@@ -244,6 +244,7 @@ declare -A QUESTION=(
   [inner-forensics.mjs]="Did the inner layer run a given command, at second-granularity, with zero CPU interference?"
   [inner-idle-log.ts]="Why was the inner layer idle (append-only reason log)?"
   [instrument-failure-check.ts]="Which of the manager's five documented instrument-failure families does each shell command in the tick docs exhibit (grep self-match, zero-hit-as-absent, pipe-then-exit-status, ...)?"
+  [instrument-decay-check.ts]="Has a telemetry carrier's group stopped writing while its companion groups in the SAME carrier still write — the P5 instrument-decay detector (docs/proposals/archguard-generation-era-primitives.md §3): groups .quay/fan-in-step-trace.jsonl by step (and fan-in-lock-events.jsonl by event), reports an expected group that never wrote (writer split to another file — the a5a301e03 ac-precheck/suite-* case) or that rate-stopped, with the still-writing companion groups as contrast, never an absolute rate threshold (a low-frequency single-stream carrier like message-receipts.jsonl must not trip)?"
   [prod-data-audit.ts]="Which production carrier cited by done-task ACs is in which three-state (① has-data / ② zero-data / ③ not-evaluated), aggregated by carrier with type pre-classification + predicate self-check (gap-prod-data-accounting-audit)?"
 [retired-clause-check.ts]="Has every AC58-registered retired clause been deleted from its source file (正文词条已从源文件删除, 落点映射完整)?"
   [inner-wakeup-heartbeat-check.ts]="Is the inner ScheduleWakeup fallback heartbeat fresh — .quay/inner-wakeup-heartbeat.json ts within 3 tick periods (5400s) — or dead (inner 兜底心跳断)?"
@@ -538,6 +539,7 @@ declare -A CADENCE=(
   [inner-wakeup-heartbeat.ts]="每轮"
 
   [instrument-failure-check.ts]="每轮"
+  [instrument-decay-check.ts]="每轮"
 [retired-clause-check.ts]="每轮"
   [integration-batch-merge.sh]="按需"
   [it0-enforcement-with-design-check.sh]="按需"
@@ -852,6 +854,7 @@ declare -A INVALIDATION=(
   [inner-wakeup-heartbeat.ts]="失效前提：inner 自排程仍以脚本写心跳文件；若改由 harness 直接上报，本条退休"
 
   [instrument-failure-check.ts]="失效前提：tick 文档仍以 shell 命令承载判据；若判据迁出 shell，本条退休"
+  [instrument-decay-check.ts]="失效前提：fan-in-step-trace.jsonl / fan-in-lock-events.jsonl 仍是共享载体的 fan-in 遥测账本（worker-driver.ts 的 appendFanInStepTrace / 锁事件写手不退役不改名），且共享载体仍承担跨任务/跨时间聚合；若 suite 决策步骤移出共享载体成为有意设计（不再要求共享聚合），本条的 expected 词表随写手语义失效，退休"
 [retired-clause-check.ts]="失效前提：AC58 archive 仍是退役条款的落点登记处；若迁出 archive 机制，本条按 ④ 失效"
   [integration-batch-merge.sh]="无可测前提，靠周期复核"
   [it0-enforcement-with-design-check.sh]="无可测前提，靠周期复核"
@@ -1166,6 +1169,7 @@ declare -A LAST_REAFFIRMED=(
   [inner-wakeup-heartbeat.ts]="2026-09-01"
 
   [instrument-failure-check.ts]="2026-08-10"
+  [instrument-decay-check.ts]="2026-09-04"
 [retired-clause-check.ts]="2026-08-14"
   [integration-batch-merge.sh]="2026-08-10"
   [it0-enforcement-with-design-check.sh]="2026-08-10"
@@ -1480,6 +1484,7 @@ declare -A MATCHING=(
   [inner-wakeup-heartbeat.ts]="n/a"
 
   [instrument-failure-check.ts]="position"
+  [instrument-decay-check.ts]="enumerative"
 [retired-clause-check.ts]="position"
   [integration-batch-merge.sh]="keyword"
   [it0-enforcement-with-design-check.sh]="keyword"
@@ -1749,6 +1754,7 @@ declare -A CONSUMER=(
   [suite-bucket-reattr-ratchet-check.ts]="谁按：run_static_checks（scripts/test.sh 全量/静态检查链，change tier）每轮按；条件=要判新增测试是否漏入重归因（静态纯 S 未重归属 ⇒ 阻断 RED；S 信号多桶未重归属 ⇒ 留痕计数）"
   [suite-driver.ts]="谁按：生产部署启动命令按（常驻 suite-driver，接线为后续/独立任务——本任务只落 driver 这一半，与 quality-gate/promotion/outer 同族；常驻模式扫 .quay/suite-requests/ 队列派发，或一次性 --run --suite-command-file 单发）；条件=fan-in 的 per-task suite 生命周期要改由常驻 driver 承接（spawn+wait+静默看门狗+取放槽，退出码 0/1/2=done/red/hung）"
   [suite-duration-exceed-check.ts]="消费方：外层/人每轮读 full-suite.log 里打印的 SUITE-DURATION-EXCEEDED 行据此动作（超长轮趋势可见不静默）；--no-block 故不阻产品验证轮（趋势观测≠代码类不变量，超长历史轮不得红整轮）"
+  [instrument-decay-check.ts]="消费方：外层/人/manager 读 --static-checks-operational 输出里打印的 INSTRUMENT-DECAY 行据此动作（哪个载体的哪个分组停写、伴生分组是谁，据此立案修写手或转 P4 守卫谱系复核 expected 词表）；--no-block 故不阻产品验证轮（遥测腐烂观测≠代码类不变量，历史/transient 腐烂不得红整轮；fail-closed 默认态留给按需诊断与未来 manager 闸）"
   [suite-lpt-order.ts]="谁按：scripts/test.sh --buckets 生成 M bucket 文件列表后按；条件=要按已知耗时降序（LPT）重排文件列表以最小化 makespan（长测试先抢 lane 与短测试并行）"
   [suite-lpt-runner.mjs]="谁按：scripts/test.sh --buckets 生成 LPT 排序后的 M bucket 文件列表后按；条件=要把该列表按 run({files}) 保序交给 node:test（node --test CLI 会按字母序重排位置参数，丢掉 LPT 顺序）"
   [productization-verification-record.ts]="谁按：AC85/AC86/AC88 验证执行者在验证完成后按（AC89 writer）；条件=要写一份第三方可读的产品化验证记录（{ts,ac,ok,artifact,evidence,detail}+按 AC 字段）到共享 checkout 的 .quay/productization-verification.jsonl"

@@ -657,6 +657,26 @@ run_operational_checks() {
   # Pointing --root at the main checkout makes the worktree round read the SAME ledger as a main run
   # (verdicts identical); on a main run main_root == repo_root ⇒ unchanged.
   run_checker "suite-duration-exceed-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-duration-exceed-check.ts" --root "${main_root}" --no-block
+  echo "== instrument-decay-check (gap-archguard-p5-instrument-decay-standing-guard, P5 instrument-decay detector) =="
+  # docs/proposals/archguard-generation-era-primitives.md §3 P5: a telemetry carrier's group stops
+  # writing while its companion groups in the SAME carrier keep writing (writer split / rate → 0).
+  # The canonical case: fan-in-step-trace.jsonl's ac-precheck/suite-start/suite-end/suite-skip went
+  # to the per-run fan-in-<task>-<runId>.log under a5a301e03 while merge-develop/typecheck/scoped-gate
+  # still write the shared carrier — "没有任何机制发现它" (§2.5). Companion contrast, NOT an absolute
+  # rate threshold (a low-frequency single-stream carrier like message-receipts.jsonl must not trip).
+  # Wired REPORT-ONLY via --no-block: the decay it reports is the PAST/current shared-carrier state
+  # (the sibling fix gap-fan-in-step-trace-suite-step-stopped-writing may still be in flight), so a
+  # blocking wire would red the current suite for a transient peer-task state. The DEFAULT (no
+  # --no-block) stays fail-closed for on-demand diagnosis / a future manager gate. CI inherits it free
+  # (the operational tier's only invocation is `bash scripts/test.sh --static-checks-operational`).
+  # @static-tier full  (whole-store observability — deferred to the full-suite gate in scoped mode)
+  # @static-class operational
+  # @static-object .quay/fan-in-step-trace.jsonl .quay/fan-in-lock-events.jsonl plugin/scripts/instrument-decay-check.ts plugin/test/instrument-decay-check.test.mjs
+  # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): the fan-in-step-trace /
+  # lock-events carriers are MAIN-checkout gitignored runtime state, absent from the one-shot verify
+  # worktree. Pointing --root at the main checkout makes the worktree round read the SAME carriers as
+  # a main run (verdicts identical); on a main run main_root == repo_root ⇒ unchanged.
+  run_checker "instrument-decay-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/instrument-decay-check.ts" --root "${main_root}" --no-block
   # Wait for all parallelized checkers and fail closed if any failed (same barrier as
   # run_static_checks — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait
