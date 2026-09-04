@@ -365,12 +365,25 @@ test("CLI --stranded: prints stranded branches and exits 0 (report-only, never a
   }
 });
 
-// ── AC1: both mirrors byte-identical ─────────────────────────────────────────────────────────────
+// ── AC1: both mirrors byte-identical (except the promoted countAcCheckboxes block) ────────────────
+// gap-abi-promote-section-parsing-flip-store-reverse-import: countAcCheckboxes was PROMOTED to the
+// product layer (packages/quay/src/task-parsing.ts). The plugin mirror now RE-EXPORTS it while the
+// experiments mirror keeps its private impl (that task's scope is the plugin/scripts copies only),
+// so the two mirrors are pinned byte-identical EXCEPT for that one block — strip it and compare.
 
-test("AC1: experiments and plugin mirrors are byte-identical", () => {
+test("AC1: experiments and plugin mirrors byte-identical outside the countAcCheckboxes block", () => {
   const a = fs.readFileSync(path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "scripts", "task-status-drift-check.ts"), "utf8");
   const b = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "task-status-drift-check.ts"), "utf8");
-  assert.equal(a, b, "mirrors must be byte-identical");
+  const strip = (src) => {
+    const start = src.indexOf("// Count GFM checkbox boxes in an AC section");
+    const end = src.indexOf("// Word-boundary symbol search across the code roots");
+    assert.ok(start !== -1 && end !== -1 && end > start, "countAcCheckboxes block markers must be present");
+    return src.slice(0, start) + src.slice(end);
+  };
+  assert.equal(strip(a), strip(b), "mirrors must be byte-identical outside the countAcCheckboxes block");
+  // The divergence is exactly the promoted re-export vs the private impl — nothing else.
+  assert.match(b, /import \{ countAcCheckboxes \} from "\.\.\/\.\.\/packages\/quay\/src\/task-parsing\.ts";/);
+  assert.match(a, /export function countAcCheckboxes\(acSection\) \{/);
 });
 
 // ── timeout fix (gap-task-status-drift-check-timeout) ─────────────────────────────────────────────

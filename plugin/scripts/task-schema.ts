@@ -76,57 +76,15 @@
 
 const STATUS_WORDS = "pending|resolved|deferred|applied|rejected";
 
-// ── extractSection — reused VERBATIM from it0-dod-check.mjs (moved here, then re-imported there). ──
-// Depth-aware: match the heading line, capture its `#` depth, stop the body at the next line whose
-// heading is at the SAME OR SHALLOWER depth (so a `## X` section extends through its nested `### `
-// subheadings and stops only at the next `## ` or shallower — never silently truncated).
-export function extractSection(fullText, heading) {
-  const headingLineRe = new RegExp(`^(##+)\\s*${heading}\\s*$`, "im");
-  const headingMatch = fullText.match(headingLineRe);
-  if (!headingMatch) return null;
-  const depth = headingMatch[1].length;
-  const startIdx = headingMatch.index + headingMatch[0].length;
-  const rest = fullText.slice(startIdx);
-  const stopRe = new RegExp(`^#{1,${depth}}\\s`, "m");
-  const stopMatch = rest.match(stopRe);
-  return stopMatch ? rest.slice(0, stopMatch.index) : rest;
-}
-
-// ── parseFrontmatterCompletely — the ONE complete frontmatter parser (gap-unified-frontmatter-parser). ─
-// Single source of truth for reading a task file's YAML frontmatter. parseTask, readDependsOn, and the
-// native store's parse() ALL delegate here — there is no second frontmatter reader to drift out of sync.
-//
-// Canonical schema (the TypeScript interface this parser realizes — the complete field set a task
-// frontmatter MAY carry; unknown keys are preserved, never dropped):
-//
-//   interface TaskFrontmatter {
-//     id?: string;                 // task id (the storage key; the store falls back to the filename)
-//     title?: string;              // human title
-//     status?: string;             // todo | ready | done | needs-human | superseded
-//     labels?: string[];           // flow `[a, b]` or block `- a`
-//     parent?: string | null;      // parent task id (relation edge)
-//     children?: string[];         // child task ids (relation edge)
-//     depends_on?: string[];       // prerequisite task ids (relation edge; top-level OR legacy extra)
-//     extra?: {
-//       schema?: string;           // "v1" — the schema marker (the grandfather boundary)
-//       dirFile?: string;          // projection-scaffolding field (forbidden by assertion A6)
-//       dirStatus?: string;        // directive disposition
-//       depends_on?: string[];     // legacy home — task_write used to nest it under extra
-//       malformed?: string[];      // store-injected diagnosis markers
-//       [key: string]: unknown;
-//     };
-//     [key: string]: unknown;      // forward-compatible: unknown fields survive the round-trip
-//   }
-//
-// Full YAML semantics (quoting, escapes, nested maps/lists) come from the `yaml` package — the SAME
-// parser the native store uses to serialize/validate — so a frontmatter written by store.serialize()
-// round-trips byte-identically through every reader. This REPLACES the old lenient hand-parse (scalars
-// only) that silently dropped nested extra structures (e.g. `extra.depends_on` read back as "").
-import { parse as parseYaml } from "yaml";
-
-export function parseFrontmatterCompletely(frontmatterRaw) {
-  return (parseYaml(frontmatterRaw) ?? {});
-}
+// ── extractSection / parseFrontmatterCompletely — PROMOTED to the product layer (gap-abi-promote-
+// section-parsing-flip-store-reverse-import). The authoritative implementations now live in
+// packages/quay/src/task-parsing.ts (next to abi.ts) — this reverses the ONE product-layer → mechanism-
+// layer src-level hard import (packages/quay-native/src/store.ts used to import parseFrontmatterCompletely
+// from THIS file). This module RE-EXPORTS them so the ~20 existing consumers (it0-dod-check,
+// task-contract-check, prepare-admission-check, slot-refill, ready-pool-check, …) keep their import
+// site and behavior unchanged. The canonical frontmatter-schema doc moved with the parser.
+import { extractSection, parseFrontmatterCompletely } from "../../packages/quay/src/task-parsing.ts";
+export { extractSection, parseFrontmatterCompletely };
 
 // ── Projections — the ONE normalization the three readers share (they never re-parse the raw text). ──
 function asStringArray(v) {
