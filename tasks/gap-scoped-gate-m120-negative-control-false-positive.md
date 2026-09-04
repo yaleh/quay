@@ -1,7 +1,7 @@
 ---
 id: gap-scoped-gate-m120-negative-control-false-positive
 title: 修缺：scoped-gate 把 build-dist.test.mjs 的 m120 负控制 stderr 误判为真实失败
-status: ready
+status: needs-human
 role: primitive
 labels:
   - scoped-gate
@@ -150,4 +150,15 @@ CONFLICT (content): Merge conflict in plugin/skills/manager/SKILL.md
 Automatic merge failed; fix conflicts and then commit the result.
 - run_id：wk-prod-1788285192
 - session_id：2f2b3c1b-b371-4162-8a64-b31533f9c6cf
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-scoped-gate-m120-negative-control-false-positive-wk-prod-1788285192.log
+
+## Needs-Human
+
+**执行 2026-09-04T10:11:07.477Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: NOT-EVALUATED 不得 RED（exit 0）: {
+- run_id：wk-prod-1788285192
+- session_id：633dda22-09cf-4403-a48b-9c38126de428
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-scoped-gate-m120-negative-control-false-positive~wk-prod-1788285192~1788516274054-0dff6b.log
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-scoped-gate-m120-negative-control-false-positive-wk-prod-1788285192.log
