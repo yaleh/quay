@@ -1,7 +1,7 @@
 ---
 id: gap-outer-bg-job-migration-proposal
 title: 提案：Outer 迁移到 Claude Code Background Job Session 以消除 tmux 依赖
-status: needs-human
+status: superseded
 role: compound
 labels:
   - migration
@@ -10,6 +10,18 @@ labels:
   - tmux-elimination
 created: 2026-09-03T02:30Z
 ---
+
+## Superseded
+
+**2026-09-04 人裁定 superseded**：本提案假设「outer 迁移到 background job session」（outer 仍
+需要独立生命周期会话，只是换运行方式）。09-04 人在 `SPEC-tmux-retirement-2026-09-03.md §1.4/
+Layer 3a` 另行裁定：**outer 作为独立生命周期会话角色被撤销**——其职能已并入 manager 的直接
+subagent 派发（AC145-149），实际启用流程（手动开会话→会话内 skill 初始化→启动 drivers+webserver
+→启动 manager）里不存在「启动 outer」这一步。方向相反（撤销 vs 迁移），本提案过期。
+
+**接替者**：`tasks/gap-retire-outer-tmux-window-logic.md`（status: ready，在飞）——outer 相关
+tmux 依赖直接删除，不迁移；Touches 与本提案存在真实重叠（`plugin/scripts/outer-*-check.sh` /
+`plugin/test/outer-*.test.mjs` 命中同一批文件），继续推进本提案会与在飞任务内容冲突。
 
 ## Needs-Human
 
