@@ -162,6 +162,7 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-execution-loop-productization-2026-08-28.md` — the execution-loop productization umbrella (task-execution→fan-in business moves to quay CLI/MCP; ADR-034 is its locked child)
 - `orchestration/SPEC-integration-architecture-2026-08-05.md` — the integration architecture (merge target / batch merge)
 - `orchestration/SPEC-outer-liveness-productization.md` — outer liveness, the manager's own anchor gap
+- `orchestration/SPEC-tmux-retirement-2026-09-03.md` — tmux 退役（先退 tmux 机制本身，outer 会话留待之后）——驱动/观测另一会话从 tmux send-keys/capture-pane 迁移到 SendMessage/quay-native 机制；执行中，任务 6（session-liveness 退役）已 done
 - `orchestration/SPEC-cold-start-one-liner.md` — cold-start one-liner (delivery surface)
 - `orchestration/SPEC-complete-delivery-surface-2026-08-05.md` — the complete delivery surface (six classes; this skill is the loop-documentation class-2 owner)
 - `orchestration/SPEC-cut-the-waiting.md` — waiting / dispatch-form rationale

@@ -167,6 +167,7 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/SPEC-instruments-behind-one-entry.md -->
 <!-- reference-doc: orchestration/manager-phase-goal.md -->
 <!-- reference-doc: orchestration/SPEC-cold-start-one-liner.md -->
+<!-- reference-doc: orchestration/SPEC-tmux-retirement-2026-09-03.md -->
 <!-- reference-doc: orchestration/SPEC-methodology-layer-architecture-2026-08-25.md -->
 <!-- reference-doc: orchestration/SPEC-checker-mechanical-spine-contract-2026-08-28.md -->
 <!-- reference-doc: orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md -->
