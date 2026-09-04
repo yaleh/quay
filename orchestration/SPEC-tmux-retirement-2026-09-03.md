@@ -1,7 +1,10 @@
 # SPEC：tmux 退役 —— 先退 tmux 机制本身，outer 会话留待之后
+（**标题为 2026-09-03 首版历史留痕，已被 2026-09-04 裁定推翻**——outer 的 tmux 依赖不是
+"留待之后"，是直接删除，见下方"人 2026-09-04 第三批裁定"与 §1.4）
 
-**作者**：manager｜**日期**：2026-09-03｜**状态**：**执行中——任务 6 已 done，任务 1-5/7 未开始**
-（§7 任务拆解进度见文末）
+**作者**：manager｜**日期**：2026-09-03（2026-09-04 大幅修订）｜**状态**：**执行中——任务 6
+已 done；原任务 1-5 因架构方向调整（见下方"人 2026-09-04 第三批裁定"）已作废，§7 已按新方向
+重新拆解为任务 1-4/6/7（新任务编号，与原编号不再对应）；任务 7 未开始**
 **来源**：人 2026-09-03 明确裁定策略顺序——**先退役 tmux，再退役 outer**（推翻此前"outer 职能
 subagent 化 → tmux 依赖自然消失"这一隐含顺序）；本 SPEC 是该裁定的具体展开。
 **前置澄清（同日，已向人核实并更正两次误判）**：
@@ -11,26 +14,48 @@ subagent 化 → tmux 依赖自然消失"这一隐含顺序）；本 SPEC 是该
 2. 本 SPEC 针对的是**三层架构（manager/orchestrator/fast-mode）里真正的 tmux 依赖**——
    `orchestrator-tick-core.md`（标题即"outer tick"）+ 全仓库实际调用 tmux 命令的生产脚本。
 
-**人 2026-09-03 第二批裁定（五条，回答了 §5 全部开放问题,原文照录）**：
+**人 2026-09-03 第二批裁定（五条，回答了当时 §5 全部开放问题,原文照录，部分已被下方第三批
+裁定进一步修正——见各条标注）**：
 1. manager 也应删除 tmux 依赖。实际上，虽然人现在的确在用 tmux 访问 Claude Code，但 manager
    已经是一个 Claude Code 后台会话，不依赖 tmux。
-2. outer 继续 CronCreate/ScheduleWakeup 持有自己的锚。
-3. outer 长驻会话通常由手工退出。不要搞复杂，只要能稳定启动即可。
-4. 取消 `session-liveness.sh`。
-5. 不要碰当前的 tmux 会话。那是人工启动的。
+2. ~~outer 继续 CronCreate/ScheduleWakeup 持有自己的锚。~~ **已被第三批裁定推翻**——outer 不再
+   需要独立会话/独立锚，见下方 §1.4。
+3. ~~outer 长驻会话通常由手工退出。不要搞复杂，只要能稳定启动即可。~~ **原句仍然成立，但适用
+   对象变了**——不再是"outer 长驻会话"（outer 不再独立存在），而是"manager 长驻会话/drivers
+   进程"同样适用"手工退出、不要搞复杂"这条精神。
+4. 取消 `session-liveness.sh`。（不变，已执行完成，见任务 6）
+5. 不要碰当前的 tmux 会话。那是人工启动的。（不变）
 
-**这五条的直接后果**：原 §5 的 5 个开放问题全部解决（见下方更新后的对应章节）；Layer 3 的实施
-范围明确包含 manager + outer 两个角色；Layer 2（观测）的范围从"改造 `session-liveness.sh`"
-变为"取消它,枚举其真实生产调用者并各自迁移"——这是本次更新新增的最大一块工作。
+**人 2026-09-04 第三批裁定（架构方向的根本调整,推翻本 SPEC §3 Layer 3 此前的技术路径）**：
+人描述了期望的 quay 启用典型流程——① user scope 安装 quay ② 在目标项目**手动**启动 Claude
+Code（用户自己决定用什么方式启动，quay 不管这一层）③ 在该会话**内**调用一个
+skill/subagent/mcp/workflow 初始化 quay（建 `.quay`/`tasks`/git branches）④ 在会话内调用
+skill/subagent/mcp/workflow 启动 drivers + web server ⑤ 在会话内调用 skill 启动 quay
+manager（④⑤可合一）⑥ 可以在一个项目里启动多个 Claude Code 会话/多个 manager。
+
+**这与本 SPEC 原 Layer 3 的技术路径（"让 `quay-topology.sh`/`manager-start.sh` 自动
+`tmux new-session` 换成自动 `claude --bg`"）方向不同**——原方案仍然是"脚本自动创建新会话"
+的思路，只是换了建会话的 API；人描述的模式核心是"用户手动开会话 + 会话内调用 skill 激活角色"，
+根本不需要一个脚本去自动创建新会话。**本 SPEC 已按此调整**：
+- **outer 作为独立会话角色被撤销**——人的 5 步流程里没有"启动 outer"这一步，与已确立的
+  AC145-149 方向（outer 职能 subagent 化，并入 manager 直接驱动）吻合。原第二批裁定 #2/#3
+  为 outer 保留的独立 CronCreate 锚、`claude --bg` 迁移设计**整体撤销**——outer 相关 tmux
+  依赖（`quay-topology.sh` 的 outer 窗口建立、`outer-session-check.sh`、`topology-check.sh`）
+  **直接删除，不是改造**。
+- **manager/drivers 的启动机制方向调整**：从"外部 CLI 自动建 tmux 会话"改为"新增 skill，
+  让用户手动启动的当前会话激活为对应角色"。详见下方 §1.4/§3 Layer 3（已重写）。
 
 ---
 
 ## 0. 一句话
 
-**把"驱动/观测另一个 Claude Code 会话"这件事从 tmux（send-keys + capture-pane）迁移到已经被
-manager 自身证明可行的 Claude Code background job session 模型（CronCreate + ScheduleWakeup +
-SendMessage + Monitor），tmux 只保留在 ADR-016 已经圈定的、无替代路径的边界用途（控制面斜杠命令 /
-下游不支持原生通道的环境）；不处理 outer 会话本身"真停"的判定（AC149），那是下一步。**
+**把"如何拥有一个 manager/drivers 在运行"这件事,从"外部脚本自动 `tmux new-session`/`new-window`
+建一个新会话"改造成人实际在用的模式——人自己决定怎么启动 Claude Code 会话（tmux 也好、
+`claude --bg` 也好，quay 不管这一层），然后在该会话【内】调用 skill 把当前会话激活为对应角色
+（初始化 quay / 启动 drivers+web server / 变身为 manager）。outer 作为一个需要独立生命周期的
+会话角色被撤销——它的职能已并入 manager 的直接 subagent 派发（AC145-149），其 tmux 依赖直接
+删除，不再设计迁移路径。tmux 只保留在 ADR-016 已经圈定的、无替代路径的边界用途（控制面斜杠命令
+/ 下游不支持原生通道的环境）+ 人工手动使用的会话（不属于本 SPEC 处理对象）。**
 
 ---
 
@@ -93,6 +118,54 @@ wait'`，cwd 指向一个具体 task worktree）——即当前那个按常规�
 仍建 tmux 会话是该脚本本身滞后于事实，需要改造以匹配已经成立的事实，而不是"要不要迁移"这个问题。
 Layer 3 因此明确覆盖 manager + outer 两个角色（原 §5 开放问题 #1 已解决）。
 
+### 1.4 第三轮（2026-09-04，本次更新）：真实使用流程 vs 当前实现的落差——推翻"outer 也要
+`claude --bg` 迁移"这个此前的技术路径
+
+**§1.3 与本节之前的全部分析,都建立在一个隐含假设上：manager/outer 各自需要一个"脚本自动创建
+新会话"的启动路径,只是把建会话的手段从 `tmux new-session` 换成 `claude --bg`。** 人描述了
+实际期望的启用流程后，这个假设被证明是错的——真实流程里**没有任何一步是"运行一个脚本、脚本
+自动建出一个新的 Claude Code 会话"**：
+
+```
+① user scope 安装 quay（npm i -g，一次性，与会话无关）
+② 人【手动】在目标项目启动一个 Claude Code 会话——用什么方式启动是人的自由
+   （交互式 `claude`、`claude --bg`、tmux 里开、IDE 里开，quay 不管这一层）
+③ 在该会话【内】调用一个 skill/subagent/mcp/workflow 初始化 quay
+   （建 .quay / tasks 目录 / git branches）
+④ 在该会话【内】调用一个 skill/subagent/mcp/workflow 启动 drivers + web server
+⑤ 在该会话【内】调用一个 skill 启动 quay manager（④⑤可合一）
+⑥ 按需在同一项目里手动开多个 Claude Code 会话/多个 manager
+```
+
+**关键差异**：③④⑤都是"当前会话内调用一个动作"，不是"启动一个新会话"。人从头到尾只手动
+开过【一次】会话（②），后续全部动作都在这个会话内完成。**这与 Layer 3 原设计的"`quay-topology.sh`
+自动 `tmux new-window` 建 outer 窗口 / `manager-start.sh` 自动 `tmux new-session` 建 manager
+会话"完全是两种模式**：前者的会话生命周期属于人（人决定何时开、开几个、用什么方式开），quay
+只负责"在已经存在的会话里，把它变成某个角色"；后者的会话生命周期属于脚本（脚本决定何时开新会话）。
+
+**outer 在这个流程里不出现**——人的 5 步流程只提到"drivers + web server"和"manager"两个
+需要启动的东西，没有第三个"outer"。这与已经确立的 AC145-149 方向（outer 职能已经 subagent
+化、并入 manager 的直接派发）一致：**outer 不是"这次决定不做迁移，留到以后"，是它作为一个
+独立会话角色的存在本身已经没有必要**——不需要给它设计任何启动机制（tmux 也好、`claude --bg`
+也好），因为不会再有代码去"启动 outer"这个动作。
+
+**因此，本 SPEC 原 Layer 3 item 2-4（`quay-topology.sh` 新增 outer 的 `claude --bg` 分支 /
+outer 独立 CronCreate 锚武装 / outer 手工退出语义）整体撤销**，替换为：outer 相关 tmux 依赖
+（`quay-topology.sh` 的 outer 窗口建立逻辑、`outer-session-check.sh`、`topology-check.sh`）
+**直接删除**（不迁移、不改造），因为它们观测/驱动的对象（outer 会话）本身不再会被创建。
+
+**manager/drivers 呢？** 同样不需要"脚本自动建新会话"——但 manager/drivers 与 outer 不同的
+地方在于：它们的**职能**（① tick 循环 ② 派发子任务）仍然是必要的，只是"如何拥有一个正在运行
+它们的会话"这件事的设计要改——不是脚本自动建会话，而是**新增一个 skill，让人已经手动启动的
+当前会话，调用这个 skill 把自己"变成"该角色**。这是本 SPEC 剩余部分的核心设计对象，见下方
+Layer 3（已按此方向重写）。
+
+**这也解释了 §1.3 里"manager 本会话大概率是被人用 `claude --bg` 单独启动、绕开 manager-start.sh
+常规路径"这个观察**——当时被当作"个例/异常"记录，现在看来它可能恰恰是人实际使用模式的真实
+写照：人手动开一个会话，然后指望在会话内把它变成 manager，而不是靠一个外部脚本自动建会话。
+`manager-start.sh` 的 `tmux new-session` 路径不是"滞后于事实需要追平"，而是**这套"脚本自动
+建会话"的模式本身就不是人在用的模式**。
+
 ---
 
 ## 2. 当前全部 tmux 依赖点盘点（subagent 逐一核实，42 个候选文件，方法：读文件头 + 按位置
@@ -116,17 +189,17 @@ Layer 3 因此明确覆盖 manager + outer 两个角色（原 §5 开放问题 #
 
 ### 2.2 核心分组（完整清单见调查 agent 原始报告，此处只列 A/D 类真正的退役对象）
 
-| 文件 | 分类 | 生产调用者 | 替代路径状态 | 退役难度 |
+| 文件 | 分类 | 生产调用者 | 处理方式（2026-09-04 更新） | 工作量 |
 |---|---|---|---|---|
-| `quay-topology.sh` | A（生命周期） | `manager-adopt.sh`、`manager-start.sh`（间接）、`quay-session.ts`、`session-topology` skill | 无 | 高 |
-| `session-bootstrap.sh` | A | `orchestrator-loop-tick.md`、`cold-start`/`session-topology` skill | 无 | 高 |
-| `manager-start.sh` | A | `packages/quay/src/cli/manager.ts`（`quay manager start`，**当前生产路径**） | **无——manager 仍真实 `tmux new-session`**（见 §2.3①，纠正此前对"manager 已退役 tmux"的误判） | 高 |
-| `session-liveness.sh` | B(主)+D | 几乎全部 skill/loop 文档 + `quay-init`/`quay-topology`/`manager-start` | **部分已去 tmux 化**（见 §2.3②）：心跳/仓库停滞已用直接量；进程存在性/忙闲判定仍锁死 tmux pane | 高 |
-| `outer-session-check.sh` | D | `manager-adopt.sh`、`orchestrator-loop-tick.md` | 无——`tmux list-windows` 是三态判定核心判据 | 中 |
-| `topology-check.sh` | D | `outer-session-check.sh`、`quay-session.ts`、`supervisor-observe.sh` | 无 | 中 |
-| `pane-state-classify.ts` | B | `send-keys-reliable.sh`、`supervisor-deliver.sh`、`inner-blocked-signal.ts`、`session-liveness.sh` | 是 C-fallback 链 + session-liveness 共用的分类核心 | 中（随两条主线一起动） |
-| `tmux-leak-scan.sh` | E（清理） | `full-suite-runner.ts`、`execute-suite-fix.js`、`fan-in-execute.js` | 无——只要测试基础设施（`hermetic-tmux.mjs`）还会起真实 tmux，本脚本就是必需的兜底 | **高，且不属于本次退役范围**（见 §4 非目标） |
-| `quay-init.sh` | D（片段） | 几乎全部 skill/loop 文档，安装期机制本体 | `--tmux-session` 支持显式传入（绕过 detect）；`detect_tmux_session` 仍用 `tmux list-sessions` | 高，但只是一次性冷启动探测，非常驻依赖 |
+| `quay-topology.sh` | A（生命周期） | `manager-adopt.sh`、`manager-start.sh`（间接）、`quay-session.ts`、`session-topology` skill | **outer 窗口建立逻辑直接删除**（§1.4）——不迁移，代码里"单窗口拓扑"（`ROLES="outer"`）本身也要重新审视是否还需要存在，见 Layer 3a | 中（删除比改造小） |
+| `session-bootstrap.sh` | A | `orchestrator-loop-tick.md`、`cold-start`/`session-topology` skill | 同上，随 outer 窗口逻辑一起删除/大幅简化 | 中 |
+| `manager-start.sh` | A | `packages/quay/src/cli/manager.ts`（`quay manager start`，**当前生产路径**） | **不再"新增 claude --bg 分支"，改为设计一个 skill 让当前会话激活为 manager**（§1.4，见 Layer 3b）；`manager-start.sh` 的 tmux 路径去留待 Layer 3b 任务现场决定（可能保留作为 bare-metal 冷启动的一个可选便利入口，但不再是唯一/推荐路径） | 高（需要新设计,非简单替换） |
+| `session-liveness.sh` | B(主)+D | 几乎全部 skill/loop 文档 + `quay-init`/`quay-topology`/`manager-start` | 取消（任务 6 已完成，与本轮方向调整无关） | 已完成 |
+| `outer-session-check.sh` | D | `manager-adopt.sh`、`orchestrator-loop-tick.md` | **直接删除**（§1.4）——观测对象（outer 会话）本身不再会被创建 | 低（删除） |
+| `topology-check.sh` | D | `outer-session-check.sh`、`quay-session.ts`、`supervisor-observe.sh` | **直接删除**（§1.4），同上 | 低（删除） |
+| `pane-state-classify.ts` | B | `send-keys-reliable.sh`、`supervisor-deliver.sh`、`inner-blocked-signal.ts`、`session-liveness.sh` | 不删除——仍服务 C 类投递 fallback 链，§4 非目标未变 | 无变化 |
+| `tmux-leak-scan.sh` | E（清理） | `full-suite-runner.ts`、`execute-suite-fix.js`、`fan-in-execute.js` | 无——只要测试基础设施（`hermetic-tmux.mjs`）还会起真实 tmux，本脚本就是必需的兜底 | **不属于本次退役范围**（见 §4 非目标） |
+| `quay-init.sh` | D（片段） | 几乎全部 skill/loop 文档，安装期机制本体 | 不变——它已经是"会话内调用的 skill"这一模式的正例（见 Layer 3b），`--tmux-session`/`detect_tmux_session` 是一次性冷启动探测，非常驻依赖，本轮不改 | 无变化 |
 
 ### 2.3 三项特别核实的关键结论（纠正本 SPEC 早期草稿的两处误判）
 
@@ -179,13 +252,13 @@ SendMessage 已是默认路径（2026-08-12 人裁定）。**本层的剩余工�
 机制退役与否，取决于 outer 未来是否还会以 tmux 形式运行——这正是本 SPEC 要解决的（迁移 outer 的
 未来运行形态，而非现在判定 outer 该不该停）。
 
-### Layer 3：生命周期管理（A 类）—— 用 `claude --bg` 取代 `tmux new-window`
-（**范围：manager + outer 两个角色**——§1.3 已更正，manager 自身常规启动路径同样未退役 tmux）
+### Layer 3：生命周期管理（A 类）—— 拆成两条不同的路（§1.4 方向调整后的重写）
 
-**架构澄清（agent 逐行核实，§2.3①）**：tmux 窗口不是 `quay-launch.sh` 建的——`quay-launch.sh`
-本身**零真实 tmux 调用**，它假设自己已经跑在调用方创建好的窗口里，`exec` 替换当前 shell。真正
-建 tmux 窗口的是三个调用方,各自独立：`quay-topology.sh`（outer,"单窗口拓扑工厂"）、
-`session-bootstrap.sh`（冷启动路径）、`manager-start.sh`（manager,`quay manager start`）：
+**架构澄清（agent 逐行核实，§2.3①，仍然成立）**：tmux 窗口不是 `quay-launch.sh` 建的——
+`quay-launch.sh` 本身**零真实 tmux 调用**，它假设自己已经跑在调用方创建好的窗口里，`exec`
+替换当前 shell。真正建 tmux 窗口的是三个调用方,各自独立：`quay-topology.sh`（outer,"单窗口
+拓扑工厂"）、`session-bootstrap.sh`（冷启动路径）、`manager-start.sh`（manager,`quay manager
+start`）：
 
 ```
 quay-topology.sh:81   printf 'bash %s/plugin/scripts/quay-launch.sh %s\n' "$REPO_ROOT" "$role"
@@ -195,57 +268,74 @@ quay-topology.sh:212  tmux new-window -t "$SESSION" -n "$role" "$CMD"
 manager-start.sh:~280 tmux new-session -d -s "$SESSION" -n manager "$LAUNCH_CMD"  # 同构，独立实现
 ```
 
-即：两处独立代码都把 `bash quay-launch.sh <role>` 塞进一个新 tmux 窗口/会话里执行。**要去掉
-tmux，需要把这两处"塞进新 tmux 窗口"都换成"塞进一个 background job"**，`quay-launch.sh` 生成
-的启动参数本身不用大改（它本来就不碰 tmux）。
+**§1.4 的结论把这两处调用方的处理方式彻底分开了**——它们此前被当作同一类问题（"两处都要把
+tmux 换成 claude --bg"），现在是两类不同的问题：
 
-**已有现成参照实现，不是从零设计**（agent §2.3①）：`plugin/scripts/driver-runtime.ts` 的
-`launchArgv()` 已经证明了"绕开 tmux、直接用 background job 机制启动一个 claude 进程"这条路径
-可行——它独立于 `quay-launch.sh` 在 TS 里重新实现了一份 profile 解析逻辑，配合 `runAsync()`
-（`node:child_process` 异步 spawn）拉起 `claude -p`。**但它只覆盖一次性 worker 派发**
-（task-worker/selector/fix-worker），且用的是 `-p` 一次性模式而非 `--bg` 长驻模式——manager/
-outer 需要的是后者（长驻、可持续接收后续指令），这部分需要新写，`launchArgv()` 的 profile 解析
-逻辑可以复用，spawn 方式需要换成 `claude --bg`。
+#### Layer 3a：outer 相关——直接删除，不迁移
 
-**核心技术发现（本次调查新增，此前的迁移提案均未发现）**：`claude` CLI **原生支持 background
-job 启动**，完整生命周期命令齐全，不需要任何自建机制：
+`quay-topology.sh` 的 outer 窗口建立逻辑（`:81`/`:173`/`:212` 里涉及 `role=outer` 的分支）、
+`session-bootstrap.sh` 里驱动 outer 冷启动的部分、`outer-session-check.sh`、`topology-check.sh`
+——**这四个文件/代码路径直接删除**。理由已在 §1.4 讲清：观测/驱动的对象（一个独立运行的 outer
+会话）本身不会再被创建，不存在"迁移到 claude --bg"这个中间态。
 
-| 需求 | tmux 现状 | `claude` 原生替代 |
-|---|---|---|
-| 启动一个新会话，不占用当前终端 | `tmux new-window -n <role> "<cmd>"` | `claude --bg <参数...>`——**"Start the session in the background and return immediately. Prints the id"** |
-| 恢复一个已停止的会话 | `tmux attach` + 手动 resume | `claude --bg --resume <session-id>`——**"continues that session in the background under the same ID"**（官方文档原文，同一 ID 续跑，而非另起一个） |
-| 列出所有活跃 background 会话 | `tmux list-windows`（本项目的 D 类） | `claude agents [--json] [--all] [--cwd <path>]`——**比 tmux 更完整**：`--cwd` 可按项目目录过滤，`--json` 直接机器可读，`--all` 含已结束的 |
-| 观察一个会话在做什么 | `tmux capture-pane`（受 ADR-016 五态+底部区域约束） | `claude logs <id>`——**"Print a background session's recent terminal output"**，不受 ADR-016 的整屏哈希/五态限制,本身就是官方 API,不是"绕过 TUI 抓屏" |
-| 打开一个会话查看/交互 | `tmux attach-session -t <sess>` | `claude attach <id>`——**"Open a background session in this terminal"** |
-| 停止一个会话（保留可恢复） | `tmux kill-window`（销毁，不可恢复对话） | `claude stop <id>` / `claude kill <id>`——**"Its conversation is kept: `claude attach <id>` opens it again"**（比 tmux kill-window 更好：会话历史不丢） |
-| 彻底删除 | `tmux kill-window` + 手动清理 worktree | `claude rm <id>`——**"Delete a background session, and its worktree when that is safe"**（比手工清理更安全，官方判断 worktree 是否可删） |
-| 升级 Claude Code 版本后重启 | 手动杀窗口重开 | `claude respawn [id\|--all]`——**"Restart a background session ... so it runs the current Claude Code version"** |
+**删除前需要现场核实的边界（不是本 SPEC 断言，是留给任务执行时确认）**：
+- `quay-topology.sh` 目前的 `ROLES="outer"`（单窗口）本身是否还有存在的理由——若 outer
+  这个角色彻底不需要独立会话，这个脚本的"拓扑工厂"这个抽象层可能整个不再需要，也可能还有
+  其它非 outer 的用途（需要 grep 实际调用者才能判断，不要凭这份 SPEC 的记忆判断）。
+- `manager-adopt.sh`（`quay-topology.sh`/`outer-session-check.sh` 的已知生产调用者之一）
+  依赖这些脚本的哪些具体行为——删除前要核实 `manager-adopt.sh` 自身是否也要跟着改，不能
+  只删被依赖方、留下断链的调用方。
 
-**这意味着 Layer 3 的改造范围比最初设想的小得多**：不需要新发明一套"outer background job 管理
-机制"（我此前两轮提案里设计的 `outer-job-executor.js` + 自建状态机 + watchdog，很大程度上是在
-重新发明 `claude agents`/`logs`/`respawn` 已经提供的能力——按硬规则①"用机件不手搓"，这是一个
-应当避免的重复实现）。真正要做的是：
+#### Layer 3b：manager/drivers 相关——新设计"skill 驱动的角色激活"模式
 
-1. **`quay-topology.sh`（outer）与 `manager-start.sh`（manager）各自新增一个非 tmux 分支**：
-   不再 `tmux new-session`/`new-window`，改为 `claude --bg <解析好的参数>`。参数解析可复用
-   `quay-launch.sh` 已有的 profile 翻译逻辑（它本来就不碰 tmux，只是当前只会 `exec` 不会
-   "打印参数后不 exec"——需要新增一个仅打印模式），或参照 `driver-runtime.ts` `launchArgv()`
-   的独立解析实现（见上）。
-2. **`outer-session-check.sh`/`topology-check.sh` 改用 `claude agents --json --cwd <repo>`
-   替代 `tmux list-windows` + `capture-pane` + transcript 发现启发式**——`claude agents --json`
-   直接给出会话是否存活、id、cwd，比现有的四态判定（healthy/empty-shell/missing/degraded）里
-   三态（window_exists/has_claude_child/transcript_fresh）的判定基础更直接可靠，可能只剩
-   "是否已被真正驱动过（有真实 user 消息）"这一层判据需要保留
-3. **outer 继续 CronCreate/ScheduleWakeup 持有自己的锚**（人 2026-09-03 裁定，原 §5 开放问题
-   #2 已解决）——不是本 SPEC 早期草稿设想的"manager 代持/按 tick 派发"，outer 保留自主的锚点
-   管理，复用 manager 自己的 `~/.quay-global/<role>/loop-registry.txt` + `*-arm-loop.sh` 一套
-   武装/验证机制（manager 自己已实测跑了 5 天，是现成可复用的参照，不是全新设计），只是把家目录
-   从 `manager` 换成 `outer`（或类似的 role 专属子目录）。
-4. **`claude --bg` 长驻会话的退出语义 = 手工**（人 2026-09-03 裁定，原 §5 开放问题 #3 已解决，
-   明确"不要搞复杂，只要能稳定启动即可"）——不设计自动失败恢复/自动重启/watchdog 强制回收；outer
-   长驻到人用 `claude stop <id>`/`claude kill <id>` 手工结束为止。这大幅简化了 Layer 3 的实施
-   范围：不需要为 outer 设计"崩溃检测→自动重启"这类机制,`claude agents --json` 能否看到这个会话
-   即是它是否还在跑的唯一判据,不在跑就是人还没手工重新启动。
+**这是本次更新新增的核心设计，替换原来"`manager-start.sh` 新增 claude --bg 分支"这个思路。**
+人期望的模式是：人已经手动启动了一个 Claude Code 会话（用什么方式启动不是 quay 管的事），
+然后在会话【内】调用一个 skill，把**当前这个已经存在的会话**变成 manager（或者变成"正在跑
+drivers+web server"的宿主）——不是脚本去建一个新会话。
+
+**现有 skill 生态盘点（本次调查新增，判断"已有什么、缺什么"）**：
+
+| 需求（对应人流程的第③④⑤步） | 现状 |
+|---|---|
+| ③ 初始化 quay（建 `.quay`/`tasks`/git branches） | **已有** —— `plugin/skills/init/SKILL.md`（`quay-init.sh` 委托，会话内调用，幂等）。这正是"会话内调用 skill 激活能力"这个模式在本仓库唯一已经实现好的正例。 |
+| ④ 启动 drivers + web server | **不存在** —— `find plugin/skills -iname "*driver*"` 只命中 `loop-driver`（inner tick 循环逻辑文档，不是"启动 driver 进程"的机制），没有任何 skill 会调 `quay driver start --kind <promotion\|worker>` / 启动 `quay serve`。目前唯一的入口是人手动敲 CLI 命令。 |
+| ⑤ 启动/变身为 manager | **不存在,只有行为规范** —— `plugin/skills/manager/SKILL.md` 是 manager 这个角色【应该怎么干活】的行为文档（tick 结构、判准等），**不是**"把当前会话变成 manager"这个动作的入口。它目前唯一记载的启动路径是 §5"启动配置"里的 bare-metal 冷启动向量——`npm i -g <quay.tgz>` 后 `quay manager start`，这条路径**仍然走 `manager-start.sh` 的 `tmux new-session`**（§2.3③已实测），且是外部 CLI 命令，不是会话内 skill 调用。 |
+
+**结论：④⑤都是缺口，不是"已有机制换个底层实现"这么简单——需要新增 skill。** 这也是为什么
+本节标题从"用 claude --bg 取代 tmux new-window"改成"新设计 skill 驱动的角色激活"：原设计
+默认④⑤的"启动"含义等价于"创建一个新会话运行它"，实际需要的是"让已经存在的会话获得这个
+角色的能力/开始履行这个角色的职责"，两者对应的实现形态完全不同（后者不涉及任何进程/会话
+创建 API，只是会话内的行为切换 + 起一些后台子进程如 driver/web server）。
+
+**"变身为 manager"具体需要做什么（初步分解，供任务拆解阶段细化，不是最终设计）**：
+- manager 的身份不来自一个特殊的启动命令，而来自会话在**做 manager 该做的事**（读
+  `plugin/skills/manager/SKILL.md` 的行为规范、跑 tick、用 `CronCreate`/`ScheduleWakeup` 武装
+  自己的循环锚点）——"变身" skill 的核心内容可能只是：初始化 `~/.quay-global/manager/` 家目录
+  （若尚不存在）、把 manager 的方法论文档加载进当前会话的可见范围、武装第一个 tick 的锚点。
+  这与"启动一个新会话跑 manager"完全不是一回事——**同一个会话本来就在跑，只是现在开始按
+  manager 的行为规范行事**。
+- **driver/web server 是需要独立后台进程的**（`quay driver start --kind promotion` /
+  `--kind worker`、`quay serve`），这两者本身已经是`packages/quay/src/cli/driver.ts`
+  `VERBS`/`serve` 命令覆盖的、不依赖 tmux 的普通后台进程（`quay driver` 的 spawn 机制本身
+  与本 SPEC 无关，早已不用 tmux）——④缺的不是"进程本身怎么起"，是"缺一个 skill 把这几条
+  CLI 命令包装成会话内一次调用"。这比③⑤都更接近纯粹的"缺一层薄封装"，工作量应该最小。
+- `manager-start.sh` 的 tmux 路径去留：**不必须删除**——它记载在
+  `plugin/skills/manager/SKILL.md` §5 作为"第三方裸机（无 quay 开发树）"场景的冷启动向量，
+  这个场景（人完全不想手动开会话，想要一条命令直接拉起一个可用的 manager 会话）仍然可能有
+  真实需求；但它不再是【推荐路径】，`plugin/skills/manager/SKILL.md` 需要更新，把"会话内调用
+  skill 激活"标注为默认路径，`manager-start.sh` 降级为"若你就是想要一条外部命令自动建会话"
+  的备选。
+
+**一个已发现但不在本次 SPEC 处理范围内的关联缺陷（留给任务拆解阶段单独立案，不在本 SPEC
+内直接处理）**：`plugin/skills/cold-start/SKILL.md` 与 `plugin/skills/session-topology/SKILL.md`
+仍然描述着**两窗口 outer+inner 拓扑**（"outer 通过 send-keys 驱动 inner"）,而
+`quay-topology.sh` 的代码本身**已经是单窗口**（`:73` `ROLES="outer"`，注释明确写"inner 层已由
+*-driver 后台进程取代，不再是 tmux 窗口"）——**这是一处独立于本次架构调整、此前就已存在的
+代码-文档漂移**，Layer 3a 删除 outer 相关逻辑后，这两份 skill 文档的过时程度会进一步加深
+（连"单窗口 outer"这个中间态描述都跟不上了，因为 outer 窗口本身也要没了）。**建议单独立案
+处理，不在本 SPEC 的任务列表里**——本 SPEC 的任务 7（文档更新）范围包含"清理提及 outer tmux
+依赖的文档"，但 cold-start/session-topology 这两份文档需要的是更大的重写（整个拓扑模型都要
+换成"会话内 skill 激活"），量级超出"顺手更新措辞"，值得独立追踪。
 
 ### Layer 2a：`session-liveness.sh` 的完整功能盘点 + 退役论证（回答"在 outer/inner 退役的大背景下
 它是否确实不再需要"——不是重复裁定，是逐项核实）
@@ -429,11 +519,18 @@ tmux server）还会起真实 tmux，`tmux-leak-scan.sh` 就是必需的兜底�
   替代场景"——控制面斜杠命令、下游不支持原生通道的环境——是否已经消失，这超出本 SPEC 范围）。
 - **不碰当前的 tmux 会话**（人 2026-09-03 裁定 #5）——当前活跃、人工正在使用的 tmux 会话
   （`quay-0` 等，人用它访问 Claude Code）与本 SPEC 处理的"生产驱动机制依赖 tmux"是两回事，
-  不在退役/迁移范围内，Layer 3 的改造只影响*未来*新启动的 manager/outer 会话，不影响已经在跑、
-  人在用的会话。**区分一点**：§1.3 提到的 `quay-manager` 会话被测试遗留孤儿进程
-  （`claude-probe`）占据，那**不是**人工正在使用的会话，是一个独立的、无关本次裁定的泄漏
-  缺陷（同族 `gap-suite-load-sampler-orphan-process-blocked-suite-interruption`）——是否清理
-  由人另行决定，不因"不碰当前 tmux 会话"这条裁定而自动排除。
+  不在退役/迁移范围内，Layer 3 的改造不影响已经在跑、人在用的会话。**区分一点**：§1.3 提到的
+  `quay-manager` 会话被测试遗留孤儿进程（`claude-probe`）占据，那**不是**人工正在使用的会话，
+  是一个独立的、无关本次裁定的泄漏缺陷（同族
+  `gap-suite-load-sampler-orphan-process-blocked-suite-interruption`）——是否清理由人另行决定，
+  不因"不碰当前 tmux 会话"这条裁定而自动排除。
+- **不在本 SPEC 内重写 `cold-start`/`session-topology` 两份 skill 文档**（§1.4/Layer 3b 已发现
+  的代码-文档漂移：两份文档仍描述两窗口 outer+inner 拓扑，`quay-topology.sh` 代码已是单窗口）
+  ——量级超出"顺手更新措辞"（任务 7 的范围），建议单独立案处理。
+- **本 SPEC 只设计"需要新增哪些 skill、各自大致做什么"，不在此文档内完成 skill 的详细实现
+  规格**（如 `plugin/skills/manager/SKILL.md` 的"变身"章节具体怎么写、"启动 drivers+web
+  server"skill 的确切参数）——这些留给 §7 对应任务落地时现场设计，本 SPEC 提供方向和已确认
+  的缺口清单（Layer 3b），不是最终实现文档。
 
 ---
 
@@ -448,6 +545,13 @@ tmux server）还会起真实 tmux，`tmux-leak-scan.sh` 就是必需的兜底�
 | #3 长驻会话退出语义 | **手工退出，不设计自动检测/恢复** | Layer 3 item 4 |
 | #4 `session-liveness.sh` 判据等价性 | **不迁移语义，直接取消**——问题本身消解 | Layer 2b |
 | #5 `quay-manager` 空壳会话清理 | 与"不碰当前 tmux 会话"裁定分离处理（该空壳非人工使用） | §4 非目标 |
+
+**人 2026-09-04 第三批裁定（追加一条，推翻上表 #2/#3 对应的 Layer 3 原设计）**：
+
+| 新问题（本次调查发现,不是原 §5 的一部分） | 裁定 | 落实位置 |
+|---|---|---|
+| outer 是否也要 `claude --bg` 迁移（原 Layer 3 item 2/3/4） | **撤销——直接删除 outer 相关 tmux 依赖，不迁移**（人从 5 步流程里没提 outer 反推出的确认） | §1.4、Layer 3a |
+| manager/drivers 启动机制该设计成什么样 | **不是"脚本自动建会话"，是新增 skill 让人手动开的当前会话激活为角色** | §1.4、Layer 3b |
 
 **没有遗留的开放问题——SPEC 到此为止判据齐全，可以进入任务拆解阶段（见 §7）。**
 
@@ -464,11 +568,15 @@ tmux server）还会起真实 tmux，`tmux-leak-scan.sh` 就是必需的兜底�
 - `orchestration/manager-tick-core.md` A19 — manager 自己的 CronCreate 锚管理实践，是 outer
   未来若采用类似模式的现成参照
 - `plugin/scripts/driver-runtime.ts` `launchArgv()`/`runAsync()` — 已存在的纯 background job
-  启动先例（覆盖一次性 worker 派发，`-p` 模式），Layer 3 的参数解析可复用其设计但需换成
-  `--bg` 长驻语义
-- `plugin/scripts/quay-topology.sh`/`manager-start.sh`/`outer-session-check.sh` — 本 SPEC
-  Layer 3 实际要改造的核心脚本（agent 逐行核实定位）；`session-liveness.sh` 及其 31 个生产
-  调用者（Layer 2b 清单）—— 取消，不是改造
+  启动先例（覆盖一次性 worker 派发，`-p` 模式）——供 Layer 3b 设计"启动 drivers"skill 时参照
+  其 profile 解析手法，非直接复用（worker 是一次性派发，drivers 是长驻进程）
+- `plugin/scripts/quay-topology.sh`/`outer-session-check.sh`/`topology-check.sh` — Layer 3a
+  直接删除对象；`manager-start.sh` — Layer 3b 降级为非默认路径，不删除；`session-liveness.sh`
+  及其 31 个生产调用者（Layer 2b 清单）—— 取消，不是改造（已完成，任务 6）
+- `plugin/skills/init/SKILL.md` — "会话内调用 skill 激活能力"模式的既有正例（对应人流程③）；
+  `plugin/skills/manager/SKILL.md` — manager 角色的行为规范文档，Layer 3b 讨论的"变身为
+  manager"skill 的落点候选；`plugin/skills/cold-start/SKILL.md`/`session-topology/SKILL.md`
+  — 已发现但本 SPEC 不处理的代码-文档漂移（两窗口 outer+inner 描述已过时，见 §4 非目标）
 - `experiments/quay-perpetual-stream/VT-MECHANISM-RETROSPECTIVE.md` — 与本 SPEC 无关的另一套
   已停摆机制的归档（避免混淆，交叉引用仅供区分）
 - `.quay/profiles.yml` — 当前 outer/worker 共用 `worker-default` profile、manager 用
@@ -476,43 +584,56 @@ tmux server）还会起真实 tmux，`tmux-leak-scan.sh` 就是必需的兜底�
 
 ---
 
-## 7. 任务拆解计划（回答"是否可以开始创建任务和执行"）
+## 7. 任务拆解计划（2026-09-04 按 §1.4 方向调整重写——原任务 1-5 作废）
 
-**结论：可以开始。** 五条裁定已解决全部设计层面的开放问题，剩下的是纯粹的实施工作。以下 7 项
-按 SPEC 成文时设想的依赖顺序排列——**实际执行时任务 6 先于 1-5 独立完成**（它不依赖 `claude
---bg` 机制,只是删除工作,与 1-5 之间没有真实依赖,顺序调整无害）：
+**结论：可以开始。** 原任务 1-5 建立在"outer 也要 claude --bg 迁移"这个已撤销的技术路径上，
+**全部作废，不是暂停**——不存在"把任务 1-5 改个描述接着做"这种延续关系，因为它们的产出物
+（`quay-launch.sh` 仅打印模式、outer 的 `claude --bg` 分支、outer 专属 CronCreate 锚）在新方向
+下根本不会被建造。以下是按 §1.4/Layer 3a/3b 重新拆出的任务，任务 6 保持不变（已完成，与本轮
+调整无关）：
 
-1. **`quay-launch.sh` 新增仅打印参数模式**（不 `exec`，只输出翻译好的 argv）——Layer 3 item 1
-   的地基，manager/outer 两条改造路径都要用它。**最小、无风险，建议下一个做。**
-2. **`quay-topology.sh` 新增 `claude --bg` 分支（outer 角色）**——依赖任务 1；outer 长驻会话
-   退出语义按裁定 #3（手工），不做自动恢复。
-3. **`manager-start.sh` 新增 `claude --bg` 分支（manager 角色）**——依赖任务 1；与任务 2 可并行
-   （两者除了都依赖任务 1 之外互不相干）。**风险提示**：这条改的是 manager 自己的启动路径，
-   落地后若有问题会影响 manager 自身的可用性，建议先在 outer 上验证 `claude --bg` 方案可行后
-   再动 manager，或至少两者的验证顺序上 outer 先行。
-4. **outer 的 CronCreate/ScheduleWakeup 锚点武装**——复用 manager 的 `*-arm-loop.sh` 模式，
-   新增 outer 专属家目录（`~/.quay-global/outer/`）。可与任务 2 并行，但建议在任务 2 验证通过
-   （outer 能用 `--bg` 稳定启动）之后再做,避免同时调试两个新机制。
-5. **`outer-session-check.sh`/`topology-check.sh` 改用 `claude agents --json`**——依赖任务 2
-   已经产出真实的 `--bg` outer 会话可供验证。
-6. ✅ **已完成**——`gap-retire-session-liveness`（`status: done`，2026-09-03）。实际范围比本
-   SPEC 原计划更完整：删除 `session-liveness.sh`/`session-liveness-mount.sh`/sweep 脚本/
-   `monitor-mount-check.sh`（连带，无对象可查）/ 22 个测试文件（比 §2b.2 统计的 21 个多 1 个，
-   实施时枚举更彻底）；清理了 147 个消费方文件里的活跃引用（`orchestration`/`packages`/
-   `plugin`/`test`/`skills`/`workflows`，历史文档字样豁免）；**额外发现并一并退役了
-   idle-watch 机制**（本 SPEC 未曾单独提及——它不是独立机制，是 `session-liveness` 的
-   manager 实例，`manager-start.sh` 的 `--check-idle-watch`/`--ensure-mount-intent`
-   参数 + 冷启动 checklist 的 `IDLE-WATCH-MOUNTED`/`MONITORS-DELIVERING` 两键一并删除，
-   manager 自我观测能力标注"未来用 driver 机制替代，本次只退役旧机制"）；全量 suite 绿
-   （AC1-AC5 全部 `[x]`）。§2b.3 的"待核实"提醒（`tmux-isolated.sh`/`tmux-session.ts`）
-   在此次实施中被正确遵循——任务体明确写了"不相干机制不碰，grep 命中 0 一律不动"，避免了
-   误删。
-7. **文档更新**（CLAUDE.md/README/相关 SPEC/ADR/skill 文档里对 tmux 依赖的描述）——收尾工作，
-   等 1-5 全部落地后再做，避免文档先于代码改导致新的漂移（同 CLAUDE.md 开篇警告的"指针复制正本
-   然后各自漂移"）。
+1. **删除 outer 相关 tmux 依赖（Layer 3a）**——`quay-topology.sh` 的 outer 窗口建立逻辑、
+   `session-bootstrap.sh` 驱动 outer 冷启动的部分、`outer-session-check.sh`、
+   `topology-check.sh`。删除前先现场核实：① `manager-adopt.sh`（已知生产调用者）依赖这些
+   脚本的哪些具体行为，删除后是否需要跟着改；② `quay-topology.sh` 的"拓扑工厂"抽象是否还有
+   非 outer 的用途（grep 实际调用者，不要凭这份 SPEC 判断）。**独立、无前置依赖，可以先做。**
+2. **新增"启动 drivers + web server"skill**（对应人流程第④步，Layer 3b 判定为纯缺口）——
+   包装 `quay driver start --kind promotion`、`quay driver start --kind worker`、`quay serve`
+   这几条已经不依赖 tmux 的 CLI 命令为一次会话内调用。**Layer 3b 判断这是三个 skill 缺口里
+   工作量最小的一个（不涉及"变身"这类身份切换语义，只是命令封装），建议作为下一个做，验证
+   "skill 驱动角色激活"这个模式的最小可行版本。**
+3. **新增"变身为 manager"skill / 改造 `plugin/skills/manager/SKILL.md`**（对应人流程第⑤步，
+   可与④合并）——让已经存在的会话开始按 manager 行为规范行事：初始化
+   `~/.quay-global/manager/` 家目录（若不存在）、加载 manager 方法论文档到当前会话、武装
+   第一个 tick 的 CronCreate/ScheduleWakeup 锚点。`manager-start.sh` 的 tmux 路径**不删除**，
+   降级为 §5"第三方裸机冷启动"场景的备选，`SKILL.md` 需要更新把"会话内 skill 激活"标注为
+   默认路径。**依赖任务 2 验证过的封装模式，建议在任务 2 之后做。**
+4. **重新评估 `manager-tick-readings.ts` 的 `outer.liveness` 字段**——该字段目前直接读 tmux
+   pane_pid（`:547-596`），依赖任务 1 删除的 outer tmux 窗口。任务 1 落地后这处调用点结构上
+   已经读不到任何东西，需要判断是直接删除字段还是替换成别的读数（如"是否存在通过 subagent
+   派发的在飞代理"这类已经存在的量）。**依赖任务 1。**
+5. **（观察项，不建任务，暂不处理）** `inner-blocked-signal.ts` 复用 `session-liveness.sh`
+   技术手法的那部分逻辑——AC148 已判定为死代码，本 SPEC 不因本轮调整单独触发清理，留给
+   inner 相关整体清理时一并处理（同原 Layer 2b4 的记录）。
+6. ✅ **已完成，不受本轮方向调整影响**——`gap-retire-session-liveness`（`status: done`，
+   2026-09-03）。实际范围比本 SPEC 原计划更完整：删除 `session-liveness.sh`/
+   `session-liveness-mount.sh`/sweep 脚本/`monitor-mount-check.sh`（连带，无对象可查）/
+   22 个测试文件（比 §2b.2 统计的 21 个多 1 个，实施时枚举更彻底）；清理了 147 个消费方
+   文件里的活跃引用；**额外发现并一并退役了 idle-watch 机制**（`manager-start.sh` 的
+   `--check-idle-watch`/`--ensure-mount-intent` 参数 + 冷启动 checklist 的
+   `IDLE-WATCH-MOUNTED`/`MONITORS-DELIVERING` 两键）；全量 suite 绿（AC1-AC5 全部 `[x]`）。
+7. **文档更新**（CLAUDE.md/README/相关 SPEC/ADR/skill 文档里对 tmux 依赖的描述，含
+   `plugin/skills/manager/SKILL.md` §5 冷启动向量的降级措辞）——收尾工作，等 1-4 全部落地后
+   再做，避免文档先于代码改导致新的漂移。**不包含** `cold-start`/`session-topology` 两份
+   skill 文档的重写（§4 非目标——量级超出本任务，建议单独立案）。
+
+**任务间依赖关系**：1 独立可先做；2 独立可与 1 并行；3 依赖 2（复用其封装模式）；4 依赖 1
+（outer tmux 窗口删除后该字段才失去观测对象）；7 依赖 1-4 全部完成。
 
 **不建议现在做的**：AC149 的验证/修复（§4 非目标）、C 类投递链的进一步退役（§4 非目标）、
-测试基础设施 tmux 用量的任何改动（§4 非目标）。
+测试基础设施 tmux 用量的任何改动（§4 非目标）、`cold-start`/`session-topology` skill 文档
+重写（§4 非目标，建议单独立案）。
 
-**当前状态（2026-09-03，本次更新）**：任务 6 done；任务 1-5、7 未开始。**下一步建议：任务 1**
-（`quay-launch.sh` 仅打印参数模式）——它是任务 2/3 的共同地基，最小且无风险，理由见上。
+**当前状态（2026-09-04，本次更新）**：任务 6 done；任务 1-4、7 未开始（原任务 1-5 已作废，
+不是这些新任务的前身）。**下一步建议：任务 1**（删除 outer 相关 tmux 依赖）或**任务 2**
+（新增"启动 drivers+web server"skill）——两者互不依赖，可任选其一先做，也可并行立案。
