@@ -114,7 +114,7 @@ experiments 才是正确版本，故那对是**语义合并**（见下表该行�
 
 | 文件 | 差异性质 | 处置 |
 |---|---|---|
-| `it0-enforcement-with-design-check.ts` | **plugin 侧漂移（非 experiments 滞后）**：标题 `DoD`→`Done`、删掉 functional `clauseN ::` 解析（真实 `inherited-core.md` 用 `clauseN ::` 记法，`### Clause N` 在真实文件里是 0 命中，删掉即失效）、CLI 默认路径改错到 `<root>/inherited-core.md`（真实在 `experiments/…/inherited-core.md`） | **语义合并**（非单向同步）：恢复 experiments 的 `DoD` 标题 + functional 解析 + 正确 CLI 路径；保留 plugin 的 helpExit/--help 统一契约 |
+| `it0-enforcement-with-design-check.ts` | **plugin 侧漂移（非 experiments 滞后）**：标题 `DoD`→`Done`、删掉 functional `clauseN ::` 解析（真实 `inherited-core.md` 用 `clauseN ::` 记法，`### Clause N` 在真实文件里是 0 命中，删掉即失效）、CLI 默认路径改错到 `<root>/inherited-core.md` | **语义合并**（非单向同步）：恢复 experiments 的 `DoD` 标题 + functional 解析；CLI 默认路径改为**可移植文件名搜索**（`findWorkspaceFile` 按文件名在 workspace 根下搜 `inherited-core.md`/`it0-dod-check.ts`，不再硬编码 `experiments/quay-perpetual-stream` 字面量）；保留 plugin 的 helpExit/--help 统一契约 |
 | `it0-split-or-commit-check.ts` | 新增 DEP-DONE-IFF-DEPS / DEP-DANGLING + helpExit + dependsOn | 同步 |
 | `task-schema-check.ts` | 头注释去 "exp5 /" | 同步 |
 | `task-schema.ts` | 头注释去 "exp5" 前缀（ABI 函数迁出已在两侧一致——gap-abi-… 已 done，按落地后现状判定为同步） | 同步 |
@@ -131,6 +131,13 @@ experiments 才是正确版本，故那对是**语义合并**（见下表该行�
 
 allow-list 记录双侧 sha256 签名——任一侧再被单边编辑 ⇒ 签名不匹配 ⇒ 检查器报 DRIFT EXPANDED 红，
 不是一次性豁免后就再也不检查。
+
+**suite 修正记录（首轮语义合并的收尾）**：首轮把 `it0-enforcement-with-design-check.ts` 语义合并成
+「两侧字节相同 + 保留字面量 `experiments/quay-perpetual-stream/inherited-core.md` 默认路径」，被
+`plugin-packaging.test.mjs` 两处断言判 workspace 不可移植（plugin 侧泄漏内部实验布局字面量）而红。
+修正：把 CLI 默认路径解析改为 `findWorkspaceFile` 按文件名搜索（两侧仍字节相同，不新增 allow-list
+条目），`plugin-packaging` 34/34、experiments `it0-enforcement-with-design-check.test.mjs` 20/20、
+`mirror-pair-drift-check` 40 对 38 consistent / 2 allowed 均绿。
 
 ### AC4 负控制（检查器真的会红）
 

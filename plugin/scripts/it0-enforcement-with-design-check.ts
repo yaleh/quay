@@ -295,6 +295,33 @@ function checkClause10() {}
   }
 }
 
+// ── findWorkspaceFile — locate a uniquely-named file anywhere under a workspace root ─────────────
+// Portable default-path resolution: the check must find inherited-core.md and it0-dod-check.ts
+// regardless of where a workspace keeps its methodology files, so it searches the tree by filename
+// rather than hardcoding this repo's internal experiment layout. The two names are unique in any
+// real corpus; hidden directories and node_modules are skipped so the walk stays fast.
+function findWorkspaceFile(root: string, filename: string): string | null {
+  const queue: string[] = [root];
+  while (queue.length > 0) {
+    const dir = queue.shift()!;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue; // unreadable directory — skip
+    }
+    for (const entry of entries) {
+      if (entry.isFile() && entry.name === filename) return path.join(dir, entry.name);
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules") {
+        queue.push(path.join(dir, entry.name));
+      }
+    }
+  }
+  return null;
+}
+
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 function usage(): never {
   console.error("usage: node it0-enforcement-with-design-check.ts [--root <dir>] [--inherited-core <path>] [--dod-check <path>] <workspace-root>");
@@ -333,17 +360,17 @@ if (isDirect) {
 
   const inheritedCorePath = inheritedCoreOverride
     ? path.resolve(process.cwd(), inheritedCoreOverride)
-    : path.join(resolved, "experiments/quay-perpetual-stream/inherited-core.md");
+    : findWorkspaceFile(resolved, "inherited-core.md");
   const dodCheckPath = dodCheckOverride
     ? path.resolve(process.cwd(), dodCheckOverride)
-    : path.join(resolved, "experiments/quay-perpetual-stream/scripts/it0-dod-check.ts");
+    : findWorkspaceFile(resolved, "it0-dod-check.ts");
 
-  if (!fs.existsSync(inheritedCorePath)) {
-    console.error(`ERROR: inherited-core.md not found: ${inheritedCorePath}`);
+  if (!inheritedCorePath || !fs.existsSync(inheritedCorePath)) {
+    console.error(`ERROR: inherited-core.md not found: ${inheritedCorePath ?? "searched under workspace root"}`);
     process.exit(2);
   }
-  if (!fs.existsSync(dodCheckPath)) {
-    console.error(`ERROR: it0-dod-check.ts not found: ${dodCheckPath}`);
+  if (!dodCheckPath || !fs.existsSync(dodCheckPath)) {
+    console.error(`ERROR: it0-dod-check.ts not found: ${dodCheckPath ?? "searched under workspace root"}`);
     process.exit(2);
   }
 
