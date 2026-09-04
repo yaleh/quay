@@ -22,7 +22,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { readFrontmatter } from "./gate-script-base.ts";
-import { parseTask, readDependsOn } from "./task-schema.ts";
+import { parseTask, readDependsOn, readTaskStatusAtRef } from "./task-schema.ts";
 import { parseTouches, checkTouchesPair } from "./touches-orthogonality-check.ts";
 import { expandDeclaredTouches } from "./concurrent-batch-scheduler.ts";
 import { TASK_STATUS } from "./task-status.ts";
@@ -66,27 +66,11 @@ export function allDepsDone(depIds: string[], statusOf: (depId: string) => strin
   return true;
 }
 
-/** 读 `<ref>:tasks/<taskId>.md` 的 status frontmatter（git show；ref 不存在 / 文件缺失 / 读不懂 ⇒ null）。
- *  canonical source = develop ref——主检出（main/manager-doc）盘上 status 是陈旧快照（硬规则 4b 的
- *  代理量），派发谓词读它会把已 done/ready 的任务按陈旧 needs-human 滤掉
- *  （gap-driver-filters-readtaskstatus-stale-main-checkout）。与 ready-pool-check.ts 的
- *  readTaskStatusAtRef（batch 读，dispatch 整池）同判词；本文件取单任务 `git show` 形态——调用点是
- *  逐 id 的（notNeedsHuman 逐候选、depsSatisfied 逐依赖），⛔ 不上 batch（读一条却 batch 是浪费）。 */
-export function readTaskStatusAtRef(root: string, ref: string, taskId: string): string | null {
-  let raw: string;
-  try {
-    raw = execFileSync("git", ["-C", root, "show", `${ref}:tasks/${taskId}.md`], {
-      timeout: 30_000,
-      stdio: ["ignore", "pipe", "ignore"],
-    }).toString("utf8");
-  } catch {
-    return null;
-  }
-  const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!m) return null;
-  const statusLine = m[1].split("\n").map((l) => l.trim()).find((l) => l.startsWith("status:"));
-  return statusLine ? (statusLine.slice("status:".length).trim() || null) : null;
-}
+// readTaskStatusAtRef — SINGLE-SOURCE in task-schema.ts (gap-task-status-parsing-reimplemented-13-sites).
+// Formerly verbatim-copied here + ready-pool-check.ts + worker-driver.ts (async); now imported + re-exported
+// (driver-filters.test.mjs imports it from this module). The canonical-source rationale (develop ref, NOT
+// the stale main checkout — 硬规则 4b) is documented on readTaskStatus below.
+export { readTaskStatusAtRef };
 
 /** 读任务 status frontmatter。canonical source = develop ref（readTaskStatusAtRef）；ref 读不可用
  *  （非 git root / 任务尚未入 develop）⇒ 退回盘上 `<root>/tasks/<id>.md`（既有行为——单测临时目录、

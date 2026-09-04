@@ -149,6 +149,17 @@ export function frontmatterDependsOn(fm) {
   const nested = fm.extra && typeof fm.extra === "object" && !Array.isArray(fm.extra) ? fm.extra.depends_on : undefined;
   return asStringArray(Array.isArray(fm.depends_on) ? fm.depends_on : nested);
 }
+
+// ── frontmatterStatus — the `status:` projection (same family as frontmatterLabels/frontmatterExtra/
+//    frontmatterDependsOn; gap-task-status-parsing-reimplemented-13-sites). ──
+// Projects the `status:` scalar from a PARSED frontmatter (the `fm` object the other projections take).
+// Absent / empty / non-string ⇒ null (缺值 = 未查, 硬规则 6 — "no status" stays distinguishable from any
+// concrete status word, never conflated with an empty string). The raw-text reader is readTaskStatusAtRef
+// below, which routes through the single parser (parseFrontmatterCompletely) + THIS projection.
+export function frontmatterStatus(fm) {
+  const s = fm && typeof fm === "object" && !Array.isArray(fm) ? fm.status : undefined;
+  return typeof s === "string" && s.trim() !== "" ? s.trim() : null;
+}
 //
 // ── WRITE-OWNERSHIP SEPARATION (gap-task-file-develop-integration-drift-fan-in-conflicts, AC3) ────
 // The frontmatter (which carries `status:`) is owned EXCLUSIVELY by the outer layer (status flips /
@@ -230,6 +241,53 @@ export function parseTask(fullText) {
 // first, then the legacy extra-nested form).
 export function readDependsOn(frontmatterRaw) {
   return frontmatterDependsOn(parseFrontmatterCompletely(frontmatterRaw));
+}
+
+// ── readTaskStatusAtRef / fetchTaskStatusAtRef — the ONE status-at-a-ref reader (sync + async variant),
+//    gap-task-status-parsing-reimplemented-13-sites. ──
+// Formerly VERBATIM-COPIED 3× (driver-filters.ts, ready-pool-check.ts, worker-driver.ts async) with zero
+// shared import — ready-pool-check.ts even acknowledged "worker-driver.ts's async readTaskStatusAtRef is
+// the same judgment". Reads `<ref>:tasks/<taskId>.md` via `git show`, then projects `status:` through the
+// single parser (parseFrontmatterCompletely) + single projection (frontmatterStatus) — there is no second
+// status reader to drift out of sync. null when the ref/path is absent, git fails, or the frontmatter is
+// unreadable (缺值 = 未查, 硬规则 6 — "no status" stays distinguishable from any concrete status word).
+import { execFile, execFileSync } from "node:child_process";
+
+function statusFromTaskFileRaw(raw) {
+  const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!fmMatch) return null;
+  return frontmatterStatus(parseFrontmatterCompletely(fmMatch[1]));
+}
+
+export function readTaskStatusAtRef(root, ref, taskId) {
+  let raw;
+  try {
+    raw = execFileSync("git", ["-C", root, "show", `${ref}:tasks/${taskId}.md`], {
+      timeout: 30_000,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).toString("utf8");
+  } catch {
+    return null;
+  }
+  return statusFromTaskFileRaw(raw);
+}
+
+// Async variant of readTaskStatusAtRef (same judgment, promise form) — worker-driver's resident loop
+// calls this (its former private async reader of the same name); the loop must NOT block on
+// execFileSync (AC4).
+export async function fetchTaskStatusAtRef(root, ref, taskId) {
+  let raw;
+  try {
+    raw = await new Promise((resolve, reject) => {
+      execFile("git", ["-C", root, "show", `${ref}:tasks/${taskId}.md`], { timeout: 30_000, encoding: "utf8" }, (err, stdout) => {
+        if (err) return reject(err);
+        resolve(stdout);
+      });
+    });
+  } catch {
+    return null;
+  }
+  return statusFromTaskFileRaw(raw);
 }
 
 // ── Marker read (canonical grandfather boundary). ─────────────────────────────────────────────────

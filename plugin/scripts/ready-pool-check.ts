@@ -160,7 +160,7 @@ import fs from "node:fs";
 import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { parseTask, extractSection, readDependsOn } from "./task-schema.ts";
+import { parseTask, extractSection, readDependsOn, readTaskStatusAtRef } from "./task-schema.ts";
 // AC152：依赖全部 done 的判定核复用 driver-filters.ts 的 allDepsDone（depsSatisfied 谓词同一份实现，
 // ⛔ 不各写一遍「逐个查 status !== done」的循环）。
 import { allDepsDone, commitTaskFile, hasPriorCommit, syncDocDevelopBidirectional } from "./driver-filters.ts";
@@ -2056,16 +2056,12 @@ export function readTaskFileAtRef(root, ref, taskId) {
   return readTaskFilesAtRefBatch(root, ref, [taskId]).get(taskId) ?? null;
 }
 
-/** Read `<ref>:tasks/<id>.md` `status:` frontmatter (the status half of readTaskFileAtRef).
- *  null when the ref/path is unavailable or the frontmatter is unreadable. */
-export function readTaskStatusAtRef(root, ref, taskId) {
-  const raw = readTaskFileAtRef(root, ref, taskId);
-  if (raw === null) return null;
-  const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!m) return null;
-  const statusLine = m[1].split("\n").map((l) => l.trim()).find((l) => l.startsWith("status:"));
-  return statusLine ? (statusLine.slice("status:".length).trim() || null) : null;
-}
+// readTaskStatusAtRef — SINGLE-SOURCE in task-schema.ts (gap-task-status-parsing-reimplemented-13-sites).
+// Formerly verbatim-copied here + driver-filters.ts + worker-driver.ts (async); now imported + re-exported
+// (ready-pool-check.test.mjs / slot-refill.test.mjs import it from this module). readTaskFileAtRef /
+// readTaskFilesAtRefBatch above are unchanged — they read the RAW file content (the batched dispatch read),
+// distinct from the status projection now owned by task-schema.ts.
+export { readTaskStatusAtRef };
 
 /** Analyze a task store. Returns { pool, floor, cap, floorMult, deficit, dispatchable_disjoint,
  *  criterion_met, pool_big_all_colliding, report, ready, excluded, candidates, promotions,
