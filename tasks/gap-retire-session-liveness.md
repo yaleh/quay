@@ -1,7 +1,7 @@
 ---
 id: gap-retire-session-liveness
 title: 退役 session-liveness（含 mount + 22 个测试 + monitor-mount-check + 引用清理），随 tmux 退役
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -350,4 +350,16 @@ Automatic merge failed; fix conflicts and then commit the result.
 ✔ AC3 fail-closed: a target whose window name != expected (default inner) is REJECTED before any send — nothing lands in the t
 - run_id：wk-prod-1788285192
 - session_id：e9a8c26e-a5d1-4755-b419-0142e8db39ee
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-retire-session-liveness-wk-prod-1788285192.log
+
+## Needs-Human
+
+**执行 2026-09-04T00:15:23.006Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=merge-develop: Auto-merging tasks/gap-retire-session-liveness.md
+CONFLICT (content): Merge conflict in tasks/gap-retire-session-liveness.md
+Automatic merge failed; fix conflicts and then commit the result.
+- run_id：wk-prod-1788285192
+- session_id：ef92c5c7-d024-434a-8526-6ddf01c2055c
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-retire-session-liveness-wk-prod-1788285192.log
