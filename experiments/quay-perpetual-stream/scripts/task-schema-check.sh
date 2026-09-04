@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# task-schema-check.sh — canonical task-schema check (exp5 / canonical-task-schema unit B2).
+# task-schema-check.sh — canonical task-schema check (canonical-task-schema unit B2).
 # Thin wrapper delegating to task-schema-check.ts.
 # Usage: task-schema-check.sh <task-file.md> [<task-file.md> ...]
 # Exit: 0 = no FAILs; 1 = >=1 marked task FAILs; 2 = usage/environment error.
