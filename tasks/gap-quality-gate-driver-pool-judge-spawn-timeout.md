@@ -2,7 +2,7 @@
 id: gap-quality-gate-driver-pool-judge-spawn-timeout
 title: quality driver B15（pool-quality-judge）spawnSync 超时
   3/3——ROUTINE_TIMEOUT_MS=180s 在真实主机负载下从未成功过一次
-status: ready
+status: done
 labels:
   - gap
   - defect
