@@ -77,20 +77,32 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，前置）：`gap-retire-unused-quay-author-skill` 状态为 done 且本地仓库
+- [x] AC1（能取假，前置）：`gap-retire-unused-quay-author-skill` 状态为 done 且本地仓库
       `find . -iname '*author*' -path '*skills*'`（排除快照目录）为空；⛔ 该任务未完成或仍有
-      author skill 文件残留则本任务不得改名。
-- [ ] AC2（能取假，机制）：`git branch --show-current` = `author`，且其 oid 与改名前
+      author skill 文件残留则本任务不得改名。**Evidence: 依赖 done；3 份 vendored SKILL.md 全删
+      （含 gitignored `packages/quay/plugin/skills/author` 磁盘残留已清）；find 仅剩 `.claude/skills/
+      quay-native-methodology/examples/quay-author-SKILL.md`（tracked 参考示例、非可装 skill，依赖任务
+      有意保留）。**
+- [x] AC2（能取假，机制）：`git branch --show-current` = `author`，且其 oid 与改名前
       `main/manager-doc` 的 oid（`618b453645` 或改名时的实际 HEAD）一致（证明是重命名非新建）；
-      ⛔ 分支名不是 `author` 或 oid 不匹配则假。
-- [ ] AC3（能取假，无回归）：`node --test plugin/test/driver-filters.test.mjs
-      plugin/test/ready-pool-check.test.mjs` 改名后全绿；⛔ 任一测试失败则假。
-- [ ] AC4（能取假，完备性）：仓库内（含 CLAUDE.md）`grep -rn "main/manager-doc"` 的命中仅剩
-      Plan 步骤 6 枚举的"历史 Evidence 保留"行；⛔ 现行规则类引用仍残留旧名则假。
-- [ ] AC5（能取假，memory 一致）：`~/.claude/projects/-home-yale-work-quay/memory/` 下 10 个
+      ⛔ 分支名不是 `author` 或 oid 不匹配则假。**Evidence: `git branch --show-current`=author；
+      oid `ffdcf0824`（改名时实际 HEAD）= 改名前 oid；`main/manager-doc` ref 已不存在。**
+- [x] AC3（能取假，无回归）：`node --test plugin/test/driver-filters.test.mjs
+      plugin/test/ready-pool-check.test.mjs` 改名后全绿；⛔ 任一测试失败则假。**Evidence: 181/181 pass
+      （fail 0）。**
+- [x] AC4（能取假，完备性）：仓库内（含 CLAUDE.md）`grep -rn "main/manager-doc"` 的命中仅剩
+      Plan 步骤 6 枚举的"历史 Evidence 保留"行；⛔ 现行规则类引用仍残留旧名则假。**Evidence: 残留仅
+      = fan-in-ff-protocol-check 58eaaa2d0 回归测试/注释 + 各任务 Evidence 的 commit-subject 引文
+      （c48ebc0d3 / f0d11209a / 1c483d387 / 1795 次 merge 引文）+ 本任务自身改名描述。**
+- [x] AC5（能取假，memory 一致）：`~/.claude/projects/-home-yale-work-quay/memory/` 下 10 个
       文件的现行指引部分已更新为 `author`，`MEMORY.md` 指针同步；⛔ 仍有现行指引引用旧名则假。
-- [ ] AC6（能取假，端到端负控制）：一次真实 doc 分支翻转（如触发 `markNeedsHuman` 或等效路径）
-      经 `propagateDocBranchToDevelop` 成功推到 `develop`；⛔ 传播失败则假。
+      **Evidence: 12 个现行指引文件 + `main-checkout-manager-doc-ff-develop.md`→`main-checkout-author-ff-develop.md`
+      改名 + `MEMORY.md` 指针同步；残留仅 fan-in-suite-red 的 58eaaa2d0 引文（历史）+ task-id
+      `gap-main-manager-doc*`（硬规则 8 不改）。**
+- [x] AC6（能取假，端到端负控制）：一次真实 doc 分支翻转（如触发 `markNeedsHuman` 或等效路径）
+      经 `propagateDocBranchToDevelop` 成功推到 `develop`；⛔ 传播失败则假。**Evidence: author 上建
+      空提交 `32fa5c154`，`propagateDocBranchToDevelop` 返回 true，develop 快进到 `32fa5c154`
+      （develop..author 与 author..develop 计数均 0）。**
 
 ## Definition of Done
 
@@ -100,14 +112,22 @@ extra:
 ## Touches
 
 - CLAUDE.md
+- docs/references/维度边界与结晶——从熔融实现中发现原则.md
 - plugin/scripts/driver-filters.ts
+- plugin/scripts/promotion-driver.ts
+- plugin/scripts/ready-pool-check.ts
 - plugin/test/driver-filters.test.mjs
 - plugin/test/ready-pool-check.test.mjs
 - tasks/gap-dispatch-reads-stale-main-checkout-task-status.md
+- tasks/gap-doc-develop-sync-semantic-conflict-resolution.md
+- tasks/gap-driver-filters-readtaskstatus-stale-main-checkout.md
 - tasks/gap-fan-in-ff-ref-update-detach-develop.md
 - tasks/gap-ff-propagate-structurally-broken-filing-must-target-develop.md
 - tasks/gap-main-manager-doc-doc-only-ff-only-tracking.md
 - tasks/gap-mark-needs-human-commit-after-write.md
 - tasks/gap-mechanical-fan-in-result-single-authoritative-structured.md
+- tasks/gap-retire-unused-quay-author-skill.md
+- tasks/gap-sync-trigger-divergence-detection-bidirectional.md
+- tasks/gap-tasks-page-develop-ref-full-history-git-log-cost.md
 - tasks/gap-web-task-status-reads-stale-main-checkout.md
 - tasks/gap-branch-rename-manager-doc-to-author.md（self-touch）

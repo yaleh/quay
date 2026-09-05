@@ -16,7 +16,7 @@ extra:
 
 ## Proposal
 
-`gap-dispatch-reads-stale-main-checkout-task-status`（done）把 web `/tasks` 列表页与 `/task/<id>` 详情页的 status/title/updated 读面统一改为以 `develop` git ref 为单一正源（AC1-AC6），这是**正确的正确性修复**——主检出 `main/manager-doc` 只是写面、常年落后 develop（实测落后 17～53 个提交），只读磁盘会导致列表/详情页互相矛盾（列表 done、详情 ready）。**但该任务的 AC5 只写了「渲染延迟可接受」，未量出具体数字**——本任务补量出：在接近生产规模的 develop（1668 个任务、11592 次提交，2026-09-01 实测）上，这层 develop-ref 读面本身引入了随**仓库提交总数**（而非任务数）线性增长的同步阻塞成本，且已在 2026-08-30 一次生产诊断会话中被口头记录（"`/tasks` 首次请求 ~7.4s，有缓存，别当挂起"）但从未正式立案。
+`gap-dispatch-reads-stale-main-checkout-task-status`（done）把 web `/tasks` 列表页与 `/task/<id>` 详情页的 status/title/updated 读面统一改为以 `develop` git ref 为单一正源（AC1-AC6），这是**正确的正确性修复**——主检出 `author` 只是写面、常年落后 develop（实测落后 17～53 个提交），只读磁盘会导致列表/详情页互相矛盾（列表 done、详情 ready）。**但该任务的 AC5 只写了「渲染延迟可接受」，未量出具体数字**——本任务补量出：在接近生产规模的 develop（1668 个任务、11592 次提交，2026-09-01 实测）上，这层 develop-ref 读面本身引入了随**仓库提交总数**（而非任务数）线性增长的同步阻塞成本，且已在 2026-08-30 一次生产诊断会话中被口头记录（"`/tasks` 首次请求 ~7.4s，有缓存，别当挂起"）但从未正式立案。
 
 **根因（`packages/quay/src/observation.ts`，全部 `execFileSync` 同步阻塞 Node 事件循环）**：
 

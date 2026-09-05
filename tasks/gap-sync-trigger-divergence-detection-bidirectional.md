@@ -15,11 +15,11 @@ extra:
 
 两个 driver 同步触发点（`ready-pool-check.ts:2522` promotion-driver 晋升翻转、`driver-filters.ts:587` worker-driver needs-human 翻转）都是 `if (committed) propagateDocBranchToDevelop(root)`——**只在有翻转落地时触发，且仅 doc→develop 单向**。缺口实证 2026-08-31：池空无翻转时同步一次不跑；develop 靠 fan-in 前进 ⇒ 主检出落后 10 提交，靠人下令语义同步才收敛。
 
-要求：两触发点改为**发现 main/manager-doc ↔ develop 不同步即触发**（分歧检测，不依赖翻转）；方向改**双向**（doc→develop 用 propagateDocBranchToDevelop；develop→doc 用 syncDevelopToDoc——后者现零生产调用者）。
+要求：两触发点改为**发现 author ↔ develop 不同步即触发**（分歧检测，不依赖翻转）；方向改**双向**（doc→develop 用 propagateDocBranchToDevelop；develop→doc 用 syncDevelopToDoc——后者现零生产调用者）。
 
 ## Plan
 
-1. 两触发点改为分歧检测（`git rev-parse main/manager-doc develop` 不同即触发），不依赖 committed 翻转。
+1. 两触发点改为分歧检测（`git rev-parse author develop` 不同即触发），不依赖 committed 翻转。
 2. 方向双向：doc→develop propagateDocBranchToDevelop；develop→doc syncDevelopToDoc。
 
 ## Acceptance Criteria

@@ -44,7 +44,7 @@ NOT-AVAILABLE"；T3 用 `enabledPlugins:false` 前后 `quay:author` 的 YES/NO �
    插件启用时可见的 quay skill，语义等价，不需要改判据结构本身。
 4. 跑一次真实的"两种 enabledPlugins 设置差分"负控制，或至少确认 T3 描述的差分方法对新探测对象
    （`quay:execute`）依然成立。
-5. 核 develop 与 main/manager-doc 是否需要 ff 同步（当前 0/0，预期落地时仍需复核）。
+5. 核 develop 与 author 是否需要 ff 同步（当前 0/0，预期落地时仍需复核）。
 
 ## Acceptance Criteria
 

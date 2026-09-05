@@ -26,7 +26,7 @@ extra:
 
 1. 提交点放 `markNeedsHuman` 内部（或紧邻 `markNeedsHumanAndCommit`），⛔ 非调用点——否则重回「调用点必须记得」的失败形态。
 2. 复用主检出路径 `commitTaskStatus` + `isInsideGitWorkTree` + `propagateDocBranchToDevelop`，不写第四份：pathspec 限定 `-- <rel>`（禁裸 commit 扫共享索引）、`--no-verify`（机械翻转内容中立）、repo-less 单测临时目录 no-op。
-3. 必跑 `propagateDocBranchToDevelop`：主检出在 main/manager-doc，翻转不 ff 到 develop ⇒ task worktree 仍读旧 status。
+3. 必跑 `propagateDocBranchToDevelop`：主检出在 author，翻转不 ff 到 develop ⇒ task worktree 仍读旧 status。
 4. 落 `committed` 到 outcome/round 记录（同 applyPromotions 的 committed），调用点不再丢弃 `{ok,reason}`。
 5. 顺带收敛三份 helper（commitTaskStatus / commitTaskStatusChange / 新 needs-human）为一个 `commitTaskFile(root, rel, message)`。
 

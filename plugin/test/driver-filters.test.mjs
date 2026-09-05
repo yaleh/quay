@@ -260,7 +260,7 @@ test("readTaskStatus — reads status; missing/unreadable ⇒ null", (t) => {
 });
 
 // ── readTaskStatus reads develop, not the stale main checkout (gap-driver-filters-readtaskstatus-stale-main-checkout) ──
-// A task's status on the main checkout (main/manager-doc) disk lags develop (4-8 commits behind). notNeedsHuman
+// A task's status on the main checkout (author) disk lags develop (4-8 commits behind). notNeedsHuman
 // read the stale disk and filtered a task that develop carries as `ready` (硬规则 4b 的陈旧代理量). The read
 // must come from the develop REF, not the stale working tree. Asserted directly: readTaskStatusAtRef reads
 // develop (ready) while fs.readFileSync on disk reads the stale needs-human.
@@ -373,9 +373,9 @@ test("AC3 — propagateDocBranchToDevelop: a flip on the doc branch reaches deve
   writeTask(root, "gap-nh", "---\nid: gap-nh\nstatus: ready\n---");
   git(root, "add", "--", "tasks/gap-nh.md");
   git(root, "commit", "-q", "-m", "baseline");
-  // develop 停在 baseline；主检出在 doc 分支 main/manager-doc 上翻转。
+  // develop 停在 baseline；主检出在 doc 分支 author 上翻转。
   git(root, "branch", "develop");
-  git(root, "checkout", "-q", "-b", "main/manager-doc");
+  git(root, "checkout", "-q", "-b", "author");
 
   const res = markNeedsHuman(root, "gap-nh", "reason");
   assert.equal(res.committed, true);
@@ -442,7 +442,7 @@ test("AC1 — propagateDocBranchToDevelop 返回 boolean（ff-only 成功 ⇒ tr
   git(root, "add", "--", "tasks/gap-a.md");
   git(root, "commit", "-q", "-m", "baseline");
   git(root, "branch", "develop");
-  git(root, "checkout", "-q", "-b", "main/manager-doc");
+  git(root, "checkout", "-q", "-b", "author");
 
   writeTask(root, "gap-a", "---\nid: gap-a\nstatus: done\n---");
   git(root, "add", "--", "tasks/gap-a.md");
@@ -462,7 +462,7 @@ test("AC3/AC4 — 语义兜底：分叉（develop 前进 + doc 翻转）→ merg
   git(root, "add", "--", "tasks/gap-a.md", "tasks/gap-b.md");
   git(root, "commit", "-q", "-m", "baseline");
   git(root, "branch", "develop");
-  git(root, "checkout", "-q", "-b", "main/manager-doc");
+  git(root, "checkout", "-q", "-b", "author");
 
   // develop 前进：gap-b → done（develop-only 提交）。
   git(root, "checkout", "-q", "develop");
@@ -471,7 +471,7 @@ test("AC3/AC4 — 语义兜底：分叉（develop 前进 + doc 翻转）→ merg
   git(root, "commit", "-q", "-m", "develop-only: gap-b done");
 
   // doc 前进：gap-a → done（doc-only 翻转，ff 不成立）。
-  git(root, "checkout", "-q", "main/manager-doc");
+  git(root, "checkout", "-q", "author");
   writeTask(root, "gap-a", "---\nid: gap-a\nstatus: done\n---");
   git(root, "add", "--", "tasks/gap-a.md");
   git(root, "commit", "-q", "-m", "doc-only: gap-a done");
@@ -491,8 +491,8 @@ test("AC3/AC4 — 语义兜底：分叉（develop 前进 + doc 翻转）→ merg
   assert.ok(events.some((e) => e.event === "doc-develop-sync-semantic-resolved"), "语义兜底完成落痕 resolved");
 
   // 双向计数归 0（develop 与 doc 同步后无分叉）。
-  assert.equal(git(root, "rev-list", "--count", "develop..main/manager-doc").trim(), "0", "doc 无 develop 未含提交");
-  assert.equal(git(root, "rev-list", "--count", "main/manager-doc..develop").trim(), "0", "develop 无 doc 未含提交");
+  assert.equal(git(root, "rev-list", "--count", "develop..author").trim(), "0", "doc 无 develop 未含提交");
+  assert.equal(git(root, "rev-list", "--count", "author..develop").trim(), "0", "develop 无 doc 未含提交");
 });
 
 test("AC1 — 机械 ff 失败 + 语义合并冲突 ⇒ 返回 false + 冲突落痕（⛔ 静默 catch ⇒ 假）", (t) => {
@@ -503,13 +503,13 @@ test("AC1 — 机械 ff 失败 + 语义合并冲突 ⇒ 返回 false + 冲突落
   git(root, "add", "-A");
   git(root, "commit", "-q", "-m", "baseline");
   git(root, "branch", "develop");
-  git(root, "checkout", "-q", "-b", "main/manager-doc");
+  git(root, "checkout", "-q", "-b", "author");
 
   // develop 删除 code.ts；doc 修改 code.ts → modify/delete 冲突（-X theirs 不能自动消解 ⇒ merge 失败）。
   git(root, "checkout", "-q", "develop");
   git(root, "rm", "-q", "--", "code.ts");
   git(root, "commit", "-q", "-m", "develop-only: delete code.ts");
-  git(root, "checkout", "-q", "main/manager-doc");
+  git(root, "checkout", "-q", "author");
   fs.appendFileSync(path.join(root, "code.ts"), "const y = 2;\n", "utf8");
   git(root, "add", "--", "code.ts");
   git(root, "commit", "-q", "-m", "doc-only: modify code.ts");
@@ -531,7 +531,7 @@ test("AC2 — 同一任务状态冲突（develop=needs-human / doc=done）⇒ �
   git(root, "add", "--", "tasks/gap-a.md");
   git(root, "commit", "-q", "-m", "baseline");
   git(root, "branch", "develop");
-  git(root, "checkout", "-q", "-b", "main/manager-doc");
+  git(root, "checkout", "-q", "-b", "author");
 
   // develop 侧把 gap-a 标 needs-human（develop 权威但优先级更低）。
   git(root, "checkout", "-q", "develop");
@@ -540,7 +540,7 @@ test("AC2 — 同一任务状态冲突（develop=needs-human / doc=done）⇒ �
   git(root, "commit", "-q", "-m", "develop: gap-a needs-human");
 
   // doc 侧把 gap-a 标 done（更前进）；两者改同一 status 行 ⇒ merge 冲突，-X theirs 会取 develop 侧。
-  git(root, "checkout", "-q", "main/manager-doc");
+  git(root, "checkout", "-q", "author");
   writeTask(root, "gap-a", "---\nid: gap-a\nstatus: done\n---");
   git(root, "add", "--", "tasks/gap-a.md");
   git(root, "commit", "-q", "-m", "doc: gap-a done");
@@ -610,7 +610,7 @@ test("AC3 — 负控制：develop 前进（纯 ff）⇒ syncDevelopToDoc 后两 
   assert.equal(
     git(root, "rev-parse", DOC_BRANCH).trim(),
     git(root, "rev-parse", "develop").trim(),
-    "一次真实同步后 rev-parse main/manager-doc develop 两 ref 相等（⛔ 仍分叉 ⇒ 假）",
+    "一次真实同步后 rev-parse author develop 两 ref 相等（⛔ 仍分叉 ⇒ 假）",
   );
 });
 

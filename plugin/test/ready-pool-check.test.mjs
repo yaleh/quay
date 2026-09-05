@@ -2518,7 +2518,7 @@ test("applyPromotions never-committed file → 首次登记 message, not 机械�
 });
 
 // ── DETACH PROPAGATION (gap-fan-in-ff-ref-update-detach-develop AC6 → gap-doc-develop-sync-…-resolution) ──
-// The main checkout sits on a doc-only work branch (main/manager-doc) while develop is bare (the
+// The main checkout sits on a doc-only work branch (author) while develop is bare (the
 // detach). A promotion flip committed on the doc branch must reach develop — fast-forward push —
 // so task worktrees branching from develop see the new status (otherwise dispatch reads ready on the
 // doc branch while the worktree base still has the old status). Non-ff (develop advanced independently)
@@ -2536,17 +2536,17 @@ test("propagateDocBranchToDevelop: doc-branch flip fast-forwards to develop (AC6
   git("add", ".");
   git("commit", "-q", "-m", "init");
   // The detach: the main checkout moves to a doc-only branch; develop is no longer checked out anywhere.
-  git("checkout", "-q", "-b", "main/manager-doc");
+  git("checkout", "-q", "-b", "author");
   const developBefore = git("rev-parse", "develop");
   // A flip lands on the doc branch (what commitTaskStatus commits before propagate).
   writeTask(root, "gap-flip", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   git("add", ".");
   git("commit", "-q", "-m", "tasks: gap-flip todo→ready（promotion-driver 机械晋升）");
-  assert.notEqual(git("rev-parse", "main/manager-doc"), developBefore, "doc branch advanced past develop");
+  assert.notEqual(git("rev-parse", "author"), developBefore, "doc branch advanced past develop");
 
   propagateDocBranchToDevelop(root);
 
-  assert.equal(git("rev-parse", "develop"), git("rev-parse", "main/manager-doc"),
+  assert.equal(git("rev-parse", "develop"), git("rev-parse", "author"),
     "AC6: develop fast-forwarded to the doc branch head — the flip is visible to task worktrees");
 });
 
@@ -2561,7 +2561,7 @@ test("propagateDocBranchToDevelop: develop advanced independently ⇒ semantic s
   writeTask(root, "gap-base", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   git("add", ".");
   git("commit", "-q", "-m", "init");
-  git("checkout", "-q", "-b", "main/manager-doc");
+  git("checkout", "-q", "-b", "author");
   // Doc branch commits a flip (its own file).
   writeTask(root, "gap-flip", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   git("add", ".");
@@ -2572,7 +2572,7 @@ test("propagateDocBranchToDevelop: develop advanced independently ⇒ semantic s
   git("add", ".");
   git("commit", "-q", "-m", "land on develop");
   const developHead = git("rev-parse", "develop");
-  git("checkout", "-q", "main/manager-doc");
+  git("checkout", "-q", "author");
 
   propagateDocBranchToDevelop(root);
 
@@ -2616,19 +2616,19 @@ test("applyPromotions 每轮无条件双向同步——池空无翻转也同步�
   writeTask(root, "gap-done", { status: "done", labels: ["gap"], body: fourArtifactBody({ checkedAc: 4 }) });
   git("add", ".");
   git("commit", "-q", "-m", "init with done task");
-  git("checkout", "-q", "-b", "main/manager-doc");
+  git("checkout", "-q", "-b", "author");
   // develop 前进（模拟 fan-in 落地），doc 落后 develop——池空无翻转也必须同步。
   git("checkout", "-q", "develop");
   writeTask(root, "gap-landed", { status: "done", labels: ["gap"], body: fourArtifactBody({ checkedAc: 4 }) });
   git("add", ".");
   git("commit", "-q", "-m", "develop-only: gap-landed done (fan-in)");
-  git("checkout", "-q", "main/manager-doc");
+  git("checkout", "-q", "author");
 
   const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 };
   const r = applyPromotions(opts);
   assert.equal(r.should_apply, false, "无合格候选 ⇒ 池空无翻转（缺口的前提）");
   assert.equal(
-    git("rev-parse", "main/manager-doc"),
+    git("rev-parse", "author"),
     git("rev-parse", "develop"),
     "池空无翻转 ⇒ applyPromotions 仍双向同步（doc 追上 develop）",
   );
@@ -2726,7 +2726,7 @@ test("setTaskStatus judges todo from develop — a dirty ready leftover re-commi
   writeTask(root, "gap-candidate", gapTask("gap-candidate"));
   git("add", ".");
   git("commit", "-q", "-m", "init todo");
-  git("checkout", "-q", "-b", "main/manager-doc");
+  git("checkout", "-q", "-b", "author");
   // The poison: the flip landed on disk (ready) but the commit failed — develop/HEAD stay todo.
   writeTask(root, "gap-candidate", { ...gapTask("gap-candidate"), status: "ready" });
   assert.match(git("show", "develop:tasks/gap-candidate.md"), /^status:\s*todo$/m,
@@ -2756,7 +2756,7 @@ test("setTaskStatus still no-ops when develop is already ready — no duplicate 
   writeTask(root, "gap-ready", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   git("add", ".");
   git("commit", "-q", "-m", "init ready");
-  git("checkout", "-q", "-b", "main/manager-doc");
+  git("checkout", "-q", "-b", "author");
 
   const out = setTaskStatus(root, "gap-ready", "ready");
   assert.equal(out.ok, false, "AC2: develop already ready ⇒ no duplicate flip");

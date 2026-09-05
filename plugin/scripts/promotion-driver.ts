@@ -661,7 +661,7 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
       if (json) process.stdout.write(`${JSON.stringify({ event: "halted", round })}\n`);
       break;
     }
-    // gap-main-manager-doc-doc-only-ff-only-tracking AC4：每轮启动前把主检出（main/manager-doc）快进到
+    // gap-main-manager-doc-doc-only-ff-only-tracking AC4：每轮启动前把主检出（author）快进到
     // develop（机械 ff-only，⛔ 静默 merge-fallback）。主检出落后 develop 时生产跑旧代码（promotion-driver
     // 常驻从主检出工作树加载）——syncDevelopToDoc 是 develop→doc 方向的机械同步单一真相源
     // （driver-filters.ts）：非 ff 报「not-ff」落痕（分叉 guard）、成功亦写 doc-develop-sync-ff-synced

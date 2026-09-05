@@ -13,7 +13,7 @@ extra: {}
 
 ## Proposal
 
-`driver-filters.ts` 的 `readTaskStatus(root, id)` 读 `path.join(root, "tasks", id)`，而 `root = ctx.root` = **主检出（main/manager-doc）**，非 develop（canonical）。主检出落后 develop（实测 8 commits），其上 `tasks/*.md` status 是陈旧快照——实证 2026-08-30：主检出把 gap-execution-loop / gap-continue-cycle 记为 `needs-human`，develop 上真值 `ready`。`notNeedsHuman`（:306）与 `depsSatisfied`（:101 读依赖 status）都经 `readTaskStatus` 消费 ⇒ **notNeedsHuman 把真 ready 任务滤掉**（逐谓词干跑复现：notInFlight/depsSatisfied/touchesDisjoint/retryCapNotExhausted 全 PASS，唯 notNeedsHuman 滤掉两任务），worker `stop_reason` 误报「backoff (all dispatchable candidates in quick-death backoff)」（catch-all 误标签）。**重启无效**（陈旧磁盘 status 非 in-memory）。
+`driver-filters.ts` 的 `readTaskStatus(root, id)` 读 `path.join(root, "tasks", id)`，而 `root = ctx.root` = **主检出（author）**，非 develop（canonical）。主检出落后 develop（实测 8 commits），其上 `tasks/*.md` status 是陈旧快照——实证 2026-08-30：主检出把 gap-execution-loop / gap-continue-cycle 记为 `needs-human`，develop 上真值 `ready`。`notNeedsHuman`（:306）与 `depsSatisfied`（:101 读依赖 status）都经 `readTaskStatus` 消费 ⇒ **notNeedsHuman 把真 ready 任务滤掉**（逐谓词干跑复现：notInFlight/depsSatisfied/touchesDisjoint/retryCapNotExhausted 全 PASS，唯 notNeedsHuman 滤掉两任务），worker `stop_reason` 误报「backoff (all dispatchable candidates in quick-death backoff)」（catch-all 误标签）。**重启无效**（陈旧磁盘 status 非 in-memory）。
 
 **这是 stale-read 族的硬规则 5b 漏网实例**——(乙) `gap-dispatch-reads-stale-main-checkout-task-status`（done）只改 ready-pool-check.ts 读面（`taskReadRef: develop`），`gap-ready-pool-depends-on-status-stale-read`（done）只改 ready-pool-check.ts 的 depends_on 读面，**都没改 driver-filters.ts 的 `readTaskStatus`**。本任务补 driver-filters.ts 这一半。
 

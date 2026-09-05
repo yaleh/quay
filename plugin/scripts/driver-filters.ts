@@ -250,8 +250,8 @@ export function hasPriorCommit(root: string, rel: string): boolean {
   }
 }
 
-// ── main/manager-doc ↔ develop 同步（gap-doc-develop-sync-semantic-conflict-resolution）──────────────
-// 人 2026-08-31 裁定反转：写面保留 main/manager-doc，但状态/任务文件变更必须以 develop 为终点。同步 =
+// ── author ↔ develop 同步（gap-doc-develop-sync-semantic-conflict-resolution）──────────────
+// 人 2026-08-31 裁定反转：写面保留 author，但状态/任务文件变更必须以 develop 为终点。同步 =
 // 机械 ff-only + 语义兜底（机械失败升级确定性语义同步，develop 权威 wins），⛔ 静默 catch。
 // 原实现（gap-fan-in-ff-ref-update-detach-develop）是 `: void` + `catch(_){}` 全吞 + `git merge develop`
 // 静默 merge-fallback——实证 2026-08-31 一次 propagate 静默失败 ⇒ 4 任务状态分叉 + 主检出落后 develop
@@ -422,7 +422,7 @@ function applyStatusAlignments(root: string, alignments: Map<string, string>): b
 }
 
 /** Propagate the doc branch to develop（gap-doc-develop-sync-semantic-conflict-resolution）：主检出在
- *  doc-only 工作分支（main/manager-doc），翻转提交到那里必须到 develop，任务 worktree（从 develop 分支）
+ *  doc-only 工作分支（author），翻转提交到那里必须到 develop，任务 worktree（从 develop 分支）
  *  才看得到新 status。同步 = 机械 ff-only + 语义兜底：ff 快进成功 ⇒ true；ff 不成立 ⇒ 升级语义兜底
  *  （semanticSyncDocToDevelop）。⛔ 静默 catch 已消除——每一步失败都写事件（DOC_DEVELOP_SYNC_EVENT_REL）
  *  并返回 boolean（false = 未同步，可观测非静默）。 */
@@ -438,7 +438,7 @@ export function propagateDocBranchToDevelop(root: string): boolean {
 }
 
 // ── develop→doc 机械同步（ff-only + 分叉 guard，gap-main-manager-doc-doc-only-ff-only-tracking）───────
-// 主检出（main/manager-doc）落后 develop 时生产跑的是旧代码（promotion-driver 常驻从主检出工作树加载，
+// 主检出（author）落后 develop 时生产跑的是旧代码（promotion-driver 常驻从主检出工作树加载，
 // CLAUDE.md 分支同步纪律「需定期 merge develop 追上」）。旧实现是静默 merge-fallback——`git merge develop`
 // 每次冲突，近 30 天 1795 次 "Merge branch 'develop' into main/manager-doc" 全由其产生。机械半边 =
 // `git merge --ff-only develop`（纯快进；⛔ 分叉即拒绝，不静默 merge）；分叉即 guard 报红（独立取值，
@@ -446,7 +446,7 @@ export function propagateDocBranchToDevelop(root: string): boolean {
 // conflict-resolution 的 semanticSyncDocToDevelop。
 
 /** doc 工作分支名（主检出所在；develop = 权威基线）。 */
-export const DOC_BRANCH = "main/manager-doc";
+export const DOC_BRANCH = "author";
 
 /** `git rev-list --count <from>..<to>` 的提交数（to 独有、from 未含）。git 出错 / 非数 ⇒ null
  *  （读不懂 ≠ 0，⛔ 硬规则 6 不把读失败伪装成「无分叉」）。 */
@@ -515,7 +515,7 @@ export function syncDevelopToDoc(root: string, docBranch: string = DOC_BRANCH): 
 // ── 双向分歧检测同步（gap-sync-trigger-divergence-detection-bidirectional）─────────────────────────
 // 两 driver 同步触发点原为「committed 翻转才触发」的单向 propagate——只在有翻转落地时触发且仅
 // doc→develop 单向。缺口 2026-08-31：池空无翻转时同步一次不跑，develop 靠 fan-in 前进 ⇒ 主检出
-// 落后 10 提交。本函数改【分歧检测】：读两 ref（main/manager-doc ↔ develop）不同即双向同步，⛔ 不依赖
+// 落后 10 提交。本函数改【分歧检测】：读两 ref（author ↔ develop）不同即双向同步，⛔ 不依赖
 // 翻转落地。方向：
 //   - develop→doc = syncDevelopToDoc（机械 ff-only，develop 前进时把主检出快进）
 //   - doc→develop = propagateDocBranchToDevelop（ff-only + 语义兜底，主检出翻转/立案到达 develop）

@@ -1,6 +1,6 @@
 ---
 id: gap-doc-develop-sync-semantic-conflict-resolution
-title: main/manager-doc↔develop 可靠同步 + 语义兜底（核心）——机械同步失败升级 Claude Code 语义同步，develop 权威
+title: author↔develop 可靠同步 + 语义兜底（核心）——机械同步失败升级 Claude Code 语义同步，develop 权威
 status: done
 labels:
   - gap
@@ -12,11 +12,11 @@ extra: {}
 
 ## Proposal
 
-**人 2026-08-31 裁定反转，本任务升为核心**：写面保留 main/manager-doc，可接受分叉、可接受同步损失 main/manager-doc 的变更，但必须有持续同步机制且必须同步成功。本任务 = 同步的核心机制：**同步可靠化 + 语义兜底**（机械 ff-only 半边归子任务 gap-main-manager-doc）。
+**人 2026-08-31 裁定反转，本任务升为核心**：写面保留 author，可接受分叉、可接受同步损失 author 的变更，但必须有持续同步机制且必须同步成功。本任务 = 同步的核心机制：**同步可靠化 + 语义兜底**（机械 ff-only 半边归子任务 gap-main-manager-doc）。
 
 - **同步可靠化（硬规则 3b）**：`propagateDocBranchToDevelop` 返回 boolean（`: void` 改 boolean）+ 失败落痕（事件记录），消除静默失败。实证 2026-08-31 propagate `catch(_){}` 全吞 ⇒ 4 任务状态分叉 + 主检出落后 develop 53 提交无痕。
 - **语义兜底（机械同步失败后）**：机械同步失败（ff 不成立）升级到 Claude Code 会话语义同步，第 1 层流程为模板：
-  1. `git diff develop...main/manager-doc` 分叉清单。
+  1. `git diff develop...author` 分叉清单。
   2. **develop 权威 wins**：tasks/*.md status 走确定性优先级 `done > needs-human > ready > todo`，**永不交 LLM**。
   3. code/docs 走 Claude Code 语义合并（base=develop + doc 侧变更叠加）+ guard（anti-drift / typecheck / scoped-gate 迭代，红则 needs-human）。
   4. merge + ref-level ff develop + 事件记录。

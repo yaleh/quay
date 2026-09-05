@@ -2637,7 +2637,7 @@ export function applyPromotions(opts) {
     }
   }
   // 分歧检测双向同步（gap-sync-trigger-divergence-detection-bidirectional）：每轮无条件触发——读两 ref
-  // （main/manager-doc ↔ develop）不同即双向同步，⛔ 不依赖 shouldApply/翻转落地（池空无翻转也要同步，
+  // （author ↔ develop）不同即双向同步，⛔ 不依赖 shouldApply/翻转落地（池空无翻转也要同步，
   // 缺口 2026-08-31 主检出落后 10 提交）。syncDocDevelopBidirectional 内部按分歧门控，无分歧/非 git
   // no-op。
   syncDocDevelopBidirectional(opts.root);
