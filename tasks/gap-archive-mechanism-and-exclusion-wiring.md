@@ -2,7 +2,7 @@
 id: gap-archive-mechanism-and-exclusion-wiring
 title: archive 机制本体尚不存在——落 archive 批次目录 + INDEX.tsv 七字段 + 五个排除面接线（AC157，AC158 执行
   archive 的硬前置）
-status: ready
+status: done
 labels:
   - gap
 parent: null
