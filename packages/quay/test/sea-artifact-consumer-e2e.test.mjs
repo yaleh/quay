@@ -1,4 +1,4 @@
-// @test-group serial
+// @test-group engine
 // @load-sensitive real-install
 // @load-sensitive-entry 2026-09-02 re-admitted to serial after a referenced-not-landed flake under full-suite load (gap-sea-artifact-consumer-e2e-ac4-assertion)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — real-install e2e:

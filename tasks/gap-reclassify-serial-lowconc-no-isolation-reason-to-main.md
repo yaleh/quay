@@ -43,6 +43,13 @@ extra:
 
 **一个未消除的风险，如实标注**：`quay-init-tmux-detection.test.mjs` 从文件名看疑似探测 tmux 状态；本仓库另有 `session-liveness-*` 家族因真实 tmux 探针在高并发下建立失败已被退役删除（`gap-retire-session-liveness`）。本文件是否属于同一类真实 tmux 探针（而非仅测试检测函数本身的纯逻辑），本任务落地前必须先读一遍该文件源码确认，不能仅凭文件名判断；若确认是真实 tmux 探针，从本次批次里单独摘出，留在原分组，在任务体记录排除理由。
 
+**落地订正（AC1 逐文件读源码核实结果，Plan 步骤 1）**：16 个候选逐一核实后，**排除 4 个、重分类 12 个**。
+
+- `quay-init-tmux-detection.test.mjs`（lowconc）：**真实 tmux 探针**——`spawnSync('tmux', ['new-session','-d',...])` 真实启动 hermetic tmux server（私有 TMUX_TMPDIR socket，仍是真实 tmux 服务端进程）、真实 `list-sessions`/`has-session -t` round-trip、并真实跑 `quay-init.sh --loop` install（文件头自注 `@load-sensitive real-install` + "never competing with the concurrency-N main body"）。与已退役 `session-liveness-*` 家族"真实 tmux 探针在高并发下建立失败"同一失败模式（服务端 establishment 非 wall-clock 慢），非"仅测试检测函数本身的纯逻辑"。保留 `lowconc`。
+- `runtime-landing.test.mjs`（lowconc）、`checker-cost.test.mjs`（serial）、`quay-init.test.mjs`（serial）：**被现存 ratchet 测试钉住**——`known-load-sensitive.test.mjs` AC3 断言 runtime-landing "must still be in the lowconc lane"、checker-cost "stays serial (child-spawn broke at lowconc c3)"；`suite-bucket-load-sensitive-isolation.test.mjs` AC5 以 quay-init.test.mjs 作为 serial 例。三者均有 `@load-sensitive`（real-install/child-spawn）+ 文件头自注的 wall-clock/child-spawn 负载敏感证据，属"有理由留在原相"，按 AC1「核实发现真实进程依赖仍强行重分类 ⇒ 假」排除、保留原分组。本地全量实测证实：仅这 3 个文件挪走即让上述 2 个 ratchet 测试转红。
+
+其余 12 个文件逐一核实无真实 tmux 探针/端口绑定/独占资源依赖（`@load-sensitive` 标记为历史 wall-clock 文档，同 `gap-serial-lowconc-reclassify-post-waterline-cap` 先例——保留标记、仅改 `@test-group`），全部重分类回 `engine`。
+
 ## Plan
 
 1. **逐文件读源码核实（尤其 `quay-init-tmux-detection.test.mjs`）**：落地前对 16 个文件中"文件名暗示可能有真实进程/端口/tmux 交互"的候选（`quay-init-tmux-detection.test.mjs` 明确点名；其余若在阅读中发现类似信号也一并排查）逐一确认其断言内容是否依赖独占/低并发环境；确认后在 Measured 里逐个记录判断依据。若某文件在阅读后判定不适合本批次，从 Touches 移除并在 Proposal 追加订正说明理由（不是本任务失败，是核实后的正确收窄）。
@@ -53,31 +60,31 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，逐文件核实）：Measured 逐一记录 16 个候选文件的核实结论（尤其 `quay-init-tmux-detection.test.mjs` 是否为真实 tmux 探针）；被排除的文件（如有）列出理由并从本次 Touches/AC2-4 范围移除；（⛔ 未逐一核实、或核实发现真实进程依赖仍强行重分类 ⇒ 假）。
-- [ ] AC2（能取假，重分类落地）：`git diff` 显示 AC1 确认可挪的文件的 `@test-group` 头从 `serial`/`lowconc` 改为 `engine`，逐文件可辨识；未改动 `plugin/scripts/runner-grouping.ts` 分类逻辑本身；（⛔ 有文件遗漏或误改分类逻辑代码 ⇒ 假）。
-- [ ] AC3（能取假，落地前本地核验）：落地前本地跑一次 `scripts/test.sh`，Measured 贴出真实命令与结果（0 failed/0 cancelled，或如实记录任何新失败并判断是否与本次重分类相关）；（⛔ 未真实跑过、或跑出新失败却未如实记录判断 ⇒ 假）。
-- [ ] AC4（能取假，真·待外部——监控窗口，不阻塞落地，阻塞"已确认稳定"结论）：任务体记录落地提交 SHA 与真实时间戳；DoD 声明该窗口尚未验证时本条标"真·待外部"而不是伪造读数；一旦有 ≥20 轮真实生产记录可查，须补一次真实核验并追加读数；出现复现失败须如实记录并回滚该文件；（⛔ 编造未核验的"全部通过" ⇒ 假；⛔ 复现失败却隐瞒/不回滚 ⇒ 假）。
-- [ ] AC5（能取假，范围守卫）：`git diff` 不含 `plugin/scripts/suite-scheduler.ts` 的准入/调度逻辑改动，也不含 `plugin/scripts/runner-grouping.ts` 分类算法本身的改动；（⛔ 动了调度或分类算法代码 ⇒ 超范围 ⇒ 假）。
+- [x] AC1（能取假，逐文件核实）：Measured 逐一记录 16 个候选文件的核实结论（尤其 `quay-init-tmux-detection.test.mjs` 是否为真实 tmux 探针）；被排除的文件（如有）列出理由并从本次 Touches/AC2-4 范围移除；（⛔ 未逐一核实、或核实发现真实进程依赖仍强行重分类 ⇒ 假）。——实测（逐一读源码核实 16/16）：排除 4、重分类 12。① `quay-init-tmux-detection.test.mjs` 确认为**真实 tmux 探针**（`spawnSync('tmux', ['new-session','-d',...])` 真实启动 hermetic tmux server + `list-sessions`/`has-session -t` round-trip + 真实 `quay-init.sh --loop` install）——与已退役 `session-liveness-*` 家族同一失败模式（服务端 establishment 非 wall-clock 慢），保留 lowconc。② `runtime-landing.test.mjs`/`checker-cost.test.mjs`/`quay-init.test.mjs` 被现存 ratchet 测试钉住（`known-load-sensitive.test.mjs` AC3：runtime-landing "must still be in the lowconc lane"、checker-cost "stays serial (child-spawn broke at lowconc c3)"；`suite-bucket-load-sensitive-isolation.test.mjs` AC5：quay-init 为 serial 例）——三者均有 `@load-sensitive` real-install/child-spawn 负载敏感证据，属"有理由留在原相"，保留原分组。其余 12 文件逐一核实无真实 tmux 探针/端口绑定/独占资源依赖，重分类回 engine。
+- [x] AC2（能取假，重分类落地）：`git diff` 显示 AC1 确认可挪的文件的 `@test-group` 头从 `serial`/`lowconc` 改为 `engine`，逐文件可辨识；未改动 `plugin/scripts/runner-grouping.ts` 分类逻辑本身；（⛔ 有文件遗漏或误改分类逻辑代码 ⇒ 假）。——实测：`git diff --name-only` 恰为 12 个 test 文件（8 个 serial + 4 个 lowconc），每文件仅 `@test-group` 头一行 `serial`|`lowconc`→`engine`，逐文件可辨识；未触碰 `runner-grouping.ts` 分类逻辑；被排除的 4 个文件（`quay-init-tmux-detection`/`runtime-landing`/`checker-cost`/`quay-init`）保持原分组未改。
+- [x] AC3（能取假，落地前本地核验）：落地前本地跑一次 `scripts/test.sh`，Measured 贴出真实命令与结果（0 failed/0 cancelled，或如实记录任何新失败并判断是否与本次重分类相关）；（⛔ 未真实跑过、或跑出新失败却未如实记录判断 ⇒ 假）。——实测：`bash scripts/test.sh`（全量默认，16 泳道）exit 0，pass 6707 / fail 0 / cancelled 0。第一轮（15 文件重分类）跑出 2 个真实失败：`known-load-sensitive.test.mjs` AC3（runtime-landing "must still be in the lowconc lane"、checker-cost "stays serial"）与 `suite-bucket-load-sensitive-isolation.test.mjs` AC5（quay-init 应为 serial 例）——均为本次重分类直接触发（这 3 个文件被 ratchet 测试钉住），据此 AC1 排除这 3 个文件后，第二轮（12 文件重分类）全绿。
+- [ ] AC4（能取假，真·待外部——监控窗口，不阻塞落地，阻塞"已确认稳定"结论）：任务体记录落地提交 SHA 与真实时间戳；DoD 声明该窗口尚未验证时本条标"真·待外部"而不是伪造读数；一旦有 ≥20 轮真实生产记录可查，须补一次真实核验并追加读数；出现复现失败须如实记录并回滚该文件；（⛔ 编造未核验的"全部通过" ⇒ 假；⛔ 复现失败却隐瞒/不回滚 ⇒ 假）。——落地提交 SHA=__SHA_TO_FILL__，落地时间戳=__TS_TO_FILL__（git 提交时刻，非任务开始时刻）；监控窗口（≥20 轮真实生产全量）尚未验证，本条留空（待外部）
+- [x] AC5（能取假，范围守卫）：`git diff` 不含 `plugin/scripts/suite-scheduler.ts` 的准入/调度逻辑改动，也不含 `plugin/scripts/runner-grouping.ts` 分类算法本身的改动；（⛔ 动了调度或分类算法代码 ⇒ 超范围 ⇒ 假）。——实测：`git diff --name-only` 仅上述 12 个 test 文件 + 任务体自身，无 `suite-scheduler.ts` / `runner-grouping.ts`（`grep -E 'runner-grouping|suite-scheduler'` 命中 0）。
 
 ## Definition of Done
 
-对 16 个候选逐一核实（无隔离违规、非自指机制测试、无真实进程独占依赖）后，把确认无理由留在 serial/lowconc 的文件改标为 engine（main 桶）；落地前本地全量跑通核验（AC2/AC3）；落地后真实监控窗口读数如实记录（AC4，真·待外部，不伪造）；任何复现失败精确回滚到该文件并留痕；全程未改动调度/分类机制本身（AC5）。若核实后发现某些文件确有正当理由留在原分组，如实记录并排除，不强行凑数。
+对 16 个候选逐一核实后：4 个（`quay-init-tmux-detection.test.mjs` 真实 tmux 探针；`runtime-landing.test.mjs`/`checker-cost.test.mjs`/`quay-init.test.mjs` 被现存 ratchet 测试钉住、有负载敏感证据）有正当理由留在原分组、如实排除并记录理由（见 Proposal「落地订正」与 AC1 实测）；其余 12 个确认无理由留在 serial/lowconc（无隔离违规、非自指机制测试、无真实 tmux 探针/端口/独占资源依赖），改标为 engine（main 桶）；落地前本地全量跑通核验（AC2/AC3）；落地后真实监控窗口读数如实记录（AC4，真·待外部，不伪造）；任何复现失败精确回滚到该文件并留痕；全程未改动调度/分类机制本身（AC5）。核实后如实收窄、不强行凑数。
 
 ## Touches
 
 - packages/quay/test/sea-artifact-consumer-e2e.test.mjs（@test-group 头：serial → engine）
-- plugin/test/checker-cost.test.mjs（@test-group 头：serial → engine）
+- ~~plugin/test/checker-cost.test.mjs~~（⚠️ AC1 核实后**排除**：被 `known-load-sensitive.test.mjs` AC3 钉住 "stays serial (child-spawn broke at lowconc c3)"，保留 `serial`）
 - plugin/test/quay-init-conflict-state-hash.test.mjs（@test-group 头：serial → engine）
 - plugin/test/quay-init-drift-report.test.mjs（@test-group 头：serial → engine）
 - plugin/test/quay-init-laydown-closure.test.mjs（@test-group 头：serial → engine）
 - plugin/test/quay-init-laydown-dist-closure.test.mjs（@test-group 头：serial → engine）
 - plugin/test/quay-init-loop-consumer-doc-refs.test.mjs（@test-group 头：serial → engine）
 - plugin/test/quay-init-loop-core.test.mjs（@test-group 头：serial → engine）
-- plugin/test/quay-init.test.mjs（@test-group 头：serial → engine）
+- ~~plugin/test/quay-init.test.mjs~~（⚠️ AC1 核实后**排除**：被 `suite-bucket-load-sensitive-isolation.test.mjs` AC5 作为 serial 例钉住，保留 `serial`）
 - plugin/test/threshold-scope-check.test.mjs（@test-group 头：serial → engine）
 - plugin/test/cold-start-skill.test.mjs（@test-group 头：lowconc → engine）
-- plugin/test/quay-init-tmux-detection.test.mjs（@test-group 头：lowconc → engine，若 AC1 核实后判定为真实 tmux 探针则排除并记录理由）
-- plugin/test/runtime-landing.test.mjs（@test-group 头：lowconc → engine）
+- ~~plugin/test/quay-init-tmux-detection.test.mjs~~（⚠️ AC1 核实后**排除**：确认为真实 tmux 探针，保留 `lowconc`，不在本次重分类范围——见 Proposal「落地订正」与 AC1 实测）
+- ~~plugin/test/runtime-landing.test.mjs~~（⚠️ AC1 核实后**排除**：被 `known-load-sensitive.test.mjs` AC3 钉住 "must still be in the lowconc lane"，保留 `lowconc`）
 - plugin/test/slot-refill.test.mjs（@test-group 头：lowconc → engine）
 - plugin/test/test-file-snapshot.test.mjs（@test-group 头：lowconc → engine）
 - plugin/test/verify-deliver-coldstart.test.mjs（@test-group 头：lowconc → engine）

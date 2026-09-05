@@ -1,4 +1,4 @@
-// @test-group serial
+// @test-group engine
 // @load-sensitive real-install
 // @judges plugin/loop/*
 // @load-sensitive-entry 2026-08-11 real-install e2e; install family flake rotation

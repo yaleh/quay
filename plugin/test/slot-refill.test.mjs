@@ -1,4 +1,4 @@
-// @test-group lowconc
+// @test-group engine
 // slot-refill.test.mjs — the event-driven dispatch ("slot-refill") decision helper
 // (tasks/gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release). Dispatch was
 // evaluated ONLY at the inner loop's tick boundary; a completed subagent's freed slot was not

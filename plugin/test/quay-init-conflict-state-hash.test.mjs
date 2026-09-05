@@ -1,4 +1,4 @@
-// @test-group serial
+// @test-group engine
 // @load-sensitive real-install
 // @load-sensitive-entry 2026-09-04 real quay-init --loop re-runs onto a fixture-laid workspace (install/quay-init family, same root cause as quay-init-loop-core)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — real-install e2e:

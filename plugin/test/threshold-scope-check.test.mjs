@@ -1,4 +1,4 @@
-// @test-group serial
+// @test-group engine
 // @load-sensitive child-spawn
 // @load-sensitive-entry 2026-08-11 child-spawn spawn×9 under suite load (round-215 silent passed=false @7721ms)
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this harness
