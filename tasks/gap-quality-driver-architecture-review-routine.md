@@ -2,7 +2,7 @@
 id: gap-quality-driver-architecture-review-routine
 title: quality driver 新增第三例程：架构复核（B15 混合形态——P1/P2/P4 机械聚类 → LLM judge → JS
   聚合，产出读数非任务终态）
-status: ready
+status: done
 labels:
   - gap
   - feature
