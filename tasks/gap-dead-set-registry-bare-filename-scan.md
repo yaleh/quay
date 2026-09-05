@@ -2,7 +2,7 @@
 id: gap-dead-set-registry-bare-filename-scan
 title: 死集闭包检测不到注册表里的裸文件名引用（quay-deliver.ts:19 的
   supervisor-bus-identity.sh）——AC156 裸文件名扫描 + 死集重算，AC158 的硬前置
-status: ready
+status: done
 labels:
   - gap
 parent: null
