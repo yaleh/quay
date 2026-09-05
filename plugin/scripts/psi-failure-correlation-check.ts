@@ -13,18 +13,19 @@
 // it to judge a NEW policy is the gap-suite-cost-model-is-wrong error. Instead this script reports
 // TWO INDEPENDENT, DIFFERENTLY-NATURED sources, and NEVER merges their numbers:
 //
-//   (a) 主动制造 (ACTIVE, primary, 规模受控 per 订正③) — enumerate the 5 verified-clean CORE
-//       candidates (full serial/lowconc groups are OPTIONAL via --include-all-groups, never a hard
-//       requirement), EXCLUDE any file listed in plugin/test-isolation-violations.txt (hard
-//       constraint, AC1), then run each candidate under a SHORT background CPU-load burst
-//       (busy-wait subprocesses saturating cores, injection window ≤10s default 5s — the 订正③ fix
-//       for the orphan-process root cause; the discussion-phase control experiment needed only 2s
-//       for a 650× runDelay signal), sampling the REAL /proc/pressure/cpu `some avg10` during each
-//       trial and recording pass/fail + the failure's error signature. ANY induced failure is
-//       adjudicated against known isolation-conflict signatures (EADDRINUSE / EEXIST / port-in-use)
-//       BEFORE it counts as a valid (scheduling-like) failure — the adjudication itself is recorded,
-//       never just pass/fail counts. Busy-wait procs are spawned → awaited → killed within the SAME
-//       control flow (no cross-tool-call polling, no orphan).
+//   (a) 主动制造 (ACTIVE, primary, 规模受控 per 订正③, 候选 7 per 订正④) — enumerate the 7
+//       verified-clean CORE candidates (full serial/lowconc groups are OPTIONAL via
+//       --include-all-groups, never a hard requirement), EXCLUDE any file listed in
+//       plugin/test-isolation-violations.txt (hard constraint, AC1), then run each candidate under a
+//       SHORT background CPU-load burst (busy-wait subprocesses saturating cores, injection window
+//       ≤10s default 5s — the 订正③ fix for the orphan-process root cause; the discussion-phase
+//       control experiment needed only 2s for a 650× runDelay signal), sampling the REAL
+//       /proc/pressure/cpu `some avg10` AND the tested process tree's /proc/<pid>/schedstat run_delay
+//       (订正⑤ mechanism confirmation) during each trial, recording pass/fail + the failure's error
+//       signature. ANY induced failure is adjudicated against known isolation-conflict signatures
+//       (EADDRINUSE / EEXIST / port-in-use) BEFORE it counts as a valid (scheduling-like) failure —
+//       the adjudication itself is recorded, never just pass/fail counts. Busy-wait procs are spawned
+//       → awaited → killed within the SAME control flow (no cross-tool-call polling, no orphan).
 //
 //   (b) 被动历史 (PASSIVE, supplementary) — join .quay/verification-round.jsonl perFile
 //       {file, startedAtMs, endedAtMs, passed} with .quay/suite-load-<runId>.jsonl {t, cpu_stall},
@@ -41,23 +42,27 @@
 // "carrier not found", never a silent empty result. The active experiment (a) does NOT depend on
 // those carriers and runs in any environment (including a bare worktree).
 //
-// MIN-N (honest small-sample floor, AC3): each source defines its own minimum sample N; a bin
+// MIN-N (honest small-sample floor, AC3): the PASSIVE source still defines a minimum sample N; a bin
 // whose fail-group N is below the floor reports 「样本不足」, never a direction (硬规则 3b).
-//   - active   MIN_N_ACTIVE   = 5 valid failures (induced + adjudicated non-isolation).
 //   - passive  MIN_N_PASSIVE  = 10 fail records in a concurrency bin.
+// The ACTIVE source's floor is replaced by run_delay mechanism confirmation (订正⑤): a count can only
+// show "fails under load", never "fails BECAUSE it was scheduled out". The go/no-go for the active
+// source rests on whether each load-induced failure's run_delay is significantly elevated over the
+// same file's low-load baseline — not on whether the hit count clears an arbitrary constant.
 //
 // GO/NO-GO (deterministic): primary = active source; passive is cross-validation.
-//   - signal        iff the active source produced >= MIN_N_ACTIVE valid (non-isolation)
-//                   load-induced failures — i.e. a scheduling-like failure under a HIGH-load trial
-//                   whose file did NOT also fail scheduling-like under the LOW-load baseline (a
-//                   deterministic failure that reproduces at loadProcs=0 is not load-induced, and
-//                   would fire the signal spuriously). Below MIN_N_ACTIVE the floor rule applies:
-//                   the source reports 样本不足, never a direction (AC3).
-//   - no-signal     iff the active experiment ran to completion but produced no load-induced
-//                   failure (candidates pass under both load levels, or failures are
-//                   isolation-conflicts / deterministic).
+//   订正⑥: only 真实复现 (real-reproduction) hits count — truncated and design-intent hits are
+//   reported but excluded. Per-candidate timeouts (CANDIDATE_CONFIG) are set above each candidate's
+//   known historical failure range, never a blind global constant.
+//   - signal        iff the active source produced ≥1 real-reproduction load-induced failure whose
+//                   run_delay is significantly elevated (≥SIGNIFICANT_RUN_DELAY_RATIO× the low-load
+//                   baseline and ≥MIN_RUN_DELAY_NS) — i.e. the mechanism really is schedule-out, so PSI
+//                   (which tracks that stall) carries incremental signal.
+//   - no-signal     iff the active experiment ran to completion but produced no load-induced failure,
+//                   OR produced load-induced failures whose run_delay was NOT elevated (failures are
+//                   isolation-conflicts / deterministic / some non-scheduling resource).
 //   - insufficient  iff the active experiment could not run enough trials to judge (no high-load
-//                   baseline, or valid load-induced failures below MIN_N_ACTIVE).
+//                   baseline).
 //
 // Exit codes: 0 = analysis produced a conclusion (read the verdict); 2 = usage/environment error
 // (missing carrier for passive, bad args).
@@ -77,8 +82,8 @@
 //   --inject-window-ms  load-injection window (busy-wait subprocess lifetime) in ms, default 5000,
 //                     hard-capped at 10000 (订正③/AC1: ≤10s; minute-scale windows were the orphan
 //                     root cause).
-//   --include-all-groups  OPTIONAL: expand the candidate set from the 5 core candidates to the full
-//                     serial+lowconc groups (订正③: core-5 is mandatory, full groups are a budget
+//   --include-all-groups  OPTIONAL: expand the candidate set from the 7 core candidates to the full
+//                     serial+lowconc groups (订正③: core-7 is mandatory, full groups are a budget
 //                     allowance, never a hard requirement).
 
 import fs from "node:fs";
@@ -93,20 +98,55 @@ type Sample = { t: number; cpu_stall: number };
 type PerFileRec = { file: string; startedAtMs: number; endedAtMs: number; passed: boolean };
 
 const DEFAULT_MIN_N_PASSIVE = 10;
-const MIN_N_ACTIVE = 5;
+// 订正⑤: the MIN_N_ACTIVE count threshold is retired — a count only shows "fails under load", never
+// "fails BECAUSE it was scheduled out". The mechanism axis is run_delay: a hit's /proc/<pid>/schedstat
+// run_delay (field 2, ns) must be significantly elevated over the same file's low-load baseline. The
+// discussion-phase control experiment measured ~650× (0.29ms quiet → 188.4ms at 2× oversubscription).
+const SIGNIFICANT_RUN_DELAY_RATIO = 3; // conservative factor; raw numbers are always reported
+const MIN_RUN_DELAY_NS = 1_000_000;    // 1ms floor — below this the absolute delay is negligible noise
 
 // The proposal's verified-clean historical-failure candidates — the MANDATORY core set (订正③, AC1):
-// exactly these 5, covering serial/engine/lowconc groups and varied historical failure counts. The
-// full serial/lowconc group enumeration is an OPTIONAL extension (--include-all-groups), never a hard
-// requirement. The earlier design ("full serial/lowconc + extras", minute-scale load windows) was the
-// needs-human 复盘's root cause — scale far beyond a single worker session's budget.
+// exactly these 7 (订正④: 5→7 — proposal-convergence.test.mjs and full-suite-runner-phases.test.mjs
+// are CONFIRMED positives from the wide-aperture 26-candidate run, added so the narrowed default set
+// no longer screens out two known hits). The full serial/lowconc group enumeration is an OPTIONAL
+// extension (--include-all-groups), never a hard requirement. The earlier design ("full serial/lowconc
+// + extras", minute-scale load windows) was the needs-human 复盘's root cause — scale far beyond a
+// single worker session's budget.
 const CORE_CANDIDATES = [
   "plugin/test/help-contract-incompatible-behaviors.test.mjs", // serial, 15x
   "plugin/test/writestate-atomicity-split.test.mjs",           // engine, 14x
-  "plugin/test/worker-driver-fan-in.test.mjs",                 // lowconc, 11x
+  "plugin/test/worker-driver-fan-in.test.mjs",                 // lowconc, 11x — 订正④ confirmed positive
   "plugin/test/worker-driver-resident.test.mjs",               // lowconc, 7x
   "plugin/test/suite-bucket-reattr-ratchet-check.test.mjs",    // engine, 5x
+  "experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs", // 订正④ confirmed positive
+  "plugin/test/full-suite-runner-phases.test.mjs",             // 订正④ confirmed positive
 ];
+
+// 订正⑥: per-candidate timeout + three-state hit classification. The 180s default was a blind
+// constant — it is NOT a production constraint (scripts/test.sh never passes --test-timeout to
+// `node --test`; Node applies no per-file wall-clock kill without it). A candidate with a KNOWN
+// historical failure DURATION range must be given a timeout ABOVE that range's upper bound, or a
+// timeout "hit" becomes a truncation artifact (the script killing the test before its real failure
+// point), not evidence. Every load-induced hit must be classified into one of three states:
+//   真实复现 (real-reproduction) / 被截断不构成证据 (truncated) / 疑似设计意图需另行分诊 (design-intent).
+interface CandidateConfig {
+  timeoutMs: number;               // --test-timeout-ms for this candidate (>= its histFail upper bound)
+  histFailMs?: [number, number];   // known historical failure duration range (ms), from 订正⑥
+  designIntent?: boolean;          // internal hang-detection design (proposal-convergence)
+  unverifiableInBudget?: boolean;  // honest timeout exceeds the <=10min budget (full-suite-runner-phases)
+}
+const DEFAULT_TEST_TIMEOUT_MS = 180_000;
+const CANDIDATE_CONFIG: Record<string, CandidateConfig> = {
+  // 订正⑥: real failures cluster at 128~188s; 240s covers the upper bound. Of the three candidates the
+  // only credible real reproduction — run_delay mechanism confirmation must target it first.
+  "plugin/test/worker-driver-fan-in.test.mjs": { timeoutMs: 240_000, histFailMs: [128_000, 188_000] },
+  // 订正⑥: real failures at 386~407s; observing one needs ~450s which exceeds the <=10min total budget
+  // combined with the other candidates — skip it (report 未验证), never run it under a shorter timeout.
+  "plugin/test/full-suite-runner-phases.test.mjs": { timeoutMs: 450_000, histFailMs: [386_000, 407_000], unverifiableInBudget: true },
+  // 订正⑥: 0 historical failures; the source carries its own hang-detection ("blocked in a futex under
+  // load") — its "failure" is likely design-intent, excluded from go/no-go evidence either way.
+  "experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs": { timeoutMs: DEFAULT_TEST_TIMEOUT_MS, designIntent: true },
+};
 
 // Load-injection window (订正③, AC1): the busy-wait subprocesses run for this many ms — a few seconds
 // (the discussion-phase control experiment needed only 2s to measure a 650× runDelay signal). Hard
@@ -176,6 +216,54 @@ function readCpuStall(): number | null {
   }
 }
 
+// /proc/<pid>/schedstat field 2 = run_delay (ns): cumulative time the task was runnable but not
+// scheduled (waiting on a runqueue). This is the DIRECT causal quantity the Proposal's hypothesis
+// is about ("真正需要低并发运行的测试，敏感的是自己被 schedule out 的概率") — the discussion-phase
+// control experiment measured it as 0.29ms (quiet) → 188.4ms (2× oversubscription), ~650×.
+function readRunDelayNs(pid: number): number | null {
+  try {
+    const text = fs.readFileSync(`/proc/${pid}/schedstat`, "utf8").trim();
+    const parts = text.split(/\s+/);
+    const v = Number(parts[1]);
+    return Number.isFinite(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+// The tested process (the `node --test` runner) spawns worker subprocesses; their run_delay is what
+// reflects the test code being scheduled out, so sample the WHOLE tree (runner + descendants).
+function listDescendantPids(rootPid: number): number[] {
+  const seen = new Set<number>();
+  const stack = [rootPid];
+  const out: number[] = [];
+  while (stack.length > 0) {
+    const pid = stack.pop()!;
+    if (seen.has(pid)) continue;
+    seen.add(pid);
+    out.push(pid);
+    try {
+      const children = fs.readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8").trim();
+      for (const c of children.split(/\s+/)) {
+        const cp = Number(c);
+        if (Number.isFinite(cp) && cp > 0) stack.push(cp);
+      }
+    } catch {
+      /* process exited between samples */
+    }
+  }
+  return out;
+}
+
+function readTreeRunDelayNs(rootPid: number): number {
+  let sum = 0;
+  for (const pid of listDescendantPids(rootPid)) {
+    const v = readRunDelayNs(pid);
+    if (v !== null) sum += v;
+  }
+  return sum;
+}
+
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 function mean(vals: number[]): number {
@@ -202,6 +290,11 @@ function fmt(n: number): string {
 function fmtRange(lo: number, hi: number): string {
   if (!Number.isFinite(lo) || !Number.isFinite(hi)) return "  n/a";
   return `${fmt(lo)}-${fmt(hi)}`;
+}
+function fmtRunDelay(ns: number): string {
+  if (!Number.isFinite(ns)) return "  n/a";
+  if (ns < 1_000_000) return `${(ns / 1000).toFixed(1)}µs`;
+  return `${(ns / 1_000_000).toFixed(1)}ms`;
 }
 
 function readJsonLines(file: string): Record<string, unknown>[] {
@@ -409,38 +502,17 @@ function spawnBusyWait(count: number, durationMs: number): { proc: ReturnType<ty
   return procs;
 }
 
-function runNodeTest(fileAbs: string, cwd: string, timeoutMs: number): Promise<{ code: number | null; stdout: string; stderr: string; wallMs: number; timedOut: boolean }> {
-  return new Promise((resolve) => {
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-    const start = Date.now();
-    let child: ReturnType<typeof spawn>;
-    try {
-      child = spawn(process.execPath, ["--test", fileAbs], { cwd, env: process.env });
-    } catch (err) {
-      resolve({ code: 1, stdout: "", stderr: String(err), wallMs: 0, timedOut: false });
-      return;
-    }
-    child.stdout?.on("data", (d) => { stdout += String(d); });
-    child.stderr?.on("data", (d) => { stderr += String(d); });
-    const timer = setTimeout(() => { timedOut = true; try { child.kill("SIGKILL"); } catch { /* ignore */ } }, timeoutMs);
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ code, stdout, stderr, wallMs: Date.now() - start, timedOut });
-    });
-  });
-}
-
 interface ActiveTrial {
   file: string;
   loadProcs: number;
   passed: boolean;
   code: number | null;
   wallMs: number;
+  timeoutMs: number; // 订正⑥: the per-candidate --test-timeout-ms actually used (for three-state classification)
   cpuStallMean: number;
   cpuStallMax: number;
   cpuStallN: number;
+  runDelayNs: number; // 订正⑤: cumulative run_delay of the tested process tree during the trial (ns)
   timedOut: boolean;
   errorSignature: string | null;
   adjudication: "pass" | "isolation-conflict" | "scheduling-like" | "other";
@@ -454,6 +526,19 @@ function adjudicate(passed: boolean, timedOut: boolean, output: string): ActiveT
   return "other";
 }
 
+// 订正⑥ three-state hit classification. A "hit" (a load-induced scheduling-like failure) is not
+// homogeneous evidence: it must be one of 真实复现 (real-reproduction) / 被截断不构成证据 (truncated)
+// / 疑似设计意图需另行分诊 (design-intent). Only 真实复现 counts toward go/no-go; the other two are
+// reported but excluded (AC1: 三态归类缺失，把命中一律当同质证据合并 ⇒ 假).
+type HitClass = "real-reproduction" | "truncated" | "design-intent";
+
+function classifyHit(t: ActiveTrial): HitClass {
+  const cfg = CANDIDATE_CONFIG[t.file];
+  if (cfg?.designIntent) return "design-intent";                 // 订正⑥: internal hang-detection, not a defect
+  if (cfg?.histFailMs && t.timeoutMs < cfg.histFailMs[1]) return "truncated"; // timeout below the real failure range
+  return "real-reproduction";
+}
+
 function extractErrorSignature(output: string): string | null {
   const lines = output.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
   const err = lines.find((l) => /error|fail|assert|timeout|exception/i.test(l));
@@ -465,16 +550,50 @@ async function runActiveTrial(fileAbs: string, rel: string, loadProcs: number, c
   const busy = spawnBusyWait(loadProcs, injectWindowMs);
   await sleep(1500); // let the busy-wait load register in the 10s PSI window
   const stalls: number[] = [];
+  let childPid: number | null = null;
+  let runDelayMaxNs = 0;
   const s0 = readCpuStall();
   if (s0 !== null) stalls.push(s0);
-  const sampler = setInterval(() => {
-    const s = readCpuStall();
-    if (s !== null) stalls.push(s);
-  }, 1000);
-  const res = await runNodeTest(fileAbs, cwd, timeoutMs);
-  clearInterval(sampler);
+
+  // Inline the test spawn (was runNodeTest) so we can sample the child's process-tree run_delay
+  // while it runs (订正⑤). Spawn → await → kill the busy-wait load all inside this one control flow.
+  const res = await new Promise<{ code: number | null; stdout: string; stderr: string; wallMs: number; timedOut: boolean }>((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    const start = Date.now();
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(process.execPath, ["--test", fileAbs], { cwd, env: process.env });
+    } catch (err) {
+      resolve({ code: 1, stdout: "", stderr: String(err), wallMs: 0, timedOut: false });
+      return;
+    }
+    childPid = child.pid ?? null;
+    child.stdout?.on("data", (d) => { stdout += String(d); });
+    child.stderr?.on("data", (d) => { stderr += String(d); });
+    const timer = setTimeout(() => { timedOut = true; try { child.kill("SIGKILL"); } catch { /* ignore */ } }, timeoutMs);
+    const sampler = setInterval(() => {
+      const s = readCpuStall();
+      if (s !== null) stalls.push(s);
+      if (childPid !== null) {
+        const rd = readTreeRunDelayNs(childPid);
+        if (rd > runDelayMaxNs) runDelayMaxNs = rd;
+      }
+    }, 1000);
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      clearInterval(sampler);
+      resolve({ code, stdout, stderr, wallMs: Date.now() - start, timedOut });
+    });
+  });
+
   const s1 = readCpuStall();
   if (s1 !== null) stalls.push(s1);
+  if (childPid !== null) {
+    const rd = readTreeRunDelayNs(childPid);
+    if (rd > runDelayMaxNs) runDelayMaxNs = rd;
+  }
   for (const b of busy) { try { b.proc.kill("SIGKILL"); } catch { /* ignore */ } }
   const output = `${res.stdout}\n${res.stderr}`;
   const passed = res.code === 0 && !res.timedOut;
@@ -484,9 +603,11 @@ async function runActiveTrial(fileAbs: string, rel: string, loadProcs: number, c
     passed,
     code: res.code,
     wallMs: res.wallMs,
+    timeoutMs,
     cpuStallMean: mean(stalls),
     cpuStallMax: max(stalls),
     cpuStallN: stalls.length,
+    runDelayNs: runDelayMaxNs,
     timedOut: res.timedOut,
     errorSignature: passed ? null : extractErrorSignature(output),
     adjudication: adjudicate(passed, res.timedOut, output),
@@ -498,37 +619,73 @@ async function activeRun(root: string, args: ReturnType<typeof parseArgs>): Prom
   trials: ActiveTrial[];
   validFailures: ActiveTrial[];
   isolationFailures: ActiveTrial[];
+  unverified: string[];   // 订正⑥: candidates skipped because their honest timeout exceeds the budget
   loadLevels: number[];
 }> {
   const candidates = enumerateCandidates(root, args.includeAllGroups);
   const rels = [...candidates.core, ...candidates.serial, ...candidates.lowconc];
   const trials: ActiveTrial[] = [];
+  const unverified: string[] = [];
   for (const rel of rels) {
+    const cfg = CANDIDATE_CONFIG[rel];
+    if (cfg?.unverifiableInBudget) { unverified.push(rel); continue; } // 订正⑥: never run under a shorter timeout
+    const timeoutMs = cfg?.timeoutMs ?? args.testTimeoutMs;
     const abs = path.join(root, rel);
     for (const loadProcs of args.loadLevels) {
       for (let t = 0; t < args.trials; t++) {
-        const trial = await runActiveTrial(abs, rel, loadProcs, root, args.testTimeoutMs, args.injectWindowMs);
+        const trial = await runActiveTrial(abs, rel, loadProcs, root, timeoutMs, args.injectWindowMs);
         trials.push(trial);
       }
     }
   }
   const validFailures = trials.filter((t) => t.adjudication === "scheduling-like");
   const isolationFailures = trials.filter((t) => t.adjudication === "isolation-conflict");
-  return { candidates, trials, validFailures, isolationFailures, loadLevels: args.loadLevels };
+  return { candidates, trials, validFailures, isolationFailures, unverified, loadLevels: args.loadLevels };
 }
 
-function activeVerdict(validFailures: ActiveTrial[], trials: ActiveTrial[], loadLevels: number[]) {
-  if (trials.length === 0) return "insufficient";
-  // a load-induced failure = a valid (non-isolation) failure under a HIGH-load trial (loadProcs > 0)
-  // whose file did NOT also fail (scheduling-like) under the LOW-load baseline (loadProcs === 0) —
-  // a deterministic failure that reproduces at loadProcs=0 is not load-induced (AC3: it would fire
-  // the signal spuriously).
+interface ActiveMechanism {
+  loadInduced: ActiveTrial[];
+  hitClasses: Map<string, HitClass>;    // file -> three-state classification (订正⑥)
+  evidence: ActiveTrial[];              // loadInduced hits classified 真实复现 — the only go/no-go evidence
+  baselineRunDelay: Map<string, number>; // file -> low-load (loadProcs=0) run_delay (ns)
+  confirmed: ActiveTrial[];              // evidence hits whose run_delay is significantly elevated (mechanism confirmed)
+  verdict: "signal" | "no-signal" | "insufficient";
+}
+
+// 订正⑤: mechanism confirmation replaces the MIN_N_ACTIVE count threshold. A "load-induced" failure
+// = a valid (non-isolation) failure under a HIGH-load trial (loadProcs > 0) whose file did NOT also
+// fail scheduling-like under the LOW-load baseline (a deterministic failure that reproduces at
+// loadProcs=0 is not load-induced — it would fire the signal spuriously). 订正⑥: among load-induced
+// hits, ONLY 真实复现 (real-reproduction) counts as evidence — truncated and design-intent hits are
+// reported but excluded (三态归类). Among real-reproduction hits, the verdict rests on run_delay
+// mechanism confirmation, NOT on the hit count: signal iff ≥1 hit's run_delay is significantly
+// elevated over its own low-load baseline (schedule-out, the quantity PSI tracks); no-signal otherwise.
+function activeMechanism(validFailures: ActiveTrial[], trials: ActiveTrial[], loadLevels: number[]): ActiveMechanism {
+  const empty: ActiveMechanism = { loadInduced: [], hitClasses: new Map(), evidence: [], baselineRunDelay: new Map(), confirmed: [], verdict: "insufficient" };
+  if (trials.length === 0) return empty;
   const highLoadLevels = loadLevels.filter((n) => n > 0);
-  if (highLoadLevels.length === 0) return "insufficient";
+  if (highLoadLevels.length === 0) return empty;
   const lowLoadFailFiles = new Set(validFailures.filter((f) => f.loadProcs === 0).map((f) => f.file));
   const loadInduced = validFailures.filter((f) => f.loadProcs > 0 && !lowLoadFailFiles.has(f.file));
-  if (loadInduced.length === 0) return "no-signal";
-  return loadInduced.length >= MIN_N_ACTIVE ? "signal" : "insufficient";
+  const hitClasses = new Map<string, HitClass>();
+  const evidence: ActiveTrial[] = [];
+  for (const f of loadInduced) {
+    const cls = classifyHit(f);
+    hitClasses.set(f.file, cls);
+    if (cls === "real-reproduction") evidence.push(f); // 订正⑥: only real-reproduction is evidence
+  }
+  const baselineRunDelay = new Map<string, number>();
+  for (const t of trials) {
+    if (t.loadProcs !== 0) continue;
+    const prev = baselineRunDelay.get(t.file) ?? 0;
+    baselineRunDelay.set(t.file, Math.max(prev, t.runDelayNs));
+  }
+  const confirmed = evidence.filter((f) => {
+    const base = baselineRunDelay.get(f.file) ?? 0;
+    return f.runDelayNs >= MIN_RUN_DELAY_NS && f.runDelayNs >= SIGNIFICANT_RUN_DELAY_RATIO * Math.max(base, 1);
+  });
+  const verdict = evidence.length === 0 ? "no-signal" : confirmed.length > 0 ? "signal" : "no-signal";
+  return { loadInduced, hitClasses, evidence, baselineRunDelay, confirmed, verdict };
 }
 
 // ── report ─────────────────────────────────────────────────────────────────────────
@@ -537,10 +694,11 @@ function binLabel(b: { lo: number; hi: number }): string {
 }
 
 function printActive(res: Awaited<ReturnType<typeof activeRun>>): void {
-  const { candidates, trials, validFailures, isolationFailures, loadLevels } = res;
+  const { candidates, trials, validFailures, isolationFailures, unverified, loadLevels } = res;
   console.log("── (a) 主动制造 (primary) ──");
   console.log(`候选: core=${candidates.core.length} serial=${candidates.serial.length} lowconc=${candidates.lowconc.length}`);
   console.log(`隔离违规排除: ${candidates.excluded.length} 个 → ${candidates.excluded.join(", ") || "(无)"}`);
+  if (unverified.length > 0) console.log(`未验证(预算外跳过, 订正⑥): ${unverified.join(", ")}`);
   console.log(`load levels (busy-wait procs): [${loadLevels.join(", ")}]  | trials 总数=${trials.length}`);
   const byLoad = new Map<number, ActiveTrial[]>();
   for (const t of trials) {
@@ -557,7 +715,19 @@ function printActive(res: Awaited<ReturnType<typeof activeRun>>): void {
   }
   console.log(`有效失败样本（非隔离冲突）: ${validFailures.length} | 隔离冲突失败(已排除): ${isolationFailures.length}`);
   for (const t of [...validFailures, ...isolationFailures]) {
-    console.log(`  [${t.adjudication}] ${t.file}  load=${t.loadProcs}  cpu_stall均值=${fmt(t.cpuStallMean)}  sig=${t.errorSignature ?? "(无)"}`);
+    console.log(`  [${t.adjudication}] ${t.file}  load=${t.loadProcs}  cpu_stall均值=${fmt(t.cpuStallMean)}  run_delay=${fmtRunDelay(t.runDelayNs)}  sig=${t.errorSignature ?? "(无)"}`);
+  }
+  // 订正⑤ mechanism confirmation — the verdict axis (not the hit count), 订正⑥ three-state classification
+  const mech = activeMechanism(validFailures, trials, loadLevels);
+  const CLS_LABEL: Record<HitClass, string> = { "real-reproduction": "真实复现", "truncated": "被截断", "design-intent": "疑似设计意图" };
+  console.log(`load-induced 命中样本: ${mech.loadInduced.length} | 真实复现(证据): ${mech.evidence.length} | run_delay 机制确认: ${mech.confirmed.length}/${mech.evidence.length}`);
+  for (const t of mech.loadInduced) {
+    const cls = mech.hitClasses.get(t.file) ?? "real-reproduction";
+    const base = mech.baselineRunDelay.get(t.file) ?? 0;
+    const ratio = base > 0 ? t.runDelayNs / base : Number.POSITIVE_INFINITY;
+    const ok = t.runDelayNs >= MIN_RUN_DELAY_NS && t.runDelayNs >= SIGNIFICANT_RUN_DELAY_RATIO * Math.max(base, 1);
+    const tag = cls === "real-reproduction" ? (ok ? "机制确认" : "机制未确认") : "不计入证据";
+    console.log(`  [${CLS_LABEL[cls]}] ${t.file}  load=32 run_delay=${fmtRunDelay(t.runDelayNs)} vs load=0 基线=${fmtRunDelay(base)}  比值=${Number.isFinite(ratio) ? ratio.toFixed(1) + "×" : "∞"}  ${tag}`);
   }
 }
 
@@ -587,6 +757,7 @@ function printPassive(res: ReturnType<typeof passiveAnalyze>): void {
 function printJson(args: ReturnType<typeof parseArgs>, active: Awaited<ReturnType<typeof activeRun>> | null, passive: ReturnType<typeof passiveAnalyze> | null, verdict: string): void {
   const out: Record<string, unknown> = { verdict };
   if (active) {
+    const mech = activeMechanism(active.validFailures, active.trials, active.loadLevels);
     out.active = {
       candidates: {
         core: active.candidates.core.length,
@@ -598,11 +769,27 @@ function printJson(args: ReturnType<typeof parseArgs>, active: Awaited<ReturnTyp
       injectWindowMs: args.injectWindowMs,
       trials: active.trials.map((t) => ({
         file: t.file, loadProcs: t.loadProcs, passed: t.passed, code: t.code, wallMs: t.wallMs,
-        cpuStallMean: t.cpuStallMean, cpuStallMax: t.cpuStallMax, adjudication: t.adjudication,
-        errorSignature: t.errorSignature,
+        timeoutMs: t.timeoutMs,
+        cpuStallMean: t.cpuStallMean, cpuStallMax: t.cpuStallMax, runDelayNs: t.runDelayNs,
+        adjudication: t.adjudication, errorSignature: t.errorSignature,
       })),
       validFailureCount: active.validFailures.length,
       isolationFailureCount: active.isolationFailures.length,
+      unverified: active.unverified,
+      mechanism: {
+        loadInducedCount: mech.loadInduced.length,
+        evidenceCount: mech.evidence.length,
+        confirmedCount: mech.confirmed.length,
+        significantRunDelayRatio: SIGNIFICANT_RUN_DELAY_RATIO,
+        minRunDelayNs: MIN_RUN_DELAY_NS,
+        hits: mech.loadInduced.map((t) => ({
+          file: t.file,
+          hitClass: mech.hitClasses.get(t.file) ?? "real-reproduction",
+          runDelayNs: t.runDelayNs,
+          baselineRunDelayNs: mech.baselineRunDelay.get(t.file) ?? 0,
+          confirmed: mech.confirmed.includes(t),
+        })),
+      },
     };
   }
   if (passive && passive.carrierFound) {
@@ -656,7 +843,7 @@ async function main(): Promise<void> {
 
   let verdict = "insufficient";
   if (active) {
-    verdict = activeVerdict(active.validFailures, active.trials, active.loadLevels);
+    verdict = activeMechanism(active.validFailures, active.trials, active.loadLevels).verdict;
   } else if (passive && passive.carrierFound) {
     verdict = passive.verdict;
   }
