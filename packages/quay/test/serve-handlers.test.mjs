@@ -1875,12 +1875,18 @@ test("AC3 (integration) — POST /sessions/driver rejects interactive kinds + no
 test("AC1 (falsifiable) — POST /sessions/driver delegates to runDriver and forwards --kind (worker action targets worker, ⛔ 漏 --kind ⇒ 默认 promotion ⇒ 假)", async () => {
   const { ws, tasksDir } = makeWorkspace("lifecycle-ac1-");
   const cwd0 = process.cwd();
+  const prevPluginRoot = process.env.QUAY_PLUGIN_ROOT;
   let server;
   try {
     // Mock the supervisor kernel to echo its argv (⛔ 不真起 driver — 只验证 --kind 透传).
+    // ⛔ The kernel is now resolved via plugin-root.ts (SPEC §6b), NOT from the workspace root —
+    // so point the resolver at this mock with the explicit QUAY_PLUGIN_ROOT override (the seam
+    // plugin-root.ts exposes for hermetic tests / operator override), else the real main-checkout
+    // kernel runs and stdout is "not-running" instead of the echoed argv.
     const scriptDir = path.join(ws, "plugin", "scripts");
     fs.mkdirSync(scriptDir, { recursive: true });
     fs.writeFileSync(path.join(scriptDir, "driver-runtime.ts"), "process.stdout.write(process.argv.slice(2).join(' '));\n");
+    process.env.QUAY_PLUGIN_ROOT = path.join(ws, "plugin");
 
     const port = await freePort();
     process.chdir(ws);
@@ -1900,6 +1906,8 @@ test("AC1 (falsifiable) — POST /sessions/driver delegates to runDriver and for
       if (server.client) await server.client.close();
     }
     process.chdir(cwd0);
+    if (prevPluginRoot === undefined) delete process.env.QUAY_PLUGIN_ROOT;
+    else process.env.QUAY_PLUGIN_ROOT = prevPluginRoot;
     fs.rmSync(tasksDir, { recursive: true, force: true });
     fs.rmSync(ws, { recursive: true, force: true });
   }

@@ -436,10 +436,34 @@ function countWorkflowExecutions(script: ScriptEntry, invocations: { scriptPath?
 }
 
 /**
+ * Recursively collect *.jsonl transcript files under a subagents dir. Covers BOTH the direct
+ * `<session>/subagents/agent-*.jsonl` layer AND the nested
+ * `<session>/subagents/workflows/<run>/agent-*.jsonl` layer — the workflow layer was previously
+ * never enumerated (gap-runtime-usage-inventory-workflow-blind-spot). Only recurses into real
+ * directories (a symlinked dir is not followed, so symlink cycles cannot recurse).
+ */
+function collectJsonlFiles(dir: string, out: string[]): void {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const e of entries) {
+    if (e.isDirectory()) {
+      collectJsonlFiles(path.join(dir, e.name), out);
+    } else if ((e.isFile() || e.isSymbolicLink()) && e.name.endsWith(".jsonl")) {
+      out.push(path.join(dir, e.name));
+    }
+  }
+}
+
+/**
  * Read transcript records in [since, until): Bash commands + Workflow invocations.
  * `includeSessions` (when non-empty) restricts the read to those session ids (top-level file +
- * their subagents) — used to scope the MAIN window to the fast-mode inner-layer sessions. An empty
- * set reads EVERY session under sessionsDir (used for the broad long contrast window).
+ * their subagents, including nested workflows/<run>/ agents) — used to scope the MAIN window to the
+ * fast-mode inner-layer sessions. An empty set reads EVERY session under sessionsDir (used for the
+ * broad long contrast window).
  */
 export function readTranscripts(
   sessionsDir: string,
@@ -461,7 +485,11 @@ export function readTranscripts(
     if (includeSessions.size > 0 && !includeSessions.has(id)) continue;
     jsonlFiles.push(path.join(sessionsDir, f));
   }
-  // subagents: every <session-id>/subagents/*.jsonl
+  // subagents: every <session-id>/subagents/**/*.jsonl — BOTH the direct layer and the nested
+  // workflows/<run>/ layer. The workflow layer was the enumeration blind spot
+  // (gap-runtime-usage-inventory-workflow-blind-spot): readTranscripts previously read only the
+  // direct subagents and never recursed into subagents/workflows/<run>/, where workflow agents do
+  // their work — so executions inside workflow agents were invisible and the live count read low.
   for (const d of fs.readdirSync(sessionsDir)) {
     if (includeSessions.size > 0 && !includeSessions.has(d)) continue;
     const sub = path.join(sessionsDir, d, "subagents");
@@ -472,13 +500,7 @@ export function readTranscripts(
       continue;
     }
     if (!subStat.isDirectory()) continue;
-    try {
-      for (const f of fs.readdirSync(sub)) {
-        if (f.endsWith(".jsonl")) jsonlFiles.push(path.join(sub, f));
-      }
-    } catch {
-      /* skip unreadable */
-    }
+    collectJsonlFiles(sub, jsonlFiles);
   }
 
   const sinceMs = Date.parse(since);
