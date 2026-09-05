@@ -2,7 +2,7 @@
 id: gap-reclassify-serial-lowconc-no-isolation-reason-to-main
 title: 默认进 main——16 个既无隔离缺陷也无自指理由的 serial/lowconc 文件挪回 engine（人 2026-09-05
   裁定：留在非 main 相才需要理由）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
