@@ -2,7 +2,7 @@
 id: gap-skill-allowed-tools-plugin-namespace
 title: plugin/skills 的 allowed-tools 写裸名 mcp__quay__*
   对任何受支持渠道都不生效（loop-driver/routines 两处），且无恒定判据——AC163，AC165 撤裸命名空间的硬前置
-status: ready
+status: done
 labels:
   - gap
   - defect
