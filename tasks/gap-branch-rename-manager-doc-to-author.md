@@ -1,7 +1,7 @@
 ---
 id: gap-branch-rename-manager-doc-to-author
 title: 分支改名 main/manager-doc → author（人 2026-09-05 裁定，含撞名规避确认）
-status: ready
+status: done
 labels:
   - gap
 parent: null
