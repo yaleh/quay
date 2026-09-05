@@ -1928,10 +1928,17 @@ declare -A PUBLIC_ENTRYPOINTS=(
 
 # ── derive the check set from the filesystem (never a hardcoded count) ────────────
 SCRIPTS=()
-for f in "$SELF_DIR"/*.sh "$SELF_DIR"/*.ts "$SELF_DIR"/*.mjs; do
-  [ -f "$f" ] || continue
+# archive/** exclusion (§12c, SPEC-plugin-lifecycle-single-bundle-2026-09-02): an archived script
+# keeps its original basename under archive/<date>/<original-path>. The recursive find below skips
+# BOTH archive/** (so a misplaced archive subdir can never pollute the live catalog) and
+# checker-mutation-cases/** (fixtures that were never part of the shipped check set under the old
+# flat glob). find -print0 + `read -d ''` keeps basenames with whitespace intact.
+while IFS= read -r -d '' f; do
   SCRIPTS+=("$(basename "$f")")
-done
+done < <(find "$SELF_DIR" -mindepth 1 -type f \
+  \( -name '*.sh' -o -name '*.ts' -o -name '*.mjs' \) \
+  -not -path '*/checker-mutation-cases/*' \
+  -not -path '*/archive/*' -print0)
 mapfile -t SCRIPTS < <(printf '%s\n' "${SCRIPTS[@]}" | sort)
 
 # ── mode selection ─────────────────────────────────────────────────────────────────

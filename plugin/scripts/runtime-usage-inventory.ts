@@ -52,7 +52,7 @@ export const SCRIPT_ROOTS = ["plugin/scripts", "experiments", ".claude/workflows
 // Directories/names excluded from script enumeration AND the import scan. `worktrees` covers
 // milestones/M*/worktrees/ (per-milestone git worktrees whose plugin/experiments files are mirrors
 // of the main checkout — same precedent as select-tests-for-touches.ts's SKIP_DIRS).
-const SKIP_DIR_NAMES = new Set([".git", "node_modules", "worktrees", ".quay", "dist", "vendor"]);
+const SKIP_DIR_NAMES = new Set([".git", "node_modules", "worktrees", ".quay", "dist", "vendor", "archive"]);
 
 // Canonical test glob (ADR-019 / DIR-109) — single source of truth: scripts/test.sh's glob=(...)
 // line. Kept in sync by hand (same three patterns, same order). Only *.test.* files consult it.

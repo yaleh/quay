@@ -869,6 +869,11 @@ build_deduped_files() {
     exit "$rc"
   fi
   _RG_META="${meta}"
+  # archive/** exclusion (§12c, SPEC-plugin-lifecycle-single-bundle-2026-09-02): an archived test
+  # (archive/<date>/plugin/test/*.test.mjs) must never re-enter the run set. The canonical glob
+  # patterns are non-recursive and cannot reach archive/ at the repo root, but the filter keeps the
+  # run set correct if a future glob grows a recursive `**` segment.
+  _RG_META="$(printf '%s\n' "${_RG_META}" | awk -F'\t' '$1 !~ /(^|\/)archive\//')"
   _RG_META_READY=1
   _RG_FILES=()
   local f
