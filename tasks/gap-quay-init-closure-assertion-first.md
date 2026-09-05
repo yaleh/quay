@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-closure-assertion-first
 title: quay-init 落地量（142 文件/7.1MB，含 117-131 个机制层脚本）没有任何恒定判据在盯——先落 AC168 的棘轮判据，收缩本体留 W3
-status: ready
+status: done
 labels:
   - gap
 parent: null
