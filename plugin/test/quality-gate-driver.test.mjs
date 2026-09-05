@@ -129,44 +129,44 @@ test("AC3 — parsePoolQualityPlan parses triggers/pool / null on malformed", ()
   assert.equal(parsePoolQualityPlan(JSON.stringify({ triggers: {} })), null, "missing pool key ⇒ null");
 });
 
-test("AC3 — runPoolQualityJudge not-triggered ⇒ verified (fired=false 是真实测量)", (t) => {
+test("AC3 — runPoolQualityJudge not-triggered ⇒ verified (fired=false 是真实测量)", async (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-b15-nt-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const planCmd = ["node", fakePlanScript(tmp, false)];
-  const fact = runPoolQualityJudge("/repo", planCmd, null);
+  const fact = await runPoolQualityJudge("/repo", planCmd, null);
   assert.equal(fact.name, "pool-quality-judge");
   assert.equal(fact.state, "verified");
   assert.equal(fact.value.fired, false);
   assert.equal(fact.value.distribution, null, "not triggered ⇒ no judge ⇒ no distribution");
 });
 
-test("AC3 — runPoolQualityJudge fired ⇒ LLM judge + JS aggregate (should-remove → remove-or-rescope)", (t) => {
+test("AC3 — runPoolQualityJudge fired ⇒ LLM judge + JS aggregate (should-remove → remove-or-rescope)", async (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-b15-fire-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const planCmd = ["node", fakePlanScript(tmp, true)];
   const judgeArgv = ["node", fakeJudgeScript(tmp)];
   const gateArgv = ["node", fakeGateGoScript(tmp)];
-  const fact = runPoolQualityJudge("/repo", planCmd, judgeArgv, gateArgv);
+  const fact = await runPoolQualityJudge("/repo", planCmd, judgeArgv, gateArgv);
   assert.equal(fact.state, "verified");
   assert.equal(fact.value.fired, true);
   assert.deepEqual(fact.value.distribution, { ready: 1, "needs-work": 0, "should-remove": 1, uncertain: 0 });
   assert.deepEqual(fact.value.shouldRemoveIds, ["gap-demo-should-remove"], "should-remove routed to remove-or-rescope");
 });
 
-test("AC3 — runPoolQualityJudge unreadable plan ⇒ not-evaluated (硬规则 3b)", (t) => {
+test("AC3 — runPoolQualityJudge unreadable plan ⇒ not-evaluated (硬规则 3b)", async (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-b15-np-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
-  const fact = runPoolQualityJudge("/repo", ["node", path.join(tmp, "nope.js")], null);
+  const fact = await runPoolQualityJudge("/repo", ["node", path.join(tmp, "nope.js")], null);
   assert.equal(fact.state, "not-evaluated");
 });
 
-test("AC3 — runPoolQualityJudge judge exit non-zero ⇒ failed", (t) => {
+test("AC3 — runPoolQualityJudge judge exit non-zero ⇒ failed", async (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-b15-jf-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const planCmd = ["node", fakePlanScript(tmp, true)];
   const failingJudge = writeFixture(tmp, "fake-judge-fail.js", `process.stdout.write(""); process.exit(1);`);
   const gateArgv = ["node", fakeGateGoScript(tmp)];
-  const fact = runPoolQualityJudge("/repo", planCmd, ["node", failingJudge], gateArgv);
+  const fact = await runPoolQualityJudge("/repo", planCmd, ["node", failingJudge], gateArgv);
   assert.equal(fact.state, "failed");
   assert.equal(fact.value.fired, true);
 });
@@ -238,13 +238,13 @@ test("resident loop --once writes a round record with facts (spawn real process)
 
 // ── 判词载体写端（gap-pool-quality-verdicts-never-persisted：AC1 driver 路径 + AC6 负控制）───────
 
-test("AC1 — runPoolQualityJudge fired writes a judged record to .quay/quality-round.jsonl", (t) => {
+test("AC1 — runPoolQualityJudge fired writes a judged record to .quay/quality-round.jsonl", async (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-qr-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const planCmd = ["node", fakePlanScript(tmp, true)];
   const judgeArgv = ["node", fakeJudgeScript(tmp)];
   const gateArgv = ["node", fakeGateGoScript(tmp)];
-  const fact = runPoolQualityJudge(tmp, planCmd, judgeArgv, gateArgv);
+  const fact = await runPoolQualityJudge(tmp, planCmd, judgeArgv, gateArgv);
   assert.equal(fact.state, "verified");
   const carrier = qualityRoundPath(tmp);
   assert.ok(fs.existsSync(carrier), "carrier must exist after a fired judge");
@@ -261,7 +261,7 @@ test("AC1 — runPoolQualityJudge fired writes a judged record to .quay/quality-
   }
 });
 
-test("AC6 — recordVerdicts=false ⇒ carrier does not grow; restore ⇒ grows (负控制, 能取假)", (t) => {
+test("AC6 — recordVerdicts=false ⇒ carrier does not grow; restore ⇒ grows (负控制, 能取假)", async (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-nc-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const planCmd = ["node", fakePlanScript(tmp, true)];
@@ -270,16 +270,61 @@ test("AC6 — recordVerdicts=false ⇒ carrier does not grow; restore ⇒ grows 
   const carrier = qualityRoundPath(tmp);
   const count = () => (fs.existsSync(carrier) ? fs.readFileSync(carrier, "utf8").split("\n").filter((l) => l.trim()).length : 0);
   // 写入开启 ⇒ 1 条。
-  const on = runPoolQualityJudge(tmp, planCmd, judgeArgv, gateArgv, true);
+  const on = await runPoolQualityJudge(tmp, planCmd, judgeArgv, gateArgv, true);
   assert.equal(on.state, "verified");
   const afterOn = count();
   assert.equal(afterOn, 1, "write on ⇒ carrier grows to 1");
   // 关掉写入 ⇒ 不增长（仍 1 条）。
-  const off = runPoolQualityJudge(tmp, planCmd, judgeArgv, gateArgv, false);
+  const off = await runPoolQualityJudge(tmp, planCmd, judgeArgv, gateArgv, false);
   assert.equal(off.state, "verified");
   assert.equal(count(), afterOn, "write off ⇒ carrier does NOT grow");
   // 恢复写入 ⇒ 增长到 2 条。
-  const on2 = runPoolQualityJudge(tmp, planCmd, judgeArgv, gateArgv, true);
+  const on2 = await runPoolQualityJudge(tmp, planCmd, judgeArgv, gateArgv, true);
   assert.equal(on2.state, "verified");
   assert.equal(count(), 2, "write restored ⇒ carrier grows to 2");
+});
+
+// ── gap-quality-gate-driver-pool-judge-spawn-timeout：AC1 非阻塞 spawn + AC5 负控制 ─────────────
+// B15 的 judge（真实 claude -p）曾用 spawnSync + 180_000 固定字面量上限，在真实并发负载下 3/3
+// 超时、0 成功（结构性地跑不完）。修法：judge spawn 改 runAsync（非阻塞）+ 缺省 unbounded
+// （无固定上限，judge 完成是唯一唤醒源）。AC1 测「非阻塞」、AC5 测「明显不够的 timeout 仍复现
+// timeout 失败」（负控制，证明瓶颈真实），AC2 三态不回归由上面既有 AC3/AC6 用例覆盖。
+
+test("AC1 — judge spawn 非阻塞（judge 运行期间事件循环不被冻住）", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-async-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const planCmd = ["node", fakePlanScript(tmp, true)];
+  const slowJudge = writeFixture(
+    tmp,
+    "fake-judge-slow.js",
+    `setTimeout(() => process.stdout.write(JSON.stringify([{id:"gap-demo-ready",verdict:"ready",acCompleteness:"all-checked",premiseSound:true,evidence:"done",recommendation:"dispatch"}])), 700);`,
+  );
+  const gateArgv = ["node", fakeGateGoScript(tmp)];
+  const t0 = Date.now();
+  const p = runPoolQualityJudge("/repo", planCmd, ["node", slowJudge], gateArgv, false);
+  // 不 await judge，先等一个 50ms 定时器：若 judge 仍 spawnSync 阻塞，这个定时器要等到 700ms 后才会触发。
+  await new Promise((r) => setTimeout(r, 50));
+  const elapsed = Date.now() - t0;
+  assert.ok(elapsed < 350, `50ms 定时器应快速触发（实测 ${elapsed}ms）——judge spawn 未阻塞事件循环`);
+  const fact = await p;
+  assert.equal(fact.state, "verified", "slow judge 最终完成 ⇒ verified");
+});
+
+test("AC5 — 负控制：明显不够的 judgeTimeoutMs 仍复现 timeout 失败；缺省 unbounded 能跑完", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-nc5-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const planCmd = ["node", fakePlanScript(tmp, true)];
+  const slowJudge = writeFixture(
+    tmp,
+    "fake-judge-slow2.js",
+    `setTimeout(() => process.stdout.write(JSON.stringify([{id:"gap-demo-ready",verdict:"ready",acCompleteness:"all-checked",premiseSound:true,evidence:"done",recommendation:"dispatch"}])), 1500);`,
+  );
+  const gateArgv = ["node", fakeGateGoScript(tmp)];
+  // 明显不够的值（100ms < 1500ms judge）⇒ 复现 timeout 失败（⛔ 不静默 verified）。
+  const fail = await runPoolQualityJudge(tmp, planCmd, ["node", slowJudge], gateArgv, false, 100);
+  assert.equal(fail.state, "failed", "明显不够的 timeout ⇒ failed");
+  assert.match(fail.reason, /timeout/i, "失败原因为 timeout（复现真实瓶颈）");
+  // 正对照：同一 slow judge 用缺省 unbounded ⇒ 能跑完 ⇒ 修法（去掉固定字面量上限）有效。
+  const ok = await runPoolQualityJudge(tmp, planCmd, ["node", slowJudge], gateArgv, false);
+  assert.equal(ok.state, "verified", "缺省 unbounded ⇒ 同一 slow judge 能跑完 ⇒ verified");
 });

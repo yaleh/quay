@@ -2,11 +2,12 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
-import { readLive, readSystem, readManagerLight, readTests, readGitHistory, readCurrentSuiteRun, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun } from "./observation.ts";
+import { readLive, readSystem, readManagerLight, readTests, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord } from "./observation.ts";
 import { TASK_STATUS } from "./abi.ts";
 import type { Manifest } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime } from "./serve-render.ts";
 import { awaitingLandMs, formatAwaitingDuration, suiteSuffix } from "./serve-live.ts";
+import { renderFanInCell } from "./serve-task.ts";
 
 // ── /dashboard ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -50,7 +51,18 @@ export function formatDurationMs(ms: number): string {
 /** The dashboard liveCard — a self-contained render of the loop pulse (state + in-flight mini list),
  *  factored out so the auto-refresh JSON endpoint can re-render this ONE card without the rest of the
  *  dashboard. `id="live-card"` is the DOM node the auto-refresh script swaps. */
-export function renderLiveCard(live: LiveResult, nowMs: number = Date.now()): string {
+export function renderLiveCard(
+  live: LiveResult,
+  nowMs: number = Date.now(),
+  tasks?: Array<{ id?: unknown; title?: unknown }>,
+): string {
+  // gap-dashboard-fanin-panel-and-timeline-bars I: join the in-flight taskId to the task summary
+  // (already fetched on the same /dashboard + /dashboard/cards requests) so each row can carry its
+  // title — reusing the taskCard miniList's "id + body-colour title" vertical idiom.
+  const titleById = new Map<string, string>();
+  for (const t of tasks ?? []) {
+    if (typeof t.id === "string" && typeof t.title === "string" && t.title.length > 0) titleById.set(t.id, t.title);
+  }
   const liveStateText = live.status === "error" ? "读失败" : live.liveState === "running" ? "running" : live.liveState === "running-unwired" ? "在跑但未接遥测" : live.liveState === "not-running" ? "未在运行" : "—";
   const liveMiniList = live.inFlight.slice(0, 3).map((t) => {
     const tag = t.phase === "awaiting-land"
@@ -64,9 +76,13 @@ export function renderLiveCard(live: LiveResult, nowMs: number = Date.now()): st
     // gap-dashboard-visual-review-batch-fixes AC2: every in-flight row carries its elapsed since
     // startedAtMs (the same formatSuiteElapsed formatter the testsCard uses, via an ISO round-trip).
     const elapsed = formatSuiteElapsed(new Date(t.startedAtMs).toISOString(), nowMs);
-    return html`<div style="display:flex;justify-content:space-between;gap:0.5rem;font-size:0.78rem;line-height:1.4">
-      <a href="/task/${encodeURIComponent(t.taskId)}" style="color:var(--color-text);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(t.taskId)}</a>
-      <span style="flex:none;${emphasis ? "color:var(--color-accent-700);font-weight:700" : "color:var(--color-neutral-700)"}">${escapeHtml(tag)}${elapsed ? ` · ${escapeHtml(elapsed)}` : ""}</span>
+    const title = titleById.get(t.taskId);
+    return html`<div style="display:flex;flex-direction:column;gap:2px;font-size:0.78rem;line-height:1.4">
+      <div style="display:flex;justify-content:space-between;gap:0.5rem">
+        <a href="/task/${encodeURIComponent(t.taskId)}" style="color:var(--color-text);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(t.taskId)}</a>
+        <span style="flex:none;${emphasis ? "color:var(--color-accent-700);font-weight:700" : "color:var(--color-neutral-700)"}">${escapeHtml(tag)}${elapsed ? ` · ${escapeHtml(elapsed)}` : ""}</span>
+      </div>
+      ${title != null ? html`<div style="color:var(--color-text);font-size:0.75rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(title)}</div>` : ""}
     </div>`;
   }).join("");
   return html`<div id="live-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
@@ -78,6 +94,108 @@ export function renderLiveCard(live: LiveResult, nowMs: number = Date.now()): st
   </div>`;
 }
 
+// ── 过去 N 小时分段着色时间轴（G/H 共用）───────────────────────────────────────────────────────────
+//
+// gap-dashboard-fanin-panel-and-timeline-bars G/H: G（测试卡）与 H（fan-in 卡）两条时间轴的数据源
+// （verification-round.jsonl / worker-outcome.jsonl）本就是持久化的真实历史，因此做成和 serve-tests.ts
+// 的 per-file gantt / load-curve 一样的【服务端渲染 SVG】（零客户端 JS、刷新页面历史不丢），不复用
+// sysCard 那套客户端内存攒数组的手法。两份 bar 共用同一份横轴换算，不写两遍。
+
+/** Default timeline window (hours) for the tests/fan-in segmented bars. */
+export const DEFAULT_TIMELINE_HOURS = 3;
+
+/** Parse `?hours=` into the timeline window: a valid integer in [1,24] → that value; missing / illegal
+ *  / out-of-range ("abc", 0, 999, 1.5, …) → DEFAULT_TIMELINE_HOURS (never throws, never clamps an
+ *  out-of-range value into 24 — AC7). */
+export function parseTimelineHours(raw: string | null | undefined): number {
+  if (raw == null || raw === "") return DEFAULT_TIMELINE_HOURS;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 24) return DEFAULT_TIMELINE_HOURS;
+  return n;
+}
+
+/** Read the timeline window off an incoming dashboard request's `?hours=` query (degrade → default). */
+function timelineHoursFromRequest(req: IncomingMessage): number {
+  try {
+    return parseTimelineHours(new URL(req.url ?? "", "http://localhost").searchParams.get("hours"));
+  } catch {
+    return DEFAULT_TIMELINE_HOURS;
+  }
+}
+
+/** Test-run state → the dashboard card's own colour token (the same ternary the recentStrip already
+ *  uses: green → positive, red → accent, other → neutral). Bare token name, so the strip writes
+ *  `background:var(--color-…)` and the SVG writes `fill="var(--color-…)"` from ONE source (no drift). */
+function stateColorToken(state: string | null): string {
+  return state === "green" ? "--color-positive-700" : state === "red" ? "--color-accent-800" : "--color-neutral-400";
+}
+
+/** Mechanical fan-in outcome → colour token (landed → positive, red → accent, unknown → neutral). */
+function fanInOutcomeColorToken(outcome: string | null): string {
+  return outcome === "landed" ? "--color-positive-700" : outcome === "red" ? "--color-accent-800" : "--color-neutral-400";
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/** A segmented absolute-wall-clock timeline bar (G and H share this ONE horizontal-axis conversion).
+ *  Each segment is `[startMs, endMs]` on an axis spanning the past `windowHours` ending at `nowMs`,
+ *  filled with `colorVar` (a bare CSS token). Segments with non-finite / inverted bounds, or that do
+ *  not intersect the window at all, are skipped (never extrapolated, never positioned by assumption).
+ *  Returns "" when no segment survives. Each surviving segment renders exactly ONE `<rect>` (AC3/AC5
+ *  count `<rect` occurrences); the axis/labels use `<line>`/`<text>` so that count stays exact. */
+function renderTimelineBarSvg(
+  segments: Array<{ startMs: number; endMs: number; colorVar: string }>,
+  windowHours: number,
+  nowMs: number,
+): string {
+  const windowStartMs = nowMs - windowHours * 3_600_000;
+  const spanMs = windowHours * 3_600_000;
+  const rows = segments.filter(
+    (s) =>
+      Number.isFinite(s.startMs) &&
+      Number.isFinite(s.endMs) &&
+      s.endMs >= s.startMs &&
+      s.endMs >= windowStartMs &&
+      s.startMs <= nowMs,
+  );
+  if (rows.length === 0) return "";
+
+  const W = 600;
+  const H = 44;
+  const pad = 4;
+  const barY = 8;
+  const barH = 14;
+  const axisY = H - 10;
+  const plotW = W - 2 * pad;
+  const X = (t: number): number => pad + ((t - windowStartMs) / spanMs) * plotW;
+
+  const bars = rows
+    .map((s) => {
+      const x0 = X(Math.max(s.startMs, windowStartMs));
+      const x1 = X(Math.min(s.endMs, nowMs));
+      const w = Math.max(x1 - x0, 1.5);
+      return `<rect x="${x0.toFixed(1)}" y="${barY}" width="${w.toFixed(1)}" height="${barH}" rx="2" fill="var(${s.colorVar})"></rect>`;
+    })
+    .join("");
+
+  const hhmm = (t: number): string => {
+    const d = new Date(t);
+    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  };
+  const axis = `<line x1="${pad}" y1="${axisY}" x2="${W - pad}" y2="${axisY}" stroke="var(--color-neutral-300)"></line>`;
+  const leftLabel = `<text x="${pad}" y="${H - 1}" font-size="9" fill="var(--color-neutral-700)">${hhmm(windowStartMs)}</text>`;
+  const rightLabel = `<text x="${W - pad}" y="${H - 1}" font-size="9" fill="var(--color-neutral-700)" text-anchor="end">${hhmm(nowMs)}</text>`;
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="过去 ${windowHours} 小时时间轴" style="width:100%;height:auto;margin-top:4px;display:block">
+${axis}
+${bars}
+${leftLabel}
+${rightLabel}
+</svg>`;
+}
+
 // gap-webui-dashboard-tests-card-latest-round-no-live-signal: the card prefers the LIVE running signal
 // (full-suite-state.json state=running, no ledger row yet) over tests.runs[0] (the latest COMPLETED
 // round); labels a gate-blocked round (pass=0/tests=0 by construction) for what it is instead of a bare
@@ -87,7 +205,13 @@ export function renderLiveCard(live: LiveResult, nowMs: number = Date.now()): st
 /** The dashboard testsCard — a self-contained render of the suite state (live-running signal / latest
  *  completed round / recent-rounds strip), factored out for the auto-refresh endpoint. `id="tests-card"`
  *  is the DOM node the auto-refresh script swaps. */
-export function renderTestsCard(tests: TestsResult, suiteRun: CurrentSuiteRun | null): string {
+export function renderTestsCard(
+  tests: TestsResult,
+  suiteRun: CurrentSuiteRun | null,
+  opts: { hours?: number; nowMs?: number } = {},
+): string {
+  const nowMs = opts.nowMs ?? Date.now();
+  const hours = opts.hours ?? DEFAULT_TIMELINE_HOURS;
   const latestRun = tests.runs[0] ?? null;
   const suiteRunning = suiteRun && suiteRun.state === "running" ? suiteRun : null;
   const gateBlocked = latestRun != null && latestRun.tests === 0 && latestRun.pass === 0 && (latestRun.reason === "gate-failed" || latestRun.gate != null);
@@ -107,7 +231,7 @@ export function renderTestsCard(tests: TestsResult, suiteRun: CurrentSuiteRun | 
     ? html`<div style="display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--color-divider);padding-top:6px">
         <div style="font-size:0.7rem;color:var(--color-neutral-700)">近${recentRuns.length}轮（新→旧）</div>
         <div style="display:flex;gap:3px">${recentRuns.map((r) => {
-          const color = r.state === "green" ? "var(--color-positive-700)" : r.state === "red" ? "var(--color-accent-800)" : "var(--color-neutral-400)";
+          const color = `var(${stateColorToken(r.state)})`;
           const rGateBlocked = r.tests === 0 && r.pass === 0 && (r.reason === "gate-failed" || r.gate != null);
           const title = `#${r.round ?? "?"} ${r.state ?? "—"}${rGateBlocked ? `（gate:${r.gate ?? "?"} 未执行测试）` : ` pass ${r.pass ?? "—"}/${r.tests ?? "—"}`}`;
           return html`<span title="${escapeHtml(title)}" style="width:11px;height:11px;border-radius:2px;background:${color};display:inline-block"></span>`;
@@ -116,21 +240,44 @@ export function renderTestsCard(tests: TestsResult, suiteRun: CurrentSuiteRun | 
     : "";
   // gap-dashboard-visual-review-batch-fixes AC4: a default-visible, readable per-round list (round · state
   // · pass X/Y · duration) below the hover-only colour strip, so a recent result is legible without hover.
+  // gap-dashboard-fanin-panel-and-timeline-bars F: each row ALSO appends its startedAt (via relativeTime)
+  // and buckets — absent fields render NO sub-item (the absent-field contract, never a "—").
   const recentList = recentRuns.filter((r) => r.state !== "running").map((r) => {
     const rGateBlocked = r.tests === 0 && r.pass === 0 && (r.reason === "gate-failed" || r.gate != null);
     const rDetail = rGateBlocked ? `gate:${r.gate ?? "?"} 未执行测试` : `pass ${r.pass ?? "—"}/${r.tests ?? "—"}`;
     const rDur = r.durationMs != null ? formatDurationMs(r.durationMs) : "—";
-    return html`<div style="display:flex;justify-content:space-between;gap:0.5rem;font-size:0.72rem;line-height:1.4">
-      <span style="flex:none;color:var(--color-neutral-700)">#${r.round ?? "?"} ${escapeHtml(r.state ?? "—")}</span>
-      <span style="color:var(--color-neutral-700)">${rDetail} · ${rDur}</span>
+    const startedMs = r.startedAt != null ? Date.parse(r.startedAt) : NaN;
+    const startedLine = Number.isFinite(startedMs)
+      ? html`<div style="color:var(--color-neutral-700)">${relativeTime(startedMs)}</div>`
+      : "";
+    const bucketsLine = r.buckets != null && r.buckets !== ""
+      ? html`<div style="color:var(--color-neutral-700)">bucket ${escapeHtml(r.buckets)}</div>`
+      : "";
+    return html`<div style="display:flex;flex-direction:column;gap:2px;font-size:0.72rem;line-height:1.4">
+      <div style="display:flex;justify-content:space-between;gap:0.5rem">
+        <span style="flex:none;color:var(--color-neutral-700)">#${r.round ?? "?"} ${escapeHtml(r.state ?? "—")}</span>
+        <span style="color:var(--color-neutral-700)">${rDetail} · ${rDur}</span>
+      </div>
+      ${startedLine}
+      ${bucketsLine}
     </div>`;
   }).join("");
+  // gap-dashboard-fanin-panel-and-timeline-bars G: past-N-hours segmented timeline below the list —
+  // input is the FULL `tests.runs` history (not just the 5-row strip), one segment per round whose
+  // [startedAt, startedAt+durationMs] both parse; colour by state (the card's own ternary).
+  const timelineSegments = tests.runs.map((r) => {
+    const startMs = r.startedAt != null ? Date.parse(r.startedAt) : NaN;
+    const endMs = Number.isFinite(startMs) && r.durationMs != null ? startMs + r.durationMs : NaN;
+    return { startMs, endMs, colorVar: stateColorToken(r.state) };
+  });
+  const timelineBar = renderTimelineBarSvg(timelineSegments, hours, nowMs);
   return html`<div id="tests-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
     <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">测试</div>
     <div style="font-weight:800">${statusLine}</div>
     <p style="margin:0;font-size:0.8rem;opacity:0.8">${detailLine}</p>
     ${recentStrip}
     ${recentList.length > 0 ? html`<div style="display:flex;flex-direction:column;gap:2px">${recentList}</div>` : ""}
+    ${timelineBar}
     <a href="/tests" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Tests →</a>
   </div>`;
 }
@@ -199,7 +346,8 @@ export function renderDashboardCardRefreshScript(): string {
 
   var refresh = function () {
     if (document.visibilityState !== "visible") { return; }
-    fetch("/dashboard/cards", { headers: { Accept: "application/json" } })
+    var qs = new URLSearchParams(window.location.search).get("hours");
+    fetch("/dashboard/cards" + (qs != null ? "?hours=" + encodeURIComponent(qs) : ""), { headers: { Accept: "application/json" } })
       .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
       .then(function (d) {
         var live = document.getElementById("live-card");
@@ -324,20 +472,91 @@ export function renderTaskCard(
   </div>`;
 }
 
-export function renderDashboardPage(d: {
-  live: LiveResult;
-  sys: SystemResult;
-  mgr: ManagerResult;
-  tests: TestsResult;
-  suiteRun: CurrentSuiteRun | null;
-  history: GitHistoryResult;
-  tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>;
-}): string {
-  const liveCard = renderLiveCard(d.live);
+/** The dashboard fan-in card — cross-task mechanical fan-in summary (list + segmented bar), added by
+ *  gap-dashboard-fanin-panel-and-timeline-bars H. Unlike /task/<id>'s Runs block (filtered by ONE task),
+ *  this aggregates EVERY worker-outcome record carrying a mechanical_fan_in result, sorted by
+ *  lock-acquire time (desc), reusing renderFanInCell for each row (no second field-join). */
+export function renderFanInCard(
+  root: string | undefined,
+  opts: { hours?: number; nowMs?: number } = {},
+): string {
+  const records = root != null ? readWorkerOutcomeRecords(root) : [];
+  return renderFanInCardFromRecords(records, opts);
+}
+
+/** Pure card-body renderer (the AC4/AC5 test seam): list + timeline bar from an already-read records
+ *  array, so the sort / null-filter / segment-count logic is unit-testable on a fixed array without a
+ *  disk fixture. */
+export function renderFanInCardFromRecords(
+  records: WorkerOutcomeRecord[],
+  opts: { hours?: number; nowMs?: number } = {},
+): string {
+  const nowMs = opts.nowMs ?? Date.now();
+  const hours = opts.hours ?? DEFAULT_TIMELINE_HOURS;
+  const fanIns = records.filter((r) => r.mechanical_fan_in != null);
+
+  const rows = fanIns
+    .map((r) => {
+      const mfi = r.mechanical_fan_in!;
+      const key = mfi.lockAcquireEpoch != null
+        ? mfi.lockAcquireEpoch
+        : r.ts != null
+          ? Date.parse(r.ts) / 1000
+          : NaN;
+      return { r, key };
+    })
+    .sort((a, b) => {
+      const an = Number.isFinite(a.key) ? a.key : -Infinity;
+      const bn = Number.isFinite(b.key) ? b.key : -Infinity;
+      return bn - an;
+    })
+    .slice(0, 5)
+    .map(({ r }, i) => html`<div style="${i > 0 ? "border-top:1px solid var(--color-divider);padding-top:6px;" : ""}display:flex;flex-direction:column;gap:2px;font-size:0.75rem;line-height:1.4">
+      <a href="/task/${encodeURIComponent(r.task ?? "")}" style="color:var(--color-text);text-decoration:none;font-weight:600">${escapeHtml(r.task ?? "?")}</a>
+      <div style="color:var(--color-neutral-700)">${renderFanInCell(r.task ?? "", r)}</div>
+    </div>`);
+  const list = rows.length > 0
+    ? html`<div style="display:flex;flex-direction:column;gap:4px">${rows.join("")}</div>`
+    : html`<p style="margin:0;font-size:0.8rem;opacity:0.8">暂无 fan-in 记录</p>`;
+
+  const segments = fanIns.map((r) => {
+    const mfi = r.mechanical_fan_in!;
+    return {
+      startMs: mfi.lockAcquireEpoch != null ? mfi.lockAcquireEpoch * 1000 : NaN,
+      endMs: mfi.lockReleaseEpoch != null ? mfi.lockReleaseEpoch * 1000 : NaN,
+      colorVar: fanInOutcomeColorToken(mfi.outcome),
+    };
+  });
+  const bar = renderTimelineBarSvg(segments, hours, nowMs);
+
+  return html`<div id="fanin-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">Fan-in</div>
+    <p style="margin:0;font-size:0.8rem;opacity:0.8">最近 ${rows.length} 次机械 fan-in（landed/red · 锁持有区间）</p>
+    ${list}
+    ${bar}
+  </div>`;
+}
+
+export function renderDashboardPage(
+  d: {
+    live: LiveResult;
+    sys: SystemResult;
+    mgr: ManagerResult;
+    tests: TestsResult;
+    suiteRun: CurrentSuiteRun | null;
+    history: GitHistoryResult;
+    tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>;
+  },
+  opts: { workspaceRoot?: string; hours?: number; nowMs?: number } = {},
+): string {
+  const nowMs = opts.nowMs ?? Date.now();
+  const hours = opts.hours ?? DEFAULT_TIMELINE_HOURS;
+  const liveCard = renderLiveCard(d.live, nowMs, d.tasks);
   const sysCard = renderSysCard(d.sys);
   const mgrCard = renderMgrCard(d.mgr);
   const taskCard = renderTaskCard(d.tasks);
-  const testsCard = renderTestsCard(d.tests, d.suiteRun);
+  const testsCard = renderTestsCard(d.tests, d.suiteRun, { hours, nowMs });
+  const fanInCard = renderFanInCard(opts.workspaceRoot, { hours, nowMs });
 
   const recentCommits = d.history.status === "ok" ? d.history.commits.slice(0, 3).map((c) => `${c.hash.slice(0, 7)} ${c.subject}`).join("<br>") : (d.history.status === "empty" ? "无提交" : "读失败");
   const commitsCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:8px">
@@ -346,14 +565,22 @@ export function renderDashboardPage(d: {
     <a href="/journal" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Journal →</a>
   </div>`;
 
+  // gap-dashboard-fanin-panel-and-timeline-bars (window presets): a small set of page-reload links that
+  // set the shared G/H timeline window. The refresh script carries the current ?hours= into its own
+  // /dashboard/cards poll, so a preset change survives the 30s auto-refresh without the bars jumping.
+  const hourLinks = [1, 3, 6, 12]
+    .map((n) => html`<a href="/dashboard?hours=${n}" style="color:var(--color-accent);text-decoration:none;${n === hours ? "font-weight:700" : ""}">${n}h</a>`)
+    .join(" · ");
+
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay dashboard — 循环脉搏、任务台账、系统资源与三层状态总览">${modernistStyles()}${pageStyles()}<title>Dashboard</title></head>
     <body>${renderMobileChrome("dashboard", "dashboard")}${renderSiteNav("dashboard")}<main>
       <h1>Dashboard</h1>
       <p class="meta">循环脉搏、任务台账、系统资源与三层调度状态的总览 — 每张卡片指向对应完整页面。</p>
+      <p class="meta">时间轴窗口（当前 ${hours}h）：${hourLinks}</p>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:var(--color-divider);border:1px solid var(--color-divider);margin-bottom:1.5rem">${liveCard}${sysCard}${mgrCard}</div>
       <h2>工作进展</h2>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:var(--color-divider);border:1px solid var(--color-divider);margin-bottom:1.5rem">${taskCard}${testsCard}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:var(--color-divider);border:1px solid var(--color-divider);margin-bottom:1.5rem">${taskCard}${testsCard}${fanInCard}</div>
       <h2>变更记录</h2>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:var(--color-divider);border:1px solid var(--color-divider)">${commitsCard}${html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:8px">
         <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">Git History</div>
@@ -441,7 +668,8 @@ export async function handleDashboard(
     history = { status: "error", reason: "internal", commits: [], head: null, heads: {} };
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderDashboardPage({ live, sys, mgr, tests, suiteRun, history, tasks }));
+  const hours = timelineHoursFromRequest(req);
+  res.end(renderDashboardPage({ live, sys, mgr, tests, suiteRun, history, tasks }, { workspaceRoot: cfg.workspaceRoot, hours }));
 }
 
 /** /dashboard/cards — the JSON data endpoint the dashboard auto-refresh script polls
@@ -477,9 +705,10 @@ export async function handleDashboardCards(
   }
   let suiteRun: CurrentSuiteRun | null;
   try { suiteRun = readCurrentSuiteRun(cfg.workspaceRoot); } catch { suiteRun = null; }
+  const hours = timelineHoursFromRequest(req);
   const payload = JSON.stringify({
-    liveCard: renderLiveCard(live),
-    testsCard: renderTestsCard(tests, suiteRun),
+    liveCard: renderLiveCard(live, Date.now(), tasks),
+    testsCard: renderTestsCard(tests, suiteRun, { hours }),
     sysCard: renderSysCard(sys),
     mgrCard: renderMgrCard(mgr),
     taskCard: renderTaskCard(tasks),
