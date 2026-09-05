@@ -2,7 +2,7 @@
 id: gap-dashboard-fanin-panel-and-timeline-bars
 title: Dashboard 四项改进：testsCard 补 startedAt/bucket + 测试与新增 fan-in panel
   的过去N小时分段时间轴 + 循环脉搏在飞列表加任务 title
-status: todo
+status: ready
 labels:
   - gap
   - webui
