@@ -45,6 +45,7 @@ import {
   globMatch,
   inTestGlob,
   buildInventory,
+  readTranscripts,
   extractHeaderComment,
   extractInstrumentDeclaration,
   buildInstrumentsManifest,
@@ -276,6 +277,50 @@ after(() => {
     assert.equal(wf.main.executed, 0);
     assert.ok(wf.long.executed > 0, "workflow executed in the long window");
     assert.ok(inv.summary.diffMainToLong.some((d) => d.script === ".claude/workflows/execute-milestone.js"));
+  });
+
+  // ── gap-runtime-usage-inventory-workflow-blind-spot: subagents/workflows/<run>/ layer ──────
+  // The enumeration blind spot: readTranscripts previously read only <session>/subagents/*.jsonl
+  // (direct layer) and never recursed into <session>/subagents/workflows/<run>/agent-*.jsonl —
+  // where workflow agents do their work. This is the fixture NEGATIVE control: a transcript planted
+  // in the workflow layer MUST be enumerated (and its command surfaced); reverting the enumeration
+  // to the old single-level readdir makes this test red on the unfixed code.
+  test("readTranscripts enumerates subagents/workflows/<run>/agent-*.jsonl (workflow-layer blind spot)", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rui-wf-"));
+    _tmpDirs.push(tmp);
+    const sessions = path.join(tmp, "sessions");
+    const sid = "wf-session";
+    // Direct subagent layer (already covered before the fix — asserted to stay covered).
+    fs.mkdirSync(path.join(sessions, sid, "subagents"), { recursive: true });
+    fs.writeFileSync(
+      path.join(sessions, sid, "subagents", "agent-direct.jsonl"),
+      JSON.stringify({ timestamp: "2026-09-03T12:00:00.000Z", type: "assistant", message: { content: [
+        { type: "tool_use", name: "Bash", input: { command: "node plugin/scripts/direct-layer.ts" } },
+      ] } }) + "\n",
+    );
+    // Workflow-agent layer — the blind spot this task fixes.
+    fs.mkdirSync(path.join(sessions, sid, "subagents", "workflows", "wf_run1"), { recursive: true });
+    fs.writeFileSync(
+      path.join(sessions, sid, "subagents", "workflows", "wf_run1", "agent-workflow.jsonl"),
+      JSON.stringify({ timestamp: "2026-09-03T12:00:00.000Z", type: "assistant", message: { content: [
+        { type: "tool_use", name: "Bash", input: { command: "node plugin/scripts/workflow-layer.ts" } },
+      ] } }) + "\n",
+    );
+    const since = "2026-09-03T00:00:00.000Z";
+    const until = "2026-09-04T00:00:00.000Z";
+    const tx = readTranscripts(sessions, since, until);
+    assert.ok(
+      tx.commands.some((c) => c.includes("workflow-layer.ts")),
+      "workflow-layer agent transcript is enumerated (the former blind spot)",
+    );
+    assert.ok(
+      tx.commands.some((c) => c.includes("direct-layer.ts")),
+      "direct subagent transcript is still enumerated",
+    );
+    assert.ok(
+      tx.files.some((f) => f.includes("workflows") && f.endsWith("agent-workflow.jsonl")),
+      "the workflow-layer file is recorded in readTranscripts' files list",
+    );
   });
 
   test("REFUTE: wrapper-indirect honors gate_delegate_ts and ignores echo mentions", () => {
