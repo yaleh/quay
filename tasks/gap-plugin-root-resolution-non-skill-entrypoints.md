@@ -3,7 +3,7 @@ id: gap-plugin-root-resolution-non-skill-entrypoints
 title: 非 skill 入口无法定位 plugin 脚本——cli/driver.ts:166 从 workspace root 拼
   plugin/scripts/driver-runtime.ts，AC168 停止复制后下游 quay driver start 必失效（SPEC
   未覆盖的承重前提）
-status: ready
+status: done
 labels:
   - gap
 parent: null
