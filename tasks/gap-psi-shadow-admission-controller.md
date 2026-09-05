@@ -66,17 +66,44 @@ worker-driver 连续 3 次 exited-not-landed，机械诊断写的是"AC 未全�
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，Phase 0 主动数据源，候选筛选正确、规模受控）：候选文件清单 = 上述 5 个已核实干净候选（serial/lowconc 组其余文件为可选扩展，不是必须），**且清单里没有任何一个文件出现在 `plugin/test-isolation-violations.txt`**（grep 核对，写进 Measured）；每次负载注入窗口 ≤10 秒（Measured 里贴出实际用的窗口时长）；对每个候选跑受控并发/背景负载 trial，记录并发设置、真实 `cpu_stall`、pass/fail、失败错误信号；任何诱发出的失败都核对过不是隔离冲突签名才计入有效样本，核对过程写进 Measured；（⛔ 候选清单命中隔离违规名单 ⇒ 假；⛔ 注入窗口 >10 秒 ⇒ 假；⛔ 诱发失败未核对隔离冲突就直接计入样本 ⇒ 假）。
-- [ ] AC2（能取假，Phase 0 被动数据源 + 数据源解析）：脚本支持 `--root`/`QUAY_MAIN_CHECKOUT` 解析主检出（在一个干净 `git worktree add` 出的目录里、不带 `--root` 直跑必须报"未找到载体"而不是假装空数据合格；带正确 `--root` 时必须能读到全历史真实数据），联合 `passed:false` 记录与其执行窗口内的 PSI 读数，按并发区间分档输出通过组 vs 失败组的 PSI 对比；（⛔ 只给相关性数字不给按失败/通过分组的对比 ⇒ 假；⛔ 在 worktree 里不传 `--root` 却读到非零数据或不报错 ⇒ 假）。
-- [ ] AC3（能取假，诚实的样本量报告，主动/被动分列）：Measured 必须**分别**给出 (a) 主动实验的有效失败样本数、(b) 被动历史联合的失败样本数——不得合并成一个数字；两者各自定义并写明"判定所需的最小 N"，N 低于门槛的档位一律报"样本不足"；最终 go/no-go 结论须注明主要依据哪个数据源、另一个数据源起什么补充/交叉验证作用；（⛔ 两个来源合并成一个数字 ⇒ 假；⛔ 任何档位 N 低于自定门槛却仍给出正/负判定 ⇒ 假）。
-- [ ] AC4（能取假，无孤儿进程）：主动实验（AC1）跑完之后，`pgrep -cf "while\(Date.now"`（或等价的忙等/负载注入进程检索）归零；实现里起后台负载的代码必须在同一控制流里同步等待并回收，不得跨多个工具调用轮询；Measured 贴出实现落地后跑一次的负控制读数（归零）；（⛔ 跑完后仍有残留的负载注入进程 ⇒ 假）。
-- [ ] AC5（能取假，Phase 1，仅当 Phase 0 判定为"进入 Phase 1"时适用；若判定"不做"，本条标 `[x]` 并注明"N/A——Phase 0 判定不做，正确地未尝试 Phase 1"）：`suite-load-sampler.ts` 在每条采样行追加 `would_throttle` 字段，派生自一个命名常量阈值（代码注释写明依据 Phase 0 的分布数据）；grep 全仓确认该字段未被 `suite-scheduler.ts` 或任何调度/准入代码读取——它是纯观察字段；新增单测覆盖派生函数本身（纯函数，不需要真实进程）。
-- [ ] AC6（能取假，Phase 1 生产核验，仅当 AC5 适用时适用；否则同 AC5 标 N/A）：Phase 1 落地之后，至少一轮真实全量套件产出的 `.quay/suite-load-*.jsonl` 文件里出现该字段，且 true/false 两个值都真实出现过（不是恒定值）；（⛔ 该字段只出现一种取值 ⇒ 假）。
-- [ ] AC7（能取假，范围守卫）：`git diff` 不含 `suite-scheduler.ts` 的 `nextDispatch`/`currentCap` 或任何准入/调度逻辑改动，且主动实验（AC1）未接入 `scripts/test.sh`/常驻 CI 路径——它是一次性诊断脚本，不是新增的常驻机制；（⛔ 动了调度逻辑，或主动实验被接成常驻步骤 ⇒ 超范围 ⇒ 假）。
+- [x] AC1（能取假，Phase 0 主动数据源，候选筛选正确、规模受控）：候选文件清单 = 上述 5 个已核实干净候选（serial/lowconc 组其余文件为可选扩展，不是必须），**且清单里没有任何一个文件出现在 `plugin/test-isolation-violations.txt`**（grep 核对，写进 Measured）；每次负载注入窗口 ≤10 秒（Measured 里贴出实际用的窗口时长）；对每个候选跑受控并发/背景负载 trial，记录并发设置、真实 `cpu_stall`、pass/fail、失败错误信号；任何诱发出的失败都核对过不是隔离冲突签名才计入有效样本，核对过程写进 Measured；（⛔ 候选清单命中隔离违规名单 ⇒ 假；⛔ 注入窗口 >10 秒 ⇒ 假；⛔ 诱发失败未核对隔离冲突就直接计入样本 ⇒ 假）。
+- [x] AC2（能取假，Phase 0 被动数据源 + 数据源解析）：脚本支持 `--root`/`QUAY_MAIN_CHECKOUT` 解析主检出（在一个干净 `git worktree add` 出的目录里、不带 `--root` 直跑必须报"未找到载体"而不是假装空数据合格；带正确 `--root` 时必须能读到全历史真实数据），联合 `passed:false` 记录与其执行窗口内的 PSI 读数，按并发区间分档输出通过组 vs 失败组的 PSI 对比；（⛔ 只给相关性数字不给按失败/通过分组的对比 ⇒ 假；⛔ 在 worktree 里不传 `--root` 却读到非零数据或不报错 ⇒ 假）。
+- [x] AC3（能取假，诚实的样本量报告，主动/被动分列）：Measured 必须**分别**给出 (a) 主动实验的有效失败样本数、(b) 被动历史联合的失败样本数——不得合并成一个数字；两者各自定义并写明"判定所需的最小 N"，N 低于门槛的档位一律报"样本不足"；最终 go/no-go 结论须注明主要依据哪个数据源、另一个数据源起什么补充/交叉验证作用；（⛔ 两个来源合并成一个数字 ⇒ 假；⛔ 任何档位 N 低于自定门槛却仍给出正/负判定 ⇒ 假）。
+- [x] AC4（能取假，无孤儿进程）：主动实验（AC1）跑完之后，`pgrep -cf "while\(Date.now"`（或等价的忙等/负载注入进程检索）归零；实现里起后台负载的代码必须在同一控制流里同步等待并回收，不得跨多个工具调用轮询；Measured 贴出实现落地后跑一次的负控制读数（归零）；（⛔ 跑完后仍有残留的负载注入进程 ⇒ 假）。
+- [x] AC5（能取假，Phase 1，仅当 Phase 0 判定为"进入 Phase 1"时适用；若判定"不做"，本条标 `[x]` 并注明"N/A——Phase 0 判定不做，正确地未尝试 Phase 1"）：`suite-load-sampler.ts` 在每条采样行追加 `would_throttle` 字段，派生自一个命名常量阈值（代码注释写明依据 Phase 0 的分布数据）；grep 全仓确认该字段未被 `suite-scheduler.ts` 或任何调度/准入代码读取——它是纯观察字段；新增单测覆盖派生函数本身（纯函数，不需要真实进程）。 **N/A——Phase 0 判定不做，正确地未尝试 Phase 1**
+- [x] AC6（能取假，Phase 1 生产核验，仅当 AC5 适用时适用；否则同 AC5 标 N/A）：Phase 1 落地之后，至少一轮真实全量套件产出的 `.quay/suite-load-*.jsonl` 文件里出现该字段，且 true/false 两个值都真实出现过（不是恒定值）；（⛔ 该字段只出现一种取值 ⇒ 假）。 **N/A——Phase 0 判定不做（同 AC5）**
+- [x] AC7（能取假，范围守卫）：`git diff` 不含 `suite-scheduler.ts` 的 `nextDispatch`/`currentCap` 或任何准入/调度逻辑改动，且主动实验（AC1）未接入 `scripts/test.sh`/常驻 CI 路径——它是一次性诊断脚本，不是新增的常驻机制；（⛔ 动了调度逻辑，或主动实验被接成常驻步骤 ⇒ 超范围 ⇒ 假）。
 
 ## Definition of Done
 
 Phase 0 用规模受控（5 个核心候选、注入窗口≤10秒、总预算≤10分钟、无孤儿进程）的主动诱发 + 被动历史联合两条独立数据源，分别给出真实样本数与 PSI 对比，交付一个诚实的 go/no-go 结论（不是没有数据支撑的方向性猜测，也不是把两种不同性质的样本混为一谈）；被动数据源的脚本正确解析主检出根，在 worktree 里也能拿到真实全历史数据；若判定进入 Phase 1，`suite-load-sampler.ts` 落地一个零效应的纯观察字段并在至少一轮真实生产轮里验证其有分辨力；全程未改动任何真实调度/准入逻辑、主动实验未被接成常驻机制、未留下孤儿进程（AC4/AC7）；AC1-7 全部勾选（Phase 1 不适用时对应 AC 标 N/A 而非留空）；本任务不对"PSI 准入控制是否真的该上线"做出结论——它只交付：(a) 一次有真实数据支撑（两条独立来源交叉验证）的初步判断，和 (b)（如果判断支持）一个供未来任务积累更多真实前瞻数据的被动观察机制。
+
+## Measured（2026-09-05，工作树 `/home/yale/work/quay-worktrees/gap-psi-shadow-admission-controller`）
+
+**AC1 候选筛选（grep 核对）+ 主动实验（规模受控）**：默认候选 = 5 个已核实干净候选（`help-contract-incompatible-behaviors.test.mjs`(serial)、`writestate-atomicity-split.test.mjs`(engine)、`worker-driver-fan-in.test.mjs`(lowconc)、`worker-driver-resident.test.mjs`(lowconc)、`suite-bucket-reattr-ratchet-check.test.mjs`(engine)），与 `plugin/test-isolation-violations.txt`（18 条 `file:type`）交叉核对 = **0 个命中**（隔离违规排除 0）。serial/lowconc 全组扩展（`--include-all-groups`）未启用（订正③：非必须）。**负载注入窗口 = 5000ms（5 秒，默认，硬上限 10000ms）**。load levels = [0, 32]（32 = 2×availableParallelism 满核忙等），共 10 个 trial（5 候选 × 2 档）：
+- load=0：5/5 通过，cpu_stall 均值 0.17%、max 0.66%
+- load=32：5/5 通过，cpu_stall 均值 9.81%、max 14.77%（负载注入生效、cpu_stall 上升 ~57 倍，但零失败）
+- 有效失败样本（非隔离冲突）= **0**；隔离冲突失败 = 0（无可判失败、无隔离冲突签名需排除）。
+
+**AC2 数据源解析 + 被动历史**：
+- 干净 worktree 不带 `--root` 直跑：输出「载体未找到 … fail-closed，不是空数据合格」，**exit code = 2**（不是假装空数据合格）。
+- 带 `--root /home/yale/work/quay`：rounds(含 perFile)=504 matched=464 | perFile 有时间窗=177292 | passed:false=238；窗内有 PSI: pass=103375 fail=223 | 无采样排除=73694 | MIN_N_PASSIVE=10。
+- 并发区间分档（通过N/均值 vs 失败N/均值，差值=失败−通过）：
+  - 1-2: 105/13.59 vs 2/5.06 → 样本不足（failN=2 < 10）
+  - 3-5: 405/11.05 vs 2/13.52 → 样本不足
+  - 6-10: 5615/20.39 vs 8/27.59 → 样本不足
+  - 11-20: 71569/47.86 vs 98/40.97 → **无信号**（−6.89，失败组均值更低）
+  - 21-40: 25681/70.32 vs 113/60.51 → **无信号**（−9.81）
+  - 41+: 0 → 样本不足
+
+**AC3 分列报告 + go/no-go**：
+- (a) 主动有效失败样本数 = **0**（MIN_N_ACTIVE=5；0 个负载诱发失败 ⇒ **no-signal**——实验跑满 10 trial 全通过）。
+- (b) 被动失败样本数 = **238**（窗内联到 PSI 223；MIN_N_PASSIVE=10；两个可判档 11-20 的 98、21-40 的 113 失败样本均**无信号**，失败组 cpu_stall 均值反而更低）。
+- **go/no-go：Phase 1 不做**。主数据源 = 主动（no-signal：5s 满核注入使 cpu_stall 0.17%→9.81% 但零失败）；补充/交叉验证 = 被动（no-signal：211 个可判失败样本的 cpu_stall 不升反降）——两条独立来源一致反驳「PSI 对测试失败有超出并发数的增量预测力」。
+
+**AC4 无孤儿进程（负控制）**：主动实验在**单条前台命令内同步完成并回收**（脚本 `runActiveTrial` 内部 `spawn busy-wait → await test → kill busy` 同一控制流，无跨回合轮询；约 8 分钟，< 10 分钟预算）；跑完后负控制读数：`pgrep -cf 'while\(Date.now'` = **0**、`node --test` 残留 = 0、psi 脚本进程 = 0（全部归零）。
+
+**AC7 范围守卫**：`git diff --name-only`（相对 develop）= `plugin/scripts/capability-catalog.sh`（六表注册）+ 新增 `plugin/scripts/psi-failure-correlation-check.ts` + `tasks/gap-psi-shadow-admission-controller.md`（自身）；`grep -c "psi-failure" scripts/test.sh` = 0、`.github/workflows` 0 命中；未改 `suite-scheduler.ts` 的 `nextDispatch`/`currentCap` 或任何准入/调度逻辑。
 
 ## Touches
 
