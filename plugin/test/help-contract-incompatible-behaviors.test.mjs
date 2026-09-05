@@ -1,4 +1,4 @@
-// @test-group serial
+// @test-group engine
 // @load-sensitive child-spawn
 // @load-sensitive-entry 2026-08-28 child-spawn (spawns every *-check.ts --help subprocess to verify the help contract; load-race-prone under full-suite concurrency)
 // help-contract-incompatible-behaviors.test.mjs — 全部 plugin/scripts/*-check.ts 的 `--help` 契约

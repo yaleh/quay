@@ -1,4 +1,4 @@
-// @test-group serial
+// @test-group engine
 // @load-sensitive child-spawn
 // @load-sensitive-entry 2026-08-09 20-child subprocess spawns rotated red under full-suite load (rounds 164/186/193/204), solo 218/218 green
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — the 20-concurrency

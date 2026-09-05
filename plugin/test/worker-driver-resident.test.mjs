@@ -1,4 +1,4 @@
-// @test-group lowconc
+// @test-group engine
 // worker-driver-resident.test.mjs — resident driver loop (selector/heartbeat/liveness/wrapper) + continue/fan-in-merge mechanics. Split from gap-suite-file-split-two-longest.
 import { test } from "node:test";
 import assert from "node:assert/strict";

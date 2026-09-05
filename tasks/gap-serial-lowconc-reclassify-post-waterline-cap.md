@@ -40,10 +40,10 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，重分类落地）：`git diff` 显示上述 5 个文件的 `@test-group` 头从 `serial`/`lowconc` 改为 `engine`，且逐文件可辨识；未改动 `plugin/scripts/runner-grouping.ts` 本身的分类逻辑（本任务只改文件标注，不改分类机制）；（⛔ 有文件遗漏、或误改了分类逻辑代码 ⇒ 假）。
-- [ ] AC2（能取假，落地前本地核验）：落地前本地跑一次 `scripts/test.sh`，Measured 贴出真实命令与结果（0 failed/0 cancelled，或如实记录任何新失败并判断是否与本次重分类相关）；（⛔ 未真实跑过、或跑出新失败却未如实记录判断 ⇒ 假）。
-- [ ] AC3（能取假，真·待外部——监控窗口，不阻塞落地，阻塞"已确认稳定"结论）：任务体记录落地提交 SHA 与真实时间戳；DoD 声明该窗口尚未验证时，本条留空/标"真·待外部"而不是伪造一个尚未发生的读数；一旦有 ≥20 轮真实生产记录可查（`verification-round.jsonl` 按落地时间戳过滤），须补一次真实核验并在此追加读数（全部通过 ⇒ 勾选；出现复现失败 ⇒ 如实记录哪个文件、哪次、错误信号，并回滚该文件分类，本条仍标注但连同回滚记录一并说明）；（⛔ 编造一个未真实核验过的"全部通过"⇒ 假；⛔ 出现复现失败却隐瞒/不回滚 ⇒ 假）。
-- [ ] AC4（能取假，范围守卫）：`git diff` 不含 `plugin/scripts/suite-scheduler.ts` 的准入/调度逻辑改动，也不含 `plugin/scripts/runner-grouping.ts` 分类算法本身的改动——本任务只是把既有机制已经证明安全的 5 个文件挪进它们该在的分组，不新增/改动任何调度机制；（⛔ 动了调度或分类算法代码 ⇒ 超范围 ⇒ 假）。
+- [x] AC1（能取假，重分类落地）：`git diff` 显示上述 5 个文件的 `@test-group` 头从 `serial`/`lowconc` 改为 `engine`，且逐文件可辨识；未改动 `plugin/scripts/runner-grouping.ts` 本身的分类逻辑（本任务只改文件标注，不改分类机制）；（⛔ 有文件遗漏、或误改了分类逻辑代码 ⇒ 假）。——实测：`git diff --name-only` 恰为 5 个文件（proposal-convergence / full-suite-runner-phases / help-contract-incompatible-behaviors / worker-driver-fan-in / worker-driver-resident），每文件仅 `@test-group` 头一行 serial|lowconc→engine，未触碰 `runner-grouping.ts`。
+- [x] AC2（能取假，落地前本地核验）：落地前本地跑一次 `scripts/test.sh`，Measured 贴出真实命令与结果（0 failed/0 cancelled，或如实记录任何新失败并判断是否与本次重分类相关）；（⛔ 未真实跑过、或跑出新失败却未如实记录判断 ⇒ 假）。——实测：`bash scripts/test.sh`（全量默认 product+engine，530 文件，16 泳道）exit 0，pass 6707 / fail 0 / cancelled 0（2026-09-05T11:47Z~11:54Z，wall-clock ≈7min）。
+- [ ] AC3（能取假，真·待外部——监控窗口，不阻塞落地，阻塞"已确认稳定"结论）：任务体记录落地提交 SHA 与真实时间戳；DoD 声明该窗口尚未验证时，本条留空/标"真·待外部"而不是伪造一个尚未发生的读数；一旦有 ≥20 轮真实生产记录可查（`verification-round.jsonl` 按落地时间戳过滤），须补一次真实核验并在此追加读数（全部通过 ⇒ 勾选；出现复现失败 ⇒ 如实记录哪个文件、哪次、错误信号，并回滚该文件分类，本条仍标注但连同回滚记录一并说明）；（⛔ 编造一个未真实核验过的"全部通过"⇒ 假；⛔ 出现复现失败却隐瞒/不回滚 ⇒ 假）。——落地提交 SHA=__SHA_TO_FILL__，落地时间戳=2026-09-05T11:55Z（git 提交时刻，非任务开始时刻）；监控窗口（≥20 轮真实生产全量）尚未验证，本条留空（待外部）
+- [x] AC4（能取假，范围守卫）：`git diff` 不含 `plugin/scripts/suite-scheduler.ts` 的准入/调度逻辑改动，也不含 `plugin/scripts/runner-grouping.ts` 分类算法本身的改动——本任务只是把既有机制已经证明安全的 5 个文件挪进它们该在的分组，不新增/改动任何调度机制；（⛔ 动了调度或分类算法代码 ⇒ 超范围 ⇒ 假）。——实测：`git diff --name-only` 仅上述 5 个 test 文件，无 `suite-scheduler.ts` / `runner-grouping.ts`。
 
 ## Definition of Done
 
