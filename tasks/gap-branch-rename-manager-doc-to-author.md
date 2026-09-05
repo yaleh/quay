@@ -74,6 +74,12 @@ extra:
      （硬规则 2 配套动作）。
    - 端到端负控制：一次真实 doc 分支翻转（如 `markNeedsHuman`）验证 `propagateDocBranchToDevelop`
      改名后仍能推到 `develop`。
+9. **CONTINUE 轮发现的必要使能修复（anti-drift false-positive）**：本任务 Touches 含非 ASCII 文件名
+   `docs/references/维度边界…md`，而 fan-in 的 anti-drift 守卫 `anti-drift-touches-check.ts`
+   `computeActualFiles` 用 `git diff --name-only` 未关 `core.quotepath` ⇒ 非 ASCII 文件名被 git
+   C-quote 成 `\ooo` 八进制形态 ⇒ 与声明 Touches 的真实 UTF-8 名无法匹配 ⇒ 误报 out-of-declared
+   （上一轮实测 1 violation、exit 1）。修法与已落地的
+   `direct-to-develop-bypass-check.ts` `gitCommitFiles` 同款：git 命令加 `-c core.quotepath=false`。
 
 ## Acceptance Criteria
 
@@ -113,6 +119,7 @@ extra:
 
 - CLAUDE.md
 - docs/references/维度边界与结晶——从熔融实现中发现原则.md
+- plugin/scripts/anti-drift-touches-check.ts
 - plugin/scripts/driver-filters.ts
 - plugin/scripts/promotion-driver.ts
 - plugin/scripts/ready-pool-check.ts
