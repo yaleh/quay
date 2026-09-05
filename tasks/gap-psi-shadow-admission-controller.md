@@ -1,7 +1,7 @@
 ---
 id: gap-psi-shadow-admission-controller
 title: PSI 反馈准入——影子模式验证（先用现有数据测增量预测力，再决定是否上实时观察字段）
-status: needs-human
+status: ready
 labels:
   - gap
 parent: null
@@ -13,7 +13,7 @@ extra:
 
 ## Proposal
 
-`gap-perfile-cpu-cost-collection`/`gap-suite-scheduler-perfile-cpu-emitter-missing` 建立了 `cost_f`（每文件真实 CPU 消耗）；讨论延伸到一个更根本的假设（人 2026-09-05）：真正需要低并发运行的测试，敏感的不是"当时有多少并发测试"，而是**自己（或自己的子进程）被 schedule out 的概率**——这是一个可以直接用 `/proc/self/schedstat` 的 `run_delay` 字段测量的量，且已经用对照实验验证（安静环境 `runDelayMs=0.29`，16 核 2x 超订阅环境 `runDelayMs=188.4`，约 650 倍差异，`onCpuMs` 几乎不变）。
+`gap-perfile-cpu-cost-collection`/`gap-suite-scheduler-perfile-cpu-emitter-missing` 建立了 `cost_f`（每文件真实 CPU 消耗）；讨论延伸到一个更根本的假设（人 2026-09-05）：真正需要低并发运行的测试，敏感的不是"当时有多少并发测试"，而是**自己（或自己的子进程）被 schedule out 的概率**——这是一个可以直接用 `/proc/self/schedstat` 的 `run_delay` 字段测量的量，且已经用对照实验验证（安静环境 `runDelayMs=0.29`，16 核 2x 超订阅环境 `runDelayMs=188.4`，约 650 倍差异，`onCpuMs` 几乎不变，**注意：该对照实验的负载注入窗口只用了 2 秒**）。
 
 **由此引出的问题**：本仓库现有的水位线机制（`gap-suite-scheduler-reliability-cap-not-speed`）用**并发文件数**做准入约束；PSI（`/proc/pressure/cpu` 的 `cpu_stall`）才是更直接的因果量。人要求"像当初 `gap-suite-dynamic-waterline-scheduler` 用历史数据模拟 min-lock vs 组预算那次的方法"，做一次 PSI 反馈控制 vs 当前水位线的历史模拟对比。
 
@@ -32,15 +32,27 @@ extra:
 
 - **风险 a——最典型的受害者已经不存在**：历史 240 条失败样本涉及 65 个不同文件，最大头是 `session-liveness-*` 家族（18x/17x/17x/9x/5x/5x/4x/3x/3x/3x），但该家族已随 tmux 退役被整体删除（`gap-retire-session-liveness`）——"曾经 flaky 的文件"里最有代表性的那批，人为重跑也跑不了了。
 - **风险 b（更危险）——历史失败清单里混着跟调度无关的失败**：逐个核对 65 个"仍存在"的历史失败文件与 `plugin/test-isolation-violations.txt`（本仓库已有的测试隔离违规名单），**3 个直接命中**：`runner-grouping-list-groups.test.mjs`(7x)、`plugin-packaging.test.mjs`(3x)、`runner-grouping-flags-only.test.mjs`(3x)——它们的历史失败大概率是共享临时路径/端口撞车，不是调度饥饿。若不排除，人为制造的失败会把"测试隔离缺陷"误判成"PSI 增量信号"，污染 Phase 0 结论。
-- **已核实的干净候选**（历史失败过、仍存在、不在隔离违规名单）：`help-contract-incompatible-behaviors.test.mjs`(serial,15x)、`writestate-atomicity-split.test.mjs`(engine,14x)、`worker-driver-fan-in.test.mjs`(lowconc,11x)、`worker-driver-resident.test.mjs`(lowconc,7x)、`suite-bucket-reattr-ratchet-check.test.mjs`(engine,5x)——覆盖不同 @test-group、不同历史失败次数，主动实验应以这批为核心，再加上当前完整的 serial/lowconc 组文件列表。
+- **已核实的干净候选**（历史失败过、仍存在、不在隔离违规名单）：`help-contract-incompatible-behaviors.test.mjs`(serial,15x)、`writestate-atomicity-split.test.mjs`(engine,14x)、`worker-driver-fan-in.test.mjs`(lowconc,11x)、`worker-driver-resident.test.mjs`(lowconc,7x)、`suite-bucket-reattr-ratchet-check.test.mjs`(engine,5x)。
+
+**⚠️ 2026-09-05 订正③（needs-human 复盘：真根因不是"忘勾 AC"，是主动实验规模远超单个 worker session 的时间预算，且产生了一个失控的孤儿进程——已直接处理，任务体已按此收紧）**：
+
+worker-driver 连续 3 次 exited-not-landed，机械诊断写的是"AC 未全勾——续做只需验证并勾选 AC"——**这个诊断是错的，不要采信**。用 `meta-cc` 查了最后一次失败会话（`fcbe20bd-...`）的真实工具调用记录：worker 启动了主动实验（`psi-failure-correlation-check.ts --source active`），该实验在**单次 trial 里**用 `node -e "const e=Date.now()+600000; while(Date.now()<e);"` 起了 **32 个忙等子进程，每个忙等 10 分钟**；worker 随后在一个 `until ! kill -0 <pid>; do sleep 15; done` 轮询循环里等这个 trial 跑完，会话在等待中耗尽了时间预算，从未跑到写 Measured/勾 AC 那一步——三次尝试都死在同一处。**更严重的是**：worker session 结束（07:24:07Z）时没有回收这个后台实验，它成了孤儿进程，独立核查时发现它已经**跑了 31 分 46 秒仍未结束**，32 个忙等子进程仍在真实消耗这台 16 核共享主机的 CPU——**已直接 kill 掉整个进程树**（`pkill -P` + `kill`），核实清理干净（`pgrep -cf "while\(Date.now"` 归零）。
+
+**根因是本任务 Plan (a) 的候选矩阵设计错误**：候选清单写的是"当前完整 serial/lowconc 组文件列表（约 28 个）+ 5 个额外候选"，乘上每个候选的负载注入窗口若选到分钟级，总耗时轻易到小时级——而本任务讨论阶段自己验证过的对照实验只用了 **2 秒**注入窗口就测出了 650 倍的清晰信号（`runDelayMs` 0.29→188.4），10 分钟窗口毫无必要。**已按下方 Plan 收紧**：候选清单从"约 28+5"砍到"5 个已核实候选为必须覆盖的核心集，其余 serial/lowconc 文件仅作为预算允许时的可选扩展"；注入窗口从"未限定"改为"数秒级，不得超过 10 秒"；新增一条硬性预算上限（整个主动实验含分析在内 ≤10 分钟真实墙钟）；新增一条硬约束：**任何后台/子进程必须在同一个工具调用内同步等待完成并回收，不得跨多个回合轮询**——这是本次孤儿进程产生的直接原因，不是"运气不好"，是控制流写法本身有问题。
 
 ## Plan
 
 **Phase 0 —— 两条数据源，分开报告，不合并成一个数字**：
 
-**(a) 主动制造（主数据源，人 2026-09-05 定向）**：挑选候选文件——当前完整的 serial/lowconc 组文件列表 + 上述已核实的干净历史失败候选，**排除任何出现在 `plugin/test-isolation-violations.txt` 里的文件**（这是硬约束，见 AC1）。对每个候选文件跑一批 trial：在受控环境下变化并发设置（该文件自身的 `--test-concurrency`，以及/或用忙等子进程人为注入背景 CPU 负载——复用本任务讨论阶段已验证可行的手法：`node -e "const e=Date.now()+Nms; while(Date.now()<e);"` 起若干后台忙等进程模拟满核），每个 trial 记录：并发/背景负载设置、trial 窗口内的真实 `/proc/pressure/cpu` 读数（`some avg10`）、该文件的 pass/fail、失败时的具体错误信号。**失败判读约束**：任何诱发出的失败，必须先核对其错误信息不是已知的隔离冲突签名（`EADDRINUSE`/临时路径 `EEXIST`/端口占用等），确认是调度/deadline 类失败（超时、断言的 wall-clock 上界被打破）才计入有效样本——这一核对本身要写进 Measured，不能只贴通过/失败计数。
+**(a) 主动制造（主数据源，规模已收紧，见订正③）**：候选文件清单 = 5 个已核实干净候选（`help-contract-incompatible-behaviors.test.mjs`/`writestate-atomicity-split.test.mjs`/`worker-driver-fan-in.test.mjs`/`worker-driver-resident.test.mjs`/`suite-bucket-reattr-ratchet-check.test.mjs`）——**这 5 个是必须覆盖的核心集**；当前 serial/lowconc 组的其余文件**仅作为预算允许时的可选扩展，不是硬性要求**。**排除任何出现在 `plugin/test-isolation-violations.txt` 里的文件**（硬约束，见 AC1）。
 
-**(b) 被动历史联合（补充数据源，原方案保留）**：联合 `.quay/verification-round.jsonl` 的 perFile `{file, startedAtMs, endedAtMs, passed}` 与对应 `.quay/suite-load-<runId>.jsonl` 的 `{t, cpu_stall}`，找同一并发区间内失败 vs 通过文件的 PSI 差异——它能捕捉主动实验难以人为复现的长尾负载源（本机其它 claude/agent 进程这类真实外部负载，已实测此刻同时有 25 个），但样本天然稀疏（240 条覆盖 65 个文件，多数已删除）。
+对每个候选文件跑一批 trial：变化并发设置（该文件自身的 `--test-concurrency`）和/或用忙等子进程注入背景负载——**注入窗口必须是数秒级（建议 2-5 秒，参考本任务讨论阶段的对照实验），硬上限 10 秒，不得使用分钟级窗口**；每次注入的子进程数量、启动方式必须在**同一个 Bash 调用内**完成"起子进程→等它们全部退出→读结果"，**不得跨多个工具调用轮询等待**（这正是本次产生孤儿进程、耗尽会话预算的直接原因）。每个 trial 记录：并发/背景负载设置、trial 窗口内的真实 `/proc/pressure/cpu` 读数、该文件的 pass/fail、失败时的具体错误信号。
+
+**整个主动实验（含分析和结果写入）的总墙钟预算 ≤10 分钟**——若接近或超出，立即停止、用已收集到的部分数据如实写 Measured（标注"预算内未跑完全部候选"），不得为了"跑完"而无限期等待。
+
+**失败判读约束**：任何诱发出的失败，必须先核对其错误信息不是已知的隔离冲突签名（`EADDRINUSE`/临时路径 `EEXIST`/端口占用等），确认是调度/deadline 类失败（超时、断言的 wall-clock 上界被打破）才计入有效样本——这一核对本身要写进 Measured，不能只贴通过/失败计数。
+
+**(b) 被动历史联合（补充数据源，原方案保留）**：联合 `.quay/verification-round.jsonl` 的 perFile `{file, startedAtMs, endedAtMs, passed}` 与对应 `.quay/suite-load-<runId>.jsonl` 的 `{t, cpu_stall}`，找同一并发区间内失败 vs 通过文件的 PSI 差异——它能捕捉主动实验难以人为复现的长尾负载源（本机其它 claude/agent 进程这类真实外部负载，已实测此刻同时有 25 个），但样本天然稀疏（240 条覆盖 65 个文件，多数已删除）。这一步不涉及后台进程，无本节风险。
 
 两条数据源在 Measured 里**分列**——"受控实验条件下诱发的失败"和"真实生产条件下自然发生的失败"是两种不同性质的证据，合并成一个数字会掩盖各自的适用范围。最终 go/no-go 结论可以引用两者，但要分别注明各自的样本量和局限。
 
@@ -54,20 +66,21 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，Phase 0 主动数据源，候选筛选正确）：候选文件清单 = 当前 serial/lowconc 组全部文件 + 本任务 Proposal 列出的已核实干净候选，**且清单里没有任何一个文件出现在 `plugin/test-isolation-violations.txt`**（grep 核对，写进 Measured）；对每个候选跑受控并发/背景负载 trial，记录并发设置、真实 `cpu_stall`、pass/fail、失败错误信号；任何诱发出的失败都核对过不是隔离冲突签名（`EADDRINUSE`/路径 `EEXIST` 等）才计入有效样本，核对过程写进 Measured；（⛔ 候选清单命中隔离违规名单 ⇒ 假；⛔ 诱发失败未核对隔离冲突就直接计入样本 ⇒ 假）。
+- [ ] AC1（能取假，Phase 0 主动数据源，候选筛选正确、规模受控）：候选文件清单 = 上述 5 个已核实干净候选（serial/lowconc 组其余文件为可选扩展，不是必须），**且清单里没有任何一个文件出现在 `plugin/test-isolation-violations.txt`**（grep 核对，写进 Measured）；每次负载注入窗口 ≤10 秒（Measured 里贴出实际用的窗口时长）；对每个候选跑受控并发/背景负载 trial，记录并发设置、真实 `cpu_stall`、pass/fail、失败错误信号；任何诱发出的失败都核对过不是隔离冲突签名才计入有效样本，核对过程写进 Measured；（⛔ 候选清单命中隔离违规名单 ⇒ 假；⛔ 注入窗口 >10 秒 ⇒ 假；⛔ 诱发失败未核对隔离冲突就直接计入样本 ⇒ 假）。
 - [ ] AC2（能取假，Phase 0 被动数据源 + 数据源解析）：脚本支持 `--root`/`QUAY_MAIN_CHECKOUT` 解析主检出（在一个干净 `git worktree add` 出的目录里、不带 `--root` 直跑必须报"未找到载体"而不是假装空数据合格；带正确 `--root` 时必须能读到全历史真实数据），联合 `passed:false` 记录与其执行窗口内的 PSI 读数，按并发区间分档输出通过组 vs 失败组的 PSI 对比；（⛔ 只给相关性数字不给按失败/通过分组的对比 ⇒ 假；⛔ 在 worktree 里不传 `--root` 却读到非零数据或不报错 ⇒ 假）。
 - [ ] AC3（能取假，诚实的样本量报告，主动/被动分列）：Measured 必须**分别**给出 (a) 主动实验的有效失败样本数、(b) 被动历史联合的失败样本数——不得合并成一个数字；两者各自定义并写明"判定所需的最小 N"，N 低于门槛的档位一律报"样本不足"；最终 go/no-go 结论须注明主要依据哪个数据源、另一个数据源起什么补充/交叉验证作用；（⛔ 两个来源合并成一个数字 ⇒ 假；⛔ 任何档位 N 低于自定门槛却仍给出正/负判定 ⇒ 假）。
-- [ ] AC4（能取假，Phase 1，仅当 Phase 0 判定为"进入 Phase 1"时适用；若判定"不做"，本条标 `[x]` 并注明"N/A——Phase 0 判定不做，正确地未尝试 Phase 1"）：`suite-load-sampler.ts` 在每条采样行追加 `would_throttle` 字段，派生自一个命名常量阈值（代码注释写明依据 Phase 0 的分布数据）；grep 全仓确认该字段未被 `suite-scheduler.ts` 或任何调度/准入代码读取——它是纯观察字段；新增单测覆盖派生函数本身（纯函数，不需要真实进程）。
-- [ ] AC5（能取假，Phase 1 生产核验，仅当 AC4 适用时适用；否则同 AC4 标 N/A）：Phase 1 落地之后，至少一轮真实全量套件产出的 `.quay/suite-load-*.jsonl` 文件里出现该字段，且 true/false 两个值都真实出现过（不是恒定值）；（⛔ 该字段只出现一种取值 ⇒ 假）。
-- [ ] AC6（能取假，范围守卫）：`git diff` 不含 `suite-scheduler.ts` 的 `nextDispatch`/`currentCap` 或任何准入/调度逻辑改动，且主动实验（AC1）未接入 `scripts/test.sh`/常驻 CI 路径——它是一次性诊断脚本，不是新增的常驻机制；（⛔ 动了调度逻辑，或主动实验被接成常驻步骤 ⇒ 超范围 ⇒ 假）。
+- [ ] AC4（能取假，无孤儿进程）：主动实验（AC1）跑完之后，`pgrep -cf "while\(Date.now"`（或等价的忙等/负载注入进程检索）归零；实现里起后台负载的代码必须在同一控制流里同步等待并回收，不得跨多个工具调用轮询；Measured 贴出实现落地后跑一次的负控制读数（归零）；（⛔ 跑完后仍有残留的负载注入进程 ⇒ 假）。
+- [ ] AC5（能取假，Phase 1，仅当 Phase 0 判定为"进入 Phase 1"时适用；若判定"不做"，本条标 `[x]` 并注明"N/A——Phase 0 判定不做，正确地未尝试 Phase 1"）：`suite-load-sampler.ts` 在每条采样行追加 `would_throttle` 字段，派生自一个命名常量阈值（代码注释写明依据 Phase 0 的分布数据）；grep 全仓确认该字段未被 `suite-scheduler.ts` 或任何调度/准入代码读取——它是纯观察字段；新增单测覆盖派生函数本身（纯函数，不需要真实进程）。
+- [ ] AC6（能取假，Phase 1 生产核验，仅当 AC5 适用时适用；否则同 AC5 标 N/A）：Phase 1 落地之后，至少一轮真实全量套件产出的 `.quay/suite-load-*.jsonl` 文件里出现该字段，且 true/false 两个值都真实出现过（不是恒定值）；（⛔ 该字段只出现一种取值 ⇒ 假）。
+- [ ] AC7（能取假，范围守卫）：`git diff` 不含 `suite-scheduler.ts` 的 `nextDispatch`/`currentCap` 或任何准入/调度逻辑改动，且主动实验（AC1）未接入 `scripts/test.sh`/常驻 CI 路径——它是一次性诊断脚本，不是新增的常驻机制；（⛔ 动了调度逻辑，或主动实验被接成常驻步骤 ⇒ 超范围 ⇒ 假）。
 
 ## Definition of Done
 
-Phase 0 用主动诱发（候选已排除隔离违规文件）+ 被动历史联合两条独立数据源，分别给出真实样本数与 PSI 对比，交付一个诚实的 go/no-go 结论（不是没有数据支撑的方向性猜测，也不是把两种不同性质的样本混为一谈）；被动数据源的脚本正确解析主检出根，在 worktree 里也能拿到真实全历史数据；若判定进入 Phase 1，`suite-load-sampler.ts` 落地一个零效应的纯观察字段并在至少一轮真实生产轮里验证其有分辨力；全程未改动任何真实调度/准入逻辑、主动实验未被接成常驻机制（AC6）；AC1-6 全部勾选（Phase 1 不适用时对应 AC 标 N/A 而非留空）；本任务不对"PSI 准入控制是否真的该上线"做出结论——它只交付：(a) 一次有真实数据支撑（两条独立来源交叉验证）的初步判断，和 (b)（如果判断支持）一个供未来任务积累更多真实前瞻数据的被动观察机制。
+Phase 0 用规模受控（5 个核心候选、注入窗口≤10秒、总预算≤10分钟、无孤儿进程）的主动诱发 + 被动历史联合两条独立数据源，分别给出真实样本数与 PSI 对比，交付一个诚实的 go/no-go 结论（不是没有数据支撑的方向性猜测，也不是把两种不同性质的样本混为一谈）；被动数据源的脚本正确解析主检出根，在 worktree 里也能拿到真实全历史数据；若判定进入 Phase 1，`suite-load-sampler.ts` 落地一个零效应的纯观察字段并在至少一轮真实生产轮里验证其有分辨力；全程未改动任何真实调度/准入逻辑、主动实验未被接成常驻机制、未留下孤儿进程（AC4/AC7）；AC1-7 全部勾选（Phase 1 不适用时对应 AC 标 N/A 而非留空）；本任务不对"PSI 准入控制是否真的该上线"做出结论——它只交付：(a) 一次有真实数据支撑（两条独立来源交叉验证）的初步判断，和 (b)（如果判断支持）一个供未来任务积累更多真实前瞻数据的被动观察机制。
 
 ## Touches
 
-- plugin/scripts/psi-failure-correlation-check.ts（新，Phase 0 分析脚本：(a) 主动诱发实验 + (b) 被动历史联合，含 `--root`/`QUAY_MAIN_CHECKOUT` 数据源解析）
+- plugin/scripts/psi-failure-correlation-check.ts（新，Phase 0 分析脚本：(a) 主动诱发实验（规模受控、同步回收）+ (b) 被动历史联合，含 `--root`/`QUAY_MAIN_CHECKOUT` 数据源解析——已有一份 648 行的未提交实现在 worktree 里，可作为起点但必须按本次收紧的规模/回收约束核实修正，不能原样提交）
 - plugin/scripts/capability-catalog.sh（新脚本六表注册）
 - plugin/scripts/suite-load-sampler.ts（Phase 1，仅当判定进入 Phase 1 时改动：追加 would_throttle 派生字段）
 - plugin/test/suite-load-sampler.test.mjs（新，Phase 1 单测：would_throttle 派生函数，仅当 Phase 1 适用时新增）
@@ -81,3 +94,5 @@ Phase 0 用主动诱发（候选已排除隔离违规文件）+ 被动历史联�
 - 失败步/判词：AC 未全勾（checked 0/6，剩余未勾 6）——续做只需验证并勾选 AC
 - run_id：wk-prod-1788285192
 - session_id：fcbe20bd-12d2-4b29-94fe-3233edbf0b04
+
+**⚠️ 上面这条机械诊断是错的，见 Proposal「订正③」——真根因是主动实验规模失控+产生孤儿进程，已处理，任务体已收紧，status 已退回 ready 供重新派发。**
