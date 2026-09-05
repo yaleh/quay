@@ -2,7 +2,7 @@
 id: gap-runtime-usage-inventory-workflow-blind-spot
 title: runtime-usage-inventory.ts 的 readTranscripts 不枚举 subagents/workflows
   层，执行读数系统性偏低（自报 live=112 vs 手工实测 178）——AC160，且必须排在 AC158 执行 archive 之前
-status: ready
+status: done
 labels:
   - gap
   - defect
