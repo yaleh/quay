@@ -202,9 +202,35 @@ packages/quay/src/cli/driver.ts:166   const kernel = path.join(root, "plugin/scr
 | ② | **不要求**目标项目本地存在 `plugin/` 副本 | 否则等于没废除复制，裁定 1 落空 |
 | ③ | npm-global 与 plugin marketplace **两条安装路径都能解析到** | 两条都是受支持渠道（§6 已把显式安装步骤写进交付流程） |
 
-**⇒ 落点**：`tasks/gap-plugin-root-resolution-non-skill-entrypoints`（2026-09-05 立案）。
-**选定方案与被否方案的理由由该任务回填本节**——本节现在只钉死**问题与三条约束，⛔ 不预设解法**。
+**⇒ 落点**：`tasks/gap-plugin-root-resolution-non-skill-entrypoints`（2026-09-05 立案，已实现并回填）。
+
+**选定方案（2026-09-05 回填）**：单一解析器 `packages/quay/src/plugin-root.ts`，导出
+`resolvePluginRoot()` / `resolvePluginScript()`。解析顺序：① `QUAY_PLUGIN_ROOT` env 显式指针
+（hermetic 测试 / 运维覆盖）→ ② 若本模块（`import.meta.url`）从 linked worktree 载入 ⇒ 改解析到
+**主检出** `plugin/`——`mainCheckoutRoot()` 用 `git worktree list --porcelain` 判非主 worktree（首条
+= 主检出），fail-closed，永不回退到 worktree 副本 → ③ 从模块自身安装位置向上走（8 跳），每层探
+`plugin/scripts/driver-runtime.ts` 与 `scripts/driver-runtime.ts` 两种 rel 形。`cli/driver.ts` 的内核
+解析改走 `resolvePluginScript("scripts/driver-runtime.ts")`，AC139-4 的「拒绝 worktree root」一层仍在
+driver 内，解析器内部的 worktree 重定向是第二层防御。
+
+**被否方案与理由**：
+
+| 被否 | 理由 |
+|---|---|
+| workspace root 拼 `plugin/scripts`（`driver.ts:166` 旧式，也是 serve-sessions.ts / ff-merge.ts / mcp-server.ts 的现式） | 违反 ②——要求本地副本；AC168 落地后每个下游项目都失败 |
+| `import.meta.url` walk-up **无** worktree 判（`manager.ts:51-64` 现式） | 违反 ①——从 worktree 载入时命中 worktree 副本（AC139-4 的载体死亡根因） |
+| `${CLAUDE_PLUGIN_ROOT}` 文本展开 | 只在 skill 载入时展开，CLI/cron/OS anchor 拿不到（§9-T1 已证） |
+
+**三条约束 → 可执行判据**（缺一即不成立）：
+① = 测试从 worktree 载入时断言解析结果在主检出、不在 worktree（把返回值改成 worktree 路径即红，
+`mainCheckoutRoot()` 单测配真实 temp worktree 恒跑）；② = 无本地 `plugin/` 的临时 workspace 里仍解析到
+（把解析器改回 workspace-root 拼接即红，实测跑出红）；③ = 两种 rel 形各覆盖一条安装路径——
+`plugin/scripts/…` 覆盖 npm-global（`files` 白名单打包出 `<pkg>/plugin/`），`scripts/…` 覆盖
+plugin marketplace（marketplace 根即 `scripts/` 的父目录）。
+
 **⊢ 顺序是硬的：该任务 → AC168。** 反序 = 先把下游项目的循环引擎删掉，再去想怎么找它。
+**⊢ 本任务只答「怎么解析」，不做 AC168 收缩本体；其余 workspace-root 拼接点（serve-sessions / ff-merge /
+mcp-server / os-anchor / precommit-guard / scripts/test.sh）的迁移是收缩本体的连带面，不在此任务 Touches 内。**
 
 ## 7. 退役 / 改造清单
 

@@ -410,6 +410,15 @@ run_static_checks() {
   # （outer-anchor-check.ts 带标记）。whole-store 引用扫描 ⇒ full（scoped 模式推迟到 full-suite 门）。
   # @static-tier full
   run_checker "outer-retirement-precondition-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/outer-retirement-precondition-check.ts" --root "${repo_root}"
+  echo "== registry-bare-filename-scan check (tasks/gap-dead-set-registry-bare-filename-scan, SPEC §12f) =="
+  # AC156 裸文件名扫描 (SPEC §12f): 注册表/清单载体里以裸文件名登记的脚本（quay-deliver.ts MEMBERS
+  #   file: 字段、*.json 清单键/值）是 §12e 闭包漏掉的引用形式。--check 模式判两件：① 真样本 canary
+  #   （supervisor-bus-identity.sh 必须被 quay-deliver.ts 以裸文件名引用——证明扫描器载体检测+匹配在
+  #   活仓库上没坏）；② 死集一致性（docs/analysis/dead-set-recomputed.json 的 after.dead 不得含任何被
+  #   裸文件名引用的脚本）。NOT-EVALUATED (exit 3) 当死集文件缺失/不可解析（独立取值，硬规则 3b）。
+  #   负控制由 mutation case + 单测钉住。whole-store 扫描 ⇒ full（scoped 模式推迟到 full-suite 门）。
+  # @static-tier full
+  run_checker "registry-bare-filename-scan" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/registry-bare-filename-scan.ts" --check --root "${repo_root}"
   echo "== ac61-staleness-disposition check (tasks/gap-ac61-staleness-list-item-disposition, AC61 判据1-3 + DoD 负控制) =="
   # AC61 清单逐条处置 enforcement: the task file's `## AC61 处置记录` section must carry a record for
   # EVERY A-1..A-7 / B-1..B-4 item (迁出带落点映射 或 经核实仍有效+读数). CHECK-A (判据1/DoD 负控):
