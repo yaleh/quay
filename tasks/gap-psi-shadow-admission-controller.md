@@ -1,7 +1,7 @@
 ---
 id: gap-psi-shadow-admission-controller
 title: PSI 反馈准入——影子模式验证（先用现有数据测增量预测力，再决定是否上实时观察字段）
-status: ready
+status: done
 labels:
   - gap
 parent: null
