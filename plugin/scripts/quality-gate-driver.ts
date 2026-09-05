@@ -35,6 +35,7 @@ import { isDirectEntry } from "./gate-script-base.ts";
 import {
   DRIVER_KINDS,
   launchArgv,
+  runAsync,
   scheduleIsDue,
   isHalted,
   resourceGateCheck,
@@ -75,8 +76,10 @@ export const INTERVAL_MS_DEFAULT = defaultDriverConfig().quality.intervalMs;
 export const POOL_JUDGE_INTERVAL_MIN_DEFAULT = 10;
 export const JUDGMENT_INTERVAL_MIN_DEFAULT = 30;
 
-/** 单次 spawn 的 wall-clock 上限（毫秒）。LLM judge spawn 与 mechanical plan/audit spawn 共用
- *  一个上限（⛔ 不为 judge 另设阈值——硬规则 4 推论；与 promotion-driver 的 ROUND_TIMEOUT_MS 同族）。 */
+/** 机械 spawn 的 wall-clock 上限（毫秒）——--plan 枚举 / --record-last-round / B17 审计共用（全部是
+ *  快速机械 node 调用，非 LLM）。⛔ LLM judge spawn 不设固定上限（runAsync timeoutMs=Infinity，
+ *  unbounded）——judge 真实耗时在并发负载下无实测上界，设 180_000 字面量正是
+ *  gap-quality-gate-driver-pool-judge-spawn-timeout 的病根（硬规则 4 推论：成本结构未知前不设数值阈值）。 */
 export const ROUTINE_TIMEOUT_MS = 180_000;
 
 // ── B17 · 判据消费纪律（纯机械审计）────────────────────────────────────────────────────────
@@ -212,16 +215,18 @@ export function defaultPoolJudgeArgv(plan: PoolQualityPlan, root: string): strin
   return launchArgv("pool-judge", poolJudgePrompt(plan, root), root);
 }
 
-/** 写端（B15）：judge 完成后持久化 lastRound（every-10-rounds 触发重置）。单写者 = 本 driver 完成路径。 */
-function recordLastJudgeRound(root: string): { recorded: boolean; lastRound: number | null } {
+/** 写端（B15）：judge 完成后持久化 lastRound（every-10-rounds 触发重置）。单写者 = 本 driver 完成路径。
+ *  机械 node 调用（快速，非 LLM）——runAsync 非阻塞替代 spawnSync（同 gap-worker-driver-async-
+ *  selector-readypool 的循环体异步化修法）。 */
+async function recordLastJudgeRound(root: string): Promise<{ recorded: boolean; lastRound: number | null }> {
   const argv = [
     "node", "--no-warnings", "--experimental-strip-types",
     path.join(root, "plugin", "scripts", "pool-quality-judge.ts"),
     "--root", root, "--record-last-round",
   ];
+  const r = await runAsync(argv, { timeoutMs: ROUTINE_TIMEOUT_MS });
+  if (r.error || r.status !== 0) return { recorded: false, lastRound: null };
   try {
-    const r = spawnSync(argv[0], argv.slice(1), { encoding: "utf8", timeout: ROUTINE_TIMEOUT_MS });
-    if (r.error || r.status !== 0) return { recorded: false, lastRound: null };
     const j = JSON.parse(String(r.stdout ?? "").trim());
     return { recorded: !!j.recorded, lastRound: typeof j.lastRound === "number" ? j.lastRound : null };
   } catch {
@@ -261,21 +266,22 @@ function failedQualityRoundRecord(root: string, reasons: string[], reason: strin
 /** B15 例程：机械触发（--plan）→ 命中则 LLM judge → JS 聚合（aggregateVerdicts 单一实现）→
  *  写端（--record-last-round + 判词载体 .quay/quality-round.jsonl）。读不懂 --plan ⇒ not-evaluated
  *  （硬规则 3b）；judge 失败 ⇒ failed（落 failed 载体记录）；未命中 ⇒ verified（查过且无需 judge——
- *  fired=false 是真实测量，非「读不懂装合格」）。 */
-export function runPoolQualityJudge(
+ *  fired=false 是真实测量，非「读不懂装合格」）。
+ *  ⛔ 循环体异步化（gap-quality-gate-driver-pool-judge-spawn-timeout AC1）：--plan / judge / 写端全部
+ *  spawnSync → runAsync（非阻塞 spawn，同 gap-worker-driver-async-selector-readypool）。judge（真实
+ *  claude -p）不再设 180_000 固定字面量上限（缺省 unbounded，judge 完成是唯一唤醒源——硬规则 4
+ *  推论：成本结构未知前不设数值阈值）。judgeTimeoutMs 是 AC5 负控制缝（测试注入「明显不够的值」复现
+ *  timeout 失败），生产缺省 Infinity。 */
+export async function runPoolQualityJudge(
   root: string,
   planCmd: string[] | null,
   judgeArgv: string[] | null,
   resourceGateArgv: string[] | null = null,
   recordVerdicts: boolean = true,
-): Fact<PoolQualityFactValue | null> {
+  judgeTimeoutMs: number = Infinity,
+): Promise<Fact<PoolQualityFactValue | null>> {
   const planArgv = planCmd ?? defaultPoolQualityPlanArgv(root);
-  let planR: ReturnType<typeof spawnSync>;
-  try {
-    planR = spawnSync(planArgv[0], planArgv.slice(1), { encoding: "utf8", timeout: ROUTINE_TIMEOUT_MS });
-  } catch (e) {
-    return { name: "pool-quality-judge", value: null, state: "not-evaluated", reason: `plan spawn failed: ${(e as Error).message}` };
-  }
+  const planR = await runAsync(planArgv, { timeoutMs: ROUTINE_TIMEOUT_MS });
   if (planR.error) {
     return { name: "pool-quality-judge", value: null, state: "not-evaluated", reason: `plan spawn error: ${planR.error.message}` };
   }
@@ -305,13 +311,7 @@ export function runPoolQualityJudge(
     return { name: "pool-quality-judge", value: base, state: "not-evaluated", reason: `resource-gate-wait: ${gate.reason} (judge deferred)` };
   }
   const argv = judgeArgv ?? defaultPoolJudgeArgv(plan, root);
-  let judgeR: ReturnType<typeof spawnSync>;
-  try {
-    judgeR = spawnSync(argv[0], argv.slice(1), { encoding: "utf8", timeout: ROUTINE_TIMEOUT_MS });
-  } catch (e) {
-    writeRecord(failedQualityRoundRecord(root, plan.triggers.reasons, `judge spawn failed: ${(e as Error).message}`));
-    return { name: "pool-quality-judge", value: base, state: "failed", reason: `judge spawn failed: ${(e as Error).message}` };
-  }
+  const judgeR = await runAsync(argv, { timeoutMs: judgeTimeoutMs, collectStderr: true });
   if (judgeR.error || judgeR.status !== 0) {
     const reason = `judge exited ${judgeR.status ?? "null"}: ${judgeR.error?.message ?? String(judgeR.stderr ?? "").slice(0, 200)}`;
     writeRecord(failedQualityRoundRecord(root, plan.triggers.reasons, reason));
@@ -327,7 +327,7 @@ export function runPoolQualityJudge(
   }
   // JS 聚合（单一实现 aggregateVerdicts——should-remove → remove-or-rescope 路由）。
   const agg = aggregateVerdicts(verdicts);
-  const recorded = recordLastJudgeRound(root);
+  const recorded = await recordLastJudgeRound(root);
   // 判词载体写端（AC1）：判过且有结果 ⇒ 追加一条 judged 记录；判词为空 ⇒ 不写空记录（AC1）。
   const judgedAt = new Date().toISOString();
   const round = recorded.lastRound ?? 0;
@@ -373,7 +373,7 @@ export function qualityGateRoutines(root: string, opts: QualityGateOptions): Rou
     {
       name: "pool-quality-judge",
       schedule: { kind: "interval", minutes: opts.poolJudgeIntervalMinutes },
-      run: () => [runPoolQualityJudge(root, opts.planCmd, opts.judgeArgv, opts.resourceGateArgv)],
+      run: async () => [await runPoolQualityJudge(root, opts.planCmd, opts.judgeArgv, opts.resourceGateArgv)],
     },
     {
       name: "judgment-consumer-check",

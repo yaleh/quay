@@ -2,28 +2,42 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
-import { readLive, readSystem, readManagerLight, readTests, readGitHistory, readCurrentSuiteRun, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun } from "./observation.ts";
+import { readLive, readSystem, readManagerLight, readTests, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord } from "./observation.ts";
 import { TASK_STATUS } from "./abi.ts";
 import type { Manifest } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime } from "./serve-render.ts";
 import { awaitingLandMs, formatAwaitingDuration, suiteSuffix } from "./serve-live.ts";
+import { renderFanInCell } from "./serve-task.ts";
 
 // ── /dashboard ─────────────────────────────────────────────────────────────────────────────────────
 
 // gap-webui-dashboard-tests-card-latest-round-no-live-signal: elapsed-time formatter for a suite
 // that is currently running (startedAt ISO → nowMs), pulled out as a pure function so it is testable
 // without a live clock. null input/unparseable ISO → null (never a fabricated "0s").
-export function formatSuiteElapsed(startedAt: string | null, nowMs: number): string | null {
-  if (startedAt == null) return null;
-  const t = Date.parse(startedAt);
-  if (!Number.isFinite(t)) return null;
-  const totalSec = Math.max(0, Math.round((nowMs - t) / 1000));
+/** Shared h/m/s split — the single place a wall-clock second count is turned into a "12m34s" string.
+ *  Both `formatSuiteElapsed` (running suite) and `formatDurationMs` (a completed round's wall ms) route
+ *  through it, so the modulo math is written exactly once (gap-dashboard-visual-review-batch-fixes AC4). */
+function formatSeconds(totalSec: number): string {
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
   const s = totalSec % 60;
   if (h > 0) return `${h}h${m}m`;
   if (m > 0) return `${m}m${s}s`;
   return `${s}s`;
+}
+
+export function formatSuiteElapsed(startedAt: string | null, nowMs: number): string | null {
+  if (startedAt == null) return null;
+  const t = Date.parse(startedAt);
+  if (!Number.isFinite(t)) return null;
+  const totalSec = Math.max(0, Math.round((nowMs - t) / 1000));
+  return formatSeconds(totalSec);
+}
+
+/** Wall-clock ms → "12m34s" (a completed test round's duration). Shares `formatSeconds`'s h/m/s split
+ *  with `formatSuiteElapsed` rather than re-deriving the same modulo math. */
+export function formatDurationMs(ms: number): string {
+  return formatSeconds(Math.round(ms / 1000));
 }
 
 // ── liveCard / testsCard (extracted so the auto-refresh endpoint re-renders just these two) ──────
@@ -37,7 +51,18 @@ export function formatSuiteElapsed(startedAt: string | null, nowMs: number): str
 /** The dashboard liveCard — a self-contained render of the loop pulse (state + in-flight mini list),
  *  factored out so the auto-refresh JSON endpoint can re-render this ONE card without the rest of the
  *  dashboard. `id="live-card"` is the DOM node the auto-refresh script swaps. */
-export function renderLiveCard(live: LiveResult): string {
+export function renderLiveCard(
+  live: LiveResult,
+  nowMs: number = Date.now(),
+  tasks?: Array<{ id?: unknown; title?: unknown }>,
+): string {
+  // gap-dashboard-fanin-panel-and-timeline-bars I: join the in-flight taskId to the task summary
+  // (already fetched on the same /dashboard + /dashboard/cards requests) so each row can carry its
+  // title — reusing the taskCard miniList's "id + body-colour title" vertical idiom.
+  const titleById = new Map<string, string>();
+  for (const t of tasks ?? []) {
+    if (typeof t.id === "string" && typeof t.title === "string" && t.title.length > 0) titleById.set(t.id, t.title);
+  }
   const liveStateText = live.status === "error" ? "读失败" : live.liveState === "running" ? "running" : live.liveState === "running-unwired" ? "在跑但未接遥测" : live.liveState === "not-running" ? "未在运行" : "—";
   const liveMiniList = live.inFlight.slice(0, 3).map((t) => {
     const tag = t.phase === "awaiting-land"
@@ -48,9 +73,16 @@ export function renderLiveCard(live: LiveResult): string {
           ? "已落地"
           : "实现中";
     const emphasis = t.phase === "awaiting-land" || t.phase === "fan-in" || t.phase === "landed";
-    return html`<div style="display:flex;justify-content:space-between;gap:0.5rem;font-size:0.78rem;line-height:1.4">
-      <a href="/task/${encodeURIComponent(t.taskId)}" style="color:var(--color-text);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(t.taskId)}</a>
-      <span style="flex:none;${emphasis ? "color:var(--color-accent-700);font-weight:700" : "color:var(--color-neutral-700)"}">${escapeHtml(tag)}</span>
+    // gap-dashboard-visual-review-batch-fixes AC2: every in-flight row carries its elapsed since
+    // startedAtMs (the same formatSuiteElapsed formatter the testsCard uses, via an ISO round-trip).
+    const elapsed = formatSuiteElapsed(new Date(t.startedAtMs).toISOString(), nowMs);
+    const title = titleById.get(t.taskId);
+    return html`<div style="display:flex;flex-direction:column;gap:2px;font-size:0.78rem;line-height:1.4">
+      <div style="display:flex;justify-content:space-between;gap:0.5rem">
+        <a href="/task/${encodeURIComponent(t.taskId)}" style="color:var(--color-text);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(t.taskId)}</a>
+        <span style="flex:none;${emphasis ? "color:var(--color-accent-700);font-weight:700" : "color:var(--color-neutral-700)"}">${escapeHtml(tag)}${elapsed ? ` · ${escapeHtml(elapsed)}` : ""}</span>
+      </div>
+      ${title != null ? html`<div style="color:var(--color-text);font-size:0.75rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(title)}</div>` : ""}
     </div>`;
   }).join("");
   return html`<div id="live-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
@@ -62,6 +94,108 @@ export function renderLiveCard(live: LiveResult): string {
   </div>`;
 }
 
+// ── 过去 N 小时分段着色时间轴（G/H 共用）───────────────────────────────────────────────────────────
+//
+// gap-dashboard-fanin-panel-and-timeline-bars G/H: G（测试卡）与 H（fan-in 卡）两条时间轴的数据源
+// （verification-round.jsonl / worker-outcome.jsonl）本就是持久化的真实历史，因此做成和 serve-tests.ts
+// 的 per-file gantt / load-curve 一样的【服务端渲染 SVG】（零客户端 JS、刷新页面历史不丢），不复用
+// sysCard 那套客户端内存攒数组的手法。两份 bar 共用同一份横轴换算，不写两遍。
+
+/** Default timeline window (hours) for the tests/fan-in segmented bars. */
+export const DEFAULT_TIMELINE_HOURS = 3;
+
+/** Parse `?hours=` into the timeline window: a valid integer in [1,24] → that value; missing / illegal
+ *  / out-of-range ("abc", 0, 999, 1.5, …) → DEFAULT_TIMELINE_HOURS (never throws, never clamps an
+ *  out-of-range value into 24 — AC7). */
+export function parseTimelineHours(raw: string | null | undefined): number {
+  if (raw == null || raw === "") return DEFAULT_TIMELINE_HOURS;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 24) return DEFAULT_TIMELINE_HOURS;
+  return n;
+}
+
+/** Read the timeline window off an incoming dashboard request's `?hours=` query (degrade → default). */
+function timelineHoursFromRequest(req: IncomingMessage): number {
+  try {
+    return parseTimelineHours(new URL(req.url ?? "", "http://localhost").searchParams.get("hours"));
+  } catch {
+    return DEFAULT_TIMELINE_HOURS;
+  }
+}
+
+/** Test-run state → the dashboard card's own colour token (the same ternary the recentStrip already
+ *  uses: green → positive, red → accent, other → neutral). Bare token name, so the strip writes
+ *  `background:var(--color-…)` and the SVG writes `fill="var(--color-…)"` from ONE source (no drift). */
+function stateColorToken(state: string | null): string {
+  return state === "green" ? "--color-positive-700" : state === "red" ? "--color-accent-800" : "--color-neutral-400";
+}
+
+/** Mechanical fan-in outcome → colour token (landed → positive, red → accent, unknown → neutral). */
+function fanInOutcomeColorToken(outcome: string | null): string {
+  return outcome === "landed" ? "--color-positive-700" : outcome === "red" ? "--color-accent-800" : "--color-neutral-400";
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/** A segmented absolute-wall-clock timeline bar (G and H share this ONE horizontal-axis conversion).
+ *  Each segment is `[startMs, endMs]` on an axis spanning the past `windowHours` ending at `nowMs`,
+ *  filled with `colorVar` (a bare CSS token). Segments with non-finite / inverted bounds, or that do
+ *  not intersect the window at all, are skipped (never extrapolated, never positioned by assumption).
+ *  Returns "" when no segment survives. Each surviving segment renders exactly ONE `<rect>` (AC3/AC5
+ *  count `<rect` occurrences); the axis/labels use `<line>`/`<text>` so that count stays exact. */
+function renderTimelineBarSvg(
+  segments: Array<{ startMs: number; endMs: number; colorVar: string }>,
+  windowHours: number,
+  nowMs: number,
+): string {
+  const windowStartMs = nowMs - windowHours * 3_600_000;
+  const spanMs = windowHours * 3_600_000;
+  const rows = segments.filter(
+    (s) =>
+      Number.isFinite(s.startMs) &&
+      Number.isFinite(s.endMs) &&
+      s.endMs >= s.startMs &&
+      s.endMs >= windowStartMs &&
+      s.startMs <= nowMs,
+  );
+  if (rows.length === 0) return "";
+
+  const W = 600;
+  const H = 44;
+  const pad = 4;
+  const barY = 8;
+  const barH = 14;
+  const axisY = H - 10;
+  const plotW = W - 2 * pad;
+  const X = (t: number): number => pad + ((t - windowStartMs) / spanMs) * plotW;
+
+  const bars = rows
+    .map((s) => {
+      const x0 = X(Math.max(s.startMs, windowStartMs));
+      const x1 = X(Math.min(s.endMs, nowMs));
+      const w = Math.max(x1 - x0, 1.5);
+      return `<rect x="${x0.toFixed(1)}" y="${barY}" width="${w.toFixed(1)}" height="${barH}" rx="2" fill="var(${s.colorVar})"></rect>`;
+    })
+    .join("");
+
+  const hhmm = (t: number): string => {
+    const d = new Date(t);
+    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  };
+  const axis = `<line x1="${pad}" y1="${axisY}" x2="${W - pad}" y2="${axisY}" stroke="var(--color-neutral-300)"></line>`;
+  const leftLabel = `<text x="${pad}" y="${H - 1}" font-size="9" fill="var(--color-neutral-700)">${hhmm(windowStartMs)}</text>`;
+  const rightLabel = `<text x="${W - pad}" y="${H - 1}" font-size="9" fill="var(--color-neutral-700)" text-anchor="end">${hhmm(nowMs)}</text>`;
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="过去 ${windowHours} 小时时间轴" style="width:100%;height:auto;margin-top:4px;display:block">
+${axis}
+${bars}
+${leftLabel}
+${rightLabel}
+</svg>`;
+}
+
 // gap-webui-dashboard-tests-card-latest-round-no-live-signal: the card prefers the LIVE running signal
 // (full-suite-state.json state=running, no ledger row yet) over tests.runs[0] (the latest COMPLETED
 // round); labels a gate-blocked round (pass=0/tests=0 by construction) for what it is instead of a bare
@@ -71,7 +205,13 @@ export function renderLiveCard(live: LiveResult): string {
 /** The dashboard testsCard — a self-contained render of the suite state (live-running signal / latest
  *  completed round / recent-rounds strip), factored out for the auto-refresh endpoint. `id="tests-card"`
  *  is the DOM node the auto-refresh script swaps. */
-export function renderTestsCard(tests: TestsResult, suiteRun: CurrentSuiteRun | null): string {
+export function renderTestsCard(
+  tests: TestsResult,
+  suiteRun: CurrentSuiteRun | null,
+  opts: { hours?: number; nowMs?: number } = {},
+): string {
+  const nowMs = opts.nowMs ?? Date.now();
+  const hours = opts.hours ?? DEFAULT_TIMELINE_HOURS;
   const latestRun = tests.runs[0] ?? null;
   const suiteRunning = suiteRun && suiteRun.state === "running" ? suiteRun : null;
   const gateBlocked = latestRun != null && latestRun.tests === 0 && latestRun.pass === 0 && (latestRun.reason === "gate-failed" || latestRun.gate != null);
@@ -91,18 +231,53 @@ export function renderTestsCard(tests: TestsResult, suiteRun: CurrentSuiteRun | 
     ? html`<div style="display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--color-divider);padding-top:6px">
         <div style="font-size:0.7rem;color:var(--color-neutral-700)">近${recentRuns.length}轮（新→旧）</div>
         <div style="display:flex;gap:3px">${recentRuns.map((r) => {
-          const color = r.state === "green" ? "var(--color-positive-700)" : r.state === "red" ? "var(--color-accent-800)" : "var(--color-neutral-400)";
+          const color = `var(${stateColorToken(r.state)})`;
           const rGateBlocked = r.tests === 0 && r.pass === 0 && (r.reason === "gate-failed" || r.gate != null);
           const title = `#${r.round ?? "?"} ${r.state ?? "—"}${rGateBlocked ? `（gate:${r.gate ?? "?"} 未执行测试）` : ` pass ${r.pass ?? "—"}/${r.tests ?? "—"}`}`;
           return html`<span title="${escapeHtml(title)}" style="width:11px;height:11px;border-radius:2px;background:${color};display:inline-block"></span>`;
         }).join("")}</div>
       </div>`
     : "";
+  // gap-dashboard-visual-review-batch-fixes AC4: a default-visible, readable per-round list (round · state
+  // · pass X/Y · duration) below the hover-only colour strip, so a recent result is legible without hover.
+  // gap-dashboard-fanin-panel-and-timeline-bars F: each row ALSO appends its startedAt (via relativeTime)
+  // and buckets — absent fields render NO sub-item (the absent-field contract, never a "—").
+  const recentList = recentRuns.filter((r) => r.state !== "running").map((r) => {
+    const rGateBlocked = r.tests === 0 && r.pass === 0 && (r.reason === "gate-failed" || r.gate != null);
+    const rDetail = rGateBlocked ? `gate:${r.gate ?? "?"} 未执行测试` : `pass ${r.pass ?? "—"}/${r.tests ?? "—"}`;
+    const rDur = r.durationMs != null ? formatDurationMs(r.durationMs) : "—";
+    const startedMs = r.startedAt != null ? Date.parse(r.startedAt) : NaN;
+    const startedLine = Number.isFinite(startedMs)
+      ? html`<div style="color:var(--color-neutral-700)">${relativeTime(startedMs)}</div>`
+      : "";
+    const bucketsLine = r.buckets != null && r.buckets !== ""
+      ? html`<div style="color:var(--color-neutral-700)">bucket ${escapeHtml(r.buckets)}</div>`
+      : "";
+    return html`<div style="display:flex;flex-direction:column;gap:2px;font-size:0.72rem;line-height:1.4">
+      <div style="display:flex;justify-content:space-between;gap:0.5rem">
+        <span style="flex:none;color:var(--color-neutral-700)">#${r.round ?? "?"} ${escapeHtml(r.state ?? "—")}</span>
+        <span style="color:var(--color-neutral-700)">${rDetail} · ${rDur}</span>
+      </div>
+      ${startedLine}
+      ${bucketsLine}
+    </div>`;
+  }).join("");
+  // gap-dashboard-fanin-panel-and-timeline-bars G: past-N-hours segmented timeline below the list —
+  // input is the FULL `tests.runs` history (not just the 5-row strip), one segment per round whose
+  // [startedAt, startedAt+durationMs] both parse; colour by state (the card's own ternary).
+  const timelineSegments = tests.runs.map((r) => {
+    const startMs = r.startedAt != null ? Date.parse(r.startedAt) : NaN;
+    const endMs = Number.isFinite(startMs) && r.durationMs != null ? startMs + r.durationMs : NaN;
+    return { startMs, endMs, colorVar: stateColorToken(r.state) };
+  });
+  const timelineBar = renderTimelineBarSvg(timelineSegments, hours, nowMs);
   return html`<div id="tests-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
     <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">测试</div>
     <div style="font-weight:800">${statusLine}</div>
     <p style="margin:0;font-size:0.8rem;opacity:0.8">${detailLine}</p>
     ${recentStrip}
+    ${recentList.length > 0 ? html`<div style="display:flex;flex-direction:column;gap:2px">${recentList}</div>` : ""}
+    ${timelineBar}
     <a href="/tests" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Tests →</a>
   </div>`;
 }
@@ -126,15 +301,74 @@ export function renderDashboardCardRefreshScript(): string {
   return `<script>
 (function () {
   var REFRESH_MS = ${DASHBOARD_CARD_REFRESH_MS};
+  var SYS_HISTORY_MAX = 60;
+  var sysHistory = [];
+
+  // Min-max normalise a value series to the sparkline viewBox, returning "x,y x,y …" for a <polyline>.
+  // null values are skipped (a probe that never returned a number draws no line, rather than a fake 0).
+  function sparkPoints(vals) {
+    var min = Infinity, max = -Infinity, i, v;
+    for (i = 0; i < vals.length; i++) {
+      v = vals[i];
+      if (v == null) { continue; }
+      if (v < min) { min = v; }
+      if (v > max) { max = v; }
+    }
+    if (!isFinite(min)) { return null; }
+    if (max === min) { max = min + 1; }
+    var W = 300, H = 60, P = 4, n = vals.length, pts = [];
+    for (i = 0; i < n; i++) {
+      v = vals[i];
+      if (v == null) { continue; }
+      var x = P + (i / (n - 1)) * (W - 2 * P);
+      var y = (H - P) - ((v - min) / (max - min)) * (H - 2 * P);
+      pts.push(x.toFixed(1) + "," + y.toFixed(1));
+    }
+    return pts.join(" ");
+  }
+
+  // Redraw the in-memory history into #sys-sparkline (two polylines: cpu_stall + loadavg). Fewer than
+  // 2 points → empty state (no fabricated single-point line). The history lives ONLY in this closure —
+  // a page reload / tab close clears it (the known trade-off of the zero-persistence simplification).
+  function redrawSparkline() {
+    var svg = document.getElementById("sys-sparkline");
+    if (!svg) { return; }
+    if (sysHistory.length < 2) { svg.innerHTML = ""; return; }
+    var cpus = sysHistory.map(function (p) { return p.cpu; });
+    var loads = sysHistory.map(function (p) { return p.load; });
+    var cpuPts = sparkPoints(cpus);
+    var loadPts = sparkPoints(loads);
+    var inner = "";
+    if (cpuPts != null) { inner += '<polyline class="load-svg-line" points="' + cpuPts + '" />'; }
+    if (loadPts != null) { inner += '<polyline class="load-svg-line" style="stroke:var(--color-positive-700)" points="' + loadPts + '" />'; }
+    svg.innerHTML = inner;
+  }
+
   var refresh = function () {
     if (document.visibilityState !== "visible") { return; }
-    fetch("/dashboard/cards", { headers: { Accept: "application/json" } })
+    var qs = new URLSearchParams(window.location.search).get("hours");
+    fetch("/dashboard/cards" + (qs != null ? "?hours=" + encodeURIComponent(qs) : ""), { headers: { Accept: "application/json" } })
       .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
       .then(function (d) {
         var live = document.getElementById("live-card");
         if (live && typeof d.liveCard === "string") { live.innerHTML = d.liveCard; }
         var tests = document.getElementById("tests-card");
         if (tests && typeof d.testsCard === "string") { tests.innerHTML = d.testsCard; }
+        var sys = document.getElementById("sys-card");
+        if (sys && typeof d.sysCard === "string") { sys.innerHTML = d.sysCard; }
+        var mgr = document.getElementById("mgr-card");
+        if (mgr && typeof d.mgrCard === "string") { mgr.innerHTML = d.mgrCard; }
+        var task = document.getElementById("task-card");
+        if (task && typeof d.taskCard === "string") { task.innerHTML = d.taskCard; }
+        if (d.sysRaw && typeof d.sysRaw === "object") {
+          var cpu = typeof d.sysRaw.cpuStallAvg10 === "number" ? d.sysRaw.cpuStallAvg10 : null;
+          var load = typeof d.sysRaw.loadAvg === "number" ? d.sysRaw.loadAvg : null;
+          if (cpu != null || load != null) {
+            sysHistory.push({ cpu: cpu, load: load });
+            if (sysHistory.length > SYS_HISTORY_MAX) { sysHistory = sysHistory.slice(sysHistory.length - SYS_HISTORY_MAX); }
+            redrawSparkline();
+          }
+        }
       })
       .catch(function () { /* fetch failed — skip this round, retry next */ });
   };
@@ -146,66 +380,80 @@ export function renderDashboardCardRefreshScript(): string {
 </script>`;
 }
 
-export function renderDashboardPage(d: {
-  live: LiveResult;
-  sys: SystemResult;
-  mgr: ManagerResult;
-  tests: TestsResult;
-  suiteRun: CurrentSuiteRun | null;
-  history: GitHistoryResult;
-  tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>;
-}): string {
-  const liveCard = renderLiveCard(d.live);
-
-  const sysGo = d.sys.resourceGate.status === "ok" && d.sys.processBudget.status === "ok" &&
-    d.sys.resourceGate.verdict === "GO" && d.sys.processBudget.verdict === "GO";
-  const sysCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
+/** The dashboard sysCard — a self-contained render of the system-resource snapshot, extracted so the
+ *  auto-refresh JSON endpoint can re-render it (id="sys-card") without the rest of the dashboard.
+ *  Carries an empty `#sys-sparkline` SVG the client-side poll fills with an in-memory load history
+ *  (gap-dashboard-visual-review-batch-fixes AC6 — the SERVER persists nothing). */
+export function renderSysCard(sys: SystemResult): string {
+  const sysGo = sys.resourceGate.status === "ok" && sys.processBudget.status === "ok" &&
+    sys.resourceGate.verdict === "GO" && sys.processBudget.verdict === "GO";
+  return html`<div id="sys-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
     <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">系统资源</div>
-    <p style="margin:0;font-size:0.8rem;line-height:1.5">cpu_stall ${d.sys.resourceGate.cpuStallAvg10 != null ? escapeHtml(String(d.sys.resourceGate.cpuStallAvg10)) : "—"} · loadavg ${d.sys.resourceGate.loadAvg != null ? escapeHtml(String(d.sys.resourceGate.loadAvg)) : "—"}</p>
-    <div style="font-weight:800;color:${sysGo ? "var(--color-positive-700)" : "var(--color-accent-800)"}">⇒ ${sysGo ? "GO" : d.sys.resourceGate.status === "ok" ? "WAIT" : "未接入"}</div>
+    <p style="margin:0;font-size:0.8rem;line-height:1.5">cpu_stall ${sys.resourceGate.cpuStallAvg10 != null ? escapeHtml(String(sys.resourceGate.cpuStallAvg10)) : "—"} · loadavg ${sys.resourceGate.loadAvg != null ? escapeHtml(String(sys.resourceGate.loadAvg)) : "—"}</p>
+    <div style="font-weight:800;color:${sysGo ? "var(--color-positive-700)" : "var(--color-accent-800)"}">⇒ ${sysGo ? "GO" : sys.resourceGate.status === "ok" ? "WAIT" : "未接入"}</div>
+    <svg id="sys-sparkline" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 60" role="img" aria-label="系统负载历史（页面停留期间）" style="width:100%;height:60px;margin-top:4px"></svg>
     <a href="/system" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看系统状态 →</a>
   </div>`;
+}
 
-  const mgrAlive = d.mgr.liveness.sessions.filter((s) => s.alive).length;
-  const mgrCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
+/** The dashboard mgrCard — a self-contained render of the Manager/Outer/Inner probe (id="mgr-card").
+ *  gap-dashboard-visual-review-batch-fixes AC1: the liveness count is only shown when
+ *  `liveness.status === "ok"`; otherwise (the current constant `"empty"` "observer retired" state) the
+ *  clause reads 「会话数未接入」 — never a bare number that a retired/never-measured metric would render
+ *  indistinguishable from a genuine "0 sessions alive" (CLAUDE.md 硬规则 3b/4b). */
+export function renderMgrCard(mgr: ManagerResult): string {
+  const mgrAlive = mgr.liveness.sessions.filter((s) => s.alive).length;
+  const livenessText = mgr.liveness.status === "ok" ? `${mgrAlive} 会话 LIVE` : "会话数未接入";
+  return html`<div id="mgr-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
     <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">Manager / Outer / Inner</div>
-    <p style="margin:0;font-size:0.8rem;line-height:1.5">loop-driver: ${escapeHtml(d.mgr.loopDriver.verdict ?? "未接入")} · ${mgrAlive} 会话 LIVE</p>
+    <p style="margin:0;font-size:0.8rem;line-height:1.5">loop-driver: ${escapeHtml(mgr.loopDriver.verdict ?? "未接入")} · ${livenessText}</p>
     <a href="/manager" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看三层状态 →</a>
   </div>`;
+}
 
+/** The dashboard taskCard — a self-contained render of the task-ledger summary (id="task-card"):
+ *  status-count bar + per-status mini lists for the three NON-terminal states (ready/todo/needs-human);
+ *  done/superseded stay pure counts. Extracted so the auto-refresh endpoint can re-render it.
+ *
+ *  gap-dashboard-taskcard-multistatus-minitable: the taskCard's single mixed "最近更新（非 done）" list
+ *  could not answer "what is currently needs-human?" without a full /tasks?status=… round-trip (48h
+ *  access log: 78 cross-status /tasks hits in one hour). Replace it with per-status mini lists for the
+ *  three NON-terminal states; N=3, updatedAt descending, still /task/<id> links — grouped in-memory from
+ *  the already-fetched task-summary array (no new provider read, no new network round-trip).
+ *
+ *  gap-dashboard-visual-review-batch-fixes AC3: the per-status group heading is a background pill with
+ *  font-weight 700, while each row's task id is font-weight 500 (accent colour dropped) — so the grouping
+ *  dimension (which used to be the weakest line) reads stronger than the id. */
+export function renderTaskCard(
+  tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>,
+): string {
   const counts = new Map<string, number>();
-  for (const t of d.tasks) {
+  for (const t of tasks) {
     const s = typeof t.status === "string" ? t.status : "unknown";
     counts.set(s, (counts.get(s) ?? 0) + 1);
   }
   const statuses = [TASK_STATUS.DONE, TASK_STATUS.READY, TASK_STATUS.TODO, TASK_STATUS.NEEDS_HUMAN, TASK_STATUS.SUPERSEDED];
-  const total = d.tasks.length;
+  const total = tasks.length;
   const bar = (s: string): string => {
     const c = counts.get(s) ?? 0;
     const pct = total > 0 ? (c / total) * 100 : 0;
     return html`<div style="width:${pct.toFixed(1)}%;background:${s === TASK_STATUS.DONE ? "var(--color-text)" : s === TASK_STATUS.NEEDS_HUMAN ? "var(--color-accent)" : "var(--color-neutral-400)"}" title="${escapeHtml(s)} ${c}"></div>`;
   };
-  // gap-dashboard-taskcard-multistatus-minitable: the taskCard's single mixed "最近更新（非 done）"
-  // list could not answer "what is currently needs-human?" without a full /tasks?status=… round-trip
-  // (48h access log: 78 cross-status /tasks hits in one hour). Replace it with per-status mini lists
-  // for the three NON-terminal states (ready/todo/needs-human); done/superseded stay pure counts to
-  // avoid board explosion. N=3, updatedAt descending, still /task/<id> links — grouped in-memory from
-  // the already-fetched task-summary array (no new provider read, no new network round-trip).
   const MINI_LIST_N = 3;
   const miniStatuses: readonly string[] = [TASK_STATUS.READY, TASK_STATUS.TODO, TASK_STATUS.NEEDS_HUMAN];
   const miniList = (s: string): string => {
-    const rows = d.tasks
+    const rows = tasks
       .filter((t) => t.status === s && typeof (t as { updatedAt?: unknown }).updatedAt === "number")
       .sort((a, b) => ((b as { updatedAt?: unknown }).updatedAt as number) - ((a as { updatedAt?: unknown }).updatedAt as number))
       .slice(0, MINI_LIST_N);
     if (rows.length === 0) return "";
     return html`<div style="border-top:1px solid var(--color-divider);margin-top:2px;padding-top:8px;display:flex;flex-direction:column;gap:6px">
-      <div style="font-size:0.7rem;color:var(--color-neutral-700)">${escapeHtml(s)}（最近 ${MINI_LIST_N} 条）</div>
+      <div style="align-self:flex-start;font-size:0.7rem;font-weight:700;color:var(--color-text);background:var(--color-neutral-200);padding:2px 8px;border-radius:999px">${escapeHtml(s)}（最近 ${MINI_LIST_N} 条）</div>
       ${rows.map((t, i) => {
         const sep = i > 0 ? "border-top:1px solid var(--color-divider);padding-top:6px;" : "";
         const updatedAt = (t as { updatedAt?: unknown }).updatedAt as number;
         return html`<div style="${sep}display:flex;flex-direction:column;gap:2px">
-        <a href="/task/${encodeURIComponent(String(t.id))}" style="color:var(--color-accent);text-decoration:none;font-size:0.75rem;font-weight:600">${escapeHtml(String(t.id))}</a>
+        <a href="/task/${encodeURIComponent(String(t.id))}" style="color:var(--color-neutral-700);text-decoration:none;font-size:0.75rem;font-weight:500">${escapeHtml(String(t.id))}</a>
         <div style="color:var(--color-text);font-size:0.75rem">${escapeHtml(String(t.title ?? ""))}</div>
         <div style="color:var(--color-neutral-700);font-size:0.7rem">${relativeTime(updatedAt)}</div>
       </div>`;
@@ -213,16 +461,7 @@ export function renderDashboardPage(d: {
     </div>`;
   };
 
-  const testsCard = renderTestsCard(d.tests, d.suiteRun);
-
-  const recentCommits = d.history.status === "ok" ? d.history.commits.slice(0, 3).map((c) => `${c.hash.slice(0, 7)} ${c.subject}`).join("<br>") : (d.history.status === "empty" ? "无提交" : "读失败");
-  const commitsCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:8px">
-    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">最近提交</div>
-    <p style="margin:0;font-size:0.8rem;line-height:1.6;font-family:ui-monospace,monospace">${recentCommits}</p>
-    <a href="/journal" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Journal →</a>
-  </div>`;
-
-  const taskCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
+  return html`<div id="task-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
     <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">任务台账速览</div>
     <div style="display:flex;height:14px;width:100%;overflow:hidden">${statuses.map(bar).join("")}</div>
     <div style="display:flex;gap:0.75rem;font-size:0.75rem;flex-wrap:wrap;color:var(--color-neutral-700)">
@@ -231,15 +470,117 @@ export function renderDashboardPage(d: {
     ${miniStatuses.map(miniList).join("")}
     <a href="/tasks" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看任务列表 →</a>
   </div>`;
+}
+
+/** The dashboard fan-in card — cross-task mechanical fan-in summary (list + segmented bar), added by
+ *  gap-dashboard-fanin-panel-and-timeline-bars H. Unlike /task/<id>'s Runs block (filtered by ONE task),
+ *  this aggregates EVERY worker-outcome record carrying a mechanical_fan_in result, sorted by
+ *  lock-acquire time (desc), reusing renderFanInCell for each row (no second field-join). */
+export function renderFanInCard(
+  root: string | undefined,
+  opts: { hours?: number; nowMs?: number } = {},
+): string {
+  const records = root != null ? readWorkerOutcomeRecords(root) : [];
+  return renderFanInCardFromRecords(records, opts);
+}
+
+/** Pure card-body renderer (the AC4/AC5 test seam): list + timeline bar from an already-read records
+ *  array, so the sort / null-filter / segment-count logic is unit-testable on a fixed array without a
+ *  disk fixture. */
+export function renderFanInCardFromRecords(
+  records: WorkerOutcomeRecord[],
+  opts: { hours?: number; nowMs?: number } = {},
+): string {
+  const nowMs = opts.nowMs ?? Date.now();
+  const hours = opts.hours ?? DEFAULT_TIMELINE_HOURS;
+  const fanIns = records.filter((r) => r.mechanical_fan_in != null);
+
+  const rows = fanIns
+    .map((r) => {
+      const mfi = r.mechanical_fan_in!;
+      const key = mfi.lockAcquireEpoch != null
+        ? mfi.lockAcquireEpoch
+        : r.ts != null
+          ? Date.parse(r.ts) / 1000
+          : NaN;
+      return { r, key };
+    })
+    .sort((a, b) => {
+      const an = Number.isFinite(a.key) ? a.key : -Infinity;
+      const bn = Number.isFinite(b.key) ? b.key : -Infinity;
+      return bn - an;
+    })
+    .slice(0, 5)
+    .map(({ r }, i) => html`<div style="${i > 0 ? "border-top:1px solid var(--color-divider);padding-top:6px;" : ""}display:flex;flex-direction:column;gap:2px;font-size:0.75rem;line-height:1.4">
+      <a href="/task/${encodeURIComponent(r.task ?? "")}" style="color:var(--color-text);text-decoration:none;font-weight:600">${escapeHtml(r.task ?? "?")}</a>
+      <div style="color:var(--color-neutral-700)">${renderFanInCell(r.task ?? "", r)}</div>
+    </div>`);
+  const list = rows.length > 0
+    ? html`<div style="display:flex;flex-direction:column;gap:4px">${rows.join("")}</div>`
+    : html`<p style="margin:0;font-size:0.8rem;opacity:0.8">暂无 fan-in 记录</p>`;
+
+  const segments = fanIns.map((r) => {
+    const mfi = r.mechanical_fan_in!;
+    return {
+      startMs: mfi.lockAcquireEpoch != null ? mfi.lockAcquireEpoch * 1000 : NaN,
+      endMs: mfi.lockReleaseEpoch != null ? mfi.lockReleaseEpoch * 1000 : NaN,
+      colorVar: fanInOutcomeColorToken(mfi.outcome),
+    };
+  });
+  const bar = renderTimelineBarSvg(segments, hours, nowMs);
+
+  return html`<div id="fanin-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">Fan-in</div>
+    <p style="margin:0;font-size:0.8rem;opacity:0.8">最近 ${rows.length} 次机械 fan-in（landed/red · 锁持有区间）</p>
+    ${list}
+    ${bar}
+  </div>`;
+}
+
+export function renderDashboardPage(
+  d: {
+    live: LiveResult;
+    sys: SystemResult;
+    mgr: ManagerResult;
+    tests: TestsResult;
+    suiteRun: CurrentSuiteRun | null;
+    history: GitHistoryResult;
+    tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>;
+  },
+  opts: { workspaceRoot?: string; hours?: number; nowMs?: number } = {},
+): string {
+  const nowMs = opts.nowMs ?? Date.now();
+  const hours = opts.hours ?? DEFAULT_TIMELINE_HOURS;
+  const liveCard = renderLiveCard(d.live, nowMs, d.tasks);
+  const sysCard = renderSysCard(d.sys);
+  const mgrCard = renderMgrCard(d.mgr);
+  const taskCard = renderTaskCard(d.tasks);
+  const testsCard = renderTestsCard(d.tests, d.suiteRun, { hours, nowMs });
+  const fanInCard = renderFanInCard(opts.workspaceRoot, { hours, nowMs });
+
+  const recentCommits = d.history.status === "ok" ? d.history.commits.slice(0, 3).map((c) => `${c.hash.slice(0, 7)} ${c.subject}`).join("<br>") : (d.history.status === "empty" ? "无提交" : "读失败");
+  const commitsCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:8px">
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">最近提交</div>
+    <p style="margin:0;font-size:0.8rem;line-height:1.6;font-family:ui-monospace,monospace">${recentCommits}</p>
+    <a href="/journal" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Journal →</a>
+  </div>`;
+
+  // gap-dashboard-fanin-panel-and-timeline-bars (window presets): a small set of page-reload links that
+  // set the shared G/H timeline window. The refresh script carries the current ?hours= into its own
+  // /dashboard/cards poll, so a preset change survives the 30s auto-refresh without the bars jumping.
+  const hourLinks = [1, 3, 6, 12]
+    .map((n) => html`<a href="/dashboard?hours=${n}" style="color:var(--color-accent);text-decoration:none;${n === hours ? "font-weight:700" : ""}">${n}h</a>`)
+    .join(" · ");
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay dashboard — 循环脉搏、任务台账、系统资源与三层状态总览">${modernistStyles()}${pageStyles()}<title>Dashboard</title></head>
     <body>${renderMobileChrome("dashboard", "dashboard")}${renderSiteNav("dashboard")}<main>
       <h1>Dashboard</h1>
       <p class="meta">循环脉搏、任务台账、系统资源与三层调度状态的总览 — 每张卡片指向对应完整页面。</p>
+      <p class="meta">时间轴窗口（当前 ${hours}h）：${hourLinks}</p>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:var(--color-divider);border:1px solid var(--color-divider);margin-bottom:1.5rem">${liveCard}${sysCard}${mgrCard}</div>
       <h2>工作进展</h2>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:var(--color-divider);border:1px solid var(--color-divider);margin-bottom:1.5rem">${taskCard}${testsCard}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:var(--color-divider);border:1px solid var(--color-divider);margin-bottom:1.5rem">${taskCard}${testsCard}${fanInCard}</div>
       <h2>变更记录</h2>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:var(--color-divider);border:1px solid var(--color-divider)">${commitsCard}${html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:8px">
         <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">Git History</div>
@@ -327,33 +668,55 @@ export async function handleDashboard(
     history = { status: "error", reason: "internal", commits: [], head: null, heads: {} };
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderDashboardPage({ live, sys, mgr, tests, suiteRun, history, tasks }));
+  const hours = timelineHoursFromRequest(req);
+  res.end(renderDashboardPage({ live, sys, mgr, tests, suiteRun, history, tasks }, { workspaceRoot: cfg.workspaceRoot, hours }));
 }
 
-/** /dashboard/cards — the JSON data endpoint the liveCard/testsCard auto-refresh script polls
- *  (gap-dashboard-testscard-livecard-auto-refresh). Re-renders ONLY those two cards and returns them
- *  as HTML fragments; the client swaps each card's own DOM node (never the whole page). `no-store` so
- *  the browser never serves a cached snapshot — a stale live card is exactly what this endpoint exists
- *  to fix. Reads the same observation sources the dashboard page reads, but none of the non-card
- *  probes (sys/mgr/tasks/history), so a poll is lighter than a full /dashboard load. */
+/** /dashboard/cards — the JSON data endpoint the dashboard auto-refresh script polls
+ *  (gap-dashboard-testscard-livecard-auto-refresh, extended by gap-dashboard-visual-review-batch-fixes
+ *  AC5/AC6). Re-renders the five live cards (live/tests/sys/mgr/task) as HTML fragments and returns
+ *  them plus a `sysRaw` snapshot (cpu_stall/loadavg + server ts) for the client-side sparkline; the
+ *  client swaps each card's own DOM node (never the whole page). `no-store` so the browser never serves
+ *  a cached snapshot — a stale card is exactly what this endpoint exists to fix. Reads the same
+ *  observation sources the dashboard page reads (but skips the git-history probe, which only the
+ *  commits card needs). */
 export async function handleDashboardCards(
   req: IncomingMessage,
   res: ServerResponse,
+  client: ProviderClient,
   cfg: { workspaceRoot: string },
 ): Promise<void> {
   let live: LiveResult;
   try { live = readLive(cfg.workspaceRoot); } catch {
     live = { status: "error", reason: "internal", inFlight: [], concurrency: 0, cpuPressure: null, liveState: null, liveExplanation: null, activity: null };
   }
+  const [sys, mgr, tasks] = await Promise.all([
+    readSystem(cfg.workspaceRoot).catch(() => ({
+      status: "error" as const, reason: "internal", resourceGate: { status: "error" as const, reason: null, cpuStallAvg10: null, cpuStallAvg300: null, memAvailMb: null, loadAvg: null, nproc: null, nodeProcs: null, verdict: null, loadThreshold: null, loadOverFactor: null }, processBudget: { status: "error" as const, reason: null, totalBudget: null, inUse: null, available: null, verdict: null },
+    })),
+    readManagerLight(cfg.workspaceRoot).catch(() => ({
+      status: "error" as const, reason: "internal", loopDriver: { status: "error" as const, reason: null, verdict: null, exitCode: null, detail: null }, liveness: { status: "error" as const, reason: null, sessions: [] }, observers: { status: "error" as const, reason: null, rows: [] }, pool: { status: "error" as const, reason: null, pool: null, floor: null, deficit: null, cap: null, lastPromoted: [] }, version: null, developLead: null,
+    })),
+    readTaskSummary(cfg.workspaceRoot, client).catch(() => [] as Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>),
+  ]);
   let tests: TestsResult;
   try { tests = readTests(cfg.workspaceRoot); } catch {
     tests = { status: "error", reason: "internal", runs: [] };
   }
   let suiteRun: CurrentSuiteRun | null;
   try { suiteRun = readCurrentSuiteRun(cfg.workspaceRoot); } catch { suiteRun = null; }
+  const hours = timelineHoursFromRequest(req);
   const payload = JSON.stringify({
-    liveCard: renderLiveCard(live),
-    testsCard: renderTestsCard(tests, suiteRun),
+    liveCard: renderLiveCard(live, Date.now(), tasks),
+    testsCard: renderTestsCard(tests, suiteRun, { hours }),
+    sysCard: renderSysCard(sys),
+    mgrCard: renderMgrCard(mgr),
+    taskCard: renderTaskCard(tasks),
+    sysRaw: {
+      cpuStallAvg10: sys.resourceGate.cpuStallAvg10,
+      loadAvg: sys.resourceGate.loadAvg,
+      ts: Date.now(),
+    },
   });
   res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
   res.end(payload);

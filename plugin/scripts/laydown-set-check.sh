@@ -148,6 +148,10 @@ resolve_tests() {
     for f in "$ROOT"/plugin/test/"$tb" "$ROOT"/packages/*/test/"$tb"; do
       if [ -f "$f" ]; then
         rel="${f#"$ROOT"/}"
+        # archive/** exclusion (§12c): an archived test (archive/<date>/plugin/test/*.test.mjs) is not
+        # part of the live laydown closure — skip it (derive_loop_scripts already drops archived
+        # scripts; this guard keeps this script's OWN test-resolution globs archive-free too).
+        case "$rel" in archive/*|*/archive/*) continue ;; esac
         echo "$rel"
       fi
     done

@@ -1,7 +1,7 @@
 ---
 name: quay-loop-driver
 description: "Drive a workspace's quay task board through a single `iterate` cycle (or iterate* until Stop): select a ready task, isolate it in a dependency-ready worktree, build+test it, gate it, record evidence, and land. Parameterised by `.quay/config.yml` (loop: section) — the same skill, different params, for any workspace. Runner-agnostic and workspace-portable."
-allowed-tools: Bash, Read, mcp__quay__task_list, mcp__quay__task_get, mcp__quay__task_write, mcp__quay__gate_run, mcp__quay__gate_log, mcp__quay__lifecycle_complete, mcp__quay__lifecycle_promote, mcp__quay__lifecycle_retreat, mcp__quay__lifecycle_adjudicate, mcp__quay__action_list, mcp__quay__action_run, mcp__quay__task_check
+allowed-tools: Bash, Read, mcp__plugin_quay_quay__task_list, mcp__plugin_quay_quay__task_get, mcp__plugin_quay_quay__task_write, mcp__plugin_quay_quay__gate_run, mcp__plugin_quay_quay__gate_log, mcp__plugin_quay_quay__lifecycle_complete, mcp__plugin_quay_quay__lifecycle_promote, mcp__plugin_quay_quay__lifecycle_retreat, mcp__plugin_quay_quay__lifecycle_adjudicate, mcp__plugin_quay_quay__action_list, mcp__plugin_quay_quay__action_run, mcp__plugin_quay_quay__task_check
 ---
 
 # quay-loop-driver

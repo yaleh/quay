@@ -1178,6 +1178,16 @@ _derive_loop_scripts_once() {
     printf '%s\n' "$f" >> "$out"
   done
   sort -u "$out" -o "$out"
+  # archive/** exclusion (§12c, SPEC-plugin-lifecycle-single-bundle-2026-09-02): a doc-referenced
+  # script that has been archived (moved to archive/<date>/plugin/scripts/<name>) is no longer part of
+  # the laydown set — restore re-registers it (SPEC §12b-3). Only consult archive/ when it exists.
+  if [ -d "${PLUGIN_ROOT}/../archive" ]; then
+    _archived_names="$(find "${PLUGIN_ROOT}/../archive" -type f 2>/dev/null | sed 's#.*/##' | sort -u | tr '\n' ' ')"
+    if [ -n "${_archived_names}" ]; then
+      awk -v names="${_archived_names}" 'BEGIN{split(names,a," "); for(i in a) skip[a[i]]=1} !($0 in skip)' "$out" > "$out.archfilt"
+      mv "$out.archfilt" "$out"
+    fi
+  fi
   # (d) dependency closure — repeat until fixpoint. ONE python3 pass replaces the retired per-script
   # `grep -oE … | sed … | sort -u` triple + per-dep `grep -qxF` (the per-script subprocess spawns were
   # the dominant wall-clock cost of derive_loop_scripts; gap-quay-init-install-wall-clock-slow AC1/AC3

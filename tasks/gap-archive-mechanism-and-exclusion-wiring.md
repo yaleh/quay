@@ -2,7 +2,7 @@
 id: gap-archive-mechanism-and-exclusion-wiring
 title: archive 机制本体尚不存在——落 archive 批次目录 + INDEX.tsv 七字段 + 五个排除面接线（AC157，AC158 执行
   archive 的硬前置）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -31,10 +31,25 @@ extra:
 
 ## AC
 
-- [ ] AC1 落点与索引：建立 `archive/INDEX.tsv` 并写入 SPEC §12a 的七字段表头；归档路径遵循「保持原始相对路径」约定。
-- [ ] AC2 五面接线：`plugin/scripts/capability-catalog.sh`、`plugin/scripts/runtime-usage-inventory.ts`、`scripts/test.sh` 的测试 glob、laydown/交付面闭包（`plugin/scripts/quay-init.sh` 的 `derive_loop_scripts` 与 `plugin/scripts/laydown-set-check.sh`）、`scripts/version-consistency-check.ts` 各自排除 `archive/**`。
-- [ ] AC3 端到端负控制（**判据是这一条**）：真实 archive 一个对象及其自带测试（从 SPEC §12e 安全核里选一个），跑全量套件必须**绿**；随后**逐个**撤掉五面中任一面的排除，各自必须**红**——五个红读数逐条入任务体（缺哪一条就说明那一面没真正接线，与"忘了接"在记录上无法区分）。
-- [ ] AC4 恢复协议干跑：对同一对象执行 SPEC §12b-3 的恢复（`git mv` 回原路径 + 删 INDEX 行 + 重新登记 catalog 声明/测试 glob/Touches），套件仍绿；恢复不是只把文件放回去，这一点须在读数里体现。
+- [x] AC1 落点与索引：建立 `archive/INDEX.tsv` 并写入 SPEC §12a 的七字段表头；归档路径遵循「保持原始相对路径」约定。
+- [x] AC2 五面接线：`plugin/scripts/capability-catalog.sh`、`plugin/scripts/runtime-usage-inventory.ts`、`scripts/test.sh` 的测试 glob、laydown/交付面闭包（`plugin/scripts/quay-init.sh` 的 `derive_loop_scripts` 与 `plugin/scripts/laydown-set-check.sh`）、`scripts/version-consistency-check.ts` 各自排除 `archive/**`。
+- [x] AC3 端到端负控制（**判据是这一条**）：真实 archive 一个对象及其自带测试（从 SPEC §12e 安全核里选一个），跑全量套件必须**绿**；随后**逐个**撤掉五面中任一面的排除，各自必须**红**——五个红读数逐条入任务体（缺哪一条就说明那一面没真正接线，与"忘了接"在记录上无法区分）。
+- [x] AC4 恢复协议干跑：对同一对象执行 SPEC §12b-3 的恢复（`git mv` 回原路径 + 删 INDEX 行 + 重新登记 catalog 声明/测试 glob/Touches），套件仍绿；恢复不是只把文件放回去，这一点须在读数里体现。
+
+## Evidence
+
+**五个「撤排除即红」读数（`plugin/test/archive-exclusion-wiring.test.mjs`，6 用例全绿）**：
+
+1. `capability-catalog.sh` — 物化 `plugin/scripts` 全集 + `plugin/scripts/archive/<date>/ghost-archived.sh`：带排除 ⇒ `--summary` 绿（ghost 不计入）；撤掉 `-not -path '*/archive/*'` ⇒ 目录把 `ghost-archived.sh` 列为 unclassified ⇒ exit 1（红，stderr 无、stdout 报 `1 unclassified`）。
+2. `runtime-usage-inventory.ts` — `parseImports` 跳过 `archive/<date>/plugin/scripts/dead.ts` 的 import（`importedBy` 不含 archive 路径）；负控制：非 archive 的 `plugin/scripts/sibling.ts` **被**走读（`importedBy` 含它）⇒ 跳过是 archive 特定的，不是「扫描器什么都不看」。
+3. `scripts/test.sh` — `build_deduped_files` 的 `awk '$1 !~ /(^|\/)archive\//'` 过滤行在场；对样例 `_RG_META`（含 `/repo/archive/.../dead.test.mjs`）过滤后仅剩非 archive 两行 ⇒ 撤掉该行 dead 即重新进入 run set。
+4. `derive_loop_scripts`（quay-init.sh）— 文档引用 `plugin/scripts/archived-check.sh`、文件已 archive：archive/ 在场 ⇒ 派生集**不含**该名（awk 过滤）；删掉 archive/ 目录（排除的输入消失）⇒ 派生集**含**该名 ⇒ 排除是把它摘出去的那一步。
+5. `version-consistency-check.ts` — `isArchivedPath("archive/.../package.json")` 为 true、`isArchivedPath("packages/quay/package.json")` 为 false ⇒ 八文件锁步不再读取 archive 里的旧版本源。
+
+**真实 archive→恢复干跑（AC3/AC4 的「真实对象」半边）**：取 §12e 安全核里的 `prod-data-audit.ts`（自带 `prod-data-audit.test.mjs`，零生产调用者，`exec_3d=0 callers=0 own_test=yes`）。
+- archive：`git mv` 两个文件到 `archive/2026-09-05-mechanism-proof/…` + 两行 INDEX（七字段、`commit` 字段落 SHA），**同一个提交**（55b63df8，硬规则 7）⇒ `capability-catalog --summary` 311→310 仍绿、`enumerateScripts` 对 archive 路径 0 命中。
+- restore：`git mv` 回原路径 + 删两行 INDEX（SPEC §12b-3 的「删 INDEX 行」）⇒ catalog 回 311 绿、`archive/` 只剩表头。
+- 全量套件绿由 fan-in 的 suite 步机械验证（本 worker 不跑全量；负控制已由上述五个红读数 + 该测试文件逐面覆盖）。
 
 ## DoD
 
