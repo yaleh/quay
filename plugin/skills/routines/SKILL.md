@@ -1,7 +1,7 @@
 ---
 name: routines
 description: Evaluate the standing routine track from .quay/config.yml loop: section — scheduler → readProbeSpec → dispatch probes → gate findings → FILE-ONLY verify. Replaces OUTER-LOOP.md step 5a.
-allowed-tools: Bash, Read, Write, TaskCreate, TaskUpdate, TaskGet, TaskList, SendMessage, Skill, mcp__quay__task_get, mcp__quay__task_list, mcp__quay__task_write
+allowed-tools: Bash, Read, Write, TaskCreate, TaskUpdate, TaskGet, TaskList, SendMessage, Skill, mcp__plugin_quay_quay__task_get, mcp__plugin_quay_quay__task_list, mcp__plugin_quay_quay__task_write
 ---
 
 # quay:run-routines
