@@ -873,14 +873,16 @@ build_deduped_files() {
   # (archive/<date>/plugin/test/*.test.mjs) must never re-enter the run set. The canonical glob
   # patterns are non-recursive and cannot reach archive/ at the repo root, but the filter keeps the
   # run set correct if a future glob grows a recursive `**` segment.
-  _RG_META="$(printf '%s\n' "${_RG_META}" | awk -F'\t' '$1 !~ /(^|\/)archive\//')"
+  if [ -n "${_RG_META}" ]; then
+    _RG_META="$(printf '%s\n' "${_RG_META}" | awk -F'\t' '$1 !~ /(^|\/)archive\//')"
+  fi
   _RG_META_READY=1
   _RG_FILES=()
   local f
   while IFS=$'\t' read -r f _; do
     [ -n "${f}" ] || continue
     _RG_FILES+=("$f")
-  done <<< "${meta}"
+  done <<< "${_RG_META}"
   printf '%s\n' "${_RG_META}"
 }
 
