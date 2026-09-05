@@ -2,7 +2,7 @@
 id: gap-dashboard-visual-review-batch-fixes
 title: Dashboard 六项改进：Manager 卡假零 bug + 循环脉搏耗时 + 任务台账分组标题视觉权重 + 测试近期列表 + 自动刷新扩展
   + 系统资源前端折线（服务端零持久化）
-status: ready
+status: done
 labels:
   - gap
   - webui
