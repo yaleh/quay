@@ -1,7 +1,7 @@
 ---
 id: gap-serial-lowconc-reclassify-post-waterline-cap
 title: 水位线可靠性上限修复后重验：5 个历史脏 serial/lowconc 候选 130/130 转绿，重分类回 main（engine）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
