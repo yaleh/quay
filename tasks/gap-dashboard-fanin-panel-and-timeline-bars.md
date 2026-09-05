@@ -2,7 +2,7 @@
 id: gap-dashboard-fanin-panel-and-timeline-bars
 title: Dashboard 四项改进：testsCard 补 startedAt/bucket + 测试与新增 fan-in panel
   的过去N小时分段时间轴 + 循环脉搏在飞列表加任务 title
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -84,27 +84,27 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（F）：`renderTestsCard` 对一条带 `startedAt`/`buckets` 的固定 `recentRuns` 输入，渲染 HTML
+- [x] AC1（F）：`renderTestsCard` 对一条带 `startedAt`/`buckets` 的固定 `recentRuns` 输入，渲染 HTML
       同时包含一个由 `relativeTime` 产出的时间字符串与该 `buckets` 原始值；对一条两字段皆为
       `null`/`undefined` 的输入，渲染 HTML 不包含这两个子项对应的固定占位文案（absent-field 契约，
       不是显示"—"）。
-- [ ] AC2（共用渲染函数）：`grep -n "function renderTimelineBarSvg" packages/quay/src/serve-dashboard.ts`
+- [x] AC2（共用渲染函数）：`grep -n "function renderTimelineBarSvg" packages/quay/src/serve-dashboard.ts`
       命中恰好 1 处定义，且 `grep -c "renderTimelineBarSvg(" packages/quay/src/serve-dashboard.ts`
       ≥3（1 处定义 + G、H 两处调用）。
-- [ ] AC3（G）：对固定 `nowMs` 与一组落在/不落在 3 小时窗口内的 `TestRunRecord` 混合输入，
+- [x] AC3（G）：对固定 `nowMs` 与一组落在/不落在 3 小时窗口内的 `TestRunRecord` 混合输入，
       `renderTestsCard` 输出的 SVG 里可数的分段元素（`<rect`）个数等于落在窗口内、且
       `startedAt`/`durationMs` 均可解析的记录数——单测断言这个计数，而不是断言"SVG 存在"。
-- [ ] AC4（H 列表）：新函数对跨任务的固定 `WorkerOutcomeRecord[]` 输入（含 ≥2 个不同 `task`、
+- [x] AC4（H 列表）：新函数对跨任务的固定 `WorkerOutcomeRecord[]` 输入（含 ≥2 个不同 `task`、
       `mechanical_fan_in` 均非空），渲染 HTML 按 `lockAcquireEpoch` 降序排列，且每行文本包含各自的
       `outcome`/`task` id——单测断言顺序与内容，同时断言对 `mechanical_fan_in == null` 的记录被过滤
       掉（不出现在渲染结果里）。
-- [ ] AC5（H bar + 挂载）：`renderDashboardPage` 输出的 HTML 里 `grep` 能命中 `id="fanin-card"`；对
+- [x] AC5（H bar + 挂载）：`renderDashboardPage` 输出的 HTML 里 `grep` 能命中 `id="fanin-card"`；对
       落在窗口内的 `mechanical_fan_in` 记录，AC3 同款计数判据（`<rect` 个数 = 窗口内可解析记录数）
       在 fan-in 卡片的 SVG 里同样成立。
-- [ ] AC6（I）：`renderLiveCard` 对一个 `startedAtMs` 已知的 `InFlightTask` + 一份包含该 taskId→title
+- [x] AC6（I）：`renderLiveCard` 对一个 `startedAtMs` 已知的 `InFlightTask` + 一份包含该 taskId→title
       映射的 `tasks` 输入，`liveMiniList` 渲染 HTML 包含该任务的 title 全文；`handleDashboardCards`
       源码里 `grep -n "readTaskSummary"` 命中（不再是只有 `handleDashboard` 一处调用）。
-- [ ] AC7（可配置窗口）：`handleDashboard`/`handleDashboardCards` 对 `?hours=6` 的请求，AC3/AC5 的计数
+- [x] AC7（可配置窗口）：`handleDashboard`/`handleDashboardCards` 对 `?hours=6` 的请求，AC3/AC5 的计数
       判据在 6 小时窗口下与 3 小时窗口下产生不同的结果（用一组横跨 3-6 小时的固定输入验证两个窗口值
       确实过滤出不同的段数，而不是窗口参数被读取但从未真正生效）；对 `?hours=` 缺失或非法值
       （如 `abc`、`0`、`999`），回退到默认 3 且不报错（HTTP 200）。
