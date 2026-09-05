@@ -88,5 +88,6 @@ EXIT=0——不再 kernel-not-found；内核经 worktree 重定向解析到主�
 - packages/quay/src/plugin-root.ts（新，唯一解析器）
 - packages/quay/src/cli/driver.ts（内核路径解析改走新解析器，保留 AC139-4 的拒 worktree 语义）
 - packages/quay/test/plugin-root.test.mjs（新，双向负控制：worktree 不得命中、无本地 plugin 仍可解析）
+- packages/quay/test/serve-handlers.test.mjs（改：AC1 驱动的 mock kernel 原靠 workspace-root 拼 plugin/scripts 命中——driver.ts 改走 plugin-root 后该 mock 被绕过、真内核输出 not-running 而红；改经 QUAY_PLUGIN_ROOT 环境 seam 指向 mock）
 - orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md（回填 §6b 选定方案与被否理由）
 - tasks/gap-plugin-root-resolution-non-skill-entrypoints.md（自身）
