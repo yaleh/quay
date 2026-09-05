@@ -509,6 +509,19 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/test/ packages/*/test/ experiments/*/test/ scripts/test.sh plugin/scripts/test-file-snapshot.sh
   run_checker "test-file-snapshot-check" bash "${repo_root}/plugin/scripts/test-file-snapshot.sh" --repo-relative check "${repo_root}/docs/analysis/test-file-baseline.txt"
+  echo "== quay-init laydown footprint ratchet (gap-quay-init-closure-assertion-first, SPEC AC168 判据先行) =="
+  # AC168 判据先行 (SPEC §8 AC3/AC4 — 安装写入闭集): the shrink-only ratchet over the REAL
+  # `quay-init --all --loop --manager` laydown footprint (files + bytes). Baseline = the measured
+  # current footprint (recorded in the task body; §2.9 measured 142 files / 7.1 MB — the current value
+  # is lower after mechanism-layer script retirements). 只许降不许升 — any change that makes quay-init
+  # lay ONE MORE file/byte goes RED immediately; the closure shrink (AC168 body) later walks the
+  # baseline down to the §6 闭集. The measurement is the PRODUCTION CARRIER: the checker RUNS a real
+  # laydown into a fresh temp target (never reads derive_loop_scripts' static derivation, never a
+  # fixture — SPEC AC4 反例判据). NOT-EVALUATED (exit 3) when the laydown cannot run (硬规则 3b:
+  # 读不懂输入 ≠ 合格). Negative controls (baseline-1 ⇒ RED / baseline+1 ⇒ GREEN) pinned by
+  # plugin/test/quay-init-closure-ratchet.test.mjs + checker-mutation-cases/quay-init-closure-ratchet.sh.
+  # @static-tier full  (whole-store ratchet — deferred to the full-suite gate in scoped mode)
+  run_checker "quay-init-closure-ratchet" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/quay-init-closure-ratchet.ts" --gate --root "${repo_root}"
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait
