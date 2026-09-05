@@ -18,6 +18,10 @@ extra:
 
 `gap-serial-lowconc-reclassify-post-waterline-cap`（done）已经把 5 个有**明确历史失败证据**（曾反复失败、随水位线可靠性上限修复消失）的文件挪回了 main（engine）。当时同一批梳理里，`plugin/test-isolation-violations.txt` 命中的 4 个文件（`runner-grouping-flags-only.test.mjs`/`runner-grouping-list-groups.test.mjs`/`runner-grouping-serial-anti-stomp.test.mjs`/`select-tests-for-touches.test.mjs`）与 3 个自指测试（测 grouping/cgroup/worker-driver 机制自身行为的 `full-suite-runner.test.mjs`/`full-suite-runner-cgroup.test.mjs`/`worker-driver.test.mjs`）被排除，留给各自的理由处理。
 
+**⚠️ 2026-09-05 订正（人指出对上述 4 个文件"共享临时路径/端口撞车"的归因是猜测，未核实——查证后确认猜错，且这 4 个文件不该被当成"待修缺陷"，本任务永久排除，不是临时排除）**：
+
+`plugin/test-isolation-violations.txt` 里这 4 个文件的真实规则键是 **R3 `spawns-test-sh`**（"嵌套整跑 scripts/test.sh"），不是 R1/R6/R8 那类临时路径/端口撞车。读源码确认它们全部带 `@load-sensitive nested-spawn` 标注，且真的 `spawnSync("bash", [testSh, ...])` 调用真实的 `scripts/test.sh`（分别跑 `--group lowconc` 子套件 / `--list-groups`+`--list-files` 元数据模式 / `--group governance` / `--for-task` 带独立 worker pool）——这是**刻意设计**，目的就是验证 `scripts/test.sh` 自身的真实 CLI 行为（源码注释："shell out to the REAL scripts/test.sh — the single source of truth, not a copy of its logic"），已被人为特意路由到 serial 相（见 `gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests`）。**这 4 个文件各自嵌套起一个真实的子进程套件调用，在 main 相高并发下资源开销是乘法级放大——隔离本身就是正确处理方式，不是需要绕过的限制，永久不属于任何"重分类回 main"候选池**（不只是本任务不处理，是这类文件结构性地不该被这么处理）。
+
 **本任务处理剩下的 16 个 serial/lowconc 文件——它们既不在隔离违规名单上，也不是自指机制测试，且真实历史失败率修复前就已经接近零**（`.quay/verification-round.jsonl` 全历史核对，水位线修复 2026-09-04T13:42:52Z 前）：
 
 | 文件 | 原分组 | 修复前失败/总运行 |

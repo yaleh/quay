@@ -31,6 +31,14 @@ extra:
 
 **诚实的局限（如实写入，不回避）**：26 次/文件、约 15 小时窗口的样本量是有说服力但非穷尽的证据——不能排除极低频复发。本任务因此把验证拆成两层：落地时可机械核验的部分（AC1/AC2），和需要真实生产轮次积累才能确认的部分（AC3，明确标注"真·待外部"，不是逃逸舱——`gap-suite-scheduler-perfile-cpu-emitter-missing` 的 AC3/AC5 是本仓库里这个模式的正确先例）。
 
+**⚠️ 2026-09-05 订正（人指出"共享临时路径/端口撞车"这个归因是猜测，未核实——查证后确认是猜错了，且这 4 个文件不该被当成"待修缺陷"）**：
+
+`plugin/test-isolation-violations.txt` 里这 4 个文件的真实规则键是 **R3 `spawns-test-sh`**（"嵌套整跑 scripts/test.sh"），不是 R1/R6/R8 那类"固定路径写入/mkdtemp 泄漏/共享 checkout 内建 mkdtemp"式的临时路径/端口撞车——此前"共享临时路径/端口撞车"的归因是未核实规则键的猜测，已查证是错的。
+
+进一步读了这 4 个文件的源码：它们全部带 `@load-sensitive nested-spawn` 标注，且真的 `spawnSync("bash", [testSh, ...])` 去调用真实的 `scripts/test.sh`（`runner-grouping-flags-only.test.mjs` 跑 `--group lowconc` 子套件、`runner-grouping-list-groups.test.mjs` 跑 `--list-groups`/`--list-files` 元数据模式、`runner-grouping-serial-anti-stomp.test.mjs` 跑 `--group governance`、`select-tests-for-touches.test.mjs` 跑 `--for-task` 带独立 worker pool）——这是**刻意设计**，目的就是验证 `scripts/test.sh` 自身的真实 CLI 行为（"针对唯一正本，不是抄一份逻辑"，源码注释原话），已被人为特意路由到 serial 相（见 `gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests`）。
+
+**结论：这 4 个文件（`runner-grouping-flags-only.test.mjs`/`runner-grouping-list-groups.test.mjs`/`runner-grouping-serial-anti-stomp.test.mjs`/`select-tests-for-touches.test.mjs`）不是缺陷，不该修，也不该纳入任何"重分类回 main"的候选**——它们各自嵌套起一个真实的子进程套件调用，若在 main 相高并发下同时跑，资源开销是乘法级放大（不是"多一个邻居"），隔离本身就是对的处理方式，不是需要绕过的限制。唯一可能有价值的独立优化方向是"降低嵌套调用本身的开销"（核实是否已用最窄参数），但那是与本任务无关的性能问题，不改变它们该留在低并发相这个结论。
+
 ## Plan
 
 1. **逐文件、非批量重分类**：对上述 5 个文件，逐一把文件头 `// @test-group serial|lowconc` 改为 `// @test-group engine`（对齐已经在 main 桶、同样修复后转绿的 `writestate-atomicity-split.test.mjs`/`suite-bucket-reattr-ratchet-check.test.mjs` 的分组选择）。**每个文件的改动在 diff 里必须可单独识别**（哪怕合并成一次提交，也要保证 `git diff` 逐文件可读）——这样如果监控窗口里某一个文件真的复发，能精确回滚那一个文件而不是全部撤回。
