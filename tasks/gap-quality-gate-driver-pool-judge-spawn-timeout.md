@@ -53,23 +53,23 @@ schema agent 才能满足其 AC5）——**不先修这条，新例程会复现�
 
 ## Acceptance Criteria
 
-- [ ] AC1（不再用固定字面量阻塞，硬规则 4 推论：成本结构未知前不设数值阈值）：B15 的 judge
+- [x] AC1（不再用固定字面量阻塞，硬规则 4 推论：成本结构未知前不设数值阈值）：B15 的 judge
   调用改为非阻塞 `spawn`（同 `gap-worker-driver-async-selector-readypool` 的既有模式），
   或者把超时值从"读宿主/读历史耗时分布"推导，而不是继续用一个从未基于真实耗时数据设定的
   `180_000` 字面量——两者选一，但不得原地加大字面量了事（那只是把同一个未测量的假设换一个
   数字，硬规则 4 推论原文）。
-- [ ] AC2（三态不回归）：修复后 `.quay/quality-round.jsonl` 里"未触发/resource-gate 推迟/
+- [x] AC2（三态不回归）：修复后 `.quay/quality-round.jsonl` 里"未触发/resource-gate 推迟/
   judge 失败/judge 成功"四态继续可区分（沿用现有 `state` 字段值），不得为了让"不超时"而把
   失败态悄悄合并进成功态。
-- [ ] AC3（B17 不受影响）：`judgment-consumer-check` 例程的调用路径/超时行为改动前后一致
+- [x] AC3（B17 不受影响）：`judgment-consumer-check` 例程的调用路径/超时行为改动前后一致
   （它本来就不发 LLM 调用，2/2 次真实运行已成功，本条不得触碰它）。
-- [ ] AC4（真实生产验证，硬规则 4 推论三，判据读生产不读测试）：修复落地**之后**，quality
+- [ ] AC4（真实生产验证，硬规则 4 推论三，判据读生产不读测试）：修复落地**之后**，quality（待外部）
   driver 在**主检出**实际跑出 ≥1 条 B15 **成功**（`state` 非 `failed`/`not-evaluated`，含真实
   `verdicts` 或明确"本轮池内容为空"之外的结果）的记录，`judgedAt` 晚于本任务落地时刻——
   贴出该记录的实际内容。
-- [ ] AC5（负控制）：人为把 timeout 调回一个明显不够的值重跑一次，仍复现 `ETIMEDOUT`——
+- [x] AC5（负控制）：人为把 timeout 调回一个明显不够的值重跑一次，仍复现 `ETIMEDOUT`——
   证明修复对象是真实瓶颈而非巧合。
-- [ ] AC6（既有不回归）：`--for-task` scoped 门 + 全量 suite 绿；`plugin/test/quality-gate-driver.test.mjs`
+- [x] AC6（既有不回归）：`--for-task` scoped 门 + 全量 suite 绿；`plugin/test/quality-gate-driver.test.mjs`
   既有断言（含依赖 `ROUTINE_TIMEOUT_MS` 常量或其行为的用例）同步更新且仍过。
 
 ## Definition of Done
