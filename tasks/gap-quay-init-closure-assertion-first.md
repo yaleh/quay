@@ -41,15 +41,19 @@ extra:
 `136 文件 / 6,886,001 字节`（主检出实测）。**与 §2.9 的 142/7.1MB 对照**：更低，因为 §2.9（2026-09-04）之后机制层脚本有退役（observer 机制 09-03 退役等），脚本数 117–131 → 111。
 
 **棘轮基线**（判据实际用的量，`⛔ 排除 .quay/`）：
-`130 文件 / 3,820,122 字节`。**为什么排除 `.quay/`**：它是 quay 自己的生成态命名空间——`config.yml` 内嵌随机 target 绝对路径（mcp_entry/repo_root/worktree_root）、`quay-init-state.json` 内嵌 `laidAt` 时间戳 + runtime sha256、`.quay/runtime/` 是 gitignored 生成 dist（字节随构建环境变）。**含它们则字节基线在主检出与全新 worktree 间不可复现**（本任务实测：主检出 dist 重建后 worktree 再建，dist 差 ~13KB ⇒ 全量字节 6,886,001 → 6,899,047 假红）。排除后**连续两次 laydown 字节逐字节一致**（3,820,122 == 3,820,122），跨环境可复现——棘轮锁的是「逐字节复制的稳定拷贝集」（pollution footprint），不是生成态。
+`130 文件 / 3,822,321 字节`。**为什么排除 `.quay/`**：它是 quay 自己的生成态命名空间——`config.yml` 内嵌随机 target 绝对路径（mcp_entry/repo_root/worktree_root）、`quay-init-state.json` 内嵌 `laidAt` 时间戳 + runtime sha256、`.quay/runtime/` 是 gitignored 生成 dist（字节随构建环境变）。**含它们则字节基线在主检出与全新 worktree 间不可复现**（本任务实测：主检出 dist 重建后 worktree 再建，dist 差 ~13KB ⇒ 全量字节 6,886,001 → 6,899,047 假红）。排除后**连续两次 laydown 字节逐字节一致**（3,822,321 == 3,822,321），跨环境可复现——棘轮锁的是「逐字节复制的稳定拷贝集」（pollution footprint），不是生成态。
 
 **负控制读数（两个方向各实测一次，入任务体）**：
-- `checkClosureRatchet({files:130,bytes:3820122}, {files:129,bytes:3820122})` ⇒ `ok:false`（基线降 1 必红，证明真在数生产产物）——单测 `基线降 1 必须红` 钉住。
-- `checkClosureRatchet({files:130,bytes:3820122}, {files:131,bytes:3820122})` ⇒ `ok:true`（基线升 1 必绿，证明棘轮方向正确、只许降不许升）——单测 `基线升 1 必须绿` 钉住。
+- `checkClosureRatchet({files:130,bytes:3822321}, {files:129,bytes:3822321})` ⇒ `ok:false`（基线降 1 必红，证明真在数生产产物）——单测 `基线降 1 必须红` 钉住。
+- `checkClosureRatchet({files:130,bytes:3822321}, {files:131,bytes:3822321})` ⇒ `ok:true`（基线升 1 必绿，证明棘轮方向正确、只许降不许升）——单测 `基线升 1 必须绿` 钉住。
 - 落地量涨 1（fake laydown 3 文件 vs 基线 2）⇒ checker 必红——mutation case `checker-mutation-cases/quay-init-closure-ratchet.sh` 实测 `exit 0`（绿→红→绿 三态全证）。
 - 真实 laydown 跑不起来（无 `quay-init.sh`）⇒ `evaluated:false`、exit 3 `NOT-EVALUATED`——单测 `hard rule 3b` 钉住。
 
-**本任务落地轮实测**：`node quay-init-closure-ratchet.ts --gate --root <worktree> --json` ⇒ `{"evaluated":true,"files":130,"bytes":3820122,"ok":true,...}`（绿）；`checker-mutation-check --list` ⇒ `checkers_total:60 checkers_with_mutation:60 uncovered:none`（新 checker 已覆盖）；catalog `--summary` ⇒ `311 scripts | 311 declared | 0 unclassified`。
+**本任务落地轮实测**：`node quay-init-closure-ratchet.ts --gate --root <worktree> --json` ⇒ `{"evaluated":true,"files":130,"bytes":3822321,"ok":true,...}`（绿）；`checker-mutation-check --list` ⇒ `checkers_total:61 checkers_with_mutation:61 uncovered:none`（新 checker 已覆盖）；catalog `--summary` ⇒ `312 scripts | 312 declared | 0 unclassified`。
+
+**重测（2026-09-05 merge develop 后）**：字节基线 3,820,122 → **3,822,321**（develop 带入的机制脚本内容编辑——`gap-archive-mechanism-and-exclusion-wiring` 的 archive 排除、`gap-skill-allowed-tools-plugin-namespace` 等——使逐字节拷贝集的字节增长，文件数仍 **130** 不变）；连续两次 laydown 字节仍逐字节一致（3,822,321 == 3,822,321），可复现。文件数未变说明新机制脚本尚未进入 laydown 集（derive_loop_scripts 未引用），仅字节随既有拷贝集内容演进。
+
+**落地轮根因修复（2026-09-05，上一轮 `infra-error` 的真因）**：判据 `runLaydown` 起初把临时 laydown 目标放在 `<root>/.quay/quay-init-ratchet-*/`（**repo 内**）。`quay-init.sh` 的 auto-commit 在 `PRE_EXISTING_CHANGES` 为空（铺设前树干净）时**无条件 `git commit`**（`--auto-commit-skip` 只在 `PRE_EXISTING_CHANGES` 非空的分支里才被读，对干净树无效）——`git -C <target>` 从 repo 内临时目录**向上解析到本仓库** ⇒ 整个 130 文件 laydown 被提交进仓库自身历史（两次：`a4b8ab1f8` / `4e68d3d6f`），且恰在套件中途提交 ⇒ `treeMutatedMidRound=true` ⇒ 全绿被作废为 `infra-error`。修复：临时目标移到 repo 外（`path.dirname(root)` 的兄弟目录，仍是真实磁盘、非 tmpfs）⇒ `git -C target` 解析不到任何 work tree ⇒ quay-init auto-commit 走「not a git repository」SKIP。落地轮实测：跑判据前后 `git rev-parse HEAD` 不变（无新 auto-commit）、计数不变（130 文件 / 3,822,321 字节，绿）。
 
 ## DoD
 

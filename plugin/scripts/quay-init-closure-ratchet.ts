@@ -52,7 +52,7 @@ const EXCLUDED_TOP_DIRS: ReadonlySet<string> = new Set([".quay"]);
 // difference is: (a) mechanism-layer scripts retired between the two measurements, (b) this baseline
 // excludes the generated `.quay/` namespace §2.9 included). Shrink-only: the laydown must stay ≤ this.
 export const BASELINE_FILES = 130;
-export const BASELINE_BYTES = 3820122;
+export const BASELINE_BYTES = 3822321;
 
 export interface ClosureCount {
   files: number;
@@ -111,16 +111,21 @@ export function countTree(dir: string, exclude: ReadonlySet<string> = new Set())
 /**
  * Run ONE real `quay-init --all --loop --manager` laydown into a fresh temp target and count the
  * product. Returns evaluated:false (NOT-EVALUATED) when quay-init.sh is absent or the laydown exits
- * non-zero. The temp target + worktree-root live under `<root>/.quay/` (a DISK path — os.tmpdir() is
- * tmpfs here and quay-init's validate_worktree_root fails closed on tmpfs) and are removed in finally.
+ * non-zero. The temp target + worktree-root live OUTSIDE the repo (a sibling of `<root>` — a real
+ * disk path; os.tmpdir() is tmpfs here and quay-init's validate_worktree_root fails closed on tmpfs),
+ * NOT inside `<root>/.quay/`: quay-init's auto-commit runs `git add`/`git commit` at the --root
+ * target, and a target INSIDE the repo makes `git -C target` resolve UP to the repo — the auto-commit
+ * then commits the whole laydown into the repo's own history (the exact pollution this ratchet exists
+ * to prevent; the prior round's a4b8ab1f8 / 4e68d3d6f and the mid-round tree mutation ⇒ infra-error).
+ * A sibling dir is outside any git work tree ⇒ quay-init's auto-commit SKIPs (not a git repository).
+ * Removed in finally.
  */
 export function runLaydown(root: string, opts: { timeoutMs?: number } = {}): LaydownResult {
   const quayInit = path.join(root, "plugin", "scripts", "quay-init.sh");
   if (!fs.existsSync(quayInit)) {
     return { evaluated: false, files: 0, bytes: 0, error: `quay-init.sh not found at ${quayInit}` };
   }
-  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
-  const tmpBase = fs.mkdtempSync(path.join(root, ".quay", "quay-init-ratchet-"));
+  const tmpBase = fs.mkdtempSync(path.join(path.dirname(root), "quay-init-ratchet-"));
   const target = path.join(tmpBase, "target");
   const worktreeRoot = path.join(tmpBase, "worktrees");
   fs.mkdirSync(target);
