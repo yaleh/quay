@@ -1,7 +1,7 @@
 ---
 id: gap-psi-shadow-admission-controller
 title: PSI 反馈准入——影子模式验证（先用现有数据测增量预测力，再决定是否上实时观察字段）
-status: ready
+status: needs-human
 labels:
   - gap
 parent: null
@@ -72,3 +72,12 @@ Phase 0 用主动诱发（候选已排除隔离违规文件）+ 被动历史联�
 - plugin/scripts/suite-load-sampler.ts（Phase 1，仅当判定进入 Phase 1 时改动：追加 would_throttle 派生字段）
 - plugin/test/suite-load-sampler.test.mjs（新，Phase 1 单测：would_throttle 派生函数，仅当 Phase 1 适用时新增）
 - tasks/gap-psi-shadow-admission-controller.md（自身）
+
+## Needs-Human
+
+**执行 2026-09-05T07:24:08.909Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：AC 未全勾（checked 0/6，剩余未勾 6）——续做只需验证并勾选 AC
+- run_id：wk-prod-1788285192
+- session_id：fcbe20bd-12d2-4b29-94fe-3233edbf0b04
