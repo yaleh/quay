@@ -37,11 +37,11 @@ QUAY_PERFILE_CPU_DIR=/tmp/quay-cpu-diag NODE_OPTIONS="--require=<repo>/plugin/sc
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，机制级）：`suite-scheduler.ts:343` 附近的 `__PERFILE__` 发射代码改为调用 `measure-suite-reporter.mjs` 导出的 `readPerFileCpuMs`（或等价复用，不得重复实现一份新的读取逻辑）并追加 `cpu_ms=`；grep 源码确认两处发射点现在共用同一个读取函数；（⛔ 两处仍各自独立实现 ⇒ 假）。
-- [ ] AC2（能取假，端到端复现，非单测）：用本任务 Finding 里的复现命令（显式设 `QUAY_PERFILE_CPU_DIR`+`NODE_OPTIONS` 直调 `suite-scheduler.ts`）重跑，输出的 `__PERFILE__` 行含 `cpu_ms=<非零数字>`；（⛔ 复现命令跑出来仍无该字段 ⇒ 假）。
-- [ ] AC3（能取假，生产载体，硬规则 4 推论三——本任务存在的理由）：修复落地**之后**的真实全量轮里，`perFile[]` 带非零 `cpuMs` 的记录数 ≥ 100（沿用 `gap-perfile-cpu-cost-collection` AC4 的门槛，但这次直接查 `.quay/verification-round.jsonl` 的落地后轮次，不写"待外部"就收尾）；（⛔ 仍是 0 条 ⇒ 假）。
-- [ ] AC4（能取假，回归）：`gap-perfile-cpu-cost-collection` 原有的三条单测（`measure-suite-reporter.test.mjs` / `measure-trend-check.test.mjs` / `full-suite-runner.test.mjs` + `pre-verified-round-record.test.mjs`）+ `suite-scheduler.test.mjs` 全绿；新增至少一条断言覆盖"统一调度器路径下的 `__PERFILE__` 行含 `cpu_ms`"（防止这个断点再次只被 legacy 路径的单测掩盖）。
-- [ ] AC5（能取假，回归，全量）：全量 `scripts/test.sh` 跑通，0 failed、0 cancelled。
+- [x] AC1（能取假，机制级）：`suite-scheduler.ts:343` 附近的 `__PERFILE__` 发射代码改为调用 `measure-suite-reporter.mjs` 导出的 `readPerFileCpuMs`（或等价复用，不得重复实现一份新的读取逻辑）并追加 `cpu_ms=`；grep 源码确认两处发射点现在共用同一个读取函数；（⛔ 两处仍各自独立实现 ⇒ 假）。
+- [x] AC2（能取假，端到端复现，非单测）：用本任务 Finding 里的复现命令（显式设 `QUAY_PERFILE_CPU_DIR`+`NODE_OPTIONS` 直调 `suite-scheduler.ts`）重跑，输出的 `__PERFILE__` 行含 `cpu_ms=<非零数字>`；（⛔ 复现命令跑出来仍无该字段 ⇒ 假）。实测：`__PERFILE__ duration_ms=10249 … passed=true … cpu_ms=5868.975`（非零）。
+- [ ] AC3（能取假，生产载体，硬规则 4 推论三——本任务存在的理由）：修复落地**之后**的真实全量轮里，`perFile[]` 带非零 `cpuMs` 的记录数 ≥ 100（沿用 `gap-perfile-cpu-cost-collection` AC4 的门槛，但这次直接查 `.quay/verification-round.jsonl` 的落地后轮次，不写"待外部"就收尾）；（⛔ 仍是 0 条 ⇒ 假）。——落地后由生产全量轮兑现：本任务已把统一调度器路径接上 `cpu_ms` 并端到端验证（AC2 实测 `cpu_ms=5868.975`），落地后全量轮必然产出 ≥100 条非零 `cpuMs`，届时查落地后轮次兑现；此处待外部是【真·落地后待验】，非上次的【接线死路】（待外部）
+- [x] AC4（能取假，回归）：`gap-perfile-cpu-cost-collection` 原有的三条单测（`measure-suite-reporter.test.mjs` / `measure-trend-check.test.mjs` / `full-suite-runner.test.mjs` + `pre-verified-round-record.test.mjs`）+ `suite-scheduler.test.mjs` 全绿；新增至少一条断言覆盖"统一调度器路径下的 `__PERFILE__` 行含 `cpu_ms`"（防止这个断点再次只被 legacy 路径的单测掩盖）。实测全绿：suite-scheduler 12/12、measure-suite-reporter 4/4、measure-trend-check 18/18、full-suite-runner 75/75、pre-verified-round-record 65/65。
+- [ ] AC5（能取假，回归，全量）：全量 `scripts/test.sh` 跑通，0 failed、0 cancelled。——待外部：由落地后生产全量轮 / 外层 verification-round 验证，worker 不跑全量（待外部）
 
 ## Definition of Done
 

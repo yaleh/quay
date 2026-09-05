@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readPerFileCpuMs } from "../scripts/measure-suite-reporter.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..", "..");
@@ -63,4 +64,11 @@ test("full-suite-runner.ts wires per-file CPU collection (route a: QUAY_PERFILE_
   assert.match(src, /NODE_OPTIONS/, "full-suite-runner.ts must wire NODE_OPTIONS (the --require preload seam)");
   const preload = join(repoRoot, "plugin", "scripts", "per-file-cpu-report.mjs");
   assert.ok(existsSync(preload), "the route (a) preload module must exist next to the reporter");
+});
+
+test("readPerFileCpuMs is a shared named export (suite-scheduler.ts reuses it, never a second reader)", () => {
+  // gap-suite-scheduler-perfile-cpu-emitter-missing — the __PERFILE__ line has TWO emission points
+  // (this reporter's legacy/LPT path + suite-scheduler.ts's own finishFile). The scheduler must import
+  // THIS function rather than reimplementing the .cpu read, or the two paths drift apart again.
+  assert.equal(typeof readPerFileCpuMs, "function", "measure-suite-reporter.mjs must export readPerFileCpuMs");
 });

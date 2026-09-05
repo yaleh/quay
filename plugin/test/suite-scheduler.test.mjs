@@ -24,6 +24,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
@@ -34,6 +35,7 @@ import {
   toSuiteGroup,
   groupsArgToSuiteGroups,
 } from "../scripts/suite-scheduler.ts";
+import { readPerFileCpuMs } from "../scripts/measure-suite-reporter.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCHEDULER_CLI = path.join(__dirname, "..", "scripts", "suite-scheduler.ts");
@@ -224,6 +226,71 @@ test("runScheduler — pass/fail-neutral execution: exit aggregate = failed-file
     assert.equal(r.status, 1, `one failing file ⇒ exit 1 (stderr: ${r.stderr})`);
     assert.match(r.stderr, new RegExp(`__PERFILE__ .* ${badFile} passed=false`), "the failing file is flagged passed=false");
     assert.match(r.stderr, new RegExp(`__PERFILE__ .* ${okFile} passed=true`), "the passing file is flagged passed=true");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// gap-suite-scheduler-perfile-cpu-emitter-missing — the unified scheduler's __PERFILE__ line was a
+// SECOND, independent emission point that never appended cpu_ms (gap-perfile-cpu-cost-collection only
+// fixed measure-suite-reporter.mjs's legacy/LPT path). These two tests pin the fix: (1) the scheduler
+// REUSES the reporter's single reader (no duplicate read), and (2) an end-to-end subprocess run through
+// the unified scheduler path actually emits `cpu_ms=` on its __PERFILE__ line.
+
+test("readPerFileCpuMs — shared single reader exported from measure-suite-reporter.mjs (no duplicate impl in scheduler)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cpu-read-"));
+  try {
+    const file = path.join(dir, "x.test.mjs");
+    // The key MUST be sha256(path.resolve(file))[:16] — byte-identical to per-file-cpu-report.mjs's writer.
+    const key = crypto.createHash("sha256").update(path.resolve(file)).digest("hex").slice(0, 16);
+    fs.writeFileSync(path.join(dir, `${key}.cpu`), "1234.5\n", "utf8");
+    process.env.QUAY_PERFILE_CPU_DIR = dir;
+    try {
+      assert.equal(readPerFileCpuMs(file), 1234.5, "a written .cpu report reads back as a number");
+      // Absent report ⇒ undefined (the caller then OMITS cpu_ms, never fabricates a 0 — 硬规则 3b).
+      assert.equal(readPerFileCpuMs(path.join(dir, "absent.test.mjs")), undefined);
+    } finally {
+      delete process.env.QUAY_PERFILE_CPU_DIR;
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runScheduler — unified-scheduler __PERFILE__ line carries cpu_ms (route a preload seam)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sched-cpu-"));
+  const cpuDir = path.join(dir, "cpu");
+  try {
+    const okFile = path.join(dir, "ok.test.mjs");
+    fs.writeFileSync(okFile, 'import { test } from "node:test";\ntest("passes", () => {});\n');
+    const childEnv = { ...process.env };
+    for (const k of Object.keys(childEnv)) {
+      if (k.startsWith("NODE_TEST_")) delete childEnv[k];
+    }
+    // Wire the route (a) preload seam the same way full-suite-runner.ts's suiteEnv does: the scheduler's
+    // run({isolation:"process"}) children inherit NODE_OPTIONS and write their own process.cpuUsage() to
+    // QUAY_PERFILE_CPU_DIR on exit; the scheduler's finishFile reads it back via readPerFileCpuMs.
+    childEnv.QUAY_PERFILE_CPU_DIR = cpuDir;
+    const preload = path.join(__dirname, "..", "scripts", "per-file-cpu-report.mjs");
+    childEnv.NODE_OPTIONS = `${childEnv.NODE_OPTIONS ? childEnv.NODE_OPTIONS + " " : ""}--require=${preload}`;
+
+    const manifest = `${okFile}\n`;
+    const r = spawnSync(
+      process.execPath,
+      ["--no-warnings", "--experimental-strip-types", SCHEDULER_CLI,
+        "--root", dir, "--main-root", dir,
+        "--serial-concurrency", "1", "--lowconc-concurrency", "1", "--main-concurrency", "1",
+        "--groups", "product,engine"],
+      { input: manifest, encoding: "utf8", env: childEnv },
+    );
+    assert.equal(r.status, 0, `scheduler should exit 0 (stderr: ${r.stderr})`);
+    // The unified scheduler's own __PERFILE__ line must now carry cpu_ms=<digits> — not just the legacy
+    // reporter's. This is the exact break that gap-perfile-cpu-cost-collection's unit tests missed.
+    assert.match(
+      r.stderr,
+      new RegExp(`__PERFILE__ .* ${okFile} passed=true .* cpu_ms=[0-9]`),
+      `unified-scheduler __PERFILE__ line must carry cpu_ms (stderr: ${r.stderr})`,
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

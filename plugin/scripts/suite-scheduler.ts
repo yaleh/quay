@@ -70,6 +70,7 @@ import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { classifyFile, type DeclaredGroup } from "./runner-grouping.ts";
 import { loadDurationAverages, orderByLpt } from "./suite-lpt-order.ts";
+import { readPerFileCpuMs } from "./measure-suite-reporter.mjs";
 
 export type SuiteGroup = "serial" | "lowconc" | "main";
 export const SUITE_GROUPS: SuiteGroup[] = ["serial", "lowconc", "main"];
@@ -340,7 +341,13 @@ export function runScheduler(opts: {
         failedFiles.push(rec.file);
       }
       st.endMs = Date.now();
-      process.stderr.write(`__PERFILE__ duration_ms=${dur} ${rec.file} passed=${passed} end_ms=${st.endMs}\n`);
+      // gap-suite-scheduler-perfile-cpu-emitter-missing — the unified scheduler's __PERFILE__ line
+      // must carry the SAME per-file CPU the legacy/LPT path emits. Reuse measure-suite-reporter's
+      // single reader (readPerFileCpuMs) — ⛔ NOT a second hand-rolled read: absent = "not measured"
+      // (field omitted), never a fabricated 0 (硬规则 3b).
+      const cpuMs = readPerFileCpuMs(rec.file);
+      const cpuPart = cpuMs !== undefined ? ` cpu_ms=${cpuMs}` : "";
+      process.stderr.write(`__PERFILE__ duration_ms=${dur} ${rec.file} passed=${passed} end_ms=${st.endMs}${cpuPart}\n`);
       // A group closes when its queue is drained AND nothing of it is still running — emit its
       // __GROUP__ + __OVERHEAD__ <group>_phase_ms once, at close (the downstream accounting reads
       // one __GROUP__ per group, same shape as measure-suite-reporter's per-phase line).

@@ -136,7 +136,11 @@ function readConcurrency() {
 // no race. The key (sha256(path.resolve(file))[:16]) MUST match the preload's key byte-for-byte.
 // Returns the CPU milliseconds, or undefined when the dir is unset / the file was never written — the
 // caller then OMITS `cpu_ms` from the line (absent = "not measured", never a fabricated 0; 硬规则 3b).
-function readPerFileCpuMs(file) {
+// Exported so the unified scheduler (suite-scheduler.ts) REUSES this single reader — ⛔ the
+// __PERFILE__ line has TWO emission points (this reporter's legacy/LPT path + the scheduler's own
+// finishFile), and a second hand-rolled read here would be the exact "two writers only one changed"
+// drift (gap-suite-scheduler-perfile-cpu-emitter-missing). Shared, never duplicated.
+export function readPerFileCpuMs(file) {
   const dir = process.env.QUAY_PERFILE_CPU_DIR;
   if (!dir) return undefined;
   try {
