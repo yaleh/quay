@@ -83,23 +83,23 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（bug 修复）：`d.mgr.liveness.status !== "ok"` 时，mgrCard 渲染输出不包含形如
+- [x] AC1（bug 修复）：`d.mgr.liveness.status !== "ok"` 时，mgrCard 渲染输出不包含形如
       `\d+\s*会话\s*LIVE` 的文本，而是一个明确的"未接入"式短语——单测对
       `liveness:{status:"empty",sessions:[],reason:...}` 断言渲染 HTML 不匹配该正则。
-- [ ] AC2（循环脉搏耗时）：`renderLiveCard` 对一个 `startedAtMs` 已知、`nowMs` 固定的
+- [x] AC2（循环脉搏耗时）：`renderLiveCard` 对一个 `startedAtMs` 已知、`nowMs` 固定的
       `InFlightTask`，输出的 `liveMiniList` 行内包含耗时格式化函数产出的时长字符串（如
       `12m34s`）——单测用固定 `startedAtMs`/`nowMs` 断言字符串命中。
-- [ ] AC3（分组标题视觉权重）：`grep -n "font-weight" packages/quay/src/serve-dashboard.ts` 命中里，
+- [x] AC3（分组标题视觉权重）：`grep -n "font-weight" packages/quay/src/serve-dashboard.ts` 命中里，
       `miniList()` 函数体内分组标题所在 `<div>` 的 `font-weight` 取值 ≥600，且同一函数内任务 id 所在
       `<a>` 的 `font-weight` 取值严格小于分组标题的取值。
-- [ ] AC4（测试近期列表）：`renderTestsCard` 对至少 2 条 `recentRuns`（`state` 非 running）的固定输入，
+- [x] AC4（测试近期列表）：`renderTestsCard` 对至少 2 条 `recentRuns`（`state` 非 running）的固定输入，
       渲染 HTML 同时包含轮次号、`pass X/Y` 文本与一个耗时字符串——单测断言三类子串均出现且顺序与各自
       round 对应。
-- [ ] AC5（自动刷新扩展）：`handleDashboardCards` 返回 JSON 的 `Object.keys(...)` 同时包含
+- [x] AC5（自动刷新扩展）：`handleDashboardCards` 返回 JSON 的 `Object.keys(...)` 同时包含
       `liveCard`/`testsCard`（既有）与新增的 `sysCard`/`mgrCard`/`taskCard` 五个键；
       `renderDashboardPage` 输出的 HTML 里 `grep` 能命中 `id="sys-card"`、`id="mgr-card"`、
       `id="task-card"` 三个新容器 id。
-- [ ] AC6（前端折线，服务端零持久化）：①`handleDashboardCards` 返回 JSON 含
+- [x] AC6（前端折线，服务端零持久化）：①`handleDashboardCards` 返回 JSON 含
       `sysRaw:{cpuStallAvg10,loadAvg,ts}` 三个字段；②`grep -n "sys-sparkline"
       packages/quay/src/serve-dashboard.ts` 命中渲染占位 + 轮询脚本里的数组 push/重绘逻辑两处（不是
       只有一处静态占位）；③`grep -n "fs\.\(write\|append\)File" packages/quay/src/serve-dashboard.ts`
@@ -118,5 +118,6 @@ gap-dashboard-visual-review-batch-fixes --json` 的 `missing` 为空。
 ## Touches
 
 - packages/quay/src/serve-dashboard.ts
+- packages/quay/src/serve-handlers.ts
 - packages/quay/test/gap-dashboard-visual-review-batch-fixes.test.mjs
 - tasks/gap-dashboard-visual-review-batch-fixes.md

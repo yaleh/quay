@@ -101,7 +101,7 @@ export async function handleAllRoutes(
   // gap-dashboard-testscard-livecard-auto-refresh — the JSON data endpoint the dashboard liveCard/
   // testsCard auto-refresh script polls. Re-renders ONLY those two cards (no sys/mgr/tasks probes).
   if (url.pathname === "/dashboard/cards") {
-    await handleDashboardCards(req, res, cfg);
+    await handleDashboardCards(req, res, client, cfg);
     return;
   }
 
