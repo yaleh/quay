@@ -176,6 +176,36 @@ tasks/                   任务目录（数据，不是扩展代码）
 **⛔ 不再写入**：`.claude/workflows/`、`.claude/agents/`、`plugin/scripts/` 副本、
 `orchestration/` tick 文档、`docs/analysis/`——**以及随之退役的 managed/conflict/stale 整套机器。**
 
+## 6b. 非 skill 入口如何定位 plugin 脚本（**AC168 的承重前提，2026-09-05 补**）
+
+**⚠️ 本节是本规格 09-02 初稿的一个缺口，不是新增需求。** §9-T1 实测「`${CLAUDE_PLUGIN_ROOT}` 零复制直调成立」
+**只覆盖 skill 载入路径**（它是 skill 载入时的文本级展开）；而**两层循环的引擎不是 skill 起的**。
+
+**实测（2026-09-05，读码 + 行号核对，非推断）**：
+```
+packages/quay/src/cli/driver.ts:166   const kernel = path.join(root, "plugin/scripts/driver-runtime.ts")
+                        :167-169      缺失即 `driver runtime kernel not found` 退出
+                        :16-20        注释写明这是 AC139-4 故意为之——⛔ 不得用 import.meta.url walk-up，
+                                      它会命中 worktree 副本（2026-08-23 常驻 supervisor 挂在短命 worktree
+                                      上的载体死亡根因）
+```
+⇒ **今天下游项目能跑两层循环，恰恰依赖 quay-init 复制进去的那 117–131 个脚本。**
+⇒ **§6 闭集一旦生效（不复制脚本），`quay driver start` 在每一个下游项目都会失败。**
+**⊢ 最贵的一点：这个失败在本仓库永远复现不出来**（本仓库自带 `plugin/`，解析恒成功）
+——**"在这里绿"是结构上不可能取假的量**（硬规则 4），判据必须落在一个**无本地 `plugin/`** 的 workspace 上。
+
+**解析器契约（三条约束，缺一即不成立）**：
+
+| # | 约束 | 为什么不能放弃 |
+|---|---|---|
+| ① | 从 worktree 调用时**永不**命中 worktree 副本 | AC139-4 的原始约束，有一次真实载体死亡作背书 |
+| ② | **不要求**目标项目本地存在 `plugin/` 副本 | 否则等于没废除复制，裁定 1 落空 |
+| ③ | npm-global 与 plugin marketplace **两条安装路径都能解析到** | 两条都是受支持渠道（§6 已把显式安装步骤写进交付流程） |
+
+**⇒ 落点**：`tasks/gap-plugin-root-resolution-non-skill-entrypoints`（2026-09-05 立案）。
+**选定方案与被否方案的理由由该任务回填本节**——本节现在只钉死**问题与三条约束，⛔ 不预设解法**。
+**⊢ 顺序是硬的：该任务 → AC168。** 反序 = 先把下游项目的循环引擎删掉，再去想怎么找它。
+
 ## 7. 退役 / 改造清单
 
 | # | 对象 | 理由 |
@@ -290,6 +320,23 @@ tasks/                   任务目录（数据，不是扩展代码）
 **⇒ 它自报的 live=112 与本规格实测的 178 相差约 66 个脚本。**
 **⛔ 它的 `unaccounted` 清单不得作为退役依据**（会删掉每天被调用几十次的脚本）。
 **⊢ 与 CLAUDE.md 记载的 meta-cc `include_subagents` 坑同形**——只是这次犯在本仓库自己的普查器上。
+
+### 11b-i. 排序补正：**修这个仪器必须排在「执行 archive」之前**（2026-09-05 补）
+
+初稿把本条放在**乙组（AC160）**，位置在甲组的 AC158（执行 archive）**之后**。**这个顺序是错的**：
+§12e 明写「**执行 archive 前须按 §12d 重算一次**」，而 §12d 的判据是「**三天零执行** ∧ 无生产调用者」
+——**"零执行"读数正是本盲区的受害者**，本节自己也写了「⛔ 它的 `unaccounted` 清单不得作为退役依据」。
+⇒ **不修就重算 = 按一份已知有缺口的读数删 97 个脚本**，其中可能含每天被调用几十次的对象。
+**⊢ 硬顺序更正为：AC160 ──► AC156 重算 ──► AC158 执行 archive。**（`manager-phase-goal.md` 的顺序块已同步。）
+
+### 11b-ii. ⚠️ 本节的两个负控制样本已腐烂一个（2026-09-05 核实）
+
+`monitor-mount-check.sh` **已随 session-liveness 退役被删除**（`f2525e075` / `5444b8bf2`，2026-09 初；
+2026-09-05 `ls` 核实不存在）⇒ **它不能再作判据锚点**。幸存的已知真样本是 **`quay-session.ts`**
+（被判 `library`/executed=0，实际 68 次、52 次在盲区层）。
+**⊢ 这是本规格自身的一个实例，值得记**：§12e 已自述死集名单是「带日期的快照，不是活文档」，
+**而同样的腐烂也发生在【判据引用的样本】上**——判据必须锚在**执行当下核实过存在**的对象上，
+不是立规格那天存在的对象上。落点：`tasks/gap-runtime-usage-inventory-workflow-blind-spot`（2026-09-05 立案）。
 
 ## 12. 统一 archive 机制（裁定：零调用先退役，需要时再恢复）
 
@@ -453,6 +500,30 @@ workflow-replay.ts                       worktree-branch-hygiene-check.sh
 **状态**：规格已裁定；**§9 四项实测已全部完成（T2 为 CLI 自述、未活体验证）**；
 **§11 三天使用实测已完成**；**§12e 传递闭包已算毕，人裁定后死集 = 97**（94 安全核 + 3 个原待裁）；
 **§12f 的裸文件名扫描是执行 archive 的前置**；§7 退役清单 + §12e/§12f 待拆条执行。
+
+**⊕ 2026-09-05 更新（人令「创建第一波任务」后）——两处补正 + 第一波 6 条已立案**：
+
+两处**本规格自身的缺陷**（均在立案核查中发现，非读文档推得）：
+① **§6b 新增**——`cli/driver.ts:166` 从 workspace root 解析驱动内核 ⇒ AC168 停止复制会让**下游 `quay driver start` 全线失效**，
+   §9-T1 的 `${CLAUDE_PLUGIN_ROOT}` 只覆盖 skill 载入路径，救不了 CLI/cron/OS anchor。**AC168 的硬前置。**
+② **§11b-i 排序补正**——AC160（修仪器盲区）必须排在 AC158（执行 archive）**之前**，否则按已知有缺口的执行读数删 97 个脚本；
+   **§11b-ii** 并记：该节引用的负控制样本 `monitor-mount-check.sh` 已被删除，判据改锚 `quay-session.ts`。
+
+**第一波 6 条任务（2026-09-05 立案，promotion-driver 已机械晋升 ready）**：
+
+| 任务 | 对应 | 一句话 |
+|---|---|---|
+| `gap-plugin-root-resolution-non-skill-entrypoints` | §6b（新） | 非 skill 入口的 plugin-root 解析，AC168 硬前置 |
+| `gap-skill-allowed-tools-plugin-namespace` | AC163 | 两处裸名改插件前缀 + 恒定判据；AC165 的硬前置 |
+| `gap-runtime-usage-inventory-workflow-blind-spot` | AC160 | 修枚举盲区；**须先于 AC158** |
+| `gap-archive-mechanism-and-exclusion-wiring` | AC157 | archive 机制 + 五面排除接线 |
+| `gap-dead-set-registry-bare-filename-scan` | AC156 | 裸文件名扫描 + 死集重算（⛔ 不沿用 09-02 快照） |
+| `gap-quay-init-closure-assertion-first` | AC168 判据先行 | 落地量棘轮（取实测基线，只降不升），收缩本体留后续波次 |
+
+**⊢ 尚未立案的（等第一波落地后再拆，避免"永远差最后一步"）**：AC158/AC159（执行 archive 与连带文档）、
+AC161/AC162（作用域外溢，其中 AC161 改 `~/.claude/settings.json`，**建议人执行**）、AC164/AC165（命名空间承接与撤裸）、
+AC166/AC167（第二副本与 `manager-tick-core.js` 迁移，608 次/3 天的路径换文件，**须单独判据**）、
+AC168 收缩本体与 AC169 交付面同步。
 
 **退役清单的可量化收益（2026-09-02 实测，`claude plugin details quay`）**：
 14 个 skill **每会话常驻 ~2,706 tok**；其中 `quay-native-methodology`(~210) 与
