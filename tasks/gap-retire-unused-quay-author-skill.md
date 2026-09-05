@@ -1,7 +1,7 @@
 ---
 id: gap-retire-unused-quay-author-skill
 title: 删除未使用的 quay:author skill + 把 SPEC 探针改指向 quay:execute
-status: todo
+status: ready
 labels:
   - gap
 parent: null
