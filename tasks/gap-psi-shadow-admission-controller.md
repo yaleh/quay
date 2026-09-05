@@ -105,12 +105,16 @@ Phase 0 用规模受控（5 个核心候选、注入窗口≤10秒、总预算�
 
 **AC7 范围守卫**：`git diff --name-only`（相对 develop）= `plugin/scripts/capability-catalog.sh`（六表注册）+ 新增 `plugin/scripts/psi-failure-correlation-check.ts` + `tasks/gap-psi-shadow-admission-controller.md`（自身）；`grep -c "psi-failure" scripts/test.sh` = 0、`.github/workflows` 0 命中；未改 `suite-scheduler.ts` 的 `nextDispatch`/`currentCap` 或任何准入/调度逻辑。
 
+**跨任务修复（本轮续做追加，2026-09-05）——上一轮 `step=suite: # fail 1` 的真因不是本任务代码，是 develop 侧一个全局红**：`spec-declaration-point-check` 报 `SPEC-capability-planes-and-mechanism-lifecycle-2026-09-05.md` 在两个声明点（`plugin/skills/manager/SKILL.md` 的 Methodology sources 索引、`plugin/skills/init/SKILL.md` 的 `reference-doc` 块）都缺失声明。根因是 `5091f917a`（manager/human 直接提交，无任务体、无任何分支上有补声明提交）只加了 SPEC 文件、漏了声明点。**这个红让 develop 上每个任务的 fan-in suite 都红，不是本任务 Touches 内任何文件造成**（本任务 diff 只有 capability-catalog.sh + psi-failure-correlation-check.ts + 自身任务体，均不触及 orchestration/ 与 plugin/skills/）。修复 = 在两个声明点补上该 SPEC 的声明（最小机械改动），并把两个 skill 文件加入本任务 Touches 以通过 anti-drift 门（越界写入会 HARD FAIL）。落点后 develop 的 spec-declaration-point-check 恢复绿，全系统解阻塞。负控制：修复前 `spec-declaration-point-check --json` exit=1（2 missing），修复后 exit=0。
+
 ## Touches
 
 - plugin/scripts/psi-failure-correlation-check.ts（新，Phase 0 分析脚本：(a) 主动诱发实验（规模受控、同步回收）+ (b) 被动历史联合，含 `--root`/`QUAY_MAIN_CHECKOUT` 数据源解析——已有一份 648 行的未提交实现在 worktree 里，可作为起点但必须按本次收紧的规模/回收约束核实修正，不能原样提交）
 - plugin/scripts/capability-catalog.sh（新脚本六表注册）
 - plugin/scripts/suite-load-sampler.ts（Phase 1，仅当判定进入 Phase 1 时改动：追加 would_throttle 派生字段）
 - plugin/test/suite-load-sampler.test.mjs（新，Phase 1 单测：would_throttle 派生函数，仅当 Phase 1 适用时新增）
+- plugin/skills/manager/SKILL.md（补 SPEC-capability-planes-and-mechanism-lifecycle 声明——develop 侧 5091f917a 漏声明致 spec-declaration-point-check 全局红，补 Methodology sources 索引）
+- plugin/skills/init/SKILL.md（同上，补 reference-doc 声明）
 - tasks/gap-psi-shadow-admission-controller.md（自身）
 
 ## Needs-Human
