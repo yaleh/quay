@@ -195,12 +195,18 @@ checker-call-surface`（status: ready）是 AC149-1/-3 的一个具体子条件�
 ④ 对零调用的工具，先退役（archive），后续发现需要了再恢复
 ```
 
-**⚡ 顺序是硬的，不是建议**——三处颠倒即破坏：
+**⚡ 顺序是硬的，不是建议**——四处颠倒即破坏（第四条 2026-09-05 补）：
 ```
 AC156 裸文件名扫描  ──►  AC158 执行 archive        扫描前 archive = 按已知有缺口的清单删东西
 AC163 allowed-tools ──►  AC164 承接 ──► AC165 撤裸  先撤后接 = 断掉 3 天 178 次的生产流量
 AC157 排除面接线    ──►  AC158 执行 archive        不接线就 archive = 当场弄红 catalog / 测试 glob
+AC160 修仪器盲区    ──►  AC156 重算 ──► AC158       不修就重算 = 拿"零执行"读数删 97 个脚本，
+                                                    而那个读数正是盲区的受害者（SPEC §11b-i）
 ```
+**⊕ 2026-09-05 新增一条前置（不在 AC156–AC169 编号内，但挡 AC168）**：
+`gap-plugin-root-resolution-non-skill-entrypoints` ──► **AC168**。
+理由：`cli/driver.ts:166` 从 workspace root 解析驱动内核，AC168 停止复制后**下游 `quay driver start` 全线失效**；
+`${CLAUDE_PLUGIN_ROOT}`（§9-T1）只覆盖 skill 载入路径，救不了 CLI/cron/OS anchor。**正本 SPEC §6b。**
 
 ### 甲、地基（archive 机制本身）
 
