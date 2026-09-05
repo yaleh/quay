@@ -84,7 +84,6 @@ status/AC 核对——那是另外的、需要人工授权走 `quay-task-operato
 
 ## Touches
 
-- plugin/scripts/quality-gate-driver.ts（`ROUTINE_TIMEOUT_MS` 用法 / `runPoolQualityJudge` 的
-  spawnSync→spawn 或超时推导改动）
+- plugin/scripts/quality-gate-driver.ts（ROUTINE_TIMEOUT_MS 用法 / runPoolQualityJudge spawnSync→spawn 改动）
 - plugin/test/quality-gate-driver.test.mjs（超时行为断言更新 + AC5 负控制用例）
 - tasks/gap-quality-gate-driver-pool-judge-spawn-timeout.md（自身）
