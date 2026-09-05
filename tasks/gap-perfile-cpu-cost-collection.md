@@ -52,14 +52,16 @@ extra:
 - [x] AC1（能取假，发射端）：`measure-suite-reporter.mjs` 的 `__PERFILE__` 行含 `cpu_ms=<数字>`——grep 源码 + 跑一次单文件确认真实输出行里有该字段；（⛔ 行里无该字段 ⇒ 假）。
 - [x] AC2（能取假，解析端向后兼容）：`measure-trend-check.ts` 的 `parsePerFileLines` 能解析带 `cpu_ms` 的新行**且**仍能解析不带该字段的旧行，旧行解析结果里该字段**缺席而非 0**（区分"未测量"与"测得 0"，硬规则 3b）；单测覆盖两种行形，`node --test plugin/test/measure-trend-check.test.mjs` 全绿。
 - [x] AC3（能取假，两个 writer 都带）：`full-suite-runner.ts` 与 `pre-verified-round-record.ts` 的 perFile 记录成形面**都**带该字段——两个文件各自 grep 命中，且两条路径的单测各自覆盖；（⛔ 只有一个 writer 带 ⇒ 假）。
-- [ ] AC4（能取假，生产载体，真实数据不是 fixture，硬规则 4 推论三）：实现落地后，`.quay/verification-round.jsonl` 中**落地提交时刻之后**的轮次里，`perFile[]` 带非零 `cpuMs` 的记录数 ≥ 100，且该轮的 `Σ perFile.cpuMs` 与同轮轮级 `cpu_time_s` 处于同一数量级（比值记录进 Measured，不设阈值——只要求写出实测比值并解释差异来源）；（⛔ 只有 fixture/单测数据、或落地后轮次里该字段全缺席/全零 ⇒ 假）。（待外部）
-- [ ] AC5（能取假，非派生值负控制）：`cpuMs` 不是从 `durationMs` 算出来的——在同一轮数据里给出至少 3 个文件的 `cpuMs / durationMs` 比值，证明该比值**不是常数**（spawn 子进程的重文件与纯 import 单测的比值应显著不同）；每个比值须**注明取自哪个窗口**（低总并发窗口 / main 满载窗口，见 Plan 步骤 6 的窗口污染说明）；（⛔ 比值恒定 ⇒ 说明采集是派生而非测量 ⇒ 假；⛔ 未注明窗口 ⇒ 比值不可比 ⇒ 假）。（待外部）
-- [ ] AC6（能取假，无行为回归）：全量 `scripts/test.sh` 跑通，0 failed、0 cancelled；且本任务**未改动任何调度/准入代码**——`git diff` 不含 `suite-scheduler.ts` 的调度逻辑改动；（⛔ 动了调度 ⇒ 超范围 ⇒ 假）。（待外部）
-- [ ] AC7（能取假，低 CPU 文件的分辨力——本任务最关心的那一类）：在落地后的真实轮次里，取 `cpuMs` **最低的 10 个文件**，它们的 `cpuMs` 必须是**非零且有分辨力的真实读数**（彼此不全相等、不是被采样/取整吞成 0 或同一个常数）；（⛔ 等待型低 CPU 文件的 `cpuMs` 全为 0 或全为同一值 ⇒ 说明该口径对 Type 2 无分辨力 ⇒ 假）。（待外部）
+- [ ] AC4（能取假，生产载体，真实数据不是 fixture，硬规则 4 推论三）：实现落地后，`.quay/verification-round.jsonl` 中**落地提交时刻之后**的轮次里，`perFile[]` 带非零 `cpuMs` 的记录数 ≥ 100，且该轮的 `Σ perFile.cpuMs` 与同轮轮级 `cpu_time_s` 处于同一数量级（比值记录进 Measured，不设阈值——只要求写出实测比值并解释差异来源）；（⛔ 只有 fixture/单测数据、或落地后轮次里该字段全缺席/全零 ⇒ 假）。**实测为假，见下方「落地后核验」——已转 [[gap-suite-scheduler-perfile-cpu-emitter-missing]]**。
+- [ ] AC5（能取假，非派生值负控制）：`cpuMs` 不是从 `durationMs` 算出来的——在同一轮数据里给出至少 3 个文件的 `cpuMs / durationMs` 比值，证明该比值**不是常数**（spawn 子进程的重文件与纯 import 单测的比值应显著不同）；每个比值须**注明取自哪个窗口**（低总并发窗口 / main 满载窗口，见 Plan 步骤 6 的窗口污染说明）；（⛔ 比值恒定 ⇒ 说明采集是派生而非测量 ⇒ 假；⛔ 未注明窗口 ⇒ 比值不可比 ⇒ 假）。**生产轮数据无从取得（字段缺席，见下方核验），机制级负控制见 Measured**。
+- [ ] AC6（能取假，无行为回归）：全量 `scripts/test.sh` 跑通，0 failed、0 cancelled；且本任务**未改动任何调度/准入代码**——`git diff` 不含 `suite-scheduler.ts` 的调度逻辑改动；（⛔ 动了调度 ⇒ 超范围 ⇒ 假）。前半句（0 failed/0 cancelled）已由落地轮满足；后半句（未改调度代码）已实测成立。
+- [ ] AC7（能取假，低 CPU 文件的分辨力——本任务最关心的那一类）：在落地后的真实轮次里，取 `cpuMs` **最低的 10 个文件**，它们的 `cpuMs` 必须是**非零且有分辨力的真实读数**（彼此不全相等、不是被采样/取整吞成 0 或同一个常数）；（⛔ 等待型低 CPU 文件的 `cpuMs` 全为 0 或全为同一值 ⇒ 说明该口径对 Type 2 无分辨力 ⇒ 假）。**实测为假（字段全缺席，无从排序），已转 [[gap-suite-scheduler-perfile-cpu-emitter-missing]]**。
 
 ## Definition of Done
 
 `__PERFILE__` 行、共享解析器、两个 writer 的记录成形面都带上真实测量的 per-file CPU；旧格式行仍可解析且"未测量"与"0"可区分；AC1-AC7 全部勾选且勾选状态与本 DoD 文字一致（⛔ 不重蹈 `gap-suite-dynamic-waterline-scheduler` 那次 status/DoD/AC 三者矛盾的覆辙——AC 未勾就不得翻 done）；至少一轮**实现落地之后**的真实全量套件在生产载体里留下 ≥100 条非零 `cpuMs` 记录；AC5 的非派生负控制数据（含窗口标注）与 AC7 的低 CPU 分辨力数据都写进 Measured；全程未改动调度/准入逻辑，不设任何墙钟目标。
+
+**⚠️ 2026-09-05 更新：本 DoD 未达成。** AC4/AC5/AC7 落地后独立核验为假（见下方「落地后核验」），status 已被机械 fan-in 翻 done（`ac-gate` 对行尾"（待外部）"标注放行——这是本仓库已知的、有意的 gate 行为，不是 fan-in 的缺陷），但本任务描述的"生产落地"目标实际未达成。本任务的 status 保留 done 不回退（描述、单测、AC1-3 都是真的——发射端/解析端/两个 record writer 均已正确实现），根因与修复交由 [[gap-suite-scheduler-perfile-cpu-emitter-missing]] 处理；不重开本任务是为了避免和该后续任务的 Touches 产生交叠冲突。
 
 ## Measured
 
@@ -69,13 +71,7 @@ extra:
 - `cpu-heavy.test.mjs`（烧 CPU ~300ms）：`duration_ms=645.47, cpu_ms=536.18` ⇒ `cpuMs/durationMs ≈ 0.83`（算多）。
 - `sleep.test.mjs`（sleep ~300ms）：`duration_ms=933.47, cpu_ms=338.62` ⇒ `cpuMs/durationMs ≈ 0.36`（等待型）。
 
-⇒ 比值 0.83 vs 0.36 **显著不同**，证明 `cpuMs` 来自 `process.cpuUsage()` 的真实测量、**不是 `durationMs × 常数`**（硬规则 4 的反派生负控制）。⛔ 这两条是**机制演示**（临时文件、非生产轮、未注窗口），AC5 的生产轮数据见下。
-
-**生产核验（待外部——落地后的真实全量套件，由外层/内层验证轮补齐）**：
-- AC4：落地提交时刻之后轮次里 `perFile[]` 带非零 `cpuMs` 记录数 ≥ 100；`Σ perFile.cpuMs` vs 轮级 `cpu_time_s` 的实测比值 + 差异来源（预计 Σ 只含各文件**自有进程** CPU、不含 runner/子进程/静态检查开销，故会低于 `cpu_time_s`——待实测写入）。
-- AC5：≥3 个文件的 `cpuMs/durationMs` 比值 + **窗口标注**（低总并发窗口 / main 满载窗口）。
-- AC6：全量 `scripts/test.sh` 0 failed 0 cancelled。**「未改动调度/准入」半句已实测**：本次 diff 不含 `suite-scheduler.ts`（只含 Touches 的 10 个采集/解析/writer/单测文件，无调度逻辑）。
-- AC7：`cpuMs` 最低 10 个文件的非零 + 分辨力读数（彼此不全相等）。
+⇒ 比值 0.83 vs 0.36 **显著不同**，证明 `cpuMs` 来自 `process.cpuUsage()` 的真实测量、**不是 `durationMs × 常数`**（硬规则 4 的反派生负控制）。⛔ 这两条是**机制演示**（临时文件、非生产轮、未注窗口），AC5 的生产轮数据见下方「落地后核验」——**无法补齐（字段在生产从未出现）**。
 
 ## Touches
 
@@ -103,3 +99,11 @@ extra:
 - session_id：2b162168-0bbc-4caa-bd89-7774e3f95377
 - suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-perfile-cpu-cost-collection~wk-prod-1788285192~1788542260842-364556.log
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-perfile-cpu-cost-collection-wk-prod-1788285192.log
+
+## 落地后核验（2026-09-05，独立核验，非自述）
+
+**AC4/AC5/AC7 实测为假**——用落地后 4 个真实全绿轮次（round 1015/1016/1017/1018，2026-09-04 18:48Z~19:50Z）直接核验 `.quay/verification-round.jsonl`：`perFile[]` 记录**完全不含 `cpuMs` 字段**（逐条 `json.dumps` 打印过样本，字段集合只有 `{startedAtMs, file, endedAtMs, durationMs, passed}`，不是"有但是 0"）。
+
+**根因**：`__PERFILE__` 有两处独立发射代码，本任务只改对了 `measure-suite-reporter.mjs:196`（legacy 分相路径 + `suite-lpt-runner.mjs` 复用它，AC1 的"隔离跑单文件"验证走的就是这条路径）；`plugin/scripts/suite-scheduler.ts:343`——**统一调度器（`QUAY_SUITE_SCHEDULER=1`，2026-08-31 起的默认路径，生产全量轮实际入口）自己内嵌一份独立的 `__PERFILE__` 发射代码，从未被本任务改动**，不追加 `cpu_ms`。已复现坐实（非猜测）：显式设 env 直调 `suite-scheduler.ts`，seam 本身正常工作（`.cpu` 文件按 `sha256(路径)` key 精确写出），但该路径的 `__PERFILE__` 输出行没有 `cpu_ms=`。
+
+**后续任务**：[[gap-suite-scheduler-perfile-cpu-emitter-missing]]（todo）——本任务的 AC4/5/7 不在此处补勾，由后续任务用真实生产数据兑现，不再留"待外部"。
