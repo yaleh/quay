@@ -2,7 +2,7 @@
 id: gap-suite-scheduler-perfile-cpu-emitter-missing
 title: per-file CPU 采集在生产从未产出——统一调度器 suite-scheduler.ts 有独立的 __PERFILE__ 发射代码，未接
   cpu_ms
-status: ready
+status: done
 labels:
   - gap
   - defect
