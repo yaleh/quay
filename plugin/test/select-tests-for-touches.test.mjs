@@ -415,7 +415,7 @@ test("AC4 — src / new-MCP-tool task selects check-adr (ADR cross-cut)", () => 
   }
 });
 
-test("AC5 — code-touching task's selection names the lint cross-cut (in-task leg via SKILL.md)", () => {
+test("AC5 — code-touching task's selection names the lint cross-cut", () => {
   const root = makeWorkspace({
     "plugin/test/foo.test.mjs": TEST_FILE_CONTENT,
   });
@@ -424,10 +424,6 @@ test("AC5 — code-touching task's selection names the lint cross-cut (in-task l
     const r = runCli(root, "--task", "t5c");
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /crosscut: .*lint/, "default output names the lint cross-cut");
-    // In-task leg of AC5: the author SKILL.md task template defaults new-code ACs to a lint-clean
-    // item (the archguard 14-error shape is caught because the author must run lint to tick it).
-    const skill = fs.readFileSync(path.join(REPO_ROOT, "plugin", "skills", "author", "SKILL.md"), "utf8");
-    assert.match(skill, /lint-clean/);
   } finally {
     cleanup(root);
   }

@@ -48,17 +48,17 @@ NOT-AVAILABLE"；T3 用 `enabledPlugins:false` 前后 `quay:author` 的 YES/NO �
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：`find . -iname '*author*' -path '*skills*'`（排除 node_modules/.claude/worktrees
+- [x] AC1（能取假）：`find . -iname '*author*' -path '*skills*'`（排除 node_modules/.claude/worktrees
       快照）在仓库内不再命中任何 author skill 文件；⛔ 仍残留任一份则假。
-- [ ] AC2（能取假）：`grep -rn 'quay:author\|"skill":"author"' orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md`
+- [x] AC2（能取假）：`grep -rn 'quay:author\|"skill":"author"' orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md`
       命中 0；同一文件对应位置已改为引用 `quay:execute`；⛔ 仍引用 author 则假。
-- [ ] AC3（能取假）：SPEC 文档里 AC5/T3 两处改写后，判据的"能取假"形式保持不变（仍是"该 skill
+- [x] AC3（能取假）：SPEC 文档里 AC5/T3 两处改写后，判据的"能取假"形式保持不变（仍是"该 skill
       NOT-AVAILABLE ⇒ 通过"这种结构，只换了探测对象，不是把判据删掉或弱化）；⛔ 判据被弱化或删除
       则假。
-- [ ] AC4（能取假）：capability-catalog 或其它任何登记面对 author skill 的登记项已摘除
+- [x] AC4（能取假）：capability-catalog 或其它任何登记面对 author skill 的登记项已摘除
       （`bash plugin/scripts/capability-catalog.sh` 输出不再包含 author skill 条目，或核实它本就
       不在该 catalog 覆盖范围内并在此记录该事实）；⛔ 有登记面仍列出已删除的 skill 则假。
-- [ ] AC5（能取假）：删除后跑一次相关静态检查/测试套件（至少覆盖 SPEC 涉及的 checker）确认无新增
+- [x] AC5（能取假）：删除后跑一次相关静态检查/测试套件（至少覆盖 SPEC 涉及的 checker）确认无新增
       红；⛔ 引入新红则假。
 
 ## Definition of Done
@@ -69,9 +69,11 @@ NOT-AVAILABLE"；T3 用 `enabledPlugins:false` 前后 `quay:author` 的 YES/NO �
 
 ## Touches
 
-- plugin/skills/author/SKILL.md（删除）
-- packages/quay/plugin/skills/author/SKILL.md（删除）
-- packages/quay-native/skills/author/SKILL.md（删除）
-- orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md（编辑 AC5+T3 两处）
-- plugin/scripts/capability-catalog.sh（若有 author 登记项则编辑，否则核实后不改）
+- plugin/skills/author/SKILL.md (delete)
+- packages/quay-native/skills/author/SKILL.md (delete)
+- plugin/.claude-plugin/plugin.json（编辑：commands[] 与 description 摘除 author 条目）
+- plugin/scripts/sync-vendor.sh（编辑：author/execute 镜像收敛为仅 execute）
+- plugin/test/plugin-packaging.test.mjs（编辑：wanted/single-source/shippedFiles 三处摘除 author）
+- plugin/test/select-tests-for-touches.test.mjs（编辑：AC5 测试摘除 author SKILL.md in-task leg）
+- orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md（编辑：AC5×2 + T3 三处 quay:author→quay:execute）
 - tasks/gap-retire-unused-quay-author-skill.md（self-touch）

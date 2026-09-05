@@ -120,7 +120,7 @@ plugin/                     唯一扩展载体（git 跟踪，一棵树）
 不进仓库；项目意愿（启用）进仓库、随 clone 传播。**两者本来就该分层，此前是被安装脚本合并了。**
 
 **AC5（能取假）**：在任一**非** quay 项目起会话 ⇒ `PATH` 不含 `<quay>/plugin/bin`
-**且** `quay:author` NOT-AVAILABLE。*取假方式*：把用户级启用改回 `true` 即红——**当前状态就是红**。
+**且** `quay:execute` NOT-AVAILABLE。*取假方式*：把用户级启用改回 `true` 即红——**当前状态就是红**。
 
 **⚠️ 与 T3 的相互作用（落地时必须一并处理，否则会把自己锁在门外）**：
 项目级启用要求 ①插件**已安装**（启用 ≠ 安装，§9-T3）②该目录**已被信任**（未信任 ⇒ 项目 settings 整份不读）。
@@ -266,7 +266,7 @@ mcp-server / os-anchor / precommit-guard / scripts/test.sh）的迁移是收缩�
   且**不含任何 `.claude/{skills,workflows,agents}` 或脚本副本**（裁定 6）。
   *能取假*：恢复任一类铺设即红。
 - **AC5 作用域不外溢**（裁定 5，判据全文见 §4b）：非 quay 项目的会话中
-  `PATH` 不含 `<quay>/plugin/bin` **且** `quay:author` NOT-AVAILABLE。
+  `PATH` 不含 `<quay>/plugin/bin` **且** `quay:execute` NOT-AVAILABLE。
   *能取假*：**当前状态即红**（实测 `/home/yale` 会话 PATH 含该路径两次）——先红后绿。
 - **AC6 用户级只承载源**：`~/.claude/settings.json` 中与 quay 相关的键
   **只有** `extraKnownMarketplaces.quay`，**没有** `enabledPlugins["quay@quay"]`。
@@ -280,7 +280,7 @@ mcp-server / os-anchor / precommit-guard / scripts/test.sh）的迁移是收缩�
 |---|---|---|
 | **T1** `${CLAUDE_PLUGIN_ROOT}` | ✅ **可用，skill 载入时文本级展开为绝对路径** | 磁盘 `quay-task-operator/SKILL.md:71` 写 `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-schema-check.ts"`；载入会话后收到的是 `node "/home/yale/work/quay/plugin/scripts/task-schema-check.ts"`。连传入的 ARGUMENTS 串一并被替换 |
 | **T2** 改动是否热生效 | ❌ **需重启会话**（**未在活会话直接实测**，见下方限定） | `claude plugin update` 帮助文本「**restart required to apply**」；`claude plugin init`「**auto-loads next session**」；`claude plugin` 子命令表**无 reload** |
-| **T3** clone 者是否自动装上 | ❌ **不会**。①**启用 ≠ 安装** ②**未信任目录下项目 settings 整份不读** | ①差分：`--settings '{"enabledPlugins":{"quay@quay":false}}'` ⇒ `quay:author` **NO**；无旗标 ⇒ **YES**（证明 settings 路径确实生效）；而声明了 marketplace+enabledPlugins 的探针插件全程 NOT-AVAILABLE ⇒ 差异只能归于「没装」。②探针项目的 `env` 键同样不生效，且该项目不在 `~/.claude.json` `projects` 表中（`hasTrustDialogAccepted` 键存在于该表）；`--dangerously-skip-permissions` 不解此门 |
+| **T3** clone 者是否自动装上 | ❌ **不会**。①**启用 ≠ 安装** ②**未信任目录下项目 settings 整份不读** | ①差分：`--settings '{"enabledPlugins":{"quay@quay":false}}'` ⇒ `quay:execute` **NO**；无旗标 ⇒ **YES**（证明 settings 路径确实生效）；而声明了 marketplace+enabledPlugins 的探针插件全程 NOT-AVAILABLE ⇒ 差异只能归于「没装」。②探针项目的 `env` 键同样不生效，且该项目不在 `~/.claude.json` `projects` 表中（`hasTrustDialogAccepted` 键存在于该表）；`--dangerously-skip-permissions` 不解此门 |
 | **T4** `bin/` 上 PATH | ✅ **成立** | 本会话 PATH 含 `/home/yale/work/quay/plugin/bin`——**而该目录并不存在**；meta-cc/archguard 的 `bin` 同形在列 ⇒ Claude Code 对每个启用插件无条件加入该路径 |
 
 **T1 的后果**：§6 闭集**不需要**裁定 3 允许的那条 plugin-root 文件指针——那条退路用不上。

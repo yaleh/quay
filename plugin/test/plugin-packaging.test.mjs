@@ -6,8 +6,8 @@
 // plugin/test/plugin-packaging.test.mjs — pins the DIR-040 (+ DIR-042-B) plugin-packaging invariants:
 //   1. the marketplace + plugin manifests are valid JSON with the shape Claude Code expects
 //   2. plugin.json's commands[] actually lists the 4 bundled skills
-//   3. the bundled author/execute skills are byte-identical to their ONE canonical source
-//      (packages/quay-native/skills/{author,execute}/SKILL.md) — single-source, ADR-004
+//   3. the bundled execute skill is byte-identical to its ONE canonical source
+//      (packages/quay-native/skills/execute/SKILL.md) — single-source, ADR-004
 //   4. none of the shipped/foreign-workspace-facing files leak this repo's own internal
 //      experiment-layout path (experiments/quay-perpetual-stream/**) or "exp5" attribution
 //   5. the loop-driver skill (DIR-042-B) carries no research-layer references (VT/value-ledger/
@@ -47,7 +47,7 @@ test('M172 (DIR-108): marketplace.json is valid JSON and lists the quay plugin p
   assert.equal(entry.source.ref, 'dist-plugin', 'source must pin the CI-published orphan branch');
 });
 
-test('plugin.json is valid JSON and declares the 14 bundled skills (M179/DIR-070-F: +quay-native-methodology, +quay-webui-bootstrap-methodology; gap-loop-mechanism-...: +quay-task-operator; cold-start-8: +quay-cold-start; gap-productize-the-manager-layer: +manager; +quay-file-task — new-task filing skill, the step before author; gap-skill-start-drivers-webserver: +quay-drivers)', () => {
+test('plugin.json is valid JSON and declares the 13 bundled skills (M179/DIR-070-F: +quay-native-methodology, +quay-webui-bootstrap-methodology; gap-loop-mechanism-...: +quay-task-operator; cold-start-8: +quay-cold-start; gap-productize-the-manager-layer: +manager; +quay-file-task; gap-skill-start-drivers-webserver: +quay-drivers; gap-retire-unused-quay-author-skill: -author)', () => {
   const manifest = readJson(path.join(pluginDir, '.claude-plugin', 'plugin.json'));
   assert.equal(manifest.name, 'quay');
   // Cross-check against packages/quay's version rather than a hardcoded literal (which is
@@ -57,7 +57,6 @@ test('plugin.json is valid JSON and declares the 14 bundled skills (M179/DIR-070
   assert.equal(manifest.version, coreVersion, 'plugin.json version must match packages/quay/package.json (version-consistency-check.ts)');
   assert.ok(Array.isArray(manifest.commands));
   const wanted = [
-    './skills/author/SKILL.md',
     './skills/execute/SKILL.md',
     './skills/quay-directive/SKILL.md',
     './skills/quay-file-task/SKILL.md',
@@ -108,8 +107,8 @@ test('.mcp.json declares the quay MCP server via ${CLAUDE_PLUGIN_ROOT}-relative 
   assert.ok(mcp.quay.args.includes('mcp'), 'must invoke the mcp subcommand');
 });
 
-test('author/execute skills are single-sourced: byte-identical to packages/quay-native\'s own shipped copies', () => {
-  for (const name of ['author', 'execute']) {
+test('execute skill is single-sourced: byte-identical to packages/quay-native\'s own shipped copy', () => {
+  for (const name of ['execute']) {
     const canonical = path.join(repoRoot, 'packages', 'quay-native', 'skills', name, 'SKILL.md');
     const bundled = path.join(pluginDir, 'skills', name, 'SKILL.md');
     assert.ok(existsSync(canonical), `canonical source missing: ${canonical}`);
@@ -153,7 +152,6 @@ test('no shipped/foreign-workspace-facing file leaks this repo\'s own experiment
     path.join(pluginDir, 'scripts', 'task-schema.ts'),
     path.join(pluginDir, 'scripts', 'task-schema-check.ts'),
     path.join(pluginDir, 'scripts', 'task-schema-check.sh'),
-    path.join(pluginDir, 'skills', 'author', 'SKILL.md'),
     path.join(pluginDir, 'skills', 'execute', 'SKILL.md'),
     path.join(pluginDir, 'skills', 'quay-directive', 'SKILL.md'),
     path.join(pluginDir, 'skills', 'loop-driver', 'SKILL.md'),
