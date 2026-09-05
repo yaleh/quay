@@ -119,6 +119,10 @@ packages/quay/plugin/
 # supervisor state files + control state (halt/control plane quality-control.json). All runtime
 # state, never git-tracked; same gitignored family as promotion/worker round+control.
 **/.quay/quality-round.jsonl
+# gap-quality-driver-architecture-review-routine (2026-09-05): the quality-gate driver's third
+# routine (architecture review) verdict carrier — one line per judged/failed/not-triggered round.
+# Same gitignored runtime-state family as quality-round.jsonl (never git-tracked).
+**/.quay/architecture-review-round.jsonl
 **/.quay/quality-control.json
 **/.quay/quality-driver.pid
 **/.quay/quality-driver-supervisor.pid
