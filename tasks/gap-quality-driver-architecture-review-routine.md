@@ -65,22 +65,19 @@ driver 来推进架构改进"时定位到的缺口——**不缺传感器，缺�
 
 ## Acceptance Criteria
 
-- [ ] AC1（机械聚类可复现）：给定三个检测器的固定 `--json` 输出样本，聚合函数产出确定的簇
+- [x] AC1（机械聚类可复现）：给定三个检测器的固定 `--json` 输出样本，聚合函数产出确定的簇
   列表——单测覆盖，非人工目测。
-- [ ] AC2（语义判断非伪装机械，同 `gap-ac144` AC2 先例）：每簇的 `verdict` 来自一次真实
+- [x] AC2（语义判断非伪装机械，同 `gap-ac144` AC2 先例）：每簇的 `verdict` 来自一次真实
   `claude -p` schema agent 调用（grep 到 spawn 调用与 schema 定义）；⛔ 若 `verdict` 由纯
   JS if/else 规则产生而非 LLM 判断 ⇒ 假。
-- [ ] AC3（三态可区分，硬规则 3b）：`.quay/architecture-review-round.jsonl` 的记录里
+- [x] AC3（三态可区分，硬规则 3b）：`.quay/architecture-review-round.jsonl` 的记录里
   "未触发 / judge 解析失败 / 判过有结果"三者取值不同，不与"合格"同形。
-- [ ] AC4（边界硬约束）：实现后 `grep` 确认该路径零 `status:` 写入、零 `task_write` 调用——
+- [x] AC4（边界硬约束）：实现后 `grep` 确认该路径零 `status:` 写入、零 `task_write` 调用——
   本任务只产出读数，不 auto-file、不改任务终态。
-- [ ] AC5（真实生产载体，硬规则 4 推论三，判据读生产不读测试）：实现落地**之后**，quality
-  driver 在**主检出**（非任务 worktree 内的一次性验证）实际跑出 ≥1 条含真实簇判词的记录，
-  `judgedAt` 晚于本任务实现落地时刻——贴出该记录的实际内容，不是"应该会产生"的推断。
-- [ ] AC6（负控制）：关闭本例程的调度开关后重跑一轮，载体不增长；重新开启后增长——两次
+- [ ] AC5（真实生产载体，硬规则 4 推论三，判据读生产不读测试）：实现落地**之后**，quality driver 在**主检出**（非任务 worktree 内的一次性验证）实际跑出 ≥1 条含真实簇判词的记录，`judgedAt` 晚于本任务实现落地时刻——贴出该记录的实际内容，不是"应该会产生"的推断。**⛔ 生产载体未产出前不勾本条（硬规则 4 推论三，同 gap-ac144 AC3 先例）**（待外部）
+- [x] AC6（负控制）：关闭本例程的调度开关后重跑一轮，载体不增长；重新开启后增长——两次
   读数都贴出。
-- [ ] AC7（既有不回归）：`--for-task` scoped 门 + 全量 suite 绿；`quality-gate-driver.ts`
-  既有两条 RoutineSpec（B15/B17）行为不变，既有单测仍过。
+- [ ] AC7（既有不回归）：`--for-task` scoped 门 + 全量 suite 绿（fan-in 驱动跑，未产出前不勾）；`quality-gate-driver.ts` 既有两条 RoutineSpec（B15/B17）行为不变，既有单测已实测 23/23 绿（待外部）
 
 ## Definition of Done
 
@@ -94,13 +91,10 @@ AC1-AC7 全勾；scoped 门 + 全量 suite 绿；改动经 fan-in 落到 develop
 ## Touches
 
 - plugin/scripts/quality-gate-driver.ts（新增第三条 RoutineSpec：架构复核例程）
-- plugin/scripts/architecture-review-cluster.ts（新增：机械聚类纯函数，聚合 P1/P2/P4 三个
-  检测器的 `--json` 输出）
+- plugin/scripts/architecture-review-cluster.ts（新增：机械聚类纯函数，聚合 P1/P2/P4 三个检测器的 `--json` 输出）
 - plugin/test/architecture-review-cluster.test.mjs（新增：聚类纯函数单测）
-- plugin/test/quality-gate-driver.test.mjs（新增：第三条 RoutineSpec 的载体写入 + 三态 + AC6
-  负控制断言）
+- plugin/test/quality-gate-driver.test.mjs（新增：第三条 RoutineSpec 的载体写入 + 三态 + AC6 负控制断言）
 - .gitignore（architecture-review-round.jsonl 运行时态 gitignore）
 - plugin/scripts/capability-catalog.sh（新脚本 architecture-review-cluster.ts 注册进对应表）
-- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY scripts= 计数 +1，同 `gap-ac144`
-  先例）
+- docs/proposals/quay-product-outline.md（DELIVERY-INVENTORY scripts= 计数 +1，同 `gap-ac144` 先例）
 - tasks/gap-quality-driver-architecture-review-routine.md（自身）
