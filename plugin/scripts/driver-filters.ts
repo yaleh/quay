@@ -479,6 +479,9 @@ export function docBranchForkedFromDevelop(root: string, docBranch: string = DOC
  *   - "error"   — git 出错 / 读分支失败（非静默）
  *  失败（not-ff / error）与成功（synced）都落痕到 DOC_DEVELOP_SYNC_EVENT_REL（⛔ 静默）——synced 也写
  *  事件是 AC4 生产载体（硬规则 3c）：成功同步若不留痕，「生产载体有记录」结构上不可满足（恒假）。
+ *  not-doc 亦落痕 doc-develop-sync-branch-mismatch（携带 cur/expected）——分支改名 / driver 常驻进程里
+ *  的 DOC_BRANCH 常量陈旧时，这是唯一的观测信号（⛔ 裸 return 静默则与「无事发生」同形，硬规则 3b，
+ *  gap-sync-develop-to-doc-not-doc-silent-noop）。
  *  already 不写（no-op，每轮写会刷日志）。 */
 export function syncDevelopToDoc(root: string, docBranch: string = DOC_BRANCH): string {
   const cur = currentBranchName(root);
@@ -486,7 +489,10 @@ export function syncDevelopToDoc(root: string, docBranch: string = DOC_BRANCH): 
     writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-ff-error", phase: "read-branch" });
     return "error";
   }
-  if (cur !== docBranch) return "not-doc";
+  if (cur !== docBranch) {
+    writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-branch-mismatch", phase: "not-doc", cur, expected: docBranch });
+    return "not-doc";
+  }
   const forked = docBranchForkedFromDevelop(root, docBranch);
   if (forked === null) {
     writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-ff-error", phase: "rev-count" });
