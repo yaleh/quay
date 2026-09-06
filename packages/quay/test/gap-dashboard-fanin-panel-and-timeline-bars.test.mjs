@@ -37,14 +37,21 @@ const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve-dashboard.t
 const FIXED_NOW_MS = 1_700_000_000_000; // deterministic wall-clock anchor for window math
 
 /** The git PRIMARY checkout root — where the drivers write the REAL `.quay/*.jsonl` runtime data.
- *  A linked worktree's `git rev-parse --git-common-dir` returns the MAIN checkout's `.git` dir
- *  (absolute), so its parent is the main checkout root. The worktree's own `.quay/` is a git-tracked
- *  snapshot WITHOUT the gitignored runtime carriers (worker-outcome.jsonl / verification-round.jsonl),
- *  so AC7 (production regression) must resolve the main checkout explicitly rather than read the
- *  worktree's stale `.quay`. */
+ *  The worktree's own `.quay/` is a git-tracked snapshot WITHOUT the gitignored runtime carriers
+ *  (worker-outcome.jsonl / verification-round.jsonl), so AC7 (production regression) must resolve
+ *  the main checkout explicitly rather than read the worktree's stale `.quay`.
+ *
+ *  gap-dashboard-fanin-timestamp-timeline-anchor AC7 fix: `git rev-parse --git-common-dir` may print
+ *  a path RELATIVE to the subprocess cwd (`__dirname`) — e.g. `../../../.git` when this test runs out
+ *  of the MAIN checkout's test dir (not a linked worktree, where it prints absolute). So the result
+ *  MUST be anchored to `__dirname` (`path.resolve(__dirname, commonDir, "..")`), never to the calling
+ *  process's `process.cwd()` — the two differ when the test is invoked from the repo root (the way
+ *  scripts/test.sh runs it), and the old `path.resolve(commonDir, "..")` resolved `../../../.git`
+ *  against cwd to the WRONG root. Anchoring to `__dirname` makes it absolute-agnostic: a relative
+ *  `commonDir` resolves against `__dirname`, an absolute one resets the prefix — both correct. */
 function mainCheckoutRoot() {
   const commonDir = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd: __dirname, encoding: "utf8" }).trim();
-  return path.resolve(commonDir, "..");
+  return path.resolve(__dirname, commonDir, "..");
 }
 
 /** Minimal-but-shape-valid dashboard args (the same benign shape the sibling dashboard tests use). */
@@ -306,6 +313,30 @@ test("AC7 (production regression): real .quay data renders ≥1 <rect> in BOTH c
   const testsHtml = renderTestsCard(tests, null, { hours: 3 });
   assert.ok((fanInHtml.match(/<rect/g) || []).length >= 1, "fan-in bar renders ≥1 <rect> from real worker-outcome.jsonl");
   assert.ok((testsHtml.match(/<rect/g) || []).length >= 1, "tests bar renders ≥1 <rect> from real verification-round.jsonl");
+});
+
+test("AC7 (cwd-independence): mainCheckoutRoot() resolves the SAME main checkout from two cwd", () => {
+  // gap-dashboard-fanin-timestamp-timeline-anchor AC7 regression sentinel: the fixed helper must
+  // depend only on __dirname (the git subprocess's cwd), never the calling process's process.cwd().
+  // Replay the two cwd the test actually runs under — the repo root (scripts/test.sh's way) and the
+  // test-file dir — and assert BOTH resolve to the same main checkout (the independent
+  // --path-format=absolute oracle, which is absolute regardless of cwd).
+  const oracle = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: __dirname, encoding: "utf8" }).trim();
+  const expectedRoot = path.dirname(oracle);
+  const prev = process.cwd();
+  let fromRepoRoot;
+  let fromTestDir;
+  try {
+    process.chdir(expectedRoot);
+    fromRepoRoot = mainCheckoutRoot();
+    process.chdir(__dirname);
+    fromTestDir = mainCheckoutRoot();
+  } finally {
+    process.chdir(prev);
+  }
+  assert.equal(fromRepoRoot, expectedRoot, "from the repo-root cwd → the main checkout root");
+  assert.equal(fromTestDir, expectedRoot, "from the test-file cwd → the main checkout root");
+  assert.equal(fromRepoRoot, fromTestDir, "identical result from two different cwd");
 });
 
 // ── Integration: illegal/missing hours → HTTP 200 (fallback, never an error) ─────────────────────
