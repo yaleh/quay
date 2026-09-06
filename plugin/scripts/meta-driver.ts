@@ -40,6 +40,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { launchArgv, runAsync, ts, type Fact } from "./driver-runtime.ts";
 import { readProbeSpec } from "./read-probe-spec.ts";
 import { gateFinding, findingKey, DEFAULT_RATE } from "./routine-file-gate.ts";
@@ -256,6 +257,60 @@ export async function fileProposals(
   return results;
 }
 
+// ── 变化检测（语义半的触发闸）────────────────────────────────────────────────────────────────────
+
+/** 语义半的触发状态（gitignored 运行时状态，与轮载体分开——它是【状态】不是【记录】）。 */
+export const STATE_REL = path.join(".quay", "meta-driver-state.json");
+
+/** 读数的稳定摘要：只含【会改变判读结论】的量（每条 AC 的 verdict/status + 偏离类别），
+ *  ⛔ 不含时间戳/reason 文本（那些每轮都变，会让摘要恒不相等 ⇒ 变化检测恒为真 ⇒ 闸失效）。 */
+export function readingsDigest(readings: MetaRoundReadings): string {
+  const parts = [
+    ...readings.criteria.map((c) => `${c.id}:${c.status}:${c.verdict}`).sort(),
+    ...readings.divergences.map((d) => `${d.id}:${d.kind}`).sort(),
+  ];
+  return createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 16);
+}
+
+export interface MetaState { digest: string | null; lastJudgedAt: string | null }
+
+export function readState(root: string): MetaState {
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(root, STATE_REL), "utf8"));
+    return { digest: typeof j.digest === "string" ? j.digest : null, lastJudgedAt: typeof j.lastJudgedAt === "string" ? j.lastJudgedAt : null };
+  } catch {
+    // 读不到 ⇒ never-judged（⛔ 不当作"没变化"——那会让首轮静默跳过语义半）。
+    return { digest: null, lastJudgedAt: null };
+  }
+}
+
+export function writeState(root: string, s: MetaState): void {
+  try {
+    const f = path.join(root, STATE_REL);
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(f, JSON.stringify(s, null, 2) + "\n", "utf8");
+  } catch { /* 状态写失败不致命；下一轮退化为 never-judged ⇒ 多判一次，不会漏判 */ }
+}
+
+/** 语义半是否该跑。**事件触发 + 定时器地板**（08-23 SPEC §5 已裁定的模型的机械形态）：
+ *  读数变了 ⇒ 跑；人给了 focus ⇒ 跑；距上次判读超过地板 ⇒ 跑。
+ *  ⊢ 地板是**安全网不是调优参数**：它防的是「摘要因故恒不变 ⇒ 永不再判读」这一失效模式，
+ *    故取一个粗值（缺省 24h）并显式可配，⛔ 不是按成本/收益调出来的阈值（硬规则 4 推论一）。 */
+export function shouldJudge(
+  args: { digest: string; state: MetaState; focus: string | null; now: number; floorMs: number },
+): { judge: boolean; reason: string } {
+  if (args.focus) return { judge: true, reason: "focus given by human" };
+  if (args.state.digest === null) return { judge: true, reason: "never judged" };
+  if (args.state.digest !== args.digest) return { judge: true, reason: "readings changed" };
+  const last = args.state.lastJudgedAt ? Date.parse(args.state.lastJudgedAt) : NaN;
+  if (!Number.isFinite(last)) return { judge: true, reason: "last-judged timestamp unreadable" };
+  if (args.now - last >= args.floorMs) return { judge: true, reason: `floor reached (${Math.round((args.now - last) / 60000)}m since last judge)` };
+  return { judge: false, reason: `unchanged since ${args.state.lastJudgedAt}` };
+}
+
+/** 语义半地板的缺省值（24h）——粗安全网，见 shouldJudge 的说明。 */
+export const JUDGE_FLOOR_MS_DEFAULT = 24 * 60 * 60 * 1000;
+
 // ── 语义半 ────────────────────────────────────────────────────────────────────────────────────────
 
 /** 组装 probe prompt 的**单一构造点**（复刻 launchArgv 的 AC140 纪律：一次性入口与常驻入口
@@ -308,6 +363,8 @@ export interface MetaRoundOptions {
   noLlm: boolean;
   k: number;
   dryRun: boolean;
+  /** 语义半的定时器地板（缺省 JUDGE_FLOOR_MS_DEFAULT）——安全网，非调优阈值。 */
+  judgeFloorMs?: number;
   /** 测试缝：注入语义半的 argv（缺省经 launchArgv 派 claude -p）。 */
   probeArgv?: (prompt: string) => string[];
   /** 测试缝：probe 规格目录（缺省 <root>/plugin）。 */
@@ -342,10 +399,25 @@ export async function runMetaRound(opts: MetaRoundOptions): Promise<MetaRoundRes
     focus,
   };
 
+  // 摘要在机械半就算出来并输出：它是触发闸的输入，必须能被【不花 LLM 的一次调用】观测到
+  // （否则"摘要在真实数据上是否稳定"这个最容易坏的性质只能靠烧 LLM 来验）。
+  const digest = readingsDigest(readings);
+
   if (noLlm) {
     return {
-      fact: { name: "meta-driver", value: { ...base, semantic: "skipped" }, state: "verified", reason: `mechanical-only (${readings.divergences.length} divergences)` },
-      record: { ts: at, state: "mechanical-only", ...base, readings: readings.criteria },
+      fact: { name: "meta-driver", value: { ...base, semantic: "skipped", digest }, state: "verified", reason: `mechanical-only (${readings.divergences.length} divergences, digest ${digest})` },
+      record: { ts: at, state: "mechanical-only", digest, ...base, readings: readings.criteria },
+    };
+  }
+
+  // 事件触发闸：读数没变且没到地板 ⇒ 不派语义半（同一输入重复派 LLM 是纯烧钱；实测两轮
+  // 生产读数完全相同）。⛔ 「跳过」有独立取值，不与「判读过」同形（硬规则 3b）。
+  const state = readState(root);
+  const gate = shouldJudge({ digest, state, focus, now: Date.now(), floorMs: opts.judgeFloorMs ?? JUDGE_FLOOR_MS_DEFAULT });
+  if (!gate.judge) {
+    return {
+      fact: { name: "meta-driver", value: { ...base, semantic: "skipped-unchanged", digest }, state: "verified", reason: `semantic half skipped: ${gate.reason}` },
+      record: { ts: at, state: "skipped-unchanged", digest, skipReason: gate.reason, ...base },
     };
   }
 
@@ -379,6 +451,9 @@ export async function runMetaRound(opts: MetaRoundOptions): Promise<MetaRoundRes
   const activeGoalIds = new Set(readings.goals.map((g) => g.id));
   const filed = await fileProposals(root, parsed.proposals, records, { k, activeGoalIds, dryRun });
   const acceptedIds = filed.filter((f) => f.accepted).map((f) => f.id);
+  // 判读成功才推进状态：失败/解析不了的轮不写 state ⇒ 下一轮仍判为「该判读」，⛔ 不会因
+  // 一次失败就把这批读数当成"已判过"而永久跳过。
+  if (!dryRun) writeState(root, { digest, lastJudgedAt: new Date().toISOString() });
 
   const value = {
     ...base,
@@ -414,7 +489,9 @@ const HELP = [
   "  --no-llm          只跑机械半（读数 + divergence），不派语义 probe",
   "  --focus \"<text>\"  本轮的人给的方向（可选，进 prompt）",
   "  --k <N>           本轮提案上限（缺省 " + DEFAULT_RATE + "，routine-file-gate 的 rate 闸）",
-  "  --dry-run         提案过闸但不写盘",
+  "  --dry-run         提案过闸但不写盘（也不推进变化检测状态）",
+  "  --judge-floor <m> 语义半的定时器地板（分钟，缺省 1440=24h）——安全网非调优阈值：",
+  "                    读数变了/给了 --focus 就会判读；地板只防「摘要恒不变 ⇒ 永不再判」",
   "  --json            输出 JSON（缺省人读摘要）",
   "",
   "Exit: 0 = 轮跑完（含 not-evaluated）; 1 = 轮失败; 2 = usage",
@@ -428,12 +505,14 @@ export async function main(argv: string[]): Promise<number> {
   let dryRun = false;
   let json = false;
   let k = DEFAULT_RATE;
+  let judgeFloorMs = JUDGE_FLOOR_MS_DEFAULT;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === "--root") { root = args[++i]; }
     else if (a === "--focus") { focus = args[++i] ?? null; }
     else if (a === "--k") { k = Number(args[++i]); }
+    else if (a === "--judge-floor") { judgeFloorMs = Number(args[++i]) * 60_000; }
     else if (a === "--no-llm") { noLlm = true; }
     else if (a === "--dry-run") { dryRun = true; }
     else if (a === "--json") { json = true; }
@@ -442,8 +521,9 @@ export async function main(argv: string[]): Promise<number> {
     else { process.stderr.write(`meta-driver: unknown argument: ${a}\n${HELP}\n`); return 2; }
   }
   if (!Number.isFinite(k) || k < 1) { process.stderr.write("meta-driver: --k must be a positive number\n"); return 2; }
+  if (!Number.isFinite(judgeFloorMs) || judgeFloorMs < 0) { process.stderr.write("meta-driver: --judge-floor must be a non-negative number of minutes\n"); return 2; }
 
-  const { fact, record } = await runMetaRound({ root, focus, noLlm, k, dryRun });
+  const { fact, record } = await runMetaRound({ root, focus, noLlm, k, dryRun, judgeFloorMs });
   // ⛔ dry-run 也要留痕：「跑了一轮、什么都没提」正是最该被记录的情形——不记则「跑过」与
   // 「没跑过」在载体上同形，本例程的沉默就不可被检测（硬规则 9）。dryRun 进记录，不进条件。
   appendRoundSafe(root, { ...record, dryRun });
