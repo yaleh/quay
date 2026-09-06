@@ -71,4 +71,5 @@ extra:
 - orchestration/REVIEW-cadence.md（参考，不修改）
 - orchestration/manager-loop-tick.md（参考，不修改）
 - plugin/test/manager-*.test.mjs（如有，验证 skill 的幂等性/初始化）
+- plugin/skills/init/SKILL.md（声明 orchestration/manager-tick-prompt.txt 为 reference-doc——会话内 CronCreate 步骤引用它，解 referenced-not-landed 全库红）
 - tasks/gap-manager-skill-session-embodiment-activation.md
