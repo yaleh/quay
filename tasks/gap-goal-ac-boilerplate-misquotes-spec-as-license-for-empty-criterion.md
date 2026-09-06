@@ -34,17 +34,17 @@ extra: {}
 
 ## AC
 
-- [ ] 无判据的活跃 AC 归零：`node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts list --status active --root . | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);const bad=j.filter(r=>String(r.id||"").startsWith("AC-")&&r.criterion==null);console.error(bad.length+" 条无判据: "+bad.map(x=>x.id).join(","));process.exit(bad.length===0?0:1)})'` ⇒ exit 0。立条时实跑为 **exit 1、13 条**（能取假）。
-- [ ] 误引样板绝迹：`grep -rl 'criterion 留空' goals/ | wc -l` ⇒ `0`。立条时实跑为 **27**（含 GOAL-006 自身引用；能取假）。
-- [ ] 每条新补的 criterion 都**能取假**：逐条给出一次「把被测对象改坏 ⇒ 该 criterion 变红」的实跑证据，或说明该条为何只能语义判定并**改为非 active**（retired/draft），⛔ 不得保留「active 且无判据」这个组合。
-- [ ] 判据测的是**行为不是源码排版**：⛔ 不接受 `grep 某字符串是否存在于某文件` 这类会因重排而失效的写法（同 probe 规格的 criterion-quality 条）。
+- [x] 无判据的活跃 AC 归零：`node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts list --status active --root . | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);const bad=j.filter(r=>String(r.id||"").startsWith("AC-")&&r.criterion==null);console.error(bad.length+" 条无判据: "+bad.map(x=>x.id).join(","));process.exit(bad.length===0?0:1)})'` ⇒ exit 0。立条时实跑为 **exit 1、13 条**（能取假）。
+- [x] 误引样板绝迹：`grep -rl 'criterion 留空' goals/ | wc -l` ⇒ `0`。立条时实跑为 **27**（含 GOAL-006 自身引用；能取假）。
+- [x] 每条新补的 criterion 都**能取假**：逐条给出一次「把被测对象改坏 ⇒ 该 criterion 变红」的实跑证据，或说明该条为何只能语义判定并**改为非 active**（retired/draft），⛔ 不得保留「active 且无判据」这个组合。
+- [x] 判据测的是**行为不是源码排版**：⛔ 不接受 `grep 某字符串是否存在于某文件` 这类会因重排而失效的写法（同 probe 规格的 criterion-quality 条）。
 
 ## DoD
 
-- [ ] 上述判据本轮实跑并贴出输出，⛔ 不是转述。
-- [ ] 26 条**全部**处理，不只处理当前 active 的 13 条——非 active 的那 13 条带着同样的假依据，一旦重新激活即复现（硬规则 5b：在某处修好 X ≠ X 只在那一处）。
-- [ ] GOAL-002 的验收面从「结构上无法达成」变为「可被测量」：`isGoalAchieved(GOAL-002)` 不再因缺判据而恒 false（可以仍为 false，但原因必须是判据真的没过，而不是没有判据）。
-- [ ] ⛔ 未把「补判据」做成给每条塞一个恒绿命令——那会把无测量换成假测量，比现状更坏（硬规则 4）。
+- [x] 上述判据本轮实跑并贴出输出，⛔ 不是转述。
+- [x] 26 条**全部**处理，不只处理当前 active 的 13 条——非 active 的那 13 条带着同样的假依据，一旦重新激活即复现（硬规则 5b：在某处修好 X ≠ X 只在那一处）。
+- [x] GOAL-002 的验收面从「结构上无法达成」变为「可被测量」：`isGoalAchieved(GOAL-002)` 不再因缺判据而恒 false（可以仍为 false，但原因必须是判据真的没过，而不是没有判据）。
+- [x] ⛔ 未把「补判据」做成给每条塞一个恒绿命令——那会把无测量换成假测量，比现状更坏（硬规则 4）。
 
 ## Touches
 
@@ -74,4 +74,5 @@ extra: {}
 - `goals/AC-168-quay-init-contract-closed-set.md`
 - `goals/AC-165-remove-root-mcp-json.md`
 - `goals/AC-166-second-copy-retirement.md`
+- `goals/GOAL-006-ac-criterion-spec-0809-3-fail-closed-ac-180-ac.md`
 - `tasks/gap-goal-ac-boilerplate-misquotes-spec-as-license-for-empty-criterion.md`
