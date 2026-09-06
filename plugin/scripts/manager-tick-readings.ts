@@ -6,8 +6,6 @@
 //   的 8 个散落 bash 块（orchestration/manager-loop-tick.md §1.a/§1.b/§1.4）收成一条命令。AC1。
 //
 // 契约：
-//   - tmux 纯只读：只用 `list-panes`（含 -a 全量枚举）；零破坏性 tmux 子命令（kill 族一律不用）。AC2。
-//   - 身份判据：`pane_pid` + `pane_current_command`（cmd=claude 才算认出会话）；不用 pgrep 的 `-P` 子进程寻址。AC4。
 //   - 输出固定结构、逐行带标签：人为跳过一项 ⇒ 该标签行缺失，可被机械检出，不是静默少几行。AC3。
 //
 // 用法:
@@ -16,34 +14,31 @@
 //
 // 测试/环境接缝（生产调用不设 → 行为不变）:
 //   MTR_PROJECTS           项目表 name=dir 空格分隔（默认 quay/archguard/meta-cc 于 /home/yale/work）
-//   MTR_TMUX_LIST_PANES    直接给定 `list-panes -a` 输出（tmux 只读接缝，测试用）
-//   TMUX_TMPDIR            tmux socket 覆盖（同 tmux 只读的测试机制）
+//
+// 2026-09-06 退役 `outer.liveness`（gap-manager-liveness-field-outer-tmux-gone，方案 A）：
+//   outer 独立 tmux 会话/窗口已由 gap-retire-outer-tmux-window-logic 删除，`outer.liveness` 字段结构上
+//   恒返回 `window-missing`（一个恒返回固定值的伪观测，本任务 DoD 明令禁止）。连同 `outerReadings()` 与
+//   仅服务于该字段的 tmux 读管线（tmuxListPanes/remoteTmuxListPanes/parsePanes/defaultTmuxSocket/
+//   resolvePanes 及相关 seam）以及 Project 的 session/host 字段（仅 outer.liveness 消费）一并删除。
+//   判层活性的正本已是直接量（git log 提交时刻 / worktree 活进程）。
+//   `outer.ticklog`（读文件，非 tmux）保留。
 
 import fs from "node:fs";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
 
 export const NAME = "manager-tick-readings";
-export const TMUX_LIST_PANES_SEAM = "MTR_TMUX_LIST_PANES";
 export const PROJECTS_SEAM = "MTR_PROJECTS";
 
 export interface Project {
   name: string;
   dir: string;
-  /** 配置的 tmux 会话名。为空时回退 `name` / `name-*` 前缀推导（本地项目）。
-   *  archguard 真名 `archguard-0` 且在 ad-arm1（跨主机）——从配置取，不硬编码推导
-   *  （gap-manager-tick-readings-stale-readings 缺陷②）。 */
-  session?: string;
-  /** 跨主机 fqdn（空 = 本机）。跨主机 liveness 走 supervisor-deliver.sh 的 `<host>:<target>` 形态
-   *  （a15dc33c；supervisor-deliver.sh 交叉标注）。 */
-  host?: string;
 }
 
 export const DEFAULT_PROJECTS: Project[] = [
   { name: "quay", dir: "/home/yale/work/quay" },
-  { name: "archguard", dir: "/home/yale/work/archguard", session: "archguard-0", host: "ad-arm1.wan.hwang.men" },
+  { name: "archguard", dir: "/home/yale/work/archguard" },
   { name: "meta-cc", dir: "/home/yale/work/meta-cc" },
 ];
 
@@ -53,84 +48,8 @@ export function parseProjects(env: NodeJS.ProcessEnv = process.env): Project[] {
   return raw.trim().split(/\s+/).map((pair) => {
     const eq = pair.indexOf("=");
     if (eq < 0) return { name: pair, dir: "" };
-    const name = pair.slice(0, eq);
-    const [dir, session, host] = pair.slice(eq + 1).split(":");
-    const project: Project = { name, dir: dir ?? "" };
-    if (session) project.session = session;
-    if (host) project.host = host;
-    return project;
+    return { name: pair.slice(0, eq), dir: pair.slice(eq + 1) };
   });
-}
-
-export function defaultTmuxSocket(env: NodeJS.ProcessEnv = process.env): string {
-  const uid = typeof process.getuid === "function" ? String(process.getuid()) : "";
-  const tmp = env.TMUX_TMPDIR || env.TMPDIR || "/tmp";
-  return path.join(tmp, `tmux-${uid}`, "default");
-}
-
-export interface PaneInfo {
-  session: string;
-  window: string;
-  panePid: string;
-  cmd: string;
-}
-
-export const PANE_FMT = "#{session_name}:#{window_name}\t#{pane_pid}\t#{pane_current_command}";
-/** 跨主机 tmux 只读接缝（测试模拟 `ssh <host> tmux list-panes` 输出，不经网络）。 */
-export const REMOTE_TMUX_LIST_PANES_SEAM = "MTR_REMOTE_TMUX_LIST_PANES";
-/** ssh 二进制接缝（测试 mock 替换；同 supervisor-deliver.sh 的 SUPERVISOR_DELIVER_SSH 机制）。 */
-export const SSH_SEAM = "MTR_SSH";
-
-/** 共享的 pane 行解析：`<session>:<window>\t<pane_pid>\t<pane_current_command>`。 */
-export function parsePanes(raw: string): PaneInfo[] {
-  if (!raw) return [];
-  return raw.split("\n").filter(Boolean).map((line) => {
-    const [sw, panePid, cmd] = line.split("\t");
-    const colon = sw.lastIndexOf(":");
-    return {
-      session: colon >= 0 ? sw.slice(0, colon) : sw,
-      window: colon >= 0 ? sw.slice(colon + 1) : "",
-      panePid: panePid ?? "",
-      cmd: cmd ?? "",
-    };
-  });
-}
-
-/** 只读 tmux：`env -u TMUX tmux -S <socket> list-panes -a`（读真实默认服务端）。 */
-export function tmuxListPanes(socket: string, env: NodeJS.ProcessEnv = process.env): PaneInfo[] {
-  const seam = env[TMUX_LIST_PANES_SEAM];
-  const raw = seam !== undefined ? seam : runTmuxListPanes(socket, env);
-  return parsePanes(raw);
-}
-
-/** 跨主机只读 tmux：`ssh <host> tmux list-panes -a -F ...`（supervisor-deliver.sh 的
- *  `<host>:<target>` 形态——同一跨主机寻址约定，a15dc33c 落地）。失败/不可达 ⇒ 空（window-missing，fail-safe）。 */
-export function remoteTmuxListPanes(host: string, env: NodeJS.ProcessEnv = process.env): PaneInfo[] {
-  const seam = env[REMOTE_TMUX_LIST_PANES_SEAM];
-  const raw = seam !== undefined ? seam : runRemoteTmuxListPanes(host, env);
-  return parsePanes(raw);
-}
-
-function runRemoteTmuxListPanes(host: string, env: NodeJS.ProcessEnv): string {
-  const ssh = env[SSH_SEAM] || "ssh";
-  // 远端命令整体作为 ssh 的单个参数（ssh 会吞 -F 当自己的 config 选项——必须整体引号，同
-  // supervisor-deliver.sh 的 `printf %q` 处理）。tmux -F 不解释 `\t`，故制表符用 bash `$'\t'`
-  // ANSI-C 引用在远端展开成真 tab（远端 shell 为 bash）。
-  const sq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
-  const fmt = PANE_FMT.split("\t").map(sq).join("$'\\t'");
-  const res = spawnSync(ssh, [host, `tmux list-panes -a -F ${fmt}`], { encoding: "utf8", env });
-  if (res.status !== 0) return "";
-  return res.stdout || "";
-}
-
-function runTmuxListPanes(socket: string, env: NodeJS.ProcessEnv): string {
-  const res = spawnSync(
-    "env",
-    ["-u", "TMUX", "tmux", "-S", socket, "list-panes", "-a", "-F", PANE_FMT],
-    { encoding: "utf8", env },
-  );
-  if (res.status !== 0) return "";
-  return res.stdout || "";
 }
 
 export function projectStatus(project: Project): string {
@@ -230,40 +149,6 @@ export function countNodeCommLiteral(procRoot = "/proc", selfPid = process.pid):
     count = 0;
   }
   return count;
-}
-
-export interface OuterReading {
-  project: string;
-  target: string;
-  exists: boolean;
-  panePid: string;
-  cmd: string;
-  host: string;
-  session: string;
-}
-
-/** 按窗口名寻址（窗口名 == outer），不按 pane 索引（索引会漂，§1.b 已成文）。
- *  `panes` 可以是 pane 数组（所有项目同一来源，向后兼容）或按项目解析的函数——
- *  跨主机项目（`p.host` 非空）经 `remoteTmuxListPanes` 查远端 tmux，会话名取 `p.session`（配置），
- *  不硬编码推导（缺陷②）。 */
-export function outerReadings(projects: Project[], panes: PaneInfo[] | ((p: Project) => PaneInfo[])): OuterReading[] {
-  const listPanes = typeof panes === "function" ? panes : () => panes;
-  const readings: OuterReading[] = [];
-  for (const p of projects) {
-    const sessionName = p.session ?? p.name;
-    const matches = listPanes(p).filter(
-      (pn) => pn.window === "outer" &&
-        (pn.session === sessionName || (p.session == null && pn.session.startsWith(`${p.name}-`))),
-    );
-    if (matches.length === 0) {
-      readings.push({ project: p.name, target: `${p.name}:outer`, exists: false, panePid: "", cmd: "", host: p.host ?? "", session: sessionName });
-    } else {
-      for (const m of matches) {
-        readings.push({ project: p.name, target: `${m.session}:${m.window}`, exists: true, panePid: m.panePid, cmd: m.cmd, host: p.host ?? "", session: sessionName });
-      }
-    }
-  }
-  return readings;
 }
 
 export function truncate(s: string, n: number): string {
@@ -385,32 +270,13 @@ export function goalReading(repoRoot: string): GoalReading {
 }
 
 export interface RenderOpts {
-  socket: string;
   repoRoot: string;
   procRoot?: string;
-  env?: NodeJS.ProcessEnv;
-}
-
-/** 跨主机 pane 解析：本地项目一次 list-panes；跨主机项目按 host 走 ssh（带缓存）。 */
-export function resolvePanes(
-  projects: Project[],
-  socket: string,
-  env: NodeJS.ProcessEnv,
-): (p: Project) => PaneInfo[] {
-  const localPanes = tmuxListPanes(socket, env);
-  const remoteCache = new Map<string, PaneInfo[]>();
-  return (p: Project): PaneInfo[] => {
-    if (!p.host) return localPanes;
-    if (!remoteCache.has(p.host)) remoteCache.set(p.host, remoteTmuxListPanes(p.host, env));
-    return remoteCache.get(p.host)!;
-  };
 }
 
 export function render(projects: Project[], opts: RenderOpts): string {
-  const env = opts.env ?? process.env;
   const procRoot = opts.procRoot ?? "/proc";
   const resources = resourceReadings(procRoot);
-  const outer = outerReadings(projects, resolvePanes(projects, opts.socket, env));
 
   const lines: string[] = [];
   lines.push(`manager-tick-readings ts=${Date.now()}`);
@@ -421,22 +287,12 @@ export function render(projects: Project[], opts: RenderOpts): string {
   lines.push(`resource.node_comm_literal ${resources.nodeCommLiteral}`);
   lines.push(`resource.node_dual_read ${resources.nodeInstrumentFailure ? "INSTRUMENT-FAILURE" : "ok"}`);
   lines.push(`resource.mem_available_mb ${resources.memAvailMb}`);
-  for (const o of outer) {
-    if (o.exists) {
-      const hostPart = o.host ? ` host=${o.host}` : "";
-      lines.push(`outer.liveness ${o.target} alive pane_pid=${o.panePid} cmd=${o.cmd}${hostPart}`);
-    } else {
-      lines.push(`outer.liveness ${o.target} window-missing`);
-    }
-  }
   for (const p of projects) lines.push(`outer.ticklog ${p.name} ${latestTickLog(p, 200, { full: true })}`);
   return `${lines.join("\n")}\n`;
 }
 
-/** 单读数子命令（Contract invoke）：`manager-tick-readings.ts outer.ticklog [name…]`
- *  / `outer.liveness <target>`。target 形态 `<project>[:<window>]` 或 `<host>:<session>:<window>`。 */
-export function renderSelected(cmd: string, args: string[], projects: Project[], opts: RenderOpts): string {
-  const env = opts.env ?? process.env;
+/** 单读数子命令（Contract invoke）：`manager-tick-readings.ts outer.ticklog [name…]`。 */
+export function renderSelected(cmd: string, args: string[], projects: Project[]): string {
   const lines: string[] = [];
 
   if (cmd === "outer.ticklog") {
@@ -444,34 +300,6 @@ export function renderSelected(cmd: string, args: string[], projects: Project[],
     for (const p of projects) {
       if (names && !names.has(p.name)) continue;
       lines.push(`outer.ticklog ${p.name} ${latestTickLog(p, 200, { full: true })}`);
-    }
-  } else if (cmd === "outer.liveness") {
-    const target = args[0] ?? "";
-    const parts = target.split(":");
-    let projName: string;
-    let window = "outer";
-    if (parts.length === 1) projName = parts[0];
-    else if (parts.length === 2) { projName = parts[0]; window = parts[1]; }
-    else { projName = parts[1]; window = parts[2]; }
-    const project = projects.find((p) => p.name === projName);
-    if (!project) {
-      lines.push(`outer.liveness ${target || "<missing>"} unknown-project`);
-      return `${lines.join("\n")}\n`;
-    }
-    const panes = project.host ? remoteTmuxListPanes(project.host, env) : tmuxListPanes(opts.socket, env);
-    const sessionName = project.session ?? project.name;
-    const matches = panes.filter(
-      (pn) => pn.window === window &&
-        (pn.session === sessionName || (project.session == null && pn.session.startsWith(`${project.name}-`))),
-    );
-    const canonical = `${projName}:${window}`;
-    if (matches.length === 0) {
-      lines.push(`outer.liveness ${canonical} window-missing`);
-    } else {
-      for (const m of matches) {
-        const hostPart = project.host ? ` host=${project.host}` : "";
-        lines.push(`outer.liveness ${canonical} alive pane_pid=${m.panePid} cmd=${m.cmd} session=${m.session}${hostPart}`);
-      }
     }
   }
   return `${lines.join("\n")}\n`;
@@ -482,14 +310,13 @@ export function main(argv: string[], opts?: { env?: NodeJS.ProcessEnv }): number
   const here = path.dirname(fileURLToPath(import.meta.url));
   const repoRoot = path.resolve(here, "..", "..");
   const projects = parseProjects(env);
-  const socket = defaultTmuxSocket(env);
   const args = argv.slice(2);
   const cmd = args[0] ?? "";
-  if (cmd === "outer.ticklog" || cmd === "outer.liveness") {
-    process.stdout.write(renderSelected(cmd, args.slice(1), projects, { socket, repoRoot, env }));
+  if (cmd === "outer.ticklog") {
+    process.stdout.write(renderSelected(cmd, args.slice(1), projects));
     return 0;
   }
-  process.stdout.write(render(projects, { socket, repoRoot, env }));
+  process.stdout.write(render(projects, { repoRoot }));
   return 0;
 }
 
