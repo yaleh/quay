@@ -2,7 +2,7 @@
 id: gap-abi-missing-commit-delete-dependson-primitives
 title: Provider ABI missing commit/delete/depends_on primitives — dispatch spine
   bypasses it structurally
-status: ready
+status: done
 labels:
   - gap
 parent: null
