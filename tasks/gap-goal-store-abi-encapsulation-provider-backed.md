@@ -84,6 +84,7 @@ goal/document 是 **Core store，不穿 Provider ABI**，与 task/ADR 走的是�
 - packages/quay-native/bin/quay-native.ts
 - packages/quay-github/src/mcp-server.ts
 - packages/quay-native/provider.yml
+- plugin/scripts/quay-init-closure-ratchet.ts
 - plugin/vendor/quay-native/provider.yml
 - packages/quay-github/provider.yml
 - packages/quay-backlog/provider.yml
