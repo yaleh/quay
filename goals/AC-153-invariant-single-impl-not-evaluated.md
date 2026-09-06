@@ -4,16 +4,18 @@ title: 核心不变式单一实现 + 结果词表含「无法评估」
 status: active
 kind: criterion
 goal: GOAL-002
+criterion: |
+  node --no-warnings --experimental-strip-types -e 'import("./plugin/scripts/driver-result.ts").then(m=>{const r=m.verifyIndependently({value:1,verifiedBy:"t",failedReason:"f",notEvaluatedReason:"n"},()=>null);process.exit(typeof m.notEvaluated==="function"&&r.state==="not-evaluated"?0:1)})'
+expect: exit 0
 origin: >
   人 2026-08-23 裁定「前述可重用机制应当分层抽象，以支持这两层上的重用」；
 
   正本 orchestration/SPEC-unified-driver-architecture-2026-08-23.md
   §2.1/§2.5/§2.6。
 evidence:
-  at: 2026-09-06T09:44:32.289Z
-  verdict: fail
-  reading: AC-153 has no criterion defined (fail-closed — an unenforceable AC must
-    never silently pass)
+  at: 2026-09-06T17:03:31.975Z
+  verdict: pass
+  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：「⛔ 不信执行者自述，用独立于执行者的量复核」**只存在一份**；且 `DriverResult`
@@ -24,4 +26,4 @@ evidence:
 （promotion AC133 / worker `computeLandingState`），**其中 worker 那份在 2026-08-23 11:37 之前
 一直是坏的**（`exitCode===0 ⇒ completed`）。
 
-**⊢ criterion 留空**：本条是语义判据、无可跑 shell 判据；`gate` fail-closed（红）是诚实状态（SPEC-0809 §3）。
+

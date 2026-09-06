@@ -3,7 +3,7 @@
 // concurrency cap is RETIRED (human ruling 2026-08-09): effective_cap is the FIXED constant 5,
 // regardless of cpu pressure / suite state / process budget. The band + hysteresis + budget logic
 // still RUNS as PURE OBSERVATION (the signal/band/budget lines the CLI prints) and is pinned here
-// as observation, but it participates in NO decision — effective_cap is always FIXED_EFFECTIVE_CAP (5).
+// as observation, but it participates in NO decision — effective_cap is always the configured worker cap.
 //
 // SPLIT NOTE (gap-suite-floor-two-longest-files-bound): this is one of FIVE files split from the
 // original cap-from-gate.test.mjs (166s main-phase floor) by test concern — this file holds the
@@ -36,11 +36,11 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 import {
-  FIXED_EFFECTIVE_CAP,
   computeDesiredBand,
   readBandsFromConfig,
   computeEffectiveCap,
 } from "../scripts/cap-from-gate.ts";
+import { driverCap } from "../scripts/driver-config.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -56,6 +56,9 @@ function findRepoRoot(startDir) {
 }
 const REPO_ROOT = findRepoRoot(__dirname);
 const GATE = path.join(REPO_ROOT, "plugin", "scripts", "resource-gate.sh");
+// Expected effective_cap = the CONFIGURED worker cap (drivers.yml via driverCap), NOT a hardcoded 5 —
+// gap-cap-from-gate-effective-cap-dual-source-blocks-yml-override (see cap-from-gate-bands.test.mjs).
+const CONFIGURED_CAP = driverCap(REPO_ROOT, "worker");
 
 // Hermetic bands injected into every GO/WAIT/EXTREME assertion (ad-arm1 gate #3 — see the sibling
 // cap-from-gate-bands.test.mjs header for the rationale). TEST_BANDS is a deliberately non-default
@@ -95,7 +98,7 @@ test("BUDGET — the budget is OBSERVED (available/readable) but NO LONGER bound
     env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "12", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
   });
   assert.equal(idle.band, "GO");
-  assert.equal(idle.effective_cap, FIXED_EFFECTIVE_CAP, "GO with room ⇒ fixed 5, not min(GO_band, available)");
+  assert.equal(idle.effective_cap, CONFIGURED_CAP, `GO with room ⇒ configured cap (${CONFIGURED_CAP}), not min(GO_band, available)`);
   assert.equal(idle.budget_available, 4, "available = nproc - in_use = 4 - 0 (observation)");
   // Budget EXHAUSTED (in_use=20 on a 4-core box → available=0): the OLD behavior dropped the cap to 1;
   // the retired dynamic cap means effective_cap stays 5 (a saturated host's WAIT verdict no longer
@@ -107,7 +110,7 @@ test("BUDGET — the budget is OBSERVED (available/readable) but NO LONGER bound
     env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "12", RESOURCE_GATE_TEST_NODE_PROCS: "20" },
   });
   assert.equal(saturated.band, "GO", "cpu pressure still says GO (observed)");
-  assert.equal(saturated.effective_cap, FIXED_EFFECTIVE_CAP, "budget exhausted ⇒ effective_cap STAYS 5 (no cap drop — dynamic cap retired)");
+  assert.equal(saturated.effective_cap, CONFIGURED_CAP, `budget exhausted ⇒ effective_cap STAYS ${CONFIGURED_CAP} (no cap drop — dynamic cap retired)`);
   assert.equal(saturated.budget_available, 0);
   // Budget constrained (available=1): the OLD behavior bounded the cap to 1; now it stays 5.
   const constrained = computeEffectiveCap({
@@ -116,7 +119,7 @@ test("BUDGET — the budget is OBSERVED (available/readable) but NO LONGER bound
     bands: TEST_BANDS,
     env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "12", RESOURCE_GATE_TEST_NODE_PROCS: "3" },
   });
-  assert.equal(constrained.effective_cap, FIXED_EFFECTIVE_CAP, "available=1 ⇒ effective_cap stays 5");
+  assert.equal(constrained.effective_cap, CONFIGURED_CAP, `available=1 ⇒ effective_cap stays ${CONFIGURED_CAP}`);
   assert.equal(constrained.budget_available, 1, "budget observation still accurate");
 });
 
@@ -152,7 +155,7 @@ test("SEAM (round-5 red, cluster B) — RESOURCE_GATE_TEST_NPROC overrides the a
   assert.equal(cap.band, "GO");
   assert.equal(cap.budget_total, injected, `budget_total must be the injected ${injected} (ambient is ${ambient})`);
   assert.equal(cap.budget_available, injected, "budget_available = injected total_budget − 0 in_use");
-  assert.equal(cap.effective_cap, FIXED_EFFECTIVE_CAP, `the seam proves the budget flows through (observation); effective_cap is still the fixed 5`);
+  assert.equal(cap.effective_cap, CONFIGURED_CAP, `the seam proves the budget flows through (observation); effective_cap is still the configured cap (${CONFIGURED_CAP})`);
 });
 
 // ── AC4: configurable bands ────────────────────────────────────────────────────────────────────────
@@ -190,7 +193,7 @@ test("AC4 — the OBSERVED band follows an injected band config, but effective_c
     bands: { go: 4, wait: 2, extreme_wait: 1 },
   });
   assert.equal(r.band, "EXTREME");
-  assert.equal(r.effective_cap, FIXED_EFFECTIVE_CAP, "config 4/2/1 does NOT drop the cap — fixed 5");
+  assert.equal(r.effective_cap, CONFIGURED_CAP, `config 4/2/1 does NOT drop the cap — configured cap (${CONFIGURED_CAP})`);
   // GO band with archguard bands → observed band GO; cap still fixed 5 (config change does NOT move it).
   const s2 = tmpState("cfgcap-go");
   const r2 = computeEffectiveCap({
@@ -200,7 +203,7 @@ test("AC4 — the OBSERVED band follows an injected band config, but effective_c
     bands: { go: 4, wait: 2, extreme_wait: 1 },
   });
   assert.equal(r2.band, "GO");
-  assert.equal(r2.effective_cap, FIXED_EFFECTIVE_CAP, "config GO=4 does NOT change the cap — fixed 5");
+  assert.equal(r2.effective_cap, CONFIGURED_CAP, `config GO=4 does NOT change the cap — configured cap (${CONFIGURED_CAP})`);
 });
 
 test("resource-gate.sh reports BOTH avg10 and avg300 lines (single source for the signal)", () => {

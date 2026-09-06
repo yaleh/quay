@@ -182,6 +182,33 @@ kind 文件只提供一个 spec 对象（routines 表或 task-processing 三段�
 - **已有跑通的先例，不是新发明**：`pool-quality-judge` 正是一个「派 LLM 判断」的 routine，
   挂在 quality kind 上（`quality-gate-driver.ts:371-384`，`schedule: {kind:"interval", minutes:…}`）。
 
+**具名例外（2026-09-06 增补 · gap-meta-kind-violates-spec-no-new-probe-driver-kind）**
+**「写型 LLM 例程且需独立 control / carrier 的，可自成 kind」**——`meta-review`
+（`meta-driver.ts`，生产 run_id `mt-prod-*`）即此例外。本例外【修订】§5.1 的结论，但
+⛔ **不推翻**它对【读型/判词型】probe 的结论——`pool-quality-judge` 先例仍是「读型 probe 不该
+自成 kind」的正面教材。判据（写型 + 独立 control + 独立 carrier **三者须同时成立**才可自成 kind，
+缺一即回到 routine）：
+
+1. **写型例程**：该例程的 `run()` 会把**新的写入**落到 goal/task store（draft 提案 / 自动驱动
+   任务 / 方向决策路由），而宿主 kind 的既有例程（B15/B17 判词审计）是【读】型——判词不写任务与
+   目标。写型例程的停泊态（halt=停止继续产出提案/任务/决策）与读型例程的停泊态是**不同的操作对象**。
+2. **独立 control 面**：halt 该例程**不得**同时 halt 宿主 kind 的其它例程。写型例程误动作的代价
+   （在共享检出里立错任务/写错 draft）需要一个只停它、不停读型判词审计的把手——这要求它有自己的
+   control 文件（`meta-control.json`），而不是与宿主 kind 共用（共用会让一个 halt 误停另一个）。
+3. **独立 carrier 面**：该例程的轮记录值面是【提案/决策】形状（divergences / proposals /
+   autoDrive / decisions），与宿主 kind 既有例程的【判词】形状（pool 三态 verdict）**不同类**。
+   混装进同一 carrier 会让一个文件出现第四种 schema——本仓库已在 verification-round 上为
+   「一个载体两套 schema」付过代价（读者要在一个文件里分辨两套形状）。
+
+**为何不适用「16 处接线 / 350 行样板」这条实测理由**：`meta-driver.ts` 的常驻循环【没有】抄那
+~350 行逐 kind 样板——它复用 `quality-gate-driver.ts` 里已【通用化】的 `runResidentQualityGateLoop`
+（注册提交 `5516d291f` 本身就把该共享循环从 quality 抽出并参数化 `controlStateRel`，meta 是第一个
+复用者）。故 meta 的实际边际成本 = 登记面（`DRIVER_KINDS` 一行 + CLI `KINDS` / `drivers.yml` /
+`driver-config.ts` / `capability-catalog.sh` + `.gitignore` + `profiles.yml`），⛔ **不含「350 行样板
+复制」**——§5.1 成本测算里最贵的那一项在 meta 上【没有发生】。§7 的「新增 kind 若登记面仍需手工补写
+即取假」这一判据**依然有效**：本例外只认「登记面已全部补齐且零样板复制」的 kind，不认「半登记」kind
+（`suite` 仍是那个反例，⛔ 不在本例外内）。
+
 ### 5.2 目标形态
 
 ```

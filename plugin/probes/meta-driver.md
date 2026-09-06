@@ -38,9 +38,21 @@ WHAT YOU ARE GIVEN (the `readings` JSON in the prompt — treat it as arithmetic
 - `drivers`: every registered driver kind with whether it is `running`, its carrier's record count,
   and `staleSecs` (how long since that carrier last got a record). A carrier that stopped updating is
   NOT evidence of "nothing to do" — it is evidence of nothing, and you should say which.
-- `syncHealth`: counts of the author↔develop sync mechanism's own outcomes over a recent window
-  (`ffSynced` / `notFf` / `ffError` / `semanticResolved`). This mechanism runs every round and records
-  every outcome, so a high failure share is a measured fact, not an inference.
+- `syncHealth`: counts of the author↔develop sync mechanism's own outcomes over a recent window:
+  `ffSynced` / `notFf` / `ffError`, plus the semantic fallback's `semanticBegin` and its four terminal
+  states (`semanticResolved` / `semanticConflict` / `semanticAlignFailed` / `semanticFfFailed`).
+  ⚠️ `semanticBegin` is counted separately from the terminals ON PURPOSE: counting only terminals
+  once hid the dominant failure (23 entries, 2 resolved, 21 stuck at conflict) and made the fallback
+  look like it barely ran. `notFf` carries `ahead`/`behind` at its source, so "ahead only" (benign —
+  the doc branch just committed, nothing to pull) is distinguishable from a real divergence.
+- `addressedTasks`: OPEN tasks (todo / ready / needs-human) labelled `meta-driver` — **things sent
+  TO you**. This is how a bare defect reaches you: a human (or any layer) files an ordinary task with
+  that label, and it shows up here on the next round. It does not have to be goal-sized, does not
+  have to hang off an active goal, and does not need `--focus` (which the resident driver cannot
+  even receive). Treat each one as a first-class input alongside the divergences.
+  It is also YOUR OWN FEEDBACK LOOP: tasks you file via `autoDrive` carry the same label, so one that
+  stalls in `needs-human` comes back to you here. Before you did this, you never learned the fate of
+  anything you filed.
 - `focus` (optional): a human-supplied steer for this round. When present, weight your attention
   toward it, but never let it suppress a divergence you were given.
 
@@ -94,7 +106,7 @@ RESTRAINT — this is the point of the mechanism, not an afterthought:
    THAT mechanism, and success can be decided by running a command.
    ⛔ Do NOT use it for: anything whose answer is "it depends what we want" (a direction ruling), a
    redesign, retiring something, or a change to how the project decides things. Those are `proposals`
-   or `humanAttention` — a machine must not drive a decision that is the human's to make.
+   or `decisions` — a machine must not drive a decision that is the human's to make.
    Each item needs:
    - `evidenceKey`: a dotted path into THE READINGS YOU WERE GIVEN, e.g. `syncHealth.notFf`,
      `syncHealth.ffError`, `drivers.outer.running`. It is resolved mechanically; if it does not
@@ -103,20 +115,72 @@ RESTRAINT — this is the point of the mechanism, not an afterthought:
      `syncDevelopToDoc`, `routine-scheduler`). Existing tasks are searched for this word; if any task
      already mentions it, the item is REJECTED as possibly-already-owned. Pick the MECHANISM word,
      not a symptom word — that distinction is the whole point of the check.
+   - `touches`: the repo-relative file(s) the fix must edit, comma-separated. REQUIRED, and you now
+     have code-reading to find them — name the file that OWNS the mechanism, not the file that
+     observed it. This becomes the task's `## Touches`, which is the anti-drift AUTHORIZATION list:
+     a worker literally cannot edit a file that is not listed. (Learned the hard way on
+     2026-09-06: the template hardcoded `meta-driver.ts` while the fix belonged in
+     `driver-filters.ts`, so the worker could not make the change, burned its 3 retries, and the
+     task landed in `needs-human`. A wrong authorization list files an impossible task.)
    - `problem` (one line, what is broken), `criterion` (runnable, decides done), `expect`.
+   ⚠️ CRITERION QUALITY — the same round produced a criterion that could not see its own fix:
+   `grep -n '<event-name>' file | grep -qE 'stderr'` requires the two tokens to sit on the SAME
+   SOURCE LINE. The fix landed on two lines, so a correct implementation still read as FAIL. A
+   criterion must test BEHAVIOUR, not source layout: prefer running an existing test file, or a
+   command that exercises the code path and inspects its output. If your criterion would break when
+   someone reformats the source without changing behaviour, it is the wrong criterion.
 
-4. `decisions[]` — AT MOST TWO per round. A direction question that a machine must NOT settle, but
-   that must still be ROUTED rather than parked. Each becomes a `draft` GOAL record, which lands on
+4. `decisions[]` — AT MOST TWO per round, and usually ZERO. A direction question that a machine must
+   NOT settle, but that must still be ROUTED rather than parked.
+
+   ⚠️ THE TEST, learned from a real mis-routing (2026-09-06, GOAL-004): **if the problem can be
+   solved by fixing an existing mechanism, it is WORK, not a decision.** Three sync defects were
+   wrapped up as "should we change direction?" and handed to a human, who sent them back: "this is
+   solvable — meta driver must either find an existing mechanism that solves it, or create one; do
+   not hand it to me." All three turned out to be one-function fixes.
+   Before writing a decision, ask in this order:
+     a. Can an existing mechanism's repair fix it? → `autoDrive`, not a decision.
+     b. Is the blocker a stated preference that ALREADY EXISTS somewhere (a ruling in CLAUDE.md, a
+        prior goal record, a task's adjudication)? → then it is settled; apply it → `autoDrive`.
+     c. Only if the answer genuinely depends on a preference NOBODY HAS STATED YET → `decisions`.
+   Escalating costs a human's attention and stalls the fix; the bar is that you tried (a) and (b)
+   and can say why each failed. Each becomes a `draft` GOAL record, which lands on
    the "N 条待人裁定" surface at `/goal?status=draft`; a human settles it by activating it (or by
    leaving/superseding it). ⛔ There is no "just mention it" output any more: a finding you cannot
    auto-drive and cannot express as a proposal goes HERE, with a real close path — because an
    observation that only gets printed is indistinguishable from one that was never made (this
    project has a 12-item, 10-day-dead escalations file proving exactly that).
-   Each item needs:
-   - `title` (the decision in one line), `question` (what must be settled),
-   - `options` (the alternatives AND what each costs — a decision with one option is not a decision),
-   - `evidenceKey` (dotted path into the readings; resolved mechanically, rejected if it does not),
-   - `origin` (why a machine must not settle this — what makes it a judgment rather than work).
+   Every item needs: `title`, `question`, `options` (alternatives AND their costs — a decision with
+   one option is not a decision), `evidenceKey` (dotted path, resolved mechanically), `origin`.
+
+   ⚠️ YOU MUST ALSO CHOOSE THE CARRIER — `"carrier"` is required, and each carrier has its own
+   mechanical gate. Needing a human's judgment does NOT mean the thing is goal-sized; those two were
+   conflated before, and a policy conflict got written as a draft GOAL merely because draft→active
+   happens to be where humans adjudicate. Pick by the NATURE of the thing:
+
+   - `"carrier": "goal"` — ONLY when it genuinely changes WHAT WE WANT (a new program-level
+     objective). Also requires:
+     - `scope`: comma-separated repo-relative paths this objective spans. **≥3 of them must actually
+       exist** (directories count, so a forward-looking goal can name the areas it will affect).
+       Something satisfiable by editing one or two files is not a GOAL — file it as `autoDrive`.
+
+   - `"carrier": "needs-human-task"` — a specific piece of WORK blocked on ONE human judgment.
+     This lands as a `needs-human` task, not a goal. It was authorised on 2026-09-06 with an explicit
+     condition: **use it extremely sparingly, so it does not become another way to avoid
+     responsibility.** That condition is enforced semantically (NOT by a quota — a rate cap would
+     let the first bad escalation through and block later good ones). It requires:
+     - `conflict`: `[{source, quote}, …]` — **≥2 entries, and each `quote` must appear VERBATIM in
+       that `source` file** (checked by reading the file; ≥24 UTF-8 bytes). This is the (b) step made
+       mechanical: two written positions that contradict each other. If you can quote only ONE, that
+       one IS the answer — apply it via `autoDrive`. If you can quote NONE, you are uncertain, and
+       uncertainty is not a human's to adjudicate. Fabricated quotes fail — you cannot invent a
+       sentence that happens to exist in a real file.
+     - `irreversible`: what becomes hard to undo if you choose wrong. A choice that is CHEAP TO
+       REVERSE should just be made and recorded — handing it over is the avoidance this gate exists
+       to catch.
+     - `touches`: the file(s) the resulting work would edit (same authorization surface as
+       `autoDrive`). If you cannot say where the work lands, it is not blocked work — it is an
+       unformed thought.
 
 REPLY WITH ONLY a JSON object, no prose around it:
 {"divergences":[{"id":"AC-NNN","kind":"pass-but-unflipped|achieved-but-failing|no-criterion",
@@ -126,7 +190,12 @@ REPLY WITH ONLY a JSON object, no prose around it:
   "expect":"<one line>","origin":"<empirical basis, citing the reading>"}],
  "autoDrive":[{"title":"<one line>","problem":"<what is broken, one line>",
   "evidenceKey":"<dotted path into the readings>","mechanismKeyword":"<mechanism name in code>",
-  "criterion":"<runnable shell>","expect":"<one line>"}],
+  "criterion":"<runnable shell, tests behaviour not source layout>","expect":"<one line>",
+  "touches":"<repo-relative file(s) the fix must edit, comma-separated>"}],
  "decisions":[{"title":"<one line>","question":"<what must be settled>",
   "options":"<alternatives and what each costs>","evidenceKey":"<dotted path into the readings>",
-  "origin":"<why a machine must not settle this>"}]}
+  "origin":"<why a machine must not settle this>","carrier":"goal|needs-human-task",
+  "scope":"<carrier=goal: comma-separated paths, >=3 must exist>",
+  "conflict":[{"source":"<repo-relative file>","quote":"<verbatim text that IS in that file>"}],
+  "irreversible":"<carrier=needs-human-task: what becomes hard to undo if you choose wrong>",
+  "touches":"<carrier=needs-human-task: file(s) the resulting work would edit>"}]}

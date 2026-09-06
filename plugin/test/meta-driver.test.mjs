@@ -39,9 +39,16 @@ import {
   renderDecisionOrigin,
   decisionQuality,
   collectDriverReadings,
+  collectInertCheckers,
   shouldJudge,
   readState,
   writeState,
+  quoteIsVerbatim,
+  carrierGate,
+  collectAddressedTasks,
+  parseFrontmatterLabels,
+  existingPaths,
+  renderHumanCallBody,
 } from '../scripts/meta-driver.ts';
 
 // 脚本根（goal-store.ts 从这里取）——数据根在各测试里另给临时目录。
@@ -263,6 +270,8 @@ const mkReadings = (verdict, noise = 'n1') => ({
   // 生态读数带上每轮都变的量（staleSecs/记录数），用来证明它们【不】进摘要。
   drivers: [{ kind: 'promotion', running: true, supervisorAlive: true, driverAlive: true, carrierRecords: noise.length, carrierLastTs: null, staleSecs: noise.length }],
   syncHealth: { window: 200, ffSynced: 1, notFf: 2, ffError: 0, semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0, lastEvent: 'doc-develop-sync-not-ff', lastTs: null },
+  addressedTasks: [],
+  inertCheckers: [],
   focus: null,
 });
 
@@ -329,7 +338,7 @@ test('readState: 状态文件不存在 ⇒ never-judged（⛔ 不冒充"没变�
 
 // ── 自动驱动通道的机械前置 ───────────────────────────────────────────────────
 const ecoReadings = {
-  goals: [], criteria: [], divergences: [], focus: null,
+  goals: [], criteria: [], divergences: [], addressedTasks: [], focus: null,
   drivers: [
     { kind: 'outer', running: false, supervisorAlive: false, driverAlive: false, carrierRecords: 0, carrierLastTs: null, staleSecs: null },
     { kind: 'promotion', running: true, supervisorAlive: true, driverAlive: true, carrierRecords: 9, carrierLastTs: null, staleSecs: 5 },
@@ -347,7 +356,37 @@ test('resolveEvidence: 点号路径与 drivers.<kind>.<field> 都能解析；不
   assert.equal(resolveEvidence(ecoReadings, ''), undefined);
 });
 
+// 生产首轮（mt-prod-1788703469, 2026-09-06）的真实回归：autoDrive 引 `criteria.AC-180.verdict`、
+// decision 引 `criteria.AC-143.status` —— 两条读数都【真实存在】，却因解析器只特化了 drivers
+// 而双双被判「解析不出」拒绝，该轮 1 提 0 立 / 1 提 0 路由。用【当时被拒的原始 key】做输入，
+// ⛔ 不用自造样例（memory: verification input must be real output）。
+const idKeyedReadings = {
+  goals: [{ id: 'GOAL-002', title: '三层塌缩', status: 'active' }],
+  criteria: [
+    { id: 'AC-180', title: 'active AC 必须有判据', goal: 'GOAL-001', status: 'draft', criterion: 'true', verdict: 'pass', reason: '' },
+    { id: 'AC-143', title: '观测台账收尾驱动化', goal: 'GOAL-002', status: 'active', criterion: null, verdict: 'fail', reason: 'no criterion' },
+  ],
+  divergences: [{ id: 'AC-143', status: 'active', verdict: 'fail', reason: 'no criterion', kind: 'no-criterion' }],
+  drivers: ecoReadings.drivers,
+  syncHealth: ecoReadings.syncHealth,
+  focus: null,
+};
+
+test('resolveEvidence: criteria/divergences/goals 也按 id 索引（⛔ 只特化 drivers ⇒ 主要证据类型不可引用）', () => {
+  assert.equal(resolveEvidence(idKeyedReadings, 'criteria.AC-180.verdict'), 'pass', '生产首轮被拒的原始 key，必须解析得出');
+  assert.equal(resolveEvidence(idKeyedReadings, 'criteria.AC-143.status'), 'active', '同上，第二条被拒的原始 key');
+  assert.equal(resolveEvidence(idKeyedReadings, 'criteria.AC-143.criterion'), null, 'null 是合法读数（无判据本身就是证据），⛔ 不得当成解析不出');
+  assert.equal(resolveEvidence(idKeyedReadings, 'divergences.AC-143.kind'), 'no-criterion');
+  assert.equal(resolveEvidence(idKeyedReadings, 'goals.GOAL-002.status'), 'active');
+  // 能取假的一侧：不存在的 id / 字段仍须是 undefined，⛔ 不得因放宽而变成"什么都能引"
+  assert.equal(resolveEvidence(idKeyedReadings, 'criteria.AC-999.verdict'), undefined);
+  assert.equal(resolveEvidence(idKeyedReadings, 'criteria.AC-180.nosuch'), undefined);
+  // 整条对象也可引（parts.length === 2），与 drivers 同语义
+  assert.equal(resolveEvidence(idKeyedReadings, 'criteria.AC-180').id, 'AC-180');
+});
+
 const goodItem = {
+  touches: 'plugin/scripts/driver-filters.ts',
   title: '查清 author↔develop 语义兜底为何从不成功',
   problem: '同步机制最近 200 事件中 semanticResolved 为 0，而 not-ff 41 次——ff 失败时的出口从未生效',
   evidenceKey: 'syncHealth.semanticResolved',
@@ -421,6 +460,14 @@ test('driveItems: 全部前置通过 ⇒ 接受并给出 id（dry-run 不落盘�
   assert.match(r[0].id, /^gap-meta-/);
 });
 
+test('renderAutoDriveBody: Touches 来自被修机制、且机械补上 self-touch', () => {
+  const body = renderAutoDriveBody(goodItem, 0, 'now', [], 'gap-meta-x');
+  assert.ok(body.includes('- `plugin/scripts/driver-filters.ts`'), 'Touches 必须指向真正要改的文件');
+  assert.ok(body.includes('- `tasks/gap-meta-x.md`'), 'self-touch 必须被机械补齐');
+  // 回归：模板曾硬编码 meta-driver.ts ⇒ worker 结构上改不了对的文件 ⇒ 撞重试上限进 needs-human。
+  assert.ok(!body.includes('- `plugin/scripts/meta-driver.ts`'), '⛔ 不得再硬编码 meta-driver.ts');
+});
+
 test('renderAutoDriveBody: 四件套齐备且把解析出的读数逐字写进任务体', () => {
   const body = renderAutoDriveBody(goodItem, 0, '2026-09-06T11:00:00Z');
   for (const h of ['## Finding', '## AC（draft）', '## DoD（draft）', '## Touches']) {
@@ -475,12 +522,23 @@ test('snapshotTrackedChanges: 非 git 目录 ⇒ null；真仓库里只收 track
 });
 
 // ── 决策通道（方向问题必须被路由，⛔ 不许停在只打印的字段里）─────────────────
+// 颗粒度闸要求 GOAL 的 scope 有 ≥3 条【真实存在】的路径 ⇒ fixture 必须造出真路径，
+// ⛔ 不能把闸放宽到"声明了 3 个字符串就算"（那就退化成可随意满足的形式要求）。
+function mkScopeRoot() {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-scope-'));
+  for (const f of ['a.ts', 'b.ts', 'c.ts']) fs.writeFileSync(path.join(d, f), '// fixture\n', 'utf8');
+  return d;
+}
+const SCOPE3 = 'a.ts, b.ts, c.ts';
+
 const goodDecision = {
   title: 'author↔develop 同步：ff-only + 两个写面是否要改',
   question: '写面保留在 author 而 develop 为权威，两边都收提交 ⇒ ff-only 结构上无法长期成立，是否改方向',
   options: '(a) 维持现状+加强语义兜底，代价=兜底至今 26 次仅 5 次解决；(b) 单写面，代价=改动 promotion-driver 的写路径',
   evidenceKey: 'syncHealth.notFf',
   origin: '正确答案取决于希望主检出承担什么角色，机器无法从读数推出该偏好，见 driver-filters.ts syncDevelopToDoc',
+  carrier: 'goal',
+  scope: SCOPE3,
 };
 
 test('nextGoalId: 取 max+1，⛔ 不复用编号', () => {
@@ -497,22 +555,26 @@ test('renderDecisionOrigin: 问题/选项/读数/关闭方式都进 origin（那
   assert.ok(o.includes('41'), '解析出的读数值必须逐字写入');
 });
 
-test('fileDecisions: evidenceKey 解析不出 ⇒ 拒（决策也要有实测依据）', async () => {
-  const r = await fileDecisions('/tmp', [{ ...goodDecision, evidenceKey: 'nope.nope' }], ecoReadings, [],
+test('fileDecisions: evidenceKey 解析不出 ⇒ 拒（决策也要有实测依据）', async (t) => {
+  const root = mkScopeRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const r = await fileDecisions(root, [{ ...goodDecision, evidenceKey: 'nope.nope' }], ecoReadings, [],
     { cap: 2, dryRun: true, at: 'now' });
   assert.equal(r[0].accepted, false);
   assert.match(r[0].reason, /解析不出/);
 });
 
-test('fileDecisions: 每轮上限 2', async () => {
+test('fileDecisions: 每轮上限 2', async (t) => {
+  const root = mkScopeRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const three = [1, 2, 3].map((n) => ({ ...goodDecision, title: `决策 ${n}`, origin: `${goodDecision.origin} 变体 ${n}` }));
-  const r = await fileDecisions('/tmp', three, ecoReadings, [], { cap: 2, dryRun: true, at: 'now' });
+  const r = await fileDecisions(root, three, ecoReadings, [], { cap: 2, dryRun: true, at: 'now' });
   assert.equal(r.filter((x) => x.accepted).length, 2);
   assert.match(r[2].reason, /上限/);
 });
 
 test('fileDecisions: 真写出一条 draft GOAL 记录（⛔ status 必须是 draft，构造上惰性）', async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-decide-'));
+  const tmp = mkScopeRoot();
   try {
     fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
     // dataRoot 走 goalStoreArgv 的默认（= scriptRoot），故这里用 repoRoot 跑脚本、临时目录放数据：
@@ -683,10 +745,53 @@ test('collectDriverReadings: 覆盖全部注册 kind；读不出时刻 ⇒ stale
   }
 });
 
+// gap-not-evaluated-checkers-never-persisted — 惰性守卫读数：从 full-suite-state.json 的
+// notEvaluatedCheckers 逐条枚举名字（⛔ 不是计数），读不到 ⇒ 空数组而非 undefined。
+test('collectInertCheckers: 逐条枚举 notEvaluatedCheckers 的名字；字段缺失/非数组 ⇒ 空数组（⛔ 非 undefined）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-inert-'));
+  try {
+    fs.mkdirSync(path.join(tmp, '.quay'), { recursive: true });
+    // 读不到 state ⇒ 空数组（⛔ 不是 undefined——「本轮没有未评估项」与「没记录这个维度」可区分）。
+    assert.deepEqual(collectInertCheckers(tmp), [], '无 state 文件 ⇒ 空数组，不是 undefined');
+    // 喂一个含 notEvaluatedCheckers 的 state 文件，断言逐条出现。
+    fs.writeFileSync(path.join(tmp, '.quay', 'full-suite-state.json'), JSON.stringify({
+      state: 'green',
+      notEvaluatedCheckers: [
+        { name: 'direct-to-develop-bypass-check', line: 'STATIC_CHECK_NOT_EVALUATED: direct-to-develop-bypass-check' },
+        { name: 'threshold-scope-check', line: 'STATIC_CHECK_NOT_EVALUATED: threshold-scope-check' },
+      ],
+    }), 'utf8');
+    assert.deepEqual(collectInertCheckers(tmp), ['direct-to-develop-bypass-check', 'threshold-scope-check'],
+      '逐条枚举名字（不是计数），且保序');
+    // 字段存在但为空数组 ⇒ 空数组（「本轮没有未评估项」）。
+    fs.writeFileSync(path.join(tmp, '.quay', 'full-suite-state.json'), JSON.stringify({ state: 'green', notEvaluatedCheckers: [] }), 'utf8');
+    assert.deepEqual(collectInertCheckers(tmp), [], '显式空数组 ⇒ 空数组');
+    // 字段不是数组（state 还在 running / 老字段）⇒ 空数组，⛔ 不抛、不当非空。
+    fs.writeFileSync(path.join(tmp, '.quay', 'full-suite-state.json'), JSON.stringify({ state: 'running' }), 'utf8');
+    assert.deepEqual(collectInertCheckers(tmp), [], 'running state（无该字段）⇒ 空数组');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// 负控制：惰性守卫的名字必须【进摘要】——否则一个新出现的惰性守卫不改变摘要 ⇒ 语义半永不被唤醒。
+test('readingsDigest: inertCheckers 名字进摘要——某个 guard 从在→不在/不在→在都改变摘要', () => {
+  const mk = (inert) => ({
+    goals: [], criteria: [], divergences: [], addressedTasks: [], inertCheckers: inert, focus: null,
+    drivers: [],
+    syncHealth: { window: 200, ffSynced: 0, notFf: 0, ffError: 0, semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0, lastEvent: null, lastTs: null },
+  });
+  assert.equal(readingsDigest(mk([])), readingsDigest(mk([])), '空 = 空');
+  assert.notEqual(readingsDigest(mk([])), readingsDigest(mk(['direct-to-develop-bypass-check'])),
+    '惰性守卫从无到有必须改变摘要');
+  assert.notEqual(readingsDigest(mk(['direct-to-develop-bypass-check'])), readingsDigest(mk(['threshold-scope-check'])),
+    '不同的惰性守卫必须改变摘要（逐名进，⛔ 只进计数会让换 guard 不改变摘要）');
+});
+
 // 负控制：摘要必须对【每轮都变的量】免疫——staleSecs/记录数每轮都不同，若进摘要则闸失效。
 test('readingsDigest: 不随 staleSecs/carrierRecords 变（否则变化检测恒为真）', () => {
   const mk = (stale, records) => ({
-    goals: [], criteria: [], divergences: [], focus: null,
+    goals: [], criteria: [], divergences: [], addressedTasks: [], inertCheckers: [], focus: null,
     drivers: [{ kind: 'promotion', running: true, supervisorAlive: true, driverAlive: true, carrierRecords: records, carrierLastTs: null, staleSecs: stale }],
     syncHealth: { window: 200, ffSynced: 1, notFf: 2, ffError: 0, semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0, lastEvent: 'doc-develop-sync-not-ff', lastTs: null },
   });
@@ -738,4 +843,134 @@ test('buildProbePrompt: 读数逐字进 prompt（语义半不自采证）', () =
   assert.ok(p.startsWith('OBJECTIVE TEXT'));
   assert.ok(p.includes('"GOAL-001"'));
   assert.ok(p.includes('retire X'), 'focus 必须进 prompt');
+});
+
+// ── 载体选择 + 防逃逸语义闸 ──────────────────────────────────────────────────
+// 人 2026-09-06：授权 needs-human-task，但「要求极为谨慎地使用，以防其成为又一种逃避责任的出口」，
+// 并明确否掉了先前的数量背压：「应从语义去控制，而不是频率」。以下全部是语义闸的双向验证。
+
+function mkQuoteRoot() {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-quote-'));
+  fs.writeFileSync(path.join(d, 'spec.md'), '前言\n语义判据允许留空，这是诚实而非缺陷\n结尾\n', 'utf8');
+  fs.writeFileSync(path.join(d, 'ac.md'), 'title: x\n不存在无判据的活跃验收\n', 'utf8');
+  return d;
+}
+
+test('quoteIsVerbatim: 真引用→真；伪造引用→假；文件读不到→假（fail-closed）；过短片段→假', (t) => {
+  const root = mkQuoteRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  assert.equal(quoteIsVerbatim(root, 'spec.md', '语义判据允许留空，这是诚实而非缺陷'), true);
+  assert.equal(quoteIsVerbatim(root, 'ac.md', '不存在无判据的活跃验收'), true);
+  // 核心防逃逸：编出来的话核不上
+  assert.equal(quoteIsVerbatim(root, 'spec.md', '这句话根本不在任何文件里出现过'), false, '伪造引用必须被拒');
+  assert.equal(quoteIsVerbatim(root, 'nosuch.md', '语义判据允许留空，这是诚实而非缺陷'), false, '文件读不到 ⇒ 假，⛔ 不与核对通过同形');
+  assert.equal(quoteIsVerbatim(root, 'spec.md', '前言'), false, '过短片段等于没校验 ⇒ 假');
+});
+
+test('carrierGate goal: scope 真实路径 <3 ⇒ 颗粒度拒；≥3 ⇒ 通过', (t) => {
+  const root = mkScopeRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const two = carrierGate(root, { ...goodDecision, scope: 'a.ts, b.ts' });
+  assert.equal(two.ok, false);
+  assert.match(two.reason, /granularity/);
+  // 实测促因：本轮那条被误升成 GOAL 的政策冲突，作用域只有 2 个文件 ⇒ 正是这条要拦的形状
+  const fake = carrierGate(root, { ...goodDecision, scope: 'x.ts, y.ts, z.ts' });
+  assert.equal(fake.ok, false, '声明了 3 条但都不存在 ⇒ 仍拒（⛔ 不能靠"写够三个字符串"满足）');
+  assert.equal(carrierGate(root, goodDecision).ok, true);
+});
+
+test('carrierGate needs-human-task: 伪造引用 ⇒ 拒（防逃逸核心，语义而非频率）', (t) => {
+  const root = mkQuoteRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const base = {
+    ...goodDecision, carrier: 'needs-human-task',
+    irreversible: '一旦按其中一个立场改写 13 条 AC，另一条路径的历史依据就被抹掉，回退需重建记录',
+    touches: 'goals/AC-180-active-ac.md',
+  };
+  // ① 一条都引不出 ⇒ 「我不确定」，不是「须人裁决」
+  assert.equal(carrierGate(root, { ...base, conflict: [] }).ok, false);
+  // ② 只引得出一条 ⇒ 那条就是答案，应直接适用
+  const one = carrierGate(root, { ...base, conflict: [{ source: 'spec.md', quote: '语义判据允许留空，这是诚实而非缺陷' }] });
+  assert.equal(one.ok, false);
+  assert.match(one.reason, /只引得出一条/);
+  // ③ 两条但其中一条是编的 ⇒ 拒，且理由点名核不上的那个 source
+  const forged = carrierGate(root, { ...base, conflict: [
+    { source: 'spec.md', quote: '语义判据允许留空，这是诚实而非缺陷' },
+    { source: 'ac.md', quote: '这句话是编的，文件里没有' },
+  ] });
+  assert.equal(forged.ok, false, '伪造的一半必须使整条被拒');
+  assert.match(forged.reason, /ac\.md/);
+  // ④ 两条真引用 + 不可逆性 + 授权面 ⇒ 通过
+  const good = { ...base, conflict: [
+    { source: 'spec.md', quote: '语义判据允许留空，这是诚实而非缺陷' },
+    { source: 'ac.md', quote: '不存在无判据的活跃验收' },
+  ] };
+  assert.equal(carrierGate(root, good).ok, true, carrierGate(root, good).reason);
+  // ⑤ 可逆的选择不该占用人的注意力
+  const noIrrev = carrierGate(root, { ...good, irreversible: '' });
+  assert.equal(noIrrev.ok, false);
+  assert.match(noIrrev.reason, /难以撤销/);
+  // ⑥ 说不出该改哪里 ⇒ 不是一件卡住的工作
+  assert.equal(carrierGate(root, { ...good, touches: '' }).ok, false);
+});
+
+test('carrierGate: 无数量背压——连开两条合格的 human-call 都必须通过（人否掉了频率控制）', (t) => {
+  const root = mkQuoteRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const good = {
+    ...goodDecision, carrier: 'needs-human-task',
+    irreversible: '一旦按其中一个立场改写 13 条 AC，另一条路径的历史依据就被抹掉，回退需重建记录',
+    touches: 'goals/AC-180-active-ac.md',
+    conflict: [
+      { source: 'spec.md', quote: '语义判据允许留空，这是诚实而非缺陷' },
+      { source: 'ac.md', quote: '不存在无判据的活跃验收' },
+    ],
+  };
+  // 同一个闸连过两次仍然通过 ⇒ 闸只看语义，不看已开条数（⛔ 若这里变红，说明频率控制又回来了）
+  assert.equal(carrierGate(root, good).ok, true);
+  assert.equal(carrierGate(root, { ...good, title: '另一个真实冲突' }).ok, true);
+});
+
+test('parseFrontmatterLabels: 块列表与内联两种写法都认；缩进列表结束即停', () => {
+  assert.deepEqual(parseFrontmatterLabels('id: x\nlabels:\n  - gap\n  - meta-driver\nstatus: todo\n'), ['gap', 'meta-driver']);
+  assert.deepEqual(parseFrontmatterLabels('labels: [gap, meta-driver]\n'), ['gap', 'meta-driver']);
+  assert.deepEqual(parseFrontmatterLabels('id: x\nstatus: todo\n'), [], '没有 labels 键 ⇒ 空，⛔ 不抛');
+  // 取假一侧：列表结束后的键不得被吃进来
+  assert.deepEqual(parseFrontmatterLabels('labels:\n  - gap\nparent: null\n'), ['gap']);
+});
+
+test('collectAddressedTasks: 只收带标签的【未关闭】任务（裸缺陷入口 + 自身闭环）', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-addr-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, 'tasks'), { recursive: true });
+  const w = (id, status, labels) => fs.writeFileSync(path.join(root, 'tasks', `${id}.md`),
+    `---\nid: ${id}\ntitle: t-${id}\nstatus: ${status}\nlabels:\n${labels.map((l) => `  - ${l}`).join('\n')}\n---\n正文\n`, 'utf8');
+  w('a', 'todo', ['gap', 'meta-driver']);
+  w('b', 'needs-human', ['meta-driver']);      // 自身闭环：它自己立的任务掉进 needs-human 也要回流
+  w('c', 'done', ['meta-driver']);             // 已关闭 ⇒ 不收
+  w('d', 'ready', ['gap']);                    // 无标签 ⇒ 不收
+  const got = collectAddressedTasks(root).map((x) => `${x.id}:${x.status}`).sort();
+  assert.deepEqual(got, ['a:todo', 'b:needs-human']);
+  assert.deepEqual(collectAddressedTasks(root, 'meta-human-call'), [], '别的标签 ⇒ 空');
+});
+
+test('existingPaths: 只留【真实存在】的（目录也算——前瞻性 GOAL 可点名目录）', (t) => {
+  const root = mkScopeRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, 'dir'), { recursive: true });
+  assert.deepEqual(existingPaths(root, 'a.ts, nosuch.ts, dir'), ['a.ts', 'dir']);
+  assert.deepEqual(existingPaths(root, ''), []);
+});
+
+test('renderHumanCallBody: 逐字冲突引用与不可逆性都进任务体（人要能直接读到裁什么）', () => {
+  const body = renderHumanCallBody({
+    ...goodDecision, carrier: 'needs-human-task',
+    irreversible: '改写后另一条路径的历史依据被抹掉',
+    touches: 'goals/AC-180-active-ac.md',
+    conflict: [{ source: 'spec.md', quote: '语义判据允许留空' }, { source: 'ac.md', quote: '不存在无判据的活跃验收' }],
+  }, 41, '2026-09-06T00:00:00Z', 'gap-meta-call-x');
+  assert.ok(body.includes('语义判据允许留空'), '引用原文必须出现在任务体里');
+  assert.ok(body.includes('改写后另一条路径的历史依据被抹掉'));
+  assert.ok(body.includes('- `tasks/gap-meta-call-x.md`'), 'self-touch 机械补齐');
+  assert.ok(body.includes('落败的一方已被就地更正或标注'), 'DoD 必须要求消解冲突源，⛔ 不留着再触发同一次');
 });

@@ -410,6 +410,18 @@ export interface SuiteState {
    */
   staticCheck?: SuiteStateStaticCheck;
   /**
+   * gap-not-evaluated-checkers-never-persisted — the checkers that could NOT be evaluated this round
+   * (checker-cost-lib's `STATIC_CHECK_NOT_EVALUATED: <name>` machine line, exit 3 = a THIRD state, NOT
+   * a red and NOT a pass). A checker that "reads unclassifiable input" exits 0 and the suite passes
+   * GREEN, so its inertness is invisible on the `failedCheckers` axis — the round-xx `direct-to-develop-
+   * bypass-check` shape (unclassifiable-commits-in-range, exit 0, the six meta-driver commits it was
+   * supposed to catch sailed straight through). This field is ALWAYS present on a terminal state (empty
+   * array = "no checker was not-evaluated this round" — DISTINGUISHABLE from an absent field = "this
+   * dimension was never recorded", hard rule 3b). Written top-level (NOT inside `staticCheck`, which is
+   * absent on green) so a GREEN round still carries the inert-guard signal.
+   */
+  notEvaluatedCheckers?: NotEvaluatedChecker[];
+  /**
    * gap-full-suite-state-red-no-failure-detail-static-check-invisible AC6 — the RUNNER's PID, written
    * on EVERY state (via the `base` object) so a consumer (suite-state-trigger's runOnce crash-watchdog)
    * can tell "the suite is genuinely running" (PID alive ⇒ `process.kill(pid, 0)` does not throw ESRCH)
@@ -554,6 +566,11 @@ const STATIC_CHECK_RATCHET_RE = /^ratchet ceiling:\s*(\d+);\s*new since baseline
 // checker-cost-lib fail-closed line (gap-static-check-red-failures-capture-only-task-contract-shape):
 //   STATIC_CHECK_FAILED: <name> exit=<rc>  (one line per failing checker, on stderr)
 const STATIC_CHECK_FAILED_RE = /^STATIC_CHECK_FAILED:\s*(\S+)\s+exit=(\d+)/;
+// checker-cost-lib not-evaluated line (gap-not-evaluated-checkers-never-persisted):
+//   STATIC_CHECK_NOT_EVALUATED: <name>  (one line per inert checker, on stderr, exit 3 → return 0)
+// No exit code — it is a THIRD state (NOT a red, NOT a pass), so it must never match
+// isStaticCheckFailureLine / STATIC_CHECK_FAILED_RE (which would turn an inert guard into a red).
+const STATIC_CHECK_NOT_EVALUATED_RE = /^STATIC_CHECK_NOT_EVALUATED:\s*(\S+)/;
 
 /** Does a stream line carry a STATIC-CHECK FAILURE signal (a passing run never emits it)? */
 export function isStaticCheckFailureLine(line: string): boolean {
@@ -615,6 +632,33 @@ export function extractFailClosedChecker(line: string): FailClosedChecker | null
   const exitCode = Number(m[2]);
   if (!Number.isInteger(exitCode) || exitCode < 0) return null;
   return { name: m[1], exitCode, line };
+}
+
+/**
+ * One NOT-EVALUATED static-check checker (gap-not-evaluated-checkers-never-persisted): checker-cost-lib
+ * emits `STATIC_CHECK_NOT_EVALUATED: <name>` (one line per inert checker, on stderr) when a
+ * run_static_checks checker exits 3 (a THIRD state — the checker could not evaluate its input, so it
+ * neither fail-closed (red) nor passed). The whole point of this task: the line was HONESTLY produced
+ * then thrown away at the stderr boundary — never parsed, never persisted, so an inert guard is a
+ * structurally-undetectable failure class. `name` is the checker id; `line` the raw stream line (no
+ * exit code — there is none worth recording: exit 3 is the constant NOT-EVALUATED code, not a
+ * per-checker value).
+ */
+export interface NotEvaluatedChecker {
+  name: string;
+  line: string;
+}
+
+/**
+ * Parse ONE checker-cost-lib not-evaluated line into a NotEvaluatedChecker (best-effort; null when the
+ * line is not a `STATIC_CHECK_NOT_EVALUATED:` shape). ⛔ A NOT-EVALUATED line must NEVER match the
+ * fail-closed parse (`STATIC_CHECK_FAILED_RE` requires `exit=<rc>`, which this line lacks) and must
+ * NEVER be flagged by `isStaticCheckFailureLine` (it is not a failure — the suite continues GREEN).
+ */
+export function extractNotEvaluatedChecker(line: string): NotEvaluatedChecker | null {
+  const m = STATIC_CHECK_NOT_EVALUATED_RE.exec(line);
+  if (!m) return null;
+  return { name: m[1], line };
 }
 
 
@@ -2409,6 +2453,12 @@ export async function run(argv: string[]): Promise<number> {
   // capture could not see. Accumulated on every line alongside staticCheckDetails; failures[] +
   // staticCheck.failedCheckers carry them on a static-check red (AC1/AC2).
   const failClosedCheckers: FailClosedChecker[] = [];
+  // gap-not-evaluated-checkers-never-persisted — the INERT checkers (`STATIC_CHECK_NOT_EVALUATED:
+  // <name>` lines). Accumulated on every line alongside failClosedCheckers, but written to the state
+  // on EVERY terminal state (green AND red) — NOT gated on staticCheckDetected, because an inert
+  // checker exits 0 and the suite passes GREEN (the very invisibility this task fixes). Sibling of
+  // failClosedCheckers: red checkers are named, inert checkers must be too (hard rule 3: enumerate).
+  const notEvaluatedCheckers: NotEvaluatedChecker[] = [];
   let staticCheckViolations: number | null = null;
   let staticCheckTaskCount: number | null = null;
   let staticCheckCeiling: number | null = null;
@@ -2857,6 +2907,11 @@ export async function run(argv: string[]): Promise<number> {
     // (same as staticCheckDetails); only failure-relevant when the failure marker fires below.
     const failClosed = extractFailClosedChecker(line);
     if (failClosed) failClosedCheckers.push(failClosed);
+    // gap-not-evaluated-checkers-never-persisted — accumulate INERT checkers on every line (same as
+    // failClosed). NOT failure-relevant: an inert checker exits 0, so it never sets staticCheckDetected
+    // and never aborts the suite — it is captured purely so the terminal state names it.
+    const notEvaluated = extractNotEvaluatedChecker(line);
+    if (notEvaluated) notEvaluatedCheckers.push(notEvaluated);
     // Enrich a pending failure with its file context (TAP detail block / stack frames follow the
     // `not ok` line; the file is NOT on the failure line itself). Best-effort, bounded lookahead.
     if (pendingFailure && detailRemaining > 0) {
@@ -3230,6 +3285,11 @@ export async function run(argv: string[]): Promise<number> {
         ...base,
         finishedAt,
         durationMs,
+        // gap-not-evaluated-checkers-never-persisted — ALWAYS present on a terminal state (empty array
+        // = "no inert checker this round", DISTINGUISHABLE from an absent field = "dimension never
+        // recorded", hard rule 3b). On green this is the ONLY place an inert guard is visible (it exits
+        // 0, never sets staticCheckDetected, never appears in failures[]/failedCheckers).
+        notEvaluatedCheckers,
         // gap-concurrent-write-mutable-tree-false-positive-red — carry the tree-mutation annotation
         // on green too: the explicit field keeps the negative control visible (treeMutatedMidRound:
         // false on a clean window). Since gap-verifiedcommit-dirty-tree-false-certificate AC5 a green
@@ -3252,6 +3312,10 @@ export async function run(argv: string[]): Promise<number> {
         ...base,
         finishedAt,
         durationMs,
+        // gap-not-evaluated-checkers-never-persisted — same as the green branch: ALWAYS present on a
+        // terminal state, so a red round ALSO names any inert checker that ran alongside the failure
+        // (a red does not erase the not-evaluated signal).
+        notEvaluatedCheckers,
         // carry the failure location(s) — the SUITE-RED event's failureLocation source. Segmented
         // (gap-streaming-red-cascade-amplifies-failures-array AC1/AC2): failures[] main set carries
         // only real file-attributable non-cascade failures; cascade + no-file entries ride the
