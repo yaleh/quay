@@ -41,6 +41,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { launchArgv, runAsync, ts, aliveness, carrierStats, KNOWN_KINDS, type Fact, type RoutineSpec } from "./driver-runtime.ts";
 import { runResidentQualityGateLoop, computeRoundRecord } from "./quality-gate-driver.ts";
 import { readProbeSpec } from "./read-probe-spec.ts";
@@ -267,6 +268,54 @@ export async function fileProposals(
   return results;
 }
 
+// ── 轮末结算 evidence 写入（⛔ 不把共享检出留在脏状态）────────────────────────────────────────────
+// 实测代价：一轮机械半把 23 个 tracked 的 goals/*.md 写脏，而其中【25 行改动全部只是 evidence.at
+// 时间戳】——零信息。常驻后这会让主检出永久脏 ⇒ syncDevelopToDoc 的 --ff-only 失败 ⇒ 正好加剧
+// 它本要观测的那个同步失败率。**一个观测机制不得因为观测而破坏被观测的系统。**
+//
+// 结算规则：只有时间戳变了 ⇒ 还原（无信息）；verdict/reading 真变了 ⇒ 保留并报出（有信息，
+// 由调用侧决定提交）。⛔ 只还原「除 at 行外与 HEAD 逐字相同」的文件——若有人另外改过该文件，
+// 比较必然不等，于是原样不动（不会毁掉别人在编辑的改动）。
+
+/** 去掉 evidence 的 at 行后的内容（比较用；at 每轮必变且不携带信息）。 */
+export function stripEvidenceTimestamp(text: string): string {
+  return text.replace(/^\s*at:\s*\S+\s*$/gm, "");
+}
+
+export interface EvidenceSettlement { restored: string[]; kept: string[]; skipped: string[] }
+
+/** 轮末结算。返回逐条处置（⛔ 不只报总数，硬规则 3 枚举不布尔）。 */
+export function settleEvidenceWrites(root: string, goalsRel = "goals"): EvidenceSettlement {
+  const out: EvidenceSettlement = { restored: [], kept: [], skipped: [] };
+  const vcs = (args: string[]) => spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+  let dirty: string[];
+  try {
+    const r = vcs(["status", "--porcelain", "--", goalsRel]);
+    if (r.status !== 0) return out;
+    dirty = String(r.stdout ?? "").split("\n")
+      .map((l) => l.trim()).filter((l) => l.startsWith("M "))
+      .map((l) => l.slice(2).trim());
+  } catch { return out; }
+
+  for (const rel of dirty) {
+    let head: string, work: string;
+    try {
+      const h = vcs(["show", `HEAD:${rel}`]);
+      if (h.status !== 0) { out.skipped.push(rel); continue; }
+      head = String(h.stdout ?? "");
+      work = fs.readFileSync(path.join(root, rel), "utf8");
+    } catch { out.skipped.push(rel); continue; }
+
+    if (stripEvidenceTimestamp(head) === stripEvidenceTimestamp(work)) {
+      const c = vcs(["checkout", "--", rel]);
+      if (c.status === 0) out.restored.push(rel); else out.skipped.push(rel);
+    } else {
+      out.kept.push(rel); // verdict/reading 真变了 ⇒ 有信息，保留
+    }
+  }
+  return out;
+}
+
 // ── 机制生态读数（driver 是否在跑 / 同步是否在成功）──────────────────────────────────────────────
 // 为什么在这里：meta-driver 的职责是【发现机制层面的问题，并判断有没有机制在管它】。只看 goal
 // 判据看不见「主检出落后 develop」「某 driver 停摆」这类问题——那正是人 2026-09-06 指出的缺口。
@@ -470,10 +519,16 @@ export async function runMetaRound(opts: MetaRoundOptions): Promise<MetaRoundRes
     readings = await collectReadings(root, focus);
   } catch (e) {
     const reason = `readings failed: ${(e as Error).message}`;
+    // 采读数途中失败也要结算——⛔ 不能因为异常路径就把共享检出留在脏状态。
+    try { settleEvidenceWrites(root); } catch { /* 结算失败不致命 */ }
     return {
       fact: { name: "meta-driver", value: { phase: "readings" }, state: "failed", reason },
     };
   }
+
+  // 读数已采完（criterion 全跑过），立刻结算 evidence 写入：只有时间戳变的还原，真变的保留。
+  // ⛔ 放在这里而不是函数末尾：语义半可能很慢（实测 134–175s），那段时间不该让共享检出脏着。
+  const settlement = settleEvidenceWrites(root);
 
   const base = {
     goalCount: readings.goals.length,
@@ -484,6 +539,11 @@ export async function runMetaRound(opts: MetaRoundOptions): Promise<MetaRoundRes
     // （否则"driver 停摆/同步在失败"只能靠烧 LLM 才看得到）。
     drivers: readings.drivers,
     syncHealth: readings.syncHealth,
+    // 结算处置进读数：evidenceKept 非空 = 本轮真有 verdict 变化（有信息，待提交）；
+    // 全 restored = 本轮只是刷新了时间戳（无信息）。这让「观测的副作用」自身可观测。
+    evidenceRestored: settlement.restored.length,
+    evidenceKept: settlement.kept,
+    evidenceSkipped: settlement.skipped,
     focus,
   };
 

@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 
 import {
   computeDivergences,
@@ -25,6 +26,8 @@ import {
   buildProbePrompt,
   readingsDigest,
   collectSyncHealth,
+  stripEvidenceTimestamp,
+  settleEvidenceWrites,
   collectDriverReadings,
   shouldJudge,
   readState,
@@ -300,6 +303,76 @@ test('readState: 状态文件不存在 ⇒ never-judged（⛔ 不冒充"没变�
     assert.equal(s.lastJudgedAt, null);
     writeState(tmp, { digest: 'abc', lastJudgedAt: '2026-09-06T00:00:00Z' });
     assert.deepEqual(readState(tmp), { digest: 'abc', lastJudgedAt: '2026-09-06T00:00:00Z' });
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── evidence 结算（观测不得破坏被观测的系统）─────────────────────────────────
+test('stripEvidenceTimestamp: 只抹 at 行，⛔ 不动 verdict/reading', () => {
+  const t = '---\nid: AC-1\nevidence:\n  at: 2026-09-06T10:00:00Z\n  verdict: pass\n  reading: ok\n---\n';
+  const stripped = stripEvidenceTimestamp(t);
+  assert.ok(!stripped.includes('2026-09-06T10:00:00Z'), 'at 的值必须被抹掉');
+  assert.ok(stripped.includes('verdict: pass'), 'verdict 必须保留');
+  assert.ok(stripped.includes('reading: ok'), 'reading 必须保留');
+  // 关键性质：两份只差时间戳的内容，抹掉后必须相等。
+  const t2 = t.replace('2026-09-06T10:00:00Z', '2026-09-06T11:22:33Z');
+  assert.equal(stripEvidenceTimestamp(t), stripEvidenceTimestamp(t2));
+  // 负控制：verdict 变了 ⇒ 抹掉时间戳后仍不相等（否则会把真信息当噪声还原掉）。
+  const t3 = t.replace('verdict: pass', 'verdict: fail');
+  assert.notEqual(stripEvidenceTimestamp(t), stripEvidenceTimestamp(t3));
+});
+
+test('settleEvidenceWrites: 只有时间戳变 ⇒ 还原；verdict 变 ⇒ 保留（真 git 仓库）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-settle-'));
+  const run = (...args) => execFileSync('git', ['-C', tmp, ...args], { encoding: 'utf8' });
+  try {
+    run('init', '-q');
+    run('config', 'user.email', 't@t');
+    run('config', 'user.name', 't');
+    fs.mkdirSync(path.join(tmp, 'goals'));
+    const mk = (id, verdict, at) =>
+      `---\nid: ${id}\nstatus: active\nevidence:\n  at: ${at}\n  verdict: ${verdict}\n  reading: r\n---\nbody\n`;
+    fs.writeFileSync(path.join(tmp, 'goals', 'AC-001.md'), mk('AC-001', 'pass', '2026-09-06T10:00:00Z'));
+    fs.writeFileSync(path.join(tmp, 'goals', 'AC-002.md'), mk('AC-002', 'pass', '2026-09-06T10:00:00Z'));
+    run('add', '-A');
+    run('commit', '-qm', 'base');
+
+    // AC-001：只刷新时间戳（无信息）；AC-002：verdict 翻转（有信息）。
+    fs.writeFileSync(path.join(tmp, 'goals', 'AC-001.md'), mk('AC-001', 'pass', '2026-09-06T11:00:00Z'));
+    fs.writeFileSync(path.join(tmp, 'goals', 'AC-002.md'), mk('AC-002', 'fail', '2026-09-06T11:00:00Z'));
+
+    const s = settleEvidenceWrites(tmp);
+    assert.deepEqual(s.restored, ['goals/AC-001.md'], '无信息的必须被还原');
+    assert.deepEqual(s.kept, ['goals/AC-002.md'], '有信息的必须保留');
+    assert.deepEqual(s.skipped, []);
+    // 还原是真的落到磁盘上了（⛔ 不只是报告说还原了）。
+    assert.ok(fs.readFileSync(path.join(tmp, 'goals', 'AC-001.md'), 'utf8').includes('T10:00:00Z'));
+    assert.ok(fs.readFileSync(path.join(tmp, 'goals', 'AC-002.md'), 'utf8').includes('verdict: fail'));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// 负控制：别人另外改过的文件不得被还原（否则会毁掉在编辑的改动）。
+test('settleEvidenceWrites: 文件除时间戳外还有其它改动 ⇒ 保留，⛔ 不还原', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-settle2-'));
+  const run = (...args) => execFileSync('git', ['-C', tmp, ...args], { encoding: 'utf8' });
+  try {
+    run('init', '-q');
+    run('config', 'user.email', 't@t');
+    run('config', 'user.name', 't');
+    fs.mkdirSync(path.join(tmp, 'goals'));
+    const f = path.join(tmp, 'goals', 'AC-003.md');
+    fs.writeFileSync(f, '---\nid: AC-003\ntitle: old\nevidence:\n  at: 2026-09-06T10:00:00Z\n  verdict: pass\n---\nbody\n');
+    run('add', '-A');
+    run('commit', '-qm', 'base');
+    // 人改了 title，同时时间戳也刷新了。
+    fs.writeFileSync(f, '---\nid: AC-003\ntitle: EDITED BY HUMAN\nevidence:\n  at: 2026-09-06T11:00:00Z\n  verdict: pass\n---\nbody\n');
+    const s = settleEvidenceWrites(tmp);
+    assert.deepEqual(s.restored, [], '有他人改动时不得还原');
+    assert.deepEqual(s.kept, ['goals/AC-003.md']);
+    assert.ok(fs.readFileSync(f, 'utf8').includes('EDITED BY HUMAN'), '他人的改动必须完好');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
