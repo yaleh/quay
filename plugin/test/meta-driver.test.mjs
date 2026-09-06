@@ -260,6 +260,55 @@ test('origin 为空 ⇒ goal-store fail-closed，写入失败且不留文件', a
   }
 });
 
+// ── 写盘即提交（gap-meta-goalstoreargv：未跟踪 goals/*.md 阻塞 develop→doc ff-only）────
+// 为什么必须真 git 仓库（⛔ 不用非 git 临时目录）：commitTaskFile 在 repo-less 根下是 no-op，
+// 若测试跑在非 git 目录，「写后提交」与「写后没提交」观测不到差别 ⇒ 判据恒真（硬规则 4）。
+// 下面第二条负控制证明判据本身能取假：未提交的 goals/*.md 会被 git status --porcelain 检出。
+test('writeDraftProposal 写盘即提交：写后 goals/ 无未提交记录（真 git 仓库）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-commit-'));
+  const run = (...args) => execFileSync('git', ['-C', tmp, ...args], { encoding: 'utf8' });
+  try {
+    run('init', '-q'); run('config', 'user.email', 't@t'); run('config', 'user.name', 't');
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    // base：一条 active GOAL，供 fileProposals 的 activeGoalIds 闸识别（否则提案被 invalid goal id 拒）。
+    fs.writeFileSync(path.join(tmp, 'goals', 'GOAL-001-t.md'),
+      '---\nid: GOAL-001\ntitle: t\nstatus: active\nkind: goal\norigin: fixture\n---\n## Goal\nx\n');
+    run('add', '-A'); run('commit', '-qm', 'base');
+
+    const r = await fileProposals(repoRoot, [goodProposal], [], {
+      k: 3, activeGoalIds: new Set(['GOAL-001']), dryRun: false, dataRoot: tmp,
+    });
+    assert.equal(r[0].accepted, true, `写入应成功，实际: ${r[0].reason}`);
+
+    // AC 判据：写盘路径提交后，goals/ 无任何未提交记录（git status --porcelain goals/ 为空）。
+    const porcelain = run('status', '--porcelain', '--', 'goals');
+    assert.equal(porcelain.trim(), '', `写盘后 goals/ 必须无未提交记录，实得: ${JSON.stringify(porcelain)}`);
+    // 文件真的进了 git（⛔ 不是"没有 git 仓库所以空"——那与合格同形，硬规则 3b）。
+    assert.ok(run('ls-files', 'goals').includes('AC-001'), '新写的 AC-001 必须已 tracked');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// 负控制：判据能取假——把「写盘即提交」改坏（写但不提交）时，同一个 git status 判据必须红。
+test('负控制：未提交的 goals/*.md 被 git status --porcelain 检出（判据能取假，⛔ 非恒真）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-nocommit-'));
+  const run = (...args) => execFileSync('git', ['-C', tmp, ...args], { encoding: 'utf8' });
+  try {
+    run('init', '-q'); run('config', 'user.email', 't@t'); run('config', 'user.name', 't');
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    // 先落一条已跟踪的 base（git 不跟踪空目录 ⇒ 空 goals/ 提交不出 base）。
+    fs.writeFileSync(path.join(tmp, 'goals', 'AC-000-base.md'), '---\nid: AC-000\nstatus: draft\n---\n');
+    run('add', '-A'); run('commit', '-qm', 'base');
+    // 模拟老实现/改坏实现的形状：写盘但没提交 ⇒ 未跟踪文件。
+    fs.writeFileSync(path.join(tmp, 'goals', 'AC-999-leak.md'), '---\nid: AC-999\nstatus: draft\n---\n');
+    const porcelain = run('status', '--porcelain', '--', 'goals');
+    assert.ok(porcelain.trim().length > 0, '未跟踪的 goals/*.md 必须被检出——否则该判据结构上测不到缺陷（恒真）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // ── 变化检测闸（事件触发 + 定时器地板）────────────────────────────────────────
 // noise 显式传入：⛔ 不用 Date.now() 制造差异——同一毫秒内两次调用会相等，前提就不成立了
 // （实测踩到：该前提断言当场报错，正是它存在的理由）。

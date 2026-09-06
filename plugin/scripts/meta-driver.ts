@@ -47,6 +47,7 @@ import { runResidentQualityGateLoop, computeRoundRecord } from "./quality-gate-d
 import { readProbeSpec } from "./read-probe-spec.ts";
 import { gateFinding, findingKey, DEFAULT_RATE } from "./routine-file-gate.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
+import { commitTaskFile } from "./task-ops.ts";
 
 /** 载体：每轮一条记录（与 quality-round.jsonl 同族，gitignored 运行时状态）。 */
 export const ROUND_CARRIER_REL = path.join(".quay", "meta-driver-round.jsonl");
@@ -232,6 +233,26 @@ export function nextAcId(records: Array<Record<string, unknown>>): string {
   return `AC-${String(max + 1).padStart(3, "0")}`;
 }
 
+/** 把 goals 下 `id` 对应的文件立即提交（复用 commitTaskFile 族，写盘即提交——⛔ 不写第 N 份）。
+ *
+ *  为什么必须（gap-meta-goalstoreargv，实测 2026-09-06）：goalStoreArgv 的 `write` 只 writeFileSync、
+ *  不 commit ⇒ 新建的 goals/*.md 是【未跟踪】文件 ⇒ `git merge --ff-only develop` 报「untracked
+ *  working tree files would be overwritten by merge」⇒ develop→doc 同步停摆（窗口 44 次 ff-error）。
+ *  写盘路径（writeDraftProposal 与决议落盘两处）写盘后立即提交，未跟踪记录不再阻塞 ff-only。
+ *
+ *  文件名解析与 goal-store 的 fileNameForId 同规则（`<id>.md` 精确或 `<id>-` 前缀，⛔ 不另造一套）。
+ *  repo-less（单测临时目录）或找不到文件或提交失败 ⇒ false（可观测的静默失败面，⛔ 不抛）。 */
+function commitGoalFile(dataRoot: string, id: string): boolean {
+  let file: string | null = null;
+  try {
+    file = fs.readdirSync(path.join(dataRoot, "goals"))
+      .filter((f) => f.endsWith(".md"))
+      .find((f) => f === `${id}.md` || f.startsWith(`${id}-`)) ?? null;
+  } catch { return false; }
+  if (!file) return false;
+  return commitTaskFile(dataRoot, path.join("goals", file), `goals: ${id} 写盘即提交（meta-driver）`);
+}
+
 /** 写一条 draft 提案。⛔ 永不传 --status：goal-store 的 write 缺省即 draft（构造上惰性）。 */
 export async function writeDraftProposal(root: string, id: string, p: Proposal, dataRoot: string = root): Promise<{ ok: boolean; reason: string }> {
   const argv = goalStoreArgv(root, [
@@ -245,6 +266,8 @@ export async function writeDraftProposal(root: string, id: string, p: Proposal, 
   const r = await runAsync(argv, { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
   if (r.error) return { ok: false, reason: `write spawn error: ${r.error.message}` };
   if (r.status !== 0) return { ok: false, reason: `write exit ${r.status}: ${(r.stderr || "").trim().slice(0, 200)}` };
+  // 写盘即提交：新写的 goals/*.md 若不提交就是未跟踪文件，会阻塞 develop→doc 的 ff-only 同步。
+  commitGoalFile(dataRoot, id);
   return { ok: true, reason: "written as draft" };
 }
 
@@ -1040,6 +1063,8 @@ export async function fileDecisions(
         out.push({ item, id, accepted: false, reason: `goal write failed (exit ${r.status}): ${(r.stderr || "").trim().slice(0, 200)}` });
         continue;
       }
+      // 写盘即提交（同 writeDraftProposal）：未跟踪的 goals/*.md 阻塞 develop→doc 的 ff-only 同步。
+      commitGoalFile(root, id);
       out.push({ item, id, accepted: true, reason: `routed as draft ${id}（可在 /goal?status=draft 看到）` });
     }
     keys.add(findingKey(candidate));
