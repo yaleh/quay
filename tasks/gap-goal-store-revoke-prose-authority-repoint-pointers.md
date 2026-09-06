@@ -1,7 +1,7 @@
 ---
 id: gap-goal-store-revoke-prose-authority-repoint-pointers
 title: 断权威：manager-phase-goal.md 降级为归档，四处 prompt 指针改读 goals/ store
-status: todo
+status: ready
 labels:
   - gap
 parent: null
