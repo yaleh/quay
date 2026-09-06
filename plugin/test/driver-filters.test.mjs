@@ -514,14 +514,30 @@ test("AC1 — 机械 ff 失败 + 语义合并冲突 ⇒ 返回 false + 冲突落
   git(root, "add", "--", "code.ts");
   git(root, "commit", "-q", "-m", "doc-only: modify code.ts");
 
+  // ⊕ 人 2026-09-06 裁定「merge 冲突时可以损失 author 分支的变更」⇒ 本条断言从「返回 false」
+  // 改为断言【终局解成立】。原断言编码的是被推翻的行为：结构冲突到此即 return false 且无升级
+  // 接线，实测 26 次进入语义兜底 21 次卡死在这里，「必成功永不卡死」从未成立。
   const ok = propagateDocBranchToDevelop(root);
-  assert.equal(ok, false, "语义合并冲突 ⇒ propagate 返回 false（非静默）");
+  assert.equal(ok, true, "结构冲突 ⇒ 硬取 develop ⇒ 语义同步必成功（裁定后的终局解）");
+
   const events = fs.readFileSync(path.join(root, DOC_DEVELOP_SYNC_EVENT_REL), "utf8")
     .trim().split("\n").map((l) => JSON.parse(l));
   assert.ok(events.some((e) => e.event === "doc-develop-sync-semantic"), "ff 失败落痕 begin");
-  assert.ok(events.some((e) => e.event === "doc-develop-sync-semantic-conflict"), "冲突落痕（升级 Claude Code 语义合并）");
-  // merge --abort 已把树恢复到无冲突残留态（⛔ 留 UD/冲突路径 ⇒ 假；.quay/ 事件文件是运行时落痕，非冲突残留）。
-  assert.equal(git(root, "ls-files", "-u").trim(), "", "merge --abort 无 unmerged 路径残留");
+  // 成功不得抹掉「发生过冲突」这个事实——否则事后无从知道这次是走了丢弃路径。
+  assert.ok(events.some((e) => e.event === "doc-develop-sync-semantic-conflict"), "冲突仍须落痕");
+
+  const resolved = events.find((e) => e.event === "doc-develop-sync-semantic-resolved");
+  assert.ok(resolved, "终局解须落痕 resolved");
+  assert.equal(resolved.resolution, "discarded-doc-commits", "须标明这次是【丢弃 doc 提交】而非正常合并");
+  // ⛔ 允许丢失 ≠ 允许静默丢失：被丢弃的提交必须逐条可查（硬规则 3 枚举不布尔）。
+  assert.ok(resolved.discardedCount >= 1, "丢弃条数须记录");
+  assert.ok(resolved.discarded.some((l) => l.includes("doc-only: modify code.ts")),
+    "被丢弃的那条提交必须逐条留痕，⛔ 不能只说「同步成功」");
+
+  // 终局态：author 与 develop 同 commit（这正是「取 develop」的含义）。
+  assert.equal(git(root, "rev-parse", "author").trim(), git(root, "rev-parse", "develop").trim(),
+    "取 develop 后两 ref 必须一致");
+  assert.equal(git(root, "ls-files", "-u").trim(), "", "无 unmerged 路径残留");
 });
 
 test("AC2 — 同一任务状态冲突（develop=needs-human / doc=done）⇒ 确定性优先级回写 done（⛔ 交 LLM / 取 develop 侧 ⇒ 假）", (t) => {
@@ -586,6 +602,17 @@ test("AC2 — 分叉 guard：doc 有 develop 未含提交 ⇒ 报红（forked=tr
   // ff-only 不 merge-fallback：develop 与 doc 都不动（无 merge commit 产生）。
   assert.equal(git(root, "rev-parse", "develop").trim(), developTip, "develop 未被静默 merge");
   assert.equal(git(root, "rev-parse", DOC_BRANCH).trim(), docTip, "doc 未被静默 merge");
+
+  // not-ff 事件必须携带 ahead/behind ⇒ 该读数可解读。此前只记 {ts,event,phase,branch}，
+  // 无法区分「只领先（良性：doc 刚提交、无物可拉）」与「既领先又落后（真分叉）」
+  // ⇒ 计数再多也说明不了问题。实测该盲区一度让 183 条 not-ff 被当成「持续分叉」。
+  const ev = fs.readFileSync(path.join(root, DOC_DEVELOP_SYNC_EVENT_REL), "utf8")
+    .trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.event === "doc-develop-sync-not-ff");
+  assert.ok(ev.length >= 1, "not-ff 须落痕");
+  const last = ev[ev.length - 1];
+  assert.ok(Number.isInteger(last.ahead) && last.ahead >= 1, "须记 doc 独有提交数");
+  assert.ok(Number.isInteger(last.behind), "须记 develop 独有提交数");
+  assert.equal(last.benign, last.behind === 0, "benign 必须由 behind 派生，⛔ 不是另一个自述");
 });
 
 test("AC3 — 负控制：develop 前进（纯 ff）⇒ syncDevelopToDoc 后两 ref 相等（⛔ 仍分叉 ⇒ 假）", (t) => {
