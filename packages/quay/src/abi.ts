@@ -49,6 +49,30 @@ export interface AdrRecord {
   body: string;
 }
 
+// ── Goal view-model (SPEC-goal-mechanism-2026-09-06.md §5.2): the goal store is
+//    PROVIDER-BACKED (storage lives in quay-native; Core keeps only this view-model
+//    + the delegation shim). GoalRecord mirrors the native store's view-model shape —
+//    the goal's criterion is the conjunction of its ACs, so a GOAL record carries no
+//    `criterion` (only AC records do); `goal` is the owning GOAL id on AC records.
+export interface GoalRecord {
+  id: string;
+  title: string;
+  status: string;
+  kind: string;
+  goal?: string;
+  criterion?: string;
+  expect?: string;
+  origin?: string;
+  evidence?: { at?: string; verdict?: string; reading?: string };
+  supersedes: string[];
+  supersededBy: string[];
+  body: string;
+  updatedAt?: number;
+}
+
+/** All valid goal-status values (draft → active → achieved / superseded / retired). */
+export const GOAL_STATUSES: readonly string[] = ['draft', 'active', 'achieved', 'superseded', 'retired'];
+
 /** task_delete result (gap-abi-missing-commit-delete-dependson-primitives): the native provider's
  *  delete returns an honest, distinguishable shape — `ok:false` (not-found) is a normal result the
  *  Core surface maps to isError, never a silent no-op. */

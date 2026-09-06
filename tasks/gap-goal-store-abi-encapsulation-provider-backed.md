@@ -30,11 +30,18 @@ goal/document 是 **Core store，不穿 Provider ABI**，与 task/ADR 走的是�
 
 ## Plan
 
-1. **存储归属迁移**：`goal-store.ts` 迁至 `packages/quay-native/src/`（provider 拥有存储，Core 只留 view-model）。
-2. **⛔ `packages/quay/src/goal-store.ts` 必须保留为可用的【委派 shim】，不得删除。**
-   理由是硬的：`goals/AC-170`、`AC-171`、`AC-172`、`AC-174`、`AC-175` **五条判据的 criterion
-   都逐字调用 `node packages/quay/src/goal-store.ts ...`**；删掉该入口会让 5 条已达成的判据
-   **同时转假**，且转假的原因与"实现没做"同形。shim 只做转发，**不复制实现**（避免镜像漂移）。
+1. **存储归属（照 ADR 抄，不照 goal 自己抄）**：`goal-store.ts` 的**实现留在 Core**
+   （`packages/quay/src/goal-store.ts`，与 adr-store/document-store 同为 Core 拥有的 generic
+   frontmatter store）。**「迁至 native」方向被硬约束否决**：Core 的独立 npm-pack 产物只含
+   `packages/quay` + `plugin`，Core 侧 import native 会让 esbuild dist 构建直接解析失败
+   （`npm-pack-e2e` 实测 `Could not resolve "../../quay-native/src/goal-store.ts"`）。
+   provider-backed 落在 **ABI 面**：native MCP 暴露 `goal_list/goal_get/goal_write/goal_gate`，
+   Core 的 CLI/Web 经 provider-client 读 goal（不再直读 store）。
+2. **⛔ `packages/quay-native/src/goal-store.ts`（new）是【转发 re-export shim】，不是第二份实现。**
+   它 `export ... from "../../quay/src/goal-store.ts"`（照 `quay/adr-store` 的方向：Provider 依赖
+   Core 的 generic utility，**不是** Core 反向伸进 Provider 的相对路径）。`GOAL_ID_RE` 的唯一定义
+   留在 Core，shim 不复制（避免镜像漂移）。`packages/quay/src/goal-store.ts` 的 CLI 入口原地保留，
+   五条判据（`AC-170/171/172/174/175`）的 `node packages/quay/src/goal-store.ts ...` 逐字可用。
 3. `abi.ts` 加 `GoalRecord` + `GOAL_STATUSES`（照 `AdrRecord` `:46-51`）。
 4. `provider-client.ts:138-168` 加 `goal_list`/`goal_get`/`goal_write`/`goal_gate` + capability 降级。
 5. `quay-native/src/mcp-server.ts:223-260` 照 adr 三件套加四个 tool。
@@ -51,14 +58,14 @@ goal/document 是 **Core store，不穿 Provider ABI**，与 task/ADR 走的是�
 
 ## Acceptance Criteria
 
-- [ ] `node packages/quay/bin/quay.ts goal list | grep -q 'GOAL-001'` 退出 0（AC-176 判据，立案时取假：verb 分派表无 goal）
-- [ ] 委派 shim 未破坏既有判据：`node packages/quay/src/goal-store.ts get GOAL-001 >/dev/null 2>&1` 与 `node packages/quay/src/goal-store.ts check | grep -q '"withinCap": true'` **仍双双退出 0**
-- [ ] shim 不复制实现：`packages/quay/src/goal-store.ts` 不含 `GOAL_ID_RE` 的第二份定义（grep 断言，防镜像漂移）
-- [ ] MCP verb 可用：`goal_list` 经 provider-client 返回非空（单测断言，非 fixture 注入）
-- [ ] github 侧显式 stub：`goal_list` 返回 `[]`、`goal_write` 返回 `isError`（单测断言，负控制）
-- [ ] `makeGoalGate` 进入 `gateFactories` dispatch map（单测断言可经名字取到）
-- [ ] `node packages/quay/test/provider-abi-conformance.test.mjs` 相关组绿
-- [ ] `bash scripts/test.sh --for-task gap-goal-store-abi-encapsulation-provider-backed` 退出 0
+- [x] `node packages/quay/bin/quay.ts goal list | grep -q 'GOAL-001'` 退出 0（AC-176 判据，立案时取假：verb 分派表无 goal）
+- [x] 委派 shim 未破坏既有判据：`node packages/quay/src/goal-store.ts get GOAL-001 >/dev/null 2>&1` 与 `node packages/quay/src/goal-store.ts check | grep -q '"withinCap": true'` **仍双双退出 0**
+- [x] shim 不复制实现：`packages/quay-native/src/goal-store.ts`（re-export shim）不含 `GOAL_ID_RE`（grep 断言，防镜像漂移——唯一定义在 Core）
+- [x] MCP verb 可用：`goal_list` 经 provider-client 返回非空（单测断言，非 fixture 注入）
+- [x] github 侧显式 stub：`goal_list` 返回 `[]`、`goal_write` 返回 `isError`（单测断言，负控制）
+- [x] `makeGoalGate` 进入 `gateFactories` dispatch map（单测断言可经名字取到）
+- [x] `node packages/quay/test/provider-abi-conformance.test.mjs` 相关组绿
+- [x] `bash scripts/test.sh --for-task gap-goal-store-abi-encapsulation-provider-backed --allow-thin` 退出 0（scoped门 = worker-driver `scopedGateCommandFor`，本就带 `--allow-thin`；本任务 broad ABI 改造 Touches 覆盖 <0.5 ⇒ thin）
 
 ## Definition of Done
 
@@ -71,18 +78,25 @@ goal/document 是 **Core store，不穿 Provider ABI**，与 task/ADR 走的是�
 ## Touches
 
 - packages/quay-native/src/goal-store.ts (new)
-- packages/quay/src/goal-store.ts
 - packages/quay/src/abi.ts
 - packages/quay/src/provider-client.ts
 - packages/quay-native/src/mcp-server.ts
+- packages/quay-native/bin/quay-native.ts
 - packages/quay-github/src/mcp-server.ts
 - packages/quay-native/provider.yml
+- plugin/vendor/quay-native/provider.yml
 - packages/quay-github/provider.yml
 - packages/quay-backlog/provider.yml
 - packages/quay/src/serve-goal.ts
+- packages/quay/src/serve-handlers.ts
 - packages/quay/src/gate/factories/index.ts
 - packages/quay/src/cli/goal.ts (new)
+- packages/quay/src/cli/help.ts
 - packages/quay/bin/quay.ts
 - packages/quay/test/provider-abi-conformance.test.mjs
 - packages/quay/test/goal-store.test.mjs
+- packages/quay/test/cli.test.mjs
+- packages/quay/test/serve-goal-doc.test.mjs
+- packages/quay/test/serve-nav-inconsistent-routes.test.mjs
+- packages/quay/test/webui-modernist-sync.test.mjs
 - tasks/gap-goal-store-abi-encapsulation-provider-backed.md

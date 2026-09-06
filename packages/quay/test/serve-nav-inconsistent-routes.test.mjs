@@ -94,7 +94,8 @@ before(async () => {
   fs.writeFileSync(path.join(adrDir, "ADR-101-nav.md"),
     "---\nid: ADR-101\ntitle: nav adr\nstatus: accepted\ndate: 2026-08-17\n---\n## Context\nc\n## Decision\nd\n## Consequences\ne\n");
   // goal store at <workspaceRoot>/goals, document store at <workspaceRoot>/docs-managed.
-  fs.mkdirSync(path.join(workspaceRoot, "goals"), { recursive: true });
+  const goalsDir = path.join(workspaceRoot, "goals");
+  fs.mkdirSync(goalsDir, { recursive: true });
   fs.mkdirSync(path.join(workspaceRoot, "docs-managed"), { recursive: true });
   // goal ids are GOAL-NNN / AC-NNN (goal-store.ts), doc ids are DOC-NNN (document-store.ts).
   fs.writeFileSync(path.join(workspaceRoot, "goals", "AC-101-criterion.md"),
@@ -103,7 +104,7 @@ before(async () => {
     "---\nid: DOC-101\ntitle: nav doc\nstatus: active\nkind: skill\n---\n## Body\nthe doc\n");
   fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
   fs.writeFileSync(path.join(workspaceRoot, ".quay", "config.yml"),
-    `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"\n      QUAY_NATIVE_ADR_DIR: "${adrDir.replaceAll("\\", "\\\\")}"\n`);
+    `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"\n      QUAY_NATIVE_ADR_DIR: "${adrDir.replaceAll("\\", "\\\\")}"\n      QUAY_NATIVE_GOAL_DIR: "${goalsDir.replaceAll("\\", "\\\\")}"\n`);
   execFileSync("git", ["init", "-q"], { cwd: workspaceRoot });
   fs.writeFileSync(path.join(workspaceRoot, "README.md"), "nav fixture workspace\n");
   execFileSync("git", ["-c", "user.email=test@test", "-c", "user.name=test", "add", "."], { cwd: workspaceRoot });

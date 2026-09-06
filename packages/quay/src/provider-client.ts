@@ -4,7 +4,7 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import type { Task, AdrRecord, Manifest, TaskDeleteResult } from './abi.ts';
+import type { Task, AdrRecord, Manifest, TaskDeleteResult, GoalRecord } from './abi.ts';
 
 export interface ConnectProviderOptions {
   command: string;
@@ -42,6 +42,10 @@ export interface ProviderClient {
   adrList(filter?: Record<string, unknown>): Promise<AdrRecord[]>;
   adrGet(id: string): Promise<AdrRecord>;
   adrWrite(patch: Record<string, unknown>): Promise<AdrRecord>;
+  goalList(filter?: Record<string, unknown>): Promise<GoalRecord[]>;
+  goalGet(id: string): Promise<GoalRecord>;
+  goalWrite(patch: Record<string, unknown>): Promise<GoalRecord>;
+  goalGate(id: string): Promise<unknown>;
   manifest(): Promise<Manifest>;
   close(): Promise<void>;
 }
@@ -156,6 +160,35 @@ export async function connectProvider({ command, args, env, cwd }: ConnectProvid
     return (r.structuredContent as {adr?: AdrRecord})?.adr ?? null as unknown as AdrRecord;
   }
 
+  // ── Goal ABI (separate object kind — provider-backed storage, SPEC §5.2). Same
+  // graceful-degradation contract as ADR: goalList degrades to [] on isError so a
+  // goal-less provider (github stub, backlog) renders cleanly; goalGet returns null
+  // on isError (mirrors adrGet); goalWrite throws (mirrors adrWrite); goalGate
+  // returns the provider's gate verdict, throwing on isError (mirrors taskCheck).
+  async function goalList(filter: Record<string, unknown> = {}): Promise<GoalRecord[]> {
+    const r = await client.callTool({ name: "goal_list", arguments: filter });
+    if (r.isError) return [];
+    return (r.structuredContent as {goals?: GoalRecord[]})?.goals ?? [];
+  }
+
+  async function goalGet(id: string): Promise<GoalRecord> {
+    const r = await client.callTool({ name: "goal_get", arguments: { id } });
+    if (r.isError) return null as unknown as GoalRecord;
+    return (r.structuredContent as {goal?: GoalRecord})?.goal ?? null as unknown as GoalRecord;
+  }
+
+  async function goalWrite(patch: Record<string, unknown>): Promise<GoalRecord> {
+    const r = await client.callTool({ name: "goal_write", arguments: patch });
+    if (r.isError) throw new Error((r.content as Array<{text?: string}>)?.[0]?.text ?? "goal_write failed");
+    return (r.structuredContent as {goal?: GoalRecord})?.goal ?? null as unknown as GoalRecord;
+  }
+
+  async function goalGate(id: string): Promise<unknown> {
+    const r = await client.callTool({ name: "goal_gate", arguments: { id } });
+    if (r.isError) throw new Error((r.content as Array<{text?: string}>)?.[0]?.text ?? "goal_gate failed");
+    return r.structuredContent ?? null;
+  }
+
   async function manifest(): Promise<Manifest> {
     const r = await client.readResource({ uri: "provider://manifest" });
     return JSON.parse((r.contents[0] as {text: string}).text) as Manifest;
@@ -165,5 +198,5 @@ export async function connectProvider({ command, args, env, cwd }: ConnectProvid
     await client.close();
   }
 
-  return { taskList, taskGet, taskWrite, taskDelete, taskCheck, adrList, adrGet, adrWrite, manifest, close };
+  return { taskList, taskGet, taskWrite, taskDelete, taskCheck, adrList, adrGet, adrWrite, goalList, goalGet, goalWrite, goalGate, manifest, close };
 }

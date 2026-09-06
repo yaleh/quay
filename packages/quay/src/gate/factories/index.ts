@@ -32,4 +32,9 @@ export const gateFactories: Record<string, (...args: any[]) => GateFn> = {
   "test-pass": makeTestPassGate,
   "coverage-floor": makeCoverageFloorGate,
   "red-green": makeRedGreenGate,
+  // SPEC-goal-mechanism-2026-09-06.md §5.2 / AC-176: makeGoalGate was exported but
+  // missing from this dispatch map — a goal gate could not be configured via
+  // gates.yml. Registered here so `type: goal` resolves (same gap the spec flagged
+  // in its §9 "gateFactories 缺口" note).
+  "goal": makeGoalGate,
 };

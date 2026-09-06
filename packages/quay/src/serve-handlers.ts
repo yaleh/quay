@@ -234,14 +234,14 @@ export async function handleAllRoutes(
   // (which had NO route — grep -c document = 0), both following the /adr shape. The
   // goal page shows target / criterion / status / recent verdict+time / origin.
   if (url.pathname === "/goal") {
-    await handleGoalList(req, res, url, cfg);
+    await handleGoalList(req, res, url, client);
     return;
   }
 
   const goalM = /^\/goal\/([^/]+)$/.exec(url.pathname);
   if (goalM) {
     const id = decodeURIComponent(goalM[1]);
-    await handleGoalDetail(req, res, id, cfg);
+    await handleGoalDetail(req, res, id, client);
     return;
   }
 

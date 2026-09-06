@@ -303,6 +303,33 @@ export async function startMcpServer({ owner, repo }: { owner: string; repo: str
     async () => ({ isError: true, content: [{ type: "text" as const, text: ADR_UNSUPPORTED }] })
   );
 
+  // ── Goal tools — quay-github does NOT support goals (no AC sub-record mapping on
+  // GitHub Issues; see SPEC-goal-mechanism-2026-09-06.md §5.4's own "遗留不一致" note).
+  // Degrade cleanly so Core stays provider-agnostic: goal_list → empty (list views
+  // render "no goals" instead of erroring); goal_get / goal_write / goal_gate → a
+  // clear "not supported" isError (Core maps to null / a clear CLI error).
+  const GOAL_UNSUPPORTED = "quay-github does not support goals (goals + AC sub-records are not GitHub Issues); use the native provider for goal storage.";
+  server.registerTool(
+    "goal_list",
+    { description: "Goals are not supported by the GitHub provider; always returns an empty list.", inputSchema: { status: z.string().optional(), kind: z.string().optional(), goal: z.string().optional() } },
+    async () => ({ content: [{ type: "text" as const, text: "[]" }], structuredContent: { goals: [] } })
+  );
+  server.registerTool(
+    "goal_get",
+    { description: "Goals are not supported by the GitHub provider.", inputSchema: { id: z.string() } },
+    async () => ({ isError: true, content: [{ type: "text" as const, text: GOAL_UNSUPPORTED }] })
+  );
+  server.registerTool(
+    "goal_write",
+    { description: "Goals are not supported by the GitHub provider.", inputSchema: { id: z.string() } },
+    async () => ({ isError: true, content: [{ type: "text" as const, text: GOAL_UNSUPPORTED }] })
+  );
+  server.registerTool(
+    "goal_gate",
+    { description: "Goals are not supported by the GitHub provider.", inputSchema: { id: z.string() } },
+    async () => ({ isError: true, content: [{ type: "text" as const, text: GOAL_UNSUPPORTED }] })
+  );
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error(`quay-github mcp: serving tasks from github.com/${owner}/${repo} (read + write: create/edit)`);

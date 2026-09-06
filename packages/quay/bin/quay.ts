@@ -176,6 +176,9 @@ export async function run(argv, ctx = {}) {
   // loads the handler modules of the other 20 verbs (the old per-spawn floor).
   // Behavior is unchanged — same module, same ctx, same return value.
   if (cmd === "adr") return (await import("../src/cli/adr.ts")).handleAdr(ctx);
+  // SPEC-goal-mechanism-2026-09-06.md §5.2 / AC-176: `quay goal` — provider-backed goal
+  // records (GOAL-NNN + AC-NNN), read/written through the Provider ABI, not the store.
+  if (cmd === "goal") return (await import("../src/cli/goal.ts")).handleGoal(ctx);
   if (cmd === "task" && sub === "list") return (await import("../src/cli/task-list.ts")).handleTaskList(ctx);
   if (cmd === "task" && sub === "view") return (await import("../src/cli/task-view.ts")).handleTaskView(ctx);
   if (cmd === "task" && sub === "create") return (await import("../src/cli/task-create.ts")).handleTaskCreate(ctx);
@@ -206,7 +209,7 @@ export async function run(argv, ctx = {}) {
   if (cmd === "driver") return (await import("../src/cli/driver.ts")).handleDriver(ctx);
 
   // QX-005: updated fallback with --help hint (UQ-001/UQ-002).
-  console.error("usage: quay <adr|init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|config validate|config check|action list|action run|serve|mcp|manager start|manager arm|driver> ...\nRun `quay --help` for full usage documentation.");
+  console.error("usage: quay <adr|goal|init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|config validate|config check|action list|action run|serve|mcp|manager start|manager arm|driver> ...\nRun `quay --help` for full usage documentation.");
   process.exitCode = 1;
     }
 }

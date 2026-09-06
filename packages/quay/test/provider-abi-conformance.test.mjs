@@ -68,6 +68,7 @@
 // genuinely mutates real issue bodies on gh-12/gh-13/gh-14).
 
 import { test, after } from "node:test";
+import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -76,6 +77,7 @@ import os from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
+import { connectProvider } from "../src/provider-client.ts";
 
 // The native-leg tasks dir is removed once at the end of this file (the carrier-array + after()
 // pattern) — a mkdtemp fixture without cleanup leaks a /tmp dir per run.
@@ -522,3 +524,59 @@ test(
   },
   main
 );
+
+// ── Goal ABI (SPEC-goal-mechanism-2026-09-06.md §5.2 / AC-176) ──
+// ALWAYS runs (NOT gated on live GitHub): the native goal verbs and the github
+// goal STUBS are both offline (the stubs never shell out to `gh`). This is the
+// AC-176 goal group — native goal_list non-empty via the REAL write path (goal
+// write, not a hand-written fixture file — "非 fixture 注入"), and the github
+// negative control (goal_list → [], goal_write → isError).
+test("provider-abi-conformance: goal ABI — native goal_list non-empty via goal_write; github stubs fail-closed", async () => {
+  // ── native leg ── goal storage is provider-backed (quay-native/src/goal-store.ts).
+  // Create a goal through Core's provider-client `goalWrite` (the real write path),
+  // then read it back through `goalList` — proves goal_list + goal_write + the
+  // provider-client's goal verbs all work end-to-end without a fixture file.
+  const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-abi-goal-tasks-"));
+  _tmpDirs.push(tasksDir);
+  const goalDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-abi-goal-goals-"));
+  _tmpDirs.push(goalDir);
+  const coreClient = await connectProvider({
+    command: "node",
+    args: [nativeBin, "mcp"],
+    cwd: path.join(__dirname, "..", "..", "quay-native"),
+    env: { QUAY_NATIVE_TASKS_DIR: tasksDir, QUAY_NATIVE_GOAL_DIR: goalDir },
+  });
+  try {
+    const written = await coreClient.goalWrite({
+      id: "GOAL-001",
+      title: "goal ABI conformance",
+      status: "active",
+      origin: "provider-abi-conformance (AC-176 goal group)",
+    });
+    assert.ok(written && written.id === "GOAL-001", `goalWrite created GOAL-001 (got ${JSON.stringify(written?.id)})`);
+    const goals = await coreClient.goalList();
+    assert.ok(Array.isArray(goals) && goals.some((g) => g.id === "GOAL-001"),
+      `goal_list via provider-client returns GOAL-001 (got ${goals.length} goals)`);
+  } finally {
+    await coreClient.close();
+  }
+
+  // ── github leg ── negative control: goal_list → [] (renders "no goals", not an
+  // error), goal_write / goal_get → isError "not supported".
+  const githubEnv = { QUAY_GITHUB_REPO: "yaleh/quay" };
+  const githubClient = await connectStdio("node", [githubBin, "mcp"], githubEnv);
+  try {
+    const lr = await githubClient.callTool({ name: "goal_list", arguments: {} });
+    assert.ok(!lr.isError, "github goal_list is not an error");
+    assert.deepEqual(lr.structuredContent?.goals ?? null, [], "github goal_list returns []");
+    const wr = await githubClient.callTool({
+      name: "goal_write",
+      arguments: { id: "GOAL-001", title: "x", status: "active", origin: "x" },
+    });
+    assert.equal(wr.isError, true, "github goal_write returns isError (negative control)");
+    const gr = await githubClient.callTool({ name: "goal_get", arguments: { id: "GOAL-001" } });
+    assert.equal(gr.isError, true, "github goal_get returns isError");
+  } finally {
+    await githubClient.close();
+  }
+});
