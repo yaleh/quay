@@ -69,8 +69,14 @@ const EXCLUDED_TOP_DIRS: ReadonlySet<string> = new Set([".quay"]);
 // commits (1cb8023f9 读数扩到机制生态 / 163825dfa 加自动驱动通道 / 1abea2b70 humanAttention 路由) expanded the
 // laid-down plugin/probes/meta-driver.md probe (+4686) and landed on develop after the previous anchor without
 // re-anchoring. A legitimate mechanism+probe growth (new resident driver kind + its probe), not pollution.
+// Re-anchored 2026-09-06 (gap-goal-driver-mechanical-ring CONTINUE, surfaced by its full suite): 0 files /
+// +1155 bytes net — the meta-driver follow-up commit 9434e1e93 (给语义半读代码的能力 + 把 FILE-ONLY 从散文
+// 变成机制 + 认领判定带状态) expanded the laid-down plugin/probes/meta-driver.md probe (+1155) and landed on
+// develop after the previous anchor (0a54d493c); this task's git merge develop absorbed it. A legitimate
+// probe growth, not pollution. (meta-driver.ts grew +5498 in the same window but is NOT in the laid-down
+// closure — the footprint delta is exactly the probe's +1155.)
 export const BASELINE_FILES = 132;
-export const BASELINE_BYTES = 3824474;
+export const BASELINE_BYTES = 3825629;
 
 export interface ClosureCount {
   files: number;
