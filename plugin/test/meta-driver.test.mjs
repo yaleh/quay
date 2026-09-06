@@ -34,6 +34,7 @@ import {
   fileDecisions,
   nextGoalId,
   renderDecisionOrigin,
+  decisionQuality,
   collectDriverReadings,
   shouldJudge,
   readState,
@@ -448,6 +449,36 @@ test('fileDecisions: 真写出一条 draft GOAL 记录（⛔ status 必须是 dr
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// 实测促因：复用 gateFinding 的 quality 闸把「变化检测是否上升为平台能力」误杀了，理由是
+// "no actionable ## Finding with reproduction evidence"——那个 EVIDENCE 正则是为缺陷发现调的，
+// 用错了对象。决策的质量在于是不是一个【真的选择】。
+test('decisionQuality: 不含代码形 token 的正当方向问题必须通过（回归：曾被误杀）', () => {
+  const architectural = {
+    title: '变化检测是否上升为平台能力',
+    question: '变化检测目前是 meta-driver 的私有实现，是否应上升为所有例程共享的平台能力',
+    options: '①维持私有，代价是下一个 driver 要再抄一遍；②上升为平台能力，代价是要改在产的 quality driver',
+    evidenceKey: 'syncHealth.notFf',
+    origin: '这是架构取舍，取决于希望平台承担多少通用能力，读数无法推出该偏好',
+  };
+  const q = decisionQuality(architectural);
+  assert.equal(q.ok, true, `正当的方向问题不得被质量闸误杀：${q.reason}`);
+});
+
+test('decisionQuality: 只有一个选项 ⇒ 拒（一个选项的决策不是决策）', () => {
+  const q = decisionQuality({
+    title: 't', question: '要不要把这件事做了，这是一个足够长的问题描述',
+    options: '就这么办', evidenceKey: 'x', origin: '这里给出一个足够长的不可自决理由说明文字以越过长度闸',
+  });
+  assert.equal(q.ok, false);
+  assert.match(q.reason, /一个选项的决策不是决策/);
+});
+
+test('decisionQuality: 问题或理由过短 ⇒ 拒', () => {
+  const base = { title: 't', evidenceKey: 'x', options: '①甲方案代价若干；②乙方案代价若干' };
+  assert.equal(decisionQuality({ ...base, question: '短', origin: '这里给出一个足够长的不可自决理由说明' }).ok, false);
+  assert.equal(decisionQuality({ ...base, question: '这是一个足够长的问题描述用于通过长度闸', origin: '短' }).ok, false);
 });
 
 test('parseProbeOutput: decisions 缺字段的条目被丢弃', () => {
