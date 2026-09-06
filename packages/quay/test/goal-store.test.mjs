@@ -10,11 +10,17 @@
 //   AC4 — the ACTIVE SET is DERIVED from goal status (change the goal, the set follows).
 //   AC6 — empty `origin` writes nothing (negative control).
 //   AC9 — GOAL-NNN naming + goal/AC unity; GOAL records have NO criterion field.
-//   AC10 — I1 single atomic goal switch fail-closed: second active rejected without disposition.
+//   AC10 — I1′ hard cap: disposeOld/supersedes in the SAME call still work; over-cap activation
+//          is REJECTED.
 //   AC11 — I2 derived: GOAL achieved ⟺ all its ACs achieved (evaluated, never stored); the
-//          exactly-one-active-goal checker.
+//          checkWithinCap() checker (withinCap vs hasDirection).
 //   draft — write() defaults to `draft` (not active); a draft GOAL is absent from activeGoals()
 //           and its ACs absent from listActiveCriteria() (SPEC §3.2 negative controls).
+//   gap-goal-store-hard-cap-staleness-three-state:
+//     AC-3 — cap=2 negative control: a 3rd active is REJECTED and the error names both holders.
+//     AC-4 — zero-AC GOAL is notEvaluated (never fresh, never stale).
+//     AC-5 — cap/stale read from .quay/config.yml (change config → check follows).
+//     AC-6 — I4: status=active + all ACs achieved ⇒ divergent.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -101,11 +107,16 @@ test("AC4 — listActiveCriteria() derives the active set from goal status, not 
   assert.deepEqual(s.listActiveCriteria().map((g) => g.id), ["AC-012"], "new goal's AC enters the active set");
 });
 
-// ── AC10: I1 single atomic goal switch, fail-closed ──────────────────────────────────────────────
-test("AC10 — activating a second goal while one is active is REJECTED without a disposition", () => {
+// ── AC10: I1′ hard cap (SPEC §4.1) ──────────────────────────────────────────────────────────────
+test("AC10 — under the default cap (3), a second and third active GOAL are allowed; a fourth is rejected", () => {
   const s = createGoalStore(tmpDir("ac10a"));
   s.write("GOAL-001", { title: "p1", status: "active", origin: "o" });
-  assert.throws(() => s.write("GOAL-002", { title: "p2", status: "active", origin: "o" }), /already active.*dispose/);
+  s.write("GOAL-002", { title: "p2", status: "active", origin: "o" });
+  s.write("GOAL-003", { title: "p3", status: "active", origin: "o" });
+  assert.throws(
+    () => s.write("GOAL-004", { title: "p4", status: "active", origin: "o" }),
+    /exceed cap 3/
+  );
 });
 
 test("AC10 — the SAME call may dispose the old goal (achieved) and activate the new one", () => {
@@ -125,7 +136,7 @@ test("AC10 — supersedes:[oldId] in the same call atomically supersedes the old
   assert.deepEqual(s.get("GOAL-001").supersededBy, ["GOAL-002"]);
 });
 
-// ── AC11: I2 derived (never stored) + exactly-one-active-goal checker ────────────────────────────
+// ── AC11: I2 derived (never stored) + checkWithinCap checker ─────────────────────────────────────
 test("AC11 — isGoalAchieved is DERIVED: goal achieved ⟺ all its ACs achieved", () => {
   const s = createGoalStore(tmpDir("ac11"));
   s.write("GOAL-010", { title: "p10", status: "active", origin: "o" });
@@ -140,17 +151,20 @@ test("AC11 — isGoalAchieved is DERIVED: goal achieved ⟺ all its ACs achieved
   // record itself carries no derived 'achieved' flag (the derivation is the tested fact).
 });
 
-test("AC11 — a goal with zero ACs is not achieved; exactly-one-active-goal checker", () => {
+test("AC11 — a goal with zero ACs is not achieved; checkWithinCap splits withinCap from hasDirection", () => {
   const s = createGoalStore(tmpDir("ac11b"));
   s.write("GOAL-010", { title: "p10", status: "active", origin: "o" });
   assert.equal(s.isGoalAchieved("GOAL-010"), false, "no ACs → not achieved");
-  let chk = s.checkExactlyOneActiveGoal();
-  assert.equal(chk.ok, true);
-  assert.equal(chk.count, 1);
+  let chk = s.checkWithinCap();
+  assert.equal(chk.withinCap, true);
+  assert.equal(chk.hasDirection, true);
+  assert.equal(chk.activeCount, 1);
+  assert.equal(chk.cap, 3);
   assert.deepEqual(chk.active, ["GOAL-010"]);
   s.write("GOAL-011", { title: "p11", status: "active", origin: "o", disposeOld: { id: "GOAL-010", to: "achieved" } });
-  chk = s.checkExactlyOneActiveGoal();
-  assert.equal(chk.ok, true);
+  chk = s.checkWithinCap();
+  assert.equal(chk.withinCap, true);
+  assert.equal(chk.activeCount, 1);
   assert.deepEqual(chk.active, ["GOAL-011"]);
 });
 
@@ -264,4 +278,70 @@ test("migration completeness — AC143..AC155 and AC156..AC169 each have exactly
     const matches = records.filter((r) => String(r.id) === id);
     assert.equal(matches.length, 1, `${id} must have exactly one record, found ${matches.length}`);
   }
+});
+
+// ── gap-goal-store-hard-cap-staleness-three-state: I1′ / I3 / I4 ─────────────────────────────────
+// AC-3 negative control: cap=2, two active, a third active is REJECTED and the error ENUMERATES
+// the two current holders (hard rule 3: enumerate, don't boolean — "which goals hold the slots"
+// is the actionable info a booleanized "over cap" would drop).
+test("AC-3 — cap=2: a 3rd active GOAL is REJECTED and the error names both current holders", () => {
+  const s = createGoalStore(tmpDir("ac3-cap"), { cap: 2 });
+  s.write("GOAL-001", { title: "p1", status: "active", origin: "o" });
+  s.write("GOAL-002", { title: "p2", status: "active", origin: "o" });
+  let caught = null;
+  try {
+    s.write("GOAL-003", { title: "p3", status: "active", origin: "o" });
+  } catch (err) {
+    caught = err;
+  }
+  assert.ok(caught, "a 3rd active GOAL with cap=2 must be rejected");
+  assert.match(caught.message, /exceed cap 2/);
+  assert.match(caught.message, /GOAL-001/, "the rejection must enumerate the first holder");
+  assert.match(caught.message, /GOAL-002/, "the rejection must enumerate the second holder");
+});
+
+// AC-4 negative control: a zero-AC GOAL is notEvaluated — never "fresh" (judging an unevaluated
+// object healthy, hard rule 3b) and never "stale" (a just-created goal is not yet overdue).
+test("AC-4 — a zero-AC GOAL is notEvaluated (never fresh, never stale)", () => {
+  const s = createGoalStore(tmpDir("ac4-stale"));
+  s.write("GOAL-001", { title: "bare", status: "active", origin: "o" });
+  const r = s.checkStaleness(Date.now());
+  assert.deepEqual(r.fresh, [], "zero-AC must not be fresh");
+  assert.deepEqual(r.stale, [], "zero-AC must not be stale");
+  assert.deepEqual(r.notEvaluated, ["GOAL-001"], "zero-AC is notEvaluated");
+  assert.deepEqual(r.divergent, [], "zero-AC is not achieved → not divergent");
+});
+
+// AC-5: cap/stale come from .quay/config.yml (change config → check follows). Proves the values
+// are NOT hardcoded literals (hard rule 4: no numeric threshold before the cost is measured).
+test("AC-5 — cap/stale read from .quay/config.yml (change config → check follows)", () => {
+  const root = tmpDir("cli-config");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const args = (a) => ["--root", root, ...a];
+  const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o"]);
+
+  fs.writeFileSync(path.join(root, ".quay", "config.yml"), "goals:\n  cap: 2\n  stale: 3d\n", "utf8");
+  let chk = JSON.parse(n(["check"]).stdout);
+  assert.equal(chk.cap, 2, "cap must come from config, not a hardcoded literal");
+  let st = JSON.parse(n(["check", "--staleness"]).stdout);
+  assert.equal(st.staleMs, 3 * 86400_000, "stale must come from config");
+
+  fs.writeFileSync(path.join(root, ".quay", "config.yml"), "goals:\n  cap: 5\n  stale: 1d\n", "utf8");
+  chk = JSON.parse(n(["check"]).stdout);
+  assert.equal(chk.cap, 5, "changing the config changes the reported cap");
+});
+
+// AC-6 / I4: status=active while isGoalAchieved() is true ⇒ "achieved but nobody closed it",
+// reported as `divergent` by checkStaleness.
+test("AC-6 — I4: status=active with all ACs achieved reports divergence", () => {
+  const s = createGoalStore(tmpDir("ac6-divergence"));
+  s.write("GOAL-010", { title: "p10", status: "active", origin: "o" });
+  s.write("AC-010", { title: "a1", status: "achieved", goal: "GOAL-010", criterion: "true", origin: "o" });
+  s.write("AC-011", { title: "a2", status: "achieved", goal: "GOAL-010", criterion: "true", origin: "o" });
+  assert.equal(s.isGoalAchieved("GOAL-010"), true, "all ACs achieved → derived achieved");
+  const r = s.checkStaleness(Date.now());
+  assert.deepEqual(r.divergent, ["GOAL-010"], "active yet achieved ⇒ divergent (I4)");
 });

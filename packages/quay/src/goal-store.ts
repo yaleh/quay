@@ -18,13 +18,26 @@
 //   3. `goal` — the ACTIVE SET is DERIVED from the goal's status, never hand-listed.
 //   4. `origin` — the empirical basis for the AC; REQUIRED (empty origin writes nothing).
 //
-// Two invariants (human-agreed, SPEC §2b):
-//   I1 — at most ONE `status: active` GOAL at a time. Goal switch is a SINGLE ATOMIC
-//        write, fail-closed: activating a new goal while another is active is REJECTED
-//        unless the same call supplies the old goal's disposition (`disposeOld` → achieved,
-//        or `supersedes: [oldId]` → superseded).
+// Invariants (SPEC-goal-mechanism-2026-09-06.md §4 — I1 superseded by I1′):
+//   I1′ — at most `cap` `status: active` GOALs at a time (default 3, configurable via
+//         .quay/config.yml `goals:`). Goal switch stays a SINGLE ATOMIC write, fail-closed:
+//         activating a goal that would exceed cap is REJECTED unless the same call disposes
+//         an active goal (`disposeOld` → achieved, or `supersedes: [oldId]` → superseded).
+//         The rejection message ENUMERATES the current active set (hard rule 3: enumerate,
+//         don't boolean — "which goals hold the slots" is the actionable info).
 //   I2 — a GOAL is achieved ⟺ ALL its ACs are achieved. DERIVED at read time
 //        (`isGoalAchieved`), never stored.
+//   I3 — staleness is THREE-STATE (fresh / stale / notEvaluated), never a fresh/stale binary
+//        (a binary would judge a never-evaluated goal as healthy — hard rule 3b). The clock is
+//        `lastProgressAt` = its ACs' `evidence.at` max, DERIVED never stored — NEVER the goal's
+//        own `updatedAt` (hard rule 4b: a quantity the measured object produces is not a
+//        measurement). Zero ACs (or no evidence.at) ⇒ notEvaluated.
+//   I4 — divergence: `status: active` while `isGoalAchieved()` is true ⇒ "achieved but nobody
+//        closed it", reported by `check --staleness`.
+//
+// cap / stale are HUMAN-GIVEN initial policy values with NO cost-structure backing (hard rule 4:
+// no numeric threshold before the cost is measured). Re-estimate from .quay/goal-round.jsonl's
+// real distribution after the goal-driver runs 30 calendar days (SPEC §4.2).
 //
 // Naming: `GOAL-NNN` / `AC-NNN` — pure sequence ids, meaning lives in `title` (the SPEC's
 // four-name decision: id never moves even when goal prose drifts). GOAL records have NO
@@ -36,6 +49,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import YAML from "yaml";
 import {
   parseFrontmatter,
   serializeFrontmatter,
@@ -55,6 +69,55 @@ const OWNED_KEYS = new Set([
   "id", "title", "status", "kind", "goal", "criterion", "expect", "origin", "activatedAt",
   "labels", "evidence", "supersedes", "superseded-by",
 ]);
+
+// ── cap / stale policy values ────────────────────────────────────────────────────────────────
+// Both are HUMAN-GIVEN initial strategy values with NO cost-structure backing (hard rule 4:
+// no numeric threshold before the cost is measured). Configurable via `.quay/config.yml`'s
+// `goals:` section (read by the CLI at invocation, passed into createGoalStore). Re-estimate
+// from `.quay/goal-round.jsonl`'s real distribution after the goal-driver runs 30 calendar
+// days (SPEC-goal-mechanism-2026-09-06.md §4.2) — any "too tight/loose" claim before then is dataless.
+const DEFAULT_GOAL_CAP = 3;
+const DEFAULT_STALE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+// Parse a `stale` duration into milliseconds. Accepted forms: "7d" / "12h" / "90m" (suffixed)
+// or a bare number = days. Returns null when unparseable (caller falls back to the default).
+function parseStaleMs(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) return value * 86400_000;
+  if (typeof value === "string") {
+    const m = value.trim().match(/^(\d+(?:\.\d+)?)\s*(d|h|m)$/i);
+    if (m) {
+      const n = Number(m[1]);
+      const unit = m[2].toLowerCase();
+      const mult = unit === "d" ? 86400_000 : unit === "h" ? 3600_000 : 60_000;
+      return n * mult;
+    }
+  }
+  return null;
+}
+
+// Read `.quay/config.yml`'s `goals:` section from the workspace root. cap/stale are OPTIONAL
+// overrides of the defaults above; an absent/unparseable config or `goals:` section yields the
+// defaults (never a crash — the store must work in a bare checkout with no config.yml).
+export function readGoalConfig(workspaceRoot: string): { cap: number; staleMs: number } {
+  let cap = DEFAULT_GOAL_CAP;
+  let staleMs = DEFAULT_STALE_MS;
+  const cfgPath = path.join(workspaceRoot, ".quay", "config.yml");
+  if (fs.existsSync(cfgPath)) {
+    try {
+      const parsed = YAML.parse(fs.readFileSync(cfgPath, "utf8"));
+      const goals = parsed && typeof parsed === "object"
+        ? (parsed as Record<string, unknown>).goals
+        : undefined;
+      if (goals && typeof goals === "object") {
+        const g = goals as Record<string, unknown>;
+        if (typeof g.cap === "number" && Number.isFinite(g.cap) && g.cap >= 1) cap = g.cap;
+        const sd = parseStaleMs(g.stale);
+        if (sd !== null) staleMs = sd;
+      }
+    } catch { /* unparseable config.yml → defaults (never crash the store) */ }
+  }
+  return { cap, staleMs };
+}
 
 interface GoalFrontmatter {
   [key: string]: unknown;
@@ -112,9 +175,14 @@ export function isCriterionId(id: string): boolean {
 
 /**
  * @param {string} goalDir absolute path to the goal directory (e.g. `<workspaceRoot>/goals`)
+ * @param {{cap?: number, staleMs?: number}} opts I1′/I3 policy values; default cap=3, stale=7d
+ *   (readGoalConfig supplies the .quay/config.yml values at the CLI entry; library callers that
+ *   only list/get omit opts and get the defaults).
  */
-export function createGoalStore(goalDir: string) {
+export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?: number } = {}) {
   fs.mkdirSync(goalDir, { recursive: true });
+  const cap = opts.cap ?? DEFAULT_GOAL_CAP;
+  const staleMs = opts.staleMs ?? DEFAULT_STALE_MS;
 
   function assertSafeId(id: string) {
     if (typeof id !== "string" || !(GOAL_ID_RE.test(id) || AC_ID_RE.test(id))) {
@@ -202,10 +270,67 @@ export function createGoalStore(goalDir: string) {
     return acs.every((g) => g.status === "achieved");
   }
 
-  // I1 checker (SPEC §2b.5-c): "exactly one active goal". ok=true only when count === 1.
-  function checkExactlyOneActiveGoal(): { ok: boolean; count: number; active: string[] } {
+  // I1′ checker — the invariant is "active count ≤ cap", NOT "exactly one". Splitting
+  // withinCap (invariant holds) from hasDirection (≥1 active) keeps "over cap" and "none
+  // active" from collapsing into one boolean (hard rule 3b: distinct states, distinct values).
+  function checkWithinCap(): {
+    withinCap: boolean;
+    hasDirection: boolean;
+    activeCount: number;
+    cap: number;
+    active: string[];
+  } {
     const ap = activeGoals();
-    return { ok: ap.length === 1, count: ap.length, active: ap.map((p) => String(p.id)) };
+    const activeCount = ap.length;
+    return {
+      withinCap: activeCount <= cap,
+      hasDirection: activeCount >= 1,
+      activeCount,
+      cap,
+      active: ap.map((p) => String(p.id)),
+    };
+  }
+
+  // I3 + I4 checker (check --staleness). THREE named buckets, structurally always present
+  // (possibly empty arrays) — never a binary fresh/stale that would judge an unevaluated goal
+  // as healthy (hard rule 3b). `lastProgressAt` is DERIVED from the ACs' `evidence.at` max —
+  // never the goal's own `updatedAt` (hard rule 4b). `divergent` is the I4 signal: status
+  // active while `isGoalAchieved()` is true ("achieved but nobody closed it").
+  function checkStaleness(nowMs: number = Date.now()): {
+    fresh: string[];
+    stale: string[];
+    notEvaluated: string[];
+    divergent: string[];
+    cap: number;
+    staleMs: number;
+  } {
+    const all = list();
+    const fresh: string[] = [];
+    const stale: string[] = [];
+    const notEvaluated: string[] = [];
+    const divergent: string[] = [];
+    for (const g of activeGoals()) {
+      const gid = String(g.id);
+      if (isGoalAchieved(gid)) divergent.push(gid); // I4 — active yet all ACs achieved
+      let lastProgressAt: number | undefined;
+      for (const ac of all.filter((r) => String(r.goal) === gid)) {
+        const ev = ac.evidence as { at?: unknown } | undefined;
+        if (ev && typeof ev.at === "string") {
+          const t = Date.parse(ev.at);
+          if (!Number.isNaN(t) && (lastProgressAt === undefined || t > lastProgressAt)) {
+            lastProgressAt = t;
+          }
+        }
+      }
+      if (lastProgressAt === undefined) {
+        notEvaluated.push(gid); // no ACs, or no evidence.at anywhere → never evaluated
+      } else if (nowMs - lastProgressAt > staleMs) {
+        stale.push(gid);
+      } else {
+        fresh.push(gid);
+      }
+    }
+    return { fresh, stale, notEvaluated, divergent, cap, staleMs };
   }
 
   /** Direct read-modify-write of the old goal's file (inside the NEW goal's write lock). */
@@ -282,27 +407,29 @@ export function createGoalStore(goalDir: string) {
         );
       }
 
-      // I1 — SINGLE ATOMIC goal switch, fail-closed (SPEC §2b.5-a).
+      // I1′ — hard cap, write-time fail-closed (SPEC-goal-mechanism-2026-09-06.md §4.1).
+      // Activating `id` must not push the active-GOAL count past `cap`. A call may free a slot
+      // first by disposing an active goal in the SAME atomic write (`disposeOld` → achieved, or
+      // `supersedes: [oldId]` → superseded). The rejection message ENUMERATES the active set
+      // (hard rule 3: enumerate, don't boolean) — "which goals hold the slots" is the actionable info.
       if (isGoalRecord && frontmatter.status === "active") {
-        const existingActive = activeGoals().filter((p) => String(p.id) !== id);
-        if (existingActive.length > 0) {
-          const oldId = String(existingActive[0].id);
-          let disposed = false;
-          if (disposeOld && String(disposeOld.id) === oldId) {
-            flipGoal(oldId, {
-              status: disposeOld.to === "achieved" ? "achieved" : "superseded",
-              supersededBy: disposeOld.to === "achieved" ? undefined : [id],
-            });
-            disposed = true;
-          } else if (Array.isArray(supersedes) && supersedes.includes(oldId)) {
-            flipGoal(oldId, { status: "superseded", supersededBy: [id] });
-            disposed = true;
-          }
-          if (!disposed) {
-            throw new Error(
-              `cannot activate ${id}: ${oldId} is already active — a goal switch must dispose of the old goal in the SAME call (disposeOld {id, to} or supersedes:[${oldId}])`
-            );
-          }
+        // Apply any explicit dispositions first (inside the new goal's write lock).
+        if (disposeOld) {
+          flipGoal(String(disposeOld.id), {
+            status: disposeOld.to === "achieved" ? "achieved" : "superseded",
+            supersededBy: disposeOld.to === "achieved" ? undefined : [id],
+          });
+        }
+        if (Array.isArray(supersedes)) {
+          for (const oldId of supersedes) flipGoal(String(oldId), { status: "superseded", supersededBy: [id] });
+        }
+        const remainingActive = activeGoals().filter((p) => String(p.id) !== id);
+        if (remainingActive.length >= cap) {
+          throw new Error(
+            `cannot activate ${id}: active GOAL count would exceed cap ${cap} — currently active: ${remainingActive
+              .map((p) => String(p.id))
+              .join(", ")} (dispose one via disposeOld {id, to} or supersedes:[id])`
+          );
         }
       }
 
@@ -323,7 +450,7 @@ export function createGoalStore(goalDir: string) {
     });
   }
 
-  return { list, get, write, activeGoals, listActiveCriteria, isGoalAchieved, checkExactlyOneActiveGoal };
+  return { list, get, write, activeGoals, listActiveCriteria, isGoalAchieved, checkWithinCap, checkStaleness };
 }
 
 // ── Direct-invocation entry (Contract invoke: `node packages/quay/src/goal-store.ts`) ──────────────
@@ -334,7 +461,9 @@ export function createGoalStore(goalDir: string) {
 //   gate <id> [--root <dir>]  — run the record's `criterion` via the acceptance runner and append
 //                               one GateEvent (verdict+timestamp) to <root>/.quay/gate-events.jsonl;
 //                               empty criterion fails CLOSED (red) and still records the event.
-//   check                     — I1 checker: exactly-one-active-goal (exit 1 when not)
+//   check                     — I1′ checker: withinCap + hasDirection (exit 1 when over cap)
+//   check --staleness         — I3 three-bucket staleness (fresh/stale/notEvaluated) + I4
+//                               divergence (exit 1 when a divergent goal exists)
 import { fileURLToPath } from "node:url";
 
 async function main(argv: string[]) {
@@ -358,7 +487,8 @@ async function main(argv: string[]) {
   root = root ?? process.cwd();
   const goalDir = path.join(root, "goals");
   const logPath = path.join(root, ".quay", "gate-events.jsonl");
-  const store = createGoalStore(goalDir);
+  const goalCfg = readGoalConfig(root);
+  const store = createGoalStore(goalDir, { cap: goalCfg.cap, staleMs: goalCfg.staleMs });
 
   const [sub, ...rest] = args;
   switch (sub) {
@@ -464,9 +594,14 @@ async function main(argv: string[]) {
       return verdict === "pass" ? 0 : 1;
     }
     case "check": {
-      const r = store.checkExactlyOneActiveGoal();
+      if (rest.includes("--staleness")) {
+        const r = store.checkStaleness();
+        process.stdout.write(JSON.stringify(r, null, 2) + "\n");
+        return r.divergent.length === 0 ? 0 : 1;
+      }
+      const r = store.checkWithinCap();
       process.stdout.write(JSON.stringify(r, null, 2) + "\n");
-      return r.ok ? 0 : 1;
+      return r.withinCap ? 0 : 1;
     }
     default: {
       console.error(

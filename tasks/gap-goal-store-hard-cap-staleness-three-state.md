@@ -51,13 +51,13 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] `node packages/quay/src/goal-store.ts check | grep -q '"withinCap": true'` 退出 0（AC-174 判据，立案时取假：无该字段）
-- [ ] `node packages/quay/src/goal-store.ts check --staleness` 的输出同时含 `"fresh"`、`"stale"`、`"notEvaluated"` 三个键（AC-175 判据，立案时取假：无该子命令）
-- [ ] 负控制：临时目录里 cap 设为 2、已有 2 条 active 时写第 3 条 active **被拒**，且错误信息**含现有 2 条的 id**（单测断言）
-- [ ] 负控制：零 AC 的 GOAL 被判 `notEvaluated`，**不出现在 `stale` 也不出现在 `fresh` 桶里**（单测断言）
-- [ ] `cap`/`stale` 从 `.quay/config.yml` 读取：改配置值后 `check` 输出的 `cap` 随之改变（单测断言，证明非写死）
-- [ ] I4：构造 status=active 而全部 AC 已 achieved 的 GOAL，`check` 报出分歧（单测断言）
-- [ ] `bash scripts/test.sh --for-task gap-goal-store-hard-cap-staleness-three-state` 退出 0
+- [x] `node packages/quay/src/goal-store.ts check | grep -q '"withinCap": true'` 退出 0（AC-174 判据，立案时取假：无该字段）
+- [x] `node packages/quay/src/goal-store.ts check --staleness` 的输出同时含 `"fresh"`、`"stale"`、`"notEvaluated"` 三个键（AC-175 判据，立案时取假：无该子命令）
+- [x] 负控制：临时目录里 cap 设为 2、已有 2 条 active 时写第 3 条 active **被拒**，且错误信息**含现有 2 条的 id**（单测断言）
+- [x] 负控制：零 AC 的 GOAL 被判 `notEvaluated`，**不出现在 `stale` 也不出现在 `fresh` 桶里**（单测断言）
+- [x] `cap`/`stale` 从 `.quay/config.yml` 读取：改配置值后 `check` 输出的 `cap` 随之改变（单测断言，证明非写死）
+- [x] I4：构造 status=active 而全部 AC 已 achieved 的 GOAL，`check` 报出分歧（单测断言）
+- [x] `bash scripts/test.sh --for-task gap-goal-store-hard-cap-staleness-three-state` 退出 0
 
 ## Definition of Done
 
