@@ -630,6 +630,49 @@ test("AC3 (补) — syncDevelopToDoc 在 develop 分支 / 非 doc 分支 ⇒ not
   assert.equal(syncDevelopToDoc(root), "already", "doc 已与 develop 同 commit ⇒ already");
 });
 
+// ── not-doc 分支落痕（gap-sync-develop-to-doc-not-doc-silent-noop）──────────────────────────────
+
+test("AC2 (能取假) — 当前分支名 ≠ docBranch 参数 ⇒ 写 branch-mismatch 事件（⛔ 仍裸 return not-doc 静默 ⇒ 假）", (t) => {
+  const root = makeGitRoot("branch-mismatch");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", "---\nid: gap-a\nstatus: ready\n---");
+  git(root, "add", "--", "tasks/gap-a.md");
+  git(root, "commit", "-q", "-m", "baseline");
+  // 当前分支 = develop（显式 checkout，确定值），传入 docBranch = "author" ⇒ cur !== docBranch。
+  git(root, "checkout", "-q", "-b", "develop");
+
+  const res = syncDevelopToDoc(root, "author");
+  assert.equal(res, "not-doc", "返回值仍为 not-doc（不改变既有分支契约）");
+
+  const events = fs.readFileSync(path.join(root, DOC_DEVELOP_SYNC_EVENT_REL), "utf8")
+    .trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const mismatch = events.filter((e) => e.event === "doc-develop-sync-branch-mismatch");
+  assert.equal(mismatch.length, 1, "branch-mismatch 事件恰好一条（⛔ 零条 ⇒ writeDocDevelopSyncEvent 未调用 ⇒ 假）");
+  assert.equal(mismatch[0].cur, "develop", "事件携带 cur（真实当前分支名）");
+  assert.equal(mismatch[0].expected, "author", "事件携带 expected（driver 内存里陈旧的预期分支名）");
+  assert.ok(
+    !["doc-develop-sync-ff-synced", "doc-develop-sync-not-ff", "doc-develop-sync-ff-error"].includes(mismatch[0].event),
+    "事件类型可区分于 synced / not-ff / error（⛔ 同形 ⇒ 假）",
+  );
+});
+
+test("AC3 (负控制) — cur===docBranch 且 behind===0（真正已同步）⇒ 仍不写事件（⛔ 把 already 也改成写事件 ⇒ 过度修复 ⇒ 假）", (t) => {
+  const root = makeGitRoot("already-noevent");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", "---\nid: gap-a\nstatus: ready\n---");
+  git(root, "add", "--", "tasks/gap-a.md");
+  git(root, "commit", "-q", "-m", "baseline");
+  git(root, "branch", "develop");
+  git(root, "checkout", "-q", "-b", DOC_BRANCH); // cur === docBranch（author），develop 与 author 同 commit
+
+  assert.equal(syncDevelopToDoc(root), "already", "doc 已与 develop 同 commit ⇒ already");
+  assert.equal(
+    fs.existsSync(path.join(root, DOC_DEVELOP_SYNC_EVENT_REL)),
+    false,
+    "already 路径仍不写事件（本任务只补「对不上号」的可观测性，不改变「确实无需同步」时的合理降噪）",
+  );
+});
+
 test("AC4 — syncDevelopToDoc 有 ≥1 非测试调用者（promotion-driver 每轮启动前）", () => {
   const src = fs.readFileSync(path.join(__dirname, "../scripts/promotion-driver.ts"), "utf8");
   assert.match(src, /syncDevelopToDoc\s*\(\s*root\s*\)/, "promotion-driver.ts 生产路径调用 syncDevelopToDoc（⛔ 仅测试调用 ⇒ 假）");

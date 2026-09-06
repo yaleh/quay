@@ -21,17 +21,31 @@ import {
   renderTestsCard,
   renderLiveCard,
   renderDashboardPage,
+  renderFanInCard,
   renderFanInCardFromRecords,
+  renderTimelineBarSvg,
   parseTimelineHours,
   DEFAULT_TIMELINE_HOURS,
 } from "../src/serve-dashboard.ts";
 import { relativeTime } from "../src/serve-render.ts";
+import { readTests } from "../src/observation.ts";
 import { startServer } from "../src/serve.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SERVE_DASHBOARD_SRC = path.join(__dirname, "..", "src", "serve-dashboard.ts");
 const FIXED_NOW_MS = 1_700_000_000_000; // deterministic wall-clock anchor for window math
+
+/** The git PRIMARY checkout root — where the drivers write the REAL `.quay/*.jsonl` runtime data.
+ *  A linked worktree's `git rev-parse --git-common-dir` returns the MAIN checkout's `.git` dir
+ *  (absolute), so its parent is the main checkout root. The worktree's own `.quay/` is a git-tracked
+ *  snapshot WITHOUT the gitignored runtime carriers (worker-outcome.jsonl / verification-round.jsonl),
+ *  so AC7 (production regression) must resolve the main checkout explicitly rather than read the
+ *  worktree's stale `.quay`. */
+function mainCheckoutRoot() {
+  const commonDir = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd: __dirname, encoding: "utf8" }).trim();
+  return path.resolve(commonDir, "..");
+}
 
 /** Minimal-but-shape-valid dashboard args (the same benign shape the sibling dashboard tests use). */
 function makeDashboardArgs(tasks = []) {
@@ -168,16 +182,20 @@ test("AC6② (I): handleDashboardCards also reads readTaskSummary (not only hand
 });
 
 test("AC7 (window actually filters): hours=3 vs hours=6 produce different segment counts", () => {
+  // Anchor the window to the LATEST event's end (round 1 ends exactly at FIXED_NOW_MS), so the 3h/6h
+  // difference is measured from the most recent real event — NOT the wall-clock now. Under the old
+  // "window end == now" assumption this fixture landed round 2 exactly on the 3h boundary and changed
+  // meaning when the anchor moved (gap-dashboard-fanin-timestamp-timeline-anchor).
   const runs = [
-    { round: 1, state: "green", pass: 1, tests: 2, startedAt: new Date(FIXED_NOW_MS - 1 * 3_600_000).toISOString(), durationMs: 30_000 },
+    { round: 1, state: "green", pass: 1, tests: 2, startedAt: new Date(FIXED_NOW_MS - 30_000).toISOString(), durationMs: 30_000 },
     { round: 2, state: "green", pass: 1, tests: 2, startedAt: new Date(FIXED_NOW_MS - 4 * 3_600_000).toISOString(), durationMs: 30_000 },
   ];
   const h3 = renderTestsCard({ status: "ok", reason: null, runs }, null, { hours: 3, nowMs: FIXED_NOW_MS });
   const h6 = renderTestsCard({ status: "ok", reason: null, runs }, null, { hours: 6, nowMs: FIXED_NOW_MS });
   const rect3 = (h3.match(/<rect/g) || []).length;
   const rect6 = (h6.match(/<rect/g) || []).length;
-  assert.equal(rect3, 1, "3h window: only the 1h-ago record renders");
-  assert.equal(rect6, 2, "6h window: both records render (the 4h-ago record now lands inside)");
+  assert.equal(rect3, 1, "3h window: only the record within 3h of the latest end renders");
+  assert.equal(rect6, 2, "6h window: the 4h-older record also renders (window widened from the latest end)");
   assert.notEqual(rect3, rect6, "the window parameter is read AND actually filters segments");
 });
 
@@ -193,6 +211,101 @@ test("AC7 (default/illegal fallback): parseTimelineHours falls back to 3 without
   assert.equal(parseTimelineHours("6"), 6, "valid 6 → 6");
   assert.equal(parseTimelineHours("1"), 1, "valid 1 → 1");
   assert.equal(parseTimelineHours("24"), 24, "valid 24 → 24");
+});
+
+// ── gap-dashboard-fanin-timestamp-timeline-anchor: timestamp + window-end anchor fixes ─────────────
+
+test("AC1 (fan-in timestamp): each row renders relativeTime(key*1000) verbatim", () => {
+  const acquireEpoch = 1_600_000_000; // fixed lockAcquireEpoch (seconds) — the row's sort key
+  const records = [
+    { ts: null, task: "t-recent", mechanical_fan_in: mfi(acquireEpoch, acquireEpoch + 4, "landed") },
+    { ts: null, task: "t-older", mechanical_fan_in: mfi(acquireEpoch - 2 * 86_400, acquireEpoch - 2 * 86_400 + 4, "red") },
+  ];
+  const html = renderFanInCardFromRecords(records, { hours: 3, nowMs: FIXED_NOW_MS });
+  // Verbatim compare against relativeTime(fixedEpoch*1000) — NOT a fuzzy /ago|前/ match. The two keys
+  // are 2 days apart so each row's expected string is distinct (each assertion proves ITS row's key).
+  assert.ok(html.includes(relativeTime(acquireEpoch * 1000)), "recent row renders relativeTime(lockAcquireEpoch*1000) verbatim");
+  assert.ok(html.includes(relativeTime((acquireEpoch - 2 * 86_400) * 1000)), "older row renders relativeTime of its OWN key verbatim");
+});
+
+test("AC2 (tests bar anchor): windowEnd=latest end → non-empty; windowEnd=now → 0 (counterexample)", () => {
+  // All records fall in [nowMs-10h, nowMs-7h] — the loop has been stalled ~7h. A 3h window anchored to
+  // wall-clock now is EMPTY; anchored to the latest record's end it is NOT.
+  const nowMs = FIXED_NOW_MS;
+  const runs = [
+    { round: 1, state: "green", pass: 1, tests: 2, startedAt: new Date(nowMs - 8 * 3_600_000).toISOString(), durationMs: 30_000 },
+    { round: 2, state: "red", pass: 0, tests: 2, startedAt: new Date(nowMs - 7 * 3_600_000).toISOString(), durationMs: 30_000 },
+  ];
+  // ① new implementation: windowEnd = latest record end (nowMs - 7h + 30s) → both records intersect.
+  const html = renderTestsCard({ status: "ok", reason: null, runs }, null, { hours: 3, nowMs });
+  const rects = (html.match(/<rect/g) || []).length;
+  assert.ok(rects >= 1, "anchored to the latest end, the 3h bar is non-empty");
+
+  // ② counterexample: force the OLD behaviour (anchor the SAME segments to wall-clock now) → 0 <rect>.
+  const segments = runs.map((r) => ({
+    startMs: Date.parse(r.startedAt),
+    endMs: Date.parse(r.startedAt) + r.durationMs,
+    colorVar: "--color-positive-700",
+  }));
+  const oldSvg = renderTimelineBarSvg(segments, 3, nowMs);
+  const oldRects = (oldSvg.match(/<rect/g) || []).length;
+  assert.equal(oldRects, 0, "the SAME segments anchored to wall-clock now produce 0 <rect> (proves ① measured the anchor change, not a coincidence)");
+});
+
+test("AC3 (fan-in bar anchor): windowEnd=latest release → non-empty; windowEnd=now → 0 (counterexample)", () => {
+  const nowSec = FIXED_NOW_MS / 1000;
+  // Last fan-in 7h ago — loop stalled. A 3h window anchored to now is empty; to the latest release it
+  // is not.
+  const records = [
+    { ts: null, task: "t-latest", mechanical_fan_in: mfi(nowSec - 7 * 3600, nowSec - 7 * 3600 + 60, "landed") },
+    { ts: null, task: "t-older", mechanical_fan_in: mfi(nowSec - 8 * 3600, nowSec - 8 * 3600 + 60, "red") },
+  ];
+  const html = renderFanInCardFromRecords(records, { hours: 3, nowMs: FIXED_NOW_MS });
+  const rects = (html.match(/<rect/g) || []).length;
+  assert.ok(rects >= 1, "anchored to the latest release, the 3h fan-in bar is non-empty");
+
+  const segments = records.map((r) => {
+    const m = r.mechanical_fan_in;
+    return { startMs: m.lockAcquireEpoch * 1000, endMs: m.lockReleaseEpoch * 1000, colorVar: "--color-positive-700" };
+  });
+  const oldSvg = renderTimelineBarSvg(segments, 3, FIXED_NOW_MS);
+  const oldRects = (oldSvg.match(/<rect/g) || []).length;
+  assert.equal(oldRects, 0, "the SAME segments anchored to wall-clock now produce 0 <rect> (anchor change, not coincidence)");
+});
+
+test("AC4 (windowEndMs naming/role): signature params are segments, windowHours, windowEndMs; ≥3 hits", () => {
+  const src = fs.readFileSync(SERVE_DASHBOARD_SRC, "utf8");
+  const count = src.split("windowEndMs").length - 1;
+  assert.ok(count >= 3, `windowEndMs appears ≥3 times (signature + call-site computations), got ${count}`);
+  const sigStart = src.indexOf("function renderTimelineBarSvg(");
+  const sigEnd = src.indexOf("): string {", sigStart);
+  assert.ok(sigStart >= 0 && sigEnd > sigStart, "renderTimelineBarSvg signature found");
+  const sig = src.slice(sigStart, sigEnd);
+  const iSegments = sig.indexOf("segments");
+  const iHours = sig.indexOf("windowHours");
+  const iEnd = sig.indexOf("windowEndMs");
+  assert.ok(iSegments >= 0 && iHours > iSegments && iEnd > iHours, "signature params are segments, windowHours, windowEndMs (in order)");
+  assert.ok(!sig.includes("nowMs"), "the signature no longer names a nowMs param");
+});
+
+test("AC5 (copy): the window hint names 结束时刻为终点 / 最近一次运行/fan-in", () => {
+  const src = fs.readFileSync(SERVE_DASHBOARD_SRC, "utf8");
+  assert.ok(src.includes("结束时刻为终点"), "the window hint states the anchor is the event end time");
+  assert.ok(src.includes("最近一次运行/fan-in"), "the window hint names both the tests and fan-in anchors");
+});
+
+test("AC7 (production regression): real .quay data renders ≥1 <rect> in BOTH cards", () => {
+  // Reads the REAL production carriers (no fixture, no injection) via the main checkout root, with
+  // nowMs = real Date.now(). Under the OLD "window end == now" behaviour this failed whenever the loop
+  // had been stalled longer than the window; the fix anchors to each card's last real event, so the
+  // latest record always renders. There is deliberately NO skip/bypass path: if the real files are
+  // absent/empty this test FAILS (a bypass switch would make the assertion untrustworthy — AC7).
+  const root = mainCheckoutRoot();
+  const fanInHtml = renderFanInCard(root, { hours: 3 });
+  const tests = readTests(root);
+  const testsHtml = renderTestsCard(tests, null, { hours: 3 });
+  assert.ok((fanInHtml.match(/<rect/g) || []).length >= 1, "fan-in bar renders ≥1 <rect> from real worker-outcome.jsonl");
+  assert.ok((testsHtml.match(/<rect/g) || []).length >= 1, "tests bar renders ≥1 <rect> from real verification-round.jsonl");
 });
 
 // ── Integration: illegal/missing hours → HTTP 200 (fallback, never an error) ─────────────────────
@@ -247,12 +360,12 @@ test("AC7 (HTTP): illegal/missing hours → HTTP 200 with the default-3 window; 
     for (const p of ["/dashboard", "/dashboard?hours=abc", "/dashboard?hours=0", "/dashboard?hours=999"]) {
       const res = await request(port, p);
       assert.equal(res.status, 200, `GET ${p} returns 200 (illegal/missing hours never error)`);
-      assert.ok(res.body.includes("时间轴窗口（当前 3h）"), `GET ${p} falls back to the default 3h window`);
+      assert.ok(res.body.includes("结束时刻为终点的过去 3h"), `GET ${p} falls back to the default 3h window`);
     }
 
     const six = await request(port, "/dashboard?hours=6");
     assert.equal(six.status, 200, "GET /dashboard?hours=6 returns 200");
-    assert.ok(six.body.includes("时间轴窗口（当前 6h）"), "GET /dashboard?hours=6 reflects the 6h window");
+    assert.ok(six.body.includes("结束时刻为终点的过去 6h"), "GET /dashboard?hours=6 reflects the 6h window");
   } finally {
     process.chdir(cwd0);
     if (server) { server.close(); if (server.client) await server.client.close(); }
