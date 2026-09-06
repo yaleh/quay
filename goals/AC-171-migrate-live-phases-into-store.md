@@ -12,7 +12,7 @@ origin: |
   规格 §7.1：上一次的死因是"建好了没人迁"——goal-store 落地 28 天，goals/ 从未存在。
   ⇒ 迁移排在 ABI 与 driver 之前，让 store 先有真实数据再加功能。
 evidence:
-  at: 2026-09-06T22:26:21.100Z
+  at: 2026-09-06T22:27:04.946Z
   verdict: pass
   reading: acceptance passed (exit 0)
 ---
