@@ -100,4 +100,5 @@ goal/document 是 **Core store，不穿 Provider ABI**，与 task/ADR 走的是�
 - packages/quay/test/serve-goal-doc.test.mjs
 - packages/quay/test/serve-nav-inconsistent-routes.test.mjs
 - packages/quay/test/webui-modernist-sync.test.mjs
+- plugin/test/launch-settings.test.mjs
 - tasks/gap-goal-store-abi-encapsulation-provider-backed.md
