@@ -1,7 +1,7 @@
 ---
 id: gap-writestate-torn-read-assertion-load-sensitive-flaky
 title: writestate 撕裂读断言依赖抢到竞争窗口，全量 suite 重并发下 torn=0 翻转并挡 fan-in
-status: todo
+status: ready
 labels:
   - gap
   - defect
