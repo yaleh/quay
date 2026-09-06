@@ -58,12 +58,12 @@ drivers.yml worker.cap = 5 ⇒ 同一测试                                 4 pa
 
 ## Acceptance Criteria
 
-- [ ] 把 `drivers.yml` 的 `worker.cap` 改成一个非默认值（如 3）后，`node --test plugin/test/cap-from-gate-bands.test.mjs` **仍全绿**（立案时取假：cap=2 时 `actual:2 expected:5` 红）
-- [ ] 同一改动下 `node plugin/scripts/slot-refill.ts --in-flight-count 0 --json` 报的 `cap` 等于 yml 的值（立案时取假：yml=2 时它报 5）
-- [ ] 负控制：把 `drivers.yml` 临时改坏（不可解析）时，仍回退到 `defaultDriverConfig()` 且不抛——回退路径未被误删（单测断言）
-- [ ] `grep -rn 'defaultDriverConfig()' plugin/scripts | grep '\.cap'` 的每个命中点都在提交信息里有"读 yml / 保留回退"的判定
-- [ ] 断言消息不含写死的并发数字：`grep -n 'fixed 5' plugin/test/cap-from-gate-bands.test.mjs` 零命中
-- [ ] `bash scripts/test.sh --for-task gap-cap-from-gate-effective-cap-dual-source-blocks-yml-override` 退出 0
+- [x] 把 `drivers.yml` 的 `worker.cap` 改成一个非默认值（如 3）后，`node --test plugin/test/cap-from-gate-bands.test.mjs` **仍全绿**（立案时取假：cap=2 时 `actual:2 expected:5` 红）
+- [x] 同一改动下 `node plugin/scripts/slot-refill.ts --in-flight-count 0 --json` 报的 `cap` 等于 yml 的值（立案时取假：yml=2 时它报 5）
+- [x] 负控制：把 `drivers.yml` 临时改坏（不可解析）时，仍回退到 `defaultDriverConfig()` 且不抛——回退路径未被误删（单测断言）
+- [x] `grep -rn 'defaultDriverConfig()' plugin/scripts | grep '\.cap'` 的每个命中点都在提交信息里有"读 yml / 保留回退"的判定
+- [x] 断言消息不含写死的并发数字：`grep -n 'fixed 5' plugin/test/cap-from-gate-bands.test.mjs` 零命中
+- [x] `bash scripts/test.sh --for-task gap-cap-from-gate-effective-cap-dual-source-blocks-yml-override` 退出 0
 
 ## Definition of Done
 
@@ -78,5 +78,9 @@ drivers.yml worker.cap = 5 ⇒ 同一测试                                 4 pa
 - plugin/scripts/cap-from-gate.ts
 - plugin/scripts/slot-refill.ts
 - plugin/test/cap-from-gate-bands.test.mjs
+- plugin/test/cap-from-gate-cli.test.mjs
+- plugin/test/cap-from-gate-config-budget.test.mjs
+- plugin/test/cap-from-gate-hysteresis.test.mjs
+- plugin/test/cap-from-gate-stale.test.mjs
 - plugin/scripts/drivers.yml
 - tasks/gap-cap-from-gate-effective-cap-dual-source-blocks-yml-override.md
