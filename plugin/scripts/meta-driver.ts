@@ -1176,6 +1176,12 @@ async function runMetaRoundInner(opts: MetaRoundOptions): Promise<MetaRoundResul
     // （否则"driver 停摆/同步在失败"只能靠烧 LLM 才看得到）。
     drivers: readings.drivers,
     syncHealth: readings.syncHealth,
+    // 寄给它的任务也必须进记录：否则「这个入口有没有被消费」在生产载体上不可见——
+    // 而入口的价值恰恰在于被消费。实测 2026-09-06：加了 addressedTasks 读数却漏了这一处，
+    // 于是两轮 mt-prod-1788707645 的记录里根本没有该字段，读记录的人（我）把
+    // 「字段缺失」误读成「命中 0 条」。硬规则 5b（类型/采集/摘要/id 索引都加了，唯独记录漏了）
+    // + 硬规则 9（守与不守在记录上必须可区分）。
+    addressedTasks: readings.addressedTasks,
     // 结算处置进读数：evidenceKept 非空 = 本轮真有 verdict 变化（有信息，待提交）；
     // 全 restored = 本轮只是刷新了时间戳（无信息）。这让「观测的副作用」自身可观测。
     evidenceRestored: settlement.restored.length,
@@ -1256,7 +1262,15 @@ async function runMetaRoundInner(opts: MetaRoundOptions): Promise<MetaRoundResul
 
   const value = {
     ...base,
-    interpretations: parsed.divergences.length,
+    // ⚠️ 此前这里只写【条数】，20 条解读本身全部丢弃。实测 2026-09-06：5 个判决轮共产出
+    // 100 条解读，无一落痕——它们烧了 LLM 时间却不留任何痕迹，比"只被打印"更彻底
+    // （probe 规格自己写着：只被打印的观察与从未做过的观察不可区分；只留计数连打印都没有）。
+    // 后果具体可见：7 条 pass-but-unflipped（AC-170..176，判据实跑 pass 而记录未翻 achieved）
+    // 被连续报了 26 轮无人处理——因为"该翻哪一条、为什么"这句话每轮都被扔掉了。
+    // ⊢ 同一形状在本文件出现过第二次（evidenceRestored 只留数字而 kept/skipped 留清单）：
+    //   占主导的那一桶反而不可枚举。硬规则 3「枚举，不布尔」的计数版变体。
+    interpretations: parsed.divergences,
+    interpretationCount: parsed.divergences.length,
     proposalsOffered: parsed.proposals.length,
     proposalsAccepted: acceptedIds.length,
     acceptedIds,
