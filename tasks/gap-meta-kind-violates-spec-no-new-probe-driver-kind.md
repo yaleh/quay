@@ -12,6 +12,8 @@ extra:
   schema: execution
   acceptance: node --experimental-strip-types --test
     plugin/test/meta-driver.test.mjs plugin/test/driver-runtime.test.mjs
+depends_on:
+  - gap-quay-init-closure-ratchet-manual-reanchor-recurs
 ---
 ## Finding
 
@@ -55,3 +57,14 @@ extra:
 
 - `orchestration/SPEC-capability-planes-and-mechanism-lifecycle-2026-09-05.md`
 - `tasks/gap-meta-kind-violates-spec-no-new-probe-driver-kind.md`
+
+## Needs-Human
+
+**执行 2026-09-06T15:59:47.507Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: # fail 1
+- run_id：wk-prod-1788700330
+- session_id：aef66f88-3746-4540-a3ce-cb56b02ed71b
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-meta-kind-violates-spec-no-new-probe-driver-kind~wk-prod-1788700330~1788710305513-2a787c.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-meta-kind-violates-spec-no-new-probe-driver-kind-wk-prod-1788700330.log

@@ -1,7 +1,7 @@
 ---
 id: gap-meta-driver-concurrency-literal-cap-undeclared
 title: meta-driver 两处 per-round cap 字面量未声明，concurrency-literal-check 红并挡全量 suite
-status: needs-human
+status: done
 labels:
   - gap
   - defect
