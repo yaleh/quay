@@ -1,7 +1,7 @@
 ---
 id: gap-manager-skill-session-embodiment-activation
 title: 改造 plugin/skills/manager/SKILL.md——支持会话内"变身为 manager"激活路线（替代外部启动新会话）
-status: ready
+status: done
 labels:
   - gap
 parent: null
