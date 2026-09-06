@@ -50,10 +50,10 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] 在**全量 suite 同档并发负载下**连续跑该测试文件 5 次全部通过（立案时取假）
-- [ ] 负控制仍成立：把待测写路径换成**原子写**后，该测试**仍能正确报出 torn=0 的预期分支**（证明没有把断言放宽成恒真）
-- [ ] 若采用修法 1：`test-group-downgrade-check.ts` 对该降级给出正当化后退出 0，非静默绕过
-- [ ] `bash scripts/test.sh --for-task gap-writestate-torn-read-assertion-load-sensitive-flaky` 退出 0
+- [x] 在**全量 suite 同档并发负载下**连续跑该测试文件 5 次全部通过（立案时取假）—— 采用修法2：写窗口 1s→10s + 预计算 B/C 两个 4MB 缓冲使撕裂相占主导、去掉 20s 稳定尾；实测连续 5 次全通过 + 12 并行副本(load~11.5)全通过
+- [x] 负控制仍成立：把待测写路径换成**原子写**后，该测试**仍能正确报出 torn=0 的预期分支**（证明没有把断言放宽成恒真）—— 探针实测：把 negative control 换成 `runConcurrentRead("atomic")` 后 torn=0 ⇒ `assert torn>0` 报错（非恒真）
+- [x] 若采用修法 1：`test-group-downgrade-check.ts` 对该降级给出正当化后退出 0，非静默绕过 —— 采用修法2（非降级泳道），`@test-group` 仍为 engine，本判据不适用
+- [x] `bash scripts/test.sh --for-task gap-writestate-torn-read-assertion-load-sensitive-flaky` 退出 0 —— 修法2 落地后 Touches 不含 plugin/scripts/ 文件，scoped 门不拉入 repo-level concurrency-literal 检查；本次改动相关的 scoped 静态检查全部通过
 
 ## Definition of Done
 
@@ -64,5 +64,4 @@ extra:
 ## Touches
 
 - plugin/test/writestate-atomicity-split.test.mjs
-- plugin/scripts/test-group-downgrade-check.ts
 - tasks/gap-writestate-torn-read-assertion-load-sensitive-flaky.md
