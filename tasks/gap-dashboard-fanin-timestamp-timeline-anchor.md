@@ -2,7 +2,7 @@
 id: gap-dashboard-fanin-timestamp-timeline-anchor
 title: Dashboard Fan-in 卡补时间戳 + 测试/Fan-in 分段时间轴 bar 窗口终点锚定到最后一次事件结束时刻（而非
   wall-clock now）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -78,30 +78,30 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（时间戳）：对 `renderFanInCardFromRecords` 传入一个固定 `records` fixture（含已知的
+- [x] AC1（时间戳）：对 `renderFanInCardFromRecords` 传入一个固定 `records` fixture（含已知的
       `lockAcquireEpoch`）与固定 `opts.nowMs`，断言输出 HTML 里每一行都含一个由 `relativeTime()` 产生的、
       与该固定输入完全对应的时间描述子串（不是模糊 `/ago|前/` 子串匹配，而是与 `relativeTime(fixedEpoch*1000)`
       的真实返回值逐字比对）。
-- [ ] AC2（bar 锚定・测试卡，反例判据）：构造 `tests.runs` fixture，全部记录的 `[startedAt, startedAt+
+- [x] AC2（bar 锚定・测试卡，反例判据）：构造 `tests.runs` fixture，全部记录的 `[startedAt, startedAt+
       durationMs]` 落在 `[nowMs-10h, nowMs-7h]` 区间（模拟"循环已停 7 小时"），调用 `renderTestsCard`
       时传 `hours=3`。① 用新实现（windowEndMs=最新记录结束时刻）渲染，断言输出含 `<rect`（非空）；
       ② 把同一份 segments 手工传给 `renderTimelineBarSvg` 并显式指定 `windowEndMs=nowMs`（即还原旧行为，
       关掉本次改动），断言此时 `<rect` 计数为 0 —— ②存在是为了证明 AC2①测的确实是"锚点从 now 换成了
       最新事件结束时刻"这件事本身，而不是别的巧合。
-- [ ] AC3（bar 锚定・Fan-in 卡，同 AC2 结构）：同款 fixture/反例判据，数据源换成
+- [x] AC3（bar 锚定・Fan-in 卡，同 AC2 结构）：同款 fixture/反例判据，数据源换成
       `mechanical_fan_in.lockAcquireEpoch/lockReleaseEpoch`，模拟"最后一次 fan-in 是 7 小时前"，① 新实现
       非空、② 显式传回 `windowEndMs=nowMs` 必须变回 0。
-- [ ] AC4（命名/职责不漂移，静态可查）：`grep -n "windowEndMs" packages/quay/src/serve-dashboard.ts`
+- [x] AC4（命名/职责不漂移，静态可查）：`grep -n "windowEndMs" packages/quay/src/serve-dashboard.ts`
       命中 ≥3 处（1 处 `renderTimelineBarSvg` 签名 + 至少 2 处调用点的计算逻辑）；`renderTimelineBarSvg`
       的函数签名所在行不再出现形参名 `nowMs`（`grep -A2 "^function renderTimelineBarSvg"` 人工核对，或用
       一条 `grep` 断言该签名行 3 个形参名依次为 `segments, windowHours, windowEndMs`）。
-- [ ] AC5（文案）：`grep -n "结束时刻为终点\|最近一次运行/fan-in" packages/quay/src/serve-dashboard.ts`
+- [x] AC5（文案）：`grep -n "结束时刻为终点\|最近一次运行/fan-in" packages/quay/src/serve-dashboard.ts`
       命中 ≥1。
-- [ ] AC6（既有测试不回归）：`node --experimental-strip-types --test
+- [x] AC6（既有测试不回归）：`node --experimental-strip-types --test
       packages/quay/test/gap-dashboard-fanin-panel-and-timeline-bars.test.mjs` exit 0——原 11 条用例
       （F/AC1、共用函数存在性、AC4 sort/filter、AC6 mount 等与本次改动无关的部分）继续全绿；只有依赖旧
       "窗口终点=now"假设的断言按 Plan 步骤4 同步改写。
-- [ ] AC7（真实生产数据回归，非 fixture）：新增一条用真实 `.quay/worker-outcome.jsonl` /
+- [x] AC7（真实生产数据回归，非 fixture）：新增一条用真实 `.quay/worker-outcome.jsonl` /
       `.quay/verification-round.jsonl`（当前 workspace，不注入/不 mock）跑一次
       `renderFanInCard(root, {hours:3})` 与 `renderTestsCard(tests, suiteRun, {hours:3})` 的测试，
       `nowMs` 用真实 `Date.now()`，断言两者返回的 HTML 都含至少一个 `<rect`——本条必须直接读生产文件，

@@ -140,17 +140,21 @@ function pad2(n: number): string {
 }
 
 /** A segmented absolute-wall-clock timeline bar (G and H share this ONE horizontal-axis conversion).
- *  Each segment is `[startMs, endMs]` on an axis spanning the past `windowHours` ending at `nowMs`,
- *  filled with `colorVar` (a bare CSS token). Segments with non-finite / inverted bounds, or that do
- *  not intersect the window at all, are skipped (never extrapolated, never positioned by assumption).
- *  Returns "" when no segment survives. Each surviving segment renders exactly ONE `<rect>` (AC3/AC5
- *  count `<rect` occurrences); the axis/labels use `<line>`/`<text>` so that count stays exact. */
-function renderTimelineBarSvg(
+ *  Each segment is `[startMs, endMs]` on an axis spanning the past `windowHours` ending at
+ *  `windowEndMs` — the CARD's own window end (its latest event's end time), NOT necessarily the
+ *  wall-clock now. gap-dashboard-fanin-timestamp-timeline-anchor: anchoring to "now" emptied the bar
+ *  entirely once the loop stalled longer than the window; the axis must instead reference the most
+ *  recent real event. Each segment is filled with `colorVar` (a bare CSS token). Segments with
+ *  non-finite / inverted bounds, or that do not intersect the window at all, are skipped (never
+ *  extrapolated, never positioned by assumption). Returns "" when no segment survives. Each surviving
+ *  segment renders exactly ONE `<rect>` (AC3/AC5 count `<rect` occurrences); the axis/labels use
+ *  `<line>`/`<text>` so that count stays exact. */
+export function renderTimelineBarSvg(
   segments: Array<{ startMs: number; endMs: number; colorVar: string }>,
   windowHours: number,
-  nowMs: number,
+  windowEndMs: number,
 ): string {
-  const windowStartMs = nowMs - windowHours * 3_600_000;
+  const windowStartMs = windowEndMs - windowHours * 3_600_000;
   const spanMs = windowHours * 3_600_000;
   const rows = segments.filter(
     (s) =>
@@ -158,7 +162,7 @@ function renderTimelineBarSvg(
       Number.isFinite(s.endMs) &&
       s.endMs >= s.startMs &&
       s.endMs >= windowStartMs &&
-      s.startMs <= nowMs,
+      s.startMs <= windowEndMs,
   );
   if (rows.length === 0) return "";
 
@@ -174,7 +178,7 @@ function renderTimelineBarSvg(
   const bars = rows
     .map((s) => {
       const x0 = X(Math.max(s.startMs, windowStartMs));
-      const x1 = X(Math.min(s.endMs, nowMs));
+      const x1 = X(Math.min(s.endMs, windowEndMs));
       const w = Math.max(x1 - x0, 1.5);
       return `<rect x="${x0.toFixed(1)}" y="${barY}" width="${w.toFixed(1)}" height="${barH}" rx="2" fill="var(${s.colorVar})"></rect>`;
     })
@@ -186,7 +190,7 @@ function renderTimelineBarSvg(
   };
   const axis = `<line x1="${pad}" y1="${axisY}" x2="${W - pad}" y2="${axisY}" stroke="var(--color-neutral-300)"></line>`;
   const leftLabel = `<text x="${pad}" y="${H - 1}" font-size="9" fill="var(--color-neutral-700)">${hhmm(windowStartMs)}</text>`;
-  const rightLabel = `<text x="${W - pad}" y="${H - 1}" font-size="9" fill="var(--color-neutral-700)" text-anchor="end">${hhmm(nowMs)}</text>`;
+  const rightLabel = `<text x="${W - pad}" y="${H - 1}" font-size="9" fill="var(--color-neutral-700)" text-anchor="end">${hhmm(windowEndMs)}</text>`;
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="过去 ${windowHours} 小时时间轴" style="width:100%;height:auto;margin-top:4px;display:block">
 ${axis}
@@ -270,7 +274,18 @@ export function renderTestsCard(
     const endMs = Number.isFinite(startMs) && r.durationMs != null ? startMs + r.durationMs : NaN;
     return { startMs, endMs, colorVar: stateColorToken(r.state) };
   });
-  const timelineBar = renderTimelineBarSvg(timelineSegments, hours, nowMs);
+  // gap-dashboard-fanin-timestamp-timeline-anchor 缺陷2 (G): the bar's window end is the card's OWN
+  // last test end time (startedAt + durationMs of the latest round with BOTH parseable), NOT the
+  // wall-clock now — a stalled loop still renders the bar anchored to the most recent real event.
+  // No usable round → fall back to nowMs (never NaN).
+  let windowEndMs: number | null = null;
+  for (const r of tests.runs) {
+    const startMs = r.startedAt != null ? Date.parse(r.startedAt) : NaN;
+    if (!Number.isFinite(startMs) || r.durationMs == null) continue;
+    const endMs = startMs + r.durationMs;
+    if (windowEndMs == null || endMs > windowEndMs) windowEndMs = endMs;
+  }
+  const timelineBar = renderTimelineBarSvg(timelineSegments, hours, windowEndMs ?? nowMs);
   return html`<div id="tests-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
     <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">测试</div>
     <div style="font-weight:800">${statusLine}</div>
@@ -495,26 +510,40 @@ export function renderFanInCardFromRecords(
   const hours = opts.hours ?? DEFAULT_TIMELINE_HOURS;
   const fanIns = records.filter((r) => r.mechanical_fan_in != null);
 
+  // Sort key (seconds): lockAcquireEpoch, falling back to the carrier's ts. Shared by the list sort
+  // AND the window-end anchor below so both read the SAME "latest" ordering (single source, no drift).
+  const keySec = (r: WorkerOutcomeRecord): number => {
+    const mfi = r.mechanical_fan_in!;
+    return mfi.lockAcquireEpoch != null
+      ? mfi.lockAcquireEpoch
+      : r.ts != null
+        ? Date.parse(r.ts) / 1000
+        : NaN;
+  };
+
   const rows = fanIns
-    .map((r) => {
-      const mfi = r.mechanical_fan_in!;
-      const key = mfi.lockAcquireEpoch != null
-        ? mfi.lockAcquireEpoch
-        : r.ts != null
-          ? Date.parse(r.ts) / 1000
-          : NaN;
-      return { r, key };
-    })
+    .map((r) => ({ r, key: keySec(r) }))
     .sort((a, b) => {
       const an = Number.isFinite(a.key) ? a.key : -Infinity;
       const bn = Number.isFinite(b.key) ? b.key : -Infinity;
       return bn - an;
     })
     .slice(0, 5)
-    .map(({ r }, i) => html`<div style="${i > 0 ? "border-top:1px solid var(--color-divider);padding-top:6px;" : ""}display:flex;flex-direction:column;gap:2px;font-size:0.75rem;line-height:1.4">
-      <a href="/task/${encodeURIComponent(r.task ?? "")}" style="color:var(--color-text);text-decoration:none;font-weight:600">${escapeHtml(r.task ?? "?")}</a>
-      <div style="color:var(--color-neutral-700)">${renderFanInCell(r.task ?? "", r)}</div>
-    </div>`);
+    .map(({ r, key }, i) => {
+      // gap-dashboard-fanin-timestamp-timeline-anchor 缺陷1: each row ALSO renders its acquire time
+      // (relativeTime over the sort key, seconds → ms) — the same F-fix idiom testsCard uses.
+      // renderFanInCell never carries a timestamp (it is a /task/<id> cell; that page has its own
+      // time column), so the card adds the sub-row itself. Absent key → no sub-row (absent-field
+      // contract, never a "—").
+      const tsLine = Number.isFinite(key)
+        ? html`<div style="color:var(--color-neutral-700)">${relativeTime(key * 1000)}</div>`
+        : "";
+      return html`<div style="${i > 0 ? "border-top:1px solid var(--color-divider);padding-top:6px;" : ""}display:flex;flex-direction:column;gap:2px;font-size:0.75rem;line-height:1.4">
+        <a href="/task/${encodeURIComponent(r.task ?? "")}" style="color:var(--color-text);text-decoration:none;font-weight:600">${escapeHtml(r.task ?? "?")}</a>
+        <div style="color:var(--color-neutral-700)">${renderFanInCell(r.task ?? "", r)}</div>
+        ${tsLine}
+      </div>`;
+    });
   const list = rows.length > 0
     ? html`<div style="display:flex;flex-direction:column;gap:4px">${rows.join("")}</div>`
     : html`<p style="margin:0;font-size:0.8rem;opacity:0.8">暂无 fan-in 记录</p>`;
@@ -527,7 +556,20 @@ export function renderFanInCardFromRecords(
       colorVar: fanInOutcomeColorToken(mfi.outcome),
     };
   });
-  const bar = renderTimelineBarSvg(segments, hours, nowMs);
+  // gap-dashboard-fanin-timestamp-timeline-anchor 缺陷2 (H): window end = the latest fan-in's own end
+  // (lockReleaseEpoch, falling back to the same record's lockAcquireEpoch), NOT the wall-clock now.
+  // Same "latest" ordering as the list (keySec). No usable record → fall back to nowMs (never NaN).
+  let windowEndMs: number | null = null;
+  let latestKey = -Infinity;
+  for (const r of fanIns) {
+    const k = keySec(r);
+    if (!Number.isFinite(k) || k <= latestKey) continue;
+    latestKey = k;
+    const mfi = r.mechanical_fan_in!;
+    const endSec = mfi.lockReleaseEpoch ?? mfi.lockAcquireEpoch;
+    if (endSec != null && Number.isFinite(endSec)) windowEndMs = endSec * 1000;
+  }
+  const bar = renderTimelineBarSvg(segments, hours, windowEndMs ?? nowMs);
 
   return html`<div id="fanin-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
     <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">Fan-in</div>
@@ -577,7 +619,7 @@ export function renderDashboardPage(
     <body>${renderMobileChrome("dashboard", "dashboard")}${renderSiteNav("dashboard")}<main>
       <h1>Dashboard</h1>
       <p class="meta">循环脉搏、任务台账、系统资源与三层调度状态的总览 — 每张卡片指向对应完整页面。</p>
-      <p class="meta">时间轴窗口（当前 ${hours}h）：${hourLinks}</p>
+      <p class="meta">时间轴窗口（以各自最近一次运行/fan-in 结束时刻为终点的过去 ${hours}h）：${hourLinks}</p>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:var(--color-divider);border:1px solid var(--color-divider);margin-bottom:1.5rem">${liveCard}${sysCard}${mgrCard}</div>
       <h2>工作进展</h2>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:var(--color-divider);border:1px solid var(--color-divider);margin-bottom:1.5rem">${taskCard}${testsCard}${fanInCard}</div>
