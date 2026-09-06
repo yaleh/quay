@@ -63,8 +63,13 @@ const EXCLUDED_TOP_DIRS: ReadonlySet<string> = new Set([".quay"]);
 // +1 file / +5155 bytes net — plugin/probes/meta-driver.md, the probe added by meta-driver v0 (eebe448ae)
 // AFTER the last re-anchor; a legitimate new probe in the laid-down probe set, not pollution. Measured by the
 // checker's own fixed --tmux-session (deterministic across consecutive laydowns).
+// Re-anchored 2026-09-06 (gap-quay-init-laydown-footprint-grew): +8640 bytes net, 0 files — the SAME
+// plugin/probes/meta-driver.md probe grew 4032 → 12672 bytes through six legitimate feature commits since the
+// prior re-anchor (auto-drive channel 163825dfa, humanAttention routing 1abea2b70, FILE-ONLY mechanism + claim
+// state 9434e1e93, ordered misrouting criteria cb26b85a0, autoDrive template fixes 26a03d8c7). Probe capacity
+// expansion, not pollution — re-anchored per the same re-anchor precedent.
 export const BASELINE_FILES = 132;
-export const BASELINE_BYTES = 3818315;
+export const BASELINE_BYTES = 3826955;
 
 export interface ClosureCount {
   files: number;
