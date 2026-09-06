@@ -2,7 +2,7 @@
 id: gap-goal-ac-boilerplate-misquotes-spec-as-license-for-empty-criterion
 title: 26 条 goal AC 的样板行引 SPEC-0809 §3 为 criterion 留空背书，而 §3 说的是相反的（13 条 active
   ⇒ GOAL-002 验收面无测量）
-status: todo
+status: ready
 labels:
   - gap
   - meta-driver
