@@ -1,7 +1,7 @@
 ---
 id: gap-manager-skill-session-embodiment-activation
 title: 改造 plugin/skills/manager/SKILL.md——支持会话内"变身为 manager"激活路线（替代外部启动新会话）
-status: ready
+status: needs-human
 labels:
   - gap
 parent: null
@@ -52,3 +52,13 @@ extra:
 - orchestration/manager-loop-tick.md（参考，不修改）
 - plugin/test/manager-*.test.mjs（如有，验证 skill 的幂等性/初始化）
 - tasks/gap-manager-skill-session-embodiment-activation.md
+## Needs-Human
+
+**执行 2026-09-06T03:28:43.978Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: __PERFILE__ duration_ms=24930 plugin/test/driver-runtime.test.mjs passed=false end_ms=1788665253202 cpu_ms=8700.287
+- run_id：wk-prod-1788285192
+- session_id：e1dd8212-7fae-4e6f-bf7c-4ed62305950a
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-manager-skill-session-embodiment-activation~wk-prod-1788285192~1788665004746-090799.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-manager-skill-session-embodiment-activation-wk-prod-1788285192.log
