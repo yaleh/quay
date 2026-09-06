@@ -13,7 +13,7 @@ origin: |
   字段放顶层而非 extra 嵌套的依据：depends_on 的既有教训——
   嵌在 extra 里的 depends_on 被 parseTask 失读（返回空字符串）。
 evidence:
-  at: 2026-09-06T22:34:10.182Z
+  at: 2026-09-06T22:34:52.695Z
   verdict: pass
   reading: acceptance passed (exit 0)
 ---
