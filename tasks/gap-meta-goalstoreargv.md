@@ -24,4 +24,5 @@ meta-driver 经 goalStoreArgv 写 goals/*.md（writeDraftProposal 与决议落�
 
 ## Touches
 - `plugin/scripts/meta-driver.ts`
+- `plugin/test/meta-driver.test.mjs`
 - `tasks/gap-meta-goalstoreargv.md`
