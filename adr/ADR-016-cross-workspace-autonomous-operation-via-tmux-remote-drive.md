@@ -15,6 +15,16 @@ applies-to:
   - "experiments/quay-perpetual-stream/OUTER-LOOP.md"
 enforcement: "Mechanically gated by plugin/scripts/adr016-screen-use-check.ts (wired into scripts/test.sh's run_static_checks; AC3 of gap-adr-016-carve-out-permits-the-whole-screen-hash-it-was-meant-to-forbid). Permitted screen use is bounded by the ## Amendment 2026-08-04 section: enumerated states (waiting-input / permission-prompt / busy / error-banner / unknown) × bottom region × no whole-screen equality/hash of capture-pane."
 ---
+
+> **⚠️ RETIRED (2026-09-04):** the tmux mechanism this ADR selected as the cross-workspace drive
+> path has since been **retired** — driving/observing another Claude Code session now defaults to
+> native `SendMessage`, and the outer/inner tmux session model was **deleted, not migrated**. See
+> `orchestration/SPEC-tmux-retirement-2026-09-03.md`. tmux survives **only** in the ADR-016-bounded
+> edge uses with no native alternative (control-plane slash commands such as `/clear`, and downstream
+> environments without a native channel) plus the test infrastructure (`hermetic-tmux.mjs` /
+> `tmux-leak-scan.sh`) and human hand-run sessions. The constraints below remain binding wherever
+> tmux is still used.
+
 ## Context
 
 A Claude Code session running in workspace A cannot launch a `/loop` (or any interactive command)
