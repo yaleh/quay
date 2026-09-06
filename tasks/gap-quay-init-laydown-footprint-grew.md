@@ -18,8 +18,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] 定位出增长 +8640 bytes 的具体文件与原因（贴文件级字节对比或 diff）
-- [ ] `node plugin/scripts/quay-init-closure-ratchet.ts --gate --root .` 退出 0
+- [x] 定位出增长 +8640 bytes 的具体文件与原因（贴文件级字节对比或 diff）
+- [x] `node plugin/scripts/quay-init-closure-ratchet.ts --gate --root .` 退出 0
 
 ## Definition of Done
 
