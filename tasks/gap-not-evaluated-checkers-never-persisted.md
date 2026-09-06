@@ -38,17 +38,19 @@ extra: {}
 
 ## AC
 
-- [ ] `STATIC_CHECK_NOT_EVALUATED: <name>` 被 `full-suite-runner.ts` 解析并写入 `full-suite-state.json`（字段与 `failedCheckers` 并列，例如 `notEvaluatedCheckers: [{name}]`）。判据：构造一个 stderr 含该行的输入喂给解析路径，断言该字段非空；⛔ 判据须走解析函数本身，不得 grep 源码。
-- [ ] 能取假：同一判据在**不含**该行时，`notEvaluatedCheckers` 必须为空数组（⛔ 不是 undefined——「本轮没有未评估项」与「本轮没记录这个维度」必须可区分）。
-- [ ] `failedCheckers` 的既有行为不变：`plugin/test/full-suite-runner.test.mjs` 全绿，且其中关于 `STATIC_CHECK_FAILED` 的既有断言未被放宽。
-- [ ] meta-driver 读得到：`collectReadings` 增一项 `inertCheckers`（**逐条枚举 name，⛔ 不是计数**——SPEC §5.3「原始工具输出的裸标量不得单独 gate 流水线；不枚举环/不给文件/不给修法，零指引价值」），并进 `readingsDigest`（否则新出现的惰性守卫不改变摘要 ⇒ 语义半永不被唤醒）。判据：喂一个含 `notEvaluatedCheckers` 的 state 文件，断言读数里逐条出现。
+- [x] `STATIC_CHECK_NOT_EVALUATED: <name>` 被 `full-suite-runner.ts` 解析并写入 `full-suite-state.json`（字段与 `failedCheckers` 并列，例如 `notEvaluatedCheckers: [{name}]`）。判据：构造一个 stderr 含该行的输入喂给解析路径，断言该字段非空；⛔ 判据须走解析函数本身，不得 grep 源码。
+- [x] 能取假：同一判据在**不含**该行时，`notEvaluatedCheckers` 必须为空数组（⛔ 不是 undefined——「本轮没有未评估项」与「本轮没记录这个维度」必须可区分）。
+- [x] `failedCheckers` 的既有行为不变：`plugin/test/full-suite-runner.test.mjs` 全绿，且其中关于 `STATIC_CHECK_FAILED` 的既有断言未被放宽。
+- [x] meta-driver 读得到：`collectReadings` 增一项 `inertCheckers`（**逐条枚举 name，⛔ 不是计数**——SPEC §5.3「原始工具输出的裸标量不得单独 gate 流水线；不枚举环/不给文件/不给修法，零指引价值」），并进 `readingsDigest`（否则新出现的惰性守卫不改变摘要 ⇒ 语义半永不被唤醒）。判据：喂一个含 `notEvaluatedCheckers` 的 state 文件，断言读数里逐条出现。
 
 ## DoD
 
-- [ ] 上述判据本轮实跑并贴出输出，⛔ 不是转述。
-- [ ] 用真实数据验证一次：当前 `direct-to-develop-bypass-check` 若以 exit 3 收场（见 `gap-bypass-check-unclassifiable-exits-zero`），它必须出现在 `notEvaluatedCheckers` 里并被 meta-driver 读到。若那条任务尚未落地，则以构造输入验证，并在任务体写明这一依赖。
-- [ ] ⛔ 未新建 driver、⛔ 未新建周期性检查器——本条只是把一个已经产生的信号写下来并让既有消费者读到。
-- [ ] 惰性守卫这一类从此**可被发现**：说得出「今天有几个检查器读不懂输入、分别是哪些」，且该答案来自载体而非临时 grep。
+- [x] 上述判据本轮实跑并贴出输出，⛔ 不是转述。
+- [x] 用真实数据验证一次：当前 `direct-to-develop-bypass-check` 若以 exit 3 收场（见 `gap-bypass-check-unclassifiable-exits-zero`），它必须出现在 `notEvaluatedCheckers` 里并被 meta-driver 读到。若那条任务尚未落地，则以构造输入验证，并在任务体写明这一依赖。
+- [x] ⛔ 未新建 driver、⛔ 未新建周期性检查器——本条只是把一个已经产生的信号写下来并让既有消费者读到。
+- [x] 惰性守卫这一类从此**可被发现**：说得出「今天有几个检查器读不懂输入、分别是哪些」，且该答案来自载体而非临时 grep。
+
+**DoD-2 依赖注记（2026-09-06）**：`gap-bypass-check-unclassifiable-exits-zero` 当前 `status=needs-human`（尚未落地），故 DoD-2 的「真实数据验证」以**构造输入**完成——`full-suite-runner.test.mjs` 以含 `STATIC_CHECK_NOT_EVALUATED: direct-to-develop-bypass-check` 的 stderr 喂给真实 runner 断言 `notEvaluatedCheckers` 非空；`meta-driver.test.mjs` 以含 `notEvaluatedCheckers` 的 state 文件喂给 `collectInertCheckers` 断言逐条枚举。待那条任务落地、`direct-to-develop-bypass-check` 真以 exit 3 收场后，本信号由真实数据自然流入（无需改本条实现）。
 
 ## Touches
 
@@ -56,4 +58,5 @@ extra: {}
 - `plugin/scripts/meta-driver.ts`
 - `plugin/test/full-suite-runner.test.mjs`
 - `plugin/test/meta-driver.test.mjs`
+- `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `tasks/gap-not-evaluated-checkers-never-persisted.md`
