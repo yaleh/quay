@@ -2,7 +2,7 @@
 id: gap-meta-kind-violates-spec-no-new-probe-driver-kind
 title: meta 被实现为新 driver kind，违反 SPEC §5.1「⛔ 不新增 probe-driver kind」，并实测触发 §7
   取假（7 处登记面手工补写）
-status: ready
+status: done
 labels:
   - gap
   - driver-candidate
