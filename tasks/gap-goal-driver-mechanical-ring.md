@@ -93,3 +93,30 @@ depends_on:
 - plugin/test/driver-runtime.test.mjs
 - .gitignore
 - tasks/gap-goal-driver-mechanical-ring.md
+
+## Needs-Human
+
+**执行 2026-09-06T12:05:27.184Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: heavy ratio (0.211) must exceed wait ratio (0.239) — else cpu_ms is duration-derived
+- run_id：wk-prod-1788285192
+- session_id：048f6a89-53bf-4305-8b67-9da4436c06c6
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-goal-driver-mechanical-ring~wk-prod-1788285192~1788695953840-0a297c.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-goal-driver-mechanical-ring-wk-prod-1788285192.log
+
+## 分诊（2026-09-06，GOAL-001 监测循环）：与本任务改动无关，已置回 ready
+
+**结论：阻塞不是本任务造成的，是一个负载敏感 flaky。⛔ 不要为追它去改 `measure-suite.test.mjs`。**
+
+- **失败点**：`plugin/test/measure-suite.test.mjs:329-331`——spawn 一个 CPU 密集子进程与一个
+  sleep 子进程，断言 `heavy.cpuMs/durationMs > wait.cpuMs/durationMs`（否则说明 cpu_ms 是从 duration 推导的）。
+- **机制**：机器重载时 CPU 密集那个子进程被抢占，比值塌到 0.211，而 sleep 那个的比值被噪声抬到 0.239
+  ⇒ 断言翻转。**该文件不在本任务的 `## Touches` 内**，本任务只改 driver 注册面。
+- **能区分的对照（已实测）**：同一测试文件隔离跑 **9/9 全过**
+  （`timeout 300 node --test plugin/test/measure-suite.test.mjs`，当时 load 3.80、运行中 worker 1 个）；
+  而失败发生时并发 subagent 为 9 个。**同一测试 + 低负载 ⇒ 通过；高负载 ⇒ 失败 ⇒ 成因是负载不是改动。**
+- **处置**：状态由 `needs-human` 置回 `ready`（重试预算按 cycle 重置）。
+  **重派时请在系统负载较低的窗口跑 fan-in 的全量 suite**；若再次撞同一断言，仍按 flaky 处理，
+  另见为该 flaky 单独立的缺陷任务（`gap-measure-suite-heavy-wait-ratio-load-sensitive-flaky`）。
+- **worktree 保留**：上次尝试的实现仍在 `task/gap-goal-driver-mechanical-ring` 分支，勿删除重来。
