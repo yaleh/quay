@@ -1,7 +1,7 @@
 ---
 id: gap-goal-store-goal-id-vocabulary-and-draft-status
 title: "goal-store 词表与 id 改造——PHASE-NNN→GOAL-NNN、新增 draft 状态、phase: 改 goal:"
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -64,12 +64,12 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] `node packages/quay/src/goal-store.ts get GOAL-001 >/dev/null 2>&1` 退出 0（AC-170 判据，今天取假）
-- [ ] `node packages/quay/src/goal-store.ts get AC-170 >/dev/null 2>&1` 退出 0（保号未破）
-- [ ] `grep -rc 'phase: PHASE-' packages/quay/test/ | grep -v ':0$' | wc -l` 输出 0（两个 fixture 已同改）
-- [ ] 单测断言：`write()` 不传 status 时落盘 `status: draft`（默认不激活）
-- [ ] 单测断言（负控制）：`draft` 状态的 GOAL 不出现在 `activeGoals()` 返回值中
-- [ ] `bash scripts/test.sh --for-task gap-goal-store-goal-id-vocabulary-and-draft-status` 退出 0
+- [x] `node packages/quay/src/goal-store.ts get GOAL-001 >/dev/null 2>&1` 退出 0（AC-170 判据，今天取假）
+- [x] `node packages/quay/src/goal-store.ts get AC-170 >/dev/null 2>&1` 退出 0（保号未破）
+- [x] `grep -rc 'phase: PHASE-' packages/quay/test/ | grep -v ':0$' | wc -l` 输出 0（两个 fixture 已同改）
+- [x] 单测断言：`write()` 不传 status 时落盘 `status: draft`（默认不激活）
+- [x] 单测断言（负控制）：`draft` 状态的 GOAL 不出现在 `activeGoals()` 返回值中
+- [x] `bash scripts/test.sh --for-task gap-goal-store-goal-id-vocabulary-and-draft-status` 退出 0
 
 ## Definition of Done
 
