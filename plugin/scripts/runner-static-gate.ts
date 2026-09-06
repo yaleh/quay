@@ -549,6 +549,21 @@ run_static_checks() {
   # plugin/test/quay-init-closure-ratchet.test.mjs + checker-mutation-cases/quay-init-closure-ratchet.sh.
   # @static-tier full  (whole-store ratchet — deferred to the full-suite gate in scoped mode)
   run_checker "quay-init-closure-ratchet" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/quay-init-closure-ratchet.ts" --gate --root "${repo_root}"
+  echo "== quay-init laydown footprint re-anchor freshness (gap-quay-init-closure-ratchet-manual-reanchor-recurs) =="
+  # A change-tier companion to the full-tier byte ratchet above: CHEAP (hashes the laydown SOURCE
+  # tree — no real laydown) and detects "a laydown source file changed but the committed baseline
+  # was not re-anchored" at the CHANGER's own scoped gate, instead of at an unrelated task's
+  # full-suite fan-in (the 8th-recurrence defect this task closes). Exit 1 when the current source
+  # fingerprint differs from docs/analysis/quay-init-closure-ratchet.baseline.json (stale — run
+  # `node --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --reanchor`); exit 3
+  # (NOT-EVALUATED) when the baseline/set cannot be read. The full-tier ratchet (above) still measures
+  # the REAL laydown and still reds on true bloat (negative control — never relaxed into constant-true).
+  # Pinned by plugin/test/quay-init-closure-ratchet.test.mjs (stale on a changed source; fresh after
+  # re-anchor). Object = the precise laydown source dirs (NOT all of plugin/scripts — ~200 harness
+  # scripts there are not laid down; the derived set + wholesale dirs are the fingerprint scope).
+  # @static-tier change
+  # @static-object plugin/scripts/ plugin/workflows/ plugin/agents/ plugin/probes/ plugin/loop/ plugin/.claude/ orchestration/
+  run_checker "quay-init-closure-ratchet-stale" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/quay-init-closure-ratchet.ts" --check-stale --root "${repo_root}"
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait
