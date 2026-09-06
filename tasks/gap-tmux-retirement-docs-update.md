@@ -1,7 +1,7 @@
 ---
 id: gap-tmux-retirement-docs-update
 title: 文档更新——tmux 退役后的描述调整（CLAUDE.md/README/SPEC/ADR/skill 文档）
-status: ready
+status: needs-human
 labels:
   - gap
 parent: null
@@ -65,3 +65,13 @@ Task 3 和 Task 4 完成后，文档中对 tmux 依赖、启用流程、manager 
 - adr/ADR-016.md（若存在且涉及 tmux）
 - docs/proposals/*.md（若有对 tmux 依赖的讨论）
 - tasks/gap-tmux-retirement-docs-update.md
+## Needs-Human
+
+**执行 2026-09-06T06:37:25.873Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: cold-start must not instruct starting a manager window (AC8)
+- run_id：wk-prod-1788285192
+- session_id：d67c8f96-2d88-4aff-865c-91cb59e51f1c
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-tmux-retirement-docs-update~wk-prod-1788285192~1788675769757-d85f8e.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-tmux-retirement-docs-update-wk-prod-1788285192.log
