@@ -1,9 +1,12 @@
 // serve-dashboard.ts — /dashboard route handler + task-summary cache, split from serve-handlers.ts.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import fs from "node:fs";
+import path from "node:path";
+import YAML from "yaml";
 import type { ProviderClient } from "./provider-client.ts";
 import { readLive, readSystem, readManagerLight, readTests, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord } from "./observation.ts";
-import { TASK_STATUS } from "./abi.ts";
+import { TASK_STATUS, type GoalRecord } from "./abi.ts";
 import type { Manifest } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime } from "./serve-render.ts";
 import { awaitingLandMs, formatAwaitingDuration, suiteSuffix } from "./serve-live.ts";
@@ -473,6 +476,8 @@ export function renderDashboardCardRefreshScript(): string {
         if (mgr && typeof d.mgrCard === "string") { mgr.innerHTML = d.mgrCard; }
         var task = document.getElementById("task-card");
         if (task && typeof d.taskCard === "string") { task.innerHTML = d.taskCard; }
+        var goal = document.getElementById("goal-card");
+        if (goal && typeof d.goalCard === "string") { goal.innerHTML = d.goalCard; }
         if (d.sysRaw && typeof d.sysRaw === "object") {
           var cpu = typeof d.sysRaw.cpuStallAvg10 === "number" ? d.sysRaw.cpuStallAvg10 : null;
           var load = typeof d.sysRaw.loadAvg === "number" ? d.sysRaw.loadAvg : null;
@@ -584,6 +589,125 @@ export function renderTaskCard(
     </div>
     ${miniStatuses.map(miniList).join("")}
     <a href="/tasks" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看任务列表 →</a>
+  </div>`;
+}
+
+// ── goal card (G8 / AC-179 / gap-dashboard-goal-card-provider-backed) ────────────────────────────
+// The dashboard goalCard — a self-contained render of the ACTIVE GOAL set: per-goal AC progress
+// (AC 达成 x/y), the three-state staleness marker (fresh/stale/NOT-EVALUATED), and the I1′ summary
+// (activeCount / cap). Goal DATA comes through the Provider ABI (`client.goalList()` — see
+// handleDashboard), NEVER a direct goal-store import (AC3): the card derives everything it shows from
+// the `GoalRecord[]` the provider returned, mirroring goal-store's own derived quantities
+// (isGoalAchieved / checkStaleness) without touching the store.
+//
+// The two policy scalars (cap, staleMs) are NOT goal data — they are workspace policy from
+// `.quay/config.yml`'s `goals:` section. readGoalPolicy() reads them DIRECTLY here (a small mirror of
+// goal-store.readGoalConfig) because AC3 forbids importing goal-store: importing the whole store into
+// the hot dashboard path for two scalars is exactly the coupling the ABI exists to remove. Defaults
+// mirror the store (cap=3, stale=7d) so a bare workspace renders identically.
+
+const DEFAULT_GOAL_CAP = 3;
+const DEFAULT_GOAL_STALE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Parse a `goals.stale` duration ("7d" / "12h" / "90m", or bare number = days) → ms. Null when
+ *  unparseable (caller falls back to the default). Mirrors goal-store.parseStaleMs. */
+function parseGoalStaleMs(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) return value * 86400_000;
+  if (typeof value === "string") {
+    const m = value.trim().match(/^(\d+(?:\.\d+)?)\s*(d|h|m)$/i);
+    if (m) {
+      const n = Number(m[1]);
+      const mult = m[2].toLowerCase() === "d" ? 86400_000 : m[2].toLowerCase() === "h" ? 3600_000 : 60_000;
+      return n * mult;
+    }
+  }
+  return null;
+}
+
+/** Read the goal mechanism's two policy scalars (I1′ cap, I3 stale window) from `.quay/config.yml`'s
+ *  `goals:` section, falling back to the store's defaults. Never throws (an absent/unparseable config
+ *  yields the defaults — the dashboard must render in a bare checkout with no config.yml). */
+export function readGoalPolicy(workspaceRoot: string | undefined): { cap: number; staleMs: number } {
+  let cap = DEFAULT_GOAL_CAP;
+  let staleMs = DEFAULT_GOAL_STALE_MS;
+  if (workspaceRoot != null) {
+    try {
+      const cfgPath = path.join(workspaceRoot, ".quay", "config.yml");
+      if (fs.existsSync(cfgPath)) {
+        const parsed = YAML.parse(fs.readFileSync(cfgPath, "utf8"));
+        const goals = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).goals : undefined;
+        if (goals && typeof goals === "object") {
+          const g = goals as Record<string, unknown>;
+          if (typeof g.cap === "number" && Number.isFinite(g.cap) && g.cap >= 1) cap = g.cap;
+          const sd = parseGoalStaleMs(g.stale);
+          if (sd !== null) staleMs = sd;
+        }
+      }
+    } catch { /* unparseable config.yml → defaults (never crash the dashboard) */ }
+  }
+  return { cap, staleMs };
+}
+
+/** I3 staleness for ONE active GOAL, DERIVED from its ACs' `evidence.at` max — the SAME derivation
+ *  goal-store.checkStaleness uses. Three named states, never a fresh/stale binary: zero ACs (or no
+ *  evidence.at anywhere) ⇒ "NOT-EVALUATED" — judging an unevaluated goal "fresh" would record a
+ *  never-measured object as healthy (hard rule 3b). */
+function goalStaleness(goalId: string, goals: GoalRecord[], staleMs: number, nowMs: number): "fresh" | "stale" | "NOT-EVALUATED" {
+  let lastProgressAt: number | undefined;
+  for (const ac of goals) {
+    if (String(ac.goal ?? "") !== goalId) continue;
+    const ev = ac.evidence as { at?: unknown } | undefined;
+    if (ev && typeof ev.at === "string") {
+      const t = Date.parse(ev.at);
+      if (!Number.isNaN(t) && (lastProgressAt === undefined || t > lastProgressAt)) lastProgressAt = t;
+    }
+  }
+  if (lastProgressAt === undefined) return "NOT-EVALUATED";
+  return nowMs - lastProgressAt > staleMs ? "stale" : "fresh";
+}
+
+/** The dashboard goalCard. Pure render over the already-read `goals` array (GOAL + AC records as
+ *  returned by `client.goalList()`); `cap`/`staleMs`/`nowMs` are injectable for deterministic tests.
+ *  Renders an explicit empty state when there are no ACTIVE goals (AC4: the card shows 空态 rather
+ *  than disappearing when a goal-less provider degrades goalList to []). */
+export function renderGoalCard(
+  goals: GoalRecord[],
+  opts: { cap?: number; staleMs?: number; nowMs?: number } = {},
+): string {
+  const nowMs = opts.nowMs ?? Date.now();
+  const cap = opts.cap ?? DEFAULT_GOAL_CAP;
+  const staleMs = opts.staleMs ?? DEFAULT_GOAL_STALE_MS;
+  const activeGoals = goals.filter((g) => g.kind === "goal" && g.status === "active");
+  const activeCount = activeGoals.length;
+
+  const stalenessColor = (s: "fresh" | "stale" | "NOT-EVALUATED"): string =>
+    s === "fresh" ? "var(--color-positive-700)" : s === "stale" ? "var(--color-accent-800)" : "var(--color-neutral-400)";
+
+  const rows = activeGoals.map((g) => {
+    const gid = String(g.id);
+    const acs = goals.filter((r) => String(r.goal ?? "") === gid);
+    const achieved = acs.filter((r) => r.status === "achieved").length;
+    const state = goalStaleness(gid, goals, staleMs, nowMs);
+    return html`<div style="display:flex;flex-direction:column;gap:2px;font-size:0.78rem;line-height:1.4">
+      <div style="display:flex;justify-content:space-between;gap:0.5rem">
+        <a href="/goal/${encodeURIComponent(gid)}" style="color:var(--color-text);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(gid)}</a>
+        <span style="flex:none;color:${stalenessColor(state)};font-weight:700">${escapeHtml(state)}</span>
+      </div>
+      <div style="color:var(--color-text);font-size:0.75rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(String(g.title ?? ""))}</div>
+      <div style="color:var(--color-neutral-700)">AC 达成 ${achieved}/${acs.length}</div>
+    </div>`;
+  }).join("");
+
+  const emptyState = activeGoals.length === 0
+    ? html`<p style="margin:0;font-size:0.8rem;opacity:0.8">暂无 active GOAL</p>`
+    : "";
+
+  return html`<div id="goal-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">阶段目标</div>
+    <div style="font-weight:800">active ${activeCount} / cap ${cap}</div>
+    ${emptyState}
+    ${rows}
+    <a href="/goal" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Goals →</a>
   </div>`;
 }
 
@@ -700,6 +824,7 @@ export function renderDashboardPage(
     suiteRun: CurrentSuiteRun | null;
     history: GitHistoryResult;
     tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>;
+    goals?: GoalRecord[];
   },
   opts: { workspaceRoot?: string; hours?: number; nowMs?: number } = {},
 ): string {
@@ -711,6 +836,8 @@ export function renderDashboardPage(
   const taskCard = renderTaskCard(d.tasks);
   const testsCard = renderTestsCard(d.tests, d.suiteRun, { hours, nowMs });
   const fanInCard = renderFanInCard(opts.workspaceRoot, { hours, nowMs });
+  const { cap, staleMs } = readGoalPolicy(opts.workspaceRoot);
+  const goalCard = renderGoalCard(d.goals ?? [], { cap, staleMs, nowMs });
 
   const recentCommits = d.history.status === "ok"
     ? d.history.commits.slice(0, 3).map((c) => `${c.hash.slice(0, 7)} ${c.subject}`).join("<br>")
@@ -736,7 +863,7 @@ export function renderDashboardPage(
       <p class="meta">时间轴窗口（以各自最近一次运行/fan-in 结束时刻为终点的过去 ${hours}h）：${hourLinks}</p>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:var(--color-divider);border:1px solid var(--color-divider);margin-bottom:1.5rem">${liveCard}${sysCard}${mgrCard}</div>
       <h2>工作进展</h2>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:var(--color-divider);border:1px solid var(--color-divider);margin-bottom:1.5rem">${taskCard}${testsCard}${fanInCard}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:var(--color-divider);border:1px solid var(--color-divider);margin-bottom:1.5rem">${goalCard}${taskCard}${testsCard}${fanInCard}</div>
       <h2>变更记录</h2>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:var(--color-divider);border:1px solid var(--color-divider)">${commitsCard}${html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:8px">
         <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">Git History</div>
@@ -804,7 +931,7 @@ export async function handleDashboard(
   // readSystem + the light manager probe + the (cached) task summary are independent — run them
   // CONCURRENTLY (Promise.all); client.taskList is no longer serialized AFTER the sys/mgr group
   // (the prior gap-webui-dashboard-manager-slow-parallelize shape awaited it later).
-  const [sys, mgr, tasks] = await Promise.all([
+  const [sys, mgr, tasks, goals] = await Promise.all([
     readSystem(cfg.workspaceRoot).catch(() => ({
       status: "error" as const, reason: "internal", resourceGate: { status: "error" as const, reason: null, cpuStallAvg10: null, cpuStallAvg300: null, memAvailMb: null, loadAvg: null, nproc: null, nodeProcs: null, verdict: null, loadThreshold: null, loadOverFactor: null }, processBudget: { status: "error" as const, reason: null, totalBudget: null, inUse: null, available: null, verdict: null },
     })),
@@ -812,6 +939,7 @@ export async function handleDashboard(
       status: "error" as const, reason: "internal", loopDriver: { status: "error" as const, reason: null, verdict: null, exitCode: null, detail: null }, liveness: { status: "error" as const, reason: null, sessions: [] }, observers: { status: "error" as const, reason: null, rows: [] }, pool: { status: "error" as const, reason: null, pool: null, floor: null, deficit: null, cap: null, lastPromoted: [] }, version: null, developLead: null,
     })),
     readTaskSummary(cfg.workspaceRoot, client).catch(() => [] as Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>),
+    client.goalList().catch(() => [] as GoalRecord[]),
   ]);
   let tests: TestsResult;
   try { tests = readTests(cfg.workspaceRoot); } catch {
@@ -825,7 +953,7 @@ export async function handleDashboard(
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   const hours = timelineHoursFromRequest(req);
-  res.end(renderDashboardPage({ live, sys, mgr, tests, suiteRun, history, tasks }, { workspaceRoot: cfg.workspaceRoot, hours }));
+  res.end(renderDashboardPage({ live, sys, mgr, tests, suiteRun, history, tasks, goals }, { workspaceRoot: cfg.workspaceRoot, hours }));
 }
 
 /** /dashboard/cards — the JSON data endpoint the dashboard auto-refresh script polls
@@ -846,7 +974,7 @@ export async function handleDashboardCards(
   try { live = readLive(cfg.workspaceRoot); } catch {
     live = { status: "error", reason: "internal", inFlight: [], concurrency: 0, cpuPressure: null, liveState: null, liveExplanation: null, activity: null };
   }
-  const [sys, mgr, tasks] = await Promise.all([
+  const [sys, mgr, tasks, goals] = await Promise.all([
     readSystem(cfg.workspaceRoot).catch(() => ({
       status: "error" as const, reason: "internal", resourceGate: { status: "error" as const, reason: null, cpuStallAvg10: null, cpuStallAvg300: null, memAvailMb: null, loadAvg: null, nproc: null, nodeProcs: null, verdict: null, loadThreshold: null, loadOverFactor: null }, processBudget: { status: "error" as const, reason: null, totalBudget: null, inUse: null, available: null, verdict: null },
     })),
@@ -854,6 +982,7 @@ export async function handleDashboardCards(
       status: "error" as const, reason: "internal", loopDriver: { status: "error" as const, reason: null, verdict: null, exitCode: null, detail: null }, liveness: { status: "error" as const, reason: null, sessions: [] }, observers: { status: "error" as const, reason: null, rows: [] }, pool: { status: "error" as const, reason: null, pool: null, floor: null, deficit: null, cap: null, lastPromoted: [] }, version: null, developLead: null,
     })),
     readTaskSummary(cfg.workspaceRoot, client).catch(() => [] as Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>),
+    client.goalList().catch(() => [] as GoalRecord[]),
   ]);
   let tests: TestsResult;
   try { tests = readTests(cfg.workspaceRoot); } catch {
@@ -862,12 +991,14 @@ export async function handleDashboardCards(
   let suiteRun: CurrentSuiteRun | null;
   try { suiteRun = readCurrentSuiteRun(cfg.workspaceRoot); } catch { suiteRun = null; }
   const hours = timelineHoursFromRequest(req);
+  const { cap, staleMs } = readGoalPolicy(cfg.workspaceRoot);
   const payload = JSON.stringify({
     liveCard: renderLiveCard(live, Date.now(), tasks),
     testsCard: renderTestsCard(tests, suiteRun, { hours }),
     sysCard: renderSysCard(sys),
     mgrCard: renderMgrCard(mgr),
     taskCard: renderTaskCard(tasks),
+    goalCard: renderGoalCard(goals, { cap, staleMs }),
     sysRaw: {
       cpuStallAvg10: sys.resourceGate.cpuStallAvg10,
       loadAvg: sys.resourceGate.loadAvg,
