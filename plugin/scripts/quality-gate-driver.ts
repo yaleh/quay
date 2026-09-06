@@ -645,6 +645,11 @@ export interface QualityGateLoopOptions {
   json: boolean;
   pidFile?: string;
   routines: RoutineSpec[];
+  /** 控制态文件（相对 root）。缺省 = quality 自己的。**参数化的理由**：本循环体除这一处外
+   *  已经是【通用的例程型常驻循环】（收 RoutineSpec[]、评估 due、汇 Facts、写轮记录），
+   *  复用它比让下一个例程型 driver 再抄 95 行样板正确（SPEC §4 正是要消灭那种重复）。
+   *  ⛔ 不同 kind 必须用各自的控制面——共用会让一个 kind 的 halt 误停另一个。 */
+  controlStateRel?: string;
 }
 
 /** 组装一条 round 记录（heartbeat carrier 的一行）。facts 是轮内跑出的全部例程读数。 */
@@ -665,6 +670,7 @@ export function computeRoundRecord(args: {
  *  lastRun 是进程内存态（例程 interval 调度用）；重启 ⇒ never-ran ⇒ 首轮两例程均 due（该跑）。 */
 export async function runResidentQualityGateLoop(opts: QualityGateLoopOptions): Promise<number> {
   const { root, intervalMs, once, maxRounds, roundLogFile, runId, json, pidFile, routines } = opts;
+  const controlStateRel = opts.controlStateRel ?? QUALITY_CONTROL_STATE_REL;
   if (pidFile) {
     try { fs.writeFileSync(pidFile, `${process.pid}\n`, "utf8"); } catch { /* pid-file 只供外部观测，写失败不致命 */ }
   }
@@ -683,7 +689,7 @@ export async function runResidentQualityGateLoop(opts: QualityGateLoopOptions): 
   while (!stopRequested) {
     round += 1;
     // 控制面（halt）：读 .quay/quality-control.json 单一真相源，halted ⇒ 记 halted 轮后退出。
-    if (isHalted(root, process.env, QUALITY_CONTROL_STATE_REL)) {
+    if (isHalted(root, process.env, controlStateRel)) {
       const rec = computeRoundRecord({ round, runId, pid: process.pid, at: new Date().toISOString(), facts: [], halted: true });
       try { fs.appendFileSync(roundLogFile, JSON.stringify(rec) + "\n", "utf8"); } catch { /* 记录写失败不致命 */ }
       if (json) process.stdout.write(`${JSON.stringify({ event: "halted", round })}\n`);

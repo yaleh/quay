@@ -128,6 +128,9 @@ packages/quay/plugin/
 # （active goal 的 AC criterion 真跑 verdict）+ divergence + 语义半的提案处置。
 # Same gitignored runtime-state family as quality-round.jsonl（never git-tracked）。
 **/.quay/meta-driver-round.jsonl
+**/.quay/meta-control.json
+# meta-driver 的变化检测状态（语义半的触发闸输入：上次判读的读数摘要 + 时刻）。
+**/.quay/meta-driver-state.json
 **/.quay/quality-driver.pid
 **/.quay/quality-driver-supervisor.pid
 **/.quay/quality-driver.log

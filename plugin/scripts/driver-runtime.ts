@@ -108,7 +108,7 @@ export { TASK_FILTERS, applyTaskFilters, makeFilterContext, allDepsDone, readTas
 
 /** 驱动 kind 标识（promotion/worker = 任务处理型，继承 0+1a；outer = 例程型，继承 0+1b——AC143 承接
  *  outer 的纯机械 A/B 段；quality = 例程型（AC144，1b）——均无任务池/无选择/无 verify）。 */
-export type DriverKind = "promotion" | "worker" | "outer" | "quality" | "suite";
+export type DriverKind = "promotion" | "worker" | "outer" | "quality" | "suite" | "meta";
 
 /** 一个 kind 的 registry 条目（KIND_* 八张 bash 表 → 一个 TS 数据结构）。 */
 export interface KindSpec {
@@ -202,6 +202,21 @@ export const DRIVER_KINDS: Record<DriverKind, KindSpec> = {
     runPrefix: "st-prod",
     carriers: ["suite-round.jsonl"],
     controlFile: "suite-control.json",
+  },
+  // meta：机制演进复核（例程型，继承 Layer 0 + 1b）。唯一例程 = meta-review：跑 active goal 各 AC 的
+  // criterion → 机械算 divergence → 【读数变了/给了 focus/到地板】才派语义半（事件触发 + 定时器地板，
+  // 08-23 SPEC §5 的机械形态）。无任务池 ⇒ 无 cap（同 quality/outer）。
+  meta: {
+    driver: "meta-driver.ts",
+    prefix: "meta-driver",
+    verbs: ["start", "stop", "drain", "resume", "status", "restart", "liveness"],
+    capFlag: "",
+    hasInterval: true,
+    hasReconcile: false,
+    pidSelf: true,
+    runPrefix: "mt-prod",
+    carriers: ["meta-driver-round.jsonl"],
+    controlFile: "meta-control.json",
   },
 };
 

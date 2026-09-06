@@ -4,10 +4,18 @@ title: 会话真正退役 + 不留双真相源 + 产能不塌
 status: active
 kind: criterion
 goal: GOAL-002
-origin: |
+origin: >
   人 2026-08-23 方向「彻底取消 outer 会话（inner 会话应已被 worker-driver 机制代替）」。
-  交叉引用：gap-b0-retirement-precondition-checker-call-surface（status: ready）是 AC149-1/-3 的
+
+  交叉引用：gap-b0-retirement-precondition-checker-call-surface（status: ready）是
+  AC149-1/-3 的
+
   一个具体子条件——枚举 outer 执行核引用的全部 checker，逐个确认留存调用面或显式退役。
+evidence:
+  at: 2026-09-06T09:44:30.939Z
+  verdict: fail
+  reading: AC-149 has no criterion defined (fail-closed — an unenforceable AC must
+    never silently pass)
 ---
 
 **判据（能取假，三条缺一不可）**：

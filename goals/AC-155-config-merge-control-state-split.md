@@ -4,10 +4,18 @@ title: 配置合并 + 保留配置/控制态分界 + 事件触发保留兜底轮
 status: active
 kind: criterion
 goal: GOAL-002
-origin: |
+origin: >
   人 2026-08-23 裁定「前述可重用机制应当分层抽象，以支持这两层上的重用」；
-  正本 orchestration/SPEC-unified-driver-architecture-2026-08-23.md §2.1/§2.5/§2.6。
+
+  正本 orchestration/SPEC-unified-driver-architecture-2026-08-23.md
+  §2.1/§2.5/§2.6。
+
   人 2026-08-25 逐字裁定「AC155：在切换时一并要求完成」——优先级提升，本阶段当前唯一未完成的地基项。
+evidence:
+  at: 2026-09-06T09:44:32.873Z
+  verdict: fail
+  reading: AC-155 has no criterion defined (fail-closed — an unenforceable AC must
+    never silently pass)
 ---
 
 **判据（能取假）**：现散在六处的配置合并到**声明式配置**一侧；**⛔ `.quay/worker-control.json`

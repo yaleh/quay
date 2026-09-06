@@ -7,6 +7,11 @@ goal: GOAL-002
 origin: |
   硬规则⑤（来源完备性）的直接应用：逐条映射，不是抽查几条——本仓库已为"抽查即删"付过代价
   （2026-08-10 删 164 行，3 条无家可归）。
+evidence:
+  at: 2026-09-06T09:44:30.598Z
+  verdict: fail
+  reading: AC-148 has no criterion defined (fail-closed — an unenforceable AC must
+    never silently pass)
 ---
 
 **判据（能取假）**：`orchestration/fast-mode-tick-core.md` 的 **A1–A26 + B1–B5 每一条**给出三分类

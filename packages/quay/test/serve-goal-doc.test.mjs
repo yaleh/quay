@@ -112,11 +112,42 @@ test("the task list (/tasks) nav links to goals and docs", async () => {
   assert.match(r.body, /\/doc/);
 });
 
-test("AC98 — a filter with no matching goals renders the prose-source pointer, not 'No goals.'", async () => {
+// AC98 原断言「空态必须指向 manager-phase-goal.md / outer-phase-goal.md 这两个 prose 正本」。
+// ⊕ 2026-09-06 G3 推翻了那个前提：manager-phase-goal.md 头部现自述「已降级为归档……正本已迁至
+// ../goals/」。继续断言旧指针 = 让页面把读者送去一个归档文件当正本读（本仓库反复付过代价的那种
+// 过期指针）。故本条改为断言【新的正确行为】：空态说明 goals/ 即正本，且仍不得说 "No goals."。
+test("AC98(G3 后) — 空态指向 goals/ 自身为正本，⛔ 不再指向已降级的 prose 归档，也不说 'No goals.'", async () => {
   const r = await get(port, "/goal?status=superseded"); // no superseded records
   assert.equal(r.status, 200);
-  // AC98: the zero-record view must point at the two prose sources and never say "No goals."
-  assert.match(r.body, /orchestration\/manager-phase-goal\.md/);
-  assert.match(r.body, /orchestration\/outer-phase-goal\.md/);
+  assert.match(r.body, /goals\//);
   assert.doesNotMatch(r.body, /No goals/);
+  // 负控制：旧指针不得再作为「正本」出现在空态的主句里。
+  assert.doesNotMatch(r.body, /阶段目标正本在 prose 文件/);
+});
+
+// draft 是唯一「等着人裁定」的态（SPEC-goal-mechanism 裁定 3：draft→active 保留给人）。
+// 此前它【没有任何 UI 入口】——?status=draft 有记录但筛选器不列它 ⇒ 提案写了也没人看得见。
+test("draft 在筛选器里可达（此前缺失 ⇒ 提案不可见）", async () => {
+  const r = await get(port, "/goal");
+  assert.equal(r.status, 200);
+  assert.match(r.body, /status=draft/, "筛选器必须提供 draft 入口");
+});
+
+test("有 draft 时首页显示待裁定横幅与条数；无 draft 时不显示", async () => {
+  const draftPath = path.join(workspaceRoot, "goals", "AC-900-draft-proposal.md");
+  fs.writeFileSync(draftPath,
+    "---\nid: AC-900\ntitle: a proposed criterion\nstatus: draft\nkind: criterion\ngoal: GOAL-001\ncriterion: exit 0\nexpect: \"exit 0\"\norigin: meta-driver 提案，依据 .quay/gate-events.jsonl 计数\n---\n## Rationale\nproposed\n");
+  try {
+    const r = await get(port, "/goal");
+    assert.match(r.body, /1 条待人裁定/);
+    assert.match(r.body, /查看待裁定/);
+    // 已经在 draft 筛选下时不重复提示（避免同一信息叠加两次）。
+    const d = await get(port, "/goal?status=draft");
+    assert.doesNotMatch(d.body, /条待人裁定/);
+  } finally {
+    fs.rmSync(draftPath, { force: true });
+  }
+  // 负控制：draft 清零后横幅必须消失（⛔ 不得是恒显示的装饰）。
+  const after = await get(port, "/goal");
+  assert.doesNotMatch(after.body, /条待人裁定/);
 });

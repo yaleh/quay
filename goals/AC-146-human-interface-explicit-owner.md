@@ -9,6 +9,11 @@ origin: |
   状态 + escalations.md。该通道当前已实际堵塞——.quay/promotion-outcome.jsonl 里
   action="needs-human" + retry-cap-exhausted 已 3 条（3 个真实任务被打成 needs-human），
   而这件事没有任何一个界面主动让人看见，是 manager 巡检时才发现的。
+evidence:
+  at: 2026-09-06T09:44:29.929Z
+  verdict: fail
+  reading: AC-146 has no criterion defined (fail-closed — an unenforceable AC must
+    never silently pass)
 ---
 
 **判据（能取假）**：一条 `needs-human` 产生后，人**在不读任何 transcript 的前提下**能从一个

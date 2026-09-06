@@ -34,10 +34,22 @@ export async function handleGoalList(
 ): Promise<void> {
   const statusFilter = url.searchParams.get("status");
   const kindFilter = url.searchParams.get("kind");
-  const goals = await client.goalList({
-    ...(statusFilter ? { status: statusFilter } : {}),
-    ...(kindFilter ? { kind: kindFilter } : {}),
-  });
+  let goals;
+  let readError: string | null = null;
+  // draft = 唯一「等着人裁定」的态（SPEC-goal-mechanism 裁定 3：draft→active 保留给人）。
+  // 它必须【在任何筛选下都可见】——否则提案写了也没人看得见（escalations.md 的死法：
+  // 12 条未答、无人知道它们在等）。故与筛选后的列表分开计数。
+  let draftCount = 0;
+  try {
+    goals = await client.goalList({
+      ...(statusFilter ? { status: statusFilter } : {}),
+      ...(kindFilter ? { kind: kindFilter } : {}),
+    });
+    draftCount = (await client.goalList({ status: "draft" })).length;
+  } catch (err) {
+    goals = [];
+    readError = err instanceof Error ? err.message : String(err);
+  }
   const rows = goals.map((g) => {
     const ext = g as unknown as Record<string, unknown>;
     const criterion = typeof ext.criterion === "string" ? ext.criterion : "";
@@ -55,7 +67,9 @@ export async function handleGoalList(
   }).join("\n");
   const statusNav = [
     statusFilter ? html`<a href="/goal">All</a>` : html`<strong>All</strong>`,
-    ...["active", "achieved", "superseded", "retired"].map((s) =>
+    // draft 排在最前：它是唯一需要人动作的态（此前该筛选项缺失 ⇒ ?status=draft 有记录
+    // 但页面上没有任何入口能到达它）。
+    ...["draft", "active", "achieved", "superseded", "retired"].map((s) =>
       s === statusFilter
         ? html`<strong>${s}</strong>`
         : html`<a href="/goal?status=${s}">${s}</a>`
@@ -74,13 +88,23 @@ export async function handleGoalList(
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${modernistStyles()}${pageStyles()}<title>Goals</title></head>
     <body>${renderMobileChrome("goal", "goals")}${renderSiteNav("goal")}<main>
       <h1>Goals — 阶段目标与 AC (${goals.length})</h1>
+      ${readError ? html`<div class="error-banner" role="alert"><strong>读失败:</strong> ${escapeHtml(readError)}</div>` : ""}
+      ${draftCount > 0 && statusFilter !== "draft"
+        ? html`<div class="info-banner" role="status">
+            <p><strong>${String(draftCount)} 条待人裁定</strong> — draft 记录不会自己生效：
+            激活是人的动作（<code>goal-store.ts write &lt;id&gt; --status active</code>），
+            不激活就一直是提案。<a href="/goal?status=draft">查看待裁定</a></p>
+          </div>`
+        : ""}
       <p class="meta">Kind: ${kindNav}</p>
       <p class="meta">Status: ${statusNav}</p>
       ${goals.length === 0
-        ? html`<div class="info-banner" role="status">
-            <p><strong>${statusFilter || kindFilter ? "当前筛选下无记录" : "goals/ 目录为空"}</strong> — 本页是 goal-store 的机读视图；阶段目标正本在 prose 文件：</p>
-            <p><code>orchestration/manager-phase-goal.md</code> · <code>orchestration/outer-phase-goal.md</code></p>
-          </div>`
+        ? (readError
+            ? "" /* 读失败：上方 error-banner 已传达，空态不得再叠加误导性的「目录为空」（live 空态同纪律） */
+            : html`<div class="info-banner" role="status">
+                <p><strong>${statusFilter || kindFilter ? "当前筛选下无记录" : "goals/ 目录为空"}</strong> — 本页是 goal-store 的机读视图，<code>goals/</code> 即正本。</p>
+                <p class="meta">（此处原先指向 <code>orchestration/manager-phase-goal.md</code>，该文件已随 G3 降级为归档，不再是正本——指针已修正。）</p>
+              </div>`)
         : html`<table>
           <tr><th>id</th><th>kind</th><th>status</th><th>goal</th><th>title</th><th>criterion</th><th>recent verdict</th><th>origin</th></tr>
           ${rows}

@@ -9,6 +9,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   computeDivergences,
@@ -17,8 +21,16 @@ import {
   nextAcId,
   parseProbeOutput,
   fileProposals,
+  writeDraftProposal,
   buildProbePrompt,
+  readingsDigest,
+  shouldJudge,
+  readState,
+  writeState,
 } from '../scripts/meta-driver.ts';
+
+// 脚本根（goal-store.ts 从这里取）——数据根在各测试里另给临时目录。
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 // ── computeDivergences ───────────────────────────────────────────────────────
 test('computeDivergences: pass 但状态非 achieved ⇒ pass-but-unflipped', () => {
@@ -168,6 +180,124 @@ test('fileProposals: dry-run 分配 id 但不写盘', async () => {
   assert.equal(r[0].accepted, true);
   assert.equal(r[0].id, 'AC-180');
   assert.match(r[0].reason, /dry-run/);
+});
+
+// ── 真写入路径（⛔ 不用 dry-run、不用假 seam）──────────────────────────────────
+// 为什么必须有这一条：v0 的两次生产轮都没产出提案（语义半克制），dry-run 与其它单测又都
+// 绕开了 writeDraftProposal ⇒ 写入路径【从未真正执行过】，与「没实现」同形（硬规则 4 推论三：
+// 只能被 fixture/dry-run 满足的判据不是测量）。这里跑真的 goal-store CLI 写真的文件。
+test('writeDraftProposal 真的写出一条 draft 记录（真跑 goal-store CLI，非 dry-run）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-write-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'goals', 'GOAL-001-t.md'),
+      '---\nid: GOAL-001\ntitle: t\nstatus: active\nkind: goal\norigin: test fixture\n---\n## Goal\nx\n');
+
+    const r = await fileProposals(repoRoot, [goodProposal], [], {
+      k: 3, activeGoalIds: new Set(['GOAL-001']), dryRun: false, dataRoot: tmp,
+    });
+
+    assert.equal(r[0].accepted, true, `写入应成功，实际: ${r[0].reason}`);
+    assert.equal(r[0].id, 'AC-001');
+
+    const files = fs.readdirSync(path.join(tmp, 'goals'));
+    const written = files.find((f) => f.startsWith('AC-001'));
+    assert.ok(written, `应写出 AC-001 文件，实际目录内容: ${files.join(', ')}`);
+    const text = fs.readFileSync(path.join(tmp, 'goals', written), 'utf8');
+    // 关键性质：落盘即 draft（构造上惰性——写下它不会让任何事发生）。
+    assert.match(text, /^status: draft$/m, '提案必须落为 draft，⛔ 绝不能是 active');
+    assert.match(text, /goal: GOAL-001/);
+    assert.ok(text.includes('gate-events.jsonl'), 'origin 的实证内容必须落盘');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// 负控制：origin 缺失时 goal-store 自身 fail-closed（AC6「空 origin 不写」）——
+// 确认这条闸真的在我们的调用路径上生效，而不是只在文档里。
+test('origin 为空 ⇒ goal-store fail-closed，写入失败且不留文件', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-noorigin-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    const r = await writeDraftProposal(repoRoot, 'AC-002',
+      { ...goodProposal, origin: '' }, tmp);
+    assert.equal(r.ok, false, 'origin 为空必须写入失败');
+    const files = fs.readdirSync(path.join(tmp, 'goals'));
+    assert.equal(files.filter((f) => f.startsWith('AC-002')).length, 0, '失败时不得留下半条记录');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── 变化检测闸（事件触发 + 定时器地板）────────────────────────────────────────
+// noise 显式传入：⛔ 不用 Date.now() 制造差异——同一毫秒内两次调用会相等，前提就不成立了
+// （实测踩到：该前提断言当场报错，正是它存在的理由）。
+const mkReadings = (verdict, noise = 'n1') => ({
+  goals: [{ id: 'GOAL-001', title: 't', status: 'active' }],
+  criteria: [{ id: 'AC-001', title: null, goal: 'GOAL-001', status: 'active', criterion: 'true', verdict, reason: `ran ${noise}` }],
+  divergences: verdict === 'pass' ? [{ id: 'AC-001', kind: 'pass-but-unflipped', status: 'active', verdict, reason: noise }] : [],
+  focus: null,
+});
+
+// 关键负控制：摘要不得随时间/文本噪声变化——否则「变化检测」恒为真，闸形同虚设
+// （硬规则 4：一个结构上不可能取假的量不是测量）。
+test('readingsDigest: 只随 verdict/status/偏离类别变，⛔ 不随 reason 文本或时间变', () => {
+  const a = mkReadings('pass', 'noise-A');
+  const b = mkReadings('pass', 'noise-B');
+  assert.notEqual(a.criteria[0].reason, b.criteria[0].reason, '前提：两次的 reason 确实不同');
+  assert.equal(readingsDigest(a), readingsDigest(b), '噪声不得改变摘要');
+  assert.notEqual(readingsDigest(a), readingsDigest(mkReadings('fail')), 'verdict 变了摘要必须变');
+});
+
+test('shouldJudge: 首次（never judged）⇒ 判读', () => {
+  const r = shouldJudge({ digest: 'd1', state: { digest: null, lastJudgedAt: null }, focus: null, now: Date.now(), floorMs: 1000 });
+  assert.equal(r.judge, true);
+  assert.match(r.reason, /never judged/);
+});
+
+test('shouldJudge: 读数变了 ⇒ 判读', () => {
+  const r = shouldJudge({ digest: 'd2', state: { digest: 'd1', lastJudgedAt: new Date().toISOString() }, focus: null, now: Date.now(), floorMs: 10 ** 9 });
+  assert.equal(r.judge, true);
+  assert.match(r.reason, /readings changed/);
+});
+
+test('shouldJudge: 读数没变且未到地板 ⇒ 不判读（省掉重复 LLM 轮）', () => {
+  const now = Date.now();
+  const r = shouldJudge({ digest: 'd1', state: { digest: 'd1', lastJudgedAt: new Date(now - 60_000).toISOString() }, focus: null, now, floorMs: 10 ** 9 });
+  assert.equal(r.judge, false);
+  assert.match(r.reason, /unchanged since/);
+});
+
+test('shouldJudge: 人给了 focus ⇒ 无论有没有变都判读', () => {
+  const now = Date.now();
+  const r = shouldJudge({ digest: 'd1', state: { digest: 'd1', lastJudgedAt: new Date(now).toISOString() }, focus: 'retire X', now, floorMs: 10 ** 9 });
+  assert.equal(r.judge, true);
+  assert.match(r.reason, /focus/);
+});
+
+test('shouldJudge: 到了地板 ⇒ 即使没变也判读（防摘要恒不变导致永不再判）', () => {
+  const now = Date.now();
+  const r = shouldJudge({ digest: 'd1', state: { digest: 'd1', lastJudgedAt: new Date(now - 7200_000).toISOString() }, focus: null, now, floorMs: 3600_000 });
+  assert.equal(r.judge, true);
+  assert.match(r.reason, /floor reached/);
+});
+
+test('shouldJudge: lastJudgedAt 读不懂 ⇒ 判读（⛔ 不当作"刚判过"而跳过）', () => {
+  const r = shouldJudge({ digest: 'd1', state: { digest: 'd1', lastJudgedAt: 'not-a-date' }, focus: null, now: Date.now(), floorMs: 10 ** 9 });
+  assert.equal(r.judge, true);
+});
+
+test('readState: 状态文件不存在 ⇒ never-judged（⛔ 不冒充"没变化"）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-state-'));
+  try {
+    const s = readState(tmp);
+    assert.equal(s.digest, null);
+    assert.equal(s.lastJudgedAt, null);
+    writeState(tmp, { digest: 'abc', lastJudgedAt: '2026-09-06T00:00:00Z' });
+    assert.deepEqual(readState(tmp), { digest: 'abc', lastJudgedAt: '2026-09-06T00:00:00Z' });
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 // ── buildProbePrompt ─────────────────────────────────────────────────────────
