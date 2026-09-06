@@ -12,6 +12,7 @@ extra:
 depends_on:
   - gap-measure-suite-heavy-wait-ratio-load-sensitive-flaky
   - gap-writestate-torn-read-assertion-load-sensitive-flaky
+goal_ac: AC-177
 ---
 ## Proposal
 
