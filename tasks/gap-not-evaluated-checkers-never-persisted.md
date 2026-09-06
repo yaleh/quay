@@ -58,4 +58,5 @@ extra: {}
 - `plugin/scripts/meta-driver.ts`
 - `plugin/test/full-suite-runner.test.mjs`
 - `plugin/test/meta-driver.test.mjs`
+- `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `tasks/gap-not-evaluated-checkers-never-persisted.md`
