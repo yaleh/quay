@@ -34,23 +34,36 @@ extra:
   重新加载，`DOC_BRANCH` 恢复为当前值 `"author"`，同步恢复。**本任务要解决的是"以后不需要靠人
   工发现才能重启"这件事本身**。
 
+**修复（本任务）**：`cur !== docBranch` 分支改为先 `writeDocDevelopSyncEvent(root, { event:
+"doc-develop-sync-branch-mismatch", phase: "not-doc", cur, expected: docBranch })` 再 `return "not-doc"`
+（返回值契约不变）。事件落在既有生产载体 `.quay/doc-develop-sync.jsonl`，携带 `cur`（真实当前分支名）
+与 `expected`（driver 内存里陈旧的预期分支名）⇒ 下次任何原因造成对不上号，
+`jq 'select(.event == "doc-develop-sync-branch-mismatch")' .quay/doc-develop-sync.jsonl` 即可定位根因，
+不再靠人工发现任务状态分歧。
+
+**AC4 范围判定**：该事件类型与既有 `doc-develop-sync-ff-synced` / `not-ff` / `error` 同落在同一生产载体
+（`.quay/doc-develop-sync.jsonl`），已是可查询、有意义的信号（非孤儿字段）。「接入告警 / 巡检脚本主动
+读面」（如把 `doc-develop-sync-branch-mismatch` 接进 `plugin/scripts/manager-tick-readings.ts` 的巡检输出）
+超出本任务范围，留待后续任务指针：**`gap-doc-develop-sync-branch-mismatch-observe`**——把
+branch-mismatch 事件接入 manager 层巡检/告警读面（读 `.quay/doc-develop-sync.jsonl` 并计数该事件类型）。
+
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，核心修复）：`cur !== docBranch` 分支改为调用 `writeDocDevelopSyncEvent`
+- [x] AC1（能取假，核心修复）：`cur !== docBranch` 分支改为调用 `writeDocDevelopSyncEvent`
       写一个可区分事件（如 `doc-develop-sync-branch-mismatch`，字段至少含 `cur`/`expected`），
       而不是裸 `return "not-doc"`；⛔ 该分支仍不落痕则假。
-- [ ] AC2（能取假，单测覆盖）：新增/扩展 `plugin/test/driver-filters.test.mjs` 的用例——构造一个
+- [x] AC2（能取假，单测覆盖）：新增/扩展 `plugin/test/driver-filters.test.mjs` 的用例——构造一个
       "当前分支名与传入 docBranch 参数不一致"的 fixture，断言 `writeDocDevelopSyncEvent` 被调用
       且事件类型可区分于 `synced`/`not-ff`/`error`；⛔ 无该单测覆盖则假。
-- [ ] AC3（能取假，负控制）：同一单测里验证 `cur === docBranch` 且 `behind === 0`（真正的"已同步，
+- [x] AC3（能取假，负控制）：同一单测里验证 `cur === docBranch` 且 `behind === 0`（真正的"已同步，
       无需动作"）时**仍然**不写事件——本任务只补"对不上号"这一种情形的可观测性，不改变"确实无需
       同步"时的静默行为（那是合理的降噪，不是缺陷）；⛔ 把正常的"already"路径也改成写事件则视为
       过度修复、不通过。
-- [ ] AC4（能取假，生产可用性）：该事件类型被至少一处"driver 健康度/观测"读面消费或至少在
+- [x] AC4（能取假，生产可用性）：该事件类型被至少一处"driver 健康度/观测"读面消费或至少在
       `orchestration/manager-tick-readings.ts` 或等效巡检脚本里可查（不要求本任务把它接进告警，
       但要求它是一个可被查询到的、有意义的信号，不是写完即弃的孤儿字段）；若判定"接入告警"超出
       本任务范围，需在此明确记录并给出后续任务指针，而不是留空。
-- [ ] AC5（能取假，回归）：`node --test plugin/test/driver-filters.test.mjs` 全绿，且改动后
+- [x] AC5（能取假，回归）：`node --test plugin/test/driver-filters.test.mjs` 全绿，且改动后
       `syncDevelopToDoc` 的四个既有分支（error/not-ff/synced/already）行为不变（既有单测不因本次
       改动而需要修改断言，除非断言本身就是本任务要修的那处静默）。
 
