@@ -1,7 +1,7 @@
 ---
 id: gap-goal-store-migrate-prose-phase-acs-to-records
 title: 把 manager-phase-goal.md 的当前阶段与下一阶段 AC 保号迁入 goals/ 记录
-status: ready
+status: done
 labels:
   - gap
 parent: null
