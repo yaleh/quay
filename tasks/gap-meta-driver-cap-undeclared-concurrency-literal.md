@@ -2,7 +2,7 @@
 id: gap-meta-driver-cap-undeclared-concurrency-literal
 title: meta-driver.ts cap:1/cap:2 未声明并发字面量 → concurrency-literal-check 红，挡触及
   plugin/scripts 的 fan-in
-status: ready
+status: done
 labels:
   - gap
   - gate
