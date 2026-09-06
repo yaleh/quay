@@ -41,7 +41,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { launchArgv, runAsync, ts, type Fact } from "./driver-runtime.ts";
+import { launchArgv, runAsync, ts, type Fact, type RoutineSpec } from "./driver-runtime.ts";
+import { runResidentQualityGateLoop, computeRoundRecord } from "./quality-gate-driver.ts";
 import { readProbeSpec } from "./read-probe-spec.ts";
 import { gateFinding, findingKey, DEFAULT_RATE } from "./routine-file-gate.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
@@ -371,9 +372,11 @@ export interface MetaRoundOptions {
   pluginRoot?: string;
 }
 
+/** 一轮的结果 = **一条 Fact**。⛔ 不再另出一个 record 形状：一次性路径与常驻循环若各写各的
+ *  形状到同一个载体，读者就要在一个文件里分辨两套 schema（本仓库已在 verification-round 上
+ *  付过这个代价）。统一信封 = computeRoundRecord({facts:[fact]})，明细全在 fact.value 里。 */
 export interface MetaRoundResult {
   fact: Fact<Record<string, unknown>>;
-  record: Record<string, unknown>;
 }
 
 /** 跑一轮：读数（机械，总是跑）→ 语义判读（可关）→ 提案过闸落地 → 出 Fact + 载体记录。 */
@@ -386,8 +389,7 @@ export async function runMetaRound(opts: MetaRoundOptions): Promise<MetaRoundRes
   } catch (e) {
     const reason = `readings failed: ${(e as Error).message}`;
     return {
-      fact: { name: "meta-driver", value: null, state: "failed", reason },
-      record: { ts: at, state: "failed", reason },
+      fact: { name: "meta-driver", value: { phase: "readings" }, state: "failed", reason },
     };
   }
 
@@ -405,8 +407,7 @@ export async function runMetaRound(opts: MetaRoundOptions): Promise<MetaRoundRes
 
   if (noLlm) {
     return {
-      fact: { name: "meta-driver", value: { ...base, semantic: "skipped", digest }, state: "verified", reason: `mechanical-only (${readings.divergences.length} divergences, digest ${digest})` },
-      record: { ts: at, state: "mechanical-only", digest, ...base, readings: readings.criteria },
+      fact: { name: "meta-driver", value: { ...base, semantic: "mechanical-only", digest, readings: readings.criteria }, state: "verified", reason: `mechanical-only (${readings.divergences.length} divergences, digest ${digest})` },
     };
   }
 
@@ -416,8 +417,7 @@ export async function runMetaRound(opts: MetaRoundOptions): Promise<MetaRoundRes
   const gate = shouldJudge({ digest, state, focus, now: Date.now(), floorMs: opts.judgeFloorMs ?? JUDGE_FLOOR_MS_DEFAULT });
   if (!gate.judge) {
     return {
-      fact: { name: "meta-driver", value: { ...base, semantic: "skipped-unchanged", digest }, state: "verified", reason: `semantic half skipped: ${gate.reason}` },
-      record: { ts: at, state: "skipped-unchanged", digest, skipReason: gate.reason, ...base },
+      fact: { name: "meta-driver", value: { ...base, semantic: "skipped-unchanged", digest, skipReason: gate.reason }, state: "verified", reason: `semantic half skipped: ${gate.reason}` },
     };
   }
 
@@ -427,8 +427,7 @@ export async function runMetaRound(opts: MetaRoundOptions): Promise<MetaRoundRes
   } catch (e) {
     const reason = `probe spec unavailable: ${(e as Error).message}`;
     return {
-      fact: { name: "meta-driver", value: base, state: "not-evaluated", reason },
-      record: { ts: at, state: "not-evaluated", reason, ...base },
+      fact: { name: "meta-driver", value: { ...base, digest }, state: "not-evaluated", reason },
     };
   }
 
@@ -439,12 +438,12 @@ export async function runMetaRound(opts: MetaRoundOptions): Promise<MetaRoundRes
   const r = await runAsync(argv, { timeoutMs: Infinity, collectStderr: true });
   if (r.error) {
     const reason = `probe spawn error: ${r.error.message}`;
-    return { fact: { name: "meta-driver", value: base, state: "not-evaluated", reason }, record: { ts: at, state: "not-evaluated", reason, ...base } };
+    return { fact: { name: "meta-driver", value: { ...base, digest }, state: "not-evaluated", reason } };
   }
   const parsed = parseProbeOutput(r.stdout);
   if (!parsed) {
     const reason = `unparseable probe output (exit ${r.status})`;
-    return { fact: { name: "meta-driver", value: base, state: "failed", reason }, record: { ts: at, state: "failed", reason, ...base } };
+    return { fact: { name: "meta-driver", value: { ...base, digest }, state: "failed", reason } };
   }
 
   const records = await listGoalRecords(root);
@@ -465,7 +464,6 @@ export async function runMetaRound(opts: MetaRoundOptions): Promise<MetaRoundRes
   };
   return {
     fact: { name: "meta-driver", value, state: "verified", reason: `${readings.divergences.length} divergences, ${acceptedIds.length}/${parsed.proposals.length} proposals filed as draft` },
-    record: { ts: at, state: "judged", ...value, filed, divergenceReadings: parsed.divergences, readings: readings.criteria },
   };
 }
 
@@ -476,6 +474,33 @@ export function appendRoundSafe(root: string, record: Record<string, unknown>): 
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.appendFileSync(file, JSON.stringify(record) + "\n", "utf8");
   } catch { /* 载体写失败不致命 */ }
+}
+
+// ── 常驻形态（例程） ──────────────────────────────────────────────────────────────────────────────
+
+/** 控制态文件（与 quality 分开——⛔ 共用会让一个 kind 的 halt 误停另一个）。 */
+export const META_CONTROL_STATE_REL = path.join(".quay", "meta-control.json");
+
+/** 本 driver 的例程集：**只此一条**。复用 quality-gate-driver 里那个【已经通用的】例程型常驻
+ *  循环（收 RoutineSpec[]、评估 due、汇 Facts、写轮记录），⛔ 不再抄一份 95 行样板——
+ *  SPEC §4 正是要消灭那种逐 kind 重复。 */
+export function metaDriverRoutines(root: string, opts: {
+  reviewIntervalMinutes: number;
+  k: number;
+  judgeFloorMs: number;
+  focus?: string | null;
+}): RoutineSpec[] {
+  return [{
+    name: "meta-review",
+    schedule: { kind: "interval", minutes: opts.reviewIntervalMinutes },
+    run: async () => {
+      // 常驻轮永不 dry-run：提案要真落盘（落盘即 draft，构造上惰性）。
+      const { fact } = await runMetaRound({
+        root, focus: opts.focus ?? null, noLlm: false, k: opts.k, dryRun: false, judgeFloorMs: opts.judgeFloorMs,
+      });
+      return [fact];
+    },
+  }];
 }
 
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────
@@ -494,6 +519,12 @@ const HELP = [
   "                    读数变了/给了 --focus 就会判读；地板只防「摘要恒不变 ⇒ 永不再判」",
   "  --json            输出 JSON（缺省人读摘要）",
   "",
+  "常驻（例程型，复用通用循环）:",
+  "  --resident            常驻跑；未给此旗标即一次性",
+  "  --interval <ms>       循环滴答间隔（缺省 30000）",
+  "  --review-interval <m> meta 复核的例程间隔（分钟，缺省 20）",
+  "  --run-id <id> / --pid-file <p> / --max-rounds <n>",
+  "",
   "Exit: 0 = 轮跑完（含 not-evaluated）; 1 = 轮失败; 2 = usage",
 ].join("\n");
 
@@ -506,6 +537,12 @@ export async function main(argv: string[]): Promise<number> {
   let json = false;
   let k = DEFAULT_RATE;
   let judgeFloorMs = JUDGE_FLOOR_MS_DEFAULT;
+  let resident = false;
+  let intervalMs = 30_000;
+  let reviewIntervalMinutes = 20;
+  let runId = `meta-${Date.now()}`;
+  let pidFile: string | undefined;
+  let maxRounds: number | null = null;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -516,17 +553,38 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--no-llm") { noLlm = true; }
     else if (a === "--dry-run") { dryRun = true; }
     else if (a === "--json") { json = true; }
-    else if (a === "--once") { /* v0 唯一模式 */ }
+    else if (a === "--once") { /* 一次性是缺省；保留旗标以便显式表达 */ }
+    else if (a === "--resident") { resident = true; }
+    else if (a === "--interval") { intervalMs = Number(args[++i]); }
+    else if (a === "--review-interval") { reviewIntervalMinutes = Number(args[++i]); }
+    else if (a === "--run-id") { runId = args[++i]; }
+    else if (a === "--pid-file") { pidFile = args[++i]; }
+    else if (a === "--max-rounds") { maxRounds = Number(args[++i]); }
     else if (a === "--help" || a === "-h") { process.stdout.write(HELP + "\n"); return 0; }
     else { process.stderr.write(`meta-driver: unknown argument: ${a}\n${HELP}\n`); return 2; }
   }
   if (!Number.isFinite(k) || k < 1) { process.stderr.write("meta-driver: --k must be a positive number\n"); return 2; }
   if (!Number.isFinite(judgeFloorMs) || judgeFloorMs < 0) { process.stderr.write("meta-driver: --judge-floor must be a non-negative number of minutes\n"); return 2; }
 
-  const { fact, record } = await runMetaRound({ root, focus, noLlm, k, dryRun, judgeFloorMs });
+  if (resident) {
+    // 常驻：复用通用例程型循环，配自己的控制面与载体（⛔ 不与 quality 共用控制面）。
+    return await runResidentQualityGateLoop({
+      root, intervalMs, once: false, maxRounds,
+      roundLogFile: path.join(root, ROUND_CARRIER_REL),
+      runId, json, pidFile,
+      controlStateRel: META_CONTROL_STATE_REL,
+      routines: metaDriverRoutines(root, { reviewIntervalMinutes, k, judgeFloorMs, focus }),
+    });
+  }
+
+  const { fact } = await runMetaRound({ root, focus, noLlm, k, dryRun, judgeFloorMs });
   // ⛔ dry-run 也要留痕：「跑了一轮、什么都没提」正是最该被记录的情形——不记则「跑过」与
   // 「没跑过」在载体上同形，本例程的沉默就不可被检测（硬规则 9）。dryRun 进记录，不进条件。
-  appendRoundSafe(root, { ...record, dryRun });
+  // 信封与常驻轮【完全相同】（computeRoundRecord），避免同一载体两套 schema。
+  appendRoundSafe(root, {
+    ...computeRoundRecord({ round: 0, runId, pid: process.pid, at: new Date().toISOString(), facts: [fact] }),
+    dryRun,
+  });
 
   if (json) {
     process.stdout.write(JSON.stringify({ fact, record }, null, 2) + "\n");

@@ -24,3 +24,7 @@ kinds:
   quality:
     cap: 5               # ⛔ quality 例程型 kind 无并发概念（例程是「读→报」非「spawn 执行者」）；字段仅为齐整
     interval_ms: 30000   # 轮询节奏（B15/B17 两条例程的 round heartbeat；生产由 --interval 覆盖）
+  meta:
+    cap: 5               # ⛔ 同 quality：例程型 kind 无并发概念；字段仅为齐整
+    interval_ms: 30000   # 循环滴答；meta 复核本身的节奏由 --review-interval（分钟）控制，
+                         # 且语义半还要过变化检测闸 ⇒ 读数没变的轮不派 LLM

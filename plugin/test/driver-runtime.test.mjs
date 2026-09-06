@@ -232,7 +232,9 @@ test("AC1 — Layer 1b (routine) reuses L0 schedule/heartbeat/notify; ⛔ 不重
 // ── AC2（supervisor 港进 TS）：registry 单一数据表 + 可单测纯函数 ─────────────────────────────────
 
 test("AC2 — 8 张 bash registry 表 → DRIVER_KINDS 单一 TS 数据表", () => {
-  assert.deepEqual(KNOWN_KINDS, ["promotion", "worker", "outer", "quality", "suite"], "五个 kind，registry 数据表承载差异");
+  // 2026-09-06 +meta（机制演进复核例程型 kind）。基线断言【有意更新】——它的作用是让新增 kind
+  // 必须显式过一次这条断言，而不是悄悄混进来；故保持逐字列举，⛔ 不改成 length 或 includes。
+  assert.deepEqual(KNOWN_KINDS, ["promotion", "worker", "outer", "quality", "suite", "meta"], "六个 kind，registry 数据表承载差异");
   assert.equal(DRIVER_KINDS.promotion.driver, "promotion-driver.ts");
   assert.equal(DRIVER_KINDS.promotion.capFlag, "--cap", "promotion capFlag = --cap");
   assert.equal(DRIVER_KINDS.promotion.hasInterval, true);

@@ -28,7 +28,7 @@ import { resolvePluginScript } from "../plugin-root.ts";
 import type { CliCtx } from "./context.ts";
 
 const VERBS = ["start", "stop", "drain", "resume", "status", "restart"];
-const KINDS = ["promotion", "worker", "outer", "quality"];
+const KINDS = ["promotion", "worker", "outer", "quality", "meta"];
 
 /** Resolve the workspace root from `--root` (walk-up) or the process cwd; null when no config. */
 function resolveRoot(rootFlag: string | undefined): string | null {
