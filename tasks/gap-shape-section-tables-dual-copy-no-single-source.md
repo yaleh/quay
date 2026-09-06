@@ -2,7 +2,7 @@
 id: gap-shape-section-tables-dual-copy-no-single-source
 title: shape 判定的「哪些标题算 AC/DoD」是两份手抄名单——store.ts 缺 draft/suffix 变体，与
   ready-pool-check 分歧（同一对文件第 2 次同类分歧）
-status: todo
+status: ready
 labels:
   - gap
   - gate
