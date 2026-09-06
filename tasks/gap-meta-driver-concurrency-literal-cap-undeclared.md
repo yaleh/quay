@@ -1,7 +1,7 @@
 ---
 id: gap-meta-driver-concurrency-literal-cap-undeclared
 title: meta-driver 两处 per-round cap 字面量未声明，concurrency-literal-check 红并挡全量 suite
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -32,3 +32,13 @@ meta-driver.ts 的两处 per-round cap 以声明方式合法化（`concurrency-d
 - plugin/scripts/meta-driver.ts
 - plugin/test/concurrency-literal-check.test.mjs
 - tasks/gap-meta-driver-concurrency-literal-cap-undeclared.md
+## Needs-Human
+
+**执行 2026-09-06T15:43:12.340Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: # fail 1
+- run_id：wk-prod-1788700330
+- session_id：ba5b4ba3-2dad-4112-a3f7-1c6ad8ad156e
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-meta-driver-concurrency-literal-cap-undeclared~wk-prod-1788700330~1788709290059-77c6ce.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-meta-driver-concurrency-literal-cap-undeclared-wk-prod-1788700330.log
