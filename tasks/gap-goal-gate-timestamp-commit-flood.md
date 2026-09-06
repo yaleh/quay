@@ -52,3 +52,23 @@ extra: {}
 - `packages/quay/test/goal-store.test.mjs`
 - `plugin/test/meta-driver.test.mjs`
 - `tasks/gap-goal-gate-timestamp-commit-flood.md`
+
+
+---
+
+## 成因更正（2026-09-06T23:5xZ，立条人自行更正——原成因不完整且指错了主要写入者）
+
+**原文写的是「goal driver 每约 42 秒 gate 一遍全部 AC × 写盘即提交」。实测表明不止如此，且 goal driver 不是唯一写入者。**
+
+**负控制（当场做的）**：把 `goal` driver **停掉**之后，`goals: AC-NNN 写盘即提交（goal-store）` 仍以**每秒一条**继续（实测 23:48:32–37 连续 5 条：AC-180/181/182/183/184，顺序递增）⇒ 停错了对象，已恢复该 driver。
+
+**真实成因（两个写入者，形态相同）**：
+1. 任何调用 `collectReadings` 的路径都会**逐条 gate 全部 criteria**，而 `goal-store gate` 写回 evidence ⇒ 触发 `commitGoalFileAfterWrite`。⇒ **meta-driver 每轮提交约 15 次**（当前 criterionCount=15）。
+2. 我本轮为验证修复跑了 3 次 `meta-driver.ts --no-llm --dry-run`——**每次同样贡献约 15 条提交**。⇒ 立条人自己也在往洪水里加水，这不是旁观者报告。
+3. goal driver 的 42 秒 gate 循环是第三个来源（原文只写了这一个）。
+
+**⚠️ 一个更严重的连带后果（原文完全没提）**：写盘即提交**架空了 `settleEvidenceWrites`**。
+`meta-driver.ts` 的结算逻辑本来负责「只有时间戳变了 ⇒ 还原，verdict 真变了 ⇒ 保留」，作用是**不让 evidence 抖动弄脏共享检出**。但现在 `gate` 在结算之前就把改动**提交**掉了 ⇒ 结算时树已干净、无可还原 ⇒ 该机制事实上失效，而它的存在会让人以为抖动已被处理。
+⇒ 修法必须同时回答：结算与提交谁在前、以及「什么算实质变化」这个判断放在哪一层（⛔ 不要两层各写一份）。
+
+**代价的一个新读数**：本次把一个 2 文件的修复推进 develop，`merge + push` **连续失败 6 次、第 7 次才成功**——develop 前进速度高于 merge-then-push 的窗口。⇒ 洪水不只是历史噪声，它已经在**阻碍正常落地流程**。
