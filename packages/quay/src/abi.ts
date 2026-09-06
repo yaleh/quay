@@ -49,6 +49,17 @@ export interface AdrRecord {
   body: string;
 }
 
+/** task_delete result (gap-abi-missing-commit-delete-dependson-primitives): the native provider's
+ *  delete returns an honest, distinguishable shape — `ok:false` (not-found) is a normal result the
+ *  Core surface maps to isError, never a silent no-op. */
+export interface TaskDeleteResult {
+  id: string;
+  ok: boolean;
+  reason: string;
+  committed: boolean;
+  propagated: boolean;
+}
+
 export interface Manifest {
   [key: string]: unknown;
 }
