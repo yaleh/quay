@@ -197,6 +197,7 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-fan-in-driver-mechanical-orchestration-2026-08-27.md` — fan-in 机械编排：取消 fan-in workflow 子代理、机械部分（锁/merge/判定/typecheck/scoped门/suite/ff）交 driver、语义部分（冲突/红 suite/typecheck 红/anti-drift 越界）单独 Claude 会话；suite 不再 detach、fan-in 锁机械包裹 suite 锁；取代 S=1 workflow 锁的解法（保留其诊断），锁时长从模型 30min 塌缩到机械 ~10min（proposal·待 outer 立案、待人裁定排期）
 - `orchestration/SPEC-tmux-retirement-2026-09-03.md` — tmux 机制退役（先退 tmux 机制本身、outer 会话留待之后；驱动/观测另一 Claude Code 会话从 tmux send-keys/capture-pane 迁移到 background job session 模型）
 - `orchestration/SPEC-capability-planes-and-mechanism-lifecycle-2026-09-05.md` — 能力面分层与机制生命周期：把「能力」而非「文件」作为架构单元（probe = routine 的 LLM 形态，⛔ 不新增 kind）· Layer 0 继承强制化 · 机制注册/生命周期（proposal·待人裁定）
+- `orchestration/SPEC-goal-mechanism-2026-09-06.md` — goal 机制启用与改造（PHASE→GOAL、多目标并发、ABI 封装、driver 驱动；SPEC-0809 的修订与启用而非替代）
 
 Cross-references:
 - `orchestration/REVIEW-cadence.md` — the daily-review cadence mechanism (this skill's cadence hook)

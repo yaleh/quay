@@ -47,4 +47,6 @@ if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, "utf8"));
 - plugin/test/driver-runtime.test.mjs
 - plugin/test/helpers/worker-driver-harness.mjs
 - plugin/test/worker-driver-resident.test.mjs
+- plugin/skills/manager/SKILL.md（补 SPEC-goal-mechanism-2026-09-06 声明——develop 侧 e74e59f19 漏声明致 spec-declaration-point-check 全局红，补 Methodology sources 索引）
+- plugin/skills/init/SKILL.md（同上，补 reference-doc 声明）
 - tasks/gap-driver-test-fixture-json-read-before-write-complete-race.md
