@@ -21,9 +21,9 @@ origin: |
   判据读【运行中的服务】而非源码，依据硬规则 4 推论三：
   grep 源码只证明"能产出"，不证明"已产出"。
 evidence:
-  at: 2026-09-06T23:12:52.712Z
-  verdict: fail
-  reading: acceptance failed (exit 1)
+  at: 2026-09-06T23:13:45.988Z
+  verdict: pass
+  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：从**运行中的 `quay serve` 进程**派生地址，`GET /dashboard` 的响应含 `goal-card`。
