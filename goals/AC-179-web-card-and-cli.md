@@ -1,7 +1,7 @@
 ---
 id: AC-179
 title: G8 dashboard 卡片在运行中的 Web 上真实渲染
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-001
 criterion: >-
@@ -21,7 +21,7 @@ origin: |
   判据读【运行中的服务】而非源码，依据硬规则 4 推论三：
   grep 源码只证明"能产出"，不证明"已产出"。
 evidence:
-  at: 2026-09-06T21:17:46.628Z
+  at: 2026-09-06T21:54:14.149Z
   verdict: pass
   reading: acceptance passed (exit 0)
 ---
