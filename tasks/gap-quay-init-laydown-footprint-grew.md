@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-laydown-footprint-grew
 title: quay-init laydown footprint 增长 +8640 bytes，shrink-only ratchet 红并挡全量 suite
-status: todo
+status: ready
 labels:
   - gap
   - defect
