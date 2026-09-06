@@ -310,6 +310,130 @@ export function renderTestsCard(
  *  faster than the backend refresh. */
 export const DASHBOARD_CARD_REFRESH_MS = 30_000;
 
+/** Pure, self-contained renderer for the `#sys-sparkline` SVG inner markup — legend (two colour
+ *  swatches + names) + two polylines (cpu_stall / loadavg) + min/max/latest value labels + an optional
+ *  loadavg threshold reference line + earliest/latest sample-time (hh:mm) labels.
+ *  gap-dashboard-syscard-sparkline-legend-labels: Tufte's sparkline minimum is "pair with the most
+ *  recent value, endpoints (min/max) marked" — the prior render was a bare min-max stretch with no
+ *  numbers at all, which is why the card read as 「很难观察」.
+ *
+ *  ⚠️ This function's source is serialized via `Function.prototype.toString()` into the client-side
+ *  inline script (see renderDashboardCardRefreshScript). KEEP IT UNTYPED AND SELF-CONTAINED: no
+ *  TypeScript type annotations (strip-types would blank them into whitespace) and no closure over
+ *  module-level helpers (the browser has none) — pad2/escapeHtml/etc. must NOT be referenced here.
+ *  It returns only SVG markup whose text content is hard-coded literals or `String(number)` output,
+ *  so no HTML escaping is required. */
+export function sparklineSvg(history, loadThreshold) {
+  var W = 300, H = 120, P = 4;
+  var plotTop = 24, plotBottom = 100;
+
+  function pad2(n) { return (n < 10 ? "0" : "") + n; }
+  function hhmm(ms) {
+    var d = new Date(ms);
+    return pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+  }
+  function num(v) { return String(v); }
+  function finite(v) { return typeof v === "number" && isFinite(v); }
+  function xAt(i, n) { return P + (i / (n - 1)) * (W - 2 * P); }
+  function yAt(v, min, max) { return plotBottom - ((v - min) / (max - min)) * (plotBottom - plotTop); }
+
+  // Per-series min/max over the FINITE values only (a null probe draws nothing, never a fake 0).
+  function stats(vals) {
+    var min = Infinity, max = -Infinity, minIdx = -1, maxIdx = -1, latestIdx = -1, j, v;
+    for (j = 0; j < vals.length; j++) {
+      v = vals[j];
+      if (!finite(v)) continue;
+      latestIdx = j;
+      if (v < min) { min = v; minIdx = j; }
+      if (v > max) { max = v; maxIdx = j; }
+    }
+    if (!isFinite(min)) return null;
+    return { min: min, max: max, minIdx: minIdx, maxIdx: maxIdx, latestIdx: latestIdx };
+  }
+  function polyline(vals, scaleMin, scaleMax) {
+    var pts = [], j, v;
+    for (j = 0; j < vals.length; j++) {
+      v = vals[j];
+      if (!finite(v)) continue;
+      pts.push(xAt(j, vals.length).toFixed(1) + "," + yAt(v, scaleMin, scaleMax).toFixed(1));
+    }
+    return pts.join(" ");
+  }
+  function seriesMarkup(vals, s, scaleMin, scaleMax, color, labelOffset) {
+    var m = [];
+    var lx = xAt(s.latestIdx, vals.length);
+    var ly = yAt(vals[s.latestIdx], scaleMin, scaleMax);
+    var minx = xAt(s.minIdx, vals.length), miny = yAt(s.min, scaleMin, scaleMax);
+    var maxx = xAt(s.maxIdx, vals.length), maxy = yAt(s.max, scaleMin, scaleMax);
+    m.push('<polyline class="load-svg-line" style="stroke:var(' + color + ')" points="' + polyline(vals, scaleMin, scaleMax) + '"></polyline>');
+    // latest value — the right-end circle + value text Tufte requires.
+    m.push('<circle cx="' + lx.toFixed(1) + '" cy="' + ly.toFixed(1) + '" r="2.5" fill="var(' + color + ')"></circle>');
+    m.push('<text x="' + (lx - 5).toFixed(1) + '" y="' + (ly - 5 + labelOffset).toFixed(1) + '" font-size="8" fill="var(--color-neutral-600)" text-anchor="end">' + num(vals[s.latestIdx]) + '</text>');
+    // min/max marks — the endpoints/extremes Tufte calls out.
+    m.push('<circle cx="' + minx.toFixed(1) + '" cy="' + miny.toFixed(1) + '" r="1.5" fill="var(' + color + ')"></circle>');
+    m.push('<text x="' + minx.toFixed(1) + '" y="' + (miny - 5 + labelOffset).toFixed(1) + '" font-size="8" fill="var(--color-neutral-600)" text-anchor="middle">' + num(s.min) + '</text>');
+    m.push('<circle cx="' + maxx.toFixed(1) + '" cy="' + maxy.toFixed(1) + '" r="1.5" fill="var(' + color + ')"></circle>');
+    m.push('<text x="' + maxx.toFixed(1) + '" y="' + (maxy - 5 + labelOffset).toFixed(1) + '" font-size="8" fill="var(--color-neutral-600)" text-anchor="middle">' + num(s.max) + '</text>');
+    return m.join("");
+  }
+
+  // Legend — static, rendered even before the first poll so the two series are identifiable at once.
+  // Colors reuse the SAME tokens the two polylines already use (cpu_stall = .load-svg-line default
+  // --color-accent-600, loadavg = --color-positive-700), not a new palette.
+  var out = [];
+  out.push('<rect x="' + P + '" y="7" width="12" height="3" fill="var(--color-accent-600)"></rect>');
+  out.push('<text x="' + (P + 17) + '" y="13" font-size="9" fill="var(--color-neutral-700)">cpu_stall</text>');
+  out.push('<rect x="' + (P + 82) + '" y="7" width="12" height="3" fill="var(--color-positive-700)"></rect>');
+  out.push('<text x="' + (P + 99) + '" y="13" font-size="9" fill="var(--color-neutral-700)">loadavg</text>');
+
+  if (history.length >= 2) {
+    var cpus = [], loads = [], i;
+    for (i = 0; i < history.length; i++) {
+      cpus.push(history[i].cpu);
+      loads.push(history[i].load);
+    }
+    var cpu = stats(cpus);
+    var load = stats(loads);
+
+    if (cpu) {
+      var cpuMin = cpu.min, cpuMax = cpu.max;
+      if (cpuMax === cpuMin) cpuMax = cpuMin + 1;
+      out.push(seriesMarkup(cpus, cpu, cpuMin, cpuMax, "--color-accent-600", 0));
+    }
+    if (load) {
+      // Loadavg keeps its own pure min-max scale — the trend must stay readable even when the overload
+      // threshold (nproc × loadOverFactor, e.g. 32) sits far above the observed loadavg (e.g. ~3).
+      var loadMin = load.min, loadMax = load.max;
+      if (loadMax === loadMin) loadMax = loadMin + 1;
+      out.push(seriesMarkup(loads, load, loadMin, loadMax, "--color-positive-700", 10));
+      // Threshold reference line (loadavg only) — drawn only when loadThreshold is present AND load
+      // data exists (a null threshold draws nothing, never a fabricated default). Clamped to the plot
+      // so a threshold far outside the observed range shows as an edge line rather than crushing the
+      // data into a sliver.
+      if (finite(loadThreshold)) {
+        var ty = yAt(loadThreshold, loadMin, loadMax);
+        var lineY = Math.min(plotBottom, Math.max(plotTop, ty));
+        var labelY = lineY - 3;
+        if (labelY < plotTop + 8) labelY = lineY + 9;
+        out.push('<line class="spark-threshold" x1="' + P + '" x2="' + (W - P) + '" y1="' + lineY.toFixed(1) + '" y2="' + lineY.toFixed(1) + '" stroke="var(--color-neutral-400)" stroke-dasharray="3 3"></line>');
+        out.push('<text x="' + (W - P) + '" y="' + labelY.toFixed(1) + '" font-size="8" fill="var(--color-neutral-500)" text-anchor="end">阈 ' + num(loadThreshold) + '</text>');
+      }
+    }
+
+    // Earliest/latest sample time (hh:mm) — history now records ts (sysRaw.ts, the server epoch-ms).
+    var firstTs = null, lastTs = null;
+    for (i = 0; i < history.length; i++) {
+      if (finite(history[i].ts)) { if (firstTs === null) firstTs = history[i].ts; lastTs = history[i].ts; }
+    }
+    if (firstTs !== null && lastTs !== null) {
+      out.push('<text x="' + P + '" y="' + (H - 6) + '" font-size="8" fill="var(--color-neutral-500)">' + hhmm(firstTs) + '</text>');
+      out.push('<text x="' + (W - P) + '" y="' + (H - 6) + '" font-size="8" fill="var(--color-neutral-500)" text-anchor="end">' + hhmm(lastTs) + '</text>');
+    }
+  }
+
+  return out.join("");
+}
+
 /** The inline auto-refresh <script> injected into the dashboard page. Pure — returns a string, so a
  *  unit test can grep it for setInterval/fetch/visibilityState and prove no location.reload (AC1/AC3). */
 export function renderDashboardCardRefreshScript(): string {
@@ -318,45 +442,19 @@ export function renderDashboardCardRefreshScript(): string {
   var REFRESH_MS = ${DASHBOARD_CARD_REFRESH_MS};
   var SYS_HISTORY_MAX = 60;
   var sysHistory = [];
+  var loadThreshold = null;
 
-  // Min-max normalise a value series to the sparkline viewBox, returning "x,y x,y …" for a <polyline>.
-  // null values are skipped (a probe that never returned a number draws no line, rather than a fake 0).
-  function sparkPoints(vals) {
-    var min = Infinity, max = -Infinity, i, v;
-    for (i = 0; i < vals.length; i++) {
-      v = vals[i];
-      if (v == null) { continue; }
-      if (v < min) { min = v; }
-      if (v > max) { max = v; }
-    }
-    if (!isFinite(min)) { return null; }
-    if (max === min) { max = min + 1; }
-    var W = 300, H = 60, P = 4, n = vals.length, pts = [];
-    for (i = 0; i < n; i++) {
-      v = vals[i];
-      if (v == null) { continue; }
-      var x = P + (i / (n - 1)) * (W - 2 * P);
-      var y = (H - P) - ((v - min) / (max - min)) * (H - 2 * P);
-      pts.push(x.toFixed(1) + "," + y.toFixed(1));
-    }
-    return pts.join(" ");
-  }
+  // The sparkline renderer (legend + two polylines + min/max/latest labels + optional threshold
+  // reference line + time-span labels) is embedded from the shared pure function in serve-dashboard.ts
+  // via Function#toString — the browser runs the SAME code the unit tests exercise (no drift).
+  var sparklineSvg = ${sparklineSvg.toString()};
 
-  // Redraw the in-memory history into #sys-sparkline (two polylines: cpu_stall + loadavg). Fewer than
-  // 2 points → empty state (no fabricated single-point line). The history lives ONLY in this closure —
-  // a page reload / tab close clears it (the known trade-off of the zero-persistence simplification).
+  // Redraw the in-memory history into #sys-sparkline. The history lives ONLY in this closure — a
+  // page reload / tab close clears it (the known trade-off of the zero-persistence simplification).
   function redrawSparkline() {
     var svg = document.getElementById("sys-sparkline");
     if (!svg) { return; }
-    if (sysHistory.length < 2) { svg.innerHTML = ""; return; }
-    var cpus = sysHistory.map(function (p) { return p.cpu; });
-    var loads = sysHistory.map(function (p) { return p.load; });
-    var cpuPts = sparkPoints(cpus);
-    var loadPts = sparkPoints(loads);
-    var inner = "";
-    if (cpuPts != null) { inner += '<polyline class="load-svg-line" points="' + cpuPts + '" />'; }
-    if (loadPts != null) { inner += '<polyline class="load-svg-line" style="stroke:var(--color-positive-700)" points="' + loadPts + '" />'; }
-    svg.innerHTML = inner;
+    svg.innerHTML = sparklineSvg(sysHistory, loadThreshold);
   }
 
   var refresh = function () {
@@ -378,8 +476,9 @@ export function renderDashboardCardRefreshScript(): string {
         if (d.sysRaw && typeof d.sysRaw === "object") {
           var cpu = typeof d.sysRaw.cpuStallAvg10 === "number" ? d.sysRaw.cpuStallAvg10 : null;
           var load = typeof d.sysRaw.loadAvg === "number" ? d.sysRaw.loadAvg : null;
+          loadThreshold = typeof d.sysRaw.loadThreshold === "number" ? d.sysRaw.loadThreshold : null;
           if (cpu != null || load != null) {
-            sysHistory.push({ cpu: cpu, load: load });
+            sysHistory.push({ cpu: cpu, load: load, ts: d.sysRaw.ts });
             if (sysHistory.length > SYS_HISTORY_MAX) { sysHistory = sysHistory.slice(sysHistory.length - SYS_HISTORY_MAX); }
             redrawSparkline();
           }
@@ -397,8 +496,9 @@ export function renderDashboardCardRefreshScript(): string {
 
 /** The dashboard sysCard — a self-contained render of the system-resource snapshot, extracted so the
  *  auto-refresh JSON endpoint can re-render it (id="sys-card") without the rest of the dashboard.
- *  Carries an empty `#sys-sparkline` SVG the client-side poll fills with an in-memory load history
- *  (gap-dashboard-visual-review-batch-fixes AC6 — the SERVER persists nothing). */
+ *  Carries a `#sys-sparkline` SVG pre-populated with the legend (sparklineSvg([])); the client-side
+ *  poll then fills the history lines + labels in-memory (gap-dashboard-visual-review-batch-fixes AC6 —
+ *  the SERVER persists nothing). */
 export function renderSysCard(sys: SystemResult): string {
   const sysGo = sys.resourceGate.status === "ok" && sys.processBudget.status === "ok" &&
     sys.resourceGate.verdict === "GO" && sys.processBudget.verdict === "GO";
@@ -406,7 +506,7 @@ export function renderSysCard(sys: SystemResult): string {
     <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">系统资源</div>
     <p style="margin:0;font-size:0.8rem;line-height:1.5">cpu_stall ${sys.resourceGate.cpuStallAvg10 != null ? escapeHtml(String(sys.resourceGate.cpuStallAvg10)) : "—"} · loadavg ${sys.resourceGate.loadAvg != null ? escapeHtml(String(sys.resourceGate.loadAvg)) : "—"}</p>
     <div style="font-weight:800;color:${sysGo ? "var(--color-positive-700)" : "var(--color-accent-800)"}">⇒ ${sysGo ? "GO" : sys.resourceGate.status === "ok" ? "WAIT" : "未接入"}</div>
-    <svg id="sys-sparkline" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 60" role="img" aria-label="系统负载历史（页面停留期间）" style="width:100%;height:60px;margin-top:4px"></svg>
+    <svg id="sys-sparkline" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 120" role="img" aria-label="系统负载历史（页面停留期间）" style="width:100%;height:120px;margin-top:4px">${sparklineSvg([], sys.resourceGate.loadThreshold)}</svg>
     <a href="/system" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看系统状态 →</a>
   </div>`;
 }
@@ -771,6 +871,7 @@ export async function handleDashboardCards(
     sysRaw: {
       cpuStallAvg10: sys.resourceGate.cpuStallAvg10,
       loadAvg: sys.resourceGate.loadAvg,
+      loadThreshold: sys.resourceGate.loadThreshold,
       ts: Date.now(),
     },
   });
