@@ -748,7 +748,7 @@ export async function runMetaRound(opts: MetaRoundOptions): Promise<MetaRoundRes
   const filed = await fileProposals(root, parsed.proposals, records, { k, activeGoalIds, dryRun });
   const acceptedIds = filed.filter((f) => f.accepted).map((f) => f.id);
   // 自动驱动：每轮至多 1 条（⛔ 比提案更严——立案会被自动晋升并派发）。
-  const driven = await driveItems(root, parsed.autoDrive, readings, { cap: 1, dryRun, at });
+  const driven = await driveItems(root, parsed.autoDrive, readings, { cap: 1, dryRun, at }); // concurrency-default-fallback: 自动驱动每轮至多 1 条（比提案 3 更严——立案会被自动晋升并派发）
   const drivenIds = driven.filter((d) => d.accepted).map((d) => d.id);
   // 判读成功才推进状态：失败/解析不了的轮不写 state ⇒ 下一轮仍判为「该判读」，⛔ 不会因
   // 一次失败就把这批读数当成"已判过"而永久跳过。
