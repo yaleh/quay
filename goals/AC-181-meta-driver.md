@@ -15,7 +15,7 @@ origin: 2026-09-06 实测：meta 已注册进 DriverKind/DRIVER_KINDS/CLI
   更新（该文件只有一个提交），quality 同样不在其中、靠手工启动。硬规则 4 推论三：一个只能被 fixture/开发态满足的判据不是测量；AC
   必须至少有一条读生产载体。判据已实跑取假：立条时刻 exit=1（首轮尚未落地）。
 evidence:
-  at: 2026-09-06T23:17:25.995Z
+  at: 2026-09-06T23:18:09.524Z
   verdict: pass
   reading: acceptance passed (exit 0)
 ---
