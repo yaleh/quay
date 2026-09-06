@@ -15,7 +15,18 @@ kinds:
     cap: 5               # 并发 cap（promotion 的 ready-pool --cap；AC48 后 cap 不闸晋升，仍参与 floor/disjointness）
     interval_ms: 30000   # 轮间隔（round heartbeat 节奏，SPEC §5.5 定时器地板）
   worker:
-    cap: 5               # 并发 cap（worker 常驻选择环的存活 worker 上限）
+    # ⏳ 临时下调 5 → 2（人 2026-09-06 明确授权「授权你临时下调 worker 并发上限」）。
+    # ⛔ 这是一个【临时值】，不是新基线。恢复动作：改回 `cap: 5` 并删除本注释块。
+    # 依据（实测读数，非估计）：本机 nproc=16；worker cap=5 时 load average 峰值 45.12、
+    # 并发 subagent 9–10 个。全量 suite 中多条判据依赖【未被控制的调度竞争】，在该档并发下翻转，
+    # 已实测连续挡住同一个任务的 fan-in 两次（各 3 轮，共 6 次全量 suite 空转）：
+    #   · plugin/test/measure-suite.test.mjs:329  heavy/wait 比值断言
+    #     → gap-measure-suite-heavy-wait-ratio-load-sensitive-flaky
+    #   · plugin/test/writestate-atomicity-split.test.mjs:125  torn>0 断言
+    #     → gap-writestate-torn-read-assertion-load-sensitive-flaky
+    # 两者【隔离跑均通过】（9/9、2/2）⇒ 能区分的对照成立：成因是负载，不是被测代码。
+    # 恢复条件：上述两条 flaky 任务 done（判据改为不依赖外生负载，或移入 lowconc 泳道）之后。
+    cap: 2               # 并发 cap（worker 常驻选择环的存活 worker 上限）
     interval_ms: 30000   # 无在飞 worker 且瞬时 WAIT 时的轮询间隔
     reconcile_interval_secs: 300  # 协调地板（SPEC §5.5：至少每 N 秒协调一次，边沿事件全丢也「慢但正确」而非静默停摆）
   outer:
