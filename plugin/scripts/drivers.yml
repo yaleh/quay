@@ -28,3 +28,6 @@ kinds:
     cap: 5               # ⛔ 同 quality：例程型 kind 无并发概念；字段仅为齐整
     interval_ms: 30000   # 循环滴答；meta 复核本身的节奏由 --review-interval（分钟）控制，
                          # 且语义半还要过变化检测闸 ⇒ 读数没变的轮不派 LLM
+  goal:
+    cap: 5               # ⛔ 同 meta：goal 机械环例程型 kind 无并发概念；字段仅为齐整
+    interval_ms: 30000   # 循环滴答（每轮跑一遍 goal 机械环：跑 criterion→写 evidence→I2 flip→I3/I4）
