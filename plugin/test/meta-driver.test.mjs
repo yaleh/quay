@@ -9,6 +9,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   computeDivergences,
@@ -17,8 +21,12 @@ import {
   nextAcId,
   parseProbeOutput,
   fileProposals,
+  writeDraftProposal,
   buildProbePrompt,
 } from '../scripts/meta-driver.ts';
+
+// 脚本根（goal-store.ts 从这里取）——数据根在各测试里另给临时目录。
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 // ── computeDivergences ───────────────────────────────────────────────────────
 test('computeDivergences: pass 但状态非 achieved ⇒ pass-but-unflipped', () => {
@@ -168,6 +176,53 @@ test('fileProposals: dry-run 分配 id 但不写盘', async () => {
   assert.equal(r[0].accepted, true);
   assert.equal(r[0].id, 'AC-180');
   assert.match(r[0].reason, /dry-run/);
+});
+
+// ── 真写入路径（⛔ 不用 dry-run、不用假 seam）──────────────────────────────────
+// 为什么必须有这一条：v0 的两次生产轮都没产出提案（语义半克制），dry-run 与其它单测又都
+// 绕开了 writeDraftProposal ⇒ 写入路径【从未真正执行过】，与「没实现」同形（硬规则 4 推论三：
+// 只能被 fixture/dry-run 满足的判据不是测量）。这里跑真的 goal-store CLI 写真的文件。
+test('writeDraftProposal 真的写出一条 draft 记录（真跑 goal-store CLI，非 dry-run）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-write-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'goals', 'GOAL-001-t.md'),
+      '---\nid: GOAL-001\ntitle: t\nstatus: active\nkind: goal\norigin: test fixture\n---\n## Goal\nx\n');
+
+    const r = await fileProposals(repoRoot, [goodProposal], [], {
+      k: 3, activeGoalIds: new Set(['GOAL-001']), dryRun: false, dataRoot: tmp,
+    });
+
+    assert.equal(r[0].accepted, true, `写入应成功，实际: ${r[0].reason}`);
+    assert.equal(r[0].id, 'AC-001');
+
+    const files = fs.readdirSync(path.join(tmp, 'goals'));
+    const written = files.find((f) => f.startsWith('AC-001'));
+    assert.ok(written, `应写出 AC-001 文件，实际目录内容: ${files.join(', ')}`);
+    const text = fs.readFileSync(path.join(tmp, 'goals', written), 'utf8');
+    // 关键性质：落盘即 draft（构造上惰性——写下它不会让任何事发生）。
+    assert.match(text, /^status: draft$/m, '提案必须落为 draft，⛔ 绝不能是 active');
+    assert.match(text, /goal: GOAL-001/);
+    assert.ok(text.includes('gate-events.jsonl'), 'origin 的实证内容必须落盘');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// 负控制：origin 缺失时 goal-store 自身 fail-closed（AC6「空 origin 不写」）——
+// 确认这条闸真的在我们的调用路径上生效，而不是只在文档里。
+test('origin 为空 ⇒ goal-store fail-closed，写入失败且不留文件', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-noorigin-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    const r = await writeDraftProposal(repoRoot, 'AC-002',
+      { ...goodProposal, origin: '' }, tmp);
+    assert.equal(r.ok, false, 'origin 为空必须写入失败');
+    const files = fs.readdirSync(path.join(tmp, 'goals'));
+    assert.equal(files.filter((f) => f.startsWith('AC-002')).length, 0, '失败时不得留下半条记录');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 // ── buildProbePrompt ─────────────────────────────────────────────────────────

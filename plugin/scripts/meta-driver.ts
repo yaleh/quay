@@ -83,12 +83,15 @@ export interface MetaRoundReadings {
 
 // ── 机械半 ────────────────────────────────────────────────────────────────────────────────────────
 
-/** goal-store CLI 的 argv（单一构造点——所有 goal 读写都经这里，⛔ 不在别处拼路径）。 */
-export function goalStoreArgv(root: string, sub: string[]): string[] {
+/** goal-store CLI 的 argv（单一构造点——所有 goal 读写都经这里，⛔ 不在别处拼路径）。
+ *  `scriptRoot` 定位脚本，`dataRoot` 定位 `goals/` 与 `.quay/gate-events.jsonl`；生产上两者相同。
+ *  **总是显式传 `--root`**：goal-store 的缺省是从 cwd 向上找根，driver 从别的 cwd 跑时会找错
+ *  （隐式 cwd 依赖，硬规则 4b：别让判定量经过一层未经验证的中间推导）。 */
+export function goalStoreArgv(scriptRoot: string, sub: string[], dataRoot: string = scriptRoot): string[] {
   return [
     "node", "--no-warnings", "--experimental-strip-types",
-    path.join(root, "packages", "quay", "src", "goal-store.ts"),
-    ...sub,
+    path.join(scriptRoot, "packages", "quay", "src", "goal-store.ts"),
+    ...sub, "--root", dataRoot,
   ];
 }
 
@@ -202,7 +205,7 @@ export function nextAcId(records: Array<Record<string, unknown>>): string {
 }
 
 /** 写一条 draft 提案。⛔ 永不传 --status：goal-store 的 write 缺省即 draft（构造上惰性）。 */
-export async function writeDraftProposal(root: string, id: string, p: Proposal): Promise<{ ok: boolean; reason: string }> {
+export async function writeDraftProposal(root: string, id: string, p: Proposal, dataRoot: string = root): Promise<{ ok: boolean; reason: string }> {
   const argv = goalStoreArgv(root, [
     "write", id,
     "--goal", p.goal,
@@ -210,7 +213,7 @@ export async function writeDraftProposal(root: string, id: string, p: Proposal):
     "--criterion", p.criterion,
     "--expect", p.expect,
     "--origin", p.origin,
-  ]);
+  ], dataRoot);
   const r = await runAsync(argv, { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
   if (r.error) return { ok: false, reason: `write spawn error: ${r.error.message}` };
   if (r.status !== 0) return { ok: false, reason: `write exit ${r.status}: ${(r.stderr || "").trim().slice(0, 200)}` };
@@ -223,7 +226,7 @@ export async function fileProposals(
   root: string,
   proposals: Proposal[],
   records: Array<Record<string, unknown>>,
-  opts: { k: number; activeGoalIds: Set<string>; dryRun: boolean },
+  opts: { k: number; activeGoalIds: Set<string>; dryRun: boolean; dataRoot?: string },
 ): Promise<Array<{ proposal: Proposal; id: string | null; accepted: boolean; reason: string }>> {
   const results: Array<{ proposal: Proposal; id: string | null; accepted: boolean; reason: string }> = [];
   const keys = existingProposalKeys(records);
@@ -242,7 +245,7 @@ export async function fileProposals(
     if (opts.dryRun) {
       results.push({ proposal: p, id, accepted: true, reason: "dry-run: would write as draft" });
     } else {
-      const w = await writeDraftProposal(root, id, p);
+      const w = await writeDraftProposal(root, id, p, opts.dataRoot ?? root);
       if (!w.ok) { results.push({ proposal: p, id, accepted: false, reason: w.reason }); continue; }
       results.push({ proposal: p, id, accepted: true, reason: w.reason });
     }
