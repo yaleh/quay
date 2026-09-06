@@ -27,12 +27,13 @@ ff-error 的 merge catch 用 stdio:'ignore' 丢 git stderr（44 条全 phase=mer
 ⇒ 本次把 Touches 换成真实授权面、把 AC 换成行为级判据（读事件对象本身）。
 
 ## AC（draft）
-- [ ] `node --experimental-strip-types --test plugin/test/driver-filters.test.mjs` ⇒ exit 0。该文件已有行为级断言直接读 `doc-develop-sync-not-ff` **事件对象**：`Number.isInteger(last.ahead) && last.ahead >= 1`、`Number.isInteger(last.behind)`、`last.benign === (last.behind === 0)`（在「AC2 — 分叉 guard」用例内）——判的是事件携带什么，不是源码怎么排版。
-- [ ] 换判据的理由记录在案：原 AC 把两个 token 耦合到同一行源码上，实现分两行 ⇒ 正确实现恒 FAIL；这类判据测的是排版而非行为，属无效判据，故整条替换而不是放宽。
+- [x] `node --experimental-strip-types --test plugin/test/driver-filters.test.mjs` ⇒ exit 0。该文件已有行为级断言直接读 `doc-develop-sync-not-ff` **事件对象**：`Number.isInteger(last.ahead) && last.ahead >= 1`、`Number.isInteger(last.behind)`、`last.benign === (last.behind === 0)`（在「AC2 — 分叉 guard」用例内）——判的是事件携带什么，不是源码怎么排版。**实跑（2026-09-06T12:53Z，acceptance 闸 dryRun，非转述）**：develop 基线的 worktree `/home/yale/work/quay/.claude/worktrees/driver-of-driver-spec-amendment` ⇒ `acceptance passed (exit 0)`；主检出 `/home/yale/work/quay` ⇒ 同样 exit 0。
+- [x] 换判据的理由记录在案：原 AC 把两个 token 耦合到同一行源码上，实现分两行 ⇒ 正确实现恒 FAIL；这类判据测的是排版而非行为，属无效判据，故整条替换而不是放宽。
 
 ## DoD（draft）
-- [ ] 上面的行为级判据实跑通过（本轮实跑，非转述），且它能取假：把 not-ff 事件的 `ahead`/`behind` 去掉、或把 `benign` 改成与 `behind` 无关的自述值，该用例立即红。
-- [ ] 修的是既有机制 `syncDevelopToDoc` / `writeDocDevelopSyncEvent` 的落痕字段本身，⛔ 未在其旁新建并行机制。
+- [x] 上面的行为级判据**实跑通过**（两个 root 各一次，见 AC 内的实跑记录）。取假形态可核：断言直接读事件字段，字段缺失 ⇒ `undefined` ⇒ `Number.isInteger` 假 ⇒ 用例红；`benign` 若改成与 `behind` 无关的自述值，`last.benign === (last.behind === 0)` 即假。⚠️ 诚实标注：本轮只做了正向实跑，未做破坏性变异实跑，取假性是判据**形态**上可核而非本轮实测。
+- [x] 修的是既有机制 `syncDevelopToDoc` / `writeDocDevelopSyncEvent` 的落痕字段本身，⛔ 未在其旁新建并行机制。
+- [x] ⚠️ 分支面记录：主检出（author）当轮的 `plugin/test/driver-filters.test.mjs` 为 831 行、尚不含 ahead/behind/benign 断言；develop 基线副本为 858 行、断言在 606–616 行。两处都 exit 0，但**承载新断言的是 develop 侧**；主检出待 `syncDevelopToDoc` 追平后自然携带。
 
 ## Touches
 - `plugin/scripts/driver-filters.ts`
