@@ -73,3 +73,8 @@ roles:
   pool-judge:
     profile: worker-default
     name: quay-pool-judge
+  # meta-driver v0：机制演进的观测/提案例程的语义半（plugin/probes/meta-driver.md）。
+  # 短命 claude -p，每轮全新上下文——抗漂移靠这个，不靠提示词。
+  meta-driver:
+    profile: worker-default
+    name: quay-meta-driver
