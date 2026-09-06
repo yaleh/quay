@@ -975,9 +975,11 @@ async function runMetaRoundInner(opts: MetaRoundOptions): Promise<MetaRoundResul
   const filed = await fileProposals(root, parsed.proposals, records, { k, activeGoalIds, dryRun });
   const acceptedIds = filed.filter((f) => f.accepted).map((f) => f.id);
   // 自动驱动：每轮至多 1 条（⛔ 比提案更严——立案会被自动晋升并派发）。
+  // concurrency-default-fallback: 每轮 auto-drive 至多 1 条是语义上限（轮内立案密度控制），非机器规格依赖。
   const driven = await driveItems(root, parsed.autoDrive, readings, { cap: 1, dryRun, at });
   const drivenIds = driven.filter((d) => d.accepted).map((d) => d.id);
   // 决策也必须被【路由】到 draft GOAL（⛔ 不许停在一个只打印的字段里）。
+  // concurrency-default-fallback: 每轮 decisions 至多 2 条是语义上限（轮内决策密度控制），非机器规格依赖。
   const decided = await fileDecisions(root, parsed.decisions, readings, records, { cap: 2, dryRun, at });
   const decidedIds = decided.filter((d) => d.accepted).map((d) => d.id);
   // 判读成功才推进状态：失败/解析不了的轮不写 state ⇒ 下一轮仍判为「该判读」，⛔ 不会因
