@@ -232,9 +232,10 @@ test("AC1 — Layer 1b (routine) reuses L0 schedule/heartbeat/notify; ⛔ 不重
 // ── AC2（supervisor 港进 TS）：registry 单一数据表 + 可单测纯函数 ─────────────────────────────────
 
 test("AC2 — 8 张 bash registry 表 → DRIVER_KINDS 单一 TS 数据表", () => {
-  // 2026-09-06 +meta（机制演进复核例程型 kind）。基线断言【有意更新】——它的作用是让新增 kind
-  // 必须显式过一次这条断言，而不是悄悄混进来；故保持逐字列举，⛔ 不改成 length 或 includes。
-  assert.deepEqual(KNOWN_KINDS, ["promotion", "worker", "outer", "quality", "suite", "meta"], "六个 kind，registry 数据表承载差异");
+  // 2026-09-06 +meta（机制演进复核例程型 kind）+goal（G6 goal 机械环例程型 kind）。基线断言
+  // 【有意更新】——它的作用是让新增 kind 必须显式过一次这条断言，而不是悄悄混进来；故保持逐字
+  // 列举，⛔ 不改成 length 或 includes。
+  assert.deepEqual(KNOWN_KINDS, ["promotion", "worker", "outer", "quality", "suite", "meta", "goal"], "七个 kind，registry 数据表承载差异");
   assert.equal(DRIVER_KINDS.promotion.driver, "promotion-driver.ts");
   assert.equal(DRIVER_KINDS.promotion.capFlag, "--cap", "promotion capFlag = --cap");
   assert.equal(DRIVER_KINDS.promotion.hasInterval, true);
@@ -262,6 +263,14 @@ test("AC2 — 8 张 bash registry 表 → DRIVER_KINDS 单一 TS 数据表", () 
   assert.equal(DRIVER_KINDS.quality.pidSelf, true);
   assert.deepEqual(DRIVER_KINDS.quality.carriers, ["quality-round.jsonl"]);
   assert.equal(DRIVER_KINDS.quality.controlFile, "quality-control.json");
+  // G6：goal 机械环例程型 kind（Layer 0 + 1b），registry 加一行接入（同 quality/meta）。
+  assert.equal(DRIVER_KINDS.goal.driver, "goal-driver.ts");
+  assert.equal(DRIVER_KINDS.goal.capFlag, "", "goal 无任务池 ⇒ 无 cap");
+  assert.equal(DRIVER_KINDS.goal.hasInterval, true);
+  assert.equal(DRIVER_KINDS.goal.hasReconcile, false);
+  assert.equal(DRIVER_KINDS.goal.pidSelf, true);
+  assert.deepEqual(DRIVER_KINDS.goal.carriers, ["goal-round.jsonl"]);
+  assert.equal(DRIVER_KINDS.goal.controlFile, "goal-control.json");
 });
 
 test("AC2 — driverArgvForKind maps --cap → per-kind cap flag (worker --concurrency)", () => {

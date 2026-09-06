@@ -1,7 +1,7 @@
 ---
 id: AC-171
 title: G2 迁移——当前阶段与下一阶段的 AC 全部成为 store 记录
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-001
 criterion: >
@@ -12,7 +12,7 @@ origin: |
   规格 §7.1：上一次的死因是"建好了没人迁"——goal-store 落地 28 天，goals/ 从未存在。
   ⇒ 迁移排在 ABI 与 driver 之前，让 store 先有真实数据再加功能。
 evidence:
-  at: 2026-09-06T09:44:34.051Z
+  at: 2026-09-06T22:22:04.489Z
   verdict: pass
   reading: acceptance passed (exit 0)
 ---

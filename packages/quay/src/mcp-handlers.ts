@@ -214,6 +214,7 @@ export function registerTaskHandlers(
         parent: z.string().nullable().optional().describe("Parent task id, or null to clear. Omit to leave unchanged."),
         children: z.array(z.string()).optional().describe("Replacement children array. Omit to leave unchanged."),
         depends_on: z.array(z.string()).optional().describe("Prerequisite task ids (relation edge, first-class top-level field). Omit to leave unchanged."),
+        goal_ac: z.string().optional().describe("Owning goal AC id (task→AC linkage, top-level single scalar). Omit to leave unchanged."),
         body: z.string().optional().describe("Full replacement body (markdown). Omit to leave unchanged."),
         extra: z.record(z.string(), z.any()).optional().describe("Extra frontmatter fields as a key/value map."),
         expectedStatus: z.string().optional().describe("Optimistic-locking guard: if task's current status differs from this value, the write is refused with isError:true (no mutation). Omit to skip the check."),

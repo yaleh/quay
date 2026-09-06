@@ -39,6 +39,7 @@ import {
   renderDecisionOrigin,
   decisionQuality,
   collectDriverReadings,
+  collectInertCheckers,
   shouldJudge,
   readState,
   writeState,
@@ -259,6 +260,55 @@ test('origin 为空 ⇒ goal-store fail-closed，写入失败且不留文件', a
   }
 });
 
+// ── 写盘即提交（gap-meta-goalstoreargv：未跟踪 goals/*.md 阻塞 develop→doc ff-only）────
+// 为什么必须真 git 仓库（⛔ 不用非 git 临时目录）：commitTaskFile 在 repo-less 根下是 no-op，
+// 若测试跑在非 git 目录，「写后提交」与「写后没提交」观测不到差别 ⇒ 判据恒真（硬规则 4）。
+// 下面第二条负控制证明判据本身能取假：未提交的 goals/*.md 会被 git status --porcelain 检出。
+test('writeDraftProposal 写盘即提交：写后 goals/ 无未提交记录（真 git 仓库）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-commit-'));
+  const run = (...args) => execFileSync('git', ['-C', tmp, ...args], { encoding: 'utf8' });
+  try {
+    run('init', '-q'); run('config', 'user.email', 't@t'); run('config', 'user.name', 't');
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    // base：一条 active GOAL，供 fileProposals 的 activeGoalIds 闸识别（否则提案被 invalid goal id 拒）。
+    fs.writeFileSync(path.join(tmp, 'goals', 'GOAL-001-t.md'),
+      '---\nid: GOAL-001\ntitle: t\nstatus: active\nkind: goal\norigin: fixture\n---\n## Goal\nx\n');
+    run('add', '-A'); run('commit', '-qm', 'base');
+
+    const r = await fileProposals(repoRoot, [goodProposal], [], {
+      k: 3, activeGoalIds: new Set(['GOAL-001']), dryRun: false, dataRoot: tmp,
+    });
+    assert.equal(r[0].accepted, true, `写入应成功，实际: ${r[0].reason}`);
+
+    // AC 判据：写盘路径提交后，goals/ 无任何未提交记录（git status --porcelain goals/ 为空）。
+    const porcelain = run('status', '--porcelain', '--', 'goals');
+    assert.equal(porcelain.trim(), '', `写盘后 goals/ 必须无未提交记录，实得: ${JSON.stringify(porcelain)}`);
+    // 文件真的进了 git（⛔ 不是"没有 git 仓库所以空"——那与合格同形，硬规则 3b）。
+    assert.ok(run('ls-files', 'goals').includes('AC-001'), '新写的 AC-001 必须已 tracked');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// 负控制：判据能取假——把「写盘即提交」改坏（写但不提交）时，同一个 git status 判据必须红。
+test('负控制：未提交的 goals/*.md 被 git status --porcelain 检出（判据能取假，⛔ 非恒真）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-nocommit-'));
+  const run = (...args) => execFileSync('git', ['-C', tmp, ...args], { encoding: 'utf8' });
+  try {
+    run('init', '-q'); run('config', 'user.email', 't@t'); run('config', 'user.name', 't');
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    // 先落一条已跟踪的 base（git 不跟踪空目录 ⇒ 空 goals/ 提交不出 base）。
+    fs.writeFileSync(path.join(tmp, 'goals', 'AC-000-base.md'), '---\nid: AC-000\nstatus: draft\n---\n');
+    run('add', '-A'); run('commit', '-qm', 'base');
+    // 模拟老实现/改坏实现的形状：写盘但没提交 ⇒ 未跟踪文件。
+    fs.writeFileSync(path.join(tmp, 'goals', 'AC-999-leak.md'), '---\nid: AC-999\nstatus: draft\n---\n');
+    const porcelain = run('status', '--porcelain', '--', 'goals');
+    assert.ok(porcelain.trim().length > 0, '未跟踪的 goals/*.md 必须被检出——否则该判据结构上测不到缺陷（恒真）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // ── 变化检测闸（事件触发 + 定时器地板）────────────────────────────────────────
 // noise 显式传入：⛔ 不用 Date.now() 制造差异——同一毫秒内两次调用会相等，前提就不成立了
 // （实测踩到：该前提断言当场报错，正是它存在的理由）。
@@ -270,6 +320,7 @@ const mkReadings = (verdict, noise = 'n1') => ({
   drivers: [{ kind: 'promotion', running: true, supervisorAlive: true, driverAlive: true, carrierRecords: noise.length, carrierLastTs: null, staleSecs: noise.length }],
   syncHealth: { window: 200, ffSynced: 1, notFf: 2, ffError: 0, semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0, lastEvent: 'doc-develop-sync-not-ff', lastTs: null },
   addressedTasks: [],
+  inertCheckers: [],
   focus: null,
 });
 
@@ -743,10 +794,53 @@ test('collectDriverReadings: 覆盖全部注册 kind；读不出时刻 ⇒ stale
   }
 });
 
+// gap-not-evaluated-checkers-never-persisted — 惰性守卫读数：从 full-suite-state.json 的
+// notEvaluatedCheckers 逐条枚举名字（⛔ 不是计数），读不到 ⇒ 空数组而非 undefined。
+test('collectInertCheckers: 逐条枚举 notEvaluatedCheckers 的名字；字段缺失/非数组 ⇒ 空数组（⛔ 非 undefined）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-inert-'));
+  try {
+    fs.mkdirSync(path.join(tmp, '.quay'), { recursive: true });
+    // 读不到 state ⇒ 空数组（⛔ 不是 undefined——「本轮没有未评估项」与「没记录这个维度」可区分）。
+    assert.deepEqual(collectInertCheckers(tmp), [], '无 state 文件 ⇒ 空数组，不是 undefined');
+    // 喂一个含 notEvaluatedCheckers 的 state 文件，断言逐条出现。
+    fs.writeFileSync(path.join(tmp, '.quay', 'full-suite-state.json'), JSON.stringify({
+      state: 'green',
+      notEvaluatedCheckers: [
+        { name: 'direct-to-develop-bypass-check', line: 'STATIC_CHECK_NOT_EVALUATED: direct-to-develop-bypass-check' },
+        { name: 'threshold-scope-check', line: 'STATIC_CHECK_NOT_EVALUATED: threshold-scope-check' },
+      ],
+    }), 'utf8');
+    assert.deepEqual(collectInertCheckers(tmp), ['direct-to-develop-bypass-check', 'threshold-scope-check'],
+      '逐条枚举名字（不是计数），且保序');
+    // 字段存在但为空数组 ⇒ 空数组（「本轮没有未评估项」）。
+    fs.writeFileSync(path.join(tmp, '.quay', 'full-suite-state.json'), JSON.stringify({ state: 'green', notEvaluatedCheckers: [] }), 'utf8');
+    assert.deepEqual(collectInertCheckers(tmp), [], '显式空数组 ⇒ 空数组');
+    // 字段不是数组（state 还在 running / 老字段）⇒ 空数组，⛔ 不抛、不当非空。
+    fs.writeFileSync(path.join(tmp, '.quay', 'full-suite-state.json'), JSON.stringify({ state: 'running' }), 'utf8');
+    assert.deepEqual(collectInertCheckers(tmp), [], 'running state（无该字段）⇒ 空数组');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// 负控制：惰性守卫的名字必须【进摘要】——否则一个新出现的惰性守卫不改变摘要 ⇒ 语义半永不被唤醒。
+test('readingsDigest: inertCheckers 名字进摘要——某个 guard 从在→不在/不在→在都改变摘要', () => {
+  const mk = (inert) => ({
+    goals: [], criteria: [], divergences: [], addressedTasks: [], inertCheckers: inert, focus: null,
+    drivers: [],
+    syncHealth: { window: 200, ffSynced: 0, notFf: 0, ffError: 0, semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0, lastEvent: null, lastTs: null },
+  });
+  assert.equal(readingsDigest(mk([])), readingsDigest(mk([])), '空 = 空');
+  assert.notEqual(readingsDigest(mk([])), readingsDigest(mk(['direct-to-develop-bypass-check'])),
+    '惰性守卫从无到有必须改变摘要');
+  assert.notEqual(readingsDigest(mk(['direct-to-develop-bypass-check'])), readingsDigest(mk(['threshold-scope-check'])),
+    '不同的惰性守卫必须改变摘要（逐名进，⛔ 只进计数会让换 guard 不改变摘要）');
+});
+
 // 负控制：摘要必须对【每轮都变的量】免疫——staleSecs/记录数每轮都不同，若进摘要则闸失效。
 test('readingsDigest: 不随 staleSecs/carrierRecords 变（否则变化检测恒为真）', () => {
   const mk = (stale, records) => ({
-    goals: [], criteria: [], divergences: [], addressedTasks: [], focus: null,
+    goals: [], criteria: [], divergences: [], addressedTasks: [], inertCheckers: [], focus: null,
     drivers: [{ kind: 'promotion', running: true, supervisorAlive: true, driverAlive: true, carrierRecords: records, carrierLastTs: null, staleSecs: stale }],
     syncHealth: { window: 200, ffSynced: 1, notFf: 2, ffError: 0, semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0, lastEvent: 'doc-develop-sync-not-ff', lastTs: null },
   });

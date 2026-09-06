@@ -2,7 +2,7 @@
 id: gap-shape-section-tables-dual-copy-no-single-source
 title: shape 判定的「哪些标题算 AC/DoD」是两份手抄名单——store.ts 缺 draft/suffix 变体，与
   ready-pool-check 分歧（同一对文件第 2 次同类分歧）
-status: ready
+status: done
 labels:
   - gap
   - gate
@@ -38,11 +38,11 @@ extra:
 
 **方向倾向（供执行者判断，非强制）**：以 `store.ts` 的 `SHAPE_REGISTRY` 为单一正源（产品层不依赖方法论层，方法论层依赖产品层是正确方向），把缺失的 draft/suffix 变体加进正源，`ready-pool-check.ts` 改为 import 而非手抄。⛔ 若执行者判断这条新分层边不可接受，退路是把名单抽到一个双方都 import 的共享数据文件——但**不接受「两边各补一份名单」**，那不解决问题。
 
-**已查的约束（不触发，但执行者须知）**：`ready-pool-check.ts` 不在 `plugin/test/driver-cli.test.mjs:39` 的 `KERNEL_DEPS` 闭集内，故本改动不破坏 kernel hermetic closure。⚠️ 但该闭集是把文件**平铺**复制进 temp root 的；若日后 store.ts 被拉进任何 kernel dep 的 import 图，跨 `packages/` 的相对 import 会在 temp root 解析失败。
+**已查的约束（执行者实测，第二条被推翻）**：`ready-pool-check.ts` 不在 `plugin/test/driver-cli.test.mjs:39` 的 `KERNEL_DEPS` 闭集内，故本改动不破坏 kernel hermetic closure（这条仍成立）。⚠️ 但「跨 `packages/` 的相对 import 会在 temp root 解析失败」这条**不是「若日后」而是立刻成立**——不是 KERNEL_DEPS，而是 **quay-init laydown**：`ready-pool-check.ts` 是 laydown 到消费者项目的机件（`promotion-driver.ts:123` 以 `node …/plugin/scripts/ready-pool-check.ts` 运行），消费者项目**没有 `packages/` 源码树**（只有 vendored dist bundle）⇒ 静态 `import "../../packages/quay-native/src/store.ts"` 必报 `ERR_MODULE_NOT_FOUND`（npm-pack-e2e 的 build-plugin-dist 实测抓到了「Could not resolve ../../packages/quay-native/src/store.ts」）。
 
 **零新增定时检查器**：本条的修法是消灭副本本身（无从漂移），不新增周期性检查机制。
 
-**与 `cand-cjk-proposal-slot-word-boundary`（done）的关系（实现记录，DoD④）**：那次修的是**匹配语义**（`\b` → 整行精确匹配，store.check() 的 CJK 提案槽别名），本次修的是**名单来源**（两份手抄 section 名单 → store.ts `SHAPE_REGISTRY` 单一正源）。两者合起来才使「is the single judge quay and meta-cc must share」这句 CLAUDE.md 契约在结构上成立：先有同一套 `\b`-free 整行精确匹配语义，再把「哪些标题算 AC/DoD」收敛到一个注册表，两个判官才真正读同一个东西。实现选择：以 store.ts 的 `SHAPE_REGISTRY` 为单一正源（产品层不依赖方法论层），draft/suffix 变体加进正源，`ready-pool-check.ts` 改为 import 派生（`SHAPE_SECTIONS = Object.fromEntries(Object.entries(SHAPE_REGISTRY).map(([s, spec]) => [s, spec.sections]))`）；并给 store.ts 的 heading 正则补 `escapeRegExp`——否则本次新注册的括号标题（`AC (draft)` / `Acceptance Criteria (runnable)` 等）会被当 regex 捕获组、永不匹配字面标题。
+**与 `cand-cjk-proposal-slot-word-boundary`（done）的关系（实现记录，DoD④）**：那次修的是**匹配语义**（`\b` → 整行精确匹配，store.check() 的 CJK 提案槽别名），本次修的是**名单来源**（两份手抄 section 名单 → 单一正源）。两者合起来才使「is the single judge quay and meta-cc must share」这句 CLAUDE.md 契约在结构上成立：先有同一套 `\b`-free 整行精确匹配语义，再把「哪些标题算 AC/DoD」收敛到一个注册表，两个判官才真正读同一个东西。**实现选择（采「退路」共享数据文件，非「方向倾向」的 import store.ts）**：以 `plugin/scripts/shape-sections.ts` 为单一正源（纯数据，无 import），`store.ts` 与 `ready-pool-check.ts` **双方都 import 它**。名单落在 laydown 集合内的 `plugin/scripts/`（quay-init 显式条目加入，避免 consumer 侧 `ERR_MODULE_NOT_FOUND`）；产品层 store.ts 反向 import 纯数据文件（esbuild bundle 内联进自足 dist，产品构建不受影响）；并给 store.ts 的 heading 正则补 `escapeRegExp`——否则新注册的括号标题（`AC (draft)` / `Acceptance Criteria (runnable)` 等）会被当 regex 捕获组、永不匹配字面标题。
 
 ## AC
 
@@ -64,4 +64,8 @@ extra:
 - `plugin/scripts/ready-pool-check.ts`
 - `packages/quay-native/test/gate-shape-dispatch.test.mjs`
 - `plugin/test/ready-pool-check.test.mjs`
+- `plugin/scripts/shape-sections.ts`
+- `plugin/scripts/quay-init.sh`
+- `plugin/scripts/capability-catalog.sh`
+- `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `tasks/gap-shape-section-tables-dual-copy-no-single-source.md`

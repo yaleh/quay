@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-closure-ratchet-manual-reanchor-recurs
 title: quay-init 闭包棘轮基线第 8 次被 laydown 内改动撞红，挡住全仓 fan-in——再锚 + 消除手工再锚形态
-status: ready
+status: done
 labels:
   - gap
   - defect

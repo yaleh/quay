@@ -49,6 +49,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import YAML from "yaml";
 import {
   parseFrontmatter,
@@ -171,6 +172,40 @@ export function isGoalId(id: string): boolean {
 
 export function isCriterionId(id: string): boolean {
   return typeof id === "string" && AC_ID_RE.test(id);
+}
+
+/**
+ * COMMIT-AFTER-WRITE (gap-meta-commitgoalfile): commit a goal file to git immediately after
+ * writeFileSync. The goal store is the SOURCE of goal writes — the CLI `write`/`gate` (evidence
+ * back-write), meta-driver's two write paths, all funnel through `write()`/`flipGoal()` — so the
+ * commit lives HERE, not in each caller (meta-driver's `commitGoalFile` covered only its two paths,
+ * leaving a direct `goal-store write` untracked ⇒ `git merge --ff-only develop` failed on untracked
+ * `goals/*.md` and develop→doc sync stalled). pathspec-limited to the single file (`--` the rel),
+ * ⛔ never a bare `git commit` — the index is SHARED across layers, a bare commit would sweep
+ * whatever another layer staged. Repo-less roots (unit-test temp dirs, bare checkouts) are a no-op
+ * (return false, not a throw) — the same shape as task-ops.ts commitTaskFile. Returns true when the
+ * commit landed; false when the goal dir is not in a git work tree / git errors (observable, not
+ * silent).
+ */
+function commitGoalFileAfterWrite(goalDir: string, fileName: string, id: string): boolean {
+  const root = path.dirname(goalDir);
+  let inside = "false";
+  try {
+    inside = execFileSync("git", ["-C", root, "rev-parse", "--is-inside-work-tree"], {
+      stdio: ["ignore", "pipe", "ignore"],
+    }).toString().trim();
+  } catch {
+    return false;
+  }
+  if (inside !== "true") return false;
+  const rel = `goals/${fileName}`;
+  try {
+    execFileSync("git", ["-C", root, "add", "--", rel]);
+    execFileSync("git", ["-C", root, "commit", "--no-verify", "-m", `goals: ${id} 写盘即提交（goal-store）`, "--", rel]);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -343,6 +378,7 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
     fm.status = patch.status;
     if (patch.supersededBy !== undefined) fm["superseded-by"] = patch.supersededBy;
     fs.writeFileSync(p, serializeFrontmatter(fm, body), "utf8");
+    commitGoalFileAfterWrite(goalDir, file, oldId);
   }
 
   function write(id: string, {
@@ -446,6 +482,7 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       const finalBody = body !== undefined ? body : existingBody;
       const fileName = existingFile ?? `${id}-${slugify(title, "goal")}.md`;
       fs.writeFileSync(path.join(goalDir, fileName), serializeFrontmatter(ordered, finalBody), "utf8");
+      commitGoalFileAfterWrite(goalDir, fileName, id);
       return get(id) as GoalViewModel;
     });
   }

@@ -3,7 +3,7 @@
 // cap is RETIRED (human ruling 2026-08-09): effective_cap is the FIXED constant 5, regardless of cpu
 // pressure / suite state / process budget. The band + hysteresis + budget logic still RUNS as PURE
 // OBSERVATION (the signal/band/budget lines the CLI prints) and is pinned here as observation, but it
-// participates in NO decision — effective_cap is always FIXED_EFFECTIVE_CAP (5).
+// participates in NO decision — effective_cap is always the configured worker cap.
 //
 // SPLIT NOTE (gap-suite-floor-two-longest-files-bound): this is one of FIVE files split from the
 // original cap-from-gate.test.mjs (166s main-phase floor) by test concern — this file holds the
@@ -38,9 +38,9 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 import {
-  FIXED_EFFECTIVE_CAP,
   computeEffectiveCap,
 } from "../scripts/cap-from-gate.ts";
+import { driverCap } from "../scripts/driver-config.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -56,6 +56,9 @@ function findRepoRoot(startDir) {
 }
 const REPO_ROOT = findRepoRoot(__dirname);
 const CAP_SCRIPT = path.join(REPO_ROOT, "plugin", "scripts", "cap-from-gate.sh");
+// Expected effective_cap = the CONFIGURED worker cap (drivers.yml via driverCap), NOT a hardcoded 5 —
+// gap-cap-from-gate-effective-cap-dual-source-blocks-yml-override (see cap-from-gate-bands.test.mjs).
+const CONFIGURED_CAP = driverCap(REPO_ROOT, "worker");
 
 // Hermetic bands injected into every GO/WAIT/EXTREME assertion (ad-arm1 gate #3 — see the sibling
 // cap-from-gate-bands.test.mjs header for the rationale). TEST_BANDS is a deliberately non-default
@@ -106,7 +109,7 @@ test("CLI smoke — `bash cap-from-gate.sh` prints a trailing effective_cap=<dig
   assert.equal(res.status, 0, `cap-from-gate.sh must exit 0\n${res.stdout}${res.stderr}`);
   const capLine = res.stdout.split("\n").filter((l) => l.startsWith("effective_cap=")).pop();
   assert.match(capLine, /^effective_cap=\d+$/, `last line must be effective_cap=N, got: ${capLine}`);
-  assert.equal(Number(capLine.split("=")[1]), FIXED_EFFECTIVE_CAP, "low avg10 ⇒ effective_cap is the fixed 5");
+  assert.equal(Number(capLine.split("=")[1]), CONFIGURED_CAP, `low avg10 ⇒ effective_cap is the configured worker cap (${CONFIGURED_CAP})`);
   // The Contract measure form: the stdout's digit segment contains the cap.
   const digits = (res.stdout.match(/[0-9]/g) || []);
   assert.ok(digits.length > 0, "stdout must carry a digit segment (Contract measure)");
@@ -117,7 +120,7 @@ test("CLI smoke — `bash cap-from-gate.sh` prints a trailing effective_cap=<dig
 // switching only with suite-running). effective_cap must be 5 REGARDLESS of load state — a suite
 // running or not, cpu pressure GO or EXTREME, budget idle or saturated. This is the Contract's
 // `effective_cap_stability` band: the CLI output is 5 in every state.
-test("FIXED-CAP — effective_cap is 5 under EVERY observed state (GO/WAIT/EXTREME × budget idle/saturated) — the Contract measure", (t) => {
+test("FIXED-CAP — effective_cap is the configured worker cap under EVERY observed state (GO/WAIT/EXTREME × budget idle/saturated) — the Contract measure", (t) => {
   const states = [
     // [label, avg10, nodeProcs, expectedObservedBand]
     ["GO idle", "12", "0", "GO"],
@@ -138,7 +141,7 @@ test("FIXED-CAP — effective_cap is 5 under EVERY observed state (GO/WAIT/EXTRE
       RESOURCE_GATE_TEST_NODE_PROCS: procs,
     };
     const r = computeEffectiveCap({ repoRoot: REPO_ROOT, stateFile: state, env });
-    assert.equal(r.effective_cap, FIXED_EFFECTIVE_CAP, `${label}: effective_cap must be the fixed 5, got ${r.effective_cap}`);
+    assert.equal(r.effective_cap, CONFIGURED_CAP, `${label}: effective_cap must be the configured worker cap (${CONFIGURED_CAP}), got ${r.effective_cap}`);
     assert.ok(["GO", "WAIT", "EXTREME"].includes(r.band), `${label}: observed band is a real band`);
     if (label.startsWith("UNMEASURABLE")) assert.equal(r.band, "EXTREME", "unmeasurable signal fail-closes the OBSERVED band to EXTREME");
   }
@@ -151,5 +154,5 @@ test("FIXED-CAP — effective_cap is 5 under EVERY observed state (GO/WAIT/EXTRE
   });
   assert.equal(res.status, 0, `cap-from-gate.sh must exit 0\n${res.stdout}${res.stderr}`);
   const capLine = res.stdout.split("\n").filter((l) => l.startsWith("effective_cap=")).pop();
-  assert.equal(Number(capLine.split("=")[1]), FIXED_EFFECTIVE_CAP, "suite-running (EXTREME, saturated) ⇒ effective_cap is still 5");
+  assert.equal(Number(capLine.split("=")[1]), CONFIGURED_CAP, `suite-running (EXTREME, saturated) ⇒ effective_cap is still ${CONFIGURED_CAP}`);
 });

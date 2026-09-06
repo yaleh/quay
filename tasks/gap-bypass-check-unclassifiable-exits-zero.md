@@ -59,3 +59,23 @@ extra: {}
 - `plugin/scripts/direct-to-develop-bypass-check.ts`
 - `plugin/test/direct-to-develop-bypass-check.test.mjs`
 - `tasks/gap-bypass-check-unclassifiable-exits-zero.md`
+## Needs-Human
+
+**执行 2026-09-06T17:28:47.155Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: # fail 1
+- run_id：wk-prod-1788712951
+- session_id：23b451f1-e43b-4967-b94d-f639419a2fe8
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-bypass-check-unclassifiable-exits-zero~wk-prod-1788712951~1788715429205-59237e.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-bypass-check-unclassifiable-exits-zero-wk-prod-1788712951.log
+
+## Resolution note
+
+**2026-09-06 — 复核结论：3x exited-not-landed 的根因不在本任务的修法本身，已解除，重置为 ready 让 driver 重派**
+
+- 本任务的修法已在分支 `task/gap-bypass-check-unclassifiable-exits-zero`（worktree `/home/yale/work/quay-worktrees/gap-bypass-check-unclassifiable-exits-zero`）落地且正确：`plugin/test/direct-to-develop-bypass-check.test.mjs` 41/41 通过；生产参数重跑（`--root . --baseline b11ce7202b46406d5d5bc82ef7b4c030c4aed05b --json`）现在正确退出 **3**（NOT-EVALUATED），输出 `evaluated:false, reason:"unclassifiable-commits-in-range", classification:{classified:1466,total:5641,ratio:0.26}`——与全部 AC 逐条吻合。
+- 两次 fan-in suite 日志核对：唯一的 `STATIC_CHECK_FAILED` 均为 **`quay-init-closure-ratchet exit=1`**，与本任务改动的文件（`direct-to-develop-bypass-check.ts` / 其测试）**无关**——是一个不同任务的缺陷在挡本任务的 fan-in。
+- 该 ratchet 缺陷已由同胞任务 `gap-quay-init-closure-ratchet-manual-reanchor-recurs` 修复并 **done**（落地于 develop）；已实测确认：`node --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --gate --root .` 在当前 develop/author（同为 b416856cc）上现在 **PASS**。
+- 已确认该修复提交 `cd71b2d7f` 是本任务分支 `task/gap-bypass-check-unclassifiable-exits-zero` 的祖先（`git merge-base --is-ancestor cd71b2d7f task/gap-bypass-check-unclassifiable-exits-zero` ⇒ 是）⇒ 重跑 fan-in 不应再撞到那条无关红。本任务分支落后当前 develop 650 个提交（fan-in 自身的 merge-develop 步骤会追上，属正常）、领先 6 个提交（即本任务的实际修复）。
+- AC/DoD 复选框沿用此前 worker 尝试已勾选的状态，本轮未重新核验、未改动；仅重置 `status: needs-human → ready`，交由 worker-driver 对现已解除阻塞的 fan-in 重试。

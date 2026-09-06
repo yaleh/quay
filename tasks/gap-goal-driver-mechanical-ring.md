@@ -1,7 +1,7 @@
 ---
 id: gap-goal-driver-mechanical-ring
 title: 新增 goal driver kind——机械环跑 AC 判据写 evidence、I2 flip achieved、I3/I4 报出
-status: todo
+status: done
 labels:
   - gap
   - delivery-critical
@@ -12,6 +12,7 @@ extra:
 depends_on:
   - gap-measure-suite-heavy-wait-ratio-load-sensitive-flaky
   - gap-writestate-torn-read-assertion-load-sensitive-flaky
+goal_ac: AC-177
 ---
 ## Proposal
 
@@ -65,13 +66,13 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] `test -s .quay/goal-round.jsonl && test "$(grep -c '"verdict"' .quay/goal-round.jsonl)" -ge 3` 退出 0（AC-177 判据，立案时取假：载体不存在）
-- [ ] 状态迁移可观测：driver 跑过之后 `node packages/quay/src/goal-store.ts check --staleness` 中 `GOAL-001` **不再位于 `notEvaluated` 桶**（立案时它在该桶）
-- [ ] AC 记录被真实写回：至少 3 条 `goals/AC-*.md` 的 `evidence.at` 晚于本任务落地时刻（读生产载体，非 fixture）
-- [ ] 边界负控制：driver 跑一轮后，`draft` 状态的 `GOAL-003` **仍为 draft**（未被自动激活）
-- [ ] 边界负控制：driver 一轮内不产生任何 `tasks/*.md` 的写入（单测/日志断言）
-- [ ] `cli/driver.ts` 的 `KINDS` 与 kernel `DRIVER_KINDS` 一致（含补回 `suite`）——单测断言两者集合相等
-- [ ] `bash scripts/test.sh --for-task gap-goal-driver-mechanical-ring` 退出 0
+- [x] `test -s .quay/goal-round.jsonl && test "$(grep -c '"verdict"' .quay/goal-round.jsonl)" -ge 3` 退出 0（AC-177 判据，立案时取假：载体不存在）
+- [x] 状态迁移可观测：driver 跑过之后 `node packages/quay/src/goal-store.ts check --staleness` 中 `GOAL-001` **不再位于 `notEvaluated` 桶**（立案时它在该桶）
+- [x] AC 记录被真实写回：至少 3 条 `goals/AC-*.md` 的 `evidence.at` 晚于本任务落地时刻（读生产载体，非 fixture）
+- [x] 边界负控制：driver 跑一轮后，`draft` 状态的 `GOAL-003` **仍为 draft**（未被自动激活）
+- [x] 边界负控制：driver 一轮内不产生任何 `tasks/*.md` 的写入（单测/日志断言）
+- [x] `cli/driver.ts` 的 `KINDS` 与 kernel `DRIVER_KINDS` 一致（含补回 `suite`）——单测断言两者集合相等
+- [x] `bash scripts/test.sh --for-task gap-goal-driver-mechanical-ring` 退出 0
 
 ## Definition of Done
 
@@ -90,6 +91,9 @@ depends_on:
 - plugin/scripts/capability-catalog.sh
 - packages/quay/src/cli/driver.ts
 - plugin/test/goal-driver.test.mjs (new)
+- plugin/test/driver-runtime.test.mjs
+- .gitignore
+- docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-goal-driver-mechanical-ring.md
 
 ## Needs-Human

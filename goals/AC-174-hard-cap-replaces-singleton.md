@@ -1,7 +1,7 @@
 ---
 id: AC-174
 title: G4 I1′ 硬上限取代单例 active，且拒绝时枚举当前 active 集合
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-001
 criterion: |
@@ -14,7 +14,7 @@ origin: |
   AC 同时存在：AC10/AC12/AC20/AC28；设目标的裁定六次，只加不关）。
   ⇒ 推翻它必须补等效守卫，硬上限即其一（另一半是 AC-175 的陈旧判定）。
 evidence:
-  at: 2026-09-06T09:44:35.423Z
+  at: 2026-09-06T22:22:06.197Z
   verdict: pass
   reading: acceptance passed (exit 0)
 ---

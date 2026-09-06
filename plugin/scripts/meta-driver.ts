@@ -89,6 +89,12 @@ export interface MetaRoundReadings {
    *  这是「裸缺陷」的入口（不必是 GOAL、不必挂活跃目标、不必用够不着的 --focus），
    *  同时是它自己的闭环（autoDrive 立的任务带同一标签，掉进 needs-human 也会回流）。 */
   addressedTasks: AddressedTask[];
+  /** gap-not-evaluated-checkers-never-persisted — the suite's INERT checkers (which run_static_checks
+   *   checker "读不懂输入" this round, i.e. exited 3 = NOT-EVALUATED), enumerated by NAME (⛔ 不是计数 —
+   *   SPEC §5.3: a bare scalar gates nothing; enumerate the names so the semantic half can name which
+   *   guard went inert). Read from full-suite-state.json's `notEvaluatedCheckers`. Empty array = "no
+   *   inert checker this round" (distinguishable from a missing dimension). */
+  inertCheckers: string[];
   focus: string | null;
 }
 
@@ -179,6 +185,7 @@ export async function collectReadings(root: string, focus: string | null): Promi
     drivers: collectDriverReadings(root),
     syncHealth: collectSyncHealth(root),
     addressedTasks: collectAddressedTasks(root),
+    inertCheckers: collectInertCheckers(root),
     focus,
   };
 }
@@ -238,6 +245,8 @@ export async function writeDraftProposal(root: string, id: string, p: Proposal, 
   const r = await runAsync(argv, { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
   if (r.error) return { ok: false, reason: `write spawn error: ${r.error.message}` };
   if (r.status !== 0) return { ok: false, reason: `write exit ${r.status}: ${(r.stderr || "").trim().slice(0, 200)}` };
+  // 写盘即提交：goal-store 的 write 自己写盘后立即提交（gap-meta-commitgoalfile），未跟踪
+  // goals/*.md 不再阻塞 develop→doc 的 ff-only 同步——⛔ 这里不再二次提交（不新建并行机制）。
   return { ok: true, reason: "written as draft" };
 }
 
@@ -409,6 +418,26 @@ export function collectSyncHealth(root: string, window = 200): SyncHealth {
   return h;
 }
 
+// gap-not-evaluated-checkers-never-persisted — 惰性守卫采集：从本轮 full-suite-state.json 提取
+// `notEvaluatedCheckers`（checker-cost-lib exit 3 = NOT-EVALUATED，非红非绿）逐条枚举名字。⛔ 不是
+// 计数——SPEC §5.3「原始工具输出的裸标量不得单独 gate 流水线；不枚举环/不给文件/不给修法，零指引
+// 价值」。取不到（state 缺失/还在 running/字段不存在）⇒ 空数组（⛔ 不是 undefined——「本轮没有未评估
+// 项」与「本轮没记录这个维度」必须可区分，硬规则 3b，与 full-suite-runner 侧 AC2 同形）。
+export function collectInertCheckers(root: string): string[] {
+  const file = path.join(root, ".quay", "full-suite-state.json");
+  let j: unknown;
+  try { j = JSON.parse(fs.readFileSync(file, "utf8")); } catch { return []; }
+  const arr = (j as { notEvaluatedCheckers?: unknown })?.notEvaluatedCheckers;
+  if (!Array.isArray(arr)) return [];
+  const out: string[] = [];
+  for (const c of arr) {
+    if (c && typeof (c as { name?: unknown }).name === "string" && ((c as { name: string }).name)) {
+      out.push((c as { name: string }).name);
+    }
+  }
+  return out;
+}
+
 // ── 变化检测（语义半的触发闸）────────────────────────────────────────────────────────────────────
 
 /** 语义半的触发状态（gitignored 运行时状态，与轮载体分开——它是【状态】不是【记录】）。 */
@@ -428,6 +457,9 @@ export function readingsDigest(readings: MetaRoundReadings): string {
     // 寄给它的任务：id + status 都进摘要。**必须进**——否则人新发一条裸缺陷不会改变摘要，
     // 变化检测闸会把那一轮判为"读数没变"而跳过语义半 ⇒ 这个入口在定时轮里等于不存在。
     ...readings.addressedTasks.map((t) => `task:${t.id}:${t.status}`).sort(),
+    // gap-not-evaluated-checkers-never-persisted — 惰性守卫的名字必须进摘要（⛔ 只进计数会让新出现的
+    // 惰性守卫不改变摘要 ⇒ 语义半永不被唤醒；逐名进，某个 guard 从在→不在/不在→在都改变摘要）。
+    ...readings.inertCheckers.map((n) => `inert:${n}`).sort(),
   ];
   return createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 16);
 }
@@ -1010,6 +1042,8 @@ export async function fileDecisions(
         out.push({ item, id, accepted: false, reason: `goal write failed (exit ${r.status}): ${(r.stderr || "").trim().slice(0, 200)}` });
         continue;
       }
+      // 写盘即提交：goal-store 的 write 自己写盘后立即提交（gap-meta-commitgoalfile）——
+      // ⛔ 这里不再二次提交（不新建并行机制）。
       out.push({ item, id, accepted: true, reason: `routed as draft ${id}（可在 /goal?status=draft 看到）` });
     }
     keys.add(findingKey(candidate));

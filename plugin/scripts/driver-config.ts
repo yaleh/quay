@@ -31,13 +31,14 @@ export interface DriverKindConfig {
   reconcileIntervalSecs: number;
 }
 
-/** 完整 driver 配置（promotion + worker + outer + quality + meta）。 */
+/** 完整 driver 配置（promotion + worker + outer + quality + meta + goal）。 */
 export interface DriverConfig {
   promotion: DriverKindConfig;
   worker: DriverKindConfig;
   outer: DriverKindConfig;
   quality: DriverKindConfig;
   meta: DriverKindConfig;
+  goal: DriverKindConfig;
 }
 
 /** 缺省配置（drivers.yml 缺失/不可解析时的回退；也是 parse 的 base）。 */
@@ -52,6 +53,8 @@ export function defaultDriverConfig(): DriverConfig {
     quality: { cap: DEFAULT_DRIVER_CAP, intervalMs: DEFAULT_INTERVAL_MS, reconcileIntervalSecs: 0 },
     // meta：机制演进复核例程型 kind，同 quality/outer——无并发概念，cap 仅为字段齐整。
     meta: { cap: DEFAULT_DRIVER_CAP, intervalMs: DEFAULT_INTERVAL_MS, reconcileIntervalSecs: 0 },
+    // goal：goal 机械环例程型 kind，同 quality/outer/meta——无并发概念，cap 仅为字段齐整。
+    goal: { cap: DEFAULT_DRIVER_CAP, intervalMs: DEFAULT_INTERVAL_MS, reconcileIntervalSecs: 0 },
   };
 }
 
@@ -94,13 +97,14 @@ export function loadDriverConfig(root: string): DriverConfig {
     outer: mergeKindConfig(kinds.outer, d.outer),
     quality: mergeKindConfig(kinds.quality, d.quality),
     meta: mergeKindConfig(kinds.meta, d.meta),
+    goal: mergeKindConfig(kinds.goal, d.goal),
   };
 }
 
 /** 单一并发 cap 解析（AC1 取假消点）：explicit（CLI --cap/--concurrency）优先 → drivers.yml cap →
  *  保守缺省 DEFAULT_DRIVER_CAP。⛔ 全仓库并发解析只此一份——promotion resolveCap / worker
  *  resolveConcurrency / cap-from-gate effective_cap 全部经本函数或 loadDriverConfig 派生。 */
-export function driverCap(root: string, kind: "promotion" | "worker" | "outer" | "quality" | "meta", explicit?: number): number {
+export function driverCap(root: string, kind: "promotion" | "worker" | "outer" | "quality" | "meta" | "goal", explicit?: number): number {
   if (explicit != null && Number.isInteger(explicit) && explicit >= 1) return explicit;
   const c = loadDriverConfig(root)[kind].cap;
   if (Number.isInteger(c) && c >= 1) return c;

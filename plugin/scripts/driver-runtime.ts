@@ -108,7 +108,7 @@ export { TASK_FILTERS, applyTaskFilters, makeFilterContext, allDepsDone, readTas
 
 /** 驱动 kind 标识（promotion/worker = 任务处理型，继承 0+1a；outer = 例程型，继承 0+1b——AC143 承接
  *  outer 的纯机械 A/B 段；quality = 例程型（AC144，1b）——均无任务池/无选择/无 verify）。 */
-export type DriverKind = "promotion" | "worker" | "outer" | "quality" | "suite" | "meta";
+export type DriverKind = "promotion" | "worker" | "outer" | "quality" | "suite" | "meta" | "goal";
 
 /** 一个 kind 的 registry 条目（KIND_* 八张 bash 表 → 一个 TS 数据结构）。 */
 export interface KindSpec {
@@ -217,6 +217,22 @@ export const DRIVER_KINDS: Record<DriverKind, KindSpec> = {
     runPrefix: "mt-prod",
     carriers: ["meta-driver-round.jsonl"],
     controlFile: "meta-control.json",
+  },
+  // goal（gap-goal-driver-mechanical-ring，G6）：goal 机械环例程型 kind（继承 Layer 0 + 1b，同
+  // quality/meta）。每轮对每个 active GOAL 跑其 AC 的 criterion → verdict → 写 evidence、I2 推导
+  // flip achieved、I3 判陈旧三态、I4 查分歧，一条 Fact[] 写 .quay/goal-round.jsonl。无任务池 ⇒
+  // 无 cap（同 quality/outer/meta）。
+  goal: {
+    driver: "goal-driver.ts",
+    prefix: "goal-driver",
+    verbs: ["start", "stop", "drain", "resume", "status", "restart", "liveness"],
+    capFlag: "",
+    hasInterval: true,
+    hasReconcile: false,
+    pidSelf: true,
+    runPrefix: "gl-prod",
+    carriers: ["goal-round.jsonl"],
+    controlFile: "goal-control.json",
   },
 };
 

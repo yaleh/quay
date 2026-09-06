@@ -14,4 +14,4 @@ origin: |
 
 **取假**：当前 `loop-driver`/`routines` 即红——先红后绿。
 
-**⊢ criterion 留空**：本条是语义判据、无可跑 shell 判据；`gate` fail-closed（红）是诚实状态（SPEC-0809 §3）。
+

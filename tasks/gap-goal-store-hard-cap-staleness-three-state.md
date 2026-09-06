@@ -10,6 +10,7 @@ extra:
   schema: execution
 depends_on:
   - gap-goal-store-revoke-prose-authority-repoint-pointers
+goal_ac: AC-174
 ---
 ## Proposal
 
