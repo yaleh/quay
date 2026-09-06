@@ -18,6 +18,14 @@ import { TASK_STATUSES, TASK_STATUS, isTaskStatus, type Task, type TaskStatus } 
 // drift across the three readers. The write-side serialize()/validateWrittenYaml() keep their own
 // YAML.stringify/YAML.parse: serialization correctness is the store's, not the schema's.
 import { parseFrontmatterCompletely } from "../../quay/src/task-parsing.ts";
+// gap-shape-section-tables-dual-copy-no-single-source: the shape section-heading lists (which
+// headings count as proposal/plan/ac/dod per shape) live in ONE place — plugin/scripts/shape-
+// sections.ts — imported by BOTH this store (product judge) and ready-pool-check.ts (methodology
+// judge). They live in plugin/scripts/ (not packages/) because quay-init lays the mechanism layer
+// but NOT the packages/ source tree into consumers, so a laid-down ready-pool-check.ts can only
+// reach a sibling plugin/scripts file; esbuild inlines this import into the self-contained dist
+// bundle so the product build stays standalone.
+import { SHAPE_SECTIONS } from "../../../plugin/scripts/shape-sections.ts";
 
 export const VALID_STATUSES: readonly string[] = TASK_STATUSES;
 
@@ -44,89 +52,36 @@ export const VALID_STATUSES: readonly string[] = TASK_STATUSES;
  * by shape rather than waiving checks (invariant 分派 ≠ 豁免).
  */
 
-/**
- * AC/DoD SUFFIXED-HEADING VARIANTS (gap-ac47-completion-predicate-consumer-fail-closed, AC3):
- * suffixed AC/DoD headings real directive tasks in this store use — `## Acceptance Criteria
- * (runnable)`, `## Acceptance Criteria (runnable — artifacts are necessary-not-sufficient)`,
- * `## Definition of Done — REAL LANDING is the bar, not artifacts`, `## Definition of Done — REAL
- * LANDING, subtractive (…)`. Explicitly REGISTERED rather than prefix-matched — a prefix would
- * ALSO swallow `## Acceptance Criteria for the OLD design`, adding uncertainty to an already-
- * fragile matcher. An UNREGISTERED suffixed variant is NOT matched and therefore fails CLOSED.
- *
- * gap-shape-section-tables-dual-copy-no-single-source: these two lists (plus the finding-shape
- * draft-heading variants below) USED to live ONLY in ready-pool-check.ts's hand-copied
- * SHAPE_SECTIONS — so store.check() and ready-pool-check.artifactsComplete() disagreed on the SAME
- * body (the second such divergence for this file pair). They now live HERE, in the single source
- * of truth, so both judges read the same registered headings.
- */
-const AC_SUFFIX_VARIANTS = [
-  "Acceptance Criteria (runnable)",
-  "Acceptance Criteria (runnable — artifacts are necessary-not-sufficient)",
-] as const;
-const DOD_SUFFIX_VARIANTS = [
-  "Definition of Done — REAL LANDING is the bar, not artifacts",
-  "Definition of Done — REAL LANDING, subtractive (DIR-026 Reading A preserved)",
-] as const;
-
-/**
- * Finding-shape DRAFT-HEADING variants (gap-todo-shape-mismatch-author-gate): `## AC（draft）` /
- * `## DoD（draft）` (and their half-width-paren form `## AC (draft)` / `## DoD (draft)`) that real
- * finding-shape gap-* tasks use. The `（draft）` suffix is a heading-label convention, not an absent
- * section — so the four-artifacts gate must count them. Registered on the FINDING shape only
- * (draft AC/DoD headings are a finding-shape convention; the other shapes keep the plain + suffixed
- * headings).
- */
-const FINDING_AC_DRAFT_VARIANTS = ["AC（draft）", "AC (draft)"] as const;
-const FINDING_DOD_DRAFT_VARIANTS = ["DoD（draft）", "DoD (draft)"] as const;
-
+// gap-shape-section-tables-dual-copy-no-single-source: the section-heading lists (proposal/plan/
+// ac/dod per shape) and the suffixed/draft heading variants previously lived HERE and were
+// hand-copied into ready-pool-check.ts (drifted twice). They now live in ONE place —
+// plugin/scripts/shape-sections.ts (imported at the top of this file) — and this registry DERIVES
+// its `sections` from it. `planKeys` (the contract shape's extra artifact keys) stay here: they are
+// not part of the AC/DoD heading-list drift and only the store consumes them. Adding a heading
+// variant to shape-sections.ts is seen by BOTH this store (check()) and ready-pool-check.ts
+// (artifactsComplete()) at once.
 export const SHAPE_REGISTRY = {
   contract: {
     planKeys: ["measure", "band", "invariant", "invoke", "control", "resume"],
-    sections: {
-      // `## 人的裁定` is the directive-variant proposal-slot: a directive task
-      // (type: directive) carries the human ruling as its proposal, with the
-      // implementation contract in `## Contract` (DIR-123-aarch64,
-      // gap-cli-quay-init-collides). Same alias principle as finding's
-      // `## Finding` mapping into the proposal-slot.
-      proposal: ["Proposal", "人的裁定"],
-      plan: ["Contract"],
-      ac: ["AC", "Acceptance Criteria", ...AC_SUFFIX_VARIANTS],
-      dod: ["DoD", "Definition of Done", ...DOD_SUFFIX_VARIANTS],
-    },
+    // `## 人的裁定` is the directive-variant proposal-slot (DIR-123-aarch64,
+    // gap-cli-quay-init-collides): a directive task carries the human ruling as proposal, the
+    // implementation contract in `## Contract`.
+    sections: SHAPE_SECTIONS.contract,
   },
   finding: {
     planKeys: [],
-    sections: {
-      proposal: ["Finding"],
-      ac: ["AC", "Acceptance Criteria", ...FINDING_AC_DRAFT_VARIANTS, ...AC_SUFFIX_VARIANTS],
-      dod: ["DoD", "Definition of Done", ...FINDING_DOD_DRAFT_VARIANTS, ...DOD_SUFFIX_VARIANTS],
-    },
+    sections: SHAPE_SECTIONS.finding,
   },
   plan: {
     planKeys: [],
-    sections: {
-      proposal: ["Proposal"],
-      plan: ["Plan"],
-      ac: ["AC", "Acceptance Criteria", ...AC_SUFFIX_VARIANTS],
-      dod: ["DoD", "Definition of Done", ...DOD_SUFFIX_VARIANTS],
-    },
+    sections: SHAPE_SECTIONS.plan,
   },
-  // proposal shape (2026-08-11, DIR-127 + gap-mcp-server-test-deadlocks): a task
-  // whose own complete contract is Proposal / AC / DoD with NO plan dimension —
-  // symmetric with `finding` (which uses `## Finding` as its proposal-slot), but
-  // the proposal-slot is the literal `## Proposal`. Recording-type directives
-  // (DIR-028: "只记录方向,不要求立刻做") and execution tasks that carry their
-  // approach inside `## Proposal` (no separate `## Plan`) are complete on this
-  // dimension — adding a fabricated `## Contract` to them would be a shape change
-  // (gap-todo-shape-mismatch-author-gate's "分派 ≠ 豁免": a shape is complete on
-  // its OWN dimension, not lazily skipping the plan check).
+  // proposal shape (2026-08-11, DIR-127 + gap-mcp-server-test-deadlocks): a task whose own complete
+  // contract is Proposal / AC / DoD with NO plan dimension — symmetric with `finding` (which uses
+  // `## Finding` as its proposal-slot), but the proposal-slot is the literal `## Proposal`.
   proposal: {
     planKeys: [],
-    sections: {
-      proposal: ["Proposal"],
-      ac: ["AC", "Acceptance Criteria", ...AC_SUFFIX_VARIANTS],
-      dod: ["DoD", "Definition of Done", ...DOD_SUFFIX_VARIANTS],
-    },
+    sections: SHAPE_SECTIONS.proposal,
   },
 } as const;
 

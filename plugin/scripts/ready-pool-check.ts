@@ -161,9 +161,14 @@ import { repoRoot } from "./repo-root.ts";
 // gap-shape-section-tables-dual-copy-no-single-source: the shape section-name lists (which headings
 // count as proposal/plan/ac/dod per shape) were hand-copied twice — SHAPE_SECTIONS below and
 // packages/quay-native/src/store.ts's SHAPE_REGISTRY — and had already drifted twice (draft + suffix
-// variants landed only on this side). Now imported from store.ts (the product layer is the single
-// source; the methodology layer depends on it, never the reverse), so both judges read the same list.
-import { SHAPE_REGISTRY } from "../../packages/quay-native/src/store.ts";
+// variants landed only on this side). Now imported from plugin/scripts/shape-sections.ts (the single
+// source, shared with store.ts). It lives in plugin/scripts/ (not packages/) because quay-init lays
+// this dir into consumers WITHOUT a packages/ source tree — a static `import` of store.ts from here
+// would ERR_MODULE_NOT_FOUND in a laid-down consumer.
+import { SHAPE_SECTIONS } from "./shape-sections.ts";
+// Re-export for backward-compat importers (e.g. gate-shape-dispatch.test.mjs) — SHAPE_SECTIONS is
+// the single source now, not a local hand-copied map.
+export { SHAPE_SECTIONS };
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { parseTask, extractSection, readDependsOn, readTaskStatusAtRef } from "./task-schema.ts";
@@ -660,20 +665,13 @@ export const SUITE_BLOCKING_WEIGHT = 2;
  *  连续 ≥3 轮红同一 Touches 命中 ⇒ blocking true). */
 export const RED_WINDOW_MIN_DEFAULT = 3;
 
-// Shape-aware registered sections — SINGLE SOURCE is packages/quay-native/src/store.ts's SHAPE_REGISTRY
-// (gap-shape-section-tables-dual-copy-no-single-source). This map USED to be a hand-copied second list
-// that drifted twice: the finding-shape DRAFT-heading variants (`## AC（draft）` / `## AC (draft)` /
-// `## DoD（draft）` / `## DoD (draft)`, gap-todo-shape-mismatch-author-gate) and the AC/DoD
-// SUFFIXED-HEADING variants (`## Acceptance Criteria (runnable)` etc., gap-ac47-completion-predicate-
-// consumer-fail-closed AC3) landed ONLY here, so store.check() and artifactsComplete() disagreed on
-// the SAME body. Both lists now live in store.ts's SHAPE_REGISTRY; this map is DERIVED from it
-// (spec.sections), so adding a heading variant to the registry is seen by both judges at once —
-// dispatch (contract → finding → plan → proposal; unknown fails closed) and the four-artifact
-// semantics (finding has no plan dimension; contract uses `## Contract` as its plan artifact) are
-// unchanged, they just come from one list now.
-export const SHAPE_SECTIONS = Object.fromEntries(
-  Object.entries(SHAPE_REGISTRY).map(([shape, spec]) => [shape, spec.sections])
-);
+// Shape-aware registered sections — SINGLE SOURCE is plugin/scripts/shape-sections.ts (imported +
+// re-exported at the top of this file). This map USED to be a hand-copied second list that drifted
+// twice: the finding-shape DRAFT-heading variants (`## AC（draft）` / `## DoD（draft）`,
+// gap-todo-shape-mismatch-author-gate) and the AC/DoD SUFFIXED-HEADING variants (`## Acceptance
+// Criteria (runnable)` etc., gap-ac47-completion-predicate-consumer-fail-closed AC3) landed ONLY here,
+// so store.check() and artifactsComplete() disagreed on the SAME body. Both lists now live in
+// shape-sections.ts; adding a heading variant there is seen by both judges at once.
 
 /** Detect a task body's shape by exact heading presence (contract → finding → plan → proposal → unknown). */
 export function detectShape(body) {

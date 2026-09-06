@@ -97,10 +97,11 @@ test("AC1: SHAPE_REGISTRY is importable and registers contract/finding/plan with
   });
 });
 
-test("AC single-source (gap-shape-section-tables-dual-copy-no-single-source): SHAPE_SECTIONS is derived from SHAPE_REGISTRY — ac/dod lists identical for every shape", () => {
-  // AC1: ready-pool-check no longer hand-copies the AC/DoD heading lists; its
-  // SHAPE_SECTIONS is Object.fromEntries(SHAPE_REGISTRY[shape].sections). Compare
-  // the two sides element-by-element — equal ⇒ single source holds.
+test("AC single-source (gap-shape-section-tables-dual-copy-no-single-source): SHAPE_SECTIONS and SHAPE_REGISTRY share one source — ac/dod lists identical for every shape", () => {
+  // AC1: ready-pool-check no longer hand-copies the AC/DoD heading lists; BOTH
+  // ready-pool-check's SHAPE_SECTIONS and store's SHAPE_REGISTRY.sections come from
+  // plugin/scripts/shape-sections.ts (the single source). Compare the two sides
+  // element-by-element — equal ⇒ single source holds.
   for (const shape of Object.keys(SHAPE_REGISTRY)) {
     assert.deepEqual(
       SHAPE_SECTIONS[shape].ac,
