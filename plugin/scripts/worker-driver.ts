@@ -3313,17 +3313,26 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   const typecheck = path.join(scriptsDir, "fan-in-ts-typecheck-gate.ts");
   const acGate = path.join(scriptsDir, "fan-in-ac-completion-gate.ts");
 
+  // gap-mechanical-fan-in-red-lock-times-null：失败结果在【release 之后】才读锁时间（同成功路径
+  // :3625 的时机）——⛔ 不能在 try 内 return 时就地读（release 事件尚未落盘 ⇒ lockHoldSecs 恒 null），
+  // 也不能事后补读（后续重试会追加更新的 acquire/release ⇒ readFanInLockHold 取最后一组 ⇒ 张冠李戴）。
+  // pendingRed = 已获锁失败结果的待填句柄：verdictOf/failSuite 构造时不带锁字段，finally release 后统一填。
+  let pendingRed: MechanicalFanInResult | null = null;
+
   // D6：单步失败产出结构化 verdict（⛔ 不再是 `(stderr||stdout).trim()` 裸流）。裸流 dump 进 logFile、
   // summary 去噪保留「哪个测试失败」，reason 是 summary 的投影（旧读面，⛔ 不含 MODULE_TYPELESS 噪声）。
-  const verdictOf = (step: string, exitCode: number | null, summary: string, logFile: string | null): MechanicalFanInResult => ({
-    outcome: "red",
-    verdict: { step, verdict: "failed", exitCode, summary, logFile },
-    step, reason: summary,
-    lockHoldSecs: null, lockAcquireEpoch: null, lockReleaseEpoch: null,
-    suiteFinishedEpoch: null, suiteOutcome: null, suitePid: null, landedSha: null,
-    suiteLog: null,
-    fanInLog: path.basename(fanInLog),
-  });
+  const verdictOf = (step: string, exitCode: number | null, summary: string, logFile: string | null): MechanicalFanInResult => {
+    const r = {
+      outcome: "red",
+      verdict: { step, verdict: "failed", exitCode, summary, logFile },
+      step, reason: summary,
+      suiteFinishedEpoch: null, suiteOutcome: null, suitePid: null, landedSha: null,
+      suiteLog: null,
+      fanInLog: path.basename(fanInLog),
+    } as unknown as MechanicalFanInResult; // 锁字段在 finally release 后填（见 pendingRed）
+    pendingRed = r;
+    return r;
+  };
   const stepLogFile = (step: string): string =>
     `/tmp/fan-in-step-${task}-${runId.replace(/[^A-Za-z0-9_.-]/g, "_")}-${step}.log`;
   // 有裸流的机械步：stdout+stderr 全量 dump 进 logFile，summary 从合并流提取（⛔ 只取 stderr 会丢
@@ -3340,7 +3349,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     }
     return verdictOf(step, a.status, summary, logFile);
   };
-  // 无裸流的机械步（reason 已结构化：flip-done / acquire-fan-in-lock / exception）。
+  // 无裸流的机械步（reason 已结构化：flip-done / exception；acquire-fan-in-lock 走独立构造——结构性例外）。
   const failClean = (step: string, summary: string, exitCode: number | null = null): MechanicalFanInResult =>
     verdictOf(step, exitCode, summary, null);
 
@@ -3383,7 +3392,18 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     trace({ step: "acquire-fan-in-lock", exit: 0, wall_ms: Date.now() - acquireT0, ok: true });
   } catch (e) {
     trace({ step: "acquire-fan-in-lock", exit: 1, wall_ms: Date.now() - acquireT0, ok: false, reason: (e as Error)?.message ?? "acquire failed" });
-    return failClean("acquire-fan-in-lock", (e as Error)?.message ?? "acquire failed");
+    // 结构性例外（锁本身没拿到，无 acquire 事件可读）：锁字段显式 null。⛔ 不走 verdictOf 的 pendingRed
+    // 填充路径——那条只对【已获锁之后】的失败有意义（gap-mechanical-fan-in-red-lock-times-null）。
+    const reason = (e as Error)?.message ?? "acquire failed";
+    return {
+      outcome: "red",
+      verdict: { step: "acquire-fan-in-lock", verdict: "failed", exitCode: null, summary: reason, logFile: null },
+      step: "acquire-fan-in-lock", reason,
+      lockHoldSecs: null, lockAcquireEpoch: null, lockReleaseEpoch: null,
+      suiteFinishedEpoch: null, suiteOutcome: null, suitePid: null, landedSha: null,
+      suiteLog: null,
+      fanInLog: path.basename(fanInLog),
+    };
   }
   const releaseLock = async (): Promise<void> => {
     await fanInLock.release();
@@ -3397,15 +3417,18 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   // A（gap-worker-execution-history-index-not-reachable-from-task）：suite 红时 verdict.logFile 指向
   // .quay/fan-in-suite-*.log（真因文件，⛔ 不再 null——旧一路 logFile:null 让 183KB 真因只能靠命名约定
   // 猜）+ suiteLog 落 mechanical_fan_in（与 fanInLog 同形的 basename，web/续做/needs-human 据此构造绝对路径）。
-  const failSuite = (summary: string, exitCode: number | null): MechanicalFanInResult => ({
-    outcome: "red",
-    verdict: { step: "suite", verdict: "failed", exitCode, summary, logFile: suiteLogFile },
-    step: "suite", reason: summary,
-    lockHoldSecs: null, lockAcquireEpoch: null, lockReleaseEpoch: null,
-    suiteFinishedEpoch: null, suiteOutcome: null, suitePid: null, landedSha: null,
-    suiteLog: path.basename(suiteLogFile),
-    fanInLog: path.basename(fanInLog),
-  });
+  const failSuite = (summary: string, exitCode: number | null): MechanicalFanInResult => {
+    const r = {
+      outcome: "red",
+      verdict: { step: "suite", verdict: "failed", exitCode, summary, logFile: suiteLogFile },
+      step: "suite", reason: summary,
+      suiteFinishedEpoch: null, suiteOutcome: null, suitePid: null, landedSha: null,
+      suiteLog: path.basename(suiteLogFile),
+      fanInLog: path.basename(fanInLog),
+    } as unknown as MechanicalFanInResult; // 锁字段在 finally release 后填（见 pendingRed）
+    pendingRed = r;
+    return r;
+  };
 
   try {
     // 2. merge develop（冲突 ⇒ red → 语义会话兜底）。
@@ -3622,6 +3645,14 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   } finally {
     const relT0 = Date.now();
     await releaseLock();
+    // 已获锁的失败结果：release 事件刚落盘，此刻读锁时间 = 本次尝试自己的区间（⛔ 早读无 release、
+    // 晚读会被后续重试的区间张冠李戴——gap-mechanical-fan-in-red-lock-times-null）。
+    if (pendingRed !== null) {
+      const lock = readFanInLockHold(root, task, runId);
+      pendingRed.lockHoldSecs = lock.lockHoldSecs;
+      pendingRed.lockAcquireEpoch = lock.lockAcquireEpoch;
+      pendingRed.lockReleaseEpoch = lock.lockReleaseEpoch;
+    }
     trace({ step: "release-fan-in-lock", exit: 0, wall_ms: Date.now() - relT0, ok: true });
   }
 

@@ -79,27 +79,27 @@ acquire/release 事件，`readFanInLockHold(root, task, runId)` 会取到**后�
 
 ## Acceptance Criteria
 
-- [ ] AC1（覆盖范围可数）：`plugin/scripts/worker-driver.ts` 里所有【发生在 `acquireFanInLock()` 成功
+- [x] AC1（覆盖范围可数）：`plugin/scripts/worker-driver.ts` 里所有【发生在 `acquireFanInLock()` 成功
       之后】的失败结果构造点（`fail`/`verdictOf`/`failSuite`/`catch` 块的 `failClean("exception", …)`，
       共 4 处调用点，1 个共享的 `verdictOf` 定义）在修复后都改为读取真实锁时间，而不是硬编码 `null`；
       `failClean("acquire-fan-in-lock", …)` 与 `spawnMechanicalFanIn` 的 `red("spawn-mechanical-fan-in", …)`
       两处结构性例外保持 `null`（对照组，见 Finding 末段）。用 `grep -c "lockHoldSecs: null, lockAcquireEpoch: null, lockReleaseEpoch: null"`
       在改动前后计数：改动前 ≥6（4 处待修 + 2 处结构性例外），改动后恰好 2（只剩两处结构性例外）。
-- [ ] AC2（时机正确性，防"事后补读"回归）：单元测试构造一个 fixture `fan-in-lock-events.jsonl`，
+- [x] AC2（时机正确性，防"事后补读"回归）：单元测试构造一个 fixture `fan-in-lock-events.jsonl`，
       内含同一 taskId+runId 的两组 acquire/release（模拟"先失败重试后成功"），验证【失败那次】的
       结果对象拿到的是**第一组**（更早的）acquire/release 时间，不是文件里最后一组——直接复现
       Finding 里描述的"张冠李戴"陷阱，证明修法在写入时序上是对的，不是靠巧合过的。
-- [ ] AC3（真实数据回归，非 fixture）：`plugin/test/worker-driver-fan-in.test.mjs` 已有 `readFanInLockHold`
+- [x] AC3（真实数据回归，非 fixture）：`plugin/test/worker-driver-fan-in.test.mjs` 已有 `readFanInLockHold`
       的两处既有断言（:1428/:1463，均针对成功/hang-then-release 路径）——新增一条针对【真实失败步骤】
       （如 anti-drift HARD FAIL 或 suite 红）的等价断言：锁被真实持有的场景下，`runMechanicalFanIn` 返回
       的失败结果里 `lockAcquireEpoch`/`lockReleaseEpoch` 不再是 `null`，而是与该测试自己驱动产生的
       `fan-in-lock-events.jsonl` 里对应 acquire/release 一致的具体数值（用测试自建的临时 workspace，
       不改动 `.quay/` 生产 jsonl 里已经写死的历史记录）。
-- [ ] AC4（下游联动不回归）：`node --experimental-strip-types --test packages/quay/test/gap-dashboard-fanin-panel-and-timeline-bars.test.mjs`
+- [x] AC4（下游联动不回归）：`node --experimental-strip-types --test packages/quay/test/gap-dashboard-fanin-panel-and-timeline-bars.test.mjs`
       exit 0——本任务修复后，dashboard Fan-in 卡的分段时间轴（G/H 任务落地的 `renderTimelineBarSvg`）
       对新产生的 red 记录能画出区间段而非跳过（该测试文件本身不需要为此改动，只作为下游不回归的验证面；
       若 `gap-dashboard-fanin-timestamp-timeline-anchor` 那条任务先落地，一并跑其测试）。
-- [ ] AC5（既有 worker-driver 测试不回归）：`scripts/test.sh --for-task gap-mechanical-fan-in-red-lock-times-null`
+- [x] AC5（既有 worker-driver 测试不回归）：`scripts/test.sh --for-task gap-mechanical-fan-in-red-lock-times-null`
       （或等价 scoped 调用，覆盖 `plugin/scripts/worker-driver.ts` 及 `plugin/test/worker-driver-fan-in.test.mjs`）
       exit 0。
 
