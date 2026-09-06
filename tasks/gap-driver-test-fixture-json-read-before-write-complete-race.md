@@ -1,7 +1,7 @@
 ---
 id: gap-driver-test-fixture-json-read-before-write-complete-race
 title: driver 测试 fixture 的 JSON 轮询读取存在"文件存在即读"竞态——existsSync 真但内容未写完时 JSON.parse 报错
-status: todo
+status: ready
 labels:
   - gap
   - defect
