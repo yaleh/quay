@@ -87,6 +87,14 @@ test("RED (P4): undeclared object-literal concurrency key is a violation", () =>
   assert.equal(hits[0].pattern, "P4");
 });
 
+test("RED (P4): the meta-driver per-round cap WITHOUT a marker is a violation (AC2 negative control — the marker authorizes, not a weakened checker)", () => {
+  const src =
+    "const driven = await driveItems(root, parsed.autoDrive, readings, { cap: 1, dryRun, at });\n" +
+    "const decided = await fileDecisions(root, parsed.decisions, readings, records, { cap: 2, dryRun, at });\n";
+  const hits = scanText("meta-driver.ts", src);
+  assert.equal(hits.filter((h) => h.kind === "violation").length, 2, JSON.stringify(hits));
+});
+
 test("RED (P5): CPU-quota literal inside a systemd-run-limit override STRING is a violation (the historical 400% leak shape)", () => {
   const src = 'systemdRunLimits = "MemoryMax=4G CPUQuota=400% TasksMax=200",\n';
   const hits = scanText(".claude/workflows/execute-suite-fix.js", src);
@@ -105,6 +113,17 @@ test("GREEN: a concurrency-default-fallback marker makes the same literal a decl
   const hits = scanText("ok.ts", src);
   assert.equal(hits.length, 1, JSON.stringify(hits));
   assert.equal(hits[0].kind, "declared-exception");
+});
+
+test("GREEN (P4): the meta-driver per-round cap WITH a concurrency-default-fallback marker is a declared exception", () => {
+  const src =
+    "// concurrency-default-fallback: per-round auto-drive cap is a semantic upper bound.\n" +
+    "const driven = await driveItems(root, parsed.autoDrive, readings, { cap: 1, dryRun, at });\n" +
+    "// concurrency-default-fallback: per-round decisions cap is a semantic upper bound.\n" +
+    "const decided = await fileDecisions(root, parsed.decisions, readings, records, { cap: 2, dryRun, at });\n";
+  const hits = scanText("meta-driver.ts", src);
+  assert.equal(hits.length, 2, JSON.stringify(hits));
+  assert.ok(hits.every((h) => h.kind === "declared-exception"), JSON.stringify(hits));
 });
 
 test("GREEN: a process.env.QUAY_MAX_* read on the line makes it a definition point", () => {
