@@ -33,10 +33,10 @@ extra:
     :3341  return failClean(step,…)    —— 硬编码
            所有三处一致：`lockHoldSecs: null, lockAcquireEpoch: null, lockReleaseEpoch: null`
   } catch (e) {
-    :3617  return failClean("exception", …)  —— 同样硬编码 null
+    return failClean("exception", …)  —— 同样硬编码 null（:3617）
   } finally {
-    :3620  await releaseLock()  —— release 事件在这里才真正落盘（:2937-2943 release() 的 Promise
-           在 holder 子进程 close 事件后才 resolve，即调用完成时 release 事件已保证落盘）
+    await releaseLock()  —— release 事件在这里才真正落盘（:2937-2943 release() 的 Promise
+           在 holder 子进程 close 事件后才 resolve，即调用完成时 release 事件已保证落盘，:3620）
   }
   // 只有【成功路径】（try 内没有提前 return，落到 try 语句之后）才会读锁时间：
   :3625  const lock = readFanInLockHold(root, task, runId)
@@ -89,19 +89,19 @@ acquire/release 事件，`readFanInLockHold(root, task, runId)` 会取到**后�
       内含同一 taskId+runId 的两组 acquire/release（模拟"先失败重试后成功"），验证【失败那次】的
       结果对象拿到的是**第一组**（更早的）acquire/release 时间，不是文件里最后一组——直接复现
       Finding 里描述的"张冠李戴"陷阱，证明修法在写入时序上是对的，不是靠巧合过的。
-- [ ] AC3（真实数据回归，非 fixture）：用当前生产 `.quay/fan-in-lock-events.jsonl` 与
-      `.quay/worker-outcome.jsonl`（不注入/不 mock），验证 `gap-branch-rename-manager-doc-to-author`
-      那条 2026-09-05T18:44:17.314Z 的历史 red 记录——**注意：本 AC 验证的是"新代码路径对同类新增记录的
-      正确行为"，不能篡改历史 jsonl 里已经写死的旧记录**；用一个新触发的、真实跑一次会话内 mock 失败步骤
-      （或至少是对同一份 `runMechanicalFanIn` 函数以真实 `fan-in-lock-events.jsonl` 为输入的直接单元测试）
-      验证：锁被真实持有的场景下，返回的失败结果不再是 `null`，而是与 `fan-in-lock-events.jsonl` 里
-      对应 acquire/release 一致的具体数值。
+- [ ] AC3（真实数据回归，非 fixture）：`plugin/test/worker-driver-fan-in.test.mjs` 已有 `readFanInLockHold`
+      的两处既有断言（:1428/:1463，均针对成功/hang-then-release 路径）——新增一条针对【真实失败步骤】
+      （如 anti-drift HARD FAIL 或 suite 红）的等价断言：锁被真实持有的场景下，`runMechanicalFanIn` 返回
+      的失败结果里 `lockAcquireEpoch`/`lockReleaseEpoch` 不再是 `null`，而是与该测试自己驱动产生的
+      `fan-in-lock-events.jsonl` 里对应 acquire/release 一致的具体数值（用测试自建的临时 workspace，
+      不改动 `.quay/` 生产 jsonl 里已经写死的历史记录）。
 - [ ] AC4（下游联动不回归）：`node --experimental-strip-types --test packages/quay/test/gap-dashboard-fanin-panel-and-timeline-bars.test.mjs`
       exit 0——本任务修复后，dashboard Fan-in 卡的分段时间轴（G/H 任务落地的 `renderTimelineBarSvg`）
       对新产生的 red 记录能画出区间段而非跳过（该测试文件本身不需要为此改动，只作为下游不回归的验证面；
       若 `gap-dashboard-fanin-timestamp-timeline-anchor` 那条任务先落地，一并跑其测试）。
 - [ ] AC5（既有 worker-driver 测试不回归）：`scripts/test.sh --for-task gap-mechanical-fan-in-red-lock-times-null`
-      （或等价 scoped 调用，覆盖 `plugin/scripts/worker-driver.ts` 及其现有测试）exit 0。
+      （或等价 scoped 调用，覆盖 `plugin/scripts/worker-driver.ts` 及 `plugin/test/worker-driver-fan-in.test.mjs`）
+      exit 0。
 
 ## Definition of Done
 
@@ -115,5 +115,5 @@ acquire/release 事件，`readFanInLockHold(root, task, runId)` 会取到**后�
 ## Touches
 
 - plugin/scripts/worker-driver.ts
-- plugin/scripts/worker-driver.test.mjs
+- plugin/test/worker-driver-fan-in.test.mjs
 - tasks/gap-mechanical-fan-in-red-lock-times-null.md
