@@ -87,13 +87,12 @@ depends_on:
 - plugin/scripts/driver-runtime.ts
 - plugin/scripts/drivers.yml
 - plugin/scripts/driver-config.ts
-- plugin/scripts/meta-driver.ts
 - plugin/scripts/capability-catalog.sh
-- plugin/scripts/quay-init-closure-ratchet.ts
 - packages/quay/src/cli/driver.ts
 - plugin/test/goal-driver.test.mjs (new)
 - plugin/test/driver-runtime.test.mjs
 - .gitignore
+- docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-goal-driver-mechanical-ring.md
 
 ## Needs-Human
