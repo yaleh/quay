@@ -20,8 +20,8 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] `node plugin/scripts/concurrency-literal-check.ts --gate --root .` 退出 0（meta-driver.ts 两处不再判违规）
-- [ ] 负控制：把这两处 cap 改回无标记的裸字面量后，checker 仍报违规 exit 1（证明没有放宽检查器本身）
+- [x] `node plugin/scripts/concurrency-literal-check.ts --gate --root .` 退出 0（meta-driver.ts 两处不再判违规）
+- [x] 负控制：把这两处 cap 改回无标记的裸字面量后，checker 仍报违规 exit 1（证明没有放宽检查器本身）
 
 ## Definition of Done
 
