@@ -4,18 +4,26 @@ title: G8 dashboard 卡片在运行中的 Web 上真实渲染
 status: active
 kind: criterion
 goal: GOAL-001
-criterion: for a in $(pgrep -af 'quay.ts serve' | grep -oE -- '--host [^ ]+
-  --port [0-9]+' | awk '{print $2":"$4}' | sort -u); do curl -sf
-  "http://$a/dashboard" | grep -q 'goal-card' && exit 0; done; exit 1
-expect: exit 0（遍历所有运行中的 serve 实例，任一 dashboard 含 goal-card 即真；全无则假）
+criterion: >-
+  root=$(git rev-parse --show-toplevel)
+
+  for p in $(pgrep -f 'quay.ts serve'); do
+    [ "$(readlink /proc/$p/cwd 2>/dev/null)" = "$root" ] || continue
+    a=$(tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null | grep -oE -- '--host [^ ]+ --port [0-9]+' | awk '{print $2":"$4}')
+    [ -n "$a" ] || continue
+    curl -sf --max-time 10 "http://$a/dashboard" | grep -q 'id="goal-card"' && exit 0
+  done
+
+  exit 1
+expect: exit 0（仅遍历 cwd = 仓库根的生产 serve 实例；按位置认元素 id="goal-card"，不认标题/提交主题里的字符串提及）
 origin: |
   人 2026-09-06 需求⑥「在 quay web 为 goal 实现相应的页面和 dashboard 卡片」。
   判据读【运行中的服务】而非源码，依据硬规则 4 推论三：
   grep 源码只证明"能产出"，不证明"已产出"。
 evidence:
-  at: 2026-09-06T09:30:33.533Z
-  verdict: fail
-  reading: acceptance failed (exit 1)
+  at: 2026-09-06T21:17:46.628Z
+  verdict: pass
+  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：从**运行中的 `quay serve` 进程**派生地址，`GET /dashboard` 的响应含 `goal-card`。
