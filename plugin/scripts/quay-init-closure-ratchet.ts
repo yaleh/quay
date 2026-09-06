@@ -51,8 +51,13 @@ const EXCLUDED_TOP_DIRS: ReadonlySet<string> = new Set([".quay"]);
 // target (the reading is recorded in the task body, compared against §2.9's 142 files / 7.1 MB — the
 // difference is: (a) mechanism-layer scripts retired between the two measurements, (b) this baseline
 // excludes the generated `.quay/` namespace §2.9 included). Shrink-only: the laydown must stay ≤ this.
-export const BASELINE_FILES = 130;
-export const BASELINE_BYTES = 3822321;
+// Re-measured 2026-09-06 (gap-task-ops-consolidate-driver-frontmatter-writers): +1 file — task-ops.ts,
+// the new shared frontmatter parse/patch/commit library that driver-filters/worker-driver/ready-pool-check
+// all import via ESM (its dep is invisible to closure step d, so it must be laid down or the drivers die
+// with ERR_MODULE_NOT_FOUND) — but −9365 bytes net, the 5 duplicated regex/parse implementations collapsed
+// into one. Both axes re-anchored to the new measured footprint (stable across 3 consecutive laydowns).
+export const BASELINE_FILES = 131;
+export const BASELINE_BYTES = 3812956;
 
 export interface ClosureCount {
   files: number;
