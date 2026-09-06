@@ -1,7 +1,7 @@
 ---
 id: gap-goal-store-goal-id-vocabulary-and-draft-status
 title: "goal-store 词表与 id 改造——PHASE-NNN→GOAL-NNN、新增 draft 状态、phase: 改 goal:"
-status: todo
+status: ready
 labels:
   - gap
 parent: null
