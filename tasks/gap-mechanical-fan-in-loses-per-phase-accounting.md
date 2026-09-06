@@ -5,6 +5,7 @@ status: ready
 labels:
   - gap
   - defect
+  - delivery-critical
 parent: null
 children: []
 extra:
