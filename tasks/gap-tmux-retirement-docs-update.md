@@ -62,6 +62,6 @@ Task 3 和 Task 4 完成后，文档中对 tmux 依赖、启用流程、manager 
 - plugin/skills/manager/SKILL.md（参考，由 Task 3 改造）
 - plugin/skills/cold-start/SKILL.md
 - plugin/skills/session-topology/SKILL.md（若需清理过时描述）
-- adr/ADR-016.md（若存在且涉及 tmux）
+- adr/ADR-016-cross-workspace-autonomous-operation-via-tmux-remote-drive.md
 - docs/proposals/*.md（若有对 tmux 依赖的讨论）
 - tasks/gap-tmux-retirement-docs-update.md
