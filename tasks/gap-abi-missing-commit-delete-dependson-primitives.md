@@ -2,7 +2,7 @@
 id: gap-abi-missing-commit-delete-dependson-primitives
 title: Provider ABI missing commit/delete/depends_on primitives — dispatch spine
   bypasses it structurally
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -31,14 +31,14 @@ Related (done, narrower scope, not duplicates): `gap-unified-frontmatter-parser`
 
 ## Acceptance Criteria
 
-- [ ] `packages/quay-native/src/store.ts` (or its `task_write` call path) commits `tasks/<id>.md` after a successful write when running from a git-tracked workspace — verified by: `task_write` a task via MCP, then `git log -1 --format=%H -- tasks/<id>.md` shows a NEW commit whose timestamp is after the call, without any other manual `git commit` in between.
-- [ ] The commit step is branch-aware and does not push directly to `develop` from a `task/<id>` worktree — verified by a negative control: `task_write` inside a task worktree, then `git rev-parse develop` unchanged (only the worktree's own branch advances).
-- [ ] `task_delete` exists as an ABI verb and a native-provider implementation — verified by: `task_delete` a scratch task via MCP, then `task_get` on the same id returns not-found AND `tasks/<id>.md` is absent from disk.
-- [ ] `task_delete` on a non-existent id fails closed (non-zero exit / explicit error), not a silent success.
-- [ ] `task_write`'s Zod schema exposes `depends_on` as a top-level array parameter — verified by printing the schema (or the MCP tool's `inputSchema`) and grepping for `depends_on` at the top level, not only inside `extra`.
-- [ ] A task written with the new top-level `depends_on` param round-trips through `parseTask()` directly (not via `readDependsOn()`) — verified by a script that writes via the new param and reads the field back from `parseTask()`'s return value.
-- [ ] Existing tasks using `extra.depends_on` (e.g. `tasks/gap-task-write-schema-depends-on-documentation.md`) still read correctly after the change — regression, not just new-path.
-- [ ] `docs/references/task-schema-canonical.md` documents all three additions.
+- [x] `packages/quay-native/src/store.ts` (or its `task_write` call path) commits `tasks/<id>.md` after a successful write when running from a git-tracked workspace — verified by: `task_write` a task via MCP, then `git log -1 --format=%H -- tasks/<id>.md` shows a NEW commit whose timestamp is after the call, without any other manual `git commit` in between.
+- [x] The commit step is branch-aware and does not push directly to `develop` from a `task/<id>` worktree — verified by a negative control: `task_write` inside a task worktree, then `git rev-parse develop` unchanged (only the worktree's own branch advances).
+- [x] `task_delete` exists as an ABI verb and a native-provider implementation — verified by: `task_delete` a scratch task via MCP, then `task_get` on the same id returns not-found AND `tasks/<id>.md` is absent from disk.
+- [x] `task_delete` on a non-existent id fails closed (non-zero exit / explicit error), not a silent success.
+- [x] `task_write`'s Zod schema exposes `depends_on` as a top-level array parameter — verified by printing the schema (or the MCP tool's `inputSchema`) and grepping for `depends_on` at the top level, not only inside `extra`.
+- [x] A task written with the new top-level `depends_on` param round-trips through `parseTask()` directly (not via `readDependsOn()`) — verified by a script that writes via the new param and reads the field back from `parseTask()`'s return value.
+- [x] Existing tasks using `extra.depends_on` (e.g. `tasks/gap-task-write-schema-depends-on-documentation.md`) still read correctly after the change — regression, not just new-path.
+- [x] `docs/references/task-schema-canonical.md` documents all three additions.
 
 ## Definition of Done
 

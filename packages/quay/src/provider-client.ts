@@ -4,7 +4,7 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import type { Task, AdrRecord, Manifest } from './abi.ts';
+import type { Task, AdrRecord, Manifest, TaskDeleteResult } from './abi.ts';
 
 export interface ConnectProviderOptions {
   command: string;
@@ -37,6 +37,7 @@ export interface ProviderClient {
   taskList(filter?: Record<string, unknown>): Promise<TaskListResult>;
   taskGet(id: string): Promise<Task>;
   taskWrite(patch: Record<string, unknown>): Promise<Task>;
+  taskDelete(id: string): Promise<TaskDeleteResult>;
   taskCheck(id: string): Promise<unknown>;          // gate result — keep unknown
   adrList(filter?: Record<string, unknown>): Promise<AdrRecord[]>;
   adrGet(id: string): Promise<AdrRecord>;
@@ -113,6 +114,14 @@ export async function connectProvider({ command, args, env, cwd }: ConnectProvid
     return (r.structuredContent as {task?: Task})?.task ?? null as unknown as Task;
   }
 
+  // gap-abi-missing-commit-delete-dependson-primitives: task_delete passthrough, mirroring taskWrite.
+  // A not-found id surfaces as isError from the provider → throw (fail-closed, never a silent no-op).
+  async function taskDelete(id: string): Promise<TaskDeleteResult> {
+    const r = await client.callTool({ name: "task_delete", arguments: { id } });
+    if (r.isError) throw new Error((r.content as Array<{text?: string}>)?.[0]?.text ?? "task_delete failed");
+    return (r.structuredContent ?? { id, ok: false, reason: "no result" }) as TaskDeleteResult;
+  }
+
   // QN-027 (iteration 13): generic task_check passthrough, mirroring
   // taskWrite's pattern exactly — provider-agnostic, no backend branch.
   // Whether the active Provider actually implements task_check (gate
@@ -156,5 +165,5 @@ export async function connectProvider({ command, args, env, cwd }: ConnectProvid
     await client.close();
   }
 
-  return { taskList, taskGet, taskWrite, taskCheck, adrList, adrGet, adrWrite, manifest, close };
+  return { taskList, taskGet, taskWrite, taskDelete, taskCheck, adrList, adrGet, adrWrite, manifest, close };
 }

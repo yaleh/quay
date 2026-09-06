@@ -24,9 +24,9 @@ export function parseFrontmatterCompletely(frontmatterRaw) {
 ```
 
 `store.parse()` calls it to read a task file's frontmatter; `parseTask()` calls it and projects
-`{ labels, extra }`; `readDependsOn()` calls it and projects the `depends_on` list. Because they
-share the same parse, a field added to the schema is visible to all three automatically — there is
-no second parser to keep in sync.
+`{ labels, extra, depends_on }`; `readDependsOn()` calls it and projects the `depends_on` list.
+Because they share the same parse, a field added to the schema is visible to all three
+automatically — there is no second parser to keep in sync.
 
 ## Canonical schema (TypeScript interface)
 
@@ -93,6 +93,34 @@ escape hatch required:
 The round-trip is `task_write(depends_on)` → `store.write()` → `depends_on:` in the file →
 `store.parse()` / `parseTask()` / `readDependsOn()` all read it back as `["gap-prereq-a",
 "gap-prereq-b"]`.
+
+## Commit-after-write (dispatch visibility)
+
+`task_write` and `task_delete` are **commit-by-default**: after a successful disk write, the native
+store commits `tasks/<id>.md` alone (a scoped pathspec, never `-A`), so a `task_write`-only change
+is dispatch-visible without a separate manual `git commit`. The commit is **branch-aware**:
+
+- **Main checkout** (any branch that is not `develop` and not a `task/<id>` worktree branch): the
+  store commits to the current branch and then `git push . <branch>:develop` (fast-forward only), so
+  the write reaches `develop` — the ref every dispatch/lifecycle consumer reads (`git show
+  develop:tasks/<id>.md`). A non-fast-forward push (a forked main checkout) is left to the driver's
+  standing `propagateDocBranchToDevelop` semantic sync.
+- **Task worktree** (`task/<id>` branch): the store commits to the worktree's own branch and does
+  NOT push to `develop` — the fan-in ff-merge remains the only path into `develop`.
+- **Not in a git repo** (unit-test temp dirs): the commit is a no-op (`committed: false`), never a
+  throw.
+
+The behavior is opt-out-able per call (`store.write(id, patch, { commit: false })`) for multi-file
+batch editors that commit once at the end. A failed commit does not fail the write (the disk value
+is already written) — it is surfaced on stderr, never silently swallowed (CLAUDE.md 硬规则 3b).
+
+## `task_delete`
+
+The native Provider exposes a `task_delete(id)` ABI verb (previously absent — the only way to remove
+a task was a raw `git checkout --`/`rm` on `tasks/<id>.md`). It unlinks the task file and applies the
+same branch-aware commit strategy as `task_write`. A delete of a non-existent id **fails closed**
+(`isError:true` / `{ ok:false, reason:"missing" }`) — never a silent no-op. The result shape is
+`{ id, ok, reason, committed, propagated }`.
 
 ## Related
 
