@@ -580,6 +580,97 @@ export async function driveItems(
   return out;
 }
 
+// ── 决策通道（方向问题也必须【被路由】，⛔ 不许停在一个死胡同字段里）──────────────────────────────
+// 人 2026-09-06 裁定：这些问题都在自举的 quay 应自行处理的范围内——meta-driver 可以不自己解决，
+// 但**要么找到既有机制去解决，要么创建该机制**。
+//
+// 而 v0 的 humanAttention 是一个【死胡同】：只打印到 stdout + 一个 gitignored 的 jsonl，没有任何
+// 人会看到，也没有关闭路径。那正是本文件自己诊断过的 escalations.md 死法（12 条未答、死 10 天）。
+// ⇒ 改为路由到既有机制：一个方向问题 = 一条 **draft GOAL 记录**（kind 由 id 前缀派生、status 缺省
+// draft、GOAL- 记录不需要 criterion），它落在 /goal?status=draft 的「N 条待人裁定」面上，
+// **激活它就是裁定本身**（SPEC-goal-mechanism 裁定 3：draft→active 保留给人）。
+// ⛔ 不新建第七个登记面——用的是已经在跑的 goal store 和刚接好的那个可见面。
+
+export interface DecisionItem {
+  title: string;
+  question: string;
+  options: string;
+  evidenceKey: string;
+  origin: string;
+}
+
+/** 下一个可用 GOAL id（max+1）。⛔ 不复用编号（硬规则 8）。 */
+export function nextGoalId(records: Array<Record<string, unknown>>): string {
+  let max = 0;
+  for (const r of records) {
+    const m = String(r.id ?? "").match(/^GOAL-(\d{3,})$/);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `GOAL-${String(max + 1).padStart(3, "0")}`;
+}
+
+/** 决策的 origin 正文：问题 + 选项 + 读数出处。`origin` 是 goal-store 的必填 fail-closed 字段，
+ *  也是 /goal 列表里可见的一列 ⇒ 内容放这里，人在待裁定面上就能直接读到要裁什么。 */
+export function renderDecisionOrigin(item: DecisionItem, evidence: unknown, at: string): string {
+  return [
+    `【要裁定什么】${item.question}`,
+    `【选项与代价】${item.options}`,
+    `【实测依据】${item.evidenceKey} = ${JSON.stringify(evidence)}（meta-driver 机械采集于 ${at}）`,
+    `【为什么不能机械决定】${item.origin}`,
+    `【怎么关闭】认可某个选项 ⇒ goal-store write <id> --status active；否决 ⇒ 保持 draft 或标 superseded。`,
+  ].join("\n");
+}
+
+export interface DecisionResult { item: DecisionItem; id: string | null; accepted: boolean; reason: string }
+
+/** 决策的闸 + 落地。与自动驱动同源的证据纪律：evidenceKey 必须在本轮读数里解析得出。 */
+export async function fileDecisions(
+  root: string, items: DecisionItem[], readings: MetaRoundReadings,
+  records: Array<Record<string, unknown>>,
+  opts: { cap: number; dryRun: boolean; at: string },
+): Promise<DecisionResult[]> {
+  const out: DecisionResult[] = [];
+  const keys = new Set<string>();
+  for (const r of records) {
+    const k = findingKey(proposalCandidateText({ title: String(r.title ?? ""), origin: String(r.origin ?? ""), criterion: "" }));
+    if (k) keys.add(k);
+  }
+  const known = [...records];
+  let filed = 0;
+  for (const item of items) {
+    if (filed >= opts.cap) {
+      out.push({ item, id: null, accepted: false, reason: `rate: 本轮已路由 ${filed} 条决策，上限 ${opts.cap}` });
+      continue;
+    }
+    const ev = resolveEvidence(readings, item.evidenceKey);
+    if (ev === undefined) {
+      out.push({ item, id: null, accepted: false, reason: `evidenceKey ${JSON.stringify(item.evidenceKey)} 解析不出 ⇒ 拒（⛔ 决策也要有实测依据）` });
+      continue;
+    }
+    const origin = renderDecisionOrigin(item, ev, opts.at);
+    const candidate = proposalCandidateText({ title: item.title, origin, criterion: "" });
+    const gate = gateFinding(candidate, { existingKeys: keys, recentCount: filed, K: opts.cap });
+    if (!gate.accept) { out.push({ item, id: null, accepted: false, reason: gate.reason }); continue; }
+
+    const id = nextGoalId(known);
+    if (opts.dryRun) {
+      out.push({ item, id, accepted: true, reason: "dry-run: would file as draft GOAL" });
+    } else {
+      const argv = goalStoreArgv(root, ["write", id, "--title", item.title, "--origin", origin]);
+      const r = await runAsync(argv, { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
+      if (r.error || r.status !== 0) {
+        out.push({ item, id, accepted: false, reason: `goal write failed (exit ${r.status}): ${(r.stderr || "").trim().slice(0, 200)}` });
+        continue;
+      }
+      out.push({ item, id, accepted: true, reason: `routed as draft ${id}（可在 /goal?status=draft 看到）` });
+    }
+    keys.add(findingKey(candidate));
+    known.push({ id, title: item.title, origin });
+    filed++;
+  }
+  return out;
+}
+
 // ── 语义半 ────────────────────────────────────────────────────────────────────────────────────────
 
 /** 组装 probe prompt 的**单一构造点**（复刻 launchArgv 的 AC140 纪律：一次性入口与常驻入口
@@ -594,7 +685,7 @@ export function buildProbePrompt(objective: string, readings: MetaRoundReadings)
 }
 
 /** 解析语义半的输出。读不懂 ⇒ null（调用侧转 not-evaluated / failed，⛔ 不当空结果放行）。 */
-export function parseProbeOutput(stdout: string): { divergences: unknown[]; proposals: Proposal[]; autoDrive: AutoDriveItem[]; humanAttention: string[] } | null {
+export function parseProbeOutput(stdout: string): { divergences: unknown[]; proposals: Proposal[]; autoDrive: AutoDriveItem[]; decisions: DecisionItem[] } | null {
   const text = String(stdout ?? "").trim();
   if (!text) return null;
   // 容忍 LLM 在 JSON 前后带少量散文：取第一个 { 到最后一个 }。
@@ -630,11 +721,24 @@ export function parseProbeOutput(stdout: string): { divergences: unknown[]; prop
         }];
       })
     : [];
+  const decisions: DecisionItem[] = Array.isArray(o.decisions)
+    ? (o.decisions as unknown[]).flatMap((raw) => {
+        if (!raw || typeof raw !== "object") return [];
+        const d = raw as Record<string, unknown>;
+        const need = ["title", "question", "options", "evidenceKey", "origin"] as const;
+        if (need.some((k) => typeof d[k] !== "string" || String(d[k]).trim() === "")) return [];
+        return [{
+          title: String(d.title).trim(), question: String(d.question).trim(),
+          options: String(d.options).trim(), evidenceKey: String(d.evidenceKey).trim(),
+          origin: String(d.origin).trim(),
+        }];
+      })
+    : [];
   return {
     divergences: Array.isArray(o.divergences) ? (o.divergences as unknown[]) : [],
     proposals,
     autoDrive,
-    humanAttention: Array.isArray(o.humanAttention) ? (o.humanAttention as unknown[]).map((x) => String(x)) : [],
+    decisions,
   };
 }
 
@@ -750,6 +854,9 @@ export async function runMetaRound(opts: MetaRoundOptions): Promise<MetaRoundRes
   // 自动驱动：每轮至多 1 条（⛔ 比提案更严——立案会被自动晋升并派发）。
   const driven = await driveItems(root, parsed.autoDrive, readings, { cap: 1, dryRun, at }); // concurrency-default-fallback: 自动驱动每轮至多 1 条（比提案 3 更严——立案会被自动晋升并派发）
   const drivenIds = driven.filter((d) => d.accepted).map((d) => d.id);
+  // 决策也必须被【路由】到 draft GOAL（⛔ 不许停在一个只打印的字段里）。
+  const decided = await fileDecisions(root, parsed.decisions, readings, records, { cap: 2, dryRun, at });
+  const decidedIds = decided.filter((d) => d.accepted).map((d) => d.id);
   // 判读成功才推进状态：失败/解析不了的轮不写 state ⇒ 下一轮仍判为「该判读」，⛔ 不会因
   // 一次失败就把这批读数当成"已判过"而永久跳过。
   if (!dryRun) writeState(root, { digest, lastJudgedAt: new Date().toISOString() });
@@ -763,10 +870,12 @@ export async function runMetaRound(opts: MetaRoundOptions): Promise<MetaRoundRes
     autoDriveOffered: parsed.autoDrive.length,
     autoDriveFiled: drivenIds,
     autoDrive: driven,
-    humanAttention: parsed.humanAttention,
+    decisionsOffered: parsed.decisions.length,
+    decisionsRouted: decidedIds,
+    decisions: decided,
   };
   return {
-    fact: { name: "meta-driver", value, state: "verified", reason: `${readings.divergences.length} divergences, ${acceptedIds.length}/${parsed.proposals.length} proposals as draft, ${drivenIds.length}/${parsed.autoDrive.length} auto-driven` },
+    fact: { name: "meta-driver", value, state: "verified", reason: `${readings.divergences.length} divergences, ${acceptedIds.length}/${parsed.proposals.length} proposals, ${drivenIds.length}/${parsed.autoDrive.length} auto-driven, ${decidedIds.length}/${parsed.decisions.length} decisions routed` },
   };
 }
 
@@ -904,8 +1013,8 @@ export async function main(argv: string[]): Promise<number> {
     if (Array.isArray(v.acceptedIds) && (v.acceptedIds as string[]).length > 0) {
       process.stdout.write(`  filed as draft: ${(v.acceptedIds as string[]).join(", ")}\n`);
     }
-    for (const h of (v.humanAttention as string[] | undefined) ?? []) {
-      process.stdout.write(`  human-attention: ${h}\n`);
+    for (const d of (v.decisions as DecisionResult[] | undefined) ?? []) {
+      process.stdout.write(`  decision ${d.accepted ? d.id : "REJECTED"}: ${d.item.title} — ${d.reason}\n`);
     }
   }
   return fact.state === "failed" ? 1 : 0;

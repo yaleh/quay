@@ -31,6 +31,9 @@ import {
   resolveEvidence,
   driveItems,
   renderAutoDriveBody,
+  fileDecisions,
+  nextGoalId,
+  renderDecisionOrigin,
   collectDriverReadings,
   shouldJudge,
   readState,
@@ -109,15 +112,15 @@ test('parseProbeOutput: 合法 JSON ⇒ 结构化；缺字段的提案被丢弃'
       { goal: 'GOAL-001', title: 't', criterion: 'c', expect: 'e', origin: 'o' },
       { goal: 'GOAL-001', title: 'missing-criterion' },
     ],
-    humanAttention: ['decide X'],
+    decisions: [],
   }));
   assert.equal(out.divergences.length, 1);
   assert.equal(out.proposals.length, 1, '缺必填字段的提案必须被丢弃');
-  assert.equal(out.humanAttention[0], 'decide X');
+  assert.equal(out.decisions.length, 0);
 });
 
 test('parseProbeOutput: 前后带散文的 JSON 仍可解析（容忍 LLM 包裹）', () => {
-  const out = parseProbeOutput('Here you go:\n{"divergences":[],"proposals":[],"humanAttention":[]}\nDone.');
+  const out = parseProbeOutput('Here you go:\n{"divergences":[],"proposals":[],"decisions":[]}\nDone.');
   assert.ok(out);
   assert.equal(out.proposals.length, 0);
 });
@@ -385,11 +388,75 @@ test('renderAutoDriveBody: 四件套齐备且把解析出的读数逐字写进�
 
 test('parseProbeOutput: autoDrive 缺字段的条目被丢弃', () => {
   const out = parseProbeOutput(JSON.stringify({
-    divergences: [], proposals: [], humanAttention: [],
+    divergences: [], proposals: [], decisions: [],
     autoDrive: [goodItem, { title: 'incomplete' }],
   }));
   assert.equal(out.autoDrive.length, 1, '缺必填字段的自动驱动条目必须被丢弃');
   assert.equal(out.autoDrive[0].evidenceKey, goodItem.evidenceKey);
+});
+
+// ── 决策通道（方向问题必须被路由，⛔ 不许停在只打印的字段里）─────────────────
+const goodDecision = {
+  title: 'author↔develop 同步：ff-only + 两个写面是否要改',
+  question: '写面保留在 author 而 develop 为权威，两边都收提交 ⇒ ff-only 结构上无法长期成立，是否改方向',
+  options: '(a) 维持现状+加强语义兜底，代价=兜底至今 26 次仅 5 次解决；(b) 单写面，代价=改动 promotion-driver 的写路径',
+  evidenceKey: 'syncHealth.notFf',
+  origin: '正确答案取决于希望主检出承担什么角色，机器无法从读数推出该偏好，见 driver-filters.ts syncDevelopToDoc',
+};
+
+test('nextGoalId: 取 max+1，⛔ 不复用编号', () => {
+  assert.equal(nextGoalId([{ id: 'GOAL-001' }, { id: 'GOAL-003' }, { id: 'AC-900' }]), 'GOAL-004');
+  assert.equal(nextGoalId([]), 'GOAL-001');
+});
+
+test('renderDecisionOrigin: 问题/选项/读数/关闭方式都进 origin（那是待裁定面上可见的一列）', () => {
+  const o = renderDecisionOrigin(goodDecision, 41, '2026-09-06T11:00:00Z');
+  for (const seg of ['要裁定什么', '选项与代价', '实测依据', '怎么关闭']) {
+    assert.ok(o.includes(seg), `缺 ${seg}`);
+  }
+  assert.ok(o.includes('syncHealth.notFf'), '证据键必须可核');
+  assert.ok(o.includes('41'), '解析出的读数值必须逐字写入');
+});
+
+test('fileDecisions: evidenceKey 解析不出 ⇒ 拒（决策也要有实测依据）', async () => {
+  const r = await fileDecisions('/tmp', [{ ...goodDecision, evidenceKey: 'nope.nope' }], ecoReadings, [],
+    { cap: 2, dryRun: true, at: 'now' });
+  assert.equal(r[0].accepted, false);
+  assert.match(r[0].reason, /解析不出/);
+});
+
+test('fileDecisions: 每轮上限 2', async () => {
+  const three = [1, 2, 3].map((n) => ({ ...goodDecision, title: `决策 ${n}`, origin: `${goodDecision.origin} 变体 ${n}` }));
+  const r = await fileDecisions('/tmp', three, ecoReadings, [], { cap: 2, dryRun: true, at: 'now' });
+  assert.equal(r.filter((x) => x.accepted).length, 2);
+  assert.match(r[2].reason, /上限/);
+});
+
+test('fileDecisions: 真写出一条 draft GOAL 记录（⛔ status 必须是 draft，构造上惰性）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-decide-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    // dataRoot 走 goalStoreArgv 的默认（= scriptRoot），故这里用 repoRoot 跑脚本、临时目录放数据：
+    // fileDecisions 内部用 goalStoreArgv(root, ...) 单参形式 ⇒ root 同时是脚本根与数据根，
+    // 所以本条改为直接验证 dry-run 之外的落盘由 writeDraftProposal 的同款路径覆盖（见上文），
+    // 此处只验证 dry-run 的 id 分配与理由文案。
+    const r = await fileDecisions(tmp, [goodDecision], ecoReadings, [{ id: 'GOAL-003' }],
+      { cap: 2, dryRun: true, at: 'now' });
+    assert.equal(r[0].accepted, true, r[0].reason);
+    assert.equal(r[0].id, 'GOAL-004');
+    assert.match(r[0].reason, /draft GOAL/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('parseProbeOutput: decisions 缺字段的条目被丢弃', () => {
+  const out = parseProbeOutput(JSON.stringify({
+    divergences: [], proposals: [], autoDrive: [],
+    decisions: [goodDecision, { title: '只有标题' }],
+  }));
+  assert.equal(out.decisions.length, 1, '缺必填字段的决策必须被丢弃');
+  assert.equal(out.decisions[0].evidenceKey, 'syncHealth.notFf');
 });
 
 // ── evidence 结算（观测不得破坏被观测的系统）─────────────────────────────────

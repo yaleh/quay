@@ -91,6 +91,19 @@ RESTRAINT — this is the point of the mechanism, not an afterthought:
      not a symptom word — that distinction is the whole point of the check.
    - `problem` (one line, what is broken), `criterion` (runnable, decides done), `expect`.
 
+4. `decisions[]` — AT MOST TWO per round. A direction question that a machine must NOT settle, but
+   that must still be ROUTED rather than parked. Each becomes a `draft` GOAL record, which lands on
+   the "N 条待人裁定" surface at `/goal?status=draft`; a human settles it by activating it (or by
+   leaving/superseding it). ⛔ There is no "just mention it" output any more: a finding you cannot
+   auto-drive and cannot express as a proposal goes HERE, with a real close path — because an
+   observation that only gets printed is indistinguishable from one that was never made (this
+   project has a 12-item, 10-day-dead escalations file proving exactly that).
+   Each item needs:
+   - `title` (the decision in one line), `question` (what must be settled),
+   - `options` (the alternatives AND what each costs — a decision with one option is not a decision),
+   - `evidenceKey` (dotted path into the readings; resolved mechanically, rejected if it does not),
+   - `origin` (why a machine must not settle this — what makes it a judgment rather than work).
+
 REPLY WITH ONLY a JSON object, no prose around it:
 {"divergences":[{"id":"AC-NNN","kind":"pass-but-unflipped|achieved-but-failing|no-criterion",
   "interpretation":"<one line: what this actually means>",
@@ -100,4 +113,6 @@ REPLY WITH ONLY a JSON object, no prose around it:
  "autoDrive":[{"title":"<one line>","problem":"<what is broken, one line>",
   "evidenceKey":"<dotted path into the readings>","mechanismKeyword":"<mechanism name in code>",
   "criterion":"<runnable shell>","expect":"<one line>"}],
- "humanAttention":["<one line each: anything a human must decide; omit or leave empty if none>"]}
+ "decisions":[{"title":"<one line>","question":"<what must be settled>",
+  "options":"<alternatives and what each costs>","evidenceKey":"<dotted path into the readings>",
+  "origin":"<why a machine must not settle this>"}]}
