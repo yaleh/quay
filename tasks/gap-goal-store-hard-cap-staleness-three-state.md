@@ -1,7 +1,7 @@
 ---
 id: gap-goal-store-hard-cap-staleness-three-state
 title: I1 单例改硬上限 I1′ + 新增陈旧三态 I3 与分歧检查 I4，cap/stale 可配不写死
-status: todo
+status: ready
 labels:
   - gap
 parent: null
