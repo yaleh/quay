@@ -5,6 +5,7 @@ status: ready
 labels:
   - gap
   - defect
+  - delivery-critical
 parent: null
 children: []
 extra:
@@ -45,12 +46,12 @@ psi_cpu_total: null, psi_io_total: null}`，**没有任何一轮含 `main` / `se
 
 ## Acceptance Criteria
 
-- [ ] 机械 fan-in 跑一轮全量后，该轮的 `verification-round.jsonl` 记录含 **≥3 个不同 `phase` 值**（至少 static + main + end），立案时取假（今天 37/37 单相）
-- [ ] 其中 `main` 相的 `lanes` 与该轮 `full-suite-state.json` 的 `laneCount` 一致（不是 1）——立案时取假
-- [ ] `main` 相的 `psi_cpu_total` 非 null（PSI 随分相自动恢复；⛔ 不得用推导值填充，缺就留 null 并报 `read_error`）
-- [ ] 负控制：cgroup 不可读时该相仍写 `read_error` 且 PSI 保持 null，**不得静默产出结构完整的空记录**（硬规则 3b）
-- [ ] 单相退化不再无声：若某轮只产出单相，记录里必须有可区分的字段说明原因，而不是与正常多相轮同形
-- [ ] `bash scripts/test.sh --for-task gap-mechanical-fan-in-loses-per-phase-accounting` 退出 0
+- [x] 机械 fan-in 跑一轮全量后，该轮的 `verification-round.jsonl` 记录含 **≥3 个不同 `phase` 值**（至少 static + main + end），立案时取假（今天 37/37 单相）
+- [x] 其中 `main` 相的 `lanes` 与该轮 `full-suite-state.json` 的 `laneCount` 一致（不是 1）——立案时取假
+- [x] `main` 相的 `psi_cpu_total` 非 null（PSI 随分相自动恢复；⛔ 不得用推导值填充，缺就留 null 并报 `read_error`）
+- [x] 负控制：cgroup 不可读时该相仍写 `read_error` 且 PSI 保持 null，**不得静默产出结构完整的空记录**（硬规则 3b）
+- [x] 单相退化不再无声：若某轮只产出单相，记录里必须有可区分的字段说明原因，而不是与正常多相轮同形
+- [x] `bash scripts/test.sh --for-task gap-mechanical-fan-in-loses-per-phase-accounting` 退出 0
 
 ## Definition of Done
 

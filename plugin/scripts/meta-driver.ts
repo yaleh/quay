@@ -85,6 +85,10 @@ export interface MetaRoundReadings {
   drivers: DriverReading[];
   /** author↔develop 同步的成败计数（该机制自己的产物）。 */
   syncHealth: SyncHealth;
+  /** 【寄给 meta-driver 的任务】——`label:meta-driver` 的未关闭任务。
+   *  这是「裸缺陷」的入口（不必是 GOAL、不必挂活跃目标、不必用够不着的 --focus），
+   *  同时是它自己的闭环（autoDrive 立的任务带同一标签，掉进 needs-human 也会回流）。 */
+  addressedTasks: AddressedTask[];
   focus: string | null;
 }
 
@@ -174,6 +178,7 @@ export async function collectReadings(root: string, focus: string | null): Promi
     goals, criteria, divergences: computeDivergences(criteria),
     drivers: collectDriverReadings(root),
     syncHealth: collectSyncHealth(root),
+    addressedTasks: collectAddressedTasks(root),
     focus,
   };
 }
@@ -420,6 +425,9 @@ export function readingsDigest(readings: MetaRoundReadings): string {
     ...readings.drivers.map((d) => `drv:${d.kind}:${d.running ? 1 : 0}`).sort(),
     // 同步只取【最近是否在失败】这个位，⛔ 不取计数。
     `sync:${readings.syncHealth.lastEvent ?? "none"}`,
+    // 寄给它的任务：id + status 都进摘要。**必须进**——否则人新发一条裸缺陷不会改变摘要，
+    // 变化检测闸会把那一轮判为"读数没变"而跳过语义半 ⇒ 这个入口在定时轮里等于不存在。
+    ...readings.addressedTasks.map((t) => `task:${t.id}:${t.status}`).sort(),
   ];
   return createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 16);
 }
@@ -488,15 +496,36 @@ export interface AutoDriveItem {
   touches: string;
 }
 
-/** 按点号路径在本轮读数里解析证据。`drivers.<kind>.<field>` 特化为按 kind 查。
+/** 读数里【按业务键索引的数组】——点号路径不能索引数组下标，所以这些必须显式按键查。
+ *
+ *  ⚠️ 生产首轮（mt-prod-1788703469, 2026-09-06）实测：本表原先【只有 drivers】，
+ *  于是同一轮里 autoDrive 引 `criteria.AC-180.verdict`、decision 引 `criteria.AC-143.status`
+ *  ——两条都是【真实存在】的读数——却双双被判「解析不出」而拒绝，该轮 1 提 0 立 / 1 提 0 路由。
+ *  ⇒ 机制最主要的证据类型（24 条 criteria vs 6 个 driver）在结构上无法被引用，
+ *  两条最有价值的输出通道被自己的闸堵死。**这不是 probe 写错，是闸缺表。**
+ *
+ *  ⊢ 硬规则 5b（在某处修好 X ≠ X 只在那一处）：写这个函数时已经知道「数组要按键索引」并
+ *  为 drivers 做了特例，却漏了同一个对象里的其余三个同形数组。补齐时逐个列出，不只补被报出来的那个。 */
+export const ID_KEYED_READING_ARRAYS: Record<string, string> = {
+  drivers: "kind",
+  criteria: "id",
+  divergences: "id",
+  goals: "id",
+  addressedTasks: "id",
+};
+
+/** 按点号路径在本轮读数里解析证据。`<数组名>.<业务键>[.<字段>]` 按 ID_KEYED_READING_ARRAYS 查。
  *  解析不出 ⇒ undefined（调用侧据此拒绝——⛔ 不允许「引用了一个不存在的读数」的自动驱动）。 */
 export function resolveEvidence(readings: MetaRoundReadings, key: string): unknown {
   const parts = String(key ?? "").split(".").filter(Boolean);
   if (parts.length === 0) return undefined;
-  if (parts[0] === "drivers" && parts.length >= 2) {
-    const d = readings.drivers.find((x) => x.kind === parts[1]);
-    if (!d) return undefined;
-    return parts.length === 2 ? d : (d as unknown as Record<string, unknown>)[parts[2]];
+  const idField = ID_KEYED_READING_ARRAYS[parts[0]];
+  if (idField && parts.length >= 2) {
+    const arr = (readings as unknown as Record<string, unknown>)[parts[0]];
+    if (!Array.isArray(arr)) return undefined;
+    const hit = (arr as Array<Record<string, unknown>>).find((x) => String(x?.[idField]) === parts[1]);
+    if (!hit) return undefined;
+    return parts.length === 2 ? hit : hit[parts[2]];
   }
   let cur: unknown = readings as unknown;
   for (const p of parts) {
@@ -538,6 +567,69 @@ export function blockingOwners(owners: OwningTask[]): OwningTask[] {
   return owners.filter((o) => o.status !== "done" && o.status !== "superseded");
 }
 
+/** 未关闭的状态集（"还在场上"）。done/superseded 之外的都算。 */
+export const OPEN_TASK_STATUSES = ["todo", "ready", "needs-human"] as const;
+
+export interface AddressedTask { id: string; status: string; title: string | null; labels: string[] }
+
+/** 读【寄给 meta-driver 的任务】——按标签枚举未关闭任务。
+ *
+ *  这是「裸缺陷」的入口：人（或任何一层）用现成的立案路径立一条普通任务、打上 `meta-driver` 标签，
+ *  它下一轮就进读数。⛔ 不新建收件箱——那正是 probe 规格记着的 escalations.md 死法（12 条未答、死 10 天），
+ *  也会成为 SPEC §6.3 警告的"第五个登记面"。用的是已经在跑的任务库 + 它自己输出就带的那个标签。
+ *
+ *  **同时是它自己的闭环**：autoDrive 立的任务带 `meta-driver` 标签，掉进 needs-human 也会回流成读数
+ *  ——此前它对自己立的任务的结局一无所知（实测 gap-meta-syncdeveloptodoc 进 needs-human 而它从不知情）。 */
+export function collectAddressedTasks(root: string, label = "meta-driver"): AddressedTask[] {
+  const dir = path.join(root, "tasks");
+  let files: string[];
+  try { files = fs.readdirSync(dir).filter((f) => f.endsWith(".md")); } catch { return []; }
+  const out: AddressedTask[] = [];
+  for (const f of files) {
+    try {
+      const text = fs.readFileSync(path.join(dir, f), "utf8");
+      if (!text.startsWith("---")) continue;
+      const end = text.indexOf("\n---", 3);
+      if (end < 0) continue;
+      const fm = text.slice(3, end);
+      const status = (fm.match(/^status:\s*(\S+)\s*$/m) ?? [])[1] ?? "unknown";
+      if (!(OPEN_TASK_STATUSES as readonly string[]).includes(status)) continue;
+      const labels = parseFrontmatterLabels(fm);
+      if (!labels.includes(label)) continue;
+      out.push({
+        id: f.replace(/\.md$/, ""),
+        status,
+        title: (fm.match(/^title:\s*(.+)$/m) ?? [])[1]?.trim() ?? null,
+        labels,
+      });
+    } catch { /* 读不了就跳过这一个 */ }
+  }
+  return out;
+}
+
+/** frontmatter 的 labels 解析：块列表（`labels:\n  - a\n  - b`）与内联（`labels: [a, b]`）都认。 */
+export function parseFrontmatterLabels(fm: string): string[] {
+  const inline = fm.match(/^labels:\s*\[(.*?)\]\s*$/m);
+  if (inline) return inline[1].split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+  const lines = fm.split("\n");
+  const i = lines.findIndex((l) => /^labels:\s*$/.test(l));
+  if (i < 0) return [];
+  const out: string[] = [];
+  for (let j = i + 1; j < lines.length; j++) {
+    const m = lines[j].match(/^\s+-\s+(.+?)\s*$/);
+    if (!m) break; // 缩进列表一结束就停，⛔ 不继续吃下一个键
+    out.push(m[1].replace(/^["']|["']$/g, ""));
+  }
+  return out;
+}
+
+/** 逗号分隔的仓库相对路径里，【真实存在】的那些。用于「拿得出真出处」这类闸——
+ *  ⛔ 存在性是关键：一个逃避责任的升级拿不出真实存在的文件路径，而一个真冲突拿得出。 */
+export function existingPaths(root: string, csv: string): string[] {
+  return String(csv ?? "").split(",").map((s) => s.trim()).filter(Boolean)
+    .filter((rel) => { try { return fs.existsSync(path.join(root, rel)); } catch { return false; } });
+}
+
 /** 任务体（四件套）。⛔ 机械渲染自结构化输出——不给 LLM 写文件的权力。 */
 export function renderAutoDriveBody(item: AutoDriveItem, evidence: unknown, at: string, staleOwners: string[] = [], taskId?: string): string {
   return [
@@ -566,22 +658,31 @@ export function renderAutoDriveBody(item: AutoDriveItem, evidence: unknown, at: 
   ].join("\n");
 }
 
-/** 立一条任务（复用 quay-native 的 task create CLI，⛔ 不手搓 markdown 落盘）。 */
-export async function createAutoDriveTask(
-  root: string, id: string, item: AutoDriveItem, body: string,
+/** 立一条任务（复用 quay-native 的 task create CLI，⛔ 不手搓 markdown 落盘）。
+ *  **单一构造点**：autoDrive 与 needs-human-task 两条落地路径共用它，⛔ 不各拼一份 argv。 */
+export async function createTask(
+  root: string, id: string, title: string, labels: string[], body: string, status?: string,
 ): Promise<{ ok: boolean; reason: string }> {
   const argv = [
     "node", "--no-warnings", "--experimental-strip-types",
     path.join(root, "packages", "quay-native", "bin", "quay-native.ts"),
     "task", "create", id,
-    "--title", item.title,
-    "--labels", "meta-driver,driver-candidate",
+    "--title", title,
+    "--labels", labels.join(","),
+    ...(status ? ["--status", status] : []),
     "--body", body,
   ];
   const r = await runAsync(argv, { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
   if (r.error) return { ok: false, reason: `task create spawn error: ${r.error.message}` };
   if (r.status !== 0) return { ok: false, reason: `task create exit ${r.status}: ${(r.stderr || "").trim().slice(0, 200)}` };
   return { ok: true, reason: `filed as ${id}` };
+}
+
+/** autoDrive 的落地（保持既有标签集不变）。 */
+export async function createAutoDriveTask(
+  root: string, id: string, item: AutoDriveItem, body: string,
+): Promise<{ ok: boolean; reason: string }> {
+  return createTask(root, id, item.title, ["meta-driver", "driver-candidate"], body);
 }
 
 export interface AutoDriveResult { item: AutoDriveItem; id: string | null; accepted: boolean; reason: string }
@@ -671,12 +772,35 @@ export function probeWriteViolations(before: Set<string> | null, after: Set<stri
 // **激活它就是裁定本身**（SPEC-goal-mechanism 裁定 3：draft→active 保留给人）。
 // ⛔ 不新建第七个登记面——用的是已经在跑的 goal store 和刚接好的那个可见面。
 
+/** 载体：⛔ 「需要人裁决」不等于「是 GOAL 尺寸」。此前两者被混为一谈——本轮实测那条决策
+ *  （SPEC-0809 §3 与 AC-180 冲突）是【政策冲突】而非「我们要什么」，却因 draft→active 恰好是
+ *  人裁决界面而被写成 draft GOAL。载体现在按事情的性质选，不按通道选。 */
+export type DecisionCarrier = "goal" | "needs-human-task";
+
 export interface DecisionItem {
   title: string;
   question: string;
   options: string;
   evidenceKey: string;
   origin: string;
+  /** 载体。缺省 `goal`（向后兼容），但两种载体各有自己的机械闸，缺字段即被该闸拒（fail-closed）。 */
+  carrier?: DecisionCarrier;
+  /** carrier=goal 必填：作用域（仓库相对路径，逗号分隔）。**必须 ≥3 条真实存在**——
+   *  一个只要改一两个文件就能满足的东西，结构上不是 GOAL（颗粒度闸，与 mechanismKeyword 拒症状词同构）。 */
+  scope?: string;
+  /** carrier=needs-human-task 必填：**互相矛盾的既有立场，逐字引用**。≥2 条，且每条的 `quote`
+   *  必须**在 `source` 文件里逐字存在**（fs 校验）。
+   *  ⛔ 这是防逃逸的核心，且是【语义】闸不是频率闸：它直接检验 a/b/c 判据的 (b) 步——
+   *  「阻碍是不是一个【已经写下】的偏好」。能引出两条互相矛盾的原文 ⇒ 确实需要人在两个既有立场间裁决；
+   *  只引得出一条 ⇒ 那条就是答案，应当直接适用（走 autoDrive）；一条都引不出 ⇒ 那是「我不确定」，不是「须人裁决」。
+   *  逐字校验让伪造变得昂贵：编不出一段恰好存在于某个真实文件里的话。 */
+  conflict?: Array<{ source: string; quote: string }>;
+  /** carrier=needs-human-task 必填：机器若自行选错，什么会变得难以撤销。
+   *  ⛔ 语义核心之二：一个【容易撤销】的选择不该占用人的注意力——自己选、记录下来即可。
+   *  只有代价不可逆时，「交给人」才是负责任而不是逃避。 */
+  irreversible?: string;
+  /** carrier=needs-human-task 必填：授权面（同 autoDrive 的 Touches）。 */
+  touches?: string;
 }
 
 /** 下一个可用 GOAL id（max+1）。⛔ 不复用编号（硬规则 8）。 */
@@ -717,6 +841,107 @@ export function decisionQuality(item: DecisionItem): { ok: boolean; reason: stri
   return { ok: true, reason: `accepted: ${segs.length} 个选项，问题与不可自决理由齐备` };
 }
 
+/** GOAL 的颗粒度下限：作用域须有 ≥3 条真实存在的路径。改一两个文件就能满足的不是 GOAL。 */
+export const GOAL_MIN_SCOPE_ENTRIES = 3;
+/** needs-human-task 的冲突下限：≥2 条【逐字可核】的既有立场。 */
+export const HUMAN_CALL_MIN_SOURCES = 2;
+/** 逐字引用的最短长度，**按 UTF-8 字节**算。太短的片段在任何文件里都能命中，等于没校验。
+ *
+ *  ⚠️ 为什么是字节不是字符：按字符数标定的阈值是拿 ASCII 校准的，会低估 CJK 的信息密度——
+ *  `不存在无判据的活跃验收` 只有 11 个字符却已经相当具体，用 `<12 字符` 判会把它当成"太短"拒掉。
+ *  这与本仓库 `cand-cjk-proposal-slot-word-boundary` 踩过的 `\b` 词边界是同一类缺陷：
+ *  **一个为 ASCII 调好的判据，遇到 CJK 静默失效。** 24 字节 ≈ ASCII 4 个词 ≈ CJK 8 字，两侧都足够具体。 */
+export const HUMAN_CALL_MIN_QUOTE_BYTES = 24;
+
+/** 逐字核对：`quote` 是否**真的**出现在 `source` 文件里。
+ *  读不到文件 ⇒ false（fail-closed，⛔ 读不出不得与「核对通过」同形，硬规则 3b）。 */
+export function quoteIsVerbatim(root: string, source: string, quote: string): boolean {
+  const q = String(quote ?? "").trim();
+  if (Buffer.byteLength(q, "utf8") < HUMAN_CALL_MIN_QUOTE_BYTES) return false;
+  try {
+    return fs.readFileSync(path.join(root, String(source ?? "")), "utf8").includes(q);
+  } catch { return false; }
+}
+/** needs-human-task 的标签（背压闸按它数未关闭条数）。 */
+export const HUMAN_CALL_LABEL = "meta-human-call";
+
+/** 载体闸：按事情的性质选载体，并对各自的滥用形态设机械下限。
+ *
+ *  人 2026-09-06 授权 needs-human-task，附加要求「极为谨慎地使用，以防其成为又一种逃避责任的出口」。
+ *  ⊢ 按硬规则 9，「谨慎」写成劝告等于没写（守与不守在记录上无法区分）⇒ 必须机械化。三道闸：
+ *    ① 真出处：`sources` 里【真实存在】的路径 ≥2 —— 一个真冲突拿得出两个互相矛盾的既有出处，
+ *      一句「我不确定」拿不出。存在性由 fs 校验，⛔ 不是长度或关键词。
+ *    ② 授权面：必须给 touches —— 说不出该改哪里，就不是「一件卡住的工作」，那是没想清楚。
+ *    ③ 背压（在调用侧）：已有未关闭的 meta-human-call ⇒ 拒。**这个出口一次只允许开一条**，
+ *      用过就关上，直到人把它关掉 —— 逃避一次的代价是失去再逃避的能力。 */
+export function carrierGate(root: string, item: DecisionItem): { ok: boolean; carrier: DecisionCarrier; reason: string } {
+  const carrier: DecisionCarrier = item.carrier === "needs-human-task" ? "needs-human-task" : "goal";
+  if (carrier === "goal") {
+    const hits = existingPaths(root, item.scope ?? "");
+    if (hits.length < GOAL_MIN_SCOPE_ENTRIES) {
+      return {
+        ok: false, carrier,
+        reason: `granularity: scope 只解析出 ${hits.length} 条真实路径（需 ≥${GOAL_MIN_SCOPE_ENTRIES}）——改一两个文件就能满足的东西不是 GOAL，请改用 autoDrive 或 needs-human-task`,
+      };
+    }
+    return { ok: true, carrier, reason: `goal: scope ${hits.length} 条真实路径` };
+  }
+  // 语义闸①：互相矛盾的既有立场，逐字可核。⛔ 不是「引用了几个文件」，是「引的话真的在那个文件里」。
+  const conflict = Array.isArray(item.conflict) ? item.conflict : [];
+  const verified = conflict.filter((c) => c && quoteIsVerbatim(root, c.source, c.quote));
+  if (verified.length < HUMAN_CALL_MIN_SOURCES) {
+    const bad = conflict.filter((c) => !verified.includes(c)).map((c) => c?.source ?? "<无 source>");
+    return {
+      ok: false, carrier,
+      reason: `escape-guard: 只核实了 ${verified.length}/${conflict.length} 条逐字冲突引用（需 ≥${HUMAN_CALL_MIN_SOURCES}）`
+        + (bad.length ? `；核不上的：${bad.join("、")}` : "")
+        + `。⊢ 引不出两条互相矛盾的原文 ⇒ 这不是「两个既有立场要人裁决」：只引得出一条 ⇒ 那条就是答案，直接适用（autoDrive）；一条都引不出 ⇒ 是「我不确定」，不是「须人裁决」`,
+    };
+  }
+  // 语义闸②：不可逆性。容易撤销的选择不该占用人的注意力——自己选、记录即可。
+  if (String(item.irreversible ?? "").trim().length < 20) {
+    return {
+      ok: false, carrier,
+      reason: "escape-guard: 未说明「机器若自行选错，什么会变得难以撤销」——一个容易撤销的选择应当自己做并记录，交给人才是逃避",
+    };
+  }
+  if (!String(item.touches ?? "").trim()) {
+    return { ok: false, carrier, reason: "escape-guard: needs-human-task 必须给 touches（授权面）——说不出该改哪里的，不是一件卡住的工作" };
+  }
+  return { ok: true, carrier, reason: `needs-human-task: ${verified.length} 条逐字可核的冲突引用 + 不可逆性说明 + 授权面齐备` };
+}
+
+/** needs-human-task 的任务体。⛔ 机械渲染自结构化输出——不给 LLM 写文件的权力（同 autoDrive）。 */
+export function renderHumanCallBody(item: DecisionItem, evidence: unknown, at: string, taskId?: string): string {
+  return [
+    "## Finding",
+    `${item.question}`,
+    "",
+    `**要人裁决的是什么**：${item.title}`,
+    `**选项与代价**：${item.options}`,
+    `**为什么机器不能自决**：${item.origin}`,
+    `**若机器自行选错，什么难以撤销**：${item.irreversible ?? ""}`,
+    `**实测依据**：\`${item.evidenceKey}\` = ${JSON.stringify(evidence)}（meta-driver 机械采集于 ${at}）`,
+    "",
+    "**互相矛盾的既有立场（逐字引用，已机械核对确实存在于对应文件）**：",
+    ...(item.conflict ?? []).map((c) => `- \`${c.source}\`：「${c.quote}」`),
+    "",
+    "## AC（draft）",
+    "- [ ] 人在上述选项中作出选择，并把选择写进本任务体（或以 DIR 记录该裁定）",
+    "- [ ] 依该选择产生的后续工作已立案或已落地（⛔ 不以「已回答」本身充当完成）",
+    "",
+    "## DoD（draft）",
+    "- [ ] 裁定已记录在可被后续读到的正本里，⛔ 不只存在于本任务的对话中",
+    "- [ ] 上面两条互相矛盾的立场中，落败的一方已被就地更正或标注，⛔ 不留着继续制造同一次冲突",
+    "",
+    "## Touches",
+    ...[...new Set([
+      ...String(item.touches ?? "").split(",").map((t) => t.trim()).filter(Boolean),
+      ...(taskId ? [`tasks/${taskId}.md`] : []),
+    ])].map((t) => `- \`${t}\``),
+  ].join("\n");
+}
+
 export interface DecisionResult { item: DecisionItem; id: string | null; accepted: boolean; reason: string }
 
 /** 决策的闸 + 落地。与自动驱动同源的证据纪律：evidenceKey 必须在本轮读数里解析得出。 */
@@ -745,6 +970,28 @@ export async function fileDecisions(
     }
     const q = decisionQuality(item);
     if (!q.ok) { out.push({ item, id: null, accepted: false, reason: q.reason }); continue; }
+
+    const cg = carrierGate(root, item);
+    if (!cg.ok) { out.push({ item, id: null, accepted: false, reason: cg.reason }); continue; }
+
+    if (cg.carrier === "needs-human-task") {
+      // ⛔ 这里【没有】数量背压。人 2026-09-06 否掉了「一次只允许开一条」：那是频率控制冒充语义控制，
+      // 且方向反了——第一条无论多烂都放行，之后再真实的冲突都被挡，过滤依赖到达顺序而非质量，
+      // 还会制造「名额被占用所以不报真问题」的反向激励。防滥用全部落在 carrierGate 的语义闸上。
+      // 未关闭的 human-call 进读数（addressedTasks）供语义半自己判重，是【信息】不是【配额】。
+      const taskId = `gap-meta-call-${item.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40)}`;
+      if (opts.dryRun) {
+        out.push({ item, id: taskId, accepted: true, reason: `dry-run: would file as needs-human task ${taskId}` });
+      } else {
+        const body = renderHumanCallBody(item, ev, opts.at, taskId);
+        const r = await createTask(root, taskId, item.title, [HUMAN_CALL_LABEL, "meta-driver"], body, "needs-human");
+        if (!r.ok) { out.push({ item, id: taskId, accepted: false, reason: r.reason }); continue; }
+        out.push({ item, id: taskId, accepted: true, reason: `routed as needs-human task ${taskId}（占用唯一名额，关闭后才可再升级）` });
+      }
+      filed++;
+      continue;
+    }
+
     const origin = renderDecisionOrigin(item, ev, opts.at);
     const candidate = proposalCandidateText({ title: item.title, origin, criterion: "" });
     const key = findingKey(candidate);
@@ -829,10 +1076,31 @@ export function parseProbeOutput(stdout: string): { divergences: unknown[]; prop
         const d = raw as Record<string, unknown>;
         const need = ["title", "question", "options", "evidenceKey", "origin"] as const;
         if (need.some((k) => typeof d[k] !== "string" || String(d[k]).trim() === "")) return [];
+        // carrier 只认两个字面量；⛔ 无法识别的取值不静默当成 goal，而是原样带下去让 carrierGate
+        // 走 goal 分支的颗粒度闸——不认识的输入不得与合格输入同形（硬规则 3b）。
+        const carrier = d.carrier === "needs-human-task" ? "needs-human-task" as const
+          : d.carrier === "goal" ? "goal" as const : undefined;
         return [{
           title: String(d.title).trim(), question: String(d.question).trim(),
           options: String(d.options).trim(), evidenceKey: String(d.evidenceKey).trim(),
           origin: String(d.origin).trim(),
+          ...(carrier ? { carrier } : {}),
+          ...(typeof d.scope === "string" ? { scope: d.scope.trim() } : {}),
+          ...(typeof d.irreversible === "string" ? { irreversible: d.irreversible.trim() } : {}),
+          ...(typeof d.touches === "string" ? { touches: d.touches.trim() } : {}),
+          // conflict：只收 {source,quote} 两个字段都是非空字符串的条目。形状不对的条目直接丢弃，
+          // ⛔ 不补默认值——一个形状不对的引用不得被凑成"看起来合格"（硬规则 3b）。
+          ...(Array.isArray(d.conflict)
+            ? {
+                conflict: (d.conflict as unknown[]).flatMap((c) => {
+                  if (!c || typeof c !== "object") return [];
+                  const e = c as Record<string, unknown>;
+                  if (typeof e.source !== "string" || typeof e.quote !== "string") return [];
+                  const source = e.source.trim(); const quote = e.quote.trim();
+                  return source && quote ? [{ source, quote }] : [];
+                }),
+              }
+            : {}),
         }];
       })
     : [];
@@ -1047,7 +1315,7 @@ const HELP = [
   "",
   "Usage: node --experimental-strip-types plugin/scripts/meta-driver.ts [options]",
   "  --root <dir>      仓库根（缺省 cwd）",
-  "  --once            跑一轮后退出（v0 唯一模式，缺省即是）",
+  "  --once            跑一轮后退出（手工检视用；⛔ 缺省是【常驻】，与 quality 等例程型 kind 一致）",
   "  --no-llm          只跑机械半（读数 + divergence），不派语义 probe",
   "  --focus \"<text>\"  本轮的人给的方向（可选，进 prompt）",
   "  --k <N>           本轮提案上限（缺省 " + DEFAULT_RATE + "，routine-file-gate 的 rate 闸）",
@@ -1057,7 +1325,7 @@ const HELP = [
   "  --json            输出 JSON（缺省人读摘要）",
   "",
   "常驻（例程型，复用通用循环）:",
-  "  --resident            常驻跑；未给此旗标即一次性",
+  "  --resident            常驻跑（**已是缺省**，保留仅为显式表达；一次性用 --once）",
   "  --interval <ms>       循环滴答间隔（缺省 30000）",
   "  --review-interval <m> meta 复核的例程间隔（分钟，缺省 20）",
   "  --run-id <id> / --pid-file <p> / --max-rounds <n>",
@@ -1074,7 +1342,7 @@ export async function main(argv: string[]): Promise<number> {
   let json = false;
   let k = DEFAULT_RATE;
   let judgeFloorMs = JUDGE_FLOOR_MS_DEFAULT;
-  let resident = false;
+  let once = false;
   let intervalMs = 30_000;
   let reviewIntervalMinutes = 20;
   let runId = `meta-${Date.now()}`;
@@ -1090,8 +1358,8 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--no-llm") { noLlm = true; }
     else if (a === "--dry-run") { dryRun = true; }
     else if (a === "--json") { json = true; }
-    else if (a === "--once") { /* 一次性是缺省；保留旗标以便显式表达 */ }
-    else if (a === "--resident") { resident = true; }
+    else if (a === "--once") { once = true; }
+    else if (a === "--resident") { /* 常驻已是缺省（见下），保留旗标以便显式表达与向后兼容 */ }
     else if (a === "--interval") { intervalMs = Number(args[++i]); }
     else if (a === "--review-interval") { reviewIntervalMinutes = Number(args[++i]); }
     else if (a === "--run-id") { runId = args[++i]; }
@@ -1103,7 +1371,19 @@ export async function main(argv: string[]): Promise<number> {
   if (!Number.isFinite(k) || k < 1) { process.stderr.write("meta-driver: --k must be a positive number\n"); return 2; }
   if (!Number.isFinite(judgeFloorMs) || judgeFloorMs < 0) { process.stderr.write("meta-driver: --judge-floor must be a non-negative number of minutes\n"); return 2; }
 
-  if (resident) {
+  // 常驻是【缺省】，与兄弟例程型 kind 对齐（quality-gate-driver.ts main() 也是无条件进常驻循环）。
+  //
+  // ⚠️ 生产实测（2026-09-06）：此前缺省是一次性、常驻要 `--resident`，而 `driverArgvForKind`
+  // （driver-runtime.ts:365-377）拼的 argv 只有 --root/cap/--interval/--pid-file/--run-id，
+  // **不传 --resident** ⇒ `quay driver start --kind meta` 起的是一次性模式 ⇒ 跑一轮 exit 0 ⇒
+  // supervisor 5 秒后重启 ⇒ 20 分钟的复核间隔完全失效，退化成 ~38 秒的忙循环：
+  // 35 分钟内 23 轮 × 24 条 criterion ≈ 550 次子进程调用，而设计意图是约 2 轮。
+  // （lastRun 是进程内存态，每次重启都 never-ran ⇒ 必然立刻 due，间隔无从生效。）
+  // ⊢ 这是 SPEC §7「半登记」损害的第三例（quality 补接线、suite 半登记、本次 meta）。
+  // ⊢ 修法是【跟随兄弟实现】而非给 driverArgvForKind 再加一个 per-kind 旗标——后者正是 §7 在说的那种成本。
+  // 手工一次性检视仍可用 `--once`；`--json`/`--dry-run` 隐含一次性（一次性的输出形态，⛔ 不该进无限循环）。
+  const oneShot = once || json || dryRun;
+  if (!oneShot) {
     // 常驻：复用通用例程型循环，配自己的控制面与载体（⛔ 不与 quality 共用控制面）。
     return await runResidentQualityGateLoop({
       root, intervalMs, once: false, maxRounds,
