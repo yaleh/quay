@@ -1,7 +1,7 @@
 ---
 id: gap-bypass-check-unclassifiable-exits-zero
 title: direct-to-develop-bypass-check 读不懂 3627 条提交却 exit 0——套件看到「通过」，它要抓的六个提交就在不可分类样本里
-status: todo
+status: ready
 labels:
   - gap
   - defect
