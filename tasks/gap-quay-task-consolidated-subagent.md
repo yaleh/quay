@@ -2,7 +2,7 @@
 id: gap-quay-task-consolidated-subagent
 title: Build quay-task consolidated subagent — single ABI-only entry point for
   all task CRUD/lifecycle
-status: ready
+status: done
 labels:
   - gap
 parent: null
