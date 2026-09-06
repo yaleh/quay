@@ -1,7 +1,7 @@
 ---
 id: gap-measure-suite-heavy-wait-ratio-load-sensitive-flaky
 title: measure-suite 的 heavy/wait 比值断言负载敏感，重载下翻转并挡住 fan-in
-status: ready
+status: done
 labels:
   - gap
   - defect
