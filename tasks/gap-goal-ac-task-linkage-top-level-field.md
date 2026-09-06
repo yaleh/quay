@@ -1,7 +1,7 @@
 ---
 id: gap-goal-ac-task-linkage-top-level-field
 title: goal_ac 顶层字段落地 —— goal ↔ task 关联使缺口计算成为机械量
-status: ready
+status: done
 labels:
   - gap
 parent: null
