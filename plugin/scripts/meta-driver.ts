@@ -621,6 +621,22 @@ export function renderDecisionOrigin(item: DecisionItem, evidence: unknown, at: 
   ].join("\n");
 }
 
+/** 决策自己的质量判据。⛔ 不复用 gateFinding 的 quality 闸——那个 EVIDENCE 正则是为【缺陷发现】
+ *  调的（要求正文含文件路径/sha/`exit N` 这类代码形 token），而一个架构方向问题合理地可以不含
+ *  这种 token。实测误杀：「变化检测是否上升为平台能力」被拒，理由 "no actionable ## Finding with
+ *  reproduction evidence" ⇒ 判据用错了对象。
+ *  决策的质量在于【是不是一个真的选择】：有问题、有 ≥2 个带代价的选项、说得出机器为何不能定。
+ *  经验依据由 evidenceKey 单独强制（那才是"有实测支撑"的闸），此处不重复要求代码形 token。 */
+export function decisionQuality(item: DecisionItem): { ok: boolean; reason: string } {
+  if (item.question.trim().length < 20) return { ok: false, reason: "quality: question 过短，说不清要裁什么" };
+  if (item.origin.trim().length < 20) return { ok: false, reason: "quality: origin 未说明机器为何不能自决" };
+  // ≥2 个选项：按常见枚举符切分，每段需有实质长度。「一个选项的决策不是决策」（probe 规格原话）。
+  const segs = item.options.split(/[;；]|[①②③④⑤]|\([a-d]\)|\b[1-4][.)]/u)
+    .map((x) => x.trim()).filter((x) => x.length >= 10);
+  if (segs.length < 2) return { ok: false, reason: `quality: 只解析出 ${segs.length} 个实质选项——一个选项的决策不是决策` };
+  return { ok: true, reason: `accepted: ${segs.length} 个选项，问题与不可自决理由齐备` };
+}
+
 export interface DecisionResult { item: DecisionItem; id: string | null; accepted: boolean; reason: string }
 
 /** 决策的闸 + 落地。与自动驱动同源的证据纪律：evidenceKey 必须在本轮读数里解析得出。 */
@@ -647,10 +663,15 @@ export async function fileDecisions(
       out.push({ item, id: null, accepted: false, reason: `evidenceKey ${JSON.stringify(item.evidenceKey)} 解析不出 ⇒ 拒（⛔ 决策也要有实测依据）` });
       continue;
     }
+    const q = decisionQuality(item);
+    if (!q.ok) { out.push({ item, id: null, accepted: false, reason: q.reason }); continue; }
     const origin = renderDecisionOrigin(item, ev, opts.at);
     const candidate = proposalCandidateText({ title: item.title, origin, criterion: "" });
-    const gate = gateFinding(candidate, { existingKeys: keys, recentCount: filed, K: opts.cap });
-    if (!gate.accept) { out.push({ item, id: null, accepted: false, reason: gate.reason }); continue; }
+    const key = findingKey(candidate);
+    if (keys.has(key)) {
+      out.push({ item, id: null, accepted: false, reason: "dedup: 已有等价的待裁定记录" });
+      continue;
+    }
 
     const id = nextGoalId(known);
     if (opts.dryRun) {
@@ -1015,6 +1036,12 @@ export async function main(argv: string[]): Promise<number> {
     }
     for (const d of (v.decisions as DecisionResult[] | undefined) ?? []) {
       process.stdout.write(`  decision ${d.accepted ? d.id : "REJECTED"}: ${d.item.title} — ${d.reason}\n`);
+      // ⛔ 被拒的决策不得静默消失：轮记录写在 gitignored 的载体里，若只落那儿，一个被闸误杀的
+      // 方向问题就again 无人知晓（正是本通道要消灭的死胡同，只是下沉了一层）。此处显式提示
+      // 它需要人看一眼——闸可能是错的（实测已发生过一次：质量判据用错了对象）。
+      if (!d.accepted) {
+        process.stdout.write(`      ⚠️ 该决策未被路由，问题本身仍未解决——若闸判错，修闸而不是重提\n`);
+      }
     }
   }
   return fact.state === "failed" ? 1 : 0;
