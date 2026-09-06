@@ -1,7 +1,7 @@
 ---
 id: gap-goal-driver-mechanical-ring
 title: 新增 goal driver kind——机械环跑 AC 判据写 evidence、I2 flip achieved、I3/I4 报出
-status: needs-human
+status: todo
 labels:
   - gap
 parent: null
@@ -9,7 +9,8 @@ children: []
 extra:
   schema: execution
 depends_on:
-  - gap-goal-store-abi-encapsulation-provider-backed
+  - gap-measure-suite-heavy-wait-ratio-load-sensitive-flaky
+  - gap-writestate-torn-read-assertion-load-sensitive-flaky
 ---
 ## Proposal
 
