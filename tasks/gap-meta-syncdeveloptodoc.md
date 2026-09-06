@@ -1,7 +1,7 @@
 ---
 id: gap-meta-syncdeveloptodoc
 title: syncDevelopToDoc 事件落痕丢弃归因数据——ff-error 吞 git 错误、not-ff 缺 ahead/behind
-status: todo
+status: ready
 labels:
   - meta-driver
   - driver-candidate
