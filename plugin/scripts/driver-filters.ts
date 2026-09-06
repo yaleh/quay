@@ -23,6 +23,9 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { readFrontmatter } from "./gate-script-base.ts";
 import { parseTask, readDependsOn, readTaskStatusAtRef } from "./task-schema.ts";
+// gap-task-ops-consolidate-driver-frontmatter-writers：frontmatter parse/patch + commit 单一真相源
+// 上收到 task-ops.ts（⛔ 本文件不再各写一份 regex+writeFileSync+git 序列）。
+import { splitTaskFile, statusFromFrontmatter, patchStatusField, commitTaskFile, hasPriorCommit } from "./task-ops.ts";
 import { parseTouches, checkTouchesPair } from "./touches-orthogonality-check.ts";
 import { expandDeclaredTouches } from "./concurrent-batch-scheduler.ts";
 import { TASK_STATUS } from "./task-status.ts";
@@ -196,59 +199,11 @@ export function reconcileNeedsHumanWithDisk(state: RetryState, root: string): st
   return cleared;
 }
 
-// ── commit-after-write（主检出 status 翻转写盘即提交；单一真相源，⛔ 不各写一份） ───────────────────
-
-/** True when `root` is inside a git work tree (production root = the main checkout). False when git
- *  itself errors (unit-test temp dirs, or a repo-less root) — the commit is then a no-op, not a throw. */
-export function isInsideGitWorkTree(root: string): boolean {
-  try {
-    const out = execFileSync("git", ["-C", root, "rev-parse", "--is-inside-work-tree"], {
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    return out.toString().trim() === "true";
-  } catch {
-    return false;
-  }
-}
-
-/** COMMIT-AFTER-WRITE (gap-mark-needs-human-commit-after-write): commit a single task file to git
- *  immediately after a mechanical status flip. pathspec-limited to `rel` (⛔ never a bare `git commit`,
- *  which would sweep whatever another layer staged into the SHARED index — memory
- *  git-commit-no-pathspec-commits-shared-index). `--no-verify` skips the pre-commit hook: a mechanical
- *  status flip is content-neutral. Repo-less unit-test temp dirs are a no-op (return false, not a throw).
- *  Returns true when the commit landed; false on repo-less / git error (surfaced as `committed: false`,
- *  observable not silent). */
-export function commitTaskFile(root: string, rel: string, message: string): boolean {
-  if (!isInsideGitWorkTree(root)) return false;
-  try {
-    execFileSync("git", ["-C", root, "add", "--", rel]);
-    execFileSync("git", ["-C", root, "commit", "--no-verify", "-m", message, "--", rel]);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** FIRST-REGISTRATION JUDGMENT (gap-promotion-commit-message-misleading-on-first-track): true when
- *  `rel` already has a commit in git history (`git log -1 --format=%H -- <rel>` non-empty). A file on
- *  disk but never committed — the case where a promotion/needs-human flip is actually the file's BIRTH
- *  commit, not a status transition — returns false, so callers can label it "首次登记" instead of
- *  claiming a flip that never happened. Repo-less root ⇒ false (same no-op shape as commitTaskFile;
- *  there is no history to consult). ⛔ 不改 commitTaskFile 签名：它只负责执行提交，本判断由调用方在
- *  组装 message 前自行调用（两个调用点：ready-pool-check.ts commitTaskStatus 与 driver-filters.ts
- *  markNeedsHuman）。 */
-export function hasPriorCommit(root: string, rel: string): boolean {
-  if (!isInsideGitWorkTree(root)) return false;
-  try {
-    const out = execFileSync("git", ["-C", root, "log", "-1", "--format=%H", "--", rel], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    return out.trim().length > 0;
-  } catch {
-    return false;
-  }
-}
+// ── commit-after-write / first-registration 判定（单一真相源已上收 task-ops.ts，⛔ 本文件不各写一份） ──
+// isInsideGitWorkTree / commitTaskFile / hasPriorCommit 迁至 task-ops.ts（gap-task-ops-consolidate-
+// driver-frontmatter-writers），本文件 import 复用——markNeedsHuman 与 ready-pool-check.ts 的
+// commitTaskStatus 共用同一份 commit primitive（gap-mark-needs-human-commit-after-write 修过的缺陷
+// 不再在第四处复发）。
 
 // ── author ↔ develop 同步（gap-doc-develop-sync-semantic-conflict-resolution）──────────────
 // 人 2026-08-31 裁定反转：写面保留 author，但状态/任务文件变更必须以 develop 为终点。同步 =
@@ -368,23 +323,19 @@ function listTaskFiles(root: string, cur: string): string[] {
   }
 }
 
-/** 读 `<ref>:<rel>` 的 status frontmatter（`git show`）。ref/文件缺失 / 读不懂 ⇒ null。 */
+/** 读 `<ref>:<rel>` 的 status frontmatter（`git show`）。ref/文件缺失 / 读不懂 ⇒ null。
+ *  gap-task-ops-consolidate-driver-frontmatter-writers：委托 task-schema.ts 的 readTaskStatusAtRef
+ *  （单一 frontmatter parser，⛔ 不再本文件手搓 fence 切分 + startsWith 读 status）。 */
 function statusAtRef(root: string, ref: string, rel: string): string | null {
-  let text: string;
-  try {
-    text = execFileSync("git", ["-C", root, "show", `${ref}:${rel}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-  } catch {
-    return null;
-  }
-  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
-  if (!m) return null;
-  const line = m[1].split("\n").map((l) => l.trim()).find((l) => l.startsWith("status:"));
-  return line ? line.slice("status:".length).trim() || null : null;
+  return readTaskStatusAtRef(root, ref, path.basename(rel, ".md"));
 }
 
 /** 回写任务状态对齐（合并后）：对每个 {rel → status}，把工作树文件的 status 行改写为胜者（已对齐
  *  则跳过），`git add` 后一次性 `git commit --no-verify`（路径限定到改写过的文件，⛔ 裸 commit 扫共享
- *  索引）。无改写 ⇒ true（no-op）。写/提交失败 ⇒ false（事件落痕由调用方）。 */
+ *  索引）。无改写 ⇒ true（no-op）。写/提交失败 ⇒ false（事件落痕由调用方）。
+ *  gap-task-ops-consolidate-driver-frontmatter-writers：status 读/写经 task-ops.ts（splitTaskFile /
+ *  statusFromFrontmatter / patchStatusField，单一 frontmatter parser，⛔ 不再本文件手搓 fence 切分 +
+ *  status 行正则）。 */
 function applyStatusAlignments(root: string, alignments: Map<string, string>): boolean {
   const changed: string[] = [];
   for (const [rel, status] of alignments) {
@@ -395,14 +346,12 @@ function applyStatusAlignments(root: string, alignments: Map<string, string>): b
     } catch {
       return false;
     }
-    const m = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(raw);
-    if (!m) return false;
-    const [, open, fm, close] = m;
-    const statusLine = /^status:\s*\S+\s*$/m.exec(fm);
-    if (!statusLine) return false;
-    if (statusLine[0].replace(/^status:\s*/, "").trim() === status) continue; // 已对齐（merge 已保留 doc 侧胜者）
-    const newFm = fm.replace(statusLine[0], `status: ${status}`);
-    fs.writeFileSync(file, `${open}${newFm}${close}${raw.slice(m[0].length)}`, "utf8");
+    const split = splitTaskFile(raw);
+    if (!split) return false;
+    if (statusFromFrontmatter(split.frontmatterRaw) === status) continue; // 已对齐（merge 已保留 doc 侧胜者）
+    const patched = patchStatusField(split.frontmatterRaw, status);
+    if (!patched.ok) return false;
+    fs.writeFileSync(file, `${split.open}${patched.fm}${split.close}${split.body}`, "utf8");
     changed.push(rel);
   }
   if (changed.length === 0) return true;
@@ -672,13 +621,14 @@ export function markNeedsHuman(root: string, id: string, reason: string): { id: 
   const file = path.join(root, "tasks", `${id}.md`);
   if (!fs.existsSync(file)) return { id, ok: false, reason: "missing", committed: false };
   const raw = fs.readFileSync(file, "utf8");
-  const m = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(raw);
-  if (!m) return { id, ok: false, reason: "no-frontmatter", committed: false };
-  const [, open, fm, close] = m;
-  const fromMatch = /^status:\s*(todo|ready)\s*$/m.exec(fm);
-  if (!fromMatch) return { id, ok: false, reason: "not-todo", committed: false };
-  const newFm = fm.replace(/^status:\s*(todo|ready)\s*$/m, "status: needs-human");
-  const body = raw.slice(m[0].length);
+  // gap-task-ops-consolidate-driver-frontmatter-writers：frontmatter 读/写经 task-ops.ts（splitTaskFile /
+  // statusFromFrontmatter / patchStatusField，单一 parser，⛔ 不再手搓 status 行正则）。
+  const split = splitTaskFile(raw);
+  if (!split) return { id, ok: false, reason: "no-frontmatter", committed: false };
+  const from = statusFromFrontmatter(split.frontmatterRaw);
+  if (from !== TASK_STATUS.TODO && from !== TASK_STATUS.READY) return { id, ok: false, reason: "not-todo", committed: false };
+  const patched = patchStatusField(split.frontmatterRaw, TASK_STATUS.NEEDS_HUMAN);
+  if (!patched.ok) return { id, ok: false, reason: patched.reason, committed: false };
   // gap-needs-human-note-carries-step-verdict：注记携带最近 exited-not-landed 的实际失败步+判词
   // （⛔ 只写模板句会把 merge 冲突 / suite 红 / ac-gate 未勾等完全不同真因压扁成同一句——读注记无法区分）。
   // 无记录 / 读不懂 ⇒ 不追加该行（与旧行为同形，⛔ 不伪造成「有失败步」）。
@@ -696,13 +646,13 @@ export function markNeedsHuman(root: string, id: string, reason: string): { id: 
     (lastAttempt?.sessionId ? `- session_id：${lastAttempt.sessionId}\n` : "") +
     (lastAttempt?.suiteLog ? `- suite 日志：${lastAttempt.suiteLog}\n` : "") +
     (lastAttempt?.fanInLog ? `- fan-in 日志：${lastAttempt.fanInLog}\n` : "");
-  fs.writeFileSync(file, `${open}${newFm}${close}${body}${record}`);
+  fs.writeFileSync(file, `${split.open}${patched.fm}${split.close}${split.body}${record}`);
   const rel = path.join("tasks", `${id}.md`);
   // FIRST-REGISTRATION JUDGMENT (gap-promotion-commit-message-misleading-on-first-track)：目标文件此前
   // 从未提交（本次提交是其 git 诞生提交，谈不上 todo→needs-human「翻转」）⇒ 如实标「首次登记」，不得
   // 沿用暗示翻转发生的「重试上限机械翻转」措辞。已有提交历史 ⇒ 真实翻转，沿用原有文案。
   const message = hasPriorCommit(root, rel)
-    ? `tasks: ${id} ${fromMatch[1]}→needs-human（重试上限机械翻转）`
+    ? `tasks: ${id} ${from}→needs-human（重试上限机械翻转）`
     : `tasks: ${id} 首次登记（status=needs-human，重试上限机械落盘）`;
   const committed = commitTaskFile(root, rel, message);
   syncDocDevelopBidirectional(root); // 分歧检测双向同步（⛔ 不依赖 committed 翻转）

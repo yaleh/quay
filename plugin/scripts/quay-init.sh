@@ -1150,8 +1150,14 @@ _derive_loop_scripts_once() {
   #   Without this explicit entry a cold-started consumer lays down full-suite-runner.ts and dies at
   #   suite launch with ERR_MODULE_NOT_FOUND (the --require target is absent). Same class as
   #   suite-params.ts / repo-root.ts above.
+  #   task-ops.ts (gap-task-ops-consolidate-driver-frontmatter-writers): the single library owning
+  #   "parse task frontmatter, mutate a field, commit it". driver-filters.ts / worker-driver.ts /
+  #   ready-pool-check.ts (all laid down via (a)/(b)) import it via ESM `./task-ops.ts`, which is
+  #   INVISIBLE to closure step (d) (same class as task-schema.ts above) — without this explicit entry a
+  #   cold-started consumer lays the drivers without their shared parse/patch/commit library and dies
+  #   with ERR_MODULE_NOT_FOUND.
   printf '%s\n' inner-idle-log.ts it0-split-or-commit-check.ts pipe-exit-code-check.sh \
-    gate-script-base.ts workflow-event-schema.mjs task-schema.ts touches-parser.ts task-status.ts wiring-coverage-check.ts \
+    gate-script-base.ts workflow-event-schema.mjs task-schema.ts task-ops.ts touches-parser.ts task-status.ts wiring-coverage-check.ts \
     capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh inner-blocked-signal.ts \
     inner-forensics.mjs task-contract-check.ts task-status-drift-check.ts touches-orthogonality-check.ts \
     verify-delivery-surface.ts precommit-guard.ts touches-one-entry-one-path-check.ts quay-session.ts \

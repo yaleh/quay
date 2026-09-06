@@ -126,6 +126,9 @@ import { spawn, spawnSync } from "node:child_process";
 import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
 import { TASK_STATUS } from "./task-status.ts";
 import { extractSection, countAcCheckboxes, fetchTaskStatusAtRef } from "./task-schema.ts";
+// gap-task-ops-consolidate-driver-frontmatter-writers：flipTaskDone 的 status 读/写经 task-ops.ts
+// （splitTaskFile / statusFromFrontmatter / patchStatusField，单一 parser，⛔ 不再手搓 status 行正则）。
+import { splitTaskFile, statusFromFrontmatter, patchStatusField } from "./task-ops.ts";
 import { repoRoot } from "./repo-root.ts";
 import { parseTouchEntriesWithTags } from "./touches-parser.ts";
 import { parseLoadSensitiveAnnotation } from "./known-load-sensitive.ts";
@@ -3035,7 +3038,8 @@ async function commitTaskStatusChange(
   return { ok: true, reason: null };
 }
 
-/** 读 worktree 的任务文件并翻 status ready→done（fail-closed：恰 1 行精确 `^status: ready$`，否则拒）。
+/** 读 worktree 的任务文件并翻 status ready→done（fail-closed：status 经 task-ops.ts 单一 parser 读出，
+ *  非 ready/done 即拒；gap-task-ops-consolidate-driver-frontmatter-writers）。
  *  gap-fan-in-flip-done-already-done-not-landed：「先 flip 后 ff」（人 2026-08-14 裁定）留下的
  *  「done 但未落地」不一致中间态（worktree 已翻 done、develop 未含落地提交）在重跑时收敛——读到
  *  `status: done` 先判真落地：
@@ -3055,36 +3059,33 @@ async function flipTaskDone(
   } catch (e) {
     return { ok: false, reason: `read task file failed: ${(e as Error).message}` };
   }
-  const lines = text.split("\n");
-  const readyCount = lines.filter((l) => l === "status: ready").length;
-  if (readyCount === 1) {
-    const flipped = text.replace(/^status: ready$/m, "status: done");
-    if (!/^status: done$/m.test(flipped)) {
-      return { ok: false, reason: "flip produced no 'status: done' line" };
-    }
-    return commitTaskStatusChange(worktree, task, file, flipped, `tasks: 翻 ${task} done（driver 机械 fan-in）`);
+  // gap-task-ops-consolidate-driver-frontmatter-writers：status 读/写经 task-ops.ts（splitTaskFile /
+  // statusFromFrontmatter / patchStatusField，单一 parser，⛔ 不再手搓 status 行正则 / 精确行计数）。
+  const split = splitTaskFile(text);
+  if (!split) return { ok: false, reason: "task file has no frontmatter" };
+  const from = statusFromFrontmatter(split.frontmatterRaw);
+  const rebuild = (fm: string): string => `${split.open}${fm}${split.close}${split.body}`;
+  if (from === "ready") {
+    const flipped = patchStatusField(split.frontmatterRaw, "done");
+    if (!flipped.ok) return { ok: false, reason: `flip failed: ${flipped.reason}` };
+    return commitTaskStatusChange(worktree, task, file, rebuild(flipped.fm), `tasks: 翻 ${task} done（driver 机械 fan-in）`);
   }
-  const doneCount = lines.filter((l) => l === "status: done").length;
-  if (doneCount === 1) {
+  if (from === "done") {
     // done 已存在：判真落地（mergeTarget 的任务文件是否已 done）。已落地 ⇒ skip；未落地 ⇒ reset→flip。
     const landed = await fetchTaskStatusAtRef(worktree, mergeTarget, task);
     if (landed === "done") return { ok: true, reason: null };
-    const reset = text.replace(/^status: done$/m, "status: ready");
-    if (!/^status: ready$/m.test(reset)) {
-      return { ok: false, reason: "reset to ready produced no 'status: ready' line" };
-    }
+    const reset = patchStatusField(split.frontmatterRaw, "ready");
+    if (!reset.ok) return { ok: false, reason: `reset to ready failed: ${reset.reason}` };
     const resetResult = await commitTaskStatusChange(
-      worktree, task, file, reset,
+      worktree, task, file, rebuild(reset.fm),
       `tasks: reset ${task} done→ready（fan-in 收敛「done 未落地」中间态）`,
     );
     if (!resetResult.ok) return resetResult;
-    const flipped = reset.replace(/^status: ready$/m, "status: done");
-    if (!/^status: done$/m.test(flipped)) {
-      return { ok: false, reason: "flip after reset produced no 'status: done' line" };
-    }
-    return commitTaskStatusChange(worktree, task, file, flipped, `tasks: 翻 ${task} done（driver 机械 fan-in）`);
+    const flipped = patchStatusField(reset.fm, "done");
+    if (!flipped.ok) return { ok: false, reason: `flip after reset failed: ${flipped.reason}` };
+    return commitTaskStatusChange(worktree, task, file, rebuild(flipped.fm), `tasks: 翻 ${task} done（driver 机械 fan-in）`);
   }
-  return { ok: false, reason: `expected exactly 1 'status: ready' line, got ${readyCount}` };
+  return { ok: false, reason: `expected status 'ready' or 'done', got ${from === null ? "none" : JSON.stringify(from)}` };
 }
 
 /** gap-mechanical-fan-in-writes-no-complete-gateevent — 机械 fan-in 翻 done 后经既有 gate-event-store
