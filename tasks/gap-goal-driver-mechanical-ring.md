@@ -1,7 +1,7 @@
 ---
 id: gap-goal-driver-mechanical-ring
 title: 新增 goal driver kind——机械环跑 AC 判据写 evidence、I2 flip achieved、I3/I4 报出
-status: needs-human
+status: ready
 labels:
   - gap
 parent: null
@@ -93,14 +93,3 @@ depends_on:
 - plugin/test/driver-runtime.test.mjs
 - .gitignore
 - tasks/gap-goal-driver-mechanical-ring.md
-
-## Needs-Human
-
-**执行 2026-09-06T12:05:27.184Z — 连续修满重试上限仍不合格（标 needs-human）**
-
-- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
-- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: heavy ratio (0.211) must exceed wait ratio (0.239) — else cpu_ms is duration-derived
-- run_id：wk-prod-1788285192
-- session_id：048f6a89-53bf-4305-8b67-9da4436c06c6
-- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-goal-driver-mechanical-ring~wk-prod-1788285192~1788695953840-0a297c.log
-- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-goal-driver-mechanical-ring-wk-prod-1788285192.log
