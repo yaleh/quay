@@ -37,8 +37,8 @@ test("goal gate fails-closed when the goal record does not exist", async () => {
 test("goal gate fails-closed when the criterion is empty/missing (AC2)", async () => {
   const dir = tmpGoalDir("nocriterion");
   const store = createGoalStore(dir);
-  store.write("PHASE-001", { title: "p", status: "active", origin: "o" });
-  store.write("AC-020", { title: "no-criterion", status: "active", phase: "PHASE-001", origin: "o" });
+  store.write("GOAL-001", { title: "p", status: "active", origin: "o" });
+  store.write("AC-020", { title: "no-criterion", status: "active", goal: "GOAL-001", origin: "o" });
   const r = await makeGoalGate("AC-020", dir)({ id: "T" });
   assert.equal(r.ok, false);
   assert.match(r.reason, /fail-closed/);
@@ -47,9 +47,9 @@ test("goal gate fails-closed when the criterion is empty/missing (AC2)", async (
 test("goal gate PASSes a criterion that exits 0 and FAILs one that exits non-zero", async () => {
   const dir = tmpGoalDir("real");
   const store = createGoalStore(dir);
-  store.write("PHASE-001", { title: "p", status: "active", origin: "o" });
-  store.write("AC-010", { title: "pass", status: "active", phase: "PHASE-001", criterion: "true", origin: "o" });
-  store.write("AC-011", { title: "fail", status: "active", phase: "PHASE-001", criterion: "false", origin: "o" });
+  store.write("GOAL-001", { title: "p", status: "active", origin: "o" });
+  store.write("AC-010", { title: "pass", status: "active", goal: "GOAL-001", criterion: "true", origin: "o" });
+  store.write("AC-011", { title: "fail", status: "active", goal: "GOAL-001", criterion: "false", origin: "o" });
 
   const pass = await makeGoalGate("AC-010", dir)({ id: "T" });
   assert.equal(pass.ok, true, `expected pass; reason=${pass.reason}`);
@@ -62,8 +62,8 @@ test("goal gate PASSes a criterion that exits 0 and FAILs one that exits non-zer
 test("a dynamically registered goal-<id> gate runs through the registry (same shape as doc/adr)", async () => {
   const dir = tmpGoalDir("registry");
   const store = createGoalStore(dir);
-  store.write("PHASE-001", { title: "p", status: "active", origin: "o" });
-  store.write("AC-100", { title: "conforming", status: "active", phase: "PHASE-001", criterion: "true", origin: "o" });
+  store.write("GOAL-001", { title: "p", status: "active", origin: "o" });
+  store.write("AC-100", { title: "conforming", status: "active", goal: "GOAL-001", criterion: "true", origin: "o" });
   registerGoalGate("goal-fixture-pass", dir, "AC-100");
   const r = await gateRegistry["goal-fixture-pass"]({ id: "T" });
   assert.equal(r.ok, true, `expected pass; reason=${r.reason}`);

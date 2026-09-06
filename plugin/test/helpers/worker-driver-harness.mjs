@@ -63,16 +63,26 @@ export function runDriver(root, args) {
   ], { encoding: "utf8" });
 }
 
+// Parse newline-delimited JSON, dropping any line that fails to parse. The resident driver appends
+// one complete line at a time, so a torn line can only be the trailing one (a concurrent writer
+// mid-append) — treating it as "not yet written" lets the caller's waitFor re-poll instead of
+// throwing a JSON.parse error (gap-driver-test-fixture-json-read-before-write-complete-race).
+function parseJsonLines(text) {
+  return text.trim().split("\n").filter(Boolean).flatMap((l) => {
+    try { return [JSON.parse(l)]; } catch { return []; }
+  });
+}
+
 export function readOutcomeLines(root) {
   const file = path.join(root, WORKER_OUTCOME_REL);
   if (!fs.existsSync(file)) return [];
-  return fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  return parseJsonLines(fs.readFileSync(file, "utf8"));
 }
 
 export function readRoundLines(root) {
   const file = path.join(root, WORKER_ROUND_REL);
   if (!fs.existsSync(file)) return [];
-  return fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  return parseJsonLines(fs.readFileSync(file, "utf8"));
 }
 
 // 常驻驱动（无 --task）现在【不退出】——瞬时 WAIT（resource-gate / pool-empty）轮询而非 latch
