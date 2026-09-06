@@ -19,7 +19,7 @@ Verify that a dispatched worker, given the new acCheckNote instruction, records 
 
 ## Acceptance Criteria
 
-- [ ] docs/scratch-ac-abi-e2e.md exists with the exact literal content abi-ok.
+- [x] docs/scratch-ac-abi-e2e.md exists with the exact literal content abi-ok.
 
 ## Definition of Done
 
