@@ -58,7 +58,7 @@ A single library owns "parse task frontmatter, mutate a field, commit it" for th
 - `plugin/scripts/task-schema.ts`
 - `experiments/quay-perpetual-stream/scripts/task-schema.ts`
 - `plugin/scripts/capability-catalog.sh` (register the new script per its own header rule for new `plugin/scripts/*.ts` files)
-- `plugin/scripts/quay-init.sh` (add task-ops.ts to the explicit `--loop` laydown list — it is the ESM dep of laid-down driver-filters/worker-driver/ready-pool-check, invisible to closure step (d))
+- `plugin/scripts/quay-init.sh` (add task-ops.ts to the explicit `--loop` laydown list — it is the ESM dep of laid-down driver-filters/worker-driver/ready-pool-check, invisible to closure step d)
 - `plugin/test/driver-filters.test.mjs`
 - `plugin/test/worker-driver.test.mjs`
 - `plugin/test/worker-driver-fan-in.test.mjs`
