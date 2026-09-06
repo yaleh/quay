@@ -63,9 +63,10 @@ Agent 2）显示工作根本不在 subagent 里（41 次 Edit 全在主线程改
 
 ## 0.5 每个 tick 先看一眼自己的目标
 
-`orchestration/manager-phase-goal.md` —— 本阶段的目标与 AC（**不写数量：数量会变，
-写死就会过期——本节原文曾写「8 条 AC」而当时早已远不止 8 条**）。
-复核：**有没有 AC 已达成而没勾、或已失效而没改**。一份不更新的 AC 清单，和没有 AC 是一回事。
+读 store —— `node packages/quay/src/goal-store.ts list --status active` 取 active GOAL，再按 `goal:` 取其 AC
+（**不写数量：数量会变，写死就会过期——本节原文曾写「8 条 AC」而当时早已远不止 8 条**）。
+复核：**有没有 AC 已达成而没翻 store 记录的 status、或已失效而没改**。一份不更新的 AC 清单，和没有 AC 是一回事。
+（`orchestration/manager-phase-goal.md` 已降级为归档，不再作「当前阶段 AC」的来源。）
 
 ## 0.5b 每条 AC 必须输出一个状态词（人 2026-08-08 12:1xZ 确认后执行）
 
@@ -77,7 +78,7 @@ Agent 2）显示工作根本不在 subagent 里（41 次 Edit 全在主线程改
 
 **每 tick 执行（不是「看一眼」，是「产出一块」）**：
 
-**1. 读 `orchestration/manager-phase-goal.md`，推理出【当前阶段】的 AC 清单。**
+**1. 读 store（`node packages/quay/src/goal-store.ts list --status active` 取 active GOAL，再按 `goal:` 取其 AC），推理出【当前阶段】的 AC 清单。**
 **不要写筛行命令。**
 
 > **⚠️ 这一条是人 2026-08-08 12:1xZ 改的，理由值得单记：**

@@ -24,7 +24,7 @@
 | 角色 | 职责 |
 |---|---|
 | **管理者（manager）** | **发起并汇总**。每个日历日起头，管理者把三项清单的结果收拢成一份汇总，写进
-  `orchestration/manager-phase-goal.md` 的复核记录（管理者自己扩，外层不代笔）。 |
+  `goals/`（AC 记录）的复核记录（管理者自己扩，外层不代笔；`orchestration/manager-phase-goal.md` 已降级为归档）。 |
 | **外层（outer）** | **参与作答**。跑机械检查（清单 1a）、判 gap-* 可追溯性（清单 1b）、在
   `orchestration/outer-phase-goal.md` 的复核记录里加「方向漂移」两行（清单 1c）。 |
 | **人（human）** | **接收结果，保留方向裁定权**。人不被要求自己逐条审查；但**任何方向性改变仍需人点头**。
@@ -90,7 +90,7 @@ node --experimental-strip-types plugin/scripts/trend-check.ts --root . --window 
 - **归属**：看趋势是 manager 层三职能之一（`gap-productize-the-manager-layer` 的职能内容，AC6 交叉
   标注）——复盘不只是「这次绿了吗」，还看「比上次更贵了吗 / 离目标更近了吗」。
 
-`orchestration/manager-phase-goal.md` 的复核记录由管理者**自己扩**（外层不代笔），加同一方向维度。
+`goals/`（AC 记录）的复核由管理者**自己扩**（外层不代笔；`orchestration/manager-phase-goal.md` 已降级为归档），加同一方向维度。
 
 ### 3d. 趋势判据——点状之外：「比上次更贵了吗 / 离目标更近了吗」
 
@@ -152,4 +152,4 @@ node --experimental-strip-types plugin/scripts/defect-shape-aggregate.ts --root 
 1. **本文件**（`orchestration/REVIEW-cadence.md`）——频率/角色/清单，未来会话可引用；
 2. **通用过期检查器** `plugin/scripts/strategic-doc-staleness-check.ts`——已接 `scripts/test.sh`
    `run_static_checks`（防回归），有 mutation case + `node:test` 套件；
-3. **复核记录扩方向**——`outer-phase-goal.md` / `manager-phase-goal.md` 的复核记录覆盖方向漂移。
+3. **复核记录扩方向**——`outer-phase-goal.md` / `goals/`（AC 记录）的复核覆盖方向漂移（`manager-phase-goal.md` 已降级为归档）。

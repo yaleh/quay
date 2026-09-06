@@ -53,13 +53,13 @@ AC3 的 `src:N` 覆盖率 **= 100%**（当前 manager-tick-core.md=56/56）。�
 
 ## Acceptance Criteria
 
-- [ ] `grep -qE 'goals/|goal list|goal-store' orchestration/manager-tick-prompt.txt` 退出 0（AC-173 判据前半，立案时取假）
-- [ ] `head -14 orchestration/manager-phase-goal.md | grep -q 'goals/'` 退出 0（AC-173 判据后半，立案时取假）
-- [ ] `grep -qE 'goals/|goal-store' orchestration/manager-loop-tick.md` 退出 0
-- [ ] `grep -qE 'goals/|goal-store' orchestration/manager-tick-core.md` 退出 0
-- [ ] `grep -qE 'goals/|goal-store' orchestration/REVIEW-cadence.md` 退出 0
-- [ ] `node plugin/scripts/tick-core-static-check.ts` 退出 0（改 tick-core 后覆盖率仍 100%）
-- [ ] `bash scripts/test.sh --for-task gap-goal-store-revoke-prose-authority-repoint-pointers` 退出 0
+- [x] `grep -qE 'goals/|goal list|goal-store' orchestration/manager-tick-prompt.txt` 退出 0（AC-173 判据前半，立案时取假）
+- [x] `head -14 orchestration/manager-phase-goal.md | grep -q 'goals/'` 退出 0（AC-173 判据后半，立案时取假）
+- [x] `grep -qE 'goals/|goal-store' orchestration/manager-loop-tick.md` 退出 0
+- [x] `grep -qE 'goals/|goal-store' orchestration/manager-tick-core.md` 退出 0
+- [x] `grep -qE 'goals/|goal-store' orchestration/REVIEW-cadence.md` 退出 0
+- [x] `node plugin/scripts/tick-core-static-check.ts` 退出 0（改 tick-core 后覆盖率仍 100%）
+- [x] `bash scripts/test.sh --for-task gap-goal-store-revoke-prose-authority-repoint-pointers` 退出 0
 
 ## Definition of Done
 
