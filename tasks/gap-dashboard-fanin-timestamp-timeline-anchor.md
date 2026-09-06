@@ -46,6 +46,42 @@ extra:
 是设计缺陷：过去 N 小时的时间轴，理应以"最近一次真实发生的事情"为参照系去看"那次事情前后忙成什么样"，
 而不是死抠"此刻往前 N 小时"这个和数据活动完全脱节的绝对区间。
 
+**追加发现（2026-09-06，AC7 自查后人复核发现——本任务的实现已合入 develop 且 AC1-AC7 曾全部勾选，
+但独立重跑测试套件后发现 AC7 那条验证本身失灵，任务据此退回重做）：**
+
+`gap-dashboard-fanin-panel-and-timeline-bars.test.mjs` 里 AC7（`test("AC7 (production regression): real
+.quay data renders ≥1 <rect> in BOTH cards", …)`，由本任务的实现提交 `a903a47f4` 引入）在**从仓库根目录
+调用**（`cd /home/yale/work/quay && node --experimental-strip-types --test packages/quay/test/gap-dashboard-fanin-panel-and-timeline-bars.test.mjs`
+——这正是 `scripts/test.sh` 实际调用测试文件的方式）时**必现失败**：`fan-in bar renders ≥1 <rect> from real
+worker-outcome.jsonl` 断言为假。
+
+**根因定位到测试自己的辅助函数，不是产品代码退化**（已用隔离脚本复现证实）：
+
+```js
+// gap-dashboard-fanin-panel-and-timeline-bars.test.mjs:45-48（现状，有 bug）
+function mainCheckoutRoot() {
+  const commonDir = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd: __dirname, encoding: "utf8" }).trim();
+  return path.resolve(commonDir, "..");
+}
+```
+
+`execFileSync(..., { cwd: __dirname })` 让 git 子进程以 `__dirname`（`packages/quay/test`）为基准计算并
+**打印出一个相对路径**（实测值：`"../../../.git"`）。但 `path.resolve(commonDir, "..")` 对相对路径的补全
+基准是**调用它的 Node 进程自身的 `process.cwd()`**，不是 `__dirname`——两者在测试从仓库根目录被调用时
+完全不同（`process.cwd()` = `/home/yale/work/quay`，比 `__dirname` 少 3 层）。实测复现：
+
+```
+process.cwd(): /home/yale/work/quay
+commonDir raw: "../../../.git"
+mainCheckoutRoot() 实际算出: /home                    ← 错误，应为 /home/yale/work/quay
+```
+
+`readWorkerOutcomeRecords('/home')`/`readTests('/home')` 在错误的根下读不到任何
+`.quay/worker-outcome.jsonl`/`.quay/verification-round.jsonl`，两张卡都渲染出 0 个 `<rect>`，AC7 断言必假。
+用同一个 `renderFanInCard`/`renderTestsCard`，显式传入正确根目录 `/home/yale/work/quay` 复核，产出 18 个
+`<rect>`——证明缺陷2（bar 窗口终点锚定）的实现逻辑本身是对的，纯粹是 AC7 这条"生产数据回归"验证自己在
+最常见的调用方式（从仓库根目录跑）下失灵，**从未真正可靠地验证过它声称要验证的东西**。
+
 ## Plan
 
 1. **修时间戳（缺陷1）**：在 `renderFanInCardFromRecords` 的行模板里，用已经算出来但目前被 `.map(({r}, i)
@@ -76,6 +112,14 @@ extra:
    segments 里最新一条的结束时刻构造窗口边界"），不能靠"缩小 fixture 让新旧行为碰巧重合"这种方式蒙混过去
    ——即下面 AC2/AC3 明确要求的"反例判据"就是为了防止这种蒙混。
 
+5.（追加）**修 AC7 自己的测试辅助函数 `mainCheckoutRoot()`**：把
+   `path.resolve(commonDir, "..")` 改为把 `commonDir` 锚定到 `__dirname`（git 子进程实际的 cwd）解析，
+   而不是让它意外落到调用者进程自身的 `process.cwd()`，例如 `path.resolve(__dirname, commonDir, "..")`。
+   修完必须验证：**在两种不同的调用 cwd 下（从仓库根目录 `cd <root> && node --test packages/quay/test/…`，
+   以及从该测试文件所在目录 `cd packages/quay/test && node --test gap-dashboard-fanin-panel-and-timeline-bars.test.mjs`
+   两种方式都跑一遍）**，`mainCheckoutRoot()` 解析出的路径必须**相同**且等于真实仓库根（
+   `/home/yale/work/quay`），AC7 在两种调用方式下都必须真正通过（不是巧合过一次）。
+
 ## Acceptance Criteria
 
 - [x] AC1（时间戳）：对 `renderFanInCardFromRecords` 传入一个固定 `records` fixture（含已知的
@@ -101,20 +145,29 @@ extra:
       packages/quay/test/gap-dashboard-fanin-panel-and-timeline-bars.test.mjs` exit 0——原 11 条用例
       （F/AC1、共用函数存在性、AC4 sort/filter、AC6 mount 等与本次改动无关的部分）继续全绿；只有依赖旧
       "窗口终点=now"假设的断言按 Plan 步骤4 同步改写。
-- [x] AC7（真实生产数据回归，非 fixture）：新增一条用真实 `.quay/worker-outcome.jsonl` /
-      `.quay/verification-round.jsonl`（当前 workspace，不注入/不 mock）跑一次
-      `renderFanInCard(root, {hours:3})` 与 `renderTestsCard(tests, suiteRun, {hours:3})` 的测试，
-      `nowMs` 用真实 `Date.now()`，断言两者返回的 HTML 都含至少一个 `<rect`——本条必须直接读生产文件，
-      关掉这条读取生产文件的路径（改喂 fixture）应该会让断言退化为不可信（即该测试不得有旁路开关能绕开
-      读真实文件）。
+- [ ] AC7（真实生产数据回归，非 fixture——**已退回重做，见上方"追加发现"**）：`renderFanInCard(root,
+      {hours:3})` 与 `renderTestsCard(tests, suiteRun, {hours:3})` 用真实 `.quay/worker-outcome.jsonl` /
+      `.quay/verification-round.jsonl`（当前 workspace，不注入/不 mock）跑，`nowMs` 用真实 `Date.now()`，
+      断言两者返回的 HTML 都含至少一个 `<rect`。**新增约束（防止本次退回的根因复发）**：该测试必须在
+      `cd /home/yale/work/quay && node --experimental-strip-types --test packages/quay/test/gap-dashboard-fanin-panel-and-timeline-bars.test.mjs`
+      这种从仓库根目录调用的方式下（与 `scripts/test.sh` 实际调用方式一致）**真正通过**，不能只在某个
+      巧合的调用目录下才绿；`mainCheckoutRoot()` 辅助函数必须修正为不依赖调用进程的 `process.cwd()`
+      （只依赖 `__dirname`），且新增一条独立断言：分别以两种不同 cwd 调用 `mainCheckoutRoot()`
+      （通过 `execFileSync` 子进程或等价手段），两次解析结果必须相同且等于仓库根目录。
+- [ ] AC8（新增，回归哨兵）：本次退回的根因（`path.resolve` 对一个"相对于 __dirname 而非 process.cwd()
+      的相对路径"补全基准搞错）具有一般性——`grep -rn "path.resolve(commonDir" packages/quay/test/*.mjs`
+      之外，若同一份测试文件或其他测试文件里还有类似"用 `{cwd: __dirname}` 跑 execFileSync 取相对路径、
+      再直接 `path.resolve` 补全"的写法，一并核查修正或至少在本任务里记录清楚（不要求跨文件修复，只要求
+      核查过并报告结果，核查范围写清楚覆盖了哪些文件）。
 
 ## Definition of Done
 
 - 代码改动已合入 `develop`（本仓库任务落地终点，非 doc-only author 分支）。
-- `scripts/test.sh --for-task gap-dashboard-fanin-timestamp-timeline-anchor`（或等价 scoped 调用）绿。
-- 手工用 MCP 浏览器刷新一次生产 dashboard 页（真实当前循环停摆时长下）确认：Fan-in 卡每一行都带时间戳；
-  测试卡与 Fan-in 卡的分段 bar 均非空、且右边界标注的时刻与该卡最后一次真实事件的结束时刻一致（非当前
-  wall-clock 时刻）。
+- `scripts/test.sh --for-task gap-dashboard-fanin-timestamp-timeline-anchor`（或等价 scoped 调用）绿，
+  且额外独立验证：`cd /home/yale/work/quay && node --experimental-strip-types --test packages/quay/test/gap-dashboard-fanin-panel-and-timeline-bars.test.mjs`
+  从仓库根目录直接跑一遍，全部用例（含 AC7）真正通过（不是读复选框，是真跑一遍拿到 exit 0）。
+- 手工用 MCP 浏览器刷新一次生产 dashboard 页确认：Fan-in 卡每一行都带时间戳；测试卡与 Fan-in 卡的分段
+  bar 均非空、且右边界标注的时刻与该卡最后一次真实事件的结束时刻一致（非当前 wall-clock 时刻）。
 - `quay task check gap-dashboard-fanin-timestamp-timeline-anchor --json` 的 `missing` 为 `[]`。
 
 ## Touches
