@@ -175,6 +175,18 @@ export function isCriterionId(id: string): boolean {
 }
 
 /**
+ * STRIP-EVIDENCE-TIMESTAMP — the SINGLE shared judgment for "is a goal-file change substantive?"
+ * (gap-goal-gate-timestamp-commit-flood). Defined HERE (Core) so BOTH goal-store's commit decision
+ * and meta-driver's settleEvidenceWrites (plugin/scripts/meta-driver.ts, which imports this) apply
+ * the SAME definition — ⛔ never a second, divergent copy in each consumer. `at:` is the evidence
+ * timestamp the goal-driver rewrites every ~42s; it carries no information, so a change that is
+ * ONLY `at:` is not substantive. Everything else (verdict/reading/status/title/…) is.
+ */
+export function stripEvidenceTimestamp(text: string): string {
+  return text.replace(/^\s*at:\s*\S+\s*$/gm, "");
+}
+
+/**
  * COMMIT-AFTER-WRITE (gap-meta-commitgoalfile): commit a goal file to git immediately after
  * writeFileSync. The goal store is the SOURCE of goal writes — the CLI `write`/`gate` (evidence
  * back-write), meta-driver's two write paths, all funnel through `write()`/`flipGoal()` — so the
@@ -183,9 +195,18 @@ export function isCriterionId(id: string): boolean {
  * `goals/*.md` and develop→doc sync stalled). pathspec-limited to the single file (`--` the rel),
  * ⛔ never a bare `git commit` — the index is SHARED across layers, a bare commit would sweep
  * whatever another layer staged. Repo-less roots (unit-test temp dirs, bare checkouts) are a no-op
- * (return false, not a throw) — the same shape as task-ops.ts commitTaskFile. Returns true when the
- * commit landed; false when the goal dir is not in a git work tree / git errors (observable, not
- * silent).
+ * (return false, not a throw) — the same shape as task-ops.ts commitTaskFile.
+ *
+ * TIMESTAMP-ONLY WRITES SKIP THE COMMIT (gap-goal-gate-timestamp-commit-flood): the goal-driver
+ * re-gates each AC every ~42s and the gate writes `evidence.at` back — when the verdict is
+ * unchanged the ONLY line that changes is `at:`. That is not a substantive change, so we restore
+ * the file to HEAD (⛔ never leave the shared checkout dirty — an uncommitted goals/*.md blocks
+ * develop→doc ff-only, the exact bug gap-meta-commitgoalfile fixed) and return false WITHOUT
+ * committing. A new file (not yet in HEAD) or any other change (verdict/status/title/…) still
+ * commits — the write-discount applies ONLY to the timestamp refresh, never to a real change.
+ *
+ * Returns true when the commit landed; false when the goal dir is not in a git work tree / git
+ * errors / the write was timestamp-only (observable, not silent).
  */
 function commitGoalFileAfterWrite(goalDir: string, fileName: string, id: string): boolean {
   const root = path.dirname(goalDir);
@@ -200,6 +221,20 @@ function commitGoalFileAfterWrite(goalDir: string, fileName: string, id: string)
   if (inside !== "true") return false;
   const rel = `goals/${fileName}`;
   try {
+    // Timestamp-only check: read HEAD's content (null ⇒ a NEW file ⇒ always substantive).
+    let head: string | null = null;
+    try {
+      head = execFileSync("git", ["-C", root, "show", `HEAD:${rel}`], {
+        stdio: ["ignore", "pipe", "ignore"],
+      }).toString();
+    } catch { /* not in HEAD ⇒ new file ⇒ commit */ }
+    if (head !== null) {
+      const work = fs.readFileSync(path.join(root, rel), "utf8");
+      if (stripEvidenceTimestamp(head) === stripEvidenceTimestamp(work)) {
+        execFileSync("git", ["-C", root, "checkout", "--", rel]);
+        return false;
+      }
+    }
     execFileSync("git", ["-C", root, "add", "--", rel]);
     execFileSync("git", ["-C", root, "commit", "--no-verify", "-m", `goals: ${id} 写盘即提交（goal-store）`, "--", rel]);
     return true;

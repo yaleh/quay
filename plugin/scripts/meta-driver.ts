@@ -47,6 +47,9 @@ import { runResidentQualityGateLoop, computeRoundRecord } from "./quality-gate-d
 import { readProbeSpec } from "./read-probe-spec.ts";
 import { gateFinding, findingKey, DEFAULT_RATE } from "./routine-file-gate.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
+// stripEvidenceTimestamp 的单一真相源在 Core（goal-store.ts）——本文件与 goal-store 的提交决策
+// 必须用同一判据「什么算实质变化」（gap-goal-gate-timestamp-commit-flood），⛔ 不各写一份。
+import { stripEvidenceTimestamp } from "../../packages/quay/src/goal-store.ts";
 
 /** 载体：每轮一条记录（与 quality-round.jsonl 同族，gitignored 运行时状态）。 */
 export const ROUND_CARRIER_REL = path.join(".quay", "meta-driver-round.jsonl");
@@ -295,10 +298,10 @@ export async function fileProposals(
 // 由调用侧决定提交）。⛔ 只还原「除 at 行外与 HEAD 逐字相同」的文件——若有人另外改过该文件，
 // 比较必然不等，于是原样不动（不会毁掉别人在编辑的改动）。
 
-/** 去掉 evidence 的 at 行后的内容（比较用；at 每轮必变且不携带信息）。 */
-export function stripEvidenceTimestamp(text: string): string {
-  return text.replace(/^\s*at:\s*\S+\s*$/gm, "");
-}
+/** 去掉 evidence 的 at 行后的内容（比较用；at 每轮必变且不携带信息）。
+ *  单一真相源已迁到 Core 的 goal-store.ts（上方 import）——re-export 供 settleEvidenceWrites
+ *  与 meta-driver.test.mjs 继续用同一判据，⛔ 不在此处另写一份。 */
+export { stripEvidenceTimestamp };
 
 export interface EvidenceSettlement { restored: string[]; kept: string[]; skipped: string[] }
 
