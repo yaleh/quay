@@ -482,33 +482,47 @@ export function resolveEvidence(readings: MetaRoundReadings, key: string): unkno
   return cur;
 }
 
-/** 既有任务里是否已有人在管这个机制（按机制词搜，⛔ 不按症状词——memory 记的那次真实漏抓）。 */
-export function findOwningTasks(root: string, keyword: string, cap = 5): string[] {
+/** 既有任务里是否已有人在管这个机制（按机制词搜，⛔ 不按症状词——memory 记的那次真实漏抓）。
+ *  **带上状态**：只报文件名不足以判断——「有人正在做」与「有人说做完了但问题还在」需要相反的处置，
+ *  而后者（done 却问题依旧）恰恰是最该被驱动的信号，不是拦截的理由。 */
+export interface OwningTask { file: string; status: string }
+export function findOwningTasks(root: string, keyword: string, cap = 5): OwningTask[] {
   const kw = String(keyword ?? "").trim().toLowerCase();
   if (kw.length < 4) return []; // 太短的词会命中一切，等于没搜
   const dir = path.join(root, "tasks");
   let files: string[];
   try { files = fs.readdirSync(dir).filter((f) => f.endsWith(".md")); } catch { return []; }
-  const hits: string[] = [];
+  const hits: OwningTask[] = [];
   for (const f of files) {
     try {
-      if (fs.readFileSync(path.join(dir, f), "utf8").toLowerCase().includes(kw)) {
-        hits.push(f);
-        if (hits.length >= cap) break;
-      }
+      const text = fs.readFileSync(path.join(dir, f), "utf8");
+      if (!text.toLowerCase().includes(kw)) continue;
+      // status 取 frontmatter 首个 `status:`（⛔ 不 grep 全文——正文里提到 status 的行会误命中）。
+      const fm = text.startsWith("---") ? text.slice(3, text.indexOf("\n---", 3)) : "";
+      const m = fm.match(/^status:\s*(\S+)\s*$/m);
+      hits.push({ file: f, status: m ? m[1] : "unknown" });
+      if (hits.length >= cap) break;
     } catch { /* 读不了就跳过这一个 */ }
   }
   return hits;
 }
 
+/** 只有【未完成】的任务才构成「已有人在管」的拦截理由。done/superseded 的命中不拦——
+ *  问题仍在而任务已 done，说明那是个假完成，应当被驱动而不是被它挡住。 */
+export function blockingOwners(owners: OwningTask[]): OwningTask[] {
+  return owners.filter((o) => o.status !== "done" && o.status !== "superseded");
+}
+
 /** 任务体（四件套）。⛔ 机械渲染自结构化输出——不给 LLM 写文件的权力。 */
-export function renderAutoDriveBody(item: AutoDriveItem, evidence: unknown, at: string): string {
+export function renderAutoDriveBody(item: AutoDriveItem, evidence: unknown, at: string, staleOwners: string[] = []): string {
   return [
     "## Finding",
     `${item.problem}`,
     "",
     `本轮读数（${item.evidenceKey}）= \`${JSON.stringify(evidence)}\`，采于 ${at}，由 meta-driver 机械采集。`,
-    `涉及机制关键词：\`${item.mechanismKeyword}\`（立案前已搜既有任务，无人认领）。`,
+    staleOwners.length > 0
+      ? `⚠️ 机制词 \`${item.mechanismKeyword}\` 命中【已完成】任务：${staleOwners.join("、")}——问题仍在而任务已 done ⇒ 先查那些任务为何没解决它，⛔ 不要在它们旁边新造一个并行机制。`
+      : `涉及机制关键词：\`${item.mechanismKeyword}\`（立案前已搜既有任务，无人认领）。`,
     "",
     "## AC（draft）",
     `- [ ] \`${item.criterion}\` ⇒ ${item.expect}`,
@@ -560,10 +574,13 @@ export async function driveItems(
       continue;
     }
     const owners = findOwningTasks(root, item.mechanismKeyword);
-    if (owners.length > 0) {
-      out.push({ item, id: null, accepted: false, reason: `既有任务可能已在管（机制词 ${item.mechanismKeyword}）：${owners.join(", ")}` });
+    const blocking = blockingOwners(owners);
+    if (blocking.length > 0) {
+      out.push({ item, id: null, accepted: false, reason: `未完成的既有任务已在管（机制词 ${item.mechanismKeyword}）：${blocking.map((o) => `${o.file}[${o.status}]`).join(", ")}` });
       continue;
     }
+    // done/superseded 的命中不拦，但要带进任务体——「已 done 却问题依旧」是立案的核心证据。
+    const staleOwners = owners.map((o) => `${o.file}[${o.status}]`);
     const gate = gateFinding(proposalCandidateText({ title: item.title, criterion: item.criterion, origin: item.problem }), { existingKeys: [], recentCount: filed, K: opts.cap });
     if (!gate.accept) { out.push({ item, id: null, accepted: false, reason: gate.reason }); continue; }
 
@@ -571,13 +588,46 @@ export async function driveItems(
     if (opts.dryRun) {
       out.push({ item, id, accepted: true, reason: "dry-run: would file" });
     } else {
-      const c = await createAutoDriveTask(root, id, item, renderAutoDriveBody(item, ev, opts.at));
+      const c = await createAutoDriveTask(root, id, item, renderAutoDriveBody(item, ev, opts.at, staleOwners));
       out.push({ item, id, accepted: c.ok, reason: c.reason });
       if (!c.ok) continue;
     }
     filed++;
   }
   return out;
+}
+
+// ── probe 写入守卫（把 FILE-ONLY 从散文变成机制）──────────────────────────────────────────────────
+// 实测 2026-09-06：launch.settings.json 是 `defaultMode: bypassPermissions` ⇒ 派出去的 claude -p
+// **本来就有全部工具权限**，包括 Write/Edit/Bash。「⛔ 不执行、⛔ 不翻状态」这些话此前**只存在于
+// probe 规格的散文里，没有任何机制强制**（硬规则 9：守与不守在记录上无法区分）。
+// 人 2026-09-06 裁定给它读代码的能力 ⇒ 读的授权扩大，写的风险随之上升 ⇒ 必须把守卫做成机制。
+//
+// 契约：**语义半在其运行期间不得改动任何 tracked 文件**——它的产出是 JSON，一切落盘都由本文件
+// 在其之后机械执行。故「spawn 期间出现的新改动」= 违约。
+// ⛔ 不自动还原：共享检出里同时有别的 driver 在写，还原会毁掉它们的工作。改为**检出即拒**——
+// 违约轮 fail-closed，不落任何提案/决策/任务（一个越权的 probe，其输出不可信）。
+
+/** 当前被改动的 tracked 文件集（porcelain 的 XY 前缀去掉后的路径）。git 不可用 ⇒ null
+ *  （读不出 ≠ 没有改动，硬规则 6——调用侧据此跳过守卫而不是伪装成"干净"）。 */
+export function snapshotTrackedChanges(root: string): Set<string> | null {
+  try {
+    const r = spawnSync("git", ["-C", root, "status", "--porcelain"], { encoding: "utf8" });
+    if (r.status !== 0) return null;
+    const set = new Set<string>();
+    for (const line of String(r.stdout ?? "").split("\n")) {
+      const t = line.trim();
+      if (!t || t.startsWith("??")) continue; // 未跟踪文件不算（probe 产出的落盘由本文件做）
+      set.add(t.slice(2).trim());
+    }
+    return set;
+  } catch { return null; }
+}
+
+/** spawn 期间新增的改动 = 违约集合。任一侧读不出 ⇒ 返回 null（无法评估，⛔ 不当作"没违约"）。 */
+export function probeWriteViolations(before: Set<string> | null, after: Set<string> | null): string[] | null {
+  if (before === null || after === null) return null;
+  return [...after].filter((f) => !before.has(f));
 }
 
 // ── 决策通道（方向问题也必须【被路由】，⛔ 不许停在一个死胡同字段里）──────────────────────────────
@@ -867,6 +917,8 @@ async function runMetaRoundInner(opts: MetaRoundOptions): Promise<MetaRoundResul
 
   const prompt = buildProbePrompt(objective, readings);
   const argv = opts.probeArgv ? opts.probeArgv(prompt) : launchArgv("meta-driver", prompt, root);
+  // FILE-ONLY 守卫的前照：spawn 期间 tracked 文件不得被改动（见 probeWriteViolations 上方说明）。
+  const beforeChanges = snapshotTrackedChanges(root);
   // ⛔ 语义半不设有限超时：成本结构未实测前不设阈值（硬规则 4 推论一）。v0 是手工触发，
   //    外部 ctrl-c 是兜底；固化成常驻例程前必须先拿到实测耗时再定这个数。
   const r = await runAsync(argv, { timeoutMs: Infinity, collectStderr: true });
@@ -874,6 +926,13 @@ async function runMetaRoundInner(opts: MetaRoundOptions): Promise<MetaRoundResul
     const reason = `probe spawn error: ${r.error.message}`;
     return { fact: { name: "meta-driver", value: { ...base, digest }, state: "not-evaluated", reason } };
   }
+  // FILE-ONLY 守卫的后照 + 判定。违约 ⇒ fail-closed：不解析、不落任何东西。
+  const violations = probeWriteViolations(beforeChanges, snapshotTrackedChanges(root));
+  if (violations !== null && violations.length > 0) {
+    const reason = `probe 违约：spawn 期间改动了 ${violations.length} 个 tracked 文件（${violations.slice(0, 5).join(", ")}）⇒ 本轮不落任何提案/决策/任务`;
+    return { fact: { name: "meta-driver", value: { ...base, digest, probeWroteFiles: violations }, state: "failed", reason } };
+  }
+
   const parsed = parseProbeOutput(r.stdout);
   if (!parsed) {
     const reason = `unparseable probe output (exit ${r.status})`;
