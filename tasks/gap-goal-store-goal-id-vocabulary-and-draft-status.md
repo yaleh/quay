@@ -81,4 +81,6 @@ scoped 门绿，且 `git show develop:packages/quay/src/goal-store.ts` 含 `GOAL
 - packages/quay/test/serve-goal-doc.test.mjs
 - packages/quay/test/serve-nav-inconsistent-routes.test.mjs
 - packages/quay/test/webui-modernist-sync.test.mjs
+- plugin/skills/manager/SKILL.md
+- plugin/skills/init/SKILL.md
 - tasks/gap-goal-store-goal-id-vocabulary-and-draft-status.md
