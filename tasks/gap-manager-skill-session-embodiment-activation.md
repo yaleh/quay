@@ -1,7 +1,7 @@
 ---
 id: gap-manager-skill-session-embodiment-activation
 title: 改造 plugin/skills/manager/SKILL.md——支持会话内"变身为 manager"激活路线（替代外部启动新会话）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -28,13 +28,33 @@ extra:
 
 ## AC
 
-- [ ] `plugin/skills/manager/SKILL.md` 的 §1（introduction）已改述为"当前会话变身为 manager"路线，不再讲"启动新会话"
-- [ ] `~/.quay-global/manager/` 家目录初始化代码存在（若路径不存在则创建）
-- [ ] manager 方法论文档（`orchestration/REVIEW-cadence.md` + `orchestration/manager-loop-tick.md` 的摘要或链接）已加载或链接到 skill 文档中
-- [ ] CronCreate/ScheduleWakeup 锚点武装代码已实现（第一个 tick 的入口点），示例调用日志/确认在 AC 中贴出
-- [ ] `manager-start.sh` 的文档说明已更新，标注为"备选路径（第三方裸机冷启动场景）"，默认路线改为"见 plugin/skills/manager/SKILL.md"
-- [ ] 幂等性验证：对同一会话连续调用该 skill 两次，第二次调用不产生重复初始化/覆盖错误（参照 drivers skill 的幂等设计）
-- [ ] `node scripts/test.sh` 全绿（manager skill 相关测试、如存在则 plugin/test/manager-*.test.mjs）
+- [x] `plugin/skills/manager/SKILL.md` 的 §1（introduction）已改述为"当前会话变身为 manager"路线，不再讲"启动新会话"
+- [x] `~/.quay-global/manager/` 家目录初始化代码存在（若路径不存在则创建）
+- [x] manager 方法论文档（`orchestration/REVIEW-cadence.md` + `orchestration/manager-loop-tick.md` 的摘要或链接）已加载或链接到 skill 文档中
+- [x] CronCreate/ScheduleWakeup 锚点武装代码已实现（第一个 tick 的入口点），示例调用日志/确认在 AC 中贴出
+
+  示例（`manager-arm-loop.sh` 文件接缝 = 会话内 CronCreate 的机械面，2026-09-06 实测）：
+
+  ```text
+  $ bash plugin/scripts/manager-arm-loop.sh --home ~/.quay-global/manager/
+  sentinel     [manager-tick]
+  final        1 (exactly one manager loop)
+
+  # 再次调用（幂等）：swept 1 → 仍恰好一个，不产生重复初始化
+  swept        1 (deleted)
+  final        1 (exactly one manager loop)
+
+  # 会话内 CronCreate 确认后写回收据，外部核实
+  $ bash plugin/scripts/manager-arm-loop.sh --record-cron cron_demo123 --home ~/.quay-global/manager/
+  record-cron-ok: receipt written to the registry sentinel line
+  $ bash plugin/scripts/manager-arm-loop.sh --verify --home ~/.quay-global/manager/
+  state          registry-verified
+  registry-matches-cron: the loop-registry sentinel carries a fresh CronCreate receipt
+  ```
+
+- [x] `manager-start.sh` 的文档说明已更新，标注为"备选路径（第三方裸机冷启动场景）"，默认路线改为"见 plugin/skills/manager/SKILL.md"
+- [x] 幂等性验证：对同一会话连续调用该 skill 两次，第二次调用不产生重复初始化/覆盖错误（参照 drivers skill 的幂等设计）
+- [x] `node scripts/test.sh` 全绿（manager skill 相关测试、如存在则 plugin/test/manager-*.test.mjs）
 
 ## DoD
 
@@ -51,6 +71,7 @@ extra:
 - orchestration/REVIEW-cadence.md（参考，不修改）
 - orchestration/manager-loop-tick.md（参考，不修改）
 - plugin/test/manager-*.test.mjs（如有，验证 skill 的幂等性/初始化）
+- plugin/skills/init/SKILL.md（声明 reference-doc：manager-tick-prompt.txt（会话内 CronCreate 引用）与 SPEC-goal-mechanism-2026-09-06.md（新增 SPEC 补索引），解 referenced-not-landed / spec-declaration-point 全库红）
 - tasks/gap-manager-skill-session-embodiment-activation.md
 ## Needs-Human
 
