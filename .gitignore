@@ -124,6 +124,10 @@ packages/quay/plugin/
 # Same gitignored runtime-state family as quality-round.jsonl (never git-tracked).
 **/.quay/architecture-review-round.jsonl
 **/.quay/quality-control.json
+# meta-driver v0（SPEC-capability-planes §12.2 提名管线第一片）：每轮一条记录——机械读数
+# （active goal 的 AC criterion 真跑 verdict）+ divergence + 语义半的提案处置。
+# Same gitignored runtime-state family as quality-round.jsonl（never git-tracked）。
+**/.quay/meta-driver-round.jsonl
 **/.quay/quality-driver.pid
 **/.quay/quality-driver-supervisor.pid
 **/.quay/quality-driver.log
