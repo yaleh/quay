@@ -263,6 +263,34 @@ function ffPushToDevelop(root: string, src: string): boolean {
  *  提交都进历史，⛔ 不 reset/checkout 丢提交，AC4）；② 分叉任务状态按确定性优先级对齐（AC2，永不 LLM）；
  *  ③ ff push develop + 事件落痕。合并冲突（code/docs 语义冲突，机械不能消解）⇒ `git merge --abort`
  *  保树干净 + 事件升级（Claude Code 语义合并接手），返回 false。 */
+/** 结构冲突下的终局解：硬取 develop，丢弃 doc 侧独有提交（人 2026-09-06 裁定允许）。
+ *  **这是让「语义同步必成功、永不卡死」第一次真正成立的那一步**——在此之前结构冲突即
+ *  return false 且无升级接线（实测 21/26 卡死在那里）。
+ *  ⛔ 允许丢失 ≠ 允许静默丢失：被丢弃的提交先逐条枚举进事件（硬规则 3 枚举不布尔），
+ *  再 reset。丢了什么在载体里查得到，⛔ 不是「同步成功」四个字。 */
+export function takeDevelopDiscardingDoc(root: string, cur: string): boolean {
+  let discarded: string[] = [];
+  try {
+    const out = execFileSync("git", ["-C", root, "log", "--oneline", "--no-decorate", "develop..HEAD"], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    });
+    discarded = out.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 50);
+  } catch {
+    discarded = ["<enumerate-failed>"]; // 读不出 ≠ 没丢（硬规则 6）——留一个可区分的取值
+  }
+  try {
+    execFileSync("git", ["-C", root, "reset", "--hard", "develop"], { stdio: "ignore" });
+  } catch {
+    writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-semantic-take-develop-failed", phase: "reset", branch: cur });
+    return false;
+  }
+  writeDocDevelopSyncEvent(root, {
+    event: "doc-develop-sync-semantic-resolved", phase: "take-develop", branch: cur,
+    resolution: "discarded-doc-commits", discardedCount: discarded.length, discarded,
+  });
+  return true;
+}
+
 export function semanticSyncDocToDevelop(root: string, cur: string): boolean {
   writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-semantic", phase: "begin", branch: cur });
 
@@ -277,7 +305,13 @@ export function semanticSyncDocToDevelop(root: string, cur: string): boolean {
   } catch {
     try { execFileSync("git", ["-C", root, "merge", "--abort"], { stdio: "ignore" }); } catch { /* 无 merge 可 abort */ }
     writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-semantic-conflict", phase: "merge", branch: cur });
-    return false;
+    // ⊕ 人 2026-09-06 裁定：「merge 冲突时可以损失 author 分支的变更」。
+    // 该裁定消解了原设计里的矛盾——`-X theirs` 只消解【内容】冲突，结构冲突（add/add、
+    // delete/modify、rename）仍 throw；此前到此即 return false，且【无任何升级接线】
+    // ⇒ 实测 26 次进入语义兜底、21 次停在这里，「必成功永不卡死」从未成立。
+    // 现在结构冲突有了永远有效的解：硬取 develop。
+    // ⛔ 允许丢失 ≠ 允许静默丢失：先枚举将被丢弃的 doc 侧提交并落痕，再重置。
+    return takeDevelopDiscardingDoc(root, cur);
   }
 
   // 回写优先级胜出的任务状态（仅当 doc 侧更前进时；否则 -X theirs 的 develop 侧已是正确值）。
@@ -448,7 +482,15 @@ export function syncDevelopToDoc(root: string, docBranch: string = DOC_BRANCH): 
     return "error";
   }
   if (forked) {
-    writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-not-ff", phase: "forked", branch: cur });
+    // ⛔ 此前只记 {ts,event,phase,branch} ⇒ 该读数【结构上不可解读】：无法区分「只领先
+    // （良性——author 刚提交任务状态、无物可拉）」与「既领先又落后（真分叉）」。
+    // 两个计数都记上，not-ff 才是一个能说明问题的量，而不只是一个计数器。
+    const ahead = revCountAhead(root, "develop", docBranch);   // author 独有
+    const behind = revCountAhead(root, docBranch, "develop");  // develop 独有
+    writeDocDevelopSyncEvent(root, {
+      event: "doc-develop-sync-not-ff", phase: "forked", branch: cur,
+      ahead, behind, benign: behind === 0,
+    });
     return "not-ff";
   }
   const behind = revCountAhead(root, docBranch, "develop");
@@ -458,11 +500,19 @@ export function syncDevelopToDoc(root: string, docBranch: string = DOC_BRANCH): 
   }
   if (behind === 0) return "already";
   try {
-    execFileSync("git", ["-C", root, "merge", "--ff-only", "develop"], { stdio: "ignore" });
+    // ⛔ 不用 stdio:"ignore"：此前 44 次 ff-error 全是 phase=merge，而 git 的错误原因被丢弃
+    // ⇒ 最常见的硬失败【不可归因】（工作树脏？index lock？钩子？无从分辨）。捕获 stderr。
+    execFileSync("git", ["-C", root, "merge", "--ff-only", "develop"], { stdio: ["ignore", "ignore", "pipe"] });
     writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-ff-synced", phase: "synced", branch: cur });
     return "synced";
-  } catch {
-    writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-ff-error", phase: "merge" });
+  } catch (e) {
+    // git 的 stderr 进事件 ⇒ 失败可归因（工作树脏 / index lock / 钩子拒绝各自可辨）。
+    const err = e as { stderr?: Buffer | string };
+    const detail = String(err?.stderr ?? "").trim().split("\n").slice(0, 3).join(" | ").slice(0, 300);
+    writeDocDevelopSyncEvent(root, {
+      event: "doc-develop-sync-ff-error", phase: "merge",
+      detail: detail || "<no-stderr-captured>",
+    });
     return "error";
   }
 }

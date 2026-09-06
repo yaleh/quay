@@ -135,6 +135,10 @@ export function computeDivergences(readings: CriterionReading[]): Divergence[] {
   const out: Divergence[] = [];
   for (const c of readings) {
     const base = { id: c.id, status: c.status, verdict: c.verdict, reason: c.reason };
+    // draft = 尚未被人激活的【提案】，不是承诺 ⇒ 它的判据通过与否都不构成偏离。
+    // （实测：AC-180 是 meta-driver 自己提的 draft，却被报成 pass-but-unflipped——
+    //  把「提案」当成「未兑现的承诺」是错的，且会让偏离数随提案数虚增。）
+    if (c.status === "draft") continue;
     if (!c.criterion || c.criterion.trim() === "") { out.push({ ...base, kind: "no-criterion" }); continue; }
     if (c.verdict === "pass" && c.status !== "achieved") { out.push({ ...base, kind: "pass-but-unflipped" }); continue; }
     if (c.verdict === "fail" && c.status === "achieved") { out.push({ ...base, kind: "achieved-but-failing" }); continue; }
@@ -361,14 +365,26 @@ export interface SyncHealth {
   ffSynced: number;
   notFf: number;
   ffError: number;
+  /** 语义兜底进入次数（begin）。⛔ 必须与终结态分开数——只数终结态会让「进入了但没结束」隐身。 */
+  semanticBegin: number;
   semanticResolved: number;
+  /** ⚠️ 2026-09-06 补：此前【漏数】这一态，而它正是占主导的失败形态（实测 26 次进入中 21 次
+   *  停在这里）⇒ 读数对主要失败态全盲。由 meta-driver 自己在一轮里读码发现并指出——
+   *  「conflict 不进 syncHealth 聚合面，读数本身盲于此失败态」。 */
+  semanticConflict: number;
+  semanticAlignFailed: number;
+  semanticFfFailed: number;
   lastEvent: string | null;
   lastTs: string | null;
 }
 
 export function collectSyncHealth(root: string, window = 200): SyncHealth {
   const file = path.join(root, ".quay", "doc-develop-sync.jsonl");
-  const h: SyncHealth = { window, ffSynced: 0, notFf: 0, ffError: 0, semanticResolved: 0, lastEvent: null, lastTs: null };
+  const h: SyncHealth = {
+    window, ffSynced: 0, notFf: 0, ffError: 0,
+    semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0,
+    lastEvent: null, lastTs: null,
+  };
   let lines: string[];
   try { lines = fs.readFileSync(file, "utf8").trim().split("\n"); } catch { return h; }
   for (const line of lines.slice(-window)) {
@@ -378,7 +394,11 @@ export function collectSyncHealth(root: string, window = 200): SyncHealth {
     if (e === "doc-develop-sync-ff-synced") h.ffSynced++;
     else if (e === "doc-develop-sync-not-ff") h.notFf++;
     else if (e === "doc-develop-sync-ff-error") h.ffError++;
+    else if (e === "doc-develop-sync-semantic") h.semanticBegin++;
     else if (e === "doc-develop-sync-semantic-resolved") h.semanticResolved++;
+    else if (e === "doc-develop-sync-semantic-conflict") h.semanticConflict++;
+    else if (e === "doc-develop-sync-semantic-align-failed") h.semanticAlignFailed++;
+    else if (e === "doc-develop-sync-semantic-ff-failed") h.semanticFfFailed++;
     if (e) { h.lastEvent = e; h.lastTs = typeof r.ts === "string" ? r.ts : null; }
   }
   return h;
@@ -461,6 +481,11 @@ export interface AutoDriveItem {
   mechanismKeyword: string;
   criterion: string;
   expect: string;
+  /** 要改的文件（仓库相对路径，逗号分隔）。**必填**——Touches 是 anti-drift 的授权面，
+   *  ⛔ 不能硬编码：实测 gap-meta-syncdeveloptodoc 因模板把 Touches 写死成 meta-driver.ts，
+   *  而真正要修的是 driver-filters.ts ⇒ worker 结构上改不了对的文件 ⇒ 连撞 3 次重试上限进
+   *  needs-human。立案时就把授权面写错，等于立了一条不可能完成的任务。 */
+  touches: string;
 }
 
 /** 按点号路径在本轮读数里解析证据。`drivers.<kind>.<field>` 特化为按 kind 查。
@@ -514,7 +539,7 @@ export function blockingOwners(owners: OwningTask[]): OwningTask[] {
 }
 
 /** 任务体（四件套）。⛔ 机械渲染自结构化输出——不给 LLM 写文件的权力。 */
-export function renderAutoDriveBody(item: AutoDriveItem, evidence: unknown, at: string, staleOwners: string[] = []): string {
+export function renderAutoDriveBody(item: AutoDriveItem, evidence: unknown, at: string, staleOwners: string[] = [], taskId?: string): string {
   return [
     "## Finding",
     `${item.problem}`,
@@ -532,7 +557,12 @@ export function renderAutoDriveBody(item: AutoDriveItem, evidence: unknown, at: 
     "- [ ] 若结论是「已有机制在管、只是失败」，则修那个机制，⛔ 不新建并行机制",
     "",
     "## Touches",
-    "- `plugin/scripts/meta-driver.ts`",
+    // 机制所在文件（由语义半读码指明）+ 任务体自身（立案纪律要求 self-touch）。
+    // self-touch 机械补齐（立案纪律要求任务体自身在 Touches 里）——⛔ 不指望 LLM 记得。
+    ...[...new Set([
+      ...item.touches.split(",").map((t) => t.trim()).filter(Boolean),
+      ...(taskId ? [`tasks/${taskId}.md`] : []),
+    ])].map((t) => `- \`${t}\``),
   ].join("\n");
 }
 
@@ -588,7 +618,7 @@ export async function driveItems(
     if (opts.dryRun) {
       out.push({ item, id, accepted: true, reason: "dry-run: would file" });
     } else {
-      const c = await createAutoDriveTask(root, id, item, renderAutoDriveBody(item, ev, opts.at, staleOwners));
+      const c = await createAutoDriveTask(root, id, item, renderAutoDriveBody(item, ev, opts.at, staleOwners, id));
       out.push({ item, id, accepted: c.ok, reason: c.reason });
       if (!c.ok) continue;
     }
@@ -783,12 +813,13 @@ export function parseProbeOutput(stdout: string): { divergences: unknown[]; prop
     ? (o.autoDrive as unknown[]).flatMap((raw) => {
         if (!raw || typeof raw !== "object") return [];
         const a = raw as Record<string, unknown>;
-        const need = ["title", "problem", "evidenceKey", "mechanismKeyword", "criterion", "expect"] as const;
+        const need = ["title", "problem", "evidenceKey", "mechanismKeyword", "criterion", "expect", "touches"] as const;
         if (need.some((k) => typeof a[k] !== "string" || String(a[k]).trim() === "")) return [];
         return [{
           title: String(a.title).trim(), problem: String(a.problem).trim(),
           evidenceKey: String(a.evidenceKey).trim(), mechanismKeyword: String(a.mechanismKeyword).trim(),
           criterion: String(a.criterion).trim(), expect: String(a.expect).trim(),
+          touches: String(a.touches).trim(),
         }];
       })
     : [];
