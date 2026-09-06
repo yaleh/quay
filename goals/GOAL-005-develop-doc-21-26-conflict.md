@@ -1,26 +1,25 @@
 ---
 id: GOAL-005
 title: 语义兜底「取 develop 永远有效 ⇒ 必成功」与「⛔ 不丢 doc 提交」矛盾：21/26 停在 conflict 且升级未接线
-status: draft
+status: achieved
 kind: goal
 origin: >-
-  【要裁定什么】git merge -X theirs 撞结构冲突（add/add、delete/modify、rename）时，「取
-  develop」应以何种机械形式落地？
+  【已裁定 2026-09-06】人：「merge 冲突时可以损失 author 分支的变更」⇒ 选项 A。
 
-  【选项与代价】A: 结构冲突时允许丢 doc 提交（reset/checkout 到 develop）——成本：违反 AC4『doc-only
-  提交都进历史』，丢尚未 fan-in 的 doc 工作；B: 强制树=develop 但保留双方提交在历史（merge + checkout develop
-  -- . + commit）——成本：实现复杂、doc 变更静默消失但提交留存；C: 接线原设计宣称的 Claude Code 语义合并（subagent
-  接手 code/docs 冲突）——成本：LLM 进同步关键路径、每次冲突花一次 subagent，但保住『不丢提交』
 
-  【实测依据】syncHealth.semanticResolved = 2（meta-driver 机械采集于 2026-09-06T12:21:48Z）
+  【已落地】driver-filters.ts takeDevelopDiscardingDoc（commit
+  55805b257）：结构冲突（add/add、delete/modify、rename——`-X theirs` 消解不了的那些）⇒ 硬取 develop
+  ⇒ 语义同步第一次真正「必成功、永不卡死」。此前实测 26 次进入兜底、21 次卡死在 conflict，且 return false 之后无任何升级接线。
 
-  【为什么不能机械决定】syncHealth.semanticResolved=2 与 focus 所述『26 进 5 resolved 21
-  conflict』同向（conflict 不进 syncHealth 聚合面——meta-driver.ts 只数 4
-  种终结态事件，读数本身盲于此失败态）；读码确认 semanticSyncDocToDevelop 的 -X theirs 只消解内容冲突、结构冲突必
-  throw，返回 false 后无任何调用者接线 Claude Code 升级——原任务
-  gap-doc-develop-sync-semantic-conflict-resolution 已 done 且 AC3『升级 Claude
-  Code』实为未接线。取舍『丢 doc 提交』vs『接 LLM』是方向裁定，机器不能替人定
 
-  【怎么关闭】认可某个选项 ⇒ goal-store write <id> --status active；否决 ⇒ 保持 draft 或标
-  superseded。
+  【允许丢失 ≠ 静默丢失】被丢弃的 doc 侧提交逐条枚举进事件（resolution=discarded-doc-commits +
+  discardedCount + discarded[]）；semantic-conflict 事件照写 ⇒ 事后可知这次走的是丢弃路径，而非普通合并。
+
+
+  【已知代价，如实记录】doc 侧更前进的任务状态（doc=done vs develop=ready）也在丢弃之列 ⇒
+  该任务可能被重新派发。这是本裁定的直接后果，不是缺陷。
+
+
+  【判据】plugin/test/driver-filters.test.mjs 的 AC1：真 modify/delete 冲突下
+  propagateDocBranchToDevelop 返回 true、两 ref 一致、被丢弃提交逐条留痕。45/45 绿。
 ---
