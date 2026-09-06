@@ -47,6 +47,12 @@ AC3 的 `src:N` 覆盖率 **= 100%**（当前 manager-tick-core.md=56/56）。�
 否则该检查器红。`plugin/loop/manager-tick-core.md` 是 2 行 pointer（非正文副本），
 内容改动不触发 tick-core-drift-check（已实测 doc-check 输出确认）。
 
+**⚠️ 改 laydown tick docs 触发 shrink-only 棘轮（实测发现，非立案时预见）**：`orchestration/*` tick docs
+是 `quay-init --loop --manager` 落地产物集的一部分，`quay-init-closure-ratchet.ts` 对其实测字节数持
+shrink-only 基线（131 files / 3812956 bytes）。本任务四处指针改指 goals/ store 使字节 +204
+（→ 3813160，文件数不变）⇒ 须 re-anchor 该基线到新实测值（同 `gap-task-ops-consolidate-driver-frontmatter-writers`
+先例），并把 `plugin/scripts/quay-init-closure-ratchet.ts` 加入 Touches。
+
 **⚠️ 观察项，不在本任务范围**：`plugin/test/integration-batch-merge.test.mjs:482,535-549`
 拿 `manager-phase-goal.md` 当「manager 未提交编辑必须被 batch-merge 拒绝」的 fixture。
 本任务只加横幅、该文件仍可被编辑 ⇒ 暂不受影响；**若将来它被彻底冻结，需另立任务换 fixture**。
@@ -76,5 +82,6 @@ AC3 的 `src:N` 覆盖率 **= 100%**（当前 manager-tick-core.md=56/56）。�
 - orchestration/manager-tick-core.md
 - orchestration/REVIEW-cadence.md
 - orchestration/manager-phase-goal.md
+- plugin/scripts/quay-init-closure-ratchet.ts
 - plugin/test/tick-core-static-check.test.mjs
 - tasks/gap-goal-store-revoke-prose-authority-repoint-pointers.md
