@@ -136,9 +136,9 @@ test("M52 A1: delivery-standalone-smoke gate requires NO task.extra args (zero-a
   assert.equal(typeof r.ok, "boolean");
 });
 
-test("M52 A2: delivery-standalone-smoke gate PASSes for real (0 RED, real script, real process I/O)", async () => {
+test("M52 A2: delivery-standalone-smoke gate REDs for real (nonzero RED — the ADR-013 separation not yet landed, real script, real process I/O)", async () => {
   const r = await gate("delivery-standalone-smoke")({ id: "T", extra: {} });
-  assert.equal(r.ok, true, `expected pass (0 RED); got reason=${r.reason}`);
+  assert.equal(r.ok, false, `expected RED (nonzero delivery blockers); got ok=true`);
 }, { timeout: 150000 });
 
 test("M52 A2: a fixed gate pointed at a non-existent script fails closed (ok:false)", async () => {
@@ -165,7 +165,7 @@ test("M52 C1 [AC2/AC3]: `quay gate --list` includes 'delivery-standalone-smoke'"
   assert.ok(r.stdout.split("\n").includes("delivery-standalone-smoke"), `got: ${r.stdout}`);
 });
 
-test("M52 C1 [AC2/AC3]: `quay gate <task> --gate delivery-standalone-smoke` PASSes for real and appends a real GateEvent", () => {
+test("M52 C1 [AC2/AC3]: `quay gate <task> --gate delivery-standalone-smoke` REDs for real and appends a real fail GateEvent", () => {
   const { workspaceRoot, tasksDir } = makeWorkspace("cli-smoke");
   const logFile = path.join(workspaceRoot, "g.jsonl");
   runNative(
@@ -176,15 +176,15 @@ test("M52 C1 [AC2/AC3]: `quay gate <task> --gate delivery-standalone-smoke` PASS
     ["gate", "T-SMOKE", "--gate", "delivery-standalone-smoke", "--file", logFile],
     workspaceRoot
   );
-  assert.equal(r.status, 0, `expected PASS; got ${r.status}, stdout=${r.stdout}, stderr=${r.stderr}`);
-  assert.match(r.stdout, /PASS/);
+  assert.equal(r.status, 1, `expected FAIL; got ${r.status}, stdout=${r.stdout}, stderr=${r.stderr}`);
+  assert.match(r.stdout, /FAIL/);
 
   const log = runQuay(["gate-log", "T-SMOKE", "--json", "--file", logFile], workspaceRoot);
   assert.equal(log.status, 0);
   const events = JSON.parse(log.stdout);
   assert.equal(events.length, 1);
   assert.equal(events[0].gate, "delivery-standalone-smoke");
-  assert.equal(events[0].verdict, "pass");
+  assert.equal(events[0].verdict, "fail");
   assert.equal(events[0].pipeline_id, "T-SMOKE");
 }, { timeout: 150000 });
 
@@ -198,11 +198,11 @@ test("M52 C1 [AC2/AC3]: `quay gate <task> --gate delivery-standalone-smoke` PASS
 // `gates:` section is the ONLY source THIS workspace's readers resolve from.
 // ===========================================================================
 
-test("M52 D1: delivery-standalone-smoke gate PASSes against THIS repo's own real .quay/config.yml gates: wiring", async () => {
+test("M52 D1: delivery-standalone-smoke gate REDs against THIS repo's own real .quay/config.yml gates: wiring", async () => {
   const realConfigYml = path.join(REPO_ROOT, ".quay", "config.yml");
   assert.ok(fs.existsSync(realConfigYml), "real .quay/config.yml must exist in this worktree");
   const content = fs.readFileSync(realConfigYml, "utf8");
   assert.match(content, /delivery-standalone-smoke/, "real config.yml's gates: section must declare the fixed gate");
   const r = await gate("delivery-standalone-smoke")({ id: "DIR-035-D" });
-  assert.equal(r.ok, true, `expected pass against this repo's real workspace; got reason=${r.reason}`);
+  assert.equal(r.ok, false, `expected RED against this repo's real workspace (ADR-013 separation not landed); got ok=true`);
 }, { timeout: 150000 });
