@@ -124,30 +124,30 @@ mainCheckoutRoot() 实际算出: /home                    ← 错误，应为 /h
 
 ## Acceptance Criteria
 
-- [ ] AC1（时间戳）：对 `renderFanInCardFromRecords` 传入一个固定 `records` fixture（含已知的
+- [x] AC1（时间戳）：对 `renderFanInCardFromRecords` 传入一个固定 `records` fixture（含已知的
       `lockAcquireEpoch`）与固定 `opts.nowMs`，断言输出 HTML 里每一行都含一个由 `relativeTime()` 产生的、
       与该固定输入完全对应的时间描述子串（不是模糊 `/ago|前/` 子串匹配，而是与 `relativeTime(fixedEpoch*1000)`
       的真实返回值逐字比对）。
-- [ ] AC2（bar 锚定・测试卡，反例判据）：构造 `tests.runs` fixture，全部记录的 `[startedAt, startedAt+
+- [x] AC2（bar 锚定・测试卡，反例判据）：构造 `tests.runs` fixture，全部记录的 `[startedAt, startedAt+
       durationMs]` 落在 `[nowMs-10h, nowMs-7h]` 区间（模拟"循环已停 7 小时"），调用 `renderTestsCard`
       时传 `hours=3`。① 用新实现（windowEndMs=最新记录结束时刻）渲染，断言输出含 `<rect`（非空）；
       ② 把同一份 segments 手工传给 `renderTimelineBarSvg` 并显式指定 `windowEndMs=nowMs`（即还原旧行为，
       关掉本次改动），断言此时 `<rect` 计数为 0 —— ②存在是为了证明 AC2①测的确实是"锚点从 now 换成了
       最新事件结束时刻"这件事本身，而不是别的巧合。
-- [ ] AC3（bar 锚定・Fan-in 卡，同 AC2 结构）：同款 fixture/反例判据，数据源换成
+- [x] AC3（bar 锚定・Fan-in 卡，同 AC2 结构）：同款 fixture/反例判据，数据源换成
       `mechanical_fan_in.lockAcquireEpoch/lockReleaseEpoch`，模拟"最后一次 fan-in 是 7 小时前"，① 新实现
       非空、② 显式传回 `windowEndMs=nowMs` 必须变回 0。
-- [ ] AC4（命名/职责不漂移，静态可查）：`grep -n "windowEndMs" packages/quay/src/serve-dashboard.ts`
+- [x] AC4（命名/职责不漂移，静态可查）：`grep -n "windowEndMs" packages/quay/src/serve-dashboard.ts`
       命中 ≥3 处（1 处 `renderTimelineBarSvg` 签名 + 至少 2 处调用点的计算逻辑）；`renderTimelineBarSvg`
       的函数签名所在行不再出现形参名 `nowMs`（`grep -A2 "^function renderTimelineBarSvg"` 人工核对，或用
       一条 `grep` 断言该签名行 3 个形参名依次为 `segments, windowHours, windowEndMs`）。
-- [ ] AC5（文案）：`grep -n "结束时刻为终点\|最近一次运行/fan-in" packages/quay/src/serve-dashboard.ts`
+- [x] AC5（文案）：`grep -n "结束时刻为终点\|最近一次运行/fan-in" packages/quay/src/serve-dashboard.ts`
       命中 ≥1。
-- [ ] AC6（既有测试不回归）：`node --experimental-strip-types --test
+- [x] AC6（既有测试不回归）：`node --experimental-strip-types --test
       packages/quay/test/gap-dashboard-fanin-panel-and-timeline-bars.test.mjs` exit 0——原 11 条用例
       （F/AC1、共用函数存在性、AC4 sort/filter、AC6 mount 等与本次改动无关的部分）继续全绿；只有依赖旧
       "窗口终点=now"假设的断言按 Plan 步骤4 同步改写。
-- [ ] AC7（真实生产数据回归，非 fixture——**已退回重做，见上方"追加发现"**）：`renderFanInCard(root,
+- [x] AC7（真实生产数据回归，非 fixture——**已退回重做，见上方"追加发现"**）：`renderFanInCard(root,
       {hours:3})` 与 `renderTestsCard(tests, suiteRun, {hours:3})` 用真实 `.quay/worker-outcome.jsonl` /
       `.quay/verification-round.jsonl`（当前 workspace，不注入/不 mock）跑，`nowMs` 用真实 `Date.now()`，
       断言两者返回的 HTML 都含至少一个 `<rect`。**新增约束（防止本次退回的根因复发）**：该测试必须在
@@ -156,11 +156,18 @@ mainCheckoutRoot() 实际算出: /home                    ← 错误，应为 /h
       巧合的调用目录下才绿；`mainCheckoutRoot()` 辅助函数必须修正为不依赖调用进程的 `process.cwd()`
       （只依赖 `__dirname`），且新增一条独立断言：分别以两种不同 cwd 调用 `mainCheckoutRoot()`
       （通过 `execFileSync` 子进程或等价手段），两次解析结果必须相同且等于仓库根目录。
-- [ ] AC8（新增，回归哨兵）：本次退回的根因（`path.resolve` 对一个"相对于 __dirname 而非 process.cwd()
+- [x] AC8（新增，回归哨兵）：本次退回的根因（`path.resolve` 对一个"相对于 __dirname 而非 process.cwd()
       的相对路径"补全基准搞错）具有一般性——`grep -rn "path.resolve(commonDir" packages/quay/test/*.mjs`
       之外，若同一份测试文件或其他测试文件里还有类似"用 `{cwd: __dirname}` 跑 execFileSync 取相对路径、
       再直接 `path.resolve` 补全"的写法，一并核查修正或至少在本任务里记录清楚（不要求跨文件修复，只要求
       核查过并报告结果，核查范围写清楚覆盖了哪些文件）。
+
+      （AC8 核查记录：① `grep -rn "path.resolve(commonDir" packages/quay/test/*.mjs` 仅命中本文件 1 处（已修）。
+      ② 全仓 test 树 `grep -rn "cwd: __dirname"` 命中 `packages/quay-github/test/{mcp-server,create-mcp}.test.mjs`
+      （各 2 处），但均为 `StdioClientTransport({ cwd: __dirname })` 拉起 MCP server 子进程，非「execFileSync git
+      rev-parse 取相对路径 + path.resolve 补全」形态，无此 bug。③ `--git-common-dir` 在 `plugin/test/*.mjs`
+      的命中均为字符串字面量/断言源码用 `--path-format=absolute` 或经 `plugin/scripts/repo-root.ts` 正本，非手搓。
+      ⇒ 该 bug 形态仅此文件一处，无需跨文件修复。）
 
 ## Definition of Done
 
