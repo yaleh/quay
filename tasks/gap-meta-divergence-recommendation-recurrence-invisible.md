@@ -1,7 +1,7 @@
 ---
 id: gap-meta-divergence-recommendation-recurrence-invisible
 title: divergences 是唯一没有执行器的通道，而 meta-driver 每轮全新上下文 ⇒ 结构上无法发现自己已重复同一建议 5 轮
-status: todo
+status: ready
 labels:
   - gap
   - defect
