@@ -30,12 +30,12 @@ extra:
 
 ## AC
 
-- [ ] **AC-179 正本判据**：遍历所有运行中的 `quay.ts serve` 实例，任一 `/dashboard` 响应含 `goal-card` ⇒ 退出码 0（判据读**运行中的服务**而非源码——硬规则 4 推论三：grep 源码只证明「能产出」，不证明「已产出」）
-- [ ] 负控制（证明上一条的管线本身是通的）：同一条 curl+grep 管线抓 `task-card` 命中非零
-- [ ] 卡片走 ABI 而非直连：`packages/quay/src/serve-dashboard.ts` 中对 `goal-store` 的直接 import 数为 0，且 goal 数据来自 `ProviderClient.goalList`
-- [ ] 优雅降级可取假：令 `goalList` 返回 `[]`（goal-less provider）时 `/dashboard` 仍返回 200 且页面不抛，卡片显示空态而非消失
-- [ ] 卡片内容三要素齐备：渲染结果含 `AC 达成 x/y`、`fresh`/`stale`/`NOT-EVALUATED` 之一的标记、`activeCount / cap`
-- [ ] scoped 门 `bash scripts/test.sh --for-task gap-dashboard-goal-card-provider-backed --allow-thin` 退出码 0
+- [x] **AC-179 正本判据**：遍历所有运行中的 `quay.ts serve` 实例，任一 `/dashboard` 响应含 `goal-card` ⇒ 退出码 0（判据读**运行中的服务**而非源码——硬规则 4 推论三：grep 源码只证明「能产出」，不证明「已产出」）
+- [x] 负控制（证明上一条的管线本身是通的）：同一条 curl+grep 管线抓 `task-card` 命中非零
+- [x] 卡片走 ABI 而非直连：`packages/quay/src/serve-dashboard.ts` 中对 `goal-store` 的直接 import 数为 0，且 goal 数据来自 `ProviderClient.goalList`
+- [x] 优雅降级可取假：令 `goalList` 返回 `[]`（goal-less provider）时 `/dashboard` 仍返回 200 且页面不抛，卡片显示空态而非消失
+- [x] 卡片内容三要素齐备：渲染结果含 `AC 达成 x/y`、`fresh`/`stale`/`NOT-EVALUATED` 之一的标记、`activeCount / cap`
+- [x] scoped 门 `bash scripts/test.sh --for-task gap-dashboard-goal-card-provider-backed --allow-thin` 退出码 0
 
 ## DoD
 
