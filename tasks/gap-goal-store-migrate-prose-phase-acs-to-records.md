@@ -1,7 +1,7 @@
 ---
 id: gap-goal-store-migrate-prose-phase-acs-to-records
 title: 把 manager-phase-goal.md 的当前阶段与下一阶段 AC 保号迁入 goals/ 记录
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -50,12 +50,12 @@ AC1–AC142 的历史阶段留在 `manager-phase-goal.md` / `manager-phase-goal-
 
 ## Acceptance Criteria
 
-- [ ] `test "$(node packages/quay/src/goal-store.ts list | grep -c '"id": "AC-1[4-6][0-9]"')" -ge 27` 退出 0（AC-171 判据，立案时取假：count=0）
-- [ ] `node packages/quay/src/goal-store.ts get GOAL-002 | grep -q '"status": "active"'` 退出 0
-- [ ] `node packages/quay/src/goal-store.ts get GOAL-003 | grep -q '"status": "draft"'` 退出 0（AC-172 判据的真实载体）
-- [ ] 保号无缺漏：AC143..AC155 与 AC156..AC169 的每个编号在 `goals/` 下恰有一个记录文件（单测断言）
-- [ ] 负控制：至少一条无可跑判据的 AC，其 `criterion` 为空且 `goal-store.ts gate <id>` 判红退出 1
-- [ ] `bash scripts/test.sh --for-task gap-goal-store-migrate-prose-phase-acs-to-records` 退出 0
+- [x] `test "$(node packages/quay/src/goal-store.ts list | grep -c '"id": "AC-1[4-6][0-9]"')" -ge 27` 退出 0（AC-171 判据，立案时取假：count=0）
+- [x] `node packages/quay/src/goal-store.ts get GOAL-002 | grep -q '"status": "active"'` 退出 0
+- [x] `node packages/quay/src/goal-store.ts get GOAL-003 | grep -q '"status": "draft"'` 退出 0（AC-172 判据的真实载体）
+- [x] 保号无缺漏：AC143..AC155 与 AC156..AC169 的每个编号在 `goals/` 下恰有一个记录文件（单测断言）
+- [x] 负控制：至少一条无可跑判据的 AC，其 `criterion` 为空且 `goal-store.ts gate <id>` 判红退出 1
+- [x] `bash scripts/test.sh --for-task gap-goal-store-migrate-prose-phase-acs-to-records` 退出 0
 
 ## Definition of Done
 
@@ -70,7 +70,33 @@ AC1–AC142 的历史阶段留在 `manager-phase-goal.md` / `manager-phase-goal-
 
 - goals/GOAL-002-three-layer-collapse.md (new)
 - goals/GOAL-003-plugin-surface-convergence.md (new)
-- goals/AC-1[4-6][0-9]-*.md (new)
+- goals/AC-143-observe-ledger-close-driven.md (new)
+- goals/AC-144-quality-gate-by-shape-driven.md (new)
+- goals/AC-145-semantic-subagent-manager-driven.md (new)
+- goals/AC-146-human-interface-explicit-owner.md (new)
+- goals/AC-147-manager-liveness-independent-watchdog.md (new)
+- goals/AC-148-inner-kernel-item-by-item-ownership.md (new)
+- goals/AC-149-session-retirement-no-dual-source.md (new)
+- goals/AC-150-promotion-driver-resource-control-alignment.md (new)
+- goals/AC-151-driver-two-level-layering.md (new)
+- goals/AC-152-filter-composable-predicate-list.md (new)
+- goals/AC-153-invariant-single-impl-not-evaluated.md (new)
+- goals/AC-154-claude-code-profile-separation.md (new)
+- goals/AC-155-config-merge-control-state-split.md (new)
+- goals/AC-156-bare-filename-scan.md (new)
+- goals/AC-157-archive-mechanism-exclusion-wiring.md (new)
+- goals/AC-158-execute-archive-batch-one.md (new)
+- goals/AC-159-linked-doc-references-sync.md (new)
+- goals/AC-160-runtime-usage-inventory-blind-spot.md (new)
+- goals/AC-161-user-level-marketplace-only.md (new)
+- goals/AC-162-register-plugin-no-user-enabled.md (new)
+- goals/AC-163-allowed-tools-plugin-prefix.md (new)
+- goals/AC-164-plugin-namespace-takes-traffic.md (new)
+- goals/AC-165-remove-root-mcp-json.md (new)
+- goals/AC-166-second-copy-retirement.md (new)
+- goals/AC-167-baime-executor-removal.md (new)
+- goals/AC-168-quay-init-contract-closed-set.md (new)
+- goals/AC-169-delivery-surface-doc-sync.md (new)
 - orchestration/manager-phase-goal.md
 - packages/quay/test/goal-store.test.mjs
 - tasks/gap-goal-store-migrate-prose-phase-acs-to-records.md

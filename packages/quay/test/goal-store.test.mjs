@@ -247,3 +247,21 @@ test("goal-store list/get/write round-trip through the CLI (invoke surface)", ()
   const got = JSON.parse(n(["get", "GOAL-001"]).stdout);
   assert.equal(got.title, "p");
 });
+
+// ── migration completeness (gap-goal-store-migrate-prose-phase-acs-to-records AC4) ───────────────
+// 保号无缺漏：AC143..AC155（当前阶段 GOAL-002）与 AC156..AC169（下一阶段 GOAL-003）共 27 个编号，
+// 每个在 <repo>/goals 下【恰有一个】记录文件。生产 goals 目录由测试文件位置派生（绝不靠 cwd），
+// 因此无论 suite 在哪个检出上跑，读到的都是该检出的 goals/。
+test("migration completeness — AC143..AC155 and AC156..AC169 each have exactly one record", () => {
+  const goalsDir = new URL("../../../goals", import.meta.url).pathname;
+  const store = createGoalStore(goalsDir);
+  const records = store.list();
+  const required = [];
+  for (let n = 143; n <= 155; n++) required.push(`AC-${n}`);
+  for (let n = 156; n <= 169; n++) required.push(`AC-${n}`);
+  assert.equal(required.length, 27, "the migrated range is 27 ids");
+  for (const id of required) {
+    const matches = records.filter((r) => String(r.id) === id);
+    assert.equal(matches.length, 1, `${id} must have exactly one record, found ${matches.length}`);
+  }
+});

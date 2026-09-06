@@ -56,8 +56,11 @@ const EXCLUDED_TOP_DIRS: ReadonlySet<string> = new Set([".quay"]);
 // all import via ESM (its dep is invisible to closure step d, so it must be laid down or the drivers die
 // with ERR_MODULE_NOT_FOUND) — but −9365 bytes net, the 5 duplicated regex/parse implementations collapsed
 // into one. Both axes re-anchored to the new measured footprint (stable across 3 consecutive laydowns).
+// Re-anchored 2026-09-06 (gap-goal-store-revoke-prose-authority-repoint-pointers): +204 bytes net, 0 files —
+// the four manager prompt pointers repointed from orchestration/manager-phase-goal.md to the goals/ store
+// (goal-store.ts list --status active) lengthen the laid-down tick docs; a legitimate pointer repoint, not pollution.
 export const BASELINE_FILES = 131;
-export const BASELINE_BYTES = 3812956;
+export const BASELINE_BYTES = 3813160;
 
 export interface ClosureCount {
   files: number;
