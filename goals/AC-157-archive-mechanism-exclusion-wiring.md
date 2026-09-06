@@ -15,4 +15,4 @@ origin: |
 
 **取假**：随便 archive 一个文件后跑全量 suite——**不接线必红**；接线后应绿。
 
-**⊢ criterion 留空**：本条是语义判据、无可跑 shell 判据；`gate` fail-closed（红）是诚实状态（SPEC-0809 §3）。
+
