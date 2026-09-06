@@ -2,7 +2,7 @@
 id: gap-meta-driver-cap-undeclared-concurrency-literal
 title: meta-driver.ts cap:1/cap:2 未声明并发字面量 → concurrency-literal-check 红，挡触及
   plugin/scripts 的 fan-in
-status: ready
+status: done
 labels:
   - gap
   - gate
@@ -18,14 +18,14 @@ extra:
 
 ## AC
 
-- [ ] `plugin/scripts/meta-driver.ts:978` 与 `:981` 两处 `cap:` 字面量各带 `concurrency-default-fallback` 标记注释（说明是语义节流默认值而非机器规格派生），或改为从 QUAY_MAX_* 定义点派生。判据：`node --experimental-strip-types plugin/scripts/concurrency-literal-check.ts --gate --root .` exit 0。
-- [ ] --gate 输出的 violations 恰为 0 条（不是「仅剩这两条」，是 0）。
-- [ ] `plugin/test/concurrency-literal-check.test.mjs` 全绿（declared-exception 机制已被既有测试覆盖，本次不新增测试）。
+- [x] `plugin/scripts/meta-driver.ts:978` 与 `:981` 两处 `cap:` 字面量各带 `concurrency-default-fallback` 标记注释（说明是语义节流默认值而非机器规格派生），或改为从 QUAY_MAX_* 定义点派生。判据：`node --experimental-strip-types plugin/scripts/concurrency-literal-check.ts --gate --root .` exit 0。
+- [x] --gate 输出的 violations 恰为 0 条（不是「仅剩这两条」，是 0）。
+- [x] `plugin/test/concurrency-literal-check.test.mjs` 全绿（declared-exception 机制已被既有测试覆盖，本次不新增测试）。
 
 ## DoD
 
-- [ ] 上述 --gate 判据实跑通过并贴出输出（非转述、非「应该会过」）。
-- [ ] 未新增任何周期性/定时检查机制；修法是给既有检查器的「已声明例外」机制补标记（或改定义点派生），非新造机件。
+- [x] 上述 --gate 判据实跑通过并贴出输出（非转述、非「应该会过」）。
+- [x] 未新增任何周期性/定时检查机制；修法是给既有检查器的「已声明例外」机制补标记（或改定义点派生），非新造机件。
 
 ## Touches
 
