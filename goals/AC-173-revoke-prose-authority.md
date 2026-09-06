@@ -1,7 +1,7 @@
 ---
 id: AC-173
 title: G3 断权威——manager-phase-goal.md 降级为归档，prompt 指针改读 store
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-001
 criterion: |
@@ -13,7 +13,7 @@ origin: |
   两个来源并存必然漂移——manager-phase-goal.md 自己就有实证：顶部横幅曾写死
   「AC54–AC78」并过期，2026-08-25 e389d3e58 才改成结构性描述。
 evidence:
-  at: 2026-09-06T09:44:34.874Z
+  at: 2026-09-06T21:54:07.522Z
   verdict: pass
   reading: acceptance passed (exit 0)
 ---
