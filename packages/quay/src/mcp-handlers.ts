@@ -213,6 +213,7 @@ export function registerTaskHandlers(
         labels: z.array(z.string()).optional().describe("Replacement label array (replaces all existing labels). Omit to leave unchanged."),
         parent: z.string().nullable().optional().describe("Parent task id, or null to clear. Omit to leave unchanged."),
         children: z.array(z.string()).optional().describe("Replacement children array. Omit to leave unchanged."),
+        depends_on: z.array(z.string()).optional().describe("Prerequisite task ids (relation edge, first-class top-level field). Omit to leave unchanged."),
         body: z.string().optional().describe("Full replacement body (markdown). Omit to leave unchanged."),
         extra: z.record(z.string(), z.any()).optional().describe("Extra frontmatter fields as a key/value map."),
         expectedStatus: z.string().optional().describe("Optimistic-locking guard: if task's current status differs from this value, the write is refused with isError:true (no mutation). Omit to skip the check."),
@@ -225,6 +226,39 @@ export function registerTaskHandlers(
         return {
           content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }],
           structuredContent: { task },
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }],
+        };
+      }
+    }
+  );
+
+  // task_delete — generic passthrough (gap-abi-missing-commit-delete-dependson-primitives), mirroring
+  // taskWrite's provider-agnostic discipline: Core forwards the id and surfaces whatever the
+  // Provider's own task_delete reports. A not-found id arrives as isError (the provider fails
+  // closed), which taskDelete() throws → surfaced as isError:true here, never a silent no-op.
+  server.registerTool(
+    "task_delete",
+    {
+      description:
+        "Delete one task by id on an enabled Provider (defaults to the default-enabled Provider). " +
+        "Returns the deletion result ({ id, ok, reason, committed, propagated }); isError:true if the task id does not exist. " +
+        "Proxies the Provider's own task_delete tool.",
+      inputSchema: {
+        provider: z.string().optional().describe("Provider id to delete from (defaults to the first-enabled Provider in .quay/config.yml)."),
+        id: z.string().describe("Task id to delete (e.g. 'QX-029')."),
+      },
+    },
+    async ({ provider, id }) => {
+      const { client } = await getClient(provider);
+      try {
+        const result = await client.taskDelete(id);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+          structuredContent: result as unknown as Record<string, unknown>,
         };
       } catch (err) {
         return {

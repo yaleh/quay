@@ -202,6 +202,35 @@ async function main() {
       `task_check ABI-C1 (compound, child done) -> ok=${sc?.ok}, childrenStatus present=${Array.isArray(sc?.childrenStatus)}`);
   }
 
+  // --- native / depends_on first-class + task_delete (gap-abi-missing-commit-delete-dependson-primitives) ---
+  {
+    // task_write with a top-level `depends_on` param (AC5): the schema accepts it and the field
+    // lands TOP-LEVEL in the file (not nested under `extra`).
+    const w = await nativeClient.callTool({ name: "task_write", arguments: { id: "ABI-P1", depends_on: ["ABI-C1"] } });
+    const raw = fs.readFileSync(path.join(tasksDir, "ABI-P1.md"), "utf8");
+    const topLevelDependsOn = /^depends_on:/m.test(raw);
+    record("native", "primitive", "task_write-depends-on",
+      !w.isError && w.structuredContent?.task?.id === "ABI-P1" && topLevelDependsOn,
+      `task_write depends_on:["ABI-C1"] -> accepted=${!w.isError}, top-level depends_on in file=${topLevelDependsOn}`);
+  }
+  {
+    // task_delete of an existing task (AC3): ok:true, then task_get on the same id returns
+    // isError (not-found) AND the file is absent from disk.
+    const del = await nativeClient.callTool({ name: "task_delete", arguments: { id: "ABI-P1" } });
+    const gone = await nativeClient.callTool({ name: "task_get", arguments: { id: "ABI-P1" } });
+    const fileAbsent = !fs.existsSync(path.join(tasksDir, "ABI-P1.md"));
+    record("native", "primitive", "task_delete",
+      !del.isError && del.structuredContent?.ok === true && gone.isError === true && fileAbsent,
+      `task_delete ABI-P1 -> ok=${del.structuredContent?.ok}, task_get.isError=${gone.isError}, file absent=${fileAbsent}`);
+  }
+  {
+    // task_delete of a non-existent id (AC4): fails closed (isError), never a silent no-op.
+    const del = await nativeClient.callTool({ name: "task_delete", arguments: { id: "ABI-NOPE" } });
+    record("native", "primitive", "task_delete-missing-fail-closed",
+      del.isError === true,
+      `task_delete ABI-NOPE (non-existent) -> isError=${del.isError} (fail-closed, not silent)`);
+  }
+
   await nativeClient.close();
 
   // ============================= GITHUB LEG =============================

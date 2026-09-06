@@ -8,6 +8,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import YAML from "yaml";
 import { TASK_STATUSES, TASK_STATUS, isTaskStatus, type Task, type TaskStatus } from '../../quay/src/abi.ts';
 // gap-unified-frontmatter-parser: the ONE complete frontmatter parser now lives in the product layer
@@ -1023,6 +1024,115 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     invalidateCache(parentId);
   }
 
+  // ── COMMIT-AFTER-WRITE (gap-abi-missing-commit-delete-dependson-primitives) ──────────────────────
+  // task_write / task_delete write to disk; every consumer of task state on the dispatch/lifecycle
+  // spine (ready-pool-check / slot-refill / worker-driver / Web UI) reads `git show develop:tasks/
+  // <id>.md`, never disk. A disk-only write is therefore dispatch-invisible until something ELSE
+  // commits and (when the write happened in a task worktree) ff-merges it into develop — the disk
+  // value silently loses to the git-ref value, indistinguishable from "the edit never happened"
+  // (CLAUDE.md 硬规则 3b/4b). This block adds a scoped, branch-aware commit primitive to the write
+  // path: commit `tasks/<id>.md` ALONE (pathspec, never `-A`), and — when on the main checkout (a
+  // branch that is NOT develop and NOT a `task/<id>` worktree branch) — ff-push to develop so the
+  // write becomes dispatch-visible. Inside a task worktree the commit lands on the worktree's own
+  // branch and develop is left untouched (fan-in ff-merge remains the only path into develop, AC2).
+
+  /** The git root containing `tasksDir`, or null when not inside a git work tree (unit-test temp
+   *  dirs / repo-less roots — the commit is then a no-op, never a throw). Memoized: `tasksDir` does
+   *  not move for the store's lifetime, so a temp-dir store pays exactly ONE failed `rev-parse`. */
+  let _gitRoot: string | null | undefined;
+  function resolveGitRoot(): string | null {
+    if (_gitRoot !== undefined) return _gitRoot;
+    try {
+      const out = execFileSync("git", ["-C", tasksDir, "rev-parse", "--show-toplevel"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      _gitRoot = out.trim() || null;
+    } catch {
+      _gitRoot = null;
+    }
+    return _gitRoot;
+  }
+
+  /** Current branch name of the git root, or null (detached HEAD / not in git). */
+  function currentBranch(root: string): string | null {
+    try {
+      const out = execFileSync("git", ["-C", root, "branch", "--show-current"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      return out.trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Stage + commit a set of repo-relative paths (hard rule 11: `git add` then `git commit`
+   *  back-to-back, no wait between them; pathspec-limited, never `-A` — memory git-commit-no-
+   *  pathspec-commits-shared-index). `--no-verify` skips the pre-commit hook (a mechanical ABI
+   *  write is content-neutral). Returns "committed" | "nothing" | "failed" — "nothing" is a
+   *  DISTINGUISHABLE state (e.g. deleting a never-committed untracked file has no index entry to
+   *  stage), never conflated with "committed" or "failed" (硬规则 3b). */
+  function commitRelPaths(root: string, relPaths: string[], message: string): "committed" | "nothing" | "failed" {
+    try {
+      execFileSync("git", ["-C", root, "add", "--", ...relPaths], { stdio: "ignore" });
+    } catch {
+      // `git add -- <path>` errors when the pathspec matches nothing tracked (deleting an untracked
+      // file): there is nothing to commit, which is NOT a commit failure.
+      return "nothing";
+    }
+    try {
+      execFileSync("git", ["-C", root, "commit", "--no-verify", "-m", message, "--", ...relPaths], { stdio: "ignore" });
+      return "committed";
+    } catch {
+      return "failed";
+    }
+  }
+
+  /** ff-push `branch` to develop (fast-forward only, `git push . <branch>:develop`). Non-ff / git
+   *  error ⇒ false. The semantic-sync fallback for a forked main checkout is NOT this store's job —
+   *  the driver's standing `propagateDocBranchToDevelop` owns that case. */
+  function ffPushToDevelop(root: string, branch: string): boolean {
+    try {
+      execFileSync("git", ["-C", root, "push", ".", `${branch}:develop`], { stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Commit `tasks/<id>.md` (branch-aware) after a successful write/delete. Returns
+   *  `{ committed, propagated, status }` — honest, distinguishable outcomes, never "silent success"
+   *  (硬规则 3b):
+   *    status "committed"  — the change is on the current branch's git history (propagated reports
+   *                          whether it also reached develop).
+   *    status "not-in-git" — the store's tasksDir is not inside a git work tree (unit-test temp
+   *                          dirs): a deliberate no-op, NOT a failure.
+   *    status "nothing"    — nothing to stage (deleting a never-committed untracked file).
+   *    status "failed"     — the git add/commit itself errored: a REAL failure (the disk change is
+   *                          not on any branch's history).
+   *  Callers log only `failed` — the other two non-committed states are expected and must not be
+   *  mistaken for a broken commit. */
+  function commitTaskWrite(id: string, verb: "task_write" | "task_delete"): { committed: boolean; propagated: boolean; status: "committed" | "not-in-git" | "nothing" | "failed" } {
+    const root = resolveGitRoot();
+    if (root === null) return { committed: false, propagated: false, status: "not-in-git" };
+    const rel = path.join("tasks", `${id}.md`);
+    const outcome = commitRelPaths(root, [rel], `tasks: ${id} ${verb}`);
+    if (outcome === "nothing") return { committed: false, propagated: false, status: "nothing" };
+    if (outcome === "failed") return { committed: false, propagated: false, status: "failed" };
+    const branch = currentBranch(root);
+    if (branch === null || branch === "develop") {
+      // detached HEAD, or already on develop — nothing further to propagate.
+      return { committed: true, propagated: branch === "develop", status: "committed" };
+    }
+    if (branch.startsWith("task/")) {
+      // Task worktree: commit to the worktree's own branch only; fan-in ff-merge is the sole path
+      // into develop (AC2 negative control).
+      return { committed: true, propagated: false, status: "committed" };
+    }
+    return { committed: true, propagated: ffPushToDevelop(root, branch), status: "committed" };
+  }
+
   /**
    * Raw file write — used by both `task create` (internal convenience,
    * not part of the ABI surface table but needed to seed tasks) and `edit`.
@@ -1069,7 +1179,10 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
    * only ordinary last-writer-wins sequencing (identical to every other
    * field this store already handles).
    */
-  function write(id: string, { title, status, labels, parent, children, extra, body, depends_on, expectedStatus }: { title?: string; status?: string; labels?: string[]; parent?: string | null; children?: string[]; extra?: Record<string, unknown>; body?: string; depends_on?: string[]; expectedStatus?: string }): (Task & { updatedAt?: number }) | null {
+  function write(id: string, { title, status, labels, parent, children, extra, body, depends_on, expectedStatus }: { title?: string; status?: string; labels?: string[]; parent?: string | null; children?: string[]; extra?: Record<string, unknown>; body?: string; depends_on?: string[]; expectedStatus?: string }, opts?: { commit?: boolean }): (Task & { updatedAt?: number }) | null {
+    // COMMIT-AFTER-WRITE (gap-abi-missing-commit-delete-dependson-primitives): commit-by-default,
+    // opt-out per call via `{ commit: false }` (multi-file batch editors commit once at the end).
+    const commit = opts?.commit !== false;
     if (status && !VALID_STATUSES.includes(status)) {
       throw new Error(
         `invalid status "${status}" — must be one of ${VALID_STATUSES.join(", ")}`
@@ -1086,7 +1199,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
 
     // QN-006: read-modify-write is lock-protected so CLI and MCP writers
     // (the same store.js core, design §6) never interleave on the same file.
-    return withLocks(lockIds, () => {
+    const result = withLocks(lockIds, () => {
       const existingRaw = readRaw(id);
       let frontmatter: Record<string, unknown> = { id, title, status, labels: labels ?? [], parent: parent ?? null, children: children ?? [] };
       let existingBody = "";
@@ -1170,6 +1283,59 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       }
 
       return get(id);
+    });
+    // Commit AFTER the lock is released (a git commit is not a file-lock concern; holding the
+    // advisory lock across a git subprocess would serialize writers for no data-integrity gain).
+    if (commit && result !== null) {
+      const c = commitTaskWrite(id, "task_write");
+      if (c.status === "failed") {
+        // The disk write succeeded but the git commit (the dispatch-visibility half) genuinely
+        // FAILED — never throw (the caller's write IS on disk), but surface on stderr so the failure
+        // is observable, not silent (硬规则 3b). "not-in-git" (temp dirs) and "nothing" are expected
+        // no-ops and deliberately do NOT log.
+        console.error(
+          `quay-native store: task_write "${id}" wrote to disk but the commit FAILED (committed=${c.committed}, propagated=${c.propagated})`
+        );
+      }
+    }
+    return result;
+  }
+
+  /**
+   * task_delete (gap-abi-missing-commit-delete-dependson-primitives): remove a task file (unlink) +
+   * the same branch-aware commit as write. Fail-closed on a missing id (a delete that removes nothing
+   * must NOT read as success — 硬规则 3b, no silent no-op). Drops the task's parse-cache entry (its
+   * advisory lock is released by withLock). Returns `{ id, ok, reason, committed, propagated }` —
+   * `ok:false` with `reason:"missing"` is the not-found contract the MCP handler maps to isError.
+   */
+  function deleteTask(id: string, opts?: { commit?: boolean }): { id: string; ok: boolean; reason: string; committed: boolean; propagated: boolean } {
+    const commit = opts?.commit !== false;
+    const taskFilePath = filePathFor(id);
+    if (!fs.existsSync(taskFilePath)) {
+      return { id, ok: false, reason: "missing", committed: false, propagated: false };
+    }
+    return withLock(id, () => {
+      // Re-check under the lock (the file may have vanished between the existsSync above and here).
+      if (!fs.existsSync(taskFilePath)) {
+        return { id, ok: false, reason: "missing", committed: false, propagated: false };
+      }
+      fs.rmSync(taskFilePath, { force: true });
+      invalidateCache(id);
+      let committed = false;
+      let propagated = false;
+      if (commit) {
+        const c = commitTaskWrite(id, "task_delete");
+        committed = c.committed;
+        propagated = c.propagated;
+        if (c.status === "failed") {
+          // The file removal succeeded but the deletion commit genuinely FAILED — surface on stderr
+          // (observable, not silent; 硬规则 3b). "not-in-git" / "nothing" are expected no-ops.
+          console.error(
+            `quay-native store: task_delete "${id}" removed the file but the deletion commit FAILED (committed=${c.committed}, propagated=${c.propagated})`
+          );
+        }
+      }
+      return { id, ok: true, reason: "deleted", committed, propagated };
     });
   }
 
@@ -1506,6 +1672,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     listWithMalformed,
     get,
     write,
+    delete: deleteTask,
     appendNote,
     check,
     artifactSections,

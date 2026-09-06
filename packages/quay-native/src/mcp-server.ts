@@ -179,6 +179,30 @@ export async function startMcpServer({ tasksDir, adrDir, defaultStatus }: { task
     }
   );
 
+  // task_delete — data.write (gap-abi-missing-commit-delete-dependson-primitives): the ABI verb the
+  // native Provider was missing. Unlinks the task file + branch-aware commit (same primitive as
+  // task_write). Fail-closed: a not-found id returns isError:true, never a silent no-op.
+  server.registerTool(
+    "task_delete",
+    {
+      description: "Delete one task by id from the native Provider's task store (unlink + branch-aware commit). Fails closed (isError) on a non-existent id.",
+      inputSchema: { id: z.string() },
+    },
+    async ({ id }) => {
+      const result = store.delete(id);
+      if (!result.ok) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: result.reason === "missing" ? `no such task: ${id}` : result.reason }],
+        };
+      }
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        structuredContent: result,
+      };
+    }
+  );
+
   // task_check — gate (optional capability; native provides it, design §6).
   server.registerTool(
     "task_check",

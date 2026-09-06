@@ -213,22 +213,30 @@ export function appendBodySection(fullText, heading, content) {
 
 // ── parseTask — delegate to parseFrontmatterCompletely. ──────────────────────────────────────────
 // Splits on the first two `---` fences, then reads the COMPLETE frontmatter via the single parser and
-// projects the { labels, extra } view the schema checks consume. (parseTask only ever READS frontmatter;
-// the write-ownership separation above is unchanged — the outer layer owns frontmatter writes.)
+// projects the { labels, extra, depends_on } view the schema checks consume. (parseTask only ever READS
+// frontmatter; the write-ownership separation above is unchanged — the outer layer owns frontmatter writes.)
 // Supported `extra` structures: scalar values AND nested lists/maps (e.g. `extra.depends_on: [a, b]`,
 // `extra.meta: { k: v }`). Nested structures round-trip faithfully as arrays/objects — never flattened
 // to scalar strings (gap-parseTask-nested-extra-support).
-// Limitation: parseTask projects only { labels, extra } — it does NOT expose `depends_on`. Call
-// readDependsOn() (below) for the prerequisite edge; both delegate to the same single parser.
+// gap-abi-missing-commit-delete-dependson-primitives: parseTask now ALSO surfaces `depends_on`
+// directly (via frontmatterDependsOn — top-level field first, legacy extra-nested form as fallback),
+// so consumers no longer need the `extra` escape hatch. readDependsOn() remains for the raw
+// frontmatter-string form; both delegate to the same single parser.
 export function parseTask(fullText) {
   const fmMatch = fullText.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!fmMatch) {
-    return { labels: [], extra: {}, frontmatterRaw: "", body: fullText };
+    return { labels: [], extra: {}, depends_on: [], frontmatterRaw: "", body: fullText };
   }
   const frontmatterRaw = fmMatch[1];
   const body = fmMatch[2];
   const complete = parseFrontmatterCompletely(frontmatterRaw);
-  return { labels: frontmatterLabels(complete), extra: frontmatterExtra(complete), frontmatterRaw, body };
+  return {
+    labels: frontmatterLabels(complete),
+    extra: frontmatterExtra(complete),
+    depends_on: frontmatterDependsOn(complete),
+    frontmatterRaw,
+    body,
+  };
 }
 
 // ── readDependsOn — delegate to parseFrontmatterCompletely. ──────────────────────────────────────
