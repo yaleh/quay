@@ -64,11 +64,11 @@ plugin/test/meta-driver.test.mjs +195     ← 不在 laydown 集合内
 
 ## Acceptance Criteria
 
-- [ ] `node --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --gate --root .` 在主检出退出 0（立案时取假：exit=1，+3146 字节）
-- [ ] 再锚提交的信息里含造成本次增长的**具体文件名**（`meta-driver.ts` / `probes/meta-driver.md`）与字节数——`git log -1` 可核
-- [ ] 复发防护落地：构造一个"改了 laydown 内文件但未同步基线"的场景，**在该改动自己的提交/门上就被挡**，而不是在下一个无关任务的 fan-in 上才红（单测断言）
-- [ ] 负控制：棘轮仍能抓真实膨胀——人为给 laydown 内文件加一大块内容且不再锚，检查器仍 exit 1（证明没被放宽成恒真）
-- [ ] `bash scripts/test.sh --for-task gap-quay-init-closure-ratchet-manual-reanchor-recurs` 退出 0
+- [x] `node --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --gate --root .` 在主检出退出 0（立案时取假：exit=1，+3146 字节）
+- [x] 再锚提交的信息里含造成本次增长的**具体文件名**（`meta-driver.ts` / `probes/meta-driver.md`）与字节数——`git log -1` 可核
+- [x] 复发防护落地：构造一个"改了 laydown 内文件但未同步基线"的场景，**在该改动自己的提交/门上就被挡**，而不是在下一个无关任务的 fan-in 上才红（单测断言）
+- [x] 负控制：棘轮仍能抓真实膨胀——人为给 laydown 内文件加一大块内容且不再锚，检查器仍 exit 1（证明没被放宽成恒真）
+- [x] `bash scripts/test.sh --for-task gap-quay-init-closure-ratchet-manual-reanchor-recurs` 退出 0
 
 ## Definition of Done
 
@@ -79,5 +79,7 @@ plugin/test/meta-driver.test.mjs +195     ← 不在 laydown 集合内
 ## Touches
 
 - plugin/scripts/quay-init-closure-ratchet.ts
+- plugin/scripts/runner-static-gate.ts
 - plugin/test/quay-init-closure-ratchet.test.mjs
+- docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-quay-init-closure-ratchet-manual-reanchor-recurs.md
