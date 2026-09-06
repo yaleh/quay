@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-goal-card-provider-backed
 title: dashboard 增 goal-card —— 走 Provider ABI 渲染 active GOAL 的达成度与三态陈旧标记
-status: ready
+status: done
 labels:
   - gap
 parent: null
