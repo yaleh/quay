@@ -28,6 +28,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createGoalStore, VALID_GOAL_STATUSES, isGoalId, isCriterionId } from "../src/goal-store.ts";
+import { gateFactories, makeGoalGate } from "../src/gate/factories/index.ts";
 
 const _createdDirs = [];
 function tmpDir(tag = "goal") {
@@ -344,4 +345,24 @@ test("AC-6 — I4: status=active with all ACs achieved reports divergence", () =
   assert.equal(s.isGoalAchieved("GOAL-010"), true, "all ACs achieved → derived achieved");
   const r = s.checkStaleness(Date.now());
   assert.deepEqual(r.divergent, ["GOAL-010"], "active yet achieved ⇒ divergent (I4)");
+});
+
+// ── gap-goal-store-abi-encapsulation-provider-backed: shim + gateFactories ────────────────────────
+// AC-176 (grep 断言, mirror-drift guard): the goal-id regex has ONE definition — in Core's
+// goal-store.ts. The native provider's goal-store.ts is a FORWARDING re-export shim (the same
+// declared-direction pattern as quay/adr-store) that never copies it.
+test("AC-176 — native goal-store.ts is a re-export shim (no second GOAL_ID_RE definition)", () => {
+  const nativeSrc = fs.readFileSync(new URL("../../quay-native/src/goal-store.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(nativeSrc, /GOAL_ID_RE/, "the native re-export shim must not redefine the goal-id regex (it lives in Core)");
+  assert.match(nativeSrc, /quay\/src\/goal-store\.ts/, "the native shim forwards to Core's goal-store");
+  const coreSrc = fs.readFileSync(new URL("../src/goal-store.ts", import.meta.url), "utf8");
+  assert.match(coreSrc, /GOAL_ID_RE/, "the single GOAL_ID_RE definition lives in Core");
+});
+
+// AC-176 (顺带补既有缺口): makeGoalGate was exported but missing from the gateFactories
+// dispatch map — a goal gate could not be configured via gates.yml. Assert it is now
+// reachable by name (`type: goal`).
+test("AC-176 — makeGoalGate is registered in the gateFactories dispatch map", () => {
+  assert.equal(typeof gateFactories["goal"], "function", "gateFactories has a `goal` entry");
+  assert.equal(gateFactories["goal"], makeGoalGate, "gateFactories.goal is makeGoalGate (reachable by name)");
 });

@@ -22,6 +22,7 @@ capabilities:
   data.write: false   # read-only by design (see header note above)
   gate: false         # no gate/acceptance-meter concept on a Backlog.md board
   skill: false        # no status_skill_map / action_buttons — read-only, no lifecycle to drive
+  goal: false         # no goal tools — read-only, no goal/AC storage concept on a Backlog.md board
 
 # status model (design §3) — same 4-state vocabulary as every other
 # Provider; Backlog.md's own free-form status strings ("Basic: Backlog",

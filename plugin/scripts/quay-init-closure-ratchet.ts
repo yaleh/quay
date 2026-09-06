@@ -59,8 +59,12 @@ const EXCLUDED_TOP_DIRS: ReadonlySet<string> = new Set([".quay"]);
 // Re-anchored 2026-09-06 (gap-goal-store-revoke-prose-authority-repoint-pointers): +204 bytes net, 0 files —
 // the four manager prompt pointers repointed from orchestration/manager-phase-goal.md to the goals/ store
 // (goal-store.ts list --status active) lengthen the laid-down tick docs; a legitimate pointer repoint, not pollution.
-export const BASELINE_FILES = 131;
-export const BASELINE_BYTES = 3813160;
+// Re-anchored 2026-09-06 (gap-goal-store-abi-encapsulation-provider-backed fan-in, surfaced by its suite):
+// +1 file / +5155 bytes net — plugin/probes/meta-driver.md, the probe added by meta-driver v0 (eebe448ae)
+// AFTER the last re-anchor; a legitimate new probe in the laid-down probe set, not pollution. Measured by the
+// checker's own fixed --tmux-session (deterministic across consecutive laydowns).
+export const BASELINE_FILES = 132;
+export const BASELINE_BYTES = 3818315;
 
 export interface ClosureCount {
   files: number;

@@ -17,6 +17,8 @@ capabilities:
                      # since the v0 commit) and byte-compared against `quay-native task edit`
                      # in test/abi-symmetry.mjs (task_write, task_write_value_equivalence, extra-isolation)
   gate: true         # task_check via `quay-native task check`
+  goal: true         # goal_list/goal_get/goal_write/goal_gate (SPEC-goal-mechanism §5.2 —
+                     # provider-backed goal storage lives in quay-native/src/goal-store.ts)
   skill: true        # quay:* Skills declared below — real, native Skills (author/, execute/),
                      # driving the majority of this experiment's own tasks since the seed's retirement
 

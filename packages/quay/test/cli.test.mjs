@@ -1250,7 +1250,7 @@ async function block14(workspaceRoot) {
     );
     // The dispatch command set from packages/quay/bin/quay.ts (every `if (cmd === "…")` route).
     const dispatchVerbs = [
-      "adr", "task", "action", "serve", "mcp", "init", "config", "gate", "gate-log",
+      "adr", "goal", "task", "action", "serve", "mcp", "init", "config", "gate", "gate-log",
       "complete", "adjudicate", "promote", "retreat", "run", "migrate", "manager", "driver",
     ];
     const missing = dispatchVerbs.filter((v) => !synopsisVerbs.includes(v));

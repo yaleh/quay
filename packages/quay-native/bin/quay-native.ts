@@ -76,6 +76,18 @@ function resolveDocsDir() {
   return path.resolve(process.cwd(), "docs-managed");
 }
 
+function resolveGoalDir() {
+  // Goals (SPEC-goal-mechanism-2026-09-06.md §5.2) are now provider-backed: they
+  // live in a directory that SHARES a common parent with tasks/ (a repo-root
+  // sibling by default, like adr/). Env override QUAY_NATIVE_GOAL_DIR, else
+  // repo-root ./goals.
+  const envDir = process.env.QUAY_NATIVE_GOAL_DIR;
+  if (envDir) return path.resolve(envDir);
+  const repoRoot = findRepoRoot(process.cwd());
+  if (repoRoot) return path.resolve(repoRoot, "goals");
+  return path.resolve(process.cwd(), "goals");
+}
+
 /**
  * DIR-047: load the per-provider `default_task_status` from .quay/config.yml.
  * Walks upward from CWD using the same root-finding logic as resolveTasksDir().
@@ -135,7 +147,7 @@ async function main() {
     // .quay/config.yml, then pass it to the MCP server so task_write (status
     // omitted on a new task) uses the same configured default as the CLI.
     const defaultStatus = loadDefaultStatus();
-    await startMcpServer({ tasksDir: resolveTasksDir(), adrDir: resolveAdrDir(), defaultStatus });
+    await startMcpServer({ tasksDir: resolveTasksDir(), adrDir: resolveAdrDir(), goalDir: resolveGoalDir(), defaultStatus });
     return;
   }
 

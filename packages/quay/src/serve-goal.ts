@@ -1,16 +1,16 @@
 // serve-goal.ts — /goal + /goal/<id> route handlers, split from serve-handlers.ts.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import path from "node:path";
-import { createGoalStore } from "./goal-store.ts";
+import type { ProviderClient } from "./provider-client.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, detailStyles, renderMarkdown, renderSiteNav, renderMobileChrome } from "./serve-render.ts";
 
-// ── /goal + /doc — the third sibling kind (goal store) + the second (document store) ──
-// Both are CORE stores (not Provider ABI surfaces), so these routes read them directly
-// from the workspace root's `goals/` and `docs-managed/` dirs — same list/detail shape
-// as /adr (SPEC §4: "照 /adr 形状"). The goal page's most valuable column is the most
-// recent verdict + time (SPEC §4: "最近 verdict 与时刻"), read from the record's
-// `evidence` field, which the goal gate runner updates after every criterion execution.
+// ── /goal — the third sibling kind (goal store), now PROVIDER-BACKED
+// (SPEC-goal-mechanism-2026-09-06.md §5.2): these routes read goals through the
+// Provider ABI (`client.goalList` / `client.goalGet`), NOT the Core store directly
+// (the store moved to quay-native). Same list/detail shape as /adr (SPEC §4: "照
+// /adr 形状"). The goal page's most valuable column is the most recent verdict +
+// time (SPEC §4: "最近 verdict 与时刻"), read from the record's `evidence` field,
+// which the goal gate runner updates after every criterion execution.
 
 function goalEvidenceCell(ext: Record<string, unknown>): string {
   const ev = ext.evidence as { at?: string; verdict?: string; reading?: string } | undefined;
@@ -30,11 +30,10 @@ export async function handleGoalList(
   req: IncomingMessage,
   res: ServerResponse,
   url: URL,
-  cfg: { workspaceRoot: string },
+  client: ProviderClient,
 ): Promise<void> {
   const statusFilter = url.searchParams.get("status");
   const kindFilter = url.searchParams.get("kind");
-  const goalDir = path.join(cfg.workspaceRoot, "goals");
   let goals;
   let readError: string | null = null;
   // draft = 唯一「等着人裁定」的态（SPEC-goal-mechanism 裁定 3：draft→active 保留给人）。
@@ -42,12 +41,11 @@ export async function handleGoalList(
   // 12 条未答、无人知道它们在等）。故与筛选后的列表分开计数。
   let draftCount = 0;
   try {
-    const store = createGoalStore(goalDir);
-    goals = store.list({
+    goals = await client.goalList({
       ...(statusFilter ? { status: statusFilter } : {}),
       ...(kindFilter ? { kind: kindFilter } : {}),
     });
-    draftCount = store.list({ status: "draft" }).length;
+    draftCount = (await client.goalList({ status: "draft" })).length;
   } catch (err) {
     goals = [];
     readError = err instanceof Error ? err.message : String(err);
@@ -118,11 +116,9 @@ export async function handleGoalDetail(
   req: IncomingMessage,
   res: ServerResponse,
   goalId: string,
-  cfg: { workspaceRoot: string },
+  client: ProviderClient,
 ): Promise<void> {
-  const goalDir = path.join(cfg.workspaceRoot, "goals");
-  const store = createGoalStore(goalDir);
-  const g = store.get(goalId);
+  const g = await client.goalGet(goalId);
   if (!g) {
     res.writeHead(404, { "Content-Type": "text/plain" });
     res.end("not found");

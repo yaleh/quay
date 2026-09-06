@@ -12,8 +12,16 @@ import { createStore } from "./store.ts";
 // (Core) — see bin/quay-native.js for the full rationale (ADR-013 / DIR-035-A).
 import { createAdrStore } from "quay/adr-store";
 import { readManifest } from "./manifest.ts";
+// Goal store is PROVIDER-OWNED (SPEC-goal-mechanism-2026-09-06.md §5.2): the goal
+// schema lives here in quay-native, NOT in Core (Core keeps only the view-model +
+// a delegation shim). The generic frontmatter plumbing it reuses is Core's
+// frontmatter-store-base, reached by relative path (see that file's header).
+import { createGoalStore, readGoalConfig } from "./goal-store.ts";
+// `goal_gate` runs a goal record's `criterion` through Core's acceptance runner —
+// the SAME single runner every Core gate uses (no duplicated timeout/kill logic).
+import { runAcceptance } from "../../quay/src/gate/acceptance-runner.ts";
 
-export async function startMcpServer({ tasksDir, adrDir, defaultStatus }: { tasksDir: string; adrDir?: string; defaultStatus?: string }): Promise<void> {
+export async function startMcpServer({ tasksDir, adrDir, goalDir, defaultStatus }: { tasksDir: string; adrDir?: string; goalDir?: string; defaultStatus?: string }): Promise<void> {
   // DIR-047: pass the per-provider default_task_status through to the store
   // (already validated by the caller — see bin/quay-native.js loadDefaultStatus()).
   // ADR-004 single-source: the store is the one place the creation default is
@@ -23,6 +31,14 @@ export async function startMcpServer({ tasksDir, adrDir, defaultStatus }: { task
   // tasks/ — default to `<parent-of-tasksDir>/adr` when adrDir is not supplied.
   const resolvedAdrDir = adrDir ?? path.join(path.dirname(tasksDir), "adr");
   const adrStore = createAdrStore(resolvedAdrDir);
+  // Goals are a SEPARATE kind (goal-store.ts), stored in a sibling directory of
+  // tasks/ — default to `<parent-of-tasksDir>/goals` when goalDir is not supplied
+  // (the same repo-root-sibling resolution shape as adr/). cap/stale (I1′/I3 policy
+  // values) are read from `.quay/config.yml`'s `goals:` section at the workspace root
+  // (goalDir's parent), honoring the configurable-value discipline of SPEC §4.2.
+  const resolvedGoalDir = goalDir ?? path.join(path.dirname(tasksDir), "goals");
+  const goalCfg = readGoalConfig(path.dirname(resolvedGoalDir));
+  const goalStore = createGoalStore(resolvedGoalDir, { cap: goalCfg.cap, staleMs: goalCfg.staleMs });
 
   const server = new McpServer({
     name: "quay-native",
@@ -284,6 +300,115 @@ export async function startMcpServer({ tasksDir, adrDir, defaultStatus }: { task
       } catch (err) {
         return { isError: true, content: [{ type: "text", text: err.message }] };
       }
+    }
+  );
+
+  // ── Goal tools (separate object kind — provider-backed storage, SPEC §5.2) ──
+  // goal_list — data.read
+  server.registerTool(
+    "goal_list",
+    {
+      description: "List goal records (GOAL-NNN + AC-NNN) in the native store, optionally filtered by status/kind/goal.",
+      inputSchema: { status: z.string().optional(), kind: z.string().optional(), goal: z.string().optional() },
+    },
+    async ({ status, kind, goal }) => {
+      const goals = goalStore.list({ status, kind, goal });
+      return {
+        content: [{ type: "text", text: JSON.stringify(goals, null, 2) }],
+        structuredContent: { goals },
+      };
+    }
+  );
+
+  // goal_get — data.read
+  server.registerTool(
+    "goal_get",
+    {
+      description: "Get one goal record by id (GOAL-NNN or AC-NNN) from the native store.",
+      inputSchema: { id: z.string() },
+    },
+    async ({ id }) => {
+      let goal = null;
+      try {
+        goal = goalStore.get(id);
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err.message }] };
+      }
+      if (!goal) return { isError: true, content: [{ type: "text", text: `no such goal: ${id}` }] };
+      return {
+        content: [{ type: "text", text: JSON.stringify(goal, null, 2) }],
+        structuredContent: { goal },
+      };
+    }
+  );
+
+  // goal_write — data.write. I1′ (hard cap) is enforced by the provider's write
+  // path (SPEC §5.2: the invariant lives in the provider so a future provider
+  // cannot bypass it). `origin` is required; AC records must declare `goal:`.
+  server.registerTool(
+    "goal_write",
+    {
+      description: "Write/patch one goal record (GOAL-NNN or AC-NNN) in the native store. status ∈ draft|active|achieved|superseded|retired; `origin` is required (empty origin writes nothing); an AC record must declare `goal: GOAL-NNN`; activating past the active-GOAL cap (default 3) is rejected unless the same call disposes an active goal.",
+      inputSchema: {
+        id: z.string(),
+        title: z.string().optional(),
+        status: z.string().optional(),
+        goal: z.string().optional(),
+        criterion: z.string().optional(),
+        expect: z.string().optional(),
+        origin: z.string().optional(),
+        evidence: z.object({ at: z.string().optional(), verdict: z.string().optional(), reading: z.string().optional() }).optional(),
+        supersedes: z.array(z.string()).optional(),
+        superseded_by: z.array(z.string()).optional(),
+        body: z.string().optional(),
+        disposeOld: z.object({ id: z.string(), to: z.enum(["achieved", "superseded"]) }).optional(),
+      },
+    },
+    async ({ id, superseded_by, disposeOld, ...rest }) => {
+      try {
+        const goal = goalStore.write(id, { ...rest, supersededBy: superseded_by, disposeOld: disposeOld as { id: string; to: "achieved" | "superseded" } | undefined });
+        return {
+          content: [{ type: "text", text: JSON.stringify(goal, null, 2) }],
+          structuredContent: { goal },
+        };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err.message }] };
+      }
+    }
+  );
+
+  // goal_gate — run the record's `criterion` via Core's acceptance runner and
+  // return the verdict. Empty criterion fails closed (never a silent PASS).
+  server.registerTool(
+    "goal_gate",
+    {
+      description: "Run one goal record's `criterion` via the acceptance runner and return the verdict (empty criterion fails closed).",
+      inputSchema: { id: z.string() },
+    },
+    async ({ id }) => {
+      let goal = null;
+      try {
+        goal = goalStore.get(id);
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err.message }] };
+      }
+      if (!goal) return { isError: true, content: [{ type: "text", text: `no such goal: ${id}` }] };
+      const criterion = (goal as unknown as Record<string, unknown>).criterion;
+      let verdict: string;
+      let reason: string;
+      if (typeof criterion !== "string" || criterion.trim() === "") {
+        verdict = "fail";
+        reason = `${id} has no criterion defined (fail-closed — an unenforceable AC must never silently pass)`;
+      } else {
+        const result = runAcceptance({ command: criterion, cwd: path.dirname(resolvedGoalDir), timeoutMs: 60000 });
+        verdict = result.ok ? "pass" : "fail";
+        reason = result.reason;
+      }
+      const out = { id, verdict, reason, timestamp: new Date().toISOString() };
+      return {
+        content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
+        structuredContent: out,
+      };
     }
   );
 
