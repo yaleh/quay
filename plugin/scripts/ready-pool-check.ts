@@ -158,6 +158,17 @@
 
 import fs from "node:fs";
 import { repoRoot } from "./repo-root.ts";
+// gap-shape-section-tables-dual-copy-no-single-source: the shape section-name lists (which headings
+// count as proposal/plan/ac/dod per shape) were hand-copied twice — SHAPE_SECTIONS below and
+// packages/quay-native/src/store.ts's SHAPE_REGISTRY — and had already drifted twice (draft + suffix
+// variants landed only on this side). Now imported from plugin/scripts/shape-sections.ts (the single
+// source, shared with store.ts). It lives in plugin/scripts/ (not packages/) because quay-init lays
+// this dir into consumers WITHOUT a packages/ source tree — a static `import` of store.ts from here
+// would ERR_MODULE_NOT_FOUND in a laid-down consumer.
+import { SHAPE_SECTIONS } from "./shape-sections.ts";
+// Re-export for backward-compat importers (e.g. gate-shape-dispatch.test.mjs) — SHAPE_SECTIONS is
+// the single source now, not a local hand-copied map.
+export { SHAPE_SECTIONS };
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { parseTask, extractSection, readDependsOn, readTaskStatusAtRef } from "./task-schema.ts";
@@ -654,70 +665,13 @@ export const SUITE_BLOCKING_WEIGHT = 2;
  *  连续 ≥3 轮红同一 Touches 命中 ⇒ blocking true). */
 export const RED_WINDOW_MIN_DEFAULT = 3;
 
-// Shape-aware registered sections (mirrors quay-native store.ts SHAPE_REGISTRY, single-source shape
-// dispatch: contract → finding → plan; unknown fails closed). The four artifacts are the shape's own
-// registered sections — a `finding`-shape task has no plan dimension, a `contract`-shape task uses
-// `## Contract` as its plan artifact.
-//
-// GAP-TODO-SHAPE-MISMATCH (2026-08-09, tasks/gap-todo-shape-mismatch-author-gate): the finding shape
-// additionally recognizes the draft-heading variants `## AC（draft）` / `## DoD（draft）` (and their
-// half-width-paren form `## AC (draft)`) that 9 real finding-shape gap-* tasks in this store use for
-// their AC/DoD sections. They ARE the AC/DoD artifacts — the `（draft）` suffix is a heading-label
-// convention, not an absent section — so the four-artifacts gate must count them, or those todo tasks
-// are wrongly ineligible for author→ready promotion (the 38-todo shape-vs-gate mismatch).
-// AC/DoD SUFFIXED-HEADING VARIANTS (gap-ac47-completion-predicate-consumer-fail-closed, AC3):
-// suffixed AC/DoD headings real directive tasks in this store use — `## Acceptance Criteria
-// (runnable)`, `## Acceptance Criteria (runnable — artifacts are necessary-not-sufficient)`,
-// `## Definition of Done — REAL LANDING is the bar, not artifacts`, `## Definition of Done — REAL
-// LANDING, subtractive (…)`. Explicitly REGISTERED (manager 2026-08-13 preference) rather than
-// prefix-matched — a prefix would ALSO swallow `## Acceptance Criteria for the OLD design`, adding
-// uncertainty to an already-fragile matcher. An UNREGISTERED suffixed variant is NOT matched here and
-// therefore fails CLOSED at countAcCheckboxes (null section → NaN total → every consumer fails
-// "complete/landed"), consistent with the existing `（draft）`-variant handling (explicit registration,
-// unregistered ⇒ fail-closed).
-const AC_SUFFIX_VARIANTS = [
-  "Acceptance Criteria (runnable)",
-  "Acceptance Criteria (runnable — artifacts are necessary-not-sufficient)",
-];
-const DOD_SUFFIX_VARIANTS = [
-  "Definition of Done — REAL LANDING is the bar, not artifacts",
-  "Definition of Done — REAL LANDING, subtractive (DIR-026 Reading A preserved)",
-];
-
-const SHAPE_SECTIONS = {
-  contract: {
-    // `## 人的裁定` is the directive-variant proposal-slot (type: directive tasks
-    // carry the human ruling as proposal, implementation in ## Contract —
-    // DIR-123-aarch64, gap-cli-quay-init-collides). Same alias principle as
-    // finding's `## Finding` mapping into the proposal-slot.
-    proposal: ["Proposal", "人的裁定"],
-    plan: ["Contract"],
-    ac: ["AC", "Acceptance Criteria", ...AC_SUFFIX_VARIANTS],
-    dod: ["DoD", "Definition of Done", ...DOD_SUFFIX_VARIANTS],
-  },
-  finding: {
-    proposal: ["Finding"],
-    ac: ["AC", "Acceptance Criteria", "AC（draft）", "AC (draft)", ...AC_SUFFIX_VARIANTS],
-    dod: ["DoD", "Definition of Done", "DoD（draft）", "DoD (draft)", ...DOD_SUFFIX_VARIANTS],
-  },
-  plan: {
-    proposal: ["Proposal"],
-    plan: ["Plan"],
-    ac: ["AC", "Acceptance Criteria", ...AC_SUFFIX_VARIANTS],
-    dod: ["DoD", "Definition of Done", ...DOD_SUFFIX_VARIANTS],
-  },
-  // proposal shape (2026-08-11, mirrors store.ts SHAPE_REGISTRY): a task whose own
-  // complete contract is Proposal / AC / DoD with NO plan dimension — symmetric
-  // with `finding` but the proposal-slot is the literal `## Proposal`. Recording-type
-  // directives (DIR-028: "只记录方向,不要求立刻做") and execution tasks carrying their
-  // approach inside `## Proposal` (no separate `## Plan`) are complete on this
-  // dimension. Adding a fabricated `## Contract` would be a shape change, not a fix.
-  proposal: {
-    proposal: ["Proposal"],
-    ac: ["AC", "Acceptance Criteria", ...AC_SUFFIX_VARIANTS],
-    dod: ["DoD", "Definition of Done", ...DOD_SUFFIX_VARIANTS],
-  },
-};
+// Shape-aware registered sections — SINGLE SOURCE is plugin/scripts/shape-sections.ts (imported +
+// re-exported at the top of this file). This map USED to be a hand-copied second list that drifted
+// twice: the finding-shape DRAFT-heading variants (`## AC（draft）` / `## DoD（draft）`,
+// gap-todo-shape-mismatch-author-gate) and the AC/DoD SUFFIXED-HEADING variants (`## Acceptance
+// Criteria (runnable)` etc., gap-ac47-completion-predicate-consumer-fail-closed AC3) landed ONLY here,
+// so store.check() and artifactsComplete() disagreed on the SAME body. Both lists now live in
+// shape-sections.ts; adding a heading variant there is seen by both judges at once.
 
 /** Detect a task body's shape by exact heading presence (contract → finding → plan → proposal → unknown). */
 export function detectShape(body) {
