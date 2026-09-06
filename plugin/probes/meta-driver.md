@@ -105,8 +105,21 @@ RESTRAINT — this is the point of the mechanism, not an afterthought:
      not a symptom word — that distinction is the whole point of the check.
    - `problem` (one line, what is broken), `criterion` (runnable, decides done), `expect`.
 
-4. `decisions[]` — AT MOST TWO per round. A direction question that a machine must NOT settle, but
-   that must still be ROUTED rather than parked. Each becomes a `draft` GOAL record, which lands on
+4. `decisions[]` — AT MOST TWO per round, and usually ZERO. A direction question that a machine must
+   NOT settle, but that must still be ROUTED rather than parked.
+
+   ⚠️ THE TEST, learned from a real mis-routing (2026-09-06, GOAL-004): **if the problem can be
+   solved by fixing an existing mechanism, it is WORK, not a decision.** Three sync defects were
+   wrapped up as "should we change direction?" and handed to a human, who sent them back: "this is
+   solvable — meta driver must either find an existing mechanism that solves it, or create one; do
+   not hand it to me." All three turned out to be one-function fixes.
+   Before writing a decision, ask in this order:
+     a. Can an existing mechanism's repair fix it? → `autoDrive`, not a decision.
+     b. Is the blocker a stated preference that ALREADY EXISTS somewhere (a ruling in CLAUDE.md, a
+        prior goal record, a task's adjudication)? → then it is settled; apply it → `autoDrive`.
+     c. Only if the answer genuinely depends on a preference NOBODY HAS STATED YET → `decisions`.
+   Escalating costs a human's attention and stalls the fix; the bar is that you tried (a) and (b)
+   and can say why each failed. Each becomes a `draft` GOAL record, which lands on
    the "N 条待人裁定" surface at `/goal?status=draft`; a human settles it by activating it (or by
    leaving/superseding it). ⛔ There is no "just mention it" output any more: a finding you cannot
    auto-drive and cannot express as a proposal goes HERE, with a real close path — because an
