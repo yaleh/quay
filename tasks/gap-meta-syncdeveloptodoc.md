@@ -1,7 +1,7 @@
 ---
 id: gap-meta-syncdeveloptodoc
 title: syncDevelopToDoc 事件落痕丢弃归因数据——ff-error 吞 git 错误、not-ff 缺 ahead/behind
-status: todo
+status: needs-human
 labels:
   - meta-driver
   - driver-candidate
@@ -24,3 +24,9 @@ ff-error 的 merge catch 用 stdio:'ignore' 丢 git stderr（44 条全 phase=mer
 
 ## Touches
 - `plugin/scripts/meta-driver.ts`
+- `tasks/gap-meta-syncdeveloptodoc.md`
+## Needs-Human
+
+**执行 2026-09-06T12:45:22.711Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：连续修满 3 次仍不合格（闸在重验证后仍判不合格）
