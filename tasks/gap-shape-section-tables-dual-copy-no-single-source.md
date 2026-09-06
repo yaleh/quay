@@ -42,19 +42,21 @@ extra:
 
 **零新增定时检查器**：本条的修法是消灭副本本身（无从漂移），不新增周期性检查机制。
 
+**与 `cand-cjk-proposal-slot-word-boundary`（done）的关系（实现记录，DoD④）**：那次修的是**匹配语义**（`\b` → 整行精确匹配，store.check() 的 CJK 提案槽别名），本次修的是**名单来源**（两份手抄 section 名单 → store.ts `SHAPE_REGISTRY` 单一正源）。两者合起来才使「is the single judge quay and meta-cc must share」这句 CLAUDE.md 契约在结构上成立：先有同一套 `\b`-free 整行精确匹配语义，再把「哪些标题算 AC/DoD」收敛到一个注册表，两个判官才真正读同一个东西。实现选择：以 store.ts 的 `SHAPE_REGISTRY` 为单一正源（产品层不依赖方法论层），draft/suffix 变体加进正源，`ready-pool-check.ts` 改为 import 派生（`SHAPE_SECTIONS = Object.fromEntries(Object.entries(SHAPE_REGISTRY).map(([s, spec]) => [s, spec.sections]))`）；并给 store.ts 的 heading 正则补 `escapeRegExp`——否则本次新注册的括号标题（`AC (draft)` / `Acceptance Criteria (runnable)` 等）会被当 regex 捕获组、永不匹配字面标题。
+
 ## AC
 
-- [ ] 单一正源成立：`plugin/scripts/ready-pool-check.ts` 不再自行维护一份 AC/DoD 标题名单，其判定所用的 section 名单与 `packages/quay-native/src/store.ts` 的 `SHAPE_REGISTRY` 为同一来源（import，或双方共同 import 的共享数据）。判据：一条命令分别从两侧取同一 shape 的 ac/dod 数组并逐元素比较，全部相等 ⇒ exit 0。
-- [ ] 分歧消失（行为级，非源码排版级）：对同一个含 `## Finding` + `## AC（draft）` + `## DoD（draft）` 的任务体，`store.check()` 与 `ready-pool-check` 的 `artifactsComplete()` 给出一致的 artifacts 判定。⛔ 判据须读两个函数的返回对象，不得 grep 源码是否含某字符串。
-- [ ] 能取假的负控制：从单一正源中删掉 `（draft）` 变体后，上一条判据立即变红（证明它测的是真行为，不是恒真回声）。
-- [ ] 既有 ASCII 标题（Proposal/Contract/AC/DoD/Finding/Plan）匹配行为不变：`packages/quay-native/test/gate-shape-dispatch.test.mjs` 与 `plugin/test/ready-pool-check.test.mjs` 全绿。
+- [x] 单一正源成立：`plugin/scripts/ready-pool-check.ts` 不再自行维护一份 AC/DoD 标题名单，其判定所用的 section 名单与 `packages/quay-native/src/store.ts` 的 `SHAPE_REGISTRY` 为同一来源（import，或双方共同 import 的共享数据）。判据：一条命令分别从两侧取同一 shape 的 ac/dod 数组并逐元素比较，全部相等 ⇒ exit 0。
+- [x] 分歧消失（行为级，非源码排版级）：对同一个含 `## Finding` + `## AC（draft）` + `## DoD（draft）` 的任务体，`store.check()` 与 `ready-pool-check` 的 `artifactsComplete()` 给出一致的 artifacts 判定。⛔ 判据须读两个函数的返回对象，不得 grep 源码是否含某字符串。
+- [x] 能取假的负控制：从单一正源中删掉 `（draft）` 变体后，上一条判据立即变红（证明它测的是真行为，不是恒真回声）。
+- [x] 既有 ASCII 标题（Proposal/Contract/AC/DoD/Finding/Plan）匹配行为不变：`packages/quay-native/test/gate-shape-dispatch.test.mjs` 与 `plugin/test/ready-pool-check.test.mjs` 全绿。
 
 ## DoD
 
-- [ ] 上述判据本轮实跑通过并贴出输出（⛔ 不是转述、不是「应该会过」），且负控制实跑确认能取假。
-- [ ] 修的是「两份手抄名单」这个结构本身：改动后再往任一 shape 加一个新标题变体，两个判官会**同时**看见它；这一点须由一个具体动作证明（例如临时加一个变体后两侧同时识别），而不是靠断言。
-- [ ] ⛔ 未新增任何周期性/定时检查机制；⛔ 未采用「两边各补一份名单」的修法。
-- [ ] 与 `cand-cjk-proposal-slot-word-boundary`（done）的关系写入任务体：那次修匹配语义、本次修名单来源，两者合起来才使「单一判官」这句 CLAUDE.md 契约在结构上成立。
+- [x] 上述判据本轮实跑通过并贴出输出（⛔ 不是转述、不是「应该会过」），且负控制实跑确认能取假。
+- [x] 修的是「两份手抄名单」这个结构本身：改动后再往任一 shape 加一个新标题变体，两个判官会**同时**看见它；这一点须由一个具体动作证明（例如临时加一个变体后两侧同时识别），而不是靠断言。
+- [x] ⛔ 未新增任何周期性/定时检查机制；⛔ 未采用「两边各补一份名单」的修法。
+- [x] 与 `cand-cjk-proposal-slot-word-boundary`（done）的关系写入任务体：那次修匹配语义、本次修名单来源，两者合起来才使「单一判官」这句 CLAUDE.md 契约在结构上成立。
 
 ## Touches
 
