@@ -441,7 +441,9 @@ export async function main(argv: string[]): Promise<number> {
   if (!Number.isFinite(k) || k < 1) { process.stderr.write("meta-driver: --k must be a positive number\n"); return 2; }
 
   const { fact, record } = await runMetaRound({ root, focus, noLlm, k, dryRun });
-  if (!dryRun) appendRoundSafe(root, record);
+  // ⛔ dry-run 也要留痕：「跑了一轮、什么都没提」正是最该被记录的情形——不记则「跑过」与
+  // 「没跑过」在载体上同形，本例程的沉默就不可被检测（硬规则 9）。dryRun 进记录，不进条件。
+  appendRoundSafe(root, { ...record, dryRun });
 
   if (json) {
     process.stdout.write(JSON.stringify({ fact, record }, null, 2) + "\n");
