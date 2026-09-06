@@ -12,7 +12,7 @@ origin: readings 中 syncHealth.notFf=133；读 .quay/doc-develop-sync.jsonl 见
   not-ff 里约 66 条是旧格式 {ts,event,phase,branch}（无 ahead/behind/benign），时间戳 ~23:00Z
   比 gap-meta-syncdeveloptodoc 落点 55805b257(12:43:59Z) 晚约 10h ⇒ 有陈旧写者仍在跑修复前代码
 evidence:
-  at: 2026-09-06T23:10:54.591Z
+  at: 2026-09-06T23:11:43.321Z
   verdict: fail
   reading: acceptance failed (exit 1)
 ---
