@@ -73,3 +73,28 @@ extra:
 - plugin/test/manager-*.test.mjs（如有，验证 skill 的幂等性/初始化）
 - plugin/skills/init/SKILL.md（声明 orchestration/manager-tick-prompt.txt 为 reference-doc——会话内 CronCreate 步骤引用它，解 referenced-not-landed 全库红）
 - tasks/gap-manager-skill-session-embodiment-activation.md
+## Needs-Human
+
+**执行 2026-09-06T03:28:43.978Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: __PERFILE__ duration_ms=24930 plugin/test/driver-runtime.test.mjs passed=false end_ms=1788665253202 cpu_ms=8700.287
+- run_id：wk-prod-1788285192
+- session_id：e1dd8212-7fae-4e6f-bf7c-4ed62305950a
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-manager-skill-session-embodiment-activation~wk-prod-1788285192~1788665004746-090799.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-manager-skill-session-embodiment-activation-wk-prod-1788285192.log
+
+## Reset
+
+**执行 2026-09-06 — needs-human → todo → ready 复位（人已同意，非机械判定）**
+
+诊断：连续 3 次重试的失败点逐次检查，均与本任务实际改动（`plugin/skills/manager/SKILL.md`/`manager-start.sh`）无关：
+1. 第 1 次（02:46）：全仓预置缺陷——`orchestration/manager-tick-prompt.txt` 未在 `plugin/skills/init/SKILL.md` 声明为 reference-doc，导致 4 个不相干测试全仓性报红；worker 已顺手修复（commit `8f22c2519`）。
+2. 第 2 次（03:05）：`plugin/test/worker-driver-resident.test.mjs` 经 `worker-driver-harness.mjs:75` 的 `readRoundLines` 读到正在被写入、尚未写完的 round 文件，`JSON.parse` 报错——测试基础设施竞态，非本任务缺陷。
+3. 第 3 次（03:28，记入 needs-human）：`plugin/test/driver-runtime.test.mjs` AC1(worker cap) 的轮询逻辑（`existsSync` 即读）撞上 `worker-argv-dump.json` 写入未完成的窗口，`JSON.parse` 报错——同类竞态，非本任务缺陷。
+
+worktree（`/home/yale/work/quay-worktrees/gap-manager-skill-session-embodiment-activation`，分支 `task/gap-manager-skill-session-embodiment-activation`）已含两个真实提交（`3462fee8b`/`8f22c2519`），实现 AC1-AC6；新增自证测试 `plugin/test/manager-skill-activation.test.mjs` 单独运行 6/6 全绿。判定：实现本身无缺陷，纯粹是连续撞上与本任务无关的全量 suite flaky/预置缺陷耗尽重试上限。
+
+第 2/3 类竞态已另立任务追踪修复（避免继续拖累其他任务的 fan-in）：见 driver-runtime.test.mjs / worker-driver-harness.mjs 竞态任务（本轮由 quay-file-task skill 立案，任务 id 见提交记录）。
+
+复位路径：`lifecycle_retreat`（needs-human → todo，reason 见 GateEvent）→ `lifecycle_promote`（todo → ready，理由：四件套完整）。期望 driver 下次派发识别既有 worktree 走 CONTINUE 复用（`gap-worker-worktree-continue-reuse` 机制），而非从零重新实现。

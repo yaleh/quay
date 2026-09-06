@@ -2,7 +2,7 @@
 id: gap-adr013-gate-blind-spots-and-task-bypass-ratchet
 title: Fix ADR-013 conformance gate's two evergreen-pass defects + add a
   fail-closed task-file-bypass ratchet
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -33,13 +33,13 @@ Separately, the same audit found ~96 places across this codebase where code read
 
 ## Acceptance Criteria
 
-- [ ] `delivery-standalone-smoke.sh` checks 1/2 scan `"$D/src" "$D/bin" "$D/plugin" "$D/dist"` — verified by reading the script and confirming the four paths appear in both `grep -rnE` invocations.
-- [ ] Running the smoke gate against the current tree (with the exp5-reference content actually present in `plugin/`) now produces a genuine RED on check 1 or 2 where it previously produced a false GREEN — verified by running the script before and after the fix and diffing the verdict counts (a negative control: it must be able to fail).
-- [ ] `delivery-standalone-smoke.sh` check 5 locates the real delivered gate-registry file regardless of extension — verified by running it against the current tree and confirming it finds and greps a real file (not silently matching nothing).
-- [ ] `plugin/scripts/task-file-bypass-check.ts` exists, is registered in `scripts/test.sh`'s static-check tier, and exits non-zero on a deliberately-injected new bypass site (a scratch file outside the allowlist with a `tasks/` fs call) — verified by injecting one and running the checker.
-- [ ] The same checker exits zero against the current tree with today's allowlist populated (the ratchet baseline holds, no false-positive noise on day one).
-- [ ] The allowlist is a data file or exported constant (not inline scattered logic) so shrinking it later (as sibling tasks land) is a one-line diff — verified by inspecting the checker's structure.
-- [ ] `packages/quay/test/delivery-standalone-smoke-gate.test.mjs` still passes after both smoke-gate fixes.
+- [x] `delivery-standalone-smoke.sh` checks 1/2 scan `"$D/src" "$D/bin" "$D/plugin" "$D/dist"` — verified by reading the script and confirming the four paths appear in both `grep -rnE` invocations.
+- [x] Running the smoke gate against the current tree (with the exp5-reference content actually present in `plugin/`) now produces a genuine RED on check 1 or 2 where it previously produced a false GREEN — verified by running the script before and after the fix and diffing the verdict counts (a negative control: it must be able to fail).
+- [x] `delivery-standalone-smoke.sh` check 5 locates the real delivered gate-registry file regardless of extension — verified by running it against the current tree and confirming it finds and greps a real file (not silently matching nothing).
+- [x] `plugin/scripts/task-file-bypass-check.ts` exists, is registered in `scripts/test.sh`'s static-check tier, and exits non-zero on a deliberately-injected new bypass site (a scratch file outside the allowlist with a `tasks/` fs call) — verified by injecting one and running the checker.
+- [x] The same checker exits zero against the current tree with today's allowlist populated (the ratchet baseline holds, no false-positive noise on day one).
+- [x] The allowlist is a data file or exported constant (not inline scattered logic) so shrinking it later (as sibling tasks land) is a one-line diff — verified by inspecting the checker's structure.
+- [x] `packages/quay/test/delivery-standalone-smoke-gate.test.mjs` still passes after both smoke-gate fixes.
 
 ## Definition of Done
 
@@ -48,9 +48,11 @@ Running `bash packages/quay/test/delivery-standalone-smoke.sh` against the curre
 ## Touches
 
 - `packages/quay/test/delivery-standalone-smoke.sh`
+- `packages/quay/test/delivery-standalone-smoke-gate.test.mjs`
 - `plugin/scripts/task-file-bypass-check.ts` (new)
 - `plugin/scripts/capability-catalog.sh`
-- `scripts/test.sh`
-- `packages/quay/test/delivery-standalone-smoke-gate.test.mjs`
+- `plugin/scripts/runner-static-gate.ts`
+- `plugin/scripts/checker-mutation-cases/task-file-bypass-check.sh` (new)
 - `plugin/test/task-file-bypass-check.test.mjs` (new)
+- `plugin/test/fixtures/task-file-bypass/plugin/scripts/bad.ts` (new)
 - `tasks/gap-adr013-gate-blind-spots-and-task-bypass-ratchet.md` (self)

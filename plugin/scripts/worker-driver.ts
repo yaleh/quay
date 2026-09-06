@@ -930,15 +930,19 @@ function driverFanInNote(): string {
   ].join(" ");
 }
 
-/** AC 勾选指令（gap-worker-dispatch-prompt-ac-check-instruction）：worker 实现后逐条验证 AC、在 worktree
- *  任务体 `## Acceptance Criteria` 勾选 `- [x]`、与实现一并提交——否则 fan-in 的 ac-precheck（suite 前
- *  fail-fast，读 `checked===total`）会因未全勾拒翻、烧掉整条 fan-in（实测 5 次全 0/3：流程里根本没有
- *  「勾 AC」动作）。创建 prompt 与续做 prompt 共用。 */
+/** AC 勾选指令（gap-worker-prompt-ac-check-via-abi-not-hand-edit）：worker 实现后逐条验证 AC、然后
+ *  经 Provider ABI（`task_check` + `task_write`）记录勾选状态——⛔ 不再让 worker 手工编辑任务体的
+ *  `- [ ]`/`- [x]` 复选框字符（那是「ABI 可达写却手搓」的最高频实例；依赖的 commit-after-write 已由
+ *  gap-abi-missing-commit-delete-dependson-primitives 落地 ⇒ `task_write` 自己分支感知提交
+ *  tasks/<id>.md）。fan-in 的 ac-precheck（suite 前 fail-fast，读 `checked===total`）会因未全勾拒翻、
+ *  烧掉整条 fan-in。创建 prompt 与续做 prompt 共用。 */
 function acCheckNote(): string {
   return [
     `after implementing, go through each Acceptance Criterion one-by-one and verify it is satisfied by your work;`,
-    `then in the worktree task body \`## Acceptance Criteria\` check off every satisfied criterion as \`- [x]\``,
-    `(turn \`- [ ]\` into \`- [x]\`), committing these AC checkbox updates together with your implementation in the same commit —`,
+    `then record the AC state through the Provider ABI — do NOT hand-edit the \`- [ ]\`/\`- [x]\` checkbox`,
+    `characters in the task file yourself: call \`task_check\` to confirm, then call \`task_write\` with the`,
+    `updated \`## Acceptance Criteria\` section (satisfied criteria as \`- [x]\`); \`task_write\` commits`,
+    `\`tasks/<id>.md\` branch-aware on its own, so the tick reaches fan-in's ac-precheck exactly as a hand-edit would —`,
     `an AC left unchecked fails fan-in's ac-precheck and burns the whole fan-in run.`,
   ].join(" ");
 }
@@ -1000,7 +1004,7 @@ export function buildWorkerPrompt(task: string, root: string): string {
     `(2) implement the task per its Proposal/Plan/AC/DoD, committing your implementation on the task branch; ${acCheckNote()}`,
     `(2b) ${preMergeNote(task, root, "<the worktree path you created in step 1>")}`,
     `(3) ${driverFanInNote()}`,
-    `⚠️ CRITICAL: every Read/Edit/Write file_path MUST be the absolute path of the worktree you created in step 1 — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your implementation in the develop shared checkout, not your worktree.`,
+    `⚠️ CRITICAL: for CODE files, every Read/Edit/Write file_path MUST be the absolute path of the worktree you created in step 1 — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your implementation in the develop shared checkout, not your worktree. This rule does NOT cover the task file — that is edited only via \`task_write\` (see step 2 above), never Read/Edit/Write.`,
     `You own your worktree fully; apart from the final merge (done by the driver) do not touch develop.`,
   ].join(" ");
 }
@@ -1650,7 +1654,7 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
     `Proposal/Plan/AC/DoD (⛔ do not redo the ${commits} commits already on the branch); ${acCheckNote()}`,
     `(1b) ${preMergeNote(task, root, wt)}`,
     `(2) ${driverFanInNote()}.`,
-    `⚠️ CRITICAL: every Read/Edit/Write file_path MUST be the worktree absolute path ${wt} — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your change in develop, not your worktree.`,
+    `⚠️ CRITICAL: for CODE files, every Read/Edit/Write file_path MUST be the worktree absolute path ${wt} — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your change in develop, not your worktree. This rule does NOT cover the task file — that is edited only via \`task_write\` (see above), never Read/Edit/Write.`,
     `You own this worktree fully; apart from the final merge do not touch develop.`,
   ].join(" ");
 }
@@ -3309,17 +3313,26 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   const typecheck = path.join(scriptsDir, "fan-in-ts-typecheck-gate.ts");
   const acGate = path.join(scriptsDir, "fan-in-ac-completion-gate.ts");
 
+  // gap-mechanical-fan-in-red-lock-times-null：失败结果在【release 之后】才读锁时间（同成功路径
+  // :3625 的时机）——⛔ 不能在 try 内 return 时就地读（release 事件尚未落盘 ⇒ lockHoldSecs 恒 null），
+  // 也不能事后补读（后续重试会追加更新的 acquire/release ⇒ readFanInLockHold 取最后一组 ⇒ 张冠李戴）。
+  // pendingRed = 已获锁失败结果的待填句柄：verdictOf/failSuite 构造时不带锁字段，finally release 后统一填。
+  let pendingRed: MechanicalFanInResult | null = null;
+
   // D6：单步失败产出结构化 verdict（⛔ 不再是 `(stderr||stdout).trim()` 裸流）。裸流 dump 进 logFile、
   // summary 去噪保留「哪个测试失败」，reason 是 summary 的投影（旧读面，⛔ 不含 MODULE_TYPELESS 噪声）。
-  const verdictOf = (step: string, exitCode: number | null, summary: string, logFile: string | null): MechanicalFanInResult => ({
-    outcome: "red",
-    verdict: { step, verdict: "failed", exitCode, summary, logFile },
-    step, reason: summary,
-    lockHoldSecs: null, lockAcquireEpoch: null, lockReleaseEpoch: null,
-    suiteFinishedEpoch: null, suiteOutcome: null, suitePid: null, landedSha: null,
-    suiteLog: null,
-    fanInLog: path.basename(fanInLog),
-  });
+  const verdictOf = (step: string, exitCode: number | null, summary: string, logFile: string | null): MechanicalFanInResult => {
+    const r = {
+      outcome: "red",
+      verdict: { step, verdict: "failed", exitCode, summary, logFile },
+      step, reason: summary,
+      suiteFinishedEpoch: null, suiteOutcome: null, suitePid: null, landedSha: null,
+      suiteLog: null,
+      fanInLog: path.basename(fanInLog),
+    } as unknown as MechanicalFanInResult; // 锁字段在 finally release 后填（见 pendingRed）
+    pendingRed = r;
+    return r;
+  };
   const stepLogFile = (step: string): string =>
     `/tmp/fan-in-step-${task}-${runId.replace(/[^A-Za-z0-9_.-]/g, "_")}-${step}.log`;
   // 有裸流的机械步：stdout+stderr 全量 dump 进 logFile，summary 从合并流提取（⛔ 只取 stderr 会丢
@@ -3336,7 +3349,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     }
     return verdictOf(step, a.status, summary, logFile);
   };
-  // 无裸流的机械步（reason 已结构化：flip-done / acquire-fan-in-lock / exception）。
+  // 无裸流的机械步（reason 已结构化：flip-done / exception；acquire-fan-in-lock 走独立构造——结构性例外）。
   const failClean = (step: string, summary: string, exitCode: number | null = null): MechanicalFanInResult =>
     verdictOf(step, exitCode, summary, null);
 
@@ -3379,7 +3392,18 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     trace({ step: "acquire-fan-in-lock", exit: 0, wall_ms: Date.now() - acquireT0, ok: true });
   } catch (e) {
     trace({ step: "acquire-fan-in-lock", exit: 1, wall_ms: Date.now() - acquireT0, ok: false, reason: (e as Error)?.message ?? "acquire failed" });
-    return failClean("acquire-fan-in-lock", (e as Error)?.message ?? "acquire failed");
+    // 结构性例外（锁本身没拿到，无 acquire 事件可读）：锁字段显式 null。⛔ 不走 verdictOf 的 pendingRed
+    // 填充路径——那条只对【已获锁之后】的失败有意义（gap-mechanical-fan-in-red-lock-times-null）。
+    const reason = (e as Error)?.message ?? "acquire failed";
+    return {
+      outcome: "red",
+      verdict: { step: "acquire-fan-in-lock", verdict: "failed", exitCode: null, summary: reason, logFile: null },
+      step: "acquire-fan-in-lock", reason,
+      lockHoldSecs: null, lockAcquireEpoch: null, lockReleaseEpoch: null,
+      suiteFinishedEpoch: null, suiteOutcome: null, suitePid: null, landedSha: null,
+      suiteLog: null,
+      fanInLog: path.basename(fanInLog),
+    };
   }
   const releaseLock = async (): Promise<void> => {
     await fanInLock.release();
@@ -3393,15 +3417,18 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   // A（gap-worker-execution-history-index-not-reachable-from-task）：suite 红时 verdict.logFile 指向
   // .quay/fan-in-suite-*.log（真因文件，⛔ 不再 null——旧一路 logFile:null 让 183KB 真因只能靠命名约定
   // 猜）+ suiteLog 落 mechanical_fan_in（与 fanInLog 同形的 basename，web/续做/needs-human 据此构造绝对路径）。
-  const failSuite = (summary: string, exitCode: number | null): MechanicalFanInResult => ({
-    outcome: "red",
-    verdict: { step: "suite", verdict: "failed", exitCode, summary, logFile: suiteLogFile },
-    step: "suite", reason: summary,
-    lockHoldSecs: null, lockAcquireEpoch: null, lockReleaseEpoch: null,
-    suiteFinishedEpoch: null, suiteOutcome: null, suitePid: null, landedSha: null,
-    suiteLog: path.basename(suiteLogFile),
-    fanInLog: path.basename(fanInLog),
-  });
+  const failSuite = (summary: string, exitCode: number | null): MechanicalFanInResult => {
+    const r = {
+      outcome: "red",
+      verdict: { step: "suite", verdict: "failed", exitCode, summary, logFile: suiteLogFile },
+      step: "suite", reason: summary,
+      suiteFinishedEpoch: null, suiteOutcome: null, suitePid: null, landedSha: null,
+      suiteLog: path.basename(suiteLogFile),
+      fanInLog: path.basename(fanInLog),
+    } as unknown as MechanicalFanInResult; // 锁字段在 finally release 后填（见 pendingRed）
+    pendingRed = r;
+    return r;
+  };
 
   try {
     // 2. merge develop（冲突 ⇒ red → 语义会话兜底）。
@@ -3618,6 +3645,14 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   } finally {
     const relT0 = Date.now();
     await releaseLock();
+    // 已获锁的失败结果：release 事件刚落盘，此刻读锁时间 = 本次尝试自己的区间（⛔ 早读无 release、
+    // 晚读会被后续重试的区间张冠李戴——gap-mechanical-fan-in-red-lock-times-null）。
+    if (pendingRed !== null) {
+      const lock = readFanInLockHold(root, task, runId);
+      pendingRed.lockHoldSecs = lock.lockHoldSecs;
+      pendingRed.lockAcquireEpoch = lock.lockAcquireEpoch;
+      pendingRed.lockReleaseEpoch = lock.lockReleaseEpoch;
+    }
     trace({ step: "release-fan-in-lock", exit: 0, wall_ms: Date.now() - relT0, ok: true });
   }
 

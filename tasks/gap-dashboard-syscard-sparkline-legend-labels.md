@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-syscard-sparkline-legend-labels
 title: Dashboard 系统资源卡 sparkline 补图例 + 端点/极值标注 + 时间跨度标签（不引入新依赖，复用已有手搓 SVG 手法）
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -54,21 +54,21 @@ Chart.js/uPlot/ApexCharts 等完整图表库、d3-axis）后确认：Edward Tuft
 
 ## Acceptance Criteria
 
-- [ ] AC1（图例）：`renderDashboardCardRefreshScript()` 返回的脚本字符串里能 grep 到两条线各自的图例文案
+- [x] AC1（图例）：`renderDashboardCardRefreshScript()` 返回的脚本字符串里能 grep 到两条线各自的图例文案
       （`cpu_stall`、`loadavg`）与各自对应的颜色（复用 `renderSysCard` 里已定义的同一套颜色 token，
       不新起一套配色）。
-- [ ] AC2（端点/极值标注）：构造一个固定 `sysHistory` 数组（已知的 min/max/最新值），驱动
+- [x] AC2（端点/极值标注）：构造一个固定 `sysHistory` 数组（已知的 min/max/最新值），驱动
       `redrawSparkline` 等价逻辑（脚本是纯字符串，测试用 jsdom-free 的方式验证生成的 SVG 片段模板/
       辅助函数的输出，或将标注计算逻辑抽成一个可被 Node 直接 `import` 的纯函数），断言输出含与固定输入
       精确对应的 min/max/最新值数字（不是模糊断言"有数字"）。
-- [ ] AC3（时间跨度标签）：`sysHistory.push` 的调用点 grep 到 `ts:` 字段被写入；给定固定的
+- [x] AC3（时间跨度标签）：`sysHistory.push` 的调用点 grep 到 `ts:` 字段被写入；给定固定的
       `sysHistory`（含 ts），断言渲染出的时间跨度标签与最早/最新 ts 的格式化结果逐字对应。
-- [ ] AC4（阈值参考线，若实现）：给定 `resourceGate.loadThreshold` 非 null 的 fixture，断言输出含一条
+- [x] AC4（阈值参考线，若实现）：给定 `resourceGate.loadThreshold` 非 null 的 fixture，断言输出含一条
       对应位置的参考线元素；给定该字段为 null 的 fixture，断言不画（absent-field 契约，
       grep 不到虚构默认值）。
-- [ ] AC5（零服务端持久化不回归）：`grep -n "fs\.\(write\|append\)FileSync\?" packages/quay/src/serve-dashboard.ts`
+- [x] AC5（零服务端持久化不回归）：`grep -n "fs\.\(write\|append\)FileSync\?" packages/quay/src/serve-dashboard.ts`
       在本次改动前后命中数一致（沿用 `gap-dashboard-visual-review-batch-fixes` AC6 同款判据）。
-- [ ] AC6（真实回归）：`node --experimental-strip-types --test packages/quay/test/gap-dashboard-visual-review-batch-fixes.test.mjs`
+- [x] AC6（真实回归）：`node --experimental-strip-types --test packages/quay/test/gap-dashboard-visual-review-batch-fixes.test.mjs`
       （或本任务新增的同名后续测试文件）exit 0，且用 MCP 浏览器截图核验一次：图例可辨认、min/max/最新值
       数字可见、时间跨度标签可见。
 
