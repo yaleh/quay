@@ -347,6 +347,35 @@ test('resolveEvidence: 点号路径与 drivers.<kind>.<field> 都能解析；不
   assert.equal(resolveEvidence(ecoReadings, ''), undefined);
 });
 
+// 生产首轮（mt-prod-1788703469, 2026-09-06）的真实回归：autoDrive 引 `criteria.AC-180.verdict`、
+// decision 引 `criteria.AC-143.status` —— 两条读数都【真实存在】，却因解析器只特化了 drivers
+// 而双双被判「解析不出」拒绝，该轮 1 提 0 立 / 1 提 0 路由。用【当时被拒的原始 key】做输入，
+// ⛔ 不用自造样例（memory: verification input must be real output）。
+const idKeyedReadings = {
+  goals: [{ id: 'GOAL-002', title: '三层塌缩', status: 'active' }],
+  criteria: [
+    { id: 'AC-180', title: 'active AC 必须有判据', goal: 'GOAL-001', status: 'draft', criterion: 'true', verdict: 'pass', reason: '' },
+    { id: 'AC-143', title: '观测台账收尾驱动化', goal: 'GOAL-002', status: 'active', criterion: null, verdict: 'fail', reason: 'no criterion' },
+  ],
+  divergences: [{ id: 'AC-143', status: 'active', verdict: 'fail', reason: 'no criterion', kind: 'no-criterion' }],
+  drivers: ecoReadings.drivers,
+  syncHealth: ecoReadings.syncHealth,
+  focus: null,
+};
+
+test('resolveEvidence: criteria/divergences/goals 也按 id 索引（⛔ 只特化 drivers ⇒ 主要证据类型不可引用）', () => {
+  assert.equal(resolveEvidence(idKeyedReadings, 'criteria.AC-180.verdict'), 'pass', '生产首轮被拒的原始 key，必须解析得出');
+  assert.equal(resolveEvidence(idKeyedReadings, 'criteria.AC-143.status'), 'active', '同上，第二条被拒的原始 key');
+  assert.equal(resolveEvidence(idKeyedReadings, 'criteria.AC-143.criterion'), null, 'null 是合法读数（无判据本身就是证据），⛔ 不得当成解析不出');
+  assert.equal(resolveEvidence(idKeyedReadings, 'divergences.AC-143.kind'), 'no-criterion');
+  assert.equal(resolveEvidence(idKeyedReadings, 'goals.GOAL-002.status'), 'active');
+  // 能取假的一侧：不存在的 id / 字段仍须是 undefined，⛔ 不得因放宽而变成"什么都能引"
+  assert.equal(resolveEvidence(idKeyedReadings, 'criteria.AC-999.verdict'), undefined);
+  assert.equal(resolveEvidence(idKeyedReadings, 'criteria.AC-180.nosuch'), undefined);
+  // 整条对象也可引（parts.length === 2），与 drivers 同语义
+  assert.equal(resolveEvidence(idKeyedReadings, 'criteria.AC-180').id, 'AC-180');
+});
+
 const goodItem = {
   touches: 'plugin/scripts/driver-filters.ts',
   title: '查清 author↔develop 语义兜底为何从不成功',

@@ -488,15 +488,35 @@ export interface AutoDriveItem {
   touches: string;
 }
 
-/** 按点号路径在本轮读数里解析证据。`drivers.<kind>.<field>` 特化为按 kind 查。
+/** 读数里【按业务键索引的数组】——点号路径不能索引数组下标，所以这些必须显式按键查。
+ *
+ *  ⚠️ 生产首轮（mt-prod-1788703469, 2026-09-06）实测：本表原先【只有 drivers】，
+ *  于是同一轮里 autoDrive 引 `criteria.AC-180.verdict`、decision 引 `criteria.AC-143.status`
+ *  ——两条都是【真实存在】的读数——却双双被判「解析不出」而拒绝，该轮 1 提 0 立 / 1 提 0 路由。
+ *  ⇒ 机制最主要的证据类型（24 条 criteria vs 6 个 driver）在结构上无法被引用，
+ *  两条最有价值的输出通道被自己的闸堵死。**这不是 probe 写错，是闸缺表。**
+ *
+ *  ⊢ 硬规则 5b（在某处修好 X ≠ X 只在那一处）：写这个函数时已经知道「数组要按键索引」并
+ *  为 drivers 做了特例，却漏了同一个对象里的其余三个同形数组。补齐时逐个列出，不只补被报出来的那个。 */
+export const ID_KEYED_READING_ARRAYS: Record<string, string> = {
+  drivers: "kind",
+  criteria: "id",
+  divergences: "id",
+  goals: "id",
+};
+
+/** 按点号路径在本轮读数里解析证据。`<数组名>.<业务键>[.<字段>]` 按 ID_KEYED_READING_ARRAYS 查。
  *  解析不出 ⇒ undefined（调用侧据此拒绝——⛔ 不允许「引用了一个不存在的读数」的自动驱动）。 */
 export function resolveEvidence(readings: MetaRoundReadings, key: string): unknown {
   const parts = String(key ?? "").split(".").filter(Boolean);
   if (parts.length === 0) return undefined;
-  if (parts[0] === "drivers" && parts.length >= 2) {
-    const d = readings.drivers.find((x) => x.kind === parts[1]);
-    if (!d) return undefined;
-    return parts.length === 2 ? d : (d as unknown as Record<string, unknown>)[parts[2]];
+  const idField = ID_KEYED_READING_ARRAYS[parts[0]];
+  if (idField && parts.length >= 2) {
+    const arr = (readings as unknown as Record<string, unknown>)[parts[0]];
+    if (!Array.isArray(arr)) return undefined;
+    const hit = (arr as Array<Record<string, unknown>>).find((x) => String(x?.[idField]) === parts[1]);
+    if (!hit) return undefined;
+    return parts.length === 2 ? hit : hit[parts[2]];
   }
   let cur: unknown = readings as unknown;
   for (const p of parts) {
