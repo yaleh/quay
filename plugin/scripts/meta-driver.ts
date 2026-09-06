@@ -1315,7 +1315,7 @@ const HELP = [
   "",
   "Usage: node --experimental-strip-types plugin/scripts/meta-driver.ts [options]",
   "  --root <dir>      仓库根（缺省 cwd）",
-  "  --once            跑一轮后退出（v0 唯一模式，缺省即是）",
+  "  --once            跑一轮后退出（手工检视用；⛔ 缺省是【常驻】，与 quality 等例程型 kind 一致）",
   "  --no-llm          只跑机械半（读数 + divergence），不派语义 probe",
   "  --focus \"<text>\"  本轮的人给的方向（可选，进 prompt）",
   "  --k <N>           本轮提案上限（缺省 " + DEFAULT_RATE + "，routine-file-gate 的 rate 闸）",
@@ -1325,7 +1325,7 @@ const HELP = [
   "  --json            输出 JSON（缺省人读摘要）",
   "",
   "常驻（例程型，复用通用循环）:",
-  "  --resident            常驻跑；未给此旗标即一次性",
+  "  --resident            常驻跑（**已是缺省**，保留仅为显式表达；一次性用 --once）",
   "  --interval <ms>       循环滴答间隔（缺省 30000）",
   "  --review-interval <m> meta 复核的例程间隔（分钟，缺省 20）",
   "  --run-id <id> / --pid-file <p> / --max-rounds <n>",
@@ -1342,7 +1342,7 @@ export async function main(argv: string[]): Promise<number> {
   let json = false;
   let k = DEFAULT_RATE;
   let judgeFloorMs = JUDGE_FLOOR_MS_DEFAULT;
-  let resident = false;
+  let once = false;
   let intervalMs = 30_000;
   let reviewIntervalMinutes = 20;
   let runId = `meta-${Date.now()}`;
@@ -1358,8 +1358,8 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--no-llm") { noLlm = true; }
     else if (a === "--dry-run") { dryRun = true; }
     else if (a === "--json") { json = true; }
-    else if (a === "--once") { /* 一次性是缺省；保留旗标以便显式表达 */ }
-    else if (a === "--resident") { resident = true; }
+    else if (a === "--once") { once = true; }
+    else if (a === "--resident") { /* 常驻已是缺省（见下），保留旗标以便显式表达与向后兼容 */ }
     else if (a === "--interval") { intervalMs = Number(args[++i]); }
     else if (a === "--review-interval") { reviewIntervalMinutes = Number(args[++i]); }
     else if (a === "--run-id") { runId = args[++i]; }
@@ -1371,7 +1371,19 @@ export async function main(argv: string[]): Promise<number> {
   if (!Number.isFinite(k) || k < 1) { process.stderr.write("meta-driver: --k must be a positive number\n"); return 2; }
   if (!Number.isFinite(judgeFloorMs) || judgeFloorMs < 0) { process.stderr.write("meta-driver: --judge-floor must be a non-negative number of minutes\n"); return 2; }
 
-  if (resident) {
+  // 常驻是【缺省】，与兄弟例程型 kind 对齐（quality-gate-driver.ts main() 也是无条件进常驻循环）。
+  //
+  // ⚠️ 生产实测（2026-09-06）：此前缺省是一次性、常驻要 `--resident`，而 `driverArgvForKind`
+  // （driver-runtime.ts:365-377）拼的 argv 只有 --root/cap/--interval/--pid-file/--run-id，
+  // **不传 --resident** ⇒ `quay driver start --kind meta` 起的是一次性模式 ⇒ 跑一轮 exit 0 ⇒
+  // supervisor 5 秒后重启 ⇒ 20 分钟的复核间隔完全失效，退化成 ~38 秒的忙循环：
+  // 35 分钟内 23 轮 × 24 条 criterion ≈ 550 次子进程调用，而设计意图是约 2 轮。
+  // （lastRun 是进程内存态，每次重启都 never-ran ⇒ 必然立刻 due，间隔无从生效。）
+  // ⊢ 这是 SPEC §7「半登记」损害的第三例（quality 补接线、suite 半登记、本次 meta）。
+  // ⊢ 修法是【跟随兄弟实现】而非给 driverArgvForKind 再加一个 per-kind 旗标——后者正是 §7 在说的那种成本。
+  // 手工一次性检视仍可用 `--once`；`--json`/`--dry-run` 隐含一次性（一次性的输出形态，⛔ 不该进无限循环）。
+  const oneShot = once || json || dryRun;
+  if (!oneShot) {
     // 常驻：复用通用例程型循环，配自己的控制面与载体（⛔ 不与 quality 共用控制面）。
     return await runResidentQualityGateLoop({
       root, intervalMs, once: false, maxRounds,
