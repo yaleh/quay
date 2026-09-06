@@ -50,12 +50,12 @@ AC1–AC142 的历史阶段留在 `manager-phase-goal.md` / `manager-phase-goal-
 
 ## Acceptance Criteria
 
-- [ ] `test "$(node packages/quay/src/goal-store.ts list | grep -c '"id": "AC-1[4-6][0-9]"')" -ge 27` 退出 0（AC-171 判据，立案时取假：count=0）
-- [ ] `node packages/quay/src/goal-store.ts get GOAL-002 | grep -q '"status": "active"'` 退出 0
-- [ ] `node packages/quay/src/goal-store.ts get GOAL-003 | grep -q '"status": "draft"'` 退出 0（AC-172 判据的真实载体）
-- [ ] 保号无缺漏：AC143..AC155 与 AC156..AC169 的每个编号在 `goals/` 下恰有一个记录文件（单测断言）
-- [ ] 负控制：至少一条无可跑判据的 AC，其 `criterion` 为空且 `goal-store.ts gate <id>` 判红退出 1
-- [ ] `bash scripts/test.sh --for-task gap-goal-store-migrate-prose-phase-acs-to-records` 退出 0
+- [x] `test "$(node packages/quay/src/goal-store.ts list | grep -c '"id": "AC-1[4-6][0-9]"')" -ge 27` 退出 0（AC-171 判据，立案时取假：count=0）
+- [x] `node packages/quay/src/goal-store.ts get GOAL-002 | grep -q '"status": "active"'` 退出 0
+- [x] `node packages/quay/src/goal-store.ts get GOAL-003 | grep -q '"status": "draft"'` 退出 0（AC-172 判据的真实载体）
+- [x] 保号无缺漏：AC143..AC155 与 AC156..AC169 的每个编号在 `goals/` 下恰有一个记录文件（单测断言）
+- [x] 负控制：至少一条无可跑判据的 AC，其 `criterion` 为空且 `goal-store.ts gate <id>` 判红退出 1
+- [x] `bash scripts/test.sh --for-task gap-goal-store-migrate-prose-phase-acs-to-records` 退出 0
 
 ## Definition of Done
 
