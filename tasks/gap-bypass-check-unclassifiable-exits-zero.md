@@ -1,7 +1,7 @@
 ---
 id: gap-bypass-check-unclassifiable-exits-zero
 title: direct-to-develop-bypass-check 读不懂 3627 条提交却 exit 0——套件看到「通过」，它要抓的六个提交就在不可分类样本里
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -59,3 +59,13 @@ extra: {}
 - `plugin/scripts/direct-to-develop-bypass-check.ts`
 - `plugin/test/direct-to-develop-bypass-check.test.mjs`
 - `tasks/gap-bypass-check-unclassifiable-exits-zero.md`
+## Needs-Human
+
+**执行 2026-09-06T17:28:47.155Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: # fail 1
+- run_id：wk-prod-1788712951
+- session_id：23b451f1-e43b-4967-b94d-f639419a2fe8
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-bypass-check-unclassifiable-exits-zero~wk-prod-1788712951~1788715429205-59237e.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-bypass-check-unclassifiable-exits-zero-wk-prod-1788712951.log
