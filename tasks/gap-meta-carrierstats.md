@@ -2,7 +2,7 @@
 id: gap-meta-carrierstats
 title: quality 载体时间戳键 judgedAt 不被 carrierStats 读取——meta-driver 对 quality 的
   staleSecs 恒 null
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
