@@ -2614,6 +2614,23 @@ export async function run(argv: string[]): Promise<number> {
   const phaseOverlapSerialDone = /^__OVERHEAD__\s+overlap_serial_done=1/;
   const phaseOverlapLowconcDone = /^__OVERHEAD__\s+overlap_lowconc_done=1/;
   const phaseOverlapDone = /^__OVERHEAD__\s+overlap_(?:serial|lowconc)_done=1/;
+  // gap-mechanical-fan-in-loses-per-phase-accounting — the UNIFIED SCHEDULER path (the default since
+  // gap-suite-dynamic-waterline-scheduler) runs serial/lowconc/main CONCURRENTLY via the group-budget
+  // waterline, so it emits NO `selected N files (groups=serial|lowconc)` serial-phase markers — the
+  // legacy boundaries above never fire and the whole concurrent test window collapses into ONE lanes=1
+  // "static" phase (the record then claims a ~47s serial run while the real suite ran minutes at
+  // laneCount — the record and the run diverged, and the main-phase PSI went dark). Its real markers are
+  // test.sh's `scheduler: unified group-budget scheduler …` (the test window START) and the scheduler's
+  // own `__OVERHEAD__ <group>_phase_ms` group-close burst (the test window END). The scheduler's
+  // serial/lowconc/main groups OVERLAP, so there is no honest per-group differential — the whole
+  // concurrent window is ONE "main" phase at laneCount (its psi is the window's psi), with the
+  // per-group walls still carried by the *_phase_ms fields (unchanged). `scheduler_ms` is the scheduler's
+  // own always-emitted total-wall marker — the main→end fallback when main never closes (e.g. a bucket
+  // with no main-group files).
+  let schedulerActive = false; // the unified scheduler path is the current stream producer
+  const schedulerStartRe = /^scheduler:\s+unified group-budget scheduler/;
+  const schedulerMainDoneRe = /^__OVERHEAD__\s+main_phase_ms=/;
+  const schedulerEndRe = /^__OVERHEAD__\s+scheduler_ms=/;
   // gap-suite-main-overlaps-load-sensitive-tail-experiment — test.sh's tail-overlap watcher announces
   // its fire on the stream. Distinct from the __OVERHEAD__ family (which the phase boundary machine
   // treats as the end-of-round burst) so a mid-window fire can never prematurely close the overlap
@@ -2652,7 +2669,27 @@ export async function run(argv: string[]): Promise<number> {
     // cumulative counters at each boundary and records the completed phase). Pure addition: it
     // cannot flip the verdict, and a boundary-detection failure only affects the `phases` field.
     if (phaseAccount) {
-      if (phaseMarkerSerialStart.test(line)) {
+      if (schedulerStartRe.test(line)) {
+        // gap-mechanical-fan-in-loses-per-phase-accounting — the unified scheduler's test window
+        // START. static→main (the concurrent window is ONE "main" phase at laneCount; its psi is the
+        // window's psi). Latching schedulerActive makes every subsequent line skip the legacy
+        // serial-phase machine below — its `selected N files (groups=…)` / `__GROUP__` boundaries do
+        // not exist on the scheduler path and would otherwise close main→end at the FIRST group close
+        // (serial closes first, so main would be recorded as a ~0s stub).
+        phaseAccount.boundary("main");
+        schedulerActive = true;
+        phaseNodeActive = false;
+        overlapPhaseActive = false;
+      } else if (schedulerActive) {
+        // Scheduler path owns the stream: the only boundaries left are main→end at the main group's
+        // close (`__OVERHEAD__ main_phase_ms=`) or — when main never ran — the scheduler's own total
+        // wall marker (`__OVERHEAD__ scheduler_ms=`). Everything else (__PERFILE__ / __GROUP__ /
+        // __OVERHEAD__ <serial|lowconc>_phase_ms) is concurrent-window noise, not a phase boundary.
+        if (!mainClosed && (schedulerMainDoneRe.test(line) || schedulerEndRe.test(line))) {
+          phaseAccount.boundary("end");
+          mainClosed = true;
+        }
+      } else if (phaseMarkerSerialStart.test(line)) {
         // static→serial (sequential path). Closes whatever phase was open (static, or a gap if the
         // previous phase's __GROUP__ already fired) and opens serial.
         phaseAccount.boundary("serial");
@@ -3605,6 +3642,19 @@ export async function run(argv: string[]): Promise<number> {
     ...(phaseAccount ? { phases: phaseAccount.records } : {}),
     ...(phaseAccount?.read_error ? { phase_counter_error: phaseAccount.read_error } : {}),
     ...(phaseAccount?.finalReadError ? { phase_final_read_error: phaseAccount.finalReadError } : {}),
+    // gap-mechanical-fan-in-loses-per-phase-accounting AC5 — a single-phase round must NOT be shaped
+    // like a normal multi-phase round: the whole-run-collapsed-into-one-`static` degradation (the pre-
+    // fix scheduler round claimed a ~47s serial run for a minutes-long 16-lane suite) is indistinguishable
+    // from a genuine static-check abort unless the record names the reason. `single_phase` + a reason
+    // field are present ONLY on a 1-phase round (a multi-phase round omits them — same absent-field
+    // contract as *_phase_ms). reason is "static-check-abort" when the suite never left the pre-test
+    // static-check phase, else "no-phase-boundary-markers" (the suite ran but no boundary was detected).
+    ...(phaseAccount && phaseAccount.records.length === 1
+      ? {
+          single_phase: true,
+          single_phase_reason: testPhaseStarted ? "no-phase-boundary-markers" : "static-check-abort",
+        }
+      : {}),
     // gap-ac124-suite-bucket-production-carrier-benefit — the bucket-execution fields. Present only on
     // a bucket-mode round (test.sh emitted __BUCKETS__); the default full suite omits them (a reader
     // must tolerate their absence). bucket_duration_ms is the round's own durationMs (the round IS the
