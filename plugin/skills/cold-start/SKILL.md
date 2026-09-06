@@ -9,7 +9,7 @@ allowed-tools: Bash, Read, Monitor, CronCreate, CronList
 **One slash command that turns a quay-init-prepared project into a running two-layer loop.**
 The user's whole cold start is this command; after it returns, the loop must be provably live.
 
-> **⛔ RETIRED (2026-09-04, `orchestration/SPEC-tmux-retirement-2026-09-03.md` §1.4/Layer 3b).**
+> **⛔ RETIRED (2026-09-04, `SPEC-tmux-retirement-2026-09-03.md` §1.4/Layer 3b).**
 > The two-session "start an outer loop, drive an inner session" model this skill describes is
 > **retired**: the outer session role was absorbed into the manager's direct subagent dispatch
 > (`gap-retire-outer-tmux-window-logic`), and the inner session was replaced by the worker-driver.
