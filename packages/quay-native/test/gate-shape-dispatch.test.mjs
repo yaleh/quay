@@ -34,7 +34,7 @@ import {
 // `artifactsComplete` (side-effect-free; main() is guarded by isDirectEntry) lets
 // this test assert both gates agree on the CJK proposal-slot body. Precedent:
 // serve.test.mjs imports plugin/scripts/fast-mode-telemetry.ts the same way.
-import { artifactsComplete } from "../../../plugin/scripts/ready-pool-check.ts";
+import { artifactsComplete, SHAPE_SECTIONS } from "../../../plugin/scripts/ready-pool-check.ts";
 
 const substantive = (label) =>
   `${label} — this is real, substantive prose describing the ${label.toLowerCase()} in enough detail to exceed the minimum content threshold for this section, well past forty characters.`;
@@ -76,13 +76,71 @@ test("AC1: SHAPE_REGISTRY is importable and registers contract/finding/plan with
   assert.deepEqual(SHAPE_REGISTRY.contract.sections.plan, ["Contract"]);
   // meta-cc DIR template: ## Finding fills the proposal-slot.
   assert.deepEqual(SHAPE_REGISTRY.finding.sections.proposal, ["Finding"]);
-  // classic template unchanged.
+  // classic template unchanged: the plain ASCII headings stay FIRST, now followed
+  // by the shared AC/DoD suffixed variants (gap-shape-section-tables-dual-copy-
+  // no-single-source moved them into the registry so both judges read one list).
   assert.deepEqual(SHAPE_REGISTRY.plan.sections, {
     proposal: ["Proposal"],
     plan: ["Plan"],
-    ac: ["AC", "Acceptance Criteria"],
-    dod: ["DoD", "Definition of Done"],
+    ac: [
+      "AC",
+      "Acceptance Criteria",
+      "Acceptance Criteria (runnable)",
+      "Acceptance Criteria (runnable — artifacts are necessary-not-sufficient)",
+    ],
+    dod: [
+      "DoD",
+      "Definition of Done",
+      "Definition of Done — REAL LANDING is the bar, not artifacts",
+      "Definition of Done — REAL LANDING, subtractive (DIR-026 Reading A preserved)",
+    ],
   });
+});
+
+test("AC single-source (gap-shape-section-tables-dual-copy-no-single-source): SHAPE_SECTIONS is derived from SHAPE_REGISTRY — ac/dod lists identical for every shape", () => {
+  // AC1: ready-pool-check no longer hand-copies the AC/DoD heading lists; its
+  // SHAPE_SECTIONS is Object.fromEntries(SHAPE_REGISTRY[shape].sections). Compare
+  // the two sides element-by-element — equal ⇒ single source holds.
+  for (const shape of Object.keys(SHAPE_REGISTRY)) {
+    assert.deepEqual(
+      SHAPE_SECTIONS[shape].ac,
+      SHAPE_REGISTRY[shape].sections.ac,
+      `${shape}.ac must be the SHAPE_REGISTRY list`
+    );
+    assert.deepEqual(
+      SHAPE_SECTIONS[shape].dod,
+      SHAPE_REGISTRY[shape].sections.dod,
+      `${shape}.dod must be the SHAPE_REGISTRY list`
+    );
+  }
+});
+
+test("AC divergence-gone (gap-shape-section-tables-dual-copy-no-single-source): store.check() and artifactsComplete() agree on a finding body with ## AC（draft）/## DoD（draft）", () => {
+  // AC2 (behavior-level, not source-level): the SAME body — `## Finding` +
+  // `## AC（draft）` + `## DoD（draft）` — must produce the SAME artifacts map from
+  // both judges. Before the fix, store.ts lacked the draft variants, so store.check()
+  // read ac:false/dod:false while artifactsComplete() read ac:true/dod:true.
+  const { store, dir } = freshStore();
+  try {
+    const body =
+      `## Finding\n${substantive("Finding")}\n` +
+      `## AC（draft）\n${substantive("draft acceptance criteria")}\n` +
+      `## DoD（draft）\n${substantive("draft definition of done")}\n`;
+    store.write("DRAFT-F", { title: "finding-draft-headings", status: "todo", body });
+    const r = store.check("DRAFT-F");
+    assert.equal(r.shape, "finding");
+    const pc = artifactsComplete(body);
+    assert.deepEqual(
+      r.artifacts,
+      pc.artifacts,
+      `store.check() and artifactsComplete() must agree; store=${JSON.stringify(r.artifacts)} pc=${JSON.stringify(pc.artifacts)}`
+    );
+    assert.equal(r.artifacts.ac, true, "draft AC must count as the ac artifact");
+    assert.equal(r.artifacts.dod, true, "draft DoD must count as the dod artifact");
+    assert.equal(r.artifacts.proposal, true, "Finding must count as the proposal artifact");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("detectShape classifies contract / finding / plan / proposal / unknown", () => {

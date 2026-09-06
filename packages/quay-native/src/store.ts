@@ -43,6 +43,42 @@ export const VALID_STATUSES: readonly string[] = TASK_STATUSES;
  * Every shape's contract is complete on its own dimension; the gate dispatches
  * by shape rather than waiving checks (invariant 分派 ≠ 豁免).
  */
+
+/**
+ * AC/DoD SUFFIXED-HEADING VARIANTS (gap-ac47-completion-predicate-consumer-fail-closed, AC3):
+ * suffixed AC/DoD headings real directive tasks in this store use — `## Acceptance Criteria
+ * (runnable)`, `## Acceptance Criteria (runnable — artifacts are necessary-not-sufficient)`,
+ * `## Definition of Done — REAL LANDING is the bar, not artifacts`, `## Definition of Done — REAL
+ * LANDING, subtractive (…)`. Explicitly REGISTERED rather than prefix-matched — a prefix would
+ * ALSO swallow `## Acceptance Criteria for the OLD design`, adding uncertainty to an already-
+ * fragile matcher. An UNREGISTERED suffixed variant is NOT matched and therefore fails CLOSED.
+ *
+ * gap-shape-section-tables-dual-copy-no-single-source: these two lists (plus the finding-shape
+ * draft-heading variants below) USED to live ONLY in ready-pool-check.ts's hand-copied
+ * SHAPE_SECTIONS — so store.check() and ready-pool-check.artifactsComplete() disagreed on the SAME
+ * body (the second such divergence for this file pair). They now live HERE, in the single source
+ * of truth, so both judges read the same registered headings.
+ */
+const AC_SUFFIX_VARIANTS = [
+  "Acceptance Criteria (runnable)",
+  "Acceptance Criteria (runnable — artifacts are necessary-not-sufficient)",
+] as const;
+const DOD_SUFFIX_VARIANTS = [
+  "Definition of Done — REAL LANDING is the bar, not artifacts",
+  "Definition of Done — REAL LANDING, subtractive (DIR-026 Reading A preserved)",
+] as const;
+
+/**
+ * Finding-shape DRAFT-HEADING variants (gap-todo-shape-mismatch-author-gate): `## AC（draft）` /
+ * `## DoD（draft）` (and their half-width-paren form `## AC (draft)` / `## DoD (draft)`) that real
+ * finding-shape gap-* tasks use. The `（draft）` suffix is a heading-label convention, not an absent
+ * section — so the four-artifacts gate must count them. Registered on the FINDING shape only
+ * (draft AC/DoD headings are a finding-shape convention; the other shapes keep the plain + suffixed
+ * headings).
+ */
+const FINDING_AC_DRAFT_VARIANTS = ["AC（draft）", "AC (draft)"] as const;
+const FINDING_DOD_DRAFT_VARIANTS = ["DoD（draft）", "DoD (draft)"] as const;
+
 export const SHAPE_REGISTRY = {
   contract: {
     planKeys: ["measure", "band", "invariant", "invoke", "control", "resume"],
@@ -54,16 +90,16 @@ export const SHAPE_REGISTRY = {
       // `## Finding` mapping into the proposal-slot.
       proposal: ["Proposal", "人的裁定"],
       plan: ["Contract"],
-      ac: ["AC", "Acceptance Criteria"],
-      dod: ["DoD", "Definition of Done"],
+      ac: ["AC", "Acceptance Criteria", ...AC_SUFFIX_VARIANTS],
+      dod: ["DoD", "Definition of Done", ...DOD_SUFFIX_VARIANTS],
     },
   },
   finding: {
     planKeys: [],
     sections: {
       proposal: ["Finding"],
-      ac: ["AC", "Acceptance Criteria"],
-      dod: ["DoD", "Definition of Done"],
+      ac: ["AC", "Acceptance Criteria", ...FINDING_AC_DRAFT_VARIANTS, ...AC_SUFFIX_VARIANTS],
+      dod: ["DoD", "Definition of Done", ...FINDING_DOD_DRAFT_VARIANTS, ...DOD_SUFFIX_VARIANTS],
     },
   },
   plan: {
@@ -71,8 +107,8 @@ export const SHAPE_REGISTRY = {
     sections: {
       proposal: ["Proposal"],
       plan: ["Plan"],
-      ac: ["AC", "Acceptance Criteria"],
-      dod: ["DoD", "Definition of Done"],
+      ac: ["AC", "Acceptance Criteria", ...AC_SUFFIX_VARIANTS],
+      dod: ["DoD", "Definition of Done", ...DOD_SUFFIX_VARIANTS],
     },
   },
   // proposal shape (2026-08-11, DIR-127 + gap-mcp-server-test-deadlocks): a task
@@ -88,13 +124,23 @@ export const SHAPE_REGISTRY = {
     planKeys: [],
     sections: {
       proposal: ["Proposal"],
-      ac: ["AC", "Acceptance Criteria"],
-      dod: ["DoD", "Definition of Done"],
+      ac: ["AC", "Acceptance Criteria", ...AC_SUFFIX_VARIANTS],
+      dod: ["DoD", "Definition of Done", ...DOD_SUFFIX_VARIANTS],
     },
   },
 } as const;
 
 export type TaskShape = keyof typeof SHAPE_REGISTRY | "unknown";
+
+/** Escape regex-special characters so a heading is matched LITERALLY. Without this, a registered
+ *  heading like `AC (draft)` or `Acceptance Criteria (runnable)` would be built into a `^##\s+<h>\s*$`
+ *  regex where the parentheses become capture groups and NEVER match the literal `## AC (draft)` line.
+ *  All the pre-variant headings are plain section names (no special chars), so escaping is a no-op for
+ *  them — it only matters for the parenthesized suffix/draft variants now registered in SHAPE_REGISTRY.
+ *  Mirrors ready-pool-check.ts's own escapeRegExp (same byte semantics — the single-judge contract). */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 /** Does `body` contain a `## <heading>` line that is EXACTLY that heading
  *  (trailing whitespace allowed)? Exact match prevents false positives from
@@ -157,7 +203,7 @@ export function sectionAfterHeading(body: string, headings: string[]): string {
     // by the iteration-1 G3 audit against QN-005's own AC text, which
     // contains the word "zero"). Correct JS end-of-string lookahead is
     // `(?![\s\S])` (no characters remain).
-    const headingRe = new RegExp(`^##\\s+${h}\\s*$`, "im");
+    const headingRe = new RegExp(`^##\\s+${escapeRegExp(h)}\\s*$`, "im");
     const m = headingRe.exec(body);
     if (!m) continue;
     // Content = everything after the heading line up to the next `## ` heading
@@ -1426,7 +1472,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
         // so `## 人的裁定` (last char 定 is CJK, next char is the newline)
         // never matched the old `^##\s+人的裁定\b` — the registered alias was
         // dead code and the proposal artifact read false for a present section.
-        if (!new RegExp(`^##\\s+${h}\\s*$`, "im").test(body)) continue;
+        if (!new RegExp(`^##\\s+${escapeRegExp(h)}\\s*$`, "im").test(body)) continue;
         const content = sectionAfterHeading(body, [h]);
         const nonWhitespaceLen = content.replace(/\s/g, "").length;
         if (nonWhitespaceLen >= MIN_SECTION_CHARS) return true;
