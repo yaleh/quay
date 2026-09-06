@@ -1,7 +1,7 @@
 ---
 id: gap-sync-develop-to-doc-not-doc-silent-noop
 title: syncDevelopToDoc 的 not-doc 分支静默无痕——分支改名后同步永久失效且不可观测
-status: ready
+status: done
 labels:
   - gap
   - defect
