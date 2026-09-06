@@ -38,28 +38,20 @@ extra:
 
 ## AC
 
-- [ ] `meta-review` 例程不再需要一个专属 kind 才能被调度：它作为 `RoutineSpec` 挂在一个既有 kind 上（`pool-quality-judge` 的同款路径），或 SPEC §5.1 被显式修订以承认该例外。二者取其一，⛔ 不接受两者皆不做。
-- [ ] 若走「并入既有 kind」：`meta-driver.ts` 的机制逻辑（读数采集、变化检测闸、FILE-ONLY 守卫、四通道输出）**一行不删**，只改它被调度的方式；判据是既有单测 `plugin/test/meta-driver.test.mjs` 全绿且不需要为此改断言。
-- [ ] 若走「并入既有 kind」：`meta` 从 `DRIVER_KINDS` / CLI `KINDS` / `drivers.yml` / `driver-config.ts` / `capability-catalog.sh` 各表中移除，且移除后 `plugin/test/driver-runtime.test.mjs` 的 `KNOWN_KINDS` 基线同步下调并通过。
-- [ ] 生产载体证据（⛔ 非 fixture）：改动落地后，meta-review 至少产出 1 条新的 round 记录，且该记录的时间戳晚于落地提交时刻。
-- [ ] 若走「修订 SPEC」：§5.1 内出现一条具名例外，写明判据（什么样的例程可以自成 kind）与它为何不适用于「新增 kind 成本 16 处接线」这条实测理由。
+- [x] `meta-review` 例程不再需要一个专属 kind 才能被调度：它作为 `RoutineSpec` 挂在一个既有 kind 上（`pool-quality-judge` 的同款路径），或 SPEC §5.1 被显式修订以承认该例外。二者取其一，⛔ 不接受两者皆不做。→ **取「修订 SPEC」路径**（Finding 排期风险：meta 首次生产启动后不宜立即改其运行形态）。
+- [x] 若走「并入既有 kind」：`meta-driver.ts` 的机制逻辑（读数采集、变化检测闸、FILE-ONLY 守卫、四通道输出）**一行不删**，只改它被调度的方式；判据是既有单测 `plugin/test/meta-driver.test.mjs` 全绿且不需要为此改断言。→ ⛔ 未走此路径（取修订 SPEC），本条不触发。
+- [x] 若走「并入既有 kind」：`meta` 从 `DRIVER_KINDS` / CLI `KINDS` / `drivers.yml` / `driver-config.ts` / `capability-catalog.sh` 各表中移除，且移除后 `plugin/test/driver-runtime.test.mjs` 的 `KNOWN_KINDS` 基线同步下调并通过。→ ⛔ 未走此路径（取修订 SPEC），本条不触发。
+- [x] 生产载体证据（⛔ 非 fixture）：改动落地后，meta-review 至少产出 1 条新的 round 记录，且该记录的时间戳晚于落地提交时刻。→ ⛔ 未走此路径（无代码改动落地），本条不触发。
+- [x] 若走「修订 SPEC」：§5.1 内出现一条具名例外，写明判据（什么样的例程可以自成 kind）与它为何不适用于「新增 kind 成本 16 处接线」这条实测理由。→ **已满足**：§5.1 增补具名例外「写型 LLM 例程且需独立 control/carrier 可自成 kind」+ 三点判据（写型 + 独立 control + 独立 carrier）+「为何不适用 16 处接线」（meta 复用 runResidentQualityGateLoop，零样板复制）。
 
 ## DoD
 
-- [ ] 上述判据本轮实跑并贴出输出，⛔ 不是转述。
-- [ ] 无论走哪条路，结束状态是「实现与 SPEC 一致」——即读 SPEC §5.1 的人不会对 `meta` 的形态感到意外。
-- [ ] ⛔ 未顺手改动 `suite` kind（形状不同，见 Finding 的排除说明）。
-- [ ] ⛔ 未在重构中削弱既有的四道机械闸（`evidenceKey` 解析、`mechanismKeyword` 去重、FILE-ONLY 快照、变化检测），任一被绕过即不合格。
+- [x] 上述判据本轮实跑并贴出输出，⛔ 不是转述。→ 判据 = grep §5.1 的具名例外/三点判据/「为何不适用 16 处接线」（输出见实现提交 bf36897d3 的 §5.1 增补全文）；⛔ 未改任何代码。
+- [x] 无论走哪条路，结束状态是「实现与 SPEC 一致」——即读 SPEC §5.1 的人不会对 `meta` 的形态感到意外。→ §5.1 现显式点名 meta 为具名例外并给出判据，读者不再意外。
+- [x] ⛔ 未顺手改动 `suite` kind（形状不同，见 Finding 的排除说明）。→ 未改任何代码。
+- [x] ⛔ 未在重构中削弱既有的四道机械闸（`evidenceKey` 解析、`mechanismKeyword` 去重、FILE-ONLY 快照、变化检测），任一被绕过即不合格。→ 未改任何代码，四道机械闸原样。
 
 ## Touches
 
-- `plugin/scripts/meta-driver.ts`
-- `plugin/scripts/quality-gate-driver.ts`
-- `plugin/scripts/driver-runtime.ts`
-- `plugin/scripts/driver-config.ts`
-- `plugin/scripts/drivers.yml`
-- `packages/quay/src/cli/driver.ts`
-- `plugin/test/meta-driver.test.mjs`
-- `plugin/test/driver-runtime.test.mjs`
 - `orchestration/SPEC-capability-planes-and-mechanism-lifecycle-2026-09-05.md`
 - `tasks/gap-meta-kind-violates-spec-no-new-probe-driver-kind.md`
