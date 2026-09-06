@@ -1,7 +1,7 @@
 ---
 id: gap-not-evaluated-checkers-never-persisted
 title: 检查器「读不懂输入」只写 stderr、从不落库——惰性守卫成为结构上不可发现的失效类（bypass-check 已惰性且无人知晓）
-status: todo
+status: ready
 labels:
   - gap
   - defect
