@@ -14,7 +14,7 @@ origin: |
   技术上的独立支撑：agent 现在读不到 goal——全仓 goal_list 零命中，
   唯一入口是直跑 node packages/quay/src/goal-store.ts。
 evidence:
-  at: 2026-09-06T22:45:37.731Z
+  at: 2026-09-06T22:46:32.165Z
   verdict: pass
   reading: acceptance passed (exit 0)
 ---
