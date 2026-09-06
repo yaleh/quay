@@ -1,7 +1,7 @@
 ---
 id: gap-manager-liveness-field-outer-tmux-gone
 title: 重新评估 manager-tick-readings.ts 的 outer.liveness 字段——outer 独立 tmux 会话已删除，该字段现无法观测
-status: ready
+status: done
 labels:
   - gap
 parent: null
