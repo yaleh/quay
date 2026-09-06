@@ -33,13 +33,13 @@ This is the highest-leverage single change identified in the audit for migrating
 
 ## Acceptance Criteria
 
-- [ ] `plugin/scripts/worker-driver.ts`'s `acCheckNote()` no longer contains the literal instruction to turn `- [ ]` into `- [x]` by hand — verified by `grep -c "turn \`- \[ \]\` into \`- \[x\]\`" plugin/scripts/worker-driver.ts` returning 0.
-- [ ] `acCheckNote()`'s new text explicitly names `task_check` and `task_write` as the mechanism for recording AC state — verified by grep.
-- [ ] Both `buildWorkerPrompt()` (`:1000`) and `buildContinueWorkerPrompt()` (`:1650`) still reference `acCheckNote()` (single source, not forked into two copies) — verified by grep count = 2 call sites, 1 definition.
-- [ ] The rewritten prompt text distinguishes code-file tool choice (`Edit`/`Write`, worktree absolute path) from task-file tool choice (`task_write` MCP) explicitly enough that a fresh reading of the full `buildWorkerPrompt()` output does not leave "which tool for the task file" ambiguous — verified by a human/LLM read of the rendered prompt string, not just a grep.
-- [ ] A live end-to-end test: dispatch a real worker against a scratch task with at least one unchecked AC, let it complete, and confirm the AC was ticked via a `task_write` call (not a raw markdown edit) — verified by inspecting the worker's tool-call transcript for a `task_write` call whose body contains the checked AC, and confirming no `Edit`/`Write` tool call touched `tasks/<scratch-id>.md`.
-- [ ] `plugin/test/worker-driver.test.mjs`, `plugin/test/worker-driver-fan-in.test.mjs`, and `plugin/test/worker-driver-resident.test.mjs` pass after the change (regression, not just the new behavior).
-- [ ] Fan-in's ac-precheck still correctly detects a genuinely-unchecked AC as a failure after this change (negative control — the new path must not accidentally make ac-precheck unable to see unchecked items).
+- [x] `plugin/scripts/worker-driver.ts`'s `acCheckNote()` no longer contains the literal instruction to turn `- [ ]` into `- [x]` by hand — verified by `grep -c "turn \`- \[ \]\` into \`- \[x\]\`" plugin/scripts/worker-driver.ts` returning 0.
+- [x] `acCheckNote()`'s new text explicitly names `task_check` and `task_write` as the mechanism for recording AC state — verified by grep.
+- [x] Both `buildWorkerPrompt()` (`:1000`) and `buildContinueWorkerPrompt()` (`:1650`) still reference `acCheckNote()` (single source, not forked into two copies) — verified by grep count = 2 call sites, 1 definition.
+- [x] The rewritten prompt text distinguishes code-file tool choice (`Edit`/`Write`, worktree absolute path) from task-file tool choice (`task_write` MCP) explicitly enough that a fresh reading of the full `buildWorkerPrompt()` output does not leave "which tool for the task file" ambiguous — verified by a human/LLM read of the rendered prompt string, not just a grep.
+- [x] A live end-to-end test: dispatch a real worker against a scratch task with at least one unchecked AC, let it complete, and confirm the AC was ticked via a `task_write` call (not a raw markdown edit) — verified by inspecting the worker's tool-call transcript for a `task_write` call whose body contains the checked AC, and confirming no `Edit`/`Write` tool call touched `tasks/<scratch-id>.md`.
+- [x] `plugin/test/worker-driver.test.mjs`, `plugin/test/worker-driver-fan-in.test.mjs`, and `plugin/test/worker-driver-resident.test.mjs` pass after the change (regression, not just the new behavior).
+- [x] Fan-in's ac-precheck still correctly detects a genuinely-unchecked AC as a failure after this change (negative control — the new path must not accidentally make ac-precheck unable to see unchecked items).
 
 ## Definition of Done
 

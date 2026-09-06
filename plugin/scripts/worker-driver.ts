@@ -930,15 +930,19 @@ function driverFanInNote(): string {
   ].join(" ");
 }
 
-/** AC 勾选指令（gap-worker-dispatch-prompt-ac-check-instruction）：worker 实现后逐条验证 AC、在 worktree
- *  任务体 `## Acceptance Criteria` 勾选 `- [x]`、与实现一并提交——否则 fan-in 的 ac-precheck（suite 前
- *  fail-fast，读 `checked===total`）会因未全勾拒翻、烧掉整条 fan-in（实测 5 次全 0/3：流程里根本没有
- *  「勾 AC」动作）。创建 prompt 与续做 prompt 共用。 */
+/** AC 勾选指令（gap-worker-prompt-ac-check-via-abi-not-hand-edit）：worker 实现后逐条验证 AC、然后
+ *  经 Provider ABI（`task_check` + `task_write`）记录勾选状态——⛔ 不再让 worker 手工编辑任务体的
+ *  `- [ ]`/`- [x]` 复选框字符（那是「ABI 可达写却手搓」的最高频实例；依赖的 commit-after-write 已由
+ *  gap-abi-missing-commit-delete-dependson-primitives 落地 ⇒ `task_write` 自己分支感知提交
+ *  tasks/<id>.md）。fan-in 的 ac-precheck（suite 前 fail-fast，读 `checked===total`）会因未全勾拒翻、
+ *  烧掉整条 fan-in。创建 prompt 与续做 prompt 共用。 */
 function acCheckNote(): string {
   return [
     `after implementing, go through each Acceptance Criterion one-by-one and verify it is satisfied by your work;`,
-    `then in the worktree task body \`## Acceptance Criteria\` check off every satisfied criterion as \`- [x]\``,
-    `(turn \`- [ ]\` into \`- [x]\`), committing these AC checkbox updates together with your implementation in the same commit —`,
+    `then record the AC state through the Provider ABI — do NOT hand-edit the \`- [ ]\`/\`- [x]\` checkbox`,
+    `characters in the task file yourself: call \`task_check\` to confirm, then call \`task_write\` with the`,
+    `updated \`## Acceptance Criteria\` section (satisfied criteria as \`- [x]\`); \`task_write\` commits`,
+    `\`tasks/<id>.md\` branch-aware on its own, so the tick reaches fan-in's ac-precheck exactly as a hand-edit would —`,
     `an AC left unchecked fails fan-in's ac-precheck and burns the whole fan-in run.`,
   ].join(" ");
 }
@@ -1000,7 +1004,7 @@ export function buildWorkerPrompt(task: string, root: string): string {
     `(2) implement the task per its Proposal/Plan/AC/DoD, committing your implementation on the task branch; ${acCheckNote()}`,
     `(2b) ${preMergeNote(task, root, "<the worktree path you created in step 1>")}`,
     `(3) ${driverFanInNote()}`,
-    `⚠️ CRITICAL: every Read/Edit/Write file_path MUST be the absolute path of the worktree you created in step 1 — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your implementation in the develop shared checkout, not your worktree.`,
+    `⚠️ CRITICAL: for CODE files, every Read/Edit/Write file_path MUST be the absolute path of the worktree you created in step 1 — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your implementation in the develop shared checkout, not your worktree. This rule does NOT cover the task file — that is edited only via \`task_write\` (see step 2 above), never Read/Edit/Write.`,
     `You own your worktree fully; apart from the final merge (done by the driver) do not touch develop.`,
   ].join(" ");
 }
@@ -1650,7 +1654,7 @@ export function buildContinueWorkerPrompt(task: string, root: string, state: Con
     `Proposal/Plan/AC/DoD (⛔ do not redo the ${commits} commits already on the branch); ${acCheckNote()}`,
     `(1b) ${preMergeNote(task, root, wt)}`,
     `(2) ${driverFanInNote()}.`,
-    `⚠️ CRITICAL: every Read/Edit/Write file_path MUST be the worktree absolute path ${wt} — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your change in develop, not your worktree.`,
+    `⚠️ CRITICAL: for CODE files, every Read/Edit/Write file_path MUST be the worktree absolute path ${wt} — never the main-checkout path \`${root}\`, never a relative path. Claude Code's file tools use absolute paths and do NOT sense shell \`cd\`; a main-checkout or relative path lands your change in develop, not your worktree. This rule does NOT cover the task file — that is edited only via \`task_write\` (see above), never Read/Edit/Write.`,
     `You own this worktree fully; apart from the final merge do not touch develop.`,
   ].join(" ");
 }
