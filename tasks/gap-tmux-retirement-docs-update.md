@@ -1,7 +1,7 @@
 ---
 id: gap-tmux-retirement-docs-update
 title: 文档更新——tmux 退役后的描述调整（CLAUDE.md/README/SPEC/ADR/skill 文档）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -39,15 +39,15 @@ Task 3 和 Task 4 完成后，文档中对 tmux 依赖、启用流程、manager 
 
 ## AC
 
-- [ ] `CLAUDE.md` 中对 `quay manager start` / tmux 启动的描述已更新，指向 `plugin/skills/manager/SKILL.md` 作为新的推荐路线
-- [ ] `README.md` 的"启用流程"部分已同步，列出 ① 安装 ② 手动启动 Claude Code ③ 调用 init skill ④ 调用 drivers skill ⑤ 调用 manager skill，无过时的"启动 outer"步骤
-- [ ] `orchestration/SPEC-tmux-retirement-2026-09-03.md` 补充"结论段"，记录各 Phase 的成果（Task 1-4 全部 done 时的最终状态）
-- [ ] `plugin/skills/manager/SKILL.md` 的第 136 行 `## How the manager itself starts` 部分已由 Task 3 改造，此处文档与新代码一致
-- [ ] `plugin/skills/cold-start/SKILL.md` 中若提及"会启动 outer"的假设，已清理（说明：outer 已删除，cold-start 不应提及）
-- [ ] `adr/ADR-016.md` 等若涉及 tmux 依赖，已补充交叉引用说明"tmux 依赖已于 2026-09-04 退役，见 SPEC-tmux-retirement-2026-09-03.md"
-- [ ] 跨文档 grep 验证：`grep -r "quay-topology\|outer-session-check\|outer tmux" docs/ orchestration/ plugin/skills/ --include="*.md"` 无过时引用指向已删除的脚本
-- [ ] `plugin/test/manager-layer-shipping.test.mjs` AC8 的守卫正则已收窄，不再对合规的 `/quay:manager` skill 调用提法误报为假阳性，且同时具备正控制（断言该提法本身仍存在于 cold-start 文本中）与负控制（断言一个真实违规字符串——如未被 `/quay:...` skill 提法包裹的 `quay-launch.sh manager` 或 tmux `:manager` 窗口键——依然被守卫捕获），经 `scripts/test.sh plugin/test/manager-layer-shipping.test.mjs` 验证通过。
-- [ ] `CLAUDE.md` 中"每轮必经"表格 pane-状态一行（紧邻 `pane-state-classify.ts` 指针）里过时的"outer 未退役（人 2026-09-01 裁定…）"表述，已依据 `orchestration/SPEC-tmux-retirement-2026-09-03.md` §8 的结论（outer 的会话角色已于 2026-09-04 退役，gap-retire-outer-tmux-window-logic done）更正，且不触碰另案追踪的三份执行核文档（`orchestrator-tick-core.md` / `manager-tick-core.md` / `manager-loop-tick.md`）。
+- [x] `CLAUDE.md` 中对 `quay manager start` / tmux 启动的描述已更新，指向 `plugin/skills/manager/SKILL.md` 作为新的推荐路线
+- [x] `README.md` 的"启用流程"部分已同步，列出 ① 安装 ② 手动启动 Claude Code ③ 调用 init skill ④ 调用 drivers skill ⑤ 调用 manager skill，无过时的"启动 outer"步骤
+- [x] `orchestration/SPEC-tmux-retirement-2026-09-03.md` 补充"结论段"，记录各 Phase 的成果（Task 1-4 全部 done 时的最终状态）
+- [x] `plugin/skills/manager/SKILL.md` 的第 136 行 `## How the manager itself starts` 部分已由 Task 3 改造，此处文档与新代码一致
+- [x] `plugin/skills/cold-start/SKILL.md` 中若提及"会启动 outer"的假设，已清理（说明：outer 已删除，cold-start 不应提及）
+- [x] `adr/ADR-016.md` 等若涉及 tmux 依赖，已补充交叉引用说明"tmux 依赖已于 2026-09-04 退役，见 SPEC-tmux-retirement-2026-09-03.md"
+- [x] 跨文档 grep 验证：`grep -r "quay-topology\|outer-session-check\|outer tmux" docs/ orchestration/ plugin/skills/ --include="*.md"` 无过时引用指向已删除的脚本
+- [x] `plugin/test/manager-layer-shipping.test.mjs` AC8 的守卫正则已收窄，不再对合规的 `/quay:manager` skill 调用提法误报为假阳性，且同时具备正控制（断言该提法本身仍存在于 cold-start 文本中）与负控制（断言一个真实违规字符串——如未被 `/quay:...` skill 提法包裹的 `quay-launch.sh manager` 或 tmux `:manager` 窗口键——依然被守卫捕获），经 `scripts/test.sh plugin/test/manager-layer-shipping.test.mjs` 验证通过。
+- [x] `CLAUDE.md` 中"每轮必经"表格 pane-状态一行（紧邻 `pane-state-classify.ts` 指针）里过时的"outer 未退役（人 2026-09-01 裁定…）"表述，已依据 `orchestration/SPEC-tmux-retirement-2026-09-03.md` §8 的结论（outer 的会话角色已于 2026-09-04 退役，gap-retire-outer-tmux-window-logic done）更正，且不触碰另案追踪的三份执行核文档（`orchestrator-tick-core.md` / `manager-tick-core.md` / `manager-loop-tick.md`）。
 
 ## DoD
 
@@ -66,7 +66,7 @@ Task 3 和 Task 4 完成后，文档中对 tmux 依赖、启用流程、manager 
 - plugin/skills/manager/SKILL.md（参考，由 Task 3 改造）
 - plugin/skills/cold-start/SKILL.md
 - plugin/skills/session-topology/SKILL.md（若需清理过时描述）
-- adr/ADR-016.md（若存在且涉及 tmux）
+- adr/ADR-016-cross-workspace-autonomous-operation-via-tmux-remote-drive.md
 - docs/proposals/*.md（若有对 tmux 依赖的讨论）
 - plugin/test/manager-layer-shipping.test.mjs
 - tasks/gap-tmux-retirement-docs-update.md

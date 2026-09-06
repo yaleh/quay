@@ -175,8 +175,9 @@ memory.
 The plugin **ships** the manager layer (any network with more than one project needs it — not
 shipping it means every network re-invents it). But a **project cold start does NOT start it**: the
 manager is cross-project, one per network, and is the human's/OS-anchor's to start. A cold-start
-skill must never start the manager just because the plugin contains it — the two-window project
-topology is `outer`+`inner` only.
+skill must never start the manager just because the plugin contains it — the manager is NOT part of
+any project's session topology (the outer/inner two-session topology was retired with the outer
+tmux session, `gap-retire-outer-tmux-window-logic`).
 
 ## Methodology sources (SPEC index — referenced, not batch-crystallized)
 
