@@ -348,6 +348,7 @@ test('resolveEvidence: 点号路径与 drivers.<kind>.<field> 都能解析；不
 });
 
 const goodItem = {
+  touches: 'plugin/scripts/driver-filters.ts',
   title: '查清 author↔develop 语义兜底为何从不成功',
   problem: '同步机制最近 200 事件中 semanticResolved 为 0，而 not-ff 41 次——ff 失败时的出口从未生效',
   evidenceKey: 'syncHealth.semanticResolved',
@@ -419,6 +420,14 @@ test('driveItems: 全部前置通过 ⇒ 接受并给出 id（dry-run 不落盘�
   const r = await driveItems('/tmp', [goodItem], ecoReadings, { cap: 1, dryRun: true, at: 'now' });
   assert.equal(r[0].accepted, true, r[0].reason);
   assert.match(r[0].id, /^gap-meta-/);
+});
+
+test('renderAutoDriveBody: Touches 来自被修机制、且机械补上 self-touch', () => {
+  const body = renderAutoDriveBody(goodItem, 0, 'now', [], 'gap-meta-x');
+  assert.ok(body.includes('- `plugin/scripts/driver-filters.ts`'), 'Touches 必须指向真正要改的文件');
+  assert.ok(body.includes('- `tasks/gap-meta-x.md`'), 'self-touch 必须被机械补齐');
+  // 回归：模板曾硬编码 meta-driver.ts ⇒ worker 结构上改不了对的文件 ⇒ 撞重试上限进 needs-human。
+  assert.ok(!body.includes('- `plugin/scripts/meta-driver.ts`'), '⛔ 不得再硬编码 meta-driver.ts');
 });
 
 test('renderAutoDriveBody: 四件套齐备且把解析出的读数逐字写进任务体', () => {

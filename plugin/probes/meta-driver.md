@@ -38,9 +38,13 @@ WHAT YOU ARE GIVEN (the `readings` JSON in the prompt — treat it as arithmetic
 - `drivers`: every registered driver kind with whether it is `running`, its carrier's record count,
   and `staleSecs` (how long since that carrier last got a record). A carrier that stopped updating is
   NOT evidence of "nothing to do" — it is evidence of nothing, and you should say which.
-- `syncHealth`: counts of the author↔develop sync mechanism's own outcomes over a recent window
-  (`ffSynced` / `notFf` / `ffError` / `semanticResolved`). This mechanism runs every round and records
-  every outcome, so a high failure share is a measured fact, not an inference.
+- `syncHealth`: counts of the author↔develop sync mechanism's own outcomes over a recent window:
+  `ffSynced` / `notFf` / `ffError`, plus the semantic fallback's `semanticBegin` and its four terminal
+  states (`semanticResolved` / `semanticConflict` / `semanticAlignFailed` / `semanticFfFailed`).
+  ⚠️ `semanticBegin` is counted separately from the terminals ON PURPOSE: counting only terminals
+  once hid the dominant failure (23 entries, 2 resolved, 21 stuck at conflict) and made the fallback
+  look like it barely ran. `notFf` carries `ahead`/`behind` at its source, so "ahead only" (benign —
+  the doc branch just committed, nothing to pull) is distinguishable from a real divergence.
 - `focus` (optional): a human-supplied steer for this round. When present, weight your attention
   toward it, but never let it suppress a divergence you were given.
 
@@ -94,7 +98,7 @@ RESTRAINT — this is the point of the mechanism, not an afterthought:
    THAT mechanism, and success can be decided by running a command.
    ⛔ Do NOT use it for: anything whose answer is "it depends what we want" (a direction ruling), a
    redesign, retiring something, or a change to how the project decides things. Those are `proposals`
-   or `humanAttention` — a machine must not drive a decision that is the human's to make.
+   or `decisions` — a machine must not drive a decision that is the human's to make.
    Each item needs:
    - `evidenceKey`: a dotted path into THE READINGS YOU WERE GIVEN, e.g. `syncHealth.notFf`,
      `syncHealth.ffError`, `drivers.outer.running`. It is resolved mechanically; if it does not
@@ -103,7 +107,20 @@ RESTRAINT — this is the point of the mechanism, not an afterthought:
      `syncDevelopToDoc`, `routine-scheduler`). Existing tasks are searched for this word; if any task
      already mentions it, the item is REJECTED as possibly-already-owned. Pick the MECHANISM word,
      not a symptom word — that distinction is the whole point of the check.
+   - `touches`: the repo-relative file(s) the fix must edit, comma-separated. REQUIRED, and you now
+     have code-reading to find them — name the file that OWNS the mechanism, not the file that
+     observed it. This becomes the task's `## Touches`, which is the anti-drift AUTHORIZATION list:
+     a worker literally cannot edit a file that is not listed. (Learned the hard way on
+     2026-09-06: the template hardcoded `meta-driver.ts` while the fix belonged in
+     `driver-filters.ts`, so the worker could not make the change, burned its 3 retries, and the
+     task landed in `needs-human`. A wrong authorization list files an impossible task.)
    - `problem` (one line, what is broken), `criterion` (runnable, decides done), `expect`.
+   ⚠️ CRITERION QUALITY — the same round produced a criterion that could not see its own fix:
+   `grep -n '<event-name>' file | grep -qE 'stderr'` requires the two tokens to sit on the SAME
+   SOURCE LINE. The fix landed on two lines, so a correct implementation still read as FAIL. A
+   criterion must test BEHAVIOUR, not source layout: prefer running an existing test file, or a
+   command that exercises the code path and inspects its output. If your criterion would break when
+   someone reformats the source without changing behaviour, it is the wrong criterion.
 
 4. `decisions[]` — AT MOST TWO per round, and usually ZERO. A direction question that a machine must
    NOT settle, but that must still be ROUTED rather than parked.
@@ -139,7 +156,8 @@ REPLY WITH ONLY a JSON object, no prose around it:
   "expect":"<one line>","origin":"<empirical basis, citing the reading>"}],
  "autoDrive":[{"title":"<one line>","problem":"<what is broken, one line>",
   "evidenceKey":"<dotted path into the readings>","mechanismKeyword":"<mechanism name in code>",
-  "criterion":"<runnable shell>","expect":"<one line>"}],
+  "criterion":"<runnable shell, tests behaviour not source layout>","expect":"<one line>",
+  "touches":"<repo-relative file(s) the fix must edit, comma-separated>"}],
  "decisions":[{"title":"<one line>","question":"<what must be settled>",
   "options":"<alternatives and what each costs>","evidenceKey":"<dotted path into the readings>",
   "origin":"<why a machine must not settle this>"}]}

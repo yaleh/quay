@@ -481,6 +481,11 @@ export interface AutoDriveItem {
   mechanismKeyword: string;
   criterion: string;
   expect: string;
+  /** 要改的文件（仓库相对路径，逗号分隔）。**必填**——Touches 是 anti-drift 的授权面，
+   *  ⛔ 不能硬编码：实测 gap-meta-syncdeveloptodoc 因模板把 Touches 写死成 meta-driver.ts，
+   *  而真正要修的是 driver-filters.ts ⇒ worker 结构上改不了对的文件 ⇒ 连撞 3 次重试上限进
+   *  needs-human。立案时就把授权面写错，等于立了一条不可能完成的任务。 */
+  touches: string;
 }
 
 /** 按点号路径在本轮读数里解析证据。`drivers.<kind>.<field>` 特化为按 kind 查。
@@ -534,7 +539,7 @@ export function blockingOwners(owners: OwningTask[]): OwningTask[] {
 }
 
 /** 任务体（四件套）。⛔ 机械渲染自结构化输出——不给 LLM 写文件的权力。 */
-export function renderAutoDriveBody(item: AutoDriveItem, evidence: unknown, at: string, staleOwners: string[] = []): string {
+export function renderAutoDriveBody(item: AutoDriveItem, evidence: unknown, at: string, staleOwners: string[] = [], taskId?: string): string {
   return [
     "## Finding",
     `${item.problem}`,
@@ -552,7 +557,12 @@ export function renderAutoDriveBody(item: AutoDriveItem, evidence: unknown, at: 
     "- [ ] 若结论是「已有机制在管、只是失败」，则修那个机制，⛔ 不新建并行机制",
     "",
     "## Touches",
-    "- `plugin/scripts/meta-driver.ts`",
+    // 机制所在文件（由语义半读码指明）+ 任务体自身（立案纪律要求 self-touch）。
+    // self-touch 机械补齐（立案纪律要求任务体自身在 Touches 里）——⛔ 不指望 LLM 记得。
+    ...[...new Set([
+      ...item.touches.split(",").map((t) => t.trim()).filter(Boolean),
+      ...(taskId ? [`tasks/${taskId}.md`] : []),
+    ])].map((t) => `- \`${t}\``),
   ].join("\n");
 }
 
@@ -608,7 +618,7 @@ export async function driveItems(
     if (opts.dryRun) {
       out.push({ item, id, accepted: true, reason: "dry-run: would file" });
     } else {
-      const c = await createAutoDriveTask(root, id, item, renderAutoDriveBody(item, ev, opts.at, staleOwners));
+      const c = await createAutoDriveTask(root, id, item, renderAutoDriveBody(item, ev, opts.at, staleOwners, id));
       out.push({ item, id, accepted: c.ok, reason: c.reason });
       if (!c.ok) continue;
     }
@@ -803,12 +813,13 @@ export function parseProbeOutput(stdout: string): { divergences: unknown[]; prop
     ? (o.autoDrive as unknown[]).flatMap((raw) => {
         if (!raw || typeof raw !== "object") return [];
         const a = raw as Record<string, unknown>;
-        const need = ["title", "problem", "evidenceKey", "mechanismKeyword", "criterion", "expect"] as const;
+        const need = ["title", "problem", "evidenceKey", "mechanismKeyword", "criterion", "expect", "touches"] as const;
         if (need.some((k) => typeof a[k] !== "string" || String(a[k]).trim() === "")) return [];
         return [{
           title: String(a.title).trim(), problem: String(a.problem).trim(),
           evidenceKey: String(a.evidenceKey).trim(), mechanismKeyword: String(a.mechanismKeyword).trim(),
           criterion: String(a.criterion).trim(), expect: String(a.expect).trim(),
+          touches: String(a.touches).trim(),
         }];
       })
     : [];
