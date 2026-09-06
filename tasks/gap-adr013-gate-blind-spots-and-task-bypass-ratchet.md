@@ -2,7 +2,7 @@
 id: gap-adr013-gate-blind-spots-and-task-bypass-ratchet
 title: Fix ADR-013 conformance gate's two evergreen-pass defects + add a
   fail-closed task-file-bypass ratchet
-status: ready
+status: done
 labels:
   - gap
   - defect
