@@ -145,10 +145,18 @@ export function computeDivergences(readings: CriterionReading[]): Divergence[] {
   const out: Divergence[] = [];
   for (const c of readings) {
     const base = { id: c.id, status: c.status, verdict: c.verdict, reason: c.reason };
-    // draft = 尚未被人激活的【提案】，不是承诺 ⇒ 它的判据通过与否都不构成偏离。
-    // （实测：AC-180 是 meta-driver 自己提的 draft，却被报成 pass-but-unflipped——
-    //  把「提案」当成「未兑现的承诺」是错的，且会让偏离数随提案数虚增。）
-    if (c.status === "draft") continue;
+    // 只有【承诺态】才可能构成偏离。承诺态 = active（已许诺、待兑现）∪ achieved（已宣称兑现）。
+    // 其余三态都不是承诺，判据过不过都不构成偏离：
+    //   draft      —— 尚未被人激活的【提案】。（实测：AC-180 是 meta-driver 自己提的 draft，
+    //                 却被报成 pass-but-unflipped——把「提案」当成「未兑现的承诺」是错的，
+    //                 且会让偏离数随提案数虚增。）
+    //   retired    —— 已撤回。⚠️ 实测 2026-09-06：把 AC-181（活性监控项误写成目标判据）退役后，
+    //                 它的判据仍 pass 而 status≠achieved ⇒ 立刻被报成 pass-but-unflipped，
+    //                 制造出一条【每轮都在、永远无法消解】的假偏离——退役的东西没有「该翻 achieved」可言。
+    //   superseded —— 已被后继取代，同理。
+    // ⊢ 判据写成「不在承诺态集合里就跳过」而非「逐个排除已知的坏值」：新增一个状态时默认安全
+    //   （不被误报），⛔ 不是默认危险。
+    if (c.status !== "active" && c.status !== "achieved") continue;
     if (!c.criterion || c.criterion.trim() === "") { out.push({ ...base, kind: "no-criterion" }); continue; }
     if (c.verdict === "pass" && c.status !== "achieved") { out.push({ ...base, kind: "pass-but-unflipped" }); continue; }
     if (c.verdict === "fail" && c.status === "achieved") { out.push({ ...base, kind: "achieved-but-failing" }); continue; }
