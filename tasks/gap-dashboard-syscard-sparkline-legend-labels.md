@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-syscard-sparkline-legend-labels
 title: Dashboard 系统资源卡 sparkline 补图例 + 端点/极值标注 + 时间跨度标签（不引入新依赖，复用已有手搓 SVG 手法）
-status: ready
+status: done
 labels:
   - gap
   - webui
