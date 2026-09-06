@@ -1,7 +1,7 @@
 {
   "files": 132,
-  "bytes": 3834660,
-  "fingerprint": "149464eb8fc207c15d24427c86c40a5f3a0a93dad3af33a20da01ef5df612d65",
+  "bytes": 3835230,
+  "fingerprint": "7176cb08544ed91883318a3ce6b8a61133bf5429305a1f1acbff837832323720",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
@@ -101,7 +101,7 @@
     },
     {
       "rel": "plugin/scripts/cap-from-gate.ts",
-      "sha": "faea6d8881aeaec2f285116e00f41824fbc209cf98047bc39eec2abee229e80a"
+      "sha": "15ad67db81c0599e4477f2c4560023a785c3e6a37e95701197fa9ba734cee200"
     },
     {
       "rel": "plugin/scripts/capability-catalog.sh",
@@ -413,7 +413,7 @@
     },
     {
       "rel": "plugin/scripts/slot-refill.ts",
-      "sha": "dae7ce3377c70a39e3a8d77bfa4d25f71a81725fbdca9471a99cb3bd8c273fdf"
+      "sha": "375d0da8e7afb7ae3b0ee1fb8c57d65f71b6d03ac0952c8b5b866b8993e63b33"
     },
     {
       "rel": "plugin/scripts/start-drivers.ts",

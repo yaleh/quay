@@ -145,7 +145,7 @@ import { listWorktrees, taskIdFromBranch } from "./fast-mode-telemetry.ts";
 // cap derives from driver-config's defaultDriverConfig().worker.cap — the SAME single source
 // cap-from-gate.ts (FIXED_EFFECTIVE_CAP) / promotion-driver.ts (CAP_DEFAULT) / worker-driver.ts
 // (driverCap) consume (AC155). No parallel `= 5` literal in slot-refill.
-import { defaultDriverConfig } from "./driver-config.ts";
+import { defaultDriverConfig, driverCap } from "./driver-config.ts";
 
 /** FIXED dispatch cap (gap-fixed-cap-5-dynamic-cap-retired, human ruling 2026-08-09): the dynamic
  *  adaptive cap is retired. `--cap` defaults to this value — 5 — so slot-refill and its derived
@@ -1461,6 +1461,7 @@ export function resolveInFlightId(tasksDir, input) {
 function main(argv) {
   let root = null;
   let cap = FIXED_DISPATCH_CAP;
+  let capExplicit = false;
   let floorMult = POOL_FLOOR_MULT_DEFAULT;
   // AC115 (SPEC-worker-driven-inner-2026-08-16 §5 阶段 1): in-flight is now the worker driver's
   // DIRECT child-process count (--in-flight-count <n>), NOT a caller-maintained id list. The retired
@@ -1473,13 +1474,18 @@ function main(argv) {
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") root = args[++i];
     else if (args[i] === "--json") { /* output is always JSON — accepted for Contract parity */ }
-    else if (args[i] === "--cap") cap = Number(args[++i]);
+    else if (args[i] === "--cap") { cap = Number(args[++i]); capExplicit = true; }
     else if (args[i] === "--floor-mult") floorMult = Number(args[++i]);
     else if (args[i] === "--in-flight-count") inFlightCount = Number(args[++i]);
     else if (args[i] === "--integration-backlog") integrationBacklog = Number(args[++i]);
     else if (args[i] === "--red-backlog-cap") redBacklogCap = Number(args[++i]);
   }
   const rootDir = root ? path.resolve(root) : repoRoot(process.cwd());
+  // gap-cap-from-gate-effective-cap-dual-source-blocks-yml-override AC2: the bare-CLI default cap must
+  // read the SAME single source the runtime uses (driverCap → drivers.yml), not the code-default
+  // FIXED_DISPATCH_CAP literal — otherwise `slot-refill --json` reports 5 even when drivers.yml worker.cap
+  // is changed. An explicit --cap still wins; FIXED_DISPATCH_CAP remains the library-fallback default.
+  if (!capExplicit) cap = driverCap(rootDir, "worker");
   const tasksDir = path.join(rootDir, "tasks");
   // AC115 RETIREMENT (SPEC §5 阶段 1 退役清单): the CLI no longer passes --in-flight/--closed-but-live/
   // --running id lists NOR measures in-flight from telemetry brackets. In-flight = the driver's direct
