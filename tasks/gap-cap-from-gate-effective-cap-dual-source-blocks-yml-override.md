@@ -83,4 +83,5 @@ drivers.yml worker.cap = 5 ⇒ 同一测试                                 4 pa
 - plugin/test/cap-from-gate-hysteresis.test.mjs
 - plugin/test/cap-from-gate-stale.test.mjs
 - plugin/scripts/drivers.yml
+- docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-cap-from-gate-effective-cap-dual-source-blocks-yml-override.md
