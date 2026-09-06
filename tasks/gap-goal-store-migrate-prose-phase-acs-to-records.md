@@ -25,8 +25,8 @@ depends_on:
 而该段**实际含到 AC155**（`39617238e` 追加 AC150-155 时未更新标题，实测确认）。
 **这是"散文不能继续当权威"的直接物证，也是本任务必须逐条核对而非按标题范围批量搬的理由。**
 
-**依赖**：`gap-goal-store-goal-id-vocabulary-and-draft-status`——`GOAL-002`/`GOAL-003` 的前缀与
-`GOAL-003` 的 `draft` 状态需要该任务先落地。AC 记录本身（`AC-NNN`）在现有代码下即可被 `list()` 读出。
+**前置已达成**：`gap-goal-store-goal-id-vocabulary-and-draft-status`（G1）已于 2026-09-06 done，
+`GOAL-NNN` 前缀、`draft` 状态、`goal:` 字段均已可用（实测 `goal-store.ts get GOAL-001` 退出 0）。
 
 ## Plan
 
@@ -50,9 +50,9 @@ AC1–AC142 的历史阶段留在 `manager-phase-goal.md` / `manager-phase-goal-
 
 ## Acceptance Criteria
 
-- [ ] `test "$(node packages/quay/src/goal-store.ts list | grep -c '"id": "AC-1[4-6][0-9]"')" -ge 27` 退出 0（AC-171 判据，今天取假：count=0）
+- [ ] `test "$(node packages/quay/src/goal-store.ts list | grep -c '"id": "AC-1[4-6][0-9]"')" -ge 27` 退出 0（AC-171 判据，立案时取假：count=0）
 - [ ] `node packages/quay/src/goal-store.ts get GOAL-002 | grep -q '"status": "active"'` 退出 0
-- [ ] `node packages/quay/src/goal-store.ts get GOAL-003 | grep -q '"status": "draft"'` 退出 0
+- [ ] `node packages/quay/src/goal-store.ts get GOAL-003 | grep -q '"status": "draft"'` 退出 0（AC-172 判据的真实载体）
 - [ ] 保号无缺漏：AC143..AC155 与 AC156..AC169 的每个编号在 `goals/` 下恰有一个记录文件（单测断言）
 - [ ] 负控制：至少一条无可跑判据的 AC，其 `criterion` 为空且 `goal-store.ts gate <id>` 判红退出 1
 - [ ] `bash scripts/test.sh --for-task gap-goal-store-migrate-prose-phase-acs-to-records` 退出 0
@@ -68,9 +68,9 @@ AC1–AC142 的历史阶段留在 `manager-phase-goal.md` / `manager-phase-goal-
 
 ## Touches
 
-- goals/GOAL-002-three-layer-collapse.md
-- goals/GOAL-003-plugin-surface-convergence.md
-- goals/AC-1[4-6][0-9]-*.md
+- goals/GOAL-002-three-layer-collapse.md (new)
+- goals/GOAL-003-plugin-surface-convergence.md (new)
+- goals/AC-1[4-6][0-9]-*.md (new)
 - orchestration/manager-phase-goal.md
 - packages/quay/test/goal-store.test.mjs
 - tasks/gap-goal-store-migrate-prose-phase-acs-to-records.md
