@@ -86,13 +86,72 @@ test('plugin.json is valid JSON and declares the 13 bundled skills (M179/DIR-070
   assert.deepEqual(listedSkills, diskSkills, `plugin.json commands[] must list exactly the on-disk skill directories. Missing: ${diskSkills.filter((d) => !listedSkills.includes(d))}. Extra: ${listedSkills.filter((d) => !diskSkills.includes(d))}`);
 });
 
-test('M143: plugin.json declares agents[] with baime-iteration-executor', () => {
+test('M143: plugin.json declares agents[] with baime-iteration-executor and quay-task', () => {
   const manifest = readJson(path.join(pluginDir, '.claude-plugin', 'plugin.json'));
   assert.ok(Array.isArray(manifest.agents), 'plugin.json must have agents[]');
-  assert.ok(
-    manifest.agents.includes('./agents/baime-iteration-executor.md'),
-    'plugin.json agents[] must include baime-iteration-executor'
-  );
+  for (const a of ['./agents/baime-iteration-executor.md', './agents/quay-task.md']) {
+    assert.ok(manifest.agents.includes(a), `plugin.json agents[] must include ${a}`);
+  }
+});
+
+// gap-quay-task-consolidated-subagent — the quay-task agent is the single ABI-only entry point for
+// task CRUD/lifecycle. Its `tools:` frontmatter is the STRUCTURAL guarantee (harness-enforced, unlike
+// a skill's advisory allowed-tools): the agent cannot reach Bash/Write/Edit/Grep/Glob, so it cannot
+// bypass the Provider ABI. These tests pin the exact tool set, the absence of every file/Bash tool,
+// the plugin-quay namespace (SPEC-plugin-lifecycle-single-bundle §3c — a bare mcp__quay__* name is
+// dead in a plugin-onboarded downstream project), and the background-invocation description.
+const QUAY_TASK_AGENT = path.join(pluginDir, 'agents', 'quay-task.md');
+
+function readQuayTaskFrontmatter() {
+  const src = readFileSync(QUAY_TASK_AGENT, 'utf8');
+  const fm = src.match(/^---\n([\s\S]*?)\n---\n/);
+  assert.ok(fm, 'quay-task.md must carry a YAML frontmatter block');
+  return { src, frontmatter: fm[1] };
+}
+
+test('gap-quay-task-consolidated-subagent: tools[] is exactly the 9 MCP verbs + Read, no Bash/Write/Edit/Grep/Glob', () => {
+  assert.ok(existsSync(QUAY_TASK_AGENT), 'plugin/agents/quay-task.md must exist');
+  const { frontmatter } = readQuayTaskFrontmatter();
+  const toolsLine = frontmatter.match(/^tools:\s*(.+)$/m);
+  assert.ok(toolsLine, 'quay-task.md frontmatter must declare a tools: field');
+  const tools = toolsLine[1].split(',').map((s) => s.trim()).filter(Boolean);
+  const expected = [
+    'mcp__plugin_quay_quay__task_list',
+    'mcp__plugin_quay_quay__task_get',
+    'mcp__plugin_quay_quay__task_write',
+    'mcp__plugin_quay_quay__task_check',
+    'mcp__plugin_quay_quay__gate_run',
+    'mcp__plugin_quay_quay__lifecycle_promote',
+    'mcp__plugin_quay_quay__lifecycle_retreat',
+    'mcp__plugin_quay_quay__lifecycle_complete',
+    'mcp__plugin_quay_quay__lifecycle_adjudicate',
+    'Read',
+  ];
+  assert.deepEqual([...tools].sort(), [...expected].sort(),
+    'tools: must be exactly the 9 MCP task/lifecycle verbs + Read (no extras, no omissions)');
+  for (const forbidden of ['Bash', 'Write', 'Edit', 'Grep', 'Glob']) {
+    assert.ok(!tools.includes(forbidden), `tools: must NOT include ${forbidden} (the structural ABI-only guarantee)`);
+  }
+  for (const t of tools.filter((x) => x.startsWith('mcp__'))) {
+    assert.ok(t.startsWith('mcp__plugin_quay_quay__'),
+      `MCP tool ${t} must use the mcp__plugin_quay_quay__* namespace (bare mcp__quay__* is dead downstream, SPEC §3c)`);
+  }
+});
+
+test('gap-quay-task-consolidated-subagent: description carries the explicit background-invocation instruction', () => {
+  const { frontmatter } = readQuayTaskFrontmatter();
+  const desc = frontmatter.match(/^description:\s*(.+)$/m);
+  assert.ok(desc, 'quay-task.md frontmatter must declare a description: field');
+  assert.match(desc[1], /background/i, 'description must name background invocation');
+  assert.match(desc[1], /do not block|do not wait/i, 'description must say do-not-block/do-not-wait (phrased for the caller)');
+});
+
+test('gap-quay-task-consolidated-subagent: body is a substantive operating procedure, not a stub', () => {
+  const { src } = readQuayTaskFrontmatter();
+  assert.ok(src.length > 800, 'quay-task.md body must be a substantive operating procedure');
+  for (const section of ['Read + dedup', 'Create', 'Edit', 'Lifecycle', 'Delete', 'Read-back discipline']) {
+    assert.ok(src.includes(section), `body must document the "${section}" procedure`);
+  }
 });
 
 test('.mcp.json declares the quay MCP server via ${CLAUDE_PLUGIN_ROOT}-relative args', () => {
