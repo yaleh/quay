@@ -116,6 +116,25 @@ function readPid(root, name) {
   return fs.existsSync(p) ? fs.readFileSync(p, "utf8").trim() : "";
 }
 
+// Poll a JSON file that a (possibly non-atomic) writer creates-then-writes. Treats "file exists but
+// content not yet fully written" (JSON.parse throws) as "not yet complete — keep polling", ⛔ not a
+// fatal parse error (gap-driver-test-fixture-json-read-before-write-complete-race). Returns the
+// parsed object, or null on timeout.
+async function pollJsonFile(p, timeoutMs = 5000, stepMs = 50) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(p)) {
+      try {
+        return JSON.parse(fs.readFileSync(p, "utf8"));
+      } catch {
+        // created but not fully written — keep polling
+      }
+    }
+    await new Promise((r) => setTimeout(r, stepMs));
+  }
+  return null;
+}
+
 function killIfAlive(pid) {
   if (!pid) return;
   try { process.kill(Number(pid), "SIGKILL"); } catch { /* already gone */ }
@@ -404,15 +423,7 @@ test("AC1 (worker cap) — start --kind worker --cap 2 ⇒ driver argv carries -
   const r = run(["restart", "--kind", "worker", "--cap", "2", "--root", root, "--restart-delay", "1", "--run-id", "dr-wac1"]);
   assert.equal(r.status, 0, `restart failed: ${r.stdout}\n${r.stderr}`);
   assert.ok(!/unknown argument: --concurrency/.test(r.stderr), `supervisor self-restart must accept --cap: ${r.stderr}`);
-  const dump = await (async () => {
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline) {
-      const p = path.join(root, ".quay", "worker-argv-dump.json");
-      if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, "utf8"));
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    return null;
-  })();
+  const dump = await pollJsonFile(path.join(root, ".quay", "worker-argv-dump.json"));
   assert.ok(dump, "worker driver dumped its argv");
   assert.ok(dump.argv.includes("--concurrency") && dump.argv.includes("2"), `driver argv carries --concurrency 2: ${JSON.stringify(dump.argv)}`);
 });
@@ -430,16 +441,33 @@ test("AC2 (worker 并发缺省) — start --kind worker with NO --cap ⇒ superv
   delete env.QUAY_MAX_TASK_SUBAGENTS;
   const r = run(["start", "--kind", "worker", "--root", root, "--restart-delay", "1", "--run-id", "dr-wac2"], { env });
   assert.equal(r.status, 0, `start failed: ${r.stdout}\n${r.stderr}`);
-  const dump = await (async () => {
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline) {
-      const p = path.join(root, ".quay", "worker-argv-dump.json");
-      if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, "utf8"));
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    return null;
-  })();
+  const dump = await pollJsonFile(path.join(root, ".quay", "worker-argv-dump.json"));
   assert.ok(dump, "worker driver dumped its argv/env");
   assert.equal(dump.capEnv, null, `supervisor must NOT inject QUAY_MAX_TASK_SUBAGENTS (driver resolves cap from drivers.yml itself): ${JSON.stringify(dump)}`);
   assert.ok(!dump.argv.includes("--concurrency"), `default resolved by driver from drivers.yml, not an explicit flag: ${JSON.stringify(dump.argv)}`);
+});
+
+// ── negative control（gap-driver-test-fixture-json-read-before-write-complete-race AC3）────────────
+// 故意制造 "文件存在但内容未写完" 的中间态：旧的 existsSync-then-JSON.parse 读法会报错，新的
+// pollJsonFile 会把它当 "还没写完" 继续轮询，最终读到完整内容。
+
+test("negative control — pollJsonFile waits through a torn (exists-but-partial) JSON file instead of a fatal parse error", async (t) => {
+  const root = makeWorkerRoot("nc-torn");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const p = path.join(root, ".quay", "worker-argv-dump.json");
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+
+  // (a) 旧逻辑（existsSync → JSON.parse）在中间态报错——先证负控制非空（旧读法确实会撞竞态）。
+  fs.writeFileSync(p, '{"argv":["--concurrency"', "utf8");
+  assert.throws(() => JSON.parse(fs.readFileSync(p, "utf8")), "old existsSync-then-JSON.parse read throws on a torn file");
+
+  // (b) 新逻辑在中间态继续轮询，等写入方补完内容后读到完整 JSON。
+  const complete = { argv: ["--concurrency", "2"], capEnv: null };
+  const finish = new Promise((resolve) => setTimeout(() => {
+    fs.writeFileSync(p, JSON.stringify(complete), "utf8");
+    resolve();
+  }, 60));
+  const dump = await pollJsonFile(p, 2000, 10);
+  await finish;
+  assert.deepEqual(dump, complete, "poller waited through the torn state and read the completed file");
 });
