@@ -54,6 +54,14 @@ extra:
 **⚠️ `plugin/vendor/quay/dist/quay.js` 未被 git 跟踪**（实测 `git ls-files --error-unmatch` 失败），
 是本地构建产物，不入 Touches、不手改。
 
+**⚠️ 立案后补入 Touches（2026-09-06，立案者的遗漏，非执行者越界）**：
+新增一个 `orchestration/SPEC-*.md` **必须在 2 个声明点注册** `<!-- reference-doc: ... -->`
+（`plugin/skills/init/SKILL.md` 已有 67 条同款，`plugin/skills/manager/SKILL.md` 一条），
+否则 `spec-declaration-point-check.ts` **全库红**。该检查器不在 pre-commit 的 doc-check 集内，
+所以 SPEC 提交当时没被拦住。develop 侧已由 `gap-manager-skill-session-embodiment-activation`
+（`909b9fd62`，已 done、不在飞）补齐 ⇒ **本任务 worktree 里若已暂存同一行，merge develop 后
+可能出现重复行，以 develop 侧为准去重即可，不要再加第二条。**
+
 ## Acceptance Criteria
 
 - [x] `node packages/quay/src/goal-store.ts get GOAL-001 >/dev/null 2>&1` 退出 0（AC-170 判据，今天取假）
@@ -81,4 +89,6 @@ scoped 门绿，且 `git show develop:packages/quay/src/goal-store.ts` 含 `GOAL
 - packages/quay/test/serve-goal-doc.test.mjs
 - packages/quay/test/serve-nav-inconsistent-routes.test.mjs
 - packages/quay/test/webui-modernist-sync.test.mjs
+- plugin/skills/init/SKILL.md
+- plugin/skills/manager/SKILL.md
 - tasks/gap-goal-store-goal-id-vocabulary-and-draft-status.md
