@@ -1,7 +1,7 @@
 ---
 id: AC-176
 title: G5 ABI 封装——goal 经 Provider ABI 暴露，CLI 走 provider client
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-001
 criterion: |
@@ -14,7 +14,7 @@ origin: |
   技术上的独立支撑：agent 现在读不到 goal——全仓 goal_list 零命中，
   唯一入口是直跑 node packages/quay/src/goal-store.ts。
 evidence:
-  at: 2026-09-06T11:06:52.155Z
+  at: 2026-09-06T21:54:10.556Z
   verdict: pass
   reading: acceptance passed (exit 0)
 ---
