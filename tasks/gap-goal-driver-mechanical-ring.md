@@ -90,6 +90,9 @@ depends_on:
 - plugin/scripts/capability-catalog.sh
 - packages/quay/src/cli/driver.ts
 - plugin/test/goal-driver.test.mjs (new)
+- plugin/test/driver-runtime.test.mjs
+- .gitignore
+- docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-goal-driver-mechanical-ring.md
 
 ## Needs-Human
