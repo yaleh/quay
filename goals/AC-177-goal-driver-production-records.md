@@ -1,7 +1,7 @@
 ---
 id: AC-177
 title: G6 goal-driver 机械环在生产载体留下带 verdict 的真实记录
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-001
 criterion: |
@@ -14,9 +14,9 @@ origin: |
   同族先例即本 GOAL 的立条依据：gap-spec-goal-store-third-sibling-kind 标 done、
   AC 全绿，而 goals/ 从未存在、gate-events 中 "gate":"goal" 零条。
 evidence:
-  at: 2026-09-06T09:44:36.833Z
-  verdict: fail
-  reading: acceptance failed (exit 1)
+  at: 2026-09-06T21:54:10.953Z
+  verdict: pass
+  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：`.quay/goal-round.jsonl` 非空且含 ≥3 条带 `verdict` 的记录。
