@@ -27,12 +27,12 @@ extra:
 
 ## AC
 
-- [ ] `goal_ac` 经 `parseTask` 从**顶层**读出（非 `extra` 嵌套）：对一条已回填的任务读取该字段，值等于其声明的 AC id，退出码 0
-- [ ] 负控制（证明上一条能取假）：对一条**未设** `goal_ac` 的任务跑同一读取，退出码非 0 / 值为空——两条一起才排除「恒真」
-- [ ] **AC-178 正本判据**：`test "$(grep -l '^goal_ac:' tasks/*.md | wc -l)" -ge 3` 退出码 0
-- [ ] 缺口计算是一条命令的机械量：对每条未达成 AC 给出关联任务计数，且输出区分「有任务在推进 / 缺口 / 未评估」**三态**（硬规则 3b：读不懂输入时不得返回与合格同形的值）
-- [ ] `task_write` 经 ABI 接受顶层 `goal_ac` 参数：实际写入一次再读回，写入值与读回值一致
-- [ ] scoped 门 `bash scripts/test.sh --for-task gap-goal-ac-task-linkage-top-level-field --allow-thin` 退出码 0
+- [x] `goal_ac` 经 `parseTask` 从**顶层**读出（非 `extra` 嵌套）：对一条已回填的任务读取该字段，值等于其声明的 AC id，退出码 0
+- [x] 负控制（证明上一条能取假）：对一条**未设** `goal_ac` 的任务跑同一读取，退出码非 0 / 值为空——两条一起才排除「恒真」
+- [x] **AC-178 正本判据**：`test "$(grep -l '^goal_ac:' tasks/*.md | wc -l)" -ge 3` 退出码 0
+- [x] 缺口计算是一条命令的机械量：对每条未达成 AC 给出关联任务计数，且输出区分「有任务在推进 / 缺口 / 未评估」**三态**（硬规则 3b：读不懂输入时不得返回与合格同形的值）
+- [x] `task_write` 经 ABI 接受顶层 `goal_ac` 参数：实际写入一次再读回，写入值与读回值一致
+- [x] scoped 门 `bash scripts/test.sh --for-task gap-goal-ac-task-linkage-top-level-field --allow-thin` 退出码 0
 
 ## DoD
 
