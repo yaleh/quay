@@ -300,6 +300,41 @@ test('readState: 状态文件不存在 ⇒ never-judged（⛔ 不冒充"没变�
   }
 });
 
+// ── CLI 冒烟（挡住"只在 CLI 路径上才炸"的那类 bug）──────────────────────────
+// 实证促因：把 runMetaRound 的返回从 {fact,record} 收敛为 {fact} 时，--json 分支仍引用
+// 已删除的 record ⇒ `--json` 直接 ReferenceError 崩溃，而全部单测都绿（它们不走 CLI）。
+// 这条测试跑真的 CLI 入口，只用 --help（零副作用）+ 参数校验路径。
+test('CLI: --help 退出 0 并列出 --focus/--json/--resident', async () => {
+  const { main } = await import('../scripts/meta-driver.ts');
+  const chunks = [];
+  const orig = process.stdout.write;
+  process.stdout.write = (c) => { chunks.push(String(c)); return true; };
+  let code;
+  try {
+    code = await main(['node', 'meta-driver.ts', '--help']);
+  } finally {
+    process.stdout.write = orig;
+  }
+  const out = chunks.join('');
+  assert.equal(code, 0);
+  for (const flag of ['--focus', '--json', '--resident', '--no-llm', '--dry-run']) {
+    assert.ok(out.includes(flag), `--help 必须列出 ${flag}`);
+  }
+});
+
+test('CLI: 未知参数 ⇒ exit 2（⛔ 不静默忽略）', async () => {
+  const { main } = await import('../scripts/meta-driver.ts');
+  const origOut = process.stdout.write, origErr = process.stderr.write;
+  process.stdout.write = () => true; process.stderr.write = () => true;
+  let code;
+  try {
+    code = await main(['node', 'meta-driver.ts', '--nope']);
+  } finally {
+    process.stdout.write = origOut; process.stderr.write = origErr;
+  }
+  assert.equal(code, 2);
+});
+
 // ── buildProbePrompt ─────────────────────────────────────────────────────────
 test('buildProbePrompt: 读数逐字进 prompt（语义半不自采证）', () => {
   const readings = { goals: [{ id: 'GOAL-001', title: 't', status: 'active' }], criteria: [], divergences: [], focus: 'retire X' };

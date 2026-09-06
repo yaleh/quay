@@ -581,13 +581,15 @@ export async function main(argv: string[]): Promise<number> {
   // ⛔ dry-run 也要留痕：「跑了一轮、什么都没提」正是最该被记录的情形——不记则「跑过」与
   // 「没跑过」在载体上同形，本例程的沉默就不可被检测（硬规则 9）。dryRun 进记录，不进条件。
   // 信封与常驻轮【完全相同】（computeRoundRecord），避免同一载体两套 schema。
-  appendRoundSafe(root, {
+  const record = {
     ...computeRoundRecord({ round: 0, runId, pid: process.pid, at: new Date().toISOString(), facts: [fact] }),
     dryRun,
-  });
+  };
+  appendRoundSafe(root, record);
 
   if (json) {
-    process.stdout.write(JSON.stringify({ fact, record }, null, 2) + "\n");
+    // 输出【与载体逐字同一个对象】——⛔ 不另拼一份，否则 stdout 与载体会各说各话。
+    process.stdout.write(JSON.stringify(record, null, 2) + "\n");
   } else {
     const v = (fact.value ?? {}) as Record<string, unknown>;
     process.stdout.write(`meta-driver [${fact.state}] ${fact.reason}\n`);
