@@ -153,6 +153,11 @@ export async function startMcpServer({ tasksDir, adrDir, goalDir, defaultStatus 
         //   canonical (new writes):   depends_on: ["dep1", "dep2"]
         //   legacy (still readable):  extra: { depends_on: [dep1, dep2], schema: "v1" }
         depends_on: z.array(z.string()).optional(),
+        // gap-goal-ac-task-linkage-top-level-field: `goal_ac` is the owning goal AC id (task→AC
+        // linkage, G7). Like `depends_on`, it is stored TOP-LEVEL (a single scalar, not an array —
+        // a task declares at most one owning AC), and read back by readGoalAc()/parseTask() through
+        // the single frontmatter parser. It is optional (gap-* defect tasks carry none).
+        goal_ac: z.string().optional(),
         body: z.string().optional(),
         // QN-007: `extra` (design §7.1's "escape hatch for backend-specific
         // fields") was missing from this schema entirely — the MCP SDK's

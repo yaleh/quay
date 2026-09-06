@@ -17,6 +17,8 @@ import { fileURLToPath } from 'node:url';
 
 import {
   goalAchievedFromRecords,
+  computeGoalGaps,
+  readTaskFacts,
   goalDriverRoutines,
   GOAL_ROUND_REL,
 } from '../scripts/goal-driver.ts';
@@ -52,6 +54,62 @@ test('goalAchievedFromRecords: 零 AC ⇒ false；全 achieved ⇒ true；有未
     ),
     false,
   );
+});
+
+// ── G7 缺口计算（computeGoalGaps 三态 + readTaskFacts，gap-goal-ac-task-linkage-top-level-field）──
+
+test('computeGoalGaps: active AC 三态（in-progress / gap），achieved/draft 排除', () => {
+  const records = [
+    { id: 'AC-170', goal: 'GOAL-001', status: 'active' },   // 有任务推进
+    { id: 'AC-171', goal: 'GOAL-001', status: 'active' },   // 无任务 ⇒ gap
+    { id: 'AC-172', goal: 'GOAL-001', status: 'achieved' }, // 已达成 ⇒ 排除
+    { id: 'AC-173', goal: 'GOAL-001', status: 'draft' },    // 未激活 ⇒ 排除
+  ];
+  const taskFacts = [
+    { id: 'gap-a', status: 'ready', goalAc: 'AC-170' },
+    { id: 'gap-b', status: 'done', goalAc: 'AC-170' },   // done 不计入推进中
+  ];
+  const gaps = computeGoalGaps(records, taskFacts);
+  assert.equal(gaps.length, 2, '只有两条 active AC 进入缺口读数（achieved/draft 排除）');
+  const g170 = gaps.find((g) => g.ac === 'AC-170');
+  const g171 = gaps.find((g) => g.ac === 'AC-171');
+  assert.equal(g170.state, 'in-progress');
+  assert.equal(g170.taskCount, 1, 'done 不计，只数 todo/ready');
+  assert.equal(g171.state, 'gap');
+  assert.equal(g171.taskCount, 0);
+});
+
+test('computeGoalGaps: taskFacts==null ⇒ 逐条 not-evaluated（⛔ 与 gap 不同形，硬规则 3b）', () => {
+  const records = [{ id: 'AC-180', goal: 'GOAL-001', status: 'active' }];
+  const gaps = computeGoalGaps(records, null);
+  assert.equal(gaps.length, 1);
+  assert.equal(gaps[0].state, 'not-evaluated');
+  assert.equal(gaps[0].taskCount, null, 'not-evaluated 时 taskCount 为 null，不是 0');
+});
+
+test('readTaskFacts: 读 tasks/*.md 的 status+goal_ac；目录不存在 ⇒ null（不是空数组）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-gap-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'tasks', 'gap-x.md'),
+      '---\nid: gap-x\nstatus: ready\ngoal_ac: AC-170\n---\nbody\n', 'utf8');
+    fs.writeFileSync(path.join(tmp, 'tasks', 'gap-y.md'),
+      '---\nid: gap-y\nstatus: done\n---\nbody\n', 'utf8');
+    const facts = await readTaskFacts(tmp);
+    assert.ok(Array.isArray(facts), 'readTaskFacts 返回数组');
+    assert.equal(facts.length, 2);
+    const x = facts.find((f) => f.id === 'gap-x');
+    assert.equal(x.status, 'ready');
+    assert.equal(x.goalAc, 'AC-170');
+    const y = facts.find((f) => f.id === 'gap-y');
+    assert.equal(y.status, 'done');
+    assert.equal(y.goalAc, null, '未设 goal_ac ⇒ null');
+
+    const empty = await readTaskFacts(path.join(tmp, 'nope'));
+    assert.equal(empty, null, 'tasks 目录不存在 ⇒ null，不是 []');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 // ── 真实机械环端到端（⛔ 不用 fixture 注入 seam，跑真的 goal-store CLI）────────────────────

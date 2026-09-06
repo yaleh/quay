@@ -1180,7 +1180,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
    * only ordinary last-writer-wins sequencing (identical to every other
    * field this store already handles).
    */
-  function write(id: string, { title, status, labels, parent, children, extra, body, depends_on, expectedStatus }: { title?: string; status?: string; labels?: string[]; parent?: string | null; children?: string[]; extra?: Record<string, unknown>; body?: string; depends_on?: string[]; expectedStatus?: string }, opts?: { commit?: boolean }): (Task & { updatedAt?: number }) | null {
+  function write(id: string, { title, status, labels, parent, children, extra, body, depends_on, goal_ac, expectedStatus }: { title?: string; status?: string; labels?: string[]; parent?: string | null; children?: string[]; extra?: Record<string, unknown>; body?: string; depends_on?: string[]; goal_ac?: string; expectedStatus?: string }, opts?: { commit?: boolean }): (Task & { updatedAt?: number }) | null {
     // COMMIT-AFTER-WRITE (gap-abi-missing-commit-delete-dependson-primitives): commit-by-default,
     // opt-out per call via `{ commit: false }` (multi-file batch editors commit once at the end).
     const commit = opts?.commit !== false;
@@ -1226,6 +1226,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
         if (parent !== undefined) frontmatter.parent = parent;
         if (extra !== undefined) frontmatter.extra = extra;
         if (depends_on !== undefined) frontmatter.depends_on = depends_on;
+        if (goal_ac !== undefined) frontmatter.goal_ac = goal_ac;
       } else {
         // No existing file: there is no "current status" to compare against,
         // so any expectedStatus is by definition a mismatch (there is
@@ -1235,6 +1236,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
         }
         frontmatter.extra = extra ?? {};
         if (depends_on !== undefined) frontmatter.depends_on = depends_on;
+        if (goal_ac !== undefined) frontmatter.goal_ac = goal_ac;
         // DIR-047 (ADR-004 single-source): apply the configured creation
         // default when creating a NEW task with no explicit status.
         // storeDefaultStatus is the per-provider default_task_status from

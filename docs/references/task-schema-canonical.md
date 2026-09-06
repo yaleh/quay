@@ -41,6 +41,7 @@ interface TaskFrontmatter {
   parent?: string | null;      // parent task id (relation edge)
   children?: string[];         // child task ids (relation edge)
   depends_on?: string[];       // prerequisite task ids (relation edge; top-level OR legacy extra)
+  goal_ac?: string;            // owning goal AC id (task→AC linkage, G7; top-level single scalar, optional)
   extra?: {
     schema?: string;           // "v1" — the schema marker (grandfather boundary)
     dirFile?: string;          // projection-scaffolding field (forbidden by assertion A6)
@@ -94,6 +95,31 @@ The round-trip is `task_write(depends_on)` → `store.write()` → `depends_on:`
 `store.parse()` / `parseTask()` / `readDependsOn()` all read it back as `["gap-prereq-a",
 "gap-prereq-b"]`.
 
+## `task_write` and `goal_ac`
+
+`goal_ac` is the task→goal-AC linkage field (G7, `SPEC-goal-mechanism-2026-09-06.md` §7): a task
+declares **at most one** owning AC, stored **top-level** as a single scalar (not an array, unlike
+`depends_on`). It is **optional** — `gap-*` defect tasks carry none. It is **one-way** (written on the
+task side only; the goal/AC record lists no children), so there is no two-way sync and therefore no
+drift surface.
+
+```json
+{
+  "id": "gap-goal-driver-mechanical-ring",
+  "goal_ac": "AC-177"
+}
+```
+
+The read path is `frontmatterGoalAc()` / `readGoalAc()` / `parseTask()` — all delegate to the single
+frontmatter parser. Absent / empty ⇒ `null` (缺值 = 未查, distinguishable from any concrete AC id).
+The field is deliberately **not** read from `extra` (the `depends_on` legacy home): nesting it under
+`extra` was exactly the `depends_on` read-failure lesson (AC-178's `origin`).
+
+The mechanical consumer is `plugin/scripts/goal-driver.ts`'s `computeGoalGaps()`: for each
+unachieved (status `active`) AC, `count(task where goal_ac == AC and status ∈ {todo, ready}) == 0`
+⇒ a **gap** — the three-state output (`in-progress` / `gap` / `not-evaluated`) keeps "read the
+input and found nothing advancing this AC" distinct from "could not read the input at all".
+
 ## Commit-after-write (dispatch visibility)
 
 `task_write` and `task_delete` are **commit-by-default**: after a successful disk write, the native
@@ -126,5 +152,6 @@ same branch-aware commit strategy as `task_write`. A delete of a non-existent id
 
 - `plugin/scripts/task-schema.ts` — the parser + the validator (`checkTask`) built on it.
 - `packages/quay-native/src/store.ts` — the native store (`parse` delegates here).
-- `packages/quay-native/src/mcp-server.ts` — the `task_write` schema (`depends_on` param).
+- `packages/quay-native/src/mcp-server.ts` — the `task_write` schema (`depends_on` / `goal_ac` params).
+- `plugin/scripts/goal-driver.ts` — the G7 gap calc (`computeGoalGaps`) that consumes `goal_ac`.
 - `tasks/gap-unified-frontmatter-parser.md` — the task that unified the readers.

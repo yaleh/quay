@@ -29,6 +29,7 @@
 // Exit: 0 = 轮跑完（含 not-evaluated）; 1 = 轮失败（failed fact）; 2 = usage。
 
 import path from "node:path";
+import fs from "node:fs";
 import { isDirectEntry } from "./gate-script-base.ts";
 // Layer 0（driver-runtime 单一实现）：DRIVER_KINDS（controlFile/carriers 单源）、runAsync（非阻塞
 // spawn）、Fact / RoutineSpec（Layer 1b 例程契约）。
@@ -39,6 +40,9 @@ import { runResidentQualityGateLoop } from "./quality-gate-driver.ts";
 import { goalStoreArgv } from "./meta-driver.ts";
 // AC155：轮询间隔的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量）。
 import { defaultDriverConfig, loadDriverConfig } from "./driver-config.ts";
+// G7（缺口计算）：task→AC 关联字段 goal_ac 的单一读取路径（parseFrontmatterCompletely +
+// frontmatterStatus / frontmatterGoalAc 投影，⛔ 不在本文件另写一份 frontmatter 解析）。
+import { parseFrontmatterCompletely, frontmatterStatus, frontmatterGoalAc } from "./task-schema.ts";
 
 // ── 常量（由 DRIVER_KINDS registry 派生，⛔ 不另写一份路径字面量）──────────────────────────
 const GOAL_SPEC = DRIVER_KINDS.goal;
@@ -128,6 +132,36 @@ export async function checkStaleness(
   }
 }
 
+/** 读 tasks/*.md → 每条 { id, status, goalAc }。⛔ 读不到 tasks 目录（不存在 / 读失败）⇒ null，
+ * 与「零任务」不同形（硬规则 3b：读不懂输入不得返回空数组冒充「没有任务」）。单文件读失败跳过该条
+ *  （best-effort，不冒充「该任务无 goal_ac」，也不让一条坏文件拖垮整个缺口读数）。 */
+export async function readTaskFacts(
+  dataRoot: string,
+): Promise<Array<{ id: string; status: string | null; goalAc: string | null }> | null> {
+  const dir = path.join(dataRoot, "tasks");
+  let files: string[];
+  try {
+    files = fs.readdirSync(dir).filter((f) => f.endsWith(".md"));
+  } catch {
+    return null;
+  }
+  const out: Array<{ id: string; status: string | null; goalAc: string | null }> = [];
+  for (const f of files) {
+    const id = f.slice(0, -".md".length);
+    let raw: string;
+    try {
+      raw = fs.readFileSync(path.join(dir, f), "utf8");
+    } catch {
+      continue;
+    }
+    const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    if (!m) continue;
+    const fm = parseFrontmatterCompletely(m[1]);
+    out.push({ id, status: frontmatterStatus(fm), goalAc: frontmatterGoalAc(fm) });
+  }
+  return out;
+}
+
 // ── 纯推导（可单测）────────────────────────────────────────────────────────────────────────
 
 /** I2（GOAL 层）：一个 GOAL 是否「全部 AC achieved」。零 AC ⇒ false（与 goal-store.isGoalAchieved 同源，
@@ -136,6 +170,46 @@ export function goalAchievedFromRecords(records: Array<Record<string, unknown>>,
   const acs = records.filter((r) => String(r.id ?? "").startsWith("AC-") && String(r.goal ?? "") === goalId);
   if (acs.length === 0) return false;
   return acs.every((r) => r.status === "achieved");
+}
+
+// ── 缺口三态（G7，硬规则 3b：读不懂输入不得返回与「合格」同形——「缺口」与「未评估」分离）────
+
+/** 单条 AC 的缺口态：in-progress（有任务推进）/ gap（缺口）/ not-evaluated（读不到 tasks 输入）。 */
+export type GapState = "in-progress" | "gap" | "not-evaluated";
+
+/** 一条 AC 的缺口读数。taskCount 只在 not-evaluated 时为 null（⛔ 与 0 不同形）。 */
+export interface GoalGap {
+  goal: string;
+  ac: string;
+  state: GapState;
+  taskCount: number | null;
+}
+
+/** 缺口计算（G7 机械量，SPEC §6.2 ⑤）：对每条未达成（status=active）AC，
+ *  count(task where goal_ac == AC and status ∈ {todo,ready}) == 0 ⇒ 缺口。
+ *  三态：in-progress（计数 > 0）/ gap（计数 == 0）/ not-evaluated（taskFacts == null）。
+ *  ⛔ 本仓任务无独立 in-flight 态——派发中的任务 status 仍为 todo/ready，故「推进中」集合 =
+ *  {todo, ready}。draft/superseded/retired/achieved 的 AC 均不是缺口对象（未激活 / 已关闭 / 已达成）。 */
+export function computeGoalGaps(
+  records: Array<Record<string, unknown>>,
+  taskFacts: Array<{ id: string; status: string | null; goalAc: string | null }> | null,
+): Array<GoalGap> {
+  const out: Array<GoalGap> = [];
+  for (const r of records) {
+    const id = String(r.id ?? "");
+    if (!id.startsWith("AC-")) continue;
+    if (String(r.status ?? "") !== "active") continue;
+    const goal = String(r.goal ?? "");
+    if (taskFacts === null) {
+      out.push({ goal, ac: id, state: "not-evaluated", taskCount: null });
+      continue;
+    }
+    const count = taskFacts.filter(
+      (t) => t.goalAc === id && (t.status === "todo" || t.status === "ready"),
+    ).length;
+    out.push({ goal, ac: id, state: count > 0 ? "in-progress" : "gap", taskCount: count });
+  }
+  return out;
 }
 
 // ── 一轮（机械环）─────────────────────────────────────────────────────────────────────────
@@ -148,6 +222,8 @@ export interface GoalRoundReadings {
   flips: Array<{ id: string; to: string; ok: boolean; reason: string }>;
   /** I3 三桶 + I4 分歧；null = check --staleness 读不到（⛔ 与「零 stale」不同形，硬规则 3b）。 */
   staleness: { fresh: string[]; stale: string[]; notEvaluated: string[]; divergent: string[] } | null;
+  /** ⑤ 缺口读数（G7）：每条 active AC 的三态；taskFacts==null ⇒ 逐条 not-evaluated。 */
+  gaps: Array<GoalGap>;
 }
 
 export interface GoalRoundOptions {
@@ -206,12 +282,17 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   // ③ I3 判陈旧 + ④ I4 查分歧：复用 goal-store 的单一真相源（读的是 gate 写回后的最新 evidence）。
   const staleness = await checkStaleness(scriptRoot, dataRoot);
 
+  // ⑤ 算缺口（G7）：读 tasks/*.md 的 goal_ac → 对每条 active AC 给三态。taskFacts==null ⇒ 逐条 not-evaluated。
+  const taskFacts = await readTaskFacts(dataRoot);
+  const gaps = computeGoalGaps(records, taskFacts);
+
   const value: GoalRoundReadings = {
     goalCount: activeGoals.length,
     criterionCount: criteria.length,
     criteria,
     flips,
     staleness,
+    gaps,
   };
   if (staleness === null) {
     return {
