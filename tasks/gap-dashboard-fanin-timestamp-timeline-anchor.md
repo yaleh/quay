@@ -2,7 +2,7 @@
 id: gap-dashboard-fanin-timestamp-timeline-anchor
 title: Dashboard Fan-in 卡补时间戳 + 测试/Fan-in 分段时间轴 bar 窗口终点锚定到最后一次事件结束时刻（而非
   wall-clock now）
-status: ready
+status: done
 labels:
   - gap
   - defect
