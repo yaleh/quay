@@ -2,7 +2,7 @@
 id: gap-worker-prompt-ac-check-via-abi-not-hand-edit
 title: worker-driver.ts acCheckNote() instructs hand-editing AC checkboxes —
   migrate to task_check/task_write
-status: ready
+status: done
 labels:
   - gap
 parent: null
