@@ -10,6 +10,7 @@ extra:
   schema: execution
 depends_on:
   - gap-goal-store-hard-cap-staleness-three-state
+goal_ac: AC-176
 ---
 ## Proposal
 
