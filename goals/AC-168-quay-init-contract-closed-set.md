@@ -15,4 +15,4 @@ origin: |
 **并显式包含安装步骤**（T3：启用 ≠ 安装；未信任目录整份不读项目 settings）。`plugin/test/quay-init*.test.mjs`
 随之改写。判据 SPEC AC3——一次**真实 laydown** 的产物清单 ⊆ 闭集（⛔ 不接受 fixture 自证）。
 
-**⊢ criterion 留空**：本条是语义判据、无可跑 shell 判据；`gate` fail-closed（红）是诚实状态（SPEC-0809 §3）。
+

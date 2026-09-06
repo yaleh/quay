@@ -1,7 +1,7 @@
 {
-  "files": 132,
-  "bytes": 3830671,
-  "fingerprint": "8f93b0722d5039a5569ac94ea9b95e677ff5e078292b1e4c7ce4fce796c6f112",
+  "files": 133,
+  "bytes": 3833272,
+  "fingerprint": "a9cc111c89ac6d58e1fd0f04ac313b6ff51d768b05b53891b8f4fe10eab47f58",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
@@ -105,7 +105,7 @@
     },
     {
       "rel": "plugin/scripts/capability-catalog.sh",
-      "sha": "19b4277431a388cdcfe8d38e1665b650b8b039171c448b14f86e7251e6c2c031"
+      "sha": "57b5601330c95e43fbf3e262ece2c537833c8a77e6c63e17fe58d711740389e6"
     },
     {
       "rel": "plugin/scripts/checker-io.ts",
@@ -349,7 +349,7 @@
     },
     {
       "rel": "plugin/scripts/ready-pool-check.ts",
-      "sha": "ee3114e162a3cecee082b43930ea28ad71edfe26f5f27b3d206736927b753daa"
+      "sha": "69f4999c2a5b2931e2aa0e375d108cc564ed04212f29a3a8d26181d723ce2319"
     },
     {
       "rel": "plugin/scripts/real-target-verify.sh",
@@ -406,6 +406,10 @@
     {
       "rel": "plugin/scripts/send-keys-reliable.sh",
       "sha": "6820abd19244280f2b08471ac85696439e7e6f932c52aef0c98edb4202f0d061"
+    },
+    {
+      "rel": "plugin/scripts/shape-sections.ts",
+      "sha": "80ea066262fb2c63d34dafc153952520d487521a541c08b3cea8efb4aa983e9b"
     },
     {
       "rel": "plugin/scripts/slot-refill.sh",
