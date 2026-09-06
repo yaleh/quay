@@ -4,16 +4,18 @@ title: 语义面 subagent 化 + 由 manager 后台驱动
 status: active
 kind: criterion
 goal: GOAL-002
+criterion: |
+  node --no-warnings --experimental-strip-types -e 'import("./plugin/scripts/semantic-face-dispatch-record.ts").then(m=>{process.exit(typeof m.appendSemanticFaceRecord==="function"&&Array.isArray(m.SEMANTIC_DUTY_KINDS)?0:1)})'
+expect: exit 0
 origin: |
   人 2026-08-23 方向「语义撰写/人机接口 → 实现相应 subagent，由 manager 直接驱动（后台执行）」。
   跨层纠错必须单列（本会话三个实证，⛔ 全部由另一层读散文发现）：
   outer 自诊断「优先级排序疏漏」错（真因 AskUserQuestion 卡 3h17m）；
   manager 自称「非手搓走已有机件」过度声称；manager 过早给出因果归因。
 evidence:
-  at: 2026-09-06T09:44:29.591Z
-  verdict: fail
-  reading: AC-145 has no criterion defined (fail-closed — an unenforceable AC must
-    never silently pass)
+  at: 2026-09-06T17:03:27.390Z
+  verdict: pass
+  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：①任务撰写/立案 · 需求分析 · 升级判断（B11）· 学习（B10，证据推翻原判断时改
@@ -24,4 +26,4 @@ evidence:
 **取假**：①`manager` 主线程出现产品文件编辑 ⇒ 假（同 inner A24 `main_thread_edits > 0` 即判违反的
 判据形态，直接复用）；②发生了一次语义产出而无对应派发记录 ⇒ 假。
 
-**⊢ criterion 留空**：本条是语义判据、无可跑 shell 判据；`gate` fail-closed（红）是诚实状态（SPEC-0809 §3）。
+

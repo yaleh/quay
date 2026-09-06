@@ -12,4 +12,4 @@ origin: |
 **判据（能取假）**：`plugin/agents/baime-iteration-executor.md` 从 `plugin.json` 摘除并 archive；
 `workflows-dual-copy-drift-check.ts` 随双副本消失一并 archive（失去判定对象）。
 
-**⊢ criterion 留空**：本条是语义判据、无可跑 shell 判据；`gate` fail-closed（红）是诚实状态（SPEC-0809 §3）。
+

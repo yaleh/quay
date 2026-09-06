@@ -14,4 +14,4 @@ origin: |
 
 **取假**：`plugin/scripts` 计数未下降 / INDEX 行数 ≠ 移动文件数 / suite 红。
 
-**⊢ criterion 留空**：本条是语义判据、无可跑 shell 判据；`gate` fail-closed（红）是诚实状态（SPEC-0809 §3）。
+

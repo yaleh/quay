@@ -15,4 +15,4 @@ origin: |
 
 **取假**：SPEC 里没有 before/after 两个数字 ⇒ 未做。
 
-**⊢ criterion 留空**：本条是语义判据、无可跑 shell 判据；`gate` fail-closed（红）是诚实状态（SPEC-0809 §3）。
+
