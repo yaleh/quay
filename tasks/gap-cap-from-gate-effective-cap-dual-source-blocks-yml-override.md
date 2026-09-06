@@ -1,7 +1,7 @@
 ---
 id: gap-cap-from-gate-effective-cap-dual-source-blocks-yml-override
 title: effective_cap 有两个来源——drivers.yml 一改就确定性红全仓，且断言把值写死
-status: todo
+status: ready
 labels:
   - gap
   - defect
