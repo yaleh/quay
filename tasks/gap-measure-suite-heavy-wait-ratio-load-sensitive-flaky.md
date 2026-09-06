@@ -44,12 +44,20 @@ extra:
 ⛔ **不要简单删除或放宽成恒真**——该断言防的是"`cpu_ms` 退化成 duration 推导值"这个真实缺陷
 （硬规则 4：一个结构上不可能取假的量不是测量），把它改成恒真等于把一个真检查换成假保证。
 
+**实现（2026-09-06，采用修法 2）**：不改 `@test-group`、不动 `test-group-downgrade-check.ts`。把断言从
+`heavy 比值 > wait 比值`（负载敏感——heavy 的 wall clock 在抢占下拉伸、比值塌陷，而 sleep 文件的
+startup 噪声抬高其比值）改为【等预算对照】：两个文件各烧固定的 ~300ms CPU（用 `process.cpuUsage()`
+限界，非 wall clock），其一额外 sleep 500ms。真 `cpu_ms` 只随 CPU 做功 ⇒ 两者 ~相等（sleep 不增 CPU）；
+duration 推导的 `cpu_ms` 会相差 sleep 的 500ms wall ⇒ 断言 `|diff| < 200ms` 把两者分开。实测 |startup
+噪声| ≤62ms（loadavg 30）远低于 500ms。顺带把同文件 child-CPU 测试的 wall-bounded 子进程循环也改成
+cpuUsage 限界（同一致命类：重载下 cutime 塌陷会低估 reaped child 的 CPU）。
+
 ## Acceptance Criteria
 
-- [ ] 在**高并发负载下**连续跑该测试文件 5 次全部通过（负载可用并发 spawn 制造；这是本任务的核心判据，立案时取假）
-- [ ] 负控制仍然成立：人为把 `cpu_ms` 改成从 `durationMs` 推导后，该测试**仍然报红**（证明没有把断言放宽成恒真）
-- [ ] 若采用修法 1：`test-group-downgrade-check.ts` 对该降级给出正当化后退出 0，不是被静默绕过
-- [ ] `bash scripts/test.sh --for-task gap-measure-suite-heavy-wait-ratio-load-sensitive-flaky` 退出 0
+- [x] 在**高并发负载下**连续跑该测试文件 5 次全部通过（负载可用并发 spawn 制造；这是本任务的核心判据，立案时取假）（实测 5/5 通过，loadavg 53–76，30 个并发 CPU burner）
+- [x] 负控制仍然成立：人为把 `cpu_ms` 改成从 `durationMs` 推导后，该测试**仍然报红**（证明没有把断言放宽成恒真）（实测 derived 后 `diff=751.6ms > 200ms` 报红）
+- [x] 若采用修法 1：`test-group-downgrade-check.ts` 对该降级给出正当化后退出 0，不是被静默绕过（N/A — 采用修法 2，未移动 @test-group，无降级需要正当化）
+- [x] `bash scripts/test.sh --for-task gap-measure-suite-heavy-wait-ratio-load-sensitive-flaky` 退出 0
 
 ## Definition of Done
 
@@ -61,5 +69,4 @@ extra:
 ## Touches
 
 - plugin/test/measure-suite.test.mjs
-- plugin/scripts/test-group-downgrade-check.ts
 - tasks/gap-measure-suite-heavy-wait-ratio-load-sensitive-flaky.md
