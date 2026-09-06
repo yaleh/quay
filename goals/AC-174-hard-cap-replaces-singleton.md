@@ -14,7 +14,7 @@ origin: |
   AC 同时存在：AC10/AC12/AC20/AC28；设目标的裁定六次，只加不关）。
   ⇒ 推翻它必须补等效守卫，硬上限即其一（另一半是 AC-175 的陈旧判定）。
 evidence:
-  at: 2026-09-06T22:28:31.906Z
+  at: 2026-09-06T22:29:15.286Z
   verdict: pass
   reading: acceptance passed (exit 0)
 ---
