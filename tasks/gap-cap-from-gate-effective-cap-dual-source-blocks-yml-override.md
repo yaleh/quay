@@ -1,7 +1,7 @@
 ---
 id: gap-cap-from-gate-effective-cap-dual-source-blocks-yml-override
 title: effective_cap 有两个来源——drivers.yml 一改就确定性红全仓，且断言把值写死
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -83,4 +83,5 @@ drivers.yml worker.cap = 5 ⇒ 同一测试                                 4 pa
 - plugin/test/cap-from-gate-hysteresis.test.mjs
 - plugin/test/cap-from-gate-stale.test.mjs
 - plugin/scripts/drivers.yml
+- docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-cap-from-gate-effective-cap-dual-source-blocks-yml-override.md
