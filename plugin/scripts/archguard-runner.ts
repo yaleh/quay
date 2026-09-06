@@ -15,7 +15,7 @@
 //
 // FAIL-CLOSED（AC2）: 只要「读不到 archguard 的分析产物」就 exit 1 —— archguard CLI 缺失、
 // analyze 失败、class/all-classes.json 缺失/不可解析、sccCount > 0，全部 exit 1（红）。exit 0
-// 仅当「真的跑了 analyze 且两个 scope 的 sccCount 全为 0」。一个「注掉调用后仍绿」的检查是假保证
+// 仅当「真的跑了 analyze 且六个 scope 的 sccCount 全为 0」。一个「注掉调用后仍绿」的检查是假保证
 // （CLAUDE.md 硬规则 3b：读不懂输入不得返回与合格同形的值）。
 //
 // CARRIER（AC3）: 每次跑完把结构信号 append 进 `.archguard/metrics-history.jsonl`（追加，不覆盖），
@@ -26,7 +26,7 @@
 // Usage:
 //   node --experimental-strip-types plugin/scripts/archguard-runner.ts --root <repo-root>
 //
-// Exit: 0 = 两个 scope 都跑通 analyze 且 sccCount 全 0（PASS）;
+// Exit: 0 = 六个 scope 都跑通 analyze 且 sccCount 全 0（PASS）;
 //       1 = 结构违例（sccCount > 0）或读不到产物（fail-closed RED —— archguard 缺失/analyze 失败/
 //           产物缺失/不可解析）;
 //       2 = usage/environment error（缺 --root）。
@@ -35,11 +35,21 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-// ── The two scopes archguard analyzes. The scope label == basename(sourceDir), which archguard
-//    uses as the output subdir (output/<scope>/class/all-classes.json) AND the query scope key.
+// ── The six scopes archguard analyzes. Each scope carries an EXPLICIT label (NOT basename(sourceDir)):
+//    packages/quay-native|github|backlog all have a `src/` basename (and two dirs a `scripts/` basename),
+//    so a basename-derived label would silently overwrite the earlier scopes' output (the trap reproduced
+//    during the gap-archguard-scope-expand-provider-packages-experiments probe). The label is passed to
+//    `runAnalyze` as `--output-dir output/<label>`, so each scope's output lands in its OWN parent dir
+//    (output/<label>/<basename>/class/all-classes.json) and no scope's product is eaten by another's.
+//    The label must therefore be unique across SCOPES (it is NOT archguard's own basename-derived label,
+//    which the runner deliberately does not rely on).
 const SCOPES: Array<{ source: string; label: string }> = [
   { source: "packages/quay/src", label: "src" },
   { source: "plugin/scripts", label: "scripts" },
+  { source: "packages/quay-native/src", label: "quay-native-src" },
+  { source: "packages/quay-github/src", label: "quay-github-src" },
+  { source: "packages/quay-backlog/src", label: "quay-backlog-src" },
+  { source: "experiments/quay-perpetual-stream/scripts", label: "experiments-scripts" },
 ];
 
 // ── Types ──────────────────────────────────────────────────────────────────────────────────────────
@@ -81,12 +91,20 @@ function resolveArchguardCli(): string | null {
   return r.stdout.trim();
 }
 
-/** Run `archguard analyze` on ONE source dir. Returns the exit code (0 = ok). */
-function runAnalyze(cli: string, root: string, source: string): number {
+/** Run `archguard analyze` on ONE source dir. Returns the exit code (0 = ok).
+ *
+ *  ⚠️ `--output-dir <workDir>/output/<label>` is NOT optional: archguard derives its own output subdir
+ *  from the source's BASENAME (`output/<basename>/class/all-classes.json`), and three provider packages
+ *  all share the `src/` basename (plus two `scripts/` dirs). Without a per-scope output-dir the later
+ *  analyzes would silently overwrite the earlier ones' `output/src/` / `output/scripts/` (the trap
+ *  reproduced in gap-archguard-scope-expand-provider-packages-experiments' probe). The explicit `label`
+ *  parents each scope's output so the basename collision is contained and never eats another scope. */
+function runAnalyze(cli: string, root: string, source: string, label: string): number {
   const workDir = path.join(root, ".archguard");
+  const outputDir = path.join(workDir, "output", label);
   const r = spawnSync(
     cli,
-    ["analyze", "--lang", "typescript", "--format", "json", "--work-dir", workDir, "-s", source],
+    ["analyze", "--lang", "typescript", "--format", "json", "--work-dir", workDir, "--output-dir", outputDir, "-s", source],
     { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
   );
   if (r.status !== 0) {
@@ -97,9 +115,13 @@ function runAnalyze(cli: string, root: string, source: string): number {
   return r.status ?? 1;
 }
 
-/** Read the archguard-produced class-level ArchJSON and extract its structural signal. */
-function readScopeSignal(root: string, label: string): ScopeSignal {
-  const file = path.join(root, ".archguard", "output", label, "class", "all-classes.json");
+/** Read the archguard-produced class-level ArchJSON and extract its structural signal.
+ *
+ *  archguard nests the class output under the source's BASENAME inside the per-scope output dir
+ *  (`<workDir>/output/<label>/<basename>/class/all-classes.json`), so the read path mirrors
+ *  `runAnalyze`'s `--output-dir <label>` + basename layout. */
+function readScopeSignal(root: string, label: string, source: string): ScopeSignal {
+  const file = path.join(root, ".archguard", "output", label, path.basename(source), "class", "all-classes.json");
   let raw: string;
   try {
     raw = fs.readFileSync(file, "utf8");
@@ -165,15 +187,15 @@ function main(): void {
   const cli = resolveArchguardCli();
   if (!cli) fail("archguard CLI not found on PATH (fail-closed — the meter must be runnable)");
 
-  // 2. REAL analyze on both scopes (AC1: a real archguard call, not a comment / project-name mention).
+  // 2. REAL analyze on every scope (AC1: a real archguard call, not a comment / project-name mention).
   for (const { source, label } of SCOPES) {
     process.stdout.write(`archguard-runner: analyzing ${label} (${source})\n`);
-    const rc = runAnalyze(cli, root, source);
+    const rc = runAnalyze(cli, root, source, label);
     if (rc !== 0) fail(`archguard analyze failed for ${label} (exit ${rc})`);
   }
 
   // 3. Read the produced artifact back (AC3: the criterion reads the .archguard product).
-  const scopes = SCOPES.map(({ label }) => readScopeSignal(root, label));
+  const scopes = SCOPES.map(({ label, source }) => readScopeSignal(root, label, source));
 
   // 4. Evaluate the structural invariant: no dependency cycles (sccCount === 0) in every scope.
   const violated = scopes.filter((s) => s.sccCount !== 0);

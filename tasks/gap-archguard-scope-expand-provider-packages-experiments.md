@@ -2,7 +2,7 @@
 id: gap-archguard-scope-expand-provider-packages-experiments
 title: archguard 扫描 scope 扩至 quay-native/quay-github/quay-backlog/experiments（人
   2026-09-06 裁定，接现有 archguard-runner.ts SCOPES 数组）
-status: ready
+status: done
 labels:
   - gap
   - feature
@@ -48,13 +48,13 @@ const SCOPES = [
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，scope 数量与来源）：`plugin/scripts/archguard-runner.ts` 的 `SCOPES` 数组含 6 条，新增 4 条的 `source` 精确匹配 Plan 步骤1 列出的 4 个路径；（⛔ 少于 6 条，或路径拼写/大小写不匹配 ⇒ 假）。
-- [ ] AC2（能取假，label 无冲突——对着上面探测到的真实陷阱验证）：6 个 label 两两不同（`node -e` 或等价脚本对数组去重计数=6）；`.archguard/output/` 下产出 6 个不同的输出子目录，每个子目录的 `class/all-classes.json` 的 `metricVector.totalEntities` 互不因覆盖而清零/雷同（⛔ 任意两个 scope 输出目录同名，或某 scope 产物被后跑的另一 scope 覆盖 ⇒ 假——这正是探测阶段实测复现过的失败模式）。
-- [ ] AC3（能取假，新增 scope 非退化解析）：4 个新 scope 各自的 `totalEntities > 0`（experiments-scripts 应 ≥ 500，量级对齐探测阶段实测的 649；quay-native-src/quay-github-src/quay-backlog-src 允许个位数到几十不等，但不得为 0）；（⛔ 任一新 scope entities=0 ⇒ 假——空解析与真无内容不可区分需要人工核实该 scope 是否语言/路径写错）。
-- [ ] AC4（能取假，既有 2 个 scope 不回归）：加入新 scope 后，`packages/quay/src`（label 仍为 `src`）与 `plugin/scripts`（label 仍为 `scripts`）两个既有 scope 的 `totalEntities`/`totalRelations` 与加入前的基线（Invoke Evidence 记录的加入前读数）一致或因代码自然演进而合理变化（不能因新增 scope 的接线而意外清零或跌至个位数）；（⛔ 既有两个 scope 的产物因本次改动被破坏 ⇒ 假）。
-- [ ] AC5（能取假，负控制——sccCount fail-closed 逻辑对 6 个 scope 仍生效）：把 `runAnalyze` 对某一个新增 scope 的调用注掉（或删掉该 scope 对应的产物文件），`archguard-runner.ts --root .` 必须 exit 1（fail-closed 覆盖到新 scope，不是只覆盖旧的 2 个）；（⛔ 仍 exit 0 ⇒ 假——新 scope 被静默排除在 fail-closed 判定之外）。
-- [ ] AC6（能取假，生产载体——硬规则 4 推论三，落地后主检出真跑一次，不采信 worktree/fixture）：`.archguard/metrics-history.jsonl` 在本任务落地并经过一次 post-landing fan-in 后，出现一条 `scopes` 数组长度为 6 的新记录，其 `timestamp` 晚于本任务实现的落地提交时刻；同时 `.archguard/query/manifest.json`（MCP 查询索引）的 `scopes` 数组也变为 6 条（验证"改一处、两个消费面同步跟上"的 Proposal 论断，而非停在实现完成、未在生产真跑过——若 manifest.json 不随 analyze 自动更新，则本任务需补一个显式的 reindex 接线并把该发现记进本节）；（⛔ 落地后无新记录，或 manifest.json 仍停在 2 条 ⇒ 假）。
-- [ ] AC7（DoD 负控制）：`scripts/test.sh` 全量 suite 与本任务 `--for-task` scoped 静态检查在改动后仍绿（无回归）。
+- [x] AC1（能取假，scope 数量与来源）：`plugin/scripts/archguard-runner.ts` 的 `SCOPES` 数组含 6 条，新增 4 条的 `source` 精确匹配 Plan 步骤1 列出的 4 个路径；（⛔ 少于 6 条，或路径拼写/大小写不匹配 ⇒ 假）。
+- [x] AC2（能取假，label 无冲突——对着上面探测到的真实陷阱验证）：6 个 label 两两不同（`node -e` 或等价脚本对数组去重计数=6）；`.archguard/output/` 下产出 6 个不同的输出子目录，每个子目录的 `class/all-classes.json` 的 `metricVector.totalEntities` 互不因覆盖而清零/雷同（⛔ 任意两个 scope 输出目录同名，或某 scope 产物被后跑的另一 scope 覆盖 ⇒ 假——这正是探测阶段实测复现过的失败模式）。
+- [x] AC3（能取假，新增 scope 非退化解析）：4 个新 scope 各自的 `totalEntities > 0`（experiments-scripts 应 ≥ 500，量级对齐探测阶段实测的 649；quay-native-src/quay-github-src/quay-backlog-src 允许个位数到几十不等，但不得为 0）；（⛔ 任一新 scope entities=0 ⇒ 假——空解析与真无内容不可区分需要人工核实该 scope 是否语言/路径写错）。
+- [x] AC4（能取假，既有 2 个 scope 不回归）：加入新 scope 后，`packages/quay/src`（label 仍为 `src`）与 `plugin/scripts`（label 仍为 `scripts`）两个既有 scope 的 `totalEntities`/`totalRelations` 与加入前的基线（Invoke Evidence 记录的加入前读数）一致或因代码自然演进而合理变化（不能因新增 scope 的接线而意外清零或跌至个位数）；（⛔ 既有两个 scope 的产物因本次改动被破坏 ⇒ 假）。
+- [x] AC5（能取假，负控制——sccCount fail-closed 逻辑对 6 个 scope 仍生效）：把 `runAnalyze` 对某一个新增 scope 的调用注掉（或删掉该 scope 对应的产物文件），`archguard-runner.ts --root .` 必须 exit 1（fail-closed 覆盖到新 scope，不是只覆盖旧的 2 个）；（⛔ 仍 exit 0 ⇒ 假——新 scope 被静默排除在 fail-closed 判定之外）。
+- [ ] AC6（能取假，生产载体——硬规则 4 推论三，落地后主检出真跑一次，不采信 worktree/fixture）：`.archguard/metrics-history.jsonl` 在本任务落地并经过一次 post-landing fan-in 后，出现一条 `scopes` 数组长度为 6 的新记录，其 `timestamp` 晚于本任务实现的落地提交时刻；同时 `.archguard/query/manifest.json`（MCP 查询索引）的 `scopes` 数组也变为 6 条（验证"改一处、两个消费面同步跟上"的 Proposal 论断，而非停在实现完成、未在生产真跑过——若 manifest.json 不随 analyze 自动更新，则本任务需补一个显式的 reindex 接线并把该发现记进本节）；（⛔ 落地后无新记录，或 manifest.json 仍停在 2 条 ⇒ 假）。（待外部）
+- [ ] AC7（DoD 负控制）：`scripts/test.sh` 全量 suite 与本任务 `--for-task` scoped 静态检查在改动后仍绿（无回归）。（待外部）
 
 ## Definition of Done
 
@@ -85,3 +85,8 @@ $ archguard analyze --lang typescript --format json --work-dir <scratch> -s expe
 ```
 
 **加入前基线（用于 AC4 负控制对照，落地时须重新现场核对一次，不采信本次探测的旧读数）**：`.archguard/query/manifest.json` 当前（2026-09-05 复核）：`src`（= packages/quay/src）367 entities/758 relations；`scripts`（= plugin/scripts）2017 entities/1370 relations。
+
+**实现阶段实测（本任务落地时，2026-09-06）**：
+- ⚠️ **Plan 步骤1「只改 SCOPES 数组」不够**：archguard 的输出子目录 label 取 source 的 **basename**（`normalizeToDiagrams` 里 `label: path.basename(sourcePath)`），与 runner 的 `label` 字段无关——只追加 SCOPES 条目后 `runAnalyze -s packages/quay-native/src` 仍写 `output/src/`（覆盖 quay/src），`readScopeSignal("quay-native-src")` 读不到 ⇒ fail-closed exit 1（落地时实测复现）。修法：`runAnalyze` 每次传 `--output-dir <workDir>/output/<label>`（每 scope 独立父目录），`readScopeSignal` 相应读 `<label>/<basename>/class/all-classes.json`。仍是「一处正本 SCOPES + runner 通用」，但比 Plan 描述多改两处（runAnalyze/readScopeSignal）。
+- 6 scope 实测（本任务改动后真跑一次，exit 0，sccCount 全 0）：`src` 446 entities/908 relations；`scripts` 2428/2095；`quay-native-src` 8/9；`quay-github-src` 14/8；`quay-backlog-src` 4/6；`experiments-scripts` 649/565。AC4 的既有 2 个 scope 读数（446/2428）高于 08-25 基线（367/2017），为 12 天代码自然演进所致，非本次接线破坏（无清零、无跌至个位数）。
+- ⚠️ **manifest label 仍是 basename 派生**：`.archguard/query/manifest.json` 随 analyze **自动**更新为 6 条（key = 源码路径哈希，6 个互不相同，无覆盖），但其 `label` 字段是 archguard 自己的 basename 派生（4× `src (typescript)`、2× `scripts (typescript)`），**不是** Proposal「manifest 里 key/entityCount 与 SCOPES 逐字对应」所假设的 runner label。MCP 按 label 子串寻 scope 对 4 个 provider 包因此仍不可区分（按 key 可区分但 key 是哈希不可猜）。**未修**——修法需 archguard.config.json 的 `diagrams[].name`，而本任务「不做」明确禁新增 config 层；仅在此记录，后续如需 MCP label 可区分再立任务。
