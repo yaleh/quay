@@ -12,7 +12,7 @@ origin: readings.criteria 中 AC-143..AC-155 共 13 条 GOAL-002 活跃 AC 的 c
   null（verdict 均 fail、reason 均「no criterion defined」），而同属活跃的 GOAL-001
   AC-170..176 全部有判据——说明无判据不是机制限制，而是 GOAL-002 的测量面整体未写
 evidence:
-  at: 2026-09-06T22:56:12.949Z
+  at: 2026-09-06T22:56:59.373Z
   verdict: pass
   reading: acceptance passed (exit 0)
 ---
