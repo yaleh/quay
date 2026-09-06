@@ -2,7 +2,7 @@
 id: gap-archguard-scope-expand-provider-packages-experiments
 title: archguard 扫描 scope 扩至 quay-native/quay-github/quay-backlog/experiments（人
   2026-09-06 裁定，接现有 archguard-runner.ts SCOPES 数组）
-status: ready
+status: done
 labels:
   - gap
   - feature
