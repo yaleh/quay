@@ -13,7 +13,7 @@ origin: |
   两个来源并存必然漂移——manager-phase-goal.md 自己就有实证：顶部横幅曾写死
   「AC54–AC78」并过期，2026-08-25 e389d3e58 才改成结构性描述。
 evidence:
-  at: 2026-09-06T22:05:58.748Z
+  at: 2026-09-06T22:06:40.112Z
   verdict: pass
   reading: acceptance passed (exit 0)
 ---
