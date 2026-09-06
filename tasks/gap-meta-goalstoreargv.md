@@ -1,7 +1,7 @@
 ---
 id: gap-meta-goalstoreargv
 title: goal 记录写入后必须提交——未提交 goals/*.md 阻塞 develop→doc ff-only 同步
-status: todo
+status: ready
 labels:
   - meta-driver
   - driver-candidate
