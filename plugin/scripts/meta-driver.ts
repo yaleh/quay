@@ -787,7 +787,19 @@ export interface MetaRoundResult {
 }
 
 /** 跑一轮：读数（机械，总是跑）→ 语义判读（可关）→ 提案过闸落地 → 出 Fact + 载体记录。 */
+/** 跑一轮，并把【本轮耗时】盖进 fact.value。
+ *  ⛔ 语义半没有有限超时（沿用 quality-gate-driver 的裁定——一个拍脑袋的 180s 曾造成真实缺陷
+ *  gap-quality-gate-driver-pool-judge-spawn-timeout）。既然不设阈值，就必须让代价【可观测】，
+ *  否则「这一轮跑了多久」永远无从谈起。实测已见 134s / 175s / >900s（第三次被外部 timeout 900
+ *  杀掉）⇒ 分布重尾；常驻化前先靠这组读数说话，⛔ 不凭空定超时。 */
 export async function runMetaRound(opts: MetaRoundOptions): Promise<MetaRoundResult> {
+  const startedMs = Date.now();
+  const r = await runMetaRoundInner(opts);
+  const value = (r.fact.value ?? {}) as Record<string, unknown>;
+  return { fact: { ...r.fact, value: { ...value, durationMs: Date.now() - startedMs } } };
+}
+
+async function runMetaRoundInner(opts: MetaRoundOptions): Promise<MetaRoundResult> {
   const { root, focus, noLlm, k, dryRun } = opts;
   const at = ts();
   let readings: MetaRoundReadings;
