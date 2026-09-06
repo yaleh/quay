@@ -2,7 +2,7 @@
 id: gap-meta-kind-violates-spec-no-new-probe-driver-kind
 title: meta 被实现为新 driver kind，违反 SPEC §5.1「⛔ 不新增 probe-driver kind」，并实测触发 §7
   取假（7 处登记面手工补写）
-status: needs-human
+status: ready
 labels:
   - gap
   - driver-candidate
@@ -12,6 +12,8 @@ extra:
   schema: execution
   acceptance: node --experimental-strip-types --test
     plugin/test/meta-driver.test.mjs plugin/test/driver-runtime.test.mjs
+depends_on:
+  - gap-quay-init-closure-ratchet-manual-reanchor-recurs
 ---
 ## Finding
 
