@@ -1096,3 +1096,35 @@ test("B (能取假) — buildContinueWorkerPrompt 带前 N 次 (ts,step,reason) 
   assert.ok(fs.existsSync(suiteAbs), "该路径在盘上存在（AC2 判据）");
 });
 
+// ── negative control（gap-driver-test-fixture-json-read-before-write-complete-race AC3）────────────
+// 故意制造 "文件存在但最后一行只写了一半" 的中间态（常驻 driver 另一进程正在追加写 JSONL）：旧的
+// readFileSync→split→JSON.parse 读法会在半行上报错，新的 readRoundLines/readOutcomeLines 把半行当
+// "还没写完" 丢弃、只返回完整行；补完后该行出现（调用方的 waitFor 重轮询即读到）。
+
+test("negative control — torn trailing JSONL line is treated as not-yet-written, then read once completed", (t) => {
+  const root = makeRoot("nc-torn-jsonl");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const line1 = JSON.stringify({ action: "stop", stop_reason: "pool-empty", in_flight: 0, ts: "2026-09-06T00:00:00Z" });
+  const line2 = JSON.stringify({ action: "dispatch", task: "gap-a", in_flight: 1, ts: "2026-09-06T00:00:01Z" });
+  const roundFile = path.join(root, WORKER_ROUND_REL);
+  const outcomeFile = path.join(root, WORKER_OUTCOME_REL);
+
+  // torn：完整一行 + 第二行只写了开头（另一进程正在追加写入）。
+  const torn = '{"action":"dispatch","task":"gap-';
+  fs.writeFileSync(roundFile, line1 + "\n" + torn, "utf8");
+  fs.writeFileSync(outcomeFile, line1 + "\n" + torn, "utf8");
+
+  // (a) 旧逻辑（split→JSON.parse）在半行上报错——先证负控制非空。
+  const naive = (f) => fs.readFileSync(f, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.throws(() => naive(roundFile), "old readRoundLines throws on a torn trailing line");
+  assert.throws(() => naive(outcomeFile), "old readOutcomeLines throws on a torn trailing line");
+
+  // (b) 新逻辑把半行当 "还没写完" 丢弃，只返回完整行，不抛错。
+  assert.deepEqual(readRoundLines(root).map((r) => r.action), ["stop"], "readRoundLines returns only the complete line");
+  assert.deepEqual(readOutcomeLines(root).map((r) => r.action), ["stop"], "readOutcomeLines returns only the complete line");
+
+  // (c) 补完该行后，调用方重轮询即可读到——半行不是被永久吞掉，只是 "还没写完"。
+  fs.writeFileSync(roundFile, line1 + "\n" + line2, "utf8");
+  assert.deepEqual(readRoundLines(root).map((r) => r.action), ["stop", "dispatch"], "completed line now read");
+});
+

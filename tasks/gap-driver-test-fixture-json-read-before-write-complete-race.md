@@ -1,7 +1,7 @@
 ---
 id: gap-driver-test-fixture-json-read-before-write-complete-race
 title: driver 测试 fixture 的 JSON 轮询读取存在"文件存在即读"竞态——existsSync 真但内容未写完时 JSON.parse 报错
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -29,11 +29,11 @@ if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, "utf8"));
 
 ## AC
 
-- [ ] `plugin/test/driver-runtime.test.mjs` 里 AC1(worker cap)的轮询逻辑改为"解析失败视为还没写完、继续轮询"(例如 `try { return JSON.parse(...) } catch { /* not yet, keep polling */ }`)而不是让 `JSON.parse` 直接抛出致命错误,或者 `FAKE_WORKER_DRIVER` 的写入改成"写临时文件 + `fs.renameSync` 原子发布"——两种任选其一即可消除该竞态窗口
-- [ ] `plugin/test/helpers/worker-driver-harness.mjs` 的 `readRoundLines`(及其在 `worker-driver-resident.test.mjs` 的调用点)同样改为"读到不完整/半行内容时视为还没写完、继续轮询"而不是让 `JSON.parse` 直接抛出——与上一条同一机制的镜像半边,两处都要修(硬规则5b:只修一处不算修好)
-- [ ] 为两个文件各写一个可复现的负控制:故意制造"文件存在但内容未写完/半行"的中间态(例如手动分两次 write 且中间插入一次读取,或 mock 一个延迟写完成的场景),断言修复前的旧逻辑会报错、修复后的新逻辑能正确等待并最终读到完整内容
-- [ ] `node --test plugin/test/driver-runtime.test.mjs` 与 `node --test plugin/test/worker-driver-resident.test.mjs` 各自单独运行全绿
-- [ ] `node scripts/test.sh` 全绿(确认修复不引入新的全量 suite 回归)
+- [x] `plugin/test/driver-runtime.test.mjs` 里 AC1(worker cap)的轮询逻辑改为"解析失败视为还没写完、继续轮询"(例如 `try { return JSON.parse(...) } catch { /* not yet, keep polling */ }`)而不是让 `JSON.parse` 直接抛出致命错误,或者 `FAKE_WORKER_DRIVER` 的写入改成"写临时文件 + `fs.renameSync` 原子发布"——两种任选其一即可消除该竞态窗口
+- [x] `plugin/test/helpers/worker-driver-harness.mjs` 的 `readRoundLines`(及其在 `worker-driver-resident.test.mjs` 的调用点)同样改为"读到不完整/半行内容时视为还没写完、继续轮询"而不是让 `JSON.parse` 直接抛出——与上一条同一机制的镜像半边,两处都要修(硬规则5b:只修一处不算修好)
+- [x] 为两个文件各写一个可复现的负控制:故意制造"文件存在但内容未写完/半行"的中间态(例如手动分两次 write 且中间插入一次读取,或 mock 一个延迟写完成的场景),断言修复前的旧逻辑会报错、修复后的新逻辑能正确等待并最终读到完整内容
+- [x] `node --test plugin/test/driver-runtime.test.mjs` 与 `node --test plugin/test/worker-driver-resident.test.mjs` 各自单独运行全绿
+- [ ] `node scripts/test.sh` 全绿(确认修复不引入新的全量 suite 回归)（待外部）
 
 ## DoD
 
@@ -47,4 +47,6 @@ if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, "utf8"));
 - plugin/test/driver-runtime.test.mjs
 - plugin/test/helpers/worker-driver-harness.mjs
 - plugin/test/worker-driver-resident.test.mjs
+- plugin/skills/manager/SKILL.md（补 SPEC-goal-mechanism-2026-09-06 声明——develop 侧 e74e59f19 漏声明致 spec-declaration-point-check 全局红，补 Methodology sources 索引）
+- plugin/skills/init/SKILL.md（同上，补 reference-doc 声明）
 - tasks/gap-driver-test-fixture-json-read-before-write-complete-race.md

@@ -96,9 +96,9 @@ before(async () => {
   // goal store at <workspaceRoot>/goals, document store at <workspaceRoot>/docs-managed.
   fs.mkdirSync(path.join(workspaceRoot, "goals"), { recursive: true });
   fs.mkdirSync(path.join(workspaceRoot, "docs-managed"), { recursive: true });
-  // goal ids are PHASE-NNN / AC-NNN (goal-store.ts), doc ids are DOC-NNN (document-store.ts).
+  // goal ids are GOAL-NNN / AC-NNN (goal-store.ts), doc ids are DOC-NNN (document-store.ts).
   fs.writeFileSync(path.join(workspaceRoot, "goals", "AC-101-criterion.md"),
-    "---\nid: AC-101\ntitle: nav criterion\nstatus: active\nkind: criterion\nphase: PHASE-101\ncriterion: echo ok\nexpect: \"=0\"\norigin: 2026-08-17 fixture\n---\n## Rationale\nmeasured\n");
+    "---\nid: AC-101\ntitle: nav criterion\nstatus: active\nkind: criterion\ngoal: GOAL-101\ncriterion: echo ok\nexpect: \"=0\"\norigin: 2026-08-17 fixture\n---\n## Rationale\nmeasured\n");
   fs.writeFileSync(path.join(workspaceRoot, "docs-managed", "DOC-101-nav-doc.md"),
     "---\nid: DOC-101\ntitle: nav doc\nstatus: active\nkind: skill\n---\n## Body\nthe doc\n");
   fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });

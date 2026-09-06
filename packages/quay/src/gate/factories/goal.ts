@@ -21,7 +21,7 @@ import { createGoalStore } from "../../goal-store.ts";
 import type { Task } from "../../abi.ts";
 
 /**
- * @param {string} goalId the goal record id (PHASE-NNN or AC-NNN)
+ * @param {string} goalId the goal record id (GOAL-NNN or AC-NNN)
  * @param {string} goalDir absolute path to the goal directory
  */
 export function makeGoalGate(goalId: string, goalDir: string): GateFn {
