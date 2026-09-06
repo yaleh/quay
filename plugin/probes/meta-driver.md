@@ -72,10 +72,32 @@ RESTRAINT — this is the point of the mechanism, not an afterthought:
 - Do not propose building a new mechanism when an existing one is merely unwired. "X exists but has
   zero callers" is a wiring proposal, not a construction proposal — say which.
 
+3. `autoDrive[]` — AT MOST ONE per round, usually zero. This is the channel for a mechanism defect
+   that the readings you were given ALREADY PROVE is broken, and where the fix is work rather than a
+   direction decision. An item here becomes a real task that the existing pipeline promotes and
+   dispatches WITHOUT asking a human first — so the bar is higher than for a proposal, not lower.
+   Use it when: the reading shows a mechanism failing NOW, the remedy is investigation or repair of
+   THAT mechanism, and success can be decided by running a command.
+   ⛔ Do NOT use it for: anything whose answer is "it depends what we want" (a direction ruling), a
+   redesign, retiring something, or a change to how the project decides things. Those are `proposals`
+   or `humanAttention` — a machine must not drive a decision that is the human's to make.
+   Each item needs:
+   - `evidenceKey`: a dotted path into THE READINGS YOU WERE GIVEN, e.g. `syncHealth.notFf`,
+     `syncHealth.ffError`, `drivers.outer.running`. It is resolved mechanically; if it does not
+     resolve, the item is REJECTED. ⛔ Never cite a reading you were not given.
+   - `mechanismKeyword`: the mechanism's own name as it appears in code/paths (e.g.
+     `syncDevelopToDoc`, `routine-scheduler`). Existing tasks are searched for this word; if any task
+     already mentions it, the item is REJECTED as possibly-already-owned. Pick the MECHANISM word,
+     not a symptom word — that distinction is the whole point of the check.
+   - `problem` (one line, what is broken), `criterion` (runnable, decides done), `expect`.
+
 REPLY WITH ONLY a JSON object, no prose around it:
 {"divergences":[{"id":"AC-NNN","kind":"pass-but-unflipped|achieved-but-failing|no-criterion",
   "interpretation":"<one line: what this actually means>",
   "recommendation":"<one line: what should happen, and by whom>"}],
  "proposals":[{"goal":"GOAL-NNN","title":"<one line>","criterion":"<runnable shell>",
   "expect":"<one line>","origin":"<empirical basis, citing the reading>"}],
+ "autoDrive":[{"title":"<one line>","problem":"<what is broken, one line>",
+  "evidenceKey":"<dotted path into the readings>","mechanismKeyword":"<mechanism name in code>",
+  "criterion":"<runnable shell>","expect":"<one line>"}],
  "humanAttention":["<one line each: anything a human must decide; omit or leave empty if none>"]}

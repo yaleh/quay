@@ -443,6 +443,143 @@ export function shouldJudge(
 /** 语义半地板的缺省值（24h）——粗安全网，见 shouldJudge 的说明。 */
 export const JUDGE_FLOOR_MS_DEFAULT = 24 * 60 * 60 * 1000;
 
+// ── 自动驱动通道（把已被读数证实的机制缺陷推进既有任务流水线）────────────────────────────────────
+// 人 2026-09-06 裁定：像「同步 69% 失败」「变化检测该不该上升为平台能力」这类问题应当【自动驱动】，
+// 不必每次等人确认。自动驱动 = 立一条任务，交给既有的 promotion→worker→fan-in 流水线执行——
+// ⛔ 不新建执行机制（那才是膨胀）。
+//
+// 三条与「提案」通道不同的、更严的机械前置（⛔ 通道选择不由 LLM 自评信心决定，硬规则 4）：
+//  ① evidenceKey 必须在【本轮读数】里解析得出——杜绝凭空造证据；解析不出即拒。
+//  ② mechanismKeyword 必须在既有任务里搜不到——搜到即拒并报出命中，因为「已有任务在管」与
+//     「无人管」修法完全不同（memory dedup-tasks-by-mechanism-not-symptom 的机械化）。
+//  ③ 每轮至多 1 条（比提案的 K=3 更严）——立案会被自动晋升并派发，代价比 draft 高得多。
+
+export interface AutoDriveItem {
+  title: string;
+  problem: string;
+  evidenceKey: string;
+  mechanismKeyword: string;
+  criterion: string;
+  expect: string;
+}
+
+/** 按点号路径在本轮读数里解析证据。`drivers.<kind>.<field>` 特化为按 kind 查。
+ *  解析不出 ⇒ undefined（调用侧据此拒绝——⛔ 不允许「引用了一个不存在的读数」的自动驱动）。 */
+export function resolveEvidence(readings: MetaRoundReadings, key: string): unknown {
+  const parts = String(key ?? "").split(".").filter(Boolean);
+  if (parts.length === 0) return undefined;
+  if (parts[0] === "drivers" && parts.length >= 2) {
+    const d = readings.drivers.find((x) => x.kind === parts[1]);
+    if (!d) return undefined;
+    return parts.length === 2 ? d : (d as unknown as Record<string, unknown>)[parts[2]];
+  }
+  let cur: unknown = readings as unknown;
+  for (const p of parts) {
+    if (cur === null || typeof cur !== "object") return undefined;
+    cur = (cur as Record<string, unknown>)[p];
+    if (cur === undefined) return undefined;
+  }
+  return cur;
+}
+
+/** 既有任务里是否已有人在管这个机制（按机制词搜，⛔ 不按症状词——memory 记的那次真实漏抓）。 */
+export function findOwningTasks(root: string, keyword: string, cap = 5): string[] {
+  const kw = String(keyword ?? "").trim().toLowerCase();
+  if (kw.length < 4) return []; // 太短的词会命中一切，等于没搜
+  const dir = path.join(root, "tasks");
+  let files: string[];
+  try { files = fs.readdirSync(dir).filter((f) => f.endsWith(".md")); } catch { return []; }
+  const hits: string[] = [];
+  for (const f of files) {
+    try {
+      if (fs.readFileSync(path.join(dir, f), "utf8").toLowerCase().includes(kw)) {
+        hits.push(f);
+        if (hits.length >= cap) break;
+      }
+    } catch { /* 读不了就跳过这一个 */ }
+  }
+  return hits;
+}
+
+/** 任务体（四件套）。⛔ 机械渲染自结构化输出——不给 LLM 写文件的权力。 */
+export function renderAutoDriveBody(item: AutoDriveItem, evidence: unknown, at: string): string {
+  return [
+    "## Finding",
+    `${item.problem}`,
+    "",
+    `本轮读数（${item.evidenceKey}）= \`${JSON.stringify(evidence)}\`，采于 ${at}，由 meta-driver 机械采集。`,
+    `涉及机制关键词：\`${item.mechanismKeyword}\`（立案前已搜既有任务，无人认领）。`,
+    "",
+    "## AC（draft）",
+    `- [ ] \`${item.criterion}\` ⇒ ${item.expect}`,
+    "",
+    "## DoD（draft）",
+    "- [ ] 上面的判据实跑通过，且判据本身能取假（改坏实现时会红）",
+    "- [ ] 若结论是「已有机制在管、只是失败」，则修那个机制，⛔ 不新建并行机制",
+    "",
+    "## Touches",
+    "- `plugin/scripts/meta-driver.ts`",
+  ].join("\n");
+}
+
+/** 立一条任务（复用 quay-native 的 task create CLI，⛔ 不手搓 markdown 落盘）。 */
+export async function createAutoDriveTask(
+  root: string, id: string, item: AutoDriveItem, body: string,
+): Promise<{ ok: boolean; reason: string }> {
+  const argv = [
+    "node", "--no-warnings", "--experimental-strip-types",
+    path.join(root, "packages", "quay-native", "bin", "quay-native.ts"),
+    "task", "create", id,
+    "--title", item.title,
+    "--labels", "meta-driver,driver-candidate",
+    "--body", body,
+  ];
+  const r = await runAsync(argv, { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
+  if (r.error) return { ok: false, reason: `task create spawn error: ${r.error.message}` };
+  if (r.status !== 0) return { ok: false, reason: `task create exit ${r.status}: ${(r.stderr || "").trim().slice(0, 200)}` };
+  return { ok: true, reason: `filed as ${id}` };
+}
+
+export interface AutoDriveResult { item: AutoDriveItem; id: string | null; accepted: boolean; reason: string }
+
+/** 自动驱动的闸 + 落地。逐条留痕（⛔ 不只报总数）。 */
+export async function driveItems(
+  root: string, items: AutoDriveItem[], readings: MetaRoundReadings,
+  opts: { cap: number; dryRun: boolean; at: string },
+): Promise<AutoDriveResult[]> {
+  const out: AutoDriveResult[] = [];
+  let filed = 0;
+  for (const item of items) {
+    if (filed >= opts.cap) {
+      out.push({ item, id: null, accepted: false, reason: `rate: 本轮已自动驱动 ${filed} 条，上限 ${opts.cap}` });
+      continue;
+    }
+    const ev = resolveEvidence(readings, item.evidenceKey);
+    if (ev === undefined) {
+      out.push({ item, id: null, accepted: false, reason: `evidenceKey ${JSON.stringify(item.evidenceKey)} 在本轮读数里解析不出 ⇒ 拒（⛔ 不接受凭空证据）` });
+      continue;
+    }
+    const owners = findOwningTasks(root, item.mechanismKeyword);
+    if (owners.length > 0) {
+      out.push({ item, id: null, accepted: false, reason: `既有任务可能已在管（机制词 ${item.mechanismKeyword}）：${owners.join(", ")}` });
+      continue;
+    }
+    const gate = gateFinding(proposalCandidateText({ title: item.title, criterion: item.criterion, origin: item.problem }), { existingKeys: [], recentCount: filed, K: opts.cap });
+    if (!gate.accept) { out.push({ item, id: null, accepted: false, reason: gate.reason }); continue; }
+
+    const id = `gap-meta-${item.mechanismKeyword.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48)}`;
+    if (opts.dryRun) {
+      out.push({ item, id, accepted: true, reason: "dry-run: would file" });
+    } else {
+      const c = await createAutoDriveTask(root, id, item, renderAutoDriveBody(item, ev, opts.at));
+      out.push({ item, id, accepted: c.ok, reason: c.reason });
+      if (!c.ok) continue;
+    }
+    filed++;
+  }
+  return out;
+}
+
 // ── 语义半 ────────────────────────────────────────────────────────────────────────────────────────
 
 /** 组装 probe prompt 的**单一构造点**（复刻 launchArgv 的 AC140 纪律：一次性入口与常驻入口
@@ -457,7 +594,7 @@ export function buildProbePrompt(objective: string, readings: MetaRoundReadings)
 }
 
 /** 解析语义半的输出。读不懂 ⇒ null（调用侧转 not-evaluated / failed，⛔ 不当空结果放行）。 */
-export function parseProbeOutput(stdout: string): { divergences: unknown[]; proposals: Proposal[]; humanAttention: string[] } | null {
+export function parseProbeOutput(stdout: string): { divergences: unknown[]; proposals: Proposal[]; autoDrive: AutoDriveItem[]; humanAttention: string[] } | null {
   const text = String(stdout ?? "").trim();
   if (!text) return null;
   // 容忍 LLM 在 JSON 前后带少量散文：取第一个 { 到最后一个 }。
@@ -480,9 +617,23 @@ export function parseProbeOutput(stdout: string): { divergences: unknown[]; prop
         }];
       })
     : [];
+  const autoDrive: AutoDriveItem[] = Array.isArray(o.autoDrive)
+    ? (o.autoDrive as unknown[]).flatMap((raw) => {
+        if (!raw || typeof raw !== "object") return [];
+        const a = raw as Record<string, unknown>;
+        const need = ["title", "problem", "evidenceKey", "mechanismKeyword", "criterion", "expect"] as const;
+        if (need.some((k) => typeof a[k] !== "string" || String(a[k]).trim() === "")) return [];
+        return [{
+          title: String(a.title).trim(), problem: String(a.problem).trim(),
+          evidenceKey: String(a.evidenceKey).trim(), mechanismKeyword: String(a.mechanismKeyword).trim(),
+          criterion: String(a.criterion).trim(), expect: String(a.expect).trim(),
+        }];
+      })
+    : [];
   return {
     divergences: Array.isArray(o.divergences) ? (o.divergences as unknown[]) : [],
     proposals,
+    autoDrive,
     humanAttention: Array.isArray(o.humanAttention) ? (o.humanAttention as unknown[]).map((x) => String(x)) : [],
   };
 }
@@ -596,6 +747,9 @@ export async function runMetaRound(opts: MetaRoundOptions): Promise<MetaRoundRes
   const activeGoalIds = new Set(readings.goals.map((g) => g.id));
   const filed = await fileProposals(root, parsed.proposals, records, { k, activeGoalIds, dryRun });
   const acceptedIds = filed.filter((f) => f.accepted).map((f) => f.id);
+  // 自动驱动：每轮至多 1 条（⛔ 比提案更严——立案会被自动晋升并派发）。
+  const driven = await driveItems(root, parsed.autoDrive, readings, { cap: 1, dryRun, at });
+  const drivenIds = driven.filter((d) => d.accepted).map((d) => d.id);
   // 判读成功才推进状态：失败/解析不了的轮不写 state ⇒ 下一轮仍判为「该判读」，⛔ 不会因
   // 一次失败就把这批读数当成"已判过"而永久跳过。
   if (!dryRun) writeState(root, { digest, lastJudgedAt: new Date().toISOString() });
@@ -606,10 +760,13 @@ export async function runMetaRound(opts: MetaRoundOptions): Promise<MetaRoundRes
     proposalsOffered: parsed.proposals.length,
     proposalsAccepted: acceptedIds.length,
     acceptedIds,
+    autoDriveOffered: parsed.autoDrive.length,
+    autoDriveFiled: drivenIds,
+    autoDrive: driven,
     humanAttention: parsed.humanAttention,
   };
   return {
-    fact: { name: "meta-driver", value, state: "verified", reason: `${readings.divergences.length} divergences, ${acceptedIds.length}/${parsed.proposals.length} proposals filed as draft` },
+    fact: { name: "meta-driver", value, state: "verified", reason: `${readings.divergences.length} divergences, ${acceptedIds.length}/${parsed.proposals.length} proposals as draft, ${drivenIds.length}/${parsed.autoDrive.length} auto-driven` },
   };
 }
 
