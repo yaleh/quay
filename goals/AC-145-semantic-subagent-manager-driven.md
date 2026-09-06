@@ -9,6 +9,11 @@ origin: |
   跨层纠错必须单列（本会话三个实证，⛔ 全部由另一层读散文发现）：
   outer 自诊断「优先级排序疏漏」错（真因 AskUserQuestion 卡 3h17m）；
   manager 自称「非手搓走已有机件」过度声称；manager 过早给出因果归因。
+evidence:
+  at: 2026-09-06T09:44:29.591Z
+  verdict: fail
+  reading: AC-145 has no criterion defined (fail-closed — an unenforceable AC must
+    never silently pass)
 ---
 
 **判据（能取假）**：①任务撰写/立案 · 需求分析 · 升级判断（B11）· 学习（B10，证据推翻原判断时改

@@ -11,6 +11,11 @@ origin: |
   resource-gate 0 处（worker-driver 22 处）；promotion 每 30 秒无条件轮询、无条件 spawn LLM
   fix worker，机器负载多高都照 spawn；而 worker 会正确退避（2026-08-23 14:09
   resource-gate-wait: loadavg 41.86 就是它救的场）。两个驱动跑同一台机器，一个懂事一个不懂事。
+evidence:
+  at: 2026-09-06T09:44:31.315Z
+  verdict: fail
+  reading: AC-150 has no criterion defined (fail-closed — an unenforceable AC must
+    never silently pass)
 ---
 
 **判据（能取假，三条）**：

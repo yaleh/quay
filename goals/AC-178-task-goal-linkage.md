@@ -6,12 +6,16 @@ kind: criterion
 goal: GOAL-001
 criterion: |
   test "$(grep -l '^goal_ac:' tasks/*.md | wc -l)" -ge 3
-expect: "exit 0（≥3 个真实任务声明了所属 AC）"
+expect: exit 0（≥3 个真实任务声明了所属 AC）
 origin: |
   没有关联，"哪条 AC 没有任何任务在推进"只能靠 LLM 语义匹配；
   有了它就是纯机械计数，driver 的缺口环才可能是机械的。
   字段放顶层而非 extra 嵌套的依据：depends_on 的既有教训——
   嵌在 extra 里的 depends_on 被 parseTask 失读（返回空字符串）。
+evidence:
+  at: 2026-09-06T09:44:37.172Z
+  verdict: fail
+  reading: acceptance failed (exit 1)
 ---
 
 **判据（能取假）**：至少 3 个 `tasks/*.md` 在 frontmatter 顶层声明 `goal_ac:`。

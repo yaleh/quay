@@ -7,11 +7,15 @@ goal: GOAL-001
 criterion: |
   grep -qE 'goals/|goal list|goal-store' orchestration/manager-tick-prompt.txt \
     && head -14 orchestration/manager-phase-goal.md | grep -q 'goals/'
-expect: "exit 0"
+expect: exit 0
 origin: |
   规格 §7.1 与 GOAL-001 风险 1：上一次 goal-store 死于"散文继续是权威且编辑它零摩擦"。
   两个来源并存必然漂移——manager-phase-goal.md 自己就有实证：顶部横幅曾写死
   「AC54–AC78」并过期，2026-08-25 e389d3e58 才改成结构性描述。
+evidence:
+  at: 2026-09-06T09:44:34.874Z
+  verdict: pass
+  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：①`manager-tick-prompt.txt` 已指向 store；

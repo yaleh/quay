@@ -6,13 +6,17 @@ kind: criterion
 goal: GOAL-001
 criterion: |
   node packages/quay/bin/quay.ts goal list | grep -q 'GOAL-001'
-expect: "exit 0"
+expect: exit 0
 origin: |
   人 2026-09-06 裁定「同意复用 goal-store 扩展，但 ABI 封装是必要的」。
   推翻的是本轮调研给出的 Core-owned 建议（goal/document 现状不穿 ABI，
   serve-goal.ts:8-14 明写）。
   技术上的独立支撑：agent 现在读不到 goal——全仓 goal_list 零命中，
   唯一入口是直跑 node packages/quay/src/goal-store.ts。
+evidence:
+  at: 2026-09-06T09:44:36.486Z
+  verdict: fail
+  reading: acceptance failed (exit 1)
 ---
 
 **判据（能取假）**：`quay goal list` 经 provider client 返回含 `GOAL-001` 的结果。

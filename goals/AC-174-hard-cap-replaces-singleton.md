@@ -6,13 +6,17 @@ kind: criterion
 goal: GOAL-001
 criterion: |
   node packages/quay/src/goal-store.ts check | grep -q '"withinCap": true'
-expect: "exit 0"
+expect: exit 0
 origin: |
   人 2026-09-06 裁定「接受硬上限 + 强制关闭机制」，cap=3。
   推翻的是 SPEC-0809 §2b 人已同意的 I1「同一时刻只能有一条 active PHASE」——
   I1 的动机是实测的目标通胀（manager-phase-goal.md 里曾有四条自称"本阶段主判据"的
   AC 同时存在：AC10/AC12/AC20/AC28；设目标的裁定六次，只加不关）。
   ⇒ 推翻它必须补等效守卫，硬上限即其一（另一半是 AC-175 的陈旧判定）。
+evidence:
+  at: 2026-09-06T09:44:35.423Z
+  verdict: pass
+  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：`check` 输出含 `"withinCap": true`。

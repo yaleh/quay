@@ -4,10 +4,18 @@ title: driver 两级分层落地（Layer 0 + Layer 1a/1b）
 status: active
 kind: criterion
 goal: GOAL-002
-origin: |
+origin: >
   人 2026-08-23 裁定「前述可重用机制应当分层抽象，以支持这两层上的重用」；
-  正本 orchestration/SPEC-unified-driver-architecture-2026-08-23.md §2.1/§2.5/§2.6，
+
+  正本 orchestration/SPEC-unified-driver-architecture-2026-08-23.md
+  §2.1/§2.5/§2.6，
+
   ⛔ 判据在此、设计在 SPEC，不互相复制。
+evidence:
+  at: 2026-09-06T09:44:31.657Z
+  verdict: fail
+  reading: AC-151 has no criterion defined (fail-closed — an unenforceable AC must
+    never silently pass)
 ---
 
 **判据（能取假）**：存在 **Layer 0（driver-runtime）** 与 **Layer 1a（task-processing）/ 1b（routine）**

@@ -8,6 +8,11 @@ origin: |
   「看门人」缺口（manager 分析时主动指出，⛔ 不是人提出的）：今天是三层互看——outer 阻塞 3h17m
   期间，是 manager 发现、inner 执行。取消两层后只剩人看 manager。新架构下 manager 阻塞时 driver
   仍在跑（更好）；但语义工作停摆且无人察觉，直到人去看。本质是用【层间冗余】换【机制连续性】。
+evidence:
+  at: 2026-09-06T09:44:30.281Z
+  verdict: fail
+  reading: AC-147 has no criterion defined (fail-closed — an unenforceable AC must
+    never silently pass)
 ---
 
 **判据（能取假）**：manager 会话失能（阻塞在交互提示 / 心跳停 / 进程死）超过阈值 T，**存在一个

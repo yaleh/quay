@@ -9,13 +9,17 @@ criterion: |
     && printf '%s' "$out" | grep -q '"fresh"' \
     && printf '%s' "$out" | grep -q '"stale"' \
     && printf '%s' "$out" | grep -q '"notEvaluated"'
-expect: "exit 0（三个桶作为结构性键恒存在，允许为空数组）"
+expect: exit 0（三个桶作为结构性键恒存在，允许为空数组）
 origin: |
   人 2026-09-06 裁定「接受硬上限 + 强制关闭机制」，stale=7 天。
   三态要求来自硬规则 3b：判定机件在读不懂输入时不得返回与"合格"同形的值。
   同形先例（同一天三个互不相关的机件）：task-status-drift-check.ts:126、
   slot-refill.ts:373、outer-tick-log-check.sh:107/112/205/262 —— 全部退出码 0、
   结构完整、数字合理，而它们什么都没查。
+evidence:
+  at: 2026-09-06T09:44:36.054Z
+  verdict: pass
+  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：`check --staleness` 输出把 active GOAL 分进**三个具名桶**：

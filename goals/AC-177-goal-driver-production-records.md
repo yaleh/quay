@@ -7,12 +7,16 @@ goal: GOAL-001
 criterion: |
   test -s .quay/goal-round.jsonl \
     && test "$(grep -c '"verdict"' .quay/goal-round.jsonl)" -ge 3
-expect: "exit 0（≥3 条含真实 criterion verdict 的轮次记录）"
+expect: exit 0（≥3 条含真实 criterion verdict 的轮次记录）
 origin: |
   硬规则 4 推论三（2026-08-14 实证，代价：一个仪器"完成"了 21 小时而真实数据为 0）：
   一个只能被 fixture / 注入数据满足的判据不是测量。
   同族先例即本 GOAL 的立条依据：gap-spec-goal-store-third-sibling-kind 标 done、
   AC 全绿，而 goals/ 从未存在、gate-events 中 "gate":"goal" 零条。
+evidence:
+  at: 2026-09-06T09:44:36.833Z
+  verdict: fail
+  reading: acceptance failed (exit 1)
 ---
 
 **判据（能取假）**：`.quay/goal-round.jsonl` 非空且含 ≥3 条带 `verdict` 的记录。

@@ -4,15 +4,20 @@ title: G8 dashboard 卡片在运行中的 Web 上真实渲染
 status: active
 kind: criterion
 goal: GOAL-001
-criterion: |
-  addr="$(pgrep -af 'quay.ts serve' | grep -oE -- '--host [^ ]+ --port [0-9]+' | head -1 | awk '{print $2":"$4}')" \
+criterion: >
+  addr="$(pgrep -af 'quay.ts serve' | grep -oE -- '--host [^ ]+ --port [0-9]+' |
+  head -1 | awk '{print $2":"$4}')" \
     && test -n "$addr" \
     && curl -sf "http://$addr/dashboard" | grep -q 'goal-card'
-expect: "exit 0"
+expect: exit 0
 origin: |
   人 2026-09-06 需求⑥「在 quay web 为 goal 实现相应的页面和 dashboard 卡片」。
   判据读【运行中的服务】而非源码，依据硬规则 4 推论三：
   grep 源码只证明"能产出"，不证明"已产出"。
+evidence:
+  at: 2026-09-06T09:44:37.570Z
+  verdict: fail
+  reading: acceptance failed (exit 1)
 ---
 
 **判据（能取假）**：从**运行中的 `quay serve` 进程**派生地址，`GET /dashboard` 的响应含 `goal-card`。

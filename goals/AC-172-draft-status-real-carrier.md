@@ -4,15 +4,20 @@ title: draft 状态可用，且有真实的 draft GOAL 载体
 status: active
 kind: criterion
 goal: GOAL-001
-criterion: |
-  node packages/quay/src/goal-store.ts list --status draft | grep -q '"id": "GOAL-'
-expect: "exit 0"
+criterion: >
+  node packages/quay/src/goal-store.ts list --status draft | grep -q '"id":
+  "GOAL-'
+expect: exit 0
 origin: |
   人 2026-09-06 裁定「draft 状态接受」。
   立条依据（推导，非偏好）：现词表无"写好但未启动"态且 write() 默认 status="active"
   (goal-store.ts:258) ⇒ 写入即激活；叠加硬上限后，cap 满时连撰写都会被堵死——
   上限本该只约束激活。该状态在散文里已存在：manager-phase-goal.md:174
   「📋 下一阶段（已创建，未启动）」，44f8813d2 明写「未切换、未启动、不得据此派发」。
+evidence:
+  at: 2026-09-06T09:44:34.603Z
+  verdict: pass
+  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：`list --status draft` 至少返回一条 `GOAL-` 记录。
