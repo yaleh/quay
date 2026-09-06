@@ -15,12 +15,12 @@ goal-store write 只 writeFileSync 不 commit，commitGoalFile 只覆盖 meta-dr
 本轮读数（syncHealth.ffError）= `40`，采于 2026-09-06T21:17:37Z，由 meta-driver 机械采集。
 涉及机制关键词：`commitGoalFile`（立案前已搜既有任务，无人认领）。
 
-## AC（draft）
-- [ ] `id="AC-PROBE-$(date +%s)"; node packages/quay/src/goal-store.ts write "$id" --title commit-probe --origin autoDrive-criterion >/dev/null 2>&1; rc=$?; n=$(git status --porcelain goals/ 2>/dev/null | grep '^??' | grep -c "$id"); git status --porcelain goals/ 2>/dev/null | grep '^??' | grep "$id" | awk '{print $2}' | xargs -r rm -f; test "$rc" -eq 0 -a "$n" -eq 0` ⇒ goal-store write 写盘即提交——写一个 probe goal 后 goals/ 无该 id 的未跟踪文件，ff-only 同步不再被 goal 文件阻塞
+## Acceptance Criteria
+- [x] `t=$(mktemp -d); git -C "$t" init -q; git -C "$t" config user.email t@t; git -C "$t" config user.name t; node packages/quay/src/goal-store.ts write GOAL-999 --title commit-probe --origin autoDrive-criterion --root "$t" >/dev/null 2>&1; rc=$?; n=$(git -C "$t" status --porcelain goals/ 2>/dev/null | grep -c '^??'); rm -rf "$t"; test "$rc" -eq 0 -a "$n" -eq 0` ⇒ goal-store write 写盘即提交——写一个 probe goal 后 goals/ 无该 id 的未跟踪文件，ff-only 同步不再被 goal 文件阻塞
 
-## DoD（draft）
-- [ ] 上面的判据实跑通过，且判据本身能取假（改坏实现时会红）
-- [ ] 若结论是「已有机制在管、只是失败」，则修那个机制，⛔ 不新建并行机制
+## Definition of Done
+- [x] 上面的判据实跑通过（sh -c 退出 0），且判据本身能取假（负控制：写盘但不提交 ⇒ `git status --porcelain goals/ | grep -c '^??'` = 1 ⇒ 判据红）
+- [x] 结论是「已有机制 commitGoalFile 在管、只是只覆盖 meta-driver 两条写路径」，故修那个机制：把提交上移到 goal-store write/flipGoal 源头，meta-driver 的 commitGoalFile 删除——⛔ 不新建并行机制
 
 ## Touches
 - `plugin/scripts/meta-driver.ts`
