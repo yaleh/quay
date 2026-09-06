@@ -79,6 +79,21 @@ test('computeDivergences: 无 criterion ⇒ no-criterion（优先于其它判定
   assert.equal(d[0].kind, 'no-criterion');
 });
 
+// 真实回归（2026-09-06）：AC-181 被写成活性监控项、退役后判据仍 pass，status=retired ≠ achieved
+// ⇒ 旧实现（只跳 draft）立刻把它报成 pass-but-unflipped，制造一条【每轮都在、永远无法消解】的
+// 假偏离——退役的东西没有「该翻 achieved」可言。用当时的真实取值作输入，⛔ 不用自造样例。
+test('computeDivergences: 非承诺态（retired/superseded/draft）一律不报偏离', () => {
+  const mk = (id, status) => ({ id, title: null, goal: 'GOAL-001', status, criterion: 'true', verdict: 'pass', reason: 'ok' });
+  assert.deepEqual(computeDivergences([mk('AC-181', 'retired')]), [], 'retired + pass 必须无偏离（真实回归）');
+  assert.deepEqual(computeDivergences([mk('AC-900', 'superseded')]), [], 'superseded 同理');
+  assert.deepEqual(computeDivergences([mk('AC-901', 'draft')]), [], 'draft 同理（既有行为不得回退）');
+  // 无判据的非承诺态也不得报 no-criterion——「撤回的东西缺判据」不是偏离
+  assert.deepEqual(computeDivergences([{ ...mk('AC-902', 'retired'), criterion: '', verdict: 'fail' }]), []);
+  // 取假的一侧：承诺态仍照报，⛔ 不得因放宽而把两类真偏离一起吞掉
+  assert.equal(computeDivergences([mk('AC-903', 'active')])[0]?.kind, 'pass-but-unflipped');
+  assert.equal(computeDivergences([{ ...mk('AC-904', 'achieved'), verdict: 'fail' }])[0]?.kind, 'achieved-but-failing');
+});
+
 test('computeDivergences: pass 且已 achieved ⇒ 无偏离（一致就不报）', () => {
   const d = computeDivergences([
     { id: 'AC-004', title: null, goal: 'GOAL-001', status: 'achieved', criterion: 'true', verdict: 'pass', reason: 'ok' },
