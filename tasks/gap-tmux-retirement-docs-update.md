@@ -1,7 +1,7 @@
 ---
 id: gap-tmux-retirement-docs-update
 title: 文档更新——tmux 退役后的描述调整（CLAUDE.md/README/SPEC/ADR/skill 文档）
-status: ready
+status: done
 labels:
   - gap
 parent: null
