@@ -1,7 +1,7 @@
 ---
 id: AC-178
 title: G7 goal ↔ task 关联落地，缺口计算成为机械量
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-001
 criterion: |
@@ -13,9 +13,9 @@ origin: |
   字段放顶层而非 extra 嵌套的依据：depends_on 的既有教训——
   嵌在 extra 里的 depends_on 被 parseTask 失读（返回空字符串）。
 evidence:
-  at: 2026-09-06T09:44:37.172Z
-  verdict: fail
-  reading: acceptance failed (exit 1)
+  at: 2026-09-06T21:54:11.410Z
+  verdict: pass
+  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：至少 3 个 `tasks/*.md` 在 frontmatter 顶层声明 `goal_ac:`。
