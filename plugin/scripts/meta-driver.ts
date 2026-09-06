@@ -855,7 +855,7 @@ export async function runMetaRound(opts: MetaRoundOptions): Promise<MetaRoundRes
   const driven = await driveItems(root, parsed.autoDrive, readings, { cap: 1, dryRun, at }); // concurrency-default-fallback: 自动驱动每轮至多 1 条（比提案 3 更严——立案会被自动晋升并派发）
   const drivenIds = driven.filter((d) => d.accepted).map((d) => d.id);
   // 决策也必须被【路由】到 draft GOAL（⛔ 不许停在一个只打印的字段里）。
-  const decided = await fileDecisions(root, parsed.decisions, readings, records, { cap: 2, dryRun, at });
+  const decided = await fileDecisions(root, parsed.decisions, readings, records, { cap: 2, dryRun, at }); // concurrency-default-fallback: 决策路由每轮至多 2 条（方向问题落成 draft GOAL）
   const decidedIds = decided.filter((d) => d.accepted).map((d) => d.id);
   // 判读成功才推进状态：失败/解析不了的轮不写 state ⇒ 下一轮仍判为「该判读」，⛔ 不会因
   // 一次失败就把这批读数当成"已判过"而永久跳过。
