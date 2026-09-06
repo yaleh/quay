@@ -38,13 +38,13 @@ Task 3 和 Task 4 完成后，文档中对 tmux 依赖、启用流程、manager 
 
 ## AC
 
-- [ ] `CLAUDE.md` 中对 `quay manager start` / tmux 启动的描述已更新，指向 `plugin/skills/manager/SKILL.md` 作为新的推荐路线
-- [ ] `README.md` 的"启用流程"部分已同步，列出 ① 安装 ② 手动启动 Claude Code ③ 调用 init skill ④ 调用 drivers skill ⑤ 调用 manager skill，无过时的"启动 outer"步骤
-- [ ] `orchestration/SPEC-tmux-retirement-2026-09-03.md` 补充"结论段"，记录各 Phase 的成果（Task 1-4 全部 done 时的最终状态）
-- [ ] `plugin/skills/manager/SKILL.md` 的第 136 行 `## How the manager itself starts` 部分已由 Task 3 改造，此处文档与新代码一致
-- [ ] `plugin/skills/cold-start/SKILL.md` 中若提及"会启动 outer"的假设，已清理（说明：outer 已删除，cold-start 不应提及）
-- [ ] `adr/ADR-016.md` 等若涉及 tmux 依赖，已补充交叉引用说明"tmux 依赖已于 2026-09-04 退役，见 SPEC-tmux-retirement-2026-09-03.md"
-- [ ] 跨文档 grep 验证：`grep -r "quay-topology\|outer-session-check\|outer tmux" docs/ orchestration/ plugin/skills/ --include="*.md"` 无过时引用指向已删除的脚本
+- [x] `CLAUDE.md` 中对 `quay manager start` / tmux 启动的描述已更新，指向 `plugin/skills/manager/SKILL.md` 作为新的推荐路线
+- [x] `README.md` 的"启用流程"部分已同步，列出 ① 安装 ② 手动启动 Claude Code ③ 调用 init skill ④ 调用 drivers skill ⑤ 调用 manager skill，无过时的"启动 outer"步骤
+- [x] `orchestration/SPEC-tmux-retirement-2026-09-03.md` 补充"结论段"，记录各 Phase 的成果（Task 1-4 全部 done 时的最终状态）
+- [x] `plugin/skills/manager/SKILL.md` 的第 136 行 `## How the manager itself starts` 部分已由 Task 3 改造，此处文档与新代码一致
+- [x] `plugin/skills/cold-start/SKILL.md` 中若提及"会启动 outer"的假设，已清理（说明：outer 已删除，cold-start 不应提及）
+- [x] `adr/ADR-016.md` 等若涉及 tmux 依赖，已补充交叉引用说明"tmux 依赖已于 2026-09-04 退役，见 SPEC-tmux-retirement-2026-09-03.md"
+- [x] 跨文档 grep 验证：`grep -r "quay-topology\|outer-session-check\|outer tmux" docs/ orchestration/ plugin/skills/ --include="*.md"` 无过时引用指向已删除的脚本
 
 ## DoD
 

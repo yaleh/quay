@@ -344,52 +344,57 @@ installed package:
 quay-native init --dry-run
 ```
 
-## Cold start: two-layer loop (the methodology, not just the task board)
+## Enablement flow: in-session skills (the methodology, not just the task board)
 
-quay is also a Claude Code **plugin** that lays down the two-layer autonomous
-loop (an outer orchestrator watching an inner developer) into a project that has
-never used quay before. The whole cold start is **three human inputs**, each
-recorded verbatim by `test/cold-start-oneliner-e2e.sh` (`--count-inputs`):
+quay is also a Claude Code **plugin** that lays the autonomous loop mechanism into
+a project that has never used quay before. The enablement flow is
+**session-embodiment**: the human starts **one** Claude Code session (however they
+like — interactive `claude`, `claude --bg`, tmux, or an IDE), then runs skills
+**inside** that session to activate each role. No script spawns a session, and there
+is **no "start outer" step** — the outer session role was retired and its function
+absorbed into the manager's direct subagent dispatch
+(`orchestration/SPEC-tmux-retirement-2026-09-03.md` §1.4/Layer 3a).
 
 ```
-# 1. install / build the plugin artifact:
-bash plugin/scripts/publish-dist-branch.sh --branch cold8-dist
+# 1. install quay (one-time, session-independent):
+npm install -g quay-<version>.tgz        # registers the plugin + the quay CLI (see Install above)
 
-# 2. in the target project, lay down the mechanism:
-#    (the /quay:init skill copies workflows + agents + gate scripts + the loop;
+# 2. in the target project, start a Claude Code session yourself — HOW is your choice.
+
+# 3. in that session, initialize quay (lays .quay / tasks / git branches + the loop mechanism;
 #    YOUR test command is auto-DETECTED from scripts/test.sh / package.json /
-#    go.mod / Cargo.toml — no need to know it in advance)
+#    go.mod / Cargo.toml — no need to know it in advance):
 /quay:init --all --loop
 
-# 3. cold-start skill — one command mounts the loop monitor (session-liveness,
-#    the ONE observer; inner-state.sh is retired) via the Monitor tool,
-#    re-creates the 20-minute cron, DRIVES the inner session to start fast mode,
-#    and asserts a real --task-start telemetry record in .workflow-events/:
-/quay:cold-start
+# 4. in that session, start the drivers + web server (one idempotent call):
+/quay:drivers
+
+# 5. in that session, activate the manager (④ and ⑤ can be the same session):
+/quay:manager
 ```
 
-The **inner start is inside `/quay:cold-start`** — it is never a separate human
-step (that was the original spec's gap: the inner loop silently never started
-because it was treated as a side effect of outer guidance). The cold-start skill
-is **agent-executed** (Monitor tool, events delivered to the session); a script
-that backgrounds the monitors with `nohup` looks identical in `ps` but notifies
-nobody, so it does not pass.
+Steps ③④⑤ are all "invoke a skill in the current session" — never "launch a new
+session". The session's lifecycle belongs to the human; quay only turns an
+already-running session into a role. The retired `outer`/`inner` two-session tmux
+model (`session-liveness.sh` / `quay-topology.sh` / `outer-session-check.sh` /
+`topology-check.sh`) was **deleted, not migrated** — see
+`orchestration/SPEC-tmux-retirement-2026-09-03.md`. The cold-start skill that
+re-created the "outer cron + drive inner" model is likewise retired; the drivers +
+manager skills above are its successors.
 
 What `--loop` lays into the target project (from the plugin bundle — nothing is
 copied out of the quay development tree):
 
 - `orchestration/orchestrator-loop-tick.md` + `docs/analysis/fast-mode-loop-tick.md`
   — the outer and inner tick documents, with `scripts/test.sh` / the quay repo
-  root / `quay-0:0.0` mechanically replaced by the target's own test command,
-  repo root, and tmux session (no hand `sed`).
+  root mechanically replaced by the target's own test command and repo root
+  (no hand `sed`).
 - `plugin/scripts/` — the checkers (`fast-mode-telemetry.ts`,
   `task-contract-check.ts`, `task-status-drift-check.ts`,
   `touches-orthogonality-check.ts`, `concurrent-batch-scheduler.ts`,
   `inner-blocked-signal.ts`, …), the resource gate, the heavy-op token, the
-  capability catalog (`capability-catalog.sh` — see below), and the
-  observation mechanism (`session-liveness.sh` — the ONE observer;
-  `inner-state.sh` is retired, gap-retire-inner-state-one-observer-targets-by-
-  parameter), plus their transitive dependencies.
+  capability catalog (`capability-catalog.sh` — see below), plus their transitive
+  dependencies.
 - `.quay/runtime/quay/quay.js` — the **built Core runtime artifact** (bundled by
   quay-init — a `.js` bundle distinct from the dev-tree source `bin/quay.ts` that
   the source-install commands above run), laid into the target's

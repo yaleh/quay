@@ -637,3 +637,34 @@ tmux server）还会起真实 tmux，`tmux-leak-scan.sh` 就是必需的兜底�
 **当前状态（2026-09-04，本次更新）**：任务 6 done；任务 1-4、7 未开始（原任务 1-5 已作废，
 不是这些新任务的前身）。**下一步建议：任务 1**（删除 outer 相关 tmux 依赖）或**任务 2**
 （新增"启动 drivers+web server"skill）——两者互不依赖，可任选其一先做，也可并行立案。
+
+---
+
+## 8. 结论段（2026-09-06 —— 任务 7 文档更新落地后的最终状态）
+
+**tmux 退役工程的六项任务（§7 任务 1-4/6/7）已全部 `done`。** 逐项成果：
+
+| 任务 | 状态 | 成果 |
+|---|---|---|
+| 1 `gap-retire-outer-tmux-window-logic` | done | 删除 outer 相关 tmux 依赖：`quay-topology.sh` 的 outer 窗口建立逻辑、`session-bootstrap.sh` 驱动 outer 冷启动的部分、`outer-session-check.sh`（含测试 `outer-session-check.test.mjs`）、`topology-check.sh`，以及 `session-topology` skill；`manager-adopt.sh` 等断链调用方一并跟进 |
+| 2 `gap-skill-start-drivers-webserver` | done | 新增 `plugin/skills/drivers/SKILL.md`（`/quay:drivers`）——会话内一次调用幂等封装 `quay driver start --kind promotion/worker` + `quay serve`（人流程第④步，Layer 3b 判定的纯缺口） |
+| 3 `gap-manager-skill-session-embodiment-activation` | done | `plugin/skills/manager/SKILL.md` 落地「会话内激活（默认）vs 裸机冷启动（备选）」两条路线：默认是当前会话调用 skill 变身 manager（初始化家目录 + 加载方法论 + 武装锚点）；`quay manager start`（`manager-start.sh` 的 tmux 路径）降级为第三方裸机冷启动备选（人流程第⑤步） |
+| 4 `gap-manager-liveness-field-outer-tmux-gone` | done | `manager-tick-readings.ts` 的 `outer.liveness` 字段随 outer 独立会话一并删除（方案 A：删除 `outerReadings()` 及仅服务于它的 tmux 读管线 `tmuxListPanes`/`remoteTmuxListPanes`/`parsePanes`/`resolvePanes` 等）——判层活性的正本已是直接量（git log 提交时刻 / worktree 活进程） |
+| 6 `gap-retire-session-liveness` | done | 取消 `session-liveness.sh` + `session-liveness-mount.sh`/sweep 脚本/`monitor-mount-check.sh` + 22 个测试文件，清理 147 个消费方引用，一并退役 idle-watch 机制（Layer 2b，人 2026-09-03 裁定 #4） |
+| 7 `gap-tmux-retirement-docs-update`（本任务） | done | 同步 CLAUDE.md / README / 本 SPEC / manager·cold-start skill / ADR-016 中对 tmux 依赖与启用流程的描述，消除新旧两套启动方式的混述 |
+
+**技术架构最终状态**：
+
+- **默认启用流程 = 会话内 skill 激活**：① user scope 安装 quay ② 用户手动启动 Claude Code
+  会话 ③ 会话内 `/quay:init` 初始化 ④ 会话内 `/quay:drivers` 启动 drivers + web server
+  ⑤ 会话内 `/quay:manager` 变身 manager（④⑤可合一）。
+- **outer 作为独立会话角色已撤销**：职能并入 manager 的直接 subagent 派发（AC145-149），
+  相关 tmux 依赖（`quay-topology.sh`/`outer-session-check.sh`/`topology-check.sh`）直接删除，无迁移路径。
+- **inner 已由 worker-driver 取代**（headless `claude -p` 派发，不在 tmux 里）。
+- **tmux 仅保留**在 ADR-016 圈定的无替代边界用途（控制面斜杠命令 / 下游不支持原生通道的环境）+
+  人工手动使用的会话 + 测试基础设施（`hermetic-tmux.mjs`/`tmux-leak-scan.sh`，§4 非目标）。
+- **`quay manager start`（`manager-start.sh`）保留为裸机冷启动备选**，不再是推荐路径。
+
+**未决（§4 非目标，建议单独立案）**：AC149 的验证/修复、C 类投递链（send-keys 系列）的进一步
+退役、`cold-start`/`session-topology` 两份 skill 文档的深层重写（任务 7 已加 RETIRED 横幅但未
+重写拓扑模型，量级超出本任务范围）。

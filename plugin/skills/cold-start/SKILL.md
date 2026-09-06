@@ -9,6 +9,15 @@ allowed-tools: Bash, Read, Monitor, CronCreate, CronList
 **One slash command that turns a quay-init-prepared project into a running two-layer loop.**
 The user's whole cold start is this command; after it returns, the loop must be provably live.
 
+> **⛔ RETIRED (2026-09-04, `orchestration/SPEC-tmux-retirement-2026-09-03.md` §1.4/Layer 3b).**
+> The two-session "start an outer loop, drive an inner session" model this skill describes is
+> **retired**: the outer session role was absorbed into the manager's direct subagent dispatch
+> (`gap-retire-outer-tmux-window-logic`), and the inner session was replaced by the worker-driver.
+> The current enablement flow is **① install ② start a Claude Code session (your choice)
+> ③ `/quay:init` ④ `/quay:drivers` ⑤ `/quay:manager`** — there is no "start outer" step. The
+> content below is retained for historical reference pending a full rewrite (tracked separately,
+> SPEC §4 非目标); do not follow it as the current procedure.
+
 **本文件是执行路径,不是行为正本。** 行为正本与背景(如 nohup 禁用的说明、铺什么验什么的判据、
 non-goals)在 `orchestration/orchestrator-loop-tick.md`(冷启动段 + 冷启动背景档案)与
 `orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md`。本文件只给动作(Steps)与可判定清单。
