@@ -2,6 +2,11 @@
 # manager-start.sh — C4/C5: `quay manager start`（无项目参数）独立拉起 manager。
 # (gap-manager-productization-five-constraints AC1/AC2/AC5)
 #
+# 角色（gap-manager-skill-session-embodiment-activation，2026-09-06）：本脚本是【备选路径】——
+# 仅用于第三方裸机冷启动场景（无 quay 开发树）拉起独立 tmux 会话。日常激活的【默认路线】是
+# 会话内调用 manager skill（见 plugin/skills/manager/SKILL.md）——当前会话变身为 manager，不另起
+# 会话、不敲 tmux/CLI。两条路线同时可用：①默认 = skill 激活（会话内）②备选 = 本脚本（机器冷启动）。
+#
 # 规格：SPEC-manager-productization-2026-08-05 §4.1。manager 的启动与启动项目完全分开：
 #   - `manager start` 不接受任何项目参数（C5：两条命令分开，不是一条带参数的命令）
 #   - 建自己的会话：独立 tmux session（`quay-manager`，名字来自 .quay/profiles.yml roles.manager.name），
