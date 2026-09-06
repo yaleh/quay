@@ -1,7 +1,7 @@
 ---
 id: gap-goal-driver-mechanical-ring
 title: 新增 goal driver kind——机械环跑 AC 判据写 evidence、I2 flip achieved、I3/I4 报出
-status: ready
+status: todo
 labels:
   - gap
 parent: null
@@ -9,7 +9,8 @@ children: []
 extra:
   schema: execution
 depends_on:
-  - gap-goal-store-abi-encapsulation-provider-backed
+  - gap-measure-suite-heavy-wait-ratio-load-sensitive-flaky
+  - gap-writestate-torn-read-assertion-load-sensitive-flaky
 ---
 ## Proposal
 
@@ -116,3 +117,14 @@ depends_on:
   **重派时请在系统负载较低的窗口跑 fan-in 的全量 suite**；若再次撞同一断言，仍按 flaky 处理，
   另见为该 flaky 单独立的缺陷任务（`gap-measure-suite-heavy-wait-ratio-load-sensitive-flaky`）。
 - **worktree 保留**：上次尝试的实现仍在 `task/gap-goal-driver-mechanical-ring` 分支，勿删除重来。
+
+## Needs-Human
+
+**执行 2026-09-06T13:02:26.727Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: an in-place write must be observably torn (proves the reader can bite)
+- run_id：wk-prod-1788285192
+- session_id：86216409-6966-4212-a5b1-660b05df718b
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-goal-driver-mechanical-ring~wk-prod-1788285192~1788699165902-925cae.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-goal-driver-mechanical-ring-wk-prod-1788285192.log
