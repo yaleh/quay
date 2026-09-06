@@ -1,7 +1,7 @@
 ---
 id: gap-git-history-lane-identity-and-row-layout-overlap
 title: Git History 图：分支同名坍缩致展开重叠 + 全局行号未按可见态分配；改用 git log --graph 式左轨道/右文字两栏布局
-status: todo
+status: ready
 labels:
   - gap
   - defect
