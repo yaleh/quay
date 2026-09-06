@@ -135,6 +135,10 @@ export function computeDivergences(readings: CriterionReading[]): Divergence[] {
   const out: Divergence[] = [];
   for (const c of readings) {
     const base = { id: c.id, status: c.status, verdict: c.verdict, reason: c.reason };
+    // draft = 尚未被人激活的【提案】，不是承诺 ⇒ 它的判据通过与否都不构成偏离。
+    // （实测：AC-180 是 meta-driver 自己提的 draft，却被报成 pass-but-unflipped——
+    //  把「提案」当成「未兑现的承诺」是错的，且会让偏离数随提案数虚增。）
+    if (c.status === "draft") continue;
     if (!c.criterion || c.criterion.trim() === "") { out.push({ ...base, kind: "no-criterion" }); continue; }
     if (c.verdict === "pass" && c.status !== "achieved") { out.push({ ...base, kind: "pass-but-unflipped" }); continue; }
     if (c.verdict === "fail" && c.status === "achieved") { out.push({ ...base, kind: "achieved-but-failing" }); continue; }
@@ -361,14 +365,26 @@ export interface SyncHealth {
   ffSynced: number;
   notFf: number;
   ffError: number;
+  /** 语义兜底进入次数（begin）。⛔ 必须与终结态分开数——只数终结态会让「进入了但没结束」隐身。 */
+  semanticBegin: number;
   semanticResolved: number;
+  /** ⚠️ 2026-09-06 补：此前【漏数】这一态，而它正是占主导的失败形态（实测 26 次进入中 21 次
+   *  停在这里）⇒ 读数对主要失败态全盲。由 meta-driver 自己在一轮里读码发现并指出——
+   *  「conflict 不进 syncHealth 聚合面，读数本身盲于此失败态」。 */
+  semanticConflict: number;
+  semanticAlignFailed: number;
+  semanticFfFailed: number;
   lastEvent: string | null;
   lastTs: string | null;
 }
 
 export function collectSyncHealth(root: string, window = 200): SyncHealth {
   const file = path.join(root, ".quay", "doc-develop-sync.jsonl");
-  const h: SyncHealth = { window, ffSynced: 0, notFf: 0, ffError: 0, semanticResolved: 0, lastEvent: null, lastTs: null };
+  const h: SyncHealth = {
+    window, ffSynced: 0, notFf: 0, ffError: 0,
+    semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0,
+    lastEvent: null, lastTs: null,
+  };
   let lines: string[];
   try { lines = fs.readFileSync(file, "utf8").trim().split("\n"); } catch { return h; }
   for (const line of lines.slice(-window)) {
@@ -378,7 +394,11 @@ export function collectSyncHealth(root: string, window = 200): SyncHealth {
     if (e === "doc-develop-sync-ff-synced") h.ffSynced++;
     else if (e === "doc-develop-sync-not-ff") h.notFf++;
     else if (e === "doc-develop-sync-ff-error") h.ffError++;
+    else if (e === "doc-develop-sync-semantic") h.semanticBegin++;
     else if (e === "doc-develop-sync-semantic-resolved") h.semanticResolved++;
+    else if (e === "doc-develop-sync-semantic-conflict") h.semanticConflict++;
+    else if (e === "doc-develop-sync-semantic-align-failed") h.semanticAlignFailed++;
+    else if (e === "doc-develop-sync-semantic-ff-failed") h.semanticFfFailed++;
     if (e) { h.lastEvent = e; h.lastTs = typeof r.ts === "string" ? r.ts : null; }
   }
   return h;

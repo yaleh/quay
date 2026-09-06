@@ -88,6 +88,15 @@ test('computeDivergences: verdict=not-evaluated ⇒ 不产生 pass/fail 类偏�
   assert.equal(d.length, 0);
 });
 
+// draft = 提案不是承诺（实测：meta-driver 自己提的 AC-180 曾被报成 pass-but-unflipped）。
+test('computeDivergences: draft 记录一律不算偏离（提案 ≠ 未兑现的承诺）', () => {
+  const d = computeDivergences([
+    { id: 'AC-900', title: null, goal: 'GOAL-001', status: 'draft', criterion: 'true', verdict: 'pass', reason: 'ok' },
+    { id: 'AC-901', title: null, goal: 'GOAL-001', status: 'draft', criterion: '', verdict: 'fail', reason: 'no criterion' },
+  ]);
+  assert.equal(d.length, 0, 'draft 既不报 pass-but-unflipped 也不报 no-criterion');
+});
+
 // ── dedup key 同源性 ─────────────────────────────────────────────────────────
 test('existingProposalKeys 与候选用同一个渲染函数 ⇒ 同内容的提案被判重复', () => {
   const p = { goal: 'GOAL-001', title: 'wire the goal gate', criterion: 'node packages/quay/src/goal-store.ts gate AC-170', expect: 'exit 0', origin: 'gate-events.jsonl 中 goal 事件数为 0' };
@@ -253,7 +262,7 @@ const mkReadings = (verdict, noise = 'n1') => ({
   divergences: verdict === 'pass' ? [{ id: 'AC-001', kind: 'pass-but-unflipped', status: 'active', verdict, reason: noise }] : [],
   // 生态读数带上每轮都变的量（staleSecs/记录数），用来证明它们【不】进摘要。
   drivers: [{ kind: 'promotion', running: true, supervisorAlive: true, driverAlive: true, carrierRecords: noise.length, carrierLastTs: null, staleSecs: noise.length }],
-  syncHealth: { window: 200, ffSynced: 1, notFf: 2, ffError: 0, semanticResolved: 0, lastEvent: 'doc-develop-sync-not-ff', lastTs: null },
+  syncHealth: { window: 200, ffSynced: 1, notFf: 2, ffError: 0, semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0, lastEvent: 'doc-develop-sync-not-ff', lastTs: null },
   focus: null,
 });
 
@@ -325,12 +334,13 @@ const ecoReadings = {
     { kind: 'outer', running: false, supervisorAlive: false, driverAlive: false, carrierRecords: 0, carrierLastTs: null, staleSecs: null },
     { kind: 'promotion', running: true, supervisorAlive: true, driverAlive: true, carrierRecords: 9, carrierLastTs: null, staleSecs: 5 },
   ],
-  syncHealth: { window: 200, ffSynced: 34, notFf: 41, ffError: 34, semanticResolved: 0, lastEvent: 'doc-develop-sync-not-ff', lastTs: null },
+  syncHealth: { window: 200, ffSynced: 34, notFf: 41, ffError: 34, semanticBegin: 26, semanticResolved: 5, semanticConflict: 21, semanticAlignFailed: 0, semanticFfFailed: 0, lastEvent: 'doc-develop-sync-not-ff', lastTs: null },
 };
 
 test('resolveEvidence: 点号路径与 drivers.<kind>.<field> 都能解析；不存在 ⇒ undefined', () => {
   assert.equal(resolveEvidence(ecoReadings, 'syncHealth.notFf'), 41);
-  assert.equal(resolveEvidence(ecoReadings, 'syncHealth.semanticResolved'), 0, '0 是合法读数，⛔ 不得被当成"解析不出"');
+  assert.equal(resolveEvidence(ecoReadings, 'syncHealth.semanticAlignFailed'), 0, '0 是合法读数，⛔ 不得被当成"解析不出"');
+  assert.equal(resolveEvidence(ecoReadings, 'syncHealth.semanticConflict'), 21, '主导失败态必须可被引用为证据');
   assert.equal(resolveEvidence(ecoReadings, 'drivers.outer.running'), false);
   assert.equal(resolveEvidence(ecoReadings, 'drivers.nosuch.running'), undefined);
   assert.equal(resolveEvidence(ecoReadings, 'syncHealth.nosuch'), undefined);
@@ -678,7 +688,7 @@ test('readingsDigest: 不随 staleSecs/carrierRecords 变（否则变化检测�
   const mk = (stale, records) => ({
     goals: [], criteria: [], divergences: [], focus: null,
     drivers: [{ kind: 'promotion', running: true, supervisorAlive: true, driverAlive: true, carrierRecords: records, carrierLastTs: null, staleSecs: stale }],
-    syncHealth: { window: 200, ffSynced: 1, notFf: 2, ffError: 0, semanticResolved: 0, lastEvent: 'doc-develop-sync-not-ff', lastTs: null },
+    syncHealth: { window: 200, ffSynced: 1, notFf: 2, ffError: 0, semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0, lastEvent: 'doc-develop-sync-not-ff', lastTs: null },
   });
   assert.equal(readingsDigest(mk(10, 100)), readingsDigest(mk(9999, 999999)), 'staleSecs/记录数不得改变摘要');
   const flipped = mk(10, 100);
