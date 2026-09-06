@@ -12,7 +12,7 @@ origin: 'syncHealth.ffError=46（窗口内 develop→doc ff-only 合并失败 46
   fs.writeFileSync（:345/:448，write 函数）无 git add/commit，与 task-ops.ts
   commitTaskFile 的提交后写模式相反。'
 evidence:
-  at: 2026-09-06T22:18:39.761Z
+  at: 2026-09-06T22:18:42.252Z
   verdict: pass
   reading: acceptance passed (exit 0)
 ---
