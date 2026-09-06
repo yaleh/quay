@@ -74,4 +74,5 @@ extra: {}
 - `goals/AC-168-quay-init-contract-closed-set.md`
 - `goals/AC-165-remove-root-mcp-json.md`
 - `goals/AC-166-second-copy-retirement.md`
+- `goals/GOAL-006-ac-criterion-spec-0809-3-fail-closed-ac-180-ac.md`
 - `tasks/gap-goal-ac-boilerplate-misquotes-spec-as-license-for-empty-criterion.md`
