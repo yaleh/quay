@@ -615,6 +615,35 @@ test("AC2 — 分叉 guard：doc 有 develop 未含提交 ⇒ 报红（forked=tr
   assert.equal(last.benign, last.behind === 0, "benign 必须由 behind 派生，⛔ 不是另一个自述");
 });
 
+// ff-error 的 detail：此前 44 条 ff-error 全是 phase=merge 而 git 原因被 stdio:"ignore" 丢弃
+// ⇒ 最常见的硬失败不可归因。本条钉住「原因被记下来了」——⛔ 不是钉住某一句具体错误文案
+// （那会随 git 版本/语言环境漂），而是钉住 detail 存在且不是占位符。
+test("ff-error 必须携带 git 失败原因（⛔ 不可归因的硬失败 = 说不出为什么红）", (t) => {
+  const root = makeGitRoot("ff-error-detail");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", "---\nid: gap-a\nstatus: ready\n---");
+  git(root, "add", "-A");
+  git(root, "commit", "-q", "-m", "baseline");
+  git(root, "branch", "develop");
+  git(root, "checkout", "-q", "-b", DOC_BRANCH);
+  // develop 前进（可 ff），但工作树脏且与 develop 的改动冲突 ⇒ --ff-only 拒绝执行。
+  git(root, "checkout", "-q", "develop");
+  fs.writeFileSync(path.join(root, "code.ts"), "from develop\n", "utf8");
+  git(root, "add", "--", "code.ts");
+  git(root, "commit", "-q", "-m", "develop advances");
+  git(root, "checkout", "-q", DOC_BRANCH);
+  fs.writeFileSync(path.join(root, "code.ts"), "dirty local\n", "utf8"); // 未提交的本地改动
+
+  const res = syncDevelopToDoc(root);
+  assert.equal(res, "error", "工作树脏导致 --ff-only 抛错 ⇒ error（⛔ 不与 not-ff/已同步同形）");
+  const ev = fs.readFileSync(path.join(root, DOC_DEVELOP_SYNC_EVENT_REL), "utf8")
+    .trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.event === "doc-develop-sync-ff-error");
+  assert.ok(ev.length >= 1, "ff-error 须落痕");
+  const detail = ev[ev.length - 1].detail;
+  assert.ok(typeof detail === "string" && detail.length > 0, "须带 detail 字段");
+  assert.notEqual(detail, "<no-stderr-captured>", "stderr 必须真的被捕获到，⛔ 不能只留占位符");
+});
+
 test("AC3 — 负控制：develop 前进（纯 ff）⇒ syncDevelopToDoc 后两 ref 相等（⛔ 仍分叉 ⇒ 假）", (t) => {
   const root = makeGitRoot("doc-ff");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
