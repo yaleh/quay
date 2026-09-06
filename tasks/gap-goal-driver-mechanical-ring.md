@@ -87,6 +87,7 @@ depends_on:
 - plugin/scripts/driver-config.ts
 - plugin/scripts/meta-driver.ts
 - plugin/scripts/capability-catalog.sh
+- plugin/scripts/quay-init-closure-ratchet.ts
 - packages/quay/src/cli/driver.ts
 - plugin/test/goal-driver.test.mjs (new)
 - plugin/test/driver-runtime.test.mjs

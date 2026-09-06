@@ -63,8 +63,14 @@ const EXCLUDED_TOP_DIRS: ReadonlySet<string> = new Set([".quay"]);
 // +1 file / +5155 bytes net — plugin/probes/meta-driver.md, the probe added by meta-driver v0 (eebe448ae)
 // AFTER the last re-anchor; a legitimate new probe in the laid-down probe set, not pollution. Measured by the
 // checker's own fixed --tmux-session (deterministic across consecutive laydowns).
+// Re-anchored 2026-09-06 (gap-goal-driver-mechanical-ring fan-in, surfaced by its full suite): 0 files /
+// +6159 bytes net — two legitimate growth sources: (1) this task's goal kind registration added six
+// goal-driver entries to the laid-down capability-catalog.sh (+1473); (2) the meta-driver task's follow-up
+// commits (1cb8023f9 读数扩到机制生态 / 163825dfa 加自动驱动通道 / 1abea2b70 humanAttention 路由) expanded the
+// laid-down plugin/probes/meta-driver.md probe (+4686) and landed on develop after the previous anchor without
+// re-anchoring. A legitimate mechanism+probe growth (new resident driver kind + its probe), not pollution.
 export const BASELINE_FILES = 132;
-export const BASELINE_BYTES = 3818315;
+export const BASELINE_BYTES = 3824474;
 
 export interface ClosureCount {
   files: number;
