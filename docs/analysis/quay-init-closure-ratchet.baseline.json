@@ -1,0 +1,539 @@
+{
+  "files": 132,
+  "bytes": 3830671,
+  "fingerprint": "8f93b0722d5039a5569ac94ea9b95e677ff5e078292b1e4c7ce4fce796c6f112",
+  "sources": [
+    {
+      "rel": "orchestration/manager-tick-core.md",
+      "sha": "271a385151339bbcaf5d7c3b7a5cc26eaf59593a34f0c52470f04cb163490fcb"
+    },
+    {
+      "rel": "orchestration/orchestrator-tick-core.md",
+      "sha": "978ad464198db00b34b57cbb8097d9012de5da8a871dfff12fc78801d5594285"
+    },
+    {
+      "rel": "plugin/.claude/launch.settings.json",
+      "sha": "25e4ace2586d593da41a0b0f7380c2d77aed03d404b7a0f3414329f6df30baec"
+    },
+    {
+      "rel": "plugin/agents/baime-iteration-executor.md",
+      "sha": "c901e4aff424a629f8ab88e07d6bf554458bbaec98e651c01741c5f1c3ba5e57"
+    },
+    {
+      "rel": "plugin/agents/quay-task.md",
+      "sha": "18094683de03b0b515fc57032c75dea0c7026c661a5478835f0ad28294eec9e5"
+    },
+    {
+      "rel": "plugin/loop/fast-mode-loop-tick.md",
+      "sha": "c29f7d93c530c9d2319adfbbb95272f7ac996dbbea5a552e4a581797a4cef645"
+    },
+    {
+      "rel": "plugin/loop/fast-mode-tick-core.md",
+      "sha": "956ba63826b1f9ff674e3f8d538c18bc2734f2d4d6882bddc87c3bf3e43dd057"
+    },
+    {
+      "rel": "plugin/loop/manager-loop-tick.md",
+      "sha": "8ef324678586ee17b72e40350ad966dbb041f61cef3f5bf8753f0f446a818f38"
+    },
+    {
+      "rel": "plugin/loop/manager-tick-core.md",
+      "sha": "e8293eccaa1b5e88b3006c61a982870937c9cf15b3d6cbc87dd3c8ec59aefe85"
+    },
+    {
+      "rel": "plugin/loop/orchestrator-loop-tick.md",
+      "sha": "a086cac48a3eaf15bc5edefe90d01bebc16a3b0edfadb4d75ae67d5b8f2c1bd4"
+    },
+    {
+      "rel": "plugin/loop/orchestrator-tick-core.md",
+      "sha": "368442f3d9782b3471f70cdba2274fd32169ff57165c7a0fd063741a45652405"
+    },
+    {
+      "rel": "plugin/probes/architecture-analysis.md",
+      "sha": "fdc3f0c9c0f5a1cf2724c8fdca011fd8d2f18bef589a1aea43e75ebd328b3987"
+    },
+    {
+      "rel": "plugin/probes/browser-explorer.md",
+      "sha": "1b30d25a0465957e51af6946610a632c3c18bb8bd3e1877d4aa6143779b7a5c1"
+    },
+    {
+      "rel": "plugin/probes/external-dogfooding.md",
+      "sha": "0a4416a12f9322fac1a8f31faf4d8fad4138771709e8dbe429b7cab06de7cadb"
+    },
+    {
+      "rel": "plugin/probes/history-mining.md",
+      "sha": "5a520886344286f4155016d46a306435708ba1323dfe936f627d4649e7f0b807"
+    },
+    {
+      "rel": "plugin/probes/meta-driver.md",
+      "sha": "3e74f1a304e17dc86b519aa8b3fc6a18b9d07475fed21c2b01b40149c96901ce"
+    },
+    {
+      "rel": "plugin/probes/self-validation.md",
+      "sha": "313c9b44b895f5bd37758b30b3c537f25712f87bf85fd32d42ff1038ec99570b"
+    },
+    {
+      "rel": "plugin/scripts/accounting-emit.ts",
+      "sha": "5b7310e08644a2f317b74d5046e00ab4d174d09c25abebdd75d7c3cbfdbdf7e1"
+    },
+    {
+      "rel": "plugin/scripts/adr016-screen-use-check.ts",
+      "sha": "11752c71b2bd922bdf8e99c1a3b1f1f1fd29e5f85c260b92eee9256d4cae3d94"
+    },
+    {
+      "rel": "plugin/scripts/agent-panel-classify.ts",
+      "sha": "c8e369112d1daf297dfb69aaffe0978355ed6731ee49f24d0d0e84fa22728237"
+    },
+    {
+      "rel": "plugin/scripts/anti-drift-touches-check.ts",
+      "sha": "a99cadbc8c3fbe96facac0ac2cd0a947931fb635ec9b847730c3e98d0e6a90f7"
+    },
+    {
+      "rel": "plugin/scripts/canonical-test-files.ts",
+      "sha": "fc0a671e3018fefea3e15269960b2d523feb698b1b7f10b1b1b92f7e5f3dc0a0"
+    },
+    {
+      "rel": "plugin/scripts/cap-counts-subagents-check.ts",
+      "sha": "68d7dd494651a00c4d2b2bfce1d5170f026a3606572f971906fd329e1d877b72"
+    },
+    {
+      "rel": "plugin/scripts/cap-from-gate.sh",
+      "sha": "b8e83cfe8d1e4fec3525b950ba7dc14be3631ab775a5c44df4a9a01ac2e33d52"
+    },
+    {
+      "rel": "plugin/scripts/cap-from-gate.ts",
+      "sha": "15ad67db81c0599e4477f2c4560023a785c3e6a37e95701197fa9ba734cee200"
+    },
+    {
+      "rel": "plugin/scripts/capability-catalog.sh",
+      "sha": "19b4277431a388cdcfe8d38e1665b650b8b039171c448b14f86e7251e6c2c031"
+    },
+    {
+      "rel": "plugin/scripts/checker-io.ts",
+      "sha": "4f91b0e4bfb2e5693b44d865f37e1c97c7f3dd68027f9adfd9b1d94333a8f71f"
+    },
+    {
+      "rel": "plugin/scripts/claim-task.sh",
+      "sha": "60eefcbe5f34b724f8316cedc8ea17fe9945d0b7437c7760ffec976f08f23de0"
+    },
+    {
+      "rel": "plugin/scripts/claim-task.ts",
+      "sha": "6dd8c9bbf55b32c0648e0c93d8098fd341247be03c5e8a818e8330e988a33dc9"
+    },
+    {
+      "rel": "plugin/scripts/closure-lag-check.sh",
+      "sha": "bfc835a36bc1b827731bea680861e117d108d23fd52a2d2cb052bb4fe7c33daa"
+    },
+    {
+      "rel": "plugin/scripts/concurrent-batch-scheduler.ts",
+      "sha": "a50c1f0f73e9ded0a036bf06db3c42e4819786bb43d88fccfd408029e5c3195c"
+    },
+    {
+      "rel": "plugin/scripts/config-wiring-check.ts",
+      "sha": "51169a3a7924b66d6113d2a2a6ac939375fc4a3619c1860e329ca768d3a7bdfb"
+    },
+    {
+      "rel": "plugin/scripts/cross-machine-verify.sh",
+      "sha": "6efce41cb06ca82da1d0e2f76400f657f0108f0985cb5804cff213fa99276920"
+    },
+    {
+      "rel": "plugin/scripts/dead-loop-check.sh",
+      "sha": "29f45d14dc1914095b256ef9506ca9f76705768e2c1c456c89d8a3d4ed1db336"
+    },
+    {
+      "rel": "plugin/scripts/develop-deliver-tgz.sh",
+      "sha": "4443a6e1aeeb99a267c7ec6047aef4cc26572cedbf0fbd07b1d352377c8ecf73"
+    },
+    {
+      "rel": "plugin/scripts/dispatch-record-fingerprint-reason-check.ts",
+      "sha": "78e8cbc1777c9c793f5c251c40e01ce6c010b536c2912a4195feaedfdab97de0"
+    },
+    {
+      "rel": "plugin/scripts/dispatch-record.ts",
+      "sha": "85ff9b380a4c671f7110f88ec65a965712d73579f34c402e7c67cb13b672a261"
+    },
+    {
+      "rel": "plugin/scripts/dispatch-worktree-setup.sh",
+      "sha": "04cd291c6fa8226c933f2793c89aea4ac627f58535325293dbdf3ef5af63d12d"
+    },
+    {
+      "rel": "plugin/scripts/drive-target-check.sh",
+      "sha": "439a749f5abe406557a225ca7985284288a995d76cf34cd7ebfbf05b56b0c2d1"
+    },
+    {
+      "rel": "plugin/scripts/driver-result.ts",
+      "sha": "20b23d8c4655d034e680f2561eec8aca50adb6a0bcbd5b41ccfb1b64eed20118"
+    },
+    {
+      "rel": "plugin/scripts/driver-shared.ts",
+      "sha": "1d44f49d5270856abaf30c05a91e0464d033f790bcb6d103aa6efcc20084ff87"
+    },
+    {
+      "rel": "plugin/scripts/external-dogfooding-check.ts",
+      "sha": "dfb9acdba7db98b9bf32c440cccf5060fd0118df676aa3c8f0bbbf536d566de5"
+    },
+    {
+      "rel": "plugin/scripts/fan-in-ac-completion-gate.ts",
+      "sha": "e2d992c5b2f601e648669cf60f42f4bc391ecdcaa39a74cccdd79caa5f9e76b3"
+    },
+    {
+      "rel": "plugin/scripts/fan-in-runid-check.ts",
+      "sha": "7185292cae5ab42187a51260b7b5b44b00999442355438499cebc8ef6cfaa4ad"
+    },
+    {
+      "rel": "plugin/scripts/fan-in-ts-typecheck-gate.ts",
+      "sha": "f46cc8208e7fc0f2121199f7590c86037da76e61a80db2ac9501d01726209ab9"
+    },
+    {
+      "rel": "plugin/scripts/fast-mode-telemetry.ts",
+      "sha": "be482cfd9dbcdb758258f2b3ec9e119f2a0380d3c5aca591b93b5306f50da8e0"
+    },
+    {
+      "rel": "plugin/scripts/fork-baseline.ts",
+      "sha": "c8527a1ec7c18c67bcdb2650b07a96288a13629d4a36c9447987aaa02e189e72"
+    },
+    {
+      "rel": "plugin/scripts/full-suite-runner.ts",
+      "sha": "938d579cfc2bb81d06152e54778474e33f157eaf3b8ce620310532273c1644fe"
+    },
+    {
+      "rel": "plugin/scripts/gate-script-base.ts",
+      "sha": "6ff2ba4b5c00d7127238ee5801f958bdb68d9d843f49815ed0cc44c0b15e3352"
+    },
+    {
+      "rel": "plugin/scripts/inner-blocked-signal.ts",
+      "sha": "a2c0d9dcb911ee8ff37541c8183eb468a599441c1c46eb6be996eed048012043"
+    },
+    {
+      "rel": "plugin/scripts/inner-forensics.mjs",
+      "sha": "ff8214c8ba61d441b3edd066f2c701e409f7a52889a3d2a2249d50c73f9f325c"
+    },
+    {
+      "rel": "plugin/scripts/inner-idle-log.ts",
+      "sha": "3a91a278c76b35c84665e82a08edc1b73243b0c3b3b6192a8c255587aab445d5"
+    },
+    {
+      "rel": "plugin/scripts/inner-wakeup-heartbeat-check.ts",
+      "sha": "484eba4a6eea092fdcd1cdf36484419b5f13ff476a4c60fa111a99f285e2176d"
+    },
+    {
+      "rel": "plugin/scripts/inner-wakeup-heartbeat.ts",
+      "sha": "d7f4259d3e1bf4c13c562ba8b1c79afbe07d88ea9b408e784f88aafd124c11e9"
+    },
+    {
+      "rel": "plugin/scripts/integration-batch-merge.sh",
+      "sha": "189fc8f1947f17e3f1ee66f50bdaaf142b808065efbd272812eef6d12560b21c"
+    },
+    {
+      "rel": "plugin/scripts/it0-split-or-commit-check.ts",
+      "sha": "286dbe39a5b1885305d32aeda94936bff8a8317a483ed0cdfb5a5ce21f19ab53"
+    },
+    {
+      "rel": "plugin/scripts/known-load-sensitive.ts",
+      "sha": "b2b9cc4e4160ecaaf6c015e826e2bd5fb93d0737c4cacc26380ebbd2f06fb471"
+    },
+    {
+      "rel": "plugin/scripts/l1-delivery-surface-check.ts",
+      "sha": "6cbe58d3f30eebfa94c9b9584d12ed5b2ee7226427215289a515994138a42e37"
+    },
+    {
+      "rel": "plugin/scripts/laydown-set-check.sh",
+      "sha": "5a92e9c58e63f7002b5b80602583861e9dd64ebfbb3595720eda14689c582894"
+    },
+    {
+      "rel": "plugin/scripts/loop-complete-task.ts",
+      "sha": "18f979309ac39e24576fb88e4e1c5089f7cb3ee6d326d513effffb437255de96"
+    },
+    {
+      "rel": "plugin/scripts/loop-driver-check.sh",
+      "sha": "29677d0ed7b47fedd13d791c7a3e199fc4162cdfe0e1a62364ecc72a19c5ca7c"
+    },
+    {
+      "rel": "plugin/scripts/main-thread-edit-check.ts",
+      "sha": "1b7fbd01042cb91289fcdb13ab78ae76e35c3146964f37b40eebd8fceda6d38d"
+    },
+    {
+      "rel": "plugin/scripts/manager-arm-loop.sh",
+      "sha": "b23764bd2daab3a8b13aca1ed4cab8893d87f17f071022300cbf9548b2c71618"
+    },
+    {
+      "rel": "plugin/scripts/manager-observation-runtime-check.ts",
+      "sha": "76a9785de65040f0e23b32726e2b1b4c975727d88809e05ca401f0d0674ba6d0"
+    },
+    {
+      "rel": "plugin/scripts/manager-start.sh",
+      "sha": "3f2d29852df0c5e980a9b3bb1bc0dce47ceb035ca6531083819d8592d8c66ead"
+    },
+    {
+      "rel": "plugin/scripts/manager-tick-log-check.sh",
+      "sha": "953a5af8493c6dc4747b1aca6ceb3f56a38679fc38092fcf9102887f60f64cab"
+    },
+    {
+      "rel": "plugin/scripts/manager-tick-readings.ts",
+      "sha": "f118115db0025f2af01ca9d25324f9f71322a1c89c6116ff2e2d3fd53eaf4071"
+    },
+    {
+      "rel": "plugin/scripts/measure-trend-check.ts",
+      "sha": "6394f3b06df4bf674fba6561f2b32d196b0aa82b10411bc6e91c35747eeada3b"
+    },
+    {
+      "rel": "plugin/scripts/no-manager-tick-doc-check.ts",
+      "sha": "3f0c00cf61189eb9fa0903a6fc6bf49f8b2127d24d92b874228e7a56435dc3a3"
+    },
+    {
+      "rel": "plugin/scripts/observer-registry.sh",
+      "sha": "5fe6526589d13935cab2d38c7890df4c79dfb18dbcb6cfc8549f2c48e11f1768"
+    },
+    {
+      "rel": "plugin/scripts/orphan-session-check.ts",
+      "sha": "00a4bcb912613fa6e03d843ebd4574d49a4921391d2977ad52ed8e57f2b8c118"
+    },
+    {
+      "rel": "plugin/scripts/outer-anchor-check.ts",
+      "sha": "fc6c56c524aa8c72a361f0704a4c15701cc0c0d06014992c44e52404e114593a"
+    },
+    {
+      "rel": "plugin/scripts/outer-cron-registry.ts",
+      "sha": "3bb0dd8682693299e9da67e2c33a7721964e449ad5b84e0307b35c55d6ce9e00"
+    },
+    {
+      "rel": "plugin/scripts/over90-task-gate.ts",
+      "sha": "68508c8e59f177f4ce51e140618e734e44c6fac72565e9b1c6b66887f34daaad"
+    },
+    {
+      "rel": "plugin/scripts/pane-state-classify.ts",
+      "sha": "cb9d5a980e03968292b34b7b5b7c5eaac8ac05f8eab11925f01a403468561308"
+    },
+    {
+      "rel": "plugin/scripts/per-file-cpu-report.mjs",
+      "sha": "982fb6e04391c77ab3fd9db759f2fecf70307732fc79f27e11d57ddfc7c17119"
+    },
+    {
+      "rel": "plugin/scripts/per-task-suite-record.ts",
+      "sha": "16232a1a07cfd20d2622244920c53a927d8995995baf43d0a5b5759e661d96d4"
+    },
+    {
+      "rel": "plugin/scripts/periodic-push-backup.sh",
+      "sha": "d9a4ea9579b8ddfc15af201456749f7dbf0355ce64d7b2e37d355ea392cb1a8c"
+    },
+    {
+      "rel": "plugin/scripts/pipe-exit-code-check.sh",
+      "sha": "30a7887de7fbd1a31cd00bdffbe358e362e818fde6d104672e39672aae8c5dae"
+    },
+    {
+      "rel": "plugin/scripts/pool-quality-judge.ts",
+      "sha": "a022912372695685d37a80a28ef4b0349b21b33f5639d283dd3ddb2107502bca"
+    },
+    {
+      "rel": "plugin/scripts/pre-verified-round-record.ts",
+      "sha": "bdba00f28b622549453d4091a18813cfc97aa004b9f5e3348ecb66d1b756be14"
+    },
+    {
+      "rel": "plugin/scripts/precommit-guard.ts",
+      "sha": "a24b702e3e70c5d6deeaf72a005e0e2f3524a7a0d7d2afb6a3ee2fbf3b319f5c"
+    },
+    {
+      "rel": "plugin/scripts/process-budget.sh",
+      "sha": "953e9452ef65ca7b0151d35b783039555d3089a269f62560145d93abbc3973e2"
+    },
+    {
+      "rel": "plugin/scripts/quay-launch.sh",
+      "sha": "77369190493d194331caccdfc5700ceab598794ca5a8f23bc904c43423f32594"
+    },
+    {
+      "rel": "plugin/scripts/quay-session.ts",
+      "sha": "ddb4ff086805b0372afca46323f7dd2b9ff3a6aee58e856ea713fa294cf7bdd6"
+    },
+    {
+      "rel": "plugin/scripts/read-probe-spec.ts",
+      "sha": "25d2df80f7269bf55194feef019eff9e09db5d7147533f5114b3bfbb4240da7b"
+    },
+    {
+      "rel": "plugin/scripts/ready-pool-check.ts",
+      "sha": "ee3114e162a3cecee082b43930ea28ad71edfe26f5f27b3d206736927b753daa"
+    },
+    {
+      "rel": "plugin/scripts/real-target-verify.sh",
+      "sha": "4d71ad52cda012cb9e8ddbcc46f69cb2aa5f882280030a87fb0f7d5025930503"
+    },
+    {
+      "rel": "plugin/scripts/reanchor-prompt.txt",
+      "sha": "2d3be38bc45883df7b577aa65fec97885212f19adc4f17b7ac788d621bb969aa"
+    },
+    {
+      "rel": "plugin/scripts/red-window-triage.ts",
+      "sha": "600c9f1bd1fddf77519ef07800ccc01329f0edbdad121e8ef45a9fe9ed6f417d"
+    },
+    {
+      "rel": "plugin/scripts/release-task.sh",
+      "sha": "0259a4181629b939ddff4b3336dbccf0913672f3f8f85ff0ef228ac633c6a977"
+    },
+    {
+      "rel": "plugin/scripts/repo-root.sh",
+      "sha": "63aa07928d6525f2ae62f96d5eba77cea7652dddc00e046b82bb3fc0704854a2"
+    },
+    {
+      "rel": "plugin/scripts/repo-root.ts",
+      "sha": "f349ff625c61087e6c986ef4ecefd698e9bd209e9049c7a869ee6fbe7d537340"
+    },
+    {
+      "rel": "plugin/scripts/resource-gate.sh",
+      "sha": "2ff313b3f172d7c4fa60bec46ba1d53996868efaadc98e1a1f9c885357951276"
+    },
+    {
+      "rel": "plugin/scripts/routine-file-gate.ts",
+      "sha": "8fdad6d903d209977254d689fc752399be9e759722a9a5d2e335a451eb9b6829"
+    },
+    {
+      "rel": "plugin/scripts/routine-scheduler.ts",
+      "sha": "82292f6f3cc350a7ce9645d4b899d8697bf615d7e0b7c87fe42e35b6d3fee08b"
+    },
+    {
+      "rel": "plugin/scripts/select-static-checks-for-touches.ts",
+      "sha": "3fa7b18f0eee4fe1a76e1779dcb9040fa45b20509e5c1d6c2bdc32f809157082"
+    },
+    {
+      "rel": "plugin/scripts/self-report-vocab-audit.ts",
+      "sha": "571b95303946fdbe520215efdb0f7c171bd60b654bb5742829c2b58b8f22b910"
+    },
+    {
+      "rel": "plugin/scripts/self-report-vocab-check.ts",
+      "sha": "252d6d87daa3618882a54d618f49b37b67a8c93e02fd5c72086e09a6e140827a"
+    },
+    {
+      "rel": "plugin/scripts/semantic-trigger.ts",
+      "sha": "7db8e452a599866122fdee960dc999715a986d761d815d67035c44631e190f06"
+    },
+    {
+      "rel": "plugin/scripts/send-keys-reliable.sh",
+      "sha": "6820abd19244280f2b08471ac85696439e7e6f932c52aef0c98edb4202f0d061"
+    },
+    {
+      "rel": "plugin/scripts/slot-refill.sh",
+      "sha": "1b2e244946b881d11627215c7057ac95fea700838133dc86298e986da2746e33"
+    },
+    {
+      "rel": "plugin/scripts/slot-refill.ts",
+      "sha": "375d0da8e7afb7ae3b0ee1fb8c57d65f71b6d03ac0952c8b5b866b8993e63b33"
+    },
+    {
+      "rel": "plugin/scripts/start-drivers.ts",
+      "sha": "016bdf209c9430a0004af1b44a30beadc6e3c772d39ea75928d10a3eb88e847f"
+    },
+    {
+      "rel": "plugin/scripts/strategic-doc-staleness-check.ts",
+      "sha": "060c503c3e203d35df59e217ba0974f9f653ad5279d1c88e5e0002875bea3053"
+    },
+    {
+      "rel": "plugin/scripts/suite-params.ts",
+      "sha": "a24dd2c0e7c0de0fb0cb4616862be89def87eba65654bc0d53b9d93081361c35"
+    },
+    {
+      "rel": "plugin/scripts/suite-state-trigger.ts",
+      "sha": "3fce8be3d4df985f05a158c3d001ce0214dd1d2b35496c41f43b168f024b61cf"
+    },
+    {
+      "rel": "plugin/scripts/supervisor-bus-identity.sh",
+      "sha": "b521ca6aabfefb83e66d699d339a55dbeac736edc8f8fb5ce5244f1ba686653c"
+    },
+    {
+      "rel": "plugin/scripts/supervisor-deliver.sh",
+      "sha": "ec893467ee58c294f9faa07da11d2cdb3036f18b174c4164ba108b944da088d1"
+    },
+    {
+      "rel": "plugin/scripts/supervisor-preempt.sh",
+      "sha": "5cf6dc0c128a81e2b202b69a215e526a0f831a2c58484769f367b00c0bdcf1a6"
+    },
+    {
+      "rel": "plugin/scripts/sync-lag-check.sh",
+      "sha": "b0d29618d61b5a46ca1b8b3710835b29012c7fb09edf97c6b2c517fb2936adcd"
+    },
+    {
+      "rel": "plugin/scripts/task-contract-check.ts",
+      "sha": "8974960bbcd18b072cb6e6b28dfa80fc16f8f5e0b0937616fcfbb1fc93469efb"
+    },
+    {
+      "rel": "plugin/scripts/task-ops.ts",
+      "sha": "ff7c52013fa64c5d9fa3b93eb91deffc86843815063280e55352477031f89b4a"
+    },
+    {
+      "rel": "plugin/scripts/task-schema-check.ts",
+      "sha": "a69d4e05e961497a2a398ce7fe4121b8132d9dfea9d453f8a9e742d4cc847aac"
+    },
+    {
+      "rel": "plugin/scripts/task-schema.ts",
+      "sha": "56cbdeb66a6a9877e6e22cebfe03e13b6bd49fb2a2f0256df1312a7fd7c45804"
+    },
+    {
+      "rel": "plugin/scripts/task-status-drift-check.ts",
+      "sha": "94a57b8169e0ea011b6856e9a907bb038c957dce33628d8d6038e328ee808d77"
+    },
+    {
+      "rel": "plugin/scripts/task-status.ts",
+      "sha": "2faf92520e69a4baaa14f4f0708b61cea4ec41c0cd1e1c699a82b7095db0e8b1"
+    },
+    {
+      "rel": "plugin/scripts/tmux-leak-fail-re.ts",
+      "sha": "8839e931605bd44b0a922794a073969ef93f7b589f9b7356a36c69b8958e8913"
+    },
+    {
+      "rel": "plugin/scripts/tmux-leak-scan.sh",
+      "sha": "2a714e869a0ca20ebbb130ceecfd01bfe5f03f827a3912f5718591e37926c8b7"
+    },
+    {
+      "rel": "plugin/scripts/touches-one-entry-one-path-check.ts",
+      "sha": "1ff019916cca9bb72bb0fa66e821187815fea766c55318b3361d320839133d25"
+    },
+    {
+      "rel": "plugin/scripts/touches-orthogonality-check.ts",
+      "sha": "e1494adcf33f19722e9f01312acd311f9b0c57cd270b03d3a0f846a287fc3b10"
+    },
+    {
+      "rel": "plugin/scripts/touches-parser.ts",
+      "sha": "a44788519623c211df4e75d035dddd56e4224f1aae515884937907618ee10a2d"
+    },
+    {
+      "rel": "plugin/scripts/transcript-delivery-check.ts",
+      "sha": "b51df6c1795985055e4e65595f2073744599ec61f4da4f524c72596cc069efd1"
+    },
+    {
+      "rel": "plugin/scripts/verify-delivery-surface.ts",
+      "sha": "ecb32b4b0a47a46d4263429e95c05d951ea99ddf35d230e1f297b917c63d9c25"
+    },
+    {
+      "rel": "plugin/scripts/wiring-coverage-check.ts",
+      "sha": "e57de38bfd11c7333eebc3b5b9c5bb50e7ae8790b2273988a35c003ecc92f366"
+    },
+    {
+      "rel": "plugin/scripts/worker-driver.ts",
+      "sha": "a0bd2f572fc36077a4a541bf75584b926b9162c5854d266ee93d5fd231e9bde8"
+    },
+    {
+      "rel": "plugin/scripts/workflow-event-schema.mjs",
+      "sha": "0d8063de2acc6a1a8f3eee393152798df2793a70c399f3e58ac775f819fe6060"
+    },
+    {
+      "rel": "plugin/scripts/worktree-process-reaper.ts",
+      "sha": "e66d9db4b65e07767fc29ebedbfd34ac04206c575bdde42ae72b44577b5a6762"
+    },
+    {
+      "rel": "plugin/workflows/drain-directives.js",
+      "sha": "e41372098493e99f30f2be2cbd90e1b81ffdcb4f4b1ce24356425a1671d090f3"
+    },
+    {
+      "rel": "plugin/workflows/execute-suite-fix.js",
+      "sha": "0a2d22c062e0f61179d637905ffa815cbbf60fcf2a74d61e79b443ddf458dca8"
+    },
+    {
+      "rel": "plugin/workflows/fan-in-execute.js",
+      "sha": "be27c107aaa459c126ae7265d428901be377156fc47208454d111e667bf242c3"
+    },
+    {
+      "rel": "plugin/workflows/pool-quality-judge.js",
+      "sha": "bf129b27180c1145fad677bdb27834d58fc07ab9005a2a06b0b46316390e10cd"
+    },
+    {
+      "rel": "plugin/workflows/run-routines.js",
+      "sha": "98fbc51b3c45a66d93bc60accdc78b454f0c4ad3908e5fd514c6dd3779641c13"
+    }
+  ]
+}
