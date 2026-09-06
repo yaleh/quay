@@ -24,6 +24,8 @@ import {
   writeDraftProposal,
   buildProbePrompt,
   readingsDigest,
+  collectSyncHealth,
+  collectDriverReadings,
   shouldJudge,
   readState,
   writeState,
@@ -236,6 +238,9 @@ const mkReadings = (verdict, noise = 'n1') => ({
   goals: [{ id: 'GOAL-001', title: 't', status: 'active' }],
   criteria: [{ id: 'AC-001', title: null, goal: 'GOAL-001', status: 'active', criterion: 'true', verdict, reason: `ran ${noise}` }],
   divergences: verdict === 'pass' ? [{ id: 'AC-001', kind: 'pass-but-unflipped', status: 'active', verdict, reason: noise }] : [],
+  // 生态读数带上每轮都变的量（staleSecs/记录数），用来证明它们【不】进摘要。
+  drivers: [{ kind: 'promotion', running: true, supervisorAlive: true, driverAlive: true, carrierRecords: noise.length, carrierLastTs: null, staleSecs: noise.length }],
+  syncHealth: { window: 200, ffSynced: 1, notFf: 2, ffError: 0, semanticResolved: 0, lastEvent: 'doc-develop-sync-not-ff', lastTs: null },
   focus: null,
 });
 
@@ -298,6 +303,64 @@ test('readState: 状态文件不存在 ⇒ never-judged（⛔ 不冒充"没变�
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// ── 机制生态读数 ─────────────────────────────────────────────────────────────
+test('collectSyncHealth: 按事件类型计数；载体缺失 ⇒ 全零而非抛', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-sync-'));
+  try {
+    // 载体不存在：必须返回全零可读结构（⛔ 不抛、⛔ 不返回 null）。
+    const empty = collectSyncHealth(tmp);
+    assert.equal(empty.ffSynced, 0);
+    assert.equal(empty.lastEvent, null);
+
+    fs.mkdirSync(path.join(tmp, '.quay'), { recursive: true });
+    const lines = [
+      { ts: '2026-09-06T10:00:00Z', event: 'doc-develop-sync-ff-synced' },
+      { ts: '2026-09-06T10:01:00Z', event: 'doc-develop-sync-not-ff' },
+      { ts: '2026-09-06T10:02:00Z', event: 'doc-develop-sync-not-ff' },
+      { ts: '2026-09-06T10:03:00Z', event: 'doc-develop-sync-ff-error' },
+      'THIS IS NOT JSON',
+    ].map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join('\n');
+    fs.writeFileSync(path.join(tmp, '.quay', 'doc-develop-sync.jsonl'), lines + '\n');
+
+    const h = collectSyncHealth(tmp);
+    assert.equal(h.ffSynced, 1);
+    assert.equal(h.notFf, 2);
+    assert.equal(h.ffError, 1);
+    // 坏行被跳过，不得让整个读数失败（⛔ 一行坏 JSON 不能使机制失明）。
+    assert.equal(h.lastEvent, 'doc-develop-sync-ff-error');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('collectDriverReadings: 覆盖全部注册 kind；读不出时刻 ⇒ staleSecs=null（⛔ 不填 0 冒充刚刚）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-drv-'));
+  try {
+    const rows = collectDriverReadings(tmp);
+    assert.ok(rows.length >= 5, `应覆盖全部注册 kind，实得 ${rows.length}`);
+    assert.ok(rows.some((r) => r.kind === 'meta'), 'meta 自己也要在生态读数里');
+    for (const r of rows) {
+      assert.equal(r.staleSecs, null, '空工作区没有载体 ⇒ 时刻读不出 ⇒ null');
+      assert.equal(r.running, false);
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// 负控制：摘要必须对【每轮都变的量】免疫——staleSecs/记录数每轮都不同，若进摘要则闸失效。
+test('readingsDigest: 不随 staleSecs/carrierRecords 变（否则变化检测恒为真）', () => {
+  const mk = (stale, records) => ({
+    goals: [], criteria: [], divergences: [], focus: null,
+    drivers: [{ kind: 'promotion', running: true, supervisorAlive: true, driverAlive: true, carrierRecords: records, carrierLastTs: null, staleSecs: stale }],
+    syncHealth: { window: 200, ffSynced: 1, notFf: 2, ffError: 0, semanticResolved: 0, lastEvent: 'doc-develop-sync-not-ff', lastTs: null },
+  });
+  assert.equal(readingsDigest(mk(10, 100)), readingsDigest(mk(9999, 999999)), 'staleSecs/记录数不得改变摘要');
+  const flipped = mk(10, 100);
+  flipped.drivers[0].running = false;
+  assert.notEqual(readingsDigest(mk(10, 100)), readingsDigest(flipped), 'driver 由跑变停必须改变摘要');
 });
 
 // ── CLI 冒烟（挡住"只在 CLI 路径上才炸"的那类 bug）──────────────────────────

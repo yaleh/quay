@@ -41,7 +41,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { launchArgv, runAsync, ts, type Fact, type RoutineSpec } from "./driver-runtime.ts";
+import { launchArgv, runAsync, ts, aliveness, carrierStats, KNOWN_KINDS, type Fact, type RoutineSpec } from "./driver-runtime.ts";
 import { runResidentQualityGateLoop, computeRoundRecord } from "./quality-gate-driver.ts";
 import { readProbeSpec } from "./read-probe-spec.ts";
 import { gateFinding, findingKey, DEFAULT_RATE } from "./routine-file-gate.ts";
@@ -80,6 +80,10 @@ export interface MetaRoundReadings {
   goals: Array<{ id: string; title: string | null; status: string }>;
   criteria: CriterionReading[];
   divergences: Divergence[];
+  /** 机制生态：每个 driver kind 在不在跑、载体多久没动。 */
+  drivers: DriverReading[];
+  /** author↔develop 同步的成败计数（该机制自己的产物）。 */
+  syncHealth: SyncHealth;
   focus: string | null;
 }
 
@@ -161,7 +165,12 @@ export async function collectReadings(root: string, focus: string | null): Promi
       reason,
     });
   }
-  return { goals, criteria, divergences: computeDivergences(criteria), focus };
+  return {
+    goals, criteria, divergences: computeDivergences(criteria),
+    drivers: collectDriverReadings(root),
+    syncHealth: collectSyncHealth(root),
+    focus,
+  };
 }
 
 // ── 提案的闸与落地 ────────────────────────────────────────────────────────────────────────────────
@@ -258,6 +267,74 @@ export async function fileProposals(
   return results;
 }
 
+// ── 机制生态读数（driver 是否在跑 / 同步是否在成功）──────────────────────────────────────────────
+// 为什么在这里：meta-driver 的职责是【发现机制层面的问题，并判断有没有机制在管它】。只看 goal
+// 判据看不见「主检出落后 develop」「某 driver 停摆」这类问题——那正是人 2026-09-06 指出的缺口。
+// ⛔ 不自己实现存活/载体统计：复用 driver-runtime 已有的 aliveness/carrierStats（硬规则①）。
+
+/** 一个 driver kind 的生态读数。staleSecs = 现在距其载体最后一条记录的秒数（载体停更 ≠ 一切正常）。 */
+export interface DriverReading {
+  kind: string;
+  running: boolean;
+  supervisorAlive: boolean;
+  driverAlive: boolean;
+  carrierRecords: number;
+  carrierLastTs: string | null;
+  staleSecs: number | null;
+}
+
+export function collectDriverReadings(root: string, now: number = Date.now()): DriverReading[] {
+  const out: DriverReading[] = [];
+  for (const kind of KNOWN_KINDS) {
+    let a, c;
+    try { a = aliveness(root, kind); } catch { a = null; }
+    try { c = carrierStats(root, kind); } catch { c = null; }
+    const lastTs = c?.lastTs ?? null;
+    const parsed = lastTs ? Date.parse(lastTs) : NaN;
+    out.push({
+      kind,
+      running: !!a?.running,
+      supervisorAlive: !!a?.supervisorAlive,
+      driverAlive: !!a?.driverAlive,
+      carrierRecords: c?.records ?? 0,
+      carrierLastTs: lastTs,
+      // 读不出时刻 ⇒ null（⛔ 不填 0 冒充"刚刚"，硬规则 6：缺值 = 未查，不是为假）。
+      staleSecs: Number.isFinite(parsed) ? Math.round((now - parsed) / 1000) : null,
+    });
+  }
+  return out;
+}
+
+/** author↔develop 同步的健康度（成功/失败各多少）。这条载体是该机制自己的产物，
+ *  ⛔ 不靠"看起来在跑"判断——它每轮都调，失败也每轮都落痕。 */
+export interface SyncHealth {
+  window: number;
+  ffSynced: number;
+  notFf: number;
+  ffError: number;
+  semanticResolved: number;
+  lastEvent: string | null;
+  lastTs: string | null;
+}
+
+export function collectSyncHealth(root: string, window = 200): SyncHealth {
+  const file = path.join(root, ".quay", "doc-develop-sync.jsonl");
+  const h: SyncHealth = { window, ffSynced: 0, notFf: 0, ffError: 0, semanticResolved: 0, lastEvent: null, lastTs: null };
+  let lines: string[];
+  try { lines = fs.readFileSync(file, "utf8").trim().split("\n"); } catch { return h; }
+  for (const line of lines.slice(-window)) {
+    let r: Record<string, unknown>;
+    try { r = JSON.parse(line); } catch { continue; }
+    const e = String(r.event ?? "");
+    if (e === "doc-develop-sync-ff-synced") h.ffSynced++;
+    else if (e === "doc-develop-sync-not-ff") h.notFf++;
+    else if (e === "doc-develop-sync-ff-error") h.ffError++;
+    else if (e === "doc-develop-sync-semantic-resolved") h.semanticResolved++;
+    if (e) { h.lastEvent = e; h.lastTs = typeof r.ts === "string" ? r.ts : null; }
+  }
+  return h;
+}
+
 // ── 变化检测（语义半的触发闸）────────────────────────────────────────────────────────────────────
 
 /** 语义半的触发状态（gitignored 运行时状态，与轮载体分开——它是【状态】不是【记录】）。 */
@@ -269,6 +346,11 @@ export function readingsDigest(readings: MetaRoundReadings): string {
   const parts = [
     ...readings.criteria.map((c) => `${c.id}:${c.status}:${c.verdict}`).sort(),
     ...readings.divergences.map((d) => `${d.id}:${d.kind}`).sort(),
+    // driver 只取【在跑与否】这个会改变结论的位；⛔ 不取 staleSecs/记录数——它们每轮都变，
+    // 取了会让摘要恒不相等、变化检测闸失效（同 reason 文本的道理）。
+    ...readings.drivers.map((d) => `drv:${d.kind}:${d.running ? 1 : 0}`).sort(),
+    // 同步只取【最近是否在失败】这个位，⛔ 不取计数。
+    `sync:${readings.syncHealth.lastEvent ?? "none"}`,
   ];
   return createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 16);
 }
@@ -398,6 +480,10 @@ export async function runMetaRound(opts: MetaRoundOptions): Promise<MetaRoundRes
     criterionCount: readings.criteria.length,
     divergenceCount: readings.divergences.length,
     divergences: readings.divergences,
+    // 生态读数进 fact.value：--no-llm 是零成本观测路径，它必须能看见这些
+    // （否则"driver 停摆/同步在失败"只能靠烧 LLM 才看得到）。
+    drivers: readings.drivers,
+    syncHealth: readings.syncHealth,
     focus,
   };
 
