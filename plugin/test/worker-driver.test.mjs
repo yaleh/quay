@@ -792,16 +792,20 @@ test("AC2 (能取假，负控制) — prompt no longer leaves bootstrap to agent
   assert.doesNotMatch(cont, /cp config\.yml/, "AC2: continue prompt must not instruct a hand-rolled config.yml copy");
 });
 
-test("AC_A1 (能取假) — buildWorkerPrompt 含「逐条验证 AC → 任务体勾选 - [x] → 与实现一并提交」指令字面 (gap-worker-dispatch-prompt-ac-check-instruction)", () => {
+test("AC_A1 (能取假) — buildWorkerPrompt 经 Provider ABI 记录 AC：点名 task_check + task_write，⛔ 不含手改复选框字面 (gap-worker-prompt-ac-check-via-abi-not-hand-edit)", () => {
   const prompt = buildWorkerPrompt("gap-x", "/r");
-  // 按位置判定（prompt 字面含勾 AC 指令，非注释里提到）：点名 AC 段 + 勾选复选框 + 逐条验证 + 与实现一并提交。
+  // 按位置判定（prompt 字面含勾 AC 指令，非注释里提到）：点名 AC 段 + 勾选复选框 + 逐条验证 + ABI 记录机制。
   assert.match(prompt, /## Acceptance Criteria/, "names the task body AC section");
   assert.match(prompt, /- \[x\]/, "instructs checking off the checkbox (- [x])");
   assert.match(prompt, /one-by-one/, "instructs per-criterion (逐条) verification");
-  assert.match(prompt, /committing these AC checkbox updates together with your implementation/, "AC 勾选与实现一并提交");
+  assert.match(prompt, /task_check/, "instructs confirming AC state via task_check");
+  assert.match(prompt, /task_write/, "instructs recording AC state via task_write");
+  assert.match(prompt, /do NOT hand-edit/, "explicitly forbids hand-editing the checkbox characters");
+  assert.doesNotMatch(prompt, /turn `- \[ \]` into `- \[x\]`/, "negative control: the old hand-edit literal is gone");
+  assert.doesNotMatch(prompt, /committing these AC checkbox updates together with your implementation/, "negative control: no hand-commit-of-checkbox-text instruction");
 });
 
-test("gap-worker-dispatch-prompt-ac-check-instruction — buildContinueWorkerPrompt 同 seam 也带勾 AC 指令 (续做轮同样勾选，否则 ac-precheck 0/3 再烧一轮)", () => {
+test("gap-worker-prompt-ac-check-via-abi-not-hand-edit — buildContinueWorkerPrompt 同 seam 也经 ABI 记录 AC (续做轮同样勾选，否则 ac-precheck 0/3 再烧一轮)", () => {
   const cont = buildContinueWorkerPrompt("gap-x", "/r", {
     worktreePath: "/wt",
     branchCommits: 3,
@@ -812,6 +816,27 @@ test("gap-worker-dispatch-prompt-ac-check-instruction — buildContinueWorkerPro
   });
   assert.match(cont, /- \[x\]/, "continue prompt instructs checking off - [x]");
   assert.match(cont, /## Acceptance Criteria/, "continue prompt names the AC section");
+  assert.match(cont, /task_check/, "continue prompt instructs task_check");
+  assert.match(cont, /task_write/, "continue prompt instructs task_write");
+  assert.doesNotMatch(cont, /turn `- \[ \]` into `- \[x\]`/, "continue prompt has no old hand-edit literal");
+});
+
+test("gap-worker-prompt-ac-check-via-abi-not-hand-edit — 单一真相源：两个 prompt 共用 acCheckNote 的同一段字面，未被 fork 成两份", () => {
+  // Plan 步骤 4 回归断言：acCheckNote 是单一真相源，两处调用点（buildWorkerPrompt / buildContinueWorkerPrompt）
+  // 必须产出同一段「经 ABI 记录、⛔ 手改」指令——若未来把续做 prompt 的指令 fork 成另一份文案，这段共享
+  // 字面会从其中一个消失 ⇒ 此处断言失败（能取假，非恒真）。
+  const create = buildWorkerPrompt("gap-x", "/r");
+  const cont = buildContinueWorkerPrompt("gap-x", "/r", {
+    worktreePath: "/wt",
+    branchCommits: 3,
+    branchHeadSubject: "x",
+    acChecked: 0,
+    acTotal: 3,
+    failureReason: "ac-precheck 0/3",
+  });
+  const sharedMarker = "record the AC state through the Provider ABI";
+  assert.ok(create.includes(sharedMarker), "create prompt carries the shared acCheckNote marker");
+  assert.ok(cont.includes(sharedMarker), "continue prompt carries the SAME acCheckNote marker (not a forked copy)");
 });
 
 // ── gap-continue-prompt-delta-relatedness-note — 续做 prompt 两条结构性信号 ─────────────────────────

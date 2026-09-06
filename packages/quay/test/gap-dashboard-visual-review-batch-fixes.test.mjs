@@ -20,7 +20,7 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
-import { renderLiveCard, renderMgrCard, renderTestsCard, renderDashboardPage } from "../src/serve-dashboard.ts";
+import { renderLiveCard, renderMgrCard, renderTestsCard, renderDashboardPage, sparklineSvg, renderDashboardCardRefreshScript } from "../src/serve-dashboard.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -193,4 +193,71 @@ test("AC5/AC6①: /dashboard/cards returns live/tests/sys/mgr/task fragments + a
     fs.rmSync(tasksDir, { recursive: true, force: true });
     fs.rmSync(ws, { recursive: true, force: true });
   }
+});
+
+// ── gap-dashboard-syscard-sparkline-legend-labels (legend / min-max-latest / time-span / threshold) ──
+
+/** Local hh:mm mirror of the sparkline's own formatter — the test computes the expected label the
+ *  SAME way the renderer does (new Date(ts).getHours/getMinutes), so the assertion is verbatim
+ *  regardless of the host timezone. */
+function hhmm(ms) {
+  const d = new Date(ms);
+  const pad2 = (n) => String(n).padStart(2, "0");
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+/** Fixed 3-point history with unambiguous min/max/latest per series (cpu: 10/50/30, load: 1.5/4.5/2.5)
+ *  and two distinct ts values, so every AC asserts EXACT numbers, not a fuzzy "some digit is present". */
+const SPARK_HISTORY = [
+  { cpu: 10, load: 1.5, ts: 1700000000000 },
+  { cpu: 50, load: 4.5, ts: 1700000060000 },
+  { cpu: 30, load: 2.5, ts: 1700000120000 },
+];
+
+test("AC1: refresh script carries the two legend labels and their exact colour tokens", () => {
+  const script = renderDashboardCardRefreshScript();
+  for (const lit of ["cpu_stall", "loadavg", "--color-accent-600", "--color-positive-700"]) {
+    assert.ok(script.includes(lit), `script string contains ${lit}`);
+  }
+});
+
+test("AC2: sparklineSvg renders the exact min/max/latest values for a fixed history", () => {
+  const svg = sparklineSvg(SPARK_HISTORY, null);
+  // cpu_stall: min 10, max 50, latest 30
+  assert.ok(svg.includes(">10<"), "cpu min value 10 renders");
+  assert.ok(svg.includes(">50<"), "cpu max value 50 renders");
+  assert.ok(svg.includes(">30<"), "cpu latest value 30 renders");
+  // loadavg: min 1.5, max 4.5, latest 2.5
+  assert.ok(svg.includes(">1.5<"), "load min value 1.5 renders");
+  assert.ok(svg.includes(">4.5<"), "load max value 4.5 renders");
+  assert.ok(svg.includes(">2.5<"), "load latest value 2.5 renders");
+});
+
+test("AC3: sysHistory.push records ts and the time-span labels match earliest/latest hh:mm", () => {
+  const src = fs.readFileSync(SERVE_DASHBOARD_SRC, "utf8");
+  assert.ok(src.includes("ts: d.sysRaw.ts"), "sysHistory.push writes the ts field from sysRaw.ts");
+  const svg = sparklineSvg(SPARK_HISTORY, null);
+  const earliest = hhmm(1700000000000);
+  const latest = hhmm(1700000120000);
+  assert.ok(svg.includes(">" + earliest + "<"), `earliest label ${earliest} renders verbatim`);
+  assert.ok(svg.includes(">" + latest + "<"), `latest label ${latest} renders verbatim`);
+});
+
+test("AC4: threshold reference line drawn only when loadThreshold is present", () => {
+  // in-range threshold (load data 1.5..4.5) → line at its true position + value label.
+  const withThreshold = sparklineSvg(SPARK_HISTORY, 3);
+  assert.ok(withThreshold.includes('class="spark-threshold"'), "non-null loadThreshold draws the reference line");
+  assert.ok(withThreshold.includes("阈 3"), "the threshold value is labelled");
+  // out-of-range threshold still renders (clamped to the plot edge), never dropped.
+  const aboveRange = sparklineSvg(SPARK_HISTORY, 8);
+  assert.ok(aboveRange.includes('class="spark-threshold"'), "above-range loadThreshold still draws the clamped line");
+  const withoutThreshold = sparklineSvg(SPARK_HISTORY, null);
+  assert.ok(!withoutThreshold.includes("spark-threshold"), "null loadThreshold draws no reference line");
+  assert.ok(!withoutThreshold.includes("阈 "), "no fabricated default threshold label");
+});
+
+test("AC5: no server-side fs write/append path added (zero-persistence contract)", () => {
+  const src = fs.readFileSync(SERVE_DASHBOARD_SRC, "utf8");
+  const writes = src.match(/fs\.(write|append)FileSync?/g) ?? [];
+  assert.equal(writes.length, 0, "serve-dashboard.ts carries no fs.writeFile/appendFile call");
 });
