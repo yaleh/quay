@@ -1,7 +1,7 @@
 ---
 id: gap-meta-ac-180
 title: 修复 AC-180 恒绿判据——grep 管道只留 id 行且 goal-store 丢弃 criterion 键，守卫永远无法取假
-status: todo
+status: ready
 labels:
   - meta-driver
   - driver-candidate
