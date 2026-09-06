@@ -241,6 +241,20 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/ scripts/ plugin/scripts/concurrency-literal-check.ts plugin/test/concurrency-literal-check.test.mjs
   run_checker "concurrency-literal-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/concurrency-literal-check.ts" --gate --root "${repo_root}"
+  echo "== task-file-bypass check (gap-adr013-gate-blind-spots-and-task-bypass-ratchet, AC4/AC5) =="
+  # Fail-closed ratchet on direct `tasks/*.md` access outside the Provider ABI: a `tasks/` path literal
+  # used as the argument of a file-operation (fs.* / readFileSync / writeFileSync / execFileSync /
+  # spawnSync / git-show-on-task-path / shell grep-cat-test) in a file OUTSIDE the ALLOWLIST is a NEW
+  # bypass → exit 1. The ALLOWLIST (exported constant, one entry per line) is the baseline of today's
+  # known, currently-necessary bypass sites — the sibling tasks
+  # gap-task-ops-consolidate-driver-frontmatter-writers / gap-quay-task-consolidated-subagent /
+  # gap-worker-prompt-ac-check-via-abi-not-hand-edit shrink it; an allowlisted file's hit-count drift is
+  # a WARN (not a fail), so shrinking the allowlist is a deliberate, reviewed edit, never a silent
+  # capability loss. Positional (hard rule 2): a tasks/ string used as a search needle / path-prefix
+  # classification / comment mention / a call spelled inside a string literal does NOT report.
+  # @static-tier change
+  # @static-object packages/quay/src/ plugin/ plugin/scripts/task-file-bypass-check.ts plugin/test/task-file-bypass-check.test.mjs
+  run_checker "task-file-bypass-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/task-file-bypass-check.ts" --gate --root "${repo_root}"
   echo "== suite-slot SSoT check (gap-suite-concurrency-ff-gate-and-slot-ssot, AC4 行为层不变量) =="
   # suite 并发量「能跑几个 suite」的单一定义点行为层不变量:
   #   I1 — fan-in-ff-merge.sh 代码不含 'full-suite.lock' 读取 (ff 闸只读本任务 capture, AC1 收窄)
