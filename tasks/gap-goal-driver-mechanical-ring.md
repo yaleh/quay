@@ -4,6 +4,7 @@ title: 新增 goal driver kind——机械环跑 AC 判据写 evidence、I2 flip
 status: todo
 labels:
   - gap
+  - delivery-critical
 parent: null
 children: []
 extra:
