@@ -37,10 +37,10 @@ before(async () => {
   // The goal store lives at <workspaceRoot>/goals; the document store at <workspaceRoot>/docs-managed.
   fs.mkdirSync(path.join(workspaceRoot, "goals"), { recursive: true });
   fs.mkdirSync(path.join(workspaceRoot, "docs-managed"), { recursive: true });
-  fs.writeFileSync(path.join(workspaceRoot, "goals", "PHASE-001-three-layer.md"),
-    "---\nid: PHASE-001\ntitle: three-layer unification\nstatus: active\nkind: phase\norigin: 2026-08-09 human goal setting\n---\n## Goal\none target statement\n");
+  fs.writeFileSync(path.join(workspaceRoot, "goals", "GOAL-001-three-layer.md"),
+    "---\nid: GOAL-001\ntitle: three-layer unification\nstatus: active\nkind: goal\norigin: 2026-08-09 human goal setting\n---\n## Goal\none target statement\n");
   fs.writeFileSync(path.join(workspaceRoot, "goals", "AC-028-experience-flows.md"),
-    "---\nid: AC-028\ntitle: experience flows between layers\nstatus: active\nkind: criterion\nphase: PHASE-001\ncriterion: git rev-list --count integration..develop\nexpect: \"=0\"\norigin: 2026-08-09 measured criterion\nevidence:\n  at: 2026-08-09T07:40:08Z\n  verdict: pass\n  reading: \"0\"\n---\n## Rationale\nmeasured\n");
+    "---\nid: AC-028\ntitle: experience flows between layers\nstatus: active\nkind: criterion\ngoal: GOAL-001\ncriterion: git rev-list --count integration..develop\nexpect: \"=0\"\norigin: 2026-08-09 measured criterion\nevidence:\n  at: 2026-08-09T07:40:08Z\n  verdict: pass\n  reading: \"0\"\n---\n## Rationale\nmeasured\n");
   fs.writeFileSync(path.join(workspaceRoot, "docs-managed", "DOC-001-quay-directive-skill.md"),
     "---\nid: DOC-001\ntitle: quay-directive skill\nstatus: active\nkind: skill\n---\n## Body\nthe directive skill\n");
   fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
@@ -61,7 +61,7 @@ after(async () => {
 test("AC5 — GET /goal lists phase + criterion records with origin and recent verdict", async () => {
   const r = await get(port, "/goal");
   assert.equal(r.status, 200);
-  assert.match(r.body, /PHASE-001/);
+  assert.match(r.body, /GOAL-001/);
   assert.match(r.body, /AC-028/);
   assert.match(r.body, /three-layer unification/);
   assert.match(r.body, /experience flows/);
@@ -80,8 +80,8 @@ test("AC5 — GET /goal/AC-028 renders the detail page with criterion and verdic
   assert.match(r.body, /2026-08-09T07:40:08Z/);
 });
 
-test("AC5 — GET /goal/PHASE-001 renders a phase (no criterion cell) with origin", async () => {
-  const r = await get(port, "/goal/PHASE-001");
+test("AC5 — GET /goal/GOAL-001 renders a goal (no criterion cell) with origin", async () => {
+  const r = await get(port, "/goal/GOAL-001");
   assert.equal(r.status, 200);
   assert.match(r.body, /three-layer unification/);
   assert.match(r.body, /origin/);

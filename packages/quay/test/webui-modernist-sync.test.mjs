@@ -62,7 +62,7 @@ before(async () => {
   fs.mkdirSync(path.join(workspaceRoot, "goals"), { recursive: true });
   fs.mkdirSync(path.join(workspaceRoot, "docs-managed"), { recursive: true });
   fs.writeFileSync(path.join(workspaceRoot, "goals", "AC-100-criterion.md"),
-    "---\nid: AC-100\ntitle: consistency\nstatus: active\nkind: criterion\nphase: PHASE-001\ncriterion: grep -cE '#[0-9a-fA-F]{6}'\nexpect: \"=0\"\norigin: 2026-08-16 measured criterion\nevidence:\n  at: 2026-08-16T00:00:00Z\n  verdict: pass\n  reading: \"0\"\n---\n## Rationale\nmeasured\n");
+    "---\nid: AC-100\ntitle: consistency\nstatus: active\nkind: criterion\ngoal: GOAL-001\ncriterion: grep -cE '#[0-9a-fA-F]{6}'\nexpect: \"=0\"\norigin: 2026-08-16 measured criterion\nevidence:\n  at: 2026-08-16T00:00:00Z\n  verdict: pass\n  reading: \"0\"\n---\n## Rationale\nmeasured\n");
   fs.writeFileSync(path.join(workspaceRoot, "docs-managed", "DOC-100-modernist.md"),
     "---\nid: DOC-100\ntitle: modernist doc\nstatus: active\nkind: skill\n---\n## Body\nthe modernist doc body\n");
   fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });

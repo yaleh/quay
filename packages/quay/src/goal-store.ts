@@ -1,5 +1,6 @@
-// quay Core: goal store — PHASE + AC records, the THIRD sibling kind
-// (tasks/gap-spec-goal-store-third-sibling-kind, orchestration/SPEC-goal-store-2026-08-09.md).
+// quay Core: goal store — GOAL + AC records, the THIRD sibling kind
+// (tasks/gap-spec-goal-store-third-sibling-kind, orchestration/SPEC-goal-store-2026-08-09.md,
+//  revised by orchestration/SPEC-goal-mechanism-2026-09-06.md §2 — PHASE-NNN → GOAL-NNN).
 //
 // A goal record is a SEPARATE object kind from tasks (a Provider's own store), ADRs
 // (adr-store.js), and documents (document-store.js): a stage goal / acceptance-criterion
@@ -14,22 +15,22 @@
 //      NOT document `contracts`, which are in-process grep/not-grep over the doc's own body).
 //      Empty/missing criterion ⇒ the goal gate FAILS CLOSED (never a silent PASS).
 //   2. `status` includes `achieved` — decisions don't achieve, ACs do.
-//   3. `phase` — the ACTIVE SET is DERIVED from the phase's status, never hand-listed.
+//   3. `goal` — the ACTIVE SET is DERIVED from the goal's status, never hand-listed.
 //   4. `origin` — the empirical basis for the AC; REQUIRED (empty origin writes nothing).
 //
 // Two invariants (human-agreed, SPEC §2b):
-//   I1 — at most ONE `status: active` PHASE at a time. Phase switch is a SINGLE ATOMIC
-//        write, fail-closed: activating a new phase while another is active is REJECTED
-//        unless the same call supplies the old phase's disposition (`disposeOld` → achieved,
+//   I1 — at most ONE `status: active` GOAL at a time. Goal switch is a SINGLE ATOMIC
+//        write, fail-closed: activating a new goal while another is active is REJECTED
+//        unless the same call supplies the old goal's disposition (`disposeOld` → achieved,
 //        or `supersedes: [oldId]` → superseded).
-//   I2 — a PHASE is achieved ⟺ ALL its ACs are achieved. DERIVED at read time
-//        (`isPhaseAchieved`), never stored.
+//   I2 — a GOAL is achieved ⟺ ALL its ACs are achieved. DERIVED at read time
+//        (`isGoalAchieved`), never stored.
 //
-// Naming: `PHASE-NNN` / `AC-NNN` — pure sequence ids, meaning lives in `title` (the SPEC's
-// four-name decision: id never moves even when goal prose drifts). PHASE records have NO
+// Naming: `GOAL-NNN` / `AC-NNN` — pure sequence ids, meaning lives in `title` (the SPEC's
+// four-name decision: id never moves even when goal prose drifts). GOAL records have NO
 // `criterion` field (their criterion is the conjunction of their ACs).
 //
-// Goal view-model: { id, title, status, kind, phase, criterion, expect, origin, evidence,
+// Goal view-model: { id, title, status, kind, goal, criterion, expect, origin, evidence,
 // supersedes, supersededBy, body, updatedAt }
 
 import fs from "node:fs";
@@ -43,16 +44,16 @@ import {
   slugify,
 } from "./frontmatter-store-base.ts";
 
-export const VALID_GOAL_STATUSES = ["active", "achieved", "superseded", "retired"];
+export const VALID_GOAL_STATUSES = ["draft", "active", "achieved", "superseded", "retired"];
 
-const PHASE_ID_RE = /^PHASE-\d{3,}$/;
+const GOAL_ID_RE = /^GOAL-\d{3,}$/;
 const AC_ID_RE = /^AC-\d{3,}$/;
 
 // Frontmatter keys the view-model owns explicitly; everything else in the frontmatter
 // (any future field) is preserved verbatim — the same discipline as adr-store/document-store.
 const OWNED_KEYS = new Set([
-  "id", "title", "status", "kind", "phase", "criterion", "expect", "origin", "evidence",
-  "supersedes", "superseded-by",
+  "id", "title", "status", "kind", "goal", "criterion", "expect", "origin", "activatedAt",
+  "labels", "evidence", "supersedes", "superseded-by",
 ]);
 
 interface GoalFrontmatter {
@@ -61,10 +62,12 @@ interface GoalFrontmatter {
   title?: string;
   status?: string;
   kind?: string;
-  phase?: string;
+  goal?: string;
   criterion?: string;
   expect?: string;
   origin?: string;
+  activatedAt?: string;
+  labels?: string[];
   evidence?: { at?: string; verdict?: string; reading?: string };
   supersedes?: string[];
   "superseded-by"?: string[];
@@ -73,7 +76,7 @@ interface GoalFrontmatter {
 interface GoalFilter {
   status?: string;
   kind?: string;
-  phase?: string;
+  goal?: string;
 }
 
 interface GoalViewModel {
@@ -81,7 +84,7 @@ interface GoalViewModel {
   title: unknown;
   status: unknown;
   kind: unknown;
-  phase: unknown;
+  goal: unknown;
   criterion: unknown;
   expect: unknown;
   origin: unknown;
@@ -93,14 +96,14 @@ interface GoalViewModel {
 }
 
 export interface DisposeOld {
-  /** the old active phase's id */
+  /** the old active goal's id */
   id: string;
   /** what happens to it: "achieved" or "superseded" */
   to: "achieved" | "superseded";
 }
 
-export function isPhaseId(id: string): boolean {
-  return typeof id === "string" && PHASE_ID_RE.test(id);
+export function isGoalId(id: string): boolean {
+  return typeof id === "string" && GOAL_ID_RE.test(id);
 }
 
 export function isCriterionId(id: string): boolean {
@@ -114,9 +117,9 @@ export function createGoalStore(goalDir: string) {
   fs.mkdirSync(goalDir, { recursive: true });
 
   function assertSafeId(id: string) {
-    if (typeof id !== "string" || !(PHASE_ID_RE.test(id) || AC_ID_RE.test(id))) {
+    if (typeof id !== "string" || !(GOAL_ID_RE.test(id) || AC_ID_RE.test(id))) {
       throw new Error(
-        `invalid goal id ${JSON.stringify(id)}: must match PHASE-NNN or AC-NNN (>=3 digits)`
+        `invalid goal id ${JSON.stringify(id)}: must match GOAL-NNN or AC-NNN (>=3 digits)`
       );
     }
     return id;
@@ -136,7 +139,7 @@ export function createGoalStore(goalDir: string) {
       title: frontmatter.title,
       status: frontmatter.status,
       kind: frontmatter.kind,
-      phase: frontmatter.phase,
+      goal: frontmatter.goal,
       criterion: frontmatter.criterion,
       expect: frontmatter.expect,
       origin: frontmatter.origin,
@@ -165,48 +168,48 @@ export function createGoalStore(goalDir: string) {
   function list(filter: GoalFilter = {}): GoalViewModel[] {
     return fs
       .readdirSync(goalDir)
-      .filter((f) => f.endsWith(".md") && (f.startsWith("PHASE-") || f.startsWith("AC-")))
+      .filter((f) => f.endsWith(".md") && (f.startsWith("GOAL-") || f.startsWith("AC-")))
       .map((f) => {
         const { frontmatter, body } = parseFrontmatter(fs.readFileSync(path.join(goalDir, f), "utf8"));
         return toViewModel(frontmatter as GoalFrontmatter, body, fs.statSync(path.join(goalDir, f)).mtimeMs);
       })
       .filter((g) => (filter.status ? g.status === filter.status : true))
       .filter((g) => (filter.kind ? g.kind === filter.kind : true))
-      .filter((g) => (filter.phase ? g.phase === filter.phase : true))
+      .filter((g) => (filter.goal ? g.goal === filter.goal : true))
       .sort((a, b) => String(a.id).localeCompare(String(b.id)));
   }
 
-  // I1: the (at most one) currently-active PHASE. Derived from stored status, never hand-listed.
-  function activePhases(): GoalViewModel[] {
-    return list().filter((g) => isPhaseId(String(g.id)) && g.status === "active");
+  // I1: the (at most one) currently-active GOAL. Derived from stored status, never hand-listed.
+  function activeGoals(): GoalViewModel[] {
+    return list().filter((g) => isGoalId(String(g.id)) && g.status === "active");
   }
 
-  // AC4: the ACTIVE SET is DERIVED from phase status, never a hand-maintained checklist.
-  // A criterion record is "active" ⟺ its phase's stored status is `active`.
-  function listActive(): GoalViewModel[] {
-    const activePhaseIds = new Set(activePhases().map((p) => String(p.id)));
-    return list().filter((g) => !isPhaseId(String(g.id)) && activePhaseIds.has(String(g.phase)));
+  // AC4: the ACTIVE SET is DERIVED from goal status, never a hand-maintained checklist.
+  // A criterion record is "active" ⟺ its goal's stored status is `active`.
+  function listActiveCriteria(): GoalViewModel[] {
+    const activeGoalIds = new Set(activeGoals().map((p) => String(p.id)));
+    return list().filter((g) => !isGoalId(String(g.id)) && activeGoalIds.has(String(g.goal)));
   }
 
-  // I2: a PHASE is achieved ⟺ ALL its ACs are achieved. Evaluated at read time, never stored.
-  function isPhaseAchieved(phaseId: string): boolean {
-    assertSafeId(phaseId);
-    if (!isPhaseId(phaseId)) {
-      throw new Error(`isPhaseAchieved requires a PHASE-NNN id, got ${JSON.stringify(phaseId)}`);
+  // I2: a GOAL is achieved ⟺ ALL its ACs are achieved. Evaluated at read time, never stored.
+  function isGoalAchieved(goalId: string): boolean {
+    assertSafeId(goalId);
+    if (!isGoalId(goalId)) {
+      throw new Error(`isGoalAchieved requires a GOAL-NNN id, got ${JSON.stringify(goalId)}`);
     }
-    const acs = list().filter((g) => String(g.phase) === phaseId);
-    if (acs.length === 0) return false; // a phase with no ACs is not achieved
+    const acs = list().filter((g) => String(g.goal) === goalId);
+    if (acs.length === 0) return false; // a goal with no ACs is not achieved
     return acs.every((g) => g.status === "achieved");
   }
 
-  // I1 checker (SPEC §2b.5-c): "exactly one active phase". ok=true only when count === 1.
-  function checkExactlyOneActivePhase(): { ok: boolean; count: number; active: string[] } {
-    const ap = activePhases();
+  // I1 checker (SPEC §2b.5-c): "exactly one active goal". ok=true only when count === 1.
+  function checkExactlyOneActiveGoal(): { ok: boolean; count: number; active: string[] } {
+    const ap = activeGoals();
     return { ok: ap.length === 1, count: ap.length, active: ap.map((p) => String(p.id)) };
   }
 
-  /** Direct read-modify-write of the old phase's file (inside the NEW phase's write lock). */
-  function flipPhase(oldId: string, patch: { status: string; supersededBy?: string[] }) {
+  /** Direct read-modify-write of the old goal's file (inside the NEW goal's write lock). */
+  function flipGoal(oldId: string, patch: { status: string; supersededBy?: string[] }) {
     const file = fileNameForId(goalDir, oldId);
     if (!file) return;
     const p = path.join(goalDir, file);
@@ -218,12 +221,12 @@ export function createGoalStore(goalDir: string) {
   }
 
   function write(id: string, {
-    title, status, phase, criterion, expect, origin, evidence,
+    title, status, goal, criterion, expect, origin, evidence,
     supersedes, supersededBy, body, disposeOld,
   }: {
     title?: string;
     status?: string;
-    phase?: string;
+    goal?: string;
     criterion?: string;
     expect?: string;
     origin?: string;
@@ -235,12 +238,12 @@ export function createGoalStore(goalDir: string) {
   }): GoalViewModel {
     assertSafeId(id);
     assertSafeStatus(status);
-    const isPhaseRecord = isPhaseId(id);
-    // SPEC §2b: PHASE records carry NO criterion field — their criterion is the conjunction
+    const isGoalRecord = isGoalId(id);
+    // SPEC §2b: GOAL records carry NO criterion field — their criterion is the conjunction
     // of their ACs. Refusing beats silently dropping the field.
-    if (isPhaseRecord && criterion !== undefined) {
+    if (isGoalRecord && criterion !== undefined) {
       throw new Error(
-        `${id} is a PHASE record and cannot carry a \`criterion\` field — a phase is judged by the conjunction of its ACs`
+        `${id} is a GOAL record and cannot carry a \`criterion\` field — a goal is judged by the conjunction of its ACs`
       );
     }
     return withFileLock(goalDir, id, () => {
@@ -255,10 +258,10 @@ export function createGoalStore(goalDir: string) {
       // Apply owned fields (preserving any unknown frontmatter keys verbatim).
       frontmatter.id = id;
       if (title !== undefined) frontmatter.title = title;
-      frontmatter.status = status ?? frontmatter.status ?? "active";
+      frontmatter.status = status ?? frontmatter.status ?? "draft";
       // `kind` is derived from the id prefix — never caller-supplied.
-      frontmatter.kind = isPhaseRecord ? "phase" : "criterion";
-      if (phase !== undefined) frontmatter.phase = phase;
+      frontmatter.kind = isGoalRecord ? "goal" : "criterion";
+      if (goal !== undefined) frontmatter.goal = goal;
       if (criterion !== undefined) frontmatter.criterion = criterion;
       if (expect !== undefined) frontmatter.expect = expect;
       if (origin !== undefined) frontmatter.origin = origin;
@@ -266,9 +269,9 @@ export function createGoalStore(goalDir: string) {
       if (supersedes !== undefined) frontmatter.supersedes = supersedes;
       if (supersededBy !== undefined) frontmatter["superseded-by"] = supersededBy;
 
-      // A criterion record MUST point at a phase (its activeness derives from that phase).
-      if (!isPhaseRecord && (typeof frontmatter.phase !== "string" || frontmatter.phase.trim() === "")) {
-        throw new Error(`AC record ${id} must declare a \`phase: PHASE-NNN\` — activeness derives from the phase`);
+      // A criterion record MUST point at a goal (its activeness derives from that goal).
+      if (!isGoalRecord && (typeof frontmatter.goal !== "string" || frontmatter.goal.trim() === "")) {
+        throw new Error(`AC record ${id} must declare a \`goal: GOAL-NNN\` — activeness derives from the goal`);
       }
 
       // AC6 / SPEC §2.4 — `origin` REQUIRED: an AC without a basis is cargo cult. Empty
@@ -279,25 +282,25 @@ export function createGoalStore(goalDir: string) {
         );
       }
 
-      // I1 — SINGLE ATOMIC phase switch, fail-closed (SPEC §2b.5-a).
-      if (isPhaseRecord && frontmatter.status === "active") {
-        const existingActive = activePhases().filter((p) => String(p.id) !== id);
+      // I1 — SINGLE ATOMIC goal switch, fail-closed (SPEC §2b.5-a).
+      if (isGoalRecord && frontmatter.status === "active") {
+        const existingActive = activeGoals().filter((p) => String(p.id) !== id);
         if (existingActive.length > 0) {
           const oldId = String(existingActive[0].id);
           let disposed = false;
           if (disposeOld && String(disposeOld.id) === oldId) {
-            flipPhase(oldId, {
+            flipGoal(oldId, {
               status: disposeOld.to === "achieved" ? "achieved" : "superseded",
               supersededBy: disposeOld.to === "achieved" ? undefined : [id],
             });
             disposed = true;
           } else if (Array.isArray(supersedes) && supersedes.includes(oldId)) {
-            flipPhase(oldId, { status: "superseded", supersededBy: [id] });
+            flipGoal(oldId, { status: "superseded", supersededBy: [id] });
             disposed = true;
           }
           if (!disposed) {
             throw new Error(
-              `cannot activate ${id}: ${oldId} is already active — a phase switch must dispose of the old phase in the SAME call (disposeOld {id, to} or supersedes:[${oldId}])`
+              `cannot activate ${id}: ${oldId} is already active — a goal switch must dispose of the old goal in the SAME call (disposeOld {id, to} or supersedes:[${oldId}])`
             );
           }
         }
@@ -305,8 +308,8 @@ export function createGoalStore(goalDir: string) {
 
       const ordered: GoalFrontmatter = {};
       for (const k of [
-        "id", "title", "status", "kind", "phase", "criterion", "expect", "origin", "evidence",
-        "supersedes", "superseded-by",
+        "id", "title", "status", "kind", "goal", "criterion", "expect", "origin", "activatedAt",
+        "labels", "evidence", "supersedes", "superseded-by",
       ]) {
         if (frontmatter[k] !== undefined) ordered[k] = frontmatter[k];
       }
@@ -320,18 +323,18 @@ export function createGoalStore(goalDir: string) {
     });
   }
 
-  return { list, get, write, activePhases, listActive, isPhaseAchieved, checkExactlyOneActivePhase };
+  return { list, get, write, activeGoals, listActiveCriteria, isGoalAchieved, checkExactlyOneActiveGoal };
 }
 
 // ── Direct-invocation entry (Contract invoke: `node packages/quay/src/goal-store.ts`) ──────────────
 // Subcommands (workspace root auto-derived from the script location, or --root <dir>):
-//   list                      — list all goal records (PHASE + AC) as JSON
+//   list                      — list all goal records (GOAL + AC) as JSON
 //   get <id>                  — one record as JSON
-//   write <id> --title ... --status ... --phase ... --criterion ... --origin ... [--expect ...]
+//   write <id> --title ... --status ... --goal ... --criterion ... --origin ... [--expect ...]
 //   gate <id> [--root <dir>]  — run the record's `criterion` via the acceptance runner and append
 //                               one GateEvent (verdict+timestamp) to <root>/.quay/gate-events.jsonl;
 //                               empty criterion fails CLOSED (red) and still records the event.
-//   check                     — I1 checker: exactly-one-active-phase (exit 1 when not)
+//   check                     — I1 checker: exactly-one-active-goal (exit 1 when not)
 import { fileURLToPath } from "node:url";
 
 async function main(argv: string[]) {
@@ -382,7 +385,7 @@ async function main(argv: string[]) {
         const v = rest[i + 1];
         if (!k.startsWith("--")) continue;
         const key = k.slice(2);
-        if (key === "title" || key === "status" || key === "phase" || key === "criterion" ||
+        if (key === "title" || key === "status" || key === "goal" || key === "criterion" ||
             key === "expect" || key === "origin" || key === "superseded-by" ||
             key === "dispose-old" || key === "dispose-to") {
           opts[key] = v;
@@ -408,7 +411,7 @@ async function main(argv: string[]) {
       const rec = store.write(id, {
         title: opts.title as string | undefined,
         status: opts.status as string | undefined,
-        phase: opts.phase as string | undefined,
+        goal: opts.goal as string | undefined,
         criterion: opts.criterion as string | undefined,
         expect: opts.expect as string | undefined,
         origin: opts.origin as string,
@@ -461,7 +464,7 @@ async function main(argv: string[]) {
       return verdict === "pass" ? 0 : 1;
     }
     case "check": {
-      const r = store.checkExactlyOneActivePhase();
+      const r = store.checkExactlyOneActiveGoal();
       process.stdout.write(JSON.stringify(r, null, 2) + "\n");
       return r.ok ? 0 : 1;
     }
