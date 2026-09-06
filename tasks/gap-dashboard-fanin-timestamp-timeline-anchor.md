@@ -2,7 +2,7 @@
 id: gap-dashboard-fanin-timestamp-timeline-anchor
 title: Dashboard Fan-in 卡补时间戳 + 测试/Fan-in 分段时间轴 bar 窗口终点锚定到最后一次事件结束时刻（而非
   wall-clock now）
-status: done
+status: ready
 labels:
   - gap
   - defect
@@ -11,6 +11,8 @@ children: []
 extra:
   schema: execution
 ---
+> **RETREATED / 搁置（独立重跑 gap-dashboard-fanin-panel-and-timeline-bars.test.mjs 发现 AC7"生产数据回归"测试从仓库根目录调用时必现失败（与 scripts/test.sh 实际调用方式一致）；根因定位到该测试自己的 mainCheckoutRoot() 辅助函数用 path.resolve(commonDir,"..") 补全一个相对于 __dirname 的相对路径,却用了调用进程的 process.cwd() 做基准,解析出 /home 而非仓库根 /home/yale/work/quay,导致读不到真实 .quay 数据、断言必假；产品代码本身（bar 窗口终点锚定逻辑）经独立复核是对的。已把 AC7 复选框取消、补充追加发现与新增 AC8 回归哨兵，退回 ready 走正常开发流程重做。）**
+
 **type:** execution
 
 ## Proposal
@@ -122,26 +124,26 @@ mainCheckoutRoot() 实际算出: /home                    ← 错误，应为 /h
 
 ## Acceptance Criteria
 
-- [x] AC1（时间戳）：对 `renderFanInCardFromRecords` 传入一个固定 `records` fixture（含已知的
+- [ ] AC1（时间戳）：对 `renderFanInCardFromRecords` 传入一个固定 `records` fixture（含已知的
       `lockAcquireEpoch`）与固定 `opts.nowMs`，断言输出 HTML 里每一行都含一个由 `relativeTime()` 产生的、
       与该固定输入完全对应的时间描述子串（不是模糊 `/ago|前/` 子串匹配，而是与 `relativeTime(fixedEpoch*1000)`
       的真实返回值逐字比对）。
-- [x] AC2（bar 锚定・测试卡，反例判据）：构造 `tests.runs` fixture，全部记录的 `[startedAt, startedAt+
+- [ ] AC2（bar 锚定・测试卡，反例判据）：构造 `tests.runs` fixture，全部记录的 `[startedAt, startedAt+
       durationMs]` 落在 `[nowMs-10h, nowMs-7h]` 区间（模拟"循环已停 7 小时"），调用 `renderTestsCard`
       时传 `hours=3`。① 用新实现（windowEndMs=最新记录结束时刻）渲染，断言输出含 `<rect`（非空）；
       ② 把同一份 segments 手工传给 `renderTimelineBarSvg` 并显式指定 `windowEndMs=nowMs`（即还原旧行为，
       关掉本次改动），断言此时 `<rect` 计数为 0 —— ②存在是为了证明 AC2①测的确实是"锚点从 now 换成了
       最新事件结束时刻"这件事本身，而不是别的巧合。
-- [x] AC3（bar 锚定・Fan-in 卡，同 AC2 结构）：同款 fixture/反例判据，数据源换成
+- [ ] AC3（bar 锚定・Fan-in 卡，同 AC2 结构）：同款 fixture/反例判据，数据源换成
       `mechanical_fan_in.lockAcquireEpoch/lockReleaseEpoch`，模拟"最后一次 fan-in 是 7 小时前"，① 新实现
       非空、② 显式传回 `windowEndMs=nowMs` 必须变回 0。
-- [x] AC4（命名/职责不漂移，静态可查）：`grep -n "windowEndMs" packages/quay/src/serve-dashboard.ts`
+- [ ] AC4（命名/职责不漂移，静态可查）：`grep -n "windowEndMs" packages/quay/src/serve-dashboard.ts`
       命中 ≥3 处（1 处 `renderTimelineBarSvg` 签名 + 至少 2 处调用点的计算逻辑）；`renderTimelineBarSvg`
       的函数签名所在行不再出现形参名 `nowMs`（`grep -A2 "^function renderTimelineBarSvg"` 人工核对，或用
       一条 `grep` 断言该签名行 3 个形参名依次为 `segments, windowHours, windowEndMs`）。
-- [x] AC5（文案）：`grep -n "结束时刻为终点\|最近一次运行/fan-in" packages/quay/src/serve-dashboard.ts`
+- [ ] AC5（文案）：`grep -n "结束时刻为终点\|最近一次运行/fan-in" packages/quay/src/serve-dashboard.ts`
       命中 ≥1。
-- [x] AC6（既有测试不回归）：`node --experimental-strip-types --test
+- [ ] AC6（既有测试不回归）：`node --experimental-strip-types --test
       packages/quay/test/gap-dashboard-fanin-panel-and-timeline-bars.test.mjs` exit 0——原 11 条用例
       （F/AC1、共用函数存在性、AC4 sort/filter、AC6 mount 等与本次改动无关的部分）继续全绿；只有依赖旧
       "窗口终点=now"假设的断言按 Plan 步骤4 同步改写。
