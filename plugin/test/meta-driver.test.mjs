@@ -39,6 +39,7 @@ import {
   renderDecisionOrigin,
   decisionQuality,
   collectDriverReadings,
+  collectInertCheckers,
   shouldJudge,
   readState,
   writeState,
@@ -270,6 +271,7 @@ const mkReadings = (verdict, noise = 'n1') => ({
   drivers: [{ kind: 'promotion', running: true, supervisorAlive: true, driverAlive: true, carrierRecords: noise.length, carrierLastTs: null, staleSecs: noise.length }],
   syncHealth: { window: 200, ffSynced: 1, notFf: 2, ffError: 0, semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0, lastEvent: 'doc-develop-sync-not-ff', lastTs: null },
   addressedTasks: [],
+  inertCheckers: [],
   focus: null,
 });
 
@@ -743,10 +745,53 @@ test('collectDriverReadings: 覆盖全部注册 kind；读不出时刻 ⇒ stale
   }
 });
 
+// gap-not-evaluated-checkers-never-persisted — 惰性守卫读数：从 full-suite-state.json 的
+// notEvaluatedCheckers 逐条枚举名字（⛔ 不是计数），读不到 ⇒ 空数组而非 undefined。
+test('collectInertCheckers: 逐条枚举 notEvaluatedCheckers 的名字；字段缺失/非数组 ⇒ 空数组（⛔ 非 undefined）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-inert-'));
+  try {
+    fs.mkdirSync(path.join(tmp, '.quay'), { recursive: true });
+    // 读不到 state ⇒ 空数组（⛔ 不是 undefined——「本轮没有未评估项」与「没记录这个维度」可区分）。
+    assert.deepEqual(collectInertCheckers(tmp), [], '无 state 文件 ⇒ 空数组，不是 undefined');
+    // 喂一个含 notEvaluatedCheckers 的 state 文件，断言逐条出现。
+    fs.writeFileSync(path.join(tmp, '.quay', 'full-suite-state.json'), JSON.stringify({
+      state: 'green',
+      notEvaluatedCheckers: [
+        { name: 'direct-to-develop-bypass-check', line: 'STATIC_CHECK_NOT_EVALUATED: direct-to-develop-bypass-check' },
+        { name: 'threshold-scope-check', line: 'STATIC_CHECK_NOT_EVALUATED: threshold-scope-check' },
+      ],
+    }), 'utf8');
+    assert.deepEqual(collectInertCheckers(tmp), ['direct-to-develop-bypass-check', 'threshold-scope-check'],
+      '逐条枚举名字（不是计数），且保序');
+    // 字段存在但为空数组 ⇒ 空数组（「本轮没有未评估项」）。
+    fs.writeFileSync(path.join(tmp, '.quay', 'full-suite-state.json'), JSON.stringify({ state: 'green', notEvaluatedCheckers: [] }), 'utf8');
+    assert.deepEqual(collectInertCheckers(tmp), [], '显式空数组 ⇒ 空数组');
+    // 字段不是数组（state 还在 running / 老字段）⇒ 空数组，⛔ 不抛、不当非空。
+    fs.writeFileSync(path.join(tmp, '.quay', 'full-suite-state.json'), JSON.stringify({ state: 'running' }), 'utf8');
+    assert.deepEqual(collectInertCheckers(tmp), [], 'running state（无该字段）⇒ 空数组');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// 负控制：惰性守卫的名字必须【进摘要】——否则一个新出现的惰性守卫不改变摘要 ⇒ 语义半永不被唤醒。
+test('readingsDigest: inertCheckers 名字进摘要——某个 guard 从在→不在/不在→在都改变摘要', () => {
+  const mk = (inert) => ({
+    goals: [], criteria: [], divergences: [], addressedTasks: [], inertCheckers: inert, focus: null,
+    drivers: [],
+    syncHealth: { window: 200, ffSynced: 0, notFf: 0, ffError: 0, semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0, lastEvent: null, lastTs: null },
+  });
+  assert.equal(readingsDigest(mk([])), readingsDigest(mk([])), '空 = 空');
+  assert.notEqual(readingsDigest(mk([])), readingsDigest(mk(['direct-to-develop-bypass-check'])),
+    '惰性守卫从无到有必须改变摘要');
+  assert.notEqual(readingsDigest(mk(['direct-to-develop-bypass-check'])), readingsDigest(mk(['threshold-scope-check'])),
+    '不同的惰性守卫必须改变摘要（逐名进，⛔ 只进计数会让换 guard 不改变摘要）');
+});
+
 // 负控制：摘要必须对【每轮都变的量】免疫——staleSecs/记录数每轮都不同，若进摘要则闸失效。
 test('readingsDigest: 不随 staleSecs/carrierRecords 变（否则变化检测恒为真）', () => {
   const mk = (stale, records) => ({
-    goals: [], criteria: [], divergences: [], addressedTasks: [], focus: null,
+    goals: [], criteria: [], divergences: [], addressedTasks: [], inertCheckers: [], focus: null,
     drivers: [{ kind: 'promotion', running: true, supervisorAlive: true, driverAlive: true, carrierRecords: records, carrierLastTs: null, staleSecs: stale }],
     syncHealth: { window: 200, ffSynced: 1, notFf: 2, ffError: 0, semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0, lastEvent: 'doc-develop-sync-not-ff', lastTs: null },
   });
