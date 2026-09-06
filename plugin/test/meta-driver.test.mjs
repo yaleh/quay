@@ -31,6 +31,9 @@ import {
   resolveEvidence,
   driveItems,
   renderAutoDriveBody,
+  blockingOwners,
+  snapshotTrackedChanges,
+  probeWriteViolations,
   fileDecisions,
   nextGoalId,
   renderDecisionOrigin,
@@ -350,19 +353,49 @@ test('driveItems: evidenceKey 解析不出 ⇒ 拒（⛔ 不接受凭空证据�
   assert.match(r[0].reason, /解析不出/);
 });
 
-test('driveItems: 机制词命中既有任务 ⇒ 拒并报出命中（已有机制在管）', async () => {
+test('driveItems: 机制词命中【未完成】任务 ⇒ 拒并报出命中与状态', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-own-'));
   try {
     fs.mkdirSync(path.join(tmp, 'tasks'));
-    fs.writeFileSync(path.join(tmp, 'tasks', 'gap-existing.md'), '---\nid: gap-existing\n---\n涉及 syncDevelopToDoc 的修复\n');
+    fs.writeFileSync(path.join(tmp, 'tasks', 'gap-existing.md'), '---\nid: gap-existing\nstatus: ready\n---\n涉及 syncDevelopToDoc 的修复\n');
     const r = await driveItems(tmp, [{ ...goodItem, mechanismKeyword: 'syncDevelopToDoc' }], ecoReadings,
       { cap: 1, dryRun: true, at: 'now' });
     assert.equal(r[0].accepted, false);
-    assert.match(r[0].reason, /既有任务可能已在管/);
-    assert.match(r[0].reason, /gap-existing\.md/, '必须报出具体命中，⛔ 不只说"有重复"');
+    assert.match(r[0].reason, /未完成的既有任务已在管/);
+    assert.match(r[0].reason, /gap-existing\.md\[ready\]/, '必须报出具体命中与状态，⛔ 不只说"有重复"');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// 关键新行为：已 done 的任务命中【不拦】——问题仍在而任务已 done，是假完成的信号，
+// 该被驱动而不是被它挡住。⛔ 但必须把这个事实带进任务体，防止在旁边另造并行机制。
+test('driveItems: 机制词只命中【已 done】任务 ⇒ 不拦（假完成该被驱动）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-done-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'tasks'));
+    fs.writeFileSync(path.join(tmp, 'tasks', 'gap-claimed-fixed.md'), '---\nid: gap-claimed-fixed\nstatus: done\n---\n涉及 syncDevelopToDoc 的修复\n');
+    const r = await driveItems(tmp, [{ ...goodItem, mechanismKeyword: 'syncDevelopToDoc' }], ecoReadings,
+      { cap: 1, dryRun: true, at: 'now' });
+    assert.equal(r[0].accepted, true, `done 的命中不得拦截：${r[0].reason}`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('blockingOwners: 只有未完成的才拦；done/superseded 不拦', () => {
+  const owners = [
+    { file: 'a.md', status: 'done' }, { file: 'b.md', status: 'superseded' },
+    { file: 'c.md', status: 'ready' }, { file: 'd.md', status: 'unknown' },
+  ];
+  const b = blockingOwners(owners).map((o) => o.file);
+  assert.deepEqual(b, ['c.md', 'd.md'], 'unknown 也拦——读不出状态不等于已完成（硬规则 6）');
+});
+
+test('renderAutoDriveBody: 已 done 的命中必须写进任务体（防在旁边另造并行机制）', () => {
+  const body = renderAutoDriveBody(goodItem, 0, 'now', ['gap-claimed-fixed.md[done]']);
+  assert.ok(body.includes('gap-claimed-fixed.md[done]'));
+  assert.ok(body.includes('不要在它们旁边新造一个并行机制'));
 });
 
 test('driveItems: 每轮上限 1（比提案的 K=3 更严）', async () => {
@@ -394,6 +427,41 @@ test('parseProbeOutput: autoDrive 缺字段的条目被丢弃', () => {
   }));
   assert.equal(out.autoDrive.length, 1, '缺必填字段的自动驱动条目必须被丢弃');
   assert.equal(out.autoDrive[0].evidenceKey, goodItem.evidenceKey);
+});
+
+// ── probe 写入守卫（FILE-ONLY 从散文变机制）───────────────────────────────────
+test('probeWriteViolations: spawn 期间新增的 tracked 改动 = 违约', () => {
+  const before = new Set(['a.ts']);
+  const after = new Set(['a.ts', 'b.ts', 'c.ts']);
+  assert.deepEqual(probeWriteViolations(before, after), ['b.ts', 'c.ts']);
+  assert.deepEqual(probeWriteViolations(before, new Set(['a.ts'])), [], '没有新增 ⇒ 无违约');
+  // 之前就脏的文件不算违约（共享检出里别的 driver 在写，⛔ 不能栽赃给 probe）。
+  assert.deepEqual(probeWriteViolations(new Set(['x.ts']), new Set(['x.ts'])), []);
+});
+
+// 硬规则 6：读不出 ≠ 没违约。任一侧快照失败必须返回 null（无法评估），⛔ 不返回空数组冒充合格。
+test('probeWriteViolations: 任一侧快照读不出 ⇒ null（⛔ 不与"无违约"同形）', () => {
+  assert.equal(probeWriteViolations(null, new Set()), null);
+  assert.equal(probeWriteViolations(new Set(), null), null);
+  assert.equal(probeWriteViolations(null, null), null);
+});
+
+test('snapshotTrackedChanges: 非 git 目录 ⇒ null；真仓库里只收 tracked 改动、不收未跟踪', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-guard-'));
+  try {
+    assert.equal(snapshotTrackedChanges(tmp), null, '非 git 目录必须是 null 而非空集');
+    const run = (...args) => execFileSync('git', ['-C', tmp, ...args], { encoding: 'utf8' });
+    run('init', '-q'); run('config', 'user.email', 't@t'); run('config', 'user.name', 't');
+    fs.writeFileSync(path.join(tmp, 'tracked.txt'), 'v1\n');
+    run('add', '-A'); run('commit', '-qm', 'base');
+    fs.writeFileSync(path.join(tmp, 'tracked.txt'), 'v2\n');       // tracked 改动 ⇒ 收
+    fs.writeFileSync(path.join(tmp, 'untracked.txt'), 'new\n');    // 未跟踪 ⇒ 不收
+    const snap = snapshotTrackedChanges(tmp);
+    assert.ok(snap.has('tracked.txt'));
+    assert.ok(!snap.has('untracked.txt'), '未跟踪文件不算 probe 违约（提案落盘本就是新文件）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 // ── 决策通道（方向问题必须被路由，⛔ 不许停在只打印的字段里）─────────────────
