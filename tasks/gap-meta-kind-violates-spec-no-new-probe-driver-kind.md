@@ -12,6 +12,8 @@ extra:
   schema: execution
   acceptance: node --experimental-strip-types --test
     plugin/test/meta-driver.test.mjs plugin/test/driver-runtime.test.mjs
+depends_on:
+  - gap-quay-init-closure-ratchet-manual-reanchor-recurs
 ---
 ## Finding
 
