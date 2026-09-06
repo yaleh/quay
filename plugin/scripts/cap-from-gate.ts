@@ -14,7 +14,8 @@
 // reported in_use=5 with 1 real node-MainThread test process, so the WAIT verdict that dropped the cap
 // was built on a wrong count). The dispatch cap is now FIXED at 5:
 //
-//   effective_cap = FIXED_EFFECTIVE_CAP (5), constant, regardless of cpu pressure / suite state / budget.
+//   effective_cap = driverCap(root, "worker") — the configured worker cap (drivers.yml), constant
+//   regardless of cpu pressure / suite state / budget.
 //
 // The cpu-pressure band + hysteresis + budget reasoning are KEPT ONLY AS OBSERVATION: this helper still
 // prints the signal/band/budget lines (so the human/outer can SEE load), but those readings participate
@@ -86,7 +87,7 @@
 //   bash plugin/scripts/cap-from-gate.sh [--root <repo>]
 //
 // Output (stdout): signal/band/budget OBSERVATION lines + a LAST `effective_cap=N` line the tick
-// extracts. effective_cap is ALWAYS FIXED_EFFECTIVE_CAP (5) — the dynamic cap is retired
+// extracts. effective_cap is ALWAYS the configured worker cap (driverCap) — the dynamic cap is retired
 // (gap-fixed-cap-5-dynamic-cap-retired). Exit 0 always (a detector/recommender, not a gate).
 
 import fs from "node:fs";
@@ -95,16 +96,16 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 import { isDirectEntry } from "./gate-script-base.ts";
-import { defaultDriverConfig, driverCap } from "./driver-config.ts";
+import { driverCap } from "./driver-config.ts";
 
 /** FIXED dispatch cap (gap-fixed-cap-5-dynamic-cap-retired, human ruling 2026-08-09): the dynamic
- *  adaptive cap is retired. effective_cap is this constant — 5 — regardless of cpu pressure, suite
- *  state, or process budget. The band/budget fields returned alongside it are PURE OBSERVATION and
- *  must NOT participate in any decision (dispatch / slot-refill / floor all use this fixed 5).
- *  AC155: 单一真相源 —— 值从 driver-config 的声明式配置（drivers.yml）派生（⛔ 不再有本文件独立的
- *  并发字面量；computeEffectiveCap 现在经 driverCap 现读 drivers.yml）。保留本符号仅为旧 import 面
- *  （cap-from-gate-*.test.mjs 用「同一值」断言 effective_cap 恒固定）。 */
-export const FIXED_EFFECTIVE_CAP = defaultDriverConfig().worker.cap;
+ *  adaptive cap is retired. effective_cap is the CONFIGURED worker cap — read live from the single
+ *  source (driver-config's declarative `plugin/scripts/drivers.yml` via `driverCap(root,"worker")`,
+ *  defaulting to 5 when the file is absent/unparseable) — regardless of cpu pressure, suite state,
+ *  or process budget. The band/budget fields returned alongside it are PURE OBSERVATION and must NOT
+ *  participate in any decision. AC155 + gap-cap-from-gate-effective-cap-dual-source-blocks-yml-override:
+ *  ⛔ 不再有本文件独立的并发字面量/常量 —— computeEffectiveCap 现读 drivers.yml（消除「运行时读 yml /
+ *  常量读代码默认」的双来源分叉）。 */
 
 /** Default GO/WAIT/EXTREME caps when config declares no concurrency_bands. quay's default (5/2/1);
  *  a project overrides in `.quay/config.yml` `loop:concurrency_bands` (e.g. archguard 4/2/1).

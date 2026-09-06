@@ -15,16 +15,10 @@ kinds:
     cap: 5               # 并发 cap（promotion 的 ready-pool --cap；AC48 后 cap 不闸晋升，仍参与 floor/disjointness）
     interval_ms: 30000   # 轮间隔（round heartbeat 节奏，SPEC §5.5 定时器地板）
   worker:
-    # ⚠️ 2026-09-06：本值曾临时下调 5→2（人授权，为缓解调度竞争型 flaky），已 REVERT 回 5。
-    # REVERT 原因（实测，非预防性）：改成 2 后 `plugin/test/cap-from-gate-bands.test.mjs`
-    # 立即红——`actual: 2, expected: 5`。根因是【同一个量两个来源】：
-    #   · 运行时 `cap-from-gate` 的 effective_cap 读本文件（yml）
-    #   · 而 `FIXED_EFFECTIVE_CAP = defaultDriverConfig().worker.cap`（cap-from-gate.ts:107）
-    #     与该测试读的是【代码默认值】
-    # 只要 yml == 代码默认（都是 5）两者就永远一致、没人发现；一改 yml 立刻分叉，
-    # 且是【确定性全仓红】——比它原本要缓解的概率性 flaky 更糟，已挡住多条任务 fan-in。
-    # ⇒ 在该单一真相源缺陷修好之前，本字段【不可用】：改它会红全仓。
-    #    跟进任务：gap-cap-from-gate-effective-cap-dual-source-blocks-yml-override
+    # 并发 cap 单一真相源（gap-cap-from-gate-effective-cap-dual-source-blocks-yml-override）：
+    # effective_cap（cap-from-gate）/ slot-refill --json 的 cap 均经 driverCap(root,"worker") 现读本字段，
+    # 改本值会一致传导到运行时与测试（不再有「运行时读 yml / 测试读代码默认」的双来源分叉）。
+    # 缺省 5 = DEFAULT_DRIVER_CAP（driver-config.ts 的回退值），非默认值时测试仍全绿。
     cap: 5               # 并发 cap（worker 常驻选择环的存活 worker 上限）
     interval_ms: 30000   # 无在飞 worker 且瞬时 WAIT 时的轮询间隔
     reconcile_interval_secs: 300  # 协调地板（SPEC §5.5：至少每 N 秒协调一次，边沿事件全丢也「慢但正确」而非静默停摆）
