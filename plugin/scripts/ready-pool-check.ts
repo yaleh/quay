@@ -161,9 +161,14 @@ import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { parseTask, extractSection, readDependsOn, readTaskStatusAtRef } from "./task-schema.ts";
+// gap-task-ops-consolidate-driver-frontmatter-writers：frontmatter parse/patch + commit 单一真相源
+// 上收到 task-ops.ts（setTaskStatus / retreatReadyToTodo / commitTaskStatus 共用，⛔ 不再本文件手搓
+// fence 切分 + status/labels 行正则）。ensureDeliveryCriticalLabel re-export 保持旧 import 面。
+import { splitTaskFile, statusFromFrontmatter, patchStatusField, ensureDeliveryCriticalLabel, commitTaskFile, hasPriorCommit } from "./task-ops.ts";
+export { ensureDeliveryCriticalLabel } from "./task-ops.ts";
 // AC152：依赖全部 done 的判定核复用 driver-filters.ts 的 allDepsDone（depsSatisfied 谓词同一份实现，
 // ⛔ 不各写一遍「逐个查 status !== done」的循环）。
-import { allDepsDone, commitTaskFile, hasPriorCommit, syncDocDevelopBidirectional } from "./driver-filters.ts";
+import { allDepsDone, syncDocDevelopBidirectional } from "./driver-filters.ts";
 // criterion-cost self-record (gap-no-criterion-records-its-own-cost-checker-cost-jsonl): this
 // criterion KNOWS its input size n (the ready pool count) — the ONLY field that splits "the
 // criterion got slower" into "n got bigger" vs "the machine got busier" (the 35.8→91.2→157.0
@@ -2469,48 +2474,8 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
 // candidate promotes regardless of pool size (合格即晋). The negative control (AC3) is structural:
 // an empty `promotions` array (no eligible candidate) ⇒ zero writes.
 
-/** Ensure the frontmatter carries the `delivery-critical` label. Mirrors parseTask's label reading
- *  (task-schema.ts — block list OR flow list OR absent), then ADDS the label when missing. This is
- *  the "标签与 ready 同现" write: the promote gate determines delivery-critical at promote time, and
- *  this helper makes the label physically present in the frontmatter AT ready-entry — so the
- *  dispatch-time sort key (slot-refill's deliveryCritical axis, which reads the same labels via
- *  parseTask/parseCandidate) can act on it in the NEXT selection.
- *  @param {string} fm  the frontmatter text between the `---` fences
- *  @returns {{ fm: string, added: boolean, deliveryCritical: boolean }}  `deliveryCritical` is true
- *      when the label is present after the operation (already there, or newly added). */
-export function ensureDeliveryCriticalLabel(fm) {
-  // flow list: `labels: [a, b]`
-  const flow = /^(labels:\s*\[)([^\]]*)(\]\s*)$/m.exec(fm);
-  if (flow) {
-    const list = flow[2];
-    const items = list.split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
-    if (items.includes("delivery-critical")) return { fm, added: false, deliveryCritical: true };
-    const sep = list.trim() ? ", " : "";
-    return {
-      fm: fm.replace(/^(labels:\s*\[)([^\]]*)(\]\s*)$/m, `$1${list}${sep}delivery-critical$3`),
-      added: true,
-      deliveryCritical: true,
-    };
-  }
-  // block list: `labels:\n  - a\n  - b`
-  if (/^labels:\s*$/m.test(fm)) {
-    const lines = fm.split(/\r?\n/);
-    const idx = lines.findIndex((l) => /^labels:\s*$/.test(l));
-    const hasDc = lines.slice(idx + 1).some((l) => /^\s+-\s+["']?delivery-critical["']?\s*$/.test(l));
-    if (hasDc) return { fm, added: false, deliveryCritical: true };
-    // Insert a new `  - delivery-critical` item at the end of the labels block (before the next
-    // top-level key, or at the frontmatter end when labels is the last field).
-    let insertAt = lines.length;
-    for (let i = idx + 1; i < lines.length; i++) {
-      if (/^\S/.test(lines[i])) { insertAt = i; break; }
-    }
-    lines.splice(insertAt, 0, "  - delivery-critical");
-    return { fm: lines.join("\n"), added: true, deliveryCritical: true };
-  }
-  // No labels field at all — append a block list at the end of the frontmatter (before the closing
-  // fence, which the caller owns).
-  return { fm: `${fm.replace(/\n*$/, "")}\nlabels:\n  - delivery-critical\n`, added: true, deliveryCritical: true };
-}
+// ensureDeliveryCriticalLabel 已迁至 task-ops.ts（gap-task-ops-consolidate-driver-frontmatter-writers），
+// 本文件 re-export 保持旧 import 面（ready-pool-check.test.mjs 直接 import 它）。单一实现，⛔ 无平行副本。
 
 /** Patch ONE task file's frontmatter `status` line. Only rewrites when the current status is `todo`
  *  (a concurrently-flipped task is left alone — no clobbering a `ready`/`done` written by another
@@ -2527,27 +2492,29 @@ export function setTaskStatus(root, id, newStatus, opts = {}) {
   const file = path.join(root, "tasks", `${id}.md`);
   if (!fs.existsSync(file)) return { id, ok: false, reason: "missing" };
   const raw = fs.readFileSync(file, "utf8");
-  const m = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(raw);
-  if (!m) return { id, ok: false, reason: "no-frontmatter" };
-  const [, open, fm, close] = m;
+  // gap-task-ops-consolidate-driver-frontmatter-writers：frontmatter 读/写经 task-ops.ts（splitTaskFile /
+  // statusFromFrontmatter / patchStatusField，单一 parser，⛔ 不再手搓 fence 切分 + status/labels 行正则）。
+  const split = splitTaskFile(raw);
+  if (!split) return { id, ok: false, reason: "no-frontmatter" };
   // 判「当前是否 todo」读 develop ref（canonical），⛔ 读工作树盘上 status——上一轮 commitTaskStatus
   // 提交失败会残留【未提交的 ready】，把后续轮毒化成 not-todo 永不重提交（develop 永远 todo；
   // gap-promotion-uncommitted-flip-poisons-settaskstatus，硬规则 4b 代理量）。develop 不可用
   // （非 git root / 任务尚未入 develop）退回盘上（既有行为）。develop 仍 todo 而盘上残留 ready 时，
-  // 下面的 replace 是 no-op（盘上无 `todo` 可替换），写回即把残留 ready 重新提交 → develop 收敛。
+  // 下面的 patch 是 no-op（盘上无 `todo` 可替换），写回即把残留 ready 重新提交 → develop 收敛。
   const developStatus = readTaskStatusAtRef(root, "develop", id);
   const currentIsTodo = developStatus !== null
     ? developStatus === TASK_STATUS.TODO
-    : /^status:\s*todo\s*$/m.test(fm);
+    : statusFromFrontmatter(split.frontmatterRaw) === TASK_STATUS.TODO;
   if (!currentIsTodo) return { id, ok: false, reason: "not-todo" };
-  let newFm = fm.replace(/^status:\s*todo\s*$/m, `status: ${newStatus}`);
+  let patched = patchStatusField(split.frontmatterRaw, newStatus, TASK_STATUS.TODO);
+  if (!patched.ok) return { id, ok: false, reason: patched.reason };
   let deliveryCritical = opts.ensureDeliveryCritical === true;
   if (deliveryCritical) {
-    const ensured = ensureDeliveryCriticalLabel(newFm);
-    newFm = ensured.fm;
+    const ensured = ensureDeliveryCriticalLabel(patched.fm);
+    patched = { ...patched, fm: ensured.fm };
     deliveryCritical = ensured.deliveryCritical;
   }
-  fs.writeFileSync(file, `${open}${newFm}${close}${raw.slice(m[0].length)}`);
+  fs.writeFileSync(file, `${split.open}${patched.fm}${split.close}${split.body}`);
   return { id, ok: true, from: TASK_STATUS.TODO, to: newStatus, deliveryCritical };
 }
 
@@ -2563,8 +2530,9 @@ export function setTaskStatus(root, id, newStatus, opts = {}) {
  *  status flip is content-neutral (the hook's doc-class + Touches checks guard authored CONTENT, and
  *  shelling `scripts/test.sh --static-checks-doc` per promotion is slow and could fail on a doc change
  *  another layer left in-flight). Returns true when the commit landed.
- *  ⛔ 单一真相源：git add/commit 与 propagateDocBranchToDevelop 都复用 driver-filters.ts 的 commitTaskFile
- *  族（gap-mark-needs-human-commit-after-write 收敛），本函数只剩「组装 message + 落 committed」。
+ *  ⛔ 单一真相源：git add/commit 复用 task-ops.ts 的 commitTaskFile 族（gap-task-ops-consolidate-
+ *  driver-frontmatter-writers 收敛；gap-mark-needs-human-commit-after-write 修过的缺陷不再复发），
+ *  本函数只剩「组装 message + 落 committed」。
  *  @param {string} root  repo root (tasks/<id>.md lives here)
  *  @param {string} id    task id
  *  @param {string} from  old status (todo)
@@ -2655,16 +2623,17 @@ export function retreatReadyToTodo(root, id, reasons = []) {
   const file = path.join(root, "tasks", `${id}.md`);
   if (!fs.existsSync(file)) return { id, ok: false, reason: "missing" };
   const raw = fs.readFileSync(file, "utf8");
-  const m = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(raw);
-  if (!m) return { id, ok: false, reason: "no-frontmatter" };
-  const [, open, fm, close] = m;
-  if (!/^status:\s*ready\s*$/m.test(fm)) return { id, ok: false, reason: "not-ready" };
-  const newFm = fm.replace(/^status:\s*ready\s*$/m, "status: todo");
-  const body = raw.slice(m[0].length);
+  // gap-task-ops-consolidate-driver-frontmatter-writers：frontmatter 读/写经 task-ops.ts（单一 parser，
+  // ⛔ 不再手搓 fence 切分 + status 行正则）。
+  const split = splitTaskFile(raw);
+  if (!split) return { id, ok: false, reason: "no-frontmatter" };
+  if (statusFromFrontmatter(split.frontmatterRaw) !== TASK_STATUS.READY) return { id, ok: false, reason: "not-ready" };
+  const patched = patchStatusField(split.frontmatterRaw, TASK_STATUS.TODO);
+  if (!patched.ok) return { id, ok: false, reason: patched.reason };
   const record =
     `\n## Revaluation\n\n**执行 ${new Date().toISOString()} — 静态条件变质，ready.back="todo"**\n\n` +
     `- 去向：ready → todo\n- 阻碍原因：${reasons.join(", ")}\n`;
-  fs.writeFileSync(file, `${open}${newFm}${close}${body}${record}`);
+  fs.writeFileSync(file, `${split.open}${patched.fm}${split.close}${split.body}${record}`);
   return { id, ok: true, from: TASK_STATUS.READY, to: TASK_STATUS.TODO, reasons, record };
 }
 

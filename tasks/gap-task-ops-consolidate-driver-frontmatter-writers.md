@@ -38,12 +38,12 @@ Related (done, narrower — single call-site patches, not the underlying duplica
 
 ## Acceptance Criteria
 
-- [ ] `plugin/scripts/task-ops.ts` exists and is imported by `driver-filters.ts`, `worker-driver.ts`, AND `ready-pool-check.ts` — verified by `grep -l "from.*task-ops\|require.*task-ops" plugin/scripts/driver-filters.ts plugin/scripts/worker-driver.ts plugin/scripts/ready-pool-check.ts` returning all three files.
-- [ ] Zero independent frontmatter-parsing regexes remain in these three files outside what `task-ops.ts`/`task-schema.ts` provide — verified by grepping each file for a standalone `/^status:/`-style frontmatter regex (the pattern used before this task) and confirming none remain outside `task-ops.ts` itself.
-- [ ] `plugin/test/driver-filters.test.mjs`, `plugin/test/worker-driver.test.mjs`, `plugin/test/worker-driver-fan-in.test.mjs`, `plugin/test/ready-pool-check.test.mjs` all still pass unmodified in behavior (green), proving the migration is behavior-preserving.
-- [ ] The mechanical fan-in path (`worker-driver.ts`'s `flipTaskDone`) still produces a real commit after a `ready→done` flip — verified end-to-end against a scratch task, not a mock: flip status, confirm `git log -1 -- tasks/<scratch-id>.md` shows a new commit.
-- [ ] `markNeedsHuman`'s commit-after-write behavior (the bug `gap-mark-needs-human-commit-after-write` fixed once) is now enforced by the shared `task-ops.ts` commit primitive, not by a call-site-local fix — verified by reading the diff and confirming `markNeedsHuman` no longer has its own git-add/commit call, only a `task-ops.ts` call.
-- [ ] `ready-pool-check.ts`'s `develop`-ref read behavior for dispatch computation is unchanged (negative control — this task touches only the write side).
+- [x] `plugin/scripts/task-ops.ts` exists and is imported by `driver-filters.ts`, `worker-driver.ts`, AND `ready-pool-check.ts` — verified by `grep -l "from.*task-ops\|require.*task-ops" plugin/scripts/driver-filters.ts plugin/scripts/worker-driver.ts plugin/scripts/ready-pool-check.ts` returning all three files.
+- [x] Zero independent frontmatter-parsing regexes remain in these three files outside what `task-ops.ts`/`task-schema.ts` provide — verified by grepping each file for a standalone `/^status:/`-style frontmatter regex (the pattern used before this task) and confirming none remain outside `task-ops.ts` itself.
+- [x] `plugin/test/driver-filters.test.mjs`, `plugin/test/worker-driver.test.mjs`, `plugin/test/worker-driver-fan-in.test.mjs`, `plugin/test/ready-pool-check.test.mjs` all still pass unmodified in behavior (green), proving the migration is behavior-preserving.
+- [x] The mechanical fan-in path (`worker-driver.ts`'s `flipTaskDone`) still produces a real commit after a `ready→done` flip — verified end-to-end against a scratch task, not a mock: flip status, confirm `git log -1 -- tasks/<scratch-id>.md` shows a new commit.
+- [x] `markNeedsHuman`'s commit-after-write behavior (the bug `gap-mark-needs-human-commit-after-write` fixed once) is now enforced by the shared `task-ops.ts` commit primitive, not by a call-site-local fix — verified by reading the diff and confirming `markNeedsHuman` no longer has its own git-add/commit call, only a `task-ops.ts` call.
+- [x] `ready-pool-check.ts`'s `develop`-ref read behavior for dispatch computation is unchanged (negative control — this task touches only the write side).
 
 ## Definition of Done
 
@@ -58,6 +58,7 @@ A single library owns "parse task frontmatter, mutate a field, commit it" for th
 - `plugin/scripts/task-schema.ts`
 - `experiments/quay-perpetual-stream/scripts/task-schema.ts`
 - `plugin/scripts/capability-catalog.sh` (register the new script per its own header rule for new `plugin/scripts/*.ts` files)
+- `plugin/scripts/quay-init.sh` (add task-ops.ts to the explicit `--loop` laydown list — it is the ESM dep of laid-down driver-filters/worker-driver/ready-pool-check, invisible to closure step (d))
 - `plugin/test/driver-filters.test.mjs`
 - `plugin/test/worker-driver.test.mjs`
 - `plugin/test/worker-driver-fan-in.test.mjs`
