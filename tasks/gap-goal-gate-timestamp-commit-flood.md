@@ -34,16 +34,16 @@ extra: {}
 
 ## AC
 
-- [ ] 纯时间戳写入不产生提交：连续两次 `goal-store gate <同一条 AC>`（其 verdict 不变）之后，`git log --oneline -- goals/<该文件>` 的提交数**不增加**。判据须实跑两次 gate 再数提交，⛔ 不得 grep 源码。立条时实测：42 秒内必增 1（能取假）。
-- [ ] verdict 真变化仍然提交：构造一条判据由 fail 翻 pass 的 AC，gate 后该文件**必须**多出恰好 1 个提交 ⇒ 证明修复没有把提交一律关掉（负控制）。
-- [ ] 状态翻转仍然提交：`active → achieved` 的 flip 后必有提交 ⇒ `gap-meta-commitgoalfile` 修好的「未提交阻塞 ff-only 同步」不复发。
-- [ ] 提交速率回落到可核对的量级：改动落地后 30 分钟窗口内 `goals/` 提交数 ≤ 该窗口内真实 verdict/status 变化数 + 1。立条时该比值为 **427 : ~0**（能取假）。
+- [x] 纯时间戳写入不产生提交：连续两次 `goal-store gate <同一条 AC>`（其 verdict 不变）之后，`git log --oneline -- goals/<该文件>` 的提交数**不增加**。判据须实跑两次 gate 再数提交，⛔ 不得 grep 源码。立条时实测：42 秒内必增 1（能取假）。
+- [x] verdict 真变化仍然提交：构造一条判据由 fail 翻 pass 的 AC，gate 后该文件**必须**多出恰好 1 个提交 ⇒ 证明修复没有把提交一律关掉（负控制）。
+- [x] 状态翻转仍然提交：`active → achieved` 的 flip 后必有提交 ⇒ `gap-meta-commitgoalfile` 修好的「未提交阻塞 ff-only 同步」不复发。
+- [x] 提交速率回落到可核对的量级：改动落地后 30 分钟窗口内 `goals/` 提交数 ≤ 该窗口内真实 verdict/status 变化数 + 1。立条时该比值为 **427 : ~0**（能取假）。
 
 ## DoD
 
-- [ ] 上述四条判据本轮实跑并贴出输出，⛔ 不是转述。
-- [ ] 复用既有判据而非新写一套：提交决策调用 `stripEvidenceTimestamp` 同款逻辑（或将其提取为共享函数），⛔ 不在 goal-store 里另写一份「什么算实质变化」。
-- [ ] ⛔ 未回退写盘即提交；⛔ 未改动 goal driver 的 gate 节奏（节奏本身不是错，错的是把每次 gate 都当成一次值得记录的变更）。
+- [x] 上述四条判据本轮实跑并贴出输出，⛔ 不是转述。
+- [x] 复用既有判据而非新写一套：提交决策调用 `stripEvidenceTimestamp` 同款逻辑（或将其提取为共享函数），⛔ 不在 goal-store 里另写一份「什么算实质变化」。
+- [x] ⛔ 未回退写盘即提交；⛔ 未改动 goal driver 的 gate 节奏（节奏本身不是错，错的是把每次 gate 都当成一次值得记录的变更）。
 
 ## Touches
 
