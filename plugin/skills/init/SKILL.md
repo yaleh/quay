@@ -127,6 +127,7 @@ documented reference from a genuine missing file:
 | `orchestration/orchestrator-` (glob) | the outer exec core's `orchestration/orchestrator-*` glob (its own quay-local outer-layer files) — quay-specific development-process docs, not loop deliverables — declared so referenced ⊆ landed holds |
 | `plugin/loop/manager-` (glob) | the opt-in manager exec core's `plugin/loop/manager-*` glob (its own quay-local manager-layer files, pointer-only) — quay-specific, not loop deliverables — declared so referenced ⊆ landed holds |
 | `orchestration/outer-tick-prompt.txt` | quay's own outer tick live-prompt file (the outer exec core's AC81 判据④ "活 prompt == 正本" points at it) — quay-specific runtime state, not a loop deliverable — declared so referenced ⊆ landed holds |
+| `orchestration/manager-tick-prompt.txt` | quay's own manager tick live-prompt file (the shipped manager skill's session-embodiment CronCreate step `cat`s it into the anchor prompt; `manager-arm-loop.sh` sha256-verifies the same file) — quay-specific runtime state, not a loop deliverable — declared so referenced ⊆ landed holds |
 | `orchestration/SPEC-worker-driven-inner-2026-08-16.md` | quay's worker-driven-inner SPEC (referenced by the shipped manager skill's SPEC index) — quay-specific, not a generic loop deliverable |
 | `orchestration/SYNTHESIS-four-gaps-2026-08-05.md` | quay's four-gap synthesis that motivated shipping the manager layer — not a generic loop deliverable |
 | `orchestration/SPEC-manager-productization-2026-08-05.md` | quay's manager productization SPEC (C1–C5 constraints, build-vs-run ownership) — not a generic loop deliverable |
@@ -196,6 +197,7 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/SPEC-worker-driven-inner-2026-08-16.md -->
 <!-- reference-doc: orchestration/orchestrator- -->
 <!-- reference-doc: orchestration/outer-tick-prompt.txt -->
+<!-- reference-doc: orchestration/manager-tick-prompt.txt -->
 <!-- reference-doc: plugin/loop/manager- -->
 <!-- reference-doc: orchestration/SPEC-unified-driver-architecture-2026-08-23.md -->
 <!-- reference-doc: orchestration/SPEC-web-session-observability-and-control-2026-08-24.md -->
