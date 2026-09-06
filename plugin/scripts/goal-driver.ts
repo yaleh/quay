@@ -186,8 +186,9 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
       const id = String(ac.id);
       const { verdict, reason } = await gateCriterion(scriptRoot, id, dataRoot);
       criteria.push({ id, goal: gid, status: String(ac.status ?? ""), verdict, reason });
-      // I2（AC 层）：判据 pass 且未 achieved ⇒ 机械 flip（裁定 5 的确定性推导，不算自动晋升）。
-      if (verdict === "pass" && ac.status !== "achieved") {
+      // I2（AC 层）：判据 pass 且 AC 为 active ⇒ 机械 flip active→achieved（裁定 5 的确定性推导，不算自动晋升）。
+      // ⛔ 裁定 3：draft→active（激活）是人/manager 手动——本驱动不得把 draft（或 superseded/retired）AC 翻成 achieved。
+      if (verdict === "pass" && ac.status === "active") {
         const w = await writeGoalStatus(scriptRoot, id, "achieved", String(ac.origin ?? ""), dataRoot);
         flips.push({ id, to: "achieved", ok: w.ok, reason: w.reason });
         if (w.ok) ac.status = "achieved";

@@ -105,6 +105,42 @@ test('real ring: 载体有 verdict + evidence 回写 + I2 flip + draft 不动 + 
   }
 });
 
+// ── 裁定 3 边界负控制：active GOAL 下的 draft AC 不被翻（draft→active 是人/manager 手动）─────────
+
+test('real ring: draft AC under active GOAL 不被翻（裁定 3 边界负控制）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-draftac-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    // GOAL-001（active）两条 AC：AC-001 active（pass ⇒ flip achieved）、AC-002 draft（pass ⇒ 不翻）。
+    writeGoalFile(tmp, { id: 'GOAL-001', status: 'active', kind: 'goal' });
+    writeGoalFile(tmp, { id: 'AC-001', status: 'active', kind: 'criterion', goal: 'GOAL-001', criterion: 'true' });
+    writeGoalFile(tmp, { id: 'AC-002', status: 'draft', kind: 'criterion', goal: 'GOAL-001', criterion: 'true' });
+
+    const roundLog = path.join(tmp, GOAL_ROUND_REL);
+    const code = await runResidentQualityGateLoop({
+      root: tmp,
+      intervalMs: 1,
+      once: true,
+      maxRounds: null,
+      roundLogFile: roundLog,
+      runId: 't',
+      json: false,
+      routines: goalDriverRoutines(tmp, { scriptRoot: repoRoot }),
+    });
+    assert.equal(code, 0, 'resident loop 一轮应正常退出');
+
+    const a1 = fs.readFileSync(path.join(tmp, 'goals', 'AC-001-t.md'), 'utf8');
+    const a2 = fs.readFileSync(path.join(tmp, 'goals', 'AC-002-t.md'), 'utf8');
+    const g1 = fs.readFileSync(path.join(tmp, 'goals', 'GOAL-001-t.md'), 'utf8');
+    assert.match(a1, /^status: achieved$/m, 'active AC pass ⇒ flip achieved（裁定 5）');
+    assert.match(a2, /^status: draft$/m, 'draft AC 不被翻（裁定 3：driver 不碰 draft 激活）');
+    // draft AC 未达成 ⇒ isGoalAchieved=false ⇒ GOAL 不 flip achieved。
+    assert.match(g1, /^status: active$/m, '含未达成的 draft AC ⇒ GOAL 不 flip achieved');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // ── AC6：cli/driver.ts KINDS 与 kernel DRIVER_KINDS 集合一致 ─────────────────────────────
 
 test('AC6: cli/driver.ts KINDS 与 kernel DRIVER_KINDS 集合相等（含补回 suite + 新增 goal）', () => {
