@@ -299,6 +299,23 @@ test("AC2 — carrierStats reads ALL carriers; last_record_ts = max across outco
   assert.match(st.primaryPath, /worker-outcome\.jsonl$/, "primary carrier is outcome");
 });
 
+test("gap-meta-carrierstats — quality carrier timestamp key is judgedAt (⛔ not ts)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dr-carrier-q-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  // quality 判词载体记录的时间戳键是 judgedAt（pool-quality-judge.ts buildQualityRoundRecord），
+  // ⛔ 不是 ts。键不匹配会把 15 条真实记录读成 lastTs=null ⇒ 停摆与健康同形。
+  fs.writeFileSync(
+    path.join(root, ".quay", "quality-round.jsonl"),
+    '{"round":1,"judgedAt":"2026-09-05T15:41:19.134Z","state":"failed"}\n' +
+      '{"round":2,"judgedAt":"2026-09-05T15:44:02.000Z","state":"judged","distribution":{},"shouldRemoveIds":[],"verdicts":[]}\n',
+    "utf8",
+  );
+  const st = carrierStats(root, "quality");
+  assert.equal(st.records, 2, "both quality records counted");
+  assert.equal(st.lastTs, "2026-09-05T15:44:02.000Z", "lastTs = max judgedAt, ⛔ null");
+});
+
 test("AC2 — pidAlive / readPidFile / aliveness (death direct-quantity, ⛔ not carrier-stall)", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dr-alive-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

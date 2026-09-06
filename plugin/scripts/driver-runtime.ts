@@ -130,6 +130,8 @@ export interface KindSpec {
   runPrefix: string;
   /** 载体文件（相对 .quay/；首个 = 主载体，作 status 的 carrier_path）。 */
   carriers: readonly string[];
+  /** 载体记录的时间戳键（缺省 ts；quality 的判词载体用 judgedAt——gap-meta-carrierstats）。 */
+  tsKey?: string;
   /** 控制态文件（相对 .quay/；drain 写它、驱动判停读它）。 */
   controlFile: string;
 }
@@ -185,6 +187,7 @@ export const DRIVER_KINDS: Record<DriverKind, KindSpec> = {
     pidSelf: true,
     runPrefix: "qg-prod",
     carriers: ["quality-round.jsonl"],
+    tsKey: "judgedAt",
     controlFile: "quality-control.json",
   },
   // suite（SPEC-suite-lifecycle-and-failure-semantics §3）：per-task suite 生命周期收进一个常驻 driver。
@@ -310,8 +313,9 @@ export function resolveMainRoot(root: string): string {
 
 // ── Layer 0 · 载体观测（carrierStats，AC139-3 / AC138-3）──────────────────────────────────────────
 // carrier_records = 全载体行数之和（wc -l 语义：数换行符）；last_record_ts = 全载体末条记录 ts 的
-// 最大值（⛔ 只报计数无法区分「在长」与「停更」——载体停更与「一切正常」同形）。ts 字段是两种 driver
-// 的 outcome/round 记录共有的 ISO 时间戳键（record 首字段）。
+// 最大值（⛔ 只报计数无法区分「在长」与「停更」——载体停更与「一切正常」同形）。时间戳键按 kind 的
+// tsKey 读（缺省 ts；quality 判词载体用 judgedAt——gap-meta-carrierstats：键不匹配会把停摆伪装成
+// 未查）。
 
 /** 一个 kind 的载体观测结果。 */
 export interface CarrierStats {
@@ -323,6 +327,7 @@ export interface CarrierStats {
 /** 读一个 kind 的全部载体：行数之和 + 末条 ts 最大。读失败/缺失 ⇒ 该载体记 0 条（⛔ 不抛）。 */
 export function carrierStats(root: string, kind: DriverKind): CarrierStats {
   const spec = DRIVER_KINDS[kind];
+  const tsKey = spec.tsKey ?? "ts";
   let records = 0;
   let lastTs: string | null = null;
   let primaryPath = "";
@@ -342,8 +347,8 @@ export function carrierStats(root: string, kind: DriverKind): CarrierStats {
       if (!line.trim()) continue;
       try {
         const j = JSON.parse(line);
-        if (j && typeof j.ts === "string" && j.ts) {
-          if (lastTs === null || j.ts > lastTs) lastTs = j.ts;
+        if (j && typeof j[tsKey] === "string" && j[tsKey]) {
+          if (lastTs === null || j[tsKey] > lastTs) lastTs = j[tsKey];
         }
       } catch {
         /* torn/partial tail — skip */
