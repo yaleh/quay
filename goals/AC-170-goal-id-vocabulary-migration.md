@@ -12,7 +12,7 @@ origin: |
   立条依据：goal-store.ts:48 PHASE_ID_RE 不匹配 GOAL-001，list() (:168) 只收
   PHASE-/AC- 前缀文件 ⇒ 本 GOAL 自己的记录当前被静默跳过。
 evidence:
-  at: 2026-09-06T23:54:33.615Z
+  at: 2026-09-06T23:55:36.357Z
   verdict: pass
   reading: acceptance passed (exit 0)
 ---
