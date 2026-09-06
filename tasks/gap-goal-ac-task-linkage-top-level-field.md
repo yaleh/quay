@@ -41,12 +41,14 @@ extra:
 ## Touches
 
 - plugin/scripts/task-schema.ts
+- experiments/quay-perpetual-stream/scripts/task-schema.ts
 - packages/quay/src/task-parsing.ts
 - packages/quay/src/mcp-handlers.ts
 - packages/quay-native/src/store.ts
 - packages/quay-native/src/mcp-server.ts
 - plugin/scripts/goal-driver.ts
 - docs/references/task-schema-canonical.md
+- docs/analysis/quay-init-closure-ratchet.baseline.json
 - plugin/test/task-parsing-parity.test.mjs
 - packages/quay/test/provider-abi-conformance.test.mjs
 - plugin/test/goal-driver.test.mjs
