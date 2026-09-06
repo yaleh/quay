@@ -16,11 +16,11 @@ meta-driver 经 goalStoreArgv 写 goals/*.md（writeDraftProposal 与决议落�
 涉及机制关键词：`goalStoreArgv`（立案前已搜既有任务，无人认领）。
 
 ## AC（draft）
-- [ ] `test "$(git status --porcelain goals/ | wc -l)" -eq 0` ⇒ goal 写盘路径在写盘后立即提交（复用 commitTaskFile 族），goals/ 无任何未提交记录，ff-only 同步不再被 goal 文件阻塞
+- [x] `test "$(git status --porcelain goals/ | wc -l)" -eq 0` ⇒ goal 写盘路径在写盘后立即提交（复用 commitTaskFile 族），goals/ 无任何未提交记录，ff-only 同步不再被 goal 文件阻塞
 
 ## DoD（draft）
-- [ ] 上面的判据实跑通过，且判据本身能取假（改坏实现时会红）
-- [ ] 若结论是「已有机制在管、只是失败」，则修那个机制，⛔ 不新建并行机制
+- [x] 上面的判据实跑通过，且判据本身能取假（改坏实现时会红）
+- [x] 若结论是「已有机制在管、只是失败」，则修那个机制，⛔ 不新建并行机制
 
 ## Touches
 - `plugin/scripts/meta-driver.ts`
