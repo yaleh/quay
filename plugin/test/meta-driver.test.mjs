@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 
 import {
   computeDivergences,
@@ -25,6 +26,11 @@ import {
   buildProbePrompt,
   readingsDigest,
   collectSyncHealth,
+  stripEvidenceTimestamp,
+  settleEvidenceWrites,
+  resolveEvidence,
+  driveItems,
+  renderAutoDriveBody,
   collectDriverReadings,
   shouldJudge,
   readState,
@@ -300,6 +306,157 @@ test('readState: 状态文件不存在 ⇒ never-judged（⛔ 不冒充"没变�
     assert.equal(s.lastJudgedAt, null);
     writeState(tmp, { digest: 'abc', lastJudgedAt: '2026-09-06T00:00:00Z' });
     assert.deepEqual(readState(tmp), { digest: 'abc', lastJudgedAt: '2026-09-06T00:00:00Z' });
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── 自动驱动通道的机械前置 ───────────────────────────────────────────────────
+const ecoReadings = {
+  goals: [], criteria: [], divergences: [], focus: null,
+  drivers: [
+    { kind: 'outer', running: false, supervisorAlive: false, driverAlive: false, carrierRecords: 0, carrierLastTs: null, staleSecs: null },
+    { kind: 'promotion', running: true, supervisorAlive: true, driverAlive: true, carrierRecords: 9, carrierLastTs: null, staleSecs: 5 },
+  ],
+  syncHealth: { window: 200, ffSynced: 34, notFf: 41, ffError: 34, semanticResolved: 0, lastEvent: 'doc-develop-sync-not-ff', lastTs: null },
+};
+
+test('resolveEvidence: 点号路径与 drivers.<kind>.<field> 都能解析；不存在 ⇒ undefined', () => {
+  assert.equal(resolveEvidence(ecoReadings, 'syncHealth.notFf'), 41);
+  assert.equal(resolveEvidence(ecoReadings, 'syncHealth.semanticResolved'), 0, '0 是合法读数，⛔ 不得被当成"解析不出"');
+  assert.equal(resolveEvidence(ecoReadings, 'drivers.outer.running'), false);
+  assert.equal(resolveEvidence(ecoReadings, 'drivers.nosuch.running'), undefined);
+  assert.equal(resolveEvidence(ecoReadings, 'syncHealth.nosuch'), undefined);
+  assert.equal(resolveEvidence(ecoReadings, ''), undefined);
+});
+
+const goodItem = {
+  title: '查清 author↔develop 语义兜底为何从不成功',
+  problem: '同步机制最近 200 事件中 semanticResolved 为 0，而 not-ff 41 次——ff 失败时的出口从未生效',
+  evidenceKey: 'syncHealth.semanticResolved',
+  mechanismKeyword: 'zzz-no-such-mechanism-keyword',
+  criterion: 'node plugin/scripts/meta-driver.ts --no-llm --json | jq -e .facts[0].value.syncHealth',
+  expect: 'exit 0',
+};
+
+test('driveItems: evidenceKey 解析不出 ⇒ 拒（⛔ 不接受凭空证据）', async () => {
+  const r = await driveItems('/tmp', [{ ...goodItem, evidenceKey: 'syncHealth.fabricated' }], ecoReadings,
+    { cap: 1, dryRun: true, at: 'now' });
+  assert.equal(r[0].accepted, false);
+  assert.match(r[0].reason, /解析不出/);
+});
+
+test('driveItems: 机制词命中既有任务 ⇒ 拒并报出命中（已有机制在管）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-own-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'tasks'));
+    fs.writeFileSync(path.join(tmp, 'tasks', 'gap-existing.md'), '---\nid: gap-existing\n---\n涉及 syncDevelopToDoc 的修复\n');
+    const r = await driveItems(tmp, [{ ...goodItem, mechanismKeyword: 'syncDevelopToDoc' }], ecoReadings,
+      { cap: 1, dryRun: true, at: 'now' });
+    assert.equal(r[0].accepted, false);
+    assert.match(r[0].reason, /既有任务可能已在管/);
+    assert.match(r[0].reason, /gap-existing\.md/, '必须报出具体命中，⛔ 不只说"有重复"');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('driveItems: 每轮上限 1（比提案的 K=3 更严）', async () => {
+  const two = [goodItem, { ...goodItem, title: '另一条', mechanismKeyword: 'yyy-another-absent-keyword' }];
+  const r = await driveItems('/tmp', two, ecoReadings, { cap: 1, dryRun: true, at: 'now' });
+  assert.equal(r.filter((x) => x.accepted).length, 1);
+  assert.match(r[1].reason, /上限/);
+});
+
+test('driveItems: 全部前置通过 ⇒ 接受并给出 id（dry-run 不落盘）', async () => {
+  const r = await driveItems('/tmp', [goodItem], ecoReadings, { cap: 1, dryRun: true, at: 'now' });
+  assert.equal(r[0].accepted, true, r[0].reason);
+  assert.match(r[0].id, /^gap-meta-/);
+});
+
+test('renderAutoDriveBody: 四件套齐备且把解析出的读数逐字写进任务体', () => {
+  const body = renderAutoDriveBody(goodItem, 0, '2026-09-06T11:00:00Z');
+  for (const h of ['## Finding', '## AC（draft）', '## DoD（draft）', '## Touches']) {
+    assert.ok(body.includes(h), `缺 ${h}`);
+  }
+  assert.ok(body.includes('syncHealth.semanticResolved'), '证据键必须进任务体');
+  assert.ok(body.includes(goodItem.criterion), '判据必须进任务体');
+});
+
+test('parseProbeOutput: autoDrive 缺字段的条目被丢弃', () => {
+  const out = parseProbeOutput(JSON.stringify({
+    divergences: [], proposals: [], humanAttention: [],
+    autoDrive: [goodItem, { title: 'incomplete' }],
+  }));
+  assert.equal(out.autoDrive.length, 1, '缺必填字段的自动驱动条目必须被丢弃');
+  assert.equal(out.autoDrive[0].evidenceKey, goodItem.evidenceKey);
+});
+
+// ── evidence 结算（观测不得破坏被观测的系统）─────────────────────────────────
+test('stripEvidenceTimestamp: 只抹 at 行，⛔ 不动 verdict/reading', () => {
+  const t = '---\nid: AC-1\nevidence:\n  at: 2026-09-06T10:00:00Z\n  verdict: pass\n  reading: ok\n---\n';
+  const stripped = stripEvidenceTimestamp(t);
+  assert.ok(!stripped.includes('2026-09-06T10:00:00Z'), 'at 的值必须被抹掉');
+  assert.ok(stripped.includes('verdict: pass'), 'verdict 必须保留');
+  assert.ok(stripped.includes('reading: ok'), 'reading 必须保留');
+  // 关键性质：两份只差时间戳的内容，抹掉后必须相等。
+  const t2 = t.replace('2026-09-06T10:00:00Z', '2026-09-06T11:22:33Z');
+  assert.equal(stripEvidenceTimestamp(t), stripEvidenceTimestamp(t2));
+  // 负控制：verdict 变了 ⇒ 抹掉时间戳后仍不相等（否则会把真信息当噪声还原掉）。
+  const t3 = t.replace('verdict: pass', 'verdict: fail');
+  assert.notEqual(stripEvidenceTimestamp(t), stripEvidenceTimestamp(t3));
+});
+
+test('settleEvidenceWrites: 只有时间戳变 ⇒ 还原；verdict 变 ⇒ 保留（真 git 仓库）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-settle-'));
+  const run = (...args) => execFileSync('git', ['-C', tmp, ...args], { encoding: 'utf8' });
+  try {
+    run('init', '-q');
+    run('config', 'user.email', 't@t');
+    run('config', 'user.name', 't');
+    fs.mkdirSync(path.join(tmp, 'goals'));
+    const mk = (id, verdict, at) =>
+      `---\nid: ${id}\nstatus: active\nevidence:\n  at: ${at}\n  verdict: ${verdict}\n  reading: r\n---\nbody\n`;
+    fs.writeFileSync(path.join(tmp, 'goals', 'AC-001.md'), mk('AC-001', 'pass', '2026-09-06T10:00:00Z'));
+    fs.writeFileSync(path.join(tmp, 'goals', 'AC-002.md'), mk('AC-002', 'pass', '2026-09-06T10:00:00Z'));
+    run('add', '-A');
+    run('commit', '-qm', 'base');
+
+    // AC-001：只刷新时间戳（无信息）；AC-002：verdict 翻转（有信息）。
+    fs.writeFileSync(path.join(tmp, 'goals', 'AC-001.md'), mk('AC-001', 'pass', '2026-09-06T11:00:00Z'));
+    fs.writeFileSync(path.join(tmp, 'goals', 'AC-002.md'), mk('AC-002', 'fail', '2026-09-06T11:00:00Z'));
+
+    const s = settleEvidenceWrites(tmp);
+    assert.deepEqual(s.restored, ['goals/AC-001.md'], '无信息的必须被还原');
+    assert.deepEqual(s.kept, ['goals/AC-002.md'], '有信息的必须保留');
+    assert.deepEqual(s.skipped, []);
+    // 还原是真的落到磁盘上了（⛔ 不只是报告说还原了）。
+    assert.ok(fs.readFileSync(path.join(tmp, 'goals', 'AC-001.md'), 'utf8').includes('T10:00:00Z'));
+    assert.ok(fs.readFileSync(path.join(tmp, 'goals', 'AC-002.md'), 'utf8').includes('verdict: fail'));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// 负控制：别人另外改过的文件不得被还原（否则会毁掉在编辑的改动）。
+test('settleEvidenceWrites: 文件除时间戳外还有其它改动 ⇒ 保留，⛔ 不还原', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-settle2-'));
+  const run = (...args) => execFileSync('git', ['-C', tmp, ...args], { encoding: 'utf8' });
+  try {
+    run('init', '-q');
+    run('config', 'user.email', 't@t');
+    run('config', 'user.name', 't');
+    fs.mkdirSync(path.join(tmp, 'goals'));
+    const f = path.join(tmp, 'goals', 'AC-003.md');
+    fs.writeFileSync(f, '---\nid: AC-003\ntitle: old\nevidence:\n  at: 2026-09-06T10:00:00Z\n  verdict: pass\n---\nbody\n');
+    run('add', '-A');
+    run('commit', '-qm', 'base');
+    // 人改了 title，同时时间戳也刷新了。
+    fs.writeFileSync(f, '---\nid: AC-003\ntitle: EDITED BY HUMAN\nevidence:\n  at: 2026-09-06T11:00:00Z\n  verdict: pass\n---\nbody\n');
+    const s = settleEvidenceWrites(tmp);
+    assert.deepEqual(s.restored, [], '有他人改动时不得还原');
+    assert.deepEqual(s.kept, ['goals/AC-003.md']);
+    assert.ok(fs.readFileSync(f, 'utf8').includes('EDITED BY HUMAN'), '他人的改动必须完好');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

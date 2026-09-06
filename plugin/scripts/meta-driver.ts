@@ -41,6 +41,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { launchArgv, runAsync, ts, aliveness, carrierStats, KNOWN_KINDS, type Fact, type RoutineSpec } from "./driver-runtime.ts";
 import { runResidentQualityGateLoop, computeRoundRecord } from "./quality-gate-driver.ts";
 import { readProbeSpec } from "./read-probe-spec.ts";
@@ -267,6 +268,54 @@ export async function fileProposals(
   return results;
 }
 
+// ── 轮末结算 evidence 写入（⛔ 不把共享检出留在脏状态）────────────────────────────────────────────
+// 实测代价：一轮机械半把 23 个 tracked 的 goals/*.md 写脏，而其中【25 行改动全部只是 evidence.at
+// 时间戳】——零信息。常驻后这会让主检出永久脏 ⇒ syncDevelopToDoc 的 --ff-only 失败 ⇒ 正好加剧
+// 它本要观测的那个同步失败率。**一个观测机制不得因为观测而破坏被观测的系统。**
+//
+// 结算规则：只有时间戳变了 ⇒ 还原（无信息）；verdict/reading 真变了 ⇒ 保留并报出（有信息，
+// 由调用侧决定提交）。⛔ 只还原「除 at 行外与 HEAD 逐字相同」的文件——若有人另外改过该文件，
+// 比较必然不等，于是原样不动（不会毁掉别人在编辑的改动）。
+
+/** 去掉 evidence 的 at 行后的内容（比较用；at 每轮必变且不携带信息）。 */
+export function stripEvidenceTimestamp(text: string): string {
+  return text.replace(/^\s*at:\s*\S+\s*$/gm, "");
+}
+
+export interface EvidenceSettlement { restored: string[]; kept: string[]; skipped: string[] }
+
+/** 轮末结算。返回逐条处置（⛔ 不只报总数，硬规则 3 枚举不布尔）。 */
+export function settleEvidenceWrites(root: string, goalsRel = "goals"): EvidenceSettlement {
+  const out: EvidenceSettlement = { restored: [], kept: [], skipped: [] };
+  const vcs = (args: string[]) => spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+  let dirty: string[];
+  try {
+    const r = vcs(["status", "--porcelain", "--", goalsRel]);
+    if (r.status !== 0) return out;
+    dirty = String(r.stdout ?? "").split("\n")
+      .map((l) => l.trim()).filter((l) => l.startsWith("M "))
+      .map((l) => l.slice(2).trim());
+  } catch { return out; }
+
+  for (const rel of dirty) {
+    let head: string, work: string;
+    try {
+      const h = vcs(["show", `HEAD:${rel}`]);
+      if (h.status !== 0) { out.skipped.push(rel); continue; }
+      head = String(h.stdout ?? "");
+      work = fs.readFileSync(path.join(root, rel), "utf8");
+    } catch { out.skipped.push(rel); continue; }
+
+    if (stripEvidenceTimestamp(head) === stripEvidenceTimestamp(work)) {
+      const c = vcs(["checkout", "--", rel]);
+      if (c.status === 0) out.restored.push(rel); else out.skipped.push(rel);
+    } else {
+      out.kept.push(rel); // verdict/reading 真变了 ⇒ 有信息，保留
+    }
+  }
+  return out;
+}
+
 // ── 机制生态读数（driver 是否在跑 / 同步是否在成功）──────────────────────────────────────────────
 // 为什么在这里：meta-driver 的职责是【发现机制层面的问题，并判断有没有机制在管它】。只看 goal
 // 判据看不见「主检出落后 develop」「某 driver 停摆」这类问题——那正是人 2026-09-06 指出的缺口。
@@ -394,6 +443,143 @@ export function shouldJudge(
 /** 语义半地板的缺省值（24h）——粗安全网，见 shouldJudge 的说明。 */
 export const JUDGE_FLOOR_MS_DEFAULT = 24 * 60 * 60 * 1000;
 
+// ── 自动驱动通道（把已被读数证实的机制缺陷推进既有任务流水线）────────────────────────────────────
+// 人 2026-09-06 裁定：像「同步 69% 失败」「变化检测该不该上升为平台能力」这类问题应当【自动驱动】，
+// 不必每次等人确认。自动驱动 = 立一条任务，交给既有的 promotion→worker→fan-in 流水线执行——
+// ⛔ 不新建执行机制（那才是膨胀）。
+//
+// 三条与「提案」通道不同的、更严的机械前置（⛔ 通道选择不由 LLM 自评信心决定，硬规则 4）：
+//  ① evidenceKey 必须在【本轮读数】里解析得出——杜绝凭空造证据；解析不出即拒。
+//  ② mechanismKeyword 必须在既有任务里搜不到——搜到即拒并报出命中，因为「已有任务在管」与
+//     「无人管」修法完全不同（memory dedup-tasks-by-mechanism-not-symptom 的机械化）。
+//  ③ 每轮至多 1 条（比提案的 K=3 更严）——立案会被自动晋升并派发，代价比 draft 高得多。
+
+export interface AutoDriveItem {
+  title: string;
+  problem: string;
+  evidenceKey: string;
+  mechanismKeyword: string;
+  criterion: string;
+  expect: string;
+}
+
+/** 按点号路径在本轮读数里解析证据。`drivers.<kind>.<field>` 特化为按 kind 查。
+ *  解析不出 ⇒ undefined（调用侧据此拒绝——⛔ 不允许「引用了一个不存在的读数」的自动驱动）。 */
+export function resolveEvidence(readings: MetaRoundReadings, key: string): unknown {
+  const parts = String(key ?? "").split(".").filter(Boolean);
+  if (parts.length === 0) return undefined;
+  if (parts[0] === "drivers" && parts.length >= 2) {
+    const d = readings.drivers.find((x) => x.kind === parts[1]);
+    if (!d) return undefined;
+    return parts.length === 2 ? d : (d as unknown as Record<string, unknown>)[parts[2]];
+  }
+  let cur: unknown = readings as unknown;
+  for (const p of parts) {
+    if (cur === null || typeof cur !== "object") return undefined;
+    cur = (cur as Record<string, unknown>)[p];
+    if (cur === undefined) return undefined;
+  }
+  return cur;
+}
+
+/** 既有任务里是否已有人在管这个机制（按机制词搜，⛔ 不按症状词——memory 记的那次真实漏抓）。 */
+export function findOwningTasks(root: string, keyword: string, cap = 5): string[] {
+  const kw = String(keyword ?? "").trim().toLowerCase();
+  if (kw.length < 4) return []; // 太短的词会命中一切，等于没搜
+  const dir = path.join(root, "tasks");
+  let files: string[];
+  try { files = fs.readdirSync(dir).filter((f) => f.endsWith(".md")); } catch { return []; }
+  const hits: string[] = [];
+  for (const f of files) {
+    try {
+      if (fs.readFileSync(path.join(dir, f), "utf8").toLowerCase().includes(kw)) {
+        hits.push(f);
+        if (hits.length >= cap) break;
+      }
+    } catch { /* 读不了就跳过这一个 */ }
+  }
+  return hits;
+}
+
+/** 任务体（四件套）。⛔ 机械渲染自结构化输出——不给 LLM 写文件的权力。 */
+export function renderAutoDriveBody(item: AutoDriveItem, evidence: unknown, at: string): string {
+  return [
+    "## Finding",
+    `${item.problem}`,
+    "",
+    `本轮读数（${item.evidenceKey}）= \`${JSON.stringify(evidence)}\`，采于 ${at}，由 meta-driver 机械采集。`,
+    `涉及机制关键词：\`${item.mechanismKeyword}\`（立案前已搜既有任务，无人认领）。`,
+    "",
+    "## AC（draft）",
+    `- [ ] \`${item.criterion}\` ⇒ ${item.expect}`,
+    "",
+    "## DoD（draft）",
+    "- [ ] 上面的判据实跑通过，且判据本身能取假（改坏实现时会红）",
+    "- [ ] 若结论是「已有机制在管、只是失败」，则修那个机制，⛔ 不新建并行机制",
+    "",
+    "## Touches",
+    "- `plugin/scripts/meta-driver.ts`",
+  ].join("\n");
+}
+
+/** 立一条任务（复用 quay-native 的 task create CLI，⛔ 不手搓 markdown 落盘）。 */
+export async function createAutoDriveTask(
+  root: string, id: string, item: AutoDriveItem, body: string,
+): Promise<{ ok: boolean; reason: string }> {
+  const argv = [
+    "node", "--no-warnings", "--experimental-strip-types",
+    path.join(root, "packages", "quay-native", "bin", "quay-native.ts"),
+    "task", "create", id,
+    "--title", item.title,
+    "--labels", "meta-driver,driver-candidate",
+    "--body", body,
+  ];
+  const r = await runAsync(argv, { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
+  if (r.error) return { ok: false, reason: `task create spawn error: ${r.error.message}` };
+  if (r.status !== 0) return { ok: false, reason: `task create exit ${r.status}: ${(r.stderr || "").trim().slice(0, 200)}` };
+  return { ok: true, reason: `filed as ${id}` };
+}
+
+export interface AutoDriveResult { item: AutoDriveItem; id: string | null; accepted: boolean; reason: string }
+
+/** 自动驱动的闸 + 落地。逐条留痕（⛔ 不只报总数）。 */
+export async function driveItems(
+  root: string, items: AutoDriveItem[], readings: MetaRoundReadings,
+  opts: { cap: number; dryRun: boolean; at: string },
+): Promise<AutoDriveResult[]> {
+  const out: AutoDriveResult[] = [];
+  let filed = 0;
+  for (const item of items) {
+    if (filed >= opts.cap) {
+      out.push({ item, id: null, accepted: false, reason: `rate: 本轮已自动驱动 ${filed} 条，上限 ${opts.cap}` });
+      continue;
+    }
+    const ev = resolveEvidence(readings, item.evidenceKey);
+    if (ev === undefined) {
+      out.push({ item, id: null, accepted: false, reason: `evidenceKey ${JSON.stringify(item.evidenceKey)} 在本轮读数里解析不出 ⇒ 拒（⛔ 不接受凭空证据）` });
+      continue;
+    }
+    const owners = findOwningTasks(root, item.mechanismKeyword);
+    if (owners.length > 0) {
+      out.push({ item, id: null, accepted: false, reason: `既有任务可能已在管（机制词 ${item.mechanismKeyword}）：${owners.join(", ")}` });
+      continue;
+    }
+    const gate = gateFinding(proposalCandidateText({ title: item.title, criterion: item.criterion, origin: item.problem }), { existingKeys: [], recentCount: filed, K: opts.cap });
+    if (!gate.accept) { out.push({ item, id: null, accepted: false, reason: gate.reason }); continue; }
+
+    const id = `gap-meta-${item.mechanismKeyword.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48)}`;
+    if (opts.dryRun) {
+      out.push({ item, id, accepted: true, reason: "dry-run: would file" });
+    } else {
+      const c = await createAutoDriveTask(root, id, item, renderAutoDriveBody(item, ev, opts.at));
+      out.push({ item, id, accepted: c.ok, reason: c.reason });
+      if (!c.ok) continue;
+    }
+    filed++;
+  }
+  return out;
+}
+
 // ── 语义半 ────────────────────────────────────────────────────────────────────────────────────────
 
 /** 组装 probe prompt 的**单一构造点**（复刻 launchArgv 的 AC140 纪律：一次性入口与常驻入口
@@ -408,7 +594,7 @@ export function buildProbePrompt(objective: string, readings: MetaRoundReadings)
 }
 
 /** 解析语义半的输出。读不懂 ⇒ null（调用侧转 not-evaluated / failed，⛔ 不当空结果放行）。 */
-export function parseProbeOutput(stdout: string): { divergences: unknown[]; proposals: Proposal[]; humanAttention: string[] } | null {
+export function parseProbeOutput(stdout: string): { divergences: unknown[]; proposals: Proposal[]; autoDrive: AutoDriveItem[]; humanAttention: string[] } | null {
   const text = String(stdout ?? "").trim();
   if (!text) return null;
   // 容忍 LLM 在 JSON 前后带少量散文：取第一个 { 到最后一个 }。
@@ -431,9 +617,23 @@ export function parseProbeOutput(stdout: string): { divergences: unknown[]; prop
         }];
       })
     : [];
+  const autoDrive: AutoDriveItem[] = Array.isArray(o.autoDrive)
+    ? (o.autoDrive as unknown[]).flatMap((raw) => {
+        if (!raw || typeof raw !== "object") return [];
+        const a = raw as Record<string, unknown>;
+        const need = ["title", "problem", "evidenceKey", "mechanismKeyword", "criterion", "expect"] as const;
+        if (need.some((k) => typeof a[k] !== "string" || String(a[k]).trim() === "")) return [];
+        return [{
+          title: String(a.title).trim(), problem: String(a.problem).trim(),
+          evidenceKey: String(a.evidenceKey).trim(), mechanismKeyword: String(a.mechanismKeyword).trim(),
+          criterion: String(a.criterion).trim(), expect: String(a.expect).trim(),
+        }];
+      })
+    : [];
   return {
     divergences: Array.isArray(o.divergences) ? (o.divergences as unknown[]) : [],
     proposals,
+    autoDrive,
     humanAttention: Array.isArray(o.humanAttention) ? (o.humanAttention as unknown[]).map((x) => String(x)) : [],
   };
 }
@@ -470,10 +670,16 @@ export async function runMetaRound(opts: MetaRoundOptions): Promise<MetaRoundRes
     readings = await collectReadings(root, focus);
   } catch (e) {
     const reason = `readings failed: ${(e as Error).message}`;
+    // 采读数途中失败也要结算——⛔ 不能因为异常路径就把共享检出留在脏状态。
+    try { settleEvidenceWrites(root); } catch { /* 结算失败不致命 */ }
     return {
       fact: { name: "meta-driver", value: { phase: "readings" }, state: "failed", reason },
     };
   }
+
+  // 读数已采完（criterion 全跑过），立刻结算 evidence 写入：只有时间戳变的还原，真变的保留。
+  // ⛔ 放在这里而不是函数末尾：语义半可能很慢（实测 134–175s），那段时间不该让共享检出脏着。
+  const settlement = settleEvidenceWrites(root);
 
   const base = {
     goalCount: readings.goals.length,
@@ -484,6 +690,11 @@ export async function runMetaRound(opts: MetaRoundOptions): Promise<MetaRoundRes
     // （否则"driver 停摆/同步在失败"只能靠烧 LLM 才看得到）。
     drivers: readings.drivers,
     syncHealth: readings.syncHealth,
+    // 结算处置进读数：evidenceKept 非空 = 本轮真有 verdict 变化（有信息，待提交）；
+    // 全 restored = 本轮只是刷新了时间戳（无信息）。这让「观测的副作用」自身可观测。
+    evidenceRestored: settlement.restored.length,
+    evidenceKept: settlement.kept,
+    evidenceSkipped: settlement.skipped,
     focus,
   };
 
@@ -536,6 +747,9 @@ export async function runMetaRound(opts: MetaRoundOptions): Promise<MetaRoundRes
   const activeGoalIds = new Set(readings.goals.map((g) => g.id));
   const filed = await fileProposals(root, parsed.proposals, records, { k, activeGoalIds, dryRun });
   const acceptedIds = filed.filter((f) => f.accepted).map((f) => f.id);
+  // 自动驱动：每轮至多 1 条（⛔ 比提案更严——立案会被自动晋升并派发）。
+  const driven = await driveItems(root, parsed.autoDrive, readings, { cap: 1, dryRun, at });
+  const drivenIds = driven.filter((d) => d.accepted).map((d) => d.id);
   // 判读成功才推进状态：失败/解析不了的轮不写 state ⇒ 下一轮仍判为「该判读」，⛔ 不会因
   // 一次失败就把这批读数当成"已判过"而永久跳过。
   if (!dryRun) writeState(root, { digest, lastJudgedAt: new Date().toISOString() });
@@ -546,10 +760,13 @@ export async function runMetaRound(opts: MetaRoundOptions): Promise<MetaRoundRes
     proposalsOffered: parsed.proposals.length,
     proposalsAccepted: acceptedIds.length,
     acceptedIds,
+    autoDriveOffered: parsed.autoDrive.length,
+    autoDriveFiled: drivenIds,
+    autoDrive: driven,
     humanAttention: parsed.humanAttention,
   };
   return {
-    fact: { name: "meta-driver", value, state: "verified", reason: `${readings.divergences.length} divergences, ${acceptedIds.length}/${parsed.proposals.length} proposals filed as draft` },
+    fact: { name: "meta-driver", value, state: "verified", reason: `${readings.divergences.length} divergences, ${acceptedIds.length}/${parsed.proposals.length} proposals as draft, ${drivenIds.length}/${parsed.autoDrive.length} auto-driven` },
   };
 }
 
