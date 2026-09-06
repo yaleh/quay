@@ -1,7 +1,7 @@
 ---
 id: AC-170
 title: G1 词表与 id 改造落地——GOAL-001 记录可被机器读到
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-001
 criterion: |
@@ -12,7 +12,7 @@ origin: |
   立条依据：goal-store.ts:48 PHASE_ID_RE 不匹配 GOAL-001，list() (:168) 只收
   PHASE-/AC- 前缀文件 ⇒ 本 GOAL 自己的记录当前被静默跳过。
 evidence:
-  at: 2026-09-06T09:44:33.444Z
+  at: 2026-09-06T21:54:05.633Z
   verdict: pass
   reading: acceptance passed (exit 0)
 ---
