@@ -77,26 +77,26 @@ lane，展开后的提交文字在同一批 y 坐标附近大面积重叠成无�
 
 ## Acceptance Criteria
 
-- [ ] 单测：构造一个 fixture，其中两条不同 lane 的 merge-tip commit 被重标签成同一个显示字符串
+- [x] 单测：构造一个 fixture，其中两条不同 lane 的 merge-tip commit 被重标签成同一个显示字符串
       （模拟 mainline 重标签+分支已删除），断言 `layoutGitGraph`/lane-id 分配给它们的内部 id 不同。
-- [ ] 单测：对上述 fixture 生成的客户端数据模型，模拟"仅点击其中一条摘要"的展开动作，断言只有被点
+- [x] 单测：对上述 fixture 生成的客户端数据模型，模拟"仅点击其中一条摘要"的展开动作，断言只有被点
       击的那条 lane 的 collapsed 状态翻转，另一条同名 lane 保持折叠。
-- [ ] 单测：构造一个含 N 条折叠分支（提交与 trunk 在时间上交错）的 fixture，断言渲染使用的总行数等
+- [x] 单测：构造一个含 N 条折叠分支（提交与 trunk 在时间上交错）的 fixture，断言渲染使用的总行数等
       于「trunk 行数 + 折叠分支数（每条 1 行摘要）」，而不是「trunk 行数 + 所有分支全部提交数」。
-- [ ] 单测：把 fixture 中每条分支都设为展开态，断言不存在两个不同的行被分配到同一个 y 坐标（重叠不
+- [x] 单测：把 fixture 中每条分支都设为展开态，断言不存在两个不同的行被分配到同一个 y 坐标（重叠不
       变式在全展开态下也成立）。
-- [ ] 单测：对生成的 SVG，断言所有 `.git-svg-ink`/`.git-svg-muted` 文字元素的 `x` 属性等于同一个常
+- [x] 单测：对生成的 SVG，断言所有 `.git-svg-ink`/`.git-svg-muted` 文字元素的 `x` 属性等于同一个常
       量（与各自 lane 节点的 `cx` 不同），即文字统一从一个固定列起写。
-- [ ] 单测：构造一个含 ≥8 条并发展开分支的 fixture，断言图形轨道栏的最大并发深度不超过一个可配置上
+- [x] 单测：构造一个含 ≥8 条并发展开分支的 fixture，断言图形轨道栏的最大并发深度不超过一个可配置上
       限（lane 插槽复用生效，超限给出提示而非无限加宽）。
-- [ ] 单测：给 `serve-dashboard.ts` 的渲染函数传入一个 `status:"error"` 的 `readGitHistory` 结果
+- [x] 单测：给 `serve-dashboard.ts` 的渲染函数传入一个 `status:"error"` 的 `readGitHistory` 结果
       （带非空 `reason`），断言输出文本里出现该 reason 的子串，而不仅仅是字面量「读失败」。
-- [ ] 现场核验：对一个真实 `quay serve` 实例，把 workspaceRoot 指向一个不存在的路径，加载
+- [x] 现场核验：对一个真实 `quay serve` 实例，把 workspaceRoot 指向一个不存在的路径，加载
       `/dashboard`，`curl`/grep 输出里能看到该缺失路径本身（不是裸「读失败」三个字）；命令与输出贴
       进提交信息或 PR 描述。
-- [ ] `node --test packages/quay/test/serve-handlers.test.mjs
+- [x] `node --test packages/quay/test/serve-handlers.test.mjs
       packages/quay/test/gap-git-history-lane-identity-and-row-layout-overlap.test.mjs` 全绿。
-- [ ] 既有 `live-state.test.mjs` / `serve-board.test.mjs` / `serve.test.mjs` 里固定「读失败」字面量
+- [x] 既有 `live-state.test.mjs` / `serve-board.test.mjs` / `serve.test.mjs` 里固定「读失败」字面量
       的用例保持通过（本任务不改动那几处子系统的裸文案语义）。
 
 ## Definition of Done
