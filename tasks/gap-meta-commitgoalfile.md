@@ -1,7 +1,7 @@
 ---
 id: gap-meta-commitgoalfile
 title: goal 写盘即提交泄漏——未跟踪 goals/*.md 阻塞 develop→doc ff-only 同步
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
