@@ -1,7 +1,7 @@
 ---
 id: gap-goal-store-abi-encapsulation-provider-backed
 title: goal 由 Core-owned 改为 Provider-backed——照 ADR 抄一遍 ABI 封装，Core 侧留委派 shim
-status: todo
+status: ready
 labels:
   - gap
 parent: null
