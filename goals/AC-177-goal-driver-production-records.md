@@ -14,7 +14,7 @@ origin: |
   同族先例即本 GOAL 的立条依据：gap-spec-goal-store-third-sibling-kind 标 done、
   AC 全绿，而 goals/ 从未存在、gate-events 中 "gate":"goal" 零条。
 evidence:
-  at: 2026-09-06T22:03:56.271Z
+  at: 2026-09-06T22:04:38.648Z
   verdict: pass
   reading: acceptance passed (exit 0)
 ---
