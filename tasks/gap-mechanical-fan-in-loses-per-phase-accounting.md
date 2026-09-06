@@ -1,7 +1,7 @@
 ---
 id: gap-mechanical-fan-in-loses-per-phase-accounting
 title: 机械 fan-in 的 --buckets 轮只记一条 lanes=1 的 static 相，main/serial/lowconc 分相记账与 PSI 全失
-status: todo
+status: ready
 labels:
   - gap
   - defect
