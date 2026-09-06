@@ -116,14 +116,35 @@ test('AC6 — the manager SKILL indexes every on-disk orchestration/SPEC-*.md (i
 });
 
 // ── AC8: delivery vs startup independence — the plugin ships the manager, the cold-start does NOT start it ──
+// The sanctioned manager-start form is the skill invocation `/quay:manager` (session-embodiment:
+// the manager skill turns the current session into the manager — one network = one manager). A bare
+// `:manager` substring (tmux window key) or `quay-launch.sh manager` (shell spawn) is a real violation.
+const SANCTIONED_MANAGER_SKILL_MENTION = /\/quay:manager\b/;
+const managerStartViolation = (l) => /manager/i.test(l) &&
+  /(quay-launch\.sh manager|:manager|manager 窗口|manager window)/i.test(l) &&
+  !SANCTIONED_MANAGER_SKILL_MENTION.test(l);
+
 test('AC8 — cold-start must NOT start the manager (one network = one manager)', () => {
   const cold = fs.readFileSync(COLD_START_SKILL, 'utf8');
   // The cold-start must state manager is NOT part of the project topology.
   assert.match(cold, /manager is cross-project and NOT part of this topology|manager 跨项目|manager is cross-project/,
     'cold-start must state manager is NOT part of the project topology (AC8)');
-  // The cold-start must NOT instruct creating/driving a manager window.
-  const managerStartHits = cold.split('\n').filter((l) => /manager/i.test(l) && /(quay-launch\.sh manager|:manager|manager 窗口|manager window)/i.test(l));
+  // The cold-start must NOT instruct creating/driving a manager window (shell/tmux form) — the
+  // sanctioned `/quay:manager` skill-invocation mention is excluded from the guard.
+  const managerStartHits = cold.split('\n').filter(managerStartViolation);
   assert.deepEqual(managerStartHits, [], 'cold-start must not instruct starting a manager window (AC8)');
+  // Positive control: the sanctioned skill-invocation mention itself must still be present (the
+  // exclusion must not silently swallow real content) — dual-direction check discipline (硬规则 2).
+  assert.match(cold, SANCTIONED_MANAGER_SKILL_MENTION,
+    'cold-start must reference /quay:manager as the sanctioned manager-start form (AC8)');
+  // Negative control: a real violation NOT wrapped in the sanctioned skill form must still be caught
+  // (the narrowing must not weaken the guard into a vacuous green — 硬规则 3b).
+  const violations = [
+    'bash /repo/plugin/scripts/quay-launch.sh manager',
+    'tmux new-window -t quay-session:manager',
+  ];
+  assert.deepEqual(violations.filter(managerStartViolation), violations,
+    'AC8 guard must still capture real shell/tmux manager-start forms (negative control)');
 });
 
 // ── Contract measure guard: the shipping scan must not be starved ───────────────────────────────────
