@@ -1,7 +1,7 @@
 ---
 id: gap-mechanical-fan-in-red-lock-times-null
 title: 机械 fan-in 红(失败)结果的锁持有时间恒 null——数据已落盘，只是失败路径的结果构造函数从不读取
-status: ready
+status: done
 labels:
   - gap
   - defect
