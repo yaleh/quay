@@ -579,6 +579,18 @@ export function renderFanInCardFromRecords(
   </div>`;
 }
 
+/**
+ * Truncated reason summary for the dashboard's 「最近提交」 git card. Keeps the recognisable
+ * 「读失败」 prefix (a fixed literal other subsystems treat as the unreadable-vs-empty discriminator)
+ * and appends a bounded, HTML-escaped reason so the specific cause (e.g. a deleted worktree path)
+ * is visible rather than collapsed to three characters. gap-git-history-lane-identity-and-row-layout-overlap.
+ */
+export function gitReadFailureSummary(reason: string | null | undefined): string {
+  const r = String(reason ?? "").replace(/\s+/g, " ").trim();
+  const cap = r.length > 160 ? `${r.slice(0, 157)}…` : r;
+  return cap ? `读失败 — ${escapeHtml(cap)}` : "读失败";
+}
+
 export function renderDashboardPage(
   d: {
     live: LiveResult;
@@ -600,7 +612,9 @@ export function renderDashboardPage(
   const testsCard = renderTestsCard(d.tests, d.suiteRun, { hours, nowMs });
   const fanInCard = renderFanInCard(opts.workspaceRoot, { hours, nowMs });
 
-  const recentCommits = d.history.status === "ok" ? d.history.commits.slice(0, 3).map((c) => `${c.hash.slice(0, 7)} ${c.subject}`).join("<br>") : (d.history.status === "empty" ? "无提交" : "读失败");
+  const recentCommits = d.history.status === "ok"
+    ? d.history.commits.slice(0, 3).map((c) => `${c.hash.slice(0, 7)} ${c.subject}`).join("<br>")
+    : (d.history.status === "empty" ? "无提交" : gitReadFailureSummary(d.history.reason));
   const commitsCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:8px">
     <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">最近提交</div>
     <p style="margin:0;font-size:0.8rem;line-height:1.6;font-family:ui-monospace,monospace">${recentCommits}</p>

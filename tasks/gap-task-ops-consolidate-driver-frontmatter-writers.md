@@ -2,7 +2,7 @@
 id: gap-task-ops-consolidate-driver-frontmatter-writers
 title: Consolidate loop-layer's 5 independent frontmatter parsers/writers into
   one library that owns commit+sync (task-ops.ts)
-status: todo
+status: ready
 labels:
   - gap
 parent: null
