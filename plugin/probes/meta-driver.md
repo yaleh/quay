@@ -45,6 +45,14 @@ WHAT YOU ARE GIVEN (the `readings` JSON in the prompt — treat it as arithmetic
   once hid the dominant failure (23 entries, 2 resolved, 21 stuck at conflict) and made the fallback
   look like it barely ran. `notFf` carries `ahead`/`behind` at its source, so "ahead only" (benign —
   the doc branch just committed, nothing to pull) is distinguishable from a real divergence.
+- `addressedTasks`: OPEN tasks (todo / ready / needs-human) labelled `meta-driver` — **things sent
+  TO you**. This is how a bare defect reaches you: a human (or any layer) files an ordinary task with
+  that label, and it shows up here on the next round. It does not have to be goal-sized, does not
+  have to hang off an active goal, and does not need `--focus` (which the resident driver cannot
+  even receive). Treat each one as a first-class input alongside the divergences.
+  It is also YOUR OWN FEEDBACK LOOP: tasks you file via `autoDrive` carry the same label, so one that
+  stalls in `needs-human` comes back to you here. Before you did this, you never learned the fate of
+  anything you filed.
 - `focus` (optional): a human-supplied steer for this round. When present, weight your attention
   toward it, but never let it suppress a divergence you were given.
 
@@ -142,11 +150,37 @@ RESTRAINT — this is the point of the mechanism, not an afterthought:
    auto-drive and cannot express as a proposal goes HERE, with a real close path — because an
    observation that only gets printed is indistinguishable from one that was never made (this
    project has a 12-item, 10-day-dead escalations file proving exactly that).
-   Each item needs:
-   - `title` (the decision in one line), `question` (what must be settled),
-   - `options` (the alternatives AND what each costs — a decision with one option is not a decision),
-   - `evidenceKey` (dotted path into the readings; resolved mechanically, rejected if it does not),
-   - `origin` (why a machine must not settle this — what makes it a judgment rather than work).
+   Every item needs: `title`, `question`, `options` (alternatives AND their costs — a decision with
+   one option is not a decision), `evidenceKey` (dotted path, resolved mechanically), `origin`.
+
+   ⚠️ YOU MUST ALSO CHOOSE THE CARRIER — `"carrier"` is required, and each carrier has its own
+   mechanical gate. Needing a human's judgment does NOT mean the thing is goal-sized; those two were
+   conflated before, and a policy conflict got written as a draft GOAL merely because draft→active
+   happens to be where humans adjudicate. Pick by the NATURE of the thing:
+
+   - `"carrier": "goal"` — ONLY when it genuinely changes WHAT WE WANT (a new program-level
+     objective). Also requires:
+     - `scope`: comma-separated repo-relative paths this objective spans. **≥3 of them must actually
+       exist** (directories count, so a forward-looking goal can name the areas it will affect).
+       Something satisfiable by editing one or two files is not a GOAL — file it as `autoDrive`.
+
+   - `"carrier": "needs-human-task"` — a specific piece of WORK blocked on ONE human judgment.
+     This lands as a `needs-human` task, not a goal. It was authorised on 2026-09-06 with an explicit
+     condition: **use it extremely sparingly, so it does not become another way to avoid
+     responsibility.** That condition is enforced semantically (NOT by a quota — a rate cap would
+     let the first bad escalation through and block later good ones). It requires:
+     - `conflict`: `[{source, quote}, …]` — **≥2 entries, and each `quote` must appear VERBATIM in
+       that `source` file** (checked by reading the file; ≥24 UTF-8 bytes). This is the (b) step made
+       mechanical: two written positions that contradict each other. If you can quote only ONE, that
+       one IS the answer — apply it via `autoDrive`. If you can quote NONE, you are uncertain, and
+       uncertainty is not a human's to adjudicate. Fabricated quotes fail — you cannot invent a
+       sentence that happens to exist in a real file.
+     - `irreversible`: what becomes hard to undo if you choose wrong. A choice that is CHEAP TO
+       REVERSE should just be made and recorded — handing it over is the avoidance this gate exists
+       to catch.
+     - `touches`: the file(s) the resulting work would edit (same authorization surface as
+       `autoDrive`). If you cannot say where the work lands, it is not blocked work — it is an
+       unformed thought.
 
 REPLY WITH ONLY a JSON object, no prose around it:
 {"divergences":[{"id":"AC-NNN","kind":"pass-but-unflipped|achieved-but-failing|no-criterion",
@@ -160,4 +194,8 @@ REPLY WITH ONLY a JSON object, no prose around it:
   "touches":"<repo-relative file(s) the fix must edit, comma-separated>"}],
  "decisions":[{"title":"<one line>","question":"<what must be settled>",
   "options":"<alternatives and what each costs>","evidenceKey":"<dotted path into the readings>",
-  "origin":"<why a machine must not settle this>"}]}
+  "origin":"<why a machine must not settle this>","carrier":"goal|needs-human-task",
+  "scope":"<carrier=goal: comma-separated paths, >=3 must exist>",
+  "conflict":[{"source":"<repo-relative file>","quote":"<verbatim text that IS in that file>"}],
+  "irreversible":"<carrier=needs-human-task: what becomes hard to undo if you choose wrong>",
+  "touches":"<carrier=needs-human-task: file(s) the resulting work would edit>"}]}
