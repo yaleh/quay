@@ -1,7 +1,7 @@
 ---
 id: gap-perfile-psi-window-join
 title: perFile 记录缺 PSI 时间窗联接——单测 PSI 只能靠手写脚本事后联接,没有可复用工具/标准字段
-status: todo
+status: ready
 labels:
   - gap
 parent: null
