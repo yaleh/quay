@@ -652,6 +652,8 @@ test("AC3 回放·CLI — 全量扫描（生产基线 b11ce720）NOT-EVALUATED�
   // gap-direct-to-develop-check-reflog-to-revlist：reflog 被 gc 全局剪后，基线区间内 ~1600 条 commit
   // 既不在 ledger（fan-in-landed 记录，本任务起才落）也不在 reflog ⇒ unclassifiable ⇒ NOT-EVALUATED。
   // ⛔ 旧行为（ok=true, evaluated=true, "no-code-surface-direct-commits"）正是「伪装成未发现 direct」。
+  // gap-bypass-check-unclassifiable-exits-zero：evaluated:false 退出码由 0 改 3（NOT-EVALUATED），
+  // ⛔ 不再与 PASS 共用 exit 0——否则只看退出码的 run_checker 把「读不懂」读成「合格」。
   const baseline = "b11ce720";
   const baseExists = gitCmd(REPO_ROOT, "cat-file", "-e", `${baseline}^{commit}`).status === 0;
   if (!baseExists) {
@@ -659,13 +661,20 @@ test("AC3 回放·CLI — 全量扫描（生产基线 b11ce720）NOT-EVALUATED�
     return;
   }
   const r = runChecker(["--root", REPO_ROOT, "--baseline", baseline]);
-  assert.equal(r.status, 0, `NOT-EVALUATED 不得 RED（exit 0）: ${r.stdout}${r.stderr}`);
+  assert.equal(r.status, 3, `NOT-EVALUATED 必须 exit 3（⛔ 不再是 exit 0）: ${r.stdout}${r.stderr}`);
   const out = jsonOut(r);
   assert.equal(out.evaluated, false, "reflog 剪后必须 NOT-EVALUATED（⛔ 不伪装成「未发现 direct」）");
   assert.equal(out.ok, true, "NOT-EVALUATED 不是 RED");
   assert.equal(out.reason, "unclassifiable-commits-in-range");
   assert.ok(out.unclassifiableCommits > 0, "基线区间内存在 ledger 无记录且 reflog 也查不到的 commit");
   assert.ok(out.denominator.unclassifiableCommits > 0, "denominator 同步暴露 unclassifiable 计数");
+  // AC4：分类覆盖率可读数——classified/total/ratio 且 0 < ratio < 1（部分可分类）。
+  assert.equal(typeof out.classification, "object", "输出必须带 classification 对象");
+  assert.ok(out.classification.total > 0, "total 为 rev-list 命中条数");
+  assert.equal(out.classification.classified, out.classification.total - out.unclassifiableCommits, "classified = total − unclassifiable");
+  assert.ok(out.classification.ratio > 0 && out.classification.ratio < 1, "部分可分类 ⇒ 0 < ratio < 1");
+  assert.equal(out.denominator.totalScannedCommits, out.classification.total, "denominator 同步 totalScannedCommits");
+  assert.equal(out.denominator.classifiedCommits, out.classification.classified, "denominator 同步 classifiedCommits");
 });
 
 test("AC3 负控制·真实 git — 2fdb6e32（docs/ 非 ASCII 设计正本）CLI --commits 必须 GREEN（AC3）", (t) => {
@@ -810,7 +819,7 @@ test("CLI — 锁窗豁免：直接提交落在锁 acquire→release 区间内 �
   }
 });
 
-test("CLI — 锁事件不成对（release 无 acquire）⇒ NOT-EVALUATED（exit 0，evaluated:false——3b）", () => {
+test("CLI — 锁事件不成对（release 无 acquire）⇒ NOT-EVALUATED（exit 3，evaluated:false——3b）", () => {
   const dir = makeTmp("climal");
   const st = makeTmp("climalstate");
   try {
@@ -823,7 +832,7 @@ test("CLI — 锁事件不成对（release 无 acquire）⇒ NOT-EVALUATED（exi
     fs.writeFileSync(events, JSON.stringify({ event: "release", epoch: 100, taskId: "t", pid: 1 }) + "\n", "utf8");
 
     const r = runChecker(["--root", dir, "--lock-events", events]);
-    assert.equal(r.status, 0, `锁事件不成对 ⇒ NOT-EVALUATED，不得红也不得假装绿`);
+    assert.equal(r.status, 3, `锁事件不成对 ⇒ NOT-EVALUATED，必须 exit 3（不得红也不得假装绿）`);
     const out = jsonOut(r);
     assert.equal(out.evaluated, false, "锁窗口读不出 ⇒ 整体 NOT-EVALUATED（3b: 读不懂≠合格）");
     assert.equal(out.ok, true, "NOT-EVALUATED 不是 RED");
@@ -1001,7 +1010,7 @@ test("AC2 CLI — 不在 ledger 且 reflog 有「直接 commit」标签 ⇒ 仍 
   }
 });
 
-test("AC3 CLI — reflog 被 gc 剪（expire）后：ledger 无记录且 reflog 也查不到 ⇒ NOT-EVALUATED", () => {
+test("exit-3 pin — reflog 被 gc 剪（expire）后：evaluated:false ⇒ exit 3（NOT-EVALUATED，gap-bypass-check-unclassifiable-exits-zero DoD3）", () => {
   const dir = makeTmp("cli-gc");
   try {
     initRepo(dir);
@@ -1012,12 +1021,32 @@ test("AC3 CLI — reflog 被 gc 剪（expire）后：ledger 无记录且 reflog 
     // 模拟 gc 全局剪：expire 全部 reflog。
     gitCmd(dir, "reflog", "expire", "--expire=now", "--all");
     const r = runChecker(["--root", dir]);
-    assert.equal(r.status, 0, `reflog 剪后不得 RED，也不得假装 GREEN: ${r.stdout}${r.stderr}`);
+    assert.equal(r.status, 3, `reflog 剪后必须 exit 3（NOT-EVALUATED），⛔ 不再与 PASS 共用 exit 0: ${r.stdout}${r.stderr}`);
     const out = jsonOut(r);
     assert.equal(out.evaluated, false, "reflog 剪后 ⇒ NOT-EVALUATED（硬规则 3b）");
     assert.equal(out.ok, true);
     assert.equal(out.reason, "unclassifiable-commits-in-range");
     assert.ok(out.unclassifiableCommits > 0, "存在 ledger 无记录且 reflog 也查不到的 commit");
+    // AC4：全部不可分类 ⇒ classification.ratio === 0。
+    assert.equal(out.classification.classified, 0, "全不可分类 ⇒ classified = 0");
+    assert.equal(out.classification.ratio, 0, "全不可分类 ⇒ ratio = 0");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("exit-3 pin — rev-list 不可读（非 git 根）⇒ evaluated:false ⇒ exit 3（NOT-EVALUATED）", () => {
+  // 第二个 evaluated:false 来源（rev-list 不可读，早退分支）也必须 exit 3——与 unclassifiable 降级
+  // 分支独立，钉住「evaluated:false 一律 exit 3」而非只钉「unclassifiable ⇒ exit 3」。
+  const dir = makeTmp("cli-norepo");
+  try {
+    fs.writeFileSync(path.join(dir, "not-a-repo.txt"), "x\n", "utf8");
+    const r = runChecker(["--root", dir]);
+    assert.equal(r.status, 3, `rev-list 不可读 ⇒ exit 3（NOT-EVALUATED），⛔ 不再是 exit 0: ${r.stdout}${r.stderr}`);
+    const out = jsonOut(r);
+    assert.equal(out.evaluated, false, "rev-list 不可读 ⇒ evaluated:false");
+    assert.equal(out.ok, true, "NOT-EVALUATED 不是 RED");
+    assert.equal(out.reason, "rev-list-unreadable (NOT-EVALUATED)");
   } finally {
     cleanup(dir);
   }

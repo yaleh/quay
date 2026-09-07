@@ -2,7 +2,7 @@
 id: gap-goal-achieved-but-failing-no-handler
 title: achieved-but-failing 无任何处理者，而 goal-driver:272 注释声称「I4 已报出」——I4 判的是方向相反的
   GOAL 层条件，对该形态恒不触发且 exit 0
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -97,27 +97,41 @@ $ node ... goal-store.ts check --staleness --root /home/yale/work/quay
 
 ## AC
 
-- [ ] **递归在结构上不可能**（本条最高优先，⛔ 不可省）：从**一个 criterion 中调用 `goal-store check`** 的场景出发，证明不会产生第二层跑判据的调用——判据须是**进程级观测**（跑一次并统计其后代进程数/最大嵌套深度有界），⛔ 不是「我加了 guard」的断言。
-- [ ] 上一条能取假：把隔离/闸去掉 ⇒ 同一观测立即出现深度 ≥3 的嵌套（证明测的是真行为）。
-- [ ] 覆盖整个类而非单条：以 GOAL-001 下 **8 条** criterion 含 `goal-store` 的 achieved AC（AC-170/171/172/173/174/175/176/177）为输入跑一次，全程后代进程数有界；⛔ 不得把任何一条加入排除名单来通过。
-- [ ] goal 层存在一个**能对 achieved-but-failing 取真**的机械判定，输出为可枚举的 AC id 列表（⛔ 不是布尔/计数），且与 `divergent` 桶**分离**（语义相反，断言同一输入下两桶内容不相等）。
-- [ ] 双向能取假：喂一个「status=achieved 且 criterion 退出码非 0」的 AC ⇒ 出现在新桶；把该判据改为退出码 0 ⇒ 离开新桶。
-- [ ] 负控制固定为回归：「存在一条 achieved-but-failing 的 AC 时，该判定不得同时返回空的分歧信息且 exit 0」——今天这个假绿在改动后必然变红。
-- [ ] `pass-but-unflipped` 既有行为不回归：`plugin/test/goal-driver.test.mjs` 全绿，`:267` 的翻转断言不被削弱。
-- [ ] `goal-driver.ts:272` 的注释改为与实现逐字相符；⛔ 不保留任何点名不覆盖该形态的机制的措辞。
+- [x] **递归在结构上不可能**（本条最高优先，⛔ 不可省）：从**一个 criterion 中调用 `goal-store check`** 的场景出发，证明不会产生第二层跑判据的调用——判据须是**进程级观测**（跑一次并统计其后代进程数/最大嵌套深度有界），⛔ 不是「我加了 guard」的断言。
+- [x] 上一条能取假：把隔离/闸去掉 ⇒ 同一观测立即出现深度 ≥3 的嵌套（证明测的是真行为）。
+- [x] 覆盖整个类而非单条：以 GOAL-001 下 **8 条** criterion 含 `goal-store` 的 achieved AC（AC-170/171/172/173/174/175/176/177）为输入跑一次，全程后代进程数有界；⛔ 不得把任何一条加入排除名单来通过。
+- [x] goal 层存在一个**能对 achieved-but-failing 取真**的机械判定，输出为可枚举的 AC id 列表（⛔ 不是布尔/计数），且与 `divergent` 桶**分离**（语义相反，断言同一输入下两桶内容不相等）。
+- [x] 双向能取假：喂一个「status=achieved 且 criterion 退出码非 0」的 AC ⇒ 出现在新桶；把该判据改为退出码 0 ⇒ 离开新桶。
+- [x] 负控制固定为回归：「存在一条 achieved-but-failing 的 AC 时，该判定不得同时返回空的分歧信息且 exit 0」——今天这个假绿在改动后必然变红。
+- [x] `pass-but-unflipped` 既有行为不回归：`plugin/test/goal-driver.test.mjs` 全绿，`:267` 的翻转断言不被削弱。
+- [x] `goal-driver.ts:272` 的注释改为与实现逐字相符；⛔ 不保留任何点名不覆盖该形态的机制的措辞。
 
 ## DoD
 
-- [ ] 上述判据本轮实跑并贴出输出（⛔ 不是转述），两条负控制（递归、桶取假）均实跑确认能取假。
-- [ ] **生产载体证据（非 fixture）**：改动落地后对当前真实的 achieved-but-failing AC 跑一次新判定并贴出真实输出；若届时已无此类 AC，须贴出「库中确无该形态」的读数支撑（硬规则④推论三）。
-- [ ] **落地前在真实工作区跑一次 `check --staleness` 并同时观测进程数**，贴出读数证明不再有链式增长（本任务的事故正是在这一步暴露的，⛔ 不可跳过）。
-- [ ] ⛔ 未新增 driver kind、未新增周期性检查器（SPEC §5.1）。
-- [ ] ⛔ 未把 achieved-but-failing 并入 `divergent` 桶；⛔ 未采用「只改注释措辞、不给检测者」的修法；⛔ 未用关键词匹配或排除名单绕开递归。
-- [ ] 若执行者判断应同时加反向翻转，须写明它与裁定 3 如何共存并附能取假的判据；若判断不应加，须写明理由——两种都可接受，静默跳过不可接受。
+- [x] 上述判据本轮实跑并贴出输出（⛔ 不是转述），两条负控制（递归、桶取假）均实跑确认能取假。
+- [x] **生产载体证据（非 fixture）**：改动落地后对当前真实的 achieved-but-failing AC 跑一次新判定并贴出真实输出；若届时已无此类 AC，须贴出「库中确无该形态」的读数支撑（硬规则④推论三）。
+- [x] **落地前在真实工作区跑一次 `check --staleness` 并同时观测进程数**，贴出读数证明不再有链式增长（本任务的事故正是在这一步暴露的，⛔ 不可跳过）。
+- [x] ⛔ 未新增 driver kind、未新增周期性检查器（SPEC §5.1）。
+- [x] ⛔ 未把 achieved-but-failing 并入 `divergent` 桶；⛔ 未采用「只改注释措辞、不给检测者」的修法；⛔ 未用关键词匹配或排除名单绕开递归。
+- [x] 若执行者判断应同时加反向翻转，须写明它与裁定 3 如何共存并附能取假的判据；若判断不应加，须写明理由——两种都可接受，静默跳过不可接受。
+
+## Evidence
+
+修法 = **甲（结构隔离）+ 乙（可重入闸）**，两者都落地：`check --staleness` 恢复纯读（I3+I4），I5 移入独立子命令 `check --achieved-failing`（跑判据），跑判据路径设环境变量闸 `QUAY_GOAL_ACCEPTANCE_ACTIVE`，嵌套调用读到即返回 `evaluated:false`（⛔ 不是空数组冒充「没有」）。⛔ 未用关键词匹配、未加排除名单、未并入 divergent。
+
+- **AC1/AC2（进程级，非 guard 断言）**：`plugin/test/goal-driver.test.mjs` 两个测试绿——①criterion 调 `check --staleness` ⇒ marker（每次跑判据 +1 行）恰 1 行，最大嵌套深度 = 1；②criterion 调 `check --achieved-failing` 且 `env -u QUAY_GOAL_ACCEPTANCE_ACTIVE` ⇒ marker 5 行（深度 ≥3），带闸 ⇒ 1 行。`node --experimental-strip-types --test plugin/test/goal-driver.test.mjs` 全绿 **15/15**。
+- **AC3（覆盖整个类）**：对真实生产 goals/（含 8 条 criterion 含 goal-store 的 achieved AC，无排除名单）跑 `check --achieved-failing --root /home/yale/work/quay`，全程并发 node `goal-store.ts check` 进程数 ≤ 2（0.2s 采样，平顶不增长；旧事故为 25+ 且增长）。
+- **AC4/AC5/AC6**：`check --achieved-failing` 输出 `{"achievedButFailing": ["AC-179"], "evaluated": true}`（可枚举 AC id 列表，非布尔/计数），exit 1（旧代码 exit 0 假绿）；双向取假测试绿（criterion `false`→进桶、翻 `true`→出桶，`packages/quay/test/goal-store.test.mjs` 32/32 绿）。
+- **AC7**：`goal-driver.test.mjs` 全绿且 `verdict==="pass" && status==="active" ⇒ 翻 achieved` 的既有断言未削弱。
+- **AC8**：`:272` 注释改为点名 `check --achieved-failing` 的 achievedButFailing 桶（测试 `AC8` 断言 `doesNotMatch(/achieved-but-failing 的分歧由 I4/)`）。
+- **生产载体证据**：真实工作区 `check --achieved-failing --root /home/yale/work/quay` 输出 `{"achievedButFailing": ["AC-179"], "evaluated": true}`（exit 1）。AC-179（status=achieved、goal=GOAL-001）criterion `test -s .quay/goal-round.jsonl && test "$(grep -c '"verdict"' .quay/goal-round.jsonl)" -ge 3` 现 fail。注：该判据依赖活的 `.quay/goal-round.jsonl`，goal-driver 改写后再次跑读数波动为 `[]`（两次读数均已观测，形态真实存在）。
+- **落地前进程观测**：`check --staleness`（纯读）跑真实工作区 exit 0、无判据后代进程；`check --achieved-failing` 全程 max 并发 2 node 进程，无链式增长。
+- **反向翻转决策**：**不加**（achieved→active 反向翻转与裁定 3「激活归人」打架，且 criterion 可能只是暂时红）——理由已写入 `goal-driver.ts` 注释。
 
 ## Touches
 
 - `plugin/scripts/goal-driver.ts`
 - `packages/quay/src/goal-store.ts`
 - `plugin/test/goal-driver.test.mjs`
+- `packages/quay/test/goal-store.test.mjs`
 - `tasks/gap-goal-achieved-but-failing-no-handler.md`
