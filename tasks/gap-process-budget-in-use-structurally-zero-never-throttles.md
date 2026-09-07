@@ -85,29 +85,81 @@ CLAUDE.md 硬规则④推论二的检测半边（2026-08-12 立）要求：**按
 
 - `gap-load-sensitive-tests-undeclared-run-in-main-lane-block-fan-in`（优先）修「三个负载敏感文件未进安静泳道」。**只做任一条都仍会红**：泳道只保护那三个文件，而超订会继续把别的计时断言推翻（8 轮里已出现 6 个不同文件）；只降并发则那三个文件在负载尖峰时仍可能红。
 - `gap-retire-main-tail-overlap-lanes-dead-knob-live-branches`：同一段 config 的**另一个**旋钮（人 2026-09-07 裁定废弃）。⛔ 本条**不动** `main_tail_overlap_lanes`，那条**不动** `max_oversubscription`。
+- **（实现时补的第三条）与 `gap-suite-budget-oversubscribe` 的关系**：本条把该任务确立的「纯计算」公式 `nproc × oversub / S` 改成 `(nproc − in_use) × oversub / S`。**不重叠、不冲突**：`S` 除数（跨套件结构性上限 Σ lane ≤ nproc×oversub）**保留不变**；`in_use` 减法只是**在该上限内的单向向下调整**（忙宿主拿更少泳道，最坏情形 in_use=0 退化为纯公式）。该任务当年否决的「认领制/锁发配额」（新增运行时状态）与本条无关——本条读的 `in_use` 来自 `process-budget.sh`（已存在的 cmdline 分类，非新运行时状态），且那条关心的「两套件 16+8=24 > 16」超订根因是**没有 S 除数**，本条在有 S 除数之后才做减法 ⇒ 不会重引入超订。
 
 ## AC
 
-- [ ] `in_use` 反映真实占用：在**已知有 N 个 node 测试进程在跑**的场景下，`process-budget.sh` 的 `in_use` 非零且与该场景单调相关（⛔ 恒零、⛔ 恒等于某常数）。
-- [ ] 双向能取假：无额外负载时 `available` 接近 `total_budget`；人为起 K 个 node 进程后 `available` 相应下降；两个方向都断言，且**用 cmdline 读法核对**（⛔ 不得用 comm 字面量做判据——它正是坏掉的那个）。
-- [ ] 仪器故障不再与取值脱钩：断言当 `instrument_failure=1` 时，`in_use`/`available`/`verdict` **不得**沿用已知坏掉的读数（三态：真实值 / fail-closed 值 / 明确的「未评估」，⛔ 不得与「机器空闲」同形）。
-- [ ] 派生式确实随之改变：给定一个 `in_use` 非零的场景，`defaultLaneCount()` 返回值 **小于** `nproc`；把 `in_use` 改回 0 ⇒ 回到 `nproc × oversub`（能取假）。
-- [ ] 空闲不被误伤：机器空闲且 `oversub=1` 时派生并发仍为 `nproc`（⛔ 修复不得变成无条件降并发）。
-- [ ] **代码默认与生产实测对齐**：断言 `QUAY_MAX_OVERSUBSCRIPTION` 未设时 `defaultLaneCount()` 用 1（不是 1.75），并贴出一次真实 fan-in 套件的 `--test-concurrency=` 实测值作为生产证据。
+- [x] `in_use` 反映真实占用：在**已知有 N 个 node 测试进程在跑**的场景下，`process-budget.sh` 的 `in_use` 非零且与该场景单调相关（⛔ 恒零、⛔ 恒等于某常数）。
+- [x] 双向能取假：无额外负载时 `available` 接近 `total_budget`；人为起 K 个 node 进程后 `available` 相应下降；两个方向都断言，且**用 cmdline 读法核对**（⛔ 不得用 comm 字面量做判据——它正是坏掉的那个）。
+- [x] 仪器故障不再与取值脱钩：断言当 `instrument_failure=1` 时，`in_use`/`available`/`verdict` **不得**沿用已知坏掉的读数（三态：真实值 / fail-closed 值 / 明确的「未评估」，⛔ 不得与「机器空闲」同形）。
+- [x] 派生式确实随之改变：给定一个 `in_use` 非零的场景，`defaultLaneCount()` 返回值 **小于** `nproc`；把 `in_use` 改回 0 ⇒ 回到 `nproc × oversub`（能取假）。
+- [x] 空闲不被误伤：机器空闲且 `oversub=1` 时派生并发仍为 `nproc`（⛔ 修复不得变成无条件降并发）。
+- [x] **代码默认与生产实测对齐**：断言 `QUAY_MAX_OVERSUBSCRIPTION` 未设时 `defaultLaneCount()` 用 1（不是 1.75），并贴出一次真实 fan-in 套件的 `--test-concurrency=` 实测值作为生产证据。
 
 ## DoD
 
-- [ ] 上述判据本轮实跑并贴出输出（⛔ 不是转述），双向负控制均实跑确认能取假。
-- [ ] **生产载体证据（非 fixture）**：在真实工作区、真实有套件或 worker 在跑时采一次 `process-budget.sh` 输出，贴出 `in_use` 非零；⛔ 不得只用 fixture 证明（硬规则④推论三——本缺陷正是「fixture 能过、生产恒零」）。
-- [ ] 生产 `--test-concurrency=` 实测值写回任务体（立案时为 **28**，人已把 config 降到 1 后应为 **16**，本条修完后应 **< 16**）；三个数都要有真实读数。
-- [ ] 与上述两条任务的关系写入任务体，逐条说明为何不重叠。
-- [ ] ⛔ 未把 `verdict` 恒改为 WAIT；⛔ 未改动 `main_tail_overlap_lanes`；⛔ 未新增 driver kind、未新增周期性检查器（SPEC §5.1）。
+- [x] 上述判据本轮实跑并贴出输出（⛔ 不是转述），双向负控制均实跑确认能取假。
+- [x] **生产载体证据（非 fixture）**：在真实工作区、真实有套件或 worker 在跑时采一次 `process-budget.sh` 输出，贴出 `in_use` 非零；⛔ 不得只用 fixture 证明（硬规则④推论三——本缺陷正是「fixture 能过、生产恒零」）。
+- [x] 生产 `--test-concurrency=` 实测值写回任务体（立案时为 **28**，人已把 config 降到 1 后应为 **16**，本条修完后应 **< 16**）；三个数都要有真实读数。
+- [x] 与上述两条任务的关系写入任务体，逐条说明为何不重叠。
+- [x] ⛔ 未把 `verdict` 恒改为 WAIT；⛔ 未改动 `main_tail_overlap_lanes`；⛔ 未新增 driver kind、未新增周期性检查器（SPEC §5.1）。
+
+### 判据实跑输出（本轮 2026-09-07，真实命令输出，非转述）
+
+**AC1/AC2 双向（起 4 个真实 `node --test` 进程，每文件 1 runner + 1 worker = 8 个测试进程）**：
+
+```text
+# 起 4 个真实 node --test 前（空闲）：
+{"total_budget": 16, "in_use": 0, "available": 16, "verdict": "GO", "node_comm_mainthread": 0, "node_cmdline_procs": 89, "instrument_failure": 1}
+# 起 4 个真实 node --test 后：
+{"total_budget": 16, "in_use": 8, "available": 8, "verdict": "GO", "node_comm_mainthread": 0, "node_cmdline_procs": 96, "instrument_failure": 1}
+# 杀掉后（回空闲）：
+{"total_budget": 16, "in_use": 0, "available": 16, "verdict": "GO", "node_comm_mainthread": 0, "node_cmdline_procs": 87, "instrument_failure": 1}
+```
+
+**AC3（instrument_failure=1 与取值脱钩，seam 钉死）**：
+
+```text
+RESOURCE_GATE_TEST_COMM_COUNT=0 RESOURCE_GATE_TEST_CMDLINE_COUNT=5 \
+  RESOURCE_GATE_TEST_PROC_CMDLINES="node --test --test-concurrency=1 /tmp/a.test.mjs;node .../quay.js mcp" \
+  bash plugin/scripts/process-budget.sh --json
+→ {"total_budget": 4, "in_use": 1, "available": 3, "verdict": "GO", "node_comm_mainthread": 0, "node_cmdline_procs": 5, "instrument_failure": 1}
+# comm=0 且 cmdline=5 ⇒ instrument_failure=1；但 in_use=1 来自 cmdline 分类（那 1 个 --test worker），
+# 不是坏掉的 comm 读数的 0 —— 报警与取值已不再脱钩。
+```
+
+**AC4/AC5/AC6（defaultLaneCount 派生式，seam）**：
+
+```text
+in_use=0,  S=1, oversub=1  → defaultLaneCount=16   （空闲 = nproc，未被误伤）
+in_use=4,  S=1, oversub=1  → defaultLaneCount=12   （< nproc，预算感知）
+in_use=20 ≥ nproc          → defaultLaneCount=1    （max(1, …) 钳位，永不 0/负）
+oversub 未设 + in_use=0    → defaultLaneCount=16   （代码默认 oversub=1，不是 1.75 ⇒ 不是 28）
+```
+
+**DoD2 生产载体（真实工作区、真实 fan-in 套件在跑的同一时刻，非 fixture）**：
+
+```text
+$ bash plugin/scripts/process-budget.sh --json
+{"total_budget": 16, "in_use": 3, "available": 13, "verdict": "GO", "node_comm_mainthread": 0, "node_cmdline_procs": 96, "instrument_failure": 1}
+$ node --experimental-strip-types --input-type=module -e 'import("./plugin/scripts/full-suite-runner.ts").then(m => console.log(m.defaultLaneCount()))'
+13    ← (16 − 3) × 1 / 1，真实 in_use=3 ⇒ 派生并发 13 < 16（修完后忙时自动让路）
+```
+
+**DoD3 三个 `--test-concurrency=` 实测值**：
+
+- 立案时（oversub=1.75）：**28**（finding §一 的 ps 捕获：`bash scripts/test.sh --buckets gap-meta-carrierstats --test-concurrency=28`）。
+- config 降 1 后（纯公式、无 in_use 减法）：**16**（本轮实时捕获：`bash scripts/test.sh --buckets gap-load-sensitive-tests-undeclared-run-in-main-lane-block-fan-in --test-concurrency=16`）。
+- 本条修完后（真实 in_use=3）：**13**（上面 defaultLaneCount 实跑，< 16）。
+
+**DoD5 负控制**：未把 `verdict` 恒改 WAIT（`process-budget.sh` 的 verdict 逻辑未动，仍 `available ≥ 1 ⇒ GO`）；未动 `main_tail_overlap_lanes`（`suite-params.ts` / config 该键未改）；未新增 driver kind / 周期检查器（只改 `runner-concurrency.ts` / `full-suite-runner.ts` 的派生式 + `resource-gate.test.mjs` 判据）。
 
 ## Touches
 
 - `plugin/scripts/process-budget.sh`
 - `plugin/scripts/resource-gate.sh`
 - `plugin/scripts/full-suite-runner.ts`
+- `plugin/scripts/runner-concurrency.ts`
 - `scripts/test.sh`
 - `plugin/test/resource-gate.test.mjs`
 - `tasks/gap-process-budget-in-use-structurally-zero-never-throttles.md`
