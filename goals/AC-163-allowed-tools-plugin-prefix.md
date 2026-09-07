@@ -16,7 +16,7 @@ origin: |
   人 2026-09-02 裁定②「同一功能，本项目自己使用的扩展应当与产品交付的是同一个；不应有
   『简化版用于产品交付』」。正本 SPEC-plugin-lifecycle-single-bundle-2026-09-02.md AC2。
 evidence:
-  at: 2026-09-07T01:15:22.373Z
+  at: 2026-09-07T01:21:32.928Z
   verdict: fail
   reading: acceptance failed (exit 1)
 ---

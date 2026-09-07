@@ -15,7 +15,7 @@ origin: |
   人 2026-09-02 裁定③「本项目的开发环境不应污染本机其它项目」。正本
   SPEC-plugin-lifecycle-single-bundle-2026-09-02.md §4b。
 evidence:
-  at: 2026-09-07T01:15:21.893Z
+  at: 2026-09-07T01:21:31.909Z
   verdict: fail
   reading: acceptance failed (exit 1)
 ---

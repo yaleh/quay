@@ -26,7 +26,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSync, execFileSync } from "node:child_process";
 import { createGoalStore, VALID_GOAL_STATUSES, isGoalId, isCriterionId } from "../src/goal-store.ts";
 import { gateFactories, makeGoalGate } from "../src/gate/factories/index.ts";
 
@@ -39,6 +39,20 @@ function tmpDir(tag = "goal") {
 test.after(() => {
   for (const dir of _createdDirs) fs.rmSync(dir, { recursive: true, force: true });
 });
+
+// A REAL git repo temp dir (⛔ not a non-git dir): commitGoalFileAfterWrite is a no-op in repo-less
+// roots, so a non-git fixture would make「写后提交」与「写后没提交」观测不到差别 ⇒ 判据恒真 (hard rule 4).
+function gitRepo(tag = "commit") {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `goal-store-git-${tag}-`));
+  _createdDirs.push(dir);
+  const run = (...args) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+  run("init", "-q");
+  run("config", "user.email", "t@t");
+  run("config", "user.name", "t");
+  fs.mkdirSync(path.join(dir, "goals"), { recursive: true });
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  return { root: dir, run };
+}
 
 // ── AC1: reuses frontmatter-store-base (read the import, never a copy) ────────────────────────────
 test("AC1 — goal-store imports parse/serialize/lock/filename from frontmatter-store-base", () => {
@@ -365,4 +379,88 @@ test("AC-176 — native goal-store.ts is a re-export shim (no second GOAL_ID_RE 
 test("AC-176 — makeGoalGate is registered in the gateFactories dispatch map", () => {
   assert.equal(typeof gateFactories["goal"], "function", "gateFactories has a `goal` entry");
   assert.equal(gateFactories["goal"], makeGoalGate, "gateFactories.goal is makeGoalGate (reachable by name)");
+});
+
+// ── gap-goal-gate-timestamp-commit-flood：纯时间戳写入不得产生提交 ──────────────────────────────
+// 为什么必须真 git 仓库：commitGoalFileAfterWrite 在 repo-less 根下是 no-op，非 git fixture 会让
+// 「提交与否」观测不到差别（硬规则 4）。判据都是【实跑 gate 再数提交】，⛔ 不是 grep 源码。
+
+/** 从 temp git repo 里取 <id> 的记录文件名（fileNameForId 落点），并返回该文件的提交数。 */
+function acFileCommitCount(root, run, id) {
+  const file = fs.readdirSync(path.join(root, "goals")).find((f) => f.startsWith(`${id}-`));
+  if (!file) throw new Error(`no goal file for ${id}`);
+  return run("log", "--oneline", "--", `goals/${file}`).trim().split("\n").filter(Boolean).length;
+}
+
+test("AC1 — 纯时间戳写入不产生提交：两次 gate（verdict 不变）后提交数不增加", () => {
+  const { root, run } = gitRepo("ac1");
+  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o"]);
+  n(["write", "AC-028", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o"]);
+  // First gate: evidence first written (verdict=pass) ⇒ substantive ⇒ commit.
+  const g1 = n(["gate", "AC-028"]);
+  assert.equal(g1.status, 0, g1.stderr);
+  const before = acFileCommitCount(root, run, "AC-028");
+  assert.ok(before >= 1, "first gate must commit (evidence first written)");
+  // Second gate: verdict unchanged ⇒ only evidence.at refreshes ⇒ NO commit.
+  const g2 = n(["gate", "AC-028"]);
+  assert.equal(g2.status, 0, g2.stderr);
+  const after = acFileCommitCount(root, run, "AC-028");
+  assert.equal(after, before, `timestamp-only gate must not commit (before=${before}, after=${after})`);
+  // The timestamp refresh must also not leave the shared checkout dirty (else ff-only sync breaks).
+  assert.equal(run("status", "--porcelain", "--", "goals").trim(), "", "no dirty goals/*.md left behind");
+});
+
+test("AC2 — verdict 真变化仍然提交：fail→pass 后该文件恰好多 1 个提交（负控制）", () => {
+  const { root, run } = gitRepo("ac2");
+  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o"]);
+  // Criterion reads a flag file: absent → fail; present → pass. Deterministic flip.
+  n(["write", "AC-029", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "test -f passflag", "--origin", "o"]);
+  const g1 = n(["gate", "AC-029"]);
+  assert.equal(g1.status, 1, "flag absent must fail");
+  const before = acFileCommitCount(root, run, "AC-029");
+  // Flip verdict fail→pass (create the flag).
+  fs.writeFileSync(path.join(root, "passflag"), "x", "utf8");
+  const g2 = n(["gate", "AC-029"]);
+  assert.equal(g2.status, 0, "flag present must pass:\n" + g2.stderr);
+  const after = acFileCommitCount(root, run, "AC-029");
+  assert.equal(after, before + 1, `verdict flip must commit exactly once (before=${before}, after=${after})`);
+});
+
+test("AC3 — 状态翻转仍然提交：active→achieved 的 flip 后必有提交", () => {
+  const { root, run } = gitRepo("ac3");
+  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o"]);
+  n(["write", "AC-030", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o"]);
+  const before = acFileCommitCount(root, run, "AC-030");
+  const w = n(["write", "AC-030", "--status", "achieved", "--origin", "o"]);
+  assert.equal(w.status, 0, w.stderr);
+  const after = acFileCommitCount(root, run, "AC-030");
+  assert.equal(after, before + 1, `status flip must commit (before=${before}, after=${after})`);
+});
+
+test("AC4 — 提交速率回落到真实变化量：N 次无变化 gate + 1 次 flip ⇒ 恰 1 个提交", () => {
+  const { root, run } = gitRepo("ac4");
+  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o"]);
+  n(["write", "AC-031", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "test -f passflag", "--origin", "o"]);
+  // Simulate the 42s cadence burst: one first fail gate (substantive evidence) + 3 no-change fail gates.
+  const g1 = n(["gate", "AC-031"]);
+  assert.equal(g1.status, 1, "flag absent must fail");
+  const baseline = acFileCommitCount(root, run, "AC-031");
+  for (let i = 0; i < 3; i++) {
+    const g = n(["gate", "AC-031"]);
+    assert.equal(g.status, 1, "flag still absent → fail");
+  }
+  assert.equal(acFileCommitCount(root, run, "AC-031"), baseline, "3 no-change gates must add 0 commits");
+  // One real change (verdict flip) ⇒ exactly one commit, not 4 (the no-change gates contributed 0).
+  fs.writeFileSync(path.join(root, "passflag"), "x", "utf8");
+  const g2 = n(["gate", "AC-031"]);
+  assert.equal(g2.status, 0, "flag present must pass:\n" + g2.stderr);
+  assert.equal(acFileCommitCount(root, run, "AC-031"), baseline + 1, "the single verdict flip must add exactly 1 commit");
 });
