@@ -3606,9 +3606,13 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     const ffToken = randomUUID();
     const { ffMerge: ffMergeFn } = await import(
       /* @vite-ignore */ pathToFileURL(ffMergeModule).href
-    ) as { ffMerge: (o: { task: string; root: string; mergeTarget: string; runId: string; worktree: string; suiteCapture: string; suiteState: string; lockWaitSecs: number; token: string; scriptsDir: string }) => Promise<{ code: number; stdout: string; stderr: string; landedSha: string | null }> };
+    ) as { ffMerge: (o: { task: string; root: string; mergeTarget: string; runId: string; attemptKey: string; worktree: string; suiteCapture: string; suiteState: string; lockWaitSecs: number; token: string; scriptsDir: string }) => Promise<{ code: number; stdout: string; stderr: string; landedSha: string | null }> };
+    // attemptKey = perSuiteRunId (mfi-<task>-<epoch>-<rand>, generated once per fan-in): the per-dispatch
+    // identity for the ff retry counter. ⛔ NOT runId (wk-prod-<epoch>) — that is the driver-process
+    // lifetime id, constant across dispatches, which latches a task's retry budget across independent
+    // dispatches (gap-ff-retry-counter-runid-no-longer-per-dispatch).
     const ff = await ffMergeFn({
-      task, root, mergeTarget, runId, worktree, suiteCapture, suiteState: suiteStateFile,
+      task, root, mergeTarget, runId, attemptKey: perSuiteRunId, worktree, suiteCapture, suiteState: suiteStateFile,
       lockWaitSecs: 30, token: ffToken, scriptsDir,
     });
     appendFanInStepTrace(root, task, runId, "ff", "end", { ok: ff.code === 0 });
