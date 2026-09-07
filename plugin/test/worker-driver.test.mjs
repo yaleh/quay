@@ -163,6 +163,12 @@ import {
   writeTouchedTask,
 } from "./helpers/worker-driver-harness.mjs";
 
+// gap-process-budget-in-use-structurally-zero-never-throttles: defaultLaneCount is now BUDGET-AWARE
+// (subtracts in_use via testProcessesInUse()). Pin in_use=0 so the D7 laneCount assertion below stays
+// deterministic (mirrorMechanicalFanInSuiteState writes defaultLaneCount(); the assertion re-reads it —
+// a shell-out between the two calls could read a different live in_use and flake).
+process.env.RESOURCE_GATE_TEST_NODE_PROCS = "0";
+
 // ── pure functions ─────────────────────────────────────────────────────────────────────────────────
 
 test("computeOutcome — SPEC §4③ field completeness + phase-2 timed_out flag", () => {

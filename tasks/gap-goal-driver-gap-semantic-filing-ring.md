@@ -33,20 +33,28 @@ goal_ac: AC-185
 
 ## AC
 
-- [ ] **AC-185 正本判据**退出码 0：生产载体 `.quay/goal-round.jsonl` 中存在两轮 R1 < R2 —— R1 某条 AC `state=gap` 且该轮 `spawned > 0`，R2 同一条 AC `state=in-progress`
-- [ ] 负控制（证明上一条非恒真）：把派发命令换成不立案的命令后，同一判据退出码非 0
-- [ ] halt 能取假：`.quay/goal-control.json` 置 halted ⇒ 该轮轮记录 `spawned == 0`
-- [ ] 资源门能取假：`resourceGateCheck` 判 WAIT ⇒ 该轮 `spawned == 0`（复用 worker/promotion 同一判定，⛔ 不另写一套）
-- [ ] 每轮 spawn 上限**读配置而非字面量**：改 `drivers.yml` 中该值后，实测同一轮的 `spawned` 随之改变（硬规则 4 推论二：写死的数字换台机器就失效）
-- [ ] `llm_invoked` **派生自真实 argv**：把派发命令换成非 LLM 命令 ⇒ 该轮 `llm_invoked` 为 false（⛔ 不得硬编码为 true）
-- [ ] **不重复立案**：环派出的 agent 立案必须经 `quay-file-task` 的**按机制去重**步骤。负控制——取一条已有 `todo`/`ready` 关联任务的 AC，把该任务翻 `needs-human` 使缺口重现，再跑一轮：`grep -l '^goal_ac: <该 AC>' tasks/*.md | wc -l` **不得增加**（缺口重现 ≠ 可以再立一条；`computeGoalGaps:208` 只认 `todo|ready`，故 needs-human 会让缺口反复重现）
-- [ ] **`stalled` 第四态**：`taskCount > 0` 但关联任务都无法自行前进时报 `stalled` 而非 `in-progress`。判据用**结构量、不用计时器**（硬规则 4：成本结构未知前不设数值阈值）——关联任务全为 `todo` 且晋升门判其不合格（`ready-pool-check` 的 `eligible=false` / 进 `excluded`），或全为 `ready` 却被 pool 排除。负控制：造一条 Touches 用 glob 的 `todo` 任务（必然过不了晋升门）⇒ 该轮该 AC 必须报 `stalled`；把 Touches 改成具体文件 ⇒ 转回 `in-progress`。四态并存，`not-evaluated` 保留（硬规则 3b）
-- [ ] SPEC §7 新增 G9 行，且该表分期→AC 映射与 `goals/` 记录标题逐条一致（G6→AC-177、G7→AC-178、G8→AC-179、G9→AC-185）
-- [ ] scoped 门 `bash scripts/test.sh --for-task gap-goal-driver-gap-semantic-filing-ring --allow-thin` 退出码 0
+- [ ] **AC-185 正本判据**退出码 0：生产载体 `.quay/goal-round.jsonl` 中存在两轮 R1 < R2 —— R1 某条 AC `state=gap` 且该轮 `spawned > 0`，R2 同一条 AC `state=in-progress`（待外部）
+- [x] 负控制（证明上一条非恒真）：把派发命令换成不立案的命令后，同一判据退出码非 0
+- [x] halt 能取假：`.quay/goal-control.json` 置 halted ⇒ 该轮轮记录 `spawned == 0`
+- [x] 资源门能取假：`resourceGateCheck` 判 WAIT ⇒ 该轮 `spawned == 0`（复用 worker/promotion 同一判定，⛔ 不另写一套）
+- [x] 每轮 spawn 上限**读配置而非字面量**：改 `drivers.yml` 中该值后，实测同一轮的 `spawned` 随之改变（硬规则 4 推论二：写死的数字换台机器就失效）
+- [x] `llm_invoked` **派生自真实 argv**：把派发命令换成非 LLM 命令 ⇒ 该轮 `llm_invoked` 为 false（⛔ 不得硬编码为 true）
+- [x] **不重复立案**：环派出的 agent 立案必须经 `quay-file-task` 的**按机制去重**步骤。负控制——取一条已有 `todo`/`ready` 关联任务的 AC，把该任务翻 `needs-human` 使缺口重现，再跑一轮：`grep -l '^goal_ac: <该 AC>' tasks/*.md | wc -l` **不得增加**（缺口重现 ≠ 可以再立一条；`computeGoalGaps:208` 只认 `todo|ready`，故 needs-human 会让缺口反复重现）
+- [x] **`stalled` 第四态**：`taskCount > 0` 但关联任务都无法自行前进时报 `stalled` 而非 `in-progress`。判据用**结构量、不用计时器**（硬规则 4：成本结构未知前不设数值阈值）——关联任务全为 `todo` 且晋升门判其不合格（`ready-pool-check` 的 `eligible=false` / 进 `excluded`），或全为 `ready` 却被 pool 排除。负控制：造一条 Touches 用 glob 的 `todo` 任务（必然过不了晋升门）⇒ 该轮该 AC 必须报 `stalled`；把 Touches 改成具体文件 ⇒ 转回 `in-progress`。四态并存，`not-evaluated` 保留（硬规则 3b）
+- [x] SPEC §7 新增 G9 行，且该表分期→AC 映射与 `goals/` 记录标题逐条一致（G6→AC-177、G7→AC-178、G8→AC-179、G9→AC-185）
+- [x] scoped 门 `bash scripts/test.sh --for-task gap-goal-driver-gap-semantic-filing-ring --allow-thin` 退出码 0
 
 ## DoD
 
 **生产上真的发生过一次闭环**，而非仅测试绿：`.quay/goal-round.jsonl` 里能指出具体两轮 —— 前一轮派了 agent（`spawned > 0`）、后一轮某条原为 `gap` 的 AC 变成 `in-progress`，且这条 AC 对应的 `tasks/*.md` 确实带 `goal_ac` 顶层字段、可被 `grep -l '^goal_ac:'` 机械枚举。反例判据（硬规则 4 推论三）：若把派发测试缝关掉后该 DoD 仍能满足，它才是测量；只由 fixture 构造的轮记录满足的不算。上限旋钮与 halt/资源门三条负控制各留一份实跑输出在任务体，供 fan-in 复核。
+
+**负控制实跑输出（2026-09-07 worker 实跑；`--gap-worker-cmd true` 占位只测驱动闸、不真起 LLM）**：
+
+- 上限旋钮（`goalSpawnCap` 读 `drivers.yml goal.spawn_cap`）：3 条 gap AC，cap 缺省=3 ⇒ `spawned=3`；`--spawn-cap 1` ⇒ `spawned=1`
+- halt（`.quay/goal-control.json` `{"halted":true}`）⇒ `spawned=0`
+- 资源门 WAIT（`--resource-gate-cmd "exit 1"`）⇒ `spawned=0`
+- stalled 第四态（真跑 ready-pool-check）：Touches 宽 glob `plugin/scripts/**` ⇒ `eligible=false`+`touchesNarrow=false`+`state=stalled`；改具体文件 self-touch ⇒ `eligible=true`+`state=in-progress`
+- AC-185 判据双向控制：非立案命令两轮 ⇒ criterion `exit 1`（非恒真）；补 `goal_ac` 任务再一轮 ⇒ criterion `exit 0`（非恒假）
 
 ## Touches
 

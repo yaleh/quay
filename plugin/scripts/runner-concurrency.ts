@@ -13,9 +13,14 @@
 // unchanged.
 
 import os from "node:os";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { suiteLockSlotCount } from "./suite-lock-slots.ts";
 import { mainCheckoutRoot } from "./repo-root.ts";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * QUAY_MAX_CONCURRENT_SUITES — knob ② (旋钮②) of the 人 2026-08-13 框架: the concurrent full-suite
@@ -43,6 +48,35 @@ export function hostParallelism(): number {
   );
   const ncpu = Number(ncpuRaw);
   return Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1;
+}
+/**
+ * testProcessesInUse — the number of throttle-able node --test processes currently running ACROSS
+ * ALL worktrees (the cross-layer budget's `in_use`, cmdline-classified by process-budget.sh — the
+ * SINGLE authority for the quantity). This is the budget-aware subtraction input for the MAIN-lane
+ * derivation (gap-process-budget-in-use-structurally-zero-never-throttles): a host already running K
+ * test workers gets K fewer lanes, so the derived concurrency tracks the machine's REAL test load
+ * instead of assuming an idle host (the pre-fix in_use was structurally 0 ⇒ the subtraction never
+ * subtracted).
+ *
+ * Deterministic test seam: RESOURCE_GATE_TEST_NODE_PROCS pins in_use directly (the SAME seam
+ * process-budget.sh reads — one name, one value). When unset, shell out to process-budget.sh --json
+ * and read its `in_use`. Fail-open: any unreadable authority / non-numeric value degrades to 0
+ * (budget-awareness is best-effort; lane accounting must never block or fail a run).
+ */
+export function testProcessesInUse(): number {
+  const seam = process.env.RESOURCE_GATE_TEST_NODE_PROCS;
+  if (seam !== undefined && seam !== "" && /^[0-9]+$/.test(seam)) return Number(seam);
+  try {
+    const out = execFileSync("bash", [path.join(__dirname, "process-budget.sh"), "--json"], {
+      encoding: "utf8",
+      timeout: 5000,
+    });
+    const parsed = JSON.parse(out);
+    const v = Number(parsed.in_use);
+    return Number.isFinite(v) && v >= 0 ? v : 0;
+  } catch {
+    return 0;
+  }
 }
 /**
  * AC2 — strip any existing `--test-concurrency=*` from a command string, both the `=` spelling
@@ -82,20 +116,26 @@ function envValOr(name: string, fallback: string): string {
 
 /**
  * defaultTestConcurrency — the DIRECT-path (scripts/test.sh) MAIN-phase concurrency:
- * max(1, floor(nproc × oversub / S)). The EXACT semantics of the bash default_concurrency_formula
- * (gap-suite-budget-oversubscribe pure computation — nproc read-host via hostParallelism, oversub 旋钮③,
- * S 旋钮②): the RESOURCE_GATE_OVERSUBSCRIPTION seam is honored (unlike full-suite-runner.ts's
- * defaultLaneCount, which reads QUAY_MAX_OVERSUBSCRIPTION directly), and the yielded-slot term is ABSENT
- * (that is a runner-path-only 漏口② fix). Value validation matches bash exactly — a non-`[0-9]+(.[0-9]+)?`
- * or non-positive oversub falls to 1.
+ * max(1, floor((nproc − in_use) × oversub / S)). nproc read-host via hostParallelism; in_use =
+ * testProcessesInUse() (the cross-layer throttle-able test-process count — gap-process-budget-in-use-
+ * structurally-zero-never-throttles: the pre-fix in_use was structurally 0 ⇒ the subtraction never
+ * subtracted, so a busy host still derived nproc lanes); oversub 旋钮③; S 旋钮②. The
+ * RESOURCE_GATE_OVERSUBSCRIPTION seam is honored (unlike full-suite-runner.ts's defaultLaneCount,
+ * which reads QUAY_MAX_OVERSUBSCRIPTION directly), and the yielded-slot term is ABSENT (that is a
+ * runner-path-only 漏口② fix). Value validation matches bash exactly — a non-`[0-9]+(.[0-9]+)?`
+ * or non-positive oversub falls to 1. The in_use subtraction is a ONE-DIRECTIONAL downward
+ * adjustment within the S-divisor structural bound (Σ lane ≤ nproc×oversub): it can only reduce
+ * lanes, so it cannot reintroduce the cross-suite oversubscription gap-suite-budget-oversubscribe
+ * eliminated.
  */
 export function defaultTestConcurrency(): number {
   const ncpu = hostParallelism();
   const slots = concurrentSuiteSlots();
+  const inUse = testProcessesInUse();
   const oversubStr = envValOr("RESOURCE_GATE_OVERSUBSCRIPTION", envValOr("QUAY_MAX_OVERSUBSCRIPTION", "1"));
   const oversubNum = Number(oversubStr);
   const oversub = /^[0-9]+(\.[0-9]+)?$/.test(oversubStr) && Number.isFinite(oversubNum) && oversubNum > 0 ? oversubNum : 1;
-  return Math.max(1, Math.floor((ncpu * oversub) / slots));
+  return Math.max(1, Math.floor(((ncpu - inUse) * oversub) / slots));
 }
 
 /**
