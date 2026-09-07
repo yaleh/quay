@@ -178,6 +178,25 @@ test("runResidentOuterLoop writes a halted round when control state is halted", 
   assert.equal(rec.halted, true);
 });
 
+test("halt 不再终止进程：halted 下 maxRounds=3 ⇒ 3 条 round 记录 round 1/2/3（循环继续）", async () => {
+  const root = makeRoot("halt-loop");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(root, OUTER_CONTROL_STATE_REL), JSON.stringify({ schemaVersion: 1, halted: true }), "utf8");
+  const roundLog = path.join(root, ROUND_LOG_REL);
+  const code = await runResidentOuterLoop({
+    root, intervalMs: 1, once: false, maxRounds: 3, roundLogFile: roundLog, runId: "halt-loop", json: false, routines: [],
+  });
+  assert.equal(code, 0);
+  const lines = fs.readFileSync(roundLog, "utf8").trim().split("\n");
+  assert.equal(lines.length, 3, "halted 下仍写满 3 轮（⛔ 旧代码只写 1 条就 break）");
+  assert.deepEqual(lines.map((l) => JSON.parse(l).round), [1, 2, 3], "round 单调递增 1/2/3");
+  for (const l of lines) {
+    const rec = JSON.parse(l);
+    assert.equal(rec.halted, true, "每轮带 halted: true");
+    assert.equal(rec.action, "halted", "halted 轮 action=halted（观测仍在 facts 里）");
+  }
+});
+
 test("computeOuterRoundRecord: maps error/halted/facts actions", () => {
   const base = { round: 1, runId: "r", pid: 1, at: "2026-01-01T00:00:00Z", facts: [] };
   assert.equal(computeOuterRoundRecord({ ...base, halted: false, error: null }).action, "facts");

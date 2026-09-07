@@ -794,11 +794,19 @@ export interface Fact<T = unknown> {
   reason: string | null;
 }
 
-/** 一条例程（name + schedule 判定 + run() → Facts[]）。 */
+/** 一条例程本轮可读的控制面上下文。halted=true ⇒ 本轮【不做受闸动作（spawn）】，但机械读数照跑
+ *  （gap-drain-on-routine-driver-empties-round-and-respawn-loops：halt 是轮内的闸，⛔ 不是进程的
+ *  终止条件——旧的 break 让例程型 driver 每 5s 起停一次）。 */
+export interface RoutineRunContext {
+  halted: boolean;
+}
+
+/** 一条例程（name + schedule 判定 + run(ctx) → Facts[]）。ctx 可选——不读 halt 的例程定义无需该参数；
+ *  需按 halt 挡 spawn 的例程用 ctx.halted（只挡动作，不挡观测）。 */
 export interface RoutineSpec {
   name: string;
   schedule: Parameters<typeof isDue>[0];
-  run(): Fact[] | Promise<Fact[]>;
+  run(ctx?: RoutineRunContext): Fact[] | Promise<Fact[]>;
 }
 
 /** schedule（Layer 1b）：复用 routine-scheduler.ts 的判定函数，⛔ 不新造定时器。 */
@@ -1067,9 +1075,11 @@ export async function startKind(
     out(`already-running: supervisor pid=${spidRaw}\n`);
     return statusForKind(root, kind, true, out);
   }
-  // gap-driver-drain-no-inverse AC2：drain 写 halted=true 后，若 start 照常 spawn supervisor，驱动会立刻
-  // 读到 halt 退出、supervisor 再 respawn ⇒ 无限 respawn 循环（「起不来却表现为正在重启」，硬规则 3b 同形）。
-  // 无活 supervisor 且控制态 halted ⇒ 明确拒绝并提示解闸命令（退出 1），⛔ 不静默进 respawn 循环。
+  // gap-driver-drain-no-inverse AC2：drain 写 halted=true 后，start 照常 spawn supervisor 会起一个用户
+  // 已 halt 的驱动。1a 类（promotion/worker/suite）读到 halt ⇒ 本轮 break 退出 ⇒ supervisor respawn；
+  // 例程型（goal/quality/outer/meta）读到 halt ⇒ 只观测不派发（循环继续，见 gap-drain-on-routine-driver-
+  // empties-round-and-respawn-loops——已修掉例程型的 exit，⛔ 不靠这里的拒绝来消 respawn，但起一个已
+  // halt 的驱动仍是错的）。无活 supervisor 且控制态 halted ⇒ 明确拒绝并提示解闸命令（退出 1）。
   // 读失败（parseError）⇒ 同样拒绝（fail-closed，⛔ 读不懂 ≠ 未 halt）。
   const ctlRel = path.posix.join(".quay", spec.controlFile);
   const ctl = readControlState(root, process.env, ctlRel);
@@ -1154,8 +1164,11 @@ export async function stopKind(root: string, kind: DriverKind, out: (s: string) 
   return 0;
 }
 
-/** drain（两个 kind 都支持，AC150-2）：halt 语义——写 <kind>-control.json halted=true，只挡新派发/新一轮，
- *  ⛔ 不杀在飞。读-改-写经 driver-shared 单一真相源（保留 preference/forced，不破坏用户控制态）。 */
+/** drain（AC150-2）：halt 语义——写 <kind>-control.json halted=true。halt 的效果是【每 kind 自己的闸】：
+ *  1a 类（promotion/worker/suite）读到 halt ⇒ 本轮 break 退出；例程型（goal/quality/outer/meta）读到
+ *  halt ⇒ 只挡受闸动作（spawn），观测循环继续（gap-drain-on-routine-driver-empties-round-and-respawn-
+ *  loops——⛔ 不再整进程退出）。两种都【不杀在飞 worker】。读-改-写经 driver-shared 单一真相源
+ *  （保留 preference/forced，不破坏用户控制态）。 */
 export function drainKind(root: string, kind: DriverKind, out: (s: string) => void = (s) => process.stdout.write(s)): number {
   const spec = DRIVER_KINDS[kind];
   const rel = path.posix.join(".quay", spec.controlFile);

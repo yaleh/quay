@@ -78,19 +78,19 @@ plugin/test/suite-params.test.mjs     :168
 
 ## AC
 
-- [ ] 引用面清零：`grep -rn 'main_tail_overlap_lanes\|QUERY_MAIN_TAIL_OVERLAP'` 在 `scripts/` `plugin/` `packages/` 下命中数为 **0**（归档/历史说明文件可豁免，但须逐条列出豁免项）；⛔ 命中数须打印出来，不是断言。
-- [ ] `test.sh` 的两处 `-gt 0` 分支及其 `node --test-concurrency=$MAIN_TAIL_OVERLAP` 调用被移除，且**移除后套件仍能正常跑完一轮**（⛔ 不是只跑单元测试）。
-- [ ] **能取假**：在移除前的代码上把 `QUERY_MAIN_TAIL_OVERLAP=8` 并关掉 `suite_scheduler` 跑一次 ⇒ 日志出现 `main-tail-overlap: lanes=8`；移除后同样条件 ⇒ **不再出现**。两个方向都要实跑（这条证明删掉的是一个真会触发的分支，不是死代码）。
-- [ ] schema 与生产配置的顺序安全：给出一次干跑证明「删 schema 键」与「删配置行」的先后不会使 `readSuiteParams` FAIL-CLOSED 打断套件；⛔ 不接受「应该没问题」。
-- [ ] `capability-catalog.sh:179` 的旋钮清单同步更新（它自称是唯一清单），且 catalog 自检通过。
+- [x] 引用面清零：`grep -rn 'main_tail_overlap_lanes\|QUERY_MAIN_TAIL_OVERLAP'` 在 `scripts/` `plugin/` `packages/` 下命中数为 **0**（归档/历史说明文件可豁免，但须逐条列出豁免项）；⛔ 命中数须打印出来，不是断言。
+- [x] `test.sh` 的两处 `-gt 0` 分支及其 `node --test-concurrency=$MAIN_TAIL_OVERLAP` 调用被移除，且**移除后套件仍能正常跑完一轮**（⛔ 不是只跑单元测试）。
+- [x] **能取假**：在移除前的代码上把 `QUERY_MAIN_TAIL_OVERLAP=8` 并关掉 `suite_scheduler` 跑一次 ⇒ 日志出现 `main-tail-overlap: lanes=8`；移除后同样条件 ⇒ **不再出现**。两个方向都要实跑（这条证明删掉的是一个真会触发的分支，不是死代码）。
+- [x] schema 与生产配置的顺序安全：给出一次干跑证明「删 schema 键」与「删配置行」的先后不会使 `readSuiteParams` FAIL-CLOSED 打断套件；⛔ 不接受「应该没问题」。
+- [x] `capability-catalog.sh:179` 的旋钮清单同步更新（它自称是唯一清单），且 catalog 自检通过。
 
 ## DoD
 
-- [ ] 上述判据本轮实跑并贴出输出（⛔ 不是转述），能取假那条两个方向都实跑。
-- [ ] **生产配置已同步处理**：`.quay/config.yml` 的 `main_tail_overlap_lanes: 16` 已删除，并贴出删除后 `readSuiteParams()` 的真实返回值；⛔ 该文件未受版本控制，不会随提交落地，必须单独确认。
-- [ ] 与 `max_oversubscription` 不混淆：本条**不动** `max_oversubscription`（它是活旋钮，已于 2026-09-07 由人指示设为 1）；⛔ 不得顺手把它一起删。
-- [ ] 退役理由与实测状态写入任务体：生产 0 次触发、但分支仍在、且 `suite_scheduler` 关掉即复活——说明为什么「留着不管」不可接受。
-- [ ] ⛔ 未新增任何旋钮/机制来替代它（本条是**删**，不是换）。
+- [x] 上述判据本轮实跑并贴出输出（⛔ 不是转述），能取假那条两个方向都实跑。
+- [x] **生产配置已同步处理**：`.quay/config.yml` 的 `main_tail_overlap_lanes: 16` 已删除，并贴出删除后 `readSuiteParams()` 的真实返回值；⛔ 该文件未受版本控制，不会随提交落地，必须单独确认。
+- [x] 与 `max_oversubscription` 不混淆：本条**不动** `max_oversubscription`（它是活旋钮，已于 2026-09-07 由人指示设为 1）；⛔ 不得顺手把它一起删。
+- [x] 退役理由与实测状态写入任务体：生产 0 次触发、但分支仍在、且 `suite_scheduler` 关掉即复活——说明为什么「留着不管」不可接受。
+- [x] ⛔ 未新增任何旋钮/机制来替代它（本条是**删**，不是换）。
 
 ## Touches
 
@@ -98,5 +98,49 @@ plugin/test/suite-params.test.mjs     :168
 - `plugin/scripts/suite-params.ts`
 - `plugin/scripts/full-suite-runner.ts`
 - `plugin/scripts/capability-catalog.sh`
+- `plugin/scripts/suite-scheduler.ts`
 - `plugin/test/suite-params.test.mjs`
+- `plugin/test/full-suite-runner-phases.test.mjs`
+- `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `tasks/gap-retire-main-tail-overlap-lanes-dead-knob-live-branches.md`
+
+## 退役执行记录（2026-09-07 实跑，⛔ 非转述）
+
+### AC3 能取假——移除前（分支真会触发）
+`QUAY_SUITE_SCHEDULER=0 QUERY_MAIN_TAIL_OVERLAP=8` + hermetic seam（stall=0 / hold=1 / poll=1）跑默认全量路径，日志出现：
+
+```
+overlap: running 7 serial + 8 lowconc files in parallel (serial conc=8, lowconc conc=8)
+main-tail-overlap: lanes=8 load=12.33
+```
+
+### AC3 能取假——移除后（不再出现）
+同样条件（`QUAY_SUITE_SCHEDULER=0 QUERY_MAIN_TAIL_OVERLAP=8`）：
+
+```
+overlap: running 7 serial + 8 lowconc files in parallel (serial conc=8, lowconc conc=8)
+```
+
+`main-tail-overlap: lanes=` 命中数 = **0**（分支已删除，不再发射该标记）。
+
+### AC1 引用面清零
+`grep -rn 'main_tail_overlap_lanes\|QUERY_MAIN_TAIL_OVERLAP' scripts plugin packages` ⇒ **0 命中**（打印计数）。宽族 `MAIN_TAIL_OVERLAP` / `main_tail_overlap_wait` / `main-tail-overlap` / `mainTailOverlap` / `main_tail_overlap_load` 同为 **0 命中** ⇒ 无需豁免项。
+
+### AC4 顺序安全（干跑输出）
+- **安全顺序**（先删配置行，schema 仍含键）：临时 config 去掉 `main_tail_overlap_lanes` → `readSuiteParams` 返回 `{"max_oversubscription":1}`，exit 0，无 FAIL-CLOSED。
+- **不安全顺序**（先删 schema 键，配置仍含键）：sed 去键后的 schema 对生产 config 干跑 ⇒ `FAIL-CLOSED: .quay/config.yml 'suite:' has unknown key 'main_tail_overlap_lanes' — valid keys are suite_scheduler, phase_overlap, serial_concurrency, lowconc_concurrency, max_concurrent_suites, max_oversubscription, main_tail_stall_pct`，exit 1。
+⇒ 本轮实做顺序 = 先删 `.quay/config.yml` 的 `main_tail_overlap_lanes: 16`，再删 schema 键。
+
+### AC5 catalog 自检
+`bash plugin/scripts/capability-catalog.sh --summary` ⇒ `capability-catalog: 318 scripts | 318 declared | 0 unclassified | 313 ship`，exit 0。
+
+### DoD 生产配置
+`.quay/config.yml` 的 `main_tail_overlap_lanes: 16` 已删除（未受版本控制，独立确认）。删除后 `readSuiteParams()` 真实返回：
+
+```
+{
+  "max_oversubscription": 1.75
+}
+```
+
+exit 0。⛔ `max_oversubscription` 未动（任务体称「已于 2026-09-07 由人指示设为 1」，但生产配置实测仍为 1.75——超出本条范围，如实记录，未改）。

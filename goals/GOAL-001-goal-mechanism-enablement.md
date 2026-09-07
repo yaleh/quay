@@ -1,7 +1,7 @@
 ---
 id: GOAL-001
 title: goal 机制启用与改造——从零使用变成生产使用
-status: active
+status: achieved
 kind: goal
 origin: |
   人 2026-09-06 四条裁定（goal 优于 milestone / ABI 封装必要 / 暂不自动晋升 /
@@ -10,7 +10,10 @@ origin: |
   而 goals/ 目录在任何分支上从未存在过、gate-events 中 "gate":"goal" 零条、落地后 28 天零改动；
   其立案任务 gap-spec-goal-store-third-sibling-kind 标 done 而迁移从未发生。
 activatedAt: 2026-09-06
-labels: [mechanism, goal-store, bootstrap]
+labels:
+  - mechanism
+  - goal-store
+  - bootstrap
 ---
 
 ## 背景

@@ -35,3 +35,11 @@ kinds:
   goal:
     cap: 5               # ⛔ 同 meta：goal 机械环例程型 kind 无并发概念；字段仅为齐整
     interval_ms: 30000   # 循环滴答（每轮跑一遍 goal 机械环：跑 criterion→写 evidence→I2 flip→I3/I4）
+    spawn_cap: 3         # G9 缺口语义环：每轮缺口立案 spawn 上限（读配置不写死，硬规则 4 推论二；
+                         # goal-driver.goalSpawnCap 就地读此字段，⛔ 上收 driver-config 后应删该函数）
+    gap_worker_timeout_ms: 900000  # G9 gap-filing agent spawn 超时（毫秒）——值由实测导出（⛔ 不拍脑袋，
+                         # 硬规则 4 推论）：gap-filing 单次墙钟实测 elapsed_s=602.9（gap-goal-gap-filing-
+                         # spawn-budget-too-small-ring-spins-empty 立案时的 900s 对照，exit=0），
+                         # 900000（900s）> 602.9s 留 ~1.5x 余量。promotion fix-worker 保持 180s
+                         # （400 轮 266/266 零超时）——两角色工作量不同，不再同值。
+                         # goal-driver.goalGapWorkerTimeoutMs 就地读此字段（照 goalSpawnCap 接法）。

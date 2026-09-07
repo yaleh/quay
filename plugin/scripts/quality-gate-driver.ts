@@ -300,6 +300,7 @@ export async function runPoolQualityJudge(
   resourceGateArgv: string[] | null = null,
   recordVerdicts: boolean = true,
   judgeTimeoutMs: number = Infinity,
+  halted: boolean = false,
 ): Promise<Fact<PoolQualityFactValue | null>> {
   const planArgv = planCmd ?? defaultPoolQualityPlanArgv(root);
   const planR = await runAsync(planArgv, { timeoutMs: ROUTINE_TIMEOUT_MS });
@@ -324,6 +325,11 @@ export async function runPoolQualityJudge(
   };
   if (!plan.triggers.fired) {
     return { name: "pool-quality-judge", value: base, state: "verified", reason: `not-triggered (${plan.triggers.reasons.length} reasons: ${plan.triggers.reasons.join(",") || "none"})` };
+  }
+  // halt 闸（gap-drain-on-routine-driver-empties-round-and-respawn-loops）：halted ⇒ 只挡受闸动作
+  // （LLM judge spawn），机械 --plan 读数照跑（fired 已读出）。⛔ 不 spawn judge、不落判词载体。
+  if (halted) {
+    return { name: "pool-quality-judge", value: base, state: "verified", reason: "halted: judge deferred (mechanical --plan read; no LLM spawn)" };
   }
   // 资源门（AC150-1 同族）：spawn LLM judge 前经 resourceGateCheck 判定，WAIT ⇒ 退避本轮（⛔ 机械 --plan
   // 不受约束，零 LLM）。资源门 WAIT 是瞬时态（⛔ 不 latch），下一轮重读。resourceGateArgv = 测试缝。
@@ -469,6 +475,7 @@ export async function runArchitectureReview(
   resourceGateArgv: string[] | null = null,
   recordVerdicts: boolean = true,
   judgeTimeoutMs: number = Infinity,
+  halted: boolean = false,
 ): Promise<Fact<ArchReviewFactValue | null>> {
   // 1. P2 身份复制（必需——既产 P2 簇又推导 P1 候选构件）。
   const identityArgv = identityCmd ?? defaultIdentityReplicationArgv(root);
@@ -533,13 +540,19 @@ export async function runArchitectureReview(
     return { name: "architecture-review", value: base, state: "verified", reason: `not-triggered (no candidate clusters)` };
   }
 
-  // 5. 资源门（spawn LLM judge 前判定，同 B15）。WAIT ⇒ 退避本轮。
+  // 5. halt 闸（gap-drain-on-routine-driver-empties-round-and-respawn-loops）：halted ⇒ 只挡受闸动作
+  // （LLM judge spawn），机械聚类读数照跑（fired 已读出）。⛔ 不 spawn judge、不落判词载体。
+  if (halted) {
+    return { name: "architecture-review", value: base, state: "verified", reason: "halted: judge deferred (mechanical clustering read; no LLM spawn)" };
+  }
+
+  // 6. 资源门（spawn LLM judge 前判定，同 B15）。WAIT ⇒ 退避本轮。
   const gate = resourceGateCheck(root, resourceGateArgv);
   if (!gate.go) {
     return { name: "architecture-review", value: base, state: "not-evaluated", reason: `resource-gate-wait: ${gate.reason} (judge deferred)` };
   }
 
-  // 6. LLM judge（真实 claude -p，单批）。
+  // 7. LLM judge（真实 claude -p，单批）。
   const argv = judgeArgv ?? defaultArchReviewJudgeArgv(clusters, root);
   const judgeR = await runAsync(argv, { timeoutMs: judgeTimeoutMs, collectStderr: true });
   if (judgeR.error || judgeR.status !== 0) {
@@ -617,17 +630,20 @@ export function qualityGateRoutines(root: string, opts: QualityGateOptions): Rou
     {
       name: "pool-quality-judge",
       schedule: { kind: "interval", minutes: opts.poolJudgeIntervalMinutes },
-      run: async () => [await runPoolQualityJudge(root, opts.planCmd, opts.judgeArgv, opts.resourceGateArgv)],
+      // ctx.halted ⇒ 只挡 LLM judge spawn（机械 --plan 仍跑）——halt 是轮内闸，⛔ 不挡观测。
+      run: async (ctx) => [await runPoolQualityJudge(root, opts.planCmd, opts.judgeArgv, opts.resourceGateArgv, true, Infinity, ctx?.halted === true)],
     },
     {
       name: "judgment-consumer-check",
       schedule: { kind: "interval", minutes: opts.judgmentIntervalMinutes },
+      // 纯机械审计（零 LLM），halt 不挡——观测照跑。
       run: () => [runJudgmentConsumerCheck(root, opts.judgmentCmd)],
     },
     {
       name: "architecture-review",
       schedule: { kind: "interval", minutes: opts.archReviewIntervalMinutes },
-      run: async () => [await runArchitectureReview(root, opts.identityCmd, opts.lineageCmd, opts.deletionCmd, opts.archJudgeArgv, opts.resourceGateArgv)],
+      // ctx.halted ⇒ 只挡 LLM judge spawn（机械聚类仍跑）——halt 是轮内闸，⛔ 不挡观测。
+      run: async (ctx) => [await runArchitectureReview(root, opts.identityCmd, opts.lineageCmd, opts.deletionCmd, opts.archJudgeArgv, opts.resourceGateArgv, true, Infinity, ctx?.halted === true)],
     },
   ];
 }
@@ -665,9 +681,10 @@ export function computeRoundRecord(args: {
   return { round, run_id: runId, pid, ts: at, halted, facts };
 }
 
-/** 常驻循环：每轮读控制态（halt ⇒ 记 halted 轮退出）→ 评估 due 例程（scheduleIsDue + 内存 lastRun）→
- *  跑 due 例程 → 汇集 Facts → 写 round 心跳。SIGINT/SIGTERM / --once / --max-rounds 停。
- *  lastRun 是进程内存态（例程 interval 调度用）；重启 ⇒ never-ran ⇒ 首轮两例程均 due（该跑）。 */
+/** 常驻循环：每轮读控制态（halt ⇒ 记 halted 轮【继续循环】，⛔ 不退出——halt 是轮内闸，只挡受闸动作
+ *  spawn，观测/心跳照跑，见 gap-drain-on-routine-driver-empties-round-and-respawn-loops）→ 评估 due 例程
+ *  （scheduleIsDue + 内存 lastRun）→ 跑 due 例程 → 汇集 Facts → 写 round 心跳。SIGINT/SIGTERM / --once /
+ *  --max-rounds 停。lastRun 是进程内存态（例程 interval 调度用）；重启 ⇒ never-ran ⇒ 首轮例程均 due（该跑）。 */
 export async function runResidentQualityGateLoop(opts: QualityGateLoopOptions): Promise<number> {
   const { root, intervalMs, once, maxRounds, roundLogFile, runId, json, pidFile, routines } = opts;
   const controlStateRel = opts.controlStateRel ?? QUALITY_CONTROL_STATE_REL;
@@ -688,25 +705,24 @@ export async function runResidentQualityGateLoop(opts: QualityGateLoopOptions): 
   let round = 0;
   while (!stopRequested) {
     round += 1;
-    // 控制面（halt）：读 .quay/quality-control.json 单一真相源，halted ⇒ 记 halted 轮后退出。
-    if (isHalted(root, process.env, controlStateRel)) {
-      const rec = computeRoundRecord({ round, runId, pid: process.pid, at: new Date().toISOString(), facts: [], halted: true });
-      try { fs.appendFileSync(roundLogFile, JSON.stringify(rec) + "\n", "utf8"); } catch { /* 记录写失败不致命 */ }
-      if (json) process.stdout.write(`${JSON.stringify({ event: "halted", round })}\n`);
-      break;
-    }
+    // 控制面（halt）：读 <kind>-control.json 单一真相源。halted ⇒ 本轮【不做受闸动作（spawn）】，但
+    // 【观测继续、心跳继续、循环继续】——halt 是轮内的闸，⛔ 不是进程的终止条件
+    // （gap-drain-on-routine-driver-empties-round-and-respawn-loops：旧的 break 让进程 return 0 结束，
+    //  supervisor 每 5s 重生一次 ⇒ 无限 respawn 循环 + 空轮记录）。halted 经 ctx 传给例程：只挡
+    // 受闸动作（LLM spawn），机械读数照跑（goal 的 criterion/缺口、quality 的 --plan/聚类均零 LLM）。
+    const halted = isHalted(root, process.env, controlStateRel);
     const facts: Fact<unknown>[] = [];
     for (const r of routines) {
       const state = { now: Date.now(), lastRun: lastRun[r.name] };
       if (!scheduleIsDue(r.schedule, state)) continue;
       lastRun[r.name] = state.now;
       try {
-        facts.push(...(await r.run()));
+        facts.push(...(await r.run({ halted })));
       } catch (e) {
         facts.push({ name: r.name, value: null, state: "failed", reason: `routine threw: ${(e as Error).message}` });
       }
     }
-    const rec = computeRoundRecord({ round, runId, pid: process.pid, at: new Date().toISOString(), facts });
+    const rec = computeRoundRecord({ round, runId, pid: process.pid, at: new Date().toISOString(), facts, halted });
     try {
       fs.mkdirSync(path.dirname(roundLogFile), { recursive: true });
       fs.appendFileSync(roundLogFile, JSON.stringify(rec) + "\n", "utf8");

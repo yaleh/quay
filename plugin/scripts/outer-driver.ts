@@ -381,7 +381,9 @@ export function computeOuterRoundRecord(opts: {
 }
 
 /** 跑常驻循环：每轮跑一遍例程（collectFacts）→ 写 round 记录 → 按间隔进入下一轮，直到信号停机或
- *  --once/--max-rounds。halted ⇒ 写一条 halted round 后退出（与 promotion/worker 同族）。 */
+ *  --once/--max-rounds。halted ⇒ 记 halted 轮【继续循环】，⛔ 不退出——halt 是轮内闸，非进程终止条件
+ *  （gap-drain-on-routine-driver-empties-round-and-respawn-loops：旧的 break 让进程 return 0 结束、
+ *  supervisor 每 5s 重生一次）。outer 例程全机械（零 LLM），halted 轮照跑全部例程，无 spawn 可挡。 */
 export async function runResidentOuterLoop(opts: ResidentOuterLoopOptions): Promise<number> {
   const { root, intervalMs, once, maxRounds, roundLogFile, runId, json, pidFile, routines } = opts;
 
@@ -404,13 +406,11 @@ export async function runResidentOuterLoop(opts: ResidentOuterLoopOptions): Prom
   let selfStopCounter = 0;
   while (!stopRequested) {
     round += 1;
-    // 控制面：起新一轮前读控制态（.quay/outer-control.json 单一真相源）。halted ⇒ 写 halted round 退出。
-    if (isHalted(root, process.env, OUTER_CONTROL_STATE_REL)) {
-      const record = computeOuterRoundRecord({ round, runId, pid: process.pid, at: ts(), facts: [], halted: true, error: null });
-      try { appendHeartbeatLine(roundLogFile, record); } catch { /* 日志写失败不致命 */ }
-      if (json) process.stdout.write(`${JSON.stringify({ event: "halted", round })}\n`);
-      break;
-    }
+    // 控制面：起新一轮前读控制态（.quay/outer-control.json 单一真相源）。halted ⇒ 本轮【不做受闸动作】，
+    // 但【观测继续、心跳继续、循环继续】——halt 是轮内闸，⛔ 不是进程的终止条件
+    // （gap-drain-on-routine-driver-empties-round-and-respawn-loops）。outer 例程全机械（零 LLM），
+    // 故 halted 轮照跑全部例程（无 spawn 可挡），只在 round 记录里标 halted: true。
+    const halted = isHalted(root, process.env, OUTER_CONTROL_STATE_REL);
 
     // 例程调度（Layer 1b schedule）：每轮跑 due 的例程。全部是 EVERY_ROUND ⇒ 每轮全跑。
     const due = routines.filter((r) => scheduleIsDue(r.schedule, { iteration: round }));
@@ -439,7 +439,7 @@ export async function runResidentOuterLoop(opts: ResidentOuterLoopOptions): Prom
       facts.push({ name: "self_stop", value: { counter: selfStop.counter }, state: "verified", reason: null });
     }
 
-    const record = computeOuterRoundRecord({ round, runId, pid: process.pid, at: ts(), facts, halted: false, error: null });
+    const record = computeOuterRoundRecord({ round, runId, pid: process.pid, at: ts(), facts, halted, error: null });
     try { appendHeartbeatLine(roundLogFile, record); } catch { /* 日志写失败不致命 */ }
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
 

@@ -1,7 +1,7 @@
 {
   "files": 133,
-  "bytes": 3848299,
-  "fingerprint": "b5957bd3f18ceacf255d8fb2b2fb8b4d2d5aea9d0682b7f375bb9c8ba92c6349",
+  "bytes": 3853644,
+  "fingerprint": "9dbed1450dfc7784c9df53ecd607049a3215d507a7db13d53c1d7c32a8b5c1f1",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
@@ -65,7 +65,7 @@
     },
     {
       "rel": "plugin/probes/meta-driver.md",
-      "sha": "3c2821c28aea35d7674fa5e29f4165d9a2513f487a84cd41f0034cddd5e36870"
+      "sha": "739d4e25563129bad7e33200642aac9ede1ebea4a6ae372acc10d8a6326c5d04"
     },
     {
       "rel": "plugin/probes/self-validation.md",
@@ -421,7 +421,7 @@
     },
     {
       "rel": "plugin/scripts/start-drivers.ts",
-      "sha": "016bdf209c9430a0004af1b44a30beadc6e3c772d39ea75928d10a3eb88e847f"
+      "sha": "812ea7fa13320fc9f4619a12462089418f74bcbe82451ae0ff0a035f6cf0e67d"
     },
     {
       "rel": "plugin/scripts/strategic-doc-staleness-check.ts",
@@ -457,7 +457,7 @@
     },
     {
       "rel": "plugin/scripts/task-ops.ts",
-      "sha": "ff7c52013fa64c5d9fa3b93eb91deffc86843815063280e55352477031f89b4a"
+      "sha": "d0eafa912103dbf29482532d13319192d72a3ded159d8183503fb5cab8d854d2"
     },
     {
       "rel": "plugin/scripts/task-schema-check.ts",
@@ -465,7 +465,7 @@
     },
     {
       "rel": "plugin/scripts/task-schema.ts",
-      "sha": "7c568481bf2aab97f31fa13aab53f48e891ed10c0a1027d8d4f9e5b15299b912"
+      "sha": "7313c2f38f119511e962f51ab6e49c429a10c14e588b1d9b45359b9628633ece"
     },
     {
       "rel": "plugin/scripts/task-status-drift-check.ts",
