@@ -1,7 +1,7 @@
 ---
 id: AC-161
 title: 用户级只留 marketplace 源，启用迁项目级
-status: draft
+status: active
 kind: criterion
 goal: GOAL-003
 criterion: |-
