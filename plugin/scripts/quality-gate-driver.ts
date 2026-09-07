@@ -832,7 +832,10 @@ export async function main(argv: string[]): Promise<number> {
   const archReviewIntervalMinutes = archReviewIntervalRaw !== undefined && isNonNegInt(archReviewIntervalRaw)
     ? Number(archReviewIntervalRaw) : ARCH_REVIEW_INTERVAL_MIN_DEFAULT;
 
-  const roundLogFile = roundLogPath ? path.resolve(roundLogPath) : path.join(rootDir, ROUND_LOG_REL);
+  // 心跳落点 = .quay/。ROUND_LOG_REL 是 .quay/-相对路径（registry carriers[0]），⛔ 直接 join rootDir
+  // 会把心跳写到 repo-root quality-round.jsonl，与 driver-runtime carrierStats 读 .quay/ 分叉 ⇒
+  // liveness 监测读不到心跳、假报 stall（gap-meta-round-log-rel）。
+  const roundLogFile = roundLogPath ? path.resolve(roundLogPath) : path.join(rootDir, ".quay", ROUND_LOG_REL);
   const resolvedRunId = runId || `qg-${Date.now()}`;
   const routines = qualityGateRoutines(rootDir, {
     planCmd: planCmd ? splitArgs(planCmd) : null,
