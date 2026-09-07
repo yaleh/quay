@@ -2,7 +2,7 @@
 // goal-driver.test.mjs — G6 (tasks/gap-goal-driver-mechanical-ring): goal 机械环的判定面单测。
 //
 // 覆盖四件事：①I2 的纯推导（goalAchievedFromRecords）；②真实机械环端到端（跑真的 goal-store CLI，
-// 非 fixture 注入 seam——载体有 verdict、evidence 回写、I2 flip、draft 不动、无 tasks 写）；
+// 非 fixture 注入 seam——载体有 verdict、evidence 不回写、I2 flip、draft 不动、无 tasks 写）；
 // ③cli/driver.ts 的 KINDS 与 kernel DRIVER_KINDS 集合一致（AC6，含补回 suite）；
 // ④CLI 冒烟（--help / 未知参数）。
 //
@@ -14,11 +14,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 
 import {
   goalAchievedFromRecords,
   computeGoalGaps,
   readTaskFacts,
+  checkStaleness,
+  checkAchievedFailing,
   goalDriverRoutines,
   GOAL_ROUND_REL,
 } from '../scripts/goal-driver.ts';
@@ -112,9 +115,126 @@ test('readTaskFacts: 读 tasks/*.md 的 status+goal_ac；目录不存在 ⇒ nul
   }
 });
 
+// ── I5 achieved-but-failing（gap-goal-achieved-but-failing-no-handler）────────────────────────
+// goal-store 的 I5 在【独立子命令】`check --achieved-failing`（跑判据），`check --staleness` 保持纯读
+// （甲：结构隔离——AC-175 的 criterion 自己调 `check --staleness`，若 staleness 也跑判据会无界递归，
+//  2026-09-07 生产事故 host load 41.89）。跑判据路径带环境变量闸（乙：GOAL_ACCEPTANCE_ACTIVE_ENV），
+//  嵌套调用读到即拒跑判据并返回 evaluated:false（⛔ 不是空数组冒充「没有」，硬规则 3b）。
+
+const goalStoreAbs = path.join(repoRoot, 'packages', 'quay', 'src', 'goal-store.ts');
+
+test('checkAchievedFailing wrapper: achieved 且 criterion fail ⇒ achievedButFailing 桶（与 divergent 分离；checkStaleness 纯读）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-stale-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    writeGoalFile(tmp, { id: 'GOAL-001', status: 'active', kind: 'goal' });
+    writeGoalFile(tmp, { id: 'AC-001', status: 'achieved', kind: 'criterion', goal: 'GOAL-001', criterion: 'false' });
+    writeGoalFile(tmp, { id: 'AC-002', status: 'active', kind: 'criterion', goal: 'GOAL-001', criterion: 'true' });
+    const af = await checkAchievedFailing(repoRoot, tmp);
+    assert.ok(af, 'checkAchievedFailing 应返回读数（非 null）');
+    assert.deepEqual(af.achievedButFailing, ['AC-001'], 'achieved 且 criterion `false` ⇒ 进桶');
+    assert.equal(af.evaluated, true, '非拒跑 ⇒ evaluated: true');
+    // checkStaleness 必须纯读：不再携带 achievedButFailing（I5 已移出到独立子命令）。
+    const st = await checkStaleness(repoRoot, tmp);
+    assert.ok(st, 'checkStaleness 应返回读数');
+    assert.equal('achievedButFailing' in st, false, 'checkStaleness 纯读，不带 achievedButFailing 键');
+    assert.deepEqual(st.divergent, [], '还有 active AC ⇒ 非 divergent（两桶语义相反、互相独立）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('AC5 — achievedButFailing 双向取假：criterion fail→pass 移出桶', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-bidir-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    writeGoalFile(tmp, { id: 'GOAL-001', status: 'active', kind: 'goal' });
+    writeGoalFile(tmp, { id: 'AC-001', status: 'achieved', kind: 'criterion', goal: 'GOAL-001', criterion: 'false' });
+    let af = await checkAchievedFailing(repoRoot, tmp);
+    assert.deepEqual(af.achievedButFailing, ['AC-001'], 'criterion `false` ⇒ 进桶');
+    // 翻成 pass ⇒ 出桶（两个方向都断言）。
+    writeGoalFile(tmp, { id: 'AC-001', status: 'achieved', kind: 'criterion', goal: 'GOAL-001', criterion: 'true' });
+    af = await checkAchievedFailing(repoRoot, tmp);
+    assert.deepEqual(af.achievedButFailing, [], 'criterion `true` ⇒ 出桶');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('AC1 — 递归结构上不可能：criterion 调 check --staleness ⇒ 跑判据深度 = 1（进程级观测，非 guard 断言）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-ac1-'));
+  const marker = path.join(tmp, 'marker.txt');
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    writeGoalFile(tmp, { id: 'GOAL-001', status: 'active', kind: 'goal' });
+    // AC-175 的真实形状：criterion 自己调 `check --staleness`。甲（结构隔离）⇒ staleness 纯读，
+    // 不产生第二层跑判据 ⇒ criterion 只被执行 1 次（marker 恰 1 行，即最大嵌套深度 1）。
+    writeGoalFile(tmp, { id: 'AC-001', status: 'achieved', kind: 'criterion', goal: 'GOAL-001',
+      criterion: `echo x >> ${marker} && node ${goalStoreAbs} check --staleness --root ${tmp}` });
+    const af = await checkAchievedFailing(repoRoot, tmp);
+    assert.ok(af, 'checkAchievedFailing 应返回读数');
+    const depth = fs.existsSync(marker)
+      ? fs.readFileSync(marker, 'utf8').trim().split('\n').filter(Boolean).length
+      : 0;
+    assert.equal(depth, 1, `跑判据最大嵌套深度必须 = 1，实测 marker 行数 ${depth}`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('AC2 — 去掉闸 ⇒ 深度 ≥3：criterion 调 check --achieved-failing（env -u 清闸）递归；带闸 ⇒ 深度 1', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-ac2-'));
+  const marker = path.join(tmp, 'marker.txt');
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    writeGoalFile(tmp, { id: 'GOAL-001', status: 'active', kind: 'goal' });
+    // 正控制（带闸）：嵌套 check --achieved-failing 读到环境变量闸 ⇒ 拒跑判据 ⇒ 深度 1。
+    writeGoalFile(tmp, { id: 'AC-001', status: 'achieved', kind: 'criterion', goal: 'GOAL-001',
+      criterion: `echo x >> ${marker} && if [ "$(wc -l < ${marker})" -lt 5 ]; then node ${goalStoreAbs} check --achieved-failing --root ${tmp}; fi` });
+    await checkAchievedFailing(repoRoot, tmp);
+    const depthOn = fs.readFileSync(marker, 'utf8').trim().split('\n').filter(Boolean).length;
+    assert.equal(depthOn, 1, `带闸 ⇒ 深度必须 = 1，实测 ${depthOn}`);
+
+    // 负控制（去闸）：清掉环境变量闸 ⇒ 同一观测立即出现深度 ≥3 的嵌套（证明测的是真行为）。
+    fs.rmSync(marker, { force: true });
+    writeGoalFile(tmp, { id: 'AC-001', status: 'achieved', kind: 'criterion', goal: 'GOAL-001',
+      criterion: `echo x >> ${marker} && if [ "$(wc -l < ${marker})" -lt 5 ]; then env -u QUAY_GOAL_ACCEPTANCE_ACTIVE node ${goalStoreAbs} check --achieved-failing --root ${tmp}; fi` });
+    await checkAchievedFailing(repoRoot, tmp);
+    const depthOff = fs.readFileSync(marker, 'utf8').trim().split('\n').filter(Boolean).length;
+    assert.ok(depthOff >= 3, `去闸 ⇒ 深度必须 ≥3，实测 ${depthOff}`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('AC6 — check --achieved-failing 对 achieved+failing AC exit 1（⛔ 不再空分歧 + exit 0 假绿）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-ac6-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    writeGoalFile(tmp, { id: 'GOAL-001', status: 'active', kind: 'goal' });
+    writeGoalFile(tmp, { id: 'AC-001', status: 'achieved', kind: 'criterion', goal: 'GOAL-001', criterion: 'false' });
+    const r = spawnSync('node', ['--experimental-strip-types', goalStoreAbs, 'check', '--achieved-failing', '--root', tmp], { encoding: 'utf8' });
+    assert.equal(r.status, 1, 'achieved-but-failing AC ⇒ exit 1（旧代码 exit 0 假绿）:\n' + r.stdout + r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.deepEqual(out.achievedButFailing, ['AC-001'], 'achieved+failing AC 被枚举进桶（⛔ 不是布尔/计数）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('AC8 — goal-driver.ts 注释与实现逐字相符（点名 check --achieved-failing，不再点名 I4/divergent 覆盖该形态）', () => {
+  const src = fs.readFileSync(new URL('../scripts/goal-driver.ts', import.meta.url), 'utf8');
+  // 旧注释（假覆盖）必须消失：它点名 I4/divergent 覆盖一个 I4 结构上不可能触发的形态。
+  assert.doesNotMatch(src, /achieved-but-failing 的分歧由 I4/, '旧注释点名 I4 覆盖 achieved-but-failing 的措辞已删除');
+  // 不再声称 check --staleness 报出 achievedButFailing（staleness 现在纯读）。
+  assert.doesNotMatch(src, /check --staleness 的\s*\n?\s*achievedButFailing/, '不再声称 check --staleness 报出 achievedButFailing');
+  // 新注释必须点名真正的检测者：check --achieved-failing 的 achievedButFailing 桶。
+  assert.match(src, /check --achieved-failing` 的 achievedButFailing 桶报出/, '新注释点名 check --achieved-failing 的 achievedButFailing 桶');
+});
+
 // ── 真实机械环端到端（⛔ 不用 fixture 注入 seam，跑真的 goal-store CLI）────────────────────
 
-test('real ring: 载体有 verdict + evidence 回写 + I2 flip + draft 不动 + 无 tasks 写', async () => {
+test('real ring: 载体有 verdict + evidence 不回写 + I2 flip + draft 不动 + 无 tasks 写', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-'));
   try {
     fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
@@ -143,12 +263,13 @@ test('real ring: 载体有 verdict + evidence 回写 + I2 flip + draft 不动 + 
     const carrier = fs.readFileSync(roundLog, 'utf8');
     assert.ok(carrier.includes('"verdict"'), 'round record must carry criterion verdicts');
 
-    // AC3 机制 + I2：evidence 回写 + AC pass→achieved + GOAL 全达成→achieved。
+    // AC3 机制 + I2：AC pass→achieved + GOAL 全达成→achieved；evidence 不回写进文件
+    // （gap-goal-evidence-cache-should-not-enter-git——evidence 是 .quay/gate-events.jsonl 派生的）。
     const g1 = fs.readFileSync(path.join(tmp, 'goals', 'GOAL-001-t.md'), 'utf8');
     const a1 = fs.readFileSync(path.join(tmp, 'goals', 'AC-001-t.md'), 'utf8');
     assert.match(g1, /^status: achieved$/m, 'GOAL-001 全部 AC 达成 ⇒ flip achieved（I2）');
     assert.match(a1, /^status: achieved$/m, 'AC-001 pass ⇒ flip achieved（裁定 5 确定性推导）');
-    assert.match(a1, /evidence:/, 'AC-001 evidence 回写（gate 写回 at/verdict/reading）');
+    assert.doesNotMatch(a1, /evidence:/, 'AC-001 evidence 不回写进文件（gate 只写 GateEvent 到账本）');
 
     // AC4 负控制：draft 不动、其 AC 也不被跑/翻。
     const g3 = fs.readFileSync(path.join(tmp, 'goals', 'GOAL-003-t.md'), 'utf8');

@@ -50,6 +50,7 @@ import {
   quoteIsVerbatim,
   carrierGate,
   collectAddressedTasks,
+  resolveAddressedTaskOpinions,
   parseFrontmatterLabels,
   existingPaths,
   renderHumanCallBody,
@@ -1020,6 +1021,97 @@ test('collectAddressedTasks: 只收带标签的【未关闭】任务（裸缺陷
   const got = collectAddressedTasks(root).map((x) => `${x.id}:${x.status}`).sort();
   assert.deepEqual(got, ['a:todo', 'b:needs-human']);
   assert.deepEqual(collectAddressedTasks(root, 'meta-human-call'), [], '别的标签 ⇒ 空');
+});
+
+// ── addressedTaskOpinions：有入口无出口的读数，补上逐条三态判定（measurement，⛔ 非 responses 通道）──
+// gap-meta-addressedtasks-input-without-output-channel：addressedTasks 是建了入口没有出口的通道——
+// 四条输出（divergences/proposals/autoDrive/decisions）没有一条能「回应一条被点名的 task」，于是
+// 「0 次响应」是结构上不可能非零的量（无通道 ⇒ 恒零，硬规则 4）。本任务不建 responses[]，只补测量：
+// 对每一条 addressedTask 落一个三态（有意见/无意见/未评估），用真实比例决定通道建不建。
+
+const addrTask = (id, status = 'ready') => ({ id, status, title: `t-${id}`, labels: ['meta-driver'] });
+
+test('resolveAddressedTaskOpinions: 逐条可枚举——每一条 addressedTask 各得 taskId+三态，⛔ 不是总数/布尔', () => {
+  const tasks = [addrTask('gap-a'), addrTask('gap-b'), addrTask('gap-c')];
+  const got = resolveAddressedTaskOpinions(tasks, [
+    { taskId: 'gap-a', hasOpinion: true, note: 'x' },
+    { taskId: 'gap-b', hasOpinion: false },
+  ]);
+  assert.equal(got.length, 3, '判定条数必须 == addressedTasks 条数');
+  assert.deepEqual(got.map((g) => [g.taskId, g.opinion]), [
+    ['gap-a', 'has-opinion'],
+    ['gap-b', 'no-opinion'],
+    ['gap-c', 'not-evaluated'],
+  ], '少答的那条必须落「未评估」，⛔ 不是被静默丢弃，也不是「无意见」');
+});
+
+test('resolveAddressedTaskOpinions: 三态可区分且能取假——三个样本缺一不可', () => {
+  const tasks = [addrTask('gap-a')];
+  // 有意见
+  assert.equal(resolveAddressedTaskOpinions(tasks, [{ taskId: 'gap-a', hasOpinion: true, note: 'n' }])[0].opinion, 'has-opinion');
+  // 无意见（probe 显式给出 hasOpinion:false —— 看过且无话可说，是真测量）
+  assert.equal(resolveAddressedTaskOpinions(tasks, [{ taskId: 'gap-a', hasOpinion: false }])[0].opinion, 'no-opinion');
+  // 未评估（probe 完全没提到这条 task —— ⛔ 不得落成「无意见」，硬规则 3b）
+  assert.equal(resolveAddressedTaskOpinions(tasks, [])[0].opinion, 'not-evaluated');
+  // 未评估（形状读不懂 —— hasOpinion 非布尔 ⇒ 读不懂 ≠ 合格，也 ≠ 无意见）
+  assert.equal(resolveAddressedTaskOpinions(tasks, [{ taskId: 'gap-a', hasOpinion: 'yes' }])[0].opinion, 'not-evaluated');
+});
+
+test('resolveAddressedTaskOpinions: 覆盖完整性——判定条数恒等于 addressedTasks 条数（负控制：probe 只答部分）', () => {
+  const tasks = [addrTask('gap-a'), addrTask('gap-b'), addrTask('gap-c')];
+  // probe 只答了 1/3 ⇒ 仍产出 3 条判定，未答的落「未评估」
+  const got = resolveAddressedTaskOpinions(tasks, [{ taskId: 'gap-a', hasOpinion: false }]);
+  assert.equal(got.length, tasks.length);
+  assert.deepEqual(got.map((g) => g.opinion), ['no-opinion', 'not-evaluated', 'not-evaluated']);
+  // probe 多答了不存在的 task ⇒ 丢弃，不扩出一个不存在的对象（判定只覆盖真实输入集）
+  const extra = resolveAddressedTaskOpinions(tasks, [{ taskId: 'gap-zzz', hasOpinion: true, note: 'x' }]);
+  assert.equal(extra.length, tasks.length);
+  assert.ok(extra.every((g) => g.opinion === 'not-evaluated'));
+  // 同一 taskId 出现多条 ⇒ 取第一条（不猜测、不合并）
+  const dup = resolveAddressedTaskOpinions([addrTask('gap-a')], [
+    { taskId: 'gap-a', hasOpinion: true, note: 'first' },
+    { taskId: 'gap-a', hasOpinion: false },
+  ]);
+  assert.equal(dup[0].opinion, 'has-opinion');
+  assert.equal(dup[0].note, 'first');
+});
+
+test('parseProbeOutput: addressedTaskOpinions 被解析；缺字段/形状不对的条目被丢弃（⛔ 不凑成合格）', () => {
+  const out = parseProbeOutput(JSON.stringify({
+    divergences: [], proposals: [], autoDrive: [], decisions: [],
+    addressedTaskOpinions: [
+      { taskId: 'gap-a', hasOpinion: true, note: 'x' },
+      { taskId: 'gap-b', hasOpinion: false },
+      { taskId: '' },                        // taskId 空 ⇒ 丢
+      { hasOpinion: true },                  // 缺 taskId ⇒ 丢
+      { taskId: 'gap-c', hasOpinion: 'yes' }, // hasOpinion 非布尔 ⇒ 丢
+      'not-an-object',                        // 形状不对 ⇒ 丢
+    ],
+  }));
+  assert.equal(out.addressedTaskOpinions.length, 2, '只留形状合格的条目');
+  assert.deepEqual(out.addressedTaskOpinions.map((o) => o.taskId), ['gap-a', 'gap-b']);
+});
+
+// 负控制：判定不进 readingsDigest——它由 probe 输出派生、每轮可变，进摘要会让变化检测闸恒为真。
+test('readingsDigest: addressedTaskOpinions 不进摘要——仅判定变化时摘要不变', () => {
+  const base = mkReadings('pass', 'n1');
+  const a = readingsDigest(base);
+  const withOpinion = { ...base, addressedTaskOpinions: [{ taskId: 'gap-x', opinion: 'has-opinion', note: null }] };
+  const b = readingsDigest(withOpinion);
+  assert.equal(a, b, '仅判定变化不得改变摘要');
+});
+
+// 单一处理者不变：逐条判定是纯函数，⛔ 不写任何 task 文件（task 的处理者仍是 promotion→worker）。
+test('resolveAddressedTaskOpinions: 纯判定——不改写 task 文件、不改 status/labels', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-opinion-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, 'tasks'), { recursive: true });
+  const taskFile = '---\nid: gap-x\nstatus: ready\ntitle: t\nlabels:\n  - meta-driver\n---\n正文\n';
+  fs.writeFileSync(path.join(root, 'tasks', 'gap-x.md'), taskFile, 'utf8');
+  const tasks = collectAddressedTasks(root);  // 真实读一遍，拿到输入
+  const got = resolveAddressedTaskOpinions(tasks, [{ taskId: 'gap-x', hasOpinion: true, note: 'n' }]);
+  assert.equal(got.length, 1);
+  assert.equal(fs.readFileSync(path.join(root, 'tasks', 'gap-x.md'), 'utf8'), taskFile, 'task 文件不得被改写');
 });
 
 test('existingPaths: 只留【真实存在】的（目录也算——前瞻性 GOAL 可点名目录）', (t) => {

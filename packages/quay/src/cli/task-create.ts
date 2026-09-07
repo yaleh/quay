@@ -38,6 +38,10 @@ export async function handleTaskCreate({ positional, flags, wantsJson }: CliCtx)
   if (flags.body !== undefined || flags["body-file"] !== undefined) {
     patch.body = await resolveBody(flags);
   }
+  // gap-cli-write-surface-lacks-toplevel-fields: `task create` shares the `task edit` write
+  // surface (同面) — the same top-level `depends_on`/`goal_ac` fields are writable at creation.
+  if (flags["depends-on"] !== undefined) patch.depends_on = String(flags["depends-on"]).split(",").filter(Boolean);
+  if (flags["goal-ac"] !== undefined) patch.goal_ac = flags["goal-ac"];
 
   await withProvider(async (client) => {
     const t = await client.taskWrite({ id, ...patch });

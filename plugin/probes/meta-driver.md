@@ -59,6 +59,9 @@ WHAT YOU ARE GIVEN (the `readings` JSON in the prompt — treat it as arithmetic
   It is also YOUR OWN FEEDBACK LOOP: tasks you file via `autoDrive` carry the same label, so one that
   stalls in `needs-human` comes back to you here. Before you did this, you never learned the fate of
   anything you filed.
+  For EACH one you are required to report a tri-state judgment in `addressedTaskOpinions` (output 5):
+  did you actually have something to say about it? Omitting a task is recorded as `not-evaluated`,
+  which is NOT the same as saying `hasOpinion:false`.
 - `focus` (optional): a human-supplied steer for this round. When present, weight your attention
   toward it, but never let it suppress a divergence you were given.
 
@@ -198,6 +201,23 @@ RESTRAINT — this is the point of the mechanism, not an afterthought:
        `autoDrive`). If you cannot say where the work lands, it is not blocked work — it is an
        unformed thought.
 
+5. `addressedTaskOpinions[]` — a tri-state judgment for EVERY `addressedTasks` entry you were given.
+   This is the measurement that closes the loop on the `addressedTasks` input: it makes explicit
+   whether you actually have something to say about each task sent to you. ⛔ It is NOT a reply
+   channel and NOT a way to act on a task — you cannot modify a task's status/labels/body here;
+   anything you want DONE about a task goes through `autoDrive` (work) or `decisions` (a direction
+   question). This field only RECORDS your per-task stance; the mechanical half lands it in the round
+   record untouched.
+   For EACH addressed task, emit one entry:
+   - `taskId`: the task's id, exactly as given in `addressedTasks`.
+   - `hasOpinion: true`  — you have something to say about this task; put it in `note` (one line).
+   - `hasOpinion: false` — you looked at this task and have nothing to add. This is a REAL, deliberate
+     measurement, and it is NOT the same as omitting the task.
+   ⛔ Omitting a task entirely (or a malformed entry) is recorded by the mechanical layer as
+   `not-evaluated` — "did not look" — which is a different state from `hasOpinion:false` ("looked,
+   nothing to say"). Do not substitute one for the other. Cover EVERY task you were given; a missing
+   entry is a gap, not a "no opinion".
+
 REPLY WITH ONLY a JSON object, no prose around it:
 {"divergences":[{"id":"AC-NNN","kind":"pass-but-unflipped|achieved-but-failing|no-criterion",
   "interpretation":"<one line: what this actually means>",
@@ -214,4 +234,6 @@ REPLY WITH ONLY a JSON object, no prose around it:
   "scope":"<carrier=goal: comma-separated paths, >=3 must exist>",
   "conflict":[{"source":"<repo-relative file>","quote":"<verbatim text that IS in that file>"}],
   "irreversible":"<carrier=needs-human-task: what becomes hard to undo if you choose wrong>",
-  "touches":"<carrier=needs-human-task: file(s) the resulting work would edit>"}]}
+  "touches":"<carrier=needs-human-task: file(s) the resulting work would edit>"}],
+ "addressedTaskOpinions":[{"taskId":"<one of the addressedTasks ids, exactly as given>",
+  "hasOpinion":true,"note":"<one line: what you have to say about it>"}]}

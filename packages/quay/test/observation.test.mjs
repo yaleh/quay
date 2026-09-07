@@ -1,4 +1,4 @@
-// @test-group product
+// @test-group lowconc
 // gap-git-history-counts-stale-branches — readGitHistory must count only ACTIVE local branches as
 // chart lanes. The old `git log --branches --source` counted every local branch, so a merged-but-
 // never-deleted leftover branch (a fan-in source left dangling) kept polluting the lane count long
@@ -464,10 +464,10 @@ test("readLiveWorkerProcesses: scans a fake /proc for worker cmdlines + start ti
       `${pid} (node) S 1 ${pid} ${pid} 0 -1 4194560 10 0 0 0 0 0 0 0 20 0 1 0 ${starttime} 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
     fs.mkdirSync(path.join(procDir, "100"));
     fs.writeFileSync(path.join(procDir, "100", "cmdline"),
-      `node /x/quay-launch.sh ${WORKER_PROCESS_NAME} -p Task: gap-first. Repo root: /tmp/ws. … `);
+      `node\x00/x/quay-launch.sh\x00${WORKER_PROCESS_NAME}\x00-p\x00Task: gap-first. Repo root: /tmp/ws.\x00…\x00`);
     fs.writeFileSync(path.join(procDir, "100", "stat"), statPid(100, 10000));
     fs.mkdirSync(path.join(procDir, "101"));
-    fs.writeFileSync(path.join(procDir, "101", "cmdline"), "node not-a-worker \n");
+    fs.writeFileSync(path.join(procDir, "101", "cmdline"), "node\x00not-a-worker\x00\n");
     fs.writeFileSync(path.join(procDir, "101", "stat"), statPid(101, 20000));
 
     const workers = readLiveWorkerProcesses(procDir);
