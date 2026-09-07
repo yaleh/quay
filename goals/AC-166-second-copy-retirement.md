@@ -1,7 +1,7 @@
 ---
 id: AC-166
 title: 第二副本退役 —— .claude 双副本 archive + manager-tick-core 迁入 plugin
-status: draft
+status: active
 kind: criterion
 goal: GOAL-003
 criterion: |-
