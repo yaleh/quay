@@ -124,6 +124,7 @@ extra:
 
 ## Touches
 
+- `.quay/suite-bucket-reattribution.jsonl`
 - `plugin/scripts/slot-refill.ts`
 - `plugin/scripts/concurrent-batch-scheduler.ts`
 - `plugin/scripts/ac36-sortkey-criterion-check.ts`
@@ -134,6 +135,7 @@ extra:
 - `plugin/test/ac56-recommended-deordered-check.test.mjs`
 - `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `docs/analysis/test-file-baseline.txt`
+- `docs/analysis/dead-set-recomputed.json`
 - `orchestration/dispatch-preference.md`
 - `orchestration/SPEC-capability-planes-and-mechanism-lifecycle-2026-09-05.md`
 - `tasks/gap-delivery-critical-mechanical-axis-orphaned-needs-ruling.md`
