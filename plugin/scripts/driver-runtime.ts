@@ -315,7 +315,7 @@ export function resolveMainRoot(root: string): string {
 // carrier_records = 全载体行数之和（wc -l 语义：数换行符）；last_record_ts = 全载体末条记录 ts 的
 // 最大值（⛔ 只报计数无法区分「在长」与「停更」——载体停更与「一切正常」同形）。时间戳键按 kind 的
 // tsKey 读（缺省 ts；quality 判词载体用 judgedAt——gap-meta-carrierstats：键不匹配会把停摆伪装成
-// 未查）。
+// 未查）。quality 载体混两种键（心跳 ts + 判词 judgedAt），读两者较新者——见 gap-meta-round-log-rel。
 
 /** 一个 kind 的载体观测结果。 */
 export interface CarrierStats {
@@ -328,6 +328,10 @@ export interface CarrierStats {
 export function carrierStats(root: string, kind: DriverKind): CarrierStats {
   const spec = DRIVER_KINDS[kind];
   const tsKey = spec.tsKey ?? "ts";
+  // 时间戳键集合：quality 载体混两种键（心跳 ts + 判词 judgedAt——gap-meta-round-log-rel）。取两者较
+  // 新者作 lastTs；⛔ 只读 tsKey 会把心跳（ts，每 30s 一条的 liveness 直接量）与停摆同形——判词 judgedAt
+  // 是间歇量，池不触发就停更，靠它判活必假报 stall（硬规则 4b：liveness 用直接量，⛔ 不用间歇派生量）。
+  const tsKeys = tsKey === "ts" ? ["ts"] : [tsKey, "ts"];
   let records = 0;
   let lastTs: string | null = null;
   let primaryPath = "";
@@ -347,8 +351,10 @@ export function carrierStats(root: string, kind: DriverKind): CarrierStats {
       if (!line.trim()) continue;
       try {
         const j = JSON.parse(line);
-        if (j && typeof j[tsKey] === "string" && j[tsKey]) {
-          if (lastTs === null || j[tsKey] > lastTs) lastTs = j[tsKey];
+        for (const k of tsKeys) {
+          if (j && typeof j[k] === "string" && j[k] && (lastTs === null || j[k] > lastTs)) {
+            lastTs = j[k];
+          }
         }
       } catch {
         /* torn/partial tail — skip */
