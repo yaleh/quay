@@ -82,45 +82,45 @@ extra:
 
 ## AC
 
-- [ ] **排序轴移除（正向 + 负控制，一条命令各出一个数）**：`plugin/scripts/slot-refill.ts` 的
+- [x] **排序轴移除（正向 + 负控制，一条命令各出一个数）**：`plugin/scripts/slot-refill.ts` 的
       `candidates.sort` 比较体与 `ranking` 构造中 `deliveryCritical` **零命中**
       （`sed -n '1150,1240p' plugin/scripts/slot-refill.ts | grep -c deliveryCritical` ⇒ `0`）；
       **负控制**：同文件 `delivery_critical_in_flight` 相关行**仍非零命中**
       （`grep -c delivery_critical_in_flight plugin/scripts/slot-refill.ts` ⇒ ≥2，打印命中行）——
       两个数一起贴，只贴前者不算（零计数须配「谓词对已知为真样本干跑」，硬规则 2）。
-- [ ] **`concurrent-batch-scheduler.ts` 去 DC**：`grep -c 'deliveryCritical' plugin/scripts/concurrent-batch-scheduler.ts` ⇒ `0`；
+- [x] **`concurrent-batch-scheduler.ts` 去 DC**：`grep -c 'deliveryCritical' plugin/scripts/concurrent-batch-scheduler.ts` ⇒ `0`；
       且全仓库对 `parseCandidate(...).deliveryCritical` 的非测试消费者为 0
       （`grep -rn 'deliveryCritical' --include=*.ts plugin/scripts/ | grep -v node_modules` 输出贴出，
       剩余命中必须全部落在上面「范围外」清单里，逐条对应）。
-- [ ] **检查器退役**：`plugin/scripts/ac36-sortkey-criterion-check.ts` 与
+- [x] **检查器退役**：`plugin/scripts/ac36-sortkey-criterion-check.ts` 与
       `plugin/test/ac36-sortkey-criterion-check.test.mjs` 删除；
       `node --experimental-strip-types plugin/scripts/deletion-closure-check.ts`（或套件内等价关口）对该删除通过——
       即全仓库对 `ac36-sortkey-criterion-check` 的引用为 0（`grep -rn` 贴出，`docs/analysis/dead-set-recomputed.json`
       这类快照文件若命中，一并核对是否需同步）。
-- [ ] **catalog 四表同步**：`plugin/scripts/capability-catalog.sh` 中 `ac36-sortkey-criterion-check.ts`
+- [x] **catalog 四表同步**：`plugin/scripts/capability-catalog.sh` 中 `ac36-sortkey-criterion-check.ts`
       的四处条目（`:104` 描述 / `:453` 节奏 / `:779` 失效前提 / `:1105` 日期）全部移除；
       `bash plugin/scripts/capability-catalog.sh` 退出 0，且自报的 `summary: N scripts` 比改前**少 1**
       （改前/改后两个 N 都贴出，不硬记数字）。
-- [ ] **closure baseline 重锚**：因 `capability-catalog.sh` 变更，跑
+- [x] **closure baseline 重锚**：因 `capability-catalog.sh` 变更，跑
       `node --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --reanchor`
       更新 `docs/analysis/quay-init-closure-ratchet.baseline.json`；
       `runner-static-gate.ts` 的 re-anchor freshness 检查绿（贴输出）。
-- [ ] **单测同步**：`plugin/test/slot-refill.test.mjs`（现 42 处 DC 命中）与
+- [x] **单测同步**：`plugin/test/slot-refill.test.mjs`（现 42 处 DC 命中）与
       `plugin/test/concurrent-batch-scheduler.test.mjs`（现 18 处）中断言该排序轴的用例删除或改判为「无 DC 轴」；
       若 `@test-group` / 用例数变更触及 ratchet 基线，同步更新基线（贴出基线 diff 或说明「无基线涉及」）。
-- [ ] **`dispatch-preference.md` 记录退役**：写下一行明确「AC36 机械排序轴已于 2026-09-07 按人裁定退役，
+- [x] **`dispatch-preference.md` 记录退役**：写下一行明确「AC36 机械排序轴已于 2026-09-07 按人裁定退役，
       delivery-critical 优先完全由 selector 语义判断，无机械保证」——
       `grep -n '机械排序轴' orchestration/dispatch-preference.md` 命中该行（贴出）；
       ⛔ 覆盖段谓词本体不动。
-- [ ] **SPEC 同步**：`orchestration/SPEC-capability-planes-and-mechanism-lifecycle-2026-09-05.md` §2.1
+- [x] **SPEC 同步**：`orchestration/SPEC-capability-planes-and-mechanism-lifecycle-2026-09-05.md` §2.1
       中 outer-driver Fact「无程序消费者」那条，补上「AC36 机械排序轴已于 2026-09-07 按人裁定退役、孤儿代码已清理」的结论
       （`grep -n '2026-09-07' <该文件>` 命中，贴出）。
 
 ## DoD
 
-- [ ] 上述每条判据本轮**实跑并贴出输出**，不是转述；零计数的那几条附带负控制读数。
-- [ ] 退役后**全量 suite 绿**（`scripts/test.sh`），且绿的那一轮在移除之后（贴 suite 结束时刻与移除提交时刻，后者早于前者）。
-- [ ] `git log` 上有一次真实的删除提交（`git show --stat` 可见 `ac36-sortkey-criterion-check.{ts,test.mjs}` 被删）。
+- [x] 上述每条判据本轮**实跑并贴出输出**，不是转述；零计数的那几条附带负控制读数。
+- [x] 退役后**全量 suite 绿**（`scripts/test.sh`），且绿的那一轮在移除之后（贴 suite 结束时刻与移除提交时刻，后者早于前者）。
+- [x] `git log` 上有一次真实的删除提交（`git show --stat` 可见 `ac36-sortkey-criterion-check.{ts,test.mjs}` 被删）。
 
 ## Touches
 
