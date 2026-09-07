@@ -2,7 +2,7 @@
 id: gap-meta-addressedtasks-input-truncates-body-only-title-reaches-probe
 title: 送件给 meta-driver 的通道只传 {id,status,title,labels}——任务正文整篇丢失且无任何机制报出，与「载体是完整
   task 文件、写入工具齐全」严重不匹配
-status: todo
+status: ready
 labels:
   - gap
   - defect
