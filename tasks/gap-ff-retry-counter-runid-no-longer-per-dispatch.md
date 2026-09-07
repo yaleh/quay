@@ -2,7 +2,7 @@
 id: gap-ff-retry-counter-runid-no-longer-per-dispatch
 title: ff 重试预算按 runId 计数，而 runId 已从「每次 dispatch 一个」变成「驱动进程生命期一个」⇒ 每周期只剩 1 次 ff
   机会而非 3 次；gap-fan-in-ff-retry-counter-scope 已 done 但其 AC2 此刻为假
-status: done
+status: ready
 labels:
   - gap
   - defect
