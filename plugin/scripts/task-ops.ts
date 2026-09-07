@@ -69,47 +69,68 @@ export function patchStatusField(
   return { ok: true, fm: frontmatterRaw.replace(statusLineRe, `status: ${toStatus}`), from, replaced: true, to: toStatus };
 }
 
-/** Ensure the frontmatter carries the `delivery-critical` label (moved VERBATIM from ready-pool-check.ts;
- *  single source now lives here). Mirrors task-schema.ts's parseTask label reading (block list OR flow list
- *  OR absent), then ADDS the label when missing. This is the "标签与 ready 同现" write: the promote gate
- *  determines delivery-critical at promote time, and this helper makes the label physically present in the
- *  frontmatter AT ready-entry — so the dispatch-time sort key (slot-refill's deliveryCritical axis, which
- *  reads the same labels via parseTask/parseCandidate) can act on it in the NEXT selection.
- *  @param {string} fm  the frontmatter text between the `---` fences
- *  @returns {{ fm: string, added: boolean, deliveryCritical: boolean }}  `deliveryCritical` is true
- *      when the label is present after the operation (already there, or newly added). */
-export function ensureDeliveryCriticalLabel(fm: string): { fm: string; added: boolean; deliveryCritical: boolean } {
+/** Escape a literal string for use inside a RegExp, so the label→has-label line match treats the label
+ *  as a literal (never a regex pattern). */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Ensure the frontmatter carries `label` — the generic "append one label, touch nothing else"
+ *  primitive (gap-task-write-labels-replace-not-append-no-safe-add-action). Reads the existing labels
+ *  (block list OR flow list OR absent), then ADDS `label` only when missing. This is a SAFE ADD, never
+ *  a whole-set replace, so a caller cannot wipe sibling labels by omission — the frontmatter-text
+ *  counterpart to the Core MCP verb `task_add_label` (packages/quay/src/mcp-handlers.ts), which provides
+ *  the same append-dedupe semantics over the Provider ABI task view-model.
+ *  @param {string} fm    the frontmatter text between the `---` fences
+ *  @param {string} label the label to append (e.g. "delivery-critical")
+ *  @returns {{ fm: string, added: boolean, present: boolean }}  `present` is true when the label is
+ *      present after the operation (already there, or newly added). */
+export function ensureLabel(fm: string, label: string): { fm: string; added: boolean; present: boolean } {
   // flow list: `labels: [a, b]`
   const flow = /^(labels:\s*\[)([^\]]*)(\]\s*)$/m.exec(fm);
   if (flow) {
     const list = flow[2];
     const items = list.split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
-    if (items.includes("delivery-critical")) return { fm, added: false, deliveryCritical: true };
+    if (items.includes(label)) return { fm, added: false, present: true };
     const sep = list.trim() ? ", " : "";
     return {
-      fm: fm.replace(/^(labels:\s*\[)([^\]]*)(\]\s*)$/m, `$1${list}${sep}delivery-critical$3`),
+      fm: fm.replace(/^(labels:\s*\[)([^\]]*)(\]\s*)$/m, `$1${list}${sep}${label}$3`),
       added: true,
-      deliveryCritical: true,
+      present: true,
     };
   }
   // block list: `labels:\n  - a\n  - b`
   if (/^labels:\s*$/m.test(fm)) {
     const lines = fm.split(/\r?\n/);
     const idx = lines.findIndex((l) => /^labels:\s*$/.test(l));
-    const hasDc = lines.slice(idx + 1).some((l) => /^\s+-\s+["']?delivery-critical["']?\s*$/.test(l));
-    if (hasDc) return { fm, added: false, deliveryCritical: true };
-    // Insert a new `  - delivery-critical` item at the end of the labels block (before the next
-    // top-level key, or at the frontmatter end when labels is the last field).
+    const hasLabel = lines.slice(idx + 1).some((l) => new RegExp(`^\\s+-\\s+["']?${escapeRegExp(label)}["']?\\s*$`).test(l));
+    if (hasLabel) return { fm, added: false, present: true };
+    // Insert a new `  - <label>` item at the end of the labels block (before the next top-level key,
+    // or at the frontmatter end when labels is the last field).
     let insertAt = lines.length;
     for (let i = idx + 1; i < lines.length; i++) {
       if (/^\S/.test(lines[i])) { insertAt = i; break; }
     }
-    lines.splice(insertAt, 0, "  - delivery-critical");
-    return { fm: lines.join("\n"), added: true, deliveryCritical: true };
+    lines.splice(insertAt, 0, `  - ${label}`);
+    return { fm: lines.join("\n"), added: true, present: true };
   }
   // No labels field at all — append a block list at the end of the frontmatter (before the closing
   // fence, which the caller owns).
-  return { fm: `${fm.replace(/\n*$/, "")}\nlabels:\n  - delivery-critical\n`, added: true, deliveryCritical: true };
+  return { fm: `${fm.replace(/\n*$/, "")}\nlabels:\n  - ${label}\n`, added: true, present: true };
+}
+
+/** Ensure the frontmatter carries the `delivery-critical` label (moved VERBATIM from ready-pool-check.ts;
+ *  single source now lives here, as the delivery-critical specialization of `ensureLabel`). This is the
+ *  "标签与 ready 同现" write: the promote gate determines delivery-critical at promote time, and this
+ *  helper makes the label physically present in the frontmatter AT ready-entry — so the dispatch-time
+ *  sort key (slot-refill's deliveryCritical axis, which reads the same labels via parseTask/parseCandidate)
+ *  can act on it in the NEXT selection.
+ *  @param {string} fm  the frontmatter text between the `---` fences
+ *  @returns {{ fm: string, added: boolean, deliveryCritical: boolean }}  `deliveryCritical` is true
+ *      when the label is present after the operation (already there, or newly added). */
+export function ensureDeliveryCriticalLabel(fm: string): { fm: string; added: boolean; deliveryCritical: boolean } {
+  const r = ensureLabel(fm, "delivery-critical");
+  return { fm: r.fm, added: r.added, deliveryCritical: r.present };
 }
 
 // ── commit (scoped, branch-aware: commits to the CURRENT branch, never pushes to develop) ─────────
