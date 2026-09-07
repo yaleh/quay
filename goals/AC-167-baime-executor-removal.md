@@ -1,7 +1,7 @@
 ---
 id: AC-167
 title: baime-iteration-executor.md 从 plugin.json 摘除并 archive
-status: draft
+status: active
 kind: criterion
 goal: GOAL-003
 criterion: |-
@@ -15,6 +15,10 @@ expect: exit 0（plugin/.claude-plugin/plugin.json 不再提及 baime-iteration-
 origin: |
   人 2026-09-02 裁定④「对零调用的工具，先退役（archive），后续发现需要了再恢复」。正本
   SPEC-plugin-lifecycle-single-bundle-2026-09-02.md。
+evidence:
+  at: 2026-09-07T01:21:38.397Z
+  verdict: fail
+  reading: acceptance failed (exit 1)
 ---
 
 **判据（能取假）**：`plugin/agents/baime-iteration-executor.md` 从 `plugin.json` 摘除并 archive；

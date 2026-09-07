@@ -1,7 +1,7 @@
 ---
 id: AC-157
 title: archive 机制落地 + 五个排除面接线（AC158 的前置）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-003
 criterion: >-
@@ -19,6 +19,10 @@ expect: exit 0（archive/INDEX.tsv 表头恰 7 个 tab 字段 ∧ 五个排除�
 origin: |
   人 2026-09-02 裁定④「对零调用的工具，先退役（archive），后续发现需要了再恢复」。
   正本 orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md §12a。
+evidence:
+  at: 2026-09-07T01:21:26.576Z
+  verdict: fail
+  reading: acceptance failed (exit 1)
 ---
 
 **判据（能取假）**：archive 机制落地——`archive/<日期>-<slug>/<保持原始相对路径>` + `archive/INDEX.tsv`

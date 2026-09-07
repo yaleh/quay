@@ -1,7 +1,7 @@
 ---
 id: AC-158
 title: 执行批次一 —— 扫描后死集 git mv + INDEX 同一提交
-status: draft
+status: active
 kind: criterion
 goal: GOAL-003
 criterion: |-
@@ -21,6 +21,10 @@ expect: exit 0（INDEX 有数据行 ∧ 每条 original_path 已不存在、arch
 origin: |
   人 2026-09-02 裁定④「对零调用的工具，先退役（archive），后续发现需要了再恢复」。
   正本 orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md §12。
+evidence:
+  at: 2026-09-07T01:21:27.384Z
+  verdict: fail
+  reading: acceptance failed (exit 1)
 ---
 
 **判据（能取假）**：扫描后死集全部 `git mv` 进 archive，**自带测试同批移动**，`git mv` 与 INDEX 行
