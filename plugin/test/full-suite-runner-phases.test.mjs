@@ -77,6 +77,12 @@ import {
   GREEN_SUITE,
 } from "./helpers/full-suite-runner-harness.mjs";
 
+// gap-process-budget-in-use-structurally-zero-never-throttles: defaultLaneCount is now BUDGET-AWARE
+// (subtracts in_use via testProcessesInUse()). Pin in_use=0 for this file so the defaultLaneCount
+// unit tests below keep asserting the pure formula — an unset seam would shell out to the live host
+// and read this suite's own node --test workers (nondeterministic / self-inflated).
+process.env.RESOURCE_GATE_TEST_NODE_PROCS = "0";
+
 // ── gap-verification-round-missing-phase-ms-breaks-cost-attribution: AC2/AC3 (phase_ms) ─────────────
 // test.sh's FULL-SUITE default path emits `__OVERHEAD__ <phase>_ms=N` per fixed-overhead phase
 // (serial/lowconc/main + run_static_checks). The runner must carry those phase readings into the
