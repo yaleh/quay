@@ -2,7 +2,7 @@
 id: gap-webui-dashboard-regressed-to-12-60s-past-two-done-tasks
 title: /dashboard 渲染回涨到 12.8–60.5 秒,越过两条 done 任务的「≤5s 量级」取假对照;它同时是 AC-179
   判据翻转的成因,进而制造 66% 的 develop 提交与 3 小时内 13/14 次 ff 失败
-status: todo
+status: ready
 labels:
   - gap
   - defect
