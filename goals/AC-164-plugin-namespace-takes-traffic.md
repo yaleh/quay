@@ -36,7 +36,7 @@ origin: >
   SPEC-plugin-lifecycle-single-bundle-2026-09-02.md §4（顺序不可颠倒——它承载 3 天 178
   次生产流量）。
 evidence:
-  at: 2026-09-07T01:09:42.084Z
+  at: 2026-09-07T01:14:26.940Z
   verdict: fail
   reading: acceptance failed (exit 1)
 ---
