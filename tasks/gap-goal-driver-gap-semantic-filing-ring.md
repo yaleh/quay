@@ -1,7 +1,7 @@
 ---
 id: gap-goal-driver-gap-semantic-filing-ring
 title: goal-driver 缺口语义环 —— 派短命 agent 经 ABI 立案，下一轮以 taskCount 独立复核
-status: todo
+status: ready
 labels:
   - gap
 parent: null
