@@ -2,7 +2,7 @@
 id: gap-delivery-critical-mechanical-axis-orphaned-needs-ruling
 title: delivery-critical 机械排序轴（slot-refill/concurrent-batch-scheduler,
   AC36）正式退役——人 2026-09-07 裁定不接入 worker-driver，清理孤儿代码/检查器/测试/catalog 条目
-status: ready
+status: done
 labels:
   - gap
   - defect
