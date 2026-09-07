@@ -237,6 +237,67 @@ export function registerTaskHandlers(
     }
   );
 
+  // task_add_label — safe "append one label, keep the rest"
+  // (gap-task-write-labels-replace-not-append-no-safe-add-action). `task_write.labels` REPLACES the
+  // whole label set (see the task_write description above), so a caller that wants to ADD a single
+  // label (e.g. delivery-critical) without wiping gap/defect/directive must first task_get + reassemble
+  // the full array — an omission-prone round-trip with no mechanism as a backstop. This verb performs
+  // that read-modify-write INTERNALLY (read current labels → append `label` when absent, dedupe →
+  // write back the union), so the caller never hand-assembles a labels array. Provider-agnostic
+  // (taskGet + taskWrite), matching the file's own "Core never special-cases a Provider id" discipline;
+  // the driver-layer frontmatter-text counterpart is ensureLabel in plugin/scripts/task-ops.ts.
+  server.registerTool(
+    "task_add_label",
+    {
+      description:
+        "Append a single label to one task WITHOUT disturbing its existing labels (safe label add). " +
+        "`task_write.labels` REPLACES the whole label set, so adding one label by hand would wipe the " +
+        "rest; this reads the current labels, appends `label` only when absent (no duplicates), and " +
+        "writes back the union — no caller-side task_get + array reassembly. " +
+        "Returns the updated task plus `added` (false when the label was already present). " +
+        "Provider-agnostic (Core-side read-modify-write over task_get/task_write).",
+      inputSchema: {
+        provider: z.string().optional().describe("Provider id to write to (defaults to the first-enabled Provider in .quay/config.yml)."),
+        id: z.string().describe("Task id to add the label to (e.g. 'QX-029')."),
+        label: z.string().min(1).describe("Label to append (e.g. 'delivery-critical'). Added only when absent; existing labels are preserved."),
+      },
+    },
+    async ({ provider, id, label }) => {
+      const { client } = await getClient(provider);
+      try {
+        const current = await client.taskGet(id);
+        if (!current) {
+          return {
+            isError: true,
+            content: [{ type: "text" as const, text: `no such task: ${id} (provider: ${provider || "default"})` }],
+          };
+        }
+        const existing = Array.isArray(current.labels) ? current.labels : [];
+        // Idempotent: the label is already present — return the current task WITHOUT writing. A
+        // no-op taskWrite of an unchanged labels array would reach the Provider, which rewrites
+        // identical bytes and then "fails" its commit as nothing-to-commit (a spurious failure log,
+        // not a real error) — skipping the write keeps the no-op silent, matching the verb's
+        // "append without duplicating" contract.
+        if (existing.includes(label)) {
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify(current, null, 2) }],
+            structuredContent: { task: current, added: false, label },
+          };
+        }
+        const task = await client.taskWrite({ id, labels: [...existing, label] });
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }],
+          structuredContent: { task, added: true, label },
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }],
+        };
+      }
+    }
+  );
+
   // task_delete — generic passthrough (gap-abi-missing-commit-delete-dependson-primitives), mirroring
   // taskWrite's provider-agnostic discipline: Core forwards the id and surfaces whatever the
   // Provider's own task_delete reports. A not-found id arrives as isError (the provider fails

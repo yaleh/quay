@@ -1,7 +1,7 @@
 ---
 id: GOAL-007
 title: done 任务的判据后来变假时，没有任何机制会重新评估——三例实测，且常驻测试因 fixture 钉住前提而恒绿
-status: active
+status: achieved
 kind: goal
 origin: >
   【提请裁定，2026-09-07，draft — 激活权归人（裁定 3）】

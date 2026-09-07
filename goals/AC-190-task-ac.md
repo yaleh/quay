@@ -1,7 +1,7 @@
 ---
 id: AC-190
 title: 反例检测器：声称长期保证却只有 task AC ⇒ 报红——没有它，丁 与「什么都不做」在记录上同形
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-007
 criterion: >

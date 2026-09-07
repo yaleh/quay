@@ -14,9 +14,11 @@
 //                 (YAML) + frontmatterStatus. There is NO new frontmatter-parsing regex here — the fence
 //                 split is structural (locates the block), field VALUES are read by the YAML parser only.
 //   (b) patch   — patchStatusField (byte-preserving status-line edit, never a YAML round-trip that would
-//                 reformat the rest of the frontmatter) + ensureDeliveryCriticalLabel (label add, moved
-//                 from ready-pool-check.ts; now also stamps `extra.deliveryCriticalSource` on label-add,
-//                 preserving an existing source — gap-delivery-critical-source-distinction-outer-retired).
+//                 reformat the rest of the frontmatter) + ensureLabel (generic "add one label, keep the
+//                 rest" safe-add primitive) + ensureDeliveryCriticalLabel (label add, moved from
+//                 ready-pool-check.ts; the delivery-critical specialization of ensureLabel; now also
+//                 stamps `extra.deliveryCriticalSource` on label-add, preserving an existing source —
+//                 gap-delivery-critical-source-distinction-outer-retired).
 //   (c) commit  — isInsideGitWorkTree / commitTaskFile / hasPriorCommit (moved verbatim from
 //                 driver-filters.ts): scoped `git add <rel> && git commit --no-verify -m <msg> -- <rel>`,
 //                 hard rule 11 atomicity (no wait between add and commit, ⛔ never a bare commit).
@@ -70,6 +72,56 @@ export function patchStatusField(
   return { ok: true, fm: frontmatterRaw.replace(statusLineRe, `status: ${toStatus}`), from, replaced: true, to: toStatus };
 }
 
+/** Escape a literal string for use inside a RegExp, so the label→has-label line match treats the label
+ *  as a literal (never a regex pattern). */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Ensure the frontmatter carries `label` — the generic "append one label, touch nothing else"
+ *  primitive (gap-task-write-labels-replace-not-append-no-safe-add-action). Reads the existing labels
+ *  (block list OR flow list OR absent), then ADDS `label` only when missing. This is a SAFE ADD, never
+ *  a whole-set replace, so a caller cannot wipe sibling labels by omission — the frontmatter-text
+ *  counterpart to the Core MCP verb `task_add_label` (packages/quay/src/mcp-handlers.ts), which provides
+ *  the same append-dedupe semantics over the Provider ABI task view-model.
+ *  @param {string} fm    the frontmatter text between the `---` fences
+ *  @param {string} label the label to append (e.g. "delivery-critical")
+ *  @returns {{ fm: string, added: boolean, present: boolean }}  `present` is true when the label is
+ *      present after the operation (already there, or newly added). */
+export function ensureLabel(fm: string, label: string): { fm: string; added: boolean; present: boolean } {
+  // flow list: `labels: [a, b]`
+  const flow = /^(labels:\s*\[)([^\]]*)(\]\s*)$/m.exec(fm);
+  if (flow) {
+    const list = flow[2];
+    const items = list.split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+    if (items.includes(label)) return { fm, added: false, present: true };
+    const sep = list.trim() ? ", " : "";
+    return {
+      fm: fm.replace(/^(labels:\s*\[)([^\]]*)(\]\s*)$/m, `$1${list}${sep}${label}$3`),
+      added: true,
+      present: true,
+    };
+  }
+  // block list: `labels:\n  - a\n  - b`
+  if (/^labels:\s*$/m.test(fm)) {
+    const lines = fm.split(/\r?\n/);
+    const idx = lines.findIndex((l) => /^labels:\s*$/.test(l));
+    const hasLabel = lines.slice(idx + 1).some((l) => new RegExp(`^\\s+-\\s+["']?${escapeRegExp(label)}["']?\\s*$`).test(l));
+    if (hasLabel) return { fm, added: false, present: true };
+    // Insert a new `  - <label>` item at the end of the labels block (before the next top-level key,
+    // or at the frontmatter end when labels is the last field).
+    let insertAt = lines.length;
+    for (let i = idx + 1; i < lines.length; i++) {
+      if (/^\S/.test(lines[i])) { insertAt = i; break; }
+    }
+    lines.splice(insertAt, 0, `  - ${label}`);
+    return { fm: lines.join("\n"), added: true, present: true };
+  }
+  // No labels field at all — append a block list at the end of the frontmatter (before the closing
+  // fence, which the caller owns).
+  return { fm: `${fm.replace(/\n*$/, "")}\nlabels:\n  - ${label}\n`, added: true, present: true };
+}
+
 /** Stamp `extra.<key>: <value>` into a raw frontmatter (byte-preserving text edit, never a YAML
  *  round-trip). Handles the three `extra:` shapes — block map (`extra:\n  k: v`), flow map
  *  (`extra: {k: v}`), and absent (append a block map at the end). PRESERVES an existing value: if the
@@ -108,7 +160,10 @@ function setExtraScalar(fm: string, key: string, value: string): string {
  *  now has two legal sources that were previously conflated into a single prose claim ("由 outer 按证据打，
  *  从不移除"): `evidence` (the promote gate's determination — this helper's only production caller) and
  *  `adhoc` (the manager under DIR-130's standing authorization, written via task_write, NOT through this
- *  helper). Mirrors task-schema.ts's parseTask label reading (block list OR flow list OR absent), then
+ *  helper). This is the delivery-critical specialization of `ensureLabel`
+ *  (gap-task-write-labels-replace-not-append-no-safe-add-action): the label append delegates to the
+ *  generic safe-add primitive, and only the delivery-critical-specific SOURCE stamp lives here. Mirrors
+ *  task-schema.ts's parseTask label reading (block list OR flow list OR absent), then
  *  ADDS the label when missing. This is the "标签与 ready 同现" write: the promote gate determines
  *  delivery-critical at promote time, and this helper makes the label physically present in the
  *  frontmatter AT ready-entry — so the dispatch-time sort key (slot-refill's deliveryCritical axis, which
@@ -122,38 +177,12 @@ function setExtraScalar(fm: string, key: string, value: string): string {
  *      when the label is present after the operation (already there, or newly added). */
 export function ensureDeliveryCriticalLabel(fm: string, opts: { deliveryCriticalSource?: string } = {}): { fm: string; added: boolean; deliveryCritical: boolean } {
   const source = opts.deliveryCriticalSource ?? "evidence";
-  const stamp = (out) => setExtraScalar(out, "deliveryCriticalSource", source);
-  // flow list: `labels: [a, b]`
-  const flow = /^(labels:\s*\[)([^\]]*)(\]\s*)$/m.exec(fm);
-  if (flow) {
-    const list = flow[2];
-    const items = list.split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
-    if (items.includes("delivery-critical")) return { fm, added: false, deliveryCritical: true };
-    const sep = list.trim() ? ", " : "";
-    return {
-      fm: stamp(fm.replace(/^(labels:\s*\[)([^\]]*)(\]\s*)$/m, `$1${list}${sep}delivery-critical$3`)),
-      added: true,
-      deliveryCritical: true,
-    };
-  }
-  // block list: `labels:\n  - a\n  - b`
-  if (/^labels:\s*$/m.test(fm)) {
-    const lines = fm.split(/\r?\n/);
-    const idx = lines.findIndex((l) => /^labels:\s*$/.test(l));
-    const hasDc = lines.slice(idx + 1).some((l) => /^\s+-\s+["']?delivery-critical["']?\s*$/.test(l));
-    if (hasDc) return { fm, added: false, deliveryCritical: true };
-    // Insert a new `  - delivery-critical` item at the end of the labels block (before the next
-    // top-level key, or at the frontmatter end when labels is the last field).
-    let insertAt = lines.length;
-    for (let i = idx + 1; i < lines.length; i++) {
-      if (/^\S/.test(lines[i])) { insertAt = i; break; }
-    }
-    lines.splice(insertAt, 0, "  - delivery-critical");
-    return { fm: stamp(lines.join("\n")), added: true, deliveryCritical: true };
-  }
-  // No labels field at all — append a block list at the end of the frontmatter (before the closing
-  // fence, which the caller owns).
-  return { fm: stamp(`${fm.replace(/\n*$/, "")}\nlabels:\n  - delivery-critical\n`), added: true, deliveryCritical: true };
+  const r = ensureLabel(fm, "delivery-critical");
+  return {
+    fm: r.added ? setExtraScalar(r.fm, "deliveryCriticalSource", source) : r.fm,
+    added: r.added,
+    deliveryCritical: r.present,
+  };
 }
 
 // ── commit (scoped, branch-aware: commits to the CURRENT branch, never pushes to develop) ─────────

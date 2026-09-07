@@ -2,7 +2,7 @@
 id: gap-ac192-reanchor-criterion-to-attemptkey
 title: AC-192 判据仍按 runId 分组而 per-cycle 键已改为 attemptKey ⇒ 判据测错字段恒红（exit 1）；重锚判据到
   attemptKey
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -30,12 +30,12 @@ AC-192 判据当前取假（2026-09-07 干跑 `node packages/quay/src/goal-store
 
 ## AC
 
-- [ ] `node packages/quay/src/goal-store.ts gate AC-192` 在生产工作树 exit 0（读真实 `.quay/fan-in-retries.jsonl`，⛔ 非 fixture）
-- [ ] 双向负控制：改动前 `gate AC-192` → fail（exit 1）已记录；注入「两个 taskId 共享同一 attemptKey」fixture 跑同一判据 → exit 1
-- [ ] 正确字段：判据分组键为 `attemptKey`；`runId` 跨任务不再判违（一条读载体的命令可核，非转述）
-- [ ] 不静默通过：载体有记录但无一条带 `attemptKey` ⇒ 判据 exit 非零或 not-evaluated，⛔ 不读成 pass（硬规则 3b）
-- [ ] 时间窗不写死绝对时间戳：只计带 `attemptKey` 的记录，修复前仅 runId 的 251 条自动排除
-- [ ] `node packages/quay/bin/quay.ts task check gap-ac192-reanchor-criterion-to-attemptkey --json` 的 `missing` 为 `[]`
+- [x] `node packages/quay/src/goal-store.ts gate AC-192` 在生产工作树 exit 0（读真实 `.quay/fan-in-retries.jsonl`，⛔ 非 fixture）
+- [x] 双向负控制：改动前 `gate AC-192` → fail（exit 1）已记录；注入「两个 taskId 共享同一 attemptKey」fixture 跑同一判据 → exit 1
+- [x] 正确字段：判据分组键为 `attemptKey`；`runId` 跨任务不再判违（一条读载体的命令可核，非转述）
+- [x] 不静默通过：载体有记录但无一条带 `attemptKey` ⇒ 判据 exit 非零或 not-evaluated，⛔ 不读成 pass（硬规则 3b）
+- [x] 时间窗不写死绝对时间戳：只计带 `attemptKey` 的记录，修复前仅 runId 的 251 条自动排除
+- [x] `node packages/quay/bin/quay.ts task check gap-ac192-reanchor-criterion-to-attemptkey --json` 的 `missing` 为 `[]`
 
 ## DoD
 

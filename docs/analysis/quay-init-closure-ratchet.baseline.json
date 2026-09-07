@@ -1,7 +1,7 @@
 {
   "files": 134,
-  "bytes": 3884535,
-  "fingerprint": "cebb47b56a575119a207c00adec250ddd0a62640a3f08869662776ed756a9694",
+  "bytes": 3887662,
+  "fingerprint": "a183eefb619d9ef4e17ee24750cdf96ea1fc3906058e90b2849b5bfffe285de5",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
@@ -105,7 +105,7 @@
     },
     {
       "rel": "plugin/scripts/capability-catalog.sh",
-      "sha": "f523db04bc64b1bf2a4945e42d058673b695eedb76265c5a8d1c56d03e7370b4"
+      "sha": "4eb13b6c80f438df4659869ffc6f3787c80606dc7afd2b441c2d0c48dff4626d"
     },
     {
       "rel": "plugin/scripts/checker-io.ts",
@@ -457,7 +457,7 @@
     },
     {
       "rel": "plugin/scripts/task-ops.ts",
-      "sha": "d0eafa912103dbf29482532d13319192d72a3ded159d8183503fb5cab8d854d2"
+      "sha": "135f56075f91e9de8ce25cf96be9394ae261b592590d7ad2001b46dcfd6ac9c7"
     },
     {
       "rel": "plugin/scripts/task-schema-check.ts",

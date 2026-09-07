@@ -1,7 +1,7 @@
 ---
 id: AC-194
 title: no direct to develop bypass
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-007
 criterion: |-
