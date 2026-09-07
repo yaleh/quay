@@ -2,7 +2,7 @@
 id: gap-ac165-remove-root-mcp-json-quay-entry
 title: AC165 撤 root .mcp.json 的 quay 条目 + settings.local 的 enabledMcpjsonServers
   去 quay
-status: ready
+status: done
 labels:
   - gap
 parent: null
