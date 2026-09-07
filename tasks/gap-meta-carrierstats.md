@@ -37,3 +37,14 @@ fan-in-ff-merge: measure ff_only_locked=false
 - run_id：wk-prod-1788717081
 - session_id：e6820d61-48dc-4ab3-8401-8402b0ee46a2
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-meta-carrierstats-wk-prod-1788717081.log
+
+## Needs-Human
+
+**执行 2026-09-07T03:24:26.106Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: cpu_ms of equal-CPU-budget files must agree within 200ms (burnSleep=966.6 burnOnly=706.8 diff=259.8) — else cpu_ms is duration-derived
+- run_id：wk-prod-1788717081
+- session_id：e2748c0b-2bec-43ce-a22d-2aa0f047867c
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-meta-carrierstats~wk-prod-1788717081~1788750475994-61f99d.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-meta-carrierstats-wk-prod-1788717081.log
