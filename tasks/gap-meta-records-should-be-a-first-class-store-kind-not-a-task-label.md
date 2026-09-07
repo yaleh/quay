@@ -99,6 +99,8 @@ adr 这种 kind 的**专属登记面实测约 7 个文件**：`adr-store.ts` / `
 
 三条均已置 `superseded`（frontmatter `status: superseded`），本表即各自「被本条哪一部分覆盖」的注明。
 
+**登记面与 `quay driver` 未进 CLI help 缺口的关系（DoD ⑤）：不同源。** 那个已知缺口是「`driver-runtime.ts` 有 `liveness` 子命令、但 `quay driver` 的 CLI VERBS/help 未收录它」——运行时已实现、CLI 表层漏登记。本条的 `quay meta` 动词在三个登记面都登记齐全（`bin/quay.ts` dispatch + `jsonCommands` + fallback usage、`cli/help.ts`、`cli/meta.ts`），`meta_list/meta_get/meta_write` 在四个 MCP 面都登记齐全（provider `mcp-server.ts` + Core `mcp-handlers.ts` + `provider-client.ts` + `abi.ts`）——不存在「实现了但某表层漏登记」的同类缺口。capability-catalog.sh 是 `plugin/scripts/*` 的能力清单（脚本→它回答的问题），不是 CLI/MCP 动词清单；本条的 catalog 登记落在 `meta-driver.ts` 条目（更新其问题声明以反映「消息 = META 记录」这一新能力）。
+
 ## AC
 
 - [x] 准入测试被显式回答并写进代码头注释：新 kind 的承重字段逐条列出「为何不能塌进 task / goal / adr / document」，形式与 `goal-store.ts` 头注释同源；⛔ 不接受不作论证直接新建。
