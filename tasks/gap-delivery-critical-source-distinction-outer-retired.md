@@ -2,7 +2,7 @@
 id: gap-delivery-critical-source-distinction-outer-retired
 title: delivery-critical 标签：dispatch-preference.md 说明文字过期（仍写"由 outer
   按证据打"）且来源无字段区分（outer 退役 + DIR-130 新增来源）
-status: ready
+status: done
 labels:
   - gap
   - defect
