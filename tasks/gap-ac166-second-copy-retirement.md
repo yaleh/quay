@@ -2,7 +2,8 @@
 id: gap-ac166-second-copy-retirement
 title: AC166 判据仍红——.claude 双副本退役（skills 5 + workflows 5 双副本 archive）+
   manager-tick-core.js 迁入 plugin/workflows/
-status: ready
+status: needs-human
+needs_human_cause: human-adjudication
 labels:
   - gap
 parent: null
@@ -99,3 +100,14 @@ goal_ac: AC-166
 - experiments/quay-perpetual-stream/scripts/workflow-metadata-conformance.mjs（镜像同步，与 plugin 版 byte-identical）
 - plugin/test/workflow-metadata-conformance.test.mjs（REAL_* 改 plugin 路径 + AC9 镜像判据退役）
 - tasks/gap-ac166-second-copy-retirement.md（自身）
+## Needs-Human
+
+**执行 2026-09-07T21:48:48.584Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+- run_id：wk-prod-1788779505
+- session_id：8107b479-64e8-4624-84f3-22a33432ccff
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-ac166-second-copy-retirement~wk-prod-1788779505~1788817345879-821503.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-ac166-second-copy-retirement-wk-prod-1788779505.log
