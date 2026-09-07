@@ -1,7 +1,7 @@
 ---
 id: AC-155
 title: 配置合并 + 保留配置/控制态分界 + 事件触发保留兜底轮询
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-002
 criterion: >
@@ -17,10 +17,6 @@ origin: >
   §2.1/§2.5/§2.6。
 
   人 2026-08-25 逐字裁定「AC155：在切换时一并要求完成」——优先级提升，本阶段当前唯一未完成的地基项。
-evidence:
-  at: 2026-09-06T17:03:32.998Z
-  verdict: pass
-  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：现散在六处的配置合并到**声明式配置**一侧；**⛔ `.quay/worker-control.json`

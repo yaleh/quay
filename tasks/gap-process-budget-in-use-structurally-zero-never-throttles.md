@@ -152,14 +152,16 @@ $ node --experimental-strip-types --input-type=module -e 'import("./plugin/scrip
 - config 降 1 后（纯公式、无 in_use 减法）：**16**（本轮实时捕获：`bash scripts/test.sh --buckets gap-load-sensitive-tests-undeclared-run-in-main-lane-block-fan-in --test-concurrency=16`）。
 - 本条修完后（真实 in_use=3）：**13**（上面 defaultLaneCount 实跑，< 16）。
 
-**DoD5 负控制**：未把 `verdict` 恒改 WAIT（`process-budget.sh` 的 verdict 逻辑未动，仍 `available ≥ 1 ⇒ GO`）；未动 `main_tail_overlap_lanes`（`suite-params.ts` / config 该键未改）；未新增 driver kind / 周期检查器（只改 `runner-concurrency.ts` / `full-suite-runner.ts` 的派生式 + `resource-gate.test.mjs` 判据）。
+**DoD5 负控制**：未把 `verdict` 恒改 WAIT（`process-budget.sh` 的 verdict 逻辑未动，仍 `available ≥ 1 ⇒ GO`）；未动 `main_tail_overlap_lanes`（`suite-params.ts` / config 该键未改）；未新增 driver kind / 周期检查器（只改 `runner-concurrency.ts` / `full-suite-runner.ts` 的派生式 + 相关测试判据）。
 
 ## Touches
 
-- `plugin/scripts/process-budget.sh`
-- `plugin/scripts/resource-gate.sh`
 - `plugin/scripts/full-suite-runner.ts`
 - `plugin/scripts/runner-concurrency.ts`
-- `scripts/test.sh`
 - `plugin/test/resource-gate.test.mjs`
+- `plugin/test/runner-concurrency.test.mjs`
+- `plugin/test/full-suite-runner-phases.test.mjs`
+- `plugin/test/suite-slot-ssot-check.test.mjs`
+- `plugin/test/worker-driver.test.mjs`
+- `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `tasks/gap-process-budget-in-use-structurally-zero-never-throttles.md`
