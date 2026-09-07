@@ -1,7 +1,7 @@
 ---
 id: AC-162
 title: register-plugin.mjs 不再写用户级 enabledPlugins
-status: draft
+status: active
 kind: criterion
 goal: GOAL-003
 criterion: >-
