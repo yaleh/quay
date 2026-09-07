@@ -33,7 +33,12 @@
 //        own `updatedAt` (hard rule 4b: a quantity the measured object produces is not a
 //        measurement). Zero ACs (or no evidence.at) ⇒ notEvaluated.
 //   I4 — divergence: `status: active` while `isGoalAchieved()` is true ⇒ "achieved but nobody
-//        closed it", reported by `check --staleness`.
+//        closed it", reported by `check --staleness` as the `divergent` bucket (GOAL ids).
+//   I5 — achieved-but-failing: an AC `status: achieved` whose `criterion` now exits non-zero ⇒
+//        "achieved but no longer verifiable", reported by `check --staleness` as the
+//        `achievedButFailing` bucket (AC ids). SEPARATE from I4 (⛔ never merged): I4 is
+//        "active yet achieved" (should be closed), I5 is "achieved yet failing" (the opposite
+//        direction, at the AC layer, produced only by RUNNING the criterion — never a stored field).
 //
 // cap / stale are HUMAN-GIVEN initial policy values with NO cost-structure backing (hard rule 4:
 // no numeric threshold before the cost is measured). Re-estimate from .quay/goal-round.jsonl's
@@ -58,6 +63,7 @@ import {
   withFileLock,
   slugify,
 } from "./frontmatter-store-base.ts";
+import { runAcceptance } from "./gate/acceptance-runner.ts";
 
 export const VALID_GOAL_STATUSES = ["draft", "active", "achieved", "superseded", "retired"];
 
@@ -361,16 +367,20 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
     };
   }
 
-  // I3 + I4 checker (check --staleness). THREE named buckets, structurally always present
+  // I3 + I4 + I5 checker (check --staleness). FOUR named buckets, structurally always present
   // (possibly empty arrays) — never a binary fresh/stale that would judge an unevaluated goal
   // as healthy (hard rule 3b). `lastProgressAt` is DERIVED from the ACs' `evidence.at` max —
   // never the goal's own `updatedAt` (hard rule 4b). `divergent` is the I4 signal: status
-  // active while `isGoalAchieved()` is true ("achieved but nobody closed it").
+  // active while `isGoalAchieved()` is true ("achieved but nobody closed it"). `achievedButFailing`
+  // is the I5 signal: an AC `status: achieved` whose `criterion` now exits non-zero ("achieved but
+  // no longer verifiable") — the OPPOSITE direction from I4, so a SEPARATE bucket of AC ids
+  // (⛔ never merged into divergent: merging would make the two opposite signals indistinguishable).
   function checkStaleness(nowMs: number = Date.now()): {
     fresh: string[];
     stale: string[];
     notEvaluated: string[];
     divergent: string[];
+    achievedButFailing: string[];
     cap: number;
     staleMs: number;
   } {
@@ -379,7 +389,9 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
     const stale: string[] = [];
     const notEvaluated: string[] = [];
     const divergent: string[] = [];
-    for (const g of activeGoals()) {
+    const active = activeGoals();
+    const activeGoalIds = new Set(active.map((g) => String(g.id)));
+    for (const g of active) {
       const gid = String(g.id);
       if (isGoalAchieved(gid)) divergent.push(gid); // I4 — active yet all ACs achieved
       let lastProgressAt: number | undefined;
@@ -400,7 +412,25 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
         fresh.push(gid);
       }
     }
-    return { fresh, stale, notEvaluated, divergent, cap, staleMs };
+    // I5 — achieved-but-failing: run each achieved AC's criterion (cwd = workspace root = goalDir's
+    // parent — the SAME derivation makeGoalGate uses for `criterion:` commands, which are
+    // workspace-relative) and collect the ACs that now exit non-zero. This is the ONLY way to know
+    // "the criterion now fails" — it is never stored as a boolean. Scope: achieved ACs under ACTIVE
+    // goals (the same scope as the rest of this checker). Empty/missing criterion is SKIPPED: that
+    // is the separate `no-criterion` divergence kind meta-driver reports, not "a criterion that now
+    // fails" (a criterion that never existed cannot have started failing).
+    const achievedButFailing: string[] = [];
+    const root = path.dirname(goalDir);
+    for (const ac of all) {
+      if (!isCriterionId(String(ac.id))) continue;
+      if (ac.status !== "achieved") continue;
+      if (!activeGoalIds.has(String(ac.goal))) continue;
+      const criterion = typeof ac.criterion === "string" ? ac.criterion : "";
+      if (criterion.trim() === "") continue;
+      const res = runAcceptance({ command: criterion, cwd: root, timeoutMs: 60000 });
+      if (!res.ok) achievedButFailing.push(String(ac.id));
+    }
+    return { fresh, stale, notEvaluated, divergent, achievedButFailing, cap, staleMs };
   }
 
   /** Direct read-modify-write of the old goal's file (inside the NEW goal's write lock). */
@@ -535,7 +565,8 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
 //                               empty criterion fails CLOSED (red) and still records the event.
 //   check                     — I1′ checker: withinCap + hasDirection (exit 1 when over cap)
 //   check --staleness         — I3 three-bucket staleness (fresh/stale/notEvaluated) + I4
-//                               divergence (exit 1 when a divergent goal exists)
+//                               divergence + I5 achieved-but-failing (exit 1 when a divergent
+//                               goal OR an achieved-but-failing AC exists)
 import { fileURLToPath } from "node:url";
 
 async function main(argv: string[]) {
@@ -630,7 +661,7 @@ async function main(argv: string[]) {
       if (!id) { console.error("goal-store: gate requires <id>"); return 2; }
       // Criterion execution REUSES the task acceptance-runner shape (SPEC §3) and the gate
       // ledger REUSES the existing GateEvent format (.quay/gate-events.jsonl).
-      const { runAcceptance } = await import("./gate/acceptance-runner.ts");
+      // (`runAcceptance` is a static import at the top — also used by checkStaleness's I5 bucket.)
       const { appendGateEvent } = await import("./gate/gate-event-store.ts");
       const rec = store.get(id);
       if (!rec) { console.error(`goal-store: no such goal: ${id}`); return 2; }
@@ -669,7 +700,7 @@ async function main(argv: string[]) {
       if (rest.includes("--staleness")) {
         const r = store.checkStaleness();
         process.stdout.write(JSON.stringify(r, null, 2) + "\n");
-        return r.divergent.length === 0 ? 0 : 1;
+        return r.divergent.length === 0 && r.achievedButFailing.length === 0 ? 0 : 1;
       }
       const r = store.checkWithinCap();
       process.stdout.write(JSON.stringify(r, null, 2) + "\n");

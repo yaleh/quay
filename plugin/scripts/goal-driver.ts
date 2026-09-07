@@ -115,18 +115,19 @@ export async function writeGoalStatus(
   return { ok: true, reason: "written" };
 }
 
-/** 读 I3 三桶 + I4 分歧（复用 goal-store 的单一真相源 checkStaleness，⛔ 不在本文件重算）。
- *  退出码 1 = 存在 divergent（是发现不是错误），两者都打印 JSON 桶到 stdout。读不懂 ⇒ null。 */
+/** 读 I3 三桶 + I4 分歧 + I5 achieved-but-failing（复用 goal-store 的单一真相源 checkStaleness，
+ *  ⛔ 不在本文件重算）。退出码 1 = 存在 divergent 或 achieved-but-failing（是发现不是错误），
+ *  两者都打印 JSON 桶到 stdout。读不懂 ⇒ null。 */
 export async function checkStaleness(
   scriptRoot: string,
   dataRoot: string,
-): Promise<{ fresh: string[]; stale: string[]; notEvaluated: string[]; divergent: string[] } | null> {
+): Promise<{ fresh: string[]; stale: string[]; notEvaluated: string[]; divergent: string[]; achievedButFailing: string[] } | null> {
   const r = await runAsync(goalStoreArgv(scriptRoot, ["check", "--staleness"], dataRoot), { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
   if (r.error) return null;
   try {
     const j = JSON.parse(String(r.stdout ?? "").trim());
     const arr = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : []);
-    return { fresh: arr(j.fresh), stale: arr(j.stale), notEvaluated: arr(j.notEvaluated), divergent: arr(j.divergent) };
+    return { fresh: arr(j.fresh), stale: arr(j.stale), notEvaluated: arr(j.notEvaluated), divergent: arr(j.divergent), achievedButFailing: arr(j.achievedButFailing) };
   } catch {
     return null;
   }
@@ -220,8 +221,8 @@ export interface GoalRoundReadings {
   criterionCount: number;
   criteria: Array<{ id: string; goal: string; status: string; verdict: "pass" | "fail" | "not-evaluated"; reason: string }>;
   flips: Array<{ id: string; to: string; ok: boolean; reason: string }>;
-  /** I3 三桶 + I4 分歧；null = check --staleness 读不到（⛔ 与「零 stale」不同形，硬规则 3b）。 */
-  staleness: { fresh: string[]; stale: string[]; notEvaluated: string[]; divergent: string[] } | null;
+  /** I3 三桶 + I4 分歧 + I5 achieved-but-failing；null = check --staleness 读不到（⛔ 与「零 stale」不同形，硬规则 3b）。 */
+  staleness: { fresh: string[]; stale: string[]; notEvaluated: string[]; divergent: string[]; achievedButFailing: string[] } | null;
   /** ⑤ 缺口读数（G7）：每条 active AC 的三态；taskFacts==null ⇒ 逐条 not-evaluated。 */
   gaps: Array<GoalGap>;
 }
@@ -269,7 +270,9 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
         flips.push({ id, to: "achieved", ok: w.ok, reason: w.reason });
         if (w.ok) ac.status = "achieved";
       }
-      // achieved-but-failing 的分歧由 I4（check --staleness divergent）+ meta-driver 报出，本驱动不翻回。
+      // achieved-but-failing（status=achieved 而 criterion 现 fail）由 check --staleness 的
+      // achievedButFailing 桶报出（见下方 ③④ staleness 读数，随本轮 Fact 落地），本驱动不翻回——
+      // ⛔ 反向翻转（achieved→active）会与裁定 3（激活归人）打架，且判据可能只是暂时红。
     }
     // I2（GOAL 层）：全部 AC achieved 且 ≥1 条 ⇒ 机械 flip GOAL（裁定 5）。
     if (goal.status === "active" && goalAchievedFromRecords(records, gid)) {
@@ -311,7 +314,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
       state: "verified",
       reason:
         `${criteria.length} criteria gated, ${flips.length} flip(s): ` +
-        `fresh=${staleness.fresh.length} stale=${staleness.stale.length} notEvaluated=${staleness.notEvaluated.length} divergent=${staleness.divergent.length}`,
+        `fresh=${staleness.fresh.length} stale=${staleness.stale.length} notEvaluated=${staleness.notEvaluated.length} divergent=${staleness.divergent.length} achievedButFailing=${staleness.achievedButFailing.length}`,
     },
   };
 }

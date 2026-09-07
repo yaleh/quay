@@ -361,6 +361,64 @@ test("AC-6 — I4: status=active with all ACs achieved reports divergence", () =
   assert.deepEqual(r.divergent, ["GOAL-010"], "active yet achieved ⇒ divergent (I4)");
 });
 
+// ── gap-goal-achieved-but-failing-no-handler: I5 achieved-but-failing bucket ──────────────────────
+// The OPPOSITE direction from I4 (divergent = active yet achieved; achievedButFailing = achieved yet
+// its criterion now exits non-zero). It must be a SEPARATE bucket of AC ids (⛔ never merged into
+// divergent — merging would make the two opposite signals indistinguishable), produced by RUNNING the
+// criterion (runAcceptance), never read from a stored field.
+
+test("I5 — an achieved AC whose criterion now fails lands in achievedButFailing (separate from divergent)", () => {
+  const s = createGoalStore(tmpDir("i5-achfail"));
+  s.write("GOAL-010", { title: "p10", status: "active", origin: "o" });
+  s.write("AC-010", { title: "a1", status: "achieved", goal: "GOAL-010", criterion: "true", origin: "o" });
+  s.write("AC-011", { title: "a2", status: "achieved", goal: "GOAL-010", criterion: "false", origin: "o" });
+  const r = s.checkStaleness(Date.now());
+  assert.deepEqual(r.divergent, ["GOAL-010"], "all ACs achieved yet goal active ⇒ divergent (I4)");
+  assert.deepEqual(r.achievedButFailing, ["AC-011"], "AC-011 criterion `false` exits 1 ⇒ achieved-but-failing");
+  // The two buckets are SEPARATE on the same input: divergent holds GOAL ids, achievedButFailing
+  // holds AC ids — never the other's contents.
+  assert.ok(!r.divergent.includes("AC-011"), "divergent holds GOAL ids, not the AC id");
+  assert.ok(!r.achievedButFailing.includes("GOAL-010"), "achievedButFailing holds AC ids, not the GOAL id");
+});
+
+test("I5 bidirectional — criterion fail→pass moves the AC out of achievedButFailing", () => {
+  const s = createGoalStore(tmpDir("i5-bidir"));
+  s.write("GOAL-010", { title: "p10", status: "active", origin: "o" });
+  s.write("AC-020", { title: "a1", status: "achieved", goal: "GOAL-010", criterion: "false", origin: "o" });
+  s.write("AC-021", { title: "a2", status: "active", goal: "GOAL-010", criterion: "true", origin: "o" });
+  let r = s.checkStaleness(Date.now());
+  assert.deepEqual(r.achievedButFailing, ["AC-020"], "criterion `false` ⇒ in bucket");
+  assert.deepEqual(r.divergent, [], "one AC still active ⇒ not divergent (the two signals are independent)");
+  // Flip the criterion to pass ⇒ the AC leaves the bucket (BOTH directions asserted).
+  s.write("AC-020", { status: "achieved", goal: "GOAL-010", criterion: "true", origin: "o" });
+  r = s.checkStaleness(Date.now());
+  assert.deepEqual(r.achievedButFailing, [], "criterion `true` ⇒ out of bucket");
+});
+
+test("I5 CLI — check --staleness exits 1 on an achieved-but-failing AC, 0 when it passes (no false-green)", () => {
+  const root = tmpDir("i5-cli");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const args = (a) => ["--root", root, ...a];
+  const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
+  n(["write", "GOAL-010", "--title", "p", "--status", "active", "--origin", "o"]);
+  n(["write", "AC-020", "--title", "achieved-but-failing", "--status", "achieved", "--goal", "GOAL-010", "--criterion", "false", "--origin", "o"]);
+  n(["write", "AC-021", "--title", "still-active", "--status", "active", "--goal", "GOAL-010", "--criterion", "true", "--origin", "o"]);
+
+  const chk = n(["check", "--staleness"]);
+  assert.equal(chk.status, 1, "an achieved-but-failing AC must make check --staleness exit 1 (old code exited 0 = false-green):\n" + chk.stdout + chk.stderr);
+  const out = JSON.parse(chk.stdout);
+  assert.deepEqual(out.achievedButFailing, ["AC-020"], "the achieved+failing AC is enumerated by id");
+  assert.deepEqual(out.divergent, [], "not divergent (one AC still active) — the buckets are independent");
+
+  // Flip the failing criterion to pass ⇒ both signals empty ⇒ exit 0.
+  n(["write", "AC-020", "--status", "achieved", "--goal", "GOAL-010", "--criterion", "true", "--origin", "o"]);
+  const chk2 = n(["check", "--staleness"]);
+  assert.equal(chk2.status, 0, "no achieved-but-failing and no divergent ⇒ exit 0:\n" + chk2.stdout + chk2.stderr);
+  assert.deepEqual(JSON.parse(chk2.stdout).achievedButFailing, []);
+});
+
 // ── gap-goal-store-abi-encapsulation-provider-backed: shim + gateFactories ────────────────────────
 // AC-176 (grep 断言, mirror-drift guard): the goal-id regex has ONE definition — in Core's
 // goal-store.ts. The native provider's goal-store.ts is a FORWARDING re-export shim (the same

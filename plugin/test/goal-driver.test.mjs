@@ -19,6 +19,7 @@ import {
   goalAchievedFromRecords,
   computeGoalGaps,
   readTaskFacts,
+  checkStaleness,
   goalDriverRoutines,
   GOAL_ROUND_REL,
 } from '../scripts/goal-driver.ts';
@@ -110,6 +111,35 @@ test('readTaskFacts: 读 tasks/*.md 的 status+goal_ac；目录不存在 ⇒ nul
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// ── I5 achieved-but-failing（gap-goal-achieved-but-failing-no-handler）────────────────────────
+// 经 goal-driver 的 checkStaleness wrapper 读 goal-store `check --staleness` 的新桶：achieved 且
+// criterion 现 fail 的 AC 进 achievedButFailing（与 divergent 分离——divergent 是 active 却已全达成
+// 的 GOAL，方向相反、层级不同）。
+
+test('checkStaleness wrapper: achieved 且 criterion fail ⇒ achievedButFailing 桶（与 divergent 分离）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-stale-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    writeGoalFile(tmp, { id: 'GOAL-001', status: 'active', kind: 'goal' });
+    writeGoalFile(tmp, { id: 'AC-001', status: 'achieved', kind: 'criterion', goal: 'GOAL-001', criterion: 'false' });
+    writeGoalFile(tmp, { id: 'AC-002', status: 'active', kind: 'criterion', goal: 'GOAL-001', criterion: 'true' });
+    const st = await checkStaleness(repoRoot, tmp);
+    assert.ok(st, 'checkStaleness 应返回读数（非 null）');
+    assert.deepEqual(st.achievedButFailing, ['AC-001'], 'achieved 且 criterion `false` ⇒ 进桶');
+    assert.deepEqual(st.divergent, [], '还有 active AC ⇒ 非 divergent（两桶语义相反、互相独立）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('AC5 — goal-driver.ts 不再点名 I4/divergent 覆盖 achieved-but-failing（注释与实现相符）', () => {
+  const src = fs.readFileSync(new URL('../scripts/goal-driver.ts', import.meta.url), 'utf8');
+  // 旧注释（假覆盖）必须消失：它点名 I4/divergent 覆盖一个 I4 结构上不可能触发的形态。
+  assert.doesNotMatch(src, /achieved-but-failing 的分歧由 I4/, '旧注释点名 I4 覆盖 achieved-but-failing 的措辞已删除');
+  // 新注释必须点名真正的检测者：check --staleness 的 achievedButFailing 桶。
+  assert.match(src, /achievedButFailing 桶报出/, '新注释点名 check --staleness 的 achievedButFailing 桶');
 });
 
 // ── 真实机械环端到端（⛔ 不用 fixture 注入 seam，跑真的 goal-store CLI）────────────────────
