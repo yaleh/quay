@@ -1,4 +1,4 @@
-// @test-group product
+// @test-group lowconc
 // ts-typecheck-gate-config-wiring.test.mjs — split out of ts-typecheck-gate.test.mjs
 // (gap-suite-split-long-multi-test-files): M63 D1 — the ts-typecheck gate PASSes against THIS
 // repo's own real .quay/config.yml gates: wiring (the exact source the real OUTER-LOOP ABSORB gates
