@@ -45,12 +45,12 @@ AC-188 只查「存在」不查「跑过」，而「写进 goals/ 却从未被�
 
 ## AC
 
-- [ ] AC-191 判据 exit 0（逐字跑 `goals/AC-191-goal-ac-evidence-at.md` 的 criterion，贴输出，⛔ 非转述）
-- [ ] `mig` 集 3/3：`goal-store list` 里 AC-192/193/194 三条各 kind=criterion、goal=GOAL-007、status ∈ {active, achieved}、criterion ≥20 字符、origin 点名来源 task id
-- [ ] 三条各 `evidence.at > born` 且 `evidence.verdict` 非空——读主检出生产载体（`.quay/gate-events.jsonl` / `goal-store list`），⛔ 非断言、非 fixture
-- [ ] 可证伪性（硬规则④）：立案时 AC-191 判据实测 `0/3`、exit 1（origin 已干跑记录），完成后 exit 0——前后读数不同，排除恒真
-- [ ] 载体读的是主检出而非任务 worktree（worktree `.quay` 是陈旧快照，硬规则 4b）
-- [ ] `node packages/quay/bin/quay.ts task check gap-ac191-migrated-ac-production-evidence-at --json` 的 `missing` 为 `[]`
+- [x] AC-191 判据 exit 0（逐字跑 `goals/AC-191-goal-ac-evidence-at.md` 的 criterion，贴输出，⛔ 非转述）
+- [x] `mig` 集 3/3：`goal-store list` 里 AC-192/193/194 三条各 kind=criterion、goal=GOAL-007、status ∈ {active, achieved}、criterion ≥20 字符、origin 点名来源 task id
+- [x] 三条各 `evidence.at > born` 且 `evidence.verdict` 非空——读主检出生产载体（`.quay/gate-events.jsonl` / `goal-store list`），⛔ 非断言、非 fixture
+- [x] 可证伪性（硬规则④）：立案时 AC-191 判据实测 `0/3`、exit 1（origin 已干跑记录），完成后 exit 0——前后读数不同，排除恒真
+- [x] 载体读的是主检出而非任务 worktree（worktree `.quay` 是陈旧快照，硬规则 4b）
+- [x] `node packages/quay/bin/quay.ts task check gap-ac191-migrated-ac-production-evidence-at --json` 的 `missing` 为 `[]`
 
 ## DoD
 
@@ -65,3 +65,17 @@ goal-driver GateEvent（verdict pass|fail），其时间戳严格晚于各自 `g
 - goals/AC-192-ff-retry-counter-per-cycle.md
 - goals/AC-193-no-orphan-suite-process.md
 - goals/AC-194-no-direct-to-develop-bypass.md
+
+## Verification
+
+2026-09-07 生产轮干跑（主检出 `/home/yale/work/quay`，⛔ 非任务 worktree 陈旧快照）：
+
+AC-191 判据逐字输出（exit 0）：
+  AC-192 born=1788800841 evidence.at=2026-09-07T18:21:59.224Z OK
+  AC-193 born=1788800857 evidence.at=2026-09-07T18:21:59.948Z OK
+  AC-194 born=1788800868 evidence.at=2026-09-07T18:22:01.148Z OK
+
+三条 verdict（goal-store 账本派生，读主检出 `.quay/gate-events.jsonl`）：
+  AC-192 status=active verdict=fail、AC-193 status=achieved verdict=pass、AC-194 status=active verdict=fail。
+born 换算（git log --diff-filter=A 首次提交）：AC-192=2026-09-07T17:07:21Z、AC-193=2026-09-07T17:07:37Z、AC-194=2026-09-07T17:07:48Z——各 evidence.at 严格晚于 born（约 1h14m–1h15m）。
+fail 是 GOAL-007 抓到的真缺陷（ff retry 跨任务累计 / direct-to-develop bypass），非本任务范围；AC-191 只要求 verdict 非空。
