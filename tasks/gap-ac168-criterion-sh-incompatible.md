@@ -1,7 +1,7 @@
 ---
 id: gap-ac168-criterion-sh-incompatible
 title: AC-168 判据仍红（exit 2）：criterion 用 bash 进程替换，goal-store gate 经 sh 执行 Syntax error
-status: todo
+status: ready
 labels:
   - gap
   - defect
