@@ -44,6 +44,7 @@ extra:
 - plugin/scripts/psi-failure-correlation-check.ts（改：被动分析路径改为复用新工具，不再维持独立的窗口联接实现）
 - plugin/test/psi-window-join.test.mjs（新，fixture 单测：命中/载体缺失/文件未命中三种情形）
 - plugin/scripts/capability-catalog.sh（新脚本六表注册之一）
+- docs/analysis/quay-init-closure-ratchet.baseline.json（re-anchor：capability-catalog.sh 六表注册改变 laydown 源，机械 --reanchor 刷新 fingerprint/sha）
 - tasks/gap-perfile-psi-window-join.md（自身）
 
 ## Measured
@@ -132,7 +133,7 @@ $ node --test plugin/test/psi-window-join.test.mjs
 覆盖：命中样本正常联接（window [1000,5000] 命中 5 采样 mean=30/max=50）、载体缺失 fail-closed（verification-round 缺失 + suite-load 缺失两分支）、指定 file/runId 不存在于 perFile ⇒ found:false。
 
 AC7（范围守卫 + 六表注册）：
-- `git diff develop --stat`（merge develop 后）只含 4 个实现文件，不含 plugin/scripts/suite-scheduler.ts 的 nextDispatch/currentCap、不含 plugin/scripts/full-suite-runner.ts 的 phases/cgroup-diff 行为改动。
+- `git diff develop --stat`（merge develop 后）只含 4 个实现文件 + re-anchor baseline，不含 plugin/scripts/suite-scheduler.ts 的 nextDispatch/currentCap、不含 plugin/scripts/full-suite-runner.ts 的 phases/cgroup-diff 行为改动。
 - 六表注册后：
 ```
 $ bash plugin/scripts/capability-catalog.sh --summary
