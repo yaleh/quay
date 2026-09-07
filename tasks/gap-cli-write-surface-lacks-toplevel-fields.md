@@ -1,7 +1,7 @@
 ---
 id: gap-cli-write-surface-lacks-toplevel-fields
 title: CLI 写字段面缺顶层字段（goal_ac / depends_on）—— 补 flag 并给字段面对齐造产物
-status: ready
+status: done
 labels:
   - gap
 parent: null
