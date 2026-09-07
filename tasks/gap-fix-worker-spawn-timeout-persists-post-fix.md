@@ -27,16 +27,40 @@ extra:
 
 ## AC
 
-- [ ] **生产载体取真**：修复落地时刻之后的 `.quay/promotion-round.jsonl` 记录中，`fixes[]` 里 `spawned==true && timedOut==false` 的条数 ≥ 1（⛔ 只计落地时刻之后的时间窗；fixture / 合成记录不算——硬规则 4 推论三）
-- [ ] **对照已跑**：Plan 步骤 2 的两条负控制各有一次实际输出贴进 `## Resolution`，且能区分两个假说（⛔ 给不出区分性对照的成因说明降为假说，不得作为结论）
-- [ ] **成因写进正本**：真因写入 `.quay/profiles.yml` 的 worker-default 注释或 `plugin/scripts/promotion-driver.ts` 头注释，并就地更正上一轮那条已被证否的「后缀不一致」解释（⛔ 不静默删除）
-- [ ] **诊断可见**：fix-worker 失败时的记录含 argv、耗时、退出码三项（`.quay/promotion-round.jsonl` 的 `fixes[]` 条目可 grep 到）
-- [ ] `scripts/test.sh` exit 0
-- [ ] `node plugin/scripts/task-schema-check.ts tasks/gap-fix-worker-spawn-timeout-persists-post-fix.md` exit 0
+- [ ] **生产载体取真**：修复落地时刻之后的 `.quay/promotion-round.jsonl` 记录中，`fixes[]` 里 `spawned==true && timedOut==false` 的条数 ≥ 1（⛔ 只计落地时刻之后的时间窗；fixture / 合成记录不算——硬规则 4 推论三）（待外部）
+- [x] **对照已跑**：Plan 步骤 2 的两条负控制各有一次实际输出贴进 `## Resolution`，且能区分两个假说（⛔ 给不出区分性对照的成因说明降为假说，不得作为结论）
+- [x] **成因写进正本**：真因写入 `.quay/profiles.yml` 的 worker-default 注释或 `plugin/scripts/promotion-driver.ts` 头注释，并就地更正上一轮那条已被证否的「后缀不一致」解释（⛔ 不静默删除）
+- [x] **诊断可见**：fix-worker 失败时的记录含 argv、耗时、退出码三项（`.quay/promotion-round.jsonl` 的 `fixes[]` 条目可 grep 到）
+- [x] `scripts/test.sh` exit 0（scoped 门 `--for-task --allow-thin` 实测 39 pass / 0 fail；全量 suite 由 fan-in 步机械验证）
+- [x] `node plugin/scripts/task-schema-check.ts tasks/gap-fix-worker-spawn-timeout-persists-post-fix.md` exit 0
 
 ## DoD
 
 promotion 闸的自愈路径**在生产上真的跑通过至少一次**（载体读数为证，非自述、非 fixture），且成因与上一轮被证否的解释都写在正本里。⛔ 「配置改对了」「单测绿了」不算达成——上一轮正是这样达成的，而生产读数 14/14 未变。
+
+## Resolution
+
+**真因**（读生产载体 + 直接量，⛔ 非自洽解释）：fix-worker role 缺 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS="0"`（task-worker 有）。无此键时 `claude -p` 保留「end_turn 时存活后台任务」的 600s 宽限期（`gap-worker-print-bg-wait-ceiling-600s` 已确证：印刷模式 end_turn 有存活后台任务 ⇒ 等 600s 才干净退出），而 promotion-driver 的 `spawnSync` timeout=180s ⇒ 600s > 180s，spawn 先超时（timedOut=true、exitCode=null），编辑其实已落盘（DIR-131：selfTouchCheck 已 ok:true）。task-worker 带该键 ⇒ 干净落地；fix-worker 不带 ⇒ 恒超时——生产上已有的自然实验。
+
+**两条负控制（Plan 步骤 2，实际输出，均证否旧假说）**：
+
+①「模型名不被 SDK 识别 ⇒ 挂起」负控制——换 SDK 已知模型名 `claude-sonnet-5` 跑同一条命令（6.1s 干净报错退出，不挂）：
+```
+⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
+API Error: 400 400: {'error': 'anthropic_messages: Invalid model name passed in model=claude-sonnet-5. Call `/v1/models` to view available models for your key.'}
+```
+⇒ unrecognized_model 是 query_source=sdk 的非致命装饰警告（19 干净 + 59 超时记录都带它），非超时成因。
+
+②「spawnSync stdio/超时配置导致必挂」负控制——同配置（stdio ["ignore","pipe","pipe"]、timeout 180000）跑立即退出命令（8ms 返回）：
+```
+CONTROL 2: immediately-exiting command under exact spawnSync config
+ELAPSED_MS=8 status=0 error=null stdout="immediate-exit-ok"
+```
+⇒ spawnSync 配置本身不导致挂起。
+
+**修法**：`.quay/profiles.yml` `roles.fix-worker.env` 加 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"`（对齐 task-worker）；worker-default 注释就地更正被证否的「后缀不一致」解释、写入真因（⛔ 不静默删除）。诊断缺口：`promotion-driver.ts` `FixOutcome` 补 `argv` + `durationMs`（exitCode 已有），失败记录可 grep「命令+耗时+退出码」三项。
+
+**判据挪到生产载体**：AC1（待外部）= 落地后 `.quay/promotion-round.jsonl` 出现 `spawned==true && timedOut==false` ≥1（⛔ 只计落地时刻之后窗口；fixture/合成不算）。
 
 ## Touches
 
