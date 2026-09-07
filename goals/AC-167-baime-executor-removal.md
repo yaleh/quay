@@ -1,7 +1,7 @@
 ---
 id: AC-167
 title: baime-iteration-executor.md 从 plugin.json 摘除并 archive
-status: draft
+status: active
 kind: criterion
 goal: GOAL-003
 criterion: |-
