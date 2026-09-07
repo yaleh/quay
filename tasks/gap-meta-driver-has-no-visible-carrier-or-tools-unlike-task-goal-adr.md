@@ -2,7 +2,7 @@
 id: gap-meta-driver-has-no-visible-carrier-or-tools-unlike-task-goal-adr
 title: meta-driver 的产出没有对外可见的载体与操作面——task/adr/goal 都是 git 跟踪的逐对象文件 + CLI（task 另有
   MCP+subagent），而 meta 只有一个 gitignored 的 jsonl、零 CLI、零 MCP；连它自己的回执别人也看不到
-status: todo
+status: ready
 labels:
   - gap
   - meta-driver
