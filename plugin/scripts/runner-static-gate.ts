@@ -671,7 +671,7 @@ run_operational_checks() {
   run_checker "fan-in-ff-protocol-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-ff-protocol-check.ts" --root "${main_root}" --baseline 19fea6f0 --json
   echo "== fan-in-materialize-check (gap-workflow-scriptpath-materialize-falls-back-main — workflow scriptPath 静默回退主检出版) =="
   # Detects the M176-family materialization fallback: a bootstrap-HIT fan-in dispatched with
-  # scriptPath=<worktree>/.claude/workflows/fan-in-execute.js must run the WORKTREE version (so the
+  # scriptPath=<worktree>/plugin/workflows/fan-in-execute.js must run the WORKTREE version (so the
   # task's own fix to the pipeline is verified by its own fan-in), but the SDK sometimes silently
   # materializes the MAIN checkout version. This checker reads the PRODUCTION CARRIER — the SDK-written
   # ~/.claude/projects/<slug>/<session>/workflows/wf_*.json records (which carry BOTH the passed
