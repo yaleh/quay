@@ -1,7 +1,7 @@
 {
   "files": 133,
-  "bytes": 3842474,
-  "fingerprint": "0e9123de74d18d90944f7def442206b7d79ea87ea571c46c39448f90a0172585",
+  "bytes": 3841153,
+  "fingerprint": "f3d03381c3551dbe7a81ac1082c8d691eec3982d1688657360e37015b16ae915",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
@@ -65,7 +65,7 @@
     },
     {
       "rel": "plugin/probes/meta-driver.md",
-      "sha": "95c7f6c39690b94b1fceee21f147e2848fe8eca5116c2d843a10957eb1904fd7"
+      "sha": "3e74f1a304e17dc86b519aa8b3fc6a18b9d07475fed21c2b01b40149c96901ce"
     },
     {
       "rel": "plugin/probes/self-validation.md",
@@ -509,7 +509,7 @@
     },
     {
       "rel": "plugin/scripts/worker-driver.ts",
-      "sha": "a0bd2f572fc36077a4a541bf75584b926b9162c5854d266ee93d5fd231e9bde8"
+      "sha": "d9c208da4e77897ce040dbacdf0e1c438ce9336853318afbc649e49896be1e46"
     },
     {
       "rel": "plugin/scripts/workflow-event-schema.mjs",

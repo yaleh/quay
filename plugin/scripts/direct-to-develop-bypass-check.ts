@@ -76,8 +76,17 @@
 // 会红）。`--commits <csv>` = 显式回放指定 commit（真样本 replay 的 fixture seam，跳过 reflog
 // 扫描）。
 //
-// Exit codes: 0 = PASS / NOT-EVALUATED（读 `evaluated`：false = 无法评估，绝不与合格同形）；
-//             1 = RED（直接提交绕过 fan-in 机件）；2 = usage/environment 错误。
+// Exit codes: 0 = PASS；1 = RED（直接提交绕过 fan-in 机件）；2 = usage/environment 错误；
+//             3 = NOT-EVALUATED（`evaluated:false`——读不懂输入，硬规则 3b）。⛔ 与 PASS 不再共用
+//             exit 0：只看退出码的消费者 `run_checker` 会把「读不懂却 exit 0」读成「合格」，把本
+//             检测器要抓的直投提交静默放行（本任务 gap-bypass-check-unclassifiable-exits-zero 的
+//             缺陷正是这一层——JSON 里已带 evaluated:false，但 ok:true ∧ exit 0 并列）。
+//
+// 分类覆盖率（AC4）+ 根因（AC3）：生产基线区间内 `git log -g develop` 的 reflog 约 1375 条，而
+//   `git rev-list baseline..develop` 约 5000 条（随 develop 前进漂移，实时读数以 checker 输出的
+//   classification.total 为准）⇒ 3627 条既不在 ledger 也不在 reflog ⇒ unclassifiable。根因 =
+//   reflog 深度不足（被 gc 剪）+ ff-merge 只在 reflog 记 tip、分支上的逐个 commit 无独立 reflog
+//   条目。输出 `classification.{classified,total,ratio}` 把「这个守卫今天看得见多少」变成可读数。
 //
 // Run:
 //   node --experimental-strip-types direct-to-develop-bypass-check.ts --root <dir>
@@ -510,9 +519,10 @@ function gitCommitMessage(root, sha) {
  *   · ledger 无记录 且 reflog 也查不到 ⇒ unclassifiable（AC3——返回 sha 列表，调用方据此
  *     NOT-EVALUATED，⛔ 不伪装成「未发现 direct」，硬规则 3b）
  *
- * 返回 `{ direct, unclassifiable }`；rev-list 不可读（git 错误）⇒ 返回 null。只报【reachable from
- * develop】的提交（rev-list 本身就只给出 develop 可达集）；baseline 用 `git rev-list <baseline>..develop`
- * 一次完成 reachability + baseline 过滤。
+ * 返回 `{ direct, unclassifiable, totalReachable }`（totalReachable = rev-list 命中条数，供
+ * 分类覆盖率 `classified / total` 读数——AC4）；rev-list 不可读（git 错误）⇒ 返回 null。只报
+ * 【reachable from develop】的提交（rev-list 本身就只给出 develop 可达集）；baseline 用
+ * `git rev-list <baseline>..develop` 一次完成 reachability + baseline 过滤。
  */
 export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
   let revs;
@@ -548,7 +558,7 @@ export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
     const message = gitCommitMessage(root, sha); // AC65 验证证据读取面
     direct.push({ sha, subject, action: "commit", epoch, files, message });
   }
-  return { direct, unclassifiable };
+  return { direct, unclassifiable, totalReachable: reachable.length };
 }
 
 function readJsonlLines(file) {
@@ -602,9 +612,10 @@ Usage:
   --help               this help
 
 Exit codes:
-  0  PASS or NOT-EVALUATED (read \`evaluated\` — false = could not judge, never conflated with green)
+  0  PASS — evaluated and no bypass
   1  RED — a direct commit to develop bypasses the fan-in mechanism
-  2  usage / environment error`;
+  2  usage / environment error
+  3  NOT-EVALUATED — could not judge (read \`evaluated\`: false), never conflated with PASS (exit 0), 硬规则 3b`;
 
 export function main(argv) {
   const args = argv.slice(2);
@@ -621,6 +632,7 @@ export function main(argv) {
 
   let commits = null;
   let unclassifiable = [];
+  let totalScanned = 0;
   let lockHoldIntervals = null;
   let lockSubEvaluated = false;
   let lockSubReason = "";
@@ -659,6 +671,7 @@ export function main(argv) {
       if (files === null || epoch === null) return null;
       return { sha, subject: gitCommitSubject(root, sha), action: "commit", epoch, files, message: gitCommitMessage(root, sha) };
     }).filter(Boolean);
+    totalScanned = commits.length;
     if (commits.length === 0) {
       process.stderr.write(`direct-to-develop-bypass-check: --commits resolved to 0 readable commits (shas: ${commitsArg})\n`);
       return 2;
@@ -674,10 +687,11 @@ export function main(argv) {
       };
       if (asJson) process.stdout.write(JSON.stringify(result, null, 2) + "\n");
       else console.log(`direct-to-develop-bypass-check: evaluated=false ok=true (${result.reason})`);
-      return 0;
+      return 3;
     }
     commits = collected.direct;
     unclassifiable = collected.unclassifiable;
+    totalScanned = collected.totalReachable;
   }
 
   const verdict = checkDirectCommits(commits, lockHoldIntervals);
@@ -725,6 +739,10 @@ export function main(argv) {
     reason = "unclassifiable-commits-in-range";
   }
 
+  // 分类覆盖率（AC4）：classified = 扫描范围内能被判定 landing-mode（fan-in / direct）的条数，
+  // total = rev-list 命中总数；unclassifiable = total − classified（既不在 ledger 也不在 reflog）。
+  const classified = totalScanned - unclassifiable.length;
+
   const result = {
     evaluated,
     ok,
@@ -733,6 +751,11 @@ export function main(argv) {
     develop,
     unclassifiableCommits: unclassifiable.length,
     unclassifiableSample: unclassifiable.slice(0, 20),
+    classification: {
+      classified,
+      total: totalScanned,
+      ratio: totalScanned > 0 ? classified / totalScanned : null,
+    },
     denominator: {
       totalDirectCommits: verdict.totalCommits,
       codeSurfaceCommits: verdict.codeSurfaceCommits,
@@ -741,6 +764,8 @@ export function main(argv) {
       ac65AuthorizedCommits: verdict.ac65AuthorizedCommits,
       ruledHistoricalCommits: verdict.ruledHistoricalCommits,
       unclassifiableCommits: unclassifiable.length,
+      classifiedCommits: classified,
+      totalScannedCommits: totalScanned,
       predicate: "design-internal exclusion set (see header / task body): tasks/ docs/ orchestration/ adr/ .quay/ plugin/loop/ measurements/ milestones/ .claude/ plugin/skills/manager/ plugin/skills/init/ CLAUDE.md README.md .gitignore .gitattributes .npmrc .github/ plugin/scripts/fan-in-* plugin/test/fan-in-*",
       ac65CarveOut: "AC65-authorized direct-fix (two predicates; sha table retired to display-only): commit message has AC65 declaration (/^AC65:/m) AND verification artifact (/AC65-Verified:/m) ⇒ ac65AuthorizedDirectFix (visible, NOT bypass); declaration with no verification artifact ⇒ RED (criterion-3); no declaration code-surface direct commit ⇒ RED. Legacy 02b2b2fc form (AC65 一条命令验证：<output>) tolerated. NOT a plugin/scripts/* filename exemption.",
       ruledHistoricalCarveOut: "RULED_HISTORICAL_COMMITS one-off exemption (manager 2026-08-15 ruling, tasks/gap-direct-to-develop-ruled-historical-cddc55e2): sha prefix match on the bounded ruled table ⇒ ruledHistorical (visible, NOT bypass, NOT ac65Authorized); any non-table direct commit still RED (exemption cannot be silently extended). Criterion-3 (declaration without verification ⇒ RED) unchanged.",
@@ -764,6 +789,7 @@ export function main(argv) {
   } else {
     console.log(`direct-to-develop-bypass-check: evaluated=${evaluated} ok=${ok} (${reason})`);
     console.log(`  denominator: total=${verdict.totalCommits} code-surface=${verdict.codeSurfaceCommits} design-internal=${verdict.designInternalCommits} in-lock-window=${verdict.inLockWindowCommits} ac65-authorized=${verdict.ac65AuthorizedCommits} ruled-historical=${verdict.ruledHistoricalCommits} unclassifiable=${unclassifiable.length}`);
+    console.log(`  classification: classified=${classified} total=${totalScanned} ratio=${totalScanned > 0 ? (classified / totalScanned).toFixed(4) : "n/a"}`);
     console.log(`  lock-window: evaluated=${lockSubEvaluated} (${lockSubReason})`);
     for (const c of codeSurfaceCandidates) {
       const tag = c.ruledHistorical ? "RULED-HISTORICAL" : c.bypass ? "RED" : c.ac65Authorized ? "AC65-AUTHORIZED" : c.inLockWindow ? "SKIP(in-lock-window)" : "design-internal";
@@ -774,7 +800,10 @@ export function main(argv) {
     }
     if (verdict.totalCommits === 0) console.log("  (no direct commits in scan range)");
   }
-  return evaluated && !ok ? 1 : 0;
+  // 退出码三态（硬规则 3b + gap-not-evaluated-harness-third-state）：NOT-EVALUATED（evaluated:false）
+  // ⇒ exit 3，⛔ 不再与 PASS（exit 0）同形——否则只看退出码的 `run_checker` 把「读不懂」读成「合格」。
+  if (!evaluated) return 3;
+  return ok ? 0 : 1;
 }
 
 if (isDirectEntry(import.meta, undefined, "direct-to-develop-bypass-check")) {

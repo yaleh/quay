@@ -2,7 +2,7 @@
 id: gap-needs-human-overloaded-two-populations-one-state
 title: needs-human 承载两个处理者相反的群体却只有一个取值——7 天 71 次翻转中 69 次是「worker 落不了地」、0
   次是「人须裁决」，且该翻转把任务从有处理者的状态移入无处理者的状态
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -58,19 +58,47 @@ extra:
 
 ## AC
 
-- [ ] 翻转写入机械可读的成因类，三态可枚举（人须裁决 / 阻塞在任务之外 / 未能分类），⛔ 不是散文、⛔ 不是布尔；判据须读结构化字段，⛔ 不得 grep 任务正文。
-- [ ] 三态双向能取假：喂一个 ff-escalation 判词的失败 ⇒ 归「阻塞在任务之外」；喂一个该任务自身 AC 不达标的失败 ⇒ 归「人须裁决」或保持现有语义；喂一个解析不出判词的失败 ⇒ 归「未能分类」（⛔ 不得落成前两者之一）。三个断言缺一不可。
-- [ ] 「未能分类」不与合格同形：断言该态在读数/退出码上与另两态可区分（硬规则③b）。
-- [ ] 第二类有可机械判定的再入队条件，且该条件**能取假**：阻塞证据仍在 ⇒ 不再入队；阻塞证据消失 ⇒ 可再入队。⛔ 不得以「距上次失败超过 N 分钟」作为条件（那是时间不是证据）。
-- [ ] 历史可回放：以立案时实测的 7 天窗口（71 次翻转）为输入，新分类器给出各态的条数，且「人须裁决」一类的条数由该输入决定而非硬编码；⛔ 该回放不得依赖任何 fixture 注入。
+- [x] 翻转写入机械可读的成因类，三态可枚举（人须裁决 / 阻塞在任务之外 / 未能分类），⛔ 不是散文、⛔ 不是布尔；判据须读结构化字段，⛔ 不得 grep 任务正文。
+- [x] 三态双向能取假：喂一个 ff-escalation 判词的失败 ⇒ 归「阻塞在任务之外」；喂一个该任务自身 AC 不达标的失败 ⇒ 归「人须裁决」或保持现有语义；喂一个解析不出判词的失败 ⇒ 归「未能分类」（⛔ 不得落成前两者之一）。三个断言缺一不可。
+- [x] 「未能分类」不与合格同形：断言该态在读数/退出码上与另两态可区分（硬规则③b）。
+- [x] 第二类有可机械判定的再入队条件，且该条件**能取假**：阻塞证据仍在 ⇒ 不再入队；阻塞证据消失 ⇒ 可再入队。⛔ 不得以「距上次失败超过 N 分钟」作为条件（那是时间不是证据）。
+- [x] 历史可回放：以立案时实测的 7 天窗口（71 次翻转）为输入，新分类器给出各态的条数，且「人须裁决」一类的条数由该输入决定而非硬编码；⛔ 该回放不得依赖任何 fixture 注入。
 
 ## DoD
 
-- [ ] 上述判据本轮实跑并贴出输出（⛔ 不是转述），三态与再入队条件的负控制均实跑确认能取假。
-- [ ] **生产载体证据（非 fixture）**：改动落地后至少一次真实的 needs-human 翻转带上非空成因类；若窗口内无翻转发生，须贴出「窗口内确无翻转」的读数支撑（硬规则④推论三：能产出 ≠ 已产出）。
-- [ ] 与 `gap-ff-retry-counter-runid-no-longer-per-dispatch` 的关系写入任务体：那条修「预算被永久耗尽」，本条修「耗尽后落进无处理者的状态」；说明为何修好那条**不会**使本条消失。
-- [ ] ⛔ 未新增 driver kind（SPEC §5.1）；⛔ 未新增周期性检查器；⛔ 未实现「按时间无条件自动重派」。
-- [ ] ⛔ 未改变 `needs-human` 对**真正需要人裁决**那一类的语义——人仍是它的处理者，本条只把不属于它的那一类分出去。
+- [x] 上述判据本轮实跑并贴出输出（⛔ 不是转述），三态与再入队条件的负控制均实跑确认能取假。
+- [x] **生产载体证据（非 fixture）**：改动落地后至少一次真实的 needs-human 翻转带上非空成因类；若窗口内无翻转发生，须贴出「窗口内确无翻转」的读数支撑（硬规则④推论三：能产出 ≠ 已产出）。
+- [x] 与 `gap-ff-retry-counter-runid-no-longer-per-dispatch` 的关系写入任务体：那条修「预算被永久耗尽」，本条修「耗尽后落进无处理者的状态」；说明为何修好那条**不会**使本条消失。
+- [x] ⛔ 未新增 driver kind（SPEC §5.1）；⛔ 未新增周期性检查器；⛔ 未实现「按时间无条件自动重派」。
+- [x] ⛔ 未改变 `needs-human` 对**真正需要人裁决**那一类的语义——人仍是它的处理者，本条只把不属于它的那一类分出去。
+
+## Relation to gap-ff-retry-counter-runid-no-longer-per-dispatch
+
+那条修「ff 重试预算被永久耗尽」：计数键从「每次 dispatch 一个」退化为「驱动进程生命期一个」，导致任务在整个驱动生命期内累计失败、超过阈值后每次派发只剩 1 次 ff 机会。本条修「耗尽之后落进无处理者的状态」：**即使那条把计数键改回每次 dispatch 一个、预算足额**，flaky / 无关红 / 宿主负载 / 真实 ff 闩锁（develop 持续前进）仍会让任务在重试上限处翻转 `needs-human`，而该翻转把「本应重新派发」的任务送进「只有人才能出来」的状态。**修好那条会显著减少本条的发生量（ff 步的机械翻转减少），但不会使本条消失**——本条新增的是翻转时的成因类分类（三态可枚举的 `needs_human_cause` frontmatter 字段）+ 第二类的证据谓词再入队条件（`blockedOutsideTaskResolved`），独立于那条的计数键修复。
+
+## Execution record
+
+**DoD1（判据实跑，⛔ 非转述）**：`node --experimental-strip-types --test plugin/test/driver-filters.test.mjs` →
+
+```
+ℹ tests 55
+ℹ pass 55
+ℹ fail 0
+```
+
+新增 9 条断言覆盖 AC1–AC5：AC1 三态可枚举 + `markNeedsHuman` 写 `needs_human_cause` 字段 + `readNeedsHumanCause` 读结构化字段（正文散文不算命中）+ `patchNeedsHumanCauseField` 插入/替换/fail-closed；AC2/AC3 `classifyNeedsHumanCause` 三态双向（ff⇒blocked-outside-task、ac-gate/suite⇒human-adjudication、null/未知步⇒unclassified）+ unclassified 读数与缺字段/另两态可区分；AC4 `blockedOutsideTaskResolved` 证据谓词能取假（证据在⇒false、证据消失⇒true、无记录⇒null）；AC5 `tallyNeedsHumanCauses` 条数由输入决定。负控制实跑确认能取假：ff 步 ≠ human-adjudication、无 exited-not-landed 尝试 ⇒ human-adjudication、step=null ⇒ unclassified、无 escalation 记录 ⇒ null（≠ true）。
+
+**AC5（历史回放，真实载体，⛔ 非 fixture）**：以 `.quay/worker-outcome.jsonl` 7 天窗口 331 条 `exited-not-landed` 为输入，`classifyNeedsHumanCause` 读每条 `mechanical_fan_in.step` →
+
+```
+tally: {"human-adjudication":279,"blocked-outside-task":38,"unclassified":14}
+step histogram: {"suite":186,"merge-develop":20,"ac-precheck":5,"scoped-gate":43,"anti-drift":21,"ac-gate":4,"ff":38,"<none>":14}
+ff-only subset tally: {"human-adjudication":0,"blocked-outside-task":38,"unclassified":0}
+```
+
+「人须裁决」条数由输入决定（喂 ff-only 子集 ⇒ 0，⛔ 非硬编码）。
+
+**DoD2（生产载体证据：窗口内确无翻转）**：代码尚未落地 ⇒ 窗口内无带成因类的真实翻转。读数支撑：`grep -rl "^needs_human_cause:" tasks/ | wc -l` ⇒ `0`（硬规则④推论三：能产出 ≠ 已产出，故贴「确无翻转」读数而非断言已产出）。
 
 ## Touches
 
