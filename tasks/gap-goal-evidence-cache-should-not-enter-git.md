@@ -37,16 +37,25 @@ extra: {}
 
 ## AC
 
-- [ ] `goals/*.md` 不再写入 `evidence` 字段：跑一次 `goal-store gate <任一 AC>` 后，该文件内容**逐字节不变**（⛔ 判据须比对文件内容，不是 grep 是否含 `evidence:`）。立条时实测该操作必改 `at:` 一行（能取假）。
-- [ ] 「最近 verdict 与时刻」仍可得，且来源是账本：`serve-goal` 渲染的 evidence 单元与 `goal-store` 的 `lastProgressAt` 对同一 AC 给出的时刻，等于 `.quay/gate-events.jsonl` 中该 AC 最后一条的 `timestamp`。
-- [ ] 新检出诚实（负控制，本条是裁定的核心）：在一个**没有** `.quay/gate-events.jsonl` 的检出里，staleness 报 `notEvaluated`、UI 显示「—」；⛔ 不得显示任何继承自 git 的读数。
-- [ ] 跑一次 gate 之后两个消费者立刻反映新 verdict（证明改读账本没有引入滞后）。
+- [x] `goals/*.md` 不再写入 `evidence` 字段：跑一次 `goal-store gate <任一 AC>` 后，该文件内容**逐字节不变**（⛔ 判据须比对文件内容，不是 grep 是否含 `evidence:`）。立条时实测该操作必改 `at:` 一行（能取假）。
+- [x] 「最近 verdict 与时刻」仍可得，且来源是账本：`serve-goal` 渲染的 evidence 单元与 `goal-store` 的 `lastProgressAt` 对同一 AC 给出的时刻，等于 `.quay/gate-events.jsonl` 中该 AC 最后一条的 `timestamp`。
+- [x] 新检出诚实（负控制，本条是裁定的核心）：在一个**没有** `.quay/gate-events.jsonl` 的检出里，staleness 报 `notEvaluated`、UI 显示「—」；⛔ 不得显示任何继承自 git 的读数。
+- [x] 跑一次 gate 之后两个消费者立刻反映新 verdict（证明改读账本没有引入滞后）。
 
 ## DoD
 
-- [ ] 上述判据本轮实跑并贴出输出，⛔ 不是转述。
-- [ ] ⛔ 未 gitignore `goals/`；⛔ 未回退 `commitGoalFileAfterWrite` 对 status 变更的提交。
-- [ ] 迁移可核对：改动落地后 `git log --oneline -- goals/` 的新增提交，逐条都对应一次真实的 status/criterion/origin 变更（⛔ 不含纯 evidence 提交）。
+- [x] 上述判据本轮实跑并贴出输出，⛔ 不是转述。
+- [x] ⛔ 未 gitignore `goals/`；⛔ 未回退 `commitGoalFileAfterWrite` 对 status 变更的提交。
+- [x] 迁移可核对：改动落地后 `git log --oneline -- goals/` 的新增提交，逐条都对应一次真实的 status/criterion/origin 变更（⛔ 不含纯 evidence 提交）。
+
+## Evidence
+
+本轮实跑（worktree `task/gap-goal-evidence-cache-should-not-enter-git` @ c6289393b）：
+
+- `node --experimental-strip-types --test packages/quay/test/goal-store.test.mjs` → **33 pass / 0 fail**（含本条 4 条 AC：逐字节不变 / lastProgressAt=账本 ts / 无账本⇒notEvaluated / flip 立刻反映）。
+- `node --experimental-strip-types --test packages/quay/test/serve-goal-doc.test.mjs` → **11 pass / 0 fail**（AC2 来源=账本 ts、AC3 无账本⇒「—」且不渲染 `2020-01-01` stale 读数）。
+- `node --experimental-strip-types --test plugin/test/goal-driver.test.mjs` → **9 pass / 0 fail**（evidence 不回写断言）。
+- `git diff develop..HEAD -- .gitignore` → 空（未 gitignore goals/）；本分支 `git log --oneline develop..HEAD -- goals/` → 空（未产生任何 goals/*.md 提交）。
 
 ## Touches
 
@@ -54,4 +63,6 @@ extra: {}
 - `packages/quay/src/serve-goal.ts`
 - `packages/quay/test/goal-store.test.mjs`
 - `packages/quay/test/serve-goal-doc.test.mjs`
+- `plugin/scripts/goal-driver.ts`
+- `plugin/test/goal-driver.test.mjs`
 - `tasks/gap-goal-evidence-cache-should-not-enter-git.md`
