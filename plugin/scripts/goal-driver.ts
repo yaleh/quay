@@ -84,7 +84,8 @@ export const GAP_WORKER_TIMEOUT_MS = 180_000;
 export const LLM_COMMAND_SET_DEFAULT: readonly string[] = ["claude", "claude-fjdac"];
 
 /** 每轮缺口立案 spawn 上限缺省（G9 语义环；正源 = drivers.yml goal.spawn_cap，⛔ 此处仅作
- *  drivers.yml 缺失/不可读时的保守回退，同 driver-config DEFAULT_DRIVER_CAP 的接法）。 */
+ *  drivers.yml 缺失/不可读时的保守回退，同 driver-config DEFAULT_DRIVER_CAP 的接法）。
+ *  concurrency-default-fallback：drivers.yml 缺失/不可解析时回退到该值（有理由的默认值，非悄悄写死）。 */
 export const GOAL_SPAWN_CAP_DEFAULT = 3;
 
 /** 例程的「每轮必跑」触发（goal 机械环是每 tick 必跑；interval minutes=0 ⇒ 恒 due）。真正的节奏由
