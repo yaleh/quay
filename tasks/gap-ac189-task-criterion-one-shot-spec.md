@@ -2,7 +2,7 @@
 id: gap-ac189-task-criterion-one-shot-spec
 title: 把「task 层判据是一次性的、需长期维持的保证上移 goal 层」写进 SPEC 正本（标题含 task 层判据、正文含 上移+goal
   层、≥200 非空白字符）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -29,11 +29,11 @@ AC-189 判据当前取假（2026-09-07 干跑：`awk` 在 `orchestration/SPEC-go
 
 ## AC
 
-- [ ] AC-189 判据 exit 0：`awk '/^##.*task 层判据/'` 命中一节，其正文含「上移」与「goal 层」，非空白字符 ≥200
-- [ ] 可证伪性（硬规则④）：改动前干跑 exit 1（章节不存在）已记录，完成前后读数不同，排除恒真
-- [ ] 落点在 `orchestration/SPEC-goal-mechanism-2026-09-06.md` 而非 CLAUDE.md（守 CLAUDE.md 头部「行数稀缺」纪律）
-- [ ] 新节编号与现有 §0–§10 不冲突（`grep -n '^## '` 无重复编号），SPEC 结构自洽
-- [ ] `node packages/quay/bin/quay.ts task check gap-ac189-task-criterion-one-shot-spec --json` 的 `missing` 为 `[]`
+- [x] AC-189 判据 exit 0：`awk '/^##.*task 层判据/'` 命中一节，其正文含「上移」与「goal 层」，非空白字符 ≥200
+- [x] 可证伪性（硬规则④）：改动前干跑 exit 1（章节不存在）已记录，完成前后读数不同，排除恒真
+- [x] 落点在 `orchestration/SPEC-goal-mechanism-2026-09-06.md` 而非 CLAUDE.md（守 CLAUDE.md 头部「行数稀缺」纪律）
+- [x] 新节编号与现有 §0–§10 不冲突（`grep -n '^## '` 无重复编号），SPEC 结构自洽
+- [x] `node packages/quay/bin/quay.ts task check gap-ac189-task-criterion-one-shot-spec --json` 的 `missing` 为 `[]`
 
 ## DoD
 
