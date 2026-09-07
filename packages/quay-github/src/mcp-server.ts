@@ -111,6 +111,12 @@ export async function startMcpServer({ owner, repo }: { owner: string; repo: str
     "labels",
     "parent",
     "children",
+    // gap-cli-write-surface-lacks-toplevel-fields: depends_on/goal_ac are native top-level fields
+    // now also recognized on GitHub (stored in the issue body's hidden quay-meta block, see
+    // github-client.ts writeMeta/setQuayMeta). `extra` remains genuinely unsupported here (the
+    // "extra 仍不可 CLI 写" ruling is unchanged).
+    "depends_on",
+    "goal_ac",
   ]);
   // PR-ABI-001 hard-error floor: the MCP SDK builds a zod `z.object(shape)`
   // from a plain inputSchema shape and, by default, SILENTLY STRIPS
@@ -135,6 +141,8 @@ export async function startMcpServer({ owner, repo }: { owner: string; repo: str
       labels: z.array(z.string()).optional(),
       parent: z.string().nullable().optional(),
       children: z.array(z.string()).optional(),
+      depends_on: z.array(z.string()).optional(),
+      goal_ac: z.string().optional(),
     })
     .catchall(z.unknown());
   server.registerTool(
@@ -172,14 +180,16 @@ export async function startMcpServer({ owner, repo }: { owner: string; repo: str
           ],
         };
       }
-      const { id, status, title, body, labels, parent, children } = rawArgs;
+      const { id, status, title, body, labels, parent, children, depends_on, goal_ac } = rawArgs;
       if (
         status === undefined &&
         title === undefined &&
         body === undefined &&
         labels === undefined &&
         parent === undefined &&
-        children === undefined
+        children === undefined &&
+        depends_on === undefined &&
+        goal_ac === undefined
       ) {
         return {
           isError: true,
@@ -187,7 +197,7 @@ export async function startMcpServer({ owner, repo }: { owner: string; repo: str
             {
               type: "text" as const,
               text:
-                "task_write: at least one of status/title/body/labels/parent/children is required",
+                "task_write: at least one of status/title/body/labels/parent/children/depends_on/goal_ac is required",
             },
           ],
         };
@@ -220,6 +230,12 @@ export async function startMcpServer({ owner, repo }: { owner: string; repo: str
           if (Object.keys(relationFields).length > 0) {
             task = client.writeRelations(realId, relationFields);
           }
+          const metaFields: { depends_on?: string[]; goal_ac?: string } = {};
+          if (depends_on !== undefined) metaFields.depends_on = depends_on as string[];
+          if (goal_ac !== undefined) metaFields.goal_ac = goal_ac as string;
+          if (Object.keys(metaFields).length > 0) {
+            task = client.writeMeta(realId, metaFields);
+          }
           return {
             content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }],
             structuredContent: { task },
@@ -241,6 +257,12 @@ export async function startMcpServer({ owner, repo }: { owner: string; repo: str
         if (children !== undefined) relationFields.children = children as string[];
         if (Object.keys(relationFields).length > 0) {
           task = client.writeRelations(id as string, relationFields);
+        }
+        const metaFields: { depends_on?: string[]; goal_ac?: string } = {};
+        if (depends_on !== undefined) metaFields.depends_on = depends_on as string[];
+        if (goal_ac !== undefined) metaFields.goal_ac = goal_ac as string;
+        if (Object.keys(metaFields).length > 0) {
+          task = client.writeMeta(id as string, metaFields);
         }
         if (!task) {
           return { isError: true, content: [{ type: "text" as const, text: `no such task: ${id}` }] };
