@@ -1,7 +1,7 @@
 ---
 id: gap-ac156-spec-12e-dead-set-lines-writeback
 title: AC156 判据仍红——死集已重算（116→112）但 SPEC §12e 未写回「扫描前/后死集」两个机读行
-status: ready
+status: done
 labels:
   - gap
 parent: null
