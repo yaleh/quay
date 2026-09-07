@@ -56,6 +56,9 @@ import {
   aliveness,
   statePaths,
   kernelSelfPath,
+  watchedSourceFiles,
+  sourceFilesMaxMtimeMs,
+  sourceChangedSince,
 } from "../scripts/driver-runtime.ts";
 import { isDue } from "../scripts/routine-scheduler.ts";
 import * as worker from "../scripts/worker-driver.ts";
@@ -481,4 +484,65 @@ test("negative control — pollJsonFile waits through a torn (exists-but-partial
   const dump = await pollJsonFile(p, 2000, 10);
   await finish;
   assert.deepEqual(dump, complete, "poller waited through the torn state and read the completed file");
+});
+
+// ── source-refresh（AC-184 陈旧写者收尾）：supervisor 在源码推进到 driver 启动时刻之后重拉 driver ──
+// 判据（AC）：`node --experimental-strip-types --test plugin/test/driver-runtime.test.mjs` 里，下面的
+// 集成测试证明 supervisor 在 driver-filters.ts 推进到运行中 driver 之后 respawn 该 driver——常驻 driver
+// 因此自刷新，AC-184 不再每提交一次就陈旧写者复发。判据取假（DoD）：删掉 runSupervisor 里的 sourceCheck
+// 对照 ⇒ 源码推进后 pid 永不变 ⇒ 集成测试红。
+
+test("source-refresh — watchedSourceFiles / sourceFilesMaxMtimeMs / sourceChangedSince 纯函数可单测且取假", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dr-src-fn-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const scripts = path.join(root, "plugin", "scripts");
+  fs.mkdirSync(scripts, { recursive: true });
+  const filtersFile = path.join(scripts, "driver-filters.ts");
+  fs.writeFileSync(filtersFile, "v1", "utf8");
+
+  // watched 集 = driver 自身入口 + 共享 Layer 0/1a 模块（含 driver-filters.ts——AC-184 的根）。
+  const watched = watchedSourceFiles("promotion");
+  assert.ok(watched.includes("promotion-driver.ts"), "driver 自身入口在监视集");
+  assert.ok(watched.includes("driver-filters.ts"), "driver-filters.ts 在监视集");
+
+  const m0 = sourceFilesMaxMtimeMs(root, "promotion");
+  assert.ok(m0 > 0, "mtime 读自被写文件（⛔ 非恒真 0）");
+
+  // 取假：since 取「未来」⇒ 不变更；since 取 0（过去）⇒ 变更。对照真读 mtime，⛔ 恒真/恒假。
+  assert.equal(sourceChangedSince(root, "promotion", m0 + 1000), false, "源码不晚于 since ⇒ 不变更");
+  assert.equal(sourceChangedSince(root, "promotion", 0), true, "源码晚于 epoch 0 ⇒ 变更");
+
+  // 推进 mtime ⇒ max 增大（可观测非静默——⛔ 不是结构上恒真的量）。
+  const later = new Date(m0 + 5000);
+  fs.utimesSync(filtersFile, later, later);
+  assert.ok(sourceFilesMaxMtimeMs(root, "promotion") > m0, "推进 mtime ⇒ max 增大");
+});
+
+test("source-refresh — supervisor respawns driver when driver-filters.ts advances past the running driver", async (t) => {
+  const root = makeRoot("src-respawn");
+  // driver-filters.ts 先于 driver 启动写入（mtime < driver 启动时刻），确保初始不触发 respawn。
+  const filtersFile = path.join(root, "plugin", "scripts", "driver-filters.ts");
+  fs.writeFileSync(filtersFile, "v1", "utf8");
+  t.after(() => {
+    run(["stop", "--root", root], { timeout: 15000 });
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  const start = run(["start", "--root", root, "--restart-delay", "1", "--run-id", "dr-src-respawn"]);
+  assert.equal(start.status, 0, `start failed: ${start.stdout}\n${start.stderr}`);
+  const p1 = readPid(root, "promotion-driver.pid");
+  assert.ok(p1, "driver pid recorded");
+
+  // 确保 driver 已运行 ≥150ms，使「重写 driver-filters.ts 的 mtime」严格晚于 driver 启动时刻；
+  // 且 mtime 落在「现在」（⛔ 未来）——respawn 后的新 driver 启动时刻更晚，故不进入 respawn 死循环。
+  await new Promise((r) => setTimeout(r, 150));
+  fs.writeFileSync(filtersFile, "v2", "utf8");
+
+  let p2 = p1;
+  for (let i = 0; i < 80; i++) {
+    p2 = readPid(root, "promotion-driver.pid");
+    if (p2 && p2 !== p1) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.notEqual(p2, p1, `driver pid changed (respawned) after driver-filters.ts advanced: ${p1} → ${p2}`);
 });

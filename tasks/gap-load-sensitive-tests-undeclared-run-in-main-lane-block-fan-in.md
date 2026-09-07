@@ -1,7 +1,7 @@
 ---
 id: gap-load-sensitive-tests-undeclared-run-in-main-lane-block-fan-in
 title: 三个事实上负载敏感的测试文件未声明泳道，在满并发主泳道跑 ⇒ 8 轮 fan-in 全红且红集每轮漂移；单跑全绿，已声明的同类文件只红 1/8
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -70,6 +70,17 @@ $ node --experimental-strip-types --test --test-name-pattern='cold first request
 
 **方向倾向（供执行者判断，非强制）**：把三个文件改到**能让它们在代表性负载下稳定绿的最宽松泳道**（`lowconc` 优先于 `serial`——`serial` 并发 1 代价最大，⛔ 不要一律推到 serial），提交带 `@test-group-downgrade` 与理由。⛔ **不接受**：①再次放宽任何计时阈值（第四节已证否，且人 2026-09-01 的裁定禁止放宽到容纳任意负载）；②给这些断言加无条件 skip（那是删掉保证，不是隔离）；③只改一个文件（三个都在挡，红集漂移正说明是同一个类）。
 
+### 六、同时登记进 KNOWN-LOAD-SENSITIVE 族（红窗自动隔离-判定机制，与泳道声明是两件事）
+
+`@test-group` 泳道声明之外，这三个文件还应该登记进独立的 KNOWN-LOAD-SENSITIVE 族（`plugin/scripts/known-load-sensitive.ts` 的机读 `// @load-sensitive <kind>` 头注释清单）——这是与泳道声明不同的另一个机制：泳道声明**降低失败概率**（降并发）；`@load-sensitive` 族登记让 `red-window-triage.ts` 在这三个文件未来仍在满并发下红时，**自动**发出隔离重跑命令并机械判定 environmental（绿，放行）vs 真回归（红，升级），不必每次都靠人工重新做一遍本任务 Evidence 2 那样的隔离验证。`load-sensitive-release-check.ts` 强制"红窗隔离通过的放行必须带**预先声明**的标记，不能是**事后**声明"——本任务已经拿到隔离证据（Evidence 2：worker-driver-resident 单跑 39/39 绿 89.6s；observation 单跑 74981ms 绿），现在登记就是"预先声明"，避免下次真的红了之后来不及补登记。
+
+**kind 归类**（与 `known-load-sensitive.ts` 现有分类法一致，"一个根因=一个 kind"，不得盲选）：
+- `worker-driver-resident.test.mjs` → `child-spawn`（resident driver 真实子进程管理，并发时序对宿主负载敏感，同 `serve.test.mjs`/`acceptance.test.mjs` 现有 child-spawn 成员性质一致）
+- `ts-typecheck-gate-config-wiring.test.mjs` → `child-spawn`（起真实 `npx tsc --noEmit` 子进程，完成时间受宿主负载直接影响）
+- `observation.test.mjs` → `wall-clock`（`/tasks cold <3s` 是真实进程计时断言，同现有 `delivery-standalone-smoke-gate.test.mjs`/`cold-start-skill.test.mjs` 两个 wall-clock 成员性质一致）
+
+**张力与为何不构成问题**：`observation.test.mjs` 的 `/tasks cold <3s` 是真实性能回归闸门，登记进 load-sensitive 族**不等于弱化断言**——隔离重跑仍然跑同一条真实断言，只是换个不受干扰的环境重新验证；若代码真的退化（非环境问题），隔离重跑一样会红，`red-window-triage.ts` 判 `red ⇒ NOT environmental, escalate`，不会被蒙混过关。
+
 ### 第 5 实例写回 GOAL-007（DoD 第 5 条）
 
 本条是 `GOAL-007`（done 任务判据后来变假、无机制重新评估）的**第 5 个实例**：`gap-observation-ac1-perf-threshold-relax`（`status: done`，人 2026-09-01 裁定放宽阈值）的 AC3 逐字写着取假条件「⛔ 仍反复红 ⇒ 假」——该条件此刻成立（近 8 轮 fan-in 中 observation 红 4 次，且全红无一真回归）。判据当年为真（放宽后曾稳定），之后被「满并发主泳道 + 宿主基线负载恒不为零」的外生负载推成假。证据记录于此（GOAL-007 为 draft，激活时吸收进 origin）。
@@ -96,6 +107,7 @@ $ node --experimental-strip-types --test --test-name-pattern='cold first request
 - [x] **能取假（隔离对照固定为回归）**：把任一文件改回 `product`/`engine` ⇒ 上一条的路由断言立即变红。——实测：observation 头改回 product ⇒ 路由断言 ✖ `grouped product, expected lowconc`，已还原（见 ## Evidence 3）。
 - [x] **计时断言未被削弱**：断言 `observation.test.mjs` 的 `/tasks` 冷/热阈值仍为 `<3s` / `<500ms`（⛔ 未上调），且 `ts-typecheck` 的 60s 超时未上调；用一条命令读出这三个数值并比对。——实测：冷/热阈值仍 `<3000ms`/`<500ms`；ts-typecheck timeoutMs 仍 120000（前序已抬、本条未动，见 ## Evidence 5）。
 - [ ] **效果由载体读数证明，非断言**：改动落地后开一个至少 5 轮 fan-in 的窗口，读 `.quay/fan-in-suite-*.log` 的 `__PERFILE__ ... passed=false`，这三个文件的出现次数为 **0**；⛔ 「应该会好」不算，须贴出 5 轮的逐轮读数。（待外部）
+- [ ] **KNOWN-LOAD-SENSITIVE 族登记（能取假）**：三个文件的头部各自声明 `// @load-sensitive <kind>`（`worker-driver-resident.test.mjs`→`child-spawn`、`ts-typecheck-gate-config-wiring.test.mjs`→`child-spawn`、`observation.test.mjs`→`wall-clock`）；`node --no-warnings --experimental-strip-types plugin/scripts/known-load-sensitive.ts --list` 的输出必须包含这三行（`file\tkind` 格式）；`node --no-warnings --experimental-strip-types plugin/scripts/known-load-sensitive.ts --check` 退出码为 0（AC2 不变量：所有头部声明都有匹配的机读注解，不存在裸声明）。⛔ kind 选择不得盲选，须在 Measured 里贴出选择理由（对照现有同 kind 成员的共性）；⛔ 声明了注解但未出现在 `--list` 输出 ⇒ 假；⛔ `--check` 非 0 退出 ⇒ 假。（待外部）
 
 ## DoD
 
@@ -108,8 +120,8 @@ $ node --experimental-strip-types --test --test-name-pattern='cold first request
 
 ## Touches
 
-- `plugin/test/worker-driver-resident.test.mjs`
-- `packages/quay/test/observation.test.mjs`
-- `packages/quay/test/ts-typecheck-gate-config-wiring.test.mjs`
+- `plugin/test/worker-driver-resident.test.mjs`（含 `@load-sensitive child-spawn` 头注解）
+- `packages/quay/test/observation.test.mjs`（含 `@load-sensitive wall-clock` 头注解）
+- `packages/quay/test/ts-typecheck-gate-config-wiring.test.mjs`（含 `@load-sensitive child-spawn` 头注解）
 - `plugin/test/runner-grouping-metadata.test.mjs`
 - `tasks/gap-load-sensitive-tests-undeclared-run-in-main-lane-block-fan-in.md`
