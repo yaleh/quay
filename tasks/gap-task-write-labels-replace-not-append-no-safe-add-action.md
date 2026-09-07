@@ -27,15 +27,15 @@ extra:
 
 ## AC
 
-- [ ] 有一个可直接调用的"追加单个标签，不影响其它标签"动作（MCP verb，或对现有 `task_write` 的一层薄封装/CLI 子命令），复用/暴露 `ensureDeliveryCriticalLabel`（`plugin/scripts/task-ops.ts:72-113`）或等价逻辑，调用方不需要自己先 `task_get` 再拼数组。
-- [ ] `plugin/skills/quay-task-operator/SKILL.md`（或等价面向调用方的文档）对 `task_write.labels` 的整体替换语义有一条明确的操作提醒，紧邻 delivery-critical 相关段落（`:29-30` 附近）。
-- [ ] 一条测试：对一个已有 `[gap, defect]` 标签的任务调用新的追加动作加 `delivery-critical`，结果 `labels` = `[gap, defect, delivery-critical]`（顺序不敏感），原标签未丢失。
-- [ ] 负控制：对同一任务重复追加 `delivery-critical` 两次，`labels` 不出现重复项。
+- [x] 有一个可直接调用的"追加单个标签，不影响其它标签"动作（MCP verb，或对现有 `task_write` 的一层薄封装/CLI 子命令），复用/暴露 `ensureDeliveryCriticalLabel`（`plugin/scripts/task-ops.ts:72-113`）或等价逻辑，调用方不需要自己先 `task_get` 再拼数组。
+- [x] `plugin/skills/quay-task-operator/SKILL.md`（或等价面向调用方的文档）对 `task_write.labels` 的整体替换语义有一条明确的操作提醒，紧邻 delivery-critical 相关段落（`:29-30` 附近）。
+- [x] 一条测试：对一个已有 `[gap, defect]` 标签的任务调用新的追加动作加 `delivery-critical`，结果 `labels` = `[gap, defect, delivery-critical]`（顺序不敏感），原标签未丢失。
+- [x] 负控制：对同一任务重复追加 `delivery-critical` 两次，`labels` 不出现重复项。
 
 ## DoD
 
-- [ ] 上述判据本轮实跑并贴出输出，不是转述。
-- [ ] `git log` 可见一次真实调用该追加动作、对一个真实任务加标签、且验证其它标签未被冲掉的记录。
+- [x] 上述判据本轮实跑并贴出输出，不是转述。
+- [x] `git log` 可见一次真实调用该追加动作、对一个真实任务加标签、且验证其它标签未被冲掉的记录。
 
 ## Touches
 
@@ -43,4 +43,5 @@ extra:
 - `plugin/scripts/task-ops.ts`
 - `plugin/skills/quay-task-operator/SKILL.md`
 - `packages/quay/test/mcp-handlers.test.mjs`
+- `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `tasks/gap-task-write-labels-replace-not-append-no-safe-add-action.md`

@@ -1,7 +1,7 @@
 ---
 id: AC-143
 title: 观测/账本/收尾面驱动化 —— outer 纯机械 A/B 段收进 driver
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-002
 criterion: |
@@ -11,10 +11,6 @@ origin: |
   人 2026-08-23 方向「其它定期操作 → 实现相应 driver，由 quay 统一机械驱动」。
   kind 派发是 registry 表驱动（KIND_DRIVER[]/KIND_VERBS[]/KIND_PREFIX[]），
   加一个 kind = 表里加一行 + 写该 driver 的 .ts（AC139-2 的设计红利，不需重造承载）。
-evidence:
-  at: 2026-09-06T17:03:26.105Z
-  verdict: pass
-  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：outer 执行核里**纯机械**的 A/B 段（A1/A3/A6/A9/A10/A18/A21 读数 ·
