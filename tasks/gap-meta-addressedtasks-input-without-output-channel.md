@@ -2,7 +2,7 @@
 id: gap-meta-addressedtasks-input-without-output-channel
 title: addressedTasks 是有入口无出口的读数——33 轮读到 110 次、四条输出通道无一是「回应一条被点名的 task」⇒ 0
   次响应，而这个 0 是无通道造成的，不能当作「无话可说」的发生率
-status: todo
+status: ready
 labels:
   - gap
   - meta-driver
