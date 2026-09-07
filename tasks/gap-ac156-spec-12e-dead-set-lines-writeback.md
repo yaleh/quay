@@ -1,7 +1,7 @@
 ---
 id: gap-ac156-spec-12e-dead-set-lines-writeback
 title: AC156 判据仍红——死集已重算（116→112）但 SPEC §12e 未写回「扫描前/后死集」两个机读行
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -22,10 +22,10 @@ goal_ac: AC-156
 
 ## AC
 
-- [ ] AC-156 判据取真：`f=orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md; grep -qE '^- 扫描前死集: [0-9]+$' "$f" && grep -qE '^- 扫描后死集: [0-9]+$' "$f"` ⇒ exit 0（这正是 AC-156 自己的判据，goal-driver 下一轮将独立复核）
-- [ ] 数字可追溯：SPEC 里两行的 N/M 与 `docs/analysis/dead-set-recomputed.json` 的 before/after deadCount 一致，或与一次新跑的 `--dead-set` 输出一致，且行旁注明来源与方法窗口；⛔ 不凭空造数
-- [ ] 能取假：临时删掉其中一行 ⇒ 上一条判据 exit 非 0（证明判据测的是这两行机读行，不是恒真）
-- [ ] `node plugin/scripts/task-schema-check.ts tasks/gap-ac156-spec-12e-dead-set-lines-writeback.md` ⇒ exit 0
+- [x] AC-156 判据取真：`f=orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md; grep -qE '^- 扫描前死集: [0-9]+$' "$f" && grep -qE '^- 扫描后死集: [0-9]+$' "$f"` ⇒ exit 0（这正是 AC-156 自己的判据，goal-driver 下一轮将独立复核）
+- [x] 数字可追溯：SPEC 里两行的 N/M 与 `docs/analysis/dead-set-recomputed.json` 的 before/after deadCount 一致，或与一次新跑的 `--dead-set` 输出一致，且行旁注明来源与方法窗口；⛔ 不凭空造数
+- [x] 能取假：临时删掉其中一行 ⇒ 上一条判据 exit 非 0（证明判据测的是这两行机读行，不是恒真）
+- [x] `node plugin/scripts/task-schema-check.ts tasks/gap-ac156-spec-12e-dead-set-lines-writeback.md` ⇒ exit 0
 
 ## DoD
 
