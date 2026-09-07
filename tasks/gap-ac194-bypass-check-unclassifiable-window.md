@@ -3,7 +3,7 @@ id: gap-ac194-bypass-check-unclassifiable-window
 title: AC-194 判据恒 fail：direct-to-develop-bypass-check 对 develop~100 窗 449/721
   提交不可分类（reflog 只记 ff tip）⇒ NOT-EVALUATED fail-closed；改 first-parent 扫描 + reflog
   括注分类使判据可评估 exit 0 且真直投仍红
-status: ready
+status: done
 labels:
   - gap
   - defect
