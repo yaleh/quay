@@ -1,7 +1,7 @@
 ---
 id: AC-192
 title: ff retry counter per-cycle
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-007
 criterion: >-
