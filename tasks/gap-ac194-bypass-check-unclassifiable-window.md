@@ -38,13 +38,13 @@ AC-194 判据当前取假（2026-09-07 干跑）：`node packages/quay/src/goal-
 
 ## AC
 
-- [ ] `node packages/quay/src/goal-store.ts gate AC-194` 在生产工作树 exit 0（读真实 develop~100，⛔ 非 fixture；贴输出含 evaluated/`totalDirectCommits: 0`）
-- [ ] 双向负控制：改动前 `gate AC-194` fail（exit 1，449/721 unclassifiable）已记录；注入 `commit:` code-surface 直投 fixture → 同一 checker exit 1（真直投仍红，能取假）
-- [ ] 分类归零：develop~100 窗 `unclassifiableCommits` 由 449 降为 0（读 `--json` 的 `denominator.unclassifiableCommits`，⛔ 非转述）
-- [ ] first-parent 对齐：扫描 `rev-list --first-parent`（100 条 spine），off-spine 621 条不参与判定（附读数）
-- [ ] 硬规则③b：落不进任何 reflog 括注区间、也非 `commit:` action 的老 commit 仍 NOT-EVALUATED（构造一个超出 reflog 保留的旧窗负控制验证，⛔ 不与合格同形）
-- [ ] 既有测试全绿 + 新增「ff 括注分类」用例在改动前红、改动后绿
-- [ ] `node packages/quay/bin/quay.ts task check gap-ac194-bypass-check-unclassifiable-window --json` 的 `missing` 为 `[]`
+- [x] `node packages/quay/src/goal-store.ts gate AC-194` 在生产工作树 exit 0（读真实 develop~100，⛔ 非 fixture；贴输出含 evaluated/`totalDirectCommits: 0`）
+- [x] 双向负控制：改动前 `gate AC-194` fail（exit 1，449/721 unclassifiable）已记录；注入 `commit:` code-surface 直投 fixture → 同一 checker exit 1（真直投仍红，能取假）
+- [x] 分类归零：develop~100 窗 `unclassifiableCommits` 由 449 降为 0（读 `--json` 的 `denominator.unclassifiableCommits`，⛔ 非转述）
+- [x] first-parent 对齐：扫描 `rev-list --first-parent`（100 条 spine），off-spine 621 条不参与判定（附读数）
+- [x] 硬规则③b：落不进任何 reflog 括注区间、也非 `commit:` action 的老 commit 仍 NOT-EVALUATED（构造一个超出 reflog 保留的旧窗负控制验证，⛔ 不与合格同形）
+- [x] 既有测试全绿 + 新增「ff 括注分类」用例在改动前红、改动后绿
+- [x] `node packages/quay/bin/quay.ts task check gap-ac194-bypass-check-unclassifiable-window --json` 的 `missing` 为 `[]`
 
 ## DoD
 

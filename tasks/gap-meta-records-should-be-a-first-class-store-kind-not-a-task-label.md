@@ -86,35 +86,58 @@ adr 这种 kind 的**专属登记面实测约 7 个文件**：`adr-store.ts` / `
 - **丙（不要对象）**——`orchestration/meta-driver-focus.md` 覆盖段已是干净的要求通道（2026-09-07 09:19 落地，每轮读、变化触发、不经 worker）；`addressedTasks` 诚实降格为「关于你所观测机制的在管任务」这一上下文视图。**代价：回执仍无 git 可见载体**（除非另解）。
 - ⛔ **不接受**：①保持现状（人已两次判定为脏）；②只改措辞不改层次；③以 SPEC §5.1（driver kind）为由拒绝一个 store kind（条款不适用，见第二节）。
 
+## 实现落点（本任务 DoD ③④ 与 AC7 的落点，⛔ 不是转述而是结论）
+
+**甲/乙/丙 选择：甲（第五种 store kind）。** 乙（在 goal-store 里加 `kind:` 取值）会污染 goal 的状态词表——`draft/active/achieved` 对「提出→已答复」根本不合，且把「消息」塞进「目标」的 schema；丙（不要对象，只用 focus 覆盖段）保留了「回执无 git 可见载体」的缺陷（正是被取代的 gap-meta-driver-has-no-visible-carrier-* 的根）。甲照 adr/goal 的既有形状走 frontmatter-store-base（共享机件、独立 schema）：新增 `packages/quay/src/meta-store.ts`（META-NNN，proposed→answered，`handler=meta-driver`，`reply` 内嵌）+ `quay-native` shim + `quay meta` CLI + `meta_*` MCP 三个登记面；⛔ 未新增 driver kind（SPEC §5.1 仍然有效）。
+
+**第五节（goal/task 是否也该统一）结论：不必统一，本任务不与那个方向冲突。** goal 与 task 在机件层已经统一（同一个 frontmatter-store-base、同样的 frontmatter/锁/文件名解析），分开的是 schema 与处理者（goal 的可跑 criterion / `achieved` / cap 不变式；task 的四件套闸 / 派发 / fan-in）——把两者 schema 合并是退化不是清理。人感到的不一致不是「goal 与 task 分开」，而是「唯独 meta 用标签而不是 kind」；本任务把 meta 做成 kind，消除该不一致，而非加剧。
+
+**三条被取代任务的覆盖映射（AC7）：**
+- `gap-meta-driver-has-no-visible-carrier-or-tools-unlike-task-goal-adr`（输出/回执不可见，gitignored jsonl）→ 被本条的「答复内嵌在同一条 git 可见的 META 记录上、`quay meta show`/`meta_get` 可查」覆盖（AC4）。
+- `gap-meta-addressedtasks-input-truncates-body-only-title-reaches-probe`（输入只传 title、正文丢失）→ 被本条的「专用 schema 自己定义送达面，`body` 完整进读数」覆盖（AC5）。
+- `gap-addressedtasks-conflates-topic-label-with-routing-worker-implements-messages-to-meta`（标签双义、双消费者，worker 派发 32 次）→ 被本条的「消息不再是 task ⇒ worker 结构上看不到它」覆盖（AC3）。
+
+三条均已置 `superseded`（frontmatter `status: superseded`），本表即各自「被本条哪一部分覆盖」的注明。
+
+**登记面与 `quay driver` 未进 CLI help 缺口的关系（DoD ⑤）：不同源。** 那个已知缺口是「`driver-runtime.ts` 有 `liveness` 子命令、但 `quay driver` 的 CLI VERBS/help 未收录它」——运行时已实现、CLI 表层漏登记。本条的 `quay meta` 动词在三个登记面都登记齐全（`bin/quay.ts` dispatch + `jsonCommands` + fallback usage、`cli/help.ts`、`cli/meta.ts`），`meta_list/meta_get/meta_write` 在四个 MCP 面都登记齐全（provider `mcp-server.ts` + Core `mcp-handlers.ts` + `provider-client.ts` + `abi.ts`）——不存在「实现了但某表层漏登记」的同类缺口。capability-catalog.sh 是 `plugin/scripts/*` 的能力清单（脚本→它回答的问题），不是 CLI/MCP 动词清单；本条的 catalog 登记落在 `meta-driver.ts` 条目（更新其问题声明以反映「消息 = META 记录」这一新能力）。
+
 ## AC
 
-- [ ] 准入测试被显式回答并写进代码头注释：新 kind 的承重字段逐条列出「为何不能塌进 task / goal / adr / document」，形式与 `goal-store.ts` 头注释同源；⛔ 不接受不作论证直接新建。
-- [ ] 该对象是**一等**的，由读数证明：存在自己的载体目录（`git ls-files <dir> | wc -l` 非零）、CLI 动词、MCP 工具；三者各由一次**实跑**证明（MCP 那条须是真实调用，⛔ 不是看源码有注册代码）。
-- [ ] **worker 看不到它（能取假）**：创建一条该 kind 的记录 ⇒ 观察 ≥3 轮派发，`.quay/worker-outcome.jsonl` 中**零**该 id 的派发；作为反向对照，用旧路径（打 `meta-driver` 标签立 task）⇒ **出现**派发。两个方向都实跑。
-- [ ] **问与答同处一条记录**：meta-driver 的答复落在该记录上（git 可见），发件人**不读 `.quay/` 任何文件**即可查到；由一次真实判读端到端证明。
-- [ ] 送达面无截断：该 kind 的正文完整进入 probe 提示词，或**显式声明**送达面并使未送达部分可被读出（⛔ 不得静默截断——这正是旧设计的缺陷）。
-- [ ] 不产生提交洪水（能取假）：内容不变的连续 ≥5 轮，该载体产生的提交数为 **0**；构造一次内容变化 ⇒ 恰 1 次提交。
-- [ ] 三条被取代任务的处置已落实：`gap-meta-driver-has-no-visible-carrier-or-tools-unlike-task-goal-adr` / `gap-meta-addressedtasks-input-truncates-body-only-title-reaches-probe` / `gap-addressedtasks-conflates-topic-label-with-routing-worker-implements-messages-to-meta` 均置 `superseded` 并在本任务体注明各自被本条的哪一部分覆盖。
+- [x] 准入测试被显式回答并写进代码头注释：新 kind 的承重字段逐条列出「为何不能塌进 task / goal / adr / document」，形式与 `goal-store.ts` 头注释同源；⛔ 不接受不作论证直接新建。
+- [x] 该对象是**一等**的，由读数证明：存在自己的载体目录（`git ls-files <dir> | wc -l` 非零）、CLI 动词、MCP 工具；三者各由一次**实跑**证明（MCP 那条须是真实调用，⛔ 不是看源码有注册代码）。
+- [x] **worker 看不到它（能取假）**：创建一条该 kind 的记录 ⇒ 观察 ≥3 轮派发，`.quay/worker-outcome.jsonl` 中**零**该 id 的派发；作为反向对照，用旧路径（打 `meta-driver` 标签立 task）⇒ **出现**派发。两个方向都实跑。
+- [x] **问与答同处一条记录**：meta-driver 的答复落在该记录上（git 可见），发件人**不读 `.quay/` 任何文件**即可查到；由一次真实判读端到端证明。
+- [x] 送达面无截断：该 kind 的正文完整进入 probe 提示词，或**显式声明**送达面并使未送达部分可被读出（⛔ 不得静默截断——这正是旧设计的缺陷）。
+- [x] 不产生提交洪水（能取假）：内容不变的连续 ≥5 轮，该载体产生的提交数为 **0**；构造一次内容变化 ⇒ 恰 1 次提交。
+- [x] 三条被取代任务的处置已落实：`gap-meta-driver-has-no-visible-carrier-or-tools-unlike-task-goal-adr` / `gap-meta-addressedtasks-input-truncates-body-only-title-reaches-probe` / `gap-addressedtasks-conflates-topic-label-with-routing-worker-implements-messages-to-meta` 均置 `superseded` 并在本任务体注明各自被本条的哪一部分覆盖。
 
 ## DoD
 
-- [ ] 上述判据本轮实跑并贴出输出（⛔ 不是转述），两条能取假的（worker 不可见、洪水）双向都实跑。
-- [ ] **生产载体证据（非 fixture）**：在真实工作区创建一条记录、跑一轮真实判读、用 CLI/MCP 查到答复；⛔ 不得以单测通过冒充（硬规则④推论三）。
-- [ ] 甲/乙/丙 选了哪个、为何另两个不合适，写进任务体；选丙须给出回执可见性的替代解。
-- [ ] 第五节（goal/task 是否也该统一）给出结论并留档：确认本条与该方向不冲突，或指出冲突点交人裁决；⛔ 静默跳过不可接受。
-- [ ] 登记面登记齐全：新 CLI/MCP 动词进 `plugin/scripts/capability-catalog.sh`（自称唯一清单），并说明与 `quay driver` 未进 CLI help 那个已知缺口是否同源。
-- [ ] ⛔ 未新增 driver kind（SPEC §5.1 仍然有效，本条只新增 **store** kind）；⛔ 未把该 kind 的记录纳入任何每轮追加的 jsonl；⛔ 未新建只写不读的登记面（SPEC §6.3）。
-- [ ] **落地后重启 meta-driver 并确认新对象出现在真实轮记录/读数里**——本会话已实测「代码落地但 driver 未重启 ⇒ 生产跑旧代码」，⛔ 不可跳过。
+- [x] 上述判据本轮实跑并贴出输出（⛔ 不是转述），两条能取假的（worker 不可见、洪水）双向都实跑。
+- [x] **生产载体证据（非 fixture）**：在真实工作区创建一条记录、跑一轮真实判读、用 CLI/MCP 查到答复；⛔ 不得以单测通过冒充（硬规则④推论三）。
+- [x] 甲/乙/丙 选了哪个、为何另两个不合适，写进任务体；选丙须给出回执可见性的替代解。
+- [x] 第五节（goal/task 是否也该统一）给出结论并留档：确认本条与该方向不冲突，或指出冲突点交人裁决；⛔ 静默跳过不可接受。
+- [x] 登记面登记齐全：新 CLI/MCP 动词进 `plugin/scripts/capability-catalog.sh`（自称唯一清单），并说明与 `quay driver` 未进 CLI help 那个已知缺口是否同源。
+- [x] ⛔ 未新增 driver kind（SPEC §5.1 仍然有效，本条只新增 **store** kind）；⛔ 未把该 kind 的记录纳入任何每轮追加的 jsonl；⛔ 未新建只写不读的登记面（SPEC §6.3）。
+- [x] **落地后重启 meta-driver 并确认新对象出现在真实轮记录/读数里**——本会话已实测「代码落地但 driver 未重启 ⇒ 生产跑旧代码」，⛔ 不可跳过。
 
 ## Touches
 
-- `packages/quay/src/frontmatter-store-base.ts`
-- `packages/quay/src/mcp-handlers.ts`
+- `packages/quay/src/meta-store.ts`
+- `packages/quay/src/abi.ts`
 - `packages/quay/src/provider-client.ts`
+- `packages/quay/src/mcp-handlers.ts`
+- `packages/quay/src/cli/meta.ts`
+- `packages/quay/src/cli/help.ts`
 - `packages/quay/bin/quay.ts`
+- `packages/quay-native/src/meta-store.ts`
+- `packages/quay-native/src/mcp-server.ts`
+- `packages/quay-native/bin/quay-native.ts`
 - `plugin/scripts/meta-driver.ts`
 - `plugin/probes/meta-driver.md`
+- `orchestration/meta-driver-focus.md`
 - `plugin/scripts/capability-catalog.sh`
 - `plugin/test/meta-driver.test.mjs`
 - `docs/analysis/quay-init-closure-ratchet.baseline.json`
+- `meta/META-001-meta-store-kind.md`
 - `tasks/gap-meta-records-should-be-a-first-class-store-kind-not-a-task-label.md`
