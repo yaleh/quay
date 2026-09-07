@@ -1,7 +1,7 @@
 ---
 id: AC-189
 title: 「task 层判据是一次性的、需长期维持的保证必须上移 goal 层」写进 SPEC 正本（按位置可查）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-007
 criterion: |
