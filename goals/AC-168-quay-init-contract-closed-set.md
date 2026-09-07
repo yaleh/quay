@@ -34,6 +34,10 @@ origin: >
   驱动内核，AC168 停止复制后下游 quay driver start 全线失效；${CLAUDE_PLUGIN_ROOT} 只覆盖 skill 载入
 
   路径，救不了 CLI/cron/OS anchor。正本 SPEC §6b。
+evidence:
+  at: 2026-09-07T01:09:44.531Z
+  verdict: fail
+  reading: acceptance failed (exit 1)
 ---
 
 **判据（能取假）**：`quay-init` 收缩到 SPEC §6 闭集（只建 quay 项目文件 + 写 Claude Code 侧配置），
