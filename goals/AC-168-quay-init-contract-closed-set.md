@@ -1,7 +1,7 @@
 ---
 id: AC-168
 title: quay-init 收缩到 SPEC §6 闭集
-status: draft
+status: active
 kind: criterion
 goal: GOAL-003
 criterion: >-
