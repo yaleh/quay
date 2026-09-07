@@ -1,7 +1,7 @@
 ---
 id: gap-ac191-migrated-ac-production-evidence-at
 title: 验证三条迁移 goal AC（AC-192/193/194）在生产轮记录里有 evidence.at 且晚于各自落地提交——AC-191 判据 exit 0
-status: todo
+status: ready
 labels:
   - gap
 parent: null
