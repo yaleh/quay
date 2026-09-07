@@ -1,7 +1,7 @@
 {
   "files": 133,
-  "bytes": 3849290,
-  "fingerprint": "32f1d87c89fcfcb3b0e2ca4df211bf01a4813887d7247c59a27e6d013d84cd1a",
+  "bytes": 3849397,
+  "fingerprint": "375253fc8338a2b660da63e2e7b4fc4d9d18f289429730a735fde7f90b76eb6e",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
@@ -421,7 +421,7 @@
     },
     {
       "rel": "plugin/scripts/start-drivers.ts",
-      "sha": "016bdf209c9430a0004af1b44a30beadc6e3c772d39ea75928d10a3eb88e847f"
+      "sha": "812ea7fa13320fc9f4619a12462089418f74bcbe82451ae0ff0a035f6cf0e67d"
     },
     {
       "rel": "plugin/scripts/strategic-doc-staleness-check.ts",
