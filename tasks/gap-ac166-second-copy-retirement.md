@@ -64,10 +64,10 @@ goal_ac: AC-166
 - plugin/test/workflows-dual-copy-drift-check.test.mjs
 - plugin/scripts/checker-mutation-cases/workflows-dual-copy-drift-check.sh
 - archive/INDEX.tsv（新增行）
-- archive/2026-09-07-second-copy-retirement/.claude/skills/*（迁入）
-- archive/2026-09-07-second-copy-retirement/.claude/workflows/*（迁入）
-- archive/2026-09-07-second-copy-retirement/plugin/scripts/*（迁入）
-- archive/2026-09-07-second-copy-retirement/plugin/test/*（迁入）
+- archive/2026-09-07-second-copy-retirement/.claude/skills/**（迁入）
+- archive/2026-09-07-second-copy-retirement/.claude/workflows/**（迁入）
+- archive/2026-09-07-second-copy-retirement/plugin/scripts/**（迁入）
+- archive/2026-09-07-second-copy-retirement/plugin/test/**（迁入）
 - plugin/scripts/runner-static-gate.ts（移除 drift-check 块 + @static-object 改 plugin 路径）
 - plugin/scripts/capability-catalog.sh（移除 workflows-dual-copy-drift-check 5 条目）
 - plugin/test/plugin-packaging.test.mjs（M143 双副本断言改 single-source）
