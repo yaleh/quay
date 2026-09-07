@@ -614,22 +614,18 @@ test('M143: init skill has zero research-layer references (VT/value-ledger/check
   );
 });
 
-test('M143: git-tracked workflows in plugin/workflows/ are byte-identical to .claude/workflows/ canonical sources', () => {
-  // Only test git-tracked source files that still exist after the prepare/execute retirement
-  // (ADR-022 / gap-retire-the-prepare-execute-pipeline-cluster). AC91: the FULL mirrored set
-  // (drain-directives / run-routines / fan-in-execute / execute-suite-fix / pool-quality-judge) —
-  // every distribution workflow is a byte-identical mirror of its .claude/workflows/ canonical.
-  const trackedWorkflows = ['drain-directives.js', 'run-routines.js', 'fan-in-execute.js', 'execute-suite-fix.js', 'pool-quality-judge.js'];
-  for (const name of trackedWorkflows) {
-    const canonical = path.join(repoRoot, '.claude', 'workflows', name);
+test('M143: the five workflow files live ONLY in plugin/workflows/ — the .claude/workflows/ second copy is retired', () => {
+  // gap-ac166-second-copy-retirement (AC166): the .claude/workflows/ dual-copy was the "second
+  // copy" that only produced drift (SPEC-plugin-lifecycle-single-bundle-2026-09-02 §7 #3). Each
+  // workflow now has a SINGLE source — plugin/workflows/ — and the .claude/workflows/ copy is
+  // archived (not deleted) under archive/. The byte-identity test is superseded by a
+  // single-source existence test: the canonical must be GONE and the bundled copy must exist.
+  const singleSourceWorkflows = ['drain-directives.js', 'run-routines.js', 'fan-in-execute.js', 'execute-suite-fix.js', 'pool-quality-judge.js'];
+  for (const name of singleSourceWorkflows) {
+    const retiredCopy = path.join(repoRoot, '.claude', 'workflows', name);
     const bundled = path.join(pluginDir, 'workflows', name);
-    assert.ok(existsSync(canonical), `canonical source missing: ${canonical}`);
-    assert.ok(existsSync(bundled), `bundled copy missing: ${bundled}`);
-    assert.equal(
-      readFileSync(bundled, 'utf8'),
-      readFileSync(canonical, 'utf8'),
-      `${name}: plugin/workflows/ copy must be byte-identical to .claude/workflows/ source`
-    );
+    assert.ok(!existsSync(retiredCopy), `.claude/workflows/${name} second copy must be retired: ${retiredCopy}`);
+    assert.ok(existsSync(bundled), `single source missing: ${bundled}`);
   }
 });
 

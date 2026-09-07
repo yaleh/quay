@@ -198,6 +198,9 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/orchestrator- -->
 <!-- reference-doc: orchestration/outer-tick-prompt.txt -->
 <!-- reference-doc: orchestration/manager-tick-prompt.txt -->
+<!-- reference-doc: orchestration/manager-tick-criteria.md -->
+<!-- reference-doc: orchestration/manager-tick-sending.md -->
+<!-- reference-doc: orchestration/manager-tick-closing.md -->
 <!-- reference-doc: plugin/loop/manager- -->
 <!-- reference-doc: orchestration/SPEC-unified-driver-architecture-2026-08-23.md -->
 <!-- reference-doc: orchestration/SPEC-web-session-observability-and-control-2026-08-24.md -->

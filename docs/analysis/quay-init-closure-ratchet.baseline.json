@@ -1,11 +1,11 @@
 {
-  "files": 133,
-  "bytes": 3853632,
-  "fingerprint": "9e7443fdd93adaae707dcc918535c252054392f62822398a56a25e7fd7eec8b6",
+  "files": 134,
+  "bytes": 3886761,
+  "fingerprint": "8b5934dc9540bae18cb74ee895750cc67952e3747c1a9bb3439e4e3a5667dd21",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
-      "sha": "271a385151339bbcaf5d7c3b7a5cc26eaf59593a34f0c52470f04cb163490fcb"
+      "sha": "0506e59990e32a17c6f233160ee37d81d86bd8d920f0a890655c6e2c3fc9c906"
     },
     {
       "rel": "orchestration/orchestrator-tick-core.md",
@@ -105,7 +105,7 @@
     },
     {
       "rel": "plugin/scripts/capability-catalog.sh",
-      "sha": "41635fb67c0b567a686321b95a1c11fa8fd50693ab159dd293d0d27551431558"
+      "sha": "b3cbf399a3589e175aff7be289fead89be1e6e25ff2c3c21e0fe897580a3166a"
     },
     {
       "rel": "plugin/scripts/checker-io.ts",
@@ -530,6 +530,10 @@
     {
       "rel": "plugin/workflows/fan-in-execute.js",
       "sha": "be27c107aaa459c126ae7265d428901be377156fc47208454d111e667bf242c3"
+    },
+    {
+      "rel": "plugin/workflows/manager-tick-core.js",
+      "sha": "6f9e9905597746c9ef932c69e1e9cc8fe6258206a4fd0180dd4b6efa327065dd"
     },
     {
       "rel": "plugin/workflows/pool-quality-judge.js",
