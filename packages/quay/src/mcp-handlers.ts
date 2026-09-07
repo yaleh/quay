@@ -273,12 +273,21 @@ export function registerTaskHandlers(
           };
         }
         const existing = Array.isArray(current.labels) ? current.labels : [];
-        const added = !existing.includes(label);
-        const labels = added ? [...existing, label] : existing;
-        const task = await client.taskWrite({ id, labels });
+        // Idempotent: the label is already present — return the current task WITHOUT writing. A
+        // no-op taskWrite of an unchanged labels array would reach the Provider, which rewrites
+        // identical bytes and then "fails" its commit as nothing-to-commit (a spurious failure log,
+        // not a real error) — skipping the write keeps the no-op silent, matching the verb's
+        // "append without duplicating" contract.
+        if (existing.includes(label)) {
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify(current, null, 2) }],
+            structuredContent: { task: current, added: false, label },
+          };
+        }
+        const task = await client.taskWrite({ id, labels: [...existing, label] });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }],
-          structuredContent: { task, added, label },
+          structuredContent: { task, added: true, label },
         };
       } catch (err) {
         return {
