@@ -2,7 +2,7 @@
 id: gap-delivery-critical-mechanical-axis-orphaned-needs-ruling
 title: delivery-critical 机械排序轴（slot-refill/concurrent-batch-scheduler,
   AC36）是孤儿——outer-driver 不在标准启动集，产出无消费者，需人裁定接入 worker-driver 或正式退役
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -53,3 +53,19 @@ extra:
 - `orchestration/dispatch-preference.md`
 - `orchestration/SPEC-capability-planes-and-mechanism-lifecycle-2026-09-05.md`
 - `tasks/gap-delivery-critical-mechanical-axis-orphaned-needs-ruling.md`
+
+## Ruling request（worker 2026-09-07 实查投递，待 人/manager 拍板）
+
+本任务 AC1 明文要求「人/manager 就 接入 vs 退役 做出裁定」。本 worker 非 manager（无 DIR-130 常设授权，该授权系 manager 层专属），不得伪造该裁定，故置 `needs-human` 待裁定。以下为 worker 本轮实查（逐条自核，非转述）与推荐，供裁定参考。
+
+**实查确认（finding 全部成立）**：
+- `worker-driver.ts` 对 `slot-refill`/`concurrent-batch` 零 import/零调用（grep 实测）。
+- `start-drivers.ts:30` `DRIVER_KINDS=["promotion","worker"]`，无 `outer` ⇒ `outer-driver.ts`（slot-refill 唯一消费者）不在标准启动集。
+- `ready-pool-check.ts:2147` `ready.sort()` 纯字典序，`pool.ready` 仅 id 字符串；`deliveryCritical` 布尔在 promote 路径算出（`ready-pool-check.ts:1750-1786`）但未随 `pool.ready` 传出。
+- `driver-runtime.ts:731-740` `defaultSelectorArgv` 只把 candidate id 列表交 LLM selector，并令其读 `dispatch-preference.md`（覆盖段已含 delivery-critical 谓词，manager 2026-08-24 立）。
+- `slot-refill.ts` 机械轴在（dcLabels + candidates.sort blocking_suite→delivery_critical→id），但 AC56 已把 `recommended` 去序（「the inner tick does NOT consume for dispatch」），`ranking` 仅验证面。
+- `SPEC-capability-planes-and-mechanism-lifecycle-2026-09-05.md:56` 已记 outer-driver Fact 无程序消费者。
+
+**推荐：退役**（供裁决，非代裁）。理由：(1) delivery-critical 阶段近尾声（dispatch-preference.md 实测 72 条带标签者 done 69 / superseded 1 / ready 2）；(2) AC56 已把机械轴与派发输出解耦，再接入需把 `deliveryCritical` 穿透 `ready-pool-check→driver-runtime→worker-driver` 并加端到端测试，成本 > 阶段余量；(3) 机械孤儿与 `dispatch-preference.md` 覆盖段构成「同一语义两套实现」的漂移。**若人更看重 102 条测试的机械保证，则选接入**——届时 AC2 的可选落法是「ready-pool-check 输出带 deliveryCritical 的 ready 序，worker-driver 机械预排序后交 selector 同优先级内语义选择」。
+
+**待裁定动作**：人在本任务（或 ADR/directive）写下「接入」或「退役」+ 理由；随后按 AC2（接入）或 AC3（退役）+ AC4（SPEC 同步）落地。
