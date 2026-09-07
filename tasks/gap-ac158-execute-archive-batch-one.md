@@ -14,7 +14,7 @@ goal_ac: AC-158
 
 **问题（立案当轮实测）**：`goals/AC-158-execute-archive-batch-one.md`（status=active、goal=GOAL-003）判据现为 fail——`archive/INDEX.tsv` 只有表头一行、0 条数据行；扫描后死集 82 个脚本一个都没 `git mv` 进 archive。AC-158 的 expect 是「INDEX 有数据行 ∧ 每条 original_path 已不存在、archive_path 存在 ∧ 行数 == SPEC 记录的扫描后死集数（当前 82）」。
 
-**工作（执行批次一，SPEC §12 的落地动作，非机制改动）**：把 §12e/§12f 重算出的扫描后死集（权威名单 `docs/analysis/dead-set-recomputed.json` 的 `after.dead`，82 个裸文件名，全部在 `plugin/scripts/` 下，含 47 个自带测试）`git mv` 进 `archive/2026-09-07-zero-call-scripts/plugin/scripts/`，自带测试同批移到 `archive/2026-09-07-zero-call-scripts/plugin/test/`，并按 §12b 纪律把 `git mv` 与 `archive/INDEX.tsv` 七字段行写进**同一个提交**（硬规则 7）。
+**工作（执行批次一，SPEC §12 的落地动作，非机制改动）**：把 §12e/§12f 重算出的扫描后死集（权威名单 `docs/analysis/dead-set-recomputed.json` 的 `after.dead`，82 个裸文件名，全部在 `plugin/scripts/` 下，含 46 个自带测试）`git mv` 进 `archive/2026-09-07-zero-call-scripts/plugin/scripts/`，自带测试同批移到 `archive/2026-09-07-zero-call-scripts/plugin/test/`，并按 §12b 纪律把 `git mv` 与 `archive/INDEX.tsv` 七字段行写进**同一个提交**（硬规则 7）。
 
 **前置已就绪**：AC156（裸文件名扫描 + 死集重算，`gap-dead-set-registry-bare-filename-scan` done；SPEC §12e 两个机读行已由 `gap-ac156-spec-12e-dead-set-lines-writeback` done 写回，`扫描后死集: 82`）；AC157（archive 机制 + 五面排除接线，`gap-archive-mechanism-and-exclusion-wiring` done，`scripts/test.sh:872` 已有 `archive/**` 排除；`gap-ac157-exclusion-wiring-criterion-divergence` ready 只补判据一致性/NUL 修复，不重做机制）。执行前仍按 §12e「执行前须重算」做一次负控制核验（见 Plan 步骤 1）。
 
@@ -26,7 +26,7 @@ goal_ac: AC-158
 
 1. **名单核验（负控制）**：读 `docs/analysis/dead-set-recomputed.json` 的 `after.dead`（82 名），逐条确认 `plugin/scripts/<name>` 仍存在、且 2026-09-07 重算后无新生产调用者（三天零执行 ∧ 无生产调用者仍成立）；若发现某个已重获调用者，摘出单独判，不硬删。
 2. **批次目录**：`archive/2026-09-07-zero-call-scripts/`（§12a 格式 `<日期>-<slug>`；若实际执行日不同，slug 日期用执行日，但 Touches glob 保持指向该批次目录）。
-3. **git mv**：对 82 个脚本逐一 `git mv plugin/scripts/<name> archive/2026-09-07-zero-call-scripts/plugin/scripts/<name>`；对其中 47 个自带测试的，同批 `git mv plugin/test/<stem>.test.mjs archive/2026-09-07-zero-call-scripts/plugin/test/`。
+3. **git mv**：对 82 个脚本逐一 `git mv plugin/scripts/<name> archive/2026-09-07-zero-call-scripts/plugin/scripts/<name>`；对其中 46 个自带测试的，同批 `git mv plugin/test/<stem>.test.mjs archive/2026-09-07-zero-call-scripts/plugin/test/`。
 4. **写 INDEX**：`archive/INDEX.tsv` 追加 82 行，每行七字段 `original_path · archive_path · date · reason_code · evidence · restore_cmd · commit`；reason_code=`zero-call`，evidence 取可复核读数（如 `exec_3d=0 callers=0`），restore_cmd=`git mv <archive_path> <original_path>`。
 5. **同一提交**：`git mv` 与 INDEX 行在同一个 commit 里（硬规则 7；不得出现「文件已移、INDEX 未写」的中间提交）。
 6. **验证**：跑 AC-158 判据（下方 AC1 的 python3 heredoc）→ exit 0；跑全量 `scripts/test.sh` → 绿（证明 `archive/**` 排除生效、无悬空引用）。
@@ -36,7 +36,7 @@ goal_ac: AC-158
 - [ ] AC-158 判据 exit 0：逐字取自 `goals/AC-158-execute-archive-batch-one.md` criterion 的 python3 heredoc——`archive/INDEX.tsv` 有数据行 ∧ 每条 original_path 已不存在、archive_path 存在 ∧ 行数 == SPEC 的 `扫描后死集: 82`
 - [ ] 行数与名单一致：`tail -n +2 archive/INDEX.tsv | wc -l` == 82 == `docs/analysis/dead-set-recomputed.json` 的 `after.deadCount`，且 INDEX 的 original_path 集合与 `after.dead`（`plugin/scripts/<name>`）逐名一致
 - [ ] 同一提交：`git mv` 与 INDEX 写在同一 commit（`git log -1 --name-only` 该批次提交同时含被移文件与 `archive/INDEX.tsv`，无中间提交）
-- [ ] 自带测试同批：47 个 `plugin/test/<stem>.test.mjs` 与对应脚本同批移走，`plugin/test/` 无孤儿测试残留
+- [ ] 自带测试同批：46 个 `plugin/test/<stem>.test.mjs` 与对应脚本同批移走，`plugin/test/` 无孤儿测试残留
 - [ ] 全量 suite 绿：`scripts/test.sh` exit 0（证明 `archive/**` 排除生效、无悬空引用）
 - [ ] `node plugin/scripts/task-schema-check.ts tasks/gap-ac158-execute-archive-batch-one.md` exit 0
 
@@ -140,7 +140,6 @@ goal_ac: AC-158
 - plugin/test/fan-in-runid-check.test.mjs
 - plugin/test/finding-backpropagate.test.mjs
 - plugin/test/gate-dispatch-coverage.test.mjs
-- plugin/test/gate-staleness-check.test.mjs
 - plugin/test/gate-staleness-check.test.mjs
 - plugin/test/inner-idle-log.test.mjs
 - plugin/test/land-capacity-monitor.test.mjs
