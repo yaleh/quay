@@ -200,13 +200,89 @@ test('computeGoalGaps 四态：stalled = 关联任务全无法自行前进（结
   assert.equal(noJudgment.find((x) => x.ac === 'AC-170').state, 'in-progress', 'judgment=null ⇒ 不判 stalled');
 });
 
-test('isTaskStuck: todo 不在 eligible 集合 ⇒ stuck；ready 在 excluded ⇒ stuck；其余不 stuck', () => {
+test('isTaskStuck: todo 不在 eligible 集合 ⇒ stuck；ready 在 excluded ⇒ stuck；needs-human ⇒ stuck；done 不 stuck', () => {
   const judgment = { eligibleTodoIds: new Set(['a']), excludedReadyIds: new Set(['b']) };
   assert.equal(isTaskStuck({ id: 'a', status: 'todo' }, judgment), false);
   assert.equal(isTaskStuck({ id: 'x', status: 'todo' }, judgment), true);
   assert.equal(isTaskStuck({ id: 'b', status: 'ready' }, judgment), true);
   assert.equal(isTaskStuck({ id: 'c', status: 'ready' }, judgment), false);
+  assert.equal(isTaskStuck({ id: 'nh', status: 'needs-human' }, judgment), true, 'needs-human ⇒ 已离开 todo/ready，不能自行前进 ⇒ stuck');
   assert.equal(isTaskStuck({ id: 'd', status: 'done' }, judgment), false);
+  assert.equal(isTaskStuck({ id: 'e', status: 'superseded' }, judgment), false);
+});
+
+// ── needs-human ⇒ stalled（gap-goal-gap-needs-human-invisible-burns-spawn-slot）────────────────
+// 关联任务翻 needs-human 后，computeGoalGaps 不再报 gap（taskCount=0），而是 stalled（taskCount=真实
+// 关联数）——needs-human 是「有处理者、但不能自行前进」，与「无任务 ⇒ gap」不同形。
+
+test('AC1: 关联任务全为 needs-human ⇒ stalled，taskCount = 该 AC 的 needs-human 任务数（不再是 0）', () => {
+  const records = [{ id: 'AC-X', goal: 'GOAL-001', status: 'active' }];
+  const taskFacts = [{ id: 'gap-ac158', status: 'needs-human', goalAc: 'AC-X' }];
+  const gaps = computeGoalGaps(records, taskFacts);
+  assert.equal(gaps.length, 1);
+  assert.equal(gaps[0].state, 'stalled');
+  assert.equal(gaps[0].taskCount, 1);
+  // 两条 needs-human 任务 ⇒ taskCount=2（枚举关联数，⛔ 非布尔化——硬规则 3）
+  const gaps2 = computeGoalGaps(records, [
+    { id: 'gap-a', status: 'needs-human', goalAc: 'AC-X' },
+    { id: 'gap-b', status: 'needs-human', goalAc: 'AC-X' },
+  ]);
+  assert.equal(gaps2[0].state, 'stalled');
+  assert.equal(gaps2[0].taskCount, 2);
+});
+
+test('AC2: 负控制——三态两两不等（needs-human ⇒ stalled；ready 可晋升 ⇒ in-progress；无关联 ⇒ gap）', () => {
+  const records = [{ id: 'AC-X', goal: 'GOAL-001', status: 'active' }];
+  // needs-human ⇒ stalled（正）
+  const stalled = computeGoalGaps(records, [{ id: 't', status: 'needs-human', goalAc: 'AC-X' }])[0];
+  // ready + judgment 判其可晋升（不在 excluded）⇒ in-progress
+  const judgment = { eligibleTodoIds: new Set(), excludedReadyIds: new Set() };
+  const inProgress = computeGoalGaps(records, [{ id: 't', status: 'ready', goalAc: 'AC-X' }], judgment)[0];
+  // taskFacts 不含该 goalAc ⇒ gap、taskCount=0
+  const gap = computeGoalGaps(records, [{ id: 'other', status: 'todo', goalAc: 'AC-OTHER' }])[0];
+  assert.equal(stalled.state, 'stalled');
+  assert.equal(stalled.taskCount, 1);
+  assert.equal(inProgress.state, 'in-progress');
+  assert.equal(gap.state, 'gap');
+  assert.equal(gap.taskCount, 0);
+  // 三次断言的 state 必须两两不等（判据能取假）
+  assert.notEqual(stalled.state, inProgress.state, 'stalled ≠ in-progress');
+  assert.notEqual(stalled.state, gap.state, 'stalled ≠ gap');
+  assert.notEqual(inProgress.state, gap.state, 'in-progress ≠ gap');
+});
+
+test('AC3: 关联任务全为 done ⇒ 仍报 gap、taskCount=0（只放开 needs-human，不放开全部非 todo/ready）', () => {
+  const records = [{ id: 'AC-X', goal: 'GOAL-001', status: 'active' }];
+  const gaps = computeGoalGaps(records, [{ id: 't', status: 'done', goalAc: 'AC-X' }]);
+  assert.equal(gaps.length, 1);
+  assert.equal(gaps[0].state, 'gap');
+  assert.equal(gaps[0].taskCount, 0);
+  // superseded 同理——真的没有在做的任务 ⇒ gap 正确
+  const gaps2 = computeGoalGaps(records, [{ id: 't', status: 'superseded', goalAc: 'AC-X' }]);
+  assert.equal(gaps2[0].state, 'gap');
+  assert.equal(gaps2[0].taskCount, 0);
+});
+
+test('AC4: stalled 不消耗 spawn 名额（选取面只取 state==="gap"）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-stalledspawn-'));
+  try {
+    const records = [
+      { id: 'GOAL-001', title: 'g', status: 'active' },
+      { id: 'AC-158', goal: 'GOAL-001', title: 'a158', expect: 'e', status: 'active' },
+      { id: 'AC-159', goal: 'GOAL-001', title: 'a159', expect: 'e2', status: 'active' },
+    ];
+    const gaps = [
+      { goal: 'GOAL-001', ac: 'AC-158', state: 'stalled', taskCount: 1 },
+      { goal: 'GOAL-001', ac: 'AC-159', state: 'gap', taskCount: 0 },
+    ];
+    const r = runGapSpawnPass(gaps, records, tmp, { gapWorkerCmd: 'true', resourceGateArgv: ['true'], spawnCap: 3 });
+    assert.equal(r.spawned, 1, '只有 AC-159 一条 gap ⇒ spawn 1');
+    // 选取结果的 ac 集合与仅 state==="gap" 的子集逐一相等（stalled 不在选取面）
+    const gapOnlyAcs = gaps.filter((g) => g.state === 'gap').map((g) => g.ac);
+    assert.deepEqual(r.outcomes.map((o) => o.ac), gapOnlyAcs);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('goalSpawnCap: 读 drivers.yml goal.spawn_cap；explicit 优先；缺失回退缺省（⛔ 不写死）', () => {

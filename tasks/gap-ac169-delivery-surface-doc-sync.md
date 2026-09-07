@@ -1,7 +1,7 @@
 ---
 id: gap-ac169-delivery-surface-doc-sync
 title: AC169 判据仍红——plugin/README.md:3 仍写陈旧 v0.4.0，应同步 plugin.json 当前版本 v0.6.1
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -20,9 +20,9 @@ goal_ac: AC-169
 
 ## AC
 
-- [ ] AC1（AC-169 criterion 逐字 exit 0）：`v=$(python3 -c "import json;print(json.load(open('plugin/.claude-plugin/plugin.json'))['version'])") && grep -q "v$v" plugin/README.md && ! grep -qE 'v0\.4\.0' plugin/README.md && echo PASS`
-- [ ] AC2（陈旧版本号清零）：`grep -cE 'v0\.4\.0' plugin/README.md` 输出为 `0`
-- [ ] AC3（schema）：`node plugin/scripts/task-schema-check.ts tasks/gap-ac169-delivery-surface-doc-sync.md` exit 0
+- [x] AC1（AC-169 criterion 逐字 exit 0）：`v=$(python3 -c "import json;print(json.load(open('plugin/.claude-plugin/plugin.json'))['version'])") && grep -q "v$v" plugin/README.md && ! grep -qE 'v0\.4\.0' plugin/README.md && echo PASS`
+- [x] AC2（陈旧版本号清零）：`grep -cE 'v0\.4\.0' plugin/README.md` 输出为 `0`
+- [x] AC3（schema）：`node plugin/scripts/task-schema-check.ts tasks/gap-ac169-delivery-surface-doc-sync.md` exit 0
 
 ## DoD
 

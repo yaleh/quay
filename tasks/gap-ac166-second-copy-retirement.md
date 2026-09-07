@@ -32,14 +32,14 @@ goal_ac: AC-166
 
 ## AC
 
-- [ ] AC1（AC-166 判据逐字 exit 0）：`[ -e .claude/workflows/manager-tick-core.js ] && exit 1; [ -f plugin/workflows/manager-tick-core.js ] || exit 1; [ "$(ls -A .claude/skills 2>/dev/null | wc -l)" = 0 ] || exit 1; exit 0`
-- [ ] AC2（5 双副本退役）：`for f in drain-directives execute-suite-fix fan-in-execute pool-quality-judge run-routines; do [ ! -e .claude/workflows/$f.js ] || exit 1; [ -f plugin/workflows/$f.js ] || exit 1; done; exit 0`
-- [ ] AC3（旧 scriptPath 引用清零）：`grep -c "scriptPath: *['\"]\.claude/workflows/manager-tick-core\.js" orchestration/manager-tick-core.md` == 0
-- [ ] AC4（drift checker archive）：`[ ! -e plugin/scripts/workflows-dual-copy-drift-check.ts ] && [ ! -e plugin/test/workflows-dual-copy-drift-check.test.mjs ] && [ ! -e plugin/scripts/checker-mutation-cases/workflows-dual-copy-drift-check.sh ]` exit 0
-- [ ] AC5（archive 对象落地 + 同一提交）：13 个 archive 对象（5 skills 目录 + 5 workflow 文件 + drift-checker 3 文件）的 original_path 均不存在、archive_path 均存在（AC158 同形判据）；`git mv` 与 INDEX 写入同一提交（`git log -1 --name-only` 同时含被移路径与 `archive/INDEX.tsv`）
-- [ ] AC6（全量 suite 绿）：`scripts/test.sh` exit 0（archive/** 排除生效、无悬空引用）
-- [ ] AC7（迁后调用 > 0）：迁后首个窗口 `quay:manager-tick-core` 调用数 > 0（读生产载体 transcript，非 fixture；608 次/3 天路径换文件后必须仍在跑）
-- [ ] AC8：`node plugin/scripts/task-schema-check.ts tasks/gap-ac166-second-copy-retirement.md` exit 0
+- [x] AC1（AC-166 判据逐字 exit 0）：`[ -e .claude/workflows/manager-tick-core.js ] && exit 1; [ -f plugin/workflows/manager-tick-core.js ] || exit 1; [ "$(ls -A .claude/skills 2>/dev/null | wc -l)" = 0 ] || exit 1; exit 0`
+- [x] AC2（5 双副本退役）：`for f in drain-directives execute-suite-fix fan-in-execute pool-quality-judge run-routines; do [ ! -e .claude/workflows/$f.js ] || exit 1; [ -f plugin/workflows/$f.js ] || exit 1; done; exit 0`
+- [x] AC3（旧 scriptPath 引用清零）：`grep -c "scriptPath: *['\"]\.claude/workflows/manager-tick-core\.js" orchestration/manager-tick-core.md` == 0
+- [x] AC4（drift checker archive）：`[ ! -e plugin/scripts/workflows-dual-copy-drift-check.ts ] && [ ! -e plugin/test/workflows-dual-copy-drift-check.test.mjs ] && [ ! -e plugin/scripts/checker-mutation-cases/workflows-dual-copy-drift-check.sh ]` exit 0
+- [x] AC5（archive 对象落地 + 同一提交）：13 个 archive 对象（5 skills 目录 + 5 workflow 文件 + drift-checker 3 文件）的 original_path 均不存在、archive_path 均存在（AC158 同形判据）；`git mv` 与 INDEX 写入同一提交（`git log -1 --name-only` 同时含被移路径与 `archive/INDEX.tsv`）
+- [x] AC6（全量 suite 绿）：`scripts/test.sh` exit 0（archive/** 排除生效、无悬空引用）
+- [x] AC7（迁后调用 > 0）：迁后首个窗口 `quay:manager-tick-core` 调用数 > 0（读生产载体 transcript，非 fixture；608 次/3 天路径换文件后必须仍在跑）
+- [x] AC8：`node plugin/scripts/task-schema-check.ts tasks/gap-ac166-second-copy-retirement.md` exit 0
 
 ## DoD
 
@@ -48,10 +48,11 @@ goal_ac: AC-166
 ## Touches
 
 - plugin/workflows/manager-tick-core.js（迁入，新路径）
+- plugin/workflows/fan-in-execute.js（自举 WARN 块 .claude/workflows → plugin/workflows 自引用）
 - .claude/workflows/manager-tick-core.js（迁出）
 - orchestration/manager-tick-core.md（B1 scriptPath + 豁免面引用改新路径）
 - .claude/skills/quay-core-bootstrap-methodology/SKILL.md（整目录 git mv，含 inventory/、reference/ 全部文件）
-- .claude/skills/quay-directive/SKILL.md（整目录 git mv）
+- .claude/skills/quay-directive（symlink → ../../plugin/skills/quay-directive，整目录 git mv）
 - .claude/skills/quay-native-methodology/SKILL.md（整目录 git mv，含 examples/ inventory/ reference/ scripts/ templates/ 全部文件）
 - .claude/skills/quay-task-to-plan/SKILL.md（整目录 git mv，含 prompts/ 全部文件）
 - .claude/skills/quay-webui-bootstrap-methodology/SKILL.md（整目录 git mv，含 reference/ 全部文件）
@@ -64,8 +65,31 @@ goal_ac: AC-166
 - plugin/test/workflows-dual-copy-drift-check.test.mjs
 - plugin/scripts/checker-mutation-cases/workflows-dual-copy-drift-check.sh
 - archive/INDEX.tsv（新增行）
-- archive/2026-09-07-second-copy-retirement/.claude/skills/*（迁入）
-- archive/2026-09-07-second-copy-retirement/.claude/workflows/*（迁入）
-- archive/2026-09-07-second-copy-retirement/plugin/scripts/*（迁入）
-- archive/2026-09-07-second-copy-retirement/plugin/test/*（迁入）
+- archive/2026-09-07-second-copy-retirement/.claude/skills/**（迁入）
+- archive/2026-09-07-second-copy-retirement/.claude/workflows/**（迁入）
+- archive/2026-09-07-second-copy-retirement/plugin/scripts/**（迁入）
+- archive/2026-09-07-second-copy-retirement/plugin/test/**（迁入）
+- plugin/scripts/runner-static-gate.ts（移除 drift-check 块 + @static-object 改 plugin 路径）
+- plugin/scripts/capability-catalog.sh（移除 workflows-dual-copy-drift-check 5 条目）
+- plugin/test/plugin-packaging.test.mjs（M143 双副本断言改 single-source）
+- plugin/skills/init/SKILL.md（声明 manager-tick-{criteria,sending,closing}.md reference-doc）
+- orchestration/manager-tick-prompt.txt（B1 scriptPath 改新路径）
+- orchestration/manager-tick-closing.md（豁免面清单路径同步）
+- plugin/scripts/red-on-omission-audit.ts（execute-suite-fix.js 引用改 plugin 路径）
+- plugin/scripts/config-wiring-check.ts（run-routines/drain-directives 引用改 plugin 路径）
+- plugin/scripts/fan-in-materialize-check.ts（DEFAULT_WORKFLOW_REL 改 plugin 路径）
+- plugin/scripts/select-static-checks-for-touches.ts（FAN_IN_ORCHESTRATION_FILES 移除 .claude 双副本条目）
+- plugin/scripts/task-file-bypass-check.ts（移除 .claude/workflows/fan-in-execute.js 双副本条目）
+- docs/analysis/quay-init-closure-ratchet.baseline.json（re-anchor，manager-tick-core 迁入 plugin/workflows）
+- plugin/scripts/select-tests-for-touches.ts（SKIP_DIRS 加 archive，归档测试不再入 scoped 选测集）
+- plugin/test/fan-in-materialize-check.test.mjs（.claude/workflows → plugin/workflows fixture 路径）
+- plugin/test/pool-quality-judge.test.mjs（workflow 路径 .claude/workflows → plugin/workflows）
+- docs/analysis/test-file-baseline.txt（重算，归档测试文件移除出 baseline）
+- plugin/test/codex-stage1-adapter.test.mjs（A3 指令面改 .agents 唯一份 + .claude/skills 退役断言）
+- plugin/test/execute-suite-fix-scope-gate.test.mjs（COPIES 去 .claude 双副本，AC1 改 single-source）
+- plugin/test/execute-suite-fix-relaunch-snapshot.test.mjs（COPIES 去 .claude 双副本，AC3 改 single-source）
+- plugin/test/fan-in-execute-paths.test.mjs（.claude/workflows → plugin/workflows fixture 路径）
+- plugin/scripts/workflow-metadata-conformance.mjs（默认文件列表去 .claude 双副本）
+- experiments/quay-perpetual-stream/scripts/workflow-metadata-conformance.mjs（镜像同步，与 plugin 版 byte-identical）
+- plugin/test/workflow-metadata-conformance.test.mjs（REAL_* 改 plugin 路径 + AC9 镜像判据退役）
 - tasks/gap-ac166-second-copy-retirement.md（自身）
