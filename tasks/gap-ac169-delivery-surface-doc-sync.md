@@ -1,7 +1,7 @@
 ---
 id: gap-ac169-delivery-surface-doc-sync
 title: AC169 判据仍红——plugin/README.md:3 仍写陈旧 v0.4.0，应同步 plugin.json 当前版本 v0.6.1
-status: done
+status: ready
 labels:
   - gap
 parent: null
