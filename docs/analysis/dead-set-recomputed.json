@@ -9,11 +9,10 @@
     "until": "2026-09-07T14:32:46.988Z",
     "hours": 72
   },
-  "universe": 318,
+  "universe": 317,
   "before": {
-    "deadCount": 87,
+    "deadCount": 86,
     "dead": [
-      "ac36-sortkey-criterion-check.ts",
       "anti-gaming-guard.sh",
       "anti-gaming-guard.ts",
       "audit-independence-check.sh",
@@ -103,9 +102,8 @@
     ]
   },
   "after": {
-    "deadCount": 83,
+    "deadCount": 82,
     "dead": [
-      "ac36-sortkey-criterion-check.ts",
       "anti-gaming-guard.sh",
       "anti-gaming-guard.ts",
       "audit-independence-check.sh",

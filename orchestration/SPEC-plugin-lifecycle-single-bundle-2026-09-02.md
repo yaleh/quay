@@ -446,8 +446,8 @@ npm 侧无需处理（`files` 是白名单，`archive/` 天然不在内）。
 （`generatedAt` 2026-09-07T14:38:19.347Z；窗口 2026-09-04T14:32:46.988Z → 2026-09-07T14:32:46.988Z，72h；
 `executionDataSource` = 三层 transcript 普查，非 runtime-usage-inventory.ts）。
 
-- 扫描前死集: 87
-- 扫描后死集: 83
+- 扫描前死集: 86
+- 扫描后死集: 82
 
 #### 安全核 94 个（`plugin/scripts/` 下，两口径下均判死；56 个自带测试须同批移动）
 
