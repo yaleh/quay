@@ -1,7 +1,7 @@
 ---
 id: gap-ac162-register-plugin-no-user-enabled
 title: AC162 register-plugin.mjs 不再写用户级 enabledPlugins（机制修复）
-status: done
+status: ready
 labels:
   - gap
 parent: null
