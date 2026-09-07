@@ -615,6 +615,25 @@ export const OPEN_TASK_STATUSES = ["todo", "ready", "needs-human"] as const;
 
 export interface AddressedTask { id: string; status: string; title: string | null; labels: string[] }
 
+/** probe 输出里对一条 addressedTask 的判定输入（语义半的原始产出，机械半随后与 addressedTasks 对齐）。 */
+export interface AddressedTaskOpinionInput {
+  taskId: string;
+  hasOpinion: boolean;
+  note?: string | null;
+}
+
+/** 逐条三态：有意见 / 无意见 / 未评估。⛔ 「无意见」与「没读到这条 task」不得共用取值（硬规则 3b）：
+ *  probe 显式给出 `hasOpinion:false` 才是「无意见」（看过且无话可说，是真测量）；
+ *  probe 完全没提到该 task（或该条形状读不懂）⇒「未评估」——读不懂 ≠ 合格，也不等于「看过且无话可说」。
+ *  ⛔ 不是总数、不是布尔：对【每一条】 addressedTask 落一个 taskId + 三态（SPEC §5.3 枚举不布尔）。 */
+export type AddressedTaskOpinion = "has-opinion" | "no-opinion" | "not-evaluated";
+
+export interface AddressedTaskJudgment {
+  taskId: string;
+  opinion: AddressedTaskOpinion;
+  note: string | null;
+}
+
 /** 读【寄给 meta-driver 的任务】——按标签枚举未关闭任务。
  *
  *  这是「裸缺陷」的入口：人（或任何一层）用现成的立案路径立一条普通任务、打上 `meta-driver` 标签，
@@ -648,6 +667,38 @@ export function collectAddressedTasks(root: string, label = "meta-driver"): Addr
     } catch { /* 读不了就跳过这一个 */ }
   }
   return out;
+}
+
+/** 把 probe 的逐条判定与 addressedTasks 对齐：对【每一条】 addressedTask 落一个三态判定。
+ *  ⛔ 判定条数必须 == addressedTasks 条数（probe 少答一条 ⇒ 那条落「未评估」，不被静默丢弃——
+ *  SPEC §5.3 不枚举对象则零指引价值；负控制见单测）。
+ *  对齐规则：
+ *    - probe 显式给出 `hasOpinion:true` ⇒ 「有意见」；`hasOpinion:false` ⇒ 「无意见」（真测量）；
+ *    - probe 没提到该 taskId，或该条形状读不懂（taskId 空 / hasOpinion 非布尔）⇒ 「未评估」；
+ *    - probe 多答了不在 addressedTasks 里的 taskId ⇒ 丢弃（判定只覆盖真实输入的 task 集，⛔ 不跟着
+ *      probe 的幻觉扩出一个不存在的对象）；同一 taskId 出现多条 ⇒ 取第一条（不猜测、不合并）。
+ *  ⛔ 纯判定，零副作用：不写 task 文件、不改 status/labels——task 的处理者仍是 promotion→worker。 */
+export function resolveAddressedTaskOpinions(
+  addressedTasks: AddressedTask[],
+  opinions: AddressedTaskOpinionInput[],
+): AddressedTaskJudgment[] {
+  const byId = new Map<string, { opinion: "has-opinion" | "no-opinion"; note: string | null }>();
+  for (const o of opinions) {
+    const id = String(o?.taskId ?? "").trim();
+    if (!id || byId.has(id)) continue;
+    // 形状读不懂 ⇒ 不登记 ⇒ 落到「未评估」（⛔ 不得当成「无意见」，硬规则 3b）。
+    if (typeof o?.hasOpinion !== "boolean") continue;
+    byId.set(id, {
+      opinion: o.hasOpinion ? "has-opinion" : "no-opinion",
+      note: typeof o.note === "string" && o.note.trim() ? o.note.trim() : null,
+    });
+  }
+  return addressedTasks.map((t) => {
+    const hit = byId.get(t.id);
+    return hit
+      ? { taskId: t.id, opinion: hit.opinion, note: hit.note }
+      : { taskId: t.id, opinion: "not-evaluated" as const, note: null };
+  });
 }
 
 /** frontmatter 的 labels 解析：块列表（`labels:\n  - a\n  - b`）与内联（`labels: [a, b]`）都认。 */
@@ -1078,7 +1129,14 @@ export function buildProbePrompt(objective: string, readings: MetaRoundReadings)
 }
 
 /** 解析语义半的输出。读不懂 ⇒ null（调用侧转 not-evaluated / failed，⛔ 不当空结果放行）。 */
-export function parseProbeOutput(stdout: string): { divergences: unknown[]; proposals: Proposal[]; autoDrive: AutoDriveItem[]; decisions: DecisionItem[] } | null {
+export function parseProbeOutput(stdout: string): {
+  divergences: unknown[];
+  proposals: Proposal[];
+  autoDrive: AutoDriveItem[];
+  decisions: DecisionItem[];
+  /** probe 对每条 addressedTask 的逐条判定（随后由 resolveAddressedTaskOpinions 与真实 task 集对齐）。 */
+  addressedTaskOpinions: AddressedTaskOpinionInput[];
+} | null {
   const text = String(stdout ?? "").trim();
   if (!text) return null;
   // 容忍 LLM 在 JSON 前后带少量散文：取第一个 { 到最后一个 }。
@@ -1149,11 +1207,27 @@ export function parseProbeOutput(stdout: string): { divergences: unknown[]; prop
         }];
       })
     : [];
+  // 逐条三态判定（measurement 通道，⛔ 不是 responses 通道、不回写 task）。形状闸：taskId 非空字符串 +
+  // hasOpinion 布尔，缺一即丢 ⇒ 落到「未评估」（⛔ 不补默认值、不凑成「看起来合格」，硬规则 3b）。
+  const addressedTaskOpinions: AddressedTaskOpinionInput[] = Array.isArray(o.addressedTaskOpinions)
+    ? (o.addressedTaskOpinions as unknown[]).flatMap((raw) => {
+        if (!raw || typeof raw !== "object") return [];
+        const a = raw as Record<string, unknown>;
+        if (typeof a.taskId !== "string" || String(a.taskId).trim() === "") return [];
+        if (typeof a.hasOpinion !== "boolean") return [];
+        return [{
+          taskId: String(a.taskId).trim(),
+          hasOpinion: a.hasOpinion,
+          note: typeof a.note === "string" ? a.note : null,
+        }];
+      })
+    : [];
   return {
     divergences: Array.isArray(o.divergences) ? (o.divergences as unknown[]) : [],
     proposals,
     autoDrive,
     decisions,
+    addressedTaskOpinions,
   };
 }
 
@@ -1289,6 +1363,9 @@ async function runMetaRoundInner(opts: MetaRoundOptions): Promise<MetaRoundResul
     return { fact: { name: "meta-driver", value: { ...base, digest }, state: "failed", reason } };
   }
 
+  // 逐条三态判定：probe 的 addressedTaskOpinions 与真实 addressedTasks 对齐（⛔ 只有语义半真跑了才有）。
+  const addressedTaskOpinions = resolveAddressedTaskOpinions(readings.addressedTasks, parsed.addressedTaskOpinions);
+
   const records = await listGoalRecords(root);
   const activeGoalIds = new Set(readings.goals.map((g) => g.id));
   const filed = await fileProposals(root, parsed.proposals, records, { k, activeGoalIds, dryRun });
@@ -1307,6 +1384,12 @@ async function runMetaRoundInner(opts: MetaRoundOptions): Promise<MetaRoundResul
 
   const value = {
     ...base,
+    // 逐条三态判定：对每一条 addressedTask 落 taskId + 三态。⛔ 不进 base——它由 probe 输出派生，
+    // 只有语义半真跑了才有（进 base 会让 no-llm/skipped 路径也带一个恒空字段，与「未评估」混同）；
+    // ⛔ 不进 readingsDigest——判定每轮可变，进摘要会让变化检测闸恒为真（AC 判据）。
+    addressedTaskOpinions,
+    // probe 原始产出条数（对齐前的裸计数）——「入口有没有被消费」在载体上可观测，⛔ 不是对齐后的条数。
+    addressedTaskOpinionsOffered: parsed.addressedTaskOpinions.length,
     // ⚠️ 此前这里只写【条数】，20 条解读本身全部丢弃。实测 2026-09-06：5 个判决轮共产出
     // 100 条解读，无一落痕——它们烧了 LLM 时间却不留任何痕迹，比"只被打印"更彻底
     // （probe 规格自己写着：只被打印的观察与从未做过的观察不可区分；只留计数连打印都没有）。
