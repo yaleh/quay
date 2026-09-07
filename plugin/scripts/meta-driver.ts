@@ -71,12 +71,30 @@ export interface CriterionReading {
 
 /** 机械算出的三类偏离（criterion 的真值 vs 记录的自述）。 */
 export type DivergenceKind = "pass-but-unflipped" | "achieved-but-failing" | "no-criterion";
+
+/** 处理者的三态 + 「读不出」。⛔ 读不出 ≠ 不存在：读不懂不得与「合格」或其反面同形
+ *  （硬规则 3b）。「不存在」是【确实没有处理者】，「读不出」是【读了但没读到】——两者处置相反
+ *  （前者 escalate，后者不得 escalate）。 */
+export type DivergenceHandlerState = "healthy" | "stalled" | "absent" | "unreadable";
+
+/** 一条偏离的处理者信息（机械可算，由 drivers 读数派生，⛔ 非语义判断）。
+ *  kind = 处理者标识（driver kind，或 "none"）；state = 三态。 */
+export interface DivergenceHandler {
+  kind: string;
+  state: DivergenceHandlerState;
+}
+
 export interface Divergence {
   id: string;
   kind: DivergenceKind;
   status: string;
   verdict: string;
   reason: string;
+  /** 【处理者】谁该消解这条偏离、它此刻在什么状态。由 drivers 读数机械派生（⛔ 不是布尔、
+   *  不是总数）：kind = 处理者标识；state = healthy/stalled/absent/unreadable。这是正确的分类轴——
+   *  同一条 pass-but-unflipped 在 goal-driver 活着时是正常时延窗口，在它停摆时是唯一值得报的事
+   *  （且该报的对象不是 AC 而是 goal-driver）。 */
+  handler?: DivergenceHandler;
   /** 【重复计数】已连续多少轮产生同一 (id, kind) 的建议——从它自己的载体
    *  `.quay/meta-driver-round.jsonl` 机械算出，⛔ 不进 readingsDigest：它每轮都可能 +1，
    *  进了会让摘要恒不相等、变化检测闸失效（硬规则 4 推论一，同 staleSecs/记录数的道理）。
@@ -173,6 +191,47 @@ export function computeDivergences(readings: CriterionReading[]): Divergence[] {
     if (c.verdict === "fail" && c.status === "achieved") { out.push({ ...base, kind: "achieved-but-failing" }); continue; }
   }
   return out;
+}
+
+// ── 处理者路由（gap-meta-divergences-not-routed-by-handler-existence）────────────────────────────
+// computeDivergences 按「AC 的 status × verdict」分类，产出三种 kind 却逐字段同形——而它们的处理者
+// 存在性截然不同（pass-but-unflipped → goal-driver 全自动翻；no-criterion → task→worker 但需显式触发；
+// achieved-but-failing → 无）。同形导致 259 次把「goal-driver 没在跑」报成 259 条 AC 症状，病因
+// （drivers.goal 没在跑）就在同一份读数里却一次也没被报出（硬规则 4b：AC 未翻是代理量，driver 活性
+// 是直接量）。修法不是替 LLM 下「goal-driver 停了」的结论（SPEC §5.3 语义解读归 probe），而是给每条
+// 偏离附一个【机械可算的处理者三态】，让 probe 按它路由。
+
+/** 每条偏离 kind 的处理者 driver kind（⛔ "none" = 无处理者）。
+ *  pass-but-unflipped → goal-driver 全自动翻 achieved；no-criterion → task→worker 流水线（需显式触发：
+ *  要有人立一条补判据的任务）；achieved-but-failing → 无（见 gap-goal-achieved-but-failing-no-handler）。 */
+export const DIVERGENCE_HANDLER_KIND: Record<DivergenceKind, string> = {
+  "pass-but-unflipped": "goal",
+  "no-criterion": "worker",
+  "achieved-but-failing": "none",
+};
+
+/** 由 drivers 读数派生一条偏离的处理者三态。纯函数、可枚举（⛔ 不是布尔/总数）：
+ *  处理者 kind 在读数里且 running ⇒ healthy；在读数里但不跑 ⇒ stalled；不在读数里 ⇒ absent；
+ *  读数整体缺失或该 kind 的 aliveness 读不出 ⇒ unreadable（⛔ 与 absent 不同取值，硬规则 3b）。 */
+export function handlerStateFor(handlerKind: string, drivers: DriverReading[] | null | undefined): DivergenceHandlerState {
+  if (handlerKind === "none") return "absent"; // 结构性：无处理者 ⇒ 不存在（⛔ 不是读不出）
+  if (drivers == null) return "unreadable"; // 读数整体缺失 ⇒ 读不出（⛔ 不冒充 absent）
+  const row = drivers.find((d) => d.kind === handlerKind);
+  if (!row) return "absent"; // 读数里没有这个 driver kind ⇒ 不存在
+  if (row.running === null) return "unreadable"; // 该 kind 的 aliveness 读不出
+  if (row.running) return "healthy";
+  return "stalled"; // 存在但不跑（含陈旧载体：进程死 ⇒ 停摆）
+}
+
+/** 给每条偏离附上机械可算的处理者信息 handler = {kind, state}（纯函数，不改输入）。 */
+export function attachDivergenceHandlers(
+  divergences: Divergence[],
+  drivers: DriverReading[] | null | undefined,
+): Divergence[] {
+  return divergences.map((d) => {
+    const kind = DIVERGENCE_HANDLER_KIND[d.kind];
+    return { ...d, handler: { kind, state: handlerStateFor(kind, drivers) } };
+  });
 }
 
 // ── 重复计数（从自己的载体机械算出）────────────────────────────────────────────────────────────
@@ -276,7 +335,10 @@ export async function collectReadings(root: string, focus: string | null): Promi
       reason,
     });
   }
-  const divergences = computeDivergences(criteria);
+  const drivers = collectDriverReadings(root);
+  // 处理者路由：先附 handler 三态（由 drivers 读数派生），再算重复计数。⛔ 顺序无关紧要，但
+  // handler 必须在每条偏离上非空——它是 probe 决定「报不报、报谁」的分类轴。
+  const divergences = attachDivergenceHandlers(computeDivergences(criteria), drivers);
   // 重复计数：从自己的载体机械算出（⛔ 不进摘要，见 readingsDigest），逐条附到 divergence 上。
   const recurrence = computeDivergenceRecurrence(extractJudgeRounds(readMetaCarrier(root)), divergences);
   for (const d of divergences) {
@@ -285,8 +347,7 @@ export async function collectReadings(root: string, focus: string | null): Promi
     d.lastRecommendation = r?.lastRecommendation ?? null;
   }
   return {
-    goals, criteria, divergences,
-    drivers: collectDriverReadings(root),
+    goals, criteria, divergences, drivers,
     syncHealth: collectSyncHealth(root),
     addressedTasks: collectAddressedTasks(root),
     inertCheckers: collectInertCheckers(root),
@@ -443,10 +504,11 @@ export function settleEvidenceWrites(root: string, goalsRel = "goals"): Evidence
 // 判据看不见「主检出落后 develop」「某 driver 停摆」这类问题——那正是人 2026-09-06 指出的缺口。
 // ⛔ 不自己实现存活/载体统计：复用 driver-runtime 已有的 aliveness/carrierStats（硬规则①）。
 
-/** 一个 driver kind 的生态读数。staleSecs = 现在距其载体最后一条记录的秒数（载体停更 ≠ 一切正常）。 */
+/** 一个 driver kind 的生态读数。staleSecs = 现在距其载体最后一条记录的秒数（载体停更 ≠ 一切正常）。
+ *  running=null 表示 aliveness 读不出（⛔ 不填 false 冒充「停了」——读不懂不得与「停摆」同形，硬规则 3b）。 */
 export interface DriverReading {
   kind: string;
-  running: boolean;
+  running: boolean | null;
   supervisorAlive: boolean;
   driverAlive: boolean;
   carrierRecords: number;
@@ -464,7 +526,9 @@ export function collectDriverReadings(root: string, now: number = Date.now()): D
     const parsed = lastTs ? Date.parse(lastTs) : NaN;
     out.push({
       kind,
-      running: !!a?.running,
+      // aliveness 读失败（a===null）⇒ running=null（⛔ 不填 false 冒充「停了」，硬规则 3b），
+      // handler 三态据此把「读不出」与「停摆」分开。
+      running: a === null ? null : !!a.running,
       supervisorAlive: !!a?.supervisorAlive,
       driverAlive: !!a?.driverAlive,
       carrierRecords: c?.records ?? 0,
@@ -565,10 +629,13 @@ export const STATE_REL = path.join(".quay", "meta-driver-state.json");
 export function readingsDigest(readings: MetaRoundReadings): string {
   const parts = [
     ...readings.criteria.map((c) => `${c.id}:${c.status}:${c.verdict}`).sort(),
-    ...readings.divergences.map((d) => `${d.id}:${d.kind}`).sort(),
+    // 偏离带处理者三态（handler.state）进摘要——三态变了结论就变（如 goal-driver 由跑变停）。
+    // ⛔ 不取 handler 的秒数（staleSecs）与 repeatCount/lastRecommendation：那些每轮都变。
+    ...readings.divergences.map((d) => `${d.id}:${d.kind}:${d.handler?.state ?? "no-handler"}`).sort(),
     // driver 只取【在跑与否】这个会改变结论的位；⛔ 不取 staleSecs/记录数——它们每轮都变，
-    // 取了会让摘要恒不相等、变化检测闸失效（同 reason 文本的道理）。
-    ...readings.drivers.map((d) => `drv:${d.kind}:${d.running ? 1 : 0}`).sort(),
+    // 取了会让摘要恒不相等、变化检测闸失效（同 reason 文本的道理）。running=null（读不出）
+    // 单独一个 token "u"，⛔ 不与 false（停摆）同形（硬规则 3b）。
+    ...readings.drivers.map((d) => `drv:${d.kind}:${d.running === null ? "u" : d.running ? 1 : 0}`).sort(),
     // 同步只取【最近是否在失败】这个位，⛔ 不取计数。
     `sync:${readings.syncHealth.lastEvent ?? "none"}`,
     // 寄给它的任务：id + status 都进摘要。**必须进**——否则人新发一条裸缺陷不会改变摘要，
