@@ -1,7 +1,7 @@
 ---
 id: gap-ac158-execute-archive-batch-one
 title: AC158 判据仍红——执行批次一：扫描后死集 112 个脚本 git mv + INDEX 同一提交（尚未执行）
-status: todo
+status: ready
 labels:
   - gap
 parent: "null"
