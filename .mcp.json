@@ -1,13 +1,3 @@
 {
-  "mcpServers": {
-    "quay": {
-      "type": "stdio",
-      "command": "node",
-      "args": [
-        "packages/quay/bin/quay.ts",
-        "mcp"
-      ],
-      "env": {}
-    }
-  }
+  "mcpServers": {}
 }

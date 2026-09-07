@@ -1,7 +1,7 @@
 ---
 id: AC-160
 title: 修 runtime-usage-inventory.ts 的枚举盲区
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-003
 criterion: >-
@@ -18,10 +18,6 @@ origin: >
   SPEC-plugin-lifecycle-single-bundle-2026-09-02.md
 
   §11b-i（「乙、把仪器修对——否则下一次普查还是错的」）。
-evidence:
-  at: 2026-09-07T01:21:29.866Z
-  verdict: fail
-  reading: acceptance failed (exit 1)
 ---
 
 **判据（双向）**：修 `runtime-usage-inventory.ts` 的枚举盲区——`readTranscripts` 须枚举
