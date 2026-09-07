@@ -2,7 +2,7 @@
 id: gap-goal-gap-filing-spawn-budget-too-small-ring-spins-empty
 title: G9 缺口立案环 spawn 预算 180s 不足 ⇒ 每轮烧满 spawn_cap 个 LLM agent、产出恒 0、taskCount
   永不脱离 0（空转，比不点火更贵）
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -69,10 +69,10 @@ goal driver 已 **drain**：`.quay/goal-control.json` = `{halted: true, halted_b
 
 ## AC
 
-- [ ] **超时值成为配置项，且能取假**：`plugin/scripts/drivers.yml` 的 `kinds.goal` 下存在 gap-filing spawn 超时字段，且 `goal-driver.ts` 现读该字段（照 `goalSpawnCap` 的接法：显式参数 → drivers.yml → 保守回退）。判据：把该字段改成一个显著不同的值后，一次 `spawnGapWorker` 的实际 `timeoutMs` 随之改变（单测断言解析结果，非断言字面量）。⛔ `grep -c 'GAP_WORKER_TIMEOUT_MS = 180_000' plugin/scripts/goal-driver.ts` 仍为 1 且无读配置路径 ⇒ 假；⛔ 仅把 180_000 改成另一个写死数字 ⇒ 假。
-- [ ] **新预算由实测导出，不是拍脑袋**：任务体或提交信息中写明所选缺省值的来源读数（本任务已提供一次真实测量 `elapsed_s=602.9`；实现者可补更多次），且缺省值 > 该读数。⛔ 只写一个数字而不给出它对应哪次测量 ⇒ 假（硬规则 4 推论：成本结构未知前不设数值阈值——此处结构已知，必须引用它）。
-- [ ] **超时 spawn 留下可归因的诊断**：`GapSpawnOutcome` 增加 stdout（截断保存，长度上限同样不写死或明确说明），且 `runGapSpawnPass` 把它写进轮记录的 `gap_spawns`。判据：构造一个必然超时的假 gap worker（测试缝 `gapWorkerCmd`），断言其 outcome 中 stdout 字段非 null 且含该假 worker 的输出。⛔ 字段存在但恒为 null ⇒ 假。
-- [ ] **单测覆盖预算读取与超时归因**：`plugin/test/goal-driver.test.mjs` 新增用例覆盖上述两点（配置读取的三级回退、超时 outcome 含 stdout），`node --test` 该文件退出码 0。⛔ 用例存在但断言的是常量本身而非解析路径 ⇒ 假。
+- [x] **超时值成为配置项，且能取假**：`plugin/scripts/drivers.yml` 的 `kinds.goal` 下存在 gap-filing spawn 超时字段，且 `goal-driver.ts` 现读该字段（照 `goalSpawnCap` 的接法：显式参数 → drivers.yml → 保守回退）。判据：把该字段改成一个显著不同的值后，一次 `spawnGapWorker` 的实际 `timeoutMs` 随之改变（单测断言解析结果，非断言字面量）。⛔ `grep -c 'GAP_WORKER_TIMEOUT_MS = 180_000' plugin/scripts/goal-driver.ts` 仍为 1 且无读配置路径 ⇒ 假；⛔ 仅把 180_000 改成另一个写死数字 ⇒ 假。
+- [x] **新预算由实测导出，不是拍脑袋**：任务体或提交信息中写明所选缺省值的来源读数（本任务已提供一次真实测量 `elapsed_s=602.9`；实现者可补更多次），且缺省值 > 该读数。⛔ 只写一个数字而不给出它对应哪次测量 ⇒ 假（硬规则 4 推论：成本结构未知前不设数值阈值——此处结构已知，必须引用它）。
+- [x] **超时 spawn 留下可归因的诊断**：`GapSpawnOutcome` 增加 stdout（截断保存，长度上限同样不写死或明确说明），且 `runGapSpawnPass` 把它写进轮记录的 `gap_spawns`。判据：构造一个必然超时的假 gap worker（测试缝 `gapWorkerCmd`），断言其 outcome 中 stdout 字段非 null 且含该假 worker 的输出。⛔ 字段存在但恒为 null ⇒ 假。
+- [x] **单测覆盖预算读取与超时归因**：`plugin/test/goal-driver.test.mjs` 新增用例覆盖上述两点（配置读取的三级回退、超时 outcome 含 stdout），`node --test` 该文件退出码 0。⛔ 用例存在但断言的是常量本身而非解析路径 ⇒ 假。
 - [ ] **生产载体验证（⛔ 不得由 fixture 满足，硬规则 4 推论三）**：修复落地并 `quay driver resume --kind goal` 后，`.quay/goal-round.jsonl` 中**实现落地时刻之后**的轮记录里，至少有一轮满足 `spawned ≥ 1` ∧ 该轮 `gap_spawns` 中 `timedOut=false` 的条数 ≥ 1。⛔ 关掉 `gapWorkerCmd` 测试缝后该判据仍能通过，才算测量。（待外部）
 - [ ] **环收敛可见**：resume 后的某一轮，`gaps` 中至少一条 AC 的 `taskCount` 由 0 变为 ≥ 1（即 `readTaskFacts` 独立复核到新立的 `goal_ac:` 任务），且 `gaps` 长度较修复前的 13 严格下降。⛔ 仅 `spawned>0` 而 `taskCount` 全 0 ⇒ 空转未解决 ⇒ 假。（待外部）
 

@@ -50,6 +50,10 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // stripEvidenceTimestamp 的单一真相源在 Core（goal-store.ts）——本文件与 goal-store 的提交决策
 // 必须用同一判据「什么算实质变化」（gap-goal-gate-timestamp-commit-flood），⛔ 不各写一份。
 import { stripEvidenceTimestamp } from "../../packages/quay/src/goal-store.ts";
+// 覆盖段抽取的单一真相源在 dispatch-preference-check.ts——本文件读 meta-driver-focus.md 的覆盖段
+// 必须用同一段标题（OVERRIDE_SECTION）与同一抽取逻辑（extractSectionContent），⛔ 不各写一份
+// （硬规则 5b：同一原则在第二个载体上的适用点必须复用同一判据，否则标题漂移会让检查器与本文件各说各话）。
+import { extractSectionContent, OVERRIDE_SECTION } from "./dispatch-preference-check.ts";
 
 /** 载体：每轮一条记录（与 quality-round.jsonl 同族，gitignored 运行时状态）。 */
 export const ROUND_CARRIER_REL = path.join(".quay", "meta-driver-round.jsonl");
@@ -57,6 +61,29 @@ export const ROUND_CARRIER_REL = path.join(".quay", "meta-driver-round.jsonl");
 /** 机械 spawn 的超时（跑一条 criterion）。⛔ LLM 派发不设有限超时——成本结构未测出前不设阈值
  *  （硬规则 4 推论一；同 quality-gate-driver 的 judgeTimeoutMs=Infinity 裁定）。 */
 export const CRITERION_TIMEOUT_MS = 120_000;
+
+/** 人工转向通道文件（orchestration/meta-driver-focus.md）——常驻 meta-driver 每轮读其覆盖段。
+ *  与 orchestration/dispatch-preference.md 同源：git 可见、每轮读（非启动时读）、三段式、
+ *  由 dispatch-preference-check.ts --file 强制结构（tasks/gap-meta-driver-no-steering-channel-focus-unreachable）。 */
+export const META_FOCUS_FILE_REL = "orchestration/meta-driver-focus.md";
+
+/** 读人工转向通道的覆盖段内容（每轮调用，⛔ 非启动时读一次——改文件即刻生效，无需重启常驻驱动）。
+ *  文件缺失 / 覆盖段解析不出 / 内容空 ⇒ null（= 人没给方向）。返回覆盖段全文（trim 后）。
+ *  ⛔ 覆盖段内容可能是「暂无方向」的注记——它是【人编辑才变】的量，进摘要（readingsDigest）正是
+ *  它该有的行为（变了 ⇒ 判读一次），与 staleSecs/记录数那些【每轮都变】的量相反（后者进摘要会让
+ *  变化检测闸恒为真）。 */
+export function readFocusFile(root: string): string | null {
+  try {
+    const text = fs.readFileSync(path.join(root, META_FOCUS_FILE_REL), "utf8");
+    const section = extractSectionContent(text, OVERRIDE_SECTION);
+    if (!section) return null;
+    const content = section.content.trim();
+    return content.length > 0 ? content : null;
+  } catch {
+    // 文件不存在 / 读不到 ⇒ 无方向。⛔ 不抛——缺文件就是「人没给方向」，不是致命错误。
+    return null;
+  }
+}
 
 /** 一条 AC 的本轮读数。verdict 来自真跑，不是记录自述。 */
 export interface CriterionReading {
@@ -97,7 +124,8 @@ export interface MetaRoundReadings {
   /** author↔develop 同步的成败计数（该机制自己的产物）。 */
   syncHealth: SyncHealth;
   /** 【寄给 meta-driver 的任务】——`label:meta-driver` 的未关闭任务。
-   *  这是「裸缺陷」的入口（不必是 GOAL、不必挂活跃目标、不必用够不着的 --focus），
+   *  这是「裸缺陷」的入口（不必是 GOAL、不必挂活跃目标、不必用 `--focus`——常驻的人给方向通道是
+   *  orchestration/meta-driver-focus.md 覆盖段，而 `--focus` 是一次性 CLI 参数，常驻驱动收不到），
    *  同时是它自己的闭环（autoDrive 立的任务带同一标签，掉进 needs-human 也会回流）。 */
   addressedTasks: AddressedTask[];
   /** gap-not-evaluated-checkers-never-persisted — the suite's INERT checkers (which run_static_checks
@@ -252,8 +280,10 @@ export function computeDivergenceRecurrence(
   return out;
 }
 
-/** 采本轮读数：active goal → 其下全部 AC → 逐条真跑 criterion → 算 divergence。 */
-export async function collectReadings(root: string, focus: string | null): Promise<MetaRoundReadings> {
+/** 采本轮读数：active goal → 其下全部 AC → 逐条真跑 criterion → 算 divergence。
+ *  `cliFocus` 是 CLI `--focus`（一次性人工干跑）的显式方向，优先级高于文件；两者都缺时
+ *  `readings.focus` = 每轮现读的 orchestration/meta-driver-focus.md 覆盖段内容（常驻场景的人给方向通道）。 */
+export async function collectReadings(root: string, cliFocus: string | null): Promise<MetaRoundReadings> {
   const all = await listGoalRecords(root);
   const goals = all
     .filter((r) => String(r.id ?? "").startsWith("GOAL-") && r.status === "active")
@@ -284,6 +314,8 @@ export async function collectReadings(root: string, focus: string | null): Promi
     d.repeatCount = r?.repeatCount ?? 0;
     d.lastRecommendation = r?.lastRecommendation ?? null;
   }
+  // CLI --focus（一次性）优先；否则每轮现读文件覆盖段（常驻的人给方向通道）。两者都缺 ⇒ null。
+  const focus = cliFocus ?? readFocusFile(root);
   return {
     goals, criteria, divergences,
     drivers: collectDriverReadings(root),
@@ -577,6 +609,9 @@ export function readingsDigest(readings: MetaRoundReadings): string {
     // gap-not-evaluated-checkers-never-persisted — 惰性守卫的名字必须进摘要（⛔ 只进计数会让新出现的
     // 惰性守卫不改变摘要 ⇒ 语义半永不被唤醒；逐名进，某个 guard 从在→不在/不在→在都改变摘要）。
     ...readings.inertCheckers.map((n) => `inert:${n}`).sort(),
+    // 人工转向（覆盖段内容）：人编辑才变，进摘要 ⇒ 变了判读一次、不变不判读（「变了」而非「非空」）。
+    // ⛔ 它恰是【人编辑才变】的量（与 staleSecs/记录数相反——那些每轮都变，进摘要会让变化检测恒为真）。
+    `focus:${readings.focus ?? "none"}`,
   ];
   return createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 16);
 }
@@ -602,7 +637,11 @@ export function writeState(root: string, s: MetaState): void {
 }
 
 /** 语义半是否该跑。**事件触发 + 定时器地板**（08-23 SPEC §5 已裁定的模型的机械形态）：
- *  读数变了 ⇒ 跑；人给了 focus ⇒ 跑；距上次判读超过地板 ⇒ 跑。
+ *  读数变了 ⇒ 跑；人给了 `--focus`（CLI，一次性）⇒ 跑；距上次判读超过地板 ⇒ 跑。
+ *  ⛔ `args.focus` 是 **CLI `--focus`（一次性人工干跑）**，不是文件覆盖段——文件覆盖段已经进
+ *  `digest`（readingsDigest），走「读数变了 ⇒ 跑」这一支：内容变了判读一次，不变不判读。
+ *  若把文件覆盖段也塞进 `args.focus`，就会退化成「非空就每轮强制判读」——这正是本任务要消灭的
+ *  成本事故（tasks/gap-meta-driver-no-steering-channel-focus-unreachable）。
  *  ⊢ 地板是**安全网不是调优参数**：它防的是「摘要因故恒不变 ⇒ 永不再判读」这一失效模式，
  *    故取一个粗值（缺省 24h）并显式可配，⛔ 不是按成本/收益调出来的阈值（硬规则 4 推论一）。 */
 export function shouldJudge(
@@ -1412,7 +1451,9 @@ async function runMetaRoundInner(opts: MetaRoundOptions): Promise<MetaRoundResul
     evidenceRestored: settlement.restored.length,
     evidenceKept: settlement.kept,
     evidenceSkipped: settlement.skipped,
-    focus,
+    // 记录里写【本轮实际生效的】focus（文件覆盖段，或 CLI --focus 覆盖它时是 CLI 值），
+    // ⛔ 不是 destructured 的 CLI focus（常驻场景恒 null，会让「人编辑了覆盖段」在载体上不可见）。
+    focus: readings.focus,
   };
 
   // 摘要在机械半就算出来并输出：它是触发闸的输入，必须能被【不花 LLM 的一次调用】观测到
@@ -1565,7 +1606,8 @@ const HELP = [
   "  --root <dir>      仓库根（缺省 cwd）",
   "  --once            跑一轮后退出（手工检视用；⛔ 缺省是【常驻】，与 quality 等例程型 kind 一致）",
   "  --no-llm          只跑机械半（读数 + divergence），不派语义 probe",
-  "  --focus \"<text>\"  本轮的人给的方向（可选，进 prompt）",
+  "  --focus \"<text>\"  一次性人工干跑（--once）时的显式方向，进 prompt；⛔ 常驻驱动收不到这个参数",
+  "                    ——常驻的人给方向通道是 orchestration/meta-driver-focus.md 覆盖段（每轮现读）",
   "  --k <N>           本轮提案上限（缺省 " + DEFAULT_RATE + "，routine-file-gate 的 rate 闸）",
   "  --dry-run         提案过闸但不写盘（也不推进变化检测状态）",
   "  --judge-floor <m> 语义半的定时器地板（分钟，缺省 1440=24h）——安全网非调优阈值：",
