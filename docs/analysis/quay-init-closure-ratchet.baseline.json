@@ -1,7 +1,7 @@
 {
-  "files": 133,
-  "bytes": 3842907,
-  "fingerprint": "60545f61dd3ee43e386a3aefc4312a32c59b2212e39610e892ebc9f2509ad973",
+  "files": 134,
+  "bytes": 3862804,
+  "fingerprint": "dece77f2ff1097428b7ff980884dcd0de52364540965112742679d17a845069f",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
@@ -105,7 +105,7 @@
     },
     {
       "rel": "plugin/scripts/capability-catalog.sh",
-      "sha": "5ef72848ee83fad4c3f3c3e87bc5a116dfe386205fc9c5f12796f9ab483356c7"
+      "sha": "af4ac943c4c4d6ebfb1257ffcd96e48cdafa3902d739c719ffd68c0a5ae1590f"
     },
     {
       "rel": "plugin/scripts/checker-io.ts",
@@ -310,6 +310,10 @@
     {
       "rel": "plugin/scripts/per-task-suite-record.ts",
       "sha": "16232a1a07cfd20d2622244920c53a927d8995995baf43d0a5b5759e661d96d4"
+    },
+    {
+      "rel": "plugin/scripts/perfile-failure-rate.ts",
+      "sha": "b13b9d976c2904f39f1a26a71e22b810dbf6e435d8f80415de20b26a33eb557f"
     },
     {
       "rel": "plugin/scripts/periodic-push-backup.sh",
@@ -529,7 +533,7 @@
     },
     {
       "rel": "plugin/workflows/fan-in-execute.js",
-      "sha": "be27c107aaa459c126ae7265d428901be377156fc47208454d111e667bf242c3"
+      "sha": "146f76f356619f1e4dcdec880091e3e5ad95f5f977f56524cc42c7641c8b6520"
     },
     {
       "rel": "plugin/workflows/pool-quality-judge.js",
