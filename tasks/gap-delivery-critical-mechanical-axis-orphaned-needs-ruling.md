@@ -132,6 +132,7 @@ extra:
 - `plugin/test/concurrent-batch-scheduler.test.mjs`
 - `plugin/test/ac36-sortkey-criterion-check.test.mjs`
 - `docs/analysis/quay-init-closure-ratchet.baseline.json`
+- `docs/analysis/test-file-baseline.txt`
 - `orchestration/dispatch-preference.md`
 - `orchestration/SPEC-capability-planes-and-mechanism-lifecycle-2026-09-05.md`
 - `tasks/gap-delivery-critical-mechanical-axis-orphaned-needs-ruling.md`
