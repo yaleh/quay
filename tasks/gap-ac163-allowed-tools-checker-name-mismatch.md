@@ -2,7 +2,7 @@
 id: gap-ac163-allowed-tools-checker-name-mismatch
 title: AC-163 判据点名 allowed-tools-plugin-prefix-check.ts，落地名是
   skill-allowed-tools-namespace-check.ts——命名对齐使判据退出 0
-status: ready
+status: done
 labels:
   - gap
   - defect
