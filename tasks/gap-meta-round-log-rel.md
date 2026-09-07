@@ -41,4 +41,6 @@ P` ⇒ 驱动存活时其新鲜心跳在 .quay/ 可观测（载体最新时间�
 ## Touches
 - `plugin/scripts/quality-gate-driver.ts`
 - `plugin/scripts/driver-runtime.ts`
+- `plugin/test/quality-gate-driver.test.mjs`
+- `plugin/test/driver-runtime.test.mjs`
 - `tasks/gap-meta-round-log-rel.md`
