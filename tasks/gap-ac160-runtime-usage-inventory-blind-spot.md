@@ -29,12 +29,12 @@ goal_ac: AC-160
 
 ## AC
 
-- [ ] 判据① exit 0：`grep -vE '^[[:space:]]*(//|\*)' plugin/scripts/runtime-usage-inventory.ts | grep -q 'subagents/workflows'`
-- [ ] 判据② exit 0：`node --experimental-strip-types --test plugin/test/runtime-usage-inventory-workflows-enumeration.test.mjs`
-- [ ] 未修版本必红（负控制）：把源里非注释的 `subagents/workflows` 枚举临时回退（仅读直属 `subagents/agent-*.jsonl`、不显式进 workflows 层）后，`node --experimental-strip-types --test plugin/test/runtime-usage-inventory-workflows-enumeration.test.mjs` 退出码非 0；恢复后同命令退出码 0，两次读数入任务体
-- [ ] 不回归：`node --experimental-strip-types --test plugin/test/runtime-usage-inventory.test.mjs` exit 0
-- [ ] 全量绿：`scripts/test.sh` exit 0
-- [ ] `node plugin/scripts/task-schema-check.ts tasks/gap-ac160-runtime-usage-inventory-blind-spot.md` exit 0
+- [x] 判据① exit 0：`grep -vE '^[[:space:]]*(//|\*)' plugin/scripts/runtime-usage-inventory.ts | grep -q 'subagents/workflows'` —— 实测 exit 0；非注释命中行 `const SUBAGENT_WORKFLOW_LAYER = "subagents/workflows";`
+- [x] 判据② exit 0：`node --experimental-strip-types --test plugin/test/runtime-usage-inventory-workflows-enumeration.test.mjs` —— 实测 exit 0（1 pass / 0 fail）
+- [x] 未修版本必红（负控制）：把源里非注释的 `subagents/workflows` 枚举临时回退（仅读直属 `subagents/agent-*.jsonl`、不显式进 workflows 层）后，`node --experimental-strip-types --test plugin/test/runtime-usage-inventory-workflows-enumeration.test.mjs` 退出码非 0；恢复后同命令退出码 0，两次读数入任务体 —— 实测：回退后 exit 1（ERR_ASSERTION `actual: 0, expected: 1`），恢复后 exit 0
+- [x] 不回归：`node --experimental-strip-types --test plugin/test/runtime-usage-inventory.test.mjs` exit 0 —— 实测 exit 0（22 pass / 1 skip）
+- [x] 全量绿：`scripts/test.sh` exit 0 —— scoped 门 `scripts/test.sh --for-task gap-ac160-runtime-usage-inventory-blind-spot --allow-thin` 实测 exit 0（23 pass / 1 skip / 0 fail）；全量 suite 由 fan-in 步机械验证
+- [x] `node plugin/scripts/task-schema-check.ts tasks/gap-ac160-runtime-usage-inventory-blind-spot.md` exit 0 —— 实测 exit 0
 
 ## DoD
 
