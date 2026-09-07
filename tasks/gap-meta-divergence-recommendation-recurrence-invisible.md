@@ -1,7 +1,7 @@
 ---
 id: gap-meta-divergence-recommendation-recurrence-invisible
 title: divergences 是唯一没有执行器的通道，而 meta-driver 每轮全新上下文 ⇒ 结构上无法发现自己已重复同一建议 5 轮
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -58,3 +58,13 @@ extra: {}
 - `plugin/test/meta-driver.test.mjs`
 - `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `tasks/gap-meta-divergence-recommendation-recurrence-invisible.md`
+## Needs-Human
+
+**执行 2026-09-07T02:51:11.493Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=ff: fan-in-ff-merge: FF FAILED (attempt 4 >= 3) — ANTI-LIVELOCK (SPEC §7, gap-ff-livelock-trigger-no-action): develop keeps advancing; escalating + STOPPING automatic retry. Escalation record written to /home/yale/work/quay/.quay/fan-in-ff-escalations.jsonl. Do NOT auto-retry: re-merge develop and re-run the fan-in once develop settles.
+fan-in-ff-merge: measure ff_only_locked=false
+- run_id：wk-prod-1788717081
+- session_id：75c3c4d6-fc9f-4a33-be8b-3a94567d8606
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-meta-divergence-recommendation-recurrence-invisible-wk-prod-1788717081.log
