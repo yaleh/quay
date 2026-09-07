@@ -17,6 +17,10 @@ expect: exit 0（plugin/README.md 含 plugin.json 的当前版本号 ∧ 不再�
 origin: |
   人 2026-09-02 裁定①「quay-init 复制 Claude Code 的各种扩展文件的行为应当废弃」。正本
   SPEC-plugin-lifecycle-single-bundle-2026-09-02.md §12e。
+evidence:
+  at: 2026-09-07T01:09:45.000Z
+  verdict: fail
+  reading: acceptance failed (exit 1)
 ---
 
 **判据（能取假）**：交付面与文档同步——`SPEC-complete-delivery-surface` 活文档六类清单、
