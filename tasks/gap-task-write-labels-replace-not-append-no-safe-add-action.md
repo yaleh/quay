@@ -3,7 +3,7 @@ id: gap-task-write-labels-replace-not-append-no-safe-add-action
 title: task_write.labels
   是整体替换非追加，且内部已有的安全追加逻辑（ensureDeliveryCriticalLabel）未暴露为可调用动作——临时打
   delivery-critical 等标签易误删既有标签
-status: done
+status: ready
 labels:
   - gap
   - defect
