@@ -73,11 +73,11 @@ drain 之后 ~15 分钟的 respawn 次数 = 138
 
 ## AC
 
-- [ ] **halt 不再终止进程**：`runResidentQualityGateLoop` 在 `isHalted` 为真时**继续循环**（写 halted 轮记录后进入下一轮的 sleep），而不是 `break`。判据：单测起一个 `halted` 控制态下的循环，传 `maxRounds: 3`，断言写出的轮记录条数为 3 且 `round` 依次为 1/2/3。⛔ 只写出 1 条、或 `round` 恒为 1 ⇒ 假。
-- [ ] **受闸的只是动作，不是观测**：halted 轮的记录中，机械读数仍然产生（`facts` 非空），只有需要闸的动作被跳过。判据：以 goal 为对象，halted 状态下的一轮里 `facts[0].value.criterionCount > 0` 且 `spawned === 0`。⛔ halted 轮 `facts: []` ⇒ 假（这正是当前行为）。
+- [x] **halt 不再终止进程**：`runResidentQualityGateLoop` 在 `isHalted` 为真时**继续循环**（写 halted 轮记录后进入下一轮的 sleep），而不是 `break`。判据：单测起一个 `halted` 控制态下的循环，传 `maxRounds: 3`，断言写出的轮记录条数为 3 且 `round` 依次为 1/2/3。⛔ 只写出 1 条、或 `round` 恒为 1 ⇒ 假。
+- [x] **受闸的只是动作，不是观测**：halted 轮的记录中，机械读数仍然产生（`facts` 非空），只有需要闸的动作被跳过。判据：以 goal 为对象，halted 状态下的一轮里 `facts[0].value.criterionCount > 0` 且 `spawned === 0`。⛔ halted 轮 `facts: []` ⇒ 假（这正是当前行为）。
 - [ ] **supervisor 不再重生**：在 halted 状态下让 driver 跑满一个观测窗口（≥ 3 个轮间隔），`.quay/<kind>-driver-supervisor.log` 中该窗口内 `respawning` 出现次数为 **0**。⛔ 出现任意次 ⇒ 假。（待外部）
-- [ ] **四个例程型 kind 一并覆盖（硬规则 5b）**：修改落在共用的 `runResidentQualityGateLoop` 上，而非 goal 的调用点；并在提交中给出 `grep` 读数证明该循环的消费者集合（预期 goal / quality / outer / meta 四个）已全部受益。⛔ 只在 `goal-driver.ts` 侧加分支 ⇒ 假。
-- [ ] **drain 的自述与实际一致**：`driver-runtime.ts` 中 drain 的输出文案与注释若仍声称「只挡新派发」，则实际行为必须确实如此；否则文案须改到与实际相符。判据：`quay driver drain --kind goal` 后 30 秒内 driver 进程仍存活（`kill -0` 为真）。⛔ 进程消失而文案仍称 in-flight untouched ⇒ 假。
+- [x] **四个例程型 kind 一并覆盖（硬规则 5b）**：修改落在共用的 `runResidentQualityGateLoop` 上，而非 goal 的调用点；并在提交中给出 `grep` 读数证明该循环的消费者集合（预期 goal / quality / outer / meta 四个）已全部受益。⛔ 只在 `goal-driver.ts` 侧加分支 ⇒ 假。
+- [x] **drain 的自述与实际一致**：`driver-runtime.ts` 中 drain 的输出文案与注释若仍声称「只挡新派发」，则实际行为必须确实如此；否则文案须改到与实际相符。判据：`quay driver drain --kind goal` 后 30 秒内 driver 进程仍存活（`kill -0` 为真）。⛔ 进程消失而文案仍称 in-flight untouched ⇒ 假。
 - [ ] **生产载体验证（⛔ 不得由 fixture 满足，硬规则 4 推论三）**：修复落地后，在生产上实做一次 drain → 观察 ≥ 3 轮 → resume，`.quay/goal-round.jsonl` 中该窗口的轮记录 `halted: true` 且 `facts` 非空、`round` 单调递增、`pid` 全程不变。⛔ `pid` 发生变化 ⇒ 仍在重生 ⇒ 假。（待外部）
 
 ## DoD
@@ -92,5 +92,7 @@ drain 之后 ~15 分钟的 respawn 次数 = 138
 
 - `plugin/scripts/quality-gate-driver.ts`
 - `plugin/scripts/driver-runtime.ts`
+- `plugin/scripts/outer-driver.ts`
 - `plugin/test/quality-gate-driver.test.mjs`
+- `plugin/test/outer-driver.test.mjs`
 - `tasks/gap-drain-on-routine-driver-empties-round-and-respawn-loops.md`
