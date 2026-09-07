@@ -406,6 +406,10 @@ Description:
       // identically). Omitted entirely => patch.expectedStatus stays
       // undefined => store.write()'s existing, unaffected behavior.
       if (flags["expect-status"] !== undefined) patch.expectedStatus = flags["expect-status"];
+      // gap-cli-write-surface-lacks-toplevel-fields: top-level `depends_on`/`goal_ac` (the same
+      // first-class fields the native MCP task_write zod schema accepts) get their CLI surface.
+      if (flags["depends-on"] !== undefined) patch.depends_on = String(flags["depends-on"]).split(",").filter(Boolean);
+      if (flags["goal-ac"] !== undefined) patch.goal_ac = flags["goal-ac"];
       if (flags["append-notes"] !== undefined) {
         const t = store.appendNote(id, flags["append-notes"]);
         if (flags.json) printJson(t);
@@ -447,6 +451,9 @@ Description:
         parent: flags.parent,
         body: flags.body ?? "",
       };
+      // gap-cli-write-surface-lacks-toplevel-fields: same top-level fields as `task edit`.
+      if (flags["depends-on"] !== undefined) patch.depends_on = String(flags["depends-on"]).split(",").filter(Boolean);
+      if (flags["goal-ac"] !== undefined) patch.goal_ac = flags["goal-ac"];
       const t = store.write(id, patch);
       if (flags.json) printJson(t);
       else console.log(`created ${id}`);
