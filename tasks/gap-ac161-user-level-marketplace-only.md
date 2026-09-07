@@ -1,7 +1,7 @@
 ---
 id: gap-ac161-user-level-marketplace-only
 title: AC161 用户级只留 marketplace 源，启用迁项目级
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -30,11 +30,11 @@ goal_ac: AC-161
 
 ## AC
 
-- [ ] AC-161 判据 exit 0：直接跑 `goals/AC-161-user-level-marketplace-only.md` 里 criterion 的 python3 heredoc，退出码 0
-- [ ] 项目级启用落地且已提交：`test -f .claude/settings.json && grep -q '"quay@quay": *true' .claude/settings.json` exit 0，且 `git ls-files .claude/settings.json` 非空
-- [ ] 用户级只剩源：`python3 -c 'import json,os;d=json.load(open(os.path.expanduser("~/.claude/settings.json")));assert not any("quay" in k for k in (d.get("enabledPlugins") or {}))'` exit 0
-- [ ] 负控制（能取假）：临时把 `"quay@quay": true` 加回用户级 `enabledPlugins` ⇒ AC-161 判据 exit 1；撤掉 ⇒ 回到 exit 0
-- [ ] 顺序未反：迁移全程任一时刻都不存在「项目级无启用 ∧ 用户级无启用」的中间态（项目级提交先于用户级删除）
+- [x] AC-161 判据 exit 0：直接跑 `goals/AC-161-user-level-marketplace-only.md` 里 criterion 的 python3 heredoc，退出码 0
+- [x] 项目级启用落地且已提交：`test -f .claude/settings.json && grep -q '"quay@quay": *true' .claude/settings.json` exit 0，且 `git ls-files .claude/settings.json` 非空
+- [x] 用户级只剩源：`python3 -c 'import json,os;d=json.load(open(os.path.expanduser("~/.claude/settings.json")));assert not any("quay" in k for k in (d.get("enabledPlugins") or {}))'` exit 0
+- [x] 负控制（能取假）：临时把 `"quay@quay": true` 加回用户级 `enabledPlugins` ⇒ AC-161 判据 exit 1；撤掉 ⇒ 回到 exit 0
+- [x] 顺序未反：迁移全程任一时刻都不存在「项目级无启用 ∧ 用户级无启用」的中间态（项目级提交先于用户级删除）
 
 ## DoD
 

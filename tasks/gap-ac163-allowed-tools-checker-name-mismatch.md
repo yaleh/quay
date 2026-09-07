@@ -54,10 +54,20 @@ Related（同 AC163、机制不同、勿当重复）: `gap-skill-allowed-tools-p
 
 ## AC
 
-- [ ] AC1 判据逐字绿：`node --experimental-strip-types plugin/scripts/allowed-tools-plugin-prefix-check.ts` exit 0，且 `test -f plugin/scripts/allowed-tools-plugin-prefix-check.ts` 为真（AC-163 criterion 第二条逐字满足）。
-- [ ] AC2 无残留旧名：`grep -rln 'skill-allowed-tools-namespace-check' plugin/` 输出为空（重命名彻底、无 stale 引用，不留 alias）。
-- [ ] AC3 双向取假（改名后仍有效）：写回一处裸 `mcp__quay__` 到任一 SKILL.md `allowed-tools` ⇒ 检查器 exit 1 且逐字点名该文件；恢复 ⇒ exit 0。两次读数入任务体 Evidence。
-- [ ] AC4 接线绿：`capability-catalog.sh --summary` 报新名 declared/covered、`checker-mutation-check.sh --list` 报新名 covered=yes、`node --test plugin/test/allowed-tools-plugin-prefix-check.test.mjs` 全绿。
+- [x] AC1 判据逐字绿：`node --experimental-strip-types plugin/scripts/allowed-tools-plugin-prefix-check.ts` exit 0，且 `test -f plugin/scripts/allowed-tools-plugin-prefix-check.ts` 为真（AC-163 criterion 第二条逐字满足）。
+- [x] AC2 无残留旧名：`grep -rln 'skill-allowed-tools-namespace-check' plugin/` 输出为空（重命名彻底、无 stale 引用，不留 alias）。
+- [x] AC3 双向取假（改名后仍有效）：写回一处裸 `mcp__quay__` 到任一 SKILL.md `allowed-tools` ⇒ 检查器 exit 1 且逐字点名该文件；恢复 ⇒ exit 0。两次读数入任务体 Evidence。
+- [x] AC4 接线绿：`capability-catalog.sh --summary` 报新名 declared/covered、`checker-mutation-check.sh --list` 报新名 covered=yes、`node --test plugin/test/allowed-tools-plugin-prefix-check.test.mjs` 全绿。
+
+## Evidence
+
+AC3 双向取假读数（2026-09-07 落地轮实际执行）：
+
+- **注入（写回裸名）**：`plugin/skills/routines/SKILL.md` 第 4 行 `allowed-tools` 的
+  `mcp__plugin_quay_quay__task_get` 改写为 `mcp__quay__task_get`；
+  `node --experimental-strip-types plugin/scripts/allowed-tools-plugin-prefix-check.ts` ⇒ **exit 1**，
+  逐字点名：`plugin/skills/routines/SKILL.md allowed-tools has non-plugin-quay mcp__ names:` / `    - mcp__quay__task_get`。
+- **恢复**：`git checkout -- plugin/skills/routines/SKILL.md` 后同命令 ⇒ **exit 0**。
 
 ## DoD
 
