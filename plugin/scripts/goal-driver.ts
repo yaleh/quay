@@ -306,21 +306,28 @@ export interface ReadyPoolJudgment {
 
 /** 一条关联任务是否「无法自行前进」（G9 stalled 的结构判据）：
  *  todo ⇒ 不在 eligibleTodoIds（晋升门判不合格 / 不在候选，含 fixture/parked）；ready ⇒ 在
- *  excludedReadyIds（被 pool 排除）。其余状态本就不在「推进中」集合（computeGoalGaps 只数 todo/ready）。 */
+ *  excludedReadyIds（被 pool 排除）；needs-human ⇒ 已离开 todo/ready、需人处理（有处理者但
+ *  不能自行前进，⛔ 与 judgment 无关）。其余状态（done/superseded）本就不在「推进中」集合
+ *  （computeGoalGaps 只数 todo/ready/needs-human）。 */
 export function isTaskStuck(task: { id: string; status: string | null }, judgment: ReadyPoolJudgment): boolean {
+  if (task.status === "needs-human") return true;
   if (task.status === "todo") return !judgment.eligibleTodoIds.has(task.id);
   if (task.status === "ready") return judgment.excludedReadyIds.has(task.id);
   return false;
 }
 
 /** 缺口计算（G7 机械量，SPEC §6.2 ⑤）：对每条未达成（status=active）AC，
- *  count(task where goal_ac == AC and status ∈ {todo,ready}) == 0 ⇒ 缺口。
- *  四态：gap（计数 == 0）/ stalled（计数 > 0 但关联任务全都无法自行前进——G9，judgment 提供结构量）/
- *  in-progress（计数 > 0）/ not-evaluated（taskFacts == null）。
+ *  count(task where goal_ac == AC and status ∈ {todo,ready,needs-human}) == 0 ⇒ 缺口。
+ *  四态：gap（计数 == 0）/ stalled（计数 > 0 但关联任务全都无法自行前进——G9，judgment 提供结构量；
+ *  ⚠️ needs-human 亦属 stalled：已离开 todo/ready、需人处理，有处理者但不能自行前进，且与
+ *  judgment 无关）/ in-progress（计数 > 0）/ not-evaluated（taskFacts == null）。
  *  judgment===null（读不到 ready-pool-check）⇒ 不判 stalled（⛔ 不把「读不懂」伪装成「卡住」，
- *  也不伪装成「推进中」——stalled 只是对 in-progress 的细化，读不懂时回到 in-progress）。
+ *  也不伪装成「推进中」——stalled 只是对 in-progress 的细化，读不懂时回到 in-progress），
+ *  ⛔ 例外：关联集合全为 needs-human 时无论 judgment 有无都判 stalled（needs-human 不需要
+ *  ready-pool 结构量即可判定「不能自行前进」）。
  *  ⛔ 本仓任务无独立 in-flight 态——派发中的任务 status 仍为 todo/ready，故「推进中」集合 =
- *  {todo, ready}。draft/superseded/retired/achieved 的 AC 均不是缺口对象（未激活 / 已关闭 / 已达成）。 */
+ *  {todo, ready, needs-human}。done/superseded 不计入（真的没有在做的任务 ⇒ gap 正确）；
+ *  draft/superseded/retired/achieved 的 AC 均不是缺口对象（未激活 / 已关闭 / 已达成）。 */
 export function computeGoalGaps(
   records: Array<Record<string, unknown>>,
   taskFacts: Array<{ id: string; status: string | null; goalAc: string | null }> | null,
@@ -337,12 +344,14 @@ export function computeGoalGaps(
       continue;
     }
     const associated = taskFacts.filter(
-      (t) => t.goalAc === id && (t.status === "todo" || t.status === "ready"),
+      (t) => t.goalAc === id && (t.status === "todo" || t.status === "ready" || t.status === "needs-human"),
     );
     const count = associated.length;
     const state: GapState = count === 0
       ? "gap"
-      : (judgment !== null && associated.every((t) => isTaskStuck(t, judgment)) ? "stalled" : "in-progress");
+      : (associated.every((t) => t.status === "needs-human")
+          ? "stalled"
+          : (judgment !== null && associated.every((t) => isTaskStuck(t, judgment)) ? "stalled" : "in-progress"));
     out.push({ goal, ac: id, state, taskCount: count });
   }
   return out;
@@ -402,7 +411,7 @@ export async function readReadyPoolJudgment(root: string, readyPoolCmd: string[]
  *  readTaskFacts 独立复核（⛔ 不信 agent 自述）。 */
 export function buildGapWorkerPrompt(gap: GoalGap, goalTitle: string, acTitle: string, acExpect: string, root: string): string {
   return [
-    "You are a gap-filing agent in the quay repo. A goal criterion (AC) has a structural gap: no todo/ready task advances it.",
+    "You are a gap-filing agent in the quay repo. A goal criterion (AC) has a structural gap: no todo/ready/needs-human task advances it.",
     `Repo root: ${root}.`,
     `goal_id=${gap.goal} goal_title=${goalTitle}`,
     `ac_id=${gap.ac} ac_title=${acTitle}`,

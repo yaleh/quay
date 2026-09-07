@@ -80,4 +80,12 @@ goal_ac: AC-166
 - plugin/scripts/select-static-checks-for-touches.ts（FAN_IN_ORCHESTRATION_FILES 移除 .claude 双副本条目）
 - plugin/scripts/task-file-bypass-check.ts（移除 .claude/workflows/fan-in-execute.js 双副本条目）
 - docs/analysis/quay-init-closure-ratchet.baseline.json（re-anchor，manager-tick-core 迁入 plugin/workflows）
+- plugin/scripts/select-tests-for-touches.ts（SKIP_DIRS 加 archive，归档测试不再入 scoped 选测集）
+- plugin/test/fan-in-materialize-check.test.mjs（.claude/workflows → plugin/workflows fixture 路径）
+- plugin/test/pool-quality-judge.test.mjs（workflow 路径 .claude/workflows → plugin/workflows）
+- docs/analysis/test-file-baseline.txt（重算，归档测试文件移除出 baseline）
+- plugin/test/codex-stage1-adapter.test.mjs（A3 指令面改 .agents 唯一份 + .claude/skills 退役断言）
+- plugin/test/execute-suite-fix-scope-gate.test.mjs（COPIES 去 .claude 双副本，AC1 改 single-source）
+- plugin/test/execute-suite-fix-relaunch-snapshot.test.mjs（COPIES 去 .claude 双副本，AC3 改 single-source）
+- plugin/test/fan-in-execute-paths.test.mjs（.claude/workflows → plugin/workflows fixture 路径）
 - tasks/gap-ac166-second-copy-retirement.md（自身）
