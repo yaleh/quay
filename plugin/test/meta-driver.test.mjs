@@ -17,6 +17,10 @@ import { execFileSync } from 'node:child_process';
 
 import {
   computeDivergences,
+  computeDivergenceRecurrence,
+  extractJudgeRounds,
+  readMetaCarrier,
+  divergenceKey,
   proposalCandidateText,
   existingProposalKeys,
   nextAcId,
@@ -1037,4 +1041,101 @@ test('renderHumanCallBody: 逐字冲突引用与不可逆性都进任务体（�
   assert.ok(body.includes('改写后另一条路径的历史依据被抹掉'));
   assert.ok(body.includes('- `tasks/gap-meta-call-x.md`'), 'self-touch 机械补齐');
   assert.ok(body.includes('落败的一方已被就地更正或标注'), 'DoD 必须要求消解冲突源，⛔ 不留着再触发同一次');
+});
+
+// ── 重复计数（divergences 是四条输出通道里唯一没有执行器的一条）────────────────────────
+// gap-meta-divergence-recommendation-recurrence-invisible：meta-driver 每轮全新上下文 ⇒ 结构上
+// 无法发现自己已把同一建议重复 N 轮。修法不是塞历史进 prompt（破坏 profiles.yml:77 的
+// 「每轮全新上下文」抗漂移设计），而是把一个机械可算的量（repeatCount + lastRecommendation）
+// 作为读数交给它。判据喂【真载体文件】（⛔ 不是直接喂 judgeRounds 数组）——要穿过
+// readMetaCarrier 那层读文件，才能证明生产路径真的取得到。
+
+// 一条 judge round 载体记录（有 fact 的 value.interpretations 数组 = 语义半真跑过）。
+function mkJudgeRecord(interps) {
+  return JSON.stringify({
+    round: 0, run_id: 'r', pid: 1, ts: '2026-09-06T00:00:00Z', halted: false,
+    facts: [{ name: 'meta-driver', value: { interpretations: interps }, state: 'verified', reason: null }],
+  });
+}
+// 写载体到临时根（路径与 ROUND_CARRIER_REL 一致）。
+function writeCarrier(root, lines) {
+  fs.mkdirSync(path.join(root, '.quay'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.quay', 'meta-driver-round.jsonl'), lines.join('\n') + '\n', 'utf8');
+}
+// 一条当前轮的机械 divergence（不含 repeatCount——由 computeDivergenceRecurrence 补上）。
+const recurDiv = (id, kind) => ({ id, kind, status: 'active', verdict: 'pass', reason: 'x' });
+
+test('重复计数: 同一 (id,kind) 连续 5 轮 ⇒ 计数 5，且 lastRecommendation 取最近一次', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-recur-'));
+  try {
+    const interp = (rec) => [{ id: 'AC-177', kind: 'pass-but-unflipped', interpretation: 'x', recommendation: rec }];
+    writeCarrier(tmp, ['rec-1', 'rec-2', 'rec-3', 'rec-4', 'rec-5'].map((r) => mkJudgeRecord(interp(r))));
+    const recurrence = computeDivergenceRecurrence(extractJudgeRounds(readMetaCarrier(tmp)), [recurDiv('AC-177', 'pass-but-unflipped')]);
+    const got = recurrence.get(divergenceKey('AC-177', 'pass-but-unflipped'));
+    assert.equal(got.repeatCount, 5, '连续 5 轮 ⇒ 计数 5');
+    assert.equal(got.lastRecommendation, 'rec-5', 'lastRecommendation 必须是最近（最晚）一轮的原文');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('重复计数: 空载体 ⇒ 计数 0、lastRecommendation null（能取假的一侧）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-recur-empty-'));
+  try {
+    writeCarrier(tmp, []);
+    const recurrence = computeDivergenceRecurrence(extractJudgeRounds(readMetaCarrier(tmp)), [recurDiv('AC-177', 'pass-but-unflipped')]);
+    const got = recurrence.get(divergenceKey('AC-177', 'pass-but-unflipped'));
+    assert.equal(got.repeatCount, 0, '空载体 ⇒ 0，⛔ 不冒充「读失败」');
+    assert.equal(got.lastRecommendation, null);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('重复计数: 连续 = 直到遇到一个不含该 (id,kind) 的判读轮为止（⛔ 不是全载体累计）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-recur-break-'));
+  try {
+    const a = (id) => [{ id, kind: 'pass-but-unflipped', interpretation: 'x', recommendation: `r-${id}` }];
+    // 时间序（旧→新）：177 / 178（判读但无 177）/ 177 / 177 / 177
+    writeCarrier(tmp, [
+      mkJudgeRecord(a('AC-177')),
+      mkJudgeRecord(a('AC-178')),
+      mkJudgeRecord(a('AC-177')),
+      mkJudgeRecord(a('AC-177')),
+      mkJudgeRecord(a('AC-177')),
+    ]);
+    const recurrence = computeDivergenceRecurrence(extractJudgeRounds(readMetaCarrier(tmp)), [recurDiv('AC-177', 'pass-but-unflipped')]);
+    const got = recurrence.get(divergenceKey('AC-177', 'pass-but-unflipped'));
+    assert.equal(got.repeatCount, 3, '中间一轮判读未提 177 ⇒ 连续被打破，只数 3');
+    assert.equal(got.lastRecommendation, 'r-AC-177');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('重复计数: 空心跳（facts=[]）与 skipped 轮不打断连续（它们不产生建议）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-recur-skip-'));
+  try {
+    const heartbeat = JSON.stringify({ round: 0, run_id: 'r', pid: 1, ts: 't', halted: false, facts: [] });
+    const skipped = JSON.stringify({ round: 0, run_id: 'r', pid: 1, ts: 't', halted: false, facts: [{ name: 'meta-driver', value: { semantic: 'skipped-unchanged' }, state: 'verified', reason: null }] });
+    const judge = mkJudgeRecord([{ id: 'AC-177', kind: 'pass-but-unflipped', interpretation: 'x', recommendation: 'r-177' }]);
+    // 旧→新：判读(177) / 心跳 / skipped / 判读(177)
+    writeCarrier(tmp, [judge, heartbeat, skipped, judge]);
+    const recurrence = computeDivergenceRecurrence(extractJudgeRounds(readMetaCarrier(tmp)), [recurDiv('AC-177', 'pass-but-unflipped')]);
+    const got = recurrence.get(divergenceKey('AC-177', 'pass-but-unflipped'));
+    assert.equal(got.repeatCount, 2, '心跳/skipped 不产生建议 ⇒ 不打断连续，两轮判读都算');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// 成本护栏（AC3）：重复计数每轮都可能 +1 ⇒ ⛔ 不得进摘要，否则变化检测闸恒为真。
+test('readingsDigest: repeatCount/lastRecommendation 变化不改变摘要（⛔ 否则变化检测恒为真）', () => {
+  const base = mkReadings('pass', 'n1');
+  const a = { ...base, divergences: [{ ...base.divergences[0], repeatCount: 1, lastRecommendation: 'rec-A' }] };
+  const b = { ...base, divergences: [{ ...base.divergences[0], repeatCount: 999, lastRecommendation: 'rec-B' }] };
+  assert.equal(readingsDigest(a), readingsDigest(b), '只有重复计数变化 ⇒ 摘要不变');
+  assert.equal(readingsDigest(base), readingsDigest(a), '无 repeatCount 与有 repeatCount 也同摘要');
+  // 能取假的一侧：verdict 变了摘要必须变（⛔ 不得因「摘要稳定」把真变化也吞掉）。
+  assert.notEqual(readingsDigest(a), readingsDigest(mkReadings('fail')), 'verdict 变仍须改变摘要');
 });

@@ -74,6 +74,14 @@ export interface Divergence {
   status: string;
   verdict: string;
   reason: string;
+  /** 【重复计数】已连续多少轮产生同一 (id, kind) 的建议——从它自己的载体
+   *  `.quay/meta-driver-round.jsonl` 机械算出，⛔ 不进 readingsDigest：它每轮都可能 +1，
+   *  进了会让摘要恒不相等、变化检测闸失效（硬规则 4 推论一，同 staleSecs/记录数的道理）。
+   *  0 = 本轮首次，或载体里无此键（无历史）。这是【算术】不是判断——判断留给语义半。 */
+  repeatCount?: number;
+  /** 上次同一 (id, kind) 建议的 recommendation 原文（无历史 ⇒ null）。逐条带原文，
+   *  ⛔ 不只给一个总数（SPEC §5.3：不枚举对象、零指引价值）。 */
+  lastRecommendation?: string | null;
 }
 
 /** 一轮的完整读数（喂给语义半的输入，也是载体里那条记录的值面）。 */
@@ -164,6 +172,83 @@ export function computeDivergences(readings: CriterionReading[]): Divergence[] {
   return out;
 }
 
+// ── 重复计数（从自己的载体机械算出）────────────────────────────────────────────────────────────
+// gap-meta-divergence-recommendation-recurrence-invisible — divergences 是四条输出通道里唯一没有
+// 执行器的一条，而 meta-driver 每轮全新上下文 ⇒ 结构上无法发现自己已把同一建议重复了 N 轮。
+// ⛔ 修法不是给语义半塞历史（那会破坏 profiles.yml:77 的「每轮全新上下文」抗漂移设计），
+// 而是把一个【机械可算的量】作为读数交给它：从它自己的载体算出「这条 (id, kind) 已连续
+// 多少轮给出建议」。机械层算术、语义层判断，与 ADR-033 的切分一致。
+
+/** 一条 (id, kind) 的重复历史（机械算术，⛔ 不含任何判断）。 */
+export interface DivergenceRecurrence {
+  repeatCount: number;
+  lastRecommendation: string | null;
+}
+
+/** 稳定键：id + kind 联合定位一条偏离（⛔ 只按 id 会混掉同一 AC 的不同偏离类别）。 */
+export function divergenceKey(id: string, kind: string): string {
+  return `${id}::${kind}`;
+}
+
+/** 从载体记录里抽出【产生建议的轮】（judge round = 有 fact 的 value.interpretations 数组）。
+ *  ⛔ 不是每条载体记录都判读过：两次复核之间是 routine 未到期的空心跳（facts=[]），
+ *  变化检测闸还会跳过没变的轮（semantic=skipped-unchanged，无 interpretations 键）——
+ *  这些都不产生建议，故既不计入、也不打断连续（「已连续 N 轮」数的是产生建议的轮）。 */
+export function extractJudgeRounds(records: Array<Record<string, unknown>>): Array<Array<Record<string, unknown>>> {
+  const out: Array<Array<Record<string, unknown>>> = [];
+  for (const rec of records) {
+    const facts = rec.facts;
+    if (!Array.isArray(facts)) continue;
+    for (const f of facts) {
+      if (!f || typeof f !== "object") continue;
+      const value = (f as Record<string, unknown>).value;
+      if (!value || typeof value !== "object") continue;
+      const interps = (value as Record<string, unknown>).interpretations;
+      if (Array.isArray(interps)) { out.push(interps as Array<Record<string, unknown>>); break; }
+    }
+  }
+  return out;
+}
+
+/** 读自己的载体（解析不了的行跳过，⛔ 不因一行坏 JSON 使机制失明）。读不到 ⇒ 空数组
+ *  （「没有历史」——与 computeDivergenceRecurrence 的 0 同义，⛔ 不返回 null 冒充「读失败」）。 */
+export function readMetaCarrier(root: string): Array<Record<string, unknown>> {
+  let text: string;
+  try { text = fs.readFileSync(path.join(root, ROUND_CARRIER_REL), "utf8"); } catch { return []; }
+  const out: Array<Record<string, unknown>> = [];
+  for (const line of text.split("\n")) {
+    const t = line.trim();
+    if (!t) continue;
+    try { out.push(JSON.parse(t) as Record<string, unknown>); } catch { /* 坏行跳过 */ }
+  }
+  return out;
+}
+
+/** 对当前每条 divergence 算「已连续多少轮产生同一 (id, kind) 建议」。
+ *  从最新一轮往旧走，只数【产生建议的轮】（extractJudgeRounds 已滤掉心跳/跳过轮），
+ *  遇第一个不含该 (id, kind) 的判读轮即停（连续被打破）。lastRecommendation = 最近那次的原句。 */
+export function computeDivergenceRecurrence(
+  judgeRounds: Array<Array<Record<string, unknown>>>,
+  divergences: Divergence[],
+): Map<string, DivergenceRecurrence> {
+  const out = new Map<string, DivergenceRecurrence>();
+  for (const d of divergences) {
+    const k = divergenceKey(d.id, d.kind);
+    let count = 0;
+    let last: string | null = null;
+    let captured = false;
+    for (let i = judgeRounds.length - 1; i >= 0; i--) {
+      const round = judgeRounds[i];
+      const hit = round.find((it) => divergenceKey(String(it.id ?? ""), String(it.kind ?? "")) === k);
+      if (!hit) break; // 连续被打断：这一判读轮没有此 (id, kind) 建议
+      count++;
+      if (!captured) { captured = true; last = typeof hit.recommendation === "string" ? (hit.recommendation as string) : null; }
+    }
+    out.set(k, { repeatCount: count, lastRecommendation: last });
+  }
+  return out;
+}
+
 /** 采本轮读数：active goal → 其下全部 AC → 逐条真跑 criterion → 算 divergence。 */
 export async function collectReadings(root: string, focus: string | null): Promise<MetaRoundReadings> {
   const all = await listGoalRecords(root);
@@ -188,8 +273,16 @@ export async function collectReadings(root: string, focus: string | null): Promi
       reason,
     });
   }
+  const divergences = computeDivergences(criteria);
+  // 重复计数：从自己的载体机械算出（⛔ 不进摘要，见 readingsDigest），逐条附到 divergence 上。
+  const recurrence = computeDivergenceRecurrence(extractJudgeRounds(readMetaCarrier(root)), divergences);
+  for (const d of divergences) {
+    const r = recurrence.get(divergenceKey(d.id, d.kind));
+    d.repeatCount = r?.repeatCount ?? 0;
+    d.lastRecommendation = r?.lastRecommendation ?? null;
+  }
   return {
-    goals, criteria, divergences: computeDivergences(criteria),
+    goals, criteria, divergences,
     drivers: collectDriverReadings(root),
     syncHealth: collectSyncHealth(root),
     addressedTasks: collectAddressedTasks(root),
