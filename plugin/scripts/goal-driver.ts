@@ -73,9 +73,15 @@ export const INTERVAL_MS_DEFAULT = defaultDriverConfig().goal.intervalMs;
 /** 机械 spawn（跑一条 criterion / 一次 check）的 wall-clock 上限（毫秒）——全部是快速机械 node 调用。 */
 export const CRITERION_TIMEOUT_MS = 120_000;
 
-/** gap-filing agent spawn 的 wall-clock 上限（spawnSync timeout，毫秒）——与 promotion-driver 的
- *  FIX_WORKER_TIMEOUT_MS 同值（⛔ 不为 gap worker 另设阈值——硬规则 4 推论）。 */
-export const GAP_WORKER_TIMEOUT_MS = 180_000;
+/** gap-filing agent spawn 的 wall-clock 上限【缺省回退值】（毫秒，spawnSync timeout）。正源 = drivers.yml
+ *  goal.gap_worker_timeout_ms（goalGapWorkerTimeoutMs 就地读，⛔ 不写死字面量——硬规则 4 推论二）。
+ *  值由实测导出（⛔ 硬规则 4 推论：成本结构未知前不设数值阈值；此处结构已知，必须引用测量）：
+ *  gap-filing 角色单次墙钟实测 elapsed_s=602.9（本任务 gap-goal-gap-filing-spawn-budget-too-small-
+ *  ring-spins-empty 立案时的 900s 对照，exit=0、timedOut=false），故缺省 900_000（900s）> 602.9s，
+ *  留 ~1.5x 余量。promotion-driver 的 fix-worker 保持 180s（最近 400 轮 266/266 零超时）——两角色
+ *  工作量本就不同（fix-worker 改已定位代码；gap-filing 要读 AC、查重、撰四件套、过 ABI 落盘），
+ *  「同值」不再是节省，而是把一个角色钉死在不可能完成的预算上。 */
+export const GAP_WORKER_TIMEOUT_MS_DEFAULT = 900_000;
 
 /** 配置声明的 LLM 命令集缺省（AC140-4：判定读集合，⛔ 不靠 base==="claude" 字面量）。`claude-fjdac` =
  *  本仓 dev-tree launcher（.quay/profiles.yml 的 worker-default.launcher）——promotion 缺省只落
@@ -108,6 +114,24 @@ export function goalSpawnCap(root: string, explicit?: number): number {
     /* drivers.yml 缺失/不可解析 ⇒ 回退缺省（同 loadDriverConfig 的 fail-open） */
   }
   return GOAL_SPAWN_CAP_DEFAULT;
+}
+
+/** gap-filing agent spawn 的 wall-clock 上限（毫秒）：explicit（测试缝/CLI --gap-worker-timeout-ms）优先
+ *  → drivers.yml 的 goal.gap_worker_timeout_ms → 保守缺省 GAP_WORKER_TIMEOUT_MS_DEFAULT。⛔ 不写死
+ *  字面量（硬规则 4 推论二）。接法照 goalSpawnCap：就地读 drivers.yml 而非经 driver-config.loadDriverConfig
+ *  （DriverKindConfig 尚不知 gap_worker_timeout_ms，会 merge 丢弃）；后续若把该字段上收 driver-config，
+ *  应删除本函数改走 loadDriverConfig(root).goal.gapWorkerTimeoutMs。 */
+export function goalGapWorkerTimeoutMs(root: string, explicit?: number): number {
+  if (explicit != null && Number.isInteger(explicit) && explicit > 0) return explicit;
+  try {
+    const text = fs.readFileSync(path.join(root, "plugin", "scripts", "drivers.yml"), "utf8");
+    const parsed = parseYaml(text) as { kinds?: { goal?: { gap_worker_timeout_ms?: unknown } } } | null;
+    const v = parsed?.kinds?.goal?.gap_worker_timeout_ms;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+  } catch {
+    /* drivers.yml 缺失/不可解析 ⇒ 回退缺省（同 goalSpawnCap 的 fail-open） */
+  }
+  return GAP_WORKER_TIMEOUT_MS_DEFAULT;
 }
 
 // ── goal-store CLI 客户端（单一 argv 构造点经 meta-driver 的 goalStoreArgv；读/写/check 在本文件，
@@ -416,7 +440,7 @@ export interface GapWorkerSpawnResult {
 /** spawn 一个短命 gap-filing agent（claude -p，或 gapWorkerCmd 覆盖前缀），同步等待其退出。
  *  捕获 stdout/stderr + timeout（照 promotion-driver 的 spawnFixWorker）。spawn 即达成；⛔ 不验证
  *  立没立案（下一轮 readTaskFacts 独立复核），⛔ 不信 agent 自述。 */
-export function spawnGapWorker(argv: string[], root: string, timeoutMs: number = GAP_WORKER_TIMEOUT_MS): GapWorkerSpawnResult {
+export function spawnGapWorker(argv: string[], root: string, timeoutMs: number = GAP_WORKER_TIMEOUT_MS_DEFAULT): GapWorkerSpawnResult {
   if (!Array.isArray(argv) || argv.length === 0) {
     return { exitCode: null, error: "empty gap-worker argv", stdout: null, stderr: null, timedOut: false };
   }
@@ -436,11 +460,28 @@ export function spawnGapWorker(argv: string[], root: string, timeoutMs: number =
   }
 }
 
-/** 一条 gap spawn 的逐条诊断（ac · goal · exitCode · stderr · timedOut，⛔ 零诊断信息）。 */
+/** gap-filing agent stdout 的落盘【尾部】上限（字符）。超时诊断要的是「进行到哪一步」——尾部是
+ *  最后打印的内容，最有信息量（读 AC → 查重 → 撰件 → 落盘，卡在哪一步看最后一行）。4000 字符足以
+ *  覆盖一步的关键输出，再长无增量诊断价值，且轮记录是 gitignored 运行时日志、无需完整回放。
+ *  此上限是诊断面封顶，非预算/阈值——它不决定行为，只决定落盘体积（硬规则 4 推论二针对后者）。 */
+export const GAP_STDOUT_TAIL_CHARS = 4000;
+
+/** 截断 stdout 到【尾部】GAP_STDOUT_TAIL_CHARS 字符（超时/长输出诊断用；空 ⇒ null）。被截断时加
+ *  「…[truncated N chars]…」标记，使「有输出但被截」与「零输出」不同形（硬规则 3b）。 */
+export function truncateStdoutTail(stdout: string | null): string | null {
+  if (stdout == null || stdout === "") return null;
+  if (stdout.length <= GAP_STDOUT_TAIL_CHARS) return stdout;
+  return `…[truncated ${stdout.length - GAP_STDOUT_TAIL_CHARS} chars]…\n${stdout.slice(-GAP_STDOUT_TAIL_CHARS)}`;
+}
+
+/** 一条 gap spawn 的逐条诊断（ac · goal · exitCode · stdout · stderr · timedOut）。stdout 保留尾部
+ *  （超时/长输出时截断）——一个超时的 spawn 至少看得出它进行到哪一步（卡在启动/查重/还是差最后落盘），
+ *  ⛔ 不再是零诊断信息。 */
 export interface GapSpawnOutcome {
   ac: string;
   goal: string;
   exitCode: number | null;
+  stdout: string | null;
   stderr: string | null;
   timedOut: boolean;
 }
@@ -461,6 +502,7 @@ export function runGapSpawnPass(
   root: string,
   opts: {
     gapWorkerCmd?: string | null;
+    gapWorkerTimeoutMs?: number;
     llmCommands?: readonly string[];
     spawnCap?: number;
     resourceGateArgv?: string[] | null;
@@ -476,6 +518,8 @@ export function runGapSpawnPass(
   if (!gate.go) return { spawned: 0, llmInvoked: false, outcomes };
   // 每轮上限读配置（goalSpawnCap：CLI --spawn-cap → drivers.yml goal.spawn_cap → 缺省），⛔ 不写死。
   const cap = goalSpawnCap(root, opts.spawnCap);
+  // 每 spawn 超时读配置（goalGapWorkerTimeoutMs：显式 → drivers.yml goal.gap_worker_timeout_ms → 缺省）。
+  const timeoutMs = goalGapWorkerTimeoutMs(root, opts.gapWorkerTimeoutMs);
   const targets = gapAcs.slice(0, cap);
   let llmInvoked = false;
   for (let i = 0; i < targets.length; i++) {
@@ -490,8 +534,11 @@ export function runGapSpawnPass(
     );
     // llm_invoked 派生自真实 argv（⛔ 不硬编码 true）；全部 targets 用同一命令前缀 ⇒ 取首条即可。
     if (i === 0) llmInvoked = isLlmInvocation(argv, opts.llmCommands ?? LLM_COMMAND_SET_DEFAULT);
-    const r = spawnGapWorker(argv, root);
-    outcomes.push({ ac: g.ac, goal: g.goal, exitCode: r.exitCode, stderr: r.stderr, timedOut: r.timedOut });
+    const r = spawnGapWorker(argv, root, timeoutMs);
+    outcomes.push({
+      ac: g.ac, goal: g.goal, exitCode: r.exitCode,
+      stdout: truncateStdoutTail(r.stdout), stderr: r.stderr, timedOut: r.timedOut,
+    });
   }
   return { spawned: outcomes.length, llmInvoked, outcomes };
 }
@@ -531,6 +578,8 @@ export interface GoalRoundOptions {
   llmCommands?: readonly string[];
   /** 覆盖每轮 spawn 上限（缺省 = drivers.yml goal.spawn_cap；CLI --spawn-cap）。 */
   spawnCap?: number;
+  /** 覆盖 gap-filing agent spawn 超时（缺省 = drivers.yml goal.gap_worker_timeout_ms；CLI --gap-worker-timeout-ms）。 */
+  gapWorkerTimeoutMs?: number;
 }
 
 export interface GoalRoundResult {
@@ -604,6 +653,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   const halted = isHalted(root, process.env, GOAL_CONTROL_STATE_REL);
   const spawnPass = runGapSpawnPass(gaps, records, root, {
     gapWorkerCmd: opts.gapWorkerCmd,
+    gapWorkerTimeoutMs: opts.gapWorkerTimeoutMs,
     llmCommands: opts.llmCommands,
     spawnCap: opts.spawnCap,
     resourceGateArgv: opts.resourceGateArgv,
@@ -679,6 +729,7 @@ const HELP = [
   "  --ready-pool-cmd <s>   覆盖 ready-pool-check 命令（测试缝；stalled 第四态的结构量来源）",
   "  --llm-commands <csv>   配置声明的 LLM 命令集，逗号分隔（缺省 claude,claude-fjdac）",
   "  --spawn-cap <n>        覆盖每轮缺口立案 spawn 上限（缺省 drivers.yml goal.spawn_cap）",
+  "  --gap-worker-timeout-ms <ms> 覆盖 gap-filing agent spawn 超时（缺省 drivers.yml goal.gap_worker_timeout_ms）",
   "  --json                 每轮向 stdout 打一条 JSON 事件行",
   "",
   "Exit: 0 = 轮跑完（含 not-evaluated）; 1 = 轮失败; 2 = usage",
@@ -699,6 +750,7 @@ export async function main(argv: string[]): Promise<number> {
   let readyPoolCmd: string | undefined;
   let llmCommandsRaw: string | undefined;
   let spawnCapRaw: string | undefined;
+  let gapWorkerTimeoutMsRaw: string | undefined;
   let scriptRootRaw: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
@@ -716,6 +768,7 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--ready-pool-cmd") readyPoolCmd = args[++i];
     else if (a === "--llm-commands") llmCommandsRaw = args[++i];
     else if (a === "--spawn-cap") spawnCapRaw = args[++i];
+    else if (a === "--gap-worker-timeout-ms") gapWorkerTimeoutMsRaw = args[++i];
     else if (a === "--json") json = true;
     else if (a === "--help" || a === "-h") { process.stdout.write(HELP + "\n"); return 0; }
     else { process.stderr.write(`goal-driver: unknown argument: ${a}\n${HELP}\n`); return 2; }
@@ -744,6 +797,18 @@ export async function main(argv: string[]): Promise<number> {
     process.stderr.write("goal-driver: --spawn-cap must be a non-negative integer\n");
     return 2;
   }
+  // G9：每 spawn 超时（--gap-worker-timeout-ms 覆盖；缺省 = goalGapWorkerTimeoutMs 读 drivers.yml）。正整数才合法。
+  const gapWorkerTimeoutMs = gapWorkerTimeoutMsRaw === undefined
+    ? undefined
+    : (() => {
+        const n = Number(gapWorkerTimeoutMsRaw);
+        if (!Number.isInteger(n) || n <= 0) return null;
+        return n;
+      })();
+  if (gapWorkerTimeoutMsRaw !== undefined && gapWorkerTimeoutMs === null) {
+    process.stderr.write("goal-driver: --gap-worker-timeout-ms must be a positive integer\n");
+    return 2;
+  }
   // AC140-4：配置声明的 LLM 命令集（缺省 LLM_COMMAND_SET_DEFAULT；--llm-commands 逗号分隔注入）。
   const llmCommands = llmCommandsRaw === undefined
     ? [...LLM_COMMAND_SET_DEFAULT]
@@ -756,6 +821,7 @@ export async function main(argv: string[]): Promise<number> {
     readyPoolCmd: readyPoolCmd ? splitArgs(readyPoolCmd) : null,
     llmCommands,
     spawnCap: spawnCap ?? undefined,
+    gapWorkerTimeoutMs: gapWorkerTimeoutMs ?? undefined,
   };
 
   // 常驻（例程型）：复用通用例程型循环，⛔ 不另写一份。缺省 = 常驻（once=false）；--once 跑一轮即退。
