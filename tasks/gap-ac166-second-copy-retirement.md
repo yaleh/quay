@@ -76,8 +76,10 @@ goal_ac: AC-166
 - orchestration/manager-tick-prompt.txt（B1 scriptPath 改新路径）
 - orchestration/manager-tick-closing.md（豁免面清单路径同步）
 - plugin/scripts/red-on-omission-audit.ts（execute-suite-fix.js 引用改 plugin 路径）
+- plugin/scripts/checker-mutation-cases/red-on-omission-audit.sh（execute-suite-fix.js fixture 路径 .claude/workflows → plugin/workflows）
 - plugin/scripts/config-wiring-check.ts（run-routines/drain-directives 引用改 plugin 路径）
 - plugin/scripts/fan-in-materialize-check.ts（DEFAULT_WORKFLOW_REL 改 plugin 路径）
+- plugin/scripts/checker-mutation-cases/fan-in-materialize-check.sh（fan-in-execute.js fixture 路径 .claude/workflows → plugin/workflows）
 - plugin/scripts/select-static-checks-for-touches.ts（FAN_IN_ORCHESTRATION_FILES 移除 .claude 双副本条目）
 - plugin/scripts/task-file-bypass-check.ts（移除 .claude/workflows/fan-in-execute.js 双副本条目）
 - docs/analysis/quay-init-closure-ratchet.baseline.json（re-anchor，manager-tick-core 迁入 plugin/workflows）
