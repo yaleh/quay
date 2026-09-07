@@ -32,13 +32,13 @@ AC-190 判据当前取假（2026-09-07 干跑：`plugin/scripts/long-term-guaran
 
 ## AC
 
-- [ ] AC-190 判据 exit 0：脚本存在、真仓库绿、`--inject-unbacked-fixture` 负控制红（同一条命令链全过）
-- [ ] 双向负控制（硬规则③b/④）：改动前干跑 exit 1（脚本不存在）已记录，完成前后读数相反 ⇒ 排除恒真/恒绿
-- [ ] 背书记录读真实生产载体（goal-store list 真实输出、tasks/*.md），⛔ 不用 fixture 注入当正判断据（注入缝只用于负控制）
-- [ ] `--inject-unbacked-fixture` 存在且注入后 exit 非零（⛔ 不接受只有单向断言的实现，AC-190 origin 逐字）
-- [ ] capability-catalog 六表登记：`bash plugin/scripts/capability-catalog.sh --summary` 未分类计数为 0
-- [ ] 测试覆盖正/负两向：`plugin/test/long-term-guarantee-goal-backed-check.test.mjs` 断言 exit 0 与 exit 非零各至少一条
-- [ ] `node packages/quay/bin/quay.ts task check gap-ac190-long-term-guarantee-goal-backed-check --json` 的 `missing` 为 `[]`
+- [x] AC-190 判据 exit 0：脚本存在、真仓库绿、`--inject-unbacked-fixture` 负控制红（同一条命令链全过）
+- [x] 双向负控制（硬规则③b/④）：改动前干跑 exit 1（脚本不存在）已记录，完成前后读数相反 ⇒ 排除恒真/恒绿
+- [x] 背书记录读真实生产载体（goal-store list 真实输出、tasks/*.md），⛔ 不用 fixture 注入当正判断据（注入缝只用于负控制）
+- [x] `--inject-unbacked-fixture` 存在且注入后 exit 非零（⛔ 不接受只有单向断言的实现，AC-190 origin 逐字）
+- [x] capability-catalog 六表登记：`bash plugin/scripts/capability-catalog.sh --summary` 未分类计数为 0
+- [x] 测试覆盖正/负两向：`plugin/test/long-term-guarantee-goal-backed-check.test.mjs` 断言 exit 0 与 exit 非零各至少一条
+- [x] `node packages/quay/bin/quay.ts task check gap-ac190-long-term-guarantee-goal-backed-check --json` 的 `missing` 为 `[]`
 
 ## DoD
 
