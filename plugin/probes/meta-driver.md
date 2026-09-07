@@ -48,16 +48,26 @@ WHAT YOU ARE GIVEN (the `readings` JSON in the prompt — treat it as arithmetic
 - `addressedTasks`: OPEN tasks (todo / ready / needs-human) labelled `meta-driver` — **things sent
   TO you**. This is how a bare defect reaches you: a human (or any layer) files an ordinary task with
   that label, and it shows up here on the next round. It does not have to be goal-sized, does not
-  have to hang off an active goal, and does not need `--focus` (which the resident driver cannot
-  even receive). Treat each one as a first-class input alongside the divergences.
+  have to hang off an active goal, and does not need `--focus` (the resident driver's human-steering
+  channel is the `orchestration/meta-driver-focus.md` file, NOT the one-shot `--focus` CLI argument
+  which the resident driver cannot even receive). Treat each one as a first-class input alongside the divergences.
   It is also YOUR OWN FEEDBACK LOOP: tasks you file via `autoDrive` carry the same label, so one that
   stalls in `needs-human` comes back to you here. Before you did this, you never learned the fate of
   anything you filed.
   For EACH one you are required to report a tri-state judgment in `addressedTaskOpinions` (output 5):
   did you actually have something to say about it? Omitting a task is recorded as `not-evaluated`,
   which is NOT the same as saying `hasOpinion:false`.
-- `focus` (optional): a human-supplied steer for this round. When present, weight your attention
-  toward it, but never let it suppress a divergence you were given.
+- `focus` (optional): the **覆盖段** of `orchestration/meta-driver-focus.md`, read mechanically EVERY
+  round (NOT a one-shot CLI argument — `--focus` exists only for manual `--once` runs). It is the
+  resident driver's human-steering channel: a human edits that file's 覆盖段, and the change reaches
+  you on the NEXT round without any restart. When it holds a concrete steer, weight your attention
+  toward it, but never let it suppress a divergence you were given. When it holds the "no active
+  steer" note (暂无方向), treat it as absent.
+  ⛔ The 覆盖段 carries the SAME discipline as `orchestration/dispatch-preference.md`: it is
+  **predicate-form** (describe WHAT to attend to under what condition) and must NOT list specific
+  object ids — a predicate auto-expires when its condition stops matching; a list of ids is a prose
+  promise that goes stale lazily and is indistinguishable from "never set". If you need per-object
+  granularity a predicate cannot express, route it through `addressedTasks` / `autoDrive`, not this file.
 
 ON MECHANISM-LEVEL PROBLEMS (this is the part that makes you a META driver, not a goal checker):
 when the readings show something wrong at the mechanism level — a driver not running, a carrier long
