@@ -2,7 +2,7 @@
 id: gap-ac192-reanchor-criterion-to-attemptkey
 title: AC-192 判据仍按 runId 分组而 per-cycle 键已改为 attemptKey ⇒ 判据测错字段恒红（exit 1）；重锚判据到
   attemptKey
-status: todo
+status: ready
 labels:
   - gap
   - defect
