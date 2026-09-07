@@ -2,7 +2,7 @@
 id: gap-goal-gap-needs-human-invisible-burns-spawn-slot
 title: 缺口计算只认 todo|ready ⇒ 关联任务翻 needs-human 后该 AC 永远报 gap 而非 stalled，环启动后已为
   AC-158 空派 10 轮、每轮占掉 spawn_cap 的 1/3
-status: done
+status: ready
 labels:
   - gap
   - defect
