@@ -25,7 +25,7 @@ origin: |
   人 2026-09-02 裁定②「本项目自己使用的扩展应当与产品交付的是同一个」。正本
   SPEC-plugin-lifecycle-single-bundle-2026-09-02.md §4（先撤后接 = 断掉 3 天 178 次生产流量）。
 evidence:
-  at: 2026-09-07T01:14:27.390Z
+  at: 2026-09-07T01:15:23.949Z
   verdict: fail
   reading: acceptance failed (exit 1)
 ---
