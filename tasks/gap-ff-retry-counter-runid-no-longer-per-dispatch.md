@@ -24,10 +24,10 @@ extra:
 > - [x] AC1（能取假，per-dispatch 隔离）：全新 dispatch 不继承历史失败次数（attempt 从 0 起）
 > - [x] AC2（能取假，预算足额）：每个 dispatch 能跑满自己的 3 次预算（不被历史提前锁死）；**⛔ 历史失败 2 次的任务在新 dispatch 第 1 次就被锁 ⇒ 假**
 
-**AC2 的取假条件此刻成立。** `gap-bypass-check-unclassifiable-exits-zero` 的三次 needs-human 判词（`.quay/fan-in-ff-escalations.jsonl`）：
+**AC2 的取假条件此刻成立。** `gap-bypass-check-unclassifiable-exits-zero` 的升级记录（`.quay/fan-in-ff-escalations.jsonl`）：
 
 ```
-attempt 5  ts=2026-09-06T23:29Z  developHead=…
+attempt 5  ts=2026-09-06T23:29Z
 attempt 6  ts=2026-09-07T02:14Z  developHead=0b2a6b4a…
 attempt 7  ts=2026-09-07T03:07Z  developHead=968dce97…
 attempt 8  ts=2026-09-07T03:32Z  developHead=dcaeb8e9…
@@ -64,6 +64,19 @@ const runId = opts.runId || `${spec.runPrefix}-${Math.floor(Date.now() / 1000)}`
 
 ⇒ 不是计数写错了，是**它依赖的那个「runId 会变」的前提没了**。硬规则 4c 的形态：判据点名的量穿过中间层后不再是原来那个量；且这次的中间层是**时间**——前提在实现落地之后才改变，而没有任何机制会报出来。
 
+### 二之二、⚠️ 常驻测试为什么恒绿——fixture 把那个前提钉死了（本条最可操作的一半）
+
+`plugin/test/fan-in-ff-merge.test.mjs` 有覆盖 attempt 递增与 escalation 的用例（`:234` / `:315` / `:202`），它们**现在全绿**。原因是它们喂进去的 runId 是：
+
+```
+"--run-id", "fm-res-1786"        (:214)
+assert.equal(rec.runId, "fm-gap-x-17866", …)   (:293)
+```
+
+**全是旧的 `fm-*` per-dispatch 形态**，而生产喂的是 `wk-prod-<epoch>`。⇒ 这些测试**结构上不可能**发现本缺陷：它们把「runId 每次 dispatch 都变」当作 fixture 常量钉住了，正是前提本身。
+
+⊢ 硬规则④推论三（只能被 fixture 满足的判据不是测量）＋ 4c（判据的量须穿过中间层）的合体。**这也是为什么「测试全绿 + 任务 done」与「缺陷正在生产上流血」可以同时为真。**
+
 ### 三、闩锁范围（立案时实测，全量非采样）
 
 当时的 `runId=wk-prod-1788717081` 下有 retry 记录的任务 **7** 条，其中 **5 条已闩锁**（prior ≥ 2 ⇒ 下一次 ff 当场升级）：
@@ -96,6 +109,7 @@ gap-meta-divergence-recommendation-recurrence-invisible    prior=4
 
 - [ ] 计数键每次 dispatch 都变：断言同一任务在**两次独立派发**下 `attempt` 都从 1 起（⛔ 不得靠「重启驱动」制造这个效果——判据须在同一驱动进程/同一 `runId` 下成立，硬规则 4c：判据要穿过中间层）。
 - [ ] 能取假（预算足额）：构造一个已有 2 条历史失败记录的任务，在**新派发**下第 1 次 ff 失败**不**触发 escalation；把计数键改回 runId ⇒ 该断言立即变红。两个方向都断言。
+- [ ] **测试喂的是生产形态的 runId**：`plugin/test/fan-in-ff-merge.test.mjs` 中所有 attempt/escalation 相关用例改用 `wk-prod-<epoch>` 形态（生产实际形态），⛔ 不再用 `fm-*`；并断言「同一 `wk-prod-*` 下的两次独立派发互不累计」——**这一条在改动前必然为红**（它正是当年那些用例结构上测不到的东西）。
 - [ ] 真实活锁仍被拦：同一次派发内连续 3 次 ff 失败**仍**触发 escalation（⛔ 不得为了让上一条通过而废掉防活锁本身）。
 - [ ] 载体可核对：retry 记录里带上新计数键，使「这一条属于哪次派发」可由一条命令读出；⛔ 不得只在内存里算而载体上看不出来。
 - [ ] 立案时的 5 条闩锁任务在改动后不再处于「下一次即升级」状态，由一条读载体的命令给出前后对照读数（⛔ 不是断言，是读数）。
