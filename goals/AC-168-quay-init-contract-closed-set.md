@@ -35,7 +35,7 @@ origin: >
 
   路径，救不了 CLI/cron/OS anchor。正本 SPEC §6b。
 evidence:
-  at: 2026-09-07T01:12:31.524Z
+  at: 2026-09-07T01:13:35.540Z
   verdict: fail
   reading: acceptance failed (exit 1)
 ---
