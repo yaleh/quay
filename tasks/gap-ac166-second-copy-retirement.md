@@ -81,6 +81,8 @@ goal_ac: AC-166
 - plugin/scripts/select-static-checks-for-touches.ts（FAN_IN_ORCHESTRATION_FILES 移除 .claude 双副本条目）
 - plugin/scripts/task-file-bypass-check.ts（移除 .claude/workflows/fan-in-execute.js 双副本条目）
 - docs/analysis/quay-init-closure-ratchet.baseline.json（re-anchor，manager-tick-core 迁入 plugin/workflows）
+- plugin/test/select-tests-for-touches.test.mjs（spawnTestSh 加 QUAY_TEST_SKIP_QUAY_REFRESH，nested 选择 spawn 免 ~35s refresh）
+- scripts/test.sh（QUAY_TEST_SKIP_QUAY_REFRESH 跳过 worktree .quay refresh——nested 选择/冒烟 spawn 不付全量 refresh 成本）
 - plugin/scripts/select-tests-for-touches.ts（SKIP_DIRS 加 archive，归档测试不再入 scoped 选测集）
 - plugin/test/fan-in-materialize-check.test.mjs（.claude/workflows → plugin/workflows fixture 路径）
 - plugin/test/pool-quality-judge.test.mjs（workflow 路径 .claude/workflows → plugin/workflows）
