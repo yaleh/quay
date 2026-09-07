@@ -2,7 +2,7 @@
 id: gap-meta-driver-runtime
 title: restart stale resident promotion+worker drivers — both predate
   driver-filters.ts @ 8b230e7
-status: todo
+status: ready
 labels:
   - meta-driver
   - driver-candidate
