@@ -4,7 +4,7 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import type { Task, AdrRecord, Manifest, TaskDeleteResult, GoalRecord } from './abi.ts';
+import type { Task, AdrRecord, Manifest, TaskDeleteResult, GoalRecord, MetaRecord } from './abi.ts';
 
 export interface ConnectProviderOptions {
   command: string;
@@ -46,6 +46,9 @@ export interface ProviderClient {
   goalGet(id: string): Promise<GoalRecord>;
   goalWrite(patch: Record<string, unknown>): Promise<GoalRecord>;
   goalGate(id: string): Promise<unknown>;
+  metaList(filter?: Record<string, unknown>): Promise<MetaRecord[]>;
+  metaGet(id: string): Promise<MetaRecord>;
+  metaWrite(patch: Record<string, unknown>): Promise<MetaRecord>;
   manifest(): Promise<Manifest>;
   close(): Promise<void>;
 }
@@ -189,6 +192,28 @@ export async function connectProvider({ command, args, env, cwd }: ConnectProvid
     return r.structuredContent ?? null;
   }
 
+  // ── Meta ABI (separate object kind — message→meta-driver, answered on the same record). Same
+  // graceful-degradation contract as ADR/goal: metaList degrades to [] on isError so a meta-less
+  // provider renders cleanly; metaGet returns null on isError (mirrors goalGet); metaWrite throws
+  // (mirrors goalWrite).
+  async function metaList(filter: Record<string, unknown> = {}): Promise<MetaRecord[]> {
+    const r = await client.callTool({ name: "meta_list", arguments: filter });
+    if (r.isError) return [];
+    return (r.structuredContent as {metas?: MetaRecord[]})?.metas ?? [];
+  }
+
+  async function metaGet(id: string): Promise<MetaRecord> {
+    const r = await client.callTool({ name: "meta_get", arguments: { id } });
+    if (r.isError) return null as unknown as MetaRecord;
+    return (r.structuredContent as {meta?: MetaRecord})?.meta ?? null as unknown as MetaRecord;
+  }
+
+  async function metaWrite(patch: Record<string, unknown>): Promise<MetaRecord> {
+    const r = await client.callTool({ name: "meta_write", arguments: patch });
+    if (r.isError) throw new Error((r.content as Array<{text?: string}>)?.[0]?.text ?? "meta_write failed");
+    return (r.structuredContent as {meta?: MetaRecord})?.meta ?? null as unknown as MetaRecord;
+  }
+
   async function manifest(): Promise<Manifest> {
     const r = await client.readResource({ uri: "provider://manifest" });
     return JSON.parse((r.contents[0] as {text: string}).text) as Manifest;
@@ -198,5 +223,5 @@ export async function connectProvider({ command, args, env, cwd }: ConnectProvid
     await client.close();
   }
 
-  return { taskList, taskGet, taskWrite, taskDelete, taskCheck, adrList, adrGet, adrWrite, goalList, goalGet, goalWrite, goalGate, manifest, close };
+  return { taskList, taskGet, taskWrite, taskDelete, taskCheck, adrList, adrGet, adrWrite, goalList, goalGet, goalWrite, goalGate, metaList, metaGet, metaWrite, manifest, close };
 }

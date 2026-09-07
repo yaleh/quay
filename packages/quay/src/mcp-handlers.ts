@@ -683,6 +683,68 @@ export function registerAdrHandlers(
   );
 }
 
+export function registerMetaHandlers(
+  server: McpServer,
+  getClient: (id: string | undefined) => Promise<ConnectedProvider>
+): void {
+  // ── Meta tools — proxy the Provider's meta_list/meta_get/meta_write (separate object kind:
+  // message SENT TO the meta-driver, answered on the same record; proposed→answered lifecycle).
+  server.registerTool(
+    "meta_list",
+    {
+      description: "List META records (META-NNN) on an enabled Provider, optionally filtered by status. META records are a separate kind from tasks (message→meta-driver lifecycle: proposed→answered, the reply embedded on the same record).",
+      inputSchema: {
+        provider: z.string().optional(),
+        status: z.string().optional(),
+      },
+    },
+    async ({ provider, status }) => {
+      const { client } = await getClient(provider);
+      const metas = await client.metaList({ status });
+      return { content: [{ type: "text" as const, text: JSON.stringify(metas, null, 2) }], structuredContent: { metas } };
+    }
+  );
+
+  server.registerTool(
+    "meta_get",
+    {
+      description: "Get one META record by id (META-NNN) from an enabled Provider. Returns isError:true if not found or the Provider does not support META records.",
+      inputSchema: { provider: z.string().optional(), id: z.string() },
+    },
+    async ({ provider, id }) => {
+      const { client } = await getClient(provider);
+      const meta = await client.metaGet(id);
+      if (!meta) return { isError: true, content: [{ type: "text" as const, text: `no such META: ${id}` }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify(meta, null, 2) }], structuredContent: { meta } };
+    }
+  );
+
+  server.registerTool(
+    "meta_write",
+    {
+      description: "Write/patch one META record on an enabled Provider. status ∈ proposed|answered (never 'done'); `handler` defaults to meta-driver; `reply` embeds the answer on the same record. Returns isError:true on validation failure or if the Provider does not support META records.",
+      inputSchema: {
+        provider: z.string().optional(),
+        id: z.string(),
+        title: z.string().optional(),
+        status: z.string().optional(),
+        handler: z.string().optional(),
+        reply: z.string().optional(),
+        body: z.string().optional(),
+      },
+    },
+    async ({ provider, id, ...patch }) => {
+      const { client } = await getClient(provider);
+      try {
+        const meta = await client.metaWrite({ id, ...patch });
+        return { content: [{ type: "text" as const, text: JSON.stringify(meta, null, 2) }], structuredContent: { meta } };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }] };
+      }
+    }
+  );
+}
+
 export function registerConfigHandlers(
   server: McpServer,
   cfg: ReturnType<typeof loadConfig>
@@ -740,6 +802,7 @@ export function registerAllHandlers(
   registerGateHandlers(server, getClient, cfg);
   registerLifecycleHandlers(server, getClient, cfg);
   registerAdrHandlers(server, getClient);
+  registerMetaHandlers(server, getClient);
   registerActionHandlers(server, getClient, cfg);
   registerConfigHandlers(server, cfg);
 }

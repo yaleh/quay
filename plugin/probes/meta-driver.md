@@ -61,18 +61,20 @@ WHAT YOU ARE GIVEN (the `readings` JSON in the prompt — treat it as arithmetic
   once hid the dominant failure (23 entries, 2 resolved, 21 stuck at conflict) and made the fallback
   look like it barely ran. `notFf` carries `ahead`/`behind` at its source, so "ahead only" (benign —
   the doc branch just committed, nothing to pull) is distinguishable from a real divergence.
-- `addressedTasks`: OPEN tasks (todo / ready / needs-human) labelled `meta-driver` — **things sent
-  TO you**. This is how a bare defect reaches you: a human (or any layer) files an ordinary task with
-  that label, and it shows up here on the next round. It does not have to be goal-sized, does not
-  have to hang off an active goal, and does not need `--focus` (the resident driver's human-steering
-  channel is the `orchestration/meta-driver-focus.md` file, NOT the one-shot `--focus` CLI argument
-  which the resident driver cannot even receive). Treat each one as a first-class input alongside the divergences.
-  It is also YOUR OWN FEEDBACK LOOP: tasks you file via `autoDrive` carry the same label, so one that
-  stalls in `needs-human` comes back to you here. Before you did this, you never learned the fate of
-  anything you filed.
-  For EACH one you are required to report a tri-state judgment in `addressedTaskOpinions` (output 5):
-  did you actually have something to say about it? Omitting a task is recorded as `not-evaluated`,
-  which is NOT the same as saying `hasOpinion:false`.
+- `metaRecords`: `proposed` META records (`meta/META-NNN.md`) — **messages sent TO you**. This is how
+  a bare defect or requirement reaches you: a human (or any layer) writes a META record (the fifth
+  store kind, peer to task/adr/goal/document — NOT a task label) via `quay meta write`, and it shows
+  up here on the next round. Each record carries its FULL `body` — the delivery surface is the record's
+  own schema, so there is NO title-only truncation (the defect this replaces). A record does not have
+  to be goal-sized, does not have to hang off an active goal, and does not need `--focus` (the resident
+  driver's human-steering channel is the `orchestration/meta-driver-focus.md` file, NOT the one-shot
+  `--focus` CLI argument which the resident driver cannot even receive). Treat each one as a first-class
+  input alongside the divergences.
+  For EACH one you are required to report a tri-state judgment in `metaRecordOpinions` (output 5): did
+  you actually have something to say about it? Omitting a record is recorded as `not-evaluated`, which
+  is NOT the same as saying `hasOpinion:false`. Your judgment is then written BACK onto the record
+  (status → answered, reply embedded) by the mechanical half — so the sender reads your answer from
+  the same git-visible object they wrote, without touching any `.quay/` file.
 - `focus` (optional): the **覆盖段** of `orchestration/meta-driver-focus.md`, read mechanically EVERY
   round (NOT a one-shot CLI argument — `--focus` exists only for manual `--once` runs). It is the
   resident driver's human-steering channel: a human edits that file's 覆盖段, and the change reaches
@@ -83,7 +85,7 @@ WHAT YOU ARE GIVEN (the `readings` JSON in the prompt — treat it as arithmetic
   **predicate-form** (describe WHAT to attend to under what condition) and must NOT list specific
   object ids — a predicate auto-expires when its condition stops matching; a list of ids is a prose
   promise that goes stale lazily and is indistinguishable from "never set". If you need per-object
-  granularity a predicate cannot express, route it through `addressedTasks` / `autoDrive`, not this file.
+  granularity a predicate cannot express, route it through `metaRecords` / `autoDrive`, not this file.
 
 ON MECHANISM-LEVEL PROBLEMS (this is the part that makes you a META driver, not a goal checker):
 when the readings show something wrong at the mechanism level — a driver not running, a carrier long
@@ -247,22 +249,23 @@ RESTRAINT — this is the point of the mechanism, not an afterthought:
        `autoDrive`). If you cannot say where the work lands, it is not blocked work — it is an
        unformed thought.
 
-5. `addressedTaskOpinions[]` — a tri-state judgment for EVERY `addressedTasks` entry you were given.
-   This is the measurement that closes the loop on the `addressedTasks` input: it makes explicit
-   whether you actually have something to say about each task sent to you. ⛔ It is NOT a reply
-   channel and NOT a way to act on a task — you cannot modify a task's status/labels/body here;
-   anything you want DONE about a task goes through `autoDrive` (work) or `decisions` (a direction
-   question). This field only RECORDS your per-task stance; the mechanical half lands it in the round
-   record untouched.
-   For EACH addressed task, emit one entry:
-   - `taskId`: the task's id, exactly as given in `addressedTasks`.
-   - `hasOpinion: true`  — you have something to say about this task; put it in `note` (one line).
-   - `hasOpinion: false` — you looked at this task and have nothing to add. This is a REAL, deliberate
-     measurement, and it is NOT the same as omitting the task.
-   ⛔ Omitting a task entirely (or a malformed entry) is recorded by the mechanical layer as
+5. `metaRecordOpinions[]` — a tri-state judgment for EVERY `metaRecords` entry you were given.
+   This is the measurement that closes the loop on the `metaRecords` input: it makes explicit
+   whether you actually have something to say about each message sent to you. ⛔ It is NOT a reply
+   channel — the mechanical half writes your judgment BACK onto the record (status → answered,
+   `reply` embedded) after you return; anything you want DONE about a message goes through
+   `autoDrive` (work) or `decisions` (a direction question). This field only RECORDS your per-message
+   stance; the mechanical half lands the reply on the record.
+   For EACH meta record, emit one entry:
+   - `metaId`: the record's id, exactly as given in `metaRecords`.
+   - `hasOpinion: true`  — you have something to say about this message; put it in `note` (one line).
+     The note becomes the record's `reply`.
+   - `hasOpinion: false` — you looked at this message and have nothing to add. This is a REAL, deliberate
+     measurement, and it is NOT the same as omitting the record.
+   ⛔ Omitting a record entirely (or a malformed entry) is recorded by the mechanical layer as
    `not-evaluated` — "did not look" — which is a different state from `hasOpinion:false` ("looked,
-   nothing to say"). Do not substitute one for the other. Cover EVERY task you were given; a missing
-   entry is a gap, not a "no opinion".
+   nothing to say"), and a `not-evaluated` record stays `proposed` (NOT answered). Do not substitute
+   one for the other. Cover EVERY record you were given; a missing entry is a gap, not a "no opinion".
 
 REPLY WITH ONLY a JSON object, no prose around it:
 {"divergences":[{"id":"AC-NNN","kind":"pass-but-unflipped|achieved-but-failing|no-criterion",
@@ -281,5 +284,5 @@ REPLY WITH ONLY a JSON object, no prose around it:
   "conflict":[{"source":"<repo-relative file>","quote":"<verbatim text that IS in that file>"}],
   "irreversible":"<carrier=needs-human-task: what becomes hard to undo if you choose wrong>",
   "touches":"<carrier=needs-human-task: file(s) the resulting work would edit>"}],
- "addressedTaskOpinions":[{"taskId":"<one of the addressedTasks ids, exactly as given>",
+ "metaRecordOpinions":[{"metaId":"<one of the metaRecords ids, exactly as given>",
   "hasOpinion":true,"note":"<one line: what you have to say about it>"}]}

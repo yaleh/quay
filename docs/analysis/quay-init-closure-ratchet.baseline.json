@@ -1,7 +1,7 @@
 {
   "files": 133,
-  "bytes": 3851509,
-  "fingerprint": "6c97d480edf644b37bcda40976359506320fb4aee440610b747e309bdcb5fe40",
+  "bytes": 3852143,
+  "fingerprint": "6ef353f877887b7f23e0fbcae49258efbbe84b624905ef1a41b52f81e10ac431",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
@@ -65,7 +65,7 @@
     },
     {
       "rel": "plugin/probes/meta-driver.md",
-      "sha": "739d4e25563129bad7e33200642aac9ede1ebea4a6ae372acc10d8a6326c5d04"
+      "sha": "b3f222f96e3506cbb76fe1b42070c1e9e2a2e26eaf2ca619fedbe8f29a5dce95"
     },
     {
       "rel": "plugin/probes/self-validation.md",
@@ -105,7 +105,7 @@
     },
     {
       "rel": "plugin/scripts/capability-catalog.sh",
-      "sha": "447ad71cd033ac5d8ef8b83279746f8c6d375d3e6c56031ab2bc6bc260ed7dcc"
+      "sha": "fc05c175d37883692fb486136862f48356f71232040960aec44496fa35c57aad"
     },
     {
       "rel": "plugin/scripts/checker-io.ts",

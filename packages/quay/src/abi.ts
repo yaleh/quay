@@ -73,6 +73,23 @@ export interface GoalRecord {
 /** All valid goal-status values (draft → active → achieved / superseded / retired). */
 export const GOAL_STATUSES: readonly string[] = ['draft', 'active', 'achieved', 'superseded', 'retired'];
 
+// ── Meta view-model (gap-meta-records-should-be-a-first-class-store-kind-not-a-task-label): the
+//    meta store is PROVIDER-BACKED like the goal store — Core keeps only this view-model + the
+//    delegation shim. A META record is a message SENT TO the meta-driver, whose answer (`reply`)
+//    is embedded on the SAME record (proposed → answered lifecycle, never done/achieved/accepted).
+export interface MetaRecord {
+  id: string;
+  title: string;
+  status: string;
+  handler: string;
+  reply?: string | null;
+  body: string;
+  updatedAt?: number;
+}
+
+/** All valid meta-status values (proposed → answered). */
+export const META_STATUSES: readonly string[] = ['proposed', 'answered'];
+
 /** task_delete result (gap-abi-missing-commit-delete-dependson-primitives): the native provider's
  *  delete returns an honest, distinguishable shape — `ok:false` (not-found) is a normal result the
  *  Core surface maps to isError, never a silent no-op. */

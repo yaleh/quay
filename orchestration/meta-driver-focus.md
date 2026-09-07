@@ -13,7 +13,7 @@
 覆盖段无具体方向时生效——meta-driver 按默认行为运行：
 
 - 逐个审 divergence（pass-but-unflipped / achieved-but-failing / no-criterion），给出解读与建议。
-- 逐个审 `addressedTasks`（寄给它的任务），给出逐条三态判定。
+- 逐个审 `metaRecords`（寄给它的 META 记录），给出逐条三态判定。
 - 覆盖段无具体方向时，**不**因此改变判读节奏（内容不变 ⇒ 摘要不变 ⇒ 不重复判读）。
 
 ## 覆盖段

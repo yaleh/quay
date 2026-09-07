@@ -53,12 +53,14 @@ import {
   writeState,
   quoteIsVerbatim,
   carrierGate,
-  collectAddressedTasks,
-  resolveAddressedTaskOpinions,
-  parseFrontmatterLabels,
+  collectMetaRecords,
+  resolveMetaRecordOpinions,
+  metaReplyText,
+  writeMetaReplies,
   existingPaths,
   renderHumanCallBody,
 } from '../scripts/meta-driver.ts';
+import { createMetaStore } from '../../packages/quay/src/meta-store.ts';
 
 // 脚本根（goal-store.ts 从这里取）——数据根在各测试里另给临时目录。
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -343,7 +345,7 @@ const mkReadings = (verdict, noise = 'n1') => ({
   // 生态读数带上每轮都变的量（staleSecs/记录数），用来证明它们【不】进摘要。
   drivers: [{ kind: 'promotion', running: true, supervisorAlive: true, driverAlive: true, carrierRecords: noise.length, carrierLastTs: null, staleSecs: noise.length }],
   syncHealth: { window: 200, ffSynced: 1, notFf: 2, ffError: 0, semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0, lastEvent: 'doc-develop-sync-not-ff', lastTs: null },
-  addressedTasks: [],
+  metaRecords: [],
   inertCheckers: [],
   focus: null,
 });
@@ -422,7 +424,7 @@ test('readFocusFile: 覆盖段内容改变后下一次调用取到的 focus 随�
     const makeFile = (override) => [
       '# t',
       '## 默认段',
-      '默认行为：逐个审 divergence 与 addressedTasks。',
+      '默认行为：逐个审 divergence 与 metaRecords。',
       '## 覆盖段',
       override,
       '## 维护者字段',
@@ -490,7 +492,7 @@ test('shouldJudge: 覆盖段非空且未变化 ⇒ 不判读（文件形态不�
 
 // ── 自动驱动通道的机械前置 ───────────────────────────────────────────────────
 const ecoReadings = {
-  goals: [], criteria: [], divergences: [], addressedTasks: [], focus: null,
+  goals: [], criteria: [], divergences: [], metaRecords: [], focus: null,
   drivers: [
     { kind: 'outer', running: false, supervisorAlive: false, driverAlive: false, carrierRecords: 0, carrierLastTs: null, staleSecs: null },
     { kind: 'promotion', running: true, supervisorAlive: true, driverAlive: true, carrierRecords: 9, carrierLastTs: null, staleSecs: 5 },
@@ -929,7 +931,7 @@ test('collectInertCheckers: 逐条枚举 notEvaluatedCheckers 的名字；字段
 // 负控制：惰性守卫的名字必须【进摘要】——否则一个新出现的惰性守卫不改变摘要 ⇒ 语义半永不被唤醒。
 test('readingsDigest: inertCheckers 名字进摘要——某个 guard 从在→不在/不在→在都改变摘要', () => {
   const mk = (inert) => ({
-    goals: [], criteria: [], divergences: [], addressedTasks: [], inertCheckers: inert, focus: null,
+    goals: [], criteria: [], divergences: [], metaRecords: [], inertCheckers: inert, focus: null,
     drivers: [],
     syncHealth: { window: 200, ffSynced: 0, notFf: 0, ffError: 0, semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0, lastEvent: null, lastTs: null },
   });
@@ -943,7 +945,7 @@ test('readingsDigest: inertCheckers 名字进摘要——某个 guard 从在→�
 // 负控制：摘要必须对【每轮都变的量】免疫——staleSecs/记录数每轮都不同，若进摘要则闸失效。
 test('readingsDigest: 不随 staleSecs/carrierRecords 变（否则变化检测恒为真）', () => {
   const mk = (stale, records) => ({
-    goals: [], criteria: [], divergences: [], addressedTasks: [], inertCheckers: [], focus: null,
+    goals: [], criteria: [], divergences: [], metaRecords: [], inertCheckers: [], focus: null,
     drivers: [{ kind: 'promotion', running: true, supervisorAlive: true, driverAlive: true, carrierRecords: records, carrierLastTs: null, staleSecs: stale }],
     syncHealth: { window: 200, ffSynced: 1, notFf: 2, ffError: 0, semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0, lastEvent: 'doc-develop-sync-not-ff', lastTs: null },
   });
@@ -1083,118 +1085,126 @@ test('carrierGate: 无数量背压——连开两条合格的 human-call 都必�
   assert.equal(carrierGate(root, { ...good, title: '另一个真实冲突' }).ok, true);
 });
 
-test('parseFrontmatterLabels: 块列表与内联两种写法都认；缩进列表结束即停', () => {
-  assert.deepEqual(parseFrontmatterLabels('id: x\nlabels:\n  - gap\n  - meta-driver\nstatus: todo\n'), ['gap', 'meta-driver']);
-  assert.deepEqual(parseFrontmatterLabels('labels: [gap, meta-driver]\n'), ['gap', 'meta-driver']);
-  assert.deepEqual(parseFrontmatterLabels('id: x\nstatus: todo\n'), [], '没有 labels 键 ⇒ 空，⛔ 不抛');
-  // 取假一侧：列表结束后的键不得被吃进来
-  assert.deepEqual(parseFrontmatterLabels('labels:\n  - gap\nparent: null\n'), ['gap']);
-});
-
-test('collectAddressedTasks: 只收带标签的【未关闭】任务（裸缺陷入口 + 自身闭环）', (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-addr-'));
+test('collectMetaRecords: 只收 proposed 的 META 记录（第五种 store kind），body 完整进读数', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-meta-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  fs.mkdirSync(path.join(root, 'tasks'), { recursive: true });
-  const w = (id, status, labels) => fs.writeFileSync(path.join(root, 'tasks', `${id}.md`),
-    `---\nid: ${id}\ntitle: t-${id}\nstatus: ${status}\nlabels:\n${labels.map((l) => `  - ${l}`).join('\n')}\n---\n正文\n`, 'utf8');
-  w('a', 'todo', ['gap', 'meta-driver']);
-  w('b', 'needs-human', ['meta-driver']);      // 自身闭环：它自己立的任务掉进 needs-human 也要回流
-  w('c', 'done', ['meta-driver']);             // 已关闭 ⇒ 不收
-  w('d', 'ready', ['gap']);                    // 无标签 ⇒ 不收
-  const got = collectAddressedTasks(root).map((x) => `${x.id}:${x.status}`).sort();
-  assert.deepEqual(got, ['a:todo', 'b:needs-human']);
-  assert.deepEqual(collectAddressedTasks(root, 'meta-human-call'), [], '别的标签 ⇒ 空');
+  const store = createMetaStore(path.join(root, 'meta'));
+  store.write('META-001', { title: 'a', body: '正文 body 完整内容 001' });
+  store.write('META-002', { title: 'b', body: '正文 002' });
+  store.write('META-002', { status: 'answered', reply: '已答复' }); // 翻 answered ⇒ 不收
+  store.write('META-003', { title: 'c', handler: 'someone-else', body: '别的 handler' }); // 仍 proposed ⇒ 收
+  const got = collectMetaRecords(root).map((x) => `${x.id}:${x.status}`).sort();
+  assert.deepEqual(got, ['META-001:proposed', 'META-003:proposed'], '只收 proposed；answered 不收');
+  const one = collectMetaRecords(root).find((x) => x.id === 'META-001');
+  assert.equal(one.body, '正文 body 完整内容 001', '正文【完整】进读数，⛔ 不存在标题截断');
+  assert.equal(one.handler, 'meta-driver', 'handler 缺省 = meta-driver');
 });
 
-// ── addressedTaskOpinions：有入口无出口的读数，补上逐条三态判定（measurement，⛔ 非 responses 通道）──
-// gap-meta-addressedtasks-input-without-output-channel：addressedTasks 是建了入口没有出口的通道——
-// 四条输出（divergences/proposals/autoDrive/decisions）没有一条能「回应一条被点名的 task」，于是
-// 「0 次响应」是结构上不可能非零的量（无通道 ⇒ 恒零，硬规则 4）。本任务不建 responses[]，只补测量：
-// 对每一条 addressedTask 落一个三态（有意见/无意见/未评估），用真实比例决定通道建不建。
+test('collectMetaRecords: meta 目录不存在 ⇒ 空数组（⛔ 不抛、不当"没有消息"与"读失败"混淆）', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-nometa-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  assert.deepEqual(collectMetaRecords(root), []);
+});
 
-const addrTask = (id, status = 'ready') => ({ id, status, title: `t-${id}`, labels: ['meta-driver'] });
+// ── metaRecordOpinions：把逐条三态判定与 metaRecords 对齐（measurement）──
+const addrMsg = (id) => ({ id, status: 'proposed', title: `t-${id}`, handler: 'meta-driver', reply: null, body: 'b' });
 
-test('resolveAddressedTaskOpinions: 逐条可枚举——每一条 addressedTask 各得 taskId+三态，⛔ 不是总数/布尔', () => {
-  const tasks = [addrTask('gap-a'), addrTask('gap-b'), addrTask('gap-c')];
-  const got = resolveAddressedTaskOpinions(tasks, [
-    { taskId: 'gap-a', hasOpinion: true, note: 'x' },
-    { taskId: 'gap-b', hasOpinion: false },
+test('resolveMetaRecordOpinions: 逐条可枚举——每一条 meta 记录各得 metaId+三态，⛔ 不是总数/布尔', () => {
+  const msgs = [addrMsg('META-001'), addrMsg('META-002'), addrMsg('META-003')];
+  const got = resolveMetaRecordOpinions(msgs, [
+    { metaId: 'META-001', hasOpinion: true, note: 'x' },
+    { metaId: 'META-002', hasOpinion: false },
   ]);
-  assert.equal(got.length, 3, '判定条数必须 == addressedTasks 条数');
-  assert.deepEqual(got.map((g) => [g.taskId, g.opinion]), [
-    ['gap-a', 'has-opinion'],
-    ['gap-b', 'no-opinion'],
-    ['gap-c', 'not-evaluated'],
+  assert.equal(got.length, 3, '判定条数必须 == metaRecords 条数');
+  assert.deepEqual(got.map((g) => [g.metaId, g.opinion]), [
+    ['META-001', 'has-opinion'],
+    ['META-002', 'no-opinion'],
+    ['META-003', 'not-evaluated'],
   ], '少答的那条必须落「未评估」，⛔ 不是被静默丢弃，也不是「无意见」');
 });
 
-test('resolveAddressedTaskOpinions: 三态可区分且能取假——三个样本缺一不可', () => {
-  const tasks = [addrTask('gap-a')];
-  // 有意见
-  assert.equal(resolveAddressedTaskOpinions(tasks, [{ taskId: 'gap-a', hasOpinion: true, note: 'n' }])[0].opinion, 'has-opinion');
-  // 无意见（probe 显式给出 hasOpinion:false —— 看过且无话可说，是真测量）
-  assert.equal(resolveAddressedTaskOpinions(tasks, [{ taskId: 'gap-a', hasOpinion: false }])[0].opinion, 'no-opinion');
-  // 未评估（probe 完全没提到这条 task —— ⛔ 不得落成「无意见」，硬规则 3b）
-  assert.equal(resolveAddressedTaskOpinions(tasks, [])[0].opinion, 'not-evaluated');
-  // 未评估（形状读不懂 —— hasOpinion 非布尔 ⇒ 读不懂 ≠ 合格，也 ≠ 无意见）
-  assert.equal(resolveAddressedTaskOpinions(tasks, [{ taskId: 'gap-a', hasOpinion: 'yes' }])[0].opinion, 'not-evaluated');
+test('resolveMetaRecordOpinions: 三态可区分且能取假——三个样本缺一不可', () => {
+  const msgs = [addrMsg('META-001')];
+  assert.equal(resolveMetaRecordOpinions(msgs, [{ metaId: 'META-001', hasOpinion: true, note: 'n' }])[0].opinion, 'has-opinion');
+  assert.equal(resolveMetaRecordOpinions(msgs, [{ metaId: 'META-001', hasOpinion: false }])[0].opinion, 'no-opinion');
+  assert.equal(resolveMetaRecordOpinions(msgs, [])[0].opinion, 'not-evaluated');
+  assert.equal(resolveMetaRecordOpinions(msgs, [{ metaId: 'META-001', hasOpinion: 'yes' }])[0].opinion, 'not-evaluated');
 });
 
-test('resolveAddressedTaskOpinions: 覆盖完整性——判定条数恒等于 addressedTasks 条数（负控制：probe 只答部分）', () => {
-  const tasks = [addrTask('gap-a'), addrTask('gap-b'), addrTask('gap-c')];
-  // probe 只答了 1/3 ⇒ 仍产出 3 条判定，未答的落「未评估」
-  const got = resolveAddressedTaskOpinions(tasks, [{ taskId: 'gap-a', hasOpinion: false }]);
-  assert.equal(got.length, tasks.length);
+test('resolveMetaRecordOpinions: 覆盖完整性——判定条数恒等于 metaRecords 条数（负控制：probe 只答部分）', () => {
+  const msgs = [addrMsg('META-001'), addrMsg('META-002'), addrMsg('META-003')];
+  const got = resolveMetaRecordOpinions(msgs, [{ metaId: 'META-001', hasOpinion: false }]);
+  assert.equal(got.length, msgs.length);
   assert.deepEqual(got.map((g) => g.opinion), ['no-opinion', 'not-evaluated', 'not-evaluated']);
-  // probe 多答了不存在的 task ⇒ 丢弃，不扩出一个不存在的对象（判定只覆盖真实输入集）
-  const extra = resolveAddressedTaskOpinions(tasks, [{ taskId: 'gap-zzz', hasOpinion: true, note: 'x' }]);
-  assert.equal(extra.length, tasks.length);
+  const extra = resolveMetaRecordOpinions(msgs, [{ metaId: 'META-999', hasOpinion: true, note: 'x' }]);
   assert.ok(extra.every((g) => g.opinion === 'not-evaluated'));
-  // 同一 taskId 出现多条 ⇒ 取第一条（不猜测、不合并）
-  const dup = resolveAddressedTaskOpinions([addrTask('gap-a')], [
-    { taskId: 'gap-a', hasOpinion: true, note: 'first' },
-    { taskId: 'gap-a', hasOpinion: false },
+  const dup = resolveMetaRecordOpinions([addrMsg('META-001')], [
+    { metaId: 'META-001', hasOpinion: true, note: 'first' },
+    { metaId: 'META-001', hasOpinion: false },
   ]);
   assert.equal(dup[0].opinion, 'has-opinion');
   assert.equal(dup[0].note, 'first');
 });
 
-test('parseProbeOutput: addressedTaskOpinions 被解析；缺字段/形状不对的条目被丢弃（⛔ 不凑成合格）', () => {
+test('metaReplyText: 三态 → 答复文本（⛔ 未评估 ⇒ null 不答复）', () => {
+  assert.equal(metaReplyText({ metaId: 'META-001', opinion: 'has-opinion', note: 'n' }), 'n');
+  assert.equal(metaReplyText({ metaId: 'META-001', opinion: 'has-opinion', note: null }), '(meta-driver 有意见，未附注)');
+  assert.equal(metaReplyText({ metaId: 'META-001', opinion: 'no-opinion', note: null }), '(meta-driver 无意见)');
+  assert.equal(metaReplyText({ metaId: 'META-001', opinion: 'not-evaluated', note: null }), null);
+});
+
+test('writeMetaReplies: 答复内嵌到同一条记录上、翻 answered；未评估留 proposed（真 store）', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-reply-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const store = createMetaStore(path.join(root, 'meta'));
+  store.write('META-001', { title: 'a', body: '正文' });
+  store.write('META-002', { title: 'b', body: '正文' });
+  const judgments = [
+    { metaId: 'META-001', opinion: 'has-opinion', note: '答复 A' },
+    { metaId: 'META-002', opinion: 'not-evaluated', note: null },
+  ];
+  const out = writeMetaReplies(root, judgments);
+  assert.deepEqual(out.map((o) => [o.metaId, o.ok]), [['META-001', true], ['META-002', false]]);
+  const answered = store.get('META-001');
+  assert.equal(answered.status, 'answered', '有意见 ⇒ 翻 answered');
+  assert.equal(answered.reply, '答复 A', '答复内嵌在同一条记录');
+  const still = store.get('META-002');
+  assert.equal(still.status, 'proposed', '未评估 ⇒ 留 proposed 不答复');
+  assert.equal(still.reply, null);
+});
+
+test('parseProbeOutput: metaRecordOpinions 被解析；缺字段/形状不对的条目被丢弃（⛔ 不凑成合格）', () => {
   const out = parseProbeOutput(JSON.stringify({
     divergences: [], proposals: [], autoDrive: [], decisions: [],
-    addressedTaskOpinions: [
-      { taskId: 'gap-a', hasOpinion: true, note: 'x' },
-      { taskId: 'gap-b', hasOpinion: false },
-      { taskId: '' },                        // taskId 空 ⇒ 丢
-      { hasOpinion: true },                  // 缺 taskId ⇒ 丢
-      { taskId: 'gap-c', hasOpinion: 'yes' }, // hasOpinion 非布尔 ⇒ 丢
-      'not-an-object',                        // 形状不对 ⇒ 丢
+    metaRecordOpinions: [
+      { metaId: 'META-001', hasOpinion: true, note: 'x' },
+      { metaId: 'META-002', hasOpinion: false },
+      { metaId: '' },                          // metaId 空 ⇒ 丢
+      { hasOpinion: true },                    // 缺 metaId ⇒ 丢
+      { metaId: 'META-003', hasOpinion: 'yes' }, // hasOpinion 非布尔 ⇒ 丢
+      'not-an-object',                          // 形状不对 ⇒ 丢
     ],
   }));
-  assert.equal(out.addressedTaskOpinions.length, 2, '只留形状合格的条目');
-  assert.deepEqual(out.addressedTaskOpinions.map((o) => o.taskId), ['gap-a', 'gap-b']);
+  assert.equal(out.metaRecordOpinions.length, 2, '只留形状合格的条目');
+  assert.deepEqual(out.metaRecordOpinions.map((o) => o.metaId), ['META-001', 'META-002']);
 });
 
 // 负控制：判定不进 readingsDigest——它由 probe 输出派生、每轮可变，进摘要会让变化检测闸恒为真。
-test('readingsDigest: addressedTaskOpinions 不进摘要——仅判定变化时摘要不变', () => {
+test('readingsDigest: metaRecordOpinions 不进摘要——仅判定变化时摘要不变', () => {
   const base = mkReadings('pass', 'n1');
   const a = readingsDigest(base);
-  const withOpinion = { ...base, addressedTaskOpinions: [{ taskId: 'gap-x', opinion: 'has-opinion', note: null }] };
+  const withOpinion = { ...base, metaRecordOpinions: [{ metaId: 'META-001', opinion: 'has-opinion', note: null }] };
   const b = readingsDigest(withOpinion);
   assert.equal(a, b, '仅判定变化不得改变摘要');
 });
 
-// 单一处理者不变：逐条判定是纯函数，⛔ 不写任何 task 文件（task 的处理者仍是 promotion→worker）。
-test('resolveAddressedTaskOpinions: 纯判定——不改写 task 文件、不改 status/labels', (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-opinion-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  fs.mkdirSync(path.join(root, 'tasks'), { recursive: true });
-  const taskFile = '---\nid: gap-x\nstatus: ready\ntitle: t\nlabels:\n  - meta-driver\n---\n正文\n';
-  fs.writeFileSync(path.join(root, 'tasks', 'gap-x.md'), taskFile, 'utf8');
-  const tasks = collectAddressedTasks(root);  // 真实读一遍，拿到输入
-  const got = resolveAddressedTaskOpinions(tasks, [{ taskId: 'gap-x', hasOpinion: true, note: 'n' }]);
-  assert.equal(got.length, 1);
-  assert.equal(fs.readFileSync(path.join(root, 'tasks', 'gap-x.md'), 'utf8'), taskFile, 'task 文件不得被改写');
+// 消息进摘要：新 META 记录出现 ⇒ 摘要变 ⇒ 触发判读（入口在定时轮里必须有效）。
+test('readingsDigest: metaRecords 进摘要——新消息改变摘要', () => {
+  const base = mkReadings('pass', 'n1');
+  const a = readingsDigest(base);
+  const withMsg = { ...base, metaRecords: [addrMsg('META-001')] };
+  const b = readingsDigest(withMsg);
+  assert.notEqual(a, b, '新消息必须改变摘要');
 });
 
 test('existingPaths: 只留【真实存在】的（目录也算——前瞻性 GOAL 可点名目录）', (t) => {
