@@ -2,7 +2,7 @@
 id: gap-meta-goal-supervisor
 title: goal driver (kind=goal) supervisor+driver dead — restore the goal store's
   resident consumer and its keep-alive path
-status: todo
+status: ready
 labels:
   - meta-driver
   - driver-candidate
