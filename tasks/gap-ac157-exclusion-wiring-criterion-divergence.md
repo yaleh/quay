@@ -2,7 +2,7 @@
 id: gap-ac157-exclusion-wiring-criterion-divergence
 title: AC157 判据仍红——两个排除面（runtime-usage-inventory.ts / scripts/test.sh）非注释行无字面
   archive/ 引用
-status: todo
+status: ready
 labels:
   - gap
 parent: null
