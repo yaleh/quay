@@ -17,11 +17,11 @@ AC-184 fails: a resident promotion/worker driver predates driver-filters.ts's la
 涉及机制关键词：`driver-source-refresh`（立案前已搜既有任务，无人认领）。
 
 ## AC（draft）
-- [ ] `node --experimental-strip-types --test plugin/test/driver-runtime.test.mjs && grep -qE 'respawn|refresh|mtime' plugin/test/driver-runtime.test.mjs` ⇒ A driver-runtime test proves the supervisor respawns the driver when driver-filters.ts advances past the running driver, so resident drivers self-refresh and AC-184 stops failing after every commit.
+- [x] `node --experimental-strip-types --test plugin/test/driver-runtime.test.mjs && grep -qE 'respawn|refresh|mtime' plugin/test/driver-runtime.test.mjs` ⇒ A driver-runtime test proves the supervisor respawns the driver when driver-filters.ts advances past the running driver, so resident drivers self-refresh and AC-184 stops failing after every commit.
 
 ## DoD（draft）
-- [ ] 上面的判据实跑通过，且判据本身能取假（改坏实现时会红）
-- [ ] 若结论是「已有机制在管、只是失败」，则修那个机制，⛔ 不新建并行机制
+- [x] 上面的判据实跑通过，且判据本身能取假（改坏实现时会红）
+- [x] 若结论是「已有机制在管、只是失败」，则修那个机制，⛔ 不新建并行机制
 
 ## Touches
 - `plugin/scripts/driver-runtime.ts`
