@@ -29,12 +29,12 @@ goal_ac: AC-168
 
 ## AC
 
-- [ ] AC1（AC-168 criterion 逐字 exit 0）：`tmp=$(mktemp -d); node --experimental-strip-types packages/quay/bin/quay.ts init --root "$tmp" >/dev/null 2>&1 || { rm -rf "$tmp"; exit 1; }; produced=$(cd "$tmp" && find . -type f | sed 's|^\./||' | sort); rm -rf "$tmp"; allowed=$(sed -n '/QUAY-INIT-CLOSED-SET:BEGIN/,/QUAY-INIT-CLOSED-SET:END/p' orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md | sed -n 's/^- //p' | sort); [ -n "$allowed" ] || exit 1; comm -23 <(printf '%s\n' "$produced") <(printf '%s\n' "$allowed") | grep -q . && exit 1; exit 0`
-- [ ] AC2（块存在且非空）：`sed -n '/QUAY-INIT-CLOSED-SET:BEGIN/,/QUAY-INIT-CLOSED-SET:END/p' orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md | sed -n 's/^- //p' | grep -c '^\.'` ≥ 3 且退出 0
-- [ ] AC3（三承重产物在块内）：闭集块抽取结果含 `.quay/config.yml`、`.quay/profiles.yml`、`.claude/launch.settings.json` 三条（`grep -c` 各 == 1）
-- [ ] AC4（契约测试能取假）：`packages/quay/test/init.test.mjs` 新测试实跑 exit 0；负控制——临时从块删 `.quay/config.yml` 后该测试红（贴出两段实跑输出）
-- [ ] AC5（CLI init 测试绿）：`node --test packages/quay/test/init.test.mjs` exit 0
-- [ ] AC6（schema）：`node plugin/scripts/task-schema-check.ts tasks/gap-ac168-quay-init-contract-closed-set.md` exit 0
+- [x] AC1（AC-168 criterion 逐字 exit 0）：`tmp=$(mktemp -d); node --experimental-strip-types packages/quay/bin/quay.ts init --root "$tmp" >/dev/null 2>&1 || { rm -rf "$tmp"; exit 1; }; produced=$(cd "$tmp" && find . -type f | sed 's|^\./||' | sort); rm -rf "$tmp"; allowed=$(sed -n '/QUAY-INIT-CLOSED-SET:BEGIN/,/QUAY-INIT-CLOSED-SET:END/p' orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md | sed -n 's/^- //p' | sort); [ -n "$allowed" ] || exit 1; comm -23 <(printf '%s\n' "$produced") <(printf '%s\n' "$allowed") | grep -q . && exit 1; exit 0`
+- [x] AC2（块存在且非空）：`sed -n '/QUAY-INIT-CLOSED-SET:BEGIN/,/QUAY-INIT-CLOSED-SET:END/p' orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md | sed -n 's/^- //p' | grep -c '^\.'` ≥ 3 且退出 0
+- [x] AC3（三承重产物在块内）：闭集块抽取结果含 `.quay/config.yml`、`.quay/profiles.yml`、`.claude/launch.settings.json` 三条（`grep -c` 各 == 1）
+- [x] AC4（契约测试能取假）：`packages/quay/test/init.test.mjs` 新测试实跑 exit 0；负控制——临时从块删 `.quay/config.yml` 后该测试红（贴出两段实跑输出）
+- [x] AC5（CLI init 测试绿）：`node --test packages/quay/test/init.test.mjs` exit 0
+- [x] AC6（schema）：`node plugin/scripts/task-schema-check.ts tasks/gap-ac168-quay-init-contract-closed-set.md` exit 0
 
 ## DoD
 

@@ -1,7 +1,7 @@
 ---
 id: gap-ac188-three-long-term-guarantee-goal-acs
 title: 把 GOAL-007 三例的长期保证上移为 goal 层【在域】AC（各带非空 criterion、origin 点名来源 task）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -32,12 +32,12 @@ AC-188 判据当前取假（2026-09-07 实测：`goal-store.ts list` 里 in-scop
 
 ## AC
 
-- [ ] AC-188 判据 exit 0：`covered: 3/3`（三个来源 task id 各被一条在域 criterion AC 的 origin 点名）
-- [ ] 可证伪性（硬规则④）：立案时 AC-188 判据实测 `covered: 0/3`、exit 1（本任务已干跑确认）——完成前后读数不同，排除恒真
-- [ ] 三条新记录各满足 kind=criterion、status=active、goal=GOAL-007、criterion 非空≥20 字符、origin 点名来源 task id（`node packages/quay/src/goal-store.ts list --root .` 逐条读）
-- [ ] 自满足防护：三条 id ∈ {AC-192,AC-193,AC-194}，且 ∉ {GOAL-007,AC-188,AC-189,AC-190,AC-191}（判据按 id 排除 SELF）
-- [ ] 每条 criterion 可跑：`for i in 192 193 194; do node packages/quay/src/goal-store.ts gate AC-$i; done` 三条各打印 verdict（pass|fail），无一条报「no criterion defined」
-- [ ] `node packages/quay/bin/quay.ts task check gap-ac188-three-long-term-guarantee-goal-acs --json` 的 `missing` 为 `[]`
+- [x] AC-188 判据 exit 0：`covered: 3/3`（三个来源 task id 各被一条在域 criterion AC 的 origin 点名）
+- [x] 可证伪性（硬规则④）：立案时 AC-188 判据实测 `covered: 0/3`、exit 1（本任务已干跑确认）——完成前后读数不同，排除恒真
+- [x] 三条新记录各满足 kind=criterion、status=active、goal=GOAL-007、criterion 非空≥20 字符、origin 点名来源 task id（`node packages/quay/src/goal-store.ts list --root .` 逐条读）
+- [x] 自满足防护：三条 id ∈ {AC-192,AC-193,AC-194}，且 ∉ {GOAL-007,AC-188,AC-189,AC-190,AC-191}（判据按 id 排除 SELF）
+- [x] 每条 criterion 可跑：`for i in 192 193 194; do node packages/quay/src/goal-store.ts gate AC-$i; done` 三条各打印 verdict（pass|fail），无一条报「no criterion defined」
+- [x] `node packages/quay/bin/quay.ts task check gap-ac188-three-long-term-guarantee-goal-acs --json` 的 `missing` 为 `[]`
 
 ## DoD
 

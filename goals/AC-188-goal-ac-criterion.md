@@ -1,7 +1,7 @@
 ---
 id: AC-188
 title: 三例的长期保证已上移为 goal 层【在域】AC，且各带非空 criterion（能被每轮重评估）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-007
 criterion: |
