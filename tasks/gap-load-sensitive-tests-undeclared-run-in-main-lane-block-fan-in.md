@@ -1,7 +1,7 @@
 ---
 id: gap-load-sensitive-tests-undeclared-run-in-main-lane-block-fan-in
 title: 三个事实上负载敏感的测试文件未声明泳道，在满并发主泳道跑 ⇒ 8 轮 fan-in 全红且红集每轮漂移；单跑全绿，已声明的同类文件只红 1/8
-status: todo
+status: ready
 labels:
   - gap
   - defect
