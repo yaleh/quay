@@ -13,6 +13,10 @@ origin: >
   SPEC-plugin-lifecycle-single-bundle-2026-09-02.md
 
   §12e 表格逐行点名的落点。
+evidence:
+  at: 2026-09-07T01:09:38.599Z
+  verdict: pass
+  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：`l1-delivery-surface-check.ts --surface` 仍报 **6/6**（六类交付物全部有交付物 +
