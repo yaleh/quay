@@ -2,7 +2,7 @@
 id: gap-ac189-task-criterion-one-shot-spec
 title: 把「task 层判据是一次性的、需长期维持的保证上移 goal 层」写进 SPEC 正本（标题含 task 层判据、正文含 上移+goal
   层、≥200 非空白字符）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
