@@ -635,6 +635,14 @@ run_operational_checks() {
   # @static-tier full
   # @static-class operational
   run_checker "fan-in-workflow-retirement-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-workflow-retirement-check.ts" --root "${repo_root}"
+  echo "== goal-driver task-boundary check (DIR-131, gap-goal-driver-task-boundary-check) =="
+  # goal/task 职责边界防回归（DIR-131）：goal-driver.ts 不得出现 task 写路径调用点——task_write /
+  # lifecycle_promote / lifecycle_retreat / lifecycle_complete 或指向 tasks/ 的 fs.write*/writeFileSync。
+  # 按位置判定（屏蔽注释与字符串字面量，硬规则 2）；负控制由单测 + mutation case 钉住（硬规则 3b/4）。
+  # 单文件（goal-driver.ts）判定 ⇒ change（scoped 模式在 task Touches 命中 goal-driver.ts 时运行）。
+  # @static-tier change
+  # @static-object plugin/scripts/goal-driver.ts plugin/scripts/goal-driver-task-boundary-check.ts plugin/test/goal-driver-task-boundary-check.test.mjs plugin/scripts/checker-mutation-cases/goal-driver-task-boundary-check.sh
+  run_checker "goal-driver-task-boundary-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/goal-driver-task-boundary-check.ts" --root "${repo_root}"
   echo "== dispatch-record fingerprint+reason check (tasks/gap-ac55-dispatch-record-fingerprint-reason, AC55 判据1/判据3) =="
   # AC55 判据1: EVERY dispatch record must carry ① the dispatch-preference file's content fingerprint
   # (git blob hash — "用的是哪一版") AND ② a one-sentence "为什么选它" ("按倾向选还是随便选") — the
