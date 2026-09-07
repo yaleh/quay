@@ -16,7 +16,7 @@ quality-gate-driver 驻留环把心跳写到 path.join(root,ROUND_LOG_REL)=repo-
 涉及机制关键词：`ROUND_LOG_REL`（立案前已搜既有任务，无人认领）。
 
 ## AC（draft）
-- [ ] `[ ! -e quality-round.jsonl ] || { echo 'repo-root heartbeat log still present' >&2; exit 1; }
+- [x] `[ ! -e quality-round.jsonl ] || { echo 'repo-root heartbeat log still present' >&2; exit 1; }
 python3 - <<'P'
 import json,os,time,datetime
 f=".quay/quality-round.jsonl"
@@ -35,8 +35,8 @@ raise SystemExit(0 if age < 300 else 1)
 P` ⇒ 驱动存活时其新鲜心跳在 .quay/ 可观测（载体最新时间戳 <300s），且 repo root 不再生成 quality-round.jsonl
 
 ## DoD（draft）
-- [ ] 上面的判据实跑通过，且判据本身能取假（改坏实现时会红）
-- [ ] 若结论是「已有机制在管、只是失败」，则修那个机制，⛔ 不新建并行机制
+- [x] 上面的判据实跑通过，且判据本身能取假（改坏实现时会红）
+- [x] 若结论是「已有机制在管、只是失败」，则修那个机制，⛔ 不新建并行机制
 
 ## Touches
 - `plugin/scripts/quality-gate-driver.ts`
