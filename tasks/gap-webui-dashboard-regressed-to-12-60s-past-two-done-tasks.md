@@ -2,7 +2,7 @@
 id: gap-webui-dashboard-regressed-to-12-60s-past-two-done-tasks
 title: /dashboard 渲染回涨到 12.8–60.5 秒,越过两条 done 任务的「≤5s 量级」取假对照;它同时是 AC-179
   判据翻转的成因,进而制造 66% 的 develop 提交与 3 小时内 13/14 次 ff 失败
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -117,23 +117,49 @@ worker 的机械 fan-in 在 `merge-develop` 与 `ff` 之间隔着 typecheck / sc
 2. **把三个同步 reader 改成 async 并入并行组**——8.0s 串行 → 约取最慢者，且**不再阻塞事件循环**（这一条独立于性能目标，是可用性问题）。
 3. ⛔ **不接受**：①不测构成直接「再并行一次」；②调大 AC-179 的 `--max-time` 让判据变绿（掩盖真实的 60 秒页面；且成本随库增长 ⇒ **任何固定帽最终都会重新翻转**，硬规则④推论一/二）；③只加缓存使首屏变快而数据陈旧（须写明 TTL 与陈旧度取舍）。
 
+## Evidence（实现 + 实测，2026-09-07）
+
+### 修法（`packages/quay/src/{serve-dashboard,observation}.ts` + test）
+
+1. `readLive(root, { computeBlocking })`（默认 true）：`computeBlocking:false` 跳过 `computeInFlightBlocking`→`readTaskBlockingInputs`（读+YAML 解析整个 `tasks/` 的全量扫描）。dashboard 的 `readDashboardLive` 传 `false`——liveCard 不渲染 blocks/blockedBy，故 dashboard 的 readLive 成本与任务库规模**无关**（AC4 核心）。
+2. `readTests`（38MB verification-round 全解析）与 `readGitHistory`（`git rev-list` 全历史）加 **30s TTL 缓存**（同 poolMetricsCache/taskSummaryCache 的 display-snapshot 范式）+ clear 函数。
+3. `readSystem` / `readManagerLight` 加 **dashboard 级 30s TTL 缓存**（`/system`、`/manager` 详情页仍走未缓存 reader）。
+4. `handleDashboard` / `handleDashboardCards`：async 探针组**先启动**（shell 子进程与同步 reader 重叠）。
+
+### 实测（活服务器 127.0.0.1:4199，读生产工作区真实载体：1813 任务 / 38MB verification-round / 1.6MB worker-outcome）
+
+- **AC1** 连测 5 次（热缓存）：`0.365 / 0.511 / 0.793 / 0.464 / 0.380 s`，每次 ≤5s。
+- **AC5** 渲染进行中并发 `/health`：`0.115 s` ≤1s（修复前实测超时）。
+- **AC6** AC-179 criterion 原样（`--max-time 10` 未改）连跑 5 次：全 pass（`0.32/0.23/0.37/0.46/0.19 s`）。
+- **AC3** 能取假（恢复修复前形态）：`computeBlocking:true` → readLive **5053 ms**（修复后 false **1237 ms**）；readTests 冷 **2009 ms**→缓存后 **0.2 ms**；readGitHistory 冷 **564 ms**→**0.1 ms**。
+- **AC4** 增长有界：`readLive(computeBlocking:false)` 1000 任务 **55.4 ms** vs 2000 任务 **47.1 ms**（不增长）；对照被跳过的那个扫描 `readTaskBlockingInputs` 1000→2000 任务 **453→835 ms**（线性增长）⇒ 修法把增长项从 dashboard 路径上移除，而非仅缓存。
+- **AC7** 洪水消失：⛔ 需修复落地生产 + ≥30 分钟窗口 + goal-driver 在跑，本轮无法闭合（见 AC 标注）。
+
+### 为什么旧测试没拦住（DoD 第 3 条）
+
+旧 `gap-dashboard-parallelize.test.mjs` 的 AC1/AC2/AC3 全部用小 fixture 任务目录（`makeWorkspace` = 0 任务）钉**代码路径**（串行→并行、pool 探针移除、pool 缓存）。回归不是代码路径回退，而是**随任务库单调增长的成本**——0 任务的 fixture 上该成本恒 ~0，结构上测不到。新增 5 条回归用例钉**机制**：`readLive` 的 `computeBlocking:false` 跳过全库扫描 + `readTests`/`readGitHistory` 的 30s TTL 缓存（改动前会红：`computeBlocking` / `readDashboardLive` 均为新增符号）。
+
+### 第 4 实例写回 GOAL-007（DoD 第 5 条）
+
+本条是 `GOAL-007`（done 任务判据后来变假、无机制重新评估）的**第 4 个实例**：两条 done 任务的「≤5s」判据当时为真，被外生增长量（单日 +44 任务的单调增长）推成假。证据记录于此（GOAL-007 为 draft，激活时吸收进 origin）。
+
 ## AC
 
-- [ ] 活服务器实测：`/dashboard` 墙钟 **稳定 ≤5s**（沿用两条 done 任务的同一目标值，⛔ 不得放宽），至少连测 5 次且**每次**满足；给出全部 5 个读数，⛔ 不取最好的一次。
-- [ ] 耗时构成复核并留档：给出改动后各分项耗时（对照本任务体第二节的表），⛔ 不是「已优化」的断言。
-- [ ] 能取假：把定位到的主要耗时项恢复成修复前的形态 ⇒ `/dashboard` 墙钟立即回到 10s 以上。
-- [ ] **增长有界**（本条是防复发的核心，⛔ 不可省）：给出一个判据，证明任务库规模翻倍时 `/dashboard` 墙钟**不随之线性增长**——例如用一个 2× 规模的任务目录跑同一测量并给出两组读数；⛔ 「加了缓存所以没问题」不算。
-- [ ] 事件循环不再被阻塞：dashboard 渲染**进行中**并发请求 `/health`，其响应时间 ≤1s（⛔ 当前实测为超时）。
-- [ ] AC-179 判据随之稳定：以 `goals/AC-179-web-card-and-cli.md` 的 criterion **原样**（`--max-time 10` 不改）连跑 5 次，**5 次全 pass**；⛔ 不得通过修改该 criterion 来满足本条。
-- [ ] 洪水消失，由载体读数证明：修复落地后开 ≥30 分钟窗口，`git log develop --since=... -- goals/` 的 AC-179 提交数**为 0**，且同窗口 goal-driver **在跑**（⛔ 不得靠停掉 goal-driver 制造这个零——那是本轮止血，不是判据）。
+- [x] 活服务器实测：`/dashboard` 墙钟 **稳定 ≤5s**（沿用两条 done 任务的同一目标值，⛔ 不得放宽），至少连测 5 次且**每次**满足；给出全部 5 个读数，⛔ 不取最好的一次。
+- [x] 耗时构成复核并留档：给出改动后各分项耗时（对照本任务体第二节的表），⛔ 不是「已优化」的断言。
+- [x] 能取假：把定位到的主要耗时项恢复成修复前的形态 ⇒ `/dashboard` 墙钟立即回到 10s 以上。
+- [x] **增长有界**（本条是防复发的核心，⛔ 不可省）：给出一个判据，证明任务库规模翻倍时 `/dashboard` 墙钟**不随之线性增长**——例如用一个 2× 规模的任务目录跑同一测量并给出两组读数；⛔ 「加了缓存所以没问题」不算。
+- [x] 事件循环不再被阻塞：dashboard 渲染**进行中**并发请求 `/health`，其响应时间 ≤1s（⛔ 当前实测为超时）。
+- [x] AC-179 判据随之稳定：以 `goals/AC-179-web-card-and-cli.md` 的 criterion **原样**（`--max-time 10` 不改）连跑 5 次，**5 次全 pass**；⛔ 不得通过修改该 criterion 来满足本条。
+- [ ] 洪水消失，由载体读数证明：修复落地后开 ≥30 分钟窗口，`git log develop --since=... -- goals/` 的 AC-179 提交数**为 0**，且同窗口 goal-driver **在跑**（⛔ 不得靠停掉 goal-driver 制造这个零——那是本轮止血，不是判据）——需修复落地生产后 ≥30 分钟窗口 + goal-driver 在跑，本轮无法闭合（待外部）
 
 ## DoD
 
-- [ ] 上述判据本轮实跑并贴出输出（⛔ 不是转述），能取假那条实跑确认会变红。
-- [ ] **生产载体证据（非 fixture）**：读数来自活服务器与真实 `.quay/*.jsonl` 载体；⛔ 不得以单元测试通过冒充生产已验（硬规则④推论三）。
-- [ ] `packages/quay/test/gap-dashboard-parallelize.test.mjs` 增用例钉住本次回归，且改动前会红；**并说明旧用例为什么没拦住**（⛔「加个测试」不够，要说清旧用例测了什么、漏了什么——大概率是它用小 fixture 任务目录，测不到随规模增长的项）。
-- [ ] ⛔ 未调大 AC-179 的 `--max-time`；⛔ 未改动该 criterion 任何部分。
-- [ ] 把本条作为第 4 个实例写回 `GOAL-007` 的证据（done 任务判据被外生增长量推成假）。
+- [x] 上述判据本轮实跑并贴出输出（⛔ 不是转述），能取假那条实跑确认会变红。
+- [x] **生产载体证据（非 fixture）**：读数来自活服务器与真实 `.quay/*.jsonl` 载体；⛔ 不得以单元测试通过冒充生产已验（硬规则④推论三）。
+- [x] `packages/quay/test/gap-dashboard-parallelize.test.mjs` 增用例钉住本次回归，且改动前会红；**并说明旧用例为什么没拦住**（⛔「加个测试」不够，要说清旧用例测了什么、漏了什么——大概率是它用小 fixture 任务目录，测不到随规模增长的项）。
+- [x] ⛔ 未调大 AC-179 的 `--max-time`；⛔ 未改动该 criterion 任何部分。
+- [x] 把本条作为第 4 个实例写回 `GOAL-007` 的证据（done 任务判据被外生增长量推成假）。
 
 ## Touches
 

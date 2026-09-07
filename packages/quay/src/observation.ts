@@ -1595,8 +1595,8 @@ const NON_LIVE_TASK_STATUSES: ReadonlySet<string> = new Set([TASK_STATUS.DONE, T
  */
 export function readLive(
   root: string,
-  { nowMs = Date.now(), liveWorkers = null, sessionHome = os.homedir() }:
-    { nowMs?: number; liveWorkers?: LiveWorker[] | null; sessionHome?: string } = {},
+  { nowMs = Date.now(), liveWorkers = null, sessionHome = os.homedir(), computeBlocking = true }:
+    { nowMs?: number; liveWorkers?: LiveWorker[] | null; sessionHome?: string; computeBlocking?: boolean } = {},
 ): LiveResult {
   const eventsDir = path.join(root, FAST_MODE_EVENTS_DIR);
   let inFlight: InFlightTask[] = [];
@@ -1773,7 +1773,18 @@ export function readLive(
   // Cross-task blocking (gap-webui-cross-task-blocking-visibility): annotate every in-flight task
   // with the ready/todo tasks it blocks and the tasks blocking it, from the on-disk task store.
   // Additive — a store read failure leaves blocks/blockedBy empty, never 500s the page.
-  inFlight = computeInFlightBlocking(root, inFlight);
+  //
+  // gap-webui-dashboard-regressed-to-12-60s-past-two-done-tasks: `computeInFlightBlocking` walks the
+  // ENTIRE task store (`readTaskBlockingInputs` → readFileSync + YAML parse of every tasks/*.md) —
+  // the one readLive cost that grows MONOTONICALLY with the task store (the recurrence root: ~44 new
+  // tasks/day made the dashboard slower every day even with zero code change). The dashboard's
+  // liveCard renders only taskId/phase/elapsed/title — it NEVER renders blocks/blockedBy — so paying
+  // for the full-store scan on the dashboard path is pure waste. `computeBlocking:false` removes the
+  // scan from the dashboard entirely (cost becomes INDEPENDENT of store size — bounded growth, AC4),
+  // while /live and /board keep it (they render the blocking rows).
+  if (computeBlocking) {
+    inFlight = computeInFlightBlocking(root, inFlight);
+  }
 
   // Discriminator (gap-live-cannot-tell-a-dead-loop-from-an-unwired-one): only when telemetry
   // is EMPTY do we consult activity signals. A telemetry READ FAILURE stays a bare 「读失败」
@@ -2394,7 +2405,31 @@ export interface GitHistoryResult {
  * lane carries exactly its own (exclusive) commits — `git log develop..<branch>`. A non-git
  * workspace degrades to empty; a git failure degrades to error; never throws.
  */
+// gap-webui-dashboard-regressed-to-12-60s-past-two-done-tasks: readGitHistory shells out to git
+// several times per call (for-each-ref → log -n <limit> → rev-list <mainlineRefs> → rev-parse HEAD),
+// and the `git rev-list <mainlineRefs>` enumerates the FULL mainline history (no `-n` cap). The
+// dashboard's commitsCard needs only the 3 most recent subjects — yet it paid for the full walk on
+// every render. A 30s TTL (keyed by root + limit; the same display-snapshot freshness the other web
+// carriers use) bounds this to one walk per 30s window. nowMs only shifts the 24h active-branch
+// window, so a ≤30s drift is invisible on the display surface.
+export const GIT_HISTORY_CACHE_TTL_MS = 30_000;
+const gitHistoryCache = new Map<string, { at: number; result: GitHistoryResult }>();
+
+/** Test-hygiene handle: drop all cached git-history readings. */
+export function clearGitHistoryCache(): void {
+  gitHistoryCache.clear();
+}
+
 export function readGitHistory(root: string, { limit = GIT_HISTORY_LIMIT, nowMs = Date.now() }: { limit?: number; nowMs?: number } = {}): GitHistoryResult {
+  const key = `${root}\n${limit}`;
+  const hit = gitHistoryCache.get(key);
+  if (hit && Date.now() - hit.at < GIT_HISTORY_CACHE_TTL_MS) return hit.result;
+  const result = readGitHistoryUncached(root, { limit, nowMs });
+  gitHistoryCache.set(key, { at: Date.now(), result });
+  return result;
+}
+
+function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, nowMs = Date.now() }: { limit?: number; nowMs?: number } = {}): GitHistoryResult {
   try {
     const sinceSec = Math.floor(nowMs / 1000) - GIT_HISTORY_ACTIVE_WINDOW_SEC;
     // Enumerate local branches with their tip hash + tip commit time. `%09` emits a TAB, which git
@@ -3126,8 +3161,37 @@ export function parseVerificationRound(line: string): TestRunRecord | null {
   }
 }
 
-/** Tests view: the suite-state writer's own round sequence + current state. */
+// ── verification-round short-TTL cache (display surface only) ──────────────────────────────────────
+// gap-webui-dashboard-regressed-to-12-60s-past-two-done-tasks: `.quay/verification-round.jsonl` grows
+// unboundedly (append-only; ~38 MB / ~1000+ rounds on the live store), and `readTests` was reading +
+// parsing the ENTIRE file on every /dashboard render — a cost that grows with the round count, not
+// with any request rate. The dashboard testsCard only needs the latest round + a 5-round strip + the
+// past-N-hours timeline; the /tests page needs the full history but is human-opened. A 30s TTL (the
+// same display-snapshot freshness the taskSummaryCache / poolMetricsCache already use) bounds the
+// steady-state cost to one parse per 30s window, keyed by workspace root. The suite writer appends a
+// round at most every ~20 min, so 30s staleness is invisible on the dashboard.
+export const VERIFICATION_ROUND_CACHE_TTL_MS = 30_000;
+const verificationRoundCache = new Map<string, { at: number; result: TestsResult }>();
+
+/** Test-hygiene handle: drop all cached verification-round readings. */
+export function clearVerificationRoundCache(): void {
+  verificationRoundCache.clear();
+}
+
+/** Tests view: the suite-state writer's own round sequence + current state. Short-TTL-cached on the
+ *  display surface (see VERIFICATION_ROUND_CACHE_TTL_MS) — a cache hit returns the SAME result object
+ *  without re-reading/re-parsing the append-only carrier. */
 export function readTests(root: string): TestsResult {
+  const hit = verificationRoundCache.get(root);
+  if (hit && Date.now() - hit.at < VERIFICATION_ROUND_CACHE_TTL_MS) return hit.result;
+  const result = readTestsUncached(root);
+  verificationRoundCache.set(root, { at: Date.now(), result });
+  return result;
+}
+
+/** Uncached half of readTests (the real read + parse), kept separate so the cache wrapper and any
+ *  future bounded reader share one implementation. */
+function readTestsUncached(root: string): TestsResult {
   const roundsPath = path.join(root, ".quay", "verification-round.jsonl");
   const runs: TestRunRecord[] = [];
   let statePathStatus: ObservationStatus = "ok";

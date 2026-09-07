@@ -914,6 +914,67 @@ export async function readTaskSummary(
   return tasks;
 }
 
+// ── Dashboard live snapshot cache (gap-webui-dashboard-regressed-to-12-60s-past-two-done-tasks) ──
+// The dashboard's liveCard renders taskId / phase / elapsed / title — elapsed is re-derived at render
+// time from each in-flight task's FIXED startedAtMs (renderLiveCard passes a fresh nowMs), so caching
+// the readLive RESULT for 30s does NOT freeze the displayed elapsed. The cache only skips re-running
+// readLive's own expensive I/O (workflow-events read, worker carrier reads, /proc scan, per-task
+// develop-ref status reads). computeBlocking is OFF: the liveCard never renders blocks/blockedBy, so
+// the full task-store scan (the cost that grows with the store) is skipped entirely. Keyed by root
+// (the same bucket discipline as taskSummaryCache).
+export const DASHBOARD_LIVE_CACHE_TTL_MS = 30_000;
+const dashboardLiveCache = new Map<string, { at: number; live: LiveResult }>();
+
+/** Test-hygiene handle: drop all cached dashboard live snapshots. */
+export function clearDashboardLiveCache(): void {
+  dashboardLiveCache.clear();
+}
+
+/** The dashboard's readLive: short-TTL-cached, computeBlocking disabled. A cache hit returns the SAME
+ *  LiveResult object without re-running readLive's I/O; on a miss it runs readLive once (no task-store
+ *  scan) and caches it for the TTL. */
+function readDashboardLive(root: string): LiveResult {
+  const hit = dashboardLiveCache.get(root);
+  if (hit && Date.now() - hit.at < DASHBOARD_LIVE_CACHE_TTL_MS) return hit.live;
+  const live = readLive(root, { computeBlocking: false });
+  dashboardLiveCache.set(root, { at: Date.now(), live });
+  return live;
+}
+
+// gap-webui-dashboard-regressed-to-12-60s-past-two-done-tasks: readSystem / readManagerLight are the
+// dashboard's last two UN-cached probes — they shell out to resource-gate.sh / process-budget.sh /
+// loop-driver-check.sh on EVERY render (~2s combined, host-load-dependent), which is what pushes a warm
+// dashboard past the 5s budget when a 15s background-refresh tick collides. The dashboard is a display
+// snapshot with a 30s auto-refresh (DASHBOARD_CARD_REFRESH_MS), so these two probes get the SAME 30s
+// snapshot cache as readLive/taskSummary — a cache hit returns the resolved value with zero subprocess
+// spawns. Only SUCCESSFUL reads are cached (a failed probe is re-run next request, same fail-open
+// policy as poolMetricsCache). The /system and /manager DETAIL pages keep calling the uncached readers,
+// so a human opening those pages still gets a fresh reading.
+const dashboardSysCache = new Map<string, { at: number; value: SystemResult }>();
+const dashboardMgrLightCache = new Map<string, { at: number; value: ManagerResult }>();
+
+/** Test-hygiene handle: drop all cached dashboard system/manager snapshots. */
+export function clearDashboardProbeCache(): void {
+  dashboardSysCache.clear();
+  dashboardMgrLightCache.clear();
+}
+
+async function readDashboardSystem(root: string): Promise<SystemResult> {
+  const hit = dashboardSysCache.get(root);
+  if (hit && Date.now() - hit.at < DASHBOARD_LIVE_CACHE_TTL_MS) return hit.value;
+  const value = await readSystem(root);
+  dashboardSysCache.set(root, { at: Date.now(), value });
+  return value;
+}
+
+async function readDashboardManagerLight(root: string): Promise<ManagerResult> {
+  const hit = dashboardMgrLightCache.get(root);
+  if (hit && Date.now() - hit.at < DASHBOARD_LIVE_CACHE_TTL_MS) return hit.value;
+  const value = await readManagerLight(root);
+  dashboardMgrLightCache.set(root, { at: Date.now(), value });
+  return value;
+}
+
 export async function handleDashboard(
   req: IncomingMessage,
   res: ServerResponse,
@@ -921,26 +982,26 @@ export async function handleDashboard(
   manifest: Manifest,
   cfg: { workspaceRoot: string },
 ): Promise<void> {
-  let live: LiveResult;
-  try { live = readLive(cfg.workspaceRoot); } catch {
-    live = { status: "error", reason: "internal", inFlight: [], concurrency: 0, cpuPressure: null, liveState: null, liveExplanation: null, activity: null };
-  }
-  // AC1 + AC2 (gap-webui-dashboard-load-time-optimization): the dashboard manager probe is now
-  // readManagerLight — loop-driver + liveness ONLY, NO pool probe (the pool metrics are not shown on
-  // the dashboard card; /manager still runs the full readManager).
-  // readSystem + the light manager probe + the (cached) task summary are independent — run them
-  // CONCURRENTLY (Promise.all); client.taskList is no longer serialized AFTER the sys/mgr group
-  // (the prior gap-webui-dashboard-manager-slow-parallelize shape awaited it later).
-  const [sys, mgr, tasks, goals] = await Promise.all([
-    readSystem(cfg.workspaceRoot).catch(() => ({
+  // gap-webui-dashboard-regressed-to-12-60s-past-two-done-tasks: the async probe group is started
+  // FIRST — its shell-script subprocesses (resource-gate / process-budget / loop-driver-check) run in
+  // the OS while the three sync readers below do their (now cached / bounded) work on the main thread.
+  // readLive runs with computeBlocking:false (see readDashboardLive): the liveCard never renders
+  // blocks/blockedBy, so the full task-store scan (computeInFlightBlocking) is skipped — the one cost
+  // that grows monotonically with the task store, and the recurrence root this task fixes.
+  const asyncProbes = Promise.all([
+    readDashboardSystem(cfg.workspaceRoot).catch(() => ({
       status: "error" as const, reason: "internal", resourceGate: { status: "error" as const, reason: null, cpuStallAvg10: null, cpuStallAvg300: null, memAvailMb: null, loadAvg: null, nproc: null, nodeProcs: null, verdict: null, loadThreshold: null, loadOverFactor: null }, processBudget: { status: "error" as const, reason: null, totalBudget: null, inUse: null, available: null, verdict: null },
     })),
-    readManagerLight(cfg.workspaceRoot).catch(() => ({
+    readDashboardManagerLight(cfg.workspaceRoot).catch(() => ({
       status: "error" as const, reason: "internal", loopDriver: { status: "error" as const, reason: null, verdict: null, exitCode: null, detail: null }, liveness: { status: "error" as const, reason: null, sessions: [] }, observers: { status: "error" as const, reason: null, rows: [] }, pool: { status: "error" as const, reason: null, pool: null, floor: null, deficit: null, cap: null, lastPromoted: [] }, version: null, developLead: null,
     })),
     readTaskSummary(cfg.workspaceRoot, client).catch(() => [] as Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>),
     client.goalList().catch(() => [] as GoalRecord[]),
   ]);
+  let live: LiveResult;
+  try { live = readDashboardLive(cfg.workspaceRoot); } catch {
+    live = { status: "error", reason: "internal", inFlight: [], concurrency: 0, cpuPressure: null, liveState: null, liveExplanation: null, activity: null };
+  }
   let tests: TestsResult;
   try { tests = readTests(cfg.workspaceRoot); } catch {
     tests = { status: "error", reason: "internal", runs: [] };
@@ -951,6 +1012,7 @@ export async function handleDashboard(
   try { history = readGitHistory(cfg.workspaceRoot); } catch {
     history = { status: "error", reason: "internal", commits: [], head: null, heads: {} };
   }
+  const [sys, mgr, tasks, goals] = await asyncProbes;
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   const hours = timelineHoursFromRequest(req);
   res.end(renderDashboardPage({ live, sys, mgr, tests, suiteRun, history, tasks, goals }, { workspaceRoot: cfg.workspaceRoot, hours }));
@@ -970,26 +1032,30 @@ export async function handleDashboardCards(
   client: ProviderClient,
   cfg: { workspaceRoot: string },
 ): Promise<void> {
-  let live: LiveResult;
-  try { live = readLive(cfg.workspaceRoot); } catch {
-    live = { status: "error", reason: "internal", inFlight: [], concurrency: 0, cpuPressure: null, liveState: null, liveExplanation: null, activity: null };
-  }
-  const [sys, mgr, tasks, goals] = await Promise.all([
-    readSystem(cfg.workspaceRoot).catch(() => ({
+  // gap-webui-dashboard-regressed-to-12-60s-past-two-done-tasks: same async-first + cached readLive
+  // (computeBlocking:false) structure as handleDashboard — this endpoint is the 30s auto-refresh
+  // poll, so it must NOT re-run the full task-store scan or the sync readers on every poll.
+  const asyncProbes = Promise.all([
+    readDashboardSystem(cfg.workspaceRoot).catch(() => ({
       status: "error" as const, reason: "internal", resourceGate: { status: "error" as const, reason: null, cpuStallAvg10: null, cpuStallAvg300: null, memAvailMb: null, loadAvg: null, nproc: null, nodeProcs: null, verdict: null, loadThreshold: null, loadOverFactor: null }, processBudget: { status: "error" as const, reason: null, totalBudget: null, inUse: null, available: null, verdict: null },
     })),
-    readManagerLight(cfg.workspaceRoot).catch(() => ({
+    readDashboardManagerLight(cfg.workspaceRoot).catch(() => ({
       status: "error" as const, reason: "internal", loopDriver: { status: "error" as const, reason: null, verdict: null, exitCode: null, detail: null }, liveness: { status: "error" as const, reason: null, sessions: [] }, observers: { status: "error" as const, reason: null, rows: [] }, pool: { status: "error" as const, reason: null, pool: null, floor: null, deficit: null, cap: null, lastPromoted: [] }, version: null, developLead: null,
     })),
     readTaskSummary(cfg.workspaceRoot, client).catch(() => [] as Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>),
     client.goalList().catch(() => [] as GoalRecord[]),
   ]);
+  let live: LiveResult;
+  try { live = readDashboardLive(cfg.workspaceRoot); } catch {
+    live = { status: "error", reason: "internal", inFlight: [], concurrency: 0, cpuPressure: null, liveState: null, liveExplanation: null, activity: null };
+  }
   let tests: TestsResult;
   try { tests = readTests(cfg.workspaceRoot); } catch {
     tests = { status: "error", reason: "internal", runs: [] };
   }
   let suiteRun: CurrentSuiteRun | null;
   try { suiteRun = readCurrentSuiteRun(cfg.workspaceRoot); } catch { suiteRun = null; }
+  const [sys, mgr, tasks, goals] = await asyncProbes;
   const hours = timelineHoursFromRequest(req);
   const { cap, staleMs } = readGoalPolicy(cfg.workspaceRoot);
   const payload = JSON.stringify({

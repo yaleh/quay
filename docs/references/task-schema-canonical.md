@@ -120,6 +120,30 @@ unachieved (status `active`) AC, `count(task where goal_ac == AC and status ∈ 
 ⇒ a **gap** — the three-state output (`in-progress` / `gap` / `not-evaluated`) keeps "read the
 input and found nothing advancing this AC" distinct from "could not read the input at all".
 
+## CLI write surface for the top-level fields
+
+`depends_on` and `goal_ac` are writable through the CLI — not only through MCP `task_write`:
+
+```bash
+quay task edit gap-example --depends-on gap-prereq-a,gap-prereq-b --goal-ac AC-177
+quay task create gap-new --title "…" --depends-on gap-prereq-a --goal-ac AC-177
+quay-native task edit gap-example --depends-on gap-prereq-a,gap-prereq-b --goal-ac AC-177
+quay-native task create gap-new --depends-on gap-prereq-a --goal-ac AC-177
+```
+
+`--depends-on <id[,id...]>` writes a top-level `depends_on` array (comma-split, mirroring
+`--children`); `--goal-ac <AC-NNN>` writes the top-level `goal_ac` scalar. Omitting either flag on a
+subsequent `task edit` leaves the existing value untouched (the patch is read-merge-write, never a
+whole-frontmatter replace) — the idempotent negative control.
+
+Alignment is machine-checked: `packages/quay/test/cli-write-surface-parity.test.mjs` machine-reads
+the native MCP `task_write` zod `inputSchema` (the single source of truth) and asserts every writable
+field is CLI-flag-wired in both the Core CLI (`packages/quay/src/cli/task-edit.ts`) and the native CLI
+(`packages/quay-native/bin/quay-native.ts`). Do **not** hand-maintain a second field list here — a
+field that drifts out of the CLI surface fails that test. On the GitHub Provider these fields are
+stored in the issue body's hidden `quay-meta` block (surfaced through `extra`); `extra` itself
+remains not CLI-writable on GitHub.
+
 ## Commit-after-write (dispatch visibility)
 
 `task_write` and `task_delete` are **commit-by-default**: after a successful disk write, the native
