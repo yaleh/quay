@@ -14,7 +14,7 @@ origin: >
 
   §12e 表格逐行点名的落点。
 evidence:
-  at: 2026-09-07T01:10:46.056Z
+  at: 2026-09-07T01:12:11.443Z
   verdict: pass
   reading: acceptance passed (exit 0)
 ---
