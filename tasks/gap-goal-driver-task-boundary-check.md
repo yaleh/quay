@@ -1,7 +1,7 @@
 ---
 id: gap-goal-driver-task-boundary-check
 title: DIR-131 执行落点：给 goal/task 职责边界造一个按位置判定的静态检查（含双向负控制 + 静态层接线）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
