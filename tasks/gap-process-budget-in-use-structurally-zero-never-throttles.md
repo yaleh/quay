@@ -1,7 +1,7 @@
 ---
 id: gap-process-budget-in-use-structurally-zero-never-throttles
 title: 跨层进程预算的 in_use 恒 0（仪器自检已报故障却不影响取值）⇒ 套件并发恒等于 nproc、对既有负载完全不感知，有效超订约 2×
-status: todo
+status: ready
 labels:
   - gap
   - defect
