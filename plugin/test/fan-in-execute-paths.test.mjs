@@ -2259,6 +2259,66 @@ test("fix-scope REAL negative control — in-Touches red → inScope(fix); out-o
   assert.equal(reasons["plugin/test/cold-start-skill.test.mjs"], "load-sensitive", "a load-sensitive family red must release (not fix)");
 });
 
+test("fix-scope REAL new-event routing — a never-failed file's out-of-Touches red routes to new-event (escalate), NOT other-task (defer); a fails>0 file routes back to other-task", async (t) => {
+  const task = "gap-test-fixscope-new-event";
+  const dir = makeFixScopeDir("fan-in-fixscope-ne-", task, [
+    "---",
+    `id: ${task}`,
+    "status: ready",
+    "---",
+    "## Touches",
+    `- tasks/${task}.md`,
+    "- pkg/a/**",
+  ].join("\n") + "\n");
+  t.after(() => cleanup(dir));
+
+  // A mock gitignored carrier. The gate reads it via QUAY_PERFILE_RATE_ROOT (the test seam for the
+  // same --root/QUAY_MAIN_CHECKOUT resolution the production gate uses) — a fake worktree has no
+  // real .quay/verification-round.jsonl.
+  const carrierDir = fs.mkdtempSync(path.join(os.tmpdir(), "perfile-rate-mock-"));
+  t.after(() => cleanup(carrierDir));
+  fs.mkdirSync(path.join(carrierDir, ".quay"), { recursive: true });
+  const carrierFile = path.join(carrierDir, ".quay", "verification-round.jsonl");
+  const rel = "pkg/OTHER/never-failed.test.mjs";
+  const mkPerFile = (runs, failIdxs) => {
+    const failSet = new Set(failIdxs);
+    return Array.from({ length: runs }, (_, i) => ({
+      file: rel, passed: !failSet.has(i), startedAtMs: 1000 + i, endedAtMs: 1100 + i, durationMs: 10,
+    }));
+  };
+  const writeCarrier = (recs) => fs.writeFileSync(carrierFile, JSON.stringify({ round: 1, perFile: recs }) + "\n", "utf8");
+
+  const log = `/tmp/fan-in-suite-${task}.log`;
+  fs.writeFileSync(log, `__PERFILE__ duration_ms=1.2 ${dir}/${rel} passed=false\n`, "utf8");
+  t.after(() => { try { fs.rmSync(log, { force: true }); } catch (_) { /* best-effort */ } });
+
+  const block = await fixScopeGateBlockFor(task, dir);
+  const env = { ...process.env, QUAY_PERFILE_RATE_ROOT: carrierDir };
+
+  // Case 1: never-failed (fails=0) ⇒ the gate routes it new-event (escalate), not other-task (defer).
+  writeCarrier(mkPerFile(60, []));
+  const r1 = runBash(block + '\necho "GATE_OUT=[$fix_scope_out]"', { cwd: dir, env });
+  assert.equal(r1.status, 0, r1.stderr);
+  const v1 = JSON.parse(r1.stdout.match(/GATE_OUT=\[(.*)\]/s)[1]);
+  const o1 = v1.outOfScope.find((f) => f.file === rel);
+  assert.ok(o1, "the out-of-Touches red must be in outOfScope");
+  assert.equal(o1.reason, "new-event", "a never-failed file must escalate (new-event), not defer (other-task)");
+  assert.deepEqual(o1.baseline, { runs: 60, fails: 0, rate: 0, classification: "new-event" }, "baseline carries runs/fails/rate/classification");
+  assert.deepEqual(v1.baselines[rel], { runs: 60, fails: 0, rate: 0, classification: "new-event" }, "every failure's baseline is in the verdict baselines map");
+
+  // Case 2: same file now has fails>0 spread across BOTH halves ⇒ within-baseline ⇒ routes back to
+  // other-task (defer), NOT new-event (escalate). This is the 能取假 direction: flip the history, the
+  // route flips.
+  writeCarrier(mkPerFile(60, [10, 45]));
+  const r2 = runBash(block + '\necho "GATE_OUT=[$fix_scope_out]"', { cwd: dir, env });
+  assert.equal(r2.status, 0, r2.stderr);
+  const v2 = JSON.parse(r2.stdout.match(/GATE_OUT=\[(.*)\]/s)[1]);
+  const o2 = v2.outOfScope.find((f) => f.file === rel);
+  assert.equal(o2.reason, "other-task", "a fails>0 within-baseline file must defer (other-task), not escalate");
+  assert.equal(o2.baseline.classification, "within-baseline");
+  assert.equal(o2.baseline.fails, 2);
+});
+
 test("fix-scope REAL machine-partition — a task WITHOUT a ## Touches section ⇒ scoped=false, load-sensitive still released, rest inScope", async (t) => {
   const task = "gap-test-fixscope-noscope";
   const dir = makeFixScopeDir("fan-in-fixscope-ns-", task, "---\nid: gap-test-fixscope-noscope\nstatus: ready\n---\n## Plan\nno touches section\n");
