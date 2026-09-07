@@ -15,7 +15,7 @@ origin: |
   人 2026-09-02 裁定②（自用与交付同一功能）+ 裁定④（manager 是产品一部分）。正本
   SPEC-plugin-lifecycle-single-bundle-2026-09-02.md。
 evidence:
-  at: 2026-09-07T01:10:52.052Z
+  at: 2026-09-07T01:12:28.007Z
   verdict: fail
   reading: acceptance failed (exit 1)
 ---
