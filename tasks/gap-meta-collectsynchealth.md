@@ -1,7 +1,7 @@
 ---
 id: gap-meta-collectsynchealth
 title: syncHealth 暴露 notFf 的 benign 分解（ahead-only vs behind）
-status: todo
+status: ready
 labels:
   - meta-driver
   - driver-candidate
