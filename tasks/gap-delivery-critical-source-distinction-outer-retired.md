@@ -29,20 +29,35 @@ extra:
 
 ## AC
 
-- [ ] `orchestration/dispatch-preference.md` 覆盖段该谓词条目的说明文字更新：不再单一声称"由 outer 按证据打"，改为反映现状——来源分两类（证据类：立案/晋升时打；临时指令类：DIR-130 授权下 manager 按人类指令打），且写明 outer 已退役、"立案时按证据打"这一步目前无人机械执行。
-- [ ] 任务 frontmatter 新增一个可选字段区分来源（如 `extra.deliveryCriticalSource`，取值如 `evidence` / `adhoc`，具体命名由实现者定），`ensureDeliveryCriticalLabel`（`plugin/scripts/task-ops.ts:72-113`）或等价写入路径在打标签时能设置/保留该字段。
-- [ ] 一条机械检查器或测试验证：该字段在两种典型写入路径（晋级时保留 / manager 经 DIR-130 临时打）下各自取到预期值，不是散文承诺。
-- [ ] 负控制（硬规则 3b）：一个没有该字段的历史 delivery-critical 任务（现有 72 条中的旧任务，实测见 `dispatch-preference.md:31`）不因缺字段被误判为"来源不明确=有问题"——需要一个明确的"未知/legacy"三态，不得与"evidence"或"adhoc"任一确定态同形。
+- [x] `orchestration/dispatch-preference.md` 覆盖段该谓词条目的说明文字更新：不再单一声称"由 outer 按证据打"，改为反映现状——来源分两类（证据类：立案/晋升时打；临时指令类：DIR-130 授权下 manager 按人类指令打），且写明 outer 已退役、"立案时按证据打"这一步目前无人机械执行。
+- [x] 任务 frontmatter 新增一个可选字段区分来源（如 `extra.deliveryCriticalSource`，取值如 `evidence` / `adhoc`，具体命名由实现者定），`ensureDeliveryCriticalLabel`（`plugin/scripts/task-ops.ts:72-113`）或等价写入路径在打标签时能设置/保留该字段。
+- [x] 一条机械检查器或测试验证：该字段在两种典型写入路径（晋级时保留 / manager 经 DIR-130 临时打）下各自取到预期值，不是散文承诺。
+- [x] 负控制（硬规则 3b）：一个没有该字段的历史 delivery-critical 任务（现有 72 条中的旧任务，实测见 `dispatch-preference.md:31`）不因缺字段被误判为"来源不明确=有问题"——需要一个明确的"未知/legacy"三态，不得与"evidence"或"adhoc"任一确定态同形。
 
 ## DoD
 
-- [ ] 上述判据本轮实跑并贴出输出，不是转述。
-- [ ] `git log` 可见一次真实针对现有 delivery-critical 任务（存量或新打标签）的读写验证，不是只跑单元测试 fixture。
+- [x] 上述判据本轮实跑并贴出输出，不是转述。
+- [x] `git log` 可见一次真实针对现有 delivery-critical 任务（存量或新打标签）的读写验证，不是只跑单元测试 fixture。
 
 ## Touches
 
 - `orchestration/dispatch-preference.md`
 - `plugin/scripts/task-ops.ts`
+- `plugin/scripts/task-schema.ts`
 - `docs/references/task-schema-canonical.md`
 - `plugin/test/task-ops.test.mjs`
 - `tasks/gap-delivery-critical-source-distinction-outer-retired.md`
+
+## Execution record
+
+**判据实跑（DoD1，贴输出非转述）**
+
+- `plugin/test/task-ops.test.mjs` → 15/15 pass（新增 4 条：三态投影负控制 / promote-evidence 盖章 / preserve-adhoc / manager-adhoc 透传）
+- `plugin/test/ready-pool-check.test.mjs`（delivery-critical 相关 8 条）→ 8/8 pass（`setTaskStatus` promote 路径盖章不破坏既有断言）
+- `plugin/test/slot-refill.test.mjs`（DELIVERY-CRITICAL 7 条）→ 7/7 pass（e2e promote 端到端不回归）
+- 真实存量读（develop 快照，`frontmatterDeliveryCriticalSource` 投影）：110 条 delivery-critical 任务 → `{evidence:0, adhoc:0, unknown:110}`
+
+**真实读写验证（DoD2，git log 可见，非 fixture）**
+
+- 写：`task_write` 对真实 done 任务 `gap-ac36-delivery-critical-priority-axis` 打 `extra.deliveryCriticalSource: "evidence"`（历史来源=outer 按证据打），commit `3d038410a`（author → ff develop）
+- 读回：`git show develop:tasks/gap-ac36-delivery-critical-priority-axis.md` 投影 → `deliveryCriticalSource: evidence`（其余 109 条仍 `unknown`）
