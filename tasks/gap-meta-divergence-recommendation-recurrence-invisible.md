@@ -56,4 +56,5 @@ extra: {}
 - `plugin/scripts/meta-driver.ts`
 - `plugin/probes/meta-driver.md`
 - `plugin/test/meta-driver.test.mjs`
+- `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `tasks/gap-meta-divergence-recommendation-recurrence-invisible.md`
