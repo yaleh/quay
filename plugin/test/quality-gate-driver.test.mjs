@@ -38,9 +38,14 @@ import {
   runArchitectureReview,
   qualityGateRoutines,
   computeRoundRecord,
+  runResidentQualityGateLoop,
 } from "../scripts/quality-gate-driver.ts";
 import { qualityRoundPath } from "../scripts/pool-quality-judge.ts";
 import { archReviewRoundPath } from "../scripts/architecture-review-cluster.ts";
+// gap-drain-on-routine-driver-empties-round-and-respawn-loops AC2 判据以 goal 为对象：goal 的例程
+// 与控制面（goalDriverRoutines / GOAL_CONTROL_STATE_REL / GOAL_ROUND_REL）——机械环跑 criterion 是
+// 零 LLM 的观测，halt 只挡缺口立案 spawn（runGapSpawnPass 的 halted 闸）。
+import { goalDriverRoutines, GOAL_CONTROL_STATE_REL, GOAL_ROUND_REL } from "../scripts/goal-driver.ts";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..", "..");
@@ -281,6 +286,71 @@ test("resident loop --once writes a round record with facts (spawn real process)
   assert.equal(rec.facts.length, 3, "first round ⇒ all three routines due (never-ran ⇒ interval due)");
   const names = rec.facts.map((f) => f.name).sort();
   assert.deepEqual(names, ["architecture-review", "judgment-consumer-check", "pool-quality-judge"]);
+});
+
+// ── gap-drain-on-routine-driver-empties-round-and-respawn-loops：halt 是轮内闸（⛔ 非进程终止条件）──
+// AC1（halt 不再终止进程）与 AC2（受闸的只是动作，观测继续）的判定面。旧实现 break ⇒ 进程 return 0 ⇒
+// supervisor 每 5s 重生一次、轮记录恒 round=1 且 facts: []。修法：halt 轮照跑机械读数、只挡 spawn。
+
+test("AC1 — halt 不再终止进程：halted 下 maxRounds=3 ⇒ 3 条轮记录 round 1/2/3", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-halt-loop-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, QUALITY_CONTROL_STATE_REL), JSON.stringify({ schemaVersion: 1, halted: true }), "utf8");
+  const roundLog = path.join(tmp, "quality-round.jsonl");
+  const routines = [{
+    name: "fake-observe",
+    schedule: { kind: "interval", minutes: 0 },
+    run: () => [{ name: "fake-observe", value: { seen: 1 }, state: "verified", reason: null }],
+  }];
+  const code = await runResidentQualityGateLoop({
+    root: tmp, intervalMs: 1, once: false, maxRounds: 3, roundLogFile: roundLog,
+    runId: "halt-loop", json: false, routines, controlStateRel: QUALITY_CONTROL_STATE_REL,
+  });
+  assert.equal(code, 0);
+  const lines = fs.readFileSync(roundLog, "utf8").split("\n").filter((l) => l.trim());
+  assert.equal(lines.length, 3, "halted 下仍写满 3 轮（⛔ 旧代码只写 1 条就 break）");
+  assert.deepEqual(lines.map((l) => JSON.parse(l).round), [1, 2, 3], "round 单调递增 1/2/3（⛔ 恒为 1 ⇒ 假）");
+  for (const l of lines) {
+    const rec = JSON.parse(l);
+    assert.equal(rec.halted, true, "每轮带 halted: true");
+    assert.ok(rec.facts.length > 0, "halted 轮仍产生机械读数（facts 非空）");
+  }
+});
+
+test("AC2 — 受闸的只是动作：goal halted 轮 criterionCount>0 且 spawned===0", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-goal-halt-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(tmp, "goals"), { recursive: true });
+  fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true }); // 空 tasks/ ⇒ readTaskFacts 返 []（⛔ 非 null）⇒ AC 判 gap
+  // 一个 active GOAL + 一条 active AC（criterion 恒真）——机械环必跑 criterion（零 LLM 观测）。
+  const writeGoal = (rec) => {
+    const lines = ["---", `id: ${rec.id}`, "title: t", `status: ${rec.status}`, `kind: ${rec.kind}`];
+    if (rec.goal) lines.push(`goal: ${rec.goal}`);
+    if (rec.criterion !== undefined) lines.push("criterion: |", `  ${rec.criterion}`);
+    lines.push("origin: test fixture", "---", "", "## body", "x", "");
+    fs.writeFileSync(path.join(tmp, "goals", `${rec.id}-t.md`), lines.join("\n"), "utf8");
+  };
+  writeGoal({ id: "GOAL-001", status: "active", kind: "goal" });
+  writeGoal({ id: "AC-001", status: "active", kind: "criterion", goal: "GOAL-001", criterion: "true" });
+  // halted 控制态（goal 自己的 .quay/goal-control.json）。
+  fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, GOAL_CONTROL_STATE_REL), JSON.stringify({ schemaVersion: 1, halted: true }), "utf8");
+  const roundLog = path.join(tmp, GOAL_ROUND_REL);
+  const code = await runResidentQualityGateLoop({
+    root: tmp, intervalMs: 1, once: true, maxRounds: null, roundLogFile: roundLog,
+    runId: "goal-halt", json: false, controlStateRel: GOAL_CONTROL_STATE_REL,
+    routines: goalDriverRoutines(tmp, { scriptRoot: REPO_ROOT }),
+  });
+  assert.equal(code, 0);
+  const lines = fs.readFileSync(roundLog, "utf8").split("\n").filter((l) => l.trim());
+  assert.equal(lines.length, 1, "once ⇒ 一条轮记录");
+  const rec = JSON.parse(lines[0]);
+  assert.equal(rec.halted, true, "轮记录带 halted: true");
+  const goalFact = rec.facts.find((f) => f.name === "goal-ring");
+  assert.ok(goalFact, "round record 含 goal-ring fact（⛔ 旧代码 facts: [] ⇒ 假）");
+  assert.ok(goalFact.value.criterionCount > 0, "halted 轮仍跑 criterion（机械读数非空，⛔ facts: [] ⇒ 假）");
+  assert.equal(goalFact.value.spawned, 0, "halted 只挡 spawn（spawned===0）");
 });
 
 // ── 判词载体写端（gap-pool-quality-verdicts-never-persisted：AC1 driver 路径 + AC6 负控制）───────
