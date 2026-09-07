@@ -2,7 +2,7 @@
 id: gap-ac190-long-term-guarantee-goal-backed-check
 title: 实现反例检测器 long-term-guarantee-goal-backed-check.ts：长期保证只有 task AC 背书 ⇒
   报红（真仓库绿 + 注入未背书条目红，双向负控制）
-status: ready
+status: done
 labels:
   - gap
 parent: null
