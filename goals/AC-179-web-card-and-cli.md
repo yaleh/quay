@@ -21,7 +21,7 @@ origin: |
   判据读【运行中的服务】而非源码，依据硬规则 4 推论三：
   grep 源码只证明"能产出"，不证明"已产出"。
 evidence:
-  at: 2026-09-07T04:52:21.786Z
+  at: 2026-09-07T05:16:17.046Z
   verdict: pass
   reading: acceptance passed (exit 0)
 ---
