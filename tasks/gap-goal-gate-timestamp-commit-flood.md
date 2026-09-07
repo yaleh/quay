@@ -2,7 +2,7 @@
 id: gap-goal-gate-timestamp-commit-flood
 title: goal gate 每 42 秒把 evidence 时间戳写盘即提交——develop 近 26 分钟 428 个提交里 427
   个是噪声（99.8%），且争用跨层共享索引
-status: ready
+status: done
 labels:
   - gap
   - defect
