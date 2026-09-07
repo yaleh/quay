@@ -1,7 +1,7 @@
 ---
 id: AC-160
 title: 修 runtime-usage-inventory.ts 的枚举盲区
-status: draft
+status: active
 kind: criterion
 goal: GOAL-003
 criterion: >-
