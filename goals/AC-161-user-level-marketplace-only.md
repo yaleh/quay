@@ -21,6 +21,10 @@ origin: >
 
   plugin marketplace 源」。正本 SPEC-plugin-lifecycle-single-bundle-2026-09-02.md
   §4b。
+evidence:
+  at: 2026-09-07T01:09:39.833Z
+  verdict: fail
+  reading: acceptance failed (exit 1)
 ---
 
 **判据（能取假）**：用户级只留 marketplace 源，启用迁项目级（SPEC §4b）。**迁移顺序**：确认已安装 →
