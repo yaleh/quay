@@ -439,14 +439,15 @@ npm 侧无需处理（`files` 是白名单，`archive/` 天然不在内）。
 **⚠️ 本清单是【带测量日期的快照】，不是活文档。** 判据（§12d）是耐久的，名单会随代码演化过期；
 **执行 archive 前须按 §12d 重算一次**，以重算结果为准。
 
-**⊕ 死集重算回写（2026-09-05，`gap-dead-set-registry-bare-filename-scan` 落地后）**：
-按 §12d（三天零执行 ∧ 无生产调用者）+ §12e 传递闭包 + §12f 裸文件名边重算；
+**⊕ 死集重算回写（2026-09-07，`gap-dead-set-closure-repo-root-call-form-false-positive` 补认执行形式后）**：
+按 §12d（三天零执行 ∧ 无生产调用者）+ §12e 传递闭包（补认 `${repo_root}/plugin/scripts/<name>`、
+`path.join(__dirname, "<name>")`、`$SCRIPT_DIR/<name>` 三种执行形式）+ §12f 裸文件名边重算；
 方法窗口与完整名单见 `docs/analysis/dead-set-recomputed.json`
-（`generatedAt` 2026-09-05T14:47:27.909Z；窗口 2026-09-02T14:45:23.574Z → 2026-09-05T14:45:23.574Z，72h；
+（`generatedAt` 2026-09-07T14:38:19.347Z；窗口 2026-09-04T14:32:46.988Z → 2026-09-07T14:32:46.988Z，72h；
 `executionDataSource` = 三层 transcript 普查，非 runtime-usage-inventory.ts）。
 
-- 扫描前死集: 116
-- 扫描后死集: 112
+- 扫描前死集: 86
+- 扫描后死集: 82
 
 #### 安全核 94 个（`plugin/scripts/` 下，两口径下均判死；56 个自带测试须同批移动）
 
