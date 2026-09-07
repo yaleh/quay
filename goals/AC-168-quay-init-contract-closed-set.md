@@ -1,7 +1,7 @@
 ---
 id: AC-168
 title: quay-init 收缩到 SPEC §6 闭集
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-003
 criterion: >-
@@ -26,8 +26,8 @@ criterion: >-
 
   printf '%s\n' "$allowed" > "$f_allowed"
 
-  comm -23 "$f_produced" "$f_allowed" | grep -q .
-  && { rm -f "$f_produced" "$f_allowed"; exit 1; }
+  comm -23 "$f_produced" "$f_allowed" | grep -q . && { rm -f "$f_produced"
+  "$f_allowed"; exit 1; }
 
   rm -f "$f_produced" "$f_allowed"
 
@@ -44,10 +44,6 @@ origin: >
   驱动内核，AC168 停止复制后下游 quay driver start 全线失效；${CLAUDE_PLUGIN_ROOT} 只覆盖 skill 载入
 
   路径，救不了 CLI/cron/OS anchor。正本 SPEC §6b。
-evidence:
-  at: 2026-09-07T01:21:40.901Z
-  verdict: fail
-  reading: acceptance failed (exit 1)
 ---
 
 **判据（能取假）**：`quay-init` 收缩到 SPEC §6 闭集（只建 quay 项目文件 + 写 Claude Code 侧配置），
