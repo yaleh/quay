@@ -2,7 +2,7 @@
 id: gap-goal-evidence-cache-should-not-enter-git
 title: evidence 是 gitignored 账本最后一行的缓存，却随记录进 git
   并旅行到别的克隆声称未做过的测量——按裁定「高频无语义价值的变更不进 git」移出
-status: todo
+status: ready
 labels:
   - gap
   - defect
