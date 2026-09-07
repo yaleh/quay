@@ -57,6 +57,49 @@ test('goalAchievedFromRecords: 零 AC ⇒ false；全 achieved ⇒ true；有未
     ),
     false,
   );
+  // 在域 = active|achieved；draft/superseded/retired 不在域 ⇒ 不阻塞（只数在域 AC）。
+  assert.equal(
+    goalAchievedFromRecords(
+      [{ id: 'AC-001', goal: 'GOAL-001', status: 'achieved' }, { id: 'AC-002', goal: 'GOAL-001', status: 'draft' }],
+      'GOAL-001',
+    ),
+    true,
+    'draft 不在域 ⇒ 不阻塞（旧实现 every(status==="achieved") 会把 draft 当阻塞）',
+  );
+  assert.equal(
+    goalAchievedFromRecords(
+      [{ id: 'AC-001', goal: 'GOAL-001', status: 'achieved' }, { id: 'AC-002', goal: 'GOAL-001', status: 'superseded' }, { id: 'AC-003', goal: 'GOAL-001', status: 'retired' }],
+      'GOAL-001',
+    ),
+    true,
+    'superseded/retired 也不在域 ⇒ 不阻塞',
+  );
+  assert.equal(
+    goalAchievedFromRecords([{ id: 'AC-002', goal: 'GOAL-001', status: 'draft' }], 'GOAL-001'),
+    false,
+    '只有 draft 无在域 AC ⇒ 不可达成',
+  );
+});
+
+// AC-1（gap-goal-driver-draft-ac-invisible-yet-blocking）：:172（goalAchievedFromRecords）与
+// :201（computeGoalGaps）对 draft AC 口径一致——都【排除】draft。旧实现 :172 用 every(status==="achieved")
+// 把 draft 计入阻塞 ⇒ 与 :201（只数 active）相反 ⇒ 一条 draft AC 既不被翻、又不计缺口、却仍挡 GOAL。
+test('AC-1: draft AC 在目标达成判定与缺口计算中被【同口径】排除（立条时二者相反，能取假）', () => {
+  // :172 侧——目标达成判定不含 draft：含 draft 的 GOAL 不再被它阻塞。
+  assert.equal(
+    goalAchievedFromRecords(
+      [{ id: 'AC-001', goal: 'GOAL-001', status: 'achieved' }, { id: 'AC-002', goal: 'GOAL-001', status: 'draft' }],
+      'GOAL-001',
+    ),
+    true,
+    ':172 不含 draft ⇒ draft 不阻塞 GOAL 达成',
+  );
+  // :201 侧——缺口计算不含 draft：draft 不进 gaps（computeGoalGaps 只数 active）。
+  const gaps = computeGoalGaps(
+    [{ id: 'AC-001', goal: 'GOAL-001', status: 'active' }, { id: 'AC-002', goal: 'GOAL-001', status: 'draft' }],
+    [],
+  );
+  assert.deepEqual(gaps.map((g) => g.ac), ['AC-001'], ':201 不含 draft ⇒ 缺口只含 active AC');
 });
 
 // ── G7 缺口计算（computeGoalGaps 三态 + readTaskFacts，gap-goal-ac-task-linkage-top-level-field）──
@@ -313,8 +356,17 @@ test('real ring: draft AC under active GOAL 不被翻（裁定 3 边界负控制
     const g1 = fs.readFileSync(path.join(tmp, 'goals', 'GOAL-001-t.md'), 'utf8');
     assert.match(a1, /^status: achieved$/m, 'active AC pass ⇒ flip achieved（裁定 5）');
     assert.match(a2, /^status: draft$/m, 'draft AC 不被翻（裁定 3：driver 不碰 draft 激活）');
-    // draft AC 未达成 ⇒ isGoalAchieved=false ⇒ GOAL 不 flip achieved。
-    assert.match(g1, /^status: active$/m, '含未达成的 draft AC ⇒ GOAL 不 flip achieved');
+    // AC-2（行为级）：draft AC 不再阻塞目标达成判定 ⇒ GOAL 可以 flip achieved。
+    assert.match(g1, /^status: achieved$/m, 'draft 不阻塞 ⇒ GOAL flip achieved（AC-2 行为级）');
+
+    // AC-3（负控制）：flips 中不含 draft AC——driver 仍不得把 draft 翻成 achieved（裁定 3 不被削弱）。
+    const lines = fs.readFileSync(roundLog, 'utf8').trim().split('\n');
+    const rec = JSON.parse(lines[lines.length - 1]);
+    const goalFact = rec.facts.find((f) => f.name === 'goal-ring');
+    assert.ok(goalFact, 'round record 含 goal-ring fact');
+    const flippedIds = (goalFact.value.flips ?? []).map((f) => f.id);
+    assert.ok(flippedIds.includes('AC-001'), 'active AC 在 flips 里（达成翻转）');
+    assert.ok(!flippedIds.includes('AC-002'), 'draft AC 不在 flips 里（裁定 3 不被削弱）');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
