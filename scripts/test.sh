@@ -804,7 +804,7 @@ build_deduped_files() {
   # patterns are non-recursive and cannot reach archive/ at the repo root, but the filter keeps the
   # run set correct if a future glob grows a recursive `**` segment.
   if [ -n "${_RG_META}" ]; then
-    _RG_META="$(printf '%s\n' "${_RG_META}" | awk -F'\t' '$1 !~ /(^|\/)archive\//')"
+    _RG_META="$(printf '%s\n' "${_RG_META}" | awk -F'\t' '$1 !~ "(^|/)archive/"')"
   fi
   _RG_META_READY=1
   _RG_FILES=()

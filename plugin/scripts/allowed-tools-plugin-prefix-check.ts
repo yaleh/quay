@@ -1,4 +1,4 @@
-// skill-allowed-tools-namespace-check.ts — plugin/skills allowed-tools 命名空间机械检查
+// allowed-tools-plugin-prefix-check.ts — plugin/skills allowed-tools 命名空间机械检查
 // (tasks/gap-skill-allowed-tools-plugin-namespace, SPEC-plugin-lifecycle-single-bundle §3c/§7-2/AC2)。
 //
 // PROBLEM IT FIXES: allowed-tools is EXACT-string matching with NO prefix alias (SPEC §3c — official
@@ -18,14 +18,14 @@
 //
 // AC3 (falsifiable, three readings): before the fix the checker goes RED naming the two files; after the
 // fix it goes GREEN; writing a bare name back goes RED again. The negative control is pinned by
-// plugin/test/skill-allowed-tools-namespace-check.test.mjs + the mutation case.
+// plugin/test/allowed-tools-plugin-prefix-check.test.mjs + the mutation case.
 //
 // NOT-EVALUATED (hard rule 3b/4): no plugin/skills dir, or no SKILL.md files under it ⇒ exit 3 (the
 // harness-canonical NOT-EVALUATED, gap-not-evaluated-harness-third-state) — a check that found nothing to
 // verify must not read as PASS.
 //
 // Run:
-//   node --experimental-strip-types plugin/scripts/skill-allowed-tools-namespace-check.ts [--root <dir>] [--json]
+//   node --experimental-strip-types plugin/scripts/allowed-tools-plugin-prefix-check.ts [--root <dir>] [--json]
 // stdout: a human line + (with --json) a machine-readable result object
 // exit: 0 = every allowed-tools mcp__ tool name is plugin-prefixed · 1 = ≥1 bare/mis-namespaced name ·
 //       3 = NOT-EVALUATED (no skills dir / no SKILL.md files)
@@ -153,7 +153,7 @@ function parseArg(argv: string[], name: string): string | undefined {
 
 export function main(argv: string[]): number {
   if (argv.includes("--help") || argv.includes("-h")) {
-    helpExit("usage: node skill-allowed-tools-namespace-check.ts [--root <dir>] [--json]");
+    helpExit("usage: node allowed-tools-plugin-prefix-check.ts [--root <dir>] [--json]");
   }
   const root = path.resolve(parseArg(argv, "--root") ?? DEFAULT_ROOT);
   const json = argv.includes("--json");

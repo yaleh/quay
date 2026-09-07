@@ -24,6 +24,7 @@ import {
   commitTaskFile,
   hasPriorCommit,
 } from "../scripts/task-ops.ts";
+import { parseFrontmatterCompletely, frontmatterDeliveryCriticalSource } from "../scripts/task-schema.ts";
 
 const FRONTMATTER = (status) => `id: gap-x\ntitle: x\nstatus: ${status}\nlabels:\n  - gap\nparent: null\n`;
 const FULL = (status, body = "## Proposal\n\nprose\n") => `---\n${FRONTMATTER(status)}\n---\n${body}`;
@@ -102,6 +103,42 @@ test("ensureDeliveryCriticalLabel — idempotent when already present", () => {
   const r = ensureDeliveryCriticalLabel(fm);
   assert.equal(r.added, false);
   assert.equal(r.fm, fm, "byte-unchanged");
+});
+
+// ── deliveryCriticalSource (gap-delivery-critical-source-distinction-outer-retired) ──────────────
+
+test("frontmatterDeliveryCriticalSource — three-state: evidence/adhoc verbatim, absent/other ⇒ unknown (AC4 负控制)", () => {
+  assert.equal(frontmatterDeliveryCriticalSource({ extra: { deliveryCriticalSource: "evidence" } }), "evidence");
+  assert.equal(frontmatterDeliveryCriticalSource({ extra: { deliveryCriticalSource: "adhoc" } }), "adhoc");
+  assert.equal(frontmatterDeliveryCriticalSource({ extra: {} }), "unknown", "absent ⇒ legacy unknown, NOT evidence/adhoc");
+  assert.equal(frontmatterDeliveryCriticalSource({}), "unknown", "no extra at all ⇒ unknown");
+  assert.equal(frontmatterDeliveryCriticalSource({ extra: { deliveryCriticalSource: "banana" } }), "unknown", "unrecognized value ⇒ unknown, never conflated with a concrete source");
+});
+
+test("ensureDeliveryCriticalLabel — stamps extra.deliveryCriticalSource=evidence when ADDING the label (AC2/AC3 promote-evidence path)", () => {
+  const r = ensureDeliveryCriticalLabel("id: x\nlabels:\n  - gap\nparent: null\n");
+  assert.equal(r.added, true);
+  assert.equal(r.deliveryCritical, true);
+  assert.match(r.fm, /labels:\n  - gap\n  - delivery-critical/);
+  assert.match(r.fm, /extra:\n  deliveryCriticalSource: evidence/);
+  assert.equal(frontmatterDeliveryCriticalSource(parseFrontmatterCompletely(r.fm)), "evidence");
+});
+
+test("ensureDeliveryCriticalLabel — PRESERVES an existing adhoc source (label already present ⇒ no restamp; AC3 晋级时保留)", () => {
+  const fm = "id: x\nlabels:\n  - gap\n  - delivery-critical\nextra:\n  deliveryCriticalSource: adhoc\n";
+  const r = ensureDeliveryCriticalLabel(fm);
+  assert.equal(r.added, false);
+  assert.equal(r.fm, fm, "byte-unchanged: the manager's adhoc stamp survives a promote pass");
+  assert.equal(frontmatterDeliveryCriticalSource(parseFrontmatterCompletely(r.fm)), "adhoc");
+});
+
+test("manager DIR-130 adhoc path — a frontmatter written via task_write extra round-trips as 'adhoc' (AC3)", () => {
+  // The manager (quay-task-operator → task_write) writes extra.deliveryCriticalSource + the label as a
+  // plain extra.* pass-through — no dedicated code path. Verify the single parser reads it back.
+  const fm = "id: gap-x\nstatus: ready\nlabels:\n  - gap\n  - delivery-critical\nextra:\n  deliveryCriticalSource: adhoc\n";
+  const parsed = parseFrontmatterCompletely(fm);
+  assert.equal(frontmatterDeliveryCriticalSource(parsed), "adhoc");
+  assert.deepEqual(parsed.labels, ["gap", "delivery-critical"], "label + source co-exist in one write");
 });
 
 // ── commit primitive (commitTaskFile / hasPriorCommit / isInsideGitWorkTree) ─────────────────────

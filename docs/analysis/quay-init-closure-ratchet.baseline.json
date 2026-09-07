@@ -1,7 +1,7 @@
 {
   "files": 133,
-  "bytes": 3841523,
-  "fingerprint": "f8e418cbb22ca212d4f29a30b4388d8ce8bb9b5461851fb6254348f73118a8b4",
+  "bytes": 3851710,
+  "fingerprint": "cec6a78d1eebfa5bcb11d3aa34db2d4bf7135069fa04897d394115941bcb8538",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
@@ -65,7 +65,7 @@
     },
     {
       "rel": "plugin/probes/meta-driver.md",
-      "sha": "ce56cd445c00b67c722422d2e31bdf2d11f2b4effda640914367860706dd0558"
+      "sha": "b3f222f96e3506cbb76fe1b42070c1e9e2a2e26eaf2ca619fedbe8f29a5dce95"
     },
     {
       "rel": "plugin/probes/self-validation.md",
@@ -105,7 +105,7 @@
     },
     {
       "rel": "plugin/scripts/capability-catalog.sh",
-      "sha": "2707716eae4685da74acaf117c3a89fafb06c5697b8a98270790b16531ca1c52"
+      "sha": "93b0b43adedaa30c9ec96000bf6fc53a659dc10fde55eb0651cc78f67c574988"
     },
     {
       "rel": "plugin/scripts/checker-io.ts",
@@ -125,7 +125,7 @@
     },
     {
       "rel": "plugin/scripts/concurrent-batch-scheduler.ts",
-      "sha": "a50c1f0f73e9ded0a036bf06db3c42e4819786bb43d88fccfd408029e5c3195c"
+      "sha": "eb453918332b4612025fbdc8951d6a9c8dee30951188514ec42e508704df2463"
     },
     {
       "rel": "plugin/scripts/config-wiring-check.ts",
@@ -417,11 +417,11 @@
     },
     {
       "rel": "plugin/scripts/slot-refill.ts",
-      "sha": "375d0da8e7afb7ae3b0ee1fb8c57d65f71b6d03ac0952c8b5b866b8993e63b33"
+      "sha": "3a6d86135d7754fafce4cd22c9198ef6db327a4b0eca1ce4c0002c77c58c83fa"
     },
     {
       "rel": "plugin/scripts/start-drivers.ts",
-      "sha": "016bdf209c9430a0004af1b44a30beadc6e3c772d39ea75928d10a3eb88e847f"
+      "sha": "812ea7fa13320fc9f4619a12462089418f74bcbe82451ae0ff0a035f6cf0e67d"
     },
     {
       "rel": "plugin/scripts/strategic-doc-staleness-check.ts",
@@ -457,7 +457,7 @@
     },
     {
       "rel": "plugin/scripts/task-ops.ts",
-      "sha": "ff7c52013fa64c5d9fa3b93eb91deffc86843815063280e55352477031f89b4a"
+      "sha": "135f56075f91e9de8ce25cf96be9394ae261b592590d7ad2001b46dcfd6ac9c7"
     },
     {
       "rel": "plugin/scripts/task-schema-check.ts",
@@ -465,7 +465,7 @@
     },
     {
       "rel": "plugin/scripts/task-schema.ts",
-      "sha": "7c568481bf2aab97f31fa13aab53f48e891ed10c0a1027d8d4f9e5b15299b912"
+      "sha": "7313c2f38f119511e962f51ab6e49c429a10c14e588b1d9b45359b9628633ece"
     },
     {
       "rel": "plugin/scripts/task-status-drift-check.ts",

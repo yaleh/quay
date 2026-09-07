@@ -319,6 +319,23 @@ test("gap-meta-carrierstats — quality carrier timestamp key is judgedAt (⛔ n
   assert.equal(st.lastTs, "2026-09-05T15:44:02.000Z", "lastTs = max judgedAt, ⛔ null");
 });
 
+test("gap-meta-round-log-rel — quality carrier reads BOTH ts (heartbeat) and judgedAt, freshest wins", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dr-carrier-qmix-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  // quality-round.jsonl 混两种键：心跳（ts，每 30s 一条 liveness 直接量）+ 判词（judgedAt，间歇量）。
+  // 修复前只读 judgedAt ⇒ 心跳不可见 ⇒ 池不触发就假报 stall；修复后两者较新者作 lastTs。
+  fs.writeFileSync(
+    path.join(root, ".quay", "quality-round.jsonl"),
+    '{"round":1,"judgedAt":"2026-09-06T10:00:00.000Z","state":"failed"}\n' +
+      '{"round":2,"run_id":"qg-x","pid":1,"ts":"2026-09-06T10:00:30.000Z","halted":false,"facts":[]}\n',
+    "utf8",
+  );
+  const st = carrierStats(root, "quality");
+  assert.equal(st.records, 2, "both heartbeat + judgment counted");
+  assert.equal(st.lastTs, "2026-09-06T10:00:30.000Z", "lastTs = fresher heartbeat ts (⛔ judgedAt-only ⇒ stale)");
+});
+
 test("AC2 — pidAlive / readPidFile / aliveness (death direct-quantity, ⛔ not carrier-stall)", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dr-alive-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
