@@ -11,6 +11,10 @@ expect: "exit 0（SPEC §12e 同时含机读行 `- 扫描前死集: N` 与 `- �
 origin: |
   人 2026-09-02 裁定④「对零调用的工具，先退役（archive），后续发现需要了再恢复」。
   正本 orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md §12f。
+evidence:
+  at: 2026-09-07T01:09:37.069Z
+  verdict: fail
+  reading: acceptance failed (exit 1)
 ---
 
 **判据（能取假）**：按 SPEC §12f 对 97 个死集跑一趟**注册表/清单裸文件名扫描**（对象：`quay-deliver.ts`
