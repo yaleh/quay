@@ -1,7 +1,7 @@
 {
   "files": 134,
-  "bytes": 3862804,
-  "fingerprint": "dece77f2ff1097428b7ff980884dcd0de52364540965112742679d17a845069f",
+  "bytes": 3864280,
+  "fingerprint": "4b020721d9bfc6bfa87b75525025fb4e695d8565a6884601371b89c78566cde1",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
@@ -65,7 +65,7 @@
     },
     {
       "rel": "plugin/probes/meta-driver.md",
-      "sha": "95c7f6c39690b94b1fceee21f147e2848fe8eca5116c2d843a10957eb1904fd7"
+      "sha": "ce56cd445c00b67c722422d2e31bdf2d11f2b4effda640914367860706dd0558"
     },
     {
       "rel": "plugin/probes/self-validation.md",
