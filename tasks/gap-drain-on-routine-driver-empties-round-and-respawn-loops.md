@@ -2,7 +2,7 @@
 id: gap-drain-on-routine-driver-empties-round-and-respawn-loops
 title: 例程型 driver 被 drain 后整轮空转退出 ⇒ supervisor 每 5s 重生一次（14 小时 0 次 → 15 分钟 138
   次），且与 goal-driver 自己的 halt 语义直接矛盾
-status: ready
+status: done
 labels:
   - gap
   - defect
