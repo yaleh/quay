@@ -1,7 +1,7 @@
 {
   "files": 133,
-  "bytes": 3851509,
-  "fingerprint": "6c97d480edf644b37bcda40976359506320fb4aee440610b747e309bdcb5fe40",
+  "bytes": 3852914,
+  "fingerprint": "a146c509a03a4f4bb2e6e1e58ddc64b8c0b27bf567a1747b99421da99d5ba51f",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
@@ -105,7 +105,7 @@
     },
     {
       "rel": "plugin/scripts/capability-catalog.sh",
-      "sha": "447ad71cd033ac5d8ef8b83279746f8c6d375d3e6c56031ab2bc6bc260ed7dcc"
+      "sha": "c1e45b4f1b7870cfe7949496095039730617057d47715cb608814d5c6376f574"
     },
     {
       "rel": "plugin/scripts/checker-io.ts",
