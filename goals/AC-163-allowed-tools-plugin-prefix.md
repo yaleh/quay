@@ -1,7 +1,7 @@
 ---
 id: AC-163
 title: allowed-tools 改 mcp__plugin_quay_quay__* + 静态检查器
-status: draft
+status: active
 kind: criterion
 goal: GOAL-003
 criterion: >-
