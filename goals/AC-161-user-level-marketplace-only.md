@@ -22,7 +22,7 @@ origin: >
   plugin marketplace 源」。正本 SPEC-plugin-lifecycle-single-bundle-2026-09-02.md
   §4b。
 evidence:
-  at: 2026-09-07T01:14:24.978Z
+  at: 2026-09-07T01:15:21.523Z
   verdict: fail
   reading: acceptance failed (exit 1)
 ---
