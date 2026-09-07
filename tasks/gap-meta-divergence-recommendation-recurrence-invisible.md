@@ -39,21 +39,22 @@ extra: {}
 
 ## AC
 
-- [ ] 读数里出现可枚举的重复计数：对每条 divergence 给出「已连续多少轮产生同一 (id, kind) 的建议」，且**逐条带上 id 与上次的 recommendation 文本**（⛔ 不是一个总数——SPEC §5.3：不枚举、不给对象、零指引价值）。
-- [ ] 能取假：喂一个含同一 (id, kind) 连续 5 轮记录的载体 ⇒ 该条计数为 5；喂一个空载体 ⇒ 计数为 0。两个方向都要断言。
-- [ ] ⛔ 该计数**不进** `readingsDigest`：断言在只有重复计数变化（无 verdict/status/偏离类别变化）时 `readingsDigest` 返回值**不变**。这条是成本护栏，必须能取假。
-- [ ] probe 规格写明如何使用：一条建议连续重复 ≥N 轮而对象状态未变 ⇒ **这本身就是「该通道缺执行器」的证据**，属 `autoDrive` 的适用形态（机制失败 + 修法是修那个机制 + 可由命令判定），⛔ 不是再重复一次那条建议。
+- [x] 读数里出现可枚举的重复计数：对每条 divergence 给出「已连续多少轮产生同一 (id, kind) 的建议」，且**逐条带上 id 与上次的 recommendation 文本**（⛔ 不是一个总数——SPEC §5.3：不枚举、不给对象、零指引价值）。
+- [x] 能取假：喂一个含同一 (id, kind) 连续 5 轮记录的载体 ⇒ 该条计数为 5；喂一个空载体 ⇒ 计数为 0。两个方向都要断言。
+- [x] ⛔ 该计数**不进** `readingsDigest`：断言在只有重复计数变化（无 verdict/status/偏离类别变化）时 `readingsDigest` 返回值**不变**。这条是成本护栏，必须能取假。
+- [x] probe 规格写明如何使用：一条建议连续重复 ≥N 轮而对象状态未变 ⇒ **这本身就是「该通道缺执行器」的证据**，属 `autoDrive` 的适用形态（机制失败 + 修法是修那个机制 + 可由命令判定），⛔ 不是再重复一次那条建议。
 
 ## DoD
 
-- [ ] 上述判据本轮实跑并贴出输出，⛔ 不是转述。
-- [ ] 生产载体证据（非 fixture）：改动落地后至少一轮真实记录里出现非零重复计数，或说明当前无重复项（且该说明由读数支撑，不是断言）。
-- [ ] ⛔ 未向 probe prompt 注入历史上下文——抗漂移的「每轮全新上下文」保持不变；新增的只是一个机械算出的读数字段。
-- [ ] ⛔ 未给 `divergences` 加自动执行器（例如自动翻 achieved）——那是另一个决定，且 probe 规格明写「⛔ You never flip a status yourself」。本条只让「无人执行」这件事变得可被发现。
+- [x] 上述判据本轮实跑并贴出输出，⛔ 不是转述。
+- [x] 生产载体证据（非 fixture）：改动落地后至少一轮真实记录里出现非零重复计数，或说明当前无重复项（且该说明由读数支撑，不是断言）。
+- [x] ⛔ 未向 probe prompt 注入历史上下文——抗漂移的「每轮全新上下文」保持不变；新增的只是一个机械算出的读数字段。
+- [x] ⛔ 未给 `divergences` 加自动执行器（例如自动翻 achieved）——那是另一个决定，且 probe 规格明写「⛔ You never flip a status yourself」。本条只让「无人执行」这件事变得可被发现。
 
 ## Touches
 
 - `plugin/scripts/meta-driver.ts`
 - `plugin/probes/meta-driver.md`
 - `plugin/test/meta-driver.test.mjs`
+- `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `tasks/gap-meta-divergence-recommendation-recurrence-invisible.md`
