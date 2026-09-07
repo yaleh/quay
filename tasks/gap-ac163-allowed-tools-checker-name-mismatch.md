@@ -83,4 +83,5 @@ AC-163 的 `criterion` 整段（两条命令）在本任务落地轮**实际执�
 - plugin/scripts/capability-catalog.sh（六表注册改新名）
 - plugin/test/allowed-tools-plugin-prefix-check.test.mjs（改名 + import 改新名）
 - plugin/scripts/checker-mutation-cases/allowed-tools-plugin-prefix-check.sh（改名 + 内容路径改新名）
+- docs/analysis/quay-init-closure-ratchet.baseline.json（re-anchor——capability-catalog.sh 是 laydown 源）
 - tasks/gap-ac163-allowed-tools-checker-name-mismatch.md（自身）
