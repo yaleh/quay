@@ -39,6 +39,13 @@ export interface FfMergeArgs {
   /** the branch the task fast-forwards into. Default `develop`. */
   mergeTarget?: string;
   runId?: string | null;
+  /** per-dispatch attempt key (gap-ff-retry-counter-runid-no-longer-per-dispatch): the retry counter's
+   *  grouping key. `runId` became a driver-process-lifetime id (`wk-prod-<epoch>`, constant across
+   *  dispatches), so the per-runId counter (gap-fan-in-ff-retry-counter-scope) now accumulates across
+   *  dispatches. The caller passes a per-dispatch identity here (the mechanical fan-in passes its
+   *  per-suite runId `mfi-<task>-<epoch>-<rand>`). Absent ⇒ falls back to `runId` (direct CLI /
+   *  semantic-fallback calls that predate the key). */
+  attemptKey?: string | null;
   agentId?: string | null;
   /** L1 token gate: the driver-injected one-time token. Absent ⇒ fail-closed (exit 2). */
   token?: string | null;
@@ -403,17 +410,23 @@ export async function ffMerge(args: FfMergeArgs): Promise<FfMergeResult> {
     return { code: 2, stdout: out.join("\n"), stderr: err.join("\n"), landedSha: null };
   }
 
-  // attempt counting (per-runId scope, gap-fan-in-ff-retry-counter-scope).
+  // attempt counting (per-dispatch scope, gap-ff-retry-counter-runid-no-longer-per-dispatch).
+  // The key is the per-dispatch identity (attemptKey), NOT runId: runId became a driver-process-lifetime
+  // id (`wk-prod-<epoch>`, constant across dispatches), so the per-runId counter (gap-fan-in-ff-retry-
+  // counter-scope — correct when runId WAS per-dispatch) now latches a task across independent dispatches.
+  // Fall back to runId when attemptKey is absent (direct CLI / semantic-fallback calls that predate the key).
   const runIdJson = args.runId ?? null;
   const agentIdJson = args.agentId ?? null;
+  const attemptKeyJson = args.attemptKey ?? null;
+  const countKey = attemptKeyJson ?? runIdJson;
   let prior = 0;
   if (fs.existsSync(retryRecord)) {
     const text = fs.readFileSync(retryRecord, "utf8");
     for (const line of text.split("\n")) {
       if (!line.trim()) continue;
-      let rec: { taskId?: string; runId?: string | null } | null = null;
+      let rec: { taskId?: string; runId?: string | null; attemptKey?: string | null } | null = null;
       try { rec = JSON.parse(line); } catch { continue; }
-      if (rec && rec.taskId === args.task && (rec.runId ?? null) === (args.runId ?? null)) prior++;
+      if (rec && rec.taskId === args.task && (rec.attemptKey ?? rec.runId ?? null) === countKey) prior++;
     }
   }
   const attempt = prior + 1;
@@ -478,12 +491,13 @@ export async function ffMerge(args: FfMergeArgs): Promise<FfMergeResult> {
     const developHeadNow = git(root, "rev-parse", mergeTarget).stdout.trim() || "unresolvable";
     fs.appendFileSync(retryRecord, JSON.stringify({
       taskId: args.task, attempt, developHead: developHeadNow, ts: iso(t1), epoch: epoch(t1),
-      runId: runIdJson, agentId: agentIdJson, mergeTarget, error: mergeErr,
+      runId: runIdJson, agentId: agentIdJson, mergeTarget, error: mergeErr, attemptKey: attemptKeyJson,
     }) + "\n");
     if (attempt >= 3) {
       fs.appendFileSync(escalations, JSON.stringify({
         event: "ff-escalation", taskId: args.task, attempt, developHead: developHeadNow, ts: iso(t1),
         epoch: epoch(t1), runId: runIdJson, agentId: agentIdJson, mergeTarget, action: "stop-retry",
+        attemptKey: attemptKeyJson,
       }) + "\n");
       err.push(
         `fan-in-ff-merge: FF FAILED (attempt ${attempt} >= 3) — ANTI-LIVELOCK (SPEC §7, gap-ff-livelock-trigger-no-action): develop keeps advancing; escalating + STOPPING automatic retry. Escalation record written to ${escalations}. Do NOT auto-retry: re-merge develop and re-run the fan-in once develop settles.`,
@@ -532,6 +546,7 @@ function parseArgv(argv: string[]): { args: FfMergeArgs; help: boolean } {
       case "--root": args.root = next(); break;
       case "--merge-target": args.mergeTarget = next(); break;
       case "--run-id": args.runId = next(); break;
+      case "--attempt-key": args.attemptKey = next(); break;
       case "--agent-id": args.agentId = next(); break;
       case "--token": args.token = next(); break;
       case "--suite-state": args.suiteState = next(); break;
@@ -553,7 +568,7 @@ function parseArgv(argv: string[]): { args: FfMergeArgs; help: boolean } {
 const HELP = `fan-in-ff-merge (TS module) — AC62 持锁段: a merge lock that wraps ONLY the ff.
 Usage:
   node --experimental-strip-types packages/quay/src/fan-in/ff-merge.ts --task <taskId> [--root <repo>]
-    [--merge-target <branch>] [--run-id <runId>] [--agent-id <id>] [--token <token>] [--suite-capture <file>]
+    [--merge-target <branch>] [--run-id <runId>] [--attempt-key <key>] [--agent-id <id>] [--token <token>] [--suite-capture <file>]
     [--lock-events <file>] [--retry-record <file>] [--escalations <file>] [--lock-wait <secs>] [--worktree <path>]
 Exit codes: 0 = ff performed; 1 = develop advanced (retry); 2 = usage/env/token; 3 = anti-livelock.
 `;

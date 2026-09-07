@@ -211,14 +211,14 @@ test("ff success writes an ff-escalation-resolved record to the escalation file"
     const esc = path.join(st, "escalations.jsonl");
     const capArgs = captureArgs(st, "ac62-res", tip);
 
-    const r = runMerge(["--task", "ac62-res", "--root", dir, "--suite-state", suite, ...capArgs, "--lock-events", events, "--retry-record", retries, "--escalations", esc, "--run-id", "fm-res-1786", "--agent-id", "sub-uuid"]);
+    const r = runMerge(["--task", "ac62-res", "--root", dir, "--suite-state", suite, ...capArgs, "--lock-events", events, "--retry-record", retries, "--escalations", esc, "--run-id", "wk-prod-1786700000", "--agent-id", "sub-uuid"]);
     assert.equal(r.status, 0, `ff should succeed: ${r.stdout}${r.stderr}`);
 
     // The resolution record is appended (the escalation-resolution signal for ff-starvation relief).
     const resLine = JSON.parse(fs.readFileSync(esc, "utf8").trim());
     assert.equal(resLine.event, "ff-escalation-resolved");
     assert.equal(resLine.taskId, "ac62-res");
-    assert.equal(resLine.runId, "fm-res-1786", "resolution carries the caller runId");
+    assert.equal(resLine.runId, "wk-prod-1786700000", "resolution carries the caller runId");
     assert.equal(resLine.agentId, "sub-uuid", "resolution carries the caller agentId");
     assert.equal(resLine.mergeTarget, "develop", "resolution names the merge target");
     assert.match(resLine.ts, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/, "ts must be ISO …Z");
@@ -286,11 +286,11 @@ test("AC67 判据2 — --agent-id is written into the retry record AND lock even
     // With --agent-id: the value is the quoted JSON string.
     const events = path.join(st, "events.jsonl");
     const retries = path.join(st, "retries.jsonl");
-    const r = runMerge(["--task", "ac67-ag", "--root", dir, "--suite-state", suite, ...capArgs, "--lock-events", events, "--retry-record", retries, "--agent-id", "subagent-uuid-abc", "--run-id", "fm-gap-x-17866"]);
+    const r = runMerge(["--task", "ac67-ag", "--root", dir, "--suite-state", suite, ...capArgs, "--lock-events", events, "--retry-record", retries, "--agent-id", "subagent-uuid-abc", "--run-id", "wk-prod-1786700001"]);
     assert.equal(r.status, 1, `ff must fail: ${r.stdout}${r.stderr}`);
     const rec = JSON.parse(fs.readFileSync(retries, "utf8").trim());
     assert.equal(rec.agentId, "subagent-uuid-abc", "retry record carries the caller agent id");
-    assert.equal(rec.runId, "fm-gap-x-17866", "runId stays a single well-formed string");
+    assert.equal(rec.runId, "wk-prod-1786700001", "runId stays a single well-formed string");
     const lines = fs.readFileSync(events, "utf8").trim().split("\n").filter(Boolean);
     for (const l of lines) {
       const e = JSON.parse(l);
@@ -433,19 +433,20 @@ test("anti-livelock — ac63 4 real retry samples replay (11:55/12:39/12:42/13:5
     const suite = writeSuiteState(st, { state: "green", startedAt: "2026-08-14T00:00:00Z", finishedAt: 1786660000, scope: "main" });
     const retries = path.join(st, "retries.jsonl");
     const capArgs = captureArgs(st, "gap-ac63-judgment2-no-carrier", tip);
-    // The 4 REAL ac63 retry records — captured verbatim from .quay/fan-in-retries.jsonl (D2 不构造).
+    // The 4 REAL ac63 retry records — captured verbatim from .quay/fan-in-retries.jsonl (D2 不构造),
+    // runId normalized to the wk-prod-<epoch> production form (developHead/ts/epoch stay verbatim).
     const realSamples = [
-      { taskId: "gap-ac63-judgment2-no-carrier", attempt: 1, developHead: "bd4612e5bc74f8db1a6a5b5cb240f2c587d1a304", ts: "2026-08-14T11:55:47Z", epoch: 1786708547, runId: "fm-gap-ac63-judgment2-no-carrier-1786707748654-tzaml5", agentId: "aac7ae30a0aa05591", mergeTarget: "develop", error: "hint: Diverging branches can't be fast-forwarded, you need to either:" },
-      { taskId: "gap-ac63-judgment2-no-carrier", attempt: 2, developHead: "17d0492ad1f3018f56efc77f9cbd20044357a504", ts: "2026-08-14T12:39:39Z", epoch: 1786711179, runId: "fm-gap-ac63-judgment2-no-carrier-1786707748654-tzaml5", agentId: "a719b89d2086a4e27", mergeTarget: "develop", error: "hint: Diverging branches can't be fast-forwarded, you need to either:" },
-      { taskId: "gap-ac63-judgment2-no-carrier", attempt: 3, developHead: "04659638f3a7e7cc6cc932dca846a87967db13da", ts: "2026-08-14T12:42:50Z", epoch: 1786711370, runId: "fm-gap-ac63-judgment2-no-carrier-1786707748654-tzaml5", agentId: "a719b89d2086a4e27", mergeTarget: "develop", error: "hint: Diverging branches can't be fast-forwarded, you need to either:" },
-      { taskId: "gap-ac63-judgment2-no-carrier", attempt: 4, developHead: "81f72af4907861c6efa3ebf5605c21c4eb7d29d2", ts: "2026-08-14T13:58:15Z", epoch: 1786715895, runId: "fm-gap-ac63-judgment2-no-carrier-1786707748654-tzaml5", agentId: "a285a0091e9605468", mergeTarget: "develop", error: "hint: Diverging branches can't be fast-forwarded, you need to either:" },
+      { taskId: "gap-ac63-judgment2-no-carrier", attempt: 1, developHead: "bd4612e5bc74f8db1a6a5b5cb240f2c587d1a304", ts: "2026-08-14T11:55:47Z", epoch: 1786708547, runId: "wk-prod-1786707748", agentId: "aac7ae30a0aa05591", mergeTarget: "develop", error: "hint: Diverging branches can't be fast-forwarded, you need to either:" },
+      { taskId: "gap-ac63-judgment2-no-carrier", attempt: 2, developHead: "17d0492ad1f3018f56efc77f9cbd20044357a504", ts: "2026-08-14T12:39:39Z", epoch: 1786711179, runId: "wk-prod-1786707748", agentId: "a719b89d2086a4e27", mergeTarget: "develop", error: "hint: Diverging branches can't be fast-forwarded, you need to either:" },
+      { taskId: "gap-ac63-judgment2-no-carrier", attempt: 3, developHead: "04659638f3a7e7cc6cc932dca846a87967db13da", ts: "2026-08-14T12:42:50Z", epoch: 1786711370, runId: "wk-prod-1786707748", agentId: "a719b89d2086a4e27", mergeTarget: "develop", error: "hint: Diverging branches can't be fast-forwarded, you need to either:" },
+      { taskId: "gap-ac63-judgment2-no-carrier", attempt: 4, developHead: "81f72af4907861c6efa3ebf5605c21c4eb7d29d2", ts: "2026-08-14T13:58:15Z", epoch: 1786715895, runId: "wk-prod-1786707748", agentId: "a285a0091e9605468", mergeTarget: "develop", error: "hint: Diverging branches can't be fast-forwarded, you need to either:" },
     ];
     fs.writeFileSync(retries, realSamples.map((r) => JSON.stringify(r)).join("\n") + "\n");
     const esc = path.join(st, "escalations.jsonl");
 
-    // gap-fan-in-ff-retry-counter-scope: the attempt count now keys on runId — pass the SAME runId the
-    // 4 real records carry so the count sees them (a different/absent runId would read 0 prior failures).
-    const r = runMerge(["--task", "gap-ac63-judgment2-no-carrier", "--root", dir, "--suite-state", suite, ...capArgs, "--retry-record", retries, "--escalations", esc, "--run-id", "fm-gap-ac63-judgment2-no-carrier-1786707748654-tzaml5"]);
+    // The attempt count keys on attemptKey ?? runId — no --attempt-key passed here, so the runId fallback
+    // sees the 4 real records (a different/absent runId would read 0 prior failures).
+    const r = runMerge(["--task", "gap-ac63-judgment2-no-carrier", "--root", dir, "--suite-state", suite, ...capArgs, "--retry-record", retries, "--escalations", esc, "--run-id", "wk-prod-1786707748"]);
     assert.equal(r.status, 3, "replaying the 4 real ac63 retry records + one more ff failure (attempt 5) must trigger the anti-livelock action (判据2: 现状只升级无动作 ⇒ 红; 触发后动作机械定义)");
     assert.match(r.stderr, /ANTI-LIVELOCK/);
     const esRec = JSON.parse(fs.readFileSync(esc, "utf8").trim());
@@ -470,10 +471,11 @@ test("anti-livelock — ac80 2 real retry samples replay: a 3rd ff failure (the 
     const suite = writeSuiteState(st, { state: "green", startedAt: "2026-08-14T00:00:00Z", finishedAt: 1786660000, scope: "main" });
     const retries = path.join(st, "retries.jsonl");
     const capArgs = captureArgs(st, "gap-ac80-prompt-canonical-and-invariant-checker", tip);
-    // The 2 REAL ac80 retry records — captured verbatim from .quay/fan-in-retries.jsonl.
+    // The 2 REAL ac80 retry records — captured verbatim from .quay/fan-in-retries.jsonl,
+    // runId normalized to the wk-prod-<epoch> production form (developHead/ts/epoch stay verbatim).
     const realSamples = [
-      { taskId: "gap-ac80-prompt-canonical-and-invariant-checker", attempt: 1, developHead: "c5d9e7635c43b368fac41b681522c88b7f28caaf", ts: "2026-08-14T17:08:27Z", epoch: 1786727307, runId: "fm-gap-ac80-prompt-canonical-and-invariant-checker-1786720803526-arirtz", agentId: "a6a49c9fd9ee3ecfe", mergeTarget: "develop", error: "hint: Diverging branches can't be fast-forwarded, you need to either:" },
-      { taskId: "gap-ac80-prompt-canonical-and-invariant-checker", attempt: 2, developHead: "bf23bd1da5b16f822365a56965c11d78a9cdcbda", ts: "2026-08-14T17:10:25Z", epoch: 1786727425, runId: "fm-gap-ac80-prompt-canonical-and-invariant-checker-1786720803526-arirtz", agentId: "a6a49c9fd9ee3ecfe", mergeTarget: "develop", error: "hint: Diverging branches can't be fast-forwarded, you need to either:" },
+      { taskId: "gap-ac80-prompt-canonical-and-invariant-checker", attempt: 1, developHead: "c5d9e7635c43b368fac41b681522c88b7f28caaf", ts: "2026-08-14T17:08:27Z", epoch: 1786727307, runId: "wk-prod-1786720803", agentId: "a6a49c9fd9ee3ecfe", mergeTarget: "develop", error: "hint: Diverging branches can't be fast-forwarded, you need to either:" },
+      { taskId: "gap-ac80-prompt-canonical-and-invariant-checker", attempt: 2, developHead: "bf23bd1da5b16f822365a56965c11d78a9cdcbda", ts: "2026-08-14T17:10:25Z", epoch: 1786727425, runId: "wk-prod-1786720803", agentId: "a6a49c9fd9ee3ecfe", mergeTarget: "develop", error: "hint: Diverging branches can't be fast-forwarded, you need to either:" },
     ];
     fs.writeFileSync(retries, realSamples.map((r) => JSON.stringify(r)).join("\n") + "\n");
     const esc = path.join(st, "escalations.jsonl");
@@ -481,9 +483,9 @@ test("anti-livelock — ac80 2 real retry samples replay: a 3rd ff failure (the 
     // AC80 had 2 ff failures and develop kept advancing (4 advances during the workflow) — the gap
     // was that nothing would trigger if it hit the 3rd. Replay the 2 real records + one more failure:
     // the 3rd failure MUST trigger the anti-livelock action (the gap is now closed).
-    // gap-fan-in-ff-retry-counter-scope: pass the SAME runId the 2 real records carry so the count
-    // sees them (a different/absent runId would read 0 prior failures under per-runId counting).
-    const r = runMerge(["--task", "gap-ac80-prompt-canonical-and-invariant-checker", "--root", dir, "--suite-state", suite, ...capArgs, "--retry-record", retries, "--escalations", esc, "--run-id", "fm-gap-ac80-prompt-canonical-and-invariant-checker-1786720803526-arirtz"]);
+    // The attempt count keys on attemptKey ?? runId — no --attempt-key passed here, so the runId fallback
+    // sees the 2 real records (a different/absent runId would read 0 prior failures).
+    const r = runMerge(["--task", "gap-ac80-prompt-canonical-and-invariant-checker", "--root", dir, "--suite-state", suite, ...capArgs, "--retry-record", retries, "--escalations", esc, "--run-id", "wk-prod-1786720803"]);
     assert.equal(r.status, 3, "the 3rd ff failure (2 real prior failures + 1) escalates — the AC80 gap is closed");
     const esRec = JSON.parse(fs.readFileSync(esc, "utf8").trim());
     assert.equal(esRec.attempt, 3, "escalation records attempt 3 (2 prior + 1)");
@@ -494,12 +496,14 @@ test("anti-livelock — ac80 2 real retry samples replay: a 3rd ff failure (the 
   }
 });
 
-// ── gap-fan-in-ff-retry-counter-scope (AC1/AC2): attempt count is PER-DISPATCH (per-runId) ────────────
-// The retry record is append-only and accumulates across ALL dispatches. `maxFfRetries=3` in
-// fan-in-execute.js is a PER-DISPATCH budget (each fresh runId starts at 0). Before the fix, a taskId
-// count read a task that failed twice historically as "attempt 3" on a LATER dispatch's first real
-// try and escalated before spending its own budget. AC1 = a fresh dispatch's first failure is attempt
-// 1 (no escalation); AC2 = the fresh dispatch runs its OWN full 3-attempt budget.
+// ── gap-fan-in-ff-retry-counter-scope (AC1/AC2): attempt count is PER-DISPATCH (per-runId fallback) ────
+// The retry record is append-only and accumulates across ALL dispatches. The count key is now the
+// per-dispatch attemptKey (gap-ff-retry-counter-runid-no-longer-per-dispatch) with a runId fallback —
+// this test exercises the FALLBACK: a DISTINCT runId (e.g. a new driver process after a restart) still
+// starts its own 3-attempt budget and does NOT inherit a prior process's failures. (The SAME-runId +
+// new-attemptKey reset — the production shape — is covered by the dk test below.) AC1 = a fresh
+// dispatch's first failure is attempt 1 (no escalation); AC2 = the fresh dispatch runs its OWN full
+// 3-attempt budget.
 
 test("gap-fan-in-ff-retry-counter-scope — a fresh dispatch (new runId) does NOT inherit historical failures: attempts restart at 1 and run the full 3-attempt budget", () => {
   const dir = makeTmp("scope");
@@ -516,15 +520,15 @@ test("gap-fan-in-ff-retry-counter-scope — a fresh dispatch (new runId) does NO
     const esc = path.join(st, "escalations.jsonl");
     const capArgs = captureArgs(st, "scope-t", tip);
 
-    // Seed 2 failures under an OLD runId (a prior, completed dispatch) — a distinct runId string.
-    const oldRunId = "fm-scope-t-1111111111111-oldrun";
+    // Seed 2 failures under an OLD driver-process runId (no attemptKey — the runId fallback key).
+    const oldRunId = "wk-prod-1111111111111";
     fs.writeFileSync(retries, [
       JSON.stringify({ taskId: "scope-t", attempt: 1, developHead: "0".repeat(40), ts: "2026-08-14T10:00:00Z", epoch: 1786700000, runId: oldRunId, agentId: "a1", mergeTarget: "develop", error: "adv" }),
       JSON.stringify({ taskId: "scope-t", attempt: 2, developHead: "1".repeat(40), ts: "2026-08-14T10:01:00Z", epoch: 1786700060, runId: oldRunId, agentId: "a2", mergeTarget: "develop", error: "adv" }),
     ].join("\n") + "\n");
 
-    // The fresh dispatch carries a NEW runId.
-    const newRunId = "fm-scope-t-2222222222222-newrun";
+    // The fresh dispatch carries a NEW driver-process runId (e.g. after a restart) — distinct key ⇒ reset.
+    const newRunId = "wk-prod-2222222222222";
     const args = ["--task", "scope-t", "--root", dir, "--suite-state", suite, ...capArgs, "--lock-events", events, "--retry-record", retries, "--escalations", esc, "--run-id", newRunId];
 
     // AC1: the fresh dispatch's FIRST failure is attempt 1 (a plain retry), NOT the inherited attempt 3.
@@ -544,6 +548,106 @@ test("gap-fan-in-ff-retry-counter-scope — a fresh dispatch (new runId) does NO
     const fresh = lines.slice(2).map(JSON.parse);
     assert.deepEqual(fresh.map((r) => r.attempt), [1, 2, 3], "fresh dispatch attempts restart from 1");
     assert.ok(fresh.every((r) => r.runId === newRunId), "fresh records carry the new runId");
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
+// ── gap-ff-retry-counter-runid-no-longer-per-dispatch (AC1/AC2/AC4) ────────────────────────────────────
+// runId's semantics drifted from "one per dispatch" to "one per driver process" (wk-prod-<epoch>), so the
+// per-runId counter (gap-fan-in-ff-retry-counter-scope — correct when runId WAS per-dispatch) now latches
+// a task's retry budget across independent dispatches. The fix keys the counter on a per-dispatch identity
+// (attemptKey — the mechanical fan-in's per-suite runId mfi-<task>-<epoch>-<rand>) and carries it in the
+// retry record. AC1 = same runId + NEW attemptKey ⇒ attempts restart at 1; AC2 = the fresh dispatch runs
+// its OWN full 3-attempt budget, and reverting to runId keying (no attempt-key) re-latches the first try;
+// AC4 = the retry record carries the new count key.
+
+test("gap-ff-retry-counter-runid-no-longer-per-dispatch — same runId + NEW attemptKey restarts at 1 (AC1/AC2); keying on runId re-latches (AC2 negative); record carries attemptKey (AC4)", () => {
+  const dir = makeTmp("dk");
+  const st = stateDir("dk");
+  try {
+    initRepo(dir);
+    const tip = makeTaskBranch(dir, "dk-t");
+    fs.writeFileSync(path.join(dir, "adv.txt"), "adv\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", "adv");
+    const suite = writeSuiteState(st, { state: "green", startedAt: "2026-08-14T00:00:00Z", finishedAt: 1786660000, scope: "main" });
+    const events = path.join(st, "events.jsonl");
+    const retries = path.join(st, "retries.jsonl");
+    const esc = path.join(st, "escalations.jsonl");
+    const capArgs = captureArgs(st, "dk-t", tip);
+
+    // The driver-process runId (constant across dispatches — the post-drift shape), with 2 historical
+    // failures from a PREVIOUS dispatch (which carried its own per-dispatch attemptKey).
+    const processRunId = "wk-prod-1788717081";
+    const oldAttemptKey = "mfi-dk-t-1111111111111-old";
+    fs.writeFileSync(retries, [
+      JSON.stringify({ taskId: "dk-t", attempt: 1, developHead: "0".repeat(40), ts: "2026-08-14T10:00:00Z", epoch: 1786700000, runId: processRunId, attemptKey: oldAttemptKey, agentId: "a1", mergeTarget: "develop", error: "adv" }),
+      JSON.stringify({ taskId: "dk-t", attempt: 2, developHead: "1".repeat(40), ts: "2026-08-14T10:01:00Z", epoch: 1786700060, runId: processRunId, attemptKey: oldAttemptKey, agentId: "a2", mergeTarget: "develop", error: "adv" }),
+    ].join("\n") + "\n");
+
+    // AC1: a fresh dispatch — SAME runId (the driver process), NEW attemptKey (per-dispatch).
+    const newAttemptKey = "mfi-dk-t-2222222222222-new";
+    const args = ["--task", "dk-t", "--root", dir, "--suite-state", suite, ...capArgs, "--lock-events", events, "--retry-record", retries, "--escalations", esc, "--run-id", processRunId, "--attempt-key", newAttemptKey];
+
+    const r1 = runMerge(args);
+    assert.equal(r1.status, 1, "fresh dispatch (same runId, new attemptKey) first failure is attempt 1 (plain retry), not the inherited attempt 3");
+    assert.ok(!fs.existsSync(esc), "NO escalation on the fresh dispatch's first failure (AC1)");
+
+    // AC4: the retry record carries the NEW count key (the per-dispatch identity).
+    const rec = JSON.parse(fs.readFileSync(retries, "utf8").trim().split("\n").filter(Boolean).pop());
+    assert.equal(rec.attempt, 1, "fresh dispatch first record is attempt 1");
+    assert.equal(rec.attemptKey, newAttemptKey, "AC4: the retry record carries the new count key");
+    assert.equal(rec.runId, processRunId, "runId stays the driver-process id (not overwritten by the count key)");
+
+    // AC2: the fresh dispatch runs its OWN full 3-attempt budget.
+    assert.equal(runMerge(args).status, 1, "second failure is attempt 2 (plain retry)");
+    const r3 = runMerge(args);
+    assert.equal(r3.status, 3, "third failure escalates — its OWN budget, not the old dispatch's");
+    assert.match(r3.stderr, /ANTI-LIVELOCK/);
+
+    // AC2 negative: revert the count key to runId (NO --attempt-key, records keyed on runId) — the same
+    // 2 historical failures latch the FIRST try into escalation (the pre-fix bug).
+    const retries2 = path.join(st, "retries2.jsonl");
+    const esc2 = path.join(st, "escalations2.jsonl");
+    fs.writeFileSync(retries2, [
+      JSON.stringify({ taskId: "dk-t", attempt: 1, developHead: "0".repeat(40), ts: "2026-08-14T10:00:00Z", epoch: 1786700000, runId: processRunId, agentId: "a1", mergeTarget: "develop", error: "adv" }),
+      JSON.stringify({ taskId: "dk-t", attempt: 2, developHead: "1".repeat(40), ts: "2026-08-14T10:01:00Z", epoch: 1786700060, runId: processRunId, agentId: "a2", mergeTarget: "develop", error: "adv" }),
+    ].join("\n") + "\n");
+    const rNeg = runMerge(["--task", "dk-t", "--root", dir, "--suite-state", suite, ...capArgs, "--lock-events", events, "--retry-record", retries2, "--escalations", esc2, "--run-id", processRunId]);
+    assert.equal(rNeg.status, 3, "keyed back on runId (no attempt-key), the 2 historical failures latch the FIRST try into escalation (the pre-fix bug)");
+    assert.match(rNeg.stderr, /ANTI-LIVELOCK/);
+  } finally {
+    cleanup(dir);
+    cleanup(st);
+  }
+});
+
+test("gap-ff-retry-counter-runid-no-longer-per-dispatch AC3 — the SAME dispatch (same attemptKey) still escalates on its 3rd ff failure (anti-livelock preserved)", () => {
+  const dir = makeTmp("dk3");
+  const st = stateDir("dk3");
+  try {
+    initRepo(dir);
+    const tip = makeTaskBranch(dir, "dk3-t");
+    fs.writeFileSync(path.join(dir, "adv.txt"), "adv\n", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", "adv");
+    const suite = writeSuiteState(st, { state: "green", startedAt: "2026-08-14T00:00:00Z", finishedAt: 1786660000, scope: "main" });
+    const events = path.join(st, "events.jsonl");
+    const retries = path.join(st, "retries.jsonl");
+    const esc = path.join(st, "escalations.jsonl");
+    const capArgs = captureArgs(st, "dk3-t", tip);
+    const args = ["--task", "dk3-t", "--root", dir, "--suite-state", suite, ...capArgs, "--lock-events", events, "--retry-record", retries, "--escalations", esc, "--run-id", "wk-prod-1788717081", "--attempt-key", "mfi-dk3-t-3333333333333"];
+
+    assert.equal(runMerge(args).status, 1, "attempt 1 plain retry");
+    assert.equal(runMerge(args).status, 1, "attempt 2 plain retry");
+    const r3 = runMerge(args);
+    assert.equal(r3.status, 3, "attempt 3 escalates within the SAME dispatch (same attemptKey)");
+    assert.match(r3.stderr, /ANTI-LIVELOCK/);
+    const lines = fs.readFileSync(retries, "utf8").trim().split("\n").filter(Boolean).map(JSON.parse);
+    assert.deepEqual(lines.map((r) => r.attempt), [1, 2, 3], "attempts accumulate 1→2→3 within one dispatch");
+    assert.ok(lines.every((r) => r.attemptKey === "mfi-dk3-t-3333333333333"), "all three records share the same attemptKey (one dispatch)");
   } finally {
     cleanup(dir);
     cleanup(st);
@@ -1008,7 +1112,7 @@ test("AC3 — production replay: `.quay/message-receipts.jsonl` dirty no longer 
     const esc = path.join(st, "escalations.jsonl");
     const capArgs = captureArgs(st, "replay-t", tip);
 
-    const r = runMerge(["--task", "replay-t", "--root", dir, ...capArgs, "--lock-events", events, "--retry-record", retries, "--escalations", esc, "--run-id", "fm-replay-1786000", "--agent-id", "sub-uuid"]);
+    const r = runMerge(["--task", "replay-t", "--root", dir, ...capArgs, "--lock-events", events, "--retry-record", retries, "--escalations", esc, "--run-id", "wk-prod-1786000000", "--agent-id", "sub-uuid"]);
     assert.equal(r.status, 0, `the replay must land on the first try (millisecond pre-flight), not exit 2:\nstdout=${r.stdout}\nstderr=${r.stderr}`);
     assert.match(r.stdout, /OK — develop fast-forwarded/, "the ff landed");
     assert.ok(!fs.existsSync(retries), "no retry record");

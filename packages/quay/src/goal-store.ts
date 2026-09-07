@@ -33,7 +33,15 @@
 //        own `updatedAt` (hard rule 4b: a quantity the measured object produces is not a
 //        measurement). Zero ACs (or no evidence.at) ⇒ notEvaluated.
 //   I4 — divergence: `status: active` while `isGoalAchieved()` is true ⇒ "achieved but nobody
-//        closed it", reported by `check --staleness`.
+//        closed it", reported by `check --staleness` as the `divergent` bucket (GOAL ids).
+//   I5 — achieved-but-failing: an AC `status: achieved` whose `criterion` now exits non-zero ⇒
+//        "achieved but no longer verifiable", reported by `check --achieved-failing` as the
+//        `achievedButFailing` bucket (AC ids). SEPARATE from I4 (⛔ never merged): I4 is
+//        "active yet achieved" (should be closed), I5 is "achieved yet failing" (the opposite
+//        direction, at the AC layer, produced only by RUNNING the criterion — never a stored field).
+//        ⛔ I5 RUNS criteria, so it is a SEPARATE subcommand from `check --staleness`, which is
+//        PURE-READ — otherwise an achieved criterion that itself calls `check --staleness` (AC-175)
+//        recurses unboundedly (2026-09-07 production incident, host load 41.89).
 //
 // cap / stale are HUMAN-GIVEN initial policy values with NO cost-structure backing (hard rule 4:
 // no numeric threshold before the cost is measured). Re-estimate from .quay/goal-round.jsonl's
@@ -58,11 +66,21 @@ import {
   withFileLock,
   slugify,
 } from "./frontmatter-store-base.ts";
+import { runAcceptance } from "./gate/acceptance-runner.ts";
 
 export const VALID_GOAL_STATUSES = ["draft", "active", "achieved", "superseded", "retired"];
 
 const GOAL_ID_RE = /^GOAL-\d{3,}$/;
 const AC_ID_RE = /^AC-\d{3,}$/;
+
+// RE-ENTRANCY GUARD env var (乙, gap-goal-achieved-but-failing-no-handler). While `checkAchievedFailing`
+// is running a criterion, it sets this in process.env; runAcceptance's spawnSync (no `env` override)
+// inherits it into the criterion's child shell. A criterion whose own command calls back into
+// `check --achieved-failing` (or `gate`) therefore spawns a grandchild that sees the var and REFUSES
+// to run criteria — bounding the recursion (the 2026-09-07 production incident was an unbounded
+// `check --staleness` → criterion → `check --staleness` chain). Exported so the falsifiability test
+// can `env -u` it to prove the observation measures real behavior.
+export const GOAL_ACCEPTANCE_ACTIVE_ENV = "QUAY_GOAL_ACCEPTANCE_ACTIVE";
 
 // Frontmatter keys the view-model owns explicitly; everything else in the frontmatter
 // (any future field) is preserved verbatim — the same discipline as adr-store/document-store.
@@ -366,6 +384,9 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
   // as healthy (hard rule 3b). `lastProgressAt` is DERIVED from the ACs' `evidence.at` max —
   // never the goal's own `updatedAt` (hard rule 4b). `divergent` is the I4 signal: status
   // active while `isGoalAchieved()` is true ("achieved but nobody closed it").
+  // ⛔ PURE-READ — it must NOT run criteria: an achieved criterion that itself calls
+  // `check --staleness` (AC-175) would recurse unboundedly (2026-09-07 production incident).
+  // The criterion-running I5 check lives in `checkAchievedFailing` (a SEPARATE subcommand).
   function checkStaleness(nowMs: number = Date.now()): {
     fresh: string[];
     stale: string[];
@@ -401,6 +422,49 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       }
     }
     return { fresh, stale, notEvaluated, divergent, cap, staleMs };
+  }
+
+  // I5 checker (check --achieved-failing). An AC `status: achieved` whose `criterion` now exits
+  // non-zero ⇒ "achieved but no longer verifiable". SEPARATE from I4 (⛔ never merged): I4 is
+  // "active yet achieved" (GOAL ids, direction "not closed"), I5 is "achieved yet failing" (AC ids,
+  // direction "no longer verifiable"). Produced ONLY by RUNNING the criterion — never a stored field.
+  // Scope: achieved ACs under ACTIVE goals (the same scope as checkStaleness). Empty/missing
+  // criterion is SKIPPED: that is the separate `no-criterion` kind meta-driver reports, not "a
+  // criterion that now fails" (a criterion that never existed cannot have started failing).
+  //
+  // ⛔ RE-ENTRANCY GUARD (乙): a criterion whose own shell command calls back into this checker
+  // (or `gate`) must NOT run criteria again — otherwise it recurses unboundedly. The guard is the
+  // GOAL_ACCEPTANCE_ACTIVE_ENV env var, inherited by the criterion's child shell (runAcceptance's
+  // spawnSync passes no `env`, so it inherits process.env): while running criteria we set it; a
+  // nested invocation that sees it REFUSES and reports `evaluated: false` (⛔ not an empty array
+  // masquerading as "no achieved-but-failing AC" — hard rule 3b). 甲 (structural isolation:
+  // `check --staleness` is pure-read) means the 8 real achieved criteria that call
+  // `check --staleness`/`list`/`get` never even reach this path; 乙 is defense-in-depth for a
+  // future criterion that calls the criterion-runner itself.
+  function checkAchievedFailing(): { achievedButFailing: string[]; evaluated: boolean } {
+    if (process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] === "1") {
+      return { achievedButFailing: [], evaluated: false };
+    }
+    const achievedButFailing: string[] = [];
+    const root = path.dirname(goalDir);
+    const prev = process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
+    process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = "1";
+    try {
+      const activeGoalIds = new Set(activeGoals().map((g) => String(g.id)));
+      for (const ac of list()) {
+        if (!isCriterionId(String(ac.id))) continue;
+        if (ac.status !== "achieved") continue;
+        if (!activeGoalIds.has(String(ac.goal))) continue;
+        const criterion = typeof ac.criterion === "string" ? ac.criterion : "";
+        if (criterion.trim() === "") continue;
+        const res = runAcceptance({ command: criterion, cwd: root, timeoutMs: 60000 });
+        if (!res.ok) achievedButFailing.push(String(ac.id));
+      }
+    } finally {
+      if (prev === undefined) delete process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
+      else process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = prev;
+    }
+    return { achievedButFailing, evaluated: true };
   }
 
   /** Direct read-modify-write of the old goal's file (inside the NEW goal's write lock). */
@@ -522,7 +586,7 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
     });
   }
 
-  return { list, get, write, activeGoals, listActiveCriteria, isGoalAchieved, checkWithinCap, checkStaleness };
+  return { list, get, write, activeGoals, listActiveCriteria, isGoalAchieved, checkWithinCap, checkStaleness, checkAchievedFailing };
 }
 
 // ── Direct-invocation entry (Contract invoke: `node packages/quay/src/goal-store.ts`) ──────────────
@@ -535,7 +599,9 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
 //                               empty criterion fails CLOSED (red) and still records the event.
 //   check                     — I1′ checker: withinCap + hasDirection (exit 1 when over cap)
 //   check --staleness         — I3 three-bucket staleness (fresh/stale/notEvaluated) + I4
-//                               divergence (exit 1 when a divergent goal exists)
+//                               divergence (exit 1 when a divergent goal exists). PURE-READ.
+//   check --achieved-failing  — I5 achieved-but-failing (exit 1 when an achieved-but-failing AC
+//                               exists; runs each achieved AC's criterion under a re-entrancy guard)
 import { fileURLToPath } from "node:url";
 
 async function main(argv: string[]) {
@@ -630,7 +696,7 @@ async function main(argv: string[]) {
       if (!id) { console.error("goal-store: gate requires <id>"); return 2; }
       // Criterion execution REUSES the task acceptance-runner shape (SPEC §3) and the gate
       // ledger REUSES the existing GateEvent format (.quay/gate-events.jsonl).
-      const { runAcceptance } = await import("./gate/acceptance-runner.ts");
+      // (`runAcceptance` is a static import at the top — also used by checkAchievedFailing's I5 bucket.)
       const { appendGateEvent } = await import("./gate/gate-event-store.ts");
       const rec = store.get(id);
       if (!rec) { console.error(`goal-store: no such goal: ${id}`); return 2; }
@@ -666,6 +732,11 @@ async function main(argv: string[]) {
       return verdict === "pass" ? 0 : 1;
     }
     case "check": {
+      if (rest.includes("--achieved-failing")) {
+        const r = store.checkAchievedFailing();
+        process.stdout.write(JSON.stringify(r, null, 2) + "\n");
+        return r.achievedButFailing.length === 0 && r.evaluated ? 0 : 1;
+      }
       if (rest.includes("--staleness")) {
         const r = store.checkStaleness();
         process.stdout.write(JSON.stringify(r, null, 2) + "\n");
