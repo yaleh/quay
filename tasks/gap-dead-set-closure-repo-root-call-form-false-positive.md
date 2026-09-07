@@ -2,7 +2,7 @@
 id: gap-dead-set-closure-repo-root-call-form-false-positive
 title: 死集闭包漏认 ${repo_root}/plugin/scripts/<name> 执行形式——after.dead 混入 ≥15 个仍被
   runner-static-gate 执行的 checker（AC158 负控制发现）
-status: done
+status: ready
 labels:
   - gap
 parent: null
