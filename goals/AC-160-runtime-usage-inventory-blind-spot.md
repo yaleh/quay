@@ -19,7 +19,7 @@ origin: >
 
   §11b-i（「乙、把仪器修对——否则下一次普查还是错的」）。
 evidence:
-  at: 2026-09-07T01:14:24.545Z
+  at: 2026-09-07T01:15:21.090Z
   verdict: fail
   reading: acceptance failed (exit 1)
 ---
