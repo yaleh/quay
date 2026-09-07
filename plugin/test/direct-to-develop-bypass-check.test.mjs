@@ -51,6 +51,9 @@ import {
   isReflogDirectCommit,
   buildReflogIndex,
   classifyLandingMode,
+  isReflogFanIn,
+  buildFanInBrackets,
+  classifySpineLandingMode,
 } from "../scripts/direct-to-develop-bypass-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -957,6 +960,121 @@ test("PURE classifyLandingMode — ledger ⇒ fan-in；reflog direct ⇒ direct�
   assert.equal(classifyLandingMode("unknownsha1", ledger, reflog), "unclassifiable", "ledger 无且 reflog 无 ⇒ unclassifiable");
   assert.equal(classifyLandingMode("directsha1", ledger, null), "unclassifiable", "reflog 不可读 ⇒ unclassifiable");
   assert.equal(classifyLandingMode("ledgersha1", ledger, null), "fan-in", "ledger 优先于 reflog 不可读");
+});
+
+// ── gap-ac194 括注分类（first-parent 扫描 + reflog 括注）──────────────────────────────────────────
+// 缺陷（gap-ac194-bypass-check-unclassifiable-window）：ff-merge 只在 reflog 记 tip（`git push .` /
+// `git merge --ff-only`），分支上被并入的中间 commit 无独立 reflog 条目 ⇒ 三态分类里大量 spine commit
+// 落进 unclassifiable ⇒ AC-194 `expect: exit 0` 结构上不可达。修法：只扫 first-parent spine（off-spine
+// 结构上非直投），对 spine 上无 reflog 条目的中间 commit 用 fan-in 括注 [P, T] 判 fan-in delivered。
+
+test("PURE isReflogFanIn — push / merge … Fast-forward 是 fan-in 落地；commit/reset/rebase 不是", () => {
+  assert.equal(isReflogFanIn("push"), true, "git push . src:develop 落地 = fan-in");
+  assert.equal(isReflogFanIn("merge task/gap-x: Fast-forward"), true, "git merge --ff-only 落地 = fan-in");
+  assert.equal(isReflogFanIn("merge author: Fast-forward"), true);
+  assert.equal(isReflogFanIn("commit: direct"), false, "直接提交不是 fan-in 落地");
+  assert.equal(isReflogFanIn("commit (amend): x"), false);
+  assert.equal(isReflogFanIn("reset: moving to HEAD~1"), false, "reset 既非直投也非 fan-in 落地");
+  assert.equal(isReflogFanIn("rebase (finish): returning to refs/heads/develop"), false);
+  assert.equal(isReflogFanIn("checkout: moving from x to develop"), false);
+  assert.equal(isReflogFanIn(""), false);
+  assert.equal(isReflogFanIn(null), false);
+});
+
+test("PURE buildFanInBrackets — faninTips + 括注对（T=tip, P=前一条更旧）；最老条目无前一条 ⇒ 不产括注", () => {
+  const { faninTips, brackets } = buildFanInBrackets([
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tpush",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tmerge task/gap-x: Fast-forward",
+    "cccccccccccccccccccccccccccccccccccccccc\tcommit: direct",
+  ]);
+  assert.ok(faninTips.has("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+  assert.ok(faninTips.has("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+  assert.ok(!faninTips.has("cccccccccccccccccccccccccccccccccccccccc"), "commit 不是 fanin tip");
+  assert.equal(brackets.length, 2);
+  assert.deepEqual(brackets[0], { T: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", P: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }, "newest 括注 P=前一条（更旧）");
+  assert.deepEqual(brackets[1], { T: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", P: "cccccccccccccccccccccccccccccccccccccccc" });
+  // 最老 fanin 条目（无前一条）⇒ 不产括注（其「之前」超出 reflog 保留，不可分类——硬规则③b）
+  const solo = buildFanInBrackets(["zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\tpush"]);
+  assert.ok(solo.faninTips.has("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"));
+  assert.equal(solo.brackets.length, 0, "最老条目无前一条 ⇒ 不产括注");
+  assert.equal(buildFanInBrackets([]).brackets.length, 0);
+  assert.equal(buildFanInBrackets(null).faninTips.size, 0);
+});
+
+test("PURE classifySpineLandingMode — ledger/direct/faninTips/括注覆盖 ⇒ fan-in|direct；否则 unclassifiable", () => {
+  const ledger = new Set(["L"]);
+  const direct = new Set(["D"]);
+  const faninTips = new Set(["T"]);
+  const covered = new Set(["M"]); // 中间 commit（括注覆盖）
+  assert.equal(classifySpineLandingMode("L", ledger, direct, faninTips, covered), "fan-in", "ledger 优先");
+  assert.equal(classifySpineLandingMode("D", ledger, direct, faninTips, covered), "direct", "commit 直投");
+  assert.equal(classifySpineLandingMode("T", ledger, direct, faninTips, covered), "fan-in", "fanin tip");
+  assert.equal(classifySpineLandingMode("M", ledger, direct, faninTips, covered), "fan-in", "括注覆盖的中间 commit");
+  assert.equal(classifySpineLandingMode("X", ledger, direct, faninTips, covered), "unclassifiable", "落不进任何括注、非 commit ⇒ unclassifiable（3b）");
+  assert.equal(classifySpineLandingMode("D", ledger, null, faninTips, covered), "unclassifiable", "reflog 不可读 ⇒ unclassifiable");
+  assert.equal(classifySpineLandingMode("L", ledger, null, faninTips, covered), "fan-in", "ledger 优先于 reflog 不可读");
+});
+
+test("AC6 CLI — ff 括注分类：多 commit task 分支 ff 落地 ⇒ 中间 spine commit 判 fan-in delivered、unclassifiable 归零", () => {
+  const dir = makeTmp("cli-bracket");
+  try {
+    initRepo(dir);
+    const base = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+    // task 分支 3 个 commit——ff 后中间 2 个（a/b）无独立 reflog 条目，只 tip（c）有 merge Fast-forward。
+    gitCmd(dir, "checkout", "-q", "-b", "task/gap-bracket");
+    fs.mkdirSync(path.join(dir, "plugin", "scripts"), { recursive: true });
+    for (const n of ["a", "b", "c"]) {
+      fs.writeFileSync(path.join(dir, "plugin", "scripts", `${n}.ts`), `export const ${n} = 1;\n`, "utf8");
+      gitCmd(dir, "add", "-A");
+      gitCmd(dir, "commit", "-q", "-m", `feat: commit ${n}`);
+    }
+    gitCmd(dir, "checkout", "-q", "develop");
+    const ff = gitCmd(dir, "merge", "--ff-only", "task/gap-bracket");
+    assert.equal(ff.status, 0, "ff 应成功");
+
+    const r = runChecker(["--root", dir, "--baseline", base]);
+    assert.equal(r.status, 0, `ff 括注分类后中间 commit 不得 unclassifiable ⇒ exit 0: ${r.stdout}${r.stderr}`);
+    const out = jsonOut(r);
+    assert.equal(out.evaluated, true);
+    assert.equal(out.ok, true);
+    assert.equal(out.unclassifiableCommits, 0, "unclassifiable 归零（中间 commit 被括注判 fan-in delivered）");
+    assert.equal(out.denominator.unclassifiableCommits, 0, "denominator 同步归零");
+    assert.equal(out.denominator.totalDirectCommits, 0, "ff 落地不产生直投");
+    assert.equal(out.classification.ratio, 1, "全部 first-parent 提交可分类");
+    assert.equal(out.classification.firstParent, 3, "first-parent spine = 3 条");
+    assert.equal(out.classification.offSpine, 0, "线性 temp repo 无 off-spine");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("AC5 CLI — 括注不越界：reflog 剪掉（expire）后中间 commit 无括注可落 ⇒ 仍 NOT-EVALUATED（不与合格同形）", () => {
+  const dir = makeTmp("cli-bracket-gc");
+  try {
+    initRepo(dir);
+    const base = gitCmd(dir, "rev-parse", "HEAD").stdout.trim();
+    gitCmd(dir, "checkout", "-q", "-b", "task/gap-bgc");
+    fs.mkdirSync(path.join(dir, "plugin", "scripts"), { recursive: true });
+    for (const n of ["a", "b", "c"]) {
+      fs.writeFileSync(path.join(dir, "plugin", "scripts", `${n}.ts`), `export const ${n} = 1;\n`, "utf8");
+      gitCmd(dir, "add", "-A");
+      gitCmd(dir, "commit", "-q", "-m", `feat: commit ${n}`);
+    }
+    gitCmd(dir, "checkout", "-q", "develop");
+    gitCmd(dir, "merge", "--ff-only", "task/gap-bgc");
+    // 模拟 gc 全局剪：expire 全部 reflog ⇒ 括注无从建立 ⇒ 中间 commit（及 tip）都落不进括注。
+    gitCmd(dir, "reflog", "expire", "--expire=now", "--all");
+
+    const r = runChecker(["--root", dir, "--baseline", base]);
+    assert.equal(r.status, 3, `reflog 剪后无括注可落 ⇒ NOT-EVALUATED exit 3（⛔ 不得 exit 0）: ${r.stdout}${r.stderr}`);
+    const out = jsonOut(r);
+    assert.equal(out.evaluated, false, "括注失效 ⇒ NOT-EVALUATED（硬规则③b）");
+    assert.equal(out.ok, true);
+    assert.equal(out.reason, "unclassifiable-commits-in-range");
+    assert.ok(out.unclassifiableCommits > 0, "中间 commit 落不进括注 ⇒ unclassifiable > 0");
+  } finally {
+    cleanup(dir);
+  }
 });
 
 // ── CLI 集成：ledger 判定（AC2）与 reflog 剪后退 NOT-EVALUATED（AC3）─────────────────────────────
