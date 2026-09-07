@@ -86,6 +86,7 @@ goal_ac: AC-166
 - plugin/test/pool-quality-judge.test.mjs（workflow 路径 .claude/workflows → plugin/workflows）
 - docs/analysis/test-file-baseline.txt（重算，归档测试文件移除出 baseline）
 - plugin/test/codex-stage1-adapter.test.mjs（A3 指令面改 .agents 唯一份 + .claude/skills 退役断言）
+- scripts/agents-claude-drift-check.ts（移除 .claude/skills/quay-directive 退役副本检查）
 - plugin/test/execute-suite-fix-scope-gate.test.mjs（COPIES 去 .claude 双副本，AC1 改 single-source）
 - plugin/test/execute-suite-fix-relaunch-snapshot.test.mjs（COPIES 去 .claude 双副本，AC3 改 single-source）
 - plugin/test/fan-in-execute-paths.test.mjs（.claude/workflows → plugin/workflows fixture 路径）
