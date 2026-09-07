@@ -1,7 +1,7 @@
 ---
 id: AC-151
 title: driver 两级分层落地（Layer 0 + Layer 1a/1b）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-002
 criterion: |
@@ -14,10 +14,6 @@ origin: >
   §2.1/§2.5/§2.6，
 
   ⛔ 判据在此、设计在 SPEC，不互相复制。
-evidence:
-  at: 2026-09-06T17:03:30.855Z
-  verdict: pass
-  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：存在 **Layer 0（driver-runtime）** 与 **Layer 1a（task-processing）/ 1b（routine）**
