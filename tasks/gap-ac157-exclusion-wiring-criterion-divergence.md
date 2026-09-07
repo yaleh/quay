@@ -25,12 +25,12 @@ goal_ac: AC-157
 
 ## AC
 
-- [ ] AC1 判据取真（AC-157 自己的判据，goal-driver 下一轮独立复核并翻 pass）：`head -1 archive/INDEX.tsv | awk -F'\t' '{print NF}'` ⇒ 7，且五个文件（capability-catalog.sh / runtime-usage-inventory.ts / test.sh / laydown-set-check.sh / version-consistency-check.ts）各自 `[ -e "$f" ]` 为真、`grep -vE '^[[:space:]]*(#|//|\*)' "$f" | grep -q 'archive/'` 为真——整段 bash ⇒ exit 0
-- [ ] AC2 NUL 修复：`grep -cP '\x00' plugin/scripts/runtime-usage-inventory.ts` ⇒ 0，且 `file plugin/scripts/runtime-usage-inventory.ts` 不再报 `data`、grep 不再报 `binary file matches`
-- [ ] AC3 两面字面引用：`for f in plugin/scripts/runtime-usage-inventory.ts scripts/test.sh; do grep -vE '^[[:space:]]*(#|//|\*)' "$f" | grep -qF 'archive/'; done` ⇒ exit 0
-- [ ] AC4 行为不变：archive 排除功能与 globMatch `*` 语义未被改坏——`runtime-usage-inventory.test.mjs` 与 `archive-exclusion-wiring.test.mjs` 仍全绿（经 `scripts/test.sh` 的 engine 组跑法，或 fan-in 的 suite 步机械验证）
-- [ ] AC5 能取假：临时撤掉任一面改动（如把字面 `archive/` 改回 `archive`/`archive\/`）⇒ AC1 判据 exit 非 0（证明判据测的是真接线，不是恒真）
-- [ ] AC6 `node plugin/scripts/task-schema-check.ts tasks/gap-ac157-exclusion-wiring-criterion-divergence.md` ⇒ exit 0
+- [x] AC1 判据取真（AC-157 自己的判据，goal-driver 下一轮独立复核并翻 pass）：`head -1 archive/INDEX.tsv | awk -F'\t' '{print NF}'` ⇒ 7，且五个文件（capability-catalog.sh / runtime-usage-inventory.ts / test.sh / laydown-set-check.sh / version-consistency-check.ts）各自 `[ -e "$f" ]` 为真、`grep -vE '^[[:space:]]*(#|//|\*)' "$f" | grep -q 'archive/'` 为真——整段 bash ⇒ exit 0
+- [x] AC2 NUL 修复：`grep -cP '\x00' plugin/scripts/runtime-usage-inventory.ts` ⇒ 0，且 `file plugin/scripts/runtime-usage-inventory.ts` 不再报 `data`、grep 不再报 `binary file matches`
+- [x] AC3 两面字面引用：`for f in plugin/scripts/runtime-usage-inventory.ts scripts/test.sh; do grep -vE '^[[:space:]]*(#|//|\*)' "$f" | grep -qF 'archive/'; done` ⇒ exit 0
+- [x] AC4 行为不变：archive 排除功能与 globMatch `*` 语义未被改坏——`runtime-usage-inventory.test.mjs` 与 `archive-exclusion-wiring.test.mjs` 仍全绿（经 `scripts/test.sh` 的 engine 组跑法，或 fan-in 的 suite 步机械验证）
+- [x] AC5 能取假：临时撤掉任一面改动（如把字面 `archive/` 改回 `archive`/`archive\/`）⇒ AC1 判据 exit 非 0（证明判据测的是真接线，不是恒真）
+- [x] AC6 `node plugin/scripts/task-schema-check.ts tasks/gap-ac157-exclusion-wiring-criterion-divergence.md` ⇒ exit 0
 
 ## DoD
 
