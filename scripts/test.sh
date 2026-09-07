@@ -203,7 +203,9 @@ main_root="$(node --no-warnings --experimental-strip-types "${repo_root}/plugin/
 case " $* " in
   *"--list-files"*|*"--list-groups"*) ;;
   *)
-    if [ -f "${repo_root}/plugin/scripts/refresh-worktree-quay.sh" ]; then
+    if [ "${QUAY_TEST_SKIP_QUAY_REFRESH:-0}" = "1" ]; then
+      echo "scripts/test.sh: QUAY_TEST_SKIP_QUAY_REFRESH=1 — skipping worktree .quay refresh (nested selection/smoke run; outer suite already refreshed)" >&2
+    elif [ -f "${repo_root}/plugin/scripts/refresh-worktree-quay.sh" ]; then
       bash "${repo_root}/plugin/scripts/refresh-worktree-quay.sh" "${repo_root}" \
         || echo "scripts/test.sh: WARNING — refresh-worktree-quay.sh failed (exit $?); the suite may be environmentally red in this worktree" >&2
     fi
