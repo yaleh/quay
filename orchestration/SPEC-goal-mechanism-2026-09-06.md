@@ -353,3 +353,35 @@ driver **只记 `spawned: true`，不信 agent 自述**，下一轮用 `task_lis
 - §4.2 的 `cap=3` / `stale=7d` **没有成本结构支撑**，是人给的初始策略值，复核点已写死。
 - 本规格未处理 `label:milestone-candidate` 本身的存废，也未处理 `document-store` 的归属不一致——
   两者都应单独立观察项，不在本规格的 AC 内。
+
+---
+
+## 11. task 层判据是一次性的，需长期维持的保证上移 goal 层
+
+**这是 GOAL-007（done 任务的判据后来变假无人再评估，三例实测）方向【丁】的落点**，不是新提案。
+
+**层级不对称（根因，逐字记录）**：goal 层【有】再评估——goal-driver 每轮（约 42 秒）对每条
+active AC 跑 `gateCriterion`，产出 pass/fail，achieved 与 fail 的分歧会被报为
+`achieved-but-failing`；task 层【没有】任何等价物——`extra.acceptance` 只在 fan-in 当轮跑一次、
+此后再不重跑，「能取假」的负控制在当轮验证一次即被丢弃，不成为常驻判据。同一个洞在两层都存在，
+但 goal 层至少能【看见】它（其处理者已立 gap-goal-achieved-but-failing-no-handler），
+task 层连检测者都没有。
+
+**结论：task 层判据是一次性的验收**——它回答「这次实现对不对」，不回答「这个保证以后还成不成立」。
+task 翻 done 后，其判据不再被任何机制重新评估（GOAL-007 三例实测：全部 status: done、全部由人
+手工发现而非机制发现，且常驻测试因 fixture 钉死前提而恒绿）。
+
+**上移规则：凡需要长期维持的保证，一律显式上移为 goal 层 AC**（`kind: criterion`），那里
+goal-driver 每轮已有再评估。上移把「哪些保证值得长期维持」变成一个显式选择，而不是默认所有
+task AC 都长期有效。这条不对称必须进正本，否则它只活在一次对话里。
+
+**这是对四条候选（甲/乙/丙/丁）的取舍**：甲（撰写纪律，取假条件成常驻测试）守与不守在记录上
+无法区分（硬规则⑨，应造产物而非写得更醒目）；乙（比对测试 fixture 取值与生产载体取值）只覆盖
+三例中的①，②是 abort 分支未覆盖、③是绕闸，都不是 fixture 与生产的取值不一致；丙（task 层
+仿 goal-driver 重跑判据）有先例、形态清楚，但成本与判据选择未决。丁（上移 goal 层）不新增机制，
+把长期性保证的归属一次性摆正，且与已有 goal-driver 再评估环直接衔接——它是唯一一个既不需新契约、
+又不把「维持」当默认的选项。
+
+**成本边界（硬规则④推论一：成本结构未知前不设采样率/周期）**：task 数以百计、多数 acceptance 是
+suite 规模命令，不能周期性重跑全部 done 任务的 acceptance。上移之后，长期保证的重跑成本由
+goal-driver 每轮对 active AC 的轻量 criterion 承担，而非对 task acceptance 的全量重放。
