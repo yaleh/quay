@@ -2,7 +2,7 @@
 id: gap-dead-set-closure-repo-root-call-form-false-positive
 title: 死集闭包漏认 ${repo_root}/plugin/scripts/<name> 执行形式——after.dead 混入 ≥15 个仍被
   runner-static-gate 执行的 checker（AC158 负控制发现）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -19,10 +19,10 @@ AC158 执行批次一的负控制（Plan 步骤 1）发现 `docs/analysis/dead-s
 
 ## AC
 
-- [ ] 闭包补认 `${repo_root}/plugin/scripts/<name>` 执行形式：对已知活体样本 `tmp-leak-pairing-check.sh` 干跑必须命中 `runner-static-gate.ts` 的 run_checker 调用者，命中 0 判谓词写错（零计数的配套动作）
-- [ ] 重算死集：`after.deadCount` 下降（112 → 不含活体），被摘出的活体连同各自载体行号写入 `extractedByBareFilenameScan` 或同形字段，`docs/analysis/dead-set-recomputed.json` 机器可读落盘
-- [ ] SPEC 同步：`orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md` 的 `扫描后死集: N` 写回重算后的正确值（与 JSON `after.deadCount` 一致）
-- [ ] 不引入新假阴性：重算后 `runner-static-gate.ts`/`runner-tree-state.ts` 等执行核真实执行的脚本均不在 `after.dead`；五面排除（archive/**）不回归
+- [x] 闭包补认 `${repo_root}/plugin/scripts/<name>` 执行形式：对已知活体样本 `tmp-leak-pairing-check.sh` 干跑必须命中 `runner-static-gate.ts` 的 run_checker 调用者，命中 0 判谓词写错（零计数的配套动作）
+- [x] 重算死集：`after.deadCount` 下降（112 → 不含活体），被摘出的活体连同各自载体行号写入 `extractedByBareFilenameScan` 或同形字段，`docs/analysis/dead-set-recomputed.json` 机器可读落盘
+- [x] SPEC 同步：`orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md` 的 `扫描后死集: N` 写回重算后的正确值（与 JSON `after.deadCount` 一致）
+- [x] 不引入新假阴性：重算后 `runner-static-gate.ts`/`runner-tree-state.ts` 等执行核真实执行的脚本均不在 `after.dead`；五面排除（archive/**）不回归
 
 ## DoD
 

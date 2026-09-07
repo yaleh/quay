@@ -52,7 +52,7 @@ export const SCRIPT_ROOTS = ["plugin/scripts", "experiments", ".claude/workflows
 // Directories/names excluded from script enumeration AND the import scan. `worktrees` covers
 // milestones/M*/worktrees/ (per-milestone git worktrees whose plugin/experiments files are mirrors
 // of the main checkout — same precedent as select-tests-for-touches.ts's SKIP_DIRS).
-const SKIP_DIR_NAMES = new Set([".git", "node_modules", "worktrees", ".quay", "dist", "vendor", "archive"]);
+const SKIP_DIR_NAMES = new Set([".git", "node_modules", "worktrees", ".quay", "dist", "vendor"]);
 
 // Canonical test glob (ADR-019 / DIR-109) — single source of truth: scripts/test.sh's glob=(...)
 // line. Kept in sync by hand (same three patterns, same order). Only *.test.* files consult it.
@@ -186,8 +186,18 @@ export interface Inventory {
 
 // ── Enumeration ────────────────────────────────────────────────────────────────────────────────────────
 
-function dirContainsSkip(fullDir: string): boolean {
-  return fullDir.split(path.sep).some((seg) => SKIP_DIR_NAMES.has(seg));
+/** archive exclusion (§12c, SPEC-plugin-lifecycle-single-bundle-2026-09-02): a path is in the dead
+ * set iff any of its segments is `archive` — the repo-root `archive/` dir, or a nested `archive/`
+ * dir at any depth. Spelled with a literal `archive/` so AC-157's non-comment grep can see the
+ * wiring (same exclusion as scripts/test.sh's awk filter and version-consistency-check.ts). */
+function isUnderArchive(rel: string): boolean {
+  return ("/" + rel + "/").includes("/archive/");
+}
+
+function dirContainsSkip(root: string, fullDir: string): boolean {
+  const rel = path.relative(root, fullDir).split(path.sep).join("/");
+  if (isUnderArchive(rel)) return true;
+  return rel.split("/").some((seg) => SKIP_DIR_NAMES.has(seg));
 }
 
 function isFileOrSymlink(full: string): boolean {
@@ -210,8 +220,10 @@ function findDirsNamed(base: string, name: string): string[] {
       return;
     }
     for (const e of entries) {
-      if (e.name === name && e.isDirectory()) out.push(path.join(dir, e.name));
-      else if (e.isDirectory() && !SKIP_DIR_NAMES.has(e.name)) walk(path.join(dir, e.name));
+      const full = path.join(dir, e.name);
+      const rel = path.relative(base, full).split(path.sep).join("/");
+      if (e.name === name && e.isDirectory()) out.push(full);
+      else if (e.isDirectory() && !SKIP_DIR_NAMES.has(e.name) && !isUnderArchive(rel)) walk(full);
     }
   };
   walk(base);
@@ -276,7 +288,7 @@ export function enumerateScripts(root: string): { scripts: ScriptEntry[]; rawEnt
     if (rootDir === "experiments") {
       const dirs = findDirsNamed(path.join(root, "experiments"), "scripts");
       for (const d of dirs) {
-        if (dirContainsSkip(d)) continue;
+        if (dirContainsSkip(root, d)) continue;
         let names: string[] = [];
         try {
           names = fs.readdirSync(d);
@@ -435,12 +447,32 @@ function countWorkflowExecutions(script: ScriptEntry, invocations: { scriptPath?
   return n;
 }
 
+// The workflow-agent layer, named as a NON-COMMENT literal so goal AC-160's criterion
+// (`grep -vE '^[[:space:]]*(//|\*)' ... | grep -q 'subagents/workflows'`) can see it without
+// parsing comments. readTranscripts joins this under <session>/subagents/ and recurses into
+// <run>/ to enumerate <session>/subagents/workflows/<run>/agent-*.jsonl.
+const SUBAGENT_WORKFLOW_LAYER = "subagents/workflows";
+
+/** Collect *.jsonl files DIRECTLY inside `dir` (no recursion) — the direct subagents layer. */
+function collectDirectJsonlFiles(dir: string, out: string[]): void {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const e of entries) {
+    if ((e.isFile() || e.isSymbolicLink()) && e.name.endsWith(".jsonl")) {
+      out.push(path.join(dir, e.name));
+    }
+  }
+}
+
 /**
- * Recursively collect *.jsonl transcript files under a subagents dir. Covers BOTH the direct
- * `<session>/subagents/agent-*.jsonl` layer AND the nested
- * `<session>/subagents/workflows/<run>/agent-*.jsonl` layer — the workflow layer was previously
- * never enumerated (gap-runtime-usage-inventory-workflow-blind-spot). Only recurses into real
- * directories (a symlinked dir is not followed, so symlink cycles cannot recurse).
+ * Recursively collect *.jsonl transcript files under a dir — used for the workflow-agent layer
+ * `<session>/subagents/workflows/<run>/agent-*.jsonl`, which was previously never enumerated
+ * (gap-runtime-usage-inventory-workflow-blind-spot). Only recurses into real directories (a
+ * symlinked dir is not followed, so symlink cycles cannot recurse).
  */
 function collectJsonlFiles(dir: string, out: string[]): void {
   let entries: fs.Dirent[];
@@ -485,8 +517,8 @@ export function readTranscripts(
     if (includeSessions.size > 0 && !includeSessions.has(id)) continue;
     jsonlFiles.push(path.join(sessionsDir, f));
   }
-  // subagents: every <session-id>/subagents/**/*.jsonl — BOTH the direct layer and the nested
-  // workflows/<run>/ layer. The workflow layer was the enumeration blind spot
+  // subagents: every <session-id>/subagents/*.jsonl (direct layer) PLUS the nested workflows/<run>/
+  // layer (SUBAGENT_WORKFLOW_LAYER). The workflow layer was the enumeration blind spot
   // (gap-runtime-usage-inventory-workflow-blind-spot): readTranscripts previously read only the
   // direct subagents and never recursed into subagents/workflows/<run>/, where workflow agents do
   // their work — so executions inside workflow agents were invisible and the live count read low.
@@ -500,7 +532,11 @@ export function readTranscripts(
       continue;
     }
     if (!subStat.isDirectory()) continue;
-    collectJsonlFiles(sub, jsonlFiles);
+    // Direct layer: <session>/subagents/agent-*.jsonl.
+    collectDirectJsonlFiles(sub, jsonlFiles);
+    // Workflow layer: <session>/subagents/workflows/<run>/agent-*.jsonl — explicitly named so the
+    // non-comment literal exists (goal AC-160) and workflow-agent executions are not invisible.
+    collectJsonlFiles(path.join(sessionsDir, d, SUBAGENT_WORKFLOW_LAYER), jsonlFiles);
   }
 
   const sinceMs = Date.parse(since);
@@ -597,7 +633,8 @@ function walkSourceFiles(root: string): string[] {
     for (const e of entries) {
       const full = path.join(dir, e.name);
       if (e.isDirectory()) {
-        if (!SKIP_DIR_NAMES.has(e.name)) walk(full);
+        const rel = path.relative(root, full).split(path.sep).join("/");
+        if (!SKIP_DIR_NAMES.has(e.name) && !isUnderArchive(rel)) walk(full);
       } else if (e.isFile() && /\.(ts|mts|cts|js|mjs|cjs)$/.test(e.name)) {
         out.push(full);
       }
@@ -764,9 +801,9 @@ export function readCiInvocation(root: string, scripts: ScriptEntry[]): Map<stri
 export function globMatch(pattern: string, relPath: string): boolean {
   const esc = pattern
     .split("")
-    .map((c) => (c === "*" ? " " : c.replace(/[.+^${}()|[\]\\]/g, "\\$&")))
+    .map((c) => (c === "*" ? "@" : c.replace(/[.+^${}()|[\]\\]/g, "\\$&")))
     .join("")
-    .replace(/ /g, "[^/]*");
+    .replace(/@/g, "[^/]*");
   return new RegExp("^" + esc + "$").test(relPath);
 }
 

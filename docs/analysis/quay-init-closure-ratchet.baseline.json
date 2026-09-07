@@ -1,7 +1,7 @@
 {
   "files": 133,
-  "bytes": 3855366,
-  "fingerprint": "bf69a9b189be71818e2e0ac890c2b03e8d9a183b45b9072b305ee1d19ba31f1f",
+  "bytes": 3854636,
+  "fingerprint": "144492024ca4da8a33ee348e6b9328da8a24b82c4d3869b2e728fc3a0ff57804",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
@@ -105,7 +105,7 @@
     },
     {
       "rel": "plugin/scripts/capability-catalog.sh",
-      "sha": "5ef72848ee83fad4c3f3c3e87bc5a116dfe386205fc9c5f12796f9ab483356c7"
+      "sha": "05ae221b95419aa2e280861c82b7de6a40d56a43b3fa65052c7ec13297a17d34"
     },
     {
       "rel": "plugin/scripts/checker-io.ts",
@@ -125,7 +125,7 @@
     },
     {
       "rel": "plugin/scripts/concurrent-batch-scheduler.ts",
-      "sha": "a50c1f0f73e9ded0a036bf06db3c42e4819786bb43d88fccfd408029e5c3195c"
+      "sha": "eb453918332b4612025fbdc8951d6a9c8dee30951188514ec42e508704df2463"
     },
     {
       "rel": "plugin/scripts/config-wiring-check.ts",
@@ -417,7 +417,7 @@
     },
     {
       "rel": "plugin/scripts/slot-refill.ts",
-      "sha": "375d0da8e7afb7ae3b0ee1fb8c57d65f71b6d03ac0952c8b5b866b8993e63b33"
+      "sha": "3a6d86135d7754fafce4cd22c9198ef6db327a4b0eca1ce4c0002c77c58c83fa"
     },
     {
       "rel": "plugin/scripts/start-drivers.ts",

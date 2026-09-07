@@ -175,7 +175,7 @@ test("scripts/test.sh build_deduped_files drops archive/** (negative control: fi
   // removed. Its behavior is exercised directly below on the same awk predicate.
   const src = fs.readFileSync(TEST_SH, "utf8");
   assert.ok(
-    src.includes("$1 !~ /(^|\\/)archive\\//"),
+    src.includes('$1 !~ "(^|/)archive/"'),
     "archive/** filter line must be present in build_deduped_files",
   );
 
@@ -184,7 +184,7 @@ test("scripts/test.sh build_deduped_files drops archive/** (negative control: fi
     "/repo/archive/2026-09-05/plugin/test/dead.test.mjs\tmain",
     "/repo/packages/quay/test/other.test.mjs\tmain",
   ].join("\n");
-  const out = spawnSync("awk", ["-F", "\t", "$1 !~ /(^|\\/)archive\\//"], { input: sample, encoding: "utf8" });
+  const out = spawnSync("awk", ["-F", "\t", '$1 !~ "(^|/)archive/"'], { input: sample, encoding: "utf8" });
   assert.equal(out.status, 0, "awk filter must run");
   const kept = out.stdout.split("\n").filter(Boolean);
   assert.deepEqual(kept, [

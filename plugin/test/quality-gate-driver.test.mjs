@@ -288,6 +288,32 @@ test("resident loop --once writes a round record with facts (spawn real process)
   assert.deepEqual(names, ["architecture-review", "judgment-consumer-check", "pool-quality-judge"]);
 });
 
+test("gap-meta-round-log-rel — default round log path = .quay/quality-round.jsonl (⛔ repo-root)", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-default-path-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const planCmd = path.join(tmp, "fake-plan.js");
+  const judgmentCmd = path.join(tmp, "fake-judgment.js");
+  const identityCmd = fakeIdentityScript(tmp, false);
+  const lineageCmd = fakeLineageScript(tmp, false);
+  fs.writeFileSync(planCmd, `process.stdout.write(JSON.stringify({triggers:{fired:false,reasons:[],poolCount:0,oldestUnreviewedAgeMs:0,roundsSinceLastJudge:0},pool:[],tasks:[],lastJudgeState:{status:"ok"}}));`, "utf8");
+  fs.writeFileSync(judgmentCmd, `process.stdout.write(JSON.stringify({mode:"judgment-consumer-audit",judgments_total:1,wired:1,unfinished:[],drift:false}));`, "utf8");
+  // ⛔ 不传 --round-log：测缺省落点。修复前 = repo-root quality-round.jsonl（与 carrierStats 读 .quay/ 分叉）。
+  const r = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", path.join(REPO_ROOT, "plugin", "scripts", "quality-gate-driver.ts"),
+     "--root", tmp, "--once",
+     "--plan-cmd", `node ${planCmd}`, "--judgment-cmd", `node ${judgmentCmd}`,
+     "--identity-cmd", `node ${identityCmd}`, "--lineage-cmd", `node ${lineageCmd}`],
+    { encoding: "utf8", timeout: 120_000 },
+  );
+  assert.equal(r.status, 0, `driver --once should exit 0 (stderr: ${r.stderr})`);
+  const carrier = path.join(tmp, ".quay", "quality-round.jsonl");
+  assert.ok(fs.existsSync(carrier), "heartbeat lands in .quay/quality-round.jsonl");
+  const lines = fs.readFileSync(carrier, "utf8").split("\n").filter((l) => l.trim());
+  assert.equal(lines.length, 1, "one round ⇒ one heartbeat line");
+  assert.ok(!fs.existsSync(path.join(tmp, "quality-round.jsonl")), "⛔ no repo-root quality-round.jsonl");
+});
+
 // ── gap-drain-on-routine-driver-empties-round-and-respawn-loops：halt 是轮内闸（⛔ 非进程终止条件）──
 // AC1（halt 不再终止进程）与 AC2（受闸的只是动作，观测继续）的判定面。旧实现 break ⇒ 进程 return 0 ⇒
 // supervisor 每 5s 重生一次、轮记录恒 round=1 且 facts: []。修法：halt 轮照跑机械读数、只挡 spawn。

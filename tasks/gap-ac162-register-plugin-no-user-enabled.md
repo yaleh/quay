@@ -1,7 +1,7 @@
 ---
 id: gap-ac162-register-plugin-no-user-enabled
 title: AC162 register-plugin.mjs 不再写用户级 enabledPlugins（机制修复）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -20,12 +20,12 @@ goal_ac: AC-162
 
 ## AC
 
-- [ ] AC-162 判据 exit 0：`grep -vE '^[[:space:]]*(//|\*|#)' packages/quay/scripts/register-plugin.mjs | grep -q 'enabledPlugins'` 不命中（内层 grep exit 1 ⇒ 判据整体 exit 0）
-- [ ] 脚本代码行已无 `enabledPlugins` 字面量：第 102/106 两行删除（`enabledKey` 变量若随之未用则一并清理）；且其余代码行不含该字面量（判据只剥行首注释标记，行尾 `// enabledPlugins` 仍命中）
-- [ ] marketplace 源仍注册：global 模式跑 register-plugin（temp HOME + `QUAY_SKIP_PLUGIN_CLI=1`）后，settings.json 的 `extraKnownMarketplaces.quay.source.path` 仍指向安装目录 plugin
-- [ ] 用户级启用不再写入：上述同一次运行后，settings.json 的 `enabledPlugins` 无 `quay@quay` 键（`python3 -c` 读 JSON 断言）
-- [ ] 测试断言翻转 + 负控制：`packages/quay/test/npm-pack-e2e.test.mjs:225` 由断言 `=== true` 改为断言无 quay 键；负控制 = 临时写回 `enabledPlugins["quay@quay"]=true` ⇒ 新断言 fail
-- [ ] 相关测试绿：`node --test packages/quay/test/npm-pack-e2e.test.mjs` 全绿（register-plugin 相关测试全部通过）
+- [x] AC-162 判据 exit 0：`grep -vE '^[[:space:]]*(//|\*|#)' packages/quay/scripts/register-plugin.mjs | grep -q 'enabledPlugins'` 不命中（内层 grep exit 1 ⇒ 判据整体 exit 0）
+- [x] 脚本代码行已无 `enabledPlugins` 字面量：第 102/106 两行删除（`enabledKey` 变量若随之未用则一并清理）；且其余代码行不含该字面量（判据只剥行首注释标记，行尾 `// enabledPlugins` 仍命中）
+- [x] marketplace 源仍注册：global 模式跑 register-plugin（temp HOME + `QUAY_SKIP_PLUGIN_CLI=1`）后，settings.json 的 `extraKnownMarketplaces.quay.source.path` 仍指向安装目录 plugin
+- [x] 用户级启用不再写入：上述同一次运行后，settings.json 的 `enabledPlugins` 无 `quay@quay` 键（`python3 -c` 读 JSON 断言）
+- [x] 测试断言翻转 + 负控制：`packages/quay/test/npm-pack-e2e.test.mjs:225` 由断言 `=== true` 改为断言无 quay 键；负控制 = 临时写回 `enabledPlugins["quay@quay"]=true` ⇒ 新断言 fail
+- [x] 相关测试绿：`node --test packages/quay/test/npm-pack-e2e.test.mjs` 全绿（register-plugin 相关测试全部通过）
 
 ## DoD
 
