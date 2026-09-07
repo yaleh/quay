@@ -2,7 +2,8 @@
 id: gap-ac166-second-copy-retirement
 title: AC166 判据仍红——.claude 双副本退役（skills 5 + workflows 5 双副本 archive）+
   manager-tick-core.js 迁入 plugin/workflows/
-status: ready
+status: needs-human
+needs_human_cause: human-adjudication
 labels:
   - gap
 parent: null
@@ -76,13 +77,16 @@ goal_ac: AC-166
 - orchestration/manager-tick-prompt.txt（B1 scriptPath 改新路径）
 - orchestration/manager-tick-closing.md（豁免面清单路径同步）
 - plugin/scripts/red-on-omission-audit.ts（execute-suite-fix.js 引用改 plugin 路径）
+- plugin/scripts/checker-mutation-cases/red-on-omission-audit.sh（execute-suite-fix.js fixture 路径 .claude/workflows → plugin/workflows）
 - plugin/scripts/config-wiring-check.ts（run-routines/drain-directives 引用改 plugin 路径）
 - plugin/scripts/fan-in-materialize-check.ts（DEFAULT_WORKFLOW_REL 改 plugin 路径）
+- plugin/scripts/checker-mutation-cases/fan-in-materialize-check.sh（fan-in-execute.js fixture 路径 .claude/workflows → plugin/workflows）
 - plugin/scripts/select-static-checks-for-touches.ts（FAN_IN_ORCHESTRATION_FILES 移除 .claude 双副本条目）
 - plugin/scripts/task-file-bypass-check.ts（移除 .claude/workflows/fan-in-execute.js 双副本条目）
 - docs/analysis/quay-init-closure-ratchet.baseline.json（re-anchor，manager-tick-core 迁入 plugin/workflows）
 - plugin/test/select-tests-for-touches.test.mjs（spawnTestSh 加 QUAY_TEST_SKIP_QUAY_REFRESH，nested 选择 spawn 免 ~35s refresh）
 - scripts/test.sh（QUAY_TEST_SKIP_QUAY_REFRESH 跳过 worktree .quay refresh——nested 选择/冒烟 spawn 不付全量 refresh 成本）
+- scripts/test-coverage-check.ts（EXCLUDE_DIR_NAMES 加 archive——归档测试文件不再判为孤儿）
 - plugin/scripts/select-tests-for-touches.ts（SKIP_DIRS 加 archive，归档测试不再入 scoped 选测集）
 - plugin/test/fan-in-materialize-check.test.mjs（.claude/workflows → plugin/workflows fixture 路径）
 - plugin/test/pool-quality-judge.test.mjs（workflow 路径 .claude/workflows → plugin/workflows）
@@ -96,3 +100,14 @@ goal_ac: AC-166
 - experiments/quay-perpetual-stream/scripts/workflow-metadata-conformance.mjs（镜像同步，与 plugin 版 byte-identical）
 - plugin/test/workflow-metadata-conformance.test.mjs（REAL_* 改 plugin 路径 + AC9 镜像判据退役）
 - tasks/gap-ac166-second-copy-retirement.md（自身）
+## Needs-Human
+
+**执行 2026-09-07T21:48:48.584Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+- run_id：wk-prod-1788779505
+- session_id：8107b479-64e8-4624-84f3-22a33432ccff
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-ac166-second-copy-retirement~wk-prod-1788779505~1788817345879-821503.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-ac166-second-copy-retirement-wk-prod-1788779505.log

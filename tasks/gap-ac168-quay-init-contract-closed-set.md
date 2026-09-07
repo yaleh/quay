@@ -1,7 +1,7 @@
 ---
 id: gap-ac168-quay-init-contract-closed-set
 title: AC168 判据仍红——SPEC §6 缺 QUAY-INIT-CLOSED-SET 标记块；补块并钉死 CLI quay init laydown ⊆ 闭集
-status: ready
+status: done
 labels:
   - gap
 parent: null

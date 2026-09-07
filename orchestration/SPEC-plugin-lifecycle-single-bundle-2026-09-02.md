@@ -160,6 +160,15 @@ tasks/                   任务目录（数据，不是扩展代码）
 .claude/settings.json    enabledPlugins（本项目启用，裁定 5）
                          + permissions.allow: ["mcp__plugin_quay_quay__*"]
 ```
+QUAY-INIT-CLOSED-SET:BEGIN
+- .quay/config.yml
+- .quay/profiles.yml
+- tasks/
+- .gitignore
+- .claude/launch.settings.json
+- .claude/settings.json
+QUAY-INIT-CLOSED-SET:END
+
 **⊢ 两组的区别是本质的**：上组是 **quay 这个产品要求的项目结构**（换个宿主也需要）；
 下组是**让宿主 Claude Code 知道去哪找已装好的插件**（一次性、幂等、纯配置）。
 **⛔ `extraKnownMarketplaces` 不进项目 settings**——它是机器特定绝对路径，属 User Scope（§4b）。

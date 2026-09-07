@@ -74,3 +74,45 @@ test("listGates() includes a goal gate once one is registered", () => {
   registerGoalGate("goal-list-check", dir, "AC-100");
   assert.ok(listGates().includes("goal-list-check"), `gates: ${listGates().join(", ")}`);
 });
+
+// gap-ac168-criterion-sh-incompatible — the goal gate executes criteria through
+// runAcceptance's `spawnSync({shell:true})`, which runs `/bin/sh` (dash on this host),
+// NOT bash. A criterion that uses bash-only process substitution `<(...)` is therefore
+// a Syntax error under sh (exit 2) even though the same text passes under bash. The
+// POSIX fix (temp files + `comm -23 "$f1" "$f2"`) runs identically under both shells.
+test("goal gate executes via sh: bash process-substitution criterion fails (exit 2), POSIX temp-file comm passes", async () => {
+  const dir = tmpGoalDir("sh-compat");
+  const store = createGoalStore(dir);
+  store.write("GOAL-001", { title: "p", status: "active", origin: "o" });
+
+  // `<(...)` is bash-only: under /bin/sh (dash) → "Syntax error: ( unexpected" → exit 2.
+  store.write("AC-020", {
+    title: "bash-process-substitution",
+    status: "active",
+    goal: "GOAL-001",
+    criterion: `comm -23 <(echo a) <(echo a) | grep -q . && exit 1
+exit 0`,
+    origin: "o",
+  });
+  const bashOnly = await makeGoalGate("AC-020", dir)({ id: "T" });
+  assert.equal(bashOnly.ok, false, `expected fail; reason=${bashOnly.reason}`);
+  assert.match(bashOnly.reason, /exit 2/);
+
+  // POSIX temp-file + `comm -23 "$f1" "$f2"` runs identically under sh and bash → exit 0.
+  store.write("AC-021", {
+    title: "posix-temp-file-comm",
+    status: "active",
+    goal: "GOAL-001",
+    criterion: `f1=$(mktemp)
+f2=$(mktemp)
+echo a > "$f1"
+echo a > "$f2"
+echo b >> "$f2"
+comm -23 "$f1" "$f2" | grep -q . && { rm -f "$f1" "$f2"; exit 1; }
+rm -f "$f1" "$f2"
+exit 0`,
+    origin: "o",
+  });
+  const posix = await makeGoalGate("AC-021", dir)({ id: "T" });
+  assert.equal(posix.ok, true, `expected pass; reason=${posix.reason}`);
+});
