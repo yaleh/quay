@@ -90,3 +90,14 @@ fan-in-ff-merge: measure ff_only_locked=false
 - run_id：wk-prod-1788717081
 - session_id：2e85bee2-988f-4951-918e-6732f731f783
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-bypass-check-unclassifiable-exits-zero-wk-prod-1788717081.log
+
+## Needs-Human
+
+**执行 2026-09-07T03:32:57.154Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=ff: fan-in-ff-merge: FF FAILED (attempt 8 >= 3) — ANTI-LIVELOCK (SPEC §7, gap-ff-livelock-trigger-no-action): develop keeps advancing; escalating + STOPPING automatic retry. Escalation record written to /home/yale/work/quay/.quay/fan-in-ff-escalations.jsonl. Do NOT auto-retry: re-merge develop and re-run the fan-in once develop settles.
+fan-in-ff-merge: measure ff_only_locked=false
+- run_id：wk-prod-1788717081
+- session_id：50aa6490-abd9-4f1d-852c-177eeda80195
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-bypass-check-unclassifiable-exits-zero-wk-prod-1788717081.log
