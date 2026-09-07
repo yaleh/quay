@@ -94,4 +94,5 @@ $ node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts 
 - `plugin/scripts/goal-driver.ts`
 - `packages/quay/src/goal-store.ts`
 - `plugin/test/goal-driver.test.mjs`
+- `packages/quay/test/goal-store.test.mjs`
 - `tasks/gap-goal-achieved-but-failing-no-handler.md`

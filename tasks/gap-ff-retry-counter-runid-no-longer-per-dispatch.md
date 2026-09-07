@@ -129,4 +129,5 @@ gap-meta-divergence-recommendation-recurrence-invisible    prior=4
 - `packages/quay/src/fan-in/ff-merge.ts`
 - `plugin/scripts/worker-driver.ts`
 - `plugin/test/fan-in-ff-merge.test.mjs`
+- `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `tasks/gap-ff-retry-counter-runid-no-longer-per-dispatch.md`
