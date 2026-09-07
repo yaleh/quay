@@ -19,10 +19,17 @@ import { spawnSync } from 'node:child_process';
 import {
   goalAchievedFromRecords,
   computeGoalGaps,
+  isTaskStuck,
   readTaskFacts,
   checkStaleness,
   checkAchievedFailing,
   goalDriverRoutines,
+  runGoalRound,
+  runGapSpawnPass,
+  buildGapWorkerPrompt,
+  readReadyPoolJudgment,
+  goalSpawnCap,
+  GOAL_SPAWN_CAP_DEFAULT,
   GOAL_ROUND_REL,
 } from '../scripts/goal-driver.ts';
 import { runResidentQualityGateLoop } from '../scripts/quality-gate-driver.ts';
@@ -153,6 +160,148 @@ test('readTaskFacts: 读 tasks/*.md 的 status+goal_ac；目录不存在 ⇒ nul
 
     const empty = await readTaskFacts(path.join(tmp, 'nope'));
     assert.equal(empty, null, 'tasks 目录不存在 ⇒ null，不是 []');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── G9 缺口语义环（tasks/gap-goal-driver-gap-semantic-filing-ring）──────────────────────────
+
+test('computeGoalGaps 四态：stalled = 关联任务全无法自行前进（结构量，⛔ 计时器）', () => {
+  const records = [
+    { id: 'AC-170', goal: 'GOAL-001', status: 'active' },  // 关联 todo 被判不合格 ⇒ stalled
+    { id: 'AC-171', goal: 'GOAL-001', status: 'active' },  // 关联 todo 合格 ⇒ in-progress
+    { id: 'AC-172', goal: 'GOAL-001', status: 'active' },  // 关联 ready 被排除 ⇒ stalled
+    { id: 'AC-173', goal: 'GOAL-001', status: 'active' },  // 关联 ready 可派发 ⇒ in-progress
+    { id: 'AC-174', goal: 'GOAL-001', status: 'active' },  // 无关联任务 ⇒ gap
+  ];
+  const taskFacts = [
+    { id: 't-stuck-todo', status: 'todo', goalAc: 'AC-170' },
+    { id: 't-ok-todo', status: 'todo', goalAc: 'AC-171' },
+    { id: 't-stuck-ready', status: 'ready', goalAc: 'AC-172' },
+    { id: 't-ok-ready', status: 'ready', goalAc: 'AC-173' },
+  ];
+  const judgment = {
+    eligibleTodoIds: new Set(['t-ok-todo']),
+    excludedReadyIds: new Set(['t-stuck-ready']),
+  };
+  const gaps = computeGoalGaps(records, taskFacts, judgment);
+  const g = (ac) => gaps.find((x) => x.ac === ac);
+  assert.equal(g('AC-170').state, 'stalled', '关联 todo 全被判不合格 ⇒ stalled');
+  assert.equal(g('AC-171').state, 'in-progress', '关联 todo 有合格者 ⇒ in-progress');
+  assert.equal(g('AC-172').state, 'stalled', '关联 ready 全被排除 ⇒ stalled');
+  assert.equal(g('AC-173').state, 'in-progress', '关联 ready 有可派发者 ⇒ in-progress');
+  assert.equal(g('AC-174').state, 'gap');
+  assert.equal(g('AC-174').taskCount, 0);
+  // judgment===null（读不到 ready-pool-check）⇒ 不判 stalled（⛔ 读不懂 ≠ 卡住，回到 in-progress）
+  const noJudgment = computeGoalGaps(records, taskFacts, null);
+  assert.equal(noJudgment.find((x) => x.ac === 'AC-170').state, 'in-progress', 'judgment=null ⇒ 不判 stalled');
+});
+
+test('isTaskStuck: todo 不在 eligible 集合 ⇒ stuck；ready 在 excluded ⇒ stuck；其余不 stuck', () => {
+  const judgment = { eligibleTodoIds: new Set(['a']), excludedReadyIds: new Set(['b']) };
+  assert.equal(isTaskStuck({ id: 'a', status: 'todo' }, judgment), false);
+  assert.equal(isTaskStuck({ id: 'x', status: 'todo' }, judgment), true);
+  assert.equal(isTaskStuck({ id: 'b', status: 'ready' }, judgment), true);
+  assert.equal(isTaskStuck({ id: 'c', status: 'ready' }, judgment), false);
+  assert.equal(isTaskStuck({ id: 'd', status: 'done' }, judgment), false);
+});
+
+test('goalSpawnCap: 读 drivers.yml goal.spawn_cap；explicit 优先；缺失回退缺省（⛔ 不写死）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-cap-'));
+  try {
+    assert.equal(goalSpawnCap(tmp), GOAL_SPAWN_CAP_DEFAULT, '无 drivers.yml ⇒ 缺省');
+    assert.equal(goalSpawnCap(tmp, 1), 1, 'explicit 优先');
+    fs.mkdirSync(path.join(tmp, 'plugin', 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'plugin', 'scripts', 'drivers.yml'), 'kinds:\n  goal:\n    spawn_cap: 1\n', 'utf8');
+    assert.equal(goalSpawnCap(tmp), 1, 'drivers.yml goal.spawn_cap=1 ⇒ 读配置');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('buildGapWorkerPrompt: 含 quay-file-task 去重指令 + 顶层 goal_ac 指令（AC7 不重复立案）', () => {
+  const p = buildGapWorkerPrompt({ goal: 'GOAL-001', ac: 'AC-185', state: 'gap', taskCount: 0 }, 'g-title', 'ac-title', 'expect', '/repo');
+  assert.ok(p.includes('quay-file-task'), 'prompt 必须点名 quay-file-task');
+  assert.ok(p.includes('MECHANISM-BASED dedup'), 'prompt 必须含按机制去重指令');
+  assert.ok(p.includes('goal_ac: AC-185'), 'prompt 必须要求顶层 goal_ac');
+  assert.ok(p.includes('needs-human'), 'prompt 必须说明 needs-human 也不重复立案');
+});
+
+test('runGapSpawnPass: halt ⇒ 0；资源门 WAIT ⇒ 0；cap 读配置；llm_invoked 派生自真实 argv', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-spawn-'));
+  try {
+    const records = [
+      { id: 'GOAL-001', title: 'g', status: 'active' },
+      { id: 'AC-001', goal: 'GOAL-001', title: 'a1', expect: 'e1', status: 'active' },
+      { id: 'AC-002', goal: 'GOAL-001', title: 'a2', expect: 'e2', status: 'active' },
+      { id: 'AC-003', goal: 'GOAL-001', title: 'a3', expect: 'e3', status: 'active' },
+    ];
+    const gaps = [
+      { goal: 'GOAL-001', ac: 'AC-001', state: 'gap', taskCount: 0 },
+      { goal: 'GOAL-001', ac: 'AC-002', state: 'gap', taskCount: 0 },
+      { goal: 'GOAL-001', ac: 'AC-003', state: 'gap', taskCount: 0 },
+    ];
+    // halt ⇒ 0（AC3）
+    let r = runGapSpawnPass(gaps, records, tmp, { gapWorkerCmd: 'true', halted: true });
+    assert.equal(r.spawned, 0, 'halted ⇒ 不 spawn');
+    assert.equal(r.llmInvoked, false);
+    // 资源门 WAIT ⇒ 0（AC4）
+    r = runGapSpawnPass(gaps, records, tmp, { gapWorkerCmd: 'true', resourceGateArgv: ['bash', '-c', 'exit 1'] });
+    assert.equal(r.spawned, 0, '资源门 WAIT ⇒ 不 spawn');
+    // cap=1 ⇒ spawned 1（AC5：3 条缺口只 spawn 1 条，读配置不写死）
+    r = runGapSpawnPass(gaps, records, tmp, { gapWorkerCmd: 'true', resourceGateArgv: ['true'], spawnCap: 1 });
+    assert.equal(r.spawned, 1);
+    assert.equal(r.outcomes.length, 1);
+    assert.equal(r.outcomes[0].ac, 'AC-001');
+    assert.equal(r.llmInvoked, false, 'gapWorkerCmd=true（非 LLM）⇒ llm_invoked=false（派生自真实 argv）');
+    // LLM 命令 ⇒ llm_invoked true（AC6：派生自 argv，⛔ 不硬编码）。用 fake `claude` 可执行文件
+    // （basename=claude 命中 LLM 集合）避免真起 claude CLI。
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-bin-'));
+    const fakeClaude = path.join(binDir, 'claude');
+    fs.writeFileSync(fakeClaude, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    r = runGapSpawnPass(gaps, records, tmp, { gapWorkerCmd: fakeClaude, resourceGateArgv: ['true'], spawnCap: 1, llmCommands: ['claude', 'claude-fjdac'] });
+    assert.equal(r.spawned, 1);
+    assert.equal(r.llmInvoked, true, 'argv[0] basename=claude（LLM）⇒ llm_invoked=true');
+    fs.rmSync(binDir, { recursive: true, force: true });
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('readReadyPoolJudgment: 解析 candidates eligible + excluded → 两集合；读不懂 ⇒ null', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-judge-'));
+  try {
+    const json = '{"candidates":[{"id":"a","eligible":true},{"id":"b","eligible":false}],"excluded":[{"id":"c","reasons":["x"]}]}';
+    const cmd = ['node', '-e', `process.stdout.write(${JSON.stringify(json)})`];
+    const j = await readReadyPoolJudgment(tmp, cmd);
+    assert.ok(j, '可解析 ⇒ 非 null');
+    assert.deepEqual([...j.eligibleTodoIds], ['a']);
+    assert.deepEqual([...j.excludedReadyIds], ['c']);
+    const bad = await readReadyPoolJudgment(tmp, ['bash', '-c', 'exit 1']);
+    assert.equal(bad, null, '非零退出 ⇒ null（⛔ 与零 stuck 不同形）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('real ring (G9): round value 带 spawned + llm_invoked 两键（缺键即判假，硬规则 3b）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-g9-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true });
+    // GOAL-001 active + AC-001 active（criterion false ⇒ 不 flip ⇒ 保持 active ⇒ gap）
+    writeGoalFile(tmp, { id: 'GOAL-001', status: 'active', kind: 'goal' });
+    writeGoalFile(tmp, { id: 'AC-001', status: 'active', kind: 'criterion', goal: 'GOAL-001', criterion: 'false' });
+    const { fact } = await runGoalRound(tmp, { scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'] });
+    assert.ok(fact && fact.value && typeof fact.value === 'object', 'runGoalRound 返回 fact.value');
+    const v = fact.value;
+    assert.equal(typeof v.spawned, 'number', 'value.spawned 必须是 number（缺键即判假）');
+    assert.equal(typeof v.llm_invoked, 'boolean', 'value.llm_invoked 必须是 boolean（缺键即判假）');
+    assert.equal(v.spawned, 1, '一条 gap AC ⇒ spawn 1 个 agent');
+    assert.equal(v.llm_invoked, false, 'gapWorkerCmd=true（非 LLM）⇒ llm_invoked=false');
+    assert.ok(Array.isArray(v.gap_spawns), 'value.gap_spawns 是数组');
+    assert.equal(v.gaps.find((g) => g.ac === 'AC-001').state, 'gap', 'spawn 前 gaps 仍记 gap（下一轮才 in-progress）');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

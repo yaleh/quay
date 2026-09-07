@@ -1,4 +1,6 @@
 // plugin/scripts/goal-driver.ts — G6 (tasks/gap-goal-driver-mechanical-ring): goal 机械环例程型 driver。
+// G9 (tasks/gap-goal-driver-gap-semantic-filing-ring): 缺口非空 ⇒ spawn 短命 agent 经 ABI 立案（照
+// promotion-driver 的 fix-worker 现成形态），下一轮 readTaskFacts 独立复核（⛔ 不信 agent 自述）。
 //
 // WHY THIS EXISTS（orchestration/SPEC-goal-mechanism-2026-09-06.md §6 + goals/AC-177-*）：
 // `goal-store.ts` 2026-08-09 落地后 28 天零使用，根因是【没有强制消费者】——前五期把 store 做对、
@@ -16,7 +18,8 @@
 //   ⛔ draft→active（激活）——人/manager 手动（裁定 3「暂不做自动晋升」），本 driver 不碰。
 //   ⛔ active→retired（放弃）——人裁定。放弃是判断不是计算，本 driver 只报红不翻状态。
 //   ⛔ 不直接改 task 状态（撞 lifecycle/promotion-driver 的 expectedStatus CAS）。
-//   ⛔ 不机械写 tasks/*.md（全仓四个 driver 零先例；缺口立案属 G7 的语义环，本期不做）。
+//   ⛔ 不机械写 tasks/*.md（全仓四个 driver 零先例）——缺口立案由 G9 的语义环 spawn 短命 agent
+//      经 ABI（quay-file-task）做，driver 自己仍不手写任务文件。
 //
 // 分层（AC151 两级抽象）：本文件继承 Layer 0 + 1b（例程型，同 outer/quality/meta），⛔ 不继承
 // Layer 1a（无候选池 source / 无任务选择 select / 无 verify 复核）——单元是【例程】不是【任务】，
@@ -30,10 +33,12 @@
 
 import path from "node:path";
 import fs from "node:fs";
+import { spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 // Layer 0（driver-runtime 单一实现）：DRIVER_KINDS（controlFile/carriers 单源）、runAsync（非阻塞
-// spawn）、Fact / RoutineSpec（Layer 1b 例程契约）。
-import { DRIVER_KINDS, runAsync, type Fact, type RoutineSpec } from "./driver-runtime.ts";
+// spawn）、launchArgv（LLM 调用配置单一构造点）、splitArgs（测试缝覆盖命令切分）、Fact / RoutineSpec
+// （Layer 1b 例程契约）。
+import { DRIVER_KINDS, runAsync, launchArgv, splitArgs, type Fact, type RoutineSpec } from "./driver-runtime.ts";
 // Layer 1b 常驻循环（quality-gate-driver 的通用例程型循环 + 统一轮记录信封，同 meta-driver 的接法）。
 import { runResidentQualityGateLoop } from "./quality-gate-driver.ts";
 // goal-store CLI 的 argv 单一构造点（所有 goal 读写都经这里，⛔ 不在别处拼路径——同 meta-driver）。
@@ -43,6 +48,15 @@ import { defaultDriverConfig, loadDriverConfig } from "./driver-config.ts";
 // G7（缺口计算）：task→AC 关联字段 goal_ac 的单一读取路径（parseFrontmatterCompletely +
 // frontmatterStatus / frontmatterGoalAc 投影，⛔ 不在本文件另写一份 frontmatter 解析）。
 import { parseFrontmatterCompletely, frontmatterStatus, frontmatterGoalAc } from "./task-schema.ts";
+// AC150 同族（G9 语义环）：资源门 + halt 判定与 worker/promotion 共用同一份实现（driver-shared.ts，
+// ⛔ 非复制粘贴）。
+import { resourceGateCheck, isHalted } from "./driver-shared.ts";
+// AC140-4：llm_invoked 判定读配置声明的 LLM 命令集（单一实现 = promotion-driver 的 isLlmInvocation，
+// ⛔ 不在本文件另写一份 base==="claude" 字面量判定）。
+import { isLlmInvocation } from "./promotion-driver.ts";
+// 每轮缺口立案 spawn 上限的声明式正源（drivers.yml）就地解析用（⛔ 本任务 Touches 不含
+// driver-config.ts——见 goalSpawnCap 的注释）。
+import { parse as parseYaml } from "yaml";
 
 // ── 常量（由 DRIVER_KINDS registry 派生，⛔ 不另写一份路径字面量）──────────────────────────
 const GOAL_SPEC = DRIVER_KINDS.goal;
@@ -59,9 +73,41 @@ export const INTERVAL_MS_DEFAULT = defaultDriverConfig().goal.intervalMs;
 /** 机械 spawn（跑一条 criterion / 一次 check）的 wall-clock 上限（毫秒）——全部是快速机械 node 调用。 */
 export const CRITERION_TIMEOUT_MS = 120_000;
 
+/** gap-filing agent spawn 的 wall-clock 上限（spawnSync timeout，毫秒）——与 promotion-driver 的
+ *  FIX_WORKER_TIMEOUT_MS 同值（⛔ 不为 gap worker 另设阈值——硬规则 4 推论）。 */
+export const GAP_WORKER_TIMEOUT_MS = 180_000;
+
+/** 配置声明的 LLM 命令集缺省（AC140-4：判定读集合，⛔ 不靠 base==="claude" 字面量）。`claude-fjdac` =
+ *  本仓 dev-tree launcher（.quay/profiles.yml 的 worker-default.launcher）——promotion 缺省只落
+ *  ["claude"]，本 driver 把 dev-tree launcher 一并列入使 llm_invoked 在生产取真（⛔ 不硬编码
+ *  llm_invoked=true，换集仍然能取假）。 */
+export const LLM_COMMAND_SET_DEFAULT: readonly string[] = ["claude", "claude-fjdac"];
+
+/** 每轮缺口立案 spawn 上限缺省（G9 语义环；正源 = drivers.yml goal.spawn_cap，⛔ 此处仅作
+ *  drivers.yml 缺失/不可读时的保守回退，同 driver-config DEFAULT_DRIVER_CAP 的接法）。 */
+export const GOAL_SPAWN_CAP_DEFAULT = 3;
+
 /** 例程的「每轮必跑」触发（goal 机械环是每 tick 必跑；interval minutes=0 ⇒ 恒 due）。真正的节奏由
  *  常驻循环的 --interval / drivers.yml goal.interval_ms 控制。 */
 export const EVERY_ROUND = { kind: "interval" as const, minutes: 0 };
+
+/** 每轮缺口立案 spawn 上限（G9 语义环）：explicit（CLI --spawn-cap）优先 → drivers.yml 的
+ *  goal.spawn_cap → 保守缺省 GOAL_SPAWN_CAP_DEFAULT。⛔ 不写死字面量（硬规则 4 推论二）。
+ *  ⚠️ 就地读 drivers.yml 而非经 driver-config.loadDriverConfig：driver-config 的 DriverKindConfig
+ *  尚不知 spawn_cap（会 merge 丢弃），而本任务 Touches 不含 driver-config.ts。后续若把 spawn_cap
+ *  上收 driver-config，应删除本函数改走 loadDriverConfig(root).goal.spawnCap。 */
+export function goalSpawnCap(root: string, explicit?: number): number {
+  if (explicit != null && Number.isInteger(explicit) && explicit >= 0) return explicit;
+  try {
+    const text = fs.readFileSync(path.join(root, "plugin", "scripts", "drivers.yml"), "utf8");
+    const parsed = parseYaml(text) as { kinds?: { goal?: { spawn_cap?: unknown } } } | null;
+    const v = parsed?.kinds?.goal?.spawn_cap;
+    if (typeof v === "number" && Number.isFinite(v) && v >= 0) return v;
+  } catch {
+    /* drivers.yml 缺失/不可解析 ⇒ 回退缺省（同 loadDriverConfig 的 fail-open） */
+  }
+  return GOAL_SPAWN_CAP_DEFAULT;
+}
 
 // ── goal-store CLI 客户端（单一 argv 构造点经 meta-driver 的 goalStoreArgv；读/写/check 在本文件，
 //    ⛔ 不复写 meta-driver 的 listGoalRecords/gateCriterion——它们把 scriptRoot 与 dataRoot 合二为一，
@@ -211,10 +257,11 @@ export function goalAchievedFromRecords(records: Array<Record<string, unknown>>,
   return inScope.every((r) => r.status === "achieved");
 }
 
-// ── 缺口三态（G7，硬规则 3b：读不懂输入不得返回与「合格」同形——「缺口」与「未评估」分离）────
+// ── 缺口四态（G7 + G9 stalled，硬规则 3b：读不懂输入不得返回与「合格」同形——「缺口」与「未评估」分离）──
 
-/** 单条 AC 的缺口态：in-progress（有任务推进）/ gap（缺口）/ not-evaluated（读不到 tasks 输入）。 */
-export type GapState = "in-progress" | "gap" | "not-evaluated";
+/** 单条 AC 的缺口态：in-progress（有任务推进）/ gap（缺口）/ stalled（有任务但都无法自行前进）/
+ *  not-evaluated（读不到 tasks 输入）。四态并存，not-evaluated 保留（硬规则 3b）。 */
+export type GapState = "in-progress" | "gap" | "stalled" | "not-evaluated";
 
 /** 一条 AC 的缺口读数。taskCount 只在 not-evaluated 时为 null（⛔ 与 0 不同形）。 */
 export interface GoalGap {
@@ -224,14 +271,35 @@ export interface GoalGap {
   taskCount: number | null;
 }
 
+/** ready-pool-check 派生出的「任务能否自行前进」判定（G9 stalled 第四态的结构量，⛔ 不用计时器）。
+ *  eligibleTodoIds = todo 任务里 ready-pool-check 判合格（candidates[].eligible===true，可被 promotion
+ *  晋升）的集合；excludedReadyIds = ready 任务里被 ready-pool-check 排进 excluded（不可派发）的集合。 */
+export interface ReadyPoolJudgment {
+  eligibleTodoIds: Set<string>;
+  excludedReadyIds: Set<string>;
+}
+
+/** 一条关联任务是否「无法自行前进」（G9 stalled 的结构判据）：
+ *  todo ⇒ 不在 eligibleTodoIds（晋升门判不合格 / 不在候选，含 fixture/parked）；ready ⇒ 在
+ *  excludedReadyIds（被 pool 排除）。其余状态本就不在「推进中」集合（computeGoalGaps 只数 todo/ready）。 */
+export function isTaskStuck(task: { id: string; status: string | null }, judgment: ReadyPoolJudgment): boolean {
+  if (task.status === "todo") return !judgment.eligibleTodoIds.has(task.id);
+  if (task.status === "ready") return judgment.excludedReadyIds.has(task.id);
+  return false;
+}
+
 /** 缺口计算（G7 机械量，SPEC §6.2 ⑤）：对每条未达成（status=active）AC，
  *  count(task where goal_ac == AC and status ∈ {todo,ready}) == 0 ⇒ 缺口。
- *  三态：in-progress（计数 > 0）/ gap（计数 == 0）/ not-evaluated（taskFacts == null）。
+ *  四态：gap（计数 == 0）/ stalled（计数 > 0 但关联任务全都无法自行前进——G9，judgment 提供结构量）/
+ *  in-progress（计数 > 0）/ not-evaluated（taskFacts == null）。
+ *  judgment===null（读不到 ready-pool-check）⇒ 不判 stalled（⛔ 不把「读不懂」伪装成「卡住」，
+ *  也不伪装成「推进中」——stalled 只是对 in-progress 的细化，读不懂时回到 in-progress）。
  *  ⛔ 本仓任务无独立 in-flight 态——派发中的任务 status 仍为 todo/ready，故「推进中」集合 =
  *  {todo, ready}。draft/superseded/retired/achieved 的 AC 均不是缺口对象（未激活 / 已关闭 / 已达成）。 */
 export function computeGoalGaps(
   records: Array<Record<string, unknown>>,
   taskFacts: Array<{ id: string; status: string | null; goalAc: string | null }> | null,
+  judgment: ReadyPoolJudgment | null = null,
 ): Array<GoalGap> {
   const out: Array<GoalGap> = [];
   for (const r of records) {
@@ -243,12 +311,188 @@ export function computeGoalGaps(
       out.push({ goal, ac: id, state: "not-evaluated", taskCount: null });
       continue;
     }
-    const count = taskFacts.filter(
+    const associated = taskFacts.filter(
       (t) => t.goalAc === id && (t.status === "todo" || t.status === "ready"),
-    ).length;
-    out.push({ goal, ac: id, state: count > 0 ? "in-progress" : "gap", taskCount: count });
+    );
+    const count = associated.length;
+    const state: GapState = count === 0
+      ? "gap"
+      : (judgment !== null && associated.every((t) => isTaskStuck(t, judgment)) ? "stalled" : "in-progress");
+    out.push({ goal, ac: id, state, taskCount: count });
   }
   return out;
+}
+
+/** 从 records 取一条记录（GOAL/AC）的 title（读不到 ⇒ ""）。 */
+function recordTitleOf(records: Array<Record<string, unknown>>, id: string): string {
+  const r = records.find((x) => String(x.id ?? "") === id);
+  return r ? String(r.title ?? "") : "";
+}
+
+/** 从 records 取一条 AC 的 expect（读不到 ⇒ ""）。 */
+function acExpectOf(records: Array<Record<string, unknown>>, id: string): string {
+  const r = records.find((x) => String(x.id ?? "") === id);
+  return r ? String(r.expect ?? "") : "";
+}
+
+/** 读 ready-pool-check 的判定面（G9 stalled 第四态的结构量来源）。缺省命令 = 全池 --json；
+ *  readyPoolCmd = 测试缝。读不懂/非零退出 ⇒ null（⛔ 与「零 stuck」不同形——judgment=null 时
+ *  computeGoalGaps 不判 stalled，回到 in-progress）。 */
+export async function readReadyPoolJudgment(root: string, readyPoolCmd: string[] | null = null): Promise<ReadyPoolJudgment | null> {
+  const argv = readyPoolCmd ?? [
+    "node", "--experimental-strip-types",
+    path.join(root, "plugin", "scripts", "ready-pool-check.ts"),
+    "--root", root, "--json",
+  ];
+  const r = await runAsync(argv, { timeoutMs: CRITERION_TIMEOUT_MS });
+  if (r.error || r.status !== 0) return null;
+  let j: unknown;
+  try {
+    j = JSON.parse(String(r.stdout ?? "").trim());
+  } catch {
+    return null;
+  }
+  if (!j || typeof j !== "object") return null;
+  const obj = j as Record<string, unknown>;
+  const eligibleTodoIds = new Set<string>();
+  for (const c of Array.isArray(obj.candidates) ? obj.candidates : []) {
+    if (c && typeof c === "object") {
+      const cc = c as Record<string, unknown>;
+      if (typeof cc.id === "string" && cc.eligible === true) eligibleTodoIds.add(cc.id);
+    }
+  }
+  const excludedReadyIds = new Set<string>();
+  for (const e of Array.isArray(obj.excluded) ? obj.excluded : []) {
+    if (e && typeof e === "object" && typeof (e as Record<string, unknown>).id === "string") {
+      excludedReadyIds.add(String((e as Record<string, unknown>).id));
+    }
+  }
+  return { eligibleTodoIds, excludedReadyIds };
+}
+
+// ── G9 缺口语义环（spawn 短命 agent 经 ABI 立案，照 promotion-driver 的 fix-worker 现成形态）──────
+
+/** gap-filing agent 的 prompt：一条 gap AC 的结构化信息（goal/ac/title/expect），⛔ 非散文指令。
+ *  agent 立案必须经 quay-file-task（其【按机制去重】步骤防重复立案）；文件须带顶层 goal_ac 供下一轮
+ *  readTaskFacts 独立复核（⛔ 不信 agent 自述）。 */
+export function buildGapWorkerPrompt(gap: GoalGap, goalTitle: string, acTitle: string, acExpect: string, root: string): string {
+  return [
+    "You are a gap-filing agent in the quay repo. A goal criterion (AC) has a structural gap: no todo/ready task advances it.",
+    `Repo root: ${root}.`,
+    `goal_id=${gap.goal} goal_title=${goalTitle}`,
+    `ac_id=${gap.ac} ac_title=${acTitle}`,
+    `ac_expect=${acExpect}`,
+    "Read the AC record (goal_get MCP) to understand the work it demands, then file ONE child task that closes this gap via the `quay-file-task` skill (Skill tool).",
+    "The quay-file-task skill performs MECHANISM-BASED dedup: if a task already claims this AC via a top-level `goal_ac:` field (ANY status, including needs-human), do NOT file a duplicate — report the existing task id instead.",
+    `The filed task MUST carry top-level frontmatter \`goal_ac: ${gap.ac}\` so the driver's next round can independently verify it (readTaskFacts counts goal_ac).`,
+  ].join("\n");
+}
+
+/** gap-filing agent argv = launchArgv("fix-worker", <prompt>)（短命，launcher/model/--bare 由
+ *  .quay/profiles.yml 的 profiles/roles 承载——AC140 单一构造点；⛔ 本任务 Touches 不含 profiles.yml，
+ *  故复用既有 fix-worker role 的 profile，语义由 prompt 承载）。gapWorkerCmd 覆盖【前缀】时把
+ *  prompt 作为末参数追加（测试缝捕获真实 prompt，同 promotion 的 --fix-worker-cmd）。 */
+export function buildGapWorkerArgv(gap: GoalGap, goalTitle: string, acTitle: string, acExpect: string, root: string, gapWorkerCmd?: string | null): string[] {
+  const prompt = buildGapWorkerPrompt(gap, goalTitle, acTitle, acExpect, root);
+  if (gapWorkerCmd != null) {
+    const prefix = splitArgs(gapWorkerCmd);
+    if (prefix.length === 0) return launchArgv("fix-worker", prompt, root);
+    return [...prefix, prompt];
+  }
+  return launchArgv("fix-worker", prompt, root);
+}
+
+/** spawn 一个短命 gap-filing agent 的结果（诊断面：stdout/stderr/timedOut 落进可查载体，spawn 失败
+ *  不再零诊断信息——同 promotion-driver 的 FixWorkerSpawnResult）。 */
+export interface GapWorkerSpawnResult {
+  exitCode: number | null;
+  error: string | null;
+  stdout: string | null;
+  stderr: string | null;
+  timedOut: boolean;
+}
+
+/** spawn 一个短命 gap-filing agent（claude -p，或 gapWorkerCmd 覆盖前缀），同步等待其退出。
+ *  捕获 stdout/stderr + timeout（照 promotion-driver 的 spawnFixWorker）。spawn 即达成；⛔ 不验证
+ *  立没立案（下一轮 readTaskFacts 独立复核），⛔ 不信 agent 自述。 */
+export function spawnGapWorker(argv: string[], root: string, timeoutMs: number = GAP_WORKER_TIMEOUT_MS): GapWorkerSpawnResult {
+  if (!Array.isArray(argv) || argv.length === 0) {
+    return { exitCode: null, error: "empty gap-worker argv", stdout: null, stderr: null, timedOut: false };
+  }
+  try {
+    const r = spawnSync(argv[0], argv.slice(1), {
+      cwd: root, encoding: "utf8", timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const stdout = String(r.stdout ?? "").trim() || null;
+    const stderr = String(r.stderr ?? "").trim() || null;
+    const timedOut = !!(r.error && (r.error as { code?: string }).code === "ETIMEDOUT");
+    if (r.error) return { exitCode: null, error: String(r.error.message || r.error), stdout, stderr, timedOut };
+    return { exitCode: r.status, error: null, stdout, stderr, timedOut };
+  } catch (e) {
+    const msg = e && typeof e === "object" && "message" in e ? String(e.message) : String(e);
+    return { exitCode: null, error: msg, stdout: null, stderr: null, timedOut: false };
+  }
+}
+
+/** 一条 gap spawn 的逐条诊断（ac · goal · exitCode · stderr · timedOut，⛔ 零诊断信息）。 */
+export interface GapSpawnOutcome {
+  ac: string;
+  goal: string;
+  exitCode: number | null;
+  stderr: string | null;
+  timedOut: boolean;
+}
+
+/** G9 缺口语义环的 spawn pass 结果。 */
+export interface GapSpawnPassResult {
+  spawned: number;
+  llmInvoked: boolean;
+  outcomes: GapSpawnOutcome[];
+}
+
+/** G9 缺口语义环的 spawn pass：缺口（state==="gap"）非空 ⇒ 过 halt + 资源门 + 每轮上限，逐条 spawn
+ *  短命 agent（一条 gap AC 一个 agent，经 quay-file-task 立案）。返回 spawned（实际 spawn 数）与
+ *  llmInvoked（派生自真实 argv，⛔ 不硬编码）。⛔ 不验证立没立案（下一轮 readTaskFacts 独立复核）。 */
+export function runGapSpawnPass(
+  gaps: Array<GoalGap>,
+  records: Array<Record<string, unknown>>,
+  root: string,
+  opts: {
+    gapWorkerCmd?: string | null;
+    llmCommands?: readonly string[];
+    spawnCap?: number;
+    resourceGateArgv?: string[] | null;
+    halted?: boolean;
+  } = {},
+): GapSpawnPassResult {
+  const outcomes: GapSpawnOutcome[] = [];
+  const gapAcs = gaps.filter((g) => g.state === "gap");
+  if (gapAcs.length === 0 || opts.halted) return { spawned: 0, llmInvoked: false, outcomes };
+  // 资源门（AC150-1 同族）：spawn LLM gap-filing agent 前判定，WAIT ⇒ 退避本轮（⛔ 机械 criterion/
+  // 缺口读数不受约束，零 LLM）。
+  const gate = resourceGateCheck(root, opts.resourceGateArgv ?? null);
+  if (!gate.go) return { spawned: 0, llmInvoked: false, outcomes };
+  // 每轮上限读配置（goalSpawnCap：CLI --spawn-cap → drivers.yml goal.spawn_cap → 缺省），⛔ 不写死。
+  const cap = goalSpawnCap(root, opts.spawnCap);
+  const targets = gapAcs.slice(0, cap);
+  let llmInvoked = false;
+  for (let i = 0; i < targets.length; i++) {
+    const g = targets[i];
+    const argv = buildGapWorkerArgv(
+      g,
+      recordTitleOf(records, g.goal),
+      recordTitleOf(records, g.ac),
+      acExpectOf(records, g.ac),
+      root,
+      opts.gapWorkerCmd,
+    );
+    // llm_invoked 派生自真实 argv（⛔ 不硬编码 true）；全部 targets 用同一命令前缀 ⇒ 取首条即可。
+    if (i === 0) llmInvoked = isLlmInvocation(argv, opts.llmCommands ?? LLM_COMMAND_SET_DEFAULT);
+    const r = spawnGapWorker(argv, root);
+    outcomes.push({ ac: g.ac, goal: g.goal, exitCode: r.exitCode, stderr: r.stderr, timedOut: r.timedOut });
+  }
+  return { spawned: outcomes.length, llmInvoked, outcomes };
 }
 
 // ── 一轮（机械环）─────────────────────────────────────────────────────────────────────────
@@ -263,13 +507,29 @@ export interface GoalRoundReadings {
   staleness: { fresh: string[]; stale: string[]; notEvaluated: string[]; divergent: string[] } | null;
   /** I5 achieved-but-failing；null = check --achieved-failing 读不到（⛔ 与「零」不同形，硬规则 3b）。 */
   achievedFailing: { achievedButFailing: string[]; evaluated: boolean } | null;
-  /** ⑤ 缺口读数（G7）：每条 active AC 的三态；taskFacts==null ⇒ 逐条 not-evaluated。 */
+  /** ⑤ 缺口读数（G7 + G9 stalled）：每条 active AC 的四态；taskFacts==null ⇒ 逐条 not-evaluated。 */
   gaps: Array<GoalGap>;
+  /** ⑥ G9 语义环：本轮实际 spawn 的 gap-filing agent 数（过 halt/资源门/上限后；0 = 未 spawn）。 */
+  spawned: number;
+  /** ⑥ G9 语义环：本轮 spawn 是否调用了 LLM（派生自真实 argv，⛔ 不硬编码）。 */
+  llm_invoked: boolean;
+  /** ⑥ G9 语义环：逐条 spawn 诊断（ac · goal · exitCode · stderr · timedOut，⛔ 零诊断信息）。 */
+  gap_spawns: Array<GapSpawnOutcome>;
 }
 
 export interface GoalRoundOptions {
   /** goal-store.ts 脚本根（缺省 = dataRoot；测试缝传 repo 根，使 goals/ 与脚本根分离）。 */
   scriptRoot?: string;
+  /** 覆盖 resource-gate 命令（测试缝；缺省 = 与 worker/promotion 同一 resourceGateCheck 缺省）。 */
+  resourceGateArgv?: string[] | null;
+  /** 覆盖 gap-filing agent 命令【前缀】（测试缝；prompt 仍作末参数追加，同 promotion --fix-worker-cmd）。 */
+  gapWorkerCmd?: string | null;
+  /** 覆盖 ready-pool-check 命令（测试缝；stalled 第四态的结构量来源）。 */
+  readyPoolCmd?: string[] | null;
+  /** 配置声明的 LLM 命令集（缺省 LLM_COMMAND_SET_DEFAULT；AC140-4 判定读此集合）。 */
+  llmCommands?: readonly string[];
+  /** 覆盖每轮 spawn 上限（缺省 = drivers.yml goal.spawn_cap；CLI --spawn-cap）。 */
+  spawnCap?: number;
 }
 
 export interface GoalRoundResult {
@@ -329,9 +589,25 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   // I5 查 achieved-but-failing：复用 goal-store 的单一真相源（独立子命令，跑判据）。
   const achievedFailing = await checkAchievedFailing(scriptRoot, dataRoot);
 
-  // ⑤ 算缺口（G7）：读 tasks/*.md 的 goal_ac → 对每条 active AC 给三态。taskFacts==null ⇒ 逐条 not-evaluated。
+  // ⑤ 算缺口（G7 + G9 stalled）：读 tasks/*.md 的 goal_ac → 对每条 active AC 给四态。taskFacts==null ⇒
+  // 逐条 not-evaluated。stalled 的结构量来自 ready-pool-check（只在存在 goal_ac 关联任务时才跑，避免
+  // 每轮无谓地起一次昂贵的全池判定）。
   const taskFacts = await readTaskFacts(dataRoot);
-  const gaps = computeGoalGaps(records, taskFacts);
+  const hasGoalAcTasks = taskFacts !== null && taskFacts.some((t) => t.goalAc !== null);
+  const judgment = hasGoalAcTasks ? await readReadyPoolJudgment(root, opts.readyPoolCmd) : null;
+  const gaps = computeGoalGaps(records, taskFacts, judgment);
+
+  // ⑥ G9 缺口语义环：缺口（state==="gap"）非空 ⇒ 过 halt + 资源门 + 每轮上限，spawn 短命 agent 经 ABI
+  // 立案。halt 与资源门在 spawn pass 内读（单一真相源 = isHalted / resourceGateCheck，与 worker/promotion
+  // 同一实现）——机械 criterion/缺口读数不受 halt 约束（观测性，零 LLM），只有 spawn 被 halt 挡住。
+  const halted = isHalted(root, process.env, GOAL_CONTROL_STATE_REL);
+  const spawnPass = runGapSpawnPass(gaps, records, root, {
+    gapWorkerCmd: opts.gapWorkerCmd,
+    llmCommands: opts.llmCommands,
+    spawnCap: opts.spawnCap,
+    resourceGateArgv: opts.resourceGateArgv,
+    halted,
+  });
 
   const value: GoalRoundReadings = {
     goalCount: activeGoals.length,
@@ -341,6 +617,9 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     staleness,
     achievedFailing,
     gaps,
+    spawned: spawnPass.spawned,
+    llm_invoked: spawnPass.llmInvoked,
+    gap_spawns: spawnPass.outcomes,
   };
   if (staleness === null) {
     return {
@@ -367,14 +646,14 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
 
 // ── 常驻形态（例程，复用通用例程型循环）────────────────────────────────────────────────────
 
-/** 本 driver 的例程集：**只此一条**（goal 机械环）。复用 quality-gate-driver 的通用例程型常驻循环
- *  （收 RoutineSpec[]、评估 due、汇 Facts、写轮记录），⛔ 不抄一份样板。 */
-export function goalDriverRoutines(root: string, opts: { scriptRoot?: string } = {}): RoutineSpec[] {
+/** 本 driver 的例程集：**只此一条**（goal 机械环 + G9 语义环）。复用 quality-gate-driver 的通用例程型
+ *  常驻循环（收 RoutineSpec[]、评估 due、汇 Facts、写轮记录），⛔ 不抄一份样板。 */
+export function goalDriverRoutines(root: string, opts: GoalRoundOptions = {}): RoutineSpec[] {
   return [{
     name: "goal-ring",
     schedule: EVERY_ROUND,
     run: async () => {
-      const { fact } = await runGoalRound(root, { scriptRoot: opts.scriptRoot });
+      const { fact } = await runGoalRound(root, opts);
       return [fact];
     },
   }];
@@ -383,17 +662,22 @@ export function goalDriverRoutines(root: string, opts: { scriptRoot?: string } =
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────
 
 const HELP = [
-  "goal-driver.ts — G6 goal 机械环例程型 driver（跑 criterion→写 GateEvent→I2 flip→I3/I4 报出）",
+  "goal-driver.ts — G6 goal 机械环例程型 driver + G9 缺口语义环（跑 criterion→写 GateEvent→I2 flip→I3/I4 报出→缺口 spawn agent）",
   "",
   "Usage: node --experimental-strip-types plugin/scripts/goal-driver.ts [options]",
-  "  --root <dir>        仓库根（缺省 cwd；goals/ 与 .quay/ 都在其下）",
-  "  --interval <ms>     循环滴答间隔（缺省 " + INTERVAL_MS_DEFAULT + "，来自 drivers.yml goal.interval_ms）",
-  "  --once              跑一轮即退出（手动单发 / 测试）",
-  "  --max-rounds <n>    跑满 N 轮退出（测试缝）",
-  "  --round-log <path>  轮记录文件（缺省 <root>/.quay/goal-round.jsonl）",
-  "  --run-id <id>       轮记录里的 run_id",
-  "  --pid-file <path>   把驱动自身 pid 写到该文件（外部观测 + kill 抓手）",
-  "  --json              每轮向 stdout 打一条 JSON 事件行",
+  "  --root <dir>           仓库根（缺省 cwd；goals/ 与 .quay/ 都在其下）",
+  "  --interval <ms>        循环滴答间隔（缺省 " + INTERVAL_MS_DEFAULT + "，来自 drivers.yml goal.interval_ms）",
+  "  --once                 跑一轮即退出（手动单发 / 测试）",
+  "  --max-rounds <n>       跑满 N 轮退出（测试缝）",
+  "  --round-log <path>     轮记录文件（缺省 <root>/.quay/goal-round.jsonl）",
+  "  --run-id <id>          轮记录里的 run_id",
+  "  --pid-file <path>      把驱动自身 pid 写到该文件（外部观测 + kill 抓手）",
+  "  --gap-worker-cmd <s>   覆盖 gap-filing agent 命令前缀（测试缝；prompt 仍作末参数追加）",
+  "  --resource-gate-cmd <s> 覆盖 resource-gate 命令（测试缝；spawn 前判定，exit 0=GO）",
+  "  --ready-pool-cmd <s>   覆盖 ready-pool-check 命令（测试缝；stalled 第四态的结构量来源）",
+  "  --llm-commands <csv>   配置声明的 LLM 命令集，逗号分隔（缺省 claude,claude-fjdac）",
+  "  --spawn-cap <n>        覆盖每轮缺口立案 spawn 上限（缺省 drivers.yml goal.spawn_cap）",
+  "  --json                 每轮向 stdout 打一条 JSON 事件行",
   "",
   "Exit: 0 = 轮跑完（含 not-evaluated）; 1 = 轮失败; 2 = usage",
 ].join("\n");
@@ -408,6 +692,11 @@ export async function main(argv: string[]): Promise<number> {
   let runId: string | undefined;
   let pidFile: string | undefined;
   let json = false;
+  let gapWorkerCmd: string | undefined;
+  let resourceGateCmd: string | undefined;
+  let readyPoolCmd: string | undefined;
+  let llmCommandsRaw: string | undefined;
+  let spawnCapRaw: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -418,6 +707,11 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--round-log") roundLogPath = args[++i];
     else if (a === "--run-id") runId = args[++i];
     else if (a === "--pid-file") pidFile = args[++i];
+    else if (a === "--gap-worker-cmd") gapWorkerCmd = args[++i];
+    else if (a === "--resource-gate-cmd") resourceGateCmd = args[++i];
+    else if (a === "--ready-pool-cmd") readyPoolCmd = args[++i];
+    else if (a === "--llm-commands") llmCommandsRaw = args[++i];
+    else if (a === "--spawn-cap") spawnCapRaw = args[++i];
     else if (a === "--json") json = true;
     else if (a === "--help" || a === "-h") { process.stdout.write(HELP + "\n"); return 0; }
     else { process.stderr.write(`goal-driver: unknown argument: ${a}\n${HELP}\n`); return 2; }
@@ -434,6 +728,30 @@ export async function main(argv: string[]): Promise<number> {
 
   const roundLogFile = roundLogPath ? path.resolve(roundLogPath) : path.join(rootDir, GOAL_ROUND_REL);
   const resolvedRunId = runId ?? `goal-${Date.now()}`;
+  // G9：每轮 spawn 上限（--spawn-cap 覆盖；缺省 = goalSpawnCap 读 drivers.yml）。非负整数才合法。
+  const spawnCap = spawnCapRaw === undefined
+    ? undefined
+    : (() => {
+        const n = Number(spawnCapRaw);
+        if (!Number.isInteger(n) || n < 0) return null;
+        return n;
+      })();
+  if (spawnCapRaw !== undefined && spawnCap === null) {
+    process.stderr.write("goal-driver: --spawn-cap must be a non-negative integer\n");
+    return 2;
+  }
+  // AC140-4：配置声明的 LLM 命令集（缺省 LLM_COMMAND_SET_DEFAULT；--llm-commands 逗号分隔注入）。
+  const llmCommands = llmCommandsRaw === undefined
+    ? [...LLM_COMMAND_SET_DEFAULT]
+    : llmCommandsRaw.split(",").map((s) => s.trim()).filter(Boolean);
+
+  const roundOpts: GoalRoundOptions = {
+    gapWorkerCmd: gapWorkerCmd ?? null,
+    resourceGateArgv: resourceGateCmd ? splitArgs(resourceGateCmd) : null,
+    readyPoolCmd: readyPoolCmd ? splitArgs(readyPoolCmd) : null,
+    llmCommands,
+    spawnCap: spawnCap ?? undefined,
+  };
 
   // 常驻（例程型）：复用通用例程型循环，⛔ 不另写一份。缺省 = 常驻（once=false）；--once 跑一轮即退。
   return await runResidentQualityGateLoop({
@@ -446,7 +764,7 @@ export async function main(argv: string[]): Promise<number> {
     json,
     pidFile,
     controlStateRel: GOAL_CONTROL_STATE_REL,
-    routines: goalDriverRoutines(rootDir),
+    routines: goalDriverRoutines(rootDir, roundOpts),
   });
 }
 
