@@ -16,11 +16,13 @@ extra:
 ---
 ## Finding
 
-**结论**：活服务器 `/dashboard` 现在渲染要 **12.8–60.5 秒**，越过了两条 `done` 任务写明的取假对照；而它不只是一个 UI 慢的问题——它是当前**交付管线阻塞的直接成因**。
+**结论**：活服务器 `/dashboard` 现在渲染要 **12.8–60.5 秒**，越过了两条 `done` 任务写明的取假对照；它同时是当前**交付管线阻塞的直接成因**。
+
+> **⚠️ 本任务体在派发后被更新过一次（2026-09-07T06:1xZ）**：补入了实测的耗时构成，并**修正了 Touches**（原写 `serve-handlers.ts` 有误——`handleDashboard` 已迁至 `serve-dashboard.ts`，真正的热点在 `observation.ts`）。请以本版为准重新读取。
 
 ### 一、实测（活服务器，非 fixture）
 
-对生产实例 `100.78.206.100:4173` 连测三次（`--max-time 120`，即不设人为帽）：
+生产实例 `100.78.206.100:4173`，连测三次（`--max-time 120`，不设人为帽）：
 
 ```
 dashboard run1: t=60.453279s code=200 size=66449
@@ -28,78 +30,114 @@ dashboard run2: t=32.227021s code=200 size=66450
 dashboard run3: t=12.818772s code=200 size=66448
 ```
 
-对照同一进程的轻端点：`/health` **0.5s**（`time_connect=0.0005s`、`time_starttransfer=0.499s`、code 200）。⇒ 不是进程卡死、不是网络、不是绑定问题，是 `/dashboard` 这一条路径本身慢。
+对照同进程 `/health`：**0.5s**（`time_connect=0.0005s`、`time_starttransfer=0.499s`、code 200）。
 
-**已排除的替代解释（各配了对照，非推测）**：
-- ⛔ 不是进程被 wedge：把该进程杀掉重启（新进程 RSS 129MB、状态 `S` 不空转），`/dashboard` **依旧** 12.8–60.5s。
-- ⛔ 不是宿主整体不可用：同机另外三个 `quay.ts serve` 实例（127.0.0.1:8765 / :42999 / :43101）`/health` 均 code 200、2.4–4.5s。
-- ⛔ 不是冷启动窗口：三次采样是同一进程连续测，且时间在**下降**（60→32→12.8，缓存回暖），最快的一次仍 12.8s。
+**已排除的替代解释（各配对照）**：
+- ⛔ 不是进程 wedge：杀掉重启后新进程（RSS 129MB、状态 `S`）`/dashboard` **依旧** 12.8–60.5s。
+- ⛔ 不是宿主整体不可用：同机另外三个 `quay.ts serve` 实例 `/health` 均 200、2.4–4.5s。
+- ⛔ 不是冷启动：三次是同一进程连续测，时间在**下降**（60→32→12.8），最快一次仍 12.8s。
 
-### 二、越过了哪条取假对照（逐字，非转述）
+### 二、耗时构成（已拆出，⛔ 执行者不必重做这一步，但须复核）
 
-`tasks/gap-webui-dashboard-manager-slow-parallelize.md`（`status: done`）的取假条款：
+`handleDashboard` 在 `packages/quay/src/serve-dashboard.ts:917`。**并行化仍在**（`Promise.all` 覆盖 `readSystem` / `readManagerLight` / `readTaskSummary` / `goalList`，且 pool 探针已从 dashboard 移除）⇒ **本次回归不是把旧修复改回去了**。
 
-> **能取假（⊢ 对照）**：修复后活服务器 `/dashboard` / `/manager` 墙钟显著下降（目标：并行化后 **≤5s 量级**，ready-pool 若缓存再降）
+逐项实测（直接 import `observation.ts` 打点，活工作区）：
 
-当时的实测是 `/dashboard` **13.13s**，根因诊断为 `readManager` 串行跑机件脚本、其中 `ready-pool-check.ts --json` 单项 **9.10s**（`node --experimental-strip-types` 每次现编译无缓存）。
+| 段 | 分项 | 耗时 |
+|---|---|---|
+| **同步段**（在 `Promise.all` **之后**，逐个串行，**阻塞事件循环**） | `readLive` | **4399 ms** |
+| | `readTests` | **2392 ms** |
+| | `readGitHistory` | **1223 ms** |
+| | `readCurrentSuiteRun` | 0.9 ms |
+| | 小计 | **≈8015 ms** |
+| 并行段 | `Promise.all(readSystem, readManagerLight)` | 2203 ms（单跑分别 3326 / 1519 ms） |
 
-`tasks/gap-webui-dashboard-load-time-optimization.md`（`status: done`）标题即「manager 探针轻量化砍 pool 地板 + taskList 并行 + 任务摘要 30s TTL 缓存」。
+合计 ≈10.2s，与实测下限 12.8s 吻合。
 
-⇒ 两条都 done，而现测最快 12.8s、最慢 60.5s——**比修复前那次 13.13s 还差**。⛔ 本条不预设「并行化被改回去了」，那是需要对照才能下的结论；**要求执行者先定位当前的耗时构成，再谈修法**（当年那次正是先拆出 9.10s 单项才修对的）。
+**`readLive` 内部（CPU profile + 定点计时，⛔ 以下三条是我先后证否的假设，写出来免得执行者重走）**：
+- ⛔ **不是 `/proc` 全扫**：`/proc` 只有 484 个数字目录，裸 cmdline 全扫 **145.7 ms**，`readLiveWorkerProcesses` **55 ms**。
+- ⛔ **不是 N×`/proc` 全扫**：`pairInFlight` 当时只产出 **1** 条候选；整条 `.workflow-events` 路径（读 578 个 jsonl 36ms + pairInFlight 2.7ms + N×`runProcessAliveSync` 24ms）合计 **≈62 ms**。
+- ⛔ **不是 `readTaskStatusForLive` 的 git spawn 主导**：`readTaskStatusAtRef` 单次 **48.5 ms**，在飞任务个位数 ⇒ 亚秒级。
 
-### 三、下游代价——它不是一个只影响观感的缺陷
+**CPU profile（`--cpu-prof`，readLive 单次 3742 ms）self-time 前几名——是平的，无单一热点**：
 
-`goals/AC-179-web-card-and-cli.md` 的 criterion **刻意**读运行中的服务（其 origin 写明依据硬规则④推论三：grep 源码只证明「能产出」不证明「已产出」）：
+```
+ 413 ms  9.3%  spawnSync                    node:internal/child_process
+ 339 ms  7.6%  (garbage collector)
+ 177 ms  4.0%  readFileSync                 node:fs
+ 127 ms  2.9%  next                         node_modules/yaml/dist/parse/parser.js
+ 108 ms  2.4%  parseDocument                node_modules/yaml/dist/parse/lexer.js
+  97 ms  2.2%  extractTouchesSection        packages/quay/src/observation.ts:436
+  95 ms  2.1%  readWorkerRoundInFlightTasks packages/quay/src/observation.ts:968
+  88 ms  2.0%  workerDriverOnlineMs         packages/quay/src/observation.ts:914
+  65 ms  1.5%  parsePlainScalar / blockSequence (yaml)
+```
+
+YAML 解析 + `extractTouchesSection` 指向**全量任务库扫描**。直接量它：
+
+```
+任务文件数: 1813        总字节 16 MB
+纯读 1813 个文件        480.2 ms  (11.3 MB)
+extractTouchesSection × 1813  255.2 ms
+（再加 1813 份 frontmatter 的 YAML 解析，profile 里 yaml 各项合计 ≈365 ms）
+```
+
+⇒ **`readLive` 每次请求都要读+解析整个任务库（1813 个文件、11.3 MB），约占它 3.7–4.4s 中的 1.1–1.5s**；其余分散在 git spawn、GC 与其它 reader。
+
+### 三、为什么两条 done 的性能修复会复发——这是本条最重要的一句
+
+那个全量扫描的成本**随任务库单调增长**（本仓库实测单日新建任务 44 条）。⇒ **页面每天都在变慢，即使一行代码都不改。** 两条前序任务修的是代码路径（串行→并行、砍 pool 探针），**没有动这个随输入增长的项** ⇒ 修复当时达标，之后必然重新越线。
+
+⊢ 这也解释了为什么它是 `GOAL-007`（done 任务判据后来变假、无机制重新评估）的第 4 个实例：**判据当时为真，之后被一个外生的增长量推成假。**
+
+### 四、下游代价——它不只是观感问题
+
+`goals/AC-179-web-card-and-cli.md` 的 criterion **刻意**读运行中的服务（origin 写明依据硬规则④推论三）：
 
 ```
 curl -sf --max-time 10 "http://$a/dashboard" | grep -q 'id="goal-card"'
 ```
 
-`--max-time 10` 打在一个 12.8–60.5s 的端点上 ⇒ **verdict 在 pass ⇄ fail 之间来回翻**。逐对 diff 相邻提交，只有这三行在变：
+10 秒帽打在 12.8–60.5s 的端点上 ⇒ **verdict 在 pass ⇄ fail 之间来回翻**。相邻提交逐对 diff，只有三行在变（`at` / `verdict` / `reading`）。每次翻转是实质变更 ⇒ `commitGoalFileAfterWrite` 提交 ⇒ develop 前进：**近 90 分钟 develop 32 次提交，21 次是 `goals: AC-179 写盘即提交`（66%）**，约每 6.5 分钟一次，与 goal-driver 轮次同频。
 
-```
-- at: …05:23:47Z   verdict: pass   reading: acceptance passed (exit 0)
-+ at: …05:29:47Z   verdict: fail   reading: acceptance failed (exit 1)
-+ at: …05:35:21Z   verdict: pass   reading: acceptance passed (exit 0)
-```
+worker 的机械 fan-in 在 `merge-develop` 与 `ff` 之间隔着 typecheck / scoped-gate / suite 若干分钟 ⇒ **ff 时 develop 已前进,不再是快进**。近 3 小时：`fan-in-step-trace.jsonl` 中 **ff 14 次、失败 13 次**；`worker-outcome.jsonl` 23 条中 **21 条 exited-not-landed**。
 
-每次翻转都是实质变更 ⇒ `commitGoalFileAfterWrite` 提交 ⇒ develop 前进。**近 90 分钟 develop 32 次提交，其中 21 次是 `goals: AC-179 写盘即提交`（66%）**，节奏约每 6.5 分钟一次，与 goal-driver 轮次同频。
+**⚠️ 不是防活锁闸造成的**：新 runId 下 8 条 retry 记录 attempt 全是 **1 或 2**，远未触及 `>= 3` ⇒ 是 ff 本身每次失败。（ff 计数器闩锁是另一个真实缺陷，已立 `gap-ff-retry-counter-runid-no-longer-per-dispatch`，**不是**本窗口的绑定约束，两者不要混。）
 
-而 worker 的机械 fan-in 在 `merge-develop` 与 `ff` 之间隔着若干分钟（typecheck / scoped-gate / suite）⇒ **ff 时 develop 已经前进,不再是快进**。近 3 小时步轨迹（`.quay/fan-in-step-trace.jsonl`）：**ff 共 14 次,失败 13 次,成功 1 次**；`worker-outcome.jsonl` 同窗口 23 条,`exited-not-landed` **21 条**。
+**⚠️ 同步段还有一个独立危害**：`readLive` / `readTests` / `readGitHistory` 是**同步**的，合计约 8 秒**阻塞事件循环** ⇒ 一次 dashboard 渲染期间**整个服务器不响应任何请求**（实测 `/health` 在渲染中超时，渲染外 0.5s）。这就是「服务器看起来卡死」的成因，也是 `/dashboard/cards` 自动轮询会把服务器打满的原因。
 
-**⚠️ 且这不是防活锁闸造成的**：新 runId 下 8 条 retry 记录的 attempt 全是 **1 或 2**，远未触及 `>= 3` 的闸 ⇒ 是 ff 本身每次都失败，不是被闸拦下。（ff 计数器闩锁是另一个真实缺陷，已立 `gap-ff-retry-counter-runid-no-longer-per-dispatch`，但**不是**本窗口的绑定约束——两者不要混为一谈。）
+### 五、与既有任务的关系（都不重叠）
 
-⊢ 一条 UI 端点的性能缺陷，经由「判据翻转 → git 提交 → develop churn」这条链，**使整个交付管线在 3 小时内只落地 1 条任务**。
+- `gap-goal-evidence-cache-should-not-enter-git`（ready，未落地）：修「evidence 不该进 git」。落地后 verdict 翻转不再产生提交 ⇒ 本条的**下游代价**消失，**但 `/dashboard` 仍然慢**。两条都要。
+- `gap-ff-retry-counter-runid-no-longer-per-dispatch`（ready）：不同失败机制（见上段 attempt=1/2 读数）。
+- `gap-webui-dashboard-manager-slow-parallelize` / `gap-webui-dashboard-load-time-optimization`（均 done）：本条是其回归/复发，按本仓先例新立而非重开。
 
-### 四、与既有任务的关系（三条，都不重叠）
-
-- `gap-goal-evidence-cache-should-not-enter-git`（**ready，未落地**）：修「evidence 不该进 git」这一段链路。它落地后，verdict 翻转不再产生提交 ⇒ 本条的下游代价消失，**但 `/dashboard` 仍然慢**。⇒ 两条都要。⚠️ 且它自己正被同一个洪水挡着落不了地（本轮已由停 goal-driver 临时解除）。
-- `gap-ff-retry-counter-runid-no-longer-per-dispatch`（ready）：修重试预算被永久耗尽；与本条是**不同的**失败机制（见上段 attempt=1/2 的读数）。
-- `gap-webui-dashboard-manager-slow-parallelize` / `gap-webui-dashboard-load-time-optimization`（均 done）：本条是它们的**回归/复发**，按本仓库先例新立而非重开（`gap-direct-to-develop-bypasses-fan-in-gates` 同款处理）。
-
-**⇒ 本条同时是 `GOAL-007`（done 任务判据后来变假、无机制重新评估）的第 4 个实例**，且是在该 GOAL 立案后 1 小时内独立测出的——请在实现时把这一条写回 GOAL-007 的证据里。
-
-**方向倾向（供执行者判断，非强制）**：先用一条命令拆出当前 `/dashboard` 的耗时构成（当年是 `readManager` 里 `ready-pool-check.ts --json` 9.10s 单项最大），再决定修法。⛔ **不接受**：①不测构成直接「再并行一次」；②把 AC-179 的 `--max-time 10` 调大来让判据变绿——那是掩盖一个真实的 60 秒页面（且判据当前是**诚实**的，它正确地报告了服务不可用）；③只加缓存使首屏变快而实际数据陈旧（须说明缓存 TTL 与陈旧度的取舍）。
+**方向倾向（供执行者判断，非强制，按实测优先级）**：
+1. **消除随任务库增长的项**——它是复发的根源。候选：按 `tasks/` 目录 mtime 做缓存；或只对显示所需的任务做扫描。⛔ 无论选哪个，都要说明「任务库再翻一倍时这一项是否仍然有界」。
+2. **把三个同步 reader 改成 async 并入并行组**——8.0s 串行 → 约取最慢者，且**不再阻塞事件循环**（这一条独立于性能目标，是可用性问题）。
+3. ⛔ **不接受**：①不测构成直接「再并行一次」；②调大 AC-179 的 `--max-time` 让判据变绿（掩盖真实的 60 秒页面；且成本随库增长 ⇒ **任何固定帽最终都会重新翻转**，硬规则④推论一/二）；③只加缓存使首屏变快而数据陈旧（须写明 TTL 与陈旧度取舍）。
 
 ## AC
 
-- [ ] 活服务器实测：`/dashboard` 墙钟 **稳定 ≤5s**（沿用两条 done 任务写明的同一目标值，⛔ 不得放宽），至少连测 5 次且**每次**满足；给出全部 5 个读数，⛔ 不取最好的一次。
-- [ ] 耗时构成被拆出来并可复核：给出当前各分项的实测耗时（形如当年的 `ready-pool-check.ts --json` 9.10s），⛔ 不是「已优化」的断言。
-- [ ] 能取假：把定位到的主要耗时项恢复成修复前的形态 ⇒ `/dashboard` 墙钟立即回到 10s 以上（证明测的是真行为）。
-- [ ] AC-179 判据随之稳定：以 `goals/AC-179-web-card-and-cli.md` 的 criterion 原样（`--max-time 10` **不改**）连跑 5 次，**5 次全 pass**；⛔ 不得通过修改该 criterion 来满足本条。
-- [ ] 洪水消失，由载体读数证明：修复落地后开一个 ≥30 分钟窗口，`git log develop --since=... -- goals/` 的 AC-179 提交数**为 0**，且同窗口 goal-driver **在跑**（⛔ 不得靠停掉 goal-driver 制造这个零——那是本轮的止血，不是判据）。
+- [ ] 活服务器实测：`/dashboard` 墙钟 **稳定 ≤5s**（沿用两条 done 任务的同一目标值，⛔ 不得放宽），至少连测 5 次且**每次**满足；给出全部 5 个读数，⛔ 不取最好的一次。
+- [ ] 耗时构成复核并留档：给出改动后各分项耗时（对照本任务体第二节的表），⛔ 不是「已优化」的断言。
+- [ ] 能取假：把定位到的主要耗时项恢复成修复前的形态 ⇒ `/dashboard` 墙钟立即回到 10s 以上。
+- [ ] **增长有界**（本条是防复发的核心，⛔ 不可省）：给出一个判据，证明任务库规模翻倍时 `/dashboard` 墙钟**不随之线性增长**——例如用一个 2× 规模的任务目录跑同一测量并给出两组读数；⛔ 「加了缓存所以没问题」不算。
+- [ ] 事件循环不再被阻塞：dashboard 渲染**进行中**并发请求 `/health`，其响应时间 ≤1s（⛔ 当前实测为超时）。
+- [ ] AC-179 判据随之稳定：以 `goals/AC-179-web-card-and-cli.md` 的 criterion **原样**（`--max-time 10` 不改）连跑 5 次，**5 次全 pass**；⛔ 不得通过修改该 criterion 来满足本条。
+- [ ] 洪水消失，由载体读数证明：修复落地后开 ≥30 分钟窗口，`git log develop --since=... -- goals/` 的 AC-179 提交数**为 0**，且同窗口 goal-driver **在跑**（⛔ 不得靠停掉 goal-driver 制造这个零——那是本轮止血，不是判据）。
 
 ## DoD
 
-- [ ] 上述判据本轮实跑并贴出输出（⛔ 不是转述、⛔ 不是「应该会过」），能取假那条实跑确认会变红。
+- [ ] 上述判据本轮实跑并贴出输出（⛔ 不是转述），能取假那条实跑确认会变红。
 - [ ] **生产载体证据（非 fixture）**：读数来自活服务器与真实 `.quay/*.jsonl` 载体；⛔ 不得以单元测试通过冒充生产已验（硬规则④推论三）。
-- [ ] `packages/quay/test/gap-dashboard-parallelize.test.mjs` 增一条钉住本次回归的用例，且该用例在改动前会红；说明它为什么当年没能拦住这次回归（⛔ 「加个测试」不够，要说清旧用例测的是什么、漏了什么）。
-- [ ] ⛔ 未调大 AC-179 的 `--max-time`；⛔ 未改动该 criterion 的任何部分。
-- [ ] 与上列三条任务的关系写入任务体，逐条说明为何不重叠；并把本条作为第 4 个实例写回 `GOAL-007` 的证据。
+- [ ] `packages/quay/test/gap-dashboard-parallelize.test.mjs` 增用例钉住本次回归，且改动前会红；**并说明旧用例为什么没拦住**（⛔「加个测试」不够，要说清旧用例测了什么、漏了什么——大概率是它用小 fixture 任务目录，测不到随规模增长的项）。
+- [ ] ⛔ 未调大 AC-179 的 `--max-time`；⛔ 未改动该 criterion 任何部分。
+- [ ] 把本条作为第 4 个实例写回 `GOAL-007` 的证据（done 任务判据被外生增长量推成假）。
 
 ## Touches
 
-- `packages/quay/src/serve-handlers.ts`
+- `packages/quay/src/serve-dashboard.ts`
 - `packages/quay/src/observation.ts`
 - `packages/quay/test/gap-dashboard-parallelize.test.mjs`
 - `tasks/gap-webui-dashboard-regressed-to-12-60s-past-two-done-tasks.md`
