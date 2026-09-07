@@ -1,7 +1,7 @@
 ---
 id: AC-169
 title: 交付面与文档同步
-status: draft
+status: active
 kind: criterion
 goal: GOAL-003
 criterion: >-
