@@ -102,7 +102,13 @@ export async function gateCriterion(
 }
 
 /** 翻一条记录的状态（AC active→achieved / GOAL active→achieved）。经 `goal-store write`（provider
- *  写路径 + I1′/origin 校验，⛔ 不直改 goals/*.md 文件）。origin 必须回传（goal-store CLI 要求）。 */
+ *  写路径 + I1′/origin 校验，⛔ 不直改 goals/*.md 文件）。origin 必须回传（goal-store CLI 要求）。
+ *
+ *  ⚠️ 【无反向翻转】（gap-goal-driver-draft-ac-invisible-yet-blocking AC4）：全仓本函数恰好 2 个
+ *  调用点（:268 / :276，本驱动内），都写 `"achieved"`——没有任何路径把 achieved 翻回 active/draft。
+ *  一旦翻成 achieved 即【永久锁定】。⇒ 后果：只有「达成后不再回退」的状态才配写成目标判据；
+ *  活性/监控类判据（如「某载体末次写入距今 < N 分钟」）会回退，翻 achieved 后该记录将永久声称
+ *  一件已不成立的事。立 AC 的人不得把监控项写成 goal 判据（AC-181 即此类，已由立条人自陈）。 */
 export async function writeGoalStatus(
   scriptRoot: string,
   id: string,
@@ -185,12 +191,24 @@ export async function readTaskFacts(
 
 // ── 纯推导（可单测）────────────────────────────────────────────────────────────────────────
 
-/** I2（GOAL 层）：一个 GOAL 是否「全部 AC achieved」。零 AC ⇒ false（与 goal-store.isGoalAchieved 同源，
- *  ⛔ 不再实现一份——此处只对【本轮已按 flip 更新过 status 的本地记录】做同一判定）。 */
+/** I2（GOAL 层）：一个 GOAL 是否「全部【在域】AC achieved」。零在域 AC ⇒ false。
+ *
+ *  在域（in-scope）= status ∈ {active, achieved}——「已激活待达成」与「已达成」都算在域。
+ *  draft（未激活，裁定 3 人/manager 手动激活）/ superseded（已被取代）/ retired（人裁定放弃）
+ *  均【不在域】，不参与「目标是否达成」判定。
+ *
+ *  ⚠️ 此口径与 computeGoalGaps 对 draft/superseded/retired 一致（都【排除】），修
+ *  gap-goal-driver-draft-ac-invisible-yet-blocking 的死角：旧实现 `every(status === "achieved")`
+ *  把 draft 计入「是否全部 achieved」⇒ 一条 draft AC 既不被 :267 flip（只翻 active）、又不计缺口
+ *  （computeGoalGaps 只数 active）、却仍挡着 GOAL 达成——三头不占。
+ *
+ *  ⚠️ 与 goal-store.isGoalAchieved 的差异：后者仍是 `every(status === "achieved")`，会把 draft/
+ *  superseded/retired 也算成阻塞（store 侧同款死角，另案处理——本任务 Touches 只含 driver 侧）。 */
 export function goalAchievedFromRecords(records: Array<Record<string, unknown>>, goalId: string): boolean {
   const acs = records.filter((r) => String(r.id ?? "").startsWith("AC-") && String(r.goal ?? "") === goalId);
-  if (acs.length === 0) return false;
-  return acs.every((r) => r.status === "achieved");
+  const inScope = acs.filter((r) => r.status === "active" || r.status === "achieved");
+  if (inScope.length === 0) return false;
+  return inScope.every((r) => r.status === "achieved");
 }
 
 // ── 缺口三态（G7，硬规则 3b：读不懂输入不得返回与「合格」同形——「缺口」与「未评估」分离）────
