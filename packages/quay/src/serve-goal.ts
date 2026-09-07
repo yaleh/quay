@@ -9,8 +9,10 @@ import { html, escapeHtml, pageStyles, modernistStyles, detailStyles, renderMark
 // Provider ABI (`client.goalList` / `client.goalGet`), NOT the Core store directly
 // (the store moved to quay-native). Same list/detail shape as /adr (SPEC §4: "照
 // /adr 形状"). The goal page's most valuable column is the most recent verdict +
-// time (SPEC §4: "最近 verdict 与时刻"), read from the record's `evidence` field,
-// which the goal gate runner updates after every criterion execution.
+// time (SPEC §4: "最近 verdict 与时刻"), read from the record's `evidence` field.
+// `evidence` is ledger-DERIVED, never stored (gap-goal-evidence-cache-should-not-enter-git):
+// the provider's goal verbs surface the store's ledger-derived view-model (the LAST `gate:"goal"`
+// event in `.quay/gate-events.jsonl`), so a fresh checkout with no ledger renders "—".
 
 function goalEvidenceCell(ext: Record<string, unknown>): string {
   const ev = ext.evidence as { at?: string; verdict?: string; reading?: string } | undefined;

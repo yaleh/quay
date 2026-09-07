@@ -78,8 +78,10 @@ export async function listGoalRecords(scriptRoot: string, dataRoot: string): Pro
   return parsed as Array<Record<string, unknown>>;
 }
 
-/** 跑一条 AC 的 criterion。⚠️ 副作用是设计如此：`goal-store gate` 自己写 GateEvent + evidence 回写，
- *  这正是「自动档」允许的那类动作（观测性、可逆、不改变系统行为）。 */
+/** 跑一条 AC 的 criterion。⚠️ 副作用是设计如此：`goal-store gate` 自己把 GateEvent 追加进
+ *  `.quay/gate-events.jsonl`（evidence 是账本派生的，⛔ 不回写进 goals/*.md——
+ *  gap-goal-evidence-cache-should-not-enter-git）。这正是「自动档」允许的那类动作
+ *  （观测性、可逆、不改变系统行为）。 */
 export async function gateCriterion(
   scriptRoot: string,
   id: string,
@@ -256,8 +258,9 @@ export interface GoalRoundResult {
   fact: Fact<Record<string, unknown>>;
 }
 
-/** 跑一轮 goal 机械环：枚举 active GOAL → 逐 AC 跑 criterion → 写 evidence（gate 自带）→ I2 flip →
- *  I3/I4（check --staleness）。返回一条 Fact（明细全在 fact.value 里，统一信封 = computeRoundRecord）。 */
+/** 跑一轮 goal 机械环：枚举 active GOAL → 逐 AC 跑 criterion → 写 GateEvent（gate 自带；evidence
+ *  是账本派生的，不回写文件）→ I2 flip → I3/I4（check --staleness）。返回一条 Fact（明细全在
+ *  fact.value 里，统一信封 = computeRoundRecord）。 */
 export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): Promise<GoalRoundResult> {
   const scriptRoot = opts.scriptRoot ?? root;
   const dataRoot = root;
@@ -362,7 +365,7 @@ export function goalDriverRoutines(root: string, opts: { scriptRoot?: string } =
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────
 
 const HELP = [
-  "goal-driver.ts — G6 goal 机械环例程型 driver（跑 criterion→写 evidence→I2 flip→I3/I4 报出）",
+  "goal-driver.ts — G6 goal 机械环例程型 driver（跑 criterion→写 GateEvent→I2 flip→I3/I4 报出）",
   "",
   "Usage: node --experimental-strip-types plugin/scripts/goal-driver.ts [options]",
   "  --root <dir>        仓库根（缺省 cwd；goals/ 与 .quay/ 都在其下）",
