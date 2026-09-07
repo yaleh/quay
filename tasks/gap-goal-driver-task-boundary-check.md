@@ -8,7 +8,6 @@ parent: null
 children: []
 extra:
   schema: execution
-  role: primitive
 ---
 ## Proposal
 
