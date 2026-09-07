@@ -1,7 +1,7 @@
 {
   "files": 133,
-  "bytes": 3844157,
-  "fingerprint": "8ddd5360b8200f2e7ee92efb16ca5c36edcdab3ef2f5cb78ce3bc001e8922ce5",
+  "bytes": 3855366,
+  "fingerprint": "bf69a9b189be71818e2e0ac890c2b03e8d9a183b45b9072b305ee1d19ba31f1f",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
@@ -65,7 +65,7 @@
     },
     {
       "rel": "plugin/probes/meta-driver.md",
-      "sha": "95c7f6c39690b94b1fceee21f147e2848fe8eca5116c2d843a10957eb1904fd7"
+      "sha": "739d4e25563129bad7e33200642aac9ede1ebea4a6ae372acc10d8a6326c5d04"
     },
     {
       "rel": "plugin/probes/self-validation.md",
@@ -193,7 +193,7 @@
     },
     {
       "rel": "plugin/scripts/full-suite-runner.ts",
-      "sha": "917f2044b23eaa3cea7a1c15a6100498f74ca2fee5708fcd3b1fffa8ed1d6e00"
+      "sha": "651fede959319101a5a658ae003636e0314b1571c6140cc4a23c4c279d8b298e"
     },
     {
       "rel": "plugin/scripts/gate-script-base.ts",
@@ -421,7 +421,7 @@
     },
     {
       "rel": "plugin/scripts/start-drivers.ts",
-      "sha": "016bdf209c9430a0004af1b44a30beadc6e3c772d39ea75928d10a3eb88e847f"
+      "sha": "812ea7fa13320fc9f4619a12462089418f74bcbe82451ae0ff0a035f6cf0e67d"
     },
     {
       "rel": "plugin/scripts/strategic-doc-staleness-check.ts",
@@ -457,7 +457,7 @@
     },
     {
       "rel": "plugin/scripts/task-ops.ts",
-      "sha": "27cb460439d4a94ceba64a64436d364a128a92b0a5d11a9ba42512be1a9072e9"
+      "sha": "135f56075f91e9de8ce25cf96be9394ae261b592590d7ad2001b46dcfd6ac9c7"
     },
     {
       "rel": "plugin/scripts/task-schema-check.ts",
@@ -465,7 +465,7 @@
     },
     {
       "rel": "plugin/scripts/task-schema.ts",
-      "sha": "7c568481bf2aab97f31fa13aab53f48e891ed10c0a1027d8d4f9e5b15299b912"
+      "sha": "7313c2f38f119511e962f51ab6e49c429a10c14e588b1d9b45359b9628633ece"
     },
     {
       "rel": "plugin/scripts/task-status-drift-check.ts",
