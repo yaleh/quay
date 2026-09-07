@@ -1,7 +1,7 @@
 ---
 id: AC-157
 title: archive 机制落地 + 五个排除面接线（AC158 的前置）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-003
 criterion: >-
