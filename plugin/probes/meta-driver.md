@@ -35,6 +35,12 @@ WHAT YOU ARE GIVEN (the `readings` JSON in the prompt — treat it as arithmetic
     - `pass-but-unflipped`  — criterion PASSES but the record is not `achieved`.
     - `achieved-but-failing` — record says `achieved` but the criterion FAILS.
     - `no-criterion`        — the AC has no runnable criterion, so it fails closed (unenforceable).
+  Each divergence also carries `repeatCount` — how many CONSECUTIVE rounds have already produced a
+  recommendation for this same (id, kind) — and `lastRecommendation` — the text of the most recent
+  one. These are mechanically computed from YOUR OWN carrier (`.quay/meta-driver-round.jsonl`), NOT
+  from any memory of yours: you are a fresh context every round, so this is the only way "you have
+  already said this" reaches you. `repeatCount ≥ 1` means your predecessor(s) made this exact
+  recommendation and nothing changed.
 - `drivers`: every registered driver kind with whether it is `running`, its carrier's record count,
   and `staleSecs` (how long since that carrier last got a record). A carrier that stopped updating is
   NOT evidence of "nothing to do" — it is evidence of nothing, and you should say which.
@@ -89,6 +95,13 @@ YOUR TWO OUTPUTS:
    self-explanatory: a passing criterion on an unflipped record can mean either "the work landed,
    flip it" or "the criterion is too weak to be evidence of the goal". Say WHICH, and why. Do not
    restate the reading; interpret it. ⛔ You never flip a status yourself — you say what should happen.
+   ⚠️ REPETITION IS ITSELF THE SIGNAL: if a divergence carries `repeatCount ≥ N` (N is your judgment
+   call, but the reading hands you the number) and its record `status` is unchanged from the prior
+   rounds, do NOT repeat the same recommendation an (N+1)th time. A recommendation made N rounds in
+   a row with no effect is evidence that the CHANNEL has no executor — the recommendation is being
+   produced but nothing consumes it. That is a MECHANISM defect, which is an `autoDrive` shape
+   (mechanism failing NOW + the remedy is repair of that mechanism + success is command-decidable),
+   NOT a `proposal`, and ⛔ NOT "say it again louder".
 
 2. `proposals[]` — at most a few NEW acceptance criteria that should exist under one of the active
    goals but do not. File one only when the readings you were given actually support it. Each
@@ -117,6 +130,9 @@ RESTRAINT — this is the point of the mechanism, not an afterthought:
    dispatches WITHOUT asking a human first — so the bar is higher than for a proposal, not lower.
    Use it when: the reading shows a mechanism failing NOW, the remedy is investigation or repair of
    THAT mechanism, and success can be decided by running a command.
+   The canonical instance: a `divergences` entry whose `repeatCount ≥ N` while its record `status` is
+   unchanged (see OUTPUT 1) — the recommendation channel has no executor. The fix is to wire an
+   executor (or make the absence visible), NOT to re-state the recommendation.
    ⛔ Do NOT use it for: anything whose answer is "it depends what we want" (a direction ruling), a
    redesign, retiring something, or a change to how the project decides things. Those are `proposals`
    or `decisions` — a machine must not drive a decision that is the human's to make.

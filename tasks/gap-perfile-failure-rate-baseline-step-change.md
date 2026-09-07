@@ -41,12 +41,12 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，基线计算 + 真实数据复现）：新增 `plugin/scripts/perfile-failure-rate.ts`，从 `.quay/verification-round.jsonl` 的 `perFile` 记录计算逐文件 `{runs, fails, rate}` 基线；对全历史跑一次，输出必须复现本任务 Proposal 里的实测读数（总体 `304/243954 = 0.1246%`、曾失败文件 `87/615`、`observation.test.mjs 24/385`、`worker-driver-resident.test.mjs 16/324`），Measured 贴出真实命令与完整输出。若实现时载体已增长导致数字变化，允许贴出**新的**真实读数并说明增量（轮数变化），⛔ 但不得跳过与生产载体的实跑核对、不得只用 fixture 交差（硬规则④推论三）。
-- [ ] AC2（能取假，分类是纯函数 + 三态齐全）：分类函数对一条失败给出 `new-event`（该文件历史 fails=0）/ `within-baseline`（历史 rate 显著非零且本次在其既有行为内）/ `step-change`（rate 发生阶跃）/ `insufficient`（该文件历史运行次数低于可判门槛）四态之一；`insufficient` 必须是**独立取值**，⛔ 不得与 `within-baseline` 或 `new-event` 共用输出（硬规则 3b：读不懂不得与合格同形）。新增 `plugin/test/perfile-failure-rate.test.mjs` 用 fixture 覆盖四态各至少一例，`node --test plugin/test/perfile-failure-rate.test.mjs` 退出码 0。
-- [ ] AC3（能取假，fail-closed）：`--root` 指向一个不含 `.quay/verification-round.jsonl` 的干净临时目录时，必须报「载体未找到」并以非 0 退出，⛔ 不得返回空基线当作「所有文件都没失败过」（那会让每个失败都被误判成 `new-event`）；`--root` 未传时回落 `QUAY_MAIN_CHECKOUT` 再回落 cwd（沿用 `psi-failure-correlation-check.ts` 既有约定，⛔ 不新造解析规则）。
-- [ ] AC4（能取假，接进生产分诊路径）：`.claude/workflows/fan-in-execute.js` 的 FIX_SCOPE_GATE 为每条失败附上该文件的基线（`runs`/`fails`/`rate`/分类），且**历史从未失败过的文件的失败不再走静默 defer-retry**，而是路由到升级/语义分析；`plugin/workflows/fan-in-execute.js` 镜像副本**同步逐字节一致**（⛔ 单边编辑会触发 byte-identical 校验红）。能取假：构造一个含「从未失败文件的失败」的 state 跑一次 gate ⇒ 输出显示 `new-event` 路由而非 defer；把同一文件的历史 fails 改成非零 ⇒ 路由变回 `within-baseline`。
+- [x] AC1（能取假，基线计算 + 真实数据复现）：新增 `plugin/scripts/perfile-failure-rate.ts`，从 `.quay/verification-round.jsonl` 的 `perFile` 记录计算逐文件 `{runs, fails, rate}` 基线；对全历史跑一次，输出必须复现本任务 Proposal 里的实测读数（总体 `304/243954 = 0.1246%`、曾失败文件 `87/615`、`observation.test.mjs 24/385`、`worker-driver-resident.test.mjs 16/324`），Measured 贴出真实命令与完整输出。若实现时载体已增长导致数字变化，允许贴出**新的**真实读数并说明增量（轮数变化），⛔ 但不得跳过与生产载体的实跑核对、不得只用 fixture 交差（硬规则④推论三）。
+- [x] AC2（能取假，分类是纯函数 + 三态齐全）：分类函数对一条失败给出 `new-event`（该文件历史 fails=0）/ `within-baseline`（历史 rate 显著非零且本次在其既有行为内）/ `step-change`（rate 发生阶跃）/ `insufficient`（该文件历史运行次数低于可判门槛）四态之一；`insufficient` 必须是**独立取值**，⛔ 不得与 `within-baseline` 或 `new-event` 共用输出（硬规则 3b：读不懂不得与合格同形）。新增 `plugin/test/perfile-failure-rate.test.mjs` 用 fixture 覆盖四态各至少一例，`node --test plugin/test/perfile-failure-rate.test.mjs` 退出码 0。
+- [x] AC3（能取假，fail-closed）：`--root` 指向一个不含 `.quay/verification-round.jsonl` 的干净临时目录时，必须报「载体未找到」并以非 0 退出，⛔ 不得返回空基线当作「所有文件都没失败过」（那会让每个失败都被误判成 `new-event`）；`--root` 未传时回落 `QUAY_MAIN_CHECKOUT` 再回落 cwd（沿用 `psi-failure-correlation-check.ts` 既有约定，⛔ 不新造解析规则）。
+- [x] AC4（能取假，接进生产分诊路径）：`.claude/workflows/fan-in-execute.js` 的 FIX_SCOPE_GATE 为每条失败附上该文件的基线（`runs`/`fails`/`rate`/分类），且**历史从未失败过的文件的失败不再走静默 defer-retry**，而是路由到升级/语义分析；`plugin/workflows/fan-in-execute.js` 镜像副本**同步逐字节一致**（⛔ 单边编辑会触发 byte-identical 校验红）。能取假：构造一个含「从未失败文件的失败」的 state 跑一次 gate ⇒ 输出显示 `new-event` 路由而非 defer；把同一文件的历史 fails 改成非零 ⇒ 路由变回 `within-baseline`。
 - [ ] AC5（能取假，生产载体证据，非 fixture）：改动落地后，至少一次**真实** fan-in 轮的 gate 输出里出现基线字段（贴出真实输出，注明 runId）；⛔ 不得以单测通过冒充（硬规则④推论三：实现了、测试绿了、但生产没跑过 ⇒ 与没实现同形）。（待外部）
-- [ ] AC6（能取假，范围守卫）：`git diff develop --stat` 不含 `plugin/scripts/suite-scheduler.ts` 的 `nextDispatch`/`currentCap` 或任何准入/调度逻辑改动；不含对「已知抖动源」既有 release/fix 判定的改动（只新增字段与 `new-event` 路由）；不引入任何 PSI 读数作为判据；新脚本已按 `plugin/scripts/capability-catalog.sh` 头注释完成六表注册（Measured 贴出注册后 `bash plugin/scripts/capability-catalog.sh --summary` 的输出，脚本计数含新文件）。
+- [x] AC6（能取假，范围守卫）：`git diff develop --stat` 不含 `plugin/scripts/suite-scheduler.ts` 的 `nextDispatch`/`currentCap` 或任何准入/调度逻辑改动；不含对「已知抖动源」既有 release/fix 判定的改动（只新增字段与 `new-event` 路由）；不引入任何 PSI 读数作为判据；新脚本已按 `plugin/scripts/capability-catalog.sh` 头注释完成六表注册（Measured 贴出注册后 `bash plugin/scripts/capability-catalog.sh --summary` 的输出，脚本计数含新文件）。
 
 ## Definition of Done
 
@@ -60,7 +60,69 @@ extra:
 - .claude/workflows/fan-in-execute.js（canonical：FIX_SCOPE_GATE 附基线字段 + new-event 路由）
 - plugin/workflows/fan-in-execute.js（上一条的 byte-identical 分布镜像，必须同步改，⛔ 单边编辑会红）
 - tasks/gap-perfile-failure-rate-baseline-step-change.md（自身）
+- docs/analysis/quay-init-closure-ratchet.baseline.json（capability-catalog.sh laydown 源变更的 closure-ratchet re-anchor 基线）
 
 ## Measured
 
-（待 author/execute 阶段填入：AC1–6 各自的真实命令与输出）
+（实现于 2026-09-07；载体 `.quay/verification-round.jsonl` 在实现期间由 proposal 的 243954 条持续增长——生产 loop 在写，增量已计入，四个锚读数在增量内复现。）
+
+**AC1**（真实载体全历史跑，非 fixture）：
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/perfile-failure-rate.ts --root /home/yale/work/quay
+total perFile records: 245303 | fails: 305 | overall rate: 0.1243%
+distinct files: 616 | ever-failed: 87 | never-failed: 529
+top jitter sources (runs>=50, rate desc):
+  packages/quay/test/observation.test.mjs: 24/386 = 6.2176%
+  plugin/test/worker-driver-resident.test.mjs: 16/328 = 4.8780%
+  plugin/test/help-contract-incompatible-behaviors.test.mjs: 16/397 = 4.0302%
+  plugin/test/writestate-atomicity-split.test.mjs: 15/397 = 3.7783%
+  plugin/test/worker-driver-fan-in.test.mjs: 12/353 = 3.3994%
+```
+增量说明：proposal 锚读数 304/243954=0.1246%、87/615、observation 24/385、worker-driver-resident 16/324 → 实现时 305/245303=0.1243%（+1349 条、+1 fail）、87/616（+1 文件）、24/386、16/328（+4 runs）。ever-failed 87、never-failed ≈528→529 复现。
+
+**AC2**（fixture 单测，退出码 0）：
+```
+$ node --test plugin/test/perfile-failure-rate.test.mjs
+# tests 10 | pass 10 | fail 0
+```
+四态各至少一例：new-event / within-baseline / step-change / insufficient（insufficient 独立取值，断言语义不与他态共用）。
+
+**AC3**（fail-closed）：
+```
+$ d=$(mktemp -d); node --no-warnings --experimental-strip-types plugin/scripts/perfile-failure-rate.ts --root "$d"; echo exit=$?
+perfile-failure-rate: 载体未找到: $d/.quay/verification-round.jsonl — …（fail-closed…）
+exit=2
+```
+`--root` 未传时回落 `QUAY_MAIN_CHECKOUT` 再回落 cwd（resolveCarrierRoot 同 psi-failure-correlation-check.ts 约定）。
+
+**AC4**（接进生产分诊路径，能取假负控制）：
+```
+$ node --no-warnings --experimental-strip-types --test --test-name-pattern "fix-scope" plugin/test/fan-in-execute-paths.test.mjs
+# tests 8 | pass 8 | fail 0
+```
+含新增「fix-scope REAL new-event routing」负控制：never-failed 文件（fails=0）的越界红 ⇒ reason=`new-event`（升级），同一文件历史 fails 改为非零（跨半程）⇒ reason 变回 `other-task`（defer）、classification=`within-baseline`。
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/workflows-dual-copy-drift-check.ts --root /home/yale/work/quay-worktrees/gap-perfile-failure-rate-baseline-step-change
+workflows-dual-copy-drift-check: drift check — 5 pairs, 5 consistent / 0 drifted
+  ok: .claude/workflows/fan-in-execute.js (1025 lines) == plugin/workflows/fan-in-execute.js (1025 lines)
+```
+
+**AC5**：（待外部）——改动落地后由一次真实 fan-in 轮的 gate 输出贴出基线字段 + runId，本 worker 不冒充。
+
+**AC6**（范围守卫，merge develop 后）：
+```
+$ git diff develop --stat
+ .claude/workflows/fan-in-execute.js       |  20 +-
+ plugin/scripts/capability-catalog.sh      |   6 +
+ plugin/scripts/perfile-failure-rate.ts    | 341 +++++++++++
+ plugin/test/fan-in-execute-paths.test.mjs |  60 ++++++
+ plugin/test/perfile-failure-rate.test.mjs | 136 ++++++++
+ plugin/workflows/fan-in-execute.js        |  20 +-
+ 6 files changed, 577 insertions(+), 6 deletions(-)
+```
+不含 suite-scheduler.ts 的 nextDispatch/currentCap 或任何准入/调度逻辑；不含已知抖动源 release/fix 判定改动；不引入 PSI 读数判据。
+```
+$ bash plugin/scripts/capability-catalog.sh --summary
+capability-catalog: 319 scripts | 319 declared | 0 unclassified | 314 ship
+```
+（六表注册：QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING/CONSUMER，`grep -c '\[perfile-failure-rate.ts\]' capability-catalog.sh` = 6。）
