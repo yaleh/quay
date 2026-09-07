@@ -254,7 +254,6 @@ packages/quay/test/verify-sea-artifact.test.mjs
 packages/quay/test/web-ui-browser.test.mjs
 packages/quay/test/webui-modernist-sync.test.mjs
 plugin/test/abi-task-status-typing.test.mjs
-plugin/test/ac36-sortkey-criterion-check.test.mjs
 plugin/test/ac56-recommended-deordered-check.test.mjs
 plugin/test/ac61-staleness-disposition-check.test.mjs
 plugin/test/ac69-slot-queue-gap-check.test.mjs

@@ -18,6 +18,11 @@ manager 不在时生效（inner/outer 独立运行时回落到这一段）。
 
 manager 在时的当前倾向（本阶段优先）。
 
+- **⛔ AC36 机械排序轴已于 2026-09-07 按人裁定退役，delivery-critical 优先完全由 selector 语义判断，无机械保证**
+  （`gap-delivery-critical-mechanical-axis-orphaned-needs-ruling`：`slot-refill.ts` 的 `delivery_critical` 第二排序轴
+  与 `concurrent-batch-scheduler.ts` 的 `deliveryCritical` 读面已删，`ac36-sortkey-criterion-check.ts` 随之退役；
+  本条以下谓词是 delivery-critical 优先的**唯一**幸存机制，无代码强制）。
+
 - **⚡ 当前优先级（谓词形，2026-08-24T07:5xZ manager 立）：候选中凡满足
   `frontmatter labels 含 delivery-critical` 者，一律优先于其它候选**，
   除非结构上不可派（Touches 冲突 / 依赖未满 / 非 ready）。多条同时满足时，其相对顺序由 selector 按语义判断。
