@@ -2,7 +2,7 @@
 id: gap-meta-driver-no-steering-channel-focus-unreachable
 title: 常驻 meta-driver 无任何可用的人工转向通道——--focus 既不被 driverArgvForKind
   透传，且即使透传也是进程级常量并使 :505 每轮强制判读，永久废掉变化检测闸
-status: todo
+status: ready
 labels:
   - gap
   - meta-driver
