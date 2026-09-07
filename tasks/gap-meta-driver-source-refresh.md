@@ -2,7 +2,7 @@
 id: gap-meta-driver-source-refresh
 title: Resident drivers self-refresh when driver-filters.ts changes (end AC-184
   stale-writer recurrence)
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
