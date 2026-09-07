@@ -261,6 +261,7 @@ plugin/test/accounting-emit-layer-map.test.mjs
 plugin/test/accounting-emit.test.mjs
 plugin/test/adr016-screen-use-check.test.mjs
 plugin/test/agent-panel-classify.test.mjs
+plugin/test/allowed-tools-plugin-prefix-check.test.mjs
 plugin/test/archguard-structural-gate-fan-in.test.mjs
 plugin/test/architecture-review-cluster.test.mjs
 plugin/test/archive-exclusion-wiring.test.mjs
@@ -476,6 +477,7 @@ plugin/test/runner-grouping-list-groups.test.mjs
 plugin/test/runner-grouping-metadata.test.mjs
 plugin/test/runner-grouping-serial-anti-stomp.test.mjs
 plugin/test/runtime-landing.test.mjs
+plugin/test/runtime-usage-inventory-workflows-enumeration.test.mjs
 plugin/test/runtime-usage-inventory.test.mjs
 plugin/test/scoped-static-checks.test.mjs
 plugin/test/select-static-checks-for-touches.test.mjs
@@ -487,7 +489,6 @@ plugin/test/semantic-face-dispatch-record.test.mjs
 plugin/test/semantic-observer-judge.test.mjs
 plugin/test/send-keys-reliable.test.mjs
 plugin/test/session-retirement-check.test.mjs
-plugin/test/skill-allowed-tools-namespace-check.test.mjs
 plugin/test/slot-refill-heartbeat.test.mjs
 plugin/test/slot-refill.test.mjs
 plugin/test/slot-visibility.test.mjs
