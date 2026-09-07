@@ -2,7 +2,7 @@
 id: gap-goal-achieved-but-failing-no-handler
 title: achieved-but-failing 无任何处理者，而 goal-driver:272 注释声称「I4 已报出」——I4 判的是方向相反的
   GOAL 层条件，对该形态恒不触发且 exit 0
-status: todo
+status: ready
 labels:
   - gap
   - defect
