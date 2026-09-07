@@ -2,7 +2,7 @@
 id: gap-addressedtasks-conflates-topic-label-with-routing-worker-implements-messages-to-meta
 title: addressedTasks 把「关于 meta-driver 的任务」当成「寄给 meta-driver 的消息」——probe 规格逐字写
   things sent TO you 而实测 6 条无一是消息，且它们全被 worker 派发实现（32 次）
-status: todo
+status: superseded
 labels:
   - gap
   - defect
