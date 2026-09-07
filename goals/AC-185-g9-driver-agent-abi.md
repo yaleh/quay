@@ -59,6 +59,10 @@ origin: >-
   llm_invoked 派生自真实 argv）。
 
   缺的只是 spawn 那一半。
+evidence:
+  at: 2026-09-07T02:41:23.498Z
+  verdict: fail
+  reading: acceptance failed (exit 1)
 ---
 **判据（能取假，三向对照已做）**：读生产载体 `.quay/goal-round.jsonl`，要求存在两轮 R1 < R2 ——
 R1 中某条 AC 的 `state == "gap"` 且该轮 `spawned > 0`，R2 中同一条 AC 变为 `state == "in-progress"`（`taskCount ≥ 1`）。
