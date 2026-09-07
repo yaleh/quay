@@ -43,4 +43,5 @@ extra:
 - `plugin/scripts/task-ops.ts`
 - `plugin/skills/quay-task-operator/SKILL.md`
 - `packages/quay/test/mcp-handlers.test.mjs`
+- `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `tasks/gap-task-write-labels-replace-not-append-no-safe-add-action.md`

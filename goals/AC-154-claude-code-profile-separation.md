@@ -1,7 +1,7 @@
 ---
 id: AC-154
 title: Claude Code profile 抽层 + 独立承载
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-002
 criterion: |
@@ -12,10 +12,6 @@ origin: >
 
   正本 orchestration/SPEC-unified-driver-architecture-2026-08-23.md
   §2.1/§2.5/§2.6。
-evidence:
-  at: 2026-09-06T17:03:32.441Z
-  verdict: pass
-  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：`profiles`（可复用）与 `roles`（引用 profile）分离；`bare` **只在一层出现**；
