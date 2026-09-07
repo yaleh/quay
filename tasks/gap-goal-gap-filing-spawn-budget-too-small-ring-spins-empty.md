@@ -2,7 +2,7 @@
 id: gap-goal-gap-filing-spawn-budget-too-small-ring-spins-empty
 title: G9 缺口立案环 spawn 预算 180s 不足 ⇒ 每轮烧满 spawn_cap 个 LLM agent、产出恒 0、taskCount
   永不脱离 0（空转，比不点火更贵）
-status: ready
+status: done
 labels:
   - gap
   - defect
