@@ -1,13 +1,15 @@
 ---
 id: gap-meta-call-resident-suite-driver-kind-spawn-per-tas
 title: resident `suite` driver kind 从未启动却仍注册——两个正本对「谁 spawn per-task suite」互相矛盾
-status: needs-human
+status: todo
 labels:
   - meta-human-call
   - meta-driver
 parent: null
 children: []
 extra: {}
+depends_on:
+  - gap-retire-resident-suite-driver-kind
 ---
 ## Finding
 per-task suite 的 spawn 架构以哪个正本为准：SPEC-suite-lifecycle-2026-08-26 §3 的常驻 `suite` driver kind（request/result 模式，实测 carrierRecords=0、request/result 目录无写入者无读取者、start-drivers.ts 未收录它），还是 SPEC-fan-in-2026-08-27 机械 fan-in 的 worker-driver 进程内直接 spawn（复用 spawnSuiteAndWait）？
@@ -36,3 +38,15 @@ per-task suite 的 spawn 架构以哪个正本为准：SPEC-suite-lifecycle-2026
 - `plugin/scripts/suite-driver.ts`
 - `plugin/scripts/worker-driver.ts`
 - `tasks/gap-meta-call-resident-suite-driver-kind-spawn-per-tas.md`
+
+## Resolution
+
+**人 2026-09-07 裁定（逐字）**：
+
+> A 退役常驻 suite kind（从 DRIVER_KINDS 移除 + 删 request/result 死循环，保留 spawnSuiteAndWait 共享函数，并修正 SPEC §3『唯一 spawn』表述）
+
+**落败的一方**：`orchestration/SPEC-suite-lifecycle-and-failure-semantics-2026-08-26.md` §3「它是【唯一】spawn per-task suite 的地方」——该表述与生产实际不符（常驻形态从未启动过），须**就地更正并标注退役**，⛔ 不静默删除。
+
+**后续工作已立案**：`gap-retire-resident-suite-driver-kind`（本任务 `depends_on` 它）——执行 A 的四件事：注册表移除 / 删常驻循环 / 保留 spawnSuiteAndWait / 订正 SPEC §3 + capability-catalog 六表条目。
+
+**裁定前 manager 的现场复核（直接量，2026-09-07）**：`start-drivers.ts:33` 的 `DRIVER_KINDS` 只有 promotion/worker/goal；`.quay/suite-requests` 与 `.quay/suite-results` 目录不存在（无 writer 无 reader）；`worker-driver.ts:202` 进程内 import `spawnSuiteAndWait`。三项一致支持 A。
