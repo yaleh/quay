@@ -1,7 +1,7 @@
 ---
 id: AC-193
 title: no orphan suite process
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-007
 criterion: |-
