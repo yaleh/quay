@@ -14,6 +14,10 @@ expect: exit 0（.claude/workflows/manager-tick-core.js 已不存在 ∧
 origin: |
   人 2026-09-02 裁定②（自用与交付同一功能）+ 裁定④（manager 是产品一部分）。正本
   SPEC-plugin-lifecycle-single-bundle-2026-09-02.md。
+evidence:
+  at: 2026-09-07T01:09:43.028Z
+  verdict: fail
+  reading: acceptance failed (exit 1)
 ---
 
 **判据（能取假）**：`.claude/skills/` 5 个 + `.claude/workflows/` 双副本 archive；`manager-tick-core.js`
