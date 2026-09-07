@@ -1,7 +1,7 @@
 ---
 id: gap-meta-round-log-rel
 title: quality 驱动轮心跳写错路径（repo root 而非 .quay/）——liveness 监测读判词载体 judgedAt 报假 stall
-status: done
+status: ready
 labels:
   - meta-driver
   - driver-candidate
