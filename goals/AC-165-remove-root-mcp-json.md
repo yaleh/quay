@@ -1,7 +1,7 @@
 ---
 id: AC-165
 title: 撤 root .mcp.json 的 quay 条目（AC164 满足后才做）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-003
 criterion: >-
