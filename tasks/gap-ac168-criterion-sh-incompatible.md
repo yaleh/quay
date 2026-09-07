@@ -23,12 +23,12 @@ goal_ac: AC-168
 
 ## AC
 
-- [ ] AC1（criterion 经 sh 逐字 exit 0）：抽 `goals/AC-168-quay-init-contract-closed-set.md` 的 criterion 字段 → 写临时文件 → `sh` 执行 exit 0（贴实跑输出）
-- [ ] AC2（goal-store gate 判 pass）：`node --experimental-strip-types packages/quay/src/goal-store.ts gate AC-168 --root /home/yale/work/quay` 输出 `"verdict": "pass"`（reason 含 `exit 0`）
-- [ ] AC3（criterion 不含 `<(`）：`grep -c '<(' goals/AC-168-quay-init-contract-closed-set.md` == 0
-- [ ] AC4（负控制能取假）：临时把 criterion 改回 `<(...)` 版 → `sh` 执行 exit 2（贴「修复前 exit 2 / 修复后 exit 0」两段输出）
-- [ ] AC5（schema + 形状）：`node plugin/scripts/task-schema-check.ts tasks/gap-ac168-criterion-sh-incompatible.md` exit 0，且 `node packages/quay/bin/quay.ts task check gap-ac168-criterion-sh-incompatible --json` 的 `missing` == `[]`
-- [ ] AC6（回归测试绿）：`packages/quay/test/goal-gate.test.mjs` 新增「goal gate 经 sh 执行——bash 进程替换判据 fail(exit 2)、POSIX temp-file comm 判据 pass」合成对照用例；`node --test packages/quay/test/goal-gate.test.mjs` exit 0
+- [x] AC1（criterion 经 sh 逐字 exit 0）：抽 `goals/AC-168-quay-init-contract-closed-set.md` 的 criterion 字段 → 写临时文件 → `sh` 执行 exit 0（贴实跑输出）
+- [x] AC2（goal-store gate 判 pass）：`node --experimental-strip-types packages/quay/src/goal-store.ts gate AC-168 --root /home/yale/work/quay` 输出 `"verdict": "pass"`（reason 含 `exit 0`）
+- [x] AC3（criterion 不含 `<(`）：`grep -c '<(' goals/AC-168-quay-init-contract-closed-set.md` == 0
+- [x] AC4（负控制能取假）：临时把 criterion 改回 `<(...)` 版 → `sh` 执行 exit 2（贴「修复前 exit 2 / 修复后 exit 0」两段输出）
+- [x] AC5（schema + 形状）：`node plugin/scripts/task-schema-check.ts tasks/gap-ac168-criterion-sh-incompatible.md` exit 0，且 `node packages/quay/bin/quay.ts task check gap-ac168-criterion-sh-incompatible --json` 的 `missing` == `[]`
+- [x] AC6（回归测试绿）：`packages/quay/test/goal-gate.test.mjs` 新增「goal gate 经 sh 执行——bash 进程替换判据 fail(exit 2)、POSIX temp-file comm 判据 pass」合成对照用例；`node --test packages/quay/test/goal-gate.test.mjs` exit 0
 
 ## DoD
 
