@@ -73,19 +73,21 @@ $ node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts 
 
 ## AC
 
-- [ ] `:272` 的声明与实现一致：goal 层存在一个**能对 achieved-but-failing 取真**的机械判定，其输出为可枚举的 AC id 列表（⛔ 不是布尔、不是计数——SPEC §5.3：不枚举对象则零指引价值），且与 `divergent` 桶**分离**（两者语义相反，断言同一输入下两个桶内容不相等）。
-- [ ] 双向能取假：喂一个含「status=achieved 且 criterion 退出码非 0」的 AC 的载体 ⇒ 该 AC 出现在新桶中；把同一 AC 的判据改为退出码 0 ⇒ 该 AC 离开新桶。两个方向都断言。
-- [ ] 负控制固定为回归：以本任务实测的现场为形，断言「存在一条 achieved-but-failing 的 AC 时，`check --staleness` 不得同时返回空的分歧信息且 exit 0」——即今天这个假绿在改动后必然变红。
-- [ ] `pass-but-unflipped` 既有行为不回归：`plugin/test/goal-driver.test.mjs` 全绿，且 `verdict==="pass" && status==="active" ⇒ 翻 achieved` 的既有断言不被削弱（⛔ 不得为了让新桶通过而放宽 `:267`）。
-- [ ] `goal-driver.ts:272` 的注释改为与实现逐字相符；⛔ 不允许保留任何点名一个不覆盖该形态的机制的措辞。
+- [x] `:272` 的声明与实现一致：goal 层存在一个**能对 achieved-but-failing 取真**的机械判定，其输出为可枚举的 AC id 列表（⛔ 不是布尔、不是计数——SPEC §5.3：不枚举对象则零指引价值），且与 `divergent` 桶**分离**（两者语义相反，断言同一输入下两个桶内容不相等）。
+- [x] 双向能取假：喂一个含「status=achieved 且 criterion 退出码非 0」的 AC 的载体 ⇒ 该 AC 出现在新桶中；把同一 AC 的判据改为退出码 0 ⇒ 该 AC 离开新桶。两个方向都断言。
+- [x] 负控制固定为回归：以本任务实测的现场为形，断言「存在一条 achieved-but-failing 的 AC 时，`check --staleness` 不得同时返回空的分歧信息且 exit 0」——即今天这个假绿在改动后必然变红。
+- [x] `pass-but-unflipped` 既有行为不回归：`plugin/test/goal-driver.test.mjs` 全绿，且 `verdict==="pass" && status==="active" ⇒ 翻 achieved` 的既有断言不被削弱（⛔ 不得为了让新桶通过而放宽 `:267`）。
+- [x] `goal-driver.ts:272` 的注释改为与实现逐字相符；⛔ 不允许保留任何点名一个不覆盖该形态的机制的措辞。
 
 ## DoD
 
-- [ ] 上述判据本轮实跑并贴出输出（⛔ 不是转述、不是「应该会过」），负控制实跑确认能取假。
-- [ ] **生产载体证据（非 fixture）**：改动落地后，对**当前真实的** AC-172（或彼时任一 achieved-but-failing 的 AC）跑一次新判定，贴出它出现在新桶中的真实输出；若届时已无此类 AC，须贴出「库中确无该形态」的读数支撑（⛔ 不得以 fixture 通过冒充生产已验，硬规则④推论三）。
-- [ ] ⛔ 未新增 driver kind、未新增周期性检查器（SPEC §5.1）；新增的是既有 `check --staleness` 的一个取值。
-- [ ] ⛔ 未把 achieved-but-failing 并入 `divergent` 桶；⛔ 未采用「只改注释措辞、不给检测者」的修法。
-- [ ] 若执行者判断应当同时加反向翻转，须在任务体中写明它与裁定 3（激活归人）如何共存，并附一个能取假的判据；若判断不应加，须写明理由——**两种都可接受，静默跳过不可接受**。
+- [x] 上述判据本轮实跑并贴出输出（⛔ 不是转述、不是「应该会过」），负控制实跑确认能取假。
+- [x] **生产载体证据（非 fixture）**：改动落地后，对**当前真实的** AC-172（或彼时任一 achieved-but-failing 的 AC）跑一次新判定，贴出它出现在新桶中的真实输出；若届时已无此类 AC，须贴出「库中确无该形态」的读数支撑（⛔ 不得以 fixture 通过冒充生产已验，硬规则④推论三）。
+- [x] ⛔ 未新增 driver kind、未新增周期性检查器（SPEC §5.1）；新增的是既有 `check --staleness` 的一个取值。
+- [x] ⛔ 未把 achieved-but-failing 并入 `divergent` 桶；⛔ 未采用「只改注释措辞、不给检测者」的修法。
+- [x] 若执行者判断应当同时加反向翻转，须在任务体中写明它与裁定 3（激活归人）如何共存，并附一个能取假的判据；若判断不应加，须写明理由——**两种都可接受，静默跳过不可接受**。
+
+**执行者决策（DoD 第 5 条，不加反向翻转）**：`achieved → active` 是激活动作，裁定 3 明确「激活归人」，机械反向翻转会与之打架；且判据 fail 可能只是暂时红（外部依赖 / suite 抖动）。本任务新增的检测者（`check --staleness` 的 `achievedButFailing` 桶 + 退出码 1）把该形态交还给有处理者的面，无需翻状态。实测生产读数：`achievedButFailing: ["AC-164","AC-172","AC-175","AC-177","AC-179"]`、`divergent: []`、exit 1。
 
 ## Touches
 
