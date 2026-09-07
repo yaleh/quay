@@ -2,7 +2,7 @@
 id: gap-meta-ac-184
 title: AC-184 stale-driver guard checks only the lowest pid — a stale
   promotion-driver still writes old-shape not-ff events and AC-183 fails
-status: done
+status: ready
 labels:
   - meta-driver
   - driver-candidate
