@@ -15,9 +15,9 @@ origin: |
   上限本该只约束激活。该状态在散文里已存在：manager-phase-goal.md:174
   「📋 下一阶段（已创建，未启动）」，44f8813d2 明写「未切换、未启动、不得据此派发」。
 evidence:
-  at: 2026-09-07T00:53:05.440Z
-  verdict: pass
-  reading: acceptance passed (exit 0)
+  at: 2026-09-07T01:13:11.793Z
+  verdict: fail
+  reading: acceptance failed (exit 1)
 ---
 
 **判据（能取假）**：`list --status draft` 至少返回一条 `GOAL-` 记录。

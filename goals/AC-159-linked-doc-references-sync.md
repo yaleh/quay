@@ -1,15 +1,22 @@
 ---
 id: AC-159
 title: 三个连带文档提及同步清理
-status: draft
+status: achieved
 kind: criterion
 goal: GOAL-003
-criterion: |
-  node --experimental-strip-types plugin/scripts/l1-delivery-surface-check.ts --surface
-expect: "exit 0（surface-categories-covered 全覆盖；散文写「仍报 6/6」，本仓当前 SPEC 实为 5/5——散文漂移物证）"
-origin: |
-  人 2026-09-02 裁定④「对零调用的工具，先退役」。正本 SPEC-plugin-lifecycle-single-bundle-2026-09-02.md
+criterion: >
+  node --experimental-strip-types plugin/scripts/l1-delivery-surface-check.ts
+  --surface
+expect: exit 0（surface-categories-covered 全覆盖；散文写「仍报 6/6」，本仓当前 SPEC 实为 5/5——散文漂移物证）
+origin: >
+  人 2026-09-02 裁定④「对零调用的工具，先退役」。正本
+  SPEC-plugin-lifecycle-single-bundle-2026-09-02.md
+
   §12e 表格逐行点名的落点。
+evidence:
+  at: 2026-09-07T01:13:29.556Z
+  verdict: pass
+  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：`l1-delivery-surface-check.ts --surface` 仍报 **6/6**（六类交付物全部有交付物 +

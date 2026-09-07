@@ -1,12 +1,23 @@
 ---
 id: AC-162
 title: register-plugin.mjs 不再写用户级 enabledPlugins
-status: draft
+status: active
 kind: criterion
 goal: GOAL-003
+criterion: >-
+  grep -vE '^[[:space:]]*(//|\*|#)' packages/quay/scripts/register-plugin.mjs |
+  grep -q 'enabledPlugins' && exit 1
+
+  exit 0
+expect: exit 0（packages/quay/scripts/register-plugin.mjs 的【非注释行】不再出现
+  enabledPlugins；注释里提到不算命中）
 origin: |
   人 2026-09-02 裁定③「本项目的开发环境不应污染本机其它项目」。正本
   SPEC-plugin-lifecycle-single-bundle-2026-09-02.md §4b。
+evidence:
+  at: 2026-09-07T01:13:31.537Z
+  verdict: fail
+  reading: acceptance failed (exit 1)
 ---
 
 **判据（能取假）**：`register-plugin.mjs` 不再写用户级 `enabledPlugins`（安装可以全局，启用不该全局）。
