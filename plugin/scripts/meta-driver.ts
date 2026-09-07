@@ -389,6 +389,12 @@ export interface SyncHealth {
   window: number;
   ffSynced: number;
   notFf: number;
+  /** not-ff 的 benign 分解（gap-meta-collectsynchealth）：benign=true = behind===0 的良性 ahead-only
+   *  （author 刚提交任务状态、无物可拉），benign=false = behind>0 的真分叉。⛔ 只数 notFf 总数会把
+   *  「良性领先」与「真分叉」混为一谈——两者处置完全不同（前者等下一轮 ff 即可，后者要升级语义兜底）。
+   *  旧事件（无 benign 字段）不进任一桶，只进 notFf 总数（⛔ 不猜——硬规则 6：缺值 = 未查，不是为假）。 */
+  notFfBenign: number;
+  notFfBehind: number;
   ffError: number;
   /** 语义兜底进入次数（begin）。⛔ 必须与终结态分开数——只数终结态会让「进入了但没结束」隐身。 */
   semanticBegin: number;
@@ -406,7 +412,7 @@ export interface SyncHealth {
 export function collectSyncHealth(root: string, window = 200): SyncHealth {
   const file = path.join(root, ".quay", "doc-develop-sync.jsonl");
   const h: SyncHealth = {
-    window, ffSynced: 0, notFf: 0, ffError: 0,
+    window, ffSynced: 0, notFf: 0, notFfBenign: 0, notFfBehind: 0, ffError: 0,
     semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0,
     lastEvent: null, lastTs: null,
   };
@@ -417,7 +423,14 @@ export function collectSyncHealth(root: string, window = 200): SyncHealth {
     try { r = JSON.parse(line); } catch { continue; }
     const e = String(r.event ?? "");
     if (e === "doc-develop-sync-ff-synced") h.ffSynced++;
-    else if (e === "doc-develop-sync-not-ff") h.notFf++;
+    else if (e === "doc-develop-sync-not-ff") {
+      h.notFf++;
+      // benign 分解（gap-meta-collectsynchealth）：写侧已在 not-ff 事件上落 ahead/behind/benign: behind===0
+      // 三键。读侧只取 benign（behind===0 的派生量）——benign:true = 良性 ahead-only，benign:false = 真分叉。
+      // 旧事件（benign 字段不存在）不进任一桶，只进 notFf 总数（⛔ 不猜，硬规则 6）。
+      if (r.benign === true) h.notFfBenign++;
+      else if (r.benign === false) h.notFfBehind++;
+    }
     else if (e === "doc-develop-sync-ff-error") h.ffError++;
     else if (e === "doc-develop-sync-semantic") h.semanticBegin++;
     else if (e === "doc-develop-sync-semantic-resolved") h.semanticResolved++;
