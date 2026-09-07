@@ -1,7 +1,7 @@
 ---
 id: AC-164
 title: 插件命名空间承接生产流量
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-003
 criterion: >-
