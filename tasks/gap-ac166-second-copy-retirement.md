@@ -48,6 +48,7 @@ goal_ac: AC-166
 ## Touches
 
 - plugin/workflows/manager-tick-core.js（迁入，新路径）
+- plugin/workflows/fan-in-execute.js（自举 WARN 块 .claude/workflows → plugin/workflows 自引用）
 - .claude/workflows/manager-tick-core.js（迁出）
 - orchestration/manager-tick-core.md（B1 scriptPath + 豁免面引用改新路径）
 - .claude/skills/quay-core-bootstrap-methodology/SKILL.md（整目录 git mv，含 inventory/、reference/ 全部文件）
@@ -88,4 +89,7 @@ goal_ac: AC-166
 - plugin/test/execute-suite-fix-scope-gate.test.mjs（COPIES 去 .claude 双副本，AC1 改 single-source）
 - plugin/test/execute-suite-fix-relaunch-snapshot.test.mjs（COPIES 去 .claude 双副本，AC3 改 single-source）
 - plugin/test/fan-in-execute-paths.test.mjs（.claude/workflows → plugin/workflows fixture 路径）
+- plugin/scripts/workflow-metadata-conformance.mjs（默认文件列表去 .claude 双副本）
+- experiments/quay-perpetual-stream/scripts/workflow-metadata-conformance.mjs（镜像同步，与 plugin 版 byte-identical）
+- plugin/test/workflow-metadata-conformance.test.mjs（REAL_* 改 plugin 路径 + AC9 镜像判据退役）
 - tasks/gap-ac166-second-copy-retirement.md（自身）
