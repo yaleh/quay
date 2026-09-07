@@ -52,7 +52,7 @@ export const SCRIPT_ROOTS = ["plugin/scripts", "experiments", ".claude/workflows
 // Directories/names excluded from script enumeration AND the import scan. `worktrees` covers
 // milestones/M*/worktrees/ (per-milestone git worktrees whose plugin/experiments files are mirrors
 // of the main checkout — same precedent as select-tests-for-touches.ts's SKIP_DIRS).
-const SKIP_DIR_NAMES = new Set([".git", "node_modules", "worktrees", ".quay", "dist", "vendor", "archive"]);
+const SKIP_DIR_NAMES = new Set([".git", "node_modules", "worktrees", ".quay", "dist", "vendor"]);
 
 // Canonical test glob (ADR-019 / DIR-109) — single source of truth: scripts/test.sh's glob=(...)
 // line. Kept in sync by hand (same three patterns, same order). Only *.test.* files consult it.
@@ -186,8 +186,18 @@ export interface Inventory {
 
 // ── Enumeration ────────────────────────────────────────────────────────────────────────────────────────
 
-function dirContainsSkip(fullDir: string): boolean {
-  return fullDir.split(path.sep).some((seg) => SKIP_DIR_NAMES.has(seg));
+/** archive exclusion (§12c, SPEC-plugin-lifecycle-single-bundle-2026-09-02): a path is in the dead
+ * set iff any of its segments is `archive` — the repo-root `archive/` dir, or a nested `archive/`
+ * dir at any depth. Spelled with a literal `archive/` so AC-157's non-comment grep can see the
+ * wiring (same exclusion as scripts/test.sh's awk filter and version-consistency-check.ts). */
+function isUnderArchive(rel: string): boolean {
+  return ("/" + rel + "/").includes("/archive/");
+}
+
+function dirContainsSkip(root: string, fullDir: string): boolean {
+  const rel = path.relative(root, fullDir).split(path.sep).join("/");
+  if (isUnderArchive(rel)) return true;
+  return rel.split("/").some((seg) => SKIP_DIR_NAMES.has(seg));
 }
 
 function isFileOrSymlink(full: string): boolean {
@@ -210,8 +220,10 @@ function findDirsNamed(base: string, name: string): string[] {
       return;
     }
     for (const e of entries) {
-      if (e.name === name && e.isDirectory()) out.push(path.join(dir, e.name));
-      else if (e.isDirectory() && !SKIP_DIR_NAMES.has(e.name)) walk(path.join(dir, e.name));
+      const full = path.join(dir, e.name);
+      const rel = path.relative(base, full).split(path.sep).join("/");
+      if (e.name === name && e.isDirectory()) out.push(full);
+      else if (e.isDirectory() && !SKIP_DIR_NAMES.has(e.name) && !isUnderArchive(rel)) walk(full);
     }
   };
   walk(base);
@@ -276,7 +288,7 @@ export function enumerateScripts(root: string): { scripts: ScriptEntry[]; rawEnt
     if (rootDir === "experiments") {
       const dirs = findDirsNamed(path.join(root, "experiments"), "scripts");
       for (const d of dirs) {
-        if (dirContainsSkip(d)) continue;
+        if (dirContainsSkip(root, d)) continue;
         let names: string[] = [];
         try {
           names = fs.readdirSync(d);
@@ -597,7 +609,8 @@ function walkSourceFiles(root: string): string[] {
     for (const e of entries) {
       const full = path.join(dir, e.name);
       if (e.isDirectory()) {
-        if (!SKIP_DIR_NAMES.has(e.name)) walk(full);
+        const rel = path.relative(root, full).split(path.sep).join("/");
+        if (!SKIP_DIR_NAMES.has(e.name) && !isUnderArchive(rel)) walk(full);
       } else if (e.isFile() && /\.(ts|mts|cts|js|mjs|cjs)$/.test(e.name)) {
         out.push(full);
       }
@@ -764,9 +777,9 @@ export function readCiInvocation(root: string, scripts: ScriptEntry[]): Map<stri
 export function globMatch(pattern: string, relPath: string): boolean {
   const esc = pattern
     .split("")
-    .map((c) => (c === "*" ? " " : c.replace(/[.+^${}()|[\]\\]/g, "\\$&")))
+    .map((c) => (c === "*" ? "@" : c.replace(/[.+^${}()|[\]\\]/g, "\\$&")))
     .join("")
-    .replace(/ /g, "[^/]*");
+    .replace(/@/g, "[^/]*");
   return new RegExp("^" + esc + "$").test(relPath);
 }
 
