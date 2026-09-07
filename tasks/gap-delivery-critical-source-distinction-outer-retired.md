@@ -44,8 +44,10 @@ extra:
 - `orchestration/dispatch-preference.md`
 - `plugin/scripts/task-ops.ts`
 - `plugin/scripts/task-schema.ts`
+- `experiments/quay-perpetual-stream/scripts/task-schema.ts`
 - `docs/references/task-schema-canonical.md`
 - `plugin/test/task-ops.test.mjs`
+- `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `tasks/gap-delivery-critical-source-distinction-outer-retired.md`
 
 ## Execution record
