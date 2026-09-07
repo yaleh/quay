@@ -1,7 +1,7 @@
 ---
 id: gap-ac188-three-long-term-guarantee-goal-acs
 title: 把 GOAL-007 三例的长期保证上移为 goal 层【在域】AC（各带非空 criterion、origin 点名来源 task）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
