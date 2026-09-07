@@ -28,4 +28,5 @@ goal driver supervisor+driver are both dead (alive:0, last_record_ts 05:56Z, sta
 - `plugin/scripts/driver-runtime.ts`
 - `plugin/scripts/start-drivers.ts`
 - `plugin/test/start-drivers.test.mjs`
+- `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `tasks/gap-meta-goal-supervisor.md`
