@@ -2,7 +2,7 @@
 id: gap-ac160-runtime-usage-inventory-blind-spot
 title: AC160 判据仍红：runtime-usage-inventory.ts 非注释位置枚举 subagents/workflows +
   新增命名回归测试（未修版本必红）
-status: ready
+status: done
 labels:
   - gap
 parent: null
