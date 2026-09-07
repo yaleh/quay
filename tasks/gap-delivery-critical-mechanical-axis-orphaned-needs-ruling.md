@@ -131,6 +131,7 @@ extra:
 - `plugin/test/slot-refill.test.mjs`
 - `plugin/test/concurrent-batch-scheduler.test.mjs`
 - `plugin/test/ac36-sortkey-criterion-check.test.mjs`
+- `plugin/test/ac56-recommended-deordered-check.test.mjs`
 - `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `docs/analysis/test-file-baseline.txt`
 - `orchestration/dispatch-preference.md`
