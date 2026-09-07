@@ -2,7 +2,7 @@
 id: gap-goal-driver-draft-ac-invisible-yet-blocking
 title: goal-driver 死角：draft 且判据 pass 的 AC 既不翻转、也不计缺口、却仍挡着 GOAL——:172 与 :201 对
   draft 口径矛盾
-status: done
+status: ready
 labels:
   - gap
   - defect
