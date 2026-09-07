@@ -78,7 +78,7 @@ test("PURE parseMaterializedRecord — in-scope worktree scriptPath yields a rec
   const root = "/home/yale/work/quay";
   const f = makeWfFile(dir, "wf_abc123-01.json", {
     runId: "wf_abc123-01", timestamp: "2026-08-20T00:00:00.000Z",
-    scriptPath: "/home/yale/work/quay-worktrees/gap-foo/.claude/workflows/fan-in-execute.js",
+    scriptPath: "/home/yale/work/quay-worktrees/gap-foo/plugin/workflows/fan-in-execute.js",
     script: "export const meta = { name: 'fan-in-execute' };",
     args: { task: "gap-foo", runId: "fm-gap-foo-123-abc" },
   });
@@ -95,7 +95,7 @@ test("PURE parseMaterializedRecord — MAIN checkout scriptPath is out of scope 
   const root = "/home/yale/work/quay";
   const f = makeWfFile(dir, "wf_main-01.json", {
     runId: "wf_main-01",
-    scriptPath: "/home/yale/work/quay/.claude/workflows/fan-in-execute.js", // under root ⇒ out of scope
+    scriptPath: "/home/yale/work/quay/plugin/workflows/fan-in-execute.js", // under root ⇒ out of scope
     script: "export const meta = {};",
     args: { task: "gap-foo" },
   });
@@ -109,7 +109,7 @@ test("PURE parseMaterializedRecord — non-fan-in workflow / unparseable / empty
   // wrong workflow basename
   const f1 = makeWfFile(dir, "wf_other-01.json", {
     runId: "wf_other-01",
-    scriptPath: "/home/yale/work/quay-worktrees/gap-foo/.claude/workflows/manager-tick-core.js",
+    scriptPath: "/home/yale/work/quay-worktrees/gap-foo/plugin/workflows/manager-tick-core.js",
     script: "export const meta = {};",
   });
   assert.equal(parseMaterializedRecord(f1, root), null);
@@ -120,7 +120,7 @@ test("PURE parseMaterializedRecord — non-fan-in workflow / unparseable / empty
   // empty script
   const f3 = makeWfFile(dir, "wf_empty-01.json", {
     runId: "wf_empty-01",
-    scriptPath: "/home/yale/work/quay-worktrees/gap-foo/.claude/workflows/fan-in-execute.js",
+    scriptPath: "/home/yale/work/quay-worktrees/gap-foo/plugin/workflows/fan-in-execute.js",
     script: "",
   });
   assert.equal(parseMaterializedRecord(f3, root), null);
@@ -136,7 +136,7 @@ test("PURE isUnder — path-segment-safe containment", () => {
 });
 
 test("PURE worktreeRootOf — extracts the worktree root from a worktree scriptPath", () => {
-  const sp = "/home/yale/work/quay-worktrees/gap-foo/.claude/workflows/fan-in-execute.js";
+  const sp = "/home/yale/work/quay-worktrees/gap-foo/plugin/workflows/fan-in-execute.js";
   assert.equal(worktreeRootOf(sp), "/home/yale/work/quay-worktrees/gap-foo");
   assert.equal(worktreeRootOf("/no/marker/here.js"), null);
 });
@@ -147,7 +147,7 @@ const REC = {
   sourceFile: "/x/wf_1.json",
   runId: "wf_1",
   timestamp: "2026-08-20T00:00:00.000Z",
-  scriptPath: "/wt/gap-foo/.claude/workflows/fan-in-execute.js",
+  scriptPath: "/wt/gap-foo/plugin/workflows/fan-in-execute.js",
   script: "WORKTREE_CONTENT",
   taskId: "gap-foo",
   fanInRunId: "fm-gap-foo-1",
@@ -522,7 +522,7 @@ test("CLI — bootstrap-hit task: worktree-vs-materialized mismatch without reco
   const tasksDir = path.join(fx.base, "tasks");
   fs.mkdirSync(tasksDir, { recursive: true });
   fs.writeFileSync(path.join(tasksDir, "gap-foo.md"),
-    "---\nid: gap-foo\n---\n## Touches\n- .claude/workflows/fan-in-execute.js\n");
+    "---\nid: gap-foo\n---\n## Touches\n- plugin/workflows/fan-in-execute.js\n");
   writeWf(fx.projectDir, "wf_bootstrap-01.json", {
     scriptPath: path.join(fx.worktreeRoot, ".claude", "workflows", "fan-in-execute.js"),
     script: "export const meta = { name: 'fan-in-execute' };\n// (different — post-dispatch sync version)\n",
@@ -581,7 +581,7 @@ test("fs taskIsBootstrapHit — Touches listing a fan-in orchestration file ⇒ 
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "fan-mat-task-"));
   t.after(() => cleanup(base));
   fs.writeFileSync(path.join(base, "gap-hit.md"),
-    "---\nid: gap-hit\n---\n## Touches\n- .claude/workflows/fan-in-execute.js\n");
+    "---\nid: gap-hit\n---\n## Touches\n- plugin/workflows/fan-in-execute.js\n");
   fs.writeFileSync(path.join(base, "gap-miss.md"),
     "---\nid: gap-miss\n---\n## Touches\n- tasks/gap-miss.md\n");
   assert.equal(taskIsBootstrapHit(base, "gap-hit"), true);

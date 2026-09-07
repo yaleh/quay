@@ -1,7 +1,7 @@
 {
   "files": 134,
-  "bytes": 3886761,
-  "fingerprint": "8b5934dc9540bae18cb74ee895750cc67952e3747c1a9bb3439e4e3a5667dd21",
+  "bytes": 3886661,
+  "fingerprint": "085888f22c02b22d52108b38187072e6b8ae91d662b364f165e96b7cf2784068",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
@@ -129,7 +129,7 @@
     },
     {
       "rel": "plugin/scripts/config-wiring-check.ts",
-      "sha": "51169a3a7924b66d6113d2a2a6ac939375fc4a3619c1860e329ca768d3a7bdfb"
+      "sha": "cb4bce7b27a41c74a5c93b924168704e6dbf715ec82138ea9f34e656cb54a412"
     },
     {
       "rel": "plugin/scripts/cross-machine-verify.sh",
@@ -389,7 +389,7 @@
     },
     {
       "rel": "plugin/scripts/select-static-checks-for-touches.ts",
-      "sha": "3fa7b18f0eee4fe1a76e1779dcb9040fa45b20509e5c1d6c2bdc32f809157082"
+      "sha": "e1d43d1dd5a6f363f15bbce5f658ef73c23082cddfb14fde7fe427db5921d4b6"
     },
     {
       "rel": "plugin/scripts/self-report-vocab-audit.ts",
