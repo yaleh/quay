@@ -38,20 +38,20 @@ including needs-human"）找到既有任务、正确地不立案 ⇒ 下一轮�
 
 ## AC
 
-- [ ] **needs-human ⇒ stalled**：关联任务全为 `needs-human` 的 active AC，`computeGoalGaps` 输出
+- [x] **needs-human ⇒ stalled**：关联任务全为 `needs-human` 的 active AC，`computeGoalGaps` 输出
       `state === "stalled"` 且 `taskCount` 等于该 AC 的 needs-human 任务数（**不再是 0**）。单测直接
       `import { computeGoalGaps }`，构造 taskFacts 含 `{goalAc:"AC-X", status:"needs-human"}`，
       断言 `{state:"stalled", taskCount:1}`
-- [ ] **负控制（判据能取假，三态互不相同）**：同一 fixture 把该任务 status 改成 `ready` 且 judgment
+- [x] **负控制（判据能取假，三态互不相同）**：同一 fixture 把该任务 status 改成 `ready` 且 judgment
       判其可晋升 ⇒ `state === "in-progress"`；把 taskFacts 换成不含该 goalAc 的任务 ⇒
       `state === "gap"` 且 `taskCount === 0`。三次断言的 state 必须两两不等
-- [ ] **`done` 不被误纳**：关联任务全为 `done` 的 active AC 仍报 `gap`、`taskCount === 0`
+- [x] **`done` 不被误纳**：关联任务全为 `done` 的 active AC 仍报 `gap`、`taskCount === 0`
       （负控制：确认改动只放开 `needs-human`，没有顺手放开全部非 todo/ready 状态）
-- [ ] **stalled 不再消耗 spawn 名额**：`:513` 的选取面对含 `stalled` 的缺口列表返回**不含**该 AC 的
+- [x] **stalled 不再消耗 spawn 名额**：`:513` 的选取面对含 `stalled` 的缺口列表返回**不含**该 AC 的
       候选集。单测断言选取结果的 `ac` 集合与仅 `state==="gap"` 的子集逐一相等
-- [ ] **`not-evaluated` 保留（硬规则 3b）**：`taskFacts === null` 时仍逐条 `not-evaluated`，不因本
+- [x] **`not-evaluated` 保留（硬规则 3b）**：`taskFacts === null` 时仍逐条 `not-evaluated`，不因本
       改动退化成 `stalled` 或 `gap`
-- [ ] **生产载体验证（硬规则 4 推论三，只计实现落地之后的时间窗）**：实现落地提交之后写入的
+- [ ] **生产载体验证（硬规则 4 推论三，只计实现落地之后的时间窗）**：实现落地提交之后写入的（待外部）
       `.quay/goal-round.jsonl` 记录中，**至少一轮**存在 `{ac:"AC-158", state:"stalled", taskCount:1}`，
       且该轮的 gap-filing spawn 未包含 AC-158。判据脚本须按 `ts > <实现落地提交时刻>` 过滤，落地前的
       轮一律不算（否则它只证明「能产出」不证明「已产出」）
