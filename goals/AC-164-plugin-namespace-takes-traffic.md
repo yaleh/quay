@@ -1,7 +1,7 @@
 ---
 id: AC-164
 title: 插件命名空间承接生产流量
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-003
 criterion: >-
@@ -36,9 +36,9 @@ origin: >
   SPEC-plugin-lifecycle-single-bundle-2026-09-02.md §4（顺序不可颠倒——它承载 3 天 178
   次生产流量）。
 evidence:
-  at: 2026-09-07T01:21:35.317Z
-  verdict: fail
-  reading: acceptance failed (exit 1)
+  at: 2026-09-07T02:39:43.008Z
+  verdict: pass
+  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：迁移后一个观测窗口内 `mcp__plugin_quay_quay__*` 调用数 **>** `mcp__quay__*`
