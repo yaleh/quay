@@ -27,3 +27,13 @@ carrierStats 只读记录 j.ts，而 quality-round.jsonl 轮记录用 judgedAt �
 - `plugin/scripts/driver-runtime.ts`
 - `plugin/test/driver-runtime.test.mjs`
 - `tasks/gap-meta-carrierstats.md`
+## Needs-Human
+
+**执行 2026-09-07T00:18:59.405Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=ff: fan-in-ff-merge: FF FAILED (attempt 5 >= 3) — ANTI-LIVELOCK (SPEC §7, gap-ff-livelock-trigger-no-action): develop keeps advancing; escalating + STOPPING automatic retry. Escalation record written to /home/yale/work/quay/.quay/fan-in-ff-escalations.jsonl. Do NOT auto-retry: re-merge develop and re-run the fan-in once develop settles.
+fan-in-ff-merge: measure ff_only_locked=false
+- run_id：wk-prod-1788717081
+- session_id：e6820d61-48dc-4ab3-8401-8402b0ee46a2
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-meta-carrierstats-wk-prod-1788717081.log

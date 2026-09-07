@@ -79,3 +79,14 @@ extra: {}
 - 该 ratchet 缺陷已由同胞任务 `gap-quay-init-closure-ratchet-manual-reanchor-recurs` 修复并 **done**（落地于 develop）；已实测确认：`node --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --gate --root .` 在当前 develop/author（同为 b416856cc）上现在 **PASS**。
 - 已确认该修复提交 `cd71b2d7f` 是本任务分支 `task/gap-bypass-check-unclassifiable-exits-zero` 的祖先（`git merge-base --is-ancestor cd71b2d7f task/gap-bypass-check-unclassifiable-exits-zero` ⇒ 是）⇒ 重跑 fan-in 不应再撞到那条无关红。本任务分支落后当前 develop 650 个提交（fan-in 自身的 merge-develop 步骤会追上，属正常）、领先 6 个提交（即本任务的实际修复）。
 - AC/DoD 复选框沿用此前 worker 尝试已勾选的状态，本轮未重新核验、未改动；仅重置 `status: needs-human → ready`，交由 worker-driver 对现已解除阻塞的 fan-in 重试。
+
+## Needs-Human
+
+**执行 2026-09-06T23:29:02.219Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=ff: fan-in-ff-merge: FF FAILED (attempt 5 >= 3) — ANTI-LIVELOCK (SPEC §7, gap-ff-livelock-trigger-no-action): develop keeps advancing; escalating + STOPPING automatic retry. Escalation record written to /home/yale/work/quay/.quay/fan-in-ff-escalations.jsonl. Do NOT auto-retry: re-merge develop and re-run the fan-in once develop settles.
+fan-in-ff-merge: measure ff_only_locked=false
+- run_id：wk-prod-1788717081
+- session_id：2e85bee2-988f-4951-918e-6732f731f783
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-bypass-check-unclassifiable-exits-zero-wk-prod-1788717081.log
