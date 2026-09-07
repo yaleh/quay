@@ -1,7 +1,7 @@
 ---
 id: AC-159
 title: 三个连带文档提及同步清理
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-003
 criterion: >
