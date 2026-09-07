@@ -2,7 +2,7 @@
 id: gap-meta-divergences-not-routed-by-handler-existence
 title: divergences 三种 kind 输出同形，其中 99.3% 有处理者会自愈 ⇒ 259 次把「goal-driver 停了」报成 259
   条 AC 症状，病因就在它自己的读数里却从未被报出
-status: ready
+status: done
 labels:
   - gap
   - defect

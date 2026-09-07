@@ -401,10 +401,10 @@ run_static_checks() {
   # value is judged — prose/body mentions do NOT count. exit 1 on a bare/mis-namespaced name (set -euo
   # pipefail abort) so the next skill author writing a bare name reddens the commit, not ships a dead list.
   # NOT-EVALUATED (exit 3) when no skills dir / no SKILL.md (hard rule 3b). Negative control + mutation case:
-  # plugin/test/skill-allowed-tools-namespace-check.test.mjs + checker-mutation-cases/<name>.sh.
+  # plugin/test/allowed-tools-plugin-prefix-check.test.mjs + checker-mutation-cases/<name>.sh.
   # @static-tier change
-  # @static-object plugin/skills/** plugin/scripts/skill-allowed-tools-namespace-check.ts plugin/test/skill-allowed-tools-namespace-check.test.mjs plugin/scripts/checker-mutation-cases/skill-allowed-tools-namespace-check.sh
-  run_checker "skill-allowed-tools-namespace-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/skill-allowed-tools-namespace-check.ts" --root "${repo_root}"
+  # @static-object plugin/skills/** plugin/scripts/allowed-tools-plugin-prefix-check.ts plugin/test/allowed-tools-plugin-prefix-check.test.mjs plugin/scripts/checker-mutation-cases/allowed-tools-plugin-prefix-check.sh
+  run_checker "allowed-tools-plugin-prefix-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/allowed-tools-plugin-prefix-check.ts" --root "${repo_root}"
   echo "== retired-clause check (gap-ac58-retired-clauses-delete-and-archive, AC58 判据1-3) =="
   # AC58 退役即迁出 enforcement: the registry (the 落点映射) records every retired clause/annotation
   # migrated OUT of the high-frequency files INTO orchestration/archive/AC58-retired-clauses.md#<id>.
