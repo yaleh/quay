@@ -17,11 +17,11 @@ A promotion-driver launched 2026-09-06T01:47Z (pid 3696202, supervisor 3696193, 
 ⚠️ 机制词 `AC-184` 命中【已完成】任务：gap-meta-syncdeveloptodoc.md[done]——问题仍在而任务已 done ⇒ 先查那些任务为何没解决它，⛔ 不要在它们旁边新造一个并行机制。
 
 ## AC（draft）
-- [ ] `last=$(git log -1 --format=%ct -- plugin/scripts/driver-filters.ts); pgrep -qf 'scripts/promotion-driver.ts' || exit 1; for p in $(pgrep -f 'scripts/promotion-driver.ts'); do [ "$(stat -c %Y /proc/$p 2>/dev/null)" -ge "$last" ] || exit 1; done` ⇒ Every live promotion-driver process is newer than the driver-filters.ts last commit — no stale writer remains and the guard cannot be flaked by a fresh sibling.
+- [x] `last=$(git log -1 --format=%ct -- plugin/scripts/driver-filters.ts); pgrep -qf 'scripts/promotion-driver.ts' || exit 1; for p in $(pgrep -f 'scripts/promotion-driver.ts'); do [ "$(stat -c %Y /proc/$p 2>/dev/null)" -ge "$last" ] || exit 1; done` ⇒ Every live promotion-driver process is newer than the driver-filters.ts last commit — no stale writer remains and the guard cannot be flaked by a fresh sibling.
 
 ## DoD（draft）
-- [ ] 上面的判据实跑通过，且判据本身能取假（改坏实现时会红）
-- [ ] 若结论是「已有机制在管、只是失败」，则修那个机制，⛔ 不新建并行机制
+- [x] 上面的判据实跑通过，且判据本身能取假（改坏实现时会红）
+- [x] 若结论是「已有机制在管、只是失败」，则修那个机制，⛔ 不新建并行机制
 
 ## Touches
 - `goals/AC-184-driver-driver.md`
