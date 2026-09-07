@@ -31,11 +31,20 @@ goal_ac: AC-165
 
 ## AC
 
-- [ ] AC-165 判据逐字 exit 0：python3 跑 `goals/AC-165-remove-root-mcp-json.md` 里 criterion 的 heredoc，退出码 0
-- [ ] `.mcp.json` 保留且合法 JSON 且无 quay 键：`test -f .mcp.json && python3 -c 'import json;d=json.load(open(".mcp.json"));assert "quay" not in (d.get("mcpServers") or {})'` exit 0
-- [ ] `.claude/settings.local.json` enabledMcpjsonServers 无 "quay"：`python3 -c 'import json;d=json.load(open(".claude/settings.local.json"));assert "quay" not in (d.get("enabledMcpjsonServers") or [])'` exit 0
-- [ ] permission allowlist 无裸命名空间残留：`grep -n "mcp__quay__" .claude/settings.local.json` 输出为空，且 `grep -qE "mcp__plugin_quay_quay__(task_get|gate_log)" .claude/settings.local.json` exit 0
-- [ ] 负控制（能取假）：临时把 `quay` 加回 `.mcp.json` mcpServers ⇒ AC-165 criterion exit 1；撤掉 ⇒ 回 exit 0（两次读数入任务体 Evidence）
+- [x] AC-165 判据逐字 exit 0：python3 跑 `goals/AC-165-remove-root-mcp-json.md` 里 criterion 的 heredoc，退出码 0
+- [x] `.mcp.json` 保留且合法 JSON 且无 quay 键：`test -f .mcp.json && python3 -c 'import json;d=json.load(open(".mcp.json"));assert "quay" not in (d.get("mcpServers") or {})'` exit 0
+- [x] `.claude/settings.local.json` enabledMcpjsonServers 无 "quay"：`python3 -c 'import json;d=json.load(open(".claude/settings.local.json"));assert "quay" not in (d.get("enabledMcpjsonServers") or [])'` exit 0
+- [x] permission allowlist 无裸命名空间残留：`grep -n "mcp__quay__" .claude/settings.local.json` 输出为空，且 `grep -qE "mcp__plugin_quay_quay__(task_get|gate_log)" .claude/settings.local.json` exit 0
+- [x] 负控制（能取假）：临时把 `quay` 加回 `.mcp.json` mcpServers ⇒ AC-165 criterion exit 1；撤掉 ⇒ 回 exit 0（两次读数入任务体 Evidence）
+
+## Evidence
+
+AC-165 criterion 逐字 + 负控制读数（2026-09-07 落地轮实际执行，两文件取目标态后跑 heredoc）：
+
+- **AC-1 判据逐字**：目标态两文件（`.mcp.json` 无 quay 键、`.claude/settings.local.json` enabledMcpjsonServers 无 "quay"）下跑 criterion heredoc ⇒ **exit 0**。
+- **负控制（加回 quay）**：`.mcp.json` 临时写回 `mcpServers.quay` ⇒ criterion ⇒ **exit 1**。
+- **恢复**：`.mcp.json` 撤掉 quay ⇒ criterion ⇒ **exit 0**。
+- 附带：`grep -n "mcp__quay__" .claude/settings.local.json` 输出为空；`grep -qE "mcp__plugin_quay_quay__(task_get|gate_log)" .claude/settings.local.json` exit 0。
 
 ## DoD
 
