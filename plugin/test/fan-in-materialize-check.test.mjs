@@ -434,7 +434,7 @@ function makeCliFixture() {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "fan-mat-cli-"));
   const projectDir = path.join(base, "projects");
   const worktreeRoot = path.join(base, "quay-worktrees", "gap-foo");
-  const worktreeWf = path.join(worktreeRoot, ".claude", "workflows", "fan-in-execute.js");
+  const worktreeWf = path.join(worktreeRoot, "plugin", "workflows", "fan-in-execute.js");
   fs.mkdirSync(path.dirname(worktreeWf), { recursive: true });
   // The worktree's fan-in-execute.js — the "latest block" the bootstrap-HIT task added.
   fs.writeFileSync(worktreeWf, "export const meta = { name: 'fan-in-execute' };\n// BOOTSTRAP-MARKER: gap-foo\n");
@@ -462,7 +462,7 @@ test("CLI — worktree-scriptPath mismatch without reconstruction ⇒ NOT-EVALUA
   // (post-dispatch merge-develop sync). No .workflow-events ⇒ no git reconstruction ⇒ NOT-EVALUATED
   // (never conflated with RED — hard rule 3b, gap-fan-in-materialize-check-bootstrap-hit-post-dispatch-sync).
   writeWf(fx.projectDir, "wf_bad-01.json", {
-    scriptPath: path.join(fx.worktreeRoot, ".claude", "workflows", "fan-in-execute.js"),
+    scriptPath: path.join(fx.worktreeRoot, "plugin", "workflows", "fan-in-execute.js"),
     script: "export const meta = { name: 'fan-in-execute' };\n// (different — post-dispatch sync version)\n",
   });
   const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--project-dir", fx.projectDir, "--workflow-events-dir", path.join(fx.base, "no-events"), "--json"], { encoding: "utf8" });
@@ -479,7 +479,7 @@ test("CLI — GREEN when a worktree-scriptPath dispatch materialized the WORKTRE
   t.after(() => cleanup(fx.base));
   const wtContent = fs.readFileSync(fx.worktreeWf, "utf8");
   writeWf(fx.projectDir, "wf_ok-01.json", {
-    scriptPath: path.join(fx.worktreeRoot, ".claude", "workflows", "fan-in-execute.js"),
+    scriptPath: path.join(fx.worktreeRoot, "plugin", "workflows", "fan-in-execute.js"),
     script: wtContent, // byte-identical to the worktree file
   });
   const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--project-dir", fx.projectDir, "--workflow-events-dir", path.join(fx.base, "no-events"), "--json"], { encoding: "utf8" });
@@ -502,7 +502,7 @@ test("CLI — non-bootstrap task: worktree-vs-materialized mismatch is NOT-APPLI
   // Materialized script is the MAIN version (lacks the marker) while the worktree file on disk has the
   // marker (worktree evolved / post-dispatch sync) — a mismatch that MUST NOT redden a non-bootstrap task.
   writeWf(fx.projectDir, "wf_nonbootstrap-01.json", {
-    scriptPath: path.join(fx.worktreeRoot, ".claude", "workflows", "fan-in-execute.js"),
+    scriptPath: path.join(fx.worktreeRoot, "plugin", "workflows", "fan-in-execute.js"),
     script: "export const meta = { name: 'fan-in-execute' };\n// (main version — no bootstrap marker)\n",
   });
   const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--project-dir", fx.projectDir, "--tasks-dir", tasksDir, "--workflow-events-dir", path.join(fx.base, "no-events"), "--json"], { encoding: "utf8" });
@@ -524,7 +524,7 @@ test("CLI — bootstrap-hit task: worktree-vs-materialized mismatch without reco
   fs.writeFileSync(path.join(tasksDir, "gap-foo.md"),
     "---\nid: gap-foo\n---\n## Touches\n- plugin/workflows/fan-in-execute.js\n");
   writeWf(fx.projectDir, "wf_bootstrap-01.json", {
-    scriptPath: path.join(fx.worktreeRoot, ".claude", "workflows", "fan-in-execute.js"),
+    scriptPath: path.join(fx.worktreeRoot, "plugin", "workflows", "fan-in-execute.js"),
     script: "export const meta = { name: 'fan-in-execute' };\n// (different — post-dispatch sync version)\n",
   });
   const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--project-dir", fx.projectDir, "--tasks-dir", tasksDir, "--workflow-events-dir", path.join(fx.base, "no-events"), "--json"], { encoding: "utf8" });
@@ -541,7 +541,7 @@ test("CLI — NOT-EVALUATED when no in-scope worktree-scriptPath records exist",
   t.after(() => cleanup(fx.base));
   // Only a MAIN-checkout scriptPath record — out of scope.
   writeWf(fx.projectDir, "wf_main-01.json", {
-    scriptPath: path.join(REPO_ROOT, ".claude", "workflows", "fan-in-execute.js"),
+    scriptPath: path.join(REPO_ROOT, "plugin", "workflows", "fan-in-execute.js"),
     script: "export const meta = { name: 'fan-in-execute' };",
   });
   const res = spawnSync("node", ["--experimental-strip-types", CHECKER, "--root", REPO_ROOT, "--project-dir", fx.projectDir, "--workflow-events-dir", path.join(fx.base, "no-events"), "--json"], { encoding: "utf8" });
@@ -570,7 +570,7 @@ test("fs findMaterializedWorkflowFiles — finds wf_*.json under session workflo
   const fx = makeCliFixture();
   t.after(() => cleanup(fx.base));
   const f1 = writeWf(fx.projectDir, "wf_a-01.json", {
-    scriptPath: path.join(fx.worktreeRoot, ".claude", "workflows", "fan-in-execute.js"),
+    scriptPath: path.join(fx.worktreeRoot, "plugin", "workflows", "fan-in-execute.js"),
     script: "x",
   });
   const files = findMaterializedWorkflowFiles(fx.projectDir);
