@@ -16,7 +16,7 @@ origin: |
   人 2026-09-02 裁定④「对零调用的工具，先退役（archive），后续发现需要了再恢复」。正本
   SPEC-plugin-lifecycle-single-bundle-2026-09-02.md。
 evidence:
-  at: 2026-09-07T01:15:24.840Z
+  at: 2026-09-07T01:21:38.397Z
   verdict: fail
   reading: acceptance failed (exit 1)
 ---
