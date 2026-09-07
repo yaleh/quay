@@ -28,6 +28,7 @@ import {
   scanBareFilenameRefs,
   listScriptBasenames,
   computeKept,
+  buildReferenceMap,
 } from "../scripts/registry-bare-filename-scan.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -127,5 +128,54 @@ test("DoD negative control: deleting the bare-filename ref from a manifest drops
     assert.ok(!keptWithout.has("foo.sh"), "with the ref removed the script returns to the dead set");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── 执行形式补认（gap-dead-set-closure-repo-root-call-form-false-positive）─────────────────────────────
+// ${repo_root}/plugin/scripts/<name>（run_checker）、path.join(__dirname, "<name>")、$SCRIPT_DIR/<name>
+// 三种执行形式此前都被 §12e 闭包漏认，导致执行核真实执行的脚本落进死集（AC158 负控制）。
+
+test("run_checker ${repo_root}/plugin/scripts/<name> survives a # @static-object glob (bash .ts not mangled)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "registry-bare-scan-"));
+  try {
+    fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(root, "plugin", "scripts", "foo.sh"), "#!/usr/bin/env bash\n:\n");
+    // runner-static-gate.ts 是 bash 语法的 .ts：其 `# @static-object` glob 里的星号斜杠会被只认行注释
+    // 与块注释的 stripper 误判为块注释起点，吞掉 run_checker 行（活 checker 假死的根因）。
+    fs.writeFileSync(path.join(root, "plugin", "scripts", "runner-static-gate.ts"), [
+      "# runner-static-gate.ts — bash, sourced by test.sh",
+      '# @static-object plugin/test/ packages/*/test/ experiments/*/test/',
+      'run_checker "foo" bash "${repo_root}/plugin/scripts/foo.sh" "${repo_root}"',
+    ].join("\n"));
+    const scripts = listScriptBasenames(root);
+    const bareRefs = scanBareFilenameRefs(root).refs;
+    const { referrers } = buildReferenceMap(root, scripts, bareRefs, true);
+    const refs = [...(referrers.get("foo.sh") ?? [])].map((f) => path.relative(root, f));
+    assert.ok(
+      refs.includes("plugin/scripts/runner-static-gate.ts"),
+      "run_checker ${repo_root}/plugin/scripts/<name> must hit its caller (0 hits = predicate broken)",
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("real repo: live checkers hit their execution-core caller via run_checker / path.join / $SCRIPT_DIR", () => {
+  const scripts = listScriptBasenames(repoRoot);
+  const bareRefs = scanBareFilenameRefs(repoRoot).refs;
+  const { referrers } = buildReferenceMap(repoRoot, scripts, bareRefs, true);
+  const cases = [
+    // [script, expected caller] — AC1 样本 + path.join(__dirname) + $SCRIPT_DIR 三种执行形式。
+    ["tmp-leak-pairing-check.sh", "plugin/scripts/runner-static-gate.ts"],
+    ["assert-clean-tree.sh", "plugin/scripts/runner-tree-state.ts"],
+    ["provision-verify-worktree.sh", "plugin/scripts/full-suite-runner.ts"],
+    ["transcript-delivery-check.ts", "plugin/scripts/send-keys-reliable.sh"],
+  ];
+  for (const [script, expectedCaller] of cases) {
+    const refs = [...(referrers.get(script) ?? [])].map((f) => path.relative(repoRoot, f));
+    assert.ok(
+      refs.includes(expectedCaller),
+      `${script} must be referenced by ${expectedCaller} (got: ${refs.join(", ") || "∅"})`,
+    );
   }
 });
