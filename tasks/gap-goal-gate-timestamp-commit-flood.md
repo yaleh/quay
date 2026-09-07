@@ -2,7 +2,7 @@
 id: gap-goal-gate-timestamp-commit-flood
 title: goal gate 每 42 秒把 evidence 时间戳写盘即提交——develop 近 26 分钟 428 个提交里 427
   个是噪声（99.8%），且争用跨层共享索引
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -72,3 +72,14 @@ extra: {}
 ⇒ 修法必须同时回答：结算与提交谁在前、以及「什么算实质变化」这个判断放在哪一层（⛔ 不要两层各写一份）。
 
 **代价的一个新读数**：本次把一个 2 文件的修复推进 develop，`merge + push` **连续失败 6 次、第 7 次才成功**——develop 前进速度高于 merge-then-push 的窗口。⇒ 洪水不只是历史噪声，它已经在**阻碍正常落地流程**。
+
+## Needs-Human
+
+**执行 2026-09-07T00:24:54.433Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=ff: fan-in-ff-merge: FF FAILED (attempt 5 >= 3) — ANTI-LIVELOCK (SPEC §7, gap-ff-livelock-trigger-no-action): develop keeps advancing; escalating + STOPPING automatic retry. Escalation record written to /home/yale/work/quay/.quay/fan-in-ff-escalations.jsonl. Do NOT auto-retry: re-merge develop and re-run the fan-in once develop settles.
+fan-in-ff-merge: measure ff_only_locked=false
+- run_id：wk-prod-1788717081
+- session_id：2a056be1-4d22-48f6-90fe-b42034035de1
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-goal-gate-timestamp-commit-flood-wk-prod-1788717081.log
