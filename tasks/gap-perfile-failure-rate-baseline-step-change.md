@@ -60,6 +60,7 @@ extra:
 - .claude/workflows/fan-in-execute.js（canonical：FIX_SCOPE_GATE 附基线字段 + new-event 路由）
 - plugin/workflows/fan-in-execute.js（上一条的 byte-identical 分布镜像，必须同步改，⛔ 单边编辑会红）
 - tasks/gap-perfile-failure-rate-baseline-step-change.md（自身）
+- docs/analysis/quay-init-closure-ratchet.baseline.json（capability-catalog.sh laydown 源变更的 closure-ratchet re-anchor 基线）
 
 ## Measured
 
