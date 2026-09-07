@@ -41,7 +41,7 @@ origin: >-
   "achieved")` 不排除 retired/superseded ⇒ 本条仍会挡着。该口径问题属
   gap-goal-driver-draft-ac-invisible-yet-blocking 的范围，不在本次自我更正内。
 evidence:
-  at: 2026-09-07T00:04:49.678Z
+  at: 2026-09-07T00:13:41.314Z
   verdict: pass
   reading: acceptance passed (exit 0)
 ---
