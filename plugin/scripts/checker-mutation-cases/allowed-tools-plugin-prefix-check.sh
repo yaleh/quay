@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Mutation case for skill-allowed-tools-namespace-check
+# Mutation case for allowed-tools-plugin-prefix-check
 # (tasks/gap-skill-allowed-tools-plugin-namespace, AC3/DoD negative control). Fixture: a temp workspace
 # carrying two shipped skills whose allowed-tools are plugin-prefixed (mcp__plugin_quay_quay__*) → GREEN.
 # Inject: write a bare `mcp__quay__*` name back into one skill's allowed-tools — the exact "作者写回裸名"
 # shape AC3 requires the checker to go RED on → MUST go RED. Restore: put the plugin prefix back → GREEN.
 set -u
-name="skill-allowed-tools-namespace-check"
+name="allowed-tools-plugin-prefix-check"
 workdir="${1:?usage: $name.sh <workdir>}"
 checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -13,7 +13,7 @@ mkdir -p "${workdir}/plugin/skills/a" "${workdir}/plugin/skills/b"
 cd "${workdir}"
 
 checker_cmd() {
-  node --no-warnings --experimental-strip-types "${checker_dir}/skill-allowed-tools-namespace-check.ts" --root "$1" >/dev/null 2>&1
+  node --no-warnings --experimental-strip-types "${checker_dir}/allowed-tools-plugin-prefix-check.ts" --root "$1" >/dev/null 2>&1
 }
 
 # GREEN baseline: both skills plugin-prefixed → exit 0.

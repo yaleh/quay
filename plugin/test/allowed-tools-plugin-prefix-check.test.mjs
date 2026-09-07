@@ -1,5 +1,5 @@
 // @test-group engine
-// skill-allowed-tools-namespace-check.test.mjs — plugin/skills allowed-tools 命名空间机械检查测试
+// allowed-tools-plugin-prefix-check.test.mjs — plugin/skills allowed-tools 命名空间机械检查测试
 // (tasks/gap-skill-allowed-tools-plugin-namespace, SPEC §3c/§7-2/AC2).
 //
 // AC2 (SPEC §8 不变式): every `mcp__` tool name in plugin/skills/*/SKILL.md must be
@@ -17,7 +17,7 @@
 //   (e) NOT-EVALUATED — no skills dir ⇒ exit 3.
 //
 // Run:
-//   scripts/test.sh plugin/test/skill-allowed-tools-namespace-check.test.mjs
+//   scripts/test.sh plugin/test/allowed-tools-plugin-prefix-check.test.mjs
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -33,11 +33,11 @@ import {
   listSkillFiles,
   extractMcpTools,
   checkSkillAllowedToolsNamespaces,
-} from "../scripts/skill-allowed-tools-namespace-check.ts";
+} from "../scripts/allowed-tools-plugin-prefix-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..");
-const CLI = path.join(repoRoot, "plugin", "scripts", "skill-allowed-tools-namespace-check.ts");
+const CLI = path.join(repoRoot, "plugin", "scripts", "allowed-tools-plugin-prefix-check.ts");
 
 // ── pure logic ──────────────────────────────────────────────────────────────────────────────────────
 
