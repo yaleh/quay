@@ -1,7 +1,7 @@
 ---
 id: gap-ac161-user-level-marketplace-only
 title: AC161 用户级只留 marketplace 源，启用迁项目级
-status: ready
+status: done
 labels:
   - gap
 parent: null
