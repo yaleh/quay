@@ -666,6 +666,7 @@ const HELP = [
   "",
   "Usage: node --experimental-strip-types plugin/scripts/goal-driver.ts [options]",
   "  --root <dir>           仓库根（缺省 cwd；goals/ 与 .quay/ 都在其下）",
+  "  --script-root <dir>    goal-store.ts 脚本根（缺省 = root；测试缝/负控制把 goals/ 与脚本根分离）",
   "  --interval <ms>        循环滴答间隔（缺省 " + INTERVAL_MS_DEFAULT + "，来自 drivers.yml goal.interval_ms）",
   "  --once                 跑一轮即退出（手动单发 / 测试）",
   "  --max-rounds <n>       跑满 N 轮退出（测试缝）",
@@ -697,10 +698,12 @@ export async function main(argv: string[]): Promise<number> {
   let readyPoolCmd: string | undefined;
   let llmCommandsRaw: string | undefined;
   let spawnCapRaw: string | undefined;
+  let scriptRootRaw: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === "--root") root = args[++i];
+    else if (a === "--script-root") scriptRootRaw = args[++i];
     else if (a === "--interval") intervalRaw = args[++i];
     else if (a === "--once") once = true;
     else if (a === "--max-rounds") maxRounds = Number(args[++i]);
@@ -746,6 +749,7 @@ export async function main(argv: string[]): Promise<number> {
     : llmCommandsRaw.split(",").map((s) => s.trim()).filter(Boolean);
 
   const roundOpts: GoalRoundOptions = {
+    scriptRoot: scriptRootRaw ? path.resolve(scriptRootRaw) : undefined,
     gapWorkerCmd: gapWorkerCmd ?? null,
     resourceGateArgv: resourceGateCmd ? splitArgs(resourceGateCmd) : null,
     readyPoolCmd: readyPoolCmd ? splitArgs(readyPoolCmd) : null,
