@@ -2,7 +2,7 @@
 // goal-driver.test.mjs — G6 (tasks/gap-goal-driver-mechanical-ring): goal 机械环的判定面单测。
 //
 // 覆盖四件事：①I2 的纯推导（goalAchievedFromRecords）；②真实机械环端到端（跑真的 goal-store CLI，
-// 非 fixture 注入 seam——载体有 verdict、evidence 回写、I2 flip、draft 不动、无 tasks 写）；
+// 非 fixture 注入 seam——载体有 verdict、evidence 不回写、I2 flip、draft 不动、无 tasks 写）；
 // ③cli/driver.ts 的 KINDS 与 kernel DRIVER_KINDS 集合一致（AC6，含补回 suite）；
 // ④CLI 冒烟（--help / 未知参数）。
 //
@@ -114,7 +114,7 @@ test('readTaskFacts: 读 tasks/*.md 的 status+goal_ac；目录不存在 ⇒ nul
 
 // ── 真实机械环端到端（⛔ 不用 fixture 注入 seam，跑真的 goal-store CLI）────────────────────
 
-test('real ring: 载体有 verdict + evidence 回写 + I2 flip + draft 不动 + 无 tasks 写', async () => {
+test('real ring: 载体有 verdict + evidence 不回写 + I2 flip + draft 不动 + 无 tasks 写', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-'));
   try {
     fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
@@ -143,12 +143,13 @@ test('real ring: 载体有 verdict + evidence 回写 + I2 flip + draft 不动 + 
     const carrier = fs.readFileSync(roundLog, 'utf8');
     assert.ok(carrier.includes('"verdict"'), 'round record must carry criterion verdicts');
 
-    // AC3 机制 + I2：evidence 回写 + AC pass→achieved + GOAL 全达成→achieved。
+    // AC3 机制 + I2：AC pass→achieved + GOAL 全达成→achieved；evidence 不回写进文件
+    // （gap-goal-evidence-cache-should-not-enter-git——evidence 是 .quay/gate-events.jsonl 派生的）。
     const g1 = fs.readFileSync(path.join(tmp, 'goals', 'GOAL-001-t.md'), 'utf8');
     const a1 = fs.readFileSync(path.join(tmp, 'goals', 'AC-001-t.md'), 'utf8');
     assert.match(g1, /^status: achieved$/m, 'GOAL-001 全部 AC 达成 ⇒ flip achieved（I2）');
     assert.match(a1, /^status: achieved$/m, 'AC-001 pass ⇒ flip achieved（裁定 5 确定性推导）');
-    assert.match(a1, /evidence:/, 'AC-001 evidence 回写（gate 写回 at/verdict/reading）');
+    assert.doesNotMatch(a1, /evidence:/, 'AC-001 evidence 不回写进文件（gate 只写 GateEvent 到账本）');
 
     // AC4 负控制：draft 不动、其 AC 也不被跑/翻。
     const g3 = fs.readFileSync(path.join(tmp, 'goals', 'GOAL-003-t.md'), 'utf8');

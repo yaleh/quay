@@ -1,8 +1,9 @@
 // @test-group product
 // Stage — /goal + /doc web views (SPEC §4: the third sibling kind's route, done together with
 // /doc which previously had NO route, both following the /adr shape). The goal page's most
-// valuable column is the most recent verdict + time, read from the record's `evidence` field
-// (which the goal gate runner updates after every criterion execution).
+// valuable column is the most recent verdict + time, read from the record's `evidence` field —
+// which is ledger-DERIVED (gap-goal-evidence-cache-should-not-enter-git): the provider surfaces
+// the store's view-model, whose `evidence` comes from `.quay/gate-events.jsonl`, never the file.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
@@ -40,13 +41,24 @@ before(async () => {
   fs.mkdirSync(path.join(workspaceRoot, "docs-managed"), { recursive: true });
   fs.writeFileSync(path.join(workspaceRoot, "goals", "GOAL-001-three-layer.md"),
     "---\nid: GOAL-001\ntitle: three-layer unification\nstatus: active\nkind: goal\norigin: 2026-08-09 human goal setting\n---\n## Goal\none target statement\n");
+  // AC-028's file carries a STALE `evidence:` block (the "inherited from git" reading this task
+  // removes). The ledger (written below) has the REAL latest event; the UI must show the LEDGER
+  // timestamp, never this stale one (gap-goal-evidence-cache-should-not-enter-git).
   fs.writeFileSync(path.join(workspaceRoot, "goals", "AC-028-experience-flows.md"),
-    "---\nid: AC-028\ntitle: experience flows between layers\nstatus: active\nkind: criterion\ngoal: GOAL-001\ncriterion: git rev-list --count integration..develop\nexpect: \"=0\"\norigin: 2026-08-09 measured criterion\nevidence:\n  at: 2026-08-09T07:40:08Z\n  verdict: pass\n  reading: \"0\"\n---\n## Rationale\nmeasured\n");
+    "---\nid: AC-028\ntitle: experience flows between layers\nstatus: active\nkind: criterion\ngoal: GOAL-001\ncriterion: git rev-list --count integration..develop\nexpect: \"=0\"\norigin: 2026-08-09 measured criterion\nevidence:\n  at: 2020-01-01T00:00:00Z\n  verdict: pass\n  reading: \"stale-inherited\"\n---\n## Rationale\nmeasured\n");
+  // AC-029 has a stale file `evidence:` but NO ledger event ⇒ the UI must render "—" (missing =
+  // not-checked, never the stale inherited reading).
+  fs.writeFileSync(path.join(workspaceRoot, "goals", "AC-029-no-ledger.md"),
+    "---\nid: AC-029\ntitle: no ledger event\nstatus: active\nkind: criterion\ngoal: GOAL-001\ncriterion: exit 0\norigin: o\nevidence:\n  at: 2020-01-01T00:00:00Z\n  verdict: pass\n  reading: \"stale-inherited\"\n---\n## Rationale\nno ledger\n");
   fs.writeFileSync(path.join(workspaceRoot, "docs-managed", "DOC-001-quay-directive-skill.md"),
     "---\nid: DOC-001\ntitle: quay-directive skill\nstatus: active\nkind: skill\n---\n## Body\nthe directive skill\n");
   fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
   fs.writeFileSync(path.join(workspaceRoot, ".quay", "config.yml"),
     `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"\n      QUAY_NATIVE_ADR_DIR: "${adrDir.replaceAll("\\", "\\\\")}"\n      QUAY_NATIVE_GOAL_DIR: "${goalsDir.replaceAll("\\", "\\\\")}"\n`);
+  // The gitignored ledger is the evidence source (gap-goal-evidence-cache-should-not-enter-git):
+  // AC-028 has a goal gate event (the UI must render THIS timestamp); AC-029 has none (⇒ "—").
+  fs.writeFileSync(path.join(workspaceRoot, ".quay", "gate-events.jsonl"),
+    JSON.stringify({ id: "ev-1", item_id: "AC-028", pipeline_id: "AC-028", gate: "goal", actor: "goal-cli", verdict: "pass", timestamp: "2026-09-06T12:00:00Z", payload: { reason: "ok" } }) + "\n");
   originalCwd = process.cwd();
   process.chdir(workspaceRoot);
   server = await startServer({ port: 0 });
@@ -67,9 +79,10 @@ test("AC5 — GET /goal lists phase + criterion records with origin and recent v
   assert.match(r.body, /three-layer unification/);
   assert.match(r.body, /experience flows/);
   assert.match(r.body, /origin/);
-  // The most valuable column: recent verdict + time (from the record's evidence).
+  // The most valuable column: recent verdict + time — now from the LEDGER, not the file.
   assert.match(r.body, /pass/);
-  assert.match(r.body, /2026-08-09T07:40:08Z/);
+  assert.match(r.body, /2026-09-06T12:00:00Z/);
+  assert.doesNotMatch(r.body, /2020-01-01T00:00:00Z/, "stale file evidence must never render (ledger is the source)");
 });
 
 test("AC5 — GET /goal/AC-028 renders the detail page with criterion and verdict", async () => {
@@ -78,7 +91,19 @@ test("AC5 — GET /goal/AC-028 renders the detail page with criterion and verdic
   assert.match(r.body, /criterion/);
   assert.match(r.body, /git rev-list/);
   assert.match(r.body, /pass/);
-  assert.match(r.body, /2026-08-09T07:40:08Z/);
+  assert.match(r.body, /2026-09-06T12:00:00Z/, "detail shows the LEDGER timestamp, not the stale file one");
+  assert.doesNotMatch(r.body, /2020-01-01T00:00:00Z/);
+});
+
+test("AC3 (evidence-out-of-git) — 无账本记录的 AC 显示「—」，⛔ 不显示继承自 git 的读数", async () => {
+  // AC-029 has NO ledger event (its file still carries a stale `evidence:` block) ⇒ the UI must
+  // show "—", never the stale `2020-01-01` reading inherited from the file (hard rule 6).
+  const detail = await get(port, "/goal/AC-029");
+  assert.equal(detail.status, 200);
+  assert.doesNotMatch(detail.body, /最近 verdict/, "no ledger event ⇒ the detail page omits the recent-verdict line");
+  assert.doesNotMatch(detail.body, /2020-01-01/, "stale file evidence must never render");
+  const list = await get(port, "/goal");
+  assert.doesNotMatch(list.body, /2020-01-01/, "no stale inherited reading anywhere in the list");
 });
 
 test("AC5 — GET /goal/GOAL-001 renders a goal (no criterion cell) with origin", async () => {
