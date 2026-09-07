@@ -2,7 +2,7 @@
 id: gap-needs-human-overloaded-two-populations-one-state
 title: needs-human 承载两个处理者相反的群体却只有一个取值——7 天 71 次翻转中 69 次是「worker 落不了地」、0
   次是「人须裁决」，且该翻转把任务从有处理者的状态移入无处理者的状态
-status: done
+status: ready
 labels:
   - gap
   - defect
