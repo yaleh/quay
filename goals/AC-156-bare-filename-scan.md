@@ -1,7 +1,7 @@
 ---
 id: AC-156
 title: 注册表/清单裸文件名扫描（AC158 的前置）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-003
 criterion: |-
