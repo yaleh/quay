@@ -2,7 +2,7 @@
 id: gap-process-budget-in-use-structurally-zero-never-throttles
 title: 跨层进程预算的 in_use 恒 0（仪器自检已报故障却不影响取值）⇒ 派生式的「减去在用」这一项永远不减；叠加 config 的
   max_oversubscription 后实测 splice 出 --test-concurrency=28（16 核）
-status: done
+status: ready
 labels:
   - gap
   - defect
