@@ -1,7 +1,7 @@
 ---
 id: AC-191
 title: 迁移后的 goal AC 在【生产】轮记录里有 evidence.at，且晚于其落地提交（只计落地后时间窗）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-007
 criterion: |
