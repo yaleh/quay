@@ -293,13 +293,14 @@ driver **只记 `spawned: true`，不信 agent 自述**，下一轮用 `task_lis
 | 期 | 内容 | AC |
 |---|---|---|
 | **G1** | 词表与 id 改造：`GOAL-NNN` + `draft` + `goal:` 字段 + 默认 status 改 `draft` | AC-170 |
-| **G2** | **先迁移**：当前阶段 + 下一阶段迁成真实记录；`draft` 有真实载体 | AC-171 |
-| **G3** | **断权威**：`manager-phase-goal.md` 降级归档 + prompt 指针 repoint | AC-174 |
-| **G4** | I1′ 硬上限 + I3 三态 + I4 分歧 | AC-172、AC-173 |
-| **G5** | ABI 封装（§5.2 全部） | AC-175 |
-| **G6** | goal-driver 机械环 | AC-176 |
-| **G7** | `goal_ac` 关联 + 缺口计算 + 语义环 | AC-177 |
-| **G8** | Web 卡片 + `quay goal` 子命令 | AC-178 |
+| **G2** | **先迁移**：当前阶段 + 下一阶段迁成真实记录；`draft` 有真实载体 | AC-171、AC-172 |
+| **G3** | **断权威**：`manager-phase-goal.md` 降级归档 + prompt 指针 repoint | AC-173 |
+| **G4** | I1′ 硬上限 + I3 三态 + I4 分歧 | AC-174、AC-175 |
+| **G5** | ABI 封装（§5.2 全部） | AC-176 |
+| **G6** | goal-driver 机械环 | AC-177 |
+| **G7** | `goal_ac` 关联 + 缺口计算 + 语义环 | AC-178 |
+| **G8** | Web 卡片 + `quay goal` 子命令 | AC-179 |
+| **G9** | 缺口语义环：driver 派短命 agent 经 ABI 立案，下一轮独立复核 | AC-185 |
 
 ### 7.1 为什么迁移（G2）排在 ABI（G5）之前
 
