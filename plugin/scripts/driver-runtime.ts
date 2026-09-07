@@ -815,6 +815,47 @@ export function reportFacts(
   return notifyManager({ root, pid: managerPid, token, message });
 }
 
+// ── Layer 0 · 源码自刷新（source-refresh，AC-184 陈旧写者收尾）────────────────────────────────────
+// AC-184 失败：常驻 promotion/worker driver 早于 driver-filters.ts 最近一次提交启动，仍在写旧格式的
+// sync/filter 代码——进程载入内存后不再感知源码变更。supervisor 逐轮对照「被监视源码最新 mtime」与
+// 「当前 driver 进程启动时刻」：源码推进到启动时刻之后 ⇒ SIGTERM driver 触发 respawn——复用既有的
+// exit→respawn 循环（⛔ 不新建并行重启机制），driver 以新进程重新 import 全部依赖（driver-filters 的
+// sync/filter 单一实现随之刷新）。判据取假（DoD）：关掉这个对照 ⇒ 源码变更后 driver 永不自愈 ⇒ 测试红。
+
+/** 被监视的共享源码（相对 <root>/plugin/scripts/）：driver 自身入口 + 两 driver 共用、会独立于重启
+ *  而变更的 Layer 0/1a 模块。driver-filters.ts 是 AC-184 的根（sync/filter 单一实现）；driver-runtime.ts
+ *  （kernel）与 driver-result/shared/config 同族——driver 启动时一次性 import，任一变更 ⇒ 常驻进程陈旧。 */
+const SHARED_SOURCE_FILES: readonly string[] = [
+  "driver-filters.ts",
+  "driver-runtime.ts",
+  "driver-result.ts",
+  "driver-shared.ts",
+  "driver-config.ts",
+];
+
+/** 一个 kind 的 driver 进程须监视的源码文件（相对 <root>/plugin/scripts/）。 */
+export function watchedSourceFiles(kind: DriverKind): string[] {
+  return [DRIVER_KINDS[kind].driver, ...SHARED_SOURCE_FILES];
+}
+
+/** 被监视源码的最新 mtime（mtimeMs 的 max）。全部缺失/读失败 ⇒ 0——0 恒不大于 driver 启动时刻 ⇒
+ *  不触发 respawn（与「未变更」同形；源码缺失本就是非 git root 测试临时目录的常态，⛔ 不是「无源码」）。 */
+export function sourceFilesMaxMtimeMs(root: string, kind: DriverKind): number {
+  let max = 0;
+  for (const rel of watchedSourceFiles(kind)) {
+    try {
+      const st = fs.statSync(path.join(root, "plugin", "scripts", rel));
+      if (st.mtimeMs > max) max = st.mtimeMs;
+    } catch { /* 缺失 → 跳过 */ }
+  }
+  return max;
+}
+
+/** 源码是否推进到 sinceMs 之后（任一被监视文件 mtimeMs > sinceMs ⇒ true）。纯函数，可单测。 */
+export function sourceChangedSince(root: string, kind: DriverKind, sinceMs: number): boolean {
+  return sourceFilesMaxMtimeMs(root, kind) > sinceMs;
+}
+
 // ── Layer 0 · supervisor（respawn / pid 记账 / stop sentinel，由 promotion-driver-launch.sh 港进）────
 // 仓库里只此一份 respawn 循环；kind 差异由 DRIVER_KINDS 数据表驱动（⛔ 非两份代码分支）。
 
@@ -856,6 +897,8 @@ export async function runSupervisor(opts: SupervisorOptions): Promise<number> {
 
   let child: ReturnType<typeof spawn> | null = null;
   let stopping = false;
+  // 当前 driver 进程的启动时刻（epoch ms）——源码自刷新对照的基准（AC-184）。
+  let driverStartedAt = 0;
 
   // 忽略 HUP（nohup 等价）：supervisor 由 startKind 以 detached 起（setsid），但直调/旧宿主可能发 HUP。
   process.on("SIGHUP", () => { /* ignore */ });
@@ -879,6 +922,7 @@ export async function runSupervisor(opts: SupervisorOptions): Promise<number> {
       stdio: ["ignore", logFd, logFd],
       env,
     });
+    driverStartedAt = Date.now();
     if (child.pid) writePidFile(st.driverPidFile, child.pid);
     appendLog(st.supervisorLog, `${ts()} supervisor: started driver pid=${child.pid ?? "?"}`);
     child.on("exit", (code) => {
@@ -896,6 +940,26 @@ export async function runSupervisor(opts: SupervisorOptions): Promise<number> {
   };
 
   startDriver();
+
+  // 源码自刷新（AC-184）：逐轮对照被监视源码 mtime 与 driver 启动时刻，源码推进到启动时刻之后 ⇒
+  // SIGTERM driver 复用既有 exit→respawn 循环（⛔ 不新建并行重启机制）。轮询间隔 = restartDelaySecs
+  // （测试传 1s ⇒ 快；生产缺省 5s ⇒ 慢，源码陈旧 ≤ ~2×restartDelaySecs 即自愈）。事件落 supervisor 日志
+  // （⛔ 静默重启——硬规则 9「可见性 ≠ 执行」）。respawn 间隙 child=null ⇒ 跳过（不 SIGTERM 空引用）。
+  const sourceCheckIntervalMs = Math.max(opts.restartDelaySecs, 1) * 1000;
+  const sourceCheck = setInterval(() => {
+    if (stopping || !child || driverStartedAt <= 0) return;
+    if (sourceChangedSince(opts.root, opts.kind, driverStartedAt)) {
+      appendLog(
+        st.supervisorLog,
+        `${ts()} supervisor: source changed (mtime=${sourceFilesMaxMtimeMs(opts.root, opts.kind)} > driver_start=${driverStartedAt}); restarting driver`,
+      );
+      try { child.kill("SIGTERM"); } catch { /* gone */ }
+    }
+  }, sourceCheckIntervalMs);
+  // 本 timer 不单独保活（unref）：supervisor 的存活由 child 子进程句柄 + respawn setTimeout 共同维持；
+  // stop sentinel → exit 路径仍由 child 的 exit 事件驱动（process.exit 会一并拆掉本 timer）。
+  sourceCheck.unref();
+
   // supervisor 是常驻前台进程：靠 child 的 exit 事件驱动，永不 resolve（被 SIGTERM/stop sentinel 退出）。
   return new Promise<number>(() => {});
 }

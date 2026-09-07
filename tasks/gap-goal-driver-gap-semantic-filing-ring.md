@@ -39,6 +39,8 @@ goal_ac: AC-185
 - [ ] 资源门能取假：`resourceGateCheck` 判 WAIT ⇒ 该轮 `spawned == 0`（复用 worker/promotion 同一判定，⛔ 不另写一套）
 - [ ] 每轮 spawn 上限**读配置而非字面量**：改 `drivers.yml` 中该值后，实测同一轮的 `spawned` 随之改变（硬规则 4 推论二：写死的数字换台机器就失效）
 - [ ] `llm_invoked` **派生自真实 argv**：把派发命令换成非 LLM 命令 ⇒ 该轮 `llm_invoked` 为 false（⛔ 不得硬编码为 true）
+- [ ] **不重复立案**：环派出的 agent 立案必须经 `quay-file-task` 的**按机制去重**步骤。负控制——取一条已有 `todo`/`ready` 关联任务的 AC，把该任务翻 `needs-human` 使缺口重现，再跑一轮：`grep -l '^goal_ac: <该 AC>' tasks/*.md | wc -l` **不得增加**（缺口重现 ≠ 可以再立一条；`computeGoalGaps:208` 只认 `todo|ready`，故 needs-human 会让缺口反复重现）
+- [ ] **`stalled` 第四态**：`taskCount > 0` 但关联任务都无法自行前进时报 `stalled` 而非 `in-progress`。判据用**结构量、不用计时器**（硬规则 4：成本结构未知前不设数值阈值）——关联任务全为 `todo` 且晋升门判其不合格（`ready-pool-check` 的 `eligible=false` / 进 `excluded`），或全为 `ready` 却被 pool 排除。负控制：造一条 Touches 用 glob 的 `todo` 任务（必然过不了晋升门）⇒ 该轮该 AC 必须报 `stalled`；把 Touches 改成具体文件 ⇒ 转回 `in-progress`。四态并存，`not-evaluated` 保留（硬规则 3b）
 - [ ] SPEC §7 新增 G9 行，且该表分期→AC 映射与 `goals/` 记录标题逐条一致（G6→AC-177、G7→AC-178、G8→AC-179、G9→AC-185）
 - [ ] scoped 门 `bash scripts/test.sh --for-task gap-goal-driver-gap-semantic-filing-ring --allow-thin` 退出码 0
 

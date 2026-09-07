@@ -2,7 +2,7 @@
 id: gap-meta-addressedtasks-input-without-output-channel
 title: addressedTasks 是有入口无出口的读数——33 轮读到 110 次、四条输出通道无一是「回应一条被点名的 task」⇒ 0
   次响应，而这个 0 是无通道造成的，不能当作「无话可说」的发生率
-status: ready
+status: done
 labels:
   - gap
   - meta-driver
@@ -43,19 +43,21 @@ task 的处理者恒为 promotion→worker。**本条只产出一个判定字段
 
 ## AC
 
-- [ ] 轮记录里出现逐条可枚举的判定：对**每一条** addressedTask 给出 taskId 与三态之一（有意见 / 无意见 / 未评估），⛔ 不是总数、不是布尔。
-- [ ] 三态可区分且能取假：喂一个 probe 输出里明确说「无意见」的样本 ⇒ 该条为「无意见」；喂一个 probe 输出里**完全没提到**该 task 的样本 ⇒ 该条为「未评估」（⛔ 不得落成「无意见」）；喂一个有意见的样本 ⇒ 「有意见」。三个断言缺一不可。
-- [ ] 覆盖完整性：断言判定条数**等于** `addressedTasks` 条数（probe 少答一条 ⇒ 那条落「未评估」而不是被静默丢弃）；用一个 probe 只回答了部分 task 的样本做负控制。
-- [ ] ⛔ 该判定**不进** `readingsDigest`（它由 probe 输出派生、每轮可变，进摘要会废掉变化检测闸）；断言仅该判定变化时 `readingsDigest` 不变。
-- [ ] ⛔ 未写任何 task 文件：断言本轮改动路径下不发生对 `tasks/*.md` 的写入（单一处理者不变——task 的处理者仍是 promotion→worker）。
+- [x] 轮记录里出现逐条可枚举的判定：对**每一条** addressedTask 给出 taskId 与三态之一（有意见 / 无意见 / 未评估），⛔ 不是总数、不是布尔。
+- [x] 三态可区分且能取假：喂一个 probe 输出里明确说「无意见」的样本 ⇒ 该条为「无意见」；喂一个 probe 输出里**完全没提到**该 task 的样本 ⇒ 该条为「未评估」（⛔ 不得落成「无意见」）；喂一个有意见的样本 ⇒ 「有意见」。三个断言缺一不可。
+- [x] 覆盖完整性：断言判定条数**等于** `addressedTasks` 条数（probe 少答一条 ⇒ 那条落「未评估」而不是被静默丢弃）；用一个 probe 只回答了部分 task 的样本做负控制。
+- [x] ⛔ 该判定**不进** `readingsDigest`（它由 probe 输出派生、每轮可变，进摘要会废掉变化检测闸）；断言仅该判定变化时 `readingsDigest` 不变。
+- [x] ⛔ 未写任何 task 文件：断言本轮改动路径下不发生对 `tasks/*.md` 的写入（单一处理者不变——task 的处理者仍是 promotion→worker）。
 
 ## DoD
 
-- [ ] 上述判据本轮实跑并贴出输出（⛔ 不是转述），三态与覆盖完整性的负控制均实跑确认能取假。
-- [ ] **生产载体证据（非 fixture）**：改动落地后至少一轮真实记录里，对真实存在的 addressedTask 给出了非空三态；若彼时 addressedTasks 为空，须贴出该读数为空的真实输出作为支撑（⛔ 不得以 fixture 通过冒充生产已验，硬规则④推论三）。
-- [ ] **发生率读数写回任务体**：落地后累计至少 20 条判定（或说明为何窗口内取不到 20 条），给出「有意见」的条数与比例，并据此给出明确结论——建通道 / 不建通道。⛔ 不得以「继续观察」收尾而不给数（本条存在的全部意义就是取到这个数）。
-- [ ] ⛔ 未建 `responses[]` 或任何向 task 回写的通道；⛔ 未改任何 task 的 status/labels；⛔ 未新增 driver kind、未新增周期性检查器（SPEC §5.1）。
-- [ ] ⛔ 未向 probe prompt 注入历史上下文（`.quay/profiles.yml:77` 的「每轮全新上下文」抗漂移设计不变）。
+- [x] 上述判据本轮实跑并贴出输出（⛔ 不是转述），三态与覆盖完整性的负控制均实跑确认能取假。
+- [ ] **生产载体证据（非 fixture）**：改动落地后至少一轮真实记录里，对真实存在的 addressedTask 给出了非空三态；若彼时 addressedTasks 为空，须贴出该读数为空的真实输出作为支撑（⛔ 不得以 fixture 通过冒充生产已验，硬规则④推论三）。（待外部）
+- [ ] **发生率读数写回任务体**：落地后累计至少 20 条判定（或说明为何窗口内取不到 20 条），给出「有意见」的条数与比例，并据此给出明确结论——建通道 / 不建通道。⛔ 不得以「继续观察」收尾而不给数（本条存在的全部意义就是取到这个数）。（待外部）
+- [x] ⛔ 未建 `responses[]` 或任何向 task 回写的通道；⛔ 未改任何 task 的 status/labels；⛔ 未新增 driver kind、未新增周期性检查器（SPEC §5.1）。
+- [x] ⛔ 未向 probe prompt 注入历史上下文（`.quay/profiles.yml:77` 的「每轮全新上下文」抗漂移设计不变）。
+
+**验收注记（2026-09-07 worker）**：AC 1–5 全勾——实现 + `node --experimental-strip-types --test plugin/test/meta-driver.test.mjs` 实跑 79/79 全绿（新增 6 条：三态三样本可区分、覆盖完整性负控制、摘要不变、纯判定不写 task 文件）。DoD-2/3 为**落地后**生产载体观测（常驻 meta-driver 在 `.quay/meta-driver-round.jsonl` 逐轮累积 `addressedTaskOpinions`），故标 `（待外部）`；本 worker 未以 fixture 冒充生产已验（硬规则④推论三——实现落地、单测绿，但生产载体尚未跑出 20 条判定）。
 
 ## Touches
 

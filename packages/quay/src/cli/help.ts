@@ -19,8 +19,8 @@ Usage:
   quay init [--force] [--dry-run] [--root <path>]   (scaffold an EMPTY task store; the loop install is the /quay:init skill, NOT this command)
   quay task list [--status <status>] [--label <label>] [--prefix <prefix>] [--sort id|status|updated] [--search <query>] [--page-size <n>] [--root <path>] [--json|--format json]
   quay task view <task-id> [--json]
-  quay task create <task-id> --title <title> [--body <text>|--body-file <path>] [--status <status>] [--labels <a,b>] [--parent <id>] [--children <a,b>] [--extra <json>] [--json]
-  quay task edit <task-id> [--title <title>] [--status <status>] [--body <text>|--body-file <path>] [--labels <a,b>] [--extra <json>] [--parent <id>] [--children <a,b>] [--expect-status <status>] [--acceptance <cmd>] [--append-notes <text>] [--enforce-gate] [--json]
+  quay task create <task-id> --title <title> [--body <text>|--body-file <path>] [--status <status>] [--labels <a,b>] [--parent <id>] [--children <a,b>] [--depends-on <a,b>] [--goal-ac <AC-NNN>] [--extra <json>] [--json]
+  quay task edit <task-id> [--title <title>] [--status <status>] [--body <text>|--body-file <path>] [--labels <a,b>] [--extra <json>] [--parent <id>] [--children <a,b>] [--depends-on <a,b>] [--goal-ac <AC-NNN>] [--expect-status <status>] [--acceptance <cmd>] [--append-notes <text>] [--enforce-gate] [--json]
   quay task check <task-id> [--json]
   quay adr list [--status <status>] [--tag <tag>] [--json] [--root <path>]
   quay adr view <id> [--json] [--root <path>]
@@ -71,6 +71,8 @@ Options for task create:
   --labels <a,b>       Comma-separated initial labels
   --parent <id>        Parent task id
   --children <a,b>     Comma-separated child task ids
+  --depends-on <a,b>   Comma-separated prerequisite task ids (top-level depends_on)
+  --goal-ac <AC-NNN>   Owning goal AC id (top-level goal_ac)
   --extra <json>       Extra metadata as a JSON object string
   --json                Output the created task as JSON
 
@@ -83,6 +85,8 @@ Options for task edit:
   --extra <json>        Extra metadata as a JSON object string (merged into existing extra)
   --parent <id>         New parent task id
   --children <a,b>      Comma-separated child task ids (replaces existing children)
+  --depends-on <a,b>    Comma-separated prerequisite task ids (top-level depends_on; replaces existing)
+  --goal-ac <AC-NNN>    Owning goal AC id (top-level goal_ac)
   --expect-status <status>  Compare-and-swap: fail if the task's current status is not this value
   --acceptance <cmd>        Set the runnable acceptance meter (stored in extra.acceptance; run by
                             'quay gate <id>', the default gate). Repeatable: multiple values are
