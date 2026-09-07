@@ -1,12 +1,20 @@
 ---
 id: AC-156
 title: 注册表/清单裸文件名扫描（AC158 的前置）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-003
+criterion: |-
+  f=orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md
+  grep -qE '^- 扫描前死集: [0-9]+$' "$f" && grep -qE '^- 扫描后死集: [0-9]+$' "$f"
+expect: "exit 0（SPEC §12e 同时含机读行 `- 扫描前死集: N` 与 `- 扫描后死集: M`；只有散文叙述不算——两个数字缺一即假）"
 origin: |
   人 2026-09-02 裁定④「对零调用的工具，先退役（archive），后续发现需要了再恢复」。
   正本 orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md §12f。
+evidence:
+  at: 2026-09-07T01:21:25.835Z
+  verdict: fail
+  reading: acceptance failed (exit 1)
 ---
 
 **判据（能取假）**：按 SPEC §12f 对 97 个死集跑一趟**注册表/清单裸文件名扫描**（对象：`quay-deliver.ts`
