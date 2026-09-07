@@ -53,17 +53,6 @@ manager 在时的当前倾向（本阶段优先）。
   **⊢ 与上面谓词形的关系**：这不是退回旧的"手写清单+散文失效"模式——到期条件是 status 检查（机械可判），
   不是散文承诺；且只列了这一对的顺序关系，不是列全部候选，谓词仍然决定"谁进候选池"，本条只决定
   "候选池内这两个具体 id 的相对先后"。
-- **⚡ 显式单条优先（2026-09-07T06:5xZ manager 立，人直接要求「优先派发」）**：
-  `gap-goal-evidence-cache-should-not-enter-git` 优先于其它 ready 候选，除非结构上不可派
-  （Touches 冲突 / 依赖未满 / 非 ready）。
-  **实况（立条时核实,不是猜测）**：AC/DoD 全部 `[x]`,任务体 Evidence 段带实跑输出（33+11+9 pass）,
-  worktree `task/gap-goal-evidence-cache-should-not-enter-git` 已存在且已 merge 最新 develop
-  （`a636203cc`）;`worker-outcome.jsonl` 已有两次 `exited-not-landed`——
-  ①`ff` 步 non-fast-forward（已在 worktree 内补 merge 解决）,
-  ②`suite` 步撞 `AC1: cold request 4122ms < 3000ms` 一个与本任务改动无关的已知 flaky 性能断言
-  （见 memory `observation-perf-ac1-load-flaky-blocks-fanins`）——**不是本任务实现有缺陷,是运气**;
-  当前无 worker 在跑该任务。原始 selector_reason 已记「正造成 develop 伪 livelock 挡无关 fan-in」。
-  **到期条件（可机械求值）**：该任务 status ∈ {done, superseded} ⇒ 本条自动失效。
 - **覆盖段生效条件**：manager 在场（可见、维护）。manager 不在场时回落到默认段。
 
 ## 维护者字段
