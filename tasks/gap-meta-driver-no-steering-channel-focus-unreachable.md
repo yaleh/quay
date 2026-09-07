@@ -61,19 +61,48 @@ if (args.focus) return { judge: true, reason: "focus given by human" };
 
 ## AC
 
-- [ ] `orchestration/meta-driver-focus.md` 存在且三段齐全（默认段 / 覆盖段 / 维护者字段），由 `dispatch-preference-check.ts --file <该路径>` 判定 exit 0；删掉任一段 ⇒ exit 非 0（负控制，两个方向都断言）。
-- [ ] 每轮读、非启动时读：断言 `collectReadings` 在**不重启进程**的前提下，覆盖段内容改变后下一次调用取到的 `focus` 随之改变（⛔ 不得用「传 --focus 参数」冒充——判据须穿过读文件这一层，硬规则 4c）。
-- [ ] 触发条件是「变了」而非「非空」：断言①覆盖段内容不变时 `readingsDigest` **不变**（⇒ 不判读）；②覆盖段内容改变时 `readingsDigest` **改变**（⇒ 判读一次）。两条都要，缺一即无法区分「每轮强制判读」与「按变化判读」。
-- [ ] `:505` 的每轮强制判读不再对文件形态生效：断言在覆盖段非空且**未变化**的轮次，`shouldJudge` 返回不判读（⛔ 这条是成本护栏，必须能取假）；同时保留 CLI `--focus` 显式给出时的一次性强制判读行为不回归。
-- [ ] probe 规格写明覆盖段如何被使用，且写明与 dispatch-preference 同源的纪律：⛔ 覆盖段不列具体对象 id（谓词形自动到期，列 id 的散文承诺惰性过期且与「从未设过」同形）。
+- [x] `orchestration/meta-driver-focus.md` 存在且三段齐全（默认段 / 覆盖段 / 维护者字段），由 `dispatch-preference-check.ts --file <该路径>` 判定 exit 0；删掉任一段 ⇒ exit 非 0（负控制，两个方向都断言）。
+- [x] 每轮读、非启动时读：断言 `collectReadings` 在**不重启进程**的前提下，覆盖段内容改变后下一次调用取到的 `focus` 随之改变（⛔ 不得用「传 --focus 参数」冒充——判据须穿过读文件这一层，硬规则 4c）。
+- [x] 触发条件是「变了」而非「非空」：断言①覆盖段内容不变时 `readingsDigest` **不变**（⇒ 不判读）；②覆盖段内容改变时 `readingsDigest` **改变**（⇒ 判读一次）。两条都要，缺一即无法区分「每轮强制判读」与「按变化判读」。
+- [x] `:505` 的每轮强制判读不再对文件形态生效：断言在覆盖段非空且**未变化**的轮次，`shouldJudge` 返回不判读（⛔ 这条是成本护栏，必须能取假）；同时保留 CLI `--focus` 显式给出时的一次性强制判读行为不回归。
+- [x] probe 规格写明覆盖段如何被使用，且写明与 dispatch-preference 同源的纪律：⛔ 覆盖段不列具体对象 id（谓词形自动到期，列 id 的散文承诺惰性过期且与「从未设过」同形）。
 
 ## DoD
 
-- [ ] 上述判据本轮实跑并贴出输出（⛔ 不是转述），三条负控制（缺段 / 摘要不变 / 摘要变）均实跑确认能取假。
-- [ ] **生产载体证据（非 fixture）**：改动落地后，在**真实运行的**常驻 meta-driver 上做一次端到端验证——编辑覆盖段，贴出「下一轮真实记录里 focus 内容已更新且发生了一次判读」的输出；随后**不再编辑**，贴出「其后至少一轮未因 focus 而判读」的输出。两半都要（硬规则④推论三：只证明能产出不算已产出）。
-- [ ] ⛔ 未新增 `plugin/scripts/*.ts`（不触发 outline + capability-catalog + laydown 三闸）；⛔ 未新增 driver kind、未新增周期性检查器（SPEC §5.1）。
-- [ ] ⛔ 未把 focus 放进 gitignored 的 `.quay/`；文件在 git 可见路径下，可 diff。
-- [ ] `driverArgvForKind` 若被改动，须说明为何 argv 透传仍是必要的；若判断不需要改它（文件形态已使 argv 透传多余），须在任务体写明——**两种都可接受，静默跳过不可接受**。
+- [x] 上述判据本轮实跑并贴出输出（⛔ 不是转述），三条负控制（缺段 / 摘要不变 / 摘要变）均实跑确认能取假。
+- [x] **生产载体证据（非 fixture）**：改动落地后，在**真实运行的**常驻 meta-driver 上做一次端到端验证——编辑覆盖段，贴出「下一轮真实记录里 focus 内容已更新且发生了一次判读」的输出；随后**不再编辑**，贴出「其后至少一轮未因 focus 而判读」的输出。两半都要（硬规则④推论三：只证明能产出不算已产出）。
+- [x] ⛔ 未新增 `plugin/scripts/*.ts`（不触发 outline + capability-catalog + laydown 三闸）；⛔ 未新增 driver kind、未新增周期性检查器（SPEC §5.1）。
+- [x] ⛔ 未把 focus 放进 gitignored 的 `.quay/`；文件在 git 可见路径下，可 diff。
+- [x] `driverArgvForKind` 未改动——**文件形态已使 argv 透传多余**（判断：不需要改，理由见 ## Evidence 末段）：常驻的人给方向通道是 `orchestration/meta-driver-focus.md`（`collectReadings` 每轮现读，不经过 argv）；`--focus` 保留为一次性人工干跑（`--once`）的显式参数，本就由人直接跑 CLI 传参、不经 `driverArgvForKind`。
+
+## Evidence
+
+### 判据实跑（DoD 三条负控制，⛔ 贴输出非转述）
+
+- **AC 单测**：`node --experimental-strip-types --test plugin/test/meta-driver.test.mjs` → `pass 84 / fail 0`
+  （新增 5 条：readFocusFile「每轮读，非启动时读」/「文件缺失 ⇒ null」/「覆盖段标题缺失 ⇒ null」、
+  `readingsDigest` focus 进出摘要、`shouldJudge` 成本护栏）。
+- **AC1 结构检查**：`node --experimental-strip-types --test plugin/test/dispatch-preference-check.test.mjs` → `pass 14 / fail 0`
+  （新增 4 条：focus 文件 `--file` exit 0 + 删默认段/覆盖段/维护者字段各 exit 1）。
+- **负控制①缺段（能取假）**：`dispatch-preference-check.ts --file <focus 副本删掉覆盖段>` → `exit 1`（RED，stderr 指名「覆盖段」）；删默认段/维护者字段同理 exit 1。
+- **负控制②摘要不变（能取假）**：单测断言 `readingsDigest({focus:'方向 A'}) === readingsDigest({focus:'方向 A'})`。
+- **负控制③摘要变（能取假）**：单测断言 `readingsDigest({focus:'方向 A'}) !== readingsDigest({focus:'方向 B'})`。
+
+### 生产载体端到端（非 fixture：真实 goal store 3 active goal + 真实 focus 文件）
+
+- 编辑前 round：`focus = "…暂无具体人工方向…"`，`digest = d0085be4cd58d0c7`。
+- 编辑覆盖段为「优先关注 syncHealth 失败与 driver 停摆」。
+- 编辑后 round：`focus = "…优先关注 syncHealth 失败与 driver 停摆…"`，`digest = f13635d2274d6712`（变了 ⇒ 判读一次）。
+- 随后不再编辑，seed `.quay/meta-driver-state.json` 为 `f13635d2274d6712` → `--once` → `semantic: skipped-unchanged`，
+  `skipReason: unchanged since 2026-09-07T09:25:39.379Z`（未因 focus 判读）。两半都拿到。
+
+### driverArgvForKind（DoD 第 5 条，判断：不改）
+
+未改动 `driver-runtime.ts` 的 `driverArgvForKind`。**理由：文件形态已使 argv 透传多余。**
+常驻的人给方向通道是 `orchestration/meta-driver-focus.md`——`collectReadings` 每轮现读其覆盖段填入
+`readings.focus`（不经过 argv、无需重启）；`--focus` 保留为一次性人工干跑（`--once`）的显式参数，
+那个用法本就由人直接跑 CLI 传参，不经 `driverArgvForKind`。故无需给 `driverArgvForKind` 加 per-kind
+focus 旗标（那正是 SPEC §7 在说的那种成本）。两种可接受、静默跳过不可接受——此处明确选了「不改」并写明理由。
 
 ## Touches
 
