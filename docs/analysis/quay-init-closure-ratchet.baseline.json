@@ -1,7 +1,7 @@
 {
   "files": 133,
-  "bytes": 3852914,
-  "fingerprint": "d7415a470e9577faf18e49ef81e9035d327a743f0be7999ba5dcd00e561dd932",
+  "bytes": 3854636,
+  "fingerprint": "144492024ca4da8a33ee348e6b9328da8a24b82c4d3869b2e728fc3a0ff57804",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
@@ -457,7 +457,7 @@
     },
     {
       "rel": "plugin/scripts/task-ops.ts",
-      "sha": "d0eafa912103dbf29482532d13319192d72a3ded159d8183503fb5cab8d854d2"
+      "sha": "135f56075f91e9de8ce25cf96be9394ae261b592590d7ad2001b46dcfd6ac9c7"
     },
     {
       "rel": "plugin/scripts/task-schema-check.ts",
