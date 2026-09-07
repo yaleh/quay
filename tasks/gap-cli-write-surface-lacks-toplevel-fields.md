@@ -1,7 +1,7 @@
 ---
 id: gap-cli-write-surface-lacks-toplevel-fields
 title: CLI 写字段面缺顶层字段（goal_ac / depends_on）—— 补 flag 并给字段面对齐造产物
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -32,14 +32,19 @@ goal_ac: AC-178
 
 ## AC
 
-- [ ] `quay task edit <id> --goal-ac AC-NNN` 写入后，目标 `tasks/*.md` 的 frontmatter **顶层**出现该键，且 `parseFrontmatterCompletely` 读出同值、`extra` 下无同名键
-- [ ] `quay task edit <id> --depends-on a,b` 同样写入顶层数组，读回等值
-- [ ] 幂等负控制：不传这两个 flag 的一次 `task edit` **不清空、不改写**已有的 `goal_ac` / `depends_on`
-- [ ] CLI 硬错误地板的 `Supported fields:` 列表含新字段，且 `cli-edit-parity-conformance.test.mjs:260` 的断言串同步更新（否则该文件一旦被启用即红）
-- [ ] **新 parity 测试能取假**：从 `task_write` 的 zod `inputSchema` 机读字段集逐个查 CLI flag；把实现里任一新 flag 摘掉 ⇒ 该测试**必红**（把这次干跑的输出贴进任务体）
-- [ ] 新 parity 测试在**默认 suite 里真的执行**（带 `@test-group` 标注、不落进 ADR-019 的 in-file skip）——以一次 `scripts/test.sh` 的输出中出现该文件名为证
-- [ ] native CLI `quay-native task edit` 同面覆盖，读回等值
-- [ ] scoped 门 `bash scripts/test.sh --for-task gap-cli-write-surface-lacks-toplevel-fields --allow-thin` 退出码 0
+- [x] `quay task edit <id> --goal-ac AC-NNN` 写入后，目标 `tasks/*.md` 的 frontmatter **顶层**出现该键，且 `parseFrontmatterCompletely` 读出同值、`extra` 下无同名键
+- [x] `quay task edit <id> --depends-on a,b` 同样写入顶层数组，读回等值
+- [x] 幂等负控制：不传这两个 flag 的一次 `task edit` **不清空、不改写**已有的 `goal_ac` / `depends_on`
+- [x] CLI 硬错误地板的 `Supported fields:` 列表含新字段，且 `cli-edit-parity-conformance.test.mjs:260` 的断言串同步更新（否则该文件一旦被启用即红）
+- [x] **新 parity 测试能取假**：从 `task_write` 的 zod `inputSchema` 机读字段集逐个查 CLI flag；把实现里任一新 flag 摘掉 ⇒ 该测试**必红**。干跑实测（临时摘掉 core `task-edit.ts` 的 `flags["depends-on"]` 处理行 ⇒ `node packages/quay/test/cli-write-surface-parity.test.mjs` fail 1）：
+  ```
+  ✖ cli-write-surface-parity: every native task_write zod field is CLI-flag-wired in core + native
+    AssertionError: CLI↔MCP write-field-surface parity gaps (zod fields: title, status, labels, parent, children, depends_on, goal_ac, body, extra, expectedStatus):
+      access flags["depends-on"] (zod field "depends_on") missing from core task-edit.ts
+  ```
+- [x] 新 parity 测试在**默认 suite 里真的执行**（带 `@test-group` 标注、不落进 ADR-019 的 in-file skip）——以一次 `scripts/test.sh` 的输出中出现该文件名为证
+- [x] native CLI `quay-native task edit` 同面覆盖，读回等值
+- [x] scoped 门 `bash scripts/test.sh --for-task gap-cli-write-surface-lacks-toplevel-fields --allow-thin` 退出码 0
 
 ## DoD
 
@@ -49,7 +54,10 @@ goal_ac: AC-178
 
 - packages/quay/src/cli/task-edit.ts
 - packages/quay/src/cli/task-create.ts
+- packages/quay/src/cli/help.ts
 - packages/quay-native/bin/quay-native.ts
+- packages/quay-github/src/mcp-server.ts
+- packages/quay-github/src/github-client.ts
 - packages/quay/test/cli-edit-parity-conformance.test.mjs
 - packages/quay/test/cli-write-surface-parity.test.mjs（new）
 - docs/references/task-schema-canonical.md
