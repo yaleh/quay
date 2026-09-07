@@ -17,6 +17,8 @@ import { execFileSync } from 'node:child_process';
 
 import {
   computeDivergences,
+  attachDivergenceHandlers,
+  handlerStateFor,
   computeDivergenceRecurrence,
   extractJudgeRounds,
   readMetaCarrier,
@@ -1311,4 +1313,73 @@ test('readingsDigest: repeatCount/lastRecommendation 变化不改变摘要（⛔
   assert.equal(readingsDigest(base), readingsDigest(a), '无 repeatCount 与有 repeatCount 也同摘要');
   // 能取假的一侧：verdict 变了摘要必须变（⛔ 不得因「摘要稳定」把真变化也吞掉）。
   assert.notEqual(readingsDigest(a), readingsDigest(mkReadings('fail')), 'verdict 变仍须改变摘要');
+});
+
+// ── 处理者路由（gap-meta-divergences-not-routed-by-handler-existence）────────────────────────────
+// 三条 kind 输出同形而处理者存在性截然不同：pass-but-unflipped → goal-driver 全自动翻；no-criterion →
+// task→worker 但需显式触发；achieved-but-failing → 无。同形导致 259 次把「goal-driver 没在跑」报成
+// 259 条 AC 症状。修法：给每条偏离附 handler 三态（由 drivers 读数派生），probe 据此路由。
+
+// 一条当前轮的机械 divergence（handler 由 attachDivergenceHandlers 补上）。
+const hDiv = (id, kind) => ({ id, kind, status: 'active', verdict: 'pass', reason: 'x' });
+// 一条 driver 读数（running 可显式给 null = aliveness 读不出）。
+const drv = (running) => ({ kind: 'goal', running, supervisorAlive: false, driverAlive: false, carrierRecords: 1, carrierLastTs: null, staleSecs: 5 });
+
+// AC1：三态是可枚举的四值（healthy/stalled/absent/unreadable），⛔ 不是布尔/总数；absent ≠ unreadable。
+test('handlerStateFor: 四值枚举且 absent≠unreadable（⛔ 读不懂不得与「不存在」同形，硬规则 3b）', () => {
+  assert.equal(handlerStateFor('goal', [drv(true)]), 'healthy', 'present + running ⇒ healthy');
+  assert.equal(handlerStateFor('goal', [drv(false)]), 'stalled', 'present + !running ⇒ stalled');
+  assert.equal(handlerStateFor('goal', [{ ...drv(true), kind: 'promotion' }]), 'absent', 'goal 不在读数 ⇒ absent');
+  assert.equal(handlerStateFor('goal', [drv(null)]), 'unreadable', 'aliveness 读不出 ⇒ unreadable');
+  assert.equal(handlerStateFor('goal', null), 'unreadable', '读数整体缺失 ⇒ unreadable');
+  assert.equal(handlerStateFor('none', [drv(true)]), 'absent', '无处理者是结构事实 ⇒ absent');
+  assert.equal(handlerStateFor('none', null), 'absent', '无处理者 ≠ 读不出（none 恒 absent）');
+  // absent 与 unreadable 必须不同取值（硬规则 3b：读不懂不得与「不存在」同形）。
+  assert.notEqual(handlerStateFor('goal', [{ ...drv(true), kind: 'promotion' }]), handlerStateFor('goal', null), 'absent ≠ unreadable');
+});
+
+// AC2：三态双向能取假——三个断言缺一不可。
+test('attachDivergenceHandlers: 三态双向能取假；achieved-but-failing 恒 absent（处理者与 goal 无关）', () => {
+  const pb = hDiv('AC-170', 'pass-but-unflipped');
+  // ① goal 健康 ⇒ healthy。
+  assert.deepEqual(attachDivergenceHandlers([pb], [drv(true)])[0].handler, { kind: 'goal', state: 'healthy' });
+  // ② 同一读数改成 goal 缺席 ⇒ absent；改成 goal 停摆 ⇒ stalled。
+  assert.deepEqual(attachDivergenceHandlers([pb], [{ ...drv(true), kind: 'promotion' }])[0].handler, { kind: 'goal', state: 'absent' });
+  assert.deepEqual(attachDivergenceHandlers([pb], [drv(false)])[0].handler, { kind: 'goal', state: 'stalled' });
+  // ③ achieved-but-failing 在两种读数下都标 absent（它的处理者与 goal-driver 无关）。
+  const af = hDiv('AC-172', 'achieved-but-failing');
+  assert.deepEqual(attachDivergenceHandlers([af], [drv(true)])[0].handler, { kind: 'none', state: 'absent' });
+  assert.deepEqual(attachDivergenceHandlers([af], [])[0].handler, { kind: 'none', state: 'absent' });
+  // no-criterion 处理者标识 = worker（task→worker 流水线）。
+  assert.equal(attachDivergenceHandlers([hDiv('AC-143', 'no-criterion')], [drv(true)])[0].handler.kind, 'worker');
+});
+
+// DoD3 回放：09-06T14:25–19:04 那段的读数形态（goal-driver 缺席/停摆）⇒ 7 条 pass-but-unflipped
+// 全部归为「处理者停摆/不存在」，⛔ 不是逐条针对 AC 的症状。
+test('回放：goal-driver 缺席时 7 条 pass-but-unflipped 归为处理者停摆（⛔ 非逐条 AC 症状）', () => {
+  const ids = ['AC-170', 'AC-171', 'AC-172', 'AC-173', 'AC-174', 'AC-175', 'AC-176'];
+  const divs = ids.map((id) => hDiv(id, 'pass-but-unflipped'));
+  for (const d of attachDivergenceHandlers(divs, [drv(false)])) {
+    assert.equal(d.handler.state, 'stalled', `${d.id} 应归为「处理者停摆」，⛔ 不是健康`);
+  }
+  for (const d of attachDivergenceHandlers(divs, [{ ...drv(true), kind: 'promotion' }])) {
+    assert.equal(d.handler.state, 'absent', `${d.id} 在 goal 缺席时应归为「处理者不存在」`);
+  }
+  // 取假的一侧：goal 健康时同 7 条归为 healthy（对照，证明分类轴随处理者状态翻转）。
+  for (const d of attachDivergenceHandlers(divs, [drv(true)])) {
+    assert.equal(d.handler.state, 'healthy', `${d.id} 在 goal 健康时归为 healthy`);
+  }
+});
+
+// AC3（成本护栏）：handler 三态进摘要；仅 staleSecs 数值变化（三态不变）⇒ 摘要不变。
+test('readingsDigest: handler 三态进摘要；仅 staleSecs 变而三态不变 ⇒ 摘要不变（两个方向都断言）', () => {
+  const base = mkReadings('pass', 'n1');
+  const withHandler = (state) => ({ ...base, divergences: [{ ...base.divergences[0], handler: { kind: 'goal', state } }] });
+  // 方向一：仅 staleSecs 数值变化、三态不变 ⇒ 摘要不变（staleSecs 不得进摘要）。
+  const a = withHandler('healthy'); a.drivers[0].staleSecs = 5;
+  const b = withHandler('healthy'); b.drivers[0].staleSecs = 9999;
+  assert.equal(readingsDigest(a), readingsDigest(b), '仅 staleSecs 变、三态不变 ⇒ 摘要不变');
+  // 方向二：三态变化 ⇒ 摘要改变（handler 三态必须进摘要，⛔ 不得恒不变）。
+  assert.notEqual(readingsDigest(withHandler('healthy')), readingsDigest(withHandler('stalled')), '三态 healthy→stalled ⇒ 摘要改变');
+  assert.notEqual(readingsDigest(withHandler('healthy')), readingsDigest(withHandler('absent')), '三态 healthy→absent ⇒ 摘要改变');
 });

@@ -2,7 +2,7 @@
 id: gap-delivery-critical-mechanical-axis-orphaned-needs-ruling
 title: delivery-critical 机械排序轴（slot-refill/concurrent-batch-scheduler,
   AC36）正式退役——人 2026-09-07 裁定不接入 worker-driver，清理孤儿代码/检查器/测试/catalog 条目
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -124,6 +124,7 @@ extra:
 
 ## Touches
 
+- `.quay/suite-bucket-reattribution.jsonl`
 - `plugin/scripts/slot-refill.ts`
 - `plugin/scripts/concurrent-batch-scheduler.ts`
 - `plugin/scripts/ac36-sortkey-criterion-check.ts`
@@ -131,7 +132,10 @@ extra:
 - `plugin/test/slot-refill.test.mjs`
 - `plugin/test/concurrent-batch-scheduler.test.mjs`
 - `plugin/test/ac36-sortkey-criterion-check.test.mjs`
+- `plugin/test/ac56-recommended-deordered-check.test.mjs`
 - `docs/analysis/quay-init-closure-ratchet.baseline.json`
+- `docs/analysis/test-file-baseline.txt`
+- `docs/analysis/dead-set-recomputed.json`
 - `orchestration/dispatch-preference.md`
 - `orchestration/SPEC-capability-planes-and-mechanism-lifecycle-2026-09-05.md`
 - `tasks/gap-delivery-critical-mechanical-axis-orphaned-needs-ruling.md`
