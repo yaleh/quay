@@ -54,18 +54,18 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 生产载体读数（不是 fixture）：对运行中的实例加载 `/git-history`，在页面上下文执行「对全部
+- [x] AC1 生产载体读数（不是 fixture）：对运行中的实例加载 `/git-history`，在页面上下文执行「对全部
       `svg text` 两两求 bbox 交集」的统计，断言**重叠对数 == 0**。取假：改动前同一段脚本实测为 **61**。
-- [ ] AC2 生产载体读数：对同一页面的 `#git-graph-data` JSON 断言「全部 lane 提交的 hash 去重后条数
+- [x] AC2 生产载体读数：对同一页面的 `#git-graph-data` JSON 断言「全部 lane 提交的 hash 去重后条数
       == 总条数」（即无跨 lane 重复认领）。取假：改动前实测 `774 总 / 277 唯一`，重复 497。
-- [ ] AC3 生产载体读数：断言 `branches` 的 `id` 去重后条数 == `branches.length`。取假：改动前 28 条里
+- [x] AC3 生产载体读数：断言 `branches` 的 `id` 去重后条数 == `branches.length`。取假：改动前 28 条里
       有 3 个重复 id。
-- [ ] AC4 判据对生产形状能取假（负控制，回答上文「fixture 恒真」那一条）：新测试构造一个**含跨 lane 重复
+- [x] AC4 判据对生产形状能取假（负控制，回答上文「fixture 恒真」那一条）：新测试构造一个**含跨 lane 重复
       提交**的 fixture（这正是旧 fixture 缺的形状），断言旧式 `rowOf[hash]` 写法在它上面**报红**、新写法报绿。
       两侧都断言。
-- [ ] AC5 空行不变式：断言渲染出的行号集合是 `[0, items.length)` 的**连续**整数且每个行号恰有 ≥1 个元素占用
+- [x] AC5 空行不变式：断言渲染出的行号集合是 `[0, items.length)` 的**连续**整数且每个行号恰有 ≥1 个元素占用
       （无被覆盖产生的空行），断言失败时打印空行号清单而非布尔。
-- [ ] AC6 `bash scripts/test.sh --for-task gap-git-graph-row-key-collides-on-multiclaimed-commits` 退出码 0。
+- [x] AC6 `bash scripts/test.sh --for-task gap-git-graph-row-key-collides-on-multiclaimed-commits` 退出码 0。
 
 ## Definition of Done
 
