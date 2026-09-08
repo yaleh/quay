@@ -8,32 +8,32 @@ parent: null
 children: []
 extra:
   schema: execution
-  needs_human_reason: '负控制（Plan 步骤1）FAILED——after.dead 的 82 名混入仍在生产使用的活脚本，直接执行会打破
-    scripts/test.sh 本身与全量 suite（AC5 结构上不可能绿）。① suite-slot-lib.sh（在 82 内）是 bash 侧
-    suite 槽路径单一定义点，scripts/test.sh:465 每轮 source
-    "${repo_root}/plugin/scripts/suite-slot-lib.sh"，并被 suite-driver.ts /
-    worker-driver.ts / full-suite-runner.ts / suite-slot-ssot-check.ts /
-    suite-lock-slots.ts 及 8+ 活测试（suite-slot-ssot-check.test.mjs /
-    suite-driver.test.mjs / worker-driver.test.mjs / resource-gate.test.mjs
-    …）直接引用；§12e 闭包只认 node|bash|sh|tsx 调用形式、漏认 bash source/.
-    内建形式——正是它被误判死的根因，移走它下一次 suite 直接 source 失败。②
-    plugin/test/plugin-packaging.test.mjs（@test-group product，默认 suite 必跑）钉住 10
-    个脚本存在性：DIR-070-B asserts
-    anti-gaming-guard.ts/sh、loadbearing-test-gate.ts/sh、drivable-workspace-check.sh，DIR-070-C
-    asserts
-    audit-independence-check.ts/sh、vmeta-lag-check.ts/sh、it0-enforcement-with-design-check.sh——这
-    10 个全在 82 内，移走即红。③ .quay/config.yml 把 6 个死集脚本注册为 gate（anti-gaming-guard.sh /
-    audit-independence-check.sh / drivable-workspace-check.sh /
-    loadbearing-test-gate.sh / vmeta-lag-check.sh /
-    build-evidence-gate.ts），移走留悬空 script: 路径。④ 不对称信号：drivable-workspace-check.sh
-    与 it0-enforcement-with-design-check.sh 在 82、其委托的 .ts 模块不在 82——wrapper
-    没了模块入口也断。归属：这是【名单面】死集重算缺陷（§12e 闭包漏认 source/. 内建 + 未把活测试钉存在性/config gate
-    注册计入连带面），非本【执行】任务缺陷。建议：闭包补 source/. 识别后重算，至少摘出 suite-slot-lib.sh + DIR-070
-    gate 脚本族，并先决 plugin-packaging.test.mjs / .quay/config.yml /
-    capability-catalog.sh 的连带清理，再重新派发本批次。未做任何 move、worktree 干净无提交。'
+  needs_human_reason: "【2026-09-08 更新，第三轮同形；⛔ 不要因
+    gap-dead-set-closure-misses-four-reference-kinds 落地就解锁】该任务已把死集 82→31 且其自身闸打印
+    `PASS … none in dead set (after=31)`，但 31 名单仍混入至少 7 个活脚本，其中 4 个由
+    scripts/test.sh 每轮亲自执行 —— 按此名单 git mv 会当场打断 suite（AC5 结构上不可能绿）：①
+    overhead-instrument.sh ← scripts/test.sh:951 source；②
+    run-namespace-sweep-kill.mjs ← scripts/test.sh:1126/1280/1646 node；③
+    state-worded-clause-check.ts ← scripts/test.sh:313 run_checker +
+    checker-mutation-cases fixture；④ refresh-worktree-quay.sh ←
+    scripts/test.sh:209 bash；⑤ send-to-session.ts ← driver-runtime.ts:449
+    path.join+spawn；⑥ tmux-session.ts ← plugin/test/helpers/hermetic-tmux.mjs:21
+    真 import（6+ 活测试经此）；⑦ tmux-test-isolation-check.ts ← checker-mutation-cases
+    fixture。已证实根因之一（带对照）：maskComments 把 scripts/test.sh:792 非注释代码行 `local
+    glob=(packages/*/test/*.test.mjs …)` 的 `/*` 当块注释起点，吞掉其后全部内容（:222/:270/:465
+    掩码后存活，:951 被抹白；同一正则对未掩码原文跑四条全中）；另外 5 个属独立缺口，不由它解释。归属仍是【名单面】，非本【执行】任务缺陷。人
+    2026-09-08 裁定改判定范式：停止补正则，收集器改文本 fail-closed，并以『临时 worktree 全量 git mv + 跑真
+    suite』的移除证明作为前移判据 —— 已立案
+    gap-dead-set-judgment-fail-closed-text-and-removal-proof 并置为本任务 depends_on。⛔
+    解锁前提（两条都要）：① 该任务 done；② 其产物 docs/analysis/dead-set-removal-proof.json 的
+    suiteVerdict=green 且 candidates 与当轮 after.dead 逐名一致。⚠️
+    解锁时本任务体须整体重写：Proposal/Plan/AC/DoD 通篇硬编码 82、且 ## Touches 逐条列了 82 脚本 + 46 测试
+    —— 名单改变后不重写会因 Touches 过度声明拉起 repo ratchet。另：capability-catalog.sh
+    声明了全部候选脚本，移动须 quay-init-closure-ratchet --reanchor 并把 baseline 计入
+    Touches。未做任何 move、worktree 干净无提交。"
 goal_ac: AC-158
 depends_on:
-  - gap-dead-set-closure-misses-four-reference-kinds
+  - gap-dead-set-judgment-fail-closed-text-and-removal-proof
 ---
 ## Proposal
 
