@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFileSync, readdirSync, openSync, readSync, closeSync, statSync } from "node:fs";
 import path from "node:path";
 import { readTests, type TestsResult, type TestRunRecord } from "./observation.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2, obsNote } from "./serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2, obsNote, DEFAULT_PAGE_SIZE } from "./serve-render.ts";
 
 // ── /tests load curve — server-rendered SVG of the suite-load timeseries (gap-test-detail-load-timeseries) ──
 //
@@ -426,6 +426,16 @@ function bucketLabel(canonical: string): string {
 }
 
 /**
+ * gap-webui-tests-page-unpaginated-tables — a full-suite timeline is hundreds of 14px bars (measured
+ * 119,381 bytes of SVG for 288 files), which dominates /tests's default response the same way the two
+ * unpaginated tables did. Cap the PLOTTED bars to the SLOWEST TIMELINE_MAX_BARS files (a gantt of
+ * hundreds of bars is unreadable, and slow files are what a reader investigates), then re-sort
+ * chronologically for display. The cap touches the chart only — the complete list still lives in the
+ * perFile table below (now paginated).
+ */
+const TIMELINE_MAX_BARS = 50;
+
+/**
  * gap-test-detail-timeline AC2 — render the per-file timeline (one horizontal bar per file, positioned
  * by its start/end epoch-ms) as a pure, dependency-free server-rendered SVG string. Sorted by start
  * time ASC (a chronological timeline, distinct from the duration table's DESC). Only files carrying
@@ -437,8 +447,15 @@ export function renderPerFileTimelineSvg(
   root?: string | null,
 ): string {
   if (!perFile || perFile.length === 0) return "";
-  const rows = perFile.filter(hasTimestamps).sort((a, b) => a.startedAtMs - b.startedAtMs);
-  if (rows.length === 0) return "";
+  const timed = perFile.filter(hasTimestamps);
+  if (timed.length === 0) return "";
+  // Select the SLOWEST TIMELINE_MAX_BARS files (duration DESC) — never mutate the caller's array — then
+  // re-sort chronologically (start-time ASC) for the actual plot, preserving the timeline's contract.
+  const rows = timed
+    .slice()
+    .sort((a, b) => b.durationMs - a.durationMs)
+    .slice(0, TIMELINE_MAX_BARS)
+    .sort((a, b) => a.startedAtMs - b.startedAtMs);
 
   // gap-webui-bucket-color-distinction AC2 — attribute each file to its bucket set (read once from the
   // dispatch-written single-truth-source artifact) so bars are HUE-coloured by bucket, not pass/fail.
@@ -516,8 +533,88 @@ export function renderPerFileTimelineSvg(
 ${xTicks.join("\n")}
 ${bars}
 ${legend}
-<text class="git-svg-ink" x="${M.left}" y="${(M.top - 6).toFixed(1)}" font-size="11">测试时间线（每文件起止时刻 · 按开始时刻升序 · 按 bucket 着色）</text>
+<text class="git-svg-ink" x="${M.left}" y="${(M.top - 6).toFixed(1)}" font-size="11">测试时间线（每文件起止时刻 · 按开始时刻升序 · 按 bucket 着色${timed.length > TIMELINE_MAX_BARS ? ` · 仅显示最慢 ${TIMELINE_MAX_BARS} / ${timed.length} 个文件` : ""}）</text>
 </svg>`;
+}
+
+// ── gap-webui-tests-page-unpaginated-tables — server-side pagination for the two /tests tables ──
+//
+// The two list tables on /tests (历史运行 history + perFile 耗时明细) previously flattened EVERY row
+// (1267 + 571 → a 665,105-byte page, 114,161 px tall). The pagination primitives already existed in
+// serve-render.ts (DEFAULT_PAGE_SIZE, consumed by /tasks via buildHref and /board via
+// buildBoardHref) but were never wired here — the 硬规则 5b instance: gap-webui-board-no-pagination
+// built the mechanism correctly and wired exactly ONE page. This wires BOTH tables to the SAME
+// server-side slice: history keys off ?page / ?pageSize, perFile off ?perFilePage / ?perFilePageSize
+// (separate namespaces so the two independent datasets paginate independently). Zero client JS —
+// plain <a href> links, the same as /board and /tasks.
+
+/** One table's pagination state, with `page` already clamped to [1, totalPages]. */
+interface PagingState {
+  page: number;
+  totalPages: number;
+  totalRows: number;
+  pageSize: number;
+  pageSizeInvalid: boolean;
+}
+
+/** The full /tests query state carried through every pagination link (focus round + both tables). */
+interface TestsQueryState {
+  round: number | null;
+  page: number;
+  pageSize: number;
+  perFilePage: number;
+  perFilePageSize: number;
+}
+
+/** Build a /tests href preserving the focus round + both tables' pagination, overriding the given fields. */
+export function buildTestsHref(q: TestsQueryState): string {
+  const params = new URLSearchParams();
+  if (q.round != null) params.set("round", String(q.round));
+  if (q.page > 1) params.set("page", String(q.page));
+  if (q.pageSize !== DEFAULT_PAGE_SIZE) params.set("pageSize", String(q.pageSize));
+  if (q.perFilePage > 1) params.set("perFilePage", String(q.perFilePage));
+  if (q.perFilePageSize !== DEFAULT_PAGE_SIZE) params.set("perFilePageSize", String(q.perFilePageSize));
+  const qs = params.toString();
+  return qs ? `/tests?${qs}` : "/tests";
+}
+
+/**
+ * The shared "Page size: 20 50 100 250" + "Page N of M (N rows)" + « Previous / Next » nav, mirroring
+ * /board (gap-webui-board-no-pagination). `href(pg, size)` builds the link in the owning table's param
+ * namespace (history → page/pageSize; perFile → perFilePage/perFilePageSize); a null `pg` means "reset
+ * to page 1" (the page-size links drop the page param). Pure — no DOM, no client JS.
+ */
+function renderPagingNav(paging: PagingState, href: (pg: number | null, size: number) => string): string {
+  const options = [20, 50, 100, 250];
+  const sizeNav = html`<p class="meta">Page size:
+    ${options.map((sz) => sz === paging.pageSize
+      ? html`<strong>${sz}</strong>`
+      : html`<a href="${href(null, sz)}">${sz}</a>`).join(" ")}
+    ${paging.pageSizeInvalid ? html`<span class="error-banner" role="alert" style="display:inline;margin-left:0.5rem">Invalid pageSize value ignored; showing default (${DEFAULT_PAGE_SIZE}).</span>` : ""}
+  </p>`;
+  const pageNav = paging.totalPages > 1
+    ? html`<p class="meta">
+        ${paging.page > 1
+          ? html`<a href="${href(paging.page - 1, paging.pageSize)}">&laquo; Previous</a>`
+          : html`<span class="page-nav-disabled">&laquo; Previous</span>`}
+        &nbsp; Page ${paging.page} of ${paging.totalPages} (${paging.totalRows} rows) &nbsp;
+        ${paging.page < paging.totalPages
+          ? html`<a href="${href(paging.page + 1, paging.pageSize)}">Next &raquo;</a>`
+          : html`<span class="page-nav-disabled">Next &raquo;</span>`}
+      </p>`
+    : html`<p class="meta">Page 1 of ${paging.totalPages} (${paging.totalRows} rows)</p>`;
+  return sizeNav + pageNav;
+}
+
+/** The raw (unclamped) /tests pagination request values, parsed in handleTests. Optional so direct
+ *  renderTestsPage callers render a single default page (never a crash, same as renderBoardPage). */
+interface TestsPagingOpts {
+  page?: number;
+  pageSize?: number;
+  pageSizeInvalid?: boolean;
+  perFilePage?: number;
+  perFilePageSize?: number;
+  perFilePageSizeInvalid?: boolean;
 }
 
 function renderTestsPage(
@@ -526,6 +623,7 @@ function renderTestsPage(
   samples: SuiteLoadSample[] = [],
   selected: TestRunRecord | null = null,
   roundRequested: number | null = null,
+  opts: TestsPagingOpts = {},
 ): string {
   const latest = tests.runs[0] ?? null;
   // gap-webui-round-detail-page — `selected` is the round the page focuses on when /tests?round=N
@@ -554,8 +652,18 @@ function renderTestsPage(
   const notFoundNote = roundRequested != null && focus == null
     ? html`<p class="meta" style="margin:0.75rem 0;color:var(--color-accent-800);font-weight:600">未找到 round #${escapeHtml(String(roundRequested))} — 验证轮记录中无该轮次，以下显示最新一轮。</p>`
     : "";
-  const historyRows = tests.runs.map((r, i) => html`<tr>
-    <td>${r.round != null ? html`<a href="/tests?round=${r.round}">#${escapeHtml(String(r.round))}</a>${i === 0 ? ` <span style="color:var(--color-neutral-700);font-weight:600">← 最新</span>` : ""}` : "—"}</td>
+  // gap-webui-tests-page-unpaginated-tables — slice the history table server-side (default 20 rows).
+  // The slice is a window into tests.runs (newest-first); the « ← 最新 » marker keys off the GLOBAL
+  // index (historyOffset + i === 0) so page 2's first row is never mislabeled "最新".
+  const historyPageSize = opts.pageSize ?? DEFAULT_PAGE_SIZE;
+  const historyPageSizeInvalid = opts.pageSizeInvalid ?? false;
+  const historyTotalRows = tests.runs.length;
+  const historyTotalPages = Math.max(1, Math.ceil(historyTotalRows / historyPageSize));
+  const historyPage = Math.min(Math.max(1, opts.page ?? 1), historyTotalPages);
+  const historyOffset = (historyPage - 1) * historyPageSize;
+  const historySlice = tests.runs.slice(historyOffset, historyOffset + historyPageSize);
+  const historyRows = historySlice.map((r, i) => html`<tr>
+    <td>${r.round != null ? html`<a href="/tests?round=${r.round}">#${escapeHtml(String(r.round))}</a>${historyOffset + i === 0 ? ` <span style="color:var(--color-neutral-700);font-weight:600">← 最新</span>` : ""}` : "—"}</td>
     <td>${r.startedAt ? escapeHtml(r.startedAt) : "—"}</td>
     <td class="${runStatusClass(r.state)}" style="font-weight:700">${escapeHtml(r.state ?? "—")}</td>
     <td>${r.pass ?? "—"}/${r.fail ?? "—"}/${r.cancelled ?? "—"}</td>
@@ -587,7 +695,18 @@ function renderTestsPage(
   const perFileRun = focus
     ? (focus.perFile && focus.perFile.length > 0 ? focus : null)
     : tests.runs.find((r) => r.perFile && r.perFile.length > 0);
-  const perFileTable = perFileRun ? renderPerFileTable(perFileRun.perFile) : "";
+  // gap-webui-tests-page-unpaginated-tables — slice the perFile table server-side (default 20 rows),
+  // its OWN namespace (?perFilePage / ?perFilePageSize) so it paginates independently of the history
+  // table. The timeline SVG (a chart, not a list table) is bounded separately — TIMELINE_MAX_BARS in
+  // renderPerFileTimelineSvg — because AC5's byte budget can't be met by table slicing alone.
+  const perFilePageSize = opts.perFilePageSize ?? DEFAULT_PAGE_SIZE;
+  const perFilePageSizeInvalid = opts.perFilePageSizeInvalid ?? false;
+  const perFileTotalRows = perFileRun ? perFileRun.perFile.length : 0;
+  const perFileTotalPages = Math.max(1, Math.ceil(perFileTotalRows / perFilePageSize));
+  const perFilePage = Math.min(Math.max(1, opts.perFilePage ?? 1), perFileTotalPages);
+  const perFileOffset = (perFilePage - 1) * perFilePageSize;
+  const perFileSlice = perFileRun ? perFileRun.perFile.slice(perFileOffset, perFileOffset + perFilePageSize) : null;
+  const perFileTable = perFileSlice && perFileSlice.length > 0 ? renderPerFileTable(perFileSlice) : "";
   // gap-test-detail-timeline AC2 — render the per-file timeline (gantt) for that same run. The chart
   // omits itself (⇒ "") when the run's perFile entries carry no timestamps (legacy/absent field).
   const perFileTimelineSvg = perFileRun ? renderPerFileTimelineSvg(perFileRun.perFile, root) : "";
@@ -603,9 +722,23 @@ function renderTestsPage(
         <p class="meta">数据源：<code>.quay/verification-round.jsonl</code> perFile 起止时刻（reporter 结束时刻 + duration 反推起始）</p>
         ${perFileTimelineSvg}`
     : "";
+  // gap-webui-tests-page-unpaginated-tables — the two pagination navs (each preserving the focus round
+  // AND the OTHER table's page so cross-table state never resets on a single-table navigation).
+  const historyNav = tests.runs.length > 0
+    ? renderPagingNav(
+        { page: historyPage, totalPages: historyTotalPages, totalRows: historyTotalRows, pageSize: historyPageSize, pageSizeInvalid: historyPageSizeInvalid },
+        (pg, sz) => buildTestsHref({ round: roundRequested, page: pg ?? 1, pageSize: sz, perFilePage, perFilePageSize }),
+      )
+    : "";
+  const perFileNav = perFileTable
+    ? renderPagingNav(
+        { page: perFilePage, totalPages: perFileTotalPages, totalRows: perFileTotalRows, pageSize: perFilePageSize, pageSizeInvalid: perFilePageSizeInvalid },
+        (pg, sz) => buildTestsHref({ round: roundRequested, page: historyPage, pageSize: historyPageSize, perFilePage: pg ?? 1, perFilePageSize: sz }),
+      )
+    : "";
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay tests — verification rounds">${modernistStyles()}${pageStyles()}<title>Tests — 验证轮记录</title></head>
-    <body>${renderMobileChrome("tests", "tests")}${renderSiteNav("tests")}<main>
+    <body>${renderMobileChrome("tests", "tests")}${renderSiteNav("tests")}<main id="main">
       <h1>Tests — 验证轮记录</h1>
       <p class="meta">数据源：<code>.quay/verification-round.jsonl</code>（每轮 suite 完成时追加，红绿皆入账）</p>
       ${obsNote(tests.status, tests.reason)}
@@ -615,12 +748,14 @@ function renderTestsPage(
       ${loadCurve}
       ${perFileTimeline}
       ${tests.runs.length > 0 ? html`<h2>历史运行（新→旧）</h2>
+      ${historyNav}
       <table>
         <tr><th>round</th><th>startedAt</th><th>state</th><th>pass/fail/cancel</th><th>duration</th><th>scope</th><th>buckets</th><th>commit</th></tr>
         ${historyRows}
       </table>` : ""}
       ${failureDetails}
       ${perFileTable}
+      ${perFileNav}
     </main></body></html>`;
 }
 
@@ -655,8 +790,24 @@ export async function handleTests(
     const latest = tests.runs[0] ?? null;
     return resolveSuiteLoadSamples(cfg.workspaceRoot, latest?.runId, roundTimeWindowMs(latest));
   })();
+  // gap-webui-tests-page-unpaginated-tables — parse the two pagination namespaces (?page / ?pageSize for
+  // history, ?perFilePage / ?perFilePageSize for perFile), mirroring /board's QW-007 pattern: 1-based
+  // page (default 1), pageSize (default DEFAULT_PAGE_SIZE); invalid values fall back to defaults with a
+  // visible "invalid value ignored" note (never a 500, never a silently-wrong page).
+  const pageParam = parseInt(url.searchParams.get("page") || "1", 10);
+  const page = Number.isFinite(pageParam) && pageParam >= 1 ? pageParam : 1;
+  const pageSizeParam = parseInt(url.searchParams.get("pageSize") || "", 10);
+  const pageSizeInvalid = url.searchParams.has("pageSize") && (!Number.isFinite(pageSizeParam) || pageSizeParam < 1);
+  const pageSize = Number.isFinite(pageSizeParam) && pageSizeParam >= 1 ? pageSizeParam : DEFAULT_PAGE_SIZE;
+  const perFilePageParam = parseInt(url.searchParams.get("perFilePage") || "1", 10);
+  const perFilePage = Number.isFinite(perFilePageParam) && perFilePageParam >= 1 ? perFilePageParam : 1;
+  const perFilePageSizeParam = parseInt(url.searchParams.get("perFilePageSize") || "", 10);
+  const perFilePageSizeInvalid = url.searchParams.has("perFilePageSize") && (!Number.isFinite(perFilePageSizeParam) || perFilePageSizeParam < 1);
+  const perFilePageSize = Number.isFinite(perFilePageSizeParam) && perFilePageSizeParam >= 1 ? perFilePageSizeParam : DEFAULT_PAGE_SIZE;
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderTestsPage(tests, cfg.workspaceRoot, samples, selected, roundNum));
+  res.end(renderTestsPage(tests, cfg.workspaceRoot, samples, selected, roundNum, {
+    page, pageSize, pageSizeInvalid, perFilePage, perFilePageSize, perFilePageSizeInvalid,
+  }));
 }
 
 // ── /tests/file — single-file cross-round detail page (gap-webui-test-file-detail-page) ──────────
@@ -824,7 +975,7 @@ function renderFileDetailPage(
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay test file — single-file cross-round history">${modernistStyles()}${pageStyles()}<title>Test file — ${escapeHtml(filePath)}</title></head>
-    <body>${renderMobileChrome("tests", "tests")}${renderSiteNav("tests")}<main>
+    <body>${renderMobileChrome("tests", "tests")}${renderSiteNav("tests")}<main id="main">
       <h1>测试文件 — <code>${escapeHtml(filePath)}</code></h1>
       <p class="meta"><a href="/tests">← 返回 Tests</a></p>
       ${obsNote(tests.status, tests.reason)}
