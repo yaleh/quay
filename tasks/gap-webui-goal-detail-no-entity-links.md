@@ -3,7 +3,7 @@ id: gap-webui-goal-detail-no-entity-links
 title: goal 详情页只渲染 body markdown、不渲染实体关系 ⇒ main 内链接数为 0；反向边（GOAL→AC）在存储里根本不存在（AC
   单向持 goal 字段、GOAL 无 children），而详情页唯一的 ABI 调用 goalGet 返回的 view-model 里没有装 AC 的位置
   —— 结构上不可能显示
-status: ready
+status: done
 labels:
   - gap
   - webui

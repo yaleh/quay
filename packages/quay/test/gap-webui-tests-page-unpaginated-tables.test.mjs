@@ -215,6 +215,7 @@ test("AC4: enumerate every <table> in serve-*.ts and annotate it — no unannota
     ["packages/quay/src/serve-task.ts", 482, "已接分页（QW-007 buildHref，?page/?pageSize）"],
     ["packages/quay/src/serve-task.ts", 579, "无需分页（上界=单个任务的 run 台账记录数）"],
     ["packages/quay/src/serve-goal.ts", 110, "无需分页（上界=goals/ 人工维护 goal 数）"],
+    ["packages/quay/src/serve-goal.ts", 173, "无需分页（上界=单个 goal 名下 criterion 数，gap-webui-goal-detail-no-entity-links 的详情页 criterion 区块）"],
     ["packages/quay/src/serve-tests.ts", 319, "已接分页（本任务，?perFilePage/?perFilePageSize）"],
     ["packages/quay/src/serve-tests.ts", 752, "已接分页（本任务，?page/?pageSize）"],
     ["packages/quay/src/serve-tests.ts", 917, "待接（/tests/file 单文件跨轮历史，一行/轮，无上界）"],
