@@ -54,6 +54,11 @@ function gitRepo(tag = "commit") {
   return { root: dir, run };
 }
 
+// gap-goal-record-completeness-undefined: a GOAL's body is required (≥40 non-whitespace chars)
+// and a criterion's content lives in criterion+expect — these keep every fixture write complete.
+const GOAL_BODY = "goal body: background, scope, non-goals and exit conditions — long enough to satisfy the 40-char minimum";
+const EXPECT = "the expected outcome this criterion proves";
+
 // ── AC1: reuses frontmatter-store-base (read the import, never a copy) ────────────────────────────
 test("AC1 — goal-store imports parse/serialize/lock/filename from frontmatter-store-base", () => {
   const src = fs.readFileSync(new URL("../src/goal-store.ts", import.meta.url), "utf8");
@@ -73,9 +78,9 @@ test("AC9 — ids are GOAL-NNN / AC-NNN (pure sequence); kind derived from the p
   assert.ok(!isGoalId("AC-028"));
   assert.ok(!isGoalId("PHASE-001"), "PHASE-NNN was renamed to GOAL-NNN by SPEC §2");
   const s = createGoalStore(tmpDir("ac9"));
-  const p = s.write("GOAL-001", { title: "three-layer unification", status: "active", origin: "o" });
+  const p = s.write("GOAL-001", { title: "three-layer unification", status: "active", origin: "o", body: GOAL_BODY });
   assert.equal(p.kind, "goal");
-  const a = s.write("AC-028", { title: "experience flows", status: "active", goal: "GOAL-001", criterion: "true", origin: "o" });
+  const a = s.write("AC-028", { title: "experience flows", status: "active", goal: "GOAL-001", criterion: "true", origin: "o", expect: EXPECT });
   assert.equal(a.kind, "criterion");
   assert.equal(a.goal, "GOAL-001");
   assert.equal(a.criterion, "true");
@@ -100,8 +105,8 @@ test("AC6 — writing a record without a non-empty origin is rejected", () => {
 
 test("AC6 — an existing origin survives a later write that omits it; blanking it is rejected", () => {
   const s = createGoalStore(tmpDir("ac6b"));
-  s.write("GOAL-001", { title: "p", status: "active", origin: "2026-08-09 human goal setting" });
-  s.write("GOAL-001", { title: "p renamed", status: "active" }); // omit origin → kept
+  s.write("GOAL-001", { title: "p", status: "active", origin: "2026-08-09 human goal setting", body: GOAL_BODY });
+  s.write("GOAL-001", { title: "p renamed", status: "active", body: GOAL_BODY }); // omit origin → kept
   assert.equal(s.get("GOAL-001").origin, "2026-08-09 human goal setting");
   assert.equal(s.get("GOAL-001").title, "p renamed");
   assert.throws(() => s.write("GOAL-001", { title: "p", status: "active", origin: "" }), /origin is required/);
@@ -110,34 +115,34 @@ test("AC6 — an existing origin survives a later write that omits it; blanking 
 // ── AC4: active set DERIVED from goal status (change the goal, the set follows) ──────────────────
 test("AC4 — listActiveCriteria() derives the active set from goal status, not a hand-maintained checklist", () => {
   const s = createGoalStore(tmpDir("ac4"));
-  s.write("GOAL-010", { title: "p10", status: "active", origin: "o1" });
-  s.write("AC-010", { title: "a1", status: "active", goal: "GOAL-010", criterion: "true", origin: "o2" });
-  s.write("AC-011", { title: "a2", status: "active", goal: "GOAL-010", criterion: "true", origin: "o3" });
+  s.write("GOAL-010", { title: "p10", status: "active", origin: "o1", body: GOAL_BODY });
+  s.write("AC-010", { title: "a1", status: "active", goal: "GOAL-010", criterion: "true", origin: "o2", expect: EXPECT });
+  s.write("AC-011", { title: "a2", status: "active", goal: "GOAL-010", criterion: "true", origin: "o3", expect: EXPECT });
   assert.deepEqual(s.listActiveCriteria().map((g) => g.id), ["AC-010", "AC-011"]);
 
   // Switch the goal (I1 with disposition) → the ACTIVE SET follows automatically.
-  s.write("GOAL-011", { title: "p11", status: "active", origin: "o4", supersedes: ["GOAL-010"] });
+  s.write("GOAL-011", { title: "p11", status: "active", origin: "o4", supersedes: ["GOAL-010"], body: GOAL_BODY });
   assert.deepEqual(s.listActiveCriteria().map((g) => g.id), [], "goal switched → old ACs leave the active set");
-  s.write("AC-012", { title: "a3", status: "active", goal: "GOAL-011", criterion: "true", origin: "o5" });
+  s.write("AC-012", { title: "a3", status: "active", goal: "GOAL-011", criterion: "true", origin: "o5", expect: EXPECT });
   assert.deepEqual(s.listActiveCriteria().map((g) => g.id), ["AC-012"], "new goal's AC enters the active set");
 });
 
 // ── AC10: I1′ hard cap (SPEC §4.1) ──────────────────────────────────────────────────────────────
 test("AC10 — under the default cap (3), a second and third active GOAL are allowed; a fourth is rejected", () => {
   const s = createGoalStore(tmpDir("ac10a"));
-  s.write("GOAL-001", { title: "p1", status: "active", origin: "o" });
-  s.write("GOAL-002", { title: "p2", status: "active", origin: "o" });
-  s.write("GOAL-003", { title: "p3", status: "active", origin: "o" });
+  s.write("GOAL-001", { title: "p1", status: "active", origin: "o", body: GOAL_BODY });
+  s.write("GOAL-002", { title: "p2", status: "active", origin: "o", body: GOAL_BODY });
+  s.write("GOAL-003", { title: "p3", status: "active", origin: "o", body: GOAL_BODY });
   assert.throws(
-    () => s.write("GOAL-004", { title: "p4", status: "active", origin: "o" }),
+    () => s.write("GOAL-004", { title: "p4", status: "active", origin: "o", body: GOAL_BODY }),
     /exceed cap 3/
   );
 });
 
 test("AC10 — the SAME call may dispose the old goal (achieved) and activate the new one", () => {
   const s = createGoalStore(tmpDir("ac10b"));
-  s.write("GOAL-001", { title: "p1", status: "active", origin: "o" });
-  s.write("GOAL-002", { title: "p2", status: "active", origin: "o", disposeOld: { id: "GOAL-001", to: "achieved" } });
+  s.write("GOAL-001", { title: "p1", status: "active", origin: "o", body: GOAL_BODY });
+  s.write("GOAL-002", { title: "p2", status: "active", origin: "o", disposeOld: { id: "GOAL-001", to: "achieved" }, body: GOAL_BODY });
   assert.equal(s.get("GOAL-001").status, "achieved");
   assert.equal(s.get("GOAL-002").status, "active");
   assert.deepEqual(s.activeGoals().map((p) => p.id), ["GOAL-002"]);
@@ -145,8 +150,8 @@ test("AC10 — the SAME call may dispose the old goal (achieved) and activate th
 
 test("AC10 — supersedes:[oldId] in the same call atomically supersedes the old goal", () => {
   const s = createGoalStore(tmpDir("ac10c"));
-  s.write("GOAL-001", { title: "p1", status: "active", origin: "o" });
-  s.write("GOAL-002", { title: "p2", status: "active", origin: "o", supersedes: ["GOAL-001"] });
+  s.write("GOAL-001", { title: "p1", status: "active", origin: "o", body: GOAL_BODY });
+  s.write("GOAL-002", { title: "p2", status: "active", origin: "o", supersedes: ["GOAL-001"], body: GOAL_BODY });
   assert.equal(s.get("GOAL-001").status, "superseded");
   assert.deepEqual(s.get("GOAL-001").supersededBy, ["GOAL-002"]);
 });
@@ -154,9 +159,9 @@ test("AC10 — supersedes:[oldId] in the same call atomically supersedes the old
 // ── AC11: I2 derived (never stored) + checkWithinCap checker ─────────────────────────────────────
 test("AC11 — isGoalAchieved is DERIVED: goal achieved ⟺ all its ACs achieved", () => {
   const s = createGoalStore(tmpDir("ac11"));
-  s.write("GOAL-010", { title: "p10", status: "active", origin: "o" });
-  s.write("AC-010", { title: "a1", status: "active", goal: "GOAL-010", criterion: "true", origin: "o" });
-  s.write("AC-011", { title: "a2", status: "active", goal: "GOAL-010", criterion: "true", origin: "o" });
+  s.write("GOAL-010", { title: "p10", status: "active", origin: "o", body: GOAL_BODY });
+  s.write("AC-010", { title: "a1", status: "active", goal: "GOAL-010", criterion: "true", origin: "o", expect: EXPECT });
+  s.write("AC-011", { title: "a2", status: "active", goal: "GOAL-010", criterion: "true", origin: "o", expect: EXPECT });
   assert.equal(s.isGoalAchieved("GOAL-010"), false, "not all ACs achieved");
   s.write("AC-010", { status: "achieved", origin: "o" });
   assert.equal(s.isGoalAchieved("GOAL-010"), false, "still one AC active");
@@ -168,7 +173,7 @@ test("AC11 — isGoalAchieved is DERIVED: goal achieved ⟺ all its ACs achieved
 
 test("AC11 — a goal with zero ACs is not achieved; checkWithinCap splits withinCap from hasDirection", () => {
   const s = createGoalStore(tmpDir("ac11b"));
-  s.write("GOAL-010", { title: "p10", status: "active", origin: "o" });
+  s.write("GOAL-010", { title: "p10", status: "active", origin: "o", body: GOAL_BODY });
   assert.equal(s.isGoalAchieved("GOAL-010"), false, "no ACs → not achieved");
   let chk = s.checkWithinCap();
   assert.equal(chk.withinCap, true);
@@ -176,7 +181,7 @@ test("AC11 — a goal with zero ACs is not achieved; checkWithinCap splits withi
   assert.equal(chk.activeCount, 1);
   assert.equal(chk.cap, 3);
   assert.deepEqual(chk.active, ["GOAL-010"]);
-  s.write("GOAL-011", { title: "p11", status: "active", origin: "o", disposeOld: { id: "GOAL-010", to: "achieved" } });
+  s.write("GOAL-011", { title: "p11", status: "active", origin: "o", disposeOld: { id: "GOAL-010", to: "achieved" }, body: GOAL_BODY });
   chk = s.checkWithinCap();
   assert.equal(chk.withinCap, true);
   assert.equal(chk.activeCount, 1);
@@ -202,15 +207,15 @@ test("write rejects malformed ids (GOAL-1, PHASE-001, path traversal)", () => {
 // ── draft: write() defaults to draft (not active); draft records are absent from the active set ──
 test("draft — write() without an explicit status lands `status: draft` (default NOT active)", () => {
   const s = createGoalStore(tmpDir("draft-default"));
-  const g = s.write("GOAL-001", { title: "unstarted goal", origin: "o" });
+  const g = s.write("GOAL-001", { title: "unstarted goal", origin: "o", body: GOAL_BODY });
   assert.equal(g.status, "draft");
   assert.equal(s.get("GOAL-001").status, "draft");
 });
 
 test("draft — a draft GOAL is absent from activeGoals(); its ACs absent from listActiveCriteria() even when the AC is active", () => {
   const s = createGoalStore(tmpDir("draft-neg"));
-  s.write("GOAL-001", { title: "unstarted goal", origin: "o" }); // defaults to draft
-  s.write("AC-001", { title: "a draft goal's AC", status: "active", goal: "GOAL-001", criterion: "true", origin: "o" });
+  s.write("GOAL-001", { title: "unstarted goal", origin: "o", body: GOAL_BODY }); // defaults to draft
+  s.write("AC-001", { title: "a draft goal's AC", status: "active", goal: "GOAL-001", criterion: "true", origin: "o", expect: EXPECT });
   assert.deepEqual(s.activeGoals().map((g) => g.id), [], "draft GOAL is not active");
   assert.deepEqual(s.listActiveCriteria().map((g) => g.id), [], "activeness derives from the GOAL, not the AC's own status");
 });
@@ -228,10 +233,12 @@ test("AC2 — an AC with an EMPTY criterion fails closed (red), and the CLI reco
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
-  spawnSync("node", ["--experimental-strip-types", cli, ...args(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o"])], { encoding: "utf8" });
-  // AC-020 has NO criterion.
-  const w = spawnSync("node", ["--experimental-strip-types", cli, ...args(["write", "AC-020", "--title", "no-criterion", "--status", "active", "--goal", "GOAL-001", "--origin", "o"])], { encoding: "utf8" });
-  assert.equal(w.status, 0, w.stderr);
+  spawnSync("node", ["--experimental-strip-types", cli, ...args(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY])], { encoding: "utf8" });
+  // AC-020 has NO criterion — now unrepresentable via write() (gap-goal-record-completeness-undefined
+  // requires criterion+expect for criterion records), so hand-write a legacy file to keep the gate’s
+  // fail-closed-on-empty-criterion path tested on a pre-existing record.
+  fs.writeFileSync(path.join(root, "goals", "AC-020-legacy.md"),
+    "---\nid: AC-020\ntitle: no-criterion\nstatus: active\nkind: criterion\ngoal: GOAL-001\norigin: o\n---\n## Rationale\nlegacy\n", "utf8");
   const g = runCli(["gate", "AC-020", "--root", root]);
   assert.equal(g.status, 1, "empty criterion must exit 1 (fail-closed):\n" + g.stdout + g.stderr);
   const out = JSON.parse(g.stdout);
@@ -246,8 +253,8 @@ test("AC3 — a goal gate run leaves a verdict+timestamp event in .quay/gate-eve
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
-  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o"]);
-  n(["write", "AC-028", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o"]);
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  n(["write", "AC-028", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
   const g = runCli(["gate", "AC-028", "--root", root]);
   assert.equal(g.status, 0, "criterion `true` must pass:\n" + g.stdout + g.stderr);
   // The ledger tail event carries BOTH fields (Contract measure goal_store_ac3_gate_event).
@@ -270,7 +277,7 @@ test("goal-store list/get/write round-trip through the CLI (invoke surface)", ()
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
-  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o"]);
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
   const list = JSON.parse(n(["list"]).stdout);
   assert.equal(list.length, 1);
   assert.equal(list[0].id, "GOAL-001");
@@ -302,11 +309,11 @@ test("migration completeness — AC143..AC155 and AC156..AC169 each have exactly
 // is the actionable info a booleanized "over cap" would drop).
 test("AC-3 — cap=2: a 3rd active GOAL is REJECTED and the error names both current holders", () => {
   const s = createGoalStore(tmpDir("ac3-cap"), { cap: 2 });
-  s.write("GOAL-001", { title: "p1", status: "active", origin: "o" });
-  s.write("GOAL-002", { title: "p2", status: "active", origin: "o" });
+  s.write("GOAL-001", { title: "p1", status: "active", origin: "o", body: GOAL_BODY });
+  s.write("GOAL-002", { title: "p2", status: "active", origin: "o", body: GOAL_BODY });
   let caught = null;
   try {
-    s.write("GOAL-003", { title: "p3", status: "active", origin: "o" });
+    s.write("GOAL-003", { title: "p3", status: "active", origin: "o", body: GOAL_BODY });
   } catch (err) {
     caught = err;
   }
@@ -320,7 +327,7 @@ test("AC-3 — cap=2: a 3rd active GOAL is REJECTED and the error names both cur
 // object healthy, hard rule 3b) and never "stale" (a just-created goal is not yet overdue).
 test("AC-4 — a zero-AC GOAL is notEvaluated (never fresh, never stale)", () => {
   const s = createGoalStore(tmpDir("ac4-stale"));
-  s.write("GOAL-001", { title: "bare", status: "active", origin: "o" });
+  s.write("GOAL-001", { title: "bare", status: "active", origin: "o", body: GOAL_BODY });
   const r = s.checkStaleness(Date.now());
   assert.deepEqual(r.fresh, [], "zero-AC must not be fresh");
   assert.deepEqual(r.stale, [], "zero-AC must not be stale");
@@ -337,7 +344,7 @@ test("AC-5 — cap/stale read from .quay/config.yml (change config → check fol
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
-  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o"]);
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
 
   fs.writeFileSync(path.join(root, ".quay", "config.yml"), "goals:\n  cap: 2\n  stale: 3d\n", "utf8");
   let chk = JSON.parse(n(["check"]).stdout);
@@ -354,9 +361,9 @@ test("AC-5 — cap/stale read from .quay/config.yml (change config → check fol
 // reported as `divergent` by checkStaleness.
 test("AC-6 — I4: status=active with all ACs achieved reports divergence", () => {
   const s = createGoalStore(tmpDir("ac6-divergence"));
-  s.write("GOAL-010", { title: "p10", status: "active", origin: "o" });
-  s.write("AC-010", { title: "a1", status: "achieved", goal: "GOAL-010", criterion: "true", origin: "o" });
-  s.write("AC-011", { title: "a2", status: "achieved", goal: "GOAL-010", criterion: "true", origin: "o" });
+  s.write("GOAL-010", { title: "p10", status: "active", origin: "o", body: GOAL_BODY });
+  s.write("AC-010", { title: "a1", status: "achieved", goal: "GOAL-010", criterion: "true", origin: "o", expect: EXPECT });
+  s.write("AC-011", { title: "a2", status: "achieved", goal: "GOAL-010", criterion: "true", origin: "o", expect: EXPECT });
   assert.equal(s.isGoalAchieved("GOAL-010"), true, "all ACs achieved → derived achieved");
   const r = s.checkStaleness(Date.now());
   assert.deepEqual(r.divergent, ["GOAL-010"], "active yet achieved ⇒ divergent (I4)");
@@ -372,9 +379,9 @@ test("AC-6 — I4: status=active with all ACs achieved reports divergence", () =
 
 test("I5 — an achieved AC whose criterion now fails lands in checkAchievedFailing (separate from divergent)", () => {
   const s = createGoalStore(tmpDir("i5-achfail"));
-  s.write("GOAL-010", { title: "p10", status: "active", origin: "o" });
-  s.write("AC-010", { title: "a1", status: "achieved", goal: "GOAL-010", criterion: "true", origin: "o" });
-  s.write("AC-011", { title: "a2", status: "achieved", goal: "GOAL-010", criterion: "false", origin: "o" });
+  s.write("GOAL-010", { title: "p10", status: "active", origin: "o", body: GOAL_BODY });
+  s.write("AC-010", { title: "a1", status: "achieved", goal: "GOAL-010", criterion: "true", origin: "o", expect: EXPECT });
+  s.write("AC-011", { title: "a2", status: "achieved", goal: "GOAL-010", criterion: "false", origin: "o", expect: EXPECT });
   const af = s.checkAchievedFailing();
   assert.deepEqual(af.achievedButFailing, ["AC-011"], "AC-011 criterion `false` exits 1 ⇒ achieved-but-failing");
   assert.equal(af.evaluated, true, "not refused ⇒ evaluated: true");
@@ -388,14 +395,14 @@ test("I5 — an achieved AC whose criterion now fails lands in checkAchievedFail
 
 test("I5 bidirectional — criterion fail→pass moves the AC out of checkAchievedFailing", () => {
   const s = createGoalStore(tmpDir("i5-bidir"));
-  s.write("GOAL-010", { title: "p10", status: "active", origin: "o" });
-  s.write("AC-020", { title: "a1", status: "achieved", goal: "GOAL-010", criterion: "false", origin: "o" });
-  s.write("AC-021", { title: "a2", status: "active", goal: "GOAL-010", criterion: "true", origin: "o" });
+  s.write("GOAL-010", { title: "p10", status: "active", origin: "o", body: GOAL_BODY });
+  s.write("AC-020", { title: "a1", status: "achieved", goal: "GOAL-010", criterion: "false", origin: "o", expect: EXPECT });
+  s.write("AC-021", { title: "a2", status: "active", goal: "GOAL-010", criterion: "true", origin: "o", expect: EXPECT });
   let af = s.checkAchievedFailing();
   assert.deepEqual(af.achievedButFailing, ["AC-020"], "criterion `false` ⇒ in bucket");
   assert.deepEqual(s.checkStaleness(Date.now()).divergent, [], "one AC still active ⇒ not divergent (the two signals are independent)");
   // Flip the criterion to pass ⇒ the AC leaves the bucket (BOTH directions asserted).
-  s.write("AC-020", { status: "achieved", goal: "GOAL-010", criterion: "true", origin: "o" });
+  s.write("AC-020", { status: "achieved", goal: "GOAL-010", criterion: "true", origin: "o", expect: EXPECT });
   af = s.checkAchievedFailing();
   assert.deepEqual(af.achievedButFailing, [], "criterion `true` ⇒ out of bucket");
 });
@@ -407,9 +414,9 @@ test("I5 CLI — check --achieved-failing exits 1 on an achieved-but-failing AC,
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
-  n(["write", "GOAL-010", "--title", "p", "--status", "active", "--origin", "o"]);
-  n(["write", "AC-020", "--title", "achieved-but-failing", "--status", "achieved", "--goal", "GOAL-010", "--criterion", "false", "--origin", "o"]);
-  n(["write", "AC-021", "--title", "still-active", "--status", "active", "--goal", "GOAL-010", "--criterion", "true", "--origin", "o"]);
+  n(["write", "GOAL-010", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  n(["write", "AC-020", "--title", "achieved-but-failing", "--status", "achieved", "--goal", "GOAL-010", "--criterion", "false", "--origin", "o", "--expect", EXPECT]);
+  n(["write", "AC-021", "--title", "still-active", "--status", "active", "--goal", "GOAL-010", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
 
   const chk = n(["check", "--achieved-failing"]);
   assert.equal(chk.status, 1, "an achieved-but-failing AC must make check --achieved-failing exit 1 (old code exited 0 = false-green):\n" + chk.stdout + chk.stderr);
@@ -417,7 +424,7 @@ test("I5 CLI — check --achieved-failing exits 1 on an achieved-but-failing AC,
   assert.deepEqual(out.achievedButFailing, ["AC-020"], "the achieved+failing AC is enumerated by id");
 
   // Flip the failing criterion to pass ⇒ bucket empty ⇒ exit 0.
-  n(["write", "AC-020", "--status", "achieved", "--goal", "GOAL-010", "--criterion", "true", "--origin", "o"]);
+  n(["write", "AC-020", "--status", "achieved", "--goal", "GOAL-010", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
   const chk2 = n(["check", "--achieved-failing"]);
   assert.equal(chk2.status, 0, "no achieved-but-failing ⇒ exit 0:\n" + chk2.stdout + chk2.stderr);
   assert.deepEqual(JSON.parse(chk2.stdout).achievedButFailing, []);
@@ -461,8 +468,8 @@ test("AC1 — gate 不写 evidence：两次 gate 后该文件提交数不变（�
   const { root, run } = gitRepo("ac1");
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
-  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o"]);
-  n(["write", "AC-028", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o"]);
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  n(["write", "AC-028", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
   // The file's commits come from `write` (creation), NEVER from gate — evidence is no longer stored.
   const before = acFileCommitCount(root, run, "AC-028");
   assert.ok(before >= 1, "write must commit the new file (write 提交，⛔ 非 gate)");
@@ -480,9 +487,9 @@ test("AC2 — verdict 真变化也不提交：fail→pass 后该文件提交数�
   const { root, run } = gitRepo("ac2");
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
-  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o"]);
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
   // Criterion reads a flag file: absent → fail; present → pass. Deterministic flip.
-  n(["write", "AC-029", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "test -f passflag", "--origin", "o"]);
+  n(["write", "AC-029", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "test -f passflag", "--origin", "o", "--expect", EXPECT]);
   const before = acFileCommitCount(root, run, "AC-029");
   const g1 = n(["gate", "AC-029"]);
   assert.equal(g1.status, 1, "flag absent must fail");
@@ -498,8 +505,8 @@ test("AC3 — 状态翻转仍然提交：active→achieved 的 flip 后必有提
   const { root, run } = gitRepo("ac3");
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
-  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o"]);
-  n(["write", "AC-030", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o"]);
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  n(["write", "AC-030", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
   const before = acFileCommitCount(root, run, "AC-030");
   const w = n(["write", "AC-030", "--status", "achieved", "--origin", "o"]);
   assert.equal(w.status, 0, w.stderr);
@@ -511,8 +518,8 @@ test("AC4 — N 次 gate（含 1 次 verdict flip）⇒ 恰 0 个提交：gate �
   const { root, run } = gitRepo("ac4");
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
-  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o"]);
-  n(["write", "AC-031", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "test -f passflag", "--origin", "o"]);
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  n(["write", "AC-031", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "test -f passflag", "--origin", "o", "--expect", EXPECT]);
   // Simulate the 42s cadence burst: one first fail gate + 3 no-change fail gates, then a flip.
   const g1 = n(["gate", "AC-031"]);
   assert.equal(g1.status, 1, "flag absent must fail");
@@ -540,8 +547,8 @@ test("AC1 (evidence-out-of-git) — gate 后文件逐字节不变", () => {
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
-  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o"]);
-  n(["write", "AC-028", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o"]);
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  n(["write", "AC-028", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
   const file = fs.readdirSync(path.join(root, "goals")).find((f) => f.startsWith("AC-028-"));
   const before = fs.readFileSync(path.join(root, "goals", file), "utf8");
   const g = runCli(["gate", "AC-028", "--root", root]);
@@ -557,8 +564,8 @@ test("AC2 (evidence-out-of-git) — lastProgressAt 与 get evidence 都取自账
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
-  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o"]);
-  n(["write", "AC-028", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o"]);
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  n(["write", "AC-028", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
   const g = runCli(["gate", "AC-028", "--root", root]);
   assert.equal(g.status, 0);
   const ledger = fs.readFileSync(path.join(root, ".quay", "gate-events.jsonl"), "utf8").trim().split("\n");
@@ -597,8 +604,8 @@ test("AC4 (evidence-out-of-git) — gate 后两个消费者立刻反映新 verdi
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
-  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o"]);
-  n(["write", "AC-029", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "test -f passflag", "--origin", "o"]);
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  n(["write", "AC-029", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "test -f passflag", "--origin", "o", "--expect", EXPECT]);
   // fail → get 立刻反映 fail。
   const g1 = runCli(["gate", "AC-029", "--root", root]);
   assert.equal(g1.status, 1, "flag absent must fail");
