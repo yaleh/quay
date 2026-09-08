@@ -50,6 +50,10 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // stripEvidenceTimestamp 的单一真相源在 Core（goal-store.ts）——本文件与 goal-store 的提交决策
 // 必须用同一判据「什么算实质变化」（gap-goal-gate-timestamp-commit-flood），⛔ 不各写一份。
 import { stripEvidenceTimestamp } from "../../packages/quay/src/goal-store.ts";
+// meta 记录是第五种 store kind（gap-meta-records-should-be-a-first-class-store-kind-not-a-task-label）：
+// 寄给 meta-driver 的消息是 META 记录（不是 task 标签），答复内嵌在同一条记录上。直接 import 读/写
+// （同 goal-store 的 stripEvidenceTimestamp 先例：源树直跑，不经 bundle）。
+import { createMetaStore } from "../../packages/quay/src/meta-store.ts";
 // 覆盖段抽取的单一真相源在 dispatch-preference-check.ts——本文件读 meta-driver-focus.md 的覆盖段
 // 必须用同一段标题（OVERRIDE_SECTION）与同一抽取逻辑（extractSectionContent），⛔ 不各写一份
 // （硬规则 5b：同一原则在第二个载体上的适用点必须复用同一判据，否则标题漂移会让检查器与本文件各说各话）。
@@ -141,11 +145,11 @@ export interface MetaRoundReadings {
   drivers: DriverReading[];
   /** author↔develop 同步的成败计数（该机制自己的产物）。 */
   syncHealth: SyncHealth;
-  /** 【寄给 meta-driver 的任务】——`label:meta-driver` 的未关闭任务。
-   *  这是「裸缺陷」的入口（不必是 GOAL、不必挂活跃目标、不必用 `--focus`——常驻的人给方向通道是
-   *  orchestration/meta-driver-focus.md 覆盖段，而 `--focus` 是一次性 CLI 参数，常驻驱动收不到），
-   *  同时是它自己的闭环（autoDrive 立的任务带同一标签，掉进 needs-human 也会回流）。 */
-  addressedTasks: AddressedTask[];
+  /** 【寄给 meta-driver 的消息】——`meta/META-NNN.md` 的 `proposed` 记录（第五种 store kind，
+   *  与 task/adr/goal/document 同级）。正文【完整】进读数（专用 schema 自己定义送达面，⛔ 不存在
+   *  「只传标题」的截断——这正是被取代的 gap-meta-addressedtasks-input-truncates-* 缺陷）。
+   *  只收 `proposed`：答复内嵌在同一条记录上、翻 `answered` 后即离开读数。 */
+  metaRecords: MetaMessage[];
   /** gap-not-evaluated-checkers-never-persisted — the suite's INERT checkers (which run_static_checks
    *   checker "读不懂输入" this round, i.e. exited 3 = NOT-EVALUATED), enumerated by NAME (⛔ 不是计数 —
    *   SPEC §5.3: a bare scalar gates nothing; enumerate the names so the semantic half can name which
@@ -381,7 +385,7 @@ export async function collectReadings(root: string, cliFocus: string | null): Pr
   return {
     goals, criteria, divergences, drivers,
     syncHealth: collectSyncHealth(root),
-    addressedTasks: collectAddressedTasks(root),
+    metaRecords: collectMetaRecords(root),
     inertCheckers: collectInertCheckers(root),
     focus,
   };
@@ -670,9 +674,9 @@ export function readingsDigest(readings: MetaRoundReadings): string {
     ...readings.drivers.map((d) => `drv:${d.kind}:${d.running === null ? "u" : d.running ? 1 : 0}`).sort(),
     // 同步只取【最近是否在失败】这个位，⛔ 不取计数。
     `sync:${readings.syncHealth.lastEvent ?? "none"}`,
-    // 寄给它的任务：id + status 都进摘要。**必须进**——否则人新发一条裸缺陷不会改变摘要，
+    // 寄给它的消息：id + status 都进摘要。**必须进**——否则人新发一条 META 记录不会改变摘要，
     // 变化检测闸会把那一轮判为"读数没变"而跳过语义半 ⇒ 这个入口在定时轮里等于不存在。
-    ...readings.addressedTasks.map((t) => `task:${t.id}:${t.status}`).sort(),
+    ...readings.metaRecords.map((m) => `meta:${m.id}:${m.status}`).sort(),
     // gap-not-evaluated-checkers-never-persisted — 惰性守卫的名字必须进摘要（⛔ 只进计数会让新出现的
     // 惰性守卫不改变摘要 ⇒ 语义半永不被唤醒；逐名进，某个 guard 从在→不在/不在→在都改变摘要）。
     ...readings.inertCheckers.map((n) => `inert:${n}`).sort(),
@@ -766,7 +770,7 @@ export const ID_KEYED_READING_ARRAYS: Record<string, string> = {
   criteria: "id",
   divergences: "id",
   goals: "id",
-  addressedTasks: "id",
+  metaRecords: "id",
 };
 
 /** 按点号路径在本轮读数里解析证据。`<数组名>.<业务键>[.<字段>]` 按 ID_KEYED_READING_ARRAYS 查。
@@ -822,81 +826,72 @@ export function blockingOwners(owners: OwningTask[]): OwningTask[] {
   return owners.filter((o) => o.status !== "done" && o.status !== "superseded");
 }
 
-/** 未关闭的状态集（"还在场上"）。done/superseded 之外的都算。 */
-export const OPEN_TASK_STATUSES = ["todo", "ready", "needs-human"] as const;
+/** 一条寄给 meta-driver 的消息（`meta/META-NNN.md` 的 proposed 记录，第五种 store kind）。
+ *  与 task/adr/goal/document 同级：专用 schema 自己定义送达面——正文【完整】进读数（body），
+ *  ⛔ 不存在「只传 title 的截断」。答复（reply）内嵌在同一条记录上，翻 answered 后离开读数。 */
+export interface MetaMessage {
+  id: string;
+  title: string | null;
+  status: string;
+  handler: string | null;
+  reply: string | null;
+  body: string;
+}
 
-export interface AddressedTask { id: string; status: string; title: string | null; labels: string[] }
-
-/** probe 输出里对一条 addressedTask 的判定输入（语义半的原始产出，机械半随后与 addressedTasks 对齐）。 */
-export interface AddressedTaskOpinionInput {
-  taskId: string;
+/** probe 输出里对一条 meta 记录的判定输入（语义半的原始产出，机械半随后与 metaRecords 对齐）。 */
+export interface MetaRecordOpinionInput {
+  metaId: string;
   hasOpinion: boolean;
   note?: string | null;
 }
 
-/** 逐条三态：有意见 / 无意见 / 未评估。⛔ 「无意见」与「没读到这条 task」不得共用取值（硬规则 3b）：
+/** 逐条三态：有意见 / 无意见 / 未评估。⛔ 「无意见」与「没读到这条记录」不得共用取值（硬规则 3b）：
  *  probe 显式给出 `hasOpinion:false` 才是「无意见」（看过且无话可说，是真测量）；
- *  probe 完全没提到该 task（或该条形状读不懂）⇒「未评估」——读不懂 ≠ 合格，也不等于「看过且无话可说」。
- *  ⛔ 不是总数、不是布尔：对【每一条】 addressedTask 落一个 taskId + 三态（SPEC §5.3 枚举不布尔）。 */
-export type AddressedTaskOpinion = "has-opinion" | "no-opinion" | "not-evaluated";
+ *  probe 完全没提到该记录（或该条形状读不懂）⇒「未评估」——读不懂 ≠ 合格，也不等于「看过且无话可说」。
+ *  ⛔ 不是总数、不是布尔：对【每一条】 meta 记录落一个 metaId + 三态（SPEC §5.3 枚举不布尔）。 */
+export type MetaRecordOpinion = "has-opinion" | "no-opinion" | "not-evaluated";
 
-export interface AddressedTaskJudgment {
-  taskId: string;
-  opinion: AddressedTaskOpinion;
+export interface MetaRecordJudgment {
+  metaId: string;
+  opinion: MetaRecordOpinion;
   note: string | null;
 }
 
-/** 读【寄给 meta-driver 的任务】——按标签枚举未关闭任务。
- *
- *  这是「裸缺陷」的入口：人（或任何一层）用现成的立案路径立一条普通任务、打上 `meta-driver` 标签，
- *  它下一轮就进读数。⛔ 不新建收件箱——那正是 probe 规格记着的 escalations.md 死法（12 条未答、死 10 天），
- *  也会成为 SPEC §6.3 警告的"第五个登记面"。用的是已经在跑的任务库 + 它自己输出就带的那个标签。
- *
- *  **同时是它自己的闭环**：autoDrive 立的任务带 `meta-driver` 标签，掉进 needs-human 也会回流成读数
- *  ——此前它对自己立的任务的结局一无所知（实测 gap-meta-syncdeveloptodoc 进 needs-human 而它从不知情）。 */
-export function collectAddressedTasks(root: string, label = "meta-driver"): AddressedTask[] {
-  const dir = path.join(root, "tasks");
-  let files: string[];
-  try { files = fs.readdirSync(dir).filter((f) => f.endsWith(".md")); } catch { return []; }
-  const out: AddressedTask[] = [];
-  for (const f of files) {
-    try {
-      const text = fs.readFileSync(path.join(dir, f), "utf8");
-      if (!text.startsWith("---")) continue;
-      const end = text.indexOf("\n---", 3);
-      if (end < 0) continue;
-      const fm = text.slice(3, end);
-      const status = (fm.match(/^status:\s*(\S+)\s*$/m) ?? [])[1] ?? "unknown";
-      if (!(OPEN_TASK_STATUSES as readonly string[]).includes(status)) continue;
-      const labels = parseFrontmatterLabels(fm);
-      if (!labels.includes(label)) continue;
-      out.push({
-        id: f.replace(/\.md$/, ""),
-        status,
-        title: (fm.match(/^title:\s*(.+)$/m) ?? [])[1]?.trim() ?? null,
-        labels,
-      });
-    } catch { /* 读不了就跳过这一个 */ }
-  }
-  return out;
+/** 读【寄给 meta-driver 的消息】——`meta/` 目录里 `status: proposed` 的记录（经 meta-store，⛔ 不手搓
+ *  解析 frontmatter）。这是「裸缺陷/要求」的入口：人（或任何一层）用 `quay meta write` 立一条 META
+ *  记录，它下一轮就进读数。⛔ 不再用 `label:meta-driver` 的 task——那个标签双义（主题 vs 路由）、双
+ *  消费者（worker 实现 + meta-driver 评论），正是被取代的 gap-addressedtasks-conflates-* 缺陷。 */
+export function collectMetaRecords(root: string): MetaMessage[] {
+  let records: Array<Record<string, unknown>>;
+  try {
+    records = createMetaStore(path.join(root, "meta")).list({ status: "proposed" });
+  } catch { return []; }
+  return records.map((m) => ({
+    id: String(m.id),
+    title: m.title == null ? null : String(m.title),
+    status: String(m.status),
+    handler: m.handler == null ? null : String(m.handler),
+    reply: m.reply == null ? null : String(m.reply),
+    body: m.body == null ? "" : String(m.body),
+  }));
 }
 
-/** 把 probe 的逐条判定与 addressedTasks 对齐：对【每一条】 addressedTask 落一个三态判定。
- *  ⛔ 判定条数必须 == addressedTasks 条数（probe 少答一条 ⇒ 那条落「未评估」，不被静默丢弃——
+/** 把 probe 的逐条判定与 metaRecords 对齐：对【每一条】 meta 记录落一个三态判定。
+ *  ⛔ 判定条数必须 == metaRecords 条数（probe 少答一条 ⇒ 那条落「未评估」，不被静默丢弃——
  *  SPEC §5.3 不枚举对象则零指引价值；负控制见单测）。
  *  对齐规则：
  *    - probe 显式给出 `hasOpinion:true` ⇒ 「有意见」；`hasOpinion:false` ⇒ 「无意见」（真测量）；
- *    - probe 没提到该 taskId，或该条形状读不懂（taskId 空 / hasOpinion 非布尔）⇒ 「未评估」；
- *    - probe 多答了不在 addressedTasks 里的 taskId ⇒ 丢弃（判定只覆盖真实输入的 task 集，⛔ 不跟着
- *      probe 的幻觉扩出一个不存在的对象）；同一 taskId 出现多条 ⇒ 取第一条（不猜测、不合并）。
- *  ⛔ 纯判定，零副作用：不写 task 文件、不改 status/labels——task 的处理者仍是 promotion→worker。 */
-export function resolveAddressedTaskOpinions(
-  addressedTasks: AddressedTask[],
-  opinions: AddressedTaskOpinionInput[],
-): AddressedTaskJudgment[] {
+ *    - probe 没提到该 metaId，或该条形状读不懂（metaId 空 / hasOpinion 非布尔）⇒ 「未评估」；
+ *    - probe 多答了不在 metaRecords 里的 metaId ⇒ 丢弃（判定只覆盖真实输入的消息集，⛔ 不跟着
+ *      probe 的幻觉扩出一个不存在的对象）；同一 metaId 出现多条 ⇒ 取第一条（不猜测、不合并）。
+ *  ⛔ 纯判定，零副作用：不写 meta 文件——答复的写盘在调用侧（writeMetaReplies），本函数只对齐。 */
+export function resolveMetaRecordOpinions(
+  metaRecords: MetaMessage[],
+  opinions: MetaRecordOpinionInput[],
+): MetaRecordJudgment[] {
   const byId = new Map<string, { opinion: "has-opinion" | "no-opinion"; note: string | null }>();
   for (const o of opinions) {
-    const id = String(o?.taskId ?? "").trim();
+    const id = String(o?.metaId ?? "").trim();
     if (!id || byId.has(id)) continue;
     // 形状读不懂 ⇒ 不登记 ⇒ 落到「未评估」（⛔ 不得当成「无意见」，硬规则 3b）。
     if (typeof o?.hasOpinion !== "boolean") continue;
@@ -905,26 +900,46 @@ export function resolveAddressedTaskOpinions(
       note: typeof o.note === "string" && o.note.trim() ? o.note.trim() : null,
     });
   }
-  return addressedTasks.map((t) => {
-    const hit = byId.get(t.id);
+  return metaRecords.map((m) => {
+    const hit = byId.get(m.id);
     return hit
-      ? { taskId: t.id, opinion: hit.opinion, note: hit.note }
-      : { taskId: t.id, opinion: "not-evaluated" as const, note: null };
+      ? { metaId: m.id, opinion: hit.opinion, note: hit.note }
+      : { metaId: m.id, opinion: "not-evaluated" as const, note: null };
   });
 }
 
-/** frontmatter 的 labels 解析：块列表（`labels:\n  - a\n  - b`）与内联（`labels: [a, b]`）都认。 */
-export function parseFrontmatterLabels(fm: string): string[] {
-  const inline = fm.match(/^labels:\s*\[(.*?)\]\s*$/m);
-  if (inline) return inline[1].split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
-  const lines = fm.split("\n");
-  const i = lines.findIndex((l) => /^labels:\s*$/.test(l));
-  if (i < 0) return [];
-  const out: string[] = [];
-  for (let j = i + 1; j < lines.length; j++) {
-    const m = lines[j].match(/^\s+-\s+(.+?)\s*$/);
-    if (!m) break; // 缩进列表一结束就停，⛔ 不继续吃下一个键
-    out.push(m[1].replace(/^["']|["']$/g, ""));
+/** 一条判定的答复文本（纯函数）。⛔ 「未评估」⇒ null（不答复，留 proposed 下一轮再呈现）；
+ *  「有意见」⇒ note（空则回退一个显式标记）；「无意见」⇒ 一个确定性标记——两者都必须【答复】
+ *  （翻 answered），否则发件人无法区分「被看过但无话」与「根本没被读」。 */
+export function metaReplyText(judgment: MetaRecordJudgment): string | null {
+  if (judgment.opinion === "not-evaluated") return null;
+  if (judgment.opinion === "has-opinion") {
+    return judgment.note ?? "(meta-driver 有意见，未附注)";
+  }
+  return "(meta-driver 无意见)";
+}
+
+/** 把逐条判定写回 meta 记录：答复内嵌在同一条记录上（问与答同一对象）、翻 answered。
+ *  写盘即提交由 meta-store 的 commit-after-write 负责——内容不变 ⇒ 不提交（AC6 提交洪水闸），
+ *  内容变 ⇒ 恰 1 次提交。逐条留痕（⛔ 不只报总数，硬规则 3）。 */
+export function writeMetaReplies(
+  root: string,
+  judgments: MetaRecordJudgment[],
+): Array<{ metaId: string; reply: string | null; ok: boolean; reason: string }> {
+  const store = createMetaStore(path.join(root, "meta"));
+  const out: Array<{ metaId: string; reply: string | null; ok: boolean; reason: string }> = [];
+  for (const j of judgments) {
+    const reply = metaReplyText(j);
+    if (reply === null) {
+      out.push({ metaId: j.metaId, reply: null, ok: false, reason: "not-evaluated ⇒ 不答复（留 proposed）" });
+      continue;
+    }
+    try {
+      store.write(j.metaId, { status: "answered", reply });
+      out.push({ metaId: j.metaId, reply, ok: true, reason: "answered" });
+    } catch (e) {
+      out.push({ metaId: j.metaId, reply, ok: false, reason: (e as Error).message });
+    }
   }
   return out;
 }
@@ -1284,7 +1299,8 @@ export async function fileDecisions(
       // ⛔ 这里【没有】数量背压。人 2026-09-06 否掉了「一次只允许开一条」：那是频率控制冒充语义控制，
       // 且方向反了——第一条无论多烂都放行，之后再真实的冲突都被挡，过滤依赖到达顺序而非质量，
       // 还会制造「名额被占用所以不报真问题」的反向激励。防滥用全部落在 carrierGate 的语义闸上。
-      // 未关闭的 human-call 进读数（addressedTasks）供语义半自己判重，是【信息】不是【配额】。
+      // 未关闭的 human-call 是【信息】不是【配额】——它的判重由语义半读码自行完成（⛔ 不再经
+      // `label:meta-driver` 标签回流成读数，那个标签双义的通道已被 META 记录取代）。
       const taskId = `gap-meta-call-${item.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40)}`;
       if (opts.dryRun) {
         out.push({ item, id: taskId, accepted: true, reason: `dry-run: would file as needs-human task ${taskId}` });
@@ -1346,8 +1362,8 @@ export function parseProbeOutput(stdout: string): {
   proposals: Proposal[];
   autoDrive: AutoDriveItem[];
   decisions: DecisionItem[];
-  /** probe 对每条 addressedTask 的逐条判定（随后由 resolveAddressedTaskOpinions 与真实 task 集对齐）。 */
-  addressedTaskOpinions: AddressedTaskOpinionInput[];
+  /** probe 对每条 meta 记录的逐条判定（随后由 resolveMetaRecordOpinions 与真实 meta 记录集对齐）。 */
+  metaRecordOpinions: MetaRecordOpinionInput[];
 } | null {
   const text = String(stdout ?? "").trim();
   if (!text) return null;
@@ -1419,16 +1435,17 @@ export function parseProbeOutput(stdout: string): {
         }];
       })
     : [];
-  // 逐条三态判定（measurement 通道，⛔ 不是 responses 通道、不回写 task）。形状闸：taskId 非空字符串 +
-  // hasOpinion 布尔，缺一即丢 ⇒ 落到「未评估」（⛔ 不补默认值、不凑成「看起来合格」，硬规则 3b）。
-  const addressedTaskOpinions: AddressedTaskOpinionInput[] = Array.isArray(o.addressedTaskOpinions)
-    ? (o.addressedTaskOpinions as unknown[]).flatMap((raw) => {
+  // 逐条三态判定（measurement 通道——答复写回由调用侧 writeMetaReplies 落地，⛔ 本函数只解析）。
+  // 形状闸：metaId 非空字符串 + hasOpinion 布尔，缺一即丢 ⇒ 落到「未评估」（⛔ 不补默认值、
+  // 不凑成「看起来合格」，硬规则 3b）。
+  const metaRecordOpinions: MetaRecordOpinionInput[] = Array.isArray(o.metaRecordOpinions)
+    ? (o.metaRecordOpinions as unknown[]).flatMap((raw) => {
         if (!raw || typeof raw !== "object") return [];
         const a = raw as Record<string, unknown>;
-        if (typeof a.taskId !== "string" || String(a.taskId).trim() === "") return [];
+        if (typeof a.metaId !== "string" || String(a.metaId).trim() === "") return [];
         if (typeof a.hasOpinion !== "boolean") return [];
         return [{
-          taskId: String(a.taskId).trim(),
+          metaId: String(a.metaId).trim(),
           hasOpinion: a.hasOpinion,
           note: typeof a.note === "string" ? a.note : null,
         }];
@@ -1439,7 +1456,7 @@ export function parseProbeOutput(stdout: string): {
     proposals,
     autoDrive,
     decisions,
-    addressedTaskOpinions,
+    metaRecordOpinions,
   };
 }
 
@@ -1507,12 +1524,9 @@ async function runMetaRoundInner(opts: MetaRoundOptions): Promise<MetaRoundResul
     // （否则"driver 停摆/同步在失败"只能靠烧 LLM 才看得到）。
     drivers: readings.drivers,
     syncHealth: readings.syncHealth,
-    // 寄给它的任务也必须进记录：否则「这个入口有没有被消费」在生产载体上不可见——
-    // 而入口的价值恰恰在于被消费。实测 2026-09-06：加了 addressedTasks 读数却漏了这一处，
-    // 于是两轮 mt-prod-1788707645 的记录里根本没有该字段，读记录的人（我）把
-    // 「字段缺失」误读成「命中 0 条」。硬规则 5b（类型/采集/摘要/id 索引都加了，唯独记录漏了）
-    // + 硬规则 9（守与不守在记录上必须可区分）。
-    addressedTasks: readings.addressedTasks,
+    // 寄给它的消息也必须进记录：否则「这个入口有没有被消费」在生产载体上不可见。
+    // （实测 2026-09-06：加了 addressedTasks 读数却漏了记录处，把「字段缺失」误读成「命中 0 条」。）
+    metaRecords: readings.metaRecords,
     // 结算处置进读数：evidenceKept 非空 = 本轮真有 verdict 变化（有信息，待提交）；
     // 全 restored = 本轮只是刷新了时间戳（无信息）。这让「观测的副作用」自身可观测。
     evidenceRestored: settlement.restored.length,
@@ -1577,8 +1591,11 @@ async function runMetaRoundInner(opts: MetaRoundOptions): Promise<MetaRoundResul
     return { fact: { name: "meta-driver", value: { ...base, digest }, state: "failed", reason } };
   }
 
-  // 逐条三态判定：probe 的 addressedTaskOpinions 与真实 addressedTasks 对齐（⛔ 只有语义半真跑了才有）。
-  const addressedTaskOpinions = resolveAddressedTaskOpinions(readings.addressedTasks, parsed.addressedTaskOpinions);
+  // 逐条三态判定：probe 的 metaRecordOpinions 与真实 meta 记录对齐（⛔ 只有语义半真跑了才有）。
+  const metaRecordOpinions = resolveMetaRecordOpinions(readings.metaRecords, parsed.metaRecordOpinions);
+  // 答复写回：内嵌在同一条 meta 记录上（问与答同一对象）、翻 answered。⛔ 只在非 dry-run 写
+  // （dry-run 不许落盘——与提案/决策/autoDrive 的 dry-run 语义一致）。
+  const metaReplies = dryRun ? [] : writeMetaReplies(root, metaRecordOpinions);
 
   const records = await listGoalRecords(root);
   const activeGoalIds = new Set(readings.goals.map((g) => g.id));
@@ -1598,12 +1615,14 @@ async function runMetaRoundInner(opts: MetaRoundOptions): Promise<MetaRoundResul
 
   const value = {
     ...base,
-    // 逐条三态判定：对每一条 addressedTask 落 taskId + 三态。⛔ 不进 base——它由 probe 输出派生，
+    // 逐条三态判定：对每一条 meta 记录落 metaId + 三态。⛔ 不进 base——它由 probe 输出派生，
     // 只有语义半真跑了才有（进 base 会让 no-llm/skipped 路径也带一个恒空字段，与「未评估」混同）；
     // ⛔ 不进 readingsDigest——判定每轮可变，进摘要会让变化检测闸恒为真（AC 判据）。
-    addressedTaskOpinions,
+    metaRecordOpinions,
     // probe 原始产出条数（对齐前的裸计数）——「入口有没有被消费」在载体上可观测，⛔ 不是对齐后的条数。
-    addressedTaskOpinionsOffered: parsed.addressedTaskOpinions.length,
+    metaRecordOpinionsOffered: parsed.metaRecordOpinions.length,
+    // 答复写回的结果（逐条留痕，⛔ 不只报总数）：哪些消息被答复、答复文本、写回是否成功。
+    metaReplies,
     // ⚠️ 此前这里只写【条数】，20 条解读本身全部丢弃。实测 2026-09-06：5 个判决轮共产出
     // 100 条解读，无一落痕——它们烧了 LLM 时间却不留任何痕迹，比"只被打印"更彻底
     // （probe 规格自己写着：只被打印的观察与从未做过的观察不可区分；只留计数连打印都没有）。

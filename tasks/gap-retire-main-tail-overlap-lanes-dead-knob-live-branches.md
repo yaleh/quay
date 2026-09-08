@@ -2,7 +2,7 @@
 id: gap-retire-main-tail-overlap-lanes-dead-knob-live-branches
 title: 退役 main_tail_overlap_lanes——注释声称已被调度器取代且生产 6 轮 0 次触发，但 test.sh 的两处分支仍只凭
   &gt;0 触发，关掉 suite_scheduler 即静默复活 16 条重叠
-status: ready
+status: done
 labels:
   - gap
   - retire

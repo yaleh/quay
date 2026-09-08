@@ -2,8 +2,8 @@
 // suite-scheduler.ts — the unified suite scheduler (gap-suite-dynamic-waterline-scheduler; the
 // waterline semantics REDEFINED as a RELIABILITY cap by gap-suite-scheduler-reliability-cap-not-speed).
 //
-// Replaces the static phase-splitting (static → serial → lowconc → main, + PHASE_OVERLAP + the A
-// main-tail-overlap watcher) with ONE event-driven loop: every test file keeps its group
+// Replaces the static phase-splitting (static → serial → lowconc → main, + PHASE_OVERLAP) with ONE
+// event-driven loop: every test file keeps its group
 // (serial / lowconc / main), each group has its own concurrency budget (host-derived, reused from
 // the existing formulas), and the scheduler dispatches greedily per group under ONE TOTAL CAP.
 //

@@ -2,7 +2,7 @@
 id: gap-meta-records-should-be-a-first-class-store-kind-not-a-task-label
 title: meta-driver 的输入/输出应是与 goal/adr/document 同级的第五种 store kind，而不是 task
   上的一个标签——本仓库已有「共享机件、独立 schema」的成熟模式（114 行 base、已应用 4 次），我没用它
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -130,6 +130,7 @@ adr 这种 kind 的**专属登记面实测约 7 个文件**：`adr-store.ts` / `
 - `packages/quay/src/cli/meta.ts`
 - `packages/quay/src/cli/help.ts`
 - `packages/quay/bin/quay.ts`
+- `packages/quay/test/cli.test.mjs`
 - `packages/quay-native/src/meta-store.ts`
 - `packages/quay-native/src/mcp-server.ts`
 - `packages/quay-native/bin/quay-native.ts`

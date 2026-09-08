@@ -3,6 +3,7 @@ id: gap-ac166-second-copy-retirement
 title: AC166 判据仍红——.claude 双副本退役（skills 5 + workflows 5 双副本 archive）+
   manager-tick-core.js 迁入 plugin/workflows/
 status: ready
+needs_human_cause: human-adjudication
 labels:
   - gap
 parent: null
@@ -29,6 +30,10 @@ goal_ac: AC-166
 4. **archive drift checker（§7 #6）**：`git mv plugin/scripts/workflows-dual-copy-drift-check.ts` + `plugin/test/workflows-dual-copy-drift-check.test.mjs` + `plugin/scripts/checker-mutation-cases/workflows-dual-copy-drift-check.sh` → 同批次目录（§12b：脚本与自身测试同批，避免孤儿测试或红套件）。
 5. **写 `archive/INDEX.tsv`**：每个 archive 对象一行七字段（original_path · archive_path · date · reason_code · evidence · restore_cmd · commit）；reason_code=`second-copy`，evidence 用可复核读数；`git mv` 与 INDEX 行**同一提交**（硬规则 7）。
 6. **验证**：AC-166 判据 exit 0（下方 AC1）；全量 `scripts/test.sh` 绿（archive 排除面已接线，若红先查排除面/checker-mutation 悬挂引用）；迁后首个窗口 `quay:manager-tick-core` 调用数 > 0。
+7. **收尾三条断言（2026-09-07 needs-human 复核补入；全量 suite 恰好 3 红，全部是本次退役自身的后果）**：
+   ① `plugin/scripts/concurrency-literal-check.ts:257` 的 `SCAN_ROOTS` 去掉 `{ dir: ".claude/workflows", … }` 条目，扫描面收敛到 `plugin/workflows/` 唯一份（`:34`/`:249-250`/`:367` 注释同步）；
+   ② `plugin/test/concurrency-literal-check.test.mjs:231`（scanSurface covers…）与 `:241`（AC1 显式枚举）两条断言改成 single-source——不再要求 `.claude/workflows/execute-suite-fix.js` 在扫描面里，改断言 `plugin/workflows/…`，并把 `SCAN_ROOTS must name the .claude/workflows root explicitly` 改为断言 `"plugin/workflows"`；AC2 负控制 fixture `plugin/test/fixtures/concurrency-literal/.claude/workflows/bad.js` 同批 `git mv` 到 `plugin/test/fixtures/concurrency-literal/plugin/workflows/bad.js`（负控制必须仍能取假——迁后重跑该条须仍红）；
+   ③ `.quay/suite-bucket-reattribution.jsonl:203` 删掉指向被归档的 `plugin/test/workflows-dual-copy-drift-check.test.mjs` 的那一行（`suite-bucket-reattr-ratchet-check` ③-AC8 僵尸条目判据），与归档同提交。
 
 ## AC
 
@@ -98,4 +103,32 @@ goal_ac: AC-166
 - plugin/scripts/workflow-metadata-conformance.mjs（默认文件列表去 .claude 双副本）
 - experiments/quay-perpetual-stream/scripts/workflow-metadata-conformance.mjs（镜像同步，与 plugin 版 byte-identical）
 - plugin/test/workflow-metadata-conformance.test.mjs（REAL_* 改 plugin 路径 + AC9 镜像判据退役）
+- plugin/scripts/concurrency-literal-check.ts（SCAN_ROOTS 去 .claude/workflows，扫描面收敛到 plugin/workflows 唯一份）
+- plugin/test/concurrency-literal-check.test.mjs（scanSurface / AC1 两条断言改 single-source）
+- plugin/test/fixtures/concurrency-literal/.claude/workflows/bad.js（AC2 负控制 fixture 迁出）
+- plugin/test/fixtures/concurrency-literal/plugin/workflows/bad.js（AC2 负控制 fixture 迁入）
+- .quay/suite-bucket-reattribution.jsonl（删被归档测试的僵尸条目，③-AC8）
 - tasks/gap-ac166-second-copy-retirement.md（自身）
+## Needs-Human
+
+**执行 2026-09-07T21:48:48.584Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+- run_id：wk-prod-1788779505
+- session_id：8107b479-64e8-4624-84f3-22a33432ccff
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-ac166-second-copy-retirement~wk-prod-1788779505~1788817345879-821503.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-ac166-second-copy-retirement-wk-prod-1788779505.log
+
+## Needs-Human 复核（manager 2026-09-07，人裁定「派发」）
+
+**结论：假 needs-human，退回 ready 续做。** 逐条读 suite 日志尾部计数 `# pass 7034 / # fail 3`，三条红全部点名如下、且**全部是本次退役自身的直接后果**：
+
+- `scanSurface covers the executable layer …`（`plugin/test/concurrency-literal-check.test.mjs:231`）
+- `AC1: the scan surface EXPLICITLY enumerates .claude/workflows/ + plugin/workflows/`（同文件 `:241`，判词 `the seam file must be in the surface`）
+- `③-AC8 — the real reattribution file has NO zombie entries`（判词逐字 `got ["plugin/test/workflows-dual-copy-drift-check.test.mjs"]`）
+
+**为什么修不动**：这三个文件当时**都不在本任务 `## Touches` 里** ⇒ fan-in 的 fix-scope gate 判 `other-task` defer ⇒ 3 轮 anti-livelock ⇒ needs-human。已按 Plan 第 7 步补进 Touches，⛔ 不是放宽判据。
+
+**worktree 侧已完成的部分（复核实测，非自述）**：`.claude/workflows/manager-tick-core.js` 已移出、`plugin/workflows/manager-tick-core.js` 已在、`.claude/skills` 已空、`archive/INDEX.tsv` 13 行 —— AC1/AC2/AC5 的对象面已就位，只差这 3 条断言与随后的全量绿。
