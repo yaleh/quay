@@ -4068,7 +4068,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
    *  round 记录——与正常 round 同载体（worker-round.jsonl）⇒ supervisor status 的 last_record_ts 不会因
    *  一轮抛错而判「死亡」（AC3：生产 round 无停写窗口），且 error/error_step/stop_reason 指到具体步骤
    *  （AC1 定位）。⛔ 写失败不致命（运行时日志）。 */
-  const writeErrorRound = (round: number, step: string, message: string, stack: string, liveness: LivenessResult | null, pool: number | null, inFlight: number, supersededReclaim: ReclaimSupersededResult | null): void => {
+  const writeErrorRound = (round: number, step: string, message: string, stack: string, liveness: LivenessResult | null, pool: number | null, inFlight: number): void => {
     const record = computeWorkerRoundRecord({
       round,
       runId: runId ?? runPrefix,
@@ -4087,7 +4087,6 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       needsHuman: [],
       reconciledNeedsHuman: [],
       retryExemptions: [],
-      supersededReclaim,
     });
     try { appendRoundToFile(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
@@ -4383,7 +4382,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // 错误边界：写 error round + resident-error 事件，sleep 后继续（⛔ 不静默死、不 hot-loop 烧 CPU）。
       const message = err && typeof err === "object" && "message" in err ? String((err as Error).message) : String(err);
       const stack = err && typeof err === "object" && "stack" in err ? String((err as Error).stack) : "";
-      writeErrorRound(round, step, message, stack, liveness, poolSeen, running.length, supersededReclaimResult);
+      writeErrorRound(round, step, message, stack, liveness, poolSeen, running.length);
       if (json) {
         process.stdout.write(
           `${JSON.stringify({ event: "resident-error", round, step, error: message })}\n`,
