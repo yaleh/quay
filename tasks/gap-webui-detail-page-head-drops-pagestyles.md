@@ -2,7 +2,7 @@
 id: gap-webui-detail-page-head-drops-pagestyles
 title: 三个详情页（/goal/:id /adr/:id /doc/:id）的 head 用「替换」而非「叠加」丢掉 pageStyles ⇒
   桌面端裸导航、移动端双导航；且无任何判据把 renderSiteNav 与它赖以显示的 stylesheet 绑在一起
-status: todo
+status: ready
 labels:
   - gap
   - webui
