@@ -150,9 +150,14 @@ test("AC5 — re-running the new validation over all production criteria rejects
 
   assert.deepEqual(rejected, [], `every production criterion must still pass; rejected:\n${JSON.stringify(rejected, null, 2)}`);
   assert.equal(passes, criteria.length, "pass count == criterion count (all pass)");
-  // 2026-09-08 snapshot: 57 criteria, 19 with an empty body — the empty-body subset must STILL pass.
-  assert.equal(criteria.length, 57, "2026-09-08 snapshot: 57 criterion records");
-  assert.equal(emptyBodyIds.length, 19, "2026-09-08 snapshot: 19 criteria with empty body");
+  // goals/ is a LIVE, growing store, so a frozen `== N` here rots: on 2026-09-08 AC-200 landed
+  // 2m26s before this task's fan-in, turning 57 into 58 and 19 into 20 — the gate went red on a
+  // stale literal, not on a rule defect. Ratchet instead. Both assertions still take-false: the
+  // first if the store shrinks/is wiped, the second if every criterion body gets backfilled (at
+  // which point this negative control no longer exercises the empty-body case it exists for).
+  // 2026-09-08 baseline reading: 57 criteria, 19 of them empty-bodied.
+  assert.ok(criteria.length >= 57, `>= the 2026-09-08 baseline of 57 criterion records (got ${criteria.length})`);
+  assert.ok(emptyBodyIds.length > 0, `the empty-body subset must be non-empty for this negative control to mean anything (got ${emptyBodyIds.length})`);
 });
 
 // ── AC6: the goal_write verb description documents the kind-split body requirement ─────────────
