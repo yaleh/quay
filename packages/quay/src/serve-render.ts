@@ -430,6 +430,13 @@ export function detailStyles(): string {
   font-size: 0.88em;
 }
 .detail-page article pre code { background: none; padding: 0; font-size: inherit; }
+/* gap-webui-detail-page-head-drops-pagestyles AC4: long unbreakable inline code (e.g. a goal
+   detail's criterion shell command in the .meta line) must wrap on the 390px mobile form —
+   otherwise it widens the page past the viewport and re-introduces a horizontal scrollbar
+   (scrollWidth > clientWidth) even after the double-nav is gone. overflow-wrap: anywhere
+   breaks only the tokens that would otherwise overflow; pre code is unaffected (its pre
+   keeps white-space: pre, which disables wrapping). */
+.detail-page code { overflow-wrap: anywhere; }
 .detail-page table { border-collapse: collapse; width: 100%; font-size: 14px; margin-top: var(--space-3); }
 .detail-page th {
   text-align: left; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
@@ -445,6 +452,20 @@ export function detailStyles(): string {
   .detail-page h1 { font-size: 26px; }
 }
 </style>`;
+}
+
+// gap-webui-detail-page-head-drops-pagestyles: the page SHELL's styles are now ONE atomic entry —
+// a page cannot render the nav markup (renderSiteNav / renderMobileChrome) without the sheet that
+// makes it visible. pageStyles() carries the .nav-* + .mobile-chrome rules AND the ≤600px @media
+// overrides (`.mobile-chrome { display:none }` desktop / `display:block` mobile; `.site-nav { display:none }`
+// mobile); detailStyles() has only .detail-page typography — ZERO nav rules. gap-ac100 swapped
+// pageStyles()→detailStyles() on the three detail pages ("换成" not "追加"), which DROPPED the shell:
+// bare nav on desktop, double nav + horizontal overflow on mobile. shellStyles(kind) ALWAYS includes
+// the shell (modernistStyles + pageStyles); the "detail" kind layers detail typography ON TOP (last
+// wins). A page rendered with shellStyles("detail") can never lose the nav/mobile-chrome rules.
+export function shellStyles(kind: "list" | "detail" = "list"): string {
+  const detail = kind === "detail" ? detailStyles() : "";
+  return `${modernistStyles()}${pageStyles()}${detail}`;
 }
 
 // QW-002: minimal inline markdown-to-HTML renderer. Handles the constructs
