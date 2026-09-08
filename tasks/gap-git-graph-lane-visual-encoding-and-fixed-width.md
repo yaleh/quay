@@ -60,19 +60,19 @@ merge 横线是三条互不相连的独立 `<line>`（`serve-git.ts:407 / :410 /
 
 ## Acceptance Criteria
 
-- [ ] AC1 对比度可算：单测对 lane 描边色与画布色计算 WCAG 对比度，断言**每一条 lane 色 ≥ 3.0**。
+- [x] AC1 对比度可算：单测对 lane 描边色与画布色计算 WCAG 对比度，断言**每一条 lane 色 ≥ 3.0**。
       取假：当前 `#eae7e7` on `#f8f4f4` = **1.13**，跑同一函数必须报红。断言失败时打印全部不达标色值与条数。
-- [ ] AC2 分支可区分：生产载体读数——加载 `/git-history`，统计 lane 描边 `stroke` 的**去重色值个数**，
+- [x] AC2 分支可区分：生产载体读数——加载 `/git-history`，统计 lane 描边 `stroke` 的**去重色值个数**，
       断言 `>= min(6, lane 总数)`。取假：改动前实测去重色值 = **1**。
-- [ ] AC3 圆角为结构事实而非观感：断言同一 SVG 内 lane 连接线的 `<path>` 元素数 **> 0** 且 fork/merge 连接
+- [x] AC3 圆角为结构事实而非观感：断言同一 SVG 内 lane 连接线的 `<path>` 元素数 **> 0** 且 fork/merge 连接
       **不再由独立 `<line>` 承载**（`<line>` 中 x1≠x2 且 y1==y2 的横线条数 == 0）。取假：改动前
       `<path>`=0、横 `<line>`>0。
-- [ ] AC4 分支名标注存在且可读：断言每条 lane 的最近节点右侧存在一个带背景填充（非透明）的文字元素，
+- [x] AC4 分支名标注存在且可读：断言每条 lane 的最近节点右侧存在一个带背景填充（非透明）的文字元素，
       其文字内容 == 该 lane 的 `ref`，且文字与其背景的对比度 ≥ 4.5。打印缺标注的 lane 清单与条数。
-- [ ] AC5 宽度由内容派生（回答硬规则 4 推论二）：断言 SVG 的 `width` 属性 **不是常量**——构造两个最长 subject
+- [x] AC5 宽度由内容派生（回答硬规则 4 推论二）：断言 SVG 的 `width` 属性 **不是常量**——构造两个最长 subject
       长度相差 ≥200px 的 fixture，断言两者算出的 width **不相等**；并对生产页面断言
       `bbox.x + bbox.width > viewBox 宽度` 的 `<text>` 条数 == **0**。取假：改动前实测 37/98。
-- [ ] AC6 `bash scripts/test.sh --for-task gap-git-graph-lane-visual-encoding-and-fixed-width` 退出码 0。
+- [x] AC6 `bash scripts/test.sh --for-task gap-git-graph-lane-visual-encoding-and-fixed-width` 退出码 0。
 
 ## Definition of Done
 
@@ -85,4 +85,5 @@ AC1/AC2/AC5 的前后数值对照（1.13→≥3.0、1→≥6、37→0）贴进�
 - `packages/quay/src/serve-git.ts`
 - `packages/quay/src/serve-render.ts`
 - `packages/quay/test/gap-git-graph-lane-visual-encoding-and-fixed-width.test.mjs`
+- `packages/quay/test/gap-git-history-lane-identity-and-row-layout-overlap.test.mjs`
 - `tasks/gap-git-graph-lane-visual-encoding-and-fixed-width.md`
