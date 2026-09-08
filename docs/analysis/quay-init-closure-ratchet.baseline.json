@@ -1,7 +1,7 @@
 {
   "files": 133,
-  "bytes": 3904530,
-  "fingerprint": "d654f41dd548816493fa29dc303689c496ad23c9a8624b2b28b3f7a1df11a5c4",
+  "bytes": 3909662,
+  "fingerprint": "031c61103346f043a5ac0d932c48d3427af540122f10db97d8ac870957476e5f",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
@@ -137,7 +137,7 @@
     },
     {
       "rel": "plugin/scripts/develop-deliver-tgz.sh",
-      "sha": "4443a6e1aeeb99a267c7ec6047aef4cc26572cedbf0fbd07b1d352377c8ecf73"
+      "sha": "9c4cc2ede641fe4771a52cb90f87aca14f4e5690b151cb9907cbd8b1648932ce"
     },
     {
       "rel": "plugin/scripts/dispatch-record-fingerprint-reason-check.ts",
