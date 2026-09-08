@@ -2,7 +2,7 @@
 id: gap-dead-set-closure-misses-four-reference-kinds
 title: 死集闭包只认调用形式、漏认四类引用（bash source/. 内建、活测试钉存在性、config.yml gate
   注册、wrapper→委托模块），82 名单仍混活脚本致 AC158 二次自锁
-status: done
+status: ready
 labels:
   - gap
 parent: null
