@@ -182,7 +182,12 @@ export function createMetaStore(metaDir: string) {
       const finalBody = body !== undefined ? body : existingBody;
       const fileName = existingFile ?? `${id}-${slugify(title, "meta")}.md`;
       fs.writeFileSync(path.join(metaDir, fileName), serializeFrontmatter(ordered, finalBody), "utf8");
-      commitMetaFile(metaDir, fileName, id);
+      const outcome = commitMetaFile(metaDir, fileName, id);
+      if (outcome === "failed") {
+        // The disk write succeeded but the git commit genuinely FAILED — surface on stderr so the
+        // failure is observable, not silent (硬规则 3b). "unchanged"/"not-in-git" are expected no-ops.
+        console.error(`meta-store: commit of "${id}" failed — the file was written to disk but is not on any branch's history`);
+      }
       return get(id);
     });
   }

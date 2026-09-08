@@ -484,7 +484,13 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
     fm.status = patch.status;
     if (patch.supersededBy !== undefined) fm["superseded-by"] = patch.supersededBy;
     fs.writeFileSync(p, serializeFrontmatter(fm, body), "utf8");
-    commitGoalFile(goalDir, file, oldId);
+    const outcome = commitGoalFile(goalDir, file, oldId);
+    if (outcome === "failed") {
+      // The disk write succeeded but the git commit genuinely FAILED — never throw (the write IS on
+      // disk), but surface on stderr so the failure is observable, not silent (硬规则 3b).
+      // "unchanged"/"not-in-git" are expected no-ops and deliberately do NOT log.
+      console.error(`goal-store: commit of "${oldId}" failed — the file was written to disk but is not on any branch's history`);
+    }
   }
 
   function write(id: string, {
@@ -589,7 +595,12 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       const finalBody = body !== undefined ? body : existingBody;
       const fileName = existingFile ?? `${id}-${slugify(title, "goal")}.md`;
       fs.writeFileSync(path.join(goalDir, fileName), serializeFrontmatter(ordered, finalBody), "utf8");
-      commitGoalFile(goalDir, fileName, id);
+      const outcome = commitGoalFile(goalDir, fileName, id);
+      if (outcome === "failed") {
+        // The disk write succeeded but the git commit genuinely FAILED — surface on stderr so the
+        // failure is observable, not silent (硬规则 3b). "unchanged"/"not-in-git" are expected no-ops.
+        console.error(`goal-store: commit of "${id}" failed — the file was written to disk but is not on any branch's history`);
+      }
       return get(id) as GoalViewModel;
     });
   }
