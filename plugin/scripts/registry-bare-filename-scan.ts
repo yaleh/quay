@@ -80,6 +80,10 @@ export interface BareScanResult {
   carrierCount: number;
   refs: BareRef[];
   referencedScripts: string[];
+  /** 四类引用（source/. 内建、测试存在性钉、config gate 注册、wrapper→委托模块）。 */
+  extraRefs: ExtraRef[];
+  /** 裸文件名引用 ∪ 四类引用的脚本名并集（:888 闸对 after.dead 求交的对象）。 */
+  allReferencedScripts: string[];
 }
 
 // ── 注释屏蔽 + 字符串字面量提取（按位置判定，硬规则 2）──────────────────────────────────────────────
@@ -154,21 +158,30 @@ export function extractBareFilenameLiterals(
   let i = 0;
   while (i < n) {
     const c = src[i];
-    if ((c === '"' || c === "'" || c === "`") && mask[i] !== 1) {
+    if (c === "`") {
+      // 反引号模板：跳过整个模板（含 ${} 插值），不当作裸文件名字面量。此前用 isTemplateInterp break
+      //  会让扫描停在模板内部、后续的单/双引号字面量失读（kind ② 扫测试文件时暴露）。
+      i++;
+      while (i < n) {
+        if (src[i] === "\\") { i += 2; continue; }
+        if (src[i] === "`") { i++; break; }
+        i++;
+      }
+      continue;
+    }
+    if ((c === '"' || c === "'") && mask[i] !== 1) {
       const q = c;
       const start = i;
       i++;
       let value = "";
       let closed = false;
-      let isTemplateInterp = false;
       while (i < n) {
         if (src[i] === "\\") { value += src[i] + (src[i + 1] ?? ""); i += 2; continue; }
         if (src[i] === q) { closed = true; i++; break; }
-        if (q === "`" && src[i] === "$" && src[i + 1] === "{") { isTemplateInterp = true; break; }
         value += src[i];
         i++;
       }
-      if (closed && !isTemplateInterp && knownNames.has(value)) {
+      if (closed && knownNames.has(value)) {
         out.push({ value, line: lineOf(src, start), snippet: snippetOf(src, start) });
       }
       continue;
@@ -309,6 +322,9 @@ export function scanBareFilenameRefs(root: string): BareScanResult {
       continue;
     }
     for (const hit of scanCarrier(rel, text, known)) {
+      // 自引用（脚本判自己是不是主入口：process.argv[1].endsWith("<name>")）不算引用——与
+      // buildReferenceMap 的 carrierAbs !== scriptAbsPath 同一语义，避免它出现在 referencedScripts。
+      if (rel === `${SCRIPTS_DIR_REL}/${hit.script}`) continue;
       const list = byScript.get(hit.script) ?? [];
       list.push(hit.carrier);
       byScript.set(hit.script, list);
@@ -317,13 +333,18 @@ export function scanBareFilenameRefs(root: string): BareScanResult {
   const refs: BareRef[] = [...byScript.entries()]
     .map(([script, carriers]) => ({ script, carriers }))
     .sort((a, b) => a.script.localeCompare(b.script));
+  const referencedScripts = refs.map((r) => r.script).sort();
+  const extraRefs = collectExtraRefs(root, basenames);
+  const allReferencedScripts = [...new Set([...referencedScripts, ...extraRefs.map((r) => r.script)])].sort();
   return {
     generatedAt: new Date().toISOString(),
     root,
     scriptCount: basenames.length,
     carrierCount: carriers.length,
     refs,
-    referencedScripts: refs.map((r) => r.script).sort(),
+    referencedScripts,
+    extraRefs,
+    allReferencedScripts,
   };
 }
 
@@ -572,6 +593,148 @@ const DIRNAME_JOIN_RE = /path\.join\(\s*__dirname\s*,\s*(['"])([A-Za-z0-9._-]+)\
  *  在 plugin/scripts/ 顶层时 `$SCRIPT_DIR` 才解析为该目录。 */
 const SCRIPT_DIR_REF_RE = /(?:\$\{SCRIPT_DIR\}\/|\$SCRIPT_DIR\/)([A-Za-z0-9][A-Za-z0-9._-]*)/g;
 
+// ── 四类引用（gap-dead-set-closure-misses-four-reference-kinds）──────────────────────────────────
+// §12e 传递闭包只认「调用形式」（import 说明符、node|bash|sh|tsx <path>、${repo_root}/ 插值、
+// path.join(__dirname,…)、$SCRIPT_DIR/…）。漏认四类引用 ⇒ 死集混入仍在生产使用的活脚本。
+// 本节把四类补进【收集器】，既有 :888 闸自动覆盖（⛔ 不新造第二个闸，双判据必然漂移）。
+// ① bash `source`/`.` 内建（执行）② plugin/test 存在性钉 ③ .quay/config.yml gate 注册
+// ④ wrapper→委托模块（同名 .sh/.ts 对称对）。
+
+export type ExtraRefKind = "source-builtin" | "test-pin" | "config-gate" | "wrapper-delegate";
+
+export interface ExtraRef {
+  script: string;          // plugin/scripts/<script> 裸文件名
+  carrier: BareRefCarrier; // 引用它的载体（file=repo-relative, line, snippet）
+  kind: ExtraRefKind;
+}
+
+/** 每类各钉一个已知为真样本（硬规则 2 的零计数配套动作）：样本 0 命中 ⇒ 谓词写错，报红，
+ *  ⛔ 不得判「无此类引用」。 */
+export const EXTRA_KIND_SAMPLES: { script: string; carrier: string; kind: ExtraRefKind }[] = [
+  { script: "suite-slot-lib.sh", carrier: "scripts/test.sh", kind: "source-builtin" },
+  { script: "loadbearing-test-gate.ts", carrier: "plugin/test/plugin-packaging.test.mjs", kind: "test-pin" },
+  { script: "anti-gaming-guard.sh", carrier: ".quay/config.yml", kind: "config-gate" },
+  { script: "drivable-workspace-check.sh", carrier: "plugin/scripts/drivable-workspace-check.ts", kind: "wrapper-delegate" },
+];
+
+/** ① bash `source` / `.` 内建 —— `source <path>` / `. <path>`，path 含 plugin/scripts/<name>
+ *  （含 "${repo_root}/plugin/scripts/<name>" 插值形态与引号形态）。source/. 是执行（加载脚本），
+ *  不是「散文提及」，故被 source 的脚本直接判活（硬规则 4b：执行是直接量）。 */
+const SOURCE_BUILTIN_RE = /(?:^|[;&|()\s])(?:source|\.)\s+(?:["'])?[^"'\s;&|()]*plugin\/scripts\/([A-Za-z0-9._-]+)/g;
+/** ③ .quay/config.yml 里 gate 的 script:/command: 路径（`./plugin/scripts/<name>` 或
+ *  `node plugin/scripts/<name>`）。.quay/ 被 walk 跳过，故单独读文件。 */
+const CONFIG_GATE_RE = /(?:script|command):\s*"[^"\n]*plugin\/scripts\/([A-Za-z0-9._-]+)/g;
+
+/**
+ * 收集 §12e 闭包漏认的四类引用。返回的每个 ExtraRef 带载体行号/snippet，供 --check 逐条打印样本
+ * 命中（AC1）与 --dead-set 重算（AC3）。
+ */
+export function collectExtraRefs(root: string, scripts: string[]): ExtraRef[] {
+  const out: ExtraRef[] = [];
+  const scriptSet = new Set(scripts);
+  const add = (script: string, carrierFile: string, line: number, snippet: string, kind: ExtraRefKind) => {
+    if (!scriptSet.has(script)) return;
+    out.push({ script, carrier: { file: carrierFile, line, snippet }, kind });
+  };
+
+  // ① source-builtin：`source <path>` / `. <path>`。
+  for (const abs of walkSourceFiles(root)) {
+    const base = path.basename(abs);
+    if (base === "capability-catalog.sh") continue;
+    if (TEST_FILE_RE.test(base)) continue;
+    const ext = path.extname(abs);
+    const rel = path.relative(root, abs).split(path.sep).join("/");
+    let text: string;
+    try {
+      text = fs.readFileSync(abs, "utf8");
+    } catch {
+      continue;
+    }
+    const cleaned = ext === ".md" || ext === ".yml" || ext === ".yaml" ? text : stripCommentsIncludingHash(text);
+    SOURCE_BUILTIN_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = SOURCE_BUILTIN_RE.exec(cleaned)) !== null) {
+      // m.index 落在前导边界（如行首 \n）上，line/snippet 会指向上一行；改用脚本名实参的位置定位。
+      const nameIdx = cleaned.indexOf(m[1], m.index);
+      add(m[1], rel, lineOf(cleaned, nameIdx), snippetOf(cleaned, nameIdx), "source-builtin");
+    }
+  }
+
+  // ② test-pin：plugin/test/**/*.{mjs,ts,cjs,js} 里的裸文件名（存在性钉）。
+  const testDir = path.join(root, "plugin", "test");
+  if (fs.existsSync(testDir)) {
+    for (const abs of listFiles(testDir, new Set([".mjs", ".ts", ".cjs", ".js"]))) {
+      const rel = path.relative(root, abs).split(path.sep).join("/");
+      let text: string;
+      try {
+        text = fs.readFileSync(abs, "utf8");
+      } catch {
+        continue;
+      }
+      for (const hit of extractBareFilenameLiterals(text, scriptSet)) {
+        add(hit.value, rel, hit.line, hit.snippet, "test-pin");
+      }
+    }
+  }
+
+  // ③ config-gate：.quay/config.yml 里 gate 的 script:/command: 路径。
+  const cfgPath = path.join(root, ".quay", "config.yml");
+  if (fs.existsSync(cfgPath)) {
+    let cfg = "";
+    try {
+      cfg = fs.readFileSync(cfgPath, "utf8");
+    } catch { /* ignore */ }
+    const cleanedCfg = cfg.split("\n").map((l) => (/^\s*#/.test(l) ? "" : l)).join("\n");
+    CONFIG_GATE_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = CONFIG_GATE_RE.exec(cleanedCfg)) !== null) {
+      add(m[1], ".quay/config.yml", lineOf(cleanedCfg, m.index), snippetOf(cleanedCfg, m.index), "config-gate");
+    }
+  }
+
+  // ④ wrapper-delegate：同名 .sh/.ts 对，其中 .sh 在非注释位置委托给 .ts（node "$(dirname "$0")/<name>.ts"、
+  //    exec … "$SCRIPT_DIR/<name>.ts"、gate_delegate_ts "<name>.ts" 等）⇒ 加对称引用（.sh⇄.ts 成对保持，
+  //    避免「wrapper 被裁而 delegate 活着没了入口」/「delegate 被裁而 wrapper 活着没了模块」）。
+  const byBase = new Map<string, { sh?: string; ts?: string }>();
+  for (const s of scripts) {
+    const ext = path.extname(s);
+    if (ext !== ".sh" && ext !== ".ts") continue;
+    const base = s.slice(0, -ext.length);
+    const e = byBase.get(base) ?? {};
+    if (ext === ".sh") e.sh = s; else e.ts = s;
+    byBase.set(base, e);
+  }
+  for (const pair of byBase.values()) {
+    if (!pair.sh || !pair.ts) continue;
+    const shRel = path.relative(root, scriptAbsPath(root, pair.sh)).split(path.sep).join("/");
+    const tsRel = path.relative(root, scriptAbsPath(root, pair.ts)).split(path.sep).join("/");
+    let shText = "";
+    try {
+      shText = fs.readFileSync(scriptAbsPath(root, pair.sh), "utf8");
+    } catch {
+      continue;
+    }
+    const shCleaned = stripCommentsIncludingHash(shText);
+    if (!shCleaned.includes(pair.ts)) continue; // 非委托对（checker-cost / repo-root 等不引用同名 .ts）
+    const idx = shCleaned.indexOf(pair.ts);
+    const line = lineOf(shCleaned, idx);
+    const snippet = snippetOf(shCleaned, idx);
+    add(pair.ts, shRel, line, snippet, "wrapper-delegate");
+    add(pair.sh, tsRel, 1, `wrapper-delegate pair: ${pair.sh} ⇄ ${pair.ts}`, "wrapper-delegate");
+  }
+
+  // 按 (script, carrier, kind) 去重后排序，稳定输出。
+  const seen = new Set<string>();
+  return out
+    .filter((r) => {
+      const k = `${r.script}|${r.carrier.file}|${r.kind}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    })
+    .sort((a, b) => a.script.localeCompare(b.script) || a.kind.localeCompare(b.kind) || a.carrier.file.localeCompare(b.carrier.file));
+}
+
 export interface ReferenceMap {
   /** script → 引用它的文件（绝对路径）集合。 */
   referrers: Map<string, Set<string>>;
@@ -589,6 +752,7 @@ export function buildReferenceMap(
   scripts: string[],
   bareRefs: BareRef[],
   includeBare: boolean,
+  extraRefs: ExtraRef[] = [],
 ): ReferenceMap {
   const referrers = new Map<string, Set<string>>();
   const scriptSet = new Set(scripts);
@@ -663,6 +827,13 @@ export function buildReferenceMap(
       }
     }
   }
+  // (4) 四类引用边（source/. 内建、测试存在性钉、config gate 注册、wrapper→委托模块）——与 (3) 同理由
+  //     直接按载体路径加入（config.yml 在 .quay/、测试文件被 walk 排除、wrapper-delegate 载体是 sibling）。
+  //     ④ wrapper-delegate 的对称边在此处进入 referrers，由 computeKept 的不动点做「条件保持」（不无条件判活）。
+  for (const r of extraRefs) {
+    const carrierAbs = path.resolve(root, r.carrier.file);
+    if (carrierAbs !== scriptAbsPath(root, r.script)) referrers.get(r.script)!.add(carrierAbs);
+  }
   return { referrers };
 }
 
@@ -695,12 +866,17 @@ export function computeKept(
   executed: Map<string, number>,
   bareRefs: BareRef[],
   includeBare: boolean,
+  extraRefs: ExtraRef[] = [],
 ): Set<string> {
-  const { referrers } = buildReferenceMap(root, scripts, bareRefs, includeBare);
+  const { referrers } = buildReferenceMap(root, scripts, bareRefs, includeBare, extraRefs);
   const scriptSet = new Set(scripts);
   const kept = new Set<string>();
   // 根 1：执行（三天内有执行）
   for (const s of scripts) if ((executed.get(s) ?? 0) > 0) kept.add(s);
+  // 根 1b（新增）：被四类【直接】引用（source/. 执行、测试存在性钉、config.yml gate 注册）——都是明确的
+  //   「被使用」，不依赖载体是否交付面（硬规则 4b：执行/注册是直接量）。④ wrapper-delegate 不在此列，
+  //   由 referrers 对称边 + 不动点做条件保持（wrapper 被引用时才拉入 delegate，反之亦然）。
+  for (const r of extraRefs) if (r.kind !== "wrapper-delegate") kept.add(r.script);
   // 根 2：被非脚本交付面引用
   for (const s of scripts) {
     for (const f of referrers.get(s) ?? []) {
@@ -749,11 +925,12 @@ export function recomputeDeadSet(
   since: string,
   until: string,
   bareRefs: BareRef[],
+  extraRefs: ExtraRef[] = [],
 ): DeadSetRecompute {
   const scripts = listScriptBasenames(root);
   const executed = countExecutions(sessionsDir, since, until, scripts);
-  const keptBefore = computeKept(root, scripts, executed, bareRefs, false);
-  const keptAfter = computeKept(root, scripts, executed, bareRefs, true);
+  const keptBefore = computeKept(root, scripts, executed, bareRefs, false, extraRefs);
+  const keptAfter = computeKept(root, scripts, executed, bareRefs, true, extraRefs);
   const deadBefore = scripts.filter((s) => !keptBefore.has(s)).sort();
   const deadAfter = scripts.filter((s) => !keptAfter.has(s)).sort();
   const bareByScript = new Map<string, BareRef>();
@@ -765,7 +942,7 @@ export function recomputeDeadSet(
     generatedAt: new Date().toISOString(),
     root,
     sessionsDir,
-    method: "SPEC §12d (三天零执行 ∧ 无生产调用者) + §12e 传递闭包 + §12f 裸文件名边",
+    method: "SPEC §12d (三天零执行 ∧ 无生产调用者) + §12e 传递闭包（补 source/./测试存在性钉/config gate 注册/wrapper-delegate 四类引用）+ §12f 裸文件名边",
     executionDataSource: "manual 3-layer transcript census (AC4 method b; not runtime-usage-inventory.ts)",
     window: {
       since,
@@ -833,14 +1010,16 @@ export function main(argv: string[]): number {
   }
 
   if (mode === "dead-set") {
-    const bareRefs = scanBareFilenameRefs(root).refs;
+    const scan = scanBareFilenameRefs(root);
+    const bareRefs = scan.refs;
+    const extraRefs = scan.extraRefs;
     const now = new Date();
     const until = parseArg(argv, "--until") ?? now.toISOString();
     const since = parseArg(argv, "--since") ?? new Date(now.getTime() - 72 * 3600000).toISOString();
     const sessionsDir = path.resolve(
       parseArg(argv, "--sessions-dir") ?? path.join(os.homedir(), ".claude", "projects", "-home-yale-work-quay"),
     );
-    const result = recomputeDeadSet(root, sessionsDir, since, until, bareRefs);
+    const result = recomputeDeadSet(root, sessionsDir, since, until, bareRefs, extraRefs);
     if (!json) {
       const extractedNames = result.extractedByBareFilenameScan.map((e) => e.script);
       process.stdout.write(
@@ -886,13 +1065,26 @@ export function main(argv: string[]): number {
     return 3;
   }
   const afterDead = new Set(deadSet.after?.dead ?? []);
-  const violations = result.referencedScripts.filter((s) => afterDead.has(s));
+  // AC1：四类样本全部命中——任一样本 0 命中 ⇒ 报红（谓词写错），⛔ 不得判「无此类引用」（硬规则 2）。
+  for (const s of EXTRA_KIND_SAMPLES) {
+    const hit = result.extraRefs.find((r) => r.script === s.script && r.kind === s.kind && r.carrier.file === s.carrier);
+    if (!hit) {
+      process.stderr.write(
+        `RED: ${s.kind} known-sample ${s.script} not found by collector (expected carrier ${s.carrier}; predicate broken, not "no such ref")\n`,
+      );
+      return 1;
+    }
+    process.stdout.write(
+      `known-sample[${s.kind}] ${s.script} ← ${hit.carrier.file}:${hit.carrier.line}  ${hit.carrier.snippet}\n`,
+    );
+  }
+  const violations = result.allReferencedScripts.filter((s) => afterDead.has(s));
   if (violations.length > 0) {
-    process.stderr.write(`RED: bare-filename-referenced script(s) still in dead set: ${violations.join(", ")}\n`);
+    process.stderr.write(`RED: referenced script(s) still in dead set: ${violations.join(", ")}\n`);
     return 1;
   }
   process.stdout.write(
-    `PASS: bare-filename scan found ${result.refs.length} referenced script(s); ` +
+    `PASS: bare-filename scan found ${result.refs.length} referenced script(s) + ${result.extraRefs.length} extra-kind ref(s); ` +
     `${KNOWN_SAMPLE} hits ${KNOWN_SAMPLE_CARRIER}; none in dead set (after=${deadSet.after?.deadCount})\n`,
   );
   return 0;
