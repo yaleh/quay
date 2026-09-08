@@ -54,20 +54,20 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 三条详情路由补齐外壳样式：对运行中的实例跑
+- [x] AC1 三条详情路由补齐外壳样式：对运行中的实例跑
       `for p in /goal/<id> /adr/<id> /doc/<id>; do curl -s "$BASE$p" | grep -c '\.mobile-chrome {'; done`，
       三个数字**均 ≥1**。取假：改动前跑同一条命令三个数字均为 `0`（已实测）。
-- [ ] AC2 判据是**枚举**而非抽查：新测试遍历路由注册表里**全部**页面路由，断言「HTML 含 `class="site-nav"`」
+- [x] AC2 判据是**枚举**而非抽查：新测试遍历路由注册表里**全部**页面路由，断言「HTML 含 `class="site-nav"`」
       ⇒「HTML 含 `.mobile-chrome {`」对每一条成立，并在断言失败时打印**违例路由清单**（条数 + 路由名），
       而不是只报一个布尔（硬规则 3 枚举不布尔）。
-- [ ] AC3 判据能取假（mutation 负控制）：测试中以一段「只调 `renderSiteNav()` 不调外壳样式」的 HTML 字符串
+- [x] AC3 判据能取假（mutation 负控制）：测试中以一段「只调 `renderSiteNav()` 不调外壳样式」的 HTML 字符串
       喂给 AC2 的纯判定函数，断言它**报红**；再喂一段两者齐全的，断言它**报绿**。两个方向都断言，
       不只断言绿的那一侧。
-- [ ] AC4 移动端形态恢复：390×844 视口下对三条详情路由断言
+- [x] AC4 移动端形态恢复：390×844 视口下对三条详情路由断言
       `getComputedStyle(document.querySelector('.site-nav')).display === 'none'` 且
       `document.documentElement.scrollWidth === document.documentElement.clientWidth`。
       取假：改动前实测为 `block` 与 `792 !== 390`。
-- [ ] AC5 `bash scripts/test.sh --for-task gap-webui-detail-page-head-drops-pagestyles` 退出码 0。
+- [x] AC5 `bash scripts/test.sh --for-task gap-webui-detail-page-head-drops-pagestyles` 退出码 0。
 
 ## Definition of Done
 
