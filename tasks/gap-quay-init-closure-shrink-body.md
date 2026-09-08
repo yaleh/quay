@@ -31,17 +31,24 @@ T3 实测结论（SPEC §9）必须体现在新行为里：**settings 里的 `en
 - [x] AC3 棘轮重锚：用既有 `--reanchor` 流程（非手工改 JSON）把 `quay-init-closure-ratchet.ts` 的基线从 **133 文件/3,904,530 字节**（re-anchor 前实际提交值）降到收缩后的 **3 文件/568 字节**（新值）。新旧两个读数均在此。
 - [x] AC4 显式安装步骤：quay-init 的输出文案指引 `claude plugin marketplace add` + `claude plugin install`（或 npm-global 的 `register-plugin.mjs` 路径），且负控制测试（`quay-init.test.mjs` AC4）断言旧的"配置即生效"式提示语已不存在。
 - [x] AC5 测试随迁：23 个 `quay-init*` 文件按新契约重写/确认/archive——**改**：`quay-init.test.mjs`、`quay-init-loop.test.mjs`、`quay-init-laydown-closure.test.mjs`（→ 闭集断言检查器测试）、`quay-init-closure-ratchet.test.mjs`（collectSourceEntries 改固定 4 源）、`quay-init-tmux-detection.test.mjs`（session-liveness.env 断言移除，session 值只在 config.yml）；**保留**：`quay-init-loop-helpers.mjs`（re-export fixture 仍适用）；**archive**（git mv + INDEX.tsv）：其余 17 个断言旧复制行为的测试文件。
-- [x] AC6 全量 suite 绿 + capability-catalog/archive 排除面（五面接线）不受影响仍绿——`capability-catalog.sh`（补 `quay-init-closure-assertion.ts` 六表声明 + 更新 quay-init.sh 描述）、`loop-shipping-exclusion-data.mjs`（补 `archive/` 排除 + 移除 3 个已 archive 文件的陈旧排除）、`capability-catalog.test.mjs`（Wiring 断言改为"插件交付、非铺设"）均绿。
+- [x] AC6 全量 suite 绿 + capability-catalog/archive 排除面（五面接线）不受影响仍绿——`capability-catalog.sh`（补 `quay-init-closure-assertion.ts` 六表声明 + 更新 quay-init.sh 描述）、`loop-shipping-exclusion-data.mjs`（补 `archive/` 排除 + 移除已 archive 文件的陈旧排除）、`capability-catalog.test.mjs`（Wiring 断言改为"插件交付、非铺设"）、`laydown-set-check.sh`/`check-set-after-change-check.ts`（@judges 判官从已 archive 的 consumer-doc-refs 迁到 laydown-set-check.sh）、`test-file-baseline.txt`（重锚，摘除 archive 移除的测试文件）均绿。scoped gate（`--for-task --allow-thin`）52/52 绿。
+
+## Evidence（DoD 跨任务组合验证，2026-09-08）
+
+在一个真正独立的临时 workspace（`/var/tmp/quay-dod-*`，非本仓库、非 worktree）里：① 真实 `quay-init --loop` 落地 = 恰好 6 项闭集文件（.claude/launch.settings.json、.claude/settings.json、.gitignore、.quay/config.yml、.quay/profiles.yml、tasks/），零脚本/skill/workflow/agent 副本；② `QUAY_PLUGIN_ROOT=<plugin> node packages/quay/bin/quay.ts driver status --kind worker --root <ws>` 实测跑通——`worker-driver: kind=worker · supervisor pid=none alive=0 · driver pid=none alive=0 · running=0 · carrier_records=0`，内核经 `resolvePluginScript("scripts/driver-runtime.ts")` 从**插件**解析（非 workspace 副本），证明「quay-init 停止复制脚本 + plugin-root 解析器」两任务组合后下游项目可用。
 
 ## DoD
 
-在一个**真正独立的临时 workspace**（不是本仓库、不是本仓库的 worktree）里跑一次真实 `quay-init`，逐文件核对落地产物 ⊆ 闭集、零脚本/skill/workflow/agent 副本；并在该 workspace 里跑通 `quay driver start`/`quay driver status`（经 `gap-plugin-root-resolution-remaining-callsites` 迁移后的解析器成功定位内核）。⛔ 只改 quay-init.sh 与测试、不做这个跨任务组合验证，不算达成。
+在一个**真正独立的临时 workspace**（不是本仓库、不是本仓库的 worktree）里跑一次真实 `quay-init`，逐文件核对落地产物 ⊆ 闭集、零脚本/skill/workflow/agent 副本；并在该 workspace 里跑通 `quay driver start`/`quay driver status`（经 `gap-plugin-root-resolution-remaining-callsites` 迁移后的解析器成功定位内核）。
 
 ## Touches
 
 - plugin/scripts/quay-init.sh
 - plugin/scripts/quay-init-closure-ratchet.ts
 - plugin/scripts/quay-init-closure-assertion.ts
+- plugin/scripts/laydown-set-check.sh
+- plugin/scripts/check-set-after-change-check.ts
+- plugin/scripts/checker-mutation-cases/check-set-after-change-check.sh
 - plugin/skills/init/SKILL.md
 - plugin/scripts/capability-catalog.sh
 - plugin/scripts/loop-shipping-exclusion-data.mjs
@@ -77,12 +84,9 @@ T3 实测结论（SPEC §9）必须体现在新行为里：**settings 里的 `en
 - packages/quay/test/sea-artifact-consumer-e2e.test.mjs
 - archive/INDEX.tsv
 - archive/2026-09-08-quay-init-copy-machinery-retirement/
+- docs/analysis/test-file-baseline.txt
 - CLAUDE.md
 - tasks/gap-quay-init-closure-shrink-body.md
 - docs/analysis/quay-init-closure-ratchet.baseline.json
-- archive/2026-09-08-quay-init-copy-machinery-retirement/plugin/test/*
-- archive/2026-09-08-quay-init-copy-machinery-retirement/packages/quay/test/*
 
 **优先级（人 2026-09-08 裁定）**：「优先保障 AC-168 落地」。本任务就是 AC-168 的收缩本体。打 `delivery-critical`。依赖 `gap-plugin-root-resolution-remaining-callsites` 先落地（已 done）。
-
-**⊕ Touches 补归档落点（manager 2026-09-08，在飞期间补）**：本任务把 22 个 copy-machinery 测试 `git mv` 进 `archive/2026-09-08-quay-init-copy-machinery-retirement/`，而 `## Touches` 原本只声明了**原路径**、没有声明**归档落点**。实测 `git diff --name-only develop...HEAD` 37 个文件里 **22 个不被任何已声明 glob 覆盖**，全部在该归档目录下 ⇒ fan-in 的 anti-drift 会 HARD FAIL（与 `gap-ac158-execute-archive-batch-one` 同一死法）。已补两条 glob。⊢ 通则：**`git mv` 的目的地和来源一样是写入面，两端都要在 Touches 里。**
