@@ -1,7 +1,7 @@
 {
   "files": 133,
-  "bytes": 3885790,
-  "fingerprint": "928109306d6a1cfc07f1b269631527f9e2ed835d7c084975f96fbfbfc4433cff",
+  "bytes": 3889915,
+  "fingerprint": "1d75360fb081a08e9a206ea2cd3c82ad11c6134945bed3757c12d2205c0f3fc5",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
@@ -149,7 +149,7 @@
     },
     {
       "rel": "plugin/scripts/dispatch-worktree-setup.sh",
-      "sha": "04cd291c6fa8226c933f2793c89aea4ac627f58535325293dbdf3ef5af63d12d"
+      "sha": "fed5970ec279a15826c2d9a62f034e69a04cd9b88468aba6b77c3a3f56abd1c1"
     },
     {
       "rel": "plugin/scripts/drive-target-check.sh",
@@ -181,7 +181,7 @@
     },
     {
       "rel": "plugin/scripts/fast-mode-telemetry.ts",
-      "sha": "a26dd905ddf4eb3302ea17bb29966f1bbfdeee214ce688f63e1ad64169e17ae9"
+      "sha": "8ed01ca1ac5f621767c756620656efce6e68f172733b9d00e122e023881693f1"
     },
     {
       "rel": "plugin/scripts/fork-baseline.ts",
@@ -505,7 +505,7 @@
     },
     {
       "rel": "plugin/scripts/worker-driver.ts",
-      "sha": "d9c208da4e77897ce040dbacdf0e1c438ce9336853318afbc649e49896be1e46"
+      "sha": "77eeace51ee47a6bff213faabbbaaa01edc5b0c6ad690b24482c68c8e0d3a284"
     },
     {
       "rel": "plugin/scripts/workflow-event-schema.mjs",
