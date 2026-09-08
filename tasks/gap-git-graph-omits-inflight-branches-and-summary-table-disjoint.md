@@ -2,7 +2,7 @@
 id: gap-git-graph-omits-inflight-branches-and-summary-table-disjoint
 title: git-history 的泳道只由「主干合并提交的父链」反推 ⇒ 只画已合并分支，5 条在飞 worktree 分支的 38
   条提交一条不画；同页汇总表另用 --source 活 ref 分组，两套分支模型的名字集合交集为空
-status: todo
+status: ready
 labels:
   - gap
   - webui
