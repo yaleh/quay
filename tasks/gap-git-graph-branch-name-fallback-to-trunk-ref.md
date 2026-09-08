@@ -46,18 +46,18 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1 生产载体读数：加载 `/git-history`，对 `#git-graph-data` 的 `branches[].ref` 求直方图，断言
+- [x] AC1 生产载体读数：加载 `/git-history`，对 `#git-graph-data` 的 `branches[].ref` 求直方图，断言
       **最大同名条数 / lane 总数 < 0.5**（即不再出现「全体同名」）。取假：改动前实测 `{develop: 28}`，比值 1.0。
-- [ ] AC2 生产载体读数：断言至少有 **≥1 条** lane 的 `ref` 能与同页某条 trunk 提交 subject 里
+- [x] AC2 生产载体读数：断言至少有 **≥1 条** lane 的 `ref` 能与同页某条 trunk 提交 subject 里
       `into task/<id>` 捕获出的 `<id>` 对上（证明取到的是真名，不是任意别的字符串）。
       失败时打印对不上的 lane 清单与条数，而非布尔。
-- [ ] AC3 「未解析」不与「已解析」同形（硬规则 3b 的直接落实）：单测断言当 `heads` 为空且 subject 无法解析时，
+- [x] AC3 「未解析」不与「已解析」同形（硬规则 3b 的直接落实）：单测断言当 `heads` 为空且 subject 无法解析时，
       命名函数返回的取值**不等于任何真实分支名**、且携带一个可判定的 `unresolved` 标记；断言
       `branchNameOf` 的旧 `:254` fallback 在同一输入下返回 `develop`（红），新实现返回 unresolved（绿）。
-- [ ] AC4 负控制（回答硬规则 4 推论四：附一个 Y 为假则结果不同的对照）：构造两个 fixture——(a) 分支 tip 仍在
+- [x] AC4 负控制（回答硬规则 4 推论四：附一个 Y 为假则结果不同的对照）：构造两个 fixture——(a) 分支 tip 仍在
       `heads` 中，(b) 分支已删除只剩合并提交——断言两者都解析出**同一个**分支名。若 (b) 解析不出而 (a) 能，
       说明只修了一半。
-- [ ] AC5 `bash scripts/test.sh --for-task gap-git-graph-branch-name-fallback-to-trunk-ref` 退出码 0。
+- [x] AC5 `bash scripts/test.sh --for-task gap-git-graph-branch-name-fallback-to-trunk-ref` 退出码 0。
 
 ## Definition of Done
 

@@ -1,7 +1,7 @@
 ---
 id: gap-mechanical-fan-in-loses-per-phase-accounting
 title: 机械 fan-in 的 --buckets 轮只记一条 lanes=1 的 static 相，main/serial/lowconc 分相记账与 PSI 全失
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -69,3 +69,4 @@ psi_cpu_total: null, psi_io_total: null}`，**没有任何一轮含 `main` / `se
 - plugin/test/suite-accounting.test.mjs
 - plugin/test/worker-driver.test.mjs
 - tasks/gap-mechanical-fan-in-loses-per-phase-accounting.md
+- docs/analysis/quay-init-closure-ratchet.baseline.json

@@ -1,7 +1,7 @@
 ---
 id: gap-meta-ffpushtodevelop
 title: semantic 兜底 ff-push 丢弃 git stderr —— 8 次 semantic-ff-failed 不可归因
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate

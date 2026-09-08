@@ -2,7 +2,7 @@
 id: gap-webui-tests-page-unpaginated-tables
 title: /tests 两张表零分页共 114,161px（1267 行 + 571 行），而分页机制早已存在于 serve-render.ts 并被
   /board 接线 —— 修好一处不等于只有一处（硬规则 5b）
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -43,17 +43,17 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 生产载体读数：加载 `/tests`，断言 `document.documentElement.scrollHeight < 20000`。
+- [x] AC1 生产载体读数：加载 `/tests`，断言 `document.documentElement.scrollHeight < 20000`。
       取假：改动前实测 **114,161**。
-- [ ] AC2 分页控件存在且可用：断言页面上 `Page size` 档位链接与 `Next »` 链接**均存在**；
+- [x] AC2 分页控件存在且可用：断言页面上 `Page size` 档位链接与 `Next »` 链接**均存在**；
       点击 `Next »` 后断言首行的 round 编号与点击前**不同**（证明真的翻页，不是渲染了个装饰）。
-- [ ] AC3 服务端切片而非客户端隐藏：断言 `curl "/tests?...&pageSize=20"` 的响应体里 `<tr` 出现次数
+- [x] AC3 服务端切片而非客户端隐藏：断言 `curl "/tests?...&pageSize=20"` 的响应体里 `<tr` 出现次数
       **<= 20 + 表头数**。取假：改动前实测 1267 + 571 行全在响应体里。
-- [ ] AC4 枚举全部列表表格（硬规则 5b 的产物，缺它视为只修了被报出来的那一个）：在测试或提交信息中给出
+- [x] AC4 枚举全部列表表格（硬规则 5b 的产物，缺它视为只修了被报出来的那一个）：在测试或提交信息中给出
       `grep -rn "<table" packages/quay/src/serve-*.ts` 的**命中数与前 3 条实际内容**，并逐条标注
       「已接分页 / 无需分页（行数有上界，注明上界来源）/ 待接」；不得有未标注项。
-- [ ] AC5 传输量：断言 `/tests` 默认响应体字节数 **< 120,000**。取假：改动前实测 665,105。
-- [ ] AC6 `bash scripts/test.sh --for-task gap-webui-tests-page-unpaginated-tables` 退出码 0。
+- [x] AC5 传输量：断言 `/tests` 默认响应体字节数 **< 120,000**。取假：改动前实测 665,105。
+- [x] AC6 `bash scripts/test.sh --for-task gap-webui-tests-page-unpaginated-tables` 退出码 0。
 
 ## Definition of Done
 
