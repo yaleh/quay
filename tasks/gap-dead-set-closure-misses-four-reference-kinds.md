@@ -41,13 +41,13 @@ extra:
 
 ## AC
 
-- [ ] AC1 四类样本全部命中：`node --experimental-strip-types plugin/scripts/registry-bare-filename-scan.ts --check` exit 0，且 stdout 逐条打印四个已知为真样本各自的命中载体（任一样本 0 命中 ⇒ 报红退出非 0，**不得静默判「无此类引用」**）
-- [ ] AC2 负控制（能取假，且今天就能取假）：在**修复前的 82 名单**上跑 `--check` ⇒ **exit 非 0** 且 stderr 含 `suite-slot-lib.sh`（当前实测为 `exit 0` + `PASS … none in dead set (after=82)` 的假绿，故本条能区分修没修）
-- [ ] AC3 新名单零交集：重算后 `docs/analysis/dead-set-recomputed.json` 的 `after.dead` ∩ {`suite-slot-lib.sh`, DIR-070 所钉十名, `.quay/config.yml` 注册六名} == ∅（python3 一条可查，打印交集内容而非只打印计数）
-- [ ] AC4 SPEC 同源：`grep '^- 扫描后死集: ' orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md` 取出的数字 == 重算后的 `after.deadCount`
-- [ ] AC5 产物 provenance 已刷新：重算后 `docs/analysis/dead-set-recomputed.json` 的 `generatedAt` 严格晚于本任务实现落地时刻（⛔ 手工改 JSON 会留旧 `generatedAt`，本条据此取假）
-- [ ] AC6 `node plugin/scripts/task-schema-check.ts tasks/gap-dead-set-closure-misses-four-reference-kinds.md` exit 0
-- [ ] AC7 全量 `scripts/test.sh` exit 0
+- [x] AC1 四类样本全部命中：`node --experimental-strip-types plugin/scripts/registry-bare-filename-scan.ts --check` exit 0，且 stdout 逐条打印四个已知为真样本各自的命中载体（任一样本 0 命中 ⇒ 报红退出非 0，**不得静默判「无此类引用」**）
+- [x] AC2 负控制（能取假，且今天就能取假）：在**修复前的 82 名单**上跑 `--check` ⇒ **exit 非 0** 且 stderr 含 `suite-slot-lib.sh`（当前实测为 `exit 0` + `PASS … none in dead set (after=82)` 的假绿，故本条能区分修没修）
+- [x] AC3 新名单零交集：重算后 `docs/analysis/dead-set-recomputed.json` 的 `after.dead` ∩ {`suite-slot-lib.sh`, DIR-070 所钉十名, `.quay/config.yml` 注册六名} == ∅（python3 一条可查，打印交集内容而非只打印计数）
+- [x] AC4 SPEC 同源：`grep '^- 扫描后死集: ' orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md` 取出的数字 == 重算后的 `after.deadCount`
+- [x] AC5 产物 provenance 已刷新：重算后 `docs/analysis/dead-set-recomputed.json` 的 `generatedAt` 严格晚于本任务实现落地时刻（⛔ 手工改 JSON 会留旧 `generatedAt`，本条据此取假）
+- [x] AC6 `node plugin/scripts/task-schema-check.ts tasks/gap-dead-set-closure-misses-four-reference-kinds.md` exit 0
+- [ ] AC7 全量 `scripts/test.sh` exit 0（待外部）
 
 ## DoD
 
