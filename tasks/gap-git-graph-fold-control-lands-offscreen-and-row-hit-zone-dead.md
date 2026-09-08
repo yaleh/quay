@@ -29,11 +29,11 @@ extra:
 
 ## AC
 
-- [ ] AC1 展开态下，被展开分支的**顶端行**（原摘要行 y）存在可点击的折叠控件：渲染后断言 `折叠` 控件的 y ∈ [laneTopY − 8, laneTopY + 8]，`node --test packages/quay/test/gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead.test.mjs` 退出码 0。
-- [ ] AC2 每个摘要行/折叠控件带一个透明命中矩形：断言渲染出的 `rect.git-svg-hit` 数 = 泳道数，且每个 `width` ≥ (textX − trunkX)。
-- [ ] AC3 负控制：测试内显式渲染一版不含命中矩形的输出，断言 AC2 的计数为 0 ⇒ 判据能取假。
-- [ ] AC4 折叠控件与同行主干文字 bbox 交集为空：复用 `gap-git-history-lane-identity-and-row-layout-overlap.test.mjs` 的 bbox 求交手法，断言相交对数 = 0。
-- [ ] AC5 `curl -s -o /dev/null -w '%{http_code} %{redirect_url}' http://127.0.0.1:4174/git` 返回 301 或 302，且 redirect_url 以 `/git-history` 结尾。
+- [x] AC1 展开态下，被展开分支的**顶端行**（原摘要行 y）存在可点击的折叠控件：渲染后断言 `折叠` 控件的 y ∈ [laneTopY − 8, laneTopY + 8]，`node --test packages/quay/test/gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead.test.mjs` 退出码 0。
+- [x] AC2 每个摘要行/折叠控件带一个透明命中矩形：断言渲染出的 `rect.git-svg-hit` 数 = 泳道数，且每个 `width` ≥ (textX − trunkX)。
+- [x] AC3 负控制：测试内显式渲染一版不含命中矩形的输出，断言 AC2 的计数为 0 ⇒ 判据能取假。
+- [x] AC4 折叠控件与同行主干文字 bbox 交集为空：复用 `gap-git-history-lane-identity-and-row-layout-overlap.test.mjs` 的 bbox 求交手法，断言相交对数 = 0。
+- [x] AC5 `curl -s -o /dev/null -w '%{http_code} %{redirect_url}' http://127.0.0.1:4174/git` 返回 301 或 302，且 redirect_url 以 `/git-history` 结尾。
 
 ## DoD
 
@@ -45,4 +45,5 @@ extra:
 - packages/quay/src/serve-handlers.ts（添加 `/git` → `/git-history` 重定向）
 - packages/quay/test/gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead.test.mjs（本任务的回归测试）
 - packages/quay/test/serve-nav-inconsistent-routes.test.mjs（路由重定向用例）
+- packages/quay/test/gap-git-graph-lane-visual-encoding-and-fixed-width.test.mjs（折叠控件 chip 位置字符串断言随 y(laneBot)→y(foldRow) 更新）
 - tasks/gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead.md
