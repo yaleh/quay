@@ -183,7 +183,8 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
   const byHash = new Map(history.commits.map((c) => [c.hash, c]));
   // Trunk = first-parent chain from HEAD (the mainline that receives the fan-in merges). When HEAD
   // is unresolvable, fall back to the newest commit — the layout still yields a vertical trunk.
-  let cur: string | null = history.head ?? pickHead(history);
+  const trunkRoot = history.head ?? pickHead(history);
+  let cur: string | null = trunkRoot;
   const trunkHashes: string[] = [];
   const seen = new Set<string>();
   while (cur && byHash.has(cur) && !seen.has(cur)) {
@@ -197,7 +198,13 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
     return { hash: c.hash, t: c.t, parents: c.parents, subject: c.subject };
   };
   const trunk = {
-    ref: branchNameOf(history, history.head ?? trunkHashes[0] ?? ""),
+    // gap-git-graph-trunk-ref-resolves-to-head-not-mainline: the trunk name is the mainline ref
+    // (develop > master), NOT the HEAD branch name — the main checkout is usually on `author`, so
+    // the old `branchNameOf(history, history.head)` named the trunk `author` even when `author`
+    // and `develop` pointed at the same commit (and the summary table + guide prose both said
+    // `develop`). Merge-subject resolution is only the fallback when no mainline ref exists AND
+    // no head matches a tip.
+    ref: resolveTrunkRef(history.heads ?? {}, trunkRoot) || (trunkRoot ? branchNameOf(history, trunkRoot) : ""),
     commits: trunkHashes.map(toCommit).reverse(), // oldest → newest
   };
 
@@ -359,6 +366,30 @@ export function resolveBranchName(history: GitHistoryResult, hash: string): Bran
 /** Branch name for a tip commit (the display string the graph renders). */
 function branchNameOf(history: GitHistoryResult, hash: string): string {
   return resolveBranchName(history, hash).name;
+}
+
+/**
+ * Resolve the vertical trunk's display name with SEMANTIC mainline priority
+ * (gap-git-graph-trunk-ref-resolves-to-head-not-mainline): `develop > master > the HEAD branch
+ * name`. The mainline priority matters because this repo's main checkout is usually on `author`,
+ * and `author` often points at the same commit as `develop` — taking the HEAD branch name then
+ * names the trunk `author`, contradicting the summary table + guide prose that both say `develop`
+ * (three contradictory口径 on one page). develop/master are checked for PRESENCE (not tip
+ * equality): a mainline ref names the trunk line even when HEAD has temporarily diverged past it.
+ *
+ * Returns "" only when no mainline ref exists AND no head matches a tip — the caller then falls
+ * back to merge-subject resolution (branchNameOf), preserving the pre-existing behaviour for a
+ * repo with neither develop nor master. Pure and directly importable (no git, no I/O).
+ */
+export function resolveTrunkRef(heads: Record<string, string>, head: string | null): string {
+  if (heads["develop"] !== undefined) return "develop";
+  if (heads["master"] !== undefined) return "master";
+  if (head !== null) {
+    for (const [name, tip] of Object.entries(heads)) {
+      if (tip === head) return name;
+    }
+  }
+  return "";
 }
 
 // ── D3 inlining (the third-party library the retired 「零客户端 JS」 invariant now permits) ──
@@ -606,6 +637,12 @@ export function gitGraphClientScript(): string {
     g.append("line").attr("class", "git-svg-trunk")
       .attr("x1", trunkX).attr("x2", trunkX).attr("y1", y(tMin)).attr("y2", y(tMax));
 
+    // Trunk name chip at the top of the trunk spine (gap-git-graph-trunk-ref-resolves-to-head-not-
+    // mainline): labels the trunk lane with its resolved name (develop/master) so the graph, the
+    // summary table and the guide prose all name the same ref. Drawn in the trunk's neutral-700
+    // (the same dark neutral as the spine) with the high-contrast white chip text.
+    appendChip(g, trunkX - 6, y(tMin) - 8, trunk.ref, "var(--color-neutral-700)");
+
     // Per-lane first/last rows, derived from the items themselves (never a lossy key lookup).
     var laneTopRow = {}, laneBotRow = {};
     items.forEach(function (it) {
@@ -744,6 +781,10 @@ function renderGitHistoryPage(history: GitHistoryResult): string {
   const nCommits = history.commits.length;
   const branches = history.status === "ok" ? groupCommitsByBranch(history.commits) : [];
   const mergeCount = history.commits.filter((c) => c.parents > 1).length;
+  // gap-git-graph-trunk-ref-resolves-to-head-not-mainline: the guide prose must name the SAME ref
+  // the trunk lane + summary table name (develop/master), never a hardcoded "develop" that could
+  // disagree with an author-named trunk. Falls back to "develop" only when there is no graph.
+  const trunkRef = layout ? layout.trunk.ref : "develop";
 
   const graph = layout
     ? html`<div id="git-graph" aria-label="Git 纵向时间轴" style="overflow-x:auto">${gitGraphLegendHtml()}</div>`
@@ -780,7 +821,7 @@ function renderGitHistoryPage(history: GitHistoryResult): string {
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — vertical commit timeline (third-party library, client-rendered)">${modernistStyles()}${pageStyles()}<title>Git history — vertical commit timeline</title></head>
     <body>${renderMobileChrome("git", "git history")}${renderSiteNav("git")}<main id="main">
       <h1>Git History — 提交纵向时间轴</h1>
-      <p class="meta"><strong>纵轴 = 提交落地顺序（git commit time），不是工时/持续时间。</strong> develop 竖直主干 + task 分支从主干分出（fork）/合入（merge）的连线；task 分支默认折叠（只显提交数与时间跨度，点击展开逐条）。菱形 = 合并提交（fan-in 落地事件）。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并（跨所有本地分支）。</p>
+      <p class="meta"><strong>纵轴 = 提交落地顺序（git commit time），不是工时/持续时间。</strong> ${escapeHtml(trunkRef)} 竖直主干 + task 分支从主干分出（fork）/合入（merge）的连线；task 分支默认折叠（只显提交数与时间跨度，点击展开逐条）。菱形 = 合并提交（fan-in 落地事件）。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并（跨所有本地分支）。</p>
       ${statusNote}
       ${graph}
       ${laneTokenStyles}
