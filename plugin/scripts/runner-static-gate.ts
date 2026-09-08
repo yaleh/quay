@@ -752,6 +752,21 @@ run_operational_checks() {
   # worktree. Pointing --root at the main checkout makes the worktree round read the SAME carriers as
   # a main run (verdicts identical); on a main run main_root == repo_root ⇒ unchanged.
   run_checker "instrument-decay-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/instrument-decay-check.ts" --root "${main_root}" --no-block
+  echo "== release-freshness deliver-orphan detector (gap-deliver-verification-trigger-orphaned-after-land-path-migration, AC4/AC5) =="
+  # The deliver orphan detector: how far develop has run ahead of the last cross-host deliver
+  # (.quay/develop-deliver-state.json, written by develop-deliver-tgz.sh). stale OR not-evaluated
+  # (state file missing / unreadable) ⇒ exit 1 (RED) — the "file absent" state is NOT 合格 (硬规则 3b;
+  # that silence is how the trigger went 18 days orphaned with nothing red). Fail-closed (no --no-block):
+  # a stale/missing deliver is a persistent "the trigger stopped" condition, not a transient round
+  # state — the ACTIVE host's opt-in `--static-checks-operational` SHOULD go red until the trigger
+  # runs again. Not in the full-suite gate (operational class), so a passive checkout stays green on
+  # code alone.
+  # @static-tier full  (whole-store runtime-state observability — deferred to the full-suite gate in scoped mode)
+  # @static-class operational
+  # @static-object .quay/develop-deliver-state.json plugin/scripts/release-freshness-check.sh plugin/scripts/develop-deliver-tgz.sh plugin/scripts/checker-mutation-cases/release-freshness-check.sh plugin/test/release-freshness-check.test.mjs
+  # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): the .quay/develop-deliver-state.json
+  # carrier is MAIN-checkout gitignored runtime state, absent from the one-shot verify worktree.
+  run_checker "release-freshness-check" bash "${repo_root}/plugin/scripts/release-freshness-check.sh" --root "${main_root}" --deliver --json
   # Wait for all parallelized checkers and fail closed if any failed (same barrier as
   # run_static_checks — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait

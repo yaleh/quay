@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # @instrument "After a develop merge, was a FRESH hardware-independent quay .tgz built at the develop tip and delivered+verified (quay serve http_code=200) on the verification machines B/C (DIR-123 每次 merge 后自动 deliver)?"
-# develop-deliver-tgz.sh — DIR-123 (人裁定 2026-08-11): after every develop merge, deliver a
-# FRESH, hardware-independent quay artifact to the verification machines B/C and prove it runs.
+# develop-deliver-tgz.sh — DIR-123 (人裁定 2026-08-11) deliver mechanism, RE-ANCHORED as the
+# LOW-FREQUENCY trigger (gap-deliver-verification-trigger-orphaned-after-land-path-migration): the
+# per-merge hook that used to live in integration-batch-merge.sh is RETIRED (the land path moved to
+# worker-driver.ts's mechanical fan-in, which never delivers). Invoke THIS script on a low-frequency
+# anchor (OS cron / manager); it self-throttles (see --check/--max-age) and delivers a FRESH,
+# hardware-independent quay artifact to the verification machines B/C, proving it runs.
 #
 # WHY .tgz AND NOT SEA (manager 2026-08-11 measured finding + outer verification):
 #   quay's NORMAL artifact is hardware-independent: dist/quay.js is pure JS
@@ -14,7 +18,7 @@
 #   complexity does not need to exist (node-free aarch64 SEA stays an explicitly-out-of-scope future
 #   option, recorded in the DIR-123 task Finding).
 #
-# FLOW (per land closure, best-effort — a remote being down must never fail the merge):
+# FLOW (best-effort — a remote being down must never fail the trigger):
 #   1. build quay + quay-native .tgz from a detached worktree AT THE DEVELOP TIP (git worktree add
 #      --detach <develop-tip>) — NOT the primary checkout HEAD, which may be integration ahead with
 #      untested commits; the delivered artifact must exactly correspond to the merged commit.
@@ -28,11 +32,26 @@
 #      offline-runnable subset of three-layer-core-named scripts — assert exit 0 + non-empty output).
 #   5. write develop-deliver-state.json (lastDelivered commit + per-host http_code + timestamp).
 #
+# LOW-FREQUENCY TRIGGER (gap-deliver-verification-trigger-orphaned-after-land-path-migration):
+#   This script is NOW the low-frequency deliver trigger — the cron anchor entry point — after the
+#   land path migrated off integration-batch-merge.sh (DIR-123's per-merge --deliver hook there is
+#   RETIRED; nothing on the mechanical fan-in sync path calls this). Invoke it directly (or from a
+#   low-frequency OS cron / manager anchor); it self-throttles on direct quantities so a caller can
+#   fire it as often as it likes and it only delivers when the develop tip has moved PAST the last
+#   delivered commit AND the last deliver is older than --max-age (default 6h). A remote being down
+#   must never fail the caller: the deliver is still best-effort (recorded in state.json, retried
+#   on the next trigger).
+#
 # USAGE:
 #   bash plugin/scripts/develop-deliver-tgz.sh [--root <repo>] [--hosts "B C"] [--force]
-#     --root   repo root (default: auto-derived from this script's location)
-#     --hosts  space-separated host keys (default "B C"; B=orangevps, C=ad-arm1)
-#     --force  rebuild + re-deliver even if state.json already shows develop tip delivered
+#                                             [--check] [--max-age <seconds>]
+#     --root     repo root (default: auto-derived from this script's location)
+#     --hosts    space-separated host keys (default "B C"; B=orangevps, C=ad-arm1)
+#     --force    rebuild + re-deliver even if state.json already shows develop tip delivered
+#     --check    compute the trigger decision ONLY (fresh|too-soon|deliver) from direct quantities
+#                and print it (JSON + one line) — do NOT build/scp/install/verify. Exit 0.
+#     --max-age  low-frequency hold in seconds: when the develop tip has moved but the last deliver
+#                is younger than this, decision=too-soon (no deliver). Default 21600 (6h).
 #
 # Host table (B/C node paths verified 2026-08-11 by outer ssh probes):
 #   B = orangevps.wan.hwang.men   node: ~/.nvm/versions/node/v22.23.1/bin (also v25.2.0)
@@ -43,21 +62,31 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-state_file="${repo_root}/.quay/develop-deliver-state.json"
-worktree_base="${repo_root}/.quay/deliver-worktree"   # under repo (gitignored .quay/), NOT /tmp (tmpfs)
 verify_port=18091
 ssh_opts=(-o BatchMode=yes -o ConnectTimeout=8)
 
 hosts="B C"
 force=0
+check_only=0
+max_age=21600   # low-frequency hold: don't re-deliver within this many seconds of the last deliver (6h)
 while [ $# -gt 0 ]; do
   case "$1" in
     --root) repo_root="$2"; shift 2 ;;
     --hosts) hosts="$2"; shift 2 ;;
     --force) force=1; shift ;;
+    --check) check_only=1; shift ;;
+    --max-age) max_age="$2"; shift 2 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
+case "${max_age}" in
+  ''|*[!0-9]*) echo "develop-deliver: --max-age must be a non-negative integer: ${max_age}" >&2; exit 2 ;;
+esac
+
+# state/worktree paths derive from the FINAL repo_root (--root override must reach them — a fixture
+# --check run otherwise reads the script's own .quay/, not the fixture's).
+state_file="${repo_root}/.quay/develop-deliver-state.json"
+worktree_base="${repo_root}/.quay/deliver-worktree"   # under repo (gitignored .quay/), NOT /tmp (tmpfs)
 
 # host_key -> (ssh_target, node_path)  — node_path uses $HOME, NOT ~ (tilde does not expand inside
 # double quotes in the remote `export PATH="...:..."`); both verified reachable BatchMode 2026-08-11.
@@ -73,13 +102,48 @@ if [ -z "${develop_tip}" ]; then
   exit 1
 fi
 
-# Freshness gate: skip when this exact develop tip is already delivered (unless --force).
-if [ "${force}" -eq 0 ] && [ -f "${state_file}" ]; then
-  prev="$(python3 -c "import json;print(json.load(open('${state_file}')).get('lastDelivered',''))" 2>/dev/null || echo "")"
-  if [ "${prev}" = "${develop_tip}" ]; then
-    echo "develop-deliver: develop ${develop_tip:0:8} already delivered (state fresh) — skip (pass --force to redo)"
-    exit 0
+# ── trigger decision (direct quantities; can be false) ──────────────────────────────────────────────
+#   decision = fresh     lastDelivered == develop_tip  (this exact tip already delivered)
+#            = too-soon  lastDelivered != tip but age <= --max-age (low-frequency hold, no deliver)
+#            = deliver   state.json absent (never delivered), OR (lastDelivered != tip AND age > max-age)
+# --force overrides every branch to deliver. The state comes ONLY from .quay/develop-deliver-state.json
+# (the deliver's own record) — never from this script's own recent invocations (硬规则 4b).
+read_state_field() {
+  python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get(sys.argv[2],''))" "${state_file}" "$1" 2>/dev/null || echo ""
+}
+
+decision="deliver"
+last_delivered=""
+age_seconds=""
+if [ "${force}" -eq 1 ]; then
+  decision="deliver"
+elif [ -f "${state_file}" ]; then
+  last_delivered="$(read_state_field lastDelivered)"
+  ts="$(read_state_field timestamp)"
+  if [ -n "${ts}" ]; then
+    age_seconds="$(python3 -c "import sys,datetime; d=datetime.datetime.fromisoformat(sys.argv[1].replace('Z','+00:00')); print(max(0,int((datetime.datetime.now(datetime.timezone.utc)-d).total_seconds())))" "${ts}" 2>/dev/null || echo "")"
   fi
+  if [ "${last_delivered}" = "${develop_tip}" ]; then
+    decision="fresh"
+  elif [ -n "${age_seconds}" ] && [ "${age_seconds}" -le "${max_age}" ]; then
+    decision="too-soon"
+  else
+    decision="deliver"
+  fi
+else
+  decision="deliver"   # state.json absent ⇒ never delivered ⇒ deliver
+fi
+
+if [ "${check_only}" -eq 1 ]; then
+  printf '{"decision":"%s","lastDelivered":"%s","develop":"%s","age_seconds":%s,"max_age":%s}\n' \
+    "${decision}" "${last_delivered}" "${develop_tip}" "${age_seconds:-null}" "${max_age}"
+  echo "develop-deliver: check decision=${decision} (develop=${develop_tip:0:8}, lastDelivered=${last_delivered:-<none>}, age_seconds=${age_seconds:-null}, max_age=${max_age})"
+  exit 0
+fi
+
+if [ "${decision}" != "deliver" ]; then
+  echo "develop-deliver: skip — decision=${decision} (develop ${develop_tip:0:8}; pass --force to redo)"
+  exit 0
 fi
 
 echo "develop-deliver: develop tip = ${develop_tip:0:12} (${develop_tip})"
