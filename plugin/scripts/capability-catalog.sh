@@ -100,6 +100,7 @@ unset _cs_violations
 # a catalog where every entry says "checks correctness" is indistinguishable from none).
 declare -A QUESTION=(
   [psi-failure-correlation-check.ts]="Does PSI (cpu_stall) have incremental predictive power for test FAILURE beyond the concurrent-file count — via TWO SPLIT data sources (never merged): (a) ACTIVE induction of failures by running serial/lowconc + verified-clean historical-failure candidates (excluding plugin/test-isolation-violations.txt hits) under controlled busy-wait CPU oversubscription while sampling /proc/pressure/cpu, adjudicating each induced failure against isolation-conflict signatures before it counts; and (b) PASSIVE historical join of .quay/verification-round.jsonl perFile {file, startedAtMs, endedAtMs, passed} with .quay/suite-load-<runId>.jsonl {t, cpu_stall}, comparing failing vs passing files WITHIN each concurrency bin, with a MIN_N floor below which a bin reports 「样本不足」 not a direction (the Phase 0 go/no-go that decides whether to build a PSI feedback admission controller, gap-psi-shadow-admission-controller)?"
+  [psi-window-join.ts]="What is the system-level PSI (cpu_stall) sample series for ONE test file's ONE run — the .quay/verification-round.jsonl perFile {file, startedAtMs, endedAtMs} window joined against the .quay/suite-load-<runId>.jsonl system-level periodic samples {t, cpu_stall} (approximate time-window join, honestly labeled, never an exclusive per-file value), fail-closed on missing carriers / missing perFile record (tasks/gap-perfile-psi-window-join)?"
   [archguard-runner.ts]="Does the repo's TypeScript code have dependency cycles — a REAL archguard CLI analyze run at suite time, whose structural verdict (metricVector.sccCount === 0, no non-trivial SCCs) is read back from the produced ArchJSON, fail-closed (archguard missing / analyze failed / cycles > 0 ⇒ exit 1, tasks/gap-archguard-zero-production-calls)?"
   [ac61-staleness-disposition-check.ts]="Has every AC61 list item (A-1..A-7 / B-1..B-4) been individually dispositioned — migrated (with landing-point map) OR verified still-valid (with a reading) — are the loop docs' integration hits classified one-row-per-hit (not just counted), and is the inner C7 live-instruction (the retired --overlaps-unverified fork instruction) gone from both core copies (AC61 判据1-3 + DoD 负控, tasks/gap-ac61-staleness-list-item-disposition)?"
   [ac69-slot-queue-gap-check.ts]="Has the AC69 槽满排队「先量再改」measurement record (槽释放→下次派发差值, docs/analysis/ac69-slot-release-vs-dispatch-gap.json) been LANDED and structurally complete — task/measuredAt/dataSource/method/stats.medianSeconds/conclusion/conclusionReason all present with conclusion ∈ maintain|change — so the AC1 '先量再改' has a mechanical product (absent ⇒ exit 2 / corrupt ⇒ exit 3, distinct from 合格 exit 0 — 硬规则 3b, tasks/gap-ac69-suite-slot-full-should-queue-not-wait)?"
@@ -449,6 +450,7 @@ declare -A GUARD_OBJECT=(
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
 declare -A CADENCE=(
   [psi-failure-correlation-check.ts]="按需"
+  [psi-window-join.ts]="按需"
   [archguard-runner.ts]="每轮"
   [ac61-staleness-disposition-check.ts]="按需"
   [ac69-slot-queue-gap-check.ts]="每轮"
@@ -775,6 +777,7 @@ declare -A CADENCE=(
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
 declare -A INVALIDATION=(
   [psi-failure-correlation-check.ts]="失效前提：被动源依赖 .quay/verification-round.jsonl 的 perFile 字段（file/startedAtMs/endedAtMs/passed）与 .quay/suite-load-<runId>.jsonl 的 {t, cpu_stall} 字段口径、以及 round.runId ↔ suite-load 文件名 <runId> 的对应关系不变；主动源依赖 plugin/test-isolation-violations.txt 的 file:type 行格式与 serial/lowconc 的 @test-group 分类口径不变；若任一载体字段语义变化或隔离违规名单格式变化，本条需同步"
+  [psi-window-join.ts]="失效前提：依赖 .quay/verification-round.jsonl 的 perFile 字段（file/startedAtMs/endedAtMs）与 .quay/suite-load-<runId>.jsonl 的 {t, cpu_stall} 字段口径、以及 round.runId ↔ suite-load 文件名 <runId> 的对应关系不变；若任一载体字段语义变化，本条需同步"
   [archguard-runner.ts]="失效前提：archguard CLI 在 PATH 上、TypeScript 能解析（tsconfig 存在）、六个 scope（packages/quay/src + plugin/scripts + packages/quay-native/src + packages/quay-github/src + packages/quay-backlog/src + experiments/quay-perpetual-stream/scripts）目录结构不变；若 archguard 移除/scope 变更/sccCount 语义变更，本条需同步"
   [ac61-staleness-disposition-check.ts]="失效前提：AC61 清单（A-1..A-7 / B-1..B-4）仍被 AC58 archive / 执行核文档消费；若两线分支模型相关条款全部迁出且不再有活引用，本条随清单消退而失效"
   [ac69-slot-queue-gap-check.ts]="失效前提：AC69 测量记录（docs/analysis/ac69-slot-release-vs-dispatch-gap.json）仍是本任务 AC1「先量再改」的产物；若槽满排队问题被重新打开并改为「槽满也起、排队」的落地形态（记录 conclusion 变 change 且 test.sh 同步改动），本条随任务重估而失效"
@@ -1101,6 +1104,7 @@ declare -A INVALIDATION=(
 # ── LAST_REAFFIRMED (last-reaffirmed stamp (③) — the date someone last looked at this mechanism and stamped it; 超 N 天未被任何调用/检查/复核触及 → 待重新确认 (只看一眼盖章, 不判断对错)) ──
 declare -A LAST_REAFFIRMED=(
   [psi-failure-correlation-check.ts]="2026-09-05"
+  [psi-window-join.ts]="2026-09-07"
   [archguard-runner.ts]="2026-08-27"
   [ac61-staleness-disposition-check.ts]="2026-08-14"
   [ac69-slot-queue-gap-check.ts]="2026-08-14"
@@ -1427,6 +1431,7 @@ declare -A LAST_REAFFIRMED=(
 # ── MATCHING (matching-method declaration (④) — how this checker judges: position (按位置不按关键词) | keyword | enumerative (枚举式存在性) | n/a (non-judgment lib/data). New checkers MUST declare which matching they use) ──
 declare -A MATCHING=(
   [psi-failure-correlation-check.ts]="n/a"
+  [psi-window-join.ts]="n/a"
   [archguard-runner.ts]="n/a"
   [ac61-staleness-disposition-check.ts]="position"
   [ac69-slot-queue-gap-check.ts]="enumerative"
@@ -1759,6 +1764,7 @@ declare -A MATCHING=(
 # the consumer. The rhythm-consumer-check.ts reads this table; see its 判据1/2/3.
 declare -A CONSUMER=(
   [psi-failure-correlation-check.ts]="谁按：任务实现者在 gap-psi-shadow-admission-controller 的 Phase 0 go/no-go 判定时按（node --experimental-strip-types plugin/scripts/psi-failure-correlation-check.ts --source active|passive|both --root <主检出>）；条件=要用主动诱发 + 被动历史两条独立数据源判定 PSI 对失败是否有超出并发数的增量预测力"
+  [psi-window-join.ts]="谁按：任务实现者在需要回答「这个测试这一次跑的时候机器多忙」的诊断可见性问题时按（node --experimental-strip-types plugin/scripts/psi-window-join.ts --run-id <runId> --file <relpath> [--root <主检出>]）；条件=要查某测试单次运行的 PSI 时间窗采样序列"
   [archguard-runner.ts]="谁按：scripts/test.sh run_selected 全量 suite 路径按（run_static_checks 之后，code-class gate）；条件=每次全量验证轮跑 archguard analyze + 读产物判依赖环，fail-closed（archguard 缺失/analyze 失败/有环 ⇒ exit 1）"
   [ac61-staleness-disposition-check.ts]="谁按：manager 在 AC61 清单处置表态时按；条件=清单项要做 A-1..B-4 的处置判定"
   [anti-drift-touches-check.ts]="谁按：任务 subagent 在落地后核验 Touches 一致性时按；条件=任务落地要验证 touches 精确命中"

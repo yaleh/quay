@@ -69,3 +69,4 @@ psi_cpu_total: null, psi_io_total: null}`，**没有任何一轮含 `main` / `se
 - plugin/test/suite-accounting.test.mjs
 - plugin/test/worker-driver.test.mjs
 - tasks/gap-mechanical-fan-in-loses-per-phase-accounting.md
+- docs/analysis/quay-init-closure-ratchet.baseline.json
