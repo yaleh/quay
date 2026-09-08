@@ -46,3 +46,4 @@ extra:
 - plugin/test/known-load-sensitive.test.mjs
 - plugin/test/cold-start-skill.test.mjs
 - tasks/gap-suite-baseline-red-l1-wiring-kindforfile-lane-coldstart-rehearsal.md
+- docs/analysis/quay-init-closure-ratchet.baseline.json
