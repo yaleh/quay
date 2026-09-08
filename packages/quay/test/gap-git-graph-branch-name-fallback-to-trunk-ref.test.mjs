@@ -114,7 +114,7 @@ test("a deleted dev-merge tip resolves from its OWN subject (ff-fan-in shape)", 
 
 // ── end-to-end: layoutGitGraph labels deleted branches with their real names, not develop ────────
 
-test("layoutGitGraph labels two deleted branches with distinct task names (no more all-develop)", () => {
+test("layoutGitGraph folds re-attributed deleted-branch commits into ONE mainline lane (no phantom lanes)", () => {
   const t0 = 1_700_000_000;
   const commits = [
     c("t000000", t0, "develop", [], "base"),
@@ -125,7 +125,11 @@ test("layoutGitGraph labels two deleted branches with distinct task names (no mo
     c("m100000", t0 + 5, "develop", ["m000000", "b000000"], "Merge branch 'task/B' into develop"),
   ];
   const layout = layoutGitGraph(hist(commits, "m100000", { develop: "m100000" }));
-  assert.equal(layout.branches.length, 2, "two deleted branches");
-  const refs = layout.branches.map((b) => b.ref).sort();
-  assert.deepEqual(refs, ["task/A", "task/B"], "each lane carries its real task name");
+  assert.equal(layout.branches.length, 1, "one lane — no phantom task/A / task/B lanes");
+  assert.equal(layout.branches[0].kind, "mainline", "the single lane is the mainline");
+  assert.deepEqual(
+    layout.branches[0].commits.map((x) => x.hash),
+    ["t000000", "t100000", "a000000", "m000000", "b000000", "m100000"],
+    "every commit — including the two dev-merged deleted-branch commits — lives on the mainline",
+  );
 });
