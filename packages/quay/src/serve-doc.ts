@@ -33,7 +33,7 @@ export async function handleDocList(
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${shellStyles()}<title>Docs</title></head>
-    <body>${renderMobileChrome("doc", "docs")}${renderSiteNav("doc")}<main>
+    <body>${renderMobileChrome("doc", "docs")}${renderSiteNav("doc")}<main id="main">
       <h1>Managed documents (${docs.length})</h1>
       ${readError ? html`<div class="error-banner" role="alert"><strong>读失败:</strong> ${escapeHtml(readError)}</div>` : ""}
       ${docs.length === 0 ? html`<p class="meta">No documents.</p>` : html`<table>
@@ -61,7 +61,7 @@ export async function handleDocDetail(
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(String(d.id))}: ${escapeHtml(String(d.title))}">${shellStyles("detail")}<title>${escapeHtml(String(d.id))}</title></head>
-    <body class="detail-page">${renderMobileChrome("doc", String(d.id))}${renderSiteNav("doc")}<main>
+    <body class="detail-page">${renderMobileChrome("doc", String(d.id))}${renderSiteNav("doc")}<main id="main">
       <h1>${escapeHtml(String(d.id))}: ${escapeHtml(String(d.title))}</h1>
       <p class="meta">status: <strong>${escapeHtml(String(d.status ?? ""))}</strong>${ext.kind ? ` · kind: ${escapeHtml(String(ext.kind))}` : ""}</p>
       <article>${renderMarkdown(d.body || "")}</article>
