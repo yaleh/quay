@@ -67,4 +67,5 @@ extra:
 - plugin/scripts/runner-static-gate.ts
 - plugin/scripts/checker-mutation-cases/release-freshness-check.sh
 - plugin/test/release-freshness-check.test.mjs
+- docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-deliver-verification-trigger-orphaned-after-land-path-migration.md
