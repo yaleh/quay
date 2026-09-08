@@ -90,6 +90,7 @@ git grep -c 'refs/heads/task/' develop -- 'plugin/scripts/*.ts' 'plugin/scripts/
 - plugin/test/fast-mode-telemetry.test.mjs（helper 三形态 + 误纳负控制单测）
 - plugin/test/worker-driver.test.mjs（枚举走 helper 的回归 + 无前缀样本负控制）
 - plugin/test/dispatch-worktree-setup.test.mjs（写方自检单测：develop 分支拒 + task/<id> 负控制）
+- docs/analysis/quay-init-closure-ratchet.baseline.json（改三个 scripts 后 re-anchor closure baseline）
 - tasks/gap-task-branch-prefix-assumption-scattered-read-sites-orphan-enumeration-blind.md（自身）
 
 ## Verification
