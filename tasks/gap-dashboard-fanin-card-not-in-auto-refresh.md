@@ -2,7 +2,7 @@
 id: gap-dashboard-fanin-card-not-in-auto-refresh
 title: 人点名：Dashboard 的 Fan-in 卡不自动刷新 —— fanin-card 有 DOM 锚点却从未接进
   /dashboard/cards payload 与刷新脚本的 swap 名单
-status: ready
+status: done
 labels:
   - gap
   - webui
