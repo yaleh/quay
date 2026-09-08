@@ -79,6 +79,7 @@ T3 实测结论（SPEC §9）必须体现在新行为里：**settings 里的 `en
 - plugin/test/quay-init-closure-ratchet.test.mjs
 - plugin/test/real-target-verify.test.mjs
 - plugin/test/runtime-landing.test.mjs
+- plugin/test/suite-bucket-attribution.test.mjs
 - packages/quay/test/install-config-driven-e2e-runtime.test.mjs
 - packages/quay/test/install-config-driven-e2e-upgrade.test.mjs
 - packages/quay/test/sea-artifact-consumer-e2e.test.mjs
@@ -88,5 +89,6 @@ T3 实测结论（SPEC §9）必须体现在新行为里：**settings 里的 `en
 - CLAUDE.md
 - tasks/gap-quay-init-closure-shrink-body.md
 - docs/analysis/quay-init-closure-ratchet.baseline.json
+- .quay/suite-bucket-reattribution.jsonl
 
 **优先级（人 2026-09-08 裁定）**：「优先保障 AC-168 落地」。本任务就是 AC-168 的收缩本体。打 `delivery-critical`。依赖 `gap-plugin-root-resolution-remaining-callsites` 先落地（已 done）。
