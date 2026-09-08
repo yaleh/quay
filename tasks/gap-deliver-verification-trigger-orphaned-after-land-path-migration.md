@@ -2,7 +2,7 @@
 id: gap-deliver-verification-trigger-orphaned-after-land-path-migration
 title: 交付验证触发点在 land 路径迁移后失联——DIR-123 的 per-merge hook 挂在已退役的
   integration-batch-merge，机械 fan-in 零接线，3332 提交未验证且无任何东西会因此变红
-status: needs-human
+status: ready
 needs_human_cause: human-adjudication
 labels:
   - gap
@@ -83,3 +83,6 @@ extra:
 - session_id：a970aef3-5867-4d57-a2aa-c2fface4efaa
 - suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-deliver-verification-trigger-orphaned-after-land-path-migration~wk-prod-1788779505~1788886264334-af069c.log
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-deliver-verification-trigger-orphaned-after-land-path-migration-wk-prod-1788779505.log
+
+
+复核（2026-09-08，人工/助手核实）：4 次 fan-in 失败中，attempt2/3/4 的失败均为当前 develop HEAD baseline 红（l1-delivery-surface-check.test.mjs AC5 / known-load-sensitive.test.mjs AC1+AC3 / cold-start-skill.test.mjs rehearsal），已在当前 develop HEAD 独立复现，与本任务 Touches 无关；已立案 gap-suite-baseline-red-l1-wiring-kindforfile-lane-coldstart-rehearsal 跟踪该 baseline 缺陷。本任务自身 AC 与实现无问题，复位 ready 重新派发。
