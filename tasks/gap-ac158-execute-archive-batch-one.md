@@ -57,6 +57,7 @@ depends_on: []
 ## Touches
 
 - archive/INDEX.tsv
+- .quay/suite-bucket-reattribution.jsonl
 - archive/2026-09-07-zero-call-scripts/plugin/scripts/*
 - archive/2026-09-07-zero-call-scripts/plugin/test/*
 - plugin/scripts/capability-catalog.sh
