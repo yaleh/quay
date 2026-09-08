@@ -1,7 +1,7 @@
 ---
 id: gap-superseded-task-residual-worktree-never-reclaimed
 title: supersede 一个任务时无路径回收其残留 worktree——「有提交 ⇒ 保留」缺时间的另一半
-status: done
+status: ready
 labels:
   - gap
   - defect
