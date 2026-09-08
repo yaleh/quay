@@ -2,7 +2,7 @@
 id: gap-webui-a11y-focus-ring-and-token-contrast-unvalidated
 title: 配色 token 从未被任何对比度判据钉过（全库任务 grep WCAG/对比度 = 0 命中）⇒ 主链接色实测 3.47:1 等 6 组低于
   AA；且全站链接 :focus 的 outline-style 为 none，纯键盘用户看不到光标位置
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -57,20 +57,20 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1 生产载体读数、枚举而非抽查：对 `/dashboard` `/tests` `/git-history` `/goal` `/task/<id>` 五页遍历
+- [x] AC1 生产载体读数、枚举而非抽查：对 `/dashboard` `/tests` `/git-history` `/goal` `/task/<id>` 五页遍历
       **全部**可见叶子文本节点，按 WCAG 公式算前景/背景比值，断言**违例条数 == 0**（普通文本 ≥4.5、
       大号或粗体 ≥3.0）。失败时打印 `(比值, 前景, 背景, 字号, 样本文本)` 清单与条数。
       取假：改动前 `/dashboard` 单页去重后即有 **6** 组违例，最低 3.47。
-- [ ] AC2 判据挂在 token 上而非渲染结果上（防下次调色再犯）：单测枚举 `--color-*` 中**实际成对使用**的
+- [x] AC2 判据挂在 token 上而非渲染结果上（防下次调色再犯）：单测枚举 `--color-*` 中**实际成对使用**的
       前景/背景组合表，逐条算比值并断言达标；表中任一条被改成不达标值时该测试必须报红（mutation 负控制，
       两侧都断言）。
-- [ ] AC3 焦点可见：对五页各自的第一个可聚焦元素调 `.focus()` 后断言 `outline-style != "none"` 且
+- [x] AC3 焦点可见：对五页各自的第一个可聚焦元素调 `.focus()` 后断言 `outline-style != "none"` 且
       `outlineWidth >= 2px`，并断言 outline 颜色对其背景对比度 ≥3.0。取假：改动前实测 `none`。
-- [ ] AC4 键盘可达性不靠视觉以外的假设：断言五页上 `tabindex="-1"` 的可交互元素数 == 0，
+- [x] AC4 键盘可达性不靠视觉以外的假设：断言五页上 `tabindex="-1"` 的可交互元素数 == 0，
       且每页存在一个跳到 `<main>` 的 skip-link（实测当前 15 页中仅 4 页有）。打印缺失页面清单与条数。
-- [ ] AC5 明暗两态都成立：AC1/AC2/AC3 在 `prefers-color-scheme: light` 与 `dark` 两种模拟下**各跑一遍**
+- [x] AC5 明暗两态都成立：AC1/AC2/AC3 在 `prefers-color-scheme: light` 与 `dark` 两种模拟下**各跑一遍**
       并均通过；打印两态各自的违例条数（应均为 0）。
-- [ ] AC6 `bash scripts/test.sh --for-task gap-webui-a11y-focus-ring-and-token-contrast-unvalidated` 退出码 0。
+- [x] AC6 `bash scripts/test.sh --for-task gap-webui-a11y-focus-ring-and-token-contrast-unvalidated` 退出码 0。
 
 ## Definition of Done
 
@@ -81,7 +81,24 @@ depends_on:
 
 ## Touches
 
+- `docs/design/quay-webui-improved-2026-08-16/_ds/modernist-40217566-87fa-42b1-9cc0-36027903691f/styles.css`
+- `packages/quay/src/serve-adr.ts`
+- `packages/quay/src/serve-architecture.ts`
+- `packages/quay/src/serve-board.ts`
+- `packages/quay/src/serve-dashboard.ts`
+- `packages/quay/src/serve-doc.ts`
+- `packages/quay/src/serve-git.ts`
+- `packages/quay/src/serve-goal.ts`
+- `packages/quay/src/serve-live.ts`
+- `packages/quay/src/serve-needs-human.ts`
 - `packages/quay/src/serve-render.ts`
+- `packages/quay/src/serve-send.ts`
+- `packages/quay/src/serve-sessions.ts`
+- `packages/quay/src/serve-system.ts`
+- `packages/quay/src/serve-task.ts`
+- `packages/quay/src/serve-tests.ts`
 - `packages/quay/src/webui-modernist.css`
 - `packages/quay/test/gap-webui-a11y-focus-ring-and-token-contrast-unvalidated.test.mjs`
+- `packages/quay/test/serve-ac95-views.test.mjs`
+- `packages/quay/test/web-ui-browser.test.mjs`
 - `tasks/gap-webui-a11y-focus-ring-and-token-contrast-unvalidated.md`

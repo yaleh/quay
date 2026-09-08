@@ -61,7 +61,7 @@ function renderSystemPage(sys: SystemResult): string {
     : "";
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay system — resource gate and process budget">${modernistStyles()}${pageStyles()}<title>System — 系统状态</title></head>
-    <body>${renderMobileChrome("system", "system")}${renderSiteNav("system")}<main>
+    <body>${renderMobileChrome("system", "system")}${renderSiteNav("system")}<main id="main">
       <h1>System — 系统状态</h1>
       <p class="meta">数据源：<code>resource-gate.sh --json</code> · <code>process-budget.sh --json</code>（稳定机读 JSON 输出）</p>
       ${banner}
@@ -145,7 +145,7 @@ function renderManagerPage(mgr: ManagerResult): string {
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay manager — Manager/Outer/Inner 三层状态">${modernistStyles()}${pageStyles()}<title>Manager / Outer / Inner</title></head>
-    <body>${renderMobileChrome("manager", "manager")}${renderSiteNav("manager")}<main>
+    <body>${renderMobileChrome("manager", "manager")}${renderSiteNav("manager")}<main id="main">
       <h1>Manager / Outer / Inner — 三层状态</h1>
       <p class="meta">三层自适应探测：多信号加权判定，缺失信号诚实标注「未检测到」，不静默假设。</p>
       <h2>Loop / 会话</h2>

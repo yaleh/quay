@@ -465,7 +465,7 @@ export async function handleTaskList(
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay task list — ${escapeHtml(manifest.name)}">${modernistStyles()}${pageStyles()}<title>Quay — ${escapeHtml(manifest.name)}</title></head>
-    <body>${renderMobileChrome("tasks", "task list")}${renderSiteNav("tasks")}<main>
+    <body>${renderMobileChrome("tasks", "task list")}${renderSiteNav("tasks")}<main id="main">
       <!-- QX-015 orientation banner removed by DIR-007 (iteration 10): misleading
            needs-human placement + disproportionate layout cost. -->
       <h1>Quay — task list (${escapeHtml(manifest.id)} provider)</h1>
@@ -640,7 +640,7 @@ export async function handleTaskDetail(
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(t.id)}: ${escapeHtml(t.title)}">${modernistStyles()}${pageStyles()}<title>${escapeHtml(t.id)}</title></head>
-    <body>${renderMobileChrome("tasks", t.id)}${renderSiteNav("tasks")}<main>
+    <body>${renderMobileChrome("tasks", t.id)}${renderSiteNav("tasks")}<main id="main">
       <!-- QX-011: back link uses ?from= param to restore filter context (UQ-009).
            The site-nav above already carries the full 15-view nav; this contextual
            link restores the list's filter/sort/page context. -->

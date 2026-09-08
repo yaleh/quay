@@ -69,4 +69,5 @@ depends_on:
 
 - `packages/quay/src/serve-git.ts`
 - `packages/quay/test/gap-git-graph-branch-name-fallback-to-trunk-ref.test.mjs`
+- `packages/quay/test/gap-git-history-lane-identity-and-row-layout-overlap.test.mjs`
 - `tasks/gap-git-graph-branch-name-fallback-to-trunk-ref.md`

@@ -74,7 +74,7 @@ export function renderNeedsHumanPage(active: ActiveRow[], ledger: LedgerRow[], m
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay needs-human — 显式人机承接界面">${modernistStyles()}${pageStyles()}<title>Needs Human — ${escapeHtml(manifest.name)}</title></head>
-    <body>${renderMobileChrome("needs-human", "needs human")}${renderSiteNav("needs-human")}<main>
+    <body>${renderMobileChrome("needs-human", "needs human")}${renderSiteNav("needs-human")}<main id="main">
       <h1>Needs Human — 待人类决定</h1>
       <p class="meta">人机接口的显式承接者：一条 <code>needs-human</code> 产生后，无需读任何 transcript，在此页即可看到。上面是「当前待办」，下面是「升级台账」（含状态已流转的历史样本）。</p>
 
