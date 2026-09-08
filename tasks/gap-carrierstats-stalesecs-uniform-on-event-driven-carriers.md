@@ -2,7 +2,7 @@
 id: gap-carrierstats-stalesecs-uniform-on-event-driven-carriers
 title: carrierStats 对事件驱动载体（quality 中位间隔 21 分钟）与逐轮载体（promotion 68737 条）发出同一个
   staleSecs 数，正常呼吸与停摆同形——今日已造成一次假警报
-status: todo
+status: ready
 labels:
   - gap
   - defect
