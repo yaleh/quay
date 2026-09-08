@@ -1,7 +1,7 @@
 ---
 id: gap-plugin-root-resolution-remaining-callsites
 title: 非 skill 入口的剩余 workspace-root 拼接点未接入统一解析器——AC168 收缩前必须先补齐（§6b 已知连带面）
-status: done
+status: ready
 labels:
   - gap
   - delivery-critical
