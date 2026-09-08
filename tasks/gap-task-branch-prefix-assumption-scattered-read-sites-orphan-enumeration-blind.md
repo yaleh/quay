@@ -2,7 +2,7 @@
 id: gap-task-branch-prefix-assumption-scattered-read-sites-orphan-enumeration-blind
 title: task/ 前缀假设散落 31 处/7 文件：worktreeExists 已修但 worker-driver 4 处 +
   fast-mode-telemetry 2 处读方仍对无前缀分支隐身
-status: todo
+status: ready
 labels:
   - gap
 parent: null
