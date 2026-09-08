@@ -25,6 +25,7 @@ import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
+import { clearVerificationRoundCache } from "../src/observation.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -80,6 +81,9 @@ const MIXED_ROUNDS = [
 ];
 
 beforeEach(() => {
+  // verification-round.jsonl 走 30s TTL 缓存（observation.ts readTests）——同文件内 AC1/AC2/AC3 已写
+  // 入 MIXED_ROUNDS 并缓存；不清缓存，AC3b 的空账本断言会读到 AC3 的陈旧缓存而非诚实空态。
+  clearVerificationRoundCache();
   fs.rmSync(roundsFile(), { force: true });
   fs.rmSync(stateFile(), { force: true });
 });
