@@ -53,8 +53,15 @@ function get(port, urlPath) {
 
 /** The <a> elements inside <main> (the proposal's `document.querySelectorAll('main a')`). */
 function mainLinks(html) {
-  const m = /<main\b[^>]*>([\s\S]*?)<\/main>/.exec(html);
-  return m ? (m[1].match(/<a\b/g) || []) : [];
+  // pageStyles() inlines a CSS comment whose doc string contains the literal `<main id="main">`
+  // (the skip-link note) in <head> — BEFORE the real <main> element. Match the LAST <main>…</main>
+  // pair, which is the actual content element (the CSS-comment occurrence always precedes it).
+  const opens = [...html.matchAll(/<main\b[^>]*>/g)];
+  if (opens.length === 0) return [];
+  const start = opens[opens.length - 1].index;
+  const end = html.indexOf("</main>", start);
+  const body = end === -1 ? html.slice(start) : html.slice(start, end);
+  return body.match(/<a\b/g) || [];
 }
 
 /** hN → h(N+2) skip positions in document order ([] = well-formed). */
