@@ -193,6 +193,7 @@ depends_on: []
 - plugin/test/workflow-metadata-conformance.test.mjs
 - plugin/test/workflow-replay.test.mjs
 - tasks/gap-ac158-execute-archive-batch-one.md
+- plugin/test/suite-bucket-attribution.test.mjs
 
 ## 派发顺序（manager 2026-09-08；depends_on 已撤，理由如下）
 
