@@ -52,8 +52,8 @@ extra:
 
 - serve-sessions.ts → `resolvePluginScript("scripts/quay-launch.sh")`（.sh 无 dist 回退），null 即 fail-closed 返 null。
 - ff-merge.ts → 新增 `scriptsDirOf(args)`：`args.scriptsDir`（worker-driver 的 worktree 缝）?? `resolvePluginRoot()+"/scripts"`；入口 fail-closed、内层 `?? ""` 保留原有缺脚本降级。
-- mcp-server.ts → `resolvePluginExecutable(rel)` 改为 `resolvePluginScriptExec(rel 去 plugin/ 前缀)`（含 dist 回退 + stripTypes），两调用点 null 即 throw。
-- precommit-guard.ts → hook/pre-merge shim 在 install 时刻经 `resolvePluginScriptExec("scripts/precommit-guard.ts")` 烘焙解析后的绝对路径（含 stripTypes 判定），不再 `$ROOT/plugin/scripts/`。
+- mcp-server.ts → 枚举点 :152（`fetchInstrumentsManifest`）改 `resolvePluginScriptExec("scripts/runtime-usage-inventory.ts")`（inventory 工具是 plugin 自身脚本，从 plugin root 解析，含 dist 回退 + stripTypes，null 即 throw）；`runInstrument` 的 `entry.path` **仍按 workspaceRoot 解析**（inventory 目录列的是 workspace 自己的 `plugin/scripts/` 脚本，entry.path 由构造即 workspace 相对——测试 fixture instrument 必须从测试 workspace 跑，非全局 plugin root），改名 `resolveWorkspaceInstrument`。
+- precommit-guard.ts → hook/pre-merge shim 不再 `$ROOT/plugin/scripts/`，改在 install 时刻烘焙 guard 自身的绝对路径：`import.meta.url`（raw .ts 或 dist .js 由扩展名定 stripTypes）+ 插件层既有 `repo-root.ts` 的 `mainCheckoutRoot` 重定向 worktree→主检出。
 - cli/manager.ts → `resolvePluginScript("scripts/manager-start.sh"/"manager-arm-loop.sh")`，保留 `QUAY_MANAGER_SCRIPTS_DIR` env 缝，null fail-closed。
 - observation.ts → readBoardLanding 改 `resolvePluginScriptExec("scripts/task-status-drift-check.ts")`；runPluginScript 的 RESOURCE_GATE_REL/PROCESS_BUDGET_REL 改 plugin-root 相对 `scripts/*.sh`，走导入的 `resolvePluginScript`。
 - serve-send.ts → `resolveTranscriptChecker` 改 `resolvePluginScriptExec("scripts/transcript-delivery-check.ts")`。
@@ -63,7 +63,7 @@ extra:
 ### AC3 os-anchor 分类（迁移不适用 + 单一正本原则未被破坏）
 
 os-anchor-watchdog.sh / os-anchor-install.sh 经 AC1 分类为**仓库内部专用**（NOT A SHIPPED DELIVERABLE，quay-init 0 引用）——AC168「停止复制脚本」对它们无下游影响（它们本就不被 quay-init 安装/调用）。故「迁移两个 shell 入口」的前提（下游可达）不成立，迁移不适用，结论与证据已随 AC5 写入 SPEC §6b 旁注。
-「不得重新发明第四套判定算法」原则在唯一实际迁移的 bash 面（precommit-guard 的 hook shim）同样被遵守：shim 在 install 时刻经**唯一解析器** `resolvePluginScriptExec` 烘焙绝对路径（选「复用解析器」路线，理由：shim 跑在下游项目里，运行时无任何可 walk-up 的模块位置，烘焙 install 时刻的解析结果复用了单一解析器而不是把三步契约搬到 bash 重写）。
+「不得重新发明第四套判定算法」原则在唯一实际迁移的 bash 面（precommit-guard 的 hook shim）同样被遵守：shim 用插件层既有的 `repo-root.ts` `mainCheckoutRoot`（单一正本，非新算法；且不用 Core resolver——跨层静态 import 会破坏 npm-pack staging），不是把三步契约搬到 bash 重写。
 
 ### AC4 双向负控制（扩展 plugin-root.test.mjs 既有矩阵）
 
@@ -77,7 +77,12 @@ scripts/test.sh 与 os-anchor-*.sh 的「仓库内部专用」结论 + 证据已
 
 - **负控制实测跑红**：把 `resolvePluginRoot()` 临时改回 `path.join(process.cwd(), "plugin")`（workspace-root 拼接），`node --experimental-strip-types --test packages/quay/test/plugin-root.test.mjs` → `no-local-plugin negative control` ✖ + `worktree negative control` ✖，**pass 7 / fail 2**；改回后 **pass 9 / fail 0**。
 - **无本地 plugin/ 临时 workspace 实测跑通**（`/tmp/quay-dod-noplugin-*`，仅 `.quay/config.yml`）：`resolvePluginScriptExec("scripts/runtime-usage-inventory.ts")` → `/home/yale/work/quay/plugin/scripts/runtime-usage-inventory.ts`（主检出，非 `<cwd>/plugin`）；`fetchInstrumentsManifest(ws)` → 返回真实 manifest（admitted=0 total=0，空目录是真实读数，非路径解析失败）；`newSessionArgs` → `argv[1]=/home/yale/work/quay/plugin/scripts/quay-launch.sh`。均输出真实结果，非 kernel-not-found / path 解析失败。
-- typecheck：`npx tsc --noEmit -p packages/quay` EXIT=0。precommit-guard 端到端 `--install-hook` 实测生成烘焙绝对路径的 hook，`git commit` 拒绝 multi-path Touches 的 e2e 测试仍绿（17/17）。
+- typecheck：`npx tsc --noEmit -p packages/quay` EXIT=0。scoped gate（`scripts/test.sh --for-task --allow-thin`）179/179 绿；precommit-guard 端到端 `--install-hook` 实测生成烘焙绝对路径的 hook，e2e 仍绿（17/17）。
+
+### 实现修正（scoped gate 两轮红后的修正，如实记录）
+
+1. **mcp-server.ts `runInstrument`**：初版把 `entry.path` 也改走全局 resolver，但 inventory 目录列的是 workspace 自己的脚本（fixture instrument 在测试 workspace），`instrument run` 于是从主检出解析到不存在的路径 → 红。修正：`entry.path` 仍按 workspaceRoot 解析（`resolveWorkspaceInstrument`），只有 inventory 工具本身（:152 枚举点）走 resolver。
+2. **precommit-guard.ts 跨层 import**：初版 `import "../../packages/quay/src/plugin-root.ts"` 在 npm-pack staging 下 esbuild 解析失败（staged `packages/quay/plugin/scripts/` 里 `../../packages/quay/src/` → `packages/packages/quay/src/`）→ `npm-pack-e2e` 红。修正：hook shim 是 self-referential（定位自身），改 `import.meta.url` + 插件层既有 `repo-root.ts` `mainCheckoutRoot`，不再跨层 import Core。
 
 ## DoD
 
