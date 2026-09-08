@@ -29,6 +29,11 @@ reversible field face only:
 - MAY act without per-write "yes", citing DIR-130 as credential: `labels` add/remove
   (incl. `delivery-critical`-class priority labels); `extra.*` field writes. Criterion:
   reversible — a wrong value is correctable and produces no irreversible lifecycle effect.
+- ⚠️ `task_write.labels` **replaces the whole label set, not appends.** A `task_write` with
+  `labels: ["delivery-critical"]` on a task that already carries `gap`/`defect`/`directive`
+  **deletes** those existing labels. For "append one label, keep the rest" use the dedicated
+  `task_add_label` MCP verb (`{ id, label }` — reads current labels, appends without
+  duplicating) instead of hand-assembling a `labels` array from a `task_get`.
 - STILL requires per-write explicit "yes" (standing authorization does NOT cover): any
   `status` flip (todo/ready/done/needs-human, either direction), writing `superseded`, task
   deletion, and AC/DoD checkbox ticking.

@@ -86,10 +86,10 @@ test('plugin.json is valid JSON and declares the 13 bundled skills (M179/DIR-070
   assert.deepEqual(listedSkills, diskSkills, `plugin.json commands[] must list exactly the on-disk skill directories. Missing: ${diskSkills.filter((d) => !listedSkills.includes(d))}. Extra: ${listedSkills.filter((d) => !diskSkills.includes(d))}`);
 });
 
-test('M143: plugin.json declares agents[] with baime-iteration-executor and quay-task', () => {
+test('M143: plugin.json declares agents[] with quay-task', () => {
   const manifest = readJson(path.join(pluginDir, '.claude-plugin', 'plugin.json'));
   assert.ok(Array.isArray(manifest.agents), 'plugin.json must have agents[]');
-  for (const a of ['./agents/baime-iteration-executor.md', './agents/quay-task.md']) {
+  for (const a of ['./agents/quay-task.md']) {
     assert.ok(manifest.agents.includes(a), `plugin.json agents[] must include ${a}`);
   }
 });
@@ -589,13 +589,6 @@ test('M143: plugin/gate-scripts/ is RETIRED — kept in tree, not laid down by q
     'sync.sh must no longer sync the retired gate scripts');
 });
 
-test('M143: plugin/agents/baime-iteration-executor.md exists', () => {
-  const agentPath = path.join(pluginDir, 'agents', 'baime-iteration-executor.md');
-  assert.ok(existsSync(agentPath), 'plugin/agents/baime-iteration-executor.md must exist');
-  const src = readFileSync(agentPath, 'utf8');
-  assert.ok(src.length > 500, 'vendored agent file must have substantive content');
-});
-
 test('M143: plugin/sync.sh exists and is executable', () => {
   const syncPath = path.join(pluginDir, 'sync.sh');
   assert.ok(existsSync(syncPath), 'plugin/sync.sh must exist');
@@ -614,22 +607,18 @@ test('M143: init skill has zero research-layer references (VT/value-ledger/check
   );
 });
 
-test('M143: git-tracked workflows in plugin/workflows/ are byte-identical to .claude/workflows/ canonical sources', () => {
-  // Only test git-tracked source files that still exist after the prepare/execute retirement
-  // (ADR-022 / gap-retire-the-prepare-execute-pipeline-cluster). AC91: the FULL mirrored set
-  // (drain-directives / run-routines / fan-in-execute / execute-suite-fix / pool-quality-judge) —
-  // every distribution workflow is a byte-identical mirror of its .claude/workflows/ canonical.
-  const trackedWorkflows = ['drain-directives.js', 'run-routines.js', 'fan-in-execute.js', 'execute-suite-fix.js', 'pool-quality-judge.js'];
-  for (const name of trackedWorkflows) {
-    const canonical = path.join(repoRoot, '.claude', 'workflows', name);
+test('M143: the five workflow files live ONLY in plugin/workflows/ — the .claude/workflows/ second copy is retired', () => {
+  // gap-ac166-second-copy-retirement (AC166): the .claude/workflows/ dual-copy was the "second
+  // copy" that only produced drift (SPEC-plugin-lifecycle-single-bundle-2026-09-02 §7 #3). Each
+  // workflow now has a SINGLE source — plugin/workflows/ — and the .claude/workflows/ copy is
+  // archived (not deleted) under archive/. The byte-identity test is superseded by a
+  // single-source existence test: the canonical must be GONE and the bundled copy must exist.
+  const singleSourceWorkflows = ['drain-directives.js', 'run-routines.js', 'fan-in-execute.js', 'execute-suite-fix.js', 'pool-quality-judge.js'];
+  for (const name of singleSourceWorkflows) {
+    const retiredCopy = path.join(repoRoot, '.claude', 'workflows', name);
     const bundled = path.join(pluginDir, 'workflows', name);
-    assert.ok(existsSync(canonical), `canonical source missing: ${canonical}`);
-    assert.ok(existsSync(bundled), `bundled copy missing: ${bundled}`);
-    assert.equal(
-      readFileSync(bundled, 'utf8'),
-      readFileSync(canonical, 'utf8'),
-      `${name}: plugin/workflows/ copy must be byte-identical to .claude/workflows/ source`
-    );
+    assert.ok(!existsSync(retiredCopy), `.claude/workflows/${name} second copy must be retired: ${retiredCopy}`);
+    assert.ok(existsSync(bundled), `single source missing: ${bundled}`);
   }
 });
 
@@ -642,68 +631,40 @@ test('M143: git-tracked workflows in plugin/workflows/ are byte-identical to .cl
 // .claude/skills/ sources are left unmodified (extraction, not a move).
 // ---------------------------------------------------------------------------
 
-test('M179 (DIR-070-F): quay-native-methodology plugin skill exists with its 4 named reference files, byte-identical to their .claude/skills/ source', () => {
+test('M179 (DIR-070-F): quay-native-methodology plugin skill exists with its 4 named reference files (single source after .claude/skills/ retirement)', () => {
   const pluginSkillDir = path.join(pluginDir, 'skills', 'quay-native-methodology');
   assert.ok(existsSync(path.join(pluginSkillDir, 'SKILL.md')), 'plugin/skills/quay-native-methodology/SKILL.md must exist');
   const refFiles = ['gate-mechanics.md', 'directive-lifecycle.md', 'patterns.md', 'g3-audit-discipline.md'];
   for (const f of refFiles) {
-    const bundled = path.join(pluginSkillDir, 'reference', f);
-    const canonical = path.join(repoRoot, '.claude', 'skills', 'quay-native-methodology', 'reference', f);
-    assert.ok(existsSync(canonical), `canonical source missing: ${canonical}`);
-    assert.ok(existsSync(bundled), `plugin/skills/quay-native-methodology/reference/${f} must exist`);
-    assert.equal(
-      readFileSync(bundled, 'utf8'),
-      readFileSync(canonical, 'utf8'),
-      `${f}: plugin copy must be byte-identical to its .claude/skills/ source (extraction, not a rewrite)`
-    );
+    assert.ok(existsSync(path.join(pluginSkillDir, 'reference', f)), `plugin/skills/quay-native-methodology/reference/${f} must exist`);
   }
 });
 
-test('M179 (DIR-070-F): quay-webui-bootstrap-methodology plugin skill exists with its 2 named reference files, byte-identical to their .claude/skills/ source', () => {
+test('M179 (DIR-070-F): quay-webui-bootstrap-methodology plugin skill exists with its 2 named reference files (single source after .claude/skills/ retirement)', () => {
   const pluginSkillDir = path.join(pluginDir, 'skills', 'quay-webui-bootstrap-methodology');
   assert.ok(existsSync(path.join(pluginSkillDir, 'SKILL.md')), 'plugin/skills/quay-webui-bootstrap-methodology/SKILL.md must exist');
   const refFiles = ['visual-review-mechanism.md', 'effectiveness-timing-corpus.md'];
   for (const f of refFiles) {
-    const bundled = path.join(pluginSkillDir, 'reference', f);
-    const canonical = path.join(repoRoot, '.claude', 'skills', 'quay-webui-bootstrap-methodology', 'reference', f);
-    assert.ok(existsSync(canonical), `canonical source missing: ${canonical}`);
-    assert.ok(existsSync(bundled), `plugin/skills/quay-webui-bootstrap-methodology/reference/${f} must exist`);
-    assert.equal(
-      readFileSync(bundled, 'utf8'),
-      readFileSync(canonical, 'utf8'),
-      `${f}: plugin copy must be byte-identical to its .claude/skills/ source (extraction, not a rewrite)`
-    );
+    assert.ok(existsSync(path.join(pluginSkillDir, 'reference', f)), `plugin/skills/quay-webui-bootstrap-methodology/reference/${f} must exist`);
   }
 });
 
-test('M179 (DIR-070-F): original .claude/skills/ sources are unmodified and still contain experiment-specific content (extraction, not a move)', () => {
-  // quay-native-methodology: case-studies/, inventory/, and v-meta-stall-analysis.md are
-  // experiment-specific content that must remain ONLY in .claude/skills/, never mirrored to plugin/.
-  const nativeSrcDir = path.join(repoRoot, '.claude', 'skills', 'quay-native-methodology');
-  assert.ok(existsSync(path.join(nativeSrcDir, 'reference', 'v-meta-stall-analysis.md')), 'original v-meta-stall-analysis.md must still exist (not deleted)');
-  assert.ok(existsSync(path.join(nativeSrcDir, 'reference', 'case-studies', 'iteration-88-abi-symmetry-walkthrough.md')), 'original case-studies/ must still exist (not deleted)');
-  assert.ok(existsSync(path.join(nativeSrcDir, 'inventory', 'inventory.json')), 'original inventory/ must still exist (not deleted)');
+test('M179 (DIR-070-F): the .claude/skills/ second copies are retired (archived, not deleted)', () => {
+  // gap-ac166-second-copy-retirement: .claude/skills/ 5 dirs were the "second copy" (drift source).
+  // They are archived under archive/ (git mv + INDEX), NOT deleted. plugin/skills/ is now the
+  // single source, and the repo-root .claude/skills/ directory no longer exists.
+  assert.ok(!existsSync(path.join(repoRoot, '.claude', 'skills')), '.claude/skills/ must not exist (second copies retired to archive/)');
+  const archived = path.join(repoRoot, 'archive', '2026-09-07-second-copy-retirement', '.claude', 'skills');
+  assert.ok(existsSync(path.join(archived, 'quay-native-methodology', 'reference', 'v-meta-stall-analysis.md')), 'archived quay-native-methodology source must exist in archive/');
+  assert.ok(existsSync(path.join(archived, 'quay-native-methodology', 'reference', 'case-studies', 'iteration-88-abi-symmetry-walkthrough.md')), 'archived case-studies/ must exist in archive/');
+  assert.ok(existsSync(path.join(archived, 'quay-webui-bootstrap-methodology', 'reference', 'v-meta-ceiling-two-experiment.md')), 'archived quay-webui-bootstrap-methodology source must exist in archive/');
   assert.ok(
     !existsSync(path.join(pluginDir, 'skills', 'quay-native-methodology', 'reference', 'v-meta-stall-analysis.md')),
     'v-meta-stall-analysis.md must NOT be mirrored into plugin/ — it is explicitly excluded experiment-specific content'
   );
   assert.ok(
-    !existsSync(path.join(pluginDir, 'skills', 'quay-native-methodology', 'inventory')),
-    'inventory/ must NOT be mirrored into plugin/ — it is explicitly excluded experiment-specific content'
-  );
-
-  // quay-webui-bootstrap-methodology: V-meta ceiling analysis and G3 env-gap case study are
-  // experiment-specific content that must remain ONLY in .claude/skills/.
-  const webuiSrcDir = path.join(repoRoot, '.claude', 'skills', 'quay-webui-bootstrap-methodology');
-  assert.ok(existsSync(path.join(webuiSrcDir, 'reference', 'v-meta-ceiling-two-experiment.md')), 'original v-meta-ceiling-two-experiment.md must still exist (not deleted)');
-  assert.ok(existsSync(path.join(webuiSrcDir, 'reference', 'g3-visual-review-env-gap.md')), 'original g3-visual-review-env-gap.md must still exist (not deleted)');
-  assert.ok(
     !existsSync(path.join(pluginDir, 'skills', 'quay-webui-bootstrap-methodology', 'reference', 'v-meta-ceiling-two-experiment.md')),
     'v-meta-ceiling-two-experiment.md must NOT be mirrored into plugin/ — it is explicitly excluded experiment-specific content'
-  );
-  assert.ok(
-    !existsSync(path.join(pluginDir, 'skills', 'quay-webui-bootstrap-methodology', 'reference', 'g3-visual-review-env-gap.md')),
-    'g3-visual-review-env-gap.md must NOT be mirrored into plugin/ — it is explicitly excluded experiment-specific content'
   );
 });
 

@@ -1,7 +1,7 @@
 ---
 id: AC-153
 title: 核心不变式单一实现 + 结果词表含「无法评估」
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-002
 criterion: |
@@ -12,10 +12,6 @@ origin: >
 
   正本 orchestration/SPEC-unified-driver-architecture-2026-08-23.md
   §2.1/§2.5/§2.6。
-evidence:
-  at: 2026-09-06T17:03:31.975Z
-  verdict: pass
-  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：「⛔ 不信执行者自述，用独立于执行者的量复核」**只存在一份**；且 `DriverResult`

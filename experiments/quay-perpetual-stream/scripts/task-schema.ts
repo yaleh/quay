@@ -114,6 +114,7 @@ export function extractSection(fullText, heading) {
 //       dirStatus?: string;        // directive disposition
 //       depends_on?: string[];     // legacy home — task_write used to nest it under extra
 //       malformed?: string[];      // store-injected diagnosis markers
+//       deliveryCriticalSource?: string; // "evidence" | "adhoc" — which source attached the delivery-critical label
 //       [key: string]: unknown;
 //     };
 //     [key: string]: unknown;      // forward-compatible: unknown fields survive the round-trip
@@ -159,6 +160,22 @@ export function frontmatterDependsOn(fm) {
 export function frontmatterGoalAc(fm) {
   const s = fm && typeof fm === "object" && !Array.isArray(fm) ? fm.goal_ac : undefined;
   return typeof s === "string" && s.trim() !== "" ? s.trim() : null;
+}
+
+// ── frontmatterDeliveryCriticalSource — the `extra.deliveryCriticalSource` three-state projection
+//    (gap-delivery-critical-source-distinction-outer-retired). ──
+// The `delivery-critical` label now has TWO legal sources that were previously conflated into a single
+// prose claim ("由 outer 按证据打，从不移除"): `evidence` (attached at filing/promotion by the promote
+// gate's determination) and `adhoc` (attached by the manager under DIR-130's standing authorization for
+// human-priority instructions). This projection makes "which source is THIS label" mechanically readable.
+// It is an EXPLICIT THREE-STATE (hard rule 3b): the two concrete sources are returned verbatim, and
+// everything else — absent (a legacy task that predates the field) OR an unparseable value — returns the
+// DISTINCT `"unknown"` marker, never conflated with either concrete source. Mirrors frontmatterStatus's
+// "缺值 = 未查" shape, but as a named third state (the label's absence of a source is a legitimate
+// legacy condition, not an error).
+export function frontmatterDeliveryCriticalSource(fm) {
+  const s = frontmatterExtra(fm).deliveryCriticalSource;
+  return s === "evidence" || s === "adhoc" ? s : "unknown";
 }
 
 // ── frontmatterStatus — the `status:` projection (same family as frontmatterLabels/frontmatterExtra/

@@ -1,7 +1,7 @@
 ---
 id: AC-152
 title: Filter 是可组合谓词列表
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-002
 criterion: |
@@ -12,10 +12,6 @@ origin: >
 
   正本 orchestration/SPEC-unified-driver-architecture-2026-08-23.md
   §2.1/§2.5/§2.6。
-evidence:
-  at: 2026-09-06T17:03:31.548Z
-  verdict: pass
-  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：`notInFlight`/`depsSatisfied`/`touchesDisjoint`/`retryCapNotExhausted`/

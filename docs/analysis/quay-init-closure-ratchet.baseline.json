@@ -1,11 +1,11 @@
 {
   "files": 133,
-  "bytes": 3844134,
-  "fingerprint": "489ee30b684d3ad1c0841ba0a25b89a34bb9f52d2c73857399a6836341b752e6",
+  "bytes": 3885790,
+  "fingerprint": "928109306d6a1cfc07f1b269631527f9e2ed835d7c084975f96fbfbfc4433cff",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
-      "sha": "271a385151339bbcaf5d7c3b7a5cc26eaf59593a34f0c52470f04cb163490fcb"
+      "sha": "0506e59990e32a17c6f233160ee37d81d86bd8d920f0a890655c6e2c3fc9c906"
     },
     {
       "rel": "orchestration/orchestrator-tick-core.md",
@@ -14,10 +14,6 @@
     {
       "rel": "plugin/.claude/launch.settings.json",
       "sha": "25e4ace2586d593da41a0b0f7380c2d77aed03d404b7a0f3414329f6df30baec"
-    },
-    {
-      "rel": "plugin/agents/baime-iteration-executor.md",
-      "sha": "c901e4aff424a629f8ab88e07d6bf554458bbaec98e651c01741c5f1c3ba5e57"
     },
     {
       "rel": "plugin/agents/quay-task.md",
@@ -65,7 +61,7 @@
     },
     {
       "rel": "plugin/probes/meta-driver.md",
-      "sha": "95c7f6c39690b94b1fceee21f147e2848fe8eca5116c2d843a10957eb1904fd7"
+      "sha": "b3f222f96e3506cbb76fe1b42070c1e9e2a2e26eaf2ca619fedbe8f29a5dce95"
     },
     {
       "rel": "plugin/probes/self-validation.md",
@@ -105,7 +101,7 @@
     },
     {
       "rel": "plugin/scripts/capability-catalog.sh",
-      "sha": "6c9542d249381a49f735f0744ae237c0aedb8bdd8b6d528a42d1db03c7fab6e1"
+      "sha": "44b666d84f28eb02f4efad30bde685b4e9c38c9a6ba2bea10da90f746c7cf139"
     },
     {
       "rel": "plugin/scripts/checker-io.ts",
@@ -125,11 +121,11 @@
     },
     {
       "rel": "plugin/scripts/concurrent-batch-scheduler.ts",
-      "sha": "a50c1f0f73e9ded0a036bf06db3c42e4819786bb43d88fccfd408029e5c3195c"
+      "sha": "eb453918332b4612025fbdc8951d6a9c8dee30951188514ec42e508704df2463"
     },
     {
       "rel": "plugin/scripts/config-wiring-check.ts",
-      "sha": "51169a3a7924b66d6113d2a2a6ac939375fc4a3619c1860e329ca768d3a7bdfb"
+      "sha": "cb4bce7b27a41c74a5c93b924168704e6dbf715ec82138ea9f34e656cb54a412"
     },
     {
       "rel": "plugin/scripts/cross-machine-verify.sh",
@@ -185,7 +181,7 @@
     },
     {
       "rel": "plugin/scripts/fast-mode-telemetry.ts",
-      "sha": "be482cfd9dbcdb758258f2b3ec9e119f2a0380d3c5aca591b93b5306f50da8e0"
+      "sha": "a26dd905ddf4eb3302ea17bb29966f1bbfdeee214ce688f63e1ad64169e17ae9"
     },
     {
       "rel": "plugin/scripts/fork-baseline.ts",
@@ -193,7 +189,7 @@
     },
     {
       "rel": "plugin/scripts/full-suite-runner.ts",
-      "sha": "917f2044b23eaa3cea7a1c15a6100498f74ca2fee5708fcd3b1fffa8ed1d6e00"
+      "sha": "3989f307a53665b89e2fba25082d48a760101d5e40503263674c02c334060223"
     },
     {
       "rel": "plugin/scripts/gate-script-base.ts",
@@ -349,7 +345,7 @@
     },
     {
       "rel": "plugin/scripts/ready-pool-check.ts",
-      "sha": "69f4999c2a5b2931e2aa0e375d108cc564ed04212f29a3a8d26181d723ce2319"
+      "sha": "8839b9e37d10a961810447d05b28686ad74f403ccc90cd35035f513776034d49"
     },
     {
       "rel": "plugin/scripts/real-target-verify.sh",
@@ -389,7 +385,7 @@
     },
     {
       "rel": "plugin/scripts/select-static-checks-for-touches.ts",
-      "sha": "3fa7b18f0eee4fe1a76e1779dcb9040fa45b20509e5c1d6c2bdc32f809157082"
+      "sha": "e1d43d1dd5a6f363f15bbce5f658ef73c23082cddfb14fde7fe427db5921d4b6"
     },
     {
       "rel": "plugin/scripts/self-report-vocab-audit.ts",
@@ -417,11 +413,11 @@
     },
     {
       "rel": "plugin/scripts/slot-refill.ts",
-      "sha": "375d0da8e7afb7ae3b0ee1fb8c57d65f71b6d03ac0952c8b5b866b8993e63b33"
+      "sha": "3a6d86135d7754fafce4cd22c9198ef6db327a4b0eca1ce4c0002c77c58c83fa"
     },
     {
       "rel": "plugin/scripts/start-drivers.ts",
-      "sha": "016bdf209c9430a0004af1b44a30beadc6e3c772d39ea75928d10a3eb88e847f"
+      "sha": "812ea7fa13320fc9f4619a12462089418f74bcbe82451ae0ff0a035f6cf0e67d"
     },
     {
       "rel": "plugin/scripts/strategic-doc-staleness-check.ts",
@@ -429,7 +425,7 @@
     },
     {
       "rel": "plugin/scripts/suite-params.ts",
-      "sha": "a24dd2c0e7c0de0fb0cb4616862be89def87eba65654bc0d53b9d93081361c35"
+      "sha": "04c79a60b6a39767c4ec53ee24090927e52ec1ec6d50a20bb5072b9812b448c2"
     },
     {
       "rel": "plugin/scripts/suite-state-trigger.ts",
@@ -457,7 +453,7 @@
     },
     {
       "rel": "plugin/scripts/task-ops.ts",
-      "sha": "ff7c52013fa64c5d9fa3b93eb91deffc86843815063280e55352477031f89b4a"
+      "sha": "135f56075f91e9de8ce25cf96be9394ae261b592590d7ad2001b46dcfd6ac9c7"
     },
     {
       "rel": "plugin/scripts/task-schema-check.ts",
@@ -465,7 +461,7 @@
     },
     {
       "rel": "plugin/scripts/task-schema.ts",
-      "sha": "7c568481bf2aab97f31fa13aab53f48e891ed10c0a1027d8d4f9e5b15299b912"
+      "sha": "7313c2f38f119511e962f51ab6e49c429a10c14e588b1d9b45359b9628633ece"
     },
     {
       "rel": "plugin/scripts/task-status-drift-check.ts",
@@ -529,7 +525,11 @@
     },
     {
       "rel": "plugin/workflows/fan-in-execute.js",
-      "sha": "be27c107aaa459c126ae7265d428901be377156fc47208454d111e667bf242c3"
+      "sha": "5a9668644a49be6a69e95c9b7ae4e245fa24b4c255d5e6ac50c31b45dd675fb7"
+    },
+    {
+      "rel": "plugin/workflows/manager-tick-core.js",
+      "sha": "6f9e9905597746c9ef932c69e1e9cc8fe6258206a4fd0180dd4b6efa327065dd"
     },
     {
       "rel": "plugin/workflows/pool-quality-judge.js",

@@ -335,7 +335,7 @@ test("B15 — corrupt judge state ⇒ --plan lastJudgeState=corrupt, roundsSince
 
 // B15 写端接线（doc-contract）:workflow 完成路径必须调确定性写端,否则 lastRound 永远不落盘。
 test("B15 — the workflow completion path invokes --record-last-round (single writer, write end)", () => {
-  const wf = path.join(REPO_ROOT, ".claude", "workflows", "pool-quality-judge.js");
+  const wf = path.join(REPO_ROOT, "plugin", "workflows", "pool-quality-judge.js");
   const src = fs.readFileSync(wf, "utf8");
   assert.ok(src.includes("--record-last-round"), "workflow 完成路径必须调确定性写端 --record-last-round");
   assert.ok(src.includes("lastJudgeRecorded"), "workflow 返回必须携带 lastJudgeRecorded");
@@ -344,7 +344,7 @@ test("B15 — the workflow completion path invokes --record-last-round (single w
 // ── DOC-CONTRACT wiring (AC2/AC3: 执行核有「调用 workflow」的编号步骤,判词含 should-remove) ─────
 
 test("AC2 — the workflow file carries the four verdicts incl. should-remove (the proof-once-then-lost fix)", () => {
-  const wf = path.join(REPO_ROOT, ".claude", "workflows", "pool-quality-judge.js");
+  const wf = path.join(REPO_ROOT, "plugin", "workflows", "pool-quality-judge.js");
   assert.ok(fs.existsSync(wf), "pool-quality-judge workflow must exist");
   const src = fs.readFileSync(wf, "utf8");
   for (const v of VERDICTS) {

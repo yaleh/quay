@@ -794,6 +794,99 @@ test("LEFTOVER-WORKTREE — a single allChecked dead task no longer zeroes the p
   assert.equal(r.pool_big_all_colliding, false, "pool_big_all_colliding stays false (AC4)");
 });
 
+// ── HOISTED leftover-worktree exemption + touch-absent-from-ref veto
+// (gap-nyf-doneflipready-arm-bypasses-leftover-worktree-exemption) ───────────────────────────────────
+// The leftover-worktree exemption used to gate ONLY the standalone `allChecked` arm, so the
+// `doneFlipReady` arm (workLandedReady || commitTraceReady) BYPASSED it: a worktree-open task whose
+// taskWorkLanded read true (via symbol-resolution / touch-file existence over the main checkout's DISK
+// tree — a proxy that fires on PRE-EXISTING files the task EDITS, hard rule 4b) was judged not-yet-
+// flipped and left the pool FOREVER. Two fixes: (1) hoist the worktree exemption ABOVE every arm —
+// an open `task/<id>` worktree is the DIRECT "fan-in not yet complete" quantity, so it suppresses ALL
+// landed/completion signals; (2) a declared code-root Touches file ABSENT from the landing ref's tree
+// vetoes the landed arms (file-existence is zero information; presence in the ref is the direct read).
+
+test("AC1 — open worktree suppresses the workLanded done-flip arm (allChecked + workLanded stays dispatchable)", (t) => {
+  const root = makeRealGitRepo("nyf-wl-worktree");
+  const wtPath = path.join(root, "..", `${path.basename(root)}-wt`);
+  t.after(() => { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(wtPath, { recursive: true, force: true }); });
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  fs.writeFileSync(path.join(root, "code", "seed.ts"), "export const seed = 1;\n");
+  // workLanded fires: the (new)-tagged touch EXISTS on disk and is committed (so it is IN the ref —
+  // the touch-absent veto is clear, isolating the worktree hoist as the only suppressor).
+  fs.writeFileSync(path.join(root, "code", "landed.ts"), "export const landed = 1;\n");
+  gitCommit(root, "seed + landed");
+  const id = "gap-nyf-wl";
+  const body = fourArtifactBody({ checkedAc: 4, touches: ["- code/landed.ts (new)"] });
+  writeTask(root, id, { status: "ready", labels: ["gap"], body });
+  const task = { id, status: "ready", body };
+  // Precondition (RED on the OLD code — doneFlipReady fired regardless of the open-worktree state).
+  assert.equal(notYetFlipped(task, root), true, "no worktree + workLanded + allChecked is a done-flip (precondition)");
+  execFileSync("git", ["-C", root, "worktree", "add", "-q", "-b", `task/${id}`, wtPath]);
+  assert.equal(notYetFlipped(task, root), false, "open worktree suppresses the workLanded done-flip arm (AC1)");
+});
+
+test("AC2 — open worktree suppresses the commit-trace done-flip arm (commitTraceReady stays dispatchable)", (t) => {
+  const root = makeRealGitRepo("nyf-trace-worktree");
+  const wtPath = path.join(root, "..", `${path.basename(root)}-wt`);
+  t.after(() => { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(wtPath, { recursive: true, force: true }); });
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  fs.writeFileSync(path.join(root, "code", "seed.ts"), "export const seed = 1;\n");
+  gitCommit(root, "seed");
+  const id = "gap-nyf-trace";
+  const body = fourArtifactBody({ checkedAc: 4, touches: ["- code/never.ts"] });
+  writeTask(root, id, { status: "ready", labels: ["gap"], body });
+  const task = { id, status: "ready", body };
+  // A commit subject naming the task in the inner: convention ⇒ commitTraceReady = true.
+  const commitTraceSubjects = ["inner: gap-nyf-trace — implementation landed"];
+  execFileSync("git", ["-C", root, "worktree", "add", "-q", "-b", `task/${id}`, wtPath]);
+  assert.equal(notYetFlipped(task, root, null, { commitTraceSubjects }), false,
+    "open worktree suppresses the commit-trace done-flip arm (AC2)");
+});
+
+test("AC3 — regression: worktree removed + allChecked + landed is a done-flip again (original behavior, bidirectional)", (t) => {
+  const root = makeRealGitRepo("nyf-regress");
+  const wtPath = path.join(root, "..", `${path.basename(root)}-wt`);
+  t.after(() => { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(wtPath, { recursive: true, force: true }); });
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  fs.writeFileSync(path.join(root, "code", "seed.ts"), "export const seed = 1;\n");
+  fs.writeFileSync(path.join(root, "code", "landed.ts"), "export const landed = 1;\n");
+  gitCommit(root, "seed + landed");
+  const id = "gap-nyf-regress";
+  const body = fourArtifactBody({ checkedAc: 4, touches: ["- code/landed.ts (new)"] });
+  writeTask(root, id, { status: "ready", labels: ["gap"], body });
+  const task = { id, status: "ready", body };
+  execFileSync("git", ["-C", root, "worktree", "add", "-q", "-b", `task/${id}`, wtPath]);
+  assert.equal(notYetFlipped(task, root), false, "open worktree keeps it dispatchable (bidirectional setup)");
+  execFileSync("git", ["-C", root, "worktree", "remove", "--force", wtPath]);
+  assert.equal(notYetFlipped(task, root), true, "worktree removed + allChecked + landed is a done-flip again (AC3)");
+});
+
+test("AC4 — a declared Touches file ABSENT from the landing ref vetoes the landed signal (fail-closed dispatchable)", (t) => {
+  const root = makeRealGitRepo("nyf-absent-touch");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  fs.writeFileSync(path.join(root, "code", "seed.ts"), "export const seed = 1;\n");
+  gitCommit(root, "seed");
+  // A (new)-tagged touch that EXISTS on disk (so taskWorkLanded's touch-existence signal fires) but is
+  // NOT committed to the landing ref — file-existence is a PROXY reading the disk tree; "absent from
+  // the ref" is the DIRECT quantity (hard rule 4b). The veto must suppress the landed arms.
+  fs.writeFileSync(path.join(root, "code", "absent.ts"), "export const absent = 1;\n");
+  const task = {
+    status: "ready",
+    body: "## Acceptance Criteria\nprose only, no checkboxes\n## Touches\n- code/absent.ts (new)\n## Definition of Done\nstandard",
+  };
+  assert.equal(taskWorkLanded(task.body, root), true, "precondition: the touch-existence signal fires (file on disk)");
+  assert.equal(notYetFlipped(task, root), false, "Touches file absent from the landing ref ⇒ landed signal suppressed (AC4)");
+  // Negative control: land the file into the ref ⇒ the veto clears ⇒ the no-AC landed shape is a
+  // done-flip again (a parameter flip flips the conclusion — hard rule 4 / 推论四).
+  gitCommit(root, "land the absent file");
+  assert.equal(notYetFlipped(task, root), true, "once the Touches file IS in the ref, the landed signal fires again (AC4 negative control)");
+});
+
 // ── no-AC-section fallback (gap-git-history-landed-master-stale-under-two-line-model AC4) ──────────
 // A task with NO `## Acceptance Criteria` checkboxes (total=0) is STRUCTURALLY unable to tick ACs:
 // allAcsChecked is恒 false, so it could never be a done-flip through the checkbox signals and would

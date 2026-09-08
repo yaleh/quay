@@ -167,7 +167,7 @@ import { readSuiteParams, suiteParamsToEnv } from "./suite-params.ts";
 // suite (harness-critical must be fully verified). `writeState` is imported but NOT re-exported (it
 // stays module-private to this boundary, same as before the split).
 import { gateScanCause, isFailureLine, buildStaticCheckFailures } from "./runner-red-parse.ts";
-import { concurrentSuiteSlots, hostParallelism, spliceConcurrency, defaultLowconcConcurrency } from "./runner-concurrency.ts";
+import { concurrentSuiteSlots, hostParallelism, spliceConcurrency, defaultLowconcConcurrency, testProcessesInUse } from "./runner-concurrency.ts";
 import { readVerifiedCommit, readTreeState, contentHash, snapshotAssertionSurface } from "./runner-tree-state.ts";
 import type { AssertionSurfaceSnapshot } from "./runner-tree-state.ts";
 import { writeState, appendVerificationRound } from "./runner-state-write.ts";
@@ -1121,23 +1121,29 @@ export function isAbortLine(line: string): boolean {
 
 /**
  * AC1 — the DEFAULT laneCount is nproc-derived, using the SAME formula as test.sh's AC5
- * derivation: max(1, floor(nproc × oversub / S)). nproc = host parallelism
- * (os.availableParallelism() — read-host, never a literal, hard-rule-4 推论二 family); S = the
- * concurrent-suite slot count (旋钮② QUAY_MAX_CONCURRENT_SUITES, default 1 — the SAME
- * definition-point read as concurrentSuiteSlots()); oversub = 旋钮③ QUAY_MAX_OVERSUBSCRIPTION
- * (default 1, current value not a recommendation).
+ * derivation: max(1, floor((nproc − in_use) × oversub / S)). nproc = host parallelism
+ * (os.availableParallelism() — read-host, never a literal, hard-rule-4 推论二 family); in_use =
+ * testProcessesInUse() (the cross-layer throttle-able node --test process count — the
+ * gap-process-budget-in-use-structurally-zero-never-throttles fix: the pre-fix in_use was
+ * structurally 0 ⇒ the "subtract in-use" term never subtracted, so a busy host still derived the
+ * idle-host lane count); S = the concurrent-suite slot count (旋钮② QUAY_MAX_CONCURRENT_SUITES,
+ * default 1 — the SAME definition-point read as concurrentSuiteSlots()); oversub = 旋钮③
+ * QUAY_MAX_OVERSUBSCRIPTION (default 1, current value not a recommendation).
  *
  * gap-suite-budget-oversubscribe (human 14:4xZ 修正方向 — (b) 认领制/(c) 锁发配额 均被否，纯计算零新增
  * 运行时状态): the previous AC74 formula (nproc ÷ AMPLIFICATION on the runner, nproc − in_use on the
  * direct path) had NO structural bound tying the sum of all running suites' lanes to the host: two
- * concurrent suites derived nproc each (16+8=24 > 16, load 29.23 on 2026-08-14 14:39Z). The new
- * formula is PURE computation — S suites each derive nproc×oversub/S ⇒ Σ lane ≤ nproc×oversub
- * structurally, no claim-ledger / no lock-carried quota. A single suite gets nproc/S (8 on this host)
- * — the known cost of the pure-computation approach (判据4), not a defect; express "single suite uses
- * the whole host" via the oversub knob instead (⛔ never dynamic run-count amplification).
- * RESOURCE_GATE_NPROC / QUAY_MAX_CONCURRENT_SUITES / QUAY_MAX_OVERSUBSCRIPTION are the
- * deterministic test seams (RESOURCE_GATE_NPROC the same seam test.sh reads; the S/oversub knobs are
- * read via their production env so tests drive them directly).
+ * concurrent suites derived nproc each (16+8=24 > 16, load 29.23 on 2026-08-14 14:39Z). The S divisor
+ * is the structural bound — S suites each derive ≤ nproc×oversub/S ⇒ Σ lane ≤ nproc×oversub, no
+ * claim-ledger / no lock-carried quota. The in_use subtraction reintroduced here is a ONE-DIRECTIONAL
+ * DOWNWARD adjustment WITHIN that bound: it only ever reduces the lane count (a busy host takes fewer
+ * lanes), so it cannot reintroduce the cross-suite oversubscription — the worst case (in_use=0) is the
+ * pure formula. A single suite on an idle host gets nproc/S; express "single suite uses the whole
+ * host" via the oversub knob instead (⛔ never dynamic run-count amplification).
+ * RESOURCE_GATE_NPROC / QUAY_MAX_CONCURRENT_SUITES / QUAY_MAX_OVERSUBSCRIPTION / RESOURCE_GATE_TEST_NODE_PROCS
+ * are the deterministic test seams (RESOURCE_GATE_NPROC the same seam test.sh reads; the S/oversub
+ * knobs are read via their production env so tests drive them directly; RESOURCE_GATE_TEST_NODE_PROCS
+ * pins in_use for the budget-aware half).
  */
 export function defaultLaneCount(): number {
   const ncpuRaw = process.env.RESOURCE_GATE_NPROC ?? String(
@@ -1151,9 +1157,10 @@ export function defaultLaneCount(): number {
   // pre-fix「只让槽不让 lane」double oversubscription (each suite × nproc×oversub/S with no bound on the
   // slot-less one). A lone suite (no yielded slot) keeps the pure S formula unchanged (AC2 no-regression).
   const yielded = yieldedSuiteSlotCount();
+  const inUse = testProcessesInUse();
   const oversubRaw = Number(process.env.QUAY_MAX_OVERSUBSCRIPTION ?? "1");
   const oversub = Number.isFinite(oversubRaw) && oversubRaw > 0 ? oversubRaw : 1;
-  return Math.max(1, Math.floor((Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1) * oversub / (slots + yielded)));
+  return Math.max(1, Math.floor(((Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1) - inUse) * oversub / (slots + yielded)));
 }
 
 /**
@@ -2628,10 +2635,10 @@ export async function run(argv: string[]): Promise<number> {
   // phase ⇒ every spawned round gets ≥1 phase record (AC4 coverage 100%, incl. red/abort rounds).
   let phaseNodeActive = false; // a phase's node --test is the current stream producer (its __GROUP__ closes it)
   let overlapPhaseActive = false; // the QUAY_PHASE_OVERLAP combined serial+lowconc window is active
-  // gap-suite-scheduler-legacy-phase-splitting-cleanup: overlapPhaseActive / phaseOverlapRan /
-  // mainTailOverlap* below are LEGACY-FALLBACK observability — they read `overlap: running` /
-  // `overlap_<phase>_done=1` / `main-tail-overlap:` markers that ONLY the QUAY_SUITE_SCHEDULER=0
-  // phased path emits; under the unified scheduler these stay false/null (the fields stay absent).
+  // gap-suite-scheduler-legacy-phase-splitting-cleanup: overlapPhaseActive / phaseOverlapRan
+  // below are LEGACY-FALLBACK observability — they read `overlap: running` /
+  // `overlap_<phase>_done=1` markers that ONLY the QUAY_SUITE_SCHEDULER=0 phased path emits; under
+  // the unified scheduler these stay false/null (the fields stay absent).
   // gap-phase-overlap-field-always-false-negative — LATCHED (never reset): the suite ACTUALLY ran
   // the overlap scheduling. Unlike overlapPhaseActive (a transient window state that resets to false
   // when the window closes), this latches true the moment test.sh emits `overlap: running` and stays
@@ -2639,15 +2646,6 @@ export async function run(argv: string[]): Promise<number> {
   // the runner's own process.env.QUAY_PHASE_OVERLAP, which the production chain (fan-in-execute.js)
   // never sets (the env knob defaults to 1 only INSIDE test.sh, invisible to this parent process).
   let phaseOverlapRan = false;
-  // gap-suite-main-overlaps-load-sensitive-tail-experiment — main-tail-overlap observability. LATCHED
-  // from test.sh's `main-tail-overlap: lanes=N [load=X]` stream marker (emitted by the tail-overlap
-  // watcher when it actually fires main early), NOT from process.env.QUERY_MAIN_TAIL_OVERLAP — the
-  // same false-negative lesson as phaseOverlapRan: the production chain never sets the env on this
-  // parent process (the knob default 0 lives only inside test.sh). null on a baseline/sequential
-  // round (knob 0, or trigger never fired) — the reader tolerates absence (same absent-field
-  // contract as phase_overlap).
-  let mainTailOverlapLanes: number | null = null;
-  let mainTailOverlapLoad: number | null = null;
   let mainClosed = false; // the main→end boundary already fired
   // gap-verification-round-phases-overlap-merged — on the overlap path test.sh emits
   // `__OVERHEAD__ overlap_<phase>_done=1` right after EACH parallel phase's `wait`. The window
@@ -2664,12 +2662,6 @@ export async function run(argv: string[]): Promise<number> {
   const phaseOverlapSerialDone = /^__OVERHEAD__\s+overlap_serial_done=1/;
   const phaseOverlapLowconcDone = /^__OVERHEAD__\s+overlap_lowconc_done=1/;
   const phaseOverlapDone = /^__OVERHEAD__\s+overlap_(?:serial|lowconc)_done=1/;
-  // gap-suite-main-overlaps-load-sensitive-tail-experiment — test.sh's tail-overlap watcher announces
-  // its fire on the stream. Distinct from the __OVERHEAD__ family (which the phase boundary machine
-  // treats as the end-of-round burst) so a mid-window fire can never prematurely close the overlap
-  // window. lanes = the early-start concurrency (the knob value); load = /proc/loadavg 1-min at fire
-  // time (the observed total load during the overlap), absent when unreadable.
-  const mainTailOverlapRe = /^main-tail-overlap:\s+lanes=(\d+)(?:\s+load=(\S+))?/;
 
   // gap-verification-round-observability-holes AC1 — `lock_wait_ms` = the flock-wait the suite paid
   // before it acquired one of the S single-flight slots. The runner does NOT take the lock itself (it
@@ -2847,18 +2839,6 @@ export async function run(argv: string[]): Promise<number> {
     // line fell through to failures[] as a false red, round 137 __OVERHEAD__ build_dist_ms=479).
     const overheadM = line.match(/^__OVERHEAD__\s+([A-Za-z0-9_]+)_ms=(\d+)(?:\s+partial=1)?$/);
     if (overheadM) phaseMs[overheadM[1]] = Number(overheadM[2]);
-    // gap-suite-main-overlaps-load-sensitive-tail-experiment — first marker wins (test.sh's watcher
-    // fires at most once). Pure addition: it cannot flip the verdict, and a missed marker only omits
-    // the two observability fields (缺键, never a fabricated 0 — the same absent-field contract as
-    // phase_overlap). load is explicit-absent (stays null) when the marker carried no readable load.
-    const tailOverlapM = line.match(mainTailOverlapRe);
-    if (tailOverlapM) {
-      mainTailOverlapLanes = Number(tailOverlapM[1]);
-      if (tailOverlapM[2] !== undefined && tailOverlapM[2] !== "") {
-        const parsedLoad = Number(tailOverlapM[2]);
-        mainTailOverlapLoad = Number.isFinite(parsedLoad) ? parsedLoad : null;
-      }
-    }
     // gap-ceiling-floor-ms-not-landed-in-verification-round AC1/AC2 — parse the reporter's
     // `__CEILING__ <path> duration_ms=<dur> floor_ms=<floor> 封顶者/该拆` line (^ anchored — the
     // ^__PERFILE__ self-match family: a PASSING test whose NAME quotes the shape is ✔-prefixed and
@@ -3611,15 +3591,6 @@ export async function run(argv: string[]): Promise<number> {
     // 241 records, phase_overlap:true only 3×, all manual exploration rounds. The `overlap: running`
     // stream marker is test.sh's ground-truth signal that the parallel branch ACTUALLY ran.
     ...(phaseOverlapRan ? { phase_overlap: true } : {}),
-    // gap-suite-main-overlaps-load-sensitive-tail-experiment AC1/AC3 — the tail-overlap observability.
-    // Present only when test.sh's watcher ACTUALLY fired main early (knob >0 AND the load trigger
-    // fired). main_tail_overlap_lanes = the early-start concurrency (the knob value / experiment's
-    // lane level); main_tail_overlap_load = /proc/loadavg 1-min at fire time (the observed total load
-    // during the overlap). Absent on a baseline/sequential round (knob 0, or trigger never fired) —
-    // the same absent-field contract as phase_overlap. Feeds AC3's "档位 → 总负载 → flake 率 →
-    // wall-clock" table (load is the observed host value, never a literal — hard rule 4 推论二).
-    ...(mainTailOverlapLanes !== null ? { main_tail_overlap_lanes: mainTailOverlapLanes } : {}),
-    ...(mainTailOverlapLoad !== null ? { main_tail_overlap_load: mainTailOverlapLoad } : {}),
     // gap-ceiling-floor-ms-not-landed-in-verification-round AC1/AC3 — the reporter's per-group
     // floors (各相) + capped-file list. Both appear together (every __CEILING__ line carries a
     // floor_ms, so floorMsSeen non-empty ⟺ ceilingFiles non-empty), and BOTH are omitted on a

@@ -88,6 +88,17 @@ function resolveGoalDir() {
   return path.resolve(process.cwd(), "goals");
 }
 
+function resolveMetaDir() {
+  // Meta records (gap-meta-records-should-be-a-first-class-store-kind-not-a-task-label) are
+  // provider-backed like goals: a repo-root sibling of tasks/ (default ./meta). Env override
+  // QUAY_NATIVE_META_DIR, else repo-root ./meta.
+  const envDir = process.env.QUAY_NATIVE_META_DIR;
+  if (envDir) return path.resolve(envDir);
+  const repoRoot = findRepoRoot(process.cwd());
+  if (repoRoot) return path.resolve(repoRoot, "meta");
+  return path.resolve(process.cwd(), "meta");
+}
+
 /**
  * DIR-047: load the per-provider `default_task_status` from .quay/config.yml.
  * Walks upward from CWD using the same root-finding logic as resolveTasksDir().
@@ -147,7 +158,7 @@ async function main() {
     // .quay/config.yml, then pass it to the MCP server so task_write (status
     // omitted on a new task) uses the same configured default as the CLI.
     const defaultStatus = loadDefaultStatus();
-    await startMcpServer({ tasksDir: resolveTasksDir(), adrDir: resolveAdrDir(), goalDir: resolveGoalDir(), defaultStatus });
+    await startMcpServer({ tasksDir: resolveTasksDir(), adrDir: resolveAdrDir(), goalDir: resolveGoalDir(), metaDir: resolveMetaDir(), defaultStatus });
     return;
   }
 
