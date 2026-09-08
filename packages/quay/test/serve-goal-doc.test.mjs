@@ -71,14 +71,16 @@ after(async () => {
   process.chdir(originalCwd);
 });
 
-test("AC5 — GET /goal lists phase + criterion records with origin and recent verdict", async () => {
+test("AC5 — GET /goal lists goal + criterion records with recent verdict (origin moved off the list)", async () => {
   const r = await get(port, "/goal");
   assert.equal(r.status, 200);
   assert.match(r.body, /GOAL-001/);
   assert.match(r.body, /AC-028/);
   assert.match(r.body, /three-layer unification/);
   assert.match(r.body, /experience flows/);
-  assert.match(r.body, /origin/);
+  // gap-webui-goal-list-sort-and-column-set AC1: the whole-prose `origin` column left the list
+  // (it lives on the detail page now) — the list must no longer render it.
+  assert.doesNotMatch(r.body, /origin/, "origin is no longer a list column");
   // The most valuable column: recent verdict + time — now from the LEDGER, not the file.
   assert.match(r.body, /pass/);
   assert.match(r.body, /2026-09-06T12:00:00Z/);

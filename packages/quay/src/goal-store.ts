@@ -109,8 +109,10 @@ const OWNED_KEYS = new Set([
 // not-checked, not false). This is the SINGLE point both consumers share: `checkStaleness` reads
 // `ac.evidence.at` from `list()`'s view-models, and the native provider's `goal_list`/`goal_get`
 // verbs surface the same view-models to serve-goal.
-function ledgerEvidenceMap(goalDir: string): Map<string, { at?: string; verdict?: string; reading?: string }> {
-  const map = new Map<string, { at?: string; verdict?: string; reading?: string }>();
+type LedgerEvidence = { at?: string; verdict?: string; reading?: string; firstAt?: string };
+
+function ledgerEvidenceMap(goalDir: string): Map<string, LedgerEvidence> {
+  const map = new Map<string, LedgerEvidence>();
   const logPath = path.join(path.dirname(goalDir), ".quay", "gate-events.jsonl");
   let events;
   try {
@@ -125,8 +127,11 @@ function ledgerEvidenceMap(goalDir: string): Map<string, { at?: string; verdict?
       && typeof (ev.payload as Record<string, unknown>).reason === "string"
       ? (ev.payload as Record<string, unknown>).reason as string
       : undefined;
-    // Append order = on-disk order, so the LAST matching event wins (the most recent).
-    map.set(id, { at: ev.timestamp, verdict: ev.verdict, reading });
+    // Append order = on-disk order, so the LAST matching event wins (the most recent). `firstAt`
+    // keeps the FIRST matching event (the earliest evidence) — the SAME single pass supplies both
+    // extremes with zero extra I/O (firstEvidenceAt's min is the first-seen timestamp).
+    const prev = map.get(id);
+    map.set(id, { at: ev.timestamp, verdict: ev.verdict, reading, firstAt: prev?.firstAt ?? ev.timestamp });
   }
   return map;
 }
@@ -217,6 +222,10 @@ interface GoalViewModel {
   supersededBy: unknown[];
   body: string;
   updatedAt?: number;
+  /** Ledger-derived (never stored, never mtime): the record's most recent goal-gate-event time. */
+  lastProgressAt?: string;
+  /** Ledger-derived (never stored, never mtime): the record's earliest goal-gate-event time. */
+  firstEvidenceAt?: string;
 }
 
 export interface DisposeOld {
@@ -232,6 +241,45 @@ export function isGoalId(id: string): boolean {
 
 export function isCriterionId(id: string): boolean {
   return typeof id === "string" && AC_ID_RE.test(id);
+}
+
+// ── lastProgressAt / firstEvidenceAt for GOAL rows (M1 time columns) ──────────────────────────
+// A GOAL's time is DERIVED from its ACs' ledger-derived evidence — NEVER its own `updatedAt`
+// (mtime) and never a stored field (hard rule 4b: a quantity the measured object produces is not
+// a measurement). lastProgressAt = max over ACs of `evidence.at` (its most recent progress);
+// firstEvidenceAt = min over ACs of `evidence.firstAt` (its earliest evidence). Criterion records
+// already carry their own last/first from toViewModel (their own gate events); this pass overrides
+// the (undefined) GOAL values. Runs over the FULL pre-filter list so a `?kind=goal`/`?goal=` filter
+// can never empty a goal's AC set (hard rule 3b — the rollup and time must not collapse under filter).
+function annotateGoalProgress(all: GoalViewModel[]): void {
+  const byGoal = new Map<string, GoalViewModel[]>();
+  for (const g of all) {
+    if (typeof g.goal !== "string") continue;
+    const arr = byGoal.get(g.goal) ?? [];
+    arr.push(g);
+    byGoal.set(g.goal, arr);
+  }
+  for (const g of all) {
+    if (!isGoalId(String(g.id))) continue;
+    const acs = byGoal.get(String(g.id)) ?? [];
+    let lastMs: number | undefined;
+    let firstMs: number | undefined;
+    let lastStr: string | undefined;
+    let firstStr: string | undefined;
+    for (const ac of acs) {
+      const ev = ac.evidence as { at?: unknown; firstAt?: unknown } | undefined;
+      if (ev && typeof ev.at === "string") {
+        const t = Date.parse(ev.at);
+        if (!Number.isNaN(t) && (lastMs === undefined || t > lastMs)) { lastMs = t; lastStr = ev.at; }
+      }
+      if (ev && typeof ev.firstAt === "string") {
+        const t = Date.parse(ev.firstAt);
+        if (!Number.isNaN(t) && (firstMs === undefined || t < firstMs)) { firstMs = t; firstStr = ev.firstAt; }
+      }
+    }
+    g.lastProgressAt = lastStr;
+    g.firstEvidenceAt = firstStr;
+  }
 }
 
 /**
@@ -298,9 +346,10 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
   function toViewModel(
     frontmatter: GoalFrontmatter,
     body: string,
-    evidenceMap: Map<string, { at?: string; verdict?: string; reading?: string }>,
+    evidenceMap: Map<string, LedgerEvidence>,
     updatedAt?: number,
   ): GoalViewModel {
+    const evidence = evidenceMap.get(String(frontmatter.id ?? ""));
     const vm: GoalViewModel = {
       id: frontmatter.id,
       title: frontmatter.title,
@@ -310,7 +359,12 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       criterion: frontmatter.criterion,
       expect: frontmatter.expect,
       origin: frontmatter.origin,
-      evidence: evidenceMap.get(String(frontmatter.id ?? "")),
+      evidence,
+      // Own-record time (a criterion): lastProgressAt = its LAST gate=goal event, firstEvidenceAt =
+      // its FIRST. A GOAL's own fields are undefined here (GOALs carry no criterion and are never
+      // gated themselves) — list() derives a GOAL's time from its ACs via annotateGoalProgress.
+      lastProgressAt: typeof evidence?.at === "string" ? evidence.at : undefined,
+      firstEvidenceAt: typeof evidence?.firstAt === "string" ? evidence.firstAt : undefined,
       supersedes: frontmatter.supersedes ?? [],
       supersededBy: frontmatter["superseded-by"] ?? [],
       body,
@@ -334,13 +388,16 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
 
   function list(filter: GoalFilter = {}): GoalViewModel[] {
     const evidenceMap = ledgerEvidenceMap(goalDir);
-    return fs
+    const all = fs
       .readdirSync(goalDir)
       .filter((f) => f.endsWith(".md") && (f.startsWith("GOAL-") || f.startsWith("AC-")))
       .map((f) => {
         const { frontmatter, body } = parseFrontmatter(fs.readFileSync(path.join(goalDir, f), "utf8"));
         return toViewModel(frontmatter as GoalFrontmatter, body, evidenceMap, fs.statSync(path.join(goalDir, f)).mtimeMs);
-      })
+      });
+    // GOAL rows' time is derived from their ACs — computed over the FULL list before any filter.
+    annotateGoalProgress(all);
+    return all
       .filter((g) => (filter.status ? g.status === filter.status : true))
       .filter((g) => (filter.kind ? g.kind === filter.kind : true))
       .filter((g) => (filter.goal ? g.goal === filter.goal : true))
