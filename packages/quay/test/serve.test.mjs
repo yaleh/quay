@@ -1645,7 +1645,12 @@ async function main() {
   // test below compares observation.ts's pairing against the real aggregate()/readAllEvents.
   {
     const obsTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-obs-test-"));
-    const obsWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-obs-workspace-"));
+    // gap-serve-board-test-workspace-couples-to-shared-tmp-quay-worktrees: nest the workspace root
+    // under a private parent so dirname(obsWorkspaceRoot)/quay-worktrees is test-private (never the
+    // shared /tmp/quay-worktrees).
+    const obsParent = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-obs-workspace-"));
+    const obsWorkspaceRoot = path.join(obsParent, "main");
+    fs.mkdirSync(obsWorkspaceRoot, { recursive: true });
     fs.mkdirSync(path.join(obsWorkspaceRoot, ".quay"), { recursive: true });
     fs.writeFileSync(
       path.join(obsWorkspaceRoot, ".quay", "config.yml"),
@@ -1847,7 +1852,7 @@ async function main() {
       }
       process.chdir(obsOrigCwd);
       fs.rmSync(obsTasksDir, { recursive: true, force: true });
-      fs.rmSync(obsWorkspaceRoot, { recursive: true, force: true });
+      fs.rmSync(obsParent, { recursive: true, force: true });
     }
   }
 

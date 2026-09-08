@@ -1445,7 +1445,11 @@ function writeLiveGhostFixture(root, entries) {
 }
 
 test("AC1/AC2/AC3 — readLive drops terminal-status ghosts, keeps a ready task (workflow-events source)", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "live-ghost-"));
+  // gap-serve-board-test-workspace-couples-to-shared-tmp-quay-worktrees: nest root under a private
+  // parent so dirname(root)/quay-worktrees is test-private (never the shared /tmp/quay-worktrees).
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "live-ghost-"));
+  const root = path.join(parent, "main");
+  fs.mkdirSync(root, { recursive: true });
   try {
     const nowMs = writeLiveGhostFixture(root, [
       { runId: "fm-SUP-1", taskId: "SUP", status: "superseded" },
@@ -1462,7 +1466,7 @@ test("AC1/AC2/AC3 — readLive drops terminal-status ghosts, keeps a ready task 
     assert.ok(!ids.has("NH"), "AC3: a needs-human task with an orphan START event is NOT in-flight (no worker is running)");
     assert.ok(ids.has("RDY"), "AC2: a ready task with an orphan START event IS still in-flight (negative control — not over-trimmed)");
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(parent, { recursive: true, force: true });
   }
 });
 
