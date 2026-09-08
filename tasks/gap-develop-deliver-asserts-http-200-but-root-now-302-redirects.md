@@ -2,7 +2,7 @@
 id: gap-develop-deliver-asserts-http-200-but-root-now-302-redirects
 title: 交付验证硬断言 / == 200，而产品 / 已改为 302→/dashboard ⇒ DIR-123 每次 merge
   后的跨主机交付验证全红，且在 B 上就中断、C 从未被验
-status: todo
+status: ready
 labels:
   - gap
   - delivery-critical
