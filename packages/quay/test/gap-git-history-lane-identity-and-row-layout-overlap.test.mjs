@@ -151,15 +151,21 @@ test("AC4: fully expanded, every visible row is distinct (the overlap invariant 
   assert.equal(new Set(hashes).size, hashes.length, "every commit hash maps to exactly one row");
 });
 
-// ── AC5: every text element starts at the fixed text column ────────────────────────────────────────
+// ── AC5: every text element starts at (or after) the fixed text column ──────────────────────────────
 
-test("AC5: all ink/muted text starts at one fixed x (textX), distinct from the lane node cx", () => {
+test("AC5: all ink/muted text starts at or after the fixed x (textX), distinct from the lane node cx", () => {
   const script = gitGraphClientScript();
-  // Every `.git-svg-ink` / `.git-svg-muted` text element's x attribute must be the single textX constant.
+  // Every `.git-svg-ink` / `.git-svg-muted` text element's x must clear the fixed text column — the
+  // single textX constant, OR textX + a chip offset (gap-git-graph-lane-visual-encoding-and-fixed-width:
+  // a collapsed summary leads with a lane-colour chip(ref), so its trailing "· N commits…" text starts
+  // right after the chip). Either way it never moves LEFT of textX, so text never overlaps a lane line.
   const re = /\.attr\("class", "git-svg-(?:ink|muted)"\)\s*\.attr\("x",\s*([^)]*)\)/g;
   const xs = [...script.matchAll(re)].map((m) => m[1].trim());
   assert.ok(xs.length >= 5, `found the text elements (got ${xs.length})`);
-  assert.ok(xs.every((x) => x === "textX"), `every ink/muted text x is textX (got: ${[...new Set(xs)].join(", ")})`);
+  assert.ok(
+    xs.every((x) => x === "textX" || x.startsWith("textX + ")),
+    `every ink/muted text x starts at (or after) textX (got: ${[...new Set(xs)].join(", ")})`,
+  );
   // The node cx is a DIFFERENT coordinate (trunk spine / lane slot), never the text column.
   assert.ok(script.includes('.attr("cx", trunkX)'), "trunk node cx is the trunk spine x");
   assert.ok(script.includes('.attr("cx", laneX)'), "branch node cx is the lane slot x");

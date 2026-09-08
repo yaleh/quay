@@ -3,7 +3,7 @@ id: gap-goal-record-completeness-undefined
 title: goal 记录「什么算写完整」从未被定义：goal_write 把出处 origin 设为必填、内容 body 设为可选，激励反向 ⇒ 8 个
   goal 里 5 个（62%）正文为空、论述全塞进 origin（GOAL-008 达 1130 字符）；task 侧有 shape-aware
   四件套闸，goal 侧零等价物、也无立条 skill
-status: needs-human
+status: ready
 needs_human_cause: human-adjudication
 labels:
   - gap
@@ -98,8 +98,12 @@ task 侧有 shape-aware 四件套（`plugin/scripts/ready-pool-check.ts` 的 `SH
 - [x] AC4 存量清单（枚举不布尔）：产出并在提交信息中贴出「当前 `kind:goal` 且 body 为空」的**完整 id 清单与条数**
       （2026-09-08 实测为 5 条：GOAL-004/005/006/007/008；实现时以当时重算为准）。
       清单为空或只给条数不给 id ⇒ 不算达成。
-- [x] AC5 不误伤 criterion（负控制）：对 `goals/` 里**现存全部 57 条 criterion** 逐条跑新校验，
-      断言**通过数 == 57**（其中 19 条 body 为空者必须仍通过）。任一条被拒 ⇒ 规则定错了。
+- [x] AC5 不误伤 criterion（负控制）：对 `goals/` 里**落地当时现存的全部 criterion** 逐条跑新校验，
+      断言**被拒条数 == 0 且通过数 == 当时重算的 criterion 总数**（其中 body 为空的子集必须非空、且必须仍通过）。
+      任一条被拒 ⇒ 规则定错了。⛔ 不得把某一时刻的条数冻结成字面量——`goals/` 是持续增长的活载体：
+      2026-09-08 实证 AC-200 在本任务 fan-in 前 2 分 26 秒落地，把 57 顶成 58、空正文 19 顶成 20，
+      判据红在字面量而非规则缺陷上（同 AC4 已有的「实现时以当时重算为准」限定，紧邻的 AC5 漏了）。
+      2026-09-08 读数 57/19 只作基线棘轮下界，不作等式。
 - [x] AC6 动词描述已改：断言 `packages/quay-native/src/mcp-server.ts` 的 `goal_write` description 中
       出现 `body` 对 `kind:goal` 必填的表述，且不再把 `origin` 描述成唯一必填的散文字段。
 - [x] AC7 `bash scripts/test.sh --for-task gap-goal-record-completeness-undefined` 退出码 0。
@@ -151,3 +155,21 @@ PASS: DIR-086 lifecycle_complete on GATE-FAIL returns ok:fals
 - run_id：wk-prod-1788779505
 - session_id：3ca567b7-5f28-4157-a5e3-c7fde94d3d15
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-goal-record-completeness-undefined-wk-prod-1788779505.log
+
+**裁定 2026-09-08 — 重派（needs-human → ready）**
+
+- 阻塞的红经实跑核实**不是规则缺陷，是判据腐烂**：AC5 测试对活载体 `goals/` 冻结了两个快照字面量
+  （`criteria.length == 57`、`emptyBodyIds.length == 19`）。时间线（提交时刻实测）：`8c06b1630`
+  「goals: AC-200 写盘即提交」于 11:00:56 落 develop（criterion 57→58、空正文 19→20）→ worker
+  11:01:10 把 develop 合入任务分支 → 11:03:36 打 needs-human，间隔 2 分 26 秒。实测现值 58 / 20，
+  两个字面量都已越过；只修前一个的话后一个会立刻接着红。
+- AC5 的实质判定本就通过：`rejected == []` 与 `passes == criteria.length` 排在快照断言之前、两条都过
+  ⇒ 新校验对全部 58 条生产 criterion 零误拒，负控制要验的性质已经成立。
+- 已改棘轮并提交 `9273e6974`（分支 `task/gap-goal-record-completeness-undefined`）：
+  `criteria.length >= 57` / `emptyBodyIds.length > 0`，两条实质断言原样保留。
+  能取假对照（硬规则④）：同一谓词对空库 ⇒ criteria=0 (`>=57` false)、emptyBody=0 (`>0` false)；
+  对生产 goals/ ⇒ 58 (true) / 20 (true)。该测试文件读数 5 tests / 5 pass / 0 fail。
+- 实现与 DoD 证据此前已完备：`80d12fe42` 提交信息含真实 `goal_write` 调用的拒绝+接受双向输入输出，
+  以及 AC4 存量 5 条空正文 goal 清单（GOAL-004/005/006/007/008）。后续 `3b11f3c4a`（校验限定
+  create-only，修 goal-driver 机械翻转被误伤）与 `5d6e17697`（slugify fixture 补 body）已修掉连带伤。
+- 分支落后 develop 9 提交，合并交机械 fan-in。
