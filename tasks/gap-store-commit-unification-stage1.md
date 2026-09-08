@@ -31,12 +31,12 @@ goal_ac: AC-195
 
 ## Acceptance Criteria
 
-- [ ] AC-195 判据本判据：`test "$(grep -l '"commit",' packages/quay/src/goal-store.ts packages/quay/src/meta-store.ts packages/quay/src/adr-store.ts packages/quay/src/document-store.ts packages/quay-native/src/store.ts 2>/dev/null | wc -l)" -eq 0`
-- [ ] 原语存在且四态齐备：`test -f packages/quay/src/store-commit.ts && grep -q 'not-in-git' packages/quay/src/store-commit.ts && grep -q 'unchanged' packages/quay/src/store-commit.ts && grep -q 'rev-parse' packages/quay/src/store-commit.ts`
-- [ ] 旧 boolean 提交函数 = 0：`test "$(grep -rl 'commitGoalFileAfterWrite\|commitMetaFileAfterWrite' packages/quay/src | wc -l)" -eq 0`
-- [ ] 五 kind 全部接线 commitStoreWrite = 5：`test "$(grep -l commitStoreWrite packages/quay/src/goal-store.ts packages/quay/src/meta-store.ts packages/quay/src/adr-store.ts packages/quay/src/document-store.ts packages/quay-native/src/store.ts 2>/dev/null | wc -l)" -eq 5`
-- [ ] 不再有 path.dirname 当 git 根：`test "$(grep -rn 'const root = path.dirname(goalDir)\|const root = path.dirname(metaDir)' packages/quay/src | wc -l)" -eq 0`
-- [ ] 负控制单测进默认 suite 且跑绿：`head -3 packages/quay/test/store-commit.test.mjs | grep -q '@test-group' && node --no-warnings --experimental-strip-types --test packages/quay/test/store-commit.test.mjs`
+- [x] AC-195 判据本判据：`test "$(grep -l '"commit",' packages/quay/src/goal-store.ts packages/quay/src/meta-store.ts packages/quay/src/adr-store.ts packages/quay/src/document-store.ts packages/quay-native/src/store.ts 2>/dev/null | wc -l)" -eq 0`
+- [x] 原语存在且四态齐备：`test -f packages/quay/src/store-commit.ts && grep -q 'not-in-git' packages/quay/src/store-commit.ts && grep -q 'unchanged' packages/quay/src/store-commit.ts && grep -q 'rev-parse' packages/quay/src/store-commit.ts`
+- [x] 旧 boolean 提交函数 = 0：`test "$(grep -rl 'commitGoalFileAfterWrite\|commitMetaFileAfterWrite' packages/quay/src | wc -l)" -eq 0`
+- [x] 五 kind 全部接线 commitStoreWrite = 5：`test "$(grep -l commitStoreWrite packages/quay/src/goal-store.ts packages/quay/src/meta-store.ts packages/quay/src/adr-store.ts packages/quay/src/document-store.ts packages/quay-native/src/store.ts 2>/dev/null | wc -l)" -eq 5`
+- [x] 不再有 path.dirname 当 git 根：`test "$(grep -rn 'const root = path.dirname(goalDir)\|const root = path.dirname(metaDir)' packages/quay/src | wc -l)" -eq 0`
+- [x] 负控制单测进默认 suite 且跑绿：`head -3 packages/quay/test/store-commit.test.mjs | grep -q '@test-group' && node --no-warnings --experimental-strip-types --test packages/quay/test/store-commit.test.mjs`
 
 ## Definition of Done
 
