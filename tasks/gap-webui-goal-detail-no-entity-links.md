@@ -2,7 +2,7 @@
 id: gap-webui-goal-detail-no-entity-links
 title: goal 详情页只渲染 body markdown、不渲染实体关系 ⇒ main 内链接数为 0：正文提到的 AC156–AC169
   不可点、无返回列表链接、名下 59 条 criterion 一条不列（而 dashboard 能算出「AC 达成 12/14」）
-status: todo
+status: ready
 labels:
   - gap
   - webui

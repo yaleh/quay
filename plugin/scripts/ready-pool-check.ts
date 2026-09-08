@@ -223,7 +223,7 @@ import { defaultDriverConfig } from "./driver-config.ts";
 // git-history-signal): ONE `git log` over all of the landing ref (integration/develop/master per
 // landingRef — gap-git-history-landed-master-stale-under-two-line-model), matched in memory per task,
 // instead of ~30-50 per-task `git log -- <paths>` calls (each O(history) — the >150s pool-check timeout).
-import { taskWorkLanded, buildGitHistoryIndex, countAcCheckboxes, landingRef, wordMatch } from "./task-status-drift-check.ts";
+import { taskWorkLanded, buildGitHistoryIndex, countAcCheckboxes, landingRef, wordMatch, isCodeTouchEntry } from "./task-status-drift-check.ts";
 // RETIRED-MECHANISM INTERCEPT (gap-ready-pool-promotion-ignores-retired-mechanism-candidate-check):
 // promotion must NOT advance a candidate that references an ADR-022-deleted classic-pipeline script
 // (prepare-milestone.js / execute-milestone.js / milestone-worktree.ts) without annotation — a todo
@@ -251,6 +251,11 @@ import { listWorktrees, worktreeExists } from "./fast-mode-telemetry.ts";
 // record). Single source: checkTaskOneEntryOnePath — the SAME judge precommit-guard.ts uses (no
 // second Touches parser).
 import { checkTaskOneEntryOnePath, readOneEntryBaseline } from "./touches-one-entry-one-path-check.ts";
+// TOUCH-ABSENT-FROM-REF VETO (gap-nyf-doneflipready-arm-bypasses-leftover-worktree-exemption): parse
+// the task's ## Touches with STRUCTURAL TAGS (`(new)`/`(delete)`) — the tag-aware read from the
+// touches-parser single source, so a `(delete)`-tagged touch (whose absence from the landing ref is
+// the DESIRED end state) is excluded from the veto below.
+import { parseTouchEntriesWithTags } from "./touches-parser.ts";
 
 /** Default concurrency cap (max in-flight subagents) — derived from driver-config's
  *  defaultDriverConfig().worker.cap (the DISPATCH single source, AC155), NOT a parallel literal.
@@ -880,6 +885,58 @@ export function isPendingImplementationItem(text) {
   return !isExternalVerificationItem(text);
 }
 
+// ── TOUCH-ABSENT-FROM-REF VETO (gap-nyf-doneflipready-arm-bypasses-leftover-worktree-exemption) ─────
+// The landed signals (taskWorkLanded's symbol-resolution / touch-file existence) read the main
+// checkout's DISK working tree — a file the task EDITS already exists there regardless of whether THIS
+// task's change landed, so "the file exists" carries zero information (hard rule 4b, measured
+// 2026-09-08: gap-mechanical-fan-in-loses-per-phase-accounting declared
+// `plugin/test/suite-accounting.test.mjs` — ABSENT from develop — yet taskWorkLanded read true via
+// symbol-resolution in the PRE-EXISTING `suite-accounting.ts`). The DIRECT quantity is "is every
+// declared specific code-root Touches file present in the LANDING REF's tree" — a file ABSENT from the
+// ref is positive evidence the work has NOT landed. The veto only fires on POSITIVE absence evidence:
+// an unreadable ref (non-git root) does NOT veto, because a false veto (keep dispatching) is
+// self-healing while a false non-veto is the exact "task disappears from the pool FOREVER" failure.
+
+/** Does the landing ref resolve in this repo? Non-git roots (the makeWorkspace test fixture) have no
+ *  ref — there is no tree to check against, so the veto must stay OFF (fail-soft, original behavior). */
+function gitRefExists(repoRoot, ref) {
+  try {
+    const out = execFileSync("git", ["-C", repoRoot, "rev-parse", "--verify", "-q", ref], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Is `path` present in the landing ref's tree? `git cat-file -e <ref>:<path>` exit 0 ⇒ present. */
+function gitFileExistsAtRef(repoRoot, ref, pathName) {
+  try {
+    execFileSync("git", ["-C", repoRoot, "cat-file", "-e", `${ref}:${pathName}`], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True when a declared CODE-ROOT Touches file (specific, non-glob, non-`(delete)`) is ABSENT from the
+ *  landing ref's tree — the veto that suppresses the landed arms. A `(delete)`-tagged touch is excluded
+ *  (its absence from the ref is the DESIRED end state); bookkeeping paths (tasks/** etc.) are excluded
+ *  (not implementation evidence); globs are excluded (can't `cat-file` a pattern). */
+function hasTouchAbsentFromRef(taskBody, repoRoot, opts) {
+  const touchesSection = extractSection(taskBody, "Touches");
+  if (!touchesSection) return false;
+  const ref = landingRef(repoRoot, opts);
+  if (!gitRefExists(repoRoot, ref)) return false; // fail-soft: no ref ⇒ no veto
+  return parseTouchEntriesWithTags(touchesSection)
+    .filter((e) => e.tag !== "delete")
+    .map((e) => e.path)
+    .filter((p) => p && !p.includes("*") && !p.includes("?"))
+    .filter((p) => isCodeTouchEntry(p))
+    .some((p) => !gitFileExistsAtRef(repoRoot, ref, p));
+}
+
 /** True when the task is in the "this batch done, not yet flipped to done" state — the declared
  *  work has landed on the mainline (task-status-drift-check's symbol-resolution / touch-file /
  *  git-history evidence — the last over integration/develop/master per landingRef, not hardcoded
@@ -929,6 +986,20 @@ export function notYetFlipped(task, repoRoot, gitIndex, opts = null) {
   const o = { taskId: task.id };
   if (gitIndex) o.gitIndex = gitIndex; // batched git-history index (see buildGitHistoryIndex)
   if (opts && !Array.isArray(opts) && opts.ref) o.ref = opts.ref; // landing ref (two-line model)
+  // LEFTOVER-WORKTREE EXEMPTION — HOISTED ABOVE EVERY ARM
+  // (gap-nyf-doneflipready-arm-bypasses-leftover-worktree-exemption): an OPEN `task/<id>` worktree is
+  // the DIRECT "fan-in not yet complete" quantity (ff-merge success is what deletes it) — while it
+  // exists the task must stay dispatchable REGARDLESS of any landed/completion signal. The OLD form
+  // (gap-ready-pool-notyflipped-allchecked-leftover-worktree-exemption) gated ONLY the standalone
+  // `allChecked` arm, so a FALSE "landed" on the `doneFlipReady` arm (symbol-resolution / touch-file
+  // existence reading the main checkout's DISK working tree instead of the landing ref — hard rule 4b)
+  // bypassed the exemption entirely and made a worktree-open task disappear from the pool FOREVER
+  // (measured 2026-09-08: gap-mechanical-fan-in-loses-per-phase-accounting + gap-perfile-failure-rate-
+  // baseline-step-change, both worktree-open + taskWorkLanded=true while their files are ABSENT from
+  // develop). Hoisting also skips the taskWorkLanded grep for worktree-open tasks. `worktreeExists` is
+  // fail-soft (non-git root / unreadable list ⇒ false ⇒ the arms below still judge normally).
+  const hasLeftoverWorktree = worktreeExists(repoRoot, task.id);
+  if (hasLeftoverWorktree) return false;
   const workLanded = taskWorkLanded(task.body, repoRoot, o);
   // COMMIT-TRACE (gap-nyf-branch-existence-vs-commit-trace): a commit whose subject names the task in
   // the inner:/fan-in: conventions is a PERSISTENT work-landed record — it survives branch deletion AND
@@ -972,22 +1043,15 @@ export function notYetFlipped(task, repoRoot, gitIndex, opts = null) {
   // trace — the trace alone is never enough.
   const commitTraceReady = traced && (allChecked || total === 0);
   const workLandedReady = workLanded && (allChecked || remainingAllExternal || total === 0);
-  const doneFlipReady = workLandedReady || commitTraceReady;
-  // LEFTOVER-WORKTREE EXEMPTION (gap-ready-pool-notyflipped-allchecked-leftover-worktree-exemption):
-  // the standalone `allChecked` arm (added 2026-08-08) excludes a ready task purely on its
-  // SELF-DECLARED completion — no landing evidence at all — so it judged not-yet-flipped and deferred
-  // forever. A mechanical fan-in FAILURE (suite red / merge-develop conflict) leaves the task
-  // `ready + all-checked + un-landed` WITH its `task/<id>` worktree still open (ff-merge success is
-  // what deletes it) — and the old arm excluded it every round, so the landing path (worker dispatch →
-  // driver fan-in) never ran again: permanent stranding that only a manual AC-uncheck could undo, and
-  // one such dead task froze the whole dispatch pool (dispatchable_disjoint 0). The open worktree is
-  // the DIRECT "fan-in not yet complete" quantity (same `git worktree list` source as
-  // computeInFlightWorktreeTouches): while it exists the task must stay dispatchable so the next
-  // dispatch triggers the driver's mechanical fan-in retry (self-heal). No worktree (true landed / the
-  // 2026-08-08 prose-AC shape) keeps the original exclude behavior. `worktreeExists` is fail-soft
-  // (non-git root / unreadable list ⇒ false ⇒ original behavior preserved).
-  const hasLeftoverWorktree = worktreeExists(repoRoot, task.id);
-  return doneFlipReady || (allChecked && !hasLeftoverWorktree);
+  // TOUCH-ABSENT-FROM-REF VETO (gap-nyf-doneflipready-arm-bypasses-leftover-worktree-exemption, step 2):
+  // a declared CODE-ROOT Touches file ABSENT from the landing ref's tree is DIRECT evidence the work
+  // has NOT landed — the existence / symbol-resolution landed signals read the main checkout's DISK
+  // working tree, which contains pre-existing files the task EDITS (existence ⇒ zero information, hard
+  // rule 4b). Absent ⇒ the landed arms must not fire (fail-closed toward dispatchable). The veto is
+  // fail-soft: an unreadable ref (non-git root) does NOT veto — a false veto (keep dispatching) is
+  // self-healing, while a false non-veto is the exact "disappear from the pool FOREVER" catastrophe.
+  const doneFlipReady = !hasTouchAbsentFromRef(task.body, repoRoot, o) && (workLandedReady || commitTraceReady);
+  return doneFlipReady || allChecked;
 }
 
 export function isFixture(task) {
