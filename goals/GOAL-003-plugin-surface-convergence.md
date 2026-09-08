@@ -1,13 +1,13 @@
 ---
 id: GOAL-003
 title: 插件面收敛 —— 单一 bundle、原生交付、死物归档
-status: active
+status: achieved
 kind: goal
 origin: |
   人 2026-09-02 裁定「根据该 SPEC 创建一个新的阶段，稍后我们将执行这一阶段」+ 四条裁定：
   ① quay-init 复制 Claude Code 各种扩展文件的行为应当废弃；② 同一功能本项目自用与产品交付
   应是同一个，不应有「简化版用于产品交付」；③ 开发环境不污染本机其它项目，仅 User Scope
-  以本项目目录为 plugin marketplace 源；④ 零调用的工具先退役（archive），后续需要再恢复。
+  以本项目目录为 plugin marketplace 源；④ 零调用的工具先退役（archive），后续需��再恢复。
   正本 orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md（460 行）。
 labels:
   - next-phase
