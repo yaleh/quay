@@ -2,7 +2,7 @@
 id: gap-meta-autodrive-id-collides-with-done-owner
 title: meta-driver autoDrive 的 id 由 mechanismKeyword 确定性派生、done owner 不拦截 ⇒
   新发现静默覆盖既有 done 任务，9 小时零新增而轮次自报 1/1 auto-driven
-status: done
+status: ready
 labels:
   - gap
   - defect
