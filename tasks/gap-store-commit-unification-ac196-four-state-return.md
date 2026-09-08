@@ -2,7 +2,7 @@
 id: gap-store-commit-unification-ac196-four-state-return
 title: AC-196 四态返回：store-commit.ts 词表含 not-in-git/unchanged，旧 boolean 提交函数 =
   0（SPEC 阶段 1 切片）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
