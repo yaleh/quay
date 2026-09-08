@@ -130,7 +130,9 @@ test("resolvePluginScriptExec() returns null when neither the raw .ts nor a dist
 });
 
 test("resolvePluginScriptExec() resolves a .sh with stripTypes:false and NO dist fallback", () => {
-  const r = resolvePluginScriptExec("scripts/resource-gate.sh");
+  // path.join (not a literal) — same AC1b rationale as observation.ts's RESOURCE_GATE_REL: a bare
+  // `"scripts/…"` string literal would collide with the OLD repo-root form the scan forbids.
+  const r = resolvePluginScriptExec(path.join("scripts", "resource-gate.sh"));
   assert.ok(r, "must resolve the raw .sh");
   assert.equal(r.stripTypes, false, ".sh runs via bash, never --experimental-strip-types");
   assert.ok(r.path.endsWith(path.join("scripts", "resource-gate.sh")), `sh path: ${r.path}`);

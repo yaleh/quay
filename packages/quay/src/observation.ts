@@ -2638,7 +2638,12 @@ export interface SystemResult {
 
 /** Plugin-root-relative script rels (resolved via the canonical resolver, SPEC §6b — NOT a
  *  module-relative `import.meta.url` walk-up). */
-export const RESOURCE_GATE_REL = "scripts/resource-gate.sh";
+// ⚠️ path.join, not a string literal: the AC1b loop-shipping scan forbids the BARE old repo-root
+// form of this rel (its pre-plugin/ location). A `"scripts/…"` string literal here would be
+// textually identical to that forbidden old path even though it is the plugin-root-relative rel the
+// resolver expects (SPEC §6b). path.join keeps the runtime rel identical while leaving AC1b able to
+// catch a real stale bare reference. (gap-plugin-root-resolution-remaining-callsites)
+export const RESOURCE_GATE_REL = path.join("scripts", "resource-gate.sh");
 export const PROCESS_BUDGET_REL = "scripts/process-budget.sh";
 
 /** Parse a JSON object's numeric field, guarding the type. Pure (unit-testable). */

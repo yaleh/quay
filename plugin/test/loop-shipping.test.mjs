@@ -187,6 +187,21 @@ test('AC2 — a real old-path reference is still caught (ENOENT tolerance must n
   }
 });
 
+test('AC1b negative control — bare scripts/resource-gate.sh still matches; the plugin/-prefixed new path does not', () => {
+  // gap-plugin-root-resolution-remaining-callsites moved the observation.ts + plugin-root.test.mjs
+  // references OFF the literal `scripts/resource-gate.sh` (to path.join) so they no longer collide
+  // with the OLD repo-root form this pattern forbids. That fix leaves oldPathPatterns untouched —
+  // this pins the lookbehind that makes the distinction REAL, so the relaxation cannot drift into
+  // blinding AC1b: a genuine stale bare reference must STILL match (RED), while the canonical new
+  // plugin/scripts/ form must NOT.
+  const re = oldPathPatterns.find((r) => r.source.includes('resource-gate'));
+  assert.ok(re, 'oldPathPatterns must derive a scripts/resource-gate.sh pattern from oldPaths');
+  assert.ok(re.test('run scripts/resource-gate.sh --json'),
+    'a bare scripts/resource-gate.sh literal must still match (a real stale old-path reference stays RED)');
+  assert.ok(!re.test('run plugin/scripts/resource-gate.sh --json'),
+    'the plugin/-prefixed canonical new path must NOT match');
+});
+
 test('AC3 — a non-ENOENT read error still throws (not swallowed)', () => {
   // A directory is a real non-ENOENT readFileSync failure (EISDIR): it must propagate, proving the
   // tolerance is ENOENT-only, not a catch-all that hides "can't read" as "passed" (硬规则 3b).
