@@ -2,7 +2,7 @@
 id: gap-store-commit-unification-ac198-rev-parse-root
 title: AC-198 root 取自 git rev-parse --show-toplevel，不再把
   path.dirname(&lt;kind&gt;Dir) 当 git 根（SPEC 阶段 1 切片）
-status: ready
+status: done
 labels:
   - gap
 parent: "null"
