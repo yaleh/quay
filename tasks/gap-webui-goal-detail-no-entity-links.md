@@ -118,4 +118,5 @@ depends_on:
 - `packages/quay/src/serve-doc.ts`
 - `packages/quay/src/serve-render.ts`
 - `packages/quay/test/gap-webui-goal-detail-no-entity-links.test.mjs`
+- `packages/quay/test/gap-webui-tests-page-unpaginated-tables.test.mjs`
 - `tasks/gap-webui-goal-detail-no-entity-links.md`
