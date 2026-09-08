@@ -63,8 +63,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 // Touches「一条目一路径」judgment — the SAME judgment the static checker uses (no second parser).
 import { checkTaskOneEntryOnePath, readOneEntryBaseline } from "./touches-one-entry-one-path-check.ts";
-import { repoRoot } from "./repo-root.ts";
-import { resolvePluginScriptExec } from "../../packages/quay/src/plugin-root.ts";
+import { repoRoot, mainCheckoutRoot } from "./repo-root.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -440,20 +439,26 @@ export function judge(
 
 // ── 钩子安装/卸载 ────────────────────────────────────────────────────────────────────────────────────
 
-/** The `exec node …` line the hook shim runs — the guard's OWN resolved executable (raw `.ts` with
- *  `--experimental-strip-types`, or the shipped dist bundle without it), baked at INSTALL time via
- *  the canonical resolver (SPEC §6b). ⛔ Not `"$ROOT/plugin/scripts/…"` — AC168 removes the workspace
- *  copy, and a runtime `$ROOT` join would hit a worktree copy (AC139-4). Fail-closed: an unresolvable
- *  guard throws rather than writing a hook that would never run. */
+/** The `exec node …` line the hook shim runs — the guard's OWN resolved executable, baked at INSTALL
+ *  time. ⛔ Not `"$ROOT/plugin/scripts/…"` — AC168 removes the workspace copy, and a runtime `$ROOT`
+ *  join would hit a worktree copy (AC139-4). The guard is SELF-REFERENTIAL (it locates itself, not an
+ *  arbitrary plugin script), so the resolution is its own `import.meta.url` (raw `.ts` in the dev
+ *  tree, the bundled `dist/*.js` in the shipped artifact — strip-types follows the extension) PLUS the
+ *  plugin layer's existing `mainCheckoutRoot` (repo-root.ts) to redirect a worktree copy to the main
+ *  checkout. ⛔ Not the Core `plugin-root.ts` resolver: a plugin→Core static import breaks under
+ *  npm-pack staging (esbuild cannot resolve `../../packages/quay/src/…` from the staged
+ *  `packages/quay/plugin/scripts/…`), and the self-location idiom is the correct resolution for a
+ *  self-referential hook rather than re-inventing the Core resolver in bash. */
 function guardExecLine(merge: boolean): string {
-  const resolved = resolvePluginScriptExec(path.join("scripts", HOOK_FINGERPRINT));
-  if (!resolved) {
-    throw new Error(
-      `precommit-guard: cannot resolve the guard executable (scripts/${HOOK_FINGERPRINT} or its dist bundle) — SPEC §6b plugin-root resolution failed`
-    );
+  const selfPath = fileURLToPath(import.meta.url);
+  let scriptPath = selfPath;
+  const main = mainCheckoutRoot(path.dirname(selfPath));
+  if (main) {
+    const mainGuard = path.join(main, "plugin", "scripts", HOOK_FINGERPRINT);
+    if (fs.existsSync(mainGuard)) scriptPath = mainGuard;
   }
-  const strip = resolved.stripTypes ? " --experimental-strip-types" : "";
-  return `exec node --no-warnings${strip} "${resolved.path}" --root "$ROOT"${merge ? " --merge" : ""}`;
+  const strip = scriptPath.endsWith(".ts") ? " --experimental-strip-types" : "";
+  return `exec node --no-warnings${strip} "${scriptPath}" --root "$ROOT"${merge ? " --merge" : ""}`;
 }
 
 function hookShim(root: string): string {
