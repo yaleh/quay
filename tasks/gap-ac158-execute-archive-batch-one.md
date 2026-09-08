@@ -8,10 +8,10 @@ parent: null
 children: []
 extra:
   schema: execution
-  needs_human_reason: "【2026-09-08 更新，第三轮同形；⛔ 不要因
+  needs_human_reason: "【2026-09-08 第三轮同形；⛔ 不要因
     gap-dead-set-closure-misses-four-reference-kinds 落地就解锁】该任务已把死集 82→31 且其自身闸打印
     `PASS … none in dead set (after=31)`，但 31 名单仍混入至少 7 个活脚本，其中 4 个由
-    scripts/test.sh 每轮亲自执行 —— 按此名单 git mv 会当场打断 suite（AC5 结构上不可能绿）：①
+    scripts/test.sh 每轮亲自执行（按此名单 git mv 会当场打断 suite，AC5 结构上不可能绿）：①
     overhead-instrument.sh ← scripts/test.sh:951 source；②
     run-namespace-sweep-kill.mjs ← scripts/test.sh:1126/1280/1646 node；③
     state-worded-clause-check.ts ← scripts/test.sh:313 run_checker +
@@ -21,16 +21,25 @@ extra:
     真 import（6+ 活测试经此）；⑦ tmux-test-isolation-check.ts ← checker-mutation-cases
     fixture。已证实根因之一（带对照）：maskComments 把 scripts/test.sh:792 非注释代码行 `local
     glob=(packages/*/test/*.test.mjs …)` 的 `/*` 当块注释起点，吞掉其后全部内容（:222/:270/:465
-    掩码后存活，:951 被抹白；同一正则对未掩码原文跑四条全中）；另外 5 个属独立缺口，不由它解释。归属仍是【名单面】，非本【执行】任务缺陷。人
-    2026-09-08 裁定改判定范式：停止补正则，收集器改文本 fail-closed，并以『临时 worktree 全量 git mv + 跑真
-    suite』的移除证明作为前移判据 —— 已立案
-    gap-dead-set-judgment-fail-closed-text-and-removal-proof 并置为本任务 depends_on。⛔
-    解锁前提（两条都要）：① 该任务 done；② 其产物 docs/analysis/dead-set-removal-proof.json 的
-    suiteVerdict=green 且 candidates 与当轮 after.dead 逐名一致。⚠️
-    解锁时本任务体须整体重写：Proposal/Plan/AC/DoD 通篇硬编码 82、且 ## Touches 逐条列了 82 脚本 + 46 测试
-    —— 名单改变后不重写会因 Touches 过度声明拉起 repo ratchet。另：capability-catalog.sh
-    声明了全部候选脚本，移动须 quay-init-closure-ratchet --reanchor 并把 baseline 计入
-    Touches。未做任何 move、worktree 干净无提交。"
+    掩码后存活，:951 被抹白；同一正则对未掩码原文跑四条全中）；另外 5 个属独立缺口。归属仍是【名单面】，非本【执行】任务缺陷。人
+    2026-09-08 裁定改判定范式（停止补正则 / 收集器改文本 fail-closed / 临时 worktree 全量 git mv + 跑真
+    suite 的移除证明作为前移判据），已立案
+    gap-dead-set-judgment-fail-closed-text-and-removal-proof 并置为本任务
+    depends_on。\\n\\n【解锁清单 —— 依赖任务 done 只满足第 1 条，其余五条必须单独做，否则直接红】（1）依赖任务 done
+    且其产物 docs/analysis/dead-set-removal-proof.json 的
+    suiteVerdict=green、candidates 与当轮 after.dead 逐名一致；（2）状态：needs-human
+    无前向边（lifecycle.ts:31），必须先 retreat 到 todo 再 author 到 ready，driver
+    才会派；（3）任务体整体重写：Proposal/Plan/AC1/AC2/DoD 通篇硬编码 82，证明后的新名单必然不是 82；（4）##
+    Touches 双向都不对（按当前 31 名单实测）：欠声明 dual-source-check.ts⇒anti-drift 硬失败；过度声明 52
+    个⇒拉起 repo ratchet；缺 plugin/scripts/capability-catalog.sh（移动脚本必须改它）与
+    docs/analysis/quay-init-closure-ratchet.baseline.json（改 catalog 必须
+    --reanchor）⇒又两项欠声明硬失败；且 archive/2026-09-07-zero-call-scripts/ 是写死日期的批次目录，而
+    Plan 步骤 2 自相矛盾地说「执行日不同则 slug 用执行日、但 Touches 保持指向该目录」⇒换天执行就写到 Touches
+    之外，硬失败；（5）遗留 worktree
+    /home/yale/work/quay-worktrees/gap-ac158-execute-archive-batch-one 落后
+    develop 163 提交，重派前必须删除，否则基准过旧撞 precommit-guard MODULE_NOT_FOUND；（6）SPEC
+    同源：goal 判据 AC-158 直接 re.search(r'^- 扫描后死集: (\\d+)$') 读 SPEC 并与 INDEX
+    行数比对，本任务 AC1/AC2 里的 82 要跟着改。未做任何 move、worktree 干净无提交。"
 goal_ac: AC-158
 depends_on:
   - gap-dead-set-judgment-fail-closed-text-and-removal-proof
