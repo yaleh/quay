@@ -13,6 +13,12 @@ export interface Task {
   children: string[];
   body: string;
   extra: Record<string, unknown>;
+  // goal_ac — owning goal AC id (task→AC linkage, G7). Top-level single scalar; null = unset
+  // (缺值 = 未查, never conflated with a concrete AC id). gap-webui-goal-task-rollup-via-shared-
+  // summary-cache: surfaced in the view-model so provider-agnostic read surfaces (the web UI's
+  // /goal rollup) can consume the structured relationship through taskList — previously goal_ac
+  // was WRITE-only through the ABI (task_write accepted it, task_list never returned it).
+  goal_ac?: string | null;
 }
 
 // ── Task-status lifecycle vocabulary: the SINGLE source (gap-abi-status-lifecycle-

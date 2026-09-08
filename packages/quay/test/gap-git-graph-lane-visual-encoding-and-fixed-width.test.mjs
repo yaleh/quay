@@ -89,18 +89,21 @@ test("AC2: categorical palette; per-lane colour yields ≥min(6, lane-count) dis
   for (let i = 0; i < n; i++) {
     const bi = `b${String(i).padStart(6, "0")}`;
     const mi = `m${String(i).padStart(6, "0")}`;
-    commits.push(c(bi, t0 + 2, "develop", ["t100000"], `branch ${i}`));
+    commits.push(c(bi, t0 + 2, `task/B${i}`, ["t100000"], `branch ${i}`));
     commits.push(c(mi, t0 + 3 + i, "develop", [prev, bi], `merge ${i}`));
     prev = mi;
   }
   const head = `m${String(n - 1).padStart(6, "0")}`;
   const layout = layoutGitGraph(hist(commits, head, { develop: head }));
 
-  assert.equal(layout.branches.length, n, "six branch lanes");
-  // Per-lane cycling: lane i carries palette[i % paletteSize], so six lanes → six distinct hues.
-  const colors = new Set(layout.branches.map((_, i) => GIT_GRAPH_LANE_PALETTE[i % GIT_GRAPH_LANE_PALETTE.length]));
+  const laterals = layout.branches.filter((b) => b.kind !== "mainline");
+  assert.equal(laterals.length, n, "six lateral branch lanes");
+  assert.equal(layout.branches.length, n + 1, "mainline + six lateral lanes");
+  // Per-lane cycling (mainline is the trunk spine, coloured separately): lateral lane i carries
+  // palette[i % paletteSize], so six lateral lanes → six distinct hues.
+  const colors = new Set(laterals.map((_, i) => GIT_GRAPH_LANE_PALETTE[i % GIT_GRAPH_LANE_PALETTE.length]));
   assert.equal(colors.size, n, "six lanes carry six distinct stroke colours");
-  assert.ok(colors.size >= Math.min(6, layout.branches.length), "distinct colours ≥ min(6, lane count)");
+  assert.ok(colors.size >= Math.min(6, laterals.length), "distinct colours ≥ min(6, lane count)");
 
   // The client must colour by LANE index, not slot — slot reuse (interval scheduling) would collapse
   // the distinct-colour count to the number of concurrent slots (<6 on the live repo).
@@ -157,7 +160,9 @@ test("AC4: every lane gets a branch-name chip (non-transparent bg) with ≥4.5:1
   assert.ok(script.includes('.style("fill", color)'), "the chip bg is filled with the lane colour (non-transparent)");
   // Both render states label the branch: collapsed (summary) and expanded (fold control).
   assert.ok(script.includes("appendChip(grp, textX, yy + 3, b.ref"), "collapsed summary leads with a chip(ref)");
-  assert.ok(script.includes("appendChip(grp2, textX, y(laneBot) - 6, b.ref"), "expanded fold control leads with a chip(ref)");
+  // gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead: the expanded fold control moved
+  // from the bottom merge row (laneBot) to the branch's top row (foldRow = laneTopRow[b.id]).
+  assert.ok(script.includes("appendChip(grp2, textX, y(foldRow) - 6, b.ref"), "expanded fold control leads with a chip(ref) at the top row");
 });
 
 // ── AC5: width is content-derived — different longest subjects → different widths, never a literal ───

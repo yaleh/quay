@@ -1,7 +1,7 @@
 ---
 id: gap-ac200-clear-frozen-goal-evidence-blocks
 title: goal 文件里的存储 evidence 块残留清零（AC-200）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -22,14 +22,14 @@ goal_ac: AC-200
 
 ## AC
 
-- [ ] `test "$(grep -l '^evidence:' goals/*.md 2>/dev/null | wc -l)" -eq 0` —— 立条时读数 18（能取假），清理后 0。
+- [x] `test "$(grep -l '^evidence:' goals/*.md 2>/dev/null | wc -l)" -eq 0` —— 立条时读数 18（能取假），清理后 0。
 
 ## DoD
 
-- [ ] 上述判据实跑并贴出输出：`grep -l '^evidence:' goals/*.md` 为空、`wc -l` = 0。
-- [ ] 18 个文件除 `evidence:` 块外逐字节不变：每个文件的 `git diff` 只含 4 行删除（`evidence:` / `at:` / `verdict:` / `reading:`），无其它改动。
-- [ ] 负控制：`goals/*.md` 文件总数不变（66），未误删、未误改任何 goal 文件。
-- [ ] 改动提交并落到 develop，全量 suite 绿（fan-in）。
+- [x] 上述判据实跑并贴出输出：`grep -l '^evidence:' goals/*.md` 为空、`wc -l` = 0。
+- [x] 18 个文件除 `evidence:` 块外逐字节不变：每个文件的 `git diff` 只含 4 行删除（`evidence:` / `at:` / `verdict:` / `reading:`），无其它改动。
+- [x] 负控制：`goals/*.md` 文件总数不变（66），未误删、未误改任何 goal 文件。
+- [ ] 改动提交并落到 develop，全量 suite 绿（fan-in）。（待外部）
 
 ## Touches
 

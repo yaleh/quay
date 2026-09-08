@@ -2,7 +2,7 @@
 id: gap-serve-board-test-workspace-couples-to-shared-tmp-quay-worktrees
 title: serve-board.test.mjs 的 workspace 直建在 os.tmpdir() 下 ⇒ 与共享
   /tmp/quay-worktrees 耦合，孤儿断言随机红
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -41,11 +41,11 @@ namespace 存在但任务目录缺席 ⇒ `false` ⇒ `readLive` 把该 run 当 
 
 ## AC
 
-- [ ] `makeWorkspace` 改为多嵌一层私有父目录（照 `observation.test.mjs:228` `ghostWorkspace`），使 `path.dirname(ws)` 是本次 mkdtemp 出来的私有目录而非裸 `os.tmpdir()`；贴改后 `sed -n '81,86p' packages/quay/test/serve-board.test.mjs` 的实际行内容
-- [ ] 取假控制（正）：在 `mkdir -p /tmp/quay-worktrees` **存在**的前提下跑 `node --test --experimental-strip-types packages/quay/test/serve-board.test.mjs`，断言 `ℹ fail 0`；改动**前**同一前提下同一命令必须红在 `AC2: the task is flagged orphan` —— 贴前后两次读数（⛔ 非转述）
-- [ ] 取假控制（反）：`rmdir /tmp/quay-worktrees` 后同一命令仍 `ℹ fail 0`，排除「只对某一态成立」
-- [ ] 兄弟实例扫描（硬规则 5b）：对 `packages/quay/test/*.mjs` 与 `plugin/test/*.mjs` 全量找出「workspace 直接建在 `os.tmpdir()` 下、且该 root 被喂给读 `dirname(root)/quay-worktrees` 的生产函数（`taskWorktreeOpen` / `isQuayWorktreePath` / `readLive` / `readBoardExecution`）」的测试；贴命中数与前 3 条实际内容，命中者一并修或逐条写明为何不受影响（⛔ 零命中时须把谓词对 `serve-board.test.mjs` 这个已知为真的样本干跑一次并贴输出）
-- [ ] `node --test --experimental-strip-types packages/quay/test/serve-board.test.mjs` 全绿，贴 `ℹ tests/pass/fail` 三个计数
+- [x] `makeWorkspace` 多嵌一层私有父目录（照 `observation.test.mjs:228` `ghostWorkspace`）；改后 `sed -n '81,86p' packages/quay/test/serve-board.test.mjs` 实际行 = `function makeWorkspace(prefix) {` / `  const parent = fs.mkdtempSync(path.join(os.tmpdir(), \`${prefix}ws-\`));` / `  const ws = path.join(parent, "main");` / `  fs.mkdirSync(ws, { recursive: true });` / `  const tasksDir = path.join(ws, "tasks");` / `  fs.mkdirSync(tasksDir, { recursive: true });` → `dirname(ws)` 是私有 parent 而非裸 `os.tmpdir()`
+- [x] 取假控制（正）：`mkdir -p /tmp/quay-worktrees` 存在下跑 `node --test --experimental-strip-types packages/quay/test/serve-board.test.mjs`。改动前同前提红在 `AC2: the task is flagged orphan`（且 AC7 `in-flight marker`、AC8 `implementing count` 同红，共 3 fail）；改动后 `ℹ tests 11` `pass 11` `fail 0`
+- [x] 取假控制（反）：`rmdir /tmp/quay-worktrees` 后同命令 `ℹ tests 11` `pass 11` `fail 0`，排除「只对某一态成立」
+- [x] 兄弟实例扫描（硬规则 5b）：命中 **4** 处且全部修复。① 主实例 `serve-board.test.mjs` `makeWorkspace`；② `serve.test.mjs` obs block（`obsWorkspaceRoot` 直建 /tmp + OBS-A start-no-end + `readLive.inFlight` 断言）；③ `serve-handlers.test.mjs:1447` ghost 测试（实测 mkdir 下红 `AC2: a ready task with an orphan START event IS still in-flight`，root `live-ghost-` 直建 /tmp）；④ `observation.test.mjs:1137` live-stale 测试（实测 mkdir 下红 `AC2: gap-fresh (ready in both) stays in-flight`，root `live-stale-` 直建 /tmp）。②③④ 均改为 `parent/main` 私有嵌套 + `rmSync(parent)`。非命中（逐条判定不受影响）：`observation.test.mjs` `ghostWorkspace` 已嵌套（正解参照）；`observation.test.mjs` worker-carrier、`serve.test.mjs` round/noStart/lock/imp/done、`serve-handlers.test.mjs` live-root/live-ghost-worker、`live-state.test.mjs` 均不写 `.workflow-events` 或不断言在飞保留；`fast-mode-telemetry.test.mjs` `isQuayWorktreePath` 为字面路径单测
+- [x] `node --test --experimental-strip-types packages/quay/test/serve-board.test.mjs` 全绿：`ℹ tests 11` `pass 11` `fail 0`（另 serve-handlers 68/68、observation 54/54、serve.test.mjs 全 PASS）
 
 ## DoD
 
@@ -55,10 +55,15 @@ namespace 存在但任务目录缺席 ⇒ `false` ⇒ `readLive` 把该 run 当 
 贴该日志路径与命中/未命中读数。
 ⛔ 单测绿是必要非充分（硬规则④推论三）：AC2 的「人为造出 `/tmp/quay-worktrees` 仍绿」
 才是真正把这条耦合关掉的证据，**不得只跑一次干净环境的绿就算完**。
+（⛔ 核心判据已由 AC2/AC3 取假控制满足；全量 suite 由 fan-in driver 在 merge 后执行，
+其 `.quay/fan-in-suite-*.log` 即本 DoD 的生产载体读数来源——worker 按 SPEC §5 不自行跑 suite。）
 
 ## Touches
 
 - packages/quay/test/serve-board.test.mjs（`makeWorkspace` 多嵌一层私有父目录，解除与共享 /tmp/quay-worktrees 的耦合）
+- packages/quay/test/serve.test.mjs（obs block `obsWorkspaceRoot` 多嵌 `obsParent/main`，解除同耦合）
+- packages/quay/test/serve-handlers.test.mjs（ghost 测试 root 多嵌 `parent/main`，解除同耦合）
+- packages/quay/test/observation.test.mjs（live-stale 测试 root 多嵌 `parent/main`，解除同耦合）
 - tasks/gap-serve-board-test-workspace-couples-to-shared-tmp-quay-worktrees.md（自身）
 
 ## Verification

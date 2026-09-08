@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 import type { ProviderClient } from "./provider-client.ts";
-import { readLive, readSystem, readManagerLight, readTests, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord } from "./observation.ts";
+import { readLive, readSystem, readManagerLight, readTests, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord, type DriverKindReading } from "./observation.ts";
 import { TASK_STATUS, type GoalRecord } from "./abi.ts";
 import type { Manifest } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime } from "./serve-render.ts";
@@ -82,16 +82,22 @@ export function renderLiveCard(
     const title = titleById.get(t.taskId);
     return html`<div style="display:flex;flex-direction:column;gap:2px;font-size:0.78rem;line-height:1.4">
       <div style="display:flex;justify-content:space-between;gap:0.5rem">
-        <a href="/task/${encodeURIComponent(t.taskId)}" style="color:var(--color-text);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(t.taskId)}</a>
+        <a href="/task/${encodeURIComponent(t.taskId)}" style="color:var(--color-text);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">${escapeHtml(t.taskId)}</a>
         <span style="flex:none;${emphasis ? "color:var(--color-accent-700);font-weight:700" : "color:var(--color-neutral-700)"}">${escapeHtml(tag)}${elapsed ? ` · ${escapeHtml(elapsed)}` : ""}</span>
       </div>
-      ${title != null ? html`<div style="color:var(--color-text);font-size:0.75rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(title)}</div>` : ""}
+      ${title != null ? html`<div style="color:var(--color-text);font-size:0.75rem">${escapeHtml(title)}</div>` : ""}
     </div>`;
   }).join("");
+  // gap-dashboard-cards-layout-and-livecard-swimlane AC5: an in-flight swimlane (one lane per task,
+  // open [startedAtMs, nowMs] segment) mirrors the tests/fan-in timeline bars the human asked for.
+  const swimlane = live.status === "ok" && live.inFlight.length > 0
+    ? renderLiveSwimlaneSvg(live.inFlight, DEFAULT_TIMELINE_HOURS, nowMs)
+    : "";
   return html`<div id="live-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
     <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">循环脉搏</div>
     <div style="font-weight:800">${escapeHtml(liveStateText)}</div>
     <p style="margin:0;font-size:0.8rem;opacity:0.8">在飞 ${live.inFlight.length} · 并发 ${live.concurrency}</p>
+    ${swimlane}
     ${live.status === "ok" && live.inFlight.length > 0 ? html`<div style="display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--color-divider);padding-top:6px">${liveMiniList}</div>` : ""}
     <a href="/live" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Live →</a>
   </div>`;
@@ -126,9 +132,9 @@ function timelineHoursFromRequest(req: IncomingMessage): number {
   }
 }
 
-/** Test-run state → the dashboard card's own colour token (the same ternary the recentStrip already
- *  uses: green → positive, red → accent, other → neutral). Bare token name, so the strip writes
- *  `background:var(--color-…)` and the SVG writes `fill="var(--color-…)"` from ONE source (no drift). */
+/** Test-run state → the dashboard card's own colour token (green → positive, red → accent, other →
+ *  neutral). Bare token name, so the round-number chip writes `background:var(--color-…)` and the
+ *  timeline SVG writes `fill="var(--color-…)"` from ONE source (no drift). */
 function stateColorToken(state: string | null): string {
   return state === "green" ? "--color-positive-700" : state === "red" ? "--color-accent-800" : "--color-neutral-400";
 }
@@ -136,6 +142,14 @@ function stateColorToken(state: string | null): string {
 /** Mechanical fan-in outcome → colour token (landed → positive, red → accent, unknown → neutral). */
 function fanInOutcomeColorToken(outcome: string | null): string {
   return outcome === "landed" ? "--color-positive-700" : outcome === "red" ? "--color-accent-800" : "--color-neutral-400";
+}
+
+/** In-flight execution phase → the liveCard swimlane lane colour. The SAME 4-way phase split
+ *  renderLiveCard's tag already discriminates (landed → positive, awaiting-land → accent-800, fan-in →
+ *  accent-700, else implementing → neutral), so a lane's colour and its tag's emphasis can never drift
+ *  apart. Bare token name — the SVG writes `fill="var(--color-…)"` from ONE source. */
+function livePhaseColorToken(phase: string | null): string {
+  return phase === "landed" ? "--color-positive-700" : phase === "awaiting-land" ? "--color-accent-800" : phase === "fan-in" ? "--color-accent-700" : "--color-neutral-400";
 }
 
 function pad2(n: number): string {
@@ -203,11 +217,74 @@ ${rightLabel}
 </svg>`;
 }
 
+/** Multi-lane SVG timeline for the liveCard (gap-dashboard-cards-layout-and-livecard-swimlane AC5):
+ *  ONE lane per in-flight task, each segment `[startedAtMs, nowMs]` — an OPEN interval to the
+ *  observation instant, because an in-flight task has no end time. Colour by execution phase (reusing
+ *  livePhaseColorToken). Reuses renderTimelineBarSvg's horizontal-axis conversion but adds a vertical
+ *  lane offset + a left-side task-id label. Each surviving task renders exactly ONE `<rect>` (AC5
+ *  counts `<rect`); the axis/labels use `<line>`/`<text>` so the count stays exact. Returns "" when no
+ *  task carries a usable startedAtMs. */
+export function renderLiveSwimlaneSvg(
+  inFlight: Array<{ taskId: string; startedAtMs: number; phase: string }>,
+  windowHours: number,
+  nowMs: number,
+): string {
+  const rows = inFlight.filter((t) => Number.isFinite(t.startedAtMs) && t.startedAtMs <= nowMs);
+  if (rows.length === 0) return "";
+
+  const windowStartMs = nowMs - windowHours * 3_600_000;
+  const spanMs = windowHours * 3_600_000;
+  const W = 600;
+  const pad = 4;
+  const labelW = 150;
+  const plotL = pad + labelW;
+  const plotW = W - 2 * pad - labelW;
+  const laneH = 16;
+  const barH = 10;
+  const top = 8;
+  const axisY = top + rows.length * laneH + 6;
+  const H = axisY + 12;
+  const X = (t: number): number => plotL + ((t - windowStartMs) / spanMs) * plotW;
+  const hhmm = (t: number): string => {
+    const d = new Date(t);
+    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  };
+
+  const bars = rows
+    .map((t, i) => {
+      const y = top + i * laneH;
+      const x0 = X(Math.max(t.startedAtMs, windowStartMs));
+      const x1 = X(nowMs);
+      const w = Math.max(x1 - x0, 1.5);
+      return `<rect x="${x0.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${barH}" rx="2" fill="var(${livePhaseColorToken(t.phase)})"></rect>`;
+    })
+    .join("");
+
+  const labels = rows
+    .map((t, i) => {
+      const id = t.taskId.length > 22 ? `${t.taskId.slice(0, 21)}…` : t.taskId;
+      return `<text x="${pad}" y="${(top + i * laneH + barH - 1).toFixed(1)}" font-size="9" fill="var(--color-neutral-700)">${escapeHtml(id)}</text>`;
+    })
+    .join("");
+
+  const axis = `<line x1="${plotL}" y1="${axisY}" x2="${W - pad}" y2="${axisY}" stroke="var(--color-neutral-300)"></line>`;
+  const leftLabel = `<text x="${plotL}" y="${H - 1}" font-size="9" fill="var(--color-neutral-700)">${hhmm(windowStartMs)}</text>`;
+  const rightLabel = `<text x="${W - pad}" y="${H - 1}" font-size="9" fill="var(--color-neutral-700)" text-anchor="end">${hhmm(nowMs)}</text>`;
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="在飞任务泳道时间轴" style="width:100%;height:auto;margin-top:4px;display:block">
+${axis}
+${bars}
+${labels}
+${leftLabel}
+${rightLabel}
+</svg>`;
+}
+
 // gap-webui-dashboard-tests-card-latest-round-no-live-signal: the card prefers the LIVE running signal
 // (full-suite-state.json state=running, no ledger row yet) over tests.runs[0] (the latest COMPLETED
 // round); labels a gate-blocked round (pass=0/tests=0 by construction) for what it is instead of a bare
-// "pass 0/0"; and adds a 近N轮 strip so the single latest row is never the only signal (硬规则4b: a
-// single point is a proxy, not the actual health picture).
+// "pass 0/0". gap-dashboard-cards-layout-and-livecard-swimlane removed the once-added 近N轮 strip; the
+// per-round colour + hover info now lives on the round-number chip in the recent-run list below.
 
 /** The dashboard testsCard — a self-contained render of the suite state (live-running signal / latest
  *  completed round / recent-rounds strip), factored out for the auto-refresh endpoint. `id="tests-card"`
@@ -234,19 +311,11 @@ export function renderTestsCard(
         : `pass ${latestRun.pass ?? "—"}/${latestRun.tests ?? "—"}`)
       : (tests.reason ? escapeHtml(tests.reason) : "无验证轮记录");
   const recentRuns = tests.runs.slice(0, 5);
-  const recentStrip = recentRuns.length > 0
-    ? html`<div style="display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--color-divider);padding-top:6px">
-        <div style="font-size:0.7rem;color:var(--color-neutral-700)">近${recentRuns.length}轮（新→旧）</div>
-        <div style="display:flex;gap:3px">${recentRuns.map((r) => {
-          const color = `var(${stateColorToken(r.state)})`;
-          const rGateBlocked = r.tests === 0 && r.pass === 0 && (r.reason === "gate-failed" || r.gate != null);
-          const title = `#${r.round ?? "?"} ${r.state ?? "—"}${rGateBlocked ? `（gate:${r.gate ?? "?"} 未执行测试）` : ` pass ${r.pass ?? "—"}/${r.tests ?? "—"}`}`;
-          return html`<span title="${escapeHtml(title)}" style="width:11px;height:11px;border-radius:2px;background:${color};display:inline-block"></span>`;
-        }).join("")}</div>
-      </div>`
-    : "";
+  // gap-dashboard-cards-layout-and-livecard-swimlane AC1: the hover-only colour strip is gone — the
+  // default-visible list below already renders the same recentRuns, so the strip was zero information
+  // without a hover. Its per-round colour + hover info now lives on the round-number chip.
   // gap-dashboard-visual-review-batch-fixes AC4: a default-visible, readable per-round list (round · state
-  // · pass X/Y · duration) below the hover-only colour strip, so a recent result is legible without hover.
+  // · pass X/Y · duration) below, so a recent result is legible without hover.
   // gap-dashboard-fanin-panel-and-timeline-bars F: each row ALSO appends its startedAt (via relativeTime)
   // and buckets — absent fields render NO sub-item (the absent-field contract, never a "—").
   const recentList = recentRuns.filter((r) => r.state !== "running").map((r) => {
@@ -262,7 +331,10 @@ export function renderTestsCard(
       : "";
     return html`<div style="display:flex;flex-direction:column;gap:2px;font-size:0.72rem;line-height:1.4">
       <div style="display:flex;justify-content:space-between;gap:0.5rem">
-        <span style="flex:none;color:var(--color-neutral-700)">#${r.round ?? "?"} ${escapeHtml(r.state ?? "—")}</span>
+        <span style="flex:none;display:flex;align-items:center;gap:0.35rem">
+          <span title="${escapeHtml(`#${r.round ?? "?"} ${r.state ?? "—"} · ${rDetail}`)}" style="background:var(${stateColorToken(r.state)});color:#fff;padding:1px 6px;border-radius:3px;font-weight:700">#${r.round ?? "?"}</span>
+          <span style="color:var(--color-neutral-700)">${escapeHtml(r.state ?? "—")}</span>
+        </span>
         <span style="color:var(--color-neutral-700)">${rDetail} · ${rDur}</span>
       </div>
       ${startedLine}
@@ -293,9 +365,8 @@ export function renderTestsCard(
     <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">测试</div>
     <div style="font-weight:800">${statusLine}</div>
     <p style="margin:0;font-size:0.8rem;opacity:0.8">${detailLine}</p>
-    ${recentStrip}
-    ${recentList.length > 0 ? html`<div style="display:flex;flex-direction:column;gap:2px">${recentList}</div>` : ""}
     ${timelineBar}
+    ${recentList.length > 0 ? html`<div style="display:flex;flex-direction:column;gap:2px">${recentList}</div>` : ""}
     <a href="/tests" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Tests →</a>
   </div>`;
 }
@@ -518,19 +589,29 @@ export function renderSysCard(sys: SystemResult): string {
   </div>`;
 }
 
-/** The dashboard mgrCard — a self-contained render of the Manager/Outer/Inner probe (id="mgr-card").
- *  gap-dashboard-visual-review-batch-fixes AC1: the liveness count is only shown when
- *  `liveness.status === "ok"`; otherwise (the current constant `"empty"` "observer retired" state) the
- *  clause reads 「会话数未接入」 — never a bare number that a retired/never-measured metric would render
- *  indistinguishable from a genuine "0 sessions alive" (CLAUDE.md 硬规则 3b/4b). */
+/** The dashboard mgrCard — a self-contained render of the two resident drivers' alive status
+ *  (id="mgr-card"). gap-dashboard-driver-status-card: the retired Manager/Outer/Inner probe is no
+ *  longer read here; the card renders promotion/worker driver alive status + last-record relative
+ *  time from the in-process driver-status reading (readDriverStatus in observation.ts). When a pid
+ *  file is absent (or the reading is absent — the dashboard error fallback), the row reads 「未运行」
+ *  — never a bare undefined/NaN/empty (CLAUDE.md 硬规则 3b/4b). */
 export function renderMgrCard(mgr: ManagerResult): string {
-  const mgrAlive = mgr.liveness.sessions.filter((s) => s.alive).length;
-  const livenessText = mgr.liveness.status === "ok" ? `${mgrAlive} 会话 LIVE` : "会话数未接入";
   return html`<div id="mgr-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
-    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">Manager / Outer / Inner</div>
-    <p style="margin:0;font-size:0.8rem;line-height:1.5">loop-driver: ${escapeHtml(mgr.loopDriver.verdict ?? "未接入")} · ${livenessText}</p>
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">Driver</div>
+    ${renderDriverStatusRow("promotion", mgr.drivers?.promotion)}
+    ${renderDriverStatusRow("worker", mgr.drivers?.worker)}
     <a href="/manager" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看三层状态 →</a>
   </div>`;
+}
+
+/** Render one driver kind's alive-status row: `<kind>: <运行中|未运行> · 末条记录 <relativeTime>`.
+ *  An absent reading (undefined — the dashboard error fallback) renders identically to a dead kind:
+ *  「未运行」, never `undefined`/`NaN`/empty (absent-field contract, hard rules 3b/4b). */
+function renderDriverStatusRow(kind: "promotion" | "worker", d: DriverKindReading | undefined): string {
+  const aliveText = d?.running === true ? "运行中" : "未运行";
+  const lastMs = d?.lastTs ? Date.parse(d.lastTs) : Number.NaN;
+  const lastText = Number.isFinite(lastMs) ? relativeTime(lastMs) : "—";
+  return html`<div style="margin:0;font-size:0.8rem;line-height:1.5"><b>${escapeHtml(kind)}</b>: ${aliveText} · 末条记录 ${lastText}</div>`;
 }
 
 /** The dashboard taskCard — a self-contained render of the task-ledger summary (id="task-card"):
@@ -547,7 +628,7 @@ export function renderMgrCard(mgr: ManagerResult): string {
  *  font-weight 700, while each row's task id is font-weight 500 (accent colour dropped) — so the grouping
  *  dimension (which used to be the weakest line) reads stronger than the id. */
 export function renderTaskCard(
-  tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>,
+  tasks: TaskSummary[],
 ): string {
   const counts = new Map<string, number>();
   for (const t of tasks) {
@@ -803,8 +884,8 @@ export function renderFanInCardFromRecords(
   return html`<div id="fanin-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
     <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">Fan-in</div>
     <p style="margin:0;font-size:0.8rem;opacity:0.8">最近 ${rows.length} 次机械 fan-in（landed/red · 锁持有区间）</p>
-    ${list}
     ${bar}
+    ${list}
   </div>`;
 }
 
@@ -849,10 +930,14 @@ export function renderCardGrid(cards: string[], opts: { marginBottom?: boolean }
 /** The .dash-grid sheet: the ≤600px single-column collapse. Split from the inline style because a
  *  media query cannot live in a style attribute. The `!important` is required to beat the inline
  *  `grid-template-columns` (inline styles outrank class selectors — this is the standard override
- *  for an inline-style + media-query combination). */
+ *  for an inline-style + media-query combination). gap-dashboard-cards-layout-and-livecard-swimlane
+ *  AC7: the column is `minmax(0,1fr)` — a bare `1fr` has an implicit `auto` minimum (the content's
+ *  min-content width), so a single long unbreakable in-flight row pushed the whole page to
+ *  `scrollWidth ≈ 4× the viewport` on mobile. `minmax(0,1fr)` clamps that minimum to 0 exactly like
+ *  the desktop `gridColumns()` template. */
 export const dashboardGridStyles = `<style>
   @media (max-width:600px) {
-    .dash-grid { grid-template-columns:1fr !important; }
+    .dash-grid { grid-template-columns:minmax(0,1fr) !important; }
   }
 </style>`;
 
@@ -864,7 +949,7 @@ export function renderDashboardPage(
     tests: TestsResult;
     suiteRun: CurrentSuiteRun | null;
     history: GitHistoryResult;
-    tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>;
+    tasks: TaskSummary[];
     goals?: GoalRecord[];
   },
   opts: { workspaceRoot?: string; hours?: number; nowMs?: number } = {},
@@ -925,7 +1010,7 @@ export function buildCardsPayload(args: {
   mgr: ManagerResult;
   tests: TestsResult;
   suiteRun: CurrentSuiteRun | null;
-  tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>;
+  tasks: TaskSummary[];
   goals: GoalRecord[];
   workspaceRoot: string;
   hours: number;
@@ -1012,7 +1097,21 @@ export function checkCardRegistrationCompleteness(
 // check). A 30s TTL bounds staleness: the dashboard is a display snapshot; the task store itself
 // (which the promotion-driver writes on todo→ready) is always read fresh, never through this cache.
 export const TASK_SUMMARY_CACHE_TTL_MS = 30_000;
-const taskSummaryCache = new Map<string, { at: number; tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }> }>();
+
+/** A frontmatter-only task summary (the `includeBody:false` shape `readTaskSummary` returns). The
+ *  `goal_ac` field (task→AC linkage, G7) joined the shape via gap-webui-goal-task-rollup-via-shared-
+ *  summary-cache so the /goal rollup can consume the structured relationship WITHOUT a second read
+ *  — it rides the SAME cached array the dashboard taskCard already uses. */
+export interface TaskSummary {
+  id?: unknown;
+  title?: unknown;
+  status?: unknown;
+  labels?: unknown;
+  updatedAt?: unknown;
+  goal_ac?: unknown;
+}
+
+const taskSummaryCache = new Map<string, { at: number; tasks: TaskSummary[] }>();
 
 /** Test-hygiene handle: drop all cached task-summary readings. */
 export function clearTaskSummaryCache(): void {
@@ -1032,7 +1131,7 @@ export function clearTaskSummaryCache(): void {
 export async function readTaskSummary(
   root: string,
   client: ProviderClient,
-): Promise<Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>> {
+): Promise<TaskSummary[]> {
   const hit = taskSummaryCache.get(root);
   if (hit && Date.now() - hit.at < TASK_SUMMARY_CACHE_TTL_MS) return hit.tasks;
   const r = await client.taskList({ includeBody: false });
@@ -1122,7 +1221,7 @@ export async function handleDashboard(
     readDashboardManagerLight(cfg.workspaceRoot).catch(() => ({
       status: "error" as const, reason: "internal", loopDriver: { status: "error" as const, reason: null, verdict: null, exitCode: null, detail: null }, liveness: { status: "error" as const, reason: null, sessions: [] }, observers: { status: "error" as const, reason: null, rows: [] }, pool: { status: "error" as const, reason: null, pool: null, floor: null, deficit: null, cap: null, lastPromoted: [] }, version: null, developLead: null,
     })),
-    readTaskSummary(cfg.workspaceRoot, client).catch(() => [] as Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>),
+    readTaskSummary(cfg.workspaceRoot, client).catch(() => [] as TaskSummary[]),
     client.goalList().catch(() => [] as GoalRecord[]),
   ]);
   let live: LiveResult;
@@ -1169,7 +1268,7 @@ export async function handleDashboardCards(
     readDashboardManagerLight(cfg.workspaceRoot).catch(() => ({
       status: "error" as const, reason: "internal", loopDriver: { status: "error" as const, reason: null, verdict: null, exitCode: null, detail: null }, liveness: { status: "error" as const, reason: null, sessions: [] }, observers: { status: "error" as const, reason: null, rows: [] }, pool: { status: "error" as const, reason: null, pool: null, floor: null, deficit: null, cap: null, lastPromoted: [] }, version: null, developLead: null,
     })),
-    readTaskSummary(cfg.workspaceRoot, client).catch(() => [] as Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>),
+    readTaskSummary(cfg.workspaceRoot, client).catch(() => [] as TaskSummary[]),
     client.goalList().catch(() => [] as GoalRecord[]),
   ]);
   let live: LiveResult;

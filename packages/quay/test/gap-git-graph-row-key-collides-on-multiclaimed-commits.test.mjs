@@ -80,7 +80,7 @@ test("AC3: two parents of one merge forking from the same trunk commit get disti
     c("t300000", t0 + 5, "develop", ["t200000", "p100000", "p200000"], "octopus merge"),
   ];
   const layout = layoutGitGraph(hist(commits, "t300000", { develop: "t300000" }));
-  assert.equal(layout.branches.length, 2, "two lanes from the octopus merge");
+  assert.equal(layout.branches.length, 3, "mainline + two reconstructed lanes (P1, P2) from the octopus merge");
   const ids = layout.branches.map((b) => b.id);
   assert.equal(new Set(ids).size, ids.length, `lane ids are unique (got: ${ids.join(", ")})`);
 });
@@ -106,16 +106,20 @@ test("AC3b: fork=null lanes sharing the same first commit no longer collide (exc
 
 // ── AC4: negative control — the cross-lane-duplicate shape the old fixture never carried ──────────
 
-/** A layout whose two lanes both claim commit "dup1" (the production shape the old fixture lacked). */
+/** A layout whose two lanes both claim commit "dup1" (the production shape the old fixture lacked).
+ *  gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge: the new model has NO `trunk` field —
+ *  the mainline IS branches[0] (kind: "mainline"), and the two duplicate-claiming lanes are laterals. */
 function dupHashLayout() {
   const mk = (hash, t, subject) => ({ hash, t, parents: 0, subject });
   return {
-    trunk: { ref: "develop", commits: [mk("t000000", 1, "base"), mk("t100000", 2, "trunk")] },
     branches: [
-      { id: "lane-A", ref: "develop", slot: 0, laneX: 82, overflow: false,
+      { kind: "mainline", id: "__mainline__", ref: "develop", slot: -1, laneX: 60, overflow: false,
+        commits: [mk("t000000", 1, "base"), mk("t100000", 2, "trunk")],
+        fork: null, merge: null, mergeT: null, firstT: 1, lastT: 2, collapsed: false },
+      { kind: "reconstructed", id: "lane-A", ref: "task/A", slot: 0, laneX: 82, overflow: false,
         commits: [mk("dup1000", 3, "shared"), mk("a100000", 4, "A only")],
         fork: "t100000", merge: null, mergeT: null, firstT: 3, lastT: 4, collapsed: true },
-      { id: "lane-B", ref: "develop", slot: 1, laneX: 104, overflow: false,
+      { kind: "reconstructed", id: "lane-B", ref: "task/B", slot: 1, laneX: 104, overflow: false,
         commits: [mk("dup1000", 3, "shared"), mk("b100000", 5, "B only")],
         fork: "t100000", merge: null, mergeT: null, firstT: 3, lastT: 5, collapsed: true },
     ],

@@ -144,6 +144,30 @@ test("gap-git-history-branch-summary-wrong-numbers: a branch whose tip is newer 
   }
 });
 
+test("gap-git-graph-trunk-ref-resolves-to-head-not-mainline (AC4): author==develop ⇒ shared commits are attributed to develop, never author", () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "obs-gh-multiref-"));
+  try {
+    // HEAD on `author`; develop is then created AT THE SAME commit — the production shape where
+    // `git rev-list --count author..develop` and the reverse are both 0. `for-each-ref` emits author
+    // before develop (alphabetical), so the un-prioritised `git log author develop --source` labels
+    // the shared commit `author`; the mainline-first ordering must flip it to `develop`.
+    execFileSync("git", ["init", "-q", "-b", "author"], { cwd: ws });
+    fs.writeFileSync(path.join(ws, "README.md"), "fixture\n");
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], { cwd: ws });
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"], { cwd: ws });
+    execFileSync("git", ["branch", "develop"], { cwd: ws });
+
+    const hist = readGitHistory(ws);
+    assert.equal(hist.status, "ok");
+    const developCommits = hist.commits.filter((c) => c.ref === "develop");
+    const authorCommits = hist.commits.filter((c) => c.ref === "author");
+    assert.ok(developCommits.length > 0, "the shared commit is attributed to develop");
+    assert.equal(authorCommits.length, 0, "no commit is attributed to author (mainline wins multi-ref)");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 test("AC127: parseVerificationRound extracts the bucket-execution fields (buckets/bucket_files/bucket_duration_ms) and tolerates their absence on legacy rows (never a fabricated \"full\")", () => {
   // gap-ac127-suite-bucket-web-tests-page-visible — AC126 landed these three fields on bucket-mode
   // rounds (full-suite-runner.ts:4027-4029); the /tests reader must surface `buckets` and tolerate
@@ -1135,7 +1159,11 @@ test("readTranscriptTail surfaces queue-operation as an external preview entry",
 });
 
 test("AC1 — readLive drops a task landed on develop (done) whose stale disk still says ready", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "live-stale-"));
+  // gap-serve-board-test-workspace-couples-to-shared-tmp-quay-worktrees: nest root under a private
+  // parent so dirname(root)/quay-worktrees is test-private (never the shared /tmp/quay-worktrees).
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "live-stale-"));
+  const root = path.join(parent, "main");
+  fs.mkdirSync(root, { recursive: true });
   try {
     const tasksDir = path.join(root, "tasks");
     fs.mkdirSync(tasksDir, { recursive: true });
@@ -1175,7 +1203,7 @@ test("AC1 — readLive drops a task landed on develop (done) whose stale disk st
     assert.ok(!ids.has("gap-stale"), "AC1: develop=done drops gap-stale even though disk=ready (⛔ 仍显示在飞 ⇒ 假)");
     assert.ok(ids.has("gap-fresh"), "AC2: gap-fresh (ready in both) stays in-flight");
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(parent, { recursive: true, force: true });
   }
 });
 

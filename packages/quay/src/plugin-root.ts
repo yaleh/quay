@@ -112,3 +112,26 @@ export function resolvePluginScript(rel: string): string | null {
   const abs = path.resolve(root, rel);
   return fs.existsSync(abs) ? abs : null;
 }
+
+/**
+ * Resolve a plugin script to its RUNNABLE form: the raw source (run with
+ * `--experimental-strip-types`) or the shipped dist bundle (a plain ESM `.js`, run without the
+ * flag). `gap-shipped-ts-files-are-not-bundled`: the npm-pack artifact carries consumer-referenced
+ * plugin `.ts` ONLY as bundled `dist/*.js` (no raw `.ts`), so a `.ts` rel must fall back to the
+ * dist bundle — the same dev/dist fallback the pre-migration callsites hand-rolled
+ * (`mcp-server.ts`'s `resolvePluginExecutable`, `observation.ts`'s `readBoardLanding`,
+ * `serve-send.ts`'s `resolveTranscriptChecker`). Returns null when neither form resolves; the
+ * caller decides whether to fail closed. `.sh` rels never fall back (shell scripts ship raw).
+ */
+export function resolvePluginScriptExec(rel: string): { path: string; stripTypes: boolean } | null {
+  const raw = resolvePluginScript(rel);
+  if (raw) return { path: raw, stripTypes: rel.endsWith(".ts") };
+  if (rel.endsWith(".ts")) {
+    // rel is plugin-root-relative (`scripts/…` or `gate-scripts/…`), so the bundled form is
+    // `scripts/dist/….js` (NOT `plugin/scripts/dist/…` — that prefix was stripped by the caller).
+    const bundledRel = rel.replace(/\.ts$/, ".js").replace(/^(scripts|gate-scripts)\//, "$1/dist/");
+    const bundled = resolvePluginScript(bundledRel);
+    if (bundled) return { path: bundled, stripTypes: false };
+  }
+  return null;
+}

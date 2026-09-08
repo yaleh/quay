@@ -12,8 +12,10 @@
 //   AC2 — with no suite running and the latest ledger round a gate-failure (pass=0/tests=0/
 //         reason=gate-failed/gate=static-check), the card's headline does NOT read "pass 0/0" —
 //         it names the gate instead;
-//   AC3 — the card renders a 近N轮 (recent-rounds) strip so the single latest row is never the only
-//         signal, distinguishing gate-blocked rounds from real red (test failures) and green.
+//   AC3 — the recent-run list renders a per-round chip so the single latest row is never the only
+//         signal, distinguishing gate-blocked rounds from real red (test failures) and green. (The
+//         hover-only 近N轮 colour strip was removed by gap-dashboard-cards-layout-and-livecard-swimlane
+//         AC1; its per-round colour + tooltip info now lives on the round-number chip below.)
 //
 // Run (scoped): node --test packages/quay/test/gap-webui-dashboard-tests-card-latest-round-no-live-signal.test.mjs
 import { test, before, after, beforeEach } from "node:test";
@@ -25,6 +27,7 @@ import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
+import { clearVerificationRoundCache } from "../src/observation.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -80,6 +83,9 @@ const MIXED_ROUNDS = [
 ];
 
 beforeEach(() => {
+  // verification-round.jsonl 走 30s TTL 缓存（observation.ts readTests）——同文件内 AC1/AC2/AC3 已写
+  // 入 MIXED_ROUNDS 并缓存；不清缓存，AC3b 的空账本断言会读到 AC3 的陈旧缓存而非诚实空态。
+  clearVerificationRoundCache();
   fs.rmSync(roundsFile(), { force: true });
   fs.rmSync(stateFile(), { force: true });
 });
@@ -108,11 +114,11 @@ test("AC2: no live suite + gate-blocked latest round names the gate, never a bar
   assert.ok(!r.body.includes(">pass 0/0<"), "no literal pass-0/0 headline node (would misread as an empty suite)");
 });
 
-test("AC3: the card renders a recent-rounds strip distinguishing gate-blocked from real green/red", async () => {
+test("AC3: the recent-run list (round chips) distinguishes gate-blocked from real green/red", async () => {
   fs.writeFileSync(roundsFile(), MIXED_ROUNDS.map((r) => JSON.stringify(r)).join("\n") + "\n");
   const r = await request(port, "/dashboard");
   assert.equal(r.status, 200);
-  assert.ok(/近\d+轮/.test(r.body), "testsCard renders a 近N轮 recent-history strip");
+  assert.ok(/#2/.test(r.body) && /#3/.test(r.body), "the recent-run list renders round chips for a green and a gate-blocked round (the single latest row is not the only signal)");
   assert.ok(r.body.includes("未执行测试"), "a gate-blocked round's tooltip says tests never ran (not 0/0 fail)");
   assert.ok(r.body.includes("pass 101/101"), "a real green round's tooltip carries its actual pass/tests count");
 });

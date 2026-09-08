@@ -52,6 +52,7 @@ import { loadConfig, activeProvider } from "./config.ts";
 import { connectProvider } from "./provider-client.ts";
 import { resolveProviderEnv } from "./provider-env.ts";
 import { type ConnectedProvider, registerAllHandlers } from "./mcp-handlers.ts";
+import { resolvePluginScriptExec } from "./plugin-root.ts";
 
 // QX-035 (experiment 4, iteration 10): read package version at startup for
 // Mitigation A (_version field in task_list response) and Mitigation B
@@ -127,13 +128,14 @@ function spawnCapture(command: string, args: string[], cwd: string): Promise<{ e
 }
 
 /**
- * Resolve a plugin script path to a runnable executable, preferring the raw source form and
- * falling back to the bundled dist form (gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-
- * the-artifact). The shipped npm-pack artifact carries the plugin's consumer-referenced .ts as
- * bundled `plugin/scripts/dist/*.js` executables (no .ts source), so `plugin/scripts/foo.ts` must
- * resolve to `plugin/scripts/dist/foo.js` there; a source checkout keeps the .ts and is used as-is.
+ * Resolve a WORKSPACE-LOCAL instrument path to a runnable executable, preferring the raw source form
+ * and falling back to the bundled dist form (gap-shipped-ts-files-are-not-bundled). ⛔ NOT the
+ * plugin-root resolver: the instrument directory lists the WORKSPACE's OWN scripts —
+ * `runtime-usage-inventory.ts` scans `<workspaceRoot>/plugin/scripts`, so `entry.path` is
+ * workspace-root-relative BY CONSTRUCTION (a test fixture instrument lives in the test workspace,
+ * not in the global plugin root).
  */
-function resolvePluginExecutable(
+function resolveWorkspaceInstrument(
   workspaceRoot: string,
   relPath: string
 ): { path: string; stripTypes: boolean } {
@@ -149,11 +151,13 @@ function resolvePluginExecutable(
 
 /** Spawn the inventory tool's `--instruments-json` mode to DERIVE the instrument directory. */
 export async function fetchInstrumentsManifest(workspaceRoot: string): Promise<InstrumentsManifest> {
-  const inventoryRel = path.join("plugin", "scripts", "runtime-usage-inventory.ts");
-  const resolved = resolvePluginExecutable(workspaceRoot, inventoryRel);
-  if (!fs.existsSync(resolved.path)) {
+  // The inventory TOOL is a plugin's own script — resolve it from the plugin root (SPEC §6b), NOT
+  // the workspace root (AC168 removes the copy). The `--root <workspaceRoot>` arg stays: the tool
+  // SCANS the workspace's own script roots (plugin/scripts · experiments · …) to build the directory.
+  const resolved = resolvePluginScriptExec(path.join("scripts", "runtime-usage-inventory.ts"));
+  if (resolved == null) {
     throw new Error(
-      `instrument directory unavailable: ${inventoryRel} (or its dist bundle) is not present under workspace root ${workspaceRoot}`
+      `instrument directory unavailable: plugin/scripts/runtime-usage-inventory.ts (or its dist bundle) is not present in the resolved plugin root (SPEC §6b)`
     );
   }
   const argv = resolved.stripTypes
@@ -179,7 +183,7 @@ export async function runInstrument(
       `no such instrument: "${name}" (the admitted directory has ${manifest.admitted}; call instrument action:list to see them)`
     );
   }
-  const resolved = resolvePluginExecutable(workspaceRoot, entry.path);
+  const resolved = resolveWorkspaceInstrument(workspaceRoot, entry.path);
   const command = entry.kind === "bash" ? "bash" : process.execPath;
   const argv = entry.kind === "bash" ? [resolved.path, ...args] : resolved.stripTypes ? ["--experimental-strip-types", resolved.path, ...args] : [resolved.path, ...args];
   return spawnCapture(command, argv, workspaceRoot);

@@ -498,7 +498,37 @@ export function shellStyles(kind: "list" | "detail" = "list"): string {
 // bold (**...**), inline code (`...`), unordered lists (- item), ordered
 // lists (1. item), horizontal rules (---/***), and paragraph breaks.
 // Uses a line-by-line state machine; no external dependency.
-export function renderMarkdown(text: string | undefined | null): string {
+// gap-webui-goal-detail-no-entity-links: two backward-compatible opt-ins on renderMarkdown
+// (default opts reproduce the exact pre-task output, so the task page and /live are untouched):
+//   - `headingOffset` (default 1): the ATX '#' count's offset. The task detail page keeps the
+//     historical `# → h2, ## → h3` demotion ("h1 is the page title"); the three ENTITY detail
+//     pages (/goal /adr /doc) pass 0 so a body `## Section` renders as `<h2>` and never skips
+//     straight from the page `<h1>` to `<h3>` (AC5).
+//   - `linkResolver` (default undefined): when set, bare entity ids (AC-?\d+ / GOAL-\d+ / DIR-\d+
+//     / ADR-\d+) the resolver maps to an href are turned into `<a>` links; ids the resolver
+//     rejects stay plain text (AC3 — never fabricate a dead link).
+export interface RenderMarkdownOpts {
+  linkResolver?: (id: string) => string | null;
+  headingOffset?: number;
+}
+
+// Entity-id shape shared by the three entity detail pages' body back-links. `AC-?` admits both
+// the prose form "AC156" (no dash) and the canonical "AC-156" — the resolver normalizes to the
+// canonical id before its existence lookup.
+const ENTITY_REF_RE = /\b(AC-?\d+|GOAL-\d+|DIR-\d+|ADR-\d+)\b/g;
+
+// Pure linkifier: turn every entity-shaped token for which `hrefFor` returns a non-null href into
+// an <a>; leave the rest as plain text (AC3 — a non-existent id must never become a dead link).
+export function linkifyEntities(text: string, hrefFor: (id: string) => string | null): string {
+  return text.replace(ENTITY_REF_RE, (match, id: string) => {
+    const href = hrefFor(id);
+    return href ? `<a href="${escapeHtml(href)}">${id}</a>` : match;
+  });
+}
+
+export function renderMarkdown(text: string | undefined | null, opts: RenderMarkdownOpts = {}): string {
+  const headingOffset = opts.headingOffset ?? 1;
+  const linkResolver = opts.linkResolver;
   const lines = String(text ?? "").split(/\r?\n/);
   const out: string[] = [];
   let inFence = false;
@@ -523,10 +553,10 @@ export function renderMarkdown(text: string | undefined | null): string {
       if (cbm) {
         const checked = cbm[1].toLowerCase() === "x";
         out.push(
-          `<li class="task-list-item"><input type="checkbox" disabled${checked ? " checked" : ""}> ${inlineMarkdown(cbm[2])}</li>`
+          `<li class="task-list-item"><input type="checkbox" disabled${checked ? " checked" : ""}> ${inlineMarkdown(cbm[2], opts)}</li>`
         );
       } else {
-        out.push(`<li>${inlineMarkdown(item)}</li>`);
+        out.push(`<li>${inlineMarkdown(item, opts)}</li>`);
       }
     }
     out.push(`</${tag}>`);
@@ -537,7 +567,7 @@ export function renderMarkdown(text: string | undefined | null): string {
   function flushPara(): void {
     if (paraBuf.length === 0) return;
     const text2 = paraBuf.join(" ");
-    if (text2.trim()) out.push(`<p>${inlineMarkdown(text2)}</p>`);
+    if (text2.trim()) out.push(`<p>${inlineMarkdown(text2, opts)}</p>`);
     paraBuf = [];
   }
 
@@ -566,7 +596,7 @@ export function renderMarkdown(text: string | undefined | null): string {
     if (hm) {
       flushList();
       flushPara();
-      const lvl = hm[1].length + 1; // # → h2, ## → h3, ### → h4 (h1 is the page title)
+      const lvl = hm[1].length + headingOffset; // default # → h2, ## → h3 (task page); detail pages pass 0 → ## → h2
       out.push(`<h${lvl}>${escapeHtml(hm[2].trim())}</h${lvl}>`);
       continue;
     }
@@ -622,19 +652,20 @@ export function renderMarkdown(text: string | undefined | null): string {
 
 // Inline markdown: code spans, bold, italic — with correct HTML escaping.
 // Process segments: alternate between code spans and the rest.
-export function inlineMarkdown(text: string): string {
+export function inlineMarkdown(text: string, opts: RenderMarkdownOpts = {}): string {
   // Process segments: alternate between code spans and the rest.
   const parts = text.split(/(`[^`]*`)/);
   return parts.map((part, i) => {
     if (i % 2 === 1) {
-      // Code span
+      // Code span — entity ids inside code are code, never links.
       const inner = part.slice(1, -1);
       return `<code>${escapeHtml(inner)}</code>`;
     }
-    // Regular text: escape HTML, then apply bold/italic
+    // Regular text: escape HTML, then apply bold/italic, then linkify entity ids.
     let s = escapeHtml(part);
     s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
     s = s.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+    if (opts.linkResolver) s = linkifyEntities(s, opts.linkResolver);
     return s;
   }).join("");
 }
@@ -825,6 +856,14 @@ export function renderMobileChrome(current: string, pageLabel: string): string {
       ${renderMobileMenu(current)}
     </nav>
   </div>`;
+}
+
+// gap-webui-goal-detail-no-entity-links (AC4): the three entity detail pages (/goal /adr /doc)
+// each render a "back to the list" link as the FIRST element of <main> — previously none of them
+// had any way back to their list (main a[href="/goal"] did not exist). One shared helper, one
+// href each, so the affordance stays consistent and is never re-invented per page.
+export function renderBackLink(href: string): string {
+  return html`<p class="meta"><a class="back-link" href="${href}">← 返回列表</a></p>`;
 }
 
 // ── Small shared helpers used by multiple domain handlers ────────────────────

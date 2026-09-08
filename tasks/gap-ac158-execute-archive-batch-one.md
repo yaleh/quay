@@ -4,10 +4,12 @@ title: AC158 执行批次一：零调用死集 git mv 进 archive + INDEX 同一
 status: ready
 labels:
   - gap
+  - delivery-critical
 parent: null
 children: []
 extra:
   schema: execution
+  deliveryCriticalSource: adhoc
 goal_ac: AC-158
 depends_on: []
 ---
@@ -39,12 +41,12 @@ depends_on: []
 
 ## AC
 
-- [ ] AC1 AC-158 判据 exit 0：逐字取自 `goals/AC-158-execute-archive-batch-one.md` 的 criterion —— `archive/INDEX.tsv` 中至少 1 条 `reason_code=zero-call` ∧ `original_path` 在 `plugin/scripts/` 下的行；每条这样的行 original_path 已不存在、archive_path 存在、evidence/restore_cmd/commit 三字段非空
-- [ ] AC2 打印本批次归档条数（不比对任何数字）：`awk -F'\t' 'NR>1 && $4=="zero-call" && $1 ~ /^plugin\/scripts\//' archive/INDEX.tsv | wc -l` 输出 N ≥ 1，并把 N 与前 3 条 original_path 打印进任务记录。⛔ 不与 SPEC 的死集数、82、31 或任何历史数字比对——人 2026-09-08 裁定条数不是闸
-- [ ] AC3 同一提交：`git log -1 --name-only` 该批次提交同时含被移文件与 `archive/INDEX.tsv`，无「文件已移、INDEX 未写」的中间提交
-- [ ] AC4 自带测试同批、无孤儿：被移脚本若有 `plugin/test/<stem>.test.mjs` 则同批移走；`plugin/test/` 中不存在其 `plugin/scripts/` 对应体已被移走的测试文件
-- [ ] AC5 全量 suite 绿：`scripts/test.sh` exit 0 —— **这就是移除证明**：绿即证明被移走的都不是活脚本，红即说明还有活的被移走，按 Plan 步骤 5 移回后重跑
-- [ ] AC6 `node plugin/scripts/task-schema-check.ts tasks/gap-ac158-execute-archive-batch-one.md` exit 0
+- [x] AC1 AC-158 判据 exit 0：逐字取自 `goals/AC-158-execute-archive-batch-one.md` 的 criterion —— `archive/INDEX.tsv` 中至少 1 条 `reason_code=zero-call` ∧ `original_path` 在 `plugin/scripts/` 下的行；每条这样的行 original_path 已不存在、archive_path 存在、evidence/restore_cmd/commit 三字段非空
+- [x] AC2 打印本批次归档条数（不比对任何数字）：`awk -F'\t' 'NR>1 && $4=="zero-call" && $1 ~ /^plugin\/scripts\//' archive/INDEX.tsv | wc -l` 输出 N ≥ 1，并把 N 与前 3 条 original_path 打印进任务记录。⛔ 不与 SPEC 的死集数、82、31 或任何历史数字比对——人 2026-09-08 裁定条数不是闸
+- [x] AC3 同一提交：`git log -1 --name-only` 该批次提交同时含被移文件与 `archive/INDEX.tsv`，无「文件已移、INDEX 未写」的中间提交
+- [x] AC4 自带测试同批、无孤儿：被移脚本若有 `plugin/test/<stem>.test.mjs` 则同批移走；`plugin/test/` 中不存在其 `plugin/scripts/` 对应体已被移走的测试文件
+- [x] AC5 全量 suite 绿：`scripts/test.sh` exit 0 —— **这就是移除证明**：绿即证明被移走的都不是活脚本，红即说明还有活的被移走，按 Plan 步骤 5 移回后重跑
+- [x] AC6 `node plugin/scripts/task-schema-check.ts tasks/gap-ac158-execute-archive-batch-one.md` exit 0
 
 ## DoD
 
@@ -213,3 +215,5 @@ depends_on: []
 - **搁浅原因不是 suite 红，是 `anti-drift` HARD FAIL 1 条**：`docs/analysis/test-file-baseline.txt` 当时不在 Touches 里（移/删测试文件会改这个基线）。该行**已于 10:53 补进 Touches**，但 **worktree 里的任务文件是旧快照**（当时落后 develop 12 提交），而 anti-drift 读的是 **worktree 那一份** ⇒ 补了也没被看见。
 - ⇒ **下一轮该做的**：在 worktree 里 `git merge --no-edit develop`（把补好的 Touches 拉进来）→ 重跑 anti-drift → 走完 scoped 门 + 全量 suite → ff。**不要重新 git mv、不要重算名单。**
 - 逐条核对 AC1–AC6 是否已由 `9547d48eb` 满足，满足就勾（AC 复选框在 Edit 时被换成新文本，故当前全部未勾——那是判据文本变更导致的重置，不是实现退回）。
+
+**优先级（manager 2026-09-08，人在场询问后打标）**：GOAL-003 现 13/14，本任务是最后一条。人问「现在在飞只有 4，可以派发 AC-158 吗？可以单任务派发它吗？」——容量与池子都允许，但手动 `worker-driver.ts --task` 与常驻 driver 并发存在真实碰撞风险（两者对已存在的 `task/gap-ac158-execute-archive-batch-one` worktree 都会生成 CONTINUE-复用 prompt，且两条路径间无跨进程去重锁）。改用打标——只改常驻 driver 自己读的偏好文件（`dispatch-preference.md` 覆盖段），无并发冲突可能，且已被 AC-168 链验证有效。`delivery-critical`（`extra.deliveryCriticalSource: adhoc`，DIR-130 授权）。

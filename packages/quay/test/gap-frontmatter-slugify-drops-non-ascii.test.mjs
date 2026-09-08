@@ -74,8 +74,14 @@ test("AC2: all four stores emit readable CJK filenames", () => {
 
   adr.write("ADR-900", { title: TITLE });
   meta.write("META-900", { title: TITLE });
-  // GOAL/AC records require a non-empty `origin` (SPEC §2.4, write-time fail-closed).
-  goal.write("GOAL-900", { title: TITLE, origin: "gap-frontmatter-slugify-drops-non-ascii test" });
+  // GOAL/AC records require a non-empty `origin` (SPEC §2.4, write-time fail-closed), and a
+  // `kind: goal` record additionally requires a `body` (gap-goal-record-completeness-undefined
+  // — this test exercises slugify, not the completeness gate, so supply a scope body).
+  goal.write("GOAL-900", {
+    title: TITLE,
+    origin: "gap-frontmatter-slugify-drops-non-ascii test",
+    body: "验证 slugify 对非 ASCII 标题保持可读文件名；范围：四个 store 的写路径与文件名生成；非目标：内容完整性校验。",
+  });
   doc.write("DOC-900", { title: TITLE });
 
   const adrFile = fs.readdirSync(path.join(dir, "adr")).find((f) => f.startsWith("ADR-900"));
