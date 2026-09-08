@@ -64,6 +64,7 @@ export function extractSection(fullText, heading) {
  *     parent?: string | null;      // parent task id (relation edge)
  *     children?: string[];         // child task ids (relation edge)
  *     depends_on?: string[];       // prerequisite task ids (relation edge; top-level OR legacy extra)
+ *     goal_ac?: string;            // owning goal AC id (task→AC linkage, G7; top-level single scalar, optional)
  *     extra?: {
  *       schema?: string;           // "v1" — the schema marker (the grandfather boundary)
  *       dirFile?: string;          // projection-scaffolding field (forbidden by assertion A6)

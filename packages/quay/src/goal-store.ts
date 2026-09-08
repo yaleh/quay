@@ -29,11 +29,20 @@
 //        (`isGoalAchieved`), never stored.
 //   I3 — staleness is THREE-STATE (fresh / stale / notEvaluated), never a fresh/stale binary
 //        (a binary would judge a never-evaluated goal as healthy — hard rule 3b). The clock is
-//        `lastProgressAt` = its ACs' `evidence.at` max, DERIVED never stored — NEVER the goal's
-//        own `updatedAt` (hard rule 4b: a quantity the measured object produces is not a
-//        measurement). Zero ACs (or no evidence.at) ⇒ notEvaluated.
+//        `lastProgressAt` = its ACs' latest goal-gate-event timestamp in `.quay/gate-events.jsonl`
+//        (DERIVED never stored — `evidence` itself is ledger-derived, see ledgerEvidenceMap) —
+//        NEVER the goal's own `updatedAt` (hard rule 4b: a quantity the measured object produces
+//        is not a measurement). Zero ACs (or no ledger event) ⇒ notEvaluated.
 //   I4 — divergence: `status: active` while `isGoalAchieved()` is true ⇒ "achieved but nobody
-//        closed it", reported by `check --staleness`.
+//        closed it", reported by `check --staleness` as the `divergent` bucket (GOAL ids).
+//   I5 — achieved-but-failing: an AC `status: achieved` whose `criterion` now exits non-zero ⇒
+//        "achieved but no longer verifiable", reported by `check --achieved-failing` as the
+//        `achievedButFailing` bucket (AC ids). SEPARATE from I4 (⛔ never merged): I4 is
+//        "active yet achieved" (should be closed), I5 is "achieved yet failing" (the opposite
+//        direction, at the AC layer, produced only by RUNNING the criterion — never a stored field).
+//        ⛔ I5 RUNS criteria, so it is a SEPARATE subcommand from `check --staleness`, which is
+//        PURE-READ — otherwise an achieved criterion that itself calls `check --staleness` (AC-175)
+//        recurses unboundedly (2026-09-07 production incident, host load 41.89).
 //
 // cap / stale are HUMAN-GIVEN initial policy values with NO cost-structure backing (hard rule 4:
 // no numeric threshold before the cost is measured). Re-estimate from .quay/goal-round.jsonl's
@@ -44,7 +53,8 @@
 // `criterion` field (their criterion is the conjunction of their ACs).
 //
 // Goal view-model: { id, title, status, kind, goal, criterion, expect, origin, evidence,
-// supersedes, supersededBy, body, updatedAt }
+// supersedes, supersededBy, body, updatedAt }. `evidence` is NOT stored — it is DERIVED at
+// read time from the gitignored ledger (gap-goal-evidence-cache-should-not-enter-git).
 
 import fs from "node:fs";
 import path from "node:path";
@@ -57,18 +67,61 @@ import {
   withFileLock,
   slugify,
 } from "./frontmatter-store-base.ts";
+import { runAcceptance } from "./gate/acceptance-runner.ts";
+import { queryGateEvents } from "./gate/gate-event-store.ts";
+import { commitStoreWrite, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
 
 export const VALID_GOAL_STATUSES = ["draft", "active", "achieved", "superseded", "retired"];
 
 const GOAL_ID_RE = /^GOAL-\d{3,}$/;
 const AC_ID_RE = /^AC-\d{3,}$/;
 
+// RE-ENTRANCY GUARD env var (乙, gap-goal-achieved-but-failing-no-handler). While `checkAchievedFailing`
+// is running a criterion, it sets this in process.env; runAcceptance's spawnSync (no `env` override)
+// inherits it into the criterion's child shell. A criterion whose own command calls back into
+// `check --achieved-failing` (or `gate`) therefore spawns a grandchild that sees the var and REFUSES
+// to run criteria — bounding the recursion (the 2026-09-07 production incident was an unbounded
+// `check --staleness` → criterion → `check --staleness` chain). Exported so the falsifiability test
+// can `env -u` it to prove the observation measures real behavior.
+export const GOAL_ACCEPTANCE_ACTIVE_ENV = "QUAY_GOAL_ACCEPTANCE_ACTIVE";
+
 // Frontmatter keys the view-model owns explicitly; everything else in the frontmatter
 // (any future field) is preserved verbatim — the same discipline as adr-store/document-store.
 const OWNED_KEYS = new Set([
   "id", "title", "status", "kind", "goal", "criterion", "expect", "origin", "activatedAt",
-  "labels", "evidence", "supersedes", "superseded-by",
+  "labels", "supersedes", "superseded-by",
 ]);
+
+// ── evidence is ledger-DERIVED (gap-goal-evidence-cache-should-not-enter-git) ───────────────────
+// `evidence` is NOT a stored field: it is the gitignored `.quay/gate-events.jsonl`'s LAST
+// `gate:"goal"` event for a record, read back into the view-model at read time. The ledger path is
+// DERIVED from goalDir (`<workspaceRoot>/.quay/gate-events.jsonl`, where goalDir is
+// `<workspaceRoot>/goals`) — the same `dirname(goalDir)` derivation `readGoalConfig` already uses.
+// A fresh checkout with no ledger ⇒ no evidence ⇒ notEvaluated / "—" (hard rule 6: missing =
+// not-checked, not false). This is the SINGLE point both consumers share: `checkStaleness` reads
+// `ac.evidence.at` from `list()`'s view-models, and the native provider's `goal_list`/`goal_get`
+// verbs surface the same view-models to serve-goal.
+function ledgerEvidenceMap(goalDir: string): Map<string, { at?: string; verdict?: string; reading?: string }> {
+  const map = new Map<string, { at?: string; verdict?: string; reading?: string }>();
+  const logPath = path.join(path.dirname(goalDir), ".quay", "gate-events.jsonl");
+  let events;
+  try {
+    events = queryGateEvents(logPath, { gate: "goal" });
+  } catch {
+    return map; // unreadable/missing ledger ⇒ no evidence for any record (never crash a read)
+  }
+  for (const ev of events) {
+    const id = String(ev.pipeline_id ?? ev.item_id ?? "");
+    if (!id) continue;
+    const reading = ev.payload && typeof ev.payload === "object"
+      && typeof (ev.payload as Record<string, unknown>).reason === "string"
+      ? (ev.payload as Record<string, unknown>).reason as string
+      : undefined;
+    // Append order = on-disk order, so the LAST matching event wins (the most recent).
+    map.set(id, { at: ev.timestamp, verdict: ev.verdict, reading });
+  }
+  return map;
+}
 
 // ── cap / stale policy values ────────────────────────────────────────────────────────────────
 // Both are HUMAN-GIVEN initial strategy values with NO cost-structure backing (hard rule 4:
@@ -174,6 +227,39 @@ export function isCriterionId(id: string): boolean {
 }
 
 /**
+ * STRIP-EVIDENCE-TIMESTAMP — the SINGLE shared judgment for "is a goal-file change substantive?"
+ * (gap-goal-gate-timestamp-commit-flood). Defined HERE (Core) so BOTH goal-store's commit decision
+ * and meta-driver's settleEvidenceWrites (plugin/scripts/meta-driver.ts, which imports this) apply
+ * the SAME definition — ⛔ never a second, divergent copy in each consumer. `at:` is the evidence
+ * timestamp the goal-driver rewrites every ~42s; it carries no information, so a change that is
+ * ONLY `at:` is not substantive. Everything else (verdict/reading/status/title/…) is.
+ */
+export function stripEvidenceTimestamp(text: string): string {
+  return text.replace(/^\s*at:\s*\S+\s*$/gm, "");
+}
+
+/**
+ * COMMIT-AFTER-WRITE (gap-meta-commitgoalfile; now unified by SPEC-store-commit-unification §4):
+ * commit a goal file to git immediately after writeFileSync, via the shared primitive
+ * `commitStoreWrite` — ⛔ no git plumbing here (the five store files' `git commit` has exactly one
+ * home: store-commit.ts). The goal store is the SOURCE of goal writes — the CLI `write`,
+ * meta-driver's write paths, all funnel through `write()`/`flipGoal()` — so the commit lives HERE,
+ * not in each caller. This wrapper declares the goal kind's default (SPEC §4 declaration table):
+ * `propagate: "none"` — a goal write rides the branch it lands on (the goal driver runs from the
+ * main checkout; a worktree write is carried into develop by that task's fan-in ff). A NEW goal
+ * that must be pool-visible now passes propagate "develop" per SPEC §2.2.
+ */
+function commitGoalFile(goalDir: string, fileName: string, id: string): CommitOutcome {
+  const root = resolveGitRoot(goalDir);
+  return commitStoreWrite({
+    relPath: root ? path.relative(root, path.join(goalDir, fileName)) : `goals/${fileName}`,
+    message: `goals: ${id} 写盘即提交（store-commit）`,
+    root,
+    propagate: "none",
+  }).outcome;
+}
+
+/**
  * @param {string} goalDir absolute path to the goal directory (e.g. `<workspaceRoot>/goals`)
  * @param {{cap?: number, staleMs?: number}} opts I1′/I3 policy values; default cap=3, stale=7d
  *   (readGoalConfig supplies the .quay/config.yml values at the CLI entry; library callers that
@@ -201,7 +287,12 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
     }
   }
 
-  function toViewModel(frontmatter: GoalFrontmatter, body: string, updatedAt?: number): GoalViewModel {
+  function toViewModel(
+    frontmatter: GoalFrontmatter,
+    body: string,
+    evidenceMap: Map<string, { at?: string; verdict?: string; reading?: string }>,
+    updatedAt?: number,
+  ): GoalViewModel {
     const vm: GoalViewModel = {
       id: frontmatter.id,
       title: frontmatter.title,
@@ -211,7 +302,7 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       criterion: frontmatter.criterion,
       expect: frontmatter.expect,
       origin: frontmatter.origin,
-      evidence: frontmatter.evidence,
+      evidence: evidenceMap.get(String(frontmatter.id ?? "")),
       supersedes: frontmatter.supersedes ?? [],
       supersededBy: frontmatter["superseded-by"] ?? [],
       body,
@@ -230,16 +321,17 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
     try {
       updatedAt = fs.statSync(p).mtimeMs;
     } catch { /* omit */ }
-    return toViewModel(frontmatter as GoalFrontmatter, body, updatedAt);
+    return toViewModel(frontmatter as GoalFrontmatter, body, ledgerEvidenceMap(goalDir), updatedAt);
   }
 
   function list(filter: GoalFilter = {}): GoalViewModel[] {
+    const evidenceMap = ledgerEvidenceMap(goalDir);
     return fs
       .readdirSync(goalDir)
       .filter((f) => f.endsWith(".md") && (f.startsWith("GOAL-") || f.startsWith("AC-")))
       .map((f) => {
         const { frontmatter, body } = parseFrontmatter(fs.readFileSync(path.join(goalDir, f), "utf8"));
-        return toViewModel(frontmatter as GoalFrontmatter, body, fs.statSync(path.join(goalDir, f)).mtimeMs);
+        return toViewModel(frontmatter as GoalFrontmatter, body, evidenceMap, fs.statSync(path.join(goalDir, f)).mtimeMs);
       })
       .filter((g) => (filter.status ? g.status === filter.status : true))
       .filter((g) => (filter.kind ? g.kind === filter.kind : true))
@@ -293,9 +385,13 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
 
   // I3 + I4 checker (check --staleness). THREE named buckets, structurally always present
   // (possibly empty arrays) — never a binary fresh/stale that would judge an unevaluated goal
-  // as healthy (hard rule 3b). `lastProgressAt` is DERIVED from the ACs' `evidence.at` max —
-  // never the goal's own `updatedAt` (hard rule 4b). `divergent` is the I4 signal: status
-  // active while `isGoalAchieved()` is true ("achieved but nobody closed it").
+  // as healthy (hard rule 3b). `lastProgressAt` is DERIVED from the ACs' ledger-derived
+  // `evidence.at` max (never stored, never the goal's own `updatedAt` — hard rule 4b).
+  // `divergent` is the I4 signal: status active while `isGoalAchieved()` is true
+  // ("achieved but nobody closed it").
+  // ⛔ PURE-READ — it must NOT run criteria: an achieved criterion that itself calls
+  // `check --staleness` (AC-175) would recurse unboundedly (2026-09-07 production incident).
+  // The criterion-running I5 check lives in `checkAchievedFailing` (a SEPARATE subcommand).
   function checkStaleness(nowMs: number = Date.now()): {
     fresh: string[];
     stale: string[];
@@ -333,6 +429,51 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
     return { fresh, stale, notEvaluated, divergent, cap, staleMs };
   }
 
+  // I5 checker (check --achieved-failing). An AC `status: achieved` whose `criterion` now exits
+  // non-zero ⇒ "achieved but no longer verifiable". SEPARATE from I4 (⛔ never merged): I4 is
+  // "active yet achieved" (GOAL ids, direction "not closed"), I5 is "achieved yet failing" (AC ids,
+  // direction "no longer verifiable"). Produced ONLY by RUNNING the criterion — never a stored field.
+  // Scope: achieved ACs under ACTIVE goals (the same scope as checkStaleness). Empty/missing
+  // criterion is SKIPPED: that is the separate `no-criterion` kind meta-driver reports, not "a
+  // criterion that now fails" (a criterion that never existed cannot have started failing).
+  //
+  // ⛔ RE-ENTRANCY GUARD (乙): a criterion whose own shell command calls back into this checker
+  // (or `gate`) must NOT run criteria again — otherwise it recurses unboundedly. The guard is the
+  // GOAL_ACCEPTANCE_ACTIVE_ENV env var, inherited by the criterion's child shell (runAcceptance's
+  // spawnSync passes no `env`, so it inherits process.env): while running criteria we set it; a
+  // nested invocation that sees it REFUSES and reports `evaluated: false` (⛔ not an empty array
+  // masquerading as "no achieved-but-failing AC" — hard rule 3b). 甲 (structural isolation:
+  // `check --staleness` is pure-read) means the 8 real achieved criteria that call
+  // `check --staleness`/`list`/`get` never even reach this path; 乙 is defense-in-depth for a
+  // future criterion that calls the criterion-runner itself.
+  function checkAchievedFailing(): { achievedButFailing: string[]; evaluated: boolean } {
+    if (process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] === "1") {
+      return { achievedButFailing: [], evaluated: false };
+    }
+    const achievedButFailing: string[] = [];
+    // Criterion cwd = the git root (robust rev-parse, ⛔ not path.dirname — hard rule 4 corollary 2),
+    // falling back to goalDir's parent only when not inside a git work tree.
+    const root = resolveGitRoot(goalDir) ?? path.dirname(goalDir);
+    const prev = process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
+    process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = "1";
+    try {
+      const activeGoalIds = new Set(activeGoals().map((g) => String(g.id)));
+      for (const ac of list()) {
+        if (!isCriterionId(String(ac.id))) continue;
+        if (ac.status !== "achieved") continue;
+        if (!activeGoalIds.has(String(ac.goal))) continue;
+        const criterion = typeof ac.criterion === "string" ? ac.criterion : "";
+        if (criterion.trim() === "") continue;
+        const res = runAcceptance({ command: criterion, cwd: root, timeoutMs: 60000 });
+        if (!res.ok) achievedButFailing.push(String(ac.id));
+      }
+    } finally {
+      if (prev === undefined) delete process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
+      else process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = prev;
+    }
+    return { achievedButFailing, evaluated: true };
+  }
+
   /** Direct read-modify-write of the old goal's file (inside the NEW goal's write lock). */
   function flipGoal(oldId: string, patch: { status: string; supersededBy?: string[] }) {
     const file = fileNameForId(goalDir, oldId);
@@ -343,10 +484,17 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
     fm.status = patch.status;
     if (patch.supersededBy !== undefined) fm["superseded-by"] = patch.supersededBy;
     fs.writeFileSync(p, serializeFrontmatter(fm, body), "utf8");
+    const outcome = commitGoalFile(goalDir, file, oldId);
+    if (outcome === "failed") {
+      // The disk write succeeded but the git commit genuinely FAILED — never throw (the write IS on
+      // disk), but surface on stderr so the failure is observable, not silent (硬规则 3b).
+      // "unchanged"/"not-in-git" are expected no-ops and deliberately do NOT log.
+      console.error(`goal-store: commit of "${oldId}" failed — the file was written to disk but is not on any branch's history`);
+    }
   }
 
   function write(id: string, {
-    title, status, goal, criterion, expect, origin, evidence,
+    title, status, goal, criterion, expect, origin,
     supersedes, supersededBy, body, disposeOld,
   }: {
     title?: string;
@@ -355,7 +503,6 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
     criterion?: string;
     expect?: string;
     origin?: string;
-    evidence?: { at?: string; verdict?: string; reading?: string };
     supersedes?: string[];
     supersededBy?: string[];
     body?: string;
@@ -390,7 +537,6 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       if (criterion !== undefined) frontmatter.criterion = criterion;
       if (expect !== undefined) frontmatter.expect = expect;
       if (origin !== undefined) frontmatter.origin = origin;
-      if (evidence !== undefined) frontmatter.evidence = evidence;
       if (supersedes !== undefined) frontmatter.supersedes = supersedes;
       if (supersededBy !== undefined) frontmatter["superseded-by"] = supersededBy;
 
@@ -433,10 +579,13 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
         }
       }
 
+      // evidence is ledger-DERIVED, never stored (gap-goal-evidence-cache-should-not-enter-git):
+      // strip any stale `evidence:` loaded from an existing file so a real write migrates it away.
+      delete frontmatter.evidence;
       const ordered: GoalFrontmatter = {};
       for (const k of [
         "id", "title", "status", "kind", "goal", "criterion", "expect", "origin", "activatedAt",
-        "labels", "evidence", "supersedes", "superseded-by",
+        "labels", "supersedes", "superseded-by",
       ]) {
         if (frontmatter[k] !== undefined) ordered[k] = frontmatter[k];
       }
@@ -446,11 +595,17 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       const finalBody = body !== undefined ? body : existingBody;
       const fileName = existingFile ?? `${id}-${slugify(title, "goal")}.md`;
       fs.writeFileSync(path.join(goalDir, fileName), serializeFrontmatter(ordered, finalBody), "utf8");
+      const outcome = commitGoalFile(goalDir, fileName, id);
+      if (outcome === "failed") {
+        // The disk write succeeded but the git commit genuinely FAILED — surface on stderr so the
+        // failure is observable, not silent (硬规则 3b). "unchanged"/"not-in-git" are expected no-ops.
+        console.error(`goal-store: commit of "${id}" failed — the file was written to disk but is not on any branch's history`);
+      }
       return get(id) as GoalViewModel;
     });
   }
 
-  return { list, get, write, activeGoals, listActiveCriteria, isGoalAchieved, checkWithinCap, checkStaleness };
+  return { list, get, write, activeGoals, listActiveCriteria, isGoalAchieved, checkWithinCap, checkStaleness, checkAchievedFailing };
 }
 
 // ── Direct-invocation entry (Contract invoke: `node packages/quay/src/goal-store.ts`) ──────────────
@@ -463,7 +618,9 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
 //                               empty criterion fails CLOSED (red) and still records the event.
 //   check                     — I1′ checker: withinCap + hasDirection (exit 1 when over cap)
 //   check --staleness         — I3 three-bucket staleness (fresh/stale/notEvaluated) + I4
-//                               divergence (exit 1 when a divergent goal exists)
+//                               divergence (exit 1 when a divergent goal exists). PURE-READ.
+//   check --achieved-failing  — I5 achieved-but-failing (exit 1 when an achieved-but-failing AC
+//                               exists; runs each achieved AC's criterion under a re-entrancy guard)
 import { fileURLToPath } from "node:url";
 
 async function main(argv: string[]) {
@@ -558,7 +715,7 @@ async function main(argv: string[]) {
       if (!id) { console.error("goal-store: gate requires <id>"); return 2; }
       // Criterion execution REUSES the task acceptance-runner shape (SPEC §3) and the gate
       // ledger REUSES the existing GateEvent format (.quay/gate-events.jsonl).
-      const { runAcceptance } = await import("./gate/acceptance-runner.ts");
+      // (`runAcceptance` is a static import at the top — also used by checkAchievedFailing's I5 bucket.)
       const { appendGateEvent } = await import("./gate/gate-event-store.ts");
       const rec = store.get(id);
       if (!rec) { console.error(`goal-store: no such goal: ${id}`); return 2; }
@@ -585,15 +742,20 @@ async function main(argv: string[]) {
         payload: { reason },
       };
       appendGateEvent(logPath, event);
-      // Best-effort evidence update so the record itself carries the last verdict + time.
-      try {
-        store.write(id, { evidence: { at: event.timestamp, verdict, reading: reason.slice(0, 200) } });
-      } catch { /* evidence write is best-effort — the ledger is authoritative */ }
+      // ⛔ NO evidence write-back: `evidence` is ledger-DERIVED, never stored
+      // (gap-goal-evidence-cache-should-not-enter-git). The ledger event just appended IS the
+      // evidence — writing it into goals/*.md would re-couple the ~42s gate cadence to the tracked
+      // file and let a stale reading travel via git (the exact defect this task removes).
       const out = { id, verdict, reason, timestamp: event.timestamp, event };
       process.stdout.write(JSON.stringify(out, null, 2) + "\n");
       return verdict === "pass" ? 0 : 1;
     }
     case "check": {
+      if (rest.includes("--achieved-failing")) {
+        const r = store.checkAchievedFailing();
+        process.stdout.write(JSON.stringify(r, null, 2) + "\n");
+        return r.achievedButFailing.length === 0 && r.evaluated ? 0 : 1;
+      }
       if (rest.includes("--staleness")) {
         const r = store.checkStaleness();
         process.stdout.write(JSON.stringify(r, null, 2) + "\n");

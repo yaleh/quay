@@ -56,6 +56,9 @@ import {
   aliveness,
   statePaths,
   kernelSelfPath,
+  watchedSourceFiles,
+  sourceFilesMaxMtimeMs,
+  sourceChangedSince,
 } from "../scripts/driver-runtime.ts";
 import { isDue } from "../scripts/routine-scheduler.ts";
 import * as worker from "../scripts/worker-driver.ts";
@@ -232,9 +235,10 @@ test("AC1 — Layer 1b (routine) reuses L0 schedule/heartbeat/notify; ⛔ 不重
 // ── AC2（supervisor 港进 TS）：registry 单一数据表 + 可单测纯函数 ─────────────────────────────────
 
 test("AC2 — 8 张 bash registry 表 → DRIVER_KINDS 单一 TS 数据表", () => {
-  // 2026-09-06 +meta（机制演进复核例程型 kind）。基线断言【有意更新】——它的作用是让新增 kind
-  // 必须显式过一次这条断言，而不是悄悄混进来；故保持逐字列举，⛔ 不改成 length 或 includes。
-  assert.deepEqual(KNOWN_KINDS, ["promotion", "worker", "outer", "quality", "suite", "meta"], "六个 kind，registry 数据表承载差异");
+  // 2026-09-06 +meta（机制演进复核例程型 kind）+goal（G6 goal 机械环例程型 kind）。基线断言
+  // 【有意更新】——它的作用是让新增 kind 必须显式过一次这条断言，而不是悄悄混进来；故保持逐字
+  // 列举，⛔ 不改成 length 或 includes。
+  assert.deepEqual(KNOWN_KINDS, ["promotion", "worker", "outer", "quality", "meta", "goal"], "六个 kind（suite 已按人 2026-09-07 裁定退役），registry 数据表承载差异");
   assert.equal(DRIVER_KINDS.promotion.driver, "promotion-driver.ts");
   assert.equal(DRIVER_KINDS.promotion.capFlag, "--cap", "promotion capFlag = --cap");
   assert.equal(DRIVER_KINDS.promotion.hasInterval, true);
@@ -262,6 +266,14 @@ test("AC2 — 8 张 bash registry 表 → DRIVER_KINDS 单一 TS 数据表", () 
   assert.equal(DRIVER_KINDS.quality.pidSelf, true);
   assert.deepEqual(DRIVER_KINDS.quality.carriers, ["quality-round.jsonl"]);
   assert.equal(DRIVER_KINDS.quality.controlFile, "quality-control.json");
+  // G6：goal 机械环例程型 kind（Layer 0 + 1b），registry 加一行接入（同 quality/meta）。
+  assert.equal(DRIVER_KINDS.goal.driver, "goal-driver.ts");
+  assert.equal(DRIVER_KINDS.goal.capFlag, "", "goal 无任务池 ⇒ 无 cap");
+  assert.equal(DRIVER_KINDS.goal.hasInterval, true);
+  assert.equal(DRIVER_KINDS.goal.hasReconcile, false);
+  assert.equal(DRIVER_KINDS.goal.pidSelf, true);
+  assert.deepEqual(DRIVER_KINDS.goal.carriers, ["goal-round.jsonl"]);
+  assert.equal(DRIVER_KINDS.goal.controlFile, "goal-control.json");
 });
 
 test("AC2 — driverArgvForKind maps --cap → per-kind cap flag (worker --concurrency)", () => {
@@ -288,6 +300,40 @@ test("AC2 — carrierStats reads ALL carriers; last_record_ts = max across outco
   assert.equal(st.records, 3, "both carriers summed (1 outcome + 2 round)");
   assert.equal(st.lastTs, "2026-08-23T11:30:00Z", "max across BOTH carriers — round wins");
   assert.match(st.primaryPath, /worker-outcome\.jsonl$/, "primary carrier is outcome");
+});
+
+test("gap-meta-carrierstats — quality carrier timestamp key is judgedAt (⛔ not ts)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dr-carrier-q-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  // quality 判词载体记录的时间戳键是 judgedAt（pool-quality-judge.ts buildQualityRoundRecord），
+  // ⛔ 不是 ts。键不匹配会把 15 条真实记录读成 lastTs=null ⇒ 停摆与健康同形。
+  fs.writeFileSync(
+    path.join(root, ".quay", "quality-round.jsonl"),
+    '{"round":1,"judgedAt":"2026-09-05T15:41:19.134Z","state":"failed"}\n' +
+      '{"round":2,"judgedAt":"2026-09-05T15:44:02.000Z","state":"judged","distribution":{},"shouldRemoveIds":[],"verdicts":[]}\n',
+    "utf8",
+  );
+  const st = carrierStats(root, "quality");
+  assert.equal(st.records, 2, "both quality records counted");
+  assert.equal(st.lastTs, "2026-09-05T15:44:02.000Z", "lastTs = max judgedAt, ⛔ null");
+});
+
+test("gap-meta-round-log-rel — quality carrier reads BOTH ts (heartbeat) and judgedAt, freshest wins", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dr-carrier-qmix-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  // quality-round.jsonl 混两种键：心跳（ts，每 30s 一条 liveness 直接量）+ 判词（judgedAt，间歇量）。
+  // 修复前只读 judgedAt ⇒ 心跳不可见 ⇒ 池不触发就假报 stall；修复后两者较新者作 lastTs。
+  fs.writeFileSync(
+    path.join(root, ".quay", "quality-round.jsonl"),
+    '{"round":1,"judgedAt":"2026-09-06T10:00:00.000Z","state":"failed"}\n' +
+      '{"round":2,"run_id":"qg-x","pid":1,"ts":"2026-09-06T10:00:30.000Z","halted":false,"facts":[]}\n',
+    "utf8",
+  );
+  const st = carrierStats(root, "quality");
+  assert.equal(st.records, 2, "both heartbeat + judgment counted");
+  assert.equal(st.lastTs, "2026-09-06T10:00:30.000Z", "lastTs = fresher heartbeat ts (⛔ judgedAt-only ⇒ stale)");
 });
 
 test("AC2 — pidAlive / readPidFile / aliveness (death direct-quantity, ⛔ not carrier-stall)", (t) => {
@@ -472,4 +518,65 @@ test("negative control — pollJsonFile waits through a torn (exists-but-partial
   const dump = await pollJsonFile(p, 2000, 10);
   await finish;
   assert.deepEqual(dump, complete, "poller waited through the torn state and read the completed file");
+});
+
+// ── source-refresh（AC-184 陈旧写者收尾）：supervisor 在源码推进到 driver 启动时刻之后重拉 driver ──
+// 判据（AC）：`node --experimental-strip-types --test plugin/test/driver-runtime.test.mjs` 里，下面的
+// 集成测试证明 supervisor 在 driver-filters.ts 推进到运行中 driver 之后 respawn 该 driver——常驻 driver
+// 因此自刷新，AC-184 不再每提交一次就陈旧写者复发。判据取假（DoD）：删掉 runSupervisor 里的 sourceCheck
+// 对照 ⇒ 源码推进后 pid 永不变 ⇒ 集成测试红。
+
+test("source-refresh — watchedSourceFiles / sourceFilesMaxMtimeMs / sourceChangedSince 纯函数可单测且取假", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dr-src-fn-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const scripts = path.join(root, "plugin", "scripts");
+  fs.mkdirSync(scripts, { recursive: true });
+  const filtersFile = path.join(scripts, "driver-filters.ts");
+  fs.writeFileSync(filtersFile, "v1", "utf8");
+
+  // watched 集 = driver 自身入口 + 共享 Layer 0/1a 模块（含 driver-filters.ts——AC-184 的根）。
+  const watched = watchedSourceFiles("promotion");
+  assert.ok(watched.includes("promotion-driver.ts"), "driver 自身入口在监视集");
+  assert.ok(watched.includes("driver-filters.ts"), "driver-filters.ts 在监视集");
+
+  const m0 = sourceFilesMaxMtimeMs(root, "promotion");
+  assert.ok(m0 > 0, "mtime 读自被写文件（⛔ 非恒真 0）");
+
+  // 取假：since 取「未来」⇒ 不变更；since 取 0（过去）⇒ 变更。对照真读 mtime，⛔ 恒真/恒假。
+  assert.equal(sourceChangedSince(root, "promotion", m0 + 1000), false, "源码不晚于 since ⇒ 不变更");
+  assert.equal(sourceChangedSince(root, "promotion", 0), true, "源码晚于 epoch 0 ⇒ 变更");
+
+  // 推进 mtime ⇒ max 增大（可观测非静默——⛔ 不是结构上恒真的量）。
+  const later = new Date(m0 + 5000);
+  fs.utimesSync(filtersFile, later, later);
+  assert.ok(sourceFilesMaxMtimeMs(root, "promotion") > m0, "推进 mtime ⇒ max 增大");
+});
+
+test("source-refresh — supervisor respawns driver when driver-filters.ts advances past the running driver", async (t) => {
+  const root = makeRoot("src-respawn");
+  // driver-filters.ts 先于 driver 启动写入（mtime < driver 启动时刻），确保初始不触发 respawn。
+  const filtersFile = path.join(root, "plugin", "scripts", "driver-filters.ts");
+  fs.writeFileSync(filtersFile, "v1", "utf8");
+  t.after(() => {
+    run(["stop", "--root", root], { timeout: 15000 });
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  const start = run(["start", "--root", root, "--restart-delay", "1", "--run-id", "dr-src-respawn"]);
+  assert.equal(start.status, 0, `start failed: ${start.stdout}\n${start.stderr}`);
+  const p1 = readPid(root, "promotion-driver.pid");
+  assert.ok(p1, "driver pid recorded");
+
+  // 确保 driver 已运行 ≥150ms，使「重写 driver-filters.ts 的 mtime」严格晚于 driver 启动时刻；
+  // 且 mtime 落在「现在」（⛔ 未来）——respawn 后的新 driver 启动时刻更晚，故不进入 respawn 死循环。
+  await new Promise((r) => setTimeout(r, 150));
+  fs.writeFileSync(filtersFile, "v2", "utf8");
+
+  let p2 = p1;
+  for (let i = 0; i < 80; i++) {
+    p2 = readPid(root, "promotion-driver.pid");
+    if (p2 && p2 !== p1) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.notEqual(p2, p1, `driver pid changed (respawned) after driver-filters.ts advanced: ${p1} → ${p2}`);
 });

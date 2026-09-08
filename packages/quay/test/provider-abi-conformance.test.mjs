@@ -216,6 +216,17 @@ async function main() {
       `task_write depends_on:["ABI-C1"] -> accepted=${!w.isError}, top-level depends_on in file=${topLevelDependsOn}`);
   }
   {
+    // task_write with a top-level `goal_ac` param (gap-goal-ac-task-linkage-top-level-field AC5):
+    // the schema accepts it and the field lands TOP-LEVEL in the file (not nested under `extra`).
+    // Round-trip: the written value reads back byte-identically from the top-level frontmatter line.
+    const w = await nativeClient.callTool({ name: "task_write", arguments: { id: "ABI-C1", goal_ac: "AC-177" } });
+    const raw = fs.readFileSync(path.join(tasksDir, "ABI-C1.md"), "utf8");
+    const topLevelGoalAc = /^goal_ac: AC-177$/m.test(raw);
+    record("native", "compound", "task_write-goal-ac",
+      !w.isError && topLevelGoalAc,
+      `task_write goal_ac:"AC-177" -> accepted=${!w.isError}, top-level goal_ac in file=${topLevelGoalAc}`);
+  }
+  {
     // task_delete of an existing task (AC3): ok:true, then task_get on the same id returns
     // isError (not-found) AND the file is absent from disk.
     const del = await nativeClient.callTool({ name: "task_delete", arguments: { id: "ABI-P1" } });

@@ -3,7 +3,7 @@
 // concurrency cap is RETIRED (human ruling 2026-08-09): effective_cap is the FIXED constant 5,
 // regardless of cpu pressure / suite state / process budget. The band + hysteresis + budget logic
 // still RUNS as PURE OBSERVATION (the signal/band/budget lines the CLI prints) and is pinned here
-// as observation, but it participates in NO decision — effective_cap is always FIXED_EFFECTIVE_CAP (5).
+// as observation, but it participates in NO decision — effective_cap is always the configured worker cap.
 //
 // SPLIT NOTE (gap-suite-floor-two-longest-files-bound): this is one of FIVE files split from the
 // original cap-from-gate.test.mjs (166s main-phase floor) by test concern — this file holds the
@@ -33,7 +33,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  FIXED_EFFECTIVE_CAP,
   computeEffectiveCap,
 } from "../scripts/cap-from-gate.ts";
 

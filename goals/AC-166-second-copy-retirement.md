@@ -1,9 +1,16 @@
 ---
 id: AC-166
 title: 第二副本退役 —— .claude 双副本 archive + manager-tick-core 迁入 plugin
-status: draft
+status: achieved
 kind: criterion
 goal: GOAL-003
+criterion: |-
+  [ -e .claude/workflows/manager-tick-core.js ] && exit 1
+  [ -f plugin/workflows/manager-tick-core.js ] || exit 1
+  [ "$(ls -A .claude/skills 2>/dev/null | wc -l)" = 0 ] || exit 1
+  exit 0
+expect: exit 0（.claude/workflows/manager-tick-core.js 已不存在 ∧
+  plugin/workflows/manager-tick-core.js 存在 ∧ .claude/skills 已空）
 origin: |
   人 2026-09-02 裁定②（自用与交付同一功能）+ 裁定④（manager 是产品一部分）。正本
   SPEC-plugin-lifecycle-single-bundle-2026-09-02.md。
@@ -15,4 +22,4 @@ origin: |
 
 **取假**：迁错路径 ⇒ 恒 0。
 
-**⊢ criterion 留空**：本条是语义判据、无可跑 shell 判据；`gate` fail-closed（红）是诚实状态（SPEC-0809 §3）。
+

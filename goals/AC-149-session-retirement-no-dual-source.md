@@ -1,9 +1,12 @@
 ---
 id: AC-149
 title: 会话真正退役 + 不留双真相源 + 产能不塌
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-002
+criterion: |
+  node --no-warnings --experimental-strip-types -e 'import("./plugin/scripts/session-retirement-check.ts").then(m=>{process.exit(m.runCheck(".").ok?0:1)})'
+expect: exit 0
 origin: >
   人 2026-08-23 方向「彻底取消 outer 会话（inner 会话应已被 worker-driver 机制代替）」。
 
@@ -11,11 +14,6 @@ origin: >
   AC149-1/-3 的
 
   一个具体子条件——枚举 outer 执行核引用的全部 checker，逐个确认留存调用面或显式退役。
-evidence:
-  at: 2026-09-06T09:44:30.939Z
-  verdict: fail
-  reading: AC-149 has no criterion defined (fail-closed — an unenforceable AC must
-    never silently pass)
 ---
 
 **判据（能取假，三条缺一不可）**：
@@ -28,4 +26,4 @@ evidence:
 - **AC149-3（无双真相源）**：停机后不存在任何"两个执行者做同一件事"的路径。**取假**：任一职责
   同时有 driver 路径与人工/会话路径且都在用 ⇒ 假。
 
-**⊢ criterion 留空**：本条是语义判据、无可跑 shell 判据；`gate` fail-closed（红）是诚实状态（SPEC-0809 §3）。
+

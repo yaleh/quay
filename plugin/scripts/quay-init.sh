@@ -1156,8 +1156,15 @@ _derive_loop_scripts_once() {
   #   INVISIBLE to closure step (d) (same class as task-schema.ts above) — without this explicit entry a
   #   cold-started consumer lays the drivers without their shared parse/patch/commit library and dies
   #   with ERR_MODULE_NOT_FOUND.
+  #   shape-sections.ts (gap-shape-section-tables-dual-copy-no-single-source): the PURE-DATA single
+  #   source of the shape section-heading lists. ready-pool-check.ts (laid down) imports it via ESM
+  #   `./shape-sections.ts` (INVISIBLE to closure step (d), same class as task-schema.ts / task-ops.ts
+  #   above), AND packages/quay-native/src/store.ts imports it via a relative path that esbuild inlines
+  #   into the dist bundle. Without this explicit entry a cold-started consumer lays ready-pool-check.ts
+  #   with no sibling shape-sections.ts and dies with ERR_MODULE_NOT_FOUND (this is exactly the defect
+  #   this task closed: the section list lived in store.ts which is NOT laid down).
   printf '%s\n' inner-idle-log.ts it0-split-or-commit-check.ts pipe-exit-code-check.sh \
-    gate-script-base.ts workflow-event-schema.mjs task-schema.ts task-ops.ts touches-parser.ts task-status.ts wiring-coverage-check.ts \
+    gate-script-base.ts workflow-event-schema.mjs task-schema.ts task-ops.ts shape-sections.ts touches-parser.ts task-status.ts wiring-coverage-check.ts \
     capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh inner-blocked-signal.ts \
     inner-forensics.mjs task-contract-check.ts task-status-drift-check.ts touches-orthogonality-check.ts \
     verify-delivery-surface.ts precommit-guard.ts touches-one-entry-one-path-check.ts quay-session.ts \

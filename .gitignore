@@ -131,6 +131,18 @@ packages/quay/plugin/
 **/.quay/meta-control.json
 # meta-driver 的变化检测状态（语义半的触发闸输入：上次判读的读数摘要 + 时刻）。
 **/.quay/meta-driver-state.json
+# gap-goal-driver-mechanical-ring (2026-09-06, G6): the goal mechanical-ring driver's production
+# launch state — round heartbeat (unconditional per-loop record of criterion verdicts, AC1 carrier) +
+# supervisor state files + control state (halt/control plane goal-control.json). All runtime state,
+# never git-tracked; same gitignored family as outer/quality round+control.
+**/.quay/goal-round.jsonl
+**/.quay/goal-control.json
+**/.quay/goal-driver.pid
+**/.quay/goal-driver-supervisor.pid
+**/.quay/goal-driver.log
+**/.quay/goal-driver-supervisor.log
+**/.quay/goal-driver-liveness.log
+**/.quay/goal-driver.stop
 **/.quay/quality-driver.pid
 **/.quay/quality-driver-supervisor.pid
 **/.quay/quality-driver.log

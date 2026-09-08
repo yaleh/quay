@@ -18,6 +18,20 @@ import { TASK_STATUSES, TASK_STATUS, isTaskStatus, type Task, type TaskStatus } 
 // drift across the three readers. The write-side serialize()/validateWrittenYaml() keep their own
 // YAML.stringify/YAML.parse: serialization correctness is the store's, not the schema's.
 import { parseFrontmatterCompletely } from "../../quay/src/task-parsing.ts";
+// SPEC-store-commit-unification §4: the commit-after-write PRIMITIVE (four-state return, rev-parse
+// root, pathspec-limited add+commit) lives in the product layer next to task-parsing.ts. This store
+// delegates its add/commit to it and keeps only its own branch-aware ff-to-develop propagation —
+// the primitive's "develop" propagate is too coarse for task/ worktree branches (fan-in ff-merge is
+// the sole path into develop from a task worktree).
+import { commitStoreWrite } from "../../quay/src/store-commit.ts";
+// gap-shape-section-tables-dual-copy-no-single-source: the shape section-heading lists (which
+// headings count as proposal/plan/ac/dod per shape) live in ONE place — plugin/scripts/shape-
+// sections.ts — imported by BOTH this store (product judge) and ready-pool-check.ts (methodology
+// judge). They live in plugin/scripts/ (not packages/) because quay-init lays the mechanism layer
+// but NOT the packages/ source tree into consumers, so a laid-down ready-pool-check.ts can only
+// reach a sibling plugin/scripts file; esbuild inlines this import into the self-contained dist
+// bundle so the product build stays standalone.
+import { SHAPE_SECTIONS } from "../../../plugin/scripts/shape-sections.ts";
 
 export const VALID_STATUSES: readonly string[] = TASK_STATUSES;
 
@@ -43,58 +57,51 @@ export const VALID_STATUSES: readonly string[] = TASK_STATUSES;
  * Every shape's contract is complete on its own dimension; the gate dispatches
  * by shape rather than waiving checks (invariant 分派 ≠ 豁免).
  */
+
+// gap-shape-section-tables-dual-copy-no-single-source: the section-heading lists (proposal/plan/
+// ac/dod per shape) and the suffixed/draft heading variants previously lived HERE and were
+// hand-copied into ready-pool-check.ts (drifted twice). They now live in ONE place —
+// plugin/scripts/shape-sections.ts (imported at the top of this file) — and this registry DERIVES
+// its `sections` from it. `planKeys` (the contract shape's extra artifact keys) stay here: they are
+// not part of the AC/DoD heading-list drift and only the store consumes them. Adding a heading
+// variant to shape-sections.ts is seen by BOTH this store (check()) and ready-pool-check.ts
+// (artifactsComplete()) at once.
 export const SHAPE_REGISTRY = {
   contract: {
     planKeys: ["measure", "band", "invariant", "invoke", "control", "resume"],
-    sections: {
-      // `## 人的裁定` is the directive-variant proposal-slot: a directive task
-      // (type: directive) carries the human ruling as its proposal, with the
-      // implementation contract in `## Contract` (DIR-123-aarch64,
-      // gap-cli-quay-init-collides). Same alias principle as finding's
-      // `## Finding` mapping into the proposal-slot.
-      proposal: ["Proposal", "人的裁定"],
-      plan: ["Contract"],
-      ac: ["AC", "Acceptance Criteria"],
-      dod: ["DoD", "Definition of Done"],
-    },
+    // `## 人的裁定` is the directive-variant proposal-slot (DIR-123-aarch64,
+    // gap-cli-quay-init-collides): a directive task carries the human ruling as proposal, the
+    // implementation contract in `## Contract`.
+    sections: SHAPE_SECTIONS.contract,
   },
   finding: {
     planKeys: [],
-    sections: {
-      proposal: ["Finding"],
-      ac: ["AC", "Acceptance Criteria"],
-      dod: ["DoD", "Definition of Done"],
-    },
+    sections: SHAPE_SECTIONS.finding,
   },
   plan: {
     planKeys: [],
-    sections: {
-      proposal: ["Proposal"],
-      plan: ["Plan"],
-      ac: ["AC", "Acceptance Criteria"],
-      dod: ["DoD", "Definition of Done"],
-    },
+    sections: SHAPE_SECTIONS.plan,
   },
-  // proposal shape (2026-08-11, DIR-127 + gap-mcp-server-test-deadlocks): a task
-  // whose own complete contract is Proposal / AC / DoD with NO plan dimension —
-  // symmetric with `finding` (which uses `## Finding` as its proposal-slot), but
-  // the proposal-slot is the literal `## Proposal`. Recording-type directives
-  // (DIR-028: "只记录方向,不要求立刻做") and execution tasks that carry their
-  // approach inside `## Proposal` (no separate `## Plan`) are complete on this
-  // dimension — adding a fabricated `## Contract` to them would be a shape change
-  // (gap-todo-shape-mismatch-author-gate's "分派 ≠ 豁免": a shape is complete on
-  // its OWN dimension, not lazily skipping the plan check).
+  // proposal shape (2026-08-11, DIR-127 + gap-mcp-server-test-deadlocks): a task whose own complete
+  // contract is Proposal / AC / DoD with NO plan dimension — symmetric with `finding` (which uses
+  // `## Finding` as its proposal-slot), but the proposal-slot is the literal `## Proposal`.
   proposal: {
     planKeys: [],
-    sections: {
-      proposal: ["Proposal"],
-      ac: ["AC", "Acceptance Criteria"],
-      dod: ["DoD", "Definition of Done"],
-    },
+    sections: SHAPE_SECTIONS.proposal,
   },
 } as const;
 
 export type TaskShape = keyof typeof SHAPE_REGISTRY | "unknown";
+
+/** Escape regex-special characters so a heading is matched LITERALLY. Without this, a registered
+ *  heading like `AC (draft)` or `Acceptance Criteria (runnable)` would be built into a `^##\s+<h>\s*$`
+ *  regex where the parentheses become capture groups and NEVER match the literal `## AC (draft)` line.
+ *  All the pre-variant headings are plain section names (no special chars), so escaping is a no-op for
+ *  them — it only matters for the parenthesized suffix/draft variants now registered in SHAPE_REGISTRY.
+ *  Mirrors ready-pool-check.ts's own escapeRegExp (same byte semantics — the single-judge contract). */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 /** Does `body` contain a `## <heading>` line that is EXACTLY that heading
  *  (trailing whitespace allowed)? Exact match prevents false positives from
@@ -157,7 +164,7 @@ export function sectionAfterHeading(body: string, headings: string[]): string {
     // by the iteration-1 G3 audit against QN-005's own AC text, which
     // contains the word "zero"). Correct JS end-of-string lookahead is
     // `(?![\s\S])` (no characters remain).
-    const headingRe = new RegExp(`^##\\s+${h}\\s*$`, "im");
+    const headingRe = new RegExp(`^##\\s+${escapeRegExp(h)}\\s*$`, "im");
     const m = headingRe.exec(body);
     if (!m) continue;
     // Content = everything after the heading line up to the next `## ` heading
@@ -1067,25 +1074,14 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     }
   }
 
-  /** Stage + commit a set of repo-relative paths (hard rule 11: `git add` then `git commit`
-   *  back-to-back, no wait between them; pathspec-limited, never `-A` — memory git-commit-no-
-   *  pathspec-commits-shared-index). `--no-verify` skips the pre-commit hook (a mechanical ABI
-   *  write is content-neutral). Returns "committed" | "nothing" | "failed" — "nothing" is a
-   *  DISTINGUISHABLE state (e.g. deleting a never-committed untracked file has no index entry to
-   *  stage), never conflated with "committed" or "failed" (硬规则 3b). */
-  function commitRelPaths(root: string, relPaths: string[], message: string): "committed" | "nothing" | "failed" {
+  /** Whether `rel` exists in HEAD (the git blob `HEAD:<rel>`). False when the file was never
+   *  committed — the "nothing to stage" guard for deleting an untracked file. */
+  function inHead(root: string, rel: string): boolean {
     try {
-      execFileSync("git", ["-C", root, "add", "--", ...relPaths], { stdio: "ignore" });
+      execFileSync("git", ["-C", root, "cat-file", "-e", `HEAD:${rel}`], { stdio: "ignore" });
+      return true;
     } catch {
-      // `git add -- <path>` errors when the pathspec matches nothing tracked (deleting an untracked
-      // file): there is nothing to commit, which is NOT a commit failure.
-      return "nothing";
-    }
-    try {
-      execFileSync("git", ["-C", root, "commit", "--no-verify", "-m", message, "--", ...relPaths], { stdio: "ignore" });
-      return "committed";
-    } catch {
-      return "failed";
+      return false;
     }
   }
 
@@ -1101,25 +1097,40 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     }
   }
 
-  /** Commit `tasks/<id>.md` (branch-aware) after a successful write/delete. Returns
+  /** Commit `tasks/<id>.md` (branch-aware) after a successful write/delete, delegating the git
+   *  add/commit to the shared primitive `commitStoreWrite` (SPEC-store-commit-unification §3) and
+   *  keeping only this store's own branch-aware ff-to-develop propagation. Returns
    *  `{ committed, propagated, status }` — honest, distinguishable outcomes, never "silent success"
    *  (硬规则 3b):
    *    status "committed"  — the change is on the current branch's git history (propagated reports
    *                          whether it also reached develop).
    *    status "not-in-git" — the store's tasksDir is not inside a git work tree (unit-test temp
    *                          dirs): a deliberate no-op, NOT a failure.
-   *    status "nothing"    — nothing to stage (deleting a never-committed untracked file).
+   *    status "nothing"    — nothing to stage/commit (deleting a never-committed untracked file, or
+   *                          a byte-identical write the primitive restored to HEAD).
    *    status "failed"     — the git add/commit itself errored: a REAL failure (the disk change is
    *                          not on any branch's history).
-   *  Callers log only `failed` — the other two non-committed states are expected and must not be
+   *  Callers log only `failed` — the other non-committed states are expected and must not be
    *  mistaken for a broken commit. */
   function commitTaskWrite(id: string, verb: "task_write" | "task_delete"): { committed: boolean; propagated: boolean; status: "committed" | "not-in-git" | "nothing" | "failed" } {
     const root = resolveGitRoot();
     if (root === null) return { committed: false, propagated: false, status: "not-in-git" };
     const rel = path.join("tasks", `${id}.md`);
-    const outcome = commitRelPaths(root, [rel], `tasks: ${id} ${verb}`);
-    if (outcome === "nothing") return { committed: false, propagated: false, status: "nothing" };
-    if (outcome === "failed") return { committed: false, propagated: false, status: "failed" };
+    // "nothing" guard BEFORE delegating: deleting a never-committed untracked file has no index
+    // entry to stage — a DISTINGUISHABLE no-op, never conflated with "failed" (硬规则 3b). The
+    // primitive's four states have no "nothing" (SPEC §3), so this edge stays here.
+    if (!fs.existsSync(path.join(root, rel)) && !inHead(root, rel)) {
+      return { committed: false, propagated: false, status: "nothing" };
+    }
+    const res = commitStoreWrite({
+      relPath: rel,
+      message: `tasks: ${id} ${verb}`,
+      root,
+      propagate: "none", // branch-aware ff below; the primitive's "develop" is too coarse for task/ branches
+    });
+    if (res.outcome === "not-in-git") return { committed: false, propagated: false, status: "not-in-git" };
+    if (res.outcome === "unchanged") return { committed: false, propagated: false, status: "nothing" };
+    if (res.outcome === "failed") return { committed: false, propagated: false, status: "failed" };
     const branch = currentBranch(root);
     if (branch === null || branch === "develop") {
       // detached HEAD, or already on develop — nothing further to propagate.
@@ -1179,7 +1190,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
    * only ordinary last-writer-wins sequencing (identical to every other
    * field this store already handles).
    */
-  function write(id: string, { title, status, labels, parent, children, extra, body, depends_on, expectedStatus }: { title?: string; status?: string; labels?: string[]; parent?: string | null; children?: string[]; extra?: Record<string, unknown>; body?: string; depends_on?: string[]; expectedStatus?: string }, opts?: { commit?: boolean }): (Task & { updatedAt?: number }) | null {
+  function write(id: string, { title, status, labels, parent, children, extra, body, depends_on, goal_ac, expectedStatus }: { title?: string; status?: string; labels?: string[]; parent?: string | null; children?: string[]; extra?: Record<string, unknown>; body?: string; depends_on?: string[]; goal_ac?: string; expectedStatus?: string }, opts?: { commit?: boolean }): (Task & { updatedAt?: number }) | null {
     // COMMIT-AFTER-WRITE (gap-abi-missing-commit-delete-dependson-primitives): commit-by-default,
     // opt-out per call via `{ commit: false }` (multi-file batch editors commit once at the end).
     const commit = opts?.commit !== false;
@@ -1225,6 +1236,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
         if (parent !== undefined) frontmatter.parent = parent;
         if (extra !== undefined) frontmatter.extra = extra;
         if (depends_on !== undefined) frontmatter.depends_on = depends_on;
+        if (goal_ac !== undefined) frontmatter.goal_ac = goal_ac;
       } else {
         // No existing file: there is no "current status" to compare against,
         // so any expectedStatus is by definition a mismatch (there is
@@ -1234,6 +1246,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
         }
         frontmatter.extra = extra ?? {};
         if (depends_on !== undefined) frontmatter.depends_on = depends_on;
+        if (goal_ac !== undefined) frontmatter.goal_ac = goal_ac;
         // DIR-047 (ADR-004 single-source): apply the configured creation
         // default when creating a NEW task with no explicit status.
         // storeDefaultStatus is the per-provider default_task_status from
@@ -1426,7 +1439,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
         // so `## 人的裁定` (last char 定 is CJK, next char is the newline)
         // never matched the old `^##\s+人的裁定\b` — the registered alias was
         // dead code and the proposal artifact read false for a present section.
-        if (!new RegExp(`^##\\s+${h}\\s*$`, "im").test(body)) continue;
+        if (!new RegExp(`^##\\s+${escapeRegExp(h)}\\s*$`, "im").test(body)) continue;
         const content = sectionAfterHeading(body, [h]);
         const nonWhitespaceLen = content.replace(/\s/g, "").length;
         if (nonWhitespaceLen >= MIN_SECTION_CHARS) return true;

@@ -225,6 +225,7 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-tmux-retirement-2026-09-03.md` — tmux 机制退役（先退 tmux 机制本身、outer 会话留待之后；驱动/观测另一 Claude Code 会话从 tmux send-keys/capture-pane 迁移到 background job session 模型）
 - `orchestration/SPEC-capability-planes-and-mechanism-lifecycle-2026-09-05.md` — 能力面分层与机制生命周期：把「能力」而非「文件」作为架构单元（probe = routine 的 LLM 形态，⛔ 不新增 kind）· Layer 0 继承强制化 · 机制注册/生命周期（proposal·待人裁定）
 - `orchestration/SPEC-goal-mechanism-2026-09-06.md` — goal 机制启用与改造（PHASE→GOAL 命名、多目标并发、ABI 封装、driver 驱动）：GOAL-NNN 取代 PHASE-NNN、draft 状态、cap=3/stale=7 天硬上限；修订并启用 SPEC-0809（人 2026-09-06 五条裁定）
+- `orchestration/SPEC-store-commit-unification-2026-09-08.md` — 五 store kind 提交面统一（单一 commitStoreWrite 原语：四态返回 committed/unchanged/not-in-git/failed、rev-parse root、pathspec 限定 add+commit；三阶段 ①原语+五 kind 接线 ②传播按读者归位 ③驱动侧直写点）
 
 Cross-references:
 - `orchestration/REVIEW-cadence.md` — the daily-review cadence mechanism (this skill's cadence hook)

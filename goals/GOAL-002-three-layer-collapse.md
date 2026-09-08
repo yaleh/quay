@@ -1,7 +1,7 @@
 ---
 id: GOAL-002
 title: 三层塌缩 —— 会话退役，机制承接
-status: active
+status: achieved
 kind: goal
 origin: |
   人 2026-08-25 逐字裁定「现在正式切换阶段（晋升面机械化 → 三层塌缩）」；
@@ -9,7 +9,10 @@ origin: |
   彻底取消 outer 会话（inner 已由 worker-driver 代替）」，来源②「创建/更新下一阶段计划，
   以退役 outer 和 inner 为目标，列入上述计划，并设置相应的 AC」。
 activatedAt: 2026-09-06
-labels: [current-phase, session-retirement, mechanism-takeover]
+labels:
+  - current-phase
+  - session-retirement
+  - mechanism-takeover
 ---
 
 ## 背景

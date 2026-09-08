@@ -17,11 +17,15 @@ import { readManifest } from "./manifest.ts";
 // a delegation shim). The generic frontmatter plumbing it reuses is Core's
 // frontmatter-store-base, reached by relative path (see that file's header).
 import { createGoalStore, readGoalConfig } from "./goal-store.ts";
+// Meta store is PROVIDER-OWNED like the goal store (gap-meta-records-should-be-a-first-class-store-
+// kind-not-a-task-label): the META record schema lives in Core, re-exported here, and the provider
+// exposes meta_list/meta_get/meta_write over the ABI.
+import { createMetaStore } from "./meta-store.ts";
 // `goal_gate` runs a goal record's `criterion` through Core's acceptance runner —
 // the SAME single runner every Core gate uses (no duplicated timeout/kill logic).
 import { runAcceptance } from "../../quay/src/gate/acceptance-runner.ts";
 
-export async function startMcpServer({ tasksDir, adrDir, goalDir, defaultStatus }: { tasksDir: string; adrDir?: string; goalDir?: string; defaultStatus?: string }): Promise<void> {
+export async function startMcpServer({ tasksDir, adrDir, goalDir, metaDir, defaultStatus }: { tasksDir: string; adrDir?: string; goalDir?: string; metaDir?: string; defaultStatus?: string }): Promise<void> {
   // DIR-047: pass the per-provider default_task_status through to the store
   // (already validated by the caller — see bin/quay-native.js loadDefaultStatus()).
   // ADR-004 single-source: the store is the one place the creation default is
@@ -39,6 +43,11 @@ export async function startMcpServer({ tasksDir, adrDir, goalDir, defaultStatus 
   const resolvedGoalDir = goalDir ?? path.join(path.dirname(tasksDir), "goals");
   const goalCfg = readGoalConfig(path.dirname(resolvedGoalDir));
   const goalStore = createGoalStore(resolvedGoalDir, { cap: goalCfg.cap, staleMs: goalCfg.staleMs });
+  // Meta records are a SEPARATE kind (meta-store.ts), stored in a sibling directory of tasks/ —
+  // default to `<parent-of-tasksDir>/meta` when metaDir is not supplied (same repo-root-sibling
+  // resolution shape as adr/ and goals/).
+  const resolvedMetaDir = metaDir ?? path.join(path.dirname(tasksDir), "meta");
+  const metaStore = createMetaStore(resolvedMetaDir);
 
   const server = new McpServer({
     name: "quay-native",
@@ -153,6 +162,11 @@ export async function startMcpServer({ tasksDir, adrDir, goalDir, defaultStatus 
         //   canonical (new writes):   depends_on: ["dep1", "dep2"]
         //   legacy (still readable):  extra: { depends_on: [dep1, dep2], schema: "v1" }
         depends_on: z.array(z.string()).optional(),
+        // gap-goal-ac-task-linkage-top-level-field: `goal_ac` is the owning goal AC id (task→AC
+        // linkage, G7). Like `depends_on`, it is stored TOP-LEVEL (a single scalar, not an array —
+        // a task declares at most one owning AC), and read back by readGoalAc()/parseTask() through
+        // the single frontmatter parser. It is optional (gap-* defect tasks carry none).
+        goal_ac: z.string().optional(),
         body: z.string().optional(),
         // QN-007: `extra` (design §7.1's "escape hatch for backend-specific
         // fields") was missing from this schema entirely — the MCP SDK's
@@ -412,10 +426,78 @@ export async function startMcpServer({ tasksDir, adrDir, goalDir, defaultStatus 
     }
   );
 
+  // ── Meta tools (separate object kind — message SENT TO the meta-driver, answered on the same
+  // record; proposed→answered lifecycle, never "done") ──
+  // meta_list — data.read
+  server.registerTool(
+    "meta_list",
+    {
+      description: "List META records (META-NNN) in the native store, optionally filtered by status. META records are a separate kind from tasks (message→meta-driver lifecycle: proposed→answered).",
+      inputSchema: { status: z.string().optional() },
+    },
+    async ({ status }) => {
+      const metas = metaStore.list({ status });
+      return {
+        content: [{ type: "text", text: JSON.stringify(metas, null, 2) }],
+        structuredContent: { metas },
+      };
+    }
+  );
+
+  // meta_get — data.read
+  server.registerTool(
+    "meta_get",
+    {
+      description: "Get one META record by id (META-NNN) from the native store.",
+      inputSchema: { id: z.string() },
+    },
+    async ({ id }) => {
+      let meta = null;
+      try {
+        meta = metaStore.get(id);
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err.message }] };
+      }
+      if (!meta) return { isError: true, content: [{ type: "text", text: `no such META: ${id}` }] };
+      return {
+        content: [{ type: "text", text: JSON.stringify(meta, null, 2) }],
+        structuredContent: { meta },
+      };
+    }
+  );
+
+  // meta_write — data.write. status ∈ proposed|answered (never "done"); `handler` defaults to
+  // "meta-driver" (the only kind semi-processed by a driver's semantics).
+  server.registerTool(
+    "meta_write",
+    {
+      description: "Write/patch one META record (META-NNN) in the native store. status ∈ proposed|answered; `handler` defaults to meta-driver; `reply` embeds the meta-driver's answer on the same record.",
+      inputSchema: {
+        id: z.string(),
+        title: z.string().optional(),
+        status: z.string().optional(),
+        handler: z.string().optional(),
+        reply: z.string().optional(),
+        body: z.string().optional(),
+      },
+    },
+    async ({ id, ...rest }) => {
+      try {
+        const meta = metaStore.write(id, rest);
+        return {
+          content: [{ type: "text", text: JSON.stringify(meta, null, 2) }],
+          structuredContent: { meta },
+        };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err.message }] };
+      }
+    }
+  );
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
   // Server now runs until stdin closes; log to stderr (stdout is the MCP channel).
-  console.error(`quay-native mcp: serving tasks from ${tasksDir}, ADRs from ${resolvedAdrDir}`);
+  console.error(`quay-native mcp: serving tasks from ${tasksDir}, ADRs from ${resolvedAdrDir}, meta from ${resolvedMetaDir}`);
 
   // gap-suite-speedup (task gap-suite-speedup): when the client disconnects
   // (stdin EOF), close the transport so the process exits promptly. The SDK

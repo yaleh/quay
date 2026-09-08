@@ -520,6 +520,18 @@ function stripComments(src: string): string {
   return out;
 }
 
+/** 屏蔽注释（行注释、块注释、bash 井号注释）但保留字符串字面量与代码，返回注释处替换为空格、其余
+ *  原样的字符串。`stripComments` 只认行注释与块注释：对 bash 语法的 `.ts`（如 runner-static-gate.ts，
+ *  被 scripts/test.sh `source`）里的 `# @static-object …` 注释行，其中的星号斜杠 glob 会被误当块注释
+ *  起点，吞掉 run_checker 行 ⇒ `${repo_root}/plugin/scripts/<name>` 调用行读不到（AC158 负控制发现的
+ *  14 个活 checker 假死的根因）。复用 maskComments（已含井号注释且跳过字符串，硬规则 2）。 */
+function stripCommentsIncludingHash(src: string): string {
+  const mask = maskComments(src);
+  let out = "";
+  for (let i = 0; i < src.length; i++) out += mask[i] === 1 ? " " : src[i];
+  return out;
+}
+
 const IMPORT_SPEC_RE = /(?:import\s*\(\s*|require\s*\(\s*|from\s*|import\s*)(['"])([^'"]+)\1/g;
 
 /** 从（去注释）源码提取 import/require 模块说明符。 */
@@ -551,6 +563,14 @@ function buildAbsToScript(root: string, scripts: string[]): Map<string, string> 
 }
 
 const PATH_REF_RE = /plugin\/scripts\/([A-Za-z0-9._-]+)/g;
+/** `path.join(__dirname, "<name>")` —— 执行核在同一 plugin/scripts/ 目录内以 __dirname 相对引用脚本
+ *  （runner-tree-state.ts:50 的 assert-clean-tree.sh、full-suite-runner.ts 的 provision-verify-worktree.sh）。
+ *  仅当载体文件本身就在 plugin/scripts/ 顶层时 __dirname 才解析为该目录，故匹配侧再做目录限定。 */
+const DIRNAME_JOIN_RE = /path\.join\(\s*__dirname\s*,\s*(['"])([A-Za-z0-9._-]+)\1\s*\)/g;
+/** `$SCRIPT_DIR/<name>` / `${SCRIPT_DIR}/<name>` —— bash 包装器以自身所在目录相对引用 sibling（与
+ *  quay-init.sh:1219 的 laydown 闭包同形；cap-from-gate.sh:24、send-keys-reliable.sh:57）。仅当载体
+ *  在 plugin/scripts/ 顶层时 `$SCRIPT_DIR` 才解析为该目录。 */
+const SCRIPT_DIR_REF_RE = /(?:\$\{SCRIPT_DIR\}\/|\$SCRIPT_DIR\/)([A-Za-z0-9][A-Za-z0-9._-]*)/g;
 
 export interface ReferenceMap {
   /** script → 引用它的文件（绝对路径）集合。 */
@@ -559,7 +579,8 @@ export interface ReferenceMap {
 
 /**
  * 建立反向引用表：对每个脚本，收集「以代码位置引用它」的文件（import 说明符 / plugin/scripts/<name>
- * 调用行 / 裸文件名清单项）。`bareRefs` 为扫描结果（调用方已算一次，勿重扫）；`includeBare` 控制是否
+ * 调用行（含 `${repo_root}/plugin/scripts/<name>` 插值形式）/ path.join(__dirname, "<name>") 相对执行形式
+ * / 裸文件名清单项）。`bareRefs` 为扫描结果（调用方已算一次，勿重扫）；`includeBare` 控制是否
  * 计入 §12f 裸文件名边（before/after 对照）。载体排除：脚本自身、测试文件、capability-catalog.sh。
  * `.md` 引用只认 `plugin/scripts/<name>` 命令行（散文提及不算，SPEC §12d）；`.json` 只认裸文件名。
  */
@@ -599,13 +620,36 @@ export function buildReferenceMap(
         }
       }
     }
-    // (2) plugin/scripts/<name> 调用行（代码与 .md/.yml 交付面都认）
-    const cleanedCode = ext === ".md" || ext === ".yml" || ext === ".yaml" ? text : stripComments(text);
+    // (2) plugin/scripts/<name> 调用行（代码与 .md/.yml 交付面都认）。代码侧改用含 bash `#` 的屏蔽
+    //     （stripCommentsIncludingHash）：runner-static-gate.ts 这类 bash `.ts` 的 `# @static-object` glob
+    //     会把 `/*` 误判成块注释、吞掉 `${repo_root}/plugin/scripts/<name>` 调用行。
+    const cleanedCode = ext === ".md" || ext === ".yml" || ext === ".yaml" ? text : stripCommentsIncludingHash(text);
     let m: RegExpExecArray | null;
     PATH_REF_RE.lastIndex = 0;
     while ((m = PATH_REF_RE.exec(cleanedCode)) !== null) {
       const s = m[1];
       if (scriptSet.has(s) && path.resolve(abs) !== scriptAbsPath(root, s)) referrers.get(s)!.add(abs);
+    }
+    // (2b) 目录相对执行形式：载体在 plugin/scripts/ 顶层时，__dirname（TS/JS）与 $SCRIPT_DIR（bash）都
+    //      解析为 plugin/scripts/。两种写法都算生产调用者：
+    //        - path.join(__dirname, "<name>")           （runner-tree-state.ts:50 assert-clean-tree.sh、
+    //          full-suite-runner.ts:1495 provision-verify-worktree.sh）
+    //        - $SCRIPT_DIR/<name> / ${SCRIPT_DIR}/<name>（bash 包装器：cap-from-gate.sh:24 cap-from-gate.ts、
+    //          send-keys-reliable.sh:57 transcript-delivery-check.ts）
+    //      仅当载体文件本身在 plugin/scripts/ 顶层时才解析为该目录（packages/*/bin 的 __dirname 不在此列）。
+    const isCode = ext === ".ts" || ext === ".mjs" || ext === ".js" || ext === ".sh";
+    if (isCode && path.dirname(path.relative(root, abs)).split(path.sep).join("/") === SCRIPTS_DIR_REL) {
+      let dm: RegExpExecArray | null;
+      DIRNAME_JOIN_RE.lastIndex = 0;
+      while ((dm = DIRNAME_JOIN_RE.exec(cleanedCode)) !== null) {
+        const s = dm[2];
+        if (scriptSet.has(s) && path.resolve(abs) !== scriptAbsPath(root, s)) referrers.get(s)!.add(abs);
+      }
+      SCRIPT_DIR_REF_RE.lastIndex = 0;
+      while ((dm = SCRIPT_DIR_REF_RE.exec(cleanedCode)) !== null) {
+        const s = dm[1];
+        if (scriptSet.has(s) && path.resolve(abs) !== scriptAbsPath(root, s)) referrers.get(s)!.add(abs);
+      }
     }
   }
   // (3) 裸文件名边：直接从扫描结果加入（载体可能是 .ts 清单也可能是 .json 清单——walkSourceFiles

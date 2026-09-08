@@ -279,20 +279,49 @@ test("reporter appends cpu_ms via route (a) 子进程自报 — a REAL per-file 
   const dir = mkdtempSync(path.join(tmpdir(), "measure-suite-cpu-"));
   const cpuDir = path.join(dir, "cpu");
   try {
-    // One CPU-heavy file (burns CPU) + one wait-type file (sleeps) — their cpu_ms/duration_ms ratios
-    // must DIFFER, proving cpu_ms is a real process.cpuUsage() measurement, not `durationMs × constant`.
-    const heavy = path.join(dir, "heavy.test.mjs");
+    // Two files burn the SAME fixed CPU budget (bounded by process.cpuUsage(), NOT wall clock) —
+    // one also sleeps afterwards, the other doesn't. A REAL cpu_ms (process.cpuUsage + reaped
+    // children) is a function of CPU work only, so the 500ms sleep adds ~0 cpu_ms and the two files'
+    // cpu_ms must be ~EQUAL. A duration-derived cpu_ms (cpu_ms = durationMs) would instead differ by
+    // the sleep's wall time.
+    //
+    // gap-measure-suite-heavy-wait-ratio-load-sensitive-flaky: the PRIOR assertion compared
+    // cpu_ms/duration_ms RATIOS (heavy ratio > wait ratio). That ratio is load-sensitive BY
+    // CONSTRUCTION — under scheduler contention the CPU-burning file's wall clock stretches (its
+    // ratio collapses) while the ~150ms node:test startup floor inflates the sleeping file's ratio,
+    // measured in production as `heavy ratio (0.211) must exceed wait ratio (0.239)` under 9
+    // concurrent subagents. The equal-budget form cancels the budget AND the startup floor (both
+    // files do the same CPU work), leaving only |startup noise| — measured ≤62ms at loadavg 30 —
+    // far below the 500ms sleep, so the check no longer depends on machine load.
+    const burnSleep = path.join(dir, "burn-sleep.test.mjs");
     writeFileSync(
-      heavy,
-      `import { test } from "node:test";\n` +
-        `test("burn", () => { const s = Date.now(); let x = 0; while (Date.now() - s < 250) { x += Math.sqrt(x + 1); } if (x < 0) throw new Error(); });\n`
-    );
-    const wait = path.join(dir, "wait.test.mjs");
-    writeFileSync(
-      wait,
+      burnSleep,
       `import { test } from "node:test";\n` +
         `import { setTimeout as sleep } from "node:timers/promises";\n` +
-        `test("w", async () => { await sleep(250); });\n`
+        `test("bs", async () => {\n` +
+        `  const start = process.cpuUsage(); let x = 0;\n` +
+        `  while (true) {\n` +
+        `    for (let i = 0; i < 20000; i++) x += Math.sqrt(x + 1);\n` +
+        `    const cpu = process.cpuUsage(start);\n` +
+        `    if ((cpu.user + cpu.system) / 1000 >= 300) break;\n` +
+        `  }\n` +
+        `  if (x < 0) throw new Error();\n` +
+        `  await sleep(500);\n` +
+        `});\n`
+    );
+    const burnOnly = path.join(dir, "burn-only.test.mjs");
+    writeFileSync(
+      burnOnly,
+      `import { test } from "node:test";\n` +
+        `test("bo", () => {\n` +
+        `  const start = process.cpuUsage(); let x = 0;\n` +
+        `  while (true) {\n` +
+        `    for (let i = 0; i < 20000; i++) x += Math.sqrt(x + 1);\n` +
+        `    const cpu = process.cpuUsage(start);\n` +
+        `    if ((cpu.user + cpu.system) / 1000 >= 300) break;\n` +
+        `  }\n` +
+        `  if (x < 0) throw new Error();\n` +
+        `});\n`
     );
 
     const env = {
@@ -303,7 +332,7 @@ test("reporter appends cpu_ms via route (a) 子进程自报 — a REAL per-file 
     delete env.NODE_TEST_CONTEXT;
     const res = spawnSync(
       "node",
-      ["--test", "--test-concurrency=2", `--test-reporter=${reporterPath}`, "--test-reporter-destination=stderr", heavy, wait],
+      ["--test", "--test-concurrency=2", `--test-reporter=${reporterPath}`, "--test-reporter-destination=stderr", burnSleep, burnOnly],
       { encoding: "utf8", env }
     );
     assert.equal(res.status, 0, `suite should pass; stderr tail: ${res.stderr.slice(-300)}`);
@@ -317,18 +346,19 @@ test("reporter appends cpu_ms via route (a) 子进程自报 — a REAL per-file 
       assert.ok(m, `__PERFILE__ line must carry cpu_ms (AC1): ${line}`);
       cpuByFile.set(m[2], { durationMs: Number(m[1]), cpuMs: Number(m[5]) });
     }
-    const h = cpuByFile.get(heavy);
-    const w = cpuByFile.get(wait);
-    assert.ok(h && w, "both files captured");
-    assert.ok(h.cpuMs > 0 && w.cpuMs > 0, `cpu_ms is a real non-zero reading (heavy=${h.cpuMs} wait=${w.cpuMs})`);
-    // AC5 non-derivation negative control: cpu_ms/duration_ms is NOT a constant. A CPU-burning file
-    // always has a HIGHER CPU-per-wall ratio than a sleeping file — a constant ratio would prove the
-    // value is derived from durationMs (the thing the AC forbids).
-    const ratioH = h.cpuMs / h.durationMs;
-    const ratioW = w.cpuMs / w.durationMs;
+    const a = cpuByFile.get(burnSleep);
+    const b = cpuByFile.get(burnOnly);
+    assert.ok(a && b, "both files captured");
+    assert.ok(a.cpuMs > 0 && b.cpuMs > 0, `cpu_ms is a real non-zero reading (burnSleep=${a.cpuMs} burnOnly=${b.cpuMs})`);
+    // AC5 non-derivation negative control: cpu_ms is NOT derived from durationMs. Both files burn
+    // the SAME fixed CPU budget, so a real cpu_ms is ~equal for the two (the 500ms sleep adds ~0
+    // CPU); a duration-derived cpu_ms (cpu_ms = durationMs) would instead differ by the sleep's
+    // 500ms wall time. The 200ms tolerance sits far above the measured |startup noise| (≤62ms at
+    // loadavg 30) and far below the 500ms sleep, so it separates real from derived without
+    // depending on machine load.
     assert.ok(
-      ratioH > ratioW,
-      `heavy ratio (${ratioH.toFixed(3)}) must exceed wait ratio (${ratioW.toFixed(3)}) — else cpu_ms is duration-derived`
+      Math.abs(a.cpuMs - b.cpuMs) < 200,
+      `cpu_ms of equal-CPU-budget files must agree within 200ms (burnSleep=${a.cpuMs.toFixed(1)} burnOnly=${b.cpuMs.toFixed(1)} diff=${Math.abs(a.cpuMs - b.cpuMs).toFixed(1)}) — else cpu_ms is duration-derived`
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -339,9 +369,10 @@ test("reporter counts CHILD-process CPU — a spawn-heavy file is not under-repo
   const dir = mkdtempSync(path.join(tmpdir(), "measure-suite-cpu-child-"));
   const cpuDir = path.join(dir, "cpu");
   try {
-    // A test file whose OWN in-process CPU is negligible (~10ms of execFileSync overhead) but which
-    // spawns a child that burns ~500ms CPU and is REAPED by execFileSync. process.cpuUsage() alone
-    // would report ~10ms; counting the reaped child (cutime+cstime) must push cpu_ms well past 250ms.
+    // A test file whose OWN in-process CPU is negligible (just execFileSync overhead) but which
+    // spawns a child that burns a fixed ~400ms CPU (bounded by process.cpuUsage, load-independent)
+    // and is REAPED by execFileSync. process.cpuUsage() alone would report only the test's own
+    // ~150ms startup; counting the reaped child (cutime+cstime) must push cpu_ms well past 250ms.
     // This is the exact misclassification the measurement exists to prevent: a spawn-heavy Type-1
     // file (worker-driver-fan-in.test.mjs et al.) must not be low-reported into looking like a
     // Type-2 waiting file.
@@ -351,7 +382,11 @@ test("reporter counts CHILD-process CPU — a spawn-heavy file is not under-repo
       `import { test } from "node:test";\n` +
         `import { execFileSync } from "node:child_process";\n` +
         `test("spawner", () => {\n` +
-        `  execFileSync(process.execPath, ["-e", "const e=Date.now()+500; while(Date.now()<e){}"]);\n` +
+        // The child burns a FIXED ~400ms of CPU (bounded by process.cpuUsage, NOT wall clock) — the
+        // same load-sensitivity fix as the cpu_ms test above: a wall-bounded loop (`while Date.now()
+        // < e`) collapses under scheduler contention, under-reporting the reaped child's CPU below
+        // the 250ms assertion. A fixed budget keeps cutime+cstime load-independent.
+        `  execFileSync(process.execPath, ["-e", "const s=process.cpuUsage();let x=0;while(true){for(let i=0;i<20000;i++)x+=Math.sqrt(x+1);const c=process.cpuUsage(s);if((c.user+c.system)/1000>=400)break;}"]);\n` +
         `});\n`
     );
 

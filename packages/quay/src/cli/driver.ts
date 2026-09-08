@@ -28,7 +28,9 @@ import { resolvePluginScript } from "../plugin-root.ts";
 import type { CliCtx } from "./context.ts";
 
 const VERBS = ["start", "stop", "drain", "resume", "status", "restart"];
-const KINDS = ["promotion", "worker", "outer", "quality", "meta"];
+// ⛔ 白名单必须与 kernel 的 DRIVER_KINDS 一致（suite 已按人 2026-09-07 裁定退役移除）。导出供
+// goal-driver.test.mjs 断言两者集合相等（gap-goal-driver-mechanical-ring AC6）。
+export const KINDS = ["promotion", "worker", "outer", "quality", "meta", "goal"];
 
 /** Resolve the workspace root from `--root` (walk-up) or the process cwd; null when no config. */
 function resolveRoot(rootFlag: string | undefined): string | null {

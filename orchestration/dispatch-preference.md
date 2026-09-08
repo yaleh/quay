@@ -18,6 +18,11 @@ manager 不在时生效（inner/outer 独立运行时回落到这一段）。
 
 manager 在时的当前倾向（本阶段优先）。
 
+- **⛔ AC36 机械排序轴已于 2026-09-07 按人裁定退役，delivery-critical 优先完全由 selector 语义判断，无机械保证**
+  （`gap-delivery-critical-mechanical-axis-orphaned-needs-ruling`：`slot-refill.ts` 的 `delivery_critical` 第二排序轴
+  与 `concurrent-batch-scheduler.ts` 的 `deliveryCritical` 读面已删，`ac36-sortkey-criterion-check.ts` 随之退役；
+  本条以下谓词是 delivery-critical 优先的**唯一**幸存机制，无代码强制）。
+
 - **⚡ 当前优先级（谓词形，2026-08-24T07:5xZ manager 立）：候选中凡满足
   `frontmatter labels 含 delivery-critical` 者，一律优先于其它候选**，
   除非结构上不可派（Touches 冲突 / 依赖未满 / 非 ready）。多条同时满足时，其相对顺序由 selector 按语义判断。
@@ -27,10 +32,18 @@ manager 在时的当前倾向（本阶段优先）。
   且过期条目是**惰性**的：任务 done 后离开 ready 池，谓词永远匹配不到，**静默失效且与「从未设过优先级」同形**，
   没有任何机件会报出来）。
 
-  **⊢ 谓词为何自动到期**：它合取了一个**语义项**（`delivery-critical` 标签——由 outer 在立案/晋升时按证据打，
-  **从不移除**：实测 72 条带该标签者中 done 69 / superseded 1 / ready 2）与一个**自行衰减项**
+  **⊢ 谓词为何自动到期**：它合取了一个**语义项**（`delivery-critical` 标签）与一个**自行衰减项**
   （候选集本身只含 ready 且未在飞的任务）。**到期由那个会自己衰减的项负责，不需要任何人清理。**
   ⇒ 一般形式：**一条会过期的规则，必须包含一个自己会衰减的项**；只写标签的谓词照样会陈旧。
+
+  **⊢ 该标签的来源（两条，不再是单一「由 outer 按证据打」）**：outer 已退役（2026-09-04，
+  `gap-retire-outer-tmux-window-logic` done），「立案时按证据打 delivery-critical」这一步目前**无人机械执行**
+  （`ensureDeliveryCriticalLabel` 只在晋升时【保留】已存在的标签，从不做「是否够格」判定）。来源由可选
+  frontmatter 字段 `extra.deliveryCriticalSource` 区分，**三态**（硬规则 3b）：`evidence`（立案/晋升时按证据打）/
+  `adhoc`（DIR-130 授权 manager 按人类插队指令加/删；2026-09-07 实例：人要求优先派发
+  `gap-goal-evidence-cache-should-not-enter-git`）/ 缺字段 = `unknown`（历史遗留，不得与任一确定态同形）。
+  **⛔ 统计存量时须分开计数**：实测 110 条带该标签者（done 105 / superseded 3 / ready 2）全部无来源字段、
+  一律读作 `unknown`，不得与两类新来源的「出现率/质量」混为一谈。
 
   **⊢ 实测等价性（立本条时的负控制，2026-08-24T07:5xZ）**：该谓词此刻选出的集合 =
   `{gap-worker-driver-stopreason-latch-permanent-stop, gap-worker-needs-human-destroys-branch-worktree}`，

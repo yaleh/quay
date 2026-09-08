@@ -107,12 +107,14 @@ export function extractSection(fullText, heading) {
 //     parent?: string | null;      // parent task id (relation edge)
 //     children?: string[];         // child task ids (relation edge)
 //     depends_on?: string[];       // prerequisite task ids (relation edge; top-level OR legacy extra)
+//     goal_ac?: string;            // owning goal AC id (task→AC linkage, G7; top-level single scalar, optional)
 //     extra?: {
 //       schema?: string;           // "v1" — the schema marker (the grandfather boundary)
 //       dirFile?: string;          // projection-scaffolding field (forbidden by assertion A6)
 //       dirStatus?: string;        // directive disposition
 //       depends_on?: string[];     // legacy home — task_write used to nest it under extra
 //       malformed?: string[];      // store-injected diagnosis markers
+//       deliveryCriticalSource?: string; // "evidence" | "adhoc" — which source attached the delivery-critical label
 //       [key: string]: unknown;
 //     };
 //     [key: string]: unknown;      // forward-compatible: unknown fields survive the round-trip
@@ -148,6 +150,32 @@ export function frontmatterExtra(fm) {
 export function frontmatterDependsOn(fm) {
   const nested = fm.extra && typeof fm.extra === "object" && !Array.isArray(fm.extra) ? fm.extra.depends_on : undefined;
   return asStringArray(Array.isArray(fm.depends_on) ? fm.depends_on : nested);
+}
+
+// goal_ac is a single optional TOP-LEVEL scalar (task→AC linkage, G7). Unlike depends_on (an array of
+// prerequisite ids), a task declares AT MOST ONE owning AC — so this is a string, not a list. Absent /
+// empty / non-string ⇒ null (缺值 = 未查, 硬规则 6 — "no goal_ac" stays distinguishable from any concrete
+// AC id). It is deliberately NOT read from `extra` (the depends_on legacy home) — the G7 field is
+// top-level by design (per AC-178: nested-under-extra was the depends_on read-failure lesson).
+export function frontmatterGoalAc(fm) {
+  const s = fm && typeof fm === "object" && !Array.isArray(fm) ? fm.goal_ac : undefined;
+  return typeof s === "string" && s.trim() !== "" ? s.trim() : null;
+}
+
+// ── frontmatterDeliveryCriticalSource — the `extra.deliveryCriticalSource` three-state projection
+//    (gap-delivery-critical-source-distinction-outer-retired). ──
+// The `delivery-critical` label now has TWO legal sources that were previously conflated into a single
+// prose claim ("由 outer 按证据打，从不移除"): `evidence` (attached at filing/promotion by the promote
+// gate's determination) and `adhoc` (attached by the manager under DIR-130's standing authorization for
+// human-priority instructions). This projection makes "which source is THIS label" mechanically readable.
+// It is an EXPLICIT THREE-STATE (hard rule 3b): the two concrete sources are returned verbatim, and
+// everything else — absent (a legacy task that predates the field) OR an unparseable value — returns the
+// DISTINCT `"unknown"` marker, never conflated with either concrete source. Mirrors frontmatterStatus's
+// "缺值 = 未查" shape, but as a named third state (the label's absence of a source is a legitimate
+// legacy condition, not an error).
+export function frontmatterDeliveryCriticalSource(fm) {
+  const s = frontmatterExtra(fm).deliveryCriticalSource;
+  return s === "evidence" || s === "adhoc" ? s : "unknown";
 }
 
 // ── frontmatterStatus — the `status:` projection (same family as frontmatterLabels/frontmatterExtra/
@@ -234,6 +262,7 @@ export function parseTask(fullText) {
     labels: frontmatterLabels(complete),
     extra: frontmatterExtra(complete),
     depends_on: frontmatterDependsOn(complete),
+    goal_ac: frontmatterGoalAc(complete),
     frontmatterRaw,
     body,
   };
@@ -249,6 +278,14 @@ export function parseTask(fullText) {
 // first, then the legacy extra-nested form).
 export function readDependsOn(frontmatterRaw) {
   return frontmatterDependsOn(parseFrontmatterCompletely(frontmatterRaw));
+}
+
+// ── readGoalAc — the `goal_ac:` raw-frontmatter reader (mirrors readDependsOn). ────────────────────
+// Delegates to the single parser (parseFrontmatterCompletely) + the single projection
+// (frontmatterGoalAc). null = the task declares no goal AC (缺值 = 未查, 硬规则 6 — distinguishable
+// from a concrete AC id, never conflated with an empty string).
+export function readGoalAc(frontmatterRaw) {
+  return frontmatterGoalAc(parseFrontmatterCompletely(frontmatterRaw));
 }
 
 // ── readTaskStatusAtRef / fetchTaskStatusAtRef — the ONE status-at-a-ref reader (sync + async variant),

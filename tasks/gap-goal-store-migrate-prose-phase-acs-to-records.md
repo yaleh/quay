@@ -10,6 +10,7 @@ extra:
   schema: execution
 depends_on:
   - gap-goal-store-goal-id-vocabulary-and-draft-status
+goal_ac: AC-171
 ---
 ## Proposal
 

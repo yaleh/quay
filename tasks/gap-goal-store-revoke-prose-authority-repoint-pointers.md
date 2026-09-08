@@ -10,6 +10,7 @@ extra:
   schema: execution
 depends_on:
   - gap-goal-store-migrate-prose-phase-acs-to-records
+goal_ac: AC-173
 ---
 ## Proposal
 

@@ -26,7 +26,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSync, execFileSync } from "node:child_process";
 import { createGoalStore, VALID_GOAL_STATUSES, isGoalId, isCriterionId } from "../src/goal-store.ts";
 import { gateFactories, makeGoalGate } from "../src/gate/factories/index.ts";
 
@@ -39,6 +39,20 @@ function tmpDir(tag = "goal") {
 test.after(() => {
   for (const dir of _createdDirs) fs.rmSync(dir, { recursive: true, force: true });
 });
+
+// A REAL git repo temp dir (⛔ not a non-git dir): commitGoalFileAfterWrite is a no-op in repo-less
+// roots, so a non-git fixture would make「写后提交」与「写后没提交」观测不到差别 ⇒ 判据恒真 (hard rule 4).
+function gitRepo(tag = "commit") {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `goal-store-git-${tag}-`));
+  _createdDirs.push(dir);
+  const run = (...args) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+  run("init", "-q");
+  run("config", "user.email", "t@t");
+  run("config", "user.name", "t");
+  fs.mkdirSync(path.join(dir, "goals"), { recursive: true });
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  return { root: dir, run };
+}
 
 // ── AC1: reuses frontmatter-store-base (read the import, never a copy) ────────────────────────────
 test("AC1 — goal-store imports parse/serialize/lock/filename from frontmatter-store-base", () => {
@@ -243,10 +257,11 @@ test("AC3 — a goal gate run leaves a verdict+timestamp event in .quay/gate-eve
   assert.equal(tail.gate, "goal");
   assert.equal(tail.verdict, "pass");
   assert.ok(typeof tail.timestamp === "string" && tail.timestamp.length > 0, "timestamp present");
-  // The record's own `evidence` now carries the last verdict + time (web column source).
+  // The record's DERIVED `evidence` (ledger, never stored — gap-goal-evidence-cache-should-not-enter-git)
+  // now carries the last verdict + time, and `at` is the SAME timestamp as the ledger tail.
   const rec = JSON.parse(n(["get", "AC-028"]).stdout);
   assert.equal(rec.evidence.verdict, "pass");
-  assert.ok(rec.evidence.at && rec.evidence.at.length > 0);
+  assert.equal(rec.evidence.at, tail.timestamp, "evidence.at must equal the ledger tail timestamp (source = ledger, not the file)");
 });
 
 test("goal-store list/get/write round-trip through the CLI (invoke surface)", () => {
@@ -347,6 +362,67 @@ test("AC-6 — I4: status=active with all ACs achieved reports divergence", () =
   assert.deepEqual(r.divergent, ["GOAL-010"], "active yet achieved ⇒ divergent (I4)");
 });
 
+// ── gap-goal-achieved-but-failing-no-handler: I5 achieved-but-failing bucket ──────────────────────
+// The OPPOSITE direction from I4 (divergent = active yet achieved; achievedButFailing = achieved yet
+// its criterion now exits non-zero). It must be a SEPARATE bucket of AC ids (⛔ never merged into
+// divergent — merging would make the two opposite signals indistinguishable), produced by RUNNING the
+// criterion (runAcceptance), never read from a stored field. I5 lives in `checkAchievedFailing`
+// (a SEPARATE subcommand from the PURE-READ `checkStaleness`) — an achieved criterion that itself
+// calls `check --staleness` (AC-175) must never recurse, so staleness is pure-read.
+
+test("I5 — an achieved AC whose criterion now fails lands in checkAchievedFailing (separate from divergent)", () => {
+  const s = createGoalStore(tmpDir("i5-achfail"));
+  s.write("GOAL-010", { title: "p10", status: "active", origin: "o" });
+  s.write("AC-010", { title: "a1", status: "achieved", goal: "GOAL-010", criterion: "true", origin: "o" });
+  s.write("AC-011", { title: "a2", status: "achieved", goal: "GOAL-010", criterion: "false", origin: "o" });
+  const af = s.checkAchievedFailing();
+  assert.deepEqual(af.achievedButFailing, ["AC-011"], "AC-011 criterion `false` exits 1 ⇒ achieved-but-failing");
+  assert.equal(af.evaluated, true, "not refused ⇒ evaluated: true");
+  // The two buckets are SEPARATE on the same input: divergent (I4) holds GOAL ids, achievedButFailing
+  // (I5) holds AC ids — never the other's contents.
+  const st = s.checkStaleness(Date.now());
+  assert.deepEqual(st.divergent, ["GOAL-010"], "all ACs achieved yet goal active ⇒ divergent (I4)");
+  assert.ok(!st.divergent.includes("AC-011"), "divergent holds GOAL ids, not the AC id");
+  assert.ok(!af.achievedButFailing.includes("GOAL-010"), "achievedButFailing holds AC ids, not the GOAL id");
+});
+
+test("I5 bidirectional — criterion fail→pass moves the AC out of checkAchievedFailing", () => {
+  const s = createGoalStore(tmpDir("i5-bidir"));
+  s.write("GOAL-010", { title: "p10", status: "active", origin: "o" });
+  s.write("AC-020", { title: "a1", status: "achieved", goal: "GOAL-010", criterion: "false", origin: "o" });
+  s.write("AC-021", { title: "a2", status: "active", goal: "GOAL-010", criterion: "true", origin: "o" });
+  let af = s.checkAchievedFailing();
+  assert.deepEqual(af.achievedButFailing, ["AC-020"], "criterion `false` ⇒ in bucket");
+  assert.deepEqual(s.checkStaleness(Date.now()).divergent, [], "one AC still active ⇒ not divergent (the two signals are independent)");
+  // Flip the criterion to pass ⇒ the AC leaves the bucket (BOTH directions asserted).
+  s.write("AC-020", { status: "achieved", goal: "GOAL-010", criterion: "true", origin: "o" });
+  af = s.checkAchievedFailing();
+  assert.deepEqual(af.achievedButFailing, [], "criterion `true` ⇒ out of bucket");
+});
+
+test("I5 CLI — check --achieved-failing exits 1 on an achieved-but-failing AC, 0 when it passes (no false-green)", () => {
+  const root = tmpDir("i5-cli");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const args = (a) => ["--root", root, ...a];
+  const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
+  n(["write", "GOAL-010", "--title", "p", "--status", "active", "--origin", "o"]);
+  n(["write", "AC-020", "--title", "achieved-but-failing", "--status", "achieved", "--goal", "GOAL-010", "--criterion", "false", "--origin", "o"]);
+  n(["write", "AC-021", "--title", "still-active", "--status", "active", "--goal", "GOAL-010", "--criterion", "true", "--origin", "o"]);
+
+  const chk = n(["check", "--achieved-failing"]);
+  assert.equal(chk.status, 1, "an achieved-but-failing AC must make check --achieved-failing exit 1 (old code exited 0 = false-green):\n" + chk.stdout + chk.stderr);
+  const out = JSON.parse(chk.stdout);
+  assert.deepEqual(out.achievedButFailing, ["AC-020"], "the achieved+failing AC is enumerated by id");
+
+  // Flip the failing criterion to pass ⇒ bucket empty ⇒ exit 0.
+  n(["write", "AC-020", "--status", "achieved", "--goal", "GOAL-010", "--criterion", "true", "--origin", "o"]);
+  const chk2 = n(["check", "--achieved-failing"]);
+  assert.equal(chk2.status, 0, "no achieved-but-failing ⇒ exit 0:\n" + chk2.stdout + chk2.stderr);
+  assert.deepEqual(JSON.parse(chk2.stdout).achievedButFailing, []);
+});
+
 // ── gap-goal-store-abi-encapsulation-provider-backed: shim + gateFactories ────────────────────────
 // AC-176 (grep 断言, mirror-drift guard): the goal-id regex has ONE definition — in Core's
 // goal-store.ts. The native provider's goal-store.ts is a FORWARDING re-export shim (the same
@@ -365,4 +441,175 @@ test("AC-176 — native goal-store.ts is a re-export shim (no second GOAL_ID_RE 
 test("AC-176 — makeGoalGate is registered in the gateFactories dispatch map", () => {
   assert.equal(typeof gateFactories["goal"], "function", "gateFactories has a `goal` entry");
   assert.equal(gateFactories["goal"], makeGoalGate, "gateFactories.goal is makeGoalGate (reachable by name)");
+});
+
+// ── gate 不写文件 ⇒ 不产生提交（gap-goal-gate-timestamp-commit-flood 的上游，被
+//    gap-goal-evidence-cache-should-not-enter-git 取代为「evidence 彻底不进文件」）──────────────
+// 为什么必须真 git 仓库：commitGoalFileAfterWrite 在 repo-less 根下是 no-op，非 git fixture 会让
+// 「提交与否」观测不到差别（硬规则 4）。判据都是【实跑 gate 再数提交】，⛔ 不是 grep 源码。
+// 上游只免了「纯时间戳写入」的提交；本条把 evidence 从文件里彻底移除 ⇒ gate 从不写文件 ⇒ 任何
+// verdict（含 flip）都 0 提交。真正的「仍提交」负控制只剩 status flip（AC3 保留）。
+
+/** 从 temp git repo 里取 <id> 的记录文件名（fileNameForId 落点），并返回该文件的提交数。 */
+function acFileCommitCount(root, run, id) {
+  const file = fs.readdirSync(path.join(root, "goals")).find((f) => f.startsWith(`${id}-`));
+  if (!file) throw new Error(`no goal file for ${id}`);
+  return run("log", "--oneline", "--", `goals/${file}`).trim().split("\n").filter(Boolean).length;
+}
+
+test("AC1 — gate 不写 evidence：两次 gate 后该文件提交数不变（且不脏）", () => {
+  const { root, run } = gitRepo("ac1");
+  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o"]);
+  n(["write", "AC-028", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o"]);
+  // The file's commits come from `write` (creation), NEVER from gate — evidence is no longer stored.
+  const before = acFileCommitCount(root, run, "AC-028");
+  assert.ok(before >= 1, "write must commit the new file (write 提交，⛔ 非 gate)");
+  const g1 = n(["gate", "AC-028"]);
+  assert.equal(g1.status, 0, g1.stderr);
+  const g2 = n(["gate", "AC-028"]);
+  assert.equal(g2.status, 0, g2.stderr);
+  const after = acFileCommitCount(root, run, "AC-028");
+  assert.equal(after, before, `gate must add 0 commits (no evidence write-back; before=${before}, after=${after})`);
+  // The gate must not leave the shared checkout dirty (else ff-only sync breaks).
+  assert.equal(run("status", "--porcelain", "--", "goals").trim(), "", "no dirty goals/*.md left behind");
+});
+
+test("AC2 — verdict 真变化也不提交：fail→pass 后该文件提交数不变（gate 从不写文件）", () => {
+  const { root, run } = gitRepo("ac2");
+  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o"]);
+  // Criterion reads a flag file: absent → fail; present → pass. Deterministic flip.
+  n(["write", "AC-029", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "test -f passflag", "--origin", "o"]);
+  const before = acFileCommitCount(root, run, "AC-029");
+  const g1 = n(["gate", "AC-029"]);
+  assert.equal(g1.status, 1, "flag absent must fail");
+  // Flip verdict fail→pass (create the flag).
+  fs.writeFileSync(path.join(root, "passflag"), "x", "utf8");
+  const g2 = n(["gate", "AC-029"]);
+  assert.equal(g2.status, 0, "flag present must pass:\n" + g2.stderr);
+  const after = acFileCommitCount(root, run, "AC-029");
+  assert.equal(after, before, `verdict flip must NOT commit (gate writes no evidence; before=${before}, after=${after})`);
+});
+
+test("AC3 — 状态翻转仍然提交：active→achieved 的 flip 后必有提交", () => {
+  const { root, run } = gitRepo("ac3");
+  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o"]);
+  n(["write", "AC-030", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o"]);
+  const before = acFileCommitCount(root, run, "AC-030");
+  const w = n(["write", "AC-030", "--status", "achieved", "--origin", "o"]);
+  assert.equal(w.status, 0, w.stderr);
+  const after = acFileCommitCount(root, run, "AC-030");
+  assert.equal(after, before + 1, `status flip must commit (before=${before}, after=${after})`);
+});
+
+test("AC4 — N 次 gate（含 1 次 verdict flip）⇒ 恰 0 个提交：gate 彻底不写文件", () => {
+  const { root, run } = gitRepo("ac4");
+  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o"]);
+  n(["write", "AC-031", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "test -f passflag", "--origin", "o"]);
+  // Simulate the 42s cadence burst: one first fail gate + 3 no-change fail gates, then a flip.
+  const g1 = n(["gate", "AC-031"]);
+  assert.equal(g1.status, 1, "flag absent must fail");
+  const baseline = acFileCommitCount(root, run, "AC-031");
+  for (let i = 0; i < 3; i++) {
+    const g = n(["gate", "AC-031"]);
+    assert.equal(g.status, 1, "flag still absent → fail");
+  }
+  assert.equal(acFileCommitCount(root, run, "AC-031"), baseline, "3 no-change gates must add 0 commits");
+  // A verdict flip also changes nothing on disk (gate writes no evidence) ⇒ still 0 commits.
+  fs.writeFileSync(path.join(root, "passflag"), "x", "utf8");
+  const g2 = n(["gate", "AC-031"]);
+  assert.equal(g2.status, 0, "flag present must pass:\n" + g2.stderr);
+  assert.equal(acFileCommitCount(root, run, "AC-031"), baseline, "the verdict flip must add 0 commits too (no evidence write-back at all)");
+});
+
+// ── gap-goal-evidence-cache-should-not-enter-git：evidence 是账本派生的，绝不进文件 ──────────────
+// 四条 AC 全部【实跑 goal-store gate / check --staleness / get】+ 比对 .quay/gate-events.jsonl，
+// ⛔ 不是 grep 源码。AC3 的 UI「—」半边在 serve-goal-doc.test.mjs（负控制：无账本 ⇒ 不显示继承读数）。
+
+test("AC1 (evidence-out-of-git) — gate 后文件逐字节不变", () => {
+  const root = tmpDir("cli-ev-ac1");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const args = (a) => ["--root", root, ...a];
+  const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o"]);
+  n(["write", "AC-028", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o"]);
+  const file = fs.readdirSync(path.join(root, "goals")).find((f) => f.startsWith("AC-028-"));
+  const before = fs.readFileSync(path.join(root, "goals", file), "utf8");
+  const g = runCli(["gate", "AC-028", "--root", root]);
+  assert.equal(g.status, 0, g.stdout + g.stderr);
+  const after = fs.readFileSync(path.join(root, "goals", file), "utf8");
+  assert.equal(after, before, "gate must not write evidence ⇒ file byte-for-byte unchanged");
+});
+
+test("AC2 (evidence-out-of-git) — lastProgressAt 与 get evidence 都取自账本最后一条", () => {
+  const root = tmpDir("cli-ev-ac2");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const args = (a) => ["--root", root, ...a];
+  const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o"]);
+  n(["write", "AC-028", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o"]);
+  const g = runCli(["gate", "AC-028", "--root", root]);
+  assert.equal(g.status, 0);
+  const ledger = fs.readFileSync(path.join(root, ".quay", "gate-events.jsonl"), "utf8").trim().split("\n");
+  const tail = JSON.parse(ledger[ledger.length - 1]);
+  // 消费者①：goal-store check --staleness 的 lastProgressAt = 账本最后一条 timestamp ⇒ fresh。
+  const st = JSON.parse(n(["check", "--staleness"]).stdout);
+  assert.deepEqual(st.fresh, ["GOAL-001"], "lastProgressAt derived from ledger ts ⇒ fresh (not notEvaluated)");
+  // 消费者②：get 的 evidence.at 与账本最后一条 timestamp 一致（verdict 亦一致）。
+  const rec = JSON.parse(n(["get", "AC-028"]).stdout);
+  assert.equal(rec.evidence.verdict, tail.verdict);
+  assert.equal(rec.evidence.at, tail.timestamp, "evidence.at === ledger tail timestamp (source = ledger)");
+});
+
+test("AC3 (evidence-out-of-git) — 无账本 ⇒ notEvaluated，文件里的 stale evidence 不泄漏", () => {
+  const root = tmpDir("cli-ev-ac3");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const args = (a) => ["--root", root, ...a];
+  const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
+  // 模拟一个从 git 继承的旧文件：frontmatter 里还带着 evidence（历史提交曾写进去的）。
+  fs.writeFileSync(path.join(root, "goals", "GOAL-001-p.md"),
+    "---\nid: GOAL-001\ntitle: p\nstatus: active\nkind: goal\norigin: o\n---\n## Goal\np\n");
+  fs.writeFileSync(path.join(root, "goals", "AC-028-legacy.md"),
+    "---\nid: AC-028\ntitle: legacy\nstatus: active\nkind: criterion\ngoal: GOAL-001\ncriterion: \"true\"\norigin: o\nevidence:\n  at: 2026-09-01T00:00:00Z\n  verdict: pass\n  reading: \"0\"\n---\n## Rationale\nlegacy\n");
+  const st = JSON.parse(n(["check", "--staleness"]).stdout);
+  assert.deepEqual(st.notEvaluated, ["GOAL-001"], "no ledger ⇒ notEvaluated, even though the file carries stale evidence");
+  const rec = JSON.parse(n(["get", "AC-028"]).stdout);
+  assert.equal(rec.evidence, undefined, "file evidence is IGNORED — evidence is ledger-derived only");
+});
+
+test("AC4 (evidence-out-of-git) — gate 后两个消费者立刻反映新 verdict（verdict flip）", () => {
+  const root = tmpDir("cli-ev-ac4");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const args = (a) => ["--root", root, ...a];
+  const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o"]);
+  n(["write", "AC-029", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "test -f passflag", "--origin", "o"]);
+  // fail → get 立刻反映 fail。
+  const g1 = runCli(["gate", "AC-029", "--root", root]);
+  assert.equal(g1.status, 1, "flag absent must fail");
+  let rec = JSON.parse(n(["get", "AC-029"]).stdout);
+  assert.equal(rec.evidence.verdict, "fail", "consumer get reflects fail immediately");
+  // flip → pass → 两个消费者立刻反映 pass（证明改读账本没有引入滞后）。
+  fs.writeFileSync(path.join(root, "passflag"), "x", "utf8");
+  const g2 = runCli(["gate", "AC-029", "--root", root]);
+  assert.equal(g2.status, 0, "flag present must pass:\n" + g2.stderr);
+  rec = JSON.parse(n(["get", "AC-029"]).stdout);
+  assert.equal(rec.evidence.verdict, "pass", "consumer get reflects pass immediately");
+  const st = JSON.parse(n(["check", "--staleness"]).stdout);
+  assert.deepEqual(st.fresh, ["GOAL-001"], "consumer staleness reads the new ledger ts ⇒ fresh");
 });

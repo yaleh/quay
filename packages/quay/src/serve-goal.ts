@@ -2,15 +2,17 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, detailStyles, renderMarkdown, renderSiteNav, renderMobileChrome } from "./serve-render.ts";
+import { html, escapeHtml, shellStyles, renderMarkdown, renderSiteNav, renderMobileChrome } from "./serve-render.ts";
 
 // ── /goal — the third sibling kind (goal store), now PROVIDER-BACKED
 // (SPEC-goal-mechanism-2026-09-06.md §5.2): these routes read goals through the
 // Provider ABI (`client.goalList` / `client.goalGet`), NOT the Core store directly
 // (the store moved to quay-native). Same list/detail shape as /adr (SPEC §4: "照
 // /adr 形状"). The goal page's most valuable column is the most recent verdict +
-// time (SPEC §4: "最近 verdict 与时刻"), read from the record's `evidence` field,
-// which the goal gate runner updates after every criterion execution.
+// time (SPEC §4: "最近 verdict 与时刻"), read from the record's `evidence` field.
+// `evidence` is ledger-DERIVED, never stored (gap-goal-evidence-cache-should-not-enter-git):
+// the provider's goal verbs surface the store's ledger-derived view-model (the LAST `gate:"goal"`
+// event in `.quay/gate-events.jsonl`), so a fresh checkout with no ledger renders "—".
 
 function goalEvidenceCell(ext: Record<string, unknown>): string {
   const ev = ext.evidence as { at?: string; verdict?: string; reading?: string } | undefined;
@@ -85,7 +87,7 @@ export async function handleGoalList(
   ].join(" · ");
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${modernistStyles()}${pageStyles()}<title>Goals</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${shellStyles()}<title>Goals</title></head>
     <body>${renderMobileChrome("goal", "goals")}${renderSiteNav("goal")}<main>
       <h1>Goals — 阶段目标与 AC (${goals.length})</h1>
       ${readError ? html`<div class="error-banner" role="alert"><strong>读失败:</strong> ${escapeHtml(readError)}</div>` : ""}
@@ -128,7 +130,7 @@ export async function handleGoalDetail(
   const evidenceCell = goalEvidenceCell(ext);
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(String(g.id))}: ${escapeHtml(String(g.title))}">${modernistStyles()}${detailStyles()}<title>${escapeHtml(String(g.id))}</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(String(g.id))}: ${escapeHtml(String(g.title))}">${shellStyles("detail")}<title>${escapeHtml(String(g.id))}</title></head>
     <body class="detail-page">${renderMobileChrome("goal", String(g.id))}${renderSiteNav("goal")}<main>
       <h1>${escapeHtml(String(g.id))}: ${escapeHtml(String(g.title))}</h1>
       <p class="meta">kind: <strong>${escapeHtml(String(g.kind ?? ""))}</strong> · status: <strong>${escapeHtml(String(g.status ?? ""))}</strong>${g.goal ? html` · goal: ${escapeHtml(String(g.goal))}` : ""}</p>

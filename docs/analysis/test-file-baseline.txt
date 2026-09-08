@@ -84,6 +84,7 @@ packages/quay/test/cli-adr.test.mjs
 packages/quay/test/cli-edit-parity-conformance.test.mjs
 packages/quay/test/cli-entry.test.mjs
 packages/quay/test/cli-migrate.test.mjs
+packages/quay/test/cli-write-surface-parity.test.mjs
 packages/quay/test/cli.test.mjs
 packages/quay/test/config-validate.test.mjs
 packages/quay/test/config.test.mjs
@@ -124,10 +125,14 @@ packages/quay/test/flags.test.mjs
 packages/quay/test/frontmatter-store-base.test.mjs
 packages/quay/test/gap-ac136-web-truth-source.test.mjs
 packages/quay/test/gap-cli-gate-enforcement.test.mjs
+packages/quay/test/gap-dashboard-fanin-panel-and-timeline-bars.test.mjs
+packages/quay/test/gap-dashboard-goal-card-provider-backed.test.mjs
 packages/quay/test/gap-dashboard-minilist-row-layout.test.mjs
 packages/quay/test/gap-dashboard-parallelize.test.mjs
 packages/quay/test/gap-dashboard-taskcard-multistatus-minitable.test.mjs
 packages/quay/test/gap-dashboard-testscard-livecard-auto-refresh.test.mjs
+packages/quay/test/gap-dashboard-visual-review-batch-fixes.test.mjs
+packages/quay/test/gap-git-history-lane-identity-and-row-layout-overlap.test.mjs
 packages/quay/test/gap-webui-accent-palette-no-success-color.test.mjs
 packages/quay/test/gap-webui-dashboard-tests-card-latest-round-no-live-signal.test.mjs
 packages/quay/test/gap-webui-root-should-show-dashboard.test.mjs
@@ -214,6 +219,7 @@ packages/quay/test/node-version-check.test.mjs
 packages/quay/test/npm-pack-e2e.test.mjs
 packages/quay/test/observation.test.mjs
 packages/quay/test/package-json-bin.test.mjs
+packages/quay/test/plugin-root.test.mjs
 packages/quay/test/provider-abi-conformance.test.mjs
 packages/quay/test/provider-env-symmetry.test.mjs
 packages/quay/test/sea-artifact-consumer-e2e.test.mjs
@@ -248,7 +254,6 @@ packages/quay/test/verify-sea-artifact.test.mjs
 packages/quay/test/web-ui-browser.test.mjs
 packages/quay/test/webui-modernist-sync.test.mjs
 plugin/test/abi-task-status-typing.test.mjs
-plugin/test/ac36-sortkey-criterion-check.test.mjs
 plugin/test/ac56-recommended-deordered-check.test.mjs
 plugin/test/ac61-staleness-disposition-check.test.mjs
 plugin/test/ac69-slot-queue-gap-check.test.mjs
@@ -256,7 +261,10 @@ plugin/test/accounting-emit-layer-map.test.mjs
 plugin/test/accounting-emit.test.mjs
 plugin/test/adr016-screen-use-check.test.mjs
 plugin/test/agent-panel-classify.test.mjs
+plugin/test/allowed-tools-plugin-prefix-check.test.mjs
 plugin/test/archguard-structural-gate-fan-in.test.mjs
+plugin/test/architecture-review-cluster.test.mjs
+plugin/test/archive-exclusion-wiring.test.mjs
 plugin/test/axis-generator.test.mjs
 plugin/test/bare-dir-touches-check.test.mjs
 plugin/test/batch-vocabulary-check.test.mjs
@@ -290,6 +298,8 @@ plugin/test/concurrency-literal-check.test.mjs
 plugin/test/concurrent-batch-scheduler.test.mjs
 plugin/test/dead-code-after-return-check.test.mjs
 plugin/test/dead-loop-check.test.mjs
+plugin/test/defect-shape-aggregate.test.mjs
+plugin/test/deletion-closure-check.test.mjs
 plugin/test/delivery-inventory-drift-gate.test.mjs
 plugin/test/delivery-status-single-source.test.mjs
 plugin/test/develop-work-ff.test.mjs
@@ -330,15 +340,20 @@ plugin/test/full-suite-runner.test.mjs
 plugin/test/gap-b3-readfilesafe-normalizerel-unification.test.mjs
 plugin/test/gate-dispatch-coverage.test.mjs
 plugin/test/gate-event-store.test.mjs
+plugin/test/gate-script-base.test.mjs
 plugin/test/gate-scripts-retirement.test.mjs
 plugin/test/gate-staleness-check.test.mjs
 plugin/test/gitignore.test.mjs
+plugin/test/goal-driver.test.mjs
+plugin/test/guard-lineage-check.test.mjs
 plugin/test/help-contract-incompatible-behaviors.test.mjs
+plugin/test/identity-replication-check.test.mjs
 plugin/test/inner-blocked-signal.test.mjs
 plugin/test/inner-forensics.test.mjs
 plugin/test/inner-idle-log.test.mjs
 plugin/test/inner-wakeup-heartbeat-check.test.mjs
 plugin/test/inner-wakeup-heartbeat.test.mjs
+plugin/test/instrument-decay-check.test.mjs
 plugin/test/instrument-failure-check.test.mjs
 plugin/test/integration-batch-merge.test.mjs
 plugin/test/judgment-consumer-check.test.mjs
@@ -362,6 +377,7 @@ plugin/test/manager-liveness-independent-check.test.mjs
 plugin/test/manager-obligation-ledger.test.mjs
 plugin/test/manager-observation-runtime-check.test.mjs
 plugin/test/manager-productization.test.mjs
+plugin/test/manager-skill-activation.test.mjs
 plugin/test/manager-start.test.mjs
 plugin/test/manager-tick-core.test.mjs
 plugin/test/manager-tick-log-check.test.mjs
@@ -372,8 +388,10 @@ plugin/test/measure-suite.test.mjs
 plugin/test/measure-trend-check.test.mjs
 plugin/test/mechanism-count.test.mjs
 plugin/test/mechanism-vitality-check.test.mjs
+plugin/test/meta-driver.test.mjs
 plugin/test/mirror-full-suite-state.test.mjs
 plugin/test/mirror-measure-history.test.mjs
+plugin/test/mirror-pair-drift-check.test.mjs
 plugin/test/needs-human-recheck.test.mjs
 plugin/test/no-manager-tick-doc-check.test.mjs
 plugin/test/obligation-discharge-agent.test.mjs
@@ -409,6 +427,8 @@ plugin/test/profile-policy.test.mjs
 plugin/test/promotion-driver.test.mjs
 plugin/test/provision-verify-worktree.test.mjs
 plugin/test/quality-gate-driver.test.mjs
+plugin/test/quay-init-closure-ratchet.test.mjs
+plugin/test/quay-init-conflict-state-hash.test.mjs
 plugin/test/quay-init-drift-report.test.mjs
 plugin/test/quay-init-laydown-closure.test.mjs
 plugin/test/quay-init-laydown-dist-closure.test.mjs
@@ -438,9 +458,11 @@ plugin/test/red-on-omission-audit.test.mjs
 plugin/test/red-window-shared-gate.test.mjs
 plugin/test/red-window-triage.test.mjs
 plugin/test/refresh-worktree-quay.test.mjs
+plugin/test/registry-bare-filename-scan.test.mjs
 plugin/test/relative-baseline.test.mjs
 plugin/test/release-freshness-check.test.mjs
 plugin/test/repo-root-unification.test.mjs
+plugin/test/repo-root.test.mjs
 plugin/test/resource-gate.test.mjs
 plugin/test/restart-readiness-check.test.mjs
 plugin/test/retired-clause-check.test.mjs
@@ -455,6 +477,7 @@ plugin/test/runner-grouping-list-groups.test.mjs
 plugin/test/runner-grouping-metadata.test.mjs
 plugin/test/runner-grouping-serial-anti-stomp.test.mjs
 plugin/test/runtime-landing.test.mjs
+plugin/test/runtime-usage-inventory-workflows-enumeration.test.mjs
 plugin/test/runtime-usage-inventory.test.mjs
 plugin/test/scoped-static-checks.test.mjs
 plugin/test/select-static-checks-for-touches.test.mjs
@@ -472,6 +495,7 @@ plugin/test/slot-visibility.test.mjs
 plugin/test/spec-declaration-point-check.test.mjs
 plugin/test/stage-receipt.test.mjs
 plugin/test/stale-ready-audit.test.mjs
+plugin/test/start-drivers.test.mjs
 plugin/test/state-worded-clause-check.test.mjs
 plugin/test/strategic-doc-staleness-check.test.mjs
 plugin/test/suite-bucket-attribution.test.mjs
@@ -502,6 +526,9 @@ plugin/test/sync-lag-check.test.mjs
 plugin/test/sync-vendor.test.mjs
 plugin/test/task-ac-carryover-check.test.mjs
 plugin/test/task-contract-check.test.mjs
+plugin/test/task-file-bypass-check.test.mjs
+plugin/test/task-ops.test.mjs
+plugin/test/task-parsing-parity.test.mjs
 plugin/test/task-status-drift-check.test.mjs
 plugin/test/task-write-ownership.test.mjs
 plugin/test/test-coverage-check.test.mjs
@@ -536,7 +563,6 @@ plugin/test/workflow-invariant-ownership.test.mjs
 plugin/test/workflow-journal.test.mjs
 plugin/test/workflow-metadata-conformance.test.mjs
 plugin/test/workflow-replay.test.mjs
-plugin/test/workflows-dual-copy-drift-check.test.mjs
 plugin/test/worktree-process-reaper.test.mjs
 plugin/test/worktree-root-fs-check.test.mjs
 plugin/test/writestate-atomicity-split.test.mjs

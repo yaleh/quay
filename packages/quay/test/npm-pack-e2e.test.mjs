@@ -222,7 +222,7 @@ test("register-plugin (global-install mode, temp HOME) writes settings.json poin
     assert.equal(settings.extraKnownMarketplaces.other.source.path, "/x/other", "other marketplaces must be preserved");
     assert.equal(settings.extraKnownMarketplaces.quay.source.source, "directory");
     assert.equal(settings.extraKnownMarketplaces.quay.source.path, installedPlugin, "marketplace must point at the INSTALLED plugin dir");
-    assert.equal(settings.enabledPlugins["quay@quay"], true, "plugin must be enabled");
+    assert.equal(settings.enabledPlugins?.["quay@quay"], undefined, "register must NOT write a user-level enabledPlugins entry (enabling is left to the project's .claude/settings.json)");
     assert.match(out, /Registered the installed quay plugin/, "hook must report success");
   } finally {
     fs.rmSync(tempHome, { recursive: true, force: true });

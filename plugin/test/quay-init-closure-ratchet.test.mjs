@@ -26,7 +26,14 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
-import { checkClosureRatchet, countTree, runLaydown } from "../scripts/quay-init-closure-ratchet.ts";
+import {
+  checkClosureRatchet,
+  countTree,
+  runLaydown,
+  collectSourceEntries,
+  fingerprintOf,
+  writeBaseline,
+} from "../scripts/quay-init-closure-ratchet.ts";
 
 function makeTmp(prefix) { return fs.mkdtempSync(path.join(os.tmpdir(), `qicr-${prefix}-`)); }
 function cleanup(dir) { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ } }
@@ -115,4 +122,112 @@ test("countTree counts regular files and byte sizes recursively", () => {
     assert.equal(c.files, 2);
     assert.equal(c.bytes, 15);
   } finally { cleanup(root); }
+});
+
+// ── mechanical re-anchor + freshness gate (gap-quay-init-closure-ratchet-manual-reanchor-recurs) ────
+
+test("fingerprintOf is order-independent and content-sensitive", () => {
+  const a = [
+    { rel: "plugin/scripts/x.sh", sha: "1" },
+    { rel: "plugin/scripts/y.ts", sha: "2" },
+  ];
+  const b = [
+    { rel: "plugin/scripts/y.ts", sha: "2" },
+    { rel: "plugin/scripts/x.sh", sha: "1" },
+  ];
+  assert.equal(fingerprintOf(a), fingerprintOf(b), "the fingerprint must not depend on entry order");
+  const c = [
+    { rel: "plugin/scripts/x.sh", sha: "1" },
+    { rel: "plugin/scripts/y.ts", sha: "3" },
+  ];
+  assert.notEqual(fingerprintOf(a), fingerprintOf(c), "a changed source hash must change the fingerprint");
+});
+
+// makeStaleFixture — a hermetic root whose plugin/scripts/quay-init.sh is a CONTROLLED FAKE that is
+// sourceable and defines derive_loop_scripts (so collectSourceEntries/--check-stale run against a real
+// derivation, not the real quay-init mechanism). Lays down one derived script + one wholesale workflow.
+function makeStaleFixture(prefix) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `qicr-${prefix}-`));
+  fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+  fs.mkdirSync(path.join(root, "plugin", "workflows"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "plugin", "scripts", "quay-init.sh"),
+    `derive_loop_scripts() { printf 'foo.sh\\n'; }\n`,
+  );
+  fs.writeFileSync(path.join(root, "plugin", "scripts", "foo.sh"), "#!/usr/bin/env bash\n");
+  fs.writeFileSync(path.join(root, "plugin", "workflows", "w.js"), "// workflow\n");
+  return root;
+}
+
+// AC3 — the freshness gate reds at the CHANGER's own gate when a laydown source changed but the
+// baseline was not re-anchored, and greens again after a mechanical re-anchor.
+test("AC3 — --check-stale reds on a changed laydown source with no re-anchor, greens after re-anchor", () => {
+  const root = makeStaleFixture("stale");
+  try {
+    const checker = path.join(REPO_ROOT, "plugin", "scripts", "quay-init-closure-ratchet.ts");
+    const runStale = () =>
+      spawnSync("node", ["--no-warnings", "--experimental-strip-types", checker, "--check-stale", "--root", root], { encoding: "utf8" });
+
+    // re-anchor: record a baseline whose fingerprint matches the current source (the mechanical action).
+    let entries = collectSourceEntries(root);
+    assert.ok(entries && entries.length > 0, "the fixture must derive a non-empty source set");
+    writeBaseline(root, { files: 0, bytes: 0, fingerprint: fingerprintOf(entries), sources: entries });
+
+    let res = runStale();
+    assert.equal(res.status, 0, `a fresh fixture must exit 0, got ${res.status}: ${res.stdout}${res.stderr}`);
+
+    // INJECT: change a laydown source file WITHOUT re-anchoring.
+    fs.writeFileSync(path.join(root, "plugin", "scripts", "foo.sh"), "#!/usr/bin/env bash\necho changed\n");
+    res = runStale();
+    assert.equal(res.status, 1, `a stale source must exit 1, got ${res.status}: ${res.stdout}${res.stderr}`);
+    assert.match(res.stdout, /re-anchor required/, "the re-anchor remedy must be named in the stale output");
+    assert.match(res.stdout, /foo\.sh/, "the changed source file must be enumerated (hard rule 3)");
+
+    // RESTORE via a mechanical re-anchor → green again.
+    entries = collectSourceEntries(root);
+    writeBaseline(root, { files: 0, bytes: 0, fingerprint: fingerprintOf(entries), sources: entries });
+    res = runStale();
+    assert.equal(res.status, 0, `a re-anchored fixture must exit 0, got ${res.status}: ${res.stdout}${res.stderr}`);
+  } finally {
+    cleanup(root);
+  }
+});
+
+// AC4 negative control — the byte ratchet is NOT relaxed into constant-true by the baseline-file
+// refactor: --gate with a COMMITTED baseline below the real laydown must still red on the file axis.
+// (Same fake-laydown shape as checker-mutation-cases/quay-init-closure-ratchet.sh, but exercising the
+// committed-baseline read path — no --baseline-files/--baseline-bytes overrides.)
+test("AC4 — --gate still reds on real growth past the committed baseline (not relaxed to constant-true)", () => {
+  const root = makeTmp("gate-neg");
+  try {
+    const checker = path.join(REPO_ROOT, "plugin", "scripts", "quay-init-closure-ratchet.ts");
+    fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+    // A fake quay-init.sh that lays down 3 files × 10 bytes = 30 bytes into the --root target.
+    fs.writeFileSync(
+      path.join(root, "plugin", "scripts", "quay-init.sh"),
+      `#!/usr/bin/env bash
+_root=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --root) _root="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+mkdir -p "$_root/plugin/scripts"
+_i=1
+while [ "$_i" -le 3 ]; do
+  printf '0123456789' > "$_root/plugin/scripts/f$_i.txt"
+  _i=$((_i + 1))
+done
+exit 0
+`,
+    );
+    // Committed baseline of 2 files / 20 bytes — BELOW the real 3 / 30 ⇒ the ratchet MUST red.
+    writeBaseline(root, { files: 2, bytes: 20, fingerprint: "test", sources: [] });
+    const res = spawnSync("node", ["--no-warnings", "--experimental-strip-types", checker, "--gate", "--root", root], { encoding: "utf8" });
+    assert.equal(res.status, 1, `--gate must red on growth past the committed baseline, got ${res.status}: ${res.stdout}${res.stderr}`);
+    assert.match(res.stdout, /GREW past/, "the growth failure message must name the violation");
+  } finally {
+    cleanup(root);
+  }
 });

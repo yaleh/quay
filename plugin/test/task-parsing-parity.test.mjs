@@ -21,7 +21,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { extractSection, parseFrontmatterCompletely } from "../scripts/task-schema.ts";
+import { extractSection, parseFrontmatterCompletely, parseTask, frontmatterGoalAc, readGoalAc } from "../scripts/task-schema.ts";
 import { countAcCheckboxes } from "../scripts/task-status-drift-check.ts";
 import {
   extractSection as productExtractSection,
@@ -52,6 +52,7 @@ more detail
 const FRONTMATTER = `id: gap-x
 title: "example: with colon"
 labels: [a, b]
+goal_ac: AC-170
 extra:
   schema: execution
   depends_on:
@@ -84,4 +85,24 @@ test("countAcCheckboxes — plugin copy matches product source (incl. fail-close
   assert.deepEqual(absent, productCountAcCheckboxes(null));
   assert.equal(absent.sectionFound, false);
   assert.ok(Number.isNaN(absent.total), "absent section must be NaN, not 0");
+});
+
+// ── goal_ac top-level read (gap-goal-ac-task-linkage-top-level-field) ──
+// AC1: parseTask reads goal_ac from TOP-LEVEL (not extra-nested). AC2: negative control — an
+// unset goal_ac reads back null (≠ a concrete AC id; 缺值 = 未查), never a fabricated value.
+test("goal_ac — parseTask reads it top-level; unset ⇒ null (AC1 + AC2 negative control)", () => {
+  const withGoal = parseTask("---\nid: x\ngoal_ac: AC-170\n---\nbody");
+  assert.equal(withGoal.goal_ac, "AC-170", "top-level goal_ac reads back via parseTask");
+  const withoutGoal = parseTask("---\nid: x\n---\nbody");
+  assert.equal(withoutGoal.goal_ac, null, "unset goal_ac ⇒ null, not a fabricated AC id");
+  // extra-nested is NOT the home: it must not leak into the top-level projection.
+  const nestedOnly = parseTask("---\nid: x\nextra:\n  goal_ac: AC-170\n---\nbody");
+  assert.equal(nestedOnly.goal_ac, null, "goal_ac nested under extra is NOT read (top-level only)");
+});
+
+test("goal_ac — frontmatterGoalAc/readGoalAc single projection (delegates to the one parser)", () => {
+  assert.equal(frontmatterGoalAc(parseFrontmatterCompletely("goal_ac: AC-177")), "AC-177");
+  assert.equal(readGoalAc("goal_ac: AC-178"), "AC-178");
+  assert.equal(readGoalAc("id: x"), null, "absent goal_ac ⇒ null");
+  assert.equal(readGoalAc("goal_ac: ''"), null, "empty goal_ac ⇒ null");
 });
