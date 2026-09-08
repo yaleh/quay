@@ -2,7 +2,7 @@
 id: gap-quay-init-hard-requires-tmux-session-and-leaves-partial-write
 title: quay-init 在无 tmux 环境硬失败 exit 2（tmux 模型已于 2026-09-03 退役），且失败点在闭集写到一半 ⇒
   目标项目被留在半初始化态
-status: todo
+status: ready
 labels:
   - gap
   - delivery-critical
