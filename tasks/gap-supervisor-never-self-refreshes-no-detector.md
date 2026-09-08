@@ -2,7 +2,7 @@
 id: gap-supervisor-never-self-refreshes-no-detector
 title: 源码自刷新住在 supervisor 里却从不作用于 supervisor 自身——早于该功能启动的 supervisor
   永不自愈，且无任何检测；今日实测一个 driver 跑了 2 天陈旧代码
-status: ready
+status: done
 labels:
   - gap
   - defect

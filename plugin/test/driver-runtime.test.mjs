@@ -59,6 +59,8 @@ import {
   watchedSourceFiles,
   sourceFilesMaxMtimeMs,
   sourceChangedSince,
+  supervisorStaleness,
+  procStartTimeMs,
 } from "../scripts/driver-runtime.ts";
 import { isDue } from "../scripts/routine-scheduler.ts";
 import * as worker from "../scripts/worker-driver.ts";
@@ -579,4 +581,59 @@ test("source-refresh — supervisor respawns driver when driver-filters.ts advan
     await new Promise((r) => setTimeout(r, 100));
   }
   assert.notEqual(p2, p1, `driver pid changed (respawned) after driver-filters.ts advanced: ${p1} → ${p2}`);
+});
+
+// ── supervisor 陈旧判定（gap-supervisor-never-self-refreshes-no-detector）─────────────────────────
+// sourceCheck（AC-184）杀的是 driver（child），从不包括 supervisor 自己：supervisor 常驻、内存 kernel 是
+// 启动那一刻的版本。新增直接量 = supervisor 启动时刻 vs 被监视源码最新 mtime。判据取假（DoD）：
+// 删掉 aliveness() 里 supervisorStaleness 的判定分支 ⇒ supervisorStale 恒 undefined ⇒ 下面的集成测试红。
+// 三态：读不到启动时刻 ⇒ not-evaluated（⛔ 与「新鲜」同形，硬规则 3b）。
+
+test("supervisor-stale — supervisorStaleness 三态：死 pid / 无 pid ⇒ not-evaluated；活 pid + 源码早于启动 ⇒ fresh", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dr-supst-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  // 死 pid / 无 pid ⇒ not-evaluated（⛔ 不与 fresh 同形）。
+  assert.equal(supervisorStaleness(root, "promotion", Number(deadPid())).state, "not-evaluated");
+  assert.equal(supervisorStaleness(root, "promotion", null).state, "not-evaluated");
+
+  // 活 pid（自己）+ 空 root（无被监视源码 ⇒ mtime 0）⇒ fresh（源码不晚于启动时刻）。
+  const fresh = supervisorStaleness(root, "promotion", process.pid);
+  assert.equal(fresh.state, "fresh");
+  assert.equal(typeof fresh.supervisorStartedAt, "number", "supervisorStartedAt 读得（epoch ms）");
+  assert.ok(fresh.supervisorStartedAt > 0, "启动时刻非恒 0");
+
+  // procStartTimeMs(自己) 落在 [进程启动, 现在] 之间（epoch ms 上下界）。
+  const start = procStartTimeMs(process.pid);
+  assert.ok(start != null && start > Date.now() - 60_000 && start <= Date.now(), `procStartTimeMs 合理: ${start}`);
+});
+
+test("supervisor-stale — aliveness 报 supervisorStale=true 当被监视源码推进到 supervisor 启动时刻之后；重启后回 fresh（双向取假）", async (t) => {
+  const root = makeRoot("sup-stale");
+  t.after(() => {
+    run(["stop", "--root", root], { timeout: 15000 });
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const start = run(["start", "--root", root, "--restart-delay", "1", "--run-id", "dr-sup-stale"]);
+  assert.equal(start.status, 0, `start failed: ${start.stdout}\n${start.stderr}`);
+  assert.ok(readPid(root, "promotion-driver-supervisor.pid"), "supervisor pid recorded");
+
+  // 初始：supervisor 晚于被监视源码（FAKE_DRIVER 在 start 前写入）⇒ fresh。
+  const before = aliveness(root, "promotion");
+  assert.equal(before.supervisorStale, false, `fresh before source advances: ${JSON.stringify(before)}`);
+  assert.equal(typeof before.supervisorStartedAt, "number", "supervisorStartedAt 进 aliveness 读数");
+
+  // 推进被监视源码 mtime 到 supervisor 启动时刻之后 ⇒ stale（判据取真）。
+  const srcFile = path.join(root, "plugin", "scripts", "promotion-driver.ts");
+  await new Promise((r) => setTimeout(r, 150));
+  fs.writeFileSync(srcFile, FAKE_DRIVER + "\n// touched\n", "utf8");
+
+  const after = aliveness(root, "promotion");
+  assert.equal(after.supervisorStale, true, `stale after source advances: ${JSON.stringify(after)}`);
+
+  // 反向：重启该 kind（新 supervisor 启动晚于源码）⇒ 同一读数不再报陈旧（⛔ 恒报陈旧不算通过）。
+  const restart = run(["restart", "--root", root, "--restart-delay", "1", "--run-id", "dr-sup-stale-r"]);
+  assert.equal(restart.status, 0, `restart failed: ${restart.stdout}\n${restart.stderr}`);
+  const afterRestart = aliveness(root, "promotion");
+  assert.equal(afterRestart.supervisorStale, false, `fresh again after restart: ${JSON.stringify(afterRestart)}`);
 });

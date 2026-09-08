@@ -2,7 +2,7 @@
 id: gap-superseded-mid-flight-live-worker-not-stopped
 title: status 翻 superseded 时活 worker 无路径被终止——reclaimSupersededWorktrees 只记
   skippedLiveWorker，从不发信号
-status: ready
+status: done
 labels:
   - gap
   - defect

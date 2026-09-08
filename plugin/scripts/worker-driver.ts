@@ -563,6 +563,30 @@ export function hasLiveWorkerForTask(taskId: string, workerCmdlines: string[]): 
   return workerCmdlines.some((cmd) => cmd.includes(WORKER_PROCESS_NAME) && re.test(cmd));
 }
 
+/** 解出该 task 存活 worker 的 pid：重扫 /proc，返回第一个其 cmdline（空格 join）命中
+ *  hasLiveWorkerForTask 的 pid；无命中 ⇒ null（读不到 /proc 也 null——硬规则 3b：读不懂 ≠ 无存活，
+ *  由调用方决定是否信号）。procDir 是测试缝（与 enumerateLiveWorkerCmdlines 同款）。 */
+function findLiveWorkerPid(taskId: string, procDir: string = "/proc"): number | null {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(procDir);
+  } catch {
+    return null;
+  }
+  for (const e of entries) {
+    if (!/^\d+$/.test(e)) continue;
+    let buf: Buffer;
+    try {
+      buf = fs.readFileSync(path.join(procDir, e, "cmdline"));
+    } catch {
+      continue; // 进程已退 / 无权限 ⇒ 跳过
+    }
+    const cmdline = buf.toString("utf8").replace(/\0/g, " ").trim();
+    if (hasLiveWorkerForTask(taskId, [cmdline])) return Number(e);
+  }
+  return null;
+}
+
 /** 冷启动「已在飞」排除集：task id 同时满足 ① 有 task/<id> worktree、② 有存活 worker 进程。二者缺一
  *  不纳入（只有 worktree 无进程 = orphan，可清、可重派；只有进程无 worktree = 尚未 fork，由内存
  *  running 覆盖）。opts.worktreeTasks / opts.workerCmdlines 是测试缝（null ⇒ 用真实 git / /proc）。 */
@@ -762,6 +786,9 @@ export interface SupersededWorktreeReclaimResult {
   reclaimed: boolean;
   /** 因存活 worker 命中而跳过（⛔ 不清）。 */
   skippedLiveWorker: boolean;
+  /** 门①命中且 status=superseded 时，本轮是否真的对存活 worker 发了 SIGTERM（⛔ 与 skippedLiveWorker
+   *  区分——「跳过且已信号」与「跳过而未信号」必须可区分，硬规则 3b）。非门①分支恒 false。 */
+  liveWorkerSignaled: boolean;
   /** 因 cwd 在 worktree 内的活进程（非 zombie ⇒ 活性；zombie 是死而未收，非活动）而跳过（⛔ 不清）。 */
   skippedLiveProcess: boolean;
   /** 移除后分支是否仍保留（`git rev-parse --verify task/<id>` exit 0 ⇒ true）。仅 reclaimed=true 时
@@ -798,6 +825,12 @@ export interface SupersededReclaimOpts {
   procs?: ProcInfo[] | null;
   /** reaper 命令（null ⇒ 真实 worktree-process-reaper.ts --worktree <path>）。入参 worktree 路径。 */
   reaperCmd?: ((worktreePath: string) => string[]) | null;
+  /** pid 解析器（null ⇒ findLiveWorkerPid 重扫 /proc 按 cmdline 匹配解出 pid）。入参 task id，返回存活
+   *  worker 的 pid；读不到 ⇒ null（⛔ 不伪造 pid）。 */
+  pidOf?: ((taskId: string) => number | null) | null;
+  /** 信号发送器（null ⇒ process.kill）。入参 pid + 信号名（"SIGTERM"）。默认 process.kill 可抛
+   *  （进程已退/无权限）——调用方 best-effort 捕获，失败 ⇒ liveWorkerSignaled=false。 */
+  sendSignal?: ((pid: number, signal: string) => void) | null;
 }
 
 /**
@@ -811,6 +844,12 @@ export interface SupersededReclaimOpts {
  * ② cwd 在 worktree 内的活进程（非 zombie）⇒ skippedLiveProcess（⛔ 不清）。⛔ 分支一律保留
  * （不 `git branch -D`）——superseded 的实现偶有被后继「取用」的先例（实证表里 gap-execution-loop 的
  * ff-merge.ts 正是这么被搬走的），删分支会让这条路径永久断掉；回收的是磁盘，不是历史。
+ * 门①命中且 status=superseded（本函数候选集恒 superseded，显式判 status 是防御性自证）时，对存活
+ * worker 解出 pid 并发 SIGTERM（gap-superseded-mid-flight-live-worker-not-stopped）：撤回后的 worker
+ * 正实现一个已知为假的前提，「继续实现」在定义上不存在有效工作可保护，故跳过磁盘回收、但终止进程；
+ * 进程退出是异步的，磁盘回收留给下一轮 reconcile（届时 hasLiveWorkerForTask 已判 false）。结果独立
+ * 字段 liveWorkerSignaled 记录「是否真发了信号」（⛔ 与 skippedLiveWorker 共用一个布尔会把「跳过未信号」
+ * 与「跳过已信号」读成同值，硬规则 3b）。发信号失败（pid 读不到/进程已退/无权限）不致命，记 false。
  * 读不懂（任务文件缺失 / status 解析不出）给独立取值 "unreadable"，不与可回收（superseded）也不与
  * 跳过（任一真 status）同形（硬规则 3b），且一律不清。
  * best-effort：移除失败（脏树/锁/活进程）不致命，error 落盘供观测，⛔ 不抛。
@@ -845,25 +884,42 @@ export async function reclaimSupersededWorktrees(
   for (const taskId of worktreeTasks) {
     const status = statusByTask.get(taskId)!;
     if (status !== TASK_STATUS.SUPERSEDED) {
-      perTask.push({ taskId, status, worktreePath: null, reclaimed: false, skippedLiveWorker: false, skippedLiveProcess: false, branchPreserved: null, error: null });
+      perTask.push({ taskId, status, worktreePath: null, reclaimed: false, skippedLiveWorker: false, liveWorkerSignaled: false, skippedLiveProcess: false, branchPreserved: null, error: null });
       continue;
     }
     const paths = await pathsOf(taskId);
     const p = paths[0] ?? null;
     if (p === null) {
-      perTask.push({ taskId, status, worktreePath: null, reclaimed: false, skippedLiveWorker: false, skippedLiveProcess: false, branchPreserved: null, error: null });
+      perTask.push({ taskId, status, worktreePath: null, reclaimed: false, skippedLiveWorker: false, liveWorkerSignaled: false, skippedLiveProcess: false, branchPreserved: null, error: null });
       continue;
     }
     // 门①：存活 worker（同 cleanupOrphanWorktree）。
     if (hasLiveWorkerForTask(taskId, workerCmdlines)) {
       skipped.push(taskId);
-      perTask.push({ taskId, status, worktreePath: p, reclaimed: false, skippedLiveWorker: true, skippedLiveProcess: false, branchPreserved: null, error: null });
+      // 仅 status=superseded 才发 SIGTERM（⛔ 不含 needs-human——该状态活 worker 可能正合法收尾，语义不如
+      // superseded 干净）。此分支只在候选（superseded）内到达，status 恒为 superseded；显式判 status 是
+      // 防御性自证（若候选集将来扩到 needs-human，仍不会误信号）。
+      let liveWorkerSignaled = false;
+      if (status === TASK_STATUS.SUPERSEDED) {
+        const resolvePid = opts.pidOf ?? ((taskId) => findLiveWorkerPid(taskId));
+        const send = opts.sendSignal ?? ((pid, signal) => process.kill(pid, signal));
+        const pid = resolvePid(taskId);
+        if (pid != null) {
+          try {
+            send(pid, "SIGTERM");
+            liveWorkerSignaled = true;
+          } catch {
+            liveWorkerSignaled = false; // 进程已退/无权限 ⇒ 记未发（best-effort，⛔ 不抛）。
+          }
+        }
+      }
+      perTask.push({ taskId, status, worktreePath: p, reclaimed: false, skippedLiveWorker: true, liveWorkerSignaled, skippedLiveProcess: false, branchPreserved: null, error: null });
       continue;
     }
     // 门②：cwd 在 worktree 内的活进程（非 zombie）。
     if (procs.some((proc) => proc.state !== "Z" && cwdUnder(proc.cwd, p))) {
       skipped.push(taskId);
-      perTask.push({ taskId, status, worktreePath: p, reclaimed: false, skippedLiveWorker: false, skippedLiveProcess: true, branchPreserved: null, error: null });
+      perTask.push({ taskId, status, worktreePath: p, reclaimed: false, skippedLiveWorker: false, liveWorkerSignaled: false, skippedLiveProcess: true, branchPreserved: null, error: null });
       continue;
     }
     // 回收动作（机件顺序）：先 reaper 再 remove。
@@ -879,7 +935,7 @@ export async function reclaimSupersededWorktrees(
     if (removed) reclaimed.push(taskId);
     perTask.push({
       taskId, status, worktreePath: p, reclaimed: removed,
-      skippedLiveWorker: false, skippedLiveProcess: false,
+      skippedLiveWorker: false, liveWorkerSignaled: false, skippedLiveProcess: false,
       branchPreserved,
       error: removed ? null : (rm.stderr || "").trim() || `git worktree remove ${p} failed`,
     });
