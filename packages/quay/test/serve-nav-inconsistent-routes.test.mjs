@@ -43,6 +43,16 @@ function get(port, urlPath) {
   });
 }
 
+/** GET a route and return the redirect status + Location header (drains the body). */
+function getRedirect(port, urlPath) {
+  return new Promise((resolve, reject) => {
+    http.get({ host: "127.0.0.1", port, path: urlPath }, (res) => {
+      res.resume();
+      res.on("end", () => resolve({ status: res.statusCode, location: res.headers.location || "" }));
+    }).on("error", reject);
+  });
+}
+
 // The 14 navGroupDefs routes (the design's navGroupDefs, key → href) — the FULL enumeration.
 // The 4 detail pages map to their list page's current-key.
 const ALL_NAV_HREFS = [
@@ -262,4 +272,12 @@ test("AC5 — the task list page's nav still links to /live and /journal (observ
   assert.equal(r.status, 200);
   assert.ok(r.body.includes('href="/live"') && r.body.includes('href="/journal"'),
     "task list nav links to /live and /journal");
+});
+
+// ── gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead AC5: /git redirects ──────────
+
+test("gap-git-graph-fold-control AC5 — /git 302s to the canonical /git-history", async () => {
+  const r = await getRedirect(port, "/git");
+  assert.ok(r.status === 301 || r.status === 302, `GET /git returns a redirect (got ${r.status})`);
+  assert.ok(r.location.endsWith("/git-history"), `redirect_url ends with /git-history (got "${r.location}")`);
 });
