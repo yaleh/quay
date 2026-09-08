@@ -2,7 +2,7 @@
 id: gap-verify-deliver-coldstart-l1-asserts-retired-artifacts
 title: verify-deliver-coldstart 的 L1 断言锚在已退役物（outer/inner tick
   文档）——今天验错对象，AC-168 落地后恒红
-status: todo
+status: ready
 labels:
   - gap
   - defect
