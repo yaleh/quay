@@ -1,7 +1,7 @@
 ---
 id: gap-meta-runroutinewithwatchdog
 title: quality-gate-driver heartbeat frozen again after caller-side watchdog fix
-status: todo
+status: ready
 labels:
   - meta-driver
   - driver-candidate
