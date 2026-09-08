@@ -1506,6 +1506,44 @@ test("cleanupOrphanWorktree / worktreePathsForTask — find + remove orphan work
   assert.equal(again.error, null);
 });
 
+// ── gap-task-branch-prefix-assumption-scattered-read-sites-orphan-enumeration-blind ──
+// The residual-worktree read sites (worktreePresentForTask / worktreePathsForTask + async) converge
+// on the shape-aware helper. AC3 negative control (能取假): a worktree whose branch is a bare <id>
+// (NO task/ prefix) must be listed — the pre-fix regex `refs/heads/task/<id>` could not see it.
+
+test("worktreePresentForTask / worktreePathsForTask — a bare-<id> branch worktree (no task/ prefix) is detected (AC3)", (t) => {
+  const root = makeGitRoot("bareid");
+  const wtPath = path.join(root, "..", `wt-bare-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-bare-id", "ready");
+  runGit(root, ["branch", "develop"]);
+  runGit(root, ["worktree", "add", "-q", "-b", "gap-bare-id", wtPath]); // ⛔ no task/ prefix
+
+  assert.equal(worktreePresentForTask(root, "gap-bare-id"), true, "bare-<id> branch must be detected as present");
+  assert.deepEqual(worktreePathsForTask(root, "gap-bare-id"), [wtPath], "bare-<id> branch worktree path must be listed");
+  assert.deepEqual(worktreePathsForTask(root, "gap-other"), [], "an unrelated task has no worktree");
+});
+
+test("worktreePresentForTaskAsync / worktreePathsForTaskAsync — bare-<id> branch worktree detected (async parity)", async (t) => {
+  const root = makeGitRoot("bareidasync");
+  const wtPath = path.join(root, "..", `wt-bareasync-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-bare-async", "ready");
+  runGit(root, ["branch", "develop"]);
+  runGit(root, ["worktree", "add", "-q", "-b", "gap-bare-async", wtPath]);
+
+  assert.equal(await worktreePresentForTaskAsync(root, "gap-bare-async"), true, "async: bare-<id> branch present");
+  assert.deepEqual(await worktreePathsForTaskAsync(root, "gap-bare-async"), [wtPath], "async: bare-<id> branch path listed");
+});
+
 // ── gap-worker-cleanup-judgment-precision：清理前 git log 判产出 + failed 按信号区分 ──────────────────
 // AC1（能取假）：清理前查 `git log develop..task/<id>`——零提交 ⇒ 无产出可清、有提交 ⇒ 有实现保留
 //  （⛔ 纯终态字符串布尔判断、不看提交 ⇒ 假）。AC2（能取假）：failed 桶按信号区分，exit_code=143
