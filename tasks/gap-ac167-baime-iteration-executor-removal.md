@@ -35,14 +35,14 @@ goal_ac: AC-167
 
 ## AC
 
-- [ ] AC1（AC-167 criterion 逐字 exit 0）：`grep -q 'baime-iteration-executor' plugin/.claude-plugin/plugin.json && exit 1; [ -e plugin/agents/baime-iteration-executor.md ] && exit 1; [ -e plugin/scripts/workflows-dual-copy-drift-check.ts ] && exit 1; grep -q 'baime-iteration-executor' archive/INDEX.tsv || exit 1; exit 0`
-- [ ] AC2（plugin.json 收敛）：`grep -c 'baime-iteration-executor' plugin/.claude-plugin/plugin.json` == 0 ∧ `grep -c 'quay-task' plugin/.claude-plugin/plugin.json` == 1
-- [ ] AC3（agent 已 git mv）：`[ ! -e plugin/agents/baime-iteration-executor.md ] && [ -e archive/2026-09-07-baime-iteration-executor-removal/plugin/agents/baime-iteration-executor.md ]` exit 0
-- [ ] AC4（INDEX 七字段行）：`tail -n +2 archive/INDEX.tsv | grep 'baime-iteration-executor' | awk -F'\t' '{print NF}'` 输出 == 7
-- [ ] AC5（测试/文档面不红）：`grep -c 'baime-iteration-executor' plugin/test/plugin-packaging.test.mjs plugin/test/gate-scripts-retirement.test.mjs test/cold-start-e2e.sh plugin/README.md` 全为 0
-- [ ] AC6（闭包 ratchet 两模式绿）：`node --no-warnings --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --gate --root .` exit 0 ∧ 同脚本 `--check-stale --root .` exit 0 ∧ `grep -c 'baime-iteration-executor' docs/analysis/quay-init-closure-ratchet.baseline.json` == 0
-- [ ] AC7（全量 suite 绿）：`scripts/test.sh` exit 0
-- [ ] AC8（schema）：`node plugin/scripts/task-schema-check.ts tasks/gap-ac167-baime-iteration-executor-removal.md` exit 0
+- [x] AC1（AC-167 criterion 逐字 exit 0）：`grep -q 'baime-iteration-executor' plugin/.claude-plugin/plugin.json && exit 1; [ -e plugin/agents/baime-iteration-executor.md ] && exit 1; [ -e plugin/scripts/workflows-dual-copy-drift-check.ts ] && exit 1; grep -q 'baime-iteration-executor' archive/INDEX.tsv || exit 1; exit 0`
+- [x] AC2（plugin.json 收敛）：`grep -c 'baime-iteration-executor' plugin/.claude-plugin/plugin.json` == 0 ∧ `grep -c 'quay-task.md' plugin/.claude-plugin/plugin.json` == 1
+- [x] AC3（agent 已 git mv）：`[ ! -e plugin/agents/baime-iteration-executor.md ] && [ -e archive/2026-09-08-baime-iteration-executor-removal/plugin/agents/baime-iteration-executor.md ]` exit 0
+- [x] AC4（INDEX 七字段行）：`tail -n +2 archive/INDEX.tsv | grep 'baime-iteration-executor' | awk -F'\t' '{print NF}'` 输出 == 7
+- [x] AC5（测试/文档面不红）：`grep -c 'baime-iteration-executor' plugin/test/plugin-packaging.test.mjs plugin/test/gate-scripts-retirement.test.mjs test/cold-start-e2e.sh plugin/README.md` 全为 0
+- [x] AC6（闭包 ratchet 两模式绿）：`node --no-warnings --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --gate --root .` exit 0 ∧ 同脚本 `--check-stale --root .` exit 0 ∧ `grep -c 'baime-iteration-executor' docs/analysis/quay-init-closure-ratchet.baseline.json` == 0
+- [x] AC7（全量 suite 绿）：`scripts/test.sh` exit 0
+- [x] AC8（schema）：`node plugin/scripts/task-schema-check.ts tasks/gap-ac167-baime-iteration-executor-removal.md` exit 0
 
 ## DoD
 
@@ -53,7 +53,7 @@ goal_ac: AC-167
 - plugin/.claude-plugin/plugin.json
 - plugin/agents/baime-iteration-executor.md
 - archive/INDEX.tsv
-- archive/2026-09-07-baime-iteration-executor-removal/plugin/agents/baime-iteration-executor.md
+- archive/2026-09-08-baime-iteration-executor-removal/plugin/agents/baime-iteration-executor.md
 - plugin/test/plugin-packaging.test.mjs
 - plugin/test/gate-scripts-retirement.test.mjs
 - test/cold-start-e2e.sh
