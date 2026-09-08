@@ -9,8 +9,7 @@ children: []
 extra:
   schema: execution
 goal_ac: AC-158
-depends_on:
-  - gap-plugin-root-resolution-remaining-callsites
+depends_on: []
 ---
 ## Proposal
 
@@ -36,7 +35,7 @@ depends_on:
 4. 摘掉 `plugin/scripts/capability-catalog.sh` 里被移脚本的六表条目，跑 `node --no-warnings --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --reanchor --root <worktree>`。
 5. **迭代收敛**：跑 `scripts/test.sh`。红 ⇒ 从失败输出定位到是哪个脚本被移走导致的，`git mv` 移回、从候选集摘出、重跑。**重复直到绿**。漏移可接受，不必为了凑数把可疑的硬留在候选集里。
 6. 写 `archive/INDEX.tsv`（每行七字段 `original_path · archive_path · date · reason_code · evidence · restore_cmd · commit`，reason_code=`zero-call`，restore_cmd=`git mv <archive_path> <original_path>`），与全部 `git mv` 在**同一个提交**。
-7. ⛔ **不再改 SPEC §12e 的「扫描后死集: N」行**——那行是**死集种群规模**，与**本批次归档件数**是两个不同的量；把它们等同起来正是原判据不可满足的根因（人 2026-09-08 裁定简化）。本任务不碰 SPEC。
+7. **SPEC §12e 的「扫描后死集: N」行不再是判据**——它是**死集种群规模**，与**本批次归档件数**是两个量，把二者等同正是原判据不可满足的根因（人 2026-09-08 裁定简化）。⛔ 不得再用它与 INDEX 行数做等式。已落在任务分支上的写入（当前写成 `53` = INDEX 总行数，语义是错的）可以保留、也可以改回种群语义，**两者都不影响达成**；该文件仍留在 Touches 里，只是为了让已有改动通过 anti-drift。
 
 ## AC
 
@@ -61,6 +60,7 @@ depends_on:
 - plugin/scripts/capability-catalog.sh
 - docs/analysis/quay-init-closure-ratchet.baseline.json
 - docs/analysis/test-file-baseline.txt
+- orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md
 - plugin/scripts/anti-gaming-guard.sh
 - plugin/scripts/anti-gaming-guard.ts
 - plugin/scripts/audit-independence-check.sh
@@ -191,25 +191,25 @@ depends_on:
 - plugin/test/workflow-replay.test.mjs
 - tasks/gap-ac158-execute-archive-batch-one.md
 
-## 派发顺序（manager 2026-09-08 钉死）
+## 派发顺序（manager 2026-09-08；depends_on 已撤，理由如下）
 
-**为什么加 `depends_on`**：本任务与 `gap-plugin-root-resolution-remaining-callsites`（AC-168 的硬前置）
-Touches 实测重叠 2 个文件 —— `plugin/scripts/os-anchor-watchdog.sh` 与
-`docs/analysis/quay-init-closure-ratchet.baseline.json`。**重叠即串行，但顺序原本是随机的**，
-而这两个任务对同一个文件的意图**相反**：
+**曾加过 `depends_on: gap-plugin-root-resolution-remaining-callsites`，2026-09-08 又撤掉。撤的理由是两条实测，不是改主意**：
 
-- 本任务把 `os-anchor-watchdog.sh`（及其 `plugin/test/os-anchor-watchdog.test.mjs`）列为**归档候选**；
-- `gap-plugin-root-resolution-remaining-callsites` 的 **AC3 正在迁移这个文件**（已勾 `[x]`：把 `:254/:295-296`
-  的 workspace-root 拼接改到 SPEC §6b 解析器）。
+1. **我当时给的理由没有成立**。加它是因为担心「归档方把编辑方正在改的文件移走」——具体指 `plugin/scripts/os-anchor-watchdog.sh`（本任务列为归档候选，而那个任务的 AC3 正在迁移它）。**实测该批次并没有归档它**（任务分支 `9547d48eb` 的 24 个脚本里没有 os-anchor-watchdog.sh，`grep` INDEX 得 0）⇒ 撞车没有发生。
+2. **本任务的实现已经做完，只差一次 fan-in**（见下方「实现状态」段：新判据对其 worktree 实测 exit 0）。**让一个「一次 fan-in 就能永久离场」的任务，去等一个「还没解决」的任务，反而延长了它占锁的总时间。**落地即永久释放锁，对 AC-168 更有利。
 
-⇒ **归档方若先跑，就会把编辑方正在改的活文件移走**。通则：**编辑方必须先于归档方**，且顺序要用
-顶层 `depends_on` 钉死，不能交给 selector 的随机顺序。
+**⊢ AC-168 的优先由标签承担，不由本任务的阻塞承担**：`gap-plugin-root-resolution-remaining-callsites` 与 `gap-quay-init-closure-shrink-body` 均已打 `delivery-critical`（`extra.deliveryCriticalSource: adhoc`，DIR-130 授权），而 `orchestration/dispatch-preference.md` 覆盖段的谓词——「候选中凡 `labels` 含 `delivery-critical` 者一律优先」——正是 worker-driver 缺省 selector prompt 逐字要求它读的那一段。⇒ **优先级有活的机制承载，不需要用 depends_on 去饿死本任务。**
 
-**并且这正是人 2026-09-08 裁定的落点**：「优先保障 AC-168 落地，简化 AC-158。AC-158 多处理几个文件
-少处理几个文件不应阻碍 goal 落地。」实测本任务在飞时**占着锁挡住了 AC-168 的硬前置**
-（worker-driver round 51 `filtered-empty — all dispatchable candidates filtered by predicates`）。
-⇒ 本任务让路：等前置落地后再派。
+**⚠️ 仍然成立的约束（与 depends_on 无关）**：本任务与 `gap-plugin-root-resolution-remaining-callsites` 的 Touches 实测重叠 3 个文件（`docs/analysis/quay-init-closure-ratchet.baseline.json`、`plugin/scripts/os-anchor-watchdog.sh`、`orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md`）⇒ **两者不会并发派发**（派发过滤器按 Touches 串行化），只是先后由 selector 定。**后落地的那个必须在【合并后的树上】重跑 `quay-init-closure-ratchet.ts --reanchor`，⛔ 不要手工并 JSON。**
 
-**⊢ 连带**：前置落地后，`os-anchor-watchdog.sh` 已被证明为**活脚本**（有人在改它），
-按 Plan「已知为活、直接从候选集排除」的同一条纪律，**把它和 `plugin/test/os-anchor-watchdog.test.mjs`
-从归档候选集里摘掉**，不要移。少归档一个不影响达成（条数不是闸）。
+**⊢ 归档候选集的连带纪律（保留）**：若某文件正被另一个未落地任务修改，它就**不是**零调用死物 ⇒ 从候选集摘掉，不要移。`os-anchor-watchdog.sh` 与 `plugin/test/os-anchor-watchdog.test.mjs` 属此类。少归档一个不影响达成（条数不是闸）。
+
+## 实现状态：已完成但搁浅在任务分支（manager 2026-09-08 核实）
+
+⛔ **下一个 worker 不要从零重做**——工作已经做完，只是没落地。
+
+- 分支 `task/gap-ac158-execute-archive-batch-one` 提交 `9547d48eb`：**24 个死脚本 + 15 个自带测试**已 `git mv` 进 `archive/2026-09-07-zero-call-scripts/`，`archive/INDEX.tsv` 增 24 条 `reason_code=zero-call` 行（七字段齐全），与 move 同一提交。
+- **新判据对该 worktree 实测 exit 0** —— 即 AC-158 的达成条件在这份搁浅实现上已经成立。
+- **搁浅原因不是 suite 红，是 `anti-drift` HARD FAIL 1 条**：`docs/analysis/test-file-baseline.txt` 当时不在 Touches 里（移/删测试文件会改这个基线）。该行**已于 10:53 补进 Touches**，但 **worktree 里的任务文件是旧快照**（当时落后 develop 12 提交），而 anti-drift 读的是 **worktree 那一份** ⇒ 补了也没被看见。
+- ⇒ **下一轮该做的**：在 worktree 里 `git merge --no-edit develop`（把补好的 Touches 拉进来）→ 重跑 anti-drift → 走完 scoped 门 + 全量 suite → ff。**不要重新 git mv、不要重算名单。**
+- 逐条核对 AC1–AC6 是否已由 `9547d48eb` 满足，满足就勾（AC 复选框在 Edit 时被换成新文本，故当前全部未勾——那是判据文本变更导致的重置，不是实现退回）。

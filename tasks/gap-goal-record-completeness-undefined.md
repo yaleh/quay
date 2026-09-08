@@ -3,7 +3,8 @@ id: gap-goal-record-completeness-undefined
 title: goal 记录「什么算写完整」从未被定义：goal_write 把出处 origin 设为必填、内容 body 设为可选，激励反向 ⇒ 8 个
   goal 里 5 个（62%）正文为空、论述全塞进 origin（GOAL-008 达 1130 字符）；task 侧有 shape-aware
   四件套闸，goal 侧零等价物、也无立条 skill
-status: ready
+status: needs-human
+needs_human_cause: human-adjudication
 labels:
   - gap
   - goal-store
@@ -120,3 +121,33 @@ task 侧有 shape-aware 四件套（`plugin/scripts/ready-pool-check.ts` 的 `SH
 - `packages/quay/test/gap-goal-record-completeness-undefined.test.mjs`
 - `packages/quay/test/gap-frontmatter-slugify-drops-non-ascii.test.mjs`
 - `tasks/gap-goal-record-completeness-undefined.md`
+## Needs-Human
+
+**执行 2026-09-08T11:03:36.270Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 成因类：human-adjudication
+- 失败步/判词：step=scoped-gate: test-isolation-check — 586 glob file(s), 24 current violation(s) [fixed-path-write=12 shared-build-artifact-write=1 spawns-test-sh=5 process-exit-1=6 mkdtemp-no-cleanup=0 live-data-dir-write=0 shared-root-mkdtemp=0]
+  packages/quay-native/test/gate-checked-state.test.mjs:fixed-path-write  (line 26) const tasksDir = path.join(__dirname, ".tmp-gate-checked-state-test");
+PASS: all 24 violation(s) are baselined in plugin/test-isolation-violations.txt; the list can only get SHORTER (no additions, no growth, no stale entries).
+test-impl-census: checked 586 test files · clean 586 · impl-deleted 0
+TOUCHES-DIR-GLOB-HINT: 1 directory-level tasks/*.md glob(s) — enumerate concrete files or add（已知全局锁）(hint only, not a violation)
+PASS: task_check('gh-3') via quay-github mcp is byte-identical to the direct CLI's own `task check gh-3 --json` output (mcp: {"id":"gh-3","gate":"execute->done","ok":false,"acTotal":1,"acChecked":0,"reason":"0/1 AC checkboxes checked"}, cli: {"id":"gh-3","gate":"execute->done","ok":false,"acTotal":1,"acChecked":0,"reason":"0/1 AC checkboxes checked"})
+PASS: task_check('gh-4') via quay-github mcp is byte-identical to the direct CLI's own `task check gh-4 --json` output (mcp: {"id":"gh-4","gate":"execute->done","ok":true,"acTotal":1,"acChecked":1,"reason":"all AC checkboxes checked; eligible to move to done"}, cli: {"id":"gh-4","gate":"execute->done","ok":true,"acTotal":1,"acChecked":1,"reason":"all AC checkboxes checked; eligible to move to done"})
+✖ AC5 — re-running the new validation over all production criteria rejects none (empty-body ones included) (2081.119455ms)
+PASS: task_check via quay mcp (provider=github) reports ok:false for gh-3's real, currently-unchecked AC state (got {"id":"gh-3","gate":"execute->done","ok":false,"acTotal":4,"acChecked":0,"reason":"0/4 AC checkboxes checked"})
+PASS: gate_run on GATE-FAIL (failing meter) is NOT isError -- a gate FAIL is a normal successful call
+PASS: gate_run on GATE-FAIL returns ok:false (got: {"ok":false,"reason":"acceptance failed (exit 1)","event":{"id":"110bfe70-28f6-4dfe-92e8-ce46ef5c34ac","item_id":"GATE-FAIL","pipeline_id":"GATE-FAIL","gate":"acceptance","actor":"quay-cli","verdict":"fail","timestamp":"2026-09-08T11:03:24.726Z","payload":{"reason":"acceptance failed (exit 1)"}}})
+PASS: gate_run without cwd on GATE-CWD-EXPLICIT returns ok:false (ran in gateWorkspaceRoot, not worktreeDir) (got: {"ok":false,"reason":"acceptance failed (exit 1)","event":{"id":"ef141aeb-5ed4-4071-a645-0699be053a2d","item_id":"GATE-CWD-EXPLICIT","pipeline_id":"GATE-CWD-EXPLICIT","gate":"acceptance","actor":"quay-cli","verdict":"fail","timestamp":"2026-09-08T11:03:24.781Z","payload":{"reason":"acceptance failed (exit 1)"}}})
+PASS: gate_log on GATE-FAIL returns the prior gate_run's fail GateEvent (got: [{"id":"110bfe70-28f6-4dfe-92e8-ce46ef5c34ac","item_id":"GATE-FAIL","pipeline_id":"GATE-FAIL","gate":"acceptance","actor":"quay-cli","verdict":"fail","timestamp":"2026-09-08T11:03:24.726Z","payload":{"reason":"acceptance failed (exit 1)"}}])
+PASS: lifecycle_adjudicate on GATE-FAIL returns no error
+PASS: lifecycle_adjudicate on GATE-FAIL reports ok:true (its check is the AC/DoD-checkbox gate, not the acceptance meter -- got: {"ok":true,"reason":"all AC and DoD checkboxes checked; eligible to move to done","exitCode":0})
+PASS: lifecycle_adjudicate never writes status -- GATE-FAIL is still 'ready'
+PASS: lifecycle_promote on GATE-TODO (todo, AC/DoD checked) advances to 'ready' (got: {"ok":true,"reason":"all required artifacts present; eligible to move to ready","to":"ready","exitCode":0})
+PASS: lifecycle_promote on GATE-FAIL (ready, failing meter) returns no error (a normal ok:false result)
+PASS: lifecycle_promote on GATE-FAIL reports ok:false, to:null (delegates to complete, meter fails) (got: {"ok":false,"reason":"acceptance failed (exit 1)","exitCode":1,"to":null})
+PASS: DIR-086 lifecycle_complete on GATE-FAIL returns no error
+PASS: DIR-086 lifecycle_complete on GATE-FAIL returns ok:fals
+- run_id：wk-prod-1788779505
+- session_id：3ca567b7-5f28-4157-a5e3-c7fde94d3d15
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-goal-record-completeness-undefined-wk-prod-1788779505.log
