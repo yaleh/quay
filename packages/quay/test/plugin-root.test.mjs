@@ -18,7 +18,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
-import { resolvePluginRoot, resolvePluginScript, mainCheckoutRoot } from "../src/plugin-root.ts";
+import { resolvePluginRoot, resolvePluginScript, resolvePluginScriptExec, mainCheckoutRoot } from "../src/plugin-root.ts";
 
 const KERNEL = path.join("scripts", "driver-runtime.ts");
 
@@ -83,6 +83,59 @@ test("worktree negative control: resolution never points at a worktree copy (AC1
       `loaded from a linked worktree → must resolve under main checkout ${main}, got ${root}`
     );
   }
+});
+
+test("resolvePluginScriptExec() returns the raw .ts with stripTypes:true (dev form)", () => {
+  const r = resolvePluginScriptExec("scripts/task-status-drift-check.ts");
+  assert.ok(r, "must resolve the raw .ts in the dev tree");
+  assert.equal(r.stripTypes, true, "raw .ts runs with --experimental-strip-types");
+  assert.ok(r.path.endsWith(path.join("scripts", "task-status-drift-check.ts")), `raw path: ${r.path}`);
+});
+
+test("resolvePluginScriptExec() falls back to the shipped dist bundle with stripTypes:false (⛔ no raw .ts ⇒ bundle)", () => {
+  // A synthetic plugin root carrying ONLY the bundled dist/*.js (the shipped artifact DELETES raw
+  // .ts — gap-shipped-ts-files-are-not-bundled). The env seam (QUAY_PLUGIN_ROOT) makes it hermetic;
+  // if the resolver regresses to a workspace-root join it returns null here (the dist dir has no
+  // raw .ts) ⇒ red.
+  const fakeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-plugroot-dist-"));
+  const distDir = path.join(fakeRoot, "scripts", "dist");
+  fs.mkdirSync(distDir, { recursive: true });
+  fs.writeFileSync(path.join(distDir, "task-status-drift-check.js"), "// bundled\n");
+  const prev = process.env.QUAY_PLUGIN_ROOT;
+  process.env.QUAY_PLUGIN_ROOT = fakeRoot;
+  try {
+    const r = resolvePluginScriptExec("scripts/task-status-drift-check.ts");
+    assert.ok(r, "must resolve the dist bundle when the raw .ts is absent");
+    assert.equal(r.stripTypes, false, "bundled .js runs WITHOUT --experimental-strip-types");
+    assert.ok(
+      r.path.endsWith(path.join("scripts", "dist", "task-status-drift-check.js")),
+      `bundled path: ${r.path}`
+    );
+  } finally {
+    if (prev === undefined) delete process.env.QUAY_PLUGIN_ROOT; else process.env.QUAY_PLUGIN_ROOT = prev;
+    fs.rmSync(fakeRoot, { recursive: true, force: true });
+  }
+});
+
+test("resolvePluginScriptExec() returns null when neither the raw .ts nor a dist bundle resolves", () => {
+  const fakeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-plugroot-empty-"));
+  const prev = process.env.QUAY_PLUGIN_ROOT;
+  process.env.QUAY_PLUGIN_ROOT = fakeRoot;
+  try {
+    assert.equal(resolvePluginScriptExec("scripts/no-such-tool.ts"), null, "absent .ts ⇒ null (caller fails closed)");
+  } finally {
+    if (prev === undefined) delete process.env.QUAY_PLUGIN_ROOT; else process.env.QUAY_PLUGIN_ROOT = prev;
+    fs.rmSync(fakeRoot, { recursive: true, force: true });
+  }
+});
+
+test("resolvePluginScriptExec() resolves a .sh with stripTypes:false and NO dist fallback", () => {
+  // path.join (not a literal) — same AC1b rationale as observation.ts's RESOURCE_GATE_REL: a bare
+  // `"scripts/…"` string literal would collide with the OLD repo-root form the scan forbids.
+  const r = resolvePluginScriptExec(path.join("scripts", "resource-gate.sh"));
+  assert.ok(r, "must resolve the raw .sh");
+  assert.equal(r.stripTypes, false, ".sh runs via bash, never --experimental-strip-types");
+  assert.ok(r.path.endsWith(path.join("scripts", "resource-gate.sh")), `sh path: ${r.path}`);
 });
 
 test("mainCheckoutRoot() detects inside a linked worktree, null for the main checkout", () => {

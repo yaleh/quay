@@ -39,18 +39,27 @@ goal_ac: AC-168
 
 ## AC
 
-- [ ] AC1: L1 断言集合由 SPEC 的 `QUAY-INIT-CLOSED-SET:BEGIN/END` 块解析得出；`grep -n 'orchestrator-loop-tick\|fast-mode-loop-tick' plugin/scripts/verify-deliver-coldstart.sh` 在**断言位置**（非注释/历史说明行）命中数为 0 —— 引用该计数前先打印命中的前 3 条实际内容（硬规则 2）。
-- [ ] AC2: 闭集来源单一（负控制，能取假）：在 SPEC 的标记块内临时增删一行，重跑脚本的 L1 判定随之变化 ⇒ 证明真读了 SPEC；若判定不变则说明仍是硬编码副本，AC2 判失败。
-- [ ] AC3: 标记块读不到时输出 `L1_NOT_EVALUATED=1` 且 `L1_OK` 不取 1——「未评估」与「合格」必须是可区分的两个取值（硬规则 3b）；`--selfcheck` 覆盖该分支并断言其正负控制。
-- [ ] AC4: 头注释 `:19-20` 及 `:173/:174/:183/:190/:195` 对 `session-liveness.sh` 与两份 tick 文档的描述同步更正——该文件已删，描述与实现不得继续分叉。
-- [ ] AC5: `bash plugin/scripts/verify-deliver-coldstart.sh --selfcheck` exit 0，且 AC2/AC3 两个新分支在 `plugin/test/verify-deliver-coldstart.test.mjs` 有直接覆盖（非仅靠 selfcheck 自证）。
-- [ ] AC6: 用重锚后的脚本在 **B=orangevps 与 C=ad-arm1 各真跑一次**完整三步（`--build-root` 从当前 develop-tip 现 build），记录追加至 `.quay/productization-verification.jsonl`，含 commit sha + 产物 sha256 + ISO 时刻。
+- [x] AC1: L1 断言集合由 SPEC 的 `QUAY-INIT-CLOSED-SET:BEGIN/END` 块解析得出；`grep -n 'orchestrator-loop-tick\|fast-mode-loop-tick' plugin/scripts/verify-deliver-coldstart.sh` 在**断言位置**（非注释/历史说明行）命中数为 0 —— 引用该计数前先打印命中的前 3 条实际内容（硬规则 2）。
+- [x] AC2: 闭集来源单一（负控制，能取假）：在 SPEC 的标记块内临时增删一行，重跑脚本的 L1 判定随之变化 ⇒ 证明真读了 SPEC；若判定不变则说明仍是硬编码副本，AC2 判失败。
+- [x] AC3: 标记块读不到时输出 `L1_NOT_EVALUATED=1` 且 `L1_OK` 不取 1——「未评估」与「合格」必须是可区分的两个取值（硬规则 3b）；`--selfcheck` 覆盖该分支并断言其正负控制。
+- [x] AC4: 头注释 `:19-20` 及 `:173/:174/:183/:190/:195` 对 `session-liveness.sh` 与两份 tick 文档的描述同步更正——该文件已删，描述与实现不得继续分叉。
+- [x] AC5: `bash plugin/scripts/verify-deliver-coldstart.sh --selfcheck` exit 0，且 AC2/AC3 两个新分支在 `plugin/test/verify-deliver-coldstart.test.mjs` 有直接覆盖（非仅靠 selfcheck 自证）。
+- [x] AC6: 用重锚后的脚本在 **B=orangevps 与 C=ad-arm1 各真跑一次**完整三步（`--build-root` 从当前 develop-tip 现 build），记录追加至 `.quay/productization-verification.jsonl`，含 commit sha + 产物 sha256 + ISO 时刻。
 
 ## DoD
 
 重锚后的判据在 B/C 两台机上、对一个**当前 develop-tip 现 build 的产物**各跑出一次可复核记录，且该记录里的 L1 成员逐条 ∈ SPEC §6 闭集。
 
 ⛔ **只改脚本与测试、不做 B/C 真实跑，不算达成**——本任务的全部价值就在「验证器验的是当前契约」这一点上，而 A 机自带 `plugin/`，SPEC §6b 已逐字论证该类缺陷「在本仓库永远复现不出来」（硬规则 4：在这里绿是结构上不可能取假的量）。判据必须落在无本地 `plugin/` 的宿主上。
+
+## Evidence
+
+**AC6 B/C 真跑（2026-09-08）**：重锚后的 `verify-deliver-coldstart.sh` 在 B=orangevps（x86_64）与 C=ad-arm1（aarch64）各真跑完整三步（`--build-root /home/yale/work/quay` 从 develop-tip `adea4c8d9` 现 build），两行记录已追加至 `.quay/productization-verification.jsonl`：
+
+- B（ts `2026-09-08T13:24:19Z`）：`build_sha=adea4c8d99f90b4919893054d4f33045f60463ee` `sha256_quay=ecae763daa8c0c4a3835bd46db692b8e9835618d46a53112cf7e3b88283a76e7` `sha256_qn=e8c2b94664cfdd0416c5d543e5b26abb73c36afa0cce90d5a8eb78435c36f8cd`；L1 成员 6 条逐条 ∈ SPEC §6 闭集，`present=5/6`（`missing=.claude/settings.json`——收缩 `gap-quay-init-closure-shrink-body` 未落地，验证器如实报当前契约未满）。
+- C（ts `2026-09-08T13:24:29Z`）：`build_sha=adea4c8d99f90b4919893054d4f33045f60463ee` `sha256_quay=fef4e20555042e1a0fb14b368847a74ce62110b1dbd20aae2ad7a356dd1794ed` `sha256_qn=216f6395b4fbd99b7b6ce5192ffa77a80cdd39934cfa5e22aa545d3b0b6e59c2`；L1 成员同 6 条 ∈ 闭集，`present=5/6`。
+
+两机 `L1_NOT_EVALUATED=0`（真读到 SPEC），`L1_CLOSED_SET=.quay/config.yml .quay/profiles.yml tasks/ .gitignore .claude/launch.settings.json .claude/settings.json`——全部解析自 SPEC §6 标记块，非硬编码副本。
 
 ## Touches
 
