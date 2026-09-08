@@ -884,17 +884,11 @@ function procStartTicks(pidOrSelf: number | "self"): number | null {
   }
 }
 
-/** /proc/stat 的 btime（boot epoch 秒）。读失败/缺行 ⇒ null。 */
-function bootTimeSeconds(): number | null {
+/** /proc/uptime 第一字段（系统 BOOTTIME 秒，float，亚秒精度）。读失败/非法 ⇒ null。 */
+function systemUptimeSeconds(): number | null {
   try {
-    const text = fs.readFileSync("/proc/stat", "utf8");
-    for (const line of text.split("\n")) {
-      if (line.startsWith("btime ")) {
-        const n = Number(line.slice("btime ".length).trim());
-        return Number.isFinite(n) ? n : null;
-      }
-    }
-    return null;
+    const n = Number(fs.readFileSync("/proc/uptime", "utf8").trim().split(/\s+/)[0]);
+    return Number.isFinite(n) && n >= 0 ? n : null;
   } catch {
     return null;
   }
@@ -910,9 +904,9 @@ function clockTicksPerSecond(): number {
   if (_clkTck !== null) return _clkTck;
   try {
     const selfTicks = procStartTicks("self");
-    const uptime = Number(fs.readFileSync("/proc/uptime", "utf8").trim().split(/\s+/)[0]);
-    const elapsed = uptime - process.uptime(); // 本进程自启动以来经过的秒数（按 kernel 时钟）
-    if (selfTicks !== null && Number.isFinite(uptime) && elapsed > 1) {
+    const uptime = systemUptimeSeconds();
+    const elapsed = uptime != null ? uptime - process.uptime() : null; // boot → 本进程 exec 的秒数（按 kernel 时钟）
+    if (selfTicks !== null && elapsed != null && elapsed > 1) {
       const clk = selfTicks / elapsed;
       if (Number.isFinite(clk) && clk > 0) {
         _clkTck = clk;
@@ -924,12 +918,17 @@ function clockTicksPerSecond(): number {
   return _clkTck;
 }
 
-/** 进程启动时刻（epoch ms）。读不到 /proc 或 btime ⇒ null（= not-evaluated，⛔ 不是「新鲜」）。 */
+/** 进程启动时刻（epoch ms）。读不到 /proc 或 uptime ⇒ null（= not-evaluated，⛔ 不是「新鲜」）。
+ *  ⛔ 不用 /proc/stat 的 btime（整数秒，丢掉 boot 的小数秒 ⇒ 进程启动时刻系统性偏早最多 ~1s，实测
+ *  ~318ms，会把「刚启动的 supervisor」误判为陈旧——gap-supervisor-never-self-refreshes-no-detector）：
+ *  改用 Date.now()（REALTIME 现在）− (uptime − starttime/CLK_TCK)（BOOTTIME 自进程启动以来经过的
+ *  秒数），两者都有亚秒精度，⛔ 不引 btime 截断误差。 */
 export function procStartTimeMs(pid: number): number | null {
   const ticks = procStartTicks(pid);
-  const btime = bootTimeSeconds();
-  if (ticks === null || btime === null) return null;
-  return Math.floor((btime + ticks / clockTicksPerSecond()) * 1000);
+  const uptime = systemUptimeSeconds();
+  if (ticks === null || uptime === null) return null;
+  const elapsedMs = (uptime - ticks / clockTicksPerSecond()) * 1000;
+  return Math.round(Date.now() - elapsedMs);
 }
 
 /** supervisor 陈旧判定结果。state=not-evaluated 表示读不到 supervisor 进程启动时刻（⛔ 与「新鲜」同形，
