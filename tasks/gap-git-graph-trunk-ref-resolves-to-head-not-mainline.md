@@ -2,7 +2,7 @@
 id: gap-git-graph-trunk-ref-resolves-to-head-not-mainline
 title: git-history 主干泳道名取自 HEAD 分支（恒为 author）而非 mainline，且同提交多 ref 时 --source
   按字母序把共享提交全归给 author ⇒ develop 在图上零存在感，而汇总表与导语都说 develop，同页三处口径矛盾
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -32,11 +32,11 @@ extra:
 
 ## AC
 
-- [ ] AC1 主干命名判定为一个可直接 import 的纯函数，对 `{heads:{author:X, develop:X, master:Y}, head:X}` 返回 `develop`，对 `{heads:{author:X, master:X}, head:X}` 返回 `master`，对 `{heads:{feature:X}, head:X}` 返回 `feature`——三例在 `packages/quay/test/gap-git-graph-trunk-ref-resolves-to-head-not-mainline.test.mjs` 断言，`node --test` 退出码 0。
-- [ ] AC2 负控制：测试内显式实现一份旧逻辑（取 HEAD 分支名）并断言它对 AC1 第一、二例返回 `author` ⇒ 判据能取假，不是恒真。
-- [ ] AC3 生产读数：`curl -s http://127.0.0.1:4174/git-history | grep -o '"trunk":{"ref":"[^"]*"'` 输出的 ref ∈ {develop, master}；同一份 HTML 中主干 chip 的文本含该 ref（用 node 解析 SVG 文本节点断言 ≥1 次命中）。
-- [ ] AC4 同提交多 ref 归因：测试内 `git init` 造一个 `author` 与 `develop` 同指的临时仓库，`readGitHistory` 返回的 commits 里 `ref === "develop"` 的条数 > 0 且 `ref === "author"` 的条数 = 0。
-- [ ] AC5 `grep -n 'history.head ?? trunkHashes' packages/quay/src/serve-git.ts` 无输出（旧代码路径确实消失，而不是被新分支绕过）。
+- [x] AC1 主干命名判定为一个可直接 import 的纯函数，对 `{heads:{author:X, develop:X, master:Y}, head:X}` 返回 `develop`，对 `{heads:{author:X, master:X}, head:X}` 返回 `master`，对 `{heads:{feature:X}, head:X}` 返回 `feature`——三例在 `packages/quay/test/gap-git-graph-trunk-ref-resolves-to-head-not-mainline.test.mjs` 断言，`node --test` 退出码 0。
+- [x] AC2 负控制：测试内显式实现一份旧逻辑（取 HEAD 分支名）并断言它对 AC1 第一、二例返回 `author` ⇒ 判据能取假，不是恒真。
+- [x] AC3 生产读数：`curl -s http://127.0.0.1:4174/git-history | grep -o '"trunk":{"ref":"[^"]*"'` 输出的 ref ∈ {develop, master}；同一份 HTML 中主干 chip 的文本含该 ref（用 node 解析 SVG 文本节点断言 ≥1 次命中）。
+- [x] AC4 同提交多 ref 归因：测试内 `git init` 造一个 `author` 与 `develop` 同指的临时仓库，`readGitHistory` 返回的 commits 里 `ref === "develop"` 的条数 > 0 且 `ref === "author"` 的条数 = 0。
+- [x] AC5 `grep -n 'history.head ?? trunkHashes' packages/quay/src/serve-git.ts` 无输出（旧代码路径确实消失，而不是被新分支绕过）。
 
 ## DoD
 
