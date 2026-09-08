@@ -138,6 +138,46 @@ test("AC2: negative control — the old global -n limit squeezes a long-lived br
   }
 });
 
+// ── AC2 mirror: per-ref does NOT resurface a stale branch's commits older than the mainline window ────
+
+test("AC2-mirror: a dead branch's ancient commit (older than the mainline window floor) is not resurfaced", () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "ghdrop-ac2b-"));
+  try {
+    execFileSync("git", ["init", "-q", "-b", "develop"], { cwd: ws });
+    fs.writeFileSync(path.join(ws, "README.md"), "fixture\n");
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], { cwd: ws });
+    const nowSec = Math.floor(Date.now() / 1000);
+    const T0 = nowSec - 3 * 86400;
+    const env0 = {
+      ...process.env,
+      GIT_AUTHOR_DATE: new Date(T0 * 1000).toISOString(),
+      GIT_COMMITTER_DATE: new Date(T0 * 1000).toISOString(),
+    };
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "base"], { cwd: ws, env: env0 });
+    // A dead branch forked from `base` with one commit just after base — far older than the recent
+    // mainline window below. Its tip stays inside the 7-day active window (so it IS enumerated as a
+    // live ref), but its commit sits outside the page's time floor.
+    execFileSync("git", ["checkout", "-q", "-b", "task/stale"], { cwd: ws });
+    commitAt(ws, "stale commit", T0 + 1, "stale.txt");
+    // develop advances far past the stale commit: 10 recent commits, so the limit=5 mainline window
+    // floor (~T0+1005) is far newer than the stale commit (T0+1).
+    execFileSync("git", ["checkout", "-q", "develop"], { cwd: ws });
+    for (let i = 0; i < 10; i++) commitAt(ws, `recent ${i}`, T0 + 1000 + i, "main.txt");
+
+    clearGitHistoryCache();
+    const perRef = readGitHistory(ws, { limit: 5 });
+    assert.equal(perRef.status, "ok");
+    const staleCommits = perRef.commits.filter((x) => x.ref === "task/stale");
+    assert.equal(staleCommits.length, 0, "the stale branch's ancient commit is outside the page window and not resurfaced");
+    // Negative control: the branch tip WAS enumerated as a live ref (the 7-day filter kept it) — the
+    // exclusion is the --since bound's doing, not the active-window filter dropping the whole branch.
+    const tips = execFileSync("git", ["-C", ws, "for-each-ref", "refs/heads", "--format=%(refname:short)"], { encoding: "utf8" });
+    assert.ok(tips.split(/\r?\n/).includes("task/stale"), "task/stale is still a live branch tip");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 // ── AC3: production reading — before=<cursor> pages back (returns an older window) ───────────────────
 
 test("AC3: production reading — before=<cursor> returns a strictly-older window than the default", () => {

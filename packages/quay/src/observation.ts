@@ -2391,8 +2391,11 @@ export interface GitHistoryResult {
  * overflow, not dropped commits). The new model:
  *   - mainline batch: `git log <mainlineRefs> -n <limit>` (the page the user sees), and
  *     `--before=<cursor>` when `before` is set (page BACK — the /git-history.json pagination cursor);
- *   - each live non-mainline ref: `git log <ref> --not <mainlineRefs>` (its EXCLUSIVE commits, full,
- *     never capped by the global limit) — a long-lived branch can no longer be starved out.
+ *   - each live non-mainline ref: `git log <ref> --not <mainlineRefs>` (its EXCLUSIVE commits, never
+ *     squeezed by the global limit), bounded to the page's time window (`--since` = the mainline
+ *     batch's oldest commit time, `--before` = the pagination cursor when paging back) — a
+ *     long-lived branch can no longer be starved out, and a stale branch's ancient commits no longer
+ *     resurface in a recent window as a fork-less (zero-height, unrenderable) lane.
  * Because each batch is fetched from a known ref, there is no `--source` attribution ambiguity and
  * no post-hoc `rev-list` re-attribution (a commit reachable from develop is simply never fetched in
  * the branch batch — `--not <mainlineRefs>` excludes it). Duplicates across sibling live branches
@@ -2500,25 +2503,35 @@ function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, befor
     // Mainline batch: the newest `limit` mainline commits, or (when `before` is set) the `limit`
     // commits strictly older than the pagination cursor. `--before` is commit-time STRICTLY-older,
     // so `before=<oldest timestamp in the current window>` never re-returns that same boundary commit.
+    let windowFloorSec: number | null = null; // the page's time floor = oldest mainline commit time
     if (mainlineRefs.length > 0 && primary !== null) {
       const args = ["-C", root, "log", ...mainlineRefs, "--date=unix", `-n ${limit}`];
       if (before !== null && Number.isFinite(before)) args.push(`--before=${before}`);
       args.push("--pretty=format:%H%x1f%ct%x1f%P%x1f%s");
       const out = execFileSync("git", args, { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] });
+      for (const line of out.split(/\r?\n/)) {
+        if (!line) continue;
+        const t = Number(line.split("\x1f")[1]);
+        if (Number.isFinite(t)) windowFloorSec = windowFloorSec === null ? t : Math.min(windowFloorSec, t);
+      }
       pushCommits(out, primary);
     }
 
-    // Live-branch batches: each live non-mainline ref's EXCLUSIVE commits, full and uncapped
-    // (`--not <mainlineRefs>` excludes every mainline-reachable commit, so the lane carries exactly
-    // its own history). A long-lived branch is never starved out of the window by newer mainline
-    // commits — this is what AC2's negative control proves the old global `-n <limit>` got wrong.
+    // Live-branch batches: each live non-mainline ref's EXCLUSIVE commits (`--not <mainlineRefs>`
+    // excludes every mainline-reachable commit, so the lane carries exactly its own history), bounded
+    // to the page's time window (`--since` = the mainline batch's oldest commit time; `--before` = the
+    // pagination cursor when paging back). The `--since` bound is the mirror of AC2's squeeze guard:
+    // without it, a long-dead branch (tip just inside the 7-day active window, exclusive commits far
+    // older than the visible mainline window) surfaces commits whose fork point is absent from the
+    // window — a zero-height lane that buildLanePath rejects as inverted (gap-git-graph-lane-path-
+    // inverts-and-duplicates-per-devmerge AC5).
     for (const r of liveRefs) {
       const notArgs = mainlineRefs.length > 0 ? ["--not", ...mainlineRefs] : [];
-      const out = execFileSync(
-        "git",
-        ["-C", root, "log", r, ...notArgs, "--date=unix", "--pretty=format:%H%x1f%ct%x1f%P%x1f%s"],
-        { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] },
-      );
+      const args = ["-C", root, "log", r, ...notArgs, "--date=unix"];
+      if (before !== null && Number.isFinite(before)) args.push(`--before=${before}`);
+      if (windowFloorSec !== null) args.push(`--since=${windowFloorSec}`);
+      args.push("--pretty=format:%H%x1f%ct%x1f%P%x1f%s");
+      const out = execFileSync("git", args, { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] });
       pushCommits(out, r);
     }
 
