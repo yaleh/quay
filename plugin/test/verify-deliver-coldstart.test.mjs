@@ -76,6 +76,20 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
     "AC5 negative: build before the phase switch must be NOT ok (criterion can take false)");
   assert.match(r.stdout, /ac5-not-evaluated\(no-sha\) eval=0 ok=0/,
     "AC5 not-evaluated: missing build_sha is DISTINCT from fail (硬规则 3b)");
+  // AC168 marketplace channel controls (gap-verify-deliver-coldstart-marketplace-channel-unverified):
+  // the --selfcheck must ALSO exercise the marketplace positive/negative/enabled-leak controls, not
+  // just the AC2/AC5 direct-measure controls. These prove the marketplace assertion really tests
+  // register-plugin.mjs's effect (AC2 negative: no register ⇒ no entry) and flags the user-level
+  // enabledPlugins leak (AC-161) — hermetic (fake HOME + fake installed package, no real npm install,
+  // no real ~/.claude/settings.json touched).
+  assert.match(r.stdout, /marketplace-register\(positive\) MP_EVALUATED=1 MP_REGISTER_OK=1 MP_SETTINGS_OK=1 MP_ENABLED_LEAK=0/,
+    "marketplace positive: register-plugin.mjs registers the directory source + no enabledPlugins leak");
+  assert.match(r.stdout, /marketplace-noregister\(negative,AC2\) MP_SETTINGS_OK=0/,
+    "marketplace negative (AC2): without register-plugin.mjs no marketplace entry appears");
+  assert.match(r.stdout, /marketplace-enabled-leak\(AC-161违反\) MP_SETTINGS_OK=0 MP_ENABLED_LEAK=1/,
+    "marketplace leak: a user-level quay@quay enabledPlugins entry is flagged (AC-161)");
+  assert.match(r.stdout, /marketplace-register-fail\(AC5\) MP_REGISTER_OK=0 MP_REGISTER_RC=1 reason_present=1/,
+    "marketplace register-failure (AC5): a non-zero register exit is recorded structurally, not swallowed");
 });
 
 test("AC1 — --selfcheck is hermetic: it does not touch a real install and runs offline", () => {
@@ -105,6 +119,14 @@ test("arg validation — unknown argument exits 2", () => {
   const r = run(["--no-such-flag"]);
   assert.equal(r.status, 2, "unknown argument must exit 2");
   assert.match(r.stderr, /unknown argument/, "must report the unknown argument");
+});
+
+test("arg validation — --channel must be npm-global|marketplace (exit 2 for unknown, fail-closed)", () => {
+  // AC1: --channel defaults to npm-global (backward compat); an unknown value must be a usage error
+  // (exit 2), NOT silently treated as npm-global (fail-closed, 硬规则 3b).
+  const r = run(["--channel", "bogus"]);
+  assert.equal(r.status, 2, "unknown --channel must exit 2");
+  assert.match(r.stderr, /--channel must be npm-global\|marketplace/, "must name the allowed values");
 });
 
 test("--verify-only requires an existing --root (exit 2, not a run)", () => {
