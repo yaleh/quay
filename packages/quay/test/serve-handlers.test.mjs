@@ -20,7 +20,7 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
-import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, bucketSetOfFile, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript, taskRunsBlock, renderFanInCell, fanInLogPath, driverActionSpec, newSessionArgs, resumeSessionArgs, WEB_DRIVER_VERBS, WEB_DRIVER_KINDS } from "../src/serve-handlers.ts";
+import { layoutGitGraph, renderGitHistoryPage, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, bucketSetOfFile, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript, taskRunsBlock, renderFanInCell, fanInLogPath, driverActionSpec, newSessionArgs, resumeSessionArgs, WEB_DRIVER_VERBS, WEB_DRIVER_KINDS } from "../src/serve-handlers.ts";
 import { readGitHistory, readLive, liveSessionIdForPid, sessionTranscriptPath, isValidSessionId, readWorkerOutcomeRecords } from "../src/observation.ts";
 import { renderLivePage } from "../src/serve-live.ts";
 import { sendSessionFrames, verdictStateToDeliveryState, classifyReceipt, resolveSessionEndpoint, sendToSession, renderSendResult, HELD_EXPIRY_MS, WEB_SEND_FROM_NAME } from "../src/serve-send.ts";
@@ -123,15 +123,70 @@ test("degradation: non-ok or empty history yields no layout", () => {
   assert.equal(layoutGitGraph({ status: "ok", reason: null, commits: [], head: null, heads: {} }), null);
 });
 
-test("groupCommitsByBranch groups into lanes sorted by most-recent landing, commits oldest-first", () => {
-  const branches = groupCommitsByBranch([
-    c("aaa", 1_700_000_000, "integration", [], "a"),
-    c("bbb", 1_700_000_300, "task/z", [], "z"),
-    c("ccc", 1_700_000_200, "integration", [], "c"),
-  ]);
-  assert.deepEqual(branches.map((b) => b.ref), ["task/z", "integration"], "most-recent-landing branch first");
-  const integration = branches.find((b) => b.ref === "integration");
-  assert.deepEqual(integration.commits.map((x) => x.hash), ["aaa", "ccc"], "lane commits oldest→newest");
+// ── gap-git-graph-omits-inflight-branches-and-summary-table-disjoint: summary table == graph ──
+// The summary table used to be built from groupCommitsByBranch (a --source-ref grouping) — a SECOND
+// branch model disjoint from the graph's fork/merge lanes. It now renders layout.branches + a 状态
+// column, so table and graph name the SAME set. These tests render the page directly on a pure
+// fixture (renderGitHistoryPage) and parse the summary table + the embedded #git-graph-data JSON.
+
+/** Strip HTML tags from a cell slice (the summary table has no nested <td>). */
+function stripTags(s) {
+  return String(s).replace(/<[^>]+>/g, "").trim();
+}
+
+/** Extract the summary table's header + data rows as arrays of plain-text cells. */
+function extractSummaryTable(html) {
+  const m = html.match(/<table>([\s\S]*?)<\/table>/);
+  if (!m) return { header: [], rows: [] };
+  const rowsHtml = [...m[1].matchAll(/<tr>([\s\S]*?)<\/tr>/g)].map((mm) => mm[1]);
+  const cellsOf = (rowHtml) => [...rowHtml.matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/g)].map((mm) => stripTags(mm[1]));
+  return { header: cellsOf(rowsHtml[0] ?? ""), rows: rowsHtml.slice(1).map(cellsOf) };
+}
+
+/** Parse the embedded #git-graph-data JSON payload. */
+function extractGraphData(html) {
+  const m = html.match(/<script type="application\/json" id="git-graph-data">([\s\S]*?)<\/script>/);
+  return m ? JSON.parse(m[1]) : null;
+}
+
+/** A fixture with one merged branch + one unmerged live branch (mirrors readGitHistory re-attribution:
+ *  the merged branch's commit carries ref "develop" but its tip resolves to task/merged via heads). */
+function mergedAndOpenGitHistory() {
+  const t0 = 1_700_000_000;
+  const commits = [
+    c("a000000", t0, "develop", [], "base"),
+    c("b000000", t0 + 1, "develop", ["a000000"], "trunk two"),
+    c("m100000", t0 + 2, "develop", ["b000000"], "merged branch commit"),
+    c("mm00000", t0 + 3, "develop", ["b000000", "m100000"], "merge task/merged"),
+    c("o100000", t0 + 4, "task/open", ["mm00000"], "open branch commit one"),
+    c("o200000", t0 + 5, "task/open", ["o100000"], "open branch commit two"),
+  ];
+  return hist(commits, "mm00000", { develop: "mm00000", "task/merged": "m100000", "task/open": "o200000" });
+}
+
+test("AC2: summary table rows and the graph JSON name the SAME branch set (bidirectional差集 empty)", () => {
+  const html = renderGitHistoryPage(mergedAndOpenGitHistory());
+  const table = extractSummaryTable(html);
+  const data = extractGraphData(html);
+  assert.ok(data, "#git-graph-data payload present");
+  const tableRefs = new Set(table.rows.map((row) => row[0]));
+  const graphRefs = new Set([data.trunk.ref, ...data.branches.map((b) => b.ref)]);
+  assert.deepEqual([...tableRefs].filter((r) => !graphRefs.has(r)).sort(), [], "table → graph: every table name is in the graph");
+  assert.deepEqual([...graphRefs].filter((r) => !tableRefs.has(r)).sort(), [], "graph → table: every graph name is in the table");
+});
+
+test("AC4: summary table has a 状态 column ({已合并, 在飞}) and 在飞 count == open branch count", () => {
+  const history = mergedAndOpenGitHistory();
+  const html = renderGitHistoryPage(history);
+  const table = extractSummaryTable(html);
+  assert.ok(table.header.includes("状态"), "the table carries a 状态 column");
+  const openCount = layoutGitGraph(history).branches.filter((b) => b.open).length;
+  assert.ok(openCount > 0, "the fixture has ≥1 open branch");
+  const statuses = table.rows.map((row) => row[1]);
+  assert.ok(statuses.every((s) => s === "已合并" || s === "在飞"), "status domain is {已合并, 在飞}");
+  const inflight = table.rows.filter((row) => row[1] === "在飞");
+  assert.equal(inflight.length, openCount, "在飞 rows == unmerged live branch count (not 0, not all)");
+  assert.ok(inflight.length < table.rows.length, "not every row is 在飞 (merged + trunk rows are 已合并)");
 });
 
 // ── integration: real git workspace, /git-history serves the vertical-graph JSON + inlined D3 ──
@@ -1445,7 +1500,11 @@ function writeLiveGhostFixture(root, entries) {
 }
 
 test("AC1/AC2/AC3 — readLive drops terminal-status ghosts, keeps a ready task (workflow-events source)", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "live-ghost-"));
+  // gap-serve-board-test-workspace-couples-to-shared-tmp-quay-worktrees: nest root under a private
+  // parent so dirname(root)/quay-worktrees is test-private (never the shared /tmp/quay-worktrees).
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "live-ghost-"));
+  const root = path.join(parent, "main");
+  fs.mkdirSync(root, { recursive: true });
   try {
     const nowMs = writeLiveGhostFixture(root, [
       { runId: "fm-SUP-1", taskId: "SUP", status: "superseded" },
@@ -1462,7 +1521,7 @@ test("AC1/AC2/AC3 — readLive drops terminal-status ghosts, keeps a ready task 
     assert.ok(!ids.has("NH"), "AC3: a needs-human task with an orphan START event is NOT in-flight (no worker is running)");
     assert.ok(ids.has("RDY"), "AC2: a ready task with an orphan START event IS still in-flight (negative control — not over-trimmed)");
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(parent, { recursive: true, force: true });
   }
 });
 

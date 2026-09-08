@@ -230,6 +230,18 @@ driver 内，解析器内部的 worktree 重定向是第二层防御。
 | `import.meta.url` walk-up **无** worktree 判（`manager.ts:51-64` 现式） | 违反 ①——从 worktree 载入时命中 worktree 副本（AC139-4 的载体死亡根因） |
 | `${CLAUDE_PLUGIN_ROOT}` 文本展开 | 只在 skill 载入时展开，CLI/cron/OS anchor 拿不到（§9-T1 已证） |
 
+**旁注（2026-09-08，`gap-plugin-root-resolution-remaining-callsites` 的 AC1 分类结论）**——上表「被否方案」里的
+「现式」点位并非全部下游可达；逐点分类后两类豁免（**仓库内部专用**，不走迁移，同 `scripts/test.sh`）：
+
+| 豁免点 | 证据（逐条独立验证，非直觉） |
+|---|---|
+| `scripts/test.sh`（数十条 `${repo_root}/plugin/scripts/`） | 开发期测试入口：不在 npm `files` 白名单（`packages/quay/package.json` 的 `scripts/register-plugin.mjs` 是 `packages/quay/scripts/` 下，非 repo-root `scripts/test.sh`）；`plugin/.claude-plugin/plugin.json` 只 ship `skills/`+`agents/`；`quay-init.sh` 只 detect 不 copy（`:2058` 明写「no leaking the quay-specific scripts/test.sh」） |
+| `os-anchor-watchdog.sh` / `os-anchor-install.sh` | 各自 header 明写「⚠ NOT A SHIPPED DELIVERABLE (human ruling 2026-08-06)… quay-init.sh never installs or invokes it」；实测 `quay-init.sh` 0 引用、`orchestration/*tick-core*.md` 0 引用（loop tick 文档里的「os-anchor-watchdog」只是观察者名单的散文提及，非调用指令） |
+
+其余下游可达点（serve-sessions / ff-merge / mcp-server / precommit-guard / cli/manager / observation /
+serve-send）已在该任务迁到本解析器（含 dist-bundle dev/dist 回退），负控制实测跑红、无本地 `plugin/` workspace
+实测跑通（读数见任务体 Evidence）。
+
 **三条约束 → 可执行判据**（缺一即不成立）：
 ① = 测试从 worktree 载入时断言解析结果在主检出、不在 worktree（把返回值改成 worktree 路径即红，
 `mainCheckoutRoot()` 单测配真实 temp worktree 恒跑）；② = 无本地 `plugin/` 的临时 workspace 里仍解析到
@@ -448,21 +460,16 @@ npm 侧无需处理（`files` 是白名单，`archive/` 天然不在内）。
 **⚠️ 本清单是【带测量日期的快照】，不是活文档。** 判据（§12d）是耐久的，名单会随代码演化过期；
 **执行 archive 前须按 §12d 重算一次**，以重算结果为准。
 
-**⊕ 死集重算回写（2026-09-07，`gap-dead-set-closure-repo-root-call-form-false-positive` 补认执行形式后）**：
+**⊕ 死集重算回写（2026-09-08，`gap-dead-set-closure-misses-four-reference-kinds` 补认四类引用后）**：
 按 §12d（三天零执行 ∧ 无生产调用者）+ §12e 传递闭包（补认 `${repo_root}/plugin/scripts/<name>`、
-`path.join(__dirname, "<name>")`、`$SCRIPT_DIR/<name>` 三种执行形式）+ §12f 裸文件名边重算；
-方法窗口与完整名单见 `docs/analysis/dead-set-recomputed.json`
-（`generatedAt` 2026-09-07T14:38:19.347Z；窗口 2026-09-04T14:32:46.988Z → 2026-09-07T14:32:46.988Z，72h；
+`path.join(__dirname, "<name>")`、`$SCRIPT_DIR/<name>` 三种执行形式，**再加四类引用**：bash `source`/`.`
+内建（执行）、`plugin/test` 存在性钉、`.quay/config.yml` gate 注册、wrapper→委托模块对称对）+
+§12f 裸文件名边重算；方法窗口与完整名单见 `docs/analysis/dead-set-recomputed.json`
+（`generatedAt` 2026-09-08T06:32:14.678Z；窗口 2026-09-05T06:28:00.783Z → 2026-09-08T06:28:00.783Z，72h；
 `executionDataSource` = 三层 transcript 普查，非 runtime-usage-inventory.ts）。
 
-- 扫描前死集: 86
-- 扫描后死集: 53
-
-> **⊕ 2026-09-08 批次一归档后写回（`gap-ac158-execute-archive-batch-one`）**：`扫描后死集` 机读行
-> 现等于 `archive/INDEX.tsv` 数据行总数（14 条此前批次 + 39 条本批次 = 53）——AC-158 判据
-> `len(INDEX rows) == 扫描后死集 N` 要求该行与 INDEX 行数同数，故此处从「死集计数」改为
-> 「归档累计计数」。真实死集仍是 82（未归档者留待后续批次）；本批次实际 `git mv` 24 个脚本
-> + 15 个自带测试（`archive/2026-09-07-zero-call-scripts/`）。
+- 扫描前死集: 31
+- 扫描后死集: 31
 
 #### 安全核 94 个（`plugin/scripts/` 下，两口径下均判死；56 个自带测试须同批移动）
 

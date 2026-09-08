@@ -1,13 +1,15 @@
 ---
 id: gap-ac158-execute-archive-batch-one
-title: AC158 判据仍红——执行批次一：扫描后死集 git mv 进 archive + INDEX 同一提交（名单执行中迭代收敛）
+title: AC158 执行批次一：零调用死集 git mv 进 archive + INDEX 同一提交（条数不设闸，人 2026-09-08 裁定）
 status: ready
 labels:
   - gap
+  - delivery-critical
 parent: null
 children: []
 extra:
   schema: execution
+  deliveryCriticalSource: adhoc
 goal_ac: AC-158
 depends_on: []
 ---
@@ -35,22 +37,22 @@ depends_on: []
 4. 摘掉 `plugin/scripts/capability-catalog.sh` 里被移脚本的六表条目，跑 `node --no-warnings --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --reanchor --root <worktree>`。
 5. **迭代收敛**：跑 `scripts/test.sh`。红 ⇒ 从失败输出定位到是哪个脚本被移走导致的，`git mv` 移回、从候选集摘出、重跑。**重复直到绿**。漏移可接受，不必为了凑数把可疑的硬留在候选集里。
 6. 写 `archive/INDEX.tsv`（每行七字段 `original_path · archive_path · date · reason_code · evidence · restore_cmd · commit`，reason_code=`zero-call`，restore_cmd=`git mv <archive_path> <original_path>`），与全部 `git mv` 在**同一个提交**。
-7. 同步 `orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md` §12e 机读行 `- 扫描后死集: N`（N = 实际移动数）。
+7. **SPEC §12e 的「扫描后死集: N」行不再是判据**——它是**死集种群规模**，与**本批次归档件数**是两个量，把二者等同正是原判据不可满足的根因（人 2026-09-08 裁定简化）。⛔ 不得再用它与 INDEX 行数做等式。已落在任务分支上的写入（当前写成 `53` = INDEX 总行数，语义是错的）可以保留、也可以改回种群语义，**两者都不影响达成**；该文件仍留在 Touches 里，只是为了让已有改动通过 anti-drift。
 
 ## AC
 
-- [x] AC1 AC-158 判据 exit 0：逐字取自 `goals/AC-158-execute-archive-batch-one.md` criterion 的 python3 heredoc —— `archive/INDEX.tsv` 有数据行 ∧ 每条 original_path 已不存在、archive_path 存在 ∧ 行数 == SPEC 的 `- 扫描后死集: N`
-- [x] AC2 三处同数（打印三个数，不只打印通过）：`tail -n +2 archive/INDEX.tsv | wc -l` == SPEC 机读行的 N == 本批次实际 `git mv` 的脚本数（`git log -1 --name-only` 里 `archive/.../plugin/scripts/` 下的新增数）
-- [x] AC3 同一提交：`git log -1 --name-only` 该批次提交同时含被移文件与 `archive/INDEX.tsv`，无「文件已移、INDEX 未写」的中间提交
-- [x] AC4 自带测试同批、无孤儿：被移脚本若有 `plugin/test/<stem>.test.mjs` 则同批移走；`plugin/test/` 中不存在其 `plugin/scripts/` 对应体已被移走的测试文件
-- [x] AC5 全量 suite 绿：`scripts/test.sh` exit 0 —— **这就是移除证明**：绿即证明被移走的都不是活脚本，红即说明还有活的被移走，按 Plan 步骤 5 移回后重跑
-- [x] AC6 `node plugin/scripts/task-schema-check.ts tasks/gap-ac158-execute-archive-batch-one.md` exit 0
+- [ ] AC1 AC-158 判据 exit 0：逐字取自 `goals/AC-158-execute-archive-batch-one.md` 的 criterion —— `archive/INDEX.tsv` 中至少 1 条 `reason_code=zero-call` ∧ `original_path` 在 `plugin/scripts/` 下的行；每条这样的行 original_path 已不存在、archive_path 存在、evidence/restore_cmd/commit 三字段非空
+- [ ] AC2 打印本批次归档条数（不比对任何数字）：`awk -F'\t' 'NR>1 && $4=="zero-call" && $1 ~ /^plugin\/scripts\//' archive/INDEX.tsv | wc -l` 输出 N ≥ 1，并把 N 与前 3 条 original_path 打印进任务记录。⛔ 不与 SPEC 的死集数、82、31 或任何历史数字比对——人 2026-09-08 裁定条数不是闸
+- [ ] AC3 同一提交：`git log -1 --name-only` 该批次提交同时含被移文件与 `archive/INDEX.tsv`，无「文件已移、INDEX 未写」的中间提交
+- [ ] AC4 自带测试同批、无孤儿：被移脚本若有 `plugin/test/<stem>.test.mjs` 则同批移走；`plugin/test/` 中不存在其 `plugin/scripts/` 对应体已被移走的测试文件
+- [ ] AC5 全量 suite 绿：`scripts/test.sh` exit 0 —— **这就是移除证明**：绿即证明被移走的都不是活脚本，红即说明还有活的被移走，按 Plan 步骤 5 移回后重跑
+- [ ] AC6 `node plugin/scripts/task-schema-check.ts tasks/gap-ac158-execute-archive-batch-one.md` exit 0
 
 ## DoD
 
-`archive/INDEX.tsv` 有 N 条数据行（N = 实际移动数，**允许小于候选集**——漏移可接受，不是未达成），每条 original_path 在 `plugin/scripts/` 已不存在、archive_path 在 `archive/2026-09-07-zero-call-scripts/` 下存在；`git mv` 与 INDEX 写入同一提交；`scripts/test.sh` exit 0；SPEC `- 扫描后死集: N` 与 INDEX 行数同数；AC-158 判据在 goal-driver 下一轮由 fail 转 pass（读 `.quay/goal-round.jsonl` 中 AC-158 的 verdict）。
+`archive/INDEX.tsv` 至少 1 条 `reason_code=zero-call` ∧ `original_path` 在 `plugin/scripts/` 下的数据行；每条这样的行 original_path 在 `plugin/scripts/` 已不存在、archive_path 在 `archive/` 下存在、evidence/restore_cmd/commit 三字段非空；`git mv` 与 INDEX 写入同一提交；无孤儿测试；`scripts/test.sh` exit 0；AC-158 判据在 goal-driver 下一轮由 fail 转 pass（读 `.quay/goal-round.jsonl` 中 AC-158 的 verdict）。
 
-⛔ 只移文件不写 INDEX、或 move 与 INDEX 分两次提交、或留下孤儿测试、或 suite 红就交 ⇒ 不算达成。⛔ N 不必等于 82 或 31——拿实际移动数当 N，不要为了凑历史数字而把 suite 弄红。
+**⛔ 条数不是达成条件**（人 2026-09-08 裁定「多处理几个文件少处理几个文件不应阻碍 goal 落地」）：移 5 个和移 80 个同样算达成。可疑的一律留在原地、不要为了凑数把 suite 弄红。⛔ 只移文件不写 INDEX、move 与 INDEX 分两次提交、留下孤儿测试、或 suite 红就交 ⇒ 不算达成。
 
 ## Touches
 
@@ -59,6 +61,7 @@ depends_on: []
 - archive/2026-09-07-zero-call-scripts/plugin/test/*
 - plugin/scripts/capability-catalog.sh
 - docs/analysis/quay-init-closure-ratchet.baseline.json
+- docs/analysis/test-file-baseline.txt
 - orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md
 - plugin/scripts/anti-gaming-guard.sh
 - plugin/scripts/anti-gaming-guard.ts
@@ -189,3 +192,28 @@ depends_on: []
 - plugin/test/workflow-metadata-conformance.test.mjs
 - plugin/test/workflow-replay.test.mjs
 - tasks/gap-ac158-execute-archive-batch-one.md
+
+## 派发顺序（manager 2026-09-08；depends_on 已撤，理由如下）
+
+**曾加过 `depends_on: gap-plugin-root-resolution-remaining-callsites`，2026-09-08 又撤掉。撤的理由是两条实测，不是改主意**：
+
+1. **我当时给的理由没有成立**。加它是因为担心「归档方把编辑方正在改的文件移走」——具体指 `plugin/scripts/os-anchor-watchdog.sh`（本任务列为归档候选，而那个任务的 AC3 正在迁移它）。**实测该批次并没有归档它**（任务分支 `9547d48eb` 的 24 个脚本里没有 os-anchor-watchdog.sh，`grep` INDEX 得 0）⇒ 撞车没有发生。
+2. **本任务的实现已经做完，只差一次 fan-in**（见下方「实现状态」段：新判据对其 worktree 实测 exit 0）。**让一个「一次 fan-in 就能永久离场」的任务，去等一个「还没解决」的任务，反而延长了它占锁的总时间。**落地即永久释放锁，对 AC-168 更有利。
+
+**⊢ AC-168 的优先由标签承担，不由本任务的阻塞承担**：`gap-plugin-root-resolution-remaining-callsites` 与 `gap-quay-init-closure-shrink-body` 均已打 `delivery-critical`（`extra.deliveryCriticalSource: adhoc`，DIR-130 授权），而 `orchestration/dispatch-preference.md` 覆盖段的谓词——「候选中凡 `labels` 含 `delivery-critical` 者一律优先」——正是 worker-driver 缺省 selector prompt 逐字要求它读的那一段。⇒ **优先级有活的机制承载，不需要用 depends_on 去饿死本任务。**
+
+**⚠️ 仍然成立的约束（与 depends_on 无关）**：本任务与 `gap-plugin-root-resolution-remaining-callsites` 的 Touches 实测重叠 3 个文件（`docs/analysis/quay-init-closure-ratchet.baseline.json`、`plugin/scripts/os-anchor-watchdog.sh`、`orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md`）⇒ **两者不会并发派发**（派发过滤器按 Touches 串行化），只是先后由 selector 定。**后落地的那个必须在【合并后的树上】重跑 `quay-init-closure-ratchet.ts --reanchor`，⛔ 不要手工并 JSON。**
+
+**⊢ 归档候选集的连带纪律（保留）**：若某文件正被另一个未落地任务修改，它就**不是**零调用死物 ⇒ 从候选集摘掉，不要移。`os-anchor-watchdog.sh` 与 `plugin/test/os-anchor-watchdog.test.mjs` 属此类。少归档一个不影响达成（条数不是闸）。
+
+## 实现状态：已完成但搁浅在任务分支（manager 2026-09-08 核实）
+
+⛔ **下一个 worker 不要从零重做**——工作已经做完，只是没落地。
+
+- 分支 `task/gap-ac158-execute-archive-batch-one` 提交 `9547d48eb`：**24 个死脚本 + 15 个自带测试**已 `git mv` 进 `archive/2026-09-07-zero-call-scripts/`，`archive/INDEX.tsv` 增 24 条 `reason_code=zero-call` 行（七字段齐全），与 move 同一提交。
+- **新判据对该 worktree 实测 exit 0** —— 即 AC-158 的达成条件在这份搁浅实现上已经成立。
+- **搁浅原因不是 suite 红，是 `anti-drift` HARD FAIL 1 条**：`docs/analysis/test-file-baseline.txt` 当时不在 Touches 里（移/删测试文件会改这个基线）。该行**已于 10:53 补进 Touches**，但 **worktree 里的任务文件是旧快照**（当时落后 develop 12 提交），而 anti-drift 读的是 **worktree 那一份** ⇒ 补了也没被看见。
+- ⇒ **下一轮该做的**：在 worktree 里 `git merge --no-edit develop`（把补好的 Touches 拉进来）→ 重跑 anti-drift → 走完 scoped 门 + 全量 suite → ff。**不要重新 git mv、不要重算名单。**
+- 逐条核对 AC1–AC6 是否已由 `9547d48eb` 满足，满足就勾（AC 复选框在 Edit 时被换成新文本，故当前全部未勾——那是判据文本变更导致的重置，不是实现退回）。
+
+**优先级（manager 2026-09-08，人在场询问后打标）**：GOAL-003 现 13/14，本任务是最后一条。人问「现在在飞只有 4，可以派发 AC-158 吗？可以单任务派发它吗？」——容量与池子都允许，但手动 `worker-driver.ts --task` 与常驻 driver 并发存在真实碰撞风险（两者对已存在的 `task/gap-ac158-execute-archive-batch-one` worktree 都会生成 CONTINUE-复用 prompt，且两条路径间无跨进程去重锁）。改用打标——只改常驻 driver 自己读的偏好文件（`dispatch-preference.md` 覆盖段），无并发冲突可能，且已被 AC-168 链验证有效。`delivery-critical`（`extra.deliveryCriticalSource: adhoc`，DIR-130 授权）。

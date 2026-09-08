@@ -2,7 +2,7 @@
 id: gap-dead-set-closure-misses-four-reference-kinds
 title: 死集闭包只认调用形式、漏认四类引用（bash source/. 内建、活测试钉存在性、config.yml gate
   注册、wrapper→委托模块），82 名单仍混活脚本致 AC158 二次自锁
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -59,6 +59,7 @@ extra:
 
 - plugin/scripts/registry-bare-filename-scan.ts
 - plugin/test/registry-bare-filename-scan.test.mjs
+- plugin/scripts/checker-mutation-cases/registry-bare-filename-scan.sh
 - docs/analysis/dead-set-recomputed.json
 - orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md
 - tasks/gap-dead-set-closure-misses-four-reference-kinds.md

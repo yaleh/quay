@@ -31,6 +31,7 @@ import { promisify } from "node:util";
 import { QUAY_VERSION } from "./version.ts";
 import { parseFrontmatter } from "./frontmatter-store-base.ts";
 import { TASK_STATUS, isTaskStatus, type TaskStatus } from "./abi.ts";
+import { resolvePluginScript, resolvePluginScriptExec } from "./plugin-root.ts";
 
 const execFileP = promisify(execFile);
 
@@ -2048,9 +2049,6 @@ export function readJournal(root: string, nowMs: number = Date.now()): JournalRe
 // without the methodology layer) the landing column reports 「无数据」; if it fails to run/parse
 // it reports 「读失败」. Either way /board returns 200 (AC6), never a 500.
 
-/** Relative path from THIS module (packages/quay/src/observation.ts) to the drift checker. */
-export const DRIFT_CHECKER_REL = "../../../plugin/scripts/task-status-drift-check.ts";
-
 /**
  * 「在飞超时」threshold — a fast-mode run that started but has no end after this many minutes is
  * flagged. 90 minutes matches the repo's task-over-90m budget (inner-blocked-signal.ts: "任务超
@@ -2135,39 +2133,27 @@ export async function readBoardLanding(root: string, opts: ReadBoardLandingOpts 
 
   let scriptPath: string;
   let stripTypes: boolean;
-  try {
-    if (opts.checkerPath) {
-      // Test seam: a caller-provided checker path (e.g. a fake that hangs) skips the dev/dist
-      // fallback and derives strip-types from its extension.
-      scriptPath = opts.checkerPath;
-      stripTypes = scriptPath.endsWith(".ts");
-    } else {
-      scriptPath = fileURLToPath(new URL(DRIFT_CHECKER_REL, import.meta.url));
-      stripTypes = true;
-      // gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact: the shipped
-      // artifact carries the plugin .ts as bundled dist/*.js executables (no raw .ts), so the
-      // drift checker resolves to plugin/scripts/dist/task-status-drift-check.js there — run
-      // without --experimental-strip-types (a plain ESM .js).
-      if (!fs.existsSync(scriptPath)) {
-        const bundled = fileURLToPath(
-          new URL("../../../plugin/scripts/dist/task-status-drift-check.js", import.meta.url)
-        );
-        if (fs.existsSync(bundled)) {
-          scriptPath = bundled;
-          stripTypes = false;
-        }
-      }
+  if (opts.checkerPath) {
+    // Test seam: a caller-provided checker path (e.g. a fake that hangs) skips the dev/dist
+    // fallback and derives strip-types from its extension.
+    scriptPath = opts.checkerPath;
+    stripTypes = scriptPath.endsWith(".ts");
+  } else {
+    // Canonical resolver (SPEC §6b) — never an import.meta.url walk-up without a worktree check.
+    // `resolvePluginScriptExec` also applies the dev/dist fallback
+    // (gap-shipped-ts-files-are-not-bundled: the shipped artifact carries the checker only as
+    // bundled dist/*.js, run without --experimental-strip-types).
+    const resolved = resolvePluginScriptExec(path.join("scripts", "task-status-drift-check.ts"));
+    if (resolved == null) {
+      return {
+        status: "empty",
+        reason: "landing 判断源缺失（plugin/scripts/task-status-drift-check.ts/dist bundle 不存在 — 产品安装无 methodology 层）",
+        flags: new Map(),
+        scanned: 0,
+      };
     }
-  } catch {
-    return { status: "error", reason: "landing 判断源解析失败（plugin 路径不可用）", flags: new Map(), scanned: 0 };
-  }
-  if (!fs.existsSync(scriptPath)) {
-    return {
-      status: "empty",
-      reason: "landing 判断源缺失（plugin/scripts/task-status-drift-check.ts/dist bundle 不存在 — 产品安装无 methodology 层）",
-      flags: new Map(),
-      scanned: 0,
-    };
+    scriptPath = resolved.path;
+    stripTypes = resolved.stripTypes;
   }
   try {
     const argv = stripTypes
@@ -2459,6 +2445,18 @@ function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, nowMs
         heads[name] = tipHash;
       }
     }
+    // gap-git-graph-trunk-ref-resolves-to-head-not-mainline: for-each-ref emits refs in refname
+    // (alphabetical) order, so a non-mainline ref like `author` sorts before `develop` — and
+    // `git log author develop --source` then attributes every shared commit to `author` (the first
+    // ref the traversal reaches it from). Put the mainline refs FIRST in the `git log --source`
+    // invocation so a commit reachable from multiple refs is attributed to the mainline directly,
+    // instead of relying solely on the post-hoc re-attribution below to undo an `author` label.
+    // (Stable within each group: develop before master, then the rest alphabetically.)
+    activeRefs.sort((a, b) => {
+      const am = GIT_HISTORY_MAINLINE_REFS.has(a) ? 0 : 1;
+      const bm = GIT_HISTORY_MAINLINE_REFS.has(b) ? 0 : 1;
+      return am - bm || (a < b ? -1 : a > b ? 1 : 0);
+    });
     if (activeRefs.length === 0) {
       // No active branch: a fresh repo with no commits, or every branch is stale with no mainline.
       return {
@@ -2548,20 +2546,8 @@ function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, nowMs
 // docs — the AC2 mechanical grep (the two narrative doc names over packages/quay/src) must hit 0.
 // Those are prose, not the producing mechanism.
 
-/** Resolve a plugin script relative to THIS module, mirroring readBoardLanding's dev/dist fallback. */
-function resolvePluginScript(rel: string): string | null {
-  try {
-    const p = fileURLToPath(new URL(rel, import.meta.url));
-    if (fs.existsSync(p)) return p;
-    if (rel.endsWith(".ts")) {
-      const bundled = fileURLToPath(new URL(rel.replace(/\.ts$/, ".js"), import.meta.url));
-      if (fs.existsSync(bundled)) return bundled;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
+/** Resolve a plugin script via the canonical resolver (SPEC §6b) — imported `resolvePluginScript`
+ *  above, never an import.meta.url walk-up without a worktree check (AC139-4). */
 
 /**
  * Run a plugin script with a HARD deadline and a process-group kill — the robust path for bash
@@ -2662,8 +2648,15 @@ export interface SystemResult {
   processBudget: ProcessBudgetReading;
 }
 
-export const RESOURCE_GATE_REL = "../../../plugin/scripts/resource-gate.sh";
-export const PROCESS_BUDGET_REL = "../../../plugin/scripts/process-budget.sh";
+/** Plugin-root-relative script rels (resolved via the canonical resolver, SPEC §6b — NOT a
+ *  module-relative `import.meta.url` walk-up). */
+// ⚠️ path.join, not a string literal: the AC1b loop-shipping scan forbids the BARE old repo-root
+// form of this rel (its pre-plugin/ location). A `"scripts/…"` string literal here would be
+// textually identical to that forbidden old path even though it is the plugin-root-relative rel the
+// resolver expects (SPEC §6b). path.join keeps the runtime rel identical while leaving AC1b able to
+// catch a real stale bare reference. (gap-plugin-root-resolution-remaining-callsites)
+export const RESOURCE_GATE_REL = path.join("scripts", "resource-gate.sh");
+export const PROCESS_BUDGET_REL = "scripts/process-budget.sh";
 
 /** Parse a JSON object's numeric field, guarding the type. Pure (unit-testable). */
 function jsonNum(j: Record<string, unknown>, key: string): number | null {

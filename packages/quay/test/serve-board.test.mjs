@@ -76,10 +76,14 @@ function runChecker(wsRoot) {
 /**
  * Build a workspace whose tasks live at `<ws>/tasks` (workspace-relative, so the drift checker's
  * default tasksDir = `<repoRoot>/tasks` matches the provider's tasks_dir — the Contract's
- * invariant). git-inits the ws so findRepoRoot resolves. Returns { ws, tasksDir }.
+ * invariant). git-inits the ws so findRepoRoot resolves. Returns { ws, tasksDir, parent } — ws is
+ * nested under a private parent so dirname(ws)/quay-worktrees stays test-private; callers
+ * rmSync(parent), not ws (gap-serve-board-test-workspace-couples-to-shared-tmp-quay-worktrees).
  */
 function makeWorkspace(prefix) {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}ws-`));
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}ws-`));
+  const ws = path.join(parent, "main");
+  fs.mkdirSync(ws, { recursive: true });
   const tasksDir = path.join(ws, "tasks");
   fs.mkdirSync(tasksDir, { recursive: true });
   fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
@@ -91,7 +95,7 @@ function makeWorkspace(prefix) {
   fs.writeFileSync(path.join(ws, "README.md"), "board fixture workspace\n");
   execFileSync("git", ["-c", "user.email=test@test", "-c", "user.name=test", "add", "."], { cwd: ws });
   execFileSync("git", ["-c", "user.email=test@test", "-c", "user.name=test", "commit", "-q", "-m", "board fixture"], { cwd: ws });
-  return { ws, tasksDir };
+  return { ws, tasksDir, parent };
 }
 
 function seed(tasksDir, id, fields) {
@@ -132,7 +136,7 @@ function distinctiveRunId(taskId) {
 }
 
 test("AC2: /board data-flag agrees with the drift checker per-task (reuse by construction)", async () => {
-  const { ws, tasksDir } = makeWorkspace("board-ac2-");
+  const { ws, tasksDir, parent } = makeWorkspace("board-ac2-");
   const cwd0 = process.cwd();
   let server;
   try {
@@ -179,12 +183,12 @@ test("AC2: /board data-flag agrees with the drift checker per-task (reuse by con
   } finally {
     process.chdir(cwd0);
     if (server) { server.close(); if (server.client) await server.client.close(); }
-    fs.rmSync(ws, { recursive: true, force: true });
+    fs.rmSync(parent, { recursive: true, force: true });
   }
 });
 
 test("AC3 negative control: done task with Touches→nonexistent code is flagged by BOTH (same kind); fixing the touch unflags BOTH", async () => {
-  const { ws, tasksDir } = makeWorkspace("board-ac3-");
+  const { ws, tasksDir, parent } = makeWorkspace("board-ac3-");
   const cwd0 = process.cwd();
   let server;
   try {
@@ -216,7 +220,7 @@ test("AC3 negative control: done task with Touches→nonexistent code is flagged
   } finally {
     process.chdir(cwd0);
     if (server) { server.close(); if (server.client) await server.client.close(); }
-    fs.rmSync(ws, { recursive: true, force: true });
+    fs.rmSync(parent, { recursive: true, force: true });
   }
 });
 
@@ -255,7 +259,7 @@ test("AC5/AC6: three data sources visible; a missing source degrades to 200 (nev
 });
 
 test("AC7/execution column: live run (process present) renders in-flight + timeout; process-dead run renders 孤儿 (not in-flight)", async () => {
-  const { ws, tasksDir } = makeWorkspace("board-exec-");
+  const { ws, tasksDir, parent } = makeWorkspace("board-exec-");
   const cwd0 = process.cwd();
   let server;
   const procs = [];
@@ -305,7 +309,7 @@ test("AC7/execution column: live run (process present) renders in-flight + timeo
     for (const p of procs) { try { process.kill(p.pid, "SIGKILL"); } catch { /* already gone */ } }
     process.chdir(cwd0);
     if (server) { server.close(); if (server.client) await server.client.close(); }
-    fs.rmSync(ws, { recursive: true, force: true });
+    fs.rmSync(parent, { recursive: true, force: true });
   }
 });
 
@@ -315,7 +319,7 @@ test("AC7/execution column: live run (process present) renders in-flight + timeo
 // the land single-flight gate reads the latter. A start+impl-complete+no-end task must NOT render
 // as implementing — it renders as awaiting-land ("待落地"), and the two counts stay independent.
 test("AC8/execution column: /board renders implementing vs awaiting-land as two independent counts (impl-complete boundary)", async () => {
-  const { ws, tasksDir } = makeWorkspace("board-impl-");
+  const { ws, tasksDir, parent } = makeWorkspace("board-impl-");
   const cwd0 = process.cwd();
   let server;
   const procs = [];
@@ -366,7 +370,7 @@ test("AC8/execution column: /board renders implementing vs awaiting-land as two 
     for (const p of procs) { try { process.kill(p.pid, "SIGKILL"); } catch { /* already gone */ } }
     process.chdir(cwd0);
     if (server) { server.close(); if (server.client) await server.client.close(); }
-    fs.rmSync(ws, { recursive: true, force: true });
+    fs.rmSync(parent, { recursive: true, force: true });
   }
 });
 
@@ -383,7 +387,7 @@ test("AC8/execution column: /board renders implementing vs awaiting-land as two 
 // state record. What survives is the PRINCIPLE AC2/AC3 pin: the display's process liveness is
 // independent of reconcile's retention, and this change does not touch the latter.
 test("AC2/AC3 negative control: worktree exists + status=ready + no live process ⇒ NOT in-flight (display), reconcile retention unchanged", async () => {
-  const { ws, tasksDir } = makeWorkspace("board-neg-");
+  const { ws, tasksDir, parent } = makeWorkspace("board-neg-");
   const cwd0 = process.cwd();
   let server;
   let wtPath = null;
@@ -450,13 +454,13 @@ test("AC2/AC3 negative control: worktree exists + status=ready + no live process
     try { if (wtPath) execFileSync("git", ["-C", ws, "worktree", "remove", "--force", wtPath], { stdio: "ignore" }); } catch { /* already removed */ }
     process.chdir(cwd0);
     if (server) { server.close(); if (server.client) await server.client.close(); }
-    fs.rmSync(ws, { recursive: true, force: true });
+    fs.rmSync(parent, { recursive: true, force: true });
     try { if (wtPath) fs.rmSync(wtPath, { recursive: true, force: true }); } catch { /* already gone */ }
   }
 });
 
 test("gap-webui-board-no-pagination: /board supports server-side ?page=N pagination, ?status= and ?label= filtering, zero client JS", async () => {
-  const { ws, tasksDir } = makeWorkspace("board-pg-");
+  const { ws, tasksDir, parent } = makeWorkspace("board-pg-");
   const cwd0 = process.cwd();
   let server;
   try {
@@ -528,7 +532,7 @@ test("gap-webui-board-no-pagination: /board supports server-side ?page=N paginat
   } finally {
     process.chdir(cwd0);
     if (server) { server.close(); if (server.client) await server.client.close(); }
-    fs.rmSync(ws, { recursive: true, force: true });
+    fs.rmSync(parent, { recursive: true, force: true });
   }
 });
 
@@ -542,7 +546,7 @@ test("gap-webui-board-no-pagination: /board supports server-side ?page=N paginat
 // cache hit ⇒ no cold subprocess, second request fast), and AC3 (timeout ⇒ 读取超时, fail-open).
 
 test("AC1: /board cold load completes in single-digit seconds (TTL + 秒级 timeout + fail-open)", async () => {
-  const { ws, tasksDir } = makeWorkspace("board-ac1-");
+  const { ws, tasksDir, parent } = makeWorkspace("board-ac1-");
   const cwd0 = process.cwd();
   let server;
   try {
@@ -567,12 +571,12 @@ test("AC1: /board cold load completes in single-digit seconds (TTL + 秒级 time
   } finally {
     process.chdir(cwd0);
     if (server) { server.close(); if (server.client) await server.client.close(); }
-    fs.rmSync(ws, { recursive: true, force: true });
+    fs.rmSync(parent, { recursive: true, force: true });
   }
 });
 
 test("AC2 negative control: a cache-hit /board request does NOT cold-run the checker (second request fast)", async () => {
-  const { ws, tasksDir } = makeWorkspace("board-cache-");
+  const { ws, tasksDir, parent } = makeWorkspace("board-cache-");
   const cwd0 = process.cwd();
   let server;
   try {
@@ -605,7 +609,7 @@ test("AC2 negative control: a cache-hit /board request does NOT cold-run the che
   } finally {
     process.chdir(cwd0);
     if (server) { server.close(); if (server.client) await server.client.close(); }
-    fs.rmSync(ws, { recursive: true, force: true });
+    fs.rmSync(parent, { recursive: true, force: true });
   }
 });
 

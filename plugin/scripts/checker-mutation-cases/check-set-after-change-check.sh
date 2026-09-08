@@ -38,11 +38,10 @@ write plugin/loop/manager-tick-core.md \
 write orchestration/manager-tick-core.md \
   '# manager tick — 执行核（source）' \
   'placeholder'
-write plugin/test/quay-init-loop-consumer-doc-refs.test.mjs \
-  '// @test-group serial' \
-  '// @judges plugin/loop/*' \
-  'import { test } from "node:test";' \
-  'test("the shipped plugin/loop docs have zero plugin/loop refs", () => {});'
+write plugin/scripts/laydown-set-check.sh \
+  '#!/usr/bin/env bash' \
+  '# @judges plugin/loop/*' \
+  'echo "fixture"'
 write plugin/scripts/tick-core-static-check.ts \
   '#!/usr/bin/env node' \
   '// tick-core-static-check.ts — fixture' \
@@ -59,26 +58,23 @@ if checker_cmd; then :; else
   exit 4
 fi
 
-# ── INJECT #1 (AC2/AC3 — the 12a6b18b defect): drop the copy-judging test's declaration ────────────
+# ── INJECT #1 (AC2/AC3 — the 12a6b18b defect): drop the copy-judging checker's declaration ──────────
 # Without `@judges plugin/loop/*`, a change to plugin/loop/manager-tick-core.md computes to an EMPTY
-# set — the constraint that judges the copy is silently invisible, exactly the pre-12a6b18b state
-# where the author ran tick-core-static-check (wrong object) and the real judge never ran.
-write plugin/test/quay-init-loop-consumer-doc-refs.test.mjs \
-  '// @test-group serial' \
-  'import { test } from "node:test";' \
-  'test("the shipped plugin/loop docs have zero plugin/loop refs", () => {});'
+# set — the constraint that judges the copy is silently invisible, exactly the pre-12a6b18b state.
+write plugin/scripts/laydown-set-check.sh \
+  '#!/usr/bin/env bash' \
+  'echo "fixture"'
 if checker_cmd; then
-  echo "STAYED-GREEN — removing the copy-judging test's @judges declaration did not redden the checker" >&2
+  echo "STAYED-GREEN — removing the copy-judging checker's @judges declaration did not redden the checker" >&2
   exit 3
 fi
 # RESTORE #1 → GREEN again.
-write plugin/test/quay-init-loop-consumer-doc-refs.test.mjs \
-  '// @test-group serial' \
-  '// @judges plugin/loop/*' \
-  'import { test } from "node:test";' \
-  'test("the shipped plugin/loop docs have zero plugin/loop refs", () => {});'
+write plugin/scripts/laydown-set-check.sh \
+  '#!/usr/bin/env bash' \
+  '# @judges plugin/loop/*' \
+  'echo "fixture"'
 if checker_cmd; then :; else
-  echo "ALWAYS-RED — restored (declared) copy-judging test still reddens the checker" >&2
+  echo "ALWAYS-RED — restored (declared) copy-judging checker still reddens the checker" >&2
   exit 4
 fi
 

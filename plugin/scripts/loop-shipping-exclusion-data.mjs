@@ -119,6 +119,7 @@ export function exclusionEntries(repoRoot, pluginDir) {
   return [
     { rel: 'tasks', target: path.join(repoRoot, 'tasks'), reason: 'historical task records (descriptions of the past)' },
     { rel: 'milestones', target: path.join(repoRoot, 'milestones'), reason: 'historical milestone journals' },
+    { rel: 'archive', target: path.join(repoRoot, 'archive'), reason: 'historical archive of retired files (SPEC §12) — archived tests/scripts legitimately reference retired old paths; archives are historical records, never live callers' },
     { rel: 'docs/analysis/batch2-queue-state.md', target: path.join(repoRoot, 'docs', 'analysis', 'batch2-queue-state.md'), reason: "the queue-state's tick records reference the deployed tick-doc target layout (docs/analysis/ + orchestration/ paths) as living documentation — same class as the deployed copies excluded below", retainedNote: "kept despite currently inert (0 hits of the 5 old-path patterns): the queue-state is a GITIGNORED runtime ledger (16:1x rule — never committed, read from disk via tail) whose tick records quote deployed tick-doc commands verbatim. A tick that quotes a deployed tick-doc line (which the AC1b scan sees as a live reference) lands exactly when the next tick appends — so the entry oscillates between inert and live. When a pack/verification run materializes a copy of the target layout, the queue-state's quoted commands carry the same old-path strings and the scan must not flag the ledger itself as the reference. (oldPaths shrank 6→5 on 2026-08-06 with heavy-op-token.sh's retirement, leaving it inert until the next append.)" },
     { rel: 'orchestration/tick-log.md', target: path.join(repoRoot, 'orchestration', 'tick-log.md'), reason: "the outer's running log", retainedNote: "kept despite currently inert (0 hits of the 5 old-path patterns): the outer tick-log is a GITIGNORED runtime ledger (16:1x rule — never committed) whose entries quote the tick-doc/scripts commands the outer actually ran, including deployed-target-layout paths. Each outer tick appends verbatim command text, so the entry oscillates between inert and live exactly as new entries land; when a verification round copies the target layout, the log's quoted commands carry the same old-path strings and must not be flagged as the reference. (oldPaths shrank 6→5 on 2026-08-06 with heavy-op-token.sh's retirement, leaving it inert until the next append.)" },
     { rel: 'orchestration/manager-pending.md', target: path.join(repoRoot, 'orchestration', 'manager-pending.md'), reason: "the manager's pending-task ledger — a GITIGNORED runtime file (16:1x rule — never committed) whose entries quote deployed tick-doc paths (e.g. 'orchestration/orchestrator-loop-tick.md:640') while tracking contradictions against the tick-doc templates. Same class as tick-log.md / batch2-queue-state.md: the ledger documents the DEPLOYED target layout (orchestration/ + docs/analysis/) as living reference, so the AC1b scan must not flag the ledger itself as a stale source-copy reference. Surfaced by AC1b scan 2026-08-08 (fixed-overhead measurement round): manager-pending.md:21 quotes the deployed outer tick-doc path.", retainedNote: "kept despite currently inert in a FRESH checkout (the target is a GITIGNORED runtime ledger — 16:1x rule, never committed — so it does NOT exist in a fresh clone and the necessity scan sees 0 hits only because the file is absent). The manager appends/edits this ledger during operation (tracking pending tasks + tick-doc contradictions), and its entries quote deployed-target-layout paths verbatim; when the manager next writes a quoted deployed tick-doc line the AC1b scan would flag the ledger as a live reference. The entry must stay to keep the scan from mis-attributing the ledger's own quotes — same oscillation class as tick-log.md." },
@@ -171,7 +172,8 @@ export function exclusionEntries(repoRoot, pluginDir) {
     },
     { rel: 'test/cold-start-e2e.sh', target: path.join(repoRoot, 'test', 'cold-start-e2e.sh'), reason: 'target layout (asserts the laid-down project)' },
     { rel: 'test/cold-start-oneliner-e2e.sh', target: path.join(repoRoot, 'test', 'cold-start-oneliner-e2e.sh'), reason: 'AC8d target-layout paths (the cold start operates on orchestration/ + docs/analysis/)' },
-    { rel: 'plugin/skills/init/SKILL.md', target: path.join(pluginDir, 'skills', 'init', 'SKILL.md'), reason: "mapping table's target column" },
+    // (gap-quay-init-closure-shrink-body AC168: init/SKILL.md was rewritten to the closed-set contract —
+    //  it no longer carries the target-layout mapping table, so its exclusion entry is gone.)
     {
       rel: 'plugin/skills/cold-start/SKILL.md',
       target: path.join(pluginDir, 'skills', 'cold-start', 'SKILL.md'),
@@ -187,21 +189,9 @@ export function exclusionEntries(repoRoot, pluginDir) {
       target: path.join(repoRoot, 'packages', 'quay', 'test', 'install-config-driven-e2e.test.mjs'),
       reason: "asserts the laid-down target layout: REQUIRED_PRODUCT_FILES lists the cold-started project's orchestration/ + docs/analysis/ tick-doc paths (the reinstall-gate e2e, landed RED-first; its target-layout references were never added here)",
     },
-    {
-      rel: 'packages/quay/test/install-config-driven-e2e-runtime.test.mjs',
-      target: path.join(repoRoot, 'packages', 'quay', 'test', 'install-config-driven-e2e-runtime.test.mjs'),
-      reason: "the RUNTIME-LANDING/BUILD half of the install-config-driven e2e family — split from install-config-driven-e2e.test.mjs by gap-split-three-phase-floor-files (2026-08-12, 6cba27d4; test bodies byte-identical to the pre-split file). productSource() maps the laid-down orchestration/ + docs/analysis/ tick-doc paths back to their plugin/loop/ sources and REQUIRED_PRODUCT_FILES asserts the consumer's laid-down target layout; same target-layout class as the pre-split file excluded above",
-    },
-    {
-      rel: 'packages/quay/test/install-config-driven-e2e-upgrade.test.mjs',
-      target: path.join(repoRoot, 'packages', 'quay', 'test', 'install-config-driven-e2e-upgrade.test.mjs'),
-      reason: "the UPGRADE/CONFIG-PRESERVATION half of the install-config-driven e2e family — split from install-config-driven-e2e.test.mjs by gap-split-three-phase-floor-files (2026-08-12, 6cba27d4; test bodies byte-identical to the pre-split file). productSource() maps the laid-down orchestration/ + docs/analysis/ tick-doc paths back to their plugin/loop/ sources; same target-layout class as the pre-split file excluded above",
-    },
-    {
-      rel: 'plugin/test/quay-init-loop-consumer-doc-refs.test.mjs',
-      target: path.join(pluginDir, 'test', 'quay-init-loop-consumer-doc-refs.test.mjs'),
-      reason: "asserts the consumer-laid layout (docs/analysis/ + orchestration/ paths) — the AC37 consumer-doc-refs install family (gap-quay-init-loop-tick-doc-paths-reference-unlanded-plugin-loop). Same target-layout class as install-config-driven-e2e.test.mjs",
-    },
+    // (gap-quay-init-closure-shrink-body AC168: install-config-driven-e2e-{runtime,upgrade} +
+    //  quay-init-loop-consumer-doc-refs were archived with the retired copy machinery — their old-path
+    //  references now live under archive/, covered by the archive/ entry above.)
     {
       rel: 'plugin/loop',
       target: path.join(pluginDir, 'loop'),
@@ -301,11 +291,9 @@ export function exclusionEntries(repoRoot, pluginDir) {
       target: path.join(pluginDir, 'test', 'tick-core-static-check.test.mjs'),
       reason: "tests the checker against its deployed-layout scan surface (PROHIBITION_DOCS fixtures incl. orchestration/orchestrator-loop-tick.md written into the baseline root); target-layout reference, same class as instrument-failure-check.test.mjs",
     },
-    {
-      rel: 'plugin/test/quay-init-loop.test.mjs',
-      target: path.join(pluginDir, 'test', 'quay-init-loop.test.mjs'),
-      reason: "asserts quay-init's DEPLOYED layout — quay-init.sh lays tick docs at orchestration/orchestrator-loop-tick.md + docs/analysis/fast-mode-loop-tick.md (target layout); the assertion verifies the consumer workspace tracks the deployed copies, not a stale source-copy reference",
-    },
+    // (gap-quay-init-closure-shrink-body AC168: quay-init-loop.test.mjs was rewritten to the closed-set
+    //  contract — it no longer asserts the DEPLOYED tick-doc layout, so its exclusion entry is gone.)
+
     {
       rel: 'plugin/scripts/verify-delivery-surface.ts',
       target: path.join(pluginDir, 'scripts', 'verify-delivery-surface.ts'),

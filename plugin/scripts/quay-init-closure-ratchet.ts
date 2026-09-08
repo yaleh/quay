@@ -1,49 +1,39 @@
-// quay-init-closure-ratchet.ts — the shrink-only ratchet over the REAL quay-init laydown footprint,
-// now with a MECHANICAL re-anchor (gap-quay-init-closure-ratchet-manual-reanchor-recurs).
-// (gap-quay-init-closure-assertion-first — SPEC AC168 判据先行; the closure shrink body is a later wave.)
+// quay-init-closure-ratchet.ts — the shrink-only ratchet over the REAL quay-init laydown footprint.
+// (gap-quay-init-closure-assertion-first — SPEC AC168 判据先行; gap-quay-init-closure-shrink-body —
+//  the closure shrink body that actually cut the copy machinery, and re-anchors this baseline.)
 //
-// THE DEFECT THIS CLOSES: `quay-init --loop` copies the mechanism layer (117–131 scripts, tick docs,
-// workflows, agents, probes, runtime) BYTE-FOR-BYTE into every target project's own git history — a
-// footprint measured ONCE (§2.9 of docs/proposals/archguard-generation-era-primitives.md: 142 files /
-// 7.1 MB) and then never observed again. This ratchet makes the direction mechanical NOW: baseline =
-// the measured footprint, shrink-only (只许降不许升) — a change that makes quay-init lay down ONE MORE
-// file (or byte) goes RED immediately.
+// THE DEFECT THIS CLOSES: `quay-init --loop` used to copy the mechanism layer (117–131 scripts, tick
+// docs, workflows, agents, probes, runtime) BYTE-FOR-BYTE into every target project's own git history.
+// SPEC §6 (gap-quay-init-closure-shrink-body, AC168) shrunk the write surface to the SIX-item closed
+// set (.quay/config.yml / .quay/profiles.yml / tasks/ / .gitignore / .claude/launch.settings.json /
+// .claude/settings.json). This ratchet keeps the direction mechanical: baseline = the measured
+// footprint, shrink-only (只许降不许升) — a change that makes quay-init lay down ONE MORE file (or
+// byte) goes RED immediately.
 //
 // THE MEASUREMENT IS THE PRODUCTION CARRIER (SPEC AC4's counter-example criterion, hard rule 4 推论三):
 // the checker runs a REAL `quay-init --all --loop --manager` laydown into a fresh temp target and counts
-// the result. It does NOT read `derive_loop_scripts`' static derivation for the byte judgment, and does
-// NOT read a fixture — a pass must survive the injection seam being turned off. `.quay/` is EXCLUDED
-// from the count (generated, non-deterministic namespace). (The `--baseline-files/--baseline-bytes`
-// overrides exist ONLY for the unit test + mutation case to exercise the ±1 judgment on a small
-// controlled fixture; production reads the committed baseline file.)
+// the result. It does NOT read a fixture — a pass must survive the injection seam being turned off.
+// `.quay/` is EXCLUDED from the count (config.yml embeds machine-specific absolute paths — the
+// non-reproducible namespace). (The `--baseline-files/--baseline-bytes` overrides exist ONLY for the
+// unit test + mutation case to exercise the ±1 judgment on a small controlled fixture; production reads
+// the committed baseline file.)
 //
-// WHY A BASELINE FILE + A FRESHNESS GATE (this task): the baseline used to be a hardcoded literal.
-// Every legitimate growth of a laid-down mechanism file (meta-driver.ts, probes/meta-driver.md, …)
-// tripped the byte axis, and the "fix" was a hand-edit of two numbers — done 7 times before this task.
-// A threshold whose reasonableness depends on an exogenous variable (how many bytes other tasks added)
-// is the hard rule 4 推论二 literal-value trap. The fix has two halves, both here:
-//   ① the baseline is now a COMMITTED, mechanically-refreshable file (docs/analysis/…baseline.json):
-//      `--reanchor` re-measures the real laydown + records the source-tree fingerprint, so a re-anchor
-//      is one command, never a hand number edit;
-//   ② a CHEAP freshness gate (`--check-stale`, wired at @static-tier change) hashes the laydown
-//      SOURCE tree and reds when a source file changed but the baseline was NOT re-anchored — at the
-//      CHANGER's own scoped gate, not at an unrelated task's full-suite fan-in.
-// The full-tier byte ratchet (`--gate`) still measures the REAL laydown and still reds on true bloat
-// (negative control: it is NOT relaxed into a constant-true).
+// WHY A BASELINE FILE + A FRESHNESS GATE: the baseline is a COMMITTED, mechanically-refreshable file
+// (`--reanchor` re-measures the real laydown + records the source-tree fingerprint); `--check-stale`
+// hashes the laydown SOURCE tree and reds when a source file changed but the baseline was NOT
+// re-anchored. The full-tier byte ratchet (`--gate`) still measures the REAL laydown.
 //
-// THE FINGERPRINT SOURCE SET is the precise set quay-init copies (excluding the generated `.quay/`
-// namespace): the DERIVED script set (derive_loop_scripts — the SAME single source the laydown uses,
-// resolved plugin/scripts/<name> or the orchestration/*-tick-core.md 正本 a loop pointer names) PLUS the
-// wholesale category dirs (workflows/agents/probes/loop) PLUS plugin/.claude/launch.settings.json. It is
-// NOT "all of plugin/scripts/" — ~200 harness/checker scripts under plugin/scripts/ are NOT laid down and
-// must not force a re-anchor. NOTE the documented boundary: quay-init.sh itself is NEVER_LAYDOWN and is
-// excluded (its content is never copied; a copy-LOGIC change that grows the footprint is still caught by
-// the full-tier byte ratchet at fan-in).
+// THE FINGERPRINT SOURCE SET is the precise set that DETERMINES the closed-set laydown output:
+//   plugin/scripts/quay-init.sh          the generator (config.yml / .gitignore / settings.json content)
+//   plugin/.quay/profiles.yml            template laid verbatim
+//   plugin/.claude/launch.settings.json  template laid verbatim
+//   plugin/.claude-plugin/plugin.json    read for plugin name + version
+// (The retired derived-script set + wholesale category dirs are gone — the copy machinery was archived
+//  by gap-quay-init-closure-shrink-body AC1.)
 //
 // NOT-EVALUATED (exit 3, hard rule 3b): when the real laydown cannot run, OR the committed baseline is
-// missing, OR the derived laydown set cannot be computed, the checker reports NOT-EVALUATED
+// missing, OR the laydown source set cannot be computed, the checker reports NOT-EVALUATED
 // (evaluated:false) — a checker that could not read its input must never look like "合格" (exit 0).
-// run_checker treats exit 3 as a third state, distinct from PASS (0) and FAIL (1).
 //
 // MODES:
 //   --gate [--root <dir>] [--json] [--baseline-files N] [--baseline-bytes B]
@@ -78,17 +68,16 @@ const EXCLUDED_TOP_DIRS: ReadonlySet<string> = new Set([".quay"]);
 // alongside test-file-baseline.txt — a COMMITTED baseline artifact, not a plugin/scripts/ executable.
 const BASELINE_FILE_REL = "docs/analysis/quay-init-closure-ratchet.baseline.json";
 
-// The wholesale category dirs quay-init lays down (every regular file under them is copied), plus the
-// single-file launch template. The DERIVED script set (plugin/scripts/*) is NOT wholesale — it is the
-// derive_loop_scripts output (see collectSourceEntries), because ~200 harness/checker scripts under
-// plugin/scripts/ are NOT laid down and must not be fingerprinted.
-const WHOLESALE_DIRS: readonly string[] = [
-  "plugin/workflows",
-  "plugin/agents",
-  "plugin/probes",
-  "plugin/loop",
+// The precise source set that DETERMINES the closed-set laydown output (repo-root-relative paths).
+// quay-init.sh is the generator (its content decides config.yml/.gitignore/.claude/settings.json);
+// the two templates are laid verbatim; plugin.json is read for the plugin name+version. A change to
+// ANY of these must invalidate the baseline (re-anchor).
+const LAYDOWN_SOURCES: readonly string[] = [
+  "plugin/scripts/quay-init.sh",
+  "plugin/.quay/profiles.yml",
+  "plugin/.claude/launch.settings.json",
+  "plugin/.claude-plugin/plugin.json",
 ];
-const EXTRA_FILES: readonly string[] = ["plugin/.claude/launch.settings.json"];
 
 export interface ClosureCount {
   files: number;
@@ -213,104 +202,24 @@ export function baselineFile(root: string): string {
 }
 
 /**
- * Derive the laydown SCRIPT+loop set (one basename per line) via quay-init.sh's derive_loop_scripts —
- * the SAME single source the --loop laydown uses (never a hand-rolled grep). Returns null when the
- * derivation cannot run (NOT-EVALUATED — a checker that cannot read its input is never "in sync").
- */
-export function deriveLaydownNames(root: string): string[] | null {
-  const pluginRoot = path.join(root, "plugin");
-  const script = [
-    `export CLAUDE_PLUGIN_ROOT='${pluginRoot}'`,
-    `set --`,
-    `. '${path.join(pluginRoot, "scripts", "quay-init.sh")}'`,
-    `PLUGIN_ROOT='${pluginRoot}'`,
-    `derive_loop_scripts`,
-  ].join("\n");
-  try {
-    const out = execFileSync("bash", ["-c", script], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 120_000,
-    });
-    const names = out.split("\n").map((s) => s.trim()).filter(Boolean);
-    return names.length > 0 ? names : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Resolve a derived basename to its laydown SOURCE file, mirroring the laydown's own resolution:
- * plugin/scripts/<name> when it exists; else the loop pointer's orchestration/*-tick-core.md 正本
- * (resolve_tick_core_src) when plugin/loop/<name> is a pointer; else the loop file itself (verbatim
- * laydown). Returns null when the name resolves to nothing on disk.
- */
-export function resolveDerivedSource(root: string, name: string): string | null {
-  const inScripts = path.join(root, "plugin", "scripts", name);
-  if (fs.existsSync(inScripts)) return inScripts;
-  const inLoop = path.join(root, "plugin", "loop", name);
-  if (fs.existsSync(inLoop)) {
-    const shipped = fs.readFileSync(inLoop, "utf8");
-    const m = shipped.match(/^> 正本: ([a-zA-Z0-9._/-]+)/);
-    if (m) {
-      const cand = path.join(root, m[1]);
-      if (fs.existsSync(cand)) return cand;
-    }
-    return inLoop;
-  }
-  return null;
-}
-
-/** Recursively list regular files under `dir` (absolute paths, symlinks not followed). */
-export function walkFiles(dir: string): string[] {
-  const out: string[] = [];
-  const walk = (d: string): void => {
-    let items: fs.Dirent[];
-    try {
-      items = fs.readdirSync(d, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of items) {
-      const p = path.join(d, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (e.isFile()) out.push(p);
-    }
-  };
-  walk(dir);
-  return out;
-}
-
-/**
- * Collect the precise laydown SOURCE set (repo-relative path + content sha256, sorted by rel).
- * Returns null when the derived set cannot be computed (NOT-EVALUATED).
+ * Collect the precise laydown SOURCE set (repo-relative path + content sha256, sorted by rel) — the
+ * files that DETERMINE the closed-set laydown output (the generator + the two verbatim templates +
+ * the plugin manifest read for name/version). Returns null when any source is unreadable
+ * (NOT-EVALUATED — a checker that cannot read its input is never "in sync").
  */
 export function collectSourceEntries(root: string): SourceEntry[] | null {
-  const names = deriveLaydownNames(root);
-  if (names === null) return null;
   const entries: SourceEntry[] = [];
-  const seen = new Set<string>();
-  const add = (abs: string): void => {
+  for (const rel of LAYDOWN_SOURCES) {
+    const abs = path.join(root, ...rel.split("/"));
     let st: fs.Stats;
     try {
       st = fs.statSync(abs);
     } catch {
-      return;
+      return null; // a missing laydown source ⇒ the fingerprint cannot be computed
     }
-    if (!st.isFile()) return;
-    const rel = path.relative(root, abs).split(path.sep).join("/");
-    if (seen.has(rel)) return;
-    seen.add(rel);
+    if (!st.isFile()) return null;
     entries.push({ rel, sha: sha256Hex(fs.readFileSync(abs)) });
-  };
-  for (const name of names) {
-    const src = resolveDerivedSource(root, name);
-    if (src) add(src);
   }
-  for (const dir of WHOLESALE_DIRS) {
-    for (const f of walkFiles(path.join(root, dir))) add(f);
-  }
-  for (const f of EXTRA_FILES) add(path.join(root, f));
   entries.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
   return entries;
 }

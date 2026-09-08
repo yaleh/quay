@@ -16,10 +16,6 @@ origin: |
   同形先例（同一天三个互不相关的机件）：task-status-drift-check.ts:126、
   slot-refill.ts:373、outer-tick-log-check.sh:107/112/205/262 —— 全部退出码 0、
   结构完整、数字合理，而它们什么都没查。
-evidence:
-  at: 2026-09-07T01:21:52.960Z
-  verdict: pass
-  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：`check --staleness` 输出把 active GOAL 分进**三个具名桶**：

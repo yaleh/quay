@@ -1,7 +1,7 @@
 ---
 id: AC-168
 title: quay-init 收缩到 SPEC §6 闭集
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-003
 criterion: grep -qE '^[[:space:]]*copy_dir

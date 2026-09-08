@@ -20,10 +20,6 @@ origin: |
   人 2026-09-06 需求⑥「在 quay web 为 goal 实现相应的页面和 dashboard 卡片」。
   判据读【运行中的服务】而非源码，依据硬规则 4 推论三：
   grep 源码只证明"能产出"，不证明"已产出"。
-evidence:
-  at: 2026-09-07T06:28:16.796Z
-  verdict: pass
-  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：从**运行中的 `quay serve` 进程**派生地址，`GET /dashboard` 的响应含 `goal-card`。

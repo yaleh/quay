@@ -73,6 +73,14 @@ import { commitStoreWrite, resolveGitRoot, type CommitOutcome } from "./store-co
 
 export const VALID_GOAL_STATUSES = ["draft", "active", "achieved", "superseded", "retired"];
 
+// gap-goal-record-completeness-undefined — "what counts as a COMPLETE goal record" was never
+// defined: `origin` was required while `body` was optional, inverting the incentive (8 goals, 5
+// with empty body — the prose all crammed into `origin`). A GOAL's substance (background / scope
+// & non-goals / exit conditions) lives in its `body`; `origin` is only a provenance citation.
+// Mirrors the task side's MIN_SECTION_CHARS = 40 (ready-pool-check.ts). Exported so the falsifiability
+// test asserts the SAME threshold the store enforces (never a second, divergent literal).
+export const MIN_GOAL_BODY_CHARS = 40;
+
 const GOAL_ID_RE = /^GOAL-\d{3,}$/;
 const AC_ID_RE = /^AC-\d{3,}$/;
 
@@ -101,8 +109,10 @@ const OWNED_KEYS = new Set([
 // not-checked, not false). This is the SINGLE point both consumers share: `checkStaleness` reads
 // `ac.evidence.at` from `list()`'s view-models, and the native provider's `goal_list`/`goal_get`
 // verbs surface the same view-models to serve-goal.
-function ledgerEvidenceMap(goalDir: string): Map<string, { at?: string; verdict?: string; reading?: string }> {
-  const map = new Map<string, { at?: string; verdict?: string; reading?: string }>();
+type LedgerEvidence = { at?: string; verdict?: string; reading?: string; firstAt?: string };
+
+function ledgerEvidenceMap(goalDir: string): Map<string, LedgerEvidence> {
+  const map = new Map<string, LedgerEvidence>();
   const logPath = path.join(path.dirname(goalDir), ".quay", "gate-events.jsonl");
   let events;
   try {
@@ -117,8 +127,11 @@ function ledgerEvidenceMap(goalDir: string): Map<string, { at?: string; verdict?
       && typeof (ev.payload as Record<string, unknown>).reason === "string"
       ? (ev.payload as Record<string, unknown>).reason as string
       : undefined;
-    // Append order = on-disk order, so the LAST matching event wins (the most recent).
-    map.set(id, { at: ev.timestamp, verdict: ev.verdict, reading });
+    // Append order = on-disk order, so the LAST matching event wins (the most recent). `firstAt`
+    // keeps the FIRST matching event (the earliest evidence) — the SAME single pass supplies both
+    // extremes with zero extra I/O (firstEvidenceAt's min is the first-seen timestamp).
+    const prev = map.get(id);
+    map.set(id, { at: ev.timestamp, verdict: ev.verdict, reading, firstAt: prev?.firstAt ?? ev.timestamp });
   }
   return map;
 }
@@ -209,6 +222,10 @@ interface GoalViewModel {
   supersededBy: unknown[];
   body: string;
   updatedAt?: number;
+  /** Ledger-derived (never stored, never mtime): the record's most recent goal-gate-event time. */
+  lastProgressAt?: string;
+  /** Ledger-derived (never stored, never mtime): the record's earliest goal-gate-event time. */
+  firstEvidenceAt?: string;
 }
 
 export interface DisposeOld {
@@ -224,6 +241,45 @@ export function isGoalId(id: string): boolean {
 
 export function isCriterionId(id: string): boolean {
   return typeof id === "string" && AC_ID_RE.test(id);
+}
+
+// ── lastProgressAt / firstEvidenceAt for GOAL rows (M1 time columns) ──────────────────────────
+// A GOAL's time is DERIVED from its ACs' ledger-derived evidence — NEVER its own `updatedAt`
+// (mtime) and never a stored field (hard rule 4b: a quantity the measured object produces is not
+// a measurement). lastProgressAt = max over ACs of `evidence.at` (its most recent progress);
+// firstEvidenceAt = min over ACs of `evidence.firstAt` (its earliest evidence). Criterion records
+// already carry their own last/first from toViewModel (their own gate events); this pass overrides
+// the (undefined) GOAL values. Runs over the FULL pre-filter list so a `?kind=goal`/`?goal=` filter
+// can never empty a goal's AC set (hard rule 3b — the rollup and time must not collapse under filter).
+function annotateGoalProgress(all: GoalViewModel[]): void {
+  const byGoal = new Map<string, GoalViewModel[]>();
+  for (const g of all) {
+    if (typeof g.goal !== "string") continue;
+    const arr = byGoal.get(g.goal) ?? [];
+    arr.push(g);
+    byGoal.set(g.goal, arr);
+  }
+  for (const g of all) {
+    if (!isGoalId(String(g.id))) continue;
+    const acs = byGoal.get(String(g.id)) ?? [];
+    let lastMs: number | undefined;
+    let firstMs: number | undefined;
+    let lastStr: string | undefined;
+    let firstStr: string | undefined;
+    for (const ac of acs) {
+      const ev = ac.evidence as { at?: unknown; firstAt?: unknown } | undefined;
+      if (ev && typeof ev.at === "string") {
+        const t = Date.parse(ev.at);
+        if (!Number.isNaN(t) && (lastMs === undefined || t > lastMs)) { lastMs = t; lastStr = ev.at; }
+      }
+      if (ev && typeof ev.firstAt === "string") {
+        const t = Date.parse(ev.firstAt);
+        if (!Number.isNaN(t) && (firstMs === undefined || t < firstMs)) { firstMs = t; firstStr = ev.firstAt; }
+      }
+    }
+    g.lastProgressAt = lastStr;
+    g.firstEvidenceAt = firstStr;
+  }
 }
 
 /**
@@ -290,9 +346,10 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
   function toViewModel(
     frontmatter: GoalFrontmatter,
     body: string,
-    evidenceMap: Map<string, { at?: string; verdict?: string; reading?: string }>,
+    evidenceMap: Map<string, LedgerEvidence>,
     updatedAt?: number,
   ): GoalViewModel {
+    const evidence = evidenceMap.get(String(frontmatter.id ?? ""));
     const vm: GoalViewModel = {
       id: frontmatter.id,
       title: frontmatter.title,
@@ -302,7 +359,12 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       criterion: frontmatter.criterion,
       expect: frontmatter.expect,
       origin: frontmatter.origin,
-      evidence: evidenceMap.get(String(frontmatter.id ?? "")),
+      evidence,
+      // Own-record time (a criterion): lastProgressAt = its LAST gate=goal event, firstEvidenceAt =
+      // its FIRST. A GOAL's own fields are undefined here (GOALs carry no criterion and are never
+      // gated themselves) — list() derives a GOAL's time from its ACs via annotateGoalProgress.
+      lastProgressAt: typeof evidence?.at === "string" ? evidence.at : undefined,
+      firstEvidenceAt: typeof evidence?.firstAt === "string" ? evidence.firstAt : undefined,
       supersedes: frontmatter.supersedes ?? [],
       supersededBy: frontmatter["superseded-by"] ?? [],
       body,
@@ -326,13 +388,16 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
 
   function list(filter: GoalFilter = {}): GoalViewModel[] {
     const evidenceMap = ledgerEvidenceMap(goalDir);
-    return fs
+    const all = fs
       .readdirSync(goalDir)
       .filter((f) => f.endsWith(".md") && (f.startsWith("GOAL-") || f.startsWith("AC-")))
       .map((f) => {
         const { frontmatter, body } = parseFrontmatter(fs.readFileSync(path.join(goalDir, f), "utf8"));
         return toViewModel(frontmatter as GoalFrontmatter, body, evidenceMap, fs.statSync(path.join(goalDir, f)).mtimeMs);
-      })
+      });
+    // GOAL rows' time is derived from their ACs — computed over the FULL list before any filter.
+    annotateGoalProgress(all);
+    return all
       .filter((g) => (filter.status ? g.status === filter.status : true))
       .filter((g) => (filter.kind ? g.kind === filter.kind : true))
       .filter((g) => (filter.goal ? g.goal === filter.goal : true))
@@ -527,6 +592,9 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
         frontmatter = { ...(parsed.frontmatter as GoalFrontmatter) };
         existingBody = parsed.body;
       }
+      // The body that will land: an explicit `body` param, else the stored body (patch
+      // semantics — omitting `body` on an update keeps it, the same as `origin`).
+      const finalBody = body !== undefined ? body : existingBody;
       // Apply owned fields (preserving any unknown frontmatter keys verbatim).
       frontmatter.id = id;
       if (title !== undefined) frontmatter.title = title;
@@ -551,6 +619,41 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
         throw new Error(
           `origin is required for ${id} — an AC/goal without an empirical basis is cargo cult; empty origin writes nothing`
         );
+      }
+
+      // gap-goal-record-completeness-undefined — "what counts as a COMPLETE record" is
+      // kind-split (⛔ never one rule for both — a blanket body-required rule would misfire
+      // on the 57 criteria whose content legitimately lives in criterion+expect):
+      //   criterion ⇒ `criterion` + `expect` + `goal` REQUIRED, `body` optional.
+      //   goal      ⇒ `body` REQUIRED (≥ MIN_GOAL_BODY_CHARS non-whitespace), `origin` is
+      //               provenance only.
+      // Each rejection names its kind and the missing field, distinguishable from every other
+      // failure (hard rule 3b — "which field is missing" is the actionable info).
+      //
+      // CREATE-ONLY (⛔ never on update): the contract governs AUTHORING a new record, not the
+      // mechanical I2 status flip (active→achieved) the goal-driver performs on an EXISTING
+      // record via writeGoalStatus (plugin/scripts/goal-driver.ts), which carries only
+      // `status`+`origin`. Re-requiring body/criterion/expect on update would block that flip —
+      // including on the pre-rule empty-body goals this task deliberately does NOT backfill.
+      if (!existingFile) {
+        if (!isGoalRecord) {
+          if (typeof frontmatter.criterion !== "string" || frontmatter.criterion.trim() === "") {
+            throw new Error(
+              `${id} is a criterion record and requires a non-empty \`criterion\` — the runnable command that verifies it (a criterion's content lives in criterion+expect, not the body; empty criterion writes nothing)`
+            );
+          }
+          if (typeof frontmatter.expect !== "string" || frontmatter.expect.trim() === "") {
+            throw new Error(
+              `${id} is a criterion record and requires a non-empty \`expect\` — the expected outcome the criterion proves (a criterion's content lives in criterion+expect, not the body; empty expect writes nothing)`
+            );
+          }
+        } else {
+          if (finalBody.trim().length < MIN_GOAL_BODY_CHARS) {
+            throw new Error(
+              `${id} is a GOAL record and requires a \`body\` of ≥${MIN_GOAL_BODY_CHARS} non-whitespace chars (background / scope & non-goals / exit conditions) — \`origin\` is only a provenance citation, not the body; empty body writes nothing`
+            );
+          }
+        }
       }
 
       // I1′ — hard cap, write-time fail-closed (SPEC-goal-mechanism-2026-09-06.md §4.1).
@@ -592,7 +695,6 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       for (const k of Object.keys(frontmatter)) {
         if (!OWNED_KEYS.has(k)) ordered[k] = frontmatter[k];
       }
-      const finalBody = body !== undefined ? body : existingBody;
       const fileName = existingFile ?? `${id}-${slugify(title, "goal")}.md`;
       fs.writeFileSync(path.join(goalDir, fileName), serializeFrontmatter(ordered, finalBody), "utf8");
       const outcome = commitGoalFile(goalDir, fileName, id);
@@ -612,7 +714,7 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
 // Subcommands (workspace root auto-derived from the script location, or --root <dir>):
 //   list                      — list all goal records (GOAL + AC) as JSON
 //   get <id>                  — one record as JSON
-//   write <id> --title ... --status ... --goal ... --criterion ... --origin ... [--expect ...]
+//   write <id> --title ... --status ... --goal ... --criterion ... --origin ... [--expect ...] [--body ...]
 //   gate <id> [--root <dir>]  — run the record's `criterion` via the acceptance runner and append
 //                               one GateEvent (verdict+timestamp) to <root>/.quay/gate-events.jsonl;
 //                               empty criterion fails CLOSED (red) and still records the event.
@@ -673,7 +775,7 @@ async function main(argv: string[]) {
         if (!k.startsWith("--")) continue;
         const key = k.slice(2);
         if (key === "title" || key === "status" || key === "goal" || key === "criterion" ||
-            key === "expect" || key === "origin" || key === "superseded-by" ||
+            key === "expect" || key === "origin" || key === "body" || key === "superseded-by" ||
             key === "dispose-old" || key === "dispose-to") {
           opts[key] = v;
           i++;
@@ -702,6 +804,7 @@ async function main(argv: string[]) {
         criterion: opts.criterion as string | undefined,
         expect: opts.expect as string | undefined,
         origin: opts.origin as string,
+        body: opts.body as string | undefined,
         supersededBy: Array.isArray(opts["superseded-by"])
           ? opts["superseded-by"] as string[]
           : (typeof opts["superseded-by"] === "string" ? [opts["superseded-by"] as string] : undefined),
