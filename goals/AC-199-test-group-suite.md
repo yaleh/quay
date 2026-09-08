@@ -1,7 +1,7 @@
 ---
 id: AC-199
 title: 双向负控制单测存在、带 @test-group 标注（进默认 suite）、且跑绿
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-008
 criterion: >-
