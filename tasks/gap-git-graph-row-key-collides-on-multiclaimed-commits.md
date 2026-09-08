@@ -2,7 +2,7 @@
 id: gap-git-graph-row-key-collides-on-multiclaimed-commits
 title: git-history 行号以 hash/laneId 为键而同一提交被多条 lane 重复认领（774 条中 497 条重复）⇒
   后写覆盖先写、61 对文字压在同一 y；前task 的重叠不变式全部由 fixture 满足，生产形状从未进过 fixture
-status: ready
+status: done
 labels:
   - gap
   - webui
