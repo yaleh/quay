@@ -13,10 +13,6 @@ origin: |
   一个只能被 fixture / 注入数据满足的判据不是测量。
   同族先例即本 GOAL 的立条依据：gap-spec-goal-store-third-sibling-kind 标 done、
   AC 全绿，而 goals/ 从未存在、gate-events 中 "gate":"goal" 零条。
-evidence:
-  at: 2026-09-07T01:21:57.342Z
-  verdict: pass
-  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：`.quay/goal-round.jsonl` 非空且含 ≥3 条带 `verdict` 的记录。

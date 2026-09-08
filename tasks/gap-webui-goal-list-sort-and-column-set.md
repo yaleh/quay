@@ -2,7 +2,7 @@
 id: gap-webui-goal-list-sort-and-column-set
 title: /goal 的列集合、排序与取数：origin 散文列（中位 191/max 2775 字符）撑爆排版、账本已算出的时刻一列没渲染、排序写死在
   store 层、?goal= 筛选被 handler 丢弃；且不带筛选取一次即可把 2 次 goalList 降为 1 次并白得 AC 达成 rollup
-status: todo
+status: ready
 labels:
   - gap
   - webui

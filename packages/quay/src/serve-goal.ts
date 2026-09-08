@@ -2,7 +2,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
-import { html, escapeHtml, shellStyles, renderMarkdown, renderSiteNav, renderMobileChrome } from "./serve-render.ts";
+import { html, escapeHtml, shellStyles, renderMarkdown, renderSiteNav, renderMobileChrome, renderBackLink } from "./serve-render.ts";
 
 // ── /goal — the third sibling kind (goal store), now PROVIDER-BACKED
 // (SPEC-goal-mechanism-2026-09-06.md §5.2): these routes read goals through the
@@ -26,6 +26,21 @@ function goalEvidenceCell(ext: Record<string, unknown>): string {
     ? `<strong class="verdict-pass">pass</strong>`
     : `<strong class="verdict-fail">${escapeHtml(verdict || "unknown")}</strong>`;
   return html`${vColored}${at ? ` · ${escapeHtml(at)}` : ""}`;
+}
+
+// gap-webui-goal-detail-no-entity-links (提案 1): the /goal list and the detail page's criterion
+// block share the SAME cell rendering (goalIdLink + goalEvidenceCell), never a second copy.
+function goalIdLink(id: unknown): string {
+  return html`<a href="/goal/${encodeURIComponent(String(id))}">${escapeHtml(String(id))}</a>`;
+}
+
+function goalCriterionRow(g: { id?: unknown; status?: unknown }): string {
+  const ext = g as unknown as Record<string, unknown>;
+  return html`<tr>
+    <td>${goalIdLink(g.id)}</td>
+    <td>${escapeHtml(String(g.status ?? ""))}</td>
+    <td>${goalEvidenceCell(ext)}</td>
+  </tr>`;
 }
 
 export async function handleGoalList(
@@ -57,7 +72,7 @@ export async function handleGoalList(
     const criterion = typeof ext.criterion === "string" ? ext.criterion : "";
     const criterionCell = criterion.length > 60 ? `${escapeHtml(criterion.slice(0, 60))}…` : escapeHtml(criterion);
     return html`<tr>
-      <td><a href="/goal/${encodeURIComponent(String(g.id))}">${escapeHtml(String(g.id))}</a></td>
+      <td>${goalIdLink(g.id)}</td>
       <td>${escapeHtml(String(g.kind ?? ""))}</td>
       <td>${escapeHtml(String(g.status ?? ""))}</td>
       <td>${escapeHtml(String(g.goal ?? ""))}</td>
@@ -120,25 +135,60 @@ export async function handleGoalDetail(
   goalId: string,
   client: ProviderClient,
 ): Promise<void> {
-  const g = await client.goalGet(goalId);
+  // 「换」不是「加」（提案 1 / AC6）：一次 `goalList()` 取代 `goalGet()`。list() 的实现是
+  // 先 readdir 读全部文件再内存 filter（带不带筛选一样贵），而 goalGet 与 goalList 各自都要
+  // 解析一遍 6.87MB 的 .quay/gate-events.jsonl —— 一次调用 = 一次账本解析，既挑出本记录又
+  // filter 出它的全部 AC。若做成 goalGet + goalList 就白白多付一次 0.2s + 多解析一遍账本。
+  let all;
+  try {
+    all = await client.goalList();
+  } catch (err) {
+    res.writeHead(500, { "Content-Type": "text/plain" });
+    res.end("goal list failed");
+    return;
+  }
+  const g = all.find((r) => String(r.id) === goalId);
   if (!g) {
     res.writeHead(404, { "Content-Type": "text/plain" });
     res.end("not found");
     return;
   }
+  const isGoal = String(g.id).startsWith("GOAL-");
+  // 反向边不存在于存储中（AC 单向持 goal 字段、GOAL 无 children）——必须靠扫描算出来（提案根因）。
+  const criteria = isGoal ? all.filter((r) => String(r.goal) === goalId && String(r.id) !== goalId) : [];
+  // 正文实体编号回链（提案 2）：只回链真实存在的实体，不存在则保持纯文本（不造死链，AC3）。
+  const idSet = new Set(all.map((r) => String(r.id)));
+  const linkResolver = (raw: string): string | null => {
+    // 正文常见无连字符形态 "AC156" → 规范化到存储里的 "AC-156"。
+    const id = /^AC(\d+)$/.test(raw) ? `AC-${raw.slice(2)}` : raw;
+    return idSet.has(id) ? `/goal/${encodeURIComponent(id)}` : null;
+  };
   const ext = g as unknown as Record<string, unknown>;
   const evidenceCell = goalEvidenceCell(ext);
+  const criteriaBlock = isGoal
+    ? html`<section id="goal-criteria">
+        <h2>本 goal 的 criterion (${criteria.length})</h2>
+        ${criteria.length === 0
+          ? html`<p class="meta">（暂无 criterion）</p>`
+          : html`<table>
+            <tr><th>id</th><th>status</th><th>recent verdict</th></tr>
+            ${criteria.map((c) => goalCriterionRow(c)).join("\n")}
+          </table>`}
+      </section>`
+    : "";
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(String(g.id))}: ${escapeHtml(String(g.title))}">${shellStyles("detail")}<title>${escapeHtml(String(g.id))}</title></head>
     <body class="detail-page">${renderMobileChrome("goal", String(g.id))}${renderSiteNav("goal")}<main id="main">
+      ${renderBackLink("/goal")}
       <h1>${escapeHtml(String(g.id))}: ${escapeHtml(String(g.title))}</h1>
-      <p class="meta">kind: <strong>${escapeHtml(String(g.kind ?? ""))}</strong> · status: <strong>${escapeHtml(String(g.status ?? ""))}</strong>${g.goal ? html` · goal: ${escapeHtml(String(g.goal))}` : ""}</p>
+      <p class="meta">kind: <strong>${escapeHtml(String(g.kind ?? ""))}</strong> · status: <strong>${escapeHtml(String(g.status ?? ""))}</strong>${g.goal ? html` · goal: ${idSet.has(String(g.goal)) ? html`<a href="/goal/${encodeURIComponent(String(g.goal))}">${escapeHtml(String(g.goal))}</a>` : escapeHtml(String(g.goal))}` : ""}</p>
       ${evidenceCell !== "—" ? html`<p class="meta">最近 verdict: ${evidenceCell}</p>` : ""}
       ${typeof ext.criterion === "string" && (ext.criterion as string).length > 0
         ? html`<p class="meta">criterion: <code>${escapeHtml(ext.criterion as string)}</code></p>` : ""}
       ${ext.expect ? html`<p class="meta">expect: ${escapeHtml(String(ext.expect))}</p>` : ""}
       <p class="meta">origin: ${escapeHtml(String(ext.origin ?? ""))}</p>
-      <article>${renderMarkdown(g.body || "")}</article>
+      ${criteriaBlock}
+      <article>${renderMarkdown(g.body || "", { headingOffset: 0, linkResolver })}</article>
     </main></body></html>`);
 }

@@ -13,10 +13,6 @@ origin: |
   I1 的动机是实测的目标通胀（manager-phase-goal.md 里曾有四条自称"本阶段主判据"的
   AC 同时存在：AC10/AC12/AC20/AC28；设目标的裁定六次，只加不关）。
   ⇒ 推翻它必须补等效守卫，硬上限即其一（另一半是 AC-175 的陈旧判定）。
-evidence:
-  at: 2026-09-07T01:21:51.059Z
-  verdict: pass
-  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：`check` 输出含 `"withinCap": true`。
