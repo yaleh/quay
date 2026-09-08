@@ -84,6 +84,7 @@ AC2 说明：tmux 前置已按 Plan 1 降为可选 ⇒ 条件「若仍保留该�
 
 - plugin/scripts/quay-init.sh
 - plugin/scripts/quay-init-closure-assertion.ts
+- docs/analysis/quay-init-closure-ratchet.baseline.json
 - plugin/test/quay-init.test.mjs
 - plugin/test/quay-init-tmux-detection.test.mjs
 - plugin/test/quay-init-laydown-closure.test.mjs
