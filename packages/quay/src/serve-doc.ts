@@ -3,7 +3,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import { createDocumentStore } from "./document-store.ts";
-import { html, escapeHtml, shellStyles, renderMarkdown, renderSiteNav, renderMobileChrome } from "./serve-render.ts";
+import { html, escapeHtml, shellStyles, renderMarkdown, renderSiteNav, renderMobileChrome, renderBackLink } from "./serve-render.ts";
 
 export async function handleDocList(
   req: IncomingMessage,
@@ -62,8 +62,9 @@ export async function handleDocDetail(
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(String(d.id))}: ${escapeHtml(String(d.title))}">${shellStyles("detail")}<title>${escapeHtml(String(d.id))}</title></head>
     <body class="detail-page">${renderMobileChrome("doc", String(d.id))}${renderSiteNav("doc")}<main id="main">
+      ${renderBackLink("/doc")}
       <h1>${escapeHtml(String(d.id))}: ${escapeHtml(String(d.title))}</h1>
       <p class="meta">status: <strong>${escapeHtml(String(d.status ?? ""))}</strong>${ext.kind ? ` · kind: ${escapeHtml(String(ext.kind))}` : ""}</p>
-      <article>${renderMarkdown(d.body || "")}</article>
+      <article>${renderMarkdown(d.body || "", { headingOffset: 0 })}</article>
     </main></body></html>`);
 }
