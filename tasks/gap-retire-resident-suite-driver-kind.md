@@ -51,6 +51,7 @@ extra:
 - plugin/test/driver-runtime.test.mjs（KNOWN_KINDS 断言移除 suite）
 - plugin/test/goal-driver.test.mjs（KINDS 断言移除 suite）
 - packages/quay/src/cli/driver.ts（KINDS 白名单移除 suite）
+- plugin/test/plugin-packaging.test.mjs（M179 .claude/skills 空目录断言改 hermetic——unblock 既有 suite 红）
 - orchestration/SPEC-suite-lifecycle-and-failure-semantics-2026-08-26.md（§3 唯一 spawn 表述订正 + 退役标注）
 - plugin/scripts/capability-catalog.sh（suite-driver.ts 六表条目改写）
 - docs/analysis/quay-init-closure-ratchet.baseline.json（laydown 源变更后 --reanchor）
