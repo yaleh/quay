@@ -113,7 +113,7 @@ tr:hover td { background: var(--color-neutral-100); }
 .malformed-row a { color: var(--color-accent-800); }
 /* gap-webui-list-table-no-overflow-container: the shared data-table shell. A wide table must
    scroll INSIDE its container (never widen the page) on desktop AND mobile alike — the pre-fix
-   horizontal-scroll fallback lived only under .detail-page (detailStyles' ≤600px media query),
+   horizontal-scroll fallback lived only in the detail view's stylesheet (its ≤600px media query),
    so the data-dense LIST pages (/goal /live /board /needs-human /tests) had no scroll rule, and
    the base sheet's "table { display:block }" mobile hack broke the table's real layout (headers
    folded to vertical single chars). Wrapping in a plain <div class="table-wrap"> keeps the
@@ -171,7 +171,7 @@ button:hover { background: var(--color-accent-800); }
   font-size: 0.88em;
   /* gap-webui-list-table-no-overflow-container: long unbreakable inline code (a commit hash,
      a long path, a criterion shell one-liner in /journal) must wrap instead of widening the page
-     past the viewport on mobile — same wrap the detail pages already get on .detail-page code. */
+     past the viewport on mobile — same wrap the detail view already gets on its inline-code rule. */
   overflow-wrap: anywhere;
 }
 .body pre code { background: none; padding: 0; font-size: inherit; }
