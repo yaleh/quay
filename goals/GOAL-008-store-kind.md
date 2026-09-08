@@ -1,7 +1,7 @@
 ---
 id: GOAL-008
 title: 五种 store kind 的提交面统一 —— 一个原语、四态返回、传播跟读者走
-status: active
+status: achieved
 kind: goal
 origin: >-
   人 2026-09-08：「显然，我们应当讨论如何为 task 的提交构建更统一的机制。而且不光是 task，还有 goal 和 meta
