@@ -2,7 +2,8 @@
 id: gap-deliver-verification-trigger-orphaned-after-land-path-migration
 title: 交付验证触发点在 land 路径迁移后失联——DIR-123 的 per-merge hook 挂在已退役的
   integration-batch-merge，机械 fan-in 零接线，3332 提交未验证且无任何东西会因此变红
-status: ready
+status: needs-human
+needs_human_cause: human-adjudication
 labels:
   - gap
   - defect
@@ -71,3 +72,14 @@ extra:
 - plugin/test/scoped-static-checks.test.mjs
 - docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-deliver-verification-trigger-orphaned-after-land-path-migration.md
+## Needs-Human
+
+**执行 2026-09-08T17:04:13.482Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: --task-start must succeed:
+- run_id：wk-prod-1788779505
+- session_id：a970aef3-5867-4d57-a2aa-c2fface4efaa
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-deliver-verification-trigger-orphaned-after-land-path-migration~wk-prod-1788779505~1788886264334-af069c.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-deliver-verification-trigger-orphaned-after-land-path-migration-wk-prod-1788779505.log
