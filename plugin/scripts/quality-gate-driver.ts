@@ -30,7 +30,6 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 // Layer 0（driver-runtime 单一实现）：DRIVER_KINDS registry（controlFile/carriers 单源）、launchArgv
 // （LLM judge spawn）、isHalted / resourceGateCheck（判停/资源门）。Layer 1b：RoutineSpec / Fact /
@@ -155,14 +154,9 @@ export function parseJudgmentConsumerReport(stdout: string): JudgmentConsumerFac
 
 /** B17 例程：跑一次判据消费审计。exit 0（无 drift）⇒ verified；exit 1（drift）⇒ failed；
  *  exit 2 / spawn 失败 / 读不懂 ⇒ not-evaluated（硬规则 3b：读不懂 ≠ 合格）。 */
-export function runJudgmentConsumerCheck(root: string, cmd: string[] | null): Fact<JudgmentConsumerFactValue | null> {
+export async function runJudgmentConsumerCheck(root: string, cmd: string[] | null): Promise<Fact<JudgmentConsumerFactValue | null>> {
   const argv = cmd ?? defaultJudgmentConsumerArgv(root);
-  let r: ReturnType<typeof spawnSync>;
-  try {
-    r = spawnSync(argv[0], argv.slice(1), { encoding: "utf8", timeout: ROUTINE_TIMEOUT_MS });
-  } catch (e) {
-    return { name: "judgment-consumer-check", value: null, state: "not-evaluated", reason: `spawn failed: ${(e as Error).message}` };
-  }
+  const r = await runAsync(argv, { timeoutMs: ROUTINE_TIMEOUT_MS });
   if (r.error) {
     return { name: "judgment-consumer-check", value: null, state: "not-evaluated", reason: `spawn error: ${r.error.message}` };
   }
@@ -647,8 +641,9 @@ export function qualityGateRoutines(root: string, opts: QualityGateOptions): Rou
     {
       name: "judgment-consumer-check",
       schedule: { kind: "interval", minutes: opts.judgmentIntervalMinutes },
-      // 纯机械审计（零 LLM），halt 不挡——观测照跑。
-      run: () => [runJudgmentConsumerCheck(root, opts.judgmentCmd)],
+      // 纯机械审计（零 LLM），halt 不挡——观测照跑。⛔ runJudgmentConsumerCheck 是 async（runAsync），
+      // 例程 run 也 async：挂死的审计子进程由 caller 侧看门狗兜底，⛔ 不同步阻塞事件循环。
+      run: async () => [await runJudgmentConsumerCheck(root, opts.judgmentCmd)],
     },
     {
       name: "architecture-review",
