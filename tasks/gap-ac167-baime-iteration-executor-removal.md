@@ -2,7 +2,7 @@
 id: gap-ac167-baime-iteration-executor-removal
 title: AC167 判据仍红——baime-iteration-executor.md 从 plugin.json 摘除并 archive（agent +
   连带测试/文档/闭包基线）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
