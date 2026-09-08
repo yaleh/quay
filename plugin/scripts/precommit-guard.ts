@@ -64,6 +64,7 @@ import { fileURLToPath } from "node:url";
 // Touches「一条目一路径」judgment — the SAME judgment the static checker uses (no second parser).
 import { checkTaskOneEntryOnePath, readOneEntryBaseline } from "./touches-one-entry-one-path-check.ts";
 import { repoRoot } from "./repo-root.ts";
+import { resolvePluginScriptExec } from "../../packages/quay/src/plugin-root.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -439,6 +440,22 @@ export function judge(
 
 // ── 钩子安装/卸载 ────────────────────────────────────────────────────────────────────────────────────
 
+/** The `exec node …` line the hook shim runs — the guard's OWN resolved executable (raw `.ts` with
+ *  `--experimental-strip-types`, or the shipped dist bundle without it), baked at INSTALL time via
+ *  the canonical resolver (SPEC §6b). ⛔ Not `"$ROOT/plugin/scripts/…"` — AC168 removes the workspace
+ *  copy, and a runtime `$ROOT` join would hit a worktree copy (AC139-4). Fail-closed: an unresolvable
+ *  guard throws rather than writing a hook that would never run. */
+function guardExecLine(merge: boolean): string {
+  const resolved = resolvePluginScriptExec(path.join("scripts", HOOK_FINGERPRINT));
+  if (!resolved) {
+    throw new Error(
+      `precommit-guard: cannot resolve the guard executable (scripts/${HOOK_FINGERPRINT} or its dist bundle) — SPEC §6b plugin-root resolution failed`
+    );
+  }
+  const strip = resolved.stripTypes ? " --experimental-strip-types" : "";
+  return `exec node --no-warnings${strip} "${resolved.path}" --root "$ROOT"${merge ? " --merge" : ""}`;
+}
+
 function hookShim(root: string): string {
   return [
     "#!/usr/bin/env bash",
@@ -451,7 +468,7 @@ function hookShim(root: string): string {
     "# (③ rejecting running-round assertion-surface commits was RETIRED under AC64 — see",
     "# orchestration/archive/AC58-retired-clauses.md#R27.)",
     'ROOT="$(git rev-parse --show-toplevel)"',
-    `exec node --no-warnings --experimental-strip-types "$ROOT/plugin/scripts/${HOOK_FINGERPRINT}" --root "$ROOT"`,
+    guardExecLine(false),
     "",
   ].join("\n");
 }
@@ -473,7 +490,7 @@ export function preMergeCommitShim(root: string): string {
     "# (③ rejecting running-round merges was RETIRED under AC64 — see",
     "# orchestration/archive/AC58-retired-clauses.md#R27.)",
     'ROOT="$(git rev-parse --show-toplevel)"',
-    `exec node --no-warnings --experimental-strip-types "$ROOT/plugin/scripts/${HOOK_FINGERPRINT}" --root "$ROOT" --merge`,
+    guardExecLine(true),
     "",
   ].join("\n");
 }

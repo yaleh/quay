@@ -9,6 +9,7 @@ import { readSessions, readSession, readTranscript, sessionTranscriptPath, isVal
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote } from "./serve-render.ts";
 import { runDriver } from "./cli/driver.ts";
 import { renderSendForm } from "./serve-send.ts";
+import { resolvePluginScript } from "./plugin-root.ts";
 
 // ── /sessions ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -493,9 +494,11 @@ export function newSessionArgs(input: NewSessionInput): NewSessionSpec | null {
   if (!profile || !permissionMode) return null;
   const sessionId =
     typeof input.sessionId === "string" && isValidSessionId(input.sessionId) ? input.sessionId : randomUUID();
+  const launch = resolvePluginScript(path.join("scripts", "quay-launch.sh"));
+  if (!launch) return null;
   const argv = [
     "bash",
-    path.join(input.root, "plugin", "scripts", "quay-launch.sh"),
+    launch,
     profile,
     "-p",
     "--input-format", "stream-json",
@@ -532,9 +535,11 @@ export function resumeSessionArgs(input: ResumeSessionInput): ResumeSessionSpec 
   const profile = typeof input.profile === "string" ? input.profile.trim() : "";
   const permissionMode = typeof input.permissionMode === "string" ? input.permissionMode.trim() : "";
   if (!profile || !permissionMode) return null;
+  const launch = resolvePluginScript(path.join("scripts", "quay-launch.sh"));
+  if (!launch) return null;
   const argv = [
     "bash",
-    path.join(input.root, "plugin", "scripts", "quay-launch.sh"),
+    launch,
     profile,
     "-p",
     "--resume", sessionId,

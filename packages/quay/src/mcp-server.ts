@@ -45,13 +45,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { loadConfig, activeProvider } from "./config.ts";
 import { connectProvider } from "./provider-client.ts";
 import { resolveProviderEnv } from "./provider-env.ts";
 import { type ConnectedProvider, registerAllHandlers } from "./mcp-handlers.ts";
+import { resolvePluginScriptExec } from "./plugin-root.ts";
 
 // QX-035 (experiment 4, iteration 10): read package version at startup for
 // Mitigation A (_version field in task_list response) and Mitigation B
@@ -127,33 +127,25 @@ function spawnCapture(command: string, args: string[], cwd: string): Promise<{ e
 }
 
 /**
- * Resolve a plugin script path to a runnable executable, preferring the raw source form and
- * falling back to the bundled dist form (gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-
- * the-artifact). The shipped npm-pack artifact carries the plugin's consumer-referenced .ts as
- * bundled `plugin/scripts/dist/*.js` executables (no .ts source), so `plugin/scripts/foo.ts` must
- * resolve to `plugin/scripts/dist/foo.js` there; a source checkout keeps the .ts and is used as-is.
+ * Resolve a plugin script path (workspace-root-relative `plugin/scripts/…`) to a runnable
+ * executable via the canonical resolver (SPEC §6b) — preferring the raw source form, falling back
+ * to the bundled dist form (gap-shipped-ts-files-are-not-bundled: the shipped npm-pack artifact
+ * carries the plugin's consumer-referenced .ts ONLY as bundled `dist/*.js`, no raw .ts). Returns
+ * null when the plugin root or the script (in either form) is absent — the caller fails closed.
+ * ⛔ Not `path.resolve(workspaceRoot, relPath)` (workspace-root join — AC168 removes the copy).
  */
-function resolvePluginExecutable(
-  workspaceRoot: string,
-  relPath: string
-): { path: string; stripTypes: boolean } {
-  const abs = path.resolve(workspaceRoot, relPath);
-  if (fs.existsSync(abs)) return { path: abs, stripTypes: relPath.endsWith(".ts") };
-  if (relPath.endsWith(".ts")) {
-    const bundled = relPath.replace(/\.ts$/, ".js").replace(/\/(scripts|gate-scripts)\//, "/$1/dist/");
-    const absBundled = path.resolve(workspaceRoot, bundled);
-    if (fs.existsSync(absBundled)) return { path: absBundled, stripTypes: false };
-  }
-  return { path: abs, stripTypes: relPath.endsWith(".ts") };
+function resolvePluginExecutable(relPath: string): { path: string; stripTypes: boolean } | null {
+  const rel = relPath.startsWith("plugin/") ? relPath.slice("plugin/".length) : relPath;
+  return resolvePluginScriptExec(rel);
 }
 
 /** Spawn the inventory tool's `--instruments-json` mode to DERIVE the instrument directory. */
 export async function fetchInstrumentsManifest(workspaceRoot: string): Promise<InstrumentsManifest> {
   const inventoryRel = path.join("plugin", "scripts", "runtime-usage-inventory.ts");
-  const resolved = resolvePluginExecutable(workspaceRoot, inventoryRel);
-  if (!fs.existsSync(resolved.path)) {
+  const resolved = resolvePluginExecutable(inventoryRel);
+  if (resolved == null) {
     throw new Error(
-      `instrument directory unavailable: ${inventoryRel} (or its dist bundle) is not present under workspace root ${workspaceRoot}`
+      `instrument directory unavailable: ${inventoryRel} (or its dist bundle) is not present in the resolved plugin root (SPEC §6b)`
     );
   }
   const argv = resolved.stripTypes
@@ -179,7 +171,12 @@ export async function runInstrument(
       `no such instrument: "${name}" (the admitted directory has ${manifest.admitted}; call instrument action:list to see them)`
     );
   }
-  const resolved = resolvePluginExecutable(workspaceRoot, entry.path);
+  const resolved = resolvePluginExecutable(entry.path);
+  if (resolved == null) {
+    throw new Error(
+      `instrument "${name}" unavailable: ${entry.path} (or its dist bundle) is not present in the resolved plugin root (SPEC §6b)`
+    );
+  }
   const command = entry.kind === "bash" ? "bash" : process.execPath;
   const argv = entry.kind === "bash" ? [resolved.path, ...args] : resolved.stripTypes ? ["--experimental-strip-types", resolved.path, ...args] : [resolved.path, ...args];
   return spawnCapture(command, argv, workspaceRoot);
