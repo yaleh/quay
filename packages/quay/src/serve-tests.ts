@@ -738,7 +738,7 @@ function renderTestsPage(
     : "";
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay tests — verification rounds">${modernistStyles()}${pageStyles()}<title>Tests — 验证轮记录</title></head>
-    <body>${renderMobileChrome("tests", "tests")}${renderSiteNav("tests")}<main>
+    <body>${renderMobileChrome("tests", "tests")}${renderSiteNav("tests")}<main id="main">
       <h1>Tests — 验证轮记录</h1>
       <p class="meta">数据源：<code>.quay/verification-round.jsonl</code>（每轮 suite 完成时追加，红绿皆入账）</p>
       ${obsNote(tests.status, tests.reason)}
@@ -975,7 +975,7 @@ function renderFileDetailPage(
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay test file — single-file cross-round history">${modernistStyles()}${pageStyles()}<title>Test file — ${escapeHtml(filePath)}</title></head>
-    <body>${renderMobileChrome("tests", "tests")}${renderSiteNav("tests")}<main>
+    <body>${renderMobileChrome("tests", "tests")}${renderSiteNav("tests")}<main id="main">
       <h1>测试文件 — <code>${escapeHtml(filePath)}</code></h1>
       <p class="meta"><a href="/tests">← 返回 Tests</a></p>
       ${obsNote(tests.status, tests.reason)}

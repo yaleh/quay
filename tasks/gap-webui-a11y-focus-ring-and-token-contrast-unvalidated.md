@@ -2,7 +2,7 @@
 id: gap-webui-a11y-focus-ring-and-token-contrast-unvalidated
 title: 配色 token 从未被任何对比度判据钉过（全库任务 grep WCAG/对比度 = 0 命中）⇒ 主链接色实测 3.47:1 等 6 组低于
   AA；且全站链接 :focus 的 outline-style 为 none，纯键盘用户看不到光标位置
-status: ready
+status: done
 labels:
   - gap
   - webui

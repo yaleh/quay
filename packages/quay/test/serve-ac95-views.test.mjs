@@ -395,7 +395,7 @@ test("AC1/AC3: the six new routes return 200 with real content or honest empty s
       const r = await get(port, route);
       assert.equal(r.status, 200, `AC1: GET ${route} returns 200 (got ${r.status})`);
       assert(r.body.includes(title), `AC1: GET ${route} is not a placeholder — includes title "${title}"`);
-      assert(r.body.includes("<main>"), `AC1: GET ${route} renders a real page`);
+      assert(/<main[\s>]/.test(r.body), `AC1: GET ${route} renders a real page`);
     }
 
     // /tests must show the fixture round's real data (AC2 — mechanism-sourced, not blank/0).
