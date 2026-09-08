@@ -46,12 +46,12 @@ extra:
 
 ## AC
 
-- [ ] AC1: 存在一个非 `integration-batch-merge.sh` 的触发点，可由一条命令定位：`grep -rn 'develop-deliver-tgz' plugin/scripts/*.ts plugin/scripts/*.sh` 命中该新触发点 —— 引用命中数前先打印前 3 条实际内容（硬规则 2）。
-- [ ] AC2: 触发点不在机械 fan-in 的同步路径上（负控制）：跑一次机械 fan-in，`.quay/develop-deliver.log` 的 mtime 不变 ⇒ 证明未给 fan-in 增加墙钟。
-- [ ] AC3: 触发条件读直接量且能取假：构造 `lastDelivered == git rev-parse develop` ⇒ 不投递；构造 `!=` 且超时间阈值 ⇒ 投递。两个方向各断言一次。
-- [ ] AC4: 失联可检测——扩展 `plugin/scripts/release-freshness-check.sh`（优先扩展既有脚本，避免新增 `plugin/scripts/*` 触发 outline/capability-catalog/laydown 三道注册闸）：`develop` tip 与 `lastDelivered` 相差超阈值即报红；且 `develop-deliver-state.json` **缺失**时输出可区分的未评估态而非「合格」（硬规则 3b）——今天正是「文件不存在」这个态被读成了沉默。
-- [ ] AC5: AC4 的检测器接进 `scripts/test.sh` 的静态层，全量 suite 绿。
-- [ ] AC6: 真实触发一次，`.quay/develop-deliver-state.json` 落盘且含当前 develop tip 与 B/C 两机的 per-host 读数（`http_code` 等）。
+- [x] AC1: 存在一个非 `integration-batch-merge.sh` 的触发点，可由一条命令定位：`grep -rn 'develop-deliver-tgz' plugin/scripts/*.ts plugin/scripts/*.sh` 命中该新触发点 —— 引用命中数前先打印前 3 条实际内容（硬规则 2）。
+- [x] AC2: 触发点不在机械 fan-in 的同步路径上（负控制）：跑一次机械 fan-in，`.quay/develop-deliver.log` 的 mtime 不变 ⇒ 证明未给 fan-in 增加墙钟。
+- [x] AC3: 触发条件读直接量且能取假：构造 `lastDelivered == git rev-parse develop` ⇒ 不投递；构造 `!=` 且超时间阈值 ⇒ 投递。两个方向各断言一次。
+- [x] AC4: 失联可检测——扩展 `plugin/scripts/release-freshness-check.sh`（优先扩展既有脚本，避免新增 `plugin/scripts/*` 触发 outline/capability-catalog/laydown 三道注册闸）：`develop` tip 与 `lastDelivered` 相差超阈值即报红；且 `develop-deliver-state.json` **缺失**时输出可区分的未评估态而非「合格」（硬规则 3b）——今天正是「文件不存在」这个态被读成了沉默。
+- [x] AC5: AC4 的检测器接进 `scripts/test.sh` 的静态层，全量 suite 绿。
+- [x] AC6: 真实触发一次，`.quay/develop-deliver-state.json` 落盘且含当前 develop tip 与 B/C 两机的 per-host 读数（`http_code` 等）。
 
 ## DoD
 
@@ -63,5 +63,8 @@ extra:
 
 - plugin/scripts/develop-deliver-tgz.sh
 - plugin/scripts/release-freshness-check.sh
+- plugin/scripts/deliver-verify-usage.sh
+- plugin/scripts/runner-static-gate.ts
+- plugin/scripts/checker-mutation-cases/release-freshness-check.sh
 - plugin/test/release-freshness-check.test.mjs
 - tasks/gap-deliver-verification-trigger-orphaned-after-land-path-migration.md
