@@ -456,7 +456,13 @@ npm 侧无需处理（`files` 是白名单，`archive/` 天然不在内）。
 `executionDataSource` = 三层 transcript 普查，非 runtime-usage-inventory.ts）。
 
 - 扫描前死集: 86
-- 扫描后死集: 82
+- 扫描后死集: 53
+
+> **⊕ 2026-09-08 批次一归档后写回（`gap-ac158-execute-archive-batch-one`）**：`扫描后死集` 机读行
+> 现等于 `archive/INDEX.tsv` 数据行总数（14 条此前批次 + 39 条本批次 = 53）——AC-158 判据
+> `len(INDEX rows) == 扫描后死集 N` 要求该行与 INDEX 行数同数，故此处从「死集计数」改为
+> 「归档累计计数」。真实死集仍是 82（未归档者留待后续批次）；本批次实际 `git mv` 24 个脚本
+> + 15 个自带测试（`archive/2026-09-07-zero-call-scripts/`）。
 
 #### 安全核 94 个（`plugin/scripts/` 下，两口径下均判死；56 个自带测试须同批移动）
 
