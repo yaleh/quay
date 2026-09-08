@@ -48,11 +48,11 @@ git rev-list develop（全量祖先集）  0.08s
 
 ## AC
 
-- [ ] AC1 `GET /git-history.json?before=<t>&limit=<n>` 返回一份完整 `GitGraphLayout` JSON，`commitCount` 反映请求的 `limit`：`node --test packages/quay/test/gap-git-graph-drops-commits-while-overflowcount-reports-zero.test.mjs` 退出码 0。
-- [ ] AC2 负控制：测试内还原旧的"全部 ref 塞进一次全局 `-n limit`"取数方式，对一个含长期活跃非 mainline 分支的 fixture，断言该分支的提交数少于按 ref 分别取时的数量 ⇒ 判据能区分新旧（复现 P2 之前的挤压问题，证明本任务的按 ref 取数是必要的，不是装饰）。
-- [ ] AC3 生产读数：`curl -s 'http://127.0.0.1:4174/git-history.json?before=<当前 500 条窗口下界时间戳>&limit=500'` 返回的 `commitCount`/最旧提交时间戳，比不带 `before` 的默认请求更早——证明端点确实能"往回翻"，不是重复返回同一批。
-- [ ] AC4 客户端集成：渲染后的 HTML 含 sentinel 元素与调用该端点的脚本；用 Playwright 模拟滚动到底部并等待，断言页面 SVG 行数在等待前后发生变化（真实加载了更多提交，不是死代码）。
-- [ ] AC5 覆盖时长文案：导语在初始加载与一次滚动加载之后分别读到的"覆盖时长"数字不同（后者更大），且该数字由当前已加载提交的实际时间跨度算出（fixture 测试断言其随窗口扩大而增大，不是写死常量）。
+- [x] AC1 `GET /git-history.json?before=<t>&limit=<n>` 返回一份完整 `GitGraphLayout` JSON，`commitCount` 反映请求的 `limit`：`node --test packages/quay/test/gap-git-graph-drops-commits-while-overflowcount-reports-zero.test.mjs` 退出码 0。
+- [x] AC2 负控制：测试内还原旧的"全部 ref 塞进一次全局 `-n limit`"取数方式，对一个含长期活跃非 mainline 分支的 fixture，断言该分支的提交数少于按 ref 分别取时的数量 ⇒ 判据能区分新旧（复现 P2 之前的挤压问题，证明本任务的按 ref 取数是必要的，不是装饰）。
+- [x] AC3 生产读数：`curl -s 'http://127.0.0.1:4174/git-history.json?before=<当前 500 条窗口下界时间戳>&limit=500'` 返回的 `commitCount`/最旧提交时间戳，比不带 `before` 的默认请求更早——证明端点确实能"往回翻"，不是重复返回同一批。
+- [x] AC4 客户端集成：渲染后的 HTML 含 sentinel 元素与调用该端点的脚本；用 Playwright 模拟滚动到底部并等待，断言页面 SVG 行数在等待前后发生变化（真实加载了更多提交，不是死代码）。
+- [x] AC5 覆盖时长文案：导语在初始加载与一次滚动加载之后分别读到的"覆盖时长"数字不同（后者更大），且该数字由当前已加载提交的实际时间跨度算出（fixture 测试断言其随窗口扩大而增大，不是写死常量）。
 
 ## DoD
 

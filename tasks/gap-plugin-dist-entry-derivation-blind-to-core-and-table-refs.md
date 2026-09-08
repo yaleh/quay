@@ -2,7 +2,7 @@
 id: gap-plugin-dist-entry-derivation-blind-to-core-and-table-refs
 title: 打包 dist entry 集对 Core 直引与表格形引用盲 → driver-runtime.js 根本不进 tarball，装完后 quay
   driver 在任何项目都起不来
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical

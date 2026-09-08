@@ -173,7 +173,7 @@ import { verifyIndependently, type DriverResult } from "./driver-result.ts";
 // AC153：re-export verifyIndependently 值——测试用「同一函数身份」证两 driver 共用单一实现（⛔ 非平行副本）。
 export { verifyIndependently } from "./driver-result.ts";
 export type { DriverResult } from "./driver-result.ts";
-import { listWorktrees, taskIdFromBranch } from "./fast-mode-telemetry.ts";
+import { listWorktrees, taskIdFromBranch, worktreeMatchesTask, parseWorktreePorcelain } from "./fast-mode-telemetry.ts";
 import { isDue } from "./routine-scheduler.ts";
 // 门②「cwd 在该 worktree 内的活进程」直接量单一真相源（gap-worktree-remove-orphans-probes 的 /proc
 // 枚举器 enumerateProcs + cwdUnder——⛔ 不手搓 /proc 扫描，同 concurrent-batch-scheduler.ts 的 in-flight
@@ -454,30 +454,26 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** 是否存在本任务残留 worktree（`git worktree list --porcelain` 里的 `branch refs/heads/task/<id>`）。
- *  fan-in 成功后 `git worktree remove` + `git branch -d task/<id>` 把该分支删掉 ⇒ 无该行 = 无残留。
+/** 是否存在本任务残留 worktree（形状感知——路径 basename ∨ 分支去掉可选 `task/` 前缀 == taskId，
+ *  gap-task-branch-prefix-assumption-scattered-read-sites-orphan-enumeration-blind）。判定收敛到
+ *  fast-mode-telemetry 的 worktreeMatchesTask，⛔ 不各自手写 `refs/heads/task/<id>` 正则。
+ *  fan-in 成功后 `git worktree remove` + `git branch -d task/<id>` 把该分支删掉 ⇒ 无该 worktree = 无残留。
  *  读失败（非 git 仓库 / git 错误）⇒ null（硬规则 3b：读不懂 ≠ 无残留）。 */
 export function worktreePresentForTask(root: string, taskId: string): boolean | null {
   const r = spawnSync("git", ["-C", root, "worktree", "list", "--porcelain"], { encoding: "utf8" });
   if (r.status !== 0 || r.error) return null;
-  const re = new RegExp(`^branch refs/heads/task/${escapeRegExp(taskId)}$`, "m");
-  return re.test(String(r.stdout ?? ""));
+  return parseWorktreePorcelain(String(r.stdout ?? "")).some((wt) => worktreeMatchesTask(wt, taskId));
 }
 
-/** 本任务残留 worktree 的路径列表（`git worktree list --porcelain` 里 `branch refs/heads/task/<id>` 行
- *  对应的 `worktree <path>` 行）。读失败（非 git 仓库 / git 错误）⇒ []（硬规则 3b：读不懂 ≠ 确认无残留，
- *  用 worktreePresentForTask 区分「读不懂」（null）与「确认无残留」（false））。 */
+/** 本任务残留 worktree 的路径列表（形状感知，判定同 worktreePresentForTask）。读失败（非 git 仓库 /
+ *  git 错误）⇒ []（硬规则 3b：读不懂 ≠ 确认无残留，用 worktreePresentForTask 区分「读不懂」（null）
+ *  与「确认无残留」（false））。 */
 export function worktreePathsForTask(root: string, taskId: string): string[] {
   const r = spawnSync("git", ["-C", root, "worktree", "list", "--porcelain"], { encoding: "utf8" });
   if (r.status !== 0 || r.error) return [];
   const paths: string[] = [];
-  let current: string | null = null;
-  for (const line of String(r.stdout ?? "").split("\n")) {
-    if (line.startsWith("worktree ")) {
-      current = line.slice("worktree ".length).trim();
-    } else if (line === `branch refs/heads/task/${taskId}` && current != null) {
-      paths.push(current);
-    }
+  for (const wt of parseWorktreePorcelain(String(r.stdout ?? ""))) {
+    if (wt.path && worktreeMatchesTask(wt, taskId)) paths.push(wt.path);
   }
   return paths;
 }
@@ -487,8 +483,7 @@ export function worktreePathsForTask(root: string, taskId: string): string[] {
 export async function worktreePresentForTaskAsync(root: string, taskId: string): Promise<boolean | null> {
   const r = await runAsync(["git", "-C", root, "worktree", "list", "--porcelain"], { timeoutMs: 5_000 });
   if (r.error || r.status !== 0) return null;
-  const re = new RegExp(`^branch refs/heads/task/${escapeRegExp(taskId)}$`, "m");
-  return re.test(String(r.stdout ?? ""));
+  return parseWorktreePorcelain(r.stdout).some((wt) => worktreeMatchesTask(wt, taskId));
 }
 
 /** worktreePathsForTask 的异步版（常驻循环体用）。读失败 ⇒ []（与同步版一致）。 */
@@ -496,13 +491,8 @@ export async function worktreePathsForTaskAsync(root: string, taskId: string): P
   const r = await runAsync(["git", "-C", root, "worktree", "list", "--porcelain"], { timeoutMs: 5_000 });
   if (r.error || r.status !== 0) return [];
   const paths: string[] = [];
-  let current: string | null = null;
-  for (const line of String(r.stdout ?? "").split("\n")) {
-    if (line.startsWith("worktree ")) {
-      current = line.slice("worktree ".length).trim();
-    } else if (line === `branch refs/heads/task/${taskId}` && current != null) {
-      paths.push(current);
-    }
+  for (const wt of parseWorktreePorcelain(r.stdout)) {
+    if (wt.path && worktreeMatchesTask(wt, taskId)) paths.push(wt.path);
   }
   return paths;
 }

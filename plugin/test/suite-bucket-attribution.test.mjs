@@ -65,18 +65,16 @@ const GROUP_A = [
   "serve.test.mjs",
 ];
 
-// (b) 21 `plugin/test/*` files that touch `packages/*/src|bin|dist` → cross-bucket (contain P).
+// (b) 19 `plugin/test/*` files that touch `packages/*/src|bin|dist` → cross-bucket (contain P).
 const GROUP_B = [
   "branch-model.test.mjs",
   "build-evidence-manifest.test.mjs",
-  "checker-cost.test.mjs",
   "checker-mutation-check.test.mjs",
   "codex-stage1-adapter.test.mjs",
   "direct-to-develop-bypass-check.test.mjs",
   "execute-suite-fix-scope-gate.test.mjs",
   "fan-in-execute-paths.test.mjs",
   "fan-in-ts-typecheck-gate.test.mjs",
-  "needs-human-recheck.test.mjs",
   "prepare-admission-check.test.mjs",
   "provision-verify-worktree.test.mjs",
   "resource-gate.test.mjs",
@@ -108,7 +106,6 @@ const GROUP_C = [
 const GROUP_D = {
   "integration-batch-merge.test.mjs": ["M"], // join(repoRoot, "plugin", "scripts", …) — destructured `join`
   "sync-lag-check.test.mjs": ["M"],          // join(repoRoot, "plugin", "scripts", …)
-  "measure-suite.test.mjs": ["M"],           // path.join(repoRoot, "plugin", "scripts", …)
   "plugin-vendor-standalone.test.mjs": ["P"], // path.join(repoRoot, "packages", "quay-native", "bin", …)
 };
 
@@ -126,8 +123,8 @@ test("AC2(a): the 8 packages/quay/test files touching plugin/scripts are cross-b
 
 // ── AC2(b) ───────────────────────────────────────────────────────────────────────────────────────────
 
-test("AC2(b): the 21 plugin/test files touching packages src are cross-bucket (contain P)", () => {
-  assert.equal(GROUP_B.length, 21, "group (b) must be exactly 21 files");
+test("AC2(b): the 19 plugin/test files touching packages src are cross-bucket (contain P)", () => {
+  assert.equal(GROUP_B.length, 19, "group (b) must be exactly 19 files");
   for (const f of GROUP_B) {
     const rel = `plugin/test/${f}`;
     const buckets = bucketSetOf(rel, ROOT);
@@ -147,7 +144,7 @@ test("AC2(c): statically-unlocatable files return UNRESOLVED, never a silent def
 // ── AC2(d) — the segmented-literal blind spot ────────────────────────────────────────────────────────
 
 test("AC2(d): segmented path.join/path.resolve subjects attribute to their source-tree bucket", () => {
-  assert.equal(Object.keys(GROUP_D).length, 4, "group (d) must be exactly 4 files");
+  assert.equal(Object.keys(GROUP_D).length, 3, "group (d) must be exactly 3 files");
   for (const [f, want] of Object.entries(GROUP_D)) {
     const rel = `plugin/test/${f}`;
     const buckets = bucketSetOf(rel, ROOT);

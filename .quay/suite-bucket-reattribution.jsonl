@@ -25,7 +25,6 @@
 {"file":"plugin/test/cap-from-gate-hysteresis.test.mjs","judgment":"S","mechanism":"S+M","signal":["concurrency"]}
 {"file":"plugin/test/cap-from-gate-stale.test.mjs","judgment":"S","mechanism":"S+M","signal":["concurrency"]}
 {"file":"plugin/test/capability-catalog.test.mjs","judgment":"S","mechanism":"S+M","signal":["--static-checks","concurrency"]}
-{"file":"plugin/test/checker-cost.test.mjs","judgment":"S","mechanism":"P+S+M","signal":["--for-task","lane","concurrency"]}
 {"file":"plugin/test/checker-lib.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/checker-mutation-check.test.mjs","judgment":"S","mechanism":"P+S+M","signal":["--group"]}
 {"file":"plugin/test/cold-start-check-running.test.mjs","judgment":"M","mechanism":"S","signal":[]}
@@ -73,8 +72,6 @@
 {"file":"plugin/test/l1-delivery-surface-check.test.mjs","judgment":"S","mechanism":"S+M","signal":["--group"]}
 {"file":"plugin/test/launch-settings.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/laydown-set-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
-{"file":"plugin/test/live-repo-literal-assert-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
-{"file":"plugin/test/load-sensitive-release-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/loop-driver-check.test.mjs","judgment":"S","mechanism":"S+M","signal":["lane"]}
 {"file":"plugin/test/loop-shipping-necessity-check.test.mjs","judgment":"S","mechanism":"S+M","signal":["--scoped"]}
 {"file":"plugin/test/loop-shipping.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
@@ -90,10 +87,8 @@
 {"file":"plugin/test/measure-suite-reporter.test.mjs","judgment":"M","mechanism":"S","signal":[]}
 {"file":"plugin/test/measure-trend-check.test.mjs","judgment":"S","mechanism":"S+M","signal":["lane"]}
 {"file":"plugin/test/mechanism-count.test.mjs","judgment":"M","mechanism":"S","signal":[]}
-{"file":"plugin/test/mechanism-vitality-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/mirror-full-suite-state.test.mjs","judgment":"S","mechanism":"S+M","signal":["lane"]}
 {"file":"plugin/test/mirror-measure-history.test.mjs","judgment":"S","mechanism":"S+M","signal":["lane"]}
-{"file":"plugin/test/needs-human-recheck.test.mjs","judgment":"M","mechanism":"P+S+M","signal":[]}
 {"file":"plugin/test/no-manager-tick-doc-check.test.mjs","judgment":"M","mechanism":"S","signal":[]}
 {"file":"plugin/test/obligation-discharge-agent.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/obligation-ledger-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
@@ -112,7 +107,6 @@
 {"file":"plugin/test/preference-notification-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/prepare-admission-check.test.mjs","judgment":"M","mechanism":"P+S+M","signal":[]}
 {"file":"plugin/test/prod-data-audit.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
-{"file":"plugin/test/productization-verification-record-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/provision-verify-worktree.test.mjs","judgment":"M","mechanism":"P+S+M","signal":[]}
 {"file":"plugin/test/quay-init-laydown-closure.test.mjs","judgment":"S","mechanism":"S+M","signal":["concurrency"]}
 {"file":"plugin/test/quay-init-tmux-detection.test.mjs","judgment":"S","mechanism":"S+M","signal":["concurrency"]}
@@ -125,7 +119,6 @@
 {"file":"plugin/test/red-window-triage.test.mjs","judgment":"S","mechanism":"S+M","signal":["--test-concurrency","runner-grouping","concurrency"]}
 {"file":"plugin/test/refresh-worktree-quay.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/relative-baseline.test.mjs","judgment":"S","mechanism":"S+M","signal":["--group"]}
-{"file":"plugin/test/release-freshness-check.test.mjs","judgment":"S","mechanism":"S+M","signal":["--group"]}
 {"file":"plugin/test/resource-gate.test.mjs","judgment":"S","mechanism":"P+S+M","signal":["--group","--test-concurrency","--for-task","--scoped","--test-name-pattern","lane","concurrency"]}
 {"file":"plugin/test/restart-readiness-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/retired-clause-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
@@ -152,7 +145,6 @@
 {"file":"plugin/test/state-worded-clause-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/strategic-doc-staleness-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/suite-bucket-attribution.test.mjs","judgment":"M","mechanism":"P+S+M","signal":[]}
-{"file":"plugin/test/suite-cutoff-verdict.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/suite-duration-exceed-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/suite-execution-form-counter.test.mjs","judgment":"S","mechanism":"S+M","signal":["lane"]}
 {"file":"plugin/test/suite-slot-ssot-check.test.mjs","judgment":"S","mechanism":"S+M","signal":["lane","concurrency"]}

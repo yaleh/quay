@@ -1,7 +1,7 @@
 ---
 id: gap-ac158-execute-archive-batch-one
 title: AC158 执行批次一：零调用死集 git mv 进 archive + INDEX 同一提交（条数不设闸，人 2026-09-08 裁定）
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical
@@ -57,6 +57,7 @@ depends_on: []
 ## Touches
 
 - archive/INDEX.tsv
+- .quay/suite-bucket-reattribution.jsonl
 - archive/2026-09-07-zero-call-scripts/plugin/scripts/*
 - archive/2026-09-07-zero-call-scripts/plugin/test/*
 - plugin/scripts/capability-catalog.sh
@@ -192,6 +193,7 @@ depends_on: []
 - plugin/test/workflow-metadata-conformance.test.mjs
 - plugin/test/workflow-replay.test.mjs
 - tasks/gap-ac158-execute-archive-batch-one.md
+- plugin/test/suite-bucket-attribution.test.mjs
 
 ## 派发顺序（manager 2026-09-08；depends_on 已撤，理由如下）
 

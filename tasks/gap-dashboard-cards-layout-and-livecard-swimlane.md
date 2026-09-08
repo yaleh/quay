@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-cards-layout-and-livecard-swimlane
 title: Dashboard 卡片精简+改版：测试卡去冗余色块条、bar chart 挪到卡片顶部、循环脉搏卡补全标题+泳道 chart（连带修复移动端整页横向溢出）
-status: ready
+status: done
 labels:
   - gap
   - webui
