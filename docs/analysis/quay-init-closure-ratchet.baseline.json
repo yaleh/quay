@@ -1,7 +1,7 @@
 {
   "files": 133,
-  "bytes": 3891486,
-  "fingerprint": "ad4cc9802ebcecc8bf56baed588ddac84cf66b616e8c52d0b40bc9b6dc0abf86",
+  "bytes": 3903280,
+  "fingerprint": "0a706b9abc1f4b25fab050c01cf0d4918795c69adefada8e28adec52e5a942e3",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
@@ -505,7 +505,7 @@
     },
     {
       "rel": "plugin/scripts/worker-driver.ts",
-      "sha": "d9c208da4e77897ce040dbacdf0e1c438ce9336853318afbc649e49896be1e46"
+      "sha": "6eed8502496db23034dba003df1207ab877d8fd6e931b89d08e6eba18a569b02"
     },
     {
       "rel": "plugin/scripts/workflow-event-schema.mjs",
