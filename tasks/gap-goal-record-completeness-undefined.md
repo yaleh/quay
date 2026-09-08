@@ -118,4 +118,5 @@ task 侧有 shape-aware 四件套（`plugin/scripts/ready-pool-check.ts` 的 `SH
 - `packages/quay/test/goal-gate.test.mjs`
 - `packages/quay/test/provider-abi-conformance.test.mjs`
 - `packages/quay/test/gap-goal-record-completeness-undefined.test.mjs`
+- `packages/quay/test/gap-frontmatter-slugify-drops-non-ascii.test.mjs`
 - `tasks/gap-goal-record-completeness-undefined.md`
