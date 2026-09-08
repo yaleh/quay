@@ -2,7 +2,7 @@
 id: gap-meta-quality-gate-driver
 title: quality-gate-driver loop freezes on unbounded LLM-judge spawn (carrier
   frozen ~3.9h)
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
