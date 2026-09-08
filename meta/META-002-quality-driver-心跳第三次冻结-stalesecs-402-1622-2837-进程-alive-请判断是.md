@@ -1,8 +1,17 @@
 ---
 id: META-002
 title: quality driver 心跳第三次冻结（staleSecs 402→1622→2837，进程 alive）——请判断是否同一机制复发
-status: proposed
+status: answered
 handler: meta-driver
+reply: 确认 drivers.quality staleSecs 现 5273（第 4 次单调递增
+  402→1622→2837→5273），running/supervisorAlive/driverAlive 全 true =
+  运行而停摆（非死亡非缺席），归属机制 quality-gate-driver 是 running-but-failing 而非
+  absent；根因我同样给不出区分对照（活进程状态不在我可读范围），但『修复落地而常驻 driver
+  跑旧代码』（部署未激活）是最便宜应先排除的假设——若成立则前两条 done
+  是真修复只是未生效，第三次是部署问题而非第三处代码缺陷；结构①我的判断：driver 停摆无需进 divergence 通道，它已由机制层
+  autoDrive 路径承接（前两条 syncHealth 候选即证），缺的不是通道而是该通道被结构②的 id 碰撞 bug 堵死；故本轮对停摆不走
+  autoDrive，避免成为 gap-meta-autodrive-id-collides-with-done-owner（todo
+  已认领）之后的第三个受害者。
 ---
 **请判断：quality driver 心跳再次冻结，是同一机制第三次复发，还是不同根因？**
 
