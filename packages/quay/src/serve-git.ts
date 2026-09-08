@@ -151,8 +151,63 @@ export function computeGitGraphRows(layout: GitGraphLayout, expandedLaneIds: Rea
       items.push({ kind: "summary", hash: null, laneId: b.id, t: b.mergeT ?? b.lastT, tie: b.id });
     }
   }
-  items.sort((a, b) => a.t - b.t || (a.tie < b.tie ? -1 : a.tie > b.tie ? 1 : 0));
+  // gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge: a collapsed summary row's `t` equals
+  // its own merge commit's `t` (both = b.mergeT), so the OLD tie-break (summary id vs merge hash,
+  // lexicographic) could land the summary BELOW its merge row — inverting the lane (botY < topY) and
+  // degenerating the rounded corner (r = max(0, vert/2) = 0). Pin the summary BEFORE any commit at the
+  // same `t` (kind order: summary=0, commit=1), so a lane's top row is always above its merge row.
+  const kindOrder = (k: "commit" | "summary") => (k === "summary" ? 0 : 1);
+  items.sort((a, b) => a.t - b.t || (kindOrder(a.kind) - kindOrder(b.kind)) || (a.tie < b.tie ? -1 : a.tie > b.tie ? 1 : 0));
   return items.map((it, row) => ({ kind: it.kind, hash: it.hash, laneId: it.laneId, t: it.t, row }));
+}
+
+/**
+ * Build the SVG path `d` for one branch lane. This is the SERVER-side mirror of the client
+ * renderer's `lanePath()` (keep the two in lock-step) — extracted so the fail-closed behaviour
+ * is unit-testable without a browser. The four row arguments mirror the client call site:
+ * `lanePath(laneX, forkRow, mergeRow, laneTop, laneBot)`, where `laneTop`/`laneBot` fall back to
+ * the lane's first/last visible rows when there is no fork/merge.
+ *
+ * FAIL-CLOSED (gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge AC1): returns `null`
+ * when `botY <= topY` — an inverted lane — instead of emitting a path that draws the line UPWARD
+ * and degenerates its rounded corner to `Q x,y x,y` (the old `r = Math.max(0, vert/2)` collapses
+ * to 0 for a non-positive `vert`). `null` is distinguishable from a legal path string, so a caller
+ * skips the lane rather than silently drawing it upside down.
+ */
+export function buildLanePath(args: {
+  laneX: number;
+  forkRow: number | null;
+  mergeRow: number | null;
+  laneTopRow: number | null;
+  laneBotRow: number | null;
+  trunkX?: number;
+  laneGap?: number;
+  padY?: number;
+  rowH?: number;
+}): string | null {
+  const trunkX = args.trunkX ?? GIT_GRAPH_TRUNK_X;
+  const laneGap = args.laneGap ?? GIT_GRAPH_LANE_GAP;
+  const padY = args.padY ?? GIT_GRAPH_PAD_Y;
+  const rowH = args.rowH ?? GIT_GRAPH_ROW_H;
+  const y = (row: number) => padY + row * rowH;
+  const hasFork = args.forkRow != null;
+  const hasMerge = args.mergeRow != null;
+  const topY = hasFork ? y(args.forkRow as number) : y(args.laneTopRow as number);
+  const botY = hasMerge ? y(args.mergeRow as number) : y(args.laneBotRow as number);
+  if (botY <= topY) return null; // inverted lane — fail closed, never draw it
+  const vert = botY - topY;
+  let r = Math.min(6, laneGap / 2);
+  if (vert < 2 * r) r = Math.max(0, vert / 2);
+  if (hasFork && hasMerge) {
+    return `M ${trunkX},${topY} H ${args.laneX - r} Q ${args.laneX},${topY} ${args.laneX},${topY + r} V ${botY - r} Q ${args.laneX},${botY} ${args.laneX - r},${botY} H ${trunkX}`;
+  }
+  if (hasFork) {
+    return `M ${trunkX},${topY} H ${args.laneX - r} Q ${args.laneX},${topY} ${args.laneX},${topY + r} V ${botY}`;
+  }
+  if (hasMerge) {
+    return `M ${args.laneX},${topY} V ${botY - r} Q ${args.laneX},${botY} ${args.laneX - r},${botY} H ${trunkX}`;
+  }
+  return `M ${args.laneX},${topY} V ${botY}`;
 }
 
 /**
@@ -246,6 +301,12 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
   // from the same trunk commit) and against fork=null lanes sharing the same first commit.
   const claimed = new Set<string>();
   const usedIds = new Set<string>();
+  // gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge: a dev-merge (`Merge branch 'develop'
+  // into task/X`) lands on the trunk once per sync, and each sync's second parent (the develop tip at
+  // that time) is walked into its OWN lane — so one task split into N same-ref lanes. Aggregate all
+  // same-ref merged lanes into ONE lane: union their commits, keep the earliest fork and the latest
+  // merge (chip shows the count).
+  const mergedByRef = new Map<string, number>(); // ref → index into branches
   // Walk merges OLDEST → NEWEST (trunk.commits is oldest → newest) so the outermost lane — the one
   // that forked directly from the trunk — claims its commits first, and a branch-of-a-branch keeps
   // only its own exclusive commits.
@@ -271,28 +332,50 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
       lane.reverse(); // oldest → newest
       for (const lc of lane) claimed.add(lc.hash);
       const ts = lane.map((x) => x.t);
-      let id = fork != null ? `${fork}::${hash}` : lane[0].hash;
-      if (usedIds.has(id)) {
-        let n = 2;
-        while (usedIds.has(`${id}#${n}`)) n++;
-        id = `${id}#${n}`;
+      const ref = branchNameOf(history, p);
+      const existingIdx = mergedByRef.get(ref);
+      if (existingIdx !== undefined) {
+        // Same ref already has a lane (an earlier dev-merge of the same task): aggregate into it.
+        const existing = branches[existingIdx];
+        const seen = new Set(existing.commits.map((x) => x.hash));
+        for (const lc of lane) if (!seen.has(lc.hash)) existing.commits.push(lc);
+        existing.commits.sort((a, b) => a.t - b.t || (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0));
+        if (existing.fork == null && fork != null) {
+          existing.fork = fork;
+        } else if (existing.fork != null && fork != null && byHash.get(fork)!.t < byHash.get(existing.fork)!.t) {
+          existing.fork = fork;
+        }
+        if (full.t > (existing.mergeT ?? -Infinity)) {
+          existing.merge = hash;
+          existing.mergeT = full.t;
+        }
+        existing.firstT = Math.min(existing.firstT, Math.min(...ts));
+        existing.lastT = Math.max(existing.lastT, Math.max(...ts));
+      } else {
+        let id = fork != null ? `${fork}::${hash}` : lane[0].hash;
+        if (usedIds.has(id)) {
+          let n = 2;
+          while (usedIds.has(`${id}#${n}`)) n++;
+          id = `${id}#${n}`;
+        }
+        usedIds.add(id);
+        branches.push({
+          ref,
+          id,
+          slot: 0,
+          laneX: GIT_GRAPH_TRUNK_X + GIT_GRAPH_LANE_GAP,
+          overflow: false,
+          commits: lane,
+          fork,
+          merge: hash,
+          mergeT: full.t,
+          open: false,
+          firstT: Math.min(...ts),
+          lastT: Math.max(...ts),
+          collapsed: true,
+        });
+        mergedByRef.set(ref, branches.length - 1);
       }
-      usedIds.add(id);
-      branches.push({
-        ref: branchNameOf(history, p),
-        id,
-        slot: 0,
-        laneX: GIT_GRAPH_TRUNK_X + GIT_GRAPH_LANE_GAP,
-        overflow: false,
-        commits: lane,
-        fork,
-        merge: hash,
-        mergeT: full.t,
-        open: false,
-        firstT: Math.min(...ts),
-        lastT: Math.max(...ts),
-        collapsed: true,
-      });
     }
   }
 
@@ -622,6 +705,10 @@ export function gitGraphClientScript(): string {
     var hasMerge = mergeRow != null;
     var topY = hasFork ? y(forkRow) : y(laneTopRow);
     var botY = hasMerge ? y(mergeRow) : y(laneBotRow);
+    // gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge: fail-closed — an inverted lane
+    // (summary row sorted below its own merge row) must not draw a line upward. Return null so the
+    // caller skips it instead of emitting a degenerate Q x,y x,y corner (r = max(0, vert/2) = 0).
+    if (botY <= topY) { return null; }
     var vert = botY - topY;
     var r = Math.min(6, laneGap / 2);
     if (vert < 2 * r) { r = Math.max(0, vert / 2); }
@@ -685,6 +772,10 @@ export function gitGraphClientScript(): string {
     });
     items.sort(function (a, b) {
       if (a.t !== b.t) { return a.t - b.t; }
+      // gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge: pin a summary row BEFORE any
+      // commit at the same t (the summary's t == its own merge commit's t), so a collapsed lane's
+      // top row is always above its merge row (no inverted lane, no degenerate Q x,y x,y corner).
+      if (a.kind !== b.kind) { return a.kind === "summary" ? -1 : 1; }
       return a.tie < b.tie ? -1 : a.tie > b.tie ? 1 : 0;
     });
     // Row is an INTRINSIC attribute of each item (its sorted index), never a hash/laneId-keyed
@@ -755,13 +846,29 @@ export function gitGraphClientScript(): string {
       var laneTop = forkRow != null ? forkRow : laneTopRow[b.id];
       var laneBot = mergeRow != null ? mergeRow : laneBotRow[b.id];
 
-      g.append("path").attr("class", "git-svg-lane")
-        .attr("d", lanePath(laneX, forkRow, mergeRow, laneTop, laneBot))
-        .attr("fill", "none").style("stroke", color).attr("stroke-width", 1.6)
-        // gap-git-graph-omits-inflight-branches-and-summary-table-disjoint: an OPEN lane (unmerged
-        // live ref) is drawn dashed so it reads at a glance as still-in-flight, distinct from a
-        // merged lane's solid line (null removes the attribute → the SVG solid default).
-        .attr("stroke-dasharray", b.open ? "6,4" : null);
+      var d = lanePath(laneX, forkRow, mergeRow, laneTop, laneBot);
+      // gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge: fail-closed — skip the lane
+      // when lanePath returned null (an inverted lane) instead of drawing it upside down.
+      if (d !== null) {
+        g.append("path").attr("class", "git-svg-lane")
+          .attr("d", d)
+          .attr("fill", "none").style("stroke", color).attr("stroke-width", 1.6)
+          // gap-git-graph-omits-inflight-branches-and-summary-table-disjoint: an OPEN lane (unmerged
+          // live ref) is drawn dashed so it reads at a glance as still-in-flight, distinct from a
+          // merged lane's solid line (null removes the attribute → the SVG solid default).
+          .attr("stroke-dasharray", b.open ? "6,4" : null);
+      }
+
+      // gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge AC5: a lane whose fork predates
+      // the window (fork == null) gets an explicit "窗口外分叉" marker at its top, so a dangling top
+      // reads as "fork outside the window", not a broken/disconnected line.
+      if (b.fork == null) {
+        g.append("text").attr("class", "git-svg-fork-dangling")
+          .attr("x", laneX).attr("y", y(laneTop) - 5).attr("font-size", 9)
+          .attr("text-anchor", "middle")
+          .style("fill", "var(--color-neutral-600)")
+          .text("窗口外分叉");
+      }
 
       if (expanded[b.id] === true) {
         // gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead: the fold control is a
