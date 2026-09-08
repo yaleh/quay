@@ -109,6 +109,45 @@ test("写函数名在字符串内部：不算调用（位置判定，硬规则 2
   assert.deepEqual(checkGoalDriverBoundary(src), [], "a write-family name inside a string is prose, not a call");
 });
 
+// ── fan-in 载体（DIR-131 AC6 归因反例机械化）：goal 侧不以 task 落地指标为输入 ────────────────
+test("fan-in 载体注释形负控制：注释里的 fan-in / full-suite-state / 落地率 不算违规", () => {
+  const src = [
+    "// fan-in 落地率是 task 机制指标，不是 goal 机制缺陷（DIR-131 Finding 反例）",
+    "// full-suite-state.json 也不许读",
+    "/* block: fan-in full-suite-state 落地率 */",
+  ].join("\n");
+  assert.deepEqual(checkGoalDriverBoundary(src), [], "a comment mentioning the fan-in carriers must be masked");
+});
+
+test("fan-in 载体负控制：读 .quay/fan-in-* 载体 ⇒ kind=fanin-read 且点行号", () => {
+  const src = [
+    'import fs from "node:fs";',
+    "",
+    'fs.readFileSync(".quay/fan-in-step-trace.jsonl", "utf8");',
+  ].join("\n");
+  const v = checkGoalDriverBoundary(src);
+  assert.equal(v.length, 1, `expected 1 violation, got: ${JSON.stringify(v)}`);
+  assert.equal(v[0].kind, "fanin-read");
+  assert.equal(v[0].token, "fan-in");
+  assert.equal(v[0].line, 3, "must name the line of the fan-in carrier read");
+});
+
+test("full-suite-state 载体负控制：读 full-suite-state.json ⇒ kind=fanin-read", () => {
+  const src = 'const s = "full-suite-state.json";\n';
+  const v = checkGoalDriverBoundary(src);
+  assert.equal(v.length, 1, `expected 1 violation, got: ${JSON.stringify(v)}`);
+  assert.equal(v[0].kind, "fanin-read");
+  assert.equal(v[0].token, "full-suite-state");
+});
+
+test("落地率 载体负控制：字符串里的 落地率 ⇒ kind=fanin-read", () => {
+  const src = 'const metric = "落地率";\n';
+  const v = checkGoalDriverBoundary(src);
+  assert.equal(v.length, 1, `expected 1 violation, got: ${JSON.stringify(v)}`);
+  assert.equal(v[0].kind, "fanin-read");
+  assert.equal(v[0].token, "落地率");
+});
+
 // ── 行号精确性：违规在源码第 N 行 ⇒ line === N ─────────────────────────────────────────────────
 test("行号精确性：违规行号与源码一致", () => {
   const src = [

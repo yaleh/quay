@@ -7,17 +7,20 @@
 // 回答的问题（@instrument）：「goal-driver.ts 是否在【代码位置】（排除注释与字符串字面量）出现
 //   task 写路径调用点——task_write / lifecycle_promote / lifecycle_retreat / lifecycle_complete
 //   这些 task 机制动词，或以 tasks/ 为目标的 fs.write* / writeFileSync——即 goal 机制越界替 task
-//   机制落地任务状态？」
+//   机制落地任务状态？以及（DIR-131 AC6）是否在【非注释位置】引用 fan-in / 落地率类载体
+//   （fan-in / full-suite-state / 落地率）——即 goal 机制以 task 落地指标为输入（错误归因反例）。」
 //
 // 判定（能取假，硬规则 3/4）：
 //   - task 机制动词（task_write / lifecycle_*）在代码位置出现 ⇒ RED（goal 机制越界写 task 状态）。
 //   - 写家族调用（fs.write* / writeFileSync / appendFile* / createWriteStream）在代码位置出现且其
 //     语句窗口内引用 tasks/ 路径 ⇒ RED（goal 机制直接写 tasks/*.md）。
+//   - fan-in / full-suite-state / 落地率 在非注释位置（含字符串字面量——读载体必写路径）出现 ⇒ RED
+//     （goal 机制读 task 落地指标）。
 //   - 头注释 / DIR-131 正文里逐字出现这些词不算（屏蔽注释与字符串字面量——硬规则 2，裸 grep 假阳性）。
 //
 // 退出码（checker-mechanical-spine-check.ts 词表 {0,1,2,3}）：
-//   0 = PASS（goal-driver.ts 无 task 写路径调用点）
-//   1 = RED（≥1 个 task 写路径调用点）
+//   0 = PASS（goal-driver.ts 无 task 写路径调用点，也不读 fan-in / 落地率类载体）
+//   1 = RED（≥1 个 task 写路径调用点 / fan-in 载体引用）
 //   2 = usage/env error（非法参数）
 //   3 = NOT-EVALUATED（目标文件缺失 / 不可读——读不到输入 ≠ 无违规，硬规则 3b）
 //
@@ -46,10 +49,15 @@ export const WRITE_FAMILY_RE =
 /** tasks 路径引用：`tasks` 后紧跟引号 / 斜杠 / 反斜杠（`"tasks"`、`tasks/`、`` `tasks/${id}.md` ``）。 */
 export const TASKS_PATH_RE = /tasks(?=["'`/\\])/;
 
+/** fan-in / 落地率类载体 token（DIR-131 AC6 归因反例机械化）：goal 侧不以 task 落地指标为输入。
+ *  与「Human verification」第 4 点的 grep 词表一致——fan-in / full-suite-state / 落地率 应无非注释命中。
+ *  读载体文件必然把路径写成字符串，故检测范围 = 非注释位置（含字符串字面量），不含 bash `#`。 */
+export const FANIN_CARRIER_RE = /(fan-in|full-suite-state|落地率)/g;
+
 export interface BoundaryViolation {
-  /** task-verb = task 机制动词；task-write = 写家族调用指向 tasks/。 */
-  kind: "task-verb" | "task-write";
-  /** 命中的动词 / 写家族函数名。 */
+  /** task-verb = task 机制动词；task-write = 写家族调用指向 tasks/；fanin-read = 非注释位置引用 fan-in / 落地率类载体。 */
+  kind: "task-verb" | "task-write" | "fanin-read";
+  /** 命中的动词 / 写家族函数名 / 载体 token。 */
   token: string;
   /** 命中所在 1-based 行号。 */
   line: number;
@@ -201,6 +209,19 @@ export function checkGoalDriverBoundary(src: string): BoundaryViolation[] {
     }
   }
 
+  // Detector 3 — fan-in / 落地率类载体（DIR-131 AC6 归因反例机械化）：goal 侧不以 task 落地指标为输入。
+  // 在「仅屏蔽注释」的文本上匹配（字符串保留——读载体文件必然把路径写成字符串），非注释位置引用即越界。
+  // 与 Human verification 第 4 点的 grep 词表一致：fan-in / full-suite-state / 落地率 应无非注释命中。
+  FANIN_CARRIER_RE.lastIndex = 0;
+  while ((m = FANIN_CARRIER_RE.exec(commentMaskedText)) !== null) {
+    violations.push({
+      kind: "fanin-read",
+      token: m[1],
+      line: lineOf(src, m.index),
+      snippet: snippetOf(src, m.index),
+    });
+  }
+
   return violations;
 }
 
@@ -242,7 +263,7 @@ usage: node --no-warnings --experimental-strip-types plugin/scripts/goal-driver-
     process.stderr.write(`goal-driver-task-boundary-check: NOT-EVALUATED — target file missing or unreadable: ${res.target}\n`);
   } else if (res.ok) {
     process.stdout.write(
-      "goal-driver-task-boundary-check: PASS — goal-driver.ts has no task-write call sites (task_write/lifecycle_*/fs.write-to-tasks)\n",
+      "goal-driver-task-boundary-check: PASS — goal-driver.ts has no task-write call sites (task_write/lifecycle_*/fs.write-to-tasks) and no fan-in/落地率 carrier reads\n",
     );
   } else {
     process.stderr.write(`goal-driver-task-boundary-check: RED (${res.violations.length} violation(s))\n`);
