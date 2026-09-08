@@ -1,7 +1,7 @@
 {
   "files": 133,
-  "bytes": 3903179,
-  "fingerprint": "ddde428c5791b023a0a4f058138311f702eb56b92bcb621a990ee7fe4280ae2a",
+  "bytes": 3904530,
+  "fingerprint": "d654f41dd548816493fa29dc303689c496ad23c9a8624b2b28b3f7a1df11a5c4",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
@@ -325,7 +325,7 @@
     },
     {
       "rel": "plugin/scripts/precommit-guard.ts",
-      "sha": "a24b702e3e70c5d6deeaf72a005e0e2f3524a7a0d7d2afb6a3ee2fbf3b319f5c"
+      "sha": "34f7f63de422fdc452c7f7383c630698147f5a92dccf7bb6bffdef8d4fe601a6"
     },
     {
       "rel": "plugin/scripts/process-budget.sh",
