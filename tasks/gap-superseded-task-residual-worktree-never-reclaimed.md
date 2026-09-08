@@ -77,4 +77,5 @@ extra:
 - plugin/scripts/worker-driver.ts（添加 reclaimSupersededWorktrees() 及其在常驻循环 reconcile 步的调用点）
 - plugin/test/worker-driver.test.mjs（纯函数 + 双闸 + unreadable 独立取值的测试）
 - plugin/test/worker-driver-resident.test.mjs（reconcile 步接线断言）
+- docs/analysis/quay-init-closure-ratchet.baseline.json（worker-driver.ts 是 quay-init laydown 源，增长需 re-anchor 该 closure baseline）
 - tasks/gap-superseded-task-residual-worktree-never-reclaimed.md（自身）
