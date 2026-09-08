@@ -4,7 +4,7 @@ title: git-history 的「分支泳道」模型假设 no-ff fan-in（从合并提
   ff——develop 最近 500 条 first-parent 链里 85 个合并提交全是「into task/id」的 dev-merge、真正
   task→develop 的 no-ff 合并为 0 条；结果图上 29-31 条「泳道」全是 develop 自身历史的碎片、套着已删分支的名字（4
   条实测经 git merge-base 核验为 develop 祖先），此前诊断的倒画/退化圆角/同名裂分只是这个错误重建的表征
-status: todo
+status: ready
 labels:
   - gap
   - webui
