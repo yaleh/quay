@@ -66,26 +66,26 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（近5轮色块条移除）：`grep -n "近${recentRuns.length}轮\|近.*轮（新→旧）" packages/quay/src/serve-dashboard.ts`
+- [x] AC1（近5轮色块条移除）：`grep -n "近${recentRuns.length}轮\|近.*轮（新→旧）" packages/quay/src/serve-dashboard.ts`
       在 `renderTestsCard` 函数体内命中数为 0。
-- [ ] AC2（round 号反色 chip）：给定固定 `state: "red"`/`"green"` 的 run fixture，`renderTestsCard`
+- [x] AC2（round 号反色 chip）：给定固定 `state: "red"`/`"green"` 的 run fixture，`renderTestsCard`
       输出中该行的 round 号被一个带 `background:var(--color-accent-800)` / `--color-positive-700`
       的元素包裹（不是仅文字变色）。
-- [ ] AC3（bar 位置）：在 `renderTestsCard` 与 `renderFanInCardFromRecords` 各自的输出字符串里，
+- [x] AC3（bar 位置）：在 `renderTestsCard` 与 `renderFanInCardFromRecords` 各自的输出字符串里，
       `timelineBar`/`bar` 出现的字符偏移量早于 `recentList`/`list` 出现的字符偏移量
       （`indexOf` 数值比较，而非目测截图）。
-- [ ] AC4（循环脉搏标题换行）：给定一个标题超过 40 字符的 in-flight fixture，`renderLiveCard`
+- [x] AC4（循环脉搏标题换行）：给定一个标题超过 40 字符的 in-flight fixture，`renderLiveCard`
       输出中标题所在元素不含 `white-space:nowrap`；对照 fixture（改动前的代码）必须先能复现
       `white-space:nowrap` 存在（负控制，证明测试真的在测这个属性而非恒真）。
-- [ ] AC5（泳道 chart）：给定 ≥2 个 in-flight 任务的固定 fixture（不同 `startedAtMs`/phase），
+- [x] AC5（泳道 chart）：给定 ≥2 个 in-flight 任务的固定 fixture（不同 `startedAtMs`/phase），
       新渲染函数输出的 `<rect>` 数量等于 in-flight 任务数，且每个 `<rect>` 的纵向位置
       （`y` 属性）两两不同（真正分行，不是叠在同一条 lane 上）。
-- [ ] AC6（移动端零横向溢出，真实回归而非静态审查）：用 MCP 浏览器把视口设为 390×844 打开生产
+- [x] AC6（移动端零横向溢出，真实回归而非静态审查）：用 MCP 浏览器把视口设为 390×844 打开生产
       `/dashboard`（或本地起服务后打开），`document.documentElement.scrollWidth` 必须
       `<= 390 + 5`（容许滚动条误差）；**改动前必须先在同一视口下复现 `scrollWidth ≈ 1541`
       的负控制**（证明这条 AC 真的在测刚才发现的 bug，而不是一个从未失败过的恒真断言，
       对应 CLAUDE.md 硬规则 4）。
-- [ ] AC7（`.dash-grid` 媒体查询钳位）：`grep -n "grid-template-columns:1fr !important"
+- [x] AC7（`.dash-grid` 媒体查询钳位）：`grep -n "grid-template-columns:1fr !important"
       packages/quay/src/serve-dashboard.ts` 命中数为 0，改为
       `grep -n "grid-template-columns:minmax(0,1fr) !important"` 命中数为 1。
 
@@ -103,4 +103,5 @@ extra:
 - packages/quay/src/serve-dashboard.ts
 - packages/quay/test/gap-dashboard-visual-review-batch-fixes.test.mjs
 - packages/quay/test/gap-dashboard-cards-layout-and-livecard-swimlane.test.mjs
+- packages/quay/test/gap-dashboard-grid-autofit-columns-vs-card-count.test.mjs
 - tasks/gap-dashboard-cards-layout-and-livecard-swimlane.md

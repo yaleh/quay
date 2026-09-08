@@ -70,8 +70,12 @@ git log develop --first-parent -n 500 --pretty='%P\x1f%s'
 ## Touches
 
 - packages/quay/src/serve-git.ts（layoutGitGraph 重写为两阶段：ref 分区优先 + 历史级重建兜底；GitGraphLayout 去 trunk 加 kind；lanePath 几何修复；chip 渲染统一）
+- packages/quay/test/gap-git-graph-branch-name-fallback-to-trunk-ref.test.mjs（端到端断言随两阶段模型改为「重归因的已删分支提交折叠进唯一 mainline 泳道，不再产出幽灵 task/A·task/B 泳道」）
+- packages/quay/test/gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead.test.mjs（fixtureLayout 前置 2→3、longestBranch 过滤 mainline、hit-rect 计数改为按 lateral 泳道）
 - packages/quay/test/gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge.test.mjs（本任务的回归测试：ff-dev-merge-heavy fixture + 真实 no-ff fixture + 几何 fixture）
+- packages/quay/test/gap-git-graph-lane-visual-encoding-and-fixed-width.test.mjs（AC2 六分支 fixture 改 distinct ref 成 6 条 lateral 泳道；颜色断言按 lateral 过滤 mainline）
 - packages/quay/test/gap-git-graph-omits-inflight-branches-and-summary-table-disjoint.test.mjs（open 泳道判定逻辑随两阶段模型调整，相邻用例需同步更新）
+- packages/quay/test/gap-git-graph-row-key-collides-on-multiclaimed-commits.test.mjs（AC3 branches 计数 2→3；dupHashLayout fixture 改 branches[] 形——无 trunk、各泳道带 kind）
 - packages/quay/test/gap-git-graph-trunk-ref-resolves-to-head-not-mainline.test.mjs（trunk 字段移除后，断言改为「mainline 泳道排序第一 + 其 ref 正确解析」）
 - packages/quay/test/gap-git-history-lane-identity-and-row-layout-overlap.test.mjs（trunk 顶层字段移除后，lane 计数/行模型断言改为「mainline 泳道 + 侧泳道」）
 - packages/quay/test/serve-handlers.test.mjs（AC1/AC2 的 trunk/branches 断言随两阶段模型改为 mainline 泳道断言）

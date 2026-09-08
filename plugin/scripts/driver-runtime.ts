@@ -859,6 +859,111 @@ export function sourceChangedSince(root: string, kind: DriverKind, sinceMs: numb
   return sourceFilesMaxMtimeMs(root, kind) > sinceMs;
 }
 
+// ── Layer 0 · supervisor 陈旧判定（gap-supervisor-never-self-refreshes-no-detector）────────────────
+// 源码自刷新（AC-184）住在 supervisor 的 sourceCheck 里，`:958` 杀的是 child——【只有 driver】，从不
+// 包括 supervisor 自己。supervisor 是常驻前台进程（runSupervisor `:967` 永不 resolve），它内存里的
+// kernel 是启动那一刻的版本、此后永不刷新；而 driver-runtime.ts 本身就在 SHARED_SOURCE_FILES 里——改它
+// 会重启 driver，却改不动持有该逻辑的 supervisor。两个后果：① 早于该功能启动的 supervisor 连刷新循环
+// 都没有 ⇒ 其 driver 永不自愈（实测 quality 跑 2 天 8 小时陈旧代码）；② supervisor 半边的任何改动对在跑
+// 的 supervisor 静默无效。本段新增一个【直接量】：supervisor 进程启动时刻 vs 被监视源码最新 mtime，
+// 陈旧即报进 aliveness()/status；读不到启动时刻 ⇒ not-evaluated（⛔ 与「新鲜」同形，硬规则 3b/4b）。
+
+/** 读 /proc/<pid>/stat 的 starttime（field 22，USER_HZ 时钟 tick 数，自 boot 起）。读失败/非负非法
+ *  ⇒ null。偏移与 supervisor-observe.sh 的 stat_fields 一致：rfind(")") 后 split，fields[0]=state
+ *  （field 3）… fields[19]=starttime（field 22）。 */
+function procStartTicks(pidOrSelf: number | "self"): number | null {
+  try {
+    const stat = fs.readFileSync(pidOrSelf === "self" ? "/proc/self/stat" : `/proc/${pidOrSelf}/stat`, "utf8");
+    const idx = stat.lastIndexOf(")");
+    if (idx < 0) return null;
+    const fields = stat.slice(idx + 2).trim().split(/\s+/);
+    const ticks = Number(fields[19]);
+    return Number.isFinite(ticks) && ticks >= 0 ? ticks : null;
+  } catch {
+    return null;
+  }
+}
+
+/** /proc/uptime 第一字段（系统 BOOTTIME 秒，float，亚秒精度）。读失败/非法 ⇒ null。 */
+function systemUptimeSeconds(): number | null {
+  try {
+    const n = Number(fs.readFileSync("/proc/uptime", "utf8").trim().split(/\s+/)[0]);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+let _clkTck: number | null = null;
+
+/** sysconf(_SC_CLK_TCK)——USER_HZ，/proc/<pid>/stat starttime 的 tick 单位（tick/秒）。Node 无 sysconf
+ *  绑定，从本进程自身 /proc/self/stat starttime 与 /proc/uptime 推导（两读数独立于任何目标 pid、都读
+ *  宿主——⛔ 不写死宿主依赖字面量，硬规则 4 推论二）：selfTicks / (systemUptime − nodeUptime) = tick/秒。
+ *  推导失败（/proc 缺失/进程初起 elapsed≤1s 噪声大）⇒ 回退 100（Linux x86_64/arm64 的 USER_HZ）。 */
+function clockTicksPerSecond(): number {
+  if (_clkTck !== null) return _clkTck;
+  try {
+    const selfTicks = procStartTicks("self");
+    const uptime = systemUptimeSeconds();
+    const elapsed = uptime != null ? uptime - process.uptime() : null; // boot → 本进程 exec 的秒数（按 kernel 时钟）
+    if (selfTicks !== null && elapsed != null && elapsed > 1) {
+      const clk = selfTicks / elapsed;
+      if (Number.isFinite(clk) && clk > 0) {
+        _clkTck = clk;
+        return clk;
+      }
+    }
+  } catch { /* fall through to fallback */ }
+  _clkTck = 100;
+  return _clkTck;
+}
+
+/** 进程启动时刻（epoch ms）。读不到 /proc 或 uptime ⇒ null（= not-evaluated，⛔ 不是「新鲜」）。
+ *  ⛔ 不用 /proc/stat 的 btime（整数秒，丢掉 boot 的小数秒 ⇒ 进程启动时刻系统性偏早最多 ~1s，实测
+ *  ~318ms，会把「刚启动的 supervisor」误判为陈旧——gap-supervisor-never-self-refreshes-no-detector）：
+ *  改用 Date.now()（REALTIME 现在）− (uptime − starttime/CLK_TCK)（BOOTTIME 自进程启动以来经过的
+ *  秒数），两者都有亚秒精度，⛔ 不引 btime 截断误差。 */
+export function procStartTimeMs(pid: number): number | null {
+  const ticks = procStartTicks(pid);
+  const uptime = systemUptimeSeconds();
+  if (ticks === null || uptime === null) return null;
+  const elapsedMs = (uptime - ticks / clockTicksPerSecond()) * 1000;
+  return Math.round(Date.now() - elapsedMs);
+}
+
+/** supervisor 陈旧判定结果。state=not-evaluated 表示读不到 supervisor 进程启动时刻（⛔ 与「新鲜」同形，
+ *  硬规则 3b/4b——「跑着旧代码的 supervisor」与「健康 supervisor」必须在读数上可区分）。 */
+export interface SupervisorStaleness {
+  state: "fresh" | "stale" | "not-evaluated";
+  /** supervisor 进程启动时刻（epoch ms）；读不到 ⇒ null。 */
+  supervisorStartedAt: number | null;
+  /** 被监视源码最新 mtime（epoch ms；全部缺失 ⇒ 0）。 */
+  sourceMtimeMs: number;
+}
+
+/** 判定一个 supervisor 是否陈旧：supervisor 启动时刻 vs 被监视源码最新 mtime。源码推进到启动时刻之后
+ *  ⇒ stale（supervisor 内存里的 kernel 早于盘上源码，sourceCheck 只重启 driver、永远改不动它自己）。
+ *  supervisor pid 缺失/已死/读不到启动时刻 ⇒ not-evaluated。 */
+export function supervisorStaleness(
+  root: string,
+  kind: DriverKind,
+  supervisorPid: number | null,
+): SupervisorStaleness {
+  const sourceMtimeMs = sourceFilesMaxMtimeMs(root, kind);
+  if (supervisorPid === null || !pidAlive(supervisorPid)) {
+    return { state: "not-evaluated", supervisorStartedAt: null, sourceMtimeMs };
+  }
+  const supervisorStartedAt = procStartTimeMs(supervisorPid);
+  if (supervisorStartedAt === null) {
+    return { state: "not-evaluated", supervisorStartedAt: null, sourceMtimeMs };
+  }
+  return {
+    state: sourceMtimeMs > supervisorStartedAt ? "stale" : "fresh",
+    supervisorStartedAt,
+    sourceMtimeMs,
+  };
+}
+
 // ── Layer 0 · supervisor（respawn / pid 记账 / stop sentinel，由 promotion-driver-launch.sh 港进）────
 // 仓库里只此一份 respawn 循环；kind 差异由 DRIVER_KINDS 数据表驱动（⛔ 非两份代码分支）。
 
@@ -975,6 +1080,11 @@ export function aliveness(root: string, kind: DriverKind): {
   driverAlive: boolean;
   running: boolean;
   deaths: string[];
+  /** supervisor 进程启动时刻（epoch ms）；读不到 ⇒ null（not-evaluated，⛔ 与「新鲜」同形）。 */
+  supervisorStartedAt: number | null;
+  /** supervisor 是否陈旧（其启动时刻早于被监视源码最新 mtime）。true=stale；false=fresh；null=
+   *  not-evaluated（supervisor 缺失/已死/读不到启动时刻）。 */
+  supervisorStale: boolean | null;
 } {
   const st = statePaths(root, kind);
   const spidRaw = readPidFile(st.supervisorPidFile);
@@ -991,7 +1101,19 @@ export function aliveness(root: string, kind: DriverKind): {
   if (driverPid != null && !driverAlive) deaths.push("driver_dead");
   // 孤儿 driver：supervisor 死而 driver 进程还在 —— ⛔ 不算「在跑」（AC3(b)）。
   if (!supervisorAlive && driverAlive) deaths.push("driver_orphaned");
-  return { supervisorPid, driverPid, supervisorAlive, driverAlive, running, deaths };
+  // supervisor 陈旧判定（gap-supervisor-never-self-refreshes-no-detector）：只对【活着】的 supervisor
+  // 有意义；缺失/已死/读不到启动时刻 ⇒ not-evaluated（null），⛔ 不与「新鲜」（false）同形。
+  const staleness = supervisorStaleness(root, kind, supervisorAlive ? supervisorPid : null);
+  return {
+    supervisorPid,
+    driverPid,
+    supervisorAlive,
+    driverAlive,
+    running,
+    deaths,
+    supervisorStartedAt: staleness.supervisorStartedAt,
+    supervisorStale: staleness.state === "stale" ? true : staleness.state === "fresh" ? false : null,
+  };
 }
 
 /** status 输出（JSON 与人类可读两态）。alive 与 running 同值（alive 是 AC139-3 字段名，running 保留
@@ -1012,11 +1134,14 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
       carrier_path: stats.primaryPath,
       carrier_records: stats.records,
       last_record_ts: stats.lastTs,
+      supervisor_started_at: a.supervisorStartedAt,
+      supervisor_stale: a.supervisorStale === true ? "stale" : a.supervisorStale === false ? "fresh" : "not-evaluated",
     }));
   } else {
     out(
       `${spec.prefix}: kind=${kind} · supervisor pid=${a.supervisorPid ?? "none"} alive=${a.supervisorAlive ? 1 : 0} · ` +
       `driver pid=${a.driverPid ?? "none"} alive=${a.driverAlive ? 1 : 0} · running=${a.running ? 1 : 0} · ` +
+      `supervisor_stale=${a.supervisorStale === true ? "stale" : a.supervisorStale === false ? "fresh" : "not-evaluated"} · ` +
       `carrier_path=${stats.primaryPath} · carrier_records=${stats.records} · last_record_ts=${stats.lastTs ?? "null"}`,
     );
   }
