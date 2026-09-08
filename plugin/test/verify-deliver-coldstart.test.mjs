@@ -20,6 +20,13 @@
 //   AC3/AC4 — the script's fresh-install shape (isolated npm --prefix + clean project root) is
 //         argued in the script header and exercised by --help/arg-validation; the real install is
 //         load-sensitive and belongs to the AC88 cross-host drive, not this hermetic file.
+//
+//   gap-verify-deliver-coldstart-l1-asserts-retired-artifacts (2026-09-08) re-anchored L1 to the
+//   SPEC §6 closed set. Direct (non-selfcheck) coverage here:
+//   AC2 — L1 closed-set is PARSED from the SPEC's QUAY-INIT-CLOSED-SET:BEGIN/END block: mutating
+//         the block (adding an absent entry) flips L1_OK 1→0 ⇒ the script really reads the SPEC,
+//         not a hardcoded copy (硬规则 4c).
+//   AC3 — an unreadable SPEC ⇒ L1_NOT_EVALUATED=1 and L1_OK≠1 (未评估 ≠ 合格, 硬规则 3b).
 //   This file uses node:test and declares // @test-group lowconc (AC5 of the mechanism task).
 //
 // Run:
@@ -109,21 +116,69 @@ test("--verify-only requires an existing --root (exit 2, not a run)", () => {
 test("--verify-only re-probes L1 from disk (a laid-down project reports L1_OK=1, not a stale 0)", () => {
   // Regression: verify-only used to inherit L1_* globals only set in step2_init, so L1_OK was
   // always 0 in verify-only mode (COLDSTART_LIVE could never be yes). probe_l1() re-reads disk.
+  // L1 is now the SPEC §6 closed set (parsed from --spec), not the retired tick docs.
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "vc-verify-only-"));
   try {
-    const dirs = ["orchestration", "docs/analysis", "plugin/scripts", ".quay/runtime/bin"];
-    for (const d of dirs) fs.mkdirSync(path.join(tmp, d), { recursive: true });
-    fs.writeFileSync(path.join(tmp, "orchestration", "orchestrator-loop-tick.md"), "# outer\n");
-    fs.writeFileSync(path.join(tmp, "docs/analysis", "fast-mode-loop-tick.md"), "# inner\n");
-    fs.writeFileSync(path.join(tmp, "plugin/scripts", "loop-driver-check.sh"), "#!/bin/bash\n");
+    const spec = path.join(tmp, "closed-set-spec.md");
+    fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
     fs.writeFileSync(path.join(tmp, ".quay", "config.yml"), "providers: {}\n");
-    fs.writeFileSync(path.join(tmp, ".quay", "runtime", "bin", "quay.js"), "//x\n");
+    fs.writeFileSync(spec,
+      "QUAY-INIT-CLOSED-SET:BEGIN\n- .quay/config.yml\n- tasks/\nQUAY-INIT-CLOSED-SET:END\n");
     const r = run(["--verify-only", "--root", tmp, "--project", "vtest",
-      "--evidence", path.join(tmp, "evidence.json"), "--ac89", path.join(tmp, "ac89.jsonl")]);
+      "--evidence", path.join(tmp, "evidence.json"), "--ac89", path.join(tmp, "ac89.jsonl"),
+      "--spec", spec]);
     assert.equal(r.status, 0, `verify-only on a laid-down project must exit 0:\n${r.stderr}`);
     assert.match(r.stdout, /L1_OK=1/, "L1 must be probed from disk, not a stale global 0");
     assert.match(r.stdout, /AC88_VERIFY=not-live/,
       "laid-down mechanism with no loop work is not-live (DATA), not fail");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — L1 closed-set is parsed from the SPEC (mutating the marked block flips the verdict)", () => {
+  // 硬规则 4c / 硬规则 2: the L1 assertion set must be DERIVED from the SPEC's
+  // QUAY-INIT-CLOSED-SET:BEGIN/END block, not a hardcoded copy. Prove it by mutating the block
+  // and observing the verdict flip — if it did not flip, the script would still be a hardcoded copy.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "vc-l1-spec-"));
+  try {
+    const spec = path.join(tmp, "spec.md");
+    const root = path.join(tmp, "root");
+    fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+    fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(root, ".quay", "config.yml"), "providers: {}\n");
+    fs.writeFileSync(spec,
+      "QUAY-INIT-CLOSED-SET:BEGIN\n- .quay/config.yml\n- tasks/\nQUAY-INIT-CLOSED-SET:END\n");
+    const a = run(["--verify-only", "--root", root, "--project", "l1spec",
+      "--evidence", path.join(tmp, "e1.json"), "--ac89", path.join(tmp, "a1.jsonl"), "--spec", spec]);
+    assert.match(a.stdout, /L1_OK=1/, "closed-set all present ⇒ L1_OK=1");
+    assert.match(a.stdout, /L1_CLOSED_SET_COUNT=2 /, "two closed-set entries parsed from SPEC");
+    // Add an entry the root does NOT have ⇒ the verdict must flip (proves the SPEC is re-read).
+    fs.writeFileSync(spec,
+      "QUAY-INIT-CLOSED-SET:BEGIN\n- .quay/config.yml\n- tasks/\n- .claude/settings.json\nQUAY-INIT-CLOSED-SET:END\n");
+    const b = run(["--verify-only", "--root", root, "--project", "l1spec",
+      "--evidence", path.join(tmp, "e2.json"), "--ac89", path.join(tmp, "a2.jsonl"), "--spec", spec]);
+    assert.match(b.stdout, /L1_OK=0/, "adding an absent entry must flip L1_OK to 0");
+    assert.match(b.stdout, /L1_CLOSED_SET_COUNT=3 /, "three entries after mutation");
+    assert.match(b.stdout, /\.claude\/settings\.json/, "the newly-added entry is named in the missing set");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("AC3 — unreadable SPEC ⇒ L1_NOT_EVALUATED=1 (distinct from qualified, hard rule 3b)", () => {
+  // 硬规则 3b: "未评估" and "合格" must be two distinguishable values. An unreadable SPEC must
+  // yield L1_NOT_EVALUATED=1 and L1_OK≠1 (never a silent pass nor a silent fail disguised as qualified).
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "vc-l1-ne-"));
+  try {
+    const root = path.join(tmp, "root");
+    fs.mkdirSync(root, { recursive: true });
+    const r = run(["--verify-only", "--root", root, "--project", "l1ne",
+      "--evidence", path.join(tmp, "e.json"), "--ac89", path.join(tmp, "a.jsonl"),
+      "--spec", path.join(tmp, "does-not-exist.md")]);
+    assert.match(r.stdout, /L1_NOT_EVALUATED=1/, "missing SPEC must set L1_NOT_EVALUATED=1");
+    assert.match(r.stdout, /L1_OK=0/, "and L1_OK must NOT be 1 (未评估 ≠ 合格)");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
