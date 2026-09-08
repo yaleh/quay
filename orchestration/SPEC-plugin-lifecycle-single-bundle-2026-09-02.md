@@ -460,15 +460,16 @@ npm 侧无需处理（`files` 是白名单，`archive/` 天然不在内）。
 **⚠️ 本清单是【带测量日期的快照】，不是活文档。** 判据（§12d）是耐久的，名单会随代码演化过期；
 **执行 archive 前须按 §12d 重算一次**，以重算结果为准。
 
-**⊕ 死集重算回写（2026-09-07，`gap-dead-set-closure-repo-root-call-form-false-positive` 补认执行形式后）**：
+**⊕ 死集重算回写（2026-09-08，`gap-dead-set-closure-misses-four-reference-kinds` 补认四类引用后）**：
 按 §12d（三天零执行 ∧ 无生产调用者）+ §12e 传递闭包（补认 `${repo_root}/plugin/scripts/<name>`、
-`path.join(__dirname, "<name>")`、`$SCRIPT_DIR/<name>` 三种执行形式）+ §12f 裸文件名边重算；
-方法窗口与完整名单见 `docs/analysis/dead-set-recomputed.json`
-（`generatedAt` 2026-09-07T14:38:19.347Z；窗口 2026-09-04T14:32:46.988Z → 2026-09-07T14:32:46.988Z，72h；
+`path.join(__dirname, "<name>")`、`$SCRIPT_DIR/<name>` 三种执行形式，**再加四类引用**：bash `source`/`.`
+内建（执行）、`plugin/test` 存在性钉、`.quay/config.yml` gate 注册、wrapper→委托模块对称对）+
+§12f 裸文件名边重算；方法窗口与完整名单见 `docs/analysis/dead-set-recomputed.json`
+（`generatedAt` 2026-09-08T06:32:14.678Z；窗口 2026-09-05T06:28:00.783Z → 2026-09-08T06:28:00.783Z，72h；
 `executionDataSource` = 三层 transcript 普查，非 runtime-usage-inventory.ts）。
 
-- 扫描前死集: 86
-- 扫描后死集: 82
+- 扫描前死集: 31
+- 扫描后死集: 31
 
 #### 安全核 94 个（`plugin/scripts/` 下，两口径下均判死；56 个自带测试须同批移动）
 

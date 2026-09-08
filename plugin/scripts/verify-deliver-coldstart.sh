@@ -62,7 +62,7 @@
 #       [--test-command <cmd>] [--tmux-session <sess>] \
 #       [--wait <s>] [--liveness-window <min>] \
 #       [--skip-cold-start-drive] [--cold-start-drive] [--verify-only] [--require-live] \
-#       [--evidence <path>] [--ac89 <path>] [--host <B|C>] [--spec <path>] [--selfcheck] [--help]
+#       [--evidence <path>] [--ac89 <path>] [--host <B|C>] [--spec <path>] [--channel npm-global|marketplace] [--selfcheck] [--help]
 #
 #   --build-root <repo> 该次验证【自己】从 <repo> 的 develop-tip 现 build quay+quay-native tgz
 #                       （AC5 主路径：build_sha/日期/产物 sha256 全由本脚本取，不引用外部产物），
@@ -73,6 +73,11 @@
 #   --spec <path>       SPEC §6 闭集来源（L1 判据解析的 SPEC 文件）。显式给出但文件缺失 ⇒
 #                       L1_NOT_EVALUATED=1（不静默回退）。缺省：--build-root <repo>/orchestration/，
 #                       再退回脚本 dev-tree 相对路径。
+#   --channel <c>      step① 验证哪条安装路径：npm-global（默认，向后兼容）| marketplace。
+#                      marketplace 分支 = npm install -g 获得可解包内容后，跑 shipped 的
+#                      register-plugin.mjs（QUAY_SKIP_PLUGIN_CLI=1）并断言 ~/.claude/settings.json
+#                      落地 extraKnownMarketplaces.quay → 已安装路径、enabledPlugins 无用户级 quay 键
+#                      （AC-161/162 契约的跨主机版本，SPEC §6b 约束③ 两条安装路径都能解析到）。
 #   --verify-only    只跑③（对已存在的 --root 重验冷启动活性；①②被调用方声明已验）。
 #   --require-live   ③ 若 COLDSTART_LIVE != yes 则 exit 1（严格验证——冷启动确认跑用）。
 #   --selfcheck      全 hermetically 自检（AC2 直接量正/负控制 + L1 闭集解析/未评估正负控制 + AC5 判据正/负控制），不碰真实安装。exit 0/1。
@@ -108,6 +113,7 @@ EVIDENCE=""
 AC89=""
 HOST=""                      # AC89 记录的主机字段（B|C，跨主机验证时由驱动方传入）
 SPEC_PATH=""                 # SPEC §6 闭集来源（--spec <path> 显式；缺省由 --build-root/dev-tree 推导）
+CHANNEL="npm-global"         # step① 验证哪条安装路径：npm-global（默认）| marketplace（SPEC §6b 约束③）
 CWD="$(pwd)"
 VC_NODE="${VC_NODE:-node}"                    # 启动弹窗探针的 node 接缝（测试可覆盖）
 VC_TMUX_SOCKET="${VC_TMUX_SOCKET:-}"          # 启动弹窗探针的 tmux 套接字覆盖（测试可覆盖）
@@ -146,10 +152,17 @@ while [ $# -gt 0 ]; do
     --ac89) AC89="$2"; shift 2 ;;
     --host) HOST="$2"; shift 2 ;;
     --spec) SPEC_PATH="$2"; shift 2 ;;
+    --channel) CHANNEL="$2"; shift 2 ;;
     --selfcheck) DO_SELFCHECK=1; shift ;;
     *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+# ── --channel 取值校验（fail-closed：未知取值 = 用法错误，不静默当 npm-global 跑）──
+case "$CHANNEL" in
+  npm-global|marketplace) ;;
+  *) echo "ERROR: --channel must be npm-global|marketplace (got: $CHANNEL)" >&2; exit 2 ;;
+esac
 
 # ── 直接量探测（AC2 / 硬规则 4b）────────────────────────────────────────────────────────
 # 用【外部可核】的直接量判双层活性，不用层自己的心跳自报：
@@ -420,6 +433,111 @@ step1_install() {
   return 0
 }
 
+# ── marketplace 通道验证（AC168：SPEC §6b 约束③ 两条安装路径都能解析到）────────────
+# npm-global 与 plugin marketplace 是 SPEC §6 的两条受支持安装路径。npm-global 那条已由
+# step1_install 的 quay --version 断言跨主机验证过（gap-verify-deliver-coldstart-l1-asserts-retired-artifacts
+# AC6）；marketplace 那条（register-plugin.mjs 把已安装 plugin 目录注册为 directory-source
+# marketplace）此前零跨主机接线——本分支补上。
+#
+# marketplace 通道 = 复用 step① 的 npm install -g 获得可解包内容，然后显式跑 shipped 的
+# register-plugin.mjs（QUAY_SKIP_PLUGIN_CLI=1 —— B/C 无 claude 二进制，register-plugin.mjs:146
+# 的优雅降级：只物化 settings.json，不 shell 出去调 claude plugin marketplace add/install——
+# 这是 marketplace 通道在无 claude 宿主上唯一可达的真实形态，不是弱化替代品）。
+# 断言 settings.json 落地后：
+#   extraKnownMarketplaces.quay.source.path == <npm root -g>/quay/plugin   （marketplace 源已注册）
+#   enabledPlugins 不含用户级 quay 键（quay / quay@*）                     （启用未外溢，AC-161/162）
+#
+# 判据能取假（AC2 负控制）：不跑 register-plugin.mjs（只 npm install）⇒ settings.json 不新增
+# marketplace 条目 ⇒ MP_SETTINGS_OK=0——证明断言真在测 register-plugin.mjs 的效果，不是环境本来就有。
+MP_EVALUATED=0          # 1 = marketplace 分支已跑；0 = npm-global 通道（未跑，可区分「没验」，硬规则 3b）
+MP_REGISTER_RC=""       # register-plugin.mjs 退出码（字符串；空 = 未跑）
+MP_REGISTER_OK=0        # 1 = register-plugin.mjs exit 0
+MP_FAIL_REASON=""       # register 失败的结构化原因（AC5：不吞退出码）
+MP_SETTINGS_PATH=""     # 实际断言读的 settings.json 路径（$HOME/.claude/settings.json）
+MP_ENTRY_PATH=""        # 读回的 extraKnownMarketplaces.quay.source.path（实测值）
+MP_SETTINGS_OK=0        # 1 = marketplace 断言全部成立（源已注册 且 无 enabledPlugins 外溢）
+MP_ENABLED_LEAK=0       # 1 = enabledPlugins 出现用户级 quay 键（AC-161 违反，能取假）
+
+mp_assert_settings() {
+  # $1 = settings.json 路径；$2 = 期望的 plugin 目录路径。
+  # 用 node 解析 JSON（比 grep/sed 稳）；判据能取假：settings 缺失/不可读/无 quay 源 ⇒ 不匹配；
+  # 有 quay@quay 启用 ⇒ enabled_leak=1。函数始终 return 0（判定是数据，不是控制流失败）。
+  local settings_path="$1" expected_dir="$2" out
+  local readable=0 entry_path="" entry_matches=0 enabled_leak=0
+  MP_SETTINGS_PATH="$settings_path"
+  MP_ENTRY_PATH=""; MP_SETTINGS_OK=0; MP_ENABLED_LEAK=0
+  if [ ! -f "$settings_path" ]; then MP_FAIL_REASON="settings.json missing: $settings_path"; return 0; fi
+  out="$("$VC_NODE" --no-warnings -e '
+    const fs = require("node:fs");
+    const p = process.argv[1], exp = process.argv[2];
+    let s;
+    try { s = JSON.parse(fs.readFileSync(p, "utf8")); } catch (e) { console.log("readable=0"); process.exit(0); }
+    if (typeof s !== "object" || s === null || Array.isArray(s)) { console.log("readable=0"); process.exit(0); }
+    const m = s.extraKnownMarketplaces || {};
+    const entry = m["quay"] || null;
+    const pathVal = entry && entry.source ? entry.source.path : "";
+    const ep = s.enabledPlugins || {};
+    let leak = 0;
+    for (const k of Object.keys(ep)) { if (k === "quay" || k.indexOf("quay@") === 0) leak = 1; }
+    console.log("readable=1");
+    console.log("entry_path=" + pathVal);
+    console.log("entry_matches=" + (pathVal === exp ? "1" : "0"));
+    console.log("enabled_leak=" + leak);
+  ' "$settings_path" "$expected_dir" 2>/dev/null)"
+  readable="$(printf '%s\n' "$out" | sed -n 's/^readable=//p' | head -1)"
+  entry_path="$(printf '%s\n' "$out" | sed -n 's/^entry_path=//p' | head -1)"
+  entry_matches="$(printf '%s\n' "$out" | sed -n 's/^entry_matches=//p' | head -1)"
+  enabled_leak="$(printf '%s\n' "$out" | sed -n 's/^enabled_leak=//p' | head -1)"
+  if [ "$readable" != "1" ]; then MP_FAIL_REASON="settings.json unreadable/unparsable: $settings_path"; return 0; fi
+  MP_ENTRY_PATH="$entry_path"
+  [ "$enabled_leak" = "1" ] && MP_ENABLED_LEAK=1
+  if [ "$entry_matches" = "1" ] && [ "$enabled_leak" = "0" ]; then MP_SETTINGS_OK=1; fi
+  return 0
+}
+
+step1_marketplace() {
+  # marketplace 通道的 step① 追加段：npm install -g 已由 step1_install 完成（可解包内容在位），
+  # 此处显式跑 shipped register-plugin.mjs 并断言 settings.json 落地结果。
+  local register plugin_dir rc
+  register="$(npm root -g --prefix "$STEP1_PREFIX")/quay/scripts/register-plugin.mjs"
+  plugin_dir="$(npm root -g --prefix "$STEP1_PREFIX")/quay/plugin"
+  MP_EVALUATED=1
+  # 每次调用重置输出态（selfcheck 多次调用不得继承上次的旧值——同 coldstart_verdict 的自包含纪律）
+  MP_REGISTER_RC=""; MP_REGISTER_OK=0; MP_FAIL_REASON=""
+  MP_SETTINGS_OK=0; MP_ENABLED_LEAK=0; MP_ENTRY_PATH=""; MP_SETTINGS_PATH=""
+  echo "== ①b marketplace channel: register installed plugin as directory-source marketplace =="
+  if [ ! -f "$register" ]; then
+    MP_FAIL_REASON="register-plugin.mjs not in installed package: $register"
+    echo "  FAIL: $MP_FAIL_REASON" >&2
+    return 0
+  fi
+  # npm_config_global=true：register-plugin.mjs 的 guard #2 只在全局安装语义下生效（postinstall 同形）。
+  # QUAY_SKIP_PLUGIN_CLI=1：register-plugin.mjs:146 优雅降级——只写 settings.json，不调 claude CLI。
+  set +e
+  npm_config_global=true QUAY_SKIP_PLUGIN_CLI=1 "$VC_NODE" --no-warnings "$register" >"${STEP1_PREFIX}/register-plugin.out" 2>&1
+  rc=$?
+  set -e
+  MP_REGISTER_RC="$rc"
+  [ "$rc" = "0" ] && MP_REGISTER_OK=1
+  if [ "$rc" != "0" ]; then
+    # AC5：如实记录失败原因（结构化字段，非吞掉退出码）——失败本身是一条有效读数
+    # （「marketplace 通道在无 claude 宿主上的真实边界」），不是本任务失败的理由。
+    MP_FAIL_REASON="register-plugin.mjs exited $rc: $(tail -n 3 "${STEP1_PREFIX}/register-plugin.out" 2>/dev/null | tr '\n' ' ' | head -c 300)"
+    echo "  register-plugin.mjs exited $rc (reason structured into record, not swallowed — AC5)"
+  fi
+  # 断言 settings.json（register-plugin.mjs 经 os.homedir() 写入 $HOME/.claude/settings.json）
+  mp_assert_settings "${HOME}/.claude/settings.json" "$plugin_dir"
+  if [ "$MP_REGISTER_OK" = "1" ] && [ "$MP_ENABLED_LEAK" = "1" ]; then
+    # register 成功但 enabledPlugins 有用户级 quay 键 ⇒ 预存在状态（register-plugin.mjs 不写
+    # enabledPlugins——AC-162 已改；这是 AC-161 迁移未覆盖到本机的旧残留，如实落结构字段，不静默）。
+    MP_FAIL_REASON="enabledPlugins has a user-level quay key (pre-existing; register-plugin.mjs does NOT write enabledPlugins — AC-161 migration not applied to this host)"
+  fi
+  echo "  register-plugin.mjs: $register (exit $rc)"
+  echo "  marketplace source path (read back): ${MP_ENTRY_PATH:-<none>}"
+  echo "  MP_SETTINGS_OK=$MP_SETTINGS_OK MP_ENABLED_LEAK=$MP_ENABLED_LEAK MP_REGISTER_RC=$MP_REGISTER_RC"
+  return 0
+}
+
 # ── L1 项目文件铺到位探测（SPEC §6 闭集，从盘上解析——full 与 verify-only 共用）──────
 # L1 断言集合 = SPEC 的 QUAY-INIT-CLOSED-SET:BEGIN/END 标记块逐条解析（机器可读），⛔ 不在本脚本
 # 复制闭集清单——复制一份就是制造漂移（CLAUDE.md 开篇纪律），本任务修的正是一次漂移（硬规则 4c：
@@ -573,7 +691,7 @@ step3_coldstart() {
 selfcheck() {
   local tmp rc=1
   tmp="$(mktemp -d 2>/dev/null)" || { echo "selfcheck: FAIL 无法创建临时目录" >&2; return 1; }
-  local dead_ws alive_ws
+  local dead_ws alive_ws saved_home="$HOME"
 
   # control 1 (AC2 负向/negative)：无冷启动 + 只有 quay-init auto-commit ⇒ 判 not live
   #   结构上必须取假：即便 git 提交很新（quay-init 铺完刚提交），因为是 chore(quay-init) 提交，
@@ -701,6 +819,68 @@ Enter to confirm · Esc to cancel"
   echo "selfcheck: ac5-negative(old-build)   eval=$c4_e ok=$c4_ok (expect 1/0)"
   echo "selfcheck: ac5-not-evaluated(no-sha) eval=$c5_e ok=$c5_ok (expect 0/0)"
 
+  # control 11/12/13 (AC168 marketplace 通道正/负控制 + enabledPlugins 外溢控制，hermetic):
+  # 用 fake HOME + fake 已安装包（symlink 真 register-plugin.mjs + 最小 manifests）跑 step1_marketplace，
+  # 不碰真实 $HOME/.claude/settings.json、不碰真实 npm install（AC3 --selfcheck 覆盖 marketplace 分支）。
+  #   control 11 (正向):  真实跑 register-plugin.mjs ⇒ marketplace 源注册 + 无 enabledPlugins 外溢 ⇒ MP_SETTINGS_OK=1
+  #   control 12 (负向,AC2): 只「安装」（fake 包在位）不跑 register ⇒ settings.json 无 marketplace 条目 ⇒ MP_SETTINGS_OK=0
+  #   control 13 (enabledPlugins 外溢,AC-161 违反): 源正确但 enabledPlugins 有 quay@quay ⇒ MP_ENABLED_LEAK=1 MP_SETTINGS_OK=0
+  local mp_prefix mp_pkg mp_home m1_ev m1_reg m1_ok m1_leak m2_ok m3_ok m3_leak
+  mp_prefix="$tmp/mp-prefix"
+  mp_pkg="$mp_prefix/lib/node_modules/quay"
+  mkdir -p "$mp_pkg/scripts" "$mp_pkg/plugin/.claude-plugin"
+  # 用 cp 而非 symlink：register-plugin.mjs 以 import.meta.url 推导 pkgRoot/pluginDir，symlink 会让
+  # import.meta.url 解析到 dev-tree 真身（packages/quay/），pkgRoot 算错 ⇒ 报 bundle incomplete。
+  cp "$SCRIPT_DIR/../../packages/quay/scripts/register-plugin.mjs" "$mp_pkg/scripts/register-plugin.mjs"
+  printf '%s\n' '{"name":"quay","plugins":[{"name":"quay"}]}' > "$mp_pkg/plugin/.claude-plugin/marketplace.json"
+  printf '%s\n' '{"name":"quay"}' > "$mp_pkg/plugin/.claude-plugin/plugin.json"
+
+  # control 11 (正向): 真实跑 register-plugin.mjs
+  mp_home="$tmp/mp-home-pos"
+  mkdir -p "$mp_home/.claude"
+  printf '%s\n' '{}' > "$mp_home/.claude/settings.json"
+  STEP1_PREFIX="$mp_prefix"
+  export HOME="$mp_home"
+  step1_marketplace
+  m1_ev="$MP_EVALUATED"; m1_reg="$MP_REGISTER_OK"; m1_ok="$MP_SETTINGS_OK"; m1_leak="$MP_ENABLED_LEAK"
+
+  # control 12 (负向, AC2): 只「安装」不跑 register ⇒ 无 marketplace 条目（断言真在测 register 的效果）
+  mp_home="$tmp/mp-home-neg"
+  mkdir -p "$mp_home/.claude"
+  printf '%s\n' '{}' > "$mp_home/.claude/settings.json"
+  mp_assert_settings "$mp_home/.claude/settings.json" "$mp_pkg/plugin"
+  m2_ok="$MP_SETTINGS_OK"
+
+  # control 13 (enabledPlugins 外溢, AC-161 违反): 源正确但 enabledPlugins 有用户级 quay 键 ⇒ 判 leak
+  mp_home="$tmp/mp-home-leak"
+  mkdir -p "$mp_home/.claude"
+  printf '{"extraKnownMarketplaces":{"quay":{"source":{"source":"directory","path":"%s"}}},"enabledPlugins":{"quay@quay":true}}\n' "$mp_pkg/plugin" > "$mp_home/.claude/settings.json"
+  mp_assert_settings "$mp_home/.claude/settings.json" "$mp_pkg/plugin"
+  m3_ok="$MP_SETTINGS_OK"; m3_leak="$MP_ENABLED_LEAK"
+
+  # control 14 (AC5 —— register 失败如实记录，非吞掉退出码): fake 已安装包缺 plugin/.claude-plugin/
+  # marketplace.json ⇒ register-plugin.mjs step 3 报 incomplete bundle ⇒ exit 1 ⇒ MP_REGISTER_OK=0、
+  # MP_REGISTER_RC=1、MP_FAIL_REASON 非空（结构化字段，不是静默）。
+  local mp_fail_pkg mp_fail_home m4_reg m4_rc m4_reason
+  mp_fail_pkg="$tmp/mp-fail-prefix/lib/node_modules/quay"
+  mkdir -p "$mp_fail_pkg/scripts" "$mp_fail_pkg/plugin"
+  cp "$SCRIPT_DIR/../../packages/quay/scripts/register-plugin.mjs" "$mp_fail_pkg/scripts/register-plugin.mjs"
+  mp_fail_home="$tmp/mp-fail-home"
+  mkdir -p "$mp_fail_home/.claude"
+  printf '%s\n' '{}' > "$mp_fail_home/.claude/settings.json"
+  STEP1_PREFIX="$tmp/mp-fail-prefix"
+  export HOME="$mp_fail_home"
+  step1_marketplace
+  m4_reg="$MP_REGISTER_OK"; m4_rc="$MP_REGISTER_RC"; m4_reason="$MP_FAIL_REASON"
+
+  export HOME="$saved_home"
+  STEP1_PREFIX=""
+
+  echo "selfcheck: marketplace-register(positive) MP_EVALUATED=$m1_ev MP_REGISTER_OK=$m1_reg MP_SETTINGS_OK=$m1_ok MP_ENABLED_LEAK=$m1_leak (expect 1/1/1/0)"
+  echo "selfcheck: marketplace-noregister(negative,AC2) MP_SETTINGS_OK=$m2_ok (expect 0 — 不跑 register 无条目)"
+  echo "selfcheck: marketplace-enabled-leak(AC-161违反) MP_SETTINGS_OK=$m3_ok MP_ENABLED_LEAK=$m3_leak (expect 0/1)"
+  echo "selfcheck: marketplace-register-fail(AC5) MP_REGISTER_OK=$m4_reg MP_REGISTER_RC=$m4_rc reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) (expect 0/nonempty/1 — 退出码不吞)"
+
   if [ "$d1" = "1" ] && [ "$d2" = "no" ] && [ "$a1" = "1" ] && [ "$a2" = "yes" ] \
      && [ "$c3_e" = "1" ] && [ "$c3_ok" = "1" ] \
      && [ "$c4_e" = "1" ] && [ "$c4_ok" = "0" ] \
@@ -709,11 +889,15 @@ Enter to confirm · Esc to cancel"
      && [ "$p3" = "1" ] && [ "$p4" = "yes" ] \
      && [ "$p5" = "1" ] \
      && [ "$n1" = "1" ] && [ "$n2" = "0" ] \
-     && [ "$s_ok1" = "1" ] && [ "$s_cnt1" = "2" ] && [ "$s_ok2" = "0" ] && [ "$s_cnt2" = "3" ]; then
-    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated"
+     && [ "$s_ok1" = "1" ] && [ "$s_cnt1" = "2" ] && [ "$s_ok2" = "0" ] && [ "$s_cnt2" = "3" ] \
+     && [ "$m1_ev" = "1" ] && [ "$m1_reg" = "1" ] && [ "$m1_ok" = "1" ] && [ "$m1_leak" = "0" ] \
+     && [ "$m2_ok" = "0" ] \
+     && [ "$m3_ok" = "0" ] && [ "$m3_leak" = "1" ] \
+     && [ "$m4_reg" = "0" ] && [ -n "$m4_rc" ] && [ -n "$m4_reason" ]; then
+    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5)"
     rc=0
   else
-    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok" >&2
+    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc m4_reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0)" >&2
     rc=1
   fi
   rm -rf "$tmp"
@@ -767,18 +951,33 @@ else
     echo "AC88_VERIFY=fail (step ① install failed)"
     exit 1
   fi
-  if ! step2_init; then
-    echo "AC88_VERIFY=fail (step ② quay-init failed)"
-    exit 1
+  if [ "$CHANNEL" = "marketplace" ]; then
+    # marketplace 通道 = step① 安装路径验证（register-plugin.mjs 注册）；②③ 是 loop 活性验证
+    # （npm-global/AC88 的关切），marketplace 通道不跑 ②③ —— register 失败也能写出记录（AC5），
+    # 不被 ② quay-init 的失败吞掉 marketplace 结果。
+    step1_marketplace
+  else
+    if ! step2_init; then
+      echo "AC88_VERIFY=fail (step ② quay-init failed)"
+      exit 1
+    fi
+    step3_coldstart
   fi
-  step3_coldstart
 fi
 
 if [ -z "$EVIDENCE" ]; then EVIDENCE="${CWD}/.quay/verify-deliver-evidence.json"; fi
 if [ -z "$AC89" ]; then AC89="${CWD}/.quay/productization-verification.jsonl"; fi
 
 # ── 判定 ─────────────────────────────────────────────────────────────────────────────
-if [ "$VERIFY_ONLY" = 1 ]; then
+if [ "$CHANNEL" = "marketplace" ]; then
+  # marketplace 通道判定：分支跑了（MP_EVALUATED=1）且 install 成功 = 机制成功；MP_SETTINGS_OK 是【数据】
+  # （注册成功=1 / 注册失败=0 均如实记录，AC5），不是控制流失败。
+  if [ "$MP_EVALUATED" = "1" ] && [ "$STEP1_OK" = "1" ]; then
+    AC88_VERIFY=ok
+  else
+    AC88_VERIFY=fail
+  fi
+elif [ "$VERIFY_ONLY" = 1 ]; then
   # 只重验③：AC5 证据已在全量跑时记录；此处不再要求 AC5（缺 tgz 无法重算 sha256）。
   if [ "$STEP1_OK" = 1 ] && [ "$STEP2_OK" = 1 ] && [ "$L1_OK" = 1 ] && [ "$L2_OK" = 1 ]; then
     AC88_VERIFY=ok
@@ -799,6 +998,11 @@ echo ""
 echo "STEP1_OK=$STEP1_OK"
 echo "STEP2_OK=$STEP2_OK"
 echo "NPM_BIN_DISPATCH=$NPM_BIN_DISPATCH"
+echo "CHANNEL=$CHANNEL (step① install path: npm-global | marketplace)"
+echo "MP_EVALUATED=$MP_EVALUATED (1 = marketplace branch ran; 0 = npm-global channel — 未验 ≠ 通过)"
+echo "MP_REGISTER_OK=$MP_REGISTER_OK MP_REGISTER_RC=${MP_REGISTER_RC:-} MP_FAIL_REASON=${MP_FAIL_REASON:-}"
+echo "MP_SETTINGS_OK=$MP_SETTINGS_OK (1 = marketplace 源已注册 + enabledPlugins 无用户级 quay 键)"
+echo "MP_ENTRY_PATH=${MP_ENTRY_PATH:-} MP_ENABLED_LEAK=$MP_ENABLED_LEAK"
 echo "L1_NOT_EVALUATED=$L1_NOT_EVALUATED (1 = SPEC §6 闭集读不到，未评估 ≠ 合格——硬规则 3b)"
 echo "L1_CLOSED_SET=${L1_CLOSED_SET:-<none>}"
 echo "L1_CLOSED_SET_COUNT=$L1_CLOSED_SET_COUNT L1_CLOSED_SET_PRESENT=$L1_CLOSED_SET_PRESENT L1_CLOSED_SET_MISSING=${L1_CLOSED_SET_MISSING:-<none>}"
@@ -855,25 +1059,45 @@ cat > "$EVIDENCE" <<EOF
   "l2_dead_loop_state": "$L2_DEAD_LOOP_STATE",
   "coldstart_live": "$COLDSTART_LIVE",
   "ac88_verify": "$AC88_VERIFY",
+  "channel": "$CHANNEL",
+  "mp_evaluated": $MP_EVALUATED,
+  "mp_register_ok": $MP_REGISTER_OK,
+  "mp_register_rc": "${MP_REGISTER_RC:-}",
+  "mp_fail_reason": "${MP_FAIL_REASON:-}",
+  "mp_settings_ok": $MP_SETTINGS_OK,
+  "mp_entry_path": "${MP_ENTRY_PATH:-}",
+  "mp_enabled_leak": $MP_ENABLED_LEAK,
+  "mp_settings_path": "${MP_SETTINGS_PATH:-}",
   "liveness_window_min": $LIVENESS_WINDOW
 }
 EOF
 echo "evidence written → $EVIDENCE"
 
 # ── AC89 记录（同 per-task-suite-records 形态，JSON 行；AC89 AC4: B/C 两机 + 安装/初始化/冷启动三项）──
+# marketplace 通道的记录用可区分 ac 标记 "AC168-marketplace"（AC4：不得与既有 ac="AC88"/"AC107" 混淆）。
 mkdir -p "$(dirname "$AC89")"
-detail="steps: install(1)=$STEP1_OK init(2)=$STEP2_OK coldstart(3) live=$COLDSTART_LIVE git_age=${L2_GIT_COMMIT_AGE_MIN}min quayinit_commit=$L2_GIT_IS_QUAYINIT_COMMIT worktree=$L2_INNER_WORKTREE_COUNT proc_cwd=$L2_LAYER_PROCESS_CWD startup_prompt=$L2_STARTUP_PROMPT dead_loop=$L2_DEAD_LOOP_STATE build_sha=${BUILD_SHA:-} build_date=${BUILD_DATE:-} sha256_quay=${SHA256_QUAY:-0} sha256_qn=${SHA256_QN:-0} ac5_ok=$AC5_OK l1_closed_set=${L1_CLOSED_SET:-none} l1_not_evaluated=$L1_NOT_EVALUATED l1_closed_set_present=$L1_CLOSED_SET_PRESENT/$L1_CLOSED_SET_COUNT l1_closed_set_missing=${L1_CLOSED_SET_MISSING:-none}"
-okflag=false; [ "$AC88_VERIFY" = "ok" ] && okflag=true
-step3=0; [ "$COLDSTART_LIVE" = "yes" ] && step3=1
 bool() { [ "$1" = "1" ] && printf true || printf false; }
+step3=0; [ "$COLDSTART_LIVE" = "yes" ] && step3=1
+detail="steps: install(1)=$STEP1_OK init(2)=$STEP2_OK coldstart(3) live=$COLDSTART_LIVE git_age=${L2_GIT_COMMIT_AGE_MIN}min quayinit_commit=$L2_GIT_IS_QUAYINIT_COMMIT worktree=$L2_INNER_WORKTREE_COUNT proc_cwd=$L2_LAYER_PROCESS_CWD startup_prompt=$L2_STARTUP_PROMPT dead_loop=$L2_DEAD_LOOP_STATE build_sha=${BUILD_SHA:-} build_date=${BUILD_DATE:-} sha256_quay=${SHA256_QUAY:-0} sha256_qn=${SHA256_QN:-0} ac5_ok=$AC5_OK l1_closed_set=${L1_CLOSED_SET:-none} l1_not_evaluated=$L1_NOT_EVALUATED l1_closed_set_present=$L1_CLOSED_SET_PRESENT/$L1_CLOSED_SET_COUNT l1_closed_set_missing=${L1_CLOSED_SET_MISSING:-none}"
+ac_tag="AC88"
+okflag=false; [ "$AC88_VERIFY" = "ok" ] && okflag=true
+mp_json=""
+if [ "$CHANNEL" = "marketplace" ]; then
+  ac_tag="AC168-marketplace"
+  # marketplace 记录的 ok = 断言全部成立（源已注册 + 无 enabledPlugins 外溢）；register 失败（AC5）⇒
+  # ok=false，但失败原因结构化落 detail/mpFailReason——失败是一条有效读数，不是静默（硬规则 3b）。
+  okflag=false; [ "$MP_SETTINGS_OK" = "1" ] && okflag=true
+  detail="${detail} channel=marketplace mp_evaluated=$MP_EVALUATED mp_register_ok=$MP_REGISTER_OK mp_register_rc=${MP_REGISTER_RC:-} mp_settings_ok=$MP_SETTINGS_OK mp_entry_path=${MP_ENTRY_PATH:-none} mp_enabled_leak=$MP_ENABLED_LEAK mp_fail_reason=${MP_FAIL_REASON:-none}"
+  mp_json=",\"mpRegisterOk\":$(bool "$MP_REGISTER_OK"),\"mpSettingsOk\":$(bool "$MP_SETTINGS_OK"),\"mpEvaluated\":$(bool "$MP_EVALUATED"),\"mpEnabledLeak\":$(bool "$MP_ENABLED_LEAK"),\"mpRegisterRc\":\"${MP_REGISTER_RC:-}\",\"mpEntryPath\":\"${MP_ENTRY_PATH:-}\",\"mpFailReason\":\"${MP_FAIL_REASON:-}\""
+fi
 host_json=""
 [ -n "$HOST" ] && host_json=",\"host\":\"$HOST\""
-printf '{"ts":"%s","ac":"AC88","ok":%s,"artifact":"%s","evidence":"%s","detail":"%s"%s,"stepInstall":%s,"stepInit":%s,"stepColdstart":%s}\n' \
-  "$TS" "$okflag" "$(basename "$QUAY_TGZ")" "$EVIDENCE" "$detail" "$host_json" \
+printf '{"ts":"%s","ac":"%s","ok":%s,"artifact":"%s","evidence":"%s","detail":"%s"%s%s,"stepInstall":%s,"stepInit":%s,"stepColdstart":%s}\n' \
+  "$TS" "$ac_tag" "$okflag" "$(basename "$QUAY_TGZ")" "$EVIDENCE" "$detail" "$host_json" "$mp_json" \
   "$(bool "$STEP1_OK")" "$(bool "$STEP2_OK")" "$(bool "$step3")" >> "$AC89"
 echo "ac89 record appended → $AC89"
 
-if [ "$REQUIRE_LIVE" = 1 ] && [ "$COLDSTART_LIVE" != "yes" ]; then
+if [ "$CHANNEL" != "marketplace" ] && [ "$REQUIRE_LIVE" = 1 ] && [ "$COLDSTART_LIVE" != "yes" ]; then
   echo "verify-deliver-coldstart: FAIL (--require-live but COLDSTART_LIVE=$COLDSTART_LIVE)"
   exit 1
 fi
@@ -881,5 +1105,9 @@ if [ "$AC88_VERIFY" = "fail" ]; then
   echo "verify-deliver-coldstart: FAIL (one of the three steps not verified, or AC5 evidence not met)"
   exit 1
 fi
-echo "verify-deliver-coldstart: done (AC88_VERIFY=$AC88_VERIFY)"
+if [ "$CHANNEL" = "marketplace" ]; then
+  echo "verify-deliver-coldstart: done (channel=marketplace MP_SETTINGS_OK=$MP_SETTINGS_OK — 成功或如实记录的失败原因均可，AC5)"
+else
+  echo "verify-deliver-coldstart: done (AC88_VERIFY=$AC88_VERIFY)"
+fi
 exit 0

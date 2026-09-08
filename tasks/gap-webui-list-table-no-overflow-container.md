@@ -57,22 +57,22 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1 生产载体读数、枚举而非抽查：对**全部**页面路由在 1440 与 390 两个视口各测一次，断言
+- [x] AC1 生产载体读数、枚举而非抽查：对**全部**页面路由在 1440 与 390 两个视口各测一次，断言
       `documentElement.scrollWidth == clientWidth` 对每一条成立。失败时打印
       `(路由, 视口, scrollWidth, clientWidth, 最深越界元素)` 清单与条数。
       取假：改动前 `/goal@1440` = `1825 vs 1440`，`/goal@390` tbody 1402，`/journal@390` 449，`/sessions@390` 418。
-- [ ] AC2 兜底规则不再以 `.detail-page` 为界：断言渲染出的 CSS 里，横向滚动规则的选择器**不含**
+- [x] AC2 兜底规则不再以 `.detail-page` 为界：断言渲染出的 CSS 里，横向滚动规则的选择器**不含**
       `.detail-page` 限定，且列表页 HTML 里每个 `<table>` 的最近可滚动祖先的 `overflow-x` 解析为 `auto|scroll`。
       打印无滚动祖先的表格清单与条数。
-- [ ] AC3 散文列被钳制：断言 `/goal` 表格的最大行高 **< 60px**，且表格总宽 <= `<main>` 容器宽。
+- [x] AC3 散文列被钳制：断言 `/goal` 表格的最大行高 **< 60px**，且表格总宽 <= `<main>` 容器宽。
       取假：改动前实测行高 109/156px、表格 1538 > 容器 870。
-- [ ] AC4 表头不再竖排单字（`/live` `/board` `/needs-human` 三页）：断言每个 `<th>` 的
+- [x] AC4 表头不再竖排单字（`/live` `/board` `/needs-human` 三页）：断言每个 `<th>` 的
       `boundingRect.height / lineHeight` **<= 2**（即最多折两行）。打印越界表头清单与条数。
       取假：改动前 `/live` 的「待落地时长」实测折 5 行。
-- [ ] AC5 修的不只是被报出来的那一个（硬规则 5b 的直接落实）：在提交信息里给出
+- [x] AC5 修的不只是被报出来的那一个（硬规则 5b 的直接落实）：在提交信息里给出
       `grep -rn "<table" packages/quay/src/serve-*.ts` 的命中数与清单，并逐条说明它是否已接入共享外壳；
       未接入者必须给出理由，不得留空。
-- [ ] AC6 `bash scripts/test.sh --for-task gap-webui-list-table-no-overflow-container` 退出码 0。
+- [x] AC6 `bash scripts/test.sh --for-task gap-webui-list-table-no-overflow-container` 退出码 0。
 
 ## Definition of Done
 

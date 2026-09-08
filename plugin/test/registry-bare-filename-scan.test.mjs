@@ -22,8 +22,10 @@ import { fileURLToPath } from "node:url";
 import {
   KNOWN_SAMPLE,
   KNOWN_SAMPLE_CARRIER,
+  EXTRA_KIND_SAMPLES,
   maskComments,
   extractBareFilenameLiterals,
+  collectExtraRefs,
   scanCarrier,
   scanBareFilenameRefs,
   listScriptBasenames,
@@ -177,5 +179,97 @@ test("real repo: live checkers hit their execution-core caller via run_checker /
       refs.includes(expectedCaller),
       `${script} must be referenced by ${expectedCaller} (got: ${refs.join(", ") || "∅"})`,
     );
+  }
+});
+
+// ── 四类引用（gap-dead-set-closure-misses-four-reference-kinds）────────────────────────────────────
+// §12e 闭包漏认的四类引用进入 collectExtraRefs：① source/. 内建 ② 测试存在性钉 ③ config gate 注册
+// ④ wrapper→委托模块。每类各钉一个已知为真样本（硬规则 2）。
+
+test("AC1: all four extra-kind known samples hit their expected carrier in the real repo", () => {
+  const scripts = listScriptBasenames(repoRoot);
+  const extra = collectExtraRefs(repoRoot, scripts);
+  for (const s of EXTRA_KIND_SAMPLES) {
+    const hit = extra.find((r) => r.script === s.script && r.kind === s.kind && r.carrier.file === s.carrier);
+    assert.ok(hit, `${s.kind} sample ${s.script} must hit ${s.carrier} (0 hits = predicate broken, not "no such ref")`);
+    assert.ok(hit.carrier.line >= 1, "carrier carries a real line number");
+  }
+});
+
+test("kind ① source-builtin keeps a sourced script even when the carrier is not a delivery surface", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "registry-bare-source-"));
+  try {
+    fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+    fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(root, "plugin", "scripts", "foo.sh"), "#!/usr/bin/env bash\n:\n");
+    fs.writeFileSync(path.join(root, "scripts", "test.sh"), 'source "${repo_root}/plugin/scripts/foo.sh"\n');
+    const scripts = listScriptBasenames(root);
+    const extra = collectExtraRefs(root, scripts);
+    const executed = new Map([["foo.sh", 0]]);
+    const kept = computeKept(root, scripts, executed, [], false, extra);
+    assert.ok(kept.has("foo.sh"), "source-builtin keeps foo.sh alive regardless of carrier delivery-surface status");
+
+    // 负控制：删掉 source 行 ⇒ foo.sh 落回死集。
+    fs.writeFileSync(path.join(root, "scripts", "test.sh"), "");
+    const extra2 = collectExtraRefs(root, scripts);
+    const kept2 = computeKept(root, scripts, executed, [], false, extra2);
+    assert.ok(!kept2.has("foo.sh"), "with the source line removed foo.sh returns to the dead set");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("kind ② test-pin keeps a script pinned by a plugin/test file", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "registry-bare-testpin-"));
+  try {
+    fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+    fs.mkdirSync(path.join(root, "plugin", "test"), { recursive: true });
+    fs.writeFileSync(path.join(root, "plugin", "scripts", "foo.sh"), "#!/usr/bin/env bash\n:\n");
+    fs.writeFileSync(path.join(root, "plugin", "test", "foo.test.mjs"), "const p = path.join(scriptsDir, 'foo.sh');\n");
+    const scripts = listScriptBasenames(root);
+    const extra = collectExtraRefs(root, scripts);
+    const executed = new Map([["foo.sh", 0]]);
+    const kept = computeKept(root, scripts, executed, [], false, extra);
+    assert.ok(kept.has("foo.sh"), "test-pin keeps foo.sh alive");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("kind ③ config-gate keeps a script registered in .quay/config.yml", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "registry-bare-config-"));
+  try {
+    fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+    fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+    fs.writeFileSync(path.join(root, "plugin", "scripts", "foo.sh"), "#!/usr/bin/env bash\n:\n");
+    fs.writeFileSync(
+      path.join(root, ".quay", "config.yml"),
+      'gates:\n  fixed:\n    - name: x\n      script: "./plugin/scripts/foo.sh"\n',
+    );
+    const scripts = listScriptBasenames(root);
+    const extra = collectExtraRefs(root, scripts);
+    const executed = new Map([["foo.sh", 0]]);
+    const kept = computeKept(root, scripts, executed, [], false, extra);
+    assert.ok(kept.has("foo.sh"), "config-gate keeps foo.sh alive");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("kind ④ wrapper-delegate keeps the .sh wrapper when its .ts delegate is kept", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "registry-bare-delegate-"));
+  try {
+    fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(root, "plugin", "scripts", "foo.sh"), 'node "$(dirname "$0")/foo.ts" "$@"\n');
+    fs.writeFileSync(path.join(root, "plugin", "scripts", "foo.ts"), "export {};\n");
+    const scripts = listScriptBasenames(root);
+    const extra = collectExtraRefs(root, scripts);
+    // foo.ts 三天内有执行（root 1），foo.sh 无执行 ⇒ 靠 wrapper-delegate 对称边被 foo.ts 拉入。
+    const executed = new Map([["foo.ts", 1], ["foo.sh", 0]]);
+    const kept = computeKept(root, scripts, executed, [], true, extra);
+    assert.ok(kept.has("foo.ts"), "foo.ts kept (executed)");
+    assert.ok(kept.has("foo.sh"), "foo.sh kept via wrapper-delegate symmetric edge");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
