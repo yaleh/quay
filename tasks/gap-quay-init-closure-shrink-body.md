@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-closure-shrink-body
 title: quay-init 收缩至 SPEC §6 闭集本体（AC168）——退役扩展文件复制机器 + 显式安装步骤 + 闭集断言
-status: todo
+status: ready
 labels:
   - gap
   - delivery-critical
