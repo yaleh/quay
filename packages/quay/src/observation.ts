@@ -2742,6 +2742,27 @@ export interface ObserverRow {
   note: string;
 }
 
+/** 单个 driver kind 的存活 + 载体观测（mirror 自 plugin/scripts/driver-runtime.ts 的 aliveness()+
+ *  carrierStats() 组合——Core 不 import plugin/，故在 observation 层 in-process 读 pid 文件 + carrier
+ *  jsonl）。字段与 `quay driver status --kind <kind> --json` 输出的 supervisor_alive/driver_alive/
+ *  running/carrier_records/last_record_ts 逐字段对应（gap-dashboard-driver-status-card AC1 对照）。 */
+export interface DriverKindReading {
+  kind: "promotion" | "worker";
+  supervisorPid: number | null;
+  driverPid: number | null;
+  supervisorAlive: boolean;
+  driverAlive: boolean;
+  running: boolean;
+  records: number;
+  lastTs: string | null;
+}
+
+/** dashboard mgrCard 消费的两个 driver kind（promotion + worker）的存活读数。 */
+export type DriversReading = {
+  promotion: DriverKindReading;
+  worker: DriverKindReading;
+};
+
 export interface ManagerResult {
   status: ObservationStatus;
   reason: string | null;
@@ -2751,6 +2772,8 @@ export interface ManagerResult {
   pool: { status: ObservationStatus; reason: string | null; pool: number | null; floor: number | null; deficit: number | null; cap: number | null; lastPromoted: string[] };
   version: string | null;
   developLead: number | null;
+  /** promotion + worker 两 driver 的存活读数（dashboard 轻量路径填充；/manager 详情页不消费，可不填）。 */
+  drivers?: DriversReading;
 }
 
 export const LOOP_DRIVER_CHECK_REL = "../../../plugin/scripts/loop-driver-check.sh";
@@ -2926,6 +2949,81 @@ async function readPoolMetrics(root: string): Promise<ManagerResult["pool"]> {
   return pool;
 }
 
+// ── Driver 存活读取（dashboard mgrCard 用）────────────────────────────────────────────────────────
+// mirror 自 plugin/scripts/driver-runtime.ts 的 aliveness()+carrierStats()（promotion/worker 两个
+// kind）。Core 不能 import plugin/（self-contained-dist 不变式：build-dist 会把 driver-runtime.ts 的
+// 整个传递闭包打进 dist/quay.js），故与 readPoolMetrics 同款做法——in-process 读 .quay 下的 pid 文件
+// + carrier jsonl（零 subprocess），字段与 `quay driver status --kind <kind> --json` 逐字段一致。
+// 30s TTL 缓存（复用 POOL_METRICS_CACHE_TTL_MS），避免每次 /dashboard 请求都同步读 pid + jsonl 末行。
+
+/** pid 文件前缀 + carrier 相对路径（同 DRIVER_KINDS registry 的 promotion/worker 两条）。 */
+const DRIVER_STATUS_SPEC = {
+  promotion: { prefix: "promotion-driver", carriers: ["promotion-outcome.jsonl", "promotion-round.jsonl"] },
+  worker: { prefix: "worker-driver", carriers: ["worker-outcome.jsonl", "worker-round.jsonl"] },
+} as const;
+
+/** `kill -0` 等价：pid 存活判定（读不懂/非正整数 ⇒ false）。mirror driver-runtime.ts pidAlive。 */
+function pidAlive(pid: string | number | null | undefined): boolean {
+  if (pid === null || pid === undefined || pid === "") return false;
+  const n = Number(pid);
+  if (!Number.isInteger(n) || n <= 0) return false;
+  try { process.kill(n, 0); return true; } catch { return false; }
+}
+
+/** 读 pid 文件（缺失/读失败 ⇒ ""，⛔ 不抛）。mirror driver-runtime.ts readPidFile。 */
+function readPidFileSync(file: string): string {
+  try { return fs.readFileSync(file, "utf8").trim(); } catch { return ""; }
+}
+
+/** 读一个 kind 的存活 + 载体（同 statusForKind 的 aliveness()+carrierStats() 组合）。 */
+function readDriverKind(root: string, kind: "promotion" | "worker"): DriverKindReading {
+  const spec = DRIVER_STATUS_SPEC[kind];
+  const q = path.join(root, ".quay");
+  const spidRaw = readPidFileSync(path.join(q, `${spec.prefix}-supervisor.pid`));
+  const dpidRaw = readPidFileSync(path.join(q, `${spec.prefix}.pid`));
+  const supervisorPid = /^\d+$/.test(spidRaw) ? Number(spidRaw) : null;
+  const driverPid = /^\d+$/.test(dpidRaw) ? Number(dpidRaw) : null;
+  const supervisorAlive = supervisorPid != null && pidAlive(supervisorPid);
+  const driverAlive = driverPid != null && pidAlive(driverPid);
+  const running = supervisorAlive && driverAlive;
+
+  let records = 0;
+  let lastTs: string | null = null;
+  for (const carrier of spec.carriers) {
+    const file = path.join(q, carrier);
+    let text: string;
+    try { text = fs.readFileSync(file, "utf8"); } catch { continue; }
+    if (text === "") continue;
+    // wc -l 语义：数换行符（⛔ split("\n").length 会把无尾换行的文件多算 1）。
+    records += (text.match(/\n/g) ?? []).length;
+    for (const line of text.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const j = JSON.parse(line);
+        if (j && typeof j.ts === "string" && j.ts && (lastTs === null || j.ts > lastTs)) lastTs = j.ts;
+      } catch { /* torn/partial tail — skip */ }
+    }
+  }
+  return { kind, supervisorPid, driverPid, supervisorAlive, driverAlive, running, records, lastTs };
+}
+
+const driverStatusCache = new Map<string, { at: number; drivers: DriversReading }>();
+
+/** Test-hygiene handle: drop all cached driver-status readings. */
+export function clearDriverStatusCache(): void { driverStatusCache.clear(); }
+
+/** 读 promotion + worker 两个 driver kind 的存活 + 载体（30s TTL 缓存）。 */
+export function readDriverStatus(root: string): DriversReading {
+  const hit = driverStatusCache.get(root);
+  if (hit && Date.now() - hit.at < POOL_METRICS_CACHE_TTL_MS) return hit.drivers;
+  const drivers: DriversReading = {
+    promotion: readDriverKind(root, "promotion"),
+    worker: readDriverKind(root, "worker"),
+  };
+  driverStatusCache.set(root, { at: Date.now(), drivers });
+  return drivers;
+}
+
 /** git rev-list --count develop..HEAD → commits ahead of develop (~0.01s; async so it never blocks
  *  the serve event loop while the heavier probes run). One of readManager's four CONCURRENT probes. */
 async function readDevelopLead(root: string): Promise<number | null> {
@@ -2969,6 +3067,7 @@ export async function readManagerLight(root: string): Promise<ManagerResult> {
     pool: { status: "empty", reason: "dashboard 轻量探针不含 pool（/manager 详情页才含）", pool: null, floor: null, deficit: null, cap: null, lastPromoted: [] },
     version,
     developLead: null,
+    drivers: readDriverStatus(root),
   };
 }
 

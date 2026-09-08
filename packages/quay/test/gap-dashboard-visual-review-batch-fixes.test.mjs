@@ -1,7 +1,7 @@
 // @test-group product
 // gap-dashboard-visual-review-batch-fixes — 人工走查产出六项 dashboard 改进的一批落地:
-//   AC1 — mgrCard 的 liveness 计数只在 status==="ok" 时显示；非 "ok"（当前恒定的 "empty" 退役态）
-//         渲染「会话数未接入」，绝不渲染一个与「真的 0 会话存活」同形的裸数字。
+//   AC1 — mgrCard 改读 promotion/worker 两个 resident driver 的存活状态（gap-dashboard-driver-status-card
+//         取代退役的 liveness/loop-driver 探针）；读数缺失 ⇒ 渲染「未运行」，绝不渲染 undefined/NaN/空。
 //   AC2 — liveCard 每行带在飞耗时（复用 formatSuiteElapsed），固定 startedAtMs/nowMs 可断言字符串。
 //   AC3 — taskCard miniList 分组标题 font-weight ≥600 且严格大于任务 id 的 font-weight（源级断言）。
 //   AC4 — testsCard 近期列表（非 running 轮）默认可见「#轮次 state · pass X/Y · 耗时」，顺序=新→旧。
@@ -42,21 +42,23 @@ function makeDashboardArgs(tasks = []) {
   };
 }
 
-test("AC1: mgrCard shows a bare live count only when liveness.status is ok, else an honest 未接入 phrase", () => {
-  // Non-ok (the current constant "empty"/retired state) → no `\d+ 会话 LIVE` anywhere.
-  const retired = renderMgrCard({
-    liveness: { status: "empty", sessions: [], reason: "liveness observer retired 2026-09-03" },
-    loopDriver: { verdict: null },
-  });
-  assert.ok(!/\d+\s*会话\s*LIVE/.test(retired), "non-ok liveness never renders a numeric 会话 LIVE clause");
-  assert.ok(retired.includes("会话数未接入"), "non-ok liveness renders the honest 会话数未接入 phrase");
+test("AC1: mgrCard renders the two resident drivers' honest alive status (未运行 when absent, never undefined/NaN)", () => {
+  // Absent drivers reading (the dashboard error fallback) → 「未运行」, never undefined/NaN/empty
+  // (gap-dashboard-driver-status-card: the retired liveness/loop-driver probe is no longer read).
+  const absent = renderMgrCard({});
+  assert.ok(!/undefined|NaN/.test(absent), "absent drivers never leak undefined/NaN");
+  assert.ok(absent.includes("未运行"), "absent drivers render the honest 未运行 phrase");
 
-  // ok + 2 alive sessions → the count IS shown (the positive control, proving the guard is what gates it).
-  const ok = renderMgrCard({
-    liveness: { status: "ok", sessions: [{ name: "a", alive: true }, { name: "b", alive: true }, { name: "c", alive: false }] },
-    loopDriver: { verdict: "LIVE" },
+  // Both kinds running → each kind named with the alive text (运行中), the positive control.
+  const running = renderMgrCard({
+    drivers: {
+      promotion: { kind: "promotion", supervisorPid: 1, driverPid: 2, supervisorAlive: true, driverAlive: true, running: true, records: 3, lastTs: new Date().toISOString() },
+      worker: { kind: "worker", supervisorPid: 1, driverPid: 2, supervisorAlive: true, driverAlive: true, running: true, records: 3, lastTs: new Date().toISOString() },
+    },
   });
-  assert.ok(/2\s*会话\s*LIVE/.test(ok), "ok liveness renders the real 2 会话 LIVE count");
+  assert.ok(running.includes("promotion"), "running renders the promotion kind");
+  assert.ok(running.includes("worker"), "running renders the worker kind");
+  assert.ok(running.includes("运行中"), "running renders the 运行中 alive text");
 });
 
 test("AC2: renderLiveCard renders an elapsed duration per in-flight row from fixed startedAtMs/nowMs", () => {
