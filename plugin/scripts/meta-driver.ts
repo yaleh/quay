@@ -826,6 +826,30 @@ export function blockingOwners(owners: OwningTask[]): OwningTask[] {
   return owners.filter((o) => o.status !== "done" && o.status !== "superseded");
 }
 
+/** 读 tasks/<id>.md 的 status；文件不存在 ⇒ null。⛔ 区分「不存在」（null）与「存在但读不出
+ *  状态」（"unknown"）——硬规则 6：读不出 ≠ 已完成，unknown 走「拒」分支，⛔ 不当作可覆盖。 */
+export function taskFileStatus(root: string, id: string): string | null {
+  const f = path.join(root, "tasks", `${id}.md`);
+  if (!fs.existsSync(f)) return null;
+  try {
+    const text = fs.readFileSync(f, "utf8");
+    const fm = text.startsWith("---") ? text.slice(3, text.indexOf("\n---", 3)) : "";
+    const m = fm.match(/^status:\s*(\S+)\s*$/m);
+    return m ? m[1] : "unknown";
+  } catch { return "unknown"; }
+}
+
+/** 派生 id 已存在时，找第一个不撞的区分后缀（-2、-3…）。⛔ 确定性幂等：同一任务集下返回同一后缀。 */
+export function nextCollisionId(root: string, baseId: string): string {
+  let n = 2;
+  let candidate = `${baseId}-${n}`;
+  while (fs.existsSync(path.join(root, "tasks", `${candidate}.md`))) {
+    n++;
+    candidate = `${baseId}-${n}`;
+  }
+  return candidate;
+}
+
 /** 一条寄给 meta-driver 的消息（`meta/META-NNN.md` 的 proposed 记录，第五种 store kind）。
  *  与 task/adr/goal/document 同级：专用 schema 自己定义送达面——正文【完整】进读数（body），
  *  ⛔ 不存在「只传 title 的截断」。答复（reply）内嵌在同一条记录上，翻 answered 后离开读数。 */
@@ -1036,12 +1060,33 @@ export async function driveItems(
     const gate = gateFinding(proposalCandidateText({ title: item.title, criterion: item.criterion, origin: item.problem }), { existingKeys: [], recentCount: filed, K: opts.cap });
     if (!gate.accept) { out.push({ item, id: null, accepted: false, reason: gate.reason }); continue; }
 
-    const id = `gap-meta-${item.mechanismKeyword.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48)}`;
+    const baseId = `gap-meta-${item.mechanismKeyword.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48)}`;
+    // ⛔ 派生 id 是 mechanismKeyword 的确定性 slug、不带唯一化 ⇒ 可能撞上既有任务。撞 done/superseded
+    // ⇒ 问题仍在而任务已 done（假完成）⇒ refile 为新任务（加区分后缀，⛔ 不覆盖既有任务体）；
+    // 撞未完成/读不出状态 ⇒ 拒（占着 id，覆盖 = 静默吞掉在办任务）。三态必须可区分（硬规则 3b）：
+    // `filed as <新 id>` / `rejected: …` / `refiled as <新 id>（既有 <旧 id> 已 done）`。
+    const existingStatus = taskFileStatus(root, baseId);
+    let id = baseId;
+    let refiledFrom: string | null = null;
+    if (existingStatus !== null) {
+      if (existingStatus === "done" || existingStatus === "superseded") {
+        id = nextCollisionId(root, baseId);
+        refiledFrom = baseId;
+        // 撞上的 done 任务进任务体证据（⛔ 即使 findOwningTasks 因关键词不在其体内而没抓到它）。
+        // 格式与 findOwningTasks 的 `${o.file}[${o.status}]` 一致（裸文件名，无 tasks/ 前缀），⛔ 不重复列。
+        const collisionOwner = `${baseId}.md[${existingStatus}]`;
+        if (!staleOwners.includes(collisionOwner)) staleOwners.push(collisionOwner);
+      } else {
+        out.push({ item, id: null, accepted: false, reason: `rejected: 既有任务 ${baseId}.md[${existingStatus}] 占着派生 id（未完成）⇒ 不覆盖` });
+        continue;
+      }
+    }
     if (opts.dryRun) {
-      out.push({ item, id, accepted: true, reason: "dry-run: would file" });
+      out.push({ item, id, accepted: true, reason: refiledFrom ? `dry-run: would refile as ${id}（既有 ${refiledFrom} 已 done）` : "dry-run: would file" });
     } else {
       const c = await createAutoDriveTask(root, id, item, renderAutoDriveBody(item, ev, opts.at, staleOwners, id));
-      out.push({ item, id, accepted: c.ok, reason: c.reason });
+      const reason = c.ok && refiledFrom ? `refiled as ${id}（既有 ${refiledFrom} 已 done）` : c.reason;
+      out.push({ item, id, accepted: c.ok, reason });
       if (!c.ok) continue;
     }
     filed++;

@@ -38,6 +38,8 @@ import {
   driveItems,
   renderAutoDriveBody,
   blockingOwners,
+  taskFileStatus,
+  nextCollisionId,
   snapshotTrackedChanges,
   probeWriteViolations,
   fileDecisions,
@@ -581,6 +583,71 @@ test('driveItems: 机制词只命中【已 done】任务 ⇒ 不拦（假完成�
     const r = await driveItems(tmp, [{ ...goodItem, mechanismKeyword: 'syncDevelopToDoc' }], ecoReadings,
       { cap: 1, dryRun: true, at: 'now' });
     assert.equal(r[0].accepted, true, `done 的命中不得拦截：${r[0].reason}`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// gap-meta-autodrive-id-collides-with-done-owner：派生 id 是 mechanismKeyword 的确定性 slug、不带
+// 唯一化 ⇒ 会撞上既有任务。撞 done 必须 refile（⛔ 不覆盖既有任务体、reason 取「refiled」独立态）；
+// 撞未完成必须拒（⛔ 覆盖 = 静默吞掉在办任务）。三态可区分（硬规则 3b），⛔ 不得与 filed as 同形。
+test('driveItems: done-owner 派生 id 碰撞 ⇒ refile 为新 id（区分后缀，reason 取 refiled 独立态）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-refile-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'tasks'));
+    // goodItem.mechanismKeyword = zzz-no-such-mechanism-keyword ⇒ 派生 id 就是这个 slug。
+    // 撞上的既有任务 id 字段含关键词 ⇒ findOwningTasks 抓到 done、不拦（假完成该被驱动），
+    // 再由 id 存在性判定 refile 为带后缀的新 id（⛔ 不复用旧 id 去覆盖）——即本次缺陷的真实现场。
+    const baseId = 'gap-meta-zzz-no-such-mechanism-keyword';
+    const file = path.join(tmp, 'tasks', `${baseId}.md`);
+    fs.writeFileSync(file, `---\nid: ${baseId}\nstatus: done\n---\n旧发现，正文不含关键词\n`);
+    const before = fs.readFileSync(file, 'utf8');
+    const r = await driveItems(tmp, [goodItem], ecoReadings, { cap: 1, dryRun: true, at: 'now' });
+    assert.equal(r[0].accepted, true, r[0].reason);
+    assert.equal(r[0].id, `${baseId}-2`, '撞 done 必须 refile 为带后缀的新 id，⛔ 不得复用旧 id');
+    assert.match(r[0].reason, /refile as/, 'refile 必须有独立取值，⛔ 不得与 filed as 同形（硬规则 3b）');
+    assert.match(r[0].reason, /已 done/, 'refile 的理由必须点名既有任务已 done，⛔ 不含就退回 filed 同形');
+    assert.equal(fs.readFileSync(file, 'utf8'), before, '既有 done 任务体不得被覆盖');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('driveItems: 非 done-owner 派生 id 碰撞（ready）⇒ 拒（⛔ 不覆盖在办任务）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-collide-ready-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'tasks'));
+    const baseId = 'gap-meta-zzz-no-such-mechanism-keyword';
+    // 文件名撞派生 id，但 id 字段/正文都不含关键词 ⇒ findOwningTasks 抓不到，纯靠 id 存在性拦。
+    // （若 id 字段也含关键词，findOwningTasks 会先在 blocking 分支拒掉，走不到本分支——两者都正确。）
+    fs.writeFileSync(path.join(tmp, 'tasks', `${baseId}.md`), `---\nid: some-other-task\nstatus: ready\n---\n在办任务，正文不含关键词\n`);
+    const r = await driveItems(tmp, [goodItem], ecoReadings, { cap: 1, dryRun: true, at: 'now' });
+    assert.equal(r[0].accepted, false);
+    assert.match(r[0].reason, /rejected/, '占着派生 id 的未完成任务必须被拒，⛔ 不得覆盖');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('taskFileStatus: 文件不存在 ⇒ null；存在则读 status（⛔ 不存在与读不出可区分）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-tfs-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'tasks'));
+    assert.equal(taskFileStatus(tmp, 'gap-nope'), null, '不存在必须返回 null，⛔ 不当「读不出」');
+    fs.writeFileSync(path.join(tmp, 'tasks', 'gap-x.md'), '---\nid: gap-x\nstatus: done\n---\n');
+    assert.equal(taskFileStatus(tmp, 'gap-x'), 'done');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('nextCollisionId: -2 已存在 ⇒ -3（确定性幂等，找第一个不撞的后缀）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-ncid-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'tasks'));
+    fs.writeFileSync(path.join(tmp, 'tasks', 'gap-meta-x-2.md'), '---\nid: gap-meta-x-2\n---\n');
+    assert.equal(nextCollisionId(tmp, 'gap-meta-x'), 'gap-meta-x-3');
+    assert.equal(nextCollisionId(tmp, 'gap-meta-y'), 'gap-meta-y-2', '无碰撞时从 -2 起');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
