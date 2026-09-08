@@ -1,7 +1,7 @@
 {
-  "files": 134,
-  "bytes": 3886055,
-  "fingerprint": "75b873df9f8b4086d0c06bfae62fe3c71c3de6132418ec265a795152fcb5d226",
+  "files": 133,
+  "bytes": 3880751,
+  "fingerprint": "d98189e0b4c6b13dcbcc3547fe0bbd584c09447eb7ba84168e0460f1652a074e",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
@@ -14,10 +14,6 @@
     {
       "rel": "plugin/.claude/launch.settings.json",
       "sha": "25e4ace2586d593da41a0b0f7380c2d77aed03d404b7a0f3414329f6df30baec"
-    },
-    {
-      "rel": "plugin/agents/baime-iteration-executor.md",
-      "sha": "c901e4aff424a629f8ab88e07d6bf554458bbaec98e651c01741c5f1c3ba5e57"
     },
     {
       "rel": "plugin/agents/quay-task.md",
