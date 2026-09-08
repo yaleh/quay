@@ -80,5 +80,9 @@ T3 实测结论（SPEC §9）必须体现在新行为里：**settings 里的 `en
 - CLAUDE.md
 - tasks/gap-quay-init-closure-shrink-body.md
 - docs/analysis/quay-init-closure-ratchet.baseline.json
+- archive/2026-09-08-quay-init-copy-machinery-retirement/plugin/test/*
+- archive/2026-09-08-quay-init-copy-machinery-retirement/packages/quay/test/*
 
 **优先级（人 2026-09-08 裁定）**：「优先保障 AC-168 落地」。本任务就是 AC-168 的收缩本体。打 `delivery-critical`。依赖 `gap-plugin-root-resolution-remaining-callsites` 先落地（已 done）。
+
+**⊕ Touches 补归档落点（manager 2026-09-08，在飞期间补）**：本任务把 22 个 copy-machinery 测试 `git mv` 进 `archive/2026-09-08-quay-init-copy-machinery-retirement/`，而 `## Touches` 原本只声明了**原路径**、没有声明**归档落点**。实测 `git diff --name-only develop...HEAD` 37 个文件里 **22 个不被任何已声明 glob 覆盖**，全部在该归档目录下 ⇒ fan-in 的 anti-drift 会 HARD FAIL（与 `gap-ac158-execute-archive-batch-one` 同一死法）。已补两条 glob。⊢ 通则：**`git mv` 的目的地和来源一样是写入面，两端都要在 Touches 里。**
