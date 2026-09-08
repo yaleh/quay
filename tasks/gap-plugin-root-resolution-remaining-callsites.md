@@ -96,5 +96,6 @@ scripts/test.sh 与 os-anchor-*.sh 的「仓库内部专用」结论 + 证据已
 - plugin/scripts/os-anchor-install.sh
 - packages/quay/src/plugin-root.ts
 - packages/quay/test/plugin-root.test.mjs
+- docs/analysis/quay-init-closure-ratchet.baseline.json
 - orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md
 - tasks/gap-plugin-root-resolution-remaining-callsites.md
