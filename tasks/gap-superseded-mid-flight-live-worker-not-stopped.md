@@ -52,12 +52,12 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，直接信号）：对一个 `status: superseded` 且 `hasLiveWorkerForTask` 命中的任务，`reclaimSupersededWorktrees` 在本轮调用了注入的 `sendSignal(pid, 'SIGTERM')`（断言调用参数含正确 pid）；不改代码直接跑则该 AC 假（当前行为是仅 skip）。
-- [ ] AC2（负控制，能取假，needs-human 不变）：同一双闸逻辑对 `status: needs-human` 且命中活 worker 的任务**不**调用 `sendSignal`（保持现状 skip-only）；若调用则该 AC 假。
-- [ ] AC3（负控制，能取假，非终态不动）：对 `status: ready`（非终态、根本不在候选集）的任务，`sendSignal` 不被调用；若调用则该 AC 假。
-- [ ] AC4（硬规则 3b，能取假，取值可区分）：结果对象新增 `liveWorkerSignaled` 字段，注入「已发信号」与「未发信号（needs-human 分支）」两种场景，断言两次返回的该字段值不同（同一字段两次取不同值，证明它真在判而非恒定）。
-- [ ] AC5（接线，非函数存在，能取假）：`plugin/test/worker-driver-resident.test.mjs` 断言常驻循环 reconcile 步真实调用到本次改动（注入缝计数 ≥1）；仅改导出函数而 reconcile 步未接线则该 AC 假。
-- [ ] AC6（硬规则 4 推论三，读生产载体，能取假）：实现落地后跑至少一轮真实 driver，`.quay/worker-round.jsonl` 该轮 `superseded_reclaim.perTask[]` 对应条目携带 `liveWorkerSignaled` 字段（候选数为 0 时也记录该轮结构存在该字段，⛔ 不省略）；关掉注入缝（用默认 `process.kill`）后该 AC 仍能通过——否则它只是回声。
+- [x] AC1（能取假，直接信号）：对一个 `status: superseded` 且 `hasLiveWorkerForTask` 命中的任务，`reclaimSupersededWorktrees` 在本轮调用了注入的 `sendSignal(pid, 'SIGTERM')`（断言调用参数含正确 pid）；不改代码直接跑则该 AC 假（当前行为是仅 skip）。
+- [x] AC2（负控制，能取假，needs-human 不变）：同一双闸逻辑对 `status: needs-human` 且命中活 worker 的任务**不**调用 `sendSignal`（保持现状 skip-only）；若调用则该 AC 假。
+- [x] AC3（负控制，能取假，非终态不动）：对 `status: ready`（非终态、根本不在候选集）的任务，`sendSignal` 不被调用；若调用则该 AC 假。
+- [x] AC4（硬规则 3b，能取假，取值可区分）：结果对象新增 `liveWorkerSignaled` 字段，注入「已发信号」与「未发信号（needs-human 分支）」两种场景，断言两次返回的该字段值不同（同一字段两次取不同值，证明它真在判而非恒定）。
+- [x] AC5（接线，非函数存在，能取假）：`plugin/test/worker-driver-resident.test.mjs` 断言常驻循环 reconcile 步真实调用到本次改动（注入缝计数 ≥1）；仅改导出函数而 reconcile 步未接线则该 AC 假。
+- [x] AC6（硬规则 4 推论三，读生产载体，能取假）：实现落地后跑至少一轮真实 driver，`.quay/worker-round.jsonl` 该轮 `superseded_reclaim.perTask[]` 对应条目携带 `liveWorkerSignaled` 字段（候选数为 0 时也记录该轮结构存在该字段，⛔ 不省略）；关掉注入缝（用默认 `process.kill`）后该 AC 仍能通过——否则它只是回声。
 
 ## Definition of Done
 
