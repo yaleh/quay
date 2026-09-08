@@ -842,12 +842,12 @@ export function taskFileStatus(root: string, id: string): string | null {
 /** 派生 id 已存在时，找第一个不撞的区分后缀（-2、-3…）。⛔ 确定性幂等：同一任务集下返回同一后缀。 */
 export function nextCollisionId(root: string, baseId: string): string {
   let n = 2;
-  let candidate = `${baseId}-${n}`;
-  while (fs.existsSync(path.join(root, "tasks", `${candidate}.md`))) {
+  let file = `${baseId}-${n}.md`;
+  while (fs.existsSync(path.join(root, "tasks", file))) {
     n++;
-    candidate = `${baseId}-${n}`;
+    file = `${baseId}-${n}.md`;
   }
-  return candidate;
+  return `${baseId}-${n}`;
 }
 
 /** 一条寄给 meta-driver 的消息（`meta/META-NNN.md` 的 proposed 记录，第五种 store kind）。
