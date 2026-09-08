@@ -156,7 +156,11 @@ test("AC3: the column template is viewport-independent (no auto-fit), with a mob
   // slots without the desktop 4-column layout overflowing.
   assert.ok(dashboardGridStyles.includes("@media (max-width:600px)"), "grid styles carry the ≤600px media query");
   assert.ok(dashboardGridStyles.includes(".dash-grid"), "grid styles target the .dash-grid class");
-  assert.ok(/\.dash-grid\s*\{[^}]*grid-template-columns:1fr/.test(dashboardGridStyles), "mobile collapse sets grid-template-columns:1fr");
+  // gap-dashboard-cards-layout-and-livecard-swimlane AC7: the collapse clamps to minmax(0,1fr) — a bare
+  // 1fr has an implicit `auto` minimum, so a long unbreakable in-flight row pushed the whole page to ~4×
+  // the viewport width on mobile. minmax(0,1fr) clamps that minimum to 0 like the desktop template.
+  assert.ok(dashboardGridStyles.includes("grid-template-columns:minmax(0,1fr) !important"), "mobile collapse sets grid-template-columns:minmax(0,1fr) !important");
+  assert.ok(!dashboardGridStyles.includes("grid-template-columns:1fr !important"), "no bare 1fr !important remains in the mobile collapse");
 
   // gridColumns itself carries no width term — the column count depends only on the card count.
   for (const n of [3, 4, 5]) {

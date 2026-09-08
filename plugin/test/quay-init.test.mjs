@@ -45,14 +45,28 @@ function diskWorktreeRoot() {
   return d;
 }
 
-function runInit(ws, args = []) {
+function runInitEnv(ws, args = [], envExtra = {}) {
   const extra = args.includes("--loop") && !args.some((a) => a === "--worktree-root")
     ? ["--worktree-root", diskWorktreeRoot()] : [];
   return spawnSync("bash", [path.join(pluginDir, "scripts", "quay-init.sh"), ...extra, ...args], {
     cwd: ws,
     encoding: "utf8",
-    env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginDir },
+    env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginDir, ...envExtra },
   });
+}
+function runInit(ws, args = []) {
+  return runInitEnv(ws, args);
+}
+
+// noTmuxPathPrefix — a temp dir whose `tmux` is a stub that reports NO sessions (exit 1), prepended to
+// PATH so quay-init's detection resolves the stub instead of a real tmux. This is the AC4 "no-tmux
+// host" simulation: `command -v tmux` succeeds but `tmux list-sessions` yields nothing ⇒ the detector
+// returns "zero matches" — the exact path a real no-tmux host (CI/container/plain ssh) takes.
+function noTmuxPathPrefix() {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "qinit-notmux-"));
+  _tmp.push(d);
+  fs.writeFileSync(path.join(d, "tmux"), "#!/bin/sh\n# simulated no-tmux host: list-sessions yields nothing\nexit 1\n", { mode: 0o755 });
+  return d;
 }
 
 const INIT_ARGS = (ws) => [
@@ -163,5 +177,60 @@ test("--dry-run lists the closed set and writes nothing", () => {
     assert.equal(r.status, 0, `--dry-run must exit 0:\n${r.stderr}`);
     assert.match(r.stdout, /closed set:/, "must report the closed set");
     assert.equal(listFiles(ws).length, 0, "--dry-run must write no files");
+  } finally { cleanup(ws); }
+});
+
+// ── AC1/AC4: a no-tmux host must NOT hard-fail the init (tmux session is optional) ─────────────────
+// gap-quay-init-hard-requires-tmux-session-and-leaves-partial-write. tmux is shadowed by a stub that
+// reports no sessions — the exact "no tmux host" path (CI/container/plain ssh). The init must exit 0,
+// lay all six closed-set items, and write loop.tmux_session: null (never a guess, never exit 2).
+// Negative control ① (removing the simulation ⇒ still green): the assertion only checks exit 0 + six
+// items + null — with a REAL tmux present the detector still finds zero MATCHING sessions for the
+// unique project name `proj-notmux`, so the same optional path continues and the test stays green.
+// Negative control ② (reverting tmux to hard-fail ⇒ red): if the detector again `exit 2`s on a miss,
+// r.status becomes 2 and both asserts below (status 0 + /needs the target project's tmux/ absent) turn red.
+test("no-tmux host: quay-init exits 0, lays the six-item closed set, and writes tmux_session: null", () => {
+  const ws = makeTmp();
+  try {
+    const prefix = noTmuxPathPrefix();
+    const r = runInitEnv(ws,
+      ["--loop", "--root", ws, "--project", "proj-notmux", "--test-command", "node --test"],
+      { PATH: prefix + ":" + (process.env.PATH || "") });
+    assert.equal(r.status, 0, `init must exit 0 on a no-tmux host:\n${r.stdout}${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /needs the target project's tmux session/,
+      "must not hard-fail on a missing tmux session (the retired dual-tmux prerequisite)");
+    for (const c of CLOSED_SET) {
+      assert.ok(fs.existsSync(path.join(ws, c)), `closed-set member must be laid down: ${c}`);
+    }
+    assert.ok(fs.existsSync(path.join(ws, "tasks")), "tasks/ must be created");
+    const cfg = fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8");
+    assert.match(cfg, /tmux_session:\s*null/, "loop.tmux_session must be null when no session is detected");
+  } finally { cleanup(ws); }
+});
+
+// ── AC3: a mid-write failure reports the per-item written/unwritten state (mechanically parseable) ──
+// A `.claude` FILE (not a dir) makes the launch.settings.json lay-down's `mkdir -p .claude` abort AFTER
+// config.yml/profiles.yml/tasks/.gitignore were written — the exact partial-write shape the task
+// describes. The EXIT trap must list which of the six items landed (written:) and which did not
+// (unwritten:), so "initialized half-way" is distinguishable from "not initialized".
+test("AC3 — a mid-write failure lists the six-item written/unwritten state", () => {
+  const ws = makeTmp();
+  try {
+    fs.mkdirSync(path.join(ws, "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "scripts", "test.sh"), "#!/bin/bash\necho test\n");
+    fs.writeFileSync(path.join(ws, ".claude"), "not a dir\n");
+    const r = runInit(ws, ["--loop", "--root", ws, "--test-command", "node --test", "--tmux-session", "proj-0:0.0"]);
+    assert.notEqual(r.status, 0, `a mid-write failure must exit non-zero:\n${r.stdout}${r.stderr}`);
+    const combined = r.stdout + "\n" + r.stderr;
+    // written before the abort.
+    for (const p of [".quay/config.yml", ".quay/profiles.yml", "tasks", ".gitignore"]) {
+      assert.match(combined, new RegExp(`written:\\s*${p.replace(/\./g, "\\.")}`),
+        `the report must mark ${p} written`);
+    }
+    // never reached.
+    for (const p of [".claude/launch.settings.json", ".claude/settings.json"]) {
+      assert.match(combined, new RegExp(`unwritten:\\s*${p.replace(/\./g, "\\.")}`),
+        `the report must mark ${p} unwritten`);
+    }
   } finally { cleanup(ws); }
 });

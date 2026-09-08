@@ -2,7 +2,7 @@
 id: gap-develop-deliver-asserts-http-200-but-root-now-302-redirects
 title: 交付验证硬断言 / == 200，而产品 / 已改为 302→/dashboard ⇒ DIR-123 每次 merge
   后的跨主机交付验证全红，且在 B 上就中断、C 从未被验
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical
@@ -49,11 +49,11 @@ curl -L / → final=200
 
 ## Acceptance Criteria
 
-- [ ] AC1 对当前 develop tip 的产物跑 `develop-deliver-tgz.sh --hosts "B C" --force` 退出码 0
-- [ ] AC2 `.quay/develop-deliver-state.json` 同时含 B 与 C 两个键，且值为最终码 200
-- [ ] AC3 负控制：把远端 serve 换成一个恒返回 404 的桩，脚本必须 exit 非 0（证明判据能取假）
-- [ ] AC4 负控制：让 B 故意失败，C 仍被验证并在 state.json 中留下自己的取值（不是缺键）
-- [ ] AC5 单机失败时本地 stdout 打印出该机的失败原因（含实际收到的 http code），不再静默 exit 1
+- [x] AC1 对当前 develop tip 的产物跑 `develop-deliver-tgz.sh --hosts "B C" --force` 退出码 0
+- [x] AC2 `.quay/develop-deliver-state.json` 同时含 B 与 C 两个键，且值为最终码 200
+- [x] AC3 负控制：把远端 serve 换成一个恒返回 404 的桩，脚本必须 exit 非 0（证明判据能取假）
+- [x] AC4 负控制：让 B 故意失败，C 仍被验证并在 state.json 中留下自己的取值（不是缺键）
+- [x] AC5 单机失败时本地 stdout 打印出该机的失败原因（含实际收到的 http code），不再静默 exit 1
 
 ## Definition of Done
 
@@ -64,6 +64,5 @@ AC1–AC5 全绿，且 state.json 中 B/C 两机的 `usage_verify` 与 `http` �
 ## Touches
 
 - plugin/scripts/develop-deliver-tgz.sh
-- plugin/test/verify-delivery-surface.test.mjs
-- plugin/test/delivery-status-single-source.test.mjs
+- plugin/test/develop-deliver-tgz.test.mjs
 - tasks/gap-develop-deliver-asserts-http-200-but-root-now-302-redirects.md

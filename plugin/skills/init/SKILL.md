@@ -53,7 +53,9 @@ Then accept the trust dialog the first time you enter the directory, and restart
 --repo-root <path>      → .quay/config.yml loop.repo_root (default: --root)
 --test-command <cmd>    → loop.test_command (detected via scripts/test.sh → package.json
                         scripts.test → go.mod → Cargo.toml when omitted; FAIL CLOSED on a miss)
---tmux-session <sess>   → loop.tmux_session (detected by project name; FAIL CLOSED, never guessed)
+--tmux-session <sess>   → loop.tmux_session (optional: detected best-effort by project name; null
+                        when absent/ambiguous — never guessed, never a hard failure — the dual-tmux
+                        model retired in SPEC-tmux-retirement-2026-09-03)
 --worktree-root <dir>   → loop.worktree_root (default: sibling-of-repo; FAIL CLOSED on tmpfs)
 --plugin-root <dir>     quay plugin dir (overrides ${CLAUDE_PLUGIN_ROOT} / self-resolution)
 --force                 overwrite an existing .claude/settings.json

@@ -18,7 +18,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
-import { resolvePluginRoot, resolvePluginScript, resolvePluginScriptExec, mainCheckoutRoot } from "../src/plugin-root.ts";
+import { resolvePluginRoot, resolvePluginRootFrom, resolvePluginScript, resolvePluginScriptExec, mainCheckoutRoot } from "../src/plugin-root.ts";
 
 const KERNEL = path.join("scripts", "driver-runtime.ts");
 
@@ -167,5 +167,42 @@ test("mainCheckoutRoot() detects inside a linked worktree, null for the main che
     assert.equal(mainCheckoutRoot(path.join(main, "sub")), null, "main checkout subdir → null");
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// gap-plugin-dist-entry-derivation-blind-to-core-and-table-refs: the shipped artifact DELETES raw
+// plugin .ts, so an installed package only carries the bundled `scripts/dist/driver-runtime.js`. The
+// plugin-root anchor must resolve from that dist bundle too — otherwise `quay driver` dies with
+// "kernel not found" in any installed project (the gap this task closes).
+test("resolvePluginRootFrom() anchors on the BUNDLED dist kernel (npm-global installed layout, no raw .ts)", () => {
+  const fakePkg = fs.mkdtempSync(path.join(os.tmpdir(), "quay-plugroot-dist-anchor-pkg-"));
+  try {
+    const fakePlugin = path.join(fakePkg, "plugin");
+    fs.mkdirSync(path.join(fakePlugin, "scripts", "dist"), { recursive: true });
+    fs.writeFileSync(path.join(fakePlugin, "scripts", "dist", "driver-runtime.js"), "// bundled kernel\n");
+    const startDir = path.join(fakePkg, "dist"); // bundled Core lives in <pkg>/dist
+    fs.mkdirSync(startDir, { recursive: true });
+    assert.equal(
+      resolvePluginRootFrom(startDir),
+      path.resolve(fakePlugin),
+      "must anchor on the bundled dist kernel when raw .ts is absent"
+    );
+  } finally {
+    fs.rmSync(fakePkg, { recursive: true, force: true });
+  }
+});
+
+test("resolvePluginRootFrom() anchors on the dist kernel in the marketplace layout (scripts/ is direct)", () => {
+  const fakeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-plugroot-dist-anchor-mkt-"));
+  try {
+    fs.mkdirSync(path.join(fakeRoot, "scripts", "dist"), { recursive: true });
+    fs.writeFileSync(path.join(fakeRoot, "scripts", "dist", "driver-runtime.js"), "// bundled kernel\n");
+    assert.equal(
+      resolvePluginRootFrom(fakeRoot),
+      path.resolve(fakeRoot),
+      "must anchor on the dist bundle where the plugin root IS the scripts' parent"
+    );
+  } finally {
+    fs.rmSync(fakeRoot, { recursive: true, force: true });
   }
 });

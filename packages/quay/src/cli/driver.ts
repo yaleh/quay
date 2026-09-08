@@ -24,7 +24,7 @@ import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { parseFlags } from "./flags.ts";
 import { findConfig } from "../config.ts";
-import { resolvePluginScript } from "../plugin-root.ts";
+import { resolvePluginScriptExec } from "../plugin-root.ts";
 import type { CliCtx } from "./context.ts";
 
 const VERBS = ["start", "stop", "drain", "resume", "status", "restart"];
@@ -165,7 +165,7 @@ export function runDriver(
     };
   }
 
-  const kernel = resolvePluginScript(path.join("scripts", "driver-runtime.ts"));
+  const kernel = resolvePluginScriptExec(path.join("scripts", "driver-runtime.ts"));
   if (!kernel) {
     return { ok: false, reason: `quay driver: driver runtime kernel not found (no plugin root resolved — no local plugin/ copy and no installed quay plugin)`, stdout: "", stderr: "", exitCode: 1 };
   }
@@ -174,7 +174,14 @@ export function runDriver(
   // --root to the resolved workspace root (last-wins in the kernel's parser) so the kernel runs
   // against the same root this handler resolved — never a stale/missing one. AC151: the supervisor
   // is TS now — spawn the kernel with `node --experimental-strip-types` (⛔ no more bash .sh).
+  // The dev tree kernel is the raw `driver-runtime.ts` (run WITH --experimental-strip-types); the
+  // shipped artifact carries it ONLY as the bundled `dist/driver-runtime.js` (a plain ESM bundle,
+  // run WITHOUT the flag) — resolvePluginScriptExec applies that dev/dist fallback
+  // (gap-plugin-dist-entry-derivation-blind-to-core-and-table-refs).
   const args = [verb, ...rest, "--root", root];
-  const r = spawnSync(process.execPath, ["--experimental-strip-types", kernel, ...args], { encoding: "utf8" });
+  const spawnArgs = kernel.stripTypes
+    ? ["--experimental-strip-types", kernel.path, ...args]
+    : [kernel.path, ...args];
+  const r = spawnSync(process.execPath, spawnArgs, { encoding: "utf8" });
   return { ok: true, reason: null, stdout: r.stdout ?? "", stderr: r.stderr ?? "", exitCode: r.status ?? 1 };
 }
