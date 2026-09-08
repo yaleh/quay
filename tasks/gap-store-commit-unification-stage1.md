@@ -1,7 +1,7 @@
 ---
 id: gap-store-commit-unification-stage1
 title: 单一提交原语 store-commit.ts + 五 store 接线（删三处各自 git commit，SPEC 阶段 1）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
