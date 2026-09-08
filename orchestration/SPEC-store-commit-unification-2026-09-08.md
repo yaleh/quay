@@ -210,7 +210,13 @@ export function commitStoreWrite(opts: {
 | **AC-196** | `store-commit.ts` 输出词表含 `not-in-git` 与 `unchanged`，且旧 boolean 提交函数 = **0** | 文件不存在、旧函数 **2** 个 ⇒ 红 |
 | **AC-197** | 五个 store 全部调用 `commitStoreWrite` = **5**（含 adr / docs-managed） | **0** ⇒ 红 |
 | **AC-198** | 不再有 `const root = path.dirname(<kind>Dir)`，且原语用 `rev-parse` | **2** 处 ⇒ 红 |
-| **AC-199** | 双向负控制单测在默认 suite 里真的跑（`scripts/test.sh <file>` 退出 0） | 文件不存在 ⇒ 红 |
+| **AC-199** | 双向负控制单测存在、带 `@test-group` 标注（⇒ 进默认 suite）、且 `node --test` 跑绿 | 文件不存在 ⇒ 红 |
+
+**AC-199 判据形态的说明**：「进默认 suite」这一半用**结构检查**（`head -3` 里有 `@test-group` 标注，
+否则落进 ADR-019 的 in-file skip）而不是跑一次全量 `scripts/test.sh` —— 因为 goal gate 的
+`runAcceptance` 预算是 60s（`goal-store.ts` gate 分支），跑全量必然超时 ⇒ 判据会因超时而恒红，
+那是**仪器故障伪装成缺陷**（硬规则 4b）。「跑绿」这一半用 `node --test` 直接跑该单文件。
+两半合起来等价于「它在默认 suite 里、且它是绿的」，而每一半都能在预算内取真取假。
 
 **AC-199 的双向负控制必须包含**（⛔ 缺一不可，否则是回声不是测量）：
 ① `propagate: "develop"` 关掉 ⇒ develop 拿不到该写；② `propagate: "none"` 打开 ⇒ develop **不**拿到该写；
