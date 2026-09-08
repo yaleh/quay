@@ -1,7 +1,7 @@
 ---
 id: gap-meta-call-resident-suite-driver-kind-spawn-per-tas
 title: resident `suite` driver kind 从未启动却仍注册——两个正本对「谁 spawn per-task suite」互相矛盾
-status: ready
+status: done
 labels:
   - meta-human-call
   - meta-driver
