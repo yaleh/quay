@@ -652,8 +652,8 @@ test('M179 (DIR-070-F): quay-webui-bootstrap-methodology plugin skill exists wit
 test('M179 (DIR-070-F): the .claude/skills/ second copies are retired (archived, not deleted)', () => {
   // gap-ac166-second-copy-retirement: .claude/skills/ 5 dirs were the "second copy" (drift source).
   // They are archived under archive/ (git mv + INDEX), NOT deleted. plugin/skills/ is now the
-  // single source, and .claude/skills/ must be empty.
-  assert.equal(fs.readdirSync(path.join(repoRoot, '.claude', 'skills')).length, 0, '.claude/skills/ must be empty (second copies retired)');
+  // single source, and .claude/skills/ must be gone (git mv removed the dir — git tracks no empty dirs).
+  assert.ok(!existsSync(path.join(repoRoot, '.claude', 'skills')), '.claude/skills/ must be gone (second copies archived via git mv, not deleted)');
   const archived = path.join(repoRoot, 'archive', '2026-09-07-second-copy-retirement', '.claude', 'skills');
   assert.ok(existsSync(path.join(archived, 'quay-native-methodology', 'reference', 'v-meta-stall-analysis.md')), 'archived quay-native-methodology source must exist in archive/');
   assert.ok(existsSync(path.join(archived, 'quay-native-methodology', 'reference', 'case-studies', 'iteration-88-abi-symmetry-walkthrough.md')), 'archived case-studies/ must exist in archive/');
