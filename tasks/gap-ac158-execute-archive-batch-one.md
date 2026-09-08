@@ -4,10 +4,12 @@ title: AC158 执行批次一：零调用死集 git mv 进 archive + INDEX 同一
 status: ready
 labels:
   - gap
+  - delivery-critical
 parent: null
 children: []
 extra:
   schema: execution
+  deliveryCriticalSource: adhoc
 goal_ac: AC-158
 depends_on: []
 ---
@@ -213,3 +215,5 @@ depends_on: []
 - **搁浅原因不是 suite 红，是 `anti-drift` HARD FAIL 1 条**：`docs/analysis/test-file-baseline.txt` 当时不在 Touches 里（移/删测试文件会改这个基线）。该行**已于 10:53 补进 Touches**，但 **worktree 里的任务文件是旧快照**（当时落后 develop 12 提交），而 anti-drift 读的是 **worktree 那一份** ⇒ 补了也没被看见。
 - ⇒ **下一轮该做的**：在 worktree 里 `git merge --no-edit develop`（把补好的 Touches 拉进来）→ 重跑 anti-drift → 走完 scoped 门 + 全量 suite → ff。**不要重新 git mv、不要重算名单。**
 - 逐条核对 AC1–AC6 是否已由 `9547d48eb` 满足，满足就勾（AC 复选框在 Edit 时被换成新文本，故当前全部未勾——那是判据文本变更导致的重置，不是实现退回）。
+
+**优先级（manager 2026-09-08，人在场询问后打标）**：GOAL-003 现 13/14，本任务是最后一条。人问「现在在飞只有 4，可以派发 AC-158 吗？可以单任务派发它吗？」——容量与池子都允许，但手动 `worker-driver.ts --task` 与常驻 driver 并发存在真实碰撞风险（两者对已存在的 `task/gap-ac158-execute-archive-batch-one` worktree 都会生成 CONTINUE-复用 prompt，且两条路径间无跨进程去重锁）。改用打标——只改常驻 driver 自己读的偏好文件（`dispatch-preference.md` 覆盖段），无并发冲突可能，且已被 AC-168 链验证有效。`delivery-critical`（`extra.deliveryCriticalSource: adhoc`，DIR-130 授权）。
