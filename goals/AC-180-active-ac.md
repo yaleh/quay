@@ -11,8 +11,4 @@ expect: goal 机制进入生产使用后，活跃 AC 无一无判据（当前 13
 origin: readings.criteria 中 AC-143..AC-155 共 13 条 GOAL-002 活跃 AC 的 criterion 全为
   null（verdict 均 fail、reason 均「no criterion defined」），而同属活跃的 GOAL-001
   AC-170..176 全部有判据——说明无判据不是机制限制，而是 GOAL-002 的测量面整体未写
-evidence:
-  at: 2026-09-07T01:22:09.465Z
-  verdict: pass
-  reading: acceptance passed (exit 0)
 ---
