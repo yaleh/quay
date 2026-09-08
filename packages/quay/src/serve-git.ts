@@ -84,6 +84,10 @@ export const GIT_GRAPH_TEXT_X = 260;
 export const GIT_GRAPH_LANE_GAP = 22;
 /** Configurable max concurrent lane slots; beyond this lanes are narrowed + counted as "+N more". */
 export const GIT_GRAPH_MAX_LANES = 8;
+/** Vertical padding above the first row (the graph's top margin, row 0's y). */
+export const GIT_GRAPH_PAD_Y = 24;
+/** Fixed row height — one visible commit/summary per 26px band. */
+export const GIT_GRAPH_ROW_H = 26;
 
 // ── Lane colour encoding (gap-git-graph-lane-visual-encoding-and-fixed-width) ──────────────────────
 // The retired single `.git-svg-grid` stroke (--color-neutral-200 / #eae7e7) measured 1.13:1 against the
@@ -149,6 +153,53 @@ export function computeGitGraphRows(layout: GitGraphLayout, expandedLaneIds: Rea
   }
   items.sort((a, b) => a.t - b.t || (a.tie < b.tie ? -1 : a.tie > b.tie ? 1 : 0));
   return items.map((it, row) => ({ kind: it.kind, hash: it.hash, laneId: it.laneId, t: it.t, row }));
+}
+
+/**
+ * A transparent hit rect: one per branch (lane), spanning the branch's INTERACTIVE row — the
+ * summary row when collapsed, the top commit row (the fold control) when expanded. Its width covers
+ * trunkX → the graph's right edge so the WHOLE row is clickable (gap-git-graph-fold-control-lands-
+ * offscreen-and-row-hit-zone-dead: the old summary group only hit-tested the node circle + chip +
+ * glyphs, leaving a ~450px dead zone in between).
+ */
+export interface GitGraphHitRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Compute the per-branch hit rects. `width` is the graph's right edge (the client's finalWidth);
+ * the rect width is clamped to ≥ textX − trunkX, so the hit rect always spans from the trunk into
+ * the text column (the minimum the dead-zone fix needs). `opts.includeHitRects === false` models
+ * "render a version WITHOUT hit rects" — the AC3 negative control (the counter can take 0).
+ */
+export function computeGitGraphHitRects(
+  layout: GitGraphLayout,
+  expanded: ReadonlySet<string>,
+  width: number,
+  opts?: { includeHitRects?: boolean },
+): GitGraphHitRect[] {
+  if (opts?.includeHitRects === false) return [];
+  const rows = computeGitGraphRows(layout, expanded);
+  const topRowByLane = new Map<string, number>();
+  for (const r of rows) {
+    if (r.laneId === null) continue;
+    if (!topRowByLane.has(r.laneId)) topRowByLane.set(r.laneId, r.row);
+  }
+  const rects: GitGraphHitRect[] = [];
+  for (const b of layout.branches) {
+    const row = topRowByLane.get(b.id);
+    if (row === undefined) continue;
+    rects.push({
+      x: GIT_GRAPH_TRUNK_X,
+      y: GIT_GRAPH_PAD_Y + row * GIT_GRAPH_ROW_H - GIT_GRAPH_ROW_H / 2,
+      width: Math.max(width - GIT_GRAPH_TRUNK_X, GIT_GRAPH_TEXT_X - GIT_GRAPH_TRUNK_X),
+      height: GIT_GRAPH_ROW_H - 2,
+    });
+  }
+  return rects;
 }
 
 /**
@@ -531,12 +582,20 @@ export function gitGraphClientScript(): string {
   try { data = JSON.parse(dataEl.textContent); } catch (e) { return; }
   if (!data || !data.trunk || !data.trunk.commits.length) { return; }
 
-  var rowH = 26, trunkX = ${GIT_GRAPH_TRUNK_X}, textX = ${GIT_GRAPH_TEXT_X}, laneGap = ${GIT_GRAPH_LANE_GAP}, maxLanes = ${GIT_GRAPH_MAX_LANES}, nodeR = 4, mergeR = 5, padY = 24;
+  var rowH = ${GIT_GRAPH_ROW_H}, trunkX = ${GIT_GRAPH_TRUNK_X}, textX = ${GIT_GRAPH_TEXT_X}, laneGap = ${GIT_GRAPH_LANE_GAP}, maxLanes = ${GIT_GRAPH_MAX_LANES}, nodeR = 4, mergeR = 5, padY = ${GIT_GRAPH_PAD_Y};
   var lanePalette = ${JSON.stringify(GIT_GRAPH_LANE_PALETTE.map((_, i) => `var(--color-lane-${i})`))};
   var chipText = "var(--color-lane-chip-text)";
   var trunk = data.trunk;
   var branches = data.branches || [];
   var overflow = typeof data.overflowCount === "number" ? data.overflowCount : 0;
+
+  // gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead: 移动端「适应宽度」开关 — 只显
+  // chip + 提交数（隐藏 subject），把内容宽度压回视口内（scrollWidth <= clientWidth * 1.2）。
+  var fitWidthEl = document.getElementById("git-graph-fit-width");
+  var fitWidth = !!(fitWidthEl && fitWidthEl.checked);
+  if (fitWidthEl) {
+    fitWidthEl.addEventListener("change", function () { fitWidth = fitWidthEl.checked; render(); });
+  }
 
   function y(row) { return padY + row * rowH; }
 
@@ -647,7 +706,7 @@ export function gitGraphClientScript(): string {
     // and a getBBox re-measure below widens the viewBox to the true text right edge, so no subject is
     // ever clipped by a literal width (硬规则 4 推论二: the old textX+460 = 720px clipped 37/98
     // subjects with no scrollbar to reach them).
-    var width = typeof data.textWidth === "number" ? data.textWidth : textX + 460;
+    var width = fitWidth ? textX : (typeof data.textWidth === "number" ? data.textWidth : textX + 460);
     var height = y(items.length - 1) + padY;
     // gap-webui-git-history-svg-unreadable: draw the viewBox at its NATIVE width/height (1:1) so the
     // text stays readable — the old width=100% + max-height:75vh + default preserveAspectRatio meet
@@ -705,12 +764,16 @@ export function gitGraphClientScript(): string {
         .attr("stroke-dasharray", b.open ? "6,4" : null);
 
       if (expanded[b.id] === true) {
-        // AC4: the fold control is a chip(ref) + "▲ 折叠" — the branch name stays prominent (chip),
-        // never a bare "▲ 折叠 ref" line.
+        // gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead: the fold control is a
+        // chip(ref) + "▲ 折叠" drawn on the branch's TOP row (first own commit, laneTopRow[b.id]) —
+        // NOT the bottom merge row (laneBot), which landed off-screen after expanding a tall branch
+        // AND sat on the trunk merge text. The first commit's own subject is skipped below (the fold
+        // control replaces it), so the control never overlaps text on its row.
+        var foldRow = laneTopRow[b.id];
         var grp2 = g.append("g").style("cursor", "pointer")
           .on("click", function () { expanded[b.id] = false; render(); });
-        var foldChipW = appendChip(grp2, textX, y(laneBot) - 6, b.ref, color);
-        grp2.append("text").attr("class", "git-svg-ink").attr("x", textX + foldChipW + 6).attr("y", y(laneBot) - 6).attr("font-size", 10)
+        var foldChipW = appendChip(grp2, textX, y(foldRow) - 6, b.ref, color);
+        grp2.append("text").attr("class", "git-svg-ink").attr("x", textX + foldChipW + 6).attr("y", y(foldRow) - 6).attr("font-size", 10)
           .text("▲ 折叠");
         grp2.append("title").text("点击折叠 " + b.ref);
       }
@@ -741,10 +804,15 @@ export function gitGraphClientScript(): string {
         node.append("title").text(c.hash + " · " + c.subject);
         if (it.laneId === null) {
           g.append("text").attr("class", "git-svg-ink").attr("x", textX).attr("y", yy + 4).attr("font-size", 11)
-            .text(c.hash.slice(0, 7) + " " + c.subject);
+            .text(fitWidth ? c.hash.slice(0, 7) : (c.hash.slice(0, 7) + " " + c.subject));
         } else {
-          g.append("text").attr("class", "git-svg-muted").attr("x", textX).attr("y", yy + 4).attr("font-size", 10)
-            .text(c.hash.slice(0, 7) + " " + c.subject);
+          // The fold control replaces the expanded branch's first commit subject (its own row),
+          // so the control never overlaps text on the top row.
+          var isFoldRow = expanded[it.laneId] === true && it.row === laneTopRow[it.laneId];
+          if (!isFoldRow) {
+            g.append("text").attr("class", "git-svg-muted").attr("x", textX).attr("y", yy + 4).attr("font-size", 10)
+              .text(fitWidth ? c.hash.slice(0, 7) : (c.hash.slice(0, 7) + " " + c.subject));
+          }
         }
       } else {
         // AC4: a collapsed branch's summary row leads with a chip(ref) — the branch name is prominent
@@ -756,7 +824,7 @@ export function gitGraphClientScript(): string {
           .style("fill", laneColorById[b.id]);
         var chipW = appendChip(grp, textX, yy + 3, b.ref, laneColorById[b.id]);
         grp.append("text").attr("class", "git-svg-ink").attr("x", textX + chipW + 6).attr("y", yy + 4).attr("font-size", 11)
-          .text("· " + b.commits.length + " commits · " + spanText(b) + "（点击展开）");
+          .text(fitWidth ? ("· " + b.commits.length + " commits") : ("· " + b.commits.length + " commits · " + spanText(b) + "（点击展开）"));
         grp.append("title").text("点击展开 " + b.ref + " 的 " + b.commits.length + " 条提交");
       }
     });
@@ -780,6 +848,23 @@ export function gitGraphClientScript(): string {
     if (finalWidth !== width) {
       svg.attr("viewBox", "0 0 " + finalWidth + " " + height).attr("width", finalWidth);
     }
+
+    // gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead AC2: one transparent hit rect
+    // per branch, spanning trunkX → the graph's right edge, on the branch's interactive row (summary
+    // when collapsed, fold control when expanded — both are the branch's TOP visible row). This makes
+    // the WHOLE row clickable: the old summary group only hit-tested the node circle + chip + glyphs,
+    // leaving a ~450px dead zone in between. Drawn last (on top) so it captures the click uniformly.
+    var hitWidth = finalWidth - trunkX;
+    branches.forEach(function (b) {
+      var hr = laneTopRow[b.id];
+      if (hr === undefined) { return; }
+      g.append("rect").attr("class", "git-svg-hit")
+        .attr("x", trunkX).attr("y", y(hr) - rowH / 2)
+        .attr("width", hitWidth).attr("height", rowH - 2)
+        .attr("fill", "transparent").attr("pointer-events", "all")
+        .style("cursor", "pointer")
+        .on("click", function () { expanded[b.id] = !expanded[b.id]; render(); });
+    });
   }
 
   render();
@@ -826,6 +911,12 @@ export function renderGitHistoryPage(history: GitHistoryResult): string {
 
   const graph = layout
     ? html`<div id="git-graph" aria-label="Git 纵向时间轴" style="overflow-x:auto">${gitGraphLegendHtml()}</div>`
+    : "";
+  // gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead: 移动端「适应宽度」开关 — the
+  // client reads this checkbox and, when checked, hides commit subjects (only chip + commit count),
+  // shrinking the content-derived SVG width to fit a narrow viewport.
+  const fitWidthToggle = layout
+    ? html`<div style="margin:0.5rem 0;font-size:0.8rem;color:var(--color-neutral-700)"><label style="display:inline-flex;align-items:center;gap:0.4rem;cursor:pointer"><input type="checkbox" id="git-graph-fit-width"> 适应宽度（仅 chip + 提交数，隐藏 subject，移动端）</label></div>`
     : "";
   // The data JSON is embedded with `<` escaped to \u003c so a commit subject can never break out of
   // the <script> element. d3 + the client renderer are emitted only when there is a graph to draw.
@@ -887,6 +978,7 @@ export function renderGitHistoryPage(history: GitHistoryResult): string {
       <h1>Git History — 提交纵向时间轴</h1>
       <p class="meta"><strong>纵轴 = 提交落地顺序（git commit time），不是工时/持续时间。</strong> ${escapeHtml(trunkRef)} 竖直主干 + task 分支从主干分出（fork）/合入（merge）的连线；task 分支默认折叠（只显提交数与时间跨度，点击展开逐条）。菱形 = 合并提交（fan-in 落地事件）。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并（跨所有本地分支）。</p>
       ${statusNote}
+      ${fitWidthToggle}
       ${graph}
       ${laneTokenStyles}
       ${dataScript}
