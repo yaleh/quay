@@ -52,4 +52,6 @@ goal_ac: AC-195
 - packages/quay-native/src/store.ts
 - packages/quay/test/store-commit.test.mjs
 - packages/quay-native/test/store.test.mjs
+- plugin/skills/manager/SKILL.md
+- plugin/skills/init/SKILL.md
 - tasks/gap-store-commit-unification-stage1.md
