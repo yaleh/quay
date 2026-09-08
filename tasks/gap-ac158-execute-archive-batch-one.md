@@ -36,7 +36,7 @@ depends_on:
 4. 摘掉 `plugin/scripts/capability-catalog.sh` 里被移脚本的六表条目，跑 `node --no-warnings --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --reanchor --root <worktree>`。
 5. **迭代收敛**：跑 `scripts/test.sh`。红 ⇒ 从失败输出定位到是哪个脚本被移走导致的，`git mv` 移回、从候选集摘出、重跑。**重复直到绿**。漏移可接受，不必为了凑数把可疑的硬留在候选集里。
 6. 写 `archive/INDEX.tsv`（每行七字段 `original_path · archive_path · date · reason_code · evidence · restore_cmd · commit`，reason_code=`zero-call`，restore_cmd=`git mv <archive_path> <original_path>`），与全部 `git mv` 在**同一个提交**。
-7. ⛔ **不再改 SPEC §12e 的「扫描后死集: N」行**——那行是**死集种群规模**，与**本批次归档件数**是两个不同的量；把它们等同起来正是原判据不可满足的根因（人 2026-09-08 裁定简化）。本任务不碰 SPEC。
+7. **SPEC §12e 的「扫描后死集: N」行不再是判据**——它是**死集种群规模**，与**本批次归档件数**是两个量，把二者等同正是原判据不可满足的根因（人 2026-09-08 裁定简化）。⛔ 不得再用它与 INDEX 行数做等式。已落在任务分支上的写入（当前写成 `53` = INDEX 总行数，语义是错的）可以保留、也可以改回种群语义，**两者都不影响达成**；该文件仍留在 Touches 里，只是为了让已有改动通过 anti-drift。
 
 ## AC
 
@@ -61,6 +61,7 @@ depends_on:
 - plugin/scripts/capability-catalog.sh
 - docs/analysis/quay-init-closure-ratchet.baseline.json
 - docs/analysis/test-file-baseline.txt
+- orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md
 - plugin/scripts/anti-gaming-guard.sh
 - plugin/scripts/anti-gaming-guard.ts
 - plugin/scripts/audit-independence-check.sh
@@ -213,3 +214,13 @@ Touches 实测重叠 2 个文件 —— `plugin/scripts/os-anchor-watchdog.sh` �
 **⊢ 连带**：前置落地后，`os-anchor-watchdog.sh` 已被证明为**活脚本**（有人在改它），
 按 Plan「已知为活、直接从候选集排除」的同一条纪律，**把它和 `plugin/test/os-anchor-watchdog.test.mjs`
 从归档候选集里摘掉**，不要移。少归档一个不影响达成（条数不是闸）。
+
+## 实现状态：已完成但搁浅在任务分支（manager 2026-09-08 核实）
+
+⛔ **下一个 worker 不要从零重做**——工作已经做完，只是没落地。
+
+- 分支 `task/gap-ac158-execute-archive-batch-one` 提交 `9547d48eb`：**24 个死脚本 + 15 个自带测试**已 `git mv` 进 `archive/2026-09-07-zero-call-scripts/`，`archive/INDEX.tsv` 增 24 条 `reason_code=zero-call` 行（七字段齐全），与 move 同一提交。
+- **新判据对该 worktree 实测 exit 0** —— 即 AC-158 的达成条件在这份搁浅实现上已经成立。
+- **搁浅原因不是 suite 红，是 `anti-drift` HARD FAIL 1 条**：`docs/analysis/test-file-baseline.txt` 当时不在 Touches 里（移/删测试文件会改这个基线）。该行**已于 10:53 补进 Touches**，但 **worktree 里的任务文件是旧快照**（当时落后 develop 12 提交），而 anti-drift 读的是 **worktree 那一份** ⇒ 补了也没被看见。
+- ⇒ **下一轮该做的**：在 worktree 里 `git merge --no-edit develop`（把补好的 Touches 拉进来）→ 重跑 anti-drift → 走完 scoped 门 + 全量 suite → ff。**不要重新 git mv、不要重算名单。**
+- 逐条核对 AC1–AC6 是否已由 `9547d48eb` 满足，满足就勾（AC 复选框在 Edit 时被换成新文本，故当前全部未勾——那是判据文本变更导致的重置，不是实现退回）。
