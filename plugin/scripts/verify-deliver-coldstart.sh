@@ -15,10 +15,10 @@
 #               （默认全新临时前缀，证明「干净安装」——绝不复用 sync.sh git 开发树，那是 AC88
 #               「⛔ 非 git clone」排除的形态，AC3）。装完断言 quay --version 与 quay-native --version。
 #   ② 初始化 — 在干净空项目目录里跑【安装包里 shipped 的】quay-init.sh --all --loop
-#               （安装源 = 本机 .tgz 产物内的插件包，非 dev 树），验证双层机制铺到位 (L1)：
-#               outer tick doc (orchestration/orchestrator-loop-tick.md) + inner tick doc
-#               (docs/analysis/fast-mode-loop-tick.md) + loop 脚本 (session-liveness.sh) +
-#               .quay/config.yml + 项目本地 runtime (.quay/runtime/bin/quay.js)。
+#               （安装源 = 本机 .tgz 产物内的插件包，非 dev 树），验证项目文件铺到位 (L1)：
+#               L1 = SPEC §6 安装写入闭集（orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md
+#               的 QUAY-INIT-CLOSED-SET:BEGIN/END 块逐条解析），逐条 ∈ 项目根。⛔ 不在本脚本复制闭集清单
+#               —— 闭集在 SPEC 里是机器可读契约，脚本只解析不抄写（硬规则 4c；复制一份就是制造漂移）。
 #   ③ 冷启动 — 活性验证（outer 窗口 + inner 层），判据是【直接量】(AC2 / CLAUDE.md 硬规则 4b)：
 #               · git 提交时间戳     —— loop 产出过提交（外部可核：git 对象）
 #               · /proc/<pid>/cwd   —— 会话进程落在项目内（内核态），【且已通过启动信任弹窗】
@@ -62,7 +62,7 @@
 #       [--test-command <cmd>] [--tmux-session <sess>] \
 #       [--wait <s>] [--liveness-window <min>] \
 #       [--skip-cold-start-drive] [--cold-start-drive] [--verify-only] [--require-live] \
-#       [--evidence <path>] [--ac89 <path>] [--host <B|C>] [--selfcheck] [--help]
+#       [--evidence <path>] [--ac89 <path>] [--host <B|C>] [--spec <path>] [--selfcheck] [--help]
 #
 #   --build-root <repo> 该次验证【自己】从 <repo> 的 develop-tip 现 build quay+quay-native tgz
 #                       （AC5 主路径：build_sha/日期/产物 sha256 全由本脚本取，不引用外部产物），
@@ -70,9 +70,12 @@
 #   --build-sha <sha>   现 build 所用 tgz 对应的 develop commit（跨主机驱动时由 build 方传入；
 #                       --build-root 时自动取，无需传）。
 #   --build-date <ISO>  该 commit 的提交时间（--build-root 时自动取；跨主机时由 build 方传入）。
+#   --spec <path>       SPEC §6 闭集来源（L1 判据解析的 SPEC 文件）。显式给出但文件缺失 ⇒
+#                       L1_NOT_EVALUATED=1（不静默回退）。缺省：--build-root <repo>/orchestration/，
+#                       再退回脚本 dev-tree 相对路径。
 #   --verify-only    只跑③（对已存在的 --root 重验冷启动活性；①②被调用方声明已验）。
 #   --require-live   ③ 若 COLDSTART_LIVE != yes 则 exit 1（严格验证——冷启动确认跑用）。
-#   --selfcheck      全 hermetically 自检（AC1 顺序 + AC2 直接量正/负控制 + AC5 判据正/负控制），不碰真实安装。exit 0/1。
+#   --selfcheck      全 hermetically 自检（AC2 直接量正/负控制 + L1 闭集解析/未评估正负控制 + AC5 判据正/负控制），不碰真实安装。exit 0/1。
 #   --help           用法在前、退出 0、无副作用（gap-scripts-sprawl 约定）。
 
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
@@ -104,6 +107,7 @@ DO_SELFCHECK=0
 EVIDENCE=""
 AC89=""
 HOST=""                      # AC89 记录的主机字段（B|C，跨主机验证时由驱动方传入）
+SPEC_PATH=""                 # SPEC §6 闭集来源（--spec <path> 显式；缺省由 --build-root/dev-tree 推导）
 CWD="$(pwd)"
 VC_NODE="${VC_NODE:-node}"                    # 启动弹窗探针的 node 接缝（测试可覆盖）
 VC_TMUX_SOCKET="${VC_TMUX_SOCKET:-}"          # 启动弹窗探针的 tmux 套接字覆盖（测试可覆盖）
@@ -141,6 +145,7 @@ while [ $# -gt 0 ]; do
     --evidence) EVIDENCE="$2"; shift 2 ;;
     --ac89) AC89="$2"; shift 2 ;;
     --host) HOST="$2"; shift 2 ;;
+    --spec) SPEC_PATH="$2"; shift 2 ;;
     --selfcheck) DO_SELFCHECK=1; shift ;;
     *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -170,9 +175,9 @@ L2_DEAD_LOOP_STATE="unknown"
 # proc_ok 撑起，git_recent/wt_recent 均为 0（AC107 任务体取假条件 (c)「⛔不得用『进程存在』代理量」被
 # 自己的实现违反）。本探针复用 pane-state-classify.ts 的 permission-prompt 分类器
 # （pane-state-classify.ts:101 PERMISSION_PROMPT_RE，特征串 Quick safety check / trust this folder /
-# Enter to confirm …；session-liveness.sh 已把该弹窗归类为 SESSION-INTERVENTION-REQUIRED，
-# busy=0 intervention=1），经 --pane-verdict 接缝（与 session-liveness.sh 的 _sl_pane_verdict 同一
-# 判定源）分类 outer 窗口 pane：
+# Enter to confirm …；pane-state-classify.ts 的 --pane-verdict 已把该弹窗归类为
+# intervention=1——session-liveness.sh 已于 2026-09-03 随 gap-retire-session-liveness 删除），
+# 经 --pane-verdict 接缝（同一判定源 pane-state-classify.ts 的 classifyPaneVerdict）分类 outer 窗口 pane：
 #   outer 窗口 pane 分类为 permission-prompt ⇒ L2_STARTUP_PROMPT=1（进程卡在启动弹窗）。
 # 捕获不到 pane（无 tmux / 会话未建 / 窗口缺失）⇒ L2_STARTUP_PROMPT=0 —— 无法观测弹窗，不据此推翻
 # proc_ok；这不是恒真项（能观测到弹窗时仍会置 1），git/wt 直接量仍独立判活。
@@ -192,7 +197,7 @@ probe_startup_prompt() {
   fi
   if [ -z "$sess" ]; then sess="${TMUX_SESSION%%:*}"; fi
   [ -n "$sess" ] || return 0   # 无会话名（冷启动未建拓扑）⇒ 无法观测弹窗，不推翻 proc_ok
-  # tmux 控制套接字解析（同 session-liveness.sh 的 SL_TMUX_SOCKET；VC_TMUX_SOCKET 为测试接缝）。
+  # tmux 控制套接字解析（VC_TMUX_SOCKET 为测试接缝；默认 socket 推导 = TMUX_TMPDIR 或 /tmp 下的 uid socket）。
   socket="${VC_TMUX_SOCKET:-}"
   if [ -z "$socket" ] && [ -n "${TMUX_TMPDIR:-}" ]; then socket="${TMUX_TMPDIR}/tmux-$(id -u)/default"; fi
   if [ -z "$socket" ]; then socket="${TMPDIR:-/tmp}/tmux-$(id -u)/default"; fi
@@ -252,10 +257,18 @@ probe_direct_measures() {
 }
 
 # ③ 双层活性判定（L1 铺到位 && L2 直接量任一）
-L1_OUTER_TICK=0; L1_INNER_TICK=0; L1_LOOP_SCRIPTS=0; L1_CONFIG=0; L1_RUNTIME=0
+# L1 = SPEC §6 闭集（机器可读标记块解析，非硬编码副本——硬规则 4c）
+SPEC_FILE="SPEC-plugin-lifecycle-single-bundle-2026-09-02.md"
+L1_NOT_EVALUATED=0              # 1 = SPEC 标记块读不到（未评估 ≠ 合格，硬规则 3b）
+L1_CLOSED_SET_COUNT=0           # 闭集条目数（解析自 SPEC 标记块）
+L1_CLOSED_SET_PRESENT=0         # 项目根里存在的闭集条目数
+L1_CLOSED_SET_MISSING=""        # 缺失条目（空格分隔；空 = 无缺失）
+L1_CLOSED_SET=""                # 闭集成员（空格分隔；供证据/记录，逐条 ∈ SPEC §6）
 L1_OK=0; L2_OK=0; COLDSTART_LIVE=no
 coldstart_verdict() {
-  L1_OK=$(( L1_OUTER_TICK && L1_INNER_TICK && L1_LOOP_SCRIPTS && L1_CONFIG && L1_RUNTIME ))
+  # L1_OK 由 probe_l1 从 SPEC §6 闭集计算；此处只加「未评估 ⇒ 不合格」守卫（硬规则 3b：
+  # L1_NOT_EVALUATED=1 时 L1_OK 不得取 1，即便残留旧值）。
+  [ "$L1_NOT_EVALUATED" = 1 ] && L1_OK=0
   # 自包含判定：函数必须重算而非继承上次调用的旧值（selfcheck 多次调用，旧值泄漏会把
   # L2_OK=0 的判负伪装成 COLDSTART_LIVE=yes——同一函数即判定器，输出不得依赖调用历史）。
   COLDSTART_LIVE=no
@@ -407,17 +420,59 @@ step1_install() {
   return 0
 }
 
-# ── L1 双层机制铺到位探测（从盘上重查——full 与 verify-only 共用）────────────────────
+# ── L1 项目文件铺到位探测（SPEC §6 闭集，从盘上解析——full 与 verify-only 共用）──────
+# L1 断言集合 = SPEC 的 QUAY-INIT-CLOSED-SET:BEGIN/END 标记块逐条解析（机器可读），⛔ 不在本脚本
+# 复制闭集清单——复制一份就是制造漂移（CLAUDE.md 开篇纪律），本任务修的正是一次漂移（硬规则 4c：
+# 判据不得锚在生命周期短于判据本身的对象上）。
+# SPEC 定位顺序：--spec <path> 显式（缺失即未评估，不静默回退）> --build-root <repo>/orchestration/
+# > 脚本 dev-tree 相对路径 > 读不到 ⇒ L1_NOT_EVALUATED=1（与 L1_OK=1 可区分，硬规则 3b）。
+resolve_spec_path() {
+  if [ -n "$SPEC_PATH" ]; then
+    [ -f "$SPEC_PATH" ] && { printf '%s' "$SPEC_PATH"; return 0; }
+    printf ''
+    return 0
+  fi
+  [ -n "$BUILD_ROOT" ] && [ -f "$BUILD_ROOT/orchestration/$SPEC_FILE" ] && { printf '%s' "$BUILD_ROOT/orchestration/$SPEC_FILE"; return 0; }
+  [ -f "$SCRIPT_DIR/../../orchestration/$SPEC_FILE" ] && { printf '%s' "$SCRIPT_DIR/../../orchestration/$SPEC_FILE"; return 0; }
+  printf ''
+}
+
 probe_l1() {
-  local root="$1"
-  L1_OUTER_TICK=0; L1_INNER_TICK=0; L1_LOOP_SCRIPTS=0; L1_CONFIG=0; L1_RUNTIME=0
-  [ -f "$root/orchestration/orchestrator-loop-tick.md" ] && L1_OUTER_TICK=1
-  [ -f "$root/docs/analysis/fast-mode-loop-tick.md" ] && L1_INNER_TICK=1
-  [ -f "$root/plugin/scripts/loop-driver-check.sh" ] && L1_LOOP_SCRIPTS=1
-  [ -f "$root/.quay/config.yml" ] && L1_CONFIG=1
-  [ -f "$root/.quay/runtime/bin/quay.js" ] && L1_RUNTIME=1
+  local root="$1" spec_path entries entry
+  L1_NOT_EVALUATED=0; L1_CLOSED_SET_COUNT=0; L1_CLOSED_SET_PRESENT=0
+  L1_CLOSED_SET_MISSING=""; L1_CLOSED_SET=""; L1_OK=0
+  spec_path="$(resolve_spec_path)"
+  if [ -z "$spec_path" ] || [ ! -f "$spec_path" ]; then
+    L1_NOT_EVALUATED=1
+    return 0
+  fi
+  # 解析标记块（机器可读）：BEGIN/END 之间形如 "- <path>" 的行，去行首 "- " 与行尾空白。
+  entries="$(sed -n '/QUAY-INIT-CLOSED-SET:BEGIN/,/QUAY-INIT-CLOSED-SET:END/p' "$spec_path" \
+    | sed -n 's/^-[[:space:]]*//p' | sed 's/[[:space:]]*$//' | grep -v '^$')"
+  if [ -z "$entries" ]; then
+    # 标记块读得到但解析不出条目 ⇒ 未评估（空闭集不是「零条=全过」的假绿，硬规则 3b）
+    L1_NOT_EVALUATED=1
+    return 0
+  fi
+  while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
+    L1_CLOSED_SET="${L1_CLOSED_SET}${L1_CLOSED_SET:+ }${entry}"
+    L1_CLOSED_SET_COUNT=$((L1_CLOSED_SET_COUNT + 1))
+    if [ -e "$root/$entry" ]; then
+      L1_CLOSED_SET_PRESENT=$((L1_CLOSED_SET_PRESENT + 1))
+    else
+      L1_CLOSED_SET_MISSING="${L1_CLOSED_SET_MISSING}${L1_CLOSED_SET_MISSING:+ }${entry}"
+    fi
+  done <<< "$entries"
+  if [ "$L1_CLOSED_SET_PRESENT" = "$L1_CLOSED_SET_COUNT" ]; then L1_OK=1; fi
   # 函数始终返回 0：L1 缺件是【数据】（L1_OK=0），不是控制流失败（set -e 不得因 L1 缺件中断）
   return 0
+}
+
+# force_l1_ok(): selfcheck 里把 L1 态注入为「已铺到位」——L2 判活测试需要 L1 侧恒真以隔离 L2。
+force_l1_ok() {
+  L1_NOT_EVALUATED=0; L1_CLOSED_SET_COUNT=1; L1_CLOSED_SET_PRESENT=1
+  L1_CLOSED_SET_MISSING=""; L1_CLOSED_SET=""; L1_OK=1
 }
 
 # ── ② 项目内 quay-init --loop ─────────────────────────────────────────────────────────────
@@ -449,12 +504,12 @@ step2_init() {
     tail -n 20 "${ROOT}/quay-init.log" >&2
     return 1
   fi
-  # L1 双层机制铺到位检查（AC1 的 ② 侧）
+  # L1 项目文件铺到位检查（SPEC §6 闭集，AC1 的 ② 侧）
   probe_l1 "$ROOT"
   STEP2_PROJECT="$ROOT"
   STEP2_OK=1
   echo "  quay-init complete (log → ${ROOT}/quay-init.log)"
-  echo "  L1: outer_tick=$L1_OUTER_TICK inner_tick=$L1_INNER_TICK loop_scripts=$L1_LOOP_SCRIPTS config=$L1_CONFIG runtime=$L1_RUNTIME"
+  echo "  L1: closed_set=${L1_CLOSED_SET:-<none>} present=$L1_CLOSED_SET_PRESENT/$L1_CLOSED_SET_COUNT missing=${L1_CLOSED_SET_MISSING:-<none>} not_evaluated=$L1_NOT_EVALUATED"
   return 0
 }
 
@@ -478,7 +533,7 @@ coldstart_drive() {
     --task-start --taskId "${PROJECT}-verify" --root "$root" >/dev/null 2>&1 || true
   if [ -f "$root/plugin/scripts/send-keys-reliable.sh" ]; then
     bash "$root/plugin/scripts/send-keys-reliable.sh" "$TMUX_SESSION" \
-      "执行 $root/docs/analysis/fast-mode-loop-tick.md 中的 tick 指令" \
+      "按 worker-driver 执行本项目的在飞任务（inner 已由 worker-driver 取代 fast-mode tick 文档）" \
       "${HOME}/.claude/projects/$(printf '%s' "$root" | tr '/' '-')/verify.jsonl" >/dev/null 2>&1 || true
   fi
   echo "  cold-start drive: launched (driver reg + telemetry + inner drive attempt)"
@@ -496,7 +551,7 @@ step3_coldstart() {
   probe_l1 "$ROOT"
   probe_direct_measures "$ROOT"
   coldstart_verdict
-  echo "  L1: outer_tick=$L1_OUTER_TICK inner_tick=$L1_INNER_TICK loop_scripts=$L1_LOOP_SCRIPTS config=$L1_CONFIG runtime=$L1_RUNTIME (probed from disk)"
+  echo "  L1: closed_set=${L1_CLOSED_SET:-<none>} present=$L1_CLOSED_SET_PRESENT/$L1_CLOSED_SET_COUNT missing=${L1_CLOSED_SET_MISSING:-<none>} not_evaluated=$L1_NOT_EVALUATED (probed from disk)"
   echo "  L2 direct measures (git commit / worktree / /proc cwd — NOT layer heartbeat):"
   echo "    L2_GIT_COMMIT_AGE_MIN=${L2_GIT_COMMIT_AGE_MIN} (<=${LIVENESS_WINDOW}min and not chore(quay-init) = live signal)"
   echo "    L2_GIT_IS_QUAYINIT_COMMIT=${L2_GIT_IS_QUAYINIT_COMMIT} (1 = the recent commit is quay-init's own auto-commit — excluded)"
@@ -524,20 +579,14 @@ selfcheck() {
   #   结构上必须取假：即便 git 提交很新（quay-init 铺完刚提交），因为是 chore(quay-init) 提交，
   #   直接量判据必须【排除】它 ⇒ L2_OK=0 ⇒ COLDSTART_LIVE=no。
   dead_ws="$tmp/dead"
-  mkdir -p "$dead_ws/orchestration" "$dead_ws/docs/analysis" "$dead_ws/plugin/scripts" \
-           "$dead_ws/.quay/runtime/bin" "$dead_ws/tasks"
-  printf '# outer\n' > "$dead_ws/orchestration/orchestrator-loop-tick.md"
-  printf '# inner\n' > "$dead_ws/docs/analysis/fast-mode-loop-tick.md"
-  printf '#!/bin/bash\n' > "$dead_ws/plugin/scripts/loop-driver-check.sh"
-  printf 'providers: {}\n' > "$dead_ws/.quay/config.yml"
-  printf '//x\n' > "$dead_ws/.quay/runtime/bin/quay.js"
+  mkdir -p "$dead_ws"
   git -C "$dead_ws" init -q -b main >/dev/null 2>&1
   git -C "$dead_ws" config user.email t@t >/dev/null 2>&1
   git -C "$dead_ws" config user.name t >/dev/null 2>&1
   echo x > "$dead_ws/a.txt"
   git -C "$dead_ws" add -A >/dev/null 2>&1
   git -C "$dead_ws" commit -qm "chore(quay-init): lay down quay plugin mechanism files (v0.4.0)" >/dev/null 2>&1
-  L1_OUTER_TICK=1; L1_INNER_TICK=1; L1_LOOP_SCRIPTS=1; L1_CONFIG=1; L1_RUNTIME=1
+  force_l1_ok
   probe_direct_measures "$dead_ws"
   coldstart_verdict
   local d1 d2
@@ -545,13 +594,7 @@ selfcheck() {
 
   # control 2 (AC2 正向/positive)：近期【非 chore】提交 + 机制铺到位 ⇒ 判 live
   alive_ws="$tmp/alive"
-  mkdir -p "$alive_ws/orchestration" "$alive_ws/docs/analysis" "$alive_ws/plugin/scripts" \
-           "$alive_ws/.quay/runtime/bin" "$alive_ws/tasks"
-  printf '# outer\n' > "$alive_ws/orchestration/orchestrator-loop-tick.md"
-  printf '# inner\n' > "$alive_ws/docs/analysis/fast-mode-loop-tick.md"
-  printf '#!/bin/bash\n' > "$alive_ws/plugin/scripts/loop-driver-check.sh"
-  printf 'providers: {}\n' > "$alive_ws/.quay/config.yml"
-  printf '//x\n' > "$alive_ws/.quay/runtime/bin/quay.js"
+  mkdir -p "$alive_ws"
   git -C "$alive_ws" init -q -b main >/dev/null 2>&1
   git -C "$alive_ws" config user.email t@t >/dev/null 2>&1
   git -C "$alive_ws" config user.name t >/dev/null 2>&1
@@ -561,7 +604,7 @@ selfcheck() {
   echo y >> "$alive_ws/a.txt"
   git -C "$alive_ws" add -A >/dev/null 2>&1
   git -C "$alive_ws" commit -qm "inner: dispatch gap-something (real loop work)" >/dev/null 2>&1
-  L1_OUTER_TICK=1; L1_INNER_TICK=1; L1_LOOP_SCRIPTS=1; L1_CONFIG=1; L1_RUNTIME=1
+  force_l1_ok
   probe_direct_measures "$alive_ws"
   coldstart_verdict
   local a1 a2
@@ -596,7 +639,7 @@ selfcheck() {
 
   # control 8 (复用 wiring —— AC1「复用 pane-state-classify 的 permission-prompt 识别，不新造」):
   # 真实信任弹窗 fixture 经 probe_startup_prompt 同一条 --pane-verdict 接缝必须判 intervention=1
-  # （同一判定源：session-liveness.sh 的 _sl_pane_verdict / classifyPaneVerdict）。
+  # （判定源：pane-state-classify.ts 的 --pane-verdict / classifyPaneVerdict）。
   local pv_fix pv_out p5
   pv_fix="Quick safety check: Is this a project you created or one you trust?
 ❯ 1. Yes, I trust this folder ✔
@@ -610,6 +653,33 @@ Enter to confirm · Esc to cancel"
   echo "selfcheck: prompt-blocked(procs=2,prompt=1) L2_OK=$p1 COLDSTART_LIVE=$p2 (expect 0/no)"
   echo "selfcheck: prompt-passed(procs=2,prompt=0) L2_OK=$p3 COLDSTART_LIVE=$p4 (expect 1/yes)"
   echo "selfcheck: pane-verdict-permission-intervention=$p5 (expect 1 — 复用 pane-state-classify 的 permission-prompt 识别)"
+
+  # control 9 (AC3 负向 —— L1 未评估，硬规则 3b): SPEC 标记块读不到 ⇒ L1_NOT_EVALUATED=1 且
+  # L1_OK=0 ——「未评估」与「合格」必须是可区分的两个取值。
+  local ne_ws="$tmp/ne" n1 n2
+  mkdir -p "$ne_ws"
+  SPEC_PATH="$tmp/no-such-spec.md"
+  probe_l1 "$ne_ws"
+  n1="$L1_NOT_EVALUATED"; n2="$L1_OK"
+  SPEC_PATH=""
+
+  # control 10 (AC2 负向 —— 闭集来源单一，硬规则 4c): 闭集由 SPEC 标记块解析得出。先在临时 SPEC
+  # 写 2 条闭集、项目根铺 2 条 ⇒ L1_OK=1；再在标记块内【增一行】（项目根没有的条目）⇒ 判定翻转
+  # L1_OK=0 —— 证明真读了 SPEC（若不变说明仍是硬编码副本，AC2 判失败）。
+  local cs_spec="$tmp/closed-set-spec.md" cs_ws="$tmp/cs" s_ok1 s_cnt1 s_ok2 s_cnt2
+  mkdir -p "$cs_ws/.quay" "$cs_ws/tasks"
+  printf 'providers: {}\n' > "$cs_ws/.quay/config.yml"
+  printf 'QUAY-INIT-CLOSED-SET:BEGIN\n- .quay/config.yml\n- tasks/\nQUAY-INIT-CLOSED-SET:END\n' > "$cs_spec"
+  SPEC_PATH="$cs_spec"
+  probe_l1 "$cs_ws"
+  s_ok1="$L1_OK"; s_cnt1="$L1_CLOSED_SET_COUNT"
+  printf 'QUAY-INIT-CLOSED-SET:BEGIN\n- .quay/config.yml\n- tasks/\n- .claude/settings.json\nQUAY-INIT-CLOSED-SET:END\n' > "$cs_spec"
+  probe_l1 "$cs_ws"
+  s_ok2="$L1_OK"; s_cnt2="$L1_CLOSED_SET_COUNT"
+  SPEC_PATH=""
+
+  echo "selfcheck: l1-spec-not-evaluated(missing-spec) L1_NOT_EVALUATED=$n1 L1_OK=$n2 (expect 1/0)"
+  echo "selfcheck: l1-closed-set-parse(spec-mutate) L1_OK=$s_ok1→$s_ok2 count=$s_cnt1→$s_cnt2 (expect 1→0, 2→3 — 真读 SPEC 非硬编码副本)"
 
   # control 3 (AC5 正向/positive)：build_sha 40-hex + build_date >= 阶段切换 + 双 sha256 ⇒ AC5_OK=1
   # control 4 (AC5 负向/negative)：build_date 早于阶段切换 ⇒ AC5_OK=0（判据能取假）
@@ -637,11 +707,13 @@ Enter to confirm · Esc to cancel"
      && [ "$c5_e" = "0" ] && [ "$c5_ok" = "0" ] \
      && [ "$p1" = "0" ] && [ "$p2" = "no" ] \
      && [ "$p3" = "1" ] && [ "$p4" = "yes" ] \
-     && [ "$p5" = "1" ]; then
-    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); AC5 can take false (old build), true (recent build), and be distinct when not evaluated"
+     && [ "$p5" = "1" ] \
+     && [ "$n1" = "1" ] && [ "$n2" = "0" ] \
+     && [ "$s_ok1" = "1" ] && [ "$s_cnt1" = "2" ] && [ "$s_ok2" = "0" ] && [ "$s_cnt2" = "3" ]; then
+    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated"
     rc=0
   else
-    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok" >&2
+    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok" >&2
     rc=1
   fi
   rm -rf "$tmp"
@@ -727,7 +799,9 @@ echo ""
 echo "STEP1_OK=$STEP1_OK"
 echo "STEP2_OK=$STEP2_OK"
 echo "NPM_BIN_DISPATCH=$NPM_BIN_DISPATCH"
-echo "L1_OUTER_TICK=$L1_OUTER_TICK L1_INNER_TICK=$L1_INNER_TICK L1_LOOP_SCRIPTS=$L1_LOOP_SCRIPTS L1_CONFIG=$L1_CONFIG L1_RUNTIME=$L1_RUNTIME"
+echo "L1_NOT_EVALUATED=$L1_NOT_EVALUATED (1 = SPEC §6 闭集读不到，未评估 ≠ 合格——硬规则 3b)"
+echo "L1_CLOSED_SET=${L1_CLOSED_SET:-<none>}"
+echo "L1_CLOSED_SET_COUNT=$L1_CLOSED_SET_COUNT L1_CLOSED_SET_PRESENT=$L1_CLOSED_SET_PRESENT L1_CLOSED_SET_MISSING=${L1_CLOSED_SET_MISSING:-<none>}"
 echo "L1_OK=$L1_OK"
 echo "L2_GIT_COMMIT_AGE_MIN=$L2_GIT_COMMIT_AGE_MIN"
 echo "L2_GIT_IS_QUAYINIT_COMMIT=$L2_GIT_IS_QUAYINIT_COMMIT"
@@ -767,6 +841,11 @@ cat > "$EVIDENCE" <<EOF
   "step2_ok": $STEP2_OK,
   "npm_bin_dispatch": $NPM_BIN_DISPATCH,
   "l1_ok": $L1_OK,
+  "l1_not_evaluated": $L1_NOT_EVALUATED,
+  "l1_closed_set": "${L1_CLOSED_SET:-}",
+  "l1_closed_set_count": $L1_CLOSED_SET_COUNT,
+  "l1_closed_set_present": $L1_CLOSED_SET_PRESENT,
+  "l1_closed_set_missing": "${L1_CLOSED_SET_MISSING:-}",
   "l2_ok": $L2_OK,
   "l2_git_commit_age_min": "$L2_GIT_COMMIT_AGE_MIN",
   "l2_git_is_quayinit_commit": $L2_GIT_IS_QUAYINIT_COMMIT,
@@ -783,7 +862,7 @@ echo "evidence written → $EVIDENCE"
 
 # ── AC89 记录（同 per-task-suite-records 形态，JSON 行；AC89 AC4: B/C 两机 + 安装/初始化/冷启动三项）──
 mkdir -p "$(dirname "$AC89")"
-detail="steps: install(1)=$STEP1_OK init(2)=$STEP2_OK coldstart(3) live=$COLDSTART_LIVE git_age=${L2_GIT_COMMIT_AGE_MIN}min quayinit_commit=$L2_GIT_IS_QUAYINIT_COMMIT worktree=$L2_INNER_WORKTREE_COUNT proc_cwd=$L2_LAYER_PROCESS_CWD startup_prompt=$L2_STARTUP_PROMPT dead_loop=$L2_DEAD_LOOP_STATE build_sha=${BUILD_SHA:-} build_date=${BUILD_DATE:-} sha256_quay=${SHA256_QUAY:-0} sha256_qn=${SHA256_QN:-0} ac5_ok=$AC5_OK"
+detail="steps: install(1)=$STEP1_OK init(2)=$STEP2_OK coldstart(3) live=$COLDSTART_LIVE git_age=${L2_GIT_COMMIT_AGE_MIN}min quayinit_commit=$L2_GIT_IS_QUAYINIT_COMMIT worktree=$L2_INNER_WORKTREE_COUNT proc_cwd=$L2_LAYER_PROCESS_CWD startup_prompt=$L2_STARTUP_PROMPT dead_loop=$L2_DEAD_LOOP_STATE build_sha=${BUILD_SHA:-} build_date=${BUILD_DATE:-} sha256_quay=${SHA256_QUAY:-0} sha256_qn=${SHA256_QN:-0} ac5_ok=$AC5_OK l1_closed_set=${L1_CLOSED_SET:-none} l1_not_evaluated=$L1_NOT_EVALUATED l1_closed_set_present=$L1_CLOSED_SET_PRESENT/$L1_CLOSED_SET_COUNT l1_closed_set_missing=${L1_CLOSED_SET_MISSING:-none}"
 okflag=false; [ "$AC88_VERIFY" = "ok" ] && okflag=true
 step3=0; [ "$COLDSTART_LIVE" = "yes" ] && step3=1
 bool() { [ "$1" = "1" ] && printf true || printf false; }

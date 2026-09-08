@@ -2,7 +2,7 @@
 id: gap-webui-goal-list-sort-and-column-set
 title: /goal 的列集合、排序与取数：origin 散文列（中位 191/max 2775 字符）撑爆排版、账本已算出的时刻一列没渲染、排序写死在
   store 层、?goal= 筛选被 handler 丢弃；且不带筛选取一次即可把 2 次 goalList 降为 1 次并白得 AC 达成 rollup
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -122,37 +122,37 @@ goal/AC 的 frontmatter **没有 `createdAt`**；store 暴露的 `updatedAt` 是
 
 ## Acceptance Criteria
 
-- [ ] AC1 origin 已删且排版恢复（生产载体读数）：加载 `/goal`，断言表头**不含** `origin`、
+- [x] AC1 origin 已删且排版恢复（生产载体读数）：加载 `/goal`，断言表头**不含** `origin`、
       表格最大行高 **< 60px**、表格总宽 <= `<main>` 容器宽、`documentElement.scrollWidth == clientWidth`。
       取假：改动前实测行高 109/156px、表宽 1538 > 870、`scrollWidth 1825 vs 1440`。
-- [ ] AC2 两个时间列确为账本派生（能取假）：对任取 3 条有 verdict 的 AC，断言页面渲染的 `lastProgressAt`
+- [x] AC2 两个时间列确为账本派生（能取假）：对任取 3 条有 verdict 的 AC，断言页面渲染的 `lastProgressAt`
       == 该 id 在 `.quay/gate-events.jsonl` 中 `gate=goal` 事件 timestamp 的**最大值**、
       `firstEvidenceAt` == **最小值**。不一致时打印 `(id, 页面值, 账本值)` 三元组清单。
-- [ ] AC3 时间列不是 mtime（硬规则 4b 的负控制，缺它视为没验）：对某个 goal 文件执行
+- [x] AC3 时间列不是 mtime（硬规则 4b 的负控制，缺它视为没验）：对某个 goal 文件执行
       `touch`（只改 mtime、不产生任何 gate 事件）后重载 `/goal`，断言该行两个时间列的值**逐字未变**；
       同时断言其 `updatedAt`（mtime）**已变**——两个方向都断言，证明取的不是 mtime。
-- [ ] AC4 「未记录」是独立取值（硬规则 6：缺值=未查不是为假）：喂一个在账本中无任何事件的记录，
+- [x] AC4 「未记录」是独立取值（硬规则 6：缺值=未查不是为假）：喂一个在账本中无任何事件的记录，
       断言两列渲染出一个可判定的 `未记录` 标记，且**不含任何时间戳、也不等于 `—`**；
       再喂一个有事件但很旧的记录，断言它渲染的是真实时刻而非该标记。两侧都断言。
-- [ ] AC5 排序是服务端且真的生效：对至少 4 个列各发 `?sort=<col>&dir=asc` 与 `dir=desc` 两次 `curl`，
+- [x] AC5 排序是服务端且真的生效：对至少 4 个列各发 `?sort=<col>&dir=asc` 与 `dir=desc` 两次 `curl`，
       断言两次响应体的**首行 id 不同**；并断言响应中不含新增的客户端排序脚本
       （`grep -c "addEventListener"` 相对改动前不增加）。
-- [ ] AC6 默认序：无 query param 时断言前 8 行的 `kind` **全部为 `goal`**，其后按 `goal` 字段分组连续、
+- [x] AC6 默认序：无 query param 时断言前 8 行的 `kind` **全部为 `goal`**，其后按 `goal` 字段分组连续、
       组内 AC 编号降序。失败时打印实际前 12 行的 `(id, kind, goal)`。
-- [ ] AC7 取数次数不增反减（M4 的核心判据，能取假）：断言单次 `/goal` 请求中
+- [x] AC7 取数次数不增反减（M4 的核心判据，能取假）：断言单次 `/goal` 请求中
       `client.goalList` 调用次数 **== 1**（spy 计数，取假：改动前为 **2**）、
       `ledgerEvidenceMap` 调用次数 **== 1**；且 `/goal` 的 p50 响应时间
       **<= 改动前基线**（实测 0.41 / 0.49 / 0.50 s，取中位 0.49s）——**不允许变慢**。
-- [ ] AC8 AC 达成 rollup 正确且在筛选下不塌成 0（回答硬规则 3b）：断言 `kind:goal` 行显示的
+- [x] AC8 AC 达成 rollup 正确且在筛选下不塌成 0（回答硬规则 3b）：断言 `kind:goal` 行显示的
       「达成/总数」与 `renderGoalCard` 对同一份数据算出的值**逐条相等**；
       再加 `?kind=goal` 筛选后**重测一次**，断言数值**与不加筛选时相同**。
       取假：若沿用服务端筛选，加 `?kind=goal` 后全部塌成 `0/0`。
-- [ ] AC9 `?goal=<id>` 筛选接线（M3）：断言 `curl "/goal?goal=GOAL-008"` 的 `<tr>` 行数
+- [x] AC9 `?goal=<id>` 筛选接线（M3）：断言 `curl "/goal?goal=GOAL-008"` 的 `<tr>` 行数
       **严格小于**无筛选时的行数，且返回的每一行 `goal` 列均为 `GOAL-008`（枚举打印不符的行）。
       取假：改动前两者实测**都是 66 行**。并断言列表的 `goal` 列渲染为指向该筛选的链接（UI 入口存在）。
-- [ ] AC10 详情页同样提供：`/goal/<id>` 上断言两个时间信息存在且与列表页对同一 id 取值相等；
+- [x] AC10 详情页同样提供：`/goal/<id>` 上断言两个时间信息存在且与列表页对同一 id 取值相等；
       并断言详情页不再有单个长度 > 400 字符的 `<p class="meta">`（取假：改动前 `/goal/GOAL-008` 实测 1138）。
-- [ ] AC11 `bash scripts/test.sh --for-task gap-webui-goal-list-sort-and-column-set` 退出码 0。
+- [x] AC11 `bash scripts/test.sh --for-task gap-webui-goal-list-sort-and-column-set` 退出码 0。
 
 ## Definition of Done
 
@@ -168,4 +168,5 @@ goalList 调用 2→1、p50 0.49s→?、筛选 66→<66）与 AC3 的 `touch` �
 - `packages/quay/src/serve-goal.ts`
 - `packages/quay/src/goal-store.ts`
 - `packages/quay/test/gap-webui-goal-list-sort-and-column-set.test.mjs`
+- `packages/quay/test/serve-goal-doc.test.mjs`
 - `tasks/gap-webui-goal-list-sort-and-column-set.md`
