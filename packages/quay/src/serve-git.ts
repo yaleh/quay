@@ -7,37 +7,11 @@ import path from "node:path";
 import { readGitHistory, type GitHistoryCommit, type GitHistoryResult, GIT_HISTORY_MAINLINE_REFS } from "./observation.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2 } from "./serve-render.ts";
 
-export interface GitHistoryBranch {
-  ref: string;
-  commits: Array<{ hash: string; t: number; parents: number; subject: string }>;
-  firstT: number;
-  lastT: number;
-}
-
-/**
- * Group commits into per-branch lanes, ordered by most-recent landing time (desc) then name.
- * readGitHistory already re-attributed shared/mainline-reachable commits to the mainline ref
- * (gap-git-history-branch-summary-wrong-numbers), so a task branch's lane here holds exactly its
- * own (exclusive) commits — `git log develop..<branch>` — never the shared ancestry.
- */
-export function groupCommitsByBranch(commits: GitHistoryCommit[]): GitHistoryBranch[] {
-  const byRef = new Map<string, GitHistoryBranch>();
-  for (const c of commits) {
-    let b = byRef.get(c.ref);
-    if (!b) {
-      b = { ref: c.ref, commits: [], firstT: c.t, lastT: c.t };
-      byRef.set(c.ref, b);
-    }
-    b.commits.push(c);
-    if (c.t < b.firstT) b.firstT = c.t;
-    if (c.t > b.lastT) b.lastT = c.t;
-  }
-  // Within a lane, render commits oldest→newest (left→right along the interval line). git log
-  // yields newest-first, but element order is only cosmetic; ascending keeps the segment + points
-  // in reading order and makes the x-axis mapping deterministic to test.
-  for (const b of byRef.values()) b.commits.sort((a, c) => a.t - c.t || a.hash.localeCompare(c.hash));
-  return [...byRef.values()].sort((a, b) => b.lastT - a.lastT || a.ref.localeCompare(b.ref));
-}
+// gap-git-graph-omits-inflight-branches-and-summary-table-disjoint: groupCommitsByBranch (the old
+// summary-table branch model, grouped by --source ref) is REMOVED — it and the graph's fork/merge
+// lanes were two disjoint branch models (the table showed live refs, the graph showed merged
+// branches; their name-set intersection was empty). The summary table now renders layout.branches
+// (the SAME model the graph draws). It is not kept as an unused export: a dead function is drift.
 
 /**
  * A `task/<id>` branch ref maps to task id `<id>` (the /task/<id> detail page already exists);
@@ -77,6 +51,10 @@ export interface GitGraphBranchLane {
   merge: string | null;
   /** Landing time of the merge commit (null when merge is null) — the collapsed summary row's anchor. */
   mergeT: number | null;
+  /** True when this lane is an UNMERGED live ref (still checked out, never merged back into the
+   *  trunk) — drawn as an open (dashed) lane ending at its newest commit, and rendered as 「在飞」
+   *  in the summary table's status column. Merged lanes are `open: false` (`merge` non-null). */
+  open: boolean;
   firstT: number;
   lastT: number;
   /** AC2: branches are collapsed by default — the client shows count + span until expanded. */
@@ -259,11 +237,65 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
         fork,
         merge: hash,
         mergeT: full.t,
+        open: false,
         firstT: Math.min(...ts),
         lastT: Math.max(...ts),
         collapsed: true,
       });
     }
+  }
+
+  // gap-git-graph-omits-inflight-branches-and-summary-table-disjoint: OPEN lanes. The merged-lane
+  // pass only walks trunk MERGE commits' parent chains, so a live (still checked out, unmerged)
+  // branch — the in-flight worktree branches — is invisible on the graph. Build an OPEN lane for
+  // each live non-mainline ref whose tip is unmerged: its commits kept their own --source ref
+  // (readGitHistory re-attributes mainline-reachable commits to the mainline ref, so a ref whose tip
+  // still carries its own name is genuinely unmerged). The walk is the same first-parent walk as the
+  // merged pass, stopping at the first trunk commit (fork) or the claimed/unknown boundary; the lane
+  // ends open (merge: null, open: true) instead of at a merge commit.
+  for (const [name, tip] of Object.entries(history.heads ?? {})) {
+    if (GIT_HISTORY_MAINLINE_REFS.has(name)) continue; // the trunk is its own lane, never a lateral
+    const tipCommit = byHash.get(tip);
+    if (!tipCommit) continue; // tip outside the active window — nothing to draw
+    if (tipCommit.ref !== name) continue; // re-attributed to the mainline ⇒ already merged, not open
+    if (claimed.has(tip)) continue; // already owned by a merged lane (merged but ref kept)
+    const lane: Array<{ hash: string; t: number; parents: number; subject: string }> = [];
+    let curP: string | null = tip;
+    let fork: string | null = null;
+    const visited = new Set<string>();
+    while (curP && byHash.has(curP) && !trunkSet.has(curP) && !claimed.has(curP) && !visited.has(curP)) {
+      visited.add(curP);
+      const pc = byHash.get(curP)!;
+      lane.push({ hash: pc.hash, t: pc.t, parents: pc.parents, subject: pc.subject });
+      curP = pc.parentHashes[0] ?? null;
+    }
+    if (curP && trunkSet.has(curP)) fork = curP;
+    if (lane.length === 0) continue;
+    lane.reverse(); // oldest → newest
+    for (const lc of lane) claimed.add(lc.hash);
+    const ts = lane.map((x) => x.t);
+    let id = fork != null ? `${fork}::open` : `${lane[0].hash}::open`;
+    if (usedIds.has(id)) {
+      let n = 2;
+      while (usedIds.has(`${id}#${n}`)) n++;
+      id = `${id}#${n}`;
+    }
+    usedIds.add(id);
+    branches.push({
+      ref: name,
+      id,
+      slot: 0,
+      laneX: GIT_GRAPH_TRUNK_X + GIT_GRAPH_LANE_GAP,
+      overflow: false,
+      commits: lane,
+      fork,
+      merge: null,
+      mergeT: null,
+      open: true,
+      firstT: Math.min(...ts),
+      lastT: Math.max(...ts),
+      collapsed: true,
+    });
   }
 
   // Interval-scheduled lane slots: sort lanes by their fork time and greedily assign each the lowest
@@ -666,7 +698,11 @@ export function gitGraphClientScript(): string {
 
       g.append("path").attr("class", "git-svg-lane")
         .attr("d", lanePath(laneX, forkRow, mergeRow, laneTop, laneBot))
-        .attr("fill", "none").style("stroke", color).attr("stroke-width", 1.6);
+        .attr("fill", "none").style("stroke", color).attr("stroke-width", 1.6)
+        // gap-git-graph-omits-inflight-branches-and-summary-table-disjoint: an OPEN lane (unmerged
+        // live ref) is drawn dashed so it reads at a glance as still-in-flight, distinct from a
+        // merged lane's solid line (null removes the attribute → the SVG solid default).
+        .attr("stroke-dasharray", b.open ? "6,4" : null);
 
       if (expanded[b.id] === true) {
         // AC4: the fold control is a chip(ref) + "▲ 折叠" — the branch name stays prominent (chip),
@@ -762,6 +798,7 @@ export function gitGraphLegendHtml(): string {
     glyph("var(--color-accent-600)", "●", "commit"),
     glyph("var(--color-accent-2-500)", "◆", "merge"),
     glyph("var(--color-neutral-700)", "┃", "trunk"),
+    glyph("var(--color-neutral-700)", "╌", "在飞（未合并）"),
   ];
   return `<div style="position:sticky;left:0;top:0;z-index:2;display:inline-flex;gap:0.75rem;align-items:center;background:var(--color-surface);padding:0.25rem 0.6rem;border:1px solid var(--color-neutral-200);border-radius:6px;font-size:0.72rem;color:var(--color-neutral-700)">${parts.join("")}</div>`;
 }
@@ -770,8 +807,10 @@ export function gitGraphLegendHtml(): string {
  * Render the full /git-history HTML page. The graph is CLIENT-rendered from the embedded JSON via
  * the inlined D3 library (the retired 「零客户端 JS」 invariant — see docs/webui-guide.md). The page
  * still carries a server-rendered summary table (an accessible, JS-free view of branch count/span).
+ * Exported so the same-source / status-column ACs (gap-git-graph-omits-inflight-branches-and-
+ * summary-table-disjoint AC2/AC4) can test the rendered HTML directly on a pure GitHistoryResult.
  */
-function renderGitHistoryPage(history: GitHistoryResult): string {
+export function renderGitHistoryPage(history: GitHistoryResult): string {
   const statusNote = history.status === "error"
     ? html`<p class="meta"><strong>读失败</strong> — ${escapeHtml(history.reason || "")}</p>`
     : history.status === "empty"
@@ -779,7 +818,6 @@ function renderGitHistoryPage(history: GitHistoryResult): string {
       : "";
   const layout = history.status === "ok" ? layoutGitGraph(history) : null;
   const nCommits = history.commits.length;
-  const branches = history.status === "ok" ? groupCommitsByBranch(history.commits) : [];
   const mergeCount = history.commits.filter((c) => c.parents > 1).length;
   // gap-git-graph-trunk-ref-resolves-to-head-not-mainline: the guide prose must name the SAME ref
   // the trunk lane + summary table name (develop/master), never a hardcoded "develop" that could
@@ -798,23 +836,49 @@ function renderGitHistoryPage(history: GitHistoryResult): string {
   const libScript = layout ? html`<script>${gitGraphLibJs()}</script>` : "";
   const clientScript = layout ? html`<script>${gitGraphClientScript()}</script>` : "";
 
-  const summaryRows = branches.map((b) => {
+  // gap-git-graph-omits-inflight-branches-and-summary-table-disjoint: the summary table used to be
+  // built from groupCommitsByBranch (a --source-ref grouping) — a SECOND branch model whose name set
+  // was disjoint from the graph's fork/merge lanes. It now renders the SAME layout.branches the
+  // graph draws, plus a 状态 column (已合并 / 在飞), so the table and the graph point at one set of
+  // objects. The trunk is listed as the leading row (status 已合并 — the closed mainline, never 在飞).
+  const summaryRows = layout
+    ? [
+        {
+          ref: layout.trunk.ref,
+          status: "已合并",
+          firstT: layout.trunk.commits.length ? Math.min(...layout.trunk.commits.map((c) => c.t)) : null,
+          lastT: layout.trunk.commits.length ? Math.max(...layout.trunk.commits.map((c) => c.t)) : null,
+          count: layout.trunk.commits.length,
+          merges: layout.trunk.commits.filter((c) => c.parents > 1).length,
+        },
+        ...layout.branches.map((b) => ({
+          ref: b.ref,
+          status: b.open ? "在飞" : "已合并",
+          firstT: b.firstT,
+          lastT: b.lastT,
+          count: b.commits.length,
+          merges: b.commits.filter((c) => c.parents > 1).length,
+        })),
+      ]
+    : [];
+  const summaryRowsHtml = summaryRows.map((b) => {
     const taskId = taskIdFromBranchRef(b.ref);
     const name = taskId
       ? html`<a href="/task/${encodeURIComponent(taskId)}">${escapeHtml(b.ref)}</a>`
       : escapeHtml(b.ref);
     return html`<tr>
       <td>${name}</td>
-      <td>${escapeHtml(isoTime(b.firstT))}</td>
-      <td>${escapeHtml(isoTime(b.lastT))}</td>
-      <td>${b.commits.length}</td>
-      <td>${b.commits.filter((c) => c.parents > 1).length}</td>
+      <td>${escapeHtml(b.status)}</td>
+      <td>${b.firstT == null ? "—" : escapeHtml(isoTime(b.firstT))}</td>
+      <td>${b.lastT == null ? "—" : escapeHtml(isoTime(b.lastT))}</td>
+      <td>${b.count}</td>
+      <td>${b.merges}</td>
     </tr>`;
   }).join("\n");
-  const summaryTable = branches.length > 0 ? html`<h2>分支汇总（git 可证的事实，非工时）</h2>
+  const summaryTable = summaryRows.length > 0 ? html`<h2>分支汇总（git 可证的事实，非工时）</h2>
     <table>
-      <tr><th>分支</th><th>首提交落地</th><th>末提交落地</th><th>提交数</th><th>合并数</th></tr>
-      ${summaryRows}
+      <tr><th>分支</th><th>状态</th><th>首提交落地</th><th>末提交落地</th><th>提交数</th><th>合并数</th></tr>
+      ${summaryRowsHtml}
     </table>` : "";
 
   return html`<!doctype html>
