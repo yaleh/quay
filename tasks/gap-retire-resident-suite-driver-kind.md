@@ -2,7 +2,7 @@
 id: gap-retire-resident-suite-driver-kind
 title: 按人 2026-09-07 A 裁定退役常驻 suite driver kind：DRIVER_KINDS 移除 + 删
   request/result 循环 + 保留 spawnSuiteAndWait + 订正 SPEC §3
-status: ready
+status: done
 labels:
   - gap
 parent: null
