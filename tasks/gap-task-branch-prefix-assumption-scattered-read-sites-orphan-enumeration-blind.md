@@ -2,7 +2,8 @@
 id: gap-task-branch-prefix-assumption-scattered-read-sites-orphan-enumeration-blind
 title: task/ 前缀假设散落 31 处/7 文件：worktreeExists 已修但 worker-driver 4 处 +
   fast-mode-telemetry 2 处读方仍对无前缀分支隐身
-status: ready
+status: needs-human
+needs_human_cause: human-adjudication
 labels:
   - gap
 parent: null
@@ -66,12 +67,12 @@ git grep -c 'refs/heads/task/' develop -- 'plugin/scripts/*.ts' 'plugin/scripts/
 
 ## AC
 
-- [ ] 逐类清点：提交信息里写出「写方 N1 / 读方 N2 / 注释 N3」三类条数与各类前 3 条实际内容，且 N1+N2+N3 与落地当时重新取的 `git grep -c 'refs/heads/task/' develop -- 'plugin/scripts/*.ts' 'plugin/scripts/*.sh'` 求和读数一致（贴两个读数，⛔ 非转述）
-- [ ] 六处读方（`worker-driver.ts:459 :474 :486 :499` + `fast-mode-telemetry.ts:556 :1558`）改动后各贴一次实际行内容，确认均不再自写 `refs/heads/task/` 判定而是调共享 helper
-- [ ] 负控制（能取假）：造一个分支名**不带** `task/` 前缀的 worktree，断言 `worker-driver` 的残留 worktree 枚举**能列出它**；改动前对同一样本干跑必须**列不出**——前后两次读数不同，排除恒真（硬规则④）
-- [ ] 负控制反向：造一个与任一 taskId 无关的 worktree（如 `worktree-slow-tests-analysis`），断言枚举**不**把它当成任务 worktree（防止放宽后误纳）
-- [ ] 写方自检：对一个分支名为 `develop` 的 worktree 跑 `dispatch-worktree-setup.sh`，断言它**失败并报出**（贴失败输出）；负控制：分支为 `task/<id>` 时仍成功
-- [ ] `node --test plugin/test/fast-mode-telemetry.test.mjs plugin/test/worker-driver.test.mjs` 全绿，贴 pass/fail 计数
+- [x] 逐类清点：提交信息里写出「写方 N1 / 读方 N2 / 注释 N3」三类条数与各类前 3 条实际内容，且 N1+N2+N3 与落地当时重新取的 `git grep -c 'refs/heads/task/' develop -- 'plugin/scripts/*.ts' 'plugin/scripts/*.sh'` 求和读数一致（贴两个读数，⛔ 非转述）
+- [x] 六处读方（`worker-driver.ts:459 :474 :486 :499` + `fast-mode-telemetry.ts:556 :1558`）改动后各贴一次实际行内容，确认均不再自写 `refs/heads/task/` 判定而是调共享 helper
+- [x] 负控制（能取假）：造一个分支名**不带** `task/` 前缀的 worktree，断言 `worker-driver` 的残留 worktree 枚举**能列出它**；改动前对同一样本干跑必须**列不出**——前后两次读数不同，排除恒真（硬规则④）
+- [x] 负控制反向：造一个与任一 taskId 无关的 worktree（如 `worktree-slow-tests-analysis`），断言枚举**不**把它当成任务 worktree（防止放宽后误纳）
+- [x] 写方自检：对一个分支名为 `develop` 的 worktree 跑 `dispatch-worktree-setup.sh`，断言它**失败并报出**（贴失败输出）；负控制：分支为 `task/<id>` 时仍成功
+- [x] `node --test plugin/test/fast-mode-telemetry.test.mjs plugin/test/worker-driver.test.mjs` 全绿，贴 pass/fail 计数
 
 ## DoD
 
@@ -89,9 +90,22 @@ git grep -c 'refs/heads/task/' develop -- 'plugin/scripts/*.ts' 'plugin/scripts/
 - plugin/scripts/dispatch-worktree-setup.sh（写方：worktree 分支名自检）
 - plugin/test/fast-mode-telemetry.test.mjs（helper 三形态 + 误纳负控制单测）
 - plugin/test/worker-driver.test.mjs（枚举走 helper 的回归 + 无前缀样本负控制）
+- plugin/test/dispatch-worktree-setup.test.mjs（写方自检单测：develop 分支拒 + task/<id> 负控制）
+- docs/analysis/quay-init-closure-ratchet.baseline.json（改三个 scripts 后 re-anchor closure baseline）
 - tasks/gap-task-branch-prefix-assumption-scattered-read-sites-orphan-enumeration-blind.md（自身）
 
 ## Verification
 
 对照（硬规则④推论四）：把一个无前缀 worktree 改名加上 `task/` 前缀，枚举结果必须由「列不出」翻成「列得出」；
 再改回去必须翻回来——一个参数翻转结论就翻，排除恒真/恒假。
+## Needs-Human
+
+**执行 2026-09-08T09:32:29.518Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: AC2: /board renders LV-1 as 孤儿
+- run_id：wk-prod-1788779505
+- session_id：f5d12d2a-036c-46a8-987a-80cebfc893cb
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-task-branch-prefix-assumption-scattered-read-sites-orphan-enumeration-blind~wk-prod-1788779505~1788859003110-d19f55.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-task-branch-prefix-assumption-scattered-read-sites-orphan-enumeration-blind-wk-prod-1788779505.log

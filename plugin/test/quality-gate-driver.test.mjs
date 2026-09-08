@@ -139,17 +139,17 @@ test("AC3 — parseJudgmentConsumerReport parses the audit envelope / null on ga
   assert.equal(parseJudgmentConsumerReport(JSON.stringify({ mode: "other" })), null);
 });
 
-test("AC3 — runJudgmentConsumerCheck three-state vocab (verified / failed / not-evaluated)", (t) => {
+test("AC3 — runJudgmentConsumerCheck three-state vocab (verified / failed / not-evaluated)", async (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-b17-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
-  const clean = runJudgmentConsumerCheck("/repo", ["node", fakeJudgmentScript(tmp, false)]);
+  const clean = await runJudgmentConsumerCheck("/repo", ["node", fakeJudgmentScript(tmp, false)]);
   assert.equal(clean.name, "judgment-consumer-check");
   assert.equal(clean.state, "verified", "no drift ⇒ verified");
   assert.equal(clean.value.drift, false);
-  const drift = runJudgmentConsumerCheck("/repo", ["node", fakeJudgmentScript(tmp, true)]);
+  const drift = await runJudgmentConsumerCheck("/repo", ["node", fakeJudgmentScript(tmp, true)]);
   assert.equal(drift.state, "failed", "drift ⇒ failed (⛔ not verified)");
   assert.equal(drift.value.drift, true);
-  const unreadable = runJudgmentConsumerCheck("/repo", ["node", path.join(tmp, "does-not-exist.js")]);
+  const unreadable = await runJudgmentConsumerCheck("/repo", ["node", path.join(tmp, "does-not-exist.js")]);
   assert.equal(unreadable.state, "not-evaluated", "spawn 失败 ⇒ not-evaluated (⛔ not verified)");
 });
 

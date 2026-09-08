@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { readGitHistory, type GitHistoryCommit, type GitHistoryResult } from "./observation.ts";
+import { readGitHistory, type GitHistoryCommit, type GitHistoryResult, GIT_HISTORY_MAINLINE_REFS } from "./observation.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2 } from "./serve-render.ts";
 
 export interface GitHistoryBranch {
@@ -171,17 +171,29 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
   };
 
   const branches: GitGraphBranchLane[] = [];
-  for (const hash of trunkHashes) {
-    const c = byHash.get(hash)!;
-    if (c.parentHashes.length < 2) continue; // not a merge — no branch lands here
+  // gap-git-graph-row-key-collides-on-multiclaimed-commits: a commit is OWNED by exactly one lane.
+  // `claimed` holds every hash already assigned to an extracted lane, so a nested lane (forked from
+  // another lane rather than from the trunk) stops at the claimed boundary instead of re-claiming the
+  // shared commits — which was the root cause of 497/774 commits being drawn on two lanes at once.
+  // `usedIds` guards the lane id against a fork::merge collision (two parents of one merge forking
+  // from the same trunk commit) and against fork=null lanes sharing the same first commit.
+  const claimed = new Set<string>();
+  const usedIds = new Set<string>();
+  // Walk merges OLDEST → NEWEST (trunk.commits is oldest → newest) so the outermost lane — the one
+  // that forked directly from the trunk — claims its commits first, and a branch-of-a-branch keeps
+  // only its own exclusive commits.
+  for (const c of trunk.commits) {
+    const hash = c.hash;
+    const full = byHash.get(hash)!;
+    if (full.parentHashes.length < 2) continue; // not a merge — no branch lands here
     // Each non-first parent is a branch tip merged in. Walk its first-parent chain back to the first
     // trunk commit (the fork point); the commits in between are that branch's own commits.
-    for (const p of c.parentHashes.slice(1)) {
+    for (const p of full.parentHashes.slice(1)) {
       const lane: Array<{ hash: string; t: number; parents: number; subject: string }> = [];
       let curP: string | null = p;
       let fork: string | null = null;
       const visited = new Set<string>();
-      while (curP && byHash.has(curP) && !trunkSet.has(curP) && !visited.has(curP)) {
+      while (curP && byHash.has(curP) && !trunkSet.has(curP) && !claimed.has(curP) && !visited.has(curP)) {
         visited.add(curP);
         const pc = byHash.get(curP)!;
         lane.push({ hash: pc.hash, t: pc.t, parents: pc.parents, subject: pc.subject });
@@ -190,17 +202,25 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
       if (curP && trunkSet.has(curP)) fork = curP;
       if (lane.length === 0) continue;
       lane.reverse(); // oldest → newest
+      for (const lc of lane) claimed.add(lc.hash);
       const ts = lane.map((x) => x.t);
+      let id = fork != null ? `${fork}::${hash}` : lane[0].hash;
+      if (usedIds.has(id)) {
+        let n = 2;
+        while (usedIds.has(`${id}#${n}`)) n++;
+        id = `${id}#${n}`;
+      }
+      usedIds.add(id);
       branches.push({
         ref: branchNameOf(history, p),
-        id: fork != null ? `${fork}::${hash}` : lane[0].hash,
+        id,
         slot: 0,
         laneX: GIT_GRAPH_TRUNK_X + GIT_GRAPH_LANE_GAP,
         overflow: false,
         commits: lane,
         fork,
         merge: hash,
-        mergeT: byHash.get(hash)!.t,
+        mergeT: full.t,
         firstT: Math.min(...ts),
         lastT: Math.max(...ts),
         collapsed: true,
@@ -246,12 +266,68 @@ function pickHead(history: GitHistoryResult): string | null {
   return best ? best.hash : null;
 }
 
-/** Branch name for a tip commit: the active ref pointing at it, else the `--source` ref, else short hash. */
-function branchNameOf(history: GitHistoryResult, hash: string): string {
+/** A resolved branch display name. `unresolved` distinguishes "no name could be determined" from a
+ *  resolved name (硬规则 3b: a read that cannot parse its input must not return a value shaped like
+ *  success). The display string for an unresolved tip is `unnamed@<short-hash>` — never a real ref
+ *  (git forbids `@` in the `head`/`tag` lookup a real name would come from, and no task branch name
+ *  contains it), so the renderer can tell the two apart and show it as plain, unlinkable text. */
+export interface BranchNameResolution {
+  name: string;
+  /** true when no real branch name was determined (not in heads, no merge-subject match). */
+  unresolved: boolean;
+}
+
+/** Parse the branch name out of a fan-in / dev-merge commit subject. Both conventions name the task
+ *  branch as one of the two quoted refs and the mainline as the other:
+ *    `Merge branch 'develop' into task/<id>`  (step-1 dev-merge, ff-carried onto develop)
+ *    `Merge branch 'task/<id>' into develop`  (a --no-ff fan-in merge)
+ *  A `task/<id>` name is preferred (it links to the task page); otherwise the first non-mainline
+ *  quoted name (author / doc/… / worktree-…). null when the subject has no merge-branch form or only
+ *  names mainline refs. */
+export function branchNameFromMergeSubject(subject: string): string | null {
+  const s = String(subject);
+  // git quotes ONLY the merged branch (`'X'`); the `into <target>` clause is UNQUOTED. Both conventions
+  // put the task branch in one slot and the mainline in the other, so collect both slots and pick the
+  // non-mainline name (task/<id> preferred for the task-page link).
+  const quoted = [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  const into = s.match(/\binto\s+([^\s]+)/)?.[1] ?? null;
+  const names = [...quoted, ...(into ? [into] : [])];
+  const task = names.find((n) => n.startsWith("task/"));
+  if (task) return task;
+  const nonMainline = names.find((n) => !GIT_HISTORY_MAINLINE_REFS.has(n));
+  return nonMainline ?? null;
+}
+
+/** Resolve a tip commit's branch display name. The three sources, in order:
+ *  1. a live branch whose tip IS `hash` (`heads` — but fan-in deletes the task branch, so this only
+ *     helps branches still checked out);
+ *  2. `hash`'s own subject, when `hash` is itself a dev-merge (`Merge branch 'develop' into task/<id>`
+ *     — the ff-fan-in shape: that merge commit IS the branch's last commit, and after the mainline
+ *     re-attribution its `--source` ref is `develop`, so the subject is the only real name left);
+ *  3. the fan-in merge that merged `hash` in (`hash` is one of its non-first parents) — its subject
+ *     names the branch being merged, which survives `git branch -d`.
+ *  A tip that resolves from none of these is `unresolved` — never silently relabelled to the mainline
+ *  ref (the old `:254` fallback returned `develop` for an unreadable tip, indistinguishable from a
+ *  lane genuinely named develop). */
+export function resolveBranchName(history: GitHistoryResult, hash: string): BranchNameResolution {
   for (const [name, tip] of Object.entries(history.heads ?? {})) {
-    if (tip === hash) return name;
+    if (tip === hash) return { name, unresolved: false };
   }
-  return history.commits.find((c) => c.hash === hash)?.ref ?? hash.slice(0, 7);
+  const tip = history.commits.find((c) => c.hash === hash);
+  const own = tip ? branchNameFromMergeSubject(tip.subject) : null;
+  if (own) return { name: own, unresolved: false };
+  for (const c of history.commits) {
+    if (c.parentHashes.length >= 2 && c.parentHashes.slice(1).includes(hash)) {
+      const name = branchNameFromMergeSubject(c.subject);
+      if (name) return { name, unresolved: false };
+    }
+  }
+  return { name: `unnamed@${hash.slice(0, 7)}`, unresolved: true };
+}
+
+/** Branch name for a tip commit (the display string the graph renders). */
+function branchNameOf(history: GitHistoryResult, hash: string): string {
+  return resolveBranchName(history, hash).name;
 }
 
 // ── D3 inlining (the third-party library the retired 「零客户端 JS」 invariant now permits) ──
@@ -332,26 +408,27 @@ export function gitGraphClientScript(): string {
   // never reallocate rows that other lanes already use when it expands.
   function visibleRows() {
     var items = [];
-    trunk.commits.forEach(function (c) { items.push({ kind: "commit", hash: c.hash, t: c.t, tie: c.hash }); });
+    trunk.commits.forEach(function (c) { items.push({ kind: "commit", laneId: null, commit: c, x: trunkX, t: c.t, tie: c.hash }); });
     branches.forEach(function (b) {
       if (expanded[b.id] === true) {
-        b.commits.forEach(function (c) { items.push({ kind: "commit", hash: c.hash, t: c.t, tie: c.hash, laneId: b.id }); });
+        b.commits.forEach(function (c) { items.push({ kind: "commit", laneId: b.id, commit: c, x: b.laneX, t: c.t, tie: c.hash }); });
       } else {
-        items.push({ kind: "summary", hash: null, t: b.mergeT != null ? b.mergeT : b.lastT, tie: b.id, laneId: b.id });
+        items.push({ kind: "summary", laneId: b.id, branch: b, x: b.laneX, t: b.mergeT != null ? b.mergeT : b.lastT, tie: b.id });
       }
     });
     items.sort(function (a, b) {
       if (a.t !== b.t) { return a.t - b.t; }
       return a.tie < b.tie ? -1 : a.tie > b.tie ? 1 : 0;
     });
-    var rowOf = {}, summaryRow = {};
-    items.forEach(function (it, i) { if (it.hash) { rowOf[it.hash] = i; } else { summaryRow[it.laneId] = i; } });
-    return { items: items, rowOf: rowOf, summaryRow: summaryRow };
+    // Row is an INTRINSIC attribute of each item (its sorted index), never a hash/laneId-keyed
+    // lookup — a bare-hash key collapses two distinct items onto one y when a commit is claimed by
+    // two lanes (the overlap + blank-row root cause, made structurally impossible here).
+    items.forEach(function (it, i) { it.row = i; });
+    return items;
   }
 
   function render() {
-    var vr = visibleRows();
-    var rowOf = vr.rowOf, summaryRow = vr.summaryRow;
+    var items = visibleRows();
     var svg = d3.select(mount).select("svg");
     if (svg.empty()) {
       svg = d3.select(mount).append("svg").attr("class", "git-svg-surface").attr("role", "img")
@@ -359,7 +436,7 @@ export function gitGraphClientScript(): string {
     }
     svg.selectAll("*").remove();
     var width = textX + 460;
-    var height = y(vr.items.length - 1) + padY;
+    var height = y(items.length - 1) + padY;
     // gap-webui-git-history-svg-unreadable: draw the viewBox at its NATIVE width/height (1:1) so the
     // text stays readable — the old width=100% + max-height:75vh + default preserveAspectRatio meet
     // squashed a tall viewBox (924x15570) to ~91px wide (meet scales to the shortest edge). The
@@ -369,40 +446,35 @@ export function gitGraphClientScript(): string {
       .attr("style", "border:1px solid var(--color-neutral-200);border-radius:6px;font-family:system-ui,-apple-system,sans-serif");
     var g = svg.append("g");
 
+    // Trunk row lookup — trunk commit hashes are unique by construction, so this map never collapses.
+    var trunkRow = {};
+    items.forEach(function (it) { if (it.kind === "commit" && it.laneId === null) { trunkRow[it.commit.hash] = it.row; } });
+
     // trunk vertical spine
-    var trunkRows = trunk.commits.map(function (c) { return rowOf[c.hash]; });
+    var trunkRows = trunk.commits.map(function (c) { return trunkRow[c.hash]; });
     var tMin = Math.min.apply(null, trunkRows);
     var tMax = Math.max.apply(null, trunkRows);
     g.append("line").attr("class", "git-svg-grid")
       .attr("x1", trunkX).attr("x2", trunkX).attr("y1", y(tMin)).attr("y2", y(tMax));
 
-    // trunk commits (diamond = merge); text starts at the FIXED textX column
-    trunk.commits.forEach(function (c) {
-      var yy = y(rowOf[c.hash]);
-      var node;
-      if (c.parents > 1) {
-        node = g.append("rect").attr("class", "git-svg-merge")
-          .attr("x", trunkX - mergeR).attr("y", yy - mergeR)
-          .attr("width", mergeR * 2).attr("height", mergeR * 2)
-          .attr("transform", "rotate(45 " + trunkX + " " + yy + ")");
-      } else {
-        node = g.append("circle").attr("class", "git-svg-commit")
-          .attr("cx", trunkX).attr("cy", yy).attr("r", nodeR);
-      }
-      node.append("title").text(c.hash + " · " + c.subject);
-      g.append("text").attr("class", "git-svg-ink")
-        .attr("x", textX).attr("y", yy + 4).attr("font-size", 11)
-        .text(c.hash.slice(0, 7) + " " + c.subject);
+    // Per-lane first/last rows, derived from the items themselves (never a lossy key lookup).
+    var laneTopRow = {}, laneBotRow = {};
+    items.forEach(function (it) {
+      if (it.laneId === null) { return; }
+      if (laneTopRow[it.laneId] === undefined) { laneTopRow[it.laneId] = it.row; }
+      laneTopRow[it.laneId] = Math.min(laneTopRow[it.laneId], it.row);
+      if (laneBotRow[it.laneId] === undefined) { laneBotRow[it.laneId] = it.row; }
+      laneBotRow[it.laneId] = Math.max(laneBotRow[it.laneId], it.row);
     });
 
-    // branch lanes: fork/merge connectors + collapsed-by-default summaries / expanded commits
+    // branch lanes: fork/merge connectors (nodes + text are drawn from the items below, so every
+    // element paints at its OWN row — two elements can never share a y).
     branches.forEach(function (b) {
       var laneX = b.laneX;
-      var forkRow = b.fork ? rowOf[b.fork] : null;
-      var mergeRow = b.merge ? rowOf[b.merge] : null;
-      var expandedHere = expanded[b.id] === true;
-      var laneTop = forkRow != null ? forkRow : (expandedHere ? rowOf[b.commits[0].hash] : summaryRow[b.id]);
-      var laneBot = mergeRow != null ? mergeRow : (expandedHere ? rowOf[b.commits[b.commits.length - 1].hash] : summaryRow[b.id]);
+      var forkRow = b.fork ? trunkRow[b.fork] : null;
+      var mergeRow = b.merge ? trunkRow[b.merge] : null;
+      var laneTop = forkRow != null ? forkRow : laneTopRow[b.id];
+      var laneBot = mergeRow != null ? mergeRow : laneBotRow[b.id];
 
       g.append("line").attr("class", "git-svg-grid")
         .attr("x1", laneX).attr("x2", laneX).attr("y1", y(laneTop)).attr("y2", y(laneBot));
@@ -415,27 +487,52 @@ export function gitGraphClientScript(): string {
           .attr("x1", laneX).attr("x2", trunkX).attr("y1", y(mergeRow)).attr("y2", y(mergeRow));
       }
 
-      if (!expandedHere) {
-        var midY = y(summaryRow[b.id]);
-        var grp = g.append("g").style("cursor", "pointer")
-          .on("click", function () { expanded[b.id] = true; render(); });
-        grp.append("circle").attr("class", "git-svg-commit").attr("cx", laneX).attr("cy", midY).attr("r", nodeR);
-        grp.append("text").attr("class", "git-svg-ink").attr("x", textX).attr("y", midY + 4).attr("font-size", 11)
-          .text(b.ref + " · " + b.commits.length + " commits · " + spanText(b) + "（点击展开）");
-        grp.append("title").text("点击展开 " + b.ref + " 的 " + b.commits.length + " 条提交");
-      } else {
-        b.commits.forEach(function (c) {
-          var yy = y(rowOf[c.hash]);
-          var node = g.append("circle").attr("class", "git-svg-commit").attr("cx", laneX).attr("cy", yy).attr("r", nodeR);
-          node.append("title").text(c.hash + " · " + c.subject);
-          g.append("text").attr("class", "git-svg-muted").attr("x", textX).attr("y", yy + 4).attr("font-size", 10)
-            .text(c.hash.slice(0, 7) + " " + c.subject);
-        });
+      if (expanded[b.id] === true) {
         var grp2 = g.append("g").style("cursor", "pointer")
           .on("click", function () { expanded[b.id] = false; render(); });
         grp2.append("text").attr("class", "git-svg-ink").attr("x", textX).attr("y", y(laneBot) - 6).attr("font-size", 10)
           .text("▲ 折叠 " + b.ref);
         grp2.append("title").text("点击折叠 " + b.ref);
+      }
+    });
+
+    // Nodes + text: iterate the items directly; each item paints at its own row and x.
+    items.forEach(function (it) {
+      var yy = y(it.row);
+      var laneX = it.x;
+      if (it.kind === "commit") {
+        var c = it.commit;
+        var node;
+        if (it.laneId === null) {
+          if (c.parents > 1) {
+            node = g.append("rect").attr("class", "git-svg-merge")
+              .attr("x", trunkX - mergeR).attr("y", yy - mergeR)
+              .attr("width", mergeR * 2).attr("height", mergeR * 2)
+              .attr("transform", "rotate(45 " + trunkX + " " + yy + ")");
+          } else {
+            node = g.append("circle").attr("class", "git-svg-commit")
+              .attr("cx", trunkX).attr("cy", yy).attr("r", nodeR);
+          }
+        } else {
+          node = g.append("circle").attr("class", "git-svg-commit")
+            .attr("cx", laneX).attr("cy", yy).attr("r", nodeR);
+        }
+        node.append("title").text(c.hash + " · " + c.subject);
+        if (it.laneId === null) {
+          g.append("text").attr("class", "git-svg-ink").attr("x", textX).attr("y", yy + 4).attr("font-size", 11)
+            .text(c.hash.slice(0, 7) + " " + c.subject);
+        } else {
+          g.append("text").attr("class", "git-svg-muted").attr("x", textX).attr("y", yy + 4).attr("font-size", 10)
+            .text(c.hash.slice(0, 7) + " " + c.subject);
+        }
+      } else {
+        var b = it.branch;
+        var grp = g.append("g").style("cursor", "pointer")
+          .on("click", function () { expanded[b.id] = true; render(); });
+        grp.append("circle").attr("class", "git-svg-commit").attr("cx", laneX).attr("cy", yy).attr("r", nodeR);
+        grp.append("text").attr("class", "git-svg-ink").attr("x", textX).attr("y", yy + 4).attr("font-size", 11)
+          .text(b.ref + " · " + b.commits.length + " commits · " + spanText(b) + "（点击展开）");
+        grp.append("title").text("点击展开 " + b.ref + " 的 " + b.commits.length + " 条提交");
       }
     });
 
@@ -513,7 +610,7 @@ function renderGitHistoryPage(history: GitHistoryResult): string {
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — vertical commit timeline (third-party library, client-rendered)">${modernistStyles()}${pageStyles()}<title>Git history — vertical commit timeline</title></head>
-    <body>${renderMobileChrome("git", "git history")}${renderSiteNav("git")}<main>
+    <body>${renderMobileChrome("git", "git history")}${renderSiteNav("git")}<main id="main">
       <h1>Git History — 提交纵向时间轴</h1>
       <p class="meta"><strong>纵轴 = 提交落地顺序（git commit time），不是工时/持续时间。</strong> develop 竖直主干 + task 分支从主干分出（fork）/合入（merge）的连线；task 分支默认折叠（只显提交数与时间跨度，点击展开逐条）。菱形 = 合并提交（fan-in 落地事件）。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并（跨所有本地分支）。</p>
       ${statusNote}

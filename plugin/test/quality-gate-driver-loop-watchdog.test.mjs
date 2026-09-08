@@ -20,6 +20,7 @@ import path from "node:path";
 
 import {
   runResidentQualityGateLoop,
+  runJudgmentConsumerCheck,
   ROUTINE_WATCHDOG_MS_DEFAULT,
   QUALITY_CONTROL_STATE_REL,
 } from "../scripts/quality-gate-driver.ts";
@@ -78,4 +79,30 @@ test("负控制 — 看门狗关闭（Infinity）⇒ 同一 never-resolving rout
 test("ROUTINE_WATCHDOG_MS_DEFAULT — 生产缺省是有限正数（liveness 安全界，非 Infinity）", () => {
   assert.ok(Number.isFinite(ROUTINE_WATCHDOG_MS_DEFAULT), "缺省必须是有限值（⛔ Infinity ⇒ 看门狗失效）");
   assert.ok(ROUTINE_WATCHDOG_MS_DEFAULT > 0, "缺省必须是正数");
+});
+
+test("AC — judgment-consumer-check 例程 async（runAsync）：挂死的审计子进程由看门狗兜底，⛔ 不同步阻塞", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-judgment-hang-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const hangScript = path.join(tmp, "hang.js");
+  fs.writeFileSync(hangScript, "setTimeout(() => {}, 1000);", "utf8");
+  const roundLog = path.join(tmp, "quality-round.jsonl");
+  const routines = [{
+    name: "judgment-consumer-check",
+    schedule: { kind: "interval", minutes: 0 },
+    run: async () => [await runJudgmentConsumerCheck(tmp, ["node", hangScript])],
+  }];
+  const code = await runResidentQualityGateLoop({
+    root: tmp, intervalMs: 1, once: true, maxRounds: null, roundLogFile: roundLog,
+    runId: "judgment-hang", json: false, routines, controlStateRel: QUALITY_CONTROL_STATE_REL,
+    routineWatchdogMs: 100,
+  });
+  assert.equal(code, 0, "看门狗兜底后循环应退出 0");
+  const lines = fs.readFileSync(roundLog, "utf8").split("\n").filter((l) => l.trim());
+  assert.equal(lines.length, 1, "once ⇒ 一条心跳（⛔ spawnSync 同步阻塞 ⇒ 看门狗无法 fire ⇒ 心跳延迟）");
+  const rec = JSON.parse(lines[0]);
+  const fact = rec.facts.find((f) => f.name === "judgment-consumer-check");
+  assert.ok(fact, "心跳含 judgment-consumer-check fact");
+  assert.equal(fact.state, "failed", "挂死 ⇒ 看门狗 failed（⛔ spawnSync 会产 not-evaluated，与 failed 不同形）");
+  assert.match(fact.reason, /timed out/i, "reason 载明 timeout（可区分）");
 });
