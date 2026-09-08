@@ -40,8 +40,4 @@ origin: >-
   【已知未解】退役【不】解除对 GOAL-001 的阻塞：goal-driver.ts:172 的 `acs.every(r => r.status ===
   "achieved")` 不排除 retired/superseded ⇒ 本条仍会挡着。该口径问题属
   gap-goal-driver-draft-ac-invisible-yet-blocking 的范围，不在本次自我更正内。
-evidence:
-  at: 2026-09-07T01:22:10.323Z
-  verdict: pass
-  reading: acceptance passed (exit 0)
 ---

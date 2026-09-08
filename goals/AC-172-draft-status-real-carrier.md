@@ -14,10 +14,6 @@ origin: |
   (goal-store.ts:258) ⇒ 写入即激活；叠加硬上限后，cap 满时连撰写都会被堵死——
   上限本该只约束激活。该状态在散文里已存在：manager-phase-goal.md:174
   「📋 下一阶段（已创建，未启动）」，44f8813d2 明写「未切换、未启动、不得据此派发」。
-evidence:
-  at: 2026-09-07T04:01:35.363Z
-  verdict: pass
-  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：`list --status draft` 至少返回一条 `GOAL-` 记录。

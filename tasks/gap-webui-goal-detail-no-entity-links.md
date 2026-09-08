@@ -85,23 +85,23 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1 生产载体读数、两个形态都测：加载 `/goal/GOAL-003` 断言 `main a` **>= 15**
+- [x] AC1 生产载体读数、两个形态都测：加载 `/goal/GOAL-003` 断言 `main a` **>= 15**
       （14 个 AC 回链 + 1 个返回链接的下界，取假：改动前实测 **0**）；
       再加载 `/goal/GOAL-008`（**正文为空的形态**）断言 `main a` **>= 6**（5 条 AC + 返回链接）
       且页面上 `AC-\d+` 出现次数 **>= 5**。取假：改动前两项实测均为 **0**。
-- [ ] AC2 子实体列表真的来自查询而非硬编码：断言页面上列出的 criterion 条数 == 用 store 按
+- [x] AC2 子实体列表真的来自查询而非硬编码：断言页面上列出的 criterion 条数 == 用 store 按
       `goal == <id>` 查出的条数（GOAL-008 应为 **5**）；不等时打印双方条数与差集前 3 条。
-- [ ] AC3 回链不造死链（两个方向都断言）：单测对一段同时含**存在的**实体编号与**不存在的**实体编号的正文，
+- [x] AC3 回链不造死链（两个方向都断言）：单测对一段同时含**存在的**实体编号与**不存在的**实体编号的正文，
       断言前者被渲染成 `<a>`、后者**保持纯文本**。只断言其中一侧不算通过。
-- [ ] AC4 三个详情页同修（硬规则 5b）：对 `/goal/<id>`、`/adr/<id>`、`/doc/<id>` **各自**断言
+- [x] AC4 三个详情页同修（硬规则 5b）：对 `/goal/<id>`、`/adr/<id>`、`/doc/<id>` **各自**断言
       `main a` 数 > 0 且存在返回上一级链接；打印仍为 0 的页面清单与条数。
-- [ ] AC5 标题层级无跳级：断言三个详情页的 heading 序列中不存在「从 hN 直接跳到 h(N+2)」的相邻对；
+- [x] AC5 标题层级无跳级：断言三个详情页的 heading 序列中不存在「从 hN 直接跳到 h(N+2)」的相邻对；
       失败时打印跳级位置清单。取假：改动前 `/goal/GOAL-003` 实测 `h1 → h3`。
-- [ ] AC6 是「换」不是「加」（能取假的代价判据）：断言单次 `/goal/<id>` 请求中
+- [x] AC6 是「换」不是「加」（能取假的代价判据）：断言单次 `/goal/<id>` 请求中
       **store 侧调用总次数 <= 1**（spy 计数 `goalGet` + `goalList` 之和）、
       且 `ledgerEvidenceMap` 调用次数 **<= 1**；并断言 `/goal/<id>` 的 p50 响应时间
       <= **改动前基线 0.22s + 100ms**。取假：实现成 goalGet + goalList 则计数为 2、账本被解析两遍。
-- [ ] AC7 `bash scripts/test.sh --for-task gap-webui-goal-detail-no-entity-links` 退出码 0。
+- [x] AC7 `bash scripts/test.sh --for-task gap-webui-goal-detail-no-entity-links` 退出码 0。
 
 ## Definition of Done
 
