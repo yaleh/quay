@@ -86,4 +86,6 @@ worker:    supervisor pid=2176308 alive=1 · driver pid=2176709 alive=1 · runni
 - packages/quay/src/serve-dashboard.ts
 - packages/quay/src/observation.ts
 - packages/quay/test/gap-dashboard-driver-status-card.test.mjs
+- packages/quay/test/gap-dashboard-visual-review-batch-fixes.test.mjs
+- packages/quay/test/gap-webui-dashboard-tests-card-latest-round-no-live-signal.test.mjs
 - tasks/gap-dashboard-driver-status-card.md
