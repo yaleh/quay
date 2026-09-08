@@ -1135,7 +1135,11 @@ test("readTranscriptTail surfaces queue-operation as an external preview entry",
 });
 
 test("AC1 — readLive drops a task landed on develop (done) whose stale disk still says ready", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "live-stale-"));
+  // gap-serve-board-test-workspace-couples-to-shared-tmp-quay-worktrees: nest root under a private
+  // parent so dirname(root)/quay-worktrees is test-private (never the shared /tmp/quay-worktrees).
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "live-stale-"));
+  const root = path.join(parent, "main");
+  fs.mkdirSync(root, { recursive: true });
   try {
     const tasksDir = path.join(root, "tasks");
     fs.mkdirSync(tasksDir, { recursive: true });
@@ -1175,7 +1179,7 @@ test("AC1 — readLive drops a task landed on develop (done) whose stale disk st
     assert.ok(!ids.has("gap-stale"), "AC1: develop=done drops gap-stale even though disk=ready (⛔ 仍显示在飞 ⇒ 假)");
     assert.ok(ids.has("gap-fresh"), "AC2: gap-fresh (ready in both) stays in-flight");
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(parent, { recursive: true, force: true });
   }
 });
 

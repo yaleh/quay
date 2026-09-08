@@ -2,7 +2,7 @@
 id: gap-serve-board-test-workspace-couples-to-shared-tmp-quay-worktrees
 title: serve-board.test.mjs 的 workspace 直建在 os.tmpdir() 下 ⇒ 与共享
   /tmp/quay-worktrees 耦合，孤儿断言随机红
-status: ready
+status: done
 labels:
   - gap
   - defect
