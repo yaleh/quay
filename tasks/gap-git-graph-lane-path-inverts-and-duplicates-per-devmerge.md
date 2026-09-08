@@ -1,9 +1,10 @@
 ---
 id: gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge
-title: git-history 折叠摘要行按 mergeT 排序与自己的合并行同刻、tie-break 靠字典序 ⇒ 10/29 条泳道
-  botY&lt;topY 倒着画、圆角退化成 Q x,y x,y；同一 task 的每次 dev-merge 各算一次 fork/merge ⇒ 裂成 4
-  条同名泳道
-status: ready
+title: git-history 的「分支泳道」模型假设 no-ff fan-in（从合并提交第二父反推分支），但本仓库 fan-in 实际是
+  ff——develop 最近 500 条 first-parent 链里 85 个合并提交全是「into task/id」的 dev-merge、真正
+  task→develop 的 no-ff 合并为 0 条；结果图上 29-31 条「泳道」全是 develop 自身历史的碎片、套着已删分支的名字（4
+  条实测经 git merge-base 核验为 develop 祖先），此前诊断的倒画/退化圆角/同名裂分只是这个错误重建的表征
+status: todo
 labels:
   - gap
   - webui
@@ -17,35 +18,59 @@ depends_on:
 ---
 ## Proposal
 
-**现象（2026-09-08 用 Playwright MCP 对渲染后 SVG 的 29 条 `path.git-svg-lane` 逐条解析 `d` 串实测，非目测）**：
+**用户诉求（2026-09-08）**：「在图中显示这段时间有活动的所有分支，而不是仅有 trunk.ref 及其分支（实际上，我倾向缺省不设置 trunk.ref）」。
 
-- **10/29 条泳道的路径是倒着画的**：`d` 形如 `M 104,50 V 24 Q 104,24 104,24 H 60`——起点 y=50 而 `V` 目标 y=24 ⇒ botY < topY，线朝上走。
-- 同样这 10 条的圆角命令**退化**成 `Q x,y x,y`：`serve-git.ts:505` 在 `vert < 2r` 时把 r 压到 `Math.max(0, vert/2)`，vert 为负 ⇒ r = 0。
-- **21/29 条泳道垂直跨度 < 30px**，视觉上几乎看不出是一条分支。
-- **根因**：折叠摘要行的排序键取 `b.mergeT`（`serve-git.ts:563` `visibleRows()` 的 `t: b.mergeT != null ? b.mergeT : b.lastT`），与主干上那条合并提交的 `t` **数值相同**，tie-break 落到 `b.id` vs `c.hash` 的字典序 ⇒ 摘要行可能排到自己的合并行**下面**，于是 `laneTopRow > mergeRow`。这是随机的：换一批 hash 就换一批倒画泳道。
-- **只有 6/29 条泳道有分叉连线**，23 条顶端悬空（`fork == null`，分叉点早于 500 条窗口）。悬空的那一头正是用户读成「没接上 / 没合并回」的直接来源——而合并端 29/29 都在。
-- **同名泳道重复**：`gap-ac166-second-copy-retirement` 裂成 4 条、`gap-plugin-root-resolution-remaining-callsites` 裂成 3 条——因为每次 `Merge branch 'develop' into task/<id>` 都被 `layoutGitGraph:219` 当作一次独立的 fork/merge 事件。
-- 主干 110 条提交里大量是 `Merge branch 'develop' into task/X` 的同步噪声，挤占了真正的落地事件行。
+**根因排查（比原诊断更深一层，2026-09-08 复核仍成立）**：`layoutGitGraph` 的分支重建算法假设的是 **no-ff fan-in**——从主干上一个合并提交的第二父往回走，就是那条被合并分支的专属提交。这个假设在**本仓库不成立**：
 
-**期望**：① 摘要行排序钉在自己合并行**之前**（而非同刻靠字典序碰运气），并让 `lanePath` 在 `botY <= topY` 时 fail-closed 报错而非静默倒画；② 同一 task id 的多次 dev-merge 聚合成**一条**泳道（chip 上可标次数）；③ fork 悬空时用显式视觉记号（虚线渐隐 / 「窗口外分叉」标记）表达「分叉在窗口之外」，不要让它看起来像断线；④ 主干上的 dev-merge 同步提交折叠成一个记号，不逐条占行。
+```
+git log develop --first-parent -n 500 --pretty='%P\x1f%s'
+  合并提交（≥2 父）总数:                    85
+  其中 subject 形如「Merge branch 'develop' into task/<id>」
+  （即 dev-merge，被 ff 带上主干的同步提交）:  83
+  真正「Merge branch 'task/<id>' into develop」的 no-ff 合并:  0
+```
 
-**相关（机制不同，不重复）**：`gap-git-graph-row-key-collides-on-multiclaimed-commits`（done）修的是 row key 撞车导致的**压字**，不涉及路径方向与泳道裂分。
+也就是说，主干上几乎全部"合并提交"的第二父指向的是 **develop 自己的旧历史**，不是某条 task 分支。逐条核对页面上被画出来的"泳道"，结论是硬的：
+
+| 泳道声称的名字 | 实际装的提交 | `git merge-base --is-ancestor <hash> develop` |
+|---|---|---|
+| `doc/spec-store-commit-unification` | `翻 gap-meta-call-resident-suite-driver-kind-spawn-per-tas done` | **YES**（develop 祖先） |
+| `task/gap-store-commit-unification-stage1` ×3 | `…ac197/ac198/ac199-*` | **YES**（develop 祖先，3 条均验证） |
+
+四条泳道声称的两个分支名（`doc/spec-store-commit-unification`、`task/gap-store-commit-unification-stage1`）**都已被删除**，泳道上的提交实际全部可达自 develop——**图上的"分支泳道"是 develop 历史的碎片，套着从已删分支的 dev-merge subject 里捡回来的名字**。这个错误重建解释了此前诊断的全部几何异常：13/31 倒画（"泳道"比它自己的"合并点"更老，因为它本来就不是一条独立的历史）、退化圆角、21/29 跨度 <30px（碎片天然短）、同名裂成 3-4 条（一条真实 task 分支做 N 次 dev-merge 就产生 N 个假泳道）。
+
+**用户提出的方向是对的，而且应该比"去掉 trunk.ref"更彻底**：不是把 trunk 的名字换成可配置项，而是**取消 trunk 作为特殊类型**——`develop`/`master` 只应是"排序时排第一的普通泳道"，不应有专属的重建算法、专属的字段（`GitGraphLayout.trunk`）、专属的 chip 渲染路径。
+
+**数据层的好消息**：`readGitHistory` 的 `--source` + 已有的 mainline 再归因（`gap-git-graph-trunk-ref-resolves-to-head-not-mainline` 已落地）**已经正确产出了分区**——每条提交的 `.ref` 要么是 mainline，要么是仍然独占它的活 ref。`layoutGitGraph` 不需要重建，只需要**按这个分区直接分组**；旧的"从合并提交第二父反推"算法应该降级为**兜底**，只在提交找不到任何 ref 归属时才启用（真正的历史级 no-ff 合并、分支已删除且没有活 ref 信息可用的情况——这类情况在别的用 no-ff 工作流的仓库里仍然存在，不能整个删掉，只是不能再抢在 ref 分区之前跑）。
+
+## Plan
+
+1. **`GitGraphBranchLane` 加 `kind: 'mainline' | 'live' | 'reconstructed'`**；`GitGraphLayout` 去掉 `trunk` 顶层字段，`branches` 数组包含全部泳道（mainline 排序第一，其余按现有排序规则）。
+2. **`layoutGitGraph` 改为两阶段**：
+   - 阶段一（ref 分区，权威）：按 `history.commits` 的 `.ref` 字段分组，每个不同的 `.ref` 值产出一条泳道；mainline ref 的那条标 `kind: 'mainline'`，其余标 `kind: 'live'`（无论是否已合并——已合并的 `merge` 非空，未合并的 `open: true`，复用 `gap-git-graph-omits-inflight-branches-and-summary-table-disjoint` 已落地的 open 泳道判定）。
+   - 阶段二（历史级重建，兜底）：**只处理阶段一之后仍未被任何泳道认领的提交**——即合并提交的第二父链上，没有任何一环携带独立 `.ref` 归属的那部分。这类提交只可能来自真正的 no-ff 合并 + 分支已删除 + 已经不在任何活 ref 的窗口内，标 `kind: 'reconstructed'`。
+3. **fork 计算统一**：mainline 泳道显式不需要 `fork`（它是参照系）；`live`/`reconstructed` 泳道的 `fork` 用 `merge-base` 或现有的"从提交往回走到第一个 mainline 提交"逻辑统一计算，不再区分"合并泳道"与"开放泳道"两套 fork 逻辑。
+4. **几何修复（原诊断，仍然需要，套用在剩下的真实泳道上）**：折叠摘要行的排序键钉在自己的合并行**之前**，`lanePath` 对 `botY <= topY` fail-closed 报错而非静默倒画。
+5. **chip 渲染统一**：与 `gap-git-graph-lane-chip-rendered-once-regardless-of-span`（P0，依赖本任务）共用同一条渲染路径，本任务落地后不应再存在 trunk 专属的 `appendChip` 调用点。
 
 ## AC
 
-- [ ] AC1 `lanePath` 在 `botY <= topY` 时抛错或返回可区分的 `null`（不与合法路径同形），且 `layoutGitGraph` 输出在所有 fixture 上满足「每条泳道 mergeRow > laneTopRow」：`node --test packages/quay/test/gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge.test.mjs` 退出码 0。
-- [ ] AC2 负控制：测试内显式跑一次旧排序（摘要行 `t = b.mergeT` 且不做 tie 钉位），断言在同一 fixture 上倒序泳道数 > 0 ⇒ 判据能取假。
-- [ ] AC3 渲染后退化圆角数为 0：对全部 `path.git-svg-lane` 的 `d` 跑正则 `/Q (\d+),(\d+) \1,\2/`，命中数 = 0。
-- [ ] AC4 同一 task id 的多次 dev-merge 聚合成一条：对一个含 `task/<id>` 被 dev-merge 三次的 fixture，断言 `branches.filter(b => b.ref === 'task/<id>').length === 1`。
-- [ ] AC5 `fork == null` 的泳道带显式记号：断言其路径带 `stroke-dasharray`（或同行有「窗口外分叉」文本），且带记号的条数 = `fork == null` 的泳道条数（既不多也不少）。
+- [ ] AC1 `layoutGitGraph` 返回值不含 `trunk` 顶层字段；对一个「develop 82 条 ff dev-merge + develop 自身 3 条真实提交」的 fixture（模拟本仓库真实形状），`branches` 中恰好一条 `kind: 'mainline'` 泳道装有全部这些提交，不产生任何其它泳道：`node --test packages/quay/test/gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge.test.mjs` 退出码 0。
+- [ ] AC2 负控制：测试内显式跑一次旧算法（合并提交第二父链优先反推），对同一 fixture 断言产生 > 1 条泳道（复现本仓库实测的碎片化）⇒ 判据能区分新旧。
+- [ ] AC3 生产读数（最强证据）：对本任务 Proposal 中列出的 4 个已核实的假泳道提交 hash，用 `git merge-base --is-ancestor <hash> develop` 作为独立 oracle（不信任被测代码自己的判断），断言这些 hash 在重写后的 `#git-graph-data` 里都落在 `kind: 'mainline'` 的泳道内，不再单独成一条泳道。
+- [ ] AC4 兜底路径仍然工作：fixture 造一个真实 no-ff 合并（第二父不可达自任何活 ref/mainline），断言产出恰好一条 `kind: 'reconstructed'` 泳道，装有该分支的专属提交。
+- [ ] AC5 几何修复：对全部 `path.git-svg-lane` 的 `d` 串，倒画数 = 0、退化圆角（`/Q (\d+),(\d+) \1,\2/`）命中数 = 0——生产读数，不是只在 fixture 里为 0。
+- [ ] AC6 chip 渲染统一：`grep -n "appendChip(g, trunkX" packages/quay/src/serve-git.ts` 无输出（trunk 专属 chip 调用点消失，为 P0 任务的落地清空前置代码）。
+- [ ] AC7 一般性泳道正确性（不止 4 个已知样本）：对生产 `#git-graph-data` 里**每一条** `kind !== 'mainline'` 的泳道，抽取它的任一提交 hash，断言 `git merge-base --is-ancestor <hash> develop` 返回**非 0**（即该提交确实不是 develop 的祖先，是真正独立的历史）——这是比 AC3 更强的全称判据，覆盖当前已知样本之外的潜在同类错误。
 
 ## DoD
 
-生产实例 `/git-history` 上用 Playwright 解析**全部** `path.git-svg-lane` 的 `d` 串，得到三个读数：倒画泳道数 = 0、退化圆角数 = 0、同名泳道重复数 = 0——三者取自**真实生产页面**而非 fixture（硬规则 4 推论三）。且把排序键改回旧实现后，上述读数重新非零（判据能取假，不是恒真）。
+生产实例 `/git-history` 上，用 AC7 描述的全称检查跑一遍：所有非 mainline 泳道的提交都经 `git merge-base --is-ancestor` 独立验证为真正不可达自 develop——0 个假阳性。把阶段二（历史级重建）的优先级改回阶段一之前，会让 AC1/AC3/AC7 重新变红（负控制）。倒画/退化圆角两个几何读数在生产上为 0。
 
 ## Touches
 
-- packages/quay/src/serve-git.ts（摘要行排序钉位；lanePath 对 botY<=topY fail-closed；同 task 多次 dev-merge 聚合；fork 悬空记号；主干同步提交折叠）
-- packages/quay/test/gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge.test.mjs（本任务的回归测试）
-- packages/quay/test/gap-git-graph-row-key-collides-on-multiclaimed-commits.test.mjs（行序/路径几何的相邻用例，聚合后行数会变）
+- packages/quay/src/serve-git.ts（layoutGitGraph 重写为两阶段：ref 分区优先 + 历史级重建兜底；GitGraphLayout 去 trunk 加 kind；lanePath 几何修复；chip 渲染统一）
+- packages/quay/test/gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge.test.mjs（本任务的回归测试：ff-dev-merge-heavy fixture + 真实 no-ff fixture + 几何 fixture）
+- packages/quay/test/gap-git-graph-omits-inflight-branches-and-summary-table-disjoint.test.mjs（open 泳道判定逻辑随两阶段模型调整，相邻用例需同步更新）
+- packages/quay/test/gap-git-graph-trunk-ref-resolves-to-head-not-mainline.test.mjs（trunk 字段移除后，断言改为「mainline 泳道排序第一 + 其 ref 正确解析」）
 - tasks/gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge.md
