@@ -2,7 +2,7 @@
 id: gap-webui-tests-page-missing-rounds-timeline-bar
 title: 人点名：dashboard 的最近测试记录 bar chart 应在 /tests 页显示 —— renderTimelineBarSvg 已
   export 却只被 dashboard 消费，测试的正主页面反而看不到它
-status: ready
+status: done
 labels:
   - gap
   - webui

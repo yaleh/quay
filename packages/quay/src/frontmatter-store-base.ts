@@ -40,9 +40,17 @@ export function serializeFrontmatter(frontmatter, body) {
 }
 
 /**
- * Lowercase, replace non-alphanumeric runs with '-', trim leading/trailing
- * '-', cap at 60 chars; falls back to `fallback` (default "adr") when the
- * title is empty/undefined so callers never emit a blank slug segment.
+ * Lowercase, collapse non-alphanumeric runs to '-', trim leading/trailing '-',
+ * cap at 60 chars; falls back to `fallback` (default "adr") when the title is
+ * empty/undefined so callers never emit a blank slug segment.
+ *
+ * gap-frontmatter-slugify-drops-non-ascii: "alphanumeric" is Unicode-aware
+ * ([\p{L}\p{N}\p{M}], CJK included) — the old `[^a-z0-9]+` class treated EVERY
+ * non-ASCII letter as a separator, so a mostly-Chinese title collapsed to its
+ * stray ASCII fragments (a 40-char title became "store-kind"). Only genuinely
+ * non-word characters (path separators, control chars, whitespace, punctuation,
+ * '.') now collapse to '-'; length stays capped at 60 chars (≤ 240 UTF-8 bytes,
+ * safely under the 255-byte filename limit).
  * @param {string} title
  * @param {string} [fallback]
  * @returns {string}
@@ -50,10 +58,12 @@ export function serializeFrontmatter(frontmatter, body) {
 export function slugify(title, fallback = "adr") {
   return (
     String(title || "")
+      .trim()
       .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/[^\p{L}\p{N}\p{M}]+/gu, "-")
       .replace(/^-+|-+$/g, "")
-      .slice(0, 60) || fallback
+      .slice(0, 60)
+      .replace(/^-+|-+$/g, "") || fallback
   );
 }
 

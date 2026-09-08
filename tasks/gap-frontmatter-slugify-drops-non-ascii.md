@@ -3,7 +3,7 @@ id: gap-frontmatter-slugify-drops-non-ascii
 title: frontmatter-store-base.ts:50 的 slugify 做 [^a-z0-9]+→'-'，把中文标题整段抹掉 ⇒ 四个
   store（goal/adr/meta/doc）共 101 个记录里 16 个（15%）文件名严重退化，如 40 字标题落成
   GOAL-008-store-kind.md
-status: ready
+status: done
 labels:
   - gap
   - goal-store
