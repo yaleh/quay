@@ -10,6 +10,7 @@ extra:
   schema: execution
 depends_on:
   - gap-plugin-root-resolution-remaining-callsites
+goal_ac: AC-168
 ---
 ## Proposal
 
