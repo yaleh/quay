@@ -31,7 +31,6 @@ export {
   relativeTime,
   isSafeRelativeRedirect,
   layoutGitGraph,
-  groupCommitsByBranch,
 } from "./serve-handlers.ts";
 
 export interface StartServerOptions {

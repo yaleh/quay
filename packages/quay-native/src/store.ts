@@ -832,6 +832,12 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       role: (children.length > 0 ? "compound" : "primitive") as Task['role'],
       extra,
       body,
+      // gap-webui-goal-task-rollup-via-shared-summary-cache: surface the top-level goal_ac
+      // (task→AC linkage, G7) in the view-model so read surfaces can consume the structured
+      // relationship. null = unset (缺值 = 未查, distinguishable from a concrete AC id), never a
+      // fabricated value. Previously goal_ac was WRITE-only: task_write accepted it, task_list
+      // silently dropped it — the relationship was recorded but no read surface could see it.
+      goal_ac: typeof frontmatter.goal_ac === "string" ? frontmatter.goal_ac : null,
     };
     // QX-008 (experiment 4, iteration 2): include updatedAt (file mtime as ms
     // since epoch) when the caller provides it. Callers that don't need mtime

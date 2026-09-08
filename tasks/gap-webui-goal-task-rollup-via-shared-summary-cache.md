@@ -3,7 +3,7 @@ id: gap-webui-goal-task-rollup-via-shared-summary-cache
 title: goal↔task 的结构化关系（顶层 goal_ac，35/1881 携带、32/57 criterion 有挂靠）从未被任何读面消费；Core
   唯一取数路径 ABI taskList 实测 2.9s，须复用 dashboard 已有的 30s TTL
   taskSummaryCache，且「未挂靠」必须是与 0 和「未读到」都可区分的独立态
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -76,24 +76,24 @@ task 的顶层字段 `goal_ac`（"Owning goal AC id，task→AC linkage"）在 s
 
 ## Acceptance Criteria
 
-- [ ] AC1 生产载体读数、数值对得上真值：加载 `/goal`，断言 `GOAL-001 / GOAL-003 / GOAL-007 / GOAL-008`
+- [x] AC1 生产载体读数、数值对得上真值：加载 `/goal`，断言 `GOAL-001 / GOAL-003 / GOAL-007 / GOAL-008`
       四行显示的挂靠任务数分别为 **11 / 13 / 6 / 5**（2026-09-08 实测真值，实现时应以当时重算的真值为准并写进提交信息），
       其余 4 个 goal 显示「未挂靠」。不一致时打印 `(goal, 页面值, 账本真值)` 清单。
-- [ ] AC2 三态互不相同（硬规则 6/3b 的直接落实，三个方向都断言）：
+- [x] AC2 三态互不相同（硬规则 6/3b 的直接落实，三个方向都断言）：
       喂三个输入——(a) 有 2 条挂靠任务、(b) 无任何任务引用、(c) `taskList` 抛错——
       断言渲染出的字符串**两两不相等**，且 (b) 不等于 `"0"`、(c) 不等于 (b)。
-- [ ] AC3 复用而非新建缓存（能取假）：断言 `serve-goal.ts` 里 `import` 了 dashboard 的缓存访问器；
+- [x] AC3 复用而非新建缓存（能取假）：断言 `serve-goal.ts` 里 `import` 了 dashboard 的缓存访问器；
       且断言在同一 30s 窗口内先请求 `/dashboard` 再请求 `/goal` 时，`client.taskList` 的调用次数**合计为 1**
       （spy/计数器）。取假：若各自建缓存则为 2。
-- [ ] AC4 代价上界（人点名的那一项，能取假）：缓存命中时断言 `/goal` p50 <= 前置任务落地后的基线 + **50ms**；
+- [x] AC4 代价上界（人点名的那一项，能取假）：缓存命中时断言 `/goal` p50 <= 前置任务落地后的基线 + **50ms**；
       缓存未命中时断言 <= 基线 + **3.5s** 且页面仍**完整渲染**（HTTP 200、其余列齐全）。
       把两种情形的实测值都打印出来。
-- [ ] AC5 fail-open 不是 fail-silent：模拟 `taskList` 抛错，断言页面仍 200、其余列正常、
+- [x] AC5 fail-open 不是 fail-silent：模拟 `taskList` 抛错，断言页面仍 200、其余列正常、
       且统计列显示「未读到」并**携带失败原因的子串**（不是裸的 `—`，硬规则 3b）。
-- [ ] AC6 rollup 口径正确：断言每个 goal 的显示值 == 其全部 criterion 的挂靠数之和；
+- [x] AC6 rollup 口径正确：断言每个 goal 的显示值 == 其全部 criterion 的挂靠数之和；
       并断言直接挂在 goal 上（而非 AC 上）的任务不被重复计入。不一致时打印 goal 清单与两侧数值。
-- [ ] AC7 详情页同样提供：`/goal/<id>` 上断言统计存在，且对同一 id 与列表页取值相等。
-- [ ] AC8 `bash scripts/test.sh --for-task gap-webui-goal-task-rollup-via-shared-summary-cache` 退出码 0。
+- [x] AC7 详情页同样提供：`/goal/<id>` 上断言统计存在，且对同一 id 与列表页取值相等。
+- [x] AC8 `bash scripts/test.sh --for-task gap-webui-goal-task-rollup-via-shared-summary-cache` 退出码 0。
 
 ## Definition of Done
 
@@ -107,4 +107,7 @@ AC4 的两组耗时实测（命中 / 未命中）与 AC3 的调用次数计数�
 - `packages/quay/src/serve-goal.ts`
 - `packages/quay/src/serve-dashboard.ts`
 - `packages/quay/test/gap-webui-goal-task-rollup-via-shared-summary-cache.test.mjs`
+- `packages/quay/src/serve-handlers.ts`
+- `packages/quay-native/src/store.ts`
+- `packages/quay/src/abi.ts`
 - `tasks/gap-webui-goal-task-rollup-via-shared-summary-cache.md`

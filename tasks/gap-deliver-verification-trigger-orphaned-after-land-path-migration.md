@@ -64,8 +64,10 @@ extra:
 - plugin/scripts/develop-deliver-tgz.sh
 - plugin/scripts/release-freshness-check.sh
 - plugin/scripts/deliver-verify-usage.sh
+- plugin/scripts/loop-shipping-exclusion-data.mjs
 - plugin/scripts/runner-static-gate.ts
 - plugin/scripts/checker-mutation-cases/release-freshness-check.sh
 - plugin/test/release-freshness-check.test.mjs
+- plugin/test/scoped-static-checks.test.mjs
 - docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-deliver-verification-trigger-orphaned-after-land-path-migration.md

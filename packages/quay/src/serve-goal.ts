@@ -3,6 +3,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
 import { html, escapeHtml, shellStyles, renderMarkdown, renderSiteNav, renderMobileChrome, renderBackLink, relativeTime, tableWrap } from "./serve-render.ts";
+import { readTaskSummary, type TaskSummary } from "./serve-dashboard.ts";
 
 // ── /goal — the third sibling kind (goal store), now PROVIDER-BACKED
 // (SPEC-goal-mechanism-2026-09-06.md §5.2): these routes read goals through the
@@ -106,13 +107,13 @@ function defaultSortGoalRows(rows: Record<string, unknown>[]): Record<string, un
 // `criterion` shell command still pushed the table to 1404px vs a 900px <main> and rows to 132px.
 // `table-layout: fixed` + per-column widths makes the table exactly `main`'s width, and
 // nowrap+ellipsis keeps every row single-line (the full title stays reachable via the `title` attr).
-const GOAL_COL_WIDTHS = ["10%", "7%", "9%", "8%", "24%", "14%", "8%", "7%", "7%", "6%"];
+const GOAL_COL_WIDTHS = ["10%", "7%", "9%", "8%", "18%", "12%", "8%", "7%", "7%", "6%", "8%"];
 
 function goalTableStyles(): string {
   return `<style>.goal-table{table-layout:fixed;width:100%}.goal-table th,.goal-table td{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.goal-table th a{color:inherit}</style>`;
 }
 
-function goalCriterionRow(g: { id?: unknown; status?: unknown }): string {
+function goalCriterionRow(g: { id?: unknown; status?: unknown }, taskAttach: string): string {
   const ext = g as unknown as Record<string, unknown>;
   return html`<tr>
     <td>${goalIdLink(g.id)}</td>
@@ -120,7 +121,63 @@ function goalCriterionRow(g: { id?: unknown; status?: unknown }): string {
     <td>${goalEvidenceCell(ext)}</td>
     <td>${timeCell(ext.lastProgressAt)}</td>
     <td>${timeCell(ext.firstEvidenceAt)}</td>
+    <td class="task-attach">${escapeHtml(taskAttach)}</td>
   </tr>`;
+}
+
+// ── goal↔task rollup (gap-webui-goal-task-rollup-via-shared-summary-cache) ────────────────────
+// A task's owning goal AC (`goal_ac`, task→AC linkage, G7) was structured-recorded but never consumed
+// by any read surface. /goal now rolls it up — per-criterion task count + status distribution, and a
+// goal-level sum over its criteria — reading the SAME 30s-TTL taskSummaryCache the dashboard uses
+// (方案 A), so /goal and /dashboard share ONE `client.taskList({includeBody:false})` per TTL window.
+
+/** The task-summary read as a THREE-STATE value (hard rule 6/3b): ok+tasks, or failed+reason. A
+ *  failed read is never coerced to [] (that would render "未挂靠" for "没读到" — the exact
+ *  conflation hard rule 3b forbids). */
+export type GoalTaskRead =
+  | { ok: true; tasks: TaskSummary[] }
+  | { ok: false; error: string };
+
+/** A task's owning goal AC id. Top-level `goal_ac` is canonical (native); the github provider
+ *  surfaces it via `extra.goal_ac`, so fall back there. null = unset (缺值 = 未查, never ""). */
+export function goalAcOf(t: TaskSummary): string | null {
+  if (typeof t.goal_ac === "string" && t.goal_ac.length > 0) return t.goal_ac;
+  const extra = (t as { extra?: unknown }).extra as Record<string, unknown> | undefined;
+  const nested = extra?.goal_ac;
+  return typeof nested === "string" && nested.length > 0 ? nested : null;
+}
+
+/** Render the task-attach cell text for the set of AC ids `acIds`. Three DISTINCT states (hard rule
+ *  3b): a concrete count + status distribution ("N（done 2 · ready 1）"), "未挂靠" (read succeeded,
+ *  zero tasks reference any of these ACs), or "未读到（reason）" (the read itself failed). */
+export function renderTaskAttachText(read: GoalTaskRead, acIds: string[]): string {
+  if (read.ok === false) return `未读到（${read.error}）`;
+  const wanted = new Set(acIds);
+  const attached = read.tasks.filter((t) => {
+    const ac = goalAcOf(t);
+    return ac !== null && wanted.has(ac);
+  });
+  if (attached.length === 0) return "未挂靠";
+  const byStatus = new Map<string, number>();
+  for (const t of attached) {
+    const s = typeof t.status === "string" ? t.status : "unknown";
+    byStatus.set(s, (byStatus.get(s) ?? 0) + 1);
+  }
+  const dist = [...byStatus.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([s, c]) => `${s} ${c}`)
+    .join(" · ");
+  return `${attached.length}（${dist}）`;
+}
+
+/** Wrap `readTaskSummary` (the dashboard cache accessor) in the three-state read. */
+async function readGoalTasks(workspaceRoot: string, client: ProviderClient): Promise<GoalTaskRead> {
+  try {
+    const tasks = await readTaskSummary(workspaceRoot, client);
+    return { ok: true, tasks };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 export async function handleGoalList(
@@ -128,6 +185,7 @@ export async function handleGoalList(
   res: ServerResponse,
   url: URL,
   client: ProviderClient,
+  workspaceRoot: string,
 ): Promise<void> {
   const statusFilter = url.searchParams.get("status");
   const kindFilter = url.searchParams.get("kind");
@@ -146,6 +204,10 @@ export async function handleGoalList(
     all = [];
     readError = err instanceof Error ? err.message : String(err);
   }
+
+  // goal↔task rollup: reuse the dashboard's shared 30s-TTL taskSummaryCache (方案 A — same window,
+  // same taskList, never a second Map). The read is three-state (ok / failed), never a silent [].
+  const taskRead = await readGoalTasks(workspaceRoot, client);
 
   // draft = 唯一「等着人裁定」的态（SPEC-goal-mechanism 裁定 3：draft→active 保留给人）。
   // 它必须【在任何筛选下都可见】——否则提案写了也没人看得见。故从【未筛选】的全集计数。
@@ -168,12 +230,20 @@ export async function handleGoalList(
     return { achieved, total: acs.length };
   };
 
+  // AC ids of ONE goal (the task-attach口径: a task hangs on an AC, never directly on the goal — the
+  // same `goal == gid && id != gid` filter the detail page's criteria block uses).
+  const criteriaIdsFor = (gid: string): string[] =>
+    all.filter((r) => String(r.goal ?? "") === gid && String(r.id ?? "") !== gid).map((r) => String(r.id));
+
   const rows = goals.map((g) => {
     const kind = String(g.kind ?? "");
     const goal = String(g.goal ?? "");
+    const gid = String(g.id ?? "");
     const criterion = typeof g.criterion === "string" ? g.criterion : "";
     const criterionCell = criterion.length > 60 ? `${escapeHtml(criterion.slice(0, 60))}…` : escapeHtml(criterion);
-    const rollup = kind === "goal" ? rollupFor(String(g.id ?? "")) : null;
+    const rollup = kind === "goal" ? rollupFor(gid) : null;
+    // A goal row rolls up over its criteria; a criterion row counts its OWN AC id.
+    const taskAttach = renderTaskAttachText(taskRead, kind === "goal" ? criteriaIdsFor(gid) : [gid]);
     return html`<tr>
       <td>${goalIdLink(g.id)}</td>
       <td>${escapeHtml(kind)}</td>
@@ -185,6 +255,7 @@ export async function handleGoalList(
       <td>${timeCell(g.lastProgressAt)}</td>
       <td>${timeCell(g.firstEvidenceAt)}</td>
       <td class="ac-rollup">${rollup ? html`${rollup.achieved}/${rollup.total}` : "—"}</td>
+      <td class="task-attach">${escapeHtml(taskAttach)}</td>
     </tr>`;
   }).join("\n");
 
@@ -238,7 +309,7 @@ export async function handleGoalList(
               </div>`)
         : tableWrap(html`<table class="goal-table">
           <colgroup>${GOAL_COL_WIDTHS.map((w) => html`<col style="width:${w}">`).join("")}</colgroup>
-          <tr>${th("id", "id")}${th("kind", "kind")}${th("status", "status")}${th("goal", "goal")}${th("title", "title")}${th("criterion", "criterion")}${th("verdict", "recent verdict")}${th("lastProgressAt", "last progress")}${th("firstEvidenceAt", "first evidence")}<th>AC 达成</th></tr>
+          <tr>${th("id", "id")}${th("kind", "kind")}${th("status", "status")}${th("goal", "goal")}${th("title", "title")}${th("criterion", "criterion")}${th("verdict", "recent verdict")}${th("lastProgressAt", "last progress")}${th("firstEvidenceAt", "first evidence")}<th>AC 达成</th><th>挂靠任务</th></tr>
           ${rows}
         </table>`)}
     </main></body></html>`);
@@ -249,6 +320,7 @@ export async function handleGoalDetail(
   res: ServerResponse,
   goalId: string,
   client: ProviderClient,
+  workspaceRoot: string,
 ): Promise<void> {
   // 「换」不是「加」（提案 1 / AC6）：一次 `goalList()` 取代 `goalGet()`。list() 的实现是
   // 先 readdir 读全部文件再内存 filter（带不带筛选一样贵），而 goalGet 与 goalList 各自都要
@@ -271,6 +343,10 @@ export async function handleGoalDetail(
   const isGoal = String(g.id).startsWith("GOAL-");
   // 反向边不存在于存储中（AC 单向持 goal 字段、GOAL 无 children）——必须靠扫描算出来（提案根因）。
   const criteria = isGoal ? all.filter((r) => String(r.goal) === goalId && String(r.id) !== goalId) : [];
+  // goal↔task rollup: the SAME shared cache + the SAME口径 as the list page, so /goal/<id> and
+  // /goal show byte-identical values for the same id (AC7).
+  const taskRead = await readGoalTasks(workspaceRoot, client);
+  const detailTaskAttach = renderTaskAttachText(taskRead, isGoal ? criteria.map((r) => String(r.id)) : [goalId]);
   // 正文实体编号回链（提案 2）：只回链真实存在的实体，不存在则保持纯文本（不造死链，AC3）。
   const idSet = new Set(all.map((r) => String(r.id)));
   const linkResolver = (raw: string): string | null => {
@@ -297,8 +373,8 @@ export async function handleGoalDetail(
         ${criteria.length === 0
           ? html`<p class="meta">（暂无 criterion）</p>`
           : html`<table>
-            <tr><th>id</th><th>status</th><th>recent verdict</th><th>last progress</th><th>first evidence</th></tr>
-            ${criteria.map((c) => goalCriterionRow(c)).join("\n")}
+            <tr><th>id</th><th>status</th><th>recent verdict</th><th>last progress</th><th>first evidence</th><th>挂靠任务</th></tr>
+            ${criteria.map((c) => goalCriterionRow(c, renderTaskAttachText(taskRead, [String(c.id)]))).join("\n")}
           </table>`}
       </section>`
     : "";
@@ -311,6 +387,7 @@ export async function handleGoalDetail(
       <p class="meta">kind: <strong>${escapeHtml(String(g.kind ?? ""))}</strong> · status: <strong>${escapeHtml(String(g.status ?? ""))}</strong>${g.goal ? html` · goal: ${idSet.has(String(g.goal)) ? html`<a href="/goal/${encodeURIComponent(String(g.goal))}">${escapeHtml(String(g.goal))}</a>` : escapeHtml(String(g.goal))}` : ""}</p>
       ${evidenceCell !== "—" ? html`<p class="meta">最近 verdict: ${evidenceCell}</p>` : ""}
       ${timeInfo}
+      <p class="meta">挂靠任务: ${escapeHtml(detailTaskAttach)}</p>
       ${typeof ext.criterion === "string" && (ext.criterion as string).length > 0
         ? html`<p class="meta">criterion: <code>${escapeHtml(ext.criterion as string)}</code></p>` : ""}
       ${ext.expect ? html`<p class="meta">expect: ${escapeHtml(String(ext.expect))}</p>` : ""}
