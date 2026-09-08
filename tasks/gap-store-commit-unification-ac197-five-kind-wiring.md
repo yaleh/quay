@@ -24,9 +24,9 @@ goal_ac: AC-197
 
 ## Acceptance Criteria
 
-- [ ] AC-197 判据本判据：`test "$(grep -l commitStoreWrite packages/quay/src/goal-store.ts packages/quay/src/meta-store.ts packages/quay/src/adr-store.ts packages/quay/src/document-store.ts packages/quay-native/src/store.ts 2>/dev/null | wc -l)" -eq 5`
-- [ ] adr-store.ts 已接线：`grep -q commitStoreWrite packages/quay/src/adr-store.ts`
-- [ ] document-store.ts 已接线：`grep -q commitStoreWrite packages/quay/src/document-store.ts`
+- [x] AC-197 判据本判据：`test "$(grep -l commitStoreWrite packages/quay/src/goal-store.ts packages/quay/src/meta-store.ts packages/quay/src/adr-store.ts packages/quay/src/document-store.ts packages/quay-native/src/store.ts 2>/dev/null | wc -l)" -eq 5`
+- [x] adr-store.ts 已接线：`grep -q commitStoreWrite packages/quay/src/adr-store.ts`
+- [x] document-store.ts 已接线：`grep -q commitStoreWrite packages/quay/src/document-store.ts`
 
 ## Definition of Done
 
