@@ -563,7 +563,6 @@ plugin/test/workflow-invariant-ownership.test.mjs
 plugin/test/workflow-journal.test.mjs
 plugin/test/workflow-metadata-conformance.test.mjs
 plugin/test/workflow-replay.test.mjs
-plugin/test/workflows-dual-copy-drift-check.test.mjs
 plugin/test/worktree-process-reaper.test.mjs
 plugin/test/worktree-root-fs-check.test.mjs
 plugin/test/writestate-atomicity-split.test.mjs

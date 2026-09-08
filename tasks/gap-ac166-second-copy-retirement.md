@@ -2,7 +2,7 @@
 id: gap-ac166-second-copy-retirement
 title: AC166 判据仍红——.claude 双副本退役（skills 5 + workflows 5 双副本 archive）+
   manager-tick-core.js 迁入 plugin/workflows/
-status: ready
+status: done
 needs_human_cause: human-adjudication
 labels:
   - gap

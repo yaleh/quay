@@ -1,13 +1,36 @@
 ---
 id: gap-ac158-execute-archive-batch-one
 title: AC158 判据仍红——执行批次一：扫描后死集 82 个脚本 git mv + INDEX 同一提交（名单已 2026-09-07 重算，112→82）
-status: todo
+status: needs-human
 labels:
   - gap
 parent: null
 children: []
 extra:
   schema: execution
+  needs_human_reason: '负控制（Plan 步骤1）FAILED——after.dead 的 82 名混入仍在生产使用的活脚本，直接执行会打破
+    scripts/test.sh 本身与全量 suite（AC5 结构上不可能绿）。① suite-slot-lib.sh（在 82 内）是 bash 侧
+    suite 槽路径单一定义点，scripts/test.sh:465 每轮 source
+    "${repo_root}/plugin/scripts/suite-slot-lib.sh"，并被 suite-driver.ts /
+    worker-driver.ts / full-suite-runner.ts / suite-slot-ssot-check.ts /
+    suite-lock-slots.ts 及 8+ 活测试（suite-slot-ssot-check.test.mjs /
+    suite-driver.test.mjs / worker-driver.test.mjs / resource-gate.test.mjs
+    …）直接引用；§12e 闭包只认 node|bash|sh|tsx 调用形式、漏认 bash source/.
+    内建形式——正是它被误判死的根因，移走它下一次 suite 直接 source 失败。②
+    plugin/test/plugin-packaging.test.mjs（@test-group product，默认 suite 必跑）钉住 10
+    个脚本存在性：DIR-070-B asserts
+    anti-gaming-guard.ts/sh、loadbearing-test-gate.ts/sh、drivable-workspace-check.sh，DIR-070-C
+    asserts
+    audit-independence-check.ts/sh、vmeta-lag-check.ts/sh、it0-enforcement-with-design-check.sh——这
+    10 个全在 82 内，移走即红。③ .quay/config.yml 把 6 个死集脚本注册为 gate（anti-gaming-guard.sh /
+    audit-independence-check.sh / drivable-workspace-check.sh /
+    loadbearing-test-gate.sh / vmeta-lag-check.sh /
+    build-evidence-gate.ts），移走留悬空 script: 路径。④ 不对称信号：drivable-workspace-check.sh
+    与 it0-enforcement-with-design-check.sh 在 82、其委托的 .ts 模块不在 82——wrapper
+    没了模块入口也断。归属：这是【名单面】死集重算缺陷（§12e 闭包漏认 source/. 内建 + 未把活测试钉存在性/config gate
+    注册计入连带面），非本【执行】任务缺陷。建议：闭包补 source/. 识别后重算，至少摘出 suite-slot-lib.sh + DIR-070
+    gate 脚本族，并先决 plugin-packaging.test.mjs / .quay/config.yml /
+    capability-catalog.sh 的连带清理，再重新派发本批次。未做任何 move、worktree 干净无提交。'
 goal_ac: AC-158
 depends_on:
   - gap-ac166-second-copy-retirement

@@ -553,8 +553,8 @@ if [ -n "$bootstrap_hit" ]; then
   # 自举警示（取假一能取假）：同步后若 worktree 与主检出的 fan-in-execute.js 仍不一致 ⇒ 本分支修改了它
   # ⇒ 自举要求派发用 worktree 版 scriptPath（若本次派发误用了主检出版，本任务对 fan-in-execute.js 的
   # 修复未被自己验证）。同步已让未修改的 fan-in-execute.js 与主检出一致 ⇒ 此警示只在本分支确实改了它时触发。
-  if [ -f "${worktree}/.claude/workflows/fan-in-execute.js" ]; then
-    if ! cmp -s "${worktree}/.claude/workflows/fan-in-execute.js" "${root}/.claude/workflows/fan-in-execute.js" 2>/dev/null; then
+  if [ -f "${worktree}/plugin/workflows/fan-in-execute.js" ]; then
+    if ! cmp -s "${worktree}/plugin/workflows/fan-in-execute.js" "${root}/plugin/workflows/fan-in-execute.js" 2>/dev/null; then
       echo "FAN-IN-BOOTSTRAP-WARN: worktree 与主检出的 fan-in-execute.js 不一致（本分支修改了它 ⇒ 须用 worktree 版 scriptPath；若派发误用主检出版，本任务修复未被自己验证）" >&2
     fi
   fi

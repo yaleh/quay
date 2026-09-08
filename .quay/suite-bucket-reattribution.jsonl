@@ -200,5 +200,4 @@
 {"file":"plugin/test/workflow-journal.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/workflow-metadata-conformance.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/workflow-replay.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
-{"file":"plugin/test/workflows-dual-copy-drift-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/worktree-root-fs-check.test.mjs","judgment":"M","mechanism":"S","signal":[]}

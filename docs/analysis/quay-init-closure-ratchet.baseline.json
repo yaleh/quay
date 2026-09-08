@@ -1,11 +1,11 @@
 {
-  "files": 133,
-  "bytes": 3853029,
-  "fingerprint": "2e5483d9b2d0b93b04ac7248668520b041ec17d319fb7e0b039b50df13b3679f",
+  "files": 134,
+  "bytes": 3886055,
+  "fingerprint": "75b873df9f8b4086d0c06bfae62fe3c71c3de6132418ec265a795152fcb5d226",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
-      "sha": "271a385151339bbcaf5d7c3b7a5cc26eaf59593a34f0c52470f04cb163490fcb"
+      "sha": "0506e59990e32a17c6f233160ee37d81d86bd8d920f0a890655c6e2c3fc9c906"
     },
     {
       "rel": "orchestration/orchestrator-tick-core.md",
@@ -105,7 +105,7 @@
     },
     {
       "rel": "plugin/scripts/capability-catalog.sh",
-      "sha": "4f8ba129d1861a1669f3ab21aa8be3a4899c91833e1862898e30f59a653518c5"
+      "sha": "353bff252319b6ef2f6a6c7f998c4779b18b6c9294aeb8be7fffff5e4632f98f"
     },
     {
       "rel": "plugin/scripts/checker-io.ts",
@@ -129,7 +129,7 @@
     },
     {
       "rel": "plugin/scripts/config-wiring-check.ts",
-      "sha": "51169a3a7924b66d6113d2a2a6ac939375fc4a3619c1860e329ca768d3a7bdfb"
+      "sha": "cb4bce7b27a41c74a5c93b924168704e6dbf715ec82138ea9f34e656cb54a412"
     },
     {
       "rel": "plugin/scripts/cross-machine-verify.sh",
@@ -389,7 +389,7 @@
     },
     {
       "rel": "plugin/scripts/select-static-checks-for-touches.ts",
-      "sha": "3fa7b18f0eee4fe1a76e1779dcb9040fa45b20509e5c1d6c2bdc32f809157082"
+      "sha": "e1d43d1dd5a6f363f15bbce5f658ef73c23082cddfb14fde7fe427db5921d4b6"
     },
     {
       "rel": "plugin/scripts/self-report-vocab-audit.ts",
@@ -529,7 +529,11 @@
     },
     {
       "rel": "plugin/workflows/fan-in-execute.js",
-      "sha": "be27c107aaa459c126ae7265d428901be377156fc47208454d111e667bf242c3"
+      "sha": "5a9668644a49be6a69e95c9b7ae4e245fa24b4c255d5e6ac50c31b45dd675fb7"
+    },
+    {
+      "rel": "plugin/workflows/manager-tick-core.js",
+      "sha": "6f9e9905597746c9ef932c69e1e9cc8fe6258206a4fd0180dd4b6efa327065dd"
     },
     {
       "rel": "plugin/workflows/pool-quality-judge.js",

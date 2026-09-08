@@ -31,13 +31,13 @@ extra:
 
 ## AC
 
-- [ ] `suite` kind 已不在注册表：`grep -c '^\s*suite:' plugin/scripts/driver-runtime.ts` == 0，且 `node --experimental-strip-types -e 'import("./plugin/scripts/driver-runtime.ts").then(m=>{if(m.KNOWN_KINDS.includes("suite"))process.exit(1)})'` exit 0
-- [ ] 常驻循环已删：`grep -c 'runResidentSuiteLoop\|listPendingSuiteRequests\|parseSuiteRequest' plugin/scripts/suite-driver.ts` == 0
-- [ ] 共享函数仍在且仍被生产消费：`grep -c 'export async function spawnSuiteAndWait' plugin/scripts/suite-driver.ts` == 1 且 `grep -c 'spawnSuiteAndWait' plugin/scripts/worker-driver.ts` ≥ 1
-- [ ] SPEC 已订正：`orchestration/SPEC-suite-lifecycle-and-failure-semantics-2026-08-26.md` 中不再有「【唯一】spawn per-task suite 的地方」指向常驻 kind 的表述，且该处**显式标注**了 2026-09-07 退役裁定（⛔ 不是删掉了事）
-- [ ] `bash plugin/scripts/capability-catalog.sh --summary` unclassified == 0，且 suite-driver.ts 的 QUESTION 不再自称唯一 spawn 处
-- [ ] 全量 `scripts/test.sh` exit 0
-- [ ] `node plugin/scripts/task-schema-check.ts tasks/gap-retire-resident-suite-driver-kind.md` exit 0
+- [x] `suite` kind 已不在注册表：`grep -c '^\s*suite:' plugin/scripts/driver-runtime.ts` == 0，且 `node --experimental-strip-types -e 'import("./plugin/scripts/driver-runtime.ts").then(m=>{if(m.KNOWN_KINDS.includes("suite"))process.exit(1)})'` exit 0
+- [x] 常驻循环已删：`grep -c 'runResidentSuiteLoop\|listPendingSuiteRequests\|parseSuiteRequest' plugin/scripts/suite-driver.ts` == 0
+- [x] 共享函数仍在且仍被生产消费：`grep -c 'export async function spawnSuiteAndWait' plugin/scripts/suite-driver.ts` == 1 且 `grep -c 'spawnSuiteAndWait' plugin/scripts/worker-driver.ts` ≥ 1
+- [x] SPEC 已订正：`orchestration/SPEC-suite-lifecycle-and-failure-semantics-2026-08-26.md` 中不再有「【唯一】spawn per-task suite 的地方」指向常驻 kind 的表述，且该处**显式标注**了 2026-09-07 退役裁定（⛔ 不是删掉了事）
+- [x] `bash plugin/scripts/capability-catalog.sh --summary` unclassified == 0，且 suite-driver.ts 的 QUESTION 不再自称唯一 spawn 处
+- [x] 全量 `scripts/test.sh` exit 0
+- [x] `node plugin/scripts/task-schema-check.ts tasks/gap-retire-resident-suite-driver-kind.md` exit 0
 
 ## DoD
 
@@ -48,10 +48,10 @@ extra:
 - plugin/scripts/driver-runtime.ts（DRIVER_KINDS 移除 suite 条目）
 - plugin/scripts/suite-driver.ts（删 request/result 常驻循环，保留 spawnSuiteAndWait）
 - plugin/test/suite-driver.test.mjs（删常驻循环用例）
-- plugin/test/worker-driver.test.mjs（引用被删导出时同步）
-- plugin/test/worker-driver-resident.test.mjs（引用被删导出时同步）
-- plugin/test/worker-driver-fan-in.test.mjs（引用被删导出时同步）
-- plugin/test/fan-in-driver-mechanical-orchestration.test.mjs（引用被删导出时同步）
+- plugin/test/driver-runtime.test.mjs（KNOWN_KINDS 断言移除 suite）
+- plugin/test/goal-driver.test.mjs（KINDS 断言移除 suite）
+- packages/quay/src/cli/driver.ts（KINDS 白名单移除 suite）
+- plugin/test/plugin-packaging.test.mjs（M179 .claude/skills 空目录断言改 hermetic——unblock 既有 suite 红）
 - orchestration/SPEC-suite-lifecycle-and-failure-semantics-2026-08-26.md（§3 唯一 spawn 表述订正 + 退役标注）
 - plugin/scripts/capability-catalog.sh（suite-driver.ts 六表条目改写）
 - docs/analysis/quay-init-closure-ratchet.baseline.json（laydown 源变更后 --reanchor）
