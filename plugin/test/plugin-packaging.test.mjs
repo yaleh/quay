@@ -660,7 +660,12 @@ test('M179 (DIR-070-F): the .claude/skills/ second copies are retired (archived,
   // gap-ac166-second-copy-retirement: .claude/skills/ 5 dirs were the "second copy" (drift source).
   // They are archived under archive/ (git mv + INDEX), NOT deleted. plugin/skills/ is now the
   // single source, and .claude/skills/ must be empty.
-  assert.equal(fs.readdirSync(path.join(repoRoot, '.claude', 'skills')).length, 0, '.claude/skills/ must be empty (second copies retired)');
+  // ⛔ 空目录不可 git 追踪（git 不存空目录、.gitkeep 会让 readdirSync 得 1 而非 0）⇒ 目录【不存在】
+  // 等价于【空】（无第二副本）。读不懂(ENOENT)当空，不因环境（gap-ac166 自己的 worktree 恰留有空目录）
+  // 而时绿时红。
+  const skillsDir = path.join(repoRoot, '.claude', 'skills');
+  const skillsEntries = existsSync(skillsDir) ? fs.readdirSync(skillsDir) : [];
+  assert.equal(skillsEntries.length, 0, '.claude/skills/ must be empty (second copies retired)');
   const archived = path.join(repoRoot, 'archive', '2026-09-07-second-copy-retirement', '.claude', 'skills');
   assert.ok(existsSync(path.join(archived, 'quay-native-methodology', 'reference', 'v-meta-stall-analysis.md')), 'archived quay-native-methodology source must exist in archive/');
   assert.ok(existsSync(path.join(archived, 'quay-native-methodology', 'reference', 'case-studies', 'iteration-88-abi-symmetry-walkthrough.md')), 'archived case-studies/ must exist in archive/');
