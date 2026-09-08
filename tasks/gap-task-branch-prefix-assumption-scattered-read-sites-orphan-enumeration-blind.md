@@ -2,7 +2,8 @@
 id: gap-task-branch-prefix-assumption-scattered-read-sites-orphan-enumeration-blind
 title: task/ 前缀假设散落 31 处/7 文件：worktreeExists 已修但 worker-driver 4 处 +
   fast-mode-telemetry 2 处读方仍对无前缀分支隐身
-status: ready
+status: needs-human
+needs_human_cause: human-adjudication
 labels:
   - gap
 parent: null
@@ -97,3 +98,14 @@ git grep -c 'refs/heads/task/' develop -- 'plugin/scripts/*.ts' 'plugin/scripts/
 
 对照（硬规则④推论四）：把一个无前缀 worktree 改名加上 `task/` 前缀，枚举结果必须由「列不出」翻成「列得出」；
 再改回去必须翻回来——一个参数翻转结论就翻，排除恒真/恒假。
+## Needs-Human
+
+**执行 2026-09-08T09:32:29.518Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: AC2: /board renders LV-1 as 孤儿
+- run_id：wk-prod-1788779505
+- session_id：f5d12d2a-036c-46a8-987a-80cebfc893cb
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-task-branch-prefix-assumption-scattered-read-sites-orphan-enumeration-blind~wk-prod-1788779505~1788859003110-d19f55.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-task-branch-prefix-assumption-scattered-read-sites-orphan-enumeration-blind-wk-prod-1788779505.log

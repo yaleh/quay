@@ -71,26 +71,26 @@ $ curl -s http://100.78.206.100:4173/dashboard | grep -o 'getElementById("[a-z-]
 
 ## Acceptance Criteria
 
-- [ ] AC1 生产载体读数（端点侧，能取假）：对运行中的实例 `GET /dashboard/cards`，断言 JSON 顶层键**包含** `faninCard`
+- [x] AC1 生产载体读数（端点侧，能取假）：对运行中的实例 `GET /dashboard/cards`，断言 JSON 顶层键**包含** `faninCard`
       且其值是长度 > 0 的字符串、内含 `id="fanin-card"`。取假：改动前该键不存在（上文实测 keys 列表可作负控制基线）。
-- [ ] AC2 生产载体读数（脚本侧，能取假）：`GET /dashboard` 的 HTML 中断言出现 `getElementById("fanin-card")`
+- [x] AC2 生产载体读数（脚本侧，能取假）：`GET /dashboard` 的 HTML 中断言出现 `getElementById("fanin-card")`
       且其后的赋值读的是 `d.faninCard`。取假：改动前 `grep -c 'getElementById("fanin-card")'` == 0。
-- [ ] AC3 **登记完备性（防复发，这条才是源头修法）**：一条判据同时读三个集合——
+- [x] AC3 **登记完备性（防复发，这条才是源头修法）**：一条判据同时读三个集合——
       ① `renderDashboardPage()` 输出中所有 `id="([a-z-]+-card)"`；
       ② `handleDashboardCards` 返回 JSON 的卡片键（去掉 `sysRaw` 等非卡片键，按 `xxxCard` 命名映射回 `xxx-card`）；
       ③ 刷新脚本中所有 `getElementById("([a-z-]+-card)")`。
       断言三者**互相相等**；不相等时打印每一侧独有的元素名。
       **负控制（必须做，否则这条判据可能恒真）**：在测试内构造一个「页面多一张卡而 payload 没有」的输入，
       断言该判据**报红**——只有它能取假才算测量（硬规则 4）。
-- [ ] AC4 刷新后内容真的会变（不是只 swap 一次空壳）：单测对 `renderFanInCardFromRecords` 分别喂入
+- [x] AC4 刷新后内容真的会变（不是只 swap 一次空壳）：单测对 `renderFanInCardFromRecords` 分别喂入
       「N 条 fan-in 记录」与「N+1 条（新增一条更晚的 landed）」，断言两次输出的列表行数分别为 `min(N,5)` 与 `min(N+1,5)`、
       且第一行的 task id 不同。两次输出相同则报红。
-- [ ] AC5 窗口一致性：同一 `?hours=` 下，`/dashboard` 页内的 fanin 时间轴与 `/dashboard/cards` 返回的 `faninCard`
+- [x] AC5 窗口一致性：同一 `?hours=` 下，`/dashboard` 页内的 fanin 时间轴与 `/dashboard/cards` 返回的 `faninCard`
       渲染出的分段**起止时间戳序列逐条相等**（同一份数据、同一套横轴换算）。不等时打印差异条数与前 3 条。
-- [ ] AC6 轮询开销未失控：测量 `handleDashboardCards` 在本仓库真实 `.quay/worker-outcome.jsonl`（≈1.8MB）下的
+- [x] AC6 轮询开销未失控：测量 `handleDashboardCards` 在本仓库真实 `.quay/worker-outcome.jsonl`（≈1.8MB）下的
       单次耗时，记录**改动前/改动后**两个读数进提交信息。若增量 > 100ms，则在同一任务内实现裁剪并复测，
       **不得以「太贵」为由把 fanin 排除出刷新**。
-- [ ] AC7 `bash scripts/test.sh --for-task gap-dashboard-fanin-card-not-in-auto-refresh` 退出码 0。
+- [x] AC7 `bash scripts/test.sh --for-task gap-dashboard-fanin-card-not-in-auto-refresh` 退出码 0。
 
 ## Definition of Done
 
