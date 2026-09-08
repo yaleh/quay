@@ -59,6 +59,7 @@ extra:
 
 - plugin/scripts/registry-bare-filename-scan.ts
 - plugin/test/registry-bare-filename-scan.test.mjs
+- plugin/scripts/checker-mutation-cases/registry-bare-filename-scan.sh
 - docs/analysis/dead-set-recomputed.json
 - orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md
 - tasks/gap-dead-set-closure-misses-four-reference-kinds.md
