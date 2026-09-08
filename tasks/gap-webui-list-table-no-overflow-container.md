@@ -3,7 +3,8 @@ id: gap-webui-list-table-no-overflow-container
 title: 列表页表格没有详情页那条横向滚动规则（serve-render.ts:444 只覆盖 .detail-page），且散文列无宽度上限 ⇒
   /goal 桌面端整页横向溢出 385px、移动端 tbody 1402px 撑爆 390 视口，/live /board /needs-human
   表头被压成竖排单字
-status: ready
+status: needs-human
+needs_human_cause: human-adjudication
 labels:
   - gap
   - webui
@@ -90,3 +91,18 @@ depends_on:
 - `packages/quay/src/serve-tests.ts`
 - `packages/quay/test/gap-webui-list-table-no-overflow-container.test.mjs`
 - `tasks/gap-webui-list-table-no-overflow-container.md`
+
+## Needs-Human
+
+**执行 2026-09-08T16:56:37.422Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 成因类：human-adjudication
+- 失败步/判词：step=scoped-gate: test-isolation-check — 572 glob file(s), 24 current violation(s) [fixed-path-write=12 shared-build-artifact-write=1 spawns-test-sh=5 process-exit-1=6 mkdtemp-no-cleanup=0 live-data-dir-write=0 shared-root-mkdtemp=0]
+  packages/quay-native/test/gate-checked-state.test.mjs:fixed-path-write  (line 26) const tasksDir = path.join(__dirname, ".tmp-gate-checked-state-test");
+PASS: all 24 violation(s) are baselined in plugin/test-isolation-violations.txt; the list can only get SHORTER (no additions, no growth, no stale entries).
+test-impl-census: checked 572 test files · clean 572 · impl-deleted 0
+TOUCHES-DIR-GLOB-HINT: 1 directory-level tasks/*.md glob(s) — enumerate concrete files or add（已知全局锁）(hint only, not a violation)
+- run_id：wk-prod-1788779505
+- session_id：f3daf8bb-70a9-4d56-82e5-01b58e42d1d0
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-webui-list-table-no-overflow-container-wk-prod-1788779505.log
