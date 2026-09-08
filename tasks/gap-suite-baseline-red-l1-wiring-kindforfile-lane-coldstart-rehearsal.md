@@ -29,11 +29,11 @@ extra:
 
 ## AC
 
-- [ ] AC1: `node --test plugin/test/l1-delivery-surface-check.test.mjs plugin/test/known-load-sensitive.test.mjs plugin/test/cold-start-skill.test.mjs` 全绿（当前 4 项失败清零），负控制：改动前贴上面 4 条 AssertionError 原文作为取假读数。
-- [ ] AC2: `plugin/scripts/quay-init.sh` 重新调用 L1 delivery-surface check（AC5 判据本身不回归——若是接线代码被后续改动误删，须找到具体删除点并说明为何当时未被 suite 挡住）。
-- [ ] AC3: `known-load-sensitive.test.mjs` AC1（`kindForFile` 对 'nested-spawn' 根因的判定）与 AC3（`runtime-landing.test.mjs` 应仍在 lowconc 泳道）两处均有明确根因说明并修复，而非放宽断言掩盖。
-- [ ] AC4: `cold-start-skill.test.mjs` 的 rehearsal 用例定位 `fast-mode-telemetry.ts` MODULE_NOT_FOUND 的路径解析根因（`--loop` 临时项目里该脚本引用路径为何解析不到）并修复。
-- [ ] AC5: `bash scripts/test.sh` 全量 suite 绿（确认修复未引入新红，且这组失败确实是当前唯一相关的红）。
+- [x] AC1: `node --test plugin/test/l1-delivery-surface-check.test.mjs plugin/test/known-load-sensitive.test.mjs plugin/test/cold-start-skill.test.mjs` 全绿（当前 4 项失败清零），负控制：改动前贴上面 4 条 AssertionError 原文作为取假读数。
+- [x] AC2: `plugin/scripts/quay-init.sh` 重新调用 L1 delivery-surface check（AC5 判据本身不回归——若是接线代码被后续改动误删，须找到具体删除点并说明为何当时未被 suite 挡住）。
+- [x] AC3: `known-load-sensitive.test.mjs` AC1（`kindForFile` 对 'nested-spawn' 根因的判定）与 AC3（`runtime-landing.test.mjs` 应仍在 lowconc 泳道）两处均有明确根因说明并修复，而非放宽断言掩盖。
+- [x] AC4: `cold-start-skill.test.mjs` 的 rehearsal 用例定位 `fast-mode-telemetry.ts` MODULE_NOT_FOUND 的路径解析根因（`--loop` 临时项目里该脚本引用路径为何解析不到）并修复。
+- [ ] AC5: `bash scripts/test.sh` 全量 suite 绿（确认修复未引入新红，且这组失败确实是当前唯一相关的红）。（待外部）
 
 ## DoD
 
