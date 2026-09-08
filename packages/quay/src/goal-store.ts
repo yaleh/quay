@@ -73,6 +73,14 @@ import { commitStoreWrite, resolveGitRoot, type CommitOutcome } from "./store-co
 
 export const VALID_GOAL_STATUSES = ["draft", "active", "achieved", "superseded", "retired"];
 
+// gap-goal-record-completeness-undefined — "what counts as a COMPLETE goal record" was never
+// defined: `origin` was required while `body` was optional, inverting the incentive (8 goals, 5
+// with empty body — the prose all crammed into `origin`). A GOAL's substance (background / scope
+// & non-goals / exit conditions) lives in its `body`; `origin` is only a provenance citation.
+// Mirrors the task side's MIN_SECTION_CHARS = 40 (ready-pool-check.ts). Exported so the falsifiability
+// test asserts the SAME threshold the store enforces (never a second, divergent literal).
+export const MIN_GOAL_BODY_CHARS = 40;
+
 const GOAL_ID_RE = /^GOAL-\d{3,}$/;
 const AC_ID_RE = /^AC-\d{3,}$/;
 
@@ -527,6 +535,9 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
         frontmatter = { ...(parsed.frontmatter as GoalFrontmatter) };
         existingBody = parsed.body;
       }
+      // The body that will land: an explicit `body` param, else the stored body (patch
+      // semantics — omitting `body` on an update keeps it, the same as `origin`).
+      const finalBody = body !== undefined ? body : existingBody;
       // Apply owned fields (preserving any unknown frontmatter keys verbatim).
       frontmatter.id = id;
       if (title !== undefined) frontmatter.title = title;
@@ -551,6 +562,33 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
         throw new Error(
           `origin is required for ${id} — an AC/goal without an empirical basis is cargo cult; empty origin writes nothing`
         );
+      }
+
+      // gap-goal-record-completeness-undefined — "what counts as a COMPLETE record" is
+      // kind-split (⛔ never one rule for both — a blanket body-required rule would misfire
+      // on the 57 criteria whose content legitimately lives in criterion+expect):
+      //   criterion ⇒ `criterion` + `expect` + `goal` REQUIRED, `body` optional.
+      //   goal      ⇒ `body` REQUIRED (≥ MIN_GOAL_BODY_CHARS non-whitespace), `origin` is
+      //               provenance only.
+      // Each rejection names its kind and the missing field, distinguishable from every other
+      // failure (hard rule 3b — "which field is missing" is the actionable info).
+      if (!isGoalRecord) {
+        if (typeof frontmatter.criterion !== "string" || frontmatter.criterion.trim() === "") {
+          throw new Error(
+            `${id} is a criterion record and requires a non-empty \`criterion\` — the runnable command that verifies it (a criterion's content lives in criterion+expect, not the body; empty criterion writes nothing)`
+          );
+        }
+        if (typeof frontmatter.expect !== "string" || frontmatter.expect.trim() === "") {
+          throw new Error(
+            `${id} is a criterion record and requires a non-empty \`expect\` — the expected outcome the criterion proves (a criterion's content lives in criterion+expect, not the body; empty expect writes nothing)`
+          );
+        }
+      } else {
+        if (finalBody.trim().length < MIN_GOAL_BODY_CHARS) {
+          throw new Error(
+            `${id} is a GOAL record and requires a \`body\` of ≥${MIN_GOAL_BODY_CHARS} non-whitespace chars (background / scope & non-goals / exit conditions) — \`origin\` is only a provenance citation, not the body; empty body writes nothing`
+          );
+        }
       }
 
       // I1′ — hard cap, write-time fail-closed (SPEC-goal-mechanism-2026-09-06.md §4.1).
@@ -592,7 +630,6 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       for (const k of Object.keys(frontmatter)) {
         if (!OWNED_KEYS.has(k)) ordered[k] = frontmatter[k];
       }
-      const finalBody = body !== undefined ? body : existingBody;
       const fileName = existingFile ?? `${id}-${slugify(title, "goal")}.md`;
       fs.writeFileSync(path.join(goalDir, fileName), serializeFrontmatter(ordered, finalBody), "utf8");
       const outcome = commitGoalFile(goalDir, fileName, id);
@@ -612,7 +649,7 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
 // Subcommands (workspace root auto-derived from the script location, or --root <dir>):
 //   list                      — list all goal records (GOAL + AC) as JSON
 //   get <id>                  — one record as JSON
-//   write <id> --title ... --status ... --goal ... --criterion ... --origin ... [--expect ...]
+//   write <id> --title ... --status ... --goal ... --criterion ... --origin ... [--expect ...] [--body ...]
 //   gate <id> [--root <dir>]  — run the record's `criterion` via the acceptance runner and append
 //                               one GateEvent (verdict+timestamp) to <root>/.quay/gate-events.jsonl;
 //                               empty criterion fails CLOSED (red) and still records the event.
@@ -673,7 +710,7 @@ async function main(argv: string[]) {
         if (!k.startsWith("--")) continue;
         const key = k.slice(2);
         if (key === "title" || key === "status" || key === "goal" || key === "criterion" ||
-            key === "expect" || key === "origin" || key === "superseded-by" ||
+            key === "expect" || key === "origin" || key === "body" || key === "superseded-by" ||
             key === "dispose-old" || key === "dispose-to") {
           opts[key] = v;
           i++;
@@ -702,6 +739,7 @@ async function main(argv: string[]) {
         criterion: opts.criterion as string | undefined,
         expect: opts.expect as string | undefined,
         origin: opts.origin as string,
+        body: opts.body as string | undefined,
         supersededBy: Array.isArray(opts["superseded-by"])
           ? opts["superseded-by"] as string[]
           : (typeof opts["superseded-by"] === "string" ? [opts["superseded-by"] as string] : undefined),

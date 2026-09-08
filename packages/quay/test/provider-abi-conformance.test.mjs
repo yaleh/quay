@@ -563,6 +563,9 @@ test("provider-abi-conformance: goal ABI — native goal_list non-empty via goal
       title: "goal ABI conformance",
       status: "active",
       origin: "provider-abi-conformance (AC-176 goal group)",
+      // gap-goal-record-completeness-undefined: a GOAL's body is required (≥40 chars) —
+      // origin is provenance only, never the body.
+      body: "goal body: background, scope, non-goals and exit conditions — long enough to satisfy the 40-char minimum",
     });
     assert.ok(written && written.id === "GOAL-001", `goalWrite created GOAL-001 (got ${JSON.stringify(written?.id)})`);
     const goals = await coreClient.goalList();
