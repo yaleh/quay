@@ -1,7 +1,7 @@
 ---
 id: gap-ac158-execute-archive-batch-one
 title: AC158 判据仍红——执行批次一：扫描后死集 git mv 进 archive + INDEX 同一提交（名单执行中迭代收敛）
-status: needs-human
+status: todo
 labels:
   - gap
 parent: null
