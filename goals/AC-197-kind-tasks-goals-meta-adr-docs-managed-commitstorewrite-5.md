@@ -1,7 +1,7 @@
 ---
 id: AC-197
 title: 五 kind 齐备：tasks/goals/meta/adr/docs-managed 全部接线 commitStoreWrite = 5
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-008
 criterion: test "$(grep -l commitStoreWrite packages/quay/src/goal-store.ts
