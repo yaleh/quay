@@ -72,6 +72,8 @@ extra:
 - plugin/test/scoped-static-checks.test.mjs
 - docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-deliver-verification-trigger-orphaned-after-land-path-migration.md
+- archive/INDEX.tsv
+- plugin/scripts/capability-catalog.sh
 ## Needs-Human
 
 **执行 2026-09-08T17:04:13.482Z — 连续修满重试上限仍不合格（标 needs-human）**
