@@ -157,7 +157,9 @@ test("AC4: every lane gets a branch-name chip (non-transparent bg) with ≥4.5:1
   assert.ok(script.includes('.style("fill", color)'), "the chip bg is filled with the lane colour (non-transparent)");
   // Both render states label the branch: collapsed (summary) and expanded (fold control).
   assert.ok(script.includes("appendChip(grp, textX, yy + 3, b.ref"), "collapsed summary leads with a chip(ref)");
-  assert.ok(script.includes("appendChip(grp2, textX, y(laneBot) - 6, b.ref"), "expanded fold control leads with a chip(ref)");
+  // gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead: the expanded fold control moved
+  // from the bottom merge row (laneBot) to the branch's top row (foldRow = laneTopRow[b.id]).
+  assert.ok(script.includes("appendChip(grp2, textX, y(foldRow) - 6, b.ref"), "expanded fold control leads with a chip(ref) at the top row");
 });
 
 // ── AC5: width is content-derived — different longest subjects → different widths, never a literal ───
