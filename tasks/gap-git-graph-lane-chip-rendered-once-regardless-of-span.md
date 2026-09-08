@@ -2,7 +2,7 @@
 id: gap-git-graph-lane-chip-rendered-once-regardless-of-span
 title: git-history 每条泳道（含 trunk）无论跨多少行，右侧文本列只画一次分支名 chip；trunk 的那一次还画在整页最顶端 ⇒
   滚动到非页首任意位置时屏幕上找不到任何分支标签，这与「develop 标签和其它分支不一样」的观感是同一机制，不是 develop 专属
-status: ready
+status: done
 labels:
   - gap
   - webui
