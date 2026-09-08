@@ -2,7 +2,7 @@
 id: gap-ac166-stale-retired-dir-test-refs
 title: gap-ac166 退役 .claude 双副本后 fixture-hash 前置 + M179 readdirSync
   两条测试仍引用已退役目录，全量 suite 确定性 2 红
-status: ready
+status: done
 labels:
   - gap
   - defect
