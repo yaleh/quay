@@ -36,6 +36,9 @@ import {
   rewriteMarkdown,
   rewriteShell,
   rewriteInvokers,
+  deriveEntries,
+  scanCoreReferences,
+  closureMissing,
 } from "../scripts/build-plugin-dist.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -152,4 +155,63 @@ test("AC5 — a BARE .ts token (no plugin/scripts/ prefix) is deliberately NOT r
   const out = rewriteMarkdown(prose);
   assert.ok(out.includes("transcript-delivery-check.ts"),
     "a bare-name .ts token without a plugin/scripts/ prefix must stay untouched");
+});
+
+// ── gap-plugin-dist-entry-derivation-blind-to-core-and-table-refs ────────────────────────────────
+// The entry set was previously hand-maintained for Core references (CORE_REFERENCED, 2 items) and
+// blind to table/list rows (`dist/<name>.js`) — so driver-runtime.ts and suite-execution-form-counter.ts
+// never shipped, and `quay driver` died in any installed project. These tests pin the mechanical
+// derivation (Core scan + dist reverse-lookup) and the fail-able reference-closure gate.
+
+const PLUGIN_ROOT = path.resolve(__dirname, "..", "..", "..", "plugin");
+
+test("AC1/AC6 — deriveEntries DERIVES driver-runtime.ts from Core refs (no hand-maintained CORE_REFERENCED)", () => {
+  const { scripts } = deriveEntries(PLUGIN_ROOT);
+  assert.ok(scripts.includes("scripts/driver-runtime.ts"),
+    "Core-referenced driver-runtime.ts (cli/driver.ts + plugin-root.ts KERNEL_RELS) must be a derived entry");
+  // The former CORE_REFERENCED members must STILL be derived (mechanical, not dropped).
+  assert.ok(scripts.includes("scripts/runtime-usage-inventory.ts"), "former CORE_REFERENCED member still derived");
+  assert.ok(scripts.includes("scripts/task-status-drift-check.ts"), "former CORE_REFERENCED member still derived");
+});
+
+test("AC2 — deriveEntries DERIVES suite-execution-form-counter.ts from deliver-verify-usage.sh's dist/*.js table row", () => {
+  const { scripts } = deriveEntries(PLUGIN_ROOT);
+  assert.ok(scripts.includes("scripts/suite-execution-form-counter.ts"),
+    "a table-row `dist/<name>.js` reference must reverse-lookup the same-named .ts into the entry set");
+});
+
+test("AC6 — scanCoreReferences derives driver-runtime.ts from Core source (the list is a scan expression, not a literal)", () => {
+  const core = scanCoreReferences();
+  assert.ok(core.has("driver-runtime.ts"), "Core scan must find the driver-runtime.ts reference");
+  assert.ok(core.has("runtime-usage-inventory.ts"), "Core scan must find runtime-usage-inventory.ts");
+  assert.ok(core.has("task-status-drift-check.ts"), "Core scan must find task-status-drift-check.ts");
+});
+
+test("AC5 — the closure gate takes false (removing an entry makes closureMissing flag it)", () => {
+  // Positive control: a referenced bundle present in the tarball → closure holds.
+  assert.deepEqual(
+    closureMissing(["suite-execution-form-counter"], ["package/plugin/scripts/dist/suite-execution-form-counter.js"]),
+    [],
+    "a referenced bundle present in the tarball must satisfy the closure"
+  );
+  // Negative control: the SAME reference with the bundle absent → flagged (the gate is not恒绿).
+  assert.deepEqual(
+    closureMissing(["suite-execution-form-counter"], ["package/plugin/scripts/dist/other.js"]),
+    ["suite-execution-form-counter"],
+    "a referenced bundle absent from the tarball must be flagged missing"
+  );
+  // gate-scripts layout resolves too.
+  assert.deepEqual(
+    closureMissing(["gate-script-base"], ["package/plugin/gate-scripts/dist/gate-script-base.js"]),
+    [],
+    "a gate-scripts/dist/<name>.js entry must resolve under the gate-scripts layout"
+  );
+});
+
+test("AC5 — a Core-referenced bundle (driver-runtime) is part of the closure; removing it flags red", () => {
+  const required = [...scanCoreReferences()].map((t) => t.replace(/\.ts$/, ""));
+  assert.ok(required.includes("driver-runtime"), "the closure's required set derives driver-runtime from Core source");
+  const missing = closureMissing(required, ["package/plugin/scripts/dist/suite-execution-form-counter.js"]);
+  assert.ok(missing.includes("driver-runtime"),
+    "a tarball without dist/driver-runtime.js must be flagged (the gate sees Core's reference)");
 });

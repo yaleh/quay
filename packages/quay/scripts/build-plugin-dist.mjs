@@ -30,6 +30,7 @@
 import * as esbuild from "esbuild";
 import path from "node:path";
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -64,11 +65,24 @@ const INVOCATION_RE =
 // removed, so it is an entry regardless of invocation spelling.
 const MD_PATH_PREFIXED_RE = /(?:plugin\/scripts|plugin\/gate-scripts)\/([A-Za-z0-9_.-]+\.ts)/g;
 
-// Core code that spawns a plugin .ts by relative path and ships inside dist/quay.js.
-// mcp-server.ts's instrument tool derives its directory from runtime-usage-inventory.ts;
-// observation.ts's /board landing judgment spawns task-status-drift-check.ts. Both must resolve
-// to a shipped executable, so both are always entries.
-const CORE_REFERENCED = ["runtime-usage-inventory.ts", "task-status-drift-check.ts"];
+// Core code (packages/quay/src) spawns plugin .ts by relative path and ships inside dist/quay.js —
+// cli/driver.ts + plugin-root.ts's KERNEL_RELS anchor reference driver-runtime.ts, mcp-server.ts
+// references runtime-usage-inventory.ts, observation.ts references task-status-drift-check.ts,
+// serve-send.ts references transcript-delivery-check.ts. These must resolve to a shipped executable
+// after the raw .ts are removed, so every Core-referenced plugin .ts is an entry. The set is DERIVED
+// by scanning Core's source for the SPAWN form only — `path.join("scripts", "X.ts")` /
+// `path.join("plugin", "scripts", "X.ts")` (never a hand-maintained list — the former
+// CORE_REFERENCED list silently missed driver-runtime.ts). ⛔ Deliberately NOT the prose/comment
+// `plugin/scripts/X.ts` mention: some dev-repo-only scripts (e.g. meta-driver.ts) import Core source
+// via `../../packages/quay/src/…` relative paths that resolve ONLY in the repo-root layout and break
+// esbuild in the staged packages/quay/plugin/ layout — a comment mention is not a runtime spawn.
+const CORE_SRC_DIR = path.resolve(pkgDir, "src");
+const CORE_PATH_JOIN_TS_RE = /path\.join\([^)]*"scripts"[^)]*"([A-Za-z0-9_.-]+\.ts)"/g;
+
+// A shipped table/list row that names a bundled entry by its dist path (`dist/<name>.js`), e.g.
+// deliver-verify-usage.sh's VERIFY_SET row `"suite-execution-form-counter|js|dist/suite-execution-form-counter.js|…"`.
+// Reverse-looked-up to the same-named `.ts` (if it exists) so the entry ships as `dist/<name>.js`.
+const DIST_JS_RE = /dist\/([A-Za-z0-9_.-]+)\.js/g;
 
 // quay-init.sh's EXPLICIT mechanism additions (plugin/scripts/quay-init.sh `derive_loop_scripts`
 // step (c)) name .ts files by BARE basename with no invocation prefix. These must ship as
@@ -94,6 +108,27 @@ function walk(dir, out = []) {
     else out.push(full);
   }
   return out;
+}
+
+/**
+ * Derive the set of plugin `.ts` basenames referenced by Core source (packages/quay/src). Replaces
+ * the former hand-maintained `CORE_REFERENCED` list — the mechanical form of "every Core→plugin
+ * script spawn ships". Scans Core `.ts` for the SPAWN form only (`path.join("scripts", "X.ts")` /
+ * `path.join("plugin", "scripts", "X.ts")` — the resolvePluginScript/resolvePluginScriptExec call
+ * sites + KERNEL_RELS); the caller intersects the result with existing plugin `.ts`. Returns empty
+ * when Core source is absent (an installed artifact carries dist/quay.js, not src/ — the scan is a
+ * SOURCE-repo derivation only).
+ * @returns {Set<string>} `.ts` basenames (e.g. "driver-runtime.ts")
+ */
+export function scanCoreReferences() {
+  const basenames = new Set();
+  if (!fs.existsSync(CORE_SRC_DIR)) return basenames;
+  for (const f of walk(CORE_SRC_DIR)) {
+    if (!f.endsWith(".ts")) continue;
+    const text = fs.readFileSync(f, "utf8");
+    for (const m of text.matchAll(CORE_PATH_JOIN_TS_RE)) if (m[1]) basenames.add(m[1]);
+  }
+  return basenames;
 }
 
 /**
@@ -128,9 +163,15 @@ export function deriveEntries(pluginRoot) {
           if (rel) referenced.add(rel);
         }
       }
+      // Table/list rows that name a bundled entry by `dist/<name>.js` (e.g.
+      // deliver-verify-usage.sh's VERIFY_SET) → reverse-lookup the same-named .ts so it ships.
+      for (const m of text.matchAll(DIST_JS_RE)) {
+        const rel = existing.get(`${m[1]}.ts`);
+        if (rel) referenced.add(rel);
+      }
     }
   }
-  for (const core of CORE_REFERENCED) {
+  for (const core of scanCoreReferences()) {
     const rel = existing.get(core);
     if (rel) referenced.add(rel);
   }
@@ -169,6 +210,44 @@ export async function bundleEntries(pluginRoot, entries) {
     outfiles.push(outfile);
   }
   return outfiles;
+}
+
+/**
+ * Assert the tarball carries a `dist/<name>.js` for every required bundle name.
+ * @param {Iterable<string>} required bundle names WITHOUT `.js` (e.g. "driver-runtime")
+ * @param {string[]} tarballEntries `tar tzf` output lines (e.g. "package/plugin/scripts/dist/x.js")
+ * @returns {string[]} missing bundle names (empty = reference closure holds)
+ */
+export function closureMissing(required, tarballEntries) {
+  const missing = [];
+  const present = (name) =>
+    tarballEntries.some(
+      (e) => e.endsWith(`/scripts/dist/${name}.js`) || e.endsWith(`/gate-scripts/dist/${name}.js`)
+    );
+  for (const name of required) if (!present(name)) missing.push(name);
+  return missing;
+}
+
+/**
+ * The reference-closure gate: every plugin script in the DERIVED entry set must be present in the
+ * tarball as its `dist/<name>.js` bundle. `deriveEntries` re-derives the SAME set the build used
+ * (invocation/md refs + the `dist/<name>.js` table-row reverse-lookup + Core source spawn refs +
+ * quay-init's explicit list), intersected with the SOURCE plugin's existing `.ts` — so prose/example
+ * `dist/foo.js` mentions (which name no real plugin script) are not part of the closure. Returns
+ * `missing` non-empty when a derived bundle was not packed; that is the fail-able form that catches
+ * the driver-runtime.ts / suite-execution-form-counter.ts gaps at factory time (a missing bundle =
+ * exit 1 in package.sh, not a silent "installed but broken"). ⛔ The assertion lands on the TARBALL
+ * LISTING (crossing both the staging copy and `npm pack`), and the entry set is derived from the
+ * SOURCE plugin root (raw `.ts` still present — the staged copy has them deleted).
+ */
+export function verifyDistClosure(pluginRoot, tarballEntries) {
+  const { scripts, gateScripts } = deriveEntries(pluginRoot);
+  const required = new Set();
+  for (const rel of [...scripts, ...gateScripts]) {
+    required.add(path.basename(rel).replace(/\.ts$/, ""));
+  }
+  const missing = closureMissing(required, tarballEntries);
+  return { required: [...required].sort(), missing };
 }
 
 /** Rewrite a markdown doc's plugin .ts references to the bundled dist entrypoints. */
@@ -287,11 +366,32 @@ const invokedAsScript = process.argv[1] && path.resolve(process.argv[1]) === fil
 if (invokedAsScript) {
   const args = process.argv.slice(2);
   const rewrite = args.includes("--rewrite");
+  const verifyClosure = args.includes("--verify-closure");
   const positional = args.filter((a) => !a.startsWith("--"));
   const pluginRoot = positional[0] ? path.resolve(positional[0]) : DEFAULT_PLUGIN_ROOT;
   (async () => {
     if (rewrite) {
       await rewriteInvokers(pluginRoot);
+    } else if (verifyClosure) {
+      const tarball = positional[1];
+      if (!tarball) {
+        console.error("build-plugin-dist --verify-closure requires <sourcePluginRoot> <tarball>");
+        process.exit(2);
+      }
+      const listing = execFileSync("tar", ["tzf", path.resolve(tarball)], { encoding: "utf8" })
+        .split("\n")
+        .filter(Boolean);
+      const { required, missing } = verifyDistClosure(pluginRoot, listing);
+      if (missing.length) {
+        console.error(
+          `dist-closure gate FAILED: ${missing.length} referenced dist bundle(s) missing from ${path.resolve(tarball)}:`
+        );
+        for (const name of missing) console.error(`  - ${name}.js`);
+        process.exit(1);
+      }
+      console.log(
+        `dist-closure gate OK: ${required.length} referenced dist bundles all present in ${path.basename(path.resolve(tarball))}`
+      );
     } else {
       await buildPluginDist(pluginRoot);
     }
