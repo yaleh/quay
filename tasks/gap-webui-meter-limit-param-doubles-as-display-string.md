@@ -2,7 +2,7 @@
 id: gap-webui-meter-limit-param-doubles-as-display-string
 title: /system 的 bar() 把 limit 一参二用（既当分母又当显示文案），loadavg 传入 "nproc×2≈32" ⇒
   Number() 得 NaN 静默退化为 1 ⇒ 进度条恒满 100%，是一个结构上不可能取假的读数
-status: ready
+status: done
 labels:
   - gap
   - webui

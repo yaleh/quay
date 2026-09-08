@@ -23,11 +23,61 @@ extra:
 
 ## AC
 
-- [ ] AC1 逐点分类：对已枚举的 11 处（7 文件 workspace-root 拼接 + 4 处 import.meta.url walk-up）逐一判定"下游可达"（下游项目会跑到这段代码）还是"仓库内部专用"（如疑似的 `scripts/test.sh`），每条附一句证据。分类结果连同判据写入任务体，`scripts/test.sh` 的豁免主张必须有独立验证（例如：搜索它是否出现在任何交付/打包清单或下游 quay-init 产物里），不得只凭直觉排除。
-- [ ] AC2 迁移全部"下游可达"的 TypeScript 入口（`serve-sessions.ts`、`fan-in/ff-merge.ts` 两类问题、`mcp-server.ts`、`precommit-guard.ts`、`cli/manager.ts`、`observation.ts`、`serve-send.ts`）改走 `resolvePluginRoot()`/`resolvePluginScript()`；每处迁移都保留原有的 AC139-4 拒 worktree 语义（不得退化）。
-- [ ] AC3 迁移两个 shell 入口（`os-anchor-watchdog.sh`、`os-anchor-install.sh`）：不得重新发明第四套判定算法（单一正本原则）——通过一个薄 node CLI 包一层调 `plugin-root.ts` 的解析函数，或等价地把三步契约（env 指针 → worktree 重定向 → 逐层探测）原样搬到 bash，两者选一并说明理由。
-- [ ] AC4 每个迁移点补双向负控制测试（worktree 场景不得命中 worktree 副本；下游可达场景不要求本地 `plugin/`），可复用/扩展 `packages/quay/test/plugin-root.test.mjs` 的既有矩阵而非各自重造。
-- [ ] AC5 若 AC1 判定 `scripts/test.sh` 确属仓库内部专用（豁免），把该结论与证据写回 SPEC §6b 的被否方案表旁注；若判定它并非豁免（下游确实会跑到），按 AC2/AC3 同法迁移。
+- [x] AC1 逐点分类：对已枚举的 11 处（7 文件 workspace-root 拼接 + 4 处 import.meta.url walk-up）逐一判定"下游可达"（下游项目会跑到这段代码）还是"仓库内部专用"（如疑似的 `scripts/test.sh`），每条附一句证据。分类结果连同判据写入任务体，`scripts/test.sh` 的豁免主张必须有独立验证（例如：搜索它是否出现在任何交付/打包清单或下游 quay-init 产物里），不得只凭直觉排除。
+- [x] AC2 迁移全部"下游可达"的 TypeScript 入口（`serve-sessions.ts`、`fan-in/ff-merge.ts` 两类问题、`mcp-server.ts`、`precommit-guard.ts`、`cli/manager.ts`、`observation.ts`、`serve-send.ts`）改走 `resolvePluginRoot()`/`resolvePluginScript()`；每处迁移都保留原有的 AC139-4 拒 worktree 语义（不得退化）。
+- [x] AC3 迁移两个 shell 入口（`os-anchor-watchdog.sh`、`os-anchor-install.sh`）：不得重新发明第四套判定算法（单一正本原则）——通过一个薄 node CLI 包一层调 `plugin-root.ts` 的解析函数，或等价地把三步契约（env 指针 → worktree 重定向 → 逐层探测）原样搬到 bash，两者选一并说明理由。
+- [x] AC4 每个迁移点补双向负控制测试（worktree 场景不得命中 worktree 副本；下游可达场景不要求本地 `plugin/`），可复用/扩展 `packages/quay/test/plugin-root.test.mjs` 的既有矩阵而非各自重造。
+- [x] AC5 若 AC1 判定 `scripts/test.sh` 确属仓库内部专用（豁免），把该结论与证据写回 SPEC §6b 的被否方案表旁注；若判定它并非豁免（下游确实会跑到），按 AC2/AC3 同法迁移。
+
+## Evidence（AC1/AC3/AC4/AC5/DoD 读数，2026-09-08）
+
+### AC1 逐点分类（11 处 → 7 文件下游可达迁移 + 3 文件仓库内部专用豁免）
+
+判据：「下游可达」= 下游项目（quay-init 布下的面）会跑到这段代码；「仓库内部专用」= 只在 quay 本仓库开发期跑、quay-init 从不安装/调用。
+
+| # | 点位 | 分类 | 一句证据 |
+|---|---|---|---|
+| 1 | serve-sessions.ts:498/537（拼 `plugin/scripts/quay-launch.sh`） | 下游可达 | `quay serve` /session 处理器，serve 面由 quay-init --loop 布到下游 |
+| 2 | ff-merge.ts:200/273/327 + :339/354（拼 `root/plugin/scripts` + `MODULE_REPO_ROOT` walk-up） | 下游可达 | fan-in 持锁段被 `quay task fan-in` + worker-driver 在下游 import |
+| 3 | mcp-server.ts:152（拼 `plugin/scripts/runtime-usage-inventory.ts`） | 下游可达 | Core MCP `instrument` 工具在下游项目跑 |
+| 4 | precommit-guard.ts:454/476（hook shim 拼 `$ROOT/plugin/scripts/`） | 下游可达 | quay-init.sh:2423-2438 把 hook 装进下游 `.git/hooks/` |
+| 5 | cli/manager.ts:51-64（walk-up 找 manager-start.sh） | 下游可达 | `quay manager start/arm` 在下游项目跑 |
+| 6 | observation.ts:2041/2630-2631/2728（DRIFT_CHECKER_REL + 本地 resolvePluginScript walk-up） | 下游可达 | web /board /dashboard /system 视图在下游项目跑 |
+| 7 | serve-send.ts:138/149（TRANSCRIPT_CHECKER_REL walk-up） | 下游可达 | web /send 在下游项目跑 |
+| 8 | os-anchor-watchdog.sh:254/295-296 | 仓库内部专用 | header「⚠ NOT A SHIPPED DELIVERABLE (human ruling 2026-08-06)」+ 实测 `quay-init.sh` 0 引用 |
+| 9 | os-anchor-install.sh:281/301 | 仓库内部专用 | 同上 header + `orchestration/*tick-core*.md` 0 引用（loop tick 文档里的「os-anchor-watchdog」只是观察者名单散文，非调用） |
+| 10 | scripts/test.sh（65 条 `${repo_root}/plugin/scripts/`） | 仓库内部专用 | 见 AC5 独立验证（非直觉） |
+
+### AC2 迁移映射（7 文件 → 唯一解析器，全部保留 AC139-4 拒 worktree 语义）
+
+- serve-sessions.ts → `resolvePluginScript("scripts/quay-launch.sh")`（.sh 无 dist 回退），null 即 fail-closed 返 null。
+- ff-merge.ts → 新增 `scriptsDirOf(args)`：`args.scriptsDir`（worker-driver 的 worktree 缝）?? `resolvePluginRoot()+"/scripts"`；入口 fail-closed、内层 `?? ""` 保留原有缺脚本降级。
+- mcp-server.ts → `resolvePluginExecutable(rel)` 改为 `resolvePluginScriptExec(rel 去 plugin/ 前缀)`（含 dist 回退 + stripTypes），两调用点 null 即 throw。
+- precommit-guard.ts → hook/pre-merge shim 在 install 时刻经 `resolvePluginScriptExec("scripts/precommit-guard.ts")` 烘焙解析后的绝对路径（含 stripTypes 判定），不再 `$ROOT/plugin/scripts/`。
+- cli/manager.ts → `resolvePluginScript("scripts/manager-start.sh"/"manager-arm-loop.sh")`，保留 `QUAY_MANAGER_SCRIPTS_DIR` env 缝，null fail-closed。
+- observation.ts → readBoardLanding 改 `resolvePluginScriptExec("scripts/task-status-drift-check.ts")`；runPluginScript 的 RESOURCE_GATE_REL/PROCESS_BUDGET_REL 改 plugin-root 相对 `scripts/*.sh`，走导入的 `resolvePluginScript`。
+- serve-send.ts → `resolveTranscriptChecker` 改 `resolvePluginScriptExec("scripts/transcript-delivery-check.ts")`。
+
+新 `resolvePluginScriptExec(rel): {path, stripTypes}|null` 加在 plugin-root.ts：raw .ts 优先（stripTypes=true），`.ts` 缺失回退 `scripts/dist/*.js`（stripTypes=false，gap-shipped-ts-files-are-not-bundled），`.sh` 不回退。
+
+### AC3 os-anchor 分类（迁移不适用 + 单一正本原则未被破坏）
+
+os-anchor-watchdog.sh / os-anchor-install.sh 经 AC1 分类为**仓库内部专用**（NOT A SHIPPED DELIVERABLE，quay-init 0 引用）——AC168「停止复制脚本」对它们无下游影响（它们本就不被 quay-init 安装/调用）。故「迁移两个 shell 入口」的前提（下游可达）不成立，迁移不适用，结论与证据已随 AC5 写入 SPEC §6b 旁注。
+「不得重新发明第四套判定算法」原则在唯一实际迁移的 bash 面（precommit-guard 的 hook shim）同样被遵守：shim 在 install 时刻经**唯一解析器** `resolvePluginScriptExec` 烘焙绝对路径（选「复用解析器」路线，理由：shim 跑在下游项目里，运行时无任何可 walk-up 的模块位置，烘焙 install 时刻的解析结果复用了单一解析器而不是把三步契约搬到 bash 重写）。
+
+### AC4 双向负控制（扩展 plugin-root.test.mjs 既有矩阵）
+
+新增 4 条 `resolvePluginScriptExec` 测试：raw .ts→stripTypes:true；仅 dist bundle→stripTypes:false（QUAY_PLUGIN_ROOT 密封 seam）；两形态皆缺→null；.sh→stripTypes:false 无 dist 回退。既有 worktree（不命中副本）与 no-local-plugin（不要求本地 plugin/）负控制对共享解析器传递覆盖全部迁移点——9/9 绿。
+
+### AC5 SPEC §6b 旁注
+
+scripts/test.sh 与 os-anchor-*.sh 的「仓库内部专用」结论 + 证据已写入 SPEC §6b 被否方案表旁注（2026-09-08 标注）。
+
+### DoD 读数
+
+- **负控制实测跑红**：把 `resolvePluginRoot()` 临时改回 `path.join(process.cwd(), "plugin")`（workspace-root 拼接），`node --experimental-strip-types --test packages/quay/test/plugin-root.test.mjs` → `no-local-plugin negative control` ✖ + `worktree negative control` ✖，**pass 7 / fail 2**；改回后 **pass 9 / fail 0**。
+- **无本地 plugin/ 临时 workspace 实测跑通**（`/tmp/quay-dod-noplugin-*`，仅 `.quay/config.yml`）：`resolvePluginScriptExec("scripts/runtime-usage-inventory.ts")` → `/home/yale/work/quay/plugin/scripts/runtime-usage-inventory.ts`（主检出，非 `<cwd>/plugin`）；`fetchInstrumentsManifest(ws)` → 返回真实 manifest（admitted=0 total=0，空目录是真实读数，非路径解析失败）；`newSessionArgs` → `argv[1]=/home/yale/work/quay/plugin/scripts/quay-launch.sh`。均输出真实结果，非 kernel-not-found / path 解析失败。
+- typecheck：`npx tsc --noEmit -p packages/quay` EXIT=0。precommit-guard 端到端 `--install-hook` 实测生成烘焙绝对路径的 hook，`git commit` 拒绝 multi-path Touches 的 e2e 测试仍绿（17/17）。
 
 ## DoD
 
