@@ -182,7 +182,7 @@ if [ "${build_ok}" -eq 0 ]; then
 fi
 
 # ── 2+3+4. Deliver + install + verify per host ─────────────────────────────────────────────────
-declare -A http_codes
+declare -A http_codes usage_verify
 deliver_fail=0
 for hk in ${hosts}; do
   target="${host_target[$hk]:-}"
@@ -220,7 +220,7 @@ cd "\$WS"
 quay serve --port ${verify_port} >/dev/null 2>&1 &
 SERVE_PID=\$!
 sleep 3
-code=\$(curl -sf -o /dev/null -w "%{http_code}" http://localhost:${verify_port}/ 2>/dev/null || echo "000")
+code=\$(curl -sfL -o /dev/null -w "%{http_code}" http://localhost:${verify_port}/ 2>/dev/null || echo "000")
 kill \$SERVE_PID 2>/dev/null || true
 wait \$SERVE_PID 2>/dev/null || true
 echo "CODE=\$code"
@@ -244,16 +244,34 @@ else
 fi
 REMOTE
 )
-  out="$(ssh "${ssh_opts[@]}" "${target}" "bash -s" <<< "${remote_script}" 2>&1)"
+  out="$(ssh "${ssh_opts[@]}" "${target}" "bash -s" <<< "${remote_script}" 2>&1 || true)"
   code="$(printf '%s\n' "${out}" | grep -oE 'CODE=[0-9]+' | tail -1 | cut -d= -f2 || echo "")"
   uv_ok="$(printf '%s\n' "${out}" | grep -c 'USAGE-VERIFY-OK' || true)"
-  if [ -n "${code}" ] && [ "${code}" = "200" ] && [ "${uv_ok}" -ge 1 ]; then
-    echo "develop-deliver: ${hk} (${target}) OK — quay serve http_code=${code} + usage-verify OK (AC92 top-N real-use mechanisms)"
+  # Decouple the two AC92 signals: http_code (is the installed quay serve up — the primary deliver
+  # signal) vs usage_verify (does the installed package's real-use surface intersect). Conflating
+  # them into one "200 vs verify-fail" hid WHICH half failed (today serve is 200 but the AC92
+  # usage-verify drifted on a non-bundled mechanism). Record each separately; still fail-closed on
+  # EITHER half.
+  if [ -n "${code}" ] && [ "${code}" = "200" ]; then
+    echo "develop-deliver: ${hk} (${target}) serve OK — http_code=${code}"
     http_codes[$hk]="${code}"
   else
-    echo "develop-deliver: ${hk} (${target}) VERIFY FAILED:" >&2
+    echo "develop-deliver: ${hk} (${target}) serve VERIFY FAILED (http_code=${code:-?}):" >&2
     printf '%s\n' "${out}" | tail -12 >&2
     http_codes[$hk]="verify-fail"
+    deliver_fail=1
+  fi
+  if [ "${uv_ok}" -ge 1 ]; then
+    usage_verify[$hk]="ok"
+    echo "develop-deliver: ${hk} (${target}) usage-verify OK (AC92 top-N real-use mechanisms)"
+  elif printf '%s\n' "${out}" | grep -q 'USAGE-VERIFY-SKIP'; then
+    usage_verify[$hk]="skip"
+  elif [ -n "${code}" ] && [ "${code}" != "200" ]; then
+    usage_verify[$hk]="not-run"   # serve failed ⇒ the remote aborted before usage-verify
+  else
+    usage_verify[$hk]="fail"
+    echo "develop-deliver: ${hk} (${target}) usage-verify FAILED (AC92 surface drifted):" >&2
+    printf '%s\n' "${out}" | tail -12 >&2
     deliver_fail=1
   fi
 done
@@ -264,6 +282,13 @@ first=1
 for hk in "${!http_codes[@]}"; do
   [ "${first}" -eq 0 ] && state_json="${state_json},"
   state_json="${state_json}\"${hk}\":\"${http_codes[$hk]}\""
+  first=0
+done
+state_json="${state_json}},\"usage_verify\":{"
+first=1
+for hk in "${!usage_verify[@]}"; do
+  [ "${first}" -eq 0 ] && state_json="${state_json},"
+  state_json="${state_json}\"${hk}\":\"${usage_verify[$hk]}\""
   first=0
 done
 state_json="${state_json}},\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"

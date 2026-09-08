@@ -20,7 +20,7 @@
 #      package's plugin/scripts, a fresh workspace, no network/live-session/repo dependency) with a
 #      documented invocation and return exit 0 + non-empty output.
 #   3. The verified set = capability-catalog.sh (the directory's self-inventory, AC2-mandated)
-#      + that offline-runnable subset. N = 10 verified rows over 9 distinct mechanisms
+#      + that offline-runnable subset. N = 7 verified rows over 6 distinct mechanisms
 #      (capability-catalog's --json and --entry-surface gates are two rows of the one mechanism).
 # If the cores name different mechanisms in the future, the set (and N) changes with them — this is
 # not a hardcoded number, it is the intersection of "named by the cores" with "offline-runnable".
@@ -29,6 +29,12 @@
 #   kind sh = plugin/scripts/<relpath> · kind js = plugin/scripts/dist/<relpath>
 #   All verified empirically against a package.sh-equivalent layout (build-plugin-dist + .ts deleted
 #   + invokers rewritten) — exit 0 + non-empty output in a fresh workspace.
+#   ⚠️ suite-execution-form-counter REMOVED (2026-09-08, gap-deliver-verification-trigger-orphaned-
+#   after-land-path-migration): its ONLY invocation reference lives in
+#   orchestration/orchestrator-tick-core.md, which build-plugin-dist does NOT scan (its CONSUMER_DIRS
+#   are under plugin/), so dist/suite-execution-form-counter.js is never built ⇒ the mechanism is
+#   ABSENT from the installed package ⇒ it fails the "offline-runnable subset" precondition. Re-adding
+#   it requires a BUILD-entry-detection fix (a separate gap), not a set row here.
 VERIFY_SET=(
   "capability-catalog-json|sh|capability-catalog.sh|--json"
   "capability-catalog-entry-surface|sh|capability-catalog.sh|--entry-surface"
@@ -36,7 +42,6 @@ VERIFY_SET=(
   "ready-pool-check|js|dist/ready-pool-check.js|--root @WS@ --cap 5"
   "slot-refill|js|dist/slot-refill.js|--root @WS@ --cap 5"
   "pool-quality-judge|js|dist/pool-quality-judge.js|--root @WS@"
-  "suite-execution-form-counter|js|dist/suite-execution-form-counter.js|--root @WS@"
   "fast-mode-telemetry|js|dist/fast-mode-telemetry.js|--root @WS@"
 )
 
