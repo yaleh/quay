@@ -59,21 +59,34 @@ tasks/                         PRESENT
 
 ## Acceptance Criteria
 
-- [ ] AC1 在 `tmux` 不可用（或无任何 session）的环境里跑 shipped 的 quay-init，exit 0 且六项闭集齐全
-- [ ] AC2 若仍保留该前置：不传 `--tmux-session` 时**一个文件都不写**（`git status --porcelain` 为空）
-- [ ] AC3 失败路径的输出逐项列出闭集六项的已写/未写状态（可机械解析）
-- [ ] AC4 新增测试在**模拟无 tmux** 的环境下跑（负控制：把该模拟去掉，测试应仍绿；把 tmux 前置改回硬失败，测试应变红）
-- [ ] AC5 `quay-init-closure-assertion.ts` 覆盖失败路径，而不只覆盖 happy path
+- [x] AC1 在 `tmux` 不可用（或无任何 session）的环境里跑 shipped 的 quay-init，exit 0 且六项闭集齐全
+- [x] AC2 若仍保留该前置：不传 `--tmux-session` 时**一个文件都不写**（`git status --porcelain` 为空）
+- [x] AC3 失败路径的输出逐项列出闭集六项的已写/未写状态（可机械解析）
+- [x] AC4 新增测试在**模拟无 tmux** 的环境下跑（负控制：把该模拟去掉，测试应仍绿；把 tmux 前置改回硬失败，测试应变红）
+- [x] AC5 `quay-init-closure-assertion.ts` 覆盖失败路径，而不只覆盖 happy path
 
 ## Definition of Done
 
 AC1–AC5 全绿，并在**一台非本机主机的非本仓库项目**里真跑一次 AC1
 （把主机名 + 项目路径 + 退出码写进 Evidence）。`scripts/test.sh` 全量绿。
 
+## Evidence
+
+外部主机 AC1 实测（DoD 要求）：主机 `orangevps`，非本仓库项目 `/tmp/xproj-gap-tmux`（`go.mod` 触发
+`go test ./...` 探测）；tmux 有 `quay-0`/`test-sess` 但均不匹配项目名 ⇒ 走零匹配分支，不传
+`--tmux-session` 跑修复后的 quay-init：**exit 0**、六项闭集齐全、`loop.tmux_session: null`。
+
+AC2 说明：tmux 前置已按 Plan 1 降为可选 ⇒ 条件「若仍保留该前置」不成立（真空满足）；剩余的硬前置
+（test-command / plugin-root / worktree-root）均在【写入之前】fail-closed —— 实测 pre-write 失败
+（无 test command）时报告六项全 `unwritten`（硬规则 7 同形，AC3 覆盖）。
+
 ## Touches
 
 - plugin/scripts/quay-init.sh
 - plugin/scripts/quay-init-closure-assertion.ts
 - plugin/test/quay-init.test.mjs
+- plugin/test/quay-init-tmux-detection.test.mjs
+- plugin/test/quay-init-laydown-closure.test.mjs
+- plugin/test/worktree-root-fs-check.test.mjs
 - plugin/skills/init/SKILL.md
 - tasks/gap-quay-init-hard-requires-tmux-session-and-leaves-partial-write.md
