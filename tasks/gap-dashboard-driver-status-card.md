@@ -2,7 +2,7 @@
 id: gap-dashboard-driver-status-card
 title: Dashboard「MANAGER / OUTER / INNER」卡读的是已退役探针（loop-driver-check/liveness
   恒空）——改读真实的 promotion/worker driver 存活状态
-status: todo
+status: ready
 labels:
   - gap
   - webui
