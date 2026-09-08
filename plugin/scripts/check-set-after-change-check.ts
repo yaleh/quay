@@ -76,7 +76,7 @@ export const REGRESSION_CASES: RegressionCase[] = [
   {
     name: "plugin/loop copy change (12a6b18b cp error chain)",
     changed: path.join("plugin", "loop", "manager-tick-core.md"),
-    mustInclude: [path.join("plugin", "test", "quay-init-loop-consumer-doc-refs.test.mjs")],
+    mustInclude: [path.join("plugin", "scripts", "laydown-set-check.sh")],
     mustExclude: [path.join("plugin", "scripts", "tick-core-static-check.ts")],
   },
   {
