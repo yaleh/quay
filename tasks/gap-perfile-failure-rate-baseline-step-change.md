@@ -58,10 +58,8 @@ extra:
 - plugin/test/perfile-failure-rate.test.mjs（新，fixture 单测：四态各至少一例 + fail-closed）
 - plugin/test/fan-in-execute-paths.test.mjs（既有测试文件，新增 fix-scope new-event 路由负控制）
 - plugin/scripts/capability-catalog.sh（新脚本六表注册）
-- .claude/workflows/fan-in-execute.js（canonical：FIX_SCOPE_GATE 附基线字段 + new-event 路由）
-- plugin/workflows/fan-in-execute.js（上一条的 byte-identical 分布镜像，必须同步改，⛔ 单边编辑会红）
+- plugin/workflows/fan-in-execute.js（FIX_SCOPE_GATE 附基线字段 + new-event 路由；.claude/ 双副本已随 gap-ac166 退役，此文件为唯一 canonical）
 - tasks/gap-perfile-failure-rate-baseline-step-change.md（自身）
-- docs/analysis/quay-init-closure-ratchet.baseline.json（capability-catalog.sh laydown 源变更的 closure-ratchet re-anchor 基线）
 
 ## Measured
 
