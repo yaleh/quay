@@ -1,7 +1,7 @@
 ---
 id: gap-perfile-failure-rate-baseline-step-change
 title: 套件失败逐次归因在这个数据结构下不可回答（0.12% 基础率）——改用逐文件失败率基线 + 阶跃检测，让"从未失败过的文件第一次红"成为可路由的独立类别
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -56,11 +56,10 @@ extra:
 
 - plugin/scripts/perfile-failure-rate.ts（新，本任务核心：基线计算 + 四态分类纯函数 + CLI）
 - plugin/test/perfile-failure-rate.test.mjs（新，fixture 单测：四态各至少一例 + fail-closed）
+- plugin/test/fan-in-execute-paths.test.mjs（既有测试文件，新增 fix-scope new-event 路由负控制）
 - plugin/scripts/capability-catalog.sh（新脚本六表注册）
-- .claude/workflows/fan-in-execute.js（canonical：FIX_SCOPE_GATE 附基线字段 + new-event 路由）
-- plugin/workflows/fan-in-execute.js（上一条的 byte-identical 分布镜像，必须同步改，⛔ 单边编辑会红）
+- plugin/workflows/fan-in-execute.js（FIX_SCOPE_GATE 附基线字段 + new-event 路由；.claude/ 双副本已随 gap-ac166 退役，此文件为唯一 canonical）
 - tasks/gap-perfile-failure-rate-baseline-step-change.md（自身）
-- docs/analysis/quay-init-closure-ratchet.baseline.json（capability-catalog.sh laydown 源变更的 closure-ratchet re-anchor 基线）
 
 ## Measured
 

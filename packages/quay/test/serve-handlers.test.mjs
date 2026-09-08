@@ -20,7 +20,7 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
-import { layoutGitGraph, renderGitHistoryPage, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, bucketSetOfFile, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript, taskRunsBlock, renderFanInCell, fanInLogPath, driverActionSpec, newSessionArgs, resumeSessionArgs, WEB_DRIVER_VERBS, WEB_DRIVER_KINDS } from "../src/serve-handlers.ts";
+import { layoutGitGraph, mainlineLane, renderGitHistoryPage, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, bucketSetOfFile, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript, taskRunsBlock, renderFanInCell, fanInLogPath, driverActionSpec, newSessionArgs, resumeSessionArgs, WEB_DRIVER_VERBS, WEB_DRIVER_KINDS } from "../src/serve-handlers.ts";
 import { readGitHistory, readLive, liveSessionIdForPid, sessionTranscriptPath, isValidSessionId, readWorkerOutcomeRecords } from "../src/observation.ts";
 import { renderLivePage } from "../src/serve-live.ts";
 import { sendSessionFrames, verdictStateToDeliveryState, classifyReceipt, resolveSessionEndpoint, sendToSession, renderSendResult, HELD_EXPIRY_MS, WEB_SEND_FROM_NAME } from "../src/serve-send.ts";
@@ -63,6 +63,11 @@ function hist(commits, head, heads = {}) {
   return { status: "ok", reason: null, commits, head, heads };
 }
 
+/** Lateral (non-mainline) lanes — the mainline is always `branches[0]`. */
+function laterals(layout) {
+  return layout.branches.filter((b) => b.kind !== "mainline");
+}
+
 // ── AC1 unit: layoutGitGraph computes the vertical trunk + branch fork/merge ──
 
 test("AC1: layoutGitGraph yields a vertical trunk (first-parent chain) + branch fork/merge edges", () => {
@@ -75,19 +80,19 @@ test("AC1: layoutGitGraph yields a vertical trunk (first-parent chain) + branch 
   ];
   const layout = layoutGitGraph(hist(commits, "m000000", { master: "m000000", "task/x": "x000000" }));
   assert.ok(layout, "an ok history yields a layout");
-  // trunk = first-parent chain from HEAD, oldest → newest
-  assert.deepEqual(layout.trunk.commits.map((x) => x.hash), ["a000000", "b000000", "m000000"], "trunk is the first-parent chain, oldest-first");
-  assert.equal(layout.trunk.ref, "master", "trunk carries the mainline ref name");
-  // the merge's second parent becomes a branch lane: fork at b, merge at m
-  assert.equal(layout.branches.length, 1, "exactly one branch lane");
-  const b = layout.branches[0];
+  // mainline = the mainline-reachable commits, oldest → newest (branches[0] is the spine)
+  assert.deepEqual(mainlineLane(layout).commits.map((x) => x.hash), ["a000000", "b000000", "m000000"], "mainline is the first-parent chain, oldest-first");
+  assert.equal(mainlineLane(layout).ref, "master", "mainline carries the mainline ref name");
+  // the merge's second parent becomes a lateral lane: fork at b, merge at m
+  assert.equal(layout.branches.length, 2, "mainline + one branch lane");
+  const b = laterals(layout)[0];
   assert.equal(b.ref, "task/x", "branch ref name");
   assert.deepEqual(b.commits.map((x) => x.hash), ["x000000"], "branch commits are the lateral commits");
   assert.equal(b.fork, "b000000", "fork point = the trunk commit the branch diverged from");
   assert.equal(b.merge, "m000000", "merge point = the trunk merge commit");
 });
 
-test("AC1: a linear history has a trunk and NO branch lanes (negative control)", () => {
+test("AC1: a linear history has a mainline and NO lateral lanes (negative control)", () => {
   const t0 = 1_700_000_000;
   const commits = [
     c("a000000", t0, "master", [], "base"),
@@ -95,8 +100,8 @@ test("AC1: a linear history has a trunk and NO branch lanes (negative control)",
     c("c000000", t0 + 2, "master", ["b000000"], "three"),
   ];
   const layout = layoutGitGraph(hist(commits, "c000000", { master: "c000000" }));
-  assert.deepEqual(layout.trunk.commits.map((x) => x.hash), ["a000000", "b000000", "c000000"], "trunk = whole chain");
-  assert.equal(layout.branches.length, 0, "no merge → no branch lanes");
+  assert.deepEqual(mainlineLane(layout).commits.map((x) => x.hash), ["a000000", "b000000", "c000000"], "mainline = whole chain");
+  assert.equal(layout.branches.length, 1, "no merge → mainline only, no lateral lanes");
 });
 
 test("AC2: branches are collapsed by default and carry full commits + time span for expansion", () => {
@@ -109,7 +114,7 @@ test("AC2: branches are collapsed by default and carry full commits + time span 
     c("m000000", t0 + 4, "master", ["b000000", "x200000"], "merge task/x"),
   ];
   const layout = layoutGitGraph(hist(commits, "m000000", { master: "m000000", "task/x": "x200000" }));
-  const b = layout.branches[0];
+  const b = laterals(layout)[0];
   assert.equal(b.collapsed, true, "AC2: branch is collapsed by default");
   assert.equal(b.commits.length, 2, "the full commit list is present (for expansion)");
   assert.deepEqual(b.commits.map((x) => x.hash), ["x100000", "x200000"], "branch commits oldest → newest");
@@ -170,7 +175,7 @@ test("AC2: summary table rows and the graph JSON name the SAME branch set (bidir
   const data = extractGraphData(html);
   assert.ok(data, "#git-graph-data payload present");
   const tableRefs = new Set(table.rows.map((row) => row[0]));
-  const graphRefs = new Set([data.trunk.ref, ...data.branches.map((b) => b.ref)]);
+  const graphRefs = new Set(data.branches.map((b) => b.ref));
   assert.deepEqual([...tableRefs].filter((r) => !graphRefs.has(r)).sort(), [], "table → graph: every table name is in the graph");
   assert.deepEqual([...graphRefs].filter((r) => !tableRefs.has(r)).sort(), [], "graph → table: every graph name is in the table");
 });
@@ -304,8 +309,12 @@ test("integration: GET /git-history serves the vertical-graph JSON payload + an 
     assert.ok(h.commits.some((x) => x.parents > 1), "git history source sees a merge commit");
     assert.ok(h.commits.some((x) => x.parentHashes.length === 2), "a merge commit carries 2 parent hashes");
     const layout = layoutGitGraph(h);
-    assert.ok(layout.branches.some((b) => b.ref === "feature/alpha"), "layout places the feature branch as a fork/merge lane");
-    assert.ok(layout.branches.every((b) => b.collapsed === true), "AC2: every branch is collapsed by default");
+    // gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge: a fully-merged branch's commits are
+    // re-attributed to the mainline ⇒ folded into the mainline lane, NOT a lateral lane; only the
+    // unmerged task branch stays a lateral lane.
+    assert.ok(!layout.branches.some((b) => b.ref === "feature/alpha"), "a fully-merged branch is folded into mainline, not a lane");
+    assert.ok(layout.branches.some((b) => b.ref === "task/GH-1"), "the unmerged task branch is a lateral lane");
+    assert.ok(laterals(layout).every((b) => b.collapsed === true), "AC2: every lateral branch is collapsed by default");
 
     // gap-git-history-branch-summary-wrong-numbers: a branch lane carries only its OWN commits, never
     // the shared mainline ancestry (the 481/111 symptom). feature/alpha was --no-ff merged into

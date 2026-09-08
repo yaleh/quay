@@ -128,12 +128,85 @@ export function runLaydownPaths(root: string): string[] | null {
   }
 }
 
+/** The SIX-item closed set (SPEC §6 QUAY-INIT-CLOSED-SET), `tasks/` directory member included — the
+ *  exact paths whose written/unwritten state a failing quay-init must mechanically report (AC3). */
+export const CLOSED_SET_ALL: readonly string[] = [
+  ".quay/config.yml",
+  ".quay/profiles.yml",
+  "tasks",
+  ".gitignore",
+  ".claude/launch.settings.json",
+  ".claude/settings.json",
+];
+
+export interface FailureStateReport {
+  /** exit code of the failed run (must be non-zero — a success is NOT-EVALUATED, never a pass). */
+  exitCode: number;
+  /** items reported as `written:` in the failure output. */
+  written: string[];
+  /** items reported as `unwritten:` in the failure output. */
+  unwritten: string[];
+  /** raw stdout+stderr of the failed run (diagnostics). */
+  output: string;
+}
+
+/**
+ * Run ONE real FAILING quay-init (a bare target with no detectable test command, so the run
+ * fail-closes BEFORE any write) and parse the AC3 closed-set state report (`written:`/`unwritten:`
+ * lines a non-zero exit must emit). Returns null when quay-init.sh is absent (the same NOT-EVALUATED
+ * condition as runLaydownPaths) or when the run unexpectedly exits 0 (a checker that expected a
+ * failure but saw none must not look like "覆盖了失败路径").
+ */
+export function runFailureStateReport(root: string): FailureStateReport | null {
+  const quayInit = path.join(root, "plugin", "scripts", "quay-init.sh");
+  if (!fs.existsSync(quayInit)) return null;
+  const tmpBase = fs.mkdtempSync(path.join(path.dirname(root), "quay-init-fail-"));
+  const target = path.join(tmpBase, "target");
+  fs.mkdirSync(target);
+  try {
+    let stdout = "";
+    let stderr = "";
+    let exitCode = 0;
+    try {
+      execFileSync(
+        "bash",
+        [quayInit, "--root", target, "--repo-root", target, "--plugin-root", path.join(root, "plugin")],
+        { timeout: 180_000, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" },
+      );
+    } catch (e: unknown) {
+      const err = e as { stdout?: unknown; stderr?: unknown; status?: unknown };
+      stdout = typeof err.stdout === "string" ? err.stdout : "";
+      stderr = typeof err.stderr === "string" ? err.stderr : "";
+      exitCode = typeof err.status === "number" ? err.status : 1;
+    }
+    if (exitCode === 0) return null; // expected a failure; a success is NOT-EVALUATED (unreadable input)
+    const output = stdout + "\n" + stderr;
+    const written: string[] = [];
+    const unwritten: string[] = [];
+    for (const line of output.split("\n")) {
+      const m = line.match(/^\s*(written|unwritten):\s*(.+?)\s*$/);
+      if (!m) continue;
+      const item = m[2].trim();
+      if (m[1] === "written") written.push(item);
+      else unwritten.push(item);
+    }
+    return { exitCode, written, unwritten, output };
+  } finally {
+    try {
+      fs.rmSync(tmpBase, { recursive: true, force: true });
+    } catch {
+      /* best-effort cleanup */
+    }
+  }
+}
+
 const usage = `quay-init-closure-assertion.ts — closed-set membership assertion over a REAL quay-init laydown (SPEC §6 / AC168)
 
 Usage:
   node --experimental-strip-types quay-init-closure-assertion.ts --gate [--root <dir>] [--json]
-      gate mode — exit 1 iff a laid-down path is outside the closed set (∪ tasks/ descendants) or a
-      forbidden extension-file copy is present; exit 3 (NOT-EVALUATED) iff the laydown could not run.`;
+      gate mode — exit 1 iff a laid-down path is outside the closed set (∪ tasks/ descendants), a
+      forbidden extension-file copy is present, or the failure path does not report every closed-set
+      item; exit 3 (NOT-EVALUATED) iff the laydown could not run.`;
 
 function main(argv: string[]): number {
   const args = argv.slice(2);
@@ -154,10 +227,26 @@ function main(argv: string[]): number {
     );
   }
   const verdict = assertClosure(rels);
-  if (verdict.ok) {
+
+  // AC5 failure path (gap-quay-init-hard-requires-tmux-session-and-leaves-partial-write): the checker
+  // must cover the FAILURE path too, not just the happy-path membership. A failing quay-init must
+  // mechanically report the six-item written/unwritten state (AC3) — assert every closed-set item
+  // appears in the report (written OR unwritten), so a report that silently omits an item is a FAIL.
+  const failReport = runFailureStateReport(root);
+  const failMissing: string[] = [];
+  if (failReport === null) {
+    failMissing.push("(failure path NOT-EVALUATED: a failing quay-init did not run to a non-zero exit)");
+  } else {
+    for (const item of CLOSED_SET_ALL) {
+      const seen = failReport.written.includes(item) || failReport.unwritten.includes(item);
+      if (!seen) failMissing.push(item);
+    }
+  }
+
+  if (verdict.ok && failReport !== null && failMissing.length === 0) {
     return emitPass(
-      `quay-init laydown is within the closed set: ${rels.length} file(s), all ∈ closed set ∪ tasks/ descendants, zero extension-file copies`,
-      { evaluated: true, files: rels.length, ...verdict },
+      `quay-init laydown is within the closed set (${rels.length} file(s), zero extension-file copies) and the failure path reports all ${CLOSED_SET_ALL.length} closed-set items`,
+      { evaluated: true, files: rels.length, ...verdict, failureExit: failReport.exitCode },
       { json: asJson },
     );
   }
@@ -167,9 +256,12 @@ function main(argv: string[]): number {
   for (const rel of verdict.forbiddenCopies) {
     process.stdout.write(`  forbidden-copy: ${rel}\n`);
   }
+  for (const item of failMissing) {
+    process.stdout.write(`  failure-report-missing: ${item}\n`);
+  }
   return emitFail(
-    `quay-init laydown VIOLATES the closed set: ${verdict.outsideClosedSet.length} path(s) outside the closed set, ${verdict.forbiddenCopies.length} forbidden extension-file copy(s)`,
-    { evaluated: true, files: rels.length, ...verdict },
+    `quay-init laydown VIOLATES the closed set (${verdict.outsideClosedSet.length} outside, ${verdict.forbiddenCopies.length} forbidden) or the failure path is uncovered (${failMissing.length} missing report item(s))`,
+    { evaluated: true, files: rels.length, ...verdict, failureReportMissing: failMissing },
     { json: asJson },
   );
 }

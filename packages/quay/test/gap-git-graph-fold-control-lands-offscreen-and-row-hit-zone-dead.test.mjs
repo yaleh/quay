@@ -55,13 +55,13 @@ const HEAD = "mB00000";
 function fixtureLayout() {
   const layout = layoutGitGraph(hist(FIXTURE, HEAD, { develop: HEAD }));
   assert.ok(layout, "fixture yields a layout");
-  assert.equal(layout.branches.length, 2, "precondition: two branch lanes");
+  assert.equal(layout.branches.length, 3, "precondition: mainline + two branch lanes");
   return layout;
 }
 
 /** The longest branch (B, 3 commits) — a multi-commit lane whose top/bottom rows are distinct. */
 function longestBranch(layout) {
-  return layout.branches.reduce((m, b) => (b.commits.length > m.commits.length ? b : m));
+  return layout.branches.filter((b) => b.kind !== "mainline").reduce((m, b) => (b.commits.length > m.commits.length ? b : m));
 }
 
 // ── AC1: the fold control lands on the branch's TOP row, within ±8px (not the bottom merge row) ───
@@ -97,7 +97,7 @@ test("AC1: the fold control y sits within ±8px of the branch's top-row y, far f
 test("AC2: hit rect count == lane count, and every rect spans ≥ (textX − trunkX)", () => {
   const layout = fixtureLayout();
   const rects = computeGitGraphHitRects(layout, new Set(), GIT_GRAPH_TEXT_X);
-  assert.equal(rects.length, layout.branches.length, "one hit rect per lane");
+  assert.equal(rects.length, layout.branches.filter((b) => b.kind !== "mainline").length, "one hit rect per lateral lane (mainline is the spine, no hit rect)");
   for (const r of rects) {
     assert.ok(
       r.width >= GIT_GRAPH_TEXT_X - GIT_GRAPH_TRUNK_X,

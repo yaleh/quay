@@ -7,6 +7,10 @@
 #  + config.yml, so `scripts/test.sh` in the worktree never depends on the agent remembering.)
 #
 # WHAT IT DOES (the enumerated set):
+#   0. branch self-check — the worktree's branch must be task/<id> (gap-task-branch-prefix-
+#      assumption-scattered-read-sites-orphan-enumeration-blind). A non-task branch (the
+#      2026-09-08 `develop` reuse that landed commits on develop bypassing fan-in) is refused
+#      (exit 2). Plain-dir / non-git / detached-HEAD worktrees have no determinable branch ⇒ skip.
 #   1. node_modules — the build phase of scripts/test.sh FAILS CLOSED without esbuild
 #      ("Cannot find package esbuild", refusing to test a possibly-stale bundle — that
 #      fail-closed is CORRECT and deliberately left untouched). Make node_modules present:
@@ -40,7 +44,7 @@
 #   --dry-run        print what would be done, change nothing
 #   --help           usage, exit 0
 #
-# Exit codes: 0 = provisioned (or already-provisioned); 2 = usage/env error.
+# Exit codes: 0 = provisioned (or already-provisioned); 2 = usage/env error (incl. non-task branch).
 #
 # Tests: plugin/test/dispatch-worktree-setup.test.mjs (@test-group engine).
 
@@ -83,6 +87,23 @@ if [ -z "${root}" ]; then
 fi
 [ -n "${root}" ] || root="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 [ -d "${root}" ] || { echo "dispatch-worktree-setup: main repo dir not found: ${root}" >&2; exit 2; }
+
+# ── 0. branch self-check (gap-task-branch-prefix-assumption-scattered-read-sites-orphan-enumeration-blind) ──
+# 写方唯一化并强制：任务 worktree 的分支必须是 task/<id>。worker 派发 prompt 里的自由 `git worktree add`
+# （无 -b / 复用既有分支）会造出非 task/ 前缀分支——2026-09-08 实测一个 worker 把 worktree 建在 develop
+# 分支上，其提交会直接落 develop 绕过 fan-in。这里 fail-closed：能读出分支但不是 task/* ⇒ 拒（exit 2），
+# ⛔ 不得静默接受。读不出分支（plain-dir 测试夹具 / 非 git worktree / detached HEAD）⇒ 跳过——没有分支
+# 可误判（node_modules 自验证语义对 plain dir 仍成立，现有测试依赖此 lenient 行为）。
+branch="$(git -C "${worktree}" symbolic-ref --short HEAD 2>/dev/null || true)"
+if [ -n "${branch}" ]; then
+  case "${branch}" in
+    task/*) ;;
+    *)
+      echo "dispatch-worktree-setup: worktree branch '${branch}' is not task/<id> — refusing to provision (a non-task branch would land commits on ${branch} bypassing fan-in)" >&2
+      exit 2
+      ;;
+  esac
+fi
 
 # ── 1. node_modules (AC1: symlink path AND install path) ─────────────────────────────────────
 if [ -e "${worktree}/node_modules" ] || [ -L "${worktree}/node_modules" ]; then

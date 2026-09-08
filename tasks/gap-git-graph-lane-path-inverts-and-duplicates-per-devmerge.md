@@ -4,7 +4,7 @@ title: git-history 的「分支泳道」模型假设 no-ff fan-in（从合并提
   ff——develop 最近 500 条 first-parent 链里 85 个合并提交全是「into task/id」的 dev-merge、真正
   task→develop 的 no-ff 合并为 0 条；结果图上 29-31 条「泳道」全是 develop 自身历史的碎片、套着已删分支的名字（4
   条实测经 git merge-base 核验为 develop 祖先），此前诊断的倒画/退化圆角/同名裂分只是这个错误重建的表征
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -55,13 +55,13 @@ git log develop --first-parent -n 500 --pretty='%P\x1f%s'
 
 ## AC
 
-- [ ] AC1 `layoutGitGraph` 返回值不含 `trunk` 顶层字段；对一个「develop 82 条 ff dev-merge + develop 自身 3 条真实提交」的 fixture（模拟本仓库真实形状），`branches` 中恰好一条 `kind: 'mainline'` 泳道装有全部这些提交，不产生任何其它泳道：`node --test packages/quay/test/gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge.test.mjs` 退出码 0。
-- [ ] AC2 负控制：测试内显式跑一次旧算法（合并提交第二父链优先反推），对同一 fixture 断言产生 > 1 条泳道（复现本仓库实测的碎片化）⇒ 判据能区分新旧。
-- [ ] AC3 生产读数（最强证据）：对本任务 Proposal 中列出的 4 个已核实的假泳道提交 hash，用 `git merge-base --is-ancestor <hash> develop` 作为独立 oracle（不信任被测代码自己的判断），断言这些 hash 在重写后的 `#git-graph-data` 里都落在 `kind: 'mainline'` 的泳道内，不再单独成一条泳道。
-- [ ] AC4 兜底路径仍然工作：fixture 造一个真实 no-ff 合并（第二父不可达自任何活 ref/mainline），断言产出恰好一条 `kind: 'reconstructed'` 泳道，装有该分支的专属提交。
-- [ ] AC5 几何修复：对全部 `path.git-svg-lane` 的 `d` 串，倒画数 = 0、退化圆角（`/Q (\d+),(\d+) \1,\2/`）命中数 = 0——生产读数，不是只在 fixture 里为 0。
-- [ ] AC6 chip 渲染统一：`grep -n "appendChip(g, trunkX" packages/quay/src/serve-git.ts` 无输出（trunk 专属 chip 调用点消失，为 P0 任务的落地清空前置代码）。
-- [ ] AC7 一般性泳道正确性（不止 4 个已知样本）：对生产 `#git-graph-data` 里**每一条** `kind !== 'mainline'` 的泳道，抽取它的任一提交 hash，断言 `git merge-base --is-ancestor <hash> develop` 返回**非 0**（即该提交确实不是 develop 的祖先，是真正独立的历史）——这是比 AC3 更强的全称判据，覆盖当前已知样本之外的潜在同类错误。
+- [x] AC1 `layoutGitGraph` 返回值不含 `trunk` 顶层字段；对一个「develop 82 条 ff dev-merge + develop 自身 3 条真实提交」的 fixture（模拟本仓库真实形状），`branches` 中恰好一条 `kind: 'mainline'` 泳道装有全部这些提交，不产生任何其它泳道：`node --test packages/quay/test/gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge.test.mjs` 退出码 0。
+- [x] AC2 负控制：测试内显式跑一次旧算法（合并提交第二父链优先反推），对同一 fixture 断言产生 > 1 条泳道（复现本仓库实测的碎片化）⇒ 判据能区分新旧。
+- [x] AC3 生产读数（最强证据）：对本任务 Proposal 中列出的 4 个已核实的假泳道提交 hash，用 `git merge-base --is-ancestor <hash> develop` 作为独立 oracle（不信任被测代码自己的判断），断言这些 hash 在重写后的 `#git-graph-data` 里都落在 `kind: 'mainline'` 的泳道内，不再单独成一条泳道。
+- [x] AC4 兜底路径仍然工作：fixture 造一个真实 no-ff 合并（第二父不可达自任何活 ref/mainline），断言产出恰好一条 `kind: 'reconstructed'` 泳道，装有该分支的专属提交。
+- [x] AC5 几何修复：对全部 `path.git-svg-lane` 的 `d` 串，倒画数 = 0、退化圆角（`/Q (\d+),(\d+) \1,\2/`）命中数 = 0——生产读数，不是只在 fixture 里为 0。
+- [x] AC6 chip 渲染统一：`grep -n "appendChip(g, trunkX" packages/quay/src/serve-git.ts` 无输出（trunk 专属 chip 调用点消失，为 P0 任务的落地清空前置代码）。
+- [x] AC7 一般性泳道正确性（不止 4 个已知样本）：对生产 `#git-graph-data` 里**每一条** `kind !== 'mainline'` 的泳道，抽取它的任一提交 hash，断言 `git merge-base --is-ancestor <hash> develop` 返回**非 0**（即该提交确实不是 develop 的祖先，是真正独立的历史）——这是比 AC3 更强的全称判据，覆盖当前已知样本之外的潜在同类错误。
 
 ## DoD
 
@@ -70,7 +70,13 @@ git log develop --first-parent -n 500 --pretty='%P\x1f%s'
 ## Touches
 
 - packages/quay/src/serve-git.ts（layoutGitGraph 重写为两阶段：ref 分区优先 + 历史级重建兜底；GitGraphLayout 去 trunk 加 kind；lanePath 几何修复；chip 渲染统一）
+- packages/quay/test/gap-git-graph-branch-name-fallback-to-trunk-ref.test.mjs（端到端断言随两阶段模型改为「重归因的已删分支提交折叠进唯一 mainline 泳道，不再产出幽灵 task/A·task/B 泳道」）
+- packages/quay/test/gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead.test.mjs（fixtureLayout 前置 2→3、longestBranch 过滤 mainline、hit-rect 计数改为按 lateral 泳道）
 - packages/quay/test/gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge.test.mjs（本任务的回归测试：ff-dev-merge-heavy fixture + 真实 no-ff fixture + 几何 fixture）
+- packages/quay/test/gap-git-graph-lane-visual-encoding-and-fixed-width.test.mjs（AC2 六分支 fixture 改 distinct ref 成 6 条 lateral 泳道；颜色断言按 lateral 过滤 mainline）
 - packages/quay/test/gap-git-graph-omits-inflight-branches-and-summary-table-disjoint.test.mjs（open 泳道判定逻辑随两阶段模型调整，相邻用例需同步更新）
+- packages/quay/test/gap-git-graph-row-key-collides-on-multiclaimed-commits.test.mjs（AC3 branches 计数 2→3；dupHashLayout fixture 改 branches[] 形——无 trunk、各泳道带 kind）
 - packages/quay/test/gap-git-graph-trunk-ref-resolves-to-head-not-mainline.test.mjs（trunk 字段移除后，断言改为「mainline 泳道排序第一 + 其 ref 正确解析」）
+- packages/quay/test/gap-git-history-lane-identity-and-row-layout-overlap.test.mjs（trunk 顶层字段移除后，lane 计数/行模型断言改为「mainline 泳道 + 侧泳道」）
+- packages/quay/test/serve-handlers.test.mjs（AC1/AC2 的 trunk/branches 断言随两阶段模型改为 mainline 泳道断言）
 - tasks/gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge.md
