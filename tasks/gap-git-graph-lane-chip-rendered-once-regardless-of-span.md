@@ -36,11 +36,11 @@ depends_on:
 
 ## AC
 
-- [ ] AC1 `computeChipStride` 对一个 50 行、全部属于同一泳道 id、`strideRows=20` 的 fixture 返回 3 个 chip 行（行 0、20、40），不是 1 个：`node --test packages/quay/test/gap-git-graph-lane-chip-rendered-once-regardless-of-span.test.mjs` 退出码 0。
-- [ ] AC2 负控制：测试内显式实现旧逻辑（每个泳道只在首行或末行画一次），对同一 fixture 断言 chip 数 = 1 ⇒ 判据能区分新旧。
-- [ ] AC3 生产读数：`curl -s http://127.0.0.1:4174/git-history` 渲染后，用 node 解析 SVG，develop（或当时的主线 ref）对应的 chip 元素数 > 1（当前生产值为 1）。
-- [ ] AC4 任意滚动位置覆盖：给定生产页面的总行数与 `strideRows`，同一泳道 id 相邻两个 chip 行的行号之差 ≤ `strideRows`，且 `strideRows * ROW_H` 小于一个保守视口高度常量（如 700px）——测试断言该不等式成立，而非只断言 chip 数量。
-- [ ] AC5 chip 渲染路径统一：`grep -n "appendChip(g, trunkX" packages/quay/src/serve-git.ts` 无输出（trunk 专属调用点已消失，与其它泳道共用同一渲染函数）。
+- [x] AC1 `computeChipStride` 对一个 50 行、全部属于同一泳道 id、`strideRows=20` 的 fixture 返回 3 个 chip 行（行 0、20、40），不是 1 个：`node --test packages/quay/test/gap-git-graph-lane-chip-rendered-once-regardless-of-span.test.mjs` 退出码 0。
+- [x] AC2 负控制：测试内显式实现旧逻辑（每个泳道只在首行或末行画一次），对同一 fixture 断言 chip 数 = 1 ⇒ 判据能区分新旧。
+- [x] AC3 生产读数：`curl -s http://127.0.0.1:4174/git-history` 渲染后，用 node 解析 SVG，develop（或当时的主线 ref）对应的 chip 元素数 > 1（当前生产值为 1）。
+- [x] AC4 任意滚动位置覆盖：给定生产页面的总行数与 `strideRows`，同一泳道 id 相邻两个 chip 行的行号之差 ≤ `strideRows`，且 `strideRows * ROW_H` 小于一个保守视口高度常量（如 700px）——测试断言该不等式成立，而非只断言 chip 数量。
+- [x] AC5 chip 渲染路径统一：`grep -n "appendChip(g, trunkX" packages/quay/src/serve-git.ts` 无输出（trunk 专属调用点已消失，与其它泳道共用同一渲染函数）。
 
 ## DoD
 
