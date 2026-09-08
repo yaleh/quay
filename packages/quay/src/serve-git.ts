@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { readGitHistory, type GitHistoryCommit, type GitHistoryResult } from "./observation.ts";
+import { readGitHistory, type GitHistoryCommit, type GitHistoryResult, GIT_HISTORY_MAINLINE_REFS } from "./observation.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2 } from "./serve-render.ts";
 
 export interface GitHistoryBranch {
@@ -266,12 +266,68 @@ function pickHead(history: GitHistoryResult): string | null {
   return best ? best.hash : null;
 }
 
-/** Branch name for a tip commit: the active ref pointing at it, else the `--source` ref, else short hash. */
-function branchNameOf(history: GitHistoryResult, hash: string): string {
+/** A resolved branch display name. `unresolved` distinguishes "no name could be determined" from a
+ *  resolved name (硬规则 3b: a read that cannot parse its input must not return a value shaped like
+ *  success). The display string for an unresolved tip is `unnamed@<short-hash>` — never a real ref
+ *  (git forbids `@` in the `head`/`tag` lookup a real name would come from, and no task branch name
+ *  contains it), so the renderer can tell the two apart and show it as plain, unlinkable text. */
+export interface BranchNameResolution {
+  name: string;
+  /** true when no real branch name was determined (not in heads, no merge-subject match). */
+  unresolved: boolean;
+}
+
+/** Parse the branch name out of a fan-in / dev-merge commit subject. Both conventions name the task
+ *  branch as one of the two quoted refs and the mainline as the other:
+ *    `Merge branch 'develop' into task/<id>`  (step-1 dev-merge, ff-carried onto develop)
+ *    `Merge branch 'task/<id>' into develop`  (a --no-ff fan-in merge)
+ *  A `task/<id>` name is preferred (it links to the task page); otherwise the first non-mainline
+ *  quoted name (author / doc/… / worktree-…). null when the subject has no merge-branch form or only
+ *  names mainline refs. */
+export function branchNameFromMergeSubject(subject: string): string | null {
+  const s = String(subject);
+  // git quotes ONLY the merged branch (`'X'`); the `into <target>` clause is UNQUOTED. Both conventions
+  // put the task branch in one slot and the mainline in the other, so collect both slots and pick the
+  // non-mainline name (task/<id> preferred for the task-page link).
+  const quoted = [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  const into = s.match(/\binto\s+([^\s]+)/)?.[1] ?? null;
+  const names = [...quoted, ...(into ? [into] : [])];
+  const task = names.find((n) => n.startsWith("task/"));
+  if (task) return task;
+  const nonMainline = names.find((n) => !GIT_HISTORY_MAINLINE_REFS.has(n));
+  return nonMainline ?? null;
+}
+
+/** Resolve a tip commit's branch display name. The three sources, in order:
+ *  1. a live branch whose tip IS `hash` (`heads` — but fan-in deletes the task branch, so this only
+ *     helps branches still checked out);
+ *  2. `hash`'s own subject, when `hash` is itself a dev-merge (`Merge branch 'develop' into task/<id>`
+ *     — the ff-fan-in shape: that merge commit IS the branch's last commit, and after the mainline
+ *     re-attribution its `--source` ref is `develop`, so the subject is the only real name left);
+ *  3. the fan-in merge that merged `hash` in (`hash` is one of its non-first parents) — its subject
+ *     names the branch being merged, which survives `git branch -d`.
+ *  A tip that resolves from none of these is `unresolved` — never silently relabelled to the mainline
+ *  ref (the old `:254` fallback returned `develop` for an unreadable tip, indistinguishable from a
+ *  lane genuinely named develop). */
+export function resolveBranchName(history: GitHistoryResult, hash: string): BranchNameResolution {
   for (const [name, tip] of Object.entries(history.heads ?? {})) {
-    if (tip === hash) return name;
+    if (tip === hash) return { name, unresolved: false };
   }
-  return history.commits.find((c) => c.hash === hash)?.ref ?? hash.slice(0, 7);
+  const tip = history.commits.find((c) => c.hash === hash);
+  const own = tip ? branchNameFromMergeSubject(tip.subject) : null;
+  if (own) return { name: own, unresolved: false };
+  for (const c of history.commits) {
+    if (c.parentHashes.length >= 2 && c.parentHashes.slice(1).includes(hash)) {
+      const name = branchNameFromMergeSubject(c.subject);
+      if (name) return { name, unresolved: false };
+    }
+  }
+  return { name: `unnamed@${hash.slice(0, 7)}`, unresolved: true };
+}
+
+/** Branch name for a tip commit (the display string the graph renders). */
+function branchNameOf(history: GitHistoryResult, hash: string): string {
+  return resolveBranchName(history, hash).name;
 }
 
 // ── D3 inlining (the third-party library the retired 「零客户端 JS」 invariant now permits) ──
