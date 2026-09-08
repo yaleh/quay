@@ -361,31 +361,51 @@ export function isBranchMerged(root, taskId) {
 }
 
 /**
- * Whether the fast-mode task `<taskId>` is checked out in an open worktree
- * (`git worktree list --porcelain`). An open worktree is a positive "executor may be mid-flight"
- * presence signal — the record is kept. Any git failure → false.
- *
- * MATCH IS SHAPE-AWARE, NOT BRANCH-PREFIX-AWARE (gap-worktree-exists-blind-to-unprefixed-task-branch):
- * a leftover worktree may be checked out on a bare `<taskId>` branch (no `task/` prefix) or a
- * detached HEAD, so the branch-ref form alone was blind to it and the leftover-worktree exemption
- * in ready-pool-check never fired. The only stable convention is the worktree PATH basename
- * (`<quay-worktrees>/<task-id>`). A worktree matches when EITHER its path basename equals taskId
- * OR its branch ref, with the `refs/heads/` namespace and an optional `task/` prefix stripped,
- * equals taskId. listWorktrees is fail-soft ([] on any git failure), so an unreadable list stays
- * false — absence is not fabricated into presence.
- * @param {string} root
+ * Shape-aware worktree→task match — the SINGLE judgment source for "is this worktree the task's?"
+ * (gap-task-branch-prefix-assumption-scattered-read-sites-orphan-enumeration-blind). A worktree
+ * matches `taskId` when EITHER its path basename equals `taskId` OR its branch ref, with the
+ * `refs/heads/` namespace and an optional `task/` prefix stripped, equals `taskId`. A detached-HEAD
+ * worktree (branch null) matches only by path basename. Pure — the caller supplies the worktree
+ * record (from listWorktrees), so tests inject deterministic facts without faking git.
+ * @param {{path?:string|null, branch?:string|null}} worktree
  * @param {string} taskId
  * @returns {boolean}
  */
+export function worktreeMatchesTask(worktree, taskId) {
+  if (!worktree || !taskId) return false;
+  if (worktree.path && path.basename(worktree.path) === taskId) return true;
+  if (!worktree.branch) return false;
+  let short = worktree.branch.startsWith("refs/heads/") ? worktree.branch.slice("refs/heads/".length) : worktree.branch;
+  if (short.startsWith("task/")) short = short.slice("task/".length);
+  return short === taskId;
+}
+
+/** Whether the task `<taskId>` is checked out in an open worktree (shape-aware via
+ *  `worktreeMatchesTask`; an open worktree is a positive "executor may be mid-flight" signal — the
+ *  record is kept). Any git failure → false (listWorktrees is fail-soft). */
 export function worktreeExists(root, taskId) {
-  const worktrees = listWorktrees(root);
-  return worktrees.some((wt) => {
-    if (wt.path && path.basename(wt.path) === taskId) return true;
-    if (!wt.branch) return false;
-    let short = wt.branch.startsWith("refs/heads/") ? wt.branch.slice("refs/heads/".length) : wt.branch;
-    if (short.startsWith("task/")) short = short.slice("task/".length);
-    return short === taskId;
-  });
+  return listWorktrees(root).some((wt) => worktreeMatchesTask(wt, taskId));
+}
+
+/**
+ * Parse `git worktree list --porcelain` output into `[{ path, branch }]`. Pure — the caller injects
+ * the raw text, so tests need no git subprocess. `branch` is the `refs/heads/...` ref or null for a
+ * detached-HEAD worktree.
+ * @param {string} text
+ * @returns {Array<{path:string, branch:string|null}>}
+ */
+export function parseWorktreePorcelain(text) {
+  const worktrees = [];
+  let cur = null;
+  for (const line of String(text ?? "").split("\n")) {
+    if (line.startsWith("worktree ")) {
+      cur = { path: line.slice("worktree ".length), branch: null };
+      worktrees.push(cur);
+    } else if (line.startsWith("branch ") && cur) {
+      cur.branch = line.slice("branch ".length);
+    }
+  }
+  return worktrees;
 }
 
 /**
@@ -400,17 +420,23 @@ export function listWorktrees(root) {
     const out = execFileSync("git", ["-C", root, "worktree", "list", "--porcelain"], {
       encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
     });
-    const worktrees = [];
-    let cur = null;
-    for (const line of out.split("\n")) {
-      if (line.startsWith("worktree ")) {
-        cur = { path: line.slice("worktree ".length), branch: null };
-        worktrees.push(cur);
-      } else if (line.startsWith("branch ") && cur) {
-        cur.branch = line.slice("branch ".length);
-      }
-    }
-    return worktrees;
+    return parseWorktreePorcelain(out);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Real task ids from the working-tree task store (`tasks/*.md`, `.md` stripped). Fail-soft: an
+ * unreadable store ⇒ [] (absence of grounding, ⛔ never a fabricated task id — hard rule 3b).
+ * @param {string} root
+ * @returns {string[]}
+ */
+export function listTaskIds(root) {
+  try {
+    return fs.readdirSync(path.join(root, "tasks"))
+      .filter((f) => f.endsWith(".md"))
+      .map((f) => f.slice(0, -".md".length));
   } catch {
     return [];
   }
@@ -426,6 +452,29 @@ export function listWorktrees(root) {
 export function taskIdFromBranch(branch) {
   const m = /^(?:refs\/heads\/)?task\/(.+)$/.exec(branch ?? "");
   return m ? m[1] : null;
+}
+
+/**
+ * Shape-aware "which task does this worktree belong to" — the enumeration half of
+ * `worktreeMatchesTask` (gap-task-branch-prefix-assumption-scattered-read-sites-orphan-enumeration-
+ * blind). Returns the taskId when the worktree is a task worktree:
+ *   (a) its branch is `task/<id>` (the naming convention — accepted even if absent from the store);
+ *   (b) its path basename is a REAL task id (a bare-`<id>` or detached-HEAD worktree under the
+ *       quay-worktrees convention).
+ * A non-task worktree (`develop`/`author`/`master`, the main checkout, an analysis worktree) yields
+ * null — grounding against the real task-id set is what stops a widened read from mis-enumerating
+ * every bare branch as a task. Pure; `taskIdSet` injected (listTaskIds in production).
+ * @param {{path?:string|null, branch?:string|null}} worktree
+ * @param {Set<string>} taskIdSet
+ * @returns {string|null}
+ */
+export function taskIdFromWorktree(worktree, taskIdSet) {
+  if (!worktree) return null;
+  const branchId = taskIdFromBranch(worktree.branch);
+  if (branchId != null) return branchId;
+  const cand = worktree.path ? path.basename(worktree.path) : null;
+  if (cand && taskIdSet && taskIdSet.has(cand)) return cand;
+  return null;
 }
 
 /**
@@ -552,22 +601,25 @@ export function makeFirstKnownCommitMsByTask(root) {
   const branchFirstCommitMs = new Map();
   const mergeFirstCommitMs = new Map();
   try {
-    const branches = execFileSync(
-      "git", ["-C", root, "for-each-ref", "--format=%(refname:short)", "refs/heads/task/"],
-      { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "ignore"] },
-    ).split("\n").map((s) => s.trim()).filter(Boolean);
-    for (const branch of branches) {
-      const taskId = branch.slice("task/".length);
+    // Enumerate OPEN worktrees and resolve each to its taskId via the shape-aware helper — ⛔ NOT
+    // `for-each-ref refs/heads/task/` (that is blind to a bare-`<id>` branch and, if widened to all
+    // refs, would misread develop/author/master + non-task worktrees as task branches). A detached-
+    // HEAD worktree has no live branch to log (matches the old refs-only enumeration's blindness to
+    // detached HEADs), so only worktrees WITH a branch contribute a branch-first-commit.
+    const taskIdSet = new Set(listTaskIds(root));
+    for (const wt of listWorktrees(root)) {
+      if (!wt || !wt.branch) continue;
+      const taskId = taskIdFromWorktree(wt, taskIdSet);
       if (!taskId) continue;
       // First commit on the branch not reachable from master (firstKnownCommitMs attempt 1).
       const out = execFileSync(
-        "git", ["-C", root, "log", "--reverse", "--format=%ct", branch, "^master"],
+        "git", ["-C", root, "log", "--reverse", "--format=%ct", wt.branch, "^master"],
         { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] },
       );
       const line = out.trim().split("\n")[0];
       if (line && /^\d+$/.test(line)) branchFirstCommitMs.set(taskId, Number(line) * 1000);
     }
-  } catch (_) { /* no live task branches / git unavailable — degrade to merge-only */ }
+  } catch (_) { /* no live task worktrees / git unavailable — degrade to merge-only */ }
 
   try {
     // ONE pass over all merge commits replaces the per-task `--all --merges --grep` scans. `%ct`
@@ -1547,15 +1599,20 @@ export function makeDefaultExecutorPresent(root) {
   // worktree branch set, and the live-process cmdlines), then answer every bracket from memory.
   // Fail-closed toward "free" exactly as before: an unreadable worktree list / /proc ⇒ no positive
   // signal, so the report degrades to the forward-only view rather than a false occupied slot.
-  const openBranches = new Set();
+  // Shape-aware (gap-task-branch-prefix-assumption-...): resolve each open worktree to its taskId via
+  // the shared helper, so a bare-`<id>` branch worktree is present too — ⛔ not a raw
+  // `refs/heads/task/<id>` string match on the branch ref.
+  const openTaskIds = new Set();
   try {
+    const taskIdSet = new Set(listTaskIds(root));
     for (const wt of listWorktrees(root)) {
-      if (wt && wt.branch) openBranches.add(wt.branch);
+      const id = taskIdFromWorktree(wt, taskIdSet);
+      if (id) openTaskIds.add(id);
     }
   } catch (_) { /* unreadable worktree list — no worktree-present signal */ }
   const procCmdlines = snapshotProcCmdlines();
   return (rec) => {
-    if (rec.taskId && openBranches.has(`refs/heads/task/${rec.taskId}`)) return { present: true, reason: "worktree-present" };
+    if (rec.taskId && openTaskIds.has(rec.taskId)) return { present: true, reason: "worktree-present" };
     if (rec.runId && processAliveInCmdlines(procCmdlines, rec.runId)) return { present: true, reason: "process-alive" };
     return { present: false, reason: "no-present-signal" };
   };

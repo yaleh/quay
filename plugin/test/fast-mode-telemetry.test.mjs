@@ -1961,6 +1961,35 @@ test("worktreeExists — unrelated id false, and an id that prefixes another id 
   }
 });
 
+// ── worktreeMatchesTask / taskIdFromWorktree (gap-task-branch-prefix-assumption-...) ──
+// The scattered `refs/heads/task/` read sites converge on ONE shape-aware judgment. These pure tests
+// pin the three matched shapes (bare branch / task/ branch / detached path-basename) plus the
+// enumeration-grounding negative controls: a non-task bare branch (worktree-slow-tests-analysis) and
+// the main checkout / develop must NOT be mis-enumerated as a task worktree (⛔ widened-read false
+// inclusion — AC4).
+
+test("worktreeMatchesTask — three shapes match (bare branch, task/ branch, detached path-basename) + unrelated rejected", async () => {
+  const cli = await importCli();
+  assert.equal(cli.worktreeMatchesTask({ path: "/home/yale/work/quay-worktrees/gap-x", branch: "refs/heads/gap-x" }, "gap-x"), true, "bare <id> branch matches (no task/ prefix)");
+  assert.equal(cli.worktreeMatchesTask({ path: "/home/yale/work/quay-worktrees/gap-x", branch: "refs/heads/task/gap-x" }, "gap-x"), true, "task/<id> branch matches");
+  assert.equal(cli.worktreeMatchesTask({ path: "/home/yale/work/quay-worktrees/gap-x", branch: null }, "gap-x"), true, "detached-HEAD worktree matches by path basename");
+  assert.equal(cli.worktreeMatchesTask({ path: "/home/yale/work/quay-worktrees/other", branch: "refs/heads/other" }, "gap-x"), false, "an unrelated worktree does not match");
+  assert.equal(cli.worktreeMatchesTask({ path: "/home/yale/work/quay-worktrees/gap-xy", branch: "refs/heads/task/gap-xy" }, "gap-x"), false, "an id that prefixes another id must not falsely match");
+  assert.equal(cli.worktreeMatchesTask(null, "gap-x"), false, "null worktree does not match");
+});
+
+test("taskIdFromWorktree — grounds bare/detached candidates against the real task-id set (⛔ non-task worktree not mis-enumerated)", async () => {
+  const cli = await importCli();
+  const taskIds = new Set(["gap-real", "gap-detached"]);
+  assert.equal(cli.taskIdFromWorktree({ branch: "refs/heads/task/gap-real" }, taskIds), "gap-real", "task/<id> branch resolves (convention, no grounding needed)");
+  assert.equal(cli.taskIdFromWorktree({ path: "/home/yale/work/quay-worktrees/gap-real", branch: "refs/heads/gap-real" }, taskIds), "gap-real", "bare branch whose basename is a real task resolves");
+  assert.equal(cli.taskIdFromWorktree({ path: "/home/yale/work/quay-worktrees/gap-detached", branch: null }, taskIds), "gap-detached", "detached HEAD whose basename is a real task resolves");
+  assert.equal(cli.taskIdFromWorktree({ path: "/home/yale/work/quay-worktrees/worktree-slow-tests-analysis", branch: "refs/heads/worktree-slow-tests-analysis" }, taskIds), null, "non-task bare branch is NOT a task worktree (AC4)");
+  assert.equal(cli.taskIdFromWorktree({ path: "/home/yale/work/quay", branch: "refs/heads/develop" }, taskIds), null, "main checkout / develop is NOT a task worktree");
+  assert.equal(cli.taskIdFromWorktree({ path: "/home/yale/work/quay-worktrees/gap-real", branch: "refs/heads/gap-real" }, new Set()), null, "no task store ⇒ bare branch NOT fabricated into a task (hard rule 3b)");
+  assert.equal(cli.taskIdFromWorktree(null, taskIds), null, "null worktree yields null");
+});
+
 test("WORKTREE-LEAK — isQuayWorktreePath excludes the main checkout and non-convention paths", async () => {
   const cli = await importCli();
   const root = "/home/yale/work/quay";
