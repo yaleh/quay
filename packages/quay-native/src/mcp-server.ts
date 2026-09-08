@@ -362,7 +362,7 @@ export async function startMcpServer({ tasksDir, adrDir, goalDir, metaDir, defau
   server.registerTool(
     "goal_write",
     {
-      description: "Write/patch one goal record (GOAL-NNN or AC-NNN) in the native store. status ∈ draft|active|achieved|superseded|retired; `origin` is required (empty origin writes nothing); an AC record must declare `goal: GOAL-NNN`; activating past the active-GOAL cap (default 3) is rejected unless the same call disposes an active goal.",
+      description: "Write/patch one goal record (GOAL-NNN or AC-NNN) in the native store. status ∈ draft|active|achieved|superseded|retired. Completeness is kind-split: a GOAL record requires a non-empty `body` (≥40 non-whitespace chars — background / scope & non-goals / exit conditions; `origin` is only a provenance citation, never the body) plus `origin`; an AC record requires `criterion` + `expect` + `goal: GOAL-NNN` (its content lives in those fields, `body` optional) plus `origin`. Empty `origin` writes nothing. Activating past the active-GOAL cap (default 3) is rejected unless the same call disposes an active goal.",
       inputSchema: {
         id: z.string(),
         title: z.string().optional(),

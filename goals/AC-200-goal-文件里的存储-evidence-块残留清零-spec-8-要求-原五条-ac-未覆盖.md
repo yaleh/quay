@@ -1,7 +1,7 @@
 ---
 id: AC-200
 title: goal 文件里的存储 evidence 块残留清零（SPEC §8 要求、原五条 AC 未覆盖）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-008
 criterion: >-
