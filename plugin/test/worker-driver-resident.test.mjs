@@ -555,6 +555,59 @@ test("AC6 end-to-end (superseded-reclaim) — a real superseded worktree is recl
   assert.match(runGit(root, ["branch", "--list", "task/gap-sup-wire"]), /gap-sup-wire/, "branch preserved (⛔ never git branch -D)");
 });
 
+// ── gap-superseded-mid-flight-live-worker-not-stopped：superseded 活 worker 被 reconcile 步 SIGTERM ──
+// AC5（接线，非「函数存在」）：常驻循环 reconcile 步真实走到本次改动——superseded + 存活 worker 的任务，
+//   其 round 记录 perTask 条目带 liveWorkerSignaled=true（⛔ 仅改导出函数而 reconcile 步不调 ⇒ round 记
+//   录无该字段 ⇒ 该 AC 假）。AC6（读生产载体，默认 process.kill）：spawnResident 不注入任何缝（走真实
+//   git//proc + 默认 process.kill）——round 记录带 liveWorkerSignaled 字段，且 fake worker 真被 SIGTERM
+//   杀死（⛔ 只是 flag 自证 = 回声，硬规则 4 推论三）。
+
+test("AC5/AC6 (superseded-mid-flight wiring + production carrier) — a live worker on a superseded task is SIGTERM'd by the reconcile step; round record carries liveWorkerSignaled", async (t) => {
+  const root = makeGitRoot("sup-mf-wire");
+  const taskId = "gap-sup-mf-wire";
+  writeTaskFile(root, taskId, "superseded");
+  runGit(root, ["branch", "develop"]); // readTaskStatus 读 develop ref；develop 指到含 superseded 任务文件的 commit
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  runGit(root, ["worktree", "add", "-q", "-b", `task/${taskId}`, wtPath]);
+  assert.equal(worktreePresentForTask(root, taskId), true, "precondition: superseded worktree present");
+
+  // 存活 worker：cmdline 含 quay-task-worker + task id（hasLiveWorkerForTask / findLiveWorkerPid 命中）。
+  const fake = spawn(process.execPath, ["-e", "setTimeout(()=>{},60000)", WORKER_PROCESS_NAME, taskId], { stdio: "ignore" });
+  t.after(() => { try { fake.kill("SIGKILL"); } catch { /* gone */ } });
+  const fakeExited = new Promise((resolve) => fake.once("exit", (code, signal) => resolve(signal)));
+  await new Promise((r) => setTimeout(r, 100)); // 让 /proc/<pid>/cmdline 可读
+
+  const drv = spawnResident(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:[],pool:0}))",
+    "--selector-cmd", "node -e console.log('gap-a\\x20pick')",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(0)",
+    "--interval", "20",
+  ]);
+  t.after(() => drv.stop());
+
+  await waitFor(() =>
+    readRoundLines(root).some((rec) =>
+      rec.superseded_reclaim &&
+      Array.isArray(rec.superseded_reclaim.perTask) &&
+      rec.superseded_reclaim.perTask.some((p) => p.taskId === taskId && p.liveWorkerSignaled === true)
+    ), 30000);
+
+  const rounds = readRoundLines(root);
+  const signaledRound = rounds.find((rec) =>
+    rec.superseded_reclaim && rec.superseded_reclaim.perTask.some((p) => p.taskId === taskId && p.liveWorkerSignaled === true));
+  assert.ok(signaledRound, "AC5: a round record shows the reconcile step reached the mid-flight signal path (liveWorkerSignaled true)");
+  const entry = signaledRound.superseded_reclaim.perTask.find((p) => p.taskId === taskId);
+  assert.equal(entry.liveWorkerSignaled, true, "AC6: production carrier perTask entry carries liveWorkerSignaled=true");
+  assert.equal(entry.skippedLiveWorker, true, "still skippedLiveWorker this round (disk reclaim deferred to next round)");
+  assert.equal(await fakeExited, "SIGTERM", "AC6: default process.kill delivered SIGTERM to the live worker (⛔ not just a flag)");
+});
+
 // ── gap-worker-driver-resident-loop-intermittent-hang：挂起复现负控制 ───────────────────────────────
 // 根因（实测 RUN 8 ENOTEMPTY）：常驻测试 after 钩按注册序 FIFO 运行，`fs.rmSync(root)` 先注册先运行、
 // 此刻驱动仍活（每轮写 root/.quay/worker-round.jsonl）⇒ rmSync ENOTEMPTY ⇒ 抛错跳过后续 `drv.stop()`

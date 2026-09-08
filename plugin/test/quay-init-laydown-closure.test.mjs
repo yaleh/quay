@@ -26,6 +26,8 @@ import {
   isInClosedSet,
   assertClosure,
   runLaydownPaths,
+  runFailureStateReport,
+  CLOSED_SET_ALL,
 } from "../scripts/quay-init-closure-assertion.ts";
 
 function makeTmp(prefix) { return fs.mkdtempSync(path.join(os.tmpdir(), `qicl-${prefix}-`)); }
@@ -72,6 +74,18 @@ test("hard rule 3b — runLaydownPaths with NO quay-init.sh ⇒ null (NOT-EVALUA
   try {
     assert.equal(runLaydownPaths(root), null, "a root without plugin/scripts/quay-init.sh must be NOT-EVALUATED");
   } finally { cleanup(root); }
+});
+
+// ── AC5 failure path (gap-quay-init-hard-requires-tmux-session-and-leaves-partial-write) ────────────
+test("AC5 — the failure path is covered: a failing quay-init reports every closed-set item's state", () => {
+  const report = runFailureStateReport(REPO_ROOT);
+  assert.ok(report !== null, "the failing quay-init must run to a non-zero exit (NOT-EVALUATED is a failure here)");
+  assert.notEqual(report.exitCode, 0, "a failure-path run must exit non-zero");
+  const seen = [...report.written, ...report.unwritten];
+  for (const item of CLOSED_SET_ALL) {
+    assert.ok(seen.includes(item),
+      `the failure report must cover closed-set item: ${item} (written=${report.written} unwritten=${report.unwritten})`);
+  }
 });
 
 test("hard rule 3b — the CLI exits 3 (NOT-EVALUATED third state) when the laydown cannot run", () => {

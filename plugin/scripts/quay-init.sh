@@ -156,7 +156,11 @@ fi
 # "<project>-0:0.0" (gap-init-guesses-the-tmux-session): it only worked for the project it was
 # written for, and a monitor aimed at a nonexistent session reports a LIVE inner as GONE (the
 # false-negative this monitor must never emit). The --loop block DETECTS the real session by
-# project name and FAILS CLOSED when none is found — never a guess.
+# project name as a BEST-EFFORT convenience — since the outer/inner dual-tmux model retired
+# (SPEC-tmux-retirement-2026-09-03) the session is OPTIONAL: quay-init's six-item closed-set write
+# never uses tmux, so a missing/ambiguous session leaves loop.tmux_session null instead of failing
+# the init (gap-quay-init-hard-requires-tmux-session-and-leaves-partial-write). Only a downstream
+# action that actually uses tmux fails closed at runtime — never this initializer.
 
 # Verify plugin root.
 if [ -z "$PLUGIN_ROOT" ]; then
@@ -518,8 +522,8 @@ sys.exit(1)
 # Prints:
 #   exactly one match  → the session name on stdout, exit 0 (caller writes it)
 #   multiple matches   → each matching session name on its own line, exit 2 (ambiguous — the
-#                        caller REQUIRES explicit --tmux-session, never picks one)
-#   zero matches       → nothing, exit 1 (caller FAILS CLOSED — never write a guess)
+#                        caller leaves loop.tmux_session null, never picks one)
+#   zero matches       → nothing, exit 1 (caller leaves loop.tmux_session null — never write a guess)
 detect_tmux_session() {
   local project="$1" m
   local -a matches=()
@@ -583,7 +587,10 @@ if not isinstance(loop, dict):
     loop = {}
 loop["repo_root"] = repo
 loop["test_command"] = test
-loop["tmux_session"] = tmux
+# gap-quay-init-hard-requires-tmux-session-and-leaves-partial-write: an empty session (no tmux
+# host / no matching session) is written as an explicit YAML null, not an empty string — the
+# session is optional since SPEC-tmux-retirement-2026-09-03, and null is the honest "not set".
+loop["tmux_session"] = tmux if tmux else None
 loop["worktree_root"] = wtroot
 data["loop"] = loop
 with open(cfg, "w", encoding="utf-8") as f:
@@ -775,7 +782,7 @@ providers:
 loop:
   repo_root: ${REPO_ROOT}
   test_command: ${TEST_COMMAND}
-  tmux_session: ${TMUX_SESSION}
+  tmux_session: ${TMUX_SESSION:-null}
   worktree_root: ${WORKTREE_ROOT}
   fork_baseline: develop
   merge_target: integration
@@ -1886,6 +1893,33 @@ if [ "${BASH_SOURCE[0]}" != "${0}" ]; then
   return 0
 fi
 
+# report_closed_set_state — the AC3 failure-path report: mechanically list the six-item closed-set
+# written/unwritten state (gap-quay-init-hard-requires-tmux-session-and-leaves-partial-write). Wired as
+# an EXIT trap below so a non-zero exit — a pre-write fail-closed check (test command / plugin root /
+# worktree root), a mid-write abort, or a post-write auto-commit failure — always reports WHICH items
+# landed. This makes "initialized half-way" distinguishable from "not initialized" (hard rule 3b
+# write-side mirror: a failed init must not be conflated with a complete one).
+report_closed_set_state() {
+  for p in .quay/config.yml .quay/profiles.yml tasks .gitignore .claude/launch.settings.json .claude/settings.json; do
+    if [ -e "$WORKSPACE_ROOT/$p" ]; then
+      echo "  written:   $p" >&2
+    else
+      echo "  unwritten: $p" >&2
+    fi
+  done
+}
+
+# _on_exit — EXIT trap: report the closed-set state on a non-zero exit only (a success run is already
+# fully reported by the install flow's own output).
+_on_exit() {
+  local rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "quay-init FAILED (exit $rc) — closed-set write state:" >&2
+    report_closed_set_state
+  fi
+}
+trap _on_exit EXIT
+
 # ── closed-set write (SPEC §6 / gap-quay-init-closure-shrink-body AC168) ────────────────────────────
 echo "quay-init (plugin v${PLUGIN_VERSION})"
 echo "  closed set: .quay/config.yml, .quay/profiles.yml, tasks/, .gitignore, .claude/launch.settings.json, .claude/settings.json"
@@ -1918,7 +1952,7 @@ providers:
 loop:
   repo_root: ${REPO_ROOT}
   test_command: ${TEST_COMMAND}
-  tmux_session: ${TMUX_SESSION}
+  tmux_session: ${TMUX_SESSION:-null}
   worktree_root: ${WORKTREE_ROOT}
   fork_baseline: develop
   merge_target: integration
@@ -2115,21 +2149,21 @@ else
   echo "  using explicit --tmux-session: $TMUX_SESSION"
 fi
 if [ -z "$TMUX_SESSION" ]; then
+  # tmux session is OPTIONAL since the outer/inner dual-tmux model retired (SPEC-tmux-retirement-
+  # 2026-09-03): quay-init's six-item closed-set write never uses tmux, so a missing/ambiguous
+  # session must NOT fail the init (gap-quay-init-hard-requires-tmux-session-and-leaves-partial-
+  # write). Detection is best-effort — exactly one match wins; zero or multiple matches leave
+  # loop.tmux_session null (never a guess, never a hard failure). Only a downstream action that
+  # actually uses tmux fails closed at runtime.
   DETECT_RC=0
   DETECT_OUT="$(detect_tmux_session "$PROJECT_NAME")" || DETECT_RC=$?
   if [ "$DETECT_RC" = 0 ]; then
     TMUX_SESSION="$DETECT_OUT"
     echo "  detected tmux session: $TMUX_SESSION (matching project '$PROJECT_NAME' — confirm this is correct)"
   elif [ "$DETECT_RC" = 2 ]; then
-    echo "ERROR: multiple tmux sessions match project '$PROJECT_NAME':" >&2
-    printf '%s\n' "$DETECT_OUT" | sed 's/^/         - /' >&2
-    echo "       Pass --tmux-session <sess> explicitly." >&2
-    exit 2
+    echo "  note: multiple tmux sessions match project '$PROJECT_NAME' — loop.tmux_session left null (tmux is optional; pass --tmux-session to pin one)"
   else
-    echo "ERROR: quay-init needs the target project's tmux session but none could be detected." >&2
-    echo "       There is no universal default — the old '<project>-0:0.0' only works for the project it was written for." >&2
-    echo "       Pass --tmux-session <sess> explicitly (e.g. 'tmux list-sessions' to see the real sessions)." >&2
-    exit 2
+    echo "  note: no tmux session detected for project '$PROJECT_NAME' — loop.tmux_session left null (tmux is optional; SPEC-tmux-retirement-2026-09-03)"
   fi
 fi
 

@@ -1506,6 +1506,44 @@ test("cleanupOrphanWorktree / worktreePathsForTask — find + remove orphan work
   assert.equal(again.error, null);
 });
 
+// ── gap-task-branch-prefix-assumption-scattered-read-sites-orphan-enumeration-blind ──
+// The residual-worktree read sites (worktreePresentForTask / worktreePathsForTask + async) converge
+// on the shape-aware helper. AC3 negative control (能取假): a worktree whose branch is a bare <id>
+// (NO task/ prefix) must be listed — the pre-fix regex `refs/heads/task/<id>` could not see it.
+
+test("worktreePresentForTask / worktreePathsForTask — a bare-<id> branch worktree (no task/ prefix) is detected (AC3)", (t) => {
+  const root = makeGitRoot("bareid");
+  const wtPath = path.join(root, "..", `wt-bare-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-bare-id", "ready");
+  runGit(root, ["branch", "develop"]);
+  runGit(root, ["worktree", "add", "-q", "-b", "gap-bare-id", wtPath]); // ⛔ no task/ prefix
+
+  assert.equal(worktreePresentForTask(root, "gap-bare-id"), true, "bare-<id> branch must be detected as present");
+  assert.deepEqual(worktreePathsForTask(root, "gap-bare-id"), [wtPath], "bare-<id> branch worktree path must be listed");
+  assert.deepEqual(worktreePathsForTask(root, "gap-other"), [], "an unrelated task has no worktree");
+});
+
+test("worktreePresentForTaskAsync / worktreePathsForTaskAsync — bare-<id> branch worktree detected (async parity)", async (t) => {
+  const root = makeGitRoot("bareidasync");
+  const wtPath = path.join(root, "..", `wt-bareasync-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-bare-async", "ready");
+  runGit(root, ["branch", "develop"]);
+  runGit(root, ["worktree", "add", "-q", "-b", "gap-bare-async", wtPath]);
+
+  assert.equal(await worktreePresentForTaskAsync(root, "gap-bare-async"), true, "async: bare-<id> branch present");
+  assert.deepEqual(await worktreePathsForTaskAsync(root, "gap-bare-async"), [wtPath], "async: bare-<id> branch path listed");
+});
+
 // ── gap-worker-cleanup-judgment-precision：清理前 git log 判产出 + failed 按信号区分 ──────────────────
 // AC1（能取假）：清理前查 `git log develop..task/<id>`——零提交 ⇒ 无产出可清、有提交 ⇒ 有实现保留
 //  （⛔ 纯终态字符串布尔判断、不看提交 ⇒ 假）。AC2（能取假）：failed 桶按信号区分，exit_code=143
@@ -1768,6 +1806,122 @@ test("dual-gate ② (superseded-reclaim) — live process anchored in the worktr
   assert.equal(entry.reclaimed, false);
   assert.deepEqual(res.skipped, ["gap-sup-f"]);
   assert.equal(worktreePresentForTask(root, "gap-sup-f"), true, "worktree survives");
+});
+
+// ── gap-superseded-mid-flight-live-worker-not-stopped：superseded 活 worker 发 SIGTERM ──────────────
+// AC1（能取假，直接信号）：superseded + 门①命中 ⇒ 注入的 sendSignal 以正确 pid + SIGTERM 调用；旧行为仅
+//   skip（从不发信号）⇒ 该 AC 假。AC2（负控制）：needs-human + 命中 ⇒ 不发信号（skip-only 保留）。AC3（负
+//   控制）：ready（非终态、不在候选集）⇒ 不发信号。AC4（硬规则 3b，字段可区分）：liveWorkerSignaled 在
+//   已信号 / 未信号两场景取不同值（同一字段两次不同值 ⇒ 真在判，⛔ 恒定）。
+
+test("AC1 (superseded-mid-flight) — live worker on a superseded task ⇒ sendSignal(pid, 'SIGTERM') is called; same round still skips disk reclaim", async (t) => {
+  const root = makeGitRoot("sup-mf-ac1");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-sup-mf-a", "superseded");
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-sup-mf-a", wtPath]);
+
+  const calls = [];
+  const res = await reclaimSupersededWorktrees(root, {
+    worktreeTasks: ["gap-sup-mf-a"],
+    statusOf: () => "superseded",
+    workerCmdlines: ["node quay-task-worker --task gap-sup-mf-a"],
+    procs: [],
+    pidOf: () => 4242,
+    sendSignal: (pid, signal) => { calls.push({ pid, signal }); },
+  });
+  const entry = res.perTask.find((p) => p.taskId === "gap-sup-mf-a");
+  assert.deepEqual(calls, [{ pid: 4242, signal: "SIGTERM" }], "AC1: sendSignal called once with the resolved pid + SIGTERM (⛔ not skip-only)");
+  assert.equal(entry.skippedLiveWorker, true, "still skipped for disk reclaim this round");
+  assert.equal(entry.liveWorkerSignaled, true, "AC1: liveWorkerSignaled true (signal actually sent)");
+  assert.equal(worktreePresentForTask(root, "gap-sup-mf-a"), true, "NOT reclaimed in the same round (worker exit is async; next round reclaims)");
+});
+
+test("AC2 (superseded-mid-flight) — needs-human task with a live worker ⇒ sendSignal NOT called (skip-only preserved)", async (t) => {
+  const root = makeGitRoot("sup-mf-ac2");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-sup-mf-b", "needs-human");
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-sup-mf-b", wtPath]);
+
+  const calls = [];
+  const res = await reclaimSupersededWorktrees(root, {
+    worktreeTasks: ["gap-sup-mf-b"],
+    statusOf: () => "needs-human",
+    workerCmdlines: ["node quay-task-worker --task gap-sup-mf-b"],
+    procs: [],
+    pidOf: () => 4242,
+    sendSignal: (pid, signal) => { calls.push({ pid, signal }); },
+  });
+  const entry = res.perTask.find((p) => p.taskId === "gap-sup-mf-b");
+  assert.equal(entry.status, "needs-human");
+  assert.deepEqual(calls, [], "AC2: sendSignal never called for needs-human (skip-only preserved)");
+  assert.equal(entry.liveWorkerSignaled, false, "AC2: needs-human ⇒ liveWorkerSignaled false");
+});
+
+test("AC3 (superseded-mid-flight) — ready task (non-terminal, not in candidate set) ⇒ sendSignal NOT called", async (t) => {
+  const root = makeGitRoot("sup-mf-ac3");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-sup-mf-c", "ready");
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-sup-mf-c", wtPath]);
+
+  const calls = [];
+  const res = await reclaimSupersededWorktrees(root, {
+    worktreeTasks: ["gap-sup-mf-c"],
+    statusOf: () => "ready",
+    workerCmdlines: ["node quay-task-worker --task gap-sup-mf-c"],
+    procs: [],
+    pidOf: () => 4242,
+    sendSignal: (pid, signal) => { calls.push({ pid, signal }); },
+  });
+  const entry = res.perTask.find((p) => p.taskId === "gap-sup-mf-c");
+  assert.equal(entry.status, "ready");
+  assert.deepEqual(calls, [], "AC3: sendSignal never called for ready (not a candidate)");
+  assert.equal(entry.liveWorkerSignaled, false, "AC3: ready ⇒ liveWorkerSignaled false");
+});
+
+test("AC4 (superseded-mid-flight) — liveWorkerSignaled takes DIFFERENT values across signaled vs not-signaled scenarios (⛔ not constant)", async (t) => {
+  const root = makeGitRoot("sup-mf-ac4");
+  const wtD = path.join(root, "..", `wt-${path.basename(root)}-d`);
+  const wtE = path.join(root, "..", `wt-${path.basename(root)}-e`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtD]); } catch { /* best-effort */ }
+    try { runGit(root, ["worktree", "remove", "--force", wtE]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtD, { recursive: true, force: true });
+    fs.rmSync(wtE, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-sup-mf-d", "superseded");
+  writeTaskFile(root, "gap-sup-mf-e", "needs-human");
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-sup-mf-d", wtD]);
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-sup-mf-e", wtE]);
+
+  const res = await reclaimSupersededWorktrees(root, {
+    worktreeTasks: ["gap-sup-mf-d", "gap-sup-mf-e"],
+    statusOf: (id) => (id === "gap-sup-mf-d" ? "superseded" : "needs-human"),
+    workerCmdlines: ["node quay-task-worker --task gap-sup-mf-d", "node quay-task-worker --task gap-sup-mf-e"],
+    procs: [],
+    pidOf: () => 4242,
+    sendSignal: () => { /* 计数非本 AC 关注点，AC1 已验 */ },
+  });
+  const signaled = res.perTask.find((p) => p.taskId === "gap-sup-mf-d");
+  const notSignaled = res.perTask.find((p) => p.taskId === "gap-sup-mf-e");
+  assert.equal(signaled.liveWorkerSignaled, true, "superseded scenario: liveWorkerSignaled true");
+  assert.equal(notSignaled.liveWorkerSignaled, false, "needs-human scenario: liveWorkerSignaled false");
+  assert.notEqual(signaled.liveWorkerSignaled, notSignaled.liveWorkerSignaled, "AC4: same field takes two different values (genuinely judging, ⛔ not constant)");
 });
 
 // ── 阶段 3（AC117）MCP 控制面：控制态 + 身份（AC2/AC3 纯函数）──────────────────────────────────────

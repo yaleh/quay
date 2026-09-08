@@ -33,13 +33,19 @@ import { execFileSync } from "node:child_process";
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 /** The kernel script that anchors "this dir is the plugin root" (the load-bearing non-skill
- *  consumer is cli/driver.ts). Two rel shapes cover the two install layouts:
- *  `plugin/scripts/…` (dev tree + npm-global, where `plugin/` is a subdir) and `scripts/…`
- *  (plugin marketplace / vendored bundle, where the plugin root IS the scripts' parent). */
+ *  consumer is cli/driver.ts). A candidate root must contain `scripts/` with the kernel in EITHER
+ *  raw form (`driver-runtime.ts`, the dev tree) or bundled form (`dist/driver-runtime.js` — the
+ *  shipped artifact DELETES raw .ts, so an installed package only has the bundle;
+ *  gap-plugin-dist-entry-derivation-blind-to-core-and-table-refs). */
 const KERNEL_RELS = [
-  path.join("plugin", "scripts", "driver-runtime.ts"),
   path.join("scripts", "driver-runtime.ts"),
+  path.join("scripts", "dist", "driver-runtime.js"),
 ];
+
+/** True when `root` directly contains `scripts/` with the kernel in either raw or bundled form. */
+function kernelAnchorExists(root: string): boolean {
+  return KERNEL_RELS.some((rel) => fs.existsSync(path.join(root, rel)));
+}
 
 /**
  * If `dir` is inside a NON-main linked git worktree (the literal `git worktree add` kind),
@@ -85,16 +91,25 @@ export function resolvePluginRoot(): string | null {
 
   const main = mainCheckoutRoot(MODULE_DIR);
   if (main) {
-    const cand = path.join(main, "plugin", "scripts", "driver-runtime.ts");
-    return fs.existsSync(cand) ? path.dirname(path.dirname(cand)) : null;
+    const cand = path.join(main, "plugin");
+    return kernelAnchorExists(cand) ? cand : null;
   }
 
-  let dir = MODULE_DIR;
+  return resolvePluginRootFrom(MODULE_DIR);
+}
+
+/**
+ * Walk-up probe from a start dir (test seam for the installed-artifact layout, where MODULE_DIR is
+ * not the source repo). Two install layouts per level: npm-global (`<dir>/plugin` IS the root) and
+ * marketplace / vendored (`<dir>` itself is the root) — the kernel anchor matches raw source AND the
+ * bundled dist form (installed packages delete raw .ts).
+ */
+export function resolvePluginRootFrom(startDir: string): string | null {
+  let dir = startDir;
   for (let i = 0; i < 8; i++) {
-    for (const rel of KERNEL_RELS) {
-      const cand = path.join(dir, rel);
-      if (fs.existsSync(cand)) return path.dirname(path.dirname(cand));
-    }
+    const pluginSubdir = path.join(dir, "plugin");
+    if (kernelAnchorExists(pluginSubdir)) return pluginSubdir;
+    if (kernelAnchorExists(dir)) return dir;
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;

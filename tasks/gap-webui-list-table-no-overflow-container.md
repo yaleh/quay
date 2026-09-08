@@ -4,6 +4,7 @@ title: 列表页表格没有详情页那条横向滚动规则（serve-render.ts:
   /goal 桌面端整页横向溢出 385px、移动端 tbody 1402px 撑爆 390 视口，/live /board /needs-human
   表头被压成竖排单字
 status: ready
+needs_human_cause: human-adjudication
 labels:
   - gap
   - webui
@@ -90,3 +91,21 @@ depends_on:
 - `packages/quay/src/serve-tests.ts`
 - `packages/quay/test/gap-webui-list-table-no-overflow-container.test.mjs`
 - `tasks/gap-webui-list-table-no-overflow-container.md`
+
+## Needs-Human
+
+**执行 2026-09-08T16:56:37.422Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 成因类：human-adjudication
+- 失败步/判词：step=scoped-gate: test-isolation-check — 572 glob file(s), 24 current violation(s) [fixed-path-write=12 shared-build-artifact-write=1 spawns-test-sh=5 process-exit-1=6 mkdtemp-no-cleanup=0 live-data-dir-write=0 shared-root-mkdtemp=0]
+  packages/quay-native/test/gate-checked-state.test.mjs:fixed-path-write  (line 26) const tasksDir = path.join(__dirname, ".tmp-gate-checked-state-test");
+PASS: all 24 violation(s) are baselined in plugin/test-isolation-violations.txt; the list can only get SHORTER (no additions, no growth, no stale entries).
+test-impl-census: checked 572 test files · clean 572 · impl-deleted 0
+TOUCHES-DIR-GLOB-HINT: 1 directory-level tasks/*.md glob(s) — enumerate concrete files or add（已知全局锁）(hint only, not a violation)
+- run_id：wk-prod-1788779505
+- session_id：f3daf8bb-70a9-4d56-82e5-01b58e42d1d0
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-webui-list-table-no-overflow-container-wk-prod-1788779505.log
+
+
+复核（2026-09-08，人工/助手核实）：5 次 fan-in 中 attempt1/2 suite 红与本任务改动无关（shellStyles ADDITIVE 断言 / mcp-server.test.mjs 超时）；attempt3/4 suite 实际转绿、ac-gate/flip-done 均成功，仅 ff 撞上 develop 并发推进的正常竞态（not a fast-forward，工作流设计为回无锁段重试）；attempt5 卡在 scoped-gate 步骤耗时 600s 超时，但捕获输出显示该步骤已跑到 PASS 收尾行，时间窗口与另一任务 gap-deliver-verification-trigger-orphaned-after-land-path-migration 的 attempt4 suite 运行窗口高度重叠，疑似两个 worker 同时跑全量 suite 造成资源争用——单次观测，未达立案门槛，仅记录不阻塞。本任务自身 AC 与实现无问题，复位 ready 重新派发。

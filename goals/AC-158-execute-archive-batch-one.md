@@ -1,7 +1,7 @@
 ---
 id: AC-158
 title: 执行批次一 —— 扫描后死集 git mv + INDEX 同一提交
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-003
 criterion: >-

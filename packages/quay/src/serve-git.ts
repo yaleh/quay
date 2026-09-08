@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { readGitHistory, type GitHistoryCommit, type GitHistoryResult, GIT_HISTORY_MAINLINE_REFS } from "./observation.ts";
+import { readGitHistory, type GitHistoryCommit, type GitHistoryResult, GIT_HISTORY_MAINLINE_REFS, GIT_HISTORY_LIMIT } from "./observation.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2 } from "./serve-render.ts";
 
 // gap-git-graph-omits-inflight-branches-and-summary-table-disjoint: groupCommitsByBranch (the old
@@ -31,8 +31,16 @@ function isoTime(t: number): string {
 }
 
 
+export type GitGraphLaneKind = "mainline" | "live" | "reconstructed";
+
 export interface GitGraphBranchLane {
   ref: string;
+  /** Which partition produced this lane (gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge):
+   *  `mainline` — the ref-partition primary (every mainline-reachable commit, drawn as the vertical
+   *  spine); `live` — a still-checked-out branch's exclusive commits (`.ref` is a live `heads` ref);
+   *  `reconstructed` — a no-ff merged + deleted branch whose second-parent chain is not attributable to
+   *  any live/mainline ref (the historical-reconstruction fallback). `branches[0]` is always mainline. */
+  kind: GitGraphLaneKind;
   /** Structural lane id (fork::merge hashes, or the first commit hash when fork is null). It is the
    *  `expanded` state key and the lane→x key — decoupled from `ref`, which can collapse to one string
    *  when several deleted task branches are all re-labelled to the mainline ref. */
@@ -57,17 +65,26 @@ export interface GitGraphBranchLane {
   open: boolean;
   firstT: number;
   lastT: number;
-  /** AC2: branches are collapsed by default — the client shows count + span until expanded. */
-  collapsed: true;
+  /** AC2: lateral branches are collapsed by default — the client shows count + span until expanded.
+   *  The mainline lane is `collapsed: false` (it is always drawn as the expanded spine). */
+  collapsed: boolean;
 }
 
 export interface GitGraphLayout {
-  trunk: { ref: string; commits: Array<{ hash: string; t: number; parents: number; subject: string }> };
+  /** ALL lanes, mainline FIRST (`branches[0].kind === "mainline"`). The mainline lane holds every
+   *  mainline-reachable commit; each other lane holds one branch's exclusive commits. There is no
+   *  separate `trunk` field — the trunk IS the mainline lane (gap-git-graph-lane-path-inverts-and-
+   *  duplicates-per-devmerge: trunk is not a special type, just the first lane). */
   branches: GitGraphBranchLane[];
   commitCount: number;
   mergeCount: number;
   /** Number of lanes that exceeded GIT_GRAPH_MAX_LANES (the client renders a "+N more" hint). */
   overflowCount: number;
+}
+
+/** The mainline lane — always `branches[0]` (the ref-partition primary, drawn as the vertical spine). */
+export function mainlineLane(layout: GitGraphLayout): GitGraphBranchLane {
+  return layout.branches[0];
 }
 
 // ── Graph-track geometry (gap-git-history-lane-identity-and-row-layout-overlap) ────────────────────
@@ -88,6 +105,10 @@ export const GIT_GRAPH_MAX_LANES = 8;
 export const GIT_GRAPH_PAD_Y = 24;
 /** Fixed row height — one visible commit/summary per 26px band. */
 export const GIT_GRAPH_ROW_H = 26;
+/** gap-git-graph-lane-chip-rendered-once-regardless-of-span AC4: repeat a lane's name chip every this
+ *  many rows so any scroll position lands within `strideRows × GIT_GRAPH_ROW_H` px of a chip
+ *  (20 rows × 26px = 520px < a 700px conservative viewport height). */
+export const GIT_GRAPH_CHIP_STRIDE_ROWS = 20;
 
 // ── Lane colour encoding (gap-git-graph-lane-visual-encoding-and-fixed-width) ──────────────────────
 // The retired single `.git-svg-grid` stroke (--color-neutral-200 / #eae7e7) measured 1.13:1 against the
@@ -143,16 +164,102 @@ export interface GitGraphRowItem {
 export function computeGitGraphRows(layout: GitGraphLayout, expandedLaneIds: ReadonlySet<string>): GitGraphRowItem[] {
   type Raw = { kind: "commit" | "summary"; hash: string | null; laneId: string | null; t: number; tie: string };
   const items: Raw[] = [];
-  for (const c of layout.trunk.commits) items.push({ kind: "commit", hash: c.hash, laneId: null, t: c.t, tie: c.hash });
   for (const b of layout.branches) {
-    if (expandedLaneIds.has(b.id)) {
+    if (b.kind === "mainline") {
+      // The mainline lane is always expanded (its commits are the vertical spine, laneId null).
+      for (const c of b.commits) items.push({ kind: "commit", hash: c.hash, laneId: null, t: c.t, tie: c.hash });
+    } else if (expandedLaneIds.has(b.id)) {
       for (const c of b.commits) items.push({ kind: "commit", hash: c.hash, laneId: b.id, t: c.t, tie: c.hash });
     } else {
       items.push({ kind: "summary", hash: null, laneId: b.id, t: b.mergeT ?? b.lastT, tie: b.id });
     }
   }
-  items.sort((a, b) => a.t - b.t || (a.tie < b.tie ? -1 : a.tie > b.tie ? 1 : 0));
+  // gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge: a collapsed summary row's `t` equals
+  // its own merge commit's `t` (both = b.mergeT), so the OLD tie-break (summary id vs merge hash,
+  // lexicographic) could land the summary BELOW its merge row — inverting the lane (botY < topY) and
+  // degenerating the rounded corner (r = max(0, vert/2) = 0). Pin the summary BEFORE any commit at the
+  // same `t` (kind order: summary=0, commit=1), so a lane's top row is always above its merge row.
+  const kindOrder = (k: "commit" | "summary") => (k === "summary" ? 0 : 1);
+  items.sort((a, b) => a.t - b.t || (kindOrder(a.kind) - kindOrder(b.kind)) || (a.tie < b.tie ? -1 : a.tie > b.tie ? 1 : 0));
   return items.map((it, row) => ({ kind: it.kind, hash: it.hash, laneId: it.laneId, t: it.t, row }));
+}
+
+/**
+ * gap-git-graph-lane-chip-rendered-once-regardless-of-span AC1/AC4 — pure: given visible rows (each
+ * carrying `row` and its lane id, `null` = the mainline/trunk), return the rows that need a name chip
+ * so any scroll position sits within `strideRows` of one. Within each lane's contiguous row span the
+ * FIRST row always gets a chip and every `strideRows`-th row after it does too, until the span ends.
+ * The mainline and every lateral lane share this ONE call path (no trunk-specific chip site).
+ *
+ * Written WITHOUT TypeScript annotations so it can be injected into the client renderer verbatim via
+ * `computeChipStride.toString()` (single source of truth — the client runs the same function the test
+ * imports). Its body carries no template literal, `${`, or `</script`, so it inlines safely.
+ */
+export function computeChipStride(items, strideRows) {
+  const chips = [];
+  const span = new Map();
+  for (const it of items) {
+    const id = it.laneId;
+    const r = it.row;
+    const s = span.get(id);
+    if (s === undefined) { span.set(id, { min: r, max: r }); }
+    else { if (r < s.min) s.min = r; if (r > s.max) s.max = r; }
+  }
+  for (const entry of span) {
+    const laneId = entry[0];
+    const s = entry[1];
+    for (let r = s.min; r <= s.max; r += strideRows) chips.push({ laneId, row: r });
+  }
+  return chips;
+}
+
+/**
+ * Build the SVG path `d` for one branch lane. This is the SERVER-side mirror of the client
+ * renderer's `lanePath()` (keep the two in lock-step) — extracted so the fail-closed behaviour
+ * is unit-testable without a browser. The four row arguments mirror the client call site:
+ * `lanePath(laneX, forkRow, mergeRow, laneTop, laneBot)`, where `laneTop`/`laneBot` fall back to
+ * the lane's first/last visible rows when there is no fork/merge.
+ *
+ * FAIL-CLOSED (gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge AC1): returns `null`
+ * when `botY <= topY` — an inverted lane — instead of emitting a path that draws the line UPWARD
+ * and degenerates its rounded corner to `Q x,y x,y` (the old `r = Math.max(0, vert/2)` collapses
+ * to 0 for a non-positive `vert`). `null` is distinguishable from a legal path string, so a caller
+ * skips the lane rather than silently drawing it upside down.
+ */
+export function buildLanePath(args: {
+  laneX: number;
+  forkRow: number | null;
+  mergeRow: number | null;
+  laneTopRow: number | null;
+  laneBotRow: number | null;
+  trunkX?: number;
+  laneGap?: number;
+  padY?: number;
+  rowH?: number;
+}): string | null {
+  const trunkX = args.trunkX ?? GIT_GRAPH_TRUNK_X;
+  const laneGap = args.laneGap ?? GIT_GRAPH_LANE_GAP;
+  const padY = args.padY ?? GIT_GRAPH_PAD_Y;
+  const rowH = args.rowH ?? GIT_GRAPH_ROW_H;
+  const y = (row: number) => padY + row * rowH;
+  const hasFork = args.forkRow != null;
+  const hasMerge = args.mergeRow != null;
+  const topY = hasFork ? y(args.forkRow as number) : y(args.laneTopRow as number);
+  const botY = hasMerge ? y(args.mergeRow as number) : y(args.laneBotRow as number);
+  if (botY <= topY) return null; // inverted lane — fail closed, never draw it
+  const vert = botY - topY;
+  let r = Math.min(6, laneGap / 2);
+  if (vert < 2 * r) r = Math.max(0, vert / 2);
+  if (hasFork && hasMerge) {
+    return `M ${trunkX},${topY} H ${args.laneX - r} Q ${args.laneX},${topY} ${args.laneX},${topY + r} V ${botY - r} Q ${args.laneX},${botY} ${args.laneX - r},${botY} H ${trunkX}`;
+  }
+  if (hasFork) {
+    return `M ${trunkX},${topY} H ${args.laneX - r} Q ${args.laneX},${topY} ${args.laneX},${topY + r} V ${botY}`;
+  }
+  if (hasMerge) {
+    return `M ${args.laneX},${topY} V ${botY - r} Q ${args.laneX},${botY} ${args.laneX - r},${botY} H ${trunkX}`;
+  }
+  return `M ${args.laneX},${topY} V ${botY}`;
 }
 
 /**
@@ -203,159 +310,161 @@ export function computeGitGraphHitRects(
 }
 
 /**
- * Compute the vertical graph structure: a trunk (the first-parent chain from HEAD) + one lateral
- * lane per branch that forks from and merges back into the trunk. PURE and deterministic on its
- * input — AC1 (vertical trunk + fork/merge edges) is tested on this output, before any SVG is drawn.
+ * Compute the vertical graph structure in TWO phases (gap-git-graph-lane-path-inverts-and-duplicates-
+ * per-devmerge). The OLD model reconstructed branch lanes by walking each merge commit's second-parent
+ * chain — an algorithm that assumes no-ff fan-in and so, in THIS ff-fan-in repo, split develop's own
+ * history into dozens of phantom lanes named after deleted branches. The new model trusts the ref
+ * partition that readGitHistory already produces (every mainline-reachable commit is re-attributed to
+ * the mainline ref; every live branch's exclusive commits keep their own ref):
+ *
+ *   Phase 1 (ref partition, authoritative) — group by `.ref`. A mainline ref → ONE `kind: 'mainline'`
+ *   lane (the vertical spine); a live branch ref (still in `heads`) → a `kind: 'live'` lane; anything
+ *   else is left unclaimed for phase 2.
+ *
+ *   Phase 2 (historical reconstruction, fallback) — the unclaimed commits (a no-ff merged + deleted
+ *   branch, reachable only through a merge's second parent, with no independent live/mainline `.ref`)
+ *   are grouped by `.ref` into `kind: 'reconstructed'` lanes. This runs AFTER the ref partition, so it
+ *   can never resurrect a phantom lane over a correctly-attributed commit.
+ *
+ * PURE and deterministic on its input — tested on this output, before any SVG is drawn.
  */
 export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null {
   if (history.status !== "ok" || history.commits.length === 0) return null;
   const byHash = new Map(history.commits.map((c) => [c.hash, c]));
-  // Trunk = first-parent chain from HEAD (the mainline that receives the fan-in merges). When HEAD
-  // is unresolvable, fall back to the newest commit — the layout still yields a vertical trunk.
-  const trunkRoot = history.head ?? pickHead(history);
-  let cur: string | null = trunkRoot;
-  const trunkHashes: string[] = [];
-  const seen = new Set<string>();
-  while (cur && byHash.has(cur) && !seen.has(cur)) {
-    seen.add(cur);
-    trunkHashes.push(cur);
-    cur = byHash.get(cur)!.parentHashes[0] ?? null;
-  }
-  const trunkSet = new Set(trunkHashes);
-  const toCommit = (h: string): { hash: string; t: number; parents: number; subject: string } => {
-    const c = byHash.get(h)!;
-    return { hash: c.hash, t: c.t, parents: c.parents, subject: c.subject };
-  };
-  const trunk = {
-    // gap-git-graph-trunk-ref-resolves-to-head-not-mainline: the trunk name is the mainline ref
-    // (develop > master), NOT the HEAD branch name — the main checkout is usually on `author`, so
-    // the old `branchNameOf(history, history.head)` named the trunk `author` even when `author`
-    // and `develop` pointed at the same commit (and the summary table + guide prose both said
-    // `develop`). Merge-subject resolution is only the fallback when no mainline ref exists AND
-    // no head matches a tip.
-    ref: resolveTrunkRef(history.heads ?? {}, trunkRoot) || (trunkRoot ? branchNameOf(history, trunkRoot) : ""),
-    commits: trunkHashes.map(toCommit).reverse(), // oldest → newest
-  };
+  const head = history.head ?? pickHead(history);
+  // The mainline lane's display name is the mainline ref (develop > master > HEAD branch), never the
+  // HEAD branch name — the main checkout is usually on `author` (gap-git-graph-trunk-ref-resolves-to-
+  // head-not-mainline). Merge-subject resolution is only the fallback when no mainline ref exists.
+  const mainlineRef = resolveTrunkRef(history.heads ?? {}, head) || (head ? branchNameOf(history, head) : "");
 
-  const branches: GitGraphBranchLane[] = [];
-  // gap-git-graph-row-key-collides-on-multiclaimed-commits: a commit is OWNED by exactly one lane.
-  // `claimed` holds every hash already assigned to an extracted lane, so a nested lane (forked from
-  // another lane rather than from the trunk) stops at the claimed boundary instead of re-claiming the
-  // shared commits — which was the root cause of 497/774 commits being drawn on two lanes at once.
-  // `usedIds` guards the lane id against a fork::merge collision (two parents of one merge forking
-  // from the same trunk commit) and against fork=null lanes sharing the same first commit.
-  const claimed = new Set<string>();
-  const usedIds = new Set<string>();
-  // Walk merges OLDEST → NEWEST (trunk.commits is oldest → newest) so the outermost lane — the one
-  // that forked directly from the trunk — claims its commits first, and a branch-of-a-branch keeps
-  // only its own exclusive commits.
-  for (const c of trunk.commits) {
-    const hash = c.hash;
-    const full = byHash.get(hash)!;
-    if (full.parentHashes.length < 2) continue; // not a merge — no branch lands here
-    // Each non-first parent is a branch tip merged in. Walk its first-parent chain back to the first
-    // trunk commit (the fork point); the commits in between are that branch's own commits.
-    for (const p of full.parentHashes.slice(1)) {
-      const lane: Array<{ hash: string; t: number; parents: number; subject: string }> = [];
-      let curP: string | null = p;
-      let fork: string | null = null;
-      const visited = new Set<string>();
-      while (curP && byHash.has(curP) && !trunkSet.has(curP) && !claimed.has(curP) && !visited.has(curP)) {
-        visited.add(curP);
-        const pc = byHash.get(curP)!;
-        lane.push({ hash: pc.hash, t: pc.t, parents: pc.parents, subject: pc.subject });
-        curP = pc.parentHashes[0] ?? null;
-      }
-      if (curP && trunkSet.has(curP)) fork = curP;
-      if (lane.length === 0) continue;
-      lane.reverse(); // oldest → newest
-      for (const lc of lane) claimed.add(lc.hash);
-      const ts = lane.map((x) => x.t);
-      let id = fork != null ? `${fork}::${hash}` : lane[0].hash;
-      if (usedIds.has(id)) {
-        let n = 2;
-        while (usedIds.has(`${id}#${n}`)) n++;
-        id = `${id}#${n}`;
-      }
-      usedIds.add(id);
-      branches.push({
-        ref: branchNameOf(history, p),
-        id,
-        slot: 0,
-        laneX: GIT_GRAPH_TRUNK_X + GIT_GRAPH_LANE_GAP,
-        overflow: false,
-        commits: lane,
-        fork,
-        merge: hash,
-        mergeT: full.t,
-        open: false,
-        firstT: Math.min(...ts),
-        lastT: Math.max(...ts),
-        collapsed: true,
-      });
+  const laneCommitOf = (c: GitHistoryCommit): { hash: string; t: number; parents: number; subject: string } => ({
+    hash: c.hash,
+    t: c.t,
+    parents: c.parents,
+    subject: c.subject,
+  });
+
+  // ── Phase 1: ref partition. `.ref` is already correct (readGitHistory re-attributes every commit
+  // reachable from develop/master to the primary mainline ref), so a commit's `.ref` IS its lane.
+  const mainline: GitHistoryCommit[] = [];
+  const liveByRef = new Map<string, GitHistoryCommit[]>();
+  const orphanByRef = new Map<string, GitHistoryCommit[]>();
+  const heads = history.heads ?? {};
+  for (const c of history.commits) {
+    if (GIT_HISTORY_MAINLINE_REFS.has(c.ref)) {
+      mainline.push(c);
+    } else if (heads[c.ref] !== undefined) {
+      const arr = liveByRef.get(c.ref) ?? [];
+      arr.push(c);
+      liveByRef.set(c.ref, arr);
+    } else {
+      const arr = orphanByRef.get(c.ref) ?? [];
+      arr.push(c);
+      orphanByRef.set(c.ref, arr);
     }
   }
 
-  // gap-git-graph-omits-inflight-branches-and-summary-table-disjoint: OPEN lanes. The merged-lane
-  // pass only walks trunk MERGE commits' parent chains, so a live (still checked out, unmerged)
-  // branch — the in-flight worktree branches — is invisible on the graph. Build an OPEN lane for
-  // each live non-mainline ref whose tip is unmerged: its commits kept their own --source ref
-  // (readGitHistory re-attributes mainline-reachable commits to the mainline ref, so a ref whose tip
-  // still carries its own name is genuinely unmerged). The walk is the same first-parent walk as the
-  // merged pass, stopping at the first trunk commit (fork) or the claimed/unknown boundary; the lane
-  // ends open (merge: null, open: true) instead of at a merge commit.
-  for (const [name, tip] of Object.entries(history.heads ?? {})) {
-    if (GIT_HISTORY_MAINLINE_REFS.has(name)) continue; // the trunk is its own lane, never a lateral
-    const tipCommit = byHash.get(tip);
-    if (!tipCommit) continue; // tip outside the active window — nothing to draw
-    if (tipCommit.ref !== name) continue; // re-attributed to the mainline ⇒ already merged, not open
-    if (claimed.has(tip)) continue; // already owned by a merged lane (merged but ref kept)
-    const lane: Array<{ hash: string; t: number; parents: number; subject: string }> = [];
-    let curP: string | null = tip;
-    let fork: string | null = null;
+  const mainlineSet = new Set(mainline.map((c) => c.hash));
+  const byT = (a: GitHistoryCommit, b: GitHistoryCommit) => a.t - b.t || (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0);
+
+  // Walk a lane's OLDEST commit back to its fork: the first MAINLINE commit on the first-parent chain
+  // (null = the fork predates the active window, drawn with the 「窗口外分叉」 marker).
+  const computeFork = (oldestHash: string): string | null => {
+    let cur: string | null = byHash.get(oldestHash)?.parentHashes[0] ?? null;
     const visited = new Set<string>();
-    while (curP && byHash.has(curP) && !trunkSet.has(curP) && !claimed.has(curP) && !visited.has(curP)) {
-      visited.add(curP);
-      const pc = byHash.get(curP)!;
-      lane.push({ hash: pc.hash, t: pc.t, parents: pc.parents, subject: pc.subject });
-      curP = pc.parentHashes[0] ?? null;
+    while (cur) {
+      if (mainlineSet.has(cur)) return cur;
+      const pc = byHash.get(cur);
+      if (!pc || visited.has(cur)) return null; // parent outside the window / cycle → fork outside window
+      visited.add(cur);
+      cur = pc.parentHashes[0] ?? null;
     }
-    if (curP && trunkSet.has(curP)) fork = curP;
-    if (lane.length === 0) continue;
-    lane.reverse(); // oldest → newest
-    for (const lc of lane) claimed.add(lc.hash);
-    const ts = lane.map((x) => x.t);
-    let id = fork != null ? `${fork}::open` : `${lane[0].hash}::open`;
-    if (usedIds.has(id)) {
-      let n = 2;
-      while (usedIds.has(`${id}#${n}`)) n++;
-      id = `${id}#${n}`;
+    return null;
+  };
+
+  // Find the merge commit that merged this lane's tip back in (null = still open/unmerged).
+  const findMerge = (tipHash: string): { merge: string; mergeT: number } | null => {
+    for (const c of history.commits) {
+      if (c.parentHashes.length >= 2 && c.parentHashes.slice(1).includes(tipHash)) {
+        return { merge: c.hash, mergeT: c.t };
+      }
+    }
+    return null;
+  };
+
+  const usedIds = new Set<string>();
+  const uniqueId = (base: string): string => {
+    let id = base;
+    let n = 2;
+    while (usedIds.has(id)) {
+      id = `${base}#${n}`;
+      n++;
     }
     usedIds.add(id);
-    branches.push({
-      ref: name,
+    return id;
+  };
+
+  // Build a lateral (non-mainline) lane: sort commits oldest→newest, compute fork + merge/open.
+  const buildLateral = (ref: string, kind: GitGraphLaneKind, commits: GitHistoryCommit[]): GitGraphBranchLane => {
+    commits.sort(byT);
+    const laneCommits = commits.map(laneCommitOf);
+    const ts = commits.map((c) => c.t);
+    const fork = computeFork(commits[0].hash);
+    const tip = commits[commits.length - 1].hash;
+    const merged = findMerge(tip);
+    const id = uniqueId(fork != null ? `${fork}::${tip}` : `${commits[0].hash}::${kind}`);
+    return {
+      ref,
+      kind,
       id,
       slot: 0,
       laneX: GIT_GRAPH_TRUNK_X + GIT_GRAPH_LANE_GAP,
       overflow: false,
-      commits: lane,
+      commits: laneCommits,
       fork,
-      merge: null,
-      mergeT: null,
-      open: true,
+      merge: merged?.merge ?? null,
+      mergeT: merged?.mergeT ?? null,
+      open: merged == null,
       firstT: Math.min(...ts),
       lastT: Math.max(...ts),
       collapsed: true,
-    });
-  }
+    };
+  };
 
-  // Interval-scheduled lane slots: sort lanes by their fork time and greedily assign each the lowest
-  // free slot. A slot is freed once the lane occupying it has merged (its merge time passes), so a
-  // later lane forking after that point REUSES the slot instead of widening the track forever. Lanes
-  // beyond GIT_GRAPH_MAX_LANES are narrowed onto the track edge and counted as overflow ("+N more").
+  // The mainline lane is branches[0] — always the spine, always expanded, never forked/merged.
+  mainline.sort(byT);
+  const mainlineLaneObj: GitGraphBranchLane = {
+    ref: mainlineRef || (mainline[0] ? mainline[0].ref : ""),
+    kind: "mainline",
+    id: "__mainline__",
+    slot: -1,
+    laneX: GIT_GRAPH_TRUNK_X,
+    overflow: false,
+    commits: mainline.map(laneCommitOf),
+    fork: null,
+    merge: null,
+    mergeT: null,
+    open: false,
+    firstT: mainline.length ? Math.min(...mainline.map((c) => c.t)) : 0,
+    lastT: mainline.length ? Math.max(...mainline.map((c) => c.t)) : 0,
+    collapsed: false,
+  };
+
+  // Lateral lanes (live + reconstructed), sorted by fork time for a stable display order, mainline
+  // pinned FIRST. Each `.ref` value produces at most one lane (the ref partition can't split a ref).
+  const laterals: GitGraphBranchLane[] = [];
+  for (const [ref, cs] of liveByRef) laterals.push(buildLateral(ref, "live", cs));
+  for (const [ref, cs] of orphanByRef) laterals.push(buildLateral(ref, "reconstructed", cs));
+  laterals.sort((a, b) => (a.fork != null ? byHash.get(a.fork)!.t : a.firstT) - (b.fork != null ? byHash.get(b.fork)!.t : b.firstT) || (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0));
+  const branches: GitGraphBranchLane[] = [mainlineLaneObj, ...laterals];
+
+  // Interval-scheduled lane slots (lateral lanes only — the mainline is the spine at trunkX): sort by
+  // fork time and greedily assign each the lowest free slot. A slot is freed once the lane occupying
+  // it has merged (its merge time passes), so a later lane forking after that point REUSES the slot.
+  // Lanes beyond GIT_GRAPH_MAX_LANES are narrowed onto the track edge and counted as overflow.
   let overflowCount = 0;
   const slotEndT: number[] = [];
-  const byStartT = [...branches].sort((a, b) => (a.fork != null ? byHash.get(a.fork)!.t : a.firstT) - (b.fork != null ? byHash.get(b.fork)!.t : b.firstT));
+  const byStartT = [...laterals].sort((a, b) => (a.fork != null ? byHash.get(a.fork)!.t : a.firstT) - (b.fork != null ? byHash.get(b.fork)!.t : b.firstT));
   for (const b of byStartT) {
     const startT = b.fork != null ? byHash.get(b.fork)!.t : b.firstT;
     const endT = b.mergeT ?? b.lastT;
@@ -377,7 +486,7 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
   }
 
   const mergeCount = history.commits.filter((c) => c.parents > 1).length;
-  return { trunk, branches, commitCount: history.commits.length, mergeCount, overflowCount };
+  return { branches, commitCount: history.commits.length, mergeCount, overflowCount };
 }
 
 /** Fallback trunk root when HEAD is unresolvable: the newest commit in the window. */
@@ -553,12 +662,43 @@ export function computeGitGraphWidth(layout: GitGraphLayout, textX: number): num
     const w = estimateTextWidth(text, size);
     if (w > longest) longest = w;
   };
-  for (const c of layout.trunk.commits) consider(`${c.hash.slice(0, 7)} ${c.subject}`, 11);
   for (const b of layout.branches) {
-    for (const c of b.commits) consider(`${c.hash.slice(0, 7)} ${c.subject}`, 10);
-    consider(`${b.ref} · ${b.commits.length} commits ·（点击展开）`, 11);
+    const size = b.kind === "mainline" ? 11 : 10;
+    for (const c of b.commits) consider(`${c.hash.slice(0, 7)} ${c.subject}`, size);
+    if (b.kind !== "mainline") consider(`${b.ref} · ${b.commits.length} commits ·（点击展开）`, 11);
   }
   return Math.ceil(textX + longest + pad);
+}
+
+/** gap-git-graph-drops-commits-while-overflowcount-reports-zero AC5: the coverage duration is the
+ *  actual time span of the MAINLINE window (branches[0].commits: newest − oldest commit time), never
+ *  a hardcoded constant. It is mainline-scoped BY DESIGN: the pagination pages MAINLINE commits only
+ *  (lateral live branches are fetched in full on every page, so their span — up to the 7-day active
+ *  window — is fixed and must not define the "how far back can I see" number). As the mainline window
+ *  grows via scroll-loading, this span only ever grows. Pure and directly importable (no I/O). */
+export function coverageSpanSeconds(layout: GitGraphLayout): number | null {
+  const mainline = layout.branches[0];
+  if (!mainline || mainline.commits.length === 0) return null;
+  let min: number | null = null;
+  let max: number | null = null;
+  for (const c of mainline.commits) {
+    if (min === null || c.t < min) min = c.t;
+    if (max === null || c.t > max) max = c.t;
+  }
+  if (min === null || max === null) return null;
+  return max - min;
+}
+
+/** Format a coverage span (seconds) as "N 小时" / "N 天" — the guide prose's 「当前已加载窗口覆盖
+ *  N 小时/天」. Mirrored VERBATIM by the client loader (gitGraphClientScript's formatSpan) — keep the
+ *  two in lock-step (same drift discipline as the lanePath / visibleRows mirrors). */
+export function formatCoverageSpan(sec: number): string {
+  if (sec >= 86400) {
+    const d = sec / 86400;
+    return `${d >= 10 ? Math.round(d) : Math.round(d * 10) / 10} 天`;
+  }
+  const h = sec / 3600;
+  return `${h >= 10 ? Math.round(h) : Math.round(h * 10) / 10} 小时`;
 }
 
 /** AC102②: the client renderer references lane colours as `var(--color-lane-N)` TOKENS, never hex.
@@ -580,14 +720,19 @@ export function gitGraphClientScript(): string {
   if (!mount || !dataEl || typeof d3 === "undefined") { return; }
   var data;
   try { data = JSON.parse(dataEl.textContent); } catch (e) { return; }
-  if (!data || !data.trunk || !data.trunk.commits.length) { return; }
+  if (!data || !data.branches || !data.branches.length) { return; }
 
-  var rowH = ${GIT_GRAPH_ROW_H}, trunkX = ${GIT_GRAPH_TRUNK_X}, textX = ${GIT_GRAPH_TEXT_X}, laneGap = ${GIT_GRAPH_LANE_GAP}, maxLanes = ${GIT_GRAPH_MAX_LANES}, nodeR = 4, mergeR = 5, padY = ${GIT_GRAPH_PAD_Y};
+  var rowH = ${GIT_GRAPH_ROW_H}, trunkX = ${GIT_GRAPH_TRUNK_X}, textX = ${GIT_GRAPH_TEXT_X}, laneGap = ${GIT_GRAPH_LANE_GAP}, maxLanes = ${GIT_GRAPH_MAX_LANES}, nodeR = 4, mergeR = 5, padY = ${GIT_GRAPH_PAD_Y}, strideRows = ${GIT_GRAPH_CHIP_STRIDE_ROWS};
   var lanePalette = ${JSON.stringify(GIT_GRAPH_LANE_PALETTE.map((_, i) => `var(--color-lane-${i})`))};
   var chipText = "var(--color-lane-chip-text)";
-  var trunk = data.trunk;
-  var branches = data.branches || [];
+  var allBranches = data.branches || [];
+  var mainline = allBranches[0];
+  var branches = allBranches.filter(function (b) { return b.kind !== "mainline"; });
   var overflow = typeof data.overflowCount === "number" ? data.overflowCount : 0;
+
+  // gap-git-graph-lane-chip-rendered-once-regardless-of-span: the SAME computeChipStride the test
+  // imports (injected verbatim via .toString()) — one source of truth, no hand-mirrored copy to drift.
+  ${computeChipStride.toString()}
 
   // gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead: 移动端「适应宽度」开关 — 只显
   // chip + 提交数（隐藏 subject），把内容宽度压回视口内（scrollWidth <= clientWidth * 1.2）。
@@ -622,6 +767,10 @@ export function gitGraphClientScript(): string {
     var hasMerge = mergeRow != null;
     var topY = hasFork ? y(forkRow) : y(laneTopRow);
     var botY = hasMerge ? y(mergeRow) : y(laneBotRow);
+    // gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge: fail-closed — an inverted lane
+    // (summary row sorted below its own merge row) must not draw a line upward. Return null so the
+    // caller skips it instead of emitting a degenerate Q x,y x,y corner (r = max(0, vert/2) = 0).
+    if (botY <= topY) { return null; }
     var vert = botY - topY;
     var r = Math.min(6, laneGap / 2);
     if (vert < 2 * r) { r = Math.max(0, vert / 2); }
@@ -675,7 +824,7 @@ export function gitGraphClientScript(): string {
   // never reallocate rows that other lanes already use when it expands.
   function visibleRows() {
     var items = [];
-    trunk.commits.forEach(function (c) { items.push({ kind: "commit", laneId: null, commit: c, x: trunkX, t: c.t, tie: c.hash }); });
+    mainline.commits.forEach(function (c) { items.push({ kind: "commit", laneId: null, commit: c, x: trunkX, t: c.t, tie: c.hash }); });
     branches.forEach(function (b) {
       if (expanded[b.id] === true) {
         b.commits.forEach(function (c) { items.push({ kind: "commit", laneId: b.id, commit: c, x: b.laneX, t: c.t, tie: c.hash }); });
@@ -685,6 +834,10 @@ export function gitGraphClientScript(): string {
     });
     items.sort(function (a, b) {
       if (a.t !== b.t) { return a.t - b.t; }
+      // gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge: pin a summary row BEFORE any
+      // commit at the same t (the summary's t == its own merge commit's t), so a collapsed lane's
+      // top row is always above its merge row (no inverted lane, no degenerate Q x,y x,y corner).
+      if (a.kind !== b.kind) { return a.kind === "summary" ? -1 : 1; }
       return a.tie < b.tie ? -1 : a.tie > b.tie ? 1 : 0;
     });
     // Row is an INTRINSIC attribute of each item (its sorted index), never a hash/laneId-keyed
@@ -722,17 +875,11 @@ export function gitGraphClientScript(): string {
     items.forEach(function (it) { if (it.kind === "commit" && it.laneId === null) { trunkRow[it.commit.hash] = it.row; } });
 
     // trunk vertical spine (a visible dark neutral — the old grid neutral-200 measured 1.13:1)
-    var trunkRows = trunk.commits.map(function (c) { return trunkRow[c.hash]; });
+    var trunkRows = mainline.commits.map(function (c) { return trunkRow[c.hash]; });
     var tMin = Math.min.apply(null, trunkRows);
     var tMax = Math.max.apply(null, trunkRows);
     g.append("line").attr("class", "git-svg-trunk")
       .attr("x1", trunkX).attr("x2", trunkX).attr("y1", y(tMin)).attr("y2", y(tMax));
-
-    // Trunk name chip at the top of the trunk spine (gap-git-graph-trunk-ref-resolves-to-head-not-
-    // mainline): labels the trunk lane with its resolved name (develop/master) so the graph, the
-    // summary table and the guide prose all name the same ref. Drawn in the trunk's neutral-700
-    // (the same dark neutral as the spine) with the high-contrast white chip text.
-    appendChip(g, trunkX - 6, y(tMin) - 8, trunk.ref, "var(--color-neutral-700)");
 
     // Per-lane first/last rows, derived from the items themselves (never a lossy key lookup).
     var laneTopRow = {}, laneBotRow = {};
@@ -743,6 +890,28 @@ export function gitGraphClientScript(): string {
       if (laneBotRow[it.laneId] === undefined) { laneBotRow[it.laneId] = it.row; }
       laneBotRow[it.laneId] = Math.max(laneBotRow[it.laneId], it.row);
     });
+
+    // gap-git-graph-lane-chip-rendered-once-regardless-of-span AC1/AC4: every lane whose commits are
+    // VISIBLE (the mainline + expanded lateral lanes) repeats its name chip every strideRows rows
+    // through its row span — ONE call path via computeChipStride, no trunk-specific chip site. The
+    // FIRST row of an expanded lateral lane is skipped here: the fold control below draws that lane's
+    // own chip (inside its clickable group, so the whole chip + "▲ 折叠" affordance toggles the lane),
+    // keeping the fold row labelled exactly once at the same y as before. A collapsed lane's summary
+    // row already leads with its own chip (once per lane, span = 1 row), so summary items are excluded
+    // here. The mainline chip also labels the spine with its resolved ref
+    // (gap-git-graph-trunk-ref-resolves-to-head-not-mainline): develop/master, so graph, summary table
+    // and guide prose all name the same ref.
+    var chipRefColor = {};
+    chipRefColor[null] = { ref: mainline.ref, color: "var(--color-neutral-700)" };
+    branches.forEach(function (b) { chipRefColor[b.id] = { ref: b.ref, color: laneColorById[b.id] }; });
+    computeChipStride(items.filter(function (it) { return it.kind === "commit"; }), strideRows)
+      .forEach(function (cr) {
+        // The fold control owns its lane's first chip row — skip it here so the fold row is labelled
+        // exactly once, by the clickable fold group below.
+        if (cr.laneId !== null && expanded[cr.laneId] === true && cr.row === laneTopRow[cr.laneId]) { return; }
+        var info = chipRefColor[cr.laneId];
+        appendChip(g, textX, y(cr.row) - 6, info.ref, info.color);
+      });
 
     // branch lanes: ONE rounded-corner <path> per lane, hue-coded per lane (AC1/AC2/AC3). Nodes + text
     // are drawn from the items below, so every element paints at its OWN row — two elements can never
@@ -755,20 +924,39 @@ export function gitGraphClientScript(): string {
       var laneTop = forkRow != null ? forkRow : laneTopRow[b.id];
       var laneBot = mergeRow != null ? mergeRow : laneBotRow[b.id];
 
-      g.append("path").attr("class", "git-svg-lane")
-        .attr("d", lanePath(laneX, forkRow, mergeRow, laneTop, laneBot))
-        .attr("fill", "none").style("stroke", color).attr("stroke-width", 1.6)
-        // gap-git-graph-omits-inflight-branches-and-summary-table-disjoint: an OPEN lane (unmerged
-        // live ref) is drawn dashed so it reads at a glance as still-in-flight, distinct from a
-        // merged lane's solid line (null removes the attribute → the SVG solid default).
-        .attr("stroke-dasharray", b.open ? "6,4" : null);
+      var d = lanePath(laneX, forkRow, mergeRow, laneTop, laneBot);
+      // gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge: fail-closed — skip the lane
+      // when lanePath returned null (an inverted lane) instead of drawing it upside down.
+      if (d !== null) {
+        g.append("path").attr("class", "git-svg-lane")
+          .attr("d", d)
+          .attr("fill", "none").style("stroke", color).attr("stroke-width", 1.6)
+          // gap-git-graph-omits-inflight-branches-and-summary-table-disjoint: an OPEN lane (unmerged
+          // live ref) is drawn dashed so it reads at a glance as still-in-flight, distinct from a
+          // merged lane's solid line (null removes the attribute → the SVG solid default).
+          .attr("stroke-dasharray", b.open ? "6,4" : null);
+      }
+
+      // gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge AC5: a lane whose fork predates
+      // the window (fork == null) gets an explicit "窗口外分叉" marker at its top, so a dangling top
+      // reads as "fork outside the window", not a broken/disconnected line.
+      if (b.fork == null) {
+        g.append("text").attr("class", "git-svg-fork-dangling")
+          .attr("x", laneX).attr("y", y(laneTop) - 5).attr("font-size", 9)
+          .attr("text-anchor", "middle")
+          .style("fill", "var(--color-neutral-600)")
+          .text("窗口外分叉");
+      }
 
       if (expanded[b.id] === true) {
         // gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead: the fold control is a
         // chip(ref) + "▲ 折叠" drawn on the branch's TOP row (first own commit, laneTopRow[b.id]) —
         // NOT the bottom merge row (laneBot), which landed off-screen after expanding a tall branch
-        // AND sat on the trunk merge text. The first commit's own subject is skipped below (the fold
-        // control replaces it), so the control never overlaps text on its row.
+        // AND sat on the trunk merge text. The chip is the lane's FIRST chip, drawn HERE inside the
+        // clickable group so the whole control toggles the lane; the unified computeChipStride loop
+        // above skips this row and fills in the remaining stride rows
+        // (gap-git-graph-lane-chip-rendered-once-regardless-of-span). The first commit's own subject
+        // is skipped below (the fold control replaces it), so the control never overlaps text on its row.
         var foldRow = laneTopRow[b.id];
         var grp2 = g.append("g").style("cursor", "pointer")
           .on("click", function () { expanded[b.id] = false; render(); });
@@ -867,6 +1055,94 @@ export function gitGraphClientScript(): string {
     });
   }
 
+  // gap-git-graph-drops-commits-while-overflowcount-reports-zero: scroll loader. The sentinel sits
+  // BELOW the SVG; when it scrolls into view (rootMargin 600px) fetch the OLDER page and PREPEND its
+  // mainline commits to the current mainline lane, then re-render. Live branches come back in FULL on
+  // every page (readGitHistory fetches them uncapped via --not <mainline>), so only the mainline lane
+  // carries genuinely-new commits — prepending is lossless and needs no client-side re-layout (rows
+  // are reassigned from scratch by visibleRows, and lateral lanes' fork/merge hashes still resolve
+  // against the grown trunkRow map). The older page's layout was still computed SERVER-side by
+  // layoutGitGraph; the client only grafts its mainline lane, which is all-mainline and fork/merge-free.
+  var sentinel = document.getElementById("git-graph-sentinel");
+  var coverageEl = document.getElementById("git-graph-coverage");
+  var loadingOlder = false;
+  var olderDone = false;
+
+  function mainlineWatermark() {
+    var min = null;
+    mainline.commits.forEach(function (c) { if (min === null || c.t < min) { min = c.t; } });
+    return min;
+  }
+  function coverageSpan() {
+    // MAINLINE-scoped (mirrors coverageSpanSeconds): the pagination pages mainline commits only, so
+    // the "how far back" number tracks mainline.commits — not the always-fully-loaded lateral lanes.
+    var min = null, max = null;
+    mainline.commits.forEach(function (c) {
+      if (min === null || c.t < min) { min = c.t; }
+      if (max === null || c.t > max) { max = c.t; }
+    });
+    if (min === null || max === null) { return null; }
+    return max - min;
+  }
+  function formatSpan(sec) {
+    if (sec >= 86400) { var d = sec / 86400; return (d >= 10 ? Math.round(d) : Math.round(d * 10) / 10) + " 天"; }
+    var h = sec / 3600;
+    return (h >= 10 ? Math.round(h) : Math.round(h * 10) / 10) + " 小时";
+  }
+  function updateCoverage() {
+    if (!coverageEl) { return; }
+    var s = coverageSpan();
+    if (s === null) { return; }
+    coverageEl.textContent = formatSpan(s);
+  }
+  function finishOlder() {
+    olderDone = true;
+    if (sentinel) { sentinel.textContent = "已加载到仓库最早提交"; }
+  }
+  function loadOlder() {
+    if (loadingOlder || olderDone) { return; }
+    var wm = mainlineWatermark();
+    if (wm === null) { finishOlder(); return; }
+    loadingOlder = true;
+    fetch("/git-history.json?before=" + wm + "&limit=500")
+      .then(function (res) {
+        if (!res.ok) { finishOlder(); return; }
+        return res.json().then(function (next) {
+          if (!next || next.status !== "ok" || !next.branches || !next.branches.length) { finishOlder(); return; }
+          var older = (next.branches[0].commits) || [];
+          if (older.length === 0) { finishOlder(); return; }
+          var have = {};
+          mainline.commits.forEach(function (c) { have[c.hash] = true; });
+          var added = 0;
+          older.forEach(function (c) { if (!have[c.hash]) { mainline.commits.unshift(c); added++; } });
+          if (added === 0) { finishOlder(); return; }
+          // Keep the lane's commit array canonical (oldest→newest) like layoutGitGraph's mainline.sort.
+          mainline.commits.sort(function (a, b) { return a.t - b.t || (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0); });
+          data.commitCount += added;
+          updateCoverage();
+          render();
+          // The prepended rows are exactly "added" mainline rows ABOVE the current viewport, so the
+          // same content (the scroll anchor commit) is restored by scrolling down by added × rowH —
+          // the scroll-position preservation the DoD requires, without a hash→pixel re-walk.
+          window.scrollBy(0, added * rowH);
+          // If the grown graph still leaves the sentinel in view, chain the next page.
+          if (sentinel && sentinel.getBoundingClientRect().top < window.innerHeight + 600) { loadOlder(); }
+        });
+      })
+      .catch(function () { finishOlder(); })
+      .finally(function () { loadingOlder = false; });
+  }
+  if (sentinel) {
+    if (typeof IntersectionObserver !== "undefined") {
+      var io = new IntersectionObserver(function (entries) {
+        for (var i = 0; i < entries.length; i++) { if (entries[i].isIntersecting) { loadOlder(); } }
+      }, { rootMargin: "600px 0px" });
+      io.observe(sentinel);
+    } else {
+      sentinel.addEventListener("click", loadOlder);
+    }
+  }
+
   render();
 })();`;
 }
@@ -905,12 +1181,22 @@ export function renderGitHistoryPage(history: GitHistoryResult): string {
   const nCommits = history.commits.length;
   const mergeCount = history.commits.filter((c) => c.parents > 1).length;
   // gap-git-graph-trunk-ref-resolves-to-head-not-mainline: the guide prose must name the SAME ref
-  // the trunk lane + summary table name (develop/master), never a hardcoded "develop" that could
+  // the mainline lane + summary table name (develop/master), never a hardcoded "develop" that could
   // disagree with an author-named trunk. Falls back to "develop" only when there is no graph.
-  const trunkRef = layout ? layout.trunk.ref : "develop";
+  const trunkRef = layout ? mainlineLane(layout).ref || "develop" : "develop";
+  // gap-git-graph-drops-commits-while-overflowcount-reports-zero AC5: the guide prose's 「覆盖时长」
+  // is computed from the LOADED commits' actual time span (never a hardcoded constant); the client
+  // loader re-computes it after every scroll-load and writes the fresh number into #git-graph-coverage.
+  const coverageSpan = layout ? coverageSpanSeconds(layout) : null;
+  const coverageText = coverageSpan !== null ? formatCoverageSpan(coverageSpan) : "—";
 
   const graph = layout
     ? html`<div id="git-graph" aria-label="Git 纵向时间轴" style="overflow-x:auto">${gitGraphLegendHtml()}</div>`
+    : "";
+  // gap-git-graph-drops-commits-while-overflowcount-reports-zero: the scroll sentinel sits BELOW the
+  // SVG; when it scrolls into view the client fetches the older page (/git-history.json?before=…).
+  const sentinel = layout
+    ? html`<div id="git-graph-sentinel" class="meta" style="padding:0.6rem 0;color:var(--color-neutral-700);font-size:0.75rem">加载更早提交…</div>`
     : "";
   // gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead: 移动端「适应宽度」开关 — the
   // client reads this checkbox and, when checked, hides commit subjects (only chip + commit count),
@@ -931,26 +1217,16 @@ export function renderGitHistoryPage(history: GitHistoryResult): string {
   // built from groupCommitsByBranch (a --source-ref grouping) — a SECOND branch model whose name set
   // was disjoint from the graph's fork/merge lanes. It now renders the SAME layout.branches the
   // graph draws, plus a 状态 column (已合并 / 在飞), so the table and the graph point at one set of
-  // objects. The trunk is listed as the leading row (status 已合并 — the closed mainline, never 在飞).
+  // objects. The mainline lane is branches[0] (status 已合并 — the closed mainline, never 在飞).
   const summaryRows = layout
-    ? [
-        {
-          ref: layout.trunk.ref,
-          status: "已合并",
-          firstT: layout.trunk.commits.length ? Math.min(...layout.trunk.commits.map((c) => c.t)) : null,
-          lastT: layout.trunk.commits.length ? Math.max(...layout.trunk.commits.map((c) => c.t)) : null,
-          count: layout.trunk.commits.length,
-          merges: layout.trunk.commits.filter((c) => c.parents > 1).length,
-        },
-        ...layout.branches.map((b) => ({
-          ref: b.ref,
-          status: b.open ? "在飞" : "已合并",
-          firstT: b.firstT,
-          lastT: b.lastT,
-          count: b.commits.length,
-          merges: b.commits.filter((c) => c.parents > 1).length,
-        })),
-      ]
+    ? layout.branches.map((b) => ({
+        ref: b.ref,
+        status: b.kind === "mainline" ? "已合并" : b.open ? "在飞" : "已合并",
+        firstT: b.firstT,
+        lastT: b.lastT,
+        count: b.commits.length,
+        merges: b.commits.filter((c) => c.parents > 1).length,
+      }))
     : [];
   const summaryRowsHtml = summaryRows.map((b) => {
     const taskId = taskIdFromBranchRef(b.ref);
@@ -976,10 +1252,11 @@ export function renderGitHistoryPage(history: GitHistoryResult): string {
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — vertical commit timeline (third-party library, client-rendered)">${modernistStyles()}${pageStyles()}<title>Git history — vertical commit timeline</title></head>
     <body>${renderMobileChrome("git", "git history")}${renderSiteNav("git")}<main id="main">
       <h1>Git History — 提交纵向时间轴</h1>
-      <p class="meta"><strong>纵轴 = 提交落地顺序（git commit time），不是工时/持续时间。</strong> ${escapeHtml(trunkRef)} 竖直主干 + task 分支从主干分出（fork）/合入（merge）的连线；task 分支默认折叠（只显提交数与时间跨度，点击展开逐条）。菱形 = 合并提交（fan-in 落地事件）。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并（跨所有本地分支）。</p>
+      <p class="meta"><strong>纵轴 = 提交落地顺序（git commit time），不是工时/持续时间。</strong> ${escapeHtml(trunkRef)} 竖直主干 + task 分支从主干分出（fork）/合入（merge）的连线；task 分支默认折叠（只显提交数与时间跨度，点击展开逐条）。菱形 = 合并提交（fan-in 落地事件）。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并（跨所有本地分支）；已加载窗口覆盖 <span id="git-graph-coverage">${escapeHtml(coverageText)}</span>。滚动到图表底部自动加载更早的提交。</p>
       ${statusNote}
       ${fitWidthToggle}
       ${graph}
+      ${sentinel}
       ${laneTokenStyles}
       ${dataScript}
       ${libScript}
@@ -1001,4 +1278,73 @@ export async function handleGitHistory(
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(renderGitHistoryPage(history));
+}
+
+function writeJson(res: ServerResponse, status: number, obj: unknown): void {
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify(obj));
+}
+
+/** The JSON payload /git-history.json returns — a COMPLETE GitGraphLayout (the client re-renders it
+ *  as a whole, never an appended fragment) plus the window's oldest/newest commit times (AC3 reads
+ *  `oldestT`; the client's scroll restoration is driven by the prepend growth, not these fields).
+ *  Pure and directly importable (no I/O) — AC1/AC3 test it on a pure GitHistoryResult. */
+export function gitHistoryJson(history: GitHistoryResult): {
+  status: GitHistoryResult["status"];
+  reason: string | null;
+  commitCount: number;
+  oldestT: number | null;
+  newestT: number | null;
+  branches: GitGraphBranchLane[];
+  mergeCount: number;
+  overflowCount: number;
+  textWidth: number;
+} {
+  if (history.status !== "ok") {
+    return { status: history.status, reason: history.reason, commitCount: 0, oldestT: null, newestT: null, branches: [], mergeCount: 0, overflowCount: 0, textWidth: 0 };
+  }
+  const layout = layoutGitGraph(history);
+  if (!layout) {
+    return { status: "empty", reason: history.reason ?? "git 仓库无提交记录", commitCount: 0, oldestT: null, newestT: null, branches: [], mergeCount: 0, overflowCount: 0, textWidth: 0 };
+  }
+  let oldestT: number | null = null;
+  let newestT: number | null = null;
+  for (const c of history.commits) {
+    if (oldestT === null || c.t < oldestT) oldestT = c.t;
+    if (newestT === null || c.t > newestT) newestT = c.t;
+  }
+  return {
+    status: "ok",
+    reason: null,
+    commitCount: layout.commitCount,
+    oldestT,
+    newestT,
+    branches: layout.branches,
+    mergeCount: layout.mergeCount,
+    overflowCount: layout.overflowCount,
+    textWidth: computeGitGraphWidth(layout, GIT_GRAPH_TEXT_X),
+  };
+}
+
+/** GET /git-history.json?before=<unixSeconds>&limit=<n> — the on-demand pagination endpoint the
+ *  client's scroll loader calls. `before` = the cursor (returns mainline commits STRICTLY older than
+ *  it); `limit` = the mainline page size (clamped to a sane ceiling). Reuses readGitHistory's per-ref
+ *  fetch + layoutGitGraph (the SAME layout the HTML page embeds), never a second build path. */
+export async function handleGitHistoryJson(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cfg: { workspaceRoot: string },
+  url: URL,
+): Promise<void> {
+  const limitRaw = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, GIT_HISTORY_LIMIT * 10) : GIT_HISTORY_LIMIT;
+  const beforeRaw = Number.parseInt(url.searchParams.get("before") ?? "", 10);
+  const before = Number.isFinite(beforeRaw) && beforeRaw > 0 ? beforeRaw : null;
+  let history: GitHistoryResult;
+  try {
+    history = readGitHistory(cfg.workspaceRoot, { limit, before });
+  } catch (err) {
+    history = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, commits: [], head: null, heads: {} };
+  }
+  writeJson(res, 200, gitHistoryJson(history));
 }
