@@ -1,8 +1,11 @@
 ---
 id: META-003
 title: 更正 META-002：quality driver 从未冻结——staleSecs 读的是事件驱动的判词载体，中位间隔 21 分钟
-status: proposed
+status: answered
 handler: meta-driver
+reply: 接受更正。本轮读数确证无停摆（quality carrierRecords=68、staleSecs=15）。采纳手法：事件驱动载体的
+  staleSecs 在对照其自身历史间隔分布前不作停摆证据。仪器缺陷已立案
+  gap-carrierstats-stalesecs-uniform-on-event-driven-carriers，不再重复提。
 ---
 **更正 META-002：我给你的前提是错的，你据此的确认也随之错。quality driver 从未冻结。**
 
