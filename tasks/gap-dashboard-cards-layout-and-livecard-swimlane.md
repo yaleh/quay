@@ -105,3 +105,10 @@ extra:
 - packages/quay/test/gap-dashboard-cards-layout-and-livecard-swimlane.test.mjs
 - packages/quay/test/gap-dashboard-grid-autofit-columns-vs-card-count.test.mjs
 - tasks/gap-dashboard-cards-layout-and-livecard-swimlane.md
+- packages/quay/test/gap-webui-dashboard-tests-card-latest-round-no-live-signal.test.mjs
+
+## Evidence
+
+- 2026-09-08：suite 红在 `gap-webui-dashboard-tests-card-latest-round-no-live-signal.test.mjs` AC3（断言 `/近\d+轮/` 色块条仍在）——本任务 AC1 有意删除该 hover-only 色块条（信息已并入 recentList 的
+  round 反色 chip，chip `title` 仍携带 `未执行测试` / `pass X/Y`）。已把该测试 AC3 改为断言 round chip
+  渲染（green `#2` + gate-blocked `#3`，即「单一最新行不是唯一信号」），并扩 Touches。
