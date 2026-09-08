@@ -2,7 +2,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readLive, readJournal, type LiveResult, type JournalResult, type JournalSection, type InFlightPhase, type SuiteStateView } from "./observation.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, renderMarkdown, relativeTime, renderSiteNav, renderMobileChrome, LIVE_STATE_RUNNING_UNWIRED_LABEL, LIVE_STATE_NOT_RUNNING_LABEL } from "./serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, renderMarkdown, relativeTime, renderSiteNav, renderMobileChrome, tableWrap, LIVE_STATE_RUNNING_UNWIRED_LABEL, LIVE_STATE_NOT_RUNNING_LABEL } from "./serve-render.ts";
 
 // ── Loop-observation routes (gap-web-cannot-show-what-the-loop-is-doing-now) ────────────────
 // /live + /journal render the loop's live state from workspace observation files. The data
@@ -81,7 +81,7 @@ export function renderLivePage(live: LiveResult): string {
   // (axis 2) — the two axes are no longer crammed into one label (the old 「实现中 / 已完工待落地」
   // conflated an execution signal with lifecycle words). 待落地时长 renders only for the
   // awaiting-land phase (a placeholder — for every other phase).
-  const rows = live.inFlight.length > 0 ? html`<table>
+  const rows = live.inFlight.length > 0 ? tableWrap(html`<table>
     <tr><th>task id</th><th>run id</th><th>pid</th><th>transcript</th><th>started</th><th>elapsed</th><th>状态</th><th>阶段</th><th>待落地时长</th><th>阻塞 (blocks)</th><th>被阻塞 (blockedBy)</th></tr>
     ${live.inFlight.map((t) => html`<tr>
       <td><a href="/task/${encodeURIComponent(t.taskId)}">${escapeHtml(t.taskId)}</a></td>
@@ -93,10 +93,10 @@ export function renderLivePage(live: LiveResult): string {
       <td>${t.status != null ? escapeHtml(t.status) : html`<span class="meta">—</span>`}</td>
       <td>${t.phase === "fan-in" ? html`<strong>${escapeHtml(phaseLabel(t.phase) + suiteSuffix(t.suite))}</strong>` : escapeHtml(phaseLabel(t.phase))}</td>
       <td>${escapeHtml(t.phase === "awaiting-land" ? formatAwaitingDuration(awaitingLandMs(t)) : "—")}</td>
-      <td>${linkList(t.blocks)}</td>
-      <td>${linkList(t.blockedBy)}</td>
+      <td class="clamp">${linkList(t.blocks)}</td>
+      <td class="clamp">${linkList(t.blockedBy)}</td>
     </tr>`).join("\n")}
-  </table>` : "";
+  </table>`) : "";
 
   // gap-live-cannot-tell-a-dead-loop-from-an-unwired-one: telemetry-empty no longer renders one
   // generic 「无数据」 — it renders one of TWO states decided by activity signals, each with the

@@ -25,6 +25,15 @@ export function escapeHtml(s: unknown): string {
   }[c] as string));
 }
 
+// gap-webui-list-table-no-overflow-container: the shared data-table shell. Wrap a (possibly wide)
+// list-page table element in a `.table-wrap` scroll container so it scrolls INSIDE its container
+// instead of widening the page — the one shell every data-dense list page routes through, so a wide
+// table is handled by a single mechanism rather than per-page width tuning. `inner` is the
+// already-built table markup; pass the page's own table HTML through verbatim.
+export function tableWrap(inner: string): string {
+  return `<div class="table-wrap">${inner}</div>`;
+}
+
 // QX-028 (experiment 4, iteration 7): strip structural heading lines from
 // body content before using it as a search index. Lines matching /^#+\s/
 // (one or more # followed by a space) are structural headers ("## Proposal",
@@ -102,6 +111,33 @@ tr:last-child td { border-bottom: none; }
 tr:hover td { background: var(--color-neutral-100); }
 .malformed-row td { background: var(--color-accent-100); color: var(--color-accent-800); font-weight: 600; }
 .malformed-row a { color: var(--color-accent-800); }
+/* gap-webui-list-table-no-overflow-container: the shared data-table shell. A wide table must
+   scroll INSIDE its container (never widen the page) on desktop AND mobile alike — the pre-fix
+   horizontal-scroll fallback lived only under .detail-page (detailStyles' ≤600px media query),
+   so the data-dense LIST pages (/goal /live /board /needs-human /tests) had no scroll rule, and
+   the base sheet's "table { display:block }" mobile hack broke the table's real layout (headers
+   folded to vertical single chars). Wrapping in a plain <div class="table-wrap"> keeps the
+   table's layout intact while the wrapper scrolls. ".table-wrap table { display:table }"
+   (specificity 0,1,1) beats the ≤600px "table { display:block }" (0,0,1), so a wrapped table is
+   never display:block. */
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.table-wrap table {
+  display: table;
+  min-width: 100%;
+}
+.table-wrap th { white-space: nowrap; }
+/* Prose column clamp: a long prose cell must not blow the table to viewport width. The full text
+   stays reachable via the cell's title attribute / the detail page. */
+.clamp {
+  max-width: 22rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 button {
   background: var(--color-accent);
   color: var(--color-bg);
@@ -133,6 +169,10 @@ button:hover { background: var(--color-accent-800); }
   border-radius: 3px;
   padding: 0.1em 0.35em;
   font-size: 0.88em;
+  /* gap-webui-list-table-no-overflow-container: long unbreakable inline code (a commit hash,
+     a long path, a criterion shell one-liner in /journal) must wrap instead of widening the page
+     past the viewport on mobile — same wrap the detail pages already get on .detail-page code. */
+  overflow-wrap: anywhere;
 }
 .body pre code { background: none; padding: 0; font-size: inherit; }
 hr { border: none; border-top: 1px solid var(--color-divider); margin: 1rem 0; }
