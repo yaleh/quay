@@ -42,12 +42,12 @@ worktree `task/gap-mechanical-fan-in-loses-per-phase-accounting` 敞着且 `deve
 
 ## AC
 
-- [ ] 单测：worktree 敞着 + `allChecked` + `workLanded` 取真 ⇒ `notYetFlipped === false`（改动前先红，贴红输出，排除恒真）
-- [ ] 单测：worktree 敞着 + `commitTraceReady` 取真 ⇒ `notYetFlipped === false`（commit-trace 臂同样受豁免约束）
-- [ ] 回归：worktree 已删 + `allChecked` + landed ⇒ `notYetFlipped === true`（原行为不退化，双向可翻）
-- [ ] 单测：Touches 含一个 develop 中缺席的文件 ⇒ landed 信号不得取真（贴用例与断言）
-- [ ] `node --test plugin/test/ready-pool-check.test.mjs` 全绿，贴 pass/fail 计数
-- [ ] `doneFlipReady` / `hasLeftoverWorktree` 全仓命中数与前 3 条实际内容贴进提交（硬规则 5b 产物）
+- [x] 单测：worktree 敞着 + `allChecked` + `workLanded` 取真 ⇒ `notYetFlipped === false`（改动前先红，贴红输出，排除恒真）
+- [x] 单测：worktree 敞着 + `commitTraceReady` 取真 ⇒ `notYetFlipped === false`（commit-trace 臂同样受豁免约束）
+- [x] 回归：worktree 已删 + `allChecked` + landed ⇒ `notYetFlipped === true`（原行为不退化，双向可翻）
+- [x] 单测：Touches 含一个 develop 中缺席的文件 ⇒ landed 信号不得取真（贴用例与断言）
+- [x] `node --test plugin/test/ready-pool-check.test.mjs` 全绿，贴 pass/fail 计数
+- [x] `doneFlipReady` / `hasLeftoverWorktree` 全仓命中数与前 3 条实际内容贴进提交（硬规则 5b 产物）
 
 ## DoD
 
@@ -66,3 +66,17 @@ worktree `task/gap-mechanical-fan-in-loses-per-phase-accounting` 敞着且 `deve
 
 负控制：删掉 worktree 后同一样本判定必须翻回 `true`；保留 worktree 则为 `false` ——
 一个参数翻转结论就翻，排除恒真/恒假（硬规则 4 / 推论四）。
+
+## Measured
+
+- 单测 `node --test plugin/test/ready-pool-check.test.mjs`：142 pass / 0 fail（含本任务 4 条新用例）。
+- 改动前先红（stash 掉 `ready-pool-check.ts` 后对 4 条新用例实跑）：`pass 0 / fail 4`，四条全红 ——
+  AC1（open worktree suppresses the workLanded done-flip arm）、AC2（commit-trace arm）、
+  AC3（regression bidirectional）、AC4（touch-absent-from-ref veto）—— 排除恒真。
+- 生产载体前后读数（`ready-pool-check.ts --root /home/yale/work/quay --json`，ref 解析 = develop）：
+  - BEFORE（旧代码）：两任务均在 `excluded[not-yet-flipped]` ——
+    `gap-mechanical-fan-in-loses-per-phase-accounting`（ac_open 0）、
+    `gap-perfile-failure-rate-baseline-step-change`（ac_open 1, awaiting_verification）。
+  - AFTER（新代码）：两任务均离开 `excluded`、进入 `ready`；`nyf_backlog` 4 → 3；
+    ready/excluded diff 恰好是这两条（无其它任务被波及）。
+- AC6 grep（全仓）：`doneFlipReady` 6 命中 / `hasLeftoverWorktree` 2 命中，前 3 条已贴进提交信息。
