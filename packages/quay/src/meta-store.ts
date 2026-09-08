@@ -26,7 +26,6 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   parseFrontmatter,
@@ -35,6 +34,7 @@ import {
   withFileLock,
   slugify,
 } from "./frontmatter-store-base.ts";
+import { commitStoreWrite, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
 
 export const VALID_META_STATUSES = ["proposed", "answered"];
 
@@ -67,46 +67,24 @@ interface MetaViewModel {
 }
 
 /**
- * COMMIT-AFTER-WRITE: commit a meta file to git immediately after writeFileSync, pathspec-limited
- * to the single file (⛔ never a bare `git commit` — the index is SHARED across layers). A write
- * whose content is BYTE-IDENTICAL to HEAD (the meta-driver re-answering a record with the same
- * reply) is restored to HEAD and returns false WITHOUT committing — that is the commit-flood guard
- * (AC6): unchanged content across N rounds produces ZERO commits, and a real content change
- * produces exactly one. Repo-less roots (unit-test temp dirs) are a no-op (return false, not a throw).
+ * COMMIT-AFTER-WRITE: commit a meta file to git immediately after writeFileSync, via the shared
+ * primitive `commitStoreWrite` — ⛔ no git plumbing here (the five store files' `git commit` has
+ * exactly one home: store-commit.ts). A write whose content is BYTE-IDENTICAL to HEAD (the
+ * meta-driver re-answering a record with the same reply) is restored to HEAD and returns
+ * "unchanged" WITHOUT committing — that is the commit-flood guard (AC6): unchanged content across
+ * N rounds produces ZERO commits, and a real content change produces exactly one. Repo-less roots
+ * (unit-test temp dirs) are a no-op ("not-in-git", not a throw). This wrapper declares the meta
+ * kind's default (SPEC §4 declaration table): `propagate: "none"` — a meta write rides the branch
+ * it lands on.
  */
-function commitMetaFileAfterWrite(metaDir: string, fileName: string, id: string): boolean {
-  const root = path.dirname(metaDir);
-  let inside = "false";
-  try {
-    inside = execFileSync("git", ["-C", root, "rev-parse", "--is-inside-work-tree"], {
-      stdio: ["ignore", "pipe", "ignore"],
-    }).toString().trim();
-  } catch {
-    return false;
-  }
-  if (inside !== "true") return false;
-  const rel = `meta/${fileName}`;
-  try {
-    let head: string | null = null;
-    try {
-      head = execFileSync("git", ["-C", root, "show", `HEAD:${rel}`], {
-        stdio: ["ignore", "pipe", "ignore"],
-      }).toString();
-    } catch { /* not in HEAD ⇒ new file ⇒ commit */ }
-    if (head !== null) {
-      const work = fs.readFileSync(path.join(root, rel), "utf8");
-      if (head === work) {
-        // Byte-identical rewrite (⛔ never leave the shared checkout dirty).
-        execFileSync("git", ["-C", root, "checkout", "--", rel]);
-        return false;
-      }
-    }
-    execFileSync("git", ["-C", root, "add", "--", rel]);
-    execFileSync("git", ["-C", root, "commit", "--no-verify", "-m", `meta: ${id} 写盘即提交（meta-store）`, "--", rel]);
-    return true;
-  } catch {
-    return false;
-  }
+function commitMetaFile(metaDir: string, fileName: string, id: string): CommitOutcome {
+  const root = resolveGitRoot(metaDir);
+  return commitStoreWrite({
+    relPath: root ? path.relative(root, path.join(metaDir, fileName)) : `meta/${fileName}`,
+    message: `meta: ${id} 写盘即提交（store-commit）`,
+    root,
+    propagate: "none",
+  }).outcome;
 }
 
 /**
@@ -204,7 +182,7 @@ export function createMetaStore(metaDir: string) {
       const finalBody = body !== undefined ? body : existingBody;
       const fileName = existingFile ?? `${id}-${slugify(title, "meta")}.md`;
       fs.writeFileSync(path.join(metaDir, fileName), serializeFrontmatter(ordered, finalBody), "utf8");
-      commitMetaFileAfterWrite(metaDir, fileName, id);
+      commitMetaFile(metaDir, fileName, id);
       return get(id);
     });
   }

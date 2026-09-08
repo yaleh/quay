@@ -59,7 +59,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { execFileSync } from "node:child_process";
 import YAML from "yaml";
 import {
   parseFrontmatter,
@@ -70,6 +69,7 @@ import {
 } from "./frontmatter-store-base.ts";
 import { runAcceptance } from "./gate/acceptance-runner.ts";
 import { queryGateEvents } from "./gate/gate-event-store.ts";
+import { commitStoreWrite, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
 
 export const VALID_GOAL_STATUSES = ["draft", "active", "achieved", "superseded", "retired"];
 
@@ -239,61 +239,24 @@ export function stripEvidenceTimestamp(text: string): string {
 }
 
 /**
- * COMMIT-AFTER-WRITE (gap-meta-commitgoalfile): commit a goal file to git immediately after
- * writeFileSync. The goal store is the SOURCE of goal writes — the CLI `write`, meta-driver's two
- * write paths, all funnel through `write()`/`flipGoal()` — so the
- * commit lives HERE, not in each caller (meta-driver's `commitGoalFile` covered only its two paths,
- * leaving a direct `goal-store write` untracked ⇒ `git merge --ff-only develop` failed on untracked
- * `goals/*.md` and develop→doc sync stalled). pathspec-limited to the single file (`--` the rel),
- * ⛔ never a bare `git commit` — the index is SHARED across layers, a bare commit would sweep
- * whatever another layer staged. Repo-less roots (unit-test temp dirs, bare checkouts) are a no-op
- * (return false, not a throw) — the same shape as task-ops.ts commitTaskFile.
- *
- * TIMESTAMP-ONLY WRITES SKIP THE COMMIT (gap-goal-gate-timestamp-commit-flood; now defense-in-depth
- * after gap-goal-evidence-cache-should-not-enter-git removed the gate's evidence write-back): a
- * legacy goal file that still carries an `evidence:` block would only change its `at:` line on an
- * evidence refresh — that is not a substantive change, so we restore the file to HEAD (⛔ never
- * leave the shared checkout dirty — an uncommitted goals/*.md blocks develop→doc ff-only, the exact
- * bug gap-meta-commitgoalfile fixed) and return false WITHOUT committing. A new file (not yet in
- * HEAD) or any other change (verdict/status/title/…) still commits — the write-discount applies
- * ONLY to the timestamp refresh, never to a real change.
- *
- * Returns true when the commit landed; false when the goal dir is not in a git work tree / git
- * errors / the write was timestamp-only (observable, not silent).
+ * COMMIT-AFTER-WRITE (gap-meta-commitgoalfile; now unified by SPEC-store-commit-unification §4):
+ * commit a goal file to git immediately after writeFileSync, via the shared primitive
+ * `commitStoreWrite` — ⛔ no git plumbing here (the five store files' `git commit` has exactly one
+ * home: store-commit.ts). The goal store is the SOURCE of goal writes — the CLI `write`,
+ * meta-driver's write paths, all funnel through `write()`/`flipGoal()` — so the commit lives HERE,
+ * not in each caller. This wrapper declares the goal kind's default (SPEC §4 declaration table):
+ * `propagate: "none"` — a goal write rides the branch it lands on (the goal driver runs from the
+ * main checkout; a worktree write is carried into develop by that task's fan-in ff). A NEW goal
+ * that must be pool-visible now passes propagate "develop" per SPEC §2.2.
  */
-function commitGoalFileAfterWrite(goalDir: string, fileName: string, id: string): boolean {
-  const root = path.dirname(goalDir);
-  let inside = "false";
-  try {
-    inside = execFileSync("git", ["-C", root, "rev-parse", "--is-inside-work-tree"], {
-      stdio: ["ignore", "pipe", "ignore"],
-    }).toString().trim();
-  } catch {
-    return false;
-  }
-  if (inside !== "true") return false;
-  const rel = `goals/${fileName}`;
-  try {
-    // Timestamp-only check: read HEAD's content (null ⇒ a NEW file ⇒ always substantive).
-    let head: string | null = null;
-    try {
-      head = execFileSync("git", ["-C", root, "show", `HEAD:${rel}`], {
-        stdio: ["ignore", "pipe", "ignore"],
-      }).toString();
-    } catch { /* not in HEAD ⇒ new file ⇒ commit */ }
-    if (head !== null) {
-      const work = fs.readFileSync(path.join(root, rel), "utf8");
-      if (stripEvidenceTimestamp(head) === stripEvidenceTimestamp(work)) {
-        execFileSync("git", ["-C", root, "checkout", "--", rel]);
-        return false;
-      }
-    }
-    execFileSync("git", ["-C", root, "add", "--", rel]);
-    execFileSync("git", ["-C", root, "commit", "--no-verify", "-m", `goals: ${id} 写盘即提交（goal-store）`, "--", rel]);
-    return true;
-  } catch {
-    return false;
-  }
+function commitGoalFile(goalDir: string, fileName: string, id: string): CommitOutcome {
+  const root = resolveGitRoot(goalDir);
+  return commitStoreWrite({
+    relPath: root ? path.relative(root, path.join(goalDir, fileName)) : `goals/${fileName}`,
+    message: `goals: ${id} 写盘即提交（store-commit）`,
+    root,
+    propagate: "none",
+  }).outcome;
 }
 
 /**
@@ -488,7 +451,9 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       return { achievedButFailing: [], evaluated: false };
     }
     const achievedButFailing: string[] = [];
-    const root = path.dirname(goalDir);
+    // Criterion cwd = the git root (robust rev-parse, ⛔ not path.dirname — hard rule 4 corollary 2),
+    // falling back to goalDir's parent only when not inside a git work tree.
+    const root = resolveGitRoot(goalDir) ?? path.dirname(goalDir);
     const prev = process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
     process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = "1";
     try {
@@ -519,7 +484,7 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
     fm.status = patch.status;
     if (patch.supersededBy !== undefined) fm["superseded-by"] = patch.supersededBy;
     fs.writeFileSync(p, serializeFrontmatter(fm, body), "utf8");
-    commitGoalFileAfterWrite(goalDir, file, oldId);
+    commitGoalFile(goalDir, file, oldId);
   }
 
   function write(id: string, {
@@ -624,7 +589,7 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       const finalBody = body !== undefined ? body : existingBody;
       const fileName = existingFile ?? `${id}-${slugify(title, "goal")}.md`;
       fs.writeFileSync(path.join(goalDir, fileName), serializeFrontmatter(ordered, finalBody), "utf8");
-      commitGoalFileAfterWrite(goalDir, fileName, id);
+      commitGoalFile(goalDir, fileName, id);
       return get(id) as GoalViewModel;
     });
   }

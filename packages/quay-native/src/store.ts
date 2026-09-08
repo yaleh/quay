@@ -18,6 +18,12 @@ import { TASK_STATUSES, TASK_STATUS, isTaskStatus, type Task, type TaskStatus } 
 // drift across the three readers. The write-side serialize()/validateWrittenYaml() keep their own
 // YAML.stringify/YAML.parse: serialization correctness is the store's, not the schema's.
 import { parseFrontmatterCompletely } from "../../quay/src/task-parsing.ts";
+// SPEC-store-commit-unification §4: the commit-after-write PRIMITIVE (four-state return, rev-parse
+// root, pathspec-limited add+commit) lives in the product layer next to task-parsing.ts. This store
+// delegates its add/commit to it and keeps only its own branch-aware ff-to-develop propagation —
+// the primitive's "develop" propagate is too coarse for task/ worktree branches (fan-in ff-merge is
+// the sole path into develop from a task worktree).
+import { commitStoreWrite } from "../../quay/src/store-commit.ts";
 // gap-shape-section-tables-dual-copy-no-single-source: the shape section-heading lists (which
 // headings count as proposal/plan/ac/dod per shape) live in ONE place — plugin/scripts/shape-
 // sections.ts — imported by BOTH this store (product judge) and ready-pool-check.ts (methodology
@@ -1068,25 +1074,14 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     }
   }
 
-  /** Stage + commit a set of repo-relative paths (hard rule 11: `git add` then `git commit`
-   *  back-to-back, no wait between them; pathspec-limited, never `-A` — memory git-commit-no-
-   *  pathspec-commits-shared-index). `--no-verify` skips the pre-commit hook (a mechanical ABI
-   *  write is content-neutral). Returns "committed" | "nothing" | "failed" — "nothing" is a
-   *  DISTINGUISHABLE state (e.g. deleting a never-committed untracked file has no index entry to
-   *  stage), never conflated with "committed" or "failed" (硬规则 3b). */
-  function commitRelPaths(root: string, relPaths: string[], message: string): "committed" | "nothing" | "failed" {
+  /** Whether `rel` exists in HEAD (the git blob `HEAD:<rel>`). False when the file was never
+   *  committed — the "nothing to stage" guard for deleting an untracked file. */
+  function inHead(root: string, rel: string): boolean {
     try {
-      execFileSync("git", ["-C", root, "add", "--", ...relPaths], { stdio: "ignore" });
+      execFileSync("git", ["-C", root, "cat-file", "-e", `HEAD:${rel}`], { stdio: "ignore" });
+      return true;
     } catch {
-      // `git add -- <path>` errors when the pathspec matches nothing tracked (deleting an untracked
-      // file): there is nothing to commit, which is NOT a commit failure.
-      return "nothing";
-    }
-    try {
-      execFileSync("git", ["-C", root, "commit", "--no-verify", "-m", message, "--", ...relPaths], { stdio: "ignore" });
-      return "committed";
-    } catch {
-      return "failed";
+      return false;
     }
   }
 
@@ -1102,25 +1097,40 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     }
   }
 
-  /** Commit `tasks/<id>.md` (branch-aware) after a successful write/delete. Returns
+  /** Commit `tasks/<id>.md` (branch-aware) after a successful write/delete, delegating the git
+   *  add/commit to the shared primitive `commitStoreWrite` (SPEC-store-commit-unification §3) and
+   *  keeping only this store's own branch-aware ff-to-develop propagation. Returns
    *  `{ committed, propagated, status }` — honest, distinguishable outcomes, never "silent success"
    *  (硬规则 3b):
    *    status "committed"  — the change is on the current branch's git history (propagated reports
    *                          whether it also reached develop).
    *    status "not-in-git" — the store's tasksDir is not inside a git work tree (unit-test temp
    *                          dirs): a deliberate no-op, NOT a failure.
-   *    status "nothing"    — nothing to stage (deleting a never-committed untracked file).
+   *    status "nothing"    — nothing to stage/commit (deleting a never-committed untracked file, or
+   *                          a byte-identical write the primitive restored to HEAD).
    *    status "failed"     — the git add/commit itself errored: a REAL failure (the disk change is
    *                          not on any branch's history).
-   *  Callers log only `failed` — the other two non-committed states are expected and must not be
+   *  Callers log only `failed` — the other non-committed states are expected and must not be
    *  mistaken for a broken commit. */
   function commitTaskWrite(id: string, verb: "task_write" | "task_delete"): { committed: boolean; propagated: boolean; status: "committed" | "not-in-git" | "nothing" | "failed" } {
     const root = resolveGitRoot();
     if (root === null) return { committed: false, propagated: false, status: "not-in-git" };
     const rel = path.join("tasks", `${id}.md`);
-    const outcome = commitRelPaths(root, [rel], `tasks: ${id} ${verb}`);
-    if (outcome === "nothing") return { committed: false, propagated: false, status: "nothing" };
-    if (outcome === "failed") return { committed: false, propagated: false, status: "failed" };
+    // "nothing" guard BEFORE delegating: deleting a never-committed untracked file has no index
+    // entry to stage — a DISTINGUISHABLE no-op, never conflated with "failed" (硬规则 3b). The
+    // primitive's four states have no "nothing" (SPEC §3), so this edge stays here.
+    if (!fs.existsSync(path.join(root, rel)) && !inHead(root, rel)) {
+      return { committed: false, propagated: false, status: "nothing" };
+    }
+    const res = commitStoreWrite({
+      relPath: rel,
+      message: `tasks: ${id} ${verb}`,
+      root,
+      propagate: "none", // branch-aware ff below; the primitive's "develop" is too coarse for task/ branches
+    });
+    if (res.outcome === "not-in-git") return { committed: false, propagated: false, status: "not-in-git" };
+    if (res.outcome === "unchanged") return { committed: false, propagated: false, status: "nothing" };
+    if (res.outcome === "failed") return { committed: false, propagated: false, status: "failed" };
     const branch = currentBranch(root);
     if (branch === null || branch === "develop") {
       // detached HEAD, or already on develop — nothing further to propagate.
