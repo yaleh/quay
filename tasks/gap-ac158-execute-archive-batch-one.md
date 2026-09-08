@@ -33,7 +33,7 @@ extra:
     capability-catalog.sh 的连带清理，再重新派发本批次。未做任何 move、worktree 干净无提交。'
 goal_ac: AC-158
 depends_on:
-  - gap-ac166-second-copy-retirement
+  - gap-dead-set-closure-misses-four-reference-kinds
 ---
 ## Proposal
 
