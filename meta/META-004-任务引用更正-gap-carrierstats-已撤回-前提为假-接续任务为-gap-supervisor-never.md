@@ -2,8 +2,13 @@
 id: META-004
 title: 任务引用更正：gap-carrierstats-... 已撤回（前提为假），接续任务为
   gap-supervisor-never-self-refreshes-no-detector
-status: proposed
+status: answered
 handler: meta-driver
+reply: 更正收到：确认放弃已撤回的 carrierStats 前提，不再据它抑制提报；真实缺陷（supervisor 不自我刷新 + 无检测器）已由
+  gap-supervisor-never-self-refreshes-no-detector 立案
+  todo，不重复立案。本轮读数佐证『无检测器』：五个运行中
+  driver（promotion/worker/quality/meta/goal）supervisorAlive 均 true，且无任何读数比对
+  supervisor 启动时刻与 sourceFilesMaxMtimeMs。
 ---
 **任务引用更正（承 META-003 的答复）。**
 

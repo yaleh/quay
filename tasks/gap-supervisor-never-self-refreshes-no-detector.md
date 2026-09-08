@@ -44,12 +44,12 @@ quality driver     pid=3584223  启动 2026-09-06 08:10:14
 
 ## Acceptance Criteria
 
-- [ ] 单测全绿：`node --experimental-strip-types --test plugin/test/driver-runtime.test.mjs`
-- [ ] 存在 supervisor 陈旧判定的实现（按位置，非注释）：`test "$(grep -c 'supervisorStartedAt\|supervisorStale\|supervisor_stale' plugin/scripts/driver-runtime.ts)" -ge 1`
-- [ ] 判定结果进对外读数：`node --experimental-strip-types -e 'import("./plugin/scripts/driver-runtime.ts").then(m=>{const a=m.aliveness(process.cwd(),"quality");process.exit(Object.keys(a).some(k=>/supervisorStale|supervisorStartedAt/i.test(k))?0:1)})'`
-- [ ] 「读不到启动时刻」有独立取值、不与「新鲜」同形：`grep -qi 'not-evaluated\|notEvaluated' plugin/scripts/driver-runtime.ts`
-- [ ] 新增用例覆盖「supervisor 早于被监视源码 mtime ⇒ 判陈旧」：`test "$(grep -ci 'supervisor.*stale\|stale.*supervisor' plugin/test/driver-runtime.test.mjs)" -ge 1`
-- [ ] 负控制（判据能取假）：把该判定分支注释掉后重跑 `node --experimental-strip-types --test plugin/test/driver-runtime.test.mjs` 必须红
+- [x] 单测全绿：`node --experimental-strip-types --test plugin/test/driver-runtime.test.mjs`
+- [x] 存在 supervisor 陈旧判定的实现（按位置，非注释）：`test "$(grep -c 'supervisorStartedAt\|supervisorStale\|supervisor_stale' plugin/scripts/driver-runtime.ts)" -ge 1`
+- [x] 判定结果进对外读数：`node --experimental-strip-types -e 'import("./plugin/scripts/driver-runtime.ts").then(m=>{const a=m.aliveness(process.cwd(),"quality");process.exit(Object.keys(a).some(k=>/supervisorStale|supervisorStartedAt/i.test(k))?0:1)})'`
+- [x] 「读不到启动时刻」有独立取值、不与「新鲜」同形：`grep -qi 'not-evaluated\|notEvaluated' plugin/scripts/driver-runtime.ts`
+- [x] 新增用例覆盖「supervisor 早于被监视源码 mtime ⇒ 判陈旧」：`test "$(grep -ci 'supervisor.*stale\|stale.*supervisor' plugin/test/driver-runtime.test.mjs)" -ge 1`
+- [x] 负控制（判据能取假）：把该判定分支注释掉后重跑 `node --experimental-strip-types --test plugin/test/driver-runtime.test.mjs` 必须红
 
 ## Definition of Done
 
