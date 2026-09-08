@@ -1,7 +1,7 @@
 ---
 id: AC-196
 title: 四态返回：输出词表含 not-in-git 与 unchanged，旧 boolean 提交函数 = 0
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-008
 criterion: >-
