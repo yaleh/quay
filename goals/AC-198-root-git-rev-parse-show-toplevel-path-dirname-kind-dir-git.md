@@ -1,7 +1,7 @@
 ---
 id: AC-198
 title: root 取自 git rev-parse --show-toplevel，不再把 path.dirname(<kind>Dir) 当 git 根
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-008
 criterion: >-
