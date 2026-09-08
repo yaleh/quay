@@ -248,13 +248,18 @@ function currentBranchName(root: string): string | null {
   }
 }
 
-/** 机械 ff-only push：把 `src` 快进到 develop（`git push . src:develop`）。ff 不成立 / git 出错 ⇒ false。 */
-function ffPushToDevelop(root: string, src: string): boolean {
+/** 机械 ff-only push：把 `src` 快进到 develop（`git push . src:develop`）。成功 ⇒ { ok:true }；
+ *  失败（ff 不成立 / git 出错）⇒ { ok:false, detail }，detail = 真实 git stderr（⛔ 不丢弃——
+ *  此前 semantic-ff-failed 8/15 次不可归因，硬规则 3b）。捕获 stderr 的写法与 syncDevelopToDoc
+ *  的 ff-error 同形（trim + 前 3 行 + 300 字符截断）。 */
+function ffPushToDevelop(root: string, src: string): { ok: boolean; detail?: string } {
   try {
-    execFileSync("git", ["-C", root, "push", ".", `${src}:develop`], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
+    execFileSync("git", ["-C", root, "push", ".", `${src}:develop`], { stdio: ["ignore", "ignore", "pipe"] });
+    return { ok: true };
+  } catch (e) {
+    const err = e as { stderr?: Buffer | string };
+    const detail = String(err?.stderr ?? "").trim().split("\n").slice(0, 3).join(" | ").slice(0, 300);
+    return { ok: false, detail: detail || "<no-stderr-captured>" };
   }
 }
 
@@ -321,8 +326,9 @@ export function semanticSyncDocToDevelop(root: string, cur: string): boolean {
   }
 
   // ③ ff push develop + 落痕。
-  if (!ffPushToDevelop(root, cur)) {
-    writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-semantic-ff-failed", phase: "push", branch: cur });
+  const pushed = ffPushToDevelop(root, cur);
+  if (!pushed.ok) {
+    writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-semantic-ff-failed", phase: "push", branch: cur, detail: pushed.detail });
     return false;
   }
   writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-semantic-resolved", phase: "done", branch: cur });
@@ -416,7 +422,7 @@ export function propagateDocBranchToDevelop(root: string): boolean {
     return false;
   }
   if (cur === "develop") return true; // 已在 develop ⇒ 无需同步（非失败）
-  if (ffPushToDevelop(root, cur)) return true; // 机械 ff-only 成功
+  if (ffPushToDevelop(root, cur).ok) return true; // 机械 ff-only 成功
   return semanticSyncDocToDevelop(root, cur); // 机械失败 ⇒ 升级语义兜底
 }
 
