@@ -394,11 +394,12 @@ test("AC5 — a random sample of 5 delivered checks each answers a specific ques
   }
 });
 
-// ── Wiring: capability-catalog.sh ships with quay-init --loop and passes in the target ──
-test("Wiring — capability-catalog.sh is in quay-init.sh's shipped set and lands+passes in a real --loop target", () => {
-  const initSrc = fs.readFileSync(path.join(SCRIPTS_DIR, "quay-init.sh"), "utf8");
-  assert.match(initSrc, /capability-catalog\.sh/,
-    "quay-init.sh must reference capability-catalog.sh in its shipped script set");
+// ── Wiring: capability-catalog.sh is a plugin script (not laid down by quay-init after AC168) ──
+test("Wiring — capability-catalog.sh is a plugin script (not laid down); the catalog passes standalone", () => {
+  // AC168 (gap-quay-init-closure-shrink-body): quay-init writes the six-item closed set only — no
+  // plugin/scripts copies. capability-catalog.sh is delivered BY THE PLUGIN, not laid into a target.
+  const catalogScript = path.join(SCRIPTS_DIR, "capability-catalog.sh");
+  assert.ok(fs.existsSync(catalogScript), "capability-catalog.sh must exist in plugin/scripts");
 
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), "cap-cat-init-"));
   const wt = diskWorktreeRoot();
@@ -408,21 +409,12 @@ test("Wiring — capability-catalog.sh is in quay-init.sh's shipped set and land
         "--test-command", "node --test", "--tmux-session", "capcat-0:0.0", "--worktree-root", wt],
       { encoding: "utf8", env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_DIR } });
     assert.equal(r.status, 0, `quay-init --loop must exit 0:\n${r.stderr}`);
-    const installed = path.join(ws, "plugin", "scripts", "capability-catalog.sh");
-    assert.ok(fs.existsSync(installed), "capability-catalog.sh must be laid down by quay-init --loop");
-    // The laid-down catalog must pass in the target: it declares its own question and every
-    // laid-down check has a declaration (the catalog's table covers the whole plugin, so the
-    // installed subset — which is ⊆ the plugin — is fully declared).
-    const cat = spawnSync("bash", [installed, "--summary"], { encoding: "utf8" });
-    assert.equal(cat.status, 0, `the laid-down catalog must pass in the target project:\n${cat.stderr}\n${cat.stdout}`);
-    assert.match(cat.stdout, /0 unclassified/, "the laid-down catalog must report 0 unclassified");
-    // AC2 consistency: the exp5-legacy families are NOT laid down (they are not in the derived
-    // LOOP_SCRIPTS, matching the catalog's ships:false judgment).
-    for (const f of ["codex-stage1-selfcheck.sh", "it0-enforcement-with-design-check.ts",
-      "audit-independence-check.ts"]) {
-      assert.ok(!fs.existsSync(path.join(ws, "plugin", "scripts", f)),
-        `exp5-legacy must not ship into a target: ${f}`);
-    }
+    assert.ok(!fs.existsSync(path.join(ws, "plugin", "scripts", "capability-catalog.sh")),
+      "capability-catalog.sh must NOT be laid down (AC168 closed set — no script copies)");
+    // The catalog passes standalone (its table covers the whole plugin).
+    const cat = spawnSync("bash", [catalogScript, "--summary"], { encoding: "utf8" });
+    assert.equal(cat.status, 0, `the catalog must pass standalone:\n${cat.stderr}\n${cat.stdout}`);
+    assert.match(cat.stdout, /0 unclassified/, "the catalog must report 0 unclassified");
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
   }
