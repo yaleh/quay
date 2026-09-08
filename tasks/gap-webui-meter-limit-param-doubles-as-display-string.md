@@ -46,16 +46,16 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 生产载体读数（能取假）：对运行中的实例读 `/system`，取 loadavg 行的填充条宽度比与页面显示的
+- [x] AC1 生产载体读数（能取假）：对运行中的实例读 `/system`，取 loadavg 行的填充条宽度比与页面显示的
       `val / threshold`，断言两者相对误差 < 2%。取假：改动前实测显示 74% 而渲染 100%，跑同一脚本必须报红。
-- [ ] AC2 单调性（回答硬规则 4：让这个量真的能取假）：单测以 `val` = 阈值的 25% / 50% / 100% / 200% 四个输入
+- [x] AC2 单调性（回答硬规则 4：让这个量真的能取假）：单测以 `val` = 阈值的 25% / 50% / 100% / 200% 四个输入
       调渲染函数，断言得到的 `pct` 为 **25 / 50 / 100 / 100** 四个**互不全等**的值。
       当前实现在这四个输入下全部返回 100 ⇒ 必须报红。
-- [ ] AC3 「无法评估」不与「合格」同形（硬规则 3b）：单测断言当 `numericLimit` 为 `null`/`NaN` 时，
+- [x] AC3 「无法评估」不与「合格」同形（硬规则 3b）：单测断言当 `numericLimit` 为 `null`/`NaN` 时，
       渲染结果里**不含填充条元素**（而不是含一个 100% 宽的填充条），且文案里出现一个可判定的未知标记。
-- [ ] AC4 枚举而非抽查：单测遍历 `/system` 页**全部**进度条调用点，断言每一处传入的分母都能 `Number()`
+- [x] AC4 枚举而非抽查：单测遍历 `/system` 页**全部**进度条调用点，断言每一处传入的分母都能 `Number()`
       成有限数或显式为 `null`；断言失败时打印违例调用点的清单与条数。
-- [ ] AC5 `bash scripts/test.sh --for-task gap-webui-meter-limit-param-doubles-as-display-string` 退出码 0。
+- [x] AC5 `bash scripts/test.sh --for-task gap-webui-meter-limit-param-doubles-as-display-string` 退出码 0。
 
 ## Definition of Done
 
