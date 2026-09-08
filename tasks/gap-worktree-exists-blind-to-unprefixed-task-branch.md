@@ -2,7 +2,7 @@
 id: gap-worktree-exists-blind-to-unprefixed-task-branch
 title: worktreeExists 只认 refs/heads/task/<id>，无 task/ 前缀的遗留 worktree 判为不存在 ⇒ NYF
   leftover-worktree 豁免失效、任务永久出池
-status: todo
+status: ready
 labels:
   - gap
 parent: null
