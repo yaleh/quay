@@ -1,7 +1,7 @@
 ---
 id: gap-store-commit-unification-ac197-five-kind-wiring
 title: AC-197 五 kind 齐备：五个 store 文件全部调用 commitStoreWrite = 5（adr / docs-managed 新增两个）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
