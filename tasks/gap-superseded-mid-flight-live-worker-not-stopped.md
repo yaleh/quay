@@ -62,7 +62,7 @@ extra:
 ## Definition of Done
 
 `reclaimSupersededWorktrees` 对 `status: superseded` 且命中活 worker 的任务发送 SIGTERM 而非仅记录跳过；AC1–AC6 全勾；`bash scripts/test.sh --for-task gap-superseded-mid-flight-live-worker-not-stopped --allow-thin` 绿，经 fan-in ff 到 develop。
-- [ ] 真实运行验证（非 fixture，待外部）：此后再发生一次「任务在飞期间被撤回为 superseded」，driver 下一轮自动终止其 worker，不再需要人工 `kill -TERM`——本任务立案当天的 gap-carrierstats-stalesecs-uniform-on-event-driven-carriers（人工 kill pid 2456242）是这个待验证场景的前例，不算生产验证。
+- [ ] 真实运行验证（非 fixture）：此后再发生一次「任务在飞期间被撤回为 superseded」，driver 下一轮自动终止其 worker，不再需要人工 `kill -TERM`——本任务立案当天的 gap-carrierstats-stalesecs-uniform-on-event-driven-carriers（人工 kill pid 2456242）是这个待验证场景的前例，不算生产验证。（待外部）
 
 ## Touches
 
