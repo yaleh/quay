@@ -114,11 +114,7 @@
 {"file":"plugin/test/prod-data-audit.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/productization-verification-record-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/provision-verify-worktree.test.mjs","judgment":"M","mechanism":"P+S+M","signal":[]}
-{"file":"plugin/test/quay-init-drift-report.test.mjs","judgment":"S","mechanism":"S+M","signal":["concurrency"]}
 {"file":"plugin/test/quay-init-laydown-closure.test.mjs","judgment":"S","mechanism":"S+M","signal":["concurrency"]}
-{"file":"plugin/test/quay-init-laydown-dist-closure.test.mjs","judgment":"S","mechanism":"S+M","signal":["--for-task","concurrency"]}
-{"file":"plugin/test/quay-init-loop-consumer-doc-refs.test.mjs","judgment":"S","mechanism":"S+M","signal":["concurrency"]}
-{"file":"plugin/test/quay-init-loop-core.test.mjs","judgment":"S","mechanism":"S+M","signal":["runner-grouping","concurrency"]}
 {"file":"plugin/test/quay-init-tmux-detection.test.mjs","judgment":"S","mechanism":"S+M","signal":["concurrency"]}
 {"file":"plugin/test/quay-init.test.mjs","judgment":"S","mechanism":"S+M","signal":["concurrency"]}
 {"file":"plugin/test/ready-pool-check.test.mjs","judgment":"S","mechanism":"S+M","signal":["--for-task","lane","concurrency"]}
@@ -140,7 +136,6 @@
 {"file":"plugin/test/runner-grouping-flags-only.test.mjs","judgment":"S","mechanism":"S","signal":["--list-files","--group","--test-concurrency","--experimental-test-coverage","runner-grouping","concurrency"]}
 {"file":"plugin/test/runner-grouping-list-groups.test.mjs","judgment":"S","mechanism":"S","signal":["--list-files","--list-groups","--group","runner-grouping","concurrency"]}
 {"file":"plugin/test/runner-grouping-serial-anti-stomp.test.mjs","judgment":"S","mechanism":"S","signal":["--list-files","--list-groups","--group","--test-concurrency","runner-grouping","lane","concurrency"]}
-{"file":"plugin/test/runtime-landing.test.mjs","judgment":"S","mechanism":"S","signal":["runner-grouping","concurrency"]}
 {"file":"plugin/test/runtime-usage-inventory.test.mjs","judgment":"S","mechanism":"S+M","signal":["--for-task"]}
 {"file":"plugin/test/scoped-static-checks.test.mjs","judgment":"S","mechanism":"S+M","signal":["--list-files","--group"]}
 {"file":"plugin/test/select-static-checks-for-touches.test.mjs","judgment":"S","mechanism":"S+M","signal":["--group"]}

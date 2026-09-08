@@ -94,3 +94,50 @@ The script prints `claude plugin marketplace add` + `claude plugin install` (or 
 
 After the six-file laydown, the workspace is READY for the cold-start skill (`/quay:cold-start`):
 one command that drives the loop to start and asserts a real `--task-start` telemetry record.
+
+## Reference docs (SPEC declaration point)
+
+The init skill is a SPEC declaration point (`spec-declaration-point-check`): every on-disk
+`orchestration/SPEC-*.md` must be declared here.
+
+<!-- reference-doc: orchestration/SPEC-branching-model-integration-branch-2026-08-05.md -->
+<!-- reference-doc: orchestration/SPEC-capability-planes-and-mechanism-lifecycle-2026-09-05.md -->
+<!-- reference-doc: orchestration/SPEC-checker-mechanical-spine-contract-2026-08-28.md -->
+<!-- reference-doc: orchestration/SPEC-codex-session-communication-host-adapter-2026-08-24.md -->
+<!-- reference-doc: orchestration/SPEC-cold-start-one-liner.md -->
+<!-- reference-doc: orchestration/SPEC-complete-delivery-surface-2026-08-05.md -->
+<!-- reference-doc: orchestration/SPEC-cut-the-waiting.md -->
+<!-- reference-doc: orchestration/SPEC-dispatch-ordering-semantic-2026-08-13.md -->
+<!-- reference-doc: orchestration/SPEC-execution-loop-productization-2026-08-28.md -->
+<!-- reference-doc: orchestration/SPEC-fan-in-driver-mechanical-orchestration-2026-08-27.md -->
+<!-- reference-doc: orchestration/SPEC-fan-in-ff-merge-lock-2026-08-14.md -->
+<!-- reference-doc: orchestration/SPEC-fan-in-workflow-lock-and-S1-2026-08-26.md -->
+<!-- reference-doc: orchestration/SPEC-goal-mechanism-2026-09-06.md -->
+<!-- reference-doc: orchestration/SPEC-goal-store-2026-08-09.md -->
+<!-- reference-doc: orchestration/SPEC-in-flight-semantics-2026-08-14.md -->
+<!-- reference-doc: orchestration/SPEC-instruments-behind-one-entry.md -->
+<!-- reference-doc: orchestration/SPEC-integration-architecture-2026-08-05.md -->
+<!-- reference-doc: orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md -->
+<!-- reference-doc: orchestration/SPEC-manager-productization-2026-08-05.md -->
+<!-- reference-doc: orchestration/SPEC-methodology-as-a-deliverable.md -->
+<!-- reference-doc: orchestration/SPEC-methodology-layer-architecture-2026-08-25.md -->
+<!-- reference-doc: orchestration/SPEC-no-text-substitution-at-install.md -->
+<!-- reference-doc: orchestration/SPEC-one-observer-two-surfaces.md -->
+<!-- reference-doc: orchestration/SPEC-outer-liveness-productization.md -->
+<!-- reference-doc: orchestration/SPEC-per-task-suite-verification-2026-08-13.md -->
+<!-- reference-doc: orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md -->
+<!-- reference-doc: orchestration/SPEC-quay-self-hosts-its-own-cold-start.md -->
+<!-- reference-doc: orchestration/SPEC-state-crystallization-2026-08-05.md -->
+<!-- reference-doc: orchestration/SPEC-store-commit-unification-2026-09-08.md -->
+<!-- reference-doc: orchestration/SPEC-suite-lifecycle-and-failure-semantics-2026-08-26.md -->
+<!-- reference-doc: orchestration/SPEC-suite-speed.md -->
+<!-- reference-doc: orchestration/SPEC-task-status-flow-target-vs-actual-2026-08-13.md -->
+<!-- reference-doc: orchestration/SPEC-three-layer-unified-architecture-2026-08-09.md -->
+<!-- reference-doc: orchestration/SPEC-tick-mechanical-checks-mcp-2026-08-15.md -->
+<!-- reference-doc: orchestration/SPEC-tick-quality-2026-08-14.md -->
+<!-- reference-doc: orchestration/SPEC-tick-read-path-slimming-2026-08-14.md -->
+<!-- reference-doc: orchestration/SPEC-tmux-retirement-2026-09-03.md -->
+<!-- reference-doc: orchestration/SPEC-typed-axes-and-standing-dynamics.md -->
+<!-- reference-doc: orchestration/SPEC-unified-driver-architecture-2026-08-23.md -->
+<!-- reference-doc: orchestration/SPEC-web-session-observability-and-control-2026-08-24.md -->
+<!-- reference-doc: orchestration/SPEC-worker-driven-inner-2026-08-16.md -->
