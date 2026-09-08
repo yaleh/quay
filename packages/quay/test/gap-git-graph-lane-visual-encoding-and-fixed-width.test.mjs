@@ -109,6 +109,16 @@ test("AC2: categorical palette; per-lane colour yields ≥min(6, lane-count) dis
   assert.ok(!script.includes("laneColor(b.slot)"), "client must NOT colour by slot (slot reuse collapses hues)");
 });
 
+// ── AC102② mirror: lane colours are var(--color-lane-N) tokens, never hardcoded hex in the script ──
+
+test("the client renderer script carries zero hardcoded hex (lane colours are tokens)", () => {
+  const script = gitGraphClientScript();
+  const hex = script.match(/#[0-9a-fA-F]{6}/g) || [];
+  assert.deepEqual(hex, [], `renderer script must carry no hardcoded hex (got ${hex.length}: ${hex.join(", ")})`);
+  assert.ok(script.includes("var(--color-lane-0)"), "lane palette entries are token references");
+  assert.ok(script.includes("var(--color-lane-chip-text)"), "the chip label is a token reference");
+});
+
 // ── AC3: rounded corners are a structural fact — one <path>, no horizontal fork/merge <line> ────────
 
 test("AC3: lane connectors are one rounded <path>; no independent horizontal <line> remains", () => {
@@ -144,7 +154,7 @@ test("AC4: every lane gets a branch-name chip (non-transparent bg) with ≥4.5:1
   // The chip is a <rect> with a non-transparent lane-colour fill + a label whose text IS the ref.
   assert.ok(script.includes("appendChip("), "the chip helper exists");
   assert.ok(script.includes(".text(ref)"), "the chip label text is the lane ref");
-  assert.ok(script.includes('attr("fill", color)'), "the chip bg is filled with the lane colour (non-transparent)");
+  assert.ok(script.includes('.style("fill", color)'), "the chip bg is filled with the lane colour (non-transparent)");
   // Both render states label the branch: collapsed (summary) and expanded (fold control).
   assert.ok(script.includes("appendChip(grp, textX, yy + 3, b.ref"), "collapsed summary leads with a chip(ref)");
   assert.ok(script.includes("appendChip(grp2, textX, y(laneBot) - 6, b.ref"), "expanded fold control leads with a chip(ref)");

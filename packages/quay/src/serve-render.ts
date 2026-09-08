@@ -268,15 +268,17 @@ hr { border: none; border-top: 1px solid var(--color-divider); margin: 1rem 0; }
 .verdict-pass { color: var(--color-positive-700); }
 .verdict-fail { color: var(--color-accent-800); }
 /* AC102: git-history SVG mark colours — token-derived so the client-rendered chart carries
-   no hardcoded hex. The hex values live only in webui-modernist.css. EXCEPTION (lane identity,
-   gap-git-graph-lane-visual-encoding-and-fixed-width): the per-lane categorical palette is a data
-   structure in serve-git.ts (AC1 unit-tests its WCAG contrast), not a theme token. */
+   no hardcoded hex. The hex values live only in webui-modernist.css, except the per-lane
+   categorical palette (gap-git-graph-lane-visual-encoding-and-fixed-width), whose hex lives in
+   serve-git.ts and is emitted per-page as a scoped --color-lane-* token sheet (gitGraphLaneTokenCss)
+   — the renderer script references the tokens, never the hex. */
 .git-svg-surface { background: var(--color-neutral-100); }
 /* grid stays the faint neutral-200 (real grid lines only) — the trunk axis is .git-svg-trunk. */
 .git-svg-grid { stroke: var(--color-neutral-200); }
 /* trunk vertical spine: a visible dark neutral (the old grid neutral-200 measured 1.13:1 on the
-   surface and was invisible at 2x zoom). */
-.git-svg-trunk { stroke: var(--color-neutral-600); }
+   surface and was invisible at 2x zoom). neutral-700 also holds ≥4.5:1 against both text
+   backgrounds, so the matching legend glyph is not a text-contrast violation. */
+.git-svg-trunk { stroke: var(--color-neutral-700); }
 .git-svg-commit { fill: var(--color-accent-600); }
 .git-svg-merge { fill: var(--color-accent-2-500); }
 .git-svg-ink { fill: var(--color-text); }

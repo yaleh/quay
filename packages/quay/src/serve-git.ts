@@ -447,11 +447,18 @@ export function computeGitGraphWidth(layout: GitGraphLayout, textX: number): num
   return Math.ceil(textX + longest + pad);
 }
 
+/** AC102②: the client renderer references lane colours as `var(--color-lane-N)` TOKENS, never hex.
+ *  The palette's hex values stay HERE (AC1/AC4 unit-test their WCAG contrast), and are emitted as a
+ *  scoped token sheet by gitGraphLaneTokenCss() — one source of truth, no second copy to drift. */
+export function gitGraphLaneTokenCss(): string {
+  const laneDefs = GIT_GRAPH_LANE_PALETTE.map((hex, i) => `--color-lane-${i}:${hex};`).join("");
+  return `#git-graph{${laneDefs}--color-lane-chip-text:${GIT_GRAPH_LANE_CHIP_TEXT};}`;
+}
+
 /** The client-side D3 renderer. Collapse/expand is toggled client-side; branches start COLLAPSED
  *  (AC2). The generated JS carries no template literal, `${`, or `</script` so it inlines verbatim —
- *  geometry constants AND the lane palette are interpolated SERVER-side (the OUTPUT carries plain
- *  numbers and a JSON palette array, never `${`). Hex colours appear only in that interpolated
- *  palette — a deliberate exception to the "no hex" rule, justified by AC1's contrast unit-test. */
+ *  geometry constants are interpolated SERVER-side as plain numbers, and lane colours are referenced
+ *  as `var(--color-lane-N)` tokens (AC102②: the renderer script carries ZERO hardcoded hex). */
 export function gitGraphClientScript(): string {
   return `(function () {
   var mount = document.getElementById("git-graph");
@@ -462,8 +469,8 @@ export function gitGraphClientScript(): string {
   if (!data || !data.trunk || !data.trunk.commits.length) { return; }
 
   var rowH = 26, trunkX = ${GIT_GRAPH_TRUNK_X}, textX = ${GIT_GRAPH_TEXT_X}, laneGap = ${GIT_GRAPH_LANE_GAP}, maxLanes = ${GIT_GRAPH_MAX_LANES}, nodeR = 4, mergeR = 5, padY = 24;
-  var lanePalette = ${JSON.stringify(GIT_GRAPH_LANE_PALETTE)};
-  var chipText = ${JSON.stringify(GIT_GRAPH_LANE_CHIP_TEXT)};
+  var lanePalette = ${JSON.stringify(GIT_GRAPH_LANE_PALETTE.map((_, i) => `var(--color-lane-${i})`))};
+  var chipText = "var(--color-lane-chip-text)";
   var trunk = data.trunk;
   var branches = data.branches || [];
   var overflow = typeof data.overflowCount === "number" ? data.overflowCount : 0;
@@ -525,13 +532,13 @@ export function gitGraphClientScript(): string {
     var chip = parent.append("g").attr("class", "git-svg-lane-chip");
     var label = chip.append("text")
       .attr("x", x + 6).attr("y", y).attr("font-size", 10)
-      .attr("fill", chipText).text(ref);
+      .style("fill", chipText).text(ref);
     var box = label.node().getBBox();
     chip.insert("rect", ":first-child")
       .attr("x", x).attr("y", y - 9)
       .attr("width", box.width + 12).attr("height", 15)
       .attr("rx", 4).attr("ry", 4)
-      .attr("fill", color);
+      .style("fill", color);
     return box.width + 12;
   }
 
@@ -622,7 +629,7 @@ export function gitGraphClientScript(): string {
 
       g.append("path").attr("class", "git-svg-lane")
         .attr("d", lanePath(laneX, forkRow, mergeRow, laneTop, laneBot))
-        .attr("fill", "none").attr("stroke", color).attr("stroke-width", 1.6);
+        .attr("fill", "none").style("stroke", color).attr("stroke-width", 1.6);
 
       if (expanded[b.id] === true) {
         // AC4: the fold control is a chip(ref) + "▲ 折叠" — the branch name stays prominent (chip),
@@ -656,7 +663,7 @@ export function gitGraphClientScript(): string {
         } else {
           node = g.append("circle").attr("class", "git-svg-commit")
             .attr("cx", laneX).attr("cy", yy).attr("r", nodeR)
-            .attr("fill", laneColorById[it.laneId]);
+            .style("fill", laneColorById[it.laneId]);
         }
         node.append("title").text(c.hash + " · " + c.subject);
         if (it.laneId === null) {
@@ -673,7 +680,7 @@ export function gitGraphClientScript(): string {
         var grp = g.append("g").style("cursor", "pointer")
           .on("click", function () { expanded[b.id] = true; render(); });
         grp.append("circle").attr("class", "git-svg-commit").attr("cx", laneX).attr("cy", yy).attr("r", nodeR)
-          .attr("fill", laneColorById[b.id]);
+          .style("fill", laneColorById[b.id]);
         var chipW = appendChip(grp, textX, yy + 3, b.ref, laneColorById[b.id]);
         grp.append("text").attr("class", "git-svg-ink").attr("x", textX + chipW + 6).attr("y", yy + 4).attr("font-size", 11)
           .text("· " + b.commits.length + " commits · " + spanText(b) + "（点击展开）");
@@ -717,7 +724,7 @@ export function gitGraphLegendHtml(): string {
   const parts = [
     glyph("var(--color-accent-600)", "●", "commit"),
     glyph("var(--color-accent-2-500)", "◆", "merge"),
-    glyph("var(--color-neutral-600)", "┃", "trunk"),
+    glyph("var(--color-neutral-700)", "┃", "trunk"),
   ];
   return `<div style="position:sticky;left:0;top:0;z-index:2;display:inline-flex;gap:0.75rem;align-items:center;background:var(--color-surface);padding:0.25rem 0.6rem;border:1px solid var(--color-neutral-200);border-radius:6px;font-size:0.72rem;color:var(--color-neutral-700)">${parts.join("")}</div>`;
 }
@@ -745,6 +752,7 @@ function renderGitHistoryPage(history: GitHistoryResult): string {
   // the <script> element. d3 + the client renderer are emitted only when there is a graph to draw.
   // AC5: textWidth (the content-derived viewBox width seed) rides in the same JSON as the layout.
   const graphData = layout ? { ...layout, textWidth: computeGitGraphWidth(layout, GIT_GRAPH_TEXT_X) } : null;
+  const laneTokenStyles = layout ? html`<style>${gitGraphLaneTokenCss()}</style>` : "";
   const dataScript = graphData ? html`<script type="application/json" id="git-graph-data">${JSON.stringify(graphData).replace(/</g, "\\u003c")}</script>` : "";
   const libScript = layout ? html`<script>${gitGraphLibJs()}</script>` : "";
   const clientScript = layout ? html`<script>${gitGraphClientScript()}</script>` : "";
@@ -775,6 +783,7 @@ function renderGitHistoryPage(history: GitHistoryResult): string {
       <p class="meta"><strong>纵轴 = 提交落地顺序（git commit time），不是工时/持续时间。</strong> develop 竖直主干 + task 分支从主干分出（fork）/合入（merge）的连线；task 分支默认折叠（只显提交数与时间跨度，点击展开逐条）。菱形 = 合并提交（fan-in 落地事件）。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并（跨所有本地分支）。</p>
       ${statusNote}
       ${graph}
+      ${laneTokenStyles}
       ${dataScript}
       ${libScript}
       ${clientScript}
