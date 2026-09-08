@@ -1,40 +1,16 @@
 ---
 id: AC-168
 title: quay-init 收缩到 SPEC §6 闭集
-status: achieved
+status: active
 kind: criterion
 goal: GOAL-003
-criterion: >-
-  tmp=$(mktemp -d)
-
-  node --experimental-strip-types packages/quay/bin/quay.ts init --root "$tmp"
-  >/dev/null 2>&1 || { rm -rf "$tmp"; exit 1; }
-
-  produced=$(cd "$tmp" && find . -type f | sed 's|^\./||' | sort); rm -rf "$tmp"
-
-  allowed=$(sed -n '/QUAY-INIT-CLOSED-SET:BEGIN/,/QUAY-INIT-CLOSED-SET:END/p'
-  orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md | sed -n 's/^-
-  //p' | sort)
-
-  [ -n "$allowed" ] || exit 1
-
-  f_produced=$(mktemp)
-
-  f_allowed=$(mktemp)
-
-  printf '%s\n' "$produced" > "$f_produced"
-
-  printf '%s\n' "$allowed" > "$f_allowed"
-
-  comm -23 "$f_produced" "$f_allowed" | grep -q . && { rm -f "$f_produced"
-  "$f_allowed"; exit 1; }
-
-  rm -f "$f_produced" "$f_allowed"
-
-  exit 0
-expect: exit 0（一次真实 quay init --root <repo 外临时目录> 的产物清单 ⊆ SPEC §6 的
-  QUAY-INIT-CLOSED-SET 标记块；闭集块缺失即判假，⛔ 不接受 fixture 自证；--root 必须在 repo 外，否则
-  quay-init 干净树时会无条件提交而污染 git 历史）
+criterion: grep -qE '^[[:space:]]*copy_dir
+  "\$PLUGIN_ROOT/(scripts|agents|workflows)"|^[[:space:]]*copy_one
+  "\$PLUGIN_ROOT/scripts/\$s"' plugin/scripts/quay-init.sh && exit 1; exit 0
+expect: exit 0（plugin/scripts/quay-init.sh 中不再存在把
+  $PLUGIN_ROOT/scripts|agents|workflows 整体或逐脚本 copy 进目标工作区的调用点——静态判据，非 fixture
+  自证；旧判据改跑 quay init（CLI, DIR-098）而非 /quay:init 技能实际调用的 quay-init.sh，quay init
+  从未做过复制、判据结构上不可能取假，已由 2026-09-08 复核撤销）
 origin: >
   人 2026-09-02 裁定①「quay-init 复制 Claude Code 的各种扩展文件的行为应当废弃，这是非常糟糕的实践」。
 
