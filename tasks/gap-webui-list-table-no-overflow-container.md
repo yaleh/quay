@@ -3,7 +3,7 @@ id: gap-webui-list-table-no-overflow-container
 title: 列表页表格没有详情页那条横向滚动规则（serve-render.ts:444 只覆盖 .detail-page），且散文列无宽度上限 ⇒
   /goal 桌面端整页横向溢出 385px、移动端 tbody 1402px 撑爆 390 视口，/live /board /needs-human
   表头被压成竖排单字
-status: needs-human
+status: ready
 needs_human_cause: human-adjudication
 labels:
   - gap
@@ -106,3 +106,6 @@ TOUCHES-DIR-GLOB-HINT: 1 directory-level tasks/*.md glob(s) — enumerate concre
 - run_id：wk-prod-1788779505
 - session_id：f3daf8bb-70a9-4d56-82e5-01b58e42d1d0
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-webui-list-table-no-overflow-container-wk-prod-1788779505.log
+
+
+复核（2026-09-08，人工/助手核实）：5 次 fan-in 中 attempt1/2 suite 红与本任务改动无关（shellStyles ADDITIVE 断言 / mcp-server.test.mjs 超时）；attempt3/4 suite 实际转绿、ac-gate/flip-done 均成功，仅 ff 撞上 develop 并发推进的正常竞态（not a fast-forward，工作流设计为回无锁段重试）；attempt5 卡在 scoped-gate 步骤耗时 600s 超时，但捕获输出显示该步骤已跑到 PASS 收尾行，时间窗口与另一任务 gap-deliver-verification-trigger-orphaned-after-land-path-migration 的 attempt4 suite 运行窗口高度重叠，疑似两个 worker 同时跑全量 suite 造成资源争用——单次观测，未达立案门槛，仅记录不阻塞。本任务自身 AC 与实现无问题，复位 ready 重新派发。
