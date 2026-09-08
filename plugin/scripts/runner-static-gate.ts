@@ -401,10 +401,10 @@ run_static_checks() {
   # value is judged — prose/body mentions do NOT count. exit 1 on a bare/mis-namespaced name (set -euo
   # pipefail abort) so the next skill author writing a bare name reddens the commit, not ships a dead list.
   # NOT-EVALUATED (exit 3) when no skills dir / no SKILL.md (hard rule 3b). Negative control + mutation case:
-  # plugin/test/skill-allowed-tools-namespace-check.test.mjs + checker-mutation-cases/<name>.sh.
+  # plugin/test/allowed-tools-plugin-prefix-check.test.mjs + checker-mutation-cases/<name>.sh.
   # @static-tier change
-  # @static-object plugin/skills/** plugin/scripts/skill-allowed-tools-namespace-check.ts plugin/test/skill-allowed-tools-namespace-check.test.mjs plugin/scripts/checker-mutation-cases/skill-allowed-tools-namespace-check.sh
-  run_checker "skill-allowed-tools-namespace-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/skill-allowed-tools-namespace-check.ts" --root "${repo_root}"
+  # @static-object plugin/skills/** plugin/scripts/allowed-tools-plugin-prefix-check.ts plugin/test/allowed-tools-plugin-prefix-check.test.mjs plugin/scripts/checker-mutation-cases/allowed-tools-plugin-prefix-check.sh
+  run_checker "allowed-tools-plugin-prefix-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/allowed-tools-plugin-prefix-check.ts" --root "${repo_root}"
   echo "== retired-clause check (gap-ac58-retired-clauses-delete-and-archive, AC58 判据1-3) =="
   # AC58 退役即迁出 enforcement: the registry (the 落点映射) records every retired clause/annotation
   # migrated OUT of the high-frequency files INTO orchestration/archive/AC58-retired-clauses.md#<id>.
@@ -480,19 +480,6 @@ run_static_checks() {
   # @static-tier change
   # @static-object docs/analysis/ac69-slot-release-vs-dispatch-gap.json plugin/scripts/ac69-slot-queue-gap-check.ts plugin/scripts/checker-mutation-cases/ac69-slot-queue-gap-check.sh plugin/test/ac69-slot-queue-gap-check.test.mjs
   run_checker "ac69-slot-queue-gap-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/ac69-slot-queue-gap-check.ts" --root "${repo_root}"
-  echo "== workflows-dual-copy-drift-check (gap-workflows-dual-copy-drift-unchecked — .claude/workflows/ vs plugin/workflows/ 双副本漂移) =="
-  # The five dual-copy workflow files (drain-directives / fan-in-execute / run-routines /
-  # execute-suite-fix / pool-quality-judge — AC91 added the last two: the shipped
-  # orchestrator-tick-core.md references them, so the plugin/workflows/ mirror must carry them) live
-  # in BOTH .claude/workflows/ (what runs here) and plugin/workflows/ (what quay-init --workflows
-  # ships to installed targets). A one-sided edit (改正本而落地副本不跟 — the A6/fan-in-execute.js class)
-  # previously had NO consumer that went red: the shipped workflow script silently went stale. This
-  # is the workflows-copy of the execution-core drift gate (orchestration/*-tick-core.md vs
-  # plugin/loop/*-tick-core.md, tick-core-static-check --check-drift) — AC73 判据4 boundary extended
-  # to the workflows dual-copy. Wired here as a code-class 每轮 gate; exit 1 on any pair drift.
-  # @static-tier change
-  # @static-object .claude/workflows/* plugin/workflows/* plugin/scripts/workflows-dual-copy-drift-check.ts plugin/test/workflows-dual-copy-drift-check.test.mjs
-  run_checker "workflows-dual-copy-drift-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/workflows-dual-copy-drift-check.ts" --root "${repo_root}"
   echo "== mirror-pair-drift-check (gap-mirror-pair-drift-policy-plugin-scripts-experiments — plugin/scripts/ vs experiments/quay-perpetual-stream/scripts/ 镜像漂移) =="
   # The general mirror-pair drift gate: plugin/scripts/ and experiments/quay-perpetual-stream/scripts/
   # carry 40 real-file copies (21 more same-name entries are experiments→plugin SYMLINKS — single-source
@@ -564,6 +551,14 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/ plugin/workflows/ plugin/agents/ plugin/probes/ plugin/loop/ plugin/.claude/ orchestration/
   run_checker "quay-init-closure-ratchet-stale" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/quay-init-closure-ratchet.ts" --check-stale --root "${repo_root}"
+  echo "== goal-driver task-boundary check (DIR-131, gap-goal-driver-task-boundary-check) =="
+  # goal/task 职责边界防回归（DIR-131）：goal-driver.ts 不得出现 task 写路径调用点——task_write /
+  # lifecycle_promote / lifecycle_retreat / lifecycle_complete 或指向 tasks/ 的 fs.write*/writeFileSync。
+  # 按位置判定（屏蔽注释与字符串字面量，硬规则 2）；负控制由单测 + mutation case 钉住（硬规则 3b/4）。
+  # 单文件（goal-driver.ts）判定 ⇒ change（scoped 模式在 task Touches 命中 goal-driver.ts 时运行）。
+  # @static-tier change
+  # @static-object plugin/scripts/goal-driver.ts plugin/scripts/goal-driver-task-boundary-check.ts plugin/test/goal-driver-task-boundary-check.test.mjs plugin/scripts/checker-mutation-cases/goal-driver-task-boundary-check.sh
+  run_checker "goal-driver-task-boundary-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/goal-driver-task-boundary-check.ts" --root "${repo_root}"
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait
@@ -684,7 +679,7 @@ run_operational_checks() {
   run_checker "fan-in-ff-protocol-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-ff-protocol-check.ts" --root "${main_root}" --baseline 19fea6f0 --json
   echo "== fan-in-materialize-check (gap-workflow-scriptpath-materialize-falls-back-main — workflow scriptPath 静默回退主检出版) =="
   # Detects the M176-family materialization fallback: a bootstrap-HIT fan-in dispatched with
-  # scriptPath=<worktree>/.claude/workflows/fan-in-execute.js must run the WORKTREE version (so the
+  # scriptPath=<worktree>/plugin/workflows/fan-in-execute.js must run the WORKTREE version (so the
   # task's own fix to the pipeline is verified by its own fan-in), but the SDK sometimes silently
   # materializes the MAIN checkout version. This checker reads the PRODUCTION CARRIER — the SDK-written
   # ~/.claude/projects/<slug>/<session>/workflows/wf_*.json records (which carry BOTH the passed
@@ -695,7 +690,7 @@ run_operational_checks() {
   # materialized script equals the pre-task base while the task's own commits touched the workflow).
   # @static-tier change
   # @static-class operational
-  # @static-object plugin/scripts/fan-in-materialize-check.ts plugin/scripts/select-static-checks-for-touches.ts .claude/workflows/fan-in-execute.js plugin/test/fan-in-materialize-check.test.mjs
+  # @static-object plugin/scripts/fan-in-materialize-check.ts plugin/scripts/select-static-checks-for-touches.ts plugin/workflows/fan-in-execute.js plugin/test/fan-in-materialize-check.test.mjs
   # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): the wf_*.json records +
   # .workflow-events + task Touches this checker audits are MAIN-checkout state, absent from the
   # one-shot verify worktree. Pointing --root at the main checkout makes the worktree round read the

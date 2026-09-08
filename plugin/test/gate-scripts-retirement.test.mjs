@@ -49,16 +49,10 @@ test('AC2: sync.sh no longer syncs the retired gate scripts', () => {
 test('AC2: the init skill no longer advertises a --gate-scripts flag', () => {
   const skill = read(path.join(pluginDir, 'skills', 'init', 'SKILL.md'));
   // The "## Arguments" code block is the advertised option list — it must NOT list --gate-scripts.
-  // (The retirement NOTE below it may mention the old flag by name; that is documentation of the
-  // retirement, not an advertisement.)
   const argsBlock = skill.match(/## Arguments\n\n```\n([\s\S]*?)\n```/)?.[1] ?? '';
   assert.ok(argsBlock.length > 0, 'init/SKILL.md must have an Arguments code block');
   assert.equal(argsBlock.includes('--gate-scripts'), false,
     'the init Arguments list must no longer advertise the retired --gate-scripts flag');
-  // The remaining categories must still be advertised.
-  for (const flag of ['--workflows', '--agents', '--loop', '--all']) {
-    assert.ok(argsBlock.includes(flag), `init/SKILL.md Arguments must still advertise ${flag}`);
-  }
 });
 
 test('AC2 (layered retirement): the retired gate scripts remain in the plugin tree as a historical artifact', () => {
@@ -79,21 +73,23 @@ test('AC2 (layered retirement): the retired gate scripts remain in the plugin tr
   }
 });
 
-test('AC2/AC3 end-to-end: quay-init --all installs the live categories but NOT the dead scripts/gates/', () => {
+test('AC2/AC3 end-to-end: quay-init --all lays the closed set and NO dead extension/script copies', () => {
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-scripts-retire-'));
   try {
     const quayInit = path.join(pluginDir, 'scripts', 'quay-init.sh');
-    // --all = --workflows + --agents (the --gate-scripts category is retired).
-    execFileSync('bash', [quayInit, '--all', '--root', ws, '--plugin-root', pluginDir],
+    execFileSync('bash', [quayInit, '--all', '--root', ws, '--plugin-root', pluginDir,
+      '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0'],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-    // Live categories still land.
-    assert.ok(fs.existsSync(path.join(ws, '.claude', 'workflows', 'drain-directives.js')),
-      '--all must still lay down workflows');
-    assert.ok(fs.existsSync(path.join(ws, '.claude', 'agents', 'baime-iteration-executor.md')),
-      '--all must still lay down agents');
-    // Dead weight does NOT land: the retired gate-scripts category must not create scripts/gates/.
+    // The retired gate-scripts category must not create scripts/gates/ (the SPEC §6 closed set lays
+    // NO scripts at all — .claude/workflows and .claude/agents are retired too).
     assert.equal(fs.existsSync(path.join(ws, 'scripts', 'gates')), false,
-      'scripts/gates/ must NOT be created — the retired gate scripts are dead weight and no longer laid down');
+      'scripts/gates/ must NOT be created');
+    assert.equal(fs.existsSync(path.join(ws, '.claude', 'workflows')), false,
+      '.claude/workflows must NOT be created (extension copies retired)');
+    assert.equal(fs.existsSync(path.join(ws, '.claude', 'agents')), false,
+      '.claude/agents must NOT be created (extension copies retired)');
+    // The closed-set files DO land.
+    assert.ok(fs.existsSync(path.join(ws, '.quay', 'config.yml')), 'the closed-set config must land');
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
   }

@@ -26,6 +26,7 @@ import {
   withFileLock,
   slugify,
 } from "./frontmatter-store-base.ts";
+import { commitStoreWrite, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
 
 export const VALID_DOCUMENT_STATUSES = ["draft", "active", "retired"];
 
@@ -152,9 +153,26 @@ export function createDocumentStore(docDir: string) {
       const finalBody = body !== undefined ? body : existingBody;
       const fileName = existingFile ?? `${id}-${slugify(title, "doc")}.md`;
       fs.writeFileSync(path.join(docDir, fileName), serializeFrontmatter(ordered, finalBody), "utf8");
+      commitDocFile(docDir, fileName, id);
       return get(id);
     });
   }
 
   return { list, get, write };
+}
+
+/**
+ * COMMIT-AFTER-WRITE (SPEC-store-commit-unification §4, 人 2026-09-08 裁定 2): docs-managed
+ * previously had NO commit path (writes were invisible to git until a session-end sweep). Now
+ * delegated to the shared primitive `commitStoreWrite` — ⛔ no git plumbing here. Default
+ * `propagate: "none"`: a docs-managed write rides the branch it lands on.
+ */
+function commitDocFile(docDir: string, fileName: string, id: string): CommitOutcome {
+  const root = resolveGitRoot(docDir);
+  return commitStoreWrite({
+    relPath: root ? path.relative(root, path.join(docDir, fileName)) : `docs-managed/${fileName}`,
+    message: `docs-managed: ${id} 写盘即提交（store-commit）`,
+    root,
+    propagate: "none",
+  }).outcome;
 }

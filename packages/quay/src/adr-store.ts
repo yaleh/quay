@@ -29,6 +29,7 @@ import {
   withFileLock,
   slugify,
 } from "./frontmatter-store-base.ts";
+import { commitStoreWrite, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
 
 export const VALID_ADR_STATUSES = ["proposed", "accepted", "superseded", "deprecated", "rejected"];
 
@@ -215,9 +216,26 @@ export function createAdrStore(adrDir: string) {
       // Keep the existing filename on edit (no orphan); derive a slug on create.
       const fileName = existingFile ?? `${id}-${slugify(title)}.md`;
       fs.writeFileSync(path.join(adrDir, fileName), serialize(ordered, finalBody), "utf8");
+      commitAdrFile(adrDir, fileName, id);
       return get(id);
     });
   }
 
   return { list, get, write };
+}
+
+/**
+ * COMMIT-AFTER-WRITE (SPEC-store-commit-unification §4, 人 2026-09-08 裁定 2): ADRs previously had
+ * NO commit path (writes were invisible to git until a session-end sweep). Now delegated to the
+ * shared primitive `commitStoreWrite` — ⛔ no git plumbing here. Default `propagate: "none"`: an
+ * ADR write rides the branch it lands on.
+ */
+function commitAdrFile(adrDir: string, fileName: string, id: string): CommitOutcome {
+  const root = resolveGitRoot(adrDir);
+  return commitStoreWrite({
+    relPath: root ? path.relative(root, path.join(adrDir, fileName)) : `adr/${fileName}`,
+    message: `adr: ${id} 写盘即提交（store-commit）`,
+    root,
+    propagate: "none",
+  }).outcome;
 }

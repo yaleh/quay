@@ -31,7 +31,7 @@
 //   QUAY_TEST_SYSTEMD_RUN_LIMITS — full-suite-runner.ts 的测试 seam, 经 execute-suite-fix.js
 //     (`systemdRunLimits = "…"` 默认 + launchEnv 注入) 把 systemd-run 限制塞进 suite 启动。
 //     历史: CPUQuota=400% 经此 seam 活 4 天 (拖慢每轮 + 制造假红), 源头默认值 (不传 -p CPUQuota=)
-//     正确但 seam 把字面量塞回。覆盖 = 扫描面含 .claude/workflows/ + plugin/workflows/ (P5 检测
+//     正确但 seam 把字面量塞回。覆盖 = 扫描面含 plugin/workflows/ (P5 检测
 //     override 字符串内的 CPUQuota=<num>%)。
 //
 // EVERY hit is classified:
@@ -246,15 +246,14 @@ function isMasked(mask: Uint8Array, i: number, j: number): boolean {
  *  Explicitly enumerated per root (可 grep 的枚举清单, 非一个 glob 糊过去 — AC1):
  *    plugin/scripts/*.{ts,sh}   — 循环执行核 (ready-pool-check / slot-refill / resource-gate …)
  *    scripts/*.{ts,sh}          — 测试入口 (test.sh) + 编排
- *    .claude/workflows/*.js     — workflow 脚本 (execute-suite-fix.js 等 — QUAY_TEST_SYSTEMD_RUN_LIMITS seam)
- *    plugin/workflows/*.js      — 同一批 workflow 的发行镜像 (plugin/sync.sh 从 .claude/workflows/ 拷贝)
+ *    plugin/workflows/*.js      — workflow 脚本唯一份 (execute-suite-fix.js 等 — QUAY_TEST_SYSTEMD_RUN_LIMITS
+ *                                 seam; .claude/workflows/ 双副本已 archive, 见 gap-ac166-second-copy-retirement)
  *  Docs (orchestration/*.md) are excluded — they quote old commands as historical evidence (masking
  *  non-code does not apply to markdown prose); test dirs are excluded — tests legitimately inject
  *  numeric fixtures. */
 const SCAN_ROOTS: Array<{ dir: string; rel: string; ext: RegExp }> = [
   { dir: "plugin/scripts", rel: "plugin/scripts", ext: /\.(ts|sh)$/ },
   { dir: "scripts", rel: "scripts", ext: /\.(ts|sh)$/ },
-  { dir: ".claude/workflows", rel: ".claude/workflows", ext: /\.js$/ },
   { dir: "plugin/workflows", rel: "plugin/workflows", ext: /\.js$/ },
 ];
 
@@ -364,8 +363,8 @@ Usage:
       measure mode — print every hit with its classification (definition-point / declared-exception /
       violation). Exit 0 always (measure).
   node --experimental-strip-types concurrency-literal-check.ts --gate [--root <dir>] [--json]
-      gate mode — scan the executable surface (plugin/scripts + scripts + .claude/workflows +
-      plugin/workflows); exit 1 iff any concurrency numeric literal is NOT at a QUAY_MAX_* definition
+      gate mode — scan the executable surface (plugin/scripts + scripts + plugin/workflows); exit 1
+      iff any concurrency numeric literal is NOT at a QUAY_MAX_* definition
       point AND NOT marked 'concurrency-default-fallback' (an undeclared literal = violation).
 
 Exit codes: 0 PASS/measure · 1 gate FAIL (>=1 violation) · 2 usage/env error.`;

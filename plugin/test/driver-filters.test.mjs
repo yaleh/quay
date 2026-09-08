@@ -504,6 +504,39 @@ test("AC3/AC4 — 语义兜底：分叉（develop 前进 + doc 翻转）→ merg
   assert.equal(git(root, "rev-list", "--count", "author..develop").trim(), "0", "develop 无 doc 未含提交");
 });
 
+test("semantic-ff-failed 事件携带真实 git stderr detail（ff-push 失败不可归因 ⇒ 假）", (t) => {
+  const root = makeGitRoot("semff-detail");
+  const wt = fs.mkdtempSync(path.join(os.tmpdir(), "driver-filters-semff-wt-"));
+  t.after(() => {
+    try { git(root, "worktree", "remove", "--force", wt); } catch { /* 已清理 */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wt, { recursive: true, force: true });
+  });
+  fs.writeFileSync(path.join(root, "f.txt"), "a", "utf8");
+  git(root, "add", "-A");
+  git(root, "commit", "-q", "-m", "base");
+  git(root, "branch", "develop");
+  git(root, "checkout", "-q", "-b", "author");
+  fs.writeFileSync(path.join(root, "f.txt"), "b", "utf8");
+  git(root, "commit", "-qam", "ahead");
+  // develop 在另一 worktree 被检出 ⇒ `git push . author:develop` 必失败（branch is currently checked out），
+  // 逼出 semantic-ff-failed 路径（此前 stdio:"ignore" 丢弃 git 原因 ⇒ 事件不带 detail）。
+  git(root, "worktree", "add", "-q", wt, "develop");
+
+  const ok = propagateDocBranchToDevelop(root);
+  assert.equal(ok, false, "ff-push 被 worktree 检出拒绝 ⇒ 语义兜底同步也失败（返回 false）");
+
+  const events = fs.readFileSync(path.join(root, DOC_DEVELOP_SYNC_EVENT_REL), "utf8")
+    .trim().split("\n").map((l) => JSON.parse(l));
+  const failed = events.filter((e) => e.event === "doc-develop-sync-semantic-ff-failed");
+  assert.ok(failed.length >= 1, "语义兜底 ff-push 失败须落痕 semantic-ff-failed");
+  const d = failed[failed.length - 1].detail;
+  assert.equal(typeof d, "string", "detail 须是 string（⛔ undefined 同形不可归因 ⇒ 假）");
+  assert.ok(d.trim().length > 0, "detail 须非空");
+  assert.notEqual(d.trim(), "<no-stderr-captured>", "detail 须是真实 git stderr，⛔ 非占位符");
+  assert.match(d, /refusing to update checked out branch/, "detail 携带真实 git 原因（refusing to update checked out branch）");
+});
+
 test("AC1 — 机械 ff 失败 + 语义合并冲突 ⇒ 返回 false + 冲突落痕（⛔ 静默 catch ⇒ 假）", (t) => {
   const root = makeGitRoot("prop-conflict");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

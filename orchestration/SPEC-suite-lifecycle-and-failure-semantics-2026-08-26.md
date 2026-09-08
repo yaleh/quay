@@ -101,6 +101,15 @@ per-task suite 由 `setsid + & + disown` 起在独立 session（`.claude/workflo
 
 ## 3. 设计 ②：suite 生命周期收进一个 driver kind
 
+> **⛔ 退役标注（人 2026-09-07 A 裁定，`gap-retire-resident-suite-driver-kind`）：本节提议的
+> 「常驻 suite driver kind」已退役。** 落地形态与 §3.3 的「建议形态」不同——per-task suite 由
+> **worker-driver 在机械 fan-in 中【进程内】`spawnSuiteAndWait` 直接 spawn 并 wait**（`worker-driver.ts`
+> import 自 `suite-driver.ts`，该文件保留为共享 spawn+wait 函数库），⛔ 不是一个常驻 `suite` kind 扫
+> 请求队列派发。常驻 kind 从未在生产启动（`start-drivers.ts` 的 `DRIVER_KINDS` 不含 suite；
+> `.quay/suite-requests` / `.quay/suite-results` 目录无 writer 无 reader），与它矛盾的这条进程内 spawn
+> 路径才是生产每轮在跑的。§3.3 的「【唯一】spawn」表述已按下述实际订正——**这是落败一方的就地更正，
+> 不是静默删句**。
+
 ### 3.1 关键约束（必须先说，否则会设计出一个不可行的方案）
 
 **suite 必须 detach 于 subagent，但可以 parent 于常驻 driver——这两件事不矛盾。**
@@ -128,7 +137,9 @@ per-task suite 由 `setsid + & + disown` 起在独立 session（`.claude/workflo
 
 ```
 kind: "suite"（或并入既有 kind——落笔方据代码结构定，本 SPEC 不指定）
-职责：它是【唯一】spawn per-task suite 的地方
+职责（⛔ 2026-09-07 已订正）：per-task suite 由 worker-driver 在机械 fan-in 中进程内
+  spawnSuiteAndWait 直接 spawn 并 wait（⛔ 不是常驻 kind 扫请求队列派发——常驻 suite kind
+  已退役，见本节顶部退役标注）
   主（进程级，自动）：driver 直接 spawn suite 并 wait ⇒ 子进程退出【立即】得知，
                       且三态可分：正常退出 / 非零退出 / 被信号杀
   辅（定时，兜底）：同一个循环顺带查"活着但无输出 ≥N 秒" ⇒ 判静默挂死 ⇒ 杀 + 记可区分失败态

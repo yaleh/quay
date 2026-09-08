@@ -237,6 +237,67 @@ export function registerTaskHandlers(
     }
   );
 
+  // task_add_label — safe "append one label, keep the rest"
+  // (gap-task-write-labels-replace-not-append-no-safe-add-action). `task_write.labels` REPLACES the
+  // whole label set (see the task_write description above), so a caller that wants to ADD a single
+  // label (e.g. delivery-critical) without wiping gap/defect/directive must first task_get + reassemble
+  // the full array — an omission-prone round-trip with no mechanism as a backstop. This verb performs
+  // that read-modify-write INTERNALLY (read current labels → append `label` when absent, dedupe →
+  // write back the union), so the caller never hand-assembles a labels array. Provider-agnostic
+  // (taskGet + taskWrite), matching the file's own "Core never special-cases a Provider id" discipline;
+  // the driver-layer frontmatter-text counterpart is ensureLabel in plugin/scripts/task-ops.ts.
+  server.registerTool(
+    "task_add_label",
+    {
+      description:
+        "Append a single label to one task WITHOUT disturbing its existing labels (safe label add). " +
+        "`task_write.labels` REPLACES the whole label set, so adding one label by hand would wipe the " +
+        "rest; this reads the current labels, appends `label` only when absent (no duplicates), and " +
+        "writes back the union — no caller-side task_get + array reassembly. " +
+        "Returns the updated task plus `added` (false when the label was already present). " +
+        "Provider-agnostic (Core-side read-modify-write over task_get/task_write).",
+      inputSchema: {
+        provider: z.string().optional().describe("Provider id to write to (defaults to the first-enabled Provider in .quay/config.yml)."),
+        id: z.string().describe("Task id to add the label to (e.g. 'QX-029')."),
+        label: z.string().min(1).describe("Label to append (e.g. 'delivery-critical'). Added only when absent; existing labels are preserved."),
+      },
+    },
+    async ({ provider, id, label }) => {
+      const { client } = await getClient(provider);
+      try {
+        const current = await client.taskGet(id);
+        if (!current) {
+          return {
+            isError: true,
+            content: [{ type: "text" as const, text: `no such task: ${id} (provider: ${provider || "default"})` }],
+          };
+        }
+        const existing = Array.isArray(current.labels) ? current.labels : [];
+        // Idempotent: the label is already present — return the current task WITHOUT writing. A
+        // no-op taskWrite of an unchanged labels array would reach the Provider, which rewrites
+        // identical bytes and then "fails" its commit as nothing-to-commit (a spurious failure log,
+        // not a real error) — skipping the write keeps the no-op silent, matching the verb's
+        // "append without duplicating" contract.
+        if (existing.includes(label)) {
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify(current, null, 2) }],
+            structuredContent: { task: current, added: false, label },
+          };
+        }
+        const task = await client.taskWrite({ id, labels: [...existing, label] });
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }],
+          structuredContent: { task, added: true, label },
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }],
+        };
+      }
+    }
+  );
+
   // task_delete — generic passthrough (gap-abi-missing-commit-delete-dependson-primitives), mirroring
   // taskWrite's provider-agnostic discipline: Core forwards the id and surfaces whatever the
   // Provider's own task_delete reports. A not-found id arrives as isError (the provider fails
@@ -683,6 +744,68 @@ export function registerAdrHandlers(
   );
 }
 
+export function registerMetaHandlers(
+  server: McpServer,
+  getClient: (id: string | undefined) => Promise<ConnectedProvider>
+): void {
+  // ── Meta tools — proxy the Provider's meta_list/meta_get/meta_write (separate object kind:
+  // message SENT TO the meta-driver, answered on the same record; proposed→answered lifecycle).
+  server.registerTool(
+    "meta_list",
+    {
+      description: "List META records (META-NNN) on an enabled Provider, optionally filtered by status. META records are a separate kind from tasks (message→meta-driver lifecycle: proposed→answered, the reply embedded on the same record).",
+      inputSchema: {
+        provider: z.string().optional(),
+        status: z.string().optional(),
+      },
+    },
+    async ({ provider, status }) => {
+      const { client } = await getClient(provider);
+      const metas = await client.metaList({ status });
+      return { content: [{ type: "text" as const, text: JSON.stringify(metas, null, 2) }], structuredContent: { metas } };
+    }
+  );
+
+  server.registerTool(
+    "meta_get",
+    {
+      description: "Get one META record by id (META-NNN) from an enabled Provider. Returns isError:true if not found or the Provider does not support META records.",
+      inputSchema: { provider: z.string().optional(), id: z.string() },
+    },
+    async ({ provider, id }) => {
+      const { client } = await getClient(provider);
+      const meta = await client.metaGet(id);
+      if (!meta) return { isError: true, content: [{ type: "text" as const, text: `no such META: ${id}` }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify(meta, null, 2) }], structuredContent: { meta } };
+    }
+  );
+
+  server.registerTool(
+    "meta_write",
+    {
+      description: "Write/patch one META record on an enabled Provider. status ∈ proposed|answered (never 'done'); `handler` defaults to meta-driver; `reply` embeds the answer on the same record. Returns isError:true on validation failure or if the Provider does not support META records.",
+      inputSchema: {
+        provider: z.string().optional(),
+        id: z.string(),
+        title: z.string().optional(),
+        status: z.string().optional(),
+        handler: z.string().optional(),
+        reply: z.string().optional(),
+        body: z.string().optional(),
+      },
+    },
+    async ({ provider, id, ...patch }) => {
+      const { client } = await getClient(provider);
+      try {
+        const meta = await client.metaWrite({ id, ...patch });
+        return { content: [{ type: "text" as const, text: JSON.stringify(meta, null, 2) }], structuredContent: { meta } };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }] };
+      }
+    }
+  );
+}
+
 export function registerConfigHandlers(
   server: McpServer,
   cfg: ReturnType<typeof loadConfig>
@@ -740,6 +863,7 @@ export function registerAllHandlers(
   registerGateHandlers(server, getClient, cfg);
   registerLifecycleHandlers(server, getClient, cfg);
   registerAdrHandlers(server, getClient);
+  registerMetaHandlers(server, getClient);
   registerActionHandlers(server, getClient, cfg);
   registerConfigHandlers(server, cfg);
 }

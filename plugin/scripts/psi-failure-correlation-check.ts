@@ -93,6 +93,7 @@ import { spawn } from "node:child_process";
 import { repoRoot } from "./repo-root.ts";
 import { canonicalTestFiles } from "./canonical-test-files.ts";
 import { classifyFile } from "./runner-grouping.ts";
+import { windowMeanStall } from "./psi-window-join.ts";
 
 type Sample = { t: number; cpu_stall: number };
 type PerFileRec = { file: string; startedAtMs: number; endedAtMs: number; passed: boolean };
@@ -343,16 +344,6 @@ function loadSamples(root: string): Map<string, Sample[]> {
     if (samples.length > 0) map.set(runId, samples);
   }
   return map;
-}
-
-function windowMeanStall(samples: Sample[], s: number, e: number): number | null {
-  let sum = 0;
-  let n = 0;
-  for (const { t, cpu_stall } of samples) {
-    if (s <= t && t <= e) { sum += cpu_stall; n++; }
-    else if (t > e) break;
-  }
-  return n === 0 ? null : sum / n;
 }
 
 function midpointConcurrency(windows: [number, number][], s: number, e: number): number {

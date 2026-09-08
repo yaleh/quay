@@ -1,7 +1,7 @@
 ---
 id: gap-meta-ffpushtodevelop
 title: semantic 兜底 ff-push 丢弃 git stderr —— 8 次 semantic-ff-failed 不可归因
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
@@ -16,7 +16,7 @@ semanticSyncDocToDevelop 的最终 ff-push（ffPushToDevelop, driver-filters.ts:
 涉及机制关键词：`ffPushToDevelop`（立案前已搜既有任务，无人认领）。
 
 ## AC（draft）
-- [ ] `node --experimental-strip-types --input-type=module - <<'JS'
+- [x] `node --experimental-strip-types --input-type=module - <<'JS'
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -39,8 +39,8 @@ if (typeof d !== 'string' || !d.trim() || d.trim() === '<no-stderr-captured>') {
 JS` ⇒ 强制非-ff 的 push 走语义路径后，doc-develop-sync-semantic-ff-failed 事件携带非空 detail（真实 git stderr，非占位符）
 
 ## DoD（draft）
-- [ ] 上面的判据实跑通过，且判据本身能取假（改坏实现时会红）
-- [ ] 若结论是「已有机制在管、只是失败」，则修那个机制，⛔ 不新建并行机制
+- [x] 上面的判据实跑通过，且判据本身能取假（改坏实现时会红）
+- [x] 若结论是「已有机制在管、只是失败」，则修那个机制，⛔ 不新建并行机制
 
 ## Touches
 - `plugin/scripts/driver-filters.ts`

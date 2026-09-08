@@ -1,7 +1,6 @@
 ---
 id: gap-meta-syncdeveloptodoc
-title: 重启 promotion 常驻 driver——早于 driver-filters.ts 最近提交启动，运行无 benign 字段的陈旧
-  syncDevelopToDoc
+title: semantic-ff-failed 事件不落 detail：常驻 driver 跑旧代码且无检测
 status: done
 labels:
   - meta-driver
@@ -12,13 +11,13 @@ extra:
   acceptance: node --experimental-strip-types --test plugin/test/driver-filters.test.mjs
 ---
 ## Finding
-AC-184 fail：promotion 常驻 driver 早于 driver-filters.ts 最近提交启动（worker 已新鲜），仍执行旧 syncDevelopToDoc，写出的 doc-develop-sync-not-ff 事件缺 benign 字段 ⇒ AC-183 亦 fail ⇒ syncHealth（notFf=132 / ffSynced=0 / semanticBegin=0）无法区分良性 ahead-only 与真分叉。修法=重启 promotion driver 加载新代码。
+语义兜底 ff-push 近窗 3 次失败（semanticFfFailed=3）且失败原因未落痕——载体 11 条 semantic-ff-failed 事件全部无 detail 字段；根因是 author 落后 develop（notFfBehind=6）使常驻 promotion-driver 加载旧 driver-filters.ts，detail 捕获修复（7b59cc66c）未在生产激活，且无机制检测「修复已落地但 driver 跑旧代码」。
 
-本轮读数（syncHealth.notFf）= `132`，采于 2026-09-06T23:39:36Z，由 meta-driver 机械采集。
-⚠️ 机制词 `syncDevelopToDoc` 命中【已完成】任务：gap-main-manager-doc-doc-only-ff-only-tracking.md[done]、gap-meta-commitgoalfile.md[done]、gap-meta-syncdeveloptodoc.md[done]、gap-sync-develop-to-doc-not-doc-silent-noop.md[done]、gap-sync-trigger-divergence-detection-bidirectional.md[done]——问题仍在而任务已 done ⇒ 先查那些任务为何没解决它，⛔ 不要在它们旁边新造一个并行机制。
+本轮读数（syncHealth.semanticFfFailed）= `3`，采于 2026-09-08T14:19:09Z，由 meta-driver 机械采集。
+⚠️ 机制词 `syncDevelopToDoc` 命中【已完成】任务：gap-main-manager-doc-doc-only-ff-only-tracking.md[done]、gap-meta-ac-184.md[done]、gap-meta-commitgoalfile.md[done]、gap-meta-syncdeveloptodoc.md[done]、gap-sync-develop-to-doc-not-doc-silent-noop.md[done]——问题仍在而任务已 done ⇒ 先查那些任务为何没解决它，⛔ 不要在它们旁边新造一个并行机制。
 
 ## AC（draft）
-- [ ] `node packages/quay/src/goal-store.ts gate AC-184` ⇒ AC-184 通过：promotion 与 worker 常驻 driver 启动时刻均不早于 driver-filters.ts 最近提交时刻
+- [ ] `node --experimental-strip-types --test plugin/test/driver-filters-ff-detail.test.mjs` ⇒ 强制 ffPushToDevelop 失败时 semanticSyncDocToDevelop 写出的 semantic-ff-failed 事件携带非空 detail，失败原因可归因
 
 ## DoD（draft）
 - [ ] 上面的判据实跑通过，且判据本身能取假（改坏实现时会红）
@@ -26,4 +25,6 @@ AC-184 fail：promotion 常驻 driver 早于 driver-filters.ts 最近提交启�
 
 ## Touches
 - `plugin/scripts/driver-filters.ts`
+- `plugin/scripts/promotion-driver.ts`
+- `plugin/test/driver-filters-ff-detail.test.mjs`
 - `tasks/gap-meta-syncdeveloptodoc.md`

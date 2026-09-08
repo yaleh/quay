@@ -8,6 +8,10 @@
 //   3. 图形轨道栏有界（区间调度插槽复用 + 超限 "+N more"）+ 文字统一从固定列起写 → AC5/AC6。
 //   4. dashboard「最近提交」卡在「读失败」后追加 reason 截断摘要 → AC7/AC8。
 //
+// 随 gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge 的两阶段 ref 分区模型更新：layout
+// 不再有 `trunk` 顶层字段——mainline 是 `branches[0]`；「同名 lane 分裂」在 ref 分区下结构上不可能
+// （每个 .ref 至多一条泳道），AC1 改为断言同一 no-ff 合并名下的提交折叠进单条 mainline。
+//
 // Run (scoped): node --test packages/quay/test/serve-handlers.test.mjs \
 //                    packages/quay/test/gap-git-history-lane-identity-and-row-layout-overlap.test.mjs
 import { test } from "node:test";
@@ -20,6 +24,7 @@ import {
   computeGitGraphRows,
   gitGraphClientScript,
   gitGraphLegendHtml,
+  mainlineLane,
   GIT_GRAPH_MAX_LANES,
   GIT_GRAPH_TEXT_X,
   GIT_GRAPH_TRUNK_X,
@@ -40,53 +45,54 @@ function hist(commits, head, heads = {}) {
   return { status: "ok", reason: null, commits, head, heads };
 }
 
-// ── AC1: two lanes re-labelled to the same display string get distinct structural ids ──────────────
+/** Lateral (non-mainline) lanes. */
+function laterals(layout) {
+  return layout.branches.filter((b) => b.kind !== "mainline");
+}
 
-test("AC1: layoutGitGraph assigns distinct internal ids to two same-named lanes (re-label + deleted branch)", () => {
+// ── AC1: two no-ff "Merge branch task/A into develop" commits fold into ONE mainline lane ──────────
+// (gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge: the ref partition can no longer split
+// one ref into multiple same-named lanes — a re-attributed commit folds into the mainline, not a lane.)
+
+test("AC1: two 'Merge branch task/A into develop' commits fold into ONE mainline lane (no same-name split)", () => {
   const t0 = 1_700_000_000;
-  // Both branch tips (b000000 / b100000) carry ref "develop" — the mainline re-attribution a deleted
-  // task branch gets — while heads only knows the mainline tip. branchNameOf() therefore collapses
-  // BOTH lanes to "develop", but their fork::merge points differ.
   const commits = [
     c("t000000", t0, "develop", [], "base"),
     c("t100000", t0 + 1, "develop", ["t000000"], "trunk"),
     c("b000000", t0 + 2, "develop", ["t100000"], "branch A tip"),
-    c("m000000", t0 + 3, "develop", ["t100000", "b000000"], "merge A"),
+    c("m000000", t0 + 3, "develop", ["t100000", "b000000"], "Merge branch 'task/A' into develop"),
     c("b100000", t0 + 4, "develop", ["m000000"], "branch B tip"),
-    c("m100000", t0 + 5, "develop", ["m000000", "b100000"], "merge B"),
+    c("m100000", t0 + 5, "develop", ["m000000", "b100000"], "Merge branch 'task/A' into develop"),
   ];
   const layout = layoutGitGraph(hist(commits, "m100000", { develop: "m100000" }));
-  assert.equal(layout.branches.length, 2, "two branch lanes");
-  const refs = layout.branches.map((b) => b.ref);
-  assert.ok(refs.every((r) => r === "develop"), `both lanes display the collapsed mainline ref (got ${refs})`);
-  const [a, b] = layout.branches;
-  assert.notEqual(a.id, b.id, "structural ids differ despite the identical display string");
+  assert.equal(layout.branches.length, 1, "ONE lane — the two same-named merges no longer split into two lanes");
+  assert.equal(layout.branches[0].kind, "mainline", "the single lane is the mainline");
+  assert.equal(layout.branches[0].commits.length, 6, "all six commits land in the mainline lane");
 });
 
-// ── AC2: expanding one summary only flips that lane (same-name sibling stays collapsed) ─────────────
+// ── AC2: expansion state keys on the STRUCTURAL id, never the display ref ──────────────────────────
 
-test("AC2: expanding one summary flips only the clicked lane, the same-name sibling stays collapsed", () => {
+test("AC2: expanding one lane flips only that lane (structural id key, never the display ref)", () => {
   const t0 = 1_700_000_000;
   const commits = [
     c("t000000", t0, "develop", [], "base"),
     c("t100000", t0 + 1, "develop", ["t000000"], "trunk"),
-    c("b000000", t0 + 2, "develop", ["t100000"], "branch A tip"),
-    c("m000000", t0 + 3, "develop", ["t100000", "b000000"], "merge A"),
-    c("b100000", t0 + 4, "develop", ["m000000"], "branch B tip"),
-    c("m100000", t0 + 5, "develop", ["m000000", "b100000"], "merge B"),
+    c("a100000", t0 + 2, "task/A", ["t100000"], "a1"),
+    c("a200000", t0 + 3, "task/A", ["a100000"], "a2"),
+    c("b100000", t0 + 4, "task/B", ["t100000"], "b1"),
+    c("b200000", t0 + 5, "task/B", ["b100000"], "b2"),
   ];
-  const layout = layoutGitGraph(hist(commits, "m100000", { develop: "m100000" }));
-  const [a, b] = layout.branches;
-  assert.equal(a.ref, b.ref, "precondition: the two lanes share one display string");
-  // Simulate the client's click handler: `expanded` is keyed by the STRUCTURAL id, so clicking lane A
-  // can never flip lane B even though they render the same label.
+  const layout = layoutGitGraph(hist(commits, "b200000", { develop: "t100000", "task/A": "a200000", "task/B": "b200000" }));
+  const [a, b] = laterals(layout);
+  assert.notEqual(a.ref, b.ref, "precondition: two distinct live lanes");
+  assert.notEqual(a.id, b.id, "structural ids differ");
+  // Simulate the client's click handler: `expanded` is keyed by the STRUCTURAL id.
   const expanded = {};
   const clickExpand = (lane) => { expanded[lane.id] = true; };
   clickExpand(a);
   assert.equal(expanded[a.id], true, "the clicked lane flips to expanded");
-  assert.notEqual(expanded[b.id], true, "the same-name sibling stays collapsed (distinct id key)");
+  assert.notEqual(expanded[b.id], true, "the sibling stays collapsed (distinct id key)");
 
-  // The client renderer must key on the id, never the collapsed display ref string.
   const script = gitGraphClientScript();
   assert.ok(script.includes("expanded[b.id]"), "client keys expansion state by structural id");
   assert.ok(!script.includes("expanded[b.ref]"), "client never keys expansion state by the display ref");
@@ -94,7 +100,7 @@ test("AC2: expanding one summary flips only the clicked lane, the same-name sibl
 
 // ── AC3: collapsed branches occupy one summary row each ────────────────────────────────────────────
 
-test("AC3: visible rows = trunk rows + N collapsed summaries (not trunk + all branch commits)", () => {
+test("AC3: visible rows = mainline rows + N collapsed summaries (not mainline + all branch commits)", () => {
   const t0 = 1_700_000_000;
   const commits = [
     c("t000000", t0, "develop", [], "base"),
@@ -109,15 +115,16 @@ test("AC3: visible rows = trunk rows + N collapsed summaries (not trunk + all br
     c("mB00000", t0 + 9, "develop", ["mA00000", "b300000"], "merge B"),
   ];
   const layout = layoutGitGraph(hist(commits, "mB00000", { develop: "mB00000" }));
-  const trunkRows = layout.trunk.commits.length;
-  const totalCommits = layout.branches.reduce((n, b) => n + b.commits.length, 0);
-  assert.equal(layout.branches.length, 2, "two branch lanes (2 and 3 commits)");
-  assert.equal(totalCommits, 5, "branches hide 5 commits when collapsed");
+  const mainlineRows = mainlineLane(layout).commits.length;
+  const lats = laterals(layout);
+  const totalCommits = lats.reduce((n, b) => n + b.commits.length, 0);
+  assert.equal(lats.length, 2, "two lateral lanes (2 and 3 commits)");
+  assert.equal(totalCommits, 5, "lateral lanes hide 5 commits when collapsed");
 
   const collapsedRows = computeGitGraphRows(layout, new Set()); // nothing expanded
-  assert.equal(collapsedRows.length, trunkRows + layout.branches.length, "rows = trunk + one summary per collapsed branch");
-  assert.ok(collapsedRows.length < trunkRows + totalCommits, "collapsed branches do NOT reserve rows for their hidden commits");
-  assert.equal(collapsedRows.filter((r) => r.kind === "summary").length, layout.branches.length, "exactly one summary row per collapsed branch");
+  assert.equal(collapsedRows.length, mainlineRows + lats.length, "rows = mainline + one summary per collapsed lateral lane");
+  assert.ok(collapsedRows.length < mainlineRows + totalCommits, "collapsed branches do NOT reserve rows for their hidden commits");
+  assert.equal(collapsedRows.filter((r) => r.kind === "summary").length, lats.length, "exactly one summary row per collapsed lateral lane");
 });
 
 // ── AC4: fully expanded, no two rows share a y ─────────────────────────────────────────────────────
@@ -140,8 +147,8 @@ test("AC4: fully expanded, every visible row is distinct (the overlap invariant 
   const expanded = new Set(layout.branches.map((b) => b.id));
   const rows = computeGitGraphRows(layout, expanded);
 
-  const expected = layout.trunk.commits.length + layout.branches.reduce((n, b) => n + b.commits.length, 0);
-  assert.equal(rows.length, expected, "fully expanded rows = trunk + every branch commit");
+  const expected = layout.branches.reduce((n, b) => n + b.commits.length, 0);
+  assert.equal(rows.length, expected, "fully expanded rows = mainline + every branch commit");
   const rowIndices = rows.map((r) => r.row);
   assert.equal(new Set(rowIndices).size, rowIndices.length, "no two rows share a row index (⇒ distinct y)");
   assert.deepEqual(rowIndices, rowIndices.map((_, i) => i), "rows are a contiguous 0..n-1 run (one row each)");
@@ -149,15 +156,21 @@ test("AC4: fully expanded, every visible row is distinct (the overlap invariant 
   assert.equal(new Set(hashes).size, hashes.length, "every commit hash maps to exactly one row");
 });
 
-// ── AC5: every text element starts at the fixed text column ────────────────────────────────────────
+// ── AC5: every text element starts at (or after) the fixed text column ──────────────────────────────
 
-test("AC5: all ink/muted text starts at one fixed x (textX), distinct from the lane node cx", () => {
+test("AC5: all ink/muted text starts at or after the fixed x (textX), distinct from the lane node cx", () => {
   const script = gitGraphClientScript();
-  // Every `.git-svg-ink` / `.git-svg-muted` text element's x attribute must be the single textX constant.
+  // Every `.git-svg-ink` / `.git-svg-muted` text element's x must clear the fixed text column — the
+  // single textX constant, OR textX + a chip offset (gap-git-graph-lane-visual-encoding-and-fixed-width:
+  // a collapsed summary leads with a lane-colour chip(ref), so its trailing "· N commits…" text starts
+  // right after the chip). Either way it never moves LEFT of textX, so text never overlaps a lane line.
   const re = /\.attr\("class", "git-svg-(?:ink|muted)"\)\s*\.attr\("x",\s*([^)]*)\)/g;
   const xs = [...script.matchAll(re)].map((m) => m[1].trim());
   assert.ok(xs.length >= 5, `found the text elements (got ${xs.length})`);
-  assert.ok(xs.every((x) => x === "textX"), `every ink/muted text x is textX (got: ${[...new Set(xs)].join(", ")})`);
+  assert.ok(
+    xs.every((x) => x === "textX" || x.startsWith("textX + ")),
+    `every ink/muted text x starts at (or after) textX (got: ${[...new Set(xs)].join(", ")})`,
+  );
   // The node cx is a DIFFERENT coordinate (trunk spine / lane slot), never the text column.
   assert.ok(script.includes('.attr("cx", trunkX)'), "trunk node cx is the trunk spine x");
   assert.ok(script.includes('.attr("cx", laneX)'), "branch node cx is the lane slot x");
@@ -169,7 +182,7 @@ test("AC5: all ink/muted text starts at one fixed x (textX), distinct from the l
 // ── AC6: bounded track — slot reuse + overflow hint (never an unbounded left/right counter) ────────
 
 test("AC6: sequential lanes reuse a freed slot; >=8 concurrent lanes stay within the slot limit + hint", () => {
-  // (a) slot reuse: branch A merges at m0 (t0+2), branch B forks from m0 (t0+2) — B reuses A's slot.
+  // (a) slot reuse: two reconstructed branches (deleted, no-ff merged) — A merges at m0, B forks after.
   const t0 = 1_700_000_000;
   const seq = [
     c("t000000", t0, "develop", [], "base"),
@@ -180,30 +193,31 @@ test("AC6: sequential lanes reuse a freed slot; >=8 concurrent lanes stay within
     c("m100000", t0 + 5, "develop", ["m000000", "b000000"], "merge B"),
   ];
   const seqLayout = layoutGitGraph(hist(seq, "m100000", { develop: "m100000" }));
-  assert.equal(seqLayout.branches.length, 2);
-  assert.equal(seqLayout.branches[0].slot, seqLayout.branches[1].slot, "B reuses the slot A released on merge");
+  const seqLats = laterals(seqLayout);
+  assert.equal(seqLats.length, 2, "two reconstructed lateral lanes");
+  assert.equal(seqLats[0].slot, seqLats[1].slot, "B reuses the slot A released on merge");
 
-  // (b) overflow: 10 lanes all forking from t1 (all overlapping) — only 8 slots exist, 2 overflow.
+  // (b) overflow: 10 concurrent reconstructed branches all forking from t1 (all overlapping) — only 8
+  // slots exist, 2 overflow.
   const conc = [
     c("t000000", t0, "develop", [], "base"),
     c("t100000", t0 + 1, "develop", ["t000000"], "trunk"),
   ];
-  let prevTrunk = "t100000";
   for (let i = 0; i < 10; i++) {
     const bi = `b${String(i).padStart(6, "0")}`;
     const mi = `m${String(i).padStart(6, "0")}`;
-    conc.push(c(bi, t0 + 2, "develop", ["t100000"], `branch ${i}`));
-    conc.push(c(mi, t0 + 3 + i, "develop", [prevTrunk, bi], `merge ${i}`));
-    prevTrunk = mi;
+    conc.push(c(bi, t0 + 2, `task/B${i}`, ["t100000"], `branch ${i}`));
+    conc.push(c(mi, t0 + 3, "develop", ["t100000", bi], `merge ${i}`));
   }
   const head = "m" + "9".padStart(6, "0");
   const concLayout = layoutGitGraph(hist(conc, head, { develop: head }));
-  assert.equal(concLayout.branches.length, 10, "10 concurrent lanes");
-  for (const b of concLayout.branches) {
+  const concLats = laterals(concLayout);
+  assert.equal(concLats.length, 10, "10 concurrent lateral lanes");
+  for (const b of concLats) {
     assert.ok(b.slot >= 0 && b.slot < GIT_GRAPH_MAX_LANES, `every lane slot is bounded (< ${GIT_GRAPH_MAX_LANES})`);
   }
   assert.equal(concLayout.overflowCount, 2, "10 concurrent lanes − 8 slots = 2 overflow");
-  assert.equal(concLayout.branches.filter((b) => b.overflow).length, 2, "two lanes are flagged overflow");
+  assert.equal(concLats.filter((b) => b.overflow).length, 2, "two lanes are flagged overflow");
 
   // The client renderer carries the "+N more" hint and the configurable limit (never widens forever).
   const script = gitGraphClientScript();

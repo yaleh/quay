@@ -196,6 +196,15 @@ export async function handleAllRoutes(
     return;
   }
 
+  // gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead AC5: /git is the short alias
+  // people type for the git history view; it 302s to the canonical /git-history (the old bare /git
+  // returned 404 and left a console error).
+  if (url.pathname === "/git") {
+    res.writeHead(302, { Location: "/git-history" });
+    res.end();
+    return;
+  }
+
   // gap-git-history-svg-server-rendered: server-rendered git history SVG. Reads git via the same
   // workspace-observation path as /live + /journal (observation.ts shells out to git too).
   if (url.pathname === "/git-history") {
@@ -234,14 +243,14 @@ export async function handleAllRoutes(
   // (which had NO route — grep -c document = 0), both following the /adr shape. The
   // goal page shows target / criterion / status / recent verdict+time / origin.
   if (url.pathname === "/goal") {
-    await handleGoalList(req, res, url, client);
+    await handleGoalList(req, res, url, client, cfg.workspaceRoot);
     return;
   }
 
   const goalM = /^\/goal\/([^/]+)$/.exec(url.pathname);
   if (goalM) {
     const id = decodeURIComponent(goalM[1]);
-    await handleGoalDetail(req, res, id, client);
+    await handleGoalDetail(req, res, id, client, cfg.workspaceRoot);
     return;
   }
 

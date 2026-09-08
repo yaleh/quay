@@ -108,7 +108,7 @@ export { TASK_FILTERS, applyTaskFilters, makeFilterContext, allDepsDone, readTas
 
 /** 驱动 kind 标识（promotion/worker = 任务处理型，继承 0+1a；outer = 例程型，继承 0+1b——AC143 承接
  *  outer 的纯机械 A/B 段；quality = 例程型（AC144，1b）——均无任务池/无选择/无 verify）。 */
-export type DriverKind = "promotion" | "worker" | "outer" | "quality" | "suite" | "meta" | "goal";
+export type DriverKind = "promotion" | "worker" | "outer" | "quality" | "meta" | "goal";
 
 /** 一个 kind 的 registry 条目（KIND_* 八张 bash 表 → 一个 TS 数据结构）。 */
 export interface KindSpec {
@@ -189,22 +189,6 @@ export const DRIVER_KINDS: Record<DriverKind, KindSpec> = {
     carriers: ["quality-round.jsonl"],
     tsKey: "judgedAt",
     controlFile: "quality-control.json",
-  },
-  // suite（SPEC-suite-lifecycle-and-failure-semantics §3）：per-task suite 生命周期收进一个常驻 driver。
-  // 它是【唯一】spawn per-task suite 的地方——直接 spawn suite 并 wait（进程级父子），辅以定时兜底静默
-  // 检测；spawn 前取单飞槽、子进程终结后释放槽（取/放同一执行点）。无任务池 ⇒ 无 cap（同 quality）。
-  // carrier = suite-round.jsonl（每轮一条，outcome 三态可分 done/red/hung）。
-  suite: {
-    driver: "suite-driver.ts",
-    prefix: "suite-driver",
-    verbs: ["start", "stop", "drain", "resume", "status", "restart", "liveness"],
-    capFlag: "",
-    hasInterval: true,
-    hasReconcile: false,
-    pidSelf: true,
-    runPrefix: "st-prod",
-    carriers: ["suite-round.jsonl"],
-    controlFile: "suite-control.json",
   },
   // meta：机制演进复核（例程型，继承 Layer 0 + 1b）。唯一例程 = meta-review：跑 active goal 各 AC 的
   // criterion → 机械算 divergence → 【读数变了/给了 focus/到地板】才派语义半（事件触发 + 定时器地板，
@@ -315,7 +299,7 @@ export function resolveMainRoot(root: string): string {
 // carrier_records = 全载体行数之和（wc -l 语义：数换行符）；last_record_ts = 全载体末条记录 ts 的
 // 最大值（⛔ 只报计数无法区分「在长」与「停更」——载体停更与「一切正常」同形）。时间戳键按 kind 的
 // tsKey 读（缺省 ts；quality 判词载体用 judgedAt——gap-meta-carrierstats：键不匹配会把停摆伪装成
-// 未查）。
+// 未查）。quality 载体混两种键（心跳 ts + 判词 judgedAt），读两者较新者——见 gap-meta-round-log-rel。
 
 /** 一个 kind 的载体观测结果。 */
 export interface CarrierStats {
@@ -328,6 +312,10 @@ export interface CarrierStats {
 export function carrierStats(root: string, kind: DriverKind): CarrierStats {
   const spec = DRIVER_KINDS[kind];
   const tsKey = spec.tsKey ?? "ts";
+  // 时间戳键集合：quality 载体混两种键（心跳 ts + 判词 judgedAt——gap-meta-round-log-rel）。取两者较
+  // 新者作 lastTs；⛔ 只读 tsKey 会把心跳（ts，每 30s 一条的 liveness 直接量）与停摆同形——判词 judgedAt
+  // 是间歇量，池不触发就停更，靠它判活必假报 stall（硬规则 4b：liveness 用直接量，⛔ 不用间歇派生量）。
+  const tsKeys = tsKey === "ts" ? ["ts"] : [tsKey, "ts"];
   let records = 0;
   let lastTs: string | null = null;
   let primaryPath = "";
@@ -347,8 +335,10 @@ export function carrierStats(root: string, kind: DriverKind): CarrierStats {
       if (!line.trim()) continue;
       try {
         const j = JSON.parse(line);
-        if (j && typeof j[tsKey] === "string" && j[tsKey]) {
-          if (lastTs === null || j[tsKey] > lastTs) lastTs = j[tsKey];
+        for (const k of tsKeys) {
+          if (j && typeof j[k] === "string" && j[k] && (lastTs === null || j[k] > lastTs)) {
+            lastTs = j[k];
+          }
         }
       } catch {
         /* torn/partial tail — skip */
@@ -794,11 +784,19 @@ export interface Fact<T = unknown> {
   reason: string | null;
 }
 
-/** 一条例程（name + schedule 判定 + run() → Facts[]）。 */
+/** 一条例程本轮可读的控制面上下文。halted=true ⇒ 本轮【不做受闸动作（spawn）】，但机械读数照跑
+ *  （gap-drain-on-routine-driver-empties-round-and-respawn-loops：halt 是轮内的闸，⛔ 不是进程的
+ *  终止条件——旧的 break 让例程型 driver 每 5s 起停一次）。 */
+export interface RoutineRunContext {
+  halted: boolean;
+}
+
+/** 一条例程（name + schedule 判定 + run(ctx) → Facts[]）。ctx 可选——不读 halt 的例程定义无需该参数；
+ *  需按 halt 挡 spawn 的例程用 ctx.halted（只挡动作，不挡观测）。 */
 export interface RoutineSpec {
   name: string;
   schedule: Parameters<typeof isDue>[0];
-  run(): Fact[] | Promise<Fact[]>;
+  run(ctx?: RoutineRunContext): Fact[] | Promise<Fact[]>;
 }
 
 /** schedule（Layer 1b）：复用 routine-scheduler.ts 的判定函数，⛔ 不新造定时器。 */
@@ -859,6 +857,111 @@ export function sourceFilesMaxMtimeMs(root: string, kind: DriverKind): number {
 /** 源码是否推进到 sinceMs 之后（任一被监视文件 mtimeMs > sinceMs ⇒ true）。纯函数，可单测。 */
 export function sourceChangedSince(root: string, kind: DriverKind, sinceMs: number): boolean {
   return sourceFilesMaxMtimeMs(root, kind) > sinceMs;
+}
+
+// ── Layer 0 · supervisor 陈旧判定（gap-supervisor-never-self-refreshes-no-detector）────────────────
+// 源码自刷新（AC-184）住在 supervisor 的 sourceCheck 里，`:958` 杀的是 child——【只有 driver】，从不
+// 包括 supervisor 自己。supervisor 是常驻前台进程（runSupervisor `:967` 永不 resolve），它内存里的
+// kernel 是启动那一刻的版本、此后永不刷新；而 driver-runtime.ts 本身就在 SHARED_SOURCE_FILES 里——改它
+// 会重启 driver，却改不动持有该逻辑的 supervisor。两个后果：① 早于该功能启动的 supervisor 连刷新循环
+// 都没有 ⇒ 其 driver 永不自愈（实测 quality 跑 2 天 8 小时陈旧代码）；② supervisor 半边的任何改动对在跑
+// 的 supervisor 静默无效。本段新增一个【直接量】：supervisor 进程启动时刻 vs 被监视源码最新 mtime，
+// 陈旧即报进 aliveness()/status；读不到启动时刻 ⇒ not-evaluated（⛔ 与「新鲜」同形，硬规则 3b/4b）。
+
+/** 读 /proc/<pid>/stat 的 starttime（field 22，USER_HZ 时钟 tick 数，自 boot 起）。读失败/非负非法
+ *  ⇒ null。偏移与 supervisor-observe.sh 的 stat_fields 一致：rfind(")") 后 split，fields[0]=state
+ *  （field 3）… fields[19]=starttime（field 22）。 */
+function procStartTicks(pidOrSelf: number | "self"): number | null {
+  try {
+    const stat = fs.readFileSync(pidOrSelf === "self" ? "/proc/self/stat" : `/proc/${pidOrSelf}/stat`, "utf8");
+    const idx = stat.lastIndexOf(")");
+    if (idx < 0) return null;
+    const fields = stat.slice(idx + 2).trim().split(/\s+/);
+    const ticks = Number(fields[19]);
+    return Number.isFinite(ticks) && ticks >= 0 ? ticks : null;
+  } catch {
+    return null;
+  }
+}
+
+/** /proc/uptime 第一字段（系统 BOOTTIME 秒，float，亚秒精度）。读失败/非法 ⇒ null。 */
+function systemUptimeSeconds(): number | null {
+  try {
+    const n = Number(fs.readFileSync("/proc/uptime", "utf8").trim().split(/\s+/)[0]);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+let _clkTck: number | null = null;
+
+/** sysconf(_SC_CLK_TCK)——USER_HZ，/proc/<pid>/stat starttime 的 tick 单位（tick/秒）。Node 无 sysconf
+ *  绑定，从本进程自身 /proc/self/stat starttime 与 /proc/uptime 推导（两读数独立于任何目标 pid、都读
+ *  宿主——⛔ 不写死宿主依赖字面量，硬规则 4 推论二）：selfTicks / (systemUptime − nodeUptime) = tick/秒。
+ *  推导失败（/proc 缺失/进程初起 elapsed≤1s 噪声大）⇒ 回退 100（Linux x86_64/arm64 的 USER_HZ）。 */
+function clockTicksPerSecond(): number {
+  if (_clkTck !== null) return _clkTck;
+  try {
+    const selfTicks = procStartTicks("self");
+    const uptime = systemUptimeSeconds();
+    const elapsed = uptime != null ? uptime - process.uptime() : null; // boot → 本进程 exec 的秒数（按 kernel 时钟）
+    if (selfTicks !== null && elapsed != null && elapsed > 1) {
+      const clk = selfTicks / elapsed;
+      if (Number.isFinite(clk) && clk > 0) {
+        _clkTck = clk;
+        return clk;
+      }
+    }
+  } catch { /* fall through to fallback */ }
+  _clkTck = 100;
+  return _clkTck;
+}
+
+/** 进程启动时刻（epoch ms）。读不到 /proc 或 uptime ⇒ null（= not-evaluated，⛔ 不是「新鲜」）。
+ *  ⛔ 不用 /proc/stat 的 btime（整数秒，丢掉 boot 的小数秒 ⇒ 进程启动时刻系统性偏早最多 ~1s，实测
+ *  ~318ms，会把「刚启动的 supervisor」误判为陈旧——gap-supervisor-never-self-refreshes-no-detector）：
+ *  改用 Date.now()（REALTIME 现在）− (uptime − starttime/CLK_TCK)（BOOTTIME 自进程启动以来经过的
+ *  秒数），两者都有亚秒精度，⛔ 不引 btime 截断误差。 */
+export function procStartTimeMs(pid: number): number | null {
+  const ticks = procStartTicks(pid);
+  const uptime = systemUptimeSeconds();
+  if (ticks === null || uptime === null) return null;
+  const elapsedMs = (uptime - ticks / clockTicksPerSecond()) * 1000;
+  return Math.round(Date.now() - elapsedMs);
+}
+
+/** supervisor 陈旧判定结果。state=not-evaluated 表示读不到 supervisor 进程启动时刻（⛔ 与「新鲜」同形，
+ *  硬规则 3b/4b——「跑着旧代码的 supervisor」与「健康 supervisor」必须在读数上可区分）。 */
+export interface SupervisorStaleness {
+  state: "fresh" | "stale" | "not-evaluated";
+  /** supervisor 进程启动时刻（epoch ms）；读不到 ⇒ null。 */
+  supervisorStartedAt: number | null;
+  /** 被监视源码最新 mtime（epoch ms；全部缺失 ⇒ 0）。 */
+  sourceMtimeMs: number;
+}
+
+/** 判定一个 supervisor 是否陈旧：supervisor 启动时刻 vs 被监视源码最新 mtime。源码推进到启动时刻之后
+ *  ⇒ stale（supervisor 内存里的 kernel 早于盘上源码，sourceCheck 只重启 driver、永远改不动它自己）。
+ *  supervisor pid 缺失/已死/读不到启动时刻 ⇒ not-evaluated。 */
+export function supervisorStaleness(
+  root: string,
+  kind: DriverKind,
+  supervisorPid: number | null,
+): SupervisorStaleness {
+  const sourceMtimeMs = sourceFilesMaxMtimeMs(root, kind);
+  if (supervisorPid === null || !pidAlive(supervisorPid)) {
+    return { state: "not-evaluated", supervisorStartedAt: null, sourceMtimeMs };
+  }
+  const supervisorStartedAt = procStartTimeMs(supervisorPid);
+  if (supervisorStartedAt === null) {
+    return { state: "not-evaluated", supervisorStartedAt: null, sourceMtimeMs };
+  }
+  return {
+    state: sourceMtimeMs > supervisorStartedAt ? "stale" : "fresh",
+    supervisorStartedAt,
+    sourceMtimeMs,
+  };
 }
 
 // ── Layer 0 · supervisor（respawn / pid 记账 / stop sentinel，由 promotion-driver-launch.sh 港进）────
@@ -977,6 +1080,11 @@ export function aliveness(root: string, kind: DriverKind): {
   driverAlive: boolean;
   running: boolean;
   deaths: string[];
+  /** supervisor 进程启动时刻（epoch ms）；读不到 ⇒ null（not-evaluated，⛔ 与「新鲜」同形）。 */
+  supervisorStartedAt: number | null;
+  /** supervisor 是否陈旧（其启动时刻早于被监视源码最新 mtime）。true=stale；false=fresh；null=
+   *  not-evaluated（supervisor 缺失/已死/读不到启动时刻）。 */
+  supervisorStale: boolean | null;
 } {
   const st = statePaths(root, kind);
   const spidRaw = readPidFile(st.supervisorPidFile);
@@ -993,7 +1101,19 @@ export function aliveness(root: string, kind: DriverKind): {
   if (driverPid != null && !driverAlive) deaths.push("driver_dead");
   // 孤儿 driver：supervisor 死而 driver 进程还在 —— ⛔ 不算「在跑」（AC3(b)）。
   if (!supervisorAlive && driverAlive) deaths.push("driver_orphaned");
-  return { supervisorPid, driverPid, supervisorAlive, driverAlive, running, deaths };
+  // supervisor 陈旧判定（gap-supervisor-never-self-refreshes-no-detector）：只对【活着】的 supervisor
+  // 有意义；缺失/已死/读不到启动时刻 ⇒ not-evaluated（null），⛔ 不与「新鲜」（false）同形。
+  const staleness = supervisorStaleness(root, kind, supervisorAlive ? supervisorPid : null);
+  return {
+    supervisorPid,
+    driverPid,
+    supervisorAlive,
+    driverAlive,
+    running,
+    deaths,
+    supervisorStartedAt: staleness.supervisorStartedAt,
+    supervisorStale: staleness.state === "stale" ? true : staleness.state === "fresh" ? false : null,
+  };
 }
 
 /** status 输出（JSON 与人类可读两态）。alive 与 running 同值（alive 是 AC139-3 字段名，running 保留
@@ -1014,11 +1134,14 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
       carrier_path: stats.primaryPath,
       carrier_records: stats.records,
       last_record_ts: stats.lastTs,
+      supervisor_started_at: a.supervisorStartedAt,
+      supervisor_stale: a.supervisorStale === true ? "stale" : a.supervisorStale === false ? "fresh" : "not-evaluated",
     }));
   } else {
     out(
       `${spec.prefix}: kind=${kind} · supervisor pid=${a.supervisorPid ?? "none"} alive=${a.supervisorAlive ? 1 : 0} · ` +
       `driver pid=${a.driverPid ?? "none"} alive=${a.driverAlive ? 1 : 0} · running=${a.running ? 1 : 0} · ` +
+      `supervisor_stale=${a.supervisorStale === true ? "stale" : a.supervisorStale === false ? "fresh" : "not-evaluated"} · ` +
       `carrier_path=${stats.primaryPath} · carrier_records=${stats.records} · last_record_ts=${stats.lastTs ?? "null"}`,
     );
   }
@@ -1067,9 +1190,11 @@ export async function startKind(
     out(`already-running: supervisor pid=${spidRaw}\n`);
     return statusForKind(root, kind, true, out);
   }
-  // gap-driver-drain-no-inverse AC2：drain 写 halted=true 后，若 start 照常 spawn supervisor，驱动会立刻
-  // 读到 halt 退出、supervisor 再 respawn ⇒ 无限 respawn 循环（「起不来却表现为正在重启」，硬规则 3b 同形）。
-  // 无活 supervisor 且控制态 halted ⇒ 明确拒绝并提示解闸命令（退出 1），⛔ 不静默进 respawn 循环。
+  // gap-driver-drain-no-inverse AC2：drain 写 halted=true 后，start 照常 spawn supervisor 会起一个用户
+  // 已 halt 的驱动。1a 类（promotion/worker）读到 halt ⇒ 本轮 break 退出 ⇒ supervisor respawn；
+  // 例程型（goal/quality/outer/meta）读到 halt ⇒ 只观测不派发（循环继续，见 gap-drain-on-routine-driver-
+  // empties-round-and-respawn-loops——已修掉例程型的 exit，⛔ 不靠这里的拒绝来消 respawn，但起一个已
+  // halt 的驱动仍是错的）。无活 supervisor 且控制态 halted ⇒ 明确拒绝并提示解闸命令（退出 1）。
   // 读失败（parseError）⇒ 同样拒绝（fail-closed，⛔ 读不懂 ≠ 未 halt）。
   const ctlRel = path.posix.join(".quay", spec.controlFile);
   const ctl = readControlState(root, process.env, ctlRel);
@@ -1154,8 +1279,11 @@ export async function stopKind(root: string, kind: DriverKind, out: (s: string) 
   return 0;
 }
 
-/** drain（两个 kind 都支持，AC150-2）：halt 语义——写 <kind>-control.json halted=true，只挡新派发/新一轮，
- *  ⛔ 不杀在飞。读-改-写经 driver-shared 单一真相源（保留 preference/forced，不破坏用户控制态）。 */
+/** drain（AC150-2）：halt 语义——写 <kind>-control.json halted=true。halt 的效果是【每 kind 自己的闸】：
+ *  1a 类（promotion/worker）读到 halt ⇒ 本轮 break 退出；例程型（goal/quality/outer/meta）读到
+ *  halt ⇒ 只挡受闸动作（spawn），观测循环继续（gap-drain-on-routine-driver-empties-round-and-respawn-
+ *  loops——⛔ 不再整进程退出）。两种都【不杀在飞 worker】。读-改-写经 driver-shared 单一真相源
+ *  （保留 preference/forced，不破坏用户控制态）。 */
 export function drainKind(root: string, kind: DriverKind, out: (s: string) => void = (s) => process.stdout.write(s)): number {
   const spec = DRIVER_KINDS[kind];
   const rel = path.posix.join(".quay", spec.controlFile);
@@ -1243,7 +1371,7 @@ export async function main(argv: string[]): Promise<number> {
 
 Usage:
   node --experimental-strip-types plugin/scripts/driver-runtime.ts <start|stop|drain|resume|status|restart|liveness> \\
-    --kind <promotion|worker|outer|quality|suite> [--root <repo>] [--interval <ms>] [--reconcile-interval <s>] [--cap <n>] \\
+    --kind <promotion|worker|outer|quality|meta|goal> [--root <repo>] [--interval <ms>] [--reconcile-interval <s>] [--cap <n>] \\
     [--restart-delay <s>] [--run-id <id>] [--json]
 `);
     return 0;

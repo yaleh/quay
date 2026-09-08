@@ -1,6 +1,6 @@
 // @test-group engine
 // fan-in-execute-paths.test.mjs — gap-fan-in-execute-three-unverified-paths: the three UNVERIFIED
-// hot points of .claude/workflows/fan-in-execute.js, exercised through the REAL invocation path
+// hot points of plugin/workflows/fan-in-execute.js, exercised through the REAL invocation path
 // (判据3 — NOT fixture-only pure-function mocks; the AC78 lesson: "改 workflow 的唯一有效验证=实调").
 //
 //   REAL-INVOCATION harness: every test first vm-EXECUTES the actual workflow file
@@ -46,7 +46,7 @@ import { buildTaskManifest, checkTaskAntiDrift } from "../scripts/anti-drift-tou
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
-const WORKFLOW = path.join(REPO_ROOT, ".claude", "workflows", "fan-in-execute.js");
+const WORKFLOW = path.join(REPO_ROOT, "plugin", "workflows", "fan-in-execute.js");
 
 // ── REAL-INVOCATION harness: vm-execute the actual workflow file ────────────────────────────────────
 // The workflow file is ESM-ish (`export const meta`) with a top-level `return` (workflow-runtime-only),
@@ -295,14 +295,14 @@ function makeDir127ReplayHome() {
 
 // ── ① code_delta regex classification (REAL git execution, 判据3) ─────────────────────────────────
 
-test("① REAL code delta — .claude/workflows/fan-in-execute.js must classify as code (rerun full suite)", async (t) => {
+test("① REAL code delta — plugin/workflows/fan-in-execute.js must classify as code (rerun full suite)", async (t) => {
   // 判据2 ① 能取假: a code-face delta wrongly classified as doc would SKIP the full suite (漏检).
   // This is the AC78 承重点 file itself — editing it MUST trigger the full suite. The classify script
-  // reads the registry (fan-in-workflow-check `@static-object .claude/workflows/fan-in-execute.js`), so
+  // reads the registry (fan-in-workflow-check `@static-object plugin/workflows/fan-in-execute.js`), so
   // no hand-written exclude list can hide it.
-  const codeDelta = await classifyRealDelta({ ".claude/workflows/fan-in-execute.js": "export const meta = {}\n" });
+  const codeDelta = await classifyRealDelta({ "plugin/workflows/fan-in-execute.js": "export const meta = {}\n" });
   assert.notEqual(codeDelta, "", `code delta must be non-empty for a .js workflow file, got: ${JSON.stringify(codeDelta)}`);
-  assert.match(codeDelta, /\.claude\/workflows\/fan-in-execute\.js/);
+  assert.match(codeDelta, /plugin\/workflows\/fan-in-execute\.js/);
 });
 
 test("① REAL test delta — plugin/test/*.test.mjs must classify as code (test assertion face reruns)", async (t) => {
@@ -1013,15 +1013,15 @@ test("⑦ worktree-resolution — every fan-in orchestration script call is ${wo
   assert.ok(classifyLine.includes(`${WT}/plugin/scripts/`), `classify must be ${WT}-rooted, got: ${classifyLine}`);
 });
 
-test("⑦ 取假一 — a branch modifying .claude/workflows/fan-in-execute.js ⇒ step-0 verdict HIT + WARN (dispatch must use the worktree scriptPath)", async (t) => {
-  const repo = makeRepoWithDelta({ ".claude/workflows/fan-in-execute.js": "export const meta = { name: 'fan-in-execute-branch-version' }\n" });
+test("⑦ 取假一 — a branch modifying plugin/workflows/fan-in-execute.js ⇒ step-0 verdict HIT + WARN (dispatch must use the worktree scriptPath)", async (t) => {
+  const repo = makeRepoWithDelta({ "plugin/workflows/fan-in-execute.js": "export const meta = { name: 'fan-in-execute-branch-version' }\n" });
   t.after(() => cleanup(repo));
-  symlinkRuntimeTrees(repo, { ".claude/workflows/fan-in-execute.js": "" });
+  symlinkRuntimeTrees(repo, { "plugin/workflows/fan-in-execute.js": "" });
   const block = await bootstrapBlockFor("gap-test-bs-hit", repo, REPO_ROOT);
   const r = runBash(block, { cwd: repo });
   assert.equal(r.status, 0, `step-0 bash failed: ${r.stderr}`);
   assert.match(r.stdout, /FAN-IN-BOOTSTRAP=hit/, `branch modifying fan-in-execute.js must be detected as a hit, got stdout:\n${r.stdout}`);
-  assert.match(r.stdout, /\.claude\/workflows\/fan-in-execute\.js/, "the hit must name the modified orchestration file");
+  assert.match(r.stdout, /plugin\/workflows\/fan-in-execute\.js/, "the hit must name the modified orchestration file");
   // 取假一 WARN (falsifiable): the running workflow is the ROOT version (REPO_ROOT), which differs from
   // the branch's committed fan-in-execute.js ⇒ the self-bootstrap gap is detected at runtime (if the A6
   // dispatcher followed the hit and used the worktree scriptPath, this WARN would NOT fire).
@@ -1095,12 +1095,12 @@ function makeStaleBootstrapRepo() {
   run(["config", "user.email", "test@test"]);
   run(["config", "user.name", "test"]);
   fs.writeFileSync(path.join(dir, "README.md"), "base\n");
-  fs.mkdirSync(path.join(dir, ".claude", "workflows"), { recursive: true });
-  fs.writeFileSync(path.join(dir, ".claude", "workflows", "fan-in-execute.js"), "OLD-fan-in-execute\n");
+  fs.mkdirSync(path.join(dir, "plugin", "workflows"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "plugin", "workflows", "fan-in-execute.js"), "OLD-fan-in-execute\n");
   run(["add", "-A"]);
   run(["commit", "-qm", "old-base"]);
   // develop advances with the poll-bounded fix to fan-in-execute.js
-  fs.writeFileSync(path.join(dir, ".claude", "workflows", "fan-in-execute.js"), "POLL-BOUNDED-fan-in-execute\n");
+  fs.writeFileSync(path.join(dir, "plugin", "workflows", "fan-in-execute.js"), "POLL-BOUNDED-fan-in-execute\n");
   run(["add", "-A"]);
   run(["commit", "-qm", "poll-bounded-fix"]);
   // task branch forks from the OLD base (HEAD~1) and modifies a DIFFERENT orchestration file
@@ -1149,15 +1149,15 @@ test("⑦b wiring — the step-0 prompt carries the --bootstrap-sync call (workt
 test("⑦b REAL stale sync — a bootstrap-HIT worktree forked before the poll-bounded fix lands: --bootstrap-sync merges develop ⇒ fan-in-execute.js becomes the latest", async (t) => {
   const repo = makeStaleBootstrapRepo();
   t.after(() => cleanup(repo));
-  symlinkRuntimeTrees(repo, { "plugin/scripts/fan-in-ff-merge.sh": "", ".claude/workflows/fan-in-execute.js": "" });
+  symlinkRuntimeTrees(repo, { "plugin/scripts/fan-in-ff-merge.sh": "", "plugin/workflows/fan-in-execute.js": "" });
   // Before: the worktree's fan-in-execute.js is the OLD (fork-time) version.
-  assert.equal(fs.readFileSync(path.join(repo, ".claude", "workflows", "fan-in-execute.js"), "utf8").trim(), "OLD-fan-in-execute");
+  assert.equal(fs.readFileSync(path.join(repo, "plugin", "workflows", "fan-in-execute.js"), "utf8").trim(), "OLD-fan-in-execute");
   const r = runSyncCli(repo, ["--merge-target", "develop"]);
   assert.equal(r.status, 0, `sync cli failed: ${r.stderr}`);
   assert.match(r.stdout, /merged=1/, `the stale worktree must merge develop, got stdout:\n${r.stdout}`);
   assert.doesNotMatch(r.stdout, /conflict=1/, "a non-overlapping merge must not conflict");
   // After: the worktree's fan-in-execute.js is the develop-latest (POLL-BOUNDED).
-  assert.equal(fs.readFileSync(path.join(repo, ".claude", "workflows", "fan-in-execute.js"), "utf8").trim(), "POLL-BOUNDED-fan-in-execute");
+  assert.equal(fs.readFileSync(path.join(repo, "plugin", "workflows", "fan-in-execute.js"), "utf8").trim(), "POLL-BOUNDED-fan-in-execute");
   // The branch's OWN orchestration modification is preserved (self-validation survives the sync).
   assert.equal(fs.readFileSync(path.join(repo, "plugin", "scripts", "fan-in-ff-merge.sh"), "utf8").trim(), "branch-modified-ff-merge");
 });
@@ -1165,10 +1165,10 @@ test("⑦b REAL stale sync — a bootstrap-HIT worktree forked before the poll-b
 test("⑦b REAL conflict — branch AND develop both modify fan-in-execute.js ⇒ conflict=1 + abort (worktree clean, branch version preserved; step-1 will resolve)", async (t) => {
   const repo = makeStaleBootstrapRepo();
   t.after(() => cleanup(repo));
-  symlinkRuntimeTrees(repo, { "plugin/scripts/fan-in-ff-merge.sh": "", ".claude/workflows/fan-in-execute.js": "" });
+  symlinkRuntimeTrees(repo, { "plugin/scripts/fan-in-ff-merge.sh": "", "plugin/workflows/fan-in-execute.js": "" });
   // Branch also modifies fan-in-execute.js (overlapping with develop's poll-bounded fix ⇒ conflict)
-  fs.writeFileSync(path.join(repo, ".claude", "workflows", "fan-in-execute.js"), "BRANCH-CHANGED-fan-in-execute\n");
-  runBash("git add .claude/workflows/fan-in-execute.js && git commit -qm 'branch also changes fan-in-execute'", { cwd: repo });
+  fs.writeFileSync(path.join(repo, "plugin", "workflows", "fan-in-execute.js"), "BRANCH-CHANGED-fan-in-execute\n");
+  runBash("git add plugin/workflows/fan-in-execute.js && git commit -qm 'branch also changes fan-in-execute'", { cwd: repo });
   const r = runSyncCli(repo, ["--merge-target", "develop"]);
   assert.equal(r.status, 0, `sync cli failed: ${r.stderr}`);
   assert.match(r.stdout, /conflict=1/, `overlapping fan-in-execute.js edits must conflict, got stdout:\n${r.stdout}`);
@@ -1176,13 +1176,13 @@ test("⑦b REAL conflict — branch AND develop both modify fan-in-execute.js �
   // Abort left the worktree clean and the branch version intact.
   const status = runBash("git status --porcelain --untracked-files=no", { cwd: repo });
   assert.equal(status.stdout.trim(), "", `worktree must be clean after abort, got: ${status.stdout}`);
-  assert.equal(fs.readFileSync(path.join(repo, ".claude", "workflows", "fan-in-execute.js"), "utf8").trim(), "BRANCH-CHANGED-fan-in-execute");
+  assert.equal(fs.readFileSync(path.join(repo, "plugin", "workflows", "fan-in-execute.js"), "utf8").trim(), "BRANCH-CHANGED-fan-in-execute");
 });
 
 test("⑦b REAL dirty — a worktree with a tracked modification ⇒ skipped (step-1 merge handles it; never clobbers local work)", async (t) => {
   const repo = makeStaleBootstrapRepo();
   t.after(() => cleanup(repo));
-  symlinkRuntimeTrees(repo, { "plugin/scripts/fan-in-ff-merge.sh": "", ".claude/workflows/fan-in-execute.js": "" });
+  symlinkRuntimeTrees(repo, { "plugin/scripts/fan-in-ff-merge.sh": "", "plugin/workflows/fan-in-execute.js": "" });
   fs.writeFileSync(path.join(repo, "README.md"), "uncommitted local edit\n");
   const r = runSyncCli(repo, ["--merge-target", "develop"]);
   assert.equal(r.status, 0, `sync cli failed: ${r.stderr}`);
@@ -1193,7 +1193,7 @@ test("⑦b REAL dirty — a worktree with a tracked modification ⇒ skipped (st
 test("⑦b REAL json — the sync reports a machine-readable outcome (merged/conflict/skipped) for the dispatch rule", async (t) => {
   const repo = makeStaleBootstrapRepo();
   t.after(() => cleanup(repo));
-  symlinkRuntimeTrees(repo, { "plugin/scripts/fan-in-ff-merge.sh": "", ".claude/workflows/fan-in-execute.js": "" });
+  symlinkRuntimeTrees(repo, { "plugin/scripts/fan-in-ff-merge.sh": "", "plugin/workflows/fan-in-execute.js": "" });
   const r = spawnSync("node", ["--experimental-strip-types", SEL_CLI, "--bootstrap-sync", "--worktree", repo, "--merge-target", "develop", "--json"], {
     encoding: "utf8", timeout: 30_000,
   });

@@ -26,8 +26,9 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL, fileURLToPath } from "node:url";
+import { pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
+import { resolvePluginRoot } from "../plugin-root.ts";
 
 // ── types ────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -59,7 +60,7 @@ export interface FfMergeArgs {
   escalations?: string;
   lockWaitSecs?: number;
   worktree?: string;
-  /** test seam — the plugin/scripts dir (self-bootstrapping default is <root>/plugin/scripts). */
+  /** test seam — the plugin/scripts dir (self-bootstrapping default is the SPEC §6b resolver). */
   scriptsDir?: string;
   now?: () => Date;
 }
@@ -204,7 +205,7 @@ function cleanTreeCheck(args: FfMergeArgs, root: string): { ok: boolean; stderrL
       benignPaths.push(ppath);
     }
     if (benignOk && benignPaths.length > 0) {
-      const scriptsDir = args.scriptsDir ?? path.join(root, "plugin", "scripts");
+      const scriptsDir = scriptsDirOf(args) ?? "";
       const touchesScript = path.join(scriptsDir, "touches-orthogonality-check.ts");
       const verdict = sh(["node", "--experimental-strip-types", touchesScript, "--runtime-dirty", "--task", args.task, "--root", root, ...benignPaths]);
       if (verdict.status !== 0 || !verdict.stdout.trim().startsWith("BENIGN")) benignOk = false;
@@ -277,7 +278,7 @@ function suiteCertGate(args: FfMergeArgs, root: string): { ok: boolean; reason: 
   }
   const delta = git(root, "diff", "--name-only", suiteHead, suiteTip).stdout.trim();
   if (delta !== "") {
-    const scriptsDir = args.scriptsDir ?? path.join(root, "plugin", "scripts");
+    const scriptsDir = scriptsDirOf(args) ?? "";
     const classifyScript = path.join(scriptsDir, "select-static-checks-for-touches.ts");
     // classify-root = the repo root the registry (scripts/test.sh) lives at — two levels up from
     // plugin/scripts (matches the bash's `dirname BASH_SOURCE/../..`).
@@ -331,7 +332,7 @@ function acquireMergeLockAsync(lockFile: string, lockWaitSecs: number): Promise<
 // ── classify-delta (the computed inert-delta classifier, no hand-written path table) ────────────────
 
 function classifyDelta(args: FfMergeArgs, root: string, files: string[]): string {
-  const scriptsDir = args.scriptsDir ?? path.join(root, "plugin", "scripts");
+  const scriptsDir = scriptsDirOf(args) ?? "";
   const classifyScript = path.join(scriptsDir, "select-static-checks-for-touches.ts");
   const classifyRoot = path.resolve(scriptsDir, "..", "..");
   const r = sh(["node", "--experimental-strip-types", classifyScript, "--classify-delta", "--root", classifyRoot, ...files]);
@@ -340,10 +341,15 @@ function classifyDelta(args: FfMergeArgs, root: string, files: string[]): string
 
 // ── main ─────────────────────────────────────────────────────────────────────────────────────────────
 
-/** The repo root the MODULE lives in (for self-bootstrapping the classifier/touches/reaper scripts —
- *  the analog of the retired bash's `dirname BASH_SOURCE/../..`). The worker-driver overrides this via
- *  `scriptsDir` when it loads a worktree copy. */
-const MODULE_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
+/** The plugin `scripts/` dir — caller override (worker-driver's worktree seam) else the canonical
+ *  resolver (SPEC §6b: never the workspace root, never an import.meta.url walk-up without a worktree
+ *  check — the pre-migration `MODULE_REPO_ROOT` and `root/plugin/scripts` defaults). null when
+ *  unresolvable (callers fail closed). */
+function scriptsDirOf(args: FfMergeArgs): string | null {
+  if (args.scriptsDir) return args.scriptsDir;
+  const pluginRoot = resolvePluginRoot();
+  return pluginRoot ? path.join(pluginRoot, "scripts") : null;
+}
 
 /** The full 持锁段 ff, as an importable function (used by `quay task fan-in` and worker-driver.ts). */
 export async function ffMerge(args: FfMergeArgs): Promise<FfMergeResult> {
@@ -358,7 +364,10 @@ export async function ffMerge(args: FfMergeArgs): Promise<FfMergeResult> {
   const lockEvents = args.lockEvents ?? path.join(root, ".quay", "fan-in-merge-lock-events.jsonl");
   const retryRecord = args.retryRecord ?? path.join(root, ".quay", "fan-in-retries.jsonl");
   const escalations = args.escalations ?? path.join(root, ".quay", "fan-in-ff-escalations.jsonl");
-  const scriptsDir = args.scriptsDir ?? path.join(MODULE_REPO_ROOT, "plugin", "scripts");
+  const scriptsDir = scriptsDirOf(args);
+  if (!scriptsDir) {
+    return { code: 2, stdout: "", stderr: "fan-in-ff-merge: plugin scripts dir not resolvable (SPEC §6b — no QUAY_PLUGIN_ROOT, not under a quay checkout/install)", landedSha: null };
+  }
   args.scriptsDir = scriptsDir;
 
   const out: string[] = [];

@@ -143,19 +143,19 @@ test("fingerprintOf is order-independent and content-sensitive", () => {
   assert.notEqual(fingerprintOf(a), fingerprintOf(c), "a changed source hash must change the fingerprint");
 });
 
-// makeStaleFixture — a hermetic root whose plugin/scripts/quay-init.sh is a CONTROLLED FAKE that is
-// sourceable and defines derive_loop_scripts (so collectSourceEntries/--check-stale run against a real
-// derivation, not the real quay-init mechanism). Lays down one derived script + one wholesale workflow.
+// makeStaleFixture — a hermetic root carrying the FOUR laydown-source files the post-shrink
+// collectSourceEntries fingerprints (plugin/scripts/quay-init.sh + the two verbatim templates +
+// plugin.json), so --check-stale runs against a controlled source set, not the real quay-init mechanism.
 function makeStaleFixture(prefix) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `qicr-${prefix}-`));
   fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
-  fs.mkdirSync(path.join(root, "plugin", "workflows"), { recursive: true });
-  fs.writeFileSync(
-    path.join(root, "plugin", "scripts", "quay-init.sh"),
-    `derive_loop_scripts() { printf 'foo.sh\\n'; }\n`,
-  );
-  fs.writeFileSync(path.join(root, "plugin", "scripts", "foo.sh"), "#!/usr/bin/env bash\n");
-  fs.writeFileSync(path.join(root, "plugin", "workflows", "w.js"), "// workflow\n");
+  fs.mkdirSync(path.join(root, "plugin", ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "plugin", ".claude"), { recursive: true });
+  fs.mkdirSync(path.join(root, "plugin", ".claude-plugin"), { recursive: true });
+  fs.writeFileSync(path.join(root, "plugin", "scripts", "quay-init.sh"), "#!/usr/bin/env bash\n");
+  fs.writeFileSync(path.join(root, "plugin", ".quay", "profiles.yml"), "version: 1\n");
+  fs.writeFileSync(path.join(root, "plugin", ".claude", "launch.settings.json"), "{}\n");
+  fs.writeFileSync(path.join(root, "plugin", ".claude-plugin", "plugin.json"), '{"name":"quay"}\n');
   return root;
 }
 
@@ -177,11 +177,11 @@ test("AC3 — --check-stale reds on a changed laydown source with no re-anchor, 
     assert.equal(res.status, 0, `a fresh fixture must exit 0, got ${res.status}: ${res.stdout}${res.stderr}`);
 
     // INJECT: change a laydown source file WITHOUT re-anchoring.
-    fs.writeFileSync(path.join(root, "plugin", "scripts", "foo.sh"), "#!/usr/bin/env bash\necho changed\n");
+    fs.writeFileSync(path.join(root, "plugin", ".claude", "launch.settings.json"), '{"changed":true}\n');
     res = runStale();
     assert.equal(res.status, 1, `a stale source must exit 1, got ${res.status}: ${res.stdout}${res.stderr}`);
     assert.match(res.stdout, /re-anchor required/, "the re-anchor remedy must be named in the stale output");
-    assert.match(res.stdout, /foo\.sh/, "the changed source file must be enumerated (hard rule 3)");
+    assert.match(res.stdout, /launch\.settings\.json/, "the changed source file must be enumerated (hard rule 3)");
 
     // RESTORE via a mechanical re-anchor → green again.
     entries = collectSourceEntries(root);

@@ -2,16 +2,14 @@
 // Migrated verbatim from packages/quay/bin/quay.ts dispatch body by
 // gap-cli-import-command-migration-into-src. No behavior change.
 //
-// NOTE on `import.meta.url` semantics: this module sits one directory deeper
-// than bin/quay.ts did (src/cli/ vs bin/), but the plugin-scripts walk-up below
-// still reaches the repo-root `plugin/scripts` within its 6-iteration bound
-// (src/cli → src → packages/quay → packages → repo-root, ~5 hops), and in the
-// bundled dist the same relative geometry holds from dist/quay.js.
+// NOTE on plugin-script resolution: the plugin scripts dir is resolved via the canonical
+// plugin-root.ts resolver (SPEC §6b) — NOT a workspace-root join (AC168 removes the copy) and NOT
+// an import.meta.url walk-up without a worktree check (AC139-4's carrier-death root cause).
 
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { parseFlags, fsSyncExists } from "./shared.ts";
+import { parseFlags } from "./shared.ts";
+import { resolvePluginScript } from "../plugin-root.ts";
 import type { CliCtx } from "./context.ts";
 
 // ── manager commands (C1-C5, gap-manager-productization-five-constraints) ─────────────────────────
@@ -44,32 +42,27 @@ adopted no longer exists as an independent role.
     return;
   }
 
-  // Locate the plugin scripts dir. Walk upward from this file looking for a dir that contains
-  // manager-start.sh — works in the dev tree (repo-root/plugin/scripts), the npm-pack root
-  // (plugin/ shipped under the pack root), and the vendored plugin bundle (plugin/scripts at the
-  // plugin root). Env override for hermetic tests.
-  const scriptsDir = (() => {
-    if (process.env.QUAY_MANAGER_SCRIPTS_DIR) return process.env.QUAY_MANAGER_SCRIPTS_DIR;
-    let dir = path.dirname(fileURLToPath(import.meta.url));
-    for (let i = 0; i < 6; i++) {
-      for (const rel of [path.join("plugin", "scripts"), "scripts"]) {
-        const cand = path.join(dir, rel);
-        if (fsSyncExists(path.join(cand, "manager-start.sh"))) return cand;
-      }
-      const parent = path.dirname(dir);
-      if (parent === dir) break;
-      dir = parent;
+  // Locate the plugin scripts via the canonical resolver (SPEC §6b). The env override (hermetic
+  // tests) still wins; otherwise resolve from the plugin root — never the workspace root (AC168)
+  // and never a worktree copy (AC139-4).
+  const resolveManagerScript = (name: string): string | null => {
+    if (process.env.QUAY_MANAGER_SCRIPTS_DIR) {
+      return path.join(process.env.QUAY_MANAGER_SCRIPTS_DIR, name);
     }
-    return path.resolve(dir, "plugin", "scripts");
-  })();
-  const managerStart = path.join(scriptsDir, "manager-start.sh");
-  const managerArm = path.join(scriptsDir, "manager-arm-loop.sh");
+    return resolvePluginScript(path.join("scripts", name));
+  };
+  const managerStart = resolveManagerScript("manager-start.sh");
+  const managerArm = resolveManagerScript("manager-arm-loop.sh");
 
-  const runManagerScript = (script, args) => {
+  const runManagerScript = (script: string | null, args: string[]): number => {
+    if (script == null) {
+      console.error("quay manager: plugin script not found — plugin-root resolution failed (manager layer not installed, SPEC §6b)");
+      return 1;
+    }
     const r = spawnSync("bash", [script, ...args], { encoding: "utf8" });
     if (r.stdout) process.stdout.write(r.stdout);
     if (r.stderr) process.stderr.write(r.stderr);
-    return r.status;
+    return r.status ?? 1;
   };
 
   if (sub === "start") {

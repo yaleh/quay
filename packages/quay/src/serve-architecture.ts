@@ -69,7 +69,7 @@ function renderArchitecturePage(arch: ArchitectureResult): string {
   </div>`;
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay architecture — system component map">${modernistStyles()}${pageStyles()}<title>Architecture — 系统组件图</title></head>
-    <body>${renderMobileChrome("architecture", "architecture")}${renderSiteNav("architecture")}<main>
+    <body>${renderMobileChrome("architecture", "architecture")}${renderSiteNav("architecture")}<main id="main">
       <h1>Architecture — 系统组件图</h1>
       <p class="meta">数据源：<code>packages/*</code>（git log 提交事实）· <code>git worktree list</code>（在飞开发）</p>
       ${obsNote(arch.status, arch.reason)}

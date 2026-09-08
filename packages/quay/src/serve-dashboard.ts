@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 import type { ProviderClient } from "./provider-client.ts";
-import { readLive, readSystem, readManagerLight, readTests, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord } from "./observation.ts";
+import { readLive, readSystem, readManagerLight, readTests, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord, type DriverKindReading } from "./observation.ts";
 import { TASK_STATUS, type GoalRecord } from "./abi.ts";
 import type { Manifest } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime } from "./serve-render.ts";
@@ -478,6 +478,8 @@ export function renderDashboardCardRefreshScript(): string {
         if (task && typeof d.taskCard === "string") { task.innerHTML = d.taskCard; }
         var goal = document.getElementById("goal-card");
         if (goal && typeof d.goalCard === "string") { goal.innerHTML = d.goalCard; }
+        var fanin = document.getElementById("fanin-card");
+        if (fanin && typeof d.faninCard === "string") { fanin.innerHTML = d.faninCard; }
         if (d.sysRaw && typeof d.sysRaw === "object") {
           var cpu = typeof d.sysRaw.cpuStallAvg10 === "number" ? d.sysRaw.cpuStallAvg10 : null;
           var load = typeof d.sysRaw.loadAvg === "number" ? d.sysRaw.loadAvg : null;
@@ -516,19 +518,29 @@ export function renderSysCard(sys: SystemResult): string {
   </div>`;
 }
 
-/** The dashboard mgrCard — a self-contained render of the Manager/Outer/Inner probe (id="mgr-card").
- *  gap-dashboard-visual-review-batch-fixes AC1: the liveness count is only shown when
- *  `liveness.status === "ok"`; otherwise (the current constant `"empty"` "observer retired" state) the
- *  clause reads 「会话数未接入」 — never a bare number that a retired/never-measured metric would render
- *  indistinguishable from a genuine "0 sessions alive" (CLAUDE.md 硬规则 3b/4b). */
+/** The dashboard mgrCard — a self-contained render of the two resident drivers' alive status
+ *  (id="mgr-card"). gap-dashboard-driver-status-card: the retired Manager/Outer/Inner probe is no
+ *  longer read here; the card renders promotion/worker driver alive status + last-record relative
+ *  time from the in-process driver-status reading (readDriverStatus in observation.ts). When a pid
+ *  file is absent (or the reading is absent — the dashboard error fallback), the row reads 「未运行」
+ *  — never a bare undefined/NaN/empty (CLAUDE.md 硬规则 3b/4b). */
 export function renderMgrCard(mgr: ManagerResult): string {
-  const mgrAlive = mgr.liveness.sessions.filter((s) => s.alive).length;
-  const livenessText = mgr.liveness.status === "ok" ? `${mgrAlive} 会话 LIVE` : "会话数未接入";
   return html`<div id="mgr-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
-    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">Manager / Outer / Inner</div>
-    <p style="margin:0;font-size:0.8rem;line-height:1.5">loop-driver: ${escapeHtml(mgr.loopDriver.verdict ?? "未接入")} · ${livenessText}</p>
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">Driver</div>
+    ${renderDriverStatusRow("promotion", mgr.drivers?.promotion)}
+    ${renderDriverStatusRow("worker", mgr.drivers?.worker)}
     <a href="/manager" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看三层状态 →</a>
   </div>`;
+}
+
+/** Render one driver kind's alive-status row: `<kind>: <运行中|未运行> · 末条记录 <relativeTime>`.
+ *  An absent reading (undefined — the dashboard error fallback) renders identically to a dead kind:
+ *  「未运行」, never `undefined`/`NaN`/empty (absent-field contract, hard rules 3b/4b). */
+function renderDriverStatusRow(kind: "promotion" | "worker", d: DriverKindReading | undefined): string {
+  const aliveText = d?.running === true ? "运行中" : "未运行";
+  const lastMs = d?.lastTs ? Date.parse(d.lastTs) : Number.NaN;
+  const lastText = Number.isFinite(lastMs) ? relativeTime(lastMs) : "—";
+  return html`<div style="margin:0;font-size:0.8rem;line-height:1.5"><b>${escapeHtml(kind)}</b>: ${aliveText} · 末条记录 ${lastText}</div>`;
 }
 
 /** The dashboard taskCard — a self-contained render of the task-ledger summary (id="task-card"):
@@ -545,7 +557,7 @@ export function renderMgrCard(mgr: ManagerResult): string {
  *  font-weight 700, while each row's task id is font-weight 500 (accent colour dropped) — so the grouping
  *  dimension (which used to be the weakest line) reads stronger than the id. */
 export function renderTaskCard(
-  tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>,
+  tasks: TaskSummary[],
 ): string {
   const counts = new Map<string, number>();
   for (const t of tasks) {
@@ -680,8 +692,11 @@ export function renderGoalCard(
   const activeGoals = goals.filter((g) => g.kind === "goal" && g.status === "active");
   const activeCount = activeGoals.length;
 
+  // gap-webui-a11y-focus-ring-and-token-contrast-unvalidated: the NOT-EVALUATED fallback was
+  // --color-neutral-400 (#bab6b6) = 1.80:1 on --color-bg — unreadable text. Muted-but-readable
+  // --color-neutral-700 (#605d5d) keeps the "not yet judged" semantics at 5.83:1.
   const stalenessColor = (s: "fresh" | "stale" | "NOT-EVALUATED"): string =>
-    s === "fresh" ? "var(--color-positive-700)" : s === "stale" ? "var(--color-accent-800)" : "var(--color-neutral-400)";
+    s === "fresh" ? "var(--color-positive-700)" : s === "stale" ? "var(--color-accent-800)" : "var(--color-neutral-700)";
 
   const rows = activeGoals.map((g) => {
     const gid = String(g.id);
@@ -815,6 +830,42 @@ export function gitReadFailureSummary(reason: string | null | undefined): string
   return cap ? `读失败 — ${escapeHtml(cap)}` : "读失败";
 }
 
+// ── Dashboard card grid (gap-dashboard-grid-autofit-columns-vs-card-count) ───────────────────────
+// The three dashboard grids used to inline `repeat(auto-fit, minmax(240px, 1fr))`: the column count
+// was derived from the CONTAINER WIDTH, with no constraint linking it to the card count. At the
+// production <main> width (870px) floor(870/240) = 3 columns, so the 4-card 「工作进展」 row wrapped
+// its 4th card onto a 2nd row and left 2 empty slots that showed the container's --color-divider
+// background as a large dark void — the divider colour is meant to show only through the 2px gaps,
+// never as an empty-slot fill. Binding the column count to the CARD count (gridColumns(n) →
+// repeat(n, minmax(0,1fr))) makes columns == cards at every width, so a row can never have an empty
+// slot. The ≤600px media query in dashboardGridStyles collapses the grid to a single column to
+// preserve the vertical stacking auto-fit used to give mobile (a 4-card row must not squeeze to
+// ~90px/card at 390px).
+
+/** Column template bound to the card count: n cards → n columns. `minmax(0,1fr)` lets each column
+ *  shrink below its content min-width (grid items default to min-width:auto, which would overflow
+ *  with long unbreakable content like the monospace 最近提交 card). */
+export function gridColumns(cardCount: number): string {
+  return `repeat(${cardCount}, minmax(0, 1fr))`;
+}
+
+/** Render one dashboard card-grid row: column count bound to cards.length (0 empty slots at any
+ *  viewport) — the falsifiable inverse of the old always-3-column auto-fit template. */
+export function renderCardGrid(cards: string[], opts: { marginBottom?: boolean } = {}): string {
+  const margin = opts.marginBottom ? "margin-bottom:1.5rem;" : "";
+  return html`<div class="dash-grid" style="display:grid;grid-template-columns:${gridColumns(cards.length)};gap:2px;background:var(--color-divider);border:1px solid var(--color-divider);${margin}">${cards.join("")}</div>`;
+}
+
+/** The .dash-grid sheet: the ≤600px single-column collapse. Split from the inline style because a
+ *  media query cannot live in a style attribute. The `!important` is required to beat the inline
+ *  `grid-template-columns` (inline styles outrank class selectors — this is the standard override
+ *  for an inline-style + media-query combination). */
+export const dashboardGridStyles = `<style>
+  @media (max-width:600px) {
+    .dash-grid { grid-template-columns:1fr !important; }
+  }
+</style>`;
+
 export function renderDashboardPage(
   d: {
     live: LiveResult;
@@ -823,7 +874,7 @@ export function renderDashboardPage(
     tests: TestsResult;
     suiteRun: CurrentSuiteRun | null;
     history: GitHistoryResult;
-    tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>;
+    tasks: TaskSummary[];
     goals?: GoalRecord[];
   },
   opts: { workspaceRoot?: string; hours?: number; nowMs?: number } = {},
@@ -847,6 +898,11 @@ export function renderDashboardPage(
     <p style="margin:0;font-size:0.8rem;line-height:1.6;font-family:ui-monospace,monospace">${recentCommits}</p>
     <a href="/journal" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Journal →</a>
   </div>`;
+  const gitHistoryCard = html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:8px">
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">Git History</div>
+    <p style="margin:0;font-size:0.8rem">提交纵向时间轴（develop 主干 + task 分支，第三方库客户端渲染）。</p>
+    <a href="/git-history" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Git History →</a>
+  </div>`;
 
   // gap-dashboard-fanin-panel-and-timeline-bars (window presets): a small set of page-reload links that
   // set the shared G/H timeline window. The refresh script carries the current ?hours= into its own
@@ -856,21 +912,102 @@ export function renderDashboardPage(
     .join(" · ");
 
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay dashboard — 循环脉搏、任务台账、系统资源与三层状态总览">${modernistStyles()}${pageStyles()}<title>Dashboard</title></head>
-    <body>${renderMobileChrome("dashboard", "dashboard")}${renderSiteNav("dashboard")}<main>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay dashboard — 循环脉搏、任务台账、系统资源与三层状态总览">${modernistStyles()}${pageStyles()}${dashboardGridStyles}<title>Dashboard</title></head>
+    <body>${renderMobileChrome("dashboard", "dashboard")}${renderSiteNav("dashboard")}<main id="main">
       <h1>Dashboard</h1>
       <p class="meta">循环脉搏、任务台账、系统资源与三层调度状态的总览 — 每张卡片指向对应完整页面。</p>
       <p class="meta">时间轴窗口（以各自最近一次运行/fan-in 结束时刻为终点的过去 ${hours}h）：${hourLinks}</p>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:var(--color-divider);border:1px solid var(--color-divider);margin-bottom:1.5rem">${liveCard}${sysCard}${mgrCard}</div>
+      ${renderCardGrid([liveCard, sysCard, mgrCard], { marginBottom: true })}
       <h2>工作进展</h2>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:var(--color-divider);border:1px solid var(--color-divider);margin-bottom:1.5rem">${goalCard}${taskCard}${testsCard}${fanInCard}</div>
+      ${renderCardGrid([goalCard, taskCard, testsCard, fanInCard], { marginBottom: true })}
       <h2>变更记录</h2>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px;background:var(--color-divider);border:1px solid var(--color-divider)">${commitsCard}${html`<div style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:8px">
-        <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">Git History</div>
-        <p style="margin:0;font-size:0.8rem">提交纵向时间轴（develop 主干 + task 分支，第三方库客户端渲染）。</p>
-        <a href="/git-history" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Git History →</a>
-      </div>`}</div>
+      ${renderCardGrid([commitsCard, gitHistoryCard])}
     </main>${renderDashboardCardRefreshScript()}</body></html>`;
+}
+
+/** Build the `/dashboard/cards` JSON payload object (before `JSON.stringify`), extracted so the AC3
+ *  registration-completeness check can read the REAL payload keys rather than a hand-copied list — a
+ *  card added here but missing from the page render or the swap script is caught by comparing the
+ *  three sets (gap-dashboard-fanin-card-not-in-auto-refresh), never by remembering to update a fixture. */
+export function buildCardsPayload(args: {
+  live: LiveResult;
+  sys: SystemResult;
+  mgr: ManagerResult;
+  tests: TestsResult;
+  suiteRun: CurrentSuiteRun | null;
+  tasks: TaskSummary[];
+  goals: GoalRecord[];
+  workspaceRoot: string;
+  hours: number;
+  cap: number;
+  staleMs: number;
+}): Record<string, unknown> {
+  const { live, sys, mgr, tests, suiteRun, tasks, goals, workspaceRoot, hours, cap, staleMs } = args;
+  return {
+    liveCard: renderLiveCard(live, Date.now(), tasks),
+    testsCard: renderTestsCard(tests, suiteRun, { hours }),
+    sysCard: renderSysCard(sys),
+    mgrCard: renderMgrCard(mgr),
+    taskCard: renderTaskCard(tasks),
+    goalCard: renderGoalCard(goals, { cap, staleMs }),
+    faninCard: renderFanInCard(workspaceRoot, { hours }),
+    sysRaw: {
+      cpuStallAvg10: sys.resourceGate.cpuStallAvg10,
+      loadAvg: sys.resourceGate.loadAvg,
+      loadThreshold: sys.resourceGate.loadThreshold,
+      ts: Date.now(),
+    },
+  };
+}
+
+/** Registration-completeness check (gap-dashboard-fanin-card-not-in-auto-refresh AC3 — 防复发):
+ *  every card the page renders as `id="*-card"` must ALSO appear as a `/dashboard/cards` payload key
+ *  (mapped `xxxCard` → `xxx-card`) AND as a `getElementById("*-card")` swap target in the auto-refresh
+ *  script. A card on only one side is a wiring gap (renders but never refreshes, or a swap target with
+ *  no payload). Pure — returns a result object instead of throwing, so a unit test can assert `ok` AND
+ *  inspect the per-side diff. The negative control (a page with one extra card ⇒ ok:false) is what
+ *  makes this a measurement rather than a恒真恒等式 (hard rule 4). */
+export interface CardRegistrationDiff {
+  ok: boolean;
+  pageCards: string[];
+  payloadCards: string[];
+  scriptCards: string[];
+  pageOnly: string[];
+  payloadOnly: string[];
+  scriptOnly: string[];
+}
+
+export function checkCardRegistrationCompleteness(
+  pageHtml: string,
+  payload: Record<string, unknown>,
+  refreshScript: string,
+): CardRegistrationDiff {
+  const uniq = (xs: string[]): string[] => Array.from(new Set(xs)).sort();
+  const pageCards = uniq(Array.from(pageHtml.matchAll(/id="([a-z-]+-card)"/g), (m) => m[1]));
+  // Drop non-card keys (sysRaw) by requiring the `xxxCard` suffix, then map camelCase → kebab-case.
+  const payloadCards = uniq(
+    Object.keys(payload)
+      .filter((k) => k.endsWith("Card"))
+      .map((k) => k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)),
+  );
+  const scriptCards = uniq(Array.from(refreshScript.matchAll(/getElementById\("([a-z-]+-card)"\)/g), (m) => m[1]));
+  // "Unique to a side" = present there but missing from at least one of the other two. The OR form
+  // (not the intersection) guarantees a non-empty diff whenever ok is false — the AND form would
+  // return empty lists on a partial mismatch and masquerade a gap as "everything accounted for"
+  // (hard rule 3b).
+  const pageOnly = pageCards.filter((c) => !payloadCards.includes(c) || !scriptCards.includes(c));
+  const payloadOnly = payloadCards.filter((c) => !pageCards.includes(c) || !scriptCards.includes(c));
+  const scriptOnly = scriptCards.filter((c) => !pageCards.includes(c) || !payloadCards.includes(c));
+  const eq = (a: string[], b: string[]): boolean => a.length === b.length && a.every((v, i) => v === b[i]);
+  return {
+    ok: eq(pageCards, payloadCards) && eq(payloadCards, scriptCards),
+    pageCards,
+    payloadCards,
+    scriptCards,
+    pageOnly,
+    payloadOnly,
+    scriptOnly,
+  };
 }
 
 // ── Task-summary short-TTL cache (dashboard display surface only) ────────────────────────────────
@@ -885,7 +1022,21 @@ export function renderDashboardPage(
 // check). A 30s TTL bounds staleness: the dashboard is a display snapshot; the task store itself
 // (which the promotion-driver writes on todo→ready) is always read fresh, never through this cache.
 export const TASK_SUMMARY_CACHE_TTL_MS = 30_000;
-const taskSummaryCache = new Map<string, { at: number; tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }> }>();
+
+/** A frontmatter-only task summary (the `includeBody:false` shape `readTaskSummary` returns). The
+ *  `goal_ac` field (task→AC linkage, G7) joined the shape via gap-webui-goal-task-rollup-via-shared-
+ *  summary-cache so the /goal rollup can consume the structured relationship WITHOUT a second read
+ *  — it rides the SAME cached array the dashboard taskCard already uses. */
+export interface TaskSummary {
+  id?: unknown;
+  title?: unknown;
+  status?: unknown;
+  labels?: unknown;
+  updatedAt?: unknown;
+  goal_ac?: unknown;
+}
+
+const taskSummaryCache = new Map<string, { at: number; tasks: TaskSummary[] }>();
 
 /** Test-hygiene handle: drop all cached task-summary readings. */
 export function clearTaskSummaryCache(): void {
@@ -905,7 +1056,7 @@ export function clearTaskSummaryCache(): void {
 export async function readTaskSummary(
   root: string,
   client: ProviderClient,
-): Promise<Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>> {
+): Promise<TaskSummary[]> {
   const hit = taskSummaryCache.get(root);
   if (hit && Date.now() - hit.at < TASK_SUMMARY_CACHE_TTL_MS) return hit.tasks;
   const r = await client.taskList({ includeBody: false });
@@ -995,7 +1146,7 @@ export async function handleDashboard(
     readDashboardManagerLight(cfg.workspaceRoot).catch(() => ({
       status: "error" as const, reason: "internal", loopDriver: { status: "error" as const, reason: null, verdict: null, exitCode: null, detail: null }, liveness: { status: "error" as const, reason: null, sessions: [] }, observers: { status: "error" as const, reason: null, rows: [] }, pool: { status: "error" as const, reason: null, pool: null, floor: null, deficit: null, cap: null, lastPromoted: [] }, version: null, developLead: null,
     })),
-    readTaskSummary(cfg.workspaceRoot, client).catch(() => [] as Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>),
+    readTaskSummary(cfg.workspaceRoot, client).catch(() => [] as TaskSummary[]),
     client.goalList().catch(() => [] as GoalRecord[]),
   ]);
   let live: LiveResult;
@@ -1042,7 +1193,7 @@ export async function handleDashboardCards(
     readDashboardManagerLight(cfg.workspaceRoot).catch(() => ({
       status: "error" as const, reason: "internal", loopDriver: { status: "error" as const, reason: null, verdict: null, exitCode: null, detail: null }, liveness: { status: "error" as const, reason: null, sessions: [] }, observers: { status: "error" as const, reason: null, rows: [] }, pool: { status: "error" as const, reason: null, pool: null, floor: null, deficit: null, cap: null, lastPromoted: [] }, version: null, developLead: null,
     })),
-    readTaskSummary(cfg.workspaceRoot, client).catch(() => [] as Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>),
+    readTaskSummary(cfg.workspaceRoot, client).catch(() => [] as TaskSummary[]),
     client.goalList().catch(() => [] as GoalRecord[]),
   ]);
   let live: LiveResult;
@@ -1058,20 +1209,10 @@ export async function handleDashboardCards(
   const [sys, mgr, tasks, goals] = await asyncProbes;
   const hours = timelineHoursFromRequest(req);
   const { cap, staleMs } = readGoalPolicy(cfg.workspaceRoot);
-  const payload = JSON.stringify({
-    liveCard: renderLiveCard(live, Date.now(), tasks),
-    testsCard: renderTestsCard(tests, suiteRun, { hours }),
-    sysCard: renderSysCard(sys),
-    mgrCard: renderMgrCard(mgr),
-    taskCard: renderTaskCard(tasks),
-    goalCard: renderGoalCard(goals, { cap, staleMs }),
-    sysRaw: {
-      cpuStallAvg10: sys.resourceGate.cpuStallAvg10,
-      loadAvg: sys.resourceGate.loadAvg,
-      loadThreshold: sys.resourceGate.loadThreshold,
-      ts: Date.now(),
-    },
-  });
+  const payload = JSON.stringify(buildCardsPayload({
+    live, sys, mgr, tests, suiteRun, tasks, goals,
+    workspaceRoot: cfg.workspaceRoot, hours, cap, staleMs,
+  }));
   res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
   res.end(payload);
 }

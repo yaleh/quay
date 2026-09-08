@@ -33,9 +33,9 @@ import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
 import { isValidSessionId, sessionTranscriptPath } from "./observation.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome } from "./serve-render.ts";
+import { resolvePluginScriptExec } from "./plugin-root.ts";
 
 const execFileP = promisify(execFile);
 
@@ -133,26 +133,15 @@ export function verdictStateToDeliveryState(verdict: TranscriptVerdictState): "d
   }
 }
 
-/** The transcript-delivery-check CLI path, resolved relative to THIS module (same dev/dist fallback as
- *  observation.ts readBoardLanding's DRIFT_CHECKER_REL). */
-const TRANSCRIPT_CHECKER_REL = "../../../plugin/scripts/transcript-delivery-check.ts";
 const TRANSCRIPT_CHECK_TIMEOUT_MS = 5_000;
 
-/** Resolve the transcript-delivery-check CLI: the dev `.ts` (run with --experimental-strip-types),
- *  falling back to the shipped dist bundle (a plain ESM `.js`, run without the flag). Absent in both
- *  forms ⇒ null (the caller then reports "unknown" — never a fabricated "delivered"). */
+/** Resolve the transcript-delivery-check CLI via the canonical resolver (SPEC §6b — never a module-
+ *  relative `import.meta.url` walk-up without a worktree check). The dev `.ts` runs with
+ *  --experimental-strip-types; the shipped dist bundle (a plain ESM `.js`) runs without the flag.
+ *  Absent in both forms ⇒ null (the caller then reports "unknown" — never a fabricated "delivered"). */
 function resolveTranscriptChecker(): { scriptPath: string; stripTypes: boolean } | null {
-  try {
-    const dev = fileURLToPath(new URL(TRANSCRIPT_CHECKER_REL, import.meta.url));
-    if (fs.existsSync(dev)) return { scriptPath: dev, stripTypes: true };
-    const bundled = fileURLToPath(
-      new URL("../../../plugin/scripts/dist/transcript-delivery-check.js", import.meta.url)
-    );
-    if (fs.existsSync(bundled)) return { scriptPath: bundled, stripTypes: false };
-  } catch {
-    // fall through — path resolution failed ⇒ null
-  }
-  return null;
+  const r = resolvePluginScriptExec(path.join("scripts", "transcript-delivery-check.ts"));
+  return r ? { scriptPath: r.path, stripTypes: r.stripTypes } : null;
 }
 
 /**
@@ -446,7 +435,7 @@ export function renderSendResult(outcome: SendOutcome, receipts: MessageReceipt[
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay message delivery — 投递状态">${modernistStyles()}${pageStyles()}<title>消息投递 — ${escapeHtml(outcome.sessionId)}</title></head>
-    <body>${renderMobileChrome("sessions", "sessions")}${renderSiteNav("sessions")}<main>
+    <body>${renderMobileChrome("sessions", "sessions")}${renderSiteNav("sessions")}<main id="main">
       <h1>消息投递 — <code>${escapeHtml(outcome.sessionId)}</code></h1>
       <p class="meta"><a href="/session/${escapeHtml(outcome.sessionId)}">← 返回会话</a> · 投递状态是【目标 transcript 物化核证】+ 回执折算，非 socket「写成功」</p>
       <section style="margin-bottom:1.5rem;background:var(--color-surface);padding:1rem">
