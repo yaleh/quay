@@ -67,7 +67,7 @@ export function renderSessionsPage(sessions: SessionsResult): string {
   }).join("");
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay sessions — 运行中 + 已结束会话">${modernistStyles()}${pageStyles()}<title>Sessions — 会话观测</title></head>
-    <body>${renderMobileChrome("sessions", "sessions")}${renderSiteNav("sessions")}<main>
+    <body>${renderMobileChrome("sessions", "sessions")}${renderSiteNav("sessions")}<main id="main">
       <h1>Sessions — 会话观测（运行中 + 已结束）</h1>
       <p class="meta">数据源：<code>claude agents --json</code>（运行中 · 交互式 + <code>-p</code>）+ transcript 目录扫描（已结束）+ 会话 transcript 尾部</p>
       ${obsNote(sessions.status, sessions.reason)}
@@ -241,7 +241,7 @@ export function renderSessionPage(view: SessionViewResult): string {
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay session — 单一会话视图">${modernistStyles()}${pageStyles()}<title>Session — ${escapeHtml(view.sessionId)}</title></head>
-    <body>${renderMobileChrome("sessions", "sessions")}${renderSiteNav("sessions")}<main>
+    <body>${renderMobileChrome("sessions", "sessions")}${renderSiteNav("sessions")}<main id="main">
       <h1>Session — <code>${escapeHtml(view.sessionId)}</code></h1>
       <p class="meta"><a href="/sessions">← 返回 Sessions</a> · 数据源：<code>~/.claude/projects/&lt;slug&gt;/&lt;sessionId&gt;.jsonl</code>（transcript 尾部，非实时）</p>
       ${obsNote(view.status, view.reason)}

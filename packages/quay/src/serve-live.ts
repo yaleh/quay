@@ -147,7 +147,7 @@ export function renderLivePage(live: LiveResult): string {
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay live — what the loop is doing right now">${modernistStyles()}${pageStyles()}<title>Live — loop activity</title></head>
-    <body>${renderMobileChrome("live", "live")}${renderSiteNav("live")}<main>
+    <body>${renderMobileChrome("live", "live")}${renderSiteNav("live")}<main id="main">
       <h1>Live — 循环此刻在做什么</h1>
       ${statusNote}
       ${summary}
@@ -159,7 +159,7 @@ export function renderLivePage(live: LiveResult): string {
 function renderJournalPage(journal: JournalResult): string {
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay journal — recent loop record">${modernistStyles()}${pageStyles()}<title>Journal — recent loop record</title></head>
-    <body>${renderMobileChrome("journal", "journal")}${renderSiteNav("journal")}<main>
+    <body>${renderMobileChrome("journal", "journal")}${renderSiteNav("journal")}<main id="main">
       <h1>Journal — 循环最近记录</h1>
       ${renderSectionBlock(journal.escalations, "升级项 (escalations.md)")}
       ${renderSectionBlock(journal.tickLog, "Tick 记录 (tick-log.md)")}
