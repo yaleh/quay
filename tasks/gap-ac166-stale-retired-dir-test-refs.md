@@ -24,10 +24,10 @@ gap-ac166-second-copy-retirement（done）退役了 `.claude/workflows/` 与 `.c
 
 ## AC
 
-- [ ] AC1（能取假，机制级）：`_pluginSurfaceHash` 不再 walk `.claude/workflows`——`grep -n '\.claude.*workflows' plugin/test/helpers/quay-init-install-fixture.mjs` 命中 0 处 walk 根。
-- [ ] AC2（能取假）：`node --experimental-strip-types --test plugin/test/quay-init-loop-fixture-hash.test.mjs` exit 0（无 `.claude/workflows must exist` 前置红）。
-- [ ] AC3（能取假）：`node --experimental-strip-types --test --test-name-pattern "M179" plugin/test/plugin-packaging.test.mjs` exit 0（无 ENOENT）。
-- [ ] AC4：全量 `scripts/test.sh` 绿（这两条确定性红消除，无新增红）。
+- [x] AC1（能取假，机制级）：`_pluginSurfaceHash` 不再 walk `.claude/workflows`——`grep -n '\.claude.*workflows' plugin/test/helpers/quay-init-install-fixture.mjs` 命中 0 处 walk 根。
+- [x] AC2（能取假）：`node --experimental-strip-types --test plugin/test/quay-init-loop-fixture-hash.test.mjs` exit 0（无 `.claude/workflows must exist` 前置红）。
+- [x] AC3（能取假）：`node --experimental-strip-types --test --test-name-pattern "M179" plugin/test/plugin-packaging.test.mjs` exit 0（无 ENOENT）。
+- [x] AC4：全量 `scripts/test.sh` 绿（这两条确定性红消除，无新增红）。
 
 ## DoD
 
