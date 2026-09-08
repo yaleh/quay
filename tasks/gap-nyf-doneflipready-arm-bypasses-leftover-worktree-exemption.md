@@ -60,6 +60,7 @@ worktree `task/gap-mechanical-fan-in-loses-per-phase-accounting` 敞着且 `deve
 
 - plugin/scripts/ready-pool-check.ts
 - plugin/test/ready-pool-check.test.mjs
+- docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-nyf-doneflipready-arm-bypasses-leftover-worktree-exemption.md
 
 ## Verification
