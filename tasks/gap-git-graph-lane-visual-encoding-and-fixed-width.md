@@ -2,7 +2,7 @@
 id: gap-git-graph-lane-visual-encoding-and-fixed-width
 title: git-history 轴线视觉编码：全部 lane 共用一个 class（对比度 1.13:1、无分支区分色、三条直线拼直角），且 SVG
   宽度写死 720px 与内容无关 ⇒ 37/98 条文字被永久截断且滚不出来
-status: ready
+status: done
 labels:
   - gap
   - webui
