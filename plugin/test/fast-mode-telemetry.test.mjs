@@ -1874,6 +1874,93 @@ test("WORKTREE-LEAK — taskIdFromBranch accepts both ref forms and rejects non-
   assert.equal(cli.taskIdFromBranch(null), null);
 });
 
+// ── worktreeExists shape-awareness (gap-worktree-exists-blind-to-unprefixed-task-branch) ──
+// `worktreeExists` is the leftover-worktree "fan-in not yet complete" direct quantity read by
+// ready-pool-check's exemption. The old probe matched ONLY `refs/heads/task/<id>`, so a leftover
+// worktree on a bare `<id>` branch (or a detached HEAD) was invisible ⇒ the exemption never fired
+// and the task went NYF forever. These tests pin the three matched shapes plus negative controls
+// against a REAL git repo (worktreeExists shells out to `git worktree list --porcelain`).
+
+function makeWorktreeRepo() {
+  const tmp = makeTmpWorkspace();
+  gitCmd(tmp, "init", "-q");
+  gitCmd(tmp, "config", "user.email", "test@example.com");
+  gitCmd(tmp, "config", "user.name", "test");
+  fs.writeFileSync(path.join(tmp, "seed.txt"), "seed\n", "utf8");
+  gitCmd(tmp, "add", "-A");
+  const commit = gitCmd(tmp, "commit", "-q", "-m", "seed");
+  assert.equal(commit.status, 0, commit.stderr);
+  return tmp;
+}
+
+/** Unique sibling dir for a repo's worktrees — parallel tests never collide on a fixed path. */
+function worktreeDirFor(tmp) {
+  return path.join(os.tmpdir(), path.basename(tmp) + "-worktrees");
+}
+
+test("worktreeExists — a bare <id> branch (no task/ prefix) matches via branch ref", async () => {
+  const cli = await importCli();
+  const tmp = makeWorktreeRepo();
+  const wtRoot = worktreeDirFor(tmp);
+  // The worktree DIR is named differently from the id on purpose: this isolates the BRANCH match
+  // (a same-named dir would also match via path basename and mask a branch-matching regression).
+  const wtPath = path.join(wtRoot, "not-the-task-id");
+  try {
+    const add = gitCmd(tmp, "worktree", "add", "-q", wtPath, "-b", "gap-bare-id");
+    assert.equal(add.status, 0, add.stderr);
+    assert.equal(cli.worktreeExists(tmp, "gap-bare-id"), true, "a bare <id> branch must match without a task/ prefix");
+  } finally {
+    fs.rmSync(wtRoot, { recursive: true, force: true });
+    cleanup(tmp);
+  }
+});
+
+test("worktreeExists — a task/<id> branch still matches (regression: original behavior must not degrade)", async () => {
+  const cli = await importCli();
+  const tmp = makeWorktreeRepo();
+  const wtRoot = worktreeDirFor(tmp);
+  const wtPath = path.join(wtRoot, "gap-task-id");
+  try {
+    const add = gitCmd(tmp, "worktree", "add", "-q", wtPath, "-b", "task/gap-task-id");
+    assert.equal(add.status, 0, add.stderr);
+    assert.equal(cli.worktreeExists(tmp, "gap-task-id"), true, "the task/<id> branch form must keep matching");
+  } finally {
+    fs.rmSync(wtRoot, { recursive: true, force: true });
+    cleanup(tmp);
+  }
+});
+
+test("worktreeExists — a detached-HEAD worktree matches via path basename", async () => {
+  const cli = await importCli();
+  const tmp = makeWorktreeRepo();
+  const wtRoot = worktreeDirFor(tmp);
+  const wtPath = path.join(wtRoot, "gap-detached-id");
+  try {
+    const add = gitCmd(tmp, "worktree", "add", "-q", "--detach", wtPath, "HEAD");
+    assert.equal(add.status, 0, add.stderr);
+    assert.equal(cli.worktreeExists(tmp, "gap-detached-id"), true, "a detached-HEAD worktree must match by path basename");
+  } finally {
+    fs.rmSync(wtRoot, { recursive: true, force: true });
+    cleanup(tmp);
+  }
+});
+
+test("worktreeExists — unrelated id false, and an id that prefixes another id does not falsely match", async () => {
+  const cli = await importCli();
+  const tmp = makeWorktreeRepo();
+  const wtRoot = worktreeDirFor(tmp);
+  const wtPath = path.join(wtRoot, "gap-prefix-id");
+  try {
+    const add = gitCmd(tmp, "worktree", "add", "-q", wtPath, "-b", "task/gap-prefix-id");
+    assert.equal(add.status, 0, add.stderr);
+    assert.equal(cli.worktreeExists(tmp, "gap-nonexistent"), false, "no worktree for an unrelated id");
+    assert.equal(cli.worktreeExists(tmp, "gap-prefix"), false, "an id that is a prefix of a real id must not falsely match");
+  } finally {
+    fs.rmSync(wtRoot, { recursive: true, force: true });
+    cleanup(tmp);
+  }
+});
+
 test("WORKTREE-LEAK — isQuayWorktreePath excludes the main checkout and non-convention paths", async () => {
   const cli = await importCli();
   const root = "/home/yale/work/quay";
