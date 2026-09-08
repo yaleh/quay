@@ -2,7 +2,7 @@
 id: gap-dashboard-grid-autofit-columns-vs-card-count
 title: dashboard 用 auto-fit 由容器宽度派生列数、与卡片数无任何约束，870px 容器只开出 3 列而「工作进展」放了 4 张卡 ⇒
   第 4 张换行、右侧 2 格露出 divider 底色成大片深灰空洞
-status: ready
+status: done
 labels:
   - gap
   - webui
