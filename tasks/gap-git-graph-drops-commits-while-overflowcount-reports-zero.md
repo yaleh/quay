@@ -3,7 +3,7 @@ id: gap-git-graph-drops-commits-while-overflowcount-reports-zero
 title: git-history 一次性拉取 GIT_HISTORY_LIMIT=500 条、无分页入口；本仓库产出约 690 提交/天 ⇒ 页面仅覆盖约
   15-17 小时且无法查看更早历史——需要滚动加载更多提交，仿 /session/&lt;id&gt;/earlier 的增量端点，且必须建立在按 ref
   取数（而非全局 -n 上限）的模型之上才能不重现旧的静默丢弃
-status: todo
+status: ready
 labels:
   - gap
   - webui
