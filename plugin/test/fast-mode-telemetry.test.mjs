@@ -1990,6 +1990,73 @@ test("taskIdFromWorktree — grounds bare/detached candidates against the real t
   assert.equal(cli.taskIdFromWorktree(null, taskIds), null, "null worktree yields null");
 });
 
+test("taskIdFromBranchRef — task/<id> unconditionally; a bare ref only when grounded in the task store", async () => {
+  const cli = await importCli();
+  const taskIds = new Set(["gap-real", "gap-other"]);
+  assert.equal(cli.taskIdFromBranchRef("refs/heads/task/gap-real", taskIds), "gap-real", "full task/ ref resolves");
+  assert.equal(cli.taskIdFromBranchRef("task/gap-unknown", taskIds), "gap-unknown", "task/ convention accepted even if absent from the store");
+  assert.equal(cli.taskIdFromBranchRef("refs/heads/gap-real", taskIds), "gap-real", "bare <id> ref resolves when it IS a real task");
+  assert.equal(cli.taskIdFromBranchRef("gap-other", taskIds), "gap-other", "short bare ref form resolves too");
+  assert.equal(cli.taskIdFromBranchRef("develop", taskIds), null, "develop is NOT a task branch");
+  assert.equal(cli.taskIdFromBranchRef("refs/heads/author", taskIds), null, "author is NOT a task branch");
+  assert.equal(cli.taskIdFromBranchRef("refs/heads/master", taskIds), null, "master is NOT a task branch");
+  assert.equal(cli.taskIdFromBranchRef("refs/heads/gap-real", new Set()), null, "no task store ⇒ a bare ref is NOT fabricated into a task (hard rule 3b)");
+  assert.equal(cli.taskIdFromBranchRef(null, taskIds), null, "null ref yields null");
+});
+
+// 能取假 (hard rule ④): the branch pass must enumerate REF space, not worktree space. A task branch
+// whose worktree was already removed — the entire exited-not-landed population — still has an
+// attempt-1 first-commit reading. Enumerating open worktrees instead makes every assertion below
+// read null (measured on the real repo when this was worktree-scoped: 9 of 17 task branches lost
+// attempt-1, 1 of them had no merge fallback either), so this test FAILS under the narrowed form.
+test("RECONCILE — makeFirstKnownCommitMsByTask reads a task branch with NO open worktree (ref-space enumeration, bare + task/ shapes)", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  const commit = (args, env = {}) => spawnSync("git", ["-C", tmp, ...args], {
+    encoding: "utf8", env: { ...process.env, ...env },
+  });
+  try {
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    for (const id of ["gap-prefixed", "gap-bare"]) {
+      fs.writeFileSync(path.join(tmp, "tasks", `${id}.md`), `---\nid: ${id}\n---\n`, "utf8");
+    }
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    gitCmd(tmp, "add", "-A");
+    assert.equal(commit(["commit", "-m", "baseline"], { GIT_AUTHOR_DATE: "2026-08-01T00:00:00Z", GIT_COMMITTER_DATE: "2026-08-01T00:00:00Z" }).status, 0);
+
+    // Two UNMERGED task branches, each with its own commit, and NO worktree checked out on either.
+    // `gap-prefixed` follows the task/<id> convention; `gap-bare` is the unprefixed shape a worker's
+    // free `git worktree add` produces — both must be read.
+    const dates = { "task/gap-prefixed": "2026-08-02T12:00:00Z", "gap-bare": "2026-08-03T12:00:00Z" };
+    for (const [branch, date] of Object.entries(dates)) {
+      assert.equal(gitCmd(tmp, "checkout", "-q", "-b", branch).status, 0);
+      fs.appendFileSync(path.join(tmp, "tasks", "gap-prefixed.md"), `work on ${branch}\n`);
+      gitCmd(tmp, "add", "-A");
+      assert.equal(commit(["commit", "-m", `work on ${branch}`], { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date }).status, 0);
+      assert.equal(gitCmd(tmp, "checkout", "-q", "master").status, 0);
+    }
+    // A non-task branch that must NOT be mis-enumerated (no tasks/develop.md exists).
+    assert.equal(gitCmd(tmp, "checkout", "-q", "-b", "develop").status, 0);
+    assert.equal(gitCmd(tmp, "checkout", "-q", "master").status, 0);
+
+    // Only the main checkout is a worktree — neither task branch has one.
+    const wt = spawnSync("git", ["-C", tmp, "worktree", "list", "--porcelain"], { encoding: "utf8" }).stdout;
+    assert.equal(/^branch refs\/heads\/(task\/gap-prefixed|gap-bare)$/m.test(wt), false, "premise: no task worktree is open");
+
+    const batched = cli.makeFirstKnownCommitMsByTask(tmp);
+    assert.equal(batched("gap-prefixed"), Date.parse(dates["task/gap-prefixed"]),
+      "a task/<id> branch with no open worktree still yields its first work commit (⛔ not null)");
+    assert.equal(batched("gap-bare"), Date.parse(dates["gap-bare"]),
+      "a bare-<id> branch with no open worktree yields its first work commit (the prefix blindness this task closes)");
+    assert.equal(batched("develop"), null, "a non-task branch is never enumerated as a task");
+    assert.equal(batched("gap-never-existed"), null, "an unknown task stays null");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
 test("WORKTREE-LEAK — isQuayWorktreePath excludes the main checkout and non-convention paths", async () => {
   const cli = await importCli();
   const root = "/home/yale/work/quay";

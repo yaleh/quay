@@ -1,7 +1,7 @@
 {
   "files": 133,
-  "bytes": 3895611,
-  "fingerprint": "ddcf71f82f2dedc4b0ce0648961792529e304709363d19371780f2aa7163f981",
+  "bytes": 3898655,
+  "fingerprint": "246d51310f171ccf4015f4832598fccec91d7a55a5ce73118c4c4ef72d17ce4b",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
@@ -181,7 +181,7 @@
     },
     {
       "rel": "plugin/scripts/fast-mode-telemetry.ts",
-      "sha": "8ed01ca1ac5f621767c756620656efce6e68f172733b9d00e122e023881693f1"
+      "sha": "b04e9d3b99c198b2e018df40a8706137fc156cd01e175e72fba1c8e59ab817d8"
     },
     {
       "rel": "plugin/scripts/fork-baseline.ts",
