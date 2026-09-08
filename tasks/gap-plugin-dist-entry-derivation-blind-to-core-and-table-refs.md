@@ -73,13 +73,13 @@ B 上 AC92 用法验证 7/8 通过、1 失败——
 
 ## Acceptance Criteria
 
-- [ ] AC1 `tar tzf quay-<v>.tgz | grep -c 'plugin/scripts/dist/driver-runtime.js'` == 1
-- [ ] AC2 `tar tzf quay-<v>.tgz | grep -c 'plugin/scripts/dist/suite-execution-form-counter.js'` == 1
-- [ ] AC3 干净前缀装该 tgz 后，在一个**没有 plugin/ 目录**的项目里 `quay driver status --kind worker`
+- [x] AC1 `tar tzf quay-<v>.tgz | grep -c 'plugin/scripts/dist/driver-runtime.js'` == 1
+- [x] AC2 `tar tzf quay-<v>.tgz | grep -c 'plugin/scripts/dist/suite-execution-form-counter.js'` == 1
+- [x] AC3 干净前缀装该 tgz 后，在一个**没有 plugin/ 目录**的项目里 `quay driver status --kind worker`
       退出码 0 且输出不含 `kernel not found`（真跑，不是读配置）
-- [ ] AC4 同一环境下 `deliver-verify-usage.sh` 报 `0 failed`（当前为 1 failed）
-- [ ] AC5 新增的引用闭包闸存在**负控制**：人为移除一个 entry 后该闸 exit 非 0（把断言喂给一个已知为假的输入，证明它不是恒绿）
-- [ ] AC6 `CORE_REFERENCED` 不再是手维护字面列表（grep 该常量名为 0，或其值由扫描表达式产生）
+- [x] AC4 同一环境下 `deliver-verify-usage.sh` 报 `0 failed`（当前为 1 failed）
+- [x] AC5 新增的引用闭包闸存在**负控制**：人为移除一个 entry 后该闸 exit 非 0（把断言喂给一个已知为假的输入，证明它不是恒绿）
+- [x] AC6 `CORE_REFERENCED` 不再是手维护字面列表（grep 该常量名为 0，或其值由扫描表达式产生）
 
 ## Definition of Done
 
@@ -91,9 +91,21 @@ AC1–AC6 全绿，且**在一台非本机的主机上、一个非本仓库的�
 
 - packages/quay/scripts/build-plugin-dist.mjs
 - packages/quay/scripts/package.sh
+- packages/quay/src/cli/driver.ts
 - packages/quay/src/plugin-root.ts
 - packages/quay/test/build-plugin-dist.test.mjs
 - packages/quay/test/plugin-root.test.mjs
 - packages/quay/test/delivery-standalone-smoke-gate.test.mjs
 - plugin/scripts/deliver-verify-usage.sh
 - tasks/gap-plugin-dist-entry-derivation-blind-to-core-and-table-refs.md
+
+## Evidence
+
+- 本机 `boheidc`（commit `2afc38d91`）实跑 AC1–AC6 全绿：`package.sh` 现 build `quay-0.6.1.tgz`
+  （`dist-closure gate OK: 70 referenced dist bundles`），`tar tzf` 含
+  `plugin/scripts/dist/driver-runtime.js`（AC1）与 `plugin/scripts/dist/suite-execution-form-counter.js`（AC2）；
+  干净前缀装、无 plugin/ 项目里 `quay driver status --kind worker` exit 0 且无 `kernel not found`（AC3）；
+  `deliver-verify-usage.sh` 报 `8 mechanisms checked, 0 failed`（AC4）。
+- AC5 负控制与 AC6（`CORE_REFERENCED` 移除）由 `build-plugin-dist.test.mjs` 单测钉住。
+- ⛔ DoD 的「非本机主机（B/C）复跑 AC3/AC4」未在本机执行——留待 merge 后
+  `develop-deliver-tgz.sh` 于 B/C 跑（AC4 已在其内；AC3 的 `quay driver status` 尚需补进该脚本或人手动复核）。
