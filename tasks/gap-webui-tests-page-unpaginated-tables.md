@@ -2,7 +2,7 @@
 id: gap-webui-tests-page-unpaginated-tables
 title: /tests 两张表零分页共 114,161px（1267 行 + 571 行），而分页机制早已存在于 serve-render.ts 并被
   /board 接线 —— 修好一处不等于只有一处（硬规则 5b）
-status: todo
+status: ready
 labels:
   - gap
   - webui

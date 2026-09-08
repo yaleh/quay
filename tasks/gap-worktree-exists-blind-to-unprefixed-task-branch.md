@@ -41,12 +41,12 @@ extra:
 
 ## AC
 
-- [ ] `grep -c 'refs/heads/task/' plugin/scripts/fast-mode-telemetry.ts` 在改动后不再是 `worktreeExists` 的唯一判据（贴改动前后两次读数，⛔ 非转述）
-- [ ] 单测：为裸 `<id>` 分支的 worktree 断言 `worktreeExists(root, id) === true`（改动前该用例必须先红——贴红的输出，排除恒真）
-- [ ] 单测：为 `task/<id>` 分支的 worktree 断言仍为 `true`（回归，原行为不得退化）
-- [ ] 单测负控制：一个不存在 worktree 的 id 断言 `false`；一个 id 为另一 id 前缀的场景断言不误命中
-- [ ] `node --test plugin/test/fast-mode-telemetry.test.mjs` 全绿，贴 pass/fail 计数
-- [ ] 全仓 `refs/heads/task/` 剩余命中数与前 3 条实际内容贴进提交信息（硬规则 5b 产物）
+- [x] `grep -c 'refs/heads/task/' plugin/scripts/fast-mode-telemetry.ts` 在改动后不再是 `worktreeExists` 的唯一判据（贴改动前后两次读数，⛔ 非转述）
+- [x] 单测：为裸 `<id>` 分支的 worktree 断言 `worktreeExists(root, id) === true`（改动前该用例必须先红——贴红的输出，排除恒真）
+- [x] 单测：为 `task/<id>` 分支的 worktree 断言仍为 `true`（回归，原行为不得退化）
+- [x] 单测负控制：一个不存在 worktree 的 id 断言 `false`；一个 id 为另一 id 前缀的场景断言不误命中
+- [x] `node --test plugin/test/fast-mode-telemetry.test.mjs` 全绿，贴 pass/fail 计数
+- [x] 全仓 `refs/heads/task/` 剩余命中数与前 3 条实际内容贴进提交信息（硬规则 5b 产物）
 
 ## DoD
 
@@ -60,6 +60,7 @@ extra:
 - plugin/scripts/fast-mode-telemetry.ts
 - plugin/test/fast-mode-telemetry.test.mjs
 - tasks/gap-worktree-exists-blind-to-unprefixed-task-branch.md
+- docs/analysis/quay-init-closure-ratchet.baseline.json
 
 ## Verification
 
