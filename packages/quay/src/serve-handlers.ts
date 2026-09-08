@@ -17,7 +17,7 @@ import { handleGoalList, handleGoalDetail } from "./serve-goal.ts";
 import { handleDocList, handleDocDetail } from "./serve-doc.ts";
 import { handleLive, handleJournal } from "./serve-live.ts";
 import { handleBoard } from "./serve-board.ts";
-import { handleGitHistory } from "./serve-git.ts";
+import { handleGitHistory, handleGitHistoryJson } from "./serve-git.ts";
 import { handleSystem, handleManager } from "./serve-system.ts";
 import { handleTests, handleTestsFile } from "./serve-tests.ts";
 import { handleSessions, handleSession, handleSessionEarlier, handleSessionDownload, handleDriverLifecycle, handleNewSession, handleResumeSession, handleFanInLogView, handleFanInLogDownload } from "./serve-sessions.ts";
@@ -209,6 +209,14 @@ export async function handleAllRoutes(
   // workspace-observation path as /live + /journal (observation.ts shells out to git too).
   if (url.pathname === "/git-history") {
     await handleGitHistory(req, res, cfg);
+    return;
+  }
+
+  // gap-git-graph-drops-commits-while-overflowcount-reports-zero: the on-demand pagination endpoint
+  // the scroll loader calls. Distinct path shape from /git-history (the `.json` suffix), routed AFTER
+  // the HTML page matcher so the two never shadow each other.
+  if (url.pathname === "/git-history.json") {
+    await handleGitHistoryJson(req, res, cfg, url);
     return;
   }
 

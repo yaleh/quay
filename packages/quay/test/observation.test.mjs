@@ -168,6 +168,58 @@ test("gap-git-graph-trunk-ref-resolves-to-head-not-mainline (AC4): author==devel
   }
 });
 
+test("readGitHistory per-ref keeps a long-lived branch's exclusive commits (no global -n squeeze)", () => {
+  // gap-git-graph-drops-commits-while-overflowcount-reports-zero: the old ONE `git log <allrefs>
+  // -n <limit>` pass capped the TOTAL across refs, so a long-lived live branch's exclusive commits
+  // got squeezed out by newer mainline commits. The per-ref fetch (`git log <ref> --not <mainline>`)
+  // keeps every exclusive commit regardless of the global limit.
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "obs-gh-perref-"));
+  try {
+    execFileSync("git", ["init", "-q", "-b", "develop"], { cwd: ws });
+    fs.writeFileSync(path.join(ws, "README.md"), "fixture\n");
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], { cwd: ws });
+    const nowSec = Math.floor(Date.now() / 1000);
+    const env0 = {
+      ...process.env,
+      GIT_AUTHOR_DATE: new Date((nowSec - 3 * 86400) * 1000).toISOString(),
+      GIT_COMMITTER_DATE: new Date((nowSec - 3 * 86400) * 1000).toISOString(),
+    };
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "base"], { cwd: ws, env: env0 });
+    execFileSync("git", ["checkout", "-q", "-b", "task/long"], { cwd: ws });
+    for (let i = 1; i <= 20; i++) commitAt(ws, `branch ${i}`, nowSec - 3 * 86400 + i, "branch.txt");
+    execFileSync("git", ["checkout", "-q", "develop"], { cwd: ws });
+    commitAt(ws, "develop newest", nowSec - 60, "main.txt");
+
+    const hist = readGitHistory(ws, { limit: 5 });
+    assert.equal(hist.status, "ok");
+    const branchCommits = hist.commits.filter((c) => c.ref === "task/long");
+    assert.equal(branchCommits.length, 20, "per-ref keeps all 20 exclusive commits despite limit=5");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("readGitHistory before=<t> returns a strictly-older window (pagination cursor)", () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "obs-gh-before-"));
+  try {
+    execFileSync("git", ["init", "-q", "-b", "develop"], { cwd: ws });
+    fs.writeFileSync(path.join(ws, "README.md"), "fixture\n");
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], { cwd: ws });
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "base"], { cwd: ws });
+    const nowSec = Math.floor(Date.now() / 1000);
+    for (let i = 1; i <= 8; i++) commitAt(ws, `c${i}`, nowSec - (8 - i) * 60);
+
+    const base = readGitHistory(ws, { limit: 3 });
+    const baseOldest = Math.min(...base.commits.map((c) => c.t));
+    const older = readGitHistory(ws, { limit: 3, before: baseOldest });
+    assert.equal(older.status, "ok");
+    const olderOldest = Math.min(...older.commits.map((c) => c.t));
+    assert.ok(olderOldest < baseOldest, `before window is older (${olderOldest} < ${baseOldest})`);
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 test("AC127: parseVerificationRound extracts the bucket-execution fields (buckets/bucket_files/bucket_duration_ms) and tolerates their absence on legacy rows (never a fabricated \"full\")", () => {
   // gap-ac127-suite-bucket-web-tests-page-visible — AC126 landed these three fields on bucket-mode
   // rounds (full-suite-runner.ts:4027-4029); the /tests reader must surface `buckets` and tolerate

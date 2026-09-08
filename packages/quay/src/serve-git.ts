@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { readGitHistory, type GitHistoryCommit, type GitHistoryResult, GIT_HISTORY_MAINLINE_REFS } from "./observation.ts";
+import { readGitHistory, type GitHistoryCommit, type GitHistoryResult, GIT_HISTORY_MAINLINE_REFS, GIT_HISTORY_LIMIT } from "./observation.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2 } from "./serve-render.ts";
 
 // gap-git-graph-omits-inflight-branches-and-summary-table-disjoint: groupCommitsByBranch (the old
@@ -637,6 +637,37 @@ export function computeGitGraphWidth(layout: GitGraphLayout, textX: number): num
   return Math.ceil(textX + longest + pad);
 }
 
+/** gap-git-graph-drops-commits-while-overflowcount-reports-zero AC5: the coverage duration is the
+ *  actual time span of the MAINLINE window (branches[0].commits: newest − oldest commit time), never
+ *  a hardcoded constant. It is mainline-scoped BY DESIGN: the pagination pages MAINLINE commits only
+ *  (lateral live branches are fetched in full on every page, so their span — up to the 7-day active
+ *  window — is fixed and must not define the "how far back can I see" number). As the mainline window
+ *  grows via scroll-loading, this span only ever grows. Pure and directly importable (no I/O). */
+export function coverageSpanSeconds(layout: GitGraphLayout): number | null {
+  const mainline = layout.branches[0];
+  if (!mainline || mainline.commits.length === 0) return null;
+  let min: number | null = null;
+  let max: number | null = null;
+  for (const c of mainline.commits) {
+    if (min === null || c.t < min) min = c.t;
+    if (max === null || c.t > max) max = c.t;
+  }
+  if (min === null || max === null) return null;
+  return max - min;
+}
+
+/** Format a coverage span (seconds) as "N 小时" / "N 天" — the guide prose's 「当前已加载窗口覆盖
+ *  N 小时/天」. Mirrored VERBATIM by the client loader (gitGraphClientScript's formatSpan) — keep the
+ *  two in lock-step (same drift discipline as the lanePath / visibleRows mirrors). */
+export function formatCoverageSpan(sec: number): string {
+  if (sec >= 86400) {
+    const d = sec / 86400;
+    return `${d >= 10 ? Math.round(d) : Math.round(d * 10) / 10} 天`;
+  }
+  const h = sec / 3600;
+  return `${h >= 10 ? Math.round(h) : Math.round(h * 10) / 10} 小时`;
+}
+
 /** AC102②: the client renderer references lane colours as `var(--color-lane-N)` TOKENS, never hex.
  *  The palette's hex values stay HERE (AC1/AC4 unit-test their WCAG contrast), and are emitted as a
  *  scoped token sheet by gitGraphLaneTokenCss() — one source of truth, no second copy to drift. */
@@ -969,6 +1000,94 @@ export function gitGraphClientScript(): string {
     });
   }
 
+  // gap-git-graph-drops-commits-while-overflowcount-reports-zero: scroll loader. The sentinel sits
+  // BELOW the SVG; when it scrolls into view (rootMargin 600px) fetch the OLDER page and PREPEND its
+  // mainline commits to the current mainline lane, then re-render. Live branches come back in FULL on
+  // every page (readGitHistory fetches them uncapped via --not <mainline>), so only the mainline lane
+  // carries genuinely-new commits — prepending is lossless and needs no client-side re-layout (rows
+  // are reassigned from scratch by visibleRows, and lateral lanes' fork/merge hashes still resolve
+  // against the grown trunkRow map). The older page's layout was still computed SERVER-side by
+  // layoutGitGraph; the client only grafts its mainline lane, which is all-mainline and fork/merge-free.
+  var sentinel = document.getElementById("git-graph-sentinel");
+  var coverageEl = document.getElementById("git-graph-coverage");
+  var loadingOlder = false;
+  var olderDone = false;
+
+  function mainlineWatermark() {
+    var min = null;
+    mainline.commits.forEach(function (c) { if (min === null || c.t < min) { min = c.t; } });
+    return min;
+  }
+  function coverageSpan() {
+    // MAINLINE-scoped (mirrors coverageSpanSeconds): the pagination pages mainline commits only, so
+    // the "how far back" number tracks mainline.commits — not the always-fully-loaded lateral lanes.
+    var min = null, max = null;
+    mainline.commits.forEach(function (c) {
+      if (min === null || c.t < min) { min = c.t; }
+      if (max === null || c.t > max) { max = c.t; }
+    });
+    if (min === null || max === null) { return null; }
+    return max - min;
+  }
+  function formatSpan(sec) {
+    if (sec >= 86400) { var d = sec / 86400; return (d >= 10 ? Math.round(d) : Math.round(d * 10) / 10) + " 天"; }
+    var h = sec / 3600;
+    return (h >= 10 ? Math.round(h) : Math.round(h * 10) / 10) + " 小时";
+  }
+  function updateCoverage() {
+    if (!coverageEl) { return; }
+    var s = coverageSpan();
+    if (s === null) { return; }
+    coverageEl.textContent = formatSpan(s);
+  }
+  function finishOlder() {
+    olderDone = true;
+    if (sentinel) { sentinel.textContent = "已加载到仓库最早提交"; }
+  }
+  function loadOlder() {
+    if (loadingOlder || olderDone) { return; }
+    var wm = mainlineWatermark();
+    if (wm === null) { finishOlder(); return; }
+    loadingOlder = true;
+    fetch("/git-history.json?before=" + wm + "&limit=500")
+      .then(function (res) {
+        if (!res.ok) { finishOlder(); return; }
+        return res.json().then(function (next) {
+          if (!next || next.status !== "ok" || !next.branches || !next.branches.length) { finishOlder(); return; }
+          var older = (next.branches[0].commits) || [];
+          if (older.length === 0) { finishOlder(); return; }
+          var have = {};
+          mainline.commits.forEach(function (c) { have[c.hash] = true; });
+          var added = 0;
+          older.forEach(function (c) { if (!have[c.hash]) { mainline.commits.unshift(c); added++; } });
+          if (added === 0) { finishOlder(); return; }
+          // Keep the lane's commit array canonical (oldest→newest) like layoutGitGraph's mainline.sort.
+          mainline.commits.sort(function (a, b) { return a.t - b.t || (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0); });
+          data.commitCount += added;
+          updateCoverage();
+          render();
+          // The prepended rows are exactly "added" mainline rows ABOVE the current viewport, so the
+          // same content (the scroll anchor commit) is restored by scrolling down by added × rowH —
+          // the scroll-position preservation the DoD requires, without a hash→pixel re-walk.
+          window.scrollBy(0, added * rowH);
+          // If the grown graph still leaves the sentinel in view, chain the next page.
+          if (sentinel && sentinel.getBoundingClientRect().top < window.innerHeight + 600) { loadOlder(); }
+        });
+      })
+      .catch(function () { finishOlder(); })
+      .finally(function () { loadingOlder = false; });
+  }
+  if (sentinel) {
+    if (typeof IntersectionObserver !== "undefined") {
+      var io = new IntersectionObserver(function (entries) {
+        for (var i = 0; i < entries.length; i++) { if (entries[i].isIntersecting) { loadOlder(); } }
+      }, { rootMargin: "600px 0px" });
+      io.observe(sentinel);
+    } else {
+      sentinel.addEventListener("click", loadOlder);
+    }
+  }
+
   render();
 })();`;
 }
@@ -1010,9 +1129,19 @@ export function renderGitHistoryPage(history: GitHistoryResult): string {
   // the mainline lane + summary table name (develop/master), never a hardcoded "develop" that could
   // disagree with an author-named trunk. Falls back to "develop" only when there is no graph.
   const trunkRef = layout ? mainlineLane(layout).ref || "develop" : "develop";
+  // gap-git-graph-drops-commits-while-overflowcount-reports-zero AC5: the guide prose's 「覆盖时长」
+  // is computed from the LOADED commits' actual time span (never a hardcoded constant); the client
+  // loader re-computes it after every scroll-load and writes the fresh number into #git-graph-coverage.
+  const coverageSpan = layout ? coverageSpanSeconds(layout) : null;
+  const coverageText = coverageSpan !== null ? formatCoverageSpan(coverageSpan) : "—";
 
   const graph = layout
     ? html`<div id="git-graph" aria-label="Git 纵向时间轴" style="overflow-x:auto">${gitGraphLegendHtml()}</div>`
+    : "";
+  // gap-git-graph-drops-commits-while-overflowcount-reports-zero: the scroll sentinel sits BELOW the
+  // SVG; when it scrolls into view the client fetches the older page (/git-history.json?before=…).
+  const sentinel = layout
+    ? html`<div id="git-graph-sentinel" class="meta" style="padding:0.6rem 0;color:var(--color-neutral-700);font-size:0.75rem">加载更早提交…</div>`
     : "";
   // gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead: 移动端「适应宽度」开关 — the
   // client reads this checkbox and, when checked, hides commit subjects (only chip + commit count),
@@ -1068,10 +1197,11 @@ export function renderGitHistoryPage(history: GitHistoryResult): string {
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — vertical commit timeline (third-party library, client-rendered)">${modernistStyles()}${pageStyles()}<title>Git history — vertical commit timeline</title></head>
     <body>${renderMobileChrome("git", "git history")}${renderSiteNav("git")}<main id="main">
       <h1>Git History — 提交纵向时间轴</h1>
-      <p class="meta"><strong>纵轴 = 提交落地顺序（git commit time），不是工时/持续时间。</strong> ${escapeHtml(trunkRef)} 竖直主干 + task 分支从主干分出（fork）/合入（merge）的连线；task 分支默认折叠（只显提交数与时间跨度，点击展开逐条）。菱形 = 合并提交（fan-in 落地事件）。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并（跨所有本地分支）。</p>
+      <p class="meta"><strong>纵轴 = 提交落地顺序（git commit time），不是工时/持续时间。</strong> ${escapeHtml(trunkRef)} 竖直主干 + task 分支从主干分出（fork）/合入（merge）的连线；task 分支默认折叠（只显提交数与时间跨度，点击展开逐条）。菱形 = 合并提交（fan-in 落地事件）。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并（跨所有本地分支）；已加载窗口覆盖 <span id="git-graph-coverage">${escapeHtml(coverageText)}</span>。滚动到图表底部自动加载更早的提交。</p>
       ${statusNote}
       ${fitWidthToggle}
       ${graph}
+      ${sentinel}
       ${laneTokenStyles}
       ${dataScript}
       ${libScript}
@@ -1093,4 +1223,73 @@ export async function handleGitHistory(
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(renderGitHistoryPage(history));
+}
+
+function writeJson(res: ServerResponse, status: number, obj: unknown): void {
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify(obj));
+}
+
+/** The JSON payload /git-history.json returns — a COMPLETE GitGraphLayout (the client re-renders it
+ *  as a whole, never an appended fragment) plus the window's oldest/newest commit times (AC3 reads
+ *  `oldestT`; the client's scroll restoration is driven by the prepend growth, not these fields).
+ *  Pure and directly importable (no I/O) — AC1/AC3 test it on a pure GitHistoryResult. */
+export function gitHistoryJson(history: GitHistoryResult): {
+  status: GitHistoryResult["status"];
+  reason: string | null;
+  commitCount: number;
+  oldestT: number | null;
+  newestT: number | null;
+  branches: GitGraphBranchLane[];
+  mergeCount: number;
+  overflowCount: number;
+  textWidth: number;
+} {
+  if (history.status !== "ok") {
+    return { status: history.status, reason: history.reason, commitCount: 0, oldestT: null, newestT: null, branches: [], mergeCount: 0, overflowCount: 0, textWidth: 0 };
+  }
+  const layout = layoutGitGraph(history);
+  if (!layout) {
+    return { status: "empty", reason: history.reason ?? "git 仓库无提交记录", commitCount: 0, oldestT: null, newestT: null, branches: [], mergeCount: 0, overflowCount: 0, textWidth: 0 };
+  }
+  let oldestT: number | null = null;
+  let newestT: number | null = null;
+  for (const c of history.commits) {
+    if (oldestT === null || c.t < oldestT) oldestT = c.t;
+    if (newestT === null || c.t > newestT) newestT = c.t;
+  }
+  return {
+    status: "ok",
+    reason: null,
+    commitCount: layout.commitCount,
+    oldestT,
+    newestT,
+    branches: layout.branches,
+    mergeCount: layout.mergeCount,
+    overflowCount: layout.overflowCount,
+    textWidth: computeGitGraphWidth(layout, GIT_GRAPH_TEXT_X),
+  };
+}
+
+/** GET /git-history.json?before=<unixSeconds>&limit=<n> — the on-demand pagination endpoint the
+ *  client's scroll loader calls. `before` = the cursor (returns mainline commits STRICTLY older than
+ *  it); `limit` = the mainline page size (clamped to a sane ceiling). Reuses readGitHistory's per-ref
+ *  fetch + layoutGitGraph (the SAME layout the HTML page embeds), never a second build path. */
+export async function handleGitHistoryJson(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cfg: { workspaceRoot: string },
+  url: URL,
+): Promise<void> {
+  const limitRaw = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, GIT_HISTORY_LIMIT * 10) : GIT_HISTORY_LIMIT;
+  const beforeRaw = Number.parseInt(url.searchParams.get("before") ?? "", 10);
+  const before = Number.isFinite(beforeRaw) && beforeRaw > 0 ? beforeRaw : null;
+  let history: GitHistoryResult;
+  try {
+    history = readGitHistory(cfg.workspaceRoot, { limit, before });
+  } catch (err) {
+    history = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, commits: [], head: null, heads: {} };
+  }
+  writeJson(res, 200, gitHistoryJson(history));
 }

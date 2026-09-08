@@ -2327,7 +2327,10 @@ export async function readBoardExecution(root: string, { nowMs = Date.now() } = 
 // lived <1h, done before their first commit landed), and real work hours live in telemetry with a
 // ~6% join rate to git. The chart shows only what git can prove: when commits landed and where.
 
-/** Max commits the /git-history chart reads (bounded SVG size, ~31 lanes in this repo's last 500). */
+/** Max MAINLINE commits the /git-history chart reads per page (gap-git-graph-drops-commits-while-
+ *  overflowcount-reports-zero: the global cap is now a per-page MAINLINE cap — live branches are
+ *  fetched in full via `git log <ref> --not <mainline>`, never squeezed by this limit). The client
+ *  pages back with `before=<cursor>` to grow the window beyond the initial 500. */
 export const GIT_HISTORY_LIMIT = 500;
 
 /**
@@ -2378,26 +2381,29 @@ export interface GitHistoryResult {
  * (e.g. a fan-in source that was never deleted) kept polluting the lane count long after it was dead.
  * Instead: enumerate branch tips + their tip commit time, keep the branches with a commit in the
  * active window (plus the mainline refs develop/master unconditionally — never dropped for
- * staleness), then ONE `git log <active…> --source` pass, each line `%H %ct %S %P %s`
- * (hash / commit-time / source-ref / parents / subject). A stale branch's commits are already
- * reachable from the mainline, so they still appear (relabeled to the mainline) — not dropped.
+ * staleness). A stale branch's commits are already reachable from the mainline, so they still appear
+ * under the mainline lane (relabeled) — not dropped.
  *
- * gap-git-history-branch-summary-wrong-numbers: `--source` labels a commit with whichever ref the
- * traversal first REACHED it from, and the walk starts at the newest tip — so a task branch whose
- * tip is newer than develop gets every shared ancestor (the whole reachable history) attributed to
- * it (observed: a 6-commit branch showed 481 commits / 111 merges / a first-commit at repo birth).
- * A commit reachable from ANY mainline ref therefore belongs to the mainline, NOT to a task branch;
- * after the log pass every such commit is re-attributed to the primary mainline ref, so each branch
- * lane carries exactly its own (exclusive) commits — `git log develop..<branch>`. A non-git
- * workspace degrades to empty; a git failure degrades to error; never throws.
+ * gap-git-graph-drops-commits-while-overflowcount-reports-zero: the fetch is PER-REF, not one global
+ * `git log <allrefs> -n <limit> --source` pass. The old single pass capped the TOTAL across every
+ * ref at `-n <limit>`, so a long-lived live branch's exclusive commits got squeezed out of the
+ * window by newer mainline commits (and `overflowCount` had no way to see it — it counted lane-slot
+ * overflow, not dropped commits). The new model:
+ *   - mainline batch: `git log <mainlineRefs> -n <limit>` (the page the user sees), and
+ *     `--before=<cursor>` when `before` is set (page BACK — the /git-history.json pagination cursor);
+ *   - each live non-mainline ref: `git log <ref> --not <mainlineRefs>` (its EXCLUSIVE commits, full,
+ *     never capped by the global limit) — a long-lived branch can no longer be starved out.
+ * Because each batch is fetched from a known ref, there is no `--source` attribution ambiguity and
+ * no post-hoc `rev-list` re-attribution (a commit reachable from develop is simply never fetched in
+ * the branch batch — `--not <mainlineRefs>` excludes it). Duplicates across sibling live branches
+ * are de-duplicated by hash (first ref in mainline-first order wins). A non-git workspace degrades
+ * to empty; a git failure degrades to error; never throws.
  */
 // gap-webui-dashboard-regressed-to-12-60s-past-two-done-tasks: readGitHistory shells out to git
-// several times per call (for-each-ref → log -n <limit> → rev-list <mainlineRefs> → rev-parse HEAD),
-// and the `git rev-list <mainlineRefs>` enumerates the FULL mainline history (no `-n` cap). The
-// dashboard's commitsCard needs only the 3 most recent subjects — yet it paid for the full walk on
-// every render. A 30s TTL (keyed by root + limit; the same display-snapshot freshness the other web
-// carriers use) bounds this to one walk per 30s window. nowMs only shifts the 24h active-branch
-// window, so a ≤30s drift is invisible on the display surface.
+// several times per call (for-each-ref → one log per ref → rev-parse HEAD). A 30s TTL (keyed by
+// root + limit + before; the same display-snapshot freshness the other web carriers use) bounds this
+// to one batch of walks per 30s window. nowMs only shifts the 7-day active-branch window, so a
+// ≤30s drift is invisible on the display surface.
 export const GIT_HISTORY_CACHE_TTL_MS = 30_000;
 const gitHistoryCache = new Map<string, { at: number; result: GitHistoryResult }>();
 
@@ -2406,24 +2412,23 @@ export function clearGitHistoryCache(): void {
   gitHistoryCache.clear();
 }
 
-export function readGitHistory(root: string, { limit = GIT_HISTORY_LIMIT, nowMs = Date.now() }: { limit?: number; nowMs?: number } = {}): GitHistoryResult {
-  const key = `${root}\n${limit}`;
+export function readGitHistory(root: string, { limit = GIT_HISTORY_LIMIT, before = null, nowMs = Date.now() }: { limit?: number; before?: number | null; nowMs?: number } = {}): GitHistoryResult {
+  const key = `${root}\n${limit}\n${before ?? ""}`;
   const hit = gitHistoryCache.get(key);
   if (hit && Date.now() - hit.at < GIT_HISTORY_CACHE_TTL_MS) return hit.result;
-  const result = readGitHistoryUncached(root, { limit, nowMs });
+  const result = readGitHistoryUncached(root, { limit, before, nowMs });
   gitHistoryCache.set(key, { at: Date.now(), result });
   return result;
 }
 
-function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, nowMs = Date.now() }: { limit?: number; nowMs?: number } = {}): GitHistoryResult {
+function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, before = null, nowMs = Date.now() }: { limit?: number; before?: number | null; nowMs?: number } = {}): GitHistoryResult {
   try {
     const sinceSec = Math.floor(nowMs / 1000) - GIT_HISTORY_ACTIVE_WINDOW_SEC;
     // Enumerate local branches with their tip hash + tip commit time. `%09` emits a TAB, which git
     // forbids in ref names (a control char), so it is a safe field separator. (`%x1f` is a
     // `--pretty`-only escape — `for-each-ref --format` emits it literally.) The tip hash is the
-    // branch TOPOLOGY (which commit the ref points at) — the vertical graph needs it, because the
-    // `--source` attribution in the log below is only "which ref the traversal reached the commit
-    // through", NOT "which branch this commit belongs to".
+    // branch TOPOLOGY (which commit the ref points at) — the vertical graph needs it to tell a live
+    // lane from a reconstructed one, and to know which ref each branch batch is fetched for.
     const refsOut = execFileSync(
       "git",
       ["-C", root, "for-each-ref", "refs/heads", "--format=%(refname:short)%09%(objectname)%09%(committerdate:unix)"],
@@ -2446,12 +2451,9 @@ function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, nowMs
       }
     }
     // gap-git-graph-trunk-ref-resolves-to-head-not-mainline: for-each-ref emits refs in refname
-    // (alphabetical) order, so a non-mainline ref like `author` sorts before `develop` — and
-    // `git log author develop --source` then attributes every shared commit to `author` (the first
-    // ref the traversal reaches it from). Put the mainline refs FIRST in the `git log --source`
-    // invocation so a commit reachable from multiple refs is attributed to the mainline directly,
-    // instead of relying solely on the post-hoc re-attribution below to undo an `author` label.
-    // (Stable within each group: develop before master, then the rest alphabetically.)
+    // (alphabetical) order, so a non-mainline ref like `author` sorts before `develop`. Mainline
+    // refs are kept FIRST so the mainline batch is fetched from them directly and the primary
+    // mainline ref (develop > master) is `mainlineRefs[0]`. (Stable within each group.)
     activeRefs.sort((a, b) => {
       const am = GIT_HISTORY_MAINLINE_REFS.has(a) ? 0 : 1;
       const bm = GIT_HISTORY_MAINLINE_REFS.has(b) ? 0 : 1;
@@ -2467,44 +2469,59 @@ function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, nowMs
         heads: {},
       };
     }
-    const out = execFileSync(
-      "git",
-      ["-C", root, "log", ...activeRefs, "--source", "--date=unix", `-n ${limit}`, "--pretty=format:%H%x1f%ct%x1f%S%x1f%P%x1f%s"],
-      { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] },
-    );
-    const commits: GitHistoryCommit[] = [];
-    for (const line of out.split(/\r?\n/)) {
-      if (!line) continue;
-      const [hash, t, ref, parents, ...subjectParts] = line.split("\x1f");
-      if (!hash || !t || !ref) continue;
-      const parentHashes = (parents ?? "").split(/\s+/).filter(Boolean);
-      commits.push({
-        hash,
-        t: Number(t),
-        ref,
-        parents: parentHashes.length,
-        parentHashes,
-        subject: subjectParts.join("\x1f"),
-      });
-    }
-    // gap-git-history-branch-summary-wrong-numbers: `--source` labels a shared ancestor with the
-    // newest tip's ref, so a task branch whose tip is newer than develop absorbs the whole reachable
-    // history. A commit reachable from ANY mainline ref is the mainline's — re-attribute it to the
-    // primary mainline ref (develop sorts before master in for-each-ref, so it wins when both exist)
-    // so each branch lane carries exactly its own commits (`git log develop..<branch>`). Branch
-    // EXCLUSIVE commits are reachable from only that branch, so `--source` already labels them right.
+
     const mainlineRefs = activeRefs.filter((r) => GIT_HISTORY_MAINLINE_REFS.has(r));
-    if (mainlineRefs.length > 0 && commits.length > 0) {
-      const mainlineHashes = new Set(
-        execFileSync("git", ["-C", root, "rev-list", ...mainlineRefs], { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] })
-          .split(/\s+/)
-          .filter(Boolean),
-      );
-      const primary = mainlineRefs[0];
-      for (const c of commits) {
-        if (mainlineHashes.has(c.hash) && !GIT_HISTORY_MAINLINE_REFS.has(c.ref)) c.ref = primary;
+    const liveRefs = activeRefs.filter((r) => !GIT_HISTORY_MAINLINE_REFS.has(r));
+    const primary = mainlineRefs[0] ?? null;
+
+    const seen = new Set<string>();
+    const commits: GitHistoryCommit[] = [];
+    // Parse one `git log` pass into commits, attributing every line to `ref` (the batch's ref — no
+    // `--source`, so there is nothing to re-attribute), and de-duplicating by hash across batches.
+    const pushCommits = (lines: string, ref: string) => {
+      for (const line of lines.split(/\r?\n/)) {
+        if (!line) continue;
+        const [hash, t, parents, ...subjectParts] = line.split("\x1f");
+        if (!hash || !t) continue;
+        if (seen.has(hash)) continue;
+        seen.add(hash);
+        const parentHashes = (parents ?? "").split(/\s+/).filter(Boolean);
+        commits.push({
+          hash,
+          t: Number(t),
+          ref,
+          parents: parentHashes.length,
+          parentHashes,
+          subject: subjectParts.join("\x1f"),
+        });
       }
+    };
+
+    // Mainline batch: the newest `limit` mainline commits, or (when `before` is set) the `limit`
+    // commits strictly older than the pagination cursor. `--before` is commit-time STRICTLY-older,
+    // so `before=<oldest timestamp in the current window>` never re-returns that same boundary commit.
+    if (mainlineRefs.length > 0 && primary !== null) {
+      const args = ["-C", root, "log", ...mainlineRefs, "--date=unix", `-n ${limit}`];
+      if (before !== null && Number.isFinite(before)) args.push(`--before=${before}`);
+      args.push("--pretty=format:%H%x1f%ct%x1f%P%x1f%s");
+      const out = execFileSync("git", args, { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] });
+      pushCommits(out, primary);
     }
+
+    // Live-branch batches: each live non-mainline ref's EXCLUSIVE commits, full and uncapped
+    // (`--not <mainlineRefs>` excludes every mainline-reachable commit, so the lane carries exactly
+    // its own history). A long-lived branch is never starved out of the window by newer mainline
+    // commits — this is what AC2's negative control proves the old global `-n <limit>` got wrong.
+    for (const r of liveRefs) {
+      const notArgs = mainlineRefs.length > 0 ? ["--not", ...mainlineRefs] : [];
+      const out = execFileSync(
+        "git",
+        ["-C", root, "log", r, ...notArgs, "--date=unix", "--pretty=format:%H%x1f%ct%x1f%P%x1f%s"],
+        { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] },
+      );
+      pushCommits(out, r);
+    }
+
     if (commits.length === 0) {
       return { status: "empty", reason: "git 仓库无提交记录", commits: [], head: null, heads: {} };
     }
