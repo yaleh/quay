@@ -29,9 +29,9 @@ goal_ac: AC-196
 
 ## Acceptance Criteria
 
-- [ ] 原语存在且词表四态齐备：`test -f packages/quay/src/store-commit.ts && grep -q 'not-in-git' packages/quay/src/store-commit.ts && grep -q 'unchanged' packages/quay/src/store-commit.ts`
-- [ ] 旧 boolean 提交函数 = 0：`test "$(grep -rl 'function commitGoalFileAfterWrite\|function commitMetaFileAfterWrite' packages/quay/src | wc -l)" -eq 0`
-- [ ] goal-store/meta-store 已改调 commitStoreWrite：`grep -q commitStoreWrite packages/quay/src/goal-store.ts && grep -q commitStoreWrite packages/quay/src/meta-store.ts`
+- [x] 原语存在且词表四态齐备：`test -f packages/quay/src/store-commit.ts && grep -q 'not-in-git' packages/quay/src/store-commit.ts && grep -q 'unchanged' packages/quay/src/store-commit.ts`
+- [x] 旧 boolean 提交函数 = 0：`test "$(grep -rl 'function commitGoalFileAfterWrite\|function commitMetaFileAfterWrite' packages/quay/src | wc -l)" -eq 0`
+- [x] goal-store/meta-store 已改调 commitStoreWrite：`grep -q commitStoreWrite packages/quay/src/goal-store.ts && grep -q commitStoreWrite packages/quay/src/meta-store.ts`
 
 ## Definition of Done
 
