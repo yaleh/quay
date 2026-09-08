@@ -2,7 +2,7 @@
 id: gap-git-graph-trunk-ref-resolves-to-head-not-mainline
 title: git-history 主干泳道名取自 HEAD 分支（恒为 author）而非 mainline，且同提交多 ref 时 --source
   按字母序把共享提交全归给 author ⇒ develop 在图上零存在感，而汇总表与导语都说 develop，同页三处口径矛盾
-status: todo
+status: ready
 labels:
   - gap
   - webui
