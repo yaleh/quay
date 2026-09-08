@@ -1,7 +1,7 @@
 ---
 id: AC-195
 title: 单一提交原语：五个 store 文件中自己实现 git commit 的 = 0（全部委托 store-commit.ts）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-008
 criterion: test "$(grep -l '"commit",' packages/quay/src/goal-store.ts
