@@ -8,7 +8,7 @@
 // Run (scoped): node --test packages/quay/test/gap-git-graph-trunk-ref-resolves-to-head-not-mainline.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveTrunkRef, layoutGitGraph } from "../src/serve-git.ts";
+import { resolveTrunkRef, layoutGitGraph, mainlineLane } from "../src/serve-git.ts";
 
 /** A commit fixture (shape matches observation.GitHistoryCommit). */
 function c(hash, t, ref, parentHashes, subject) {
@@ -60,5 +60,5 @@ test("resolveTrunkRef is wired into layoutGitGraph (not a dead function)", () =>
   // HEAD is on `author`, which points at the same commit as `develop` — the exact production shape.
   const commits = [c(X, t0, "develop", [], "init")];
   const layout = layoutGitGraph(hist(commits, X, { author: X, develop: X }));
-  assert.equal(layout.trunk.ref, "develop", "the trunk lane is named develop, not author");
+  assert.equal(mainlineLane(layout).ref, "develop", "the mainline lane is named develop, not author");
 });
