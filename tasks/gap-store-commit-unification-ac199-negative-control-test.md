@@ -1,7 +1,7 @@
 ---
 id: gap-store-commit-unification-ac199-negative-control-test
 title: AC-199 双向负控制单测存在、带 @test-group 标注（进默认 suite）、且跑绿（SPEC 阶段 1 切片）
-status: ready
+status: done
 labels:
   - gap
 parent: "null"
