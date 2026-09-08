@@ -4,10 +4,12 @@ title: quay-init 收缩至 SPEC §6 闭集本体（AC168）——退役扩展文
 status: todo
 labels:
   - gap
+  - delivery-critical
 parent: null
 children: []
 extra:
   schema: execution
+  deliveryCriticalSource: adhoc
 depends_on:
   - gap-plugin-root-resolution-remaining-callsites
 goal_ac: AC-168
@@ -65,3 +67,5 @@ T3 实测结论（SPEC §9，已完成）必须体现在新行为里：**setting
 - plugin/test/quay-init-tmux-detection.test.mjs
 - CLAUDE.md
 - tasks/gap-quay-init-closure-shrink-body.md
+
+**优先级（人 2026-09-08 裁定）**：「优先保障 AC-168 落地」。本任务就是 AC-168 的收缩本体——GOAL-003 的业务目的（插件更新即生效、配置不参与升级、下游不再背 130 个复制文件）几乎全部由它承载。打 `delivery-critical`（`extra.deliveryCriticalSource: adhoc`，DIR-130 授权）。依赖 `gap-plugin-root-resolution-remaining-callsites` 先落地。
