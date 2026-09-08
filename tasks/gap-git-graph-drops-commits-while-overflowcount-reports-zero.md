@@ -2,7 +2,7 @@
 id: gap-git-graph-drops-commits-while-overflowcount-reports-zero
 title: git-history 导语宣称「最近 500 条提交」而图上实绘 315 条 distinct、静默丢 185 条，overflowCount
   恒报 0 把「未归属」与「无溢出」写成同一个值；且 500 是条数上限，本仓库只覆盖 17.4 小时而页面不说
-status: todo
+status: ready
 labels:
   - gap
   - webui

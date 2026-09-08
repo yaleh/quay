@@ -2,7 +2,7 @@
 id: gap-verify-deliver-coldstart-marketplace-channel-unverified
 title: 跨主机交付验证只覆盖 npm-global 一条通道——marketplace
   通道（register-plugin.mjs）零跨主机接线，SPEC §6b 约束③未满足
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical

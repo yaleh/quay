@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# @judges plugin/loop/*
 # laydown-set-check.sh — the cold-start gate criterion
 # (gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite, 2026-08-06).
 #
