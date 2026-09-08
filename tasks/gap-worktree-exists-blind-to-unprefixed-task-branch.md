@@ -60,6 +60,7 @@ extra:
 - plugin/scripts/fast-mode-telemetry.ts
 - plugin/test/fast-mode-telemetry.test.mjs
 - tasks/gap-worktree-exists-blind-to-unprefixed-task-branch.md
+- docs/analysis/quay-init-closure-ratchet.baseline.json
 
 ## Verification
 
