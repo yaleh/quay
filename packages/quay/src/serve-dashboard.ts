@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 import type { ProviderClient } from "./provider-client.ts";
-import { readLive, readSystem, readManagerLight, readTests, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord } from "./observation.ts";
+import { readLive, readSystem, readManagerLight, readTests, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord, type DriverKindReading } from "./observation.ts";
 import { TASK_STATUS, type GoalRecord } from "./abi.ts";
 import type { Manifest } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime } from "./serve-render.ts";
@@ -589,19 +589,29 @@ export function renderSysCard(sys: SystemResult): string {
   </div>`;
 }
 
-/** The dashboard mgrCard — a self-contained render of the Manager/Outer/Inner probe (id="mgr-card").
- *  gap-dashboard-visual-review-batch-fixes AC1: the liveness count is only shown when
- *  `liveness.status === "ok"`; otherwise (the current constant `"empty"` "observer retired" state) the
- *  clause reads 「会话数未接入」 — never a bare number that a retired/never-measured metric would render
- *  indistinguishable from a genuine "0 sessions alive" (CLAUDE.md 硬规则 3b/4b). */
+/** The dashboard mgrCard — a self-contained render of the two resident drivers' alive status
+ *  (id="mgr-card"). gap-dashboard-driver-status-card: the retired Manager/Outer/Inner probe is no
+ *  longer read here; the card renders promotion/worker driver alive status + last-record relative
+ *  time from the in-process driver-status reading (readDriverStatus in observation.ts). When a pid
+ *  file is absent (or the reading is absent — the dashboard error fallback), the row reads 「未运行」
+ *  — never a bare undefined/NaN/empty (CLAUDE.md 硬规则 3b/4b). */
 export function renderMgrCard(mgr: ManagerResult): string {
-  const mgrAlive = mgr.liveness.sessions.filter((s) => s.alive).length;
-  const livenessText = mgr.liveness.status === "ok" ? `${mgrAlive} 会话 LIVE` : "会话数未接入";
   return html`<div id="mgr-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
-    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">Manager / Outer / Inner</div>
-    <p style="margin:0;font-size:0.8rem;line-height:1.5">loop-driver: ${escapeHtml(mgr.loopDriver.verdict ?? "未接入")} · ${livenessText}</p>
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">Driver</div>
+    ${renderDriverStatusRow("promotion", mgr.drivers?.promotion)}
+    ${renderDriverStatusRow("worker", mgr.drivers?.worker)}
     <a href="/manager" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看三层状态 →</a>
   </div>`;
+}
+
+/** Render one driver kind's alive-status row: `<kind>: <运行中|未运行> · 末条记录 <relativeTime>`.
+ *  An absent reading (undefined — the dashboard error fallback) renders identically to a dead kind:
+ *  「未运行」, never `undefined`/`NaN`/empty (absent-field contract, hard rules 3b/4b). */
+function renderDriverStatusRow(kind: "promotion" | "worker", d: DriverKindReading | undefined): string {
+  const aliveText = d?.running === true ? "运行中" : "未运行";
+  const lastMs = d?.lastTs ? Date.parse(d.lastTs) : Number.NaN;
+  const lastText = Number.isFinite(lastMs) ? relativeTime(lastMs) : "—";
+  return html`<div style="margin:0;font-size:0.8rem;line-height:1.5"><b>${escapeHtml(kind)}</b>: ${aliveText} · 末条记录 ${lastText}</div>`;
 }
 
 /** The dashboard taskCard — a self-contained render of the task-ledger summary (id="task-card"):
