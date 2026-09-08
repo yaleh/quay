@@ -105,6 +105,10 @@ export const GIT_GRAPH_MAX_LANES = 8;
 export const GIT_GRAPH_PAD_Y = 24;
 /** Fixed row height — one visible commit/summary per 26px band. */
 export const GIT_GRAPH_ROW_H = 26;
+/** gap-git-graph-lane-chip-rendered-once-regardless-of-span AC4: repeat a lane's name chip every this
+ *  many rows so any scroll position lands within `strideRows × GIT_GRAPH_ROW_H` px of a chip
+ *  (20 rows × 26px = 520px < a 700px conservative viewport height). */
+export const GIT_GRAPH_CHIP_STRIDE_ROWS = 20;
 
 // ── Lane colour encoding (gap-git-graph-lane-visual-encoding-and-fixed-width) ──────────────────────
 // The retired single `.git-svg-grid` stroke (--color-neutral-200 / #eae7e7) measured 1.13:1 against the
@@ -178,6 +182,35 @@ export function computeGitGraphRows(layout: GitGraphLayout, expandedLaneIds: Rea
   const kindOrder = (k: "commit" | "summary") => (k === "summary" ? 0 : 1);
   items.sort((a, b) => a.t - b.t || (kindOrder(a.kind) - kindOrder(b.kind)) || (a.tie < b.tie ? -1 : a.tie > b.tie ? 1 : 0));
   return items.map((it, row) => ({ kind: it.kind, hash: it.hash, laneId: it.laneId, t: it.t, row }));
+}
+
+/**
+ * gap-git-graph-lane-chip-rendered-once-regardless-of-span AC1/AC4 — pure: given visible rows (each
+ * carrying `row` and its lane id, `null` = the mainline/trunk), return the rows that need a name chip
+ * so any scroll position sits within `strideRows` of one. Within each lane's contiguous row span the
+ * FIRST row always gets a chip and every `strideRows`-th row after it does too, until the span ends.
+ * The mainline and every lateral lane share this ONE call path (no trunk-specific chip site).
+ *
+ * Written WITHOUT TypeScript annotations so it can be injected into the client renderer verbatim via
+ * `computeChipStride.toString()` (single source of truth — the client runs the same function the test
+ * imports). Its body carries no template literal, `${`, or `</script`, so it inlines safely.
+ */
+export function computeChipStride(items, strideRows) {
+  const chips = [];
+  const span = new Map();
+  for (const it of items) {
+    const id = it.laneId;
+    const r = it.row;
+    const s = span.get(id);
+    if (s === undefined) { span.set(id, { min: r, max: r }); }
+    else { if (r < s.min) s.min = r; if (r > s.max) s.max = r; }
+  }
+  for (const entry of span) {
+    const laneId = entry[0];
+    const s = entry[1];
+    for (let r = s.min; r <= s.max; r += strideRows) chips.push({ laneId, row: r });
+  }
+  return chips;
 }
 
 /**
@@ -689,13 +722,17 @@ export function gitGraphClientScript(): string {
   try { data = JSON.parse(dataEl.textContent); } catch (e) { return; }
   if (!data || !data.branches || !data.branches.length) { return; }
 
-  var rowH = ${GIT_GRAPH_ROW_H}, trunkX = ${GIT_GRAPH_TRUNK_X}, textX = ${GIT_GRAPH_TEXT_X}, laneGap = ${GIT_GRAPH_LANE_GAP}, maxLanes = ${GIT_GRAPH_MAX_LANES}, nodeR = 4, mergeR = 5, padY = ${GIT_GRAPH_PAD_Y};
+  var rowH = ${GIT_GRAPH_ROW_H}, trunkX = ${GIT_GRAPH_TRUNK_X}, textX = ${GIT_GRAPH_TEXT_X}, laneGap = ${GIT_GRAPH_LANE_GAP}, maxLanes = ${GIT_GRAPH_MAX_LANES}, nodeR = 4, mergeR = 5, padY = ${GIT_GRAPH_PAD_Y}, strideRows = ${GIT_GRAPH_CHIP_STRIDE_ROWS};
   var lanePalette = ${JSON.stringify(GIT_GRAPH_LANE_PALETTE.map((_, i) => `var(--color-lane-${i})`))};
   var chipText = "var(--color-lane-chip-text)";
   var allBranches = data.branches || [];
   var mainline = allBranches[0];
   var branches = allBranches.filter(function (b) { return b.kind !== "mainline"; });
   var overflow = typeof data.overflowCount === "number" ? data.overflowCount : 0;
+
+  // gap-git-graph-lane-chip-rendered-once-regardless-of-span: the SAME computeChipStride the test
+  // imports (injected verbatim via .toString()) — one source of truth, no hand-mirrored copy to drift.
+  ${computeChipStride.toString()}
 
   // gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead: 移动端「适应宽度」开关 — 只显
   // chip + 提交数（隐藏 subject），把内容宽度压回视口内（scrollWidth <= clientWidth * 1.2）。
@@ -844,13 +881,6 @@ export function gitGraphClientScript(): string {
     g.append("line").attr("class", "git-svg-trunk")
       .attr("x1", trunkX).attr("x2", trunkX).attr("y1", y(tMin)).attr("y2", y(tMax));
 
-    // Mainline name chip at the top of the spine (gap-git-graph-trunk-ref-resolves-to-head-not-mainline):
-    // labels the mainline lane with its resolved name (develop/master) so the graph, the summary table
-    // and the guide prose all name the same ref. Rendered through the SAME appendChip path as every
-    // other lane chip (gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge AC6: no trunk-
-    // specific chip call site), anchored at the text column like the lateral chips.
-    appendChip(g, textX, y(tMin) - 8, mainline.ref, "var(--color-neutral-700)");
-
     // Per-lane first/last rows, derived from the items themselves (never a lossy key lookup).
     var laneTopRow = {}, laneBotRow = {};
     items.forEach(function (it) {
@@ -860,6 +890,28 @@ export function gitGraphClientScript(): string {
       if (laneBotRow[it.laneId] === undefined) { laneBotRow[it.laneId] = it.row; }
       laneBotRow[it.laneId] = Math.max(laneBotRow[it.laneId], it.row);
     });
+
+    // gap-git-graph-lane-chip-rendered-once-regardless-of-span AC1/AC4: every lane whose commits are
+    // VISIBLE (the mainline + expanded lateral lanes) repeats its name chip every strideRows rows
+    // through its row span — ONE call path via computeChipStride, no trunk-specific chip site. The
+    // FIRST row of an expanded lateral lane is skipped here: the fold control below draws that lane's
+    // own chip (inside its clickable group, so the whole chip + "▲ 折叠" affordance toggles the lane),
+    // keeping the fold row labelled exactly once at the same y as before. A collapsed lane's summary
+    // row already leads with its own chip (once per lane, span = 1 row), so summary items are excluded
+    // here. The mainline chip also labels the spine with its resolved ref
+    // (gap-git-graph-trunk-ref-resolves-to-head-not-mainline): develop/master, so graph, summary table
+    // and guide prose all name the same ref.
+    var chipRefColor = {};
+    chipRefColor[null] = { ref: mainline.ref, color: "var(--color-neutral-700)" };
+    branches.forEach(function (b) { chipRefColor[b.id] = { ref: b.ref, color: laneColorById[b.id] }; });
+    computeChipStride(items.filter(function (it) { return it.kind === "commit"; }), strideRows)
+      .forEach(function (cr) {
+        // The fold control owns its lane's first chip row — skip it here so the fold row is labelled
+        // exactly once, by the clickable fold group below.
+        if (cr.laneId !== null && expanded[cr.laneId] === true && cr.row === laneTopRow[cr.laneId]) { return; }
+        var info = chipRefColor[cr.laneId];
+        appendChip(g, textX, y(cr.row) - 6, info.ref, info.color);
+      });
 
     // branch lanes: ONE rounded-corner <path> per lane, hue-coded per lane (AC1/AC2/AC3). Nodes + text
     // are drawn from the items below, so every element paints at its OWN row — two elements can never
@@ -900,8 +952,11 @@ export function gitGraphClientScript(): string {
         // gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead: the fold control is a
         // chip(ref) + "▲ 折叠" drawn on the branch's TOP row (first own commit, laneTopRow[b.id]) —
         // NOT the bottom merge row (laneBot), which landed off-screen after expanding a tall branch
-        // AND sat on the trunk merge text. The first commit's own subject is skipped below (the fold
-        // control replaces it), so the control never overlaps text on its row.
+        // AND sat on the trunk merge text. The chip is the lane's FIRST chip, drawn HERE inside the
+        // clickable group so the whole control toggles the lane; the unified computeChipStride loop
+        // above skips this row and fills in the remaining stride rows
+        // (gap-git-graph-lane-chip-rendered-once-regardless-of-span). The first commit's own subject
+        // is skipped below (the fold control replaces it), so the control never overlaps text on its row.
         var foldRow = laneTopRow[b.id];
         var grp2 = g.append("g").style("cursor", "pointer")
           .on("click", function () { expanded[b.id] = false; render(); });
