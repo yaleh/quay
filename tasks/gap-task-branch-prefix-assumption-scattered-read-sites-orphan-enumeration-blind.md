@@ -114,4 +114,4 @@ git grep -c 'refs/heads/task/' develop -- 'plugin/scripts/*.ts' 'plugin/scripts/
 
 - 阻塞的 suite 红经核实与本任务**结构上无关**：`observation.ts` / `serve-board.ts` 对本任务改动的三个文件零 import；该断言（`AC2: /board renders LV-1 as 孤儿`）失败源于 `serve-board.test.mjs` 的 fixture workspace 直建于 `/tmp` 下、与共享 `/tmp/quay-worktrees` 耦合。对照实验：`mkdir /tmp/quay-worktrees` ⇒ 该测试立刻红；`rmdir` ⇒ 11/11 绿。历史发生率 118 份跑过该测试的 suite 日志中红 1 次。
 - 已另立案：`gap-serve-board-test-workspace-couples-to-shared-tmp-quay-worktrees`。
-- 顺带修掉一个本任务引入的范围外收窄回归：`makeFirstKnownCommitMsByTask` 曾由「枚举所有 task/* 分支」被改成「只枚举有打开 worktree 的分支」，实测 17 条 task 分支中 9 条失去 attempt-1 读数、其中 1 条连 merge 兜底也没有（读数由数值变 null）。已改回 REF-space 枚举并新增 `taskIdFromBranchRef` 接地判定 + 能取假的负控制单测（提交 dfff18de6）。三个测试文件 180/180 绿。
+- 顺带修掉一个本任务引入的范围外收窄回归：`makeFirstKnownCommitMsByTask` 曾由「枚举所有 task/* 分支」被改成「只枚举有打开 worktree 的分支」，实测 17 条 task 分支中 9 条失去 attempt-1 读数、其中 1 条连 merge 兜底也没有（读数由数值变 null）。已改回 REF-space 枚举并新增 `taskIdFromBranchRef` 接地判定 + 能取假的负控制单测（提交 `c06e8d0fd`——裁定原文引的 `dfff18de6` 是同内容的游离副本，`git branch -a --contains` 无任何分支含它；两者 patch 经 diff 比对逐字相同，产出未丢，但那个 SHA 不可达，故更正为分支尖端的可达提交。判据/记录不得引用生命周期短于自身的对象，见硬规则 5b②）。三个测试文件 180/180 绿。
