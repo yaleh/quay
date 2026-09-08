@@ -2,7 +2,7 @@
 id: gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead
 title: git-history 折叠控件画在泳道底部（合并行）⇒ 展开 25 提交的分支后落到视口外 195px 且压住同行主干文字；摘要行包围盒跨
   450px 而中间无命中元素 ⇒ 行内点击死区，用户体验上「展开后无法收缩」
-status: ready
+status: done
 labels:
   - gap
   - webui
