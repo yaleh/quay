@@ -1,7 +1,7 @@
 ---
 id: gap-ac158-execute-archive-batch-one
 title: AC158 执行批次一：零调用死集 git mv 进 archive + INDEX 同一提交（条数不设闸，人 2026-09-08 裁定）
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical
