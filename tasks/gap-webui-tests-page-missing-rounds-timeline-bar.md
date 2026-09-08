@@ -2,7 +2,7 @@
 id: gap-webui-tests-page-missing-rounds-timeline-bar
 title: 人点名：dashboard 的最近测试记录 bar chart 应在 /tests 页显示 —— renderTimelineBarSvg 已
   export 却只被 dashboard 消费，测试的正主页面反而看不到它
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -46,17 +46,17 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1 生产载体读数：加载 `/tests`，断言存在一个 `<svg>` 其 `aria-label` 与 dashboard 那条时间轴 bar
+- [x] AC1 生产载体读数：加载 `/tests`，断言存在一个 `<svg>` 其 `aria-label` 与 dashboard 那条时间轴 bar
       **同名**，且其内部 `<rect>` 分段数 **> 0**。取假：改动前该页 `<svg>` 只有 2 个、均非此 label。
-- [ ] AC2 复用而非复制（防双份实现漂移）：断言 `packages/quay/src/serve-tests.ts` 里出现
+- [x] AC2 复用而非复制（防双份实现漂移）：断言 `packages/quay/src/serve-tests.ts` 里出现
       `import { renderTimelineBarSvg }`，且 `grep -c "function renderTimelineBarSvg" packages/quay/src/serve-tests.ts`
       == **0**。两个方向都断言。
-- [ ] AC3 分段确实由数据驱动（能取假）：单测对同一渲染函数分别喂入「全 green 的 N 轮」与「含 M 条 red 的 N 轮」，
+- [x] AC3 分段确实由数据驱动（能取假）：单测对同一渲染函数分别喂入「全 green 的 N 轮」与「含 M 条 red 的 N 轮」，
       断言两次输出的 red 色分段数分别为 **0** 与 **M**。若两次输出相同则报红。
-- [ ] AC4 与 dashboard 同源同窗口：断言 `/tests` 与 `/dashboard` 在同一时刻、同一 `hours` 参数下，
+- [x] AC4 与 dashboard 同源同窗口：断言 `/tests` 与 `/dashboard` 在同一时刻、同一 `hours` 参数下，
       渲染出的分段**起止时间戳序列逐条相等**（同一份数据、同一套横轴换算，不是各算各的）。
       不相等时打印两侧序列的差异条数与前 3 条。
-- [ ] AC5 `bash scripts/test.sh --for-task gap-webui-tests-page-missing-rounds-timeline-bar` 退出码 0。
+- [x] AC5 `bash scripts/test.sh --for-task gap-webui-tests-page-missing-rounds-timeline-bar` 退出码 0。
 
 ## Definition of Done
 

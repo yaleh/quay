@@ -2,7 +2,7 @@
 id: gap-git-graph-branch-name-fallback-to-trunk-ref
 title: git-history 的 branchNameOf 在 heads 查不到时 fallback 到合并提交自身的 ref，而合并提交恒在
   trunk 上 ⇒ 28 条 lane 的名字 100% 都是 develop，图上无法区分任何一条 task 分支
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -69,4 +69,5 @@ depends_on:
 
 - `packages/quay/src/serve-git.ts`
 - `packages/quay/test/gap-git-graph-branch-name-fallback-to-trunk-ref.test.mjs`
+- `packages/quay/test/gap-git-history-lane-identity-and-row-layout-overlap.test.mjs`
 - `tasks/gap-git-graph-branch-name-fallback-to-trunk-ref.md`

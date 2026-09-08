@@ -112,7 +112,7 @@ button {
   cursor: pointer;
   margin: 0 0.25rem 0.25rem 0;
 }
-button:hover { background: var(--color-accent-600); }
+button:hover { background: var(--color-accent-800); }
 .meta { color: var(--color-neutral-700); font-size: 0.9rem; margin: 0.5rem 0 1rem; }
 .meta a { text-decoration: underline; }
 .body { margin-top: 1rem; }
@@ -150,6 +150,23 @@ hr { border: none; border-top: 1px solid var(--color-divider); margin: 1rem 0; }
   white-space: nowrap;
   border: 0;
 }
+/* AC4 (gap-webui-a11y-focus-ring-and-token-contrast-unvalidated): skip-link — the FIRST tab
+   stop on every page, visually hidden until focused. It targets <main id="main"> so keyboard
+   users skip the 15-item site nav straight to the page content. Off-screen via transform (kept
+   in the tab order), revealed on :focus; the same :focus outline rule from the Modernist sheet
+   makes the revealed link visible. */
+.skip-link {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translateY(-100%);
+  background: var(--color-bg);
+  color: var(--color-accent);
+  padding: var(--space-2) var(--space-3);
+  z-index: 100;
+  font-weight: 600;
+}
+.skip-link:focus { transform: translateY(0); }
 /* QX-015 (experiment 4, iteration 3): project orientation banner — REMOVED by
    DIR-007 (iteration 10). Banner had two problems: (1) depicted needs-human as
    sequential step in todo→ready→needs-human→done chain rather than as a
@@ -251,9 +268,17 @@ hr { border: none; border-top: 1px solid var(--color-divider); margin: 1rem 0; }
 .verdict-pass { color: var(--color-positive-700); }
 .verdict-fail { color: var(--color-accent-800); }
 /* AC102: git-history SVG mark colours — token-derived so the client-rendered chart carries
-   no hardcoded hex. The hex values live only in webui-modernist.css. */
+   no hardcoded hex. The hex values live only in webui-modernist.css, except the per-lane
+   categorical palette (gap-git-graph-lane-visual-encoding-and-fixed-width), whose hex lives in
+   serve-git.ts and is emitted per-page as a scoped --color-lane-* token sheet (gitGraphLaneTokenCss)
+   — the renderer script references the tokens, never the hex. */
 .git-svg-surface { background: var(--color-neutral-100); }
+/* grid stays the faint neutral-200 (real grid lines only) — the trunk axis is .git-svg-trunk. */
 .git-svg-grid { stroke: var(--color-neutral-200); }
+/* trunk vertical spine: a visible dark neutral (the old grid neutral-200 measured 1.13:1 on the
+   surface and was invisible at 2x zoom). neutral-700 also holds ≥4.5:1 against both text
+   backgrounds, so the matching legend glyph is not a text-contrast violation. */
+.git-svg-trunk { stroke: var(--color-neutral-700); }
 .git-svg-commit { fill: var(--color-accent-600); }
 .git-svg-merge { fill: var(--color-accent-2-500); }
 .git-svg-ink { fill: var(--color-text); }
@@ -408,7 +433,7 @@ export function detailStyles(): string {
 .detail-page .meta {
   font-size: 13px;
   margin: 0 0 var(--space-3);
-  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+  color: var(--color-neutral-700);
 }
 .detail-page .meta strong { color: var(--color-text); font-weight: var(--font-heading-weight); }
 .detail-page .meta a { text-decoration: underline; }
@@ -440,7 +465,7 @@ export function detailStyles(): string {
 .detail-page table { border-collapse: collapse; width: 100%; font-size: 14px; margin-top: var(--space-3); }
 .detail-page th {
   text-align: left; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
-  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+  color: var(--color-neutral-700);
   padding: var(--space-2); border-bottom: 2px solid var(--color-divider);
 }
 .detail-page td { padding: var(--space-2); border-bottom: 1px solid var(--color-divider); }
@@ -750,8 +775,16 @@ function navItem(key: string, label: string, current: string, prefix: "nav-" | "
  *  inactive → text + weight 600), and the Board NEW badge. The `.site-nav` strip sits OUTSIDE
  *  <main> (an independent full-width bar) and is hidden on mobile — its links live in the
  *  hamburger menu (renderMobileMenu). */
+/** AC4 (gap-webui-a11y-focus-ring-and-token-contrast-unvalidated): skip-link — the first
+ *  keyboard tab stop on every page, jumping straight to <main id="main">. Emitted as the FIRST
+ *  element of the site nav so every page that renders renderSiteNav gets it with zero per-page
+ *  churn; the .skip-link class (pageStyles) keeps it visually hidden until :focus. */
+export function renderSkipLink(): string {
+  return html`<a class="skip-link" href="#main">跳到主要内容</a>`;
+}
+
 export function renderSiteNav(current: string): string {
-  return html`<nav class="site-nav" aria-label="Site navigation">
+  return html`${renderSkipLink()}<nav class="site-nav" aria-label="Site navigation">
     <div class="nav">
       <span class="nav-brand">Quay</span>
       ${SITE_NAV_GROUPS.map((g) => html`<span class="nav-group">${

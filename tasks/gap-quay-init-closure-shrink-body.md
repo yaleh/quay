@@ -4,10 +4,12 @@ title: quay-init 收缩至 SPEC §6 闭集本体（AC168）——退役扩展文
 status: todo
 labels:
   - gap
+  - delivery-critical
 parent: null
 children: []
 extra:
   schema: execution
+  deliveryCriticalSource: adhoc
 depends_on:
   - gap-plugin-root-resolution-remaining-callsites
 goal_ac: AC-168
@@ -65,3 +67,16 @@ T3 实测结论（SPEC §9，已完成）必须体现在新行为里：**setting
 - plugin/test/quay-init-tmux-detection.test.mjs
 - CLAUDE.md
 - tasks/gap-quay-init-closure-shrink-body.md
+- docs/analysis/quay-init-closure-ratchet.baseline.json
+
+**优先级（人 2026-09-08 裁定）**：「优先保障 AC-168 落地」。本任务就是 AC-168 的收缩本体——GOAL-003 的业务目的（插件更新即生效、配置不参与升级、下游不再背 130 个复制文件）几乎全部由它承载。打 `delivery-critical`（`extra.deliveryCriticalSource: adhoc`，DIR-130 授权）。依赖 `gap-plugin-root-resolution-remaining-callsites` 先落地。
+
+**⊕ Touches 补 baseline（manager 2026-09-08 预防性补，非事后修）**：本任务重写 `quay-init.sh` 的铺设面，
+而 `quay-init-closure-ratchet.ts` 的闸「**在 source 文件变了而 baseline 未 re-anchor 时报红**」
+（脚本头注释 :29 逐字）。⇒ 收缩落地必然需要
+`node --no-warnings --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --reanchor --root <worktree>`，
+而 re-anchor 写的正是 `docs/analysis/quay-init-closure-ratchet.baseline.json`。
+**该文件原本不在本任务 Touches 里** ⇒ 一旦改动足迹落到它上面，fan-in 的 anti-drift 会 HARD FAIL。
+先验先例：兄弟任务 `gap-plugin-root-resolution-remaining-callsites` 只改了几个调用点就已经必须
+re-anchor（其 worktree 提交 `da645981b`，该 baseline 文件 3 增 3 删）；本任务的足迹比它大一个数量级。
+⛔ 冲突时不要手工并 JSON——在**合并后的树上**重跑 `--reanchor`（这是该 baseline 的既定解法）。

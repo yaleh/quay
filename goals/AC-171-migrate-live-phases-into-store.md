@@ -11,10 +11,6 @@ expect: exit 0（≥27 条：当前阶段 AC143–155 共 13 条 + 下一阶段 
 origin: |
   规格 §7.1：上一次的死因是"建好了没人迁"——goal-store 落地 28 天，goals/ 从未存在。
   ⇒ 迁移排在 ABI 与 driver 之前，让 store 先有真实数据再加功能。
-evidence:
-  at: 2026-09-07T01:21:46.135Z
-  verdict: pass
-  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：`goal-store.ts list` 输出中 `AC-140`…`AC-169` 区间的记录数 ≥ 27。

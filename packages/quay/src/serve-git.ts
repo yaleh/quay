@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { readGitHistory, type GitHistoryCommit, type GitHistoryResult } from "./observation.ts";
+import { readGitHistory, type GitHistoryCommit, type GitHistoryResult, GIT_HISTORY_MAINLINE_REFS } from "./observation.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2 } from "./serve-render.ts";
 
 export interface GitHistoryBranch {
@@ -106,6 +106,37 @@ export const GIT_GRAPH_TEXT_X = 260;
 export const GIT_GRAPH_LANE_GAP = 22;
 /** Configurable max concurrent lane slots; beyond this lanes are narrowed + counted as "+N more". */
 export const GIT_GRAPH_MAX_LANES = 8;
+
+// ── Lane colour encoding (gap-git-graph-lane-visual-encoding-and-fixed-width) ──────────────────────
+// The retired single `.git-svg-grid` stroke (--color-neutral-200 / #eae7e7) measured 1.13:1 against the
+// canvas (--color-neutral-100 / #f8f4f4) — invisible — and gave every branch the SAME colour, so the
+// "which line is which branch" dimension had no visual channel at all. Lane identity is now encoded
+// HUE-wise: one categorical colour per concurrent slot (0..GIT_GRAPH_MAX_LANES-1). The hex values live
+// HERE, not in the CSS token sheet, because AC1 unit-tests each colour's WCAG contrast — a categorical
+// palette is data, not a theme token (the "no hex" rule was for single-source theme tokens).
+
+/** AC1: categorical lane palette — eight distinct HUES (not shades of one), each dark enough to hold
+ *  ≥3:1 contrast against the light canvas (--color-neutral-100 / #f8f4f4) AND ≥4.5:1 against the white
+ *  chip label drawn on top of it. Slot-indexed: the interval scheduler never gives two overlapping
+ *  lanes the same slot, so two concurrent lanes always differ in hue. */
+export const GIT_GRAPH_LANE_PALETTE: readonly string[] = [
+  "#b71c1c", // red
+  "#0d47a1", // blue
+  "#1b5e20", // green
+  "#4a148c", // purple
+  "#004d40", // teal
+  "#bf360c", // deep orange
+  "#880e4f", // pink
+  "#1a237e", // indigo
+];
+
+/** AC4: chip label colour drawn on top of a lane colour (reverse/inverse). White holds ≥4.5:1 on every
+ *  palette entry (worst case 5.60:1). */
+export const GIT_GRAPH_LANE_CHIP_TEXT = "#ffffff";
+
+/** The canvas the graph draws on — mirrors `--color-neutral-100` in webui-modernist.css. Exported so
+ *  the AC1/AC4 contrast tests compute against the SAME value the CSS renders (no second source). */
+export const GIT_GRAPH_SURFACE_HEX = "#f8f4f4";
 
 /**
  * A visible graph row (the client's per-render row model, mirrored here so the row-count/overlap
@@ -266,12 +297,68 @@ function pickHead(history: GitHistoryResult): string | null {
   return best ? best.hash : null;
 }
 
-/** Branch name for a tip commit: the active ref pointing at it, else the `--source` ref, else short hash. */
-function branchNameOf(history: GitHistoryResult, hash: string): string {
+/** A resolved branch display name. `unresolved` distinguishes "no name could be determined" from a
+ *  resolved name (硬规则 3b: a read that cannot parse its input must not return a value shaped like
+ *  success). The display string for an unresolved tip is `unnamed@<short-hash>` — never a real ref
+ *  (git forbids `@` in the `head`/`tag` lookup a real name would come from, and no task branch name
+ *  contains it), so the renderer can tell the two apart and show it as plain, unlinkable text. */
+export interface BranchNameResolution {
+  name: string;
+  /** true when no real branch name was determined (not in heads, no merge-subject match). */
+  unresolved: boolean;
+}
+
+/** Parse the branch name out of a fan-in / dev-merge commit subject. Both conventions name the task
+ *  branch as one of the two quoted refs and the mainline as the other:
+ *    `Merge branch 'develop' into task/<id>`  (step-1 dev-merge, ff-carried onto develop)
+ *    `Merge branch 'task/<id>' into develop`  (a --no-ff fan-in merge)
+ *  A `task/<id>` name is preferred (it links to the task page); otherwise the first non-mainline
+ *  quoted name (author / doc/… / worktree-…). null when the subject has no merge-branch form or only
+ *  names mainline refs. */
+export function branchNameFromMergeSubject(subject: string): string | null {
+  const s = String(subject);
+  // git quotes ONLY the merged branch (`'X'`); the `into <target>` clause is UNQUOTED. Both conventions
+  // put the task branch in one slot and the mainline in the other, so collect both slots and pick the
+  // non-mainline name (task/<id> preferred for the task-page link).
+  const quoted = [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  const into = s.match(/\binto\s+([^\s]+)/)?.[1] ?? null;
+  const names = [...quoted, ...(into ? [into] : [])];
+  const task = names.find((n) => n.startsWith("task/"));
+  if (task) return task;
+  const nonMainline = names.find((n) => !GIT_HISTORY_MAINLINE_REFS.has(n));
+  return nonMainline ?? null;
+}
+
+/** Resolve a tip commit's branch display name. The three sources, in order:
+ *  1. a live branch whose tip IS `hash` (`heads` — but fan-in deletes the task branch, so this only
+ *     helps branches still checked out);
+ *  2. `hash`'s own subject, when `hash` is itself a dev-merge (`Merge branch 'develop' into task/<id>`
+ *     — the ff-fan-in shape: that merge commit IS the branch's last commit, and after the mainline
+ *     re-attribution its `--source` ref is `develop`, so the subject is the only real name left);
+ *  3. the fan-in merge that merged `hash` in (`hash` is one of its non-first parents) — its subject
+ *     names the branch being merged, which survives `git branch -d`.
+ *  A tip that resolves from none of these is `unresolved` — never silently relabelled to the mainline
+ *  ref (the old `:254` fallback returned `develop` for an unreadable tip, indistinguishable from a
+ *  lane genuinely named develop). */
+export function resolveBranchName(history: GitHistoryResult, hash: string): BranchNameResolution {
   for (const [name, tip] of Object.entries(history.heads ?? {})) {
-    if (tip === hash) return name;
+    if (tip === hash) return { name, unresolved: false };
   }
-  return history.commits.find((c) => c.hash === hash)?.ref ?? hash.slice(0, 7);
+  const tip = history.commits.find((c) => c.hash === hash);
+  const own = tip ? branchNameFromMergeSubject(tip.subject) : null;
+  if (own) return { name: own, unresolved: false };
+  for (const c of history.commits) {
+    if (c.parentHashes.length >= 2 && c.parentHashes.slice(1).includes(hash)) {
+      const name = branchNameFromMergeSubject(c.subject);
+      if (name) return { name, unresolved: false };
+    }
+  }
+  return { name: `unnamed@${hash.slice(0, 7)}`, unresolved: true };
+}
+
+/** Branch name for a tip commit (the display string the graph renders). */
+function branchNameOf(history: GitHistoryResult, hash: string): string {
+  return resolveBranchName(history, hash).name;
 }
 
 // ── D3 inlining (the third-party library the retired 「零客户端 JS」 invariant now permits) ──
@@ -313,10 +400,65 @@ function gitGraphLibJs(): string {
   }
 }
 
+/** True when a code point renders at full glyph width (~1em): CJK ideographs, kana, hangul, CJK
+ *  punctuation and full-width forms. Everything else is treated as a proportional Latin glyph. */
+function isFullWidthChar(cp: number): boolean {
+  return (
+    (cp >= 0x1100 && cp <= 0x115f) || // Hangul Jamo
+    (cp >= 0x2e80 && cp <= 0x303e) || // CJK radicals + punctuation
+    (cp >= 0x3041 && cp <= 0x33ff) || // Hiragana/Katakana + CJK compatibility
+    (cp >= 0x3400 && cp <= 0x4dbf) || // CJK ext A
+    (cp >= 0x4e00 && cp <= 0x9fff) || // CJK unified ideographs
+    (cp >= 0xac00 && cp <= 0xd7af) || // Hangul syllables
+    (cp >= 0xf900 && cp <= 0xfaff) || // CJK compatibility ideographs
+    (cp >= 0xff00 && cp <= 0xffef)    // full-width forms
+  );
+}
+
+/** Estimated rendered width of a string at a given px font-size. Full-width glyphs count ~1em;
+ *  proportional Latin glyphs ~0.62em (system-ui average). This is the server-side FLOOR the client
+ *  seeds the viewBox with — the client then re-measures the real text with getBBox and widens if
+ *  needed, so an estimate error can never re-introduce clipping (AC5). */
+export function estimateTextWidth(text: string, fontSize: number): number {
+  let w = 0;
+  for (const ch of text) {
+    const cp = ch.codePointAt(0) ?? 0;
+    w += isFullWidthChar(cp) ? fontSize : fontSize * 0.62;
+  }
+  return w;
+}
+
+/** AC5: content-derived SVG width — textX + the longest drawn label's estimated width + right padding.
+ *  Never a literal constant: two layouts whose longest subject differs in rendered width yield
+ *  DIFFERENT widths, so the viewBox always tracks content (硬规则 4 推论二: a literal that happens to
+ *  match today's data becomes a silent hard limit on the next batch). */
+export function computeGitGraphWidth(layout: GitGraphLayout, textX: number): number {
+  const pad = 24;
+  let longest = 0;
+  const consider = (text: string, size: number) => {
+    const w = estimateTextWidth(text, size);
+    if (w > longest) longest = w;
+  };
+  for (const c of layout.trunk.commits) consider(`${c.hash.slice(0, 7)} ${c.subject}`, 11);
+  for (const b of layout.branches) {
+    for (const c of b.commits) consider(`${c.hash.slice(0, 7)} ${c.subject}`, 10);
+    consider(`${b.ref} · ${b.commits.length} commits ·（点击展开）`, 11);
+  }
+  return Math.ceil(textX + longest + pad);
+}
+
+/** AC102②: the client renderer references lane colours as `var(--color-lane-N)` TOKENS, never hex.
+ *  The palette's hex values stay HERE (AC1/AC4 unit-test their WCAG contrast), and are emitted as a
+ *  scoped token sheet by gitGraphLaneTokenCss() — one source of truth, no second copy to drift. */
+export function gitGraphLaneTokenCss(): string {
+  const laneDefs = GIT_GRAPH_LANE_PALETTE.map((hex, i) => `--color-lane-${i}:${hex};`).join("");
+  return `#git-graph{${laneDefs}--color-lane-chip-text:${GIT_GRAPH_LANE_CHIP_TEXT};}`;
+}
+
 /** The client-side D3 renderer. Collapse/expand is toggled client-side; branches start COLLAPSED
- *  (AC2). The generated JS must carry no template literal, `${`, hex colour, or `</script` so it
- *  inlines verbatim — the geometry constants below are interpolated SERVER-side (the OUTPUT carries
- *  plain numbers, never `${`). */
+ *  (AC2). The generated JS carries no template literal, `${`, or `</script` so it inlines verbatim —
+ *  geometry constants are interpolated SERVER-side as plain numbers, and lane colours are referenced
+ *  as `var(--color-lane-N)` tokens (AC102②: the renderer script carries ZERO hardcoded hex). */
 export function gitGraphClientScript(): string {
   return `(function () {
   var mount = document.getElementById("git-graph");
@@ -327,11 +469,20 @@ export function gitGraphClientScript(): string {
   if (!data || !data.trunk || !data.trunk.commits.length) { return; }
 
   var rowH = 26, trunkX = ${GIT_GRAPH_TRUNK_X}, textX = ${GIT_GRAPH_TEXT_X}, laneGap = ${GIT_GRAPH_LANE_GAP}, maxLanes = ${GIT_GRAPH_MAX_LANES}, nodeR = 4, mergeR = 5, padY = 24;
+  var lanePalette = ${JSON.stringify(GIT_GRAPH_LANE_PALETTE.map((_, i) => `var(--color-lane-${i})`))};
+  var chipText = "var(--color-lane-chip-text)";
   var trunk = data.trunk;
   var branches = data.branches || [];
   var overflow = typeof data.overflowCount === "number" ? data.overflowCount : 0;
 
   function y(row) { return padY + row * rowH; }
+
+  // AC1/AC2: one categorical hue per LANE (cycled by lane index), NOT per slot. Slot reuse (interval
+  // scheduling) must NOT recycle a hue onto a DIFFERENT lane — colouring by slot would collapse the
+  // distinct-colour count to the number of concurrent slots (4 on the live repo, <6), failing AC2's
+  // ≥min(6, lane-count). Per-lane cycling yields min(paletteSize, laneCount) distinct hues (8 ≥ 6).
+  var laneColorById = {};
+  branches.forEach(function (b, i) { laneColorById[b.id] = lanePalette[i % lanePalette.length]; });
 
   function spanText(b) {
     var s = b.lastT - b.firstT;
@@ -339,6 +490,56 @@ export function gitGraphClientScript(): string {
     if (s >= 86400) { return Math.round(s / 86400) + "d"; }
     if (s >= 3600) { return Math.round(s / 3600) + "h"; }
     return Math.round(s / 60) + "m";
+  }
+
+  // AC3: a branch lane's fork/merge connectors are ONE rounded-corner <path>, not three independent
+  // straight <line>s. Rounded turns (radius min(6, laneGap/2), clamped to the vertical run) make a
+  // merge visually distinct from two unrelated lines crossing at a right angle.
+  function lanePath(laneX, forkRow, mergeRow, laneTopRow, laneBotRow) {
+    var hasFork = forkRow != null;
+    var hasMerge = mergeRow != null;
+    var topY = hasFork ? y(forkRow) : y(laneTopRow);
+    var botY = hasMerge ? y(mergeRow) : y(laneBotRow);
+    var vert = botY - topY;
+    var r = Math.min(6, laneGap / 2);
+    if (vert < 2 * r) { r = Math.max(0, vert / 2); }
+    if (hasFork && hasMerge) {
+      return "M " + trunkX + "," + topY +
+        " H " + (laneX - r) +
+        " Q " + laneX + "," + topY + " " + laneX + "," + (topY + r) +
+        " V " + (botY - r) +
+        " Q " + laneX + "," + botY + " " + (laneX - r) + "," + botY +
+        " H " + trunkX;
+    }
+    if (hasFork) {
+      return "M " + trunkX + "," + topY +
+        " H " + (laneX - r) +
+        " Q " + laneX + "," + topY + " " + laneX + "," + (topY + r) +
+        " V " + botY;
+    }
+    if (hasMerge) {
+      return "M " + laneX + "," + topY +
+        " V " + (botY - r) +
+        " Q " + laneX + "," + botY + " " + (laneX - r) + "," + botY +
+        " H " + trunkX;
+    }
+    return "M " + laneX + "," + topY + " V " + botY;
+  }
+
+  // AC4: append a branch-name chip (lane-colour pill + high-contrast label) at (x, y = text baseline).
+  // Returns the pill width so the caller can place trailing text right after it.
+  function appendChip(parent, x, y, ref, color) {
+    var chip = parent.append("g").attr("class", "git-svg-lane-chip");
+    var label = chip.append("text")
+      .attr("x", x + 6).attr("y", y).attr("font-size", 10)
+      .style("fill", chipText).text(ref);
+    var box = label.node().getBBox();
+    chip.insert("rect", ":first-child")
+      .attr("x", x).attr("y", y - 9)
+      .attr("width", box.width + 12).attr("height", 15)
+      .attr("rx", 4).attr("ry", 4)
+      .style("fill", color);
+    return box.width + 12;
   }
 
   // Expand state keys on the STRUCTURAL lane id (fork::merge), never the display ref string — two
@@ -379,7 +580,11 @@ export function gitGraphClientScript(): string {
         .attr("aria-label", "Git commit vertical timeline: trunk + branch fork/merge lanes");
     }
     svg.selectAll("*").remove();
-    var width = textX + 460;
+    // AC5: width is CONTENT-derived — the server seeds the longest-label estimate (data.textWidth),
+    // and a getBBox re-measure below widens the viewBox to the true text right edge, so no subject is
+    // ever clipped by a literal width (硬规则 4 推论二: the old textX+460 = 720px clipped 37/98
+    // subjects with no scrollbar to reach them).
+    var width = typeof data.textWidth === "number" ? data.textWidth : textX + 460;
     var height = y(items.length - 1) + padY;
     // gap-webui-git-history-svg-unreadable: draw the viewBox at its NATIVE width/height (1:1) so the
     // text stays readable — the old width=100% + max-height:75vh + default preserveAspectRatio meet
@@ -394,11 +599,11 @@ export function gitGraphClientScript(): string {
     var trunkRow = {};
     items.forEach(function (it) { if (it.kind === "commit" && it.laneId === null) { trunkRow[it.commit.hash] = it.row; } });
 
-    // trunk vertical spine
+    // trunk vertical spine (a visible dark neutral — the old grid neutral-200 measured 1.13:1)
     var trunkRows = trunk.commits.map(function (c) { return trunkRow[c.hash]; });
     var tMin = Math.min.apply(null, trunkRows);
     var tMax = Math.max.apply(null, trunkRows);
-    g.append("line").attr("class", "git-svg-grid")
+    g.append("line").attr("class", "git-svg-trunk")
       .attr("x1", trunkX).attr("x2", trunkX).attr("y1", y(tMin)).attr("y2", y(tMax));
 
     // Per-lane first/last rows, derived from the items themselves (never a lossy key lookup).
@@ -411,31 +616,29 @@ export function gitGraphClientScript(): string {
       laneBotRow[it.laneId] = Math.max(laneBotRow[it.laneId], it.row);
     });
 
-    // branch lanes: fork/merge connectors (nodes + text are drawn from the items below, so every
-    // element paints at its OWN row — two elements can never share a y).
+    // branch lanes: ONE rounded-corner <path> per lane, hue-coded per lane (AC1/AC2/AC3). Nodes + text
+    // are drawn from the items below, so every element paints at its OWN row — two elements can never
+    // share a y.
     branches.forEach(function (b) {
       var laneX = b.laneX;
+      var color = laneColorById[b.id];
       var forkRow = b.fork ? trunkRow[b.fork] : null;
       var mergeRow = b.merge ? trunkRow[b.merge] : null;
       var laneTop = forkRow != null ? forkRow : laneTopRow[b.id];
       var laneBot = mergeRow != null ? mergeRow : laneBotRow[b.id];
 
-      g.append("line").attr("class", "git-svg-grid")
-        .attr("x1", laneX).attr("x2", laneX).attr("y1", y(laneTop)).attr("y2", y(laneBot));
-      if (forkRow != null) {
-        g.append("line").attr("class", "git-svg-grid")
-          .attr("x1", trunkX).attr("x2", laneX).attr("y1", y(forkRow)).attr("y2", y(forkRow));
-      }
-      if (mergeRow != null) {
-        g.append("line").attr("class", "git-svg-grid")
-          .attr("x1", laneX).attr("x2", trunkX).attr("y1", y(mergeRow)).attr("y2", y(mergeRow));
-      }
+      g.append("path").attr("class", "git-svg-lane")
+        .attr("d", lanePath(laneX, forkRow, mergeRow, laneTop, laneBot))
+        .attr("fill", "none").style("stroke", color).attr("stroke-width", 1.6);
 
       if (expanded[b.id] === true) {
+        // AC4: the fold control is a chip(ref) + "▲ 折叠" — the branch name stays prominent (chip),
+        // never a bare "▲ 折叠 ref" line.
         var grp2 = g.append("g").style("cursor", "pointer")
           .on("click", function () { expanded[b.id] = false; render(); });
-        grp2.append("text").attr("class", "git-svg-ink").attr("x", textX).attr("y", y(laneBot) - 6).attr("font-size", 10)
-          .text("▲ 折叠 " + b.ref);
+        var foldChipW = appendChip(grp2, textX, y(laneBot) - 6, b.ref, color);
+        grp2.append("text").attr("class", "git-svg-ink").attr("x", textX + foldChipW + 6).attr("y", y(laneBot) - 6).attr("font-size", 10)
+          .text("▲ 折叠");
         grp2.append("title").text("点击折叠 " + b.ref);
       }
     });
@@ -459,7 +662,8 @@ export function gitGraphClientScript(): string {
           }
         } else {
           node = g.append("circle").attr("class", "git-svg-commit")
-            .attr("cx", laneX).attr("cy", yy).attr("r", nodeR);
+            .attr("cx", laneX).attr("cy", yy).attr("r", nodeR)
+            .style("fill", laneColorById[it.laneId]);
         }
         node.append("title").text(c.hash + " · " + c.subject);
         if (it.laneId === null) {
@@ -470,12 +674,16 @@ export function gitGraphClientScript(): string {
             .text(c.hash.slice(0, 7) + " " + c.subject);
         }
       } else {
+        // AC4: a collapsed branch's summary row leads with a chip(ref) — the branch name is prominent
+        // (lane-colour pill + high-contrast label) instead of a bare text prefix.
         var b = it.branch;
         var grp = g.append("g").style("cursor", "pointer")
           .on("click", function () { expanded[b.id] = true; render(); });
-        grp.append("circle").attr("class", "git-svg-commit").attr("cx", laneX).attr("cy", yy).attr("r", nodeR);
-        grp.append("text").attr("class", "git-svg-ink").attr("x", textX).attr("y", yy + 4).attr("font-size", 11)
-          .text(b.ref + " · " + b.commits.length + " commits · " + spanText(b) + "（点击展开）");
+        grp.append("circle").attr("class", "git-svg-commit").attr("cx", laneX).attr("cy", yy).attr("r", nodeR)
+          .style("fill", laneColorById[b.id]);
+        var chipW = appendChip(grp, textX, yy + 3, b.ref, laneColorById[b.id]);
+        grp.append("text").attr("class", "git-svg-ink").attr("x", textX + chipW + 6).attr("y", yy + 4).attr("font-size", 11)
+          .text("· " + b.commits.length + " commits · " + spanText(b) + "（点击展开）");
         grp.append("title").text("点击展开 " + b.ref + " 的 " + b.commits.length + " 条提交");
       }
     });
@@ -485,6 +693,19 @@ export function gitGraphClientScript(): string {
       g.append("text").attr("class", "git-svg-muted")
         .attr("x", textX).attr("y", padY - 8).attr("font-size", 10)
         .text("+" + overflow + " more lanes 收窄");
+    }
+
+    // AC5: re-measure the rendered text and widen the viewBox to the TRUE right edge, so no subject
+    // is ever clipped by the viewBox (content-derived width — never a literal, and never a guess).
+    var maxRight = textX;
+    svg.selectAll("text").each(function () {
+      var box = this.getBBox();
+      var right = box.x + box.width;
+      if (right > maxRight) { maxRight = right; }
+    });
+    var finalWidth = Math.max(width, Math.ceil(maxRight + 12));
+    if (finalWidth !== width) {
+      svg.attr("viewBox", "0 0 " + finalWidth + " " + height).attr("width", finalWidth);
     }
   }
 
@@ -503,7 +724,7 @@ export function gitGraphLegendHtml(): string {
   const parts = [
     glyph("var(--color-accent-600)", "●", "commit"),
     glyph("var(--color-accent-2-500)", "◆", "merge"),
-    glyph("var(--color-neutral-200)", "┃", "trunk"),
+    glyph("var(--color-neutral-700)", "┃", "trunk"),
   ];
   return `<div style="position:sticky;left:0;top:0;z-index:2;display:inline-flex;gap:0.75rem;align-items:center;background:var(--color-surface);padding:0.25rem 0.6rem;border:1px solid var(--color-neutral-200);border-radius:6px;font-size:0.72rem;color:var(--color-neutral-700)">${parts.join("")}</div>`;
 }
@@ -529,7 +750,10 @@ function renderGitHistoryPage(history: GitHistoryResult): string {
     : "";
   // The data JSON is embedded with `<` escaped to \u003c so a commit subject can never break out of
   // the <script> element. d3 + the client renderer are emitted only when there is a graph to draw.
-  const dataScript = layout ? html`<script type="application/json" id="git-graph-data">${JSON.stringify(layout).replace(/</g, "\\u003c")}</script>` : "";
+  // AC5: textWidth (the content-derived viewBox width seed) rides in the same JSON as the layout.
+  const graphData = layout ? { ...layout, textWidth: computeGitGraphWidth(layout, GIT_GRAPH_TEXT_X) } : null;
+  const laneTokenStyles = layout ? html`<style>${gitGraphLaneTokenCss()}</style>` : "";
+  const dataScript = graphData ? html`<script type="application/json" id="git-graph-data">${JSON.stringify(graphData).replace(/</g, "\\u003c")}</script>` : "";
   const libScript = layout ? html`<script>${gitGraphLibJs()}</script>` : "";
   const clientScript = layout ? html`<script>${gitGraphClientScript()}</script>` : "";
 
@@ -554,11 +778,12 @@ function renderGitHistoryPage(history: GitHistoryResult): string {
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — vertical commit timeline (third-party library, client-rendered)">${modernistStyles()}${pageStyles()}<title>Git history — vertical commit timeline</title></head>
-    <body>${renderMobileChrome("git", "git history")}${renderSiteNav("git")}<main>
+    <body>${renderMobileChrome("git", "git history")}${renderSiteNav("git")}<main id="main">
       <h1>Git History — 提交纵向时间轴</h1>
       <p class="meta"><strong>纵轴 = 提交落地顺序（git commit time），不是工时/持续时间。</strong> develop 竖直主干 + task 分支从主干分出（fork）/合入（merge）的连线；task 分支默认折叠（只显提交数与时间跨度，点击展开逐条）。菱形 = 合并提交（fan-in 落地事件）。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并（跨所有本地分支）。</p>
       ${statusNote}
       ${graph}
+      ${laneTokenStyles}
       ${dataScript}
       ${libScript}
       ${clientScript}

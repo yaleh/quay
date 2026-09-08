@@ -19,8 +19,4 @@ origin: criteria 中 AC-183 verdict=fail（sync 载体 tail-200 里存在缺 ben
   事件）；drivers.promotion 报 running=true 且 staleSecs=27（载体新鲜）却仍在写旧格式——现有 drivers
   读数只测载体新鲜度、不测进程对代码的新鲜度，故 promotion 进程早于 benign 修复 commit 55805b257(12:43:59Z)
   启动(01:47:50Z) 也未能在读数中暴露
-evidence:
-  at: 2026-09-07T05:02:13.177Z
-  verdict: fail
-  reading: acceptance failed (exit 1)
 ---

@@ -44,21 +44,23 @@ function hist(commits, head, heads = {}) {
 
 test("AC1: layoutGitGraph assigns distinct internal ids to two same-named lanes (re-label + deleted branch)", () => {
   const t0 = 1_700_000_000;
-  // Both branch tips (b000000 / b100000) carry ref "develop" — the mainline re-attribution a deleted
-  // task branch gets — while heads only knows the mainline tip. branchNameOf() therefore collapses
-  // BOTH lanes to "develop", but their fork::merge points differ.
+  // Both branch tips (b000000 / b100000) carry ref "develop" (the mainline re-attribution a deleted
+  // task branch gets) and heads only knows the mainline tip — but both fan-in merges name the SAME
+  // task branch ("Merge branch 'task/A' into develop"), so branchNameOf() resolves BOTH lanes to
+  // "task/A" while their fork::merge points differ. (gap-git-graph-branch-name-fallback-to-trunk-ref
+  // changed the collapse target from the mainline ref to the merge-subject name.)
   const commits = [
     c("t000000", t0, "develop", [], "base"),
     c("t100000", t0 + 1, "develop", ["t000000"], "trunk"),
     c("b000000", t0 + 2, "develop", ["t100000"], "branch A tip"),
-    c("m000000", t0 + 3, "develop", ["t100000", "b000000"], "merge A"),
+    c("m000000", t0 + 3, "develop", ["t100000", "b000000"], "Merge branch 'task/A' into develop"),
     c("b100000", t0 + 4, "develop", ["m000000"], "branch B tip"),
-    c("m100000", t0 + 5, "develop", ["m000000", "b100000"], "merge B"),
+    c("m100000", t0 + 5, "develop", ["m000000", "b100000"], "Merge branch 'task/A' into develop"),
   ];
   const layout = layoutGitGraph(hist(commits, "m100000", { develop: "m100000" }));
   assert.equal(layout.branches.length, 2, "two branch lanes");
   const refs = layout.branches.map((b) => b.ref);
-  assert.ok(refs.every((r) => r === "develop"), `both lanes display the collapsed mainline ref (got ${refs})`);
+  assert.ok(refs.every((r) => r === "task/A"), `both lanes display the same resolved task ref (got ${refs})`);
   const [a, b] = layout.branches;
   assert.notEqual(a.id, b.id, "structural ids differ despite the identical display string");
 });
@@ -71,9 +73,9 @@ test("AC2: expanding one summary flips only the clicked lane, the same-name sibl
     c("t000000", t0, "develop", [], "base"),
     c("t100000", t0 + 1, "develop", ["t000000"], "trunk"),
     c("b000000", t0 + 2, "develop", ["t100000"], "branch A tip"),
-    c("m000000", t0 + 3, "develop", ["t100000", "b000000"], "merge A"),
+    c("m000000", t0 + 3, "develop", ["t100000", "b000000"], "Merge branch 'task/A' into develop"),
     c("b100000", t0 + 4, "develop", ["m000000"], "branch B tip"),
-    c("m100000", t0 + 5, "develop", ["m000000", "b100000"], "merge B"),
+    c("m100000", t0 + 5, "develop", ["m000000", "b100000"], "Merge branch 'task/A' into develop"),
   ];
   const layout = layoutGitGraph(hist(commits, "m100000", { develop: "m100000" }));
   const [a, b] = layout.branches;
@@ -149,15 +151,21 @@ test("AC4: fully expanded, every visible row is distinct (the overlap invariant 
   assert.equal(new Set(hashes).size, hashes.length, "every commit hash maps to exactly one row");
 });
 
-// ── AC5: every text element starts at the fixed text column ────────────────────────────────────────
+// ── AC5: every text element starts at (or after) the fixed text column ──────────────────────────────
 
-test("AC5: all ink/muted text starts at one fixed x (textX), distinct from the lane node cx", () => {
+test("AC5: all ink/muted text starts at or after the fixed x (textX), distinct from the lane node cx", () => {
   const script = gitGraphClientScript();
-  // Every `.git-svg-ink` / `.git-svg-muted` text element's x attribute must be the single textX constant.
+  // Every `.git-svg-ink` / `.git-svg-muted` text element's x must clear the fixed text column — the
+  // single textX constant, OR textX + a chip offset (gap-git-graph-lane-visual-encoding-and-fixed-width:
+  // a collapsed summary leads with a lane-colour chip(ref), so its trailing "· N commits…" text starts
+  // right after the chip). Either way it never moves LEFT of textX, so text never overlaps a lane line.
   const re = /\.attr\("class", "git-svg-(?:ink|muted)"\)\s*\.attr\("x",\s*([^)]*)\)/g;
   const xs = [...script.matchAll(re)].map((m) => m[1].trim());
   assert.ok(xs.length >= 5, `found the text elements (got ${xs.length})`);
-  assert.ok(xs.every((x) => x === "textX"), `every ink/muted text x is textX (got: ${[...new Set(xs)].join(", ")})`);
+  assert.ok(
+    xs.every((x) => x === "textX" || x.startsWith("textX + ")),
+    `every ink/muted text x starts at (or after) textX (got: ${[...new Set(xs)].join(", ")})`,
+  );
   // The node cx is a DIFFERENT coordinate (trunk spine / lane slot), never the text column.
   assert.ok(script.includes('.attr("cx", trunkX)'), "trunk node cx is the trunk spine x");
   assert.ok(script.includes('.attr("cx", laneX)'), "branch node cx is the lane slot x");

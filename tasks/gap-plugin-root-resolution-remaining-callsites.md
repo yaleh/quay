@@ -4,10 +4,12 @@ title: 非 skill 入口的剩余 workspace-root 拼接点未接入统一解析�
 status: ready
 labels:
   - gap
+  - delivery-critical
 parent: null
 children: []
 extra:
   schema: execution
+  deliveryCriticalSource: adhoc
 ---
 ## Proposal
 
@@ -104,3 +106,29 @@ scripts/test.sh 与 os-anchor-*.sh 的「仓库内部专用」结论 + 证据已
 - docs/analysis/quay-init-closure-ratchet.baseline.json
 - orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md
 - tasks/gap-plugin-root-resolution-remaining-callsites.md
+- plugin/scripts/loop-shipping-exclusion-data.mjs
+- plugin/test/loop-shipping.test.mjs
+- plugin/test/loop-shipping-necessity-check.test.mjs
+
+## Evidence — 2026-09-08 阻塞根因（manager 定位；两次 fan-in 死在同一处）
+
+09-08 两次 fan-in 均止于 suite red，且**全套只红一条**（5235/5236 pass）：
+
+```
+plugin/test/loop-shipping.test.mjs:137
+✖ AC1b — after the move, no live reference to the 5 old paths remains
+  + 'packages/quay/src/observation.ts: contains "/(?<!plugin\/)scripts\/resource-gate\.sh/"'
+  + 'packages/quay/test/plugin-root.test.mjs: contains "/(?<!plugin\/)scripts\/resource-gate\.sh/"'
+```
+
+**这不是本任务写错了，是两个机制的谓词撞车**：
+- `plugin/scripts/loop-shipping-exclusion-data.mjs` 的 `oldPaths` 含 `scripts/resource-gate.sh`（**移动前的 repo-root 相对路径**），AC1b 以 `(?<!plugin/)scripts/resource-gate\.sh` 禁止该裸形出现在任何活引用中；
+- 而 SPEC §6b 解析器 `resolvePluginScriptExec()` 吃的是 **plugin-root 相对路径**，正确实参逐字就是 `"scripts/resource-gate.sh"` —— 与被禁的裸形**同形**。
+
+⇒ 本任务把 `observation.ts` 迁到解析器（`RESOURCE_GATE_REL = "scripts/resource-gate.sh"`, :2641）**必然**触发 AC1b，重试多少次都一样。这是 AC-168 整条链停摆的实际原因。
+
+**⇒ Touches 已扩**（manager 2026-09-08）：`loop-shipping-exclusion-data.mjs` + 两个 loop-shipping 测试。核对过：这三个文件当前无其它未完成任务声明（22 条历史声明者全部 done），无 Touches 冲突。
+
+**⛔ 约束——不要用最省事的解法**：不得简单把 `observation.ts` / `plugin-root.test.mjs` 整文件加进 AC1b 的 exclusion 表。exclusion 是**整文件跳过**，那会让 AC1b 对这两个文件里**真正的**陈旧引用失明——读不懂/被跳过不得与合格同形（硬规则 3b）。正确方向是让谓词能区分「移动前的 repo-root 路径」与「解析器的 plugin-root 相对实参」：或让解析器实参不与旧路径同形，或让 AC1b 的匹配带上足以区分二者的上下文。选哪条由实现者定，但**必须保住 AC1b 对真陈旧引用的分辨力**，并给出负控制：把一个真的陈旧裸引用塞回去 ⇒ AC1b 必须仍然红。
+
+**优先级**：人 2026-09-08 裁定「优先保障 AC-168 落地」。本任务是 AC-168 的硬前置（`gap-quay-init-closure-shrink-body` 的 depends_on），故打 `delivery-critical`（`extra.deliveryCriticalSource: adhoc`，DIR-130 授权）。

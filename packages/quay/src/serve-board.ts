@@ -158,7 +158,7 @@ export function renderBoardPage(board: {
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay board — 三源 join 看板">${modernistStyles()}${pageStyles()}<title>Board — 三源 join 看板</title></head>
-    <body>${renderMobileChrome("board", "board")}${renderSiteNav("board")}<main>
+    <body>${renderMobileChrome("board", "board")}${renderSiteNav("board")}<main id="main">
       <h1>Board — 意图 / 执行 / 落地</h1>
       <p class="meta">${intentNote} · ${execNote} · ${landingNote}</p>
       ${filterForm}

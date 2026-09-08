@@ -5,6 +5,7 @@ import { readFileSync, readdirSync, openSync, readSync, closeSync, statSync } fr
 import path from "node:path";
 import { readTests, type TestsResult, type TestRunRecord } from "./observation.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2, obsNote, DEFAULT_PAGE_SIZE } from "./serve-render.ts";
+import { renderTimelineBarSvg, DEFAULT_TIMELINE_HOURS, parseTimelineHours } from "./serve-dashboard.ts";
 
 // ── /tests load curve — server-rendered SVG of the suite-load timeseries (gap-test-detail-load-timeseries) ──
 //
@@ -255,6 +256,56 @@ ${polyline}
 ${points}
 <text class="git-svg-ink" x="${M.left}" y="${M.top - 6}" font-size="11">loadavg (1m) · suite 运行期采样</text>
 </svg>`;
+}
+
+// ── 最近测试记录分段时间轴（复用 dashboard 图件）────────────────────────────────────────────────────
+//
+// gap-webui-tests-page-missing-rounds-timeline-bar: /dashboard 的「测试」卡里有一条「过去 N 小时」
+// 红绿分段时间轴（serve-dashboard.ts 的 renderTimelineBarSvg，export），但其消费者只有 dashboard
+// 一处 —— /tests 作为 verification-round.jsonl 的正主页面反而没有（页面上只有 loadavg curve 与
+// per-file gantt 两个 svg）。本段在 /tests 顶部复用该 export（import，不复制渲染逻辑），数据取
+// tests.runs（与 dashboard 同源），分段颜色按 state red/green，窗口档位与 dashboard 一致
+// （1h·3h·6h·12h，parseTimelineHours 另允许 1..24 的更长档）。
+
+/** 测试轮 state → 与 dashboard testsCard 相同的颜色 token（green → positive，red → accent，其它 →
+ *  neutral）。serve-dashboard.ts 的 stateColorToken 是模块私有（非 export），故此处按同一三元复刻
+ *  这 3 行「颜色映射」——复刻的是映射不是渲染逻辑，渲染仍走 import 的 renderTimelineBarSvg（AC2
+ *  断言 serve-tests.ts 里 0 个同名 function 定义，即不复制渲染函数）。 */
+function timelineColorToken(state: string | null): string {
+  return state === "green" ? "--color-positive-700" : state === "red" ? "--color-accent-800" : "--color-neutral-400";
+}
+
+/** tests.runs → 每轮一段 [startedAt, startedAt+durationMs]，颜色按 state。与 dashboard
+ *  renderTestsCard 内的同款 map 逐字一致（AC4 的「同一份数据」：同源 verification-round.jsonl、
+ *  同一套 start/end 换算，不是各算各的）。startedAt 不可解析 / durationMs 缺失的轮 → NaN（随后被
+ *  renderTimelineBarSvg 的窗口过滤跳过，绝不臆造位置）。 */
+export function buildTestsTimelineSegments(runs: TestRunRecord[]): Array<{ startMs: number; endMs: number; colorVar: string }> {
+  return runs.map((r) => {
+    const startMs = r.startedAt != null ? Date.parse(r.startedAt) : NaN;
+    const endMs = Number.isFinite(startMs) && r.durationMs != null ? startMs + r.durationMs : NaN;
+    return { startMs, endMs, colorVar: timelineColorToken(r.state) };
+  });
+}
+
+/** 窗口终点 = 最近一次「可解析 startedAt + durationMs」的结束时刻（与 dashboard 同锚点：不是
+ *  wall-clock now，而是最近一次真实事件结束 —— 循环停摆超过窗口时 bar 仍锚在最近事件上，不整段
+ *  空掉）。无可用轮 → null（调用方回退到 nowMs，绝不 NaN）。 */
+export function latestRoundEndMs(runs: TestRunRecord[]): number | null {
+  let windowEndMs: number | null = null;
+  for (const r of runs) {
+    const startMs = r.startedAt != null ? Date.parse(r.startedAt) : NaN;
+    if (!Number.isFinite(startMs) || r.durationMs == null) continue;
+    const endMs = startMs + r.durationMs;
+    if (windowEndMs == null || endMs > windowEndMs) windowEndMs = endMs;
+  }
+  return windowEndMs;
+}
+
+/** /tests 的最近测试记录分段 bar —— 复用 dashboard 的 renderTimelineBarSvg（import），输入
+ *  tests.runs、hours 窗口、nowMs 兜底（windowEnd 不可计算时）。返回 "" 表示无分段（页面省略该节，
+ *  绝不 500）。 */
+export function renderTestsTimelineBar(runs: TestRunRecord[], hours: number, nowMs: number): string {
+  return renderTimelineBarSvg(buildTestsTimelineSegments(runs), hours, latestRoundEndMs(runs) ?? nowMs);
 }
 
 // ── /tests ─────────────────────────────────────────────────────────────────────────────────────────
@@ -557,16 +608,20 @@ interface PagingState {
   pageSizeInvalid: boolean;
 }
 
-/** The full /tests query state carried through every pagination link (focus round + both tables). */
+/** The full /tests query state carried through every pagination link (focus round + both tables + the
+ *  timeline window). `hours` is optional so pre-existing direct callers (and the unpaginated-tables
+ *  test) render the default window unchanged. */
 interface TestsQueryState {
   round: number | null;
   page: number;
   pageSize: number;
   perFilePage: number;
   perFilePageSize: number;
+  hours?: number | null;
 }
 
-/** Build a /tests href preserving the focus round + both tables' pagination, overriding the given fields. */
+/** Build a /tests href preserving the focus round + both tables' pagination + the timeline window,
+ *  overriding the given fields. */
 export function buildTestsHref(q: TestsQueryState): string {
   const params = new URLSearchParams();
   if (q.round != null) params.set("round", String(q.round));
@@ -574,6 +629,7 @@ export function buildTestsHref(q: TestsQueryState): string {
   if (q.pageSize !== DEFAULT_PAGE_SIZE) params.set("pageSize", String(q.pageSize));
   if (q.perFilePage > 1) params.set("perFilePage", String(q.perFilePage));
   if (q.perFilePageSize !== DEFAULT_PAGE_SIZE) params.set("perFilePageSize", String(q.perFilePageSize));
+  if (q.hours != null && q.hours !== DEFAULT_TIMELINE_HOURS) params.set("hours", String(q.hours));
   const qs = params.toString();
   return qs ? `/tests?${qs}` : "/tests";
 }
@@ -624,6 +680,7 @@ function renderTestsPage(
   selected: TestRunRecord | null = null,
   roundRequested: number | null = null,
   opts: TestsPagingOpts = {},
+  hours: number = DEFAULT_TIMELINE_HOURS,
 ): string {
   const latest = tests.runs[0] ?? null;
   // gap-webui-round-detail-page — `selected` is the round the page focuses on when /tests?round=N
@@ -727,24 +784,38 @@ function renderTestsPage(
   const historyNav = tests.runs.length > 0
     ? renderPagingNav(
         { page: historyPage, totalPages: historyTotalPages, totalRows: historyTotalRows, pageSize: historyPageSize, pageSizeInvalid: historyPageSizeInvalid },
-        (pg, sz) => buildTestsHref({ round: roundRequested, page: pg ?? 1, pageSize: sz, perFilePage, perFilePageSize }),
+        (pg, sz) => buildTestsHref({ round: roundRequested, page: pg ?? 1, pageSize: sz, perFilePage, perFilePageSize, hours }),
       )
     : "";
   const perFileNav = perFileTable
     ? renderPagingNav(
         { page: perFilePage, totalPages: perFileTotalPages, totalRows: perFileTotalRows, pageSize: perFilePageSize, pageSizeInvalid: perFilePageSizeInvalid },
-        (pg, sz) => buildTestsHref({ round: roundRequested, page: historyPage, pageSize: historyPageSize, perFilePage: pg ?? 1, perFilePageSize: sz }),
+        (pg, sz) => buildTestsHref({ round: roundRequested, page: historyPage, pageSize: historyPageSize, perFilePage: pg ?? 1, perFilePageSize: sz, hours }),
       )
+    : "";
+  // gap-webui-tests-page-missing-rounds-timeline-bar — 最近测试记录分段时间轴（复用 dashboard 的
+  // renderTimelineBarSvg）。放在 suite 状态摘要（latestBanner）之下、负载曲线之上。窗口档位与
+  // dashboard 一致（1h·3h·6h·12h，页面重载链接）；?hours= 另可设 1..24 的更长档（parseTimelineHours）。
+  const roundsTimelineBar = renderTestsTimelineBar(tests.runs, hours, Date.now());
+  const hourLinks = [1, 3, 6, 12]
+    .map((n) => html`<a href="/tests?hours=${n}" style="color:var(--color-accent);text-decoration:none;${n === hours ? "font-weight:700" : ""}">${n}h</a>`)
+    .join(" · ");
+  const roundsTimeline = roundsTimelineBar
+    ? html`<h2>最近测试记录分段时间轴</h2>
+        <p class="meta">数据源：<code>.quay/verification-round.jsonl</code>（每轮一段，红=red · 绿=green，锚定最近一轮结束时刻）</p>
+        <p class="meta">时间轴窗口（过去 ${hours}h）：${hourLinks}</p>
+        ${roundsTimelineBar}`
     : "";
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay tests — verification rounds">${modernistStyles()}${pageStyles()}<title>Tests — 验证轮记录</title></head>
-    <body>${renderMobileChrome("tests", "tests")}${renderSiteNav("tests")}<main>
+    <body>${renderMobileChrome("tests", "tests")}${renderSiteNav("tests")}<main id="main">
       <h1>Tests — 验证轮记录</h1>
       <p class="meta">数据源：<code>.quay/verification-round.jsonl</code>（每轮 suite 完成时追加，红绿皆入账）</p>
       ${obsNote(tests.status, tests.reason)}
       ${focusNote}
       ${notFoundNote}
       ${latestBanner}
+      ${roundsTimeline}
       ${loadCurve}
       ${perFileTimeline}
       ${tests.runs.length > 0 ? html`<h2>历史运行（新→旧）</h2>
@@ -804,10 +875,13 @@ export async function handleTests(
   const perFilePageSizeParam = parseInt(url.searchParams.get("perFilePageSize") || "", 10);
   const perFilePageSizeInvalid = url.searchParams.has("perFilePageSize") && (!Number.isFinite(perFilePageSizeParam) || perFilePageSizeParam < 1);
   const perFilePageSize = Number.isFinite(perFilePageSizeParam) && perFilePageSizeParam >= 1 ? perFilePageSizeParam : DEFAULT_PAGE_SIZE;
+  // gap-webui-tests-page-missing-rounds-timeline-bar — read the timeline window off ?hours=（与 dashboard
+  // 同一 parseTimelineHours：非法/超界回退默认 3，绝不 500）。
+  const hours = parseTimelineHours(url.searchParams.get("hours"));
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(renderTestsPage(tests, cfg.workspaceRoot, samples, selected, roundNum, {
     page, pageSize, pageSizeInvalid, perFilePage, perFilePageSize, perFilePageSizeInvalid,
-  }));
+  }, hours));
 }
 
 // ── /tests/file — single-file cross-round detail page (gap-webui-test-file-detail-page) ──────────
@@ -975,7 +1049,7 @@ function renderFileDetailPage(
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay test file — single-file cross-round history">${modernistStyles()}${pageStyles()}<title>Test file — ${escapeHtml(filePath)}</title></head>
-    <body>${renderMobileChrome("tests", "tests")}${renderSiteNav("tests")}<main>
+    <body>${renderMobileChrome("tests", "tests")}${renderSiteNav("tests")}<main id="main">
       <h1>测试文件 — <code>${escapeHtml(filePath)}</code></h1>
       <p class="meta"><a href="/tests">← 返回 Tests</a></p>
       ${obsNote(tests.status, tests.reason)}

@@ -435,7 +435,7 @@ export function renderSendResult(outcome: SendOutcome, receipts: MessageReceipt[
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay message delivery — 投递状态">${modernistStyles()}${pageStyles()}<title>消息投递 — ${escapeHtml(outcome.sessionId)}</title></head>
-    <body>${renderMobileChrome("sessions", "sessions")}${renderSiteNav("sessions")}<main>
+    <body>${renderMobileChrome("sessions", "sessions")}${renderSiteNav("sessions")}<main id="main">
       <h1>消息投递 — <code>${escapeHtml(outcome.sessionId)}</code></h1>
       <p class="meta"><a href="/session/${escapeHtml(outcome.sessionId)}">← 返回会话</a> · 投递状态是【目标 transcript 物化核证】+ 回执折算，非 socket「写成功」</p>
       <section style="margin-bottom:1.5rem;background:var(--color-surface);padding:1rem">

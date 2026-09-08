@@ -2,7 +2,7 @@
 id: gap-dashboard-grid-autofit-columns-vs-card-count
 title: dashboard 用 auto-fit 由容器宽度派生列数、与卡片数无任何约束，870px 容器只开出 3 列而「工作进展」放了 4 张卡 ⇒
   第 4 张换行、右侧 2 格露出 divider 底色成大片深灰空洞
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -49,17 +49,17 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 生产载体读数：加载 `/dashboard`（1440 宽），对每个 grid 容器算
+- [x] AC1 生产载体读数：加载 `/dashboard`（1440 宽），对每个 grid 容器算
       `列数 × 行数 − 子元素数` 得到空槽数，断言**每个 grid 的空槽数 == 0**。
       取假：改动前「工作进展」行实测 3 列 4 卡 ⇒ 空槽 2，第 3 行 3 列 2 卡 ⇒ 空槽 1。
       断言失败时打印每个 grid 的 `(列数, 卡片数, 空槽数)` 三元组，不只报布尔。
-- [ ] AC2 与卡片数绑定（能取假的结构判据）：单测对渲染函数传入 3 / 4 / 5 张卡三种输入，断言算出的
+- [x] AC2 与卡片数绑定（能取假的结构判据）：单测对渲染函数传入 3 / 4 / 5 张卡三种输入，断言算出的
       `gridTemplateColumns` 列数分别 == 3 / 4 / 5。当前实现对三种输入都返回同一个模板串 ⇒ 必须报红。
-- [ ] AC3 多视口枚举而非单点：在 1440 / 1024 / 768 / 390 四个视口各测一次 AC1，断言四个视口下空槽数**全部** == 0；
+- [x] AC3 多视口枚举而非单点：在 1440 / 1024 / 768 / 390 四个视口各测一次 AC1，断言四个视口下空槽数**全部** == 0；
       打印四个视口的三元组清单。
-- [ ] AC4 深灰不再作为空槽的呈现：断言 `/dashboard` 上不存在「面积 > 20000px² 且背景等于 `--color-divider`
+- [x] AC4 深灰不再作为空槽的呈现：断言 `/dashboard` 上不存在「面积 > 20000px² 且背景等于 `--color-divider`
       解析值」的可见矩形区域。取假：改动前该区域实测存在。
-- [ ] AC5 `bash scripts/test.sh --for-task gap-dashboard-grid-autofit-columns-vs-card-count` 退出码 0。
+- [x] AC5 `bash scripts/test.sh --for-task gap-dashboard-grid-autofit-columns-vs-card-count` 退出码 0。
 
 ## Definition of Done
 
