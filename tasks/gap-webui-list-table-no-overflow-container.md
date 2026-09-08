@@ -14,6 +14,7 @@ extra:
   schema: execution
 depends_on:
   - gap-webui-detail-page-head-drops-pagestyles
+  - gap-webui-goal-list-sort-and-column-set
 ---
 **type:** execution
 

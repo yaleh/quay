@@ -2,7 +2,7 @@
 id: gap-nyf-doneflipready-arm-bypasses-leftover-worktree-exemption
 title: notYetFlipped 的 doneFlipReady 臂绕过 leftover-worktree 豁免 —— worktree
   敞着、产出未进 develop 却判 landed，任务永久出池
-status: ready
+status: done
 labels:
   - gap
 parent: null
