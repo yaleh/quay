@@ -3,7 +3,7 @@ id: gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge
 title: git-history 折叠摘要行按 mergeT 排序与自己的合并行同刻、tie-break 靠字典序 ⇒ 10/29 条泳道
   botY&lt;topY 倒着画、圆角退化成 Q x,y x,y；同一 task 的每次 dev-merge 各算一次 fork/merge ⇒ 裂成 4
   条同名泳道
-status: todo
+status: ready
 labels:
   - gap
   - webui
