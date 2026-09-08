@@ -1537,6 +1537,35 @@ verify_referenced_landed() {
   return 0
 }
 
+# verify_delivery_surface_l1 — gap-complete-delivery-surface-spec-and-l1-verification (AC5): the
+# SIX-category L1 delivery-completeness check. verify_referenced_landed (above) covers category 1
+# (mechanisms/runtime: referenced ⊆ landed); this extends the L1 surface to ALL SIX categories —
+# each category's deliverables present + owning gap task filed (SPEC §6 machine-readable list is
+# the single source). Runs against the SHIPPED delivery surface (the quay checkout root — the SPEC
+# lives at <repo>/orchestration/, outside the plugin bundle), fail-closed on any uncovered category.
+# In a BARE plugin copy (hermetic tests) the repo-level SPEC is absent → SKIP (referenced⊆landed
+# still guards the mechanism axis). This wiring was re-added after being removed by the AC168
+# closed-set shrink (commit 6358b2cd6) — the L1 check ships in the derived laydown set (explicit
+# addition `l1-delivery-surface-check.ts` in derive_loop_scripts) and must still be invoked post-init
+# beside verify_referenced_landed (the AC5 wiring contract, gap-suite-baseline-red-l1-wiring-...).
+verify_delivery_surface_l1() {
+  local delivery_root spec_file
+  l1_script="$PLUGIN_ROOT/scripts/l1-delivery-surface-check.ts"
+  delivery_root="$(cd "$(dirname "$PLUGIN_ROOT")" && pwd)"
+  spec_file="$delivery_root/orchestration/SPEC-complete-delivery-surface-2026-08-05.md"
+  if [ -f "$l1_script" ] && [ -f "$spec_file" ]; then
+    if node --no-warnings --experimental-strip-types "$l1_script" --surface --root "$delivery_root" --spec "$spec_file"; then
+      : # six-category delivery surface complete — the OK line is on the check's stdout
+    else
+      echo "ERROR: delivery-surface L1 check failed — the six-category delivery surface is incomplete." >&2
+      return 1
+    fi
+  elif [ -f "$l1_script" ]; then
+    echo "  delivery-surface-l1: SKIP (repo-level SPEC not found at $spec_file — bare plugin copy; referenced⊆landed still guards the mechanism axis)"
+  fi
+  return 0
+}
+
 # dist_stale <bundle> <src_dir> — AC1 stale detection for the vendored runtime bundle
 # (gap-upgrade-channel-cant-sync-build-artifacts-dist-stale). A git pull syncs SOURCE (tracked)
 # but not the gitignored dist/, so the bundle can be older than the source that produced it — the
@@ -2205,6 +2234,11 @@ echo "  created: tasks/"
 ensure_gitignore
 write_template "$PLUGIN_ROOT/.claude/launch.settings.json" "$WORKSPACE_ROOT/.claude/launch.settings.json" "launch template"
 write_claude_settings
+
+# L1 delivery-surface check (post-init, beside verify_referenced_landed): the six-category delivery
+# surface of the SHIPPED quay checkout is complete. Read-only over the plugin's own root — never
+# writes to the target, so the six-item closed set is unaffected.
+verify_delivery_surface_l1 || exit 2
 
 auto_commit_laid_down
 print_install_steps

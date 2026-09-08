@@ -2,7 +2,7 @@
 id: gap-suite-baseline-red-l1-wiring-kindforfile-lane-coldstart-rehearsal
 title: quay-init L1 check 接线回归 + kindForFile/lowconc 泳道/cold-start rehearsal 三处
   baseline 恒红——挡住任何抽中它们的 fan-in
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -46,3 +46,4 @@ extra:
 - plugin/test/known-load-sensitive.test.mjs
 - plugin/test/cold-start-skill.test.mjs
 - tasks/gap-suite-baseline-red-l1-wiring-kindforfile-lane-coldstart-rehearsal.md
+- docs/analysis/quay-init-closure-ratchet.baseline.json
