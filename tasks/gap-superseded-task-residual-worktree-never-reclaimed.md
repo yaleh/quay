@@ -58,19 +58,19 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假）：`reclaimSupersededWorktrees` 对一个 `status: superseded`、零活进程的 task worktree 返回 `reclaimed: true` 且实际调用了 `git worktree remove --force`；若它保留则该 AC 假。
-- [ ] AC2（负控制，能取假）：对 `status: ready` 且 worker-outcome 为 `exited-not-landed` 的残留 worktree 返回跳过且**不移除**——保护待续做的实现（2026-09-08 现场有 3 个这样的：perfile-failure-rate-baseline / dead-set-closure / task-branch-prefix，误删即永久丢失分支上的实现）；若移除则该 AC 假。
-- [ ] AC3（负控制，能取假）：注入一条命中该 task 的 `workerCmdlines` ⇒ 返回 `skippedLiveWorker: true` 且不移除；同一输入去掉该 cmdline ⇒ 转为可回收（同一函数两次调用给出相反结果，证明该闸真在判而非恒真）。
-- [ ] AC4（能取假）：移除前调用了 `worktree-process-reaper.ts --worktree <path>`（断言调用序：reaper 先于 remove），且移除后 `git rev-parse --verify task/<id>` 仍 exit 0——**分支保留**；分支被删则该 AC 假。
-- [ ] AC5（硬规则 3b，能取假）：任务文件缺失或 status 读不懂 ⇒ 返回值里出现独立取值 `"unreadable"`，且该取值 `!== ` 可回收取值、`!== ` 跳过取值（断言三者两两不等），并且不移除。
-- [ ] AC6（接线，非「函数存在」）：`plugin/test/worker-driver-resident.test.mjs` 断言常驻循环 reconcile 步实际调用了本函数（注入缝计数 ≥1）；仅导出函数而 reconcile 步不调 ⇒ 该 AC 假。
-- [ ] AC7（读生产载体，硬规则 4 推论三）：实现落地后跑至少一轮真实 driver，该轮的 driver 轮次记录中含本步的结果字段（候选数为 0 时记 0，⛔ 不省略）——使「跑过且无候选」与「压根没跑」在载体上可区分；关掉注入缝后该 AC 仍能通过（否则它只是回声）。
+- [x] AC1（能取假）：`reclaimSupersededWorktrees` 对一个 `status: superseded`、零活进程的 task worktree 返回 `reclaimed: true` 且实际调用了 `git worktree remove --force`；若它保留则该 AC 假。
+- [x] AC2（负控制，能取假）：对 `status: ready` 且 worker-outcome 为 `exited-not-landed` 的残留 worktree 返回跳过且**不移除**——保护待续做的实现（2026-09-08 现场有 3 个这样的：perfile-failure-rate-baseline / dead-set-closure / task-branch-prefix，误删即永久丢失分支上的实现）；若移除则该 AC 假。
+- [x] AC3（负控制，能取假）：注入一条命中该 task 的 `workerCmdlines` ⇒ 返回 `skippedLiveWorker: true` 且不移除；同一输入去掉该 cmdline ⇒ 转为可回收（同一函数两次调用给出相反结果，证明该闸真在判而非恒真）。
+- [x] AC4（能取假）：移除前调用了 `worktree-process-reaper.ts --worktree <path>`（断言调用序：reaper 先于 remove），且移除后 `git rev-parse --verify task/<id>` 仍 exit 0——**分支保留**；分支被删则该 AC 假。
+- [x] AC5（硬规则 3b，能取假）：任务文件缺失或 status 读不懂 ⇒ 返回值里出现独立取值 `"unreadable"`，且该取值 `!== ` 可回收取值、`!== ` 跳过取值（断言三者两两不等），并且不移除。
+- [x] AC6（接线，非「函数存在」）：`plugin/test/worker-driver-resident.test.mjs` 断言常驻循环 reconcile 步实际调用了本函数（注入缝计数 ≥1）；仅导出函数而 reconcile 步不调 ⇒ 该 AC 假。
+- [x] AC7（读生产载体，硬规则 4 推论三）：实现落地后跑至少一轮真实 driver，该轮的 driver 轮次记录中含本步的结果字段（候选数为 0 时记 0，⛔ 不省略）——使「跑过且无候选」与「压根没跑」在载体上可区分；关掉注入缝后该 AC 仍能通过（否则它只是回声）。
 
 ## Definition of Done
 
-- [ ] `reclaimSupersededWorktrees` 落地并接进常驻循环 reconcile 步，AC1–AC7 全勾，`bash scripts/test.sh --for-task gap-superseded-task-residual-worktree-never-reclaimed --allow-thin` 绿，经 fan-in ff 到 develop。
-- [ ] 真实运行验证（非 fixture）：实现落地后，构造或等待一个 status 翻 superseded 且带残留 worktree 的真实任务，driver 下一轮自动回收它，`git worktree list` 中该条目消失而 `task/<id>` 分支仍在——盘上对象真的被机制操作过一次，不是「测试通过」。
-- [ ] 2026-09-08 手工清理的 7 个不重现：此后 superseded 残留由机制回收，人不再需要手跑清理脚本。
+- [x] `reclaimSupersededWorktrees` 落地并接进常驻循环 reconcile 步，AC1–AC7 全勾，`bash scripts/test.sh --for-task gap-superseded-task-residual-worktree-never-reclaimed --allow-thin` 绿，经 fan-in ff 到 develop。
+- [ ] 真实运行验证（非 fixture）：实现落地后，构造或等待一个 status 翻 superseded 且带残留 worktree 的真实任务，driver 下一轮自动回收它，`git worktree list` 中该条目消失而 `task/<id>` 分支仍在——盘上对象真的被机制操作过一次，不是「测试通过」。（待外部）
+- [ ] 2026-09-08 手工清理的 7 个不重现：此后 superseded 残留由机制回收，人不再需要手跑清理脚本。（待外部）
 
 ## Touches
 
