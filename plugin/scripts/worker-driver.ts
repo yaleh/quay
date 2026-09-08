@@ -120,7 +120,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { isDirectEntry, normalizeRel } from "./gate-script-base.ts";
@@ -175,6 +175,10 @@ export { verifyIndependently } from "./driver-result.ts";
 export type { DriverResult } from "./driver-result.ts";
 import { listWorktrees, taskIdFromBranch, worktreeMatchesTask, parseWorktreePorcelain } from "./fast-mode-telemetry.ts";
 import { isDue } from "./routine-scheduler.ts";
+// 门②「cwd 在该 worktree 内的活进程」直接量单一真相源（gap-worktree-remove-orphans-probes 的 /proc
+// 枚举器 enumerateProcs + cwdUnder——⛔ 不手搓 /proc 扫描，同 concurrent-batch-scheduler.ts 的 in-flight
+// worktree 活性判定）。reaper 步骤亦复用同一脚本（--worktree <path> 模式，先 reaper 再 remove）。
+import { enumerateProcs, cwdUnder, type ProcInfo } from "./worktree-process-reaper.ts";
 // AC151：worker 继承 Layer 0（driver-runtime：profile/liveness/loop/stopCondition）+ Layer 1a
 // （task-processing：source/select）。⛔ 不各写一遍 launchArgv/liveness/shuffle/readyPoolCheck/
 // selector——全部经 import 消费单一实现。runAsync 只 import 不 re-export（本文件内部用，非公开面）。
@@ -720,6 +724,160 @@ export function cleanupOrphanWorktree(
   };
 }
 
+// ── superseded worktree 回收（gap-superseded-task-residual-worktree-never-reclaimed）──────────────
+// 任务生命周期终止（supersede，经 task_write 改 status）后，其残留 worktree 单调累积、现有清理路径
+// （cleanupOrphanWorktree 只在 worker 异常死亡路径触发、且保留有提交的）够不着。每轮 reconcile 步枚举
+// task/<id> worktree、仅 status=superseded 进候选，双闸通过者按机件顺序回收。⛔ 分支一律保留（见函数 doc）。
+
+/** worktree-process-reaper.ts 脚本绝对路径（本文件同目录，module-relative 解析——主检出 / worktree /
+ *  bundle 同义）。superseded 回收的 reaper 步骤经 subprocess 调用（⛔ 不 import 其函数手搓——按机件顺序
+ *  跑 gap-worktree-remove-orphans-probes 已建的正确入口）。 */
+const WORKTREE_PROCESS_REAPER_ENTRY = fileURLToPath(new URL("./worktree-process-reaper.ts", import.meta.url));
+
+/** 缺省 reaper 命令（--worktree <path> 模式）：收探针 / 挂死 runner。⛔ 脚本自持「不杀 real claude
+ *  session / 不杀调用方自身进程树」安全包络（worktree-process-reaper.ts AC2）。 */
+function defaultSupersededReaperCmd(root: string, worktreePath: string): string[] {
+  return [process.execPath, "--experimental-strip-types", WORKTREE_PROCESS_REAPER_ENTRY, "--worktree", worktreePath, "--root", root];
+}
+
+/** 单个 task worktree 的 superseded 回收结果（可观测：status / 回收 / 双闸跳过 / 分支保留）。 */
+export interface SupersededWorktreeReclaimResult {
+  taskId: string;
+  /** 该 task 的 status 读数：superseded / ready / done / needs-human / todo / unreadable（缺失或读不懂）。
+   *  三者两两不等（硬规则 3b）：unreadable 不与可回收（superseded）也不与跳过（任一真 status）同形。 */
+  status: string;
+  /** 该 task worktree 路径（worktreePathsForTask 首条）；无 worktree ⇒ null。 */
+  worktreePath: string | null;
+  /** 实际回收成功（reaper 已跑 + `git worktree remove --force` 全部成功）。 */
+  reclaimed: boolean;
+  /** 因存活 worker 命中而跳过（⛔ 不清）。 */
+  skippedLiveWorker: boolean;
+  /** 因 cwd 在 worktree 内的活进程（非 zombie ⇒ 活性；zombie 是死而未收，非活动）而跳过（⛔ 不清）。 */
+  skippedLiveProcess: boolean;
+  /** 移除后分支是否仍保留（`git rev-parse --verify task/<id>` exit 0 ⇒ true）。仅 reclaimed=true 时
+   *  才读；其余 null。读失败（spawn error）⇒ null（读不懂 ≠ 已删）。 */
+  branchPreserved: boolean | null;
+  /** 移除失败的错误（尝试过但失败）；无 ⇒ null。 */
+  error: string | null;
+}
+
+/** superseded worktree 回收（整轮）结果。 */
+export interface ReclaimSupersededResult {
+  /** 枚举到的候选（status === superseded）task 数。无候选 ⇒ 0（⛔ 不省略——「跑过且无候选」与「没跑」
+   *  在载体上可区分，硬规则 4 推论三的读生产载体半边）。 */
+  candidateCount: number;
+  /** 每个被枚举的 task worktree 的回收结果（枚举序）。 */
+  perTask: SupersededWorktreeReclaimResult[];
+  /** 实际回收（reclaimed=true）的 task id。 */
+  reclaimed: string[];
+  /** 候选（superseded）但被双闸跳过的 task id（存活 worker / 活进程）。 */
+  skipped: string[];
+}
+
+/** 测试缝（与 cleanupOrphanWorktree 同款，null ⇒ 用真实 git / /proc / readTaskStatus）。 */
+export interface SupersededReclaimOpts {
+  /** 存活 worker cmdline 列表（null ⇒ enumerateLiveWorkerCmdlines()）。 */
+  workerCmdlines?: string[] | null;
+  /** 枚举到的 task/<id> worktree 的 task id（null ⇒ enumerateTaskWorktreeTasksAsync(root)）。 */
+  worktreeTasks?: string[] | null;
+  /** task id → status 读取（null ⇒ readTaskStatus(root, id)）。 */
+  statusOf?: ((taskId: string) => string | null) | null;
+  /** task id → worktree 路径列表（null ⇒ worktreePathsForTaskAsync(root, id)）。 */
+  pathsOf?: ((taskId: string) => Promise<string[]>) | null;
+  /** 门②活进程列表（null ⇒ enumerateProcs()）。 */
+  procs?: ProcInfo[] | null;
+  /** reaper 命令（null ⇒ 真实 worktree-process-reaper.ts --worktree <path>）。入参 worktree 路径。 */
+  reaperCmd?: ((worktreePath: string) => string[]) | null;
+}
+
+/**
+ * superseded worktree 回收（gap-superseded-task-residual-worktree-never-reclaimed）：任务生命周期终止
+ * （supersede，经 task_write 改 status）后，其残留 worktree 单调累积、只有人工手清路径。修法 = 每轮
+ * reconcile 步枚举 task/<id> worktree，仅 status=superseded 进候选，双闸通过者按机件顺序回收：
+ *   ① 先 `worktree-process-reaper.ts --worktree <path>`（收探针/挂死 runner——已建的正确入口，脚本自持
+ *     「不杀 real claude」安全包络）；
+ *   ② 再 `git worktree remove --force <path>`。
+ * 双闸（回收前）：① hasLiveWorkerForTask 命中 ⇒ skippedLiveWorker（⛔ 不清，同 cleanupOrphanWorktree）；
+ * ② cwd 在 worktree 内的活进程（非 zombie）⇒ skippedLiveProcess（⛔ 不清）。⛔ 分支一律保留
+ * （不 `git branch -D`）——superseded 的实现偶有被后继「取用」的先例（实证表里 gap-execution-loop 的
+ * ff-merge.ts 正是这么被搬走的），删分支会让这条路径永久断掉；回收的是磁盘，不是历史。
+ * 读不懂（任务文件缺失 / status 解析不出）给独立取值 "unreadable"，不与可回收（superseded）也不与
+ * 跳过（任一真 status）同形（硬规则 3b），且一律不清。
+ * best-effort：移除失败（脏树/锁/活进程）不致命，error 落盘供观测，⛔ 不抛。
+ */
+export async function reclaimSupersededWorktrees(
+  root: string,
+  opts: SupersededReclaimOpts = {},
+): Promise<ReclaimSupersededResult> {
+  const worktreeTasks = opts.worktreeTasks ?? await enumerateTaskWorktreeTasksAsync(root);
+  if (worktreeTasks.length === 0) {
+    return { candidateCount: 0, perTask: [], reclaimed: [], skipped: [] };
+  }
+  const statusOf = opts.statusOf ?? ((taskId: string) => readTaskStatus(root, taskId));
+  const pathsOf = opts.pathsOf ?? ((taskId: string) => worktreePathsForTaskAsync(root, taskId));
+
+  // 第一遍：读 status，仅 superseded 进候选。
+  const statusByTask = new Map<string, string>();
+  const candidates: string[] = [];
+  for (const taskId of worktreeTasks) {
+    const status = statusOf(taskId) ?? "unreadable";
+    statusByTask.set(taskId, status);
+    if (status === TASK_STATUS.SUPERSEDED) candidates.push(taskId);
+  }
+
+  // 双闸共享扫 /proc（仅在有候选时；无候选不白扫——同 enumerateColdStartInflight 的 short-circuit）。
+  const workerCmdlines = candidates.length > 0 ? (opts.workerCmdlines ?? enumerateLiveWorkerCmdlines()) : [];
+  const procs = candidates.length > 0 ? (opts.procs ?? enumerateProcs()) : [];
+  const reclaimed: string[] = [];
+  const skipped: string[] = [];
+
+  const perTask: SupersededWorktreeReclaimResult[] = [];
+  for (const taskId of worktreeTasks) {
+    const status = statusByTask.get(taskId)!;
+    if (status !== TASK_STATUS.SUPERSEDED) {
+      perTask.push({ taskId, status, worktreePath: null, reclaimed: false, skippedLiveWorker: false, skippedLiveProcess: false, branchPreserved: null, error: null });
+      continue;
+    }
+    const paths = await pathsOf(taskId);
+    const p = paths[0] ?? null;
+    if (p === null) {
+      perTask.push({ taskId, status, worktreePath: null, reclaimed: false, skippedLiveWorker: false, skippedLiveProcess: false, branchPreserved: null, error: null });
+      continue;
+    }
+    // 门①：存活 worker（同 cleanupOrphanWorktree）。
+    if (hasLiveWorkerForTask(taskId, workerCmdlines)) {
+      skipped.push(taskId);
+      perTask.push({ taskId, status, worktreePath: p, reclaimed: false, skippedLiveWorker: true, skippedLiveProcess: false, branchPreserved: null, error: null });
+      continue;
+    }
+    // 门②：cwd 在 worktree 内的活进程（非 zombie）。
+    if (procs.some((proc) => proc.state !== "Z" && cwdUnder(proc.cwd, p))) {
+      skipped.push(taskId);
+      perTask.push({ taskId, status, worktreePath: p, reclaimed: false, skippedLiveWorker: false, skippedLiveProcess: true, branchPreserved: null, error: null });
+      continue;
+    }
+    // 回收动作（机件顺序）：先 reaper 再 remove。
+    const reaperArgv = opts.reaperCmd ? opts.reaperCmd(p) : defaultSupersededReaperCmd(root, p);
+    await runAsync(reaperArgv, { timeoutMs: 30_000 });
+    const rm = await runAsync(["git", "-C", root, "worktree", "remove", "--force", p], { timeoutMs: 30_000, collectStderr: true });
+    const removed = rm.status === 0;
+    let branchPreserved: boolean | null = null;
+    if (removed) {
+      const br = await runAsync(["git", "-C", root, "rev-parse", "--verify", `task/${taskId}`], { timeoutMs: 5_000 });
+      branchPreserved = br.status === 0 ? true : (br.status === null ? null : false);
+    }
+    if (removed) reclaimed.push(taskId);
+    perTask.push({
+      taskId, status, worktreePath: p, reclaimed: removed,
+      skippedLiveWorker: false, skippedLiveProcess: false,
+      branchPreserved,
+      error: removed ? null : (rm.stderr || "").trim() || `git worktree remove ${p} failed`,
+    });
+  }
+
+  return { candidateCount: candidates.length, perTask, reclaimed, skipped };
+}
+
 /** verified 态的证据载体：status 已读为 "done"、worktree 已确认无残留。 */
 export interface LandingEvidence {
   status: typeof TASK_STATUS.DONE;
@@ -875,6 +1033,11 @@ export function computeWorkerRoundRecord(opts: {
    *  verdict ∈ unrelated-flaky-exempt / own-defect-counted / insufficient-data-fallback——三态在记录里可
    *  区分（AC5，硬规则 3b：判不出 ≠ 判为无关）。缺省/空 = 本轮无豁免判定。 */
   retryExemptions?: Array<{ task: string; verdict: string; reason: string; failingTestFiles: string[]; recurredTasks: string[] }>;
+  /** 本轮 superseded worktree 回收结果（gap-superseded-task-residual-worktree-never-reclaimed AC7）：
+   *  { candidateCount, reclaimed, skipped, perTask }。候选数为 0 时 candidateCount=0（⛔ 不省略——「跑过
+   *  且无候选」与「压根没跑」在载体上可区分，硬规则 4 推论三的读生产载体半边）。缺省 null = 没跑该步
+   *  （⛔ 与 candidateCount=0 区分）。 */
+  supersededReclaim?: ReclaimSupersededResult | null;
 }) {
   return {
     ts: opts.at,
@@ -895,6 +1058,7 @@ export function computeWorkerRoundRecord(opts: {
     needs_human_committed: (opts.needsHuman ?? []).map((n) => ({ id: n.id, committed: n.committed })),
     reconciled_needs_human: opts.reconciledNeedsHuman ?? [],
     retry_exemptions: opts.retryExemptions ?? [],
+    superseded_reclaim: opts.supersededReclaim ?? null,
   };
 }
 
@@ -3857,7 +4021,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   // round 心跳（AC138-3）：worker-outcome 只在任务真完成时写，池空时 outcome 停更会被 supervisor
   // status 的 last_record_ts（读全载体 max）误读为「死亡」；round 每轮循环无条件写一条作 liveness 直接量。
   const roundFile = path.join(rootDir, WORKER_ROUND_REL);
-  const writeRound = (round: number, inFlight: number, pool: number | null, reason: string | null, liveness: LivenessResult | null, reconciled: string[]): void => {
+  const writeRound = (round: number, inFlight: number, pool: number | null, reason: string | null, liveness: LivenessResult | null, reconciled: string[], supersededReclaim: ReclaimSupersededResult | null): void => {
     const record = computeWorkerRoundRecord({
       round,
       runId: runId ?? runPrefix,
@@ -3882,6 +4046,9 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // gap-retry-cap-flip-conflates-own-defect-with-unrelated-flaky：本轮重试豁免三态判定（splice(0)
       // 快照清空，⛔ 不跨轮累积）。三态在 round 记录里可区分（AC5 生产载体）。
       retryExemptions: retryExemptions.splice(0),
+      // gap-superseded-task-residual-worktree-never-reclaimed AC7：本轮 superseded worktree 回收结果
+      // （候选数 0 也记 0，⛔ 不省略——「跑过且无候选」与「没跑」可区分）。
+      supersededReclaim,
     });
     try { appendRoundToFile(roundFile, record); } catch { /* 记录写失败不致命（运行时日志，⛔ 不因日志炸循环） */ }
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
@@ -4070,6 +4237,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     // 变量先于 try 声明 ⇒ catch 内可见，error round 可带上已读到的 liveness/pool 读数。
     let liveness: LivenessResult | null = null;
     let reconciled: string[] = [];
+    let supersededReclaimResult: ReclaimSupersededResult | null = null;
     let poolSeen: number | null = null;
     let waitReason: string | null = null;
     let step = "start";
@@ -4108,6 +4276,16 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // 孤儿 dispatch adopt/finalize（gap-worker-driver-restart-orphan-no-outcome-no-timeout）：driver 重启
       // 遗留的在飞 worker 有据可查、有归宿可判，⛔ 不再「排除集之外一片黑箱、只能等它自己消失」。
       reconcileOrphanDispatches();
+      // superseded worktree 回收（gap-superseded-task-residual-worktree-never-reclaimed）：任务生命周期
+      // 终止（supersede）后的残留 worktree 单调累积、无路径释放——每轮枚举 task worktree、仅 superseded
+      // 且双闸通过者回收（先 reaper 再 `git worktree remove`，分支保留）。结果进本轮 round 记录（AC7）。
+      step = "reclaim-superseded";
+      supersededReclaimResult = await reclaimSupersededWorktrees(rootDir, {});
+      if (json && supersededReclaimResult.candidateCount > 0) {
+        process.stdout.write(
+          `${JSON.stringify({ event: "superseded-reclaim", candidate_count: supersededReclaimResult.candidateCount, reclaimed: supersededReclaimResult.reclaimed, skipped: supersededReclaimResult.skipped })}\n`,
+        );
+      }
 
       // 2. 池非空且未达 cap 且未判停 ⇒ 走选择环起下一个。
       //    ⛔ stopReason 是【终态 latch】（仅 mcp-halt）；瞬时闸拒绝只记本轮 waitReason，下一轮重读
@@ -4164,7 +4342,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // AC138-3 无条件心跳：每轮循环写一条（⛔ 池空/判停轮也写——outcome 在这些轮不写）。
       //   终态 stopReason 与瞬时 waitReason 都记 action=stop（观测面保留 stop_reason 读数，AC2）。
       step = "write-round";
-      writeRound(round, running.length, poolSeen, stopReason ?? waitReason, liveness, reconciled);
+      writeRound(round, running.length, poolSeen, stopReason ?? waitReason, liveness, reconciled, supersededReclaimResult);
 
       // 3. 无在飞 ⇒ 终态 halt（stopReason latch）才退出；瞬时 WAIT（池可能再补 / 闸可能已放行）⇒
       //    等 intervalMs 重读，⛔ 不退出（gap-worker-driver-stopreason-latch-permanent-stop AC3）。

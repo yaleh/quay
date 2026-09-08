@@ -138,6 +138,7 @@ import {
   classifyLoadSensitive,
   relatednessSignalsFor,
   formatRelatednessNote,
+  reclaimSupersededWorktrees,
 } from "../scripts/worker-driver.ts";
 import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
 import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
@@ -1626,6 +1627,185 @@ test("AC2 (cleanup-judgment) — SIGTERM (exit_code=143) failed worktree WITH co
   assert.equal(res.sigtermExternal, true, "exit_code=143 classified as external SIGTERM");
   assert.equal(worktreePresentForTask(root, "gap-cj-b"), true, "worktree survives");
   assert.match(runGit(root, ["branch", "--list", "task/gap-cj-b"]), /gap-cj-b/, "branch survives");
+});
+
+// ── gap-superseded-task-residual-worktree-never-reclaimed：superseded 残留 worktree 回收 + 双闸 ──────
+// AC1（能取假）：status=superseded、零活进程 ⇒ reclaimed:true 且真跑了 `git worktree remove --force`。
+// AC2（负控制）：status=ready（exited-not-landed 残留）⇒ 跳过、不移除——保护待续做的实现。
+// AC3（负控制，双闸①）：注入命中该 task 的 workerCmdlines ⇒ skippedLiveWorker:true 且不移除；同一输入
+//   去掉 cmdline ⇒ 转为可回收（同一函数两次调用相反结果 ⇒ 闸真在判、非恒真）。
+// AC4（能取假）：移除前调 reaper（断言调用序：reaper 先于 remove），且移除后 `git rev-parse --verify
+//   task/<id>` 仍 exit 0——分支保留。
+// AC5（硬规则 3b）：任务文件缺失/status 读不懂 ⇒ status="unreadable"，且该取值 !== 可回收（superseded）、
+//   !== 跳过（ready），三者两两不等，且不移除。
+// 双闸②（计划第 2 条）：cwd 在 worktree 内的活进程（非 zombie）⇒ skippedLiveProcess:true 且不移除。
+
+test("AC1 (superseded-reclaim) — superseded worktree with zero live processes IS reclaimed (git worktree remove runs; branch preserved)", async (t) => {
+  const root = makeGitRoot("sup-ac1");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-sup-a", "superseded");
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-sup-a", wtPath]);
+  assert.equal(worktreePresentForTask(root, "gap-sup-a"), true, "precondition: worktree present");
+
+  const res = await reclaimSupersededWorktrees(root, {
+    worktreeTasks: ["gap-sup-a"],
+    statusOf: () => "superseded",
+    workerCmdlines: [],
+    procs: [],
+    reaperCmd: () => ["node", "-e", "process.exit(0)"],
+  });
+  const entry = res.perTask.find((p) => p.taskId === "gap-sup-a");
+  assert.equal(res.candidateCount, 1, "one superseded candidate");
+  assert.equal(entry.reclaimed, true, "AC1: superseded + zero live process IS reclaimed");
+  assert.deepEqual(res.reclaimed, ["gap-sup-a"]);
+  assert.equal(worktreePresentForTask(root, "gap-sup-a"), false, "git worktree remove --force actually ran");
+  assert.match(runGit(root, ["branch", "--list", "task/gap-sup-a"]), /gap-sup-a/, "branch preserved (⛔ never git branch -D)");
+});
+
+test("AC2 (superseded-reclaim) — ready residue (exited-not-landed) is NOT reclaimed", async (t) => {
+  const root = makeGitRoot("sup-ac2");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-sup-b", "ready");
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-sup-b", wtPath]);
+
+  const res = await reclaimSupersededWorktrees(root, {
+    worktreeTasks: ["gap-sup-b"],
+    statusOf: () => "ready",
+    workerCmdlines: [],
+    procs: [],
+  });
+  const entry = res.perTask.find((p) => p.taskId === "gap-sup-b");
+  assert.equal(entry.status, "ready");
+  assert.equal(entry.reclaimed, false, "AC2: ready residue NOT removed (protect pending implementation)");
+  assert.equal(res.candidateCount, 0, "ready is not a superseded candidate");
+  assert.equal(worktreePresentForTask(root, "gap-sup-b"), true, "worktree survives");
+});
+
+test("AC3 (superseded-reclaim) — live worker cmdline ⇒ skippedLiveWorker; same input minus cmdline ⇒ reclaimable", async (t) => {
+  const root = makeGitRoot("sup-ac3");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-sup-c", "superseded");
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-sup-c", wtPath]);
+
+  const withWorker = await reclaimSupersededWorktrees(root, {
+    worktreeTasks: ["gap-sup-c"],
+    statusOf: () => "superseded",
+    workerCmdlines: ["node quay-task-worker --task gap-sup-c"],
+    procs: [],
+  });
+  const skipEntry = withWorker.perTask.find((p) => p.taskId === "gap-sup-c");
+  assert.equal(skipEntry.skippedLiveWorker, true, "AC3: matching worker cmdline ⇒ skippedLiveWorker (gate ①)");
+  assert.equal(skipEntry.reclaimed, false);
+  assert.deepEqual(withWorker.skipped, ["gap-sup-c"]);
+  assert.equal(worktreePresentForTask(root, "gap-sup-c"), true, "NOT removed while worker cmdline matches");
+
+  const withoutWorker = await reclaimSupersededWorktrees(root, {
+    worktreeTasks: ["gap-sup-c"],
+    statusOf: () => "superseded",
+    workerCmdlines: [],
+    procs: [],
+    reaperCmd: () => ["node", "-e", "process.exit(0)"],
+  });
+  const reclaimEntry = withoutWorker.perTask.find((p) => p.taskId === "gap-sup-c");
+  assert.equal(reclaimEntry.reclaimed, true, "AC3: same input minus cmdline ⇒ reclaimable (gate actually judges, ⛔ not constant)");
+  assert.equal(worktreePresentForTask(root, "gap-sup-c"), false);
+});
+
+test("AC4 (superseded-reclaim) — reaper runs BEFORE remove (genuine order); branch preserved after remove", async (t) => {
+  const root = makeGitRoot("sup-ac4");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  const orderLog = path.join(root, "reaper-order.log");
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-sup-d", "superseded");
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-sup-d", wtPath]);
+
+  // 假 reaper：运行时检查 worktree 是否仍存在——若 remove 先于 reaper 则路径已消失 ⇒ "after-remove"。
+  const reaperCmd = (p) => ["node", "-e",
+    `require('fs').writeFileSync(${JSON.stringify(orderLog)}, require('fs').existsSync(${JSON.stringify(p)}) ? 'before-remove' : 'after-remove')`];
+  const res = await reclaimSupersededWorktrees(root, {
+    worktreeTasks: ["gap-sup-d"],
+    statusOf: () => "superseded",
+    workerCmdlines: [],
+    procs: [],
+    reaperCmd,
+  });
+  const entry = res.perTask.find((p) => p.taskId === "gap-sup-d");
+  assert.equal(entry.reclaimed, true);
+  assert.equal(fs.readFileSync(orderLog, "utf8"), "before-remove", "AC4: reaper ran while the worktree still existed ⇒ BEFORE remove");
+  assert.equal(entry.branchPreserved, true, "AC4: git rev-parse --verify task/<id> exit 0 after remove (branch preserved)");
+  assert.match(runGit(root, ["branch", "--list", "task/gap-sup-d"]), /gap-sup-d/, "branch still exists");
+});
+
+test("AC5 (superseded-reclaim) — unreadable status is a DISTINCT value and never removed", async (t) => {
+  const root = makeGitRoot("sup-ac5");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-sup-e", "ready");
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-sup-e", wtPath]);
+
+  // 任务文件缺失 / status 读不懂 ⇒ statusOf 返回 null。
+  const res = await reclaimSupersededWorktrees(root, {
+    worktreeTasks: ["gap-sup-e"],
+    statusOf: () => null,
+    workerCmdlines: [],
+    procs: [],
+  });
+  const entry = res.perTask.find((p) => p.taskId === "gap-sup-e");
+  assert.equal(entry.status, "unreadable", "AC5: read-not-understood ⇒ independent value \"unreadable\"");
+  assert.equal(entry.reclaimed, false, "AC5: unreadable ⇒ never removed");
+  // 三者两两不等（硬规则 3b）：unreadable / 可回收（superseded）/ 跳过（ready）。
+  assert.notEqual(entry.status, "superseded");
+  assert.notEqual(entry.status, "ready");
+  assert.notEqual("superseded", "ready");
+  assert.equal(worktreePresentForTask(root, "gap-sup-e"), true, "worktree survives");
+});
+
+test("dual-gate ② (superseded-reclaim) — live process anchored in the worktree ⇒ skippedLiveProcess (never removed)", async (t) => {
+  const root = makeGitRoot("sup-ac6");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeTaskFile(root, "gap-sup-f", "superseded");
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-sup-f", wtPath]);
+
+  const res = await reclaimSupersededWorktrees(root, {
+    worktreeTasks: ["gap-sup-f"],
+    statusOf: () => "superseded",
+    workerCmdlines: [],
+    // 非 zombie（state="S"）活进程、cwd 在该 worktree 内 ⇒ 门②跳过。
+    procs: [{ pid: 4242, cwd: wtPath, cwdDeleted: false, argv0: "claude", state: "S", ppid: 1, openFiles: [] }],
+  });
+  const entry = res.perTask.find((p) => p.taskId === "gap-sup-f");
+  assert.equal(entry.skippedLiveProcess, true, "gate ②: live process cwd-under-worktree ⇒ skippedLiveProcess");
+  assert.equal(entry.reclaimed, false);
+  assert.deepEqual(res.skipped, ["gap-sup-f"]);
+  assert.equal(worktreePresentForTask(root, "gap-sup-f"), true, "worktree survives");
 });
 
 // ── 阶段 3（AC117）MCP 控制面：控制态 + 身份（AC2/AC3 纯函数）──────────────────────────────────────
