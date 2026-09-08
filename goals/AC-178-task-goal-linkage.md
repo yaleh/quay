@@ -12,10 +12,6 @@ origin: |
   有了它就是纯机械计数，driver 的缺口环才可能是机械的。
   字段放顶层而非 extra 嵌套的依据：depends_on 的既有教训——
   嵌在 extra 里的 depends_on 被 parseTask 失读（返回空字符串）。
-evidence:
-  at: 2026-09-07T01:21:58.338Z
-  verdict: pass
-  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：至少 3 个 `tasks/*.md` 在 frontmatter 顶层声明 `goal_ac:`。

@@ -13,8 +13,4 @@ origin: readings.drivers.goal 报 running=false / supervisorAlive=false /
   与 goal-driver-supervisor.pid，而 meta/promotion/quality/worker 四类均有；AC-177 只要求
   goal-round.jsonl 有 ≥3 verdict 记录（一次性、已 achieved），AC-184 只查 promotion/worker
   陈旧写者，均不覆盖 goal 存活
-evidence:
-  at: 2026-09-07T07:51:35.531Z
-  verdict: pass
-  reading: acceptance passed (exit 0)
 ---
