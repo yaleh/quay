@@ -60,6 +60,7 @@ depends_on: []
 - plugin/scripts/capability-catalog.sh
 - docs/analysis/quay-init-closure-ratchet.baseline.json
 - orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md
+- docs/analysis/test-file-baseline.txt
 - plugin/scripts/anti-gaming-guard.sh
 - plugin/scripts/anti-gaming-guard.ts
 - plugin/scripts/audit-independence-check.sh
