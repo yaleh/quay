@@ -88,7 +88,7 @@ export async function handleGoalList(
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${shellStyles()}<title>Goals</title></head>
-    <body>${renderMobileChrome("goal", "goals")}${renderSiteNav("goal")}<main>
+    <body>${renderMobileChrome("goal", "goals")}${renderSiteNav("goal")}<main id="main">
       <h1>Goals — 阶段目标与 AC (${goals.length})</h1>
       ${readError ? html`<div class="error-banner" role="alert"><strong>读失败:</strong> ${escapeHtml(readError)}</div>` : ""}
       ${draftCount > 0 && statusFilter !== "draft"
@@ -131,7 +131,7 @@ export async function handleGoalDetail(
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(String(g.id))}: ${escapeHtml(String(g.title))}">${shellStyles("detail")}<title>${escapeHtml(String(g.id))}</title></head>
-    <body class="detail-page">${renderMobileChrome("goal", String(g.id))}${renderSiteNav("goal")}<main>
+    <body class="detail-page">${renderMobileChrome("goal", String(g.id))}${renderSiteNav("goal")}<main id="main">
       <h1>${escapeHtml(String(g.id))}: ${escapeHtml(String(g.title))}</h1>
       <p class="meta">kind: <strong>${escapeHtml(String(g.kind ?? ""))}</strong> · status: <strong>${escapeHtml(String(g.status ?? ""))}</strong>${g.goal ? html` · goal: ${escapeHtml(String(g.goal))}` : ""}</p>
       ${evidenceCell !== "—" ? html`<p class="meta">最近 verdict: ${evidenceCell}</p>` : ""}

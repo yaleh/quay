@@ -554,7 +554,7 @@ function renderGitHistoryPage(history: GitHistoryResult): string {
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — vertical commit timeline (third-party library, client-rendered)">${modernistStyles()}${pageStyles()}<title>Git history — vertical commit timeline</title></head>
-    <body>${renderMobileChrome("git", "git history")}${renderSiteNav("git")}<main>
+    <body>${renderMobileChrome("git", "git history")}${renderSiteNav("git")}<main id="main">
       <h1>Git History — 提交纵向时间轴</h1>
       <p class="meta"><strong>纵轴 = 提交落地顺序（git commit time），不是工时/持续时间。</strong> develop 竖直主干 + task 分支从主干分出（fork）/合入（merge）的连线；task 分支默认折叠（只显提交数与时间跨度，点击展开逐条）。菱形 = 合并提交（fan-in 落地事件）。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并（跨所有本地分支）。</p>
       ${statusNote}

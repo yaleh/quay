@@ -680,8 +680,11 @@ export function renderGoalCard(
   const activeGoals = goals.filter((g) => g.kind === "goal" && g.status === "active");
   const activeCount = activeGoals.length;
 
+  // gap-webui-a11y-focus-ring-and-token-contrast-unvalidated: the NOT-EVALUATED fallback was
+  // --color-neutral-400 (#bab6b6) = 1.80:1 on --color-bg — unreadable text. Muted-but-readable
+  // --color-neutral-700 (#605d5d) keeps the "not yet judged" semantics at 5.83:1.
   const stalenessColor = (s: "fresh" | "stale" | "NOT-EVALUATED"): string =>
-    s === "fresh" ? "var(--color-positive-700)" : s === "stale" ? "var(--color-accent-800)" : "var(--color-neutral-400)";
+    s === "fresh" ? "var(--color-positive-700)" : s === "stale" ? "var(--color-accent-800)" : "var(--color-neutral-700)";
 
   const rows = activeGoals.map((g) => {
     const gid = String(g.id);
@@ -898,7 +901,7 @@ export function renderDashboardPage(
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay dashboard — 循环脉搏、任务台账、系统资源与三层状态总览">${modernistStyles()}${pageStyles()}${dashboardGridStyles}<title>Dashboard</title></head>
-    <body>${renderMobileChrome("dashboard", "dashboard")}${renderSiteNav("dashboard")}<main>
+    <body>${renderMobileChrome("dashboard", "dashboard")}${renderSiteNav("dashboard")}<main id="main">
       <h1>Dashboard</h1>
       <p class="meta">循环脉搏、任务台账、系统资源与三层调度状态的总览 — 每张卡片指向对应完整页面。</p>
       <p class="meta">时间轴窗口（以各自最近一次运行/fan-in 结束时刻为终点的过去 ${hours}h）：${hourLinks}</p>
