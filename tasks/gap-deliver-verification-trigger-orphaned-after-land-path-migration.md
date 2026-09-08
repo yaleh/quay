@@ -2,7 +2,7 @@
 id: gap-deliver-verification-trigger-orphaned-after-land-path-migration
 title: 交付验证触发点在 land 路径迁移后失联——DIR-123 的 per-merge hook 挂在已退役的
   integration-batch-merge，机械 fan-in 零接线，3332 提交未验证且无任何东西会因此变红
-status: ready
+status: done
 needs_human_cause: human-adjudication
 labels:
   - gap
