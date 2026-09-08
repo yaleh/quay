@@ -108,17 +108,23 @@ const CONCURRENCY_ENV = [
   "QUAY_MAX_OVERSUBSCRIPTION",
   "QUAY_MAX_CONCURRENT_SUITES",
   "QUAY_PHASE_OVERLAP",
+  // gap-process-budget-in-use-structurally-zero-never-throttles: the MAIN derivation is now
+  // BUDGET-AWARE (subtracts in_use = testProcessesInUse()). in_use is hermetic-pinned to 0 unless a
+  // test drives RESOURCE_GATE_TEST_NODE_PROCS explicitly — otherwise defaultTestConcurrency /
+  // defaultLaneCount would shell out to the live host and read a nondeterministic in_use.
+  "RESOURCE_GATE_TEST_NODE_PROCS",
 ];
 function withSeams(seams, fn) {
   const saved = {};
   const touched = [];
-  for (const k of Object.keys(seams)) {
+  const effective = { RESOURCE_GATE_TEST_NODE_PROCS: "0", ...seams };
+  for (const k of Object.keys(effective)) {
     saved[k] = process.env[k];
-    process.env[k] = seams[k];
+    process.env[k] = effective[k];
     touched.push(k);
   }
   for (const k of CONCURRENCY_ENV) {
-    if (!(k in seams)) {
+    if (!(k in effective)) {
       saved[k] = process.env[k];
       delete process.env[k];
       touched.push(k);
@@ -135,12 +141,19 @@ function withSeams(seams, fn) {
 }
 
 /** defaultTestConcurrency (the TS direct-path main formula) with seams. `slots` is the
- *  RESOURCE_GATE_CONCURRENT_SUITES seam; `oversub` is the RESOURCE_GATE_OVERSUBSCRIPTION seam. The MAIN
- *  formula is PURE computation (max(1, floor(nproc × oversub / S)) — gap-suite-budget-oversubscribe):
- *  no runtime `in_use` subtraction, no AMPLIFICATION divisor. */
-function derivedConcurrency(nproc, slots = 2, oversub = 1) {
+ *  RESOURCE_GATE_CONCURRENT_SUITES seam; `oversub` is the RESOURCE_GATE_OVERSUBSCRIPTION seam; `inUse`
+ *  is the RESOURCE_GATE_TEST_NODE_PROCS seam (the budget-aware subtraction — default 0 = idle host).
+ *  The MAIN formula is max(1, floor((nproc − in_use) × oversub / S)) — the S divisor is the
+ *  structural bound (gap-suite-budget-oversubscribe), the in_use subtraction is the budget-aware
+ *  downward adjustment (gap-process-budget-in-use-structurally-zero-never-throttles). */
+function derivedConcurrency(nproc, slots = 2, oversub = 1, inUse = 0) {
   return withSeams(
-    { RESOURCE_GATE_NPROC: String(nproc), RESOURCE_GATE_CONCURRENT_SUITES: String(slots), RESOURCE_GATE_OVERSUBSCRIPTION: String(oversub) },
+    {
+      RESOURCE_GATE_NPROC: String(nproc),
+      RESOURCE_GATE_CONCURRENT_SUITES: String(slots),
+      RESOURCE_GATE_OVERSUBSCRIPTION: String(oversub),
+      RESOURCE_GATE_TEST_NODE_PROCS: String(inUse),
+    },
     () => defaultTestConcurrency(),
   );
 }
@@ -467,6 +480,11 @@ test("AC5 — formula derives max(1, floor(nproc × oversub / S)); the DEFAULT e
   const prevRGOver = process.env.RESOURCE_GATE_OVERSUBSCRIPTION;
   delete process.env.QUAY_MAX_OVERSUBSCRIPTION;
   delete process.env.RESOURCE_GATE_OVERSUBSCRIPTION;
+  // in_use must ALSO be hermetic here (this real-host assertion does not go through withSeams): the
+  // budget-aware derivation would otherwise shell out to the live host and read a nondeterministic
+  // in_use, so pin it to 0 (idle baseline) to compare against derivedConcurrency(...,inUse=0).
+  const prevInUse = process.env.RESOURCE_GATE_TEST_NODE_PROCS;
+  process.env.RESOURCE_GATE_TEST_NODE_PROCS = "0";
   const pinTmp = fs.mkdtempSync(path.join(os.tmpdir(), "rg-pin5-"));
   const pinBase = path.join(pinTmp, "full-suite.lock");
   fs.writeFileSync(`${pinBase}.concurrency`, "2", "utf8");
@@ -479,7 +497,7 @@ test("AC5 — formula derives max(1, floor(nproc × oversub / S)); the DEFAULT e
     assert.equal(
       currentDefaultConcurrency(),
       derivedConcurrency(realNproc, realSlots, 1),
-      `default_test_concurrency must return max(1, floor(${realNproc}×1/${realSlots})) = ${Math.max(1, Math.floor(realNproc / realSlots))} on the real host (gap-suite-budget-oversubscribe pure computation)`
+      `default_test_concurrency must return max(1, floor(${realNproc}×1/${realSlots})) = ${Math.max(1, Math.floor(realNproc / realSlots))} on the real host (idle in_use=0 baseline)`
     );
   } finally {
     if (prevLock === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
@@ -492,21 +510,27 @@ test("AC5 — formula derives max(1, floor(nproc × oversub / S)); the DEFAULT e
     else process.env.QUAY_MAX_OVERSUBSCRIPTION = prevOversub;
     if (prevRGOver === undefined) delete process.env.RESOURCE_GATE_OVERSUBSCRIPTION;
     else process.env.RESOURCE_GATE_OVERSUBSCRIPTION = prevRGOver;
+    if (prevInUse === undefined) delete process.env.RESOURCE_GATE_TEST_NODE_PROCS;
+    else process.env.RESOURCE_GATE_TEST_NODE_PROCS = prevInUse;
     fs.rmSync(pinTmp, { recursive: true, force: true });
   }
 });
 
-test("AC5b — the MAIN derivation is PURE computation: runtime in_use is NOT subtracted (the pre-fix racy subtraction was the oversubscription source); process-budget.sh still reports the cross-layer budget", () => {
-  // gap-suite-budget-oversubscribe: the pre-fix `nproc − in_use` read the runtime in_use at each
-  // suite's own start (each subtracted only what was already running, never what would come) ⇒ two
-  // suites derived 16 then 8, Σ 24 > 16. The pure formula ignores in_use entirely — S and oversub
-  // are the structural bound. (The rejected (b)/(c) alternatives — claim ledger / lock-carried
-  // quota — also introduced new runtime state; the human chose zero new runtime state.)
-  assert.equal(derivedConcurrency(16, 2, 1), 8, "16 cores / 2 slots → 8 regardless of in_use");
-  assert.equal(derivedConcurrency(4, 2, 1), 2, "4 cores / 2 slots → 2");
+test("AC5b — the MAIN derivation is BUDGET-AWARE: in_use is subtracted (in_use=0 keeps the idle baseline; in_use>0 reduces lanes); process-budget.sh still reports the cross-layer budget", () => {
+  // gap-process-budget-in-use-structurally-zero-never-throttles: the pre-fix in_use was structurally 0
+  // ⇒ the "subtract in-use" term never subtracted, so a busy host derived the idle-host lane count
+  // (oversubscription). The formula is now max(1, floor((nproc − in_use) × oversub / S)): the S
+  // divisor stays the structural bound (gap-suite-budget-oversubscribe), and in_use is a
+  // one-directional downward adjustment within it (a busy host takes fewer lanes; the idle baseline
+  // is unchanged).
+  assert.equal(derivedConcurrency(16, 2, 1), 8, "16 cores / 2 slots, in_use=0 → 8 (idle baseline)");
+  assert.equal(derivedConcurrency(4, 2, 1), 2, "4 cores / 2 slots, in_use=0 → 2");
+  // in_use>0 reduces lanes (bidirectional falsifiable — the budget-aware half).
+  assert.equal(derivedConcurrency(16, 2, 1, 4), 6, "16 cores / 2 slots, in_use=4 → (16−4)/2 = 6");
+  assert.equal(derivedConcurrency(16, 1, 1, 4), 12, "16 cores / 1 slot, in_use=4 → 16−4 = 12");
   // The shared authority (plugin/scripts/process-budget.sh) still reports total_budget / in_use /
   // available — the cross-layer PROCESS-budget observation the gate's report and cap-from-gate
-  // consume (single source for those consumers; not a lane-formula input).
+  // consume, AND the in_use source the lane formula now reads (single source, not a separate count).
   const budgetScript = path.join(REPO_ROOT, "plugin", "scripts", "process-budget.sh");
   assert.ok(fs.existsSync(budgetScript), "the shared total-budget authority must exist");
   const seam = { ...process.env, RESOURCE_GATE_TEST_NPROC: "4", RESOURCE_GATE_TEST_NODE_PROCS: "3" };
@@ -629,21 +653,24 @@ test("AC2 — file-wins negative control: writing ONLY the `.concurrency` file (
   }
 });
 
-test("AC4 (判据4) — single suite gets nproc/S (pure computation known cost, NOT full nproc); oversub knob is the express channel, no dynamic amplification", () => {
-  // A lone suite under the pure formula gets nproc/S = 8 on a 16-core 2-slot host — the known cost
-  // of the pure-computation approach (no "how many suites are running" runtime read, which was the
-  // rejected dynamic-amplification form). Express "single suite uses the whole host" via oversub=2.
+test("AC4 (判据4) — single suite gets nproc/S on an idle host (known cost, NOT full nproc); oversub knob is the express channel, no dynamic run-count amplification", () => {
+  // A lone suite on an IDLE host (in_use=0) gets nproc/S = 8 on a 16-core 2-slot host — the known cost
+  // of the S-divisor structural bound. Express "single suite uses the whole host" via oversub=2.
+  // gap-process-budget-in-use-structurally-zero-never-throttles: the in_use subtraction is a downward
+  // adjustment WITHIN this bound (a busy host takes FEWER lanes), so the idle baseline is unchanged.
   assert.equal(derivedConcurrency(16, 2, 1), 8, "single suite = nproc/S = 8 (not 16) — known cost");
   assert.equal(derivedConcurrency(16, 2, 2), 16, "oversub=2 → single suite = 16 (the trade-off knob)");
-  // The formula does NOT read any runtime "running suite count" — S is a static knob. Strip the
-  // comments first (by-position — the historical `nproc − in_use` explanation is prose, not code) and
-  // assert the CODE neither reads in_use nor shells out to process-budget. The formula now lives in
-  // runner-concurrency.ts defaultTestConcurrency (SPEC P4), not in test.sh bash.
+  // The formula reads in_use (via testProcessesInUse — the budget-aware half) but STILL must NOT read a
+  // dynamic "running suite count" (concurrentSuitesRunning — the rejected dynamic-amplification form):
+  // S stays a static knob. Strip the comments first (by-position) and assert the CODE reads in_use yet
+  // never reads concurrentSuitesRunning. The formula lives in runner-concurrency.ts defaultTestConcurrency
+  // (SPEC P4).
   const rc = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "runner-concurrency.ts"), "utf8");
   const fnMatch = rc.match(/defaultTestConcurrency\(\): number \{[^]*?\n\}/);
   assert.ok(fnMatch, "defaultTestConcurrency must exist");
   const codeLines = fnMatch[0].split("\n").filter((l) => !/^\s*\/\//.test(l) && !/^\s*\/\*\*?/.test(l)).join("\n");
-  assert.doesNotMatch(codeLines, /in_use|RESOURCE_GATE_TEST_NODE_PROCS|process-budget\.sh|concurrentSuitesRunning/, "the main formula must NOT read runtime running-suite/in_use counts");
+  assert.match(codeLines, /testProcessesInUse\(\)/, "the main formula must read in_use (budget-aware)");
+  assert.doesNotMatch(codeLines, /concurrentSuitesRunning/, "the main formula must NOT read a dynamic running-suite count (S stays a static knob)");
 });
 
 test("AC74/判据2 — serial default is HOST-derived (H÷(S×P)); lowconc default is the SAME host-derived value (gap-lowconc-concurrency-restore-host-derived)", () => {
@@ -682,12 +709,16 @@ test("判据4 — direct path and runner path read the SAME values (main=H×over
   const prevOverlap = process.env.QUAY_PHASE_OVERLAP;
   const prevSeam = process.env.RESOURCE_GATE_CONCURRENT_SUITES;
   const prevLock = process.env.FULL_SUITE_LOCK_FILE;
+  const prevInUse = process.env.RESOURCE_GATE_TEST_NODE_PROCS;
   // This test drives the KNOB — clear the seam (read FIRST by suiteLockSlotCount since
   // gap-suite-lock-slot-seam-asymmetry) so it cannot shadow the knob from an ambient test env.
   delete process.env.RESOURCE_GATE_CONCURRENT_SUITES;
   process.env.RESOURCE_GATE_NPROC = "16";
   process.env.QUAY_MAX_CONCURRENT_SUITES = "2";
   process.env.QUAY_MAX_OVERSUBSCRIPTION = "1";
+  // Pin in_use to 0 (idle baseline) so the budget-aware runner (defaultLaneCount) and the direct path
+  // (derivedConcurrency, in_use=0) compare equal — an unset seam would shell out to the live host.
+  process.env.RESOURCE_GATE_TEST_NODE_PROCS = "0";
   // Hermetic against the PRODUCTION `.concurrency` scalar (gap-suite-slot-ssot-i5-false-positive): a
   // live-suite S=1 file at <suiteLockBase>.concurrency would otherwise SHADOW the knob=2 this test
   // drives (the file has priority over QUAY_MAX_CONCURRENT_SUITES) ⇒ concurrentSuiteSlots() reads S=1
@@ -746,6 +777,8 @@ test("判据4 — direct path and runner path read the SAME values (main=H×over
     else process.env.RESOURCE_GATE_CONCURRENT_SUITES = prevSeam;
     if (prevLock === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
     else process.env.FULL_SUITE_LOCK_FILE = prevLock;
+    if (prevInUse === undefined) delete process.env.RESOURCE_GATE_TEST_NODE_PROCS;
+    else process.env.RESOURCE_GATE_TEST_NODE_PROCS = prevInUse;
     fs.rmSync(pinTmp, { recursive: true, force: true });
   }
 });
@@ -763,6 +796,62 @@ test("判据2 NEGATIVE CONTROL — the checker CAN take false: the pre-fix state
   assert.equal(targetLane, 8, "new target lane = 8");
   assert.notEqual(preFixLanes[0], targetLane, `pre-fix first suite 16 ≠ ${targetLane} (nproc×oversub/S) → RED on main`);
   assert.ok(preFixLanes[0] + preFixLanes[1] > host * oversub, "pre-fix Σ 24 > nproc×oversub 16 → RED");
+});
+
+// ── gap-process-budget-in-use-structurally-zero-never-throttles: budget-aware MAIN derivation ───────
+// The MAIN-lane derivation must subtract the cross-layer in_use (throttle-able node --test processes)
+// so a busy host takes fewer lanes. Idle (in_use=0) keeps the pure formula; the oversub code default
+// stays 1. The pre-fix defect: in_use was structurally 0 ⇒ the subtraction never subtracted, so a busy
+// host derived the idle-host lane count (16×1.75=28 on a 16-core host).
+
+/** defaultLaneCount (the runner-path main formula) with seams, hermetic against the production
+ *  `.concurrency` scalar AND any live `.yielded` markers — pin the lock base to a clean temp dir so
+ *  yieldedSuiteSlotCount() reads 0. S is driven via the RESOURCE_GATE_CONCURRENT_SUITES seam (outranks
+ *  the file); in_use via RESOURCE_GATE_TEST_NODE_PROCS; oversub via QUAY_MAX_OVERSUBSCRIPTION. */
+function runnerLaneCount(seams) {
+  const prevLock = process.env.FULL_SUITE_LOCK_FILE;
+  const pinTmp = fs.mkdtempSync(path.join(os.tmpdir(), "rg-rl-"));
+  const pinBase = path.join(pinTmp, "full-suite.lock");
+  process.env.FULL_SUITE_LOCK_FILE = pinBase;
+  try {
+    return withSeams(seams, () => defaultLaneCount());
+  } finally {
+    if (prevLock === undefined) delete process.env.FULL_SUITE_LOCK_FILE;
+    else process.env.FULL_SUITE_LOCK_FILE = prevLock;
+    fs.rmSync(pinTmp, { recursive: true, force: true });
+  }
+}
+
+test("AC4/AC5 — defaultLaneCount is budget-aware: in_use>0 ⇒ < nproc; in_use=0 ⇒ nproc×oversub (bidirectional, S=1 production shape)", () => {
+  // S=1 (the production slot count) so the idle baseline is nproc×oversub (single suite = whole host).
+  const idle = runnerLaneCount({ RESOURCE_GATE_NPROC: "16", RESOURCE_GATE_CONCURRENT_SUITES: "1", QUAY_MAX_OVERSUBSCRIPTION: "1" });
+  assert.equal(idle, 16, "idle in_use=0, oversub=1, S=1 → nproc = 16");
+  const busy = runnerLaneCount({ RESOURCE_GATE_NPROC: "16", RESOURCE_GATE_CONCURRENT_SUITES: "1", QUAY_MAX_OVERSUBSCRIPTION: "1", RESOURCE_GATE_TEST_NODE_PROCS: "4" });
+  assert.equal(busy, 12, "in_use=4 → (16−4)×1/1 = 12");
+  assert.ok(busy < 16, "a busy host takes fewer than nproc lanes");
+  // Clamps at 1 when in_use >= nproc (never 0 lanes, never negative).
+  const saturated = runnerLaneCount({ RESOURCE_GATE_NPROC: "16", RESOURCE_GATE_CONCURRENT_SUITES: "1", QUAY_MAX_OVERSUBSCRIPTION: "1", RESOURCE_GATE_TEST_NODE_PROCS: "20" });
+  assert.equal(saturated, 1, "in_use=20 ≥ nproc → clamps at 1 (max(1, ...))");
+});
+
+test("AC4 — direct path and runner path BOTH subtract in_use (set in_use back to 0 ⇒ full value)", () => {
+  // The DIRECT path (defaultTestConcurrency) and RUNNER path (defaultLaneCount) stay equal under the
+  // SAME seams (判据4), and both respond to in_use.
+  const busyDirect = derivedConcurrency(16, 2, 1, 4);   // (16−4)/2 = 6
+  const busyRunner = runnerLaneCount({ RESOURCE_GATE_NPROC: "16", RESOURCE_GATE_CONCURRENT_SUITES: "2", QUAY_MAX_OVERSUBSCRIPTION: "1", RESOURCE_GATE_TEST_NODE_PROCS: "4" });
+  assert.equal(busyDirect, 6, "direct in_use=4 → (16−4)/2 = 6");
+  assert.equal(busyRunner, 6, "runner in_use=4 → 6 (equal to direct)");
+  // Set in_use back to 0 ⇒ back to nproc×oversub/S (bidirectional falsifiable).
+  assert.equal(derivedConcurrency(16, 2, 1, 0), 8, "in_use=0 → back to 16×1/2 = 8");
+  assert.equal(runnerLaneCount({ RESOURCE_GATE_NPROC: "16", RESOURCE_GATE_CONCURRENT_SUITES: "2", QUAY_MAX_OVERSUBSCRIPTION: "1" }), 8, "runner in_use=0 → back to 8");
+});
+
+test("AC6 — oversub code default is 1 (not 1.75): QUAY_MAX_OVERSUBSCRIPTION unset ⇒ defaultLaneCount uses 1", () => {
+  // The production config's 1.75 was an experiment residue (already ops-changed to 1 by the human);
+  // the CODE default must be 1 so a fresh host/install never oversubscribes by 1.75×.
+  const defaultOversub = runnerLaneCount({ RESOURCE_GATE_NPROC: "16", RESOURCE_GATE_CONCURRENT_SUITES: "1" });
+  // withSeams clears QUAY_MAX_OVERSUBSCRIPTION ⇒ the code default 1 applies (not 1.75 ⇒ not 28).
+  assert.equal(defaultOversub, 16, "oversub unset → default 1 → nproc×1/1 = 16 (not 16×1.75=28)");
 });
 
 // ── COUNTING SCOPE (gap-process-budget-counts-infra-as-test-concurrency-cap-pinned-1, AC2/AC3/AC4) ──

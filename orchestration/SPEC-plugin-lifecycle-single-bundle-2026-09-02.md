@@ -160,6 +160,15 @@ tasks/                   任务目录（数据，不是扩展代码）
 .claude/settings.json    enabledPlugins（本项目启用，裁定 5）
                          + permissions.allow: ["mcp__plugin_quay_quay__*"]
 ```
+QUAY-INIT-CLOSED-SET:BEGIN
+- .quay/config.yml
+- .quay/profiles.yml
+- tasks/
+- .gitignore
+- .claude/launch.settings.json
+- .claude/settings.json
+QUAY-INIT-CLOSED-SET:END
+
 **⊢ 两组的区别是本质的**：上组是 **quay 这个产品要求的项目结构**（换个宿主也需要）；
 下组是**让宿主 Claude Code 知道去哪找已装好的插件**（一次性、幂等、纯配置）。
 **⛔ `extraKnownMarketplaces` 不进项目 settings**——它是机器特定绝对路径，属 User Scope（§4b）。
@@ -438,6 +447,16 @@ npm 侧无需处理（`files` 是白名单，`archive/` 天然不在内）。
 
 **⚠️ 本清单是【带测量日期的快照】，不是活文档。** 判据（§12d）是耐久的，名单会随代码演化过期；
 **执行 archive 前须按 §12d 重算一次**，以重算结果为准。
+
+**⊕ 死集重算回写（2026-09-07，`gap-dead-set-closure-repo-root-call-form-false-positive` 补认执行形式后）**：
+按 §12d（三天零执行 ∧ 无生产调用者）+ §12e 传递闭包（补认 `${repo_root}/plugin/scripts/<name>`、
+`path.join(__dirname, "<name>")`、`$SCRIPT_DIR/<name>` 三种执行形式）+ §12f 裸文件名边重算；
+方法窗口与完整名单见 `docs/analysis/dead-set-recomputed.json`
+（`generatedAt` 2026-09-07T14:38:19.347Z；窗口 2026-09-04T14:32:46.988Z → 2026-09-07T14:32:46.988Z，72h；
+`executionDataSource` = 三层 transcript 普查，非 runtime-usage-inventory.ts）。
+
+- 扫描前死集: 86
+- 扫描后死集: 82
 
 #### 安全核 94 个（`plugin/scripts/` 下，两口径下均判死；56 个自带测试须同批移动）
 

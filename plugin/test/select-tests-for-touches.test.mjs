@@ -97,6 +97,7 @@ function spawnTestSh(args) {
   // transient untracked fixture (runner-grouping AC7's zz-*-undeclared.test.mjs) → spurious
   // "NEW file without @test-group" → exit 1 (surfaced 2026-08-03, stranded+parser combined suite).
   env.QUAY_TEST_SKIP_STATIC_CHECKS = "1";
+  env.QUAY_TEST_SKIP_QUAY_REFRESH = "1";
   return spawnSync("bash", [TEST_SH, ...args], {
     cwd: REPO_ROOT,
     encoding: "utf8",

@@ -108,7 +108,7 @@ export { TASK_FILTERS, applyTaskFilters, makeFilterContext, allDepsDone, readTas
 
 /** 驱动 kind 标识（promotion/worker = 任务处理型，继承 0+1a；outer = 例程型，继承 0+1b——AC143 承接
  *  outer 的纯机械 A/B 段；quality = 例程型（AC144，1b）——均无任务池/无选择/无 verify）。 */
-export type DriverKind = "promotion" | "worker" | "outer" | "quality" | "suite" | "meta" | "goal";
+export type DriverKind = "promotion" | "worker" | "outer" | "quality" | "meta" | "goal";
 
 /** 一个 kind 的 registry 条目（KIND_* 八张 bash 表 → 一个 TS 数据结构）。 */
 export interface KindSpec {
@@ -189,22 +189,6 @@ export const DRIVER_KINDS: Record<DriverKind, KindSpec> = {
     carriers: ["quality-round.jsonl"],
     tsKey: "judgedAt",
     controlFile: "quality-control.json",
-  },
-  // suite（SPEC-suite-lifecycle-and-failure-semantics §3）：per-task suite 生命周期收进一个常驻 driver。
-  // 它是【唯一】spawn per-task suite 的地方——直接 spawn suite 并 wait（进程级父子），辅以定时兜底静默
-  // 检测；spawn 前取单飞槽、子进程终结后释放槽（取/放同一执行点）。无任务池 ⇒ 无 cap（同 quality）。
-  // carrier = suite-round.jsonl（每轮一条，outcome 三态可分 done/red/hung）。
-  suite: {
-    driver: "suite-driver.ts",
-    prefix: "suite-driver",
-    verbs: ["start", "stop", "drain", "resume", "status", "restart", "liveness"],
-    capFlag: "",
-    hasInterval: true,
-    hasReconcile: false,
-    pidSelf: true,
-    runPrefix: "st-prod",
-    carriers: ["suite-round.jsonl"],
-    controlFile: "suite-control.json",
   },
   // meta：机制演进复核（例程型，继承 Layer 0 + 1b）。唯一例程 = meta-review：跑 active goal 各 AC 的
   // criterion → 机械算 divergence → 【读数变了/给了 focus/到地板】才派语义半（事件触发 + 定时器地板，
@@ -315,7 +299,7 @@ export function resolveMainRoot(root: string): string {
 // carrier_records = 全载体行数之和（wc -l 语义：数换行符）；last_record_ts = 全载体末条记录 ts 的
 // 最大值（⛔ 只报计数无法区分「在长」与「停更」——载体停更与「一切正常」同形）。时间戳键按 kind 的
 // tsKey 读（缺省 ts；quality 判词载体用 judgedAt——gap-meta-carrierstats：键不匹配会把停摆伪装成
-// 未查）。
+// 未查）。quality 载体混两种键（心跳 ts + 判词 judgedAt），读两者较新者——见 gap-meta-round-log-rel。
 
 /** 一个 kind 的载体观测结果。 */
 export interface CarrierStats {
@@ -328,6 +312,10 @@ export interface CarrierStats {
 export function carrierStats(root: string, kind: DriverKind): CarrierStats {
   const spec = DRIVER_KINDS[kind];
   const tsKey = spec.tsKey ?? "ts";
+  // 时间戳键集合：quality 载体混两种键（心跳 ts + 判词 judgedAt——gap-meta-round-log-rel）。取两者较
+  // 新者作 lastTs；⛔ 只读 tsKey 会把心跳（ts，每 30s 一条的 liveness 直接量）与停摆同形——判词 judgedAt
+  // 是间歇量，池不触发就停更，靠它判活必假报 stall（硬规则 4b：liveness 用直接量，⛔ 不用间歇派生量）。
+  const tsKeys = tsKey === "ts" ? ["ts"] : [tsKey, "ts"];
   let records = 0;
   let lastTs: string | null = null;
   let primaryPath = "";
@@ -347,8 +335,10 @@ export function carrierStats(root: string, kind: DriverKind): CarrierStats {
       if (!line.trim()) continue;
       try {
         const j = JSON.parse(line);
-        if (j && typeof j[tsKey] === "string" && j[tsKey]) {
-          if (lastTs === null || j[tsKey] > lastTs) lastTs = j[tsKey];
+        for (const k of tsKeys) {
+          if (j && typeof j[k] === "string" && j[k] && (lastTs === null || j[k] > lastTs)) {
+            lastTs = j[k];
+          }
         }
       } catch {
         /* torn/partial tail — skip */
@@ -794,11 +784,19 @@ export interface Fact<T = unknown> {
   reason: string | null;
 }
 
-/** 一条例程（name + schedule 判定 + run() → Facts[]）。 */
+/** 一条例程本轮可读的控制面上下文。halted=true ⇒ 本轮【不做受闸动作（spawn）】，但机械读数照跑
+ *  （gap-drain-on-routine-driver-empties-round-and-respawn-loops：halt 是轮内的闸，⛔ 不是进程的
+ *  终止条件——旧的 break 让例程型 driver 每 5s 起停一次）。 */
+export interface RoutineRunContext {
+  halted: boolean;
+}
+
+/** 一条例程（name + schedule 判定 + run(ctx) → Facts[]）。ctx 可选——不读 halt 的例程定义无需该参数；
+ *  需按 halt 挡 spawn 的例程用 ctx.halted（只挡动作，不挡观测）。 */
 export interface RoutineSpec {
   name: string;
   schedule: Parameters<typeof isDue>[0];
-  run(): Fact[] | Promise<Fact[]>;
+  run(ctx?: RoutineRunContext): Fact[] | Promise<Fact[]>;
 }
 
 /** schedule（Layer 1b）：复用 routine-scheduler.ts 的判定函数，⛔ 不新造定时器。 */
@@ -1067,9 +1065,11 @@ export async function startKind(
     out(`already-running: supervisor pid=${spidRaw}\n`);
     return statusForKind(root, kind, true, out);
   }
-  // gap-driver-drain-no-inverse AC2：drain 写 halted=true 后，若 start 照常 spawn supervisor，驱动会立刻
-  // 读到 halt 退出、supervisor 再 respawn ⇒ 无限 respawn 循环（「起不来却表现为正在重启」，硬规则 3b 同形）。
-  // 无活 supervisor 且控制态 halted ⇒ 明确拒绝并提示解闸命令（退出 1），⛔ 不静默进 respawn 循环。
+  // gap-driver-drain-no-inverse AC2：drain 写 halted=true 后，start 照常 spawn supervisor 会起一个用户
+  // 已 halt 的驱动。1a 类（promotion/worker）读到 halt ⇒ 本轮 break 退出 ⇒ supervisor respawn；
+  // 例程型（goal/quality/outer/meta）读到 halt ⇒ 只观测不派发（循环继续，见 gap-drain-on-routine-driver-
+  // empties-round-and-respawn-loops——已修掉例程型的 exit，⛔ 不靠这里的拒绝来消 respawn，但起一个已
+  // halt 的驱动仍是错的）。无活 supervisor 且控制态 halted ⇒ 明确拒绝并提示解闸命令（退出 1）。
   // 读失败（parseError）⇒ 同样拒绝（fail-closed，⛔ 读不懂 ≠ 未 halt）。
   const ctlRel = path.posix.join(".quay", spec.controlFile);
   const ctl = readControlState(root, process.env, ctlRel);
@@ -1154,8 +1154,11 @@ export async function stopKind(root: string, kind: DriverKind, out: (s: string) 
   return 0;
 }
 
-/** drain（两个 kind 都支持，AC150-2）：halt 语义——写 <kind>-control.json halted=true，只挡新派发/新一轮，
- *  ⛔ 不杀在飞。读-改-写经 driver-shared 单一真相源（保留 preference/forced，不破坏用户控制态）。 */
+/** drain（AC150-2）：halt 语义——写 <kind>-control.json halted=true。halt 的效果是【每 kind 自己的闸】：
+ *  1a 类（promotion/worker）读到 halt ⇒ 本轮 break 退出；例程型（goal/quality/outer/meta）读到
+ *  halt ⇒ 只挡受闸动作（spawn），观测循环继续（gap-drain-on-routine-driver-empties-round-and-respawn-
+ *  loops——⛔ 不再整进程退出）。两种都【不杀在飞 worker】。读-改-写经 driver-shared 单一真相源
+ *  （保留 preference/forced，不破坏用户控制态）。 */
 export function drainKind(root: string, kind: DriverKind, out: (s: string) => void = (s) => process.stdout.write(s)): number {
   const spec = DRIVER_KINDS[kind];
   const rel = path.posix.join(".quay", spec.controlFile);
@@ -1243,7 +1246,7 @@ export async function main(argv: string[]): Promise<number> {
 
 Usage:
   node --experimental-strip-types plugin/scripts/driver-runtime.ts <start|stop|drain|resume|status|restart|liveness> \\
-    --kind <promotion|worker|outer|quality|suite> [--root <repo>] [--interval <ms>] [--reconcile-interval <s>] [--cap <n>] \\
+    --kind <promotion|worker|outer|quality|meta|goal> [--root <repo>] [--interval <ms>] [--reconcile-interval <s>] [--cap <n>] \\
     [--restart-delay <s>] [--run-id <id>] [--json]
 `);
     return 0;

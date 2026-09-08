@@ -53,7 +53,7 @@
 |---|---|
 | Layer 0 的 `trigger 兜底轮询 + 事件订阅` 一行**只存在于注释** | `plugin/scripts/driver-runtime.ts:15`；全文件 `subscribe`/`EventEmitter`/`fs.watch` **零命中**（本会话 grep 实测） |
 | `on(<event>)` 的**解析器与匹配器已实现，生产者未实现** | `routine-scheduler.ts` 解析 `/^on\(\s*([\w-]+)\s*\)$/`；事件名文法为任意 `[\w-]+`，**无枚举词表、无校验** |
-| 一个 driver 在对空气产出结构化 Fact | `.quay/outer-round.jsonl` 自 2026-08-26 每轮写入；除 `outer-driver.ts` 自身外，全仓库仅 `driver-runtime.ts:175`（carriers 登记，供 `carrierStats` 做**存活统计**）引用它 ⇒ **Fact 的内容无任何程序消费者**；`outer-driver.ts:8` 自述「manager/语义层可消费」——即设计上的消费者是一个**人/LLM 按需去读**的路径，而它没有发生 |
+| 一个 driver 在对空气产出结构化 Fact | `.quay/outer-round.jsonl` 自 2026-08-26 每轮写入；除 `outer-driver.ts` 自身外，全仓库仅 `driver-runtime.ts:175`（carriers 登记，供 `carrierStats` 做**存活统计**）引用它 ⇒ **Fact 的内容无任何程序消费者**；`outer-driver.ts:8` 自述「manager/语义层可消费」——即设计上的消费者是一个**人/LLM 按需去读**的路径，而它没有发生。**2026-09-07 补**：AC36 机械排序轴已于 2026-09-07 按人裁定退役、孤儿代码已清理（`gap-delivery-critical-mechanical-axis-orphaned-needs-ruling`）——`slot-refill.ts` 的 `delivery_critical` 排序轴 + `concurrent-batch-scheduler.ts` 的 `deliveryCritical` 读面 + `ac36-sortkey-criterion-check.ts` 检查器全部移除，delivery-critical 优先完全由 selector 语义判断承担，无机械保证。 |
 
 **⊢ 结论**：事件面不是「要不要做」的问题（08-23 §5 已裁定要做），是**「已裁定 12 天、Layer 0 侧零实现」**的问题。
 本 SPEC 不重新设计它，只在 §3.1 给出补齐判据。

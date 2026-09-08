@@ -25,7 +25,6 @@
     "./skills/quay-webui-bootstrap-methodology/SKILL.md"
   ],
   "agents": [
-    "./agents/baime-iteration-executor.md",
     "./agents/quay-task.md"
   ]
 }

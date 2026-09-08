@@ -89,7 +89,7 @@ test('AC2/AC3 end-to-end: quay-init --all installs the live categories but NOT t
     // Live categories still land.
     assert.ok(fs.existsSync(path.join(ws, '.claude', 'workflows', 'drain-directives.js')),
       '--all must still lay down workflows');
-    assert.ok(fs.existsSync(path.join(ws, '.claude', 'agents', 'baime-iteration-executor.md')),
+    assert.ok(fs.existsSync(path.join(ws, '.claude', 'agents', 'quay-task.md')),
       '--all must still lay down agents');
     // Dead weight does NOT land: the retired gate-scripts category must not create scripts/gates/.
     assert.equal(fs.existsSync(path.join(ws, 'scripts', 'gates')), false,

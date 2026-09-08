@@ -48,6 +48,7 @@ interface TaskFrontmatter {
     dirStatus?: string;        // directive disposition
     depends_on?: string[];     // legacy home — task_write used to nest it under extra
     malformed?: string[];      // store-injected diagnosis markers
+    deliveryCriticalSource?: string; // "evidence" | "adhoc" — which source attached the delivery-critical label
     [key: string]: unknown;
   };
   [key: string]: unknown;      // forward-compatible: unknown fields survive the round-trip
@@ -119,6 +120,25 @@ The mechanical consumer is `plugin/scripts/goal-driver.ts`'s `computeGoalGaps()`
 unachieved (status `active`) AC, `count(task where goal_ac == AC and status ∈ {todo, ready}) == 0`
 ⇒ a **gap** — the three-state output (`in-progress` / `gap` / `not-evaluated`) keeps "read the
 input and found nothing advancing this AC" distinct from "could not read the input at all".
+
+## `deliveryCriticalSource` — the `delivery-critical` label's source discriminator
+
+`extra.deliveryCriticalSource` is an **optional** `extra.*` scalar that records *which source*
+attached the `delivery-critical` label. It exists because the label now has two legal sources that
+were previously conflated into a single prose claim ("由 outer 按证据打，从不移除"):
+
+| Value | Source | Write path |
+|---|---|---|
+| `evidence` | 立案/晋升时按证据打（outer 已退役；晋升路径现在只【保留】已存在的标签，`ensureDeliveryCriticalLabel` 在**新增**标签时盖 `evidence`） | `plugin/scripts/task-ops.ts` `ensureDeliveryCriticalLabel` (promote gate) |
+| `adhoc` | DIR-130 授权 manager 按人类临时插队指令加/删 | `task_write(extra: { deliveryCriticalSource: "adhoc" })` — 纯 `extra.*` 透传，无专码 |
+| *(absent)* | 历史遗留：任务先于该字段存在，来源不可考 | — |
+
+The read path is `frontmatterDeliveryCriticalSource()` in `plugin/scripts/task-schema.ts` (the same
+projection family as `frontmatterStatus` / `frontmatterGoalAc`). It returns an **explicit
+three-state** (硬规则 3b): `"evidence"` / `"adhoc"` are returned verbatim; **anything else —
+absent (legacy) OR an unrecognized value — returns `"unknown"`**, never conflated with either
+concrete source. A legacy delivery-critical task (the 110 pre-field tasks in the store) is therefore
+*not* misjudged as "source unclear ⇒ problem" — `unknown` is a legitimate, named legacy condition.
 
 ## CLI write surface for the top-level fields
 

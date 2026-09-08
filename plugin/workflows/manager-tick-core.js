@@ -391,6 +391,6 @@ return {
     第三步_收尾: CLOSING,
     第四步_发消息时照这个: SENDING,
     说明: '这三段由本 workflow 从磁盘上的 .js 交还给你，不依赖你的会话上下文——' +
-          '判准是数据不是记忆，跨 clear/compact 稳定。改判据请改 .claude/workflows/manager-tick-readings.js。',
+          '判准是数据不是记忆，跨 clear/compact 稳定。改判据请改 orchestration/manager-tick-criteria.md。',
   },
 }

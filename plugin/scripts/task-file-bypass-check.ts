@@ -71,7 +71,6 @@ export const ALLOWLIST: Record<string, { reason: string; expected: number }> = {
   "plugin/scripts/workflow-journal.ts": { reason: "embedded --selftest fixture writes a FAKE store under fs.mkdtempSync — not the live store, tripped by the coarse positional detector", expected: 1 },
   "plugin/skills/routines/": { reason: "routines skill doc — seeded from the Plan allowlist (scan surface is code files; kept for fidelity)", expected: 0 },
   "plugin/workflows/fan-in-execute.js": { reason: "fan-in workflow mechanically flips/commits tasks/<id>.md (the AC78 landing write, task-path in generated prompt/heredoc text so it currently measures 0 hits) — gap-quay-task-consolidated-subagent will route it through the ABI", expected: 0 },
-  ".claude/workflows/fan-in-execute.js": { reason: "dual-copy of the fan-in workflow (same AC78 landing write)", expected: 0 },
 };
 
 // ── detection ─────────────────────────────────────────────────────────────────────────────────────

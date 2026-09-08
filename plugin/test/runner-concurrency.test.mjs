@@ -36,13 +36,20 @@ const CONCURRENCY_ENV = [
   "QUAY_MAX_OVERSUBSCRIPTION",
   "QUAY_MAX_CONCURRENT_SUITES",
   "QUAY_PHASE_OVERLAP",
+  // gap-process-budget-in-use-structurally-zero-never-throttles: the MAIN derivation is now
+  // BUDGET-AWARE (subtracts in_use = testProcessesInUse()). in_use is hermetic-pinned to 0 unless a
+  // test drives RESOURCE_GATE_TEST_NODE_PROCS explicitly — otherwise defaultTestConcurrency would
+  // shell out to the live host and read a nondeterministic in_use (incl. this test's own node --test
+  // workers).
+  "RESOURCE_GATE_TEST_NODE_PROCS",
 ];
 function withSeams(seams, fn) {
   const saved = {};
   const touched = [];
-  for (const k of Object.keys(seams)) {
+  const effective = { RESOURCE_GATE_TEST_NODE_PROCS: "0", ...seams };
+  for (const k of Object.keys(effective)) {
     saved[k] = process.env[k];
-    process.env[k] = seams[k];
+    process.env[k] = effective[k];
     touched.push(k);
   }
   // Hermetic: any concurrency-knob env NOT explicitly provided is cleared for the call (restored
@@ -51,7 +58,7 @@ function withSeams(seams, fn) {
   // runner-concurrency + resource-gate self-tests because the exported oversub leaked into fixtures
   // expecting 16×1/2=8). Same hermetic-input discipline as the outer-cron-registry host guard.
   for (const k of CONCURRENCY_ENV) {
-    if (!(k in seams)) {
+    if (!(k in effective)) {
       saved[k] = process.env[k];
       delete process.env[k];
       touched.push(k);

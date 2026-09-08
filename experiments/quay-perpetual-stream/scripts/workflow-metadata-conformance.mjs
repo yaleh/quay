@@ -11,7 +11,7 @@
 //   5. Worktree/isolation mechanism mention                   (WARN on unmentioned mechanism)
 //   6. Cache/resume mechanism mention                         (FAIL on stale claim, WARN on omission)
 //   7. Gate-count precision (only if meta claims a specific count)
-//   8. Mirror byte-identity across .claude/workflows/ and plugin/workflows/
+//   8. Mirror byte-identity across same-basename files (workflow dual copies retired: no default mirrors)
 //   9. Re-entrant phase documentation                         (WARN on unannotated multiplicity)
 //
 // Extraction is PURE regex/string-operation on source TEXT — never eval/import of the workflow
@@ -720,7 +720,7 @@ function usage() {
   console.log(
     "usage: node workflow-metadata-conformance.mjs [--json] [--workspace-root <dir>] [<file...>]\n" +
     "  --json              emit the full result object as one JSON line (for DoD-gate machine consumption)\n" +
-    "  --workspace-root    override the repo root used for the default 4-file list (default: auto-derived)\n" +
+    "  --workspace-root    override the repo root used for the default 2-file list (default: auto-derived)\n" +
     "  <file...>           override the default file list (each file is checked independently)\n" +
     "Exit: 0 = all hard checks pass; 1 = >=1 FAIL; 2 = usage/env error (missing file)."
   );
@@ -754,10 +754,9 @@ export function main(argv) {
       // were retired with the classic milestone loop (ADR-022).
       // gap-select-preflight-retirement-decision: select-preflight.js retired with the classic
       // OUTER-LOOP SELECT phase (2026-08-16). The surviving checked-in workflows are
-      // drain-directives and run-routines (with plugin mirrors).
-      path.join(repoRoot, ".claude/workflows/drain-directives.js"),
+      // drain-directives and run-routines (single source in plugin/workflows/ — the .claude/workflows/
+      // dual copies were retired by gap-ac166-second-copy-retirement).
       path.join(repoRoot, "plugin/workflows/drain-directives.js"),
-      path.join(repoRoot, ".claude/workflows/run-routines.js"),
       path.join(repoRoot, "plugin/workflows/run-routines.js"),
     ];
   }

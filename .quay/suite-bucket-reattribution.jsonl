@@ -7,7 +7,6 @@
 {"file":"experiments/quay-perpetual-stream/test/finding-backpropagate.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs","judgment":"S","mechanism":"S","signal":["concurrency"]}
 {"file":"experiments/quay-perpetual-stream/test/workflow-baseline-metrics.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
-{"file":"plugin/test/ac36-sortkey-criterion-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/ac56-recommended-deordered-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/ac61-staleness-disposition-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/ac69-slot-queue-gap-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
@@ -201,5 +200,4 @@
 {"file":"plugin/test/workflow-journal.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/workflow-metadata-conformance.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/workflow-replay.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
-{"file":"plugin/test/workflows-dual-copy-drift-check.test.mjs","judgment":"M","mechanism":"S+M","signal":[]}
 {"file":"plugin/test/worktree-root-fs-check.test.mjs","judgment":"M","mechanism":"S","signal":[]}

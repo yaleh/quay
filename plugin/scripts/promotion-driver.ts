@@ -233,13 +233,19 @@ export function buildFixWorkerArgv(id: string, missing: string[], root: string, 
 }
 
 /** spawn 一个短命 fix worker 的结果（AC142 诊断面：stdout/stderr/timedOut 落进可查载体，spawn 失败
- *  不再零诊断信息——对照 gap-fix-worker-spawn-zero-diagnostic-info 的 10 条 `spawned exit=1` 无 stderr）。 */
+ *  不再零诊断信息——对照 gap-fix-worker-spawn-zero-diagnostic-info 的 10 条 `spawned exit=1` 无 stderr）。
+ *  gap-fix-worker-spawn-timeout-persists-post-fix AC4：补 argv + durationMs——失败记录可 grep 到
+ *  「命令 + 耗时 + 退出码」三项，诊断不再只能靠人当场复现。 */
 export interface FixWorkerSpawnResult {
   exitCode: number | null;
   error: string | null;
   stdout: string | null;
   stderr: string | null;
   timedOut: boolean;
+  /** AC4 诊断面：spawn 的完整 argv（命令 + 参数，含 --model / --settings / prompt）。 */
+  argv: string[] | null;
+  /** AC4 诊断面：spawn 的墙钟耗时（毫秒，Date.now 差值）。spawnSync 超时 ⇒ ≈ timeoutMs。 */
+  durationMs: number | null;
 }
 
 /** spawn 一个短命 fix worker（claude -p，或 --fix-worker-cmd 覆盖前缀），同步等待其退出。
@@ -248,21 +254,23 @@ export interface FixWorkerSpawnResult {
  *  （AC133），⛔ 不信 worker 自述。 */
 export function spawnFixWorker(argv: string[], root: string, timeoutMs: number = FIX_WORKER_TIMEOUT_MS): FixWorkerSpawnResult {
   if (!Array.isArray(argv) || argv.length === 0) {
-    return { exitCode: null, error: "empty fix-worker argv", stdout: null, stderr: null, timedOut: false };
+    return { exitCode: null, error: "empty fix-worker argv", stdout: null, stderr: null, timedOut: false, argv: null, durationMs: null };
   }
+  const startMs = Date.now();
   try {
     const r = spawnSync(argv[0], argv.slice(1), {
       cwd: root, encoding: "utf8", timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024,
       stdio: ["ignore", "pipe", "pipe"],
     });
+    const durationMs = Date.now() - startMs;
     const stdout = String(r.stdout ?? "").trim() || null;
     const stderr = String(r.stderr ?? "").trim() || null;
     const timedOut = !!(r.error && (r.error as { code?: string }).code === "ETIMEDOUT");
-    if (r.error) return { exitCode: null, error: String(r.error.message || r.error), stdout, stderr, timedOut };
-    return { exitCode: r.status, error: null, stdout, stderr, timedOut };
+    if (r.error) return { exitCode: null, error: String(r.error.message || r.error), stdout, stderr, timedOut, argv, durationMs };
+    return { exitCode: r.status, error: null, stdout, stderr, timedOut, argv, durationMs };
   } catch (e) {
     const msg = e && typeof e === "object" && "message" in e ? String(e.message) : String(e);
-    return { exitCode: null, error: msg, stdout: null, stderr: null, timedOut: false };
+    return { exitCode: null, error: msg, stdout: null, stderr: null, timedOut: false, argv, durationMs: Date.now() - startMs };
   }
 }
 
@@ -355,6 +363,10 @@ export interface FixOutcome {
   stderr: string | null;
   /** AC142 诊断面：fix worker 是否超时（spawnSync timeout ETIMEDOUT）。 */
   timedOut: boolean;
+  /** gap-fix-worker-spawn-timeout-persists-post-fix AC4：spawn 的完整 argv（失败记录可 grep 命令）。 */
+  argv: string[] | null;
+  /** gap-fix-worker-spawn-timeout-persists-post-fix AC4：spawn 的墙钟耗时（毫秒）。 */
+  durationMs: number | null;
 }
 
 export function computeRoundRecord(opts: {
@@ -408,11 +420,11 @@ export function computeRoundRecord(opts: {
 export function runFixPass(fixDecisions: FixDecision[], root: string, fixWorkerCmd: string | null): FixOutcome[] {
   return fixDecisions.map((d) => {
     if (!d.fixable) {
-      return { id: d.id, spawned: false, missing: d.missing, unfixable: d.unfixable, exitCode: null, stderr: null, timedOut: false };
+      return { id: d.id, spawned: false, missing: d.missing, unfixable: d.unfixable, exitCode: null, stderr: null, timedOut: false, argv: null, durationMs: null };
     }
     const argv = buildFixWorkerArgv(d.id, d.missing, root, fixWorkerCmd);
-    const { exitCode, stderr, timedOut } = spawnFixWorker(argv, root);
-    return { id: d.id, spawned: true, missing: d.missing, unfixable: [], exitCode, stderr, timedOut };
+    const { exitCode, stderr, timedOut, argv: spawnedArgv, durationMs } = spawnFixWorker(argv, root);
+    return { id: d.id, spawned: true, missing: d.missing, unfixable: [], exitCode, stderr, timedOut, argv: spawnedArgv, durationMs };
   });
 }
 
