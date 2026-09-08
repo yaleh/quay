@@ -361,23 +361,31 @@ export function isBranchMerged(root, taskId) {
 }
 
 /**
- * Whether the fast-mode branch `task/<taskId>` is checked out in an open worktree
+ * Whether the fast-mode task `<taskId>` is checked out in an open worktree
  * (`git worktree list --porcelain`). An open worktree is a positive "executor may be mid-flight"
  * presence signal — the record is kept. Any git failure → false.
+ *
+ * MATCH IS SHAPE-AWARE, NOT BRANCH-PREFIX-AWARE (gap-worktree-exists-blind-to-unprefixed-task-branch):
+ * a leftover worktree may be checked out on a bare `<taskId>` branch (no `task/` prefix) or a
+ * detached HEAD, so the branch-ref form alone was blind to it and the leftover-worktree exemption
+ * in ready-pool-check never fired. The only stable convention is the worktree PATH basename
+ * (`<quay-worktrees>/<task-id>`). A worktree matches when EITHER its path basename equals taskId
+ * OR its branch ref, with the `refs/heads/` namespace and an optional `task/` prefix stripped,
+ * equals taskId. listWorktrees is fail-soft ([] on any git failure), so an unreadable list stays
+ * false — absence is not fabricated into presence.
  * @param {string} root
  * @param {string} taskId
  * @returns {boolean}
  */
 export function worktreeExists(root, taskId) {
-  const branch = `refs/heads/task/${taskId}`;
-  try {
-    const out = execFileSync("git", ["-C", root, "worktree", "list", "--porcelain"], {
-      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
-    });
-    return out.split("\n").some((l) => l.trim() === `branch ${branch}`);
-  } catch {
-    return false;
-  }
+  const worktrees = listWorktrees(root);
+  return worktrees.some((wt) => {
+    if (wt.path && path.basename(wt.path) === taskId) return true;
+    if (!wt.branch) return false;
+    let short = wt.branch.startsWith("refs/heads/") ? wt.branch.slice("refs/heads/".length) : wt.branch;
+    if (short.startsWith("task/")) short = short.slice("task/".length);
+    return short === taskId;
+  });
 }
 
 /**
