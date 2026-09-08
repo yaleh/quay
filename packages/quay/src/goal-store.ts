@@ -572,22 +572,30 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       //               provenance only.
       // Each rejection names its kind and the missing field, distinguishable from every other
       // failure (hard rule 3b — "which field is missing" is the actionable info).
-      if (!isGoalRecord) {
-        if (typeof frontmatter.criterion !== "string" || frontmatter.criterion.trim() === "") {
-          throw new Error(
-            `${id} is a criterion record and requires a non-empty \`criterion\` — the runnable command that verifies it (a criterion's content lives in criterion+expect, not the body; empty criterion writes nothing)`
-          );
-        }
-        if (typeof frontmatter.expect !== "string" || frontmatter.expect.trim() === "") {
-          throw new Error(
-            `${id} is a criterion record and requires a non-empty \`expect\` — the expected outcome the criterion proves (a criterion's content lives in criterion+expect, not the body; empty expect writes nothing)`
-          );
-        }
-      } else {
-        if (finalBody.trim().length < MIN_GOAL_BODY_CHARS) {
-          throw new Error(
-            `${id} is a GOAL record and requires a \`body\` of ≥${MIN_GOAL_BODY_CHARS} non-whitespace chars (background / scope & non-goals / exit conditions) — \`origin\` is only a provenance citation, not the body; empty body writes nothing`
-          );
+      //
+      // CREATE-ONLY (⛔ never on update): the contract governs AUTHORING a new record, not the
+      // mechanical I2 status flip (active→achieved) the goal-driver performs on an EXISTING
+      // record via writeGoalStatus (plugin/scripts/goal-driver.ts), which carries only
+      // `status`+`origin`. Re-requiring body/criterion/expect on update would block that flip —
+      // including on the pre-rule empty-body goals this task deliberately does NOT backfill.
+      if (!existingFile) {
+        if (!isGoalRecord) {
+          if (typeof frontmatter.criterion !== "string" || frontmatter.criterion.trim() === "") {
+            throw new Error(
+              `${id} is a criterion record and requires a non-empty \`criterion\` — the runnable command that verifies it (a criterion's content lives in criterion+expect, not the body; empty criterion writes nothing)`
+            );
+          }
+          if (typeof frontmatter.expect !== "string" || frontmatter.expect.trim() === "") {
+            throw new Error(
+              `${id} is a criterion record and requires a non-empty \`expect\` — the expected outcome the criterion proves (a criterion's content lives in criterion+expect, not the body; empty expect writes nothing)`
+            );
+          }
+        } else {
+          if (finalBody.trim().length < MIN_GOAL_BODY_CHARS) {
+            throw new Error(
+              `${id} is a GOAL record and requires a \`body\` of ≥${MIN_GOAL_BODY_CHARS} non-whitespace chars (background / scope & non-goals / exit conditions) — \`origin\` is only a provenance citation, not the body; empty body writes nothing`
+            );
+          }
         }
       }
 
