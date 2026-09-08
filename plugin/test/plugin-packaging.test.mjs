@@ -86,10 +86,10 @@ test('plugin.json is valid JSON and declares the 13 bundled skills (M179/DIR-070
   assert.deepEqual(listedSkills, diskSkills, `plugin.json commands[] must list exactly the on-disk skill directories. Missing: ${diskSkills.filter((d) => !listedSkills.includes(d))}. Extra: ${listedSkills.filter((d) => !diskSkills.includes(d))}`);
 });
 
-test('M143: plugin.json declares agents[] with baime-iteration-executor and quay-task', () => {
+test('M143: plugin.json declares agents[] with quay-task', () => {
   const manifest = readJson(path.join(pluginDir, '.claude-plugin', 'plugin.json'));
   assert.ok(Array.isArray(manifest.agents), 'plugin.json must have agents[]');
-  for (const a of ['./agents/baime-iteration-executor.md', './agents/quay-task.md']) {
+  for (const a of ['./agents/quay-task.md']) {
     assert.ok(manifest.agents.includes(a), `plugin.json agents[] must include ${a}`);
   }
 });
@@ -589,13 +589,6 @@ test('M143: plugin/gate-scripts/ is RETIRED — kept in tree, not laid down by q
     'sync.sh must no longer sync the retired gate scripts');
 });
 
-test('M143: plugin/agents/baime-iteration-executor.md exists', () => {
-  const agentPath = path.join(pluginDir, 'agents', 'baime-iteration-executor.md');
-  assert.ok(existsSync(agentPath), 'plugin/agents/baime-iteration-executor.md must exist');
-  const src = readFileSync(agentPath, 'utf8');
-  assert.ok(src.length > 500, 'vendored agent file must have substantive content');
-});
-
 test('M143: plugin/sync.sh exists and is executable', () => {
   const syncPath = path.join(pluginDir, 'sync.sh');
   assert.ok(existsSync(syncPath), 'plugin/sync.sh must exist');
@@ -659,13 +652,8 @@ test('M179 (DIR-070-F): quay-webui-bootstrap-methodology plugin skill exists wit
 test('M179 (DIR-070-F): the .claude/skills/ second copies are retired (archived, not deleted)', () => {
   // gap-ac166-second-copy-retirement: .claude/skills/ 5 dirs were the "second copy" (drift source).
   // They are archived under archive/ (git mv + INDEX), NOT deleted. plugin/skills/ is now the
-  // single source, and .claude/skills/ must be empty.
-  // ⛔ 空目录不可 git 追踪（git 不存空目录、.gitkeep 会让 readdirSync 得 1 而非 0）⇒ 目录【不存在】
-  // 等价于【空】（无第二副本）。读不懂(ENOENT)当空，不因环境（gap-ac166 自己的 worktree 恰留有空目录）
-  // 而时绿时红。
-  const skillsDir = path.join(repoRoot, '.claude', 'skills');
-  const skillsEntries = existsSync(skillsDir) ? fs.readdirSync(skillsDir) : [];
-  assert.equal(skillsEntries.length, 0, '.claude/skills/ must be empty (second copies retired)');
+  // single source, and the repo-root .claude/skills/ directory no longer exists.
+  assert.ok(!existsSync(path.join(repoRoot, '.claude', 'skills')), '.claude/skills/ must not exist (second copies retired to archive/)');
   const archived = path.join(repoRoot, 'archive', '2026-09-07-second-copy-retirement', '.claude', 'skills');
   assert.ok(existsSync(path.join(archived, 'quay-native-methodology', 'reference', 'v-meta-stall-analysis.md')), 'archived quay-native-methodology source must exist in archive/');
   assert.ok(existsSync(path.join(archived, 'quay-native-methodology', 'reference', 'case-studies', 'iteration-88-abi-symmetry-walkthrough.md')), 'archived case-studies/ must exist in archive/');

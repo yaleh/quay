@@ -1,7 +1,7 @@
 {
-  "files": 134,
-  "bytes": 3884980,
-  "fingerprint": "6c7c043daf982ab887a3bf279c34ae72fd88e2755a954bcd0b18efd5b4b456d0",
+  "files": 133,
+  "bytes": 3880995,
+  "fingerprint": "e8c93e324ed60cb541d05e1947fe18be196b7254c027205e701664a1f29a2b98",
   "sources": [
     {
       "rel": "orchestration/manager-tick-core.md",
@@ -14,10 +14,6 @@
     {
       "rel": "plugin/.claude/launch.settings.json",
       "sha": "25e4ace2586d593da41a0b0f7380c2d77aed03d404b7a0f3414329f6df30baec"
-    },
-    {
-      "rel": "plugin/agents/baime-iteration-executor.md",
-      "sha": "c901e4aff424a629f8ab88e07d6bf554458bbaec98e651c01741c5f1c3ba5e57"
     },
     {
       "rel": "plugin/agents/quay-task.md",
@@ -105,7 +101,7 @@
     },
     {
       "rel": "plugin/scripts/capability-catalog.sh",
-      "sha": "18d2c5623f43b700ea94266047b4c62d4e92df83cec527da69d37c7ce42fa47d"
+      "sha": "44b666d84f28eb02f4efad30bde685b4e9c38c9a6ba2bea10da90f746c7cf139"
     },
     {
       "rel": "plugin/scripts/checker-io.ts",

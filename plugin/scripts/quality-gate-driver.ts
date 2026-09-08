@@ -103,6 +103,17 @@ export const ARCH_REVIEW_INTERVAL_MIN_DEFAULT = 60;
  *  gap-quality-gate-driver-pool-judge-spawn-timeout 的病根（硬规则 4 推论：成本结构未知前不设数值阈值）。 */
 export const ROUTINE_TIMEOUT_MS = 180_000;
 
+/** 例程看门狗缺省（毫秒）——【循环】这一侧的 caller 兜底，⛔ 不是 judge 耗时的指标。
+ *  judge spawn（runAsync timeoutMs=Infinity）无上限 ⇒ 挂死的 claude 子进程会让常驻循环冻结在
+ *  `await r.run()` 上（.quay/quality-round.jsonl 冻结、进程仍活 ⇒ supervisor 永不重生）。
+ *  driver-runtime 的 runAsync 注释已写明「死持有者由调用侧的 watchdog 兜底，不靠此处 SIGKILL」——
+ *  那个「调用侧」就是本循环。本看门狗在例程 wall-clock 超界时记一条 failed Fact（routine timed out）
+ *  并继续下一例程/写心跳，⛔ 不 await 已挂的 routine promise（那会让循环同死）。
+ *  ⛔ 这不是给 judge 成本设数值阈值（judge 无实测上界，硬规则 4）——是 liveness 安全界（同 suite-driver
+ *  SILENCE_MS_DEFAULT 15min 的语义：给「活着但不动」一个上限，防静默冻结）。生产可用 --routine-watchdog
+ *  覆盖；测试经 env QUAY_TEST_QUALITY_GATE_DRIVER_ROUTINE_WATCHDOG_MS 或 --routine-watchdog 传小值。 */
+export const ROUTINE_WATCHDOG_MS_DEFAULT = Number(process.env.QUAY_TEST_QUALITY_GATE_DRIVER_ROUTINE_WATCHDOG_MS ?? 30 * 60_000);
+
 // ── B17 · 判据消费纪律（纯机械审计）────────────────────────────────────────────────────────
 
 /** 缺省 judgment-consumer-check 命令（--json 机器面）。输出 = audit report JSON。 */
@@ -661,6 +672,10 @@ export interface QualityGateLoopOptions {
   json: boolean;
   pidFile?: string;
   routines: RoutineSpec[];
+  /** 例程看门狗（毫秒）：单条例程 wall-clock 上限（caller 侧兜底，防挂死的 judge spawn 冻结循环）。
+   *  缺省 = ROUTINE_WATCHDOG_MS_DEFAULT（30min liveness 安全界）。Infinity / ≤0 = 显式不设限
+   *  （⛔ 生产不传，测试负控制用它复现「无看门狗 ⇒ 冻结」）。 */
+  routineWatchdogMs?: number;
   /** 控制态文件（相对 root）。缺省 = quality 自己的。**参数化的理由**：本循环体除这一处外
    *  已经是【通用的例程型常驻循环】（收 RoutineSpec[]、评估 due、汇 Facts、写轮记录），
    *  复用它比让下一个例程型 driver 再抄 95 行样板正确（SPEC §4 正是要消灭那种重复）。
@@ -681,6 +696,29 @@ export function computeRoundRecord(args: {
   return { round, run_id: runId, pid, ts: at, halted, facts };
 }
 
+/** 单条例程的 caller 侧看门狗：race `r.run(ctx)` 对 `watchdogMs`。例程 wall-clock 超界 ⇒ 返回一条
+ *  failed Fact（routine timed out）并继续——⛔ 不 await 已挂的 routine promise。judge spawn 是
+ *  runAsync(Infinity)，挂死时该 promise 永不 settle，await 它会让常驻循环同死（心跳冻结）。
+ *  Infinity / ≤0 ⇒ 直跑（显式不设限，测试负控制用）；例程自身 throw / reject 自然传播，交外层
+ *  try/catch 记「routine threw」（与既有语义一致，⛔ 本函数只处理超时这一态）。 */
+async function runRoutineWithWatchdog(r: RoutineSpec, ctx: { halted: boolean }, watchdogMs: number): Promise<Fact<unknown>[]> {
+  if (!Number.isFinite(watchdogMs) || watchdogMs <= 0) {
+    return await r.run(ctx);
+  }
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const timeoutFact: Fact<unknown>[] = [
+      { name: r.name, value: null, state: "failed", reason: `routine timed out after ${watchdogMs}ms (caller-side watchdog)` },
+    ];
+    return await Promise.race([
+      r.run(ctx),
+      new Promise<Fact<unknown>[]>((resolve) => { timer = setTimeout(() => resolve(timeoutFact), watchdogMs); }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /** 常驻循环：每轮读控制态（halt ⇒ 记 halted 轮【继续循环】，⛔ 不退出——halt 是轮内闸，只挡受闸动作
  *  spawn，观测/心跳照跑，见 gap-drain-on-routine-driver-empties-round-and-respawn-loops）→ 评估 due 例程
  *  （scheduleIsDue + 内存 lastRun）→ 跑 due 例程 → 汇集 Facts → 写 round 心跳。SIGINT/SIGTERM / --once /
@@ -688,6 +726,7 @@ export function computeRoundRecord(args: {
 export async function runResidentQualityGateLoop(opts: QualityGateLoopOptions): Promise<number> {
   const { root, intervalMs, once, maxRounds, roundLogFile, runId, json, pidFile, routines } = opts;
   const controlStateRel = opts.controlStateRel ?? QUALITY_CONTROL_STATE_REL;
+  const routineWatchdogMs = opts.routineWatchdogMs ?? ROUTINE_WATCHDOG_MS_DEFAULT;
   if (pidFile) {
     try { fs.writeFileSync(pidFile, `${process.pid}\n`, "utf8"); } catch { /* pid-file 只供外部观测，写失败不致命 */ }
   }
@@ -717,7 +756,9 @@ export async function runResidentQualityGateLoop(opts: QualityGateLoopOptions): 
       if (!scheduleIsDue(r.schedule, state)) continue;
       lastRun[r.name] = state.now;
       try {
-        facts.push(...(await r.run({ halted })));
+        // caller 侧看门狗（gap-meta-quality-gate-driver）：judge spawn runAsync(Infinity) 挂死时，
+        // 看门狗在例程 wall-clock 超界后返回 failed Fact 继续写心跳，⛔ 不 await 已挂的 promise。
+        facts.push(...(await runRoutineWithWatchdog(r, { halted }, routineWatchdogMs)));
       } catch (e) {
         facts.push({ name: r.name, value: null, state: "failed", reason: `routine threw: ${(e as Error).message}` });
       }
@@ -747,6 +788,7 @@ const HELP = [
   "  --interval <ms>           轮间隔（缺省 30000，来自 drivers.yml quality.interval_ms；测试缝传小值）",
   "  --once                    跑一轮即退出（手动单发 / 测试）",
   "  --max-rounds <n>          跑满 N 轮退出（测试缝，防常驻环无限跑）",
+  "  --routine-watchdog <ms>   例程看门狗（毫秒，缺省 30min；测试传小值）",
   "  --pool-judge-interval <m> B15 例程复核间隔（分钟，缺省 10）",
   "  --judgment-interval <m>   B17 例程复核间隔（分钟，缺省 30）",
   "  --arch-review-interval <m> 架构复核例程间隔（分钟，缺省 60）",
@@ -785,6 +827,7 @@ export async function main(argv: string[]): Promise<number> {
   let poolJudgeIntervalRaw: string | undefined;
   let judgmentIntervalRaw: string | undefined;
   let archReviewIntervalRaw: string | undefined;
+  let routineWatchdogRaw: string | undefined;
   let planCmd: string | undefined;
   let judgeCmd: string | undefined;
   let judgmentCmd: string | undefined;
@@ -806,6 +849,7 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--pool-judge-interval") poolJudgeIntervalRaw = args[++i];
     else if (a === "--judgment-interval") judgmentIntervalRaw = args[++i];
     else if (a === "--arch-review-interval") archReviewIntervalRaw = args[++i];
+    else if (a === "--routine-watchdog") routineWatchdogRaw = args[++i];
     else if (a === "--plan-cmd") planCmd = args[++i];
     else if (a === "--judge-cmd") judgeCmd = args[++i];
     else if (a === "--judgment-cmd") judgmentCmd = args[++i];
@@ -831,6 +875,8 @@ export async function main(argv: string[]): Promise<number> {
     ? Number(judgmentIntervalRaw) : JUDGMENT_INTERVAL_MIN_DEFAULT;
   const archReviewIntervalMinutes = archReviewIntervalRaw !== undefined && isNonNegInt(archReviewIntervalRaw)
     ? Number(archReviewIntervalRaw) : ARCH_REVIEW_INTERVAL_MIN_DEFAULT;
+  const routineWatchdogMs = routineWatchdogRaw !== undefined && isNonNegInt(routineWatchdogRaw)
+    ? Number(routineWatchdogRaw) : ROUTINE_WATCHDOG_MS_DEFAULT;
 
   // 心跳落点 = .quay/。ROUND_LOG_REL 是 .quay/-相对路径（registry carriers[0]），⛔ 直接 join rootDir
   // 会把心跳写到 repo-root quality-round.jsonl，与 driver-runtime carrierStats 读 .quay/ 分叉 ⇒
@@ -851,7 +897,7 @@ export async function main(argv: string[]): Promise<number> {
     archReviewIntervalMinutes,
   });
 
-  return runResidentQualityGateLoop({ root: rootDir, intervalMs: interval, once, maxRounds, roundLogFile, runId: resolvedRunId, json, pidFile, routines });
+  return runResidentQualityGateLoop({ root: rootDir, intervalMs: interval, once, maxRounds, roundLogFile, runId: resolvedRunId, json, pidFile, routines, routineWatchdogMs });
 }
 
 // Direct entry guard (gate-script-base convention)：仅当本文件是入口时跑 main()。

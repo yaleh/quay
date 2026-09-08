@@ -9,12 +9,17 @@
 // 那个消费者：每轮对每个 active GOAL 跑其 AC 的 criterion → verdict → 写 evidence（落 GateEvent），
 // I2 推导 flip achieved、I3 判陈旧三态、I4 查分歧，一条 Fact[] 写 `.quay/goal-round.jsonl`。
 //
-// 职责边界（人 2026-09-06 裁定 3+5 划定，⛔ 逐条不得越界）：
+// 职责边界（人 2026-09-06 裁定 3+5 划定 + 人 2026-09-07 DIR-131 边界裁定，⛔ 逐条不得越界）：
 //   ✅ 跑 AC criterion、写 evidence（goal-store gate 自带）——观测性、可逆、不改变系统行为。
 //   ✅ I2 推导：AC pass 且未 achieved ⇒ 机械 flip AC；GOAL 全部 AC achieved ⇒ 机械 flip GOAL
 //      （裁定 5：active→achieved 是 I2 的确定性推导，不算自动晋升）。
 //   ✅ I3 判陈旧三态（fresh/stale/notEvaluated）+ I4 查分歧——复用 `goal-store check --staleness`
 //      的单一真相源（⛔ 不在本文件重算 I3/I4，避免与 store 漂移）。
+//   ✅ 缺口读数 + 缺口非空时经 ABI（quay-file-task）立案——立案是 goal 侧的【最后一个动作】；
+//      此后 todo→done 全程（晋升门 / 派发 / worktree / fan-in / 落地）归 promotion-driver /
+//      worker-driver 驱动。⛔ goal 侧对 needs-human 只如实报 stalled 并停止空派 gap-filing agent，
+//      不去替 task 机制恢复它（落地速率 / ready 池积压 / needs-human 恢复都是 task 机制的指标，
+//      不是 goal 机制的缺陷——DIR-131 Finding 里的错误归因反例）。
 //   ⛔ draft→active（激活）——人/manager 手动（裁定 3「暂不做自动晋升」），本 driver 不碰。
 //   ⛔ active→retired（放弃）——人裁定。放弃是判断不是计算，本 driver 只报红不翻状态。
 //   ⛔ 不直接改 task 状态（撞 lifecycle/promotion-driver 的 expectedStatus CAS）。
