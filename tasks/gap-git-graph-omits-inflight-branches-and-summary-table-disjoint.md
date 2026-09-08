@@ -2,7 +2,7 @@
 id: gap-git-graph-omits-inflight-branches-and-summary-table-disjoint
 title: git-history 的泳道只由「主干合并提交的父链」反推 ⇒ 只画已合并分支，5 条在飞 worktree 分支的 38
   条提交一条不画；同页汇总表另用 --source 活 ref 分组，两套分支模型的名字集合交集为空
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -28,11 +28,11 @@ extra:
 
 ## AC
 
-- [ ] AC1 `layoutGitGraph` 对一个含「已合并分支 + 未合并活分支」的 fixture 返回的 `branches` 同时含两者，未合并者带 `open: true` 且 `merge === null`：`node --test packages/quay/test/gap-git-graph-omits-inflight-branches-and-summary-table-disjoint.test.mjs` 退出码 0。
-- [ ] AC2 图表同源：渲染后 HTML 中汇总表每行的分支名都能在 `#git-graph-data` 的 `branches[].ref ∪ [trunk.ref]` 中找到，且反向亦然——测试用 node 解析并断言双向差集均为空集。
-- [ ] AC3 负控制：测试内显式跑一次旧实现（汇总表走 `groupCommitsByBranch`），断言 AC2 的差集 > 0 ⇒ 判据能取假。
-- [ ] AC4 汇总表含「状态」列，取值域为 {已合并, 在飞}，且 fixture 下「在飞」行数 = 未合并活分支数（不是 0，也不是全部）。
-- [ ] AC5 生产读数：在至少存在 1 条在飞 worktree 分支时（`git worktree list | grep -c quay-worktrees` ≥ 1），`curl -s http://127.0.0.1:4174/git-history` 的 `#git-graph-data` 满足 `branches.filter(b => b.open).length >= 1`。
+- [x] AC1 `layoutGitGraph` 对一个含「已合并分支 + 未合并活分支」的 fixture 返回的 `branches` 同时含两者，未合并者带 `open: true` 且 `merge === null`：`node --test packages/quay/test/gap-git-graph-omits-inflight-branches-and-summary-table-disjoint.test.mjs` 退出码 0。
+- [x] AC2 图表同源：渲染后 HTML 中汇总表每行的分支名都能在 `#git-graph-data` 的 `branches[].ref ∪ [trunk.ref]` 中找到，且反向亦然——测试用 node 解析并断言双向差集均为空集。
+- [x] AC3 负控制：测试内显式跑一次旧实现（汇总表走 `groupCommitsByBranch`），断言 AC2 的差集 > 0 ⇒ 判据能取假。
+- [x] AC4 汇总表含「状态」列，取值域为 {已合并, 在飞}，且 fixture 下「在飞」行数 = 未合并活分支数（不是 0，也不是全部）。
+- [x] AC5 生产读数：在至少存在 1 条在飞 worktree 分支时（`git worktree list | grep -c quay-worktrees` ≥ 1），`curl -s http://127.0.0.1:4174/git-history` 的 `#git-graph-data` 满足 `branches.filter(b => b.open).length >= 1`。
 
 ## DoD
 
@@ -41,7 +41,7 @@ extra:
 ## Touches
 
 - packages/quay/src/serve-git.ts（layoutGitGraph 增开放泳道；汇总表改用同一份 branches 并添加状态列）
-- packages/quay/src/observation.ts（活 ref 上未合并的提交须进入 history，供开放泳道使用）
+- packages/quay/src/serve.ts（移除 groupCommitsByBranch 的再导出——该函数随双模型退役删除）
 - packages/quay/test/gap-git-graph-omits-inflight-branches-and-summary-table-disjoint.test.mjs（本任务的回归测试）
 - packages/quay/test/serve-handlers.test.mjs（汇总表状态列与图表同源用例）
 - tasks/gap-git-graph-omits-inflight-branches-and-summary-table-disjoint.md
