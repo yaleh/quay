@@ -44,11 +44,11 @@ id 是 `mechanismKeyword` 的**确定性 slug，不带任何唯一化**；而 `:
 
 ## Acceptance Criteria
 
-- [ ] 单测全绿（含本任务新增用例）：`node --experimental-strip-types --test plugin/test/meta-driver.test.mjs`
-- [ ] 新增用例按位置存在且命名指向本机制：`test "$(grep -c 'done-owner\|doneOwner' plugin/test/meta-driver.test.mjs)" -ge 1`
-- [ ] `driveItems` 里存在「派生 id 已存在」的独立分支，且它不调用覆盖路径：`test "$(grep -c 'existsSync(path.join(root, "tasks"' plugin/scripts/meta-driver.ts)" -ge 1`
-- [ ] 三态可区分（硬规则 3b）：`AutoDriveResult.reason` 的取值里存在 refiled 这一态：`grep -q 'refiled as' plugin/scripts/meta-driver.ts`
-- [ ] 负控制（判据能取假）：把新增判定分支注释掉后重跑 `node --experimental-strip-types --test plugin/test/meta-driver.test.mjs` 必须失败——判据若在关掉实现后仍通过，它就是回声不是测量
+- [x] 单测全绿（含本任务新增用例）：`node --experimental-strip-types --test plugin/test/meta-driver.test.mjs`
+- [x] 新增用例按位置存在且命名指向本机制：`test "$(grep -c 'done-owner\|doneOwner' plugin/test/meta-driver.test.mjs)" -ge 1`
+- [x] `driveItems` 里存在「派生 id 已存在」的独立分支，且它不调用覆盖路径：`test "$(grep -c 'existsSync(path.join(root, "tasks"' plugin/scripts/meta-driver.ts)" -ge 1`
+- [x] 三态可区分（硬规则 3b）：`AutoDriveResult.reason` 的取值里存在 refiled 这一态：`grep -q 'refiled as' plugin/scripts/meta-driver.ts`
+- [x] 负控制（判据能取假）：把新增判定分支注释掉后重跑 `node --experimental-strip-types --test plugin/test/meta-driver.test.mjs` 必须失败——判据若在关掉实现后仍通过，它就是回声不是测量
 
 ## Definition of Done
 
