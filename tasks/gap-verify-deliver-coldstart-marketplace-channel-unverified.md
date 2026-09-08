@@ -2,7 +2,7 @@
 id: gap-verify-deliver-coldstart-marketplace-channel-unverified
 title: 跨主机交付验证只覆盖 npm-global 一条通道——marketplace
   通道（register-plugin.mjs）零跨主机接线，SPEC §6b 约束③未满足
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical
@@ -33,17 +33,30 @@ plugin/scripts/verify-deliver-coldstart.sh:391  npm install -g --no-audit --no-f
 
 ## AC
 
-- [ ] AC1: `verify-deliver-coldstart.sh` step① 新增 `--channel npm-global|marketplace`（默认 `npm-global` 保持向后兼容，现有 AC6 记录不失效）；`marketplace` 分支：`npm install -g`（获得可解包内容）后跑 `register-plugin.mjs`（`QUAY_SKIP_PLUGIN_CLI=1`，B/C 当前无 claude），断言 `~/.claude/settings.json` 落地后 `extraKnownMarketplaces` 含指向已安装路径的 quay 条目、`enabledPlugins` 不含用户级 quay 键（AC-161/162 契约的跨主机版本）。
-- [ ] AC2: 负控制——不跑 `register-plugin.mjs`（只 `npm install -g`）时，`~/.claude/settings.json` 里不出现新的 marketplace 条目；证明 AC1 的新增断言真的在测 `register-plugin.mjs` 的效果，不是环境本来就有。
-- [ ] AC3: `--selfcheck` 覆盖 `--channel marketplace` 分支的正负控制（hermetic，不碰真实 B/C）。
-- [ ] AC4: 在 **B=orangevps 与 C=ad-arm1** 各真跑一次 `--channel marketplace`（`--build-root` 从 develop-tip 现 build，与 npm-global 通道用同一 tgz，避免引入变量），记录追加至 `.quay/productization-verification.jsonl`（`ac="AC168-marketplace"` 或等价可区分标记，不得与既有 `ac="AC88"`/`ac="AC107"` 记录混淆——两种通道的记录必须可区分，硬规则 3b）。
-- [ ] AC5: 若 B 或 C 上 `register-plugin.mjs` 因当前无 claude 二进制而某一步失败，如实记录失败原因（结构化字段，非吞掉退出码）——这本身是一条有效读数（「marketplace 通道在无 claude 宿主上的真实边界」），不是本任务失败的理由。
+- [x] AC1: `verify-deliver-coldstart.sh` step① 新增 `--channel npm-global|marketplace`（默认 `npm-global` 保持向后兼容，现有 AC6 记录不失效）；`marketplace` 分支：`npm install -g`（获得可解包内容）后跑 `register-plugin.mjs`（`QUAY_SKIP_PLUGIN_CLI=1`，B/C 当前无 claude），断言 `~/.claude/settings.json` 落地后 `extraKnownMarketplaces` 含指向已安装路径的 quay 条目、`enabledPlugins` 不含用户级 quay 键（AC-161/162 契约的跨主机版本）。
+- [x] AC2: 负控制——不跑 `register-plugin.mjs`（只 `npm install -g`）时，`~/.claude/settings.json` 里不出现新的 marketplace 条目；证明 AC1 的新增断言真的在测 `register-plugin.mjs` 的效果，不是环境本来就有。
+- [x] AC3: `--selfcheck` 覆盖 `--channel marketplace` 分支的正负控制（hermetic，不碰真实 B/C）。
+- [x] AC4: 在 **B=orangevps 与 C=ad-arm1** 各真跑一次 `--channel marketplace`（`--build-root` 从 develop-tip 现 build，与 npm-global 通道用同一 tgz，避免引入变量），记录追加至 `.quay/productization-verification.jsonl`（`ac="AC168-marketplace"` 或等价可区分标记，不得与既有 `ac="AC88"`/`ac="AC107"` 记录混淆——两种通道的记录必须可区分，硬规则 3b）。
+- [x] AC5: 若 B 或 C 上 `register-plugin.mjs` 因当前无 claude 二进制而某一步失败，如实记录失败原因（结构化字段，非吞掉退出码）——这本身是一条有效读数（「marketplace 通道在无 claude 宿主上的真实边界」），不是本任务失败的理由。
 
 ## DoD
 
 `--channel marketplace` 在 B/C 两台真机上各产出一条可复核记录（成功或如实记录的失败原因均可），SPEC §6b 约束③（两条安装路径都能解析到）由「只声称」变为「跨主机实测」。
 
 ⛔ 只加 `--channel` 标志、不在 B/C 真跑，不算达成——与 `gap-verify-deliver-coldstart-l1-asserts-retired-artifacts` 同一纪律：本仓库自带 `plugin/`，任何只在本机跑通的验证在这类缺陷上永远绿（硬规则 4）。
+
+## Evidence
+
+**AC4 B/C 真跑（2026-09-08）**：新增 `--channel marketplace` 的 `verify-deliver-coldstart.sh` 在 B=orangevps（x86_64）与 C=ad-arm1（aarch64）各真跑一次，记录已追加至 `.quay/productization-verification.jsonl`，`ac=AC168-marketplace`（与既有 `ac="AC88"`/`ac="AC107"` 可区分，硬规则 3b）：
+
+- B（ts `2026-09-08T14:48:35Z`）：`build_sha=46b33b4914b35d736ace83d7a815e0b3d6d2697f`（develop tip，detached worktree 现 build）`sha256_quay=3fccba9ed84ebbc0f3a4547bbb50c8a3e0c7f631566ec263b52cdf96084290c2` `sha256_qn=1b1ea295ea8058290cddc740cbf092d284afff635ec8f19af4c4eee32dcae31a`；`mpRegisterOk=true` `mpEntryPath=/home/yale/mp-verify/prefix/lib/node_modules/quay/plugin` `mpEnabledLeak=true`。
+- C（ts `2026-09-08T14:48:55Z`）：同上，`mpRegisterOk=true`、`mpEntryPath` 指向 C 的已安装路径、`mpEnabledLeak=true`。
+
+**关键读数（如实记录，非静默）**：两机 `mpRegisterOk=true`——marketplace 通道的 `register-plugin.mjs` 跨主机真实落地成功（`extraKnownMarketplaces.quay.source.path` → 已安装路径，读回一致）；但 `mpSettingsOk=false`、`mpEnabledLeak=true`——两机 `~/.claude/settings.json` 仍残留**预存在**的用户级 `enabledPlugins["quay@quay"]=true`（AC-161 迁移只覆盖本机 dev 机、未覆盖 B/C；register-plugin.mjs 自 AC-162 起不写 enabledPlugins，该残留是迁移前旧状态）。这是 AC5 定义的有效读数：「marketplace 通道在无 claude 宿主上的真实边界」与「AC-161 迁移未达 B/C」两条都如实落结构化字段（`mpFailReason`/`mpEnabledLeak`），不是本任务失败的理由。
+
+**AC3 --selfcheck / 测试**：`bash plugin/scripts/verify-deliver-coldstart.sh --selfcheck` exit 0，marketplace 四控制（register 正 / 无 register 负 / enabledPlugins 外溢 / register-fail AC5）全过；`plugin/test/verify-deliver-coldstart.test.mjs` 10 tests pass，直接覆盖这些 selfcheck 行与 `--channel` 取值校验。
+
+**构建方式（与 `--build-root` 同源）**：tgz 在 detached worktree at develop-tip `46b33b49` 现 build（package.sh + quay-native build-dist + npm pack），再 scp 到 B/C 以 `--tgz` + `--build-sha` + `--build-date` 跑——与 npm-global 通道用同一 tgz（避免引入变量）；B/C 各自无 claude（`which claude` not found），故用 `QUAY_SKIP_PLUGIN_CLI=1` 路径（register-plugin.mjs:146 优雅降级）。
 
 ## Touches
 
