@@ -108,7 +108,7 @@ export { TASK_FILTERS, applyTaskFilters, makeFilterContext, allDepsDone, readTas
 
 /** 驱动 kind 标识（promotion/worker = 任务处理型，继承 0+1a；outer = 例程型，继承 0+1b——AC143 承接
  *  outer 的纯机械 A/B 段；quality = 例程型（AC144，1b）——均无任务池/无选择/无 verify）。 */
-export type DriverKind = "promotion" | "worker" | "outer" | "quality" | "suite" | "meta" | "goal";
+export type DriverKind = "promotion" | "worker" | "outer" | "quality" | "meta" | "goal";
 
 /** 一个 kind 的 registry 条目（KIND_* 八张 bash 表 → 一个 TS 数据结构）。 */
 export interface KindSpec {
@@ -189,22 +189,6 @@ export const DRIVER_KINDS: Record<DriverKind, KindSpec> = {
     carriers: ["quality-round.jsonl"],
     tsKey: "judgedAt",
     controlFile: "quality-control.json",
-  },
-  // suite（SPEC-suite-lifecycle-and-failure-semantics §3）：per-task suite 生命周期收进一个常驻 driver。
-  // 它是【唯一】spawn per-task suite 的地方——直接 spawn suite 并 wait（进程级父子），辅以定时兜底静默
-  // 检测；spawn 前取单飞槽、子进程终结后释放槽（取/放同一执行点）。无任务池 ⇒ 无 cap（同 quality）。
-  // carrier = suite-round.jsonl（每轮一条，outcome 三态可分 done/red/hung）。
-  suite: {
-    driver: "suite-driver.ts",
-    prefix: "suite-driver",
-    verbs: ["start", "stop", "drain", "resume", "status", "restart", "liveness"],
-    capFlag: "",
-    hasInterval: true,
-    hasReconcile: false,
-    pidSelf: true,
-    runPrefix: "st-prod",
-    carriers: ["suite-round.jsonl"],
-    controlFile: "suite-control.json",
   },
   // meta：机制演进复核（例程型，继承 Layer 0 + 1b）。唯一例程 = meta-review：跑 active goal 各 AC 的
   // criterion → 机械算 divergence → 【读数变了/给了 focus/到地板】才派语义半（事件触发 + 定时器地板，
@@ -1082,7 +1066,7 @@ export async function startKind(
     return statusForKind(root, kind, true, out);
   }
   // gap-driver-drain-no-inverse AC2：drain 写 halted=true 后，start 照常 spawn supervisor 会起一个用户
-  // 已 halt 的驱动。1a 类（promotion/worker/suite）读到 halt ⇒ 本轮 break 退出 ⇒ supervisor respawn；
+  // 已 halt 的驱动。1a 类（promotion/worker）读到 halt ⇒ 本轮 break 退出 ⇒ supervisor respawn；
   // 例程型（goal/quality/outer/meta）读到 halt ⇒ 只观测不派发（循环继续，见 gap-drain-on-routine-driver-
   // empties-round-and-respawn-loops——已修掉例程型的 exit，⛔ 不靠这里的拒绝来消 respawn，但起一个已
   // halt 的驱动仍是错的）。无活 supervisor 且控制态 halted ⇒ 明确拒绝并提示解闸命令（退出 1）。
@@ -1171,7 +1155,7 @@ export async function stopKind(root: string, kind: DriverKind, out: (s: string) 
 }
 
 /** drain（AC150-2）：halt 语义——写 <kind>-control.json halted=true。halt 的效果是【每 kind 自己的闸】：
- *  1a 类（promotion/worker/suite）读到 halt ⇒ 本轮 break 退出；例程型（goal/quality/outer/meta）读到
+ *  1a 类（promotion/worker）读到 halt ⇒ 本轮 break 退出；例程型（goal/quality/outer/meta）读到
  *  halt ⇒ 只挡受闸动作（spawn），观测循环继续（gap-drain-on-routine-driver-empties-round-and-respawn-
  *  loops——⛔ 不再整进程退出）。两种都【不杀在飞 worker】。读-改-写经 driver-shared 单一真相源
  *  （保留 preference/forced，不破坏用户控制态）。 */
@@ -1262,7 +1246,7 @@ export async function main(argv: string[]): Promise<number> {
 
 Usage:
   node --experimental-strip-types plugin/scripts/driver-runtime.ts <start|stop|drain|resume|status|restart|liveness> \\
-    --kind <promotion|worker|outer|quality|suite> [--root <repo>] [--interval <ms>] [--reconcile-interval <s>] [--cap <n>] \\
+    --kind <promotion|worker|outer|quality|meta|goal> [--root <repo>] [--interval <ms>] [--reconcile-interval <s>] [--cap <n>] \\
     [--restart-delay <s>] [--run-id <id>] [--json]
 `);
     return 0;

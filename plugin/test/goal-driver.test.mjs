@@ -3,7 +3,7 @@
 //
 // 覆盖四件事：①I2 的纯推导（goalAchievedFromRecords）；②真实机械环端到端（跑真的 goal-store CLI，
 // 非 fixture 注入 seam——载体有 verdict、evidence 不回写、I2 flip、draft 不动、无 tasks 写）；
-// ③cli/driver.ts 的 KINDS 与 kernel DRIVER_KINDS 集合一致（AC6，含补回 suite）；
+// ③cli/driver.ts 的 KINDS 与 kernel DRIVER_KINDS 集合一致（AC6）；
 // ④CLI 冒烟（--help / 未知参数）。
 //
 // Run: node --test plugin/test/goal-driver.test.mjs
@@ -646,8 +646,8 @@ test('real ring: draft AC under active GOAL 不被翻（裁定 3 边界负控制
 
 // ── AC6：cli/driver.ts KINDS 与 kernel DRIVER_KINDS 集合一致 ─────────────────────────────
 
-test('AC6: cli/driver.ts KINDS 与 kernel DRIVER_KINDS 集合相等（含补回 suite + 新增 goal）', () => {
-  assert.ok(KINDS.includes('suite'), 'suite 已补回 cli 白名单');
+test('AC6: cli/driver.ts KINDS 与 kernel DRIVER_KINDS 集合相等（suite 已退役移除 + goal 在列）', () => {
+  assert.ok(!KINDS.includes('suite'), 'suite 已按人 2026-09-07 裁定从 cli 白名单退役移除');
   assert.ok(KINDS.includes('goal'), 'goal 已进 cli 白名单');
   assert.deepEqual(new Set(KINDS), new Set(KNOWN_KINDS), 'cli KINDS 与 kernel DRIVER_KINDS 集合必须一致');
   // goal kind 在 registry 里是例程型（同 quality/outer/meta）：无 cap、有 interval、自写 pid。
