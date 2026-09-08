@@ -2,7 +2,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
-import { html, escapeHtml, shellStyles, renderMarkdown, renderSiteNav, renderMobileChrome, renderBackLink, relativeTime } from "./serve-render.ts";
+import { html, escapeHtml, shellStyles, renderMarkdown, renderSiteNav, renderMobileChrome, renderBackLink, relativeTime, tableWrap } from "./serve-render.ts";
 import { readTaskSummary, type TaskSummary } from "./serve-dashboard.ts";
 
 // ── /goal — the third sibling kind (goal store), now PROVIDER-BACKED
@@ -307,11 +307,11 @@ export async function handleGoalList(
                 <p><strong>${statusFilter || kindFilter || goalFilter ? "当前筛选下无记录" : "goals/ 目录为空"}</strong> — 本页是 goal-store 的机读视图，<code>goals/</code> 即正本。</p>
                 <p class="meta">（此处原先指向 <code>orchestration/manager-phase-goal.md</code>，该文件已随 G3 降级为归档，不再是正本——指针已修正。）</p>
               </div>`)
-        : html`<table class="goal-table">
+        : tableWrap(html`<table class="goal-table">
           <colgroup>${GOAL_COL_WIDTHS.map((w) => html`<col style="width:${w}">`).join("")}</colgroup>
           <tr>${th("id", "id")}${th("kind", "kind")}${th("status", "status")}${th("goal", "goal")}${th("title", "title")}${th("criterion", "criterion")}${th("verdict", "recent verdict")}${th("lastProgressAt", "last progress")}${th("firstEvidenceAt", "first evidence")}<th>AC 达成</th><th>挂靠任务</th></tr>
           ${rows}
-        </table>`}
+        </table>`)}
     </main></body></html>`);
 }
 

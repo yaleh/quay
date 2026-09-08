@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFileSync, readdirSync, openSync, readSync, closeSync, statSync } from "node:fs";
 import path from "node:path";
 import { readTests, type TestsResult, type TestRunRecord } from "./observation.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2, obsNote, DEFAULT_PAGE_SIZE } from "./serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2, obsNote, DEFAULT_PAGE_SIZE, tableWrap } from "./serve-render.ts";
 import { renderTimelineBarSvg, DEFAULT_TIMELINE_HOURS, parseTimelineHours } from "./serve-dashboard.ts";
 
 // ── /tests load curve — server-rendered SVG of the suite-load timeseries (gap-test-detail-load-timeseries) ──
@@ -361,16 +361,16 @@ export function renderPerFileTable(
   // gap-webui-test-file-detail-page AC3 — the file cell is a link to the single-file detail page
   // (path is the repo-rel path, URL-encoded into the query param; the handler decodes it back).
   const rows = sorted.map((f) => html`<tr>
-    <td><a href="/tests/file?path=${encodeURIComponent(f.file)}"><code>${escapeHtml(f.file)}</code></a></td>
+    <td class="clamp" title="${escapeHtml(f.file)}"><a href="/tests/file?path=${encodeURIComponent(f.file)}"><code>${escapeHtml(f.file)}</code></a></td>
     <td>${escapeHtml(String(Math.round(f.durationMs)))} ms</td>
     <td class="${f.passed ? "" : "verdict-fail"}" style="${f.passed ? "" : "font-weight:700"}">${f.passed ? "passed" : "failed"}</td>
   </tr>`).join("\n");
   return html`<details open style="margin-top:1rem">
     <summary style="cursor:pointer;font-weight:600">perFile 耗时明细（耗时降序 · 失败标红）</summary>
-    <table style="margin-top:0.5rem">
+    ${tableWrap(html`<table style="margin-top:0.5rem">
       <tr><th>file</th><th>duration</th><th>result</th></tr>
       ${rows}
-    </table>
+    </table>`)}
   </details>`;
 }
 
@@ -820,10 +820,10 @@ function renderTestsPage(
       ${perFileTimeline}
       ${tests.runs.length > 0 ? html`<h2>历史运行（新→旧）</h2>
       ${historyNav}
-      <table>
+      ${tableWrap(html`<table>
         <tr><th>round</th><th>startedAt</th><th>state</th><th>pass/fail/cancel</th><th>duration</th><th>scope</th><th>buckets</th><th>commit</th></tr>
         ${historyRows}
-      </table>` : ""}
+      </table>`)}` : ""}
       ${failureDetails}
       ${perFileTable}
       ${perFileNav}
@@ -988,10 +988,10 @@ export function renderFileHistoryTable(points: FileRoundPoint[]): string {
     <td class="${p.passed ? "" : "verdict-fail"}" style="${p.passed ? "" : "font-weight:700"}">${p.passed ? "passed" : "failed"}</td>
   </tr>`)
     .join("\n");
-  return `<table>
+  return tableWrap(`<table>
     <tr><th>round</th><th>startedAt</th><th>duration</th><th>result</th></tr>
     ${rows}
-  </table>`;
+  </table>`);
 }
 
 /**
