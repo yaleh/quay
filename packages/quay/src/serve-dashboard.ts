@@ -547,7 +547,7 @@ export function renderMgrCard(mgr: ManagerResult): string {
  *  font-weight 700, while each row's task id is font-weight 500 (accent colour dropped) — so the grouping
  *  dimension (which used to be the weakest line) reads stronger than the id. */
 export function renderTaskCard(
-  tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>,
+  tasks: TaskSummary[],
 ): string {
   const counts = new Map<string, number>();
   for (const t of tasks) {
@@ -864,7 +864,7 @@ export function renderDashboardPage(
     tests: TestsResult;
     suiteRun: CurrentSuiteRun | null;
     history: GitHistoryResult;
-    tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>;
+    tasks: TaskSummary[];
     goals?: GoalRecord[];
   },
   opts: { workspaceRoot?: string; hours?: number; nowMs?: number } = {},
@@ -925,7 +925,7 @@ export function buildCardsPayload(args: {
   mgr: ManagerResult;
   tests: TestsResult;
   suiteRun: CurrentSuiteRun | null;
-  tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>;
+  tasks: TaskSummary[];
   goals: GoalRecord[];
   workspaceRoot: string;
   hours: number;
@@ -1012,7 +1012,21 @@ export function checkCardRegistrationCompleteness(
 // check). A 30s TTL bounds staleness: the dashboard is a display snapshot; the task store itself
 // (which the promotion-driver writes on todo→ready) is always read fresh, never through this cache.
 export const TASK_SUMMARY_CACHE_TTL_MS = 30_000;
-const taskSummaryCache = new Map<string, { at: number; tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }> }>();
+
+/** A frontmatter-only task summary (the `includeBody:false` shape `readTaskSummary` returns). The
+ *  `goal_ac` field (task→AC linkage, G7) joined the shape via gap-webui-goal-task-rollup-via-shared-
+ *  summary-cache so the /goal rollup can consume the structured relationship WITHOUT a second read
+ *  — it rides the SAME cached array the dashboard taskCard already uses. */
+export interface TaskSummary {
+  id?: unknown;
+  title?: unknown;
+  status?: unknown;
+  labels?: unknown;
+  updatedAt?: unknown;
+  goal_ac?: unknown;
+}
+
+const taskSummaryCache = new Map<string, { at: number; tasks: TaskSummary[] }>();
 
 /** Test-hygiene handle: drop all cached task-summary readings. */
 export function clearTaskSummaryCache(): void {
@@ -1032,7 +1046,7 @@ export function clearTaskSummaryCache(): void {
 export async function readTaskSummary(
   root: string,
   client: ProviderClient,
-): Promise<Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>> {
+): Promise<TaskSummary[]> {
   const hit = taskSummaryCache.get(root);
   if (hit && Date.now() - hit.at < TASK_SUMMARY_CACHE_TTL_MS) return hit.tasks;
   const r = await client.taskList({ includeBody: false });
@@ -1122,7 +1136,7 @@ export async function handleDashboard(
     readDashboardManagerLight(cfg.workspaceRoot).catch(() => ({
       status: "error" as const, reason: "internal", loopDriver: { status: "error" as const, reason: null, verdict: null, exitCode: null, detail: null }, liveness: { status: "error" as const, reason: null, sessions: [] }, observers: { status: "error" as const, reason: null, rows: [] }, pool: { status: "error" as const, reason: null, pool: null, floor: null, deficit: null, cap: null, lastPromoted: [] }, version: null, developLead: null,
     })),
-    readTaskSummary(cfg.workspaceRoot, client).catch(() => [] as Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>),
+    readTaskSummary(cfg.workspaceRoot, client).catch(() => [] as TaskSummary[]),
     client.goalList().catch(() => [] as GoalRecord[]),
   ]);
   let live: LiveResult;
@@ -1169,7 +1183,7 @@ export async function handleDashboardCards(
     readDashboardManagerLight(cfg.workspaceRoot).catch(() => ({
       status: "error" as const, reason: "internal", loopDriver: { status: "error" as const, reason: null, verdict: null, exitCode: null, detail: null }, liveness: { status: "error" as const, reason: null, sessions: [] }, observers: { status: "error" as const, reason: null, rows: [] }, pool: { status: "error" as const, reason: null, pool: null, floor: null, deficit: null, cap: null, lastPromoted: [] }, version: null, developLead: null,
     })),
-    readTaskSummary(cfg.workspaceRoot, client).catch(() => [] as Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>),
+    readTaskSummary(cfg.workspaceRoot, client).catch(() => [] as TaskSummary[]),
     client.goalList().catch(() => [] as GoalRecord[]),
   ]);
   let live: LiveResult;
