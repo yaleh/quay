@@ -1,7 +1,7 @@
 ---
 id: gap-ac200-clear-frozen-goal-evidence-blocks
 title: goal 文件里的存储 evidence 块残留清零（AC-200）
-status: ready
+status: done
 labels:
   - gap
 parent: null

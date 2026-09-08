@@ -11,10 +11,6 @@ origin: |
   人 2026-09-06 裁定「PHASE-NNN → GOAL-NNN 照做」。
   立条依据：goal-store.ts:48 PHASE_ID_RE 不匹配 GOAL-001，list() (:168) 只收
   PHASE-/AC- 前缀文件 ⇒ 本 GOAL 自己的记录当前被静默跳过。
-evidence:
-  at: 2026-09-07T01:21:44.478Z
-  verdict: pass
-  reading: acceptance passed (exit 0)
 ---
 
 **判据（能取假）**：`node packages/quay/src/goal-store.ts get GOAL-001` 退出码为 0。
