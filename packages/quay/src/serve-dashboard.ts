@@ -478,6 +478,8 @@ export function renderDashboardCardRefreshScript(): string {
         if (task && typeof d.taskCard === "string") { task.innerHTML = d.taskCard; }
         var goal = document.getElementById("goal-card");
         if (goal && typeof d.goalCard === "string") { goal.innerHTML = d.goalCard; }
+        var fanin = document.getElementById("fanin-card");
+        if (fanin && typeof d.faninCard === "string") { fanin.innerHTML = d.faninCard; }
         if (d.sysRaw && typeof d.sysRaw === "object") {
           var cpu = typeof d.sysRaw.cpuStallAvg10 === "number" ? d.sysRaw.cpuStallAvg10 : null;
           var load = typeof d.sysRaw.loadAvg === "number" ? d.sysRaw.loadAvg : null;
@@ -913,6 +915,91 @@ export function renderDashboardPage(
     </main>${renderDashboardCardRefreshScript()}</body></html>`;
 }
 
+/** Build the `/dashboard/cards` JSON payload object (before `JSON.stringify`), extracted so the AC3
+ *  registration-completeness check can read the REAL payload keys rather than a hand-copied list — a
+ *  card added here but missing from the page render or the swap script is caught by comparing the
+ *  three sets (gap-dashboard-fanin-card-not-in-auto-refresh), never by remembering to update a fixture. */
+export function buildCardsPayload(args: {
+  live: LiveResult;
+  sys: SystemResult;
+  mgr: ManagerResult;
+  tests: TestsResult;
+  suiteRun: CurrentSuiteRun | null;
+  tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown; updatedAt?: unknown }>;
+  goals: GoalRecord[];
+  workspaceRoot: string;
+  hours: number;
+  cap: number;
+  staleMs: number;
+}): Record<string, unknown> {
+  const { live, sys, mgr, tests, suiteRun, tasks, goals, workspaceRoot, hours, cap, staleMs } = args;
+  return {
+    liveCard: renderLiveCard(live, Date.now(), tasks),
+    testsCard: renderTestsCard(tests, suiteRun, { hours }),
+    sysCard: renderSysCard(sys),
+    mgrCard: renderMgrCard(mgr),
+    taskCard: renderTaskCard(tasks),
+    goalCard: renderGoalCard(goals, { cap, staleMs }),
+    faninCard: renderFanInCard(workspaceRoot, { hours }),
+    sysRaw: {
+      cpuStallAvg10: sys.resourceGate.cpuStallAvg10,
+      loadAvg: sys.resourceGate.loadAvg,
+      loadThreshold: sys.resourceGate.loadThreshold,
+      ts: Date.now(),
+    },
+  };
+}
+
+/** Registration-completeness check (gap-dashboard-fanin-card-not-in-auto-refresh AC3 — 防复发):
+ *  every card the page renders as `id="*-card"` must ALSO appear as a `/dashboard/cards` payload key
+ *  (mapped `xxxCard` → `xxx-card`) AND as a `getElementById("*-card")` swap target in the auto-refresh
+ *  script. A card on only one side is a wiring gap (renders but never refreshes, or a swap target with
+ *  no payload). Pure — returns a result object instead of throwing, so a unit test can assert `ok` AND
+ *  inspect the per-side diff. The negative control (a page with one extra card ⇒ ok:false) is what
+ *  makes this a measurement rather than a恒真恒等式 (hard rule 4). */
+export interface CardRegistrationDiff {
+  ok: boolean;
+  pageCards: string[];
+  payloadCards: string[];
+  scriptCards: string[];
+  pageOnly: string[];
+  payloadOnly: string[];
+  scriptOnly: string[];
+}
+
+export function checkCardRegistrationCompleteness(
+  pageHtml: string,
+  payload: Record<string, unknown>,
+  refreshScript: string,
+): CardRegistrationDiff {
+  const uniq = (xs: string[]): string[] => Array.from(new Set(xs)).sort();
+  const pageCards = uniq(Array.from(pageHtml.matchAll(/id="([a-z-]+-card)"/g), (m) => m[1]));
+  // Drop non-card keys (sysRaw) by requiring the `xxxCard` suffix, then map camelCase → kebab-case.
+  const payloadCards = uniq(
+    Object.keys(payload)
+      .filter((k) => k.endsWith("Card"))
+      .map((k) => k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)),
+  );
+  const scriptCards = uniq(Array.from(refreshScript.matchAll(/getElementById\("([a-z-]+-card)"\)/g), (m) => m[1]));
+  // "Unique to a side" = present there but missing from at least one of the other two. The OR form
+  // (not the intersection) guarantees a non-empty diff whenever ok is false — the AND form would
+  // return empty lists on a partial mismatch and masquerade a gap as "everything accounted for"
+  // (hard rule 3b).
+  const pageOnly = pageCards.filter((c) => !payloadCards.includes(c) || !scriptCards.includes(c));
+  const payloadOnly = payloadCards.filter((c) => !pageCards.includes(c) || !scriptCards.includes(c));
+  const scriptOnly = scriptCards.filter((c) => !pageCards.includes(c) || !payloadCards.includes(c));
+  const eq = (a: string[], b: string[]): boolean => a.length === b.length && a.every((v, i) => v === b[i]);
+  return {
+    ok: eq(pageCards, payloadCards) && eq(payloadCards, scriptCards),
+    pageCards,
+    payloadCards,
+    scriptCards,
+    pageOnly,
+    payloadOnly,
+    scriptOnly,
+  };
+}
+
 // ── Task-summary short-TTL cache (dashboard display surface only) ────────────────────────────────
 // gap-webui-dashboard-load-time-optimization AC3: the dashboard's taskCard shows only STATUS COUNTS
 // + the 5 most-recently-updated non-done tasks, yet the pre-cache path called
@@ -1098,20 +1185,10 @@ export async function handleDashboardCards(
   const [sys, mgr, tasks, goals] = await asyncProbes;
   const hours = timelineHoursFromRequest(req);
   const { cap, staleMs } = readGoalPolicy(cfg.workspaceRoot);
-  const payload = JSON.stringify({
-    liveCard: renderLiveCard(live, Date.now(), tasks),
-    testsCard: renderTestsCard(tests, suiteRun, { hours }),
-    sysCard: renderSysCard(sys),
-    mgrCard: renderMgrCard(mgr),
-    taskCard: renderTaskCard(tasks),
-    goalCard: renderGoalCard(goals, { cap, staleMs }),
-    sysRaw: {
-      cpuStallAvg10: sys.resourceGate.cpuStallAvg10,
-      loadAvg: sys.resourceGate.loadAvg,
-      loadThreshold: sys.resourceGate.loadThreshold,
-      ts: Date.now(),
-    },
-  });
+  const payload = JSON.stringify(buildCardsPayload({
+    live, sys, mgr, tests, suiteRun, tasks, goals,
+    workspaceRoot: cfg.workspaceRoot, hours, cap, staleMs,
+  }));
   res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
   res.end(payload);
 }

@@ -84,24 +84,24 @@ task 侧有 shape-aware 四件套（`plugin/scripts/ready-pool-check.ts` 的 `SH
 
 ## Acceptance Criteria
 
-- [ ] AC1 契约按 kind 分流且能取假：单测对 `goal_write` 喂四个输入——
+- [x] AC1 契约按 kind 分流且能取假：单测对 `goal_write` 喂四个输入——
       (a) `kind:goal` + 有 origin 无 body、(b) `kind:goal` + 有 body、
       (c) `kind:criterion` + 有 criterion/expect 无 body、(d) `kind:criterion` + 缺 criterion——
       断言 (a) 与 (d) **被拒**、(b) 与 (c) **被接受**。四个方向都断言，不只断言接受的那两个。
       取假：当前实现对 (a) 与 (d) 都接受（GOAL-008 即 (a) 的产物）。
-- [ ] AC2 拒绝原因可区分（硬规则 3b）：断言 (a) 与 (d) 的错误信息**互不相同**，且各自含所缺字段名；
+- [x] AC2 拒绝原因可区分（硬规则 3b）：断言 (a) 与 (d) 的错误信息**互不相同**，且各自含所缺字段名；
       断言二者都不等于「写入失败」这类裸文案。
-- [ ] AC3 ABI 与 store 两层一致：对同一组输入分别经 MCP `goal_write` 与直接调
+- [x] AC3 ABI 与 store 两层一致：对同一组输入分别经 MCP `goal_write` 与直接调
       `packages/quay/src/goal-store.ts` 的 `write()`，断言**接受/拒绝的判定逐条相同**；
       不同则打印分歧输入清单与两侧判定。
-- [ ] AC4 存量清单（枚举不布尔）：产出并在提交信息中贴出「当前 `kind:goal` 且 body 为空」的**完整 id 清单与条数**
+- [x] AC4 存量清单（枚举不布尔）：产出并在提交信息中贴出「当前 `kind:goal` 且 body 为空」的**完整 id 清单与条数**
       （2026-09-08 实测为 5 条：GOAL-004/005/006/007/008；实现时以当时重算为准）。
       清单为空或只给条数不给 id ⇒ 不算达成。
-- [ ] AC5 不误伤 criterion（负控制）：对 `goals/` 里**现存全部 57 条 criterion** 逐条跑新校验，
+- [x] AC5 不误伤 criterion（负控制）：对 `goals/` 里**现存全部 57 条 criterion** 逐条跑新校验，
       断言**通过数 == 57**（其中 19 条 body 为空者必须仍通过）。任一条被拒 ⇒ 规则定错了。
-- [ ] AC6 动词描述已改：断言 `packages/quay-native/src/mcp-server.ts` 的 `goal_write` description 中
+- [x] AC6 动词描述已改：断言 `packages/quay-native/src/mcp-server.ts` 的 `goal_write` description 中
       出现 `body` 对 `kind:goal` 必填的表述，且不再把 `origin` 描述成唯一必填的散文字段。
-- [ ] AC7 `bash scripts/test.sh --for-task gap-goal-record-completeness-undefined` 退出码 0。
+- [x] AC7 `bash scripts/test.sh --for-task gap-goal-record-completeness-undefined` 退出码 0。
 
 ## Definition of Done
 
@@ -115,5 +115,7 @@ task 侧有 shape-aware 四件套（`plugin/scripts/ready-pool-check.ts` 的 `SH
 - `packages/quay-native/src/mcp-server.ts`
 - `packages/quay/src/goal-store.ts`
 - `packages/quay/test/goal-store.test.mjs`
+- `packages/quay/test/goal-gate.test.mjs`
+- `packages/quay/test/provider-abi-conformance.test.mjs`
 - `packages/quay/test/gap-goal-record-completeness-undefined.test.mjs`
 - `tasks/gap-goal-record-completeness-undefined.md`
