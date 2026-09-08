@@ -3,7 +3,7 @@ id: gap-webui-list-table-no-overflow-container
 title: 列表页表格没有详情页那条横向滚动规则（serve-render.ts:444 只覆盖 .detail-page），且散文列无宽度上限 ⇒
   /goal 桌面端整页横向溢出 385px、移动端 tbody 1402px 撑爆 390 视口，/live /board /needs-human
   表头被压成竖排单字
-status: ready
+status: done
 needs_human_cause: human-adjudication
 labels:
   - gap
