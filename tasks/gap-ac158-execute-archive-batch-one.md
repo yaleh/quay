@@ -9,7 +9,8 @@ children: []
 extra:
   schema: execution
 goal_ac: AC-158
-depends_on: []
+depends_on:
+  - gap-plugin-root-resolution-remaining-callsites
 ---
 ## Proposal
 
@@ -189,3 +190,26 @@ depends_on: []
 - plugin/test/workflow-metadata-conformance.test.mjs
 - plugin/test/workflow-replay.test.mjs
 - tasks/gap-ac158-execute-archive-batch-one.md
+
+## 派发顺序（manager 2026-09-08 钉死）
+
+**为什么加 `depends_on`**：本任务与 `gap-plugin-root-resolution-remaining-callsites`（AC-168 的硬前置）
+Touches 实测重叠 2 个文件 —— `plugin/scripts/os-anchor-watchdog.sh` 与
+`docs/analysis/quay-init-closure-ratchet.baseline.json`。**重叠即串行，但顺序原本是随机的**，
+而这两个任务对同一个文件的意图**相反**：
+
+- 本任务把 `os-anchor-watchdog.sh`（及其 `plugin/test/os-anchor-watchdog.test.mjs`）列为**归档候选**；
+- `gap-plugin-root-resolution-remaining-callsites` 的 **AC3 正在迁移这个文件**（已勾 `[x]`：把 `:254/:295-296`
+  的 workspace-root 拼接改到 SPEC §6b 解析器）。
+
+⇒ **归档方若先跑，就会把编辑方正在改的活文件移走**。通则：**编辑方必须先于归档方**，且顺序要用
+顶层 `depends_on` 钉死，不能交给 selector 的随机顺序。
+
+**并且这正是人 2026-09-08 裁定的落点**：「优先保障 AC-168 落地，简化 AC-158。AC-158 多处理几个文件
+少处理几个文件不应阻碍 goal 落地。」实测本任务在飞时**占着锁挡住了 AC-168 的硬前置**
+（worker-driver round 51 `filtered-empty — all dispatchable candidates filtered by predicates`）。
+⇒ 本任务让路：等前置落地后再派。
+
+**⊢ 连带**：前置落地后，`os-anchor-watchdog.sh` 已被证明为**活脚本**（有人在改它），
+按 Plan「已知为活、直接从候选集排除」的同一条纪律，**把它和 `plugin/test/os-anchor-watchdog.test.mjs`
+从归档候选集里摘掉**，不要移。少归档一个不影响达成（条数不是闸）。
