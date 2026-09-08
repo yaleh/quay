@@ -1,7 +1,7 @@
 ---
 id: gap-fix-worker-spawn-timeout-persists-post-fix
 title: promotion fix-worker 修复后仍 14/14 空转：unrecognized_model + 超时持续 15 天，判据须读生产载体
-status: ready
+status: done
 labels:
   - gap
   - defect
