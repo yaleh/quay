@@ -2445,6 +2445,18 @@ function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, nowMs
         heads[name] = tipHash;
       }
     }
+    // gap-git-graph-trunk-ref-resolves-to-head-not-mainline: for-each-ref emits refs in refname
+    // (alphabetical) order, so a non-mainline ref like `author` sorts before `develop` — and
+    // `git log author develop --source` then attributes every shared commit to `author` (the first
+    // ref the traversal reaches it from). Put the mainline refs FIRST in the `git log --source`
+    // invocation so a commit reachable from multiple refs is attributed to the mainline directly,
+    // instead of relying solely on the post-hoc re-attribution below to undo an `author` label.
+    // (Stable within each group: develop before master, then the rest alphabetically.)
+    activeRefs.sort((a, b) => {
+      const am = GIT_HISTORY_MAINLINE_REFS.has(a) ? 0 : 1;
+      const bm = GIT_HISTORY_MAINLINE_REFS.has(b) ? 0 : 1;
+      return am - bm || (a < b ? -1 : a > b ? 1 : 0);
+    });
     if (activeRefs.length === 0) {
       // No active branch: a fresh repo with no commits, or every branch is stale with no mainline.
       return {
