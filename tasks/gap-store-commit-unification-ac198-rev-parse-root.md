@@ -29,9 +29,9 @@ goal_ac: AC-198
 
 ## Acceptance Criteria
 
-- [ ] AC-198 判据本判据（goal-store 不再 path.dirname 当 root）：`test "$(grep -rn 'const root = path.dirname(goalDir)' packages/quay/src | wc -l)" -eq 0`
-- [ ] AC-198 判据本判据（meta-store 不再 path.dirname 当 root）：`test "$(grep -rn 'const root = path.dirname(metaDir)' packages/quay/src | wc -l)" -eq 0`
-- [ ] 原语用 rev-parse：`test -f packages/quay/src/store-commit.ts && grep -q 'rev-parse' packages/quay/src/store-commit.ts`
+- [x] AC-198 判据本判据（goal-store 不再 path.dirname 当 root）：`test "$(grep -rn 'const root = path.dirname(goalDir)' packages/quay/src | wc -l)" -eq 0`
+- [x] AC-198 判据本判据（meta-store 不再 path.dirname 当 root）：`test "$(grep -rn 'const root = path.dirname(metaDir)' packages/quay/src | wc -l)" -eq 0`
+- [x] 原语用 rev-parse：`test -f packages/quay/src/store-commit.ts && grep -q 'rev-parse' packages/quay/src/store-commit.ts`
 
 ## Definition of Done
 
