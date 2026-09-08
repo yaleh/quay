@@ -86,10 +86,10 @@ test('plugin.json is valid JSON and declares the 13 bundled skills (M179/DIR-070
   assert.deepEqual(listedSkills, diskSkills, `plugin.json commands[] must list exactly the on-disk skill directories. Missing: ${diskSkills.filter((d) => !listedSkills.includes(d))}. Extra: ${listedSkills.filter((d) => !diskSkills.includes(d))}`);
 });
 
-test('M143: plugin.json declares agents[] with baime-iteration-executor and quay-task', () => {
+test('M143: plugin.json declares agents[] with quay-task', () => {
   const manifest = readJson(path.join(pluginDir, '.claude-plugin', 'plugin.json'));
   assert.ok(Array.isArray(manifest.agents), 'plugin.json must have agents[]');
-  for (const a of ['./agents/baime-iteration-executor.md', './agents/quay-task.md']) {
+  for (const a of ['./agents/quay-task.md']) {
     assert.ok(manifest.agents.includes(a), `plugin.json agents[] must include ${a}`);
   }
 });
@@ -587,13 +587,6 @@ test('M143: plugin/gate-scripts/ is RETIRED — kept in tree, not laid down by q
   const syncSrc = readFileSync(path.join(pluginDir, 'sync.sh'), 'utf8');
   assert.doesNotMatch(syncSrc, /cp\s+.*gate-scripts\//,
     'sync.sh must no longer sync the retired gate scripts');
-});
-
-test('M143: plugin/agents/baime-iteration-executor.md exists', () => {
-  const agentPath = path.join(pluginDir, 'agents', 'baime-iteration-executor.md');
-  assert.ok(existsSync(agentPath), 'plugin/agents/baime-iteration-executor.md must exist');
-  const src = readFileSync(agentPath, 'utf8');
-  assert.ok(src.length > 500, 'vendored agent file must have substantive content');
 });
 
 test('M143: plugin/sync.sh exists and is executable', () => {
