@@ -3,7 +3,7 @@ id: gap-webui-goal-task-rollup-via-shared-summary-cache
 title: goal↔task 的结构化关系（顶层 goal_ac，35/1881 携带、32/57 criterion 有挂靠）从未被任何读面消费；Core
   唯一取数路径 ABI taskList 实测 2.9s，须复用 dashboard 已有的 30s TTL
   taskSummaryCache，且「未挂靠」必须是与 0 和「未读到」都可区分的独立态
-status: ready
+status: done
 labels:
   - gap
   - webui
