@@ -3,7 +3,7 @@ id: gap-goal-record-completeness-undefined
 title: goal 记录「什么算写完整」从未被定义：goal_write 把出处 origin 设为必填、内容 body 设为可选，激励反向 ⇒ 8 个
   goal 里 5 个（62%）正文为空、论述全塞进 origin（GOAL-008 达 1130 字符）；task 侧有 shape-aware
   四件套闸，goal 侧零等价物、也无立条 skill
-status: todo
+status: ready
 labels:
   - gap
   - goal-store
