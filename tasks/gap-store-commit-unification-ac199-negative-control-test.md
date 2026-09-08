@@ -27,10 +27,10 @@ goal_ac: AC-199
 
 ## Acceptance Criteria
 
-- [ ] 单测文件存在：`test -f packages/quay/test/store-commit.test.mjs`
-- [ ] 前三行含 @test-group 标注（进默认 suite）：`head -3 packages/quay/test/store-commit.test.mjs | grep -q '@test-group'`
-- [ ] 四组负控制断言在位（非零测试回声）：`grep -q 'not-in-git' packages/quay/test/store-commit.test.mjs && grep -q 'unchanged' packages/quay/test/store-commit.test.mjs && grep -q 'propagate' packages/quay/test/store-commit.test.mjs`
-- [ ] 跑绿：`node --no-warnings --experimental-strip-types --test packages/quay/test/store-commit.test.mjs`
+- [x] 单测文件存在：`test -f packages/quay/test/store-commit.test.mjs`
+- [x] 前三行含 @test-group 标注（进默认 suite）：`head -3 packages/quay/test/store-commit.test.mjs | grep -q '@test-group'`
+- [x] 四组负控制断言在位（非零测试回声）：`grep -q 'not-in-git' packages/quay/test/store-commit.test.mjs && grep -q 'unchanged' packages/quay/test/store-commit.test.mjs && grep -q 'propagate' packages/quay/test/store-commit.test.mjs`
+- [x] 跑绿：`node --no-warnings --experimental-strip-types --test packages/quay/test/store-commit.test.mjs`
 
 ## Definition of Done
 
