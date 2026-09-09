@@ -69,6 +69,8 @@ const log = process.env.FAKE_QUAY_LOG;
 const stateFile = process.env.FAKE_QUAY_STATE;
 const startExit = Number(process.env.FAKE_QUAY_START_EXIT || 0);
 const startStderr = process.env.FAKE_QUAY_START_STDERR || "";
+const startAlive = Number(process.env.FAKE_QUAY_START_ALIVE || 1);
+const statusGarbage = Number(process.env.FAKE_QUAY_STATUS_GARBAGE || 0);
 function rec(a) { if (log) fs.appendFileSync(log, JSON.stringify(a) + "\\n"); }
 function state() { return (stateFile && fs.existsSync(stateFile)) ? JSON.parse(fs.readFileSync(stateFile, "utf8")) : {}; }
 const cmd = argv[0];
@@ -76,6 +78,7 @@ if (cmd === "driver") {
   const verb = argv[1];
   const kind = argv[argv.indexOf("--kind") + 1];
   if (verb === "status") {
+    if (statusGarbage) { console.log("not-json-at-all"); process.exit(0); }
     const s = state();
     console.log(JSON.stringify({ kind: kind, alive: s[kind] ? 1 : 0 }));
     process.exit(0);
@@ -84,7 +87,7 @@ if (cmd === "driver") {
     rec(["start", kind]);
     if (startExit !== 0) { process.stderr.write(startStderr); process.exit(startExit); }
     const s = state();
-    s[kind] = true;
+    s[kind] = startAlive === 1;
     if (stateFile) fs.writeFileSync(stateFile, JSON.stringify(s));
     console.log("started: kind=" + kind);
     process.exit(0);
@@ -244,6 +247,46 @@ test("halted start failure is relayed verbatim, not swallowed (exit non-zero)", 
 });
 
 // ── structural ────────────────────────────────────────────────────────────────────────────────
+
+test("AC-203 — start exit 0 but status says NOT alive ⇒ the script exits non-zero (⛔ exit 0 is not 'started')", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sdr-notalive-"));
+  try {
+    const root = makeWorkspaceRoot(tmp);
+    const fake = writeFakeQuay(tmp);
+    const log = path.join(tmp, "log.jsonl");
+    const stateFile = path.join(tmp, "state.json");
+    const port = await freePort();
+    // start 退出码 0（打印 started），但 status 报 alive:0（driver 没真活）——正是 AC-203 的死因形态。
+    const r = runScript(
+      ["--cli", fake, "--root", root, "--host", "127.0.0.1", "--port", String(port), "--serve-timeout", "2000"],
+      { env: { FAKE_QUAY_LOG: log, FAKE_QUAY_STATE: stateFile, FAKE_QUAY_START_ALIVE: "0" } },
+    );
+    assert.notEqual(r.status, 0, "start exit 0 + not alive must fail the script");
+    assert.match(r.stderr, /not alive per `quay driver status`/, "the not-alive reason is reported");
+    assert.ok(!/promotion: started/.test(r.stdout), "must NOT report started when the driver is not alive");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("AC-203 — start exit 0 but status unreadable ⇒ the script exits non-zero (read-unable is not 'alive')", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sdr-unreadable-"));
+  try {
+    const root = makeWorkspaceRoot(tmp);
+    const fake = writeFakeQuay(tmp);
+    const log = path.join(tmp, "log.jsonl");
+    const stateFile = path.join(tmp, "state.json");
+    const port = await freePort();
+    const r = runScript(
+      ["--cli", fake, "--root", root, "--host", "127.0.0.1", "--port", String(port), "--serve-timeout", "2000"],
+      { env: { FAKE_QUAY_LOG: log, FAKE_QUAY_STATE: stateFile, FAKE_QUAY_STATUS_GARBAGE: "1" } },
+    );
+    assert.notEqual(r.status, 0, "unreadable status after start must fail the script");
+    assert.match(r.stderr, /could not parse `quay driver status/, "the read-unable reason is reported");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
 
 test("the drivers skill references plugin/scripts/start-drivers.ts (the ONE delegate)", () => {
   const skill = fs.readFileSync(SKILL, "utf8");

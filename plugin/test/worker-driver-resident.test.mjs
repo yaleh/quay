@@ -110,6 +110,7 @@ import {
   spawnMechanicalFanIn,
   readFanInLockHold,
 } from "../scripts/worker-driver.ts";
+import { resolveKernelScriptsDir } from "../scripts/driver-runtime.ts";
 import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
 import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
 import { suiteLockBase, suiteLockSlotPaths } from "../scripts/suite-lock-slots.ts";
@@ -233,7 +234,7 @@ test("AC129 pure — defaultSelectorArgv / defaultReadyPoolArgv are launch / nod
   assert.match(sel[sel.length - 1], /gap-a, gap-b/, "candidate ids are inlined into the selector prompt");
   const rpc = defaultReadyPoolArgv("/r", ["gap-a"], 3);
   assert.equal(rpc[0], "node");
-  assert.deepEqual(rpc.slice(1, 5), ["--experimental-strip-types", "/r/plugin/scripts/ready-pool-check.ts", "--root", "/r"]);
+  assert.deepEqual(rpc.slice(1, 5), ["--experimental-strip-types", path.join(resolveKernelScriptsDir(), "ready-pool-check.ts"), "--root", "/r"]);
   assert.ok(rpc.includes("--in-flight"), "in-flight ids are passed to ready-pool-check");
   assert.ok(rpc.includes("gap-a"));
 });
