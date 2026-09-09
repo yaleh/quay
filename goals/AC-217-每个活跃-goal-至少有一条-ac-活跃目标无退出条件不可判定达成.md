@@ -1,7 +1,7 @@
 ---
 id: AC-217
 title: 每个活跃 GOAL 至少有一条 AC——活跃目标无退出条件不可判定达成
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-010
 criterion: node --no-warnings --experimental-strip-types
@@ -44,4 +44,9 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-09-09T13:33:26.410Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
