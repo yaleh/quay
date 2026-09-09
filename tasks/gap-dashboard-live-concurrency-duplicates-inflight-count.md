@@ -2,7 +2,7 @@
 id: gap-dashboard-live-concurrency-duplicates-inflight-count
 title: Dashboard "并发" field duplicates 在飞(inFlight) count — separate it from the
   real worker cap
-status: todo
+status: ready
 labels:
   - gap
   - defect
