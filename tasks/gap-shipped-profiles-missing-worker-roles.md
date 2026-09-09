@@ -25,16 +25,36 @@ AC-207 端到端生产复跑继续受阻（第 4 轮实测，host B=orangevps / 
 
 ## Acceptance Criteria
 
-- [ ] AC1 补齐：`git show HEAD:plugin/.quay/profiles.yml` 的 roles 含 task-worker/selector/fix-worker 三键（各 ≥1 命中，贴命中行）。
-- [ ] AC2 负控制（能取假）：改前 `resolveRole(readProfilesConfig("<repo>/plugin"), 'task-worker')` 抛 `role not found: "task-worker"`；改后不抛且 launcher=claude（贴前后命令与输出）。
-- [ ] AC3 全量绿：`scripts/test.sh` 全量绿（含 profile-policy.test.mjs 与新增钉）。
+- [x] AC1 补齐：`git show HEAD:plugin/.quay/profiles.yml` 的 roles 含 task-worker/selector/fix-worker 三键（各 ≥1 命中，贴命中行）。
+- [x] AC2 负控制（能取假）：改前 `resolveRole(readProfilesConfig("<repo>/plugin"), 'task-worker')` 抛 `role not found: "task-worker"`；改后不抛且 launcher=claude（贴前后命令与输出）。
+- [ ] AC3 全量绿：`scripts/test.sh` 全量绿（含 profile-policy.test.mjs 与新增钉）。（待外部）
 
 ## Definition of Done
 
 shipped `plugin/.quay/profiles.yml` 与 dev-tree 根 `.quay/profiles.yml` 的 roles 键集一致（仅 launcher/model 取值差异保留）；`resolveRole(readProfilesConfig("<repo>/plugin"), 'task-worker')` 不再抛；`scripts/test.sh` 全量绿。
 
+## Evidence
+
+AC1 命中行（worktree `plugin/.quay/profiles.yml` roles 键）：
+```
+28:  manager:
+31:  outer:
+38:  task-worker:
+43:  selector:
+46:  fix-worker:
+51:  pool-judge:
+54:  meta-driver:
+```
+
+AC2 负控制（前后命令与输出）：
+- 改前：`git show HEAD:plugin/.quay/profiles.yml` 铺进临时 `.quay/`，`resolveRole(readProfilesConfig("<tmp>"), 'task-worker')` → `THROWS — role not found: "task-worker"`。
+- 改后：`resolveRole(readProfilesConfig("<repo>/plugin"), 'task-worker')` → `NO THROW — launcher=claude, model=null, name=quay-task-worker`。
+
+AC3：全量 suite 由 fan-in 机械 driver 跑（待外部）；scoped 门 + `profile-policy.test.mjs`（22/22 绿，含 4 条 SHIPPED 钉）已在 worktree 验证。
+
 ## Touches
 
 - plugin/.quay/profiles.yml
 - plugin/test/profile-policy.test.mjs
+- docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-shipped-profiles-missing-worker-roles.md
