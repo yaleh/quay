@@ -37,11 +37,11 @@ $ grep "@static-object" scripts/test.sh | grep -i goal
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，登记表含 goals/）：`grep -n '"goals/"' plugin/scripts/select-static-checks-for-touches.ts` 命中 `DOC_SURFACES` 数组内（⛔ 只在别处提及不算）。
-- [ ] AC2（能取假，行为验证）：`node --experimental-strip-types plugin/scripts/select-static-checks-for-touches.ts --classify-delta --root . goals/AC-999-fake.md` 的 stdout 变为空（⛔ 仍非空 ⇒ 假）。
-- [ ] AC3（能取假，负控制不破坏既有 doc 判定）：同一条命令对 `tasks/AC-999-fake.md` / `docs/x.md` / `.quay/x.json` 跑，stdout 仍为空（⛔ 任一变非空 ⇒ 回归）。
-- [ ] AC4（能取假，负控制不误伤真代码）：对 `packages/quay/src/goal-store.ts`（真实代码文件，恰好路径含 "goal" 但不在 `goals/` 目录下）跑同一条命令，stdout 仍非空（⛔ 变空 ⇒ 过度匹配，说明改动方式错了——必须是路径前缀匹配 `goals/`，不是子串匹配 "goal"）。
-- [ ] AC5（能取假，既有测试不回归 + 新增覆盖本次改动）：`plugin/test/fan-in-execute-paths.test.mjs` 里 `① REAL doc delta — tasks/ + docs/ + adr/ + .quay/ only must classify as doc` 这条测试更新覆盖 `goals/`（标题同步改为含 goals/），且 `node --no-warnings --experimental-strip-types --test plugin/test/fan-in-execute-paths.test.mjs plugin/test/select-static-checks-for-touches.test.mjs` 退出 0。
+- [x] AC1（能取假，登记表含 goals/）：`grep -n '"goals/"' plugin/scripts/select-static-checks-for-touches.ts` 命中 `DOC_SURFACES` 数组内（⛔ 只在别处提及不算）。
+- [x] AC2（能取假，行为验证）：`node --experimental-strip-types plugin/scripts/select-static-checks-for-touches.ts --classify-delta --root . goals/AC-999-fake.md` 的 stdout 变为空（⛔ 仍非空 ⇒ 假）。
+- [x] AC3（能取假，负控制不破坏既有 doc 判定）：同一条命令对 `tasks/AC-999-fake.md` / `docs/x.md` / `.quay/x.json` 跑，stdout 仍为空（⛔ 任一变非空 ⇒ 回归）。
+- [x] AC4（能取假，负控制不误伤真代码）：对 `packages/quay/src/goal-store.ts`（真实代码文件，恰好路径含 "goal" 但不在 `goals/` 目录下）跑同一条命令，stdout 仍非空（⛔ 变空 ⇒ 过度匹配，说明改动方式错了——必须是路径前缀匹配 `goals/`，不是子串匹配 "goal"）。
+- [x] AC5（能取假，既有测试不回归 + 新增覆盖本次改动）：`plugin/test/fan-in-execute-paths.test.mjs` 里 `① REAL doc delta — tasks/ + docs/ + adr/ + .quay/ only must classify as doc` 这条测试更新覆盖 `goals/`（标题同步改为含 goals/），且 `node --no-warnings --experimental-strip-types --test plugin/test/fan-in-execute-paths.test.mjs plugin/test/select-static-checks-for-touches.test.mjs` 退出 0。
 
 ## Definition of Done
 
