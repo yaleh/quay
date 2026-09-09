@@ -74,7 +74,9 @@ test("AC1: my per-commit column equals git log --graph --all for the same window
   const layout = layoutGitGraph(history);
   assert.ok(layout, "the production history yields a layout");
   assert.ok(layout.rows.length > 0, "the window carries commits");
-  const refCols = gitGraphReferenceColumns(LIMIT);
+  // The oracle's `-n` is the LOADED count (layout.rows.length), not a hardcoded 500 — so the judge
+  // follows whatever window was actually read (gap-git-graph-pagination-appends-page-relative-col-and-torow).
+  const refCols = gitGraphReferenceColumns(layout.rows.length);
   assert.ok(refCols.size > 0, "the git oracle parsed a non-empty column map");
 
   let mismatch = 0;
@@ -91,7 +93,7 @@ test("AC1: my per-commit column equals git log --graph --all for the same window
 
 test("AC2: the no-recycle allocation (every second parent opens a new column) mismatches git (mismatch > 0)", () => {
   const commits = emissionOrderCommits(LIMIT);
-  const refCols = gitGraphReferenceColumns(LIMIT);
+  const refCols = gitGraphReferenceColumns(commits.length);
 
   // Inline reimplementation of the retired lane-model behaviour: a second parent ALWAYS gets a brand-new
   // column, never dedup/reuse — the allocation that exploded to 25 lanes where git uses ~6.
