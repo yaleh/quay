@@ -22,6 +22,7 @@
 //      不是 goal 机制的缺陷——DIR-131 Finding 里的错误归因反例）。
 //   ⛔ draft→active（激活）——人/manager 手动（裁定 3「暂不做自动晋升」），本 driver 不碰。
 //   ⛔ active→retired（放弃）——人裁定。放弃是判断不是计算，本 driver 只报红不翻状态。
+//      分诊判「retire」时本 driver 只能置 needs-human 并说明理由交人判断（AC-211，⛔ 不翻 retired）。
 //   ⛔ 不直接改 task 状态（撞 lifecycle/promotion-driver 的 expectedStatus CAS）。
 //   ⛔ 不机械写 tasks/*.md（全仓四个 driver 零先例）——缺口立案由 G9 的语义环 spawn 短命 agent
 //      经 ABI（quay-file-task）做，driver 自己仍不手写任务文件。
@@ -648,6 +649,7 @@ export interface GoalRoundReadings {
   goalCount: number;
   criterionCount: number;
   criteria: Array<{ id: string; goal: string; status: string; verdict: "pass" | "fail" | "not-evaluated"; reason: string }>;
+  /** 本轮 driver 做的全部状态翻写：I2 达成翻转（to=achieved）+ AC-211 retire 建议（to=needs-human）。 */
   flips: Array<{ id: string; to: string; ok: boolean; reason: string }>;
   /** I3 三桶 + I4 分歧；null = check --staleness 读不到（⛔ 与「零 stale」不同形，硬规则 3b）。
    *  scopeSize = 枚举出的 active goal 数（作用域规模）；evaluated = scopeSize > 0。0 active goal ⇒
@@ -764,6 +766,21 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
       if (!isAc(r) || r.status !== "draft" || String(r.goal ?? "") !== gid) continue;
       triage.push(triageDraftAc(r, null, taskFacts));
     }
+  }
+
+  // AC-211（gap-goal-driver-no-retire-write-surface）：分诊判「retire」⇒ driver 只能置 needs-human
+  // 并说明理由，⛔ 不翻 retired（最不可逆的一态挡在人这一侧，人 2026-09-09 裁定 1）。写面经
+  // writeGoalStatus（provider 写路径，⛔ 不直改 goals/*.md），reason 非空可 grep。retire 对象是
+  // draft AC（本就不在 computeGoalGaps 的对象集），翻 needs-human 后下一轮 goalAchievedFromRecords
+  // 把它计入在域并阻塞 GOAL 达成（AC-209）——与「draft 三头不占」相反，needs-human 真在域、真阻塞、
+  // 真要人。
+  for (const entry of triage) {
+    if (entry.decision !== "retire") continue;
+    const w = await writeGoalStatus(scriptRoot, entry.ac, "needs-human", dataRoot, {
+      actor: "goal-driver",
+      reason: "triage 判 retire：建议退役但 retired 归人——driver 置 needs-human 交人判断",
+    });
+    flips.push({ id: entry.ac, to: "needs-human", ok: w.ok, reason: w.reason });
   }
 
   // ⑥ G9 缺口语义环：缺口（state==="gap"）非空 ⇒ 过 halt + 资源门 + 每轮上限，spawn 短命 agent 经 ABI
