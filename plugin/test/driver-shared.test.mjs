@@ -105,3 +105,21 @@ test("AC3 — kernel 侧无 resource-gate.sh ⇒ fail-closed 报 not found（⛔
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("AC2 负控制（改后）— 无 plugin/ 的第三方 root 走缺省解析 ⇒ 非 exit 127、非 not found（kernel 侧有）", () => {
+  // 第三方项目 root：无 plugin/ 目录（quay-init 只写 config，不复制 plugin/）。缺省解析（无
+  // QUAY_PLUGIN_ROOT）从本 kernel 安装位置（本仓库 plugin/scripts/resource-gate.sh）拿到脚本 ⇒
+  // 跑真实 gate（GO 或真实 WAIT），⛔ 不再 `bash <不存在路径>` exit 127。
+  const thirdParty = fs.mkdtempSync(path.join(os.tmpdir(), "drv-shared-3rd-"));
+  try {
+    withPluginRoot(null, () => {
+      const r = resourceGateCheck(thirdParty, null);
+      // go 是 true 还是 false 取决于真实负载——两种都合法，唯一非法的是 127（command-not-found）
+      // 或 not found（kernel 侧也没有）。
+      assert.doesNotMatch(r.reason, /127/, `reason 不得含 exit 127：${r.reason}`);
+      assert.doesNotMatch(r.reason, /not found/, `kernel 侧有脚本 ⇒ 不得报 not found：${r.reason}`);
+    });
+  } finally {
+    fs.rmSync(thirdParty, { recursive: true, force: true });
+  }
+});
