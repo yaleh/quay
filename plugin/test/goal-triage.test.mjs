@@ -1,10 +1,11 @@
 // @test-group engine
 // goal-triage.test.mjs — GOAL-010 范围② / AC-210 (tasks/gap-goal-driver-draft-ac-triage):
-// draft AC 分诊——active GOAL 名下每条 draft AC 出五态判决之一（activate / re-anchor / retire /
-// needs-human / hold）并逐条落痕到轮记录 value.triage。
+// draft AC 分诊——active GOAL 名下每条 draft AC 出四态判决之一（activate / re-anchor /
+// needs-human / hold）并逐条落痕到轮记录 value.triage。retire 已按 AC-219 移除——
+// 「无任务牵引」≠「死信」，刚提案的 draft AC 无牵引分诊为 hold 而非 retire→needs-human。
 //
-// 覆盖四件事：①五态词表（decision ∈ 五态，且五态各至少一条输入可达——AC2）；②纯函数
-// triageDraftAc 的判决语义（goal 锚 / criterion / posture / 牵引 / 死信——AC2/AC3）；
+// 覆盖四件事：①四态词表（decision ∈ 四态，且四态各至少一条输入可达——AC2）；②纯函数
+// triageDraftAc 的判决语义（goal 锚 / criterion / posture / 牵引 / 无牵引——AC2/AC3）；
 // ③真实机械环端到端（active GOAL 名下 draft AC 跑一轮后轮记录 facts[].value.triage[] 逐条含该
 // AC——AC1，⛔ 不注入 seam，跑真的 goal-store CLI）；④无 draft AC 时 triage 为 [] 且字段仍在
 // （与「未跑分诊」按字段存在性区分，硬规则 3b）；⑤AC-210 判据（python 一行）的双向控制
@@ -40,10 +41,10 @@ function writeGoalFile(tmp, { id, status, kind, goal, criterion }) {
   fs.writeFileSync(path.join(tmp, 'goals', `${id}-t.md`), lines.join('\n'), 'utf8');
 }
 
-// ── AC2 五态词表 + 纯函数判决语义 ─────────────────────────────────────────────────────────
+// ── AC2 四态词表 + 纯函数判决语义 ─────────────────────────────────────────────────────────
 
-test('AC2 五态词表：五态各至少一条输入可达（decision ∈ 五态，五态两两不等）', () => {
-  assert.equal(new Set(TRIAGE_DECISIONS).size, 5, '五态词表恰好五态、无重复');
+test('AC2 四态词表：四态各至少一条输入可达（decision ∈ 四态，四态两两不等）', () => {
+  assert.equal(new Set(TRIAGE_DECISIONS).size, 4, '四态词表恰好四态、无重复');
   const traction = [{ id: 't', status: 'todo', goalAc: 'AC-900' }];
   const seen = new Set();
 
@@ -52,23 +53,24 @@ test('AC2 五态词表：五态各至少一条输入可达（decision ∈ 五态
   // re-anchor：goal 锚缺失 / 非法（非 GOAL-NNN）。
   seen.add(triageDraftAc({ id: 'AC-900', goal: '', criterion: 'true' }, null, traction).decision);
   seen.add(triageDraftAc({ id: 'AC-900', goal: 'PHASE-001', criterion: 'true' }, null, traction).decision);
-  // retire：结构完备 + 无 posture + 无牵引（taskFacts null / 空）。
+  // hold（无牵引）：结构完备 + 无 posture + 无牵引（taskFacts null / 空）⇒ 待人工激活/补任务
+  // （AC-219：⛔ 不判 retire——「无任务牵引」≠「死信」）。
   seen.add(triageDraftAc({ id: 'AC-900', goal: 'GOAL-009', criterion: 'true' }, null, null).decision);
   seen.add(triageDraftAc({ id: 'AC-900', goal: 'GOAL-009', criterion: 'true' }, null, []).decision);
   // needs-human：criterion 缺失/空。
   seen.add(triageDraftAc({ id: 'AC-900', goal: 'GOAL-009', criterion: '' }, null, traction).decision);
   seen.add(triageDraftAc({ id: 'AC-900', goal: 'GOAL-009' }, null, traction).decision);
-  // hold：goal 声明 posture（AC-215 的读取端本任务只收不读；非空即按住）。
+  // hold（posture）：goal 声明 posture（AC-215 的读取端本任务只收不读；非空即按住）。
   seen.add(triageDraftAc({ id: 'AC-900', goal: 'GOAL-009', criterion: 'true' }, 'measure-only', traction).decision);
 
-  assert.deepEqual([...seen].sort(), [...TRIAGE_DECISIONS].sort(), '五态各至少一条输入可达');
+  assert.deepEqual([...seen].sort(), [...TRIAGE_DECISIONS].sort(), '四态各至少一条输入可达');
 });
 
-test('AC2 判决语义：posture 挡住 activate/retire 落在 hold（⛔ 不判 activate，也不判 retire）', () => {
+test('AC2 判决语义：posture 挡住 activate 落在 hold（⛔ 不判 activate）', () => {
   const traction = [{ id: 't', status: 'todo', goalAc: 'AC-900' }];
   // 有牵引但 posture 声明 ⇒ hold（不因牵引而 activate）。
   assert.equal(triageDraftAc({ id: 'AC-900', goal: 'GOAL-009', criterion: 'true' }, 'measure-only', traction).decision, 'hold');
-  // 无牵引但 posture 声明 ⇒ hold（不因无牵引而 retire）。
+  // 无牵引但 posture 声明 ⇒ hold（不因无牵引而变态）。
   assert.equal(triageDraftAc({ id: 'AC-900', goal: 'GOAL-009', criterion: 'true' }, 'measure-only', []).decision, 'hold');
 });
 
@@ -83,7 +85,7 @@ test('AC3 逐条落痕：每条 triage 带非空 ac + 非空 decision + 非空 r
   for (const r of records) {
     const t = triageDraftAc(r, null, null);
     assert.ok(typeof t.ac === 'string' && t.ac.length > 0, `ac 非空: ${t.ac}`);
-    assert.ok(TRIAGE_DECISIONS.includes(t.decision), `decision ∈ 五态: ${t.decision}`);
+    assert.ok(TRIAGE_DECISIONS.includes(t.decision), `decision ∈ 四态: ${t.decision}`);
     assert.ok(typeof t.reason === 'string' && t.reason.length > 0, `reason 非空: ${t.reason}`);
   }
 });
@@ -124,7 +126,7 @@ test('AC1 对象集扩展：active GOAL 名下 draft AC 跑一轮后轮记录 fa
     const acs = triage.map((t) => t.ac).sort();
     assert.deepEqual(acs, ['AC-900', 'AC-901'], '逐条含 draft AC（active AC 不入 triage 对象集）');
     for (const t of triage) {
-      assert.ok(TRIAGE_DECISIONS.includes(t.decision), `decision ∈ 五态: ${t.decision}`);
+      assert.ok(TRIAGE_DECISIONS.includes(t.decision), `decision ∈ 四态: ${t.decision}`);
       assert.ok(typeof t.reason === 'string' && t.reason.length > 0, `reason 非空: ${t.reason}`);
     }
   } finally {
