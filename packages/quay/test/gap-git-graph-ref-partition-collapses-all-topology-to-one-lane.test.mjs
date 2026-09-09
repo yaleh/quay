@@ -45,12 +45,17 @@ function hist(commits, head, heads = {}) {
 
 const T0 = 1_700_000_000;
 
-/** Every merge commit's second-parent commit hash (the AC1 orphan universe). */
+/** Every merge commit's second-parent commit hash that is ALSO in the window (the AC1 orphan universe).
+ *  A merge at the window edge may have a second parent OUTSIDE the window — that is not an orphan, it is
+ *  the 「窗口外分叉」 case (the fork predates the window, drawn with a dangling marker, no lane commits). */
 function secondParentHashes(history) {
+  const inWindow = new Set(history.commits.map((c) => c.hash));
   const out = [];
   for (const commit of history.commits) {
     if (commit.parentHashes.length < 2) continue;
-    for (const p of commit.parentHashes.slice(1)) out.push(p);
+    for (const p of commit.parentHashes.slice(1)) {
+      if (inWindow.has(p)) out.push(p);
+    }
   }
   return out;
 }
