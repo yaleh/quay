@@ -220,7 +220,7 @@ export function matchesObject(object, touch) {
  *  verified by the scoped + doc phases the fan-in always runs. Registry overrides fire first (a
  *  checker-read path under docs/, e.g. docs/analysis/ac69-*.json, is code). */
 export const DOC_SURFACES = [
-  "tasks/", "docs/", "adr/", ".quay/", "measurements/", "milestones/",
+  "tasks/", "goals/", "docs/", "adr/", ".quay/", "measurements/", "milestones/",
   "orchestration/archive/", "plugin/loop/",
 ];
 
