@@ -34,7 +34,7 @@ const LIVE_ENV = "QUAY_GOAL_CRITERION_LIVE";
 const liveEnabled = process.env[LIVE_ENV] === "1";
 
 // gap-store-commit-propagation-log 落地提交（日志机制本身的起点；AC75：merge 不得 rebase，SHA 稳定）。
-const LANDING_SHA = "527c76a36";
+const LANDING_SHA = "1e4f006bd";
 const LANDING_CUTOFF = "2026-09-09T22:30:07Z";
 
 // self-only 样本量门槛：远低于旧版的 30——这不是一个统计比率（不需要大样本才有意义），是一个硬
