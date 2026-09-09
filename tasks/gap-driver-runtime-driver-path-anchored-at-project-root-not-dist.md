@@ -2,7 +2,7 @@
 id: gap-driver-runtime-driver-path-anchored-at-project-root-not-dist
 title: driver 在无 plugin/ 的第三方项目里真活——driver-runtime 路径锚在 opts.root 且
   start-drivers 只信退出码（AC-203 exit 1）
-status: done
+status: ready
 labels:
   - gap
   - delivery-critical
