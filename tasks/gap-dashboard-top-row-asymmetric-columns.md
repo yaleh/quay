@@ -22,10 +22,10 @@ extra:
 
 ## AC
 
-- [ ] `packages/quay/src/serve-dashboard.ts` 顶部行改为 2 列非对称网格（`grid-template-columns:minmax(0,3fr) minmax(0,2fr)` 或等价比例），第 2 列内部用 `display:flex;flex-direction:column;gap:2px` 把 `sysCard` 与 `mgrCard` 纵向堆叠成一个 grid item（不是继续复用 `gridColumns(n)`/`renderCardGrid` 的等宽通用逻辑，因为该行需要固定 3:2 比例，其余行——如 4 卡的「工作进展」行——仍应继续使用现有的等宽 `gridColumns`，不得被这次改动牵连）。
-- [ ] `dashboardGridStyles` 的 `≤600px` 单列折叠规则（`.dash-grid { grid-template-columns:minmax(0,1fr) !important; }`）在改动后仍然生效：移动端顶部行两个 grid item（循环脉搏 / 堆叠列）各自变成整宽一列，堆叠列内部纵向排列不受影响——用一次真实浏览器视口收窄到 ≤600px 的复核验证，不能只看桌面宽度。
-- [ ] 一次真实浏览器视觉复核（本地临时 `quay serve` 实例，不得连接/改动生产 100.78.206.100:4173 实例）：截图确认循环脉搏在新宽度下的长任务描述折行行数明显减少（对照修改前的截图或量宽读数）。
-- [ ] 现有 dashboard 相关测试（`packages/quay/test/gap-dashboard-*.test.mjs` 里覆盖 `renderDashboardPage`/`renderCardGrid`/`gridColumns` 的用例）全部通过，且不得因为这次改动误伤其它行（4 卡「工作进展」行）的等宽渲染——若现有测试对列数/`grid-template-columns` 有精确断言，需要确认这次改动只影响顶部行对应的断言，其余行的断言不变。
+- [x] `packages/quay/src/serve-dashboard.ts` 顶部行改为 2 列非对称网格（`grid-template-columns:minmax(0,3fr) minmax(0,2fr)` 或等价比例），第 2 列内部用 `display:flex;flex-direction:column;gap:2px` 把 `sysCard` 与 `mgrCard` 纵向堆叠成一个 grid item（不是继续复用 `gridColumns(n)`/`renderCardGrid` 的等宽通用逻辑，因为该行需要固定 3:2 比例，其余行——如 4 卡的「工作进展」行——仍应继续使用现有的等宽 `gridColumns`，不得被这次改动牵连）。
+- [x] `dashboardGridStyles` 的 `≤600px` 单列折叠规则（`.dash-grid { grid-template-columns:minmax(0,1fr) !important; }`）在改动后仍然生效：移动端顶部行两个 grid item（循环脉搏 / 堆叠列）各自变成整宽一列，堆叠列内部纵向排列不受影响——用一次真实浏览器视口收窄到 ≤600px 的复核验证，不能只看桌面宽度。
+- [x] 一次真实浏览器视觉复核（本地临时 `quay serve` 实例，不得连接/改动生产 100.78.206.100:4173 实例）：截图确认循环脉搏在新宽度下的长任务描述折行行数明显减少（对照修改前的截图或量宽读数）。
+- [x] 现有 dashboard 相关测试（`packages/quay/test/gap-dashboard-*.test.mjs` 里覆盖 `renderDashboardPage`/`renderCardGrid`/`gridColumns` 的用例）全部通过，且不得因为这次改动误伤其它行（4 卡「工作进展」行）的等宽渲染——若现有测试对列数/`grid-template-columns` 有精确断言，需要确认这次改动只影响顶部行对应的断言，其余行的断言不变。
 
 ## DoD
 
