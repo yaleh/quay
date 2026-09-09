@@ -468,3 +468,42 @@ test("AC7 (field-aware): ## Evidence append on a non-task/* branch does NOT adva
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+// ── GOAL-011 AC-220 (gap-store-commit-propagation-log): durable audit trail ─────────────────────
+// commitTaskWrite must log its OWN propagation decision to .quay/store-commit-propagation.jsonl —
+// the direct production carrier AC-220's new criterion reads, replacing the confounded "ff-red
+// rate vs 7-day baseline" proxy (too many unrelated causes mixed in).
+
+test("AC8 (propagation log): self-only write logs changeKind=self-only propagated=false", () => {
+  const { store, root } = makeGitStore({ branch: "develop" });
+  try {
+    store.write("RT", { title: "field-aware", status: "todo", body: "## Acceptance Criteria\n\n- [ ] do a thing\n" });
+    execFileSync("git", ["-C", root, "checkout", "-q", "-b", "author"]);
+    store.write("RT", { body: "## Acceptance Criteria\n\n- [x] do a thing\n" });
+    const logPath = path.join(root, ".quay", "store-commit-propagation.jsonl");
+    assert.ok(fs.existsSync(logPath), "propagation log file created");
+    const records = fs.readFileSync(logPath, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const last = records.at(-1);
+    assert.equal(last.id, "RT");
+    assert.equal(last.changeKind, "self-only");
+    assert.equal(last.propagated, false, "self-only write must log propagated:false — the exact invariant AC-220 checks in production");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC9 (propagation log negative control): mixed write logs changeKind=must-propagate propagated=true", () => {
+  const { store, root } = makeGitStore({ branch: "develop" });
+  try {
+    store.write("RT", { title: "field-aware", status: "todo", body: "## Acceptance Criteria\n\n- [ ] do a thing\n" });
+    execFileSync("git", ["-C", root, "checkout", "-q", "-b", "author"]);
+    store.write("RT", { status: "ready", body: "## Acceptance Criteria\n\n- [x] do a thing\n" });
+    const logPath = path.join(root, ".quay", "store-commit-propagation.jsonl");
+    const records = fs.readFileSync(logPath, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const last = records.at(-1);
+    assert.equal(last.changeKind, "must-propagate");
+    assert.equal(last.propagated, true, "mixed write must log propagated:true — negative control, ⛔ the log itself must not fabricate a uniform false");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
