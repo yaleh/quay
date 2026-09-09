@@ -85,7 +85,7 @@ test('AC3 逐条落痕：每条 triage 带非空 ac + 非空 decision + 非空 r
   for (const r of records) {
     const t = triageDraftAc(r, null, null);
     assert.ok(typeof t.ac === 'string' && t.ac.length > 0, `ac 非空: ${t.ac}`);
-    assert.ok(TRIAGE_DECISIONS.includes(t.decision), `decision ∈ 五态: ${t.decision}`);
+    assert.ok(TRIAGE_DECISIONS.includes(t.decision), `decision ∈ 四态: ${t.decision}`);
     assert.ok(typeof t.reason === 'string' && t.reason.length > 0, `reason 非空: ${t.reason}`);
   }
 });
@@ -126,7 +126,7 @@ test('AC1 对象集扩展：active GOAL 名下 draft AC 跑一轮后轮记录 fa
     const acs = triage.map((t) => t.ac).sort();
     assert.deepEqual(acs, ['AC-900', 'AC-901'], '逐条含 draft AC（active AC 不入 triage 对象集）');
     for (const t of triage) {
-      assert.ok(TRIAGE_DECISIONS.includes(t.decision), `decision ∈ 五态: ${t.decision}`);
+      assert.ok(TRIAGE_DECISIONS.includes(t.decision), `decision ∈ 四态: ${t.decision}`);
       assert.ok(typeof t.reason === 'string' && t.reason.length > 0, `reason 非空: ${t.reason}`);
     }
   } finally {
