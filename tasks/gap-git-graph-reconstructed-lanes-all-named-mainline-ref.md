@@ -3,7 +3,7 @@ id: gap-git-graph-reconstructed-lanes-all-named-mainline-ref
 title: git-history 恢复第二父轨道后，113/113 条 reconstructed 泳道全部被命名为 develop（100% 同名，与
   gap-git-graph-branch-name-fallback-to-trunk-ref 修过的现象逐字相同、方向相反）；根因是 ff
   dev-merge 的第二父本就是主线自身历史、根本没有分支名可恢复，取 task/X 是张冠李戴、取 develop 语义对但退化成零信息
-status: todo
+status: ready
 labels:
   - gap
   - webui
