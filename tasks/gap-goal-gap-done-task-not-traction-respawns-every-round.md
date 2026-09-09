@@ -54,11 +54,11 @@ goal-driver.ts:531  triageDraftAc    (t.status === "todo" || t.status === "ready
 
 ## AC
 
-- [ ] AC1（不再每轮 spawn，双向）：构造「AC active + 其关联任务全部 `done` + AC 判据 fail」的记录集，`computeGoalGaps` 返回该条的 `state` **≠ `"gap"`**（当前为 `"gap"`）；反向负控制：**零**关联任务的 AC 仍返回 `"gap"`（真缺口不被误放）。
-- [ ] AC2（词表可区分，硬规则 3）：`GapState` 词表含一个独立取值，把「关联任务全部 done 而 AC 未达成」与「零关联任务」分开——`grep -n "GapState" plugin/scripts/goal-driver.ts` 可见该取值，且它**不与** `gap`/`in-progress` 共用。
-- [ ] AC3（两处同修，按位置判定）：牵引判定收进单一导出函数，`computeGoalGaps` 与 `triageDraftAc` 都调它——`grep -c 'status === "todo" || t.status === "ready"' plugin/scripts/goal-driver.ts` == **0**（字面量重复已消除），且该导出函数的调用点 ≥ 2。
-- [ ] AC4（生产验证，读载体非 fixture）：修复落地后的轮记录里，不存在「同一 AC 连续 ≥3 轮被判 `gap` 且其关联任务已 `done`」的记录——`python3` 扫 `.quay/goal-round.jsonl` 只计落地提交之后的轮次。
-- [ ] AC5（回归）：`node --no-warnings --experimental-strip-types --test plugin/test/goal-driver.test.mjs` 与 `plugin/test/goal-triage.test.mjs` 均 exit 0。
+- [x] AC1（不再每轮 spawn，双向）：构造「AC active + 其关联任务全部 `done` + AC 判据 fail」的记录集，`computeGoalGaps` 返回该条的 `state` **≠ `"gap"`**（当前为 `"gap"`）；反向负控制：**零**关联任务的 AC 仍返回 `"gap"`（真缺口不被误放）。
+- [x] AC2（词表可区分，硬规则 3）：`GapState` 词表含一个独立取值，把「关联任务全部 done 而 AC 未达成」与「零关联任务」分开——`grep -n "GapState" plugin/scripts/goal-driver.ts` 可见该取值，且它**不与** `gap`/`in-progress` 共用。
+- [x] AC3（两处同修，按位置判定）：牵引判定收进单一导出函数，`computeGoalGaps` 与 `triageDraftAc` 都调它——`grep -c 'status === "todo" || t.status === "ready"' plugin/scripts/goal-driver.ts` == **0**（字面量重复已消除），且该导出函数的调用点 ≥ 2。
+- [ ] AC4（生产验证，读载体非 fixture）：修复落地后的轮记录里，不存在「同一 AC 连续 ≥3 轮被判 `gap` 且其关联任务已 `done`」的记录——`python3` 扫 `.quay/goal-round.jsonl` 只计落地提交之后的轮次。（待外部）
+- [x] AC5（回归）：`node --no-warnings --experimental-strip-types --test plugin/test/goal-driver.test.mjs` 与 `plugin/test/goal-triage.test.mjs` 均 exit 0。
 
 ## DoD
 
