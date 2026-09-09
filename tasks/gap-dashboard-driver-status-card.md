@@ -2,7 +2,7 @@
 id: gap-dashboard-driver-status-card
 title: Dashboard Driver 卡只读 promotion/worker 两个字面量 kind，遗漏 quality/meta/goal
   三个真实在跑的 driver（应遍历 DriverKind 而非硬编码）
-status: ready
+status: done
 labels:
   - gap
   - webui
