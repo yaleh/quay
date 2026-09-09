@@ -450,13 +450,16 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
   // Merged second-parent lanes: for EVERY merge commit (oldest → newest so a deeper lane claims its
   // shared history first), walk each non-first parent into a lane.
   const merges = history.commits.filter((c) => c.parentHashes.length >= 2).sort(byT);
+  const mainlineArtifacts = new Set<GitGraphBranchLane>();
   for (const merge of merges) {
     for (const p of merge.parentHashes.slice(1)) {
       const { commits, fork } = walkLane(p);
       if (commits.length === 0) continue;
       for (const c of commits) claimed.add(c.hash);
-      const { ref, kind } = secondParentLaneName(history, p);
-      laterals.push(buildLateral(ref, kind, commits, fork, { hash: merge.hash, t: merge.t }));
+      const { ref, kind, mainlineArtifact } = secondParentLaneName(history, p);
+      const lane = buildLateral(ref, kind, commits, fork, { hash: merge.hash, t: merge.t });
+      if (mainlineArtifact) mainlineArtifacts.add(lane);
+      laterals.push(lane);
     }
   }
 
@@ -479,13 +482,16 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
   // 102 reconstructed lanes, 40 of them single-commit, all unnamed (a ff dev-merge's second parent IS
   // the mainline's old tip, so no branch name exists to recover). Those fragments are one continuous
   // first-parent chain: each lane's OLDEST commit's first parent is the TIP of the next-older lane.
-  // Merge each unnamed reconstructed lane into the unnamed reconstructed lane that claims that parent
-  // (oldest-first, so the absorb target is already final) — the chain collapses into one lane per
-  // connected region, eliminating the single-commit noise (AC5) without dropping any commit (AC4).
+  // Merge each MAINLINE-ARTIFACT lane into the mainline-artifact lane that claims that parent (oldest-
+  // first, so the absorb target is already final) — the chain collapses into one lane per connected
+  // region, eliminating the single-commit noise (AC5) without dropping any commit (AC4).
+  // RESTRICTED to mainlineArtifact lanes: a genuinely-deleted branch that forked off another branch
+  // (branch-of-a-branch) is ALSO unnamed but is NOT the mainline's own history — its exclusive commits
+  // must stay their own lane (gap-git-graph-row-key-collides-on-multiclaimed-commits AC2).
   const laneByCommit = new Map<string, GitGraphBranchLane>();
   for (const b of laterals) for (const c of b.commits) laneByCommit.set(c.hash, b);
   const absorbOrder = laterals
-    .filter((b) => b.kind === "reconstructed" && b.unnamed)
+    .filter((b) => mainlineArtifacts.has(b))
     .sort((a, b) => a.firstT - b.firstT);
   const absorbed = new Set<GitGraphBranchLane>();
   for (const b of absorbOrder) {
@@ -495,7 +501,7 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
     if (parent == null) continue;
     const target = laneByCommit.get(parent);
     if (!target || target === b) continue;
-    if (target.kind !== "reconstructed" || !target.unnamed) continue;
+    if (!mainlineArtifacts.has(target)) continue;
     // b (newer) continues target (older): extend target's chain with b's commits.
     target.commits = [...target.commits, ...b.commits].sort(byT);
     target.firstT = Math.min(target.firstT, b.firstT);
@@ -611,21 +617,28 @@ export function quotedBranchNameFromMergeSubject(subject: string): string | null
  *  at all (git log --graph draws it as an undecorated side-line). Naming it `develop` collapses all
  *  reconstructed lanes to one name (113/113 → 100% 同名, zero information). A mainline ref is therefore
  *  NEVER used as a branch name: tier 2 requires the quoted name to be a live ref AND not a mainline ref,
- *  and tier 3 returns `ref: null` (a distinguishable "no name", 硬规则 3b — never a fabricated branch). */
-export function secondParentLaneName(history: GitHistoryResult, tipHash: string): { ref: string | null; kind: "live" | "reconstructed"; unnamed: boolean } {
+ *  and tier 3 returns `ref: null` (a distinguishable "no name", 硬规则 3b — never a fabricated branch).
+ *  `mainlineArtifact` distinguishes the TWO ways tier 3 is reached: true when the merge subject's quoted
+ *  name IS a mainline ref (a ff dev-merge's mainline-history ghost — the fragment the convergence merges),
+ *  false when there is no recoverable name at all (a genuinely deleted branch, e.g. branch-of-a-branch —
+ *  its exclusive commits must stay their own lane). */
+export function secondParentLaneName(history: GitHistoryResult, tipHash: string): { ref: string | null; kind: "live" | "reconstructed"; unnamed: boolean; mainlineArtifact: boolean } {
   const heads = history.heads ?? {};
   for (const [name, tip] of Object.entries(heads)) {
-    if (tip === tipHash) return { ref: name, kind: "live", unnamed: false };
+    if (tip === tipHash) return { ref: name, kind: "live", unnamed: false, mainlineArtifact: false };
   }
   for (const c of history.commits) {
     if (c.parentHashes.length >= 2 && c.parentHashes.slice(1).includes(tipHash)) {
       const quoted = quotedBranchNameFromMergeSubject(c.subject);
       if (quoted && !GIT_HISTORY_MAINLINE_REFS.has(quoted) && heads[quoted] !== undefined) {
-        return { ref: quoted, kind: "reconstructed", unnamed: false };
+        return { ref: quoted, kind: "reconstructed", unnamed: false, mainlineArtifact: false };
+      }
+      if (quoted && GIT_HISTORY_MAINLINE_REFS.has(quoted)) {
+        return { ref: null, kind: "reconstructed", unnamed: true, mainlineArtifact: true };
       }
     }
   }
-  return { ref: null, kind: "reconstructed", unnamed: true };
+  return { ref: null, kind: "reconstructed", unnamed: true, mainlineArtifact: false };
 }
 
 /** Parse the branch name out of a fan-in / dev-merge commit subject. Both conventions name the task
