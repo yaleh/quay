@@ -2,7 +2,7 @@
 id: gap-git-graph-stride-chip-overlaps-commit-row-text
 title: git-history 的 stride chip 与提交行文字共用文本列 x、y 相差不足一行高 ⇒ 25 个 chip 逐个压住同行提交
   subject，与已修的折叠控件压字同源
-status: todo
+status: ready
 labels:
   - gap
   - webui
