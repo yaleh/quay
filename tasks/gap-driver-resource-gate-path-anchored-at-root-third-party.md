@@ -29,10 +29,10 @@ AC-207 端到端生产复跑（host B=orangevps，第三方项目 /home/yale/wor
 
 ## Acceptance Criteria
 
-- [ ] AC1 机制迁移：`grep -n 'path.join(.*"plugin".*resource-gate' plugin/scripts/driver-shared.ts` 命中数为 0，且新路径解析函数存在（贴零命中对照 + 前 3 条新解析命中，硬规则②）。
-- [ ] AC2 负控制复现（改前）：无 plugin/ 第三方项目 round 记录逐字含 `resource-gate WAIT (exit 127)`；改后同一项目 `driver status` 报 `alive=1` 且 round 记录 `gate.reason` 不再含 `exit 127`（读载体，非自述）。
-- [ ] AC3 单测：`plugin/test/driver-shared.test.mjs`（或既有 driver-runtime.test.mjs 加例）覆盖「kernel 侧有 resource-gate ⇒ 非 127」与「kernel 侧无 ⇒ fail-closed 报找不到」双向。
-- [ ] AC4 全量绿：`scripts/test.sh` 全量绿。
+- [x] AC1 机制迁移：`grep -n 'path.join(.*"plugin".*resource-gate' plugin/scripts/driver-shared.ts` 命中数为 0，且新路径解析函数存在（贴零命中对照 + 前 3 条新解析命中，硬规则②）。
+- [x] AC2 负控制复现（改前）：无 plugin/ 第三方项目 round 记录逐字含 `resource-gate WAIT (exit 127)`；改后同一项目 `driver status` 报 `alive=1` 且 round 记录 `gate.reason` 不再含 `exit 127`（读载体，非自述）。
+- [x] AC3 单测：`plugin/test/driver-shared.test.mjs`（或既有 driver-runtime.test.mjs 加例）覆盖「kernel 侧有 resource-gate ⇒ 非 127」与「kernel 侧无 ⇒ fail-closed 报找不到」双向。
+- [x] AC4 全量绿：`scripts/test.sh` 全量绿。
 
 ## Definition of Done
 
