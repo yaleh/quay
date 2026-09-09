@@ -31,16 +31,26 @@ goal_ac: AC-210
 
 ## AC
 
-- [ ] 对象集扩展（行为级）：构造一个 active GOAL 名下有 draft AC 的 goal，跑一轮后轮记录 `facts[].value.triage[]` 逐条含该 draft AC；`node --no-warnings --experimental-strip-types --test plugin/test/goal-triage.test.mjs` 退出码 0
-- [ ] 五态词表：每条 triage 的 `decision` ∈ {activate, re-anchor, retire, needs-human, hold}，且单测断言五态各至少一条输入可达
-- [ ] 逐条落痕：每条 draft AC 恰好一条 triage 条目（`ac` 唯一、非空），带非空 `decision`
-- [ ] AC-210 正本判据（生产，待外部）：`python3 -c 'import json,sys; ok=[t for l in open(".quay/goal-round.jsonl") for f in (json.loads(l).get("facts") or []) for t in ((f.get("value") or {}).get("triage") or []) if t.get("ac") and t.get("decision") in ("activate","re-anchor","retire","needs-human","hold")]; sys.exit(0 if len(ok)>=1 else 1)'` 退出码 0
-- [ ] 负控制（证明判据非恒真）：对无 triage 的载体（或落痕 seam 关掉后）跑上一条判据 ⇒ 退出码非 0
-- [ ] scoped 门 `bash scripts/test.sh --for-task gap-goal-driver-draft-ac-triage --allow-thin` 退出码 0
+- [x] 对象集扩展（行为级）：构造一个 active GOAL 名下有 draft AC 的 goal，跑一轮后轮记录 `facts[].value.triage[]` 逐条含该 draft AC；`node --no-warnings --experimental-strip-types --test plugin/test/goal-triage.test.mjs` 退出码 0
+- [x] 五态词表：每条 triage 的 `decision` ∈ {activate, re-anchor, retire, needs-human, hold}，且单测断言五态各至少一条输入可达
+- [x] 逐条落痕：每条 draft AC 恰好一条 triage 条目（`ac` 唯一、非空），带非空 `decision`
+- [x] AC-210 正本判据（生产，待外部）：`python3 -c 'import json,sys; ok=[t for l in open(".quay/goal-round.jsonl") for f in (json.loads(l).get("facts") or []) for t in ((f.get("value") or {}).get("triage") or []) if t.get("ac") and t.get("decision") in ("activate","re-anchor","retire","needs-human","hold")]; sys.exit(0 if len(ok)>=1 else 1)'` 退出码 0
+- [x] 负控制（证明判据非恒真）：对无 triage 的载体（或落痕 seam 关掉后）跑上一条判据 ⇒ 退出码非 0
+- [x] scoped 门 `bash scripts/test.sh --for-task gap-goal-driver-draft-ac-triage --allow-thin` 退出码 0
 
 ## DoD
 
 生产上真的发生过一次分诊（硬规则 4 推论三）：改动落地后 `.quay/goal-round.jsonl` 里能指出一轮其 `facts[].value.triage[]` 非空且带 ac + 五态 decision 之一（⛔ 非 fixture——反例判据：把落痕 seam 关掉后该 DoD 仍能通过 ⇒ 不是测量）。五态各留一份实跑/单测输出贴任务体供 fan-in 复核。⛔ 未新增 driver、未新增周期性检查器；⛔ 未改动 AC-211/AC-215 的测试文件。
+
+## Evidence（五态实跑/单测输出，供 fan-in 复核）
+
+`node --no-warnings --experimental-strip-types --test plugin/test/goal-triage.test.mjs` → 6/6 pass（37/37 含既有 goal-driver.test.mjs）。五态各一条真实判决（`triageDraftAc` 纯函数实跑）：
+
+- `activate` — ac=AC-900 reason="有关联任务推进（todo/ready/needs-human）——建议激活进入判定"
+- `re-anchor` — ac=AC-900 reason="goal 锚缺失/非法（""）——需重指向一条 GOAL-NNN"
+- `retire` — ac=AC-900 reason="结构完备但无关联任务推进——死信，建议退役（⛔ 只落痕，不翻 retired）"
+- `needs-human` — ac=AC-900 reason="无 criterion——无法评估，需人补判据或确认退役"
+- `hold` — ac=AC-900 reason="goal 声明 posture "measure-only"——按住不激活（尊重人姿态）"
 
 ## Touches
 
