@@ -1130,7 +1130,9 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     }
     const res = commitStoreWrite({
       relPath: rel,
-      message: `tasks: ${id} ${verb}`,
+      kind: "tasks",
+      id,
+      action: verb,
       root,
       propagate: "none", // branch-aware ff below; the primitive's "develop" is too coarse for task/ branches
     });

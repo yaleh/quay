@@ -69,7 +69,7 @@ import {
 } from "./frontmatter-store-base.ts";
 import { runAcceptance } from "./gate/acceptance-runner.ts";
 import { queryGateEvents } from "./gate/gate-event-store.ts";
-import { commitStoreWrite, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
+import { commitStoreWrite, commitStoreBatch, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
 
 export const VALID_GOAL_STATUSES = ["draft", "active", "achieved", "superseded", "retired", "needs-human"];
 
@@ -308,11 +308,13 @@ export function stripEvidenceTimestamp(text: string): string {
  * main checkout; a worktree write is carried into develop by that task's fan-in ff). A NEW goal
  * that must be pool-visible now passes propagate "develop" per SPEC §2.2.
  */
-function commitGoalFile(goalDir: string, fileName: string, id: string): CommitOutcome {
+function commitGoalFile(goalDir: string, fileName: string, id: string, action: string): CommitOutcome {
   const root = resolveGitRoot(goalDir);
   return commitStoreWrite({
     relPath: root ? path.relative(root, path.join(goalDir, fileName)) : `goals/${fileName}`,
-    message: `goals: ${id} 写盘即提交（store-commit）`,
+    kind: "goals",
+    id,
+    action,
     root,
     propagate: "none",
   }).outcome;
@@ -572,10 +574,11 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
     const p = path.join(goalDir, file);
     const { frontmatter, body } = parseFrontmatter(fs.readFileSync(p, "utf8"));
     const fm = frontmatter as GoalFrontmatter;
+    const prevStatus = String(fm.status ?? "");
     fm.status = patch.status;
     if (patch.supersededBy !== undefined) fm["superseded-by"] = patch.supersededBy;
     fs.writeFileSync(p, serializeFrontmatter(fm, body), "utf8");
-    const outcome = commitGoalFile(goalDir, file, oldId);
+    const outcome = commitGoalFile(goalDir, file, oldId, `status ${prevStatus}→${patch.status}`);
     if (outcome === "failed") {
       // The disk write succeeded but the git commit genuinely FAILED — never throw (the write IS on
       // disk), but surface on stderr so the failure is observable, not silent (硬规则 3b).
@@ -591,6 +594,7 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
     actor,
     reason,
     dryRun = false,
+    commit = true,
   }: {
     title?: string;
     status?: string;
@@ -610,6 +614,9 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
     reason?: string;
     /** P9: validate everything (including the activation gate) but persist NOTHING. */
     dryRun?: boolean;
+    /** batch (gap-store-commit-action-and-actor AC3): write the file but defer the git commit to a
+     *  `writeBatch` flush (⛔ not used by the per-write CLI path). */
+    commit?: boolean;
   }): GoalViewModel {
     assertSafeId(id);
     assertSafeStatus(status);
@@ -827,17 +834,86 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       }
       const fileName = existingFile ?? `${id}-${slugify(title, "goal")}.md`;
       fs.writeFileSync(path.join(goalDir, fileName), serializeFrontmatter(ordered, finalBody), "utf8");
-      const outcome = commitGoalFile(goalDir, fileName, id);
-      if (outcome === "failed") {
-        // The disk write succeeded but the git commit genuinely FAILED — surface on stderr so the
-        // failure is observable, not silent (硬规则 3b). "unchanged"/"not-in-git" are expected no-ops.
-        console.error(`goal-store: commit of "${id}" failed — the file was written to disk but is not on any branch's history`);
+      if (commit) {
+        // Action semantics (gap-store-commit-action-and-actor AC1): create / status flip / field
+        // update are DISTINGUISHABLE in the commit subject — never the old fixed prose that made
+        // create, criterion-edit, status-flip and the driver's mechanical flip all read identical.
+        let action: string;
+        if (!existingFile) {
+          action = "create";
+        } else if (statusChanged) {
+          action = `status ${prevStatus}→${nextStatus}`;
+        } else {
+          const touched: string[] = [];
+          if (title !== undefined) touched.push("title");
+          if (goal !== undefined) touched.push("goal");
+          if (criterion !== undefined) touched.push("criterion");
+          if (expect !== undefined) touched.push("expect");
+          if (origin !== undefined) touched.push("origin");
+          if (supersedes !== undefined) touched.push("supersedes");
+          if (supersededBy !== undefined) touched.push("superseded-by");
+          if (body !== undefined) touched.push("body");
+          action = touched.length > 0 ? `field:${touched.join(",")}` : "update";
+        }
+        const outcome = commitGoalFile(goalDir, fileName, id, action);
+        if (outcome === "failed") {
+          // The disk write succeeded but the git commit genuinely FAILED — surface on stderr so the
+          // failure is observable, not silent (硬规则 3b). "unchanged"/"not-in-git" are expected no-ops.
+          console.error(`goal-store: commit of "${id}" failed — the file was written to disk but is not on any branch's history`);
+        }
       }
       return get(id) as GoalViewModel;
     });
   }
 
-  return { list, get, write, activeGoals, listActiveCriteria, isGoalAchieved, checkWithinCap, checkStaleness, checkAchievedFailing };
+  /** BATCH (gap-store-commit-action-and-actor AC3): write N records and commit them in ONE git
+   *  commit — one logical action must not produce N commits (the 16-commits-per-logical-action
+   *  defect). Each record goes through the SAME `write()` validation/locking (commit deferred), then
+   *  a single `commitStoreBatch` stages+commits all written files. ⛔ Not for records with
+   *  `disposeOld` (a dispose flips a SECOND record's file and is committed by `flipGoal` itself). */
+  function writeBatch(records: Array<{
+    id: string;
+    title?: string;
+    status?: string;
+    goal?: string;
+    criterion?: string;
+    expect?: string;
+    origin?: string;
+    supersedes?: string[];
+    supersededBy?: string[];
+    body?: string;
+    force?: boolean;
+    actor?: string;
+    reason?: string;
+  }>): GoalViewModel[] {
+    const root = resolveGitRoot(goalDir);
+    const results: GoalViewModel[] = [];
+    const relPaths: string[] = [];
+    for (const r of records) {
+      const vm = write(r.id, {
+        title: r.title, status: r.status, goal: r.goal, criterion: r.criterion,
+        expect: r.expect, origin: r.origin, supersedes: r.supersedes,
+        supersededBy: r.supersededBy, body: r.body, force: r.force,
+        actor: r.actor, reason: r.reason, commit: false,
+      });
+      results.push(vm);
+      const f = fileNameForId(goalDir, r.id);
+      if (f) relPaths.push(root ? path.relative(root, path.join(goalDir, f)) : `goals/${f}`);
+    }
+    const outcome = commitStoreBatch({
+      relPaths,
+      kind: "goals",
+      id: records.map((r) => r.id).join(" "),
+      action: "batch",
+      root,
+    });
+    if (outcome === "failed") {
+      console.error(`goal-store: batch commit of ${records.length} record(s) failed — files written to disk but not on any branch's history`);
+    }
+    return results;
+  }
+
+  return { list, get, write, writeBatch, activeGoals, listActiveCriteria, isGoalAchieved, checkWithinCap, checkStaleness, checkAchievedFailing };
 }
 
 // ── Direct-invocation entry (Contract invoke: `node packages/quay/src/goal-store.ts`) ──────────────
@@ -846,6 +922,7 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
 //   get <id>                  — one record as JSON
 //   write <id> [--title ...] [--status ...] [--goal ...] [--criterion ...] [--expect ...]
 //              [--origin ...] [--body ...] [--actor ...] [--reason ...] [--force] [--dry-run]
+//   batch --json '<array>'  — write N records in ONE commit (each: id + the write fields)
 //              (`--origin` is REQUIRED on create, OPTIONAL on update — patch semantics keep the
 //              stored value; `--dry-run` validates without persisting; `--force` skips the
 //              draft→active activation gate)
@@ -961,6 +1038,43 @@ async function main(argv: string[]) {
         return 2;
       }
     }
+    case "batch": {
+      // `node goal-store.ts batch --json '[{...}, {...}]'` — write N records in ONE commit
+      // (gap-store-commit-action-and-actor AC3). Records share the `write` shape: `id` + the write
+      // fields (title/status/goal/criterion/expect/origin/body/actor/reason/force).
+      const ji = rest.indexOf("--json");
+      if (ji < 0) { console.error("goal-store: batch requires --json <array-of-records>"); return 2; }
+      const raw = rest[ji + 1];
+      if (raw === undefined) { console.error("goal-store: batch --json missing value"); return 2; }
+      let records: unknown;
+      try { records = JSON.parse(raw); } catch {
+        console.error("goal-store: batch --json is not valid JSON"); return 2;
+      }
+      if (!Array.isArray(records)) { console.error("goal-store: batch --json must be a JSON array"); return 2; }
+      try {
+        const results = store.writeBatch(records.map((r) => {
+          const o = (r && typeof r === "object" ? r : {}) as Record<string, unknown>;
+          return {
+            id: String(o.id ?? ""),
+            title: o.title as string | undefined,
+            status: o.status as string | undefined,
+            goal: o.goal as string | undefined,
+            criterion: o.criterion as string | undefined,
+            expect: o.expect as string | undefined,
+            origin: o.origin as string | undefined,
+            body: o.body as string | undefined,
+            force: o.force === true,
+            actor: o.actor as string | undefined,
+            reason: o.reason as string | undefined,
+          };
+        }));
+        process.stdout.write(JSON.stringify(results, null, 2) + "\n");
+        return 0;
+      } catch (err) {
+        console.error(`goal-store: batch failed: ${(err as Error).message}`);
+        return 2;
+      }
+    }
     case "gate": {
       const id = rest[0];
       if (!id) { console.error("goal-store: gate requires <id>"); return 2; }
@@ -1020,7 +1134,7 @@ async function main(argv: string[]) {
     }
     default: {
       console.error(
-        `goal-store: unknown subcommand ${JSON.stringify(sub)} — expected list|get|write|gate|check`
+        `goal-store: unknown subcommand ${JSON.stringify(sub)} — expected list|get|write|batch|gate|check`
       );
       return 2;
     }
