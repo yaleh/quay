@@ -29,9 +29,9 @@ extra: {}
 
 ## AC
 
-- [ ] AC1 分页页非空：`before=<首屏最老 t>` 直调 `readGitHistory` + `layoutGitGraph`，断言 `branches[0].commits.length > 0`（当前 = 0）。
-- [ ] AC2 连续三页单调增长：连调三页（cursor 逐页回退），合并 mainline 泳道后提交数单调增长且第三页非空。
-- [ ] AC3 侧枝不丢：`live`/`reconstructed` 泳道总数在分页前后不减少（`--first-parent` 主链分离不破坏侧枝）。
+- [x] AC1 分页页非空：`before=<首屏最老 t>` 直调 `readGitHistory` + `layoutGitGraph`，断言 `branches[0].commits.length > 0`（当前 = 0）。
+- [x] AC2 连续三页单调增长：连调三页（cursor 逐页回退），合并 mainline 泳道后提交数单调增长且第三页非空。
+- [x] AC3 侧枝不丢：`live`/`reconstructed` 泳道总数在分页前后不减少（`--first-parent` 主链分离不破坏侧枝）。
 
 ## DoD
 
