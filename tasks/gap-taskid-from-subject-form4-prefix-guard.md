@@ -1,7 +1,7 @@
 ---
 id: gap-taskid-from-subject-form4-prefix-guard
 title: taskIdFromSubject Form 4 缺 known-prefix 守卫——`git-history:` 前缀遮蔽 Form 6 尾括号 id
-status: todo
+status: ready
 labels:
   - gap
   - defect
