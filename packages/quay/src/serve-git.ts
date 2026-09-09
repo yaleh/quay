@@ -38,6 +38,14 @@ export const GIT_GRAPH_LANE_GAP = 16;
 export const GIT_GRAPH_PAD_Y = 24;
 /** Fixed row height — one commit per band. */
 export const GIT_GRAPH_ROW_H = 24;
+/**
+ * Auto-load fuse (gap-git-graph-no-bounded-scroll-panel): the client scroll-loader auto-loads AT MOST
+ * this many rows beyond the initial window (via IntersectionObserver + the self-chain) before degrading
+ * the sentinel to a manual 「点击加载更早提交」 button. 2500 rows ≈ 5 pages × 500 — a small slice of the
+ * full repo (~19,520 commits) whose whole-DOM full-repaint cost is the long-term leak this caps; the
+ * rest loads one click at a time. Exported so the AC5 test can mock exactly the right number of pages.
+ */
+export const GIT_GRAPH_AUTO_LOAD_ROW_LIMIT = 2500;
 
 /**
  * Categorical column palette — eight distinct HUES (not shades of one), each dark enough to hold ≥3:1
@@ -394,6 +402,7 @@ export function gitGraphClientScript(): string {
   return `(function () {
   var mount = document.getElementById("git-graph");
   var dataEl = document.getElementById("git-graph-data");
+  var scrollEl = document.getElementById("git-graph-scroll");
   if (!mount || !dataEl || typeof d3 === "undefined") { return; }
   var data;
   try { data = JSON.parse(dataEl.textContent); } catch (e) { return; }
@@ -559,11 +568,46 @@ export function gitGraphClientScript(): string {
     }
   }
 
+  // ── scroll container sizing ────────────────────────────────────────────────────────────────
+  // The header height is NOT constant (statusNote present/absent, line-wrap at different viewport
+  // widths), so the panel's max-height is computed at runtime and re-computed on resize — never a
+  // hardcoded CSS value (gap-git-graph-no-bounded-scroll-panel Plan step 3).
+  function layoutScrollHeight() {
+    if (!scrollEl) { return; }
+    var top = scrollEl.getBoundingClientRect().top;
+    var h = window.innerHeight - top - 24; // 24px breathing room above the page bottom
+    if (h < 160) { h = 160; } // floor: very short / mobile viewports still get a usable panel
+    scrollEl.style.maxHeight = h + "px";
+  }
+
   // ── scroll loader: append OLDER commits below the current rows (newest-first axis) ──
   var sentinel = document.getElementById("git-graph-sentinel");
   var coverageEl = document.getElementById("git-graph-coverage");
   var loadingOlder = false;
   var olderDone = false;
+  var autoLoadBudget = ${GIT_GRAPH_AUTO_LOAD_ROW_LIMIT};
+  var autoLoadedRows = 0;
+  var fuseTripped = false;
+  var autoObserver = null;
+
+  // Degrade the sentinel from an auto-load target to a manual 「加载更早提交」 button once the
+  // auto-load fuse trips (or IntersectionObserver is unavailable). Clicking keeps loading until
+  // finishOlder() — the manual path is deliberately NOT counted against the fuse.
+  function tripFuse() {
+    if (fuseTripped) { return; }
+    fuseTripped = true;
+    if (autoObserver) { autoObserver.disconnect(); autoObserver = null; }
+    if (sentinel) {
+      sentinel.textContent = "点击加载更早提交";
+      sentinel.style.cursor = "pointer";
+      sentinel.addEventListener("click", loadOlder);
+    }
+  }
+
+  if (scrollEl) {
+    layoutScrollHeight();
+    if (typeof window.addEventListener === "function") { window.addEventListener("resize", layoutScrollHeight); }
+  }
 
   function coverageSpan() {
     var min = null, max = null;
@@ -613,19 +657,26 @@ export function gitGraphClientScript(): string {
           // Reset BEFORE chaining: the self-chain call below must see loadingOlder === false, or the
           // chain dead-stops after one page (gap-git-graph-scroll-loader-self-chain-blocked-by-loadingolder-flag).
           loadingOlder = false;
-          if (sentinel && sentinel.getBoundingClientRect().top < window.innerHeight + 600) { loadOlder(); }
+          if (!fuseTripped) {
+            autoLoadedRows += added;
+            if (autoLoadedRows >= autoLoadBudget) { tripFuse(); }
+          }
+          if (!fuseTripped && sentinel && sentinel.getBoundingClientRect().top < window.innerHeight + 600) { loadOlder(); }
         });
       })
       .catch(function () { finishOlder(); });
   }
   if (sentinel) {
     if (typeof IntersectionObserver !== "undefined") {
-      var io = new IntersectionObserver(function (entries) {
-        for (var i = 0; i < entries.length; i++) { if (entries[i].isIntersecting) { loadOlder(); } }
-      }, { rootMargin: "600px 0px" });
-      io.observe(sentinel);
+      // root is the scroll CONTAINER, not the default viewport — "should we load more" must judge the
+      // container's own bottom, not whether the whole document reached its bottom (gap-git-graph-no-
+      // bounded-scroll-panel; the container now owns the vertical scroll the page used to carry).
+      autoObserver = new IntersectionObserver(function (entries) {
+        for (var i = 0; i < entries.length; i++) { if (!fuseTripped && entries[i].isIntersecting) { loadOlder(); } }
+      }, { root: scrollEl, rootMargin: "600px 0px" });
+      autoObserver.observe(sentinel);
     } else {
-      sentinel.addEventListener("click", loadOlder);
+      tripFuse();
     }
   }
 
@@ -634,7 +685,11 @@ export function gitGraphClientScript(): string {
 })();`;
 }
 
-/** Mini-legend rendered in the graph corner (● commit / ◆ merge) — how to read the graph key. */
+/** Mini-legend rendered in the graph corner (● commit / ◆ merge) — how to read the graph key.
+ *  A full-width, OPAQUE bar sticky to the container's top (and left, for horizontal scroll): once the
+ *  scroll container produces real vertical overflow (gap-git-graph-no-bounded-scroll-panel) the bar
+ *  sticks at the top and the commit rows scroll cleanly under it — no narrow floating pill occluding
+ *  the first visible row. The opaque `--color-surface` background adapts to dark mode via the CSS var. */
 export function gitGraphLegendHtml(): string {
   const glyph = (colorVar: string, ch: string, label: string) =>
     `<span><span style="color:${colorVar}">${ch}</span> ${label}</span>`;
@@ -643,7 +698,7 @@ export function gitGraphLegendHtml(): string {
     glyph("var(--color-accent-2-500)", "◆", "merge"),
     glyph("var(--color-neutral-700)", "╰", "父提交连线（圆角正交）"),
   ];
-  return `<div style="position:sticky;left:0;top:0;z-index:2;display:inline-flex;gap:0.75rem;align-items:center;background:var(--color-surface);padding:0.25rem 0.6rem;border:1px solid var(--color-neutral-200);border-radius:6px;font-size:0.72rem;color:var(--color-neutral-700)">${parts.join("")}</div>`;
+  return `<div style="position:sticky;left:0;top:0;z-index:2;display:flex;gap:0.75rem;align-items:center;background:var(--color-surface);padding:0.35rem 0.6rem;border-bottom:1px solid var(--color-neutral-200);font-size:0.72rem;color:var(--color-neutral-700)">${parts.join("")}</div>`;
 }
 
 /**
@@ -653,8 +708,9 @@ export function gitGraphLegendHtml(): string {
  * text (44/500 rows at 1440px) and horizontal-scrolling the graph scrolls the column context away.
  * This is a PAGE-scoped override — the `#main` id selector (1,0,0) beats the bare `main` type selector
  * (0,0,1), and the style is emitted ONLY on this page's HTML — so the global 900px is untouched (AC7).
- * 1400px yields ~1368px content width at a 1440px viewport (≥ the measured SVG); `#git-graph`'s own
- * `overflow-x:auto` keeps narrower viewports scrollable rather than clipped.
+ * 1400px yields ~1368px content width at a 1440px viewport (≥ the measured SVG); `#git-graph-scroll`'s
+ * own `overflow-x:auto` keeps narrower viewports scrollable rather than clipped (gap-git-graph-no-
+ * bounded-scroll-panel moved the x/y overflow onto the new scroll container).
  */
 export function gitHistoryPageStyle(): string {
   return html`<style>#main { max-width: 1400px; }</style>`;
@@ -742,11 +798,13 @@ export function renderGitHistoryPage(history: GitHistoryResult, view: GitGraphVi
   const coverageSpan = layout ? coverageSpanSeconds(layout) : null;
   const coverageText = coverageSpan !== null ? formatCoverageSpan(coverageSpan) : "—";
 
+  // The scroll container owns BOTH horizontal and vertical overflow (Plan step 6 — one container, not
+  // nested x/y scroll layers). `#git-graph` loses its own overflow-x:auto; the sentinel moves INSIDE the
+  // container so the IntersectionObserver can target it against the container's own scrollport (AC2).
+  // max-height is a calc() FALLBACK so the page is usable before JS runs — the client script overwrites
+  // it with a precise px value computed from the header's actual height on load + resize (Plan step 3).
   const graph = layout
-    ? html`<div id="git-graph" aria-label="Git 纵向时间轴" style="overflow-x:auto">${gitGraphLegendHtml()}</div>`
-    : "";
-  const sentinel = layout
-    ? html`<div id="git-graph-sentinel" class="meta" style="padding:0.6rem 0;color:var(--color-neutral-700);font-size:0.75rem">加载更早提交…</div>`
+    ? html`<div id="git-graph-scroll" aria-label="Git 纵向时间轴（可滚动）" style="overflow-x:auto;overflow-y:auto;max-height:calc(100vh - 240px)"><div id="git-graph" aria-label="Git 纵向时间轴">${gitGraphLegendHtml()}</div><div id="git-graph-sentinel" class="meta" style="padding:0.6rem 0;color:var(--color-neutral-700);font-size:0.75rem">加载更早提交…</div></div>`
     : "";
   // The data JSON is embedded with `<` escaped to \u003c so a commit subject can never break out of
   // the <script> element. d3 + the client renderer are emitted only when there is a graph to draw.
@@ -763,10 +821,9 @@ export function renderGitHistoryPage(history: GitHistoryResult, view: GitGraphVi
     <body>${renderMobileChrome("git", "git history")}${renderSiteNav("git")}<main id="main">
       <h1>Git History — 提交纵向时间轴</h1>
       ${gitHistoryViewToggle(view)}
-      <p class="meta"><strong>纵轴 = git 发射顺序（新的在上）。</strong> 每行一个提交；分支标签只在 ref 指向的那个提交上内联显示（git decorate 语义）。菱形 = 合并提交。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并（跨所有本地分支）；已加载窗口覆盖 <span id="git-graph-coverage">${escapeHtml(coverageText)}</span>。滚动到图表底部自动加载更早的提交。</p>
+      <p class="meta"><strong>纵轴 = git 发射顺序（新的在上）。</strong> 每行一个提交；分支标签只在 ref 指向的那个提交上内联显示（git decorate 语义）。菱形 = 合并提交。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并（跨所有本地分支）；已加载窗口覆盖 <span id="git-graph-coverage">${escapeHtml(coverageText)}</span>。在图表容器内滚动到底部自动加载更早的提交（加载较多后改为点击加载）。</p>
       ${statusNote}
       ${graph}
-      ${sentinel}
       ${dataScript}
       ${libScript}
       ${clientScript}
