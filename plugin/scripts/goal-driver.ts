@@ -757,14 +757,16 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
 
   // ⑦ draft AC 分诊（GOAL-010 范围② / AC-210）：对 active GOAL 名下每条 draft AC 出五态判决并逐条
   // 落痕（⛔ 只记录，不 flip——draft→active 归人/manager 裁定 3，retire 归人 AC-211）。taskFacts 已在
-  // ⑤读出，直接传入（⛔ 不再读一次）。goal posture 由 AC-215 从 goal 记录读出后传入，本任务暂传 null
-  // （判决函数已按 posture 入参预留 seam）。对象集 = 轮开始时 active 的 GOAL 名下的 draft AC。
+  // ⑤读出，直接传入（⛔ 不再读一次）。goal posture 由 goal 记录读出后传入（AC-215：`measure-only`
+  // 名下 draft AC 不得判 activate——判决函数已按 posture 入参预留 seam）。对象集 = 轮开始时 active 的
+  // GOAL 名下的 draft AC。
   const triage: TriageEntry[] = [];
   for (const goal of activeGoals) {
     const gid = String(goal.id);
+    const posture = typeof goal.posture === "string" ? goal.posture : null;
     for (const r of records) {
       if (!isAc(r) || r.status !== "draft" || String(r.goal ?? "") !== gid) continue;
-      triage.push(triageDraftAc(r, null, taskFacts));
+      triage.push(triageDraftAc(r, posture, taskFacts));
     }
   }
 
