@@ -3,7 +3,7 @@ id: gap-git-graph-stride-chip-overlaps-commit-row-text
 title: （已被 gap-git-graph-adopt-git-column-algorithm-and-decorate-labels
   取代）原范围「chip 挪开以免压字」作废——其 AC3 会把人明确否决的「每 strideRows 重复标签」锁进回归测试；改写为「确认 chip
   机件确已移除且标签仍在 ref tip」的独立闭合确认
-status: done
+status: ready
 labels:
   - gap
   - webui
