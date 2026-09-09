@@ -103,6 +103,18 @@ function colsOf(openTag) {
   return m ? Number(m[1]) : null;
 }
 
+/** Column count encoded in a grid row's inline template — BOTH the card-count-bound
+ *  repeat(N, minmax(0,1fr)) form (工作进展/变更记录) and the fixed 3fr:2fr asymmetric top row
+ *  (gap-dashboard-top-row-asymmetric-columns) reduce to a plain column count, so the shared
+ *  empty-slot invariant (cols × rows − cards == 0) still holds for every row. Null = unrecognized. */
+function rowColCount(openTag) {
+  const repeat = colsOf(openTag);
+  if (repeat !== null) return repeat;
+  const asym = openTag.match(/grid-template-columns:minmax\(0,\s*3fr\)\s+minmax\(0,\s*2fr\)/);
+  if (asym) return 2;
+  return null;
+}
+
 test("AC2: gridColumns/renderCardGrid bind column count to card count (3/4/5 → 3/4/5 columns)", () => {
   // The pure helper: n cards → n columns.
   assert.equal(gridColumns(3), "repeat(3, minmax(0, 1fr))", "gridColumns(3) is a 3-column template");
@@ -133,9 +145,9 @@ test("AC1: every grid row has 0 empty slots (columns == cards) in the rendered p
 
   const triplets = [];
   for (const row of rows) {
-    const cols = colsOf(row.openTag);
+    const cols = rowColCount(row.openTag);
     const cards = countDirectDivs(row.content);
-    assert.ok(cols !== null, "each grid row carries a repeat(N, minmax(0,1fr)) column template");
+    assert.ok(cols !== null, "each grid row carries a recognized column template (repeat(N) or 3fr:2fr)");
     const rowCount = Math.ceil(cards / cols);
     const empty = cols * rowCount - cards;
     triplets.push(`(列数=${cols}, 卡片数=${cards}, 空槽数=${empty})`);
@@ -180,9 +192,38 @@ test("AC4: the divider colour can only show through the 2px gap + 1px border (no
     // lines whose area is far below 20000px², never a large dark rectangle.
     assert.ok(row.openTag.includes("gap:2px"), "the grid keeps the 2px gap (divider shows only through it)");
     assert.ok(row.openTag.includes("border:1px solid var(--color-divider)"), "the grid keeps the 1px divider border");
-    const cols = colsOf(row.openTag);
+    const cols = rowColCount(row.openTag);
     const cards = countDirectDivs(row.content);
     const empty = cols * Math.ceil(cards / cols) - cards;
     assert.equal(empty, 0, "no empty slot ⇒ no large --color-divider rectangle (gap/border only)");
   }
+});
+
+test("top-row asymmetric: 3fr:2fr two columns, sys+mgr flex-stacked in the right column, equal-width rows untouched", () => {
+  const html = renderDashboardPage(makeDashboardArgs());
+  const rows = extractGridRows(html);
+  assert.equal(rows.length, 3, "the page still renders exactly 3 card-grid rows");
+
+  const top = rows[0];
+  // Fixed 3:2 ratio, NOT the card-count-bound repeat(N, minmax(0,1fr)) form.
+  assert.ok(top.openTag.includes("grid-template-columns:minmax(0,3fr) minmax(0,2fr)"), "top row carries the 3fr:2fr asymmetric template");
+  assert.ok(!top.openTag.includes("repeat("), "top row does not reuse gridColumns()'s repeat() template");
+  // Exactly 2 grid items: the live card + one stacked column (sys + mgr wrapped).
+  assert.equal(countDirectDivs(top.content), 2, "top row has exactly 2 grid items");
+
+  // The right column stacks sysCard + mgrCard in a flex column; the live card is the left column.
+  const wrapIdx = top.content.indexOf('<div style="display:flex;flex-direction:column;gap:2px">');
+  const liveIdx = top.content.indexOf('id="live-card"');
+  const sysIdx = top.content.indexOf('id="sys-card"');
+  const mgrIdx = top.content.indexOf('id="mgr-card"');
+  assert.ok(wrapIdx !== -1, "the right column is a flex-column stack");
+  assert.ok(liveIdx !== -1 && sysIdx !== -1 && mgrIdx !== -1, "all three cards remain in the top row");
+  assert.ok(liveIdx < wrapIdx && wrapIdx < sysIdx && sysIdx < mgrIdx,
+    "live card is the left column; sys then mgr stacked top-to-bottom in the right column");
+
+  // The other two rows stay card-count-bound and equal-width (not affected by the top-row change).
+  const rest = rows.slice(1);
+  assert.ok(rest.every((r) => colsOf(r.openTag) !== null), "工作进展 + 变更记录 rows still use repeat(N, minmax(0,1fr))");
+  assert.equal(colsOf(rest[0].openTag), 4, "工作进展 row stays 4 columns (4 cards)");
+  assert.equal(colsOf(rest[1].openTag), 2, "变更记录 row stays 2 columns (2 cards)");
 });
