@@ -2,7 +2,7 @@
 id: gap-ac214-freshness-anchor-build-sha-missing-on-203-205-207
 title: AC-214 新鲜度元判据读 build_sha，而 AC-203/205/207 落账记录不写它（207 只有异仓库 commit_sha）→
   三条载体 AC 达成后仍恒 exit 1
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical
@@ -35,13 +35,13 @@ goal_ac: AC-214
 
 ## Acceptance Criteria
 
-- [ ] AC1 机制（choke point）：`grep -n 'ac89_append_goal009\|"build_sha"' plugin/scripts/verify-deliver-coldstart.sh` 命中 ≥1，且 helper 对每条 `GOAL-009-AC-*` 记录统一补 top-level `build_sha`（40-hex）；贴前 3 条命中（硬规则②）。
-- [ ] AC2 兄弟契约对齐：`grep -c 'ac89_append_goal009' tasks/gap-driver-runtime-driver-path-anchored-at-project-root-not-dist.md tasks/gap-ac205-session-delivery-channel-transcript-confirmed.md tasks/gap-ac207-e2e-target-driver-driven-real-commit-task-done.md` 各 ≥1；贴命中行。
-- [ ] AC3 正向控制：合成载体含四条 `GOAL-009-AC-20{1,3,5,7}` 记录、各自 top-level `build_sha` = 近 K 内 develop 祖先 ⇒ AC-214 criterion exit 0（贴干跑输出）。
-- [ ] AC4 负控制（陈旧转红）：把 AC3 中某条 `build_sha` 换成 434 个交付面提交之前的 develop 祖先 ⇒ criterion exit 1 `stale evidence:…`；验证后移除合成记录（不污染生产载体）。
-- [ ] AC5 负控制（异仓库 sha 不作锚）：合成一条 `ac="GOAL-009-AC-207"` 但只有 `commit_sha`（异仓库 sha）、无 `build_sha` 的记录 ⇒ criterion 仍 exit 1（`no evidence yet:…`），证明新鲜度锚只认 `build_sha`；验证后移除。
-- [ ] AC6 fail-closed：`BUILD_SHA` 空或非 40-hex 时 `ac89_append_goal009()` 不写该记录且 exit 非 0；实测 `--verify-only`（无 build）路径不追加 `GOAL-009-AC-*` 记录（硬规则 3b）。
-- [ ] AC7 测试钉：`plugin/test/verify-deliver-coldstart.test.mjs` 断言 helper 补 `build_sha`（正：注入 40-hex `BUILD_SHA` ⇒ 写出含 `build_sha` 记录；负：空 ⇒ 不写）；`scripts/test.sh` 全量绿。
+- [x] AC1 机制（choke point）：`grep -n 'ac89_append_goal009\|"build_sha"' plugin/scripts/verify-deliver-coldstart.sh` 命中 ≥1，且 helper 对每条 `GOAL-009-AC-*` 记录统一补 top-level `build_sha`（40-hex）；贴前 3 条命中（硬规则②）。
+- [x] AC2 兄弟契约对齐：`grep -c 'ac89_append_goal009' tasks/gap-driver-runtime-driver-path-anchored-at-project-root-not-dist.md tasks/gap-ac205-session-delivery-channel-transcript-confirmed.md tasks/gap-ac207-e2e-target-driver-driven-real-commit-task-done.md` 各 ≥1；贴命中行。
+- [x] AC3 正向控制：合成载体含四条 `GOAL-009-AC-20{1,3,5,7}` 记录、各自 top-level `build_sha` = 近 K 内 develop 祖先 ⇒ AC-214 criterion exit 0（贴干跑输出）。
+- [x] AC4 负控制（陈旧转红）：把 AC3 中某条 `build_sha` 换成 434 个交付面提交之前的 develop 祖先 ⇒ criterion exit 1 `stale evidence:…`；验证后移除合成记录（不污染生产载体）。
+- [x] AC5 负控制（异仓库 sha 不作锚）：合成一条 `ac="GOAL-009-AC-207"` 但只有 `commit_sha`（异仓库 sha）、无 `build_sha` 的记录 ⇒ criterion 仍 exit 1（`no evidence yet:…`），证明新鲜度锚只认 `build_sha`；验证后移除。
+- [x] AC6 fail-closed：`BUILD_SHA` 空或非 40-hex 时 `ac89_append_goal009()` 不写该记录且 exit 非 0；实测 `--verify-only`（无 build）路径不追加 `GOAL-009-AC-*` 记录（硬规则 3b）。
+- [x] AC7 测试钉：`plugin/test/verify-deliver-coldstart.test.mjs` 断言 helper 补 `build_sha`（正：注入 40-hex `BUILD_SHA` ⇒ 写出含 `build_sha` 记录；负：空 ⇒ 不写）；`scripts/test.sh` 全量绿。
 
 ## Definition of Done
 
@@ -55,3 +55,15 @@ AC1–AC7 全绿；`scripts/test.sh` 全量绿（含 `plugin/test/verify-deliver
 - tasks/gap-ac205-session-delivery-channel-transcript-confirmed.md
 - tasks/gap-ac207-e2e-target-driver-driven-real-commit-task-done.md
 - tasks/gap-ac214-freshness-anchor-build-sha-missing-on-203-205-207.md
+
+## Evidence
+
+AC1 机制：`grep -n 'ac89_append_goal009\|"build_sha"' plugin/scripts/verify-deliver-coldstart.sh` 命中前 3 条——
+`399:ac89_append_goal009() {` / `402:…echo "ac89_append_goal009: BUILD_SHA not 40-hex…` / `405:…AC89 path empty…`；helper 对每条 GOAL-009-AC-* 统一补 top-level `build_sha`（40-hex，fail-closed）。
+AC2 兄弟契约：`grep -c 'ac89_append_goal009'` 三个 sibling task 各 =1（gap-driver-runtime:28 / gap-ac205:35 / gap-ac207:29）。
+AC3 正向：合成载体四条 GOAL-009-AC-20{1,3,5,7} 各带 develop-tip `build_sha` ⇒ AC-214 criterion **exit 0**。
+AC4 负向：把 AC-207 的 `build_sha` 换成 441 交付面提交之前的 develop 祖先 ⇒ **exit 1** `stale evidence: GOAL-009-AC-207:441>200`；验证后已移除合成记录。
+AC5 负向：AC-207 只有 `commit_sha`（异仓库 sha）无 `build_sha` ⇒ **exit 1** `no evidence yet: GOAL-009-AC-207`（新鲜度锚只认 `build_sha`）；验证后已移除。
+exit 3：载体缺失 ⇒ **exit 3** `NOT-EVALUATED: carrier absent`（三向全对）。
+AC6 fail-closed：`BUILD_SHA=not-a-sha` 与 39-hex 均 `return 1` 且不写；`--verify-only` 只写 `ac="AC88"`、`grep -c 'GOAL-009-AC-'` = 0。
+AC7 测试钉：`node --test plugin/test/verify-deliver-coldstart.test.mjs` 10/10 绿（含 goal009-anchor 正/负断言）。

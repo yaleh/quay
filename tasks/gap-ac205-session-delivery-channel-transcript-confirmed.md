@@ -32,7 +32,7 @@ AC-205（GOAL-009）判据 exit 1：载体 `.quay/productization-verification.js
 
 1. **验证/修 `dist/send-to-session.js` 自洽**：跑 `node --experimental-strip-types packages/quay/scripts/build-plugin-dist.mjs` 后 grep staged bundle 无 `packages/quay/src` 残留；若 >0，扩展 `coreSrcAliasPlugin`（或把 `send-to-session.ts` 的动态 import 静态化/改为 bundle 内引用）使其内联。⛔ 不改 `send-to-session.ts` 的投递语义，只保证 shipped bundle 自洽。
 2. **接线验证步骤到 `verify-deliver-coldstart.sh`**（或同层）：host B/C 上，用安装物里的 `dist/send-to-session.js` 发 probe（`--pid <target>` 或 `--self`）到同址目标会话；从 `--pid` 注册读 `sessionId`，grep 目标 transcript jsonl 命中 probe 文本 ⇒ `transcript_confirmed`。
-3. **载体落账**：追加 `ac="GOAL-009-AC-205"` 记录；`shipped_from_installed_artifact` 取「所用 send-to-session 出自安装物 dist 而非 dev 树」这一事实，`transcript_confirmed` 取 grep 命中布尔；缺任一读数不写（fail-closed）。
+3. **载体落账**：经 `ac89_append_goal009()` 落账（`build_sha`/`ts` 由 helper 统一补——AC-214 新鲜度锚只认 top-level `build_sha`），追加 `ac="GOAL-009-AC-205"` 记录；`shipped_from_installed_artifact` 取「所用 send-to-session 出自安装物 dist 而非 dev 树」这一事实，`transcript_confirmed` 取 grep 命中布尔；缺任一读数不写（fail-closed）。
 4. **生产复跑**（host B/C + 同址目标会话）使 AC-205 判据 exit 1 → exit 0。
 
 ## Acceptance Criteria

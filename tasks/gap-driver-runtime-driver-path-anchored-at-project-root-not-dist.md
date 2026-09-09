@@ -51,6 +51,7 @@ AC1–AC6 全绿；`scripts/test.sh` 全量绿（含 `plugin/test/driver-runtime
 - plugin/test/driver-runtime.test.mjs
 - plugin/test/start-drivers.test.mjs
 - plugin/test/verify-deliver-coldstart.test.mjs
+- plugin/test/worker-driver-resident.test.mjs
 - packages/quay/scripts/build-plugin-dist.mjs
 - packages/quay/test/build-plugin-dist.test.mjs
 - goals/AC-202-凡被-spawn-的机件必进交付物-把闭包闸扩到-driver-kinds-这类数据表字面量引用.md
