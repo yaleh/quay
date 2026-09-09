@@ -589,29 +589,33 @@ export function renderSysCard(sys: SystemResult): string {
   </div>`;
 }
 
-/** The dashboard mgrCard — a self-contained render of the two resident drivers' alive status
+/** The dashboard mgrCard — a self-contained render of every resident driver kind's alive status
  *  (id="mgr-card"). gap-dashboard-driver-status-card: the retired Manager/Outer/Inner probe is no
- *  longer read here; the card renders promotion/worker driver alive status + last-record relative
- *  time from the in-process driver-status reading (readDriverStatus in observation.ts). When a pid
- *  file is absent (or the reading is absent — the dashboard error fallback), the row reads 「未运行」
- *  — never a bare undefined/NaN/empty (CLAUDE.md 硬规则 3b/4b). */
+ *  longer read here; the card renders all KNOWN_KINDS driver alive status + last-record relative
+ *  time from the in-process driver-status reading (readDriverStatus in observation.ts — the kind list
+ *  arrives INSIDE the reading array, so this card never needs to know the kind list itself). When a
+ *  pid file is absent the row reads 「未运行」 — never a bare undefined/NaN/empty (CLAUDE.md 硬规则
+ *  3b/4b). A retired kind (outer) renders 「未运行」 rather than being silently omitted — honest
+ *  absence, not a hidden hole (AC7). When the whole reading is absent/empty (dashboard error
+ *  fallback / product install without the driver kernel), the card reads 「Driver 状态未接入」 — the
+ *  honest empty state, not a fabricated per-kind row. */
 export function renderMgrCard(mgr: ManagerResult): string {
+  const rows = mgr.drivers ?? [];
   return html`<div id="mgr-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
     <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">Driver</div>
-    ${renderDriverStatusRow("promotion", mgr.drivers?.promotion)}
-    ${renderDriverStatusRow("worker", mgr.drivers?.worker)}
+    ${rows.length > 0 ? rows.map(renderDriverStatusRow).join("") : html`<div style="margin:0;font-size:0.8rem;line-height:1.5">Driver 状态未接入</div>`}
     <a href="/manager" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看三层状态 →</a>
   </div>`;
 }
 
 /** Render one driver kind's alive-status row: `<kind>: <运行中|未运行> · 末条记录 <relativeTime>`.
- *  An absent reading (undefined — the dashboard error fallback) renders identically to a dead kind:
- *  「未运行」, never `undefined`/`NaN`/empty (absent-field contract, hard rules 3b/4b). */
-function renderDriverStatusRow(kind: "promotion" | "worker", d: DriverKindReading | undefined): string {
-  const aliveText = d?.running === true ? "运行中" : "未运行";
-  const lastMs = d?.lastTs ? Date.parse(d.lastTs) : Number.NaN;
+ *  A dead reading renders 「未运行」, never `undefined`/`NaN`/empty (absent-field contract, hard rules
+ *  3b/4b). */
+function renderDriverStatusRow(d: Pick<DriverKindReading, "kind" | "running" | "lastTs">): string {
+  const aliveText = d.running === true ? "运行中" : "未运行";
+  const lastMs = d.lastTs ? Date.parse(d.lastTs) : Number.NaN;
   const lastText = Number.isFinite(lastMs) ? relativeTime(lastMs) : "—";
-  return html`<div style="margin:0;font-size:0.8rem;line-height:1.5"><b>${escapeHtml(kind)}</b>: ${aliveText} · 末条记录 ${lastText}</div>`;
+  return html`<div style="margin:0;font-size:0.8rem;line-height:1.5"><b>${escapeHtml(d.kind)}</b>: ${aliveText} · 末条记录 ${lastText}</div>`;
 }
 
 /** The dashboard taskCard — a self-contained render of the task-ledger summary (id="task-card"):
