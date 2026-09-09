@@ -26,7 +26,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync, execFile, spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { QUAY_VERSION } from "./version.ts";
 import { parseFrontmatter } from "./frontmatter-store-base.ts";
@@ -2773,12 +2773,15 @@ export interface ObserverRow {
   note: string;
 }
 
-/** 单个 driver kind 的存活 + 载体观测（mirror 自 plugin/scripts/driver-runtime.ts 的 aliveness()+
- *  carrierStats() 组合——Core 不 import plugin/，故在 observation 层 in-process 读 pid 文件 + carrier
- *  jsonl）。字段与 `quay driver status --kind <kind> --json` 输出的 supervisor_alive/driver_alive/
- *  running/carrier_records/last_record_ts 逐字段对应（gap-dashboard-driver-status-card AC1 对照）。 */
+/** 单个 driver kind 的存活 + 载体观测（in-process 调 plugin/scripts/driver-runtime.ts 的 aliveness()+
+ *  carrierStats()——不 spawn 子进程、不解析 CLI 输出，AC4）。字段与 `quay driver status --kind <kind>
+ *  --json` 输出的 supervisor_alive/driver_alive/running/carrier_records/last_record_ts 逐字段对应
+ *  （gap-dashboard-driver-status-card AC1 对照）。kind 是 driver-runtime.ts 导出的 DriverKind（六值，
+ *  运行时从 kernel 的 KNOWN_KINDS 遍历得到）——⛔ 不硬编码 promotion/worker 字面量联合（AC6/AC7：
+ *  driver kind 会新增/退役）。类型上记作 string：Core 不能静态 import plugin/（见下方 loadDriverRuntime
+ *  注释），故 kind 词表在运行时经 KNOWN_KINDS 消费，Core 侧无该词表的静态副本。 */
 export interface DriverKindReading {
-  kind: "promotion" | "worker";
+  kind: string;
   supervisorPid: number | null;
   driverPid: number | null;
   supervisorAlive: boolean;
@@ -2788,11 +2791,9 @@ export interface DriverKindReading {
   lastTs: string | null;
 }
 
-/** dashboard mgrCard 消费的两个 driver kind（promotion + worker）的存活读数。 */
-export type DriversReading = {
-  promotion: DriverKindReading;
-  worker: DriverKindReading;
-};
+/** dashboard mgrCard 消费的全部 driver kind（KNOWN_KINDS 顺序）的存活读数——一个数组，每项自带
+ *  kind 字段（serve-dashboard 只渲染数组，无需再知道 kind 列表；order 由 observation 层决定）。 */
+export type DriversReading = DriverKindReading[];
 
 export interface ManagerResult {
   status: ObservationStatus;
@@ -2803,7 +2804,7 @@ export interface ManagerResult {
   pool: { status: ObservationStatus; reason: string | null; pool: number | null; floor: number | null; deficit: number | null; cap: number | null; lastPromoted: string[] };
   version: string | null;
   developLead: number | null;
-  /** promotion + worker 两 driver 的存活读数（dashboard 轻量路径填充；/manager 详情页不消费，可不填）。 */
+  /** 全部 driver kind（KNOWN_KINDS）的存活读数（dashboard 轻量路径填充；/manager 详情页不消费，可不填）。 */
   drivers?: DriversReading;
 }
 
@@ -2981,61 +2982,49 @@ async function readPoolMetrics(root: string): Promise<ManagerResult["pool"]> {
 }
 
 // ── Driver 存活读取（dashboard mgrCard 用）────────────────────────────────────────────────────────
-// mirror 自 plugin/scripts/driver-runtime.ts 的 aliveness()+carrierStats()（promotion/worker 两个
-// kind）。Core 不能 import plugin/（self-contained-dist 不变式：build-dist 会把 driver-runtime.ts 的
-// 整个传递闭包打进 dist/quay.js），故与 readPoolMetrics 同款做法——in-process 读 .quay 下的 pid 文件
-// + carrier jsonl（零 subprocess），字段与 `quay driver status --kind <kind> --json` 逐字段一致。
-// 30s TTL 缓存（复用 POOL_METRICS_CACHE_TTL_MS），避免每次 /dashboard 请求都同步读 pid + jsonl 末行。
+// in-process 调 plugin/scripts/driver-runtime.ts 的 aliveness()+carrierStats()——零 subprocess、
+// 零 CLI 输出解析（AC4）。kind 集合遍历 driver-runtime.ts 导出的 KNOWN_KINDS（六值），⛔ 不硬编码
+// promotion/worker 字面量联合——driver kind 会新增/退役，卡片无需改代码即跟上（AC6/AC7）。
+//
+// ⛔ 静态 import 禁令（为什么 loadDriverRuntime 走运行时动态 import，而不是文件顶部的 import）：
+// packages/quay/src 维持「零 plugin/ 静态 import」边界（见 readBoardLanding 注释）。driver-runtime.ts
+// 的传递闭包（driver-filters/driver-shared/fast-mode-telemetry/workflow-event-schema 等）从未进入
+// Core 的 tsc 程序（根 tsconfig include 只覆盖 packages/**），一旦静态 import（含 import type），
+// tsc 会把整个闭包拖进来并撞上 plugin 树里既存的 78 个类型错误，`tsc --noEmit -p packages/quay` 即红。
+// 运行时经 resolvePluginScriptExec（dev 原始 .ts / 出厂 dist/*.js bundle 的同一 dev/dist fallback，
+// 见 plugin-root.ts）动态 import，specifier 是运行时变量 ⇒ tsc 不静态解析 ⇒ 闭包不进 Core 类型图。
 
-/** pid 文件前缀 + carrier 相对路径（同 DRIVER_KINDS registry 的 promotion/worker 两条）。 */
-const DRIVER_STATUS_SPEC = {
-  promotion: { prefix: "promotion-driver", carriers: ["promotion-outcome.jsonl", "promotion-round.jsonl"] },
-  worker: { prefix: "worker-driver", carriers: ["worker-outcome.jsonl", "worker-round.jsonl"] },
-} as const;
-
-/** `kill -0` 等价：pid 存活判定（读不懂/非正整数 ⇒ false）。mirror driver-runtime.ts pidAlive。 */
-function pidAlive(pid: string | number | null | undefined): boolean {
-  if (pid === null || pid === undefined || pid === "") return false;
-  const n = Number(pid);
-  if (!Number.isInteger(n) || n <= 0) return false;
-  try { process.kill(n, 0); return true; } catch { return false; }
+/** driver-runtime.ts 被 Core 消费的那一薄片（结构类型；⛔ 非 import——见上面静态 import 禁令）。 */
+interface DriverRuntimeSurface {
+  KNOWN_KINDS: string[];
+  aliveness(root: string, kind: string): {
+    supervisorPid: number | null;
+    driverPid: number | null;
+    supervisorAlive: boolean;
+    driverAlive: boolean;
+    running: boolean;
+  };
+  carrierStats(root: string, kind: string): { records: number; lastTs: string | null };
 }
 
-/** 读 pid 文件（缺失/读失败 ⇒ ""，⛔ 不抛）。mirror driver-runtime.ts readPidFile。 */
-function readPidFileSync(file: string): string {
-  try { return fs.readFileSync(file, "utf8").trim(); } catch { return ""; }
-}
+/** 动态 import 的缓存 promise（进程内一次；零 subprocess —— AC4）。 */
+let driverRuntimePromise: Promise<DriverRuntimeSurface | null> | null = null;
 
-/** 读一个 kind 的存活 + 载体（同 statusForKind 的 aliveness()+carrierStats() 组合）。 */
-function readDriverKind(root: string, kind: "promotion" | "worker"): DriverKindReading {
-  const spec = DRIVER_STATUS_SPEC[kind];
-  const q = path.join(root, ".quay");
-  const spidRaw = readPidFileSync(path.join(q, `${spec.prefix}-supervisor.pid`));
-  const dpidRaw = readPidFileSync(path.join(q, `${spec.prefix}.pid`));
-  const supervisorPid = /^\d+$/.test(spidRaw) ? Number(spidRaw) : null;
-  const driverPid = /^\d+$/.test(dpidRaw) ? Number(dpidRaw) : null;
-  const supervisorAlive = supervisorPid != null && pidAlive(supervisorPid);
-  const driverAlive = driverPid != null && pidAlive(driverPid);
-  const running = supervisorAlive && driverAlive;
-
-  let records = 0;
-  let lastTs: string | null = null;
-  for (const carrier of spec.carriers) {
-    const file = path.join(q, carrier);
-    let text: string;
-    try { text = fs.readFileSync(file, "utf8"); } catch { continue; }
-    if (text === "") continue;
-    // wc -l 语义：数换行符（⛔ split("\n").length 会把无尾换行的文件多算 1）。
-    records += (text.match(/\n/g) ?? []).length;
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue;
+/** 懒加载 driver-runtime kernel（in-process，⛔ 不 spawn 子进程）。resolvePluginScriptExec 应用
+ *  dev/dist fallback；kernel 缺失（产品安装无 methodology 层）⇒ null（诚实空读数，⛔ 不抛）。 */
+function loadDriverRuntime(): Promise<DriverRuntimeSurface | null> {
+  if (!driverRuntimePromise) {
+    driverRuntimePromise = (async () => {
+      const resolved = resolvePluginScriptExec(path.join("scripts", "driver-runtime.ts"));
+      if (!resolved) return null;
       try {
-        const j = JSON.parse(line);
-        if (j && typeof j.ts === "string" && j.ts && (lastTs === null || j.ts > lastTs)) lastTs = j.ts;
-      } catch { /* torn/partial tail — skip */ }
-    }
+        return (await import(pathToFileURL(resolved.path).href)) as DriverRuntimeSurface;
+      } catch {
+        return null;
+      }
+    })();
   }
-  return { kind, supervisorPid, driverPid, supervisorAlive, driverAlive, running, records, lastTs };
+  return driverRuntimePromise;
 }
 
 const driverStatusCache = new Map<string, { at: number; drivers: DriversReading }>();
@@ -3043,14 +3032,31 @@ const driverStatusCache = new Map<string, { at: number; drivers: DriversReading 
 /** Test-hygiene handle: drop all cached driver-status readings. */
 export function clearDriverStatusCache(): void { driverStatusCache.clear(); }
 
-/** 读 promotion + worker 两个 driver kind 的存活 + 载体（30s TTL 缓存）。 */
-export function readDriverStatus(root: string): DriversReading {
+/** 读一个 kind 的存活 + 载体（同 statusForKind 的 aliveness()+carrierStats() 组合，in-process）。 */
+function readDriverKind(runtime: DriverRuntimeSurface, root: string, kind: string): DriverKindReading {
+  const a = runtime.aliveness(root, kind);
+  const s = runtime.carrierStats(root, kind);
+  return {
+    kind,
+    supervisorPid: a.supervisorPid,
+    driverPid: a.driverPid,
+    supervisorAlive: a.supervisorAlive,
+    driverAlive: a.driverAlive,
+    running: a.running,
+    records: s.records,
+    lastTs: s.lastTs,
+  };
+}
+
+/** 读全部 driver kind（kernel 导出的 KNOWN_KINDS 顺序）的存活 + 载体（30s TTL 缓存）。kernel 缺失
+ *  ⇒ 返回空数组（诚实空读数，⛔ 不是编造的 0）。 */
+export async function readDriverStatus(root: string): Promise<DriversReading> {
   const hit = driverStatusCache.get(root);
   if (hit && Date.now() - hit.at < POOL_METRICS_CACHE_TTL_MS) return hit.drivers;
-  const drivers: DriversReading = {
-    promotion: readDriverKind(root, "promotion"),
-    worker: readDriverKind(root, "worker"),
-  };
+  const runtime = await loadDriverRuntime();
+  const drivers: DriversReading = runtime
+    ? runtime.KNOWN_KINDS.map((kind) => readDriverKind(runtime, root, kind))
+    : [];
   driverStatusCache.set(root, { at: Date.now(), drivers });
   return drivers;
 }
@@ -3098,7 +3104,7 @@ export async function readManagerLight(root: string): Promise<ManagerResult> {
     pool: { status: "empty", reason: "dashboard 轻量探针不含 pool（/manager 详情页才含）", pool: null, floor: null, deficit: null, cap: null, lastPromoted: [] },
     version,
     developLead: null,
-    drivers: readDriverStatus(root),
+    drivers: await readDriverStatus(root),
   };
 }
 

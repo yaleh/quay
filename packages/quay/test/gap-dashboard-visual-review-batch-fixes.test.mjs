@@ -42,19 +42,21 @@ function makeDashboardArgs(tasks = []) {
   };
 }
 
-test("AC1: mgrCard renders the two resident drivers' honest alive status (未运行 when absent, never undefined/NaN)", () => {
+test("AC1: mgrCard renders the resident drivers' honest alive status (未运行 when absent, never undefined/NaN)", () => {
   // Absent drivers reading (the dashboard error fallback) → 「未运行」, never undefined/NaN/empty
   // (gap-dashboard-driver-status-card: the retired liveness/loop-driver probe is no longer read).
   const absent = renderMgrCard({});
   assert.ok(!/undefined|NaN/.test(absent), "absent drivers never leak undefined/NaN");
-  assert.ok(absent.includes("未运行"), "absent drivers render the honest 未运行 phrase");
+  assert.ok(absent.includes("未接入"), "absent drivers render the honest 未接入 phrase");
 
-  // Both kinds running → each kind named with the alive text (运行中), the positive control.
+  // Kinds running → each kind named with the alive text (运行中), the positive control. The reading
+  // is now an ARRAY (DriversReading = DriverKindReading[]) — one entry per kind, each carrying its own
+  // `kind` field (gap-dashboard-driver-status-card AC6: traverse KNOWN_KINDS, not hardcoded fields).
   const running = renderMgrCard({
-    drivers: {
-      promotion: { kind: "promotion", supervisorPid: 1, driverPid: 2, supervisorAlive: true, driverAlive: true, running: true, records: 3, lastTs: new Date().toISOString() },
-      worker: { kind: "worker", supervisorPid: 1, driverPid: 2, supervisorAlive: true, driverAlive: true, running: true, records: 3, lastTs: new Date().toISOString() },
-    },
+    drivers: [
+      { kind: "promotion", supervisorPid: 1, driverPid: 2, supervisorAlive: true, driverAlive: true, running: true, records: 3, lastTs: new Date().toISOString() },
+      { kind: "worker", supervisorPid: 1, driverPid: 2, supervisorAlive: true, driverAlive: true, running: true, records: 3, lastTs: new Date().toISOString() },
+    ],
   });
   assert.ok(running.includes("promotion"), "running renders the promotion kind");
   assert.ok(running.includes("worker"), "running renders the worker kind");
