@@ -2,7 +2,7 @@
 id: gap-goal-store-backfill-legacy-empty-body
 title: 三条存量 achieved GOAL（GOAL-005/007/008）body 为空、业务目标全挤在 origin：回填可读 body 使
   AC-208 判据归零
-status: ready
+status: done
 labels:
   - gap
   - goal-store
@@ -36,8 +36,8 @@ goal_ac: AC-208
 
 ## AC
 
-- [ ] AC1（AC-208 判据逐字，exit 0）：`test "$(node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts list | python3 -c 'import json,sys; d=json.load(sys.stdin); print(sum(1 for r in d if str(r.get("id","")).startswith("GOAL-") and str(r.get("status")) not in ("superseded","retired") and len((r.get("body") or "").strip())<40))')" -eq 0`——读真实 `goals/` 载体，非注入 fixture。
-- [ ] AC2（枚举 + 可读性，防 40 字符占位符）：逐条跑 `for id in GOAL-005 GOAL-007 GOAL-008; do node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts get $id | python3 -c 'import json,sys; d=json.load(sys.stdin); b=(d.get("body") or "").strip(); print(d.get("id"), len(b), all(w in b for w in ("背景","范围","退出条件")))'; done`——三条都打印 `len(b)>=40` 且末列 `True`（业务目标三节都在 body 里可读）。
+- [x] AC1（AC-208 判据逐字，exit 0）：`test "$(node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts list | python3 -c 'import json,sys; d=json.load(sys.stdin); print(sum(1 for r in d if str(r.get("id","")).startswith("GOAL-") and str(r.get("status")) not in ("superseded","retired") and len((r.get("body") or "").strip())<40))')" -eq 0`——读真实 `goals/` 载体，非注入 fixture。
+- [x] AC2（枚举 + 可读性，防 40 字符占位符）：逐条跑 `for id in GOAL-005 GOAL-007 GOAL-008; do node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts get $id | python3 -c 'import json,sys; d=json.load(sys.stdin); b=(d.get("body") or "").strip(); print(d.get("id"), len(b), all(w in b for w in ("背景","范围","退出条件")))'; done`——三条都打印 `len(b)>=40` 且末列 `True`（业务目标三节都在 body 里可读）。
 
 ## DoD
 

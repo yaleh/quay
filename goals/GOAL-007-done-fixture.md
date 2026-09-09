@@ -102,3 +102,19 @@ origin: >
 
   - ② 的孤儿已手工清除；其复发路径（abort 分支）未单独立案，发生率 1，按硬规则⑫记为观察项。
 ---
+
+## 背景
+
+一条 task 翻 done 之后，它的判据【再也不会被重新评估】。当判据当年成立所依赖的前提后来变了，任务仍是 done、常驻测试仍全绿、而缺陷正在生产上流血——三者可以同时为真，且没有任何机制会报出来。实测三例（全部 status: done，全部由人手工发现而非机制发现）：① gap-fan-in-ff-retry-counter-scope（runId 由 fm-* per-dispatch 变为 wk-prod-* per-driver，闸被闩锁）② gap-suite-load-sampler-orphan-process（修复未覆盖的路径，孤儿存活 8.3 天）③ gap-direct-to-develop-bypasses-fan-in-gates（假完成）。常驻测试恒绿是因为 fixture 把【前提本身】钉死——喂进去的 runId 全是旧形态，结构上不可能发现该缺陷。
+
+## 范围与非目标
+
+层级不对称：goal 层【有】再评估（goal-driver 每轮对每条 active AC 跑 gateCriterion，achieved-but-failing 会被报出），task 层【没有】任何等价物。成本约束：不能「周期性重跑所有 done 任务的 acceptance」（任务数以百计、多数是 suite 规模）。
+
+请裁的是方向，四条候选（不排序、不预设推荐）：甲 撰写纪律；乙 机械对照（比对 fixture 取值与生产载体取值）；丙 task 层再评估（触发条件而非周期）；丁 不修（把长期保证上移到 goal 层 AC）。
+
+不在本条范围（已就地处理）：① 的具体修法已立 gap-ff-retry-counter-runid-no-longer-per-dispatch（ready）；goal 层 achieved-but-failing 无处理者已立 gap-goal-achieved-but-failing-no-handler（ready）；② 的孤儿已手工清除，复发路径发生率 1 记为观察项。
+
+## 退出条件
+
+提请裁定（激活权归人）done-task 判据再评估缺失的修法方向（四条候选）。现已裁定并就地处理——具体修法分别立 task 就位，status 现为 achieved。
