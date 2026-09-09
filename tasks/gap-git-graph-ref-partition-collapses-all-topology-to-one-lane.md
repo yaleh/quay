@@ -13,6 +13,7 @@ children: []
 extra:
   schema: execution
 ---
+
 ## Proposal
 
 **用户诉求（2026-09-08）**：「在图中显示这段时间有活动的所有分支」。**当前实测结果与诉求相反：页面只渲染 1 条泳道。**
@@ -52,11 +53,11 @@ subj:  Merge branch 'develop' into task/gap-deliver-verification-trigger-orphane
 
 ## AC
 
-- [ ] AC1 拓扑完备性（结构不变式，非阈值）：对窗口内每一个合并提交，其第二父提交必须出现在某条泳道的 commits 中——孤儿数 = 0；且非 mainline 泳道数 > 0（当前 = 0）。真实仓库输入与 fixture 各跑一遍，`node --test packages/quay/test/gap-git-graph-ref-partition-collapses-all-topology-to-one-lane.test.mjs` 退出码 0。
-- [ ] AC2 命名取反已修（负控制）：对 fixture 中一个 `Merge branch 'develop' into task/X` 的合并，断言其第二父轨道被命名为 `develop` 而非 `task/X`；同一测试内显式跑旧规则（挑非 mainline 名）并断言它给出 `task/X` ⇒ 判据能区分新旧。
-- [ ] AC3 不再贴错名字（全称判据）：对生产 `#git-graph-data` 里**每一条** `kind === 'reconstructed'` 的泳道，取其任一提交 hash，用 `git merge-base --is-ancestor <hash> <该泳道 ref>` 作独立 oracle 断言退出码 0；不满足者必须降级为 `#<hash>` 未命名形态 ⇒ 错标计数 = 0。
-- [ ] AC4 `--since` 下界修正：`readGitHistory` 对当前仓库返回的 commits 中，`ref` 为非 mainline 且属于「7 天内有独有提交的活跃 ref」的条数 > 0（当前 = 0）；测试内把下界改回「主线批次最旧提交时间」应使该计数归零 ⇒ 负控制成立。
-- [ ] AC5 与 git 对账（点名清单，非魔法比值）：断言实测已知的 4 条活跃 ref（`task/gap-session-liveness-signals-perfile-timeout-flaky`、`worktree-archguard-primitives-doc`、`worktree-dispatch-pref-priority-goal-evidence`、`worktree-slow-tests-analysis`，若届时仍存在且仍有独有提交）全部出现在泳道 ref 集合中；同时断言非 mainline 泳道数 ≤ 窗口内合并提交数（上界，防重复裂分）。
+- [x] AC1 拓扑完备性（结构不变式，非阈值）：对窗口内每一个合并提交，其第二父提交必须出现在某条泳道的 commits 中——孤儿数 = 0；且非 mainline 泳道数 > 0（当前 = 0）。真实仓库输入与 fixture 各跑一遍，`node --test packages/quay/test/gap-git-graph-ref-partition-collapses-all-topology-to-one-lane.test.mjs` 退出码 0。
+- [x] AC2 命名取反已修（负控制）：对 fixture 中一个 `Merge branch 'develop' into task/X` 的合并，断言其第二父轨道被命名为 `develop` 而非 `task/X`；同一测试内显式跑旧规则（挑非 mainline 名）并断言它给出 `task/X` ⇒ 判据能区分新旧。
+- [x] AC3 不再贴错名字（全称判据）：对生产 `#git-graph-data` 里**每一条** `kind === 'reconstructed'` 的泳道，取其任一提交 hash，用 `git merge-base --is-ancestor <hash> <该泳道 ref>` 作独立 oracle 断言退出码 0；不满足者必须降级为 `#<hash>` 未命名形态 ⇒ 错标计数 = 0。
+- [x] AC4 `--since` 下界修正：`readGitHistory` 对当前仓库返回的 commits 中，`ref` 为非 mainline 且属于「7 天内有独有提交的活跃 ref」的条数 > 0（当前 = 0）；测试内把下界改回「主线批次最旧提交时间」应使该计数归零 ⇒ 负控制成立。
+- [x] AC5 与 git 对账（点名清单，非魔法比值）：断言实测已知的 4 条活跃 ref（`task/gap-session-liveness-signals-perfile-timeout-flaky`、`worktree-archguard-primitives-doc`、`worktree-dispatch-pref-priority-goal-evidence`、`worktree-slow-tests-analysis`，若届时仍存在且仍有独有提交）全部出现在泳道 ref 集合中；同时断言非 mainline 泳道数 ≤ 窗口内合并提交数（上界，防重复裂分）。
 
 ## DoD
 
@@ -69,4 +70,9 @@ subj:  Merge branch 'develop' into task/gap-deliver-verification-trigger-orphane
 - packages/quay/test/gap-git-graph-ref-partition-collapses-all-topology-to-one-lane.test.mjs（本任务的回归测试）
 - packages/quay/test/gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge.test.mjs（该任务断言「无侧线泳道」，恢复拓扑后需同步更新）
 - packages/quay/test/observation.test.mjs（--since 下界用例）
+- packages/quay/test/gap-git-graph-branch-name-fallback-to-trunk-ref.test.mjs（no-ff 合并的端到端断言随拓扑恢复更新：已删分支 → #<hash> 未命名泳道）
+- packages/quay/test/gap-git-graph-omits-inflight-branches-and-summary-table-disjoint.test.mjs（已合并分支「折叠进 mainline」断言随拓扑恢复更新：保留 ref 的已合并分支是 kind:live 泳道）
+- packages/quay/test/gap-git-history-lane-identity-and-row-layout-overlap.test.mjs（同名合并「折叠成一条 mainline」断言随拓扑恢复更新：两条 #<hash> 未命名泳道）
+- packages/quay/test/gap-git-graph-drops-commits-while-overflowcount-reports-zero.test.mjs（AC2-mirror 随 --since 下界改为 min(主线下界, 7 天窗口) 更新）
+- packages/quay/test/serve-handlers.test.mjs（integration 测试里 --no-ff 已合并分支折叠断言随拓扑恢复更新）
 - tasks/gap-git-graph-ref-partition-collapses-all-topology-to-one-lane.md
