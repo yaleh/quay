@@ -2,7 +2,7 @@
 id: gap-goal-store-backfill-legacy-empty-body
 title: 三条存量 achieved GOAL（GOAL-005/007/008）body 为空、业务目标全挤在 origin：回填可读 body 使
   AC-208 判据归零
-status: done
+status: ready
 labels:
   - gap
   - goal-store
