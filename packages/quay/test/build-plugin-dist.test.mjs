@@ -242,6 +242,7 @@ function ac202Missing(pluginRoot) {
   const required = new Set();
   for (const x of rt.matchAll(/driver:\s*"([A-Za-z0-9_.-]+\.ts)"/g)) required.add(x[1]);
   for (const x of rt.matchAll(/"plugin",\s*"scripts",\s*"([A-Za-z0-9_.-]+\.ts)"/g)) required.add(x[1]);
+  for (const x of rt.matchAll(/resolveKernelSibling\(\s*"([A-Za-z0-9_.-]+\.ts)"\s*\)/g)) required.add(x[1]);
   return [...required].filter((n) => !shipped.has(n));
 }
 

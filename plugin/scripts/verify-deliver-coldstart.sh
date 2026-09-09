@@ -129,6 +129,18 @@ SHA256_QN=""
 AC5_EVALUATED=0                             # 1 = AC5 判据有输入可判；0 = 缺输入（无法评估 ≠ 通过）
 AC5_OK=0
 
+# ── AC-203（GOAL-009）：driver 在无 plugin/ 的第三方项目里真活 ───────────────────────────
+# 判据读载体（driver_alive / carrier_records），⛔ 不读 start 退出码（今天 start 就 exit 0 而系统是死的）。
+# 记录字段：host（目标宿主 hostname；criterion 要求 host≠本机）· project_root（第三方项目绝对路径；
+# ∉ 本仓库）· has_plugin_dir=false（AC168 后第三方项目本就不该有 plugin/）· driver_alive=1 ·
+# carrier_records>0。缺任一有效读数不写（硬规则 3b：缺值 ≠ 合格）。
+AC203_HOST=""                                # 目标宿主 hostname（跨主机验证时 = B/C 机 hostname）
+AC203_PROJECT_ROOT=""                        # 第三方项目绝对路径
+AC203_HAS_PLUGIN_DIR=1                       # 1 = 项目根有 plugin/（安装拷贝残留）；0 = 无（AC168 应达成）
+AC203_DRIVER_ALIVE=0                         # 读自 status 载体
+AC203_CARRIER_RECORDS=-1                     # -1 = 未读（缺值 ≠ 合格）
+AC203_EVALUATED=0                            # 1 = status 载体读成（driver_alive + carrier_records 都读出）
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --tgz) QUAY_TGZ="$2"; shift 2 ;;
@@ -687,6 +699,83 @@ step3_coldstart() {
   fi
 }
 
+# ── ④ driver 真活（AC-203）：第三方项目（无 plugin/）里 start driver 后读 status 载体 ─────────
+# 判据读载体（driver_alive / carrier_records），⛔ 不读 start 退出码（今天 start 就 exit 0 而系统是死的）。
+# 复用 status 载体（`quay driver status --json` 的 driver_alive + carrier_records 字段）——同
+# start-drivers.ts parseDriverStatus 读的同一载体面，不新造「活不活」读法（只比它多读一个 carrier_records）。
+
+# 解析 status JSON 载体：driver_alive + carrier_records。读不出 ⇒ AC203_EVALUATED=0（未评估 ≠ 合格）。
+probe_ac203_driver_status() {
+  local status_json="$1" parsed
+  AC203_EVALUATED=0; AC203_DRIVER_ALIVE=0; AC203_CARRIER_RECORDS=-1
+  [ -n "$status_json" ] || return 0
+  parsed="$(printf '%s' "$status_json" | "$VC_NODE" --no-warnings -e '
+    let s="";
+    process.stdin.on("data", d => s += d).on("end", () => {
+      try {
+        const j = JSON.parse(s);
+        const alive = (j && (j.driver_alive === 1 || j.driver_alive === true)) ? 1 : 0;
+        const recs = (j && typeof j.carrier_records === "number") ? j.carrier_records : -1;
+        console.log("alive=" + alive + " recs=" + recs);
+      } catch { console.log("alive=0 recs=-1"); }
+    });
+  ' 2>/dev/null)"
+  AC203_DRIVER_ALIVE="$(printf '%s' "$parsed" | sed -n 's/^alive=//p' | head -1)"
+  AC203_CARRIER_RECORDS="$(printf '%s' "$parsed" | sed -n 's/^recs=//p' | head -1)"
+  [ -z "$AC203_DRIVER_ALIVE" ] && AC203_DRIVER_ALIVE=0
+  [ -z "$AC203_CARRIER_RECORDS" ] && AC203_CARRIER_RECORDS=-1
+  AC203_EVALUATED=1
+}
+
+# 写 GOAL-009-AC-203 记录。缺任一有效读数（host/project_root 空、driver_alive≠1、carrier_records 非正、
+# has_plugin_dir≠0）⇒ 不写 return 1（硬规则 3b：缺值 ≠ 合格）。五字段逐字满足 criterion 过滤：
+# has_plugin_dir 必须是 JSON 字面 false（criterion 用 `is not False` 判）、driver_alive/carrier_records 是整数。
+write_ac203_record() {
+  local ts="$1" host="$2" project_root="$3" has_plugin_dir="$4" driver_alive="$5" carrier_records="$6" ac89="$7"
+  [ -n "$host" ] || return 1
+  [ -n "$project_root" ] || return 1
+  [ "$has_plugin_dir" = "0" ] || return 1
+  [ "$driver_alive" = "1" ] || return 1
+  [ "$carrier_records" -gt 0 ] 2>/dev/null || return 1
+  mkdir -p "$(dirname "$ac89")"
+  printf '{"ts":"%s","ac":"GOAL-009-AC-203","host":"%s","project_root":"%s","has_plugin_dir":false,"driver_alive":%s,"carrier_records":%s}\n' \
+    "$ts" "$host" "$project_root" "$driver_alive" "$carrier_records" >> "$ac89"
+  return 0
+}
+
+# step ④：在第三方项目（$ROOT，无 plugin/）里用 installed quay CLI start promotion driver，轮询 status 载体
+# 确认 driver_alive=1 ∧ carrier_records>0 ⇒ 写 AC-203 记录。缺任一生效读数不写（fail-closed）。
+step4_driver_liveness() {
+  local root="$1" qrl i status_json
+  # installed quay CLI 经 realpath（npm bin symlink 不派发——step1 已实测；loop 也走 realpath 的 .quay/runtime/bin/quay.js）。
+  qrl="${STEP1_PREFIX}/bin/quay"
+  qrl="$(readlink -f "$qrl" 2>/dev/null || echo "$qrl")"
+  AC203_HOST="$(hostname 2>/dev/null || echo '')"
+  AC203_PROJECT_ROOT="$root"
+  AC203_HAS_PLUGIN_DIR=1
+  [ -d "$root/plugin" ] || AC203_HAS_PLUGIN_DIR=0
+  echo "== ④ driver liveness (AC-203): start promotion driver in the third-party project, read the status carrier =="
+  if ! node "$qrl" driver start --kind promotion --root "$root" >/dev/null 2>&1; then
+    echo "  FAIL: quay driver start --kind promotion exited non-zero (see $root/.quay logs)"
+    return 1
+  fi
+  # 轮询 status 至多 30s，等 driver 首轮写 round 心跳（carrier_records>0 的直接量）。
+  for i in $(seq 1 60); do
+    status_json="$(node "$qrl" driver status --kind promotion --root "$root" --json 2>/dev/null || true)"
+    probe_ac203_driver_status "$status_json"
+    if [ "$AC203_EVALUATED" = "1" ] && [ "$AC203_DRIVER_ALIVE" = "1" ] && [ "$AC203_CARRIER_RECORDS" -gt 0 ] 2>/dev/null; then break; fi
+    sleep 0.5
+  done
+  echo "  driver_alive=$AC203_DRIVER_ALIVE carrier_records=$AC203_CARRIER_RECORDS has_plugin_dir=$AC203_HAS_PLUGIN_DIR evaluated=$AC203_EVALUATED host=$AC203_HOST"
+  if [ "$AC203_EVALUATED" = "1" ] && [ "$AC203_DRIVER_ALIVE" = "1" ] && [ "$AC203_CARRIER_RECORDS" -gt 0 ] 2>/dev/null && [ "$AC203_HAS_PLUGIN_DIR" = "0" ]; then
+    write_ac203_record "$TS" "$AC203_HOST" "$AC203_PROJECT_ROOT" "0" "1" "$AC203_CARRIER_RECORDS" "$AC89"
+    echo "  ac203 record written → $AC89"
+    return 0
+  fi
+  echo "  NOTE: AC-203 record NOT written (driver not alive / no carrier records / plugin dir present — 缺值≠合格)"
+  return 0
+}
+
 # ── 自检（hermetic：AC1 顺序 + AC2 直接量正/负控制，不碰真实安装）────────────────────────
 selfcheck() {
   local tmp rc=1
@@ -881,6 +970,25 @@ Enter to confirm · Esc to cancel"
   echo "selfcheck: marketplace-enabled-leak(AC-161违反) MP_SETTINGS_OK=$m3_ok MP_ENABLED_LEAK=$m3_leak (expect 0/1)"
   echo "selfcheck: marketplace-register-fail(AC5) MP_REGISTER_OK=$m4_reg MP_REGISTER_RC=$m4_rc reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) (expect 0/nonempty/1 — 退出码不吞)"
 
+  # control 15 (AC-203 载体记录): write_ac203_record 写出的记录五字段逐字满足 criterion 过滤（
+  # has_plugin_dir 是 JSON 字面 false、driver_alive/carrier_records 是整数）；driver_alive=0 ⇒ 拒写
+  # （fail-closed，缺值≠合格）。host/project_root 用「非本机/非本仓库」的假值，证明 criterion 能取真。
+  local ac203_file="$tmp/ac203.jsonl" ac203_wrote=0 ac203_fields_ok=0 ac203_refused=0 ac203_ts="2026-09-09T00:00:00Z"
+  if write_ac203_record "$ac203_ts" "hostB-fake" "/tmp/third-party-fake" "0" "1" "5" "$ac203_file"; then
+    ac203_wrote=1
+    if grep -q '"ac":"GOAL-009-AC-203"' "$ac203_file" \
+       && grep -q '"has_plugin_dir":false' "$ac203_file" \
+       && grep -q '"driver_alive":1' "$ac203_file" \
+       && grep -q '"carrier_records":5' "$ac203_file"; then
+      ac203_fields_ok=1
+    fi
+  fi
+  if ! write_ac203_record "$ac203_ts" "hostB-fake" "/tmp/third-party-fake" "0" "0" "5" "$ac203_file" 2>/dev/null; then
+    ac203_refused=1
+  fi
+  echo "selfcheck: ac203-record(valid) wrote=$ac203_wrote fields_ok=$ac203_fields_ok (expect 1/1)"
+  echo "selfcheck: ac203-record(dead-driver) refused=$ac203_refused (expect 1 — driver_alive=0 拒写, 缺值≠合格)"
+
   if [ "$d1" = "1" ] && [ "$d2" = "no" ] && [ "$a1" = "1" ] && [ "$a2" = "yes" ] \
      && [ "$c3_e" = "1" ] && [ "$c3_ok" = "1" ] \
      && [ "$c4_e" = "1" ] && [ "$c4_ok" = "0" ] \
@@ -893,11 +1001,12 @@ Enter to confirm · Esc to cancel"
      && [ "$m1_ev" = "1" ] && [ "$m1_reg" = "1" ] && [ "$m1_ok" = "1" ] && [ "$m1_leak" = "0" ] \
      && [ "$m2_ok" = "0" ] \
      && [ "$m3_ok" = "0" ] && [ "$m3_leak" = "1" ] \
-     && [ "$m4_reg" = "0" ] && [ -n "$m4_rc" ] && [ -n "$m4_reason" ]; then
-    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5)"
+     && [ "$m4_reg" = "0" ] && [ -n "$m4_rc" ] && [ -n "$m4_reason" ] \
+     && [ "$ac203_wrote" = "1" ] && [ "$ac203_fields_ok" = "1" ] && [ "$ac203_refused" = "1" ]; then
+    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed)"
     rc=0
   else
-    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc m4_reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0)" >&2
+    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc m4_reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused" >&2
     rc=1
   fi
   rm -rf "$tmp"
@@ -913,6 +1022,10 @@ fi
 TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "== verify-deliver-coldstart (AC88 三步验证机制) =="
 echo "ts=$TS | project=$PROJECT | root=$ROOT | prefix=$PREFIX | wait=${WAIT}s | liveness_window=${LIVENESS_WINDOW}min"
+
+# 证据/记录载体默认路径提前解析（step④ AC-203 记录写进同一载体，需在步骤运行前拿到路径）。
+if [ -z "$EVIDENCE" ]; then EVIDENCE="${CWD}/.quay/verify-deliver-evidence.json"; fi
+if [ -z "$AC89" ]; then AC89="${CWD}/.quay/productization-verification.jsonl"; fi
 
 AC88_VERIFY=fail
 if [ "$VERIFY_ONLY" = 1 ]; then
@@ -962,11 +1075,9 @@ else
       exit 1
     fi
     step3_coldstart
+    step4_driver_liveness "$ROOT"
   fi
 fi
-
-if [ -z "$EVIDENCE" ]; then EVIDENCE="${CWD}/.quay/verify-deliver-evidence.json"; fi
-if [ -z "$AC89" ]; then AC89="${CWD}/.quay/productization-verification.jsonl"; fi
 
 # ── 判定 ─────────────────────────────────────────────────────────────────────────────
 if [ "$CHANNEL" = "marketplace" ]; then
