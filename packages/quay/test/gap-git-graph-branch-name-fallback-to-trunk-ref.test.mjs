@@ -116,7 +116,8 @@ test("a deleted dev-merge tip resolves from its OWN subject (ff-fan-in shape)", 
 // gap-git-graph-ref-partition-collapses-all-topology-to-one-lane: the ref-partition model that folded
 // these re-attributed commits into ONE mainline lane was the over-correction — the topology is restored
 // (each no-ff merge's second parent becomes a lateral lane), but the deleted branches (task/A, task/B)
-// are no longer live refs, so their lanes are UNNAMED (#<hash>) — never a fabricated task/A name.
+// are no longer live refs, so their lanes are UNNAMED (ref null + unnamed flag) — never a fabricated
+// task/A name.
 
 test("layoutGitGraph reconstructs re-attributed deleted-branch commits as unnamed lateral lanes (no phantom names)", () => {
   const t0 = 1_700_000_000;
@@ -138,5 +139,5 @@ test("layoutGitGraph reconstructs re-attributed deleted-branch commits as unname
   );
   const laterals = layout.branches.filter((b) => b.kind !== "mainline");
   assert.equal(laterals.length, 2, "the two deleted branches become two lateral lanes");
-  assert.ok(laterals.every((b) => b.ref.startsWith("#")), "deleted branches are unnamed (#<hash>), never fabricated task/A / task/B names");
+  assert.ok(laterals.every((b) => b.ref == null && b.unnamed === true), "deleted branches are unnamed (ref null), never fabricated task/A / task/B names");
 });

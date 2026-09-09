@@ -19,8 +19,8 @@ import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMob
  * gap-git-history-clickable-branches-window: branch names on the chart + summary link out to the
  * task that produced them.
  */
-export function taskIdFromBranchRef(ref: string): string | null {
-  if (!ref.startsWith("task/")) return null;
+export function taskIdFromBranchRef(ref: string | null): string | null {
+  if (ref == null || !ref.startsWith("task/")) return null;
   const id = ref.slice("task/".length);
   return id.length > 0 ? id : null;
 }
@@ -34,13 +34,20 @@ function isoTime(t: number): string {
 export type GitGraphLaneKind = "mainline" | "live" | "reconstructed";
 
 export interface GitGraphBranchLane {
-  ref: string;
+  /** The lane's display name. `null` when no real branch name can be attributed (an UNNAMED lane —
+   *  a ff dev-merge's second parent is the mainline's own old tip, so there is no branch to name,
+   *  and `git log --graph` draws such side-lines without decoration). `unnamed` below is the explicit
+   *  flag so a null ref is never confused with a failed read (硬规则 3b). */
+  ref: string | null;
   /** Which partition produced this lane (gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge):
    *  `mainline` — the ref-partition primary (every mainline-reachable commit, drawn as the vertical
    *  spine); `live` — a still-checked-out branch's exclusive commits (`.ref` is a live `heads` ref);
    *  `reconstructed` — a no-ff merged + deleted branch whose second-parent chain is not attributable to
    *  any live/mainline ref (the historical-reconstruction fallback). `branches[0]` is always mainline. */
   kind: GitGraphLaneKind;
+  /** True when `ref === null` — the lane carries no name (no chip, no 「窗口外分叉」 marker). The
+   *  explicit flag keeps "unnamed" distinguishable from "a named lane whose ref read failed". */
+  unnamed: boolean;
   /** Structural lane id (fork::merge hashes, or the first commit hash when fork is null). It is the
    *  `expanded` state key and the lane→x key — decoupled from `ref`, which can collapse to one string
    *  when several deleted task branches are all re-labelled to the mainline ref. */
@@ -408,7 +415,7 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
 
   // Build a lateral lane from a walked chain (oldest→newest) + fork/merge metadata.
   const buildLateral = (
-    ref: string,
+    ref: string | null,
     kind: GitGraphLaneKind,
     collected: GitHistoryCommit[],
     fork: string | null,
@@ -422,6 +429,7 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
     return {
       ref,
       kind,
+      unnamed: ref == null,
       id,
       slot: 0,
       laneX: GIT_GRAPH_TRUNK_X + GIT_GRAPH_LANE_GAP,
@@ -466,10 +474,54 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
     laterals.push(buildLateral(name, "live", commits, fork, null));
   }
 
+  // ── Fragment convergence (gap-git-graph-reconstructed-lanes-all-named-mainline-ref) ───────────────
+  // The `claimed` walk breaks the mainline's OWN second-parent history into one lane per dev-merge —
+  // 102 reconstructed lanes, 40 of them single-commit, all unnamed (a ff dev-merge's second parent IS
+  // the mainline's old tip, so no branch name exists to recover). Those fragments are one continuous
+  // first-parent chain: each lane's OLDEST commit's first parent is the TIP of the next-older lane.
+  // Merge each unnamed reconstructed lane into the unnamed reconstructed lane that claims that parent
+  // (oldest-first, so the absorb target is already final) — the chain collapses into one lane per
+  // connected region, eliminating the single-commit noise (AC5) without dropping any commit (AC4).
+  const laneByCommit = new Map<string, GitGraphBranchLane>();
+  for (const b of laterals) for (const c of b.commits) laneByCommit.set(c.hash, b);
+  const absorbOrder = laterals
+    .filter((b) => b.kind === "reconstructed" && b.unnamed)
+    .sort((a, b) => a.firstT - b.firstT);
+  const absorbed = new Set<GitGraphBranchLane>();
+  for (const b of absorbOrder) {
+    if (absorbed.has(b)) continue;
+    const oldest = byHash.get(b.commits[0].hash);
+    const parent = oldest ? oldest.parentHashes[0] : null;
+    if (parent == null) continue;
+    const target = laneByCommit.get(parent);
+    if (!target || target === b) continue;
+    if (target.kind !== "reconstructed" || !target.unnamed) continue;
+    // b (newer) continues target (older): extend target's chain with b's commits.
+    target.commits = [...target.commits, ...b.commits].sort(byT);
+    target.firstT = Math.min(target.firstT, b.firstT);
+    target.lastT = Math.max(target.lastT, b.lastT);
+    // The combined chain merges back at the NEWEST dev-merge (b's merge), not target's older one.
+    if (b.mergeT != null) {
+      target.merge = b.merge;
+      target.mergeT = b.mergeT;
+      target.open = false;
+    }
+    const newTip = target.commits[target.commits.length - 1].hash;
+    target.id = uniqueId(target.fork != null ? `${target.fork}::${newTip}` : `${target.commits[0].hash}::${target.kind}`);
+    for (const c of b.commits) laneByCommit.set(c.hash, target);
+    absorbed.add(b);
+  }
+  if (absorbed.size > 0) {
+    for (let i = laterals.length - 1; i >= 0; i--) {
+      if (absorbed.has(laterals[i])) laterals.splice(i, 1);
+    }
+  }
+
   // The mainline lane is branches[0] — always the spine, always expanded, never forked/merged.
   const mainlineLaneObj: GitGraphBranchLane = {
     ref: mainlineRef || (mainlineCommits[0] ? mainlineCommits[0].ref : ""),
     kind: "mainline",
+    unnamed: false,
     id: "__mainline__",
     slot: -1,
     laneX: GIT_GRAPH_TRUNK_X,
@@ -485,7 +537,7 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
   };
 
   // Lateral lanes sorted by fork time for a stable display order, mainline pinned FIRST.
-  laterals.sort((a, b) => (a.fork != null ? byHash.get(a.fork)!.t : a.firstT) - (b.fork != null ? byHash.get(b.fork)!.t : b.firstT) || (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0));
+  laterals.sort((a, b) => (a.fork != null ? byHash.get(a.fork)!.t : a.firstT) - (b.fork != null ? byHash.get(b.fork)!.t : b.firstT) || (a.ref == null ? "" : a.ref).localeCompare(b.ref == null ? "" : b.ref));
   const branches: GitGraphBranchLane[] = [mainlineLaneObj, ...laterals];
 
   // Interval-scheduled lane slots (lateral lanes only — the mainline is the spine at trunkX): sort by
@@ -550,23 +602,30 @@ export function quotedBranchNameFromMergeSubject(subject: string): string | null
 
 /** Name a second-parent lane by provability — fail-visible, never a wrong name. Three tiers:
  *  1. the tip IS a live `heads` ref → that ref name, `kind: 'live'`;
- *  2. the tip was merged in by a merge commit whose QUOTED branch name is still a live ref → that
- *     name, `kind: 'reconstructed'` (the quoted name is the second parent, so its commits are its
+ *  2. the tip was merged in by a merge commit whose QUOTED branch name is a live NON-mainline ref →
+ *     that name, `kind: 'reconstructed'` (the quoted name is the second parent, so its commits are its
  *     ancestors — AC3's `git merge-base --is-ancestor` oracle holds);
- *  3. neither → `#<short-hash>` unnamed (`kind: 'reconstructed'` but a clearly-not-a-ref label, never
- *     a fabricated branch name). */
-export function secondParentLaneName(history: GitHistoryResult, tipHash: string): { ref: string; kind: "live" | "reconstructed" } {
+ *  3. neither → unnamed (`ref: null`, `unnamed: true`, `kind: 'reconstructed'`).
+ *  gap-git-graph-reconstructed-lanes-all-named-mainline-ref: a ff dev-merge `Merge branch 'develop'
+ *  into task/X` names its second parent `develop` — the mainline's OWN old tip, which is not a branch
+ *  at all (git log --graph draws it as an undecorated side-line). Naming it `develop` collapses all
+ *  reconstructed lanes to one name (113/113 → 100% 同名, zero information). A mainline ref is therefore
+ *  NEVER used as a branch name: tier 2 requires the quoted name to be a live ref AND not a mainline ref,
+ *  and tier 3 returns `ref: null` (a distinguishable "no name", 硬规则 3b — never a fabricated branch). */
+export function secondParentLaneName(history: GitHistoryResult, tipHash: string): { ref: string | null; kind: "live" | "reconstructed"; unnamed: boolean } {
   const heads = history.heads ?? {};
   for (const [name, tip] of Object.entries(heads)) {
-    if (tip === tipHash) return { ref: name, kind: "live" };
+    if (tip === tipHash) return { ref: name, kind: "live", unnamed: false };
   }
   for (const c of history.commits) {
     if (c.parentHashes.length >= 2 && c.parentHashes.slice(1).includes(tipHash)) {
       const quoted = quotedBranchNameFromMergeSubject(c.subject);
-      if (quoted && heads[quoted] !== undefined) return { ref: quoted, kind: "reconstructed" };
+      if (quoted && !GIT_HISTORY_MAINLINE_REFS.has(quoted) && heads[quoted] !== undefined) {
+        return { ref: quoted, kind: "reconstructed", unnamed: false };
+      }
     }
   }
-  return { ref: `#${tipHash.slice(0, 7)}`, kind: "reconstructed" };
+  return { ref: null, kind: "reconstructed", unnamed: true };
 }
 
 /** Parse the branch name out of a fan-in / dev-merge commit subject. Both conventions name the task
@@ -727,7 +786,7 @@ export function computeGitGraphWidth(layout: GitGraphLayout, textX: number): num
   for (const b of layout.branches) {
     const size = b.kind === "mainline" ? 11 : 10;
     for (const c of b.commits) consider(`${c.hash.slice(0, 7)} ${c.subject}`, size);
-    if (b.kind !== "mainline") consider(`${b.ref} · ${b.commits.length} commits ·（点击展开）`, 11);
+    if (b.kind !== "mainline" && b.ref != null) consider(`${b.ref} · ${b.commits.length} commits ·（点击展开）`, 11);
   }
   return Math.ceil(textX + longest + pad);
 }
@@ -965,14 +1024,17 @@ export function gitGraphClientScript(): string {
     // and guide prose all name the same ref.
     var chipRefColor = {};
     chipRefColor[null] = { ref: mainline.ref, color: "var(--color-neutral-700)" };
-    branches.forEach(function (b) { chipRefColor[b.id] = { ref: b.ref, color: laneColorById[b.id] }; });
+    // gap-git-graph-reconstructed-lanes-all-named-mainline-ref: an unnamed lane (ref == null — a ff
+    // dev-merge's mainline-history second parent, which has no branch name to recover) gets NO chip,
+    // mirroring git log --graph's undecorated side-lines. Store null so the stride loop skips it.
+    branches.forEach(function (b) { chipRefColor[b.id] = b.ref != null ? { ref: b.ref, color: laneColorById[b.id] } : null; });
     computeChipStride(items.filter(function (it) { return it.kind === "commit"; }), strideRows)
       .forEach(function (cr) {
         // The fold control owns its lane's first chip row — skip it here so the fold row is labelled
         // exactly once, by the clickable fold group below.
         if (cr.laneId !== null && expanded[cr.laneId] === true && cr.row === laneTopRow[cr.laneId]) { return; }
         var info = chipRefColor[cr.laneId];
-        appendChip(g, textX, y(cr.row) - 6, info.ref, info.color);
+        if (info != null) { appendChip(g, textX, y(cr.row) - 6, info.ref, info.color); }
       });
 
     // branch lanes: ONE rounded-corner <path> per lane, hue-coded per lane (AC1/AC2/AC3). Nodes + text
@@ -1002,7 +1064,10 @@ export function gitGraphClientScript(): string {
       // gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge AC5: a lane whose fork predates
       // the window (fork == null) gets an explicit "窗口外分叉" marker at its top, so a dangling top
       // reads as "fork outside the window", not a broken/disconnected line.
-      if (b.fork == null) {
+      // gap-git-graph-reconstructed-lanes-all-named-mainline-ref: the marker is drawn ONLY for a NAMED
+      // lane (ref != null) — an unnamed lane is mainline-history structure with no recoverable branch,
+      // so a marker would be noise (marker count stays ≤ named-reconstructed count, AC5).
+      if (b.fork == null && b.ref != null) {
         g.append("text").attr("class", "git-svg-fork-dangling")
           .attr("x", laneX).attr("y", y(laneTop) - 5).attr("font-size", 9)
           .attr("text-anchor", "middle")
@@ -1022,10 +1087,11 @@ export function gitGraphClientScript(): string {
         var foldRow = laneTopRow[b.id];
         var grp2 = g.append("g").style("cursor", "pointer")
           .on("click", function () { expanded[b.id] = false; render(); });
-        var foldChipW = appendChip(grp2, textX, y(foldRow) - 6, b.ref, color);
+        var foldChipW = 0;
+        if (b.ref != null) { foldChipW = appendChip(grp2, textX, y(foldRow) - 6, b.ref, color); }
         grp2.append("text").attr("class", "git-svg-ink").attr("x", textX + foldChipW + 6).attr("y", y(foldRow) - 6).attr("font-size", 10)
           .text("▲ 折叠");
-        grp2.append("title").text("点击折叠 " + b.ref);
+        grp2.append("title").text(b.ref != null ? ("点击折叠 " + b.ref) : "点击折叠");
       }
     });
 
@@ -1066,16 +1132,18 @@ export function gitGraphClientScript(): string {
         }
       } else {
         // AC4: a collapsed branch's summary row leads with a chip(ref) — the branch name is prominent
-        // (lane-colour pill + high-contrast label) instead of a bare text prefix.
+        // (lane-colour pill + high-contrast label) instead of a bare text prefix. An unnamed lane
+        // (ref == null) gets no chip — just the commit circle + count/span text.
         var b = it.branch;
         var grp = g.append("g").style("cursor", "pointer")
           .on("click", function () { expanded[b.id] = true; render(); });
         grp.append("circle").attr("class", "git-svg-commit").attr("cx", laneX).attr("cy", yy).attr("r", nodeR)
           .style("fill", laneColorById[b.id]);
-        var chipW = appendChip(grp, textX, yy + 3, b.ref, laneColorById[b.id]);
+        var chipW = 0;
+        if (b.ref != null) { chipW = appendChip(grp, textX, yy + 3, b.ref, laneColorById[b.id]); }
         grp.append("text").attr("class", "git-svg-ink").attr("x", textX + chipW + 6).attr("y", yy + 4).attr("font-size", 11)
           .text(fitWidth ? ("· " + b.commits.length + " commits") : ("· " + b.commits.length + " commits · " + spanText(b) + "（点击展开）"));
-        grp.append("title").text("点击展开 " + b.ref + " 的 " + b.commits.length + " 条提交");
+        grp.append("title").text(b.ref != null ? ("点击展开 " + b.ref + " 的 " + b.commits.length + " 条提交") : ("点击展开 " + b.commits.length + " 条提交"));
       }
     });
 
@@ -1299,8 +1367,10 @@ export function renderGitHistoryPage(history: GitHistoryResult): string {
   const summaryRowsHtml = summaryRows.map((b) => {
     const taskId = taskIdFromBranchRef(b.ref);
     const name = taskId
-      ? html`<a href="/task/${encodeURIComponent(taskId)}">${escapeHtml(b.ref)}</a>`
-      : escapeHtml(b.ref);
+      ? html`<a href="/task/${encodeURIComponent(taskId)}">${escapeHtml(b.ref!)}</a>`
+      : b.ref == null
+        ? html`<span style="color:var(--color-neutral-500)">未命名</span>`
+        : escapeHtml(b.ref);
     return html`<tr>
       <td>${name}</td>
       <td>${escapeHtml(b.status)}</td>

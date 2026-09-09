@@ -72,7 +72,7 @@ test("AC1: two 'Merge branch task/A into develop' commits produce two DISTINCT u
   const laterals = layout.branches.filter((b) => b.kind !== "mainline");
   assert.equal(laterals.length, 2, "two second-parent lanes, never folded into one");
   assert.notEqual(laterals[0].id, laterals[1].id, "the two lanes carry distinct structural ids");
-  assert.ok(laterals.every((b) => b.ref.startsWith("#")), "both lanes are unnamed (#<hash>) — no shared name to split");
+  assert.ok(laterals.every((b) => b.ref == null && b.unnamed === true), "both lanes are unnamed (ref null) — no shared name to split");
 });
 
 // ── AC2: expansion state keys on the STRUCTURAL id, never the display ref ──────────────────────────

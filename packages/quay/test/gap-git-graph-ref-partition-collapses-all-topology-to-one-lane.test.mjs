@@ -106,9 +106,10 @@ test("AC1: every merge's second parent lands in a lane; non-mainline lanes > 0 (
   const claimed = claimedHashes(layout);
   const orphans = secondParentHashes(fx).filter((h) => !claimed.has(h));
   assert.equal(orphans.length, 0, `every second parent is claimed (orphans: ${orphans.map((h) => h.slice(0, 7)).join(", ")})`);
-  // The second-parent lanes are the develop side commits, each named develop (quoted), never task/gap-N.
-  const named = laterals.map((b) => b.ref);
-  assert.ok(named.every((r) => r === "develop"), `every lateral lane is named develop, not task/gap-N (got ${[...new Set(named)].join(", ")})`);
+  // The second-parent lanes are the develop side commits (the mainline's OWN history) — UNNAMED
+  // (gap-git-graph-reconstructed-lanes-all-named-mainline-ref): never develop, never a fabricated
+  // task/gap-N name.
+  assert.ok(laterals.every((b) => b.ref == null && b.unnamed === true), "every lateral lane is unnamed (ref null), not develop and not task/gap-N");
 });
 
 test("AC1 (production): every merge's second parent is claimed; non-mainline lanes > 0", () => {
@@ -125,12 +126,13 @@ test("AC1 (production): every merge's second parent is claimed; non-mainline lan
 
 // ── AC2: naming inversion fixed (negative control) ───────────────────────────────────────────────────
 
-test("AC2: the second-parent lane of `Merge branch 'develop' into task/X` is named develop, not task/X", () => {
+test("AC2: the second-parent lane of `Merge branch 'develop' into task/X` is unnamed, not develop/task/X", () => {
   const fx = ffDevMergeFixture(1);
   const layout = layoutGitGraph(fx);
   const lane = layout.branches.find((b) => b.kind !== "mainline");
   assert.ok(lane, "the fixture yields one lateral lane");
-  assert.equal(lane.ref, "develop", "the second-parent lane is named develop (the QUOTED name), not task/gap-0");
+  assert.equal(lane.ref, null, "the second-parent lane is unnamed (ref null), not develop and not task/gap-0");
+  assert.equal(lane.unnamed, true, "the lane carries the explicit unnamed flag");
 
   // The parser itself: the new quoted rule vs the OLD non-mainline rule — the criterion can be false.
   const subject = "Merge branch 'develop' into task/gap-0";
@@ -148,8 +150,8 @@ test("AC3: every reconstructed lane's commits are ancestors of its ref (mislabel
   assert.ok(reconstructed.length > 0, "the production repo has reconstructed lanes to verify");
   let mislabels = 0;
   for (const b of reconstructed) {
-    assert.ok(b.commits.length > 0, `lane ${b.ref} carries at least one commit`);
-    if (b.ref.startsWith("#")) continue; // already unnamed — not a mislabel
+    assert.ok(b.commits.length > 0, `lane ${b.ref ?? "unnamed"} carries at least one commit`);
+    if (b.ref == null) continue; // unnamed — not a mislabel (no name to be wrong about)
     const sample = b.commits[0].hash;
     try {
       execFileSync("git", ["-C", REPO_ROOT, "merge-base", "--is-ancestor", sample, b.ref], { stdio: "ignore" });

@@ -3,19 +3,20 @@
 // ref-partition model folded every develop-reachable commit into ONE mainline lane, which in this ff
 // fan-in repo is ALL commits — deleting the topology that git log --graph shows. The topology is now
 // RESTORED (gap-git-graph-ref-partition-collapses-all-topology-to-one-lane): each merge's second parent
-// becomes a lateral lane, named by the QUOTED merge-subject name (develop), never the deleted task
-// branch. This file's old "no lateral lane" assertions are updated to the restored model.
+// becomes a lateral lane. gap-git-graph-reconstructed-lanes-all-named-mainline-ref: the second parent of
+// a ff dev-merge IS the mainline's own old tip — no branch name to recover — so the lane is UNNAMED
+// (ref: null + unnamed: true), never the deleted task branch, never develop.
 //
-//   AC1  ff dev-merge 密集 fixture → 一条 mainline 泳道（first-parent 链 = spine）+ N 条 develop 命名的
+//   AC1  ff dev-merge 密集 fixture → 一条 mainline 泳道（first-parent 链 = spine）+ N 条 unnamed 的
 //        侧线泳道（拓扑恢复，非塌缩成 1 条）。
 //   AC2  负控制：ref 分区模型（过度纠正的旧模型）把同一 fixture 塌缩成 1 条泳道 ⇒ 判据能区分新旧。
-//   AC3  生产读数：Proposal 列出的 4 个已核实「假泳道」提交都是 develop 祖先，且现在落在 ref === 'develop'
-//        的泳道（mainline 或 reconstructed），不再套已删分支的名字。
-//   AC4  兜底：真实 no-ff 合并 fixture → 恰好一条 kind:'reconstructed' 泳道，且因分支已删而 #<hash> 未命名。
+//   AC3  生产读数：Proposal 列出的 4 个已核实「假泳道」提交都是 develop 祖先，且现在落在 unnamed
+//        泳道（不是 develop、不是已删 task 名）。
+//   AC4  兜底：真实 no-ff 合并 fixture → 恰好一条 kind:'reconstructed' 泳道，且因分支已删而 ref:null 未命名。
 //   AC5  几何：生产布局上每条有线的泳道 buildLanePath 都不倒画（无 null）且无退化圆角 Q x,y x,y。
 //   AC6  chip 渲染统一：serve-git.ts 源码不再有 trunk 专属的 appendChip(g, trunkX 调用点。
-//   AC7  命名已改对（全称）：生产里每条具名 reconstructed 泳道的 ref 都是 develop（带引号名），不是已删
-//        task 分支名 —— 与 AC3 的 oracle 独立互证。
+//   AC7  命名已改对（全称）：生产里每条 reconstructed 泳道都是 unnamed（ref:null），不是 develop 也不是
+//        已删 task 分支名 —— 与 AC3 的 oracle 独立互证。
 //
 // Run (scoped): node --test packages/quay/test/gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge.test.mjs
 import { test } from "node:test";
@@ -101,7 +102,7 @@ function refPartitionLaneCount(history) {
 
 // ── AC1: the ff fixture unfolds into mainline + 82 lateral lanes (topology restored) ────────────────
 
-test("AC1: layoutGitGraph returns no trunk field; ff-dev-merge fixture → mainline spine + 82 develop-named lanes", () => {
+test("AC1: layoutGitGraph returns no trunk field; ff-dev-merge fixture → mainline spine + 82 unnamed lanes", () => {
   const fx = ffDevMergeHeavyFixture();
   const layout = layoutGitGraph(fx);
   assert.ok(layout, "the fixture yields a layout");
@@ -117,8 +118,8 @@ test("AC1: layoutGitGraph returns no trunk field; ff-dev-merge fixture → mainl
 
   const laterals = layout.branches.filter((b) => b.kind !== "mainline");
   assert.equal(laterals.length, 82, "82 lateral lanes — one per dev-merge second parent (the topology is restored)");
-  assert.ok(laterals.every((b) => b.ref === "develop" && b.kind === "reconstructed"),
-    "every lateral lane is named develop (the QUOTED name), never task/gap-N");
+  assert.ok(laterals.every((b) => b.ref == null && b.unnamed === true && b.kind === "reconstructed"),
+    "every lateral lane is unnamed (ref null), never develop and never task/gap-N");
 });
 
 // ── AC2: negative control — the ref-partition model collapses the SAME fixture to 1 lane ─────────────
@@ -131,9 +132,9 @@ test("AC2: the OVER-CORRECTED ref-partition model yields 1 lane on the same ff f
   assert.ok(layout.branches.length > 1, "the restored walk unfolds the same fixture back to > 1 lane");
 });
 
-// ── AC3: production reading — the 4 known false-lane commits are develop ancestors AND land in develop-named lanes ──
+// ── AC3: production reading — the 4 known false-lane commits are develop ancestors AND land in unnamed lanes ──
 
-test("AC3: the 4 verified false-lane commits are develop ancestors AND land in a develop-named lane (production)", () => {
+test("AC3: the 4 verified false-lane commits are develop ancestors AND land in an unnamed lane (production)", () => {
   const known = [
     "9162d1c9848a7508bab301f46eeb8ce2f5827ba3", // 翻 gap-meta-call-resident-suite-driver-kind-spawn-per-tas done
     "3fdfffc341efcb38f906ab64ef9597707ba44c6d", // 翻 gap-store-commit-unification-ac197-five-kind-wiring done
@@ -152,20 +153,22 @@ test("AC3: the 4 verified false-lane commits are develop ancestors AND land in a
   for (const h of known) {
     const lane = laneByHash.get(h);
     assert.ok(lane, `${h.slice(0, 7)} is claimed by a lane`);
-    assert.equal(lane.ref, "develop", `${h.slice(0, 7)} lands in a develop-named lane, never a deleted task branch`);
+    assert.equal(lane.ref, null, `${h.slice(0, 7)} lands in an unnamed lane, never develop and never a deleted task branch`);
+    assert.equal(lane.unnamed, true, `${h.slice(0, 7)}'s lane carries the explicit unnamed flag`);
   }
 });
 
 // ── AC4: the reconstruction fallback still works for a real no-ff merge ──────────────────────────────
 
-test("AC4: a real no-ff merge (deleted branch) yields exactly one reconstructed lane, now unnamed (#<hash>)", () => {
+test("AC4: a real no-ff merge (deleted branch) yields exactly one reconstructed lane, now unnamed (ref null)", () => {
   const fx = noFfReconstructionFixture();
   const layout = layoutGitGraph(fx);
   const recon = layout.branches.filter((b) => b.kind === "reconstructed");
   assert.equal(recon.length, 1, "exactly one reconstructed lane");
   const lane = recon[0];
   // The deleted branch is no longer a live ref, so the lane is unnamed (never a fabricated task/deleted).
-  assert.ok(lane.ref.startsWith("#"), `the reconstructed lane is unnamed (got ${lane.ref}), never task/deleted`);
+  assert.equal(lane.ref, null, `the reconstructed lane is unnamed (got ${lane.ref}), never task/deleted`);
+  assert.equal(lane.unnamed, true, "the lane carries the explicit unnamed flag");
   assert.deepEqual(lane.commits.map((x) => x.hash), ["b200000", "b100000", "B000000"], "the lane holds the branch's exclusive commits oldest→newest");
   assert.equal(lane.fork, "b000000", "the reconstructed lane forks from the trunk commit it diverged from");
   assert.equal(lane.merge, "m000000", "the reconstructed lane merges back into the no-ff merge commit");
@@ -229,17 +232,17 @@ test("AC6: serve-git.ts carries no trunk-specific appendChip(g, trunkX call site
   assert.ok(!src.includes("appendChip(g, trunkX"), "no `appendChip(g, trunkX` remains in serve-git.ts");
 });
 
-// ── AC7: the naming is fixed — every named reconstructed lane is develop, never a deleted task branch ──
+// ── AC7: the naming is fixed — every reconstructed lane is unnamed, never develop / a deleted task branch ──
 
-test("AC7: every named reconstructed lane is develop (the QUOTED name), never a deleted task branch (production)", () => {
+test("AC7: every reconstructed lane is unnamed (ref null), never develop nor a deleted task branch (production)", () => {
   const history = readGitHistory(REPO_ROOT);
   assert.equal(history.status, "ok", "the checkout under test is a readable git repo");
   const layout = layoutGitGraph(history);
   const reconstructed = layout.branches.filter((b) => b.kind === "reconstructed");
   assert.ok(reconstructed.length > 0, "the production repo has reconstructed lanes to check");
   for (const b of reconstructed) {
-    if (b.ref.startsWith("#")) continue; // unnamed — the fail-visible fallback, not a mislabel
-    assert.equal(b.ref, "develop", `reconstructed lane is named develop (got ${b.ref}), never a deleted task branch`);
+    assert.equal(b.ref, null, `reconstructed lane is unnamed (got ${b.ref}), never develop and never a deleted task branch`);
+    assert.equal(b.unnamed, true, "the lane carries the explicit unnamed flag");
   }
 });
 
