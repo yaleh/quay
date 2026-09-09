@@ -1,7 +1,7 @@
 ---
 id: gap-goal-sufficiency-not-evaluated
 title: 充分性判不出 ≠ 通过——not-evaluated 是独立取值且不触发 flip（硬规则 3b）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
