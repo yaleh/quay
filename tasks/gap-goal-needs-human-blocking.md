@@ -29,10 +29,10 @@ goal_ac: AC-209
 
 ## AC
 
-- [ ] 新建 `plugin/test/goal-needs-human-blocking.test.mjs`，双向负控制断言：`VALID_GOAL_STATUSES.includes("needs-human")`、`goalAchievedFromRecords` 含 needs-human AC ⇒ false、全 achieved ⇒ true；`node --no-warnings --experimental-strip-types --test plugin/test/goal-needs-human-blocking.test.mjs` 退出码 0
-- [ ] `packages/quay/src/goal-store.ts` 的 `VALID_GOAL_STATUSES` 字面量含 `"needs-human"`（`grep -n '"needs-human"' packages/quay/src/goal-store.ts` 命中第 74 行处）
-- [ ] `plugin/scripts/goal-driver.ts` 的 `goalAchievedFromRecords` 在域过滤含 `r.status === "needs-human"`（`grep -n 'status === "needs-human"' plugin/scripts/goal-driver.ts` 命中且位于该函数体内）
-- [ ] 既有 `packages/quay/test/goal-store.test.mjs` 的 `VALID_GOAL_STATUSES` deepEqual 断言同步为含 needs-human；`node --no-warnings --experimental-strip-types --test packages/quay/test/goal-store.test.mjs` 退出码 0
+- [x] 新建 `plugin/test/goal-needs-human-blocking.test.mjs`，双向负控制断言：`VALID_GOAL_STATUSES.includes("needs-human")`、`goalAchievedFromRecords` 含 needs-human AC ⇒ false、全 achieved ⇒ true；`node --no-warnings --experimental-strip-types --test plugin/test/goal-needs-human-blocking.test.mjs` 退出码 0
+- [x] `packages/quay/src/goal-store.ts` 的 `VALID_GOAL_STATUSES` 字面量含 `"needs-human"`（`grep -n '"needs-human"' packages/quay/src/goal-store.ts` 命中第 74 行处）
+- [x] `plugin/scripts/goal-driver.ts` 的 `goalAchievedFromRecords` 在域过滤含 `r.status === "needs-human"`（`grep -n 'status === "needs-human"' plugin/scripts/goal-driver.ts` 命中且位于该函数体内）
+- [x] 既有 `packages/quay/test/goal-store.test.mjs` 的 `VALID_GOAL_STATUSES` deepEqual 断言同步为含 needs-human；`node --no-warnings --experimental-strip-types --test packages/quay/test/goal-store.test.mjs` 退出码 0
 
 ## DoD
 
