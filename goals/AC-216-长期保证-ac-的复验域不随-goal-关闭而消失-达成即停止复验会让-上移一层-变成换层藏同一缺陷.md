@@ -1,7 +1,7 @@
 ---
 id: AC-216
 title: 长期保证 AC 的复验域不随 GOAL 关闭而消失——⛔ 达成即停止复验会让「上移一层」变成换层藏同一缺陷
-status: draft
+status: active
 kind: criterion
 goal: GOAL-010
 criterion: node --no-warnings --experimental-strip-types --test
