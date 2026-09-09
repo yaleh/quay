@@ -77,11 +77,13 @@ interface MetaViewModel {
  * kind's default (SPEC §4 declaration table): `propagate: "none"` — a meta write rides the branch
  * it lands on.
  */
-function commitMetaFile(metaDir: string, fileName: string, id: string): CommitOutcome {
+function commitMetaFile(metaDir: string, fileName: string, id: string, action: string): CommitOutcome {
   const root = resolveGitRoot(metaDir);
   return commitStoreWrite({
     relPath: root ? path.relative(root, path.join(metaDir, fileName)) : `meta/${fileName}`,
-    message: `meta: ${id} 写盘即提交（store-commit）`,
+    kind: "meta",
+    id,
+    action,
     root,
     propagate: "none",
   }).outcome;
@@ -169,6 +171,7 @@ export function createMetaStore(metaDir: string) {
       }
       frontmatter.id = id;
       if (title !== undefined) frontmatter.title = title;
+      const prevStatus = typeof frontmatter.status === "string" ? frontmatter.status : undefined;
       frontmatter.status = status ?? frontmatter.status ?? "proposed";
       frontmatter.handler = handler ?? frontmatter.handler ?? "meta-driver";
       if (reply !== undefined) frontmatter.reply = reply;
@@ -182,7 +185,12 @@ export function createMetaStore(metaDir: string) {
       const finalBody = body !== undefined ? body : existingBody;
       const fileName = existingFile ?? `${id}-${slugify(title, "meta")}.md`;
       fs.writeFileSync(path.join(metaDir, fileName), serializeFrontmatter(ordered, finalBody), "utf8");
-      const outcome = commitMetaFile(metaDir, fileName, id);
+      // Action semantics (gap-store-commit-action-and-actor AC1): create / status flip / field
+      // update are distinguishable in the commit subject — never fixed prose.
+      const action = !existingFile
+        ? "create"
+        : (prevStatus !== undefined && prevStatus !== frontmatter.status ? `status ${prevStatus}→${frontmatter.status}` : "update");
+      const outcome = commitMetaFile(metaDir, fileName, id, action);
       if (outcome === "failed") {
         // The disk write succeeded but the git commit genuinely FAILED — surface on stderr so the
         // failure is observable, not silent (硬规则 3b). "unchanged"/"not-in-git" are expected no-ops.
