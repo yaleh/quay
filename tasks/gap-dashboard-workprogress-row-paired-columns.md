@@ -28,10 +28,10 @@ depends_on:
 
 ## AC
 
-- [ ] `packages/quay/src/serve-dashboard.ts` 的"工作进展"行改为 2 列等宽网格（`grid-template-columns:1fr 1fr` 或等价写法），左列内部用 `display:flex;flex-direction:column;gap:2px` 纵向堆叠 `[goalCard, taskCard]`（阶段目标在上、任务台账速览在下），右列纵向堆叠 `[testsCard, fanCard]`（测试在上、FAN-IN 在下）——不得继续复用 `gridColumns(n)`/`renderCardGrid` 的"列数=卡片数"通用逻辑渲染这一行（该行现在是 2 个 grid item，不是 4 个），顶部行（循环脉搏/系统资源/DRIVER，见 `gap-dashboard-top-row-asymmetric-columns`）与其它仍用等宽网格的行不得被这次改动牵连。
-- [ ] `dashboardGridStyles` 的 `≤600px` 单列折叠规则对这一行改动后仍然生效：移动端两个 grid item（左列/右列）各自变成整宽一列，列内部纵向排列不受影响——用真实浏览器视口收窄到 ≤600px 的复核验证。
-- [ ] 一次真实浏览器测量复核（本地临时 `quay serve` 实例，不得连接/改动生产 100.78.206.100:4173 实例）：落地后实测左列（阶段目标+任务台账速览）与右列（测试+FAN-IN）各自的自然高度，把实际读数（不是预先设定的阈值——本任务的 Proposal 已经说明这两个数会随内容波动，不设固定像素差阈值，按硬规则"成本结构未知/会随数据波动前不设数值阈值"）写进提交记录，作为"这次改动是否达到预期平衡"的证据，而不是仅凭肉眼一次截图判断。
-- [ ] 现有 dashboard 相关测试（`packages/quay/test/gap-dashboard-grid-autofit-columns-vs-card-count.test.mjs` 等覆盖 `renderDashboardPage`/`gridColumns` 的用例）全部通过，且不得因为这次改动误伤顶部行或其它仍用等宽网格渲染的行的断言。
+- [x] `packages/quay/src/serve-dashboard.ts` 的"工作进展"行改为 2 列等宽网格（`grid-template-columns:1fr 1fr` 或等价写法），左列内部用 `display:flex;flex-direction:column;gap:2px` 纵向堆叠 `[goalCard, taskCard]`（阶段目标在上、任务台账速览在下），右列纵向堆叠 `[testsCard, fanCard]`（测试在上、FAN-IN 在下）——不得继续复用 `gridColumns(n)`/`renderCardGrid` 的"列数=卡片数"通用逻辑渲染这一行（该行现在是 2 个 grid item，不是 4 个），顶部行（循环脉搏/系统资源/DRIVER，见 `gap-dashboard-top-row-asymmetric-columns`）与其它仍用等宽网格的行不得被这次改动牵连。
+- [x] `dashboardGridStyles` 的 `≤600px` 单列折叠规则对这一行改动后仍然生效：移动端两个 grid item（左列/右列）各自变成整宽一列，列内部纵向排列不受影响——用真实浏览器视口收窄到 ≤600px 的复核验证。
+- [x] 一次真实浏览器测量复核（本地临时 `quay serve` 实例，不得连接/改动生产 100.78.206.100:4173 实例）：落地后实测左列（阶段目标+任务台账速览）与右列（测试+FAN-IN）各自的自然高度，把实际读数（不是预先设定的阈值——本任务的 Proposal 已经说明这两个数会随内容波动，不设固定像素差阈值，按硬规则"成本结构未知/会随数据波动前不设数值阈值"）写进提交记录，作为"这次改动是否达到预期平衡"的证据，而不是仅凭肉眼一次截图判断。
+- [x] 现有 dashboard 相关测试（`packages/quay/test/gap-dashboard-grid-autofit-columns-vs-card-count.test.mjs` 等覆盖 `renderDashboardPage`/`gridColumns` 的用例）全部通过，且不得因为这次改动误伤顶部行或其它仍用等宽网格渲染的行的断言。
 
 ## DoD
 
