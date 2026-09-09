@@ -22,7 +22,7 @@
 //      不是 goal 机制的缺陷——DIR-131 Finding 里的错误归因反例）。
 //   ⛔ draft→active（激活）——人/manager 手动（裁定 3「暂不做自动晋升」），本 driver 不碰。
 //   ⛔ active→retired（放弃）——人裁定。放弃是判断不是计算，本 driver 只报红不翻状态。
-//      分诊判「retire」时本 driver 只能置 needs-human 并说明理由交人判断（AC-211，⛔ 不翻 retired）。
+//      分诊不再判「retire」（AC-219：无任务牵引≠死信）——draft AC 无牵引分诊为 hold，⛔ 不翻 retired。
 //   ⛔ 不直接改 task 状态（撞 lifecycle/promotion-driver 的 expectedStatus CAS）。
 //   ⛔ 不机械写 tasks/*.md（全仓四个 driver 零先例）——缺口立案由 G9 的语义环 spawn 短命 agent
 //      经 ABI（quay-file-task）做，driver 自己仍不手写任务文件。
@@ -478,27 +478,30 @@ export async function readReadyPoolJudgment(root: string, readyPoolCmd: string[]
   return { eligibleTodoIds, excludedReadyIds };
 }
 
-// ── draft AC 分诊（GOAL-010 范围② / AC-210）─────────────────────────────────────────────
+// ── draft AC 分诊（GOAL-010 范围② / AC-210；AC-219 修正 retire 默认分支）───────────────
 // 对象集 = active GOAL 名下 status=draft 的 AC（扩 G9 的 active-only 对象集，⛔ 不影响
-// computeGoalGaps 只数 active 的口径）。对每条 draft AC 出五态判决之一：
-//   activate / re-anchor / retire / needs-human / hold
-// 判决只【记录】，⛔ 不 flip 任何 AC status（draft→active 归人/manager 裁定 3；retire 归人，AC-211）。
+// computeGoalGaps 只数 active 的口径）。对每条 draft AC 出四态判决之一：
+//   activate / re-anchor / needs-human / hold
+// 判决只【记录】，⛔ 不 flip 任何 AC status（draft→active 归人/manager 裁定 3；放弃 retired 归人）。
+// 「无任务牵引」≠「死信」——刚提案的 draft AC 天然无牵引，分诊为 hold 而非 retire→needs-human
+// （AC-219，gap-meta-goal-triage-fresh-draft-not-retire）。
 //
 // 判决函数是纯函数（record + goal posture + taskFacts ⇒ decision），⛔ 不读进程存活/时钟——
-// 使五态可单测（goal-triage.test.mjs），并使 AC-215（posture 挡 activate）可落地。
+// 使四态可单测（goal-triage.test.mjs），并使 AC-215（posture 挡 activate）可落地。
 
-/** 五态判决词表（AC-210 判据读它；⛔ 加态即改判据与 AC-215 的「其余三态」口径）。 */
-export const TRIAGE_DECISIONS = ["activate", "re-anchor", "retire", "needs-human", "hold"] as const;
+/** 四态判决词表（AC-210 判据读它；retire 已按 AC-219 移除——「无任务牵引」≠「死信」，放弃归人）。
+ *  ⛔ 加态即改判据与 AC-215 的「其余三态」口径。 */
+export const TRIAGE_DECISIONS = ["activate", "re-anchor", "needs-human", "hold"] as const;
 export type TriageDecision = (typeof TRIAGE_DECISIONS)[number];
 
-/** 一条 draft AC 的分诊落痕：ac 唯一、decision ∈ 五态、reason 非空（逐条落痕，硬规则 3 枚举不布尔）。 */
+/** 一条 draft AC 的分诊落痕：ac 唯一、decision ∈ 四态、reason 非空（逐条落痕，硬规则 3 枚举不布尔）。 */
 export interface TriageEntry {
   ac: string;
   decision: TriageDecision;
   reason: string;
 }
 
-/** 对一条 draft AC 出五态判决之一。纯函数、确定性、⛔ 不读进程存活/时钟。
+/** 对一条 draft AC 出四态判决之一。纯函数、确定性、⛔ 不读进程存活/时钟。
  *
  * 输入：
  *  - record     该 draft AC 的 goal-store 视图模型（id / goal / criterion / expect / …）
@@ -511,8 +514,8 @@ export interface TriageEntry {
  *  2. needs-human criterion 缺失/空 ⇒ 无法评估，需人补判据或确认退役
  *  3. hold        goal 声明 posture ⇒ 按住不激活（尊重人「先测量后承诺」的姿态，AC-215）
  *  4. activate    有关联任务推进（todo/ready/needs-human）⇒ 建议激活进入判定
- *  5. retire      其余（结构完备、active goal、无 posture、无牵引）⇒ 死信，建议退役
- *                 （⛔ 只落痕建议，不翻 retired——driver 只能置 needs-human 并说明理由，AC-211）
+ *  5. hold        其余（结构完备、active goal、无 posture、无牵引）⇒ 待人工激活/补任务，按住
+ *                 （⛔ 不判退役——「无任务牵引」≠「死信」，刚提案的 draft AC 天然无牵引，AC-219）
  */
 export function triageDraftAc(
   record: Record<string, unknown>,
@@ -540,7 +543,7 @@ export function triageDraftAc(
   if (hasTraction) {
     return { ac, decision: "activate", reason: "有关联任务推进（todo/ready/needs-human）——建议激活进入判定" };
   }
-  return { ac, decision: "retire", reason: "结构完备但无关联任务推进——死信，建议退役（⛔ 只落痕，不翻 retired）" };
+  return { ac, decision: "hold", reason: "结构完备但无关联任务推进——待人工激活/补任务，按住（⛔ 不判退役：无任务牵引≠死信，AC-219）" };
 }
 
 // ── G9 缺口语义环（spawn 短命 agent 经 ABI 立案，照 promotion-driver 的 fix-worker 现成形态）──────
@@ -698,7 +701,7 @@ export interface GoalRoundReadings {
   goalCount: number;
   criterionCount: number;
   criteria: Array<{ id: string; goal: string; status: string; verdict: "pass" | "fail" | "not-evaluated"; reason: string }>;
-  /** 本轮 driver 做的全部状态翻写：I2 达成翻转（to=achieved）+ AC-211 retire 建议（to=needs-human）。 */
+  /** 本轮 driver 做的全部状态翻写：I2 达成翻转（to=achieved）。⛔ 分诊不翻状态（AC-219）。 */
   flips: Array<{ id: string; to: string; ok: boolean; reason: string }>;
   /** I3 三桶 + I4 分歧；null = check --staleness 读不到（⛔ 与「零 stale」不同形，硬规则 3b）。
    *  scopeSize = 枚举出的 active goal 数（作用域规模）；evaluated = scopeSize > 0。0 active goal ⇒
@@ -718,7 +721,7 @@ export interface GoalRoundReadings {
   /** ⑥ G9 语义环：逐条 spawn 诊断（ac · goal · exitCode · stderr · timedOut，⛔ 零诊断信息）。 */
   gap_spawns: Array<GapSpawnOutcome>;
   /** ⑦ draft AC 分诊（GOAL-010 范围② / AC-210）：active GOAL 名下每条 draft AC 恰好一条
-   *  {ac, decision, reason}（decision ∈ 五态；ac 唯一）。无 draft AC ⇒ 空数组——字段仍在，
+   *  {ac, decision, reason}（decision ∈ 四态；ac 唯一）。无 draft AC ⇒ 空数组——字段仍在，
    *  「查过且零条」与「未跑分诊」按字段存在性区分（硬规则 3b）。 */
   triage: Array<TriageEntry>;
 }
@@ -825,11 +828,11 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   const judgment = hasGoalAcTasks ? await readReadyPoolJudgment(root, opts.readyPoolCmd) : null;
   const gaps = computeGoalGaps(records, taskFacts, judgment);
 
-  // ⑦ draft AC 分诊（GOAL-010 范围② / AC-210）：对 active GOAL 名下每条 draft AC 出五态判决并逐条
-  // 落痕（⛔ 只记录，不 flip——draft→active 归人/manager 裁定 3，retire 归人 AC-211）。taskFacts 已在
-  // ⑤读出，直接传入（⛔ 不再读一次）。goal posture 由 goal 记录读出后传入（AC-215：`measure-only`
-  // 名下 draft AC 不得判 activate——判决函数已按 posture 入参预留 seam）。对象集 = 轮开始时 active 的
-  // GOAL 名下的 draft AC。
+  // ⑦ draft AC 分诊（GOAL-010 范围② / AC-210）：对 active GOAL 名下每条 draft AC 出四态判决并逐条
+  // 落痕（⛔ 只记录，不 flip——draft→active 归人/manager 裁定 3；放弃 retired 归人，且分诊不再判
+  // retire，AC-219）。taskFacts 已在 ⑤读出，直接传入（⛔ 不再读一次）。goal posture 由 goal 记录
+  // 读出后传入（AC-215：`measure-only` 名下 draft AC 不得判 activate——判决函数已按 posture 入参预留
+  // seam）。对象集 = 轮开始时 active 的 GOAL 名下的 draft AC。
   const triage: TriageEntry[] = [];
   for (const goal of activeGoals) {
     const gid = String(goal.id);
@@ -838,21 +841,6 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
       if (!isAc(r) || r.status !== "draft" || String(r.goal ?? "") !== gid) continue;
       triage.push(triageDraftAc(r, posture, taskFacts));
     }
-  }
-
-  // AC-211（gap-goal-driver-no-retire-write-surface）：分诊判「retire」⇒ driver 只能置 needs-human
-  // 并说明理由，⛔ 不翻 retired（最不可逆的一态挡在人这一侧，人 2026-09-09 裁定 1）。写面经
-  // writeGoalStatus（provider 写路径，⛔ 不直改 goals/*.md），reason 非空可 grep。retire 对象是
-  // draft AC（本就不在 computeGoalGaps 的对象集），翻 needs-human 后下一轮 goalAchievedFromRecords
-  // 把它计入在域并阻塞 GOAL 达成（AC-209）——与「draft 三头不占」相反，needs-human 真在域、真阻塞、
-  // 真要人。
-  for (const entry of triage) {
-    if (entry.decision !== "retire") continue;
-    const w = await writeGoalStatus(scriptRoot, entry.ac, "needs-human", dataRoot, {
-      actor: "goal-driver",
-      reason: "triage 判 retire：建议退役但 retired 归人——driver 置 needs-human 交人判断",
-    });
-    flips.push({ id: entry.ac, to: "needs-human", ok: w.ok, reason: w.reason });
   }
 
   // ⑥ G9 缺口语义环：缺口（state==="gap"）非空 ⇒ 过 halt + 资源门 + 每轮上限，spawn 短命 agent 经 ABI
