@@ -132,6 +132,21 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
     "AC-204 record: forbidden_count=1 ⇒ refused (fail-closed)");
   assert.match(r.stdout, /ac204-record\(no-enable\) refused=1/,
     "AC-204 record: enable_declared=0 ⇒ refused (fail-closed, 成对判定)");
+  // AC-205 (gap-ac205-session-delivery-channel-transcript-confirmed): transcript_confirmed is
+  // derived from transcript-delivery-check reading the transcript (probe present ⇒ delivered exit 0;
+  // absent ⇒ not) — never from a send exit code — and the record writes the three criterion fields
+  // verbatim + top-level build_sha, refusing shipped=false / transcript_confirmed=false / empty-host
+  // (fail-closed, AC4 negative).
+  assert.match(r.stdout, /ac205-transcript-check\(hit\/miss\) hit=1 miss=0/,
+    "AC-205 transcript check: probe present ⇒ delivered(exit 0), absent ⇒ not — the transcript read is the source");
+  assert.match(r.stdout, /ac205-record\(valid\) wrote=1 fields_ok=1/,
+    "AC-205 record: valid record written with shipped_from_installed_artifact=true + transcript_confirmed=true + build_sha");
+  assert.match(r.stdout, /ac205-record\(shipped=false\) refused=1/,
+    "AC-205 record: shipped_from_installed_artifact=false ⇒ refused (fail-closed)");
+  assert.match(r.stdout, /ac205-record\(transcript_confirmed=false\) refused=1/,
+    "AC-205 record: transcript_confirmed=false ⇒ refused (AC4 negative — send exit 0 but transcript not materialized)");
+  assert.match(r.stdout, /ac205-record\(empty-host\) refused=1/,
+    "AC-205 record: empty host ⇒ refused (fail-closed)");
 });
 
 test("AC1 — --selfcheck is hermetic: it does not touch a real install and runs offline", () => {

@@ -40,6 +40,7 @@ import {
   scanCoreReferences,
   scanPluginSelfReferences,
   closureMissing,
+  bundleEntries,
 } from "../scripts/build-plugin-dist.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -299,6 +300,38 @@ test("AC4 — negative control: removing the driver field empties the derived se
     fs.writeFileSync(path.join(dir, "scripts", "driver-runtime.ts"), "export const K = {};\n", "utf8");
     assert.deepEqual([...scanPluginSelfReferences(dir)], [],
       "removing the driver field empties the derived set — the derivation is mechanical, not a literal");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── gap-ac205-session-delivery-channel-transcript-confirmed ──────────────────────────────────────
+// send-to-session.ts:53 does `await import("../../packages/quay/src/serve-send.ts")` — a dev-tree
+// relative path. The shipped dist/send-to-session.js must be SELF-CONTAINED (serve-send inlined,
+// no runtime dev-tree dynamic import), or the installed artifact (no packages/ source tree) fails at
+// runtime with "共享投递模块不可用" (send-to-session.ts:134). esbuild inlines the dynamic import; the
+// `packages/quay/src` tokens that remain in the bundle are esbuild's __esm/__commonJS lazy-init
+// registry keys + source-boundary comments (shared by 15 of 76 bundles — meta-driver.js,
+// worker-driver.js, …), NOT runtime imports. This test pins the ACTUAL failure mode: the bundle must
+// carry sendSessionFrames (inlined) and zero runtime `import("...packages/quay/src...")` /
+// `../../packages/quay/src` dev-tree relative path.
+test("AC1 (AC-205) — bundled send-to-session.js is self-contained (serve-send inlined, no runtime dev-tree import)", async () => {
+  const dir = tmp();
+  try {
+    fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+    // Copy send-to-session.ts to a NON-repo-root temp plugin root: its `../../packages/quay/src/`
+    // dynamic import can then only resolve via coreSrcAliasPlugin (the dev-tree path does not exist
+    // there — this is the STAGED-layout shape the alias plugin must cover).
+    fs.copyFileSync(path.join(PLUGIN_ROOT, "scripts", "send-to-session.ts"), path.join(dir, "scripts", "send-to-session.ts"));
+    const outfiles = await bundleEntries(dir, ["scripts/send-to-session.ts"]);
+    assert.equal(outfiles.length, 1, "send-to-session.ts must bundle");
+    const bundle = fs.readFileSync(outfiles[0], "utf8");
+    assert.ok(bundle.includes("sendSessionFrames"),
+      "serve-send.ts must be inlined (sendSessionFrames symbol present)");
+    assert.ok(!/import\("[^"]*packages\/quay\/src/.test(bundle),
+      "no runtime dynamic import of the dev-tree packages/quay/src may survive (self-contained)");
+    assert.ok(!/\.\.\/\.\.\/packages\/quay\/src/.test(bundle),
+      "the dev-tree relative path literal must not survive as a runtime reference");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
