@@ -1,7 +1,7 @@
 ---
 id: AC-215
 title: 分诊尊重 GOAL 层 posture——人已声明「只测量不激活」的 GOAL，driver 不得越权 activate
-status: draft
+status: active
 kind: criterion
 goal: GOAL-010
 criterion: node --no-warnings --experimental-strip-types --test
