@@ -1,7 +1,7 @@
 ---
 id: AC-212
 title: 充分性闸挡住「AC 全绿即关闭」——退出条件未被覆盖时 GOAL 不得自行关闭
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-010
 criterion: python3 -c 'import json,sys; ok=[s for l in
@@ -43,4 +43,10 @@ origin: >-
   achieved，driver 不评估已关闭 GOAL 名下的 AC，故无竞态窗口），再把 GOAL-010 翻回 active，使 flip
   生效那一刻在域集合已含 6 条红 AC（`goalAchievedFromRecords` = false）。⛔ 反序会在 ~50
   秒内被再次自我关闭——对照实验 A 形态（只翻 GOAL、6 条 draft 不动）实测返回 TRUE。
+statusLog:
+  - at: 2026-09-09T10:40:15.591Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
