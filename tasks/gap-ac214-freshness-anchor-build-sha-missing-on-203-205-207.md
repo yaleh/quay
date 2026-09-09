@@ -2,7 +2,7 @@
 id: gap-ac214-freshness-anchor-build-sha-missing-on-203-205-207
 title: AC-214 新鲜度元判据读 build_sha，而 AC-203/205/207 落账记录不写它（207 只有异仓库 commit_sha）→
   三条载体 AC 达成后仍恒 exit 1
-status: todo
+status: ready
 labels:
   - gap
   - delivery-critical
