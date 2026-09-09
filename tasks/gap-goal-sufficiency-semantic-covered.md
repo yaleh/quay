@@ -1,7 +1,7 @@
 ---
 id: gap-goal-sufficiency-semantic-covered
 title: 充分性闸补语义判定分支——goalSufficiencyVerdict 须能产出 covered（GOAL-010 退出条件②）
-status: ready
+status: done
 labels:
   - gap
 parent: null
