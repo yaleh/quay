@@ -55,3 +55,17 @@ origin: >-
   ② tasks 侧的分支感知**没有回归**：store.ts:1129 传 propagate:"none" 并保留三分支逻辑
      （task/ 分支不推 develop），未出现「任务分支直推 develop 绕过 fan-in」的风险。
 ---
+
+## 背景
+
+五个 store kind 的 commit-after-write 互不一致：tasks/goals/meta 各有一套互不相同的实现，adr/docs-managed 完全没有。四类实质分歧：①root 解析（store.ts 用 git rev-parse --show-toplevel，goal/meta 用 path.dirname(<kind>Dir) 这一「恰好等于当前布局」的假设）②传播（只有 tasks ff-push develop）③幂等（三种各不相同）④失败词表（只有 tasks 四态；goal/meta 把「不在 git 里」「内容没变」「commit 真失败」压成同一个 false）。核心判准：传播策略由【谁读这个字段、什么时候读】决定，不由【谁写它】决定。现成的缝：frontmatter-store-base.ts 已抽出 parse/serialize/lockfile/filename 共享机件，而 commit-after-write 是纯 MECHANIC 却不在里面。
+
+## 范围与非目标
+
+范围：本 goal 只覆盖 SPEC 阶段 1（一个原语 + 五 kind 接线）。阶段 2（传播按读者归位，含修 acShortCircuitVerdict）与阶段 3（驱动侧 5 个直写点，占 tasks 写面 68.4%）另立。
+
+非目标/备注：AC-197「五 kind 全接线」对 adr（7 天 3 条提交）与 docs-managed（7 天 0 条）只有单测证据、零生产写入——证据等级弱于 goals/meta/tasks；tasks 侧分支感知无回归（store.ts:1129 传 propagate:"none" 并保留三分支逻辑）。
+
+## 退出条件
+
+SPEC 阶段 1 完成：AC-195..199 全 pass，经机械 fan-in 全量 suite 落地，生产载体换新原语（04:54 起 goals 提交消息为「（store-commit）」）。重开后补 AC-200（残留 evidence 块清理）。现已 achieved。
