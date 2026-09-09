@@ -1,7 +1,7 @@
 ---
 id: AC-223
 title: 分诊判出 activate 后 driver 必须执行它——判决零消费等于「分诊」只做了一半（GOAL-010 退出条件①）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-010
 criterion: node --no-warnings --experimental-strip-types --test
@@ -82,4 +82,9 @@ statusLog:
     to: active
     actor: cli:human-ruling-2026-09-09
     reason: 人授权直接 active：接受 GOAL-010 推迟关闭
+  - at: 2026-09-09T16:48:29.823Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---

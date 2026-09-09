@@ -46,7 +46,8 @@ const INIT_ARGS = (ws) => [
   "--test-command", "node --test", "--tmux-session", "proj-0:0.0",
 ];
 
-// The committed closed-set members (tasks/ is an empty dir at laydown, so git tracks nothing under it).
+// The committed closed-set members (tasks/ and goals/ are empty dirs at laydown, so git tracks
+// nothing under them — only the FILES are tracked).
 const CLOSED_SET_TRACKED = [
   ".quay/config.yml",
   ".quay/profiles.yml",
@@ -126,6 +127,7 @@ test('AC1/control — a non-git workspace skips auto-commit but still lays the c
     assert.match(r.stdout, /auto-commit: SKIP \(not a git repository/, 'must skip auto-commit in a non-git workspace');
     assert.ok(fs.existsSync(path.join(ws, ".quay", "config.yml")), 'the closed-set config is laid down');
     assert.ok(fs.existsSync(path.join(ws, ".claude", "settings.json")), 'the closed-set .claude/settings.json is laid down');
+    assert.ok(fs.existsSync(path.join(ws, "goals")), 'goals/ is laid down (dual carrier)');
   } finally { cleanup(ws); }
 });
 
