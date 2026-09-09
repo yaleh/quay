@@ -285,6 +285,16 @@ export async function readTaskFacts(
 
 // ── 纯推导（可单测）────────────────────────────────────────────────────────────────────────
 
+/** 一条 GOAL 的【在域】AC 集合（status ∈ {active, achieved, needs-human}）。draft/superseded/retired
+ *  不在域。goalAchievedFromRecords 与充分性判定共用此口径（⛔ 口径分叉会重演 draft 三头不占）。 */
+export function inScopeAcsOf(records: Array<Record<string, unknown>>, goalId: string): Array<Record<string, unknown>> {
+  return records.filter(
+    (r) => String(r.id ?? "").startsWith("AC-") &&
+      String(r.goal ?? "") === goalId &&
+      (r.status === "active" || r.status === "achieved" || r.status === "needs-human"),
+  );
+}
+
 /** I2（GOAL 层）：一个 GOAL 是否「全部【在域】AC achieved」。零在域 AC ⇒ false。
  *
  *  在域（in-scope）= status ∈ {active, achieved, needs-human}——「已激活待达成」「已达成」「需人裁定」
@@ -301,10 +311,48 @@ export async function readTaskFacts(
  *  ⚠️ 与 goal-store.isGoalAchieved 的差异：后者仍是 `every(status === "achieved")`，会把 draft/
  *  superseded/retired 也算成阻塞（store 侧同款死角，另案处理——本任务 Touches 只含 driver 侧）。 */
 export function goalAchievedFromRecords(records: Array<Record<string, unknown>>, goalId: string): boolean {
-  const acs = records.filter((r) => String(r.id ?? "").startsWith("AC-") && String(r.goal ?? "") === goalId);
-  const inScope = acs.filter((r) => r.status === "active" || r.status === "achieved" || r.status === "needs-human");
+  const inScope = inScopeAcsOf(records, goalId);
   if (inScope.length === 0) return false;
   return inScope.every((r) => r.status === "achieved");
+}
+
+/** 充分性三态词表（AC-212 闸 / AC-213 可区分性；⛔ 加态即改 AC-212 判据的 `verdict in (...)` 集合）：
+ *  covered = 退出条件被在域 AC 覆盖；insufficient = 结构上可证覆盖不成立；
+ *  not-evaluated = 判不出（⛔ 不与 covered 同形，硬规则 3b——语义半不可用时不得放行关闭）。 */
+export type SufficiencyVerdict = "covered" | "insufficient" | "not-evaluated";
+
+/** I2（GOAL 层）充分性闸：flip 当且仅当「全部【在域】AC achieved」且充分性判定为 `covered`。
+ *  insufficient / not-evaluated / null ⇒ 不 flip（GOAL-010 退出条件②：覆盖与否判不出时取
+ *  「未评估」而非放行；GOAL-010 风险 2：判不出 ⇒ 不 flip 且报 not-evaluated）。 */
+export function goalFlipDecision(
+  records: Array<Record<string, unknown>>,
+  goalId: string,
+  sufficiency: { verdict?: SufficiencyVerdict | null } | null | undefined,
+): boolean {
+  return goalAchievedFromRecords(records, goalId) && sufficiency?.verdict === "covered";
+}
+
+/** body 是否含非空的 `## 退出条件` 节（标题存在且节体有非空白内容——「写下了」，⛔ 不是「只有标题」）。
+ *  ⛔ 标题后只允许水平空白 [ \t]*，不用 \s*——\s 含 \n，会把「标题后紧跟的空行 + 下一节标题」吞进
+ *  标题匹配，导致空节被误判为「有内容」。 */
+function hasExitConditions(body: string): boolean {
+  const m = body.match(/##[ \t]+退出条件[ \t]*\r?\n([\s\S]*?)(?=\r?\n##[ \t]|$)/);
+  return m !== null && m[1].trim().length > 0;
+}
+
+/** 一条 GOAL 的充分性判定（机械可证部分）：读 body 的 `## 退出条件` vs 在域 AC 集合。
+ *  insufficient  结构上可证覆盖不成立：GOAL body 无【非空】`## 退出条件` 文本（退出条件从未写下，
+ *                覆盖无从谈起——GOAL-005/007/008 空 body 形态），或零在域 AC（空集合无法覆盖）。
+ *  not-evaluated body 有退出条件、有在域 AC，但「这组 AC 是否覆盖退出条件」是语义判定，需 LLM
+ *                （GOAL-010 风险 2 与 AC-213 的提示词/成本上限），本函数不机械产 covered——
+ *                硬性判 covered 会重演「纯语法合取即关闭」的缺陷（AC-212 的 origin）。 */
+export function goalSufficiencyVerdict(
+  goal: Record<string, unknown>,
+  inScopeAcs: Array<Record<string, unknown>>,
+): SufficiencyVerdict {
+  if (!hasExitConditions(String(goal.body ?? ""))) return "insufficient";
+  if (inScopeAcs.length === 0) return "insufficient";
+  return "not-evaluated";
 }
 
 // ── 缺口四态（G7 + G9 stalled，硬规则 3b：读不懂输入不得返回与「合格」同形——「缺口」与「未评估」分离）──
@@ -692,6 +740,10 @@ export interface GoalRoundOptions {
 
 export interface GoalRoundResult {
   fact: Fact<Record<string, unknown>>;
+  /** 每条 active GOAL 的充分性判定（独立 Fact，name="goal-sufficiency"，value.sufficiency={goal, verdict}，
+   *  verdict ∈ 三态 covered/insufficient/not-evaluated）。AC-212 判据 grep 的正是 facts[].value.sufficiency。
+   *  零 active GOAL ⇒ 空数组——字段仍在，「查过且零条」与「未跑判定」按字段存在性区分（硬规则 3b）。 */
+  sufficiencyFacts: Array<Fact<Record<string, unknown>>>;
 }
 
 /** 跑一轮 goal 机械环：枚举 active GOAL → 逐 AC 跑 criterion → 写 GateEvent（gate 自带；evidence
@@ -705,7 +757,10 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   try {
     records = await listGoalRecords(scriptRoot, dataRoot);
   } catch (e) {
-    return { fact: { name: "goal-ring", value: { phase: "list" }, state: "failed", reason: `list failed: ${(e as Error).message}` } };
+    return {
+      fact: { name: "goal-ring", value: { phase: "list" }, state: "failed", reason: `list failed: ${(e as Error).message}` },
+      sufficiencyFacts: [],
+    };
   }
 
   const isGoal = (r: Record<string, unknown>): boolean => String(r.id ?? "").startsWith("GOAL-");
@@ -713,6 +768,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   const activeGoals = records.filter((r) => isGoal(r) && r.status === "active");
   const criteria: GoalRoundReadings["criteria"] = [];
   const flips: GoalRoundReadings["flips"] = [];
+  const sufficiencyFacts: Array<Fact<Record<string, unknown>>> = [];
 
   // 对每个 active GOAL：① 跑其每条 AC 的 criterion；② I2 推导（AC pass→achieved，全达成→GOAL achieved）。
   for (const goal of activeGoals) {
@@ -734,9 +790,21 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
       // 随本轮 Fact 落地），本驱动不翻回——⛔ 反向翻转（achieved→active）会与裁定 3（激活归人）
       // 打架，且判据可能只是暂时红。
     }
-    // I2（GOAL 层）：全部 AC achieved 且 ≥1 条 ⇒ 机械 flip GOAL（裁定 5）。
-    if (goal.status === "active" && goalAchievedFromRecords(records, gid)) {
-      const w = await writeGoalStatus(scriptRoot, gid, "achieved", dataRoot, { actor: "goal-driver", reason: "I2: all ACs achieved" });
+    // 充分性闸（AC-212）：对每条 active GOAL 出三态充分性判定并落轮记录（⛔ 判不出也写 not-evaluated，
+    // 不静默丢弃——否则 AC-212 判据 part 1 结构上永远无法满足）。读 body 的 `## 退出条件` vs 在域 AC 集合，
+    // 机械可证的部分判 insufficient（无退出条件 / 零在域 AC），覆盖与否的语义判定归 AC-213 的 LLM。
+    const inScope = inScopeAcsOf(records, gid);
+    const sufficiency = goalSufficiencyVerdict(goal, inScope);
+    sufficiencyFacts.push({
+      name: "goal-sufficiency",
+      value: { sufficiency: { goal: gid, verdict: sufficiency } },
+      state: "verified",
+      reason: `sufficiency=${sufficiency}（在域 AC ${inScope.length} 条）`,
+    });
+    // I2（GOAL 层）：充分性闸——全部在域 AC achieved 且充分性 covered ⇒ 机械 flip GOAL（裁定 5）。
+    // insufficient / not-evaluated ⇒ 不 flip（GOAL-010 退出条件②：判不出取「未评估」而非放行）。
+    if (goal.status === "active" && goalFlipDecision(records, gid, { verdict: sufficiency })) {
+      const w = await writeGoalStatus(scriptRoot, gid, "achieved", dataRoot, { actor: "goal-driver", reason: "I2: all ACs achieved + sufficiency covered" });
       flips.push({ id: gid, to: "achieved", ok: w.ok, reason: w.reason });
       if (w.ok) goal.status = "achieved";
     }
@@ -819,6 +887,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
         state: "not-evaluated",
         reason: `${criteria.length} criteria gated, ${flips.length} flip(s); staleness check unreadable`,
       },
+      sufficiencyFacts,
     };
   }
   return {
@@ -831,6 +900,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
         `fresh=${staleness.fresh.length} stale=${staleness.stale.length} notEvaluated=${staleness.notEvaluated.length} divergent=${staleness.divergent.length} ` +
         `achievedButFailing=${achievedFailing ? achievedFailing.achievedButFailing.length : "?"}`,
     },
+    sufficiencyFacts,
   };
 }
 
@@ -843,8 +913,8 @@ export function goalDriverRoutines(root: string, opts: GoalRoundOptions = {}): R
     name: "goal-ring",
     schedule: EVERY_ROUND,
     run: async () => {
-      const { fact } = await runGoalRound(root, opts);
-      return [fact];
+      const { fact, sufficiencyFacts } = await runGoalRound(root, opts);
+      return [fact, ...sufficiencyFacts];
     },
   }];
 }
