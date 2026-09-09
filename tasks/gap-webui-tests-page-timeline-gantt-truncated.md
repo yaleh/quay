@@ -1,7 +1,7 @@
 ---
 id: gap-webui-tests-page-timeline-gantt-truncated
 title: /tests 页「测试时间线」甘特图硬编码 TIMELINE_MAX_BARS=50，超过 50 个文件的轮次只画最慢 50 个，其余不可见
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -49,21 +49,21 @@ const TIMELINE_MAX_BARS = 50;
 
 ## Acceptance Criteria
 
-- [ ] AC1 取假对照：对一个 `perFile.length > 50` 的真实/构造轮次，加载 `/tests`，断言改动前 SVG
+- [x] AC1 取假对照：对一个 `perFile.length > 50` 的真实/构造轮次，加载 `/tests`，断言改动前 SVG
       （`aria-label="Per-file test timeline (gantt)"`）内 `<rect` 元素个数 **< 该轮 perFile 中同时
       具备 `startedAtMs`/`endedAtMs` 的条目数**（复现"部分文件不可见"）；改动后，翻遍全部分页页面，
       `<rect>` 元素总数之和 **等于** 该条目数。
-- [ ] AC2 分页控件存在且可用：时间线图区域出现 `Page size` 档位链接与 `Next »` 链接（独立 query-param
+- [x] AC2 分页控件存在且可用：时间线图区域出现 `Page size` 档位链接与 `Next »` 链接（独立 query-param
       命名空间，不与既有 `page`/`perFilePage` 冲突）；点击 `Next »` 后断言当前页第一根 bar 对应的
       文件名与翻页前不同。
-- [ ] AC3 时间语义保留：断言每一页内的 bar 按 `startedAtMs` 升序排列；断言跳到最后一页时，该页最后
+- [x] AC3 时间语义保留：断言每一页内的 bar 按 `startedAtMs` 升序排列；断言跳到最后一页时，该页最后
       一根 bar 的 `endedAtMs` 等于该轮 perFile（含时间戳的条目）里的全局最大值（证明分页切的是完整
       时间轴的尾段，不是仍然按耗时过滤后的子集）。
-- [ ] AC4 单页字节预算不劣化：断言默认 pageSize 下单次响应体中该 `<svg>` 片段字节数 **< 30,000**
+- [x] AC4 单页字节预算不劣化：断言默认 pageSize 下单次响应体中该 `<svg>` 片段字节数 **< 30,000**
       （对照 `gap-webui-tests-page-unpaginated-tables` 量化的"288 文件 119,381 字节"问题不能重演）。
-- [ ] AC5 标题文字不再是"仅显示最慢 N/M"这类暗示"其余不可见"的措辞，改为准确反映当前页范围，例如
+- [x] AC5 标题文字不再是"仅显示最慢 N/M"这类暗示"其余不可见"的措辞，改为准确反映当前页范围，例如
       "第 X/Y 页 · 本页 A–B / 共 N 个文件"；断言渲染出的标题字符串不含"仅显示最慢"。
-- [ ] AC6 `bash scripts/test.sh --for-task gap-webui-tests-page-timeline-gantt-truncated` 退出码 0。
+- [x] AC6 `bash scripts/test.sh --for-task gap-webui-tests-page-timeline-gantt-truncated` 退出码 0。
 
 ## Definition of Done
 
@@ -76,4 +76,12 @@ const TIMELINE_MAX_BARS = 50;
 
 - packages/quay/src/serve-tests.ts
 - packages/quay/test/gap-webui-tests-page-timeline-gantt-truncated.test.mjs
+- packages/quay/test/gap-webui-tests-page-unpaginated-tables.test.mjs
 - tasks/gap-webui-tests-page-timeline-gantt-truncated.md
+
+## Evidence
+
+- 真实实例 round 1363（565 个含 `startedAtMs`/`endedAtMs` 的 perFile 条目，> 50）上 `/tests?round=1363`：
+  改动前只画最慢 50 根 bar；改动后翻遍 12 页（50×11 + 15），`<rect>` bar 总数 = 565 = 该轮 timed 总数。
+- 最后一页（第 12 页）最后一根 bar = `plugin/test/obligation-ledger-check.test.mjs`，其 `endedAtMs` 为该轮全局最大值。
+- 截图：`gantt-timeline-last-page-round1363.png`（第 12/12 页 · 本页 551–565 / 共 565 个文件）。

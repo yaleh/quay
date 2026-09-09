@@ -108,7 +108,11 @@ function seedRounds(ws, count, perFileCount) {
   return count + perFileCount;
 }
 
-const firstNextHref = (body) => (body.match(/<a href="([^"]+)">Next &raquo;<\/a>/) ?? [])[1] ?? null;
+// gap-webui-tests-page-timeline-gantt-truncated — /tests now carries THREE paginated datasets (history,
+// perFile table, gantt), each with its own "Next »". Target the HISTORY nav's Next specifically: its href
+// carries the standalone `page=` param, whereas gantt/perFile use `ganttPage=`/`perFilePage=` (neither
+// matches the `[?&]page=` boundary, and `pageSize=` doesn't either because `page` is followed by `Size`).
+const firstNextHref = (body) => (body.match(/<a href="([^"]*[?&]page=\d+[^"]*)">Next &raquo;<\/a>/) ?? [])[1] ?? null;
 const firstHistoryRound = (body) => (body.match(/href="\/tests\?round=(\d+)"/) ?? [])[1] ?? null;
 
 test("buildTestsHref: preserves focus round + both tables' pagination, drops defaults", () => {
