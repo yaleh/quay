@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-top-row-asymmetric-columns
 title: dashboard 顶部行改非对称分栏(3fr:2fr)：循环脉搏加宽，系统资源+DRIVER 堆叠减少留白
-status: todo
+status: ready
 labels:
   - gap
   - webui
