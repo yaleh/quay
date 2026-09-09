@@ -90,6 +90,14 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
     "marketplace leak: a user-level quay@quay enabledPlugins entry is flagged (AC-161)");
   assert.match(r.stdout, /marketplace-register-fail\(AC5\) MP_REGISTER_OK=0 MP_REGISTER_RC=1 reason_present=1/,
     "marketplace register-failure (AC5): a non-zero register exit is recorded structurally, not swallowed");
+  // AC-214 freshness anchor helper (gap-ac214-freshness-anchor-build-sha-missing-on-203-205-207):
+  // the GOAL-009 anchor helper must append top-level build_sha (the AC-214 meta-criterion's only
+  // recognized anchor field) on a 40-hex BUILD_SHA, and fail closed (no write, non-zero) on an
+  // empty BUILD_SHA — 缺值≠合格 (硬规则 3b).
+  assert.match(r.stdout, /goal009-anchor\(positive\) rc=0 records=1 build_sha=1/,
+    "positive control: a 40-hex BUILD_SHA ⇒ a GOAL-009 record with top-level build_sha is written");
+  assert.match(r.stdout, /goal009-anchor\(negative\) rc=1 lines=1→1/,
+    "negative control: an empty BUILD_SHA ⇒ no write and non-zero (fail-closed, 硬规则 3b)");
 });
 
 test("AC1 — --selfcheck is hermetic: it does not touch a real install and runs offline", () => {

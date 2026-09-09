@@ -385,6 +385,28 @@ ac5_evaluate() {
   return 0
 }
 
+# ── GOAL-009 载体型证据记录共享锚（gap-ac214-freshness-anchor-build-sha-missing-on-203-205-207）──
+# AC-214 新鲜度元判据（goals/AC-214-*.md）对 AC-201/203/205/207 四条载体记录读 top-level `build_sha`
+# （= 本仓库 BUILD_SHA，build 时刻 develop-tip，天然 develop 祖先），只认 `build_sha`/`commit` 两个字段名。
+# 此前只有 AC-201 带 top-level `build_sha`；AC-203/205 落账字段契约不含它、AC-207 只有异仓库 `commit_sha`
+# （且 `git rev-list <异仓库 sha>..develop` 会 fatal）⇒ 三条各自达成并落账后，AC-214 对它们 `sha` 恒取不到
+# ⇒ 恒 exit 1（与它要防的「一旦转绿即永久绿」相反的同形）。本函数是唯一 choke point：每条 GOAL-009-AC-*
+# 记录统一由它补 top-level `build_sha` + `ts`，sibling tasks（AC-201/203/205/207）各自保留 AC 专属字段
+# （host/driver_alive/commit_sha 等），锚字段经本函数统一。
+# 入参 $1 = 该条记录除 build_sha/ts 外的 JSON 片段（以 "," 开头，如 `,"ac":"GOAL-009-AC-203","host":"B"`）。
+# fail-closed（硬规则 3b）：BUILD_SHA 非 40-hex ⇒ 不写该记录且 return 非 0（缺值≠合格，也≠静默跳过）；
+#   AC89 路径空 ⇒ 不写且 return 非 0。⛔ 不引用已归档零调用的 productization-verification-record.ts/-check.ts。
+ac89_append_goal009() {
+  local fragment="$1"
+  if ! printf '%s' "${BUILD_SHA:-}" | grep -Eq '^[0-9a-f]{40}$'; then
+    echo "ac89_append_goal009: BUILD_SHA not 40-hex (got '${BUILD_SHA:-}') — GOAL-009 record NOT written (fail-closed)" >&2
+    return 1
+  fi
+  [ -n "${AC89:-}" ] || { echo "ac89_append_goal009: AC89 path empty — GOAL-009 record NOT written (fail-closed)" >&2; return 1; }
+  mkdir -p "$(dirname "$AC89")"
+  printf '{"build_sha":"%s","ts":"%s"%s}\n' "$BUILD_SHA" "${TS:-}" "$fragment" >> "$AC89"
+}
+
 # ── ① 安装：隔离前缀全新 .tgz 安装 ─────────────────────────────────────────────────────────
 # 判据 = 安装产物【真实可运行】：dist bundle 经 realpath 执行能跑（--version 出版本号）+ shipped
 # quay-init.sh 在位。NPM_BIN_DISPATCH 是【诊断量】——npm 创建的 bin symlink 是否真的派发：
@@ -881,6 +903,32 @@ Enter to confirm · Esc to cancel"
   echo "selfcheck: marketplace-enabled-leak(AC-161违反) MP_SETTINGS_OK=$m3_ok MP_ENABLED_LEAK=$m3_leak (expect 0/1)"
   echo "selfcheck: marketplace-register-fail(AC5) MP_REGISTER_OK=$m4_reg MP_REGISTER_RC=$m4_rc reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) (expect 0/nonempty/1 — 退出码不吞)"
 
+  # control 15/16 (AC-214 新鲜度锚 helper 正/负控制，hermetic —— gap-ac214-freshness-anchor-build-sha-
+  # missing-on-203-205-207):
+  #   control 15 (正向): 注入 40-hex BUILD_SHA ⇒ ac89_append_goal009 写一条含 top-level build_sha 的
+  #     GOAL-009 记录（AC-214 criterion 只认这个锚字段，缺它恒 exit 1）。
+  #   control 16 (负向, fail-closed): BUILD_SHA 空 ⇒ 不写且 return 非 0（缺值≠合格，硬规则 3b——
+  #     一个读不懂/缺输入的写入 helper 不得与「成功」同形，也不得静默跳过）。
+  local g009_file g15_rc g15_pos g15_build g16_rc g16_before g16_after
+  g009_file="$tmp/goal009.jsonl"
+  AC89="$g009_file"
+  TS="2026-09-09T00:00:00Z"
+  BUILD_SHA="0123456789abcdef0123456789abcdef01234567"
+  ac89_append_goal009 ',"ac":"GOAL-009-AC-203","host":"B"'; g15_rc=$?
+  g15_pos="$(grep -c '"ac":"GOAL-009-AC-203"' "$g009_file" 2>/dev/null || echo 0)"
+  g15_build="$(grep -c '"build_sha":"0123456789abcdef0123456789abcdef01234567"' "$g009_file" 2>/dev/null || echo 0)"
+  BUILD_SHA=""
+  g16_before="$(wc -l < "$g009_file" 2>/dev/null || echo 0)"
+  g16_rc=0
+  set +e
+  ac89_append_goal009 ',"ac":"GOAL-009-AC-205","host":"B"'
+  g16_rc=$?
+  set -e
+  g16_after="$(wc -l < "$g009_file" 2>/dev/null || echo 0)"
+  AC89=""; TS=""; BUILD_SHA=""
+  echo "selfcheck: goal009-anchor(positive) rc=$g15_rc records=$g15_pos build_sha=$g15_build (expect 0/1/1 — 40-hex ⇒ 写含 top-level build_sha 记录)"
+  echo "selfcheck: goal009-anchor(negative) rc=$g16_rc lines=$g16_before→$g16_after (expect non-0/unchanged — 空 BUILD_SHA 不写)"
+
   if [ "$d1" = "1" ] && [ "$d2" = "no" ] && [ "$a1" = "1" ] && [ "$a2" = "yes" ] \
      && [ "$c3_e" = "1" ] && [ "$c3_ok" = "1" ] \
      && [ "$c4_e" = "1" ] && [ "$c4_ok" = "0" ] \
@@ -893,11 +941,13 @@ Enter to confirm · Esc to cancel"
      && [ "$m1_ev" = "1" ] && [ "$m1_reg" = "1" ] && [ "$m1_ok" = "1" ] && [ "$m1_leak" = "0" ] \
      && [ "$m2_ok" = "0" ] \
      && [ "$m3_ok" = "0" ] && [ "$m3_leak" = "1" ] \
-     && [ "$m4_reg" = "0" ] && [ -n "$m4_rc" ] && [ -n "$m4_reason" ]; then
-    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5)"
+     && [ "$m4_reg" = "0" ] && [ -n "$m4_rc" ] && [ -n "$m4_reason" ] \
+     && [ "$g15_rc" = "0" ] && [ "$g15_pos" = "1" ] && [ "$g15_build" = "1" ] \
+     && [ "$g16_rc" != "0" ] && [ "$g16_before" = "$g16_after" ]; then
+    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed)"
     rc=0
   else
-    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc m4_reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0)" >&2
+    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc m4_reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after" >&2
     rc=1
   fi
   rm -rf "$tmp"
