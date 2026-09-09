@@ -8,7 +8,8 @@ labels:
   - defect
 parent: null
 children: []
-extra: {}
+extra:
+  schema: execution
 ---
 **type:** execution
 
