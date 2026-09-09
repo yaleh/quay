@@ -819,7 +819,7 @@ export function gitHistoryJson(history: GitHistoryResult, view: GitGraphView = "
   commitCount: number;
   oldestT: number | null;
   newestT: number | null;
-  rows: GitGraphRow[];
+  rows: GitGraphRawRow[];
   mergeCount: number;
   groups?: TaskGraphGroup[];
   unattributedCount?: number;
