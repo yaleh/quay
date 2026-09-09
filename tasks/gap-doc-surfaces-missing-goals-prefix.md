@@ -2,7 +2,7 @@
 id: gap-doc-surfaces-missing-goals-prefix
 title: DOC_SURFACES 缺 goals/——goal-store-commit 型旁路写手每次引发 ff-race 都逼全量重跑
   suite，而不是走已有的零成本重试路径
-status: ready
+status: done
 labels:
   - gap
 parent: null
