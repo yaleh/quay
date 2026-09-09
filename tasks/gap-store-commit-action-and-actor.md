@@ -2,7 +2,7 @@
 id: gap-store-commit-action-and-actor
 title: store-commit 提交信息无动作语义、无写入者：一次逻辑动作 16 次同文案提交，72h 内 goals/ 4007/4042
   同形，立条者三天后即不可追溯
-status: ready
+status: done
 labels:
   - gap
   - defect
