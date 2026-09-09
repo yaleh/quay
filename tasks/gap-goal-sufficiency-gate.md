@@ -28,9 +28,9 @@ goal_ac: AC-212
 
 ## AC
 
-- [ ] 新建 `plugin/test/goal-sufficiency-gate.test.mjs`：正控制「在域 AC 全 achieved + sufficiency=covered ⇒ `goalFlipDecision` true」、负控制「在域 AC 全 achieved + sufficiency=insufficient ⇒ `goalFlipDecision` false」（后者即 AC-212 判据点名的那条）；`node --no-warnings --experimental-strip-types --test plugin/test/goal-sufficiency-gate.test.mjs` 退出码 0
-- [ ] `plugin/scripts/goal-driver.ts` 导出 `goalFlipDecision` 且其 flip 条件含 `sufficiency?.verdict === "covered"`；I2 GOAL 层 flip 调用点改用 `goalFlipDecision`（`grep -n "goalFlipDecision" plugin/scripts/goal-driver.ts` 命中导出与调用点，调用点不再直调 `goalAchievedFromRecords` 判 flip）
-- [ ] `runGoalRound` 把 sufficiency 判定写进轮 facts（`grep -n "sufficiency" plugin/scripts/goal-driver.ts` 命中 Fact 构造落点），且 `goal-sufficiency-gate.test.mjs` 内含断言：`runGoalRound(tmp, {scriptRoot})`（复用 `goal-driver.test.mjs` 的 temp-root 缝，非 fixture 注入）返回的 facts 中存在 `value.sufficiency`（dict，含 `goal` 与三态 `verdict`）
+- [x] 新建 `plugin/test/goal-sufficiency-gate.test.mjs`：正控制「在域 AC 全 achieved + sufficiency=covered ⇒ `goalFlipDecision` true」、负控制「在域 AC 全 achieved + sufficiency=insufficient ⇒ `goalFlipDecision` false」（后者即 AC-212 判据点名的那条）；`node --no-warnings --experimental-strip-types --test plugin/test/goal-sufficiency-gate.test.mjs` 退出码 0
+- [x] `plugin/scripts/goal-driver.ts` 导出 `goalFlipDecision` 且其 flip 条件含 `sufficiency?.verdict === "covered"`；I2 GOAL 层 flip 调用点改用 `goalFlipDecision`（`grep -n "goalFlipDecision" plugin/scripts/goal-driver.ts` 命中导出与调用点，调用点不再直调 `goalAchievedFromRecords` 判 flip）
+- [x] `runGoalRound` 把 sufficiency 判定写进轮 facts（`grep -n "sufficiency" plugin/scripts/goal-driver.ts` 命中 Fact 构造落点），且 `goal-sufficiency-gate.test.mjs` 内含断言：`runGoalRound(tmp, {scriptRoot})`（复用 `goal-driver.test.mjs` 的 temp-root 缝，非 fixture 注入）返回的 facts 中存在 `value.sufficiency`（dict，含 `goal` 与三态 `verdict`）
 
 ## DoD
 
@@ -40,4 +40,5 @@ AC-212 完整 criterion 的两半都满足：①负控制单测证明「在域 A
 
 - `plugin/scripts/goal-driver.ts`
 - `plugin/test/goal-sufficiency-gate.test.mjs`
+- `plugin/test/goal-driver.test.mjs`
 - `tasks/gap-goal-sufficiency-gate.md`
