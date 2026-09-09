@@ -1,12 +1,12 @@
 // @test-group engine
-// long-term-guarantee-goal-backed-check.test.mjs — 反例检测器：长期保证只有 task AC 背书 ⇒ 报红
-// (tasks/gap-ac190-long-term-guarantee-goal-backed-check, goals/AC-190-task-ac.md).
+// long-term-guarantee-goal-backed-check.test.mjs — 位置判定：delivery-critical 新立案任务必须声明 goal_ac
+// (tasks/gap-long-term-guarantee-registry-hand-maintained, goals/AC-190-task-ac.md).
 //
 // 双向负控制（AC-190 origin 逐字，⛔ 不接受只有单向断言的实现）：
-//   正控制 = 真仓库上默认运行 exit 0（三条长期保证各被 goal 层 criterion AC 背书）；
-//   负控制 = --inject-unbacked-fixture 注入一条「只有 task AC 背书的长期保证」后 exit 非零。
-// 纯函数 evaluate/isBackingRecord 的单测覆盖背书判定的四个取假维度（kind/status/criterion 非空/origin 点名），
-// 与端到端 spawn 断言互为印证——正/负各至少一条断言（AC6）。
+//   正控制 = 真仓库上默认运行 exit 0（生效线之后 delivery-critical 任务均声明 goal_ac）；
+//   负控制 = --inject-unbacked-fixture 注入一条「生效线之后、带标签、无 goal_ac」后 exit 非零。
+// 纯函数 isDeliveryCritical/hasGoalAc/filedAfterCutoff/evaluateDeliveryCritical 的单测覆盖位置判定的
+// 三个取假维度（标签有无 / goal_ac 空 / 生效线前后），与端到端 spawn 断言互为印证。
 //
 // Run: scripts/test.sh plugin/test/long-term-guarantee-goal-backed-check.test.mjs
 
@@ -17,53 +17,98 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 import {
-  evaluate,
-  isBackingRecord,
+  ACTIVATION_LINE_ISO,
+  activationLineMs,
+  DELIVERY_CRITICAL_LABEL,
   INJECTED_UNBACKED_ID,
+  isDeliveryCritical,
+  hasGoalAc,
+  filedAfterCutoff,
+  evaluateDeliveryCritical,
 } from "../scripts/long-term-guarantee-goal-backed-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const CHECKER = path.join(REPO_ROOT, "plugin", "scripts", "long-term-guarantee-goal-backed-check.ts");
 
-// ── 纯函数：背书判定 ─────────────────────────────────────────────────────────────────────────────
+// ── 纯函数：标签判定 ─────────────────────────────────────────────────────────────────────────────
 
-function backing(overrides = {}) {
-  return {
-    id: "AC-192",
-    kind: "criterion",
-    status: "achieved",
-    criterion: "echo a-runnable-criterion-that-is-long-enough",
-    origin: "来源 task gap-fan-in-ff-retry-counter-scope 的长期保证",
-    ...overrides,
-  };
+test("isDeliveryCritical: labels 含 delivery-critical ⇒ true；不含 ⇒ false（标签位置，非名单）", () => {
+  assert.equal(isDeliveryCritical({ labels: ["gap", DELIVERY_CRITICAL_LABEL] }), true);
+  assert.equal(isDeliveryCritical({ labels: ["gap", "mechanism"] }), false);
+  assert.equal(isDeliveryCritical({ labels: [] }), false);
+  assert.equal(isDeliveryCritical({}), false);
+  assert.equal(isDeliveryCritical({ labels: "delivery-critical" }), false); // 非数组 ⇒ false
+});
+
+// ── 纯函数：goal_ac 非空判定 ────────────────────────────────────────────────────────────────────
+
+test("hasGoalAc: 非空 string ⇒ true；空/缺值/非 string ⇒ false（fail-closed）", () => {
+  assert.equal(hasGoalAc({ goal_ac: "AC-190" }), true);
+  assert.equal(hasGoalAc({ goal_ac: "" }), false);
+  assert.equal(hasGoalAc({ goal_ac: "   " }), false);
+  assert.equal(hasGoalAc({}), false);
+  assert.equal(hasGoalAc({ goal_ac: null }), false);
+  assert.equal(hasGoalAc({ goal_ac: 123 }), false);
+});
+
+// ── 纯函数：生效线判定 ──────────────────────────────────────────────────────────────────────────
+
+test("filedAfterCutoff: ≥ 生效线 ⇒ true；< ⇒ false；缺值 ⇒ true（缺值=未查，fail-closed）", () => {
+  const cutoff = activationLineMs();
+  assert.equal(filedAfterCutoff({ filedAtMs: cutoff }, cutoff), true);
+  assert.equal(filedAfterCutoff({ filedAtMs: cutoff + 1 }, cutoff), true);
+  assert.equal(filedAfterCutoff({ filedAtMs: cutoff - 1 }, cutoff), false);
+  assert.equal(filedAfterCutoff({}, cutoff), true); // 缺值 ⇒ fail-closed
+  assert.equal(filedAfterCutoff({ filedAtMs: NaN }, cutoff), true);
+});
+
+test("activationLineMs: 解析 ACTIVATION_LINE_ISO 为有限 ms 且 ≥ 0", () => {
+  assert.ok(Number.isFinite(activationLineMs()));
+  assert.ok(activationLineMs() >= 0);
+  assert.ok(Date.parse(ACTIVATION_LINE_ISO) === activationLineMs());
+});
+
+// ── 纯函数：位置判定（三份清单 + 存量拆分，枚举不布尔） ─────────────────────────────────────────
+
+function dcTask(id, { goal_ac = null, filedAtMs = Date.now() } = {}) {
+  return { id, labels: [DELIVERY_CRITICAL_LABEL], goal_ac, filedAtMs };
 }
 
-test("isBackingRecord: kind=criterion + active/achieved + criterion≥20 + origin 非空 ⇒ true", () => {
-  assert.equal(isBackingRecord(backing()), true);
-  assert.equal(isBackingRecord(backing({ status: "active" })), true);
+test("evaluateDeliveryCritical: 生效线后带标签无 goal_ac ⇒ violating（负控制）", () => {
+  const r = evaluateDeliveryCritical([dcTask("gap-new-unbacked")]);
+  assert.deepEqual(r.violating, ["gap-new-unbacked"]);
+  assert.deepEqual(r.compliant, []);
+  assert.equal(r.total, 1);
 });
 
-test("isBackingRecord: 四个取假维度各为 false（kind/status/空 criterion/空 origin）", () => {
-  assert.equal(isBackingRecord(backing({ kind: "goal" })), false);
-  assert.equal(isBackingRecord(backing({ status: "draft" })), false);
-  assert.equal(isBackingRecord(backing({ criterion: "" })), false);
-  assert.equal(isBackingRecord(backing({ criterion: "short" })), false);
-  assert.equal(isBackingRecord(backing({ origin: "" })), false);
+test("evaluateDeliveryCritical: 生效线后带标签有 goal_ac ⇒ compliant（正控制，证明非恒红）", () => {
+  const r = evaluateDeliveryCritical([dcTask("gap-new-backed", { goal_ac: "AC-190" })]);
+  assert.deepEqual(r.violating, []);
+  assert.deepEqual(r.compliant, ["gap-new-backed"]);
 });
 
-test("evaluate: 有 goal 层背书 ⇒ unbacked 为空（正控制）", () => {
-  const { backed, unbacked } = evaluate([backing()], ["gap-fan-in-ff-retry-counter-scope"]);
-  assert.deepEqual(unbacked, []);
-  assert.deepEqual(backed, ["gap-fan-in-ff-retry-counter-scope"]);
+test("evaluateDeliveryCritical: 生效线前存量不判红，且按 goal_ac 有无拆开（grandfather）", () => {
+  const cutoff = activationLineMs();
+  const old = cutoff - 1000;
+  const r = evaluateDeliveryCritical([
+    dcTask("gap-old-unbacked", { filedAtMs: old }),
+    dcTask("gap-old-backed", { goal_ac: "AC-190", filedAtMs: old }),
+  ], cutoff);
+  assert.deepEqual(r.violating, []);
+  assert.deepEqual(r.compliant, []);
+  assert.deepEqual(r.grandfathered.sort(), ["gap-old-backed", "gap-old-unbacked"]);
+  assert.deepEqual(r.grandfatheredNoGoalAc, ["gap-old-unbacked"]);
+  assert.deepEqual(r.grandfatheredWithGoalAc, ["gap-old-backed"]);
 });
 
-test("evaluate: 无 goal 层背书 ⇒ 枚举未背书 id（负控制，枚举不布尔）", () => {
-  const { unbacked } = evaluate([backing()], ["gap-some-unbacked-guarantee"]);
-  assert.deepEqual(unbacked, ["gap-some-unbacked-guarantee"]);
+test("evaluateDeliveryCritical: 非 delivery-critical 任务不参与判定（位置判定只认标签）", () => {
+  const r = evaluateDeliveryCritical([{ id: "gap-other", labels: ["gap"], goal_ac: null, filedAtMs: Date.now() }]);
+  assert.equal(r.total, 0);
+  assert.deepEqual(r.violating, []);
 });
 
-// ── 端到端：真仓库绿 + 注入红（双向负控制，AC6 的 exit 0 与 exit 非零断言） ───────────────────────
+// ── 端到端：真仓库绿 + 注入红（双向负控制） ─────────────────────────────────────────────────────
 
 function runChecker(args = []) {
   return spawnSync(process.execPath, ["--no-warnings", "--experimental-strip-types", CHECKER, ...args], {
@@ -71,12 +116,12 @@ function runChecker(args = []) {
   });
 }
 
-test("默认运行对真仓库 exit 0（正控制：三条长期保证均被 goal AC 背书）", () => {
+test("默认运行对真仓库 exit 0（正控制：生效线后 delivery-critical 任务均声明 goal_ac）", () => {
   const r = runChecker();
   assert.equal(r.status, 0, `default run must be green, got status=${r.status}\nstdout=${r.stdout}\nstderr=${r.stderr}`);
 });
 
-test("--inject-unbacked-fixture 注入未背书条目 ⇒ exit 非零（负控制）", () => {
+test("--inject-unbacked-fixture 注入未声明 goal_ac 的新立案任务 ⇒ exit 非零（负控制）", () => {
   const r = runChecker(["--inject-unbacked-fixture"]);
   assert.notEqual(r.status, 0, `injected run must be red, got status=${r.status}`);
   assert.match(r.stdout, new RegExp(INJECTED_UNBACKED_ID));
