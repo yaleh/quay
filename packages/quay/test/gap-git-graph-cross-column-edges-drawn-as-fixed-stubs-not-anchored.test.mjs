@@ -24,10 +24,11 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readGitHistory } from "../src/observation.ts";
+import { readGitHistory, clearGitHistoryCache } from "../src/observation.ts";
 import {
   gitGraphClientScript,
   layoutGitGraph,
+  assignGitColumns,
   renderGitHistoryPage,
   gitGraphLaneTokenCss,
   GIT_GRAPH_LANE_PALETTE,
@@ -195,6 +196,35 @@ test("AC1: every .git-svg-edge endpoint lands on a node center (±1px); unanchor
     if (!nearNode(centers, ep.x2, ep.y2, 1)) unanchored++;
   }
   assert.equal(unanchored, 0, `every edge endpoint is anchored (got ${unanchored} unanchored endpoints)`);
+});
+
+// ── AC1b: the anchoring judge extends to POST-pagination (merged multi-page window) ──────────────
+// gap-git-graph-pagination-appends-page-relative-col-and-torow: the original AC1 only looked at the
+// first screen (500 rows); a page-relative col/toRow merge dangles edges after ONE scroll. The judge
+// must hold over the merged full sequence too (loaded count > one page).
+
+test("AC1b: after merging N pages every .git-svg-edge endpoint still anchors (unanchored = 0)", () => {
+  clearGitHistoryCache();
+  const loaded = [];
+  const seen = new Set();
+  for (let k = 0; k < 3; k++) {
+    const h = readGitHistory(REPO_ROOT, { limit: LIMIT, skip: k === 0 ? null : LIMIT * k });
+    assert.equal(h.status, "ok");
+    for (const c of h.commits) if (!seen.has(c.hash)) { seen.add(c.hash); loaded.push(c); }
+  }
+  assert.ok(loaded.length > LIMIT, `the merged window exceeds one page (${loaded.length} > ${LIMIT})`);
+  const cols = assignGitColumns(loaded);
+  const mount = executeScript(gitGraphClientScript(), loaded);
+  const edges = collectByClass(mount, "git-svg-edge");
+  assert.ok(edges.length > 0, "cross-column edges exist after pagination (a non-degenerate judge)");
+  const centers = loaded.map((c, i) => ({ x: GIT_GRAPH_TRUNK_X + cols.get(c.hash) * GIT_GRAPH_LANE_GAP, y: y(i) }));
+  let unanchored = 0;
+  for (const e of edges) {
+    const ep = pathEndpoints(e.attrs.d);
+    if (!nearNode(centers, ep.x1, ep.y1, 1)) unanchored++;
+    if (!nearNode(centers, ep.x2, ep.y2, 1)) unanchored++;
+  }
+  assert.equal(unanchored, 0, `every edge endpoint anchored after pagination (got ${unanchored})`);
 });
 
 // ── AC2: each edge ends at its PARENT's exact node (not merely "some node") ─────────────────────

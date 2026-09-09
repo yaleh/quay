@@ -27,7 +27,10 @@ import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMob
 
 /** x of column 0 — the left anchor of the graph track. */
 export const GIT_GRAPH_TRUNK_X = 40;
-/** x where ALL commit text starts — one fixed column to the right of the track. */
+/** Legacy seed for the commit-text x (the pre-pagination fixed column). The client now recomputes
+ *  textX dynamically from the rightmost column so the text always sits PAST the track
+ *  (gap-git-graph-pagination-appends-page-relative-col-and-torow); kept for the geometry doc + any
+ *  caller that still reads the seed. */
 export const GIT_GRAPH_TEXT_X = 220;
 /** Horizontal spacing between adjacent columns within the track. */
 export const GIT_GRAPH_LANE_GAP = 16;
@@ -396,11 +399,41 @@ export function gitGraphClientScript(): string {
   try { data = JSON.parse(dataEl.textContent); } catch (e) { return; }
   if (!data || !data.rows || !data.rows.length) { return; }
 
-  var rowH = ${GIT_GRAPH_ROW_H}, trunkX = ${GIT_GRAPH_TRUNK_X}, textX = ${GIT_GRAPH_TEXT_X}, laneGap = ${GIT_GRAPH_LANE_GAP}, nodeR = 3.5, mergeR = 5, padY = ${GIT_GRAPH_PAD_Y};
+  var rowH = ${GIT_GRAPH_ROW_H}, trunkX = ${GIT_GRAPH_TRUNK_X}, laneGap = ${GIT_GRAPH_LANE_GAP}, nodeR = 3.5, mergeR = 5, padY = ${GIT_GRAPH_PAD_Y};
   var lanePalette = ${JSON.stringify(GIT_GRAPH_LANE_PALETTE.map((_, i) => `var(--color-lane-${i})`))};
+
+  // Single-source column allocation (gap-git-graph-pagination-appends-page-relative-col-and-torow):
+  // assignGitColumns is injected VERBATIM from the server module (assignGitColumns.toString()) so the
+  // client's column assignment IS the exact function the adopt test cross-checks against git log --graph
+  // — there is no second, independent column-allocation implementation in this script.
+  var assignGitColumns = ${assignGitColumns.toString()};
 
   function y(row) { return padY + row * rowH; }
   function laneColor(col) { return lanePalette[col % lanePalette.length]; }
+
+  // Recompute the layout quantities (col + edges) over the WHOLE merged row array. Each pagination page
+  // arrives page-relative (or, after the fix, with no col/toRow at all); the only correct assignment is
+  // GLOBAL — over every loaded row. Edges' toCol/toRow/outsideWindow are rebuilt from parentHashes too,
+  // so an edge whose parent sits in a later-loaded page anchors to that parent's real row (no dangling).
+  function recomputeLayout() {
+    var cols = assignGitColumns(data.rows);
+    var rowIndex = {};
+    data.rows.forEach(function (r, i) { rowIndex[r.hash] = i; });
+    data.rows.forEach(function (r) {
+      var colC = cols.get(r.hash);
+      r.col = colC;
+      var edges = [];
+      r.parentHashes.forEach(function (p, pi) {
+        var colP = cols.get(p);
+        if (colP === undefined) {
+          edges.push({ fromCol: colC, toCol: colC, kind: pi === 0 ? "parent" : "merge", toRow: -1, outsideWindow: true });
+        } else {
+          edges.push({ fromCol: colC, toCol: colP, kind: pi === 0 ? "parent" : "merge", toRow: rowIndex[p], outsideWindow: false });
+        }
+      });
+      r.edges = edges;
+    });
+  }
 
   // A rounded-orthogonal edge: horizontal out of the child node toward the parent's column, a rounded
   // quarter-turn down (radius min(6, laneGap/2)), then a straight vertical drop to the parent's row.
@@ -417,6 +450,12 @@ export function gitGraphClientScript(): string {
 
   function render() {
     var rows = data.rows;
+    // textX follows the rightmost column: the text starts one laneGap PAST the highest column, so every
+    // column line's x is strictly < the text's x — structurally the lines can never intrude the commit
+    // text (AC3), even as the column count grows past the initial window (the page-relative col bug).
+    var maxCol = 0;
+    rows.forEach(function (r) { if (r.col > maxCol) { maxCol = r.col; } });
+    var textX = trunkX + (maxCol + 1) * laneGap;
     var svg = d3.select(mount).select("svg");
     if (svg.empty()) {
       svg = d3.select(mount).append("svg").attr("class", "git-svg-surface").attr("role", "img")
@@ -540,7 +579,9 @@ export function gitGraphClientScript(): string {
     data.rows.forEach(function (r) { if (wm === null || r.t < wm) { wm = r.t; } });
     if (wm === null) { finishOlder(); return; }
     loadingOlder = true;
-    fetch("/git-history.json?before=" + wm + "&limit=500")
+    // skip is the authoritative emission-order cursor (git log --skip); before is the timestamp
+    // watermark the self-chain cursor still walks back through (kept in the URL for cursor observability).
+    fetch("/git-history.json?before=" + wm + "&limit=500&skip=" + data.rows.length)
       .then(function (res) {
         if (!res.ok) { finishOlder(); return; }
         return res.json().then(function (next) {
@@ -550,6 +591,7 @@ export function gitGraphClientScript(): string {
           var added = 0;
           next.rows.forEach(function (r) { if (!have[r.hash]) { data.rows.push(r); added++; } });
           if (added === 0) { finishOlder(); return; }
+          recomputeLayout();
           updateCoverage();
           render();
           // Reset BEFORE chaining: the self-chain call below must see loadingOlder === false, or the
@@ -571,6 +613,7 @@ export function gitGraphClientScript(): string {
     }
   }
 
+  recomputeLayout();
   render();
 })();`;
 }
@@ -735,17 +778,48 @@ function writeJson(res: ServerResponse, status: number, obj: unknown): void {
   res.end(JSON.stringify(obj));
 }
 
-/** The JSON payload /git-history.json returns — a COMPLETE GitGraphLayout (the client re-renders it
- *  whole, appending OLDER rows on scroll) plus the window's oldest/newest commit times. The task view
- *  (`view="task"`) returns the task grouping instead: `groups` + the explicit `unattributedCount`
- *  (AC4) — the git view's payload is unchanged and carries neither field. */
+/**
+ * One RAW commit row — the /git-history.json pagination payload carries ONLY the raw commit data
+ * (hash / t / subject / parents / parentHashes / decorations). The page-relative layout quantities
+ * (`col`, `edges[].toRow`) are ABSENT here: a page computes them against its own row array, so
+ * appending pages raw and re-laying-out client-side (gap-git-graph-pagination-appends-page-relative-
+ * col-and-torow) is what keeps the graph correct once the window grows past the first page.
+ */
+export interface GitGraphRawRow {
+  hash: string;
+  t: number;
+  subject: string;
+  parents: number;
+  parentHashes: string[];
+  decorations: string[];
+}
+
+/** Strip the layout quantities off a history — the raw commit rows the pagination endpoint returns. */
+export function gitGraphRawRows(history: GitHistoryResult): GitGraphRawRow[] {
+  if (history.status !== "ok") return [];
+  return history.commits.map((c) => ({
+    hash: c.hash,
+    t: c.t,
+    subject: c.subject,
+    parents: c.parents,
+    parentHashes: c.parentHashes,
+    decorations: c.decorations,
+  }));
+}
+
+/** The JSON payload /git-history.json returns — RAW commit rows (the client re-renders them whole and
+ *  recomputes the layout over the merged full sequence, appending OLDER rows on scroll) plus the
+ *  window's oldest/newest commit times. The task view (`view="task"`) returns the task grouping
+ *  instead: `groups` + the explicit `unattributedCount` (AC4) — the git view's payload carries neither
+ *  field. gap-git-graph-pagination-appends-page-relative-col-and-torow: the git-view rows no longer
+ *  carry `col` / `edges[].toRow` (page-relative layout quantities). */
 export function gitHistoryJson(history: GitHistoryResult, view: GitGraphView = "git"): {
   status: GitHistoryResult["status"];
   reason: string | null;
   commitCount: number;
   oldestT: number | null;
   newestT: number | null;
-  rows: GitGraphRow[];
+  rows: GitGraphRawRow[];
   mergeCount: number;
   groups?: TaskGraphGroup[];
   unattributedCount?: number;
@@ -786,14 +860,20 @@ export function gitHistoryJson(history: GitHistoryResult, view: GitGraphView = "
     commitCount: layout.commitCount,
     oldestT,
     newestT,
-    rows: layout.rows,
+    // Raw commits only — no col / edges[].toRow. The client recomputes the layout over the merged
+    // full sequence (gap-git-graph-pagination-appends-page-relative-col-and-torow).
+    rows: gitGraphRawRows(history),
     mergeCount: layout.mergeCount,
   };
 }
 
-/** GET /git-history.json?before=<unixSeconds>&limit=<n> — the on-demand pagination endpoint the
- *  client's scroll loader calls. `before` = the cursor (returns commits STRICTLY older than it); the
- *  client appends the returned older rows below the current ones and re-renders. */
+/** GET /git-history.json?skip=<n>&limit=<m>[&before=<unixSeconds>] — the on-demand pagination endpoint
+ *  the client's scroll loader calls. `skip` = the emission-order cursor (`git log --skip` — the page
+ *  that continues `--all --topo-order` contiguously, so the client's merged full sequence is exactly
+ *  `git log --all --topo-order -n <loaded>` and its recomputed columns match `git log --graph --all`);
+ *  `before` is retained as a backward-compat timestamp watermark (the self-chain cursor still walks
+ *  back through time), ignored when `skip` is present. The client appends the returned raw rows below
+ *  the current ones and re-renders. */
 export async function handleGitHistoryJson(
   req: IncomingMessage,
   res: ServerResponse,
@@ -802,11 +882,13 @@ export async function handleGitHistoryJson(
 ): Promise<void> {
   const limitRaw = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
   const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, GIT_HISTORY_LIMIT * 10) : GIT_HISTORY_LIMIT;
+  const skipRaw = Number.parseInt(url.searchParams.get("skip") ?? "", 10);
+  const skip = Number.isFinite(skipRaw) && skipRaw > 0 ? skipRaw : null;
   const beforeRaw = Number.parseInt(url.searchParams.get("before") ?? "", 10);
   const before = Number.isFinite(beforeRaw) && beforeRaw > 0 ? beforeRaw : null;
   let history: GitHistoryResult;
   try {
-    history = readGitHistory(cfg.workspaceRoot, { limit, before });
+    history = readGitHistory(cfg.workspaceRoot, { limit, before, skip });
   } catch (err) {
     history = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, commits: [], head: null, heads: {}, mainlineHead: null };
   }
