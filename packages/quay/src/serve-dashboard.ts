@@ -767,24 +767,35 @@ export function renderGoalCard(
   const activeGoals = goals.filter((g) => g.kind === "goal" && g.status === "active");
   const activeCount = activeGoals.length;
 
-  // gap-webui-a11y-focus-ring-and-token-contrast-unvalidated: the NOT-EVALUATED fallback was
-  // --color-neutral-400 (#bab6b6) = 1.80:1 on --color-bg — unreadable text. Muted-but-readable
-  // --color-neutral-700 (#605d5d) keeps the "not yet judged" semantics at 5.83:1.
-  const stalenessColor = (s: "fresh" | "stale" | "NOT-EVALUATED"): string =>
-    s === "fresh" ? "var(--color-positive-700)" : s === "stale" ? "var(--color-accent-800)" : "var(--color-neutral-700)";
+  // gap-dashboard-status-tag-badges: the three-state marker was bare inline color text
+  // (color:var(--color-*);font-weight:700) with no background/border, so it blended into the body
+  // copy on scan. The existing .tag soft-badge components (never consumed before) give it a
+  // background + padding. The per-state colors are the SAME calibrated tokens the inline style used
+  // (gap-webui-a11y-focus-ring-and-token-contrast-unvalidated: fresh → positive-700, stale →
+  // accent-800, NOT-EVALUATED → neutral-700 at 5.83:1) — now carried by .tag-positive/.tag-accent/
+  // .tag-neutral rather than inline.
+  const stalenessClass = (s: "fresh" | "stale" | "NOT-EVALUATED"): string =>
+    s === "fresh" ? "tag-positive" : s === "stale" ? "tag-accent" : "tag-neutral";
 
   const rows = activeGoals.map((g) => {
     const gid = String(g.id);
     const acs = goals.filter((r) => String(r.goal ?? "") === gid);
     const achieved = acs.filter((r) => r.status === "achieved").length;
     const state = goalStaleness(gid, goals, staleMs, nowMs);
+    // gap-dashboard-goal-card-ac-progress-bar: 「AC 达成 x/y」旁加一条 mini 进度条——复用
+    // renderTaskCard bar() 的 `width:{pct}%` 分段条手法，不引入新组件/新依赖。acs.length === 0
+    // 时不渲染进度条（只保留纯文本），避免除零产生 NaN/Infinity 宽度；纯文本读者/无障碍场景仍可读。
+    // 填充色复用既有 token --color-positive-700（同 staleness 的 fresh 态），不引入新十六进制色值。
+    const acBar = acs.length > 0
+      ? html`<div style="height:4px;width:100%;background:var(--color-neutral-200);border-radius:999px;overflow:hidden;margin-top:3px"><div style="width:${((achieved / acs.length) * 100).toFixed(1)}%;height:100%;background:var(--color-positive-700)"></div></div>`
+      : "";
     return html`<div style="display:flex;flex-direction:column;gap:2px;font-size:0.78rem;line-height:1.4">
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem;flex-wrap:wrap">
         <a href="/goal/${encodeURIComponent(gid)}" style="color:var(--color-text);text-decoration:none;flex:none">${escapeHtml(gid)}</a>
-        <span style="flex:none;color:${stalenessColor(state)};font-weight:700">${escapeHtml(state)}</span>
+        <span class="tag ${stalenessClass(state)}" style="flex:none">${escapeHtml(state)}</span>
       </div>
       <div style="color:var(--color-text);font-size:0.75rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(String(g.title ?? ""))}</div>
-      <div style="color:var(--color-neutral-700)">AC 达成 ${achieved}/${acs.length}</div>
+      <div style="color:var(--color-neutral-700)">AC 达成 ${achieved}/${acs.length}${acBar}</div>
     </div>`;
   }).join("");
 

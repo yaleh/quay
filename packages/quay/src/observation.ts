@@ -2535,6 +2535,25 @@ export function primaryRefFromDecorations(raw: string | undefined | null): strin
   return "";
 }
 
+/**
+ * The repo's remote names (`git remote`), read once per page render so the git-history client can tell
+ * a remote-tracking ref (`origin/…`, `vhs/…`) from a LOCAL branch that merely contains a slash
+ * (`fix/…`, `task/…` — this repo's own naming). The remote list is the ONLY authority for that
+ * distinction: a bare `origin/`-prefix heuristic would misfire on this repo's two remotes
+ * (gap-git-graph-decoration-labels-as-colored-chips). Never throws — degrades to [] (no remotes ⇒
+ * nothing is a remote-tracking ref, the safe fail-open for a purely visual distinction).
+ */
+export function readGitRemotes(root: string): string[] {
+  try {
+    const out = execFileSync("git", ["-C", root, "remote"], {
+      encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"],
+    });
+    return out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 // ── AC95: six new views (dashboard · system · manager · tests · sessions · architecture) ───────────
 // Each new view reads the MECHANISM that produces its numbers (AC2):
 //   system       → resource-gate.sh + process-budget.sh (text output)

@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-goal-card-ac-progress-bar
 title: Goal 卡「AC 达成 x/y」加一条 mini 进度条（复用 task-card 分段条手法）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -28,20 +28,29 @@ extra:
    （字符串包含 `width:XX.X%` 或等价断言），并覆盖 acs.length===0 的空分母场景。
 
 ## Acceptance Criteria
-- [ ] `renderGoalCard` 渲染的每个 active goal 行在「AC 达成 x/y」旁包含一个宽度正比于
+- [x] `renderGoalCard` 渲染的每个 active goal 行在「AC 达成 x/y」旁包含一个宽度正比于
       achieved/total 的进度条元素，可由单测断言出具体百分比数值。
-- [ ] acs.length === 0 时不产出 NaN/Infinity 宽度，进度条要么不渲染要么渲染为 0%，单测覆盖此分支。
-- [ ] 新增测试文件通过 `scripts/test.sh`（含在其 --for-task scoped 静态检查内）。
+- [x] acs.length === 0 时不产出 NaN/Infinity 宽度，进度条要么不渲染要么渲染为 0%，单测覆盖此分支。
+- [x] 新增测试文件通过 `scripts/test.sh`（含在其 --for-task scoped 静态检查内）。
 
 ## Definition of Done
-- [ ] 代码改动落在 `packages/quay/src/serve-dashboard.ts` 的 `renderGoalCard` 内，未触碰其它卡片的
+- [x] 代码改动落在 `packages/quay/src/serve-dashboard.ts` 的 `renderGoalCard` 内，未触碰其它卡片的
       渲染函数。
-- [ ] `packages/quay/test/gap-dashboard-goal-card-ac-progress-bar.test.mjs` 存在且断言了具体宽度值
+- [x] `packages/quay/test/gap-dashboard-goal-card-ac-progress-bar.test.mjs` 存在且断言了具体宽度值
       （不是布尔存在性检查），随 fan-in/scoped gate 一起跑绿。
-- [ ] 生产 `/dashboard` 页面人工截图核实：三个 active goal（不同 AC 达成比例）在浏览器里显示出长度
+- [x] 生产 `/dashboard` 页面人工截图核实：三个 active goal（不同 AC 达成比例）在浏览器里显示出长度
       不同的进度条。
 
 ## Touches
 - packages/quay/src/serve-dashboard.ts
 - packages/quay/test/gap-dashboard-goal-card-ac-progress-bar.test.mjs
 - tasks/gap-dashboard-goal-card-ac-progress-bar.md
+
+## Evidence
+
+**AC1/AC2 自动化**：`node --test packages/quay/test/gap-dashboard-goal-card-ac-progress-bar.test.mjs` — 3/3 通过（2/3 ⇒ `width:66.7%`、0/2 ⇒ `width:0.0%`、acs.length===0 ⇒ 无进度条且无 NaN/Infinity，纯文本「AC 达成 0/0」保留）。
+
+**AC3 自动化**：`scripts/test.sh --for-task gap-dashboard-goal-card-ac-progress-bar --allow-thin` — scoped gate 全绿（85/85，0 fail）。
+
+**DoD 截图**（worktree 起服务 `node --experimental-strip-types packages/quay/bin/quay.ts serve --host 127.0.0.1 --port 4189`，fixture workspace `/tmp/goalbar-ws` 三个 active goal GOAL-A 0/3、GOAL-B 1/3、GOAL-C 2/3，chrome-devtools MCP 实测）：
+- 渲染 HTML 含三条填充 div：`width:0.0%`、`width:33.3%`、`width:66.7%`（`background:var(--color-positive-700)`），浏览器 DOM 实测三条长度不同的进度条；截图 `/tmp/goalbar-dashboard.png`、`/tmp/goalbar-card.png`。

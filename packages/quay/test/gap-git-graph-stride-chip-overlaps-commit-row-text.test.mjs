@@ -7,8 +7,10 @@
 // 只在 ref tip 内联。本任务退化为四条确认读数，全部取自真实生产源码与生产仓库（非 fixture）。
 //
 //   AC1  chip 机件归零：serve-git.ts 中 `grep -c appendChip` = 0（取代任务落地前是 4）。
-//   AC2  压字结构上不可能：渲染器只画「每提交一行」的 git-svg-ink 文本，无任何非提交文本元素
-//        ⇒ 非提交×提交 bbox 相交对数 = 0；该结论不依赖坐标微调（因为已无浮动标签元素）。
+//   AC2  压字结构上不可能：渲染器只画「每提交一行」的内联标签（hash → decoration chip → subject，
+//        见 gap-git-graph-decoration-labels-as-colored-chips），无任何【浮动】非提交文本元素——
+//        decoration chip 是该行自身文本流的一部分（同 baseline、紧随 hash），不是可漂到别行的
+//        浮动 lane-chip ⇒ 非提交×提交 bbox 相交对数 = 0；该结论不依赖坐标微调。
 //   AC3  负控制：显式还原一个浮动 chip 文本并置于提交行同一 baseline / 同一 x，断言相交对数 > 0
 //        ⇒ AC2 的判据能取假，不是因为「页面上没东西」而恒真。
 //   AC4  标签仍然存在：%D 非空的提交行仍带内联标签，条数与 `git log --all -n <N>` 中 %D 非空的
@@ -94,22 +96,22 @@ test("AC2: no non-commit text element can intersect a commit text element (struc
   const layout = layoutGitGraph(history);
   assert.ok(layout && layout.rows.length > 0, "the window carries commits (a non-empty page)");
 
-  // The renderer draws EXACTLY one text site — the per-row git-svg-ink commit text — and no floating
-  // chip element. Any re-introduction of a chip (git-svg-lane-chip / appendChip) breaks these two checks
-  // BEFORE the intersection count below is even consulted.
+  // The renderer's inline label is now hash → decoration chip → subject (gap-git-graph-decoration-labels-
+  // as-colored-chips) — several inline text sites per row, no longer ONE concatenated string. The RETIRED
+  // floating lane chip (git-svg-lane-chip / appendChip) must still be absent: a decoration chip is part of
+  // the row's own text flow, never a floating overlay that could drift onto another row's text.
   const script = gitGraphClientScript();
-  const textSites = (script.match(/\.append\("text"\)/g) || []).length;
-  assert.equal(textSites, 1, "the renderer emits exactly one <text> site (the per-commit ink)");
   assert.ok(!script.includes("git-svg-lane-chip"), "no floating lane-chip element in the renderer");
   assert.ok(!script.includes("appendChip"), "no chip appender in the renderer");
-  assert.ok(script.includes("git-svg-ink"), "the single text site is the commit ink (sanity)");
+  assert.ok(script.includes("git-svg-ink"), "the commit ink class is present");
+  assert.ok(script.includes("git-svg-decor-chip"), "decorations render as inline chips (not a floating lane chip)");
 
   const commitEls = commitTextElements(layout.rows);
   assert.equal(commitEls.length, layout.rows.length, "one commit text per row");
 
-  // The non-commit text inventory is empty (proven above: the only text site is the commit ink), so the
-  // non-commit × commit intersection count is 0 — structurally, with no reliance on coordinate tuning.
-  // AC3 is the guard that this "0" is not vacuous.
+  // The non-commit text inventory is empty (no floating overlay element), so the non-commit × commit
+  // intersection count is 0 — structurally, with no reliance on coordinate tuning. AC3 is the guard that
+  // this "0" is not vacuous.
   assert.equal(nonCommitIntersections(commitEls, []), 0, "non-commit × commit bbox intersection pairs = 0");
 });
 

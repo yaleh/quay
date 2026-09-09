@@ -1,7 +1,7 @@
 ---
 id: gap-git-graph-decoration-labels-as-colored-chips
 title: git-history 分支标签改为按列色着色的胶囊 chip：拆分独立标签、HEAD 高亮、远程/本地区分
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -49,14 +49,14 @@ g.append("text").attr("class", "git-svg-ink")...text(label);
 
 ## AC
 
-- [ ] AC1 服务端 payload 携带远程名列表：`#git-graph-data` 的 JSON 含 `remotes` 数组，且对本仓库真实 `git remote` 输出（`origin`、`vhs`）逐项相等（不满足数 = 0）。
-- [ ] AC2 每个 decoration 渲染为独立 chip：生产窗口内，任取一行 `decorations.length > 0` 的提交（含 `HEAD -> X, develop` 这种多 decoration 行），渲染出的 `.git-svg-decor-chip` 数 = 拆分后（HEAD 单独计一个）应有的 decoration 条目数；不满足数 = 0，且该窗口内 chip 总数 > 0（非退化判据）。
-- [ ] AC3 chip 背景色随行的列色联动：对每个渲染出的 chip，其 `fill`/背景色变量 = 该行 `laneColor(r.col)`（即 `var(--color-lane-(r.col % 8))`）；不满足数 = 0。
-- [ ] AC4 HEAD 独立拆分与高亮：对 decorations 含形如 `HEAD -> X` 的行，渲染结果里存在一个文本严格等于 `HEAD` 的 chip（带 `git-svg-decor-chip--head` class）与一个文本等于 `X` 的 chip，且**不**存在一个内容整体等于 `HEAD -> X` 的单一 chip；不满足数 = 0。
-- [ ] AC5 远程/本地区分不误判——用本仓库真实反例校验：`fix/goal-card-id-flex-squeeze`（本地）渲染为默认实心样式（无 `--ghost` class），`origin/fix/goal-card-id-flex-squeeze`（远程追踪）渲染带 `--ghost` class；两者判定不互相污染。
-- [ ] AC6 行内顺序与不重叠：hash chip 序列 subject 的 x 坐标满足 `subjectX >= 最后一个 chip 的右边界 + gap`（对生产窗口全部 decorated 行成立，不满足数 = 0）；相邻两行的 chip 纵向 bounding box 不重叠（不满足数 = 0）。
-- [ ] AC7 负控制：把 AC2 的判据对象换回"整行一个 `<text>`"的旧渲染（本任务改动前的行为），断言 chip 数为 0（AC2 判据能取假，不是恒真）。
-- [ ] AC8 既有测试不回归：`gap-git-graph-adopt-git-column-algorithm-and-decorate-labels.test.mjs`、`serve-handlers.test.mjs` 里基于 `row.decorations` 数组（数据层，非渲染文本）的既有断言（如 `decorations.includes("feature/alpha")`）在本次改动后原样通过——本任务只改渲染，不改 `decorations` 数据结构本身。
+- [x] AC1 服务端 payload 携带远程名列表：`#git-graph-data` 的 JSON 含 `remotes` 数组，且对本仓库真实 `git remote` 输出（`origin`、`vhs`）逐项相等（不满足数 = 0）。
+- [x] AC2 每个 decoration 渲染为独立 chip：生产窗口内，任取一行 `decorations.length > 0` 的提交（含 `HEAD -> X, develop` 这种多 decoration 行），渲染出的 `.git-svg-decor-chip` 数 = 拆分后（HEAD 单独计一个）应有的 decoration 条目数；不满足数 = 0，且该窗口内 chip 总数 > 0（非退化判据）。
+- [x] AC3 chip 背景色随行的列色联动：对每个渲染出的 chip，其 `fill`/背景色变量 = 该行 `laneColor(r.col)`（即 `var(--color-lane-(r.col % 8))`）；不满足数 = 0。
+- [x] AC4 HEAD 独立拆分与高亮：对 decorations 含形如 `HEAD -> X` 的行，渲染结果里存在一个文本严格等于 `HEAD` 的 chip（带 `git-svg-decor-chip--head` class）与一个文本等于 `X` 的 chip，且**不**存在一个内容整体等于 `HEAD -> X` 的单一 chip；不满足数 = 0。
+- [x] AC5 远程/本地区分不误判——用本仓库真实反例校验：`fix/goal-card-id-flex-squeeze`（本地）渲染为默认实心样式（无 `--ghost` class），`origin/fix/goal-card-id-flex-squeeze`（远程追踪）渲染带 `--ghost` class；两者判定不互相污染。
+- [x] AC6 行内顺序与不重叠：hash chip 序列 subject 的 x 坐标满足 `subjectX >= 最后一个 chip 的右边界 + gap`（对生产窗口全部 decorated 行成立，不满足数 = 0）；相邻两行的 chip 纵向 bounding box 不重叠（不满足数 = 0）。
+- [x] AC7 负控制：把 AC2 的判据对象换回"整行一个 `<text>`"的旧渲染（本任务改动前的行为），断言 chip 数为 0（AC2 判据能取假，不是恒真）。
+- [x] AC8 既有测试不回归：`gap-git-graph-adopt-git-column-algorithm-and-decorate-labels.test.mjs`、`serve-handlers.test.mjs` 里基于 `row.decorations` 数组（数据层，非渲染文本）的既有断言（如 `decorations.includes("feature/alpha")`）在本次改动后原样通过——本任务只改渲染，不改 `decorations` 数据结构本身。
 
 ## DoD
 
@@ -67,4 +67,5 @@ g.append("text").attr("class", "git-svg-ink")...text(label);
 - packages/quay/src/observation.ts（新增/暴露读取 `git remote` 的辅助函数，供 `serve-git.ts` 组装 payload 时调用）
 - packages/quay/src/serve-git.ts（payload 加 `remotes` 字段；`gitGraphClientScript()` 的 `render()` 内 decoration 渲染从单一 `<text>` 拼接改为逐个 chip 的 `rect+text`；`GIT_GRAPH_ROW_H` 按 chip 高度联动调整）
 - packages/quay/test/gap-git-graph-decoration-labels-as-colored-chips.test.mjs（本任务的回归测试：AC1-AC8，复用 `gap-git-graph-cross-column-edges-drawn-as-fixed-stubs-not-anchored.test.mjs` 的 vm+d3-mock 执行手法）
+- packages/quay/test/gap-git-graph-stride-chip-overlaps-commit-row-text.test.mjs（本任务把该测试的「渲染器只画一个 text 位点」判据更新为「hash → decoration chip → subject 内联标签」——decoration chip 是行内文本流的一部分，不是浮动 lane-chip）
 - tasks/gap-git-graph-decoration-labels-as-colored-chips.md
