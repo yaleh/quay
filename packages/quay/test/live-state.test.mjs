@@ -170,7 +170,7 @@ test("positive + AC4 no-regression: telemetry present ⇒ running; unreadable st
     const live = await get(port, "/live");
     assert.equal(live.status, 200, "positive: /live 200 with telemetry present");
     assert.ok(live.body.includes("live_state=running"), "positive: machine key live_state=running present");
-    assert.ok(live.body.includes("并发数"), "positive: running summary still rendered");
+    assert.ok(live.body.includes("上限"), "positive: running summary renders the cap label (上限), not the retired 并发数");
     assert.ok(!live.body.includes("在跑但未接遥测") && !live.body.includes("未在运行"),
       "positive: neither telemetry-empty state text appears when telemetry is present");
 

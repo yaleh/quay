@@ -1,7 +1,7 @@
 // serve-live.ts — /live + /journal route handlers, split from serve-handlers.ts.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readLive, readJournal, type LiveResult, type JournalResult, type JournalSection, type InFlightPhase, type SuiteStateView } from "./observation.ts";
+import { readLive, readJournal, DEFAULT_DRIVER_CAP, type LiveResult, type JournalResult, type JournalSection, type InFlightPhase, type SuiteStateView } from "./observation.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderMarkdown, relativeTime, renderSiteNav, renderMobileChrome, tableWrap, LIVE_STATE_RUNNING_UNWIRED_LABEL, LIVE_STATE_NOT_RUNNING_LABEL } from "./serve-render.ts";
 
 // ── Loop-observation routes (gap-web-cannot-show-what-the-loop-is-doing-now) ────────────────
@@ -122,7 +122,7 @@ export function renderLivePage(live: LiveResult): string {
   }
 
   const summary = live.status === "ok"
-    ? html`<p class="meta"><code>live_state=running</code> · 并发数: ${live.concurrency} · 在飞: ${live.inFlight.length}${live.cpuPressure != null
+    ? html`<p class="meta"><code>live_state=running</code> · 在飞: ${live.inFlight.length} / 上限: ${live.concurrencyCap}${live.cpuPressure != null
         ? html` · CPU 压力 (some avg10): ${escapeHtml(live.cpuPressure.toFixed(2))}`
         : ""}</p>`
     : "";
@@ -180,7 +180,7 @@ export async function handleLive(
       status: "error",
       reason: `internal: ${err instanceof Error ? err.message : String(err)}`,
       inFlight: [],
-      concurrency: 0,
+      concurrencyCap: DEFAULT_DRIVER_CAP,
       cpuPressure: null,
       liveState: null,
       liveExplanation: null,

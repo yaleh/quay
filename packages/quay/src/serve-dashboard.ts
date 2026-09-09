@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 import type { ProviderClient } from "./provider-client.ts";
-import { readLive, readSystem, readManagerLight, readTests, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord, type DriverKindReading } from "./observation.ts";
+import { readLive, readSystem, readManagerLight, readTests, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, DEFAULT_DRIVER_CAP, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord, type DriverKindReading } from "./observation.ts";
 import { TASK_STATUS, type GoalRecord } from "./abi.ts";
 import type { Manifest } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime } from "./serve-render.ts";
@@ -96,7 +96,7 @@ export function renderLiveCard(
   return html`<div id="live-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
     <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">循环脉搏</div>
     <div style="font-weight:800">${escapeHtml(liveStateText)}</div>
-    <p style="margin:0;font-size:0.8rem;opacity:0.8">在飞 ${live.inFlight.length} · 并发 ${live.concurrency}</p>
+    <p style="margin:0;font-size:0.8rem;opacity:0.8">在飞 ${live.inFlight.length} / 上限 ${live.concurrencyCap}</p>
     ${swimlane}
     ${live.status === "ok" && live.inFlight.length > 0 ? html`<div style="display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--color-divider);padding-top:6px">${liveMiniList}</div>` : ""}
     <a href="/live" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Live →</a>
@@ -1261,7 +1261,7 @@ export async function handleDashboard(
   ]);
   let live: LiveResult;
   try { live = readDashboardLive(cfg.workspaceRoot); } catch {
-    live = { status: "error", reason: "internal", inFlight: [], concurrency: 0, cpuPressure: null, liveState: null, liveExplanation: null, activity: null };
+    live = { status: "error", reason: "internal", inFlight: [], concurrencyCap: DEFAULT_DRIVER_CAP, cpuPressure: null, liveState: null, liveExplanation: null, activity: null };
   }
   let tests: TestsResult;
   try { tests = readTests(cfg.workspaceRoot); } catch {
@@ -1308,7 +1308,7 @@ export async function handleDashboardCards(
   ]);
   let live: LiveResult;
   try { live = readDashboardLive(cfg.workspaceRoot); } catch {
-    live = { status: "error", reason: "internal", inFlight: [], concurrency: 0, cpuPressure: null, liveState: null, liveExplanation: null, activity: null };
+    live = { status: "error", reason: "internal", inFlight: [], concurrencyCap: DEFAULT_DRIVER_CAP, cpuPressure: null, liveState: null, liveExplanation: null, activity: null };
   }
   let tests: TestsResult;
   try { tests = readTests(cfg.workspaceRoot); } catch {
