@@ -2,7 +2,7 @@
 id: gap-goal-driver-no-retire-write-surface
 title: goal-driver 写面不越权放弃：writeGoalStatus 只写 achieved/active/needs-human，分诊
   retire 只产 needs-human 建议（非空理由）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -31,10 +31,10 @@ goal_ac: AC-211
 
 ## AC
 
-- [ ] AC1（正本判据）：`node --no-warnings --experimental-strip-types --test plugin/test/goal-triage-no-driver-retire.test.mjs` 退出码 0。
-- [ ] AC2（不变式①负控制）：把 `plugin/scripts/goal-driver.ts` 任一 `writeGoalStatus` 调用点的 status 实参临时改成 `"retired"` 再跑 AC1 ⇒ 退出码非 0；恢复后 ⇒ 0（证明写面守卫枚举到的调用点非空且逐点真核，⛔ 恒真）。
-- [ ] AC3（不变式②负控制）：构造「分诊判 retire」输入断言产物 status=needs-human ∧ reason 非空 ∧ ≠ retired；把产物 status 改写成 `"retired"` ⇒ 测试失败。
-- [ ] AC4（scoped 门）：`bash scripts/test.sh --for-task gap-goal-driver-no-retire-write-surface --allow-thin` 退出码 0。
+- [x] AC1（正本判据）：`node --no-warnings --experimental-strip-types --test plugin/test/goal-triage-no-driver-retire.test.mjs` 退出码 0。
+- [x] AC2（不变式①负控制）：把 `plugin/scripts/goal-driver.ts` 任一 `writeGoalStatus` 调用点的 status 实参临时改成 `"retired"` 再跑 AC1 ⇒ 退出码非 0；恢复后 ⇒ 0（证明写面守卫枚举到的调用点非空且逐点真核，⛔ 恒真）。
+- [x] AC3（不变式②负控制）：构造「分诊判 retire」输入断言产物 status=needs-human ∧ reason 非空 ∧ ≠ retired；把产物 status 改写成 `"retired"` ⇒ 测试失败。
+- [x] AC4（scoped 门）：`bash scripts/test.sh --for-task gap-goal-driver-no-retire-write-surface --allow-thin` 退出码 0。
 
 ## DoD
 
@@ -43,8 +43,19 @@ goal_ac: AC-211
 - 若本任务新增「retire → needs-human」写面落点，它经 `writeGoalStatus`（provider 写路径）写 `"needs-human"`，⛔ 不直改 `goals/*.md`，且 reason 非空可 grep。
 - 全量 `scripts/test.sh` 绿。
 
+## Evidence（负控制实跑输出，供 fan-in 复核）
+
+**AC1（正）**：`node --no-warnings --experimental-strip-types --test plugin/test/goal-triage-no-driver-retire.test.mjs` → 3/3 pass（退出码 0）。三条：不变式① 写面守卫、不变式② 行为级（retire ⇒ needs-human + reason 非空）、分诊纯函数前提。
+
+**AC2（不变式①负控制）**：把 `plugin/scripts/goal-driver.ts` 的 `writeGoalStatus(scriptRoot, id, "achieved", …)` 临时改成 `"retired"` ⇒ 测试红，报 `AssertionError [ERR_ASSERTION]: status 实参不得为 "retired"（放弃/取代归人，AC-211）`，退出码 1；恢复后 ⇒ 3/3 pass（退出码 0）。
+
+**AC3（不变式②负控制）**：把 retire 写面落点 `writeGoalStatus(scriptRoot, entry.ac, "needs-human", …)` 临时改成 `"retired"` ⇒ 两条红：不变式① 报 `status 实参不得为 "retired"`、不变式② 报 `AssertionError [ERR_ASSERTION]: retire 建议 ⇒ 产物 status=needs-human（⛔ 不翻 retired）`，退出码 1；恢复后 ⇒ 3/3 pass。
+
+**连带修正（Touches 扩充）**：新增 retire→needs-human 写面使既有 `plugin/test/goal-driver.test.mjs` 的「draft AC under active GOAL 不被翻」断言失效（其 fixture 的 AC-002 draft、无牵引 ⇒ 分诊判 retire ⇒ 现应置 needs-human）。该测试已更新为断言 draft AC 不被翻成 achieved/active/retired、但 retire 死信 ⇒ 置 needs-human。三文件联跑（goal-triage-no-driver-retire + goal-driver + goal-triage）→ 40/40 pass。
+
 ## Touches
 
 - `plugin/scripts/goal-driver.ts`
 - `plugin/test/goal-triage-no-driver-retire.test.mjs`
+- `plugin/test/goal-driver.test.mjs`
 - `tasks/gap-goal-driver-no-retire-write-surface.md`
