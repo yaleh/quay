@@ -2410,19 +2410,25 @@ export function clearGitHistoryCache(): void {
   gitHistoryCache.clear();
 }
 
-export function readGitHistory(root: string, { limit = GIT_HISTORY_LIMIT, before = null, nowMs = Date.now() }: { limit?: number; before?: number | null; nowMs?: number } = {}): GitHistoryResult {
-  const key = `${root}\n${limit}\n${before ?? ""}`;
+export function readGitHistory(root: string, { limit = GIT_HISTORY_LIMIT, before = null, skip = null, nowMs = Date.now() }: { limit?: number; before?: number | null; skip?: number | null; nowMs?: number } = {}): GitHistoryResult {
+  const key = `${root}\n${limit}\n${before ?? ""}\n${skip ?? ""}`;
   const hit = gitHistoryCache.get(key);
   if (hit && Date.now() - hit.at < GIT_HISTORY_CACHE_TTL_MS) return hit.result;
-  const result = readGitHistoryUncached(root, { limit, before, nowMs });
+  const result = readGitHistoryUncached(root, { limit, before, skip, nowMs });
   gitHistoryCache.set(key, { at: Date.now(), result });
   return result;
 }
 
-function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, before = null, nowMs = Date.now() }: { limit?: number; before?: number | null; nowMs?: number } = {}): GitHistoryResult {
+function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, before = null, skip = null, nowMs = Date.now() }: { limit?: number; before?: number | null; skip?: number | null; nowMs?: number } = {}): GitHistoryResult {
   try {
     const args = ["-C", root, "log", "--all", "--topo-order", `-n ${limit}`];
-    if (before !== null && Number.isFinite(before)) args.push(`--before=${before}`);
+    // gap-git-graph-pagination-appends-page-relative-col-and-torow: `skip` is the EMISSION-ORDER cursor
+    // (`git log --skip`) that pages `--all --topo-order` contiguously — a `--before=<t>` timestamp filter
+    // reorders/drops commits relative to the single `-n <loaded>` walk, so it can never reconstruct the
+    // exact git emission sequence. `skip` takes precedence when both are present; `before` is retained
+    // for backward-compat callers (and the self-chain cursor's timestamp watermark).
+    if (skip !== null && Number.isFinite(skip) && skip > 0) args.push(`--skip=${skip}`);
+    else if (before !== null && Number.isFinite(before)) args.push(`--before=${before}`);
     args.push("--pretty=format:%H%x1f%P%x1f%D%x1f%ct%x1f%s");
     const out = execFileSync("git", args, { encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "pipe"] });
 
@@ -2491,6 +2497,25 @@ export function primaryRefFromDecorations(raw: string | undefined | null): strin
     return d;
   }
   return "";
+}
+
+/**
+ * The repo's remote names (`git remote`), read once per page render so the git-history client can tell
+ * a remote-tracking ref (`origin/…`, `vhs/…`) from a LOCAL branch that merely contains a slash
+ * (`fix/…`, `task/…` — this repo's own naming). The remote list is the ONLY authority for that
+ * distinction: a bare `origin/`-prefix heuristic would misfire on this repo's two remotes
+ * (gap-git-graph-decoration-labels-as-colored-chips). Never throws — degrades to [] (no remotes ⇒
+ * nothing is a remote-tracking ref, the safe fail-open for a purely visual distinction).
+ */
+export function readGitRemotes(root: string): string[] {
+  try {
+    const out = execFileSync("git", ["-C", root, "remote"], {
+      encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"],
+    });
+    return out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 // ── AC95: six new views (dashboard · system · manager · tests · sessions · architecture) ───────────

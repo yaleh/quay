@@ -7,8 +7,8 @@
 // concurrency-1 serial phase (gap-install-family-tests-rotate-flakes-under-full-suite).
 // quay-init.test.mjs — gap-quay-init-closure-shrink-body (SPEC §6 / AC168 收缩本体).
 //
-// The new quay-init contract: a PROJECT INITIALIZER whose write surface is the SIX-item closed set —
-//   .quay/config.yml / .quay/profiles.yml / tasks/ / .gitignore /
+// The new quay-init contract: a PROJECT INITIALIZER whose write surface is the SEVEN-item closed set —
+//   .quay/config.yml / .quay/profiles.yml / tasks/ / goals/ / .gitignore /
 //   .claude/launch.settings.json / .claude/settings.json
 // — and NOTHING else (no .claude/{skills,workflows,agents}, no plugin/scripts copies, no .quay/runtime).
 // It is NOT an installer: the extension files + scripts are delivered by the quay Claude Code plugin,
@@ -74,7 +74,7 @@ const INIT_ARGS = (ws) => [
   "--test-command", "node --test", "--tmux-session", "proj-0:0.0",
 ];
 
-// The six-item closed set (SPEC §6) — the exact relative paths quay-init may write.
+// The seven-item closed set (SPEC §6) — the exact relative paths quay-init may write.
 const CLOSED_SET = [
   ".quay/config.yml",
   ".quay/profiles.yml",
@@ -96,8 +96,8 @@ function listFiles(root) {
   return out.sort();
 }
 
-// ── AC1: the write surface is the six-item closed set ────────────────────────────────────────────────
-test("AC1 — a real quay-init --loop laydown writes ONLY the six-item closed set (no extension/script copies)", () => {
+// ── AC1: the write surface is the seven-item closed set ──────────────────────────────────────────────
+test("AC1 — a real quay-init --loop laydown writes ONLY the seven-item closed set (no extension/script copies)", () => {
   const ws = makeTmp();
   try {
     const r = runInit(ws, INIT_ARGS(ws));
@@ -105,12 +105,13 @@ test("AC1 — a real quay-init --loop laydown writes ONLY the six-item closed se
 
     const files = listFiles(ws);
     for (const f of files) {
-      const ok = CLOSED_SET.includes(f) || f.startsWith("tasks/");
-      assert.ok(ok, `a laid-down path must be in the closed set ∪ tasks/ descendants; got ${f} (all: ${files.join(", ")})`);
+      const ok = CLOSED_SET.includes(f) || f.startsWith("tasks/") || f.startsWith("goals/");
+      assert.ok(ok, `a laid-down path must be in the closed set ∪ tasks/ and goals/ descendants; got ${f} (all: ${files.join(", ")})`);
     }
     for (const c of CLOSED_SET) {
       assert.ok(files.includes(c), `the closed-set member must be laid down: ${c}`);
     }
+    assert.ok(fs.existsSync(path.join(ws, "goals")), "goals/ must be created (dual carrier)");
     // The retired extension-file copy surface must be ABSENT (裁定 6: 不复制扩展或脚本).
     assert.ok(!fs.existsSync(path.join(ws, ".claude", "workflows")), "no .claude/workflows copy");
     assert.ok(!fs.existsSync(path.join(ws, ".claude", "agents")), "no .claude/agents copy");
@@ -183,13 +184,13 @@ test("--dry-run lists the closed set and writes nothing", () => {
 // ── AC1/AC4: a no-tmux host must NOT hard-fail the init (tmux session is optional) ─────────────────
 // gap-quay-init-hard-requires-tmux-session-and-leaves-partial-write. tmux is shadowed by a stub that
 // reports no sessions — the exact "no tmux host" path (CI/container/plain ssh). The init must exit 0,
-// lay all six closed-set items, and write loop.tmux_session: null (never a guess, never exit 2).
+// lay all seven closed-set items, and write loop.tmux_session: null (never a guess, never exit 2).
 // Negative control ① (removing the simulation ⇒ still green): the assertion only checks exit 0 + six
 // items + null — with a REAL tmux present the detector still finds zero MATCHING sessions for the
 // unique project name `proj-notmux`, so the same optional path continues and the test stays green.
 // Negative control ② (reverting tmux to hard-fail ⇒ red): if the detector again `exit 2`s on a miss,
 // r.status becomes 2 and both asserts below (status 0 + /needs the target project's tmux/ absent) turn red.
-test("no-tmux host: quay-init exits 0, lays the six-item closed set, and writes tmux_session: null", () => {
+test("no-tmux host: quay-init exits 0, lays the seven-item closed set, and writes tmux_session: null", () => {
   const ws = makeTmp();
   try {
     const prefix = noTmuxPathPrefix();
@@ -203,6 +204,7 @@ test("no-tmux host: quay-init exits 0, lays the six-item closed set, and writes 
       assert.ok(fs.existsSync(path.join(ws, c)), `closed-set member must be laid down: ${c}`);
     }
     assert.ok(fs.existsSync(path.join(ws, "tasks")), "tasks/ must be created");
+    assert.ok(fs.existsSync(path.join(ws, "goals")), "goals/ must be created (dual carrier)");
     const cfg = fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8");
     assert.match(cfg, /tmux_session:\s*null/, "loop.tmux_session must be null when no session is detected");
   } finally { cleanup(ws); }
@@ -210,10 +212,10 @@ test("no-tmux host: quay-init exits 0, lays the six-item closed set, and writes 
 
 // ── AC3: a mid-write failure reports the per-item written/unwritten state (mechanically parseable) ──
 // A `.claude` FILE (not a dir) makes the launch.settings.json lay-down's `mkdir -p .claude` abort AFTER
-// config.yml/profiles.yml/tasks/.gitignore were written — the exact partial-write shape the task
-// describes. The EXIT trap must list which of the six items landed (written:) and which did not
+// config.yml/profiles.yml/tasks/goals/.gitignore were written — the exact partial-write shape the task
+// describes. The EXIT trap must list which of the seven items landed (written:) and which did not
 // (unwritten:), so "initialized half-way" is distinguishable from "not initialized".
-test("AC3 — a mid-write failure lists the six-item written/unwritten state", () => {
+test("AC3 — a mid-write failure lists the seven-item written/unwritten state", () => {
   const ws = makeTmp();
   try {
     fs.mkdirSync(path.join(ws, "scripts"), { recursive: true });
@@ -223,7 +225,7 @@ test("AC3 — a mid-write failure lists the six-item written/unwritten state", (
     assert.notEqual(r.status, 0, `a mid-write failure must exit non-zero:\n${r.stdout}${r.stderr}`);
     const combined = r.stdout + "\n" + r.stderr;
     // written before the abort.
-    for (const p of [".quay/config.yml", ".quay/profiles.yml", "tasks", ".gitignore"]) {
+    for (const p of [".quay/config.yml", ".quay/profiles.yml", "tasks", "goals", ".gitignore"]) {
       assert.match(combined, new RegExp(`written:\\s*${p.replace(/\./g, "\\.")}`),
         `the report must mark ${p} written`);
     }

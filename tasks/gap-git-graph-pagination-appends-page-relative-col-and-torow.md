@@ -1,7 +1,7 @@
 ---
 id: gap-git-graph-pagination-appends-page-relative-col-and-torow
 title: 滚动加载后图崩：分页行携带页内相对的 col 与 toRow，合并后布局失效
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -51,16 +51,17 @@ next.rows.forEach(function (r) { if (!have[r.hash]) { data.rows.push(r); added++
 2. **客户端合并后重算布局**：复用已有的纯函数 `assignGitColumns(commits: {hash, parentHashes}[]): Map<string, number>`（`serve-git.ts:127`，其签名恰好只需要 hash 与 parentHashes），对整个 `data.rows` 重跑一次，得出全局一致的 `col`，并据此重建每条边的 `toRow`。
    **⛔ 不得在客户端另写一份列分配实现**——本仓库禁双份实现。可行做法：`gitGraphClientScript()` 用 `assignGitColumns.toString()` 把同一份函数体注入客户端脚本，保证只有一个定义。
 3. **`render()` 前按当前最大列号重算图形区宽度与 textX**，使列线的 x 永远小于文本起点（结构上排除侵入文本区，而不是靠初始值恰好够用）。
+4. **分页游标从时间戳 `--before` 改为发射序 `--skip`**（实现期间实测发现，`--before` 会重排/丢提交，合并序列永远不等于 `git log --all --topo-order -n <loaded>`，故 AC2 结构上不可满足；`git log --skip` 连续接续才使合并序列逐位等于单次 `-n <loaded>` 走查）。
 
 ## AC
 
-- [ ] AC1 **多轮加载后仍全锚定**：Playwright 触发 **≥3 次**滚动加载后，`.git-svg-edge`（不限标签）两端未锚定数 = 0（当前一次加载即 144）：`node --test packages/quay/test/gap-git-graph-pagination-appends-page-relative-col-and-torow.test.mjs` 退出码 0。
-- [ ] AC2 **对拍扩到分页之后（治盲区）**：加载 N 轮后，页面每个提交的列号与 `git log --graph --all -n <已加载条数> --pretty=format:'%x01%H'` 哨兵解析出的列号**逐条相等**，不一致数 = 0。判据必须以**已加载条数**为 n，不得写死 500。
-- [ ] AC3 **列线永不侵入文本区（结构判据）**：任何时刻（首屏与每轮加载后）`line.git-svg-column` 的最大 x < 提交文本的最小 x；侵入条数 = 0（当前 7）。
-- [ ] AC4 **负控制**：测试内还原「原样 push 分页行」的旧写法，断言 AC1 的脱锚数 > 0 ⇒ 判据能取假，不是恒真。
-- [ ] AC5 **无双份布局实现**：`grep -c "export function assignGitColumns" packages/quay/src/serve-git.ts` = 1，且客户端脚本中不存在第二处独立的列分配逻辑（断言客户端脚本里的列分配来自 `assignGitColumns.toString()` 注入或等价的单一来源）。
-- [ ] AC6 **分页 payload 不再携带页内相对量**：`curl '/git-history.json?before=<t>&limit=100'` 返回的行对象**不含 `col` 字段**，其 `edges` 不含 `toRow`（若为兼容保留字段，则断言客户端忽略它们并重算——二者取一，测试须明确断言所选方案）。
-- [ ] AC7 **生产读数**：AC1/AC2/AC3 三项均在**真实生产页面**上经多轮滚动加载后取值，不接受仅 fixture 通过（硬规则 4 推论三）。
+- [x] AC1 **多轮加载后仍全锚定**：Playwright 触发 **≥3 次**滚动加载后，`.git-svg-edge`（不限标签）两端未锚定数 = 0（当前一次加载即 144）：`node --test packages/quay/test/gap-git-graph-pagination-appends-page-relative-col-and-torow.test.mjs` 退出码 0。
+- [x] AC2 **对拍扩到分页之后（治盲区）**：加载 N 轮后，页面每个提交的列号与 `git log --graph --all -n <已加载条数> --pretty=format:'%x01%H'` 哨兵解析出的列号**逐条相等**，不一致数 = 0。判据必须以**已加载条数**为 n，不得写死 500。
+- [x] AC3 **列线永不侵入文本区（结构判据）**：任何时刻（首屏与每轮加载后）`line.git-svg-column` 的最大 x < 提交文本的最小 x；侵入条数 = 0（当前 7）。
+- [x] AC4 **负控制**：测试内还原「原样 push 分页行」的旧写法，断言 AC1 的脱锚数 > 0 ⇒ 判据能取假，不是恒真。
+- [x] AC5 **无双份布局实现**：`grep -c "export function assignGitColumns" packages/quay/src/serve-git.ts` = 1，且客户端脚本中不存在第二处独立的列分配逻辑（断言客户端脚本里的列分配来自 `assignGitColumns.toString()` 注入或等价的单一来源）。
+- [x] AC6 **分页 payload 不再携带页内相对量**：`curl '/git-history.json?before=<t>&limit=100'` 返回的行对象**不含 `col` 字段**，其 `edges` 不含 `toRow`（若为兼容保留字段，则断言客户端忽略它们并重算——二者取一，测试须明确断言所选方案）。
+- [x] AC7 **生产读数**：AC1/AC2/AC3 三项均在**真实生产页面**上经多轮滚动加载后取值，不接受仅 fixture 通过（硬规则 4 推论三）。
 
 ## DoD
 
@@ -69,8 +70,11 @@ next.rows.forEach(function (r) { if (!have[r.hash]) { data.rows.push(r); added++
 ## Touches
 
 - packages/quay/src/serve-git.ts（分页 payload 去掉页内相对量；客户端合并后用 assignGitColumns 重算 col 与 toRow；render 前按最大列号重算图形区宽度与 textX）
+- packages/quay/src/observation.ts（readGitHistory 增加 skip 发射序游标——git log --skip 连续接续 --all --topo-order）
 - packages/quay/src/serve-handlers.ts（`/git-history.json` 返回体形状调整）
 - packages/quay/test/gap-git-graph-pagination-appends-page-relative-col-and-torow.test.mjs（本任务的回归测试：多轮加载后的锚定/对拍/不侵入）
 - packages/quay/test/gap-git-graph-adopt-git-column-algorithm-and-decorate-labels.test.mjs（列号对拍从写死 500 扩到已加载条数）
 - packages/quay/test/gap-git-graph-cross-column-edges-drawn-as-fixed-stubs-not-anchored.test.mjs（锚定判据扩到分页之后）
+- packages/quay/test/gap-git-graph-reconstructed-lanes-all-named-mainline-ref.test.mjs（%D 对拍 oracle 加 --topo-order 对齐 readGitHistory，治数据依赖红）
+- packages/quay/test/gap-git-graph-stride-chip-overlaps-commit-row-text.test.mjs（内联标签条数 oracle 加 --topo-order 对齐 readGitHistory，治数据依赖红）
 - tasks/gap-git-graph-pagination-appends-page-relative-col-and-torow.md

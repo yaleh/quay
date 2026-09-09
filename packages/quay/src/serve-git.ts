@@ -19,7 +19,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { readGitHistory, type GitHistoryCommit, type GitHistoryResult, GIT_HISTORY_LIMIT } from "./observation.ts";
+import { readGitHistory, readGitRemotes, type GitHistoryCommit, type GitHistoryResult, GIT_HISTORY_LIMIT } from "./observation.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2 } from "./serve-render.ts";
 
 // ── Graph-track geometry ────────────────────────────────────────────────────────────────────────────
@@ -27,14 +27,37 @@ import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMob
 
 /** x of column 0 — the left anchor of the graph track. */
 export const GIT_GRAPH_TRUNK_X = 40;
-/** x where ALL commit text starts — one fixed column to the right of the track. */
+/** Legacy seed for the commit-text x (the pre-pagination fixed column). The client now recomputes
+ *  textX dynamically from the rightmost column so the text always sits PAST the track
+ *  (gap-git-graph-pagination-appends-page-relative-col-and-torow); kept for the geometry doc + any
+ *  caller that still reads the seed. */
 export const GIT_GRAPH_TEXT_X = 220;
 /** Horizontal spacing between adjacent columns within the track. */
 export const GIT_GRAPH_LANE_GAP = 16;
 /** Vertical padding above the first row. */
 export const GIT_GRAPH_PAD_Y = 24;
-/** Fixed row height — one commit per band. */
-export const GIT_GRAPH_ROW_H = 24;
+/**
+ * Fixed row height — one commit per band. Bumped 24 → 26 when decorations became chip-sized
+ * (gap-git-graph-decoration-labels-as-colored-chips): a 16px chip + its padding needs more headroom
+ * than the old 11px plain-text baseline did, so adjacent rows' chips never crowd/overlap (AC6).
+ */
+export const GIT_GRAPH_ROW_H = 26;
+/** Decoration-chip geometry (gap-git-graph-decoration-labels-as-colored-chips) — interpolated into the
+ *  client renderer as plain numbers; a chip is a rounded `rect` behind an inline `text`, laid out
+ *  hash → chips → subject across one commit row. */
+export const GIT_GRAPH_CHIP_H = 16;
+export const GIT_GRAPH_CHIP_PAD_X = 5;
+export const GIT_GRAPH_CHIP_RX = 4;
+export const GIT_GRAPH_CHIP_GAP = 5;
+export const GIT_GRAPH_DECOR_FONT_SIZE = 10;
+/**
+ * Auto-load fuse (gap-git-graph-no-bounded-scroll-panel): the client scroll-loader auto-loads AT MOST
+ * this many rows beyond the initial window (via IntersectionObserver + the self-chain) before degrading
+ * the sentinel to a manual 「点击加载更早提交」 button. 2500 rows ≈ 5 pages × 500 — a small slice of the
+ * full repo (~19,520 commits) whose whole-DOM full-repaint cost is the long-term leak this caps; the
+ * rest loads one click at a time. Exported so the AC5 test can mock exactly the right number of pages.
+ */
+export const GIT_GRAPH_AUTO_LOAD_ROW_LIMIT = 2500;
 
 /**
  * Categorical column palette — eight distinct HUES (not shades of one), each dark enough to hold ≥3:1
@@ -205,17 +228,20 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
  *   1. `Merge branch 'develop' into task/<id>`   — the ff-carried dev-merge
  *   2. `tasks: 翻 <id> done（driver 机械 fan-in）`  — the fan-in landing
  *   3. `tasks: <id> task_write` / `tasks: <id> todo→ready（promotion-driver）` / `tasks: reset <id> done→ready`
- *   4. `<id>: <实现说明>`                          — an implementation commit, the id before the colon
- *   5. `<type>: <id> <说明>`                       — a conventional-commit type, then the id (e.g.
- *      `test: gap-… 独立闭合确认` / `fix: gap-… — …`); the id's first segment must be a KNOWN task-id
- *      prefix so a generic slug (`chore: re-anchor …`) is never mistaken for one (AC6 reconciliation)
+ *   4. `<id>: <实现说明>`                          — an implementation commit, the id before the colon; its
+ *      first segment must be a KNOWN task-id prefix (same guard as Forms 5/6)
+ *   5. `<type|scope>: <id> <说明>`                 — a conventional-commit type OR a worker scope prefix
+ *      (e.g. `test: gap-… 独立闭合确认` / `fix: gap-… — …` / `webui: gap-… 实现（…）`); the id's first
+ *      segment must be a KNOWN task-id prefix so a generic slug (`chore: re-anchor …`) is never
+ *      mistaken for one (AC6 reconciliation)
  *
  * Unrecognised subjects (e.g. `chore: re-anchor …`) return `null`, never a guess (fail-visible —
- * 硬规则 3b). Form 4 distinguishes a task id from a conventional-commit type (`chore:`/`fix:`/…) by
- * requiring at least one `-` in the prefix: task ids in this repo are multi-segment slugs
- * (`gap-…`, `DIR-…`, `exp-…`), whereas a conventional type is a single bare token. This is a
- * project-specific heuristic over driver commit-text conventions, not git semantics — when the
- * convention changes the task view degrades, while the git view is unaffected (硬规则 4b).
+ * 硬规则 3b). Forms 4–6 all gate the id's first segment on a KNOWN task-id prefix (this repo's task
+ * slugs — `gap-…`, `DIR-…`, `exp5-…`, …), so a conventional type (`chore:`) or a component/page name
+ * (`git-history: …` / `fix: git-history 分页页 …`) is never mistaken for a task id (AC1/AC6
+ * reconciliation). This is a project-specific heuristic over driver commit-text conventions, not git
+ * semantics — when the convention changes the task view degrades, while the git view is unaffected
+ * (硬规则 4b).
  */
 export function taskIdFromSubject(subject: string): string | null {
   const s = String(subject).trim();
@@ -233,15 +259,19 @@ export function taskIdFromSubject(subject: string): string | null {
     return null;
   }
 
-  // Form 4 — `<id>: <说明>`, the id a multi-segment slug (≥ one `-`).
-  const impl = s.match(/^([A-Za-z0-9][A-Za-z0-9_-]*-[A-Za-z0-9_-]+):\s/);
+  // Form 4 — `<id>: <说明>`, the id a multi-segment slug whose FIRST segment must be a KNOWN task-id
+  // prefix (same guard as Forms 5/6), so a component/page name (`git-history: …`) is never mistaken
+  // for a task id — it falls through to Form 6 and extracts the trailing-parens id instead.
+  const impl = s.match(/^((?:gap|DIR|exp5|QN|QX|QC|QW|QENG|ARCH|cand|SU|PROBE|TEST)-[A-Za-z0-9][A-Za-z0-9_-]*):\s/);
   if (impl) return impl[1];
 
-  // Form 5 — `<type>: <id> <说明>`: a conventional-commit type prefix, then a task id. The id's first
-  // segment must be a KNOWN task-id prefix, so a generic verb slug after the type (`chore: re-anchor
-  // quay-init-closure-ratchet baseline`) or a page/file name (`fix: git-history 分页页 …`) is never
-  // mistaken for a task id (AC1) — fail-visible, not a guess.
-  const typed = s.match(/^(?:test|fix|feat|chore|docs|refactor|perf|style|verification):\s+((?:gap|DIR|exp5|QN|QX|QC|QW|QENG|ARCH|cand|SU|PROBE|TEST)-[A-Za-z0-9][A-Za-z0-9_-]*)/);
+  // Form 5 — `<type|scope>: <id> <说明>`: a conventional-commit type OR a worker scope prefix (this
+  // repo's agents emit `webui:`/`inner:`/`archive:` etc. before the id), then a task id. The id's
+  // first segment must be a KNOWN task-id prefix, so a generic verb slug after the type (`chore:
+  // re-anchor quay-init-closure-ratchet baseline`) or a page/file name (`fix: git-history 分页页 …`)
+  // is never mistaken for a task id (AC1) — the guard lives on the ID, not on an ever-drifting closed
+  // type list (a one-off `webui:` commit would otherwise strand its task id in AC6 reconciliation).
+  const typed = s.match(/^[A-Za-z0-9][A-Za-z0-9_-]*:\s+((?:gap|DIR|exp5|QN|QX|QC|QW|QENG|ARCH|cand|SU|PROBE|TEST)-[A-Za-z0-9][A-Za-z0-9_-]*)/);
   if (typed) return typed[1];
 
   // Form 6 — trailing-parens id: `<说明> (gap-…)` (e.g. `dashboard: 顶部行改 … (gap-dashboard-top-row-
@@ -391,23 +421,92 @@ export function gitGraphClientScript(): string {
   return `(function () {
   var mount = document.getElementById("git-graph");
   var dataEl = document.getElementById("git-graph-data");
+  var scrollEl = document.getElementById("git-graph-scroll");
   if (!mount || !dataEl || typeof d3 === "undefined") { return; }
   var data;
   try { data = JSON.parse(dataEl.textContent); } catch (e) { return; }
   if (!data || !data.rows || !data.rows.length) { return; }
 
-  var rowH = ${GIT_GRAPH_ROW_H}, trunkX = ${GIT_GRAPH_TRUNK_X}, textX = ${GIT_GRAPH_TEXT_X}, laneGap = ${GIT_GRAPH_LANE_GAP}, nodeR = 3.5, mergeR = 5, padY = ${GIT_GRAPH_PAD_Y};
+  var rowH = ${GIT_GRAPH_ROW_H}, trunkX = ${GIT_GRAPH_TRUNK_X}, laneGap = ${GIT_GRAPH_LANE_GAP}, nodeR = 3.5, mergeR = 5, padY = ${GIT_GRAPH_PAD_Y};
+  var chipH = ${GIT_GRAPH_CHIP_H}, chipPadX = ${GIT_GRAPH_CHIP_PAD_X}, chipRx = ${GIT_GRAPH_CHIP_RX}, chipGap = ${GIT_GRAPH_CHIP_GAP}, decorFontSize = ${GIT_GRAPH_DECOR_FONT_SIZE};
   var lanePalette = ${JSON.stringify(GIT_GRAPH_LANE_PALETTE.map((_, i) => `var(--color-lane-${i})`))};
+  // Remote names from the server payload ("git remote") — the ONLY authority for "is this a
+  // remote-tracking ref". A local branch that merely contains a slash (fix/..., task/...) must NOT be
+  // misread as remote (gap-git-graph-decoration-labels-as-colored-chips).
+  var remotes = (data.remotes && data.remotes.length) ? data.remotes : [];
+
+  // Single-source column allocation (gap-git-graph-pagination-appends-page-relative-col-and-torow):
+  // assignGitColumns is injected VERBATIM from the server module (assignGitColumns.toString()) so the
+  // client's column assignment IS the exact function the adopt test cross-checks against git log --graph
+  // — there is no second, independent column-allocation implementation in this script.
+  var assignGitColumns = ${assignGitColumns.toString()};
 
   function y(row) { return padY + row * rowH; }
   function laneColor(col) { return lanePalette[col % lanePalette.length]; }
 
-  // A rounded-orthogonal edge: horizontal out of the child node toward the parent's column, a rounded
-  // quarter-turn down (radius min(6, laneGap/2)), then a straight vertical drop to the parent's row.
-  // Cross-column edges always satisfy |toX - fromX| >= laneGap, so the corner radius never exceeds the
-  // horizontal run. Only H/V/Q commands — no L, no diagonal (AC8).
-  function edgePath(fromX, fromY, toX, toY) {
+  // A remote-tracking ref starts with "<remoteName>/" for one of the repo's remotes (the authoritative
+  // list, not a string-shape guess).
+  function isRemoteRef(dec) {
+    for (var i = 0; i < remotes.length; i++) {
+      if (remotes[i] && dec.slice(0, remotes[i].length + 1) === remotes[i] + "/") { return true; }
+    }
+    return false;
+  }
+
+  // Split one %D decoration into the chips to render: "HEAD -> X" becomes ["HEAD", "X"] (HEAD rendered
+  // as its own highlighted chip, X as a normal/ghost chip), anything else (a branch name, "tag: v1.2",
+  // a bare detached "HEAD") is a single chip. Mirrors primaryRefFromDecorations' HEAD split. NOTE the
+  // doubled backslashes: this regex literal lives inside a template literal, so \\s is what survives to
+  // the emitted client JS as \s (a bare \s would be eaten by string-escape processing).
+  function decorationChips(dec) {
+    var m = /^HEAD\\s*->\\s*(.+)$/.exec(dec);
+    if (m) { return ["HEAD", m[1]]; }
+    return [dec];
+  }
+
+  // Recompute the layout quantities (col + edges) over the WHOLE merged row array. Each pagination page
+  // arrives page-relative (or, after the fix, with no col/toRow at all); the only correct assignment is
+  // GLOBAL — over every loaded row. Edges' toCol/toRow/outsideWindow are rebuilt from parentHashes too,
+  // so an edge whose parent sits in a later-loaded page anchors to that parent's real row (no dangling).
+  function recomputeLayout() {
+    var cols = assignGitColumns(data.rows);
+    var rowIndex = {};
+    data.rows.forEach(function (r, i) { rowIndex[r.hash] = i; });
+    data.rows.forEach(function (r) {
+      var colC = cols.get(r.hash);
+      r.col = colC;
+      var edges = [];
+      r.parentHashes.forEach(function (p, pi) {
+        var colP = cols.get(p);
+        if (colP === undefined) {
+          edges.push({ fromCol: colC, toCol: colC, kind: pi === 0 ? "parent" : "merge", toRow: -1, outsideWindow: true });
+        } else {
+          edges.push({ fromCol: colC, toCol: colP, kind: pi === 0 ? "parent" : "merge", toRow: rowIndex[p], outsideWindow: false });
+        }
+      });
+      r.edges = edges;
+    });
+  }
+
+  // A rounded-orthogonal edge, two shapes by the edge's kind (gap-git-graph-edge-fold-bends-at-child-
+  // for-first-parent-edges):
+  //   · merge (bendAtParent=false) — horizontal out of the child node toward the parent's column, a
+  //     rounded quarter-turn DOWN at the CHILD's row, then a vertical drop to the parent's row. The
+  //     parent column does not exist above toRow, so the corner belongs at the child end.
+  //   · parent (bendAtParent=true) — this branch's own lineage folds back into a column that keeps
+  //     running downward: vertical out of the child's node down to the PARENT's row, then a rounded
+  //     quarter-turn horizontally into the parent's column. The corner belongs at the PARENT end.
+  // Both use only M/H/V/Q (no L), radius min(6, laneGap/2) > 0. Cross-column edges always satisfy
+  // |toX - fromX| >= laneGap, so the corner radius never exceeds the horizontal run (AC8).
+  function edgePath(fromX, fromY, toX, toY, bendAtParent) {
     var r = Math.min(6, laneGap / 2);
+    if (bendAtParent) {
+      var hs = toX >= fromX ? r : -r;
+      return "M " + fromX + "," + fromY +
+        " V " + (toY - r) +
+        " Q " + fromX + "," + toY + " " + (fromX + hs) + "," + toY +
+        " H " + toX;
+    }
     var sign = toX >= fromX ? 1 : -1;
     return "M " + fromX + "," + fromY +
       " H " + (toX - sign * r) +
@@ -417,6 +516,12 @@ export function gitGraphClientScript(): string {
 
   function render() {
     var rows = data.rows;
+    // textX follows the rightmost column: the text starts one laneGap PAST the highest column, so every
+    // column line's x is strictly < the text's x — structurally the lines can never intrude the commit
+    // text (AC3), even as the column count grows past the initial window (the page-relative col bug).
+    var maxCol = 0;
+    rows.forEach(function (r) { if (r.col > maxCol) { maxCol = r.col; } });
+    var textX = trunkX + (maxCol + 1) * laneGap;
     var svg = d3.select(mount).select("svg");
     if (svg.empty()) {
       svg = d3.select(mount).append("svg").attr("class", "git-svg-surface").attr("role", "img")
@@ -448,6 +553,9 @@ export function gitGraphClientScript(): string {
     // itself. The path ENDS at the PARENT's node (the edge's toRow), never a fixed stub — so a merge's two
     // connectors both reach their parent commits' nodes. A parent OUTSIDE the window is a dashed stub
     // from the commit's node down to the bottom boundary (a VISIBLE "there is more below", 硬规则 3b).
+    // The fold corner is kind-directed: a merge (second+ parent) bends at the CHILD's row, a first-parent
+    // lineage fold (kind === "parent") bends at the PARENT's row (gap-git-graph-edge-fold-bends-at-child-
+    // for-first-parent-edges).
     rows.forEach(function (r, i) {
       r.edges.forEach(function (e) {
         if (e.outsideWindow) {
@@ -460,12 +568,13 @@ export function gitGraphClientScript(): string {
         }
         if (e.fromCol === e.toCol) { return; }
         g.append("path").attr("class", "git-svg-edge")
-          .attr("d", edgePath(trunkX + e.fromCol * laneGap, y(i), trunkX + e.toCol * laneGap, y(e.toRow)))
+          .attr("d", edgePath(trunkX + e.fromCol * laneGap, y(i), trunkX + e.toCol * laneGap, y(e.toRow), e.kind === "parent"))
           .attr("fill", "none").attr("stroke", laneColor(e.fromCol)).attr("stroke-width", 1.6);
       });
     });
 
-    // nodes + inline text
+    // nodes + inline text (hash → decoration chips → subject; gap-git-graph-decoration-labels-as-
+    // colored-chips: each %D entry is its own rounded chip, not part of one concatenated string)
     rows.forEach(function (r, i) {
       var cx = trunkX + r.col * laneGap;
       var cy = y(i);
@@ -483,12 +592,53 @@ export function gitGraphClientScript(): string {
       }
       node.append("title").text(r.hash + " · " + r.subject);
 
-      var label = r.hash.slice(0, 7);
-      if (r.decorations && r.decorations.length) { label += " (" + r.decorations.join(", ") + ")"; }
-      label += " " + r.subject;
-      g.append("text").attr("class", "git-svg-ink")
-        .attr("x", textX).attr("y", cy + 4).attr("font-size", 11)
-        .text(label);
+      // The inline label is laid out left→right: hash text, then one chip per decoration entry, then
+      // the subject. Each text width is measured with getBBox().width (the same measure technique the
+      // viewBox re-measure below uses), so chips hug their ref name and the subject starts clear of
+      // the last chip by chipGap.
+      var cursorX = textX;
+      var hashTxt = g.append("text").attr("class", "git-svg-ink")
+        .attr("x", cursorX).attr("y", cy + 4).attr("font-size", 11)
+        .text(r.hash.slice(0, 7));
+      cursorX += hashTxt.node().getBBox().width + chipGap;
+
+      if (r.decorations && r.decorations.length) {
+        r.decorations.forEach(function (dec) {
+          decorationChips(dec).forEach(function (c) {
+            var isHead = c === "HEAD";
+            var ghost = isRemoteRef(c);
+            var cls = "git-svg-decor-chip";
+            if (isHead) { cls += " git-svg-decor-chip--head"; }
+            if (ghost) { cls += " git-svg-decor-chip--ghost"; }
+            var chip = g.append("g").attr("class", cls);
+            // rect FIRST so the text paints on top; its x/width are filled after the text is measured.
+            var bg = chip.append("rect").attr("class", "git-svg-decor-chip-bg")
+              .attr("y", cy - chipH / 2).attr("height", chipH).attr("rx", chipRx)
+              .style("fill", laneColor(r.col));
+            if (isHead) {
+              // HEAD highlight = a light keyline around the solid lane-colour chip (token-derived, so
+              // AC102②'s "no hardcoded hex in the renderer" holds — --color-bg is the light canvas token).
+              bg.style("stroke", "var(--color-bg)").style("stroke-width", 1.5);
+            } else if (ghost) {
+              // ghost = outline + translucent fill (the ref name reads on the light canvas); the fill
+              // token is STILL the row's lane colour so AC3's "every chip bg = laneColor" holds.
+              bg.style("fill-opacity", 0.22).style("stroke", laneColor(r.col)).style("stroke-width", 1);
+            }
+            var txt = chip.append("text").attr("class", "git-svg-decor-chip-text")
+              .attr("font-size", decorFontSize).text(c)
+              .style("fill", ghost ? laneColor(r.col) : "var(--color-bg)");
+            var tw = txt.node().getBBox().width;
+            var w = tw + chipPadX * 2;
+            bg.attr("x", cursorX).attr("width", w);
+            txt.attr("x", cursorX + chipPadX).attr("y", cy + 4);
+            cursorX += w + chipGap;
+          });
+        });
+      }
+
+      g.append("text").attr("class", "git-svg-ink git-svg-subject")
+        .attr("x", cursorX).attr("y", cy + 4).attr("font-size", 11)
+        .text(r.subject);
     });
 
     // re-measure the real text and widen the viewBox to its true right edge (no clipped subject)
@@ -504,11 +654,46 @@ export function gitGraphClientScript(): string {
     }
   }
 
+  // ── scroll container sizing ────────────────────────────────────────────────────────────────
+  // The header height is NOT constant (statusNote present/absent, line-wrap at different viewport
+  // widths), so the panel's max-height is computed at runtime and re-computed on resize — never a
+  // hardcoded CSS value (gap-git-graph-no-bounded-scroll-panel Plan step 3).
+  function layoutScrollHeight() {
+    if (!scrollEl) { return; }
+    var top = scrollEl.getBoundingClientRect().top;
+    var h = window.innerHeight - top - 24; // 24px breathing room above the page bottom
+    if (h < 160) { h = 160; } // floor: very short / mobile viewports still get a usable panel
+    scrollEl.style.maxHeight = h + "px";
+  }
+
   // ── scroll loader: append OLDER commits below the current rows (newest-first axis) ──
   var sentinel = document.getElementById("git-graph-sentinel");
   var coverageEl = document.getElementById("git-graph-coverage");
   var loadingOlder = false;
   var olderDone = false;
+  var autoLoadBudget = ${GIT_GRAPH_AUTO_LOAD_ROW_LIMIT};
+  var autoLoadedRows = 0;
+  var fuseTripped = false;
+  var autoObserver = null;
+
+  // Degrade the sentinel from an auto-load target to a manual 「加载更早提交」 button once the
+  // auto-load fuse trips (or IntersectionObserver is unavailable). Clicking keeps loading until
+  // finishOlder() — the manual path is deliberately NOT counted against the fuse.
+  function tripFuse() {
+    if (fuseTripped) { return; }
+    fuseTripped = true;
+    if (autoObserver) { autoObserver.disconnect(); autoObserver = null; }
+    if (sentinel) {
+      sentinel.textContent = "点击加载更早提交";
+      sentinel.style.cursor = "pointer";
+      sentinel.addEventListener("click", loadOlder);
+    }
+  }
+
+  if (scrollEl) {
+    layoutScrollHeight();
+    if (typeof window.addEventListener === "function") { window.addEventListener("resize", layoutScrollHeight); }
+  }
 
   function coverageSpan() {
     var min = null, max = null;
@@ -540,7 +725,9 @@ export function gitGraphClientScript(): string {
     data.rows.forEach(function (r) { if (wm === null || r.t < wm) { wm = r.t; } });
     if (wm === null) { finishOlder(); return; }
     loadingOlder = true;
-    fetch("/git-history.json?before=" + wm + "&limit=500")
+    // skip is the authoritative emission-order cursor (git log --skip); before is the timestamp
+    // watermark the self-chain cursor still walks back through (kept in the URL for cursor observability).
+    fetch("/git-history.json?before=" + wm + "&limit=500&skip=" + data.rows.length)
       .then(function (res) {
         if (!res.ok) { finishOlder(); return; }
         return res.json().then(function (next) {
@@ -550,32 +737,45 @@ export function gitGraphClientScript(): string {
           var added = 0;
           next.rows.forEach(function (r) { if (!have[r.hash]) { data.rows.push(r); added++; } });
           if (added === 0) { finishOlder(); return; }
+          recomputeLayout();
           updateCoverage();
           render();
           // Reset BEFORE chaining: the self-chain call below must see loadingOlder === false, or the
           // chain dead-stops after one page (gap-git-graph-scroll-loader-self-chain-blocked-by-loadingolder-flag).
           loadingOlder = false;
-          if (sentinel && sentinel.getBoundingClientRect().top < window.innerHeight + 600) { loadOlder(); }
+          if (!fuseTripped) {
+            autoLoadedRows += added;
+            if (autoLoadedRows >= autoLoadBudget) { tripFuse(); }
+          }
+          if (!fuseTripped && sentinel && sentinel.getBoundingClientRect().top < window.innerHeight + 600) { loadOlder(); }
         });
       })
       .catch(function () { finishOlder(); });
   }
   if (sentinel) {
     if (typeof IntersectionObserver !== "undefined") {
-      var io = new IntersectionObserver(function (entries) {
-        for (var i = 0; i < entries.length; i++) { if (entries[i].isIntersecting) { loadOlder(); } }
-      }, { rootMargin: "600px 0px" });
-      io.observe(sentinel);
+      // root is the scroll CONTAINER, not the default viewport — "should we load more" must judge the
+      // container's own bottom, not whether the whole document reached its bottom (gap-git-graph-no-
+      // bounded-scroll-panel; the container now owns the vertical scroll the page used to carry).
+      autoObserver = new IntersectionObserver(function (entries) {
+        for (var i = 0; i < entries.length; i++) { if (!fuseTripped && entries[i].isIntersecting) { loadOlder(); } }
+      }, { root: scrollEl, rootMargin: "600px 0px" });
+      autoObserver.observe(sentinel);
     } else {
-      sentinel.addEventListener("click", loadOlder);
+      tripFuse();
     }
   }
 
+  recomputeLayout();
   render();
 })();`;
 }
 
-/** Mini-legend rendered in the graph corner (● commit / ◆ merge) — how to read the graph key. */
+/** Mini-legend rendered in the graph corner (● commit / ◆ merge) — how to read the graph key.
+ *  A full-width, OPAQUE bar sticky to the container's top (and left, for horizontal scroll): once the
+ *  scroll container produces real vertical overflow (gap-git-graph-no-bounded-scroll-panel) the bar
+ *  sticks at the top and the commit rows scroll cleanly under it — no narrow floating pill occluding
+ *  the first visible row. The opaque `--color-surface` background adapts to dark mode via the CSS var. */
 export function gitGraphLegendHtml(): string {
   const glyph = (colorVar: string, ch: string, label: string) =>
     `<span><span style="color:${colorVar}">${ch}</span> ${label}</span>`;
@@ -584,7 +784,7 @@ export function gitGraphLegendHtml(): string {
     glyph("var(--color-accent-2-500)", "◆", "merge"),
     glyph("var(--color-neutral-700)", "╰", "父提交连线（圆角正交）"),
   ];
-  return `<div style="position:sticky;left:0;top:0;z-index:2;display:inline-flex;gap:0.75rem;align-items:center;background:var(--color-surface);padding:0.25rem 0.6rem;border:1px solid var(--color-neutral-200);border-radius:6px;font-size:0.72rem;color:var(--color-neutral-700)">${parts.join("")}</div>`;
+  return `<div style="position:sticky;left:0;top:0;z-index:2;display:flex;gap:0.75rem;align-items:center;background:var(--color-surface);padding:0.35rem 0.6rem;border-bottom:1px solid var(--color-neutral-200);font-size:0.72rem;color:var(--color-neutral-700)">${parts.join("")}</div>`;
 }
 
 /**
@@ -594,8 +794,9 @@ export function gitGraphLegendHtml(): string {
  * text (44/500 rows at 1440px) and horizontal-scrolling the graph scrolls the column context away.
  * This is a PAGE-scoped override — the `#main` id selector (1,0,0) beats the bare `main` type selector
  * (0,0,1), and the style is emitted ONLY on this page's HTML — so the global 900px is untouched (AC7).
- * 1400px yields ~1368px content width at a 1440px viewport (≥ the measured SVG); `#git-graph`'s own
- * `overflow-x:auto` keeps narrower viewports scrollable rather than clipped.
+ * 1400px yields ~1368px content width at a 1440px viewport (≥ the measured SVG); `#git-graph-scroll`'s
+ * own `overflow-x:auto` keeps narrower viewports scrollable rather than clipped (gap-git-graph-no-
+ * bounded-scroll-panel moved the x/y overflow onto the new scroll container).
  */
 export function gitHistoryPageStyle(): string {
   return html`<style>#main { max-width: 1400px; }</style>`;
@@ -647,8 +848,11 @@ function renderTaskGroupsHtml(history: GitHistoryResult): string {
  * `view` selects the grouping: `"git"` (default — the git DAG topology) or `"task"` (gap-git-graph-
  * task-view-aggregate-commits-by-task-id). The default is byte-identical to `?view=git` (AC5).
  * Exported so the ACs can test the rendered HTML directly on a pure GitHistoryResult.
+ * `remotes` (the workspace's `git remote` names) ride along in the embedded `#git-graph-data` payload so
+ * the client can tell a remote-tracking ref from a slash-containing LOCAL branch (gap-git-graph-
+ * decoration-labels-as-colored-chips AC1); defaults to [] for pure-history callers.
  */
-export function renderGitHistoryPage(history: GitHistoryResult, view: GitGraphView = "git"): string {
+export function renderGitHistoryPage(history: GitHistoryResult, view: GitGraphView = "git", remotes: string[] = []): string {
   if (view === "task") {
     const statusNote = history.status === "error"
       ? html`<p class="meta"><strong>读失败</strong> — ${escapeHtml(history.reason || "")}</p>`
@@ -683,15 +887,17 @@ export function renderGitHistoryPage(history: GitHistoryResult, view: GitGraphVi
   const coverageSpan = layout ? coverageSpanSeconds(layout) : null;
   const coverageText = coverageSpan !== null ? formatCoverageSpan(coverageSpan) : "—";
 
+  // The scroll container owns BOTH horizontal and vertical overflow (Plan step 6 — one container, not
+  // nested x/y scroll layers). `#git-graph` loses its own overflow-x:auto; the sentinel moves INSIDE the
+  // container so the IntersectionObserver can target it against the container's own scrollport (AC2).
+  // max-height is a calc() FALLBACK so the page is usable before JS runs — the client script overwrites
+  // it with a precise px value computed from the header's actual height on load + resize (Plan step 3).
   const graph = layout
-    ? html`<div id="git-graph" aria-label="Git 纵向时间轴" style="overflow-x:auto">${gitGraphLegendHtml()}</div>`
-    : "";
-  const sentinel = layout
-    ? html`<div id="git-graph-sentinel" class="meta" style="padding:0.6rem 0;color:var(--color-neutral-700);font-size:0.75rem">加载更早提交…</div>`
+    ? html`<div id="git-graph-scroll" aria-label="Git 纵向时间轴（可滚动）" style="overflow-x:auto;overflow-y:auto;max-height:calc(100vh - 240px)"><div id="git-graph" aria-label="Git 纵向时间轴">${gitGraphLegendHtml()}</div><div id="git-graph-sentinel" class="meta" style="padding:0.6rem 0;color:var(--color-neutral-700);font-size:0.75rem">加载更早提交…</div></div>`
     : "";
   // The data JSON is embedded with `<` escaped to \u003c so a commit subject can never break out of
   // the <script> element. d3 + the client renderer are emitted only when there is a graph to draw.
-  const graphData = layout ? { ...layout } : null;
+  const graphData = layout ? { ...layout, remotes } : null;
   const dataScript = graphData ? html`<script type="application/json" id="git-graph-data">${JSON.stringify(graphData).replace(/</g, "\\u003c")}</script>` : "";
   const libScript = layout ? html`<script>${gitGraphLibJs()}</script>` : "";
   const clientScript = layout ? html`<script>${gitGraphClientScript()}</script>` : "";
@@ -704,10 +910,9 @@ export function renderGitHistoryPage(history: GitHistoryResult, view: GitGraphVi
     <body>${renderMobileChrome("git", "git history")}${renderSiteNav("git")}<main id="main">
       <h1>Git History — 提交纵向时间轴</h1>
       ${gitHistoryViewToggle(view)}
-      <p class="meta"><strong>纵轴 = git 发射顺序（新的在上）。</strong> 每行一个提交；分支标签只在 ref 指向的那个提交上内联显示（git decorate 语义）。菱形 = 合并提交。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并（跨所有本地分支）；已加载窗口覆盖 <span id="git-graph-coverage">${escapeHtml(coverageText)}</span>。滚动到图表底部自动加载更早的提交。</p>
+      <p class="meta"><strong>纵轴 = git 发射顺序（新的在上）。</strong> 每行一个提交；分支标签只在 ref 指向的那个提交上内联显示（git decorate 语义）。菱形 = 合并提交。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并（跨所有本地分支）；已加载窗口覆盖 <span id="git-graph-coverage">${escapeHtml(coverageText)}</span>。在图表容器内滚动到底部自动加载更早的提交（加载较多后改为点击加载）。</p>
       ${statusNote}
       ${graph}
-      ${sentinel}
       ${dataScript}
       ${libScript}
       ${clientScript}
@@ -726,8 +931,9 @@ export async function handleGitHistory(
   } catch (err) {
     history = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, commits: [], head: null, heads: {}, mainlineHead: null };
   }
+  const remotes = readGitRemotes(cfg.workspaceRoot);
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderGitHistoryPage(history, gitHistoryViewOf(url)));
+  res.end(renderGitHistoryPage(history, gitHistoryViewOf(url), remotes));
 }
 
 function writeJson(res: ServerResponse, status: number, obj: unknown): void {
@@ -735,17 +941,48 @@ function writeJson(res: ServerResponse, status: number, obj: unknown): void {
   res.end(JSON.stringify(obj));
 }
 
-/** The JSON payload /git-history.json returns — a COMPLETE GitGraphLayout (the client re-renders it
- *  whole, appending OLDER rows on scroll) plus the window's oldest/newest commit times. The task view
- *  (`view="task"`) returns the task grouping instead: `groups` + the explicit `unattributedCount`
- *  (AC4) — the git view's payload is unchanged and carries neither field. */
+/**
+ * One RAW commit row — the /git-history.json pagination payload carries ONLY the raw commit data
+ * (hash / t / subject / parents / parentHashes / decorations). The page-relative layout quantities
+ * (`col`, `edges[].toRow`) are ABSENT here: a page computes them against its own row array, so
+ * appending pages raw and re-laying-out client-side (gap-git-graph-pagination-appends-page-relative-
+ * col-and-torow) is what keeps the graph correct once the window grows past the first page.
+ */
+export interface GitGraphRawRow {
+  hash: string;
+  t: number;
+  subject: string;
+  parents: number;
+  parentHashes: string[];
+  decorations: string[];
+}
+
+/** Strip the layout quantities off a history — the raw commit rows the pagination endpoint returns. */
+export function gitGraphRawRows(history: GitHistoryResult): GitGraphRawRow[] {
+  if (history.status !== "ok") return [];
+  return history.commits.map((c) => ({
+    hash: c.hash,
+    t: c.t,
+    subject: c.subject,
+    parents: c.parents,
+    parentHashes: c.parentHashes,
+    decorations: c.decorations,
+  }));
+}
+
+/** The JSON payload /git-history.json returns — RAW commit rows (the client re-renders them whole and
+ *  recomputes the layout over the merged full sequence, appending OLDER rows on scroll) plus the
+ *  window's oldest/newest commit times. The task view (`view="task"`) returns the task grouping
+ *  instead: `groups` + the explicit `unattributedCount` (AC4) — the git view's payload carries neither
+ *  field. gap-git-graph-pagination-appends-page-relative-col-and-torow: the git-view rows no longer
+ *  carry `col` / `edges[].toRow` (page-relative layout quantities). */
 export function gitHistoryJson(history: GitHistoryResult, view: GitGraphView = "git"): {
   status: GitHistoryResult["status"];
   reason: string | null;
   commitCount: number;
   oldestT: number | null;
   newestT: number | null;
-  rows: GitGraphRow[];
+  rows: GitGraphRawRow[];
   mergeCount: number;
   groups?: TaskGraphGroup[];
   unattributedCount?: number;
@@ -786,14 +1023,20 @@ export function gitHistoryJson(history: GitHistoryResult, view: GitGraphView = "
     commitCount: layout.commitCount,
     oldestT,
     newestT,
-    rows: layout.rows,
+    // Raw commits only — no col / edges[].toRow. The client recomputes the layout over the merged
+    // full sequence (gap-git-graph-pagination-appends-page-relative-col-and-torow).
+    rows: gitGraphRawRows(history),
     mergeCount: layout.mergeCount,
   };
 }
 
-/** GET /git-history.json?before=<unixSeconds>&limit=<n> — the on-demand pagination endpoint the
- *  client's scroll loader calls. `before` = the cursor (returns commits STRICTLY older than it); the
- *  client appends the returned older rows below the current ones and re-renders. */
+/** GET /git-history.json?skip=<n>&limit=<m>[&before=<unixSeconds>] — the on-demand pagination endpoint
+ *  the client's scroll loader calls. `skip` = the emission-order cursor (`git log --skip` — the page
+ *  that continues `--all --topo-order` contiguously, so the client's merged full sequence is exactly
+ *  `git log --all --topo-order -n <loaded>` and its recomputed columns match `git log --graph --all`);
+ *  `before` is retained as a backward-compat timestamp watermark (the self-chain cursor still walks
+ *  back through time), ignored when `skip` is present. The client appends the returned raw rows below
+ *  the current ones and re-renders. */
 export async function handleGitHistoryJson(
   req: IncomingMessage,
   res: ServerResponse,
@@ -802,11 +1045,13 @@ export async function handleGitHistoryJson(
 ): Promise<void> {
   const limitRaw = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
   const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, GIT_HISTORY_LIMIT * 10) : GIT_HISTORY_LIMIT;
+  const skipRaw = Number.parseInt(url.searchParams.get("skip") ?? "", 10);
+  const skip = Number.isFinite(skipRaw) && skipRaw > 0 ? skipRaw : null;
   const beforeRaw = Number.parseInt(url.searchParams.get("before") ?? "", 10);
   const before = Number.isFinite(beforeRaw) && beforeRaw > 0 ? beforeRaw : null;
   let history: GitHistoryResult;
   try {
-    history = readGitHistory(cfg.workspaceRoot, { limit, before });
+    history = readGitHistory(cfg.workspaceRoot, { limit, before, skip });
   } catch (err) {
     history = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, commits: [], head: null, heads: {}, mainlineHead: null };
   }

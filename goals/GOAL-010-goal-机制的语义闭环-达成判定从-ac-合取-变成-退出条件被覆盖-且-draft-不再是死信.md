@@ -1,7 +1,7 @@
 ---
 id: GOAL-010
 title: goal 机制的语义闭环 —— 达成判定从「AC 合取」变成「退出条件被覆盖」，且 draft 不再是死信
-status: active
+status: achieved
 kind: goal
 origin: >-
   人 2026-09-09 三条裁定：①晋升应当是语义的；放弃（retire）不交给 goal-driver——它若期望退役某条 AC，应置为
@@ -31,6 +31,12 @@ origin: >-
 
   【重启 2026-09-09】人授权按对照实验 B 形态重启：先激活 6 条 draft（AC-210/211/212/213/215/216）再翻本
   GOAL 回 active，使 flip 那一刻在域集合已含 6 条红 AC。事故经过与结构根因见 AC-212 的 origin。
+statusLog:
+  - at: 2026-09-09T17:41:39.138Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 ---
 
 ## 背景
@@ -81,13 +87,16 @@ GOAL 的达成判定至今是**纯语法的合取**：`goal-driver.ts:283-288` �
 ## 退出条件
 
 散文版：
-1. 一条 draft AC 在 active GOAL 名下**不会无限期无人过问**——每条都会被分诊出一个判决并留痕。
+1. 一条 draft AC 在 active GOAL 名下**不会无限期无人过问**——每条都会被分诊出一个判决并留痕，
+   **且 `activate` 这一判决被 driver 实际执行**（draft→active 真的发生），而不是只写进读数里无人消费。
+   ⛔ `retire` 不在此列，仍归人（见非目标与裁定 1）。
 2. GOAL **不会在退出条件未被覆盖时自行关闭**；覆盖与否判不出时，取「未评估」而非放行。
 3. 要人裁定的 AC 有一个**会挡住 GOAL 关闭**的承接态，而不是又一个惰性的 draft。
 4. driver 永远不自行放弃一条 AC——它只能建议（置 `needs-human` 并说明理由）。
 5. 每条非 superseded/retired 的 GOAL 的业务目标在记录里可读。
 
-机器判据在本 GOAL 的 6 条 AC 记录（`AC-208` … `AC-213`）里，**不在本节**。
+机器判据在本 GOAL 名下的 AC 记录里，**不在本节**（初始 6 条 `AC-208`…`AC-213`，
+执行中按同一批退出条件补入 `AC-215`/`AC-216`/`AC-217`/`AC-219`/`AC-222`/`AC-223`）。
 
 ## 风险
 

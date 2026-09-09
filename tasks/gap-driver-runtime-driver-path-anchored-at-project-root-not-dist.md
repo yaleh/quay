@@ -2,7 +2,7 @@
 id: gap-driver-runtime-driver-path-anchored-at-project-root-not-dist
 title: driver 在无 plugin/ 的第三方项目里真活——driver-runtime 路径锚在 opts.root 且
   start-drivers 只信退出码（AC-203 exit 1）
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical
@@ -25,7 +25,7 @@ AC-203（GOAL-009）判据 exit 1（无记录）：`goals/AC-203-*.md` criterion
 
 1. **driver-runtime 解析迁移**：driver/脚本路径不再拼 `<opts.root>/plugin/scripts/`，改从自身安装位置解析（自身 `import.meta.url` 的 dist 目录 / 复用 `repo-root.ts` 的 `mainCheckoutRoot` 语义），对已随包的 `dist/<name>.js` 解析到 dist bundle；`:449`/`:692`/源码监视/出厂 settings 同法迁移。⛔ 保留 AC139-4 拒 worktree 副本语义。
 2. **start-drivers 活体确认**：`start` 之后重跑 `quay driver status --kind <k> --json` 并 `parseDriverStatus`，`parsed && alive` 才报 `started`；`parsed=false`（读不出）与 `alive=false`（不活）各报独立失败、exit 非 0——复用 `parseDriverStatus`，不新造读法。
-3. **载体落账**：跨主机验证路径（`verify-deliver-coldstart.sh` 或同层新步骤）在真实第三方项目（无 `plugin/`）里 start driver 后，`parseDriverStatus` 确认 `driver_alive=1` 且 `carrier_records>0`，经 `ac89_append_goal009()` 落账（`build_sha`/`ts` 由 helper 统一补——AC-214 新鲜度锚只认 top-level `build_sha`），保留 AC 专属字段 `host`/`project_root`/`has_plugin_dir=false`/`driver_alive`/`carrier_records`；缺任一生效读数不写（硬规则 3b，缺值≠合格）。
+3. **载体落账**：跨主机验证路径（`verify-deliver-coldstart.sh` 或同层新步骤）在真实第三方项目（无 `plugin/`）里 start driver 后，`parseDriverStatus` 确认 `driver_alive=1` 且 `carrier_records>0`，写 `{"ts","ac":"GOAL-009-AC-203","host","project_root","has_plugin_dir":false,"driver_alive":1,"carrier_records":N}` 到 `<cwd>/.quay/productization-verification.jsonl`；缺任一生效读数不写（硬规则 3b，缺值≠合格）。
 4. **生产复跑**：在 host B/C 跑一次真实验证，使 AC-203 criterion 从 exit 1 → exit 0。
 
 ## Acceptance Criteria
@@ -51,6 +51,7 @@ AC1–AC6 全绿；`scripts/test.sh` 全量绿（含 `plugin/test/driver-runtime
 - plugin/test/driver-runtime.test.mjs
 - plugin/test/start-drivers.test.mjs
 - plugin/test/verify-deliver-coldstart.test.mjs
+- plugin/test/worker-driver-resident.test.mjs
 - packages/quay/scripts/build-plugin-dist.mjs
 - packages/quay/test/build-plugin-dist.test.mjs
 - goals/AC-202-凡被-spawn-的机件必进交付物-把闭包闸扩到-driver-kinds-这类数据表字面量引用.md

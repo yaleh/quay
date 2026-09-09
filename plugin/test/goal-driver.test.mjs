@@ -251,16 +251,47 @@ test('AC2: 负控制——三态两两不等（needs-human ⇒ stalled；ready �
   assert.notEqual(inProgress.state, gap.state, 'in-progress ≠ gap');
 });
 
-test('AC3: 关联任务全为 done ⇒ 仍报 gap、taskCount=0（只放开 needs-human，不放开全部非 todo/ready）', () => {
+test('关联任务全为 done ⇒ done-unresolved（⛔ 不再 gap/不再每轮 spawn）；零关联任务 ⇒ gap（负控制）', () => {
   const records = [{ id: 'AC-X', goal: 'GOAL-001', status: 'active' }];
+  // 正：关联任务全部 done ⇒ done-unresolved（工作已做过，⛔ 不再 spawn 立案），taskCount=关联数（枚举，非布尔化）。
   const gaps = computeGoalGaps(records, [{ id: 't', status: 'done', goalAc: 'AC-X' }]);
   assert.equal(gaps.length, 1);
-  assert.equal(gaps[0].state, 'gap');
-  assert.equal(gaps[0].taskCount, 0);
-  // superseded 同理——真的没有在做的任务 ⇒ gap 正确
+  assert.equal(gaps[0].state, 'done-unresolved');
+  assert.equal(gaps[0].taskCount, 1);
+  // superseded 同理——有关联任务但无牵引（工作已关闭）⇒ done-unresolved，⛔ 不再与「零关联」同判 gap。
   const gaps2 = computeGoalGaps(records, [{ id: 't', status: 'superseded', goalAc: 'AC-X' }]);
-  assert.equal(gaps2[0].state, 'gap');
-  assert.equal(gaps2[0].taskCount, 0);
+  assert.equal(gaps2[0].state, 'done-unresolved');
+  assert.equal(gaps2[0].taskCount, 1);
+  // 负控制：零关联任务（goal_ac 指向别处）⇒ gap（真缺口不被误放）。
+  const gaps3 = computeGoalGaps(records, [{ id: 'other', status: 'todo', goalAc: 'AC-OTHER' }]);
+  assert.equal(gaps3[0].state, 'gap');
+  assert.equal(gaps3[0].taskCount, 0);
+});
+
+// ── gap-goal-gap-done-task-not-traction-respawns-every-round：done 不再每轮 spawn ─────────────
+// 关联任务翻 done 后 computeGoalGaps 不再报 gap（=每轮 spawn 立案），而是 done-unresolved（有关联
+// 任务但无牵引）。与「零关联任务 ⇒ gap」不同形（硬规则 3：枚举不布尔，两种成因不同处置）。
+
+test('AC2 词表可区分：GapState 含 done-unresolved，与 gap/in-progress 两两不同（读源 + 行为判定）', () => {
+  const src = fs.readFileSync(new URL('../scripts/goal-driver.ts', import.meta.url), 'utf8');
+  assert.match(src, /export type GapState = "in-progress" \| "gap" \| "done-unresolved" \| "stalled" \| "not-evaluated"/, 'GapState 词表含 done-unresolved');
+  const records = [{ id: 'AC-X', goal: 'GOAL-001', status: 'active' }];
+  const done = computeGoalGaps(records, [{ id: 't', status: 'done', goalAc: 'AC-X' }])[0];
+  const gap = computeGoalGaps(records, [{ id: 'other', status: 'todo', goalAc: 'AC-OTHER' }])[0];
+  const inProg = computeGoalGaps(records, [{ id: 't', status: 'ready', goalAc: 'AC-X' }], { eligibleTodoIds: new Set(), excludedReadyIds: new Set() })[0];
+  assert.equal(done.state, 'done-unresolved');
+  assert.equal(gap.state, 'gap');
+  assert.equal(inProg.state, 'in-progress');
+  assert.notEqual(done.state, gap.state, 'done-unresolved ≠ gap');
+  assert.notEqual(done.state, inProg.state, 'done-unresolved ≠ in-progress');
+});
+
+test('AC3 两处同修：牵引判定收进 isTractionStatus，字面量重复已消除（读源判定）', () => {
+  const src = fs.readFileSync(new URL('../scripts/goal-driver.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(src, /status === "todo" \|\| t\.status === "ready"/, '字面量重复已消除');
+  // isTractionStatus 定义一次、被 computeGoalGaps 与 triageDraftAc 调用（≥2 调用点）。
+  const calls = (src.match(/isTractionStatus\(/g) ?? []).length;
+  assert.ok(calls >= 2, `isTractionStatus 调用点 ≥ 2（实测 ${calls}）`);
 });
 
 test('AC4: stalled 不消耗 spawn 名额（选取面只取 state==="gap"）', () => {
