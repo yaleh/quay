@@ -1,7 +1,7 @@
 ---
 id: gap-git-graph-no-bounded-scroll-panel
 title: git-history 页面提交纵向时间轴无独立滚动容器：整页滚动触发无限加载，导航/说明随之被卷走且页面高度无界增长
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -47,13 +47,13 @@ extra:
 
 ## AC
 
-- [ ] AC1 容器结构：`renderGitHistoryPage`/`gitGraphClientScript` 输出的 HTML+CSS 中，`#git-graph`（或其新增的外层容器）同时具备 (a) 一个高度约束（内联 style 的 `max-height`，或客户端脚本运行时设置的 `style.maxHeight`）与 (b) `overflow-y:auto`/`scroll`；缺一不可。单测对源文件做字符串/结构断言。
-- [ ] AC2 `sentinel` 归属：`git-graph-sentinel` 在新结构里是该滚动容器的子孙，不再是 `<main>` 下与图表平级的兄弟节点——单测解析 `renderGitHistoryPage()` 返回的 HTML，断言 sentinel 的标签落在容器开合标签之内。
-- [ ] AC3 `IntersectionObserver` root：仿照 `gap-git-graph-scroll-loader-self-chain-blocked-by-loadingolder-flag.test.mjs` 的 `runClient` vm 沙箱技术，执行真实 `gitGraphClientScript()`，用一个记录构造参数的 `IntersectionObserver` 桩断言 `new IntersectionObserver(cb, opts)` 的 `opts.root` 是一个具体元素对象，不是 `undefined`（当前实现恒为 `undefined`）。
-- [ ] AC4 负控制：同一份沙箱里把 `opts.root` 参数抹掉（模拟当前未修复实现），断言捕获到的 `root` 变回 `undefined` ⇒ 判据能区分新旧代码，不是恒真。
-- [ ] AC5 加载量保险丝：单测里连续 mock 足量的非空翻页响应使累计行数越过实现选定的阈值，断言越过阈值后**不再自动发起 fetch**、而是 `sentinel` 被绑定为可点击（`addEventListener("click", loadOlder)` 或等效），且此后点击仍能继续加载直至 `finishOlder()`。
-- [ ] AC6 生产实测（DoD 证据，Playwright/chrome-devtools，本文件不自动化）：在生产 `/git-history` 页面，把"图表容器"滚动到底、连续触发多次加载，读取 `document.scrollingElement.scrollHeight` 在加载前后基本不变（容差内），同时容器自身 `scrollHeight` 持续增长；并用截图确认导航栏/标题/说明文字始终在视口内可见。
-- [ ] AC7 四视口回归：按 `quay-webui-bootstrap-methodology` 的四视口方法（桌面宽/桌面窄/移动/暗色）分别截图，确认无明显裁切、遮挡、图例覆盖提交文本等问题，截图作为 DoD 证据落盘。
+- [x] AC1 容器结构：`renderGitHistoryPage`/`gitGraphClientScript` 输出的 HTML+CSS 中，`#git-graph`（或其新增的外层容器）同时具备 (a) 一个高度约束（内联 style 的 `max-height`，或客户端脚本运行时设置的 `style.maxHeight`）与 (b) `overflow-y:auto`/`scroll`；缺一不可。单测对源文件做字符串/结构断言。
+- [x] AC2 `sentinel` 归属：`git-graph-sentinel` 在新结构里是该滚动容器的子孙，不再是 `<main>` 下与图表平级的兄弟节点——单测解析 `renderGitHistoryPage()` 返回的 HTML，断言 sentinel 的标签落在容器开合标签之内。
+- [x] AC3 `IntersectionObserver` root：仿照 `gap-git-graph-scroll-loader-self-chain-blocked-by-loadingolder-flag.test.mjs` 的 `runClient` vm 沙箱技术，执行真实 `gitGraphClientScript()`，用一个记录构造参数的 `IntersectionObserver` 桩断言 `new IntersectionObserver(cb, opts)` 的 `opts.root` 是一个具体元素对象，不是 `undefined`（当前实现恒为 `undefined`）。
+- [x] AC4 负控制：同一份沙箱里把 `opts.root` 参数抹掉（模拟当前未修复实现），断言捕获到的 `root` 变回 `undefined` ⇒ 判据能区分新旧代码，不是恒真。
+- [x] AC5 加载量保险丝：单测里连续 mock 足量的非空翻页响应使累计行数越过实现选定的阈值，断言越过阈值后**不再自动发起 fetch**、而是 `sentinel` 被绑定为可点击（`addEventListener("click", loadOlder)` 或等效），且此后点击仍能继续加载直至 `finishOlder()`。
+- [x] AC6 生产实测（DoD 证据，Playwright/chrome-devtools，本文件不自动化）：在生产 `/git-history` 页面，把"图表容器"滚动到底、连续触发多次加载，读取 `document.scrollingElement.scrollHeight` 在加载前后基本不变（容差内），同时容器自身 `scrollHeight` 持续增长；并用截图确认导航栏/标题/说明文字始终在视口内可见。
+- [x] AC7 四视口回归：按 `quay-webui-bootstrap-methodology` 的四视口方法（桌面宽/桌面窄/移动/暗色）分别截图，确认无明显裁切、遮挡、图例覆盖提交文本等问题，截图作为 DoD 证据落盘。
 
 ## DoD
 
@@ -64,3 +64,19 @@ extra:
 - packages/quay/src/serve-git.ts（`#git-graph` 容器结构、`gitGraphClientScript` 的 `IntersectionObserver`/`loadOlder`/`sentinel` 相关代码）
 - packages/quay/test/gap-git-graph-no-bounded-scroll-panel.test.mjs（本任务的回归测试，新增文件）
 - tasks/gap-git-graph-no-bounded-scroll-panel.md（本任务自身）
+
+## Evidence
+
+**AC1–AC5 自动化**：`node --test packages/quay/test/gap-git-graph-no-bounded-scroll-panel.test.mjs` — 5/5 通过（AC1 容器结构、AC2 sentinel 归属、AC3 IO root=容器元素、AC4 负控制、AC5 保险丝降级为可点击按钮）。
+
+**AC6 生产实测**（worktree 起服务 `node --experimental-strip-types packages/quay/bin/quay.ts serve --host 127.0.0.1 --port 4180`，chrome-devtools MCP 对 `/git-history` 实测，桌面宽 1440×900）：
+
+- `document.scrollingElement.scrollHeight` 全程恒为 **900px**（== `clientHeight`，整页不再滚动）；`#git-graph-scroll` 自身 `scrollHeight` 随滚动加载持续增长 **12,125 → 24,101 → 36,077 → 48,053 → 60,029 → 72,005 → 83,981px**（~500 → ~3,495 行），`clientHeight` 640px——只有容器内部滚动位置在变，整页高度稳定在头部+容器高度左右。
+- 连续滚动到底触发自动加载：越过保险丝阈值（`autoLoadedRows≥2500`，累计 ~3,000 行）后 `sentinel` 由"加载更早提交…"降级为**"点击加载更早提交"**（`cursor:pointer`），不再自动 fetch。
+- 全程 `nav`/`<h1>`/说明文字 `getBoundingClientRect()` 保持在视口内可见（`navVisible/h1Visible/metaVisible=true`）。
+
+**AC7 四视口回归**（截图落盘 `/tmp/gap-scroll-panel-evidence/`）：
+
+- `desktop-wide-light.png`（1440×900）、`desktop-narrow-light.png`（900×800）、`mobile-light.png`（390×844@3x）、`desktop-wide-dark.png`（1440×900 + `prefers-color-scheme:dark` 模拟）。
+- 图例为全宽不透明 sticky 条（`legendHeight≈30.6px`、`backgroundColor=var(--color-surface)`、`legendWidth==containerClientWidth`），吸顶后第一行提交位于条下方（无遮挡、无覆盖提交文本）；各视口 `pageScrollHeight==clientHeight`（整页不滚）、SVG 超宽（1853px）时容器 `overflow-x:auto` 横向可滚（无裁切）。
+- 注：本页当前无原生暗色主题（`webui-modernist.css` 无 `prefers-color-scheme` 分支），"暗色"为浏览器模拟（渲染同亮色）；图例背景用 `var(--color-surface)` 与全页同 token，将来加暗色主题时自动适配。
