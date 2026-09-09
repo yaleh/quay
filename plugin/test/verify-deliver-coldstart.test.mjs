@@ -90,6 +90,12 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
     "marketplace leak: a user-level quay@quay enabledPlugins entry is flagged (AC-161)");
   assert.match(r.stdout, /marketplace-register-fail\(AC5\) MP_REGISTER_OK=0 MP_REGISTER_RC=1 reason_present=1/,
     "marketplace register-failure (AC5): a non-zero register exit is recorded structurally, not swallowed");
+  // AC-203 (gap-driver-runtime-driver-path-anchored-at-project-root-not-dist): the carrier record writes
+  // the five criterion fields verbatim and refuses a dead-driver record (fail-closed, 缺值≠合格).
+  assert.match(r.stdout, /ac203-record\(valid\) wrote=1 fields_ok=1/,
+    "AC-203 record: valid record written with has_plugin_dir=false literal + driver_alive=1 + carrier_records>0");
+  assert.match(r.stdout, /ac203-record\(dead-driver\) refused=1/,
+    "AC-203 record: a dead-driver (driver_alive=0) record is refused — the criterion can take false");
   // AC-214 freshness anchor helper (gap-ac214-freshness-anchor-build-sha-missing-on-203-205-207):
   // the GOAL-009 anchor helper must append top-level build_sha (the AC-214 meta-criterion's only
   // recognized anchor field) on a 40-hex BUILD_SHA, and fail closed (no write, non-zero) on an

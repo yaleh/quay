@@ -282,6 +282,39 @@ export function kernelSelfPath(): string {
   return fileURLToPath(import.meta.url);
 }
 
+/** 本 kernel 的脚本目录（sibling 脚本解析基准：driver / ready-pool-check / send-to-session 都住这里）。
+ *  锚在本 kernel 自身安装位置（⛔ 非 opts.root —— AC-203：quay-init 后的第三方项目没有 plugin/）。
+ *  QUAY_PLUGIN_ROOT 覆盖基准（hermetic 测试缝，同 Core plugin-root.ts 的手法）。 */
+export function resolveKernelScriptsDir(): string {
+  const override = process.env.QUAY_PLUGIN_ROOT;
+  if (override) return path.join(override, "scripts");
+  return path.dirname(kernelSelfPath());
+}
+
+/** 本 kernel 的 plugin root（含 scripts/ 的目录；出厂 settings 的基准）。QUAY_PLUGIN_ROOT 覆盖。 */
+export function resolveKernelPluginRoot(): string {
+  const override = process.env.QUAY_PLUGIN_ROOT;
+  if (override) return override;
+  const dir = path.dirname(kernelSelfPath());
+  return path.basename(dir) === "dist" ? path.dirname(path.dirname(dir)) : path.dirname(dir);
+}
+
+/** 解析本 kernel 的一个 sibling 脚本到可运行形态：原始 .ts（dev tree，用 --experimental-strip-types 跑）
+ *  或 bundled dist/<name>.js（installed artifact，纯 ESM，不带 flag 跑）。两者都不在 ⇒ null（调用方
+ *  fail-closed）。⛔ 不锚在 opts.root（AC-203）。 */
+export function resolveKernelSibling(name: string): { path: string; stripTypes: boolean } | null {
+  const dir = resolveKernelScriptsDir();
+  const raw = path.join(dir, name);
+  if (fs.existsSync(raw)) return { path: raw, stripTypes: true };
+  if (name.endsWith(".ts")) {
+    const js = name.replace(/\.ts$/, ".js");
+    const bundledDir = path.basename(dir) === "dist" ? dir : path.join(dir, "dist");
+    const bundled = path.join(bundledDir, js);
+    if (fs.existsSync(bundled)) return { path: bundled, stripTypes: false };
+  }
+  return null;
+}
+
 // ── Layer 0 · 稳定承载（resolveMainRoot，gap-resident-driver-stable-carrier-liveness AC1）──────────
 // 常驻 supervisor 不得由生命周期短于它的对象（worktree）承载：若 --root 落在 git worktree 内，把 root
 // 规范化到 primary worktree（主检出）。git 不可用 / 非 git 仓库 / 解析失败 ⇒ 原样返回 root。
@@ -446,11 +479,14 @@ export function notifyManager(opts: {
   token: string;
   message: string;
 }): { ok: boolean; error: string | null } {
-  const script = path.join(opts.root, "plugin", "scripts", "send-to-session.ts");
+  const sibling = resolveKernelSibling("send-to-session.ts");
+  if (!sibling) {
+    return { ok: false, error: "send-to-session.ts not resolvable from the kernel's install location (third-party install missing the shipped bundle)" };
+  }
   const argv = [
     process.execPath,
-    "--experimental-strip-types",
-    script,
+    ...(sibling.stripTypes ? ["--experimental-strip-types"] : []),
+    sibling.path,
     "--pid",
     String(opts.pid),
     "--token",
@@ -490,7 +526,7 @@ export function splitArgs(cmd: string): string[] {
 function pickSettingsFile(root: string): string {
   const devTree = path.join(root, ".claude", "launch.settings.json");
   if (fs.existsSync(devTree)) return devTree;
-  const shipped = path.join(root, "plugin", ".claude", "launch.settings.json");
+  const shipped = path.join(resolveKernelPluginRoot(), ".claude", "launch.settings.json");
   if (fs.existsSync(shipped)) return shipped;
   throw new Error(`launch settings file not found (checked ${devTree} and ${shipped})`);
 }
@@ -686,12 +722,14 @@ export function shuffle<T>(arr: readonly T[]): T[] {
   return a;
 }
 
-/** 缺省 ready-pool-check 命令（Layer 1a · source 的缺省承载）。 */
+/** 缺省 ready-pool-check 命令（Layer 1a · source 的缺省承载）。脚本路径锚在本 kernel 自身安装位置
+ *  （⛔ 非 root —— AC-203），--root 仍指向目标 workspace root。 */
 export function defaultReadyPoolArgv(root: string, inFlight: string[], cap: number): string[] {
-  const argv = [
-    "node", "--experimental-strip-types", path.join(root, "plugin", "scripts", "ready-pool-check.ts"),
-    "--root", root, "--cap", String(cap), "--json",
-  ];
+  const sibling = resolveKernelSibling("ready-pool-check.ts");
+  const scriptArgs = sibling
+    ? (sibling.stripTypes ? ["--experimental-strip-types", sibling.path] : [sibling.path])
+    : ["--experimental-strip-types", path.join(resolveKernelScriptsDir(), "ready-pool-check.ts")];
+  const argv = ["node", ...scriptArgs, "--root", root, "--cap", String(cap), "--json"];
   if (inFlight.length > 0) argv.push("--in-flight", inFlight.join(","));
   return argv;
 }
@@ -842,12 +880,15 @@ export function watchedSourceFiles(kind: DriverKind): string[] {
 }
 
 /** 被监视源码的最新 mtime（mtimeMs 的 max）。全部缺失/读失败 ⇒ 0——0 恒不大于 driver 启动时刻 ⇒
- *  不触发 respawn（与「未变更」同形；源码缺失本就是非 git root 测试临时目录的常态，⛔ 不是「无源码」）。 */
-export function sourceFilesMaxMtimeMs(root: string, kind: DriverKind): number {
+ *  不触发 respawn（与「未变更」同形；源码缺失本就是非 git root 测试临时目录的常态，⛔ 不是「无源码」）。
+ *  源码目录锚在本 kernel 自身安装位置（⛔ 非 root —— AC-203）；installed artifact 只有 dist bundle、
+ *  无原始 .ts ⇒ 恒 0 ⇒ 无自刷新（正确：装好的 bundle 是静态的，无源码可推进）。 */
+export function sourceFilesMaxMtimeMs(_root: string, kind: DriverKind): number {
   let max = 0;
+  const dir = resolveKernelScriptsDir();
   for (const rel of watchedSourceFiles(kind)) {
     try {
-      const st = fs.statSync(path.join(root, "plugin", "scripts", rel));
+      const st = fs.statSync(path.join(dir, rel));
       if (st.mtimeMs > max) max = st.mtimeMs;
     } catch { /* 缺失 → 跳过 */ }
   }
@@ -983,9 +1024,9 @@ export interface SupervisorOptions {
 export async function runSupervisor(opts: SupervisorOptions): Promise<number> {
   const spec = DRIVER_KINDS[opts.kind];
   const st = statePaths(opts.root, opts.kind);
-  const driver = path.join(opts.root, "plugin", "scripts", spec.driver);
-  if (!fs.existsSync(driver)) {
-    process.stderr.write(`driver-runtime: driver not found at ${driver}\n`);
+  const driverSibling = resolveKernelSibling(spec.driver);
+  if (!driverSibling) {
+    process.stderr.write(`driver-runtime: driver not found at ${path.join(resolveKernelScriptsDir(), spec.driver)}\n`);
     return 2;
   }
   fs.mkdirSync(path.join(opts.root, ".quay"), { recursive: true });
@@ -1026,7 +1067,7 @@ export async function runSupervisor(opts: SupervisorOptions): Promise<number> {
     } catch {
       logFd = 2; // fall back to stderr if the log cannot be opened
     }
-    child = spawn(process.execPath, ["--experimental-strip-types", driver, ...args], {
+    child = spawn(process.execPath, [...(driverSibling.stripTypes ? ["--experimental-strip-types"] : []), driverSibling.path, ...args], {
       stdio: ["ignore", logFd, logFd],
       env,
     });

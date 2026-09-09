@@ -289,7 +289,29 @@ async function main(argv: string[]): Promise<number> {
       // ⛔ DO NOT swallow: the CLI's own reason (halted / worktree / config) is the actionable message.
       return 1;
     }
-    drv[kind] = { state: "started" };
+    // AC-203 (gap-driver-runtime-driver-path-anchored-at-project-root-not-dist): start 的退出码 0
+    // 不等于 driver 真活——今天 `quay driver start` 就 exit 0 而系统是死的（driver not found，死在
+    // supervisor 内部日志里）。start 之后重跑 status 并 parseDriverStatus，只有 alive=1 才报 started；
+    // parsed=false（读不出）与 alive=false（不活）各报独立失败、exit 非 0 —— 复用 parseDriverStatus，
+    // 不新造读法。
+    const postStatus = runCli(inv, ["driver", "status", "--kind", kind, "--root", root, "--json"], { cwd: root });
+    if (postStatus.stderr) process.stderr.write(postStatus.stderr);
+    const postParsed = parseDriverStatus(postStatus.stdout);
+    if (!postParsed.parsed) {
+      process.stderr.write(
+        `start-drivers: after start, could not parse \`quay driver status --kind ${kind}\` output (read-unable is not "alive")\n`,
+      );
+      drv[kind] = { state: "unverified", reason: "status-unreadable" };
+      return 1;
+    }
+    if (!postParsed.alive) {
+      process.stderr.write(
+        `start-drivers: ${kind} exited 0 from \`quay driver start\` but is not alive per \`quay driver status\` — refusing to report started\n`,
+      );
+      drv[kind] = { state: "unverified", reason: "not-alive" };
+      return 1;
+    }
+    drv[kind] = { state: "started", alive: true };
     if (!opts.json) process.stdout.write(`${kind}: started\n`);
   }
 
