@@ -419,3 +419,52 @@ test("AC4 (task_delete fail-closed): store.delete of a non-existent id reports o
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+// ── gap-store-commit-propagation-field-aware: field-level propagation judgment ──────────────────
+// A write whose change set is ONLY the self-only fields (AC/DoD checkbox toggles, ## Evidence
+// content, extra.goal / goal_ac) must NOT ff to develop even on a non-task/* branch — the task's
+// own fan-in carries it to develop with the worktree branch (SPEC-store-commit-unification §5).
+// A mixed write (AC toggle + status flip) keeps the current ff-to-develop behavior.
+
+test("AC5 (field-aware): pure AC-checkbox write on a non-task/* branch does NOT advance develop", () => {
+  const { store, root } = makeGitStore({ branch: "develop" });
+  try {
+    store.write("RT", { title: "field-aware", status: "todo", body: "## Acceptance Criteria\n\n- [ ] do a thing\n" });
+    const developBefore = git(root, "rev-parse", "develop");
+    execFileSync("git", ["-C", root, "checkout", "-q", "-b", "author"]);
+    // pure AC toggle: only the checkbox flips, no other field changes.
+    store.write("RT", { body: "## Acceptance Criteria\n\n- [x] do a thing\n" });
+    assert.equal(git(root, "rev-parse", "develop"), developBefore, "develop unchanged after a pure-AC write on a non-task branch");
+    assert.notEqual(git(root, "rev-parse", "author"), developBefore, "the author branch advanced (the tick is on its own branch)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC6 (field-aware negative control): mixed write (AC toggle + status flip) DOES advance develop", () => {
+  const { store, root } = makeGitStore({ branch: "develop" });
+  try {
+    store.write("RT", { title: "field-aware", status: "todo", body: "## Acceptance Criteria\n\n- [ ] do a thing\n" });
+    const developBefore = git(root, "rev-parse", "develop");
+    execFileSync("git", ["-C", root, "checkout", "-q", "-b", "author"]);
+    // mixed write: status lifecycle flip + AC toggle together ⇒ must-propagate (the field-level
+    // judgment must NOT widen its net to swallow a status flip).
+    store.write("RT", { status: "ready", body: "## Acceptance Criteria\n\n- [x] do a thing\n" });
+    assert.notEqual(git(root, "rev-parse", "develop"), developBefore, "develop advanced after a mixed write (status flip + AC toggle)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC7 (field-aware): ## Evidence append on a non-task/* branch does NOT advance develop", () => {
+  const { store, root } = makeGitStore({ branch: "develop" });
+  try {
+    store.write("RT", { title: "field-aware", status: "todo", body: "## Acceptance Criteria\n\n- [x] do a thing\n" });
+    const developBefore = git(root, "rev-parse", "develop");
+    execFileSync("git", ["-C", root, "checkout", "-q", "-b", "author"]);
+    store.write("RT", { body: "## Acceptance Criteria\n\n- [x] do a thing\n\n## Evidence\n\nran the suite, green\n" });
+    assert.equal(git(root, "rev-parse", "develop"), developBefore, "develop unchanged after an Evidence-only append on a non-task branch");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -2521,7 +2521,8 @@ export function newSessionId(): string {
 }
 
 // ── AC 未全勾短路（gap-worker-ac-check-shortcircuit）────────────────────────────────────────────
-// worker exit 0 后、finishAsync spawn 机械 fan-in 前，查 worktree 任务体 AC/DoD 是否全勾（用 flip 闸
+// worker exit 0 后、finishAsync spawn 机械 fan-in 前，查 worktree 任务体 AC/DoD 是否全勾（develop ref
+// ∪ worktree 副本并集，AC-218；用 flip 闸
 // 同源谓词 flipAcGateVerdict——⛔ 不新造计数函数，与机械 fan-in step 6.5 ac-precheck / step 8 ac-gate
 // 同一判定）。未全勾 ⇒ 短路：不 spawn fan-in（省整条 fan-in + 锁排队），直接 exited-not-landed +
 // 原因「AC 未全勾」。三态（硬规则 3b：判定词表含「未评估」）：
@@ -2530,22 +2531,47 @@ export function newSessionId(): string {
 // 与 gap-worker-dispatch-prompt-ac-check-instruction 互补：A 打根因（prompt 教勾），B 兜底（任何残留
 // 漏勾早发现、低代价——不烧整条 fan-in + 锁排队）。
 export function acShortCircuitVerdict(worktree: string, taskId: string): { shortCircuit: boolean; reason: string | null } {
-  let body: string;
+  // AC-218 / gap-store-commit-propagation-field-aware: judge the UNION of the develop ref and the
+  // worktree working-tree copy. With field-aware commitTaskWrite, a pure-AC write on a non-task/*
+  // branch no longer ff's to develop, and a task/* worktree write lands on the task branch — so the
+  // AC ticks can legitimately live in EITHER place while the other is stale (the 2026-09-07 incident:
+  // ABI 勾满 8 条 AC 落 develop，worktree 副本仍 0/8 ⇒ 误判 exited-not-landed 烧 45 分钟)。All-checked
+  // in EITHER ⇒ no short-circuit; fail-closed only when BOTH are absent/unreadable or neither is
+  // all-checked (无法评估 ≠ 合格, 硬规则 3b — a single-source read can no longer see a just-ticked
+  // task as "0/N").
+  let worktreeBody: string | null = null;
+  let developBody: string | null = null;
   try {
-    body = fs.readFileSync(path.join(worktree, "tasks", `${taskId}.md`), "utf8");
+    worktreeBody = fs.readFileSync(path.join(worktree, "tasks", `${taskId}.md`), "utf8");
   } catch {
-    // 任务体读不懂 ⇒ fail-closed 短路（无法评估 ≠ 合格，硬规则 3b）。
-    return { shortCircuit: true, reason: `AC 未全勾（任务体读不懂：tasks/${taskId}.md 缺失或不可读）——续做需补齐并勾选 AC` };
+    /* absent/unreadable — still try develop below (缺值 = 未查, not yet a verdict) */
   }
-  const v = flipAcGateVerdict(body);
-  if (v.ok) return { shortCircuit: false, reason: null };
-  return {
-    shortCircuit: true,
-    reason:
-      v.status === "not-evaluated"
-        ? "AC 未全勾（AC/DoD 段缺失或无法识别，无法评估 ≠ 合格）——续做需补齐并勾选 AC"
-        : `AC 未全勾（checked ${v.checked}/${v.total}，剩余未勾 ${v.unchecked}）——续做只需验证并勾选 AC`,
-  };
+  try {
+    const r = spawnSync("git", ["-C", worktree, "show", `develop:tasks/${taskId}.md`], { encoding: "utf8" });
+    if (r.status === 0 && !r.error) developBody = String(r.stdout ?? "");
+  } catch {
+    /* no develop copy / not a git work tree — the worktree-only read below still applies */
+  }
+
+  // Union verdict: all-checked in either source wins (no short-circuit).
+  const wtV = worktreeBody !== null ? flipAcGateVerdict(worktreeBody) : null;
+  const devV = developBody !== null ? flipAcGateVerdict(developBody) : null;
+  if ((wtV !== null && wtV.ok) || (devV !== null && devV.ok)) {
+    return { shortCircuit: false, reason: null };
+  }
+
+  // Neither all-checked — report against the worktree copy when readable (richer reason), else
+  // fail-closed (任务体读不懂 ⇒ 短路).
+  if (wtV !== null) {
+    return {
+      shortCircuit: true,
+      reason:
+        wtV.status === "not-evaluated"
+          ? "AC 未全勾（AC/DoD 段缺失或无法识别，无法评估 ≠ 合格）——续做需补齐并勾选 AC"
+          : `AC 未全勾（checked ${wtV.checked}/${wtV.total}，剩余未勾 ${wtV.unchecked}）——续做只需验证并勾选 AC`,
+    };
+  }
+  return { shortCircuit: true, reason: `AC 未全勾（任务体读不懂：tasks/${taskId}.md 缺失或不可读）——续做需补齐并勾选 AC` };
 }
 
 /**
