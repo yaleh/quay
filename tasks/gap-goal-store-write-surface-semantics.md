@@ -2,7 +2,7 @@
 id: gap-goal-store-write-surface-semantics
 title: goal 写入面语义六缺陷：CLI 强制 --origin 制造覆盖写（底层本是 patch 语义）+ update 无内容校验 + 激活 AC
   零校验 + activatedAt 死字段
-status: ready
+status: done
 labels:
   - gap
   - defect
