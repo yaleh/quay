@@ -669,7 +669,11 @@ export function gitGraphClientScript(): string {
 })();`;
 }
 
-/** Mini-legend rendered in the graph corner (● commit / ◆ merge) — how to read the graph key. */
+/** Mini-legend rendered in the graph corner (● commit / ◆ merge) — how to read the graph key.
+ *  A full-width, OPAQUE bar sticky to the container's top (and left, for horizontal scroll): once the
+ *  scroll container produces real vertical overflow (gap-git-graph-no-bounded-scroll-panel) the bar
+ *  sticks at the top and the commit rows scroll cleanly under it — no narrow floating pill occluding
+ *  the first visible row. The opaque `--color-surface` background adapts to dark mode via the CSS var. */
 export function gitGraphLegendHtml(): string {
   const glyph = (colorVar: string, ch: string, label: string) =>
     `<span><span style="color:${colorVar}">${ch}</span> ${label}</span>`;
@@ -678,7 +682,7 @@ export function gitGraphLegendHtml(): string {
     glyph("var(--color-accent-2-500)", "◆", "merge"),
     glyph("var(--color-neutral-700)", "╰", "父提交连线（圆角正交）"),
   ];
-  return `<div style="position:sticky;left:0;top:0;z-index:2;display:inline-flex;gap:0.75rem;align-items:center;background:var(--color-surface);padding:0.25rem 0.6rem;border:1px solid var(--color-neutral-200);border-radius:6px;font-size:0.72rem;color:var(--color-neutral-700)">${parts.join("")}</div>`;
+  return `<div style="position:sticky;left:0;top:0;z-index:2;display:flex;gap:0.75rem;align-items:center;background:var(--color-surface);padding:0.35rem 0.6rem;border-bottom:1px solid var(--color-neutral-200);font-size:0.72rem;color:var(--color-neutral-700)">${parts.join("")}</div>`;
 }
 
 /**
@@ -688,8 +692,9 @@ export function gitGraphLegendHtml(): string {
  * text (44/500 rows at 1440px) and horizontal-scrolling the graph scrolls the column context away.
  * This is a PAGE-scoped override — the `#main` id selector (1,0,0) beats the bare `main` type selector
  * (0,0,1), and the style is emitted ONLY on this page's HTML — so the global 900px is untouched (AC7).
- * 1400px yields ~1368px content width at a 1440px viewport (≥ the measured SVG); `#git-graph`'s own
- * `overflow-x:auto` keeps narrower viewports scrollable rather than clipped.
+ * 1400px yields ~1368px content width at a 1440px viewport (≥ the measured SVG); `#git-graph-scroll`'s
+ * own `overflow-x:auto` keeps narrower viewports scrollable rather than clipped (gap-git-graph-no-
+ * bounded-scroll-panel moved the x/y overflow onto the new scroll container).
  */
 export function gitHistoryPageStyle(): string {
   return html`<style>#main { max-width: 1400px; }</style>`;
