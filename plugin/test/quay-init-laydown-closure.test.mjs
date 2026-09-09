@@ -3,7 +3,7 @@
 //
 // A NEW criterion distinct from the quay-init-closure-ratchet (which only counts files/bytes): this
 // pins the closed-set membership assertion over a REAL quay-init laydown — every laid-down path must be
-// a member of the SIX-item closed set (∪ tasks/ descendants), and the retired extension-file copy
+// a member of the SEVEN-item closed set (∪ tasks/ and goals/ descendants), and the retired extension-file copy
 // surface (.claude/{skills,workflows,agents}, plugin/scripts) must be ZERO. Read-the-input failure is a
 // distinguishable NOT-EVALUATED (hard rule 3b), never conflated with "合格".
 //
@@ -34,12 +34,14 @@ function makeTmp(prefix) { return fs.mkdtempSync(path.join(os.tmpdir(), `qicl-${
 function cleanup(dir) { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ } }
 
 // ── the pure membership function ─────────────────────────────────────────────────────────────────────
-test("isInClosedSet admits exactly the six closed-set members + tasks/ descendants", () => {
+test("isInClosedSet admits exactly the seven closed-set members + tasks/ and goals/ descendants", () => {
   for (const m of [".quay/config.yml", ".quay/profiles.yml", ".gitignore", ".claude/launch.settings.json", ".claude/settings.json"]) {
     assert.equal(isInClosedSet(m), true, `${m} must be a closed-set member`);
   }
   assert.equal(isInClosedSet("tasks/TASK-001.md"), true, "a tasks/ descendant must be admitted");
   assert.equal(isInClosedSet("tasks/sub/dir/x.md"), true, "a nested tasks/ descendant must be admitted");
+  assert.equal(isInClosedSet("goals/GOAL-001.md"), true, "a goals/ descendant must be admitted");
+  assert.equal(isInClosedSet("goals/sub/dir/x.md"), true, "a nested goals/ descendant must be admitted");
   for (const bad of ["plugin/scripts/x.sh", ".claude/workflows/w.js", ".claude/agents/a.md", ".claude/skills/s/SKILL.md", ".quay/runtime/quay.js", "orchestration/tick.md", "docs/analysis/x.md", "scripts/gates/g.sh"]) {
     assert.equal(isInClosedSet(bad), false, `${bad} must NOT be a closed-set member`);
   }

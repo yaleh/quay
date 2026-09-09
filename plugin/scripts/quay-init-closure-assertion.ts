@@ -5,7 +5,7 @@
 // WHAT IT CHECKS: run ONE REAL `quay-init --all --loop --manager` laydown (not a fixture — hard rule 4
 // 推论三: the production carrier) into a fresh temp target, enumerate every laid-down relative path, and
 // assert:
-//   (a) every path ∈ the SIX-item closed set (∪ descendants of `tasks/`), and
+//   (a) every path ∈ the SEVEN-item closed set (∪ descendants of `tasks/` and `goals/`), and
 //   (b) the laydown contains ZERO `.claude/skills` / `.claude/workflows` / `.claude/agents` /
 //       `plugin/scripts` copies (the retired extension-file copy surface).
 // `.quay/` is NOT excluded here (unlike the ratchet) — `.quay/config.yml` + `.quay/profiles.yml` are
@@ -24,8 +24,8 @@ import { execFileSync } from "node:child_process";
 import { isDirectEntry, helpExit, emitPass, emitFail, emitNotEvaluated } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
 
-// The SIX-item closed set (SPEC §6 QUAY-INIT-CLOSED-SET). Files are exact-match members; the `tasks/`
-// directory admits its descendants.
+// The SEVEN-item closed set (SPEC §6 QUAY-INIT-CLOSED-SET). Files are exact-match members; the `tasks/`
+// and `goals/` directories admit their descendants.
 export const CLOSED_SET_FILES: ReadonlySet<string> = new Set([
   ".quay/config.yml",
   ".quay/profiles.yml",
@@ -33,7 +33,7 @@ export const CLOSED_SET_FILES: ReadonlySet<string> = new Set([
   ".claude/launch.settings.json",
   ".claude/settings.json",
 ]);
-export const CLOSED_SET_DIRS: readonly string[] = ["tasks"];
+export const CLOSED_SET_DIRS: readonly string[] = ["tasks", "goals"];
 
 // The retired extension-file copy surface — ANY of these in the laydown is a violation (裁定 6: 不复制
 // 任何 Claude Code 扩展或脚本).
@@ -45,7 +45,7 @@ export const FORBIDDEN_PREFIXES: readonly string[] = [
 ];
 
 /** A path (repo-relative, forward slashes) is a closed-set member iff it is one of the five files OR a
- *  descendant of `tasks/`. */
+ *  descendant of `tasks/` or `goals/`. */
 export function isInClosedSet(rel: string): boolean {
   if (CLOSED_SET_FILES.has(rel)) return true;
   const norm = rel.split(path.sep).join("/");
@@ -57,7 +57,7 @@ export function isInClosedSet(rel: string): boolean {
 
 export interface ClosureAssertionVerdict {
   ok: boolean;
-  /** paths laid down but outside the closed set (∪ tasks/ descendants). */
+  /** paths laid down but outside the closed set (∪ tasks/ and goals/ descendants). */
   outsideClosedSet: string[];
   /** paths under a forbidden prefix (.claude/skills|workflows|agents, plugin/scripts). */
   forbiddenCopies: string[];
@@ -128,12 +128,14 @@ export function runLaydownPaths(root: string): string[] | null {
   }
 }
 
-/** The SIX-item closed set (SPEC §6 QUAY-INIT-CLOSED-SET), `tasks/` directory member included — the
- *  exact paths whose written/unwritten state a failing quay-init must mechanically report (AC3). */
+/** The SEVEN-item closed set (SPEC §6 QUAY-INIT-CLOSED-SET), `tasks/` and `goals/` directory members
+ *  included — the exact paths whose written/unwritten state a failing quay-init must mechanically
+ *  report (AC3). */
 export const CLOSED_SET_ALL: readonly string[] = [
   ".quay/config.yml",
   ".quay/profiles.yml",
   "tasks",
+  "goals",
   ".gitignore",
   ".claude/launch.settings.json",
   ".claude/settings.json",
@@ -204,7 +206,7 @@ const usage = `quay-init-closure-assertion.ts — closed-set membership assertio
 
 Usage:
   node --experimental-strip-types quay-init-closure-assertion.ts --gate [--root <dir>] [--json]
-      gate mode — exit 1 iff a laid-down path is outside the closed set (∪ tasks/ descendants), a
+      gate mode — exit 1 iff a laid-down path is outside the closed set (∪ tasks/ and goals/ descendants), a
       forbidden extension-file copy is present, or the failure path does not report every closed-set
       item; exit 3 (NOT-EVALUATED) iff the laydown could not run.`;
 
@@ -230,7 +232,7 @@ function main(argv: string[]): number {
 
   // AC5 failure path (gap-quay-init-hard-requires-tmux-session-and-leaves-partial-write): the checker
   // must cover the FAILURE path too, not just the happy-path membership. A failing quay-init must
-  // mechanically report the six-item written/unwritten state (AC3) — assert every closed-set item
+  // mechanically report the seven-item written/unwritten state (AC3) — assert every closed-set item
   // appears in the report (written OR unwritten), so a report that silently omits an item is a FAIL.
   const failReport = runFailureStateReport(root);
   const failMissing: string[] = [];
