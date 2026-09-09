@@ -131,7 +131,7 @@ function postCutoffTaskIds(root: string, ref: string, cutoffIso: string): Set<st
     // `<ISO>\n\n<file>\n<file>\n…`（每个 commit 一块）。
     const out = execFileSync(
       "git",
-      ["-C", root, "log", "--since", cutoffIso, "--diff-filter=A", "--format=%cI", "--name-only", ref, "--", "tasks/"],
+      ["-C", root, "log", "--since", cutoffIso, "--diff-filter=A", "--format=%cI", "--name-only", ref],
       { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 * 1024 * 1024 },
     );
     for (const raw of out.split("\n")) {
