@@ -779,8 +779,8 @@ export function renderGoalCard(
     const achieved = acs.filter((r) => r.status === "achieved").length;
     const state = goalStaleness(gid, goals, staleMs, nowMs);
     return html`<div style="display:flex;flex-direction:column;gap:2px;font-size:0.78rem;line-height:1.4">
-      <div style="display:flex;justify-content:space-between;gap:0.5rem">
-        <a href="/goal/${encodeURIComponent(gid)}" style="color:var(--color-text);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(gid)}</a>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem;flex-wrap:wrap">
+        <a href="/goal/${encodeURIComponent(gid)}" style="color:var(--color-text);text-decoration:none;flex:none">${escapeHtml(gid)}</a>
         <span style="flex:none;color:${stalenessColor(state)};font-weight:700">${escapeHtml(state)}</span>
       </div>
       <div style="color:var(--color-text);font-size:0.75rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(String(g.title ?? ""))}</div>
@@ -854,7 +854,7 @@ export function renderFanInCardFromRecords(
         : "";
       return html`<div style="${i > 0 ? "border-top:1px solid var(--color-divider);padding-top:6px;" : ""}display:flex;flex-direction:column;gap:2px;font-size:0.75rem;line-height:1.4">
         <a href="/task/${encodeURIComponent(r.task ?? "")}" style="color:var(--color-text);text-decoration:none;font-weight:600">${escapeHtml(r.task ?? "?")}</a>
-        <div style="color:var(--color-neutral-700)">${renderFanInCell(r.task ?? "", r)}</div>
+        <div style="color:var(--color-neutral-700)">${renderFanInCell(r.task ?? "", r, { showReason: false })}</div>
         ${tsLine}
       </div>`;
     });

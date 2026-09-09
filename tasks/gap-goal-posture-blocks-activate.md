@@ -1,8 +1,8 @@
 ---
 id: gap-goal-posture-blocks-activate
-title: goal-driver 分诊尊重 GOAL 层 posture——measure-only 名下 draft AC 不得判
-  activate，只落 re-anchor/needs-human/hold
-status: ready
+title: goal-driver 分诊尊重 GOAL 层 posture——measure-only 名下 draft AC 不得判 activate，只落
+  re-anchor/needs-human/hold
+status: done
 labels:
   - gap
 parent: null
@@ -32,11 +32,11 @@ goal_ac: AC-215
 
 ## AC
 
-- [ ] `node --no-warnings --experimental-strip-types --test plugin/test/goal-posture-blocks-activate.test.mjs` 退出码 0（AC-215 criterion 逐字）
-- [ ] 方向一（负控制①，activate 可达）：测试断言未声明 posture 的 GOAL 名下 draft AC ⇒ 分诊决策可为 `activate`——证明「堵 activate」不是无条件恒真（`grep -n "activate" plugin/test/goal-posture-blocks-activate.test.mjs` 命中该断言点）
-- [ ] 方向二（负控制②，activate 被拒）：测试断言声明 measure-only 的 GOAL 名下 draft AC ⇒ 决策 `!== "activate"` 且 `∈ {re-anchor, needs-human, hold}`——`grep -n "re-anchor\|needs-human\|hold" plugin/test/goal-posture-blocks-activate.test.mjs` 命中该断言点
-- [ ] posture 读回（expect 前半）：`packages/quay/src/goal-store.ts` 的 `OWNED_KEYS` 与 `toViewModel` 投影含 `posture`（`grep -n "posture" packages/quay/src/goal-store.ts` 命中 ≥2 处：类型 + 投影/OWNED_KEYS）
-- [ ] scoped 门 `bash scripts/test.sh --for-task gap-goal-posture-blocks-activate --allow-thin` 退出码 0
+- [x] `node --no-warnings --experimental-strip-types --test plugin/test/goal-posture-blocks-activate.test.mjs` 退出码 0（AC-215 criterion 逐字）
+- [x] 方向一（负控制①，activate 可达）：测试断言未声明 posture 的 GOAL 名下 draft AC ⇒ 分诊决策可为 `activate`——证明「堵 activate」不是无条件恒真（`grep -n "activate" plugin/test/goal-posture-blocks-activate.test.mjs` 命中该断言点）
+- [x] 方向二（负控制②，activate 被拒）：测试断言声明 measure-only 的 GOAL 名下 draft AC ⇒ 决策 `!== "activate"` 且 `∈ {re-anchor, needs-human, hold}`——`grep -n "re-anchor\|needs-human\|hold" plugin/test/goal-posture-blocks-activate.test.mjs` 命中该断言点
+- [x] posture 读回（expect 前半）：`packages/quay/src/goal-store.ts` 的 `OWNED_KEYS` 与 `toViewModel` 投影含 `posture`（`grep -n "posture" packages/quay/src/goal-store.ts` 命中 ≥2 处：类型 + 投影/OWNED_KEYS）
+- [x] scoped 门 `bash scripts/test.sh --for-task gap-goal-posture-blocks-activate --allow-thin` 退出码 0
 
 ## DoD
 

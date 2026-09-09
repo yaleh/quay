@@ -3,7 +3,7 @@ id: gap-git-graph-stride-chip-overlaps-commit-row-text
 title: （已被 gap-git-graph-adopt-git-column-algorithm-and-decorate-labels
   取代）原范围「chip 挪开以免压字」作废——其 AC3 会把人明确否决的「每 strideRows 重复标签」锁进回归测试；改写为「确认 chip
   机件确已移除且标签仍在 ref tip」的独立闭合确认
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -31,10 +31,10 @@ depends_on:
 
 ## AC
 
-- [ ] AC1 chip 机件归零：`grep -c "appendChip" packages/quay/src/serve-git.ts` 输出为 0（当前 4）。
-- [ ] AC2 压字结构上不可能：渲染后的 SVG 中，不存在任何非提交文本元素与提交文本元素的 bbox 相交——相交对数 = 0，且该结论不依赖坐标微调（因为已无浮动标签元素）。
-- [ ] AC3 负控制：测试内显式还原一个浮动 chip 元素并置于提交行同一 y，断言 AC2 的相交对数 > 0 ⇒ 判据能取假，不是因为「页面上没东西」而恒真。
-- [ ] AC4 标签仍然存在（不许用「什么都不画」来满足 AC1/AC2）：`%D` 非空的提交行仍带内联标签，条数与 `git log --pretty=format:'%H%x01%D'` 中 `%D` 非空的提交数相等。
+- [x] AC1 chip 机件归零：`grep -c "appendChip" packages/quay/src/serve-git.ts` 输出为 0（当前 4）。
+- [x] AC2 压字结构上不可能：渲染后的 SVG 中，不存在任何非提交文本元素与提交文本元素的 bbox 相交——相交对数 = 0，且该结论不依赖坐标微调（因为已无浮动标签元素）。
+- [x] AC3 负控制：测试内显式还原一个浮动 chip 元素并置于提交行同一 y，断言 AC2 的相交对数 > 0 ⇒ 判据能取假，不是因为「页面上没东西」而恒真。
+- [x] AC4 标签仍然存在（不许用「什么都不画」来满足 AC1/AC2）：`%D` 非空的提交行仍带内联标签，条数与 `git log --pretty=format:'%H%x01%D'` 中 `%D` 非空的提交数相等。
 
 ## DoD
 

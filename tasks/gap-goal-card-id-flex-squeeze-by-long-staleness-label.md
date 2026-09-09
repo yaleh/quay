@@ -1,7 +1,7 @@
 ---
 id: gap-goal-card-id-flex-squeeze-by-long-staleness-label
 title: dashboard 阶段目标卡片：长三态标签(NOT-EVALUATED)把 GOAL id 挤压截断
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -31,11 +31,11 @@ extra:
 
 ## AC
 
-- [ ] `packages/quay/src/serve-dashboard.ts` 里 `renderGoalCard` 的 id 行模板：id `<a>` 的 style 属性含 `flex:none` 且不含 `overflow:hidden`（`grep -n 'flex:none' packages/quay/src/serve-dashboard.ts` 命中的是 id 这一行，且该行不再出现 `overflow:hidden;text-overflow:ellipsis;white-space:nowrap`）；外层行的 style 属性含 `flex-wrap:wrap`。
-- [ ] `packages/quay/test/gap-dashboard-goal-card-provider-backed.test.mjs` 现有 7 个测试全部通过（`node --experimental-strip-types --test packages/quay/test/gap-dashboard-goal-card-provider-backed.test.mjs` exit 0）——这条必要但不充分，因为现有测试只做文本正则断言，测不出 flex 挤压问题，故需要下一条。
-- [ ] 在该测试文件里新增至少一条布局回归断言：构造一个 8 字符 GOAL id + 零 AC（触发 `NOT-EVALUATED`，13 字符的最长三态标签），断言 `renderGoalCard()` 输出里该 id 对应的 `<a>` 标签的 style 属性字符串含 `flex:none` 且不含 `overflow:hidden`（纯字符串/正则断言即可，不需要起浏览器）——这是本次要补的回归覆盖，不是重跑现有测试。
-- [ ] 一次真实浏览器视觉复核：起一个本地临时 `quay serve` 实例（不得连接/改动生产 100.78.206.100:4173 实例），用 chrome-devtools 或 playwright 截图/量宽验证一个 `NOT-EVALUATED` 状态、8 字符 id 的 GOAL 行，id 完整显示不被省略号截断。
-- [ ] 已用 grep 复核 `packages/quay/src/serve*.ts` 全部文件，确认除 `:783` 外没有其它"`flex:none` 兄弟 + `overflow:hidden`/ellipsis 兄弟"活跃反模式实例（把 grep 命令与命中结果贴进任务/提交记录，而不是只下结论）。
+- [x] `packages/quay/src/serve-dashboard.ts` 里 `renderGoalCard` 的 id 行模板：id `<a>` 的 style 属性含 `flex:none` 且不含 `overflow:hidden`（`grep -n 'flex:none' packages/quay/src/serve-dashboard.ts` 命中的是 id 这一行，且该行不再出现 `overflow:hidden;text-overflow:ellipsis;white-space:nowrap`）；外层行的 style 属性含 `flex-wrap:wrap`。
+- [x] `packages/quay/test/gap-dashboard-goal-card-provider-backed.test.mjs` 现有 7 个测试全部通过（`node --experimental-strip-types --test packages/quay/test/gap-dashboard-goal-card-provider-backed.test.mjs` exit 0）——这条必要但不充分，因为现有测试只做文本正则断言，测不出 flex 挤压问题，故需要下一条。
+- [x] 在该测试文件里新增至少一条布局回归断言：构造一个 8 字符 GOAL id + 零 AC（触发 `NOT-EVALUATED`，13 字符的最长三态标签），断言 `renderGoalCard()` 输出里该 id 对应的 `<a>` 标签的 style 属性字符串含 `flex:none` 且不含 `overflow:hidden`（纯字符串/正则断言即可，不需要起浏览器）——这是本次要补的回归覆盖，不是重跑现有测试。
+- [x] 一次真实浏览器视觉复核：起一个本地临时 `quay serve` 实例（不得连接/改动生产 100.78.206.100:4173 实例），用 chrome-devtools 或 playwright 截图/量宽验证一个 `NOT-EVALUATED` 状态、8 字符 id 的 GOAL 行，id 完整显示不被省略号截断。
+- [x] 已用 grep 复核 `packages/quay/src/serve*.ts` 全部文件，确认除 `:783` 外没有其它"`flex:none` 兄弟 + `overflow:hidden`/ellipsis 兄弟"活跃反模式实例（把 grep 命令与命中结果贴进任务/提交记录，而不是只下结论）。
 
 ## DoD
 
