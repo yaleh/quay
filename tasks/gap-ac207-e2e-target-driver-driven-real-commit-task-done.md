@@ -1,7 +1,7 @@
 ---
 id: gap-ac207-e2e-target-driver-driven-real-commit-task-done
 title: 端到端：目标项目自己的 *-drivers 驱动出真实开发提交且任务翻 done，落 ac=GOAL-009-AC-207 记录（AC-207）
-status: ready
+status: needs-human
 labels:
   - gap
   - delivery-critical
@@ -53,6 +53,8 @@ AC2/AC3/AC5 ⛔ 阻塞（第 4 轮，2026-09-09T22:39Z）：原阻塞（resource
 
 ② **host B/C 的 claude OAuth 过期（环境缺陷）**：host B=orangevps（claude 2.1.261）与 host C=vhs（claude 2.1.229）`claude -p` 均返回 `Failed to authenticate: OAuth session expired and could not be refreshed`；shipped worker-default launcher=claude + auth=key 需 ANTHROPIC_API_KEY（第三方项目未设）⇒ 即便 ① 修好，bare claude 无凭据也 spawn 不出 worker。
 
+AC2/AC3/AC5 ⛔ 阻塞复核（CONTINUE 第 5 轮，2026-09-09T23:01Z）：两阻塞仍未解除——① shipped `plugin/.quay/profiles.yml` 仍只有 manager/outer 两 role（`git show develop:plugin/.quay/profiles.yml` 确认 task-worker 未落 develop；修复任务 `gap-shipped-profiles-missing-worker-roles` 已 ready、AC1/AC2 已勾、AC3 全量 suite 待外部）；② host B/C claude OAuth 未恢复。生产载体 `.quay/productization-verification.jsonl` 仍 0 条 `ac="GOAL-009-AC-207"`（`grep -c` = 0）。AC1/AC4 实现已 done 不变；AC2/AC3/AC5 需外部 e2e 方可验 ⇒ 本任务翻 needs-human 停派，待两阻塞解除后由人翻回 ready 续做。
+
 ## Touches
 
 - plugin/scripts/verify-deliver-coldstart.sh
@@ -61,10 +63,8 @@ AC2/AC3/AC5 ⛔ 阻塞（第 4 轮，2026-09-09T22:39Z）：原阻塞（resource
 
 ## Needs-Human
 
-**执行 2026-09-09T22:39Z — 阻塞于两个新缺陷（CONTINUE 第 4 轮，⛔ 非实现缺陷；AC1/AC4 实现已 done 不变）**
+**执行 2026-09-09T23:01Z — CONTINUE 第 5 轮复核：两阻塞仍未解除（⛔ 非实现缺陷；AC1/AC4 已 done 不变），翻 needs-human 停派**
 
-- 原阻塞（resource-gate 锚 opts.root ⇒ 第三方 exit 127）已解除：`gap-driver-resource-gate-path-anchored-at-root-third-party` 已 done 落 develop（6acf9e8a2）。
-- 本轮实测两个【新】阻塞，均在本任务 Touches 之外：
-  ① **shipped profiles.yml 缺 worker roles（产品缺陷）**：`plugin/.quay/profiles.yml`（quay-init 模板 verbatim 铺进第三方项目）`roles:` 只有 `manager`/`outer`；worker-driver 派发走 `launchArgv("task-worker", …)` → `profile-policy.ts:140` `resolveRole` 抛 `role not found: "task-worker"`。已复现：`resolveRole(readProfilesConfig("<repo>/plugin"), 'task-worker')` THROW，而 dev-tree 根 `.quay/profiles.yml` 有 task-worker/selector/fix-worker/pool-judge/meta-driver 七个 role ⇒ 第三方项目 worker 永不 spawn。
-  ② **host B/C claude OAuth 过期（环境缺陷）**：orangevps（claude 2.1.261）与 vhs（claude 2.1.229）`claude -p` 均 `Failed to authenticate: OAuth session expired and could not be refreshed`；shipped worker-default launcher=claude + auth=key 需 ANTHROPIC_API_KEY（第三方未设）⇒ 即便 ① 修好，bare claude 也 spawn 不出。
-- 恢复路径（需人 + 新任务）：(a) 立新 gap 任务补齐 shipped `plugin/.quay/profiles.yml` 的 worker roles（与 dev-tree 根 profiles.yml role 键集对齐）；(b) 人重认证 host B/C claude OAuth（或为 worker role 配 ANTHROPIC_API_KEY / claude-deepseek）。两项落地后复跑 `verify-deliver-coldstart.sh --ac207-e2e` 使 criterion exit 0，再 retreat 本任务续验 AC2/AC3/AC5。
+- 阻塞①（产品缺陷）：shipped `plugin/.quay/profiles.yml` 缺 worker roles ⇒ worker-driver `resolveRole("task-worker")` 抛 `role not found`。修复任务 `gap-shipped-profiles-missing-worker-roles` 已 ready（AC1/AC2 已勾、AC3 全量 suite 待外部），尚未落 develop。
+- 阻塞②（环境缺陷）：host B/C claude OAuth 过期，`claude -p` 无法认证 ⇒ 第三方项目 worker 无法 spawn。
+- 恢复路径（需人）：(a) 待 `gap-shipped-profiles-missing-worker-roles` 落 develop（补齐 shipped profiles.yml worker roles）；(b) 人重认证 host B/C claude OAuth（或为 worker role 配 ANTHROPIC_API_KEY）。两项落地后：人把本任务翻回 ready，worker 续做 `verify-deliver-coldstart.sh --ac207-e2e` 使 criterion exit 0，再验 AC2/AC3/AC5。
