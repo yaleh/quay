@@ -16,7 +16,7 @@ import path from "node:path";
 
 import { resolveResourceGateScript, resourceGateCheck } from "../scripts/driver-shared.ts";
 
-/** 一个临时 plugin root：<dir>/scripts/resource-gate.sh 按 opts.withScript 决定在不在。 */
+/** 一个临时 plugin root：其 scripts 子目录下按 opts.withScript 决定放不放 resource-gate.sh。 */
 function makePluginRoot(opts = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "drv-shared-"));
   const scripts = path.join(root, "scripts");
