@@ -73,8 +73,9 @@ test("AC2: other fields render unchanged — outcome + suite + view/download lin
     fanInLog: "fan-in-gap-x-abc.log",
   });
   const html = renderFanInCell("gap-x", record, {});
-  // outcome still renders (landed strong)
-  assert.ok(html.includes("<strong>landed</strong>"), "landed outcome still renders");
+  // outcome still renders (landed tag badge — gap-dashboard-status-tag-badges; the merged
+  // renderFanInCell renders the outcome as a .tag span, not a bare <strong>)
+  assert.ok(html.includes(`<span class="tag tag-positive">landed</span>`), "landed outcome still renders");
   // suite still renders WITHOUT a monospace span (not a hash/duration — unchanged behavior)
   assert.ok(html.includes("suite done"), "suite outcome still renders");
   assert.ok(!html.includes(`<span style="${MONO_STACK}">suite`), "suite is not monospace-wrapped");
