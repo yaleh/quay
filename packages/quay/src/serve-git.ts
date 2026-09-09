@@ -7,13 +7,20 @@
 // commit with inline `%D` decoration labels (a branch name appears ONLY on the commit a ref points at).
 // The retired lane model's fold/expand, stride chips, hit rects, fork/merge/open classification and
 // 「窗口外分叉」 markers are all gone — the page has zero click controls.
+//
+// gap-git-graph-task-view-aggregate-commits-by-task-id: a SECOND, opt-in view (`?view=task`) groups the
+// SAME commits by the task id extracted from their subject (taskIdFromSubject) instead of by git column
+// topology. It is a project-specific heuristic over driver commit-text conventions, NOT git semantics,
+// so it is an opt-in view — the default stays the git view (AC5 byte-identity). The task view's output
+// (TaskGraphLayout) is model-independent: it promises only 「每提交一行 + 分组归属 + unattributedCount」,
+// and never references the retired fork/merge/open/overflow swimlane fields (AC7).
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { readGitHistory, type GitHistoryResult, GIT_HISTORY_LIMIT } from "./observation.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome } from "./serve-render.ts";
+import { readGitHistory, type GitHistoryCommit, type GitHistoryResult, GIT_HISTORY_LIMIT } from "./observation.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2 } from "./serve-render.ts";
 
 // ── Graph-track geometry ────────────────────────────────────────────────────────────────────────────
 // One fixed text column on the right; the graph track on the left (the git log --graph / gitk model).
@@ -134,6 +141,117 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
   return { rows, commitCount: rows.length, mergeCount: rows.filter((r) => r.parents > 1).length };
 }
 
+/**
+ * Extract a task id from a commit SUBJECT, covering this repo's four structured commit-message
+ * shapes (gap-git-graph-task-view-aggregate-commits-by-task-id):
+ *
+ *   1. `Merge branch 'develop' into task/<id>`   — the ff-carried dev-merge
+ *   2. `tasks: 翻 <id> done（driver 机械 fan-in）`  — the fan-in landing
+ *   3. `tasks: <id> task_write` / `tasks: <id> todo→ready（promotion-driver）` / `tasks: reset <id> done→ready`
+ *   4. `<id>: <实现说明>`                          — an implementation commit, the id before the colon
+ *   5. `<type>: <id> <说明>`                       — a conventional-commit type, then the id (e.g.
+ *      `test: gap-… 独立闭合确认` / `fix: gap-… — …`); the id's first segment must be a KNOWN task-id
+ *      prefix so a generic slug (`chore: re-anchor …`) is never mistaken for one (AC6 reconciliation)
+ *
+ * Unrecognised subjects (e.g. `chore: re-anchor …`) return `null`, never a guess (fail-visible —
+ * 硬规则 3b). Form 4 distinguishes a task id from a conventional-commit type (`chore:`/`fix:`/…) by
+ * requiring at least one `-` in the prefix: task ids in this repo are multi-segment slugs
+ * (`gap-…`, `DIR-…`, `exp-…`), whereas a conventional type is a single bare token. This is a
+ * project-specific heuristic over driver commit-text conventions, not git semantics — when the
+ * convention changes the task view degrades, while the git view is unaffected (硬规则 4b).
+ */
+export function taskIdFromSubject(subject: string): string | null {
+  const s = String(subject).trim();
+  if (!s) return null;
+
+  // Form 1 — the task branch is always named `task/<id>` (quoted, or in the unquoted `into` clause).
+  const mergeTask = s.match(/\btask\/([A-Za-z0-9][A-Za-z0-9_-]*)/);
+  if (mergeTask) return mergeTask[1];
+
+  // Forms 2+3 — `tasks:` prefix, optionally led by a verb particle (`翻`/`reset`) that precedes the id.
+  if (s.startsWith("tasks:")) {
+    const rest = s.slice("tasks:".length).trim();
+    const m = rest.match(/^(?:翻\s+|reset\s+)?([A-Za-z0-9][A-Za-z0-9_-]*)/);
+    if (m) return m[1];
+    return null;
+  }
+
+  // Form 4 — `<id>: <说明>`, the id a multi-segment slug (≥ one `-`).
+  const impl = s.match(/^([A-Za-z0-9][A-Za-z0-9_-]*-[A-Za-z0-9_-]+):\s/);
+  if (impl) return impl[1];
+
+  // Form 5 — `<type>: <id> <说明>`: a conventional-commit type prefix, then a task id. The id's first
+  // segment must be a KNOWN task-id prefix, so a generic verb slug after the type (`chore: re-anchor
+  // quay-init-closure-ratchet baseline`) or a page/file name (`fix: git-history 分页页 …`) is never
+  // mistaken for a task id (AC1) — fail-visible, not a guess.
+  const typed = s.match(/^(?:test|fix|feat|chore|docs|refactor|perf|style|verification):\s+((?:gap|DIR|exp5|QN|QX|QC|QW|QENG|ARCH|cand|SU|PROBE|TEST)-[A-Za-z0-9][A-Za-z0-9_-]*)/);
+  if (typed) return typed[1];
+
+  return null;
+}
+
+// ── The task view (gap-git-graph-task-view-aggregate-commits-by-task-id) ───────────────────────────
+
+/** The view selector: `git` = the git DAG topology (default); `task` = task-id grouping. */
+export type GitGraphView = "git" | "task";
+
+/** One task-id group — every commit whose subject yields this task id, in git emission order. */
+export interface TaskGraphGroup {
+  id: string;
+  commits: GitHistoryCommit[];
+  /** Newest/oldest commit landing time within the group. */
+  firstT: number;
+  lastT: number;
+}
+
+/**
+ * The task view's layout. Deliberately model-INDEPENDENT (AC7): it promises only groups + counts,
+ * never the retired fork/merge/open/overflow swimlane fields, so it survives the git-column rewrite
+ * of gap-git-graph-adopt-git-column-algorithm-and-decorate-labels. The identity
+ * `commitCount − Σ group commits = unattributedCount` holds (AC4), and the unattributed count is an
+ * explicit field — never conflated with "no unattributed commits" (硬规则 3b).
+ */
+export interface TaskGraphLayout {
+  /** Task-attributed groups, most-recently-active first. The unattributed commits are NOT a group. */
+  groups: TaskGraphGroup[];
+  commitCount: number;
+  unattributedCount: number;
+}
+
+/**
+ * The task-view grouping function — the ONLY thing that differs from the git view: commits are grouped
+ * by `taskIdFromSubject(subject)`, not by git ref/merge topology. Commits no task id could be recovered
+ * from are counted in `unattributedCount` (shown explicitly on the page, never "no unattributed"). PURE
+ * and deterministic on its input; references no swimlane field (AC7).
+ */
+export function layoutTaskGraph(history: GitHistoryResult): TaskGraphLayout | null {
+  if (history.status !== "ok" || history.commits.length === 0) return null;
+  const byTask = new Map<string, GitHistoryCommit[]>();
+  let unattributedCount = 0;
+  for (const c of history.commits) {
+    const id = taskIdFromSubject(c.subject);
+    if (id == null) {
+      unattributedCount++;
+      continue;
+    }
+    const list = byTask.get(id);
+    if (list) list.push(c);
+    else byTask.set(id, [c]);
+  }
+  const groups: TaskGraphGroup[] = [...byTask.entries()].map(([id, commits]) => {
+    let firstT = commits[0].t;
+    let lastT = commits[0].t;
+    for (const c of commits) {
+      if (c.t < firstT) firstT = c.t;
+      if (c.t > lastT) lastT = c.t;
+    }
+    return { id, commits, firstT, lastT };
+  });
+  // Most-recently-active task first — the view answers "which tasks moved recently".
+  groups.sort((a, b) => b.lastT - a.lastT || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return { groups, commitCount: history.commits.length, unattributedCount };
+}
+
 /** Format a coverage span (seconds) as "N 小时" / "N 天". Mirrored verbatim by the client loader. */
 export function formatCoverageSpan(sec: number): string {
   if (sec >= 86400) {
@@ -154,6 +272,12 @@ export function coverageSpanSeconds(layout: GitGraphLayout): number | null {
     if (r.t > max) max = r.t;
   }
   return max - min;
+}
+
+/** `unix seconds` → `YYYY-MM-DD HH:MM:SS` (local). Used by the task view's group summaries. */
+function isoTime(t: number): string {
+  const d = new Date(t * 1000);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 }
 
 // ── D3 inlining (the third-party library the retired 「零客户端 JS」 invariant now permits) ──
@@ -373,11 +497,76 @@ export function gitGraphLegendHtml(): string {
 }
 
 /**
- * Render the full /git-history HTML page. The graph is CLIENT-rendered from the embedded JSON via the
- * inlined D3 library. The retired summary table + fold/expand controls are gone — the page is a pure
- * read-only vertical timeline, aligned to `git log --graph --all --oneline --decorate`.
+ * The view switch control rendered on BOTH views. `view` is the active view (its label is bold, not a
+ * link); the other view is a link to `?view=<other>`. Default (git) and `?view=git` render this
+ * identically, so AC5's byte-identity holds.
  */
-export function renderGitHistoryPage(history: GitHistoryResult): string {
+export function gitHistoryViewToggle(view: GitGraphView): string {
+  const git = view === "git"
+    ? html`<strong>git 拓扑</strong>`
+    : html`<a href="?view=git">git 拓扑</a>`;
+  const task = view === "task"
+    ? html`<strong>任务分组</strong>`
+    : html`<a href="?view=task">任务分组</a>`;
+  return html`<div class="meta" style="margin:0.5rem 0;font-size:0.8rem;color:var(--color-neutral-700)">视图切换：${git} · ${task}（默认 git 拓扑；任务分组是项目特定启发式）</div>`;
+}
+
+/**
+ * Render the task view's body: one native `<details>` per task group (the summary links the task id to
+ * its /task/<id> detail page and shows the commit count + first/last landing time; the body lists the
+ * commits in git emission order), plus the explicit unattributed count. Zero client JS — the native
+ * `<details>` element is the "点开一个任务分组" interaction, no custom renderer.
+ */
+function renderTaskGroupsHtml(history: GitHistoryResult): string {
+  const layout = layoutTaskGraph(history);
+  if (!layout) return "";
+  const groupBlocks = layout.groups.map((g) => {
+    const name = html`<a href="/task/${encodeURIComponent(g.id)}">${escapeHtml(g.id)}</a>`;
+    const commitsHtml = g.commits.map((c) => html`<li><code>${escapeHtml(c.hash.slice(0, 7))}</code> ${escapeHtml(c.subject)}</li>`).join("\n");
+    return html`<details class="task-group" style="margin:0.4rem 0">
+      <summary style="cursor:pointer">${name} · ${g.commits.length} 条提交 · ${escapeHtml(isoTime(g.firstT))} ~ ${escapeHtml(isoTime(g.lastT))}</summary>
+      <ul style="list-style:none;padding-left:1rem;margin:0.3rem 0">${commitsHtml}</ul>
+    </details>`;
+  }).join("\n");
+  const unattributed = html`<details class="task-group" style="margin:0.4rem 0">
+    <summary style="cursor:pointer"><span style="color:var(--color-neutral-500)">未归属（无 task id）</span> · ${layout.unattributedCount} 条</summary>
+    <ul style="list-style:none;padding-left:1rem;margin:0.3rem 0">${history.commits.filter((c) => taskIdFromSubject(c.subject) === null).map((c) => html`<li><code>${escapeHtml(c.hash.slice(0, 7))}</code> ${escapeHtml(c.subject)}</li>`).join("\n")}</ul>
+  </details>`;
+  return html`<h2>任务分组（按 task id 聚合）</h2>
+    <div class="task-groups">${groupBlocks}${unattributed}</div>`;
+}
+
+/**
+ * Render the full /git-history HTML page. The git view's graph is CLIENT-rendered from the embedded
+ * JSON via the inlined D3 library; the task view (`?view=task`) is a SERVER-rendered task-id grouping.
+ * `view` selects the grouping: `"git"` (default — the git DAG topology) or `"task"` (gap-git-graph-
+ * task-view-aggregate-commits-by-task-id). The default is byte-identical to `?view=git` (AC5).
+ * Exported so the ACs can test the rendered HTML directly on a pure GitHistoryResult.
+ */
+export function renderGitHistoryPage(history: GitHistoryResult, view: GitGraphView = "git"): string {
+  if (view === "task") {
+    const statusNote = history.status === "error"
+      ? html`<p class="meta"><strong>读失败</strong> — ${escapeHtml(history.reason || "")}</p>`
+      : history.status === "empty"
+        ? html`<p class="meta"><strong>无数据</strong> — ${escapeHtml(history.reason || "")}</p>`
+        : "";
+    const taskLayout = history.status === "ok" ? layoutTaskGraph(history) : null;
+    const nCommits = history.commits.length;
+    const mergeCount = history.commits.filter((c) => c.parents > 1).length;
+    const unattributedCount = taskLayout ? taskLayout.unattributedCount : 0;
+    const groupsHtml = renderTaskGroupsHtml(history);
+    const guide = html`<p class="meta"><strong>任务分组 = 按 commit subject 里的 task id 聚合（项目特定启发式，非 git 语义）。</strong> 一组 = 一个任务从立案、晋升、实现到 fan-in 的完整轨迹；无法归属任何 task id 的提交计入「未归属」组（<strong>${unattributedCount}</strong> 条）。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并。默认视图仍是 git 拓扑，切换回来不会丢任何信息。</p>`;
+    return html`<!doctype html>
+      <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — task-id grouping (project-specific heuristic)">${modernistStyles()}${pageStyles()}<title>Git history — 任务分组</title></head>
+      <body>${renderMobileChrome("git", "git history")}${renderSiteNav("git")}<main id="main">
+        <h1>Git History — 任务分组时间轴</h1>
+        ${gitHistoryViewToggle(view)}
+        ${guide}
+        ${statusNote}
+        ${groupsHtml}
+      </main></body></html>`;
+  }
+
   const statusNote = history.status === "error"
     ? html`<p class="meta"><strong>读失败</strong> — ${escapeHtml(history.reason || "")}</p>`
     : history.status === "empty"
@@ -406,6 +595,7 @@ export function renderGitHistoryPage(history: GitHistoryResult): string {
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — vertical commit timeline (client-rendered, git log --graph aligned)">${modernistStyles()}${pageStyles()}<title>Git history — vertical commit timeline</title></head>
     <body>${renderMobileChrome("git", "git history")}${renderSiteNav("git")}<main id="main">
       <h1>Git History — 提交纵向时间轴</h1>
+      ${gitHistoryViewToggle(view)}
       <p class="meta"><strong>纵轴 = git 发射顺序（新的在上）。</strong> 每行一个提交；分支标签只在 ref 指向的那个提交上内联显示（git decorate 语义）。菱形 = 合并提交。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并（跨所有本地分支）；已加载窗口覆盖 <span id="git-graph-coverage">${escapeHtml(coverageText)}</span>。滚动到图表底部自动加载更早的提交。</p>
       ${statusNote}
       ${graph}
@@ -420,6 +610,7 @@ export async function handleGitHistory(
   req: IncomingMessage,
   res: ServerResponse,
   cfg: { workspaceRoot: string },
+  url: URL,
 ): Promise<void> {
   let history: GitHistoryResult;
   try {
@@ -428,7 +619,7 @@ export async function handleGitHistory(
     history = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, commits: [], head: null, heads: {}, mainlineHead: null };
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderGitHistoryPage(history));
+  res.end(renderGitHistoryPage(history, gitHistoryViewOf(url)));
 }
 
 function writeJson(res: ServerResponse, status: number, obj: unknown): void {
@@ -437,8 +628,10 @@ function writeJson(res: ServerResponse, status: number, obj: unknown): void {
 }
 
 /** The JSON payload /git-history.json returns — a COMPLETE GitGraphLayout (the client re-renders it
- *  whole, appending OLDER rows on scroll) plus the window's oldest/newest commit times. */
-export function gitHistoryJson(history: GitHistoryResult): {
+ *  whole, appending OLDER rows on scroll) plus the window's oldest/newest commit times. The task view
+ *  (`view="task"`) returns the task grouping instead: `groups` + the explicit `unattributedCount`
+ *  (AC4) — the git view's payload is unchanged and carries neither field. */
+export function gitHistoryJson(history: GitHistoryResult, view: GitGraphView = "git"): {
   status: GitHistoryResult["status"];
   reason: string | null;
   commitCount: number;
@@ -446,19 +639,38 @@ export function gitHistoryJson(history: GitHistoryResult): {
   newestT: number | null;
   rows: GitGraphRow[];
   mergeCount: number;
+  groups?: TaskGraphGroup[];
+  unattributedCount?: number;
 } {
   if (history.status !== "ok") {
     return { status: history.status, reason: history.reason, commitCount: 0, oldestT: null, newestT: null, rows: [], mergeCount: 0 };
-  }
-  const layout = layoutGitGraph(history);
-  if (!layout) {
-    return { status: "empty", reason: history.reason ?? "git 仓库无提交记录", commitCount: 0, oldestT: null, newestT: null, rows: [], mergeCount: 0 };
   }
   let oldestT: number | null = null;
   let newestT: number | null = null;
   for (const c of history.commits) {
     if (oldestT === null || c.t < oldestT) oldestT = c.t;
     if (newestT === null || c.t > newestT) newestT = c.t;
+  }
+  if (view === "task") {
+    const taskLayout = layoutTaskGraph(history);
+    if (!taskLayout) {
+      return { status: "empty", reason: history.reason ?? "git 仓库无提交记录", commitCount: 0, oldestT: null, newestT: null, rows: [], mergeCount: 0, groups: [], unattributedCount: 0 };
+    }
+    return {
+      status: "ok",
+      reason: null,
+      commitCount: taskLayout.commitCount,
+      oldestT,
+      newestT,
+      rows: [],
+      mergeCount: 0,
+      groups: taskLayout.groups,
+      unattributedCount: taskLayout.unattributedCount,
+    };
+  }
+  const layout = layoutGitGraph(history);
+  if (!layout) {
+    return { status: "empty", reason: history.reason ?? "git 仓库无提交记录", commitCount: 0, oldestT: null, newestT: null, rows: [], mergeCount: 0 };
   }
   return {
     status: "ok",
@@ -490,5 +702,12 @@ export async function handleGitHistoryJson(
   } catch (err) {
     history = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, commits: [], head: null, heads: {}, mainlineHead: null };
   }
-  writeJson(res, 200, gitHistoryJson(history));
+  writeJson(res, 200, gitHistoryJson(history, gitHistoryViewOf(url)));
+}
+
+/** Parse the `?view=` selector into a view. `"task"` → task grouping; anything else (including the
+ *  absent param) → the DEFAULT git topology (fail-closed to git — a heuristic never becomes the
+ *  default truth, gap-git-graph-task-view-aggregate-commits-by-task-id AC5). */
+export function gitHistoryViewOf(url: URL | undefined): GitGraphView {
+  return url?.searchParams.get("view") === "task" ? "task" : "git";
 }

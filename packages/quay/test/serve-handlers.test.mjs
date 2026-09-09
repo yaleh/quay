@@ -171,6 +171,51 @@ test("integration: GET /git-history serves the vertical-graph JSON payload + an 
   }
 });
 
+test("?view=task routing: /git-history serves the task view; default = ?view=git (byte-identical)", async () => {
+  const { ws, tasksDir } = makeWorkspace("gh-view-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: ws });
+    fs.writeFileSync(path.join(ws, "README.md"), "git-history view fixture\n");
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], { cwd: ws });
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"], { cwd: ws });
+    const nowSec = Math.floor(Date.now() / 1000);
+    gitCommit(ws, "chore: baseline", { t: nowSec - 400 });
+    gitCommit(ws, "gap-1: implement", { t: nowSec - 300 });
+    gitCommit(ws, "tasks: 翻 gap-1 done（driver 机械 fan-in）", { t: nowSec - 200 });
+    createStore(tasksDir).write("gap-1", { title: "view task", status: "todo" });
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const def = await get(port, "/git-history");
+    const gitView = await get(port, "/git-history?view=git");
+    const taskView = await get(port, "/git-history?view=task");
+    const bogus = await get(port, "/git-history?view=bogus");
+
+    assert.equal(def.status, 200);
+    assert.equal(gitView.status, 200);
+    assert.equal(taskView.status, 200);
+    assert.equal(def.body, gitView.body, "default /git-history is byte-identical to ?view=git");
+    assert.equal(def.body, bogus.body, "an unknown ?view= value fails closed to the git default");
+    assert.ok(def.body.includes("git-graph-data"), "the default page embeds the git-view data script");
+    assert.ok(!def.body.includes("任务分组（按 task id 聚合）"), "the default page does NOT render the task grouping");
+    assert.ok(taskView.body.includes("任务分组（按 task id 聚合）"), "?view=task renders the task grouping");
+    assert.ok(taskView.body.includes("未归属"), "?view=task shows the unattributed group explicitly");
+    assert.ok(taskView.body.includes("gap-1"), "the task group names the task id");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 test("AC5: /git-history degrades to 200 「无数据」 on a non-git workspace (never 500, no graph mount)", async () => {
   const { ws, tasksDir } = makeWorkspace("gh-deg-");
   const cwd0 = process.cwd();
