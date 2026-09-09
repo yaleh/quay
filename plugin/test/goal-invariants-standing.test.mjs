@@ -30,6 +30,7 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
 import { collectSyncHealth } from "../scripts/meta-driver.ts";
+import { createGoalStore } from "../../packages/quay/src/goal-store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -230,4 +231,31 @@ test("AC-187 空作用域 — 载体缺失 ⇒ 全零（可区分：不是 notFf
   assert.equal(h.notFf, 0);
   assert.equal(h.notFfBenign, 0);
   assert.equal(h.notFfBehind, 0);
+});
+
+// ── gap-goal-store-write-surface-semantics：AC2 / AC3 两条常设不变式 ────────────────────────────
+// 与 AC-182/183/187 同源（gap-standing-invariants-not-reevaluated-move-to-suite）：本任务第 1/2/3
+// 步的「别再退化」那半是 hermetic 常设不变式——goal 层做不到「定期重跑」（goal-driver 只评估
+// active goal 且全过就机械 flip），套件每次都跑、永不关闭、不占 goal cap。故下沉到此文件，⛔ 不
+// 写成 goal AC（`achieved` 不可逆，活性/常设判据写成 goal AC 是类别错误）。
+
+/** AC2（P2）常设：goal-driver 不再回传 origin 快照——回传会在「人改了 origin 而快照是旧的」时
+ *  静默覆盖新值（P2 竞态根因）。按位置判定（源码 grep），⛔ 不按注释/字符串提及。 */
+test("AC2 常设 — goal-driver.ts 无 `origin ?? \"\"` 回传（P2 竞态根因已删）", () => {
+  const src = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "goal-driver.ts"), "utf8");
+  assert.equal(src.includes('origin ?? ""'), false, "goal-driver.ts 不得再回传 origin 快照（P2）");
+});
+
+/** AC3（P4/P5）常设：update 清空 criterion 被拒（曾 exit 0 静默写成空串）；反向 status-only 放行
+ *  （机械 I2 flip 不被挡）。hermetic——用 createGoalStore 在临时目录上真写，⛔ 不注入 seam。 */
+test("AC3 常设 — update 清空 criterion 被拒；status-only 放行（机械 flip 不被挡）", () => {
+  const dir = tmpDir("gi-ac3-");
+  const s = createGoalStore(path.join(dir, "goals"));
+  const GOAL_BODY = "goal body: background, scope, non-goals and exit conditions — long enough to satisfy the 40-char minimum";
+  s.write("GOAL-001", { title: "g", status: "active", origin: "o", body: GOAL_BODY });
+  s.write("AC-001", { title: "a", status: "active", goal: "GOAL-001", criterion: "true", expect: "expected", origin: "o" });
+  assert.throws(() => s.write("AC-001", { criterion: "" }), /criterion/);
+  // status-only 写入不碰内容字段 ⇒ 不校验内容，机械 flip 放行。
+  s.write("AC-001", { status: "achieved" });
+  assert.equal(s.get("AC-001").status, "achieved");
 });
