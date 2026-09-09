@@ -2410,19 +2410,25 @@ export function clearGitHistoryCache(): void {
   gitHistoryCache.clear();
 }
 
-export function readGitHistory(root: string, { limit = GIT_HISTORY_LIMIT, before = null, nowMs = Date.now() }: { limit?: number; before?: number | null; nowMs?: number } = {}): GitHistoryResult {
-  const key = `${root}\n${limit}\n${before ?? ""}`;
+export function readGitHistory(root: string, { limit = GIT_HISTORY_LIMIT, before = null, skip = null, nowMs = Date.now() }: { limit?: number; before?: number | null; skip?: number | null; nowMs?: number } = {}): GitHistoryResult {
+  const key = `${root}\n${limit}\n${before ?? ""}\n${skip ?? ""}`;
   const hit = gitHistoryCache.get(key);
   if (hit && Date.now() - hit.at < GIT_HISTORY_CACHE_TTL_MS) return hit.result;
-  const result = readGitHistoryUncached(root, { limit, before, nowMs });
+  const result = readGitHistoryUncached(root, { limit, before, skip, nowMs });
   gitHistoryCache.set(key, { at: Date.now(), result });
   return result;
 }
 
-function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, before = null, nowMs = Date.now() }: { limit?: number; before?: number | null; nowMs?: number } = {}): GitHistoryResult {
+function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, before = null, skip = null, nowMs = Date.now() }: { limit?: number; before?: number | null; skip?: number | null; nowMs?: number } = {}): GitHistoryResult {
   try {
     const args = ["-C", root, "log", "--all", "--topo-order", `-n ${limit}`];
-    if (before !== null && Number.isFinite(before)) args.push(`--before=${before}`);
+    // gap-git-graph-pagination-appends-page-relative-col-and-torow: `skip` is the EMISSION-ORDER cursor
+    // (`git log --skip`) that pages `--all --topo-order` contiguously — a `--before=<t>` timestamp filter
+    // reorders/drops commits relative to the single `-n <loaded>` walk, so it can never reconstruct the
+    // exact git emission sequence. `skip` takes precedence when both are present; `before` is retained
+    // for backward-compat callers (and the self-chain cursor's timestamp watermark).
+    if (skip !== null && Number.isFinite(skip) && skip > 0) args.push(`--skip=${skip}`);
+    else if (before !== null && Number.isFinite(before)) args.push(`--before=${before}`);
     args.push("--pretty=format:%H%x1f%P%x1f%D%x1f%ct%x1f%s");
     const out = execFileSync("git", args, { encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "pipe"] });
 

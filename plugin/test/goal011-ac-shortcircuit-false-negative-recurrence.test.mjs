@@ -20,13 +20,26 @@
 //
 // 三态处理同 AC-220：node:test 退出码是唯一信号通道，无法区分的情形一律 fail-closed，不放行。
 //
-// Run: node --no-warnings --experimental-strip-types --test plugin/test/goal011-ac-shortcircuit-false-negative-recurrence.test.mjs
+// ⚠️ 事故记录 + 修法（2026-09-09T15:xx，本文件落地约 1h 后发现，与 AC-220 同一根因、同一修法）：
+// 本文件在 plugin/test/*.test.mjs glob 下会被 scripts/test.sh 的全量 suite 无条件扫到；落地 1h
+// 后生产真出现一次 "AC 未全勾" 短路事件（gap-ac207-e2e-target-driver-driven-real-commit-task-done），
+// 判据据实 FAIL，随即拖垮两个【与 GOAL-011 无关】的其它任务的 fan-in（gap-ac201-productization-*、
+// gap-goal-gap-done-task-not-traction-respawns-every-round）——本判据的读者本该只是 goal-driver 的
+// criterion spawn（AC-221 未 active 前甚至不会被调），⛔ 不该参与决定其它任务能不能落地。修法同
+// AC-220：照搬本仓库已有的 QUAY_TEST_LIVE_GITHUB 先例（packages/quay/test/cli.test.mjs），默认
+// SKIP、不断言、exit 0；只有显式设置 QUAY_GOAL_CRITERION_LIVE=1（AC-221 的 criterion 字段自带这个
+// 前缀）才跑真判据。
+//
+// Run: QUAY_GOAL_CRITERION_LIVE=1 node --no-warnings --experimental-strip-types --test plugin/test/goal011-ac-shortcircuit-false-negative-recurrence.test.mjs
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { mainCheckoutRoot } from "../scripts/repo-root.ts";
+
+const LIVE_ENV = "QUAY_GOAL_CRITERION_LIVE";
+const liveEnabled = process.env[LIVE_ENV] === "1";
 
 const LANDING_SHA = "bdbdb368d";
 const LANDING_CUTOFF = "2026-09-09T11:28:11Z";
@@ -60,6 +73,10 @@ function isShortCircuit(rec) {
 // 若这里命中 0 条，说明判据的正则/字段名已经偏离生产载体的实际形状，不能信任它在落地后的 0 计数。
 
 test("负控制：SHORTCIRCUIT_PATTERN 命中至少一条落地前的历史短路样本（判据本身没坏）", () => {
+  if (!liveEnabled) {
+    console.log(`SKIP: 未设置 ${LIVE_ENV}=1——见文件头注的事故记录,默认在全量 suite 里不断言。`);
+    return;
+  }
   const records = readWorkerOutcomeLines();
   const preLanding = records.filter((r) => r.ts && r.ts < LANDING_CUTOFF && isShortCircuit(r));
   assert.ok(
@@ -74,6 +91,10 @@ test("负控制：SHORTCIRCUIT_PATTERN 命中至少一条落地前的历史短�
 test(
   `落地(${LANDING_SHA} / ${LANDING_CUTOFF})后 "AC 未全勾" 短路事件实测发生次数为 0`,
   () => {
+    if (!liveEnabled) {
+      console.log(`SKIP: 未设置 ${LIVE_ENV}=1——见文件头注的事故记录,默认在全量 suite 里不断言。`);
+      return;
+    }
     const records = readWorkerOutcomeLines();
     const postLanding = records.filter(
       (r) => typeof r.ts === "string" && r.ts >= LANDING_CUTOFF && isShortCircuit(r)

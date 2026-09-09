@@ -90,6 +90,12 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
     "marketplace leak: a user-level quay@quay enabledPlugins entry is flagged (AC-161)");
   assert.match(r.stdout, /marketplace-register-fail\(AC5\) MP_REGISTER_OK=0 MP_REGISTER_RC=1 reason_present=1/,
     "marketplace register-failure (AC5): a non-zero register exit is recorded structurally, not swallowed");
+  // AC-203 (gap-driver-runtime-driver-path-anchored-at-project-root-not-dist): the carrier record writes
+  // the five criterion fields verbatim and refuses a dead-driver record (fail-closed, 缺值≠合格).
+  assert.match(r.stdout, /ac203-record\(valid\) wrote=1 fields_ok=1/,
+    "AC-203 record: valid record written with has_plugin_dir=false literal + driver_alive=1 + carrier_records>0");
+  assert.match(r.stdout, /ac203-record\(dead-driver\) refused=1/,
+    "AC-203 record: a dead-driver (driver_alive=0) record is refused — the criterion can take false");
   // AC-201 controls (gap-ac201-productization-verification-build-sha-tgz-sha256-record):
   // the --selfcheck must ALSO exercise the AC-201 record append positive/negative controls — positive
   // injects a 40-hex BUILD_SHA + 64-hex SHA256_QUAY and asserts a top-level ac=GOAL-009-AC-201 record
@@ -107,6 +113,15 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
     "positive control: a 40-hex BUILD_SHA ⇒ a GOAL-009 record with top-level build_sha is written");
   assert.match(r.stdout, /goal009-anchor\(negative\) rc=1 lines=1→1/,
     "negative control: an empty BUILD_SHA ⇒ no write and non-zero (fail-closed, 硬规则 3b)");
+  // AC-206 (gap-ac206-goals-tasks-dual-carrier-quay-init-goals-closed-set): the dual-carrier record
+  // writes the four boolean fields verbatim, refuses an empty-host record (fail-closed), and truthfully
+  // writes goals_dir_created=false when goals/ is missing (缺件如实非静默, 缺值≠合格).
+  assert.match(r.stdout, /ac206-record\(valid\) wrote=1 fields_ok=1/,
+    "AC-206 record: valid record written with all four boolean fields true (dual carrier)");
+  assert.match(r.stdout, /ac206-record\(goals-missing\) neg_ok=1/,
+    "AC-206 record: goals/ missing ⇒ goals_dir_created=false still written (缺件如实非静默)");
+  assert.match(r.stdout, /ac206-record\(empty-host\) refused=1/,
+    "AC-206 record: empty host ⇒ refused (fail-closed, 缺值≠合格)");
 });
 
 test("AC1 — --selfcheck is hermetic: it does not touch a real install and runs offline", () => {

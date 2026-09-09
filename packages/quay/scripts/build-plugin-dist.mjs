@@ -85,15 +85,20 @@ const CORE_PATH_JOIN_TS_RE = /path\.join\([^)]*"scripts"[^)]*"([A-Za-z0-9_.-]+\.
 // Reverse-looked-up to the same-named `.ts` (if it exists) so the entry ships as `dist/<name>.js`.
 const DIST_JS_RE = /dist\/([A-Za-z0-9_.-]+)\.js/g;
 
-// Plugin source spawns ITSELF in two literal forms that none of the other scans cover — they are
+// Plugin source spawns ITSELF in literal forms that none of the other scans cover — they are
 // not in Core source (so scanCoreReferences misses them) and carry no `node ` invocation prefix
-// (so INVOCATION_RE misses them). Both live in driver-runtime.ts, and a third-party
+// (so INVOCATION_RE misses them). All live in driver-runtime.ts, and a third-party
 // `quay driver start --kind X` resolves them by path:
 //   1. the DRIVER_KINDS data table's `driver: "X.ts"` field — the spawn target of each driver kind
 //      (`quay driver start --kind promotion` → `<root>/plugin/scripts/promotion-driver.ts`), a
 //      string-literal data table esbuild never inlines into the caller's bundle;
 //   2. a `path.join(…, "plugin", "scripts", "X.ts")` spawn helper (notifyManager → send-to-session.ts,
-//      defaultReadyPoolArgv → ready-pool-check.ts).
+//      defaultReadyPoolArgv → ready-pool-check.ts) — the PRE-AC-203 form, migrated off in
+//      gap-driver-runtime-driver-path-anchored-at-project-root-not-dist;
+//   3. a `resolveKernelSibling("X.ts")` call (the AC-203 form — the kernel resolves sibling scripts
+//      relative to its OWN install location, not opts.root; notifyManager → send-to-session.ts,
+//      defaultReadyPoolArgv → ready-pool-check.ts). Kept alongside form 2 so the scan stays
+//      derivation-complete across the migration.
 // The scan is SCOPED to driver-runtime.ts — the file the AC-202 criterion itself reads — because the
 // broad `"plugin", "scripts", "X.ts"` literal ALSO matches non-spawn readFile text-reads elsewhere
 // (axis-generator.ts / precommit-guard.ts / rhythm-consumer-check.ts read runner-static-gate.ts — a
@@ -102,6 +107,7 @@ const DIST_JS_RE = /dist\/([A-Za-z0-9_.-]+)\.js/g;
 // driver-runtime.ts only. Both forms are DERIVED by regex (never a hand-maintained list).
 const PLUGIN_DRIVER_FIELD_RE = /driver:\s*"([A-Za-z0-9_.-]+\.ts)"/g;
 const PLUGIN_PATH_JOIN_TS_RE = /"plugin",\s*"scripts",\s*"([A-Za-z0-9_.-]+\.ts)"/g;
+const PLUGIN_SIBLING_RESOLVER_RE = /resolveKernelSibling\(\s*"([A-Za-z0-9_.-]+\.ts)"\s*\)/g;
 
 // quay-init.sh's EXPLICIT mechanism additions (plugin/scripts/quay-init.sh `derive_loop_scripts`
 // step (c)) name .ts files by BARE basename with no invocation prefix. These must ship as
@@ -171,6 +177,7 @@ export function scanPluginSelfReferences(pluginRoot) {
   const text = fs.readFileSync(driverRuntime, "utf8");
   for (const m of text.matchAll(PLUGIN_DRIVER_FIELD_RE)) if (m[1]) basenames.add(m[1]);
   for (const m of text.matchAll(PLUGIN_PATH_JOIN_TS_RE)) if (m[1]) basenames.add(m[1]);
+  for (const m of text.matchAll(PLUGIN_SIBLING_RESOLVER_RE)) if (m[1]) basenames.add(m[1]);
   return basenames;
 }
 

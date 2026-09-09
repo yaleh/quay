@@ -1,7 +1,7 @@
 ---
 id: gap-git-graph-pagination-appends-page-relative-col-and-torow
 title: 滚动加载后图崩：分页行携带页内相对的 col 与 toRow，合并后布局失效
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -75,4 +75,6 @@ next.rows.forEach(function (r) { if (!have[r.hash]) { data.rows.push(r); added++
 - packages/quay/test/gap-git-graph-pagination-appends-page-relative-col-and-torow.test.mjs（本任务的回归测试：多轮加载后的锚定/对拍/不侵入）
 - packages/quay/test/gap-git-graph-adopt-git-column-algorithm-and-decorate-labels.test.mjs（列号对拍从写死 500 扩到已加载条数）
 - packages/quay/test/gap-git-graph-cross-column-edges-drawn-as-fixed-stubs-not-anchored.test.mjs（锚定判据扩到分页之后）
+- packages/quay/test/gap-git-graph-reconstructed-lanes-all-named-mainline-ref.test.mjs（%D 对拍 oracle 加 --topo-order 对齐 readGitHistory，治数据依赖红）
+- packages/quay/test/gap-git-graph-stride-chip-overlaps-commit-row-text.test.mjs（内联标签条数 oracle 加 --topo-order 对齐 readGitHistory，治数据依赖红）
 - tasks/gap-git-graph-pagination-appends-page-relative-col-and-torow.md

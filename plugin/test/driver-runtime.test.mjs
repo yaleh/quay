@@ -93,9 +93,13 @@ const FAKE_WORKER_DRIVER = [
 ].join("\n");
 
 function run(args, opts = {}) {
+  const env = { ...process.env, ...(opts.env || {}) };
+  // AC-203：kernel 从自身安装位置（或 QUAY_PLUGIN_ROOT）解析 driver/脚本——测试的 fake driver 住在
+  // <tmp>/plugin/scripts/，故经 QUAY_PLUGIN_ROOT 指向 fake plugin root（同 Core plugin-root.ts 手法）。
+  if (opts.pluginRoot) env.QUAY_PLUGIN_ROOT = opts.pluginRoot;
   return spawnSync(process.execPath, ["--experimental-strip-types", KERNEL, ...args], {
     encoding: "utf8",
-    env: opts.env || { ...process.env },
+    env,
     timeout: opts.timeout || 30000,
   });
 }
@@ -360,7 +364,7 @@ test("AC1 (稳定承载) — start from a worktree ⇒ supervisor/driver carried
     fs.rmSync(wt, { recursive: true, force: true });
   });
 
-  const start = run(["start", "--root", wt, "--restart-delay", "1", "--run-id", "dr-ac1"]);
+  const start = run(["start", "--root", wt, "--restart-delay", "1", "--run-id", "dr-ac1"], { pluginRoot: path.join(main, "plugin") });
   assert.equal(start.status, 0, `start failed: ${start.stdout}\n${start.stderr}`);
   assert.match(start.stderr, /relocating/, `relocation announced on stderr: ${start.stderr}`);
 
@@ -401,7 +405,7 @@ test("AC2 positive — live supervisor+driver ⇒ liveness exit 0 + deaths=none"
     run(["stop", "--root", root], { timeout: 15000 });
     fs.rmSync(root, { recursive: true, force: true });
   });
-  const start = run(["start", "--root", root, "--restart-delay", "1", "--run-id", "dr-ac2pos"]);
+  const start = run(["start", "--root", root, "--restart-delay", "1", "--run-id", "dr-ac2pos"], { pluginRoot: path.join(root, "plugin") });
   assert.equal(start.status, 0, `start failed: ${start.stdout}\n${start.stderr}`);
   assert.ok(readPid(root, "promotion-driver-supervisor.pid"), "supervisor pid written");
   assert.ok(readPid(root, "promotion-driver.pid"), "driver pid written");
@@ -423,7 +427,7 @@ test("AC3 (supervisor 死) — kill -9 supervisor ⇒ supervisor_dead + orphan d
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  const start = run(["start", "--root", root, "--restart-delay", "1", "--run-id", "dr-ac3"]);
+  const start = run(["start", "--root", root, "--restart-delay", "1", "--run-id", "dr-ac3"], { pluginRoot: path.join(root, "plugin") });
   assert.equal(start.status, 0, `start failed: ${start.stdout}\n${start.stderr}`);
   const supervisorPid = spid();
   assert.ok(supervisorPid, "supervisor pid recorded");
@@ -470,7 +474,7 @@ test("AC1 (worker cap) — start --kind worker --cap 2 ⇒ driver argv carries -
     run(["stop", "--kind", "worker", "--root", root], { timeout: 15000 });
     fs.rmSync(root, { recursive: true, force: true });
   });
-  const r = run(["restart", "--kind", "worker", "--cap", "2", "--root", root, "--restart-delay", "1", "--run-id", "dr-wac1"]);
+  const r = run(["restart", "--kind", "worker", "--cap", "2", "--root", root, "--restart-delay", "1", "--run-id", "dr-wac1"], { pluginRoot: path.join(root, "plugin") });
   assert.equal(r.status, 0, `restart failed: ${r.stdout}\n${r.stderr}`);
   assert.ok(!/unknown argument: --concurrency/.test(r.stderr), `supervisor self-restart must accept --cap: ${r.stderr}`);
   const dump = await pollJsonFile(path.join(root, ".quay", "worker-argv-dump.json"));
@@ -489,7 +493,7 @@ test("AC2 (worker 并发缺省) — start --kind worker with NO --cap ⇒ superv
   // QUAY_MAX_TASK_SUBAGENTS 使本测对「supervisor 是否注入」敏感（旧行为注入 "5" ⇒ 本测 FAIL，⛔ 防假绿）。
   const env = { ...process.env };
   delete env.QUAY_MAX_TASK_SUBAGENTS;
-  const r = run(["start", "--kind", "worker", "--root", root, "--restart-delay", "1", "--run-id", "dr-wac2"], { env });
+  const r = run(["start", "--kind", "worker", "--root", root, "--restart-delay", "1", "--run-id", "dr-wac2"], { env, pluginRoot: path.join(root, "plugin") });
   assert.equal(r.status, 0, `start failed: ${r.stdout}\n${r.stderr}`);
   const dump = await pollJsonFile(path.join(root, ".quay", "worker-argv-dump.json"));
   assert.ok(dump, "worker driver dumped its argv/env");
@@ -535,6 +539,10 @@ test("source-refresh — watchedSourceFiles / sourceFilesMaxMtimeMs / sourceChan
   fs.mkdirSync(scripts, { recursive: true });
   const filtersFile = path.join(scripts, "driver-filters.ts");
   fs.writeFileSync(filtersFile, "v1", "utf8");
+  // AC-203：sourceFilesMaxMtimeMs 锚在 kernel 自身安装位置（或 QUAY_PLUGIN_ROOT），⛔ 非 root 参数。
+  const savedPluginRoot = process.env.QUAY_PLUGIN_ROOT;
+  process.env.QUAY_PLUGIN_ROOT = path.join(root, "plugin");
+  t.after(() => { if (savedPluginRoot === undefined) delete process.env.QUAY_PLUGIN_ROOT; else process.env.QUAY_PLUGIN_ROOT = savedPluginRoot; });
 
   // watched 集 = driver 自身入口 + 共享 Layer 0/1a 模块（含 driver-filters.ts——AC-184 的根）。
   const watched = watchedSourceFiles("promotion");
@@ -564,7 +572,7 @@ test("source-refresh — supervisor respawns driver when driver-filters.ts advan
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  const start = run(["start", "--root", root, "--restart-delay", "1", "--run-id", "dr-src-respawn"]);
+  const start = run(["start", "--root", root, "--restart-delay", "1", "--run-id", "dr-src-respawn"], { pluginRoot: path.join(root, "plugin") });
   assert.equal(start.status, 0, `start failed: ${start.stdout}\n${start.stderr}`);
   const p1 = readPid(root, "promotion-driver.pid");
   assert.ok(p1, "driver pid recorded");
@@ -610,11 +618,16 @@ test("supervisor-stale — supervisorStaleness 三态：死 pid / 无 pid ⇒ no
 
 test("supervisor-stale — aliveness 报 supervisorStale=true 当被监视源码推进到 supervisor 启动时刻之后；重启后回 fresh（双向取假）", async (t) => {
   const root = makeRoot("sup-stale");
+  // AC-203：aliveness 直接调用（同进程）经 sourceFilesMaxMtimeMs 读 kernel 自身安装位置（或
+  // QUAY_PLUGIN_ROOT），⛔ 非 root 参数——本测直接 import 调用，故须在进程 env 上设 QUAY_PLUGIN_ROOT。
+  const savedPluginRoot = process.env.QUAY_PLUGIN_ROOT;
+  process.env.QUAY_PLUGIN_ROOT = path.join(root, "plugin");
   t.after(() => {
     run(["stop", "--root", root], { timeout: 15000 });
     fs.rmSync(root, { recursive: true, force: true });
+    if (savedPluginRoot === undefined) delete process.env.QUAY_PLUGIN_ROOT; else process.env.QUAY_PLUGIN_ROOT = savedPluginRoot;
   });
-  const start = run(["start", "--root", root, "--restart-delay", "1", "--run-id", "dr-sup-stale"]);
+  const start = run(["start", "--root", root, "--restart-delay", "1", "--run-id", "dr-sup-stale"], { pluginRoot: path.join(root, "plugin") });
   assert.equal(start.status, 0, `start failed: ${start.stdout}\n${start.stderr}`);
   assert.ok(readPid(root, "promotion-driver-supervisor.pid"), "supervisor pid recorded");
 
@@ -632,7 +645,7 @@ test("supervisor-stale — aliveness 报 supervisorStale=true 当被监视源码
   assert.equal(after.supervisorStale, true, `stale after source advances: ${JSON.stringify(after)}`);
 
   // 反向：重启该 kind（新 supervisor 启动晚于源码）⇒ 同一读数不再报陈旧（⛔ 恒报陈旧不算通过）。
-  const restart = run(["restart", "--root", root, "--restart-delay", "1", "--run-id", "dr-sup-stale-r"]);
+  const restart = run(["restart", "--root", root, "--restart-delay", "1", "--run-id", "dr-sup-stale-r"], { pluginRoot: path.join(root, "plugin") });
   assert.equal(restart.status, 0, `restart failed: ${restart.stdout}\n${restart.stderr}`);
   const afterRestart = aliveness(root, "promotion");
   assert.equal(afterRestart.supervisorStale, false, `fresh again after restart: ${JSON.stringify(afterRestart)}`);
