@@ -2,7 +2,7 @@
 id: gap-driver-kinds-table-literal-not-in-dist-entry
 title: 打包 dist entry 集对 DRIVER_KINDS 数据表字面量引用盲 → 6 driver kind +
   send-to-session.ts 不进 tarball（AC-202 恒红）
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical
@@ -36,11 +36,11 @@ goal_ac: AC-202
 
 ## Acceptance Criteria
 
-- [ ] AC1 AC-202 判据干跑 exit 0（stderr 无 `MISSING`）；当前 exit 1、`MISSING(7)`。
-- [ ] AC2 `node --experimental-strip-types packages/quay/scripts/build-plugin-dist.mjs` 后，`plugin/scripts/dist/` 下 `{promotion,worker,outer,quality-gate,meta,goal}-driver.js` + `send-to-session.js` 共 7 个各存在。
-- [ ] AC3 `packages/quay/test/build-plugin-dist.test.mjs` 新增断言 `deriveEntries("./plugin").scripts` 含这 7 个 basename，且通过。
-- [ ] AC4 负控制：禁用新扫描/摘一个 driver 字段 ⇒ `deriveEntries` 缺这 7 个、AC-202 criterion exit 非 0（判据能取假）。
-- [ ] AC5 `deriveEntries` 无新增手维护 7 名单——这 7 个由源扫描从 driver-runtime.ts 机械推导（`grep` 该函数新增扫描确为正则推导而非字面数组）。
+- [x] AC1 AC-202 判据干跑 exit 0（stderr 无 `MISSING`）；当前 exit 1、`MISSING(7)`。
+- [x] AC2 `node --experimental-strip-types packages/quay/scripts/build-plugin-dist.mjs` 后，`plugin/scripts/dist/` 下 `{promotion,worker,outer,quality-gate,meta,goal}-driver.js` + `send-to-session.js` 共 7 个各存在。
+- [x] AC3 `packages/quay/test/build-plugin-dist.test.mjs` 新增断言 `deriveEntries("./plugin").scripts` 含这 7 个 basename，且通过。
+- [x] AC4 负控制：禁用新扫描/摘一个 driver 字段 ⇒ `deriveEntries` 缺这 7 个、AC-202 criterion exit 非 0（判据能取假）。
+- [x] AC5 `deriveEntries` 无新增手维护 7 名单——这 7 个由源扫描从 driver-runtime.ts 机械推导（`grep` 该函数新增扫描确为正则推导而非字面数组）。
 
 ## Definition of Done
 
