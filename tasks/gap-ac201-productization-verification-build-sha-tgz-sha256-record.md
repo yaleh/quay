@@ -2,7 +2,7 @@
 id: gap-ac201-productization-verification-build-sha-tgz-sha256-record
 title: verify-deliver-coldstart --ac89 追加面不写 GOAL-009-AC-201 记录 → 产物可溯源判据恒 exit
   1（AC-201）
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical
