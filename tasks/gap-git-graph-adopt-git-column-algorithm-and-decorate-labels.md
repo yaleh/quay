@@ -98,6 +98,7 @@ git log --graph --all --pretty=format:'%x01%H'
 - packages/quay/test/gap-git-graph-scroll-loader-self-chain-blocked-by-loadingolder-flag.test.mjs（滚动自链断言随渲染层调整）
 - packages/quay/test/observation.test.mjs（行序与 %D 取数用例）
 - packages/quay/test/serve-handlers.test.mjs（路由与 payload 形状用例）
+- docs/analysis/test-file-baseline.txt（删除 9 个泳道模型测试 ⇒ 测试文件基线快照同步更新）
 - packages/quay/test/gap-git-graph-branch-name-fallback-to-trunk-ref.test.mjs（模型耦合，随泳道命名概念取消而删除）
 - packages/quay/test/gap-git-graph-drops-commits-while-overflowcount-reports-zero.test.mjs（模型耦合，删除；分页覆盖由 AC7 与上面两个测试承接）
 - packages/quay/test/gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead.test.mjs（折叠交互取消，随之删除）
