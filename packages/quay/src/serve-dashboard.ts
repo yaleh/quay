@@ -944,6 +944,24 @@ export function renderTopRow(liveCard: string, sysCard: string, mgrCard: string)
   return html`<div class="dash-grid" style="display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:2px;background:var(--color-divider);border:1px solid var(--color-divider);margin-bottom:1.5rem;">${liveCard}<div style="display:flex;flex-direction:column;gap:2px">${sysCard}${mgrCard}</div></div>`;
 }
 
+/** The 工作进展 row is paired into two equal-width columns BY DESIGN (gap-dashboard-workprogress-row-paired-columns)
+ *  and does NOT reuse gridColumns()/renderCardGrid() — those stay card-count-bound for the 变更记录 row
+ *  (and the pure helpers), while this row now carries exactly 2 grid items (two flex stacks) instead of
+ *  4 cards. The four cards are all unbounded dynamic lists whose natural heights drift with content (the
+ *  task ledger alone was measured at 966–1684px), so stretch-aligning four equal-width columns to the
+ *  tallest card left the 阶段目标 card ~88% and the tests card ~71% blank. Exhaustive pairing measured the
+ *  (任务台账速览 + 阶段目标 | 测试 + FAN-IN) split at 1232px vs 1261px at 433px half-width — 2.3% apart, the
+ *  most balanced of the four pairings, and semantically coherent (left = progress board, right =
+ *  verification pipeline). Left column stacks goalCard above taskCard (阶段目标 上, 任务台账速览 下 — per the
+ *  human's specified order), right column stacks testsCard above fanCard (测试 上, FAN-IN 下 — the original
+ *  left-to-right 阶段目标→测试→FAN-IN order with 测试 moved above FAN-IN). This pairing is the most
+ *  imbalance-resistant of the four, NOT a guarantee of permanent zero-whitespace. Keeps the .dash-grid
+ *  class so the ≤600px single-column media query still collapses it (each column becomes a full-width
+ *  row; the inner flex stacks are unaffected). */
+export function renderWorkProgressRow(goalCard: string, taskCard: string, testsCard: string, fanCard: string): string {
+  return html`<div class="dash-grid" style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:2px;background:var(--color-divider);border:1px solid var(--color-divider);margin-bottom:1.5rem;"><div style="display:flex;flex-direction:column;gap:2px">${goalCard}${taskCard}</div><div style="display:flex;flex-direction:column;gap:2px">${testsCard}${fanCard}</div></div>`;
+}
+
 /** The .dash-grid sheet: the ≤600px single-column collapse. Split from the inline style because a
  *  media query cannot live in a style attribute. The `!important` is required to beat the inline
  *  `grid-template-columns` (inline styles outrank class selectors — this is the standard override
@@ -1011,7 +1029,7 @@ export function renderDashboardPage(
       <p class="meta">时间轴窗口（以各自最近一次运行/fan-in 结束时刻为终点的过去 ${hours}h）：${hourLinks}</p>
       ${renderTopRow(liveCard, sysCard, mgrCard)}
       <h2>工作进展</h2>
-      ${renderCardGrid([goalCard, taskCard, testsCard, fanInCard], { marginBottom: true })}
+      ${renderWorkProgressRow(goalCard, taskCard, testsCard, fanInCard)}
       <h2>变更记录</h2>
       ${renderCardGrid([commitsCard, gitHistoryCard])}
     </main>${renderDashboardCardRefreshScript()}</body></html>`;
