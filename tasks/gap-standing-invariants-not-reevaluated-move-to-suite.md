@@ -1,7 +1,7 @@
 ---
 id: gap-standing-invariants-not-reevaluated-move-to-suite
 title: AC-182/183/187 判据今天就过却永远到不了 achieved——常设不变式应下沉套件而非留在 goal 层
-status: ready
+status: done
 labels:
   - gap
   - mechanism
