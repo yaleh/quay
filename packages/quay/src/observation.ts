@@ -32,15 +32,7 @@ import { QUAY_VERSION } from "./version.ts";
 import { parseFrontmatter } from "./frontmatter-store-base.ts";
 import { TASK_STATUS, isTaskStatus, type TaskStatus } from "./abi.ts";
 import { resolvePluginScript, resolvePluginScriptExec } from "./plugin-root.ts";
-// gap-dashboard-live-concurrency-duplicates-inflight-count: the worker concurrency CAP is a workspace
-// detail whose single source of truth is plugin/scripts/driver-config.ts `driverCap` (drivers.yml
-// worker.cap → DEFAULT_DRIVER_CAP fallback). driver-config.ts is a LEAF module (only fs/path/yaml —
-// no plugin-tree closure), so this static import does NOT drag the plugin tree's type errors into
-// Core's tsc program the way a driver-runtime.ts import would (see loadDriverRuntime's ban note).
-import { driverCap, DEFAULT_DRIVER_CAP } from "../../../plugin/scripts/driver-config.ts";
-// Re-exported so the render surfaces (serve-dashboard/serve-live) take their error-fallback cap from
-// this single quarantined module rather than reaching into plugin/ themselves.
-export { DEFAULT_DRIVER_CAP };
+import YAML from "yaml";
 
 const execFileP = promisify(execFile);
 
@@ -1598,6 +1590,29 @@ export function readTaskStatusForLive(root: string, taskId: string): TaskStatus 
  *  `todo` carrying a start event is not evidence of terminality. */
 const NON_LIVE_TASK_STATUSES: ReadonlySet<string> = new Set([TASK_STATUS.DONE, TASK_STATUS.SUPERSEDED, TASK_STATUS.NEEDS_HUMAN]);
 
+// gap-dashboard-live-concurrency-duplicates-inflight-count: the worker concurrency CAP shown on the
+// dashboard. Core (packages/quay/src) must stay dependency-free on plugin/scripts — a STATIC import of
+// plugin/scripts/driver-config.ts breaks the npm-pack dist bundle (esbuild cannot resolve driver-config's
+// `yaml` from the plugin tree in the pack temp dir), and readLive is SYNC so the loadDriverRuntime-style
+// dynamic import is unavailable. This reader therefore mirrors driverCap(root,"worker") against the SAME
+// data source (plugin/scripts/drivers.yml kinds.worker.cap → DEFAULT_DRIVER_CAP fallback); the explicit
+// CLI --concurrency override is out of dashboard scope (Plan §4 — the dashboard reads static config).
+export const DEFAULT_DRIVER_CAP = 5; // concurrency-default-fallback: Core mirror of driver-config.ts DEFAULT_DRIVER_CAP
+
+/** Read the worker concurrency cap from drivers.yml, mirroring driverCap(root,"worker") (worker kind,
+ *  no explicit override). Absent/unparseable config degrades to DEFAULT_DRIVER_CAP — never throws. */
+function readWorkerCap(root: string): number {
+  try {
+    const text = fs.readFileSync(path.join(root, "plugin/scripts/drivers.yml"), "utf8");
+    const parsed = YAML.parse(text) as { kinds?: { worker?: { cap?: unknown } } } | null;
+    const cap = parsed?.kinds?.worker?.cap;
+    if (typeof cap === "number" && Number.isInteger(cap) && cap >= 1) return cap;
+  } catch {
+    // absent/unparseable drivers.yml → conservative default (fail-open, same as loadDriverConfig)
+  }
+  return DEFAULT_DRIVER_CAP;
+}
+
 /**
  * Live loop view: in-flight fast-mode tasks + elapsed minutes + concurrency + CPU pressure +
  * the loop-state discriminator. Degrades per the header contract; never throws.
@@ -1827,15 +1842,10 @@ export function readLive(
   }
 
   // gap-dashboard-live-concurrency-duplicates-inflight-count: the worker concurrency CAP is an
-  // INDEPENDENT data source (drivers.yml, not telemetry) — read in its own try/catch per the
-  // degradation contract. A read failure degrades to the conservative DEFAULT_DRIVER_CAP, never a
-  // fabricated 0 (and never the in-flight count, which the old `concurrency` field duplicated).
-  let concurrencyCap: number = DEFAULT_DRIVER_CAP;
-  try {
-    concurrencyCap = driverCap(root, "worker");
-  } catch {
-    concurrencyCap = DEFAULT_DRIVER_CAP;
-  }
+  // INDEPENDENT data source (drivers.yml, not telemetry) — readWorkerCap degrades to the
+  // conservative DEFAULT_DRIVER_CAP, never a fabricated 0 (and never the in-flight count, which the
+  // old `concurrency` field duplicated).
+  const concurrencyCap = readWorkerCap(root);
 
   return { status, reason, inFlight, concurrencyCap, cpuPressure, liveState, liveExplanation, activity };
 }
