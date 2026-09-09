@@ -435,12 +435,25 @@ export function gitGraphClientScript(): string {
     });
   }
 
-  // A rounded-orthogonal edge: horizontal out of the child node toward the parent's column, a rounded
-  // quarter-turn down (radius min(6, laneGap/2)), then a straight vertical drop to the parent's row.
-  // Cross-column edges always satisfy |toX - fromX| >= laneGap, so the corner radius never exceeds the
-  // horizontal run. Only H/V/Q commands — no L, no diagonal (AC8).
-  function edgePath(fromX, fromY, toX, toY) {
+  // A rounded-orthogonal edge, two shapes by the edge's kind (gap-git-graph-edge-fold-bends-at-child-
+  // for-first-parent-edges):
+  //   · merge (bendAtParent=false) — horizontal out of the child node toward the parent's column, a
+  //     rounded quarter-turn DOWN at the CHILD's row, then a vertical drop to the parent's row. The
+  //     parent column does not exist above toRow, so the corner belongs at the child end.
+  //   · parent (bendAtParent=true) — this branch's own lineage folds back into a column that keeps
+  //     running downward: vertical out of the child's node down to the PARENT's row, then a rounded
+  //     quarter-turn horizontally into the parent's column. The corner belongs at the PARENT end.
+  // Both use only M/H/V/Q (no L), radius min(6, laneGap/2) > 0. Cross-column edges always satisfy
+  // |toX - fromX| >= laneGap, so the corner radius never exceeds the horizontal run (AC8).
+  function edgePath(fromX, fromY, toX, toY, bendAtParent) {
     var r = Math.min(6, laneGap / 2);
+    if (bendAtParent) {
+      var hs = toX >= fromX ? r : -r;
+      return "M " + fromX + "," + fromY +
+        " V " + (toY - r) +
+        " Q " + fromX + "," + toY + " " + (fromX + hs) + "," + toY +
+        " H " + toX;
+    }
     var sign = toX >= fromX ? 1 : -1;
     return "M " + fromX + "," + fromY +
       " H " + (toX - sign * r) +
@@ -487,6 +500,9 @@ export function gitGraphClientScript(): string {
     // itself. The path ENDS at the PARENT's node (the edge's toRow), never a fixed stub — so a merge's two
     // connectors both reach their parent commits' nodes. A parent OUTSIDE the window is a dashed stub
     // from the commit's node down to the bottom boundary (a VISIBLE "there is more below", 硬规则 3b).
+    // The fold corner is kind-directed: a merge (second+ parent) bends at the CHILD's row, a first-parent
+    // lineage fold (kind === "parent") bends at the PARENT's row (gap-git-graph-edge-fold-bends-at-child-
+    // for-first-parent-edges).
     rows.forEach(function (r, i) {
       r.edges.forEach(function (e) {
         if (e.outsideWindow) {
@@ -499,7 +515,7 @@ export function gitGraphClientScript(): string {
         }
         if (e.fromCol === e.toCol) { return; }
         g.append("path").attr("class", "git-svg-edge")
-          .attr("d", edgePath(trunkX + e.fromCol * laneGap, y(i), trunkX + e.toCol * laneGap, y(e.toRow)))
+          .attr("d", edgePath(trunkX + e.fromCol * laneGap, y(i), trunkX + e.toCol * laneGap, y(e.toRow), e.kind === "parent"))
           .attr("fill", "none").attr("stroke", laneColor(e.fromCol)).attr("stroke-width", 1.6);
       });
     });
