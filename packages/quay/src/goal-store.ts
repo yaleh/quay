@@ -462,6 +462,8 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
     stale: string[];
     notEvaluated: string[];
     divergent: string[];
+    scopeSize: number;
+    evaluated: boolean;
     cap: number;
     staleMs: number;
   } {
@@ -470,7 +472,8 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
     const stale: string[] = [];
     const notEvaluated: string[] = [];
     const divergent: string[] = [];
-    for (const g of activeGoals()) {
+    const active = activeGoals();
+    for (const g of active) {
       const gid = String(g.id);
       if (isGoalAchieved(gid)) divergent.push(gid); // I4 — active yet all ACs achieved
       let lastProgressAt: number | undefined;
@@ -491,7 +494,13 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
         fresh.push(gid);
       }
     }
-    return { fresh, stale, notEvaluated, divergent, cap, staleMs };
+    // Empty scope (0 active goals) must NOT share its output shape with "all evaluated and healthy"
+    // (hard rule 3b): with 0 active goals every bucket is empty — the SAME shape a booleanized
+    // "nothing stale / nothing divergent" reader sees for "N goals none divergent". `scopeSize` =
+    // the enumerated active-goal count, `evaluated` = whether any goal was actually judged
+    // (scopeSize > 0) — two fields that make "no objects to check" distinguishable from "checked".
+    const scopeSize = active.length;
+    return { fresh, stale, notEvaluated, divergent, scopeSize, evaluated: scopeSize > 0, cap, staleMs };
   }
 
   // I5 checker (check --achieved-failing). An AC `status: achieved` whose `criterion` now exits
@@ -511,9 +520,26 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
   // `check --staleness` is pure-read) means the 8 real achieved criteria that call
   // `check --staleness`/`list`/`get` never even reach this path; 乙 is defense-in-depth for a
   // future criterion that calls the criterion-runner itself.
-  function checkAchievedFailing(): { achievedButFailing: string[]; evaluated: boolean } {
+  function checkAchievedFailing(): { achievedButFailing: string[]; evaluated: boolean; scopeSize: number } {
+    // Enumerate the in-scope set FIRST (pure-read — no criterion runs): achieved ACs under ACTIVE
+    // goals with a non-empty criterion. `scopeSize` is that count, and it is what makes "empty
+    // scope" (0 active goals / 0 achieved ACs under them) field-distinguishable from "ran N criteria
+    // and all passed" (hard rule 3b — ⛔ not an empty array masquerading as "no achieved-but-failing
+    // AC"). The enumeration is done before the guard check so the guard path's `scopeSize` is truthful
+    // too (it refuses to RUN, but it still knows the scope).
+    const activeGoalIds = new Set(activeGoals().map((g) => String(g.id)));
+    const inScope: GoalViewModel[] = [];
+    for (const ac of list()) {
+      if (!isCriterionId(String(ac.id))) continue;
+      if (ac.status !== "achieved") continue;
+      if (!activeGoalIds.has(String(ac.goal))) continue;
+      const criterion = typeof ac.criterion === "string" ? ac.criterion : "";
+      if (criterion.trim() === "") continue;
+      inScope.push(ac);
+    }
+    const scopeSize = inScope.length;
     if (process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] === "1") {
-      return { achievedButFailing: [], evaluated: false };
+      return { achievedButFailing: [], evaluated: false, scopeSize };
     }
     const achievedButFailing: string[] = [];
     // Criterion cwd = the git root (robust rev-parse, ⛔ not path.dirname — hard rule 4 corollary 2),
@@ -522,13 +548,8 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
     const prev = process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
     process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = "1";
     try {
-      const activeGoalIds = new Set(activeGoals().map((g) => String(g.id)));
-      for (const ac of list()) {
-        if (!isCriterionId(String(ac.id))) continue;
-        if (ac.status !== "achieved") continue;
-        if (!activeGoalIds.has(String(ac.goal))) continue;
+      for (const ac of inScope) {
         const criterion = typeof ac.criterion === "string" ? ac.criterion : "";
-        if (criterion.trim() === "") continue;
         const res = runAcceptance({ command: criterion, cwd: root, timeoutMs: 60000 });
         if (!res.ok) achievedButFailing.push(String(ac.id));
       }
@@ -536,7 +557,7 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       if (prev === undefined) delete process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
       else process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = prev;
     }
-    return { achievedButFailing, evaluated: true };
+    return { achievedButFailing, evaluated: scopeSize > 0, scopeSize };
   }
 
   /** Direct read-modify-write of the old goal's file (inside the NEW goal's write lock). */
@@ -721,8 +742,10 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
 //   check                     — I1′ checker: withinCap + hasDirection (exit 1 when over cap)
 //   check --staleness         — I3 three-bucket staleness (fresh/stale/notEvaluated) + I4
 //                               divergence (exit 1 when a divergent goal exists). PURE-READ.
+//                               Carries scopeSize + evaluated (0 active goal ⇒ evaluated:false).
 //   check --achieved-failing  — I5 achieved-but-failing (exit 1 when an achieved-but-failing AC
-//                               exists; runs each achieved AC's criterion under a re-entrancy guard)
+//                               exists OR the scope is empty — evaluated:false; runs each achieved
+//                               AC's criterion under a re-entrancy guard). Carries scopeSize.
 import { fileURLToPath } from "node:url";
 
 async function main(argv: string[]) {

@@ -201,17 +201,23 @@ export async function writeGoalStatus(
 
 /** 读 I3 三桶 + I4 分歧（复用 goal-store 的单一真相源 checkStaleness，⛔ 不在本文件重算）。
  *  退出码 1 = 存在 divergent（是发现不是错误），打印 JSON 桶到 stdout。读不懂 ⇒ null。
- *  ⛔ PURE-READ——不跑 criterion（跑判据的 I5 在 checkAchievedFailing，独立子命令）。 */
+ *  ⛔ PURE-READ——不跑 criterion（跑判据的 I5 在 checkAchievedFailing，独立子命令）。
+ *  scopeSize/evaluated 透传 goal-store 的取值（0 active goal ⇒ evaluated:false、scopeSize:0——
+ *  空作用域与「查过且全过」按字段区分，⛔ 同形，硬规则 3b）。 */
 export async function checkStaleness(
   scriptRoot: string,
   dataRoot: string,
-): Promise<{ fresh: string[]; stale: string[]; notEvaluated: string[]; divergent: string[] } | null> {
+): Promise<{ fresh: string[]; stale: string[]; notEvaluated: string[]; divergent: string[]; scopeSize: number; evaluated: boolean } | null> {
   const r = await runAsync(goalStoreArgv(scriptRoot, ["check", "--staleness"], dataRoot), { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
   if (r.error) return null;
   try {
     const j = JSON.parse(String(r.stdout ?? "").trim());
     const arr = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : []);
-    return { fresh: arr(j.fresh), stale: arr(j.stale), notEvaluated: arr(j.notEvaluated), divergent: arr(j.divergent) };
+    return {
+      fresh: arr(j.fresh), stale: arr(j.stale), notEvaluated: arr(j.notEvaluated), divergent: arr(j.divergent),
+      scopeSize: typeof j.scopeSize === "number" ? j.scopeSize : -1,
+      evaluated: j.evaluated === true,
+    };
   } catch {
     return null;
   }
@@ -219,17 +225,23 @@ export async function checkStaleness(
 
 /** 读 I5 achieved-but-failing（复用 goal-store 的单一真相源 checkAchievedFailing，⛔ 不在本文件重算）。
  *  退出码 1 = 存在 achieved-but-failing AC 或未评估（是发现不是错误），打印 JSON 到 stdout。
- *  读不懂 ⇒ null。 */
+ *  读不懂 ⇒ null。
+ *  scopeSize/evaluated 透传 goal-store 的取值（0 作用域 ⇒ evaluated:false、scopeSize:0——
+ *  空作用域与「查过且全过」按字段区分，⛔ 同形，硬规则 3b）。 */
 export async function checkAchievedFailing(
   scriptRoot: string,
   dataRoot: string,
-): Promise<{ achievedButFailing: string[]; evaluated: boolean } | null> {
+): Promise<{ achievedButFailing: string[]; evaluated: boolean; scopeSize: number } | null> {
   const r = await runAsync(goalStoreArgv(scriptRoot, ["check", "--achieved-failing"], dataRoot), { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
   if (r.error) return null;
   try {
     const j = JSON.parse(String(r.stdout ?? "").trim());
     const arr = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : []);
-    return { achievedButFailing: arr(j.achievedButFailing), evaluated: j.evaluated !== false };
+    return {
+      achievedButFailing: arr(j.achievedButFailing),
+      evaluated: j.evaluated === true,
+      scopeSize: typeof j.scopeSize === "number" ? j.scopeSize : -1,
+    };
   } catch {
     return null;
   }
@@ -565,10 +577,14 @@ export interface GoalRoundReadings {
   criterionCount: number;
   criteria: Array<{ id: string; goal: string; status: string; verdict: "pass" | "fail" | "not-evaluated"; reason: string }>;
   flips: Array<{ id: string; to: string; ok: boolean; reason: string }>;
-  /** I3 三桶 + I4 分歧；null = check --staleness 读不到（⛔ 与「零 stale」不同形，硬规则 3b）。 */
-  staleness: { fresh: string[]; stale: string[]; notEvaluated: string[]; divergent: string[] } | null;
-  /** I5 achieved-but-failing；null = check --achieved-failing 读不到（⛔ 与「零」不同形，硬规则 3b）。 */
-  achievedFailing: { achievedButFailing: string[]; evaluated: boolean } | null;
+  /** I3 三桶 + I4 分歧；null = check --staleness 读不到（⛔ 与「零 stale」不同形，硬规则 3b）。
+   *  scopeSize = 枚举出的 active goal 数（作用域规模）；evaluated = scopeSize > 0。0 active goal ⇒
+   *  evaluated:false、scopeSize:0——空作用域与「查过且全过」按字段区分（⛔ 同形，硬规则 3b）。 */
+  staleness: { fresh: string[]; stale: string[]; notEvaluated: string[]; divergent: string[]; scopeSize: number; evaluated: boolean } | null;
+  /** I5 achieved-but-failing；null = check --achieved-failing 读不到（⛔ 与「零」不同形，硬规则 3b）。
+   *  scopeSize = 枚举出的作用域规模（active goal 下 achieved AC 且 criterion 非空）；evaluated =
+   *  scopeSize > 0。空作用域与「查过且全过」按字段区分（⛔ 同形，硬规则 3b）。 */
+  achievedFailing: { achievedButFailing: string[]; evaluated: boolean; scopeSize: number } | null;
   /** ⑤ 缺口读数（G7 + G9 stalled）：每条 active AC 的四态；taskFacts==null ⇒ 逐条 not-evaluated。 */
   gaps: Array<GoalGap>;
   /** ⑥ G9 语义环：本轮实际 spawn 的 gap-filing agent 数（过 halt/资源门/上限后；0 = 未 spawn）。 */
