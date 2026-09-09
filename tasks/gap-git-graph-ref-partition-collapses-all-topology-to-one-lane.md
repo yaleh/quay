@@ -3,7 +3,7 @@ id: gap-git-graph-ref-partition-collapses-all-topology-to-one-lane
 title: git-history 的 ref 分区模型在 ff fan-in 下结构性只产出 1 条泳道，与 git log --graph 同窗口的 36
   条并发轨道相比丢掉全部拓扑（500 条提交里 441 条即 88% 在侧线被拍平）；且 live 分支取数的 --since 下界绑在主线 15
   小时窗口上，7 天内有独有提交的 4 条 ref 全被滤掉
-status: todo
+status: ready
 labels:
   - gap
   - webui
