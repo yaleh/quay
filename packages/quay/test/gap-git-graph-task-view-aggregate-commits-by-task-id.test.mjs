@@ -54,6 +54,11 @@ test("AC1: taskIdFromSubject extracts the task id from the four subject shapes; 
   // (gap-dashboard-top-row-asymmetric-columns)`).
   assert.equal(taskIdFromSubject("dashboard: 顶部行改 3:2 非对称分栏，sys+mgr 堆叠右列 (gap-dashboard-top-row-asymmetric-columns)"), "gap-dashboard-top-row-asymmetric-columns");
 
+  // Form 4 known-prefix guard: a component/page-name prefix (`git-history:`) must NOT be taken as a
+  // task id — the subject falls through to Form 6 and extracts the trailing-parens id (gap-taskid-
+  // from-subject-form4-prefix-guard — the real `git-history: … (gap-…)` implementation commit).
+  assert.equal(taskIdFromSubject("git-history: full-width opaque sticky legend + stale comment fix (gap-git-graph-no-bounded-scroll-panel)"), "gap-git-graph-no-bounded-scroll-panel");
+
   // Fail-visible: an unrelated conventional-commit subject returns null (never a guess).
   assert.equal(taskIdFromSubject("chore: re-anchor quay-init-closure-ratchet baseline"), null);
   assert.equal(taskIdFromSubject("fix: git-history 分页页 mainline 泳道恒空"), null);
