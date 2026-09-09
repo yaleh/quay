@@ -4,6 +4,7 @@ title: 三例的长期保证已上移为 goal 层【在域】AC，且各带非�
 status: achieved
 kind: criterion
 goal: GOAL-007
+long-term: true
 criterion: |
   node -e '
   const {execFileSync}=require("node:child_process");

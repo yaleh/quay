@@ -1,7 +1,7 @@
 ---
 id: gap-goal-standing-ac-reverify-scope
 title: 长期保证 AC 的复验域不随 GOAL 关闭而消失——I5 checkAchievedFailing 作用域加显式声明通道，读数枚举 inScope
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -29,15 +29,24 @@ goal_ac: AC-216
 
 ## AC
 
-- [ ] `node --no-warnings --experimental-strip-types --test plugin/test/goal-standing-ac-reverify-scope.test.mjs` 退出码 0（AC-216 criterion 前半逐字）
-- [ ] 方向一（负控制①，声明跨 GOAL 关闭）：测试断言声明 `long-term: true` 的 achieved AC 其 GOAL 已 achieved ⇒ 在 `checkAchievedFailing` 返回的 `inScope` 里（`grep -n "inScope" plugin/test/goal-standing-ac-reverify-scope.test.mjs` 命中该断言点）
-- [ ] 方向二（负控制②，未声明随 GOAL 关闭）：测试断言未声明的 achieved AC 其 GOAL 已 achieved ⇒ **不在** `inScope` 里——证明「放宽作用域」不是无差别（同硬规则④推论三，两条负控制各带「改坏 ⇒ 测试红」的取假路径）
-- [ ] `inScope` 枚举落进生产载体：`packages/quay/src/goal-store.ts` 的 `checkAchievedFailing` 返回值含 `inScope: string[]`，`plugin/scripts/goal-driver.ts` reader 与 fact 透传之（`grep -n "inScope" packages/quay/src/goal-store.ts plugin/scripts/goal-driver.ts` 命中 ≥3 处：store 枚举 + reader 透传 + fact 类型）
-- [ ] 声明字段读回：`long-term` 进 `GoalFrontmatter` / `GoalViewModel` / `OWNED_KEYS` / `toViewModel`（`grep -n "long-term" packages/quay/src/goal-store.ts` 命中 ≥3 处）
-- [ ] 三条载体 AC 标记：AC-188/189/190 各带顶层 `long-term: true` 且 `goal-store list` 读回可见（`grep -n "long-term" goals/AC-188-goal-ac-criterion.md goals/AC-189-task-goal-spec.md goals/AC-190-task-ac.md` 各命中 ≥1）
-- [ ] AC-216 criterion 后半（生产读数）exit 0：`.quay/goal-round.jsonl` 存在 ≥1 条 fact 的 `value.achievedFailing.inScope` 含某条其 GOAL 已 achieved 的 AC——读主检出生产载体、只计落地之后时间窗，⛔ 靠 fixture 注入满足 = 未完成（硬规则④推论三）
-- [ ] `node packages/quay/bin/quay.ts task check gap-goal-standing-ac-reverify-scope --json` 的 `missing` 为 `[]`
+- [x] `node --no-warnings --experimental-strip-types --test plugin/test/goal-standing-ac-reverify-scope.test.mjs` 退出码 0（AC-216 criterion 前半逐字）
+- [x] 方向一（负控制①，声明跨 GOAL 关闭）：测试断言声明 `long-term: true` 的 achieved AC 其 GOAL 已 achieved ⇒ 在 `checkAchievedFailing` 返回的 `inScope` 里（`grep -n "inScope" plugin/test/goal-standing-ac-reverify-scope.test.mjs` 命中该断言点）
+- [x] 方向二（负控制②，未声明随 GOAL 关闭）：测试断言未声明的 achieved AC 其 GOAL 已 achieved ⇒ **不在** `inScope` 里——证明「放宽作用域」不是无差别（同硬规则④推论三，两条负控制各带「改坏 ⇒ 测试红」的取假路径）
+- [x] `inScope` 枚举落进生产载体：`packages/quay/src/goal-store.ts` 的 `checkAchievedFailing` 返回值含 `inScope: string[]`，`plugin/scripts/goal-driver.ts` reader 与 fact 透传之（`grep -n "inScope" packages/quay/src/goal-store.ts plugin/scripts/goal-driver.ts` 命中 ≥3 处：store 枚举 + reader 透传 + fact 类型）
+- [x] 声明字段读回：`long-term` 进 `GoalFrontmatter` / `GoalViewModel` / `OWNED_KEYS` / `toViewModel`（`grep -n "long-term" packages/quay/src/goal-store.ts` 命中 ≥3 处）
+- [x] 三条载体 AC 标记：AC-188/189/190 各带顶层 `long-term: true` 且 `goal-store list` 读回可见（`grep -n "long-term" goals/AC-188-goal-ac-criterion.md goals/AC-189-task-goal-spec.md goals/AC-190-task-ac.md` 各命中 ≥1）
+- [ ] AC-216 criterion 后半（生产读数）exit 0：`.quay/goal-round.jsonl` 存在 ≥1 条 fact 的 `value.achievedFailing.inScope` 含某条其 GOAL 已 achieved 的 AC——读主检出生产载体、只计落地之后时间窗，⛔ 靠 fixture 注入满足 = 未完成（硬规则④推论三）。**⛔ 需本任务 fan-in 落地后主检出 goal-driver 生产轮才产出（本 worker ⛔ 不碰主检出，同 gap-ac144 先例）。**（待外部）
+- [x] `node packages/quay/bin/quay.ts task check gap-goal-standing-ac-reverify-scope --json` 的 `missing` 为 `[]`
 
+
+## Evidence
+
+- AC-216 criterion 前半（单测）：`node --no-warnings --experimental-strip-types --test plugin/test/goal-standing-ac-reverify-scope.test.mjs` exit 0——3 pass / 0 fail（方向① / 方向② / baseline）。
+- 实跑 inScope 枚举（worktree 真数据，`QUAY_GOAL_ACCEPTANCE_ACTIVE=1` 只枚举不跑 criterion）：`node packages/quay/src/goal-store.ts check --achieved-failing --root <worktree>` 返回 `inScope: ["AC-188","AC-189","AC-190","AC-208","AC-209","AC-210","AC-211","AC-215"]`，其中 AC-188/189/190 的 GOAL-007 已 achieved 仍在域（long-term 声明生效）；scopeSize=8。
+- 生产载体透传（grep）：`grep -n inScope packages/quay/src/goal-store.ts plugin/scripts/goal-driver.ts` 命中 store 枚举(542/563/565/583)+reader(240/250)+fact 类型(711) 共 ≥3；`grep -n long-term packages/quay/src/goal-store.ts` 命中 ≥3（GoalFrontmatter/GoalViewModel/OWNED_KEYS/toViewModel/ordered-keys）。
+- 三条载体 AC：`grep -n long-term goals/AC-188-goal-ac-criterion.md goals/AC-189-task-goal-spec.md goals/AC-190-task-ac.md` 各命中 ≥1（第 7 行 `long-term: true`）；`goal-store list` 读回 `longTerm: true`（AC-188/189/190）。
+- typecheck：`node_modules/.bin/tsc --noEmit -p tsconfig.json` exit 0。
+- AC-216 criterion 后半（生产读数）为（待外部）：`.quay/goal-round.jsonl` 是主检出生产载体、由主检出 goal-driver 每轮写——须本任务 fan-in 落地 + 主检出 sync 后才有 `value.achievedFailing.inScope` 含 GOAL 已 achieved 的 AC（本 worker ⛔ 不碰主检出，同 gap-ac144「生产载体未产出前不勾本条」先例）。
 ## DoD
 
 AC-216 criterion 两半都满足：①双向负控制单测绿（声明 `long-term: true` 的 achieved AC 跨 GOAL 关闭仍在 I5 复验域、未声明的随 GOAL 关闭离开）；②生产轮记录 `.quay/goal-round.jsonl` 出现 ≥1 条 fact 的 `value.achievedFailing.inScope` 含某条【其 GOAL 已 achieved】的 AC（读主检出生产载体，只计落地之后时间窗）——证明复验在生产上真的跨过 GOAL 关闭，而非只在单测里成立（硬规则④推论三）。实跑输出贴本任务体供 fan-in 复核；改动经 fan-in 落地 develop，`git show develop:plugin/test/goal-standing-ac-reverify-scope.test.mjs` 可见该文件。⛔ 未声明的 AC 仍随 GOAL 关闭离开作用域（不无差别放宽——控成本，AC-216 origin 成本边界）。

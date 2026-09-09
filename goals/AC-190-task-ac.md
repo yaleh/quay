@@ -4,6 +4,7 @@ title: 反例检测器：声称长期保证却只有 task AC ⇒ 报红（位置
 status: achieved
 kind: criterion
 goal: GOAL-007
+long-term: true
 criterion: >
   s=plugin/scripts/long-term-guarantee-goal-backed-check.ts
 
