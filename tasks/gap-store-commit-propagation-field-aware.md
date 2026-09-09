@@ -47,16 +47,16 @@ in 冲突率前后对照的经验读数、事故复现窗口）留给本任务�
 
 ## AC
 
-- [ ] `packages/quay-native/test/store.test.mjs` 新增用例：纯 AC 复选框切换（无其它字段变更）在非
+- [x] `packages/quay-native/test/store.test.mjs` 新增用例：纯 AC 复选框切换（无其它字段变更）在非
   `task/*` 分支写入时，`commitTaskWrite` 返回 `propagated===false`（不 ff 到 develop）；
   `node --experimental-strip-types --test packages/quay-native/test/store.test.mjs` exit 0
-- [ ] 同一测试文件的负控制用例：混合写（AC 切换 + 新建字段或状态翻转同时发生）在非 `task/*` 分支写入
+- [x] 同一测试文件的负控制用例：混合写（AC 切换 + 新建字段或状态翻转同时发生）在非 `task/*` 分支写入
   时，仍 `propagated===true`（照常 ff 到 develop）——防止字段级判据把范围改宽波及不该改的写
-- [ ] `plugin/test/ac-shortcircuit-develop-worktree-union.test.mjs` 落地（AC-218 判据原文点名的文件），
+- [x] `plugin/test/ac-shortcircuit-develop-worktree-union.test.mjs` 落地（AC-218 判据原文点名的文件），
   覆盖「AC 勾选只落在 develop ref 或 worktree 任务分支提交、工作树副本未同步」场景下 `acShortCircuitVerdict`
   仍判全勾；`node --experimental-strip-types --test plugin/test/ac-shortcircuit-develop-worktree-union.test.mjs`
   exit 0
-- [ ] `node --experimental-strip-types --test packages/quay-native/test/store.test.mjs` 与
+- [x] `node --experimental-strip-types --test packages/quay-native/test/store.test.mjs` 与
   `plugin/test/ac-shortcircuit-develop-worktree-union.test.mjs` 均绿后，跑一次 `scripts/test.sh` 全量
   无新增红（回归）
 
