@@ -1,7 +1,7 @@
 ---
 id: gap-ac207-e2e-target-driver-driven-real-commit-task-done
 title: 端到端：目标项目自己的 *-drivers 驱动出真实开发提交且任务翻 done，落 ac=GOAL-009-AC-207 记录（AC-207）
-status: ready
+status: needs-human
 labels:
   - gap
   - delivery-critical
@@ -54,3 +54,12 @@ AC2/AC3/AC5 ⛔ 阻塞（生产复跑已跑，AC-203/206 已证实落地，⛔ �
 - plugin/scripts/verify-deliver-coldstart.sh
 - plugin/test/verify-deliver-coldstart.test.mjs
 - tasks/gap-ac207-e2e-target-driver-driven-real-commit-task-done.md
+
+## Needs-Human
+
+**执行 2026-09-09T20:12:48Z — 阻塞于未落地兄弟任务 + 跨主机生产复跑（CONTINUE 第 3 轮，⛔ 非实现缺陷）**
+
+- 阻碍原因：AC2/AC3/AC5 依赖 host B/C 第三方项目生产 e2e 复跑，该复跑被 `gap-driver-resource-gate-path-anchored-at-root-third-party` 阻塞（resource-gate 锚 `opts.root` ⇒ 第三方无 `plugin/` ⇒ exit 127 ⇒ 永不派发）。
+- 本轮实测：缺陷任务 status=ready，其 worktree 有未提交实现（`M plugin/scripts/driver-shared.ts` / `M plugin/scripts/cap-from-gate.ts` / `?? plugin/test/driver-shared.test.mjs`），develop 未落地——`develop:plugin/scripts/driver-shared.ts:212` 仍 `path.join(root, "plugin", "scripts", "resource-gate.sh")`。
+- 本任务实现（AC1/AC4）已完成并验证（分支 5 提交、AC 勾 2/5）；AC2/AC3/AC5 为外部依赖等待，⛔ 未伪造勾选。
+- 恢复路径：resource-gate 缺陷落地 develop 后，在 host B/C 复跑 `verify-deliver-coldstart.sh --ac207-e2e` 使 criterion exit 0，再 retreat 本任务回 ready 续验 AC2/AC3/AC5。
