@@ -1,7 +1,7 @@
 ---
 id: AC-219
 title: draft AC 分诊的 retire 默认分支不得对新提案（无任务牵引）的 draft AC 判退役——「无任务牵引」≠「死信」
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-010
 criterion: node --no-warnings --experimental-strip-types --test
@@ -26,4 +26,9 @@ statusLog:
     actor: human
     reason: triage bug已修复,gap-meta-goal-triage-fresh-draft-not-retire
       done;测试goal-triage-fresh-draft-not-retire.test.mjs 3/3 pass;同AC-217先例拨回
+  - at: 2026-09-09T13:42:08.074Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
