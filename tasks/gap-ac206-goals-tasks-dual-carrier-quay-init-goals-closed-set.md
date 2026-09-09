@@ -2,7 +2,7 @@
 id: gap-ac206-goals-tasks-dual-carrier-quay-init-goals-closed-set
 title: quay-init 闭集缺 goals/ → 六处同步改动 + verify-deliver 落 ac=GOAL-009-AC-206
   双载体记录（AC-206）
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical
