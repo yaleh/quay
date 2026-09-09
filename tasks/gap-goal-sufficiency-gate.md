@@ -1,7 +1,7 @@
 ---
 id: gap-goal-sufficiency-gate
 title: 充分性闸——GOAL flip 前判「退出条件被 AC 覆盖」，不足则不 flip 且 sufficiency 判定落轮记录
-status: todo
+status: ready
 labels:
   - gap
 parent: null
