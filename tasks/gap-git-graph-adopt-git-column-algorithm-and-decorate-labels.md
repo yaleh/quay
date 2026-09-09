@@ -56,13 +56,13 @@ git log --graph --all --pretty=format:'%x01%H'
 
 ## AC
 
-- [ ] AC1 **列号对拍（核心，退化解不可满足）**：对生产仓库同一窗口，我方每个提交的列号与 `git log --graph --all --pretty=format:'%x01%H'` 哨兵解析出的列号**逐条相等**，不一致数 = 0：`node --test packages/quay/test/gap-git-graph-adopt-git-column-algorithm-and-decorate-labels.test.mjs` 退出码 0。
-- [ ] AC2 负控制：测试内显式跑一版「不回收列」的分配（每个第二父都开新列），断言 AC1 的不一致数 > 0 ⇒ 判据能取假，不是恒真。
-- [ ] AC3 **标签只在 ref tip**：页面渲染出的标签集合与 `git log --pretty=format:'%H%x01%D'` 中 `%D` 非空的提交集合**逐条相等**；且 `develop` 标签出现次数 = 1（当前 6）。
-- [ ] AC4 **交互机件归零**：`packages/quay/src/serve-git.ts` 中 `expanded\[` / `点击展开` / `折叠` / `git-svg-hit` / `appendChip` 的 `grep -c` **全部为 0**（当前分别 8 / 4 / 5 / 1 / 4）。
-- [ ] AC5 **悬空标记归零**：渲染后含「窗口外分叉」的文本数 = 0（当前 5）；且布局输出的类型定义中不再有 `fork` / `merge` / `open` 字段。
-- [ ] AC6 **纵轴方向**：SVG 中 y 最小的那一行对应的提交 = `git log -1 --pretty=%H`（最新提交）。
-- [ ] AC7 **滚动加载未被打回**：Playwright 滚到底部后保持不动 15s，SVG 行数至少增长两次（沿用已 done 的 `gap-git-graph-scroll-loader-self-chain-blocked-by-loadingolder-flag` 判据）。
+- [x] AC1 **列号对拍（核心，退化解不可满足）**：对生产仓库同一窗口，我方每个提交的列号与 `git log --graph --all --pretty=format:'%x01%H'` 哨兵解析出的列号**逐条相等**，不一致数 = 0：`node --test packages/quay/test/gap-git-graph-adopt-git-column-algorithm-and-decorate-labels.test.mjs` 退出码 0。
+- [x] AC2 负控制：测试内显式跑一版「不回收列」的分配（每个第二父都开新列），断言 AC1 的不一致数 > 0 ⇒ 判据能取假，不是恒真。
+- [x] AC3 **标签只在 ref tip**：页面渲染出的标签集合与 `git log --pretty=format:'%H%x01%D'` 中 `%D` 非空的提交集合**逐条相等**；且 `develop` 标签出现次数 = 1（当前 6）。
+- [x] AC4 **交互机件归零**：`packages/quay/src/serve-git.ts` 中 `expanded\[` / `点击展开` / `折叠` / `git-svg-hit` / `appendChip` 的 `grep -c` **全部为 0**（当前分别 8 / 4 / 5 / 1 / 4）。
+- [x] AC5 **悬空标记归零**：渲染后含「窗口外分叉」的文本数 = 0（当前 5）；且布局输出的类型定义中不再有 `fork` / `merge` / `open` 字段。
+- [x] AC6 **纵轴方向**：SVG 中 y 最小的那一行对应的提交 = `git log -1 --pretty=%H`（最新提交）。
+- [x] AC7 **滚动加载未被打回**：Playwright 滚到底部后保持不动 15s，SVG 行数至少增长两次（沿用已 done 的 `gap-git-graph-scroll-loader-self-chain-blocked-by-loadingolder-flag` 判据）。
 
 ## DoD
 
@@ -73,8 +73,20 @@ git log --graph --all --pretty=format:'%x01%H'
 - packages/quay/src/serve-git.ts（layoutGitGraph 替换为活跃列+回收；输出改每行边集；删除全部交互与 chip 机件；标签内联进文本列）
 - packages/quay/src/observation.ts（行序改用 git 发射顺序；取 %D decoration）
 - packages/quay/test/gap-git-graph-adopt-git-column-algorithm-and-decorate-labels.test.mjs（本任务的回归测试，含 git 列号对拍）
-- packages/quay/test/gap-git-graph-lane-chip-rendered-once-regardless-of-span.test.mjs（stride 行为被反转，断言需同步更新）
-- packages/quay/test/gap-git-graph-ref-partition-collapses-all-topology-to-one-lane.test.mjs（泳道对象取消，断言需重写）
-- packages/quay/test/gap-git-graph-reconstructed-lanes-all-named-mainline-ref.test.mjs（泳道命名概念取消，断言需重写）
-- packages/quay/test/gap-git-graph-pagination-mainline-lane-empty-before-page.test.mjs（分页脊柱不变式在新模型下的等价断言）
+- packages/quay/test/gap-git-graph-lane-chip-rendered-once-regardless-of-span.test.mjs（stride 行为被反转，断言改标签只在 tip）
+- packages/quay/test/gap-git-graph-ref-partition-collapses-all-topology-to-one-lane.test.mjs（泳道对象取消，断言改列号对拍/拓扑保留）
+- packages/quay/test/gap-git-graph-reconstructed-lanes-all-named-mainline-ref.test.mjs（泳道命名概念取消，断言改 %D 标签无伪造）
+- packages/quay/test/gap-git-graph-pagination-mainline-lane-empty-before-page.test.mjs（分页不变式改 rows 非空）
+- packages/quay/test/gap-git-graph-scroll-loader-self-chain-blocked-by-loadingolder-flag.test.mjs（client 脚本 rows 模型适配）
+- packages/quay/test/gap-git-graph-branch-name-fallback-to-trunk-ref.test.mjs（泳道命名机件删除，测试随删）
+- packages/quay/test/gap-git-graph-drops-commits-while-overflowcount-reports-zero.test.mjs（overflow 计数删除，测试随删）
+- packages/quay/test/gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead.test.mjs（交互删除，测试随删）
+- packages/quay/test/gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge.test.mjs（泳道路径删除，测试随删）
+- packages/quay/test/gap-git-graph-lane-visual-encoding-and-fixed-width.test.mjs（泳道颜色删除，测试随删）
+- packages/quay/test/gap-git-graph-omits-inflight-branches-and-summary-table-disjoint.test.mjs（汇总表删除，测试随删）
+- packages/quay/test/gap-git-graph-row-key-collides-on-multiclaimed-commits.test.mjs（泳道行键删除，测试随删）
+- packages/quay/test/gap-git-graph-trunk-ref-resolves-to-head-not-mainline.test.mjs（mainline 概念删除，测试随删）
+- packages/quay/test/gap-git-history-lane-identity-and-row-layout-overlap.test.mjs（泳道行布局删除，测试随删）
+- packages/quay/test/observation.test.mjs（readGitHistory per-ref 模型 8 条测试随模型删除）
+- packages/quay/test/serve-handlers.test.mjs（git-history 集成断言适配 rows 模型）
 - tasks/gap-git-graph-adopt-git-column-algorithm-and-decorate-labels.md
