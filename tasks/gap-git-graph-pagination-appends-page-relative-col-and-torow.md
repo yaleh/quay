@@ -1,7 +1,7 @@
 ---
 id: gap-git-graph-pagination-appends-page-relative-col-and-torow
 title: 滚动加载后图崩：分页行携带页内相对的 col 与 toRow，合并后布局失效
-status: todo
+status: ready
 labels:
   - gap
   - webui
