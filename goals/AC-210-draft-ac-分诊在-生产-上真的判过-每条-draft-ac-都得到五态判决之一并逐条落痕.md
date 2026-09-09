@@ -1,7 +1,7 @@
 ---
 id: AC-210
 title: draft AC 分诊在【生产】上真的判过——每条 draft AC 都得到五态判决之一并逐条落痕
-status: draft
+status: active
 kind: criterion
 goal: GOAL-010
 criterion: python3 -c 'import json,sys; ok=[t for l in

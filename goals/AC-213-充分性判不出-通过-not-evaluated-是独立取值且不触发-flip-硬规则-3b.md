@@ -1,7 +1,7 @@
 ---
 id: AC-213
 title: 充分性判不出 ≠ 通过——not-evaluated 是独立取值且不触发 flip（硬规则 3b）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-010
 criterion: node --no-warnings --experimental-strip-types --test
