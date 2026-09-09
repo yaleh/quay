@@ -310,32 +310,42 @@ export function computeGitGraphHitRects(
 }
 
 /**
- * Compute the vertical graph structure in TWO phases (gap-git-graph-lane-path-inverts-and-duplicates-
- * per-devmerge). The OLD model reconstructed branch lanes by walking each merge commit's second-parent
- * chain — an algorithm that assumes no-ff fan-in and so, in THIS ff-fan-in repo, split develop's own
- * history into dozens of phantom lanes named after deleted branches. The new model trusts the ref
- * partition that readGitHistory already produces (every mainline-reachable commit is re-attributed to
- * the mainline ref; every live branch's exclusive commits keep their own ref):
+ * Compute the vertical graph structure (gap-git-graph-ref-partition-collapses-all-topology-to-one-
+ * lane). The ref-partition model this replaces folded EVERY develop-reachable commit into one mainline
+ * lane — in this ff-fan-in repo that is ALL commits (fan-in is ff, so every landed task-branch commit
+ * is develop-reachable), structurally yielding exactly ONE lane and losing the whole topology that
+ * `git log --graph --all` shows (36 concurrent tracks). The fix restores the second-parent walk:
  *
- *   Phase 1 (ref partition, authoritative) — group by `.ref`. A mainline ref → ONE `kind: 'mainline'`
- *   lane (the vertical spine); a live branch ref (still in `heads`) → a `kind: 'live'` lane; anything
- *   else is left unclaimed for phase 2.
+ *   Mainline lane — the first-parent chain from HEAD (the vertical spine `git log --graph` draws as the
+ *   `*` column), named develop/master (resolveTrunkRef). In ff-fan-in this chain IS the last landed
+ *   task's own history, not a stable "trunk" — that is fine: the spine is a drawing choice, not a claim.
  *
- *   Phase 2 (historical reconstruction, fallback) — the unclaimed commits (a no-ff merged + deleted
- *   branch, reachable only through a merge's second parent, with no independent live/mainline `.ref`)
- *   are grouped by `.ref` into `kind: 'reconstructed'` lanes. This runs AFTER the ref partition, so it
- *   can never resurrect a phantom lane over a correctly-attributed commit.
+ *   Lateral lanes — one per merge commit's second parent (the side-line `git log --graph` draws), walked
+ *   along the second parent's first-parent chain until it meets the spine, a commit already claimed by a
+ *   deeper lane (a branch-of-a-branch keeps only its exclusive commits — gap-git-graph-row-key-collides-
+ *   on-multiclaimed-commits), or the window edge. A live branch whose tip is not reachable from the
+ *   mainline (its exclusive commits keep their own `.ref`) becomes an OPEN lane.
  *
+ * Naming is provability-tiered (fail-visible, never a wrong name): a lane whose tip is a live `heads`
+ * ref → that ref name (`kind: 'live'`); otherwise the merge subject's QUOTED branch name — git quotes
+ * only the merged branch, so `Merge branch 'develop' into task/X` names the second parent `develop` —
+ * when that name is still a live ref (`kind: 'reconstructed'`); otherwise `#<short-hash>` unnamed.
  * PURE and deterministic on its input — tested on this output, before any SVG is drawn.
  */
 export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null {
   if (history.status !== "ok" || history.commits.length === 0) return null;
   const byHash = new Map(history.commits.map((c) => [c.hash, c]));
   const head = history.head ?? pickHead(history);
+  const heads = history.heads ?? {};
   // The mainline lane's display name is the mainline ref (develop > master > HEAD branch), never the
   // HEAD branch name — the main checkout is usually on `author` (gap-git-graph-trunk-ref-resolves-to-
   // head-not-mainline). Merge-subject resolution is only the fallback when no mainline ref exists.
-  const mainlineRef = resolveTrunkRef(history.heads ?? {}, head) || (head ? branchNameOf(history, head) : "");
+  const mainlineRef = resolveTrunkRef(heads, head) || (head ? branchNameOf(history, head) : "");
+  // The spine is the MAINLINE ref's first-parent chain (the mainline batch is fetched from it), not
+  // rev-parse HEAD — in a worktree HEAD is the task branch and lags the shared develop ref, so walking
+  // from HEAD would drop commits that landed on develop after the branch point (gap-git-graph-ref-
+  // partition-collapses-all-topology-to-one-lane: the spine must span the data actually fetched).
+  const spineRoot = mainlineRef && heads[mainlineRef] !== undefined ? heads[mainlineRef] : head;
 
   const laneCommitOf = (c: GitHistoryCommit): { hash: string; t: number; parents: number; subject: string } => ({
     hash: c.hash,
@@ -344,54 +354,28 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
     subject: c.subject,
   });
 
-  // ── Phase 1: ref partition. `.ref` is already correct (readGitHistory re-attributes every commit
-  // reachable from develop/master to the primary mainline ref), so a commit's `.ref` IS its lane.
-  const mainline: GitHistoryCommit[] = [];
-  const liveByRef = new Map<string, GitHistoryCommit[]>();
-  const orphanByRef = new Map<string, GitHistoryCommit[]>();
-  const heads = history.heads ?? {};
-  for (const c of history.commits) {
-    if (GIT_HISTORY_MAINLINE_REFS.has(c.ref)) {
-      mainline.push(c);
-    } else if (heads[c.ref] !== undefined) {
-      const arr = liveByRef.get(c.ref) ?? [];
-      arr.push(c);
-      liveByRef.set(c.ref, arr);
-    } else {
-      const arr = orphanByRef.get(c.ref) ?? [];
-      arr.push(c);
-      orphanByRef.set(c.ref, arr);
-    }
-  }
-
-  const mainlineSet = new Set(mainline.map((c) => c.hash));
   const byT = (a: GitHistoryCommit, b: GitHistoryCommit) => a.t - b.t || (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0);
 
-  // Walk a lane's OLDEST commit back to its fork: the first MAINLINE commit on the first-parent chain
-  // (null = the fork predates the active window, drawn with the 「窗口外分叉」 marker).
-  const computeFork = (oldestHash: string): string | null => {
-    let cur: string | null = byHash.get(oldestHash)?.parentHashes[0] ?? null;
-    const visited = new Set<string>();
-    while (cur) {
-      if (mainlineSet.has(cur)) return cur;
-      const pc = byHash.get(cur);
-      if (!pc || visited.has(cur)) return null; // parent outside the window / cycle → fork outside window
-      visited.add(cur);
-      cur = pc.parentHashes[0] ?? null;
+  // ── Mainline spine: the first-parent chain from the mainline ref's tip (the `*` column). Walk
+  // newest → oldest, then reverse so the lane's commit array is canonical oldest → newest.
+  const spineHashes: string[] = [];
+  {
+    let cur: string | null = spineRoot;
+    const seen = new Set<string>();
+    while (cur && byHash.has(cur) && !seen.has(cur)) {
+      seen.add(cur);
+      spineHashes.push(cur);
+      cur = byHash.get(cur)!.parentHashes[0] ?? null;
     }
-    return null;
-  };
+  }
+  spineHashes.reverse(); // oldest → newest
+  const spineSet = new Set(spineHashes);
+  const mainlineCommits = spineHashes.map((h) => byHash.get(h)!);
 
-  // Find the merge commit that merged this lane's tip back in (null = still open/unmerged).
-  const findMerge = (tipHash: string): { merge: string; mergeT: number } | null => {
-    for (const c of history.commits) {
-      if (c.parentHashes.length >= 2 && c.parentHashes.slice(1).includes(tipHash)) {
-        return { merge: c.hash, mergeT: c.t };
-      }
-    }
-    return null;
-  };
-
+  // Lateral-lane extraction. `claimed` gives each commit to EXACTLY ONE lane: a branch forked from
+  // another branch stops at the parent lane's already-claimed commit instead of re-claiming shared
+  // history (gap-git-graph-row-key-collides-on-multiclaimed-commits).
+  const claimed = new Set<string>();
   const usedIds = new Set<string>();
   const uniqueId = (base: string): string => {
     let id = base;
@@ -404,15 +388,37 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
     return id;
   };
 
-  // Build a lateral (non-mainline) lane: sort commits oldest→newest, compute fork + merge/open.
-  const buildLateral = (ref: string, kind: GitGraphLaneKind, commits: GitHistoryCommit[]): GitGraphBranchLane => {
-    commits.sort(byT);
-    const laneCommits = commits.map(laneCommitOf);
-    const ts = commits.map((c) => c.t);
-    const fork = computeFork(commits[0].hash);
-    const tip = commits[commits.length - 1].hash;
-    const merged = findMerge(tip);
-    const id = uniqueId(fork != null ? `${fork}::${tip}` : `${commits[0].hash}::${kind}`);
+  // Walk a lane's first-parent chain from `start`, collecting commits until the spine, a claimed
+  // commit, the window edge (unknown parent), or a cycle. Returns the collected commits (newest →
+  // oldest) and the fork (the spine commit reached, or null when the fork predates the window).
+  const walkLane = (start: string): { commits: GitHistoryCommit[]; fork: string | null } => {
+    const collected: GitHistoryCommit[] = [];
+    let cur: string | null = start;
+    let fork: string | null = null;
+    const visited = new Set<string>();
+    while (cur && byHash.has(cur) && !spineSet.has(cur) && !claimed.has(cur) && !visited.has(cur)) {
+      visited.add(cur);
+      const pc = byHash.get(cur)!;
+      collected.push(pc);
+      cur = pc.parentHashes[0] ?? null;
+    }
+    if (cur && spineSet.has(cur)) fork = cur;
+    return { commits: collected, fork };
+  };
+
+  // Build a lateral lane from a walked chain (oldest→newest) + fork/merge metadata.
+  const buildLateral = (
+    ref: string,
+    kind: GitGraphLaneKind,
+    collected: GitHistoryCommit[],
+    fork: string | null,
+    merge: { hash: string; t: number } | null,
+  ): GitGraphBranchLane => {
+    collected.sort(byT);
+    const laneCommits = collected.map(laneCommitOf);
+    const ts = collected.map((c) => c.t);
+    const tip = collected[collected.length - 1].hash;
+    const id = uniqueId(fork != null ? `${fork}::${tip}` : `${collected[0].hash}::${kind}`);
     return {
       ref,
       kind,
@@ -422,39 +428,63 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
       overflow: false,
       commits: laneCommits,
       fork,
-      merge: merged?.merge ?? null,
-      mergeT: merged?.mergeT ?? null,
-      open: merged == null,
+      merge: merge?.hash ?? null,
+      mergeT: merge?.t ?? null,
+      open: merge == null,
       firstT: Math.min(...ts),
       lastT: Math.max(...ts),
       collapsed: true,
     };
   };
 
+  const laterals: GitGraphBranchLane[] = [];
+
+  // Merged second-parent lanes: for EVERY merge commit (oldest → newest so a deeper lane claims its
+  // shared history first), walk each non-first parent into a lane.
+  const merges = history.commits.filter((c) => c.parentHashes.length >= 2).sort(byT);
+  for (const merge of merges) {
+    for (const p of merge.parentHashes.slice(1)) {
+      const { commits, fork } = walkLane(p);
+      if (commits.length === 0) continue;
+      for (const c of commits) claimed.add(c.hash);
+      const { ref, kind } = secondParentLaneName(history, p);
+      laterals.push(buildLateral(ref, kind, commits, fork, { hash: merge.hash, t: merge.t }));
+    }
+  }
+
+  // Open live lanes: a live non-mainline ref whose tip is still on its OWN ref (not re-attributed to
+  // the mainline) is genuinely unmerged (gap-git-graph-omits-inflight-branches-and-summary-table-
+  // disjoint) — draw it open (merge: null, dashed).
+  for (const [name, tip] of Object.entries(heads)) {
+    if (GIT_HISTORY_MAINLINE_REFS.has(name)) continue;
+    const tipCommit = byHash.get(tip);
+    if (!tipCommit || tipCommit.ref !== name) continue; // re-attributed ⇒ already merged
+    if (claimed.has(tip) || spineSet.has(tip)) continue;
+    const { commits, fork } = walkLane(tip);
+    if (commits.length === 0) continue;
+    for (const c of commits) claimed.add(c.hash);
+    laterals.push(buildLateral(name, "live", commits, fork, null));
+  }
+
   // The mainline lane is branches[0] — always the spine, always expanded, never forked/merged.
-  mainline.sort(byT);
   const mainlineLaneObj: GitGraphBranchLane = {
-    ref: mainlineRef || (mainline[0] ? mainline[0].ref : ""),
+    ref: mainlineRef || (mainlineCommits[0] ? mainlineCommits[0].ref : ""),
     kind: "mainline",
     id: "__mainline__",
     slot: -1,
     laneX: GIT_GRAPH_TRUNK_X,
     overflow: false,
-    commits: mainline.map(laneCommitOf),
+    commits: mainlineCommits.map(laneCommitOf),
     fork: null,
     merge: null,
     mergeT: null,
     open: false,
-    firstT: mainline.length ? Math.min(...mainline.map((c) => c.t)) : 0,
-    lastT: mainline.length ? Math.max(...mainline.map((c) => c.t)) : 0,
+    firstT: mainlineCommits.length ? Math.min(...mainlineCommits.map((c) => c.t)) : 0,
+    lastT: mainlineCommits.length ? Math.max(...mainlineCommits.map((c) => c.t)) : 0,
     collapsed: false,
   };
 
-  // Lateral lanes (live + reconstructed), sorted by fork time for a stable display order, mainline
-  // pinned FIRST. Each `.ref` value produces at most one lane (the ref partition can't split a ref).
-  const laterals: GitGraphBranchLane[] = [];
-  for (const [ref, cs] of liveByRef) laterals.push(buildLateral(ref, "live", cs));
-  for (const [ref, cs] of orphanByRef) laterals.push(buildLateral(ref, "reconstructed", cs));
+  // Lateral lanes sorted by fork time for a stable display order, mainline pinned FIRST.
   laterals.sort((a, b) => (a.fork != null ? byHash.get(a.fork)!.t : a.firstT) - (b.fork != null ? byHash.get(b.fork)!.t : b.firstT) || (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0));
   const branches: GitGraphBranchLane[] = [mainlineLaneObj, ...laterals];
 
@@ -505,6 +535,38 @@ export interface BranchNameResolution {
   name: string;
   /** true when no real branch name was determined (not in heads, no merge-subject match). */
   unresolved: boolean;
+}
+
+/** Parse the branch name git QUOTED in a merge subject — the SECOND parent's name (gap-git-graph-ref-
+ *  partition-collapses-all-topology-to-one-lane). git's merge-message convention is `Merge branch 'A'
+ *  into B`: the quoted 'A' is the branch being merged in (the merge commit's second parent), while the
+ *  `into B` clause (unquoted) is the first parent. So `Merge branch 'develop' into task/X` names its
+ *  second-parent lane `develop`, NOT `task/X` — the inverse of branchNameFromMergeSubject, which
+ *  deliberately picks the non-mainline name. null when the subject has no merge-branch form. */
+export function quotedBranchNameFromMergeSubject(subject: string): string | null {
+  const quoted = [...String(subject).matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  return quoted[0] ?? null;
+}
+
+/** Name a second-parent lane by provability — fail-visible, never a wrong name. Three tiers:
+ *  1. the tip IS a live `heads` ref → that ref name, `kind: 'live'`;
+ *  2. the tip was merged in by a merge commit whose QUOTED branch name is still a live ref → that
+ *     name, `kind: 'reconstructed'` (the quoted name is the second parent, so its commits are its
+ *     ancestors — AC3's `git merge-base --is-ancestor` oracle holds);
+ *  3. neither → `#<short-hash>` unnamed (`kind: 'reconstructed'` but a clearly-not-a-ref label, never
+ *     a fabricated branch name). */
+export function secondParentLaneName(history: GitHistoryResult, tipHash: string): { ref: string; kind: "live" | "reconstructed" } {
+  const heads = history.heads ?? {};
+  for (const [name, tip] of Object.entries(heads)) {
+    if (tip === tipHash) return { ref: name, kind: "live" };
+  }
+  for (const c of history.commits) {
+    if (c.parentHashes.length >= 2 && c.parentHashes.slice(1).includes(tipHash)) {
+      const quoted = quotedBranchNameFromMergeSubject(c.subject);
+      if (quoted && heads[quoted] !== undefined) return { ref: quoted, kind: "reconstructed" };
+    }
+  }
+  return { ref: `#${tipHash.slice(0, 7)}`, kind: "reconstructed" };
 }
 
 /** Parse the branch name out of a fan-in / dev-merge commit subject. Both conventions name the task

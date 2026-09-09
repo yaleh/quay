@@ -2519,17 +2519,18 @@ function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, befor
 
     // Live-branch batches: each live non-mainline ref's EXCLUSIVE commits (`--not <mainlineRefs>`
     // excludes every mainline-reachable commit, so the lane carries exactly its own history), bounded
-    // to the page's time window (`--since` = the mainline batch's oldest commit time; `--before` = the
-    // pagination cursor when paging back). The `--since` bound is the mirror of AC2's squeeze guard:
-    // without it, a long-dead branch (tip just inside the 7-day active window, exclusive commits far
-    // older than the visible mainline window) surfaces commits whose fork point is absent from the
-    // window — a zero-height lane that buildLanePath rejects as inverted (gap-git-graph-lane-path-
-    // inverts-and-duplicates-per-devmerge AC5).
+    // to the page's time window (`--since` = min(mainline floor, now − ACTIVE_WINDOW); `--before` = the
+    // pagination cursor when paging back). gap-git-graph-ref-partition-collapses-all-topology-to-one-
+    // lane: the old `--since` = the mainline batch's OLDEST commit time made a live branch's visibility
+    // depend on mainline commit density — the busier the repo, the closer the floor, the fewer active
+    // branches surface (a reverse incentive). The floor is now floored at the 7-day active window, so a
+    // ref with unique commits inside the window stays visible regardless of how recent the mainline is.
     for (const r of liveRefs) {
       const notArgs = mainlineRefs.length > 0 ? ["--not", ...mainlineRefs] : [];
       const args = ["-C", root, "log", r, ...notArgs, "--date=unix"];
       if (before !== null && Number.isFinite(before)) args.push(`--before=${before}`);
-      if (windowFloorSec !== null) args.push(`--since=${windowFloorSec}`);
+      const liveFloorSec = windowFloorSec !== null ? Math.min(windowFloorSec, sinceSec) : sinceSec;
+      args.push(`--since=${liveFloorSec}`);
       args.push("--pretty=format:%H%x1f%ct%x1f%P%x1f%s");
       const out = execFileSync("git", args, { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] });
       pushCommits(out, r);

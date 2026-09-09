@@ -56,10 +56,14 @@ test("AC1: layout yields mainline + open lanes; open lanes carry open:true + mer
   assert.equal(open.fork, "mm00000", "open lane forks from the trunk commit it diverged from");
   assert.deepEqual(open.commits.map((x) => x.hash), ["o100000", "o200000"], "open lane carries its own commits oldest→newest");
 
-  // The merged branch's commit is re-attributed to develop ⇒ it folds into the mainline, NOT a lane.
-  const mainlineHashes = new Set(mainlineLane(layout).commits.map((x) => x.hash));
-  assert.ok(mainlineHashes.has("m100000"), "the fully-merged branch's commit lands in the mainline lane");
-  assert.equal(layout.branches.find((b) => b.ref === "task/merged"), undefined, "no fabricated task/merged lane (it is folded into mainline)");
+  // gap-git-graph-ref-partition-collapses-all-topology-to-one-lane: the merged branch's tip is STILL a
+  // live head (task/merged was never deleted), so it is a merged lane (kind live, open:false) — the
+  // topology is restored, not folded into the mainline.
+  const merged = layout.branches.find((b) => b.ref === "task/merged");
+  assert.ok(merged, "the still-checked-out merged branch is a lane (its ref was not deleted)");
+  assert.equal(merged.kind, "live", "the merged-but-kept branch is kind live");
+  assert.equal(merged.open, false, "it is merged (open:false), not in-flight");
+  assert.deepEqual(merged.commits.map((x) => x.hash), ["m100000"], "the lane carries its own commit");
 });
 
 test("AC1 (negative control): a merged-only fixture produces NO open lane", () => {
@@ -72,25 +76,20 @@ test("AC1 (negative control): a merged-only fixture produces NO open lane", () =
   ];
   const layout = layoutGitGraph(hist(commits, "mm00000", { develop: "mm00000", "task/merged": "m100000" }));
   assert.equal(layout.branches.filter((b) => b.open).length, 0, "no open lane when every branch is merged");
-  assert.equal(layout.branches.length, 1, "only the mainline lane (the merged branch folded in)");
+  assert.equal(layout.branches.length, 2, "mainline + the merged branch's lane (no open lane)");
 });
 
-// ── AC3: negative control — the OLD --source grouping and the NEW graph agree (差集 empty) ─────────
-// Implemented INLINE here (deliberately NOT imported): the old summary table grouped by --source ref,
-// which folds a merged branch into "develop". The ref-partition graph now does the SAME fold, so the
-// two name sets agree — and the graph no longer fabricates a lane for a re-attributed commit.
-function oldGroupCommitsByBranchRefs(commits) {
-  const byRef = new Set();
-  for (const c of commits) byRef.add(c.ref);
-  return [...byRef];
-}
+// ── AC3: the graph names BOTH the open live branch AND the merged-but-kept branch (from heads) ─────
+// gap-git-graph-ref-partition-collapses-all-topology-to-one-lane: the graph is no longer a projection
+// of the --source ref partition — it restores the second-parent lanes, and a still-checked-out merged
+// branch (ref not deleted) is named from heads, not fabricated from a merge subject.
 
-test("AC3: the graph ref set equals the --source ref partition (no fabricated merged-branch lane)", () => {
+test("AC3: the graph names the open live branch AND the merged-but-kept branch (both from heads)", () => {
   const { commits, heads, head } = mergedAndOpenFixture();
   const layout = layoutGitGraph(hist(commits, head, heads));
-  const sourceRefs = new Set(oldGroupCommitsByBranchRefs(commits));
   const graphRefs = new Set(layout.branches.map((b) => b.ref));
-  assert.deepEqual([...graphRefs].sort(), [...sourceRefs].sort(), "graph and --source partition name the SAME ref set");
-  assert.ok(!graphRefs.has("task/merged"), "the graph no longer fabricates a task/merged lane");
   assert.ok(graphRefs.has("task/open"), "the graph still names the open live branch");
+  assert.ok(graphRefs.has("task/merged"), "the graph names the still-checked-out merged branch (its ref was kept)");
+  const merged = layout.branches.find((b) => b.ref === "task/merged");
+  assert.equal(merged.open, false, "the merged branch is closed, not in-flight");
 });
