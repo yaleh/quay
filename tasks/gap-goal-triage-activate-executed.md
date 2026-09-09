@@ -28,13 +28,13 @@ goal_ac: AC-223
 
 ## AC
 
-- [ ] `node --no-warnings --experimental-strip-types --test plugin/test/goal-triage-activate-executed.test.mjs` 退出码 0（AC-223 机制半逐字）
-- [ ] 正向：测试断言分诊判 `activate` 的 draft AC 经一轮 driver 后 `flips` 含 `to=="active"`（`writeGoalStatus` 以 `"active"` 被调、目标 status 翻 active）
-- [ ] 负控制 (a)：测试断言判 `hold`/`re-anchor`/`needs-human` 的 AC 不被激活（`flips` 无该 ac 的 `to=="active"` 条目）
-- [ ] 负控制 (b)：测试断言 posture 已声明（measure-only，AC-215）的 GOAL 名下 draft AC 不被激活
-- [ ] 负控制 (c)：测试断言 driver 不写 `retired`（`flips` 无 `to=="retired"`；`plugin/test/goal-triage-no-driver-retire.test.mjs` 仍绿）
-- [ ] 生产半判据（生产，待外部）：`node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts list | python3 -c 'import json,sys; d=json.load(sys.stdin); n=sum(1 for r in d for e in (r.get("statusLog") or []) if str(e.get("to"))=="active" and str(e.get("actor","")).startswith("goal-driver")); print("driver-activations:",n); sys.exit(0 if n>=1 else 1)'` 退出码 0（落地后一轮 driver 跑过，非 fixture）
-- [ ] scoped 门 `bash scripts/test.sh --for-task gap-goal-triage-activate-executed --allow-thin` 退出码 0
+- [x] `node --no-warnings --experimental-strip-types --test plugin/test/goal-triage-activate-executed.test.mjs` 退出码 0（AC-223 机制半逐字）
+- [x] 正向：测试断言分诊判 `activate` 的 draft AC 经一轮 driver 后 `flips` 含 `to=="active"`（`writeGoalStatus` 以 `"active"` 被调、目标 status 翻 active）
+- [x] 负控制 (a)：测试断言判 `hold`/`re-anchor`/`needs-human` 的 AC 不被激活（`flips` 无该 ac 的 `to=="active"` 条目）
+- [x] 负控制 (b)：测试断言 posture 已声明（measure-only，AC-215）的 GOAL 名下 draft AC 不被激活
+- [x] 负控制 (c)：测试断言 driver 不写 `retired`（`flips` 无 `to=="retired"`；`plugin/test/goal-triage-no-driver-retire.test.mjs` 仍绿）
+- [ ] 生产半判据（生产）：`node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts list | python3 -c 'import json,sys; d=json.load(sys.stdin); n=sum(1 for r in d for e in (r.get("statusLog") or []) if str(e.get("to"))=="active" and str(e.get("actor","")).startswith("goal-driver")); print("driver-activations:",n); sys.exit(0 if n>=1 else 1)'` 退出码 0（落地后一轮 driver 跑过，非 fixture）（待外部）
+- [x] scoped 门 `bash scripts/test.sh --for-task gap-goal-triage-activate-executed --allow-thin` 退出码 0
 
 ## DoD
 
