@@ -356,11 +356,19 @@ export function goalSufficiencyVerdict(
   return "not-evaluated";
 }
 
-// ── 缺口四态（G7 + G9 stalled，硬规则 3b：读不懂输入不得返回与「合格」同形——「缺口」与「未评估」分离）──
+// ── 缺口五态（G7 + G9 stalled + done-unresolved，硬规则 3b：读不懂输入不得返回与「合格」同形——
+//    「缺口」/「无牵引」/「未评估」分离；硬规则 3：枚举不布尔——「零关联」与「全 done」两种成因不同处置）──
 
-/** 单条 AC 的缺口态：in-progress（有任务推进）/ gap（缺口）/ stalled（有任务但都无法自行前进）/
- *  not-evaluated（读不到 tasks 输入）。四态并存，not-evaluated 保留（硬规则 3b）。 */
-export type GapState = "in-progress" | "gap" | "stalled" | "not-evaluated";
+/** 单条 AC 的缺口态（五态并存，not-evaluated 保留——读不到 tasks 输入与「缺口/无牵引」不同形，硬规则 3b）：
+ *  in-progress     有任务推进（todo/ready/needs-human 有牵引）
+ *  gap             真缺口：零关联任务（无任何 goal_ac==ac 的任务）⇒ 该 spawn 立案
+ *  done-unresolved 有关联任务、但全部为非牵引态（done/superseded 等）而 AC 判据仍未达成——工作已做过，
+ *                  缺的是复验或工作量不足，⛔ 不该再每轮 spawn 同一条任务（gap-goal-gap-done-task-not-
+ *                  traction-respawns-every-round；与 gap「零关联」不同形，硬规则 3）
+ *  stalled         有任务但都无法自行前进（G9 结构判据）
+ *  not-evaluated   读不到 tasks 输入（taskFacts==null）
+ */
+export type GapState = "in-progress" | "gap" | "done-unresolved" | "stalled" | "not-evaluated";
 
 /** 一条 AC 的缺口读数。taskCount 只在 not-evaluated 时为 null（⛔ 与 0 不同形）。 */
 export interface GoalGap {
@@ -390,17 +398,25 @@ export function isTaskStuck(task: { id: string; status: string | null }, judgmen
   return false;
 }
 
-/** 缺口计算（G7 机械量，SPEC §6.2 ⑤）：对每条未达成（status=active）AC，
- *  count(task where goal_ac == AC and status ∈ {todo,ready,needs-human}) == 0 ⇒ 缺口。
- *  四态：gap（计数 == 0）/ stalled（计数 > 0 但关联任务全都无法自行前进——G9，judgment 提供结构量；
+/** 「牵引」状态集合的单一真相源：一条关联任务处于「推进中」的状态（todo/ready/needs-human）。
+ *  done/superseded 等其余状态不是牵引（工作已做过/已放弃）——computeGoalGaps 与 triageDraftAc 都调它
+ *  （⛔ 两处各写一份字面量即漂移，硬规则 5b——gap-goal-gap-done-task-not-traction-respawns-every-round AC3）。 */
+export function isTractionStatus(status: string | null | undefined): boolean {
+  return status === "todo" || status === "ready" || status === "needs-human";
+}
+
+/** 缺口计算（G7 机械量，SPEC §6.2 ⑤）：对每条未达成（status=active）AC 出五态之一。
+ *  五态：gap（零关联任务——真缺口）/ done-unresolved（有关联任务但全部非牵引——done/superseded 等，
+ *  工作已做过、⛔ 不再 spawn 立案）/ stalled（有牵引任务但全都无法自行前进——G9，judgment 提供结构量；
  *  ⚠️ needs-human 亦属 stalled：已离开 todo/ready、需人处理，有处理者但不能自行前进，且与
- *  judgment 无关）/ in-progress（计数 > 0）/ not-evaluated（taskFacts == null）。
+ *  judgment 无关）/ in-progress（有牵引且可前进）/ not-evaluated（taskFacts == null）。
  *  judgment===null（读不到 ready-pool-check）⇒ 不判 stalled（⛔ 不把「读不懂」伪装成「卡住」，
  *  也不伪装成「推进中」——stalled 只是对 in-progress 的细化，读不懂时回到 in-progress），
  *  ⛔ 例外：关联集合全为 needs-human 时无论 judgment 有无都判 stalled（needs-human 不需要
  *  ready-pool 结构量即可判定「不能自行前进」）。
- *  ⛔ 本仓任务无独立 in-flight 态——派发中的任务 status 仍为 todo/ready，故「推进中」集合 =
- *  {todo, ready, needs-human}。done/superseded 不计入（真的没有在做的任务 ⇒ gap 正确）；
+ *  ⛔ 本仓任务无独立 in-flight 态——派发中的任务 status 仍为 todo/ready，故「牵引」集合 =
+ *  {todo, ready, needs-human}（单一真相源 = isTractionStatus）。done/superseded 等非牵引态
+ *  不再与「零关联任务」同判 gap（gap-goal-gap-done-task-not-traction-respawns-every-round）；
  *  draft/superseded/retired/achieved 的 AC 均不是缺口对象（未激活 / 已关闭 / 已达成）。 */
 export function computeGoalGaps(
   records: Array<Record<string, unknown>>,
@@ -417,16 +433,29 @@ export function computeGoalGaps(
       out.push({ goal, ac: id, state: "not-evaluated", taskCount: null });
       continue;
     }
-    const associated = taskFacts.filter(
-      (t) => t.goalAc === id && (t.status === "todo" || t.status === "ready" || t.status === "needs-human"),
-    );
-    const count = associated.length;
-    const state: GapState = count === 0
-      ? "gap"
-      : (associated.every((t) => t.status === "needs-human")
-          ? "stalled"
-          : (judgment !== null && associated.every((t) => isTaskStuck(t, judgment)) ? "stalled" : "in-progress"));
-    out.push({ goal, ac: id, state, taskCount: count });
+    // 关联任务 = 所有 goal_ac==id 的任务（任意状态）；牵引 = 其中的 todo/ready/needs-human。
+    const allAssociated = taskFacts.filter((t) => t.goalAc === id);
+    const traction = allAssociated.filter((t) => isTractionStatus(t.status));
+    const count = traction.length;
+    let state: GapState;
+    let taskCount: number;
+    if (allAssociated.length === 0) {
+      state = "gap";                  // 真缺口：零关联任务 ⇒ 该 spawn 立案
+      taskCount = 0;
+    } else if (count === 0) {
+      state = "done-unresolved";      // 有关联任务但全部非牵引（done/superseded）——工作已做过，⛔ 不再 spawn
+      taskCount = allAssociated.length; // 枚举关联数（⛔ 非布尔化，硬规则 3）
+    } else if (traction.every((t) => t.status === "needs-human")) {
+      state = "stalled";
+      taskCount = count;
+    } else if (judgment !== null && traction.every((t) => isTaskStuck(t, judgment))) {
+      state = "stalled";
+      taskCount = count;
+    } else {
+      state = "in-progress";
+      taskCount = count;
+    }
+    out.push({ goal, ac: id, state, taskCount });
   }
   return out;
 }
@@ -526,9 +555,9 @@ export function triageDraftAc(
   const goalRef = String(record.goal ?? "").trim();
   const criterion = String(record.criterion ?? "").trim();
   const posture = typeof goalPosture === "string" ? goalPosture.trim() : "";
-  // 「推进中」口径与 computeGoalGaps 一致（todo/ready/needs-human）；done/superseded 不是牵引。
+  // 「牵引」口径 = isTractionStatus（与 computeGoalGaps 同一单一真相源）；done/superseded 不是牵引。
   const hasTraction = taskFacts !== null && taskFacts.some(
-    (t) => t.goalAc === ac && (t.status === "todo" || t.status === "ready" || t.status === "needs-human"),
+    (t) => t.goalAc === ac && isTractionStatus(t.status),
   );
 
   if (goalRef === "" || !/^GOAL-\d{3,}$/.test(goalRef)) {
