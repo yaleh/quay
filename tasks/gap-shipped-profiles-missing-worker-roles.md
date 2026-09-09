@@ -2,7 +2,7 @@
 id: gap-shipped-profiles-missing-worker-roles
 title: shipped plugin/.quay/profiles.yml 缺 worker roles ⇒ worker-driver
   resolveRole 抛 role not found，第三方项目永不派发（AC-207 端到端阻塞）
-status: todo
+status: ready
 labels:
   - gap
   - delivery-critical
