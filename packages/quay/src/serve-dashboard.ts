@@ -931,6 +931,19 @@ export function renderCardGrid(cards: string[], opts: { marginBottom?: boolean }
   return html`<div class="dash-grid" style="display:grid;grid-template-columns:${gridColumns(cards.length)};gap:2px;background:var(--color-divider);border:1px solid var(--color-divider);${margin}">${cards.join("")}</div>`;
 }
 
+/** The dashboard's top row is asymmetric BY DESIGN (gap-dashboard-top-row-asymmetric-columns) and
+ *  does NOT reuse gridColumns()/renderCardGrid() — those stay card-count-bound and equal-width for
+ *  the 工作进展 / 变更记录 rows. The 循环脉搏 card is by far the tallest of the three (a long in-flight
+ *  task description wraps to ~8 lines at the old 287px column width, driving the row height), while
+ *  系统资源 and DRIVER are short and were ~45%/~48% blank when stretch-aligned to the live card's
+ *  height. A fixed 3fr:2fr two-column split widens the live card (fewer wrapped lines) and stacks the
+ *  two short cards in the right column, collapsing two large voids into one smaller one. It keeps the
+ *  .dash-grid class so the ≤600px single-column media query still collapses it (both grid items become
+ *  full-width rows; the right column's flex stack is unaffected). */
+export function renderTopRow(liveCard: string, sysCard: string, mgrCard: string): string {
+  return html`<div class="dash-grid" style="display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:2px;background:var(--color-divider);border:1px solid var(--color-divider);margin-bottom:1.5rem;">${liveCard}<div style="display:flex;flex-direction:column;gap:2px">${sysCard}${mgrCard}</div></div>`;
+}
+
 /** The .dash-grid sheet: the ≤600px single-column collapse. Split from the inline style because a
  *  media query cannot live in a style attribute. The `!important` is required to beat the inline
  *  `grid-template-columns` (inline styles outrank class selectors — this is the standard override
@@ -996,7 +1009,7 @@ export function renderDashboardPage(
       <h1>Dashboard</h1>
       <p class="meta">循环脉搏、任务台账、系统资源与三层调度状态的总览 — 每张卡片指向对应完整页面。</p>
       <p class="meta">时间轴窗口（以各自最近一次运行/fan-in 结束时刻为终点的过去 ${hours}h）：${hourLinks}</p>
-      ${renderCardGrid([liveCard, sysCard, mgrCard], { marginBottom: true })}
+      ${renderTopRow(liveCard, sysCard, mgrCard)}
       <h2>工作进展</h2>
       ${renderCardGrid([goalCard, taskCard, testsCard, fanInCard], { marginBottom: true })}
       <h2>变更记录</h2>
