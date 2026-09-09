@@ -53,18 +53,16 @@ AC2/AC3/AC5 ⛔ 阻塞（第 4 轮，2026-09-09T22:39Z）：原阻塞（resource
 
 ② **host B/C 的 claude OAuth 过期（环境缺陷）**：host B=orangevps（claude 2.1.261）与 host C=vhs（claude 2.1.229）`claude -p` 均返回 `Failed to authenticate: OAuth session expired and could not be refreshed`；shipped worker-default launcher=claude + auth=key 需 ANTHROPIC_API_KEY（第三方项目未设）⇒ 即便 ① 修好，bare claude 无凭据也 spawn 不出 worker。
 
-## Touches
+AC2/AC3/AC5 ⛔ 阻塞复核（CONTINUE 第 5 轮，2026-09-09T23:01Z）：两阻塞仍未解除——① shipped `plugin/.quay/profiles.yml` 仍只有 manager/outer 两 role（`git show develop:plugin/.quay/profiles.yml` 确认 task-worker 未落 develop；修复任务 `gap-shipped-profiles-missing-worker-roles` 已 ready、AC1/AC2 已勾、AC3 全量 suite 待外部）；② host B/C claude OAuth 未恢复。生产载体 `.quay/productization-verification.jsonl` 仍 0 条 `ac="GOAL-009-AC-207"`（`grep -c` = 0）。AC1/AC4 实现已 done 不变；AC2/AC3/AC5 需外部 e2e 方可验 ⇒ 本任务翻 needs-human 停派，待两阻塞解除后由人翻回 ready 续做。
 
-- plugin/scripts/verify-deliver-coldstart.sh
-- plugin/test/verify-deliver-coldstart.test.mjs
-- tasks/gap-ac207-e2e-target-driver-driven-real-commit-task-done.md
+**两阻塞解除记录（人 2026-09-09 授权，retreat→ready 续验 AC2/AC3/AC5）**：
 
-## Needs-Human
+① **shipped profiles.yml worker roles**——修复任务 `gap-shipped-profiles-missing-worker-roles` 已 done 并落 develop：`develop` HEAD `5c12f9c9` 逐字含该提交主题（`git log develop` 可核）；即修复已在 develop 权威基线上生效，第三方项目重新按当前 develop tip 现 build 的安装物即会带上完整 worker roles。
 
-**执行 2026-09-09T22:39Z — 阻塞于两个新缺陷（CONTINUE 第 4 轮，⛔ 非实现缺陷；AC1/AC4 实现已 done 不变）**
+② **host B/C claude OAuth 过期**——人已授权用第三方 Anthropic-compatible endpoint wrapper `claude-fjdac`（走 `ANTHROPIC_AUTH_TOKEN` 而非 OAuth）绕开认证阻塞：已把该 wrapper + key 文件部署到 orangevps 与 ad-arm1 两台机器，逐台实测 `claude-fjdac -p` 认证成功、正常返回。orangevps 上第三方验证项目 `/home/yale/work/ac207-third-party` 的 `.quay/profiles.yml` 已改为 `worker-default.launcher=claude-fjdac` + `model=deepseek-v4-pro-anthropic` + `auth=token`，与本仓库根 `.quay/profiles.yml` 逐字一致。
 
-- 原阻塞（resource-gate 锚 opts.root ⇒ 第三方 exit 127）已解除：`gap-driver-resource-gate-path-anchored-at-root-third-party` 已 done 落 develop（6acf9e8a2）。
-- 本轮实测两个【新】阻塞，均在本任务 Touches 之外：
-  ① **shipped profiles.yml 缺 worker roles（产品缺陷）**：`plugin/.quay/profiles.yml`（quay-init 模板 verbatim 铺进第三方项目）`roles:` 只有 `manager`/`outer`；worker-driver 派发走 `launchArgv("task-worker", …)` → `profile-policy.ts:140` `resolveRole` 抛 `role not found: "task-worker"`。已复现：`resolveRole(readProfilesConfig("<repo>/plugin"), 'task-worker')` THROW，而 dev-tree 根 `.quay/profiles.yml` 有 task-worker/selector/fix-worker/pool-judge/meta-driver 七个 role ⇒ 第三方项目 worker 永不 spawn。
-  ② **host B/C claude OAuth 过期（环境缺陷）**：orangevps（claude 2.1.261）与 vhs（claude 2.1.229）`claude -p` 均 `Failed to authenticate: OAuth session expired and could not be refreshed`；shipped worker-default launcher=claude + auth=key 需 ANTHROPIC_API_KEY（第三方未设）⇒ 即便 ① 修好，bare claude 也 spawn 不出。
-- 恢复路径（需人 + 新任务）：(a) 立新 gap 任务补齐 shipped `plugin/.quay/profiles.yml` 的 worker roles（与 dev-tree 根 profiles.yml role 键集对齐）；(b) 人重认证 host B/C claude OAuth（或为 worker role 配 ANTHROPIC_API_KEY / claude-deepseek）。两项落地后复跑 `verify-deliver-coldstart.sh --ac207-e2e` 使 criterion exit 0，再 retreat 本任务续验 AC2/AC3/AC5。
+**同时**：orangevps 该第三方项目此前装的旧安装物携带 resource-gate.sh 路径锚死 bug（同样已在 develop 修复），已从 develop tip（`5c12f9c9d193cf5e2b5aff11ad3eaee064fc58c6`）现 build `quay-0.6.1.tgz` + `quay-native-0.6.1.tgz`，重装进该项目 npm prefix，重启 promotion+worker driver；实测 promotion round 的资源闸已回 `"go":true,"reason":"=> GO: 资源充足，可以跑"`（此前恒 `resource-gate WAIT exit 127`）。
+
+⇒ 两个此前阻塞 AC2/AC3/AC5 的成因均已解除并留有外部可核证据（develop commit / claude-fjdac 实测认证 / promotion gate GO 读数）。任务由人授权 retreat 回 ready，续做 AC2/AC3/AC5（第三方项目 e2e 驱动、直接量读取、载体落账、判据干跑翻转）。
+
+AC2/AC3/AC5 ⛔ 阻塞（CONTINUE 第 6 轮，2026-09-09T23:4xZ）：前两阻塞虽已解除，但 e2e 仍未驱动起来——**第三个阻塞（产品缺陷，同族于已 done 的 `gap-driver-resource-gate-path-anchored-at-root-third-party`，且是 `gap-plugin-root-resolution-remaining-callsites` 遗漏的调用点）**：`promotion-driver.ts` `defaultPromotionCheckArgv`（develop :120-126）仍把 ready-pool-check 锚在 `path.join(root, "plugin", "scripts", "ready-pool-check.ts")`——root 是第三方项目根，而 quay-init 布下的第三方项目无 plugin/（裁定 6 不复制脚本）、shipped 包只有 dist/*.js 无 .ts。实测：orangevps 第三方项目 promotion-round.jsonl 每轮 `error="ready-pool-check exited 1"`（round 8–13）；复现 `node --experimental-strip-types <third-party>/plugin/scripts/ready-pool-check.ts` → `Cannot find module` exit 1。对照 Layer 0 `driver-runtime.ts` `resolveKernelSibling("ready-pool-check.ts")` 已正确解析到 shipped `scripts/dist/ready-pool-check.js`（含 .ts→dist/.js 回退）。同层 worker-driver.ts 有同形锚点（:1175/:1201/:3531）。⇒ 已立新任务 `gap-promotion-driver-ready-pool-check-path-third-party`（本任务 Touches 之外）；AC1/AC4 实现已 done 不变；AC2/AC3/AC5 仍阻塞，待该任务落 develop + 第三方重装后复跑 e2e。
