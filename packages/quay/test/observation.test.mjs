@@ -13,9 +13,10 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readTranscriptTail, readSession, parseClaudeAgentsJson, readTaskStatusAtRef, readTaskAtRefMeta, readTaskTitleMapAtRef, readTaskCommitTimesAtRef, readTaskCommitTimeAtRef, readTaskStatusMapAtRef, refreshDevelopRefCaches, clearTaskStatusRefCache } from "../src/observation.ts";
+import { parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, readWorkerOutcomeRecords, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readTranscriptTail, readSession, parseClaudeAgentsJson, readTaskStatusAtRef, readTaskAtRefMeta, readTaskTitleMapAtRef, readTaskCommitTimesAtRef, readTaskCommitTimeAtRef, readTaskStatusMapAtRef, refreshDevelopRefCaches, clearTaskStatusRefCache } from "../src/observation.ts";
 import { renderSessionPage } from "../src/serve-handlers.ts";
 import { taskRunsBlock, handleTaskList } from "../src/serve-task.ts";
+import { renderLiveCard } from "../src/serve-dashboard.ts";
 
 
 test("AC127: parseVerificationRound extracts the bucket-execution fields (buckets/bucket_files/bucket_duration_ms) and tolerates their absence on legacy rows (never a fabricated \"full\")", () => {
@@ -1289,5 +1290,39 @@ test("AC4 — the background refresh is fail-open: git unavailable never throws,
     assert.equal(readTaskStatusMapAtRef(root, "develop").get("gap-a"), "done", "AC4: the next successful refresh restores the cache content");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── gap-dashboard-live-swimlane-fixed-lane-gantt-timeline DoD integration test ────────────────────
+// The DoD is NOT pure-unit samples: it must prove the merge → pack → render three-stage pipeline is
+// wired to PRODUCTION data shapes — a real `.quay/worker-outcome.jsonl` (read via readWorkerOutcomeRecords)
+// + a real readLive() in-flight set (via the process-signal seam), fed through renderLiveCard, produces
+// a fixed-5-lane gantt (historical + in-flight blocks) AND the untouched in-flight mini-list.
+test("DoD: renderLiveCard gantt merges readLive() + worker-outcome.jsonl into one 5-lane gantt alongside the mini-list", () => {
+  const ws = workerWorkspace("gantt-e2e");
+  try {
+    const nowMs = Date.parse("2026-08-24T08:00:00.000Z");
+    // Two TERMINAL historical outcomes (completed-with-fan-in + failed) — the carrier's full shape.
+    const hist = [
+      { ts: "2026-08-24T07:41:00.000Z", task: "gap-hist-a", run_id: "wk-a", started_at: "2026-08-24T07:00:00.000Z", ended_at: "2026-08-24T07:41:00.000Z", final_state: "completed", mechanical_fan_in: { outcome: "landed" } },
+      { ts: "2026-08-24T07:21:00.000Z", task: "gap-hist-b", run_id: "wk-b", started_at: "2026-08-24T07:10:00.000Z", ended_at: "2026-08-24T07:20:00.000Z", final_state: "failed" },
+    ];
+    fs.mkdirSync(path.dirname(path.join(ws, WORKER_OUTCOME_REL)), { recursive: true });
+    fs.writeFileSync(path.join(ws, WORKER_OUTCOME_REL), hist.map((r) => JSON.stringify(r) + "\n").join(""));
+
+    // One first-dispatched in-flight worker (no outcome record yet) via the process-signal seam.
+    const live = readLive(ws, { nowMs, liveWorkers: [{ taskId: "gap-live-c", pid: "100", startedAtMs: Date.parse("2026-08-24T07:30:00.000Z") }] });
+
+    const records = readWorkerOutcomeRecords(ws);
+    const html = renderLiveCard(live, nowMs, [], records, 3);
+
+    assert.match(html, /循环脉搏甘特图/, "the gantt svg renders from real readLive + worker-outcome data");
+    const ganttStart = html.indexOf('aria-label="循环脉搏甘特图');
+    assert.ok(ganttStart >= 0, "gantt svg anchor found");
+    const rects = (html.slice(ganttStart).match(/<rect[^>]*>/g) ?? []);
+    assert.equal(rects.length, 3, "2 historical + 1 in-flight interval → exactly 3 <rect> blocks (merge+pack+render wired)");
+    assert.match(html, /<a href="\/task\/gap-live-c"/, "the in-flight mini-list task id survives alongside the gantt (hard constraint)");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
   }
 });
