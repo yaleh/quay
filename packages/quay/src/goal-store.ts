@@ -97,7 +97,7 @@ export const GOAL_ACCEPTANCE_ACTIVE_ENV = "QUAY_GOAL_ACCEPTANCE_ACTIVE";
 // (any future field) is preserved verbatim — the same discipline as adr-store/document-store.
 const OWNED_KEYS = new Set([
   "id", "title", "status", "kind", "goal", "criterion", "expect", "origin", "activatedAt", "statusLog",
-  "labels", "posture", "supersedes", "superseded-by",
+  "labels", "posture", "supersedes", "superseded-by", "long-term",
 ]);
 
 // ── evidence is ledger-DERIVED (gap-goal-evidence-cache-should-not-enter-git) ───────────────────
@@ -203,6 +203,8 @@ interface GoalFrontmatter {
   evidence?: { at?: string; verdict?: string; reading?: string };
   supersedes?: string[];
   "superseded-by"?: string[];
+  /** AC-216：显式「长期保证」声明——`true` 的 achieved AC 其 GOAL 已 achieved/关闭也仍在 I5 复验域。 */
+  "long-term"?: boolean;
 }
 
 interface GoalFilter {
@@ -227,6 +229,8 @@ interface GoalViewModel {
   statusLog?: Array<{ at: string; from: string; to: string; actor: string; reason: string }>;
   supersedes: unknown[];
   supersededBy: unknown[];
+  /** AC-216：`long-term: true` 的 achieved AC 跨 GOAL 关闭仍在 I5 复验域（frontmatter `long-term` 投影）。 */
+  longTerm: unknown;
   body: string;
   updatedAt?: number;
   /** Ledger-derived (never stored, never mtime): the record's most recent goal-gate-event time. */
@@ -369,6 +373,7 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       expect: frontmatter.expect,
       origin: frontmatter.origin,
       posture: frontmatter.posture,
+      longTerm: frontmatter["long-term"] === true,
       evidence,
       // Own-record time (a criterion): lastProgressAt = its LAST gate=goal event, firstEvidenceAt =
       // its FIRST. A GOAL's own fields are undefined here (GOALs carry no criterion and are never
@@ -519,9 +524,11 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
   // non-zero ⇒ "achieved but no longer verifiable". SEPARATE from I4 (⛔ never merged): I4 is
   // "active yet achieved" (GOAL ids, direction "not closed"), I5 is "achieved yet failing" (AC ids,
   // direction "no longer verifiable"). Produced ONLY by RUNNING the criterion — never a stored field.
-  // Scope: achieved ACs under ACTIVE goals (the same scope as checkStaleness). Empty/missing
+  // Scope: achieved ACs under ACTIVE goals ∪ achieved ACs with `long-term: true` (AC-216 — a
+  // long-term AC stays in the reverify scope after its GOAL is achieved/closed). Empty/missing
   // criterion is SKIPPED: that is the separate `no-criterion` kind meta-driver reports, not "a
   // criterion that now fails" (a criterion that never existed cannot have started failing).
+  // `inScope` enumerates the in-scope AC ids (hard rule 3: enumerate, don't boolean).
   //
   // ⛔ RE-ENTRANCY GUARD (乙): a criterion whose own shell command calls back into this checker
   // (or `gate`) must NOT run criteria again — otherwise it recurses unboundedly. The guard is the
@@ -532,7 +539,7 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
   // `check --staleness` is pure-read) means the 8 real achieved criteria that call
   // `check --staleness`/`list`/`get` never even reach this path; 乙 is defense-in-depth for a
   // future criterion that calls the criterion-runner itself.
-  function checkAchievedFailing(): { achievedButFailing: string[]; evaluated: boolean; scopeSize: number } {
+  function checkAchievedFailing(): { achievedButFailing: string[]; evaluated: boolean; scopeSize: number; inScope: string[] } {
     // Enumerate the in-scope set FIRST (pure-read — no criterion runs): achieved ACs under ACTIVE
     // goals with a non-empty criterion. `scopeSize` is that count, and it is what makes "empty
     // scope" (0 active goals / 0 achieved ACs under them) field-distinguishable from "ran N criteria
@@ -544,14 +551,18 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
     for (const ac of list()) {
       if (!isCriterionId(String(ac.id))) continue;
       if (ac.status !== "achieved") continue;
-      if (!activeGoalIds.has(String(ac.goal))) continue;
+      // AC-216 — in scope ⟺ (under an ACTIVE goal) OR (explicit `long-term: true`): a long-term
+      // achieved AC stays in the reverify scope even after its GOAL is achieved/closed; an
+      // undeclared one leaves with its GOAL (cost boundary — ⛔ not an indiscriminate widening).
+      if (!activeGoalIds.has(String(ac.goal)) && ac.longTerm !== true) continue;
       const criterion = typeof ac.criterion === "string" ? ac.criterion : "";
       if (criterion.trim() === "") continue;
       inScope.push(ac);
     }
     const scopeSize = inScope.length;
+    const inScopeIds = inScope.map((ac) => String(ac.id));
     if (process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] === "1") {
-      return { achievedButFailing: [], evaluated: false, scopeSize };
+      return { achievedButFailing: [], evaluated: false, scopeSize, inScope: inScopeIds };
     }
     const achievedButFailing: string[] = [];
     // Criterion cwd = the git root (robust rev-parse, ⛔ not path.dirname — hard rule 4 corollary 2),
@@ -569,7 +580,7 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       if (prev === undefined) delete process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
       else process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = prev;
     }
-    return { achievedButFailing, evaluated: scopeSize > 0, scopeSize };
+    return { achievedButFailing, evaluated: scopeSize > 0, scopeSize, inScope: inScopeIds };
   }
 
   /** Direct read-modify-write of the old goal's file (inside the NEW goal's write lock). */
@@ -826,7 +837,7 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       const ordered: GoalFrontmatter = {};
       for (const k of [
         "id", "title", "status", "kind", "goal", "criterion", "expect", "origin", "activatedAt", "statusLog",
-        "labels", "posture", "supersedes", "superseded-by",
+        "labels", "posture", "supersedes", "superseded-by", "long-term",
       ]) {
         if (frontmatter[k] !== undefined) ordered[k] = frontmatter[k];
       }
