@@ -52,25 +52,30 @@ g.append("line").attr("class", "git-svg-edge")
 
 1. **边的终点锚定到目标行**：客户端渲染前建 `hash → rowIndex` 映射（一次遍历）；对每条跨列边，用它对应的 `parentHashes[pi]` 查出目标行号，终点取 `y(目标行)`。若目标父提交不在当前窗口内，边画到窗口边界并**显式标记为截断**（不得与正常边同形）。可选更干净：服务端在 `GitGraphEdge` 上补 `toRow`，客户端直接用。
 2. **边锚定的机械判据**：见 AC1–AC4，覆盖「两端都锚定」「锚到正确的那一行」「边数不缩水」「负控制能取假」四个方向。
-3. **页面级放宽容器**：在 git-history 页的 `<style>` 里覆盖本页的 `main`/`#git-graph` 可用宽度到足以容纳 SVG（约 1300px，或视口宽减边距取较小者），**不动 `serve-render.ts:76` 的全局 900px**。
+3. **连线风格改为圆角正交 + 按列分色**（人 2026-09-09 指出：更早版本的线型与配色是对的，错的只是它的分支模型）。线型复用旧版 `lanePath()` 的转折写法（`H … Q … V … Q … H`，半径 `min(6, laneGap/2)`），但**参数从"泳道的 fork/merge 行"改成"边的起止（列, 行）"**——旧函数按泳道取参，新模型没有泳道，只能借用它的转折惯用法，不能直接调用。色板与 `--color-lane-N` 令牌从 `303a94950^` 恢复。
+4. **页面级放宽容器**：在 git-history 页的 `<style>` 里覆盖本页的 `main`/`#git-graph` 可用宽度到足以容纳 SVG（约 1300px，或视口宽减边距取较小者），**不动 `serve-render.ts:76` 的全局 900px**。
 
 ## AC
 
-- [ ] AC1 **边两端都锚定**：渲染后遍历全部 `line.git-svg-edge`，两端坐标都必须落在某个节点中心 **±1px** 内；不满足数 = 0（当前 167）：`node --test packages/quay/test/gap-git-graph-cross-column-edges-drawn-as-fixed-stubs-not-anchored.test.mjs` 退出码 0。
+- [ ] AC1 **边两端都锚定**：渲染后遍历全部带 `git-svg-edge` class 的元素（**不限标签**：`line` 或 `path` 皆可，选择器写 `.git-svg-edge`），两端坐标都必须落在某个节点中心 **±1px** 内；不满足数 = 0（当前 167）：`node --test packages/quay/test/gap-git-graph-cross-column-edges-drawn-as-fixed-stubs-not-anchored.test.mjs` 退出码 0。
 - [ ] AC2 **锚到正确的那一行（防"落在任意节点上"）**：对每条跨列边，断言其终点 y **等于**该边对应 `parentHashes[pi]` 所在行的 `y(rowIndex)`；不等数 = 0。这条比 AC1 强——落在某个节点上不够，必须落在**它的父提交**那一行。
-- [ ] AC3 **边数不缩水（防"少画几条边"满足 AC1/AC2）**：`line.git-svg-edge` 的元素数 = 数据中 `fromCol !== toCol` 的边数（当前 178）；两者不等即判失败。
+- [ ] AC3 **边数不缩水（防"少画几条边"满足 AC1/AC2）**：`.git-svg-edge` 的元素数（**不限标签**）= 数据中 `fromCol !== toCol` 的边数（当前 178）；两者不等即判失败。
 - [ ] AC4 **负控制**：测试内显式还原 `y(i) + rowH * 0.65` 的旧写法，断言 AC1 的不满足数 > 0 ⇒ 判据能取假，不是恒真。
 - [ ] AC5 **窗口外父提交显式化**：父提交不在当前窗口内的边，必须带一个可区分的标记（如 `stroke-dasharray` 或独立 class），且其条数与「`parentHashes` 落在窗口外」的边数相等——不与正常边同形（硬规则 3b）。
 - [ ] AC6 **文本不再截断**：1440px 视口下，`#git-graph` 可视宽度 ≥ SVG 宽度，被截断的提交文本行数 = 0（当前 44/500）。
 - [ ] AC7 **不动全局样式**：`grep -n "max-width: 900px" packages/quay/src/serve-render.ts` 仍命中裸 `main` 规则（全站 900px 未被改动），加宽是 git-history 页自己的覆盖。
 
+- [ ] AC8 **正交圆角连线（不是斜线）**：每个 `.git-svg-edge` 的几何只由水平段、垂直段与圆角转折构成——若用 `<path>`，其 `d` 只允许 `M`/`H`/`V`/`Q`/`Z` 命令，**不得出现 `L` 或带斜率的隐式 lineto**；圆角半径 > 0（不得退化成直角或 `Q x,y x,y`）。负控制：还原成直连斜线应使该断言失败。
+- [ ] AC9 **按列分色**：列线与边按列号取色，色板复用 `303a94950^` 中被删除的 `GIT_GRAPH_LANE_PALETTE`（8 个已做过对比度校验的 hex）与 `gitGraphLaneTokenCss()` 的 `--color-lane-N` 机制——**从 git 历史恢复，不要重新造一套**。断言：渲染后列线的不同描边色数 = `min(8, 实际列数)`（当前列数 11 ⇒ 应为 8），且相邻两列颜色不同。负控制：全部改回单色应使不同色数 = 1。
+- [ ] AC10 **色板逐值一致**：恢复的 8 个 hex 与 `git show 303a94950^:packages/quay/src/serve-git.ts` 中的 `GIT_GRAPH_LANE_PALETTE` 逐项相等（防止"随便挑 8 个颜色"绕过 AC9 的对比度保证）。
+
 ## DoD
 
-生产 `/git-history` 上，任取一个菱形（合并提交），它的两条斜线都能**从菱形中心连到对应父提交的圆点/菱形中心**——肉眼可顺着侧枝追踪来龙去脉；配合一次 Playwright 读数：`line.git-svg-edge` 中两端未锚定数 = 0、终点行号错配数 = 0、边数等于数据中的跨列边数（三个读数取自**真实生产页面**而非 fixture）。1440px 视口下截断行数 = 0。把终点改回 `y(i) + rowH * 0.65` 会让 AC1/AC2/AC4 变红。
+生产 `/git-history` 上，任取一个菱形（合并提交），它的两条连线都能**从菱形中心沿圆角正交折线连到对应父提交的圆点/菱形中心**——肉眼可顺着侧枝追踪来龙去脉；配合一次 Playwright 读数：`.git-svg-edge`（不限标签）中两端未锚定数 = 0、终点行号错配数 = 0、边数等于数据中的跨列边数（三个读数取自**真实生产页面**而非 fixture）。1440px 视口下截断行数 = 0；连线为圆角正交折线而非斜线，且相邻列颜色可区分。把终点改回 `y(i) + rowH * 0.65` 会让 AC1/AC2/AC4 变红。
 
 ## Touches
 
-- packages/quay/src/serve-git.ts（边终点改为目标行的 y；窗口外父提交的截断标记；git-history 页级容器宽度覆盖）
+- packages/quay/src/serve-git.ts（边终点改为目标行的 y；连线改圆角正交；恢复 GIT_GRAPH_LANE_PALETTE 与 gitGraphLaneTokenCss 并按列取色；窗口外父提交的截断标记；git-history 页级容器宽度覆盖）
 - packages/quay/test/gap-git-graph-cross-column-edges-drawn-as-fixed-stubs-not-anchored.test.mjs（本任务的回归测试：锚定/行号/边数/负控制）
 - packages/quay/test/gap-git-graph-adopt-git-column-algorithm-and-decorate-labels.test.mjs（同页渲染断言，边渲染改动后需同步）
 - tasks/gap-git-graph-cross-column-edges-drawn-as-fixed-stubs-not-anchored.md

@@ -1103,6 +1103,95 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     }
   }
 
+  // ── gap-store-commit-propagation-field-aware (SPEC-store-commit-unification §5) ────────────────
+  // Field-level propagation judgment: a write's strategy is decided by WHO reads the changed field,
+  // not WHO wrote it. Three field classes are read ONLY by the task's own fan-in (ac-precheck /
+  // flip AC gate / Evidence rendering) and may therefore stay on the task's branch until fan-in:
+  //   · AC/DoD checkbox toggles (`- [ ]` ↔ `- [x]`)
+  //   · `## Evidence` section content (append/edit — incl. suffixed variants `## Evidence（…）`)
+  //   · the task's own goal association (`goal_ac` top-level, `extra.goal` nested)
+  // A write whose change set is ONLY these is "self-only": even on a non-`task/*` branch it must
+  // NOT ff to develop (the task's own fan-in carries it to develop with the worktree branch).
+  // Anything else — new-task creation, status/lifecycle flips, title/labels/parent/children, any
+  // non-goal `extra` key, any body edit outside Evidence/checkbox markers — is "must-propagate"
+  // and keeps the current behavior (宁可多推、不可少推: a mixed write is never misread as pure-AC).
+
+  /** Order-insensitive deep equality — used only to compare two frontmatter objects field-by-field
+   *  with the self-only goal fields masked out. */
+  function deepEqualSelfOnly(a: unknown, b: unknown): boolean {
+    if (a === b) return true;
+    if (typeof a !== typeof b) return false;
+    if (a === null || b === null) return false;
+    if (Array.isArray(a) || Array.isArray(b)) {
+      if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+      return a.every((v, i) => deepEqualSelfOnly(v, b[i]));
+    }
+    if (typeof a === "object" && typeof b === "object") {
+      const ak = Object.keys(a as Record<string, unknown>);
+      const bk = Object.keys(b as Record<string, unknown>);
+      if (ak.length !== bk.length) return false;
+      const bs = new Set(bk);
+      if (!ak.every((k) => bs.has(k))) return false;
+      return ak.every((k) => deepEqualSelfOnly((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
+    }
+    return false;
+  }
+
+  /** Strip the self-only frontmatter fields (`goal_ac`, `extra.goal`) so any OTHER frontmatter
+   *  change surfaces as a difference. */
+  function stripSelfOnlyFrontmatter(fm: Record<string, unknown>): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(fm)) {
+      if (k === "goal_ac") continue;
+      if (k === "extra") {
+        const e = v && typeof v === "object" && !Array.isArray(v) ? { ...(v as Record<string, unknown>) } : {};
+        delete e.goal;
+        out[k] = e;
+        continue;
+      }
+      out[k] = v;
+    }
+    return out;
+  }
+
+  /** Normalize the body's self-only changes: (a) AC/DoD checkbox markers → canonical `[·]` so a
+   *  `- [ ]`↔`- [x]` toggle is invisible; (b) the ENTIRE `## Evidence` section (heading + content,
+   *  incl. suffixed variants) is stripped, so appending/editing/removing evidence — read only by
+   *  the task's own fan-in — is invisible too. */
+  function maskSelfOnlyBody(body: string): string {
+    let out = body.replace(/^([ \t]*[-*][ \t]+)\[[ xX~]\]([ \t]+)/gm, "$1[·]$2");
+    for (;;) {
+      const m = /^##[ \t]+Evidence\b.*$/m.exec(out);
+      if (!m) break;
+      const headingStart = m.index;
+      const contentStart = m.index + m[0].length;
+      const rest = out.slice(contentStart);
+      const next = /^##[ \t]/m.exec(rest);
+      const contentEnd = contentStart + (next ? next.index : rest.length);
+      out = out.slice(0, headingStart) + out.slice(contentEnd);
+    }
+    // Strip a trailing Evidence section leaves its leading blank-line separator as trailing
+    // whitespace (before ends at the previous section, after ends with the separator). Trailing
+    // whitespace is not a field — trim it so an Evidence-only append compares equal (end-of-file
+    // whitespace is not read by any consumer).
+    return out.trimEnd();
+  }
+
+  /** Field-level change classification: "self-only" iff the ONLY differences between the before
+   *  and after (frontmatter + body) are the three self-only field classes above. */
+  function classifyTaskWriteChange(
+    beforeFrontmatter: Record<string, unknown>,
+    beforeBody: string,
+    afterFrontmatter: Record<string, unknown>,
+    afterBody: string,
+  ): "self-only" | "must-propagate" {
+    if (!deepEqualSelfOnly(stripSelfOnlyFrontmatter(beforeFrontmatter), stripSelfOnlyFrontmatter(afterFrontmatter))) {
+      return "must-propagate";
+    }
+    if (maskSelfOnlyBody(beforeBody) !== maskSelfOnlyBody(afterBody)) return "must-propagate";
+    return "self-only";
+  }
+
   /** Commit `tasks/<id>.md` (branch-aware) after a successful write/delete, delegating the git
    *  add/commit to the shared primitive `commitStoreWrite` (SPEC-store-commit-unification §3) and
    *  keeping only this store's own branch-aware ff-to-develop propagation. Returns
@@ -1118,7 +1207,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
    *                          not on any branch's history).
    *  Callers log only `failed` — the other non-committed states are expected and must not be
    *  mistaken for a broken commit. */
-  function commitTaskWrite(id: string, verb: "task_write" | "task_delete"): { committed: boolean; propagated: boolean; status: "committed" | "not-in-git" | "nothing" | "failed" } {
+  function commitTaskWrite(id: string, verb: "task_write" | "task_delete", changeKind: "self-only" | "must-propagate" = "must-propagate"): { committed: boolean; propagated: boolean; status: "committed" | "not-in-git" | "nothing" | "failed" } {
     const root = resolveGitRoot();
     if (root === null) return { committed: false, propagated: false, status: "not-in-git" };
     const rel = path.join("tasks", `${id}.md`);
@@ -1147,6 +1236,12 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     if (branch.startsWith("task/")) {
       // Task worktree: commit to the worktree's own branch only; fan-in ff-merge is the sole path
       // into develop (AC2 negative control).
+      return { committed: true, propagated: false, status: "committed" };
+    }
+    if (verb === "task_write" && changeKind === "self-only") {
+      // Self-only write (AC ticks / Evidence / goal association) on a non-task/* branch: do NOT ff
+      // to develop — the task's own fan-in carries it to develop with the worktree branch
+      // (gap-store-commit-propagation-field-aware, SPEC §5).
       return { committed: true, propagated: false, status: "committed" };
     }
     return { committed: true, propagated: ffPushToDevelop(root, branch), status: "committed" };
@@ -1218,12 +1313,18 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
 
     // QN-006: read-modify-write is lock-protected so CLI and MCP writers
     // (the same store.js core, design §6) never interleave on the same file.
+    // gap-store-commit-propagation-field-aware: default "must-propagate" so a NEW file (no before
+    // state) and any error path keep the current ff-to-develop behavior — the field-level judgment
+    // can only downgrade a write to "self-only", never the other way.
+    let writeChangeKind: "self-only" | "must-propagate" = "must-propagate";
     const result = withLocks(lockIds, () => {
       const existingRaw = readRaw(id);
       let frontmatter: Record<string, unknown> = { id, title, status, labels: labels ?? [], parent: parent ?? null, children: children ?? [] };
       let existingBody = "";
+      let beforeFrontmatter: Record<string, unknown> | null = null;
       if (existingRaw !== null) {
         const parsed = parse(existingRaw);
+        beforeFrontmatter = parsed.frontmatter;
         frontmatter = { ...parsed.frontmatter };
         existingBody = parsed.body;
         // QN-015: the CAS check MUST happen here, inside the same lock
@@ -1266,6 +1367,11 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       }
       const finalBody = body !== undefined ? body : existingBody;
       const raw = serialize(frontmatter, finalBody);
+      // Field-level propagation judgment (SPEC §5) — classify BEFORE the file write so the caller's
+      // change set (not a re-read of the just-written file) decides whether to ff to develop.
+      if (beforeFrontmatter !== null) {
+        writeChangeKind = classifyTaskWriteChange(beforeFrontmatter, existingBody, frontmatter, finalBody);
+      }
       const taskFilePath = filePathFor(id);
       // M89 (exp5-DEFECT-YAML-FRONTMATTER-COLON-CRASH): post-write YAML
       // validation — write, then immediately re-parse the frontmatter.
@@ -1308,7 +1414,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     // Commit AFTER the lock is released (a git commit is not a file-lock concern; holding the
     // advisory lock across a git subprocess would serialize writers for no data-integrity gain).
     if (commit && result !== null) {
-      const c = commitTaskWrite(id, "task_write");
+      const c = commitTaskWrite(id, "task_write", writeChangeKind);
       if (c.status === "failed") {
         // The disk write succeeded but the git commit (the dispatch-visibility half) genuinely
         // FAILED — never throw (the caller's write IS on disk), but surface on stderr so the failure
