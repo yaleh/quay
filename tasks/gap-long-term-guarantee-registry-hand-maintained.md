@@ -1,7 +1,7 @@
 ---
 id: gap-long-term-guarantee-registry-hand-maintained
 title: 长期保证登记表手维护 3 项而候选 125 条（120 条无 goal_ac）——PASS 3/3 是按构造的绿
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
