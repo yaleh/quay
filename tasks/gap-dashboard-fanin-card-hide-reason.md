@@ -20,11 +20,11 @@ extra:
 
 ## AC
 
-- [ ] `renderFanInCell`（`packages/quay/src/serve-task.ts:508`）签名新增一个选项参数控制是否渲染 `mfi.reason`，默认值使 `/task/<id>` 调用点（`serve-task.ts:575`）行为与改动前逐字一致（不传该选项，或显式传默认值）。
-- [ ] `serve-dashboard.ts:857` 的 FAN-IN 卡片调用点显式传入"不显示 reason"的选项值。
-- [ ] 新增/扩展单元测试：构造一条 `mfi.reason` 超过 500 字符的假记录，断言 `renderFanInCardFromRecords`（dashboard 路径）的输出**不包含**该 reason 文本，而 `renderFanInCell`（`/task/<id>` 路径，直接调用不经 dashboard 选项）的输出**仍包含**该 reason 文本——两个路径的行为差异要在同一条测试里对照断言，不能只测一边。
-- [ ] `step`/`lock`/`suite`/`sha`/`view·download` 等其余字段在 dashboard 路径上渲染不受影响（用现有测试或新增断言核实，不能因为去掉 reason 顺带影响其它字段的拼接顺序）。
-- [ ] 一次真实浏览器视觉复核（本地临时 `quay serve` 实例，不得连接/改动生产 100.78.206.100:4173 实例）：对一条真实存在长 reason 的 fan-in 记录，确认 dashboard 卡片不再显示该文本。
+- [x] `renderFanInCell`（`packages/quay/src/serve-task.ts:508`）签名新增一个选项参数控制是否渲染 `mfi.reason`，默认值使 `/task/<id>` 调用点（`serve-task.ts:575`）行为与改动前逐字一致（不传该选项，或显式传默认值）。
+- [x] `serve-dashboard.ts:857` 的 FAN-IN 卡片调用点显式传入"不显示 reason"的选项值。
+- [x] 新增/扩展单元测试：构造一条 `mfi.reason` 超过 500 字符的假记录，断言 `renderFanInCardFromRecords`（dashboard 路径）的输出**不包含**该 reason 文本，而 `renderFanInCell`（`/task/<id>` 路径，直接调用不经 dashboard 选项）的输出**仍包含**该 reason 文本——两个路径的行为差异要在同一条测试里对照断言，不能只测一边。
+- [x] `step`/`lock`/`suite`/`sha`/`view·download` 等其余字段在 dashboard 路径上渲染不受影响（用现有测试或新增断言核实，不能因为去掉 reason 顺带影响其它字段的拼接顺序）。
+- [x] 一次真实浏览器视觉复核（本地临时 `quay serve` 实例，不得连接/改动生产 100.78.206.100:4173 实例）：对一条真实存在长 reason 的 fan-in 记录，确认 dashboard 卡片不再显示该文本。
 
 ## DoD
 
