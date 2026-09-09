@@ -74,7 +74,9 @@ test("AC1: my per-commit column equals git log --graph --all for the same window
   const layout = layoutGitGraph(history);
   assert.ok(layout, "the production history yields a layout");
   assert.ok(layout.rows.length > 0, "the window carries commits");
-  const refCols = gitGraphReferenceColumns(LIMIT);
+  // The oracle's `-n` is the LOADED count (layout.rows.length), not a hardcoded 500 — so the judge
+  // follows whatever window was actually read (gap-git-graph-pagination-appends-page-relative-col-and-torow).
+  const refCols = gitGraphReferenceColumns(layout.rows.length);
   assert.ok(refCols.size > 0, "the git oracle parsed a non-empty column map");
 
   let mismatch = 0;
@@ -91,7 +93,7 @@ test("AC1: my per-commit column equals git log --graph --all for the same window
 
 test("AC2: the no-recycle allocation (every second parent opens a new column) mismatches git (mismatch > 0)", () => {
   const commits = emissionOrderCommits(LIMIT);
-  const refCols = gitGraphReferenceColumns(LIMIT);
+  const refCols = gitGraphReferenceColumns(commits.length);
 
   // Inline reimplementation of the retired lane-model behaviour: a second parent ALWAYS gets a brand-new
   // column, never dedup/reuse — the allocation that exploded to 25 lanes where git uses ~6.
@@ -129,7 +131,10 @@ test("AC3: the rendered label set equals the %D-nonempty commit set; develop app
   const layout = layoutGitGraph(history);
   const myDecorated = new Set(layout.rows.filter((r) => r.decorations.length > 0).map((r) => r.hash));
 
-  const decOut = execFileSync("git", ["-C", REPO_ROOT, "log", "--all", "-n", String(LIMIT), "--pretty=format:%H%x01%D"], {
+  // --topo-order matches readGitHistory's own query (`--all --topo-order -n`); the default date-order
+  // window can select a DIFFERENT 500-commit set when an out-of-order merge tip sits near the boundary,
+  // so the two must be aligned or the label-set comparison compares two different windows.
+  const decOut = execFileSync("git", ["-C", REPO_ROOT, "log", "--all", "--topo-order", "-n", String(LIMIT), "--pretty=format:%H%x01%D"], {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });
