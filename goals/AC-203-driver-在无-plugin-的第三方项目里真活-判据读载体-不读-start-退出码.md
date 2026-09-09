@@ -1,7 +1,7 @@
 ---
 id: AC-203
 title: driver 在无 plugin/ 的第三方项目里真活——判据读载体，⛔ 不读 start 退出码
-status: draft
+status: active
 kind: criterion
 goal: GOAL-009
 criterion: >-
@@ -39,5 +39,12 @@ origin: "2026-09-09 B 机实测：quay driver start --kind promotion 打印 star
   driver not found at
   /tmp/xproj-metacc/plugin/scripts/promotion-driver.ts（driver-runtime.ts:986
   把路径锚在 opts.root）。"
+activatedAt: 2026-09-09T11:49:14.255Z
+statusLog:
+  - at: 2026-09-09T11:49:14.255Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
 ---
 **判据（能取假）**：2026-09-09 干跑 exit 1。**为什么不能读退出码**：今天 start 的退出码就是 0 而系统是死的 ⇒ 任何形如 exit 0 的判据恒绿且零信息（硬规则 3b：起不来与合格同形）。**复用而非新造**：start-drivers.ts:54 的 parseDriverStatus 已把「读不出」与「不活」分成两个取值，实现时复用它。**结构性反自证**：判据显式要求 host≠本机 ∧ project_root ∉ 本仓库——否则在本仓库上一跑就绿（gap-ac118 实证：自测是结构上不可能报红的绿）。
