@@ -367,7 +367,7 @@ export function gitGraphLegendHtml(): string {
   const parts = [
     glyph("var(--color-accent-600)", "●", "commit"),
     glyph("var(--color-accent-2-500)", "◆", "merge"),
-    glyph("var(--color-neutral-500)", "╲", "父提交连线"),
+    glyph("var(--color-neutral-700)", "╲", "父提交连线"),
   ];
   return `<div style="position:sticky;left:0;top:0;z-index:2;display:inline-flex;gap:0.75rem;align-items:center;background:var(--color-surface);padding:0.25rem 0.6rem;border:1px solid var(--color-neutral-200);border-radius:6px;font-size:0.72rem;color:var(--color-neutral-700)">${parts.join("")}</div>`;
 }
