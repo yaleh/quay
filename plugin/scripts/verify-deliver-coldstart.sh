@@ -765,6 +765,58 @@ write_ac203_record() {
   return 0
 }
 
+# 写 GOAL-009-AC-206 记录（gap-ac206-goals-tasks-dual-carrier-quay-init-goals-closed-set）。
+# 缺 host/project_root ⇒ 不写 return 1（硬规则 3b：缺值 ≠ 合格）；四字段（goals_dir_created /
+# tasks_dir_created / goal_store_readable / task_store_readable）是布尔 JSON 字面 true/false——
+# goals/ 缺失时【如实写 false】，不是拒写（criterion 用 `is not True` 判，false ⇒ 记录在但判据不 exit 0，
+# 如实非静默——同 AC-203 的「缺值不写」与「缺件如实写 false」的分工）。
+write_ac206_record() {
+  local ts="$1" host="$2" project_root="$3" gdc="$4" tdc="$5" gsr="$6" tsr="$7" ac89="$8"
+  [ -n "$host" ] || return 1
+  [ -n "$project_root" ] || return 1
+  case "$gdc" in 0|1) ;; *) return 1 ;; esac
+  case "$tdc" in 0|1) ;; *) return 1 ;; esac
+  case "$gsr" in 0|1) ;; *) return 1 ;; esac
+  case "$tsr" in 0|1) ;; *) return 1 ;; esac
+  local b_gdc=false b_tdc=false b_gsr=false b_tsr=false
+  [ "$gdc" = "1" ] && b_gdc=true
+  [ "$tdc" = "1" ] && b_tdc=true
+  [ "$gsr" = "1" ] && b_gsr=true
+  [ "$tsr" = "1" ] && b_tsr=true
+  mkdir -p "$(dirname "$ac89")"
+  printf '{"ts":"%s","ac":"GOAL-009-AC-206","host":"%s","project_root":"%s","goals_dir_created":%s,"tasks_dir_created":%s,"goal_store_readable":%s,"task_store_readable":%s}\n' \
+    "$ts" "$host" "$project_root" "$b_gdc" "$b_tdc" "$b_gsr" "$b_tsr" >> "$ac89"
+  return 0
+}
+
+# 探测目标项目的 goals/ + tasks/ 双载体：目录是否创建 + store 是否可读。缺件是【数据】（布尔 0），
+# 不是控制流失败（set -e 不得因 goals/ 缺失中断——如实写 false 才是 criterion 的「能取假」半边）。
+probe_ac206_dual_carrier() {
+  local root="$1"
+  AC206_GOALS_DIR_CREATED=0; AC206_TASKS_DIR_CREATED=0
+  AC206_GOAL_STORE_READABLE=0; AC206_TASK_STORE_READABLE=0
+  [ -d "$root/goals" ] && AC206_GOALS_DIR_CREATED=1
+  [ -d "$root/tasks" ] && AC206_TASKS_DIR_CREATED=1
+  [ -d "$root/goals" ] && [ -r "$root/goals" ] && AC206_GOAL_STORE_READABLE=1
+  [ -d "$root/tasks" ] && [ -r "$root/tasks" ] && AC206_TASK_STORE_READABLE=1
+}
+
+# step ⑤：校验第三方项目（$ROOT）goals/ 与 tasks/ 均创建、两 store（goals/*.md 与 tasks/*.md 的
+# 目录载体）均可读 ⇒ 写 AC-206 记录。缺 host/project_root 不写（fail-closed）；目录/可读性如实写布尔。
+step5_dual_carrier() {
+  local root="$1"
+  probe_ac206_dual_carrier "$root"
+  AC206_HOST="$(hostname 2>/dev/null || echo '')"
+  AC206_PROJECT_ROOT="$root"
+  echo "== ⑤ dual carrier (AC-206): goals/ + tasks/ both created and stores readable =="
+  echo "  goals_dir_created=$AC206_GOALS_DIR_CREATED tasks_dir_created=$AC206_TASKS_DIR_CREATED goal_store_readable=$AC206_GOAL_STORE_READABLE task_store_readable=$AC206_TASK_STORE_READABLE host=$AC206_HOST"
+  write_ac206_record "$TS" "$AC206_HOST" "$AC206_PROJECT_ROOT" \
+    "$AC206_GOALS_DIR_CREATED" "$AC206_TASKS_DIR_CREATED" \
+    "$AC206_GOAL_STORE_READABLE" "$AC206_TASK_STORE_READABLE" "$AC89"
+  echo "  ac206 record written → $AC89"
+  return 0
+}
+
 # step ④：在第三方项目（$ROOT，无 plugin/）里用 installed quay CLI start promotion driver，轮询 status 载体
 # 确认 driver_alive=1 ∧ carrier_records>0 ⇒ 写 AC-203 记录。缺任一生效读数不写（fail-closed）。
 step4_driver_liveness() {
@@ -1037,6 +1089,34 @@ Enter to confirm · Esc to cancel"
   echo "selfcheck: goal009-anchor(positive) rc=$g15_rc records=$g15_pos build_sha=$g15_build (expect 0/1/1 — 40-hex ⇒ 写含 top-level build_sha 记录)"
   echo "selfcheck: goal009-anchor(negative) rc=$g16_rc lines=$g16_before→$g16_after (expect non-0/unchanged — 空 BUILD_SHA 不写)"
 
+  # control 18/19 (AC-206 双载体记录, gap-ac206-goals-tasks-dual-carrier-quay-init-goals-closed-set):
+  #   control 18 (正向): 四字段全 True ⇒ 写含布尔 true 的 GOAL-009-AC-206 记录（criterion 过滤逐字满足）。
+  #   control 19 (负向, 如实非静默): goals/ 缺失 ⇒ goals_dir_created=false 仍写（缺件是数据，不是拒写）;
+  #     host 空 ⇒ 拒写（缺值≠合格，fail-closed——缺输入与缺件是两种失败形态）。
+  local ac206_file ac206_wrote=0 ac206_fields_ok=0 ac206_neg_ok=0 ac206_refused=0 ac206_ts="2026-09-09T00:00:00Z"
+  ac206_file="$tmp/ac206.jsonl"
+  if write_ac206_record "$ac206_ts" "hostB-fake" "/tmp/third-party-fake" "1" "1" "1" "1" "$ac206_file"; then
+    ac206_wrote=1
+    if grep -q '"ac":"GOAL-009-AC-206"' "$ac206_file" \
+       && grep -q '"goals_dir_created":true' "$ac206_file" \
+       && grep -q '"tasks_dir_created":true' "$ac206_file" \
+       && grep -q '"goal_store_readable":true' "$ac206_file" \
+       && grep -q '"task_store_readable":true' "$ac206_file"; then
+      ac206_fields_ok=1
+    fi
+  fi
+  if write_ac206_record "$ac206_ts" "hostB-fake" "/tmp/third-party-fake" "0" "1" "0" "1" "$ac206_file"; then
+    if grep -q '"goals_dir_created":false' "$ac206_file" && grep -q '"goal_store_readable":false' "$ac206_file"; then
+      ac206_neg_ok=1
+    fi
+  fi
+  if ! write_ac206_record "$ac206_ts" "" "/tmp/third-party-fake" "1" "1" "1" "1" "$ac206_file" 2>/dev/null; then
+    ac206_refused=1
+  fi
+  echo "selfcheck: ac206-record(valid) wrote=$ac206_wrote fields_ok=$ac206_fields_ok (expect 1/1)"
+  echo "selfcheck: ac206-record(goals-missing) neg_ok=$ac206_neg_ok (expect 1 — goals_dir_created=false 仍写, 缺件如实非静默)"
+  echo "selfcheck: ac206-record(empty-host) refused=$ac206_refused (expect 1 — 缺 host 拒写, 缺值≠合格)"
+
   if [ "$d1" = "1" ] && [ "$d2" = "no" ] && [ "$a1" = "1" ] && [ "$a2" = "yes" ] \
      && [ "$c3_e" = "1" ] && [ "$c3_ok" = "1" ] \
      && [ "$c4_e" = "1" ] && [ "$c4_ok" = "0" ] \
@@ -1052,11 +1132,12 @@ Enter to confirm · Esc to cancel"
      && [ "$m4_reg" = "0" ] && [ -n "$m4_rc" ] && [ -n "$m4_reason" ] \
      && [ "$ac203_wrote" = "1" ] && [ "$ac203_fields_ok" = "1" ] && [ "$ac203_refused" = "1" ] \
      && [ "$g15_rc" = "0" ] && [ "$g15_pos" = "1" ] && [ "$g15_build" = "1" ] \
-     && [ "$g16_rc" != "0" ] && [ "$g16_before" = "$g16_after" ]; then
-    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed)"
+     && [ "$g16_rc" != "0" ] && [ "$g16_before" = "$g16_after" ] \
+     && [ "$ac206_wrote" = "1" ] && [ "$ac206_fields_ok" = "1" ] && [ "$ac206_neg_ok" = "1" ] && [ "$ac206_refused" = "1" ]; then
+    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed)"
     rc=0
   else
-    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc m4_reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after" >&2
+    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc m4_reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused" >&2
     rc=1
   fi
   rm -rf "$tmp"
@@ -1126,6 +1207,7 @@ else
     fi
     step3_coldstart
     step4_driver_liveness "$ROOT"
+    step5_dual_carrier "$ROOT"
   fi
 fi
 

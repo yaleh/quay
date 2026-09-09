@@ -154,6 +154,7 @@ plugin/                     唯一扩展载体（git 跟踪，一棵树）
 .quay/config.yml         provider map + loop 参数
 .quay/profiles.yml       launcher/model
 tasks/                   任务目录（数据，不是扩展代码）
+goals/                   目标目录（数据，与 tasks/ 双载体）
 .gitignore               若干条目
 
 【Claude Code 侧——只写配置，不写扩展】
@@ -164,6 +165,7 @@ QUAY-INIT-CLOSED-SET:BEGIN
 - .quay/config.yml
 - .quay/profiles.yml
 - tasks/
+- goals/
 - .gitignore
 - .claude/launch.settings.json
 - .claude/settings.json
