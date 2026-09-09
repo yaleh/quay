@@ -10,7 +10,7 @@ import { TASK_STATUS, type GoalRecord } from "./abi.ts";
 import type { Manifest } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime } from "./serve-render.ts";
 import { awaitingLandMs, formatAwaitingDuration, suiteSuffix } from "./serve-live.ts";
-import { renderFanInCell } from "./serve-task.ts";
+import { fanInStatusParts, renderFanInLinks } from "./serve-task.ts";
 
 // ── /dashboard ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -318,16 +318,19 @@ export function renderTestsCard(
   // · pass X/Y · duration) below, so a recent result is legible without hover.
   // gap-dashboard-fanin-panel-and-timeline-bars F: each row ALSO appends its startedAt (via relativeTime)
   // and buckets — absent fields render NO sub-item (the absent-field contract, never a "—").
+  // gap-dashboard-tests-fanin-cards-compact-rows: startedAt + buckets used to be two separate `<div>`
+  // sub-rows (3 lines/record). Merged into ONE `·`-joined metadata line — only the parts that are
+  // actually present render (still the absent-field contract: 0 parts → no line at all, never a "—").
   const recentList = recentRuns.filter((r) => r.state !== "running").map((r) => {
     const rGateBlocked = r.tests === 0 && r.pass === 0 && (r.reason === "gate-failed" || r.gate != null);
     const rDetail = rGateBlocked ? `gate:${r.gate ?? "?"} 未执行测试` : `pass ${r.pass ?? "—"}/${r.tests ?? "—"}`;
     const rDur = r.durationMs != null ? formatDurationMs(r.durationMs) : "—";
     const startedMs = r.startedAt != null ? Date.parse(r.startedAt) : NaN;
-    const startedLine = Number.isFinite(startedMs)
-      ? html`<div style="color:var(--color-neutral-700)">${relativeTime(startedMs)}</div>`
-      : "";
-    const bucketsLine = r.buckets != null && r.buckets !== ""
-      ? html`<div style="color:var(--color-neutral-700)">bucket ${escapeHtml(r.buckets)}</div>`
+    const metaParts: string[] = [];
+    if (Number.isFinite(startedMs)) metaParts.push(relativeTime(startedMs));
+    if (r.buckets != null && r.buckets !== "") metaParts.push(`bucket ${escapeHtml(r.buckets)}`);
+    const metaLine = metaParts.length > 0
+      ? html`<div style="color:var(--color-neutral-700)">${metaParts.join(" · ")}</div>`
       : "";
     return html`<div style="display:flex;flex-direction:column;gap:2px;font-size:0.72rem;line-height:1.4">
       <div style="display:flex;justify-content:space-between;gap:0.5rem">
@@ -337,8 +340,7 @@ export function renderTestsCard(
         </span>
         <span style="color:var(--color-neutral-700)">${rDetail} · ${rDur}</span>
       </div>
-      ${startedLine}
-      ${bucketsLine}
+      ${metaLine}
     </div>`;
   }).join("");
   // gap-dashboard-fanin-panel-and-timeline-bars G: past-N-hours segmented timeline below the list —
@@ -804,7 +806,8 @@ export function renderGoalCard(
 /** The dashboard fan-in card — cross-task mechanical fan-in summary (list + segmented bar), added by
  *  gap-dashboard-fanin-panel-and-timeline-bars H. Unlike /task/<id>'s Runs block (filtered by ONE task),
  *  this aggregates EVERY worker-outcome record carrying a mechanical_fan_in result, sorted by
- *  lock-acquire time (desc), reusing renderFanInCell for each row (no second field-join). */
+ *  lock-acquire time (desc), sharing serve-task.ts's fanInStatusParts/renderFanInLinks with
+ *  renderFanInCell (no second field-join — gap-dashboard-tests-fanin-cards-compact-rows). */
 export function renderFanInCard(
   root: string | undefined,
   opts: { hours?: number; nowMs?: number } = {},
@@ -843,19 +846,32 @@ export function renderFanInCardFromRecords(
       return bn - an;
     })
     .slice(0, 5)
+    // gap-dashboard-tests-fanin-cards-compact-rows: a long task/branch name used to wrap onto its own
+    // lines, and outcome/step/lock/suite/sha/view/download each rendered on a separate `<br>` line —
+    // 4+ lines/record. Collapsed to a fixed TWO-line row: line 1 = truncated task name (nowrap +
+    // ellipsis + title tooltip for the full id) + acquire time, right-aligned; line 2 = the status
+    // fields `·`-joined (fanInStatusParts, showReason:false — unchanged from before) + the
+    // view/download links, right-aligned.
     .map(({ r, key }, i) => {
+      const mfi = r.mechanical_fan_in!;
+      const taskId = r.task ?? "?";
       // gap-dashboard-fanin-timestamp-timeline-anchor 缺陷1: each row ALSO renders its acquire time
-      // (relativeTime over the sort key, seconds → ms) — the same F-fix idiom testsCard uses.
-      // renderFanInCell never carries a timestamp (it is a /task/<id> cell; that page has its own
-      // time column), so the card adds the sub-row itself. Absent key → no sub-row (absent-field
-      // contract, never a "—").
+      // (relativeTime over the sort key, seconds → ms) — the same F-fix idiom testsCard uses. Absent
+      // key → no sub-item (absent-field contract, never a "—").
       const tsLine = Number.isFinite(key)
-        ? html`<div style="color:var(--color-neutral-700)">${relativeTime(key * 1000)}</div>`
+        ? html`<span style="flex:none;color:var(--color-neutral-700)">${relativeTime(key * 1000)}</span>`
         : "";
+      const statusText = fanInStatusParts(mfi, false).join(" · ");
+      const links = renderFanInLinks(taskId, mfi);
       return html`<div style="${i > 0 ? "border-top:1px solid var(--color-divider);padding-top:6px;" : ""}display:flex;flex-direction:column;gap:2px;font-size:0.75rem;line-height:1.4">
-        <a href="/task/${encodeURIComponent(r.task ?? "")}" style="color:var(--color-text);text-decoration:none;font-weight:600">${escapeHtml(r.task ?? "?")}</a>
-        <div style="color:var(--color-neutral-700)">${renderFanInCell(r.task ?? "", r, { showReason: false })}</div>
-        ${tsLine}
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem">
+          <a href="/task/${encodeURIComponent(taskId)}" title="${escapeHtml(taskId)}" style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--color-text);text-decoration:none;font-weight:600">${escapeHtml(taskId)}</a>
+          ${tsLine}
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem;color:var(--color-neutral-700)">
+          <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${statusText}</span>
+          ${links !== "" ? html`<span style="flex:none">${links}</span>` : ""}
+        </div>
       </div>`;
     });
   const list = rows.length > 0

@@ -501,6 +501,39 @@ export async function handleTaskList(
  *  non-worker workspace never scans /proc, which would surface OTHER workspaces' workers); the
  *  `liveWorkers` test seam bypasses the gate, and `sessionHome` makes the pid→sessionId join testable. */
 
+/** Build one attempt's mechanical-fan-in STATUS parts (outcome/step/reason/lock/suite/sha), WITHOUT
+ *  the view/download link — the shared field list behind both `renderFanInCell` (the /task/<id> Runs
+ *  cell, `<br>`-joined) and the dashboard fan-in card's compact row (` · `-joined), so the two callers
+ *  can pick their own joiner without duplicating the field list (gap-dashboard-tests-fanin-cards-
+ *  compact-rows). `mfi` is the non-null `mechanical_fan_in` — callers check the null case themselves. */
+export function fanInStatusParts(
+  mfi: NonNullable<WorkerOutcomeRecord["mechanical_fan_in"]>,
+  showReason: boolean,
+): string[] {
+  const parts: string[] = [];
+  if (mfi.outcome === "landed") parts.push(html`<strong>landed</strong>`);
+  else if (mfi.outcome === "red") parts.push(html`<strong>red</strong>`);
+  else parts.push(escapeHtml(mfi.outcome ?? "?"));
+  if (mfi.outcome === "red" && mfi.step) parts.push(`step ${escapeHtml(mfi.step)}`);
+  if (showReason && mfi.reason != null) parts.push(html`<span style="font-size:0.75rem;color:var(--color-neutral-700)">${escapeHtml(mfi.reason)}</span>`);
+  if (mfi.lockHoldSecs != null) parts.push(`lock ${mfi.lockHoldSecs}s`);
+  if (mfi.suiteOutcome != null) parts.push(`suite ${escapeHtml(mfi.suiteOutcome)}`);
+  if (mfi.landedSha != null) parts.push(`sha <code>${escapeHtml(mfi.landedSha.slice(0, 7))}</code>`);
+  return parts;
+}
+
+/** The view/download link pair for a fan-in record's log file, or "" when the record carries no
+ *  `fanInLog` (never a dead link). Split out from `renderFanInCell` so the dashboard fan-in card can
+ *  place it on its own line/side rather than `<br>`-appended after the status text
+ *  (gap-dashboard-tests-fanin-cards-compact-rows). */
+export function renderFanInLinks(
+  taskId: string,
+  mfi: NonNullable<WorkerOutcomeRecord["mechanical_fan_in"]>,
+): string {
+  if (mfi.fanInLog == null || mfi.fanInLog.length === 0) return "";
+  return html`<a href="/fan-in-log/${encodeURIComponent(taskId)}/${encodeURIComponent(mfi.fanInLog)}">view</a> · <a href="/fan-in-log/${encodeURIComponent(taskId)}/${encodeURIComponent(mfi.fanInLog)}/download">download</a>`;
+}
+
 /** Render one attempt's mechanical-fan-in cell (gap-mech-fan-in-log-webui-visible-clickable B2):
  *  landed/red + first failing step + lock hold + suite outcome + landed sha, plus a view/download
  *  link when the record carries a fanInLog file name. A null record renders an honest "—" (never a
@@ -518,18 +551,9 @@ export function renderFanInCell(
   const mfi = r.mechanical_fan_in;
   if (mfi == null) return "—";
   const showReason = opts.showReason ?? true;
-  const parts: string[] = [];
-  if (mfi.outcome === "landed") parts.push(html`<strong>landed</strong>`);
-  else if (mfi.outcome === "red") parts.push(html`<strong>red</strong>`);
-  else parts.push(escapeHtml(mfi.outcome ?? "?"));
-  if (mfi.outcome === "red" && mfi.step) parts.push(`step ${escapeHtml(mfi.step)}`);
-  if (showReason && mfi.reason != null) parts.push(html`<span style="font-size:0.75rem;color:var(--color-neutral-700)">${escapeHtml(mfi.reason)}</span>`);
-  if (mfi.lockHoldSecs != null) parts.push(`lock ${mfi.lockHoldSecs}s`);
-  if (mfi.suiteOutcome != null) parts.push(`suite ${escapeHtml(mfi.suiteOutcome)}`);
-  if (mfi.landedSha != null) parts.push(`sha <code>${escapeHtml(mfi.landedSha.slice(0, 7))}</code>`);
-  if (mfi.fanInLog != null && mfi.fanInLog.length > 0) {
-    parts.push(html`<a href="/fan-in-log/${encodeURIComponent(taskId)}/${encodeURIComponent(mfi.fanInLog)}">view</a> · <a href="/fan-in-log/${encodeURIComponent(taskId)}/${encodeURIComponent(mfi.fanInLog)}/download">download</a>`);
-  }
+  const parts = fanInStatusParts(mfi, showReason);
+  const links = renderFanInLinks(taskId, mfi);
+  if (links !== "") parts.push(links);
   return parts.join("<br>");
 }
 
