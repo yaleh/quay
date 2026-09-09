@@ -767,11 +767,15 @@ export function renderGoalCard(
   const activeGoals = goals.filter((g) => g.kind === "goal" && g.status === "active");
   const activeCount = activeGoals.length;
 
-  // gap-webui-a11y-focus-ring-and-token-contrast-unvalidated: the NOT-EVALUATED fallback was
-  // --color-neutral-400 (#bab6b6) = 1.80:1 on --color-bg — unreadable text. Muted-but-readable
-  // --color-neutral-700 (#605d5d) keeps the "not yet judged" semantics at 5.83:1.
-  const stalenessColor = (s: "fresh" | "stale" | "NOT-EVALUATED"): string =>
-    s === "fresh" ? "var(--color-positive-700)" : s === "stale" ? "var(--color-accent-800)" : "var(--color-neutral-700)";
+  // gap-dashboard-status-tag-badges: the three-state marker was bare inline color text
+  // (color:var(--color-*);font-weight:700) with no background/border, so it blended into the body
+  // copy on scan. The existing .tag soft-badge components (never consumed before) give it a
+  // background + padding. The per-state colors are the SAME calibrated tokens the inline style used
+  // (gap-webui-a11y-focus-ring-and-token-contrast-unvalidated: fresh → positive-700, stale →
+  // accent-800, NOT-EVALUATED → neutral-700 at 5.83:1) — now carried by .tag-positive/.tag-accent/
+  // .tag-neutral rather than inline.
+  const stalenessClass = (s: "fresh" | "stale" | "NOT-EVALUATED"): string =>
+    s === "fresh" ? "tag-positive" : s === "stale" ? "tag-accent" : "tag-neutral";
 
   const rows = activeGoals.map((g) => {
     const gid = String(g.id);
@@ -788,7 +792,7 @@ export function renderGoalCard(
     return html`<div style="display:flex;flex-direction:column;gap:2px;font-size:0.78rem;line-height:1.4">
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem;flex-wrap:wrap">
         <a href="/goal/${encodeURIComponent(gid)}" style="color:var(--color-text);text-decoration:none;flex:none">${escapeHtml(gid)}</a>
-        <span style="flex:none;color:${stalenessColor(state)};font-weight:700">${escapeHtml(state)}</span>
+        <span class="tag ${stalenessClass(state)}" style="flex:none">${escapeHtml(state)}</span>
       </div>
       <div style="color:var(--color-text);font-size:0.75rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(String(g.title ?? ""))}</div>
       <div style="color:var(--color-neutral-700)">AC 达成 ${achieved}/${acs.length}${acBar}</div>
