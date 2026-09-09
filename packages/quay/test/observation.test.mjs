@@ -220,6 +220,49 @@ test("readGitHistory before=<t> returns a strictly-older window (pagination curs
   }
 });
 
+test("readGitHistory --since 下界 = min(主线下界, 7 天窗口) — 活跃 ref 的独有提交不再被主线下界滤掉", () => {
+  // gap-git-graph-ref-partition-collapses-all-topology-to-one-lane AC4: the old --since bound was the
+  // mainline batch's OLDEST commit time, so a live ref whose unique commits are older than the mainline
+  // floor (but within the 7-day active window) was filtered out — the busier the repo, the fewer active
+  // branches surfaced. The fix floors the bound at the 7-day active window.
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "obs-gh-since-"));
+  try {
+    execFileSync("git", ["init", "-q", "-b", "develop"], { cwd: ws });
+    fs.writeFileSync(path.join(ws, "README.md"), "fixture\n");
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], { cwd: ws });
+    const nowSec = Math.floor(Date.now() / 1000);
+    const T0 = nowSec - 4 * 86400; // base 4 days ago (within 7 days)
+    const env0 = {
+      ...process.env,
+      GIT_AUTHOR_DATE: new Date(T0 * 1000).toISOString(),
+      GIT_COMMITTER_DATE: new Date(T0 * 1000).toISOString(),
+    };
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "base"], { cwd: ws, env: env0 });
+    // A live branch with a unique commit OLDER than the recent mainline floor (≈ now−1day) but WITHIN
+    // the 7-day active window (now−4days) — the exact production shape of the 4 active refs.
+    execFileSync("git", ["checkout", "-q", "-b", "task/active"], { cwd: ws });
+    commitAt(ws, "unique commit", T0 + 1, "branch.txt");
+    execFileSync("git", ["checkout", "-q", "develop"], { cwd: ws });
+    for (let i = 0; i < 6; i++) commitAt(ws, `recent ${i}`, nowSec - 1 * 86400 + i * 3600, "main.txt");
+
+    const hist = readGitHistory(ws, { limit: 5 });
+    assert.equal(hist.status, "ok");
+    const branchCommits = hist.commits.filter((c) => c.ref === "task/active");
+    assert.equal(branchCommits.length, 1, "the within-7-days unique commit surfaces (the fix, was 0)");
+    // Negative control: with the OLD bound (--since = the mainline batch's oldest commit time), the
+    // same commit is filtered out — proving the fix is what un-dropped it, not a fixture coincidence.
+    const mainlineFloor = Math.min(...hist.commits.filter((c) => c.ref === "develop").map((c) => c.t));
+    const oldBoundOut = execFileSync(
+      "git",
+      ["-C", ws, "log", "task/active", "--not", "develop", "--date=unix", `--since=${mainlineFloor}`, "--pretty=format:%H"],
+      { encoding: "utf8" },
+    ).trim();
+    assert.equal(oldBoundOut, "", "the OLD mainline-floor bound drops the unique commit (the bug)");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
 test("AC127: parseVerificationRound extracts the bucket-execution fields (buckets/bucket_files/bucket_duration_ms) and tolerates their absence on legacy rows (never a fabricated \"full\")", () => {
   // gap-ac127-suite-bucket-web-tests-page-visible — AC126 landed these three fields on bucket-mode
   // rounds (full-suite-runner.ts:4027-4029); the /tests reader must surface `buckets` and tolerate

@@ -138,41 +138,47 @@ test("AC2: negative control — the old global -n limit squeezes a long-lived br
   }
 });
 
-// ── AC2 mirror: per-ref does NOT resurface a stale branch's commits older than the mainline window ────
+// ── AC2 mirror: per-ref drops a live branch's exclusive commits older than the 7-day window ─────────
+// gap-git-graph-ref-partition-collapses-all-topology-to-one-lane: the --since floor is now
+// min(mainline floor, now − 7 days), NOT the mainline floor. So the "ancient commit that must not
+// resurface" boundary moved from the mainline window floor to the 7-day active window.
 
-test("AC2-mirror: a dead branch's ancient commit (older than the mainline window floor) is not resurfaced", () => {
+test("AC2-mirror: a live branch's exclusive commit older than the 7-day window is dropped; its recent tip surfaces", () => {
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), "ghdrop-ac2b-"));
   try {
     execFileSync("git", ["init", "-q", "-b", "develop"], { cwd: ws });
     fs.writeFileSync(path.join(ws, "README.md"), "fixture\n");
     execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], { cwd: ws });
     const nowSec = Math.floor(Date.now() / 1000);
-    const T0 = nowSec - 3 * 86400;
+    const T0 = nowSec - 10 * 86400; // base 10 days ago (outside the 7-day active window)
     const env0 = {
       ...process.env,
       GIT_AUTHOR_DATE: new Date(T0 * 1000).toISOString(),
       GIT_COMMITTER_DATE: new Date(T0 * 1000).toISOString(),
     };
     execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "base"], { cwd: ws, env: env0 });
-    // A dead branch forked from `base` with one commit just after base — far older than the recent
-    // mainline window below. Its tip stays inside the 7-day active window (so it IS enumerated as a
-    // live ref), but its commit sits outside the page's time floor.
-    execFileSync("git", ["checkout", "-q", "-b", "task/stale"], { cwd: ws });
-    commitAt(ws, "stale commit", T0 + 1, "stale.txt");
-    // develop advances far past the stale commit: 10 recent commits, so the limit=5 mainline window
-    // floor (~T0+1005) is far newer than the stale commit (T0+1).
+    // A live branch with an ANCIENT exclusive commit (older than 7 days) and a RECENT tip (within 7 days),
+    // so the branch IS enumerated — the ancient commit must still be dropped by the --since bound.
+    execFileSync("git", ["checkout", "-q", "-b", "task/long"], { cwd: ws });
+    commitAt(ws, "ancient commit", T0 + 1, "branch.txt");
+    // develop advances with 6 recent commits (all within 7 days), so the limit=5 mainline window's
+    // floor is WITHIN 7 days — the min() then picks the 7-day active-window floor (not the mainline floor).
     execFileSync("git", ["checkout", "-q", "develop"], { cwd: ws });
-    for (let i = 0; i < 10; i++) commitAt(ws, `recent ${i}`, T0 + 1000 + i, "main.txt");
+    for (let i = 0; i < 6; i++) commitAt(ws, `recent ${i}`, nowSec - 2 * 86400 + i * 3600, "main.txt");
+    // The branch's recent tip (within 7 days), committed after develop's recent batch.
+    execFileSync("git", ["checkout", "-q", "task/long"], { cwd: ws });
+    commitAt(ws, "recent tip", nowSec - 1 * 86400, "branch.txt");
 
     clearGitHistoryCache();
     const perRef = readGitHistory(ws, { limit: 5 });
     assert.equal(perRef.status, "ok");
-    const staleCommits = perRef.commits.filter((x) => x.ref === "task/stale");
-    assert.equal(staleCommits.length, 0, "the stale branch's ancient commit is outside the page window and not resurfaced");
-    // Negative control: the branch tip WAS enumerated as a live ref (the 7-day filter kept it) — the
+    const subjects = new Set(perRef.commits.filter((x) => x.ref === "task/long").map((x) => x.subject));
+    assert.ok(subjects.has("recent tip"), "the branch's recent commit (within 7 days) is surfaced");
+    assert.ok(!subjects.has("ancient commit"), "the branch's ancient commit (older than 7 days) is dropped by the --since bound");
+    // Negative control: the branch tip WAS enumerated (the recent tip kept it) — the ancient commit's
     // exclusion is the --since bound's doing, not the active-window filter dropping the whole branch.
     const tips = execFileSync("git", ["-C", ws, "for-each-ref", "refs/heads", "--format=%(refname:short)"], { encoding: "utf8" });
-    assert.ok(tips.split(/\r?\n/).includes("task/stale"), "task/stale is still a live branch tip");
+    assert.ok(tips.split(/\r?\n/).includes("task/long"), "task/long is still a live branch tip");
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
   }

@@ -309,10 +309,10 @@ test("integration: GET /git-history serves the vertical-graph JSON payload + an 
     assert.ok(h.commits.some((x) => x.parents > 1), "git history source sees a merge commit");
     assert.ok(h.commits.some((x) => x.parentHashes.length === 2), "a merge commit carries 2 parent hashes");
     const layout = layoutGitGraph(h);
-    // gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge: a fully-merged branch's commits are
-    // re-attributed to the mainline ⇒ folded into the mainline lane, NOT a lateral lane; only the
-    // unmerged task branch stays a lateral lane.
-    assert.ok(!layout.branches.some((b) => b.ref === "feature/alpha"), "a fully-merged branch is folded into mainline, not a lane");
+    // gap-git-graph-ref-partition-collapses-all-topology-to-one-lane: the second-parent walk is restored
+    // — a --no-ff merged branch whose ref was NOT deleted is a merged lane (kind live, open:false), not
+    // folded into the mainline; the unmerged task branch stays an OPEN lateral lane.
+    assert.ok(layout.branches.some((b) => b.ref === "feature/alpha"), "the --no-ff merged (kept) branch is a lateral lane");
     assert.ok(layout.branches.some((b) => b.ref === "task/GH-1"), "the unmerged task branch is a lateral lane");
     assert.ok(laterals(layout).every((b) => b.collapsed === true), "AC2: every lateral branch is collapsed by default");
 

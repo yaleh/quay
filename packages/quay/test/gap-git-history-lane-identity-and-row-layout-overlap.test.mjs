@@ -50,11 +50,12 @@ function laterals(layout) {
   return layout.branches.filter((b) => b.kind !== "mainline");
 }
 
-// ── AC1: two no-ff "Merge branch task/A into develop" commits fold into ONE mainline lane ──────────
-// (gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge: the ref partition can no longer split
-// one ref into multiple same-named lanes — a re-attributed commit folds into the mainline, not a lane.)
+// ── AC1: two no-ff "Merge branch task/A into develop" commits produce two DISTINCT unnamed lanes ──
+// (gap-git-graph-ref-partition-collapses-all-topology-to-one-lane: the ref partition that folded these
+// into ONE mainline lane was the over-correction — the topology is restored, and the deleted branch is
+// unnamed (#<hash>), so two same-subject merges can no longer collide on a shared name.)
 
-test("AC1: two 'Merge branch task/A into develop' commits fold into ONE mainline lane (no same-name split)", () => {
+test("AC1: two 'Merge branch task/A into develop' commits produce two DISTINCT unnamed lanes (no same-name split)", () => {
   const t0 = 1_700_000_000;
   const commits = [
     c("t000000", t0, "develop", [], "base"),
@@ -65,9 +66,13 @@ test("AC1: two 'Merge branch task/A into develop' commits fold into ONE mainline
     c("m100000", t0 + 5, "develop", ["m000000", "b100000"], "Merge branch 'task/A' into develop"),
   ];
   const layout = layoutGitGraph(hist(commits, "m100000", { develop: "m100000" }));
-  assert.equal(layout.branches.length, 1, "ONE lane — the two same-named merges no longer split into two lanes");
-  assert.equal(layout.branches[0].kind, "mainline", "the single lane is the mainline");
-  assert.equal(layout.branches[0].commits.length, 6, "all six commits land in the mainline lane");
+  assert.equal(layout.branches.length, 3, "mainline + two reconstructed lanes");
+  assert.equal(layout.branches[0].kind, "mainline", "the first lane is the mainline");
+  assert.equal(layout.branches[0].commits.length, 4, "the mainline is the first-parent chain (4 commits)");
+  const laterals = layout.branches.filter((b) => b.kind !== "mainline");
+  assert.equal(laterals.length, 2, "two second-parent lanes, never folded into one");
+  assert.notEqual(laterals[0].id, laterals[1].id, "the two lanes carry distinct structural ids");
+  assert.ok(laterals.every((b) => b.ref.startsWith("#")), "both lanes are unnamed (#<hash>) — no shared name to split");
 });
 
 // ── AC2: expansion state keys on the STRUCTURAL id, never the display ref ──────────────────────────

@@ -112,9 +112,13 @@ test("a deleted dev-merge tip resolves from its OWN subject (ff-fan-in shape)", 
   assert.equal(res.name, "task/A");
 });
 
-// ── end-to-end: layoutGitGraph labels deleted branches with their real names, not develop ────────
+// ── end-to-end: layoutGitGraph reconstructs deleted branches as UNNAMED lateral lanes ──────────────
+// gap-git-graph-ref-partition-collapses-all-topology-to-one-lane: the ref-partition model that folded
+// these re-attributed commits into ONE mainline lane was the over-correction — the topology is restored
+// (each no-ff merge's second parent becomes a lateral lane), but the deleted branches (task/A, task/B)
+// are no longer live refs, so their lanes are UNNAMED (#<hash>) — never a fabricated task/A name.
 
-test("layoutGitGraph folds re-attributed deleted-branch commits into ONE mainline lane (no phantom lanes)", () => {
+test("layoutGitGraph reconstructs re-attributed deleted-branch commits as unnamed lateral lanes (no phantom names)", () => {
   const t0 = 1_700_000_000;
   const commits = [
     c("t000000", t0, "develop", [], "base"),
@@ -125,11 +129,14 @@ test("layoutGitGraph folds re-attributed deleted-branch commits into ONE mainlin
     c("m100000", t0 + 5, "develop", ["m000000", "b000000"], "Merge branch 'task/B' into develop"),
   ];
   const layout = layoutGitGraph(hist(commits, "m100000", { develop: "m100000" }));
-  assert.equal(layout.branches.length, 1, "one lane — no phantom task/A / task/B lanes");
-  assert.equal(layout.branches[0].kind, "mainline", "the single lane is the mainline");
+  assert.equal(layout.branches.length, 3, "mainline + two reconstructed lanes (the topology is restored)");
+  assert.equal(layout.branches[0].kind, "mainline", "the first lane is the mainline");
   assert.deepEqual(
     layout.branches[0].commits.map((x) => x.hash),
-    ["t000000", "t100000", "a000000", "m000000", "b000000", "m100000"],
-    "every commit — including the two dev-merged deleted-branch commits — lives on the mainline",
+    ["t000000", "t100000", "m000000", "m100000"],
+    "the mainline is the first-parent chain (the spine), not every develop-reachable commit",
   );
+  const laterals = layout.branches.filter((b) => b.kind !== "mainline");
+  assert.equal(laterals.length, 2, "the two deleted branches become two lateral lanes");
+  assert.ok(laterals.every((b) => b.ref.startsWith("#")), "deleted branches are unnamed (#<hash>), never fabricated task/A / task/B names");
 });
