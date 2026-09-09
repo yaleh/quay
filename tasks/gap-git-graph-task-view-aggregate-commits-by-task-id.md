@@ -47,13 +47,13 @@ tasks: <id> task_write / <id> todo→ready（promotion-driver） ← 立案与�
 
 ## AC
 
-- [ ] AC1 `taskIdFromSubject` 对四种文案形态各返回正确 task id，对无关 subject（如 `chore: re-anchor quay-init-closure-ratchet baseline`）返回 `null`：`node --test packages/quay/test/gap-git-graph-task-view-aggregate-commits-by-task-id.test.mjs` 退出码 0。
-- [ ] AC2 负控制：喂一条 `Merge branch 'develop' into develop`，断言返回 `null` 而不是把 `develop` 当成 task id ⇒ 判据能取假。
-- [ ] AC3（**改写，跨模型成立**）任务视图确实多看见东西：取一个真实 task id，断言它的提交在 **git 视图里占据 ≥2 个不同的列号**，而在**任务视图里属于同一组**。这条不依赖「泳道」概念，在旧的泳道模型与主任务的每行列号模型下都可判定。
-- [ ] AC4 未归属显式化：任务视图输出含 `unattributedCount`，且满足恒等式 `总提交数 − Σ各任务分组提交数 = unattributedCount`（差为 0）；且该值在**生产数据**上 > 0（不是只在 fixture 里非零，硬规则 4 推论三）。
-- [ ] AC5 默认视图不变：不带 `?view=` 参数时返回的 `#git-graph-data` 与 `?view=git` **逐字节一致**——启发式不冒充默认真值。
-- [ ] AC6（**改写措辞**）与 git 对账：任取一个近期完成的任务**分组**，其提交条数与 `git log --oneline --all --grep=<task-id>` 的条数一致（差为 0）。
-- [ ] AC7（**新增，防主任务落地后失效**）任务视图的输出不依赖即将被删除的泳道字段：`grep -nE "\.(fork|merge|open|overflow)\b"` 在任务视图的实现路径（`layoutTaskGraph` 及其调用链）中命中数 = 0；负控制：显式引用其中任一字段应使该计数 > 0。
+- [x] AC1 `taskIdFromSubject` 对四种文案形态各返回正确 task id，对无关 subject（如 `chore: re-anchor quay-init-closure-ratchet baseline`）返回 `null`：`node --test packages/quay/test/gap-git-graph-task-view-aggregate-commits-by-task-id.test.mjs` 退出码 0。
+- [x] AC2 负控制：喂一条 `Merge branch 'develop' into develop`，断言返回 `null` 而不是把 `develop` 当成 task id ⇒ 判据能取假。
+- [x] AC3（**改写，跨模型成立**）任务视图确实多看见东西：取一个真实 task id，断言它的提交在 **git 视图里占据 ≥2 个不同的列号**，而在**任务视图里属于同一组**。这条不依赖「泳道」概念，在旧的泳道模型与主任务的每行列号模型下都可判定。
+- [x] AC4 未归属显式化：任务视图输出含 `unattributedCount`，且满足恒等式 `总提交数 − Σ各任务分组提交数 = unattributedCount`（差为 0）；且该值在**生产数据**上 > 0（不是只在 fixture 里非零，硬规则 4 推论三）。
+- [x] AC5 默认视图不变：不带 `?view=` 参数时返回的 `#git-graph-data` 与 `?view=git` **逐字节一致**——启发式不冒充默认真值。
+- [x] AC6（**改写措辞**）与 git 对账：任取一个近期完成的任务**分组**，其提交条数与 `git log --oneline --all --grep=<task-id>` 的条数一致（差为 0）。
+- [x] AC7（**新增，防主任务落地后失效**）任务视图的输出不依赖即将被删除的泳道字段：`grep -nE "\.(fork|merge|open|overflow)\b"` 在任务视图的实现路径（`layoutTaskGraph` 及其调用链）中命中数 = 0；负控制：显式引用其中任一字段应使该计数 > 0。
 
 ## DoD
 
