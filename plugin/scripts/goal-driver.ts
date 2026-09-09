@@ -89,6 +89,11 @@ export const CRITERION_TIMEOUT_MS = 120_000;
  *  「同值」不再是节省，而是把一个角色钉死在不可能完成的预算上。 */
 export const GAP_WORKER_TIMEOUT_MS_DEFAULT = 900_000;
 
+/** 充分性语义判定 spawn 的 wall-clock 上限（毫秒）。单次 LLM 判定（退出条件 vs 在域 AC，提示词已
+ *  内嵌全部事实，⛔ 无需工具调用）——成本结构与 promotion 的 fix-worker（180s，最近 400 轮 266/266
+ *  零超时）同族，故取 180_000。sufficiencyTimeoutMs 测试缝可覆盖（负控制 b 的「超时」注入小值）。 */
+export const SUFFICIENCY_TIMEOUT_MS = 180_000;
+
 /** 配置声明的 LLM 命令集缺省（AC140-4：判定读集合，⛔ 不靠 base==="claude" 字面量）。`claude-fjdac` =
  *  本仓 dev-tree launcher（.quay/profiles.yml 的 worker-default.launcher）——promotion 缺省只落
  *  ["claude"]，本 driver 把 dev-tree launcher 一并列入使 llm_invoked 在生产取真（⛔ 不硬编码
@@ -333,12 +338,17 @@ export function goalFlipDecision(
   return goalAchievedFromRecords(records, goalId) && sufficiency?.verdict === "covered";
 }
 
-/** body 是否含非空的 `## 退出条件` 节（标题存在且节体有非空白内容——「写下了」，⛔ 不是「只有标题」）。
+/** 取 body 的 `## 退出条件` 节文本（标题后至下一 `## ` 标题或结尾；节体 trim）。无该节 / 节体空 ⇒ ""。
  *  ⛔ 标题后只允许水平空白 [ \t]*，不用 \s*——\s 含 \n，会把「标题后紧跟的空行 + 下一节标题」吞进
  *  标题匹配，导致空节被误判为「有内容」。 */
-function hasExitConditions(body: string): boolean {
+function exitConditionsText(body: string): string {
   const m = body.match(/##[ \t]+退出条件[ \t]*\r?\n([\s\S]*?)(?=\r?\n##[ \t]|$)/);
-  return m !== null && m[1].trim().length > 0;
+  return m !== null ? m[1].trim() : "";
+}
+
+/** body 是否含非空的 `## 退出条件` 节（标题存在且节体有非空白内容——「写下了」，⛔ 不是「只有标题」）。 */
+function hasExitConditions(body: string): boolean {
+  return exitConditionsText(body).length > 0;
 }
 
 /** 一条 GOAL 的充分性判定（机械可证部分）：读 body 的 `## 退出条件` vs 在域 AC 集合。
@@ -354,6 +364,87 @@ export function goalSufficiencyVerdict(
   if (!hasExitConditions(String(goal.body ?? ""))) return "insufficient";
   if (inScopeAcs.length === 0) return "insufficient";
   return "not-evaluated";
+}
+
+// ── 充分性语义判定（AC-222 语义半：让充分性闸能产 covered，⛔ 硬约束不可用/超时/读不懂 ⇒ not-evaluated）──
+
+/** 语义判定 stdout → 三态词表（AC-222 负控制 b 的 fail-closed 核心）：
+ *  只有【明确、可解析】的 `covered` 才返回 covered；`insufficient` 同理；其余一切（非零退出、空输出、
+ *  读不懂、超时、JSON 解析失败）⇒ not-evaluated。⛔ 绝不把「读不懂」回落成 covered——「无条件
+ *  return covered」的放水实现会原样重演 AC-212 记录过的三次假 achieved。 */
+export function parseSemanticSufficiencyVerdict(stdout: string | null, exitCode: number | null): SufficiencyVerdict {
+  if (exitCode !== 0) return "not-evaluated";
+  const text = (stdout ?? "").trim();
+  // 纯 token（测试缝 / 极简输出）也认。
+  if (text === "covered" || text === "insufficient") return text;
+  // JSON 形态：{"verdict":"covered"} / {"verdict":"insufficient"}（claude -p 可能带解释性前文，
+  // 从末行向上找第一个可解析的 JSON 对象）。⛔ 找不到 ⇒ not-evaluated，绝不默认 covered。
+  const candidates = [text, ...text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean).reverse()];
+  for (const cand of candidates) {
+    try {
+      const obj = JSON.parse(cand);
+      if (obj && typeof obj === "object" && (obj.verdict === "covered" || obj.verdict === "insufficient")) {
+        return obj.verdict as SufficiencyVerdict;
+      }
+    } catch {
+      /* 非 JSON 行，继续向上找 */
+    }
+  }
+  return "not-evaluated";
+}
+
+/** 充分性语义判定的 prompt：把 GOAL 的退出条件文本 + 在域 AC 集合（id/title/expect）结构化给 LLM，
+ *  要求只输出一行 JSON。⛔ 非散文指令——结构化事实 + 输出契约（解析靠 parseSemanticSufficiencyVerdict）。 */
+export function buildSufficiencyPrompt(
+  goal: Record<string, unknown>,
+  inScopeAcs: Array<Record<string, unknown>>,
+  root: string,
+): string {
+  const gid = String(goal.id ?? "");
+  const title = String(goal.title ?? "");
+  const exitText = exitConditionsText(String(goal.body ?? ""));
+  const acLines = inScopeAcs.length === 0
+    ? "(none)"
+    : inScopeAcs.map((ac) => `- ${String(ac.id ?? "")}: ${String(ac.title ?? "")} | expect=${String(ac.expect ?? "")}`).join("\n");
+  return [
+    "You are a sufficiency judge in the quay repo. Decide whether the goal's in-scope AC set fully covers its exit conditions.",
+    `Repo root: ${root}.`,
+    `goal_id=${gid} goal_title=${title}`,
+    "## 退出条件 (exit conditions):",
+    exitText,
+    "## In-scope ACs:",
+    acLines,
+    'Reply with EXACTLY one line of JSON and nothing else: {"verdict":"covered"} if every exit condition is covered by the AC set, otherwise {"verdict":"insufficient"}.',
+  ].join("\n");
+}
+
+/** 充分性语义判定（AC-222 语义半）：机械可证部分判不出（有退出条件 + 有在域 AC）时，spawn 短命 LLM
+ *  判「这组 AC 是否覆盖退出条件」⇒ covered / insufficient。⛔ 硬约束：LLM 不可用 / 超时 / 读不懂 ⇒
+ *  not-evaluated，绝不允许回落成 covered（parseSemanticSufficiencyVerdict 的 fail-closed）。
+ *  sufficiencyCmd = 测试缝（同 readyPoolCmd 的数组形态：覆盖命令前缀，prompt 作末参数追加）；
+ *  缺省 = launchArgv("fix-worker") 真 LLM。 */
+export async function semanticSufficiencyVerdict(
+  goal: Record<string, unknown>,
+  inScopeAcs: Array<Record<string, unknown>>,
+  root: string,
+  opts: { sufficiencyCmd?: string[] | null; sufficiencyTimeoutMs?: number } = {},
+): Promise<SufficiencyVerdict> {
+  const prompt = buildSufficiencyPrompt(goal, inScopeAcs, root);
+  let argv: string[];
+  try {
+    if (opts.sufficiencyCmd != null) {
+      if (opts.sufficiencyCmd.length === 0) return "not-evaluated";
+      argv = [...opts.sufficiencyCmd, prompt];
+    } else {
+      argv = launchArgv("fix-worker", prompt, root);
+    }
+  } catch {
+    // launchArgv 抛错（profiles.yml 缺失/非法）⇒ 判不出，⛔ 不回落 covered。
+    return "not-evaluated";
+  }
+  const r = await runAsync(argv, { timeoutMs: opts.sufficiencyTimeoutMs ?? SUFFICIENCY_TIMEOUT_MS });
+  if (r.error) return "not-evaluated";
+  return parseSemanticSufficiencyVerdict(r.stdout, r.status);
 }
 
 // ── 缺口五态（G7 + G9 stalled + done-unresolved，硬规则 3b：读不懂输入不得返回与「合格」同形——
@@ -730,7 +821,8 @@ export interface GoalRoundReadings {
   goalCount: number;
   criterionCount: number;
   criteria: Array<{ id: string; goal: string; status: string; verdict: "pass" | "fail" | "not-evaluated"; reason: string }>;
-  /** 本轮 driver 做的全部状态翻写：I2 达成翻转（to=achieved）。⛔ 分诊不翻状态（AC-219）。 */
+  /** 本轮 driver 做的全部状态翻写：I2 达成翻转（to=achieved）+ ⑧ 分诊 activate 执行（to=active）。
+   *  ⛔ 分诊不翻其余三态（re-anchor / needs-human / hold 只落痕，AC-219）。 */
   flips: Array<{ id: string; to: string; ok: boolean; reason: string }>;
   /** I3 三桶 + I4 分歧；null = check --staleness 读不到（⛔ 与「零 stale」不同形，硬规则 3b）。
    *  scopeSize = 枚举出的 active goal 数（作用域规模）；evaluated = scopeSize > 0。0 active goal ⇒
@@ -770,6 +862,11 @@ export interface GoalRoundOptions {
   spawnCap?: number;
   /** 覆盖 gap-filing agent spawn 超时（缺省 = drivers.yml goal.gap_worker_timeout_ms；CLI --gap-worker-timeout-ms）。 */
   gapWorkerTimeoutMs?: number;
+  /** 覆盖充分性语义判定命令前缀（测试缝；prompt 仍作末参数追加，同 readyPoolCmd 的数组形态）。
+   *  null/undefined ⇒ launchArgv("fix-worker") 真 LLM；空数组 ⇒ not-evaluated（不可用）。 */
+  sufficiencyCmd?: string[] | null;
+  /** 覆盖充分性语义判定 spawn 超时（缺省 = SUFFICIENCY_TIMEOUT_MS；负控制 b 的「超时」注入小值）。 */
+  sufficiencyTimeoutMs?: number;
 }
 
 export interface GoalRoundResult {
@@ -828,7 +925,16 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     // 不静默丢弃——否则 AC-212 判据 part 1 结构上永远无法满足）。读 body 的 `## 退出条件` vs 在域 AC 集合，
     // 机械可证的部分判 insufficient（无退出条件 / 零在域 AC），覆盖与否的语义判定归 AC-213 的 LLM。
     const inScope = inScopeAcsOf(records, gid);
-    const sufficiency = goalSufficiencyVerdict(goal, inScope);
+    // 充分性闸（AC-212 机械 + AC-222 语义）：先机械可证部分（无退出条件 / 零在域 AC ⇒ insufficient），
+    // 有退出条件 + 有在域 AC ⇒ 语义判定（LLM 判 covered/insufficient；不可用/超时/读不懂 ⇒ not-evaluated，
+    // ⛔ 绝不回落 covered——semanticSufficiencyVerdict 的 fail-closed）。
+    const mechanical = goalSufficiencyVerdict(goal, inScope);
+    const sufficiency = mechanical === "not-evaluated"
+      ? await semanticSufficiencyVerdict(goal, inScope, root, {
+          sufficiencyCmd: opts.sufficiencyCmd,
+          sufficiencyTimeoutMs: opts.sufficiencyTimeoutMs,
+        })
+      : mechanical;
     sufficiencyFacts.push({
       name: "goal-sufficiency",
       value: { sufficiency: { goal: gid, verdict: sufficiency } },
@@ -858,8 +964,9 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   const gaps = computeGoalGaps(records, taskFacts, judgment);
 
   // ⑦ draft AC 分诊（GOAL-010 范围② / AC-210）：对 active GOAL 名下每条 draft AC 出四态判决并逐条
-  // 落痕（⛔ 只记录，不 flip——draft→active 归人/manager 裁定 3；放弃 retired 归人，且分诊不再判
-  // retire，AC-219）。taskFacts 已在 ⑤读出，直接传入（⛔ 不再读一次）。goal posture 由 goal 记录
+  // 落痕。分诊循环只【产出判决】，⛔ 不 flip 任何 AC status——判决的消费在 ⑧（仅 activate 一态被
+  // 执行；re-anchor / needs-human / hold 仍只落痕不 flip；放弃 retired 归人，且分诊不再判 retire，
+  // AC-219）。taskFacts 已在 ⑤读出，直接传入（⛔ 不再读一次）。goal posture 由 goal 记录
   // 读出后传入（AC-215：`measure-only` 名下 draft AC 不得判 activate——判决函数已按 posture 入参预留
   // seam）。对象集 = 轮开始时 active 的 GOAL 名下的 draft AC。
   const triage: TriageEntry[] = [];
@@ -870,6 +977,17 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
       if (!isAc(r) || r.status !== "draft" || String(r.goal ?? "") !== gid) continue;
       triage.push(triageDraftAc(r, posture, taskFacts));
     }
+  }
+
+  // ⑧ 执行 activate 判决（GOAL-010 退出条件① / AC-223）：分诊只做了「产出判决」那一半，消费
+  // 从未接线——此处补上消费。⛔ 只消费 `activate` 一态：对每条 decision==="activate" 的 triage
+  // 条目调 writeGoalStatus 把 draft AC 机械翻 active。激活走 goal-store write，会被 P6
+  // not-evaluated 前置闸与 cap 闸挡住（AC-223 origin 风险 C 的守护，driver 无需复制该判断）。
+  // ⛔ 不写 retired（裁定 1，AC-211 单测守着）；re-anchor / needs-human / hold 仍不 flip。
+  for (const t of triage) {
+    if (t.decision !== "activate") continue;
+    const w = await writeGoalStatus(scriptRoot, t.ac, "active", dataRoot, { actor: "goal-driver", reason: "triage: activate" });
+    flips.push({ id: t.ac, to: "active", ok: w.ok, reason: w.reason });
   }
 
   // ⑥ G9 缺口语义环：缺口（state==="gap"）非空 ⇒ 过 halt + 资源门 + 每轮上限，spawn 短命 agent 经 ABI

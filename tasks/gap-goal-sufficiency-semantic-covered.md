@@ -1,7 +1,7 @@
 ---
 id: gap-goal-sufficiency-semantic-covered
 title: 充分性闸补语义判定分支——goalSufficiencyVerdict 须能产出 covered（GOAL-010 退出条件②）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -40,12 +40,12 @@ export function goalSufficiencyVerdict(
 
 ## AC
 
-- [ ] `node --no-warnings --experimental-strip-types --test plugin/test/goal-sufficiency-semantic-covered.test.mjs` 退出码 0（AC-222 机制半逐字）
-- [ ] 正向：测试断言语义判定路径存在——判"覆盖"（在域 AC 集合确实覆盖 GOAL body 退出条件）⇒ `goalSufficiencyVerdict` 返回 `covered`
-- [ ] 负控制 (a)：测试断言判"不覆盖"⇒ 返回 `insufficient`（与 covered 可分）
-- [ ] 负控制 (b)：测试断言语义判定路径不可用/超时/读不懂 ⇒ 返回 `not-evaluated`，⛔ 不得为 `covered`
-- [ ] 生产半判据（待外部）：`node --no-warnings --experimental-strip-types --test plugin/test/goal-sufficiency-semantic-covered.test.mjs && python3 -c 'import json,sys; ok=[s for l in open(".quay/goal-round.jsonl") for f in (json.loads(l).get("facts") or []) for s in [(f.get("value") or {}).get("sufficiency")] if isinstance(s,dict) and s.get("verdict")=="covered"]; sys.exit(0 if len(ok)>=1 else 1)'` 退出码 0（落地后一轮 driver 跑过，非 fixture 注入）
-- [ ] scoped 门 `bash scripts/test.sh --for-task gap-goal-sufficiency-semantic-covered --allow-thin` 退出码 0
+- [x] `node --no-warnings --experimental-strip-types --test plugin/test/goal-sufficiency-semantic-covered.test.mjs` 退出码 0（AC-222 机制半逐字）
+- [x] 正向：测试断言语义判定路径存在——判"覆盖"（在域 AC 集合确实覆盖 GOAL body 退出条件）⇒ `goalSufficiencyVerdict` 返回 `covered`
+- [x] 负控制 (a)：测试断言判"不覆盖"⇒ 返回 `insufficient`（与 covered 可分）
+- [x] 负控制 (b)：测试断言语义判定路径不可用/超时/读不懂 ⇒ 返回 `not-evaluated`，⛔ 不得为 `covered`
+- [ ] 生产半判据：`node --no-warnings --experimental-strip-types --test plugin/test/goal-sufficiency-semantic-covered.test.mjs && python3 -c 'import json,sys; ok=[s for l in open(".quay/goal-round.jsonl") for f in (json.loads(l).get("facts") or []) for s in [(f.get("value") or {}).get("sufficiency")] if isinstance(s,dict) and s.get("verdict")=="covered"]; sys.exit(0 if len(ok)>=1 else 1)'` 退出码 0（落地后一轮 driver 跑过，非 fixture 注入）（待外部）
+- [x] scoped 门 `bash scripts/test.sh --for-task gap-goal-sufficiency-semantic-covered --allow-thin` 退出码 0
 
 ## DoD
 

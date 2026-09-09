@@ -41,12 +41,12 @@ extra:
 
 ## AC
 
-- [ ] `readLive()` 返回对象含 `concurrencyCap` 字段，其值等于 `driverCap(root, "worker")`（fixture 验证：构造 `drivers.yml` 中 `worker.cap=7` 且在飞任务数为 2 的场景，断言 `concurrencyCap === 7 && inFlight.length === 2`，两值不相等，证明不再是同一个数字的复制）
-- [ ] `readLive()` 返回对象不再含 `concurrency` 字段（`grep -c "\.concurrency\b" packages/quay/src/observation.ts packages/quay/src/serve-dashboard.ts packages/quay/src/serve-live.ts` 对旧字段的引用计数为 0，新字段名为 `concurrencyCap`）
-- [ ] `packages/quay/src/serve-dashboard.ts` 渲染的 dashboard 卡片 HTML 含「上限」标签且不再含「并发 ${在飞同值}」的重复展示（`curl`/渲染函数直接调用的输出 `grep -c '并发 '` 为 0）
-- [ ] `packages/quay/src/serve-live.ts` `/live` 页面 summary 行含「上限」标签，不再含「并发数:」这一旧标签文案
-- [ ] `node --test packages/quay/test/observation.test.mjs packages/quay/test/live-state.test.mjs packages/quay/test/serve.test.mjs` 全部通过（exit 0），且三个测试文件里对旧 `live.concurrency` 字段/`并发数:`/`· 并发` 文案的断言已更新为对 `concurrencyCap`/「上限」的断言
-- [ ] `scripts/test.sh --for-task gap-dashboard-live-concurrency-duplicates-inflight-count` 全绿（exit 0）
+- [x] `readLive()` 返回对象含 `concurrencyCap` 字段，其值等于 `driverCap(root, "worker")`（fixture 验证：构造 `drivers.yml` 中 `worker.cap=7` 且在飞任务数为 2 的场景，断言 `concurrencyCap === 7 && inFlight.length === 2`，两值不相等，证明不再是同一个数字的复制）
+- [x] `readLive()` 返回对象不再含 `concurrency` 字段（`grep -c "\.concurrency\b" packages/quay/src/observation.ts packages/quay/src/serve-dashboard.ts packages/quay/src/serve-live.ts` 对旧字段的引用计数为 0，新字段名为 `concurrencyCap`）
+- [x] `packages/quay/src/serve-dashboard.ts` 渲染的 dashboard 卡片 HTML 含「上限」标签且不再含「并发 ${在飞同值}」的重复展示（`curl`/渲染函数直接调用的输出 `grep -c '并发 '` 为 0）
+- [x] `packages/quay/src/serve-live.ts` `/live` 页面 summary 行含「上限」标签，不再含「并发数:」这一旧标签文案
+- [x] `node --test packages/quay/test/observation.test.mjs packages/quay/test/live-state.test.mjs packages/quay/test/serve.test.mjs` 全部通过（exit 0），且三个测试文件里对旧 `live.concurrency` 字段/`并发数:`/`· 并发` 文案的断言已更新为对 `concurrencyCap`/「上限」的断言
+- [x] `scripts/test.sh --for-task gap-dashboard-live-concurrency-duplicates-inflight-count` 全绿（exit 0）
 
 ## DoD
 

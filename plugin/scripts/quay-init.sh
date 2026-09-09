@@ -6,10 +6,11 @@
 # 不是一个安装器**。扩展与脚本由 quay Claude Code plugin 原生交付（skill 载入时 ${CLAUDE_PLUGIN_ROOT}
 # 文本级展开 / 非 skill 入口走 packages/quay/src/plugin-root.ts 解析器）。
 #
-# 写入闭集（QUAY-INIT-CLOSED-SET）——只写这 6 项：
+# 写入闭集（QUAY-INIT-CLOSED-SET）——只写这 7 项：
 #   .quay/config.yml         provider map + loop 参数（生成）
 #   .quay/profiles.yml       launcher/model 承载（模板 verbatim）
 #   tasks/                   任务目录（mkdir）
+#   goals/                   目标目录（mkdir，与 tasks/ 双载体）
 #   .gitignore               quay 运行时状态条目（追加，幂等）
 #   .claude/launch.settings.json   每角色启动配置模板（模板 verbatim）
 #   .claude/settings.json    enabledPlugins + permissions.allow（生成）
@@ -157,7 +158,7 @@ fi
 # written for, and a monitor aimed at a nonexistent session reports a LIVE inner as GONE (the
 # false-negative this monitor must never emit). The --loop block DETECTS the real session by
 # project name as a BEST-EFFORT convenience — since the outer/inner dual-tmux model retired
-# (SPEC-tmux-retirement-2026-09-03) the session is OPTIONAL: quay-init's six-item closed-set write
+# (SPEC-tmux-retirement-2026-09-03) the session is OPTIONAL: quay-init's seven-item closed-set write
 # never uses tmux, so a missing/ambiguous session leaves loop.tmux_session null instead of failing
 # the init (gap-quay-init-hard-requires-tmux-session-and-leaves-partial-write). Only a downstream
 # action that actually uses tmux fails closed at runtime — never this initializer.
@@ -1922,14 +1923,14 @@ if [ "${BASH_SOURCE[0]}" != "${0}" ]; then
   return 0
 fi
 
-# report_closed_set_state — the AC3 failure-path report: mechanically list the six-item closed-set
+# report_closed_set_state — the AC3 failure-path report: mechanically list the seven-item closed-set
 # written/unwritten state (gap-quay-init-hard-requires-tmux-session-and-leaves-partial-write). Wired as
 # an EXIT trap below so a non-zero exit — a pre-write fail-closed check (test command / plugin root /
 # worktree root), a mid-write abort, or a post-write auto-commit failure — always reports WHICH items
 # landed. This makes "initialized half-way" distinguishable from "not initialized" (hard rule 3b
 # write-side mirror: a failed init must not be conflated with a complete one).
 report_closed_set_state() {
-  for p in .quay/config.yml .quay/profiles.yml tasks .gitignore .claude/launch.settings.json .claude/settings.json; do
+  for p in .quay/config.yml .quay/profiles.yml tasks goals .gitignore .claude/launch.settings.json .claude/settings.json; do
     if [ -e "$WORKSPACE_ROOT/$p" ]; then
       echo "  written:   $p" >&2
     else
@@ -1951,7 +1952,7 @@ trap _on_exit EXIT
 
 # ── closed-set write (SPEC §6 / gap-quay-init-closure-shrink-body AC168) ────────────────────────────
 echo "quay-init (plugin v${PLUGIN_VERSION})"
-echo "  closed set: .quay/config.yml, .quay/profiles.yml, tasks/, .gitignore, .claude/launch.settings.json, .claude/settings.json"
+echo "  closed set: .quay/config.yml, .quay/profiles.yml, tasks/, goals/, .gitignore, .claude/launch.settings.json, .claude/settings.json"
 
 # write_config — generate .quay/config.yml (provider map → the plugin's vendored native runtime; loop section).
 write_config() {
@@ -2179,7 +2180,7 @@ else
 fi
 if [ -z "$TMUX_SESSION" ]; then
   # tmux session is OPTIONAL since the outer/inner dual-tmux model retired (SPEC-tmux-retirement-
-  # 2026-09-03): quay-init's six-item closed-set write never uses tmux, so a missing/ambiguous
+  # 2026-09-03): quay-init's seven-item closed-set write never uses tmux, so a missing/ambiguous
   # session must NOT fail the init (gap-quay-init-hard-requires-tmux-session-and-leaves-partial-
   # write). Detection is best-effort — exactly one match wins; zero or multiple matches leave
   # loop.tmux_session null (never a guess, never a hard failure). Only a downstream action that
@@ -2213,11 +2214,12 @@ if [ -z "$WORKTREE_ROOT" ]; then
 fi
 validate_worktree_root "$WORKTREE_ROOT" || exit 2
 
-# ── main dispatch: the SIX-item closed set ─────────────────────────────────────────────────────────────
+# ── main dispatch: the SEVEN-item closed set ────────────────────────────────────────────────────────────
 if [ "$DRY_RUN" = true ]; then
   write_config
   write_template "$PLUGIN_ROOT/.quay/profiles.yml" "$WORKSPACE_ROOT/.quay/profiles.yml" "profile carrier (template)"
   echo "  would-create: tasks/"
+  echo "  would-create: goals/"
   ensure_gitignore
   write_template "$PLUGIN_ROOT/.claude/launch.settings.json" "$WORKSPACE_ROOT/.claude/launch.settings.json" "launch template"
   write_claude_settings
@@ -2231,13 +2233,15 @@ write_config
 write_template "$PLUGIN_ROOT/.quay/profiles.yml" "$WORKSPACE_ROOT/.quay/profiles.yml" "profile carrier (template)"
 mkdir -p "$WORKSPACE_ROOT/tasks"
 echo "  created: tasks/"
+mkdir -p "$WORKSPACE_ROOT/goals"
+echo "  created: goals/"
 ensure_gitignore
 write_template "$PLUGIN_ROOT/.claude/launch.settings.json" "$WORKSPACE_ROOT/.claude/launch.settings.json" "launch template"
 write_claude_settings
 
 # L1 delivery-surface check (post-init, beside verify_referenced_landed): the six-category delivery
 # surface of the SHIPPED quay checkout is complete. Read-only over the plugin's own root — never
-# writes to the target, so the six-item closed set is unaffected.
+# writes to the target, so the seven-item closed set is unaffected.
 verify_delivery_surface_l1 || exit 2
 
 auto_commit_laid_down

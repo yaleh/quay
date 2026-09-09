@@ -22,8 +22,8 @@
 // (gap-quay-init-hard-requires-tmux-session-and-leaves-partial-write).
 //
 // AC1  — a UNIQUE `tmux list-sessions` match by project name is detected and written
-// AC2  — ZERO matches ⇒ still succeed (exit 0, six items), loop.tmux_session left null (never a guess)
-// AC3  — MULTIPLE matches ⇒ still succeed (exit 0, six items), loop.tmux_session left null (never pick one)
+// AC2  — ZERO matches ⇒ still succeed (exit 0, seven items), loop.tmux_session left null (never a guess)
+// AC3  — MULTIPLE matches ⇒ still succeed (exit 0, seven items), loop.tmux_session left null (never pick one)
 // AC4  — an explicit --tmux-session always wins over detection
 // AC5  — the written value resolves: `tmux has-session -t <value>` exits 0
 //
@@ -187,7 +187,7 @@ test('AC1 — a UNIQUE matching tmux session is detected and written (no --tmux-
 // ── AC2: zero matches ⇒ optional, never write a guess (the 立案 reason, now demoted) ────────────────
 // NOT gated on tmux availability: the optional path must hold even when tmux is entirely absent (the
 // detector returns "no match" and the installer proceeds with loop.tmux_session null — never a guess).
-test('AC2 — NO matching tmux session: init still succeeds (exit 0, six items), loop.tmux_session null (never a guess)', () => {
+test('AC2 — NO matching tmux session: init still succeeds (exit 0, seven items), loop.tmux_session null (never a guess)', () => {
   const ws = makeTmp();
   const sockDir = path.join(ws, 'sock'); fs.mkdirSync(sockDir, { recursive: true });
   const env = isolateTmuxEnv(sockDir); // private socket — on a tmux box this is a server with NO sessions
@@ -202,7 +202,7 @@ test('AC2 — NO matching tmux session: init still succeeds (exit 0, six items),
     const cfg = fs.readFileSync(path.join(ws, '.quay', 'config.yml'), 'utf8');
     assert.match(cfg, /tmux_session:\s*null/,
       'AC2: must write loop.tmux_session null, not a guessed session');
-    for (const c of ['.quay/config.yml', '.quay/profiles.yml', 'tasks', '.gitignore', '.claude/launch.settings.json', '.claude/settings.json']) {
+    for (const c of ['.quay/config.yml', '.quay/profiles.yml', 'tasks', 'goals', '.gitignore', '.claude/launch.settings.json', '.claude/settings.json']) {
       assert.ok(fs.existsSync(path.join(ws, c)), `closed-set member must be laid down: ${c}`);
     }
   } finally {

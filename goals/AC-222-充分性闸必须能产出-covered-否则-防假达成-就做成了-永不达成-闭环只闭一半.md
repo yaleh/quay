@@ -1,7 +1,7 @@
 ---
 id: AC-222
 title: 充分性闸必须能产出 covered——否则「防假达成」就做成了「永不达成」，闭环只闭一半
-status: draft
+status: achieved
 kind: criterion
 goal: GOAL-010
 criterion: node --no-warnings --experimental-strip-types --test
@@ -43,4 +43,16 @@ origin: >-
   ⚠️ 本条判据的负控制不可省：若只要求「生产里出现过 covered」，可被「无条件 return
   covered」满足——那会原样重演最初的「纯语法合取即关闭」缺陷（AC-212 origin 记录的三次假 achieved）。故判据必须同时要求「LLM
   不可用 ⇒ not-evaluated，⛔ 不得回落 covered」。
+activatedAt: 2026-09-09T16:35:25.310Z
+statusLog:
+  - at: 2026-09-09T16:35:25.310Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+  - at: 2026-09-09T17:41:02.237Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
