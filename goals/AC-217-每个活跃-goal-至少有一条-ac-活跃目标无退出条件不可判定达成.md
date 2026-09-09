@@ -1,7 +1,7 @@
 ---
 id: AC-217
 title: 每个活跃 GOAL 至少有一条 AC——活跃目标无退出条件不可判定达成
-status: needs-human
+status: active
 kind: criterion
 goal: GOAL-010
 criterion: node --no-warnings --experimental-strip-types
@@ -32,10 +32,16 @@ origin: >-
   needs-human 的，而该分诊缺陷已由
   gap-meta-goal-triage-fresh-draft-not-retire（done）修复（默认分支 retire→hold、移除 retire
   词态）。
+activatedAt: 2026-09-09T13:31:39.117Z
 statusLog:
   - at: 2026-09-09T09:37:09.309Z
     from: draft
     to: needs-human
     actor: goal-driver
     reason: triage 判 retire：建议退役但 retired 归人——driver 置 needs-human 交人判断
+  - at: 2026-09-09T13:31:39.117Z
+    from: needs-human
+    to: active
+    actor: goal-cli
+    reason: ""
 ---
