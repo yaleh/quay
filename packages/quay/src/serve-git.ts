@@ -36,6 +36,34 @@ export const GIT_GRAPH_PAD_Y = 24;
 /** Fixed row height — one commit per band. */
 export const GIT_GRAPH_ROW_H = 24;
 
+/**
+ * Categorical column palette — eight distinct HUES (not shades of one), each dark enough to hold ≥3:1
+ * contrast against the light canvas (--color-neutral-100 / #f8f4f4). Slot-indexed by column number:
+ * column `c` draws with `var(--color-lane-(c % 8))`, so two ADJACENT columns always differ in hue.
+ * Restored verbatim from the retired lane model (gap-git-graph-cross-column-edges-drawn-as-fixed-stubs-
+ * not-anchored AC10 pins it to `git show 303a94950^:packages/quay/src/serve-git.ts` item-by-item).
+ */
+export const GIT_GRAPH_LANE_PALETTE: readonly string[] = [
+  "#b71c1c", // red
+  "#0d47a1", // blue
+  "#1b5e20", // green
+  "#4a148c", // purple
+  "#004d40", // teal
+  "#bf360c", // deep orange
+  "#880e4f", // pink
+  "#1a237e", // indigo
+];
+
+/**
+ * The client renderer references column colours as `var(--color-lane-N)` TOKENS, never hex — the hex
+ * values stay HERE (one source of truth) and are emitted as a scoped token sheet by
+ * gitGraphLaneTokenCss(). Restored alongside GIT_GRAPH_LANE_PALETTE for per-column colouring (AC9).
+ */
+export function gitGraphLaneTokenCss(): string {
+  const laneDefs = GIT_GRAPH_LANE_PALETTE.map((hex, i) => `--color-lane-${i}:${hex};`).join("");
+  return `#git-graph{${laneDefs}}`;
+}
+
 // ── The per-commit row model (gap-git-graph-adopt-git-column-algorithm-and-decorate-labels) ─────────
 
 export interface GitGraphEdge {
@@ -45,6 +73,19 @@ export interface GitGraphEdge {
   toCol: number;
   /** `parent` = first parent (vertical continuation); `merge` = a second-or-later parent (diagonal). */
   kind: "parent" | "merge";
+  /**
+   * The parent's row index in the window — the y-anchor the client draws this edge's ENDPOINT at
+   * (`y(toRow)`). This is the data that fixes gap-git-graph-cross-column-edges-drawn-as-fixed-stubs-
+   * not-anchored: the endpoint used to be `y(i) + rowH * 0.65` (a fixed 15.6px stub), leaving every
+   * cross-column edge dangling. -1 when `outsideWindow` (the parent has no row in this window).
+   */
+  toRow: number;
+  /**
+   * true when the parent is NOT in this window (`git log -n limit` cut it off) — the edge is drawn
+   * as a dashed stub from the commit's node down to the window boundary, so "there is more below"
+   * is VISIBLE rather than the line silently ending (硬规则 3b: an invisible end is not "no parent").
+   */
+  outsideWindow: boolean;
 }
 
 /** One row = one commit, in git emission order (newest FIRST, so row 0 is the newest commit). */
@@ -119,13 +160,29 @@ export function assignGitColumns(commits: Array<{ hash: string; parentHashes: st
 export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null {
   if (history.status !== "ok" || history.commits.length === 0) return null;
   const cols = assignGitColumns(history.commits);
+  // hash → row index, so an edge can carry the PARENT's row (`toRow`) as its endpoint anchor.
+  // gap-git-graph-cross-column-edges-drawn-as-fixed-stubs-not-anchored: the client previously drew
+  // the endpoint at `y(i) + rowH*0.65` (a fixed stub) because it had no way to find the parent's row.
+  const rowIndex = new Map<string, number>();
+  history.commits.forEach((c, i) => rowIndex.set(c.hash, i));
   const rows: GitGraphRow[] = history.commits.map((c) => {
     const colC = cols.get(c.hash) as number;
-    const edges: GitGraphEdge[] = [];
-    c.parentHashes.forEach((p, pi) => {
+    // One edge per parent, in `parentHashes` order — `edges[pi]` always corresponds to `parentHashes[pi]`.
+    const edges: GitGraphEdge[] = c.parentHashes.map((p, pi) => {
       const colP = cols.get(p);
-      if (colP === undefined) return; // parent outside the window — its line just ends, no marker
-      edges.push({ fromCol: colC, toCol: colP, kind: pi === 0 ? "parent" : "merge" });
+      if (colP === undefined) {
+        // parent outside the window — keep the edge, MARKED, so "the line continues below" is visible.
+        // Its true column is unknown until the older page loads; the dashed stub continues the child's
+        // own column straight down to the window boundary.
+        return { fromCol: colC, toCol: colC, kind: pi === 0 ? "parent" : "merge", toRow: -1, outsideWindow: true };
+      }
+      return {
+        fromCol: colC,
+        toCol: colP,
+        kind: pi === 0 ? "parent" : "merge",
+        toRow: rowIndex.get(p) as number,
+        outsideWindow: false,
+      };
     });
     return {
       hash: c.hash,
@@ -322,10 +379,13 @@ function gitGraphLibJs(): string {
 
 /**
  * The client-side D3 renderer. One row per commit (newest first), a dot/diamond node at the commit's
- * column, a vertical line per active column, a diagonal per cross-column parent edge, and inline
- * `hash (decorations) subject` text. NO interaction (no fold/expand, no chips, no hit rects). The
+ * column, a vertical line per active column, a ROUNDED-ORTHOGONAL path per cross-column parent edge
+ * (anchored to the parent's row — gap-git-graph-cross-column-edges-drawn-as-fixed-stubs-not-anchored),
+ * and inline `hash (decorations) subject` text. Columns and edges are hue-coded per column number via
+ * `var(--color-lane-N)` tokens (AC9). NO interaction (no fold/expand, no chips, no hit rects). The
  * generated JS carries no template literal, `${`, or `</script` so it inlines verbatim — geometry
- * constants are interpolated SERVER-side as plain numbers.
+ * constants are interpolated SERVER-side as plain numbers, and column colours as `var(--color-lane-N)`
+ * tokens (the hex stays in GIT_GRAPH_LANE_PALETTE).
  */
 export function gitGraphClientScript(): string {
   return `(function () {
@@ -337,8 +397,23 @@ export function gitGraphClientScript(): string {
   if (!data || !data.rows || !data.rows.length) { return; }
 
   var rowH = ${GIT_GRAPH_ROW_H}, trunkX = ${GIT_GRAPH_TRUNK_X}, textX = ${GIT_GRAPH_TEXT_X}, laneGap = ${GIT_GRAPH_LANE_GAP}, nodeR = 3.5, mergeR = 5, padY = ${GIT_GRAPH_PAD_Y};
+  var lanePalette = ${JSON.stringify(GIT_GRAPH_LANE_PALETTE.map((_, i) => `var(--color-lane-${i})`))};
 
   function y(row) { return padY + row * rowH; }
+  function laneColor(col) { return lanePalette[col % lanePalette.length]; }
+
+  // A rounded-orthogonal edge: horizontal out of the child node toward the parent's column, a rounded
+  // quarter-turn down (radius min(6, laneGap/2)), then a straight vertical drop to the parent's row.
+  // Cross-column edges always satisfy |toX - fromX| >= laneGap, so the corner radius never exceeds the
+  // horizontal run. Only H/V/Q commands — no L, no diagonal (AC8).
+  function edgePath(fromX, fromY, toX, toY) {
+    var r = Math.min(6, laneGap / 2);
+    var sign = toX >= fromX ? 1 : -1;
+    return "M " + fromX + "," + fromY +
+      " H " + (toX - sign * r) +
+      " Q " + toX + "," + fromY + " " + toX + "," + (fromY + r) +
+      " V " + toY;
+  }
 
   function render() {
     var rows = data.rows;
@@ -366,17 +441,27 @@ export function gitGraphClientScript(): string {
       g.append("line").attr("class", "git-svg-column")
         .attr("x1", trunkX + (+c) * laneGap).attr("x2", trunkX + (+c) * laneGap)
         .attr("y1", y(colMin[c])).attr("y2", y(colMax[c]))
-        .attr("stroke", "var(--color-neutral-400)").attr("stroke-width", 1.2);
+        .attr("stroke", laneColor(+c)).attr("stroke-width", 1.2);
     }
 
-    // cross-column parent edges (diagonals); same-column parents are the vertical line itself
+    // cross-column parent edges (rounded-orthogonal paths); same-column parents are the vertical line
+    // itself. The path ENDS at the PARENT's node (the edge's toRow), never a fixed stub — so a merge's two
+    // connectors both reach their parent commits' nodes. A parent OUTSIDE the window is a dashed stub
+    // from the commit's node down to the bottom boundary (a VISIBLE "there is more below", 硬规则 3b).
     rows.forEach(function (r, i) {
       r.edges.forEach(function (e) {
+        if (e.outsideWindow) {
+          g.append("line").attr("class", "git-svg-edge-outside")
+            .attr("x1", trunkX + e.fromCol * laneGap).attr("y1", y(i))
+            .attr("x2", trunkX + e.toCol * laneGap).attr("y2", y(rows.length))
+            .attr("stroke", laneColor(e.fromCol)).attr("stroke-width", 1.2)
+            .attr("stroke-dasharray", "4 3");
+          return;
+        }
         if (e.fromCol === e.toCol) { return; }
-        g.append("line").attr("class", "git-svg-edge")
-          .attr("x1", trunkX + e.fromCol * laneGap).attr("y1", y(i))
-          .attr("x2", trunkX + e.toCol * laneGap).attr("y2", y(i) + rowH * 0.65)
-          .attr("stroke", "var(--color-neutral-500)").attr("stroke-width", 1.2);
+        g.append("path").attr("class", "git-svg-edge")
+          .attr("d", edgePath(trunkX + e.fromCol * laneGap, y(i), trunkX + e.toCol * laneGap, y(e.toRow)))
+          .attr("fill", "none").attr("stroke", laneColor(e.fromCol)).attr("stroke-width", 1.6);
       });
     });
 
@@ -497,9 +582,23 @@ export function gitGraphLegendHtml(): string {
   const parts = [
     glyph("var(--color-accent-600)", "●", "commit"),
     glyph("var(--color-accent-2-500)", "◆", "merge"),
-    glyph("var(--color-neutral-700)", "╲", "父提交连线"),
+    glyph("var(--color-neutral-700)", "╰", "父提交连线（圆角正交）"),
   ];
   return `<div style="position:sticky;left:0;top:0;z-index:2;display:inline-flex;gap:0.75rem;align-items:center;background:var(--color-surface);padding:0.25rem 0.6rem;border:1px solid var(--color-neutral-200);border-radius:6px;font-size:0.72rem;color:var(--color-neutral-700)">${parts.join("")}</div>`;
+}
+
+/**
+ * Page-level width override for the git-history page (gap-git-graph-cross-column-edges-drawn-as-fixed-
+ * stubs-not-anchored AC6/AC7). The shared base sheet caps every `<main>` at 900px (serve-render.ts
+ * `main { max-width: 900px }`); the git graph's SVG is ~1288px wide, so the shared cap clips commit
+ * text (44/500 rows at 1440px) and horizontal-scrolling the graph scrolls the column context away.
+ * This is a PAGE-scoped override — the `#main` id selector (1,0,0) beats the bare `main` type selector
+ * (0,0,1), and the style is emitted ONLY on this page's HTML — so the global 900px is untouched (AC7).
+ * 1400px yields ~1368px content width at a 1440px viewport (≥ the measured SVG); `#git-graph`'s own
+ * `overflow-x:auto` keeps narrower viewports scrollable rather than clipped.
+ */
+export function gitHistoryPageStyle(): string {
+  return html`<style>#main { max-width: 1400px; }</style>`;
 }
 
 /**
@@ -596,9 +695,12 @@ export function renderGitHistoryPage(history: GitHistoryResult, view: GitGraphVi
   const dataScript = graphData ? html`<script type="application/json" id="git-graph-data">${JSON.stringify(graphData).replace(/</g, "\\u003c")}</script>` : "";
   const libScript = layout ? html`<script>${gitGraphLibJs()}</script>` : "";
   const clientScript = layout ? html`<script>${gitGraphClientScript()}</script>` : "";
+  // Scoped --color-lane-N token sheet: the renderer references column colours as tokens, and this
+  // sheet (emitted only when there is a graph) defines them on #git-graph — the hex lives once, here.
+  const laneTokenStyle = layout ? html`<style>${gitGraphLaneTokenCss()}</style>` : "";
 
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — vertical commit timeline (client-rendered, git log --graph aligned)">${modernistStyles()}${pageStyles()}<title>Git history — vertical commit timeline</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — vertical commit timeline (client-rendered, git log --graph aligned)">${modernistStyles()}${pageStyles()}${gitHistoryPageStyle()}${laneTokenStyle}<title>Git history — vertical commit timeline</title></head>
     <body>${renderMobileChrome("git", "git history")}${renderSiteNav("git")}<main id="main">
       <h1>Git History — 提交纵向时间轴</h1>
       ${gitHistoryViewToggle(view)}
