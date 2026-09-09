@@ -1,7 +1,7 @@
 ---
 id: gap-goal-needs-human-blocking
 title: goal AC needs-human 进词表并计入 goalAchievedFromRecords 在域集合（阻塞 GOAL 达成）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
