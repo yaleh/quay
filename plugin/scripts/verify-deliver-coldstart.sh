@@ -128,6 +128,7 @@ SHA256_QUAY=""                              # quay tgz 的内容 sha256（机制
 SHA256_QN=""
 AC5_EVALUATED=0                             # 1 = AC5 判据有输入可判；0 = 缺输入（无法评估 ≠ 通过）
 AC5_OK=0
+AC201_WRITTEN=0                             # 1 = append_ac201_record 写了一条 ac=GOAL-009-AC-201 记录
 
 # ── AC-203（GOAL-009）：driver 在无 plugin/ 的第三方项目里真活 ───────────────────────────
 # 判据读载体（driver_alive / carrier_records），⛔ 不读 start 退出码（今天 start 就 exit 0 而系统是死的）。
@@ -394,6 +395,25 @@ ac5_evaluate() {
   if [ -n "$SHA256_QUAY" ] && [ -n "$SHA256_QN" ]; then sha_ok=1; fi
   if [ "$hex_ok" = 1 ] && [ "$newer_ok" = 1 ] && [ "$sha_ok" = 1 ]; then AC5_OK=1; fi
   # 函数始终返回 0：AC5 的判定结果是【数据】，不是控制流失败（set -e 不得因 AC5 判负中断三步机制）
+  return 0
+}
+
+# ── AC-201 产物可溯源记录（gap-ac201-productization-verification-build-sha-tgz-sha256-record）──
+# 在 --ac89 载体追加一条 ac="GOAL-009-AC-201" 记录，top-level 字段 {ts, ac, build_sha, tgz_sha256}
+# （字段在顶层，非 detail 字符串——AC-201 criterion 只读 top-level build_sha/tgz_sha256）。
+# build_sha=BUILD_SHA（来自 build_from_develop_tip 的 `git rev-parse refs/heads/develop` ⇒ 天然是
+# develop 祖先，满足 criterion 的 merge-base --is-ancestor）、tgz_sha256=SHA256_QUAY。
+# ⛔ 仅当 BUILD_SHA 与 SHA256_QUAY 都非空才 append——缺输入不写、不冒充合格（硬规则 3b）。
+# ⛔ 不引用已归档零调用的 productization-verification-record.ts / -check.ts（AC-201 origin 明令）。
+# 返回 0；AC201_WRITTEN=1 表示写了一条（selfcheck 正/负控制据此判定）。
+append_ac201_record() {
+  AC201_WRITTEN=0
+  [ -n "${AC89:-}" ] || return 0
+  [ -n "${BUILD_SHA:-}" ] && [ -n "${SHA256_QUAY:-}" ] || return 0
+  mkdir -p "$(dirname "$AC89")"
+  printf '{"ts":"%s","ac":"GOAL-009-AC-201","build_sha":"%s","tgz_sha256":"%s"}\n' \
+    "${TS:-}" "$BUILD_SHA" "$SHA256_QUAY" >> "$AC89"
+  AC201_WRITTEN=1
   return 0
 }
 
@@ -982,6 +1002,29 @@ Enter to confirm · Esc to cancel"
   echo "selfcheck: ac5-negative(old-build)   eval=$c4_e ok=$c4_ok (expect 1/0)"
   echo "selfcheck: ac5-not-evaluated(no-sha) eval=$c5_e ok=$c5_ok (expect 0/0)"
 
+  # control 15/16 (AC-201 产物可溯源记录正/负控制, gap-ac201-productization-verification-build-sha-tgz-sha256-record):
+  #   正：注入 40-hex BUILD_SHA + 64-hex SHA256_QUAY ⇒ append_ac201_record 写一条 ac=GOAL-009-AC-201
+  #       且 top-level build_sha/tgz_sha256 非空（字段在顶层，非 detail 字符串）。
+  #   负：BUILD_SHA 空 ⇒ 不写（AC201_WRITTEN=0，缺输入 ≠ 合格，硬规则 3b）。
+  local ac201_file ac201_pos_w ac201_pos_sha ac201_pos_tgz ac201_pos_ac ac201_neg_w ac201_neg_lines
+  ac201_file="$tmp/ac201.jsonl"
+  AC89="$ac201_file"
+  BUILD_SHA="0123456789abcdef0123456789abcdef01234567"
+  SHA256_QUAY="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  append_ac201_record
+  ac201_pos_w="$AC201_WRITTEN"
+  ac201_pos_sha="$(sed -n 's/.*"build_sha":"\([0-9a-f]*\)".*/\1/p' "$ac201_file" 2>/dev/null | head -1)"
+  ac201_pos_tgz="$(sed -n 's/.*"tgz_sha256":"\([0-9a-f]*\)".*/\1/p' "$ac201_file" 2>/dev/null | head -1)"
+  ac201_pos_ac="$(grep -c '"ac":"GOAL-009-AC-201"' "$ac201_file" 2>/dev/null || echo 0)"
+  BUILD_SHA=""; SHA256_QUAY=""
+  append_ac201_record
+  ac201_neg_w="$AC201_WRITTEN"
+  ac201_neg_lines="$(wc -l < "$ac201_file" 2>/dev/null | tr -d ' ')"
+  AC89=""
+  BUILD_SHA=""; SHA256_QUAY=""
+  echo "selfcheck: ac201-record(positive) written=$ac201_pos_w build_sha_len=${#ac201_pos_sha} tgz_sha256_len=${#ac201_pos_tgz} ac_count=$ac201_pos_ac (expect 1/40/64/1)"
+  echo "selfcheck: ac201-record(negative,no-build-sha) written=$ac201_neg_w lines=$ac201_neg_lines (expect 0/1 — 缺输入不写)"
+
   # control 11/12/13 (AC168 marketplace 通道正/负控制 + enabledPlugins 外溢控制，hermetic):
   # 用 fake HOME + fake 已安装包（symlink 真 register-plugin.mjs + 最小 manifests）跑 step1_marketplace，
   # 不碰真实 $HOME/.claude/settings.json、不碰真实 npm install（AC3 --selfcheck 覆盖 marketplace 分支）。
@@ -1131,13 +1174,15 @@ Enter to confirm · Esc to cancel"
      && [ "$m3_ok" = "0" ] && [ "$m3_leak" = "1" ] \
      && [ "$m4_reg" = "0" ] && [ -n "$m4_rc" ] && [ -n "$m4_reason" ] \
      && [ "$ac203_wrote" = "1" ] && [ "$ac203_fields_ok" = "1" ] && [ "$ac203_refused" = "1" ] \
+     && [ "$ac201_pos_w" = "1" ] && [ "${#ac201_pos_sha}" = "40" ] && [ "${#ac201_pos_tgz}" = "64" ] && [ "$ac201_pos_ac" = "1" ] \
+     && [ "$ac201_neg_w" = "0" ] && [ "$ac201_neg_lines" = "1" ] \
      && [ "$g15_rc" = "0" ] && [ "$g15_pos" = "1" ] && [ "$g15_build" = "1" ] \
      && [ "$g16_rc" != "0" ] && [ "$g16_before" = "$g16_after" ] \
      && [ "$ac206_wrote" = "1" ] && [ "$ac206_fields_ok" = "1" ] && [ "$ac206_neg_ok" = "1" ] && [ "$ac206_refused" = "1" ]; then
-    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed)"
+    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed)"
     rc=0
   else
-    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc m4_reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused" >&2
+    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc m4_reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused ac201_pos_w=$ac201_pos_w ac201_sha_len=${#ac201_pos_sha} ac201_tgz_len=${#ac201_pos_tgz} ac201_pos_ac=$ac201_pos_ac ac201_neg_w=$ac201_neg_w ac201_neg_lines=$ac201_neg_lines g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused" >&2
     rc=1
   fi
   rm -rf "$tmp"
@@ -1339,6 +1384,14 @@ printf '{"ts":"%s","ac":"%s","ok":%s,"artifact":"%s","evidence":"%s","detail":"%
   "$TS" "$ac_tag" "$okflag" "$(basename "$QUAY_TGZ")" "$EVIDENCE" "$detail" "$host_json" "$mp_json" \
   "$(bool "$STEP1_OK")" "$(bool "$STEP2_OK")" "$(bool "$step3")" >> "$AC89"
 echo "ac89 record appended → $AC89"
+
+# ── AC-201 产物可溯源记录追加（gap-ac201：top-level {ts,ac,build_sha,tgz_sha256}；缺输入不写）──
+append_ac201_record
+if [ "$AC201_WRITTEN" = "1" ]; then
+  echo "ac201 record appended → $AC89 (build_sha=${BUILD_SHA} tgz_sha256=${SHA256_QUAY})"
+else
+  echo "ac201 record NOT appended (BUILD_SHA or SHA256_QUAY empty — 缺输入不写, 硬规则 3b)"
+fi
 
 if [ "$CHANNEL" != "marketplace" ] && [ "$REQUIRE_LIVE" = 1 ] && [ "$COLDSTART_LIVE" != "yes" ]; then
   echo "verify-deliver-coldstart: FAIL (--require-live but COLDSTART_LIVE=$COLDSTART_LIVE)"
