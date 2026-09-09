@@ -19,7 +19,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { readGitHistory, type GitHistoryCommit, type GitHistoryResult, GIT_HISTORY_LIMIT } from "./observation.ts";
+import { readGitHistory, readGitRemotes, type GitHistoryCommit, type GitHistoryResult, GIT_HISTORY_LIMIT } from "./observation.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2 } from "./serve-render.ts";
 
 // ── Graph-track geometry ────────────────────────────────────────────────────────────────────────────
@@ -36,8 +36,20 @@ export const GIT_GRAPH_TEXT_X = 220;
 export const GIT_GRAPH_LANE_GAP = 16;
 /** Vertical padding above the first row. */
 export const GIT_GRAPH_PAD_Y = 24;
-/** Fixed row height — one commit per band. */
-export const GIT_GRAPH_ROW_H = 24;
+/**
+ * Fixed row height — one commit per band. Bumped 24 → 26 when decorations became chip-sized
+ * (gap-git-graph-decoration-labels-as-colored-chips): a 16px chip + its padding needs more headroom
+ * than the old 11px plain-text baseline did, so adjacent rows' chips never crowd/overlap (AC6).
+ */
+export const GIT_GRAPH_ROW_H = 26;
+/** Decoration-chip geometry (gap-git-graph-decoration-labels-as-colored-chips) — interpolated into the
+ *  client renderer as plain numbers; a chip is a rounded `rect` behind an inline `text`, laid out
+ *  hash → chips → subject across one commit row. */
+export const GIT_GRAPH_CHIP_H = 16;
+export const GIT_GRAPH_CHIP_PAD_X = 5;
+export const GIT_GRAPH_CHIP_RX = 4;
+export const GIT_GRAPH_CHIP_GAP = 5;
+export const GIT_GRAPH_DECOR_FONT_SIZE = 10;
 /**
  * Auto-load fuse (gap-git-graph-no-bounded-scroll-panel): the client scroll-loader auto-loads AT MOST
  * this many rows beyond the initial window (via IntersectionObserver + the self-chain) before degrading
@@ -409,7 +421,12 @@ export function gitGraphClientScript(): string {
   if (!data || !data.rows || !data.rows.length) { return; }
 
   var rowH = ${GIT_GRAPH_ROW_H}, trunkX = ${GIT_GRAPH_TRUNK_X}, laneGap = ${GIT_GRAPH_LANE_GAP}, nodeR = 3.5, mergeR = 5, padY = ${GIT_GRAPH_PAD_Y};
+  var chipH = ${GIT_GRAPH_CHIP_H}, chipPadX = ${GIT_GRAPH_CHIP_PAD_X}, chipRx = ${GIT_GRAPH_CHIP_RX}, chipGap = ${GIT_GRAPH_CHIP_GAP}, decorFontSize = ${GIT_GRAPH_DECOR_FONT_SIZE};
   var lanePalette = ${JSON.stringify(GIT_GRAPH_LANE_PALETTE.map((_, i) => `var(--color-lane-${i})`))};
+  // Remote names from the server payload ("git remote") — the ONLY authority for "is this a
+  // remote-tracking ref". A local branch that merely contains a slash (fix/..., task/...) must NOT be
+  // misread as remote (gap-git-graph-decoration-labels-as-colored-chips).
+  var remotes = (data.remotes && data.remotes.length) ? data.remotes : [];
 
   // Single-source column allocation (gap-git-graph-pagination-appends-page-relative-col-and-torow):
   // assignGitColumns is injected VERBATIM from the server module (assignGitColumns.toString()) so the
@@ -419,6 +436,26 @@ export function gitGraphClientScript(): string {
 
   function y(row) { return padY + row * rowH; }
   function laneColor(col) { return lanePalette[col % lanePalette.length]; }
+
+  // A remote-tracking ref starts with "<remoteName>/" for one of the repo's remotes (the authoritative
+  // list, not a string-shape guess).
+  function isRemoteRef(dec) {
+    for (var i = 0; i < remotes.length; i++) {
+      if (remotes[i] && dec.slice(0, remotes[i].length + 1) === remotes[i] + "/") { return true; }
+    }
+    return false;
+  }
+
+  // Split one %D decoration into the chips to render: "HEAD -> X" becomes ["HEAD", "X"] (HEAD rendered
+  // as its own highlighted chip, X as a normal/ghost chip), anything else (a branch name, "tag: v1.2",
+  // a bare detached "HEAD") is a single chip. Mirrors primaryRefFromDecorations' HEAD split. NOTE the
+  // doubled backslashes: this regex literal lives inside a template literal, so \\s is what survives to
+  // the emitted client JS as \s (a bare \s would be eaten by string-escape processing).
+  function decorationChips(dec) {
+    var m = /^HEAD\\s*->\\s*(.+)$/.exec(dec);
+    if (m) { return ["HEAD", m[1]]; }
+    return [dec];
+  }
 
   // Recompute the layout quantities (col + edges) over the WHOLE merged row array. Each pagination page
   // arrives page-relative (or, after the fix, with no col/toRow at all); the only correct assignment is
@@ -529,7 +566,8 @@ export function gitGraphClientScript(): string {
       });
     });
 
-    // nodes + inline text
+    // nodes + inline text (hash → decoration chips → subject; gap-git-graph-decoration-labels-as-
+    // colored-chips: each %D entry is its own rounded chip, not part of one concatenated string)
     rows.forEach(function (r, i) {
       var cx = trunkX + r.col * laneGap;
       var cy = y(i);
@@ -547,12 +585,53 @@ export function gitGraphClientScript(): string {
       }
       node.append("title").text(r.hash + " · " + r.subject);
 
-      var label = r.hash.slice(0, 7);
-      if (r.decorations && r.decorations.length) { label += " (" + r.decorations.join(", ") + ")"; }
-      label += " " + r.subject;
-      g.append("text").attr("class", "git-svg-ink")
-        .attr("x", textX).attr("y", cy + 4).attr("font-size", 11)
-        .text(label);
+      // The inline label is laid out left→right: hash text, then one chip per decoration entry, then
+      // the subject. Each text width is measured with getBBox().width (the same measure technique the
+      // viewBox re-measure below uses), so chips hug their ref name and the subject starts clear of
+      // the last chip by chipGap.
+      var cursorX = textX;
+      var hashTxt = g.append("text").attr("class", "git-svg-ink")
+        .attr("x", cursorX).attr("y", cy + 4).attr("font-size", 11)
+        .text(r.hash.slice(0, 7));
+      cursorX += hashTxt.node().getBBox().width + chipGap;
+
+      if (r.decorations && r.decorations.length) {
+        r.decorations.forEach(function (dec) {
+          decorationChips(dec).forEach(function (c) {
+            var isHead = c === "HEAD";
+            var ghost = isRemoteRef(c);
+            var cls = "git-svg-decor-chip";
+            if (isHead) { cls += " git-svg-decor-chip--head"; }
+            if (ghost) { cls += " git-svg-decor-chip--ghost"; }
+            var chip = g.append("g").attr("class", cls);
+            // rect FIRST so the text paints on top; its x/width are filled after the text is measured.
+            var bg = chip.append("rect").attr("class", "git-svg-decor-chip-bg")
+              .attr("y", cy - chipH / 2).attr("height", chipH).attr("rx", chipRx)
+              .style("fill", laneColor(r.col));
+            if (isHead) {
+              // HEAD highlight = a light keyline around the solid lane-colour chip (token-derived, so
+              // AC102②'s "no hardcoded hex in the renderer" holds — --color-bg is the light canvas token).
+              bg.style("stroke", "var(--color-bg)").style("stroke-width", 1.5);
+            } else if (ghost) {
+              // ghost = outline + translucent fill (the ref name reads on the light canvas); the fill
+              // token is STILL the row's lane colour so AC3's "every chip bg = laneColor" holds.
+              bg.style("fill-opacity", 0.22).style("stroke", laneColor(r.col)).style("stroke-width", 1);
+            }
+            var txt = chip.append("text").attr("class", "git-svg-decor-chip-text")
+              .attr("font-size", decorFontSize).text(c)
+              .style("fill", ghost ? laneColor(r.col) : "var(--color-bg)");
+            var tw = txt.node().getBBox().width;
+            var w = tw + chipPadX * 2;
+            bg.attr("x", cursorX).attr("width", w);
+            txt.attr("x", cursorX + chipPadX).attr("y", cy + 4);
+            cursorX += w + chipGap;
+          });
+        });
+      }
+
+      g.append("text").attr("class", "git-svg-ink git-svg-subject")
+        .attr("x", cursorX).attr("y", cy + 4).attr("font-size", 11)
+        .text(r.subject);
     });
 
     // re-measure the real text and widen the viewBox to its true right edge (no clipped subject)
@@ -762,8 +841,11 @@ function renderTaskGroupsHtml(history: GitHistoryResult): string {
  * `view` selects the grouping: `"git"` (default — the git DAG topology) or `"task"` (gap-git-graph-
  * task-view-aggregate-commits-by-task-id). The default is byte-identical to `?view=git` (AC5).
  * Exported so the ACs can test the rendered HTML directly on a pure GitHistoryResult.
+ * `remotes` (the workspace's `git remote` names) ride along in the embedded `#git-graph-data` payload so
+ * the client can tell a remote-tracking ref from a slash-containing LOCAL branch (gap-git-graph-
+ * decoration-labels-as-colored-chips AC1); defaults to [] for pure-history callers.
  */
-export function renderGitHistoryPage(history: GitHistoryResult, view: GitGraphView = "git"): string {
+export function renderGitHistoryPage(history: GitHistoryResult, view: GitGraphView = "git", remotes: string[] = []): string {
   if (view === "task") {
     const statusNote = history.status === "error"
       ? html`<p class="meta"><strong>读失败</strong> — ${escapeHtml(history.reason || "")}</p>`
@@ -808,7 +890,7 @@ export function renderGitHistoryPage(history: GitHistoryResult, view: GitGraphVi
     : "";
   // The data JSON is embedded with `<` escaped to \u003c so a commit subject can never break out of
   // the <script> element. d3 + the client renderer are emitted only when there is a graph to draw.
-  const graphData = layout ? { ...layout } : null;
+  const graphData = layout ? { ...layout, remotes } : null;
   const dataScript = graphData ? html`<script type="application/json" id="git-graph-data">${JSON.stringify(graphData).replace(/</g, "\\u003c")}</script>` : "";
   const libScript = layout ? html`<script>${gitGraphLibJs()}</script>` : "";
   const clientScript = layout ? html`<script>${gitGraphClientScript()}</script>` : "";
@@ -842,8 +924,9 @@ export async function handleGitHistory(
   } catch (err) {
     history = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, commits: [], head: null, heads: {}, mainlineHead: null };
   }
+  const remotes = readGitRemotes(cfg.workspaceRoot);
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderGitHistoryPage(history, gitHistoryViewOf(url)));
+  res.end(renderGitHistoryPage(history, gitHistoryViewOf(url), remotes));
 }
 
 function writeJson(res: ServerResponse, status: number, obj: unknown): void {
