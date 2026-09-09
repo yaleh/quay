@@ -131,7 +131,10 @@ test("AC3: the rendered label set equals the %D-nonempty commit set; develop app
   const layout = layoutGitGraph(history);
   const myDecorated = new Set(layout.rows.filter((r) => r.decorations.length > 0).map((r) => r.hash));
 
-  const decOut = execFileSync("git", ["-C", REPO_ROOT, "log", "--all", "-n", String(LIMIT), "--pretty=format:%H%x01%D"], {
+  // --topo-order matches readGitHistory's own query (`--all --topo-order -n`); the default date-order
+  // window can select a DIFFERENT 500-commit set when an out-of-order merge tip sits near the boundary,
+  // so the two must be aligned or the label-set comparison compares two different windows.
+  const decOut = execFileSync("git", ["-C", REPO_ROOT, "log", "--all", "--topo-order", "-n", String(LIMIT), "--pretty=format:%H%x01%D"], {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });
