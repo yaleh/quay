@@ -504,16 +504,26 @@ export async function handleTaskList(
 /** Render one attempt's mechanical-fan-in cell (gap-mech-fan-in-log-webui-visible-clickable B2):
  *  landed/red + first failing step + lock hold + suite outcome + landed sha, plus a view/download
  *  link when the record carries a fanInLog file name. A null record renders an honest "—" (never a
- *  fabricated "landed"). */
-export function renderFanInCell(taskId: string, r: WorkerOutcomeRecord): string {
+ *  fabricated "landed").
+ *
+ *  gap-dashboard-fanin-card-hide-reason: `mfi.reason` is unbounded free text (measured up to 1084
+ *  chars) — right on /task/<id>'s Runs table (one cell per attempt), but it balloons the dashboard's
+ *  five-row FAN-IN overview card. The `showReason` option (default true → /task/<id> unchanged) lets
+ *  the dashboard skip that one span entirely, rather than truncate. */
+export function renderFanInCell(
+  taskId: string,
+  r: WorkerOutcomeRecord,
+  opts: { showReason?: boolean } = {},
+): string {
   const mfi = r.mechanical_fan_in;
   if (mfi == null) return "—";
+  const showReason = opts.showReason ?? true;
   const parts: string[] = [];
   if (mfi.outcome === "landed") parts.push(html`<strong>landed</strong>`);
   else if (mfi.outcome === "red") parts.push(html`<strong>red</strong>`);
   else parts.push(escapeHtml(mfi.outcome ?? "?"));
   if (mfi.outcome === "red" && mfi.step) parts.push(`step ${escapeHtml(mfi.step)}`);
-  if (mfi.reason != null) parts.push(html`<span style="font-size:0.75rem;color:var(--color-neutral-700)">${escapeHtml(mfi.reason)}</span>`);
+  if (showReason && mfi.reason != null) parts.push(html`<span style="font-size:0.75rem;color:var(--color-neutral-700)">${escapeHtml(mfi.reason)}</span>`);
   if (mfi.lockHoldSecs != null) parts.push(`lock ${mfi.lockHoldSecs}s`);
   if (mfi.suiteOutcome != null) parts.push(`suite ${escapeHtml(mfi.suiteOutcome)}`);
   if (mfi.landedSha != null) parts.push(`sha <code>${escapeHtml(mfi.landedSha.slice(0, 7))}</code>`);
