@@ -311,13 +311,14 @@ test("① REAL test delta — plugin/test/*.test.mjs must classify as code (test
   assert.match(codeDelta, /plugin\/test\//);
 });
 
-test("① REAL doc delta — tasks/ + docs/ + adr/ + .quay/ only must classify as doc (skip full suite)", async (t) => {
+test("① REAL doc delta — tasks/ + goals/ + docs/ + adr/ + .quay/ only must classify as doc (skip full suite)", async (t) => {
   // 判据2 ① 镜像: a pure-doc delta classified as code would WASTE a full-suite run (该跳却重跑).
   // NOTE: orchestration/*-tick-core.md is deliberately NOT here — it is read by tick-core-static-check
   // / rhythm-consumer (`@static-object orchestration/*-tick-core.md`), so it classifies as CODE
   // (gap-fan-in-delta-scope-doc-only-skip AC2 取假二).
   const files = {
     "tasks/gap-fan-in-execute-three-unverified-paths.md": "status: ready\n",
+    "goals/AC-999-fake.md": "status: ready\n",
     "docs/proposals/exp5-crystallization-strategy.md": "x\n",
     "docs/references/git.md": "y\n",
     "adr/ADR-010-scheduled-milestone-e2e-incl-browser-tests.md": "y\n",
@@ -327,6 +328,15 @@ test("① REAL doc delta — tasks/ + docs/ + adr/ + .quay/ only must classify a
   };
   const codeDelta = await classifyRealDelta(files);
   assert.equal(codeDelta, "", `pure-doc delta must produce empty code_delta, got: ${JSON.stringify(codeDelta)}`);
+});
+
+test("① REAL doc delta negative — packages/quay/src/goal-store.ts must classify as code (goals/ is a prefix, not substring goal)", async (t) => {
+  // gap-doc-surfaces-missing-goals-prefix AC4: a real code file whose path CONTAINS "goal" but is NOT
+  // under the goals/ directory must stay CODE. The DOC_SURFACES entry is the prefix "goals/", not a
+  // substring match on "goal" — an over-broad fix (substring) would misclassify this as doc and skip.
+  const codeDelta = await classifyRealDelta({ "packages/quay/src/goal-store.ts": "export const x = 1\n" });
+  assert.notEqual(codeDelta, "", `packages/quay/src/goal-store.ts must classify as code (not goals/ prefix), got empty`);
+  assert.match(codeDelta, /packages\/quay\/src\/goal-store\.ts/);
 });
 
 test("① REAL decision — code delta ⇒ rerun decision, doc delta ⇒ skip decision (AC75 semantics)", async (t) => {
