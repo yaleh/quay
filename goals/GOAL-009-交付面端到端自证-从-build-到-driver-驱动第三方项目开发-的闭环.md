@@ -1,7 +1,7 @@
 ---
 id: GOAL-009
 title: 交付面端到端自证 —— 从 build 到「driver 驱动第三方项目开发」的闭环
-status: achieved
+status: active
 kind: goal
 origin: 人 2026-09-09 四条裁定：① 点火依靠会话投递，后续驱动依靠
   *-drivers，但仍应可间断使用会话（和会话投递）进行调节（典型地是问题分析与创建 goal/task），就像本项目当前的状态；② 退役
@@ -10,12 +10,18 @@ origin: 人 2026-09-09 四条裁定：① 点火依靠会话投递，后续驱�
   会话，SPEC-tmux-retirement-2026-09-03「quay 不管会话生命周期」的产品判断原样保留（本 GOAL 含一条退役、零 SPEC
   反转）；④ goals/ 目录应当和 tasks/ 目录一起由 quay-init 创建。实测来源：2026-09-08/09 在
   B(orangevps)/C(ad-arm1) 与第三方项目 meta-cc 克隆上的跨主机跨项目验证。
+activatedAt: 2026-09-09T11:49:40.080Z
 statusLog:
   - at: 2026-09-09T09:03:58.541Z
     from: active
     to: achieved
     actor: goal-driver
     reason: "I2: all ACs achieved"
+  - at: 2026-09-09T11:49:40.081Z
+    from: achieved
+    to: active
+    actor: goal-cli
+    reason: ""
 ---
 ## 背景
 
