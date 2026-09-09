@@ -27,7 +27,10 @@ import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMob
 
 /** x of column 0 — the left anchor of the graph track. */
 export const GIT_GRAPH_TRUNK_X = 40;
-/** x where ALL commit text starts — one fixed column to the right of the track. */
+/** Legacy seed for the commit-text x (the pre-pagination fixed column). The client now recomputes
+ *  textX dynamically from the rightmost column so the text always sits PAST the track
+ *  (gap-git-graph-pagination-appends-page-relative-col-and-torow); kept for the geometry doc + any
+ *  caller that still reads the seed. */
 export const GIT_GRAPH_TEXT_X = 220;
 /** Horizontal spacing between adjacent columns within the track. */
 export const GIT_GRAPH_LANE_GAP = 16;
