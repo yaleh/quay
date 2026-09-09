@@ -2,7 +2,7 @@
 id: gap-dashboard-driver-status-card
 title: Dashboard Driver 卡只读 promotion/worker 两个字面量 kind，遗漏 quality/meta/goal
   三个真实在跑的 driver（应遍历 DriverKind 而非硬编码）
-status: done
+status: ready
 labels:
   - gap
   - webui
@@ -12,6 +12,8 @@ children: []
 extra:
   schema: execution
 ---
+> **RETREATED / 搁置（人用 ps 直接核验：实际存活 5 个 driver kind（promotion/worker/quality/meta/goal），本任务落地实现硬编码字面量联合 promotion|worker，遗漏 quality/meta/goal 三个；任务体已补追加发现 + AC6/AC7，退回 ready 重新推进为遍历 DriverKind 的通用实现）**
+
 **type:** execution
 
 ## Proposal
@@ -88,18 +90,18 @@ outer     : 无 pid 文件、driver status 恒 0（已退役，非本任务范�
 
 ## Acceptance Criteria
 
-- [x] AC1（真实读数）：给定当前 workspace 真实的 `.quay/promotion-*.pid` / `.quay/worker-*.pid` 与
+- [ ] AC1（真实读数）：给定当前 workspace 真实的 `.quay/promotion-*.pid` / `.quay/worker-*.pid` 与
       对应 carrier jsonl，新读取函数返回的 `supervisorAlive`/`driverAlive`/`lastTs` 与
       `node packages/quay/bin/quay.js driver status --kind promotion --json` /
       `--kind worker --json` 的输出逐字段一致（同一时刻对照，不是分别读两次不同时刻的状态）。
-- [x] AC2（卡片渲染）：给定两个 kind 均 `running:true` 的 fixture，`renderMgrCard`（或其新签名）输出
+- [ ] AC2（卡片渲染）：给定两个 kind 均 `running:true` 的 fixture，`renderMgrCard`（或其新签名）输出
       同时包含 `promotion` 与 `worker` 两个 kind 各自的 alive 状态文案；给定 `running:false`
       （pid 文件缺失）的 fixture，输出「未运行」而非 `undefined`/`NaN`/空字符串。
-- [x] AC3（退役读数不再出现在卡片）：`grep -n "loopDriver\|liveness" packages/quay/src/serve-dashboard.ts`
+- [ ] AC3（退役读数不再出现在卡片）：`grep -n "loopDriver\|liveness" packages/quay/src/serve-dashboard.ts`
       在 `renderMgrCard` 函数体内命中数为 0（旧字段名不再被这个函数引用）。
-- [x] AC4（零新增子进程开销）：`grep -n "execFileSync\|spawnSync\|execSync" packages/quay/src/observation.ts`
+- [ ] AC4（零新增子进程开销）：`grep -n "execFileSync\|spawnSync\|execSync" packages/quay/src/observation.ts`
       新增读取函数所在代码块内命中数为 0（in-process 调用 `driver-runtime.ts` 导出函数，不 shell 出）。
-- [x] AC5（真实回归）：新增/复用的单测覆盖 AC1/AC2/AC3 的固定断言，
+- [ ] AC5（真实回归）：新增/复用的单测覆盖 AC1/AC2/AC3 的固定断言，
       `node --experimental-strip-types --test packages/quay/test/gap-dashboard-driver-status-card.test.mjs`
       exit 0；并用 MCP 浏览器截图核验一次：生产页面「Driver」卡显示的 pid/alive/last_record 与
       当时 `quay driver status` 的现场输出一致。
