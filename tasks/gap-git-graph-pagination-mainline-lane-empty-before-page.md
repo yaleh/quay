@@ -2,7 +2,7 @@
 id: gap-git-graph-pagination-mainline-lane-empty-before-page
 title: git-history 分页页 mainline 泳道恒空：layoutGitGraph 脊柱从 tip 起走而 before 页不含
   tip，滚动加载第一页即停
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -29,9 +29,9 @@ extra: {}
 
 ## AC
 
-- [ ] AC1 分页页非空：`before=<首屏最老 t>` 直调 `readGitHistory` + `layoutGitGraph`，断言 `branches[0].commits.length > 0`（当前 = 0）。
-- [ ] AC2 连续三页单调增长：连调三页（cursor 逐页回退），合并 mainline 泳道后提交数单调增长且第三页非空。
-- [ ] AC3 侧枝不丢：`live`/`reconstructed` 泳道总数在分页前后不减少（`--first-parent` 主链分离不破坏侧枝）。
+- [x] AC1 分页页非空：`before=<首屏最老 t>` 直调 `readGitHistory` + `layoutGitGraph`，断言 `branches[0].commits.length > 0`（当前 = 0）。
+- [x] AC2 连续三页单调增长：连调三页（cursor 逐页回退），合并 mainline 泳道后提交数单调增长且第三页非空。
+- [x] AC3 侧枝不丢：`live`/`reconstructed` 泳道总数在分页前后不减少（`--first-parent` 主链分离不破坏侧枝）。
 
 ## DoD
 
@@ -41,5 +41,6 @@ extra: {}
 
 - packages/quay/src/observation.ts（readGitHistory 主链 batch --first-parent + 侧枝分离）
 - packages/quay/src/serve-git.ts（layoutGitGraph 脊柱根分页回退）
+- packages/quay/src/serve-dashboard.ts（GitHistoryResult 加 mainlineHead 字段，fallback 对象补字段）
 - packages/quay/test/gap-git-graph-pagination-mainline-lane-empty-before-page.test.mjs（本任务回归测试）
 - tasks/gap-git-graph-pagination-mainline-lane-empty-before-page.md

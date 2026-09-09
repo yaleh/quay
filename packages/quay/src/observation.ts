@@ -2373,6 +2373,13 @@ export interface GitHistoryResult {
   head: string | null;
   /** Active branch name → tip commit hash (the branch topology, not the `--source` attribution). */
   heads: Record<string, string>;
+  /** The newest MAINLINE (first-parent) commit in THIS batch — the spine root `layoutGitGraph`
+   *  should walk from. On the first page (`before === null`) this equals `heads[develop]`; on a
+   *  pagination page (`before` set) the real tip is strictly newer than the cursor and therefore
+   *  NOT in `commits`, so this is the newest spine commit the `--first-parent` batch actually
+   *  fetched (gap-git-graph-pagination-mainline-lane-empty-before-page). null when no mainline
+   *  batch was fetched. */
+  mainlineHead: string | null;
 }
 
 /**
@@ -2470,6 +2477,7 @@ function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, befor
         commits: [],
         head: null,
         heads: {},
+        mainlineHead: null,
       };
     }
 
@@ -2500,20 +2508,48 @@ function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, befor
       }
     };
 
-    // Mainline batch: the newest `limit` mainline commits, or (when `before` is set) the `limit`
-    // commits strictly older than the pagination cursor. `--before` is commit-time STRICTLY-older,
-    // so `before=<oldest timestamp in the current window>` never re-returns that same boundary commit.
+    // Mainline batch: the newest `limit` MAINLINE (first-parent) commits, or (when `before` is set)
+    // the `limit` commits strictly older than the pagination cursor. `--before` is commit-time
+    // STRICTLY-older, so `before=<oldest timestamp in the current window>` never re-returns that same
+    // boundary commit. `--first-parent` walks ONLY the mainline spine (the `*` column), so the spine
+    // root on a pagination page is the batch's newest commit (not the absent tip) and the merged
+    // second-parent (lateral) commits are re-fetched separately below (gap-git-graph-pagination-
+    // mainline-lane-empty-before-page).
     let windowFloorSec: number | null = null; // the page's time floor = oldest mainline commit time
+    let mainlineHead: string | null = null; // newest mainline commit actually fetched (spine root)
     if (mainlineRefs.length > 0 && primary !== null) {
-      const args = ["-C", root, "log", ...mainlineRefs, "--date=unix", `-n ${limit}`];
+      const args = ["-C", root, "log", ...mainlineRefs, "--first-parent", "--date=unix", `-n ${limit}`];
       if (before !== null && Number.isFinite(before)) args.push(`--before=${before}`);
       args.push("--pretty=format:%H%x1f%ct%x1f%P%x1f%s");
       const out = execFileSync("git", args, { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] });
       for (const line of out.split(/\r?\n/)) {
         if (!line) continue;
-        const t = Number(line.split("\x1f")[1]);
-        if (Number.isFinite(t)) windowFloorSec = windowFloorSec === null ? t : Math.min(windowFloorSec, t);
+        const [hash, tRaw] = line.split("\x1f");
+        const t = Number(tRaw);
+        if (Number.isFinite(t)) {
+          windowFloorSec = windowFloorSec === null ? t : Math.min(windowFloorSec, t);
+          if (mainlineHead === null) mainlineHead = hash; // first line = newest spine commit in window
+        }
       }
+      pushCommits(out, primary);
+    }
+
+    // Merged second-parent (lateral) lanes: `--first-parent` mainline walks ONLY the spine, so every
+    // commit reachable from develop via a second-parent edge (a merged task branch, and — for the
+    // `Merge branch 'develop' into task/X` dev-merge shape — the old develop line) is no longer in
+    // `commits`. Re-fetch them with the PRE-FIX mainline batch — a plain `git log <mainlineRefs>
+    // -n <limit>` (count-capped, no `--first-parent`, no `--since`) — which traverses EVERY edge, so
+    // nested second parents (branch-of-a-branch) and a recently-merged-but-old commit are all
+    // included exactly as before; `pushCommits` de-duplicates the spine commits already added by the
+    // `--first-parent` batch, leaving the lateral commits in the page's `limit`-commit window. Their
+    // `ref` stays the mainline (develop-reachable — already merged), matching the pre-fix attribution
+    // (gap-git-graph-pagination-mainline-lane-empty-before-page AC3: side lanes never lost; the
+    // count-capped window, not a time floor, is what keeps a stale merged commit visible).
+    if (mainlineRefs.length > 0 && primary !== null) {
+      const args = ["-C", root, "log", ...mainlineRefs, "--date=unix", `-n ${limit}`];
+      if (before !== null && Number.isFinite(before)) args.push(`--before=${before}`);
+      args.push("--pretty=format:%H%x1f%ct%x1f%P%x1f%s");
+      const out = execFileSync("git", args, { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] });
       pushCommits(out, primary);
     }
 
@@ -2537,7 +2573,7 @@ function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, befor
     }
 
     if (commits.length === 0) {
-      return { status: "empty", reason: "git 仓库无提交记录", commits: [], head: null, heads: {} };
+      return { status: "empty", reason: "git 仓库无提交记录", commits: [], head: null, heads: {}, mainlineHead: null };
     }
     let head: string | null = null;
     try {
@@ -2548,11 +2584,11 @@ function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, befor
     } catch {
       head = null; // unborn HEAD / detached — the renderer falls back to the newest commit as trunk root.
     }
-    return { status: "ok", reason: null, commits, head, heads };
+    return { status: "ok", reason: null, commits, head, heads, mainlineHead };
   } catch (err) {
     const stderr = String((err as { stderr?: Buffer | string }).stderr ?? "");
     if (stderr.includes("not a git repository")) {
-      return { status: "empty", reason: "工作区不是 git 仓库（无提交记录）", commits: [], head: null, heads: {} };
+      return { status: "empty", reason: "工作区不是 git 仓库（无提交记录）", commits: [], head: null, heads: {}, mainlineHead: null };
     }
     return {
       status: "error",
@@ -2560,6 +2596,7 @@ function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, befor
       commits: [],
       head: null,
       heads: {},
+      mainlineHead: null,
     };
   }
 }
