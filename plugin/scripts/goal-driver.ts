@@ -237,7 +237,7 @@ export async function checkStaleness(
 export async function checkAchievedFailing(
   scriptRoot: string,
   dataRoot: string,
-): Promise<{ achievedButFailing: string[]; evaluated: boolean; scopeSize: number } | null> {
+): Promise<{ achievedButFailing: string[]; evaluated: boolean; scopeSize: number; inScope: string[] } | null> {
   const r = await runAsync(goalStoreArgv(scriptRoot, ["check", "--achieved-failing"], dataRoot), { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
   if (r.error) return null;
   try {
@@ -247,6 +247,7 @@ export async function checkAchievedFailing(
       achievedButFailing: arr(j.achievedButFailing),
       evaluated: j.evaluated === true,
       scopeSize: typeof j.scopeSize === "number" ? j.scopeSize : -1,
+      inScope: arr(j.inScope),
     };
   } catch {
     return null;
@@ -704,9 +705,10 @@ export interface GoalRoundReadings {
    *  evaluated:false、scopeSize:0——空作用域与「查过且全过」按字段区分（⛔ 同形，硬规则 3b）。 */
   staleness: { fresh: string[]; stale: string[]; notEvaluated: string[]; divergent: string[]; scopeSize: number; evaluated: boolean } | null;
   /** I5 achieved-but-failing；null = check --achieved-failing 读不到（⛔ 与「零」不同形，硬规则 3b）。
-   *  scopeSize = 枚举出的作用域规模（active goal 下 achieved AC 且 criterion 非空）；evaluated =
+   *  scopeSize = 枚举出的作用域规模（active goal 下 achieved AC 或 long-term achieved AC，criterion 非空）；
+   *  inScope = 该作用域 AC id 枚举（AC-216：含其 GOAL 已 achieved 的 long-term AC）。evaluated =
    *  scopeSize > 0。空作用域与「查过且全过」按字段区分（⛔ 同形，硬规则 3b）。 */
-  achievedFailing: { achievedButFailing: string[]; evaluated: boolean; scopeSize: number } | null;
+  achievedFailing: { achievedButFailing: string[]; evaluated: boolean; scopeSize: number; inScope: string[] } | null;
   /** ⑤ 缺口读数（G7 + G9 stalled）：每条 active AC 的四态；taskFacts==null ⇒ 逐条 not-evaluated。 */
   gaps: Array<GoalGap>;
   /** ⑥ G9 语义环：本轮实际 spawn 的 gap-filing agent 数（过 halt/资源门/上限后；0 = 未 spawn）。 */

@@ -4,6 +4,7 @@ title: 「task 层判据是一次性的、需长期维持的保证必须上移 g
 status: achieved
 kind: criterion
 goal: GOAL-007
+long-term: true
 criterion: |
   f=orchestration/SPEC-goal-mechanism-2026-09-06.md
   sec=$(awk '/^##.*task 层判据/{g=1;next} g&&/^##/{exit} g' "$f")
