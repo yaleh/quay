@@ -35,7 +35,7 @@ AC-204（GOAL-009）判据 exit 1：`goals/AC-204-*.md` criterion 读 `plugin/sc
 - [x] AC4 接线：`verify-deliver-coldstart.sh` step ② 后枚举 `$ROOT` 落地路径算 `forbidden_count`，读 `$ROOT/.claude/settings.json` 判 `enable_declared`；两者皆可读才 append，缺任一生效读数不写（硬规则 3b，缺值≠合格）。
 - [x] AC5 载体落账：`--ac89` 追加面 append `ac="GOAL-009-AC-204"` 记录，`{ts, ac, host, project_root, forbidden_count, enable_declared}` 五字段逐字满足 criterion 过滤（`forbidden_count=0 ∧ enable_declared=true`）。
 - [x] AC6 负控制（判据能取假）：写一条 `ac="GOAL-009-AC-204"` 但 `forbidden_count=1`（或 `enable_declared=false`）的记录 ⇒ criterion 仍 exit 1；验证后移除该记录、不污染生产载体。
-- [ ] AC7 生产复跑：AC-204 criterion 干跑从 exit 1 → exit 0（贴干跑输出，host 为 B/C 之一、project_root 为第三方项目、forbidden_count=0 ∧ enable_declared=true）（待外部）。
+- [ ] AC7 生产复跑：AC-204 criterion 干跑从 exit 1 → exit 0（贴干跑输出，host 为 B/C 之一、project_root 为第三方项目、forbidden_count=0 ∧ enable_declared=true）（待外部）
 
 ## Definition of Done
 
