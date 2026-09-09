@@ -30,11 +30,11 @@ serve-task.ts）渲染的 `sha 36384f5`、`lock 332s` 等同类型内容（git h
    `font-family:ui-monospace,monospace`（或改用的等价 class 名）包裹 sha/lock 的文本节点。
 
 ## Acceptance Criteria
-- [ ] fan-in 卡渲染的 `sha <hash>` 与 `lock <Ns>` 文本节点带有
+- [x] fan-in 卡渲染的 `sha <hash>` 与 `lock <Ns>` 文本节点带有
       `font-family:ui-monospace,monospace`（或等价 class），单测对含这两个字段的样本记录断言存在。
-- [ ] 改动不影响 fan-in 卡其余字段（task id 链接、`view`/`download`、时间戳）的既有渲染，既有
+- [x] 改动不影响 fan-in 卡其余字段（task id 链接、`view`/`download`、时间戳）的既有渲染，既有
       `gap-dashboard-fanin-panel-and-timeline-bars.test.mjs` 等测试无回归红。
-- [ ] 新增测试文件通过 `scripts/test.sh`（含 --for-task scoped 静态检查）。
+- [x] 新增测试文件通过 `scripts/test.sh`（含 --for-task scoped 静态检查）。
 
 ## Definition of Done
 - [ ] 代码改动落在 `packages/quay/src/serve-task.ts`（`renderFanInCell`）和/或

@@ -730,7 +730,8 @@ export interface GoalRoundReadings {
   goalCount: number;
   criterionCount: number;
   criteria: Array<{ id: string; goal: string; status: string; verdict: "pass" | "fail" | "not-evaluated"; reason: string }>;
-  /** 本轮 driver 做的全部状态翻写：I2 达成翻转（to=achieved）。⛔ 分诊不翻状态（AC-219）。 */
+  /** 本轮 driver 做的全部状态翻写：I2 达成翻转（to=achieved）+ ⑧ 分诊 activate 执行（to=active）。
+   *  ⛔ 分诊不翻其余三态（re-anchor / needs-human / hold 只落痕，AC-219）。 */
   flips: Array<{ id: string; to: string; ok: boolean; reason: string }>;
   /** I3 三桶 + I4 分歧；null = check --staleness 读不到（⛔ 与「零 stale」不同形，硬规则 3b）。
    *  scopeSize = 枚举出的 active goal 数（作用域规模）；evaluated = scopeSize > 0。0 active goal ⇒
@@ -858,8 +859,9 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   const gaps = computeGoalGaps(records, taskFacts, judgment);
 
   // ⑦ draft AC 分诊（GOAL-010 范围② / AC-210）：对 active GOAL 名下每条 draft AC 出四态判决并逐条
-  // 落痕（⛔ 只记录，不 flip——draft→active 归人/manager 裁定 3；放弃 retired 归人，且分诊不再判
-  // retire，AC-219）。taskFacts 已在 ⑤读出，直接传入（⛔ 不再读一次）。goal posture 由 goal 记录
+  // 落痕。分诊循环只【产出判决】，⛔ 不 flip 任何 AC status——判决的消费在 ⑧（仅 activate 一态被
+  // 执行；re-anchor / needs-human / hold 仍只落痕不 flip；放弃 retired 归人，且分诊不再判 retire，
+  // AC-219）。taskFacts 已在 ⑤读出，直接传入（⛔ 不再读一次）。goal posture 由 goal 记录
   // 读出后传入（AC-215：`measure-only` 名下 draft AC 不得判 activate——判决函数已按 posture 入参预留
   // seam）。对象集 = 轮开始时 active 的 GOAL 名下的 draft AC。
   const triage: TriageEntry[] = [];
@@ -870,6 +872,17 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
       if (!isAc(r) || r.status !== "draft" || String(r.goal ?? "") !== gid) continue;
       triage.push(triageDraftAc(r, posture, taskFacts));
     }
+  }
+
+  // ⑧ 执行 activate 判决（GOAL-010 退出条件① / AC-223）：分诊只做了「产出判决」那一半，消费
+  // 从未接线——此处补上消费。⛔ 只消费 `activate` 一态：对每条 decision==="activate" 的 triage
+  // 条目调 writeGoalStatus 把 draft AC 机械翻 active。激活走 goal-store write，会被 P6
+  // not-evaluated 前置闸与 cap 闸挡住（AC-223 origin 风险 C 的守护，driver 无需复制该判断）。
+  // ⛔ 不写 retired（裁定 1，AC-211 单测守着）；re-anchor / needs-human / hold 仍不 flip。
+  for (const t of triage) {
+    if (t.decision !== "activate") continue;
+    const w = await writeGoalStatus(scriptRoot, t.ac, "active", dataRoot, { actor: "goal-driver", reason: "triage: activate" });
+    flips.push({ id: t.ac, to: "active", ok: w.ok, reason: w.reason });
   }
 
   // ⑥ G9 缺口语义环：缺口（state==="gap"）非空 ⇒ 过 halt + 资源门 + 每轮上限，spawn 短命 agent 经 ABI
