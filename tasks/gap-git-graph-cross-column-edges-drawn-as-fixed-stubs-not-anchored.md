@@ -4,7 +4,7 @@ title: git-history 的跨列斜线全是悬空残桩：serve-git.ts:378 终点�
   的固定短桩而非目标父提交所在行的 y ⇒ 178 条线里只有 11 条（恰好=11 条垂直列线）两端锚定、167
   条跨列边全断，侧枝来龙去脉无法追踪；且列对拍测试 7/7 全绿却漏验了边的绘制。并修 main{max-width:900px} 导致的 44/500
   行文本截断
-status: todo
+status: ready
 labels:
   - gap
   - webui
