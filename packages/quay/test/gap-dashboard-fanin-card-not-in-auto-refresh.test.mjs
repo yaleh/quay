@@ -30,6 +30,7 @@ import {
   buildCardsPayload,
   checkCardRegistrationCompleteness,
 } from "../src/serve-dashboard.ts";
+import { renderFanInCell } from "../src/serve-task.ts";
 import { startServer } from "../src/serve.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
@@ -224,6 +225,44 @@ test("AC5 (window consistency): page fanin timeline segments == cards faninCard 
   assert.equal(mismatches.length, 0,
     `AC5: ${mismatches.length}/${n} segment(s) differ (page=${pageSegs.length}, cards=${cardsSegs.length}); first 3: ` +
     JSON.stringify(mismatches.slice(0, 3)));
+});
+
+// gap-dashboard-fanin-card-hide-reason — the dashboard FAN-IN card must NOT render the unbounded
+// mfi.reason free text (measured up to 1084 chars), while /task/<id>'s Runs cell keeps the full text.
+// The option `showReason` defaults to true (the /task/<id> call site is untouched); the dashboard
+// passes false. This test pins the divergence in ONE test (AC3) and that every other field survives
+// (AC4), so removing reason never silently breaks the remaining field-join order.
+test("hide reason: dashboard card drops long mfi.reason, /task/<id> cell keeps it", () => {
+  const longReason = "R".repeat(600) + " UNIQUE-LONG-REASON-MARKER-42";
+  assert.ok(longReason.length > 500, "fixture reason exceeds 500 chars");
+  const nowSec = FIXED_NOW_MS / 1000;
+  const rec = {
+    ts: null,
+    task: "task-long-reason",
+    mechanical_fan_in: {
+      ...mfi(nowSec - 500, nowSec - 230, "red"),
+      step: "ff",
+      reason: longReason,
+      suiteOutcome: "suite-red",
+      landedSha: "abcdef1234567",
+      fanInLog: "fan-in-123.log",
+    },
+  };
+
+  const cell = renderFanInCell("task-long-reason", rec);
+  const dash = renderFanInCardFromRecords([rec], { hours: 3, nowMs: FIXED_NOW_MS });
+
+  // AC3: the two paths diverge on reason, asserted side by side in ONE test.
+  assert.ok(cell.includes(longReason), "/task/<id> renderFanInCell STILL renders the reason (default showReason)");
+  assert.ok(!dash.includes(longReason), "dashboard renderFanInCardFromRecords does NOT render the reason");
+
+  // AC4: every OTHER field survives the dashboard-path reason removal (join order intact).
+  assert.ok(dash.includes("step ff"), "dashboard still renders step");
+  assert.ok(dash.includes("lock 270s"), "dashboard still renders lock hold");
+  assert.ok(dash.includes("suite suite-red"), "dashboard still renders suite outcome");
+  assert.ok(dash.includes("sha <code>abcdef1</code>"), "dashboard still renders landed sha");
+  assert.ok(dash.includes(">view</a>"), "dashboard still renders the view link");
+  assert.ok(dash.includes(">download</a>"), "dashboard still renders the download link");
 });
 
 // ── Integration plumbing (shared with the sibling dashboard tests) ───────────────────────────────
