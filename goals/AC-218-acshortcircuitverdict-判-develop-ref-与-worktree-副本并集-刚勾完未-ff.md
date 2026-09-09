@@ -1,7 +1,7 @@
 ---
 id: AC-218
 title: acShortCircuitVerdict 判 develop ref 与 worktree 副本并集——刚勾完未 ff 的 AC 不被误判未全勾
-status: draft
+status: needs-human
 kind: criterion
 goal: GOAL-011
 criterion: node --no-warnings --experimental-strip-types --test
@@ -13,4 +13,10 @@ origin: readings 中 GOAL-011 列 active 但 criteria 表 AC-201..217 无一 goa
   acShortCircuitVerdict 改判并集，而 plugin/scripts/worker-driver.ts:2535 现只读 worktree
   副本（path.join(worktree,'tasks/<id>.md')），正是 2026-09-07 ABI 勾满 8 条 AC 后 worktree
   副本见 0/8、exited-not-landed 烧 45 分钟的根因
+statusLog:
+  - at: 2026-09-09T09:37:09.931Z
+    from: draft
+    to: needs-human
+    actor: goal-driver
+    reason: triage 判 retire：建议退役但 retired 归人——driver 置 needs-human 交人判断
 ---
