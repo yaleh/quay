@@ -43,11 +43,11 @@ AC1–AC5 全绿；`scripts/test.sh` 全量绿（含 `plugin/test/verify-deliver
 
 ## Evidence
 
-AC1 ✅ 机制接线：`grep -c 'GOAL-009-AC-207'`=4、`produced_by_driver`=14、`gate_events`=15（均 ≥1，前 3 条命中已贴）；`--selfcheck` exit 0 且含 ac207-record 正/负控制（valid wrote=1 fields_ok=1 / produced_by_driver=false refused=1 / gate_events=0 refused=1）。`plugin/test/verify-deliver-coldstart.test.mjs` 10/10 绿。
+AC1 ✅ 机制接线（merge develop 后复验）：`grep -c 'GOAL-009-AC-207'`≥1、`produced_by_driver`/`gate_events` 两字段名各 ≥1 命中；`--selfcheck` exit 0 且含 ac207-record 正/负控制（valid wrote=1 fields_ok=1 / produced_by_driver=false refused=1 / gate_events=0 refused=1），与 develop 侧 AC-203/201/206/204/205 控制一并 PASS。`plugin/test/verify-deliver-coldstart.test.mjs` 11/11 绿。
 
-AC4 ✅ 负控制：向生产载体注入 produced_by_driver=false 与 host=本机 各一条 ⇒ AC-207 criterion 仍 exit 1（判据能取假）；载体已字节级还原（cmp 一致，24 行）。
+AC4 ✅ 负控制：向生产载体注入 produced_by_driver=false 与 host=本机 各一条 ⇒ AC-207 criterion 仍 exit 1（判据能取假）；载体已字节级还原。selfcheck 内 hermetic 负控制（ac207-record produced_by_driver=false / gate_events=0 各 refused=1）已覆盖。
 
-AC2/AC3/AC5 ⛔ 阻塞：需第三方项目自己的 *-drivers 真活并驱动任务到 done。实测（本机，develop-tip 0.6.1 tgz）`quay driver start --kind promotion --root <第三方项目>` 打印 started 且 exit 0，但 status `driver_alive:0`；supervisor 日志 `driver-runtime: driver not found at <第三方项目>/plugin/scripts/promotion-driver.ts`——正是 AC-203（driver 路径锚在 opts.root 而非 kernel 安装位置）未落 develop 所致；且 AC-206（quay-init 创建 goals/）未落 develop ⇒ 第三方项目无 goals/。AC-207 机制接线（write_ac207_record / probe_ac207_measures / step5_e2e + `--ac207-e2e` flag）已就位并 fail-closed，待 AC-203/206 落 develop 后生产复跑即可使 criterion exit 0。
+AC2/AC3/AC5 ⛔ 阻塞（生产复跑已跑，AC-203/206 已证实落地，⛔ 新缺陷现形）：2026-09-09 host B=orangevps 生产复跑（develop-tip 0.6.1 tgz 现 build，`--ac207-e2e`，第三方项目 /home/yale/work/ac207-third-party）。已证实：step① install quay 0.6.1 OK（NPM_BIN_DISPATCH=1）；step② quay-init L1 closed_set present=7/7 含 `goals/`（AC-206 落地）；step④ `driver_alive=1`、`has_plugin_dir=0`（AC-203 落地，driver 在无 plugin/ 第三方项目真活）；step⑤ 双载体 goals/tasks 均建且可读（AC-206 记录已写）。⛔ 新缺陷（已立 `gap-driver-resource-gate-path-anchored-at-root-third-party`）：promotion-driver 每轮 `error: ready-pool-check exited 1` + `gate:{go:false, reason:"resource-gate WAIT (exit 127)"}`、worker-driver 每轮 `stop_reason:"resource-gate-wait: resource-gate WAIT (exit 127)"`——`plugin/scripts/driver-shared.ts:212` `resourceGateCheck` 仍把 resource-gate.sh 锚在 `opts.root/plugin/scripts/`，第三方项目无 plugin/ ⇒ `bash <不存在>` exit 127 ⇒ 恒 WAIT ⇒ 任务 e2e-verify-207 永久 todo、永不派发 ⇒ 无真实开发提交 ⇒ AC-207 记录无法写（fail-closed）。AC-207 机制接线已就位并 fail-closed，待该缺陷落地后复跑 `--ac207-e2e` 即可使 criterion exit 0。
 
 ## Touches
 
