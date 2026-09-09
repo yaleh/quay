@@ -1,7 +1,7 @@
 ---
 id: gap-goal-triage-activate-executed
 title: goal-driver 执行分诊 activate 判决——draft AC 经一轮 driver 后确为 active（判决零消费修复）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
