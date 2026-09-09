@@ -178,7 +178,9 @@ export async function gateCriterion(
 }
 
 /** 翻一条记录的状态（AC active→achieved / GOAL active→achieved）。经 `goal-store write`（provider
- *  写路径 + I1′/origin 校验，⛔ 不直改 goals/*.md 文件）。origin 必须回传（goal-store CLI 要求）。
+ *  写路径 + I1′/origin 校验，⛔ 不直改 goals/*.md 文件）。⛔ 不再回传 origin（gap-goal-store-write-
+ *  surface-semantics P2：回传快照里的 origin 会在「人改了 origin 而快照是旧的」时静默覆盖新值——
+ *  goal-store 的 write 本就是 patch 语义，省略 `--origin` 即保留存储值，竞态随回传一起消失）。
  *
  *  ⚠️ 【无反向翻转】（gap-goal-driver-draft-ac-invisible-yet-blocking AC4）：全仓本函数恰好 2 个
  *  调用点（:268 / :276，本驱动内），都写 `"achieved"`——没有任何路径把 achieved 翻回 active/draft。
@@ -189,10 +191,13 @@ export async function writeGoalStatus(
   scriptRoot: string,
   id: string,
   status: string,
-  origin: string,
   dataRoot: string,
+  opts: { actor?: string; reason?: string } = {},
 ): Promise<{ ok: boolean; reason: string }> {
-  const argv = goalStoreArgv(scriptRoot, ["write", id, "--status", status, "--origin", origin], dataRoot);
+  const extra: string[] = [];
+  if (opts.actor) extra.push("--actor", opts.actor);
+  if (opts.reason) extra.push("--reason", opts.reason);
+  const argv = goalStoreArgv(scriptRoot, ["write", id, "--status", status, ...extra], dataRoot);
   const r = await runAsync(argv, { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
   if (r.error) return { ok: false, reason: `write spawn error: ${r.error.message}` };
   if (r.status !== 0) return { ok: false, reason: `write exit ${r.status}: ${(r.stderr || "").trim().slice(0, 200)}` };
@@ -649,7 +654,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
       // I2（AC 层）：判据 pass 且 AC 为 active ⇒ 机械 flip active→achieved（裁定 5 的确定性推导，不算自动晋升）。
       // ⛔ 裁定 3：draft→active（激活）是人/manager 手动——本驱动不得把 draft（或 superseded/retired）AC 翻成 achieved。
       if (verdict === "pass" && ac.status === "active") {
-        const w = await writeGoalStatus(scriptRoot, id, "achieved", String(ac.origin ?? ""), dataRoot);
+        const w = await writeGoalStatus(scriptRoot, id, "achieved", dataRoot, { actor: "goal-driver", reason: "I2: criterion pass" });
         flips.push({ id, to: "achieved", ok: w.ok, reason: w.reason });
         if (w.ok) ac.status = "achieved";
       }
@@ -660,7 +665,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     }
     // I2（GOAL 层）：全部 AC achieved 且 ≥1 条 ⇒ 机械 flip GOAL（裁定 5）。
     if (goal.status === "active" && goalAchievedFromRecords(records, gid)) {
-      const w = await writeGoalStatus(scriptRoot, gid, "achieved", String(goal.origin ?? ""), dataRoot);
+      const w = await writeGoalStatus(scriptRoot, gid, "achieved", dataRoot, { actor: "goal-driver", reason: "I2: all ACs achieved" });
       flips.push({ id: gid, to: "achieved", ok: w.ok, reason: w.reason });
       if (w.ok) goal.status = "achieved";
     }

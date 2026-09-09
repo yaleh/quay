@@ -96,7 +96,7 @@ export const GOAL_ACCEPTANCE_ACTIVE_ENV = "QUAY_GOAL_ACCEPTANCE_ACTIVE";
 // Frontmatter keys the view-model owns explicitly; everything else in the frontmatter
 // (any future field) is preserved verbatim — the same discipline as adr-store/document-store.
 const OWNED_KEYS = new Set([
-  "id", "title", "status", "kind", "goal", "criterion", "expect", "origin", "activatedAt",
+  "id", "title", "status", "kind", "goal", "criterion", "expect", "origin", "activatedAt", "statusLog",
   "labels", "supersedes", "superseded-by",
 ]);
 
@@ -196,6 +196,7 @@ interface GoalFrontmatter {
   expect?: string;
   origin?: string;
   activatedAt?: string;
+  statusLog?: Array<{ at: string; from: string; to: string; actor: string; reason: string }>;
   labels?: string[];
   evidence?: { at?: string; verdict?: string; reading?: string };
   supersedes?: string[];
@@ -218,6 +219,8 @@ interface GoalViewModel {
   expect: unknown;
   origin: unknown;
   evidence: unknown;
+  activatedAt?: string;
+  statusLog?: Array<{ at: string; from: string; to: string; actor: string; reason: string }>;
   supersedes: unknown[];
   supersededBy: unknown[];
   body: string;
@@ -365,6 +368,8 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       // gated themselves) — list() derives a GOAL's time from its ACs via annotateGoalProgress.
       lastProgressAt: typeof evidence?.at === "string" ? evidence.at : undefined,
       firstEvidenceAt: typeof evidence?.firstAt === "string" ? evidence.firstAt : undefined,
+      activatedAt: frontmatter.activatedAt,
+      statusLog: frontmatter.statusLog,
       supersedes: frontmatter.supersedes ?? [],
       supersededBy: frontmatter["superseded-by"] ?? [],
       body,
@@ -582,6 +587,10 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
   function write(id: string, {
     title, status, goal, criterion, expect, origin,
     supersedes, supersededBy, body, disposeOld,
+    force = false,
+    actor,
+    reason,
+    dryRun = false,
   }: {
     title?: string;
     status?: string;
@@ -593,6 +602,14 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
     supersededBy?: string[];
     body?: string;
     disposeOld?: DisposeOld;
+    /** P6: skip the draft→active activation gate (a deliberate "I know it's not evaluable" override). */
+    force?: boolean;
+    /** P3: the actor recorded in a statusLog entry (default "goal-cli"). */
+    actor?: string;
+    /** P3: the reason recorded in a statusLog entry. */
+    reason?: string;
+    /** P9: validate everything (including the activation gate) but persist NOTHING. */
+    dryRun?: boolean;
   }): GoalViewModel {
     assertSafeId(id);
     assertSafeStatus(status);
@@ -616,10 +633,14 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       // The body that will land: an explicit `body` param, else the stored body (patch
       // semantics — omitting `body` on an update keeps it, the same as `origin`).
       const finalBody = body !== undefined ? body : existingBody;
+      // The PRIOR status (undefined for a new record) — the basis for status-change detection
+      // (statusLog, P3) and the draft→active activation gate (P6).
+      const prevStatus = typeof frontmatter.status === "string" ? frontmatter.status : undefined;
       // Apply owned fields (preserving any unknown frontmatter keys verbatim).
       frontmatter.id = id;
       if (title !== undefined) frontmatter.title = title;
-      frontmatter.status = status ?? frontmatter.status ?? "draft";
+      const nextStatus = status ?? frontmatter.status ?? "draft";
+      frontmatter.status = nextStatus;
       // `kind` is derived from the id prefix — never caller-supplied.
       frontmatter.kind = isGoalRecord ? "goal" : "criterion";
       if (goal !== undefined) frontmatter.goal = goal;
@@ -628,6 +649,13 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       if (origin !== undefined) frontmatter.origin = origin;
       if (supersedes !== undefined) frontmatter.supersedes = supersedes;
       if (supersededBy !== undefined) frontmatter["superseded-by"] = supersededBy;
+      const statusChanged = prevStatus !== undefined && nextStatus !== prevStatus;
+      // ⛔ "activation" here is EXACTLY draft→active (SPEC §6 裁定 3: activation is manual; the
+      // goal-driver never flips INTO active). create-as-active is NOT gated — a new record's
+      // criterion is validated by the create completeness contract, and the P6 round-trip concern
+      // ("does the criterion still run after YAML round-trip?") only exists once a record has
+      // been stored once and later activated.
+      const activating = nextStatus === "active" && prevStatus === "draft";
 
       // A criterion record MUST point at a goal (its activeness derives from that goal).
       if (!isGoalRecord && (typeof frontmatter.goal !== "string" || frontmatter.goal.trim() === "")) {
@@ -651,11 +679,21 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       // Each rejection names its kind and the missing field, distinguishable from every other
       // failure (hard rule 3b — "which field is missing" is the actionable info).
       //
-      // CREATE-ONLY (⛔ never on update): the contract governs AUTHORING a new record, not the
-      // mechanical I2 status flip (active→achieved) the goal-driver performs on an EXISTING
-      // record via writeGoalStatus (plugin/scripts/goal-driver.ts), which carries only
-      // `status`+`origin`. Re-requiring body/criterion/expect on update would block that flip —
-      // including on the pre-rule empty-body goals this task deliberately does NOT backfill.
+      // FIELD-TOUCHED successor (gap-goal-store-write-surface-semantics P4/P5): the old
+      // CREATE-ONLY guard (⛔ `if (!existingFile)`) left the UPDATE path entirely unvalidated —
+      // blanking a criterion on an existing record was silently written as an empty string.
+      // The split is now by WHICH CONTENT FIELDS this write touches, not create vs update:
+      //   • CREATE: the presence contract above still governs authoring a new record.
+      //   • UPDATE: a touched `criterion`/`expect` must not be blanked (P4/P5) — this is what
+      //     blocks `write <id> --criterion ""` on an existing record (was exit 0).
+      //   • status-only (the mechanical I2 flip, which touches no content field) is still
+      //     let through — that was the create-only guard's entire reason for existing.
+      // ⛔ No ≥ MIN_SECTION_CHARS floor on criterion/expect: production carries legitimate short
+      // values ("exit 0", 19-char runnable criteria) and the store's own re-write negative-control
+      // (gap-goal-record-completeness-undefined AC5) would reject them — a numeric threshold over
+      // an unmeasured cost structure (hard rule 4). The non-empty guard is the enforceable half.
+      const touchesCriterion = criterion !== undefined;
+      const touchesExpect = expect !== undefined;
       if (!existingFile) {
         if (!isGoalRecord) {
           if (typeof frontmatter.criterion !== "string" || frontmatter.criterion.trim() === "") {
@@ -675,6 +713,67 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
             );
           }
         }
+      } else if (!isGoalRecord) {
+        if (touchesCriterion && (typeof frontmatter.criterion !== "string" || frontmatter.criterion.trim() === "")) {
+          throw new Error(
+            `${id} cannot be updated to an empty \`criterion\` — the runnable command that verifies it (empty criterion writes nothing)`
+          );
+        }
+        if (touchesExpect && (typeof frontmatter.expect !== "string" || frontmatter.expect.trim() === "")) {
+          throw new Error(
+            `${id} cannot be updated to an empty \`expect\` — the expected outcome the criterion proves (empty expect writes nothing)`
+          );
+        }
+      }
+
+      // P6 — activation gate (gap-goal-store-write-surface-semantics): a CRITERION record
+      // transitioning draft→active must carry an EVALUABLE criterion — run it ONCE and require a
+      // definitive verdict (pass OR fail both prove "it can run"; a hard-true criterion is
+      // evaluable and passes). "not-evaluated" (empty criterion, or the command fails to spawn)
+      // ⇒ REJECT with the reason surfaced on stderr. `--force` overrides for a deliberate
+      // "I know it's not evaluable". Running the criterion is also the ONLY honest proof that it
+      // survived the YAML round-trip — proven by running, not by remembering to check.
+      if (activating && !isGoalRecord && !force) {
+        const criterionCmd = typeof frontmatter.criterion === "string" ? frontmatter.criterion : "";
+        if (criterionCmd.trim() === "") {
+          throw new Error(`cannot activate ${id}: criterion not-evaluated (no criterion defined) — pass --force to override`);
+        }
+        const gateRoot = resolveGitRoot(goalDir) ?? path.dirname(goalDir);
+        const startedMs = Date.now();
+        const gateRes = runAcceptance({ command: criterionCmd, cwd: gateRoot, timeoutMs: 60000 });
+        const wallMs = Date.now() - startedMs;
+        // not-evaluated = the command never ran to a verdict (spawn error); "ran and failed"
+        // (exit ≠0) and timeouts are both a definitive "fail" verdict ⇒ evaluable ⇒ allowed.
+        if (gateRes.code === null && !gateRes.timedOut) {
+          throw new Error(`cannot activate ${id}: criterion not-evaluated (${gateRes.reason}) — pass --force to override`);
+        }
+        // P10 — make the activation cost visible: the criterion now joins the per-round hot loop.
+        console.error(`goal-store: activated ${id} — criterion ran in ${wallMs}ms (${gateRes.ok ? "pass" : "fail"})`);
+      }
+
+      // P3 — status-change provenance (gap-goal-store-write-surface-semantics): `activatedAt`
+      // (first-activation timestamp) + `statusLog` (append-only status-change history).
+      //
+      // BOUNDARY vs `evidence` (why this IS stored, never derived — the next person must NOT delete
+      // it following gap-goal-evidence-cache-should-not-enter-git's precedent): `evidence` is
+      // re-DERIVED every ~42s from the gitignored gate ledger ⇒ derived ⇒ never stored (落盘 would
+      // re-couple the ~42s cadence to a tracked file). `statusLog` is LOW-FREQUENCY (a status flip
+      // is a deliberate lifecycle move, not a ~42s re-read), MONOTONICALLY APPENDED, and NOWHERE
+      // DERIVABLE — the gate ledger records only verdicts, never status flips, so a status change
+      // has no other carrier; losing it is unrecoverable. (hard rule 4: a DERIVED quantity must not
+      // be 落盘; an UNDERIVABLE one must.)
+      if (nextStatus === "active" && prevStatus !== "active" && typeof frontmatter.activatedAt !== "string") {
+        frontmatter.activatedAt = new Date().toISOString();
+      }
+      if (statusChanged) {
+        const prior = Array.isArray(frontmatter.statusLog) ? frontmatter.statusLog : [];
+        frontmatter.statusLog = [...prior, {
+          at: new Date().toISOString(),
+          from: prevStatus as string,
+          to: nextStatus,
+          actor: actor ?? "goal-cli",
+          reason: reason ?? "",
+        }];
       }
 
       // I1′ — hard cap, write-time fail-closed (SPEC-goal-mechanism-2026-09-06.md §4.1).
@@ -682,18 +781,24 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       // first by disposing an active goal in the SAME atomic write (`disposeOld` → achieved, or
       // `supersedes: [oldId]` → superseded). The rejection message ENUMERATES the active set
       // (hard rule 3: enumerate, don't boolean) — "which goals hold the slots" is the actionable info.
-      if (isGoalRecord && frontmatter.status === "active") {
-        // Apply any explicit dispositions first (inside the new goal's write lock).
-        if (disposeOld) {
-          flipGoal(String(disposeOld.id), {
-            status: disposeOld.to === "achieved" ? "achieved" : "superseded",
-            supersededBy: disposeOld.to === "achieved" ? undefined : [id],
-          });
+      if (isGoalRecord && nextStatus === "active") {
+        // Dispositions that free a slot. In dry-run they must NOT be applied (no side effects) but
+        // they must still count against `remainingActive` so the cap judgment matches a real write.
+        const disposedIds = new Set<string>();
+        if (disposeOld) disposedIds.add(String(disposeOld.id));
+        if (Array.isArray(supersedes)) for (const oldId of supersedes) disposedIds.add(String(oldId));
+        if (!dryRun) {
+          if (disposeOld) {
+            flipGoal(String(disposeOld.id), {
+              status: disposeOld.to === "achieved" ? "achieved" : "superseded",
+              supersededBy: disposeOld.to === "achieved" ? undefined : [id],
+            });
+          }
+          if (Array.isArray(supersedes)) {
+            for (const oldId of supersedes) flipGoal(String(oldId), { status: "superseded", supersededBy: [id] });
+          }
         }
-        if (Array.isArray(supersedes)) {
-          for (const oldId of supersedes) flipGoal(String(oldId), { status: "superseded", supersededBy: [id] });
-        }
-        const remainingActive = activeGoals().filter((p) => String(p.id) !== id);
+        const remainingActive = activeGoals().filter((p) => String(p.id) !== id && !disposedIds.has(String(p.id)));
         if (remainingActive.length >= cap) {
           throw new Error(
             `cannot activate ${id}: active GOAL count would exceed cap ${cap} — currently active: ${remainingActive
@@ -708,13 +813,17 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       delete frontmatter.evidence;
       const ordered: GoalFrontmatter = {};
       for (const k of [
-        "id", "title", "status", "kind", "goal", "criterion", "expect", "origin", "activatedAt",
+        "id", "title", "status", "kind", "goal", "criterion", "expect", "origin", "activatedAt", "statusLog",
         "labels", "supersedes", "superseded-by",
       ]) {
         if (frontmatter[k] !== undefined) ordered[k] = frontmatter[k];
       }
       for (const k of Object.keys(frontmatter)) {
         if (!OWNED_KEYS.has(k)) ordered[k] = frontmatter[k];
+      }
+      // P9 dry-run: validate everything (incl. the activation gate) but persist NOTHING.
+      if (dryRun) {
+        return toViewModel(ordered, finalBody, ledgerEvidenceMap(goalDir));
       }
       const fileName = existingFile ?? `${id}-${slugify(title, "goal")}.md`;
       fs.writeFileSync(path.join(goalDir, fileName), serializeFrontmatter(ordered, finalBody), "utf8");
@@ -735,9 +844,14 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
 // Subcommands (workspace root auto-derived from the script location, or --root <dir>):
 //   list                      — list all goal records (GOAL + AC) as JSON
 //   get <id>                  — one record as JSON
-//   write <id> --title ... --status ... --goal ... --criterion ... --origin ... [--expect ...] [--body ...]
-//   gate <id> [--root <dir>]  — run the record's `criterion` via the acceptance runner and append
-//                               one GateEvent (verdict+timestamp) to <root>/.quay/gate-events.jsonl;
+//   write <id> [--title ...] [--status ...] [--goal ...] [--criterion ...] [--expect ...]
+//              [--origin ...] [--body ...] [--actor ...] [--reason ...] [--force] [--dry-run]
+//              (`--origin` is REQUIRED on create, OPTIONAL on update — patch semantics keep the
+//              stored value; `--dry-run` validates without persisting; `--force` skips the
+//              draft→active activation gate)
+//   gate <id> [--dry-run]     — run the record's `criterion` via the acceptance runner and append
+//                               one GateEvent (verdict+timestamp) to <root>/.quay/gate-events.jsonl
+//                               (--dry-run runs the criterion but appends nothing);
 //                               empty criterion fails CLOSED (red) and still records the event.
 //   check                     — I1′ checker: withinCap + hasDirection (exit 1 when over cap)
 //   check --staleness         — I3 three-bucket staleness (fresh/stale/notEvaluated) + I4
@@ -792,23 +906,23 @@ async function main(argv: string[]) {
       const id = rest[0];
       if (!id) { console.error("goal-store: write requires <id>"); return 2; }
       const opts: Record<string, unknown> = {};
+      let force = false;
+      let dryRun = false;
       for (let i = 1; i < rest.length; i++) {
         const k = rest[i];
-        const v = rest[i + 1];
         if (!k.startsWith("--")) continue;
         const key = k.slice(2);
+        if (key === "force") { force = true; continue; }
+        if (key === "dry-run") { dryRun = true; continue; }
+        const v = rest[i + 1];
         if (key === "title" || key === "status" || key === "goal" || key === "criterion" ||
             key === "expect" || key === "origin" || key === "body" || key === "superseded-by" ||
-            key === "dispose-old" || key === "dispose-to") {
+            key === "dispose-old" || key === "dispose-to" || key === "actor" || key === "reason") {
           opts[key] = v;
           i++;
         } else {
           console.error(`goal-store: unknown write flag: ${k}`); return 2;
         }
-      }
-      if (typeof opts.origin !== "string") {
-        console.error("goal-store: write requires --origin <text> (AC6: empty origin writes nothing)");
-        return 2;
       }
       let disposeOld: DisposeOld | undefined;
       if (opts["dispose-old"] !== undefined) {
@@ -820,25 +934,37 @@ async function main(argv: string[]) {
         }
         disposeOld = { id: String(opts["dispose-old"]), to };
       }
-      const rec = store.write(id, {
-        title: opts.title as string | undefined,
-        status: opts.status as string | undefined,
-        goal: opts.goal as string | undefined,
-        criterion: opts.criterion as string | undefined,
-        expect: opts.expect as string | undefined,
-        origin: opts.origin as string,
-        body: opts.body as string | undefined,
-        supersededBy: Array.isArray(opts["superseded-by"])
-          ? opts["superseded-by"] as string[]
-          : (typeof opts["superseded-by"] === "string" ? [opts["superseded-by"] as string] : undefined),
-        disposeOld,
-      });
-      process.stdout.write(JSON.stringify(rec, null, 2) + "\n");
-      return 0;
+      try {
+        const rec = store.write(id, {
+          title: opts.title as string | undefined,
+          status: opts.status as string | undefined,
+          goal: opts.goal as string | undefined,
+          criterion: opts.criterion as string | undefined,
+          expect: opts.expect as string | undefined,
+          // P1: `origin` is optional on update (patch semantics — omitting it keeps the stored
+          // value). Create still requires it — enforced by write()'s origin check, not here.
+          origin: opts.origin as string | undefined,
+          body: opts.body as string | undefined,
+          supersededBy: Array.isArray(opts["superseded-by"])
+            ? opts["superseded-by"] as string[]
+            : (typeof opts["superseded-by"] === "string" ? [opts["superseded-by"] as string] : undefined),
+          disposeOld,
+          force,
+          actor: opts.actor as string | undefined,
+          reason: opts.reason as string | undefined,
+          dryRun,
+        });
+        process.stdout.write(JSON.stringify(rec, null, 2) + "\n");
+        return 0;
+      } catch (err) {
+        console.error(`goal-store: write failed: ${(err as Error).message}`);
+        return 2;
+      }
     }
     case "gate": {
       const id = rest[0];
       if (!id) { console.error("goal-store: gate requires <id>"); return 2; }
+      const dryRun = rest.includes("--dry-run");
       // Criterion execution REUSES the task acceptance-runner shape (SPEC §3) and the gate
       // ledger REUSES the existing GateEvent format (.quay/gate-events.jsonl).
       // (`runAcceptance` is a static import at the top — also used by checkAchievedFailing's I5 bucket.)
@@ -867,12 +993,13 @@ async function main(argv: string[]) {
         timestamp: new Date().toISOString(),
         payload: { reason },
       };
-      appendGateEvent(logPath, event);
+      // P9 dry-run: run the criterion but do NOT append the gate event (persist nothing).
+      if (!dryRun) appendGateEvent(logPath, event);
       // ⛔ NO evidence write-back: `evidence` is ledger-DERIVED, never stored
       // (gap-goal-evidence-cache-should-not-enter-git). The ledger event just appended IS the
       // evidence — writing it into goals/*.md would re-couple the ~42s gate cadence to the tracked
       // file and let a stale reading travel via git (the exact defect this task removes).
-      const out = { id, verdict, reason, timestamp: event.timestamp, event };
+      const out = { id, verdict, reason, timestamp: event.timestamp, dryRun, event };
       process.stdout.write(JSON.stringify(out, null, 2) + "\n");
       return verdict === "pass" ? 0 : 1;
     }

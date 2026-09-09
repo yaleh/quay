@@ -684,3 +684,95 @@ test("AC4 — 负控制：1 active goal ⇒ checkStaleness 报 evaluated:true + 
   assert.equal(r.scopeSize, 1, "作用域规模 = 1 > 0");
   assert.deepEqual(r.notEvaluated, ["GOAL-010"], "无 evidence ⇒ 该 goal 判 notEvaluated（作用域非空但该 goal 未评估——两个不同维度）");
 });
+
+// ── gap-goal-store-write-surface-semantics：写入面六缺陷（AC1/AC3/AC4/AC5/AC6）──────────────────
+// 六缺陷的证据与七步修法见任务体。这里逐条在【真实 store/CLI】上跑（⛔ 不注入 fixture seam）：
+// AC1 P1（--origin create 必传 / update 可省，patch 语义）、AC3 P4/P5（update 空 criterion 拒 /
+// status-only 放行）、AC4 P6（激活前置闸：not-evaluated 拒 / 可跑放行）、AC5 P3（activatedAt +
+// statusLog 追加，title-only 不追加）、AC6 P9（--dry-run 不落盘）。AC2 与 AC7 在
+// plugin/test/goal-invariants-standing.test.mjs（grep 判定 + 常设不变式）。
+
+test("AC1 (P1) — update 省略 --origin 保留原值；create 省略 --origin 仍被拒", () => {
+  const root = tmpDir("cli-ac1-p1");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  const n = (cmd) => runCli([...cmd, "--root", root]);
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "2026-09-09 human basis", "--body", GOAL_BODY]);
+  // 正向：既有记录 update 不传 --origin ⇒ exit 0 且 origin 逐字保留。
+  const up = n(["write", "GOAL-001", "--title", "p renamed"]);
+  assert.equal(up.status, 0, up.stdout + up.stderr);
+  const rec = JSON.parse(n(["get", "GOAL-001"]).stdout);
+  assert.equal(rec.origin, "2026-09-09 human basis", "origin must be preserved verbatim");
+  assert.equal(rec.title, "p renamed");
+  // 反向：新建 id 不传 --origin ⇒ exit≠0（create 必传，契约不被削弱）。
+  const create = n(["write", "GOAL-002", "--title", "q", "--status", "draft", "--body", GOAL_BODY]);
+  assert.notEqual(create.status, 0, "create without --origin must fail");
+  assert.match(create.stderr, /origin is required/);
+});
+
+test("AC3 (P4/P5) — update --criterion \"\" 被拒；status-only 放行（机械 flip 不被挡）", () => {
+  const root = tmpDir("cli-ac3-p4");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  const n = (cmd) => runCli([...cmd, "--root", root]);
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  n(["write", "AC-001", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
+  // 正向：update 清空 criterion ⇒ exit≠0（旧代码 exit 0 静默写成空串）。
+  const blank = n(["write", "AC-001", "--criterion", ""]);
+  assert.notEqual(blank.status, 0, "blanking criterion on update must fail:\n" + blank.stdout + blank.stderr);
+  assert.match(blank.stderr, /criterion/);
+  // 反向：只碰 status ⇒ exit 0。
+  const flip = n(["write", "AC-001", "--status", "achieved"]);
+  assert.equal(flip.status, 0, flip.stdout + flip.stderr);
+  assert.equal(JSON.parse(n(["get", "AC-001"]).stdout).status, "achieved");
+});
+
+test("AC4 (P6) — 激活不可评估 criterion 的 AC 被拒（stderr 含 not-evaluated）；可跑的放行", () => {
+  const root = tmpDir("cli-ac4-p6");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  const n = (cmd) => runCli([...cmd, "--root", root]);
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  // 一条 draft 且无 criterion 的遗留 AC（不可评估）。
+  fs.writeFileSync(path.join(root, "goals", "AC-020-legacy.md"),
+    "---\nid: AC-020\ntitle: no-criterion\nstatus: draft\nkind: criterion\ngoal: GOAL-001\norigin: o\n---\n## Rationale\nlegacy\n", "utf8");
+  const act = n(["write", "AC-020", "--status", "active"]);
+  assert.notEqual(act.status, 0, "activating an unevaluable criterion must fail:\n" + act.stdout + act.stderr);
+  assert.match(act.stderr, /not-evaluated/);
+  // 反向：可跑判据（fail 亦可）⇒ 放行。
+  n(["write", "AC-021", "--title", "runnable", "--status", "draft", "--goal", "GOAL-001", "--criterion", "false", "--origin", "o", "--expect", EXPECT]);
+  const ok = n(["write", "AC-021", "--status", "active"]);
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  assert.equal(JSON.parse(n(["get", "AC-021"]).stdout).status, "active");
+});
+
+test("AC5 (P3) — draft→active 写 activatedAt + statusLog；title-only 不追加 statusLog", () => {
+  const s = createGoalStore(tmpDir("ac5-p3"));
+  s.write("GOAL-001", { title: "p", status: "active", origin: "o", body: GOAL_BODY });
+  s.write("AC-001", { title: "a", status: "draft", goal: "GOAL-001", criterion: "true", origin: "o", expect: EXPECT });
+  s.write("AC-001", { status: "active" }); // draft→active
+  const rec = s.get("AC-001");
+  assert.ok(typeof rec.activatedAt === "string" && rec.activatedAt.length > 0, "activatedAt set on first activation");
+  assert.ok(Array.isArray(rec.statusLog) && rec.statusLog.length === 1, "statusLog appends exactly one entry");
+  assert.equal(rec.statusLog[0].from, "draft");
+  assert.equal(rec.statusLog[0].to, "active");
+  assert.ok(typeof rec.statusLog[0].at === "string" && rec.statusLog[0].at.length > 0);
+  // 反向：只改 title ⇒ 不追加 statusLog 条目。
+  s.write("AC-001", { title: "a renamed" });
+  const rec2 = s.get("AC-001");
+  assert.equal(rec2.statusLog.length, 1, "title-only write must not append a statusLog entry");
+});
+
+test("AC6 (P9) — write --dry-run exit 0 ∧ goals/ 无新增变化 ∧ 记录内容未变", () => {
+  const { root, run } = gitRepo("ac6-dryrun");
+  const n = (cmd) => runCli([...cmd, "--root", root]);
+  n(["write", "GOAL-001", "--title", "p", "--status", "draft", "--origin", "o", "--body", GOAL_BODY]);
+  const file = fs.readdirSync(path.join(root, "goals")).find((f) => f.startsWith("GOAL-001-"));
+  const before = fs.readFileSync(path.join(root, "goals", file), "utf8");
+  const dry = n(["write", "GOAL-001", "--status", "active", "--dry-run"]);
+  assert.equal(dry.status, 0, dry.stdout + dry.stderr);
+  assert.equal(run("status", "--porcelain", "--", "goals").trim(), "", "dry-run must leave goals/ clean");
+  const after = fs.readFileSync(path.join(root, "goals", file), "utf8");
+  assert.equal(after, before, "dry-run must not change the record content");
+  assert.equal(JSON.parse(n(["get", "GOAL-001"]).stdout).status, "draft", "record still draft — dry-run persisted nothing");
+});
