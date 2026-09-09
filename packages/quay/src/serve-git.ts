@@ -345,7 +345,15 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
   // rev-parse HEAD — in a worktree HEAD is the task branch and lags the shared develop ref, so walking
   // from HEAD would drop commits that landed on develop after the branch point (gap-git-graph-ref-
   // partition-collapses-all-topology-to-one-lane: the spine must span the data actually fetched).
-  const spineRoot = mainlineRef && heads[mainlineRef] !== undefined ? heads[mainlineRef] : head;
+  const mainlineTip = mainlineRef && heads[mainlineRef] !== undefined ? heads[mainlineRef] : null;
+  // On a pagination page (`before` set) the mainline tip is strictly newer than the cursor, so it is
+  // NOT in `byHash` and walking from it yields an EMPTY spine (gap-git-graph-pagination-mainline-lane-
+  // empty-before-page). Fall back to `mainlineHead` — the newest spine commit the `--first-parent`
+  // mainline batch actually fetched — then to HEAD (pure-fixture tests without `mainlineHead`).
+  const spineRoot =
+    mainlineTip !== null && byHash.has(mainlineTip) ? mainlineTip
+    : history.mainlineHead != null && byHash.has(history.mainlineHead) ? history.mainlineHead
+    : head;
 
   const laneCommitOf = (c: GitHistoryCommit): { hash: string; t: number; parents: number; subject: string } => ({
     hash: c.hash,
@@ -1342,7 +1350,7 @@ export async function handleGitHistory(
   try {
     history = readGitHistory(cfg.workspaceRoot);
   } catch (err) {
-    history = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, commits: [], head: null, heads: {} };
+    history = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, commits: [], head: null, heads: {}, mainlineHead: null };
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(renderGitHistoryPage(history));
@@ -1412,7 +1420,7 @@ export async function handleGitHistoryJson(
   try {
     history = readGitHistory(cfg.workspaceRoot, { limit, before });
   } catch (err) {
-    history = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, commits: [], head: null, heads: {} };
+    history = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, commits: [], head: null, heads: {}, mainlineHead: null };
   }
   writeJson(res, 200, gitHistoryJson(history));
 }
