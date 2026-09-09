@@ -33,11 +33,11 @@ not-ff 事件）⇒ **它们不是「还没做」，缺陷是真的已经被别�
 
 ## Acceptance Criteria
 
-- [ ] AC1 新测试在 `scripts/test.sh` 中被发现并执行（位置判定：出现在套件运行清单里，非仅文件存在）
-- [ ] AC2 三条断言各自可取假（逐条造一个违反输入 ⇒ 该条红）
-- [ ] AC3 作用域为空时报「未评估」，不与通过同形
-- [ ] AC4 三条 goal 记录 status = retired 且 origin 写明移交去向
-- [ ] AC5 `scripts/test.sh` 全量绿
+- [x] AC1 新测试在 `scripts/test.sh` 中被发现并执行（位置判定：出现在套件运行清单里，非仅文件存在）
+- [x] AC2 三条断言各自可取假（逐条造一个违反输入 ⇒ 该条红）
+- [x] AC3 作用域为空时报「未评估」，不与通过同形
+- [x] AC4 三条 goal 记录 status = retired 且 origin 写明移交去向
+- [ ] AC5 `scripts/test.sh` 全量绿（待外部）
 
 ## Definition of Done
 
