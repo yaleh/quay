@@ -97,6 +97,7 @@ import { spawnSync } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { driverCap } from "./driver-config.ts";
+import { resolveResourceGateScript } from "./driver-shared.ts";
 
 /** FIXED dispatch cap (gap-fixed-cap-5-dynamic-cap-retired, human ruling 2026-08-09): the dynamic
  *  adaptive cap is retired. effective_cap is the CONFIGURED worker cap — read live from the single
@@ -270,7 +271,10 @@ export function readBudgetFromGate(
  *  NB: reads `some avg10`, NOT `some avg300` — the avg300 field is churn-dominated and structurally
  *  dead (see header comment, gap-cap-from-gate-avg300-driven-by-claude-session-churn-structural-cap-2). */
 export function readCpuStallFromGate(repoRoot: string, env: NodeJS.ProcessEnv = process.env): number | null {
-  const gate = path.join(repoRoot, "plugin", "scripts", "resource-gate.sh");
+  // ⛔ 非 repoRoot 锚定（gap-driver-resource-gate-path-anchored-at-root-third-party）：第三方项目没有
+  // plugin/scripts/，resolveResourceGateScript 从 kernel 安装位置解析；找不到 ⇒ null（unmeasurable）。
+  const gate = resolveResourceGateScript(env);
+  if (!gate) return null;
   const res = spawnSync("bash", [gate], { cwd: repoRoot, encoding: "utf8", env });
   if (res.status !== 0) {
     // report mode always exits 0 — a non-zero means the script itself is broken; fail closed.
@@ -289,7 +293,9 @@ export function readCpuStallFromGate(repoRoot: string, env: NodeJS.ProcessEnv = 
  *  Returns null when UNMEASURABLE. Note the cap itself is FIXED (gap-fixed-cap-5-dynamic-cap-retired)
  *  — this is observation only, so dispatch sees the same overload-window signal the gate refuses on. */
 export function readLoadAvgFromGate(repoRoot: string, env: NodeJS.ProcessEnv = process.env): number | null {
-  const gate = path.join(repoRoot, "plugin", "scripts", "resource-gate.sh");
+  // ⛔ 非 repoRoot 锚定（gap-driver-resource-gate-path-anchored-at-root-third-party）：同 readCpuStallFromGate。
+  const gate = resolveResourceGateScript(env);
+  if (!gate) return null;
   const res = spawnSync("bash", [gate], { cwd: repoRoot, encoding: "utf8", env });
   if (res.status !== 0) return null;
   const m = `${res.stdout}\n${res.stderr}`.match(/loadavg=([0-9.]+|UNMEASURABLE)/);
