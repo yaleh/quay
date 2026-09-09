@@ -1,7 +1,7 @@
 ---
 id: gap-ac205-session-delivery-channel-transcript-confirmed
 title: 会话投递通道在项目生命周期内持续可用——send-to-session 从安装物真投且 transcript 外部可核（AC-205）
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical
