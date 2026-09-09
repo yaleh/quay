@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-workprogress-row-paired-columns
 title: dashboard 工作进展行改配对两列((阶段目标+任务台账速览)|(测试+FAN-IN))，替代原等宽四列
-status: ready
+status: done
 labels:
   - gap
   - webui
