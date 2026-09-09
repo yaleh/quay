@@ -50,12 +50,12 @@ develop × 28  →（改成挑非 mainline 名）→ task/X（可区分但张冠
 
 ## AC
 
-- [ ] AC1 **命名多样性（不可被退化标注满足）**：生产 `#git-graph-data` 中，具名泳道（`ref != null`）的**不同取值数 ≥ 2**，且**没有任何单一 ref 占具名泳道总数的 90% 以上**（当前 develop 占 113/117 ≈ 97%）：`node --test packages/quay/test/gap-git-graph-reconstructed-lanes-all-named-mainline-ref.test.mjs` 退出码 0。
-- [ ] AC2 **mainline 名不得作分支名**：断言 `branches.filter(b => b.kind !== 'mainline' && GIT_HISTORY_MAINLINE_REFS.has(b.ref)).length === 0`（当前 = 113）。
-- [ ] AC3 负控制：测试内显式还原「第二父轨道取带引号名」的旧规则，断言 AC2 的计数 > 0 ⇒ 判据能取假，不是恒真。
-- [ ] AC4 拓扑不因此丢失（防止用「删泳道」来满足 AC1/AC2）：窗口内每个合并提交的第二父仍必须出现在某条泳道的 commits 中——孤儿数 = 0（沿用 A 的 AC1 不变式，确保本次修复不是又一次塌缩）。
-- [ ] AC5 碎片收敛：`reconstructed` 泳道中 `commits.length === 1` 的条数占比 **< 20%**（当前 49/113 ≈ 43%）；且「窗口外分叉」标记数 ≤ 具名 reconstructed 泳道数。
-- [ ] AC6 生产读数：以上 AC1/AC2/AC5 三项均在**真实生产页面**的 `#git-graph-data` 上取值，不接受仅 fixture 通过（硬规则 4 推论三）。
+- [x] AC1 **命名多样性（不可被退化标注满足）**：生产 `#git-graph-data` 中，具名泳道（`ref != null`）的**不同取值数 ≥ 2**，且**没有任何单一 ref 占具名泳道总数的 90% 以上**（当前 develop 占 113/117 ≈ 97%）：`node --test packages/quay/test/gap-git-graph-reconstructed-lanes-all-named-mainline-ref.test.mjs` 退出码 0。
+- [x] AC2 **mainline 名不得作分支名**：断言 `branches.filter(b => b.kind !== 'mainline' && GIT_HISTORY_MAINLINE_REFS.has(b.ref)).length === 0`（当前 = 113）。
+- [x] AC3 负控制：测试内显式还原「第二父轨道取带引号名」的旧规则，断言 AC2 的计数 > 0 ⇒ 判据能取假，不是恒真。
+- [x] AC4 拓扑不因此丢失（防止用「删泳道」来满足 AC1/AC2）：窗口内每个合并提交的第二父仍必须出现在某条泳道的 commits 中——孤儿数 = 0（沿用 A 的 AC1 不变式，确保本次修复不是又一次塌缩）。
+- [x] AC5 碎片收敛：`reconstructed` 泳道中 `commits.length === 1` 的条数占比 **< 20%**（当前 49/113 ≈ 43%）；且「窗口外分叉」标记数 ≤ 具名 reconstructed 泳道数。
+- [x] AC6 生产读数：以上 AC1/AC2/AC5 三项均在**真实生产页面**的 `#git-graph-data` 上取值，不接受仅 fixture 通过（硬规则 4 推论三）。
 
 ## DoD
 
@@ -67,4 +67,6 @@ develop × 28  →（改成挑非 mainline 名）→ task/X（可区分但张冠
 - packages/quay/test/gap-git-graph-reconstructed-lanes-all-named-mainline-ref.test.mjs（本任务的回归测试）
 - packages/quay/test/gap-git-graph-ref-partition-collapses-all-topology-to-one-lane.test.mjs（A 的拓扑不变式，收敛后行数会变，需同步更新）
 - packages/quay/test/gap-git-graph-branch-name-fallback-to-trunk-ref.test.mjs（同一命名机制的历史回归测试，需同步）
+- packages/quay/test/gap-git-graph-lane-path-inverts-and-duplicates-per-devmerge.test.mjs（同一命名机制的历史回归测试，develop/# 命名断言需同步）
+- packages/quay/test/gap-git-history-lane-identity-and-row-layout-overlap.test.mjs（unnamed 约定 #<hash>→ref:null，断言需同步）
 - tasks/gap-git-graph-reconstructed-lanes-all-named-mainline-ref.md
