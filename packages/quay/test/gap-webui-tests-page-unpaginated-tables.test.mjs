@@ -211,7 +211,6 @@ test("AC4: enumerate every <table> in serve-*.ts and annotate it — no unannota
   const inventory = [
     ["packages/quay/src/serve-architecture.ts", 55, "无需分页（上界=packages/* 顶层组件数，近 7 天变更组件 ≤ 该固定集合）"],
     ["packages/quay/src/serve-board.ts", 168, "已接分页（gap-webui-board-no-pagination，?page/?pageSize）"],
-    ["packages/quay/src/serve-git.ts", 550, "无需分页（上界=GIT_HISTORY_LIMIT=500 提交窗口 ⇒ 分支数 ≤ 500）"],
     ["packages/quay/src/serve-doc.ts", 39, "无需分页（上界=docs-managed/ 人工维护文档数）"],
     ["packages/quay/src/serve-adr.ts", 26, "无需分页（上界=adr/ADR-*.md 文件数）"],
     ["packages/quay/src/serve-system.ts", 118, "无需分页（上界=活跃 Claude 会话数）"],
