@@ -1,7 +1,7 @@
 ---
 id: gap-goal-store-empty-scope-reads-as-all-verified
 title: goal-store 的 I5/I3 空作用域输出与「全部复验通过」同形——58 条判据一条没跑却报 evaluated:true
-status: ready
+status: done
 labels:
   - gap
   - mechanism
