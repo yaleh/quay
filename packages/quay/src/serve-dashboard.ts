@@ -1240,7 +1240,7 @@ export async function handleDashboard(
   try { suiteRun = readCurrentSuiteRun(cfg.workspaceRoot); } catch { suiteRun = null; }
   let history: GitHistoryResult;
   try { history = readGitHistory(cfg.workspaceRoot); } catch {
-    history = { status: "error", reason: "internal", commits: [], head: null, heads: {} };
+    history = { status: "error", reason: "internal", commits: [], head: null, heads: {}, mainlineHead: null };
   }
   const [sys, mgr, tasks, goals] = await asyncProbes;
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
