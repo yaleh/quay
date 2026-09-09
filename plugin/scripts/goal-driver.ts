@@ -428,6 +428,71 @@ export async function readReadyPoolJudgment(root: string, readyPoolCmd: string[]
   return { eligibleTodoIds, excludedReadyIds };
 }
 
+// ── draft AC 分诊（GOAL-010 范围② / AC-210）─────────────────────────────────────────────
+// 对象集 = active GOAL 名下 status=draft 的 AC（扩 G9 的 active-only 对象集，⛔ 不影响
+// computeGoalGaps 只数 active 的口径）。对每条 draft AC 出五态判决之一：
+//   activate / re-anchor / retire / needs-human / hold
+// 判决只【记录】，⛔ 不 flip 任何 AC status（draft→active 归人/manager 裁定 3；retire 归人，AC-211）。
+//
+// 判决函数是纯函数（record + goal posture + taskFacts ⇒ decision），⛔ 不读进程存活/时钟——
+// 使五态可单测（goal-triage.test.mjs），并使 AC-215（posture 挡 activate）可落地。
+
+/** 五态判决词表（AC-210 判据读它；⛔ 加态即改判据与 AC-215 的「其余三态」口径）。 */
+export const TRIAGE_DECISIONS = ["activate", "re-anchor", "retire", "needs-human", "hold"] as const;
+export type TriageDecision = (typeof TRIAGE_DECISIONS)[number];
+
+/** 一条 draft AC 的分诊落痕：ac 唯一、decision ∈ 五态、reason 非空（逐条落痕，硬规则 3 枚举不布尔）。 */
+export interface TriageEntry {
+  ac: string;
+  decision: TriageDecision;
+  reason: string;
+}
+
+/** 对一条 draft AC 出五态判决之一。纯函数、确定性、⛔ 不读进程存活/时钟。
+ *
+ * 输入：
+ *  - record     该 draft AC 的 goal-store 视图模型（id / goal / criterion / expect / …）
+ *  - goalPosture 所属 GOAL 的 posture（AC-215 的读取端，本任务只收不读——production 侧由 AC-215
+ *               从 goal 记录读出后传入；非空即视为「declared hold」，具体词表由 AC-215 定）
+ *  - taskFacts  readTaskFacts 的读数（可能 null = 读不到 tasks ⇒ 按无牵引处理）
+ *
+ * 判决顺序（每条各判一个可区分的前置，⛔ 顺序即语义）：
+ *  1. re-anchor   goal 锚缺失/非法（非 GOAL-NNN）⇒ 需重指向一条 GOAL-NNN
+ *  2. needs-human criterion 缺失/空 ⇒ 无法评估，需人补判据或确认退役
+ *  3. hold        goal 声明 posture ⇒ 按住不激活（尊重人「先测量后承诺」的姿态，AC-215）
+ *  4. activate    有关联任务推进（todo/ready/needs-human）⇒ 建议激活进入判定
+ *  5. retire      其余（结构完备、active goal、无 posture、无牵引）⇒ 死信，建议退役
+ *                 （⛔ 只落痕建议，不翻 retired——driver 只能置 needs-human 并说明理由，AC-211）
+ */
+export function triageDraftAc(
+  record: Record<string, unknown>,
+  goalPosture: string | null | undefined,
+  taskFacts: Array<{ id: string; status: string | null; goalAc: string | null }> | null,
+): TriageEntry {
+  const ac = String(record.id ?? "");
+  const goalRef = String(record.goal ?? "").trim();
+  const criterion = String(record.criterion ?? "").trim();
+  const posture = typeof goalPosture === "string" ? goalPosture.trim() : "";
+  // 「推进中」口径与 computeGoalGaps 一致（todo/ready/needs-human）；done/superseded 不是牵引。
+  const hasTraction = taskFacts !== null && taskFacts.some(
+    (t) => t.goalAc === ac && (t.status === "todo" || t.status === "ready" || t.status === "needs-human"),
+  );
+
+  if (goalRef === "" || !/^GOAL-\d{3,}$/.test(goalRef)) {
+    return { ac, decision: "re-anchor", reason: `goal 锚缺失/非法（"${goalRef}"）——需重指向一条 GOAL-NNN` };
+  }
+  if (criterion === "") {
+    return { ac, decision: "needs-human", reason: "无 criterion——无法评估，需人补判据或确认退役" };
+  }
+  if (posture !== "") {
+    return { ac, decision: "hold", reason: `goal 声明 posture "${posture}"——按住不激活（尊重人姿态）` };
+  }
+  if (hasTraction) {
+    return { ac, decision: "activate", reason: "有关联任务推进（todo/ready/needs-human）——建议激活进入判定" };
+  }
+  return { ac, decision: "retire", reason: "结构完备但无关联任务推进——死信，建议退役（⛔ 只落痕，不翻 retired）" };
+}
+
 // ── G9 缺口语义环（spawn 短命 agent 经 ABI 立案，照 promotion-driver 的 fix-worker 现成形态）──────
 
 /** gap-filing agent 的 prompt：一条 gap AC 的结构化信息（goal/ac/title/expect），⛔ 非散文指令。
@@ -600,6 +665,10 @@ export interface GoalRoundReadings {
   llm_invoked: boolean;
   /** ⑥ G9 语义环：逐条 spawn 诊断（ac · goal · exitCode · stderr · timedOut，⛔ 零诊断信息）。 */
   gap_spawns: Array<GapSpawnOutcome>;
+  /** ⑦ draft AC 分诊（GOAL-010 范围② / AC-210）：active GOAL 名下每条 draft AC 恰好一条
+   *  {ac, decision, reason}（decision ∈ 五态；ac 唯一）。无 draft AC ⇒ 空数组——字段仍在，
+   *  「查过且零条」与「未跑分诊」按字段存在性区分（硬规则 3b）。 */
+  triage: Array<TriageEntry>;
 }
 
 export interface GoalRoundOptions {
@@ -684,6 +753,19 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   const judgment = hasGoalAcTasks ? await readReadyPoolJudgment(root, opts.readyPoolCmd) : null;
   const gaps = computeGoalGaps(records, taskFacts, judgment);
 
+  // ⑦ draft AC 分诊（GOAL-010 范围② / AC-210）：对 active GOAL 名下每条 draft AC 出五态判决并逐条
+  // 落痕（⛔ 只记录，不 flip——draft→active 归人/manager 裁定 3，retire 归人 AC-211）。taskFacts 已在
+  // ⑤读出，直接传入（⛔ 不再读一次）。goal posture 由 AC-215 从 goal 记录读出后传入，本任务暂传 null
+  // （判决函数已按 posture 入参预留 seam）。对象集 = 轮开始时 active 的 GOAL 名下的 draft AC。
+  const triage: TriageEntry[] = [];
+  for (const goal of activeGoals) {
+    const gid = String(goal.id);
+    for (const r of records) {
+      if (!isAc(r) || r.status !== "draft" || String(r.goal ?? "") !== gid) continue;
+      triage.push(triageDraftAc(r, null, taskFacts));
+    }
+  }
+
   // ⑥ G9 缺口语义环：缺口（state==="gap"）非空 ⇒ 过 halt + 资源门 + 每轮上限，spawn 短命 agent 经 ABI
   // 立案。halt 与资源门在 spawn pass 内读（单一真相源 = isHalted / resourceGateCheck，与 worker/promotion
   // 同一实现）——机械 criterion/缺口读数不受 halt 约束（观测性，零 LLM），只有 spawn 被 halt 挡住。
@@ -705,6 +787,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     staleness,
     achievedFailing,
     gaps,
+    triage,
     spawned: spawnPass.spawned,
     llm_invoked: spawnPass.llmInvoked,
     gap_spawns: spawnPass.outcomes,
