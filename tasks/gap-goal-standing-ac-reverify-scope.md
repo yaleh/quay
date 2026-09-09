@@ -1,7 +1,7 @@
 ---
 id: gap-goal-standing-ac-reverify-scope
 title: 长期保证 AC 的复验域不随 GOAL 关闭而消失——I5 checkAchievedFailing 作用域加显式声明通道，读数枚举 inScope
-status: todo
+status: ready
 labels:
   - gap
 parent: null
