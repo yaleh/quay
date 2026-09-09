@@ -2,7 +2,7 @@
 id: gap-store-commit-propagation-field-aware
 title: store-commit
   AC勾选/evidence类字段跟分支走——commitTaskWrite传播判据改字段级，配acShortCircuitVerdict并集读（GOAL-011退出条件①）
-status: ready
+status: done
 labels:
   - gap
   - defect
