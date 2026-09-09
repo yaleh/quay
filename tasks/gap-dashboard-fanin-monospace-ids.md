@@ -9,6 +9,7 @@ children: []
 extra:
   schema: execution
 ---
+
 ## Proposal
 Dashboard 已经有等宽字体的先例：`serve-dashboard.ts:1008`（「最近提交」卡）与 `serve-system.ts:140`
 （系统资源卡）都对 git hash/日志用 `font-family:ui-monospace,monospace` 渲染。但同一个 dashboard 的
@@ -37,11 +38,11 @@ serve-task.ts）渲染的 `sha 36384f5`、`lock 332s` 等同类型内容（git h
 - [x] 新增测试文件通过 `scripts/test.sh`（含 --for-task scoped 静态检查）。
 
 ## Definition of Done
-- [ ] 代码改动落在 `packages/quay/src/serve-task.ts`（`renderFanInCell`）和/或
+- [x] 代码改动落在 `packages/quay/src/serve-task.ts`（`renderFanInCell`）和/或
       `packages/quay/src/serve-dashboard.ts`（`renderFanInCardFromRecords`）之内。
-- [ ] `packages/quay/test/gap-dashboard-fanin-monospace-ids.test.mjs` 存在且断言具体字体样式字符串
+- [x] `packages/quay/test/gap-dashboard-fanin-monospace-ids.test.mjs` 存在且断言具体字体样式字符串
       （不是布尔存在性检查），随 scoped gate 跑绿。
-- [ ] 生产 `/dashboard` 页面人工截图核实：fan-in 卡的 `sha`/`lock` 数值改为等宽字体渲染，与「最近提
+- [x] 生产 `/dashboard` 页面人工截图核实：fan-in 卡的 `sha`/`lock` 数值改为等宽字体渲染，与「最近提
       交」卡的视觉风格一致。
 
 ## Touches
