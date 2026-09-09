@@ -1,7 +1,7 @@
 ---
 id: gap-liveness-shaped-goal-ac-locks-forever
 title: AC-184/186 是活性形状判据（同 AC-181 已退役的类别错误）——无反向翻转 ⇒ 激活即永久锁死
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
