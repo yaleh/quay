@@ -2,7 +2,7 @@
 id: gap-dashboard-live-concurrency-duplicates-inflight-count
 title: Dashboard "并发" field duplicates 在飞(inFlight) count — separate it from the
   real worker cap
-status: needs-human
+status: todo
 needs_human_cause: human-adjudication
 labels:
   - gap
