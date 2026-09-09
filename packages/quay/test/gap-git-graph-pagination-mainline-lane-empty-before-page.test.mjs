@@ -6,7 +6,8 @@
 //
 //   AC1  before 页非空：before=<首屏最老 t> 直调 readGitHistory + layoutGitGraph，rows.length > 0。
 //   AC2  连续三页单调增长：cursor 逐页回退连取三页，合并提交数单调增长且第三页非空。
-//   AC3  侧枝不丢：页内每个在窗第二父都已被取回（missing = 0）——git log --all 的完整遍历不丢侧枝。
+//   AC3  侧枝不丢：数据层取回的提交集与 `git log --all --topo-order -n <limit>` 逐条相等（drop = 0），
+//        --all 完整遍历不丢任何 git 发 emit 的提交（旧 develop-only 侧枝 batch 会丢侧枝提交）。
 //
 // Run (scoped): node --test packages/quay/test/gap-git-graph-pagination-mainline-lane-empty-before-page.test.mjs
 import { test } from "node:test";
@@ -51,21 +52,27 @@ test("AC2: three consecutive pages grow the merged commit set monotonically and 
 test("AC3: every in-window second parent is fetched (no side branch lost by the --all traversal)", () => {
   const history = readGitHistory(REPO_ROOT, { limit: LIMIT });
   assert.equal(history.status, "ok", "the checkout under test is a readable git repo");
-  const inWindow = new Set(history.commits.map((c) => c.hash));
+  const fetched = new Set(history.commits.map((c) => c.hash));
+  // The page window IS `git log --all --topo-order -n <limit>` — the same window `git log --graph
+  // --all` draws (the AC1 oracle) and the data layer's single traversal. A commit is "lost" iff
+  // git's own --all traversal emits it within the limit but the data layer did not fetch it (the
+  // old develop-only lateral batch dropped side-branch commits exactly this way). A second parent
+  // below the window (cut off by `-n`) is legitimately deferred to an older page, matching git.
   const windowHashes = new Set(
-    execFileSync("git", ["-C", REPO_ROOT, "log", "develop", "-n", String(LIMIT), "--format=%H"], { encoding: "utf8" })
+    execFileSync("git", ["-C", REPO_ROOT, "log", "--all", "--topo-order", "-n", String(LIMIT), "--format=%H"], { encoding: "utf8" })
       .trim().split(/\r?\n/).filter(Boolean),
   );
+  let dropped = 0;
+  for (const h of windowHashes) if (!fetched.has(h)) dropped++;
+  assert.equal(dropped, 0, `git --all emits ${windowHashes.size} commits; the data layer dropped ${dropped} (side branch lost)`);
+  assert.equal(fetched.size, windowHashes.size, `the data layer fetched the full --all window (${fetched.size} vs ${windowHashes.size})`);
+
+  // Non-vacuous half: the window genuinely contains merge second parents (a merge commit whose
+  // second parent also lands inside the --all window — the commits AC1's column match draws an edge to).
   let inWindowSecondParents = 0;
-  let missing = 0;
   for (const cm of history.commits) {
     if (cm.parentHashes.length < 2) continue;
-    for (const p of cm.parentHashes.slice(1)) {
-      if (!windowHashes.has(p)) continue;
-      inWindowSecondParents++;
-      if (!inWindow.has(p)) missing++;
-    }
+    for (const p of cm.parentHashes.slice(1)) if (windowHashes.has(p)) inWindowSecondParents++;
   }
   assert.ok(inWindowSecondParents > 0, "the window contains merge second parents to verify (non-vacuous)");
-  assert.equal(missing, 0, `every in-window second parent is fetched (${missing} missing)`);
 });
