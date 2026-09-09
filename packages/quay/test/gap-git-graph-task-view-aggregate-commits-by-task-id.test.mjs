@@ -10,7 +10,8 @@
 //   AC4  未归属显式化：输出含 unattributedCount，恒等式 总提交数 − Σ各任务分组提交数 = unattributedCount
 //        （差 0），且生产数据上该值 > 0。
 //   AC5  默认视图不变：不带 ?view= 时返回的 #git-graph-data 与 ?view=git 逐字节一致。
-//   AC6  与 git 对账：任取一个近期完成的任务分组，其提交条数与 git log --oneline --all --grep=<task-id> 一致。
+//   AC6  与 git 对账：任取一个近期完成的任务分组，其提交条数与 subject 提到该 task-id 的提交条数一致
+//        （subject-only，不是 git log --grep 的全消息匹配——body 提到 id 的提交不该计入）。
 //   AC7  任务视图输出不依赖泳道字段：layoutTaskGraph 及其调用链无 fork/merge/open/overflow 引用；
 //        负控制显式引用任一字段命中 > 0（判据能取假）。
 //
@@ -148,9 +149,9 @@ test("AC5: the default (no ?view=) page is byte-identical to ?view=git; task vie
   assert.equal(gitHistoryViewOf(new URL("http://x/?view=bogus")), "git", "an unknown ?view= fails closed to git");
 });
 
-// ── AC6: a recent completed task group reconciles with git log --grep ─────────────────────────────
+// ── AC6: a recent completed task group reconciles with the subject-mention count ──────────────────
 
-test("AC6: the most recent completed task group count equals git log --oneline --all --grep=<id>", () => {
+test("AC6: the most recent completed task group count equals the subject-mention count", () => {
   clearGitHistoryCache();
   const history = readGitHistory(REPO_ROOT);
   assert.equal(history.status, "ok");
@@ -165,9 +166,14 @@ test("AC6: the most recent completed task group count equals git log --oneline -
   const group = layout.groups.find((g) => g.id === id);
   assert.ok(group, `the task ${id} has a group`);
 
-  const out = execFileSync("git", ["-C", REPO_ROOT, "log", "--oneline", "--all", `--grep=${id}`], { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] });
-  const gitCount = out.split(/\r?\n/).filter(Boolean).length;
-  assert.equal(group.commits.length, gitCount, `group count (${group.commits.length}) == git log --grep count (${gitCount}) (diff 0)`);
+  // Subject-only reconciliation, over the SAME 500-commit window readGitHistory reads (`--all
+  // --topo-order -n 500`): the task view attributes by SUBJECT (`taskIdFromSubject`), so the
+  // independent measure is the number of commits in that window whose SUBJECT mentions the id —
+  // NOT `git log --grep=<id>`, which searches the full message AND all history: a commit whose body
+  // merely references the id miscounts, and the unbounded walk blows the execFileSync pipe buffer.
+  const out = execFileSync("git", ["-C", REPO_ROOT, "log", "--all", "--topo-order", "-n", "500", "--format=%s"], { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] });
+  const gitCount = out.split(/\r?\n/).filter((l) => l.includes(id)).length;
+  assert.equal(group.commits.length, gitCount, `group count (${group.commits.length}) == subject-mention count (${gitCount}) (diff 0)`);
 });
 
 // ── AC7: the task view's output path references no swimlane field (survives the git-column rewrite) ─
