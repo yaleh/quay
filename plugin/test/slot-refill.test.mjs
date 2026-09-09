@@ -110,7 +110,7 @@ function makeWorkspace(tag) {
   return dir;
 }
 
-function writeTask(root, id, { status = "todo", labels = [], parent = null, role = null, dependsOn = [], body, selfTouch = true } = {}) {
+function writeTask(root, id, { status = "todo", labels = [], parent = null, role = null, dependsOn = [], goal_ac = null, body, selfTouch = true } = {}) {
   const fm = [
     "---",
     `id: ${id}`,
@@ -124,6 +124,9 @@ function writeTask(root, id, { status = "todo", labels = [], parent = null, role
     // [a, b]` — the machine-readable prerequisite edges (readDependsOn). Absent when empty (no dead
     // relation edge to confuse the mirror of a task that has no depends_on).
     dependsOn.length ? `depends_on: [${dependsOn.join(", ")}]` : null,
+    // LONG-TERM-GUARANTEE FILING-TIME GATE (gap-long-term-guarantee-registry-hand-maintained): a
+    // delivery-critical fixture must carry goal_ac to be promotion-eligible (立案时必填, fail-closed).
+    goal_ac ? `goal_ac: ${goal_ac}` : null,
     "extra:",
     "  schema: v1",
     "---",
@@ -1575,7 +1578,7 @@ test("DELIVERY-CRITICAL — end-to-end: a delivery-critical task promoted (todo�
     "- [ ] an AC item that is long enough",
     "- [ ] a sufficiently long acceptance criterion item that clears the four-artifact author gate",
   );
-  writeTask(root, "ac36-e2e", { status: "todo", labels: ["gap", "delivery-critical"], body: todoBody });
+  writeTask(root, "ac36-e2e", { status: "todo", labels: ["gap", "delivery-critical"], goal_ac: "AC-190", body: todoBody });
   const script = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
   // AC115: --in-flight-count 0 = the driver's measured zero, so the exact recommended window is
   // hermetic without any telemetry/process scan.

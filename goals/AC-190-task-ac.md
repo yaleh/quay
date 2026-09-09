@@ -1,6 +1,6 @@
 ---
 id: AC-190
-title: 反例检测器：声称长期保证却只有 task AC ⇒ 报红——没有它，丁 与「什么都不做」在记录上同形
+title: 反例检测器：声称长期保证却只有 task AC ⇒ 报红（位置判定——delivery-critical 新立案任务必须声明 goal_ac）
 status: achieved
 kind: criterion
 goal: GOAL-007
@@ -13,10 +13,10 @@ criterion: >
   "真仓库上报红（应为绿）"; exit 1; fi
 
   if node --no-warnings --experimental-strip-types "$s"
-  --inject-unbacked-fixture; then echo "负控制未触发：注入「只有 task AC 的长期保证」后仍绿"; exit 1;
+  --inject-unbacked-fixture; then echo "负控制未触发：注入「生效线后无 goal_ac 的 delivery-critical 任务」后仍绿"; exit 1;
   fi
 
-  echo "双向负控制通过：真仓库绿、注入未背书条目红"
+  echo "双向负控制通过：真仓库绿、注入未声明 goal_ac 的新立案任务红"
 
   exit 0
 expect: exit 0
@@ -39,4 +39,12 @@ origin: |-
   见 plugin/scripts/capability-catalog.sh 头注释）——实现任务的 ## Touches 必须同时列出这三处。
 
   干跑（2026-09-07）：脚本不存在，exit 1 ⇒ 今天取假。
+
+  ⚠ 换形态（gap-long-term-guarantee-registry-hand-maintained，2026-09-09）：原实现枚举一张手维护的
+  三项登记表，PASS 3/3 是按构造的绿——同一时刻带 delivery-critical 标签的任务 125 条、
+  其中 120 条无 goal_ac（96%），手写表只覆盖 2.4%。这与 CORE_REFERENCED（手维护两项漏掉 driver-runtime.ts）
+  同一形态、同一周内第二次。本 criterion 改判据：位置判定（枚举 tasks/*.md 里带 delivery-critical 标签的
+  任务，对【生效线 2026-09-09T00:00:00Z 之后新立案】者 fail-closed 要求 goal_ac 非空），存量（125/120）
+  grandfathered 单独排期、不在本任务清。负控制缝 --inject-unbacked-fixture 语义随之改为「注入一条生效线后
+  无 goal_ac 的 delivery-critical 任务」。
 ---

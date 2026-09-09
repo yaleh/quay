@@ -102,7 +102,7 @@ function makeWorkspace(tag) {
   return dir;
 }
 
-function writeTask(root, id, { status = "todo", labels = [], parent = null, children = [], role = null, body }) {
+function writeTask(root, id, { status = "todo", labels = [], parent = null, children = [], role = null, goal_ac = null, body }) {
   const fm = [
     "---",
     `id: ${id}`,
@@ -114,6 +114,7 @@ function writeTask(root, id, { status = "todo", labels = [], parent = null, chil
     `parent: ${parent}`,
     children.length > 0 ? "children:" : "children: []",
     ...children.map((c) => `  - ${c}`),
+    goal_ac ? `goal_ac: ${goal_ac}` : null,
     "extra:",
     "  schema: v1",
     "---",
@@ -2971,7 +2972,7 @@ test("applyPromotions: a delivery-critical todo enters ready WITH its label (AC1
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
-  writeTask(root, "gap-crit", gapTask("gap-crit", { labels: ["gap", "delivery-critical"] }));
+  writeTask(root, "gap-crit", gapTask("gap-crit", { labels: ["gap", "delivery-critical"], goal_ac: "AC-190" }));
 
   const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 }; // floor 3, pool 2
   const r = applyPromotions(opts);
@@ -2983,6 +2984,22 @@ test("applyPromotions: a delivery-critical todo enters ready WITH its label (AC1
   const task = parseTask(fs.readFileSync(path.join(root, "tasks", "gap-crit.md"), "utf8"));
   assert.match(task.frontmatterRaw, /^status:\s*ready$/m, "status landed on disk");
   assert.ok(task.labels.includes("delivery-critical"), "the label is in the frontmatter at ready-entry (标签与 ready 同现)");
+});
+
+test("applyPromotions: a delivery-critical todo WITHOUT goal_ac is NOT promoted (立案时必填 fail-closed)", (t) => {
+  const root = makeWorkspace("apply-dc-no-goal-ac");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-crit", gapTask("gap-crit", { labels: ["gap", "delivery-critical"] }));
+
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 };
+  const r = applyPromotions(opts);
+  assert.equal(r.should_apply, false, "no eligible candidate ⇒ nothing to apply");
+  assert.equal(r.applied_promotions.length, 0, "delivery-critical without goal_ac is never promoted");
+
+  const task = parseTask(fs.readFileSync(path.join(root, "tasks", "gap-crit.md"), "utf8"));
+  assert.match(task.frontmatterRaw, /^status:\s*todo$/m, "status stays todo — filing-time gate holds");
 });
 
 test("applyPromotions: a non-delivery-critical candidate is promoted WITHOUT the label (AC1 negative control)", (t) => {
