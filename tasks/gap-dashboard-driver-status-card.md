@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-driver-status-card
-title: Dashboard「MANAGER / OUTER / INNER」卡读的是已退役探针（loop-driver-check/liveness
-  恒空）——改读真实的 promotion/worker driver 存活状态
+title: Dashboard Driver 卡只读 promotion/worker 两个字面量 kind，遗漏 quality/meta/goal
+  三个真实在跑的 driver（应遍历 DriverKind 而非硬编码）
 status: done
 labels:
   - gap
@@ -42,6 +42,30 @@ worker:    supervisor pid=2176308 alive=1 · driver pid=2176709 alive=1 · runni
 做类型层清理，只改卡片实际读取/渲染的字段）。为避免每次 `/dashboard` 请求都同步读 pid 文件 + jsonl
 末行，复用 `readPoolMetrics`（`observation.ts:2898`）已有的 30s TTL 缓存手法给这个新读取包一层缓存。
 
+**追加发现（2026-09-09，本任务已 done 落地后，人用真实进程核验再次核查暴露的缺口）**：
+上面「现在实际驱动本仓库的是两层 driver」这句话在本任务撰写时是真的，**但已经过期**——
+`plugin/scripts/driver-runtime.ts:111` 的 `DriverKind` 类型早已是
+`"promotion" | "worker" | "outer" | "quality" | "meta" | "goal"` 六种，而 `ps aux` 直接核验（direct 量，
+非自报）确认**当前实际存活的是 5 个 kind**（`outer` 已确认彻底退役——`.quay/outer-*.pid` 不存在、
+`driver status --kind outer` 返回 `running=0 carrier_records=0`）：
+```
+promotion : supervisor pid=2740047（09-07 11:11 起）· driver pid=3813695 · running=1 · last_record 09-09T02:31Z
+worker    : supervisor pid=2740107（09-07 11:11 起）· driver pid=1668830 · running=1 · last_record 09-09T02:28Z
+quality   : supervisor pid=2031614（09-08 16:06 起）· driver pid=3807969 · running=1 · last_record 09-09T02:30Z
+meta      : supervisor pid=49269  （09-07 09:03 起）· driver pid=3812949 · running=1 · last_record 09-09T02:31Z
+goal      : supervisor pid=3307756（09-07 12:08 起）· driver pid=3813761 · running=1 · last_record 09-09T02:30Z
+outer     : 无 pid 文件、driver status 恒 0（已退役，非本任务范围）
+```
+每一个 pid 都用 `ps -o pid,lstart,cmd -p <pid>` 逐条核对为真实的
+`driver-runtime.ts __supervise --kind <kind>` / `<kind>-driver.ts` 进程对，不是读 pid 文件自证。
+
+而本任务已落地的实现（`renderDriverStatusRow(kind: "promotion" | "worker", ...)`、
+`readDriverKind(root, kind: "promotion" | "worker")`，见 `observation.ts:3009`/`serve-dashboard.ts:606`）
+**把 kind 写成了字面量联合类型 `"promotion" | "worker"`，逐字复刻了本任务 Proposal 当时的（已过期）认知**——
+不是代码 bug，是任务撰写时的前提被后续新增的 3 个 driver kind（quality/meta/goal）超越了，
+实现完全忠实地做了任务要求的事，只是任务要求本身现在覆盖不全。**Driver 卡目前对生产使用者是失真的**：
+只显示 2/5 个真正在跑的 driver，quality-driver/meta-driver/goal-driver 三个的存活状态完全不可见。
+
 ## Plan
 
 1. 在 `observation.ts` 新增一个纯函数（或复用 `readPoolMetrics` 同款缓存包装模式）读取
@@ -54,6 +78,13 @@ worker:    supervisor pid=2176308 alive=1 · driver pid=2176709 alive=1 · runni
    `#mgr-card` 的 DOM id 不变（`renderDashboardCardRefreshScript` 已有的自动刷新路径不用改）。
 4. 旧的 `runLoopDriverProbe`/`liveness` 读取调用点若因此清空，保留函数定义（`readManager`／
    `/manager` 页面等其它消费者可能仍需要），只改 mgrCard 这一个消费点，不做跨文件大范围清理。
+5. **（追加）不再硬编码 `"promotion" | "worker"` 字面量联合**：`readDriverKind`/
+   `renderDriverStatusRow` 的 kind 参数类型改为 `driver-runtime.ts` 已导出的 `DriverKind`
+   （`:111`，六值），`readDriverStatus` 改为遍历 `KNOWN_KINDS`（`:226`，导出的 `DriverKind[]`）而不是
+   两行手写字段——这样以后再新增/退役一个 driver kind（本任务的教训正是"两层"这个数字本身会过期），
+   卡片不需要再改代码就能跟上。**`outer` 是否要在卡片里显示「未运行」是一个产品判断，不是本任务自己
+   决定**：默认方案是六个 kind 全部渲染（`outer` 显示「未运行」是真实且有信息量的——它标注了"这个角色
+   已确认退役"，不是遗漏），除非人在推进本任务时另有裁定。
 
 ## Acceptance Criteria
 
@@ -72,13 +103,24 @@ worker:    supervisor pid=2176308 alive=1 · driver pid=2176709 alive=1 · runni
       `node --experimental-strip-types --test packages/quay/test/gap-dashboard-driver-status-card.test.mjs`
       exit 0；并用 MCP 浏览器截图核验一次：生产页面「Driver」卡显示的 pid/alive/last_record 与
       当时 `quay driver status` 的现场输出一致。
+- [ ] AC6（六 kind 全覆盖，不再硬编码两个字面量）：`grep -n '"promotion" | "worker"\|"promotion"|"worker"'
+      packages/quay/src/observation.ts packages/quay/src/serve-dashboard.ts` 命中数为 0（字面量联合已改成
+      `DriverKind` 类型引用）；`grep -n "KNOWN_KINDS" packages/quay/src/observation.ts` 命中数 ≥1
+      （改成遍历导出的 kind 列表，不是手写两行）。
+- [ ] AC7（真实回归，六 kind 全部可见）：给定当前 workspace 真实的 5 个存活 driver
+      （promotion/worker/quality/meta/goal，2026-09-09 用 `ps -o pid,lstart,cmd -p <pid>` 核验过的现场
+      pid，验收时需重新现场核验一次而非援引本任务写死的历史 pid），`/dashboard` 页面（或
+      `renderMgrCard`/`readDriverStatus` 的单测 fixture）的 Driver 卡对这 5 个 kind 每一个都渲染出
+      「运行中」+ 一个非空的末条记录相对时间；`outer` 渲染出「未运行」（不是被静默省略——负控制：
+      故意把某个 kind 的 pid 文件改名/删除，断言该 kind 从「运行中」变成「未运行」而不是从卡片上消失）。
 
 ## Definition of Done
 
 - 代码改动已合入 `develop`。
 - `scripts/test.sh --for-task gap-dashboard-driver-status-card`（或等价 scoped 调用）绿。
-- 手工用 MCP 浏览器刷新生产 dashboard 页确认：原「MANAGER / OUTER / INNER」卡已替换为显示
-  promotion-driver / worker-driver 真实存活状态的卡片，不再显示「未接入」占位文案。
+- 手工用 MCP 浏览器刷新生产 dashboard 页确认：Driver 卡同时显示 promotion/worker/quality/meta/goal
+  五个 kind 的真实存活状态（与当时 `node packages/quay/bin/quay.js driver status --kind <kind>` 的
+  现场输出逐一核对一致），不再只显示 promotion/worker 两项。
 - `quay task check gap-dashboard-driver-status-card --json` 的 `missing` 为 `[]`。
 
 ## Touches
