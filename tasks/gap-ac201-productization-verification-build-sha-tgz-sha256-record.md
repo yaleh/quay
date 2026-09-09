@@ -25,16 +25,16 @@ goal_ac: AC-201
 
 ## Acceptance Criteria
 
-- [ ] AC1 机制：`--build-root`（或 `--build-sha` + 真实 `--tgz`）路径下，`--ac89` 载体追加一条 `ac="GOAL-009-AC-201"` 且 top-level `build_sha`（40-hex）/ `tgz_sha256`（64-hex）非空的记录（字段在顶层，非 detail 字符串）。
-- [ ] AC2 干跑：生产载体 `.quay/productization-verification.jsonl` 出现 `ac="GOAL-009-AC-201"` 记录，`git merge-base --is-ancestor <build_sha> develop` 退出 0 且 `tgz_sha256` 非空 ⇒ AC-201 criterion exit 0（当前 exit 1）。
-- [ ] AC3 负控制：在载体上追加一条 `ac="GOAL-009-AC-201"` 但 `build_sha=40×0` 的记录 ⇒ criterion 仍 exit 1（判据能取假，非恒绿）；验证后移除该记录、不污染生产载体。
-- [ ] AC4 缺输入不写：`BUILD_SHA` 或 `SHA256_QUAY` 为空时不写该记录——实测 `--verify-only`（无 build）路径不追加（硬规则 3b，缺值≠合格）。
-- [ ] AC5 自检钉：把新记录追加抽成函数（如 `append_ac201_record()`），`--selfcheck` 加正/负控制——正：注入 40-hex BUILD_SHA + 64-hex SHA256_QUAY ⇒ 写出 ac=GOAL-009-AC-201 记录且两字段非空；负：BUILD_SHA 空 ⇒ 不写（`--selfcheck` exit 0）。`plugin/test/verify-deliver-coldstart.test.mjs` 同步断言字段形态。
+- [x] AC1 机制：`--build-root`（或 `--build-sha` + 真实 `--tgz`）路径下，`--ac89` 载体追加一条 `ac="GOAL-009-AC-201"` 且 top-level `build_sha`（40-hex）/ `tgz_sha256`（64-hex）非空的记录（字段在顶层，非 detail 字符串）。
+- [x] AC2 干跑：生产载体 `.quay/productization-verification.jsonl` 出现 `ac="GOAL-009-AC-201"` 记录，`git merge-base --is-ancestor <build_sha> develop` 退出 0 且 `tgz_sha256` 非空 ⇒ AC-201 criterion exit 0（当前 exit 1）。
+- [x] AC3 负控制：在载体上追加一条 `ac="GOAL-009-AC-201"` 但 `build_sha=40×0` 的记录 ⇒ criterion 仍 exit 1（判据能取假，非恒绿）；验证后移除该记录、不污染生产载体。
+- [x] AC4 缺输入不写：`BUILD_SHA` 或 `SHA256_QUAY` 为空时不写该记录——实测 `--verify-only`（无 build）路径不追加（硬规则 3b，缺值≠合格）。
+- [x] AC5 自检钉：把新记录追加抽成函数（如 `append_ac201_record()`），`--selfcheck` 加正/负控制——正：注入 40-hex BUILD_SHA + 64-hex SHA256_QUAY ⇒ 写出 ac=GOAL-009-AC-201 记录且两字段非空；负：BUILD_SHA 空 ⇒ 不写（`--selfcheck` exit 0）。`plugin/test/verify-deliver-coldstart.test.mjs` 同步断言字段形态。
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全绿；`bash plugin/scripts/verify-deliver-coldstart.sh --selfcheck` exit 0；`scripts/test.sh`（含 verify-deliver-coldstart.test.mjs）全绿。
-- [ ] AC-201 criterion 从 exit 1 → exit 0（贴出干跑输出）。⛔ 本任务只到「产物记录可溯源」这一层；driver 真活（AC-203）与端到端（AC-207）是下游，各自另有 task。
+- [x] AC1–AC5 全绿；`bash plugin/scripts/verify-deliver-coldstart.sh --selfcheck` exit 0；`scripts/test.sh`（含 verify-deliver-coldstart.test.mjs）全绿。
+- [x] AC-201 criterion 从 exit 1 → exit 0（贴出干跑输出）。⛔ 本任务只到「产物记录可溯源」这一层；driver 真活（AC-203）与端到端（AC-207）是下游，各自另有 task。
 
 ## Touches
 
