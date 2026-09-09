@@ -519,10 +519,14 @@ export function renderFanInCell(
   if (mfi == null) return "—";
   const showReason = opts.showReason ?? true;
   const parts: string[] = [];
-  if (mfi.outcome === "landed") parts.push(html`<strong>landed</strong>`);
-  else if (mfi.outcome === "red") parts.push(html`<strong>red</strong>`);
-  else parts.push(escapeHtml(mfi.outcome ?? "?"));
-  if (mfi.outcome === "red" && mfi.step) parts.push(`step ${escapeHtml(mfi.step)}`);
+  // gap-dashboard-status-tag-badges: landed/red/unknown were bare <strong> text with no background,
+  // so the outcome blended into the row copy. Reuse the .tag soft-badge set (landed → tag-positive,
+  // red → tag-accent, unknown → tag-neutral); the failing step tag shares tag-neutral so both read
+  // as one badge family. Reason/lock/suite/sha stay plain text.
+  if (mfi.outcome === "landed") parts.push(html`<span class="tag tag-positive">landed</span>`);
+  else if (mfi.outcome === "red") parts.push(html`<span class="tag tag-accent">red</span>`);
+  else parts.push(html`<span class="tag tag-neutral">${escapeHtml(mfi.outcome ?? "?")}</span>`);
+  if (mfi.outcome === "red" && mfi.step) parts.push(html`<span class="tag tag-neutral">step ${escapeHtml(mfi.step)}</span>`);
   if (showReason && mfi.reason != null) parts.push(html`<span style="font-size:0.75rem;color:var(--color-neutral-700)">${escapeHtml(mfi.reason)}</span>`);
   // gap-dashboard-fanin-monospace-ids: sha/lock are git hash / duration data — same monospace stack as
   // the 「最近提交」 card (serve-dashboard.ts) and the system resources card (serve-system.ts), so they

@@ -44,15 +44,22 @@ test("AC1: taskIdFromSubject extracts the task id from the four subject shapes; 
   // Form 4 — implementation commit: `<id>: <实现说明>`.
   assert.equal(taskIdFromSubject("gap-123: implement the fix"), "gap-123");
 
-  // Form 5 — `<type>: <id> <说明>`: a conventional type, then a known-prefix task id (the AC6
-  // reconciliation form — real commits like `test: gap-… 独立闭合确认` / `fix: gap-… — …`).
+  // Form 5 — `<type|scope>: <id> <说明>`: a conventional type OR a worker scope prefix, then a
+  // known-prefix task id (the AC6 reconciliation form — real commits like `test: gap-… 独立闭合确认` /
+  // `fix: gap-… — …` / `webui: gap-… 实现（…）`). The id's known prefix is the guard, not the type.
   assert.equal(taskIdFromSubject("test: gap-123 独立闭合确认"), "gap-123");
   assert.equal(taskIdFromSubject("fix: gap-123 — address the review finding"), "gap-123");
+  assert.equal(taskIdFromSubject("webui: gap-dashboard-status-tag-badges 实现（补 --color-positive-100 + .tag-positive，goal/fan-in 状态词改徽章）"), "gap-dashboard-status-tag-badges");
 
   // Form 6 — trailing-parens id: `<说明> (gap-…)` (the AC6 reconciliation form for subjects whose id
   // sits in a trailing parenthetical, not the colon position — real commit `dashboard: 顶部行改 …
   // (gap-dashboard-top-row-asymmetric-columns)`).
   assert.equal(taskIdFromSubject("dashboard: 顶部行改 3:2 非对称分栏，sys+mgr 堆叠右列 (gap-dashboard-top-row-asymmetric-columns)"), "gap-dashboard-top-row-asymmetric-columns");
+
+  // Form 4 known-prefix guard: a component/page-name prefix (`git-history:`) must NOT be taken as a
+  // task id — the subject falls through to Form 6 and extracts the trailing-parens id (gap-taskid-
+  // from-subject-form4-prefix-guard — the real `git-history: … (gap-…)` implementation commit).
+  assert.equal(taskIdFromSubject("git-history: full-width opaque sticky legend + stale comment fix (gap-git-graph-no-bounded-scroll-panel)"), "gap-git-graph-no-bounded-scroll-panel");
 
   // Fail-visible: an unrelated conventional-commit subject returns null (never a guess).
   assert.equal(taskIdFromSubject("chore: re-anchor quay-init-closure-ratchet baseline"), null);

@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-status-tag-badges
 title: Fan-in/Goal 卡状态文字改用既有 .tag 语义徽章组件（补 .tag-positive 令牌）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -41,24 +41,25 @@ Dashboard 视觉改进方案核对认定的三个高性价比项之一：组件�
    landed/red 两组状态各自的映射。
 
 ## Acceptance Criteria
-- [ ] `webui-modernist.css` 新增 `--color-positive-100`（或等价浅绿背景 token）与 `.tag-positive`
+- [x] `webui-modernist.css` 新增 `--color-positive-100`（或等价浅绿背景 token）与 `.tag-positive`
       规则，可用 `grep -n "tag-positive" packages/quay/src/webui-modernist.css` 验证存在。
-- [ ] `renderGoalCard` 对 fresh/stale/NOT-EVALUATED 三态分别输出 `tag-positive`/`tag-accent`/
+- [x] `renderGoalCard` 对 fresh/stale/NOT-EVALUATED 三态分别输出 `tag-positive`/`tag-accent`/
       `tag-neutral` class，单测按状态值逐一断言（不是仅断言"包含 tag 字样"）。
-- [ ] fan-in 卡对 landed/red 两种 outcome 分别输出 `tag-positive`/`tag-accent` class，单测逐一断言。
-- [ ] `webui-modernist-sync.test.mjs`（既有的 CSS 同步校验测试）随改动一起跑绿，不产生新的漂移红。
+- [x] fan-in 卡对 landed/red 两种 outcome 分别输出 `tag-positive`/`tag-accent` class，单测逐一断言。
+- [x] `webui-modernist-sync.test.mjs`（既有的 CSS 同步校验测试）随改动一起跑绿，不产生新的漂移红。
 
 ## Definition of Done
-- [ ] 代码改动落在 `webui-modernist.css`、`serve-dashboard.ts`、`serve-task.ts`（`renderFanInCell`
+- [x] 代码改动落在 `webui-modernist.css`、`serve-dashboard.ts`、`serve-task.ts`（`renderFanInCell`
       涉及处）之内。
-- [ ] `packages/quay/test/gap-dashboard-status-tag-badges.test.mjs` 存在且按状态值断言具体 class
+- [x] `packages/quay/test/gap-dashboard-status-tag-badges.test.mjs` 存在且按状态值断言具体 class
       名，随 scoped gate 跑绿。
-- [ ] 生产 `/dashboard` 页面人工截图核实：goal 卡的 fresh 标签与 fan-in 卡的 landed/red 标签均显示为
-      浅底色徽章而非裸色文字。
+- [ ] 生产 `/dashboard` 页面人工截图核实：goal 卡 fresh 标签与 fan-in 卡 landed/red 标签显示为浅底色徽章而非裸色文字（待外部）
 
 ## Touches
+- docs/design/quay-webui-improved-2026-08-16/_ds/modernist-40217566-87fa-42b1-9cc0-36027903691f/styles.css
 - packages/quay/src/webui-modernist.css
 - packages/quay/src/serve-dashboard.ts
 - packages/quay/src/serve-task.ts
+- packages/quay/test/gap-dashboard-fanin-panel-and-timeline-bars.test.mjs
 - packages/quay/test/gap-dashboard-status-tag-badges.test.mjs
 - tasks/gap-dashboard-status-tag-badges.md

@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 import type { ProviderClient } from "./provider-client.ts";
-import { readLive, readSystem, readManagerLight, readTests, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord, type DriverKindReading } from "./observation.ts";
+import { readLive, readSystem, readManagerLight, readTests, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord, type DriverKindReading, type InFlightTask } from "./observation.ts";
 import { TASK_STATUS, type GoalRecord } from "./abi.ts";
 import type { Manifest } from "./serve-render.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime } from "./serve-render.ts";
@@ -58,6 +58,8 @@ export function renderLiveCard(
   live: LiveResult,
   nowMs: number = Date.now(),
   tasks?: Array<{ id?: unknown; title?: unknown }>,
+  records?: WorkerOutcomeRecord[],
+  hours?: number,
 ): string {
   // gap-dashboard-fanin-panel-and-timeline-bars I: join the in-flight taskId to the task summary
   // (already fetched on the same /dashboard + /dashboard/cards requests) so each row can carry its
@@ -88,16 +90,23 @@ export function renderLiveCard(
       ${title != null ? html`<div style="color:var(--color-text);font-size:0.75rem">${escapeHtml(title)}</div>` : ""}
     </div>`;
   }).join("");
-  // gap-dashboard-cards-layout-and-livecard-swimlane AC5: an in-flight swimlane (one lane per task,
-  // open [startedAtMs, nowMs] segment) mirrors the tests/fan-in timeline bars the human asked for.
-  const swimlane = live.status === "ok" && live.inFlight.length > 0
-    ? renderLiveSwimlaneSvg(live.inFlight, DEFAULT_TIMELINE_HOURS, nowMs)
+  // gap-dashboard-live-swimlane-fixed-lane-gantt-timeline: the once in-flight-only swimlane is now a
+  // fixed-5-lane gantt that ALSO renders history (worker-outcome.jsonl) — merge the two sources and
+  // greedily pack them onto FIXED_GANTT_LANES lanes, so throughput / idle gaps / long-tail blocking
+  // are readable, not just the current in-flight set. (The superseded one-lane-per-task swimlane —
+  // gap-dashboard-cards-layout-and-livecard-swimlane AC5 — lives on as renderLiveSwimlaneSvg.)
+  const windowHours = hours ?? DEFAULT_TIMELINE_HOURS;
+  const ganttIntervals = live.status === "ok"
+    ? mergeLiveAndHistoryIntervals(live.inFlight, records ?? [], nowMs - windowHours * 3_600_000, nowMs)
+    : [];
+  const gantt = ganttIntervals.length > 0
+    ? renderLiveGanttSvg(ganttIntervals, windowHours, nowMs)
     : "";
   return html`<div id="live-card" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:6px">
     <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">循环脉搏</div>
     <div style="font-weight:800">${escapeHtml(liveStateText)}</div>
     <p style="margin:0;font-size:0.8rem;opacity:0.8">在飞 ${live.inFlight.length} · 并发 ${live.concurrency}</p>
-    ${swimlane}
+    ${gantt}
     ${live.status === "ok" && live.inFlight.length > 0 ? html`<div style="display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--color-divider);padding-top:6px">${liveMiniList}</div>` : ""}
     <a href="/live" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Live →</a>
   </div>`;
@@ -275,6 +284,190 @@ export function renderLiveSwimlaneSvg(
 ${axis}
 ${bars}
 ${labels}
+${leftLabel}
+${rightLabel}
+</svg>`;
+}
+
+// ── 固定 5 泳道甘特图（循环脉搏卡，gap-dashboard-live-swimlane-fixed-lane-gantt-timeline）───────
+// The old swimlane (renderLiveSwimlaneSvg above, still exported + tested) drew ONE lane per in-flight
+// task with an open [startedAtMs, now] segment — history (already-ended tasks) was invisible, so
+// throughput / idle gaps / long-tail blocking (a 41-min fan-in) could not be read. The gantt below
+// merges in-flight (readLive) + history (worker-outcome.jsonl) into ONE interval list, greedily packs
+// it onto FIXED_GANTT_LANES lanes (== the dispatch concurrency cap), and renders every block with a
+// native `<title>` hover (task id · phase/final-state · duration · start→end). No new colour-token
+// system: colours come from livePhaseColorToken (in-flight) / fanInOutcomeColorToken + final_state
+// (history), the SAME three token functions the rest of the dashboard already uses.
+
+/** The dispatch concurrency cap — also the fixed Y-axis lane count ("this is the concurrency cap").
+ *  Matches the driver's FIXED_DISPATCH_CAP so the two can never drift apart. */
+export const FIXED_GANTT_LANES = 5;
+
+/** A merged in-flight-or-historical run interval for the liveCard gantt. `phase` (in-flight) and
+ *  `finalState`/`fanInOutcome` (historical) are mutually exclusive: exactly one side is non-null. */
+export interface LiveGanttInterval {
+  taskId: string;
+  runId: string;
+  startMs: number;
+  endMs: number;
+  phase: string | null;
+  finalState: string | null;
+  fanInOutcome: string | null;
+}
+
+/** Merge readLive's in-flight runs (open interval to `now`) with worker-outcome history (closed
+ *  interval, filtered to `[windowStartMs, nowMs]`) into ONE interval list, deduplicated by `run_id`
+ *  (a run that is both in-flight AND already on the outcome carrier appears once). Pure — no I/O.
+ *  In-flight wins the dedup (added first); a record with a null/empty `run_id` cannot collide and is
+ *  always kept (dropping it would lose history for no dedup benefit). */
+export function mergeLiveAndHistoryIntervals(
+  inFlight: InFlightTask[],
+  records: WorkerOutcomeRecord[],
+  windowStartMs: number,
+  nowMs: number,
+): LiveGanttInterval[] {
+  const seen = new Set<string>();
+  const out: LiveGanttInterval[] = [];
+  const add = (iv: LiveGanttInterval): void => {
+    if (iv.runId !== "") {
+      if (seen.has(iv.runId)) return;
+      seen.add(iv.runId);
+    }
+    out.push(iv);
+  };
+  for (const t of inFlight) {
+    if (!Number.isFinite(t.startedAtMs) || t.startedAtMs > nowMs) continue;
+    add({ taskId: t.taskId, runId: t.runId, startMs: t.startedAtMs, endMs: nowMs, phase: t.phase, finalState: null, fanInOutcome: null });
+  }
+  for (const r of records) {
+    const startMs = r.started_at != null ? Date.parse(r.started_at) : NaN;
+    const endMs = r.ended_at != null ? Date.parse(r.ended_at) : NaN;
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) continue;
+    if (endMs < windowStartMs || startMs > nowMs) continue;
+    add({ taskId: r.task ?? "", runId: r.run_id ?? "", startMs, endMs, phase: null, finalState: r.final_state, fanInOutcome: r.mechanical_fan_in?.outcome ?? null });
+  }
+  return out;
+}
+
+/** Greedy "meeting-room" packing of intervals onto ≤ maxLanes lanes (sorted by start, assigned to the
+ *  earliest lane whose last interval has ended). Returns the packed lanes PLUS an explicit `overflow`
+ *  count: when a moment has > maxLanes overlapping intervals (e.g. a fan-in phase not counted against
+ *  the driver's worker cap), the excess is NEVER silently dropped or index-clipped — it surfaces as a
+ *  visible "+N 更多" badge, not a swallowed interval. (The bounded-overlap ⇒ ≤5-lane convergence claim
+ *  holds only when the window's true concurrency never exceeds the cap; the overflow arm is the honest
+ *  degradation when that assumption breaks.) */
+export function packLanes(
+  intervals: LiveGanttInterval[],
+  maxLanes: number = FIXED_GANTT_LANES,
+): { lanes: LiveGanttInterval[][]; overflow: number } {
+  const sorted = [...intervals].sort((a, b) => (a.startMs - b.startMs) || (a.endMs - b.endMs));
+  const lanes: LiveGanttInterval[][] = [];
+  const laneEnds: number[] = [];
+  let overflow = 0;
+  for (const iv of sorted) {
+    let lane = -1;
+    for (let i = 0; i < lanes.length; i++) {
+      if (laneEnds[i] <= iv.startMs) { lane = i; break; }
+    }
+    if (lane >= 0) {
+      lanes[lane].push(iv);
+      laneEnds[lane] = iv.endMs;
+    } else if (lanes.length < maxLanes) {
+      lanes.push([iv]);
+      laneEnds.push(iv.endMs);
+    } else {
+      overflow++;
+    }
+  }
+  return { lanes, overflow };
+}
+
+/** A merged interval → the card's colour token. In-flight by phase (livePhaseColorToken); history by
+ *  fan-in outcome first (fanInOutcomeColorToken), then final_state (completed → positive; failed/
+ *  killed/timed-out → accent-800; exited-not-landed → accent-700; else neutral). Bare token name so
+ *  the SVG writes `fill="var(--color-…)"` from ONE source, exactly like the existing helpers. */
+function ganttIntervalColorVar(iv: LiveGanttInterval): string {
+  if (iv.phase != null) return livePhaseColorToken(iv.phase);
+  const byFanIn = fanInOutcomeColorToken(iv.fanInOutcome);
+  if (byFanIn !== "--color-neutral-400") return byFanIn;
+  if (iv.finalState === "completed") return "--color-positive-700";
+  if (iv.finalState === "failed" || iv.finalState === "killed" || iv.finalState === "timed-out") return "--color-accent-800";
+  if (iv.finalState === "exited-not-landed") return "--color-accent-700";
+  return "--color-neutral-400";
+}
+
+/** In-flight execution phase → the short label a block's `<title>` carries (mirrors renderLiveCard's
+ *  tag wording, so hover text and the mini-list tag never drift apart). */
+function phaseLabel(phase: string | null): string {
+  return phase === "landed" ? "已落地" : phase === "awaiting-land" ? "待落地" : phase === "fan-in" ? "fan-in" : "实现中";
+}
+
+/** Fixed-5-lane gantt SVG for the liveCard (replaces renderLiveSwimlaneSvg as the card's swimlane):
+ *  `intervals` are the ALREADY-merged in-flight + history list (see mergeLiveAndHistoryIntervals);
+ *  greedily packs onto FIXED_GANTT_LANES lanes and renders all 5 lane guide lines even when some are
+ *  empty (the "this is the concurrency cap" visual semantic). Each surviving interval renders exactly
+ *  ONE `<rect>` carrying a native `<title>` hover (task id · phase/final-state · duration · start→end);
+ *  the axis/guide-lines/labels use `<line>`/`<text>` so the `<rect` count stays exact. Returns "" when
+ *  no interval survives (mirrors renderLiveSwimlaneSvg's no-rows contract). */
+export function renderLiveGanttSvg(
+  intervals: LiveGanttInterval[],
+  windowHours: number,
+  nowMs: number,
+): string {
+  if (intervals.length === 0) return "";
+  const { lanes, overflow } = packLanes(intervals, FIXED_GANTT_LANES);
+
+  const windowStartMs = nowMs - windowHours * 3_600_000;
+  const spanMs = windowHours * 3_600_000;
+  const W = 600;
+  const pad = 4;
+  const plotL = pad;
+  const plotW = W - 2 * pad;
+  const laneH = 16;
+  const barH = 10;
+  const top = 8;
+  const axisY = top + FIXED_GANTT_LANES * laneH + 6;
+  const H = axisY + 12;
+  const X = (t: number): number => plotL + ((t - windowStartMs) / spanMs) * plotW;
+  const hhmm = (t: number): string => {
+    const d = new Date(t);
+    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  };
+
+  const laneLines: string[] = [];
+  for (let i = 0; i < FIXED_GANTT_LANES; i++) {
+    const gy = (top + i * laneH + laneH - 4).toFixed(1);
+    laneLines.push(`<line class="lane-line" x1="${plotL}" y1="${gy}" x2="${W - pad}" y2="${gy}" stroke="var(--color-neutral-300)" stroke-dasharray="2 2"></line>`);
+  }
+
+  const bars: string[] = [];
+  for (let i = 0; i < lanes.length; i++) {
+    const y = top + i * laneH;
+    for (const iv of lanes[i]) {
+      const x0 = X(Math.max(iv.startMs, windowStartMs));
+      const x1 = X(Math.min(iv.endMs, nowMs));
+      const w = Math.max(x1 - x0, 1.5);
+      const duration = formatDurationMs(Math.max(0, iv.endMs - iv.startMs));
+      const state = iv.phase != null ? phaseLabel(iv.phase) : (iv.finalState ?? "unknown");
+      const startIso = new Date(iv.startMs).toISOString();
+      const endIso = new Date(iv.endMs).toISOString();
+      bars.push(`<rect x="${x0.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${barH}" rx="2" fill="var(${ganttIntervalColorVar(iv)})"><title>${escapeHtml(`${iv.taskId} · ${state} · ${duration} · ${startIso} → ${endIso}`)}</title></rect>`);
+    }
+  }
+
+  const overflowLabel = overflow > 0
+    ? `<text x="${W - pad}" y="${top}" font-size="9" font-weight="700" fill="var(--color-accent-800)" text-anchor="end">+${overflow} 更多</text>`
+    : "";
+
+  const axis = `<line x1="${plotL}" y1="${axisY}" x2="${W - pad}" y2="${axisY}" stroke="var(--color-neutral-300)"></line>`;
+  const leftLabel = `<text x="${plotL}" y="${H - 1}" font-size="9" fill="var(--color-neutral-700)">${hhmm(windowStartMs)}</text>`;
+  const rightLabel = `<text x="${W - pad}" y="${H - 1}" font-size="9" fill="var(--color-neutral-700)" text-anchor="end">${hhmm(nowMs)}</text>`;
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="循环脉搏甘特图（固定 ${FIXED_GANTT_LANES} 泳道）" style="width:100%;height:auto;margin-top:4px;display:block">
+${laneLines.join("\n")}
+${bars.join("\n")}
+${overflowLabel}
+${axis}
 ${leftLabel}
 ${rightLabel}
 </svg>`;
@@ -767,24 +960,35 @@ export function renderGoalCard(
   const activeGoals = goals.filter((g) => g.kind === "goal" && g.status === "active");
   const activeCount = activeGoals.length;
 
-  // gap-webui-a11y-focus-ring-and-token-contrast-unvalidated: the NOT-EVALUATED fallback was
-  // --color-neutral-400 (#bab6b6) = 1.80:1 on --color-bg — unreadable text. Muted-but-readable
-  // --color-neutral-700 (#605d5d) keeps the "not yet judged" semantics at 5.83:1.
-  const stalenessColor = (s: "fresh" | "stale" | "NOT-EVALUATED"): string =>
-    s === "fresh" ? "var(--color-positive-700)" : s === "stale" ? "var(--color-accent-800)" : "var(--color-neutral-700)";
+  // gap-dashboard-status-tag-badges: the three-state marker was bare inline color text
+  // (color:var(--color-*);font-weight:700) with no background/border, so it blended into the body
+  // copy on scan. The existing .tag soft-badge components (never consumed before) give it a
+  // background + padding. The per-state colors are the SAME calibrated tokens the inline style used
+  // (gap-webui-a11y-focus-ring-and-token-contrast-unvalidated: fresh → positive-700, stale →
+  // accent-800, NOT-EVALUATED → neutral-700 at 5.83:1) — now carried by .tag-positive/.tag-accent/
+  // .tag-neutral rather than inline.
+  const stalenessClass = (s: "fresh" | "stale" | "NOT-EVALUATED"): string =>
+    s === "fresh" ? "tag-positive" : s === "stale" ? "tag-accent" : "tag-neutral";
 
   const rows = activeGoals.map((g) => {
     const gid = String(g.id);
     const acs = goals.filter((r) => String(r.goal ?? "") === gid);
     const achieved = acs.filter((r) => r.status === "achieved").length;
     const state = goalStaleness(gid, goals, staleMs, nowMs);
+    // gap-dashboard-goal-card-ac-progress-bar: 「AC 达成 x/y」旁加一条 mini 进度条——复用
+    // renderTaskCard bar() 的 `width:{pct}%` 分段条手法，不引入新组件/新依赖。acs.length === 0
+    // 时不渲染进度条（只保留纯文本），避免除零产生 NaN/Infinity 宽度；纯文本读者/无障碍场景仍可读。
+    // 填充色复用既有 token --color-positive-700（同 staleness 的 fresh 态），不引入新十六进制色值。
+    const acBar = acs.length > 0
+      ? html`<div style="height:4px;width:100%;background:var(--color-neutral-200);border-radius:999px;overflow:hidden;margin-top:3px"><div style="width:${((achieved / acs.length) * 100).toFixed(1)}%;height:100%;background:var(--color-positive-700)"></div></div>`
+      : "";
     return html`<div style="display:flex;flex-direction:column;gap:2px;font-size:0.78rem;line-height:1.4">
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem;flex-wrap:wrap">
         <a href="/goal/${encodeURIComponent(gid)}" style="color:var(--color-text);text-decoration:none;flex:none">${escapeHtml(gid)}</a>
-        <span style="flex:none;color:${stalenessColor(state)};font-weight:700">${escapeHtml(state)}</span>
+        <span class="tag ${stalenessClass(state)}" style="flex:none">${escapeHtml(state)}</span>
       </div>
       <div style="color:var(--color-text);font-size:0.75rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(String(g.title ?? ""))}</div>
-      <div style="color:var(--color-neutral-700)">AC 达成 ${achieved}/${acs.length}</div>
+      <div style="color:var(--color-neutral-700)">AC 达成 ${achieved}/${acs.length}${acBar}</div>
     </div>`;
   }).join("");
 
@@ -991,12 +1195,15 @@ export function renderDashboardPage(
 ): string {
   const nowMs = opts.nowMs ?? Date.now();
   const hours = opts.hours ?? DEFAULT_TIMELINE_HOURS;
-  const liveCard = renderLiveCard(d.live, nowMs, d.tasks);
+  // gap-dashboard-live-swimlane-fixed-lane-gantt-timeline: read the worker-outcome history ONCE and
+  // feed it to BOTH the liveCard gantt and the fan-in card (same data source, no second I/O path).
+  const workerOutcomes = opts.workspaceRoot != null ? readWorkerOutcomeRecords(opts.workspaceRoot) : [];
+  const liveCard = renderLiveCard(d.live, nowMs, d.tasks, workerOutcomes, hours);
   const sysCard = renderSysCard(d.sys);
   const mgrCard = renderMgrCard(d.mgr);
   const taskCard = renderTaskCard(d.tasks);
   const testsCard = renderTestsCard(d.tests, d.suiteRun, { hours, nowMs });
-  const fanInCard = renderFanInCard(opts.workspaceRoot, { hours, nowMs });
+  const fanInCard = renderFanInCardFromRecords(workerOutcomes, { hours, nowMs });
   const { cap, staleMs } = readGoalPolicy(opts.workspaceRoot);
   const goalCard = renderGoalCard(d.goals ?? [], { cap, staleMs, nowMs });
 
@@ -1053,14 +1260,17 @@ export function buildCardsPayload(args: {
   staleMs: number;
 }): Record<string, unknown> {
   const { live, sys, mgr, tests, suiteRun, tasks, goals, workspaceRoot, hours, cap, staleMs } = args;
+  // gap-dashboard-live-swimlane-fixed-lane-gantt-timeline: same single-read worker-outcome history fed
+  // to both the liveCard gantt and the fan-in card (the /dashboard/cards auto-refresh path).
+  const workerOutcomes = workspaceRoot != null ? readWorkerOutcomeRecords(workspaceRoot) : [];
   return {
-    liveCard: renderLiveCard(live, Date.now(), tasks),
+    liveCard: renderLiveCard(live, Date.now(), tasks, workerOutcomes, hours),
     testsCard: renderTestsCard(tests, suiteRun, { hours }),
     sysCard: renderSysCard(sys),
     mgrCard: renderMgrCard(mgr),
     taskCard: renderTaskCard(tasks),
     goalCard: renderGoalCard(goals, { cap, staleMs }),
-    faninCard: renderFanInCard(workspaceRoot, { hours }),
+    faninCard: renderFanInCardFromRecords(workerOutcomes, { hours }),
     sysRaw: {
       cpuStallAvg10: sys.resourceGate.cpuStallAvg10,
       loadAvg: sys.resourceGate.loadAvg,

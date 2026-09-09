@@ -96,6 +96,15 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
     "AC-203 record: valid record written with has_plugin_dir=false literal + driver_alive=1 + carrier_records>0");
   assert.match(r.stdout, /ac203-record\(dead-driver\) refused=1/,
     "AC-203 record: a dead-driver (driver_alive=0) record is refused — the criterion can take false");
+  // AC-201 controls (gap-ac201-productization-verification-build-sha-tgz-sha256-record):
+  // the --selfcheck must ALSO exercise the AC-201 record append positive/negative controls — positive
+  // injects a 40-hex BUILD_SHA + 64-hex SHA256_QUAY and asserts a top-level ac=GOAL-009-AC-201 record
+  // with both fields non-empty (top-level fields, NOT a detail string); negative (empty BUILD_SHA)
+  // writes nothing (缺输入不写, 硬规则 3b).
+  assert.match(r.stdout, /ac201-record\(positive\) written=1 build_sha_len=40 tgz_sha256_len=64 ac_count=1/,
+    "AC-201 positive: 40-hex build_sha + 64-hex tgz_sha256 written as top-level fields");
+  assert.match(r.stdout, /ac201-record\(negative,no-build-sha\) written=0 lines=1/,
+    "AC-201 negative: empty BUILD_SHA writes nothing (hard rule 3b)");
   // AC-214 freshness anchor helper (gap-ac214-freshness-anchor-build-sha-missing-on-203-205-207):
   // the GOAL-009 anchor helper must append top-level build_sha (the AC-214 meta-criterion's only
   // recognized anchor field) on a 40-hex BUILD_SHA, and fail closed (no write, non-zero) on an
@@ -104,6 +113,40 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
     "positive control: a 40-hex BUILD_SHA ⇒ a GOAL-009 record with top-level build_sha is written");
   assert.match(r.stdout, /goal009-anchor\(negative\) rc=1 lines=1→1/,
     "negative control: an empty BUILD_SHA ⇒ no write and non-zero (fail-closed, 硬规则 3b)");
+  // AC-206 (gap-ac206-goals-tasks-dual-carrier-quay-init-goals-closed-set): the dual-carrier record
+  // writes the four boolean fields verbatim, refuses an empty-host record (fail-closed), and truthfully
+  // writes goals_dir_created=false when goals/ is missing (缺件如实非静默, 缺值≠合格).
+  assert.match(r.stdout, /ac206-record\(valid\) wrote=1 fields_ok=1/,
+    "AC-206 record: valid record written with all four boolean fields true (dual carrier)");
+  assert.match(r.stdout, /ac206-record\(goals-missing\) neg_ok=1/,
+    "AC-206 record: goals/ missing ⇒ goals_dir_created=false still written (缺件如实非静默)");
+  assert.match(r.stdout, /ac206-record\(empty-host\) refused=1/,
+    "AC-206 record: empty host ⇒ refused (fail-closed, 缺值≠合格)");
+  // AC-204 (gap-ac204-quay-init-forbidden-prefixes-mcp-commands-hooks-enable-declared): the forbidden-
+  // surface record writes forbidden_count=0 (integer) + enable_declared=true (literal) verbatim, and
+  // refuses a forbidden-copy record (forbidden_count=1) and a no-enable record (enable_declared=0) —
+  // the 成对判定 (禁列为空 alone is satisfiable by "lay nothing" ⇒ must pair with enable declared).
+  assert.match(r.stdout, /ac204-record\(valid\) wrote=1 fields_ok=1/,
+    "AC-204 record: valid record written with forbidden_count=0 + enable_declared=true verbatim");
+  assert.match(r.stdout, /ac204-record\(forbidden-copy\) refused=1/,
+    "AC-204 record: forbidden_count=1 ⇒ refused (fail-closed)");
+  assert.match(r.stdout, /ac204-record\(no-enable\) refused=1/,
+    "AC-204 record: enable_declared=0 ⇒ refused (fail-closed, 成对判定)");
+  // AC-205 (gap-ac205-session-delivery-channel-transcript-confirmed): transcript_confirmed is
+  // derived from transcript-delivery-check reading the transcript (probe present ⇒ delivered exit 0;
+  // absent ⇒ not) — never from a send exit code — and the record writes the three criterion fields
+  // verbatim + top-level build_sha, refusing shipped=false / transcript_confirmed=false / empty-host
+  // (fail-closed, AC4 negative).
+  assert.match(r.stdout, /ac205-transcript-check\(hit\/miss\) hit=1 miss=0/,
+    "AC-205 transcript check: probe present ⇒ delivered(exit 0), absent ⇒ not — the transcript read is the source");
+  assert.match(r.stdout, /ac205-record\(valid\) wrote=1 fields_ok=1/,
+    "AC-205 record: valid record written with shipped_from_installed_artifact=true + transcript_confirmed=true + build_sha");
+  assert.match(r.stdout, /ac205-record\(shipped=false\) refused=1/,
+    "AC-205 record: shipped_from_installed_artifact=false ⇒ refused (fail-closed)");
+  assert.match(r.stdout, /ac205-record\(transcript_confirmed=false\) refused=1/,
+    "AC-205 record: transcript_confirmed=false ⇒ refused (AC4 negative — send exit 0 but transcript not materialized)");
+  assert.match(r.stdout, /ac205-record\(empty-host\) refused=1/,
+    "AC-205 record: empty host ⇒ refused (fail-closed)");
 });
 
 test("AC1 — --selfcheck is hermetic: it does not touch a real install and runs offline", () => {
@@ -215,6 +258,36 @@ test("AC3 — unreadable SPEC ⇒ L1_NOT_EVALUATED=1 (distinct from qualified, h
       "--spec", path.join(tmp, "does-not-exist.md")]);
     assert.match(r.stdout, /L1_NOT_EVALUATED=1/, "missing SPEC must set L1_NOT_EVALUATED=1");
     assert.match(r.stdout, /L1_OK=0/, "and L1_OK must NOT be 1 (未评估 ≠ 合格)");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("AC4 — --verify-only (no build, no tgz sha256) does NOT append an AC-201 record (缺输入不写, 硬规则 3b)", () => {
+  // AC-201 record (ac=GOAL-009-AC-201) is only appended when BOTH BUILD_SHA and SHA256_QUAY are
+  // non-empty. In --verify-only mode there is no build and ac5_evaluate is never called ⇒
+  // SHA256_QUAY stays empty ⇒ append_ac201_record must not write. Prove the ac89 carrier contains
+  // the ordinary AC88 record but no GOAL-009-AC-201 record (缺输入 ≠ 合格, 硬规则 3b).
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "vc-ac201-"));
+  try {
+    const spec = path.join(tmp, "spec.md");
+    const root = path.join(tmp, "root");
+    fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+    fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(root, ".quay", "config.yml"), "providers: {}\n");
+    fs.writeFileSync(spec,
+      "QUAY-INIT-CLOSED-SET:BEGIN\n- .quay/config.yml\n- tasks/\nQUAY-INIT-CLOSED-SET:END\n");
+    const ac89 = path.join(tmp, "ac89.jsonl");
+    const r = run(["--verify-only", "--root", root, "--project", "ac201",
+      "--evidence", path.join(tmp, "e.json"), "--ac89", ac89, "--spec", spec]);
+    assert.equal(r.status, 0, `verify-only must exit 0:\n${r.stderr}`);
+    assert.match(r.stdout, /ac201 record NOT appended/,
+      "verify-only must report the AC-201 record was NOT appended (缺输入不写)");
+    const contents = fs.existsSync(ac89) ? fs.readFileSync(ac89, "utf8") : "";
+    assert.ok(/\"ac\":\"AC88\"/.test(contents),
+      "the ordinary AC88 record IS still appended in verify-only mode");
+    assert.ok(!/GOAL-009-AC-201/.test(contents),
+      "verify-only (no build, no tgz sha256) must NOT append an AC-201 record");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

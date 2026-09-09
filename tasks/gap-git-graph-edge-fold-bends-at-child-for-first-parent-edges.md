@@ -1,7 +1,7 @@
 ---
 id: gap-git-graph-edge-fold-bends-at-child-for-first-parent-edges
 title: git-history 跨列边折角固定在子节点端：kind="parent" 的边（分支收口回父分支）方向应在父节点端拐弯，反了
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -64,12 +64,12 @@ g.append("path")...attr("d", edgePath(trunkX + e.fromCol*laneGap, y(i), trunkX +
 
 ## AC
 
-- [ ] AC1 `kind==="merge"` 的跨列边折角位置不变（回归防护）：对本仓库当前 `readGitHistory`+`layoutGitGraph` 生产窗口，执行真实 `gitGraphClientScript()`（复用 `gap-git-graph-cross-column-edges-drawn-as-fixed-stubs-not-anchored.test.mjs` 的 vm+d3-mock 执行手法），对每条 `kind==="merge"` 的边解析 `d`，断言**第一个绘制命令是 `H`**；不满足数 = 0；`kind==="merge"` 边总数 > 0（非退化判据）。
-- [ ] AC2 `kind==="parent"` 的跨列边折角翻到父节点端（本任务的核心断言）：同一生产窗口，对每条 `kind==="parent"` 的边解析 `d`，断言**第一个绘制命令是 `V`**；不满足数 = 0；`kind==="parent"` 边总数 > 0（非退化判据）。
-- [ ] AC3 负控制：显式还原成"永远 `bendAtParent=false`"（即改动前的行为），重跑 AC2 的判据，断言不满足数 > 0——证明 AC2 的判据真的能取假，不是恒真断言。
-- [ ] AC4 端点不变：对全部跨列边（含 merge 和 parent 两类），解析 `d` 的起点/终点，断言起点 = `(trunkX+fromCol*laneGap, y(row))`、终点 = `(trunkX+toCol*laneGap, y(toRow))`，误差 ≤ 1px，不满足数 = 0——证明本次改动没有破坏已有的端点锚定行为（sibling done 任务的 AC1/AC2 不能被本次改动带红）。
-- [ ] AC5 命令集与圆角约束保持：对全部跨列边的 `d`，只允许出现 `M/H/V/Q` 字母（无 `L`），且每条边至少含一个非退化 `Q`（控制点与终点不重合，半径 `>0`）——复用 `edgePathViolation` 判据手法，不满足数 = 0。
-- [ ] AC6 判据不依赖硬编码的具体 commit hash/行号（本仓库持续在提交，钉死某一行数据的判据会随仓库演化失效）——AC1/AC2/AC3/AC4/AC5 全部基于"这一类边"的通用条件（`e.kind`），不是某一条具体边。
+- [x] AC1 `kind==="merge"` 的跨列边折角位置不变（回归防护）：对本仓库当前 `readGitHistory`+`layoutGitGraph` 生产窗口，执行真实 `gitGraphClientScript()`（复用 `gap-git-graph-cross-column-edges-drawn-as-fixed-stubs-not-anchored.test.mjs` 的 vm+d3-mock 执行手法），对每条 `kind==="merge"` 的边解析 `d`，断言**第一个绘制命令是 `H`**；不满足数 = 0；`kind==="merge"` 边总数 > 0（非退化判据）。
+- [x] AC2 `kind==="parent"` 的跨列边折角翻到父节点端（本任务的核心断言）：同一生产窗口，对每条 `kind==="parent"` 的边解析 `d`，断言**第一个绘制命令是 `V`**；不满足数 = 0；`kind==="parent"` 边总数 > 0（非退化判据）。
+- [x] AC3 负控制：显式还原成"永远 `bendAtParent=false`"（即改动前的行为），重跑 AC2 的判据，断言不满足数 > 0——证明 AC2 的判据真的能取假，不是恒真断言。
+- [x] AC4 端点不变：对全部跨列边（含 merge 和 parent 两类），解析 `d` 的起点/终点，断言起点 = `(trunkX+fromCol*laneGap, y(row))`、终点 = `(trunkX+toCol*laneGap, y(toRow))`，误差 ≤ 1px，不满足数 = 0——证明本次改动没有破坏已有的端点锚定行为（sibling done 任务的 AC1/AC2 不能被本次改动带红）。
+- [x] AC5 命令集与圆角约束保持：对全部跨列边的 `d`，只允许出现 `M/H/V/Q` 字母（无 `L`），且每条边至少含一个非退化 `Q`（控制点与终点不重合，半径 `>0`）——复用 `edgePathViolation` 判据手法，不满足数 = 0。
+- [x] AC6 判据不依赖硬编码的具体 commit hash/行号（本仓库持续在提交，钉死某一行数据的判据会随仓库演化失效）——AC1/AC2/AC3/AC4/AC5 全部基于"这一类边"的通用条件（`e.kind`），不是某一条具体边。
 
 ## DoD
 
