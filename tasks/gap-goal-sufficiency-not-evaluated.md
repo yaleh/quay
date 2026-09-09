@@ -27,9 +27,9 @@ goal_ac: AC-213
 
 ## AC
 
-- [ ] `node --no-warnings --experimental-strip-types --test plugin/test/goal-sufficiency-not-evaluated.test.mjs` 退出码 0（AC-213 criterion 逐字）
-- [ ] 负控制（expect 前半）：测试断言在域 AC 全 achieved（`goalAchievedFromRecords(records, goalId) === true`）时 `goalFlipDecision(records, goalId, {verdict:"not-evaluated"}) === false`——判不出 ≠ 通过、不触发 flip
-- [ ] 可区分性（expect 后半）：测试断言 `not-evaluated` 在轮记录里与 `covered` 不同形——驱动 `runGoalRound`（temp-root 缝）产出的 facts 中出现 `value.sufficiency` 且 `verdict === "not-evaluated"`（`grep -n "not-evaluated" plugin/test/goal-sufficiency-not-evaluated.test.mjs` 命中断言点）
+- [x] `node --no-warnings --experimental-strip-types --test plugin/test/goal-sufficiency-not-evaluated.test.mjs` 退出码 0（AC-213 criterion 逐字）
+- [x] 负控制（expect 前半）：测试断言在域 AC 全 achieved（`goalAchievedFromRecords(records, goalId) === true`）时 `goalFlipDecision(records, goalId, {verdict:"not-evaluated"}) === false`——判不出 ≠ 通过、不触发 flip
+- [x] 可区分性（expect 后半）：测试断言 `not-evaluated` 在轮记录里与 `covered` 不同形——驱动 `runGoalRound`（temp-root 缝）产出的 facts 中出现 `value.sufficiency` 且 `verdict === "not-evaluated"`（`grep -n "not-evaluated" plugin/test/goal-sufficiency-not-evaluated.test.mjs` 命中断言点）
 
 ## DoD
 
