@@ -1,7 +1,7 @@
 ---
 id: gap-webui-tests-page-timeline-gantt-truncated
 title: /tests 页「测试时间线」甘特图硬编码 TIMELINE_MAX_BARS=50，超过 50 个文件的轮次只画最慢 50 个，其余不可见
-status: todo
+status: ready
 labels:
   - gap
   - webui
