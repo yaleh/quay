@@ -73,6 +73,9 @@ test('正向：判 activate 的 draft AC 一轮后 flips 含 to=="active" 且目
     assert.equal(flip903.ok, true, 'AC-903 激活写成功（criterion true 可评估，P6 放行）');
 
     // 负控制 (a)：needs-human 的 AC-901 / hold 的 AC-902 不被激活。
+    // （re-anchor 在 runGoalRound 的分诊循环里结构上不可达——循环以 active GOAL 的 gid 过滤
+    // 名下 AC，`String(r.goal)===gid` 恒为合法 GOAL-NNN，triageDraftAc 的 re-anchor 前置恒假；
+    // 故驱动层的非 activate 判决只可能是 needs-human / hold 两态，此处逐态各取一对象。）
     const activeIds = new Set(flips.filter((f) => f.to === 'active').map((f) => f.id));
     assert.ok(!activeIds.has('AC-901'), 'needs-human 的 AC-901 不被激活（改坏=无视判决按牵引激活会红）');
     assert.ok(!activeIds.has('AC-902'), 'hold 的 AC-902 不被激活（改坏=无视判决按牵引激活会红）');
