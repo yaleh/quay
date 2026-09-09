@@ -32,6 +32,7 @@ import { QUAY_VERSION } from "./version.ts";
 import { parseFrontmatter } from "./frontmatter-store-base.ts";
 import { TASK_STATUS, isTaskStatus, type TaskStatus } from "./abi.ts";
 import { resolvePluginScript, resolvePluginScriptExec } from "./plugin-root.ts";
+import YAML from "yaml";
 
 const execFileP = promisify(execFile);
 
@@ -183,7 +184,13 @@ export interface LiveResult {
   status: ObservationStatus;
   reason: string | null;
   inFlight: InFlightTask[];
-  concurrency: number;
+  /**
+   * The worker concurrency CAP (`driverCap(root, "worker")` — drivers.yml `worker.cap`, or
+   * DEFAULT_DRIVER_CAP when absent). gap-dashboard-live-concurrency-duplicates-inflight-count: this
+   * is NOT the in-flight count — `inFlight.length` is. The old `concurrency` field duplicated
+   * `inFlight.length` and misled the display into showing two identical numbers side-by-side.
+   */
+  concurrencyCap: number;
   /** `/proc/pressure/cpu` `some avg10` — null when unavailable (non-Linux / unreadable). */
   cpuPressure: number | null;
   /**
@@ -1583,6 +1590,29 @@ export function readTaskStatusForLive(root: string, taskId: string): TaskStatus 
  *  `todo` carrying a start event is not evidence of terminality. */
 const NON_LIVE_TASK_STATUSES: ReadonlySet<string> = new Set([TASK_STATUS.DONE, TASK_STATUS.SUPERSEDED, TASK_STATUS.NEEDS_HUMAN]);
 
+// gap-dashboard-live-concurrency-duplicates-inflight-count: the worker concurrency CAP shown on the
+// dashboard. Core (packages/quay/src) must stay dependency-free on plugin/scripts — a STATIC import of
+// plugin/scripts/driver-config.ts breaks the npm-pack dist bundle (esbuild cannot resolve driver-config's
+// `yaml` from the plugin tree in the pack temp dir), and readLive is SYNC so the loadDriverRuntime-style
+// dynamic import is unavailable. This reader therefore mirrors driverCap(root,"worker") against the SAME
+// data source (plugin/scripts/drivers.yml kinds.worker.cap → DEFAULT_DRIVER_CAP fallback); the explicit
+// CLI --concurrency override is out of dashboard scope (Plan §4 — the dashboard reads static config).
+export const DEFAULT_DRIVER_CAP = 5; // concurrency-default-fallback: Core mirror of driver-config.ts DEFAULT_DRIVER_CAP
+
+/** Read the worker concurrency cap from drivers.yml, mirroring driverCap(root,"worker") (worker kind,
+ *  no explicit override). Absent/unparseable config degrades to DEFAULT_DRIVER_CAP — never throws. */
+function readWorkerCap(root: string): number {
+  try {
+    const text = fs.readFileSync(path.join(root, "plugin/scripts/drivers.yml"), "utf8");
+    const parsed = YAML.parse(text) as { kinds?: { worker?: { cap?: unknown } } } | null;
+    const cap = parsed?.kinds?.worker?.cap;
+    if (typeof cap === "number" && Number.isInteger(cap) && cap >= 1) return cap;
+  } catch {
+    // absent/unparseable drivers.yml → conservative default (fail-open, same as loadDriverConfig)
+  }
+  return DEFAULT_DRIVER_CAP;
+}
+
 /**
  * Live loop view: in-flight fast-mode tasks + elapsed minutes + concurrency + CPU pressure +
  * the loop-state discriminator. Degrades per the header contract; never throws.
@@ -1811,7 +1841,13 @@ export function readLive(
     cpuPressure = null; // non-Linux or unreadable — the row is simply omitted
   }
 
-  return { status, reason, inFlight, concurrency: inFlight.length, cpuPressure, liveState, liveExplanation, activity };
+  // gap-dashboard-live-concurrency-duplicates-inflight-count: the worker concurrency CAP is an
+  // INDEPENDENT data source (drivers.yml, not telemetry) — readWorkerCap degrades to the
+  // conservative DEFAULT_DRIVER_CAP, never a fabricated 0 (and never the in-flight count, which the
+  // old `concurrency` field duplicated).
+  const concurrencyCap = readWorkerCap(root);
+
+  return { status, reason, inFlight, concurrencyCap, cpuPressure, liveState, liveExplanation, activity };
 }
 
 /** Read a file, splitting it into `## `-headed sections and keeping the most recent `max` sections. */

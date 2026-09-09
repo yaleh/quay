@@ -128,7 +128,36 @@ test("AC1: readLive removes a released-worktree ghost (start-no-end + worktree a
     const live = readLive(root, { nowMs: Date.now() });
     assert.ok(!live.inFlight.some((t) => t.taskId === "GHOST-1"),
       "AC1: the released-worktree ghost is removed from readLive inFlight (not shown as 实现中)");
-    assert.equal(live.concurrency, 0, "AC1: the ghost does not inflate the in-flight concurrency count");
+    assert.equal(live.inFlight.length, 0, "AC1: the ghost does not inflate the in-flight count");
+    assert.ok(Number.isInteger(live.concurrencyCap) && live.concurrencyCap >= 1,
+      "AC1: concurrencyCap is the worker cap (an independent integer ≥1), not a duplicate of inFlight.length");
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test("AC1 (concurrencyCap): readLive returns concurrencyCap = driverCap(root,'worker') (drivers.yml worker.cap=7), distinct from inFlight.length (2)", () => {
+  // gap-dashboard-live-concurrency-duplicates-inflight-count AC1: the old `concurrency` field was
+  // just `inFlight.length` re-named, so the display showed two identical numbers. The new field is
+  // the REAL worker cap from drivers.yml — assert the two values DIFFER (7 vs 2), proving the cap is
+  // no longer a duplicate of the in-flight count.
+  const { parent, root, namespace } = ghostWorkspace("cap-distinct");
+  try {
+    // drivers.yml worker.cap=7 — the single source of truth driverCap(root,"worker") reads.
+    const scriptsDir = path.join(root, "plugin", "scripts");
+    fs.mkdirSync(scriptsDir, { recursive: true });
+    fs.writeFileSync(path.join(scriptsDir, "drivers.yml"), "version: 1\nkinds:\n  worker:\n    cap: 7\n", "utf8");
+    // Two in-flight tasks, each with its worktree slot occupied (so neither is trimmed as a ghost).
+    fs.mkdirSync(namespace, { recursive: true });
+    for (const id of ["CAP-A", "CAP-B"]) {
+      fs.mkdirSync(path.join(namespace, id), { recursive: true });
+      writeStartEvent(root, id, Date.now() - 60_000);
+    }
+    const live = readLive(root, { nowMs: Date.now() });
+    assert.equal(live.concurrencyCap, 7, "concurrencyCap === driverCap(root,'worker') === drivers.yml worker.cap (7)");
+    assert.equal(live.inFlight.length, 2, "inFlight.length is 2 (the two in-flight tasks)");
+    assert.notEqual(live.concurrencyCap, live.inFlight.length,
+      "concurrencyCap (7) ≠ inFlight.length (2) — the cap is no longer the same number duplicated");
   } finally {
     fs.rmSync(parent, { recursive: true, force: true });
   }
