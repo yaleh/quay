@@ -38,6 +38,7 @@ import {
   rewriteInvokers,
   deriveEntries,
   scanCoreReferences,
+  scanPluginSelfReferences,
   closureMissing,
 } from "../scripts/build-plugin-dist.mjs";
 
@@ -214,4 +215,90 @@ test("AC5 — a Core-referenced bundle (driver-runtime) is part of the closure; 
   const missing = closureMissing(required, ["package/plugin/scripts/dist/suite-execution-form-counter.js"]);
   assert.ok(missing.includes("driver-runtime"),
     "a tarball without dist/driver-runtime.js must be flagged (the gate sees Core's reference)");
+});
+
+// ── gap-driver-kinds-table-literal-not-in-dist-entry ────────────────────────────────────────────
+// The entry set was blind to plugin SOURCE's own spawn references: driver-runtime.ts's DRIVER_KINDS
+// `driver: "X.ts"` data-table fields (the 6 driver kinds) and its `path.join(…,"plugin","scripts",
+// "X.ts")` spawn helpers (send-to-session.ts / ready-pool-check.ts). A third-party
+// `quay driver start --kind promotion` resolves `<root>/plugin/scripts/promotion-driver.ts`, which
+// never shipped → GOAL-009's `driver not found`. These tests pin the mechanical derivation
+// (scanPluginSelfReferences over driver-runtime.ts) and the criterion's fail-ability.
+
+const REQUIRED_DRIVER_KINDS = [
+  "promotion-driver.ts",
+  "worker-driver.ts",
+  "outer-driver.ts",
+  "quality-gate-driver.ts",
+  "meta-driver.ts",
+  "goal-driver.ts",
+];
+
+/** Replicate the AC-202 criterion's required-vs-shipped check (the goal file's inline script). */
+function ac202Missing(pluginRoot) {
+  const { scripts, gateScripts } = deriveEntries(pluginRoot);
+  const shipped = new Set([...scripts, ...gateScripts].map((p) => p.split("/").pop()));
+  const rt = fs.readFileSync(path.join(pluginRoot, "scripts", "driver-runtime.ts"), "utf8");
+  const required = new Set();
+  for (const x of rt.matchAll(/driver:\s*"([A-Za-z0-9_.-]+\.ts)"/g)) required.add(x[1]);
+  for (const x of rt.matchAll(/"plugin",\s*"scripts",\s*"([A-Za-z0-9_.-]+\.ts)"/g)) required.add(x[1]);
+  return [...required].filter((n) => !shipped.has(n));
+}
+
+test("AC1/AC3 — deriveEntries DERIVES the 6 driver kinds + send-to-session.ts from driver-runtime.ts (plugin-self scan)", () => {
+  const { scripts } = deriveEntries(PLUGIN_ROOT);
+  for (const n of [...REQUIRED_DRIVER_KINDS, "send-to-session.ts"]) {
+    assert.ok(scripts.includes(`scripts/${n}`),
+      `${n} (a driver-runtime.ts spawn) must be a derived entry`);
+  }
+  assert.ok(scripts.includes("scripts/ready-pool-check.ts"),
+    "ready-pool-check.ts (defaultReadyPoolArgv) must be a derived entry");
+  // The AC-202 criterion's own check: shipped ⊇ required → no missing → exit 0.
+  assert.deepEqual(ac202Missing(PLUGIN_ROOT), [], "the AC-202 criterion must be satisfied (exit 0)");
+});
+
+test("AC5 — scanPluginSelfReferences derives by regex over driver-runtime.ts, not a literal list", () => {
+  const self = scanPluginSelfReferences(PLUGIN_ROOT);
+  assert.deepEqual([...self].sort(), [...REQUIRED_DRIVER_KINDS, "ready-pool-check.ts", "send-to-session.ts"].sort(),
+    "the scan must return exactly the two regex forms' matches from driver-runtime.ts");
+});
+
+test("AC4 — negative control: the 6 drivers + send-to-session are NOT derivable from the Core scan alone (the scan is load-bearing)", () => {
+  const core = scanCoreReferences();
+  for (const n of [...REQUIRED_DRIVER_KINDS, "send-to-session.ts"]) {
+    assert.ok(!core.has(n),
+      `${n} must NOT be derivable from the Core scan — disabling the plugin-self scan leaves it missing (criterion exit 1)`);
+  }
+});
+
+test("AC4 — negative control: the criterion takes false when a driver-runtime.ts reference names no shipped script", () => {
+  const dir = tmp();
+  try {
+    fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+    // A driver field naming a script that has no .ts file in the plugin root: the scan derives it
+    // but the `existing` intersection drops it, so shipped lacks it while the criterion's required
+    // set has it → missing → the criterion reports a defect rather than passing恒绿.
+    fs.writeFileSync(path.join(dir, "scripts", "driver-runtime.ts"),
+      'export const K = { promotion: { driver: "promotion-driver.ts" } };\n', "utf8");
+    assert.deepEqual(ac202Missing(dir), ["promotion-driver.ts"],
+      "a driver field whose target script does not exist must be reported missing (criterion exit 1)");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC4 — negative control: removing the driver field empties the derived set (the scan reads the source, not a hardcoded list)", () => {
+  const dir = tmp();
+  try {
+    fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "scripts", "driver-runtime.ts"),
+      'export const K = { promotion: { driver: "promotion-driver.ts" } };\n', "utf8");
+    assert.deepEqual([...scanPluginSelfReferences(dir)], ["promotion-driver.ts"],
+      "a driver field must be derived");
+    fs.writeFileSync(path.join(dir, "scripts", "driver-runtime.ts"), "export const K = {};\n", "utf8");
+    assert.deepEqual([...scanPluginSelfReferences(dir)], [],
+      "removing the driver field empties the derived set — the derivation is mechanical, not a literal");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

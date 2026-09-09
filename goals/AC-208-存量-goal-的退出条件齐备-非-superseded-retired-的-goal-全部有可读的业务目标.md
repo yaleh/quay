@@ -1,7 +1,7 @@
 ---
 id: AC-208
 title: 存量 GOAL 的退出条件齐备——非 superseded/retired 的 GOAL 全部有可读的业务目标
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-010
 criterion: test "$(node --no-warnings --experimental-strip-types

@@ -8,7 +8,7 @@
 //   AC1  执行真实客户端脚本（mock fetch + 恒可见 sentinel），一次 loadOlder() 触发 ≥2 次请求。
 //   AC2  负控制：内联重建旧写法（复位在 .finally、自链在 .then），请求数回落到 1 ⇒ 判据能区分新旧。
 //   AC3  结构判据：源文件里每一处 loadingOlder = false 的行号都小于自链 loadOlder() 调用点行号。
-//   AC4  终止条件：空 branches 响应 ⇒ finishOlder() 被调、sentinel 文案变「已加载到仓库最早提交」、
+//   AC4  终止条件：空 rows 响应 ⇒ finishOlder() 被调、sentinel 文案变「已加载到仓库最早提交」、
 //        且不再发起后续请求（无无限循环）。
 //   AC5  Playwright 生产实测（DoD 证据，非本文件自动化断言——本仓库无 headless-browser 依赖）。
 //
@@ -23,20 +23,19 @@ import { gitGraphClientScript } from "../src/serve-git.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-/** A minimal mainline commit (shape the client renderer reads: hash/t/subject/parents). */
+/** A minimal row (the shape the client renderer reads: hash/t/subject/parents/col/decorations/edges). */
 function commit(hash, t, subject) {
-  return { hash, t, ref: "develop", parents: 0, parentHashes: [], subject };
+  return { hash, t, ref: "", parents: 0, parentHashes: [], subject, col: 0, decorations: [], edges: [] };
 }
 
 /** A minimal ok GitGraphLayout JSON page for /git-history.json?before=…&limit=… (the loadOlder shape). */
-function page(commits) {
-  return { status: "ok", reason: null, branches: [{ kind: "mainline", ref: "develop", commits }] };
+function page(rows) {
+  return { status: "ok", reason: null, rows };
 }
 
 // ── minimal DOM + d3 mocks to EXECUTE the emitted client IIFE (not just compile it) ────────────
-// The renderer's d3 usage is chainable selections only (no .data().enter() on the mainline-only
-// path), so a self-returning selection with .node()/.each() suffices to run the whole IIFE to
-// completion and reach loadOlder's fetch chain.
+// The renderer's d3 usage is chainable selections only, so a self-returning selection with .node()/
+// .each() suffices to run the whole IIFE to completion and reach loadOlder's fetch chain.
 
 function makeNode() {
   return { getBBox: () => ({ x: 0, y: 0, width: 24, height: 12 }) };
@@ -63,14 +62,7 @@ function makeSel() {
 
 /** Execute gitGraphClientScript() in a fresh vm context; returns the state the tests assert on. */
 function runClient({ pages, seedCommits }) {
-  const layout = {
-    status: "ok",
-    reason: null,
-    branches: [{ kind: "mainline", ref: "develop", commits: seedCommits }],
-    commitCount: seedCommits.length,
-    overflowCount: 0,
-    textWidth: 400,
-  };
+  const layout = { status: "ok", reason: null, rows: seedCommits, commitCount: seedCommits.length };
   const sentinel = {
     textContent: "",
     getBoundingClientRect: () => ({ top: 0, left: 0, bottom: 0, right: 0, width: 0, height: 0 }),
@@ -81,7 +73,6 @@ function runClient({ pages, seedCommits }) {
     "git-graph-data": { textContent: JSON.stringify(layout) },
     "git-graph-sentinel": sentinel,
     "git-graph-coverage": { textContent: "" },
-    "git-graph-fit-width": null,
   };
   const fetchCalls = [];
   const queue = pages.slice();
@@ -146,7 +137,7 @@ test("AC2: the OLD ordering (reset in .finally, self-chain in .then) makes exact
     return Promise.resolve({ ok: true, json: () => Promise.resolve(page([commit("p1", 999, "older")])) })
       .then(function (res) {
         return res.json().then(function (next) {
-          if (!next || next.status !== "ok" || !next.branches || !next.branches.length) { olderDone = true; return; }
+          if (!next || next.status !== "ok" || !next.rows || !next.rows.length) { olderDone = true; return; }
           loadOlder(); // self-chain INSIDE .then() — loadingOlder is still true here, so it dead-returns
         });
       })

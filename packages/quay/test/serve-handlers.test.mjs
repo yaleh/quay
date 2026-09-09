@@ -20,7 +20,7 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
-import { layoutGitGraph, mainlineLane, renderGitHistoryPage, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, bucketSetOfFile, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript, taskRunsBlock, renderFanInCell, fanInLogPath, driverActionSpec, newSessionArgs, resumeSessionArgs, WEB_DRIVER_VERBS, WEB_DRIVER_KINDS } from "../src/serve-handlers.ts";
+import { layoutGitGraph, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, bucketSetOfFile, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, gitGraphClientScript, taskRunsBlock, renderFanInCell, fanInLogPath, driverActionSpec, newSessionArgs, resumeSessionArgs, WEB_DRIVER_VERBS, WEB_DRIVER_KINDS } from "../src/serve-handlers.ts";
 import { readGitHistory, readLive, liveSessionIdForPid, sessionTranscriptPath, isValidSessionId, readWorkerOutcomeRecords } from "../src/observation.ts";
 import { renderLivePage } from "../src/serve-live.ts";
 import { sendSessionFrames, verdictStateToDeliveryState, classifyReceipt, resolveSessionEndpoint, sendToSession, renderSendResult, HELD_EXPIRY_MS, WEB_SEND_FROM_NAME } from "../src/serve-send.ts";
@@ -52,161 +52,6 @@ function get(port, urlPath) {
     }).on("error", reject);
   });
 }
-
-/** A commit fixture (shape matches observation.GitHistoryCommit). `parentHashes` = parent hashes. */
-function c(hash, t, ref, parentHashes, subject) {
-  return { hash, t, ref, parents: parentHashes.length, parentHashes, subject };
-}
-
-/** A minimal ok GitHistoryResult for the pure layout. */
-function hist(commits, head, heads = {}) {
-  return { status: "ok", reason: null, commits, head, heads };
-}
-
-/** Lateral (non-mainline) lanes — the mainline is always `branches[0]`. */
-function laterals(layout) {
-  return layout.branches.filter((b) => b.kind !== "mainline");
-}
-
-// ── AC1 unit: layoutGitGraph computes the vertical trunk + branch fork/merge ──
-
-test("AC1: layoutGitGraph yields a vertical trunk (first-parent chain) + branch fork/merge edges", () => {
-  const t0 = 1_700_000_000;
-  const commits = [
-    c("a000000", t0, "master", [], "base"),
-    c("b000000", t0 + 1, "master", ["a000000"], "trunk two"),
-    c("x000000", t0 + 2, "task/x", ["b000000"], "branch commit"),
-    c("m000000", t0 + 3, "master", ["b000000", "x000000"], "merge task/x"),
-  ];
-  const layout = layoutGitGraph(hist(commits, "m000000", { master: "m000000", "task/x": "x000000" }));
-  assert.ok(layout, "an ok history yields a layout");
-  // mainline = the mainline-reachable commits, oldest → newest (branches[0] is the spine)
-  assert.deepEqual(mainlineLane(layout).commits.map((x) => x.hash), ["a000000", "b000000", "m000000"], "mainline is the first-parent chain, oldest-first");
-  assert.equal(mainlineLane(layout).ref, "master", "mainline carries the mainline ref name");
-  // the merge's second parent becomes a lateral lane: fork at b, merge at m
-  assert.equal(layout.branches.length, 2, "mainline + one branch lane");
-  const b = laterals(layout)[0];
-  assert.equal(b.ref, "task/x", "branch ref name");
-  assert.deepEqual(b.commits.map((x) => x.hash), ["x000000"], "branch commits are the lateral commits");
-  assert.equal(b.fork, "b000000", "fork point = the trunk commit the branch diverged from");
-  assert.equal(b.merge, "m000000", "merge point = the trunk merge commit");
-});
-
-test("AC1: a linear history has a mainline and NO lateral lanes (negative control)", () => {
-  const t0 = 1_700_000_000;
-  const commits = [
-    c("a000000", t0, "master", [], "base"),
-    c("b000000", t0 + 1, "master", ["a000000"], "two"),
-    c("c000000", t0 + 2, "master", ["b000000"], "three"),
-  ];
-  const layout = layoutGitGraph(hist(commits, "c000000", { master: "c000000" }));
-  assert.deepEqual(mainlineLane(layout).commits.map((x) => x.hash), ["a000000", "b000000", "c000000"], "mainline = whole chain");
-  assert.equal(layout.branches.length, 1, "no merge → mainline only, no lateral lanes");
-});
-
-test("AC2: branches are collapsed by default and carry full commits + time span for expansion", () => {
-  const t0 = 1_700_000_000;
-  const commits = [
-    c("a000000", t0, "master", [], "base"),
-    c("b000000", t0 + 1, "master", ["a000000"], "trunk"),
-    c("x100000", t0 + 2, "task/x", ["b000000"], "branch one"),
-    c("x200000", t0 + 3, "task/x", ["x100000"], "branch two"),
-    c("m000000", t0 + 4, "master", ["b000000", "x200000"], "merge task/x"),
-  ];
-  const layout = layoutGitGraph(hist(commits, "m000000", { master: "m000000", "task/x": "x200000" }));
-  const b = laterals(layout)[0];
-  assert.equal(b.collapsed, true, "AC2: branch is collapsed by default");
-  assert.equal(b.commits.length, 2, "the full commit list is present (for expansion)");
-  assert.deepEqual(b.commits.map((x) => x.hash), ["x100000", "x200000"], "branch commits oldest → newest");
-  assert.equal(b.firstT, t0 + 2, "firstT = oldest branch commit landing time");
-  assert.equal(b.lastT, t0 + 3, "lastT = newest branch commit landing time (the time span)");
-});
-
-test("degradation: non-ok or empty history yields no layout", () => {
-  assert.equal(layoutGitGraph({ status: "empty", reason: "x", commits: [], head: null, heads: {} }), null);
-  assert.equal(layoutGitGraph({ status: "error", reason: "y", commits: [], head: null, heads: {} }), null);
-  assert.equal(layoutGitGraph({ status: "ok", reason: null, commits: [], head: null, heads: {} }), null);
-});
-
-// ── gap-git-graph-omits-inflight-branches-and-summary-table-disjoint: summary table == graph ──
-// The summary table used to be built from groupCommitsByBranch (a --source-ref grouping) — a SECOND
-// branch model disjoint from the graph's fork/merge lanes. It now renders layout.branches + a 状态
-// column, so table and graph name the SAME set. These tests render the page directly on a pure
-// fixture (renderGitHistoryPage) and parse the summary table + the embedded #git-graph-data JSON.
-
-/** Strip HTML tags from a cell slice (the summary table has no nested <td>). */
-function stripTags(s) {
-  return String(s).replace(/<[^>]+>/g, "").trim();
-}
-
-/** Extract the summary table's header + data rows as arrays of plain-text cells. */
-function extractSummaryTable(html) {
-  const m = html.match(/<table>([\s\S]*?)<\/table>/);
-  if (!m) return { header: [], rows: [] };
-  const rowsHtml = [...m[1].matchAll(/<tr>([\s\S]*?)<\/tr>/g)].map((mm) => mm[1]);
-  const cellsOf = (rowHtml) => [...rowHtml.matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/g)].map((mm) => stripTags(mm[1]));
-  return { header: cellsOf(rowsHtml[0] ?? ""), rows: rowsHtml.slice(1).map(cellsOf) };
-}
-
-/** Parse the embedded #git-graph-data JSON payload. */
-function extractGraphData(html) {
-  const m = html.match(/<script type="application\/json" id="git-graph-data">([\s\S]*?)<\/script>/);
-  return m ? JSON.parse(m[1]) : null;
-}
-
-/** A fixture with one merged branch + one unmerged live branch (mirrors readGitHistory re-attribution:
- *  the merged branch's commit carries ref "develop" but its tip resolves to task/merged via heads). */
-function mergedAndOpenGitHistory() {
-  const t0 = 1_700_000_000;
-  const commits = [
-    c("a000000", t0, "develop", [], "base"),
-    c("b000000", t0 + 1, "develop", ["a000000"], "trunk two"),
-    c("m100000", t0 + 2, "develop", ["b000000"], "merged branch commit"),
-    c("mm00000", t0 + 3, "develop", ["b000000", "m100000"], "merge task/merged"),
-    c("o100000", t0 + 4, "task/open", ["mm00000"], "open branch commit one"),
-    c("o200000", t0 + 5, "task/open", ["o100000"], "open branch commit two"),
-  ];
-  return hist(commits, "mm00000", { develop: "mm00000", "task/merged": "m100000", "task/open": "o200000" });
-}
-
-test("AC2: summary table rows and the graph JSON name the SAME branch set (bidirectional差集 empty)", () => {
-  const html = renderGitHistoryPage(mergedAndOpenGitHistory());
-  const table = extractSummaryTable(html);
-  const data = extractGraphData(html);
-  assert.ok(data, "#git-graph-data payload present");
-  const tableRefs = new Set(table.rows.map((row) => row[0]));
-  const graphRefs = new Set(data.branches.map((b) => b.ref));
-  assert.deepEqual([...tableRefs].filter((r) => !graphRefs.has(r)).sort(), [], "table → graph: every table name is in the graph");
-  assert.deepEqual([...graphRefs].filter((r) => !tableRefs.has(r)).sort(), [], "graph → table: every graph name is in the table");
-});
-
-test("AC4: summary table has a 状态 column ({已合并, 在飞}) and 在飞 count == open branch count", () => {
-  const history = mergedAndOpenGitHistory();
-  const html = renderGitHistoryPage(history);
-  const table = extractSummaryTable(html);
-  assert.ok(table.header.includes("状态"), "the table carries a 状态 column");
-  const openCount = layoutGitGraph(history).branches.filter((b) => b.open).length;
-  assert.ok(openCount > 0, "the fixture has ≥1 open branch");
-  const statuses = table.rows.map((row) => row[1]);
-  assert.ok(statuses.every((s) => s === "已合并" || s === "在飞"), "status domain is {已合并, 在飞}");
-  const inflight = table.rows.filter((row) => row[1] === "在飞");
-  assert.equal(inflight.length, openCount, "在飞 rows == unmerged live branch count (not 0, not all)");
-  assert.ok(inflight.length < table.rows.length, "not every row is 在飞 (merged + trunk rows are 已合并)");
-});
-
-// ── integration: real git workspace, /git-history serves the vertical-graph JSON + inlined D3 ──
-
-// ── AC1: branch names on the /git-history chart link out to their task's /task/<id> ──
-
-test("AC1: taskIdFromBranchRef maps task/<id> → <id> and leaves non-task refs unlinked", () => {
-  assert.equal(taskIdFromBranchRef("task/gap-git-history-clickable-branches-window"), "gap-git-history-clickable-branches-window");
-  assert.equal(taskIdFromBranchRef("task/"), null, "a bare task/ prefix has no task id");
-  assert.equal(taskIdFromBranchRef("develop"), null, "develop is a mainline ref, not a task");
-  assert.equal(taskIdFromBranchRef("master"), null);
-  assert.equal(taskIdFromBranchRef("integration"), null);
-  assert.equal(taskIdFromBranchRef("verify/stale"), null);
-  assert.equal(taskIdFromBranchRef("feature/alpha"), null);
-});
 
 // gap-webui-git-history-svg-unreadable: the client renderer must draw the viewBox at its NATIVE
 // width/height (1:1) instead of width=100% + max-height:75vh + default preserveAspectRatio meet,
@@ -287,43 +132,34 @@ test("integration: GET /git-history serves the vertical-graph JSON payload + an 
 
     const r = await get(port, "/git-history");
     assert.equal(r.status, 200, "GET /git-history returns 200");
-    // AC1: the graph mount + embedded JSON payload (vertical trunk + fork/merge structure).
+    // The graph mount + embedded JSON payload (per-commit rows with git column + %D decorations).
     assert.ok(r.body.includes('id="git-graph"'), "the vertical graph mount is present");
     // gap-webui-git-history-svg-unreadable AC2: the mount scrolls horizontally so the native-width
     // SVG is never squashed into the viewport (falsifiable — absent before the fix).
     assert.ok(r.body.includes('overflow-x:auto'), "the graph mount scrolls horizontally (native width)");
     assert.ok(r.body.includes('id="git-graph-data"'), "the embedded graph JSON payload is present");
-    assert.ok(r.body.includes('"fork"'), "the JSON payload carries fork edges");
-    assert.ok(r.body.includes('"merge"'), "the JSON payload carries merge edges");
-    assert.ok(r.body.includes('"collapsed":true'), "AC2: branches are collapsed by default in the payload");
-    assert.ok(r.body.includes("feature/alpha"), "the feature branch appears");
+    assert.ok(r.body.includes('"rows"'), "the JSON payload carries per-commit rows (not lanes)");
+    assert.ok(r.body.includes('"col"'), "each row carries its git column number");
+    assert.ok(r.body.includes('"decorations"'), "each row carries %D decorations");
+    assert.ok(r.body.includes("feature/alpha"), "the feature branch tip decoration appears");
+    assert.ok(r.body.includes("task/GH-1"), "the task branch tip decoration appears");
     assert.ok(r.body.includes("master") || r.body.includes("main"), "the main branch appears");
     // AC3: client JS + the third-party D3 library are now inlined (the retired zero-client-JS invariant).
     assert.ok(r.body.includes("d3js.org"), "the inlined D3 library is present");
     assert.ok((r.body.match(/<script/g) || []).length >= 3, "the page carries the data/lib/client <script> tags");
-    assert.ok(r.body.includes("分支汇总"), "the server-rendered summary table is still present");
-    // readGitHistory now exposes the DAG edges (parentHashes + heads) the layout consumes.
+    // readGitHistory now exposes the DAG edges (parentHashes) + %D decorations the layout consumes.
     const h = readGitHistory(ws);
     assert.equal(h.status, "ok");
     assert.ok(h.head, "readGitHistory resolves HEAD");
     assert.ok(h.commits.some((x) => x.parents > 1), "git history source sees a merge commit");
     assert.ok(h.commits.some((x) => x.parentHashes.length === 2), "a merge commit carries 2 parent hashes");
     const layout = layoutGitGraph(h);
-    // gap-git-graph-ref-partition-collapses-all-topology-to-one-lane: the second-parent walk is restored
-    // — a --no-ff merged branch whose ref was NOT deleted is a merged lane (kind live, open:false), not
-    // folded into the mainline; the unmerged task branch stays an OPEN lateral lane.
-    assert.ok(layout.branches.some((b) => b.ref === "feature/alpha"), "the --no-ff merged (kept) branch is a lateral lane");
-    assert.ok(layout.branches.some((b) => b.ref === "task/GH-1"), "the unmerged task branch is a lateral lane");
-    assert.ok(laterals(layout).every((b) => b.collapsed === true), "AC2: every lateral branch is collapsed by default");
-
-    // gap-git-history-branch-summary-wrong-numbers: a branch lane carries only its OWN commits, never
-    // the shared mainline ancestry (the 481/111 symptom). feature/alpha was --no-ff merged into
-    // master, so it has ZERO exclusive commits (correctly no phantom summary lane); task/GH-1 is
-    // unmerged and carries exactly its one commit.
-    const featureCommits = h.commits.filter((x) => x.ref === "feature/alpha");
-    assert.equal(featureCommits.length, 0, "a fully-merged branch has no phantom lane (0 exclusive commits)");
-    const taskCommits = h.commits.filter((x) => x.ref === "task/GH-1");
-    assert.deepEqual(taskCommits.map((x) => x.subject), ["task work"], "the unmerged task branch carries exactly its own commit");
+    // gap-git-graph-adopt-git-column-algorithm-and-decorate-labels: one row per commit, in git emission
+    // order; a branch name decorates ONLY the commit its ref points at (the merge keeps feature/alpha
+    // and the unmerged task/GH-1 branch still decorate their own tips).
+    assert.equal(layout.rows.length, h.commits.length, "every fetched commit becomes one row");
+    assert.ok(layout.rows.some((row) => row.decorations.includes("feature/alpha")), "the feature branch tip is decorated");
+    assert.ok(layout.rows.some((row) => row.decorations.includes("task/GH-1")), "the unmerged task branch tip is decorated");
   } finally {
     if (server) {
       server.close();
@@ -364,11 +200,11 @@ test("?view=task routing: /git-history serves the task view; default = ?view=git
     assert.equal(taskView.status, 200);
     assert.equal(def.body, gitView.body, "default /git-history is byte-identical to ?view=git");
     assert.equal(def.body, bogus.body, "an unknown ?view= value fails closed to the git default");
-    assert.ok(def.body.includes("分支汇总"), "the default page renders the git summary table");
-    assert.ok(!def.body.includes("任务泳道汇总"), "the default page does NOT render the task summary");
-    assert.ok(taskView.body.includes("任务泳道汇总"), "?view=task renders the task summary table");
-    assert.ok(taskView.body.includes("unattributedCount"), "?view=task JSON carries unattributedCount");
-    assert.ok(taskView.body.includes("gap-1"), "the task swimlane names the task id");
+    assert.ok(def.body.includes("git-graph-data"), "the default page embeds the git-view data script");
+    assert.ok(!def.body.includes("任务分组（按 task id 聚合）"), "the default page does NOT render the task grouping");
+    assert.ok(taskView.body.includes("任务分组（按 task id 聚合）"), "?view=task renders the task grouping");
+    assert.ok(taskView.body.includes("未归属"), "?view=task shows the unattributed group explicitly");
+    assert.ok(taskView.body.includes("gap-1"), "the task group names the task id");
   } finally {
     if (server) {
       server.close();

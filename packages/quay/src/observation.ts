@@ -2356,13 +2356,17 @@ export interface GitHistoryCommit {
   hash: string;
   /** Commit timestamp (unix seconds) — the commit's landing time. */
   t: number;
-  /** Local branch this commit was reached from (`--source`), e.g. "integration". */
+  /** Best-effort primary local-branch name derived from `%D` decoration ("" when none). */
   ref: string;
   /** Number of parents. > 1 → a merge commit (the fan-in landing event). */
   parents: number;
   /** Full parent hashes — the DAG edges the vertical graph's fork/merge lines are drawn from. */
   parentHashes: string[];
   subject: string;
+  /** `%D` decoration entries — the refs/tags pointing at this commit (`HEAD -> author`, `develop`, `tag: v1`…).
+   *  gap-git-graph-adopt-git-column-algorithm-and-decorate-labels: branch labels render from THIS, so a
+   *  label appears only on the commit a ref actually points at (git decorate semantics), never repeated. */
+  decorations: string[];
 }
 
 export interface GitHistoryResult {
@@ -2373,41 +2377,25 @@ export interface GitHistoryResult {
   head: string | null;
   /** Active branch name → tip commit hash (the branch topology, not the `--source` attribution). */
   heads: Record<string, string>;
-  /** The newest MAINLINE (first-parent) commit in THIS batch — the spine root `layoutGitGraph`
-   *  should walk from. On the first page (`before === null`) this equals `heads[develop]`; on a
-   *  pagination page (`before` set) the real tip is strictly newer than the cursor and therefore
-   *  NOT in `commits`, so this is the newest spine commit the `--first-parent` batch actually
-   *  fetched (gap-git-graph-pagination-mainline-lane-empty-before-page). null when no mainline
-   *  batch was fetched. */
+  /** The newest commit in THIS batch (`commits[0].hash`) — retained for shape compatibility with the
+   *  retired mainline-spine model (gap-git-graph-adopt-git-column-algorithm-and-decorate-labels: the
+   *  graph now renders `git log --all --topo-order` rows, no mainline spine). null when the batch is
+   *  empty. */
   mainlineHead: string | null;
 }
 
 /**
- * Read the commit-landing timeline from the ACTIVE local branches only (gap-git-history-counts-stale-branches):
- * `git log --branches --source` counted EVERY local branch as a lane, so a leftover merged branch
- * (e.g. a fan-in source that was never deleted) kept polluting the lane count long after it was dead.
- * Instead: enumerate branch tips + their tip commit time, keep the branches with a commit in the
- * active window (plus the mainline refs develop/master unconditionally — never dropped for
- * staleness). A stale branch's commits are already reachable from the mainline, so they still appear
- * under the mainline lane (relabeled) — not dropped.
+ * Read the commit-landing timeline as `git log --all --topo-order` emits it (gap-git-graph-adopt-git-
+ * column-algorithm-and-decorate-labels). The retired per-ref "active branch lane" model is GONE: the
+ * column-allocation algorithm needs commits in git's EMISSION order — every commit emitted before its
+ * parents — which `--topo-order` guarantees and a per-ref/time-sorted fetch does not (measured: 60
+ * commits, 1 mis-ordered). `--all` (not the old 7-day active-branch filter) makes the page match
+ * `git log --graph --all` exactly, the AC1 mechanical judge. `%D` supplies the decorate labels so a
+ * branch name renders only on the commit a ref actually points at (AC3).
  *
- * gap-git-graph-drops-commits-while-overflowcount-reports-zero: the fetch is PER-REF, not one global
- * `git log <allrefs> -n <limit> --source` pass. The old single pass capped the TOTAL across every
- * ref at `-n <limit>`, so a long-lived live branch's exclusive commits got squeezed out of the
- * window by newer mainline commits (and `overflowCount` had no way to see it — it counted lane-slot
- * overflow, not dropped commits). The new model:
- *   - mainline batch: `git log <mainlineRefs> -n <limit>` (the page the user sees), and
- *     `--before=<cursor>` when `before` is set (page BACK — the /git-history.json pagination cursor);
- *   - each live non-mainline ref: `git log <ref> --not <mainlineRefs>` (its EXCLUSIVE commits, never
- *     squeezed by the global limit), bounded to the page's time window (`--since` = the mainline
- *     batch's oldest commit time, `--before` = the pagination cursor when paging back) — a
- *     long-lived branch can no longer be starved out, and a stale branch's ancient commits no longer
- *     resurface in a recent window as a fork-less (zero-height, unrenderable) lane.
- * Because each batch is fetched from a known ref, there is no `--source` attribution ambiguity and
- * no post-hoc `rev-list` re-attribution (a commit reachable from develop is simply never fetched in
- * the branch batch — `--not <mainlineRefs>` excludes it). Duplicates across sibling live branches
- * are de-duplicated by hash (first ref in mainline-first order wins). A non-git workspace degrades
- * to empty; a git failure degrades to error; never throws.
+ * Pagination (`before=<unixSeconds>`) keeps the same cursor semantics: `--before` filters to commits
+ * STRICTLY older than the cursor, then `--topo-order` re-orders that older window. A non-git workspace
+ * degrades to empty; a git failure degrades to error; never throws.
  */
 // gap-webui-dashboard-regressed-to-12-60s-past-two-done-tasks: readGitHistory shells out to git
 // several times per call (for-each-ref → one log per ref → rev-parse HEAD). A 30s TTL (keyed by
@@ -2433,143 +2421,26 @@ export function readGitHistory(root: string, { limit = GIT_HISTORY_LIMIT, before
 
 function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, before = null, nowMs = Date.now() }: { limit?: number; before?: number | null; nowMs?: number } = {}): GitHistoryResult {
   try {
-    const sinceSec = Math.floor(nowMs / 1000) - GIT_HISTORY_ACTIVE_WINDOW_SEC;
-    // Enumerate local branches with their tip hash + tip commit time. `%09` emits a TAB, which git
-    // forbids in ref names (a control char), so it is a safe field separator. (`%x1f` is a
-    // `--pretty`-only escape — `for-each-ref --format` emits it literally.) The tip hash is the
-    // branch TOPOLOGY (which commit the ref points at) — the vertical graph needs it to tell a live
-    // lane from a reconstructed one, and to know which ref each branch batch is fetched for.
-    const refsOut = execFileSync(
-      "git",
-      ["-C", root, "for-each-ref", "refs/heads", "--format=%(refname:short)%09%(objectname)%09%(committerdate:unix)"],
-      { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] },
-    );
-    const activeRefs: string[] = [];
-    const heads: Record<string, string> = {};
-    let sawAnyRef = false;
-    for (const line of refsOut.split(/\r?\n/)) {
-      if (!line) continue;
-      sawAnyRef = true;
-      const [name, tipHash, tipTsRaw] = line.split("\t");
-      const tipTs = Number(tipTsRaw ?? "");
-      // Keep a branch if its tip is inside the active window, OR it is a mainline ref
-      // (develop/master are always kept regardless of tip age — their tips advance only at
-      // merge boundaries, which can be >24h apart; a mainline lane must never drop out).
-      if (name && tipHash && Number.isFinite(tipTs) && (tipTs >= sinceSec || GIT_HISTORY_MAINLINE_REFS.has(name))) {
-        activeRefs.push(name);
-        heads[name] = tipHash;
-      }
-    }
-    // gap-git-graph-trunk-ref-resolves-to-head-not-mainline: for-each-ref emits refs in refname
-    // (alphabetical) order, so a non-mainline ref like `author` sorts before `develop`. Mainline
-    // refs are kept FIRST so the mainline batch is fetched from them directly and the primary
-    // mainline ref (develop > master) is `mainlineRefs[0]`. (Stable within each group.)
-    activeRefs.sort((a, b) => {
-      const am = GIT_HISTORY_MAINLINE_REFS.has(a) ? 0 : 1;
-      const bm = GIT_HISTORY_MAINLINE_REFS.has(b) ? 0 : 1;
-      return am - bm || (a < b ? -1 : a > b ? 1 : 0);
-    });
-    if (activeRefs.length === 0) {
-      // No active branch: a fresh repo with no commits, or every branch is stale with no mainline.
-      return {
-        status: "empty",
-        reason: sawAnyRef ? `无活跃分支（最近 ${GIT_HISTORY_ACTIVE_WINDOW_SEC / 86400} 天无提交且无 develop/master）` : "git 仓库无提交记录",
-        commits: [],
-        head: null,
-        heads: {},
-        mainlineHead: null,
-      };
-    }
+    const args = ["-C", root, "log", "--all", "--topo-order", `-n ${limit}`];
+    if (before !== null && Number.isFinite(before)) args.push(`--before=${before}`);
+    args.push("--pretty=format:%H%x1f%P%x1f%D%x1f%ct%x1f%s");
+    const out = execFileSync("git", args, { encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "pipe"] });
 
-    const mainlineRefs = activeRefs.filter((r) => GIT_HISTORY_MAINLINE_REFS.has(r));
-    const liveRefs = activeRefs.filter((r) => !GIT_HISTORY_MAINLINE_REFS.has(r));
-    const primary = mainlineRefs[0] ?? null;
-
-    const seen = new Set<string>();
     const commits: GitHistoryCommit[] = [];
-    // Parse one `git log` pass into commits, attributing every line to `ref` (the batch's ref — no
-    // `--source`, so there is nothing to re-attribute), and de-duplicating by hash across batches.
-    const pushCommits = (lines: string, ref: string) => {
-      for (const line of lines.split(/\r?\n/)) {
-        if (!line) continue;
-        const [hash, t, parents, ...subjectParts] = line.split("\x1f");
-        if (!hash || !t) continue;
-        if (seen.has(hash)) continue;
-        seen.add(hash);
-        const parentHashes = (parents ?? "").split(/\s+/).filter(Boolean);
-        commits.push({
-          hash,
-          t: Number(t),
-          ref,
-          parents: parentHashes.length,
-          parentHashes,
-          subject: subjectParts.join("\x1f"),
-        });
-      }
-    };
-
-    // Mainline batch: the newest `limit` MAINLINE (first-parent) commits, or (when `before` is set)
-    // the `limit` commits strictly older than the pagination cursor. `--before` is commit-time
-    // STRICTLY-older, so `before=<oldest timestamp in the current window>` never re-returns that same
-    // boundary commit. `--first-parent` walks ONLY the mainline spine (the `*` column), so the spine
-    // root on a pagination page is the batch's newest commit (not the absent tip) and the merged
-    // second-parent (lateral) commits are re-fetched separately below (gap-git-graph-pagination-
-    // mainline-lane-empty-before-page).
-    let windowFloorSec: number | null = null; // the page's time floor = oldest mainline commit time
-    let mainlineHead: string | null = null; // newest mainline commit actually fetched (spine root)
-    if (mainlineRefs.length > 0 && primary !== null) {
-      const args = ["-C", root, "log", ...mainlineRefs, "--first-parent", "--date=unix", `-n ${limit}`];
-      if (before !== null && Number.isFinite(before)) args.push(`--before=${before}`);
-      args.push("--pretty=format:%H%x1f%ct%x1f%P%x1f%s");
-      const out = execFileSync("git", args, { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] });
-      for (const line of out.split(/\r?\n/)) {
-        if (!line) continue;
-        const [hash, tRaw] = line.split("\x1f");
-        const t = Number(tRaw);
-        if (Number.isFinite(t)) {
-          windowFloorSec = windowFloorSec === null ? t : Math.min(windowFloorSec, t);
-          if (mainlineHead === null) mainlineHead = hash; // first line = newest spine commit in window
-        }
-      }
-      pushCommits(out, primary);
-    }
-
-    // Merged second-parent (lateral) lanes: `--first-parent` mainline walks ONLY the spine, so every
-    // commit reachable from develop via a second-parent edge (a merged task branch, and — for the
-    // `Merge branch 'develop' into task/X` dev-merge shape — the old develop line) is no longer in
-    // `commits`. Re-fetch them with the PRE-FIX mainline batch — a plain `git log <mainlineRefs>
-    // -n <limit>` (count-capped, no `--first-parent`, no `--since`) — which traverses EVERY edge, so
-    // nested second parents (branch-of-a-branch) and a recently-merged-but-old commit are all
-    // included exactly as before; `pushCommits` de-duplicates the spine commits already added by the
-    // `--first-parent` batch, leaving the lateral commits in the page's `limit`-commit window. Their
-    // `ref` stays the mainline (develop-reachable — already merged), matching the pre-fix attribution
-    // (gap-git-graph-pagination-mainline-lane-empty-before-page AC3: side lanes never lost; the
-    // count-capped window, not a time floor, is what keeps a stale merged commit visible).
-    if (mainlineRefs.length > 0 && primary !== null) {
-      const args = ["-C", root, "log", ...mainlineRefs, "--date=unix", `-n ${limit}`];
-      if (before !== null && Number.isFinite(before)) args.push(`--before=${before}`);
-      args.push("--pretty=format:%H%x1f%ct%x1f%P%x1f%s");
-      const out = execFileSync("git", args, { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] });
-      pushCommits(out, primary);
-    }
-
-    // Live-branch batches: each live non-mainline ref's EXCLUSIVE commits (`--not <mainlineRefs>`
-    // excludes every mainline-reachable commit, so the lane carries exactly its own history), bounded
-    // to the page's time window (`--since` = min(mainline floor, now − ACTIVE_WINDOW); `--before` = the
-    // pagination cursor when paging back). gap-git-graph-ref-partition-collapses-all-topology-to-one-
-    // lane: the old `--since` = the mainline batch's OLDEST commit time made a live branch's visibility
-    // depend on mainline commit density — the busier the repo, the closer the floor, the fewer active
-    // branches surface (a reverse incentive). The floor is now floored at the 7-day active window, so a
-    // ref with unique commits inside the window stays visible regardless of how recent the mainline is.
-    for (const r of liveRefs) {
-      const notArgs = mainlineRefs.length > 0 ? ["--not", ...mainlineRefs] : [];
-      const args = ["-C", root, "log", r, ...notArgs, "--date=unix"];
-      if (before !== null && Number.isFinite(before)) args.push(`--before=${before}`);
-      const liveFloorSec = windowFloorSec !== null ? Math.min(windowFloorSec, sinceSec) : sinceSec;
-      args.push(`--since=${liveFloorSec}`);
-      args.push("--pretty=format:%H%x1f%ct%x1f%P%x1f%s");
-      const out = execFileSync("git", args, { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] });
-      pushCommits(out, r);
+    for (const line of out.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      const [hash, parentsRaw, decorRaw, tRaw, ...subjectParts] = line.split("\x1f");
+      if (!hash || !tRaw) continue;
+      const parentHashes = (parentsRaw ?? "").split(/\s+/).filter(Boolean);
+      commits.push({
+        hash,
+        t: Number(tRaw),
+        ref: primaryRefFromDecorations(decorRaw),
+        parents: parentHashes.length,
+        parentHashes,
+        subject: subjectParts.join("\x1f"),
+        decorations: parseDecorations(decorRaw),
+      });
     }
 
     if (commits.length === 0) {
@@ -2582,9 +2453,9 @@ function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, befor
       });
       head = headOut.trim().split(/\r?\n/)[0] || null;
     } catch {
-      head = null; // unborn HEAD / detached — the renderer falls back to the newest commit as trunk root.
+      head = null; // unborn HEAD / detached — `%D` still marks HEAD via `HEAD -> <ref>`.
     }
-    return { status: "ok", reason: null, commits, head, heads, mainlineHead };
+    return { status: "ok", reason: null, commits, head, heads: {}, mainlineHead: commits[0].hash };
   } catch (err) {
     const stderr = String((err as { stderr?: Buffer | string }).stderr ?? "");
     if (stderr.includes("not a git repository")) {
@@ -2599,6 +2470,27 @@ function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, befor
       mainlineHead: null,
     };
   }
+}
+
+/** Parse `%D` decoration output ("HEAD -> author, origin/author") into its entries. */
+export function parseDecorations(raw: string | undefined | null): string[] {
+  if (!raw) return [];
+  return String(raw).split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+/** Best-effort primary local-branch name from `%D`: `HEAD -> X` wins, then the first non-HEAD/non-tag
+ *  entry. "" when no branch name is recoverable (never a fabricated ref — 硬规则 3b). */
+export function primaryRefFromDecorations(raw: string | undefined | null): string {
+  const decs = parseDecorations(raw);
+  for (const d of decs) {
+    const m = /^HEAD\s*->\s*(.+)$/.exec(d);
+    if (m) return m[1];
+  }
+  for (const d of decs) {
+    if (d === "HEAD" || d.startsWith("tag:")) continue;
+    return d;
+  }
+  return "";
 }
 
 // ── AC95: six new views (dashboard · system · manager · tests · sessions · architecture) ───────────

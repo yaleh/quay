@@ -125,6 +125,8 @@ packages/quay/test/flags.test.mjs
 packages/quay/test/frontmatter-store-base.test.mjs
 packages/quay/test/gap-ac136-web-truth-source.test.mjs
 packages/quay/test/gap-cli-gate-enforcement.test.mjs
+packages/quay/test/gap-dashboard-cards-layout-and-livecard-swimlane.test.mjs
+packages/quay/test/gap-dashboard-driver-status-card.test.mjs
 packages/quay/test/gap-dashboard-fanin-card-not-in-auto-refresh.test.mjs
 packages/quay/test/gap-dashboard-fanin-panel-and-timeline-bars.test.mjs
 packages/quay/test/gap-dashboard-goal-card-provider-backed.test.mjs
@@ -135,13 +137,12 @@ packages/quay/test/gap-dashboard-taskcard-multistatus-minitable.test.mjs
 packages/quay/test/gap-dashboard-testscard-livecard-auto-refresh.test.mjs
 packages/quay/test/gap-dashboard-visual-review-batch-fixes.test.mjs
 packages/quay/test/gap-frontmatter-slugify-drops-non-ascii.test.mjs
-packages/quay/test/gap-git-graph-branch-name-fallback-to-trunk-ref.test.mjs
-packages/quay/test/gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead.test.mjs
-packages/quay/test/gap-git-graph-lane-visual-encoding-and-fixed-width.test.mjs
-packages/quay/test/gap-git-graph-omits-inflight-branches-and-summary-table-disjoint.test.mjs
-packages/quay/test/gap-git-graph-row-key-collides-on-multiclaimed-commits.test.mjs
-packages/quay/test/gap-git-graph-trunk-ref-resolves-to-head-not-mainline.test.mjs
-packages/quay/test/gap-git-history-lane-identity-and-row-layout-overlap.test.mjs
+packages/quay/test/gap-git-graph-adopt-git-column-algorithm-and-decorate-labels.test.mjs
+packages/quay/test/gap-git-graph-lane-chip-rendered-once-regardless-of-span.test.mjs
+packages/quay/test/gap-git-graph-pagination-mainline-lane-empty-before-page.test.mjs
+packages/quay/test/gap-git-graph-reconstructed-lanes-all-named-mainline-ref.test.mjs
+packages/quay/test/gap-git-graph-ref-partition-collapses-all-topology-to-one-lane.test.mjs
+packages/quay/test/gap-git-graph-scroll-loader-self-chain-blocked-by-loadingolder-flag.test.mjs
 packages/quay/test/gap-goal-record-completeness-undefined.test.mjs
 packages/quay/test/gap-webui-a11y-focus-ring-and-token-contrast-unvalidated.test.mjs
 packages/quay/test/gap-webui-accent-palette-no-success-color.test.mjs
@@ -150,9 +151,11 @@ packages/quay/test/gap-webui-detail-page-head-drops-pagestyles.test.mjs
 packages/quay/test/gap-webui-goal-detail-no-entity-links.test.mjs
 packages/quay/test/gap-webui-goal-list-sort-and-column-set.test.mjs
 packages/quay/test/gap-webui-goal-task-rollup-via-shared-summary-cache.test.mjs
+packages/quay/test/gap-webui-list-table-no-overflow-container.test.mjs
 packages/quay/test/gap-webui-meter-limit-param-doubles-as-display-string.test.mjs
 packages/quay/test/gap-webui-root-should-show-dashboard.test.mjs
 packages/quay/test/gap-webui-tests-page-missing-rounds-timeline-bar.test.mjs
+packages/quay/test/gap-webui-tests-page-timeline-gantt-truncated.test.mjs
 packages/quay/test/gap-webui-tests-page-unpaginated-tables.test.mjs
 packages/quay/test/gap002-create-ergonomics.iteration-0.test.mjs
 packages/quay/test/gap002-create-ergonomics.test.mjs
@@ -276,6 +279,7 @@ plugin/test/ac61-staleness-disposition-check.test.mjs
 plugin/test/ac69-slot-queue-gap-check.test.mjs
 plugin/test/accounting-emit-layer-map.test.mjs
 plugin/test/accounting-emit.test.mjs
+plugin/test/active-ac-must-have-criterion.test.mjs
 plugin/test/adr016-screen-use-check.test.mjs
 plugin/test/agent-panel-classify.test.mjs
 plugin/test/allowed-tools-plugin-prefix-check.test.mjs
@@ -317,6 +321,7 @@ plugin/test/defect-shape-aggregate.test.mjs
 plugin/test/deletion-closure-check.test.mjs
 plugin/test/delivery-inventory-drift-gate.test.mjs
 plugin/test/delivery-status-single-source.test.mjs
+plugin/test/develop-deliver-tgz.test.mjs
 plugin/test/direct-to-develop-bypass-check.test.mjs
 plugin/test/dispatch-preference-check.test.mjs
 plugin/test/dispatch-record-fingerprint-reason-check.test.mjs
@@ -360,6 +365,8 @@ plugin/test/gate-staleness-check.test.mjs
 plugin/test/gitignore.test.mjs
 plugin/test/goal-driver-task-boundary-check.test.mjs
 plugin/test/goal-driver.test.mjs
+plugin/test/goal-invariants-standing.test.mjs
+plugin/test/goal-needs-human-blocking.test.mjs
 plugin/test/guard-lineage-check.test.mjs
 plugin/test/help-contract-incompatible-behaviors.test.mjs
 plugin/test/identity-replication-check.test.mjs
@@ -417,6 +424,7 @@ plugin/test/outer-retirement-precondition-check.test.mjs
 plugin/test/outer-tick-log-check.test.mjs
 plugin/test/pane-state-classify.test.mjs
 plugin/test/per-task-suite-record-check.test.mjs
+plugin/test/perfile-failure-rate.test.mjs
 plugin/test/periodic-push-backup.test.mjs
 plugin/test/pipe-exit-code-check.test.mjs
 plugin/test/plugin-packaging.test.mjs
@@ -451,6 +459,7 @@ plugin/test/red-window-triage.test.mjs
 plugin/test/refresh-worktree-quay.test.mjs
 plugin/test/registry-bare-filename-scan.test.mjs
 plugin/test/relative-baseline.test.mjs
+plugin/test/release-freshness-check.test.mjs
 plugin/test/repo-root-unification.test.mjs
 plugin/test/repo-root.test.mjs
 plugin/test/resource-gate.test.mjs
