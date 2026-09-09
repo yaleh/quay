@@ -1,7 +1,7 @@
 ---
 id: gap-git-graph-edge-fold-bends-at-child-for-first-parent-edges
 title: git-history 跨列边折角固定在子节点端：kind="parent" 的边（分支收口回父分支）方向应在父节点端拐弯，反了
-status: ready
+status: done
 labels:
   - gap
   - webui
