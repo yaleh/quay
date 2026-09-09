@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-goal-card-ac-progress-bar
 title: Goal 卡「AC 达成 x/y」加一条 mini 进度条（复用 task-card 分段条手法）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
