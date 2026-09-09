@@ -2,7 +2,7 @@
 id: gap-goal-driver-no-retire-write-surface
 title: goal-driver 写面不越权放弃：writeGoalStatus 只写 achieved/active/needs-human，分诊
   retire 只产 needs-human 建议（非空理由）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
