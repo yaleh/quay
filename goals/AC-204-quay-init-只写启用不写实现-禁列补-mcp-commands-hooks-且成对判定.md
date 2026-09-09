@@ -1,7 +1,7 @@
 ---
 id: AC-204
 title: quay-init 只写启用不写实现——禁列补 mcp/commands/hooks，且成对判定
-status: draft
+status: active
 kind: criterion
 goal: GOAL-009
 criterion: |-
@@ -34,5 +34,12 @@ origin: 人 2026-09-09：quay-init 过程不应复制 Claude Code 扩展（如 m
   Code 扩展和 plugin 的典型实践。实测：FORBIDDEN_PREFIXES 只有
   .claude/skills|workflows|agents/ + plugin/scripts/，grep -c mcp.json =
   0；且断言只在开发树 laydown 上跑，从未在安装物+第三方项目形态上跑过。
+activatedAt: 2026-09-09T11:49:14.970Z
+statusLog:
+  - at: 2026-09-09T11:49:14.971Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
 ---
 **判据（能取假）**：2026-09-09 干跑 exit 1，报 forbidden-list missing: ['.claude/commands/', '.claude/hooks/', '.mcp.json']。**为什么必须成对**：「禁列为空」单独成立时可被「什么都不做」满足——一个什么都不铺的 init 也过。故判据同时要求 enable_declared=true（项目级 enabledPlugins + permissions.allow 指向已安装插件）。这一对合起来才表达契约：**项目只写启用/授权，实现全部由 plugin bundle 原生提供**。
