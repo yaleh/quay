@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-fanin-card-hide-reason
 title: dashboard FAN-IN 卡片不显示 mfi.reason(改选项控制,/task/<id> 详情页保留全文)
-status: todo
+status: ready
 labels:
   - gap
   - webui
