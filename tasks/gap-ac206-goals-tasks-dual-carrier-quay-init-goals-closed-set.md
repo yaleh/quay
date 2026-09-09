@@ -35,16 +35,16 @@ B. **载体写**（criterion exit 0 的另一半）：`plugin/scripts/verify-del
 
 ## Acceptance Criteria
 
-- [ ] AC1 机制六处落地：`grep -c '^- goals/$'` SPEC 闭集块 ≥1、`grep -c '"goals"' quay-init-closure-assertion.ts` ≥1、`grep -Fc 'mkdir -p "$WORKSPACE_ROOT/goals"' quay-init.sh` ≥1，各贴前 3 条命中（硬规则②）。
-- [ ] AC2 干跑：本仓库 `quay-init.sh --dry-run` 输出含 `would-create: goals/`；对真实 laydown 跑闭集断言——含 `goals/` 时 PASS、删除 `goals/` 的负样本 FAIL（能取假，非恒绿）。
-- [ ] AC3 判据前半翻转：`bash -c "$(criterion)"` 不再打印 "SPEC closed set lacks goals/" / "CLOSED_SET_DIRS lacks goals" / "does not create goals/"——后半（载体）此时为 exit 1 或 3（无记录/载体），是如实读数。
-- [ ] AC4 载体写 + selfcheck：`verify-deliver-coldstart.sh --ac89` 追加 `ac="GOAL-009-AC-206"` 记录，四字段均布尔、`host`/`project_root` 非空；`--selfcheck` 正/负控制——正：注入已建 goals/+tasks/ 且两 store 可读 ⇒ 四字段 True；负：goals/ 缺失 ⇒ `goals_dir_created=false`（仍写、criterion 不 exit 0，如实非静默）。
-- [ ] AC5 判据双向控制（注入后移除，不污染生产载体）：向载体注入一条 `ac="GOAL-009-AC-206"`、`host=注入假主机≠本机`、`project_root=第三方路径`、四字段全 True 的记录 ⇒ criterion exit 0；改 `goals_dir_created=false` ⇒ criterion exit 1。两条注入记录验证后均移除。
+- [x] AC1 机制六处落地：`grep -c '^- goals/$'` SPEC 闭集块 ≥1、`grep -c '"goals"' quay-init-closure-assertion.ts` ≥1、`grep -Fc 'mkdir -p "$WORKSPACE_ROOT/goals"' quay-init.sh` ≥1，各贴前 3 条命中（硬规则②）。
+- [x] AC2 干跑：本仓库 `quay-init.sh --dry-run` 输出含 `would-create: goals/`；对真实 laydown 跑闭集断言——含 `goals/` 时 PASS、删除 `goals/` 的负样本 FAIL（能取假，非恒绿）。
+- [x] AC3 判据前半翻转：`bash -c "$(criterion)"` 不再打印 "SPEC closed set lacks goals/" / "CLOSED_SET_DIRS lacks goals" / "does not create goals/"——后半（载体）此时为 exit 1 或 3（无记录/载体），是如实读数。
+- [x] AC4 载体写 + selfcheck：`verify-deliver-coldstart.sh --ac89` 追加 `ac="GOAL-009-AC-206"` 记录，四字段均布尔、`host`/`project_root` 非空；`--selfcheck` 正/负控制——正：注入已建 goals/+tasks/ 且两 store 可读 ⇒ 四字段 True；负：goals/ 缺失 ⇒ `goals_dir_created=false`（仍写、criterion 不 exit 0，如实非静默）。
+- [x] AC5 判据双向控制（注入后移除，不污染生产载体）：向载体注入一条 `ac="GOAL-009-AC-206"`、`host=注入假主机≠本机`、`project_root=第三方路径`、四字段全 True 的记录 ⇒ criterion exit 0；改 `goals_dir_created=false` ⇒ criterion exit 1。两条注入记录验证后均移除。
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全绿；`scripts/test.sh`（含 quay-init 五测试 + verify-deliver-coldstart.test.mjs）全绿。
-- [ ] AC-206 criterion 可被满足且能取假（AC5 正/负控制为证）。⛔ 本任务到「goals+tasks 双载体」代码层；真实 host≠本机、非本仓库项目的生产记录由下游跨主机验证轮（verify-deliver-coldstart 对 B/C 跑）落盘，是 AC-207 端到端主题、非本任务代码范围。
+- [x] AC1–AC5 全绿；`scripts/test.sh`（含 quay-init 五测试 + verify-deliver-coldstart.test.mjs）全绿。
+- [x] AC-206 criterion 可被满足且能取假（AC5 正/负控制为证）。⛔ 本任务到「goals+tasks 双载体」代码层；真实 host≠本机、非本仓库项目的生产记录由下游跨主机验证轮（verify-deliver-coldstart 对 B/C 跑）落盘，是 AC-207 端到端主题、非本任务代码范围。
 
 ## Touches
 
