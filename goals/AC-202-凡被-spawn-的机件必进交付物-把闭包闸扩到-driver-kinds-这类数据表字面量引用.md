@@ -1,7 +1,7 @@
 ---
 id: AC-202
 title: 凡被 spawn 的机件必进交付物——把闭包闸扩到 DRIVER_KINDS 这类数据表字面量引用
-status: draft
+status: active
 kind: criterion
 goal: GOAL-009
 criterion: >-
