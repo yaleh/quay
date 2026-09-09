@@ -31,11 +31,56 @@ import { execFileSync } from "node:child_process";
 
 export type CommitOutcome = "committed" | "unchanged" | "not-in-git" | "failed";
 
+/**
+ * Structured parts of a store-commit subject — the SINGLE message constructor
+ * (gap-store-commit-action-and-actor AC4): the five store files pass STRUCTURED fields and this
+ * ONE renderer turns them into `kind: id action [by actor]`. ⛔ A store file must never
+ * hand-assemble the message string itself — that is exactly the "fixed prose, no action, no
+ * writer" defect this type removes.
+ */
+export interface StoreCommitMessageParts {
+  /** store kind prefix, e.g. "goals" | "docs-managed" | "adr" | "meta" | "tasks". */
+  kind: string;
+  /** record id, e.g. "GOAL-001" | "AC-180" | "DOC-1" | "ADR-12" | "META-1" | "gap-…". */
+  id: string;
+  /** the action: "create" | `field:<name>` | `status <from>→<to>` | a kind-specific verb
+   *  ("task_write" | "task_delete"). The store decides WHAT happened; this renderer decides the
+   *  subject SHAPE. */
+  action: string;
+  /** the writer: "cli:<session|pid>" | "driver:<run-id>". Omitted ⇒ no `by` suffix. */
+  actor?: string;
+}
+
+/** Render a store-commit subject from structured parts. Pure — the single place the
+ *  `kind: id action [by actor]` grammar lives. */
+export function storeCommitMessage(parts: StoreCommitMessageParts): string {
+  const actor = parts.actor !== undefined && parts.actor.trim() !== "" ? ` by ${parts.actor.trim()}` : "";
+  return `${parts.kind}: ${parts.id} ${parts.action}${actor}`;
+}
+
+/**
+ * Resolve the commit writer (gap-store-commit-action-and-actor AC2). Explicit `actor` wins; else
+ * the env seam `QUAY_STORE_COMMIT_ACTOR` (a driver that knows its run-id sets
+ * `driver:<run-id>` when spawning the store); else `cli:<pid>` (a direct CLI write). ⛔ never
+ * empty — every store-commit subject must carry `by cli:` or `by driver:` so a goals/ history is
+ * auditable (the 4007-identical-commits defect).
+ */
+export function resolveCommitActor(actor?: string): string {
+  if (actor !== undefined && actor.trim() !== "") return actor.trim();
+  const env = process.env.QUAY_STORE_COMMIT_ACTOR;
+  if (env !== undefined && env.trim() !== "") return env.trim();
+  return `cli:${process.pid}`;
+}
+
 export interface CommitStoreWriteOptions {
   /** repo-relative path of the written file, e.g. "tasks/x.md" | "goals/AC-1.md" | "meta/META-1.md"
    *  | "adr/ADR-1.md" | "docs-managed/D-1.md". */
   relPath: string;
-  message: string;
+  /** structured commit-subject parts — see `storeCommitMessage`. */
+  kind: string;
+  id: string;
+  action: string;
+  actor?: string;
   /** git root to commit in. Default: `git rev-parse --show-toplevel` from the process cwd — the
    *  robust root (⛔ not path.dirname). Callers that know their dir pass `resolveGitRoot(dir)` so
    *  the root is correct even when the process cwd is a different checkout (SPEC §6). */
@@ -46,6 +91,18 @@ export interface CommitStoreWriteOptions {
   /** "is this write non-substantive?" — default byte-identical. The goal store's legacy
    *  `stripEvidenceTimestamp` comparator is NOT wired in here (retired per SPEC §4 note). */
   skipIf?: (head: string, work: string) => boolean;
+}
+
+export interface CommitStoreBatchOptions {
+  /** repo-relative paths of the written files, staged and committed in ONE commit. */
+  relPaths: string[];
+  /** structured commit-subject parts — see `storeCommitMessage`. */
+  kind: string;
+  id: string;
+  action: string;
+  actor?: string;
+  root?: string | null;
+  propagate?: "none" | "develop";
 }
 
 export interface CommitStoreWriteResult {
@@ -94,7 +151,7 @@ export function resolveGitRoot(dir: string): string | null {
 const byteIdentical = (head: string, work: string) => head === work;
 
 export function commitStoreWrite(opts: CommitStoreWriteOptions): CommitStoreWriteResult {
-  const { relPath, message, propagate = "none", skipIf } = opts;
+  const { relPath, kind, id, action, actor, propagate = "none", skipIf } = opts;
   const root = opts.root === undefined ? resolveGitRoot(process.cwd()) : opts.root;
   if (!root) return { outcome: "not-in-git", propagated: false };
   if (gitOut(root, ["rev-parse", "--is-inside-work-tree"]) !== "true") {
@@ -119,6 +176,7 @@ export function commitStoreWrite(opts: CommitStoreWriteOptions): CommitStoreWrit
   }
 
   // add + commit back-to-back (hard rule 11), pathspec-limited (never -A), --no-verify.
+  const message = storeCommitMessage({ kind, id, action, actor: resolveCommitActor(actor) });
   if (!gitOk(root, ["add", "--", relPath])) return { outcome: "failed", propagated: false };
   if (!gitOk(root, ["commit", "--no-verify", "-m", message, "--", relPath])) {
     return { outcome: "failed", propagated: false };
@@ -130,4 +188,33 @@ export function commitStoreWrite(opts: CommitStoreWriteOptions): CommitStoreWrit
     if (branch) propagated = gitOk(root, ["push", ".", `${branch}:develop`]);
   }
   return { outcome: "committed", propagated };
+}
+
+/**
+ * COMMIT-AFTER-BATCH (gap-store-commit-action-and-actor AC3): stage MANY written files and commit
+ * them in ONE commit — the `--batch` primitive. One logical action that writes N records must not
+ * produce N commits (the 16-commits-per-logical-action defect). `relPaths` are staged together
+ * (hard rule 11: pathspec-limited, never -A) and committed back-to-back with one subject.
+ */
+export function commitStoreBatch(opts: CommitStoreBatchOptions): CommitOutcome {
+  const { relPaths, kind, id, action, actor, propagate = "none" } = opts;
+  const root = opts.root === undefined ? resolveGitRoot(process.cwd()) : opts.root;
+  if (!root) return "not-in-git";
+  if (gitOut(root, ["rev-parse", "--is-inside-work-tree"]) !== "true") return "not-in-git";
+  if (relPaths.length === 0) return "unchanged";
+
+  if (!gitOk(root, ["add", "--", ...relPaths])) return "failed";
+  // Nothing staged (every file byte-identical to HEAD) ⇒ no commit — an honest "unchanged", not a
+  // "committed" echo (硬规则 3b).
+  const staged = gitOut(root, ["diff", "--cached", "--name-only"]);
+  if (staged === null || staged === "") return "unchanged";
+
+  const message = storeCommitMessage({ kind, id, action, actor: resolveCommitActor(actor) });
+  if (!gitOk(root, ["commit", "--no-verify", "-m", message, "--", ...relPaths])) return "failed";
+
+  if (propagate === "develop") {
+    const branch = gitOut(root, ["branch", "--show-current"]);
+    if (branch) gitOk(root, ["push", ".", `${branch}:develop`]);
+  }
+  return "committed";
 }

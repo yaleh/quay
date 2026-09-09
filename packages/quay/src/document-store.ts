@@ -140,6 +140,7 @@ export function createDocumentStore(docDir: string) {
       }
       frontmatter.id = id;
       if (title !== undefined) frontmatter.title = title;
+      const prevStatus = typeof frontmatter.status === "string" ? frontmatter.status : undefined;
       frontmatter.status = status ?? frontmatter.status ?? "draft";
       if (kind !== undefined) frontmatter.kind = kind;
       if (contracts !== undefined) frontmatter.contracts = contracts;
@@ -153,7 +154,12 @@ export function createDocumentStore(docDir: string) {
       const finalBody = body !== undefined ? body : existingBody;
       const fileName = existingFile ?? `${id}-${slugify(title, "doc")}.md`;
       fs.writeFileSync(path.join(docDir, fileName), serializeFrontmatter(ordered, finalBody), "utf8");
-      commitDocFile(docDir, fileName, id);
+      // Action semantics (gap-store-commit-action-and-actor AC1): create / status flip / field
+      // update are distinguishable in the commit subject — never fixed prose.
+      const action = !existingFile
+        ? "create"
+        : (prevStatus !== undefined && prevStatus !== frontmatter.status ? `status ${prevStatus}→${frontmatter.status}` : "update");
+      commitDocFile(docDir, fileName, id, action);
       return get(id);
     });
   }
@@ -167,11 +173,13 @@ export function createDocumentStore(docDir: string) {
  * delegated to the shared primitive `commitStoreWrite` — ⛔ no git plumbing here. Default
  * `propagate: "none"`: a docs-managed write rides the branch it lands on.
  */
-function commitDocFile(docDir: string, fileName: string, id: string): CommitOutcome {
+function commitDocFile(docDir: string, fileName: string, id: string, action: string): CommitOutcome {
   const root = resolveGitRoot(docDir);
   return commitStoreWrite({
     relPath: root ? path.relative(root, path.join(docDir, fileName)) : `docs-managed/${fileName}`,
-    message: `docs-managed: ${id} 写盘即提交（store-commit）`,
+    kind: "docs-managed",
+    id,
+    action,
     root,
     propagate: "none",
   }).outcome;

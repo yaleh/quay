@@ -2,7 +2,7 @@
 id: gap-store-commit-action-and-actor
 title: store-commit 提交信息无动作语义、无写入者：一次逻辑动作 16 次同文案提交，72h 内 goals/ 4007/4042
   同形，立条者三天后即不可追溯
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -46,11 +46,11 @@ depends_on:
 
 ## AC
 
-- [ ] AC1（动作可辨，双向）：一次 create 与一次 status flip 各产生一条提交，两者 subject **不同形**，且分别含 `create` 与 `status <from>→<to>`；反向：改动作前的历史提交仍能被解析（不破坏既有历史读取）。
-- [ ] AC2（写入者可辨）：`git log --format=%s -20 -- goals/ | grep -c 'by '` == 20——最近 20 条 store-commit 提交每条都带 `by cli:` 或 `by driver:` 之一。
-- [ ] AC3（批量）：一次 `--batch` 写 N≥3 条记录 ⇒ 该次操作产生的提交数 == 1（`git rev-list --count` 前后差为 1）。
-- [ ] AC4（五 kind 单一构造点，按位置判定）：五个 store 文件中**自己拼提交文案字符串**的处数 == 0，全部委托 `store-commit.ts` 的构造函数——`grep -c '写盘即提交' packages/quay/src/{goal,document,adr,meta}-store.ts packages/quay-native/src/store.ts` 合计为 0。
-- [ ] AC5（不回归）：`goals/` 的提交仍能被 develop→doc 的 ff-only 同步消费——`gap-meta-commitgoalfile` 建立的不变式不破（以 `plugin/test/goal-invariants-standing.test.mjs` 中相关断言跑绿为准）。
+- [x] AC1（动作可辨，双向）：一次 create 与一次 status flip 各产生一条提交，两者 subject **不同形**，且分别含 `create` 与 `status <from>→<to>`；反向：改动作前的历史提交仍能被解析（不破坏既有历史读取）。
+- [x] AC2（写入者可辨）：`git log --format=%s -20 -- goals/ | grep -c 'by '` == 20——最近 20 条 store-commit 提交每条都带 `by cli:` 或 `by driver:` 之一。
+- [x] AC3（批量）：一次 `--batch` 写 N≥3 条记录 ⇒ 该次操作产生的提交数 == 1（`git rev-list --count` 前后差为 1）。
+- [x] AC4（五 kind 单一构造点，按位置判定）：五个 store 文件中**自己拼提交文案字符串**的处数 == 0，全部委托 `store-commit.ts` 的构造函数——`grep -c '写盘即提交' packages/quay/src/{goal,document,adr,meta}-store.ts packages/quay-native/src/store.ts` 合计为 0。
+- [x] AC5（不回归）：`goals/` 的提交仍能被 develop→doc 的 ff-only 同步消费——`gap-meta-commitgoalfile` 建立的不变式不破（以 `plugin/test/goal-invariants-standing.test.mjs` 中相关断言跑绿为准）。
 
 ## DoD
 
