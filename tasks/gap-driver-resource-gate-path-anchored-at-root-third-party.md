@@ -1,7 +1,7 @@
 ---
 id: gap-driver-resource-gate-path-anchored-at-root-third-party
 title: resource-gate.sh 路径仍锚在 opts.root —— 第三方无 plugin/ 项目驱动每轮 WAIT(exit 127) 永不派发
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical
