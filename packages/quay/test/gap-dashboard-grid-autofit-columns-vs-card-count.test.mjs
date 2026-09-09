@@ -23,6 +23,7 @@ import assert from "node:assert/strict";
 import {
   renderDashboardPage,
   renderCardGrid,
+  renderWorkProgressRow,
   gridColumns,
   dashboardGridStyles,
 } from "../src/serve-dashboard.ts";
@@ -103,15 +104,18 @@ function colsOf(openTag) {
   return m ? Number(m[1]) : null;
 }
 
-/** Column count encoded in a grid row's inline template — BOTH the card-count-bound
- *  repeat(N, minmax(0,1fr)) form (工作进展/变更记录) and the fixed 3fr:2fr asymmetric top row
- *  (gap-dashboard-top-row-asymmetric-columns) reduce to a plain column count, so the shared
+/** Column count encoded in a grid row's inline template — the card-count-bound
+ *  repeat(N, minmax(0,1fr)) form (变更记录), the fixed 3fr:2fr asymmetric top row
+ *  (gap-dashboard-top-row-asymmetric-columns), and the paired 1fr:1fr 工作进展 row
+ *  (gap-dashboard-workprogress-row-paired-columns) all reduce to a plain column count, so the shared
  *  empty-slot invariant (cols × rows − cards == 0) still holds for every row. Null = unrecognized. */
 function rowColCount(openTag) {
   const repeat = colsOf(openTag);
   if (repeat !== null) return repeat;
   const asym = openTag.match(/grid-template-columns:minmax\(0,\s*3fr\)\s+minmax\(0,\s*2fr\)/);
   if (asym) return 2;
+  const paired = openTag.match(/grid-template-columns:minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)/);
+  if (paired) return 2;
   return null;
 }
 
@@ -221,9 +225,45 @@ test("top-row asymmetric: 3fr:2fr two columns, sys+mgr flex-stacked in the right
   assert.ok(liveIdx < wrapIdx && wrapIdx < sysIdx && sysIdx < mgrIdx,
     "live card is the left column; sys then mgr stacked top-to-bottom in the right column");
 
-  // The other two rows stay card-count-bound and equal-width (not affected by the top-row change).
+  // 变更记录 stays card-count-bound and equal-width; the 工作进展 row is now paired (checked in its own
+  // test below). Neither is affected by the top-row change.
   const rest = rows.slice(1);
-  assert.ok(rest.every((r) => colsOf(r.openTag) !== null), "工作进展 + 变更记录 rows still use repeat(N, minmax(0,1fr))");
-  assert.equal(colsOf(rest[0].openTag), 4, "工作进展 row stays 4 columns (4 cards)");
-  assert.equal(colsOf(rest[1].openTag), 2, "变更记录 row stays 2 columns (2 cards)");
+  assert.equal(colsOf(rest[1].openTag), 2, "变更记录 row stays repeat(2, minmax(0,1fr)) (2 cards)");
+});
+
+test("工作进展 paired: 1fr:1fr two equal-width columns, goal+task flex-stacked left, tests+fanin right", () => {
+  // Direct helper unit: the pairing order is structural, so assert it on the pure function.
+  const row = renderWorkProgressRow(
+    '<div id="goal-card">g</div>',
+    '<div id="task-card">t</div>',
+    '<div id="tests-card">x</div>',
+    '<div id="fanin-card">f</div>',
+  );
+  assert.ok(row.includes("grid-template-columns:minmax(0,1fr) minmax(0,1fr)"), "paired row is 1fr:1fr equal-width");
+  assert.ok(!row.includes("repeat("), "paired row does not reuse gridColumns()'s repeat() template");
+  const goalIdx = row.indexOf('id="goal-card"');
+  const taskIdx = row.indexOf('id="task-card"');
+  const testsIdx = row.indexOf('id="tests-card"');
+  const faninIdx = row.indexOf('id="fanin-card"');
+  assert.ok(goalIdx < taskIdx && taskIdx < testsIdx && testsIdx < faninIdx,
+    "order is goal(上) → task(下) in the left column, tests(上) → fanin(下) in the right column");
+
+  // Integration: the rendered page's 工作进展 row (rows[1]) is exactly 2 grid items, each a flex stack.
+  const html = renderDashboardPage(makeDashboardArgs());
+  const rows = extractGridRows(html);
+  assert.equal(rows.length, 3, "the page still renders exactly 3 card-grid rows");
+  const work = rows[1];
+  assert.ok(work.openTag.includes("grid-template-columns:minmax(0,1fr) minmax(0,1fr)"), "工作进展 row carries the 1fr:1fr template");
+  assert.ok(!work.openTag.includes("repeat("), "工作进展 row does not reuse gridColumns()");
+  assert.equal(countDirectDivs(work.content), 2, "工作进展 row has exactly 2 grid items (two flex stacks)");
+
+  // Two flex-column stacks, in order: left = goal above task, right = tests above fanin.
+  const goalIdxP = work.content.indexOf('id="goal-card"');
+  const taskIdxP = work.content.indexOf('id="task-card"');
+  const testsIdxP = work.content.indexOf('id="tests-card"');
+  const faninIdxP = work.content.indexOf('id="fanin-card"');
+  assert.ok(goalIdxP < taskIdxP && taskIdxP < testsIdxP && testsIdxP < faninIdxP,
+    "page order: goal(上)→task(下) left, tests(上)→fanin(下) right");
+  assert.equal((work.content.match(/display:flex;flex-direction:column;gap:2px/g) || []).length, 2,
+    "both columns are flex-column stacks (one per grid item)");
 });
