@@ -52,13 +52,13 @@ Store: s.write("AC-960", { status: "active" })（不传） → exit 0，origin �
 
 ## AC
 
-- [ ] AC1（P1 根治，双向负控制）：对**既有**记录 `node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts --root <tmp> write <既有id> --status active` 不传 `--origin` ⇒ exit 0 **∧** 该记录 origin 与写入前逐字相同；反向：同一命令用于**新建** id ⇒ 仍 exit≠0（create 必传，契约不被削弱）。
-- [ ] AC2（P2，按位置判定）：`grep -c 'origin ?? ""' plugin/scripts/goal-driver.ts` == 0 **∧** `writeGoalStatus` 的签名不再要求 origin 参数。
-- [ ] AC3（P4/P5，双向）：对既有 AC 记录 `write <id> --criterion ""` ⇒ exit≠0（当前为 exit 0）；反向：`write <id> --status achieved`（只碰 status）⇒ exit 0，机械 flip 不被挡。
-- [ ] AC4（P6，双向）：激活一条 criterion 为不可评估命令的 AC ⇒ 拒绝且 stderr 含 `not-evaluated`；反向：激活一条判据可跑（pass 或 fail 均可）的 AC ⇒ 放行。
-- [ ] AC5（P3，双向）：一次 `draft→active` 之后该记录含 `activatedAt`（首次激活时刻）**∧** `statusLog` 追加一条含 `{at, from, to}`；反向：只改 `title` 的写入不追加 statusLog 条目。
-- [ ] AC6（P9）：`write <id> --status active --dry-run` ⇒ exit 0 **∧** `git status --porcelain goals/` 无新增变化 **∧** 该记录内容未变。
-- [ ] AC7（防退化下沉）：`node --no-warnings --experimental-strip-types --test plugin/test/goal-invariants-standing.test.mjs` exit 0，且该文件含对 AC2 与 AC3 两条不变式的断言。
+- [x] AC1（P1 根治，双向负控制）：对**既有**记录 `node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts --root <tmp> write <既有id> --status active` 不传 `--origin` ⇒ exit 0 **∧** 该记录 origin 与写入前逐字相同；反向：同一命令用于**新建** id ⇒ 仍 exit≠0（create 必传，契约不被削弱）。
+- [x] AC2（P2，按位置判定）：`grep -c 'origin ?? ""' plugin/scripts/goal-driver.ts` == 0 **∧** `writeGoalStatus` 的签名不再要求 origin 参数。
+- [x] AC3（P4/P5，双向）：对既有 AC 记录 `write <id> --criterion ""` ⇒ exit≠0（当前为 exit 0）；反向：`write <id> --status achieved`（只碰 status）⇒ exit 0，机械 flip 不被挡。
+- [x] AC4（P6，双向）：激活一条 criterion 为不可评估命令的 AC ⇒ 拒绝且 stderr 含 `not-evaluated`；反向：激活一条判据可跑（pass 或 fail 均可）的 AC ⇒ 放行。
+- [x] AC5（P3，双向）：一次 `draft→active` 之后该记录含 `activatedAt`（首次激活时刻）**∧** `statusLog` 追加一条含 `{at, from, to}`；反向：只改 `title` 的写入不追加 statusLog 条目。
+- [x] AC6（P9）：`write <id> --status active --dry-run` ⇒ exit 0 **∧** `git status --porcelain goals/` 无新增变化 **∧** 该记录内容未变。
+- [x] AC7（防退化下沉）：`node --no-warnings --experimental-strip-types --test plugin/test/goal-invariants-standing.test.mjs` exit 0，且该文件含对 AC2 与 AC3 两条不变式的断言。
 
 ## DoD
 
