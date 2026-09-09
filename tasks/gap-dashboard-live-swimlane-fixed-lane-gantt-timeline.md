@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-live-swimlane-fixed-lane-gantt-timeline
 title: Dashboard「循环脉搏」泳道图升级为固定 5 泳道甘特图（合并历史任务+贪心打包+hover），保留在飞任务 mini-list
-status: ready
+status: done
 labels:
   - gap
 parent: null
