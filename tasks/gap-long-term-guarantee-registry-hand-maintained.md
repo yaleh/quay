@@ -34,12 +34,12 @@ goal_ac: AC-190
 
 ## Acceptance Criteria
 
-- [ ] AC1 新立案且带指定标签而 `goal_ac` 为空 ⇒ 闸红（负控制：造一条这样的任务）
-- [ ] AC2 带标签且 `goal_ac` 非空 ⇒ 闸绿（证明不是恒红）
-- [ ] AC3 生效线之前的存量任务**不**被判红（打印受影响条数，应为 0）
-- [ ] AC4 `REGISTERED_GUARANTEES` 字面量在活面 grep 命中 = 0
-- [ ] AC5 AC-190 的 criterion 指向新判据且可运行
-- [ ] AC6 `scripts/test.sh` 全量绿
+- [x] AC1 新立案且带指定标签而 `goal_ac` 为空 ⇒ 闸红（负控制：造一条这样的任务）
+- [x] AC2 带标签且 `goal_ac` 非空 ⇒ 闸绿（证明不是恒红）
+- [x] AC3 生效线之前的存量任务**不**被判红（打印受影响条数，应为 0）
+- [x] AC4 `REGISTERED_GUARANTEES` 字面量在活面 grep 命中 = 0
+- [x] AC5 AC-190 的 criterion 指向新判据且可运行
+- [x] AC6 `scripts/test.sh` 全量绿
 
 ## Definition of Done
 
@@ -54,3 +54,15 @@ AC1–AC6 全绿；且在任务 Evidence 里记下生效线取值与当时的存
 - plugin/test/ready-pool-check.test.mjs
 - goals/AC-190-task-ac.md
 - tasks/gap-long-term-guarantee-registry-hand-maintained.md
+- plugin/scripts/capability-catalog.sh
+- plugin/test/slot-refill.test.mjs
+
+## Evidence
+
+生效线取值：`ACTIVATION_LINE_ISO = "2026-09-09T00:00:00Z"`（`plugin/scripts/long-term-guarantee-goal-backed-check.ts` 常量，显式 cutoff）。
+
+立案时实测存量（本任务 Proposal 原文）：带 `delivery-critical` 标签 125 条，其中 120 条无 `goal_ac`（96%）。
+实现时检测器实测（`--json`）：total=120 delivery-critical（标签判读）、grandfathered=120、
+其中 grandfathered_no_goal_ac=115、grandfathered_with_goal_ac=5。生效线之前的存量不判红（grandfathered），
+单独排期、⛔ 不在本任务清——检测器每轮打印 grandfathered_no_goal_ac 计数，故「存量为什么没被清」有据可查，
+是【显式生效线豁免】而非静默豁免。
