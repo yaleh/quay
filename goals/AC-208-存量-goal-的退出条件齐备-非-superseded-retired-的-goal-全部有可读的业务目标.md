@@ -9,7 +9,8 @@ criterion: test "$(node --no-warnings --experimental-strip-types
   d=json.load(sys.stdin); print(sum(1 for r in d if
   str(r.get("id","")).startswith("GOAL-") and str(r.get("status")) not in
   ("superseded","retired") and len((r.get("body") or "").strip())<40))')" -eq 0
-expect: 判据 exit 0
+expect: 非 superseded/retired 的 GOAL 中 body<40 非空白字符的条数 == 0——每条仍在流通的 GOAL
+  的业务目标（背景 / 范围与非目标 / 退出条件）在记录里可读，充分性闸（AC-212）因此有输入。
 origin: 9 条 GOAL 中 5 条 body 为空（GOAL-004/005/006/007/008），其中 GOAL-005/007/008 已
   achieved 且非 superseded ⇒ 业务目标从未被写下就判达成，「是否达成业务目标」结构上无从判断。body
   必填（MIN_GOAL_BODY_CHARS=40）于 2026-09-08 由
