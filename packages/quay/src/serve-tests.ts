@@ -479,34 +479,52 @@ function bucketLabel(canonical: string): string {
 /**
  * gap-webui-tests-page-unpaginated-tables — a full-suite timeline is hundreds of 14px bars (measured
  * 119,381 bytes of SVG for 288 files), which dominates /tests's default response the same way the two
- * unpaginated tables did. Cap the PLOTTED bars to the SLOWEST TIMELINE_MAX_BARS files (a gantt of
- * hundreds of bars is unreadable, and slow files are what a reader investigates), then re-sort
- * chronologically for display. The cap touches the chart only — the complete list still lives in the
- * perFile table below (now paginated).
+ * unpaginated tables did. TIMELINE_MAX_BARS now names the DEFAULT gantt page size (still ~50 bars) —
+ * the byte budget survives, but gap-webui-tests-page-timeline-gantt-truncated replaced the old "cap to
+ * the SLOWEST 50" with a chronological server-side slice, so every timed file is reachable by paging.
  */
 const TIMELINE_MAX_BARS = 50;
+
+/** The gantt's pagination state (page already clamped), computed over the TIMED entries only. */
+export interface TimelinePaging {
+  page: number;
+  totalPages: number;
+  totalRows: number;
+  pageSize: number;
+}
 
 /**
  * gap-test-detail-timeline AC2 — render the per-file timeline (one horizontal bar per file, positioned
  * by its start/end epoch-ms) as a pure, dependency-free server-rendered SVG string. Sorted by start
  * time ASC (a chronological timeline, distinct from the duration table's DESC). Only files carrying
  * BOTH `startedAtMs` and `endedAtMs` are plotted; absent/legacy perFile ⇒ "" (no fabricated chart).
+ * gap-webui-tests-page-timeline-gantt-truncated — `paging` slices the chronological axis server-side
+ * (page `paging.page` of `paging.totalPages`, `paging.pageSize` per page) instead of the old "slowest
+ * 50 then re-sort"; the title states the current page's row range so no file is silently invisible.
  * Marks carry token-derived CSS classes (git-svg-* / gantt-svg-*), ZERO hardcoded hex, zero client JS.
  */
 export function renderPerFileTimelineSvg(
   perFile: { file: string; durationMs: number; passed: boolean; startedAtMs?: number; endedAtMs?: number }[] | null | undefined,
   root?: string | null,
+  paging?: TimelinePaging,
 ): string {
   if (!perFile || perFile.length === 0) return "";
   const timed = perFile.filter(hasTimestamps);
   if (timed.length === 0) return "";
-  // Select the SLOWEST TIMELINE_MAX_BARS files (duration DESC) — never mutate the caller's array — then
-  // re-sort chronologically (start-time ASC) for the actual plot, preserving the timeline's contract.
+  // gap-webui-tests-page-timeline-gantt-truncated — a chronological window (start-time ASC, then this
+  // page's slice), replacing "slowest 50 then re-sort". A missing `paging` (legacy direct callers) is
+  // page 1 of the default page size — the same ≤ TIMELINE_MAX_BARS bars, but now the EARLIEST-starting
+  // ones rather than the slowest, so paging to the end exposes the whole axis. Never mutates the
+  // caller's array (filter → slice → sort).
+  const pageSize = paging?.pageSize ?? TIMELINE_MAX_BARS;
+  const totalRows = paging?.totalRows ?? timed.length;
+  const totalPages = Math.max(1, paging?.totalPages ?? Math.ceil(totalRows / pageSize));
+  const page = Math.min(Math.max(1, paging?.page ?? 1), totalPages);
+  const offset = (page - 1) * pageSize;
   const rows = timed
     .slice()
-    .sort((a, b) => b.durationMs - a.durationMs)
-    .slice(0, TIMELINE_MAX_BARS)
-    .sort((a, b) => a.startedAtMs - b.startedAtMs);
+    .sort((a, b) => a.startedAtMs - b.startedAtMs)
+    .slice(offset, offset + pageSize);
 
   // gap-webui-bucket-color-distinction AC2 — attribute each file to its bucket set (read once from the
   // dispatch-written single-truth-source artifact) so bars are HUE-coloured by bucket, not pass/fail.
@@ -580,11 +598,15 @@ export function renderPerFileTimelineSvg(
     xTicks.push(`<line class="git-svg-grid" x1="${X(t).toFixed(1)}" y1="${M.top}" x2="${X(t).toFixed(1)}" y2="${H - M.bottom}" stroke-width="1" /><text class="git-svg-muted" x="${X(t).toFixed(1)}" y="${H - M.bottom + 16}" font-size="10" text-anchor="middle">${hhmmss}</text>`);
   }
 
+  // gap-webui-tests-page-timeline-gantt-truncated AC5 — name the current page's row range ("第 X/Y 页 ·
+  // 本页 A–B / 共 N 个文件") instead of the old "仅显示最慢 N/M" (which implied the rest were gone).
+  const title = `测试时间线（每文件起止时刻 · 第 ${page}/${totalPages} 页 · 本页 ${offset + 1}–${offset + rows.length} / 共 ${totalRows} 个文件 · 按开始时刻升序 · 按 bucket 着色）`;
+
   return `<svg class="git-svg-surface" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Per-file test timeline (gantt)" style="max-width:100%;height:auto;border:1px solid var(--color-neutral-200);border-radius:6px;font-family:system-ui,-apple-system,sans-serif;">
 ${xTicks.join("\n")}
 ${bars}
 ${legend}
-<text class="git-svg-ink" x="${M.left}" y="${(M.top - 6).toFixed(1)}" font-size="11">测试时间线（每文件起止时刻 · 按开始时刻升序 · 按 bucket 着色${timed.length > TIMELINE_MAX_BARS ? ` · 仅显示最慢 ${TIMELINE_MAX_BARS} / ${timed.length} 个文件` : ""}）</text>
+<text class="git-svg-ink" x="${M.left}" y="${(M.top - 6).toFixed(1)}" font-size="11">${title}</text>
 </svg>`;
 }
 
@@ -608,20 +630,22 @@ interface PagingState {
   pageSizeInvalid: boolean;
 }
 
-/** The full /tests query state carried through every pagination link (focus round + both tables + the
- *  timeline window). `hours` is optional so pre-existing direct callers (and the unpaginated-tables
- *  test) render the default window unchanged. */
+/** The full /tests query state carried through every pagination link (focus round + all three datasets —
+ *  history, perFile table, gantt — + the timeline window). `hours`/`ganttPage`/`ganttPageSize` are
+ *  optional so pre-existing direct callers (and the unpaginated-tables test) render the defaults. */
 interface TestsQueryState {
   round: number | null;
   page: number;
   pageSize: number;
   perFilePage: number;
   perFilePageSize: number;
+  ganttPage?: number;
+  ganttPageSize?: number;
   hours?: number | null;
 }
 
-/** Build a /tests href preserving the focus round + both tables' pagination + the timeline window,
- *  overriding the given fields. */
+/** Build a /tests href preserving the focus round + all three datasets' pagination + the timeline
+ *  window, overriding the given fields. */
 export function buildTestsHref(q: TestsQueryState): string {
   const params = new URLSearchParams();
   if (q.round != null) params.set("round", String(q.round));
@@ -629,6 +653,8 @@ export function buildTestsHref(q: TestsQueryState): string {
   if (q.pageSize !== DEFAULT_PAGE_SIZE) params.set("pageSize", String(q.pageSize));
   if (q.perFilePage > 1) params.set("perFilePage", String(q.perFilePage));
   if (q.perFilePageSize !== DEFAULT_PAGE_SIZE) params.set("perFilePageSize", String(q.perFilePageSize));
+  if (q.ganttPage != null && q.ganttPage > 1) params.set("ganttPage", String(q.ganttPage));
+  if (q.ganttPageSize != null && q.ganttPageSize !== TIMELINE_MAX_BARS) params.set("ganttPageSize", String(q.ganttPageSize));
   if (q.hours != null && q.hours !== DEFAULT_TIMELINE_HOURS) params.set("hours", String(q.hours));
   const qs = params.toString();
   return qs ? `/tests?${qs}` : "/tests";
@@ -671,6 +697,9 @@ interface TestsPagingOpts {
   perFilePage?: number;
   perFilePageSize?: number;
   perFilePageSizeInvalid?: boolean;
+  ganttPage?: number;
+  ganttPageSize?: number;
+  ganttPageSizeInvalid?: boolean;
 }
 
 function renderTestsPage(
@@ -754,8 +783,7 @@ function renderTestsPage(
     : tests.runs.find((r) => r.perFile && r.perFile.length > 0);
   // gap-webui-tests-page-unpaginated-tables — slice the perFile table server-side (default 20 rows),
   // its OWN namespace (?perFilePage / ?perFilePageSize) so it paginates independently of the history
-  // table. The timeline SVG (a chart, not a list table) is bounded separately — TIMELINE_MAX_BARS in
-  // renderPerFileTimelineSvg — because AC5's byte budget can't be met by table slicing alone.
+  // table.
   const perFilePageSize = opts.perFilePageSize ?? DEFAULT_PAGE_SIZE;
   const perFilePageSizeInvalid = opts.perFilePageSizeInvalid ?? false;
   const perFileTotalRows = perFileRun ? perFileRun.perFile.length : 0;
@@ -764,33 +792,55 @@ function renderTestsPage(
   const perFileOffset = (perFilePage - 1) * perFilePageSize;
   const perFileSlice = perFileRun ? perFileRun.perFile.slice(perFileOffset, perFileOffset + perFilePageSize) : null;
   const perFileTable = perFileSlice && perFileSlice.length > 0 ? renderPerFileTable(perFileSlice) : "";
+  // gap-webui-tests-page-timeline-gantt-truncated — paginate the gantt (a chart, not a list) over the
+  // TIMED entries only (the chart plots only those), its OWN namespace (?ganttPage / ?ganttPageSize).
+  // Default pageSize stays TIMELINE_MAX_BARS (50) so the byte budget the unpaginated-tables task solved
+  // is preserved; the SLICE is by start-time ASC, so paging to the end exposes the whole time axis.
+  const ganttTimed = perFileRun ? perFileRun.perFile.filter(hasTimestamps) : [];
+  const ganttPageSize = opts.ganttPageSize ?? TIMELINE_MAX_BARS;
+  const ganttPageSizeInvalid = opts.ganttPageSizeInvalid ?? false;
+  const ganttTotalRows = ganttTimed.length;
+  const ganttTotalPages = Math.max(1, Math.ceil(ganttTotalRows / ganttPageSize));
+  const ganttPage = Math.min(Math.max(1, opts.ganttPage ?? 1), ganttTotalPages);
   // gap-test-detail-timeline AC2 — render the per-file timeline (gantt) for that same run. The chart
   // omits itself (⇒ "") when the run's perFile entries carry no timestamps (legacy/absent field).
-  const perFileTimelineSvg = perFileRun ? renderPerFileTimelineSvg(perFileRun.perFile, root) : "";
+  const perFileTimelineSvg = perFileRun
+    ? renderPerFileTimelineSvg(perFileRun.perFile, root, { page: ganttPage, totalPages: ganttTotalPages, totalRows: ganttTotalRows, pageSize: ganttPageSize })
+    : "";
   // gap-web-tests-three-sections-round-drift AC2 — the find() above silently falls back to an
   // EARLIER run when the newest run carries no perFile (red / static-check-early-fail / reporter
   // stopped before perFile). Surface that fallback instead of hiding it: name both the latest run
   // and the run actually shown. (No fallback notice in focus mode — the selected round is shown as-is,
   // not "falling back" from a different round.)
   const timelineFallback = !focus && perFileRun != null && latest != null && perFileRun !== latest;
+  // gap-webui-tests-page-timeline-gantt-truncated — the gantt's own nav (?ganttPage/?ganttPageSize),
+  // rendered inside the timeline section right below the chart so it can't be confused with the
+  // history/perFile navs.
+  const ganttNav = perFileTimelineSvg
+    ? renderPagingNav(
+        { page: ganttPage, totalPages: ganttTotalPages, totalRows: ganttTotalRows, pageSize: ganttPageSize, pageSizeInvalid: ganttPageSizeInvalid },
+        (pg, sz) => buildTestsHref({ round: roundRequested, page: historyPage, pageSize: historyPageSize, perFilePage, perFilePageSize, ganttPage: pg ?? 1, ganttPageSize: sz, hours }),
+      )
+    : "";
   const perFileTimeline = perFileTimelineSvg
     ? html`<h2>测试时间线${perFileRun ? `（${roundLabel(perFileRun)}）` : ""}</h2>
         ${timelineFallback ? html`<p class="meta" style="margin:0.25rem 0;color:var(--color-accent-800);font-weight:600">⚠️ 最新一轮无 perFile 数据${latest ? `（${roundLabel(latest)}）` : ""}，以下回退显示${perFileRun ? ` ${roundLabel(perFileRun)}` : ""}。</p>` : ""}
         <p class="meta">数据源：<code>.quay/verification-round.jsonl</code> perFile 起止时刻（reporter 结束时刻 + duration 反推起始）</p>
-        ${perFileTimelineSvg}`
+        ${perFileTimelineSvg}
+        ${ganttNav}`
     : "";
-  // gap-webui-tests-page-unpaginated-tables — the two pagination navs (each preserving the focus round
-  // AND the OTHER table's page so cross-table state never resets on a single-table navigation).
+  // gap-webui-tests-page-unpaginated-tables — the two table navs (each preserving the focus round AND
+  // the OTHER datasets' pages so cross-dataset state never resets on a single-dataset navigation).
   const historyNav = tests.runs.length > 0
     ? renderPagingNav(
         { page: historyPage, totalPages: historyTotalPages, totalRows: historyTotalRows, pageSize: historyPageSize, pageSizeInvalid: historyPageSizeInvalid },
-        (pg, sz) => buildTestsHref({ round: roundRequested, page: pg ?? 1, pageSize: sz, perFilePage, perFilePageSize, hours }),
+        (pg, sz) => buildTestsHref({ round: roundRequested, page: pg ?? 1, pageSize: sz, perFilePage, perFilePageSize, ganttPage, ganttPageSize, hours }),
       )
     : "";
   const perFileNav = perFileTable
     ? renderPagingNav(
         { page: perFilePage, totalPages: perFileTotalPages, totalRows: perFileTotalRows, pageSize: perFilePageSize, pageSizeInvalid: perFilePageSizeInvalid },
-        (pg, sz) => buildTestsHref({ round: roundRequested, page: historyPage, pageSize: historyPageSize, perFilePage: pg ?? 1, perFilePageSize: sz, hours }),
+        (pg, sz) => buildTestsHref({ round: roundRequested, page: historyPage, pageSize: historyPageSize, perFilePage: pg ?? 1, perFilePageSize: sz, ganttPage, ganttPageSize, hours }),
       )
     : "";
   // gap-webui-tests-page-missing-rounds-timeline-bar — 最近测试记录分段时间轴（复用 dashboard 的
@@ -861,10 +911,11 @@ export async function handleTests(
     const latest = tests.runs[0] ?? null;
     return resolveSuiteLoadSamples(cfg.workspaceRoot, latest?.runId, roundTimeWindowMs(latest));
   })();
-  // gap-webui-tests-page-unpaginated-tables — parse the two pagination namespaces (?page / ?pageSize for
-  // history, ?perFilePage / ?perFilePageSize for perFile), mirroring /board's QW-007 pattern: 1-based
-  // page (default 1), pageSize (default DEFAULT_PAGE_SIZE); invalid values fall back to defaults with a
-  // visible "invalid value ignored" note (never a 500, never a silently-wrong page).
+  // gap-webui-tests-page-unpaginated-tables — parse the three pagination namespaces (?page / ?pageSize for
+  // history, ?perFilePage / ?perFilePageSize for the perFile table, ?ganttPage / ?ganttPageSize for the
+  // timeline chart), mirroring /board's QW-007 pattern: 1-based page (default 1), pageSize (default
+  // DEFAULT_PAGE_SIZE / TIMELINE_MAX_BARS); invalid values fall back to defaults with a visible "invalid
+  // value ignored" note (never a 500, never a silently-wrong page).
   const pageParam = parseInt(url.searchParams.get("page") || "1", 10);
   const page = Number.isFinite(pageParam) && pageParam >= 1 ? pageParam : 1;
   const pageSizeParam = parseInt(url.searchParams.get("pageSize") || "", 10);
@@ -875,12 +926,17 @@ export async function handleTests(
   const perFilePageSizeParam = parseInt(url.searchParams.get("perFilePageSize") || "", 10);
   const perFilePageSizeInvalid = url.searchParams.has("perFilePageSize") && (!Number.isFinite(perFilePageSizeParam) || perFilePageSizeParam < 1);
   const perFilePageSize = Number.isFinite(perFilePageSizeParam) && perFilePageSizeParam >= 1 ? perFilePageSizeParam : DEFAULT_PAGE_SIZE;
+  const ganttPageParam = parseInt(url.searchParams.get("ganttPage") || "1", 10);
+  const ganttPage = Number.isFinite(ganttPageParam) && ganttPageParam >= 1 ? ganttPageParam : 1;
+  const ganttPageSizeParam = parseInt(url.searchParams.get("ganttPageSize") || "", 10);
+  const ganttPageSizeInvalid = url.searchParams.has("ganttPageSize") && (!Number.isFinite(ganttPageSizeParam) || ganttPageSizeParam < 1);
+  const ganttPageSize = Number.isFinite(ganttPageSizeParam) && ganttPageSizeParam >= 1 ? ganttPageSizeParam : TIMELINE_MAX_BARS;
   // gap-webui-tests-page-missing-rounds-timeline-bar — read the timeline window off ?hours=（与 dashboard
   // 同一 parseTimelineHours：非法/超界回退默认 3，绝不 500）。
   const hours = parseTimelineHours(url.searchParams.get("hours"));
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(renderTestsPage(tests, cfg.workspaceRoot, samples, selected, roundNum, {
-    page, pageSize, pageSizeInvalid, perFilePage, perFilePageSize, perFilePageSizeInvalid,
+    page, pageSize, pageSizeInvalid, perFilePage, perFilePageSize, perFilePageSizeInvalid, ganttPage, ganttPageSize, ganttPageSizeInvalid,
   }, hours));
 }
 
