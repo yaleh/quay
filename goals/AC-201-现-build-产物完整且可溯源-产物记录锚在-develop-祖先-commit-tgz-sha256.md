@@ -1,7 +1,7 @@
 ---
 id: AC-201
 title: 现 build 产物完整且可溯源——产物记录锚在 develop 祖先 commit + tgz sha256
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-009
 criterion: >-
@@ -38,5 +38,10 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-09-09T12:14:43.839Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
 **判据（能取假）**：2026-09-09 干跑 exit 1（载体存在但无本 AC 记录）。**负控制**：把 build_sha 换成一个非 develop 祖先的 sha ⇒ merge-base --is-ancestor 非零 ⇒ 仍 exit 1。**载体字段约定**：{ac, build_sha, tgz_sha256}，由 verify-deliver-coldstart.sh 的 --ac89 追加面写入（:969/:1098，活脚本；⛔ 注意 productization-verification-record.ts 与 -check.ts 两个独立助手已于 2026-09-07 作为零调用脚本归档，不要引用它们）。
