@@ -582,7 +582,9 @@ test('real ring: 载体有 verdict + evidence 不回写 + I2 flip + draft 不动
     // （gap-goal-evidence-cache-should-not-enter-git——evidence 是 .quay/gate-events.jsonl 派生的）。
     const g1 = fs.readFileSync(path.join(tmp, 'goals', 'GOAL-001-t.md'), 'utf8');
     const a1 = fs.readFileSync(path.join(tmp, 'goals', 'AC-001-t.md'), 'utf8');
-    assert.match(g1, /^status: achieved$/m, 'GOAL-001 全部 AC 达成 ⇒ flip achieved（I2）');
+    // AC-212 充分性闸：GOAL 达成判定 = 在域 AC 合取 + 充分性 covered。GOAL-001 body 无 `## 退出条件`
+    // ⇒ 充分性 insufficient ⇒ 即便两条 AC 全绿也不 flip GOAL（covered 的语义判定归 AC-213 的 LLM）。
+    assert.match(g1, /^status: active$/m, 'AC-212 充分性闸：body 无退出条件 ⇒ insufficient ⇒ 不 flip GOAL');
     assert.match(a1, /^status: achieved$/m, 'AC-001 pass ⇒ flip achieved（裁定 5 确定性推导）');
     assert.doesNotMatch(a1, /evidence:/, 'AC-001 evidence 不回写进文件（gate 只写 GateEvent 到账本）');
 
@@ -634,9 +636,9 @@ test('real ring: draft AC under active GOAL 不被翻成 achieved/active；retir
     assert.doesNotMatch(a2, /^status: achieved$/m, 'draft AC 不得翻 achieved（裁定 3）');
     assert.doesNotMatch(a2, /^status: active$/m, 'draft AC 不得翻 active（裁定 3：激活归人）');
     assert.doesNotMatch(a2, /^status: retired$/m, 'draft AC 不得翻 retired（放弃归人，AC-211）');
-    // AC-2（行为级）：draft AC 不再阻塞目标达成判定 ⇒ GOAL 可以 flip achieved。本轮的 GOAL 推导发生在
-    // retire→needs-human 写面之前，draft 尚未翻 needs-human 故仍不阻塞；下一轮 needs-human 才阻塞。
-    assert.match(g1, /^status: achieved$/m, 'draft 不阻塞 ⇒ GOAL flip achieved（AC-2 行为级）');
+    // AC-2（行为级）+ AC-212 充分性闸：draft AC 不再阻塞目标达成判定（纯函数层已证，见 goalAchievedFromRecords
+    // 单测），但 GOAL 层 flip 还要过充分性闸——GOAL-001 body 无 `## 退出条件` ⇒ insufficient ⇒ 不 flip。
+    assert.match(g1, /^status: active$/m, 'draft 不阻塞但充分性 insufficient ⇒ 不 flip GOAL（AC-212）');
 
     // 负控制：flips 里 AC-002 的 to=needs-human（⛔ 不是 achieved——裁定 3 不被削弱）。
     const lines = fs.readFileSync(roundLog, 'utf8').trim().split('\n');
