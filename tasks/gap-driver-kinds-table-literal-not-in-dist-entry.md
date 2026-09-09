@@ -2,7 +2,7 @@
 id: gap-driver-kinds-table-literal-not-in-dist-entry
 title: 打包 dist entry 集对 DRIVER_KINDS 数据表字面量引用盲 → 6 driver kind +
   send-to-session.ts 不进 tarball（AC-202 恒红）
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical
