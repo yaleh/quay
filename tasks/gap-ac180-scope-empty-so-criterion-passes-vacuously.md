@@ -1,7 +1,7 @@
 ---
 id: gap-ac180-scope-empty-so-criterion-passes-vacuously
 title: AC-180 判据空过：active AC 数=0 ⇒ 恒真；且翻 active 会自指后自我熄灭
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
