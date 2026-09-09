@@ -2,7 +2,7 @@
 id: gap-ac204-quay-init-forbidden-prefixes-mcp-commands-hooks-enable-declared
 title: quay-init 禁复制面漏 mcp/commands/hooks 且闭集断言未在安装物+第三方项目形态跑过——补
   FORBIDDEN_PREFIXES 三项 + 成对落账（AC-204）
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical

@@ -6,8 +6,10 @@
 // 推论三: the production carrier) into a fresh temp target, enumerate every laid-down relative path, and
 // assert:
 //   (a) every path ∈ the SEVEN-item closed set (∪ descendants of `tasks/` and `goals/`), and
-//   (b) the laydown contains ZERO `.claude/skills` / `.claude/workflows` / `.claude/agents` /
-//       `plugin/scripts` copies (the retired extension-file copy surface).
+//   (b) the laydown contains ZERO forbidden-copy surface: `.claude/skills` / `.claude/workflows` /
+//       `.claude/agents` / `.claude/commands` / `.claude/hooks` / `plugin/scripts` copies, and no
+//       `.mcp.json` (the retired extension-file copy surface — quay-init writes ENABLE only, never the
+//       Claude Code extension implementations it points at).
 // `.quay/` is NOT excluded here (unlike the ratchet) — `.quay/config.yml` + `.quay/profiles.yml` are
 // closed-set MEMBERS, so they must be asserted AS members, not skipped.
 //
@@ -35,13 +37,17 @@ export const CLOSED_SET_FILES: ReadonlySet<string> = new Set([
 ]);
 export const CLOSED_SET_DIRS: readonly string[] = ["tasks", "goals"];
 
-// The retired extension-file copy surface — ANY of these in the laydown is a violation (裁定 6: 不复制
-// 任何 Claude Code 扩展或脚本).
+// The forbidden copy surface — ANY of these in the laydown is a violation (裁定 6: 不复制任何 Claude
+// Code 扩展或脚本). Directory entries carry a trailing "/" (prefix match: the dir itself + descendants);
+// `.mcp.json` is a FILE (exact match, no trailing slash) — a prefix slice would truncate it to `.mcp.jso`.
 export const FORBIDDEN_PREFIXES: readonly string[] = [
   ".claude/skills/",
   ".claude/workflows/",
   ".claude/agents/",
+  ".claude/commands/",
+  ".claude/hooks/",
   "plugin/scripts/",
+  ".mcp.json",
 ];
 
 /** A path (repo-relative, forward slashes) is a closed-set member iff it is one of the five files OR a
@@ -59,7 +65,7 @@ export interface ClosureAssertionVerdict {
   ok: boolean;
   /** paths laid down but outside the closed set (∪ tasks/ and goals/ descendants). */
   outsideClosedSet: string[];
-  /** paths under a forbidden prefix (.claude/skills|workflows|agents, plugin/scripts). */
+  /** paths under a forbidden prefix (.claude/skills|workflows|agents|commands|hooks, plugin/scripts, or the `.mcp.json` file). */
   forbiddenCopies: string[];
 }
 
@@ -69,7 +75,11 @@ export function assertClosure(relPaths: string[]): ClosureAssertionVerdict {
   for (const rel of relPaths) {
     if (!isInClosedSet(rel)) outsideClosedSet.push(rel);
     for (const p of FORBIDDEN_PREFIXES) {
-      if (rel === p.slice(0, -1) || rel.startsWith(p)) {
+      // Directory prefixes (trailing "/") admit the dir itself (`p.slice(0,-1)`) and its descendants
+      // (`startsWith(p)`); a file prefix (no trailing slash, e.g. `.mcp.json`) is exact-match only —
+      // otherwise `.mcp.json` slices to `.mcp.jso` and the file/目录 two-state match breaks (AC-204).
+      const hit = p.endsWith("/") ? rel === p.slice(0, -1) || rel.startsWith(p) : rel === p;
+      if (hit) {
         forbiddenCopies.push(rel);
         break;
       }

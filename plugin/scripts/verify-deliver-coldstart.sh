@@ -142,6 +142,17 @@ AC203_DRIVER_ALIVE=0                         # 读自 status 载体
 AC203_CARRIER_RECORDS=-1                     # -1 = 未读（缺值 ≠ 合格）
 AC203_EVALUATED=0                            # 1 = status 载体读成（driver_alive + carrier_records 都读出）
 
+# ── AC-204（GOAL-009）：quay-init 禁复制面（mcp/commands/hooks）补全 + 成对落账 ────────────
+# 判据读 FORBIDDEN_PREFIXES（quay-init-closure-assertion.ts）要求含 .mcp.json/.claude/commands//
+# .claude/hooks/ 三项，并要求载体存在 ac=GOAL-009-AC-204 记录（host≠本机 ∧ project_root∉本仓库 ∧
+# forbidden_count=0 ∧ enable_declared=true）。「禁列为空」单独成立可被「什么都不铺」满足 ⇒ 必须与
+# 「启用声明存在」（enabledPlugins 非空 ∧ permissions.allow 含 mcp__plugin_quay_quay__*）成对判定。
+AC204_HOST=""                                # 目标宿主 hostname（criterion 要求 host≠本机）
+AC204_PROJECT_ROOT=""                        # 第三方项目绝对路径（criterion 要求 ∉ 本仓库）
+AC204_FORBIDDEN_COUNT=-1                     # 枚举 $ROOT 落地路径算出的 forbidden 拷贝数（-1 = 未读）
+AC204_ENABLE_DECLARED=""                     # 读 $ROOT/.claude/settings.json 判的启用声明（0/1；空 = 未读）
+AC204_EVALUATED=0                            # 1 = forbidden_count + enable_declared 都读成
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --tgz) QUAY_TGZ="$2"; shift 2 ;;
@@ -870,6 +881,103 @@ step4_driver_liveness() {
   return 0
 }
 
+# ── AC-204（GOAL-009）：quay-init 禁复制面（mcp/commands/hooks）补全 + enable 成对判定 ──────────
+# 枚举 $ROOT 落地路径 → 用【同一个】判源（quay-init-closure-assertion.ts 的 assertClosure）算
+# forbidden_count（⛔ 不在此脚本硬编码 FORBIDDEN_PREFIXES——复制一份就是制造漂移，硬规则 4c）；
+# 解析 $ROOT/.claude/settings.json 判 enable_declared（enabledPlugins 非空 ∧ permissions.allow 含
+# mcp__plugin_quay_quay__*）。两者皆可解析才可落账；缺任一生效读数不写（硬规则 3b：缺值 ≠ 合格）。
+probe_ac204_forbidden_surface() {
+  local root="$1" out
+  AC204_FORBIDDEN_COUNT=-1
+  AC204_ENABLE_DECLARED=""
+  AC204_EVALUATED=0
+  [ -d "$root" ] || return 0
+  # node 动态 import 判源（--input-type=module + top-level await）。argv 顺序：$1=$root（供 isDirectEntry
+  # 判 basename ≠ "quay-init-closure-assertion"，避免 import 时误触发其 main()）、$2=判源 TS 路径。
+  out="$("$VC_NODE" --no-warnings --experimental-strip-types --input-type=module -e '
+    const mod = await import("file://" + process.argv[2]);
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const root = process.argv[1];
+    const rels = [];
+    const walk = (d) => {
+      let entries; try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        if (e.name === ".git") continue;      // git internals are not laid-down product
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) walk(p);
+        else if (e.isFile()) rels.push(path.relative(root, p).split(path.sep).join("/"));
+      }
+    };
+    walk(root);
+    rels.sort();
+    console.log("forbidden_count=" + mod.assertClosure(rels).forbiddenCopies.length);
+  ' -- "$root" "$SCRIPT_DIR/quay-init-closure-assertion.ts" 2>/dev/null)"
+  AC204_FORBIDDEN_COUNT="$(printf '%s\n' "$out" | sed -n 's/^forbidden_count=//p' | head -1)"
+  case "$AC204_FORBIDDEN_COUNT" in
+    ''|*[!0-9]*) AC204_FORBIDDEN_COUNT=-1 ;;
+  esac
+  AC204_ENABLE_DECLARED="$(probe_ac204_enable_declared "$root/.claude/settings.json")"
+  if [ "$AC204_FORBIDDEN_COUNT" -ge 0 ] 2>/dev/null && [ -n "$AC204_ENABLE_DECLARED" ]; then
+    AC204_EVALUATED=1
+  fi
+}
+
+# 解析 .claude/settings.json 判 enable_declared。缺文件/不可解析 ⇒ 输出空（未评估 ≠ 合格，硬规则 3b）；
+# 可解析 ⇒ 输出 0/1（enabledPlugins 非空 ∧ permissions.allow 含 mcp__plugin_quay_quay__*）。
+probe_ac204_enable_declared() {
+  local settings="$1" out readable declared
+  [ -f "$settings" ] || { printf ''; return 0; }
+  out="$("$VC_NODE" --no-warnings -e '
+    const fs = require("node:fs");
+    const p = process.argv[1];
+    let s;
+    try { s = JSON.parse(fs.readFileSync(p, "utf8")); } catch { console.log("readable=0"); process.exit(0); }
+    if (typeof s !== "object" || s === null || Array.isArray(s)) { console.log("readable=0"); process.exit(0); }
+    const ep = s.enabledPlugins || {};
+    const allow = (s.permissions && Array.isArray(s.permissions.allow)) ? s.permissions.allow : [];
+    const epNonEmpty = Object.keys(ep).length > 0;
+    const mcpAllow = allow.some((a) => typeof a === "string" && a.indexOf("mcp__plugin_quay_quay__") === 0);
+    console.log("readable=1");
+    console.log("enable_declared=" + (epNonEmpty && mcpAllow ? "1" : "0"));
+  ' "$settings" 2>/dev/null)"
+  readable="$(printf '%s\n' "$out" | sed -n 's/^readable=//p' | head -1)"
+  declared="$(printf '%s\n' "$out" | sed -n 's/^enable_declared=//p' | head -1)"
+  if [ "$readable" = "1" ]; then printf '%s' "$declared"; else printf ''; fi
+}
+
+# 写 GOAL-009-AC-204 记录。缺任一成功读数（host/project_root 空、forbidden_count≠0、enable_declared≠1）
+# ⇒ 不写 return 1（fail-closed，缺值/缺成功 ≠ 合格）。五字段逐字满足 criterion 过滤：
+# forbidden_count 是 JSON 整数 0、enable_declared 是 JSON 字面 true。
+write_ac204_record() {
+  local ts="$1" host="$2" project_root="$3" forbidden_count="$4" enable_declared="$5" ac89="$6"
+  [ -n "$host" ] || return 1
+  [ -n "$project_root" ] || return 1
+  [ "$forbidden_count" = "0" ] || return 1
+  [ "$enable_declared" = "1" ] || return 1
+  mkdir -p "$(dirname "$ac89")"
+  printf '{"ts":"%s","ac":"GOAL-009-AC-204","host":"%s","project_root":"%s","forbidden_count":0,"enable_declared":true}\n' \
+    "$ts" "$host" "$project_root" >> "$ac89"
+  return 0
+}
+
+# step ⑥：在第三方项目（$ROOT，step ② 后）枚举落地路径算 forbidden_count、读 settings.json 判
+# enable_declared ⇒ 两者皆可读且 forbidden_count=0 ∧ enable_declared=1 时写 AC-204 记录。
+step_ac204_forbidden_surface() {
+  local root="$1"
+  probe_ac204_forbidden_surface "$root"
+  AC204_HOST="${HOST:-}"                       # --host B|C flag（修法 3: host 取 --host B|C）
+  AC204_PROJECT_ROOT="$(readlink -f "$root" 2>/dev/null || echo "$root")"
+  echo "== ⑥ forbidden surface (AC-204): quay-init writes ENABLE only, never mcp/commands/hooks copies =="
+  echo "  forbidden_count=$AC204_FORBIDDEN_COUNT enable_declared=${AC204_ENABLE_DECLARED:-<unread>} evaluated=$AC204_EVALUATED host=${AC204_HOST:-<none>} project_root=$AC204_PROJECT_ROOT"
+  if write_ac204_record "$TS" "$AC204_HOST" "$AC204_PROJECT_ROOT" "$AC204_FORBIDDEN_COUNT" "$AC204_ENABLE_DECLARED" "$AC89"; then
+    echo "  ac204 record written → $AC89"
+  else
+    echo "  NOTE: AC-204 record NOT written (forbidden_count=$AC204_FORBIDDEN_COUNT enable_declared=${AC204_ENABLE_DECLARED:-<unread>} host=${AC204_HOST:-<none>} — 缺值/缺成功读数≠合格)"
+  fi
+  return 0
+}
+
 # ── 自检（hermetic：AC1 顺序 + AC2 直接量正/负控制，不碰真实安装）────────────────────────
 selfcheck() {
   local tmp rc=1
@@ -1160,6 +1268,32 @@ Enter to confirm · Esc to cancel"
   echo "selfcheck: ac206-record(goals-missing) neg_ok=$ac206_neg_ok (expect 1 — goals_dir_created=false 仍写, 缺件如实非静默)"
   echo "selfcheck: ac206-record(empty-host) refused=$ac206_refused (expect 1 — 缺 host 拒写, 缺值≠合格)"
 
+  # control 20/21 (AC-204 禁复制面成对落账, gap-ac204-quay-init-forbidden-prefixes-mcp-commands-hooks-
+  # enable-declared):
+  #   control 20 (正向): forbidden_count=0 ∧ enable_declared=1 ⇒ 写含五字段的 GOAL-009-AC-204 记录
+  #     （forbidden_count 是 JSON 整数 0、enable_declared 是 JSON 字面 true——criterion 过滤逐字满足）。
+  #   control 21 (负向, fail-closed): forbidden_count=1（或 enable_declared=0）⇒ 拒写（return 非 0）
+  #     ——「禁列为空」单独成立可被「什么都不铺」满足，故必须与「启用声明存在」成对判定（缺值/缺成功 ≠ 合格）。
+  local ac204_file ac204_wrote=0 ac204_fields_ok=0 ac204_refused_fc=0 ac204_refused_en=0 ac204_ts="2026-09-09T00:00:00Z"
+  ac204_file="$tmp/ac204.jsonl"
+  if write_ac204_record "$ac204_ts" "B" "/tmp/third-party-fake" "0" "1" "$ac204_file"; then
+    ac204_wrote=1
+    if grep -q '"ac":"GOAL-009-AC-204"' "$ac204_file" \
+       && grep -q '"forbidden_count":0' "$ac204_file" \
+       && grep -q '"enable_declared":true' "$ac204_file"; then
+      ac204_fields_ok=1
+    fi
+  fi
+  if ! write_ac204_record "$ac204_ts" "B" "/tmp/third-party-fake" "1" "1" "$ac204_file" 2>/dev/null; then
+    ac204_refused_fc=1
+  fi
+  if ! write_ac204_record "$ac204_ts" "B" "/tmp/third-party-fake" "0" "0" "$ac204_file" 2>/dev/null; then
+    ac204_refused_en=1
+  fi
+  echo "selfcheck: ac204-record(valid) wrote=$ac204_wrote fields_ok=$ac204_fields_ok (expect 1/1)"
+  echo "selfcheck: ac204-record(forbidden-copy) refused=$ac204_refused_fc (expect 1 — forbidden_count=1 拒写)"
+  echo "selfcheck: ac204-record(no-enable) refused=$ac204_refused_en (expect 1 — enable_declared=0 拒写)"
+
   if [ "$d1" = "1" ] && [ "$d2" = "no" ] && [ "$a1" = "1" ] && [ "$a2" = "yes" ] \
      && [ "$c3_e" = "1" ] && [ "$c3_ok" = "1" ] \
      && [ "$c4_e" = "1" ] && [ "$c4_ok" = "0" ] \
@@ -1178,11 +1312,12 @@ Enter to confirm · Esc to cancel"
      && [ "$ac201_neg_w" = "0" ] && [ "$ac201_neg_lines" = "1" ] \
      && [ "$g15_rc" = "0" ] && [ "$g15_pos" = "1" ] && [ "$g15_build" = "1" ] \
      && [ "$g16_rc" != "0" ] && [ "$g16_before" = "$g16_after" ] \
-     && [ "$ac206_wrote" = "1" ] && [ "$ac206_fields_ok" = "1" ] && [ "$ac206_neg_ok" = "1" ] && [ "$ac206_refused" = "1" ]; then
-    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed)"
+     && [ "$ac206_wrote" = "1" ] && [ "$ac206_fields_ok" = "1" ] && [ "$ac206_neg_ok" = "1" ] && [ "$ac206_refused" = "1" ] \
+     && [ "$ac204_wrote" = "1" ] && [ "$ac204_fields_ok" = "1" ] && [ "$ac204_refused_fc" = "1" ] && [ "$ac204_refused_en" = "1" ]; then
+    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed); AC-204 carrier record writes the five criterion fields verbatim (forbidden_count=0 integer, enable_declared=true literal) and refuses a forbidden-copy or no-enable record (fail-closed, 成对判定)"
     rc=0
   else
-    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc m4_reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused ac201_pos_w=$ac201_pos_w ac201_sha_len=${#ac201_pos_sha} ac201_tgz_len=${#ac201_pos_tgz} ac201_pos_ac=$ac201_pos_ac ac201_neg_w=$ac201_neg_w ac201_neg_lines=$ac201_neg_lines g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused" >&2
+    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc m4_reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused ac201_pos_w=$ac201_pos_w ac201_sha_len=${#ac201_pos_sha} ac201_tgz_len=${#ac201_pos_tgz} ac201_pos_ac=$ac201_pos_ac ac201_neg_w=$ac201_neg_w ac201_neg_lines=$ac201_neg_lines g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused ac204_wrote=$ac204_wrote ac204_fields_ok=$ac204_fields_ok ac204_refused_fc=$ac204_refused_fc ac204_refused_en=$ac204_refused_en" >&2
     rc=1
   fi
   rm -rf "$tmp"
@@ -1250,6 +1385,7 @@ else
       echo "AC88_VERIFY=fail (step ② quay-init failed)"
       exit 1
     fi
+    step_ac204_forbidden_surface "$ROOT"
     step3_coldstart
     step4_driver_liveness "$ROOT"
     step5_dual_carrier "$ROOT"
