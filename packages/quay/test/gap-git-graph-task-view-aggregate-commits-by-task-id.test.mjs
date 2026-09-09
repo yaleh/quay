@@ -48,9 +48,15 @@ test("AC1: taskIdFromSubject extracts the task id from the four subject shapes; 
   assert.equal(taskIdFromSubject("test: gap-123 独立闭合确认"), "gap-123");
   assert.equal(taskIdFromSubject("fix: gap-123 — address the review finding"), "gap-123");
 
+  // Form 6 — trailing-parens id: `<说明> (gap-…)` (the AC6 reconciliation form for subjects whose id
+  // sits in a trailing parenthetical, not the colon position — real commit `dashboard: 顶部行改 …
+  // (gap-dashboard-top-row-asymmetric-columns)`).
+  assert.equal(taskIdFromSubject("dashboard: 顶部行改 3:2 非对称分栏，sys+mgr 堆叠右列 (gap-dashboard-top-row-asymmetric-columns)"), "gap-dashboard-top-row-asymmetric-columns");
+
   // Fail-visible: an unrelated conventional-commit subject returns null (never a guess).
   assert.equal(taskIdFromSubject("chore: re-anchor quay-init-closure-ratchet baseline"), null);
   assert.equal(taskIdFromSubject("fix: git-history 分页页 mainline 泳道恒空"), null);
+  assert.equal(taskIdFromSubject("docs: touch up the README (v2)"), null); // bare parenthetical, not a known prefix
   assert.equal(taskIdFromSubject("init"), null);
   assert.equal(taskIdFromSubject(""), null);
 });
