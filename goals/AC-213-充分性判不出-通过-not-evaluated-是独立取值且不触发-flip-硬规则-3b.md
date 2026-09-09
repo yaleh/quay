@@ -6,7 +6,8 @@ kind: criterion
 goal: GOAL-010
 criterion: node --no-warnings --experimental-strip-types --test
   plugin/test/goal-sufficiency-not-evaluated.test.mjs
-expect: 判据 exit 0
+expect: 单测证明 sufficiency=not-evaluated 时不触发 GOAL flip，且该取值在轮记录里可区分于
+  covered——「判不出」不与「通过」同形，语义半不可用时 GOAL 不会被静默放行关闭（硬规则 3b）。
 origin: 硬规则
   3b（判定机件在读不懂输入时不得返回与合格同形的值）在本仓已有三次同日实测：task-status-drift-check.ts:126（acSection
   读不到 ⇒ 零未勾 ⇒ 判完成）、slot-refill.ts:373（total===0 ⇒ 第一行就判
