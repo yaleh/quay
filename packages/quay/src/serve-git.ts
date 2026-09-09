@@ -149,6 +149,9 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
  *   2. `tasks: 翻 <id> done（driver 机械 fan-in）`  — the fan-in landing
  *   3. `tasks: <id> task_write` / `tasks: <id> todo→ready（promotion-driver）` / `tasks: reset <id> done→ready`
  *   4. `<id>: <实现说明>`                          — an implementation commit, the id before the colon
+ *   5. `<type>: <id> <说明>`                       — a conventional-commit type, then the id (e.g.
+ *      `test: gap-… 独立闭合确认` / `fix: gap-… — …`); the id's first segment must be a KNOWN task-id
+ *      prefix so a generic slug (`chore: re-anchor …`) is never mistaken for one (AC6 reconciliation)
  *
  * Unrecognised subjects (e.g. `chore: re-anchor …`) return `null`, never a guess (fail-visible —
  * 硬规则 3b). Form 4 distinguishes a task id from a conventional-commit type (`chore:`/`fix:`/…) by
@@ -176,6 +179,13 @@ export function taskIdFromSubject(subject: string): string | null {
   // Form 4 — `<id>: <说明>`, the id a multi-segment slug (≥ one `-`).
   const impl = s.match(/^([A-Za-z0-9][A-Za-z0-9_-]*-[A-Za-z0-9_-]+):\s/);
   if (impl) return impl[1];
+
+  // Form 5 — `<type>: <id> <说明>`: a conventional-commit type prefix, then a task id. The id's first
+  // segment must be a KNOWN task-id prefix, so a generic verb slug after the type (`chore: re-anchor
+  // quay-init-closure-ratchet baseline`) or a page/file name (`fix: git-history 分页页 …`) is never
+  // mistaken for a task id (AC1) — fail-visible, not a guess.
+  const typed = s.match(/^(?:test|fix|feat|chore|docs|refactor|perf|style|verification):\s+((?:gap|DIR|exp5|QN|QX|QC|QW|QENG|ARCH|cand|SU|PROBE|TEST)-[A-Za-z0-9][A-Za-z0-9_-]*)/);
+  if (typed) return typed[1];
 
   return null;
 }

@@ -43,6 +43,11 @@ test("AC1: taskIdFromSubject extracts the task id from the four subject shapes; 
   // Form 4 — implementation commit: `<id>: <实现说明>`.
   assert.equal(taskIdFromSubject("gap-123: implement the fix"), "gap-123");
 
+  // Form 5 — `<type>: <id> <说明>`: a conventional type, then a known-prefix task id (the AC6
+  // reconciliation form — real commits like `test: gap-… 独立闭合确认` / `fix: gap-… — …`).
+  assert.equal(taskIdFromSubject("test: gap-123 独立闭合确认"), "gap-123");
+  assert.equal(taskIdFromSubject("fix: gap-123 — address the review finding"), "gap-123");
+
   // Fail-visible: an unrelated conventional-commit subject returns null (never a guess).
   assert.equal(taskIdFromSubject("chore: re-anchor quay-init-closure-ratchet baseline"), null);
   assert.equal(taskIdFromSubject("fix: git-history 分页页 mainline 泳道恒空"), null);
