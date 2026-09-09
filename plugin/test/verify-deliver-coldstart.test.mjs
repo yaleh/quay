@@ -90,6 +90,15 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
     "marketplace leak: a user-level quay@quay enabledPlugins entry is flagged (AC-161)");
   assert.match(r.stdout, /marketplace-register-fail\(AC5\) MP_REGISTER_OK=0 MP_REGISTER_RC=1 reason_present=1/,
     "marketplace register-failure (AC5): a non-zero register exit is recorded structurally, not swallowed");
+  // AC-201 controls (gap-ac201-productization-verification-build-sha-tgz-sha256-record):
+  // the --selfcheck must ALSO exercise the AC-201 record append positive/negative controls — positive
+  // injects a 40-hex BUILD_SHA + 64-hex SHA256_QUAY and asserts a top-level ac=GOAL-009-AC-201 record
+  // with both fields non-empty (top-level fields, NOT a detail string); negative (empty BUILD_SHA)
+  // writes nothing (缺输入不写, 硬规则 3b).
+  assert.match(r.stdout, /ac201-record\(positive\) written=1 build_sha_len=40 tgz_sha256_len=64 ac_count=1/,
+    "AC-201 positive: 40-hex build_sha + 64-hex tgz_sha256 written as top-level fields");
+  assert.match(r.stdout, /ac201-record\(negative,no-build-sha\) written=0 lines=1/,
+    "AC-201 negative: empty BUILD_SHA writes nothing (hard rule 3b)");
 });
 
 test("AC1 — --selfcheck is hermetic: it does not touch a real install and runs offline", () => {
@@ -201,6 +210,36 @@ test("AC3 — unreadable SPEC ⇒ L1_NOT_EVALUATED=1 (distinct from qualified, h
       "--spec", path.join(tmp, "does-not-exist.md")]);
     assert.match(r.stdout, /L1_NOT_EVALUATED=1/, "missing SPEC must set L1_NOT_EVALUATED=1");
     assert.match(r.stdout, /L1_OK=0/, "and L1_OK must NOT be 1 (未评估 ≠ 合格)");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("AC4 — --verify-only (no build, no tgz sha256) does NOT append an AC-201 record (缺输入不写, 硬规则 3b)", () => {
+  // AC-201 record (ac=GOAL-009-AC-201) is only appended when BOTH BUILD_SHA and SHA256_QUAY are
+  // non-empty. In --verify-only mode there is no build and ac5_evaluate is never called ⇒
+  // SHA256_QUAY stays empty ⇒ append_ac201_record must not write. Prove the ac89 carrier contains
+  // the ordinary AC88 record but no GOAL-009-AC-201 record (缺输入 ≠ 合格, 硬规则 3b).
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "vc-ac201-"));
+  try {
+    const spec = path.join(tmp, "spec.md");
+    const root = path.join(tmp, "root");
+    fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+    fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(root, ".quay", "config.yml"), "providers: {}\n");
+    fs.writeFileSync(spec,
+      "QUAY-INIT-CLOSED-SET:BEGIN\n- .quay/config.yml\n- tasks/\nQUAY-INIT-CLOSED-SET:END\n");
+    const ac89 = path.join(tmp, "ac89.jsonl");
+    const r = run(["--verify-only", "--root", root, "--project", "ac201",
+      "--evidence", path.join(tmp, "e.json"), "--ac89", ac89, "--spec", spec]);
+    assert.equal(r.status, 0, `verify-only must exit 0:\n${r.stderr}`);
+    assert.match(r.stdout, /ac201 record NOT appended/,
+      "verify-only must report the AC-201 record was NOT appended (缺输入不写)");
+    const contents = fs.existsSync(ac89) ? fs.readFileSync(ac89, "utf8") : "";
+    assert.ok(/\"ac\":\"AC88\"/.test(contents),
+      "the ordinary AC88 record IS still appended in verify-only mode");
+    assert.ok(!/GOAL-009-AC-201/.test(contents),
+      "verify-only (no build, no tgz sha256) must NOT append an AC-201 record");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
