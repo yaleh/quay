@@ -1,7 +1,7 @@
 ---
 id: gap-git-graph-no-bounded-scroll-panel
 title: git-history 页面提交纵向时间轴无独立滚动容器：整页滚动触发无限加载，导航/说明随之被卷走且页面高度无界增长
-status: ready
+status: done
 labels:
   - gap
   - webui
