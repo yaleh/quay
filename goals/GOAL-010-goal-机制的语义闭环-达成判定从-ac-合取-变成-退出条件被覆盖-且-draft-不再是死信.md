@@ -1,7 +1,7 @@
 ---
 id: GOAL-010
 title: goal 机制的语义闭环 —— 达成判定从「AC 合取」变成「退出条件被覆盖」，且 draft 不再是死信
-status: active
+status: achieved
 kind: goal
 origin: >-
   人 2026-09-09 三条裁定：①晋升应当是语义的；放弃（retire）不交给 goal-driver——它若期望退役某条 AC，应置为
@@ -31,6 +31,12 @@ origin: >-
 
   【重启 2026-09-09】人授权按对照实验 B 形态重启：先激活 6 条 draft（AC-210/211/212/213/215/216）再翻本
   GOAL 回 active，使 flip 那一刻在域集合已含 6 条红 AC。事故经过与结构根因见 AC-212 的 origin。
+statusLog:
+  - at: 2026-09-09T17:41:39.138Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 ---
 
 ## 背景
