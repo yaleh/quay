@@ -1,7 +1,7 @@
 ---
 id: AC-211
 title: driver 不越权放弃——期望退役的 AC 只能置 needs-human 并说明理由，retired 归人
-status: draft
+status: active
 kind: criterion
 goal: GOAL-010
 criterion: node --no-warnings --experimental-strip-types --test
