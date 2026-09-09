@@ -620,3 +620,67 @@ test("AC4 (evidence-out-of-git) — gate 后两个消费者立刻反映新 verdi
   const st = JSON.parse(n(["check", "--staleness"]).stdout);
   assert.deepEqual(st.fresh, ["GOAL-001"], "consumer staleness reads the new ledger ts ⇒ fresh");
 });
+
+// ── gap-goal-store-empty-scope-reads-as-all-verified: I5/I3 空作用域 ──────────────────────────────
+// 空作用域（0 active goal）不得与「全部复验通过」同形（硬规则 3b）。checkAchievedFailing 与
+// checkStaleness 都新增 scopeSize + evaluated 两个独立取值：scopeSize = 枚举出的作用域规模，
+// evaluated = scopeSize > 0（真跑了判据 / 真评了陈旧）。0 active goal ⇒ evaluated:false、scopeSize:0。
+
+test("AC1 — 0 active goal: checkAchievedFailing 报 evaluated:false + scopeSize:0（⛔ 与全过同形）", () => {
+  const s = createGoalStore(tmpDir("empty-af"));
+  // 生产形态：criterion 挂在 achieved goal 下（active goal = 0 ⇒ 作用域空）。
+  s.write("GOAL-010", { title: "g", status: "achieved", origin: "o", body: GOAL_BODY });
+  s.write("AC-010", { title: "a", status: "achieved", goal: "GOAL-010", criterion: "false", origin: "o", expect: EXPECT });
+  const af = s.checkAchievedFailing();
+  assert.deepEqual(af.achievedButFailing, [], "非 active goal 下的 achieved AC 不在作用域 ⇒ 不进桶");
+  assert.equal(af.evaluated, false, "0 active goal ⇒ 未评估（⛔ 与「查过且全过」同形）");
+  assert.equal(af.scopeSize, 0, "作用域规模 = 0");
+});
+
+test("AC1 CLI — 0 active goal: check --achieved-failing exit 1 + evaluated:false（⛔ 假绿）", () => {
+  const root = tmpDir("empty-af-cli");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const args = (a) => ["--root", root, ...a];
+  const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
+  n(["write", "GOAL-010", "--title", "p", "--status", "achieved", "--origin", "o", "--body", GOAL_BODY]);
+  n(["write", "AC-010", "--title", "a", "--status", "achieved", "--goal", "GOAL-010", "--criterion", "false", "--origin", "o", "--expect", EXPECT]);
+  const chk = n(["check", "--achieved-failing"]);
+  assert.equal(chk.status, 1, "0 active goal ⇒ exit 1（未评估 ≠ 通过，⛔ 假绿）:\n" + chk.stdout + chk.stderr);
+  const out = JSON.parse(chk.stdout);
+  assert.equal(out.evaluated, false);
+  assert.equal(out.scopeSize, 0);
+});
+
+test("AC2 — 0 active goal: checkStaleness 报 evaluated:false + scopeSize:0", () => {
+  const s = createGoalStore(tmpDir("empty-stale"));
+  s.write("GOAL-010", { title: "g", status: "achieved", origin: "o", body: GOAL_BODY });
+  const r = s.checkStaleness(Date.now());
+  assert.deepEqual(r.fresh, []);
+  assert.deepEqual(r.stale, []);
+  assert.deepEqual(r.notEvaluated, []);
+  assert.deepEqual(r.divergent, []);
+  assert.equal(r.evaluated, false, "0 active goal ⇒ 未评估");
+  assert.equal(r.scopeSize, 0, "作用域规模 = 0");
+});
+
+test("AC4 — 负控制：1 active goal + achieved AC ⇒ checkAchievedFailing 报 evaluated:true + scopeSize>0", () => {
+  const s = createGoalStore(tmpDir("nonempty-af"));
+  s.write("GOAL-010", { title: "g", status: "active", origin: "o", body: GOAL_BODY });
+  s.write("AC-010", { title: "a", status: "achieved", goal: "GOAL-010", criterion: "true", origin: "o", expect: EXPECT });
+  const af = s.checkAchievedFailing();
+  assert.deepEqual(af.achievedButFailing, [], "criterion true ⇒ 不进桶");
+  assert.equal(af.evaluated, true, "1 active goal 且有 achieved AC ⇒ 真评估");
+  assert.equal(af.scopeSize, 1, "作用域规模 = 1 > 0（⛔ 与空作用域 scopeSize:0 区分）");
+});
+
+test("AC4 — 负控制：1 active goal ⇒ checkStaleness 报 evaluated:true + scopeSize>0", () => {
+  const s = createGoalStore(tmpDir("nonempty-stale"));
+  s.write("GOAL-010", { title: "g", status: "active", origin: "o", body: GOAL_BODY });
+  s.write("AC-010", { title: "a", status: "active", goal: "GOAL-010", criterion: "true", origin: "o", expect: EXPECT });
+  const r = s.checkStaleness(Date.now());
+  assert.equal(r.evaluated, true, "1 active goal ⇒ 真评估");
+  assert.equal(r.scopeSize, 1, "作用域规模 = 1 > 0");
+  assert.deepEqual(r.notEvaluated, ["GOAL-010"], "无 evidence ⇒ 该 goal 判 notEvaluated（作用域非空但该 goal 未评估——两个不同维度）");
+});

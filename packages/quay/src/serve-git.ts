@@ -1187,12 +1187,18 @@ export function gitGraphClientScript(): string {
           // same content (the scroll anchor commit) is restored by scrolling down by added × rowH —
           // the scroll-position preservation the DoD requires, without a hash→pixel re-walk.
           window.scrollBy(0, added * rowH);
+          // Reset the guard BEFORE chaining. The self-chain call below runs inside .then(), which
+          // precedes any .finally() on the promise chain — a .finally()-based reset would still leave
+          // loadingOlder === true when the chained loadOlder() re-enters, so the guard would dead-return
+          // and the chain would stop after one page (gap-git-graph-scroll-loader-self-chain-blocked-by-
+          // loadingolder-flag). olderDone (set by finishOlder on the empty / added===0 paths) remains the
+          // sole termination signal, so a continuously-visible sentinel still stops at the oldest page.
+          loadingOlder = false;
           // If the grown graph still leaves the sentinel in view, chain the next page.
           if (sentinel && sentinel.getBoundingClientRect().top < window.innerHeight + 600) { loadOlder(); }
         });
       })
-      .catch(function () { finishOlder(); })
-      .finally(function () { loadingOlder = false; });
+      .catch(function () { finishOlder(); });
   }
   if (sentinel) {
     if (typeof IntersectionObserver !== "undefined") {
