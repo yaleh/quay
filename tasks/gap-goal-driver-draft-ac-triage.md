@@ -1,7 +1,7 @@
 ---
 id: gap-goal-driver-draft-ac-triage
 title: goal-driver 分诊环：active GOAL 名下 draft AC 出五态判决并逐条落痕 goal-round.jsonl
-status: ready
+status: done
 labels:
   - gap
 parent: null
