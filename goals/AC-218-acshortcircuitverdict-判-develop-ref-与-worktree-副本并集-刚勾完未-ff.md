@@ -1,7 +1,7 @@
 ---
 id: AC-218
 title: acShortCircuitVerdict 判 develop ref 与 worktree 副本并集——刚勾完未 ff 的 AC 不被误判未全勾
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-011
 criterion: node --no-warnings --experimental-strip-types --test
@@ -26,4 +26,9 @@ statusLog:
     actor: human
     reason: triage bug已修复,gap-meta-goal-triage-fresh-draft-not-retire
       done;实现与测试均已绿,gap-store-commit-propagation-field-aware done;同AC-217先例拨回
+  - at: 2026-09-09T13:42:10.571Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
