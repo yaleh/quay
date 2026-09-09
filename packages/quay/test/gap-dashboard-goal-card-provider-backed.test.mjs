@@ -87,6 +87,22 @@ test("AC5: three-state never collapses — fresh / stale / NOT-EVALUATED are dis
   assert.doesNotMatch(notEval, /fresh/, "never-evaluated goal is never judged fresh");
 });
 
+test("layout regression: 8-char id + zero ACs (NOT-EVALUATED) keeps id <a> flex:none, no overflow:hidden", () => {
+  // gap-goal-card-id-flex-squeeze-by-long-staleness-label: a flex:none sibling (the three-state label)
+  // used to squeeze an overflow:hidden+ellipsis <a> to ~half its width — "GOAL-011" rendered as "GOAL-0…".
+  // The fix gives the id <a> flex:none (never shrinks) and drops the ellipsis trio, and lets the label
+  // wrap onto its own line via the row's flex-wrap:wrap. This is a pure string/regex regression (no
+  // browser) — it can't measure flexbox squeeze, so it asserts the two style tokens that guard against it.
+  const html = renderGoalCard([goal("GOAL-011")], { cap: 3, staleMs: 7 * DAY, nowMs: NOW });
+  assert.match(html, /NOT-EVALUATED/, "zero ACs trigger the longest (13-char) three-state label");
+  const idAnchor = html.match(/<a href="\/goal\/GOAL-011"[^>]*>/);
+  assert.ok(idAnchor, "the active goal's id <a> is rendered");
+  assert.match(idAnchor[0], /flex:none/, "id <a> carries flex:none so the label sibling cannot shrink it");
+  assert.doesNotMatch(idAnchor[0], /overflow:hidden/, "id <a> no longer carries the ellipsis truncation that enabled the squeeze");
+  // The row itself must allow the label to wrap rather than compete for the id's width.
+  assert.match(html, /display:flex;justify-content:space-between;[^"]*flex-wrap:wrap/, "id row carries flex-wrap:wrap");
+});
+
 test("AC4: goalList degraded to [] renders an empty state, never throws and never disappears", () => {
   const html = renderGoalCard([], { cap: 3, staleMs: 7 * DAY, nowMs: NOW });
   assert.match(html, /id="goal-card"/, "the card still renders when the goal list is empty");
