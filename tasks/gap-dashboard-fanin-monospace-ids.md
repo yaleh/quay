@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-fanin-monospace-ids
 title: Fan-in 卡的 sha/lock 耗时套等宽字体（复用站内既有 monospace 约定）
-status: ready
+status: done
 labels:
   - gap
 parent: null
