@@ -37,3 +37,4 @@ shipped `plugin/.quay/profiles.yml` 与 dev-tree 根 `.quay/profiles.yml` 的 ro
 
 - plugin/.quay/profiles.yml
 - plugin/test/profile-policy.test.mjs
+- tasks/gap-shipped-profiles-missing-worker-roles.md
