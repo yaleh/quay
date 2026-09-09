@@ -2,7 +2,7 @@
 id: gap-git-graph-scroll-loader-self-chain-blocked-by-loadingolder-flag
 title: git-history 滚动加载的自链调用写在 .then() 里而 loadingOlder 复位在 .finally()，.then 先执行
   ⇒ 自链必被 if(loadingOlder) return 挡掉、成死代码；实测停在底部连滚 4 次行数不变，滚离再滚回才各翻一页
-status: ready
+status: done
 labels:
   - gap
   - webui
