@@ -1,7 +1,7 @@
 ---
 id: gap-goal-card-id-flex-squeeze-by-long-staleness-label
 title: dashboard 阶段目标卡片：长三态标签(NOT-EVALUATED)把 GOAL id 挤压截断
-status: ready
+status: done
 labels:
   - gap
   - defect
