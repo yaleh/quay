@@ -1,7 +1,7 @@
 ---
 id: AC-209
 title: AC 的 needs-human 进词表且【计入在域、阻塞 GOAL 达成】——不阻塞的承接态与 draft 同形
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-010
 criterion: node --no-warnings --experimental-strip-types --test
