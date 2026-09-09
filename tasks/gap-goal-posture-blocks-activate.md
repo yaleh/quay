@@ -2,7 +2,7 @@
 id: gap-goal-posture-blocks-activate
 title: goal-driver 分诊尊重 GOAL 层 posture——measure-only 名下 draft AC 不得判 activate，只落
   re-anchor/needs-human/hold
-status: ready
+status: done
 labels:
   - gap
 parent: null
