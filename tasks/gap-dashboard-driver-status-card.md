@@ -90,26 +90,26 @@ outer     : 无 pid 文件、driver status 恒 0（已退役，非本任务范�
 
 ## Acceptance Criteria
 
-- [ ] AC1（真实读数）：给定当前 workspace 真实的 `.quay/promotion-*.pid` / `.quay/worker-*.pid` 与
+- [x] AC1（真实读数）：给定当前 workspace 真实的 `.quay/promotion-*.pid` / `.quay/worker-*.pid` 与
       对应 carrier jsonl，新读取函数返回的 `supervisorAlive`/`driverAlive`/`lastTs` 与
       `node packages/quay/bin/quay.js driver status --kind promotion --json` /
       `--kind worker --json` 的输出逐字段一致（同一时刻对照，不是分别读两次不同时刻的状态）。
-- [ ] AC2（卡片渲染）：给定两个 kind 均 `running:true` 的 fixture，`renderMgrCard`（或其新签名）输出
+- [x] AC2（卡片渲染）：给定两个 kind 均 `running:true` 的 fixture，`renderMgrCard`（或其新签名）输出
       同时包含 `promotion` 与 `worker` 两个 kind 各自的 alive 状态文案；给定 `running:false`
       （pid 文件缺失）的 fixture，输出「未运行」而非 `undefined`/`NaN`/空字符串。
-- [ ] AC3（退役读数不再出现在卡片）：`grep -n "loopDriver\|liveness" packages/quay/src/serve-dashboard.ts`
+- [x] AC3（退役读数不再出现在卡片）：`grep -n "loopDriver\|liveness" packages/quay/src/serve-dashboard.ts`
       在 `renderMgrCard` 函数体内命中数为 0（旧字段名不再被这个函数引用）。
-- [ ] AC4（零新增子进程开销）：`grep -n "execFileSync\|spawnSync\|execSync" packages/quay/src/observation.ts`
+- [x] AC4（零新增子进程开销）：`grep -n "execFileSync\|spawnSync\|execSync" packages/quay/src/observation.ts`
       新增读取函数所在代码块内命中数为 0（in-process 调用 `driver-runtime.ts` 导出函数，不 shell 出）。
-- [ ] AC5（真实回归）：新增/复用的单测覆盖 AC1/AC2/AC3 的固定断言，
+- [x] AC5（真实回归）：新增/复用的单测覆盖 AC1/AC2/AC3 的固定断言，
       `node --experimental-strip-types --test packages/quay/test/gap-dashboard-driver-status-card.test.mjs`
       exit 0；并用 MCP 浏览器截图核验一次：生产页面「Driver」卡显示的 pid/alive/last_record 与
       当时 `quay driver status` 的现场输出一致。
-- [ ] AC6（六 kind 全覆盖，不再硬编码两个字面量）：`grep -n '"promotion" | "worker"\|"promotion"|"worker"'
+- [x] AC6（六 kind 全覆盖，不再硬编码两个字面量）：`grep -n '"promotion" | "worker"\|"promotion"|"worker"'
       packages/quay/src/observation.ts packages/quay/src/serve-dashboard.ts` 命中数为 0（字面量联合已改成
       `DriverKind` 类型引用）；`grep -n "KNOWN_KINDS" packages/quay/src/observation.ts` 命中数 ≥1
       （改成遍历导出的 kind 列表，不是手写两行）。
-- [ ] AC7（真实回归，六 kind 全部可见）：给定当前 workspace 真实的 5 个存活 driver
+- [x] AC7（真实回归，六 kind 全部可见）：给定当前 workspace 真实的 5 个存活 driver
       （promotion/worker/quality/meta/goal，2026-09-09 用 `ps -o pid,lstart,cmd -p <pid>` 核验过的现场
       pid，验收时需重新现场核验一次而非援引本任务写死的历史 pid），`/dashboard` 页面（或
       `renderMgrCard`/`readDriverStatus` 的单测 fixture）的 Driver 卡对这 5 个 kind 每一个都渲染出
