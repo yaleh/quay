@@ -11,14 +11,15 @@
 // (`package/plugin/vendor/*/dist/*.js`) — plugin/scripts was the one unbundled island.
 //
 // WHAT is bundled: every plugin .ts that a shipped invoker references by path or bare name —
-// loop tick docs, skills, probes, .sh wrappers, quay-init's explicit mechanism additions, and
-// Core's mcp-server instrument entry. The entry set is DERIVED at build time by scanning the
-// shipped surface for `<name>.ts` basenames that match an existing plugin .ts — never a
-// hand-maintained list: when a new tool is referenced by a tick doc/skill the next package.sh run
-// bundles it. Libraries (gate-script-base.ts, task-schema.ts, touches-parser.ts, …) are therefore
-// bundled too (quay-init's mechanism layout still lists them as transitive deps); standalone
-// execution of a library bundle is a no-op, but every rewritten reference resolves to a shipped
-// executable.
+// loop tick docs, skills, probes, .sh wrappers, quay-init's explicit mechanism additions,
+// Core's mcp-server instrument entry, and the plugin source's OWN spawns (driver-runtime.ts's
+// DRIVER_KINDS `driver: "X.ts"` table fields + `path.join(…,"plugin","scripts","X.ts")` helpers).
+// The entry set is DERIVED at build time by scanning the shipped surface for `<name>.ts` basenames
+// that match an existing plugin .ts — never a hand-maintained list: when a new tool is referenced
+// by a tick doc/skill the next package.sh run bundles it. Libraries (gate-script-base.ts,
+// task-schema.ts, touches-parser.ts, …) are therefore bundled too (quay-init's mechanism layout
+// still lists them as transitive deps); standalone execution of a library bundle is a no-op, but
+// every rewritten reference resolves to a shipped executable.
 //
 // OUTPUT: <pluginRoot>/scripts/dist/<name>.js and <pluginRoot>/gate-scripts/dist/<name>.js.
 // The bundles are ESM and run on a bare Node >=20 with NO --experimental-strip-types.
@@ -84,6 +85,24 @@ const CORE_PATH_JOIN_TS_RE = /path\.join\([^)]*"scripts"[^)]*"([A-Za-z0-9_.-]+\.
 // Reverse-looked-up to the same-named `.ts` (if it exists) so the entry ships as `dist/<name>.js`.
 const DIST_JS_RE = /dist\/([A-Za-z0-9_.-]+)\.js/g;
 
+// Plugin source spawns ITSELF in two literal forms that none of the other scans cover — they are
+// not in Core source (so scanCoreReferences misses them) and carry no `node ` invocation prefix
+// (so INVOCATION_RE misses them). Both live in driver-runtime.ts, and a third-party
+// `quay driver start --kind X` resolves them by path:
+//   1. the DRIVER_KINDS data table's `driver: "X.ts"` field — the spawn target of each driver kind
+//      (`quay driver start --kind promotion` → `<root>/plugin/scripts/promotion-driver.ts`), a
+//      string-literal data table esbuild never inlines into the caller's bundle;
+//   2. a `path.join(…, "plugin", "scripts", "X.ts")` spawn helper (notifyManager → send-to-session.ts,
+//      defaultReadyPoolArgv → ready-pool-check.ts).
+// The scan is SCOPED to driver-runtime.ts — the file the AC-202 criterion itself reads — because the
+// broad `"plugin", "scripts", "X.ts"` literal ALSO matches non-spawn readFile text-reads elsewhere
+// (axis-generator.ts / precommit-guard.ts / rhythm-consumer-check.ts read runner-static-gate.ts — a
+// bash script deliberately named `.ts` so the annotation parsers see it — as TEXT; bundling it as an
+// esbuild entry is a syntax error). The criterion is the single judge, and it enumerates
+// driver-runtime.ts only. Both forms are DERIVED by regex (never a hand-maintained list).
+const PLUGIN_DRIVER_FIELD_RE = /driver:\s*"([A-Za-z0-9_.-]+\.ts)"/g;
+const PLUGIN_PATH_JOIN_TS_RE = /"plugin",\s*"scripts",\s*"([A-Za-z0-9_.-]+\.ts)"/g;
+
 // quay-init.sh's EXPLICIT mechanism additions (plugin/scripts/quay-init.sh `derive_loop_scripts`
 // step (c)) name .ts files by BARE basename with no invocation prefix. These must ship as
 // executable bundles so quay-init's lay-down set resolves after the raw .ts are removed. The list
@@ -132,6 +151,30 @@ export function scanCoreReferences() {
 }
 
 /**
+ * Derive the set of plugin `.ts` basenames that driver-runtime.ts references by path — the
+ * DRIVER_KINDS `driver: "X.ts"` data-table fields and the `path.join(…, "plugin", "scripts",
+ * "X.ts")` spawn helpers (see the regex constants above). The third instance of "the entry set is
+ * blind to a reference form": the first two (Core spawn refs, dist/*.js table rows) are already
+ * mechanical; this closes the last blind spot by scanning the plugin source itself, NOT Core. The
+ * caller intersects the result with existing plugin `.ts` (so a table field naming a dev-only or
+ * nonexistent script is ignored). Scanned from the plugin root (raw `.ts` present — the staged copy
+ * has them deleted only AFTER the build runs). ⛔ Scoped to driver-runtime.ts on purpose — the
+ * broad `"plugin", "scripts", "X.ts"` literal matches non-spawn readFile reads elsewhere (see the
+ * constant comment), and the AC-202 criterion enumerates driver-runtime.ts only.
+ * @param {string} pluginRoot
+ * @returns {Set<string>} `.ts` basenames (e.g. "promotion-driver.ts", "send-to-session.ts")
+ */
+export function scanPluginSelfReferences(pluginRoot) {
+  const basenames = new Set();
+  const driverRuntime = path.join(pluginRoot, "scripts", "driver-runtime.ts");
+  if (!fs.existsSync(driverRuntime)) return basenames;
+  const text = fs.readFileSync(driverRuntime, "utf8");
+  for (const m of text.matchAll(PLUGIN_DRIVER_FIELD_RE)) if (m[1]) basenames.add(m[1]);
+  for (const m of text.matchAll(PLUGIN_PATH_JOIN_TS_RE)) if (m[1]) basenames.add(m[1]);
+  return basenames;
+}
+
+/**
  * Derive the consumer-referenced entry set for a plugin root.
  * @param {string} pluginRoot
  * @returns {{ scripts: string[], gateScripts: string[] }} relative entry paths
@@ -175,6 +218,10 @@ export function deriveEntries(pluginRoot) {
     const rel = existing.get(core);
     if (rel) referenced.add(rel);
   }
+  for (const self of scanPluginSelfReferences(pluginRoot)) {
+    const rel = existing.get(self);
+    if (rel) referenced.add(rel);
+  }
   for (const explicit of QUAY_INIT_EXPLICIT) {
     const rel = existing.get(explicit);
     if (rel) referenced.add(rel);
@@ -183,6 +230,27 @@ export function deriveEntries(pluginRoot) {
   const scripts = [...referenced].filter((r) => r.startsWith("scripts"));
   const gateScripts = [...referenced].filter((r) => r.startsWith("gate-scripts"));
   return { scripts, gateScripts };
+}
+
+/**
+ * esbuild plugin that re-points meta-driver.ts's repo-root-relative Core-source imports at the real
+ * Core source dir. meta-driver.ts imports `../../packages/quay/src/goal-store.ts` + meta-store.ts —
+ * a relative path that resolves ONLY in the repo-root layout (plugin/scripts/ → ../../packages/…).
+ * In the STAGED packages/quay/plugin/ layout that same literal resolves to
+ * packages/quay/plugin/packages/quay/src/… (nonexistent) and esbuild fails. AC-202 forces
+ * meta-driver.ts into the entry set (a DRIVER_KINDS table row), so the bundle step must make that
+ * import resolve. The target is always packages/quay/src/<basename> regardless of the importer's
+ * depth, so map by basename — a general fallback, not a per-script list.
+ */
+function coreSrcAliasPlugin() {
+  return {
+    name: "core-src-alias",
+    setup(build) {
+      build.onResolve({ filter: /packages\/quay\/src\/[A-Za-z0-9_.-]+\.ts$/ }, (args) => {
+        return { path: path.join(pkgDir, "src", args.path.split("/").pop()) };
+      });
+    },
+  };
 }
 
 /**
@@ -205,6 +273,7 @@ export async function bundleEntries(pluginRoot, entries) {
       outfile,
       loader: { ".json": "json" },
       banner: { js: REQUIRE_BANNER },
+      plugins: [coreSrcAliasPlugin()],
       logLevel: "silent",
     });
     outfiles.push(outfile);
