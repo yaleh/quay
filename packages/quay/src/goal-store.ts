@@ -71,7 +71,7 @@ import { runAcceptance } from "./gate/acceptance-runner.ts";
 import { queryGateEvents } from "./gate/gate-event-store.ts";
 import { commitStoreWrite, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
 
-export const VALID_GOAL_STATUSES = ["draft", "active", "achieved", "superseded", "retired"];
+export const VALID_GOAL_STATUSES = ["draft", "active", "achieved", "superseded", "retired", "needs-human"];
 
 // gap-goal-record-completeness-undefined — "what counts as a COMPLETE goal record" was never
 // defined: `origin` was required while `body` was optional, inverting the incentive (8 goals, 5

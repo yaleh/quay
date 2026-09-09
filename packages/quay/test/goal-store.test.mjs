@@ -190,7 +190,7 @@ test("AC11 — a goal with zero ACs is not achieved; checkWithinCap splits withi
 
 // ── VALID_GOAL_STATUSES / id validation (schema hardening) ─────────────────────────────────────────
 test("VALID_GOAL_STATUSES includes draft+achieved; rejects todo/done", () => {
-  assert.deepEqual(VALID_GOAL_STATUSES, ["draft", "active", "achieved", "superseded", "retired"]);
+  assert.deepEqual(VALID_GOAL_STATUSES, ["draft", "active", "achieved", "superseded", "retired", "needs-human"]);
   assert.ok(!VALID_GOAL_STATUSES.includes("done"), "a goal is not a task; it does not 'done'");
   const s = createGoalStore(tmpDir("status"));
   assert.throws(() => s.write("GOAL-001", { title: "p", status: "done", origin: "o" }), /invalid goal status/);
