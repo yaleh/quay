@@ -187,6 +187,12 @@ export function taskIdFromSubject(subject: string): string | null {
   const typed = s.match(/^(?:test|fix|feat|chore|docs|refactor|perf|style|verification):\s+((?:gap|DIR|exp5|QN|QX|QC|QW|QENG|ARCH|cand|SU|PROBE|TEST)-[A-Za-z0-9][A-Za-z0-9_-]*)/);
   if (typed) return typed[1];
 
+  // Form 6 — trailing-parens id: `<说明> (gap-…)` (e.g. `dashboard: 顶部行改 … (gap-dashboard-top-row-
+  // asymmetric-columns)`). Same known-prefix guard as Form 5, anchored to end-of-subject so a bare
+  // parenthetical (`… (updated)`) is never mistaken for a task id (AC6 reconciliation).
+  const paren = s.match(/\(((?:gap|DIR|exp5|QN|QX|QC|QW|QENG|ARCH|cand|SU|PROBE|TEST)-[A-Za-z0-9][A-Za-z0-9_-]*)\)\s*$/);
+  if (paren) return paren[1];
+
   return null;
 }
 
