@@ -248,6 +248,16 @@ export function deriveEntries(pluginRoot) {
  * meta-driver.ts into the entry set (a DRIVER_KINDS table row), so the bundle step must make that
  * import resolve. The target is always packages/quay/src/<basename> regardless of the importer's
  * depth, so map by basename — a general fallback, not a per-script list.
+ *
+ * gap-ac205-session-delivery-channel-transcript-confirmed: the SAME onResolve also covers
+ * send-to-session.ts's DYNAMIC import — `await import("../../packages/quay/src/serve-send.ts")`
+ * (send-to-session.ts:53). onResolve fires for dynamic imports too, the filter
+ * `/packages\/quay\/src\/<basename>.ts$/` matches the raw specifier's trailing
+ * `packages/quay/src/serve-send.ts`, and esbuild then INLINES it (bundle:true). The shipped
+ * dist/send-to-session.js is therefore self-contained: the `packages/quay/src` tokens that remain
+ * in the bundle are esbuild's __esm/__commonJS lazy-init registry keys + source-boundary comments
+ * (shared by 15 of ~76 bundles), NOT runtime dev-tree imports — a bare-Node run of the installed
+ * bundle reaches the socket-write stage, never the `共享投递模块不可用` exit-4 path.
  */
 function coreSrcAliasPlugin() {
   return {

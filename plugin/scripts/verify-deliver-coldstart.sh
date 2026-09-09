@@ -62,7 +62,7 @@
 #       [--test-command <cmd>] [--tmux-session <sess>] \
 #       [--wait <s>] [--liveness-window <min>] \
 #       [--skip-cold-start-drive] [--cold-start-drive] [--verify-only] [--require-live] \
-#       [--evidence <path>] [--ac89 <path>] [--host <B|C>] [--spec <path>] [--channel npm-global|marketplace] [--selfcheck] [--help]
+#       [--evidence <path>] [--ac89 <path>] [--host <B|C>] [--spec <path>] [--channel npm-global|marketplace] [--ac205-session] [--selfcheck] [--help]
 #
 #   --build-root <repo> 该次验证【自己】从 <repo> 的 develop-tip 现 build quay+quay-native tgz
 #                       （AC5 主路径：build_sha/日期/产物 sha256 全由本脚本取，不引用外部产物），
@@ -79,6 +79,9 @@
 #                      落地 extraKnownMarketplaces.quay → 已安装路径、enabledPlugins 无用户级 quay 键
 #                      （AC-161/162 契约的跨主机版本，SPEC §6b 约束③ 两条安装路径都能解析到）。
 #   --verify-only    只跑③（对已存在的 --root 重验冷启动活性；①②被调用方声明已验）。
+#   --ac205-session  ⑦ 会话投递（GOAL-009-AC-205）：用安装物 dist/send-to-session.js 给同址目标会话
+#                    发 probe，读目标 transcript（transcript-delivery-check.js --check）判 delivered
+#                    ⇒ 写 AC-205 记录（transcript_confirmed=true）。opt-in：需同址 live 目标会话。
 #   --require-live   ③ 若 COLDSTART_LIVE != yes 则 exit 1（严格验证——冷启动确认跑用）。
 #   --selfcheck      全 hermetically 自检（AC2 直接量正/负控制 + L1 闭集解析/未评估正负控制 + AC5 判据正/负控制），不碰真实安装。exit 0/1。
 #   --help           用法在前、退出 0、无副作用（gap-scripts-sprawl 约定）。
@@ -153,6 +156,18 @@ AC204_FORBIDDEN_COUNT=-1                     # 枚举 $ROOT 落地路径算出�
 AC204_ENABLE_DECLARED=""                     # 读 $ROOT/.claude/settings.json 判的启用声明（0/1；空 = 未读）
 AC204_EVALUATED=0                            # 1 = forbidden_count + enable_declared 都读成
 
+# ── AC-205（GOAL-009）：会话投递通道——安装物 dist/send-to-session.js 真投 + transcript 外部可核 ──
+# 判据读载体（host/shipped_from_installed_artifact/transcript_confirmed）。⛔ 不采信发送方自述
+# （硬规则 4b + AC-205 正文）：send-to-session 走 Unix socket 返回 0 字节、无 ack，退出码 0 不代表
+# 对方真收到。transcript_confirmed 必须由读目标会话 transcript 得出（transcript-delivery-check.ts
+# --check —— 单一定义源，⛔ 不手搓 grep，硬规则①）。shipped_from_installed_artifact=true 表示所用
+# send-to-session 出自安装物 dist（$(npm root -g)/quay/plugin/scripts/dist/），非 dev 树。
+AC205_HOST=""                                # 目标宿主 hostname（criterion 要求 host≠本机）
+AC205_SHIPPED_FROM_INSTALLED_ARTIFACT=0      # 1 = 所用 send-to-session 出自安装物 dist
+AC205_TRANSCRIPT_CONFIRMED=0                 # 1 = transcript-delivery-check 判 delivered（读 transcript）
+AC205_EVALUATED=0                            # 1 = send 已发 + transcript 已读
+AC205_SESSION=0                              # 1 = --ac205-session 触发（需同址目标会话，opt-in）
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --tgz) QUAY_TGZ="$2"; shift 2 ;;
@@ -177,6 +192,7 @@ while [ $# -gt 0 ]; do
     --host) HOST="$2"; shift 2 ;;
     --spec) SPEC_PATH="$2"; shift 2 ;;
     --channel) CHANNEL="$2"; shift 2 ;;
+    --ac205-session) AC205_SESSION=1; shift ;;
     --selfcheck) DO_SELFCHECK=1; shift ;;
     *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -978,6 +994,115 @@ step_ac204_forbidden_surface() {
   return 0
 }
 
+# ── AC-205（GOAL-009）：会话投递通道——安装物 dist/send-to-session.js 真投 + transcript 外部可核 ──
+# 判据读载体（host/shipped_from_installed_artifact/transcript_confirmed）。⛔ 不采信发送方自述：
+# send-to-session 走 Unix socket 返回 0 字节、无 ack ⇒ exit 0 不代表真收到。transcript_confirmed
+# 只由 transcript-delivery-check.js --check（读目标 transcript jsonl，判 delivered 的退出码）得出，
+# ⛔ 不由 send-to-session 的退出码得出（AC2/AC4 判据）。shipped_from_installed_artifact 取「所用
+# send-to-session 出自安装物 dist（$(npm root -g)/quay/plugin/scripts/dist/send-to-session.js），
+# 非 dev 树」这一事实。目标会话发现：枚举 ~/.claude/sessions/<pid>.json（同 send-to-session.ts
+# --pid 的注册源），取第一个【messagingSocketPath 存在 + 有 peerToken .key + sessionId 合法】的 live 会话。
+
+# 写 GOAL-009-AC-205 记录（经 ac89_append_goal009 统一补 top-level build_sha/ts——AC-214 新鲜度锚）。
+# 缺任一成功读数（host 空、shipped_from_installed_artifact≠true、transcript_confirmed≠true）⇒ 不写
+# return 1（fail-closed，缺值/缺成功 ≠ 合格）。三字段逐字满足 criterion 过滤：
+# shipped_from_installed_artifact / transcript_confirmed 是 JSON 字面 true。
+write_ac205_record() {
+  local host="$1" shipped="$2" transcript_confirmed="$3"
+  [ -n "$host" ] || return 1
+  [ "$shipped" = "true" ] || return 1
+  [ "$transcript_confirmed" = "true" ] || return 1
+  ac89_append_goal009 ",\"ac\":\"GOAL-009-AC-205\",\"host\":\"$host\",\"shipped_from_installed_artifact\":$shipped,\"transcript_confirmed\":$transcript_confirmed"
+}
+
+# 找目标会话（~/.claude/sessions/<pid>.json）：输出 "pid\nsessionId\nsocket\ncwd"（4 行），无则空。
+# 判据：messagingSocketPath 存在（-S）∧ 有 <pid>.*.key（peerToken 载体）∧ sessionId 非空。
+find_ac205_target_session() {
+  "$VC_NODE" --no-warnings -e '
+    const fs = require("node:fs"), path = require("node:path"), os = require("node:os");
+    const dir = path.join(os.homedir(), ".claude", "sessions");
+    let out = "";
+    try {
+      const names = fs.readdirSync(dir);
+      for (const f of names) {
+        if (!f.endsWith(".json")) continue;
+        const pid = f.slice(0, -5);
+        let j;
+        try { j = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")); } catch { continue; }
+        const sock = typeof j.messagingSocketPath === "string" ? j.messagingSocketPath : "";
+        const sid = typeof j.sessionId === "string" ? j.sessionId : "";
+        const cwd = typeof j.cwd === "string" ? j.cwd : "";
+        if (!sock || !sid) continue;
+        if (!fs.existsSync(sock)) continue;
+        if (!names.some((k) => k.startsWith(pid + ".") && k.endsWith(".key"))) continue;
+        out = pid + "\n" + sid + "\n" + sock + "\n" + cwd;
+        break;
+      }
+    } catch {}
+    process.stdout.write(out);
+  ' 2>/dev/null
+}
+
+# step ⑦：会话投递（AC-205）——用安装物 dist/send-to-session.js 给同址目标会话发 probe，
+# 读目标 transcript 判 delivered ⇒ 写 AC-205 记录。缺任一生效读数不写（fail-closed）。
+step_ac205_session_delivery() {
+  local qroot send_js check_js target pid session_id sock cwd transcript probe i verdict
+  AC205_HOST="$(hostname 2>/dev/null || echo '')"
+  AC205_SHIPPED_FROM_INSTALLED_ARTIFACT=0
+  AC205_TRANSCRIPT_CONFIRMED=0
+  AC205_EVALUATED=0
+  qroot="$(npm root -g --prefix "$STEP1_PREFIX" 2>/dev/null || echo '')"
+  send_js="$qroot/quay/plugin/scripts/dist/send-to-session.js"
+  check_js="$qroot/quay/plugin/scripts/dist/transcript-delivery-check.js"
+  echo "== ⑦ session delivery (AC-205): installed dist/send-to-session.js → same-host target → transcript-verified =="
+  if [ ! -f "$send_js" ] || [ ! -f "$check_js" ]; then
+    echo "  NOTE: AC-205 record NOT written (installed dist/send-to-session.js or dist/transcript-delivery-check.js missing — 安装物不自洽，缺值≠合格)"
+    return 0
+  fi
+  # 所用 send-to-session 出自安装物 dist（非 dev 树）——shipped_from_installed_artifact 的事实来源。
+  AC205_SHIPPED_FROM_INSTALLED_ARTIFACT=1
+  target="$(find_ac205_target_session)"
+  [ -n "$target" ] || { echo "  NOTE: AC-205 record NOT written (no live same-host target session in ~/.claude/sessions — 缺目标会话≠合格)"; return 0; }
+  pid="$(printf '%s\n' "$target" | sed -n '1p')"
+  session_id="$(printf '%s\n' "$target" | sed -n '2p')"
+  sock="$(printf '%s\n' "$target" | sed -n '3p')"
+  cwd="$(printf '%s\n' "$target" | sed -n '4p')"
+  # 目标 transcript 路径：sessionTranscriptPath = ~/.claude/projects/<projectSlug(cwd)>/<sessionId>.jsonl，
+  # projectSlug = cwd.split("/").join("-")。读不到精确路径时 glob 兜底（硬规则 3b：读不到 ⇒ 不置真）。
+  transcript="${HOME}/.claude/projects/$(printf '%s' "$cwd" | tr '/' '-')/${session_id}.jsonl"
+  if [ ! -f "$transcript" ]; then
+    transcript="$(ls -t "${HOME}"/.claude/projects/*/"${session_id}".jsonl 2>/dev/null | head -1 || true)"
+  fi
+  [ -n "$transcript" ] && [ -f "$transcript" ] || { echo "  NOTE: AC-205 record NOT written (target transcript not found for sessionId=$session_id — 缺值≠合格)"; return 0; }
+  probe="ac205-probe-$(date +%s)-$$"
+  echo "  target: pid=$pid sessionId=$session_id (name from registry)"
+  echo "  send-to-session (installed dist): $send_js"
+  echo "  transcript: $transcript"
+  # ① 发送 probe（send exit 0 只表示「连接+写成功」，socket 无 ack ⇒ ⛔ 不作 transcript_confirmed 依据）
+  if ! "$VC_NODE" --no-warnings "$send_js" --pid "$pid" "$probe" >/dev/null 2>&1; then
+    echo "  NOTE: AC-205 record NOT written (send-to-session failed to connect — 缺值≠合格)"
+    return 0
+  fi
+  AC205_EVALUATED=1
+  # ② transcript 外部可核：轮询 transcript-delivery-check.js --check（读 transcript jsonl 判 delivered）。
+  #    ⛔ transcript_confirmed 只从这里得出（exit 0 = delivered），⛔ 从不读 send 的退出码（AC2/AC4）。
+  for i in $(seq 1 30); do
+    if "$VC_NODE" --no-warnings "$check_js" --check "$transcript" --text "$probe" >/dev/null 2>&1; then
+      AC205_TRANSCRIPT_CONFIRMED=1
+      break
+    fi
+    sleep 1
+  done
+  echo "  shipped_from_installed_artifact=$AC205_SHIPPED_FROM_INSTALLED_ARTIFACT transcript_confirmed=$AC205_TRANSCRIPT_CONFIRMED evaluated=$AC205_EVALUATED host=$AC205_HOST"
+  if [ "$AC205_EVALUATED" = "1" ] && [ "$AC205_SHIPPED_FROM_INSTALLED_ARTIFACT" = "1" ] && [ "$AC205_TRANSCRIPT_CONFIRMED" = "1" ]; then
+    write_ac205_record "$AC205_HOST" "true" "true"
+    echo "  ac205 record written → $AC89"
+    return 0
+  fi
+  echo "  NOTE: AC-205 record NOT written (transcript_confirmed=$AC205_TRANSCRIPT_CONFIRMED — send exit 0 但 transcript 未物化 ⇒ 不落账，负控制 AC4)"
+  return 0
+}
+
 # ── 自检（hermetic：AC1 顺序 + AC2 直接量正/负控制，不碰真实安装）────────────────────────
 selfcheck() {
   local tmp rc=1
@@ -1294,6 +1419,42 @@ Enter to confirm · Esc to cancel"
   echo "selfcheck: ac204-record(forbidden-copy) refused=$ac204_refused_fc (expect 1 — forbidden_count=1 拒写)"
   echo "selfcheck: ac204-record(no-enable) refused=$ac204_refused_en (expect 1 — enable_declared=0 拒写)"
 
+  # control 22/23/24 (AC-205 会话投递通道, gap-ac205-session-delivery-channel-transcript-confirmed):
+  #   transcript_confirmed 必须由 transcript-delivery-check 读【合成 transcript】判 delivered 的退出码
+  #   导出（⛔ 非 send 退出码——本控制无任何 send，send 无 ack 的形态无法在 hermetic 下伪造；证明的是
+  #   「transcript 读命中 ⇒ delivered(exit 0) / 读不中 ⇒ 非 0」这一半，正是 step ⑦ 置
+  #   AC205_TRANSCRIPT_CONFIRMED=1 的唯一来源）。write_ac205_record 对 shipped=false /
+  #   transcript_confirmed=false / host 空 各拒写（fail-closed，缺值/缺成功 ≠ 合格——AC4 负控制）。
+  local ac205_file="$tmp/ac205.jsonl" ac205_wrote=0 ac205_fields_ok=0
+  local ac205_ship_refused=0 ac205_conf_refused=0 ac205_host_refused=0 ac205_tc_hit=0 ac205_tc_miss=0
+  local ac205_probe="ac205-probe-$(date +%s)-$$"
+  AC89="$ac205_file"; TS="2026-09-09T00:00:00Z"; BUILD_SHA="0123456789abcdef0123456789abcdef01234567"
+  printf '{"type":"user","message":{"role":"user","content":"%s"}}\n' "$ac205_probe" > "$tmp/ac205-hit.jsonl"
+  if "$VC_NODE" --no-warnings --experimental-strip-types "$SCRIPT_DIR/transcript-delivery-check.ts" \
+      --check "$tmp/ac205-hit.jsonl" --text "$ac205_probe" >/dev/null 2>&1; then ac205_tc_hit=1; fi
+  printf '{"type":"assistant","message":{"role":"assistant","content":"unrelated"}}\n' > "$tmp/ac205-miss.jsonl"
+  if "$VC_NODE" --no-warnings --experimental-strip-types "$SCRIPT_DIR/transcript-delivery-check.ts" \
+      --check "$tmp/ac205-miss.jsonl" --text "$ac205_probe" >/dev/null 2>&1; then ac205_tc_miss=1; fi
+  if [ "$ac205_tc_hit" = "1" ] && write_ac205_record "hostB-fake" "true" "true"; then
+    ac205_wrote=1
+    if grep -q '"ac":"GOAL-009-AC-205"' "$ac205_file" \
+       && grep -q '"host":"hostB-fake"' "$ac205_file" \
+       && grep -q '"shipped_from_installed_artifact":true' "$ac205_file" \
+       && grep -q '"transcript_confirmed":true' "$ac205_file" \
+       && grep -q '"build_sha":"0123456789abcdef0123456789abcdef01234567"' "$ac205_file"; then
+      ac205_fields_ok=1
+    fi
+  fi
+  if ! write_ac205_record "hostB-fake" "false" "true" 2>/dev/null; then ac205_ship_refused=1; fi
+  if ! write_ac205_record "hostB-fake" "true" "false" 2>/dev/null; then ac205_conf_refused=1; fi
+  if ! write_ac205_record "" "true" "true" 2>/dev/null; then ac205_host_refused=1; fi
+  AC89=""; TS=""; BUILD_SHA=""
+  echo "selfcheck: ac205-transcript-check(hit/miss) hit=$ac205_tc_hit miss=$ac205_tc_miss (expect 1/0 — transcript 读命中 probe ⇒ delivered(exit 0)，读不中 ⇒ 非 0)"
+  echo "selfcheck: ac205-record(valid) wrote=$ac205_wrote fields_ok=$ac205_fields_ok (expect 1/1)"
+  echo "selfcheck: ac205-record(shipped=false) refused=$ac205_ship_refused (expect 1 — 安装物出处缺失拒写)"
+  echo "selfcheck: ac205-record(transcript_confirmed=false) refused=$ac205_conf_refused (expect 1 — transcript 未物化拒写, AC4 负控制)"
+  echo "selfcheck: ac205-record(empty-host) refused=$ac205_host_refused (expect 1 — 缺 host 拒写)"
+
   if [ "$d1" = "1" ] && [ "$d2" = "no" ] && [ "$a1" = "1" ] && [ "$a2" = "yes" ] \
      && [ "$c3_e" = "1" ] && [ "$c3_ok" = "1" ] \
      && [ "$c4_e" = "1" ] && [ "$c4_ok" = "0" ] \
@@ -1313,11 +1474,14 @@ Enter to confirm · Esc to cancel"
      && [ "$g15_rc" = "0" ] && [ "$g15_pos" = "1" ] && [ "$g15_build" = "1" ] \
      && [ "$g16_rc" != "0" ] && [ "$g16_before" = "$g16_after" ] \
      && [ "$ac206_wrote" = "1" ] && [ "$ac206_fields_ok" = "1" ] && [ "$ac206_neg_ok" = "1" ] && [ "$ac206_refused" = "1" ] \
-     && [ "$ac204_wrote" = "1" ] && [ "$ac204_fields_ok" = "1" ] && [ "$ac204_refused_fc" = "1" ] && [ "$ac204_refused_en" = "1" ]; then
-    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed); AC-204 carrier record writes the five criterion fields verbatim (forbidden_count=0 integer, enable_declared=true literal) and refuses a forbidden-copy or no-enable record (fail-closed, 成对判定)"
+     && [ "$ac204_wrote" = "1" ] && [ "$ac204_fields_ok" = "1" ] && [ "$ac204_refused_fc" = "1" ] && [ "$ac204_refused_en" = "1" ] \
+     && [ "$ac205_tc_hit" = "1" ] && [ "$ac205_tc_miss" = "0" ] \
+     && [ "$ac205_wrote" = "1" ] && [ "$ac205_fields_ok" = "1" ] \
+     && [ "$ac205_ship_refused" = "1" ] && [ "$ac205_conf_refused" = "1" ] && [ "$ac205_host_refused" = "1" ]; then
+    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed); AC-204 carrier record writes the five criterion fields verbatim (forbidden_count=0 integer, enable_declared=true literal) and refuses a forbidden-copy or no-enable record (fail-closed, 成对判定); AC-205 carrier record writes the three criterion fields verbatim (shipped_from_installed_artifact=true + transcript_confirmed=true literals, top-level build_sha) with transcript_confirmed derived from transcript-delivery-check reading the transcript (hit ⇒ delivered / miss ⇒ not) — never from a send exit code — and refuses shipped=false / transcript_confirmed=false / empty-host (fail-closed, AC4 负控制)"
     rc=0
   else
-    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc m4_reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused ac201_pos_w=$ac201_pos_w ac201_sha_len=${#ac201_pos_sha} ac201_tgz_len=${#ac201_pos_tgz} ac201_pos_ac=$ac201_pos_ac ac201_neg_w=$ac201_neg_w ac201_neg_lines=$ac201_neg_lines g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused ac204_wrote=$ac204_wrote ac204_fields_ok=$ac204_fields_ok ac204_refused_fc=$ac204_refused_fc ac204_refused_en=$ac204_refused_en" >&2
+    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc m4_reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused ac201_pos_w=$ac201_pos_w ac201_sha_len=${#ac201_pos_sha} ac201_tgz_len=${#ac201_pos_tgz} ac201_pos_ac=$ac201_pos_ac ac201_neg_w=$ac201_neg_w ac201_neg_lines=$ac201_neg_lines g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused ac204_wrote=$ac204_wrote ac204_fields_ok=$ac204_fields_ok ac204_refused_fc=$ac204_refused_fc ac204_refused_en=$ac204_refused_en ac205_tc_hit=$ac205_tc_hit ac205_tc_miss=$ac205_tc_miss ac205_wrote=$ac205_wrote ac205_fields_ok=$ac205_fields_ok ac205_ship_refused=$ac205_ship_refused ac205_conf_refused=$ac205_conf_refused ac205_host_refused=$ac205_host_refused" >&2
     rc=1
   fi
   rm -rf "$tmp"
@@ -1389,6 +1553,9 @@ else
     step3_coldstart
     step4_driver_liveness "$ROOT"
     step5_dual_carrier "$ROOT"
+    if [ "$AC205_SESSION" = "1" ]; then
+      step_ac205_session_delivery "$ROOT"
+    fi
   fi
 fi
 

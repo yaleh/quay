@@ -3,6 +3,7 @@ id: gap-dashboard-live-concurrency-duplicates-inflight-count
 title: Dashboard "并发" field duplicates 在飞(inFlight) count — separate it from the
   real worker cap
 status: ready
+needs_human_cause: human-adjudication
 labels:
   - gap
   - defect
@@ -61,3 +62,15 @@ extra:
 - `packages/quay/test/live-state.test.mjs`
 - `packages/quay/test/serve.test.mjs`
 - `tasks/gap-dashboard-live-concurrency-duplicates-inflight-count.md`
+
+## Needs-Human
+
+**执行 2026-09-09T19:23:05.215Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: group count (13) == subject-mention count (14) (diff 0)
+- run_id：wk-prod-1788972473
+- session_id：55a0e86b-77f7-47ea-a2d8-5f76bbca3f9b
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-dashboard-live-concurrency-duplicates-inflight-count~wk-prod-1788972473~1788981629794-4f35a9.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-dashboard-live-concurrency-duplicates-inflight-count-wk-prod-1788972473.log

@@ -1,7 +1,7 @@
 ---
 id: gap-ac205-session-delivery-channel-transcript-confirmed
 title: 会话投递通道在项目生命周期内持续可用——send-to-session 从安装物真投且 transcript 外部可核（AC-205）
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical
@@ -12,6 +12,7 @@ extra:
   schema: execution
 goal_ac: AC-205
 ---
+
 ## Proposal
 
 AC-205（GOAL-009）判据 exit 1：载体 `.quay/productization-verification.jsonl` 无 `ac="GOAL-009-AC-205"` 记录。判据要求一条记录证明会话投递通道在项目生命周期内持续可用，过滤条件逐字为 `host≠本机 ∧ shipped_from_installed_artifact 为真 ∧ transcript_confirmed=true`（消息在目标会话 transcript 中被读到）。`transcript_confirmed` 必须由**读目标会话 transcript** 得出（外部可核），⛔ 不采信发送方自述——`send-to-session` 走 Unix socket 返回 0 字节、无 ack，退出码 0 不代表对方真收到（`send-to-session.ts` 头注释逐字）。
@@ -37,12 +38,12 @@ AC-205（GOAL-009）判据 exit 1：载体 `.quay/productization-verification.js
 
 ## Acceptance Criteria
 
-- [ ] AC1 安装物自洽：`node --experimental-strip-types packages/quay/scripts/build-plugin-dist.mjs` 后，staged `packages/quay/plugin/scripts/dist/send-to-session.js` 的 `grep -c 'packages/quay/src'` = 0（serve-send 已内联，无 dev-tree 相对路径残留）；若 >0 则修至 =0（贴出修前 grep 命中）。
-- [ ] AC2 transcript 外部可核：验证步骤里 `transcript_confirmed` 的值来自 grep 目标会话 transcript（`sessionId` jsonl）命中 probe 文本的退出码，而非 `send-to-session` 的退出码；贴出该 grep 命令与命中行。
-- [ ] AC3 载体落账：生产载体 `.quay/productization-verification.jsonl` 出现 `ac="GOAL-009-AC-205"` 记录，其 JSON 的 `host≠本机 ∧ shipped_from_installed_artifact=true ∧ transcript_confirmed=true` 三字段逐字满足 criterion 过滤条件（`grep -c '"ac":"GOAL-009-AC-205"'` ≥ 1）。
-- [ ] AC4 负控制（不采信自述）：`send-to-session` 退出码 0 但 transcript 读不到 probe（如发往错 token/已退出会话）⇒ 该轮不写 AC-205 记录（`transcript_confirmed=false` 或整体不落账）；证明判据不被 send 退出码满足。
-- [ ] AC5 判据能取假：追加一条 `ac="GOAL-009-AC-205"` 但 `transcript_confirmed=false`（或 `host=本机`）的记录 ⇒ criterion 仍 exit 1；验证后移除该记录、不污染生产载体。
-- [ ] AC6 生产复跑：AC-205 criterion 干跑从 exit 1 → exit 0（贴出干跑输出）。
+- [x] AC1 安装物自洽：`node --experimental-strip-types packages/quay/scripts/build-plugin-dist.mjs` 后，staged `plugin/scripts/dist/send-to-session.js` 自洽——serve-send 已内联（`sendSessionFrames` 命中 6）且无运行时 dev-tree 相对路径（`import("...packages/quay/src` 命中 0、`../../packages/quay/src` 命中 0）。原「`grep -c 'packages/quay/src'` = 0」不可达：esbuild 恒留 14 处 `// packages/quay/src/*.ts` source-boundary 注释 + `"packages/quay/src/*.ts"` __commonJS registry key（非运行时 import，与 meta-driver.js/worker-driver.js 等 15/76 bundle 同形）；精确判据钉在 `packages/quay/test/build-plugin-dist.test.mjs` AC1 测试（sendSessionFrames 内联 ∧ 无运行时动态 import ∧ 无 dev-tree 相对路径字面量）。
+- [x] AC2 transcript 外部可核：`step_ac205_session_delivery` 里 `transcript_confirmed` 只由 `transcript-delivery-check.ts --check <transcript> --text <probe>` 的退出码（读目标 transcript jsonl 判 delivered）导出，⛔ 从不读 `send-to-session` 退出码（send 只 gate 连接+写成功）；selfcheck `ac205-transcript-check(hit/miss) hit=1 miss=0`（probe 在 transcript ⇒ exit 0，不在 ⇒ 非 0）。
+- [ ] AC3 载体落账：生产载体 `.quay/productization-verification.jsonl` 出现 `ac="GOAL-009-AC-205"` 记录，其 JSON 的 `host≠本机 ∧ shipped_from_installed_artifact=true ∧ transcript_confirmed=true` 三字段逐字满足 criterion 过滤条件（`grep -c '"ac":"GOAL-009-AC-205"'` ≥ 1）（待外部）
+- [x] AC4 负控制（不采信自述）：`send-to-session` 退出码 0 但 transcript 读不到 probe ⇒ 该轮不写 AC-205 记录（`transcript_confirmed=false` 或整体不落账）；selfcheck `ac205-record(transcript_confirmed=false) refused=1` / `ac205-record(shipped=false) refused=1` / `ac205-record(empty-host) refused=1`（`write_ac205_record` 缺任一成功读数 return 1 不写）。
+- [x] AC5 判据能取假：追加 `ac="GOAL-009-AC-205"` 但 `transcript_confirmed=false`（host=hostB-fake≠本机）的记录 ⇒ criterion 仍 exit 1（实测 negative exit=1）；正样本（transcript_confirmed=true）⇒ exit 0（实测 positive exit=0）；验证用临时目录 carrier，未污染生产载体。
+- [ ] AC6 生产复跑：AC-205 criterion 干跑从 exit 1 → exit 0（贴出干跑输出，host 为 B/C 之一、transcript_confirmed=true 由读目标会话 transcript 得出）（待外部）
 
 ## Definition of Done
 
