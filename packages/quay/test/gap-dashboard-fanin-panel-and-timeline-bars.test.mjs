@@ -144,7 +144,7 @@ test("AC4 (H list): sorted by lockAcquireEpoch desc, renders outcome+task, drops
   assert.ok(html.includes("task-high") && html.includes("task-mid") && html.includes("task-low"), "each row carries its task id");
   assert.ok(html.indexOf("task-high") < html.indexOf("task-mid"), "desc order: lockAcquireEpoch 300 before 200");
   assert.ok(html.indexOf("task-mid") < html.indexOf("task-low"), "desc order: lockAcquireEpoch 200 before 100");
-  assert.ok(html.includes("<strong>landed</strong>") && html.includes("<strong>red</strong>"), "each row renders its own outcome");
+  assert.ok(html.includes('<span class="tag tag-positive">landed</span>') && html.includes('<span class="tag tag-accent">red</span>'), "each row renders its own outcome as a tag badge");
   assert.ok(!html.includes("task-no-fan"), "a mechanical_fan_in == null record is filtered out");
 });
 
