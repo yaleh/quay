@@ -1192,6 +1192,29 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     return "self-only";
   }
 
+  /** GOAL-011 AC-220（gap-store-commit-propagation-log，退出条件①②的直接生产证据）：把
+   *  `commitTaskWrite` 每一次「committed:true」的传播决定追加写入
+   *  `<root>/.quay/store-commit-propagation.jsonl`（gitignored 运行时日志，worker-outcome.jsonl
+   *  同族）——这是该函数自己的决定，不是从 ff-red 率反推的间接信号（硬规则「推论三」：measure the
+   *  actual production carrier, not a downstream noisy symptom）。⛔ 日志写入失败不得影响真实的
+   *  commit/propagate 结果（best-effort、try/catch 吞掉）——观测不得阻塞主执行
+   *  （observation-must-not-block-main-execution，人 2026-08-30 裁定）。 */
+  function logPropagationOutcome(root: string, rec: {
+    id: string;
+    verb: "task_write" | "task_delete";
+    changeKind: "self-only" | "must-propagate";
+    branchClass: "develop" | "task-branch" | "other";
+    propagated: boolean;
+  }): void {
+    try {
+      const file = path.join(root, ".quay", "store-commit-propagation.jsonl");
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.appendFileSync(file, JSON.stringify({ ts: new Date().toISOString(), ...rec }) + "\n", "utf8");
+    } catch {
+      // best-effort telemetry — never let a log-write failure affect the real commit outcome.
+    }
+  }
+
   /** Commit `tasks/<id>.md` (branch-aware) after a successful write/delete, delegating the git
    *  add/commit to the shared primitive `commitStoreWrite` (SPEC-store-commit-unification §3) and
    *  keeping only this store's own branch-aware ff-to-develop propagation. Returns
@@ -1231,20 +1254,26 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     const branch = currentBranch(root);
     if (branch === null || branch === "develop") {
       // detached HEAD, or already on develop — nothing further to propagate.
-      return { committed: true, propagated: branch === "develop", status: "committed" };
+      const propagated = branch === "develop";
+      logPropagationOutcome(root, { id, verb, changeKind, branchClass: "develop", propagated });
+      return { committed: true, propagated, status: "committed" };
     }
     if (branch.startsWith("task/")) {
       // Task worktree: commit to the worktree's own branch only; fan-in ff-merge is the sole path
       // into develop (AC2 negative control).
+      logPropagationOutcome(root, { id, verb, changeKind, branchClass: "task-branch", propagated: false });
       return { committed: true, propagated: false, status: "committed" };
     }
     if (verb === "task_write" && changeKind === "self-only") {
       // Self-only write (AC ticks / Evidence / goal association) on a non-task/* branch: do NOT ff
       // to develop — the task's own fan-in carries it to develop with the worktree branch
       // (gap-store-commit-propagation-field-aware, SPEC §5).
+      logPropagationOutcome(root, { id, verb, changeKind, branchClass: "other", propagated: false });
       return { committed: true, propagated: false, status: "committed" };
     }
-    return { committed: true, propagated: ffPushToDevelop(root, branch), status: "committed" };
+    const propagated = ffPushToDevelop(root, branch);
+    logPropagationOutcome(root, { id, verb, changeKind, branchClass: "other", propagated });
+    return { committed: true, propagated, status: "committed" };
   }
 
   /**
