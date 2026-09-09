@@ -122,6 +122,16 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
     "AC-206 record: goals/ missing ⇒ goals_dir_created=false still written (缺件如实非静默)");
   assert.match(r.stdout, /ac206-record\(empty-host\) refused=1/,
     "AC-206 record: empty host ⇒ refused (fail-closed, 缺值≠合格)");
+  // AC-204 (gap-ac204-quay-init-forbidden-prefixes-mcp-commands-hooks-enable-declared): the forbidden-
+  // surface record writes forbidden_count=0 (integer) + enable_declared=true (literal) verbatim, and
+  // refuses a forbidden-copy record (forbidden_count=1) and a no-enable record (enable_declared=0) —
+  // the 成对判定 (禁列为空 alone is satisfiable by "lay nothing" ⇒ must pair with enable declared).
+  assert.match(r.stdout, /ac204-record\(valid\) wrote=1 fields_ok=1/,
+    "AC-204 record: valid record written with forbidden_count=0 + enable_declared=true verbatim");
+  assert.match(r.stdout, /ac204-record\(forbidden-copy\) refused=1/,
+    "AC-204 record: forbidden_count=1 ⇒ refused (fail-closed)");
+  assert.match(r.stdout, /ac204-record\(no-enable\) refused=1/,
+    "AC-204 record: enable_declared=0 ⇒ refused (fail-closed, 成对判定)");
 });
 
 test("AC1 — --selfcheck is hermetic: it does not touch a real install and runs offline", () => {

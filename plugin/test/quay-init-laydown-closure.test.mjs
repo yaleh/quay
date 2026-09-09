@@ -42,7 +42,7 @@ test("isInClosedSet admits exactly the seven closed-set members + tasks/ and goa
   assert.equal(isInClosedSet("tasks/sub/dir/x.md"), true, "a nested tasks/ descendant must be admitted");
   assert.equal(isInClosedSet("goals/GOAL-001.md"), true, "a goals/ descendant must be admitted");
   assert.equal(isInClosedSet("goals/sub/dir/x.md"), true, "a nested goals/ descendant must be admitted");
-  for (const bad of ["plugin/scripts/x.sh", ".claude/workflows/w.js", ".claude/agents/a.md", ".claude/skills/s/SKILL.md", ".quay/runtime/quay.js", "orchestration/tick.md", "docs/analysis/x.md", "scripts/gates/g.sh"]) {
+  for (const bad of ["plugin/scripts/x.sh", ".claude/workflows/w.js", ".claude/agents/a.md", ".claude/skills/s/SKILL.md", ".mcp.json", ".claude/commands/x.md", ".claude/hooks/h.sh", ".quay/runtime/quay.js", "orchestration/tick.md", "docs/analysis/x.md", "scripts/gates/g.sh"]) {
     assert.equal(isInClosedSet(bad), false, `${bad} must NOT be a closed-set member`);
   }
 });
@@ -60,6 +60,26 @@ test("assertClosure flags outside-closed-set paths and forbidden copies", () => 
   assert.equal(stray.ok, false, "an outside-closed-set path must violate the closure");
   assert.deepEqual(stray.outsideClosedSet, ["orchestration/tick.md"]);
   assert.deepEqual(stray.forbiddenCopies, []);
+});
+
+test("AC3 — the mcp/commands/hooks extension surface is forbidden (file/目录 two-state); the enable surface is not", () => {
+  // File vs dir two-state matching (AC-204): `.mcp.json` is a FILE prefix (exact match only, no trailing
+  // slash), `.claude/commands/` and `.claude/hooks/` are directory prefixes (dir itself + descendants).
+  const v = assertClosure([".mcp.json", ".claude/commands/x.md", ".claude/hooks/h.sh"]);
+  assert.ok(v.forbiddenCopies.includes(".mcp.json"), ".mcp.json must be a forbidden copy (exact file match)");
+  assert.ok(v.forbiddenCopies.includes(".claude/commands/x.md"), ".claude/commands/x.md must be forbidden (directory prefix)");
+  assert.ok(v.forbiddenCopies.includes(".claude/hooks/h.sh"), ".claude/hooks/h.sh must be forbidden (directory prefix)");
+
+  // The enable surface (`.claude/settings.json`) is a closed-set MEMBER, NOT a forbidden copy — 区分
+  // enable 面 (settings.json 只写启用/授权) 与实现面 (mcp/commands/hooks 是扩展实现, quay-init 不复制).
+  assert.equal(isInClosedSet(".claude/settings.json"), true, ".claude/settings.json must remain a closed-set member");
+  const sv = assertClosure([".claude/settings.json"]);
+  assert.deepEqual(sv.forbiddenCopies, [], ".claude/settings.json must NOT be a forbidden copy");
+  assert.equal(sv.ok, true, "a laydown of only the enable surface must be ok");
+
+  // The file prefix must NOT over-match: a prefix slice would truncate `.mcp.json` to `.mcp.jso`.
+  const notMismatch = assertClosure([".mcp.json.bak"]);
+  assert.deepEqual(notMismatch.forbiddenCopies, [], ".mcp.json.bak must NOT be treated as the `.mcp.json` file");
 });
 
 // ── the REAL laydown must be within the closed set (production carrier, not a fixture) ──────────────
