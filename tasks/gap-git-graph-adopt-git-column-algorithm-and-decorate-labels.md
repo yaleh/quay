@@ -3,7 +3,7 @@ id: gap-git-graph-adopt-git-column-algorithm-and-decorate-labels
 title: git-history 改用 git 的活跃列+回收算法：取消泳道对象与 fork/merge/open 分类（同窗口 git 只用 6
   列而页面炸出 25 条泳道+5 个窗口外分叉标记）、标签改为只在 ref tip 内联的 %D decoration（当前 develop 标签重复 6
   次）、删除折叠展开等全部交互、纵轴改新在上，并以 git log --graph 的列号逐条对拍为判据
-status: ready
+status: done
 labels:
   - gap
   - webui
