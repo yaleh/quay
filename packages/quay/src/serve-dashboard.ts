@@ -778,13 +778,20 @@ export function renderGoalCard(
     const acs = goals.filter((r) => String(r.goal ?? "") === gid);
     const achieved = acs.filter((r) => r.status === "achieved").length;
     const state = goalStaleness(gid, goals, staleMs, nowMs);
+    // gap-dashboard-goal-card-ac-progress-bar: 「AC 达成 x/y」旁加一条 mini 进度条——复用
+    // renderTaskCard bar() 的 `width:{pct}%` 分段条手法，不引入新组件/新依赖。acs.length === 0
+    // 时不渲染进度条（只保留纯文本），避免除零产生 NaN/Infinity 宽度；纯文本读者/无障碍场景仍可读。
+    // 填充色复用既有 token --color-positive-700（同 staleness 的 fresh 态），不引入新十六进制色值。
+    const acBar = acs.length > 0
+      ? html`<div style="height:4px;width:100%;background:var(--color-neutral-200);border-radius:999px;overflow:hidden;margin-top:3px"><div style="width:${((achieved / acs.length) * 100).toFixed(1)}%;height:100%;background:var(--color-positive-700)"></div></div>`
+      : "";
     return html`<div style="display:flex;flex-direction:column;gap:2px;font-size:0.78rem;line-height:1.4">
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem;flex-wrap:wrap">
         <a href="/goal/${encodeURIComponent(gid)}" style="color:var(--color-text);text-decoration:none;flex:none">${escapeHtml(gid)}</a>
         <span style="flex:none;color:${stalenessColor(state)};font-weight:700">${escapeHtml(state)}</span>
       </div>
       <div style="color:var(--color-text);font-size:0.75rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(String(g.title ?? ""))}</div>
-      <div style="color:var(--color-neutral-700)">AC 达成 ${achieved}/${acs.length}</div>
+      <div style="color:var(--color-neutral-700)">AC 达成 ${achieved}/${acs.length}${acBar}</div>
     </div>`;
   }).join("");
 
