@@ -1,7 +1,7 @@
 ---
 id: GOAL-010
 title: goal 机制的语义闭环 —— 达成判定从「AC 合取」变成「退出条件被覆盖」，且 draft 不再是死信
-status: draft
+status: active
 kind: goal
 origin: >-
   人 2026-09-09 三条裁定：①晋升应当是语义的；放弃（retire）不交给 goal-driver——它若期望退役某条 AC，应置为
@@ -22,6 +22,11 @@ origin: >-
 
   规格出处：orchestration/SPEC-goal-mechanism-2026-09-06.md（§3.2 draft 状态、§4.1
   I1′、§6.1 职责边界）。
+
+
+
+  【激活】2026-09-09 人单次授权激活。裁定：①晋升应当是语义的；放弃(retire)不交给 goal-driver，它若期望退役某条 AC 应置
+  needs-human 并说明理由交人判断 ②needs-human 阻塞 GOAL 达成 ③六条 AC 分开不合并。
 ---
 
 ## 背景
