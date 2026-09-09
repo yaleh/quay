@@ -2537,18 +2537,17 @@ function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, befor
     // Merged second-parent (lateral) lanes: `--first-parent` mainline walks ONLY the spine, so every
     // commit reachable from develop via a second-parent edge (a merged task branch, and — for the
     // `Merge branch 'develop' into task/X` dev-merge shape — the old develop line) is no longer in
-    // `commits`. Re-fetch them with ONE full, UNCAPPED mainline walk bounded to the page's own time
-    // floor (`--since` = the oldest spine commit time), never the 7-day active-window floor, so the
-    // spine can never extend past the `--first-parent` window (which would make consecutive pagination
-    // pages OVERLAP and the client's dedup stop the scroll early). The full walk traverses EVERY edge,
-    // so nested second parents (branch-of-a-branch) are included too; `pushCommits` de-duplicates the
-    // spine commits already added by the `--first-parent` batch, leaving exactly the lateral commits.
-    // Their `ref` stays the mainline (develop-reachable — already merged), matching the pre-fix
-    // attribution (gap-git-graph-pagination-mainline-lane-empty-before-page AC3: side lanes never lost).
-    if (windowFloorSec !== null) {
-      const args = ["-C", root, "log", ...mainlineRefs, "--date=unix"];
+    // `commits`. Re-fetch them with the PRE-FIX mainline batch — a plain `git log <mainlineRefs>
+    // -n <limit>` (count-capped, no `--first-parent`, no `--since`) — which traverses EVERY edge, so
+    // nested second parents (branch-of-a-branch) and a recently-merged-but-old commit are all
+    // included exactly as before; `pushCommits` de-duplicates the spine commits already added by the
+    // `--first-parent` batch, leaving the lateral commits in the page's `limit`-commit window. Their
+    // `ref` stays the mainline (develop-reachable — already merged), matching the pre-fix attribution
+    // (gap-git-graph-pagination-mainline-lane-empty-before-page AC3: side lanes never lost; the
+    // count-capped window, not a time floor, is what keeps a stale merged commit visible).
+    if (mainlineRefs.length > 0 && primary !== null) {
+      const args = ["-C", root, "log", ...mainlineRefs, "--date=unix", `-n ${limit}`];
       if (before !== null && Number.isFinite(before)) args.push(`--before=${before}`);
-      args.push(`--since=${windowFloorSec}`);
       args.push("--pretty=format:%H%x1f%ct%x1f%P%x1f%s");
       const out = execFileSync("git", args, { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] });
       pushCommits(out, primary);

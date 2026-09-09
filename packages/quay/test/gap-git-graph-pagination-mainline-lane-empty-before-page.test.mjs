@@ -14,8 +14,9 @@
 //   AC1  before 页非空：before=<首屏最老 t> 直调 readGitHistory + layoutGitGraph，branches[0].commits
 //        .length > 0（修复前 = 0）；fixture 负控制验证脊柱根回退（旧逻辑 tip 不在 batch ⇒ 空脊柱）。
 //   AC2  连续三页单调增长：cursor 逐页回退连取三页，合并 mainline 提交数单调增长且第三页非空。
-//   AC3  侧枝不丢：页内每个「在窗第二父」（合并提交的第二父且其提交时间 ≥ 页内最老主链时间）都已被
-//        取回（missing = 0）并被某条泳道认领（孤儿数 = 0），且「在窗第二父」数 > 0（判据能取假）。
+//   AC3  侧枝不丢：页内每个「在窗第二父」（合并提交的第二父，且落在 `git log develop -n <limit>` 的
+//        计数窗口内）都已被取回（missing = 0）并被某条泳道认领（孤儿数 = 0），且「在窗第二父」数 > 0
+//        （判据能取假）。
 //
 // Run (scoped): node --test packages/quay/test/gap-git-graph-pagination-mainline-lane-empty-before-page.test.mjs
 import { test } from "node:test";
@@ -35,11 +36,6 @@ const LIMIT = 200;
 /** A commit fixture (shape matches observation.GitHistoryCommit). */
 function c(hash, t, ref, parentHashes, subject) {
   return { hash, t, ref, parents: parentHashes.length, parentHashes, subject };
-}
-
-/** The commit time (unix seconds) of a real hash via git — the AC3 "in window" oracle. */
-function commitTime(hash) {
-  return Number(execFileSync("git", ["-C", REPO_ROOT, "show", "-s", "--format=%ct", hash], { encoding: "utf8" }).trim());
 }
 
 /** Every hash claimed by ANY lane (mainline included — a second parent on the spine is claimed too). */
@@ -119,21 +115,24 @@ test("AC3: every in-window second parent is fetched and claimed (no side branch 
   const history = readGitHistory(REPO_ROOT, { limit: LIMIT });
   assert.equal(history.status, "ok", "the checkout under test is a readable git repo");
   const layout = layoutGitGraph(history);
-  const mainline = mainlineLane(layout).commits;
-  assert.ok(mainline.length > 0, "the page has a non-empty mainline");
-  const floor = Math.min(...mainline.map((cm) => cm.t));
+  assert.ok(mainlineLane(layout).commits.length > 0, "the page has a non-empty mainline");
   const timeByHash = new Map(history.commits.map((cm) => [cm.hash, cm.t]));
   const claimed = claimedHashes(layout);
+  // The lateral batch is `git log develop -n <limit>` (count-capped — the pre-fix mainline batch), so
+  // a merge's second parent is "in the page window" iff it is among those <limit> newest
+  // develop-reachable commits. That git oracle is the "not lost" universe: a second parent inside it
+  // must be fetched and claimed; one outside it is legitimately deferred to an older page.
+  const windowHashes = new Set(
+    execFileSync("git", ["-C", REPO_ROOT, "log", "develop", "-n", String(LIMIT), "--format=%H"], { encoding: "utf8" })
+      .trim().split(/\r?\n/).filter(Boolean),
+  );
   let inWindowSecondParents = 0;
   let missing = 0;
   let orphans = 0;
   for (const cm of history.commits) {
     if (cm.parentHashes.length < 2) continue;
     for (const p of cm.parentHashes.slice(1)) {
-      // A fetched second parent carries its own timestamp; an unfetched one needs the git oracle to
-      // tell "below the window floor (deferred to an older page)" from "dropped by --first-parent".
-      const t = timeByHash.has(p) ? timeByHash.get(p) : commitTime(p);
-      if (t < floor) continue; // below the window floor — legitimately deferred to an older page
+      if (!windowHashes.has(p)) continue; // below the count window — deferred to an older page
       inWindowSecondParents++;
       if (!timeByHash.has(p)) missing++;
       else if (!claimed.has(p)) orphans++;
