@@ -1,7 +1,7 @@
 ---
 id: AC-215
 title: 分诊尊重 GOAL 层 posture——人已声明「只测量不激活」的 GOAL，driver 不得越权 activate
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-010
 criterion: node --no-warnings --experimental-strip-types --test
@@ -29,4 +29,10 @@ origin: >-
 
 
   与 AC-211 同形（都是「driver 不得覆盖人已做出的决定」，前者管 retire、本条管 activate），按人裁定「六条分开」故单列。
+statusLog:
+  - at: 2026-09-09T10:03:36.164Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
