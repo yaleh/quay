@@ -609,7 +609,9 @@ export function gitGraphClientScript(): string {
               .attr("y", cy - chipH / 2).attr("height", chipH).attr("rx", chipRx)
               .style("fill", laneColor(r.col));
             if (isHead) {
-              bg.style("stroke", "#ffffff").style("stroke-width", 1.5);
+              // HEAD highlight = a light keyline around the solid lane-colour chip (token-derived, so
+              // AC102②'s "no hardcoded hex in the renderer" holds — --color-bg is the light canvas token).
+              bg.style("stroke", "var(--color-bg)").style("stroke-width", 1.5);
             } else if (ghost) {
               // ghost = outline + translucent fill (the ref name reads on the light canvas); the fill
               // token is STILL the row's lane colour so AC3's "every chip bg = laneColor" holds.
@@ -617,7 +619,7 @@ export function gitGraphClientScript(): string {
             }
             var txt = chip.append("text").attr("class", "git-svg-decor-chip-text")
               .attr("font-size", decorFontSize).text(c)
-              .style("fill", ghost ? laneColor(r.col) : "#ffffff");
+              .style("fill", ghost ? laneColor(r.col) : "var(--color-bg)");
             var tw = txt.node().getBBox().width;
             var w = tw + chipPadX * 2;
             bg.attr("x", cursorX).attr("width", w);
