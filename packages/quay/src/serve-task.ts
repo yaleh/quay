@@ -524,9 +524,12 @@ export function renderFanInCell(
   else parts.push(escapeHtml(mfi.outcome ?? "?"));
   if (mfi.outcome === "red" && mfi.step) parts.push(`step ${escapeHtml(mfi.step)}`);
   if (showReason && mfi.reason != null) parts.push(html`<span style="font-size:0.75rem;color:var(--color-neutral-700)">${escapeHtml(mfi.reason)}</span>`);
-  if (mfi.lockHoldSecs != null) parts.push(`lock ${mfi.lockHoldSecs}s`);
+  // gap-dashboard-fanin-monospace-ids: sha/lock are git hash / duration data — same monospace stack as
+  // the 「最近提交」 card (serve-dashboard.ts) and the system resources card (serve-system.ts), so they
+  // align vertically and read as data instead of prose. Zero extra font files (system stack).
+  if (mfi.lockHoldSecs != null) parts.push(html`<span style="font-family:ui-monospace,monospace">lock ${mfi.lockHoldSecs}s</span>`);
   if (mfi.suiteOutcome != null) parts.push(`suite ${escapeHtml(mfi.suiteOutcome)}`);
-  if (mfi.landedSha != null) parts.push(`sha <code>${escapeHtml(mfi.landedSha.slice(0, 7))}</code>`);
+  if (mfi.landedSha != null) parts.push(html`<span style="font-family:ui-monospace,monospace">sha <code>${escapeHtml(mfi.landedSha.slice(0, 7))}</code></span>`);
   if (mfi.fanInLog != null && mfi.fanInLog.length > 0) {
     parts.push(html`<a href="/fan-in-log/${encodeURIComponent(taskId)}/${encodeURIComponent(mfi.fanInLog)}">view</a> · <a href="/fan-in-log/${encodeURIComponent(taskId)}/${encodeURIComponent(mfi.fanInLog)}/download">download</a>`);
   }
