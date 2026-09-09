@@ -1,7 +1,7 @@
 ---
 id: gap-meta-goal-triage-fresh-draft-not-retire
 title: goal-driver 分诊默认分支把无任务牵引的 draft AC 判 retire——改 hold 并补建 AC-219 判据测试
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
