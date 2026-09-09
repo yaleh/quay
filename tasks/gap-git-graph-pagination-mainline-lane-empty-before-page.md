@@ -41,5 +41,6 @@ extra: {}
 
 - packages/quay/src/observation.ts（readGitHistory 主链 batch --first-parent + 侧枝分离）
 - packages/quay/src/serve-git.ts（layoutGitGraph 脊柱根分页回退）
+- packages/quay/src/serve-dashboard.ts（GitHistoryResult 加 mainlineHead 字段，fallback 对象补字段）
 - packages/quay/test/gap-git-graph-pagination-mainline-lane-empty-before-page.test.mjs（本任务回归测试）
 - tasks/gap-git-graph-pagination-mainline-lane-empty-before-page.md
