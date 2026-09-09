@@ -38,16 +38,33 @@ AC-180 因此是「空作用域与合格同形」这一缺陷类的又一个实�
 
 ## Acceptance Criteria
 
-- [ ] AC1 改写后的判据在**当前仓库**上作用域 > 0（打印实际条数，⛔ 不接受空作用域下的绿）
-- [ ] AC2 负控制：造一条无 criterion 的非 draft AC ⇒ 判据必须红
-- [ ] AC3 负控制反向：移除该条 ⇒ 判据转绿（证明不是恒红）
-- [ ] AC4 判据在 `scripts/test.sh` 中被发现并执行（位置判定）
-- [ ] AC5 `scripts/test.sh` 全量绿
+- [x] AC1 改写后的判据在**当前仓库**上作用域 > 0（打印实际条数，⛔ 不接受空作用域下的绿）
+- [x] AC2 负控制：造一条无 criterion 的非 draft AC ⇒ 判据必须红
+- [x] AC3 负控制反向：移除该条 ⇒ 判据转绿（证明不是恒红）
+- [x] AC4 判据在 `scripts/test.sh` 中被发现并执行（位置判定）
+- [ ] AC5 `scripts/test.sh` 全量绿（待外部）
 
 ## Definition of Done
 
 AC1–AC5 全绿；并在任务 Evidence 里写明改写前后作用域条数的对照（0 → 58 量级），
 使「这次修的是空过而不是换了个写法」可被事后核对。
+
+## Evidence
+
+改写前后作用域对照（本任务修的是「空过」而非「换个写法」的可核对证据，实测 2026-09-09）：
+
+- 改写前（`list --status active`）：active AC 条数 = **0**，其中 criterion 为空 = **0** ⇒ 判据恒真（空过）。
+- 改写后（非 draft/retired/superseded）：作用域 = **51** 条 achieved AC（另有 12 draft + 2 retired 不在作用域），
+  其中 criterion 为空 = **0** ⇒ 非空作用域上的真实绿（0 → 51，同「0 → 58 量级」）。
+
+AC1：`plugin/test/active-ac-must-have-criterion.test.mjs` 的「当前仓库」断言作用域 > 0（51 条）且空 criterion = 0；
+改写后的 criterion 真跑 `goal-store gate AC-180` ⇒ exit 0（非空作用域）。
+AC2/AC3：纯函数 + 端到端负控制均绿——造一条无 criterion 的非 draft AC ⇒ empty 命中（红）；移除 ⇒ empty 空（绿）。
+AC4：`scripts/test.sh --list-files` 命中本测试（568 个选定文件之一）；`scripts/test.sh plugin/test/active-ac-must-have-criterion.test.mjs` 7/7 pass。
+AC5：（待外部）——`scripts/test.sh` 全量绿由 worker-driver 的 fan-in 机械跑，本 worker 不跑全量。
+
+AC-180 记录经 goal-store ABI 置 `retired`（commit `dfecdb664`），origin 写明职能移交
+`plugin/test/active-ac-must-have-criterion.test.mjs`（常设不变式下沉套件，同 gap-standing-invariants-not-reevaluated）。
 
 ## Touches
 
