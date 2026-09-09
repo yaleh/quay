@@ -281,9 +281,11 @@ export async function readTaskFacts(
 
 /** I2（GOAL 层）：一个 GOAL 是否「全部【在域】AC achieved」。零在域 AC ⇒ false。
  *
- *  在域（in-scope）= status ∈ {active, achieved}——「已激活待达成」与「已达成」都算在域。
- *  draft（未激活，裁定 3 人/manager 手动激活）/ superseded（已被取代）/ retired（人裁定放弃）
+ *  在域（in-scope）= status ∈ {active, achieved, needs-human}——「已激活待达成」「已达成」「需人裁定」
+ *  都算在域。draft（未激活，裁定 3 人/manager 手动激活）/ superseded（已被取代）/ retired（人裁定放弃）
  *  均【不在域】，不参与「目标是否达成」判定。
+ *  needs-human 计入在域（人 2026-09-09 裁定 2：needs-human 阻塞 GOAL 达成，gap-goal-needs-human-blocking）：
+ *  一条要人裁定的 AC 若不计数，就与 draft 完全同形——既不挡 GOAL 达成、也不计缺口，等于白加一个状态。
  *
  *  ⚠️ 此口径与 computeGoalGaps 对 draft/superseded/retired 一致（都【排除】），修
  *  gap-goal-driver-draft-ac-invisible-yet-blocking 的死角：旧实现 `every(status === "achieved")`
@@ -294,7 +296,7 @@ export async function readTaskFacts(
  *  superseded/retired 也算成阻塞（store 侧同款死角，另案处理——本任务 Touches 只含 driver 侧）。 */
 export function goalAchievedFromRecords(records: Array<Record<string, unknown>>, goalId: string): boolean {
   const acs = records.filter((r) => String(r.id ?? "").startsWith("AC-") && String(r.goal ?? "") === goalId);
-  const inScope = acs.filter((r) => r.status === "active" || r.status === "achieved");
+  const inScope = acs.filter((r) => r.status === "active" || r.status === "achieved" || r.status === "needs-human");
   if (inScope.length === 0) return false;
   return inScope.every((r) => r.status === "achieved");
 }
