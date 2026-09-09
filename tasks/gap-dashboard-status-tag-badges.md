@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-status-tag-badges
 title: Fan-in/Goal 卡状态文字改用既有 .tag 语义徽章组件（补 .tag-positive 令牌）
-status: done
+status: ready
 labels:
   - gap
 parent: null
