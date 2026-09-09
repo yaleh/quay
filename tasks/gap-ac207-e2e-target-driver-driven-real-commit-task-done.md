@@ -55,16 +55,12 @@ AC2/AC3/AC5 ⛔ 阻塞（第 4 轮，2026-09-09T22:39Z）：原阻塞（resource
 
 AC2/AC3/AC5 ⛔ 阻塞复核（CONTINUE 第 5 轮，2026-09-09T23:01Z）：两阻塞仍未解除——① shipped `plugin/.quay/profiles.yml` 仍只有 manager/outer 两 role（`git show develop:plugin/.quay/profiles.yml` 确认 task-worker 未落 develop；修复任务 `gap-shipped-profiles-missing-worker-roles` 已 ready、AC1/AC2 已勾、AC3 全量 suite 待外部）；② host B/C claude OAuth 未恢复。生产载体 `.quay/productization-verification.jsonl` 仍 0 条 `ac="GOAL-009-AC-207"`（`grep -c` = 0）。AC1/AC4 实现已 done 不变；AC2/AC3/AC5 需外部 e2e 方可验 ⇒ 本任务翻 needs-human 停派，待两阻塞解除后由人翻回 ready 续做。
 
-## Touches
+**两阻塞解除记录（人 2026-09-09 授权，retreat→ready 续验 AC2/AC3/AC5）**：
 
-- plugin/scripts/verify-deliver-coldstart.sh
-- plugin/test/verify-deliver-coldstart.test.mjs
-- tasks/gap-ac207-e2e-target-driver-driven-real-commit-task-done.md
+① **shipped profiles.yml worker roles**——修复任务 `gap-shipped-profiles-missing-worker-roles` 已 done 并落 develop：`develop` HEAD `5c12f9c9` 逐字含该提交主题（`git log develop` 可核）；即修复已在 develop 权威基线上生效，第三方项目重新按当前 develop tip 现 build 的安装物即会带上完整 worker roles。
 
-## Needs-Human
+② **host B/C claude OAuth 过期**——人已授权用第三方 Anthropic-compatible endpoint wrapper `claude-fjdac`（走 `ANTHROPIC_AUTH_TOKEN` 而非 OAuth）绕开认证阻塞：已把该 wrapper + key 文件部署到 orangevps 与 ad-arm1 两台机器，逐台实测 `claude-fjdac -p` 认证成功、正常返回。orangevps 上第三方验证项目 `/home/yale/work/ac207-third-party` 的 `.quay/profiles.yml` 已改为 `worker-default.launcher=claude-fjdac` + `model=deepseek-v4-pro-anthropic` + `auth=token`，与本仓库根 `.quay/profiles.yml` 逐字一致。
 
-**执行 2026-09-09T23:01Z — CONTINUE 第 5 轮复核：两阻塞仍未解除（⛔ 非实现缺陷；AC1/AC4 已 done 不变），翻 needs-human 停派**
+**同时**：orangevps 该第三方项目此前装的旧安装物携带 resource-gate.sh 路径锚死 bug（同样已在 develop 修复），已从 develop tip（`5c12f9c9d193cf5e2b5aff11ad3eaee064fc58c6`）现 build `quay-0.6.1.tgz` + `quay-native-0.6.1.tgz`，重装进该项目 npm prefix，重启 promotion+worker driver；实测 promotion round 的资源闸已回 `"go":true,"reason":"=> GO: 资源充足，可以跑"`（此前恒 `resource-gate WAIT exit 127`）。
 
-- 阻塞①（产品缺陷）：shipped `plugin/.quay/profiles.yml` 缺 worker roles ⇒ worker-driver `resolveRole("task-worker")` 抛 `role not found`。修复任务 `gap-shipped-profiles-missing-worker-roles` 已 ready（AC1/AC2 已勾、AC3 全量 suite 待外部），尚未落 develop。
-- 阻塞②（环境缺陷）：host B/C claude OAuth 过期，`claude -p` 无法认证 ⇒ 第三方项目 worker 无法 spawn。
-- 恢复路径（需人）：(a) 待 `gap-shipped-profiles-missing-worker-roles` 落 develop（补齐 shipped profiles.yml worker roles）；(b) 人重认证 host B/C claude OAuth（或为 worker role 配 ANTHROPIC_API_KEY）。两项落地后：人把本任务翻回 ready，worker 续做 `verify-deliver-coldstart.sh --ac207-e2e` 使 criterion exit 0，再验 AC2/AC3/AC5。
+⇒ 两个此前阻塞 AC2/AC3/AC5 的成因均已解除并留有外部可核证据（develop commit / claude-fjdac 实测认证 / promotion gate GO 读数）。任务由人授权 retreat 回 ready，续做 AC2/AC3/AC5（第三方项目 e2e 驱动、直接量读取、载体落账、判据干跑翻转）。
