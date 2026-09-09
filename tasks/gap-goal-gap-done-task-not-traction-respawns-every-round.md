@@ -2,7 +2,7 @@
 id: gap-goal-gap-done-task-not-traction-respawns-every-round
 title: computeGoalGaps 牵引口径排除 done ⇒ 任务已 done 而 AC 判据仍红时每轮重复 spawn 立案（实测 AC-214
   烧 6 次、轮长 65s→204s 拖慢全环 3 倍）
-status: ready
+status: done
 labels:
   - gap
   - defect
