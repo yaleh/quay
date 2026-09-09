@@ -230,9 +230,10 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
  *   3. `tasks: <id> task_write` / `tasks: <id> todo→ready（promotion-driver）` / `tasks: reset <id> done→ready`
  *   4. `<id>: <实现说明>`                          — an implementation commit, the id before the colon; its
  *      first segment must be a KNOWN task-id prefix (same guard as Forms 5/6)
- *   5. `<type>: <id> <说明>`                       — a conventional-commit type, then the id (e.g.
- *      `test: gap-… 独立闭合确认` / `fix: gap-… — …`); the id's first segment must be a KNOWN task-id
- *      prefix so a generic slug (`chore: re-anchor …`) is never mistaken for one (AC6 reconciliation)
+ *   5. `<type|scope>: <id> <说明>`                 — a conventional-commit type OR a worker scope prefix
+ *      (e.g. `test: gap-… 独立闭合确认` / `fix: gap-… — …` / `webui: gap-… 实现（…）`); the id's first
+ *      segment must be a KNOWN task-id prefix so a generic slug (`chore: re-anchor …`) is never
+ *      mistaken for one (AC6 reconciliation)
  *
  * Unrecognised subjects (e.g. `chore: re-anchor …`) return `null`, never a guess (fail-visible —
  * 硬规则 3b). Forms 4–6 all gate the id's first segment on a KNOWN task-id prefix (this repo's task
@@ -264,11 +265,13 @@ export function taskIdFromSubject(subject: string): string | null {
   const impl = s.match(/^((?:gap|DIR|exp5|QN|QX|QC|QW|QENG|ARCH|cand|SU|PROBE|TEST)-[A-Za-z0-9][A-Za-z0-9_-]*):\s/);
   if (impl) return impl[1];
 
-  // Form 5 — `<type>: <id> <说明>`: a conventional-commit type prefix, then a task id. The id's first
-  // segment must be a KNOWN task-id prefix, so a generic verb slug after the type (`chore: re-anchor
-  // quay-init-closure-ratchet baseline`) or a page/file name (`fix: git-history 分页页 …`) is never
-  // mistaken for a task id (AC1) — fail-visible, not a guess.
-  const typed = s.match(/^(?:test|fix|feat|chore|docs|refactor|perf|style|verification):\s+((?:gap|DIR|exp5|QN|QX|QC|QW|QENG|ARCH|cand|SU|PROBE|TEST)-[A-Za-z0-9][A-Za-z0-9_-]*)/);
+  // Form 5 — `<type|scope>: <id> <说明>`: a conventional-commit type OR a worker scope prefix (this
+  // repo's agents emit `webui:`/`inner:`/`archive:` etc. before the id), then a task id. The id's
+  // first segment must be a KNOWN task-id prefix, so a generic verb slug after the type (`chore:
+  // re-anchor quay-init-closure-ratchet baseline`) or a page/file name (`fix: git-history 分页页 …`)
+  // is never mistaken for a task id (AC1) — the guard lives on the ID, not on an ever-drifting closed
+  // type list (a one-off `webui:` commit would otherwise strand its task id in AC6 reconciliation).
+  const typed = s.match(/^[A-Za-z0-9][A-Za-z0-9_-]*:\s+((?:gap|DIR|exp5|QN|QX|QC|QW|QENG|ARCH|cand|SU|PROBE|TEST)-[A-Za-z0-9][A-Za-z0-9_-]*)/);
   if (typed) return typed[1];
 
   // Form 6 — trailing-parens id: `<说明> (gap-…)` (e.g. `dashboard: 顶部行改 … (gap-dashboard-top-row-
