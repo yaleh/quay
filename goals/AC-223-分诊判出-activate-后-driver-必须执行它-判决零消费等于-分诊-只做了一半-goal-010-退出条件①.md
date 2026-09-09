@@ -1,7 +1,7 @@
 ---
 id: AC-223
 title: 分诊判出 activate 后 driver 必须执行它——判决零消费等于「分诊」只做了一半（GOAL-010 退出条件①）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-010
 criterion: node --no-warnings --experimental-strip-types --test
@@ -75,4 +75,11 @@ origin: >-
   【顺带记账，不另立条】分诊判决的历史分布 = `{retire: 25, hold: 43}`，其中 `retire` 自 AC-219 的修复后不再产生
   ⇒ AC-211（driver 期望退役时置 `needs-human` 并说明理由）现在结构上不可能被触发。它没有变成假条（「driver 不许写
   retired」这条约束仍正确且被单测守着），但其保护对象已从「一个会发生的行为」变成「一个不再发生的行为」。
+activatedAt: 2026-09-09T15:26:58.624Z
+statusLog:
+  - at: 2026-09-09T15:26:58.624Z
+    from: draft
+    to: active
+    actor: cli:human-ruling-2026-09-09
+    reason: 人授权直接 active：接受 GOAL-010 推迟关闭
 ---
