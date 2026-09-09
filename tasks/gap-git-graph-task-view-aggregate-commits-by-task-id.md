@@ -3,7 +3,7 @@ id: gap-git-graph-task-view-aggregate-commits-by-task-id
 title: git-history 缺少任务视图——fan-in 后 git ref 即删（27 条 ref 仅 4 条 7 天内有独有提交、带 %D
   decoration 的提交仅 4 个），而本仓库的开发单元是 quay 任务；按 subject 里的 task id
   聚合才是用户想看的分支，作为可切换视图、默认仍为 git 视图；判据已改写为跨模型成立，不再依赖即将被主任务删除的「泳道」概念
-status: ready
+status: done
 labels:
   - gap
   - webui
