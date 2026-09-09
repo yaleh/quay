@@ -10,6 +10,9 @@
 //   AC5 — renderLiveCard keeps the in-flight mini-list AND renders the merged gantt (both present).
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   renderLiveCard,
   renderLiveGanttSvg,
@@ -17,9 +20,19 @@ import {
   packLanes,
   FIXED_GANTT_LANES,
 } from "../src/serve-dashboard.ts";
+import { readLive, readWorkerOutcomeRecords, WORKER_OUTCOME_REL } from "../src/observation.ts";
 
 const FIXED_NOW_MS = 1_700_000_000_000; // deterministic wall-clock anchor
 const HOUR_MS = 3_600_000;
+
+/** Build a temp workspace with a `.quay/` dir (the worker outcome carrier lives there) for the DoD
+ *  e2e path — mirrors observation.test.mjs's workerWorkspace so the test writes real carrier data. */
+function workerWorkspace(prefix) {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-`));
+  fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(ws, "tasks"), { recursive: true });
+  return ws;
+}
 
 test("AC1: mergeLiveAndHistoryIntervals dedups by run_id, ends historical at ended_at and in-flight at now", () => {
   const nowMs = FIXED_NOW_MS;
@@ -132,4 +145,38 @@ test("AC5: renderLiveCard keeps the in-flight mini-list AND renders the merged g
   assert.match(html, /循环脉搏甘特图/, "the merged fixed-lane gantt svg renders");
   // Both must be in the SAME card render (indexOf order is irrelevant; coexistence is the assertion).
   assert.ok(html.includes('aria-label="循环脉搏甘特图'), "gantt svg present");
+});
+
+// ── gap-dashboard-live-swimlane-fixed-lane-gantt-timeline DoD integration test ────────────────────
+// The DoD is NOT pure-unit samples: it must prove the merge → pack → render three-stage pipeline is
+// wired to PRODUCTION data shapes — a real `.quay/worker-outcome.jsonl` (read via readWorkerOutcomeRecords)
+// + a real readLive() in-flight set (via the process-signal seam), fed through renderLiveCard, produces
+// a fixed-5-lane gantt (historical + in-flight blocks) AND the untouched in-flight mini-list.
+test("DoD: renderLiveCard gantt merges readLive() + worker-outcome.jsonl into one 5-lane gantt alongside the mini-list", () => {
+  const ws = workerWorkspace("gantt-e2e");
+  try {
+    const nowMs = Date.parse("2026-08-24T08:00:00.000Z");
+    // Two TERMINAL historical outcomes (completed-with-fan-in + failed) — the carrier's full shape.
+    const hist = [
+      { ts: "2026-08-24T07:41:00.000Z", task: "gap-hist-a", run_id: "wk-a", started_at: "2026-08-24T07:00:00.000Z", ended_at: "2026-08-24T07:41:00.000Z", final_state: "completed", mechanical_fan_in: { outcome: "landed" } },
+      { ts: "2026-08-24T07:21:00.000Z", task: "gap-hist-b", run_id: "wk-b", started_at: "2026-08-24T07:10:00.000Z", ended_at: "2026-08-24T07:20:00.000Z", final_state: "failed" },
+    ];
+    fs.mkdirSync(path.dirname(path.join(ws, WORKER_OUTCOME_REL)), { recursive: true });
+    fs.writeFileSync(path.join(ws, WORKER_OUTCOME_REL), hist.map((r) => JSON.stringify(r) + "\n").join(""));
+
+    // One first-dispatched in-flight worker (no outcome record yet) via the process-signal seam.
+    const live = readLive(ws, { nowMs, liveWorkers: [{ taskId: "gap-live-c", pid: "100", startedAtMs: Date.parse("2026-08-24T07:30:00.000Z") }] });
+
+    const records = readWorkerOutcomeRecords(ws);
+    const html = renderLiveCard(live, nowMs, [], records, 3);
+
+    assert.match(html, /循环脉搏甘特图/, "the gantt svg renders from real readLive + worker-outcome data");
+    const ganttStart = html.indexOf('aria-label="循环脉搏甘特图');
+    assert.ok(ganttStart >= 0, "gantt svg anchor found");
+    const rects = (html.slice(ganttStart).match(/<rect[^>]*>/g) ?? []);
+    assert.equal(rects.length, 3, "2 historical + 1 in-flight interval → exactly 3 <rect> blocks (merge+pack+render wired)");
+    assert.match(html, /<a href="\/task\/gap-live-c"/, "the in-flight mini-list task id survives alongside the gantt (hard constraint)");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
 });
