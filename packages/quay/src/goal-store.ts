@@ -97,7 +97,7 @@ export const GOAL_ACCEPTANCE_ACTIVE_ENV = "QUAY_GOAL_ACCEPTANCE_ACTIVE";
 // (any future field) is preserved verbatim — the same discipline as adr-store/document-store.
 const OWNED_KEYS = new Set([
   "id", "title", "status", "kind", "goal", "criterion", "expect", "origin", "activatedAt", "statusLog",
-  "labels", "supersedes", "superseded-by",
+  "labels", "posture", "supersedes", "superseded-by",
 ]);
 
 // ── evidence is ledger-DERIVED (gap-goal-evidence-cache-should-not-enter-git) ───────────────────
@@ -198,6 +198,8 @@ interface GoalFrontmatter {
   activatedAt?: string;
   statusLog?: Array<{ at: string; from: string; to: string; actor: string; reason: string }>;
   labels?: string[];
+  /** GOAL 层 posture 声明（如 `measure-only`——先测量后承诺，名下 draft AC 不得判 activate，AC-215）。 */
+  posture?: string;
   evidence?: { at?: string; verdict?: string; reading?: string };
   supersedes?: string[];
   "superseded-by"?: string[];
@@ -218,6 +220,8 @@ interface GoalViewModel {
   criterion: unknown;
   expect: unknown;
   origin: unknown;
+  /** GOAL 层 posture 声明（AC-215：`measure-only` ⇒ 名下 draft AC 分诊不得判 activate）。 */
+  posture: unknown;
   evidence: unknown;
   activatedAt?: string;
   statusLog?: Array<{ at: string; from: string; to: string; actor: string; reason: string }>;
@@ -364,6 +368,7 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       criterion: frontmatter.criterion,
       expect: frontmatter.expect,
       origin: frontmatter.origin,
+      posture: frontmatter.posture,
       evidence,
       // Own-record time (a criterion): lastProgressAt = its LAST gate=goal event, firstEvidenceAt =
       // its FIRST. A GOAL's own fields are undefined here (GOALs carry no criterion and are never
@@ -821,7 +826,7 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       const ordered: GoalFrontmatter = {};
       for (const k of [
         "id", "title", "status", "kind", "goal", "criterion", "expect", "origin", "activatedAt", "statusLog",
-        "labels", "supersedes", "superseded-by",
+        "labels", "posture", "supersedes", "superseded-by",
       ]) {
         if (frontmatter[k] !== undefined) ordered[k] = frontmatter[k];
       }
