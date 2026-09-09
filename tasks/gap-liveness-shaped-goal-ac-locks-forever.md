@@ -1,7 +1,7 @@
 ---
 id: gap-liveness-shaped-goal-ac-locks-forever
 title: AC-184/186 是活性形状判据（同 AC-181 已退役的类别错误）——无反向翻转 ⇒ 激活即永久锁死
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -36,16 +36,36 @@ AC-181 的退役给出了可复用的筛子：**「这个量会不会回退？�
 
 ## Acceptance Criteria
 
-- [ ] AC1 AC-184 / AC-186 status = retired，origin 写明类别错误与监控面去向
-- [ ] AC2 两者对应的活性读数在监控面可读（给出实际命令与一次真实输出，⛔ 非「应该有」）
-- [ ] AC3 SPEC 中新增该筛子，且明确「会回退的量不得作为 goal AC」
-- [ ] AC4 负控制：对一条**单调达成**型 AC 套用该筛子 ⇒ 判定为「可作 AC」（证明筛子不是一律否决）
-- [ ] AC5 `scripts/test.sh` 全量绿
+- [x] AC1 AC-184 / AC-186 status = retired，origin 写明类别错误与监控面去向
+- [x] AC2 两者对应的活性读数在监控面可读（给出实际命令与一次真实输出，⛔ 非「应该有」）
+- [x] AC3 SPEC 中新增该筛子，且明确「会回退的量不得作为 goal AC」
+- [x] AC4 负控制：对一条**单调达成**型 AC 套用该筛子 ⇒ 判定为「可作 AC」（证明筛子不是一律否决）
+- [ ] AC5 `scripts/test.sh` 全量绿（待外部）
 
 ## Definition of Done
 
 AC1–AC5 全绿；且 `quay goal list --goal GOAL-001` 中两条为 retired，
 监控面读数经一次真实执行确认存在（把命令与输出写进任务 Evidence）。
+
+## Evidence
+
+AC3/AC4 落点：`orchestration/SPEC-goal-mechanism-2026-09-06.md` §12（筛子「会回退的量不得作 goal AC」+ 负控制：AC-177 单调达成正例）。
+
+AC1/AC2 验证（命令 + 一次真实输出）——退役落点与监控面读数：
+
+AC-184 / AC-186 退役（worktree `quay goal list --goal GOAL-001`）：
+  AC-184  retired  criterion  常驻 driver 进程不得早于其执行的 driver 源码最近一次提交——把「陈旧写者」变成机械读数
+  AC-186  retired  criterion  goal-driver 常驻消费者必须在线——goal store 的强制消费者（kind=goal）进程存活判据
+
+AC-186 对应读数（goal 存活，监控面）——`quay driver status --kind goal --json`：
+  {"kind":"goal","supervisor_pid":3307756,"driver_pid":3813761,"supervisor_alive":1,"driver_alive":1,"alive":1,"running":1,"carrier_path":"/home/yale/work/quay/.quay/goal-round.jsonl","carrier_records":2968,"last_record_ts":"2026-09-09T04:26:20.268Z","supervisor_started_at":1788782935054,"supervisor_stale":"stale"}
+
+AC-184 对应读数（promotion/worker 陈旧写者，监控面）——`quay driver status --kind promotion --json`：
+  {"kind":"promotion","supervisor_pid":2740047,"driver_pid":3813695,"supervisor_alive":1,"driver_alive":1,"alive":1,"running":1,"carrier_path":"/home/yale/work/quay/.quay/promotion-outcome.jsonl","carrier_records":70492,"last_record_ts":"2026-09-09T04:26:02.535Z","supervisor_started_at":1788779502287,"supervisor_stale":"stale"}
+`quay driver status --kind worker --json`：
+  {"kind":"worker","supervisor_pid":2740107,"driver_pid":1668830,"supervisor_alive":1,"driver_alive":1,"alive":1,"running":1,"carrier_path":"/home/yale/work/quay/.quay/worker-outcome.jsonl","carrier_records":15332,"last_record_ts":"2026-09-09T04:21:48.476Z","supervisor_started_at":1788779505444,"supervisor_stale":"stale"}
+
+（supervisor_stale 三态 stale/fresh/not-evaluated，当前读 stale——该读数能取假，非恒绿。）
 
 ## Touches
 

@@ -691,3 +691,51 @@ test('CLI: 未知参数 ⇒ exit 2（⛔ 不静默忽略）', async () => {
   }
   assert.equal(code, 2);
 });
+
+// ── gap-goal-store-empty-scope-reads-as-all-verified: 轮记录透传 scopeSize + evaluated ─────────────
+// goal-driver 的 checkStaleness / checkAchievedFailing 读数透传 goal-store 的 scopeSize + evaluated，
+// 使 .quay/goal-round.jsonl 的轮记录可机械区分「空作用域」与「查过且全过」（AC3）。0 active goal ⇒
+// evaluated:false、scopeSize:0（⛔ 与「全过且 evaluated:true、scopeSize>0」同形，硬规则 3b）。
+
+test('AC3 — checkStaleness/checkAchievedFailing 透传 scopeSize + evaluated（空作用域可机械读出）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-emptyscope-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    // 0 active goal（只有 achieved goal + achieved AC）——生产空作用域形态。
+    writeGoalFile(tmp, { id: 'GOAL-001', status: 'achieved', kind: 'goal' });
+    writeGoalFile(tmp, { id: 'AC-001', status: 'achieved', kind: 'criterion', goal: 'GOAL-001', criterion: 'false' });
+    const st = await checkStaleness(repoRoot, tmp);
+    assert.ok(st, 'checkStaleness 应返回读数（非 null）');
+    assert.equal(st.scopeSize, 0, '0 active goal ⇒ scopeSize 0');
+    assert.equal(st.evaluated, false, '0 active goal ⇒ evaluated false');
+    const af = await checkAchievedFailing(repoRoot, tmp);
+    assert.ok(af, 'checkAchievedFailing 应返回读数（非 null）');
+    assert.equal(af.scopeSize, 0, '0 active goal ⇒ scopeSize 0');
+    assert.equal(af.evaluated, false, '0 active goal ⇒ evaluated false');
+    assert.deepEqual(af.achievedButFailing, [], '非 active goal 下的 achieved AC 不进桶');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('AC3 — runGoalRound 轮记录 value 带 scopeSize + evaluated（空作用域可被机械读出）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-roundscope-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true });
+    // 0 active goal（只有 achieved goal + achieved AC）——生产空作用域形态。
+    writeGoalFile(tmp, { id: 'GOAL-001', status: 'achieved', kind: 'goal' });
+    writeGoalFile(tmp, { id: 'AC-001', status: 'achieved', kind: 'criterion', goal: 'GOAL-001', criterion: 'false' });
+    const { fact } = await runGoalRound(tmp, { scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'] });
+    assert.ok(fact && fact.value && typeof fact.value === 'object', 'runGoalRound 返回 fact.value');
+    const v = fact.value;
+    assert.ok(v.staleness != null, 'staleness 非 null（读得到）');
+    assert.equal(v.staleness.scopeSize, 0, '轮记录 staleness.scopeSize=0');
+    assert.equal(v.staleness.evaluated, false, '轮记录 staleness.evaluated=false');
+    assert.ok(v.achievedFailing != null, 'achievedFailing 非 null（读得到）');
+    assert.equal(v.achievedFailing.scopeSize, 0, '轮记录 achievedFailing.scopeSize=0');
+    assert.equal(v.achievedFailing.evaluated, false, '轮记录 achievedFailing.evaluated=false');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

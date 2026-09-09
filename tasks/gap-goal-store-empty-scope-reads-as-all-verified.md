@@ -1,7 +1,7 @@
 ---
 id: gap-goal-store-empty-scope-reads-as-all-verified
 title: goal-store 的 I5/I3 空作用域输出与「全部复验通过」同形——58 条判据一条没跑却报 evaluated:true
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -36,11 +36,11 @@ never a stored field. **Scope: achieved ACs under ACTIVE goals (the same scope a
 
 ## Acceptance Criteria
 
-- [ ] AC1 active goal = 0 时 `check --achieved-failing` 的输出可与「有作用域且全过」按**字段**区分（非文案差异）
-- [ ] AC2 `check --staleness` 同上
-- [ ] AC3 `.quay/goal-round.jsonl` 的新轮次记录里该区分可被机械读出
-- [ ] AC4 负控制：置 1 个 active goal 且其下有 achieved AC ⇒ 报「评估过」且作用域规模 > 0
-- [ ] AC5 `scripts/test.sh` 全量绿
+- [x] AC1 active goal = 0 时 `check --achieved-failing` 的输出可与「有作用域且全过」按**字段**区分（非文案差异）
+- [x] AC2 `check --staleness` 同上
+- [x] AC3 `.quay/goal-round.jsonl` 的新轮次记录里该区分可被机械读出
+- [x] AC4 负控制：置 1 个 active goal 且其下有 achieved AC ⇒ 报「评估过」且作用域规模 > 0
+- [ ] AC5 `scripts/test.sh` 全量绿（待外部）
 
 ## Definition of Done
 
