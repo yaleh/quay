@@ -19,13 +19,25 @@
 // exit code，不解析 stdout JSON），fail-closed 是这里能表达「未评估」的唯一手段（同 AC-213 的精神，
 // 换了一个没有独立三态出口的判据形状）。
 //
-// Run: node --no-warnings --experimental-strip-types --test plugin/test/goal011-fanin-conflict-rate-post-landing.test.mjs
+// ⚠️ 事故记录 + 修法（2026-09-09T15:xx，本文件落地约 1h 后发现）：本文件在 plugin/test/*.test.mjs
+// glob 下会被 scripts/test.sh 的全量 suite 无条件扫到——一旦「样本不足/比率未降」FAIL，就会拖垮【与
+// GOAL-011 无关的其它任务】的 fan-in（实测两个牺牲品：gap-ac201-productization-verification-*、
+// gap-goal-gap-done-task-not-traction-respawns-every-round，均因本文件的断言失败而 suite 红）。
+// 这是本判据的读者错位：它本该只被 goal-driver 的 criterion 单独 spawn 调用（AC-220 未 active 前甚至
+// 不会被调），⛔ 不该参与决定「其它任务能不能落地」。修法照搬本仓库已有的 QUAY_TEST_LIVE_GITHUB
+// 先例（packages/quay/test/cli.test.mjs）：默认（scripts/test.sh 全量扫）SKIP、不断言、exit 0；
+// 只有显式设置 QUAY_GOAL_CRITERION_LIVE=1（AC-220 的 criterion 字段自带这个前缀）才跑真判据。
+//
+// Run: QUAY_GOAL_CRITERION_LIVE=1 node --no-warnings --experimental-strip-types --test plugin/test/goal011-fanin-conflict-rate-post-landing.test.mjs
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { mainCheckoutRoot } from "../scripts/repo-root.ts";
+
+const LIVE_ENV = "QUAY_GOAL_CRITERION_LIVE";
+const liveEnabled = process.env[LIVE_ENV] === "1";
 
 // gap-store-commit-propagation-field-aware 落地提交（AC75：merge 不得 rebase，SHA 稳定）。
 const LANDING_SHA = "bdbdb368d";
@@ -73,6 +85,11 @@ function isFfRed(rec) {
 // 认得出真实发生过的 ff-red。
 
 test("负控制：FF_RED_PATTERN 命中至少一条落地前的历史 ff-red 样本（判据本身没坏）", () => {
+  if (!liveEnabled) {
+    console.log(`SKIP: 未设置 ${LIVE_ENV}=1——本文件是 GOAL-011 的经验验证判据,不是常规回归测试,` +
+      "默认在全量 suite 里不断言(见文件头注的事故记录),只有 goal-driver 显式带该 env var 调用时才跑真判据。");
+    return;
+  }
   const records = readWorkerOutcomeLines();
   const preLandingFfRed = records.filter((r) => r.ts && r.ts < LANDING_CUTOFF && isFfRed(r));
   assert.ok(
@@ -88,6 +105,10 @@ test(
   `落地(${LANDING_SHA} / ${LANDING_CUTOFF})后 ff-red 率相对基线(${BASELINE_FF_RED}/${BASELINE_TOTAL}` +
     `≈${(BASELINE_RATE * 100).toFixed(1)}%)实测下降,且样本量 ≥ ${MIN_SAMPLE}`,
   () => {
+    if (!liveEnabled) {
+      console.log(`SKIP: 未设置 ${LIVE_ENV}=1——见文件头注的事故记录,默认在全量 suite 里不断言。`);
+      return;
+    }
     const records = readWorkerOutcomeLines();
     const postLanding = records.filter((r) => typeof r.ts === "string" && r.ts >= LANDING_CUTOFF);
     const withFanIn = postLanding.filter((r) => r.mechanical_fan_in);
