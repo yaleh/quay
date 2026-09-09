@@ -199,6 +199,7 @@ export function createAdrStore(adrDir: string) {
       // Apply owned fields (preserving any reserved/unknown frontmatter keys).
       frontmatter.id = id;
       if (title !== undefined) frontmatter.title = title;
+      const prevStatus = typeof frontmatter.status === "string" ? frontmatter.status : undefined;
       frontmatter.status = status ?? frontmatter.status ?? "proposed";
       if (date !== undefined) frontmatter.date = date;
       if (supersedes !== undefined) frontmatter.supersedes = supersedes;
@@ -216,7 +217,12 @@ export function createAdrStore(adrDir: string) {
       // Keep the existing filename on edit (no orphan); derive a slug on create.
       const fileName = existingFile ?? `${id}-${slugify(title)}.md`;
       fs.writeFileSync(path.join(adrDir, fileName), serialize(ordered, finalBody), "utf8");
-      commitAdrFile(adrDir, fileName, id);
+      // Action semantics (gap-store-commit-action-and-actor AC1): create / status flip / field
+      // update are distinguishable in the commit subject — never fixed prose.
+      const action = !existingFile
+        ? "create"
+        : (prevStatus !== undefined && prevStatus !== frontmatter.status ? `status ${prevStatus}→${frontmatter.status}` : "update");
+      commitAdrFile(adrDir, fileName, id, action);
       return get(id);
     });
   }
@@ -230,11 +236,13 @@ export function createAdrStore(adrDir: string) {
  * shared primitive `commitStoreWrite` — ⛔ no git plumbing here. Default `propagate: "none"`: an
  * ADR write rides the branch it lands on.
  */
-function commitAdrFile(adrDir: string, fileName: string, id: string): CommitOutcome {
+function commitAdrFile(adrDir: string, fileName: string, id: string, action: string): CommitOutcome {
   const root = resolveGitRoot(adrDir);
   return commitStoreWrite({
     relPath: root ? path.relative(root, path.join(adrDir, fileName)) : `adr/${fileName}`,
-    message: `adr: ${id} 写盘即提交（store-commit）`,
+    kind: "adr",
+    id,
+    action,
     root,
     propagate: "none",
   }).outcome;
