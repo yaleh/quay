@@ -37,7 +37,7 @@ Dashboard 视觉改进方案核对认定的三个高性价比项之一：组件�
 4. 不新增客户端 JS、不改变卡片的 SSR-only 设计取舍；纯 CSS class + 服务端字符串拼接。
 5. 新增单测文件 `packages/quay/test/gap-dashboard-status-tag-badges.test.mjs`：断言
    `renderGoalCard`/`renderFanInCardFromRecords`（或 `renderFanInCell`）对已知状态值输出包含预期的
-   `tag-positive`/`tag-accent`/`tag-neutral` class 名，�covers 至少 fresh/stale/NOT-EVALUATED 与
+   `tag-positive`/`tag-accent`/`tag-neutral` class 名，覆盖至少 fresh/stale/NOT-EVALUATED 与
    landed/red 两组状态各自的映射。
 
 ## Acceptance Criteria
