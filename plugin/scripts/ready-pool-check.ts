@@ -1818,6 +1818,12 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
   // setTaskStatus/applyPromotions. A candidate with no frontmatter / no such label ⇒ false
   // (conservative default, matching the dispatch side).
   const deliveryCritical = (task.labels || []).includes("delivery-critical");
+  // LONG-TERM-GUARANTEE FILING-TIME GATE (gap-long-term-guarantee-registry-hand-maintained): 立案时必填 —
+  // a delivery-critical candidate must declare a non-empty goal_ac (task→AC linkage, parseTask's
+  // frontmatterGoalAc projection: absent/empty ⇒ null). This is the filing-time half of the positional
+  // judgment that replaced the retired hand-maintained registry; the goal-layer half (the
+  // long-term-guarantee-goal-backed-check) enforces the same rule on post-cutoff tasks every round.
+  const goalAcMissing = deliveryCritical && !task.goal_ac;
   // PRIORITY TIEBREAKER (gap-priority-has-no-mechanism-reader): the explicit `priority:*` label
   // (p1 > p2 > none), read from the SAME frontmatter-labels source (parseTask) the dispatch sort
   // reads. A PREFERENCE, never a safety override — the promotion sort ranks disjointScore FIRST
@@ -1848,6 +1854,9 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     // determination — consumed by applyPromotions so the label is written AT PROMOTE (标签与 ready
     // 同现). Same frontmatter-labels source the dispatch sort reads.
     deliveryCritical,
+    // LONG-TERM-GUARANTEE FILING-TIME GATE (gap-long-term-guarantee-registry-hand-maintained): a
+    // delivery-critical candidate without goal_ac is never promotion-eligible (立案时必填, fail-closed).
+    goalAcMissing,
     // PRIORITY TIEBREAKER (gap-priority-has-no-mechanism-reader): the candidate's explicit
     // `priority:*` label rank (p1=1, p2=2, none=Infinity) — consumed by the promotion sort as the
     // tiebreaker WITHIN an equal-disjointness bucket (AC1). Never above disjointScore (AC3).
@@ -1883,7 +1892,7 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     // TOUCHES-WIDTH (2026-08-28): the touchesNarrow guard is ADDED — a candidate with a
     // directory-level `## Touches` glob is never eligible (it would silently lock the whole dispatch
     // pool while in flight; the fix-worker narrows it before it ever enters ready).
-    eligible: depsReady && four.complete && touchesResolve && touchesNarrow.narrow && !retiredMechanism && !superseded && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok,
+    eligible: depsReady && four.complete && touchesResolve && touchesNarrow.narrow && !retiredMechanism && !superseded && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok && !goalAcMissing,
   };
 }
 
@@ -1979,6 +1988,22 @@ export function buildTargetedPromotion(id, task, root, allTasks, develop = "deve
       checks: { retiredMechanism: true, retiredRefs: staleRefs },
     };
   }
+  // LONG-TERM-GUARANTEE FILING-TIME GATE (gap-long-term-guarantee-registry-hand-maintained): the same
+  // 立案时必填 fail-closed as the bulk path — a delivery-critical candidate without goal_ac is never
+  // targeted-promotable either (an outer stage-goal selection must not bypass it).
+  const deliveryCritical = (task.labels || []).includes("delivery-critical");
+  const goalAcMissing = deliveryCritical && !task.goal_ac;
+  if (goalAcMissing) {
+    return {
+      id,
+      found: true,
+      status: task.status,
+      eligible: false,
+      floor_independent: true,
+      reason: `goal-ac-missing: ${id} is delivery-critical but declares no goal_ac (立案时必填, fail-closed) — not promotable`,
+      checks: { goalAcMissing: true },
+    };
+  }
   const four = artifactsComplete(task.body);
   const depsReady = depsReadyFor(task, allTasks, root, develop);
   const touches = checkTaskTouchesResolve(task.body, root);
@@ -1987,7 +2012,7 @@ export function buildTargetedPromotion(id, task, root, allTasks, develop = "deve
   // PROSE-PREREQUISITE GAP (AC3): targeted promotion must NOT advance a task whose prose-declared
   // prereqs have no relation edge — same fail-closed as the bulk path.
   const prosePrereqGapIds = prosePrereqGap(task.body, task.frontmatterRaw, path.join(root, "tasks"));
-  const eligible = four.complete && depsReady && touchesResolve && touchesNarrow.narrow && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok;
+  const eligible = four.complete && depsReady && touchesResolve && touchesNarrow.narrow && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok && !goalAcMissing;
   const checks = {
     fourArtifacts: four.complete,
     missingArtifacts: four.missing,
@@ -2002,6 +2027,7 @@ export function buildTargetedPromotion(id, task, root, allTasks, develop = "deve
     retiredMechanism: false,
     compound,
     selfTouchOk: selfTouch.ok,
+    goalAcMissing,
   };
   return {
     id,
