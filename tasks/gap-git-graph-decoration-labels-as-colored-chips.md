@@ -1,7 +1,7 @@
 ---
 id: gap-git-graph-decoration-labels-as-colored-chips
 title: git-history 分支标签改为按列色着色的胶囊 chip：拆分独立标签、HEAD 高亮、远程/本地区分
-status: ready
+status: done
 labels:
   - gap
   - webui
