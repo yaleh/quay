@@ -1,7 +1,7 @@
 ---
 id: AC-216
 title: 长期保证 AC 的复验域不随 GOAL 关闭而消失——⛔ 达成即停止复验会让「上移一层」变成换层藏同一缺陷
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-010
 criterion: node --no-warnings --experimental-strip-types --test
@@ -45,4 +45,10 @@ origin: >-
 
   为何须显式声明而非无差别放宽作用域：现有 51 条 achieved AC，按实测单条 gate 成本（GOAL-009 的 7 条共 4.98s ≈
   0.71s/条）全跑一遍约 36–50 秒/轮，超过 drivers.yml 的 goal.interval_ms=30000（30 秒）轮间隔。
+statusLog:
+  - at: 2026-09-09T11:45:37.240Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
