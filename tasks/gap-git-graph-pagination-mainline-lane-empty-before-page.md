@@ -2,7 +2,7 @@
 id: gap-git-graph-pagination-mainline-lane-empty-before-page
 title: git-history 分页页 mainline 泳道恒空：layoutGitGraph 脊柱从 tip 起走而 before 页不含
   tip，滚动加载第一页即停
-status: done
+status: ready
 labels:
   - gap
   - webui
