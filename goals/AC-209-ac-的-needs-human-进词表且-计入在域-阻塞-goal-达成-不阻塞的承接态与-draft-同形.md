@@ -6,7 +6,9 @@ kind: criterion
 goal: GOAL-010
 criterion: node --no-warnings --experimental-strip-types --test
   plugin/test/goal-needs-human-blocking.test.mjs
-expect: 判据 exit 0
+expect: goal 记录词表含 needs-human，且 goalAchievedFromRecords 的在域集合含它——一条 needs-human
+  的 AC 会使该 GOAL 的达成判定为 false（阻塞关闭）；双向负控制单测同时覆盖「含 needs-human ⇒ false」与「全
+  achieved ⇒ true」两个方向。
 origin: 人 2026-09-09 裁定 2：「needs-human 阻塞 GOAL
   达成」。现状实测：VALID_GOAL_STATUSES（goal-store.ts:74）=
   draft|active|achieved|superseded|retired，无
