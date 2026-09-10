@@ -1,0 +1,149 @@
+// @test-group engine
+// goal-sufficiency-determinism.test.mjs — gap-sufficiency-verdict-nondeterministic-on-identical-input:
+// 充分性裁决对同一输入必须确定——同一输入跨轮/跨调用给出同一裁决（goalAchieved 不再随轮次抽签）。
+// 覆盖四个方向（AC7 点名 AC2/AC3/AC4/AC5）：
+//  AC2 正向确定性：同一固定输入连续调用 5 次，5 次裁决完全相同；首次判定 2 次采样、其余 4 次命中
+//      缓存 ⇒ LLM 被调用 ≤2 次（⛔ 靠真实缓存路径，不 mock 掉 LLM）。
+//  AC3 输入变化必重判：改任一在域 AC 的 expect 一个字符 ⇒ 哈希变 ⇒ 重新 spawn；还原 ⇒ 命中缓存不 spawn。
+//  AC4 不得把判不出变合格（硬规则 3b）：缓存未命中 ∧ LLM 失败 ⇒ not-evaluated（⛔ 非 covered，⛔ 非
+//      沿用别的输入的缓存值），goalFlipDecision 仍 false。
+//  AC5 首次判定一致性守卫：两次不一致取样 ⇒ not-evaluated 且不入缓存；下一轮两次一致 ⇒ 入缓存。
+//
+// Run: node --test plugin/test/goal-sufficiency-determinism.test.mjs
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import {
+  semanticSufficiencyVerdict,
+  sufficiencyCacheKey,
+  resetSufficiencyCacheForTest,
+  sufficiencyCacheSnapshot,
+  goalFlipDecision,
+} from '../scripts/goal-driver.ts';
+
+// 仓库根（脚本根 = goal-store.ts 所在；此处只作 prompt 的 `Repo root` 与 root 参数，测试全走
+// sufficiencyCmd 缝，⛔ 不 spawn 真 LLM）。
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+/** 计数文件读值（LLM 被调用了几次）。读不到 ⇒ 0。 */
+function readCounter(counterPath) {
+  try { return parseInt(fs.readFileSync(counterPath, 'utf8'), 10) || 0; } catch { return 0; }
+}
+
+/** 有状态的 sufficiencyCmd 缝：每次调用递增计数文件，并按序返回 verdicts（超出后重复末项）。
+ *  prompt 作末参数追加、被忽略。用 node -e 免 shell 引号剥层（同 goal-sufficiency-semantic-covered）。 */
+function seqCmd(counterPath, verdicts) {
+  const script = [
+    'const fs = require("node:fs");',
+    `const p = ${JSON.stringify(counterPath)};`,
+    'let n = 0;',
+    'try { n = parseInt(fs.readFileSync(p, "utf8"), 10) || 0; } catch {}',
+    `const vs = ${JSON.stringify(verdicts)};`,
+    'const v = vs[Math.min(n, vs.length - 1)];',
+    'fs.writeFileSync(p, String(n + 1));',
+    'process.stdout.write(JSON.stringify({ verdict: v }));',
+  ].join('\n');
+  return ['node', '-e', script];
+}
+
+// ── AC2 正向确定性：同一输入 5 次裁决相同，LLM 调用 ≤2 ────────────────────────
+
+test('AC2: 同一固定输入连续 5 次裁决完全相同，LLM 调用 ≤2（首次判定 2 次采样 + 4 次命中缓存）', async () => {
+  resetSufficiencyCacheForTest();
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-suff-det-ac2-'));
+  const counter = path.join(tmp, 'counter.txt');
+  try {
+    const goal = { id: 'GOAL-001', title: 't', body: '## 背景\nbg\n\n## 退出条件\n\n1. 条件一\n' };
+    const acs = [{ id: 'AC-001', title: 't1', expect: '覆盖条件一' }];
+    const cmd = seqCmd(counter, ['covered']);
+    const verdicts = [];
+    for (let i = 0; i < 5; i++) {
+      verdicts.push(await semanticSufficiencyVerdict(goal, acs, repoRoot, { sufficiencyCmd: cmd }));
+    }
+    assert.deepEqual(verdicts, ['covered', 'covered', 'covered', 'covered', 'covered'], '5 次裁决完全相同');
+    const calls = readCounter(counter);
+    assert.ok(calls <= 2, `LLM 被调用 ${calls} 次（应 ≤2：首次判定 2 次采样，其余命中缓存）`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── AC3 输入变化必重判（防缓存过期为假保证）─────────────────────────────────
+
+test('AC3: 改 expect 一个字符 ⇒ 重 spawn；还原 ⇒ 命中原缓存不再 spawn', async () => {
+  resetSufficiencyCacheForTest();
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-suff-det-ac3-'));
+  const counter = path.join(tmp, 'counter.txt');
+  try {
+    const goal = { id: 'GOAL-001', title: 't', body: '## 背景\nbg\n\n## 退出条件\n\n1. 条件一\n' };
+    const acsA = [{ id: 'AC-001', title: 't1', expect: '覆盖条件一' }];
+    const acsB = [{ id: 'AC-001', title: 't1', expect: '覆盖条件二' }]; // expect 变一个字符（一→二）
+    const cmd = seqCmd(counter, ['covered']);
+
+    const v1 = await semanticSufficiencyVerdict(goal, acsA, repoRoot, { sufficiencyCmd: cmd });
+    const c1 = readCounter(counter);
+    const v2 = await semanticSufficiencyVerdict(goal, acsB, repoRoot, { sufficiencyCmd: cmd });
+    const c2 = readCounter(counter);
+    const v3 = await semanticSufficiencyVerdict(goal, acsA, repoRoot, { sufficiencyCmd: cmd });
+    const c3 = readCounter(counter);
+
+    assert.equal(v1, 'covered', '原输入 ⇒ covered');
+    assert.equal(v2, 'covered', '改 expect ⇒ 重新判定 covered');
+    assert.equal(v3, 'covered', '还原 ⇒ covered');
+    assert.ok(c2 > c1, `改动 expect 后应重新 spawn（c1=${c1}, c2=${c2}）`);
+    assert.equal(c3, c2, `还原后应命中缓存不再 spawn（c2=${c2}, c3=${c3}）`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── AC4 不得把判不出变合格（硬规则 3b，能取假）──────────────────────────────
+
+test('AC4: 缓存未命中 ∧ LLM 失败 ⇒ not-evaluated（⛔ 非 covered、⛔ 非沿用别的输入的缓存值）且 goal 不 flip', async () => {
+  resetSufficiencyCacheForTest();
+  const goal = { id: 'GOAL-001', title: 't', body: '## 背景\nbg\n\n## 退出条件\n\n1. 条件一\n' };
+  const acsA = [{ id: 'AC-001', title: 't1', expect: '覆盖条件一' }];
+  const acsB = [{ id: 'AC-001', title: 't1', expect: '另一组 expect' }];
+  // 先让 acsA（不同输入）缓存成 covered——证明缓存按输入隔离。
+  await semanticSufficiencyVerdict(goal, acsA, repoRoot, {
+    sufficiencyCmd: ['node', '-e', 'process.stdout.write(JSON.stringify({verdict:"covered"}))'],
+  });
+  // acsB 缓存未命中 ∧ LLM 失败（spawn 不存在的二进制）⇒ not-evaluated，⛔ 不沿用 acsA 的 covered。
+  const v = await semanticSufficiencyVerdict(goal, acsB, repoRoot, { sufficiencyCmd: ['/nonexistent/definitely-not-a-binary'] });
+  assert.equal(v, 'not-evaluated', '缓存未命中 ∧ LLM 失败 ⇒ not-evaluated');
+  assert.notEqual(v, 'covered', '⛔ 不得为 covered（判不出 ≠ 合格）');
+  // goalAchieved 仍 false：AC 全 achieved 但 sufficiency=not-evaluated ⇒ 不 flip GOAL。
+  const records = [{ id: 'AC-001', goal: 'GOAL-001', status: 'achieved' }];
+  assert.equal(goalFlipDecision(records, 'GOAL-001', { verdict: v }), false, 'not-evaluated 不得触发 GOAL 达成');
+});
+
+// ── AC5 首次判定一致性守卫：不一致不入缓存，一致才入 ─────────────────────────
+
+test('AC5: 两次不一致取样 ⇒ not-evaluated 且不入缓存；下一轮两次一致 ⇒ 入缓存', async () => {
+  resetSufficiencyCacheForTest();
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-suff-det-ac5-'));
+  try {
+    const goal = { id: 'GOAL-001', title: 't', body: '## 背景\nbg\n\n## 退出条件\n\n1. 条件一\n' };
+    const acs = [{ id: 'AC-001', title: 't1', expect: '覆盖条件一' }];
+    const key = sufficiencyCacheKey(goal, acs);
+
+    // 轮 1：两次不一致（covered 然后 insufficient）。
+    const counter1 = path.join(tmp, 'c1.txt');
+    const v1 = await semanticSufficiencyVerdict(goal, acs, repoRoot, { sufficiencyCmd: seqCmd(counter1, ['covered', 'insufficient']) });
+    assert.equal(v1, 'not-evaluated', '两次不一致 ⇒ not-evaluated');
+    assert.equal(sufficiencyCacheSnapshot().has(key), false, '两次不一致 ⇒ 不入缓存');
+
+    // 轮 2：两次一致（covered）⇒ 入缓存。
+    const counter2 = path.join(tmp, 'c2.txt');
+    const v2 = await semanticSufficiencyVerdict(goal, acs, repoRoot, { sufficiencyCmd: seqCmd(counter2, ['covered']) });
+    assert.equal(v2, 'covered', '两次一致 ⇒ covered');
+    assert.equal(sufficiencyCacheSnapshot().get(key), 'covered', '两次一致 ⇒ 入缓存');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
