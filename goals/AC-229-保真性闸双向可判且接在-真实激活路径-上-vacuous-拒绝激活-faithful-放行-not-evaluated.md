@@ -2,7 +2,7 @@
 id: AC-229
 title: 保真性闸双向可判且接在【真实激活路径】上——vacuous 拒绝激活 / faithful 放行 / not-evaluated
   不放行（GOAL-013 退出条件①②③④）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-013
 criterion: node --no-warnings --experimental-strip-types --test
@@ -38,4 +38,9 @@ statusLog:
     to: active
     actor: cli:human-ruling-2026-09-10
     reason: 人 2026-09-10 授权执行（单次授权）：立 GOAL-013 判据保真性闸
+  - at: 2026-09-10T10:56:12.119Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
