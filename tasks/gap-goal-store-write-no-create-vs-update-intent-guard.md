@@ -2,7 +2,7 @@
 id: gap-goal-store-write-no-create-vs-update-intent-guard
 title: goal-store write 不让调用方声明 create/update 意图 ⇒ 陈旧的存在性判断静默覆盖活跃记录；同族的
   task_write 早有 expectedStatus CAS（硬规则 5b：只修了一处）
-status: ready
+status: done
 labels:
   - gap
   - defect

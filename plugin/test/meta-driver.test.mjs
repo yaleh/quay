@@ -63,6 +63,14 @@ import {
   writeMetaReplies,
   existingPaths,
   renderHumanCallBody,
+  unchangedStreak,
+  absentStreak,
+  deriveGoalCarrierSignals,
+  goalRingValue,
+  readRoundCarrier,
+  GOAL_ROUND_CARRIER_REL,
+  SPAWN_ZERO_OUTPUT_THRESHOLD,
+  VERDICT_UNCHANGED_THRESHOLD,
 } from '../scripts/meta-driver.ts';
 import { createMetaStore } from '../../packages/quay/src/meta-store.ts';
 
@@ -352,6 +360,7 @@ const mkReadings = (verdict, noise = 'n1') => ({
   metaRecords: [],
   inertCheckers: [],
   focus: null,
+  timeSeries: [],
 });
 
 // 关键负控制：摘要不得随时间/文本噪声变化——否则「变化检测」恒为真，闸形同虚设
@@ -1071,6 +1080,7 @@ test('collectInertCheckers: 逐条枚举 notEvaluatedCheckers 的名字；字段
 test('readingsDigest: inertCheckers 名字进摘要——某个 guard 从在→不在/不在→在都改变摘要', () => {
   const mk = (inert) => ({
     goals: [], criteria: [], divergences: [], metaRecords: [], inertCheckers: inert, focus: null,
+    timeSeries: [],
     drivers: [],
     syncHealth: { window: 200, ffSynced: 0, notFf: 0, ffError: 0, semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0, lastEvent: null, lastTs: null },
   });
@@ -1085,6 +1095,7 @@ test('readingsDigest: inertCheckers 名字进摘要——某个 guard 从在→�
 test('readingsDigest: 不随 staleSecs/carrierRecords 变（否则变化检测恒为真）', () => {
   const mk = (stale, records) => ({
     goals: [], criteria: [], divergences: [], metaRecords: [], inertCheckers: [], focus: null,
+    timeSeries: [],
     drivers: [{ kind: 'promotion', running: true, supervisorAlive: true, driverAlive: true, carrierRecords: records, carrierLastTs: null, staleSecs: stale }],
     syncHealth: { window: 200, ffSynced: 1, notFf: 2, ffError: 0, semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0, lastEvent: 'doc-develop-sync-not-ff', lastTs: null },
   });
@@ -1531,4 +1542,114 @@ test('readingsDigest: handler 三态进摘要；仅 staleSecs 变而三态不变
   // 方向二：三态变化 ⇒ 摘要改变（handler 三态必须进摘要，⛔ 不得恒不变）。
   assert.notEqual(readingsDigest(withHandler('healthy')), readingsDigest(withHandler('stalled')), '三态 healthy→stalled ⇒ 摘要改变');
   assert.notEqual(readingsDigest(withHandler('healthy')), readingsDigest(withHandler('absent')), '三态 healthy→absent ⇒ 摘要改变');
+});
+
+// ── 时序派生层（gap-meta-readings-no-timeseries-derivation）────────────────────────
+// 通用时序层：对已在读的载体派生两类 streak——(a) 取值不变；(b) 应发生而未发生（spawn 了但零产出）。
+// AC1 判据喂【真生产记录】（⛔ 不是构造数据——硬规则 4 推论三：只能被构造数据满足的判据不是测量）。
+
+// 真生产记录（.quay/goal-round.jsonl，2026-09-09T14:51→15:28，rounds 49–56，逐字取自生产文件；
+// 每条只保留派生层读的字段，gap_spawns 的 stdout/stderr 大段已 elide）。8 轮每轮都 spawn 了 AC-214
+// 一个 gap 立案 agent（gap_spawns.ac==="AC-214"）而 gaps 里它仍是 state==="gap"/taskCount===0 ⇒
+// 零产出连续 8 轮。round/ts/verdict/state 均为生产原值。
+const AC214_ROUNDS = [
+  [49, '2026-09-09T14:51:46.771Z'],
+  [50, '2026-09-09T14:56:15.796Z'],
+  [51, '2026-09-09T15:00:17.349Z'],
+  [52, '2026-09-09T15:04:48.108Z'],
+  [53, '2026-09-09T15:09:50.088Z'],
+  [54, '2026-09-09T15:14:30.911Z'],
+  [55, '2026-09-09T15:23:29.752Z'],
+  [56, '2026-09-09T15:28:22.562Z'],
+];
+const mkGoalRound = (round, ts) => ({
+  round, ts,
+  facts: [{
+    name: 'goal-ring',
+    value: {
+      criteria: [{ id: 'AC-214', goal: 'GOAL-009', status: 'active', verdict: 'fail', reason: 'acceptance failed (exit 1)' }],
+      gaps: [{ goal: 'GOAL-009', ac: 'AC-214', state: 'gap', taskCount: 0 }],
+      gap_spawns: [{ ac: 'AC-214', goal: 'GOAL-009', exitCode: 0 }],
+    },
+    state: 'verified',
+  }],
+});
+const AC214_WINDOW = AC214_ROUNDS.map(([r, t]) => mkGoalRound(r, t));
+
+test('AC1 派生层: 真生产记录（AC-214 连续 8 轮 spawn 零产出）⇒ spawn-zero-output streak ≥ 8', () => {
+  const signals = deriveGoalCarrierSignals(AC214_WINDOW, ['AC-214']);
+  const spawn = signals.find((s) => s.key === 'goal:AC-214:spawn-zero-output');
+  assert.equal(spawn.mode, 'expected-absent');
+  assert.equal(spawn.evaluated, true);
+  assert.ok(spawn.count >= 8, `零产出 streak 应 ≥ 8，实得 ${spawn.count}`);
+  assert.equal(spawn.crossed, true, 'count ≥ 阈值 8 ⇒ crossed 必须 true');
+  // 第二类量（取值不变）：8 轮 verdict 都是 fail ⇒ verdict streak 也 ≥ 8。
+  const verdict = signals.find((s) => s.key === 'goal:AC-214:verdict');
+  assert.equal(verdict.mode, 'unchanged');
+  assert.equal(verdict.evaluated, true);
+  assert.ok(verdict.count >= 8, `verdict 连续不变 streak 应 ≥ 8，实得 ${verdict.count}`);
+});
+
+test('AC1 负控制: 打断「零产出」连续后 streak 变短（判据能取假，⛔ 非恒真）', () => {
+  // 最后一轮改成「spawn 了且产出了任务」（gaps 里不再 gap）⇒ 零产出连续被打破。
+  const last = AC214_WINDOW[AC214_WINDOW.length - 1];
+  const broken = [
+    ...AC214_WINDOW.slice(0, -1),
+    { ...last, facts: [{ ...last.facts[0], value: { ...last.facts[0].value, gaps: [{ goal: 'GOAL-009', ac: 'AC-214', state: 'in-progress', taskCount: 1 }] } }] },
+  ];
+  const s = deriveGoalCarrierSignals(broken, ['AC-214']).find((x) => x.key === 'goal:AC-214:spawn-zero-output');
+  assert.equal(s.evaluated, true);
+  assert.ok(s.count < 8, '最后一轮产出任务 ⇒ 零产出 streak 必须被打断');
+  assert.equal(s.crossed, false, '未越阈 ⇒ crossed=false');
+});
+
+// AC2: digest 只取 crossed 位，⛔ 不进 count——count 递增但未越阈 ⇒ 摘要相同；越阈 ⇒ 摘要改变。
+const tsReadings = (count, crossed, evaluated = true, key = 'goal:AC-214:spawn-zero-output') => ({
+  ...mkReadings('pass', 'n1'),
+  timeSeries: [{ key, mode: 'expected-absent', count, crossed, evaluated, threshold: 8 }],
+});
+
+test('AC2 digest: streak 递增但未越阈 ⇒ 摘要相同；越阈 ⇒ 摘要改变（两个方向）', () => {
+  const below1 = tsReadings(3, false);
+  const below2 = tsReadings(7, false);
+  assert.equal(readingsDigest(below1), readingsDigest(below2), 'count 3→7 都未越阈 ⇒ 摘要必须相同（否则变化检测恒为真）');
+  const crossed = tsReadings(8, true);
+  assert.notEqual(readingsDigest(below2), readingsDigest(crossed), '越阈（crossed false→true）⇒ 摘要必须改变');
+});
+
+// AC3: 读不出 ⇒ evaluated:false，⛔ 不与 streak=0/crossed=false 同形（硬规则 3b）。
+test('AC3: 载体无历史 / 该 AC 无观测 ⇒ evaluated:false（⛔ 不与 crossed=false 同形）', () => {
+  const none = deriveGoalCarrierSignals([], ['AC-214']);
+  const spawn = none.find((s) => s.key === 'goal:AC-214:spawn-zero-output');
+  assert.equal(spawn.evaluated, false, '无历史 ⇒ evaluated:false');
+  assert.equal(spawn.count, 0);
+  assert.equal(spawn.crossed, false);
+  // 有历史但该 AC 从未出现（spawn 序列全是 null）⇒ 尾值 null ⇒ evaluated:false。
+  const never = deriveGoalCarrierSignals([mkGoalRound(1, '2026-09-09T00:00:00.000Z')], ['AC-999']);
+  const s2 = never.find((s) => s.key === 'goal:AC-999:spawn-zero-output');
+  assert.equal(s2.evaluated, false, '该 AC 无任何观测 ⇒ evaluated:false，⛔ 不冒充 streak=0');
+  // digest 里 evaluated:false（u）与 crossed:false（0）必须不同 token——否则读不懂与合格同形。
+  const unread = { ...mkReadings('pass', 'n1'), timeSeries: [{ key: 'k', mode: 'expected-absent', count: 0, crossed: false, evaluated: false, threshold: 8 }] };
+  const readOk = { ...mkReadings('pass', 'n1'), timeSeries: [{ key: 'k', mode: 'expected-absent', count: 0, crossed: false, evaluated: true, threshold: 8 }] };
+  assert.notEqual(readingsDigest(unread), readingsDigest(readOk), 'evaluated:false（u）与 crossed:false（0）必须改变摘要');
+});
+
+// 纯函数边界：空 / 尾值 null ⇒ evaluated:false；尾值 false（发生了）⇒ count=0 而非未评估。
+test('unchangedStreak/absentStreak: 空与尾值 null ⇒ evaluated:false；absent 尾 false ⇒ count=0', () => {
+  assert.deepEqual(unchangedStreak([]), { evaluated: false, count: 0 });
+  assert.deepEqual(unchangedStreak([null]), { evaluated: false, count: 0 });
+  assert.deepEqual(unchangedStreak(['a', 'a', 'b']), { evaluated: true, count: 1 }, '尾值 b 只连续 1 轮');
+  assert.deepEqual(unchangedStreak(['a', 'a', 'a']), { evaluated: true, count: 3 });
+  assert.deepEqual(absentStreak([]), { evaluated: false, count: 0 });
+  assert.deepEqual(absentStreak([null]), { evaluated: false, count: 0 });
+  assert.deepEqual(absentStreak([true, true, false]), { evaluated: true, count: 0 }, '尾值 false = 发生了 ⇒ count 0，⛔ 不是未评估');
+  assert.deepEqual(absentStreak([true, true, true]), { evaluated: true, count: 3 });
+});
+
+// 派生层只读传入记录、不碰磁盘；goalRingValue 读不出 ⇒ null。
+test('goalRingValue: 读不出 facts/name 不符 ⇒ null（⛔ 不抛）', () => {
+  assert.equal(goalRingValue({}), null);
+  assert.equal(goalRingValue({ facts: [] }), null);
+  assert.equal(goalRingValue({ facts: [{ name: 'meta-driver', value: {} }] }), null);
+  assert.deepEqual(goalRingValue({ facts: [{ name: 'goal-ring', value: { criteria: [] } }] }), { criteria: [] });
 });
