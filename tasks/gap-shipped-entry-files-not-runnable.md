@@ -1,7 +1,7 @@
 ---
 id: gap-shipped-entry-files-not-runnable
 title: AC-233 交付包 files 装入 bin/quay.js+bin/quay.ts——形如入口却在安装位置不可运行：加枚举测试并排除
-status: ready
+status: done
 needs_human_cause: human-adjudication
 labels:
   - gap
