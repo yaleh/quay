@@ -26,11 +26,11 @@ extra:
 
 ## AC
 
-- [ ] AC1 视觉边界存在：`#git-graph-scroll` 的计算样式（生产窗口渲染后）具备至少一种可辨识的面板边界（`border-width > 0` 或 `box-shadow !== "none"`），不满足数 = 0。
-- [ ] AC2 底部渐隐/更多内容提示：滚动容器未滚到底（`scrollTop + clientHeight < scrollHeight`）时，容器底部存在一个视觉提示元素/遮罩（如渐隐 mask 或固定的"↓ 更多提交"提示条），其可见性随 `scrollTop` 是否已触底而切换——用程序化滚动分别置于"未触底"和"已触底"两种状态，断言提示的可见性状态相应改变（不是恒定显示或恒定隐藏，判据能区分两种状态）。
-- [ ] AC3 与既有机制不冲突：复用 `gap-git-graph-no-bounded-scroll-panel.test.mjs` 的 vm 沙箱手法重跑其 AC1-AC5（容器结构、sentinel 归属、`IntersectionObserver` root、负控制、保险丝降级），全部保持通过——证明本任务只加视觉层，没有改动滚动/加载机制本身。
-- [ ] AC4 四视口回归（复用 `quay-webui-bootstrap-methodology` 的四视口法）：桌面宽/桌面窄/移动/暗色四张截图，确认新增的边框/渐隐样式在四种视口下都可见、不遮挡提交文本、不与既有的 sticky 图例样式冲突（图例仍然是不透明底、仍吸顶）。
-- [ ] AC5 负控制：把新增的边框/渐隐相关 CSS 显式还原为空（本任务改动前的状态），重跑 AC1/AC2 判据，断言不满足数 > 0——证明判据能取假，不是恒真断言。
+- [x] AC1 视觉边界存在：`#git-graph-scroll` 的计算样式（生产窗口渲染后）具备至少一种可辨识的面板边界（`border-width > 0` 或 `box-shadow !== "none"`），不满足数 = 0。
+- [x] AC2 底部渐隐/更多内容提示：滚动容器未滚到底（`scrollTop + clientHeight < scrollHeight`）时，容器底部存在一个视觉提示元素/遮罩（如渐隐 mask 或固定的"↓ 更多提交"提示条），其可见性随 `scrollTop` 是否已触底而切换——用程序化滚动分别置于"未触底"和"已触底"两种状态，断言提示的可见性状态相应改变（不是恒定显示或恒定隐藏，判据能区分两种状态）。
+- [x] AC3 与既有机制不冲突：复用 `gap-git-graph-no-bounded-scroll-panel.test.mjs` 的 vm 沙箱手法重跑其 AC1-AC5（容器结构、sentinel 归属、`IntersectionObserver` root、负控制、保险丝降级），全部保持通过——证明本任务只加视觉层，没有改动滚动/加载机制本身。
+- [x] AC4 四视口回归（复用 `quay-webui-bootstrap-methodology` 的四视口法）：桌面宽/桌面窄/移动/暗色四张截图，确认新增的边框/渐隐样式在四种视口下都可见、不遮挡提交文本、不与既有的 sticky 图例样式冲突（图例仍然是不透明底、仍吸顶）。
+- [x] AC5 负控制：把新增的边框/渐隐相关 CSS 显式还原为空（本任务改动前的状态），重跑 AC1/AC2 判据，断言不满足数 > 0——证明判据能取假，不是恒真断言。
 
 ## DoD
 
