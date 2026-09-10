@@ -39,17 +39,17 @@ const argv = goalStoreArgv(root, ["write", id, "--title", item.title, "--origin"
 
 ## AC
 
-- [ ] `node --no-warnings --experimental-strip-types --test plugin/test/meta-driver.test.mjs` exit 0，且其中新增用例断言 `fileDecisions` 的 goal 分支构造出的 argv **含 `--body`** 且其值 ≥40 非空白字符
-- [ ] `renderDecisionBody` 单测：产出的三段（背景 / 范围与非目标 / 退出条件）各非空、合计 ≥40 非空白字符，且**不等于** `renderDecisionOrigin` 的产出（负控制：两者若相同则测试红——防「把 origin 复制进 body」这种伪修复）
-- [ ] 端到端经**真 goal-store**（非 mock、非 fixture 注入）跑一条 `carrier=goal` 的 decision ⇒ 目标目录下出现该 GOAL 文件、其 `body` ≥40 非空白字符、命令 exit 0
-- [ ] **突变负控制**：把 argv 里的 `--body` 去掉后重跑上述用例 ⇒ **必须变红**（证明判据能取假；⛔ 恒绿的检查不算保证）
-- [ ] `bash scripts/test.sh` exit 0
+- [x] `node --no-warnings --experimental-strip-types --test plugin/test/meta-driver.test.mjs` exit 0，且其中新增用例断言 `fileDecisions` 的 goal 分支构造出的 argv **含 `--body`** 且其值 ≥40 非空白字符
+- [x] `renderDecisionBody` 单测：产出的三段（背景 / 范围与非目标 / 退出条件）各非空、合计 ≥40 非空白字符，且**不等于** `renderDecisionOrigin` 的产出（负控制：两者若相同则测试红——防「把 origin 复制进 body」这种伪修复）
+- [x] 端到端经**真 goal-store**（非 mock、非 fixture 注入）跑一条 `carrier=goal` 的 decision ⇒ 目标目录下出现该 GOAL 文件、其 `body` ≥40 非空白字符、命令 exit 0
+- [x] **突变负控制**：把 argv 里的 `--body` 去掉后重跑上述用例 ⇒ **必须变红**（证明判据能取假；⛔ 恒绿的检查不算保证）
+- [x] `bash scripts/test.sh` exit 0
 
 ## DoD
 
-- [ ] 一条 `carrier=goal` 的 decision 经**真实 goal-store** 落地成一个 body ≥40 非空白字符的 draft GOAL，且该验证**在关掉任何测试注入缝后仍成立**（硬规则 4 推论三：只能被 fixture/注入满足的判据不是测量，只是回声）
-- [ ] 失败路径仍 fail-closed 且**取值可区分**：body 不足 / store 拒写时 `decisions[].accepted=false` 且 `reason` 与成功态不同形，并逐条留痕进 `.quay/meta-driver-round.jsonl`（⛔ 不静默吞——本缺陷能被发现正是因为这条留痕已经做对了）
-- [ ] `GOAL-013`（本次失败的那条决策）的最终去向已在本任务体记明：**已由人手工落地** 或 **由修好后的通道重跑落地**，二者取其一，⛔ 不留悬空
+- [x] 一条 `carrier=goal` 的 decision 经**真实 goal-store** 落地成一个 body ≥40 非空白字符的 draft GOAL，且该验证**在关掉任何测试注入缝后仍成立**（硬规则 4 推论三：只能被 fixture/注入满足的判据不是测量，只是回声）
+- [x] 失败路径仍 fail-closed 且**取值可区分**：body 不足 / store 拒写时 `decisions[].accepted=false` 且 `reason` 与成功态不同形，并逐条留痕进 `.quay/meta-driver-round.jsonl`（⛔ 不静默吞——本缺陷能被发现正是因为这条留痕已经做对了）
+- [x] `GOAL-013`（本次失败的那条决策）的最终去向已在本任务体记明：**已由人手工落地**——人于 2026-09-10T10:10:49Z（commit `19019927b`）将该决策手工落地为 `GOAL-014`（draft，body 三段齐备），其 origin 已逐字记明编号沿革（meta-driver 于 09:29:42Z 尝试落地 GOAL-013 因缺 `--body` exit 2；其后 GOAL-013 被另一会话用于「判据保真性」，故本条改用 GOAL-014）。⛔ 不留悬空。
 
 ## Touches
 
