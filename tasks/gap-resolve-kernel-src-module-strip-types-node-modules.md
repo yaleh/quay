@@ -54,4 +54,5 @@ goal_ac: AC-207
 
 - plugin/scripts/worker-driver.ts
 - plugin/test/worker-driver.test.mjs
+- packages/quay/scripts/build-plugin-dist.mjs
 - tasks/gap-resolve-kernel-src-module-strip-types-node-modules.md
