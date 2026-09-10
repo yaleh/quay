@@ -2,7 +2,7 @@
 id: gap-ac228-conformance-target-fixture-real-quay-init
 title: C域一致性目标夹具 conformance-target-fixture：真 quay-init 生成 + 三轴不像本仓库 +
   双向负控制，接入常规套件（AC-228）
-status: done
+status: ready
 labels:
   - gap
   - mechanism
