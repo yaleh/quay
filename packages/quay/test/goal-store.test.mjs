@@ -27,7 +27,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
-import { createGoalStore, VALID_GOAL_STATUSES, isGoalId, isCriterionId } from "../src/goal-store.ts";
+import { createGoalStore, VALID_GOAL_STATUSES, isGoalId, isCriterionId, GoalIntentConflictError } from "../src/goal-store.ts";
 import { gateFactories, makeGoalGate } from "../src/gate/factories/index.ts";
 
 const _createdDirs = [];
@@ -775,4 +775,92 @@ test("AC6 (P9) — write --dry-run exit 0 ∧ goals/ 无新增变化 ∧ 记录�
   const after = fs.readFileSync(path.join(root, "goals", file), "utf8");
   assert.equal(after, before, "dry-run must not change the record content");
   assert.equal(JSON.parse(n(["get", "GOAL-001"]).stdout).status, "draft", "record still draft — dry-run persisted nothing");
+});
+
+// ── gap-goal-store-write-no-create-vs-update-intent-guard：create/update 意图声明（CAS）────────────
+// `write` 曾一个动词兼管新建与更新（patch 语义）⇒ 陈旧的「存在性检查」会静默覆盖另一会话刚创建的活跃
+// 记录（2026-09-10 GOAL-013 事故：check 与 write 相隔 33 分钟，占用发生在其中 110 秒）。本任务补上
+// task_write `expectedStatus` 的同族 CAS：`--expect-absent`（意在新建，已存在即拒）/ `--expect-existing`
+// （意在更新，不存在即拒）。失配抛 `GoalIntentConflictError`（独立类，非「可解析文案的通用 Error」——
+// 调用方可 `instanceof` 捕获该竞态），且【落锁内、落盘前】拒绝 ⇒ 目标文件不被改动。全部在真实
+// goal-store/CLI 上跑，⛔ 非 mock、非 fixture 注入。
+
+test("AC1 — 已存在的 active GOAL + `--expect-absent`（create 意图）⇒ 非零退出 + 文件未被改动（事故重放）", () => {
+  const { root, run } = gitRepo("intent-ac1");
+  const n = (cmd) => runCli([...cmd, "--root", root]);
+  n(["write", "GOAL-013", "--title", "original title", "--status", "active", "--origin", "original origin", "--body", GOAL_BODY]);
+  const file = fs.readdirSync(path.join(root, "goals")).find((f) => f.startsWith("GOAL-013-"));
+  const before = run("hash-object", `goals/${file}`).trim();
+  // 事故形态：目标已存在且 active，写入方意图新建（显式传 title/origin/body）⇒ 必须被拒。
+  const w = n(["write", "GOAL-013", "--title", "overwritten", "--origin", "overwritten origin", "--body", GOAL_BODY, "--expect-absent"]);
+  assert.notEqual(w.status, 0, "create intent on an existing record must exit non-zero:\n" + w.stdout + w.stderr);
+  assert.match(w.stderr, /already exists/, "stderr must name the existing-record conflict:\n" + w.stderr);
+  const after = run("hash-object", `goals/${file}`).trim();
+  assert.equal(after, before, "the refused write must leave the target file byte-identical (git hash-object unchanged)");
+  assert.equal(JSON.parse(n(["get", "GOAL-013"]).stdout).title, "original title", "record content untouched");
+});
+
+test("AC1 library — 已存在记录 + intent 'absent' 抛 GoalIntentConflictError（instanceof 可捕获）", () => {
+  const s = createGoalStore(tmpDir("intent-ac1-lib"));
+  s.write("GOAL-013", { title: "p", status: "active", origin: "o", body: GOAL_BODY });
+  let caught = null;
+  try {
+    s.write("GOAL-013", { title: "overwritten", origin: "o2", body: GOAL_BODY, intent: "absent" });
+  } catch (err) {
+    caught = err;
+  }
+  assert.ok(caught instanceof GoalIntentConflictError, "must throw the specific class, not a generic Error");
+  assert.equal(caught.expect, "absent");
+  assert.equal(caught.actual, "present");
+  assert.equal(s.get("GOAL-013").title, "p", "the refused write must not overwrite");
+});
+
+test("AC2 — 不存在的 id + `--expect-existing`（update 意图）⇒ 非零退出 + 不创建文件", () => {
+  const { root } = gitRepo("intent-ac2");
+  const n = (cmd) => runCli([...cmd, "--root", root]);
+  const w = n(["write", "GOAL-099", "--title", "p", "--origin", "o", "--body", GOAL_BODY, "--expect-existing"]);
+  assert.notEqual(w.status, 0, "update intent on an absent id must exit non-zero:\n" + w.stdout + w.stderr);
+  assert.match(w.stderr, /does not exist/, "stderr must name the absent-record conflict:\n" + w.stderr);
+  assert.equal(fs.readdirSync(path.join(root, "goals")).length, 0, "the refused write must not create a file");
+});
+
+test("AC2 library — 不存在 id + intent 'existing' 抛 GoalIntentConflictError 且不落盘", () => {
+  const s = createGoalStore(tmpDir("intent-ac2-lib"));
+  let caught = null;
+  try {
+    s.write("GOAL-099", { title: "p", origin: "o", body: GOAL_BODY, intent: "existing" });
+  } catch (err) {
+    caught = err;
+  }
+  assert.ok(caught instanceof GoalIntentConflictError);
+  assert.equal(caught.expect, "existing");
+  assert.equal(caught.actual, "absent");
+  assert.equal(s.list().length, 0, "nothing written to disk");
+});
+
+test("AC3 — 未声明意图时 create/update 的落痕可区分（提交 subject `create` ≠ `field:…`）", () => {
+  const { root, run } = gitRepo("intent-ac3");
+  const n = (cmd) => runCli([...cmd, "--root", root]);
+  // 方向①（反之）：调用方以为存在（update 式写）实则不存在 ⇒ store 创建 ⇒ 落痕 `create`。
+  n(["write", "GOAL-001", "--title", "fresh", "--origin", "o", "--body", GOAL_BODY]);
+  const createSubj = run("log", "--oneline", "-1", "--format=%s").trim();
+  assert.match(createSubj, /create/, `a no-intent write to an absent id must trace as create, got: ${createSubj}`);
+  // 方向②（正向）：调用方以为不存在（create 式写）实则存在 ⇒ store 更新 ⇒ 落痕 `field:…`。
+  n(["write", "GOAL-001", "--title", "renamed"]);
+  const updateSubj = run("log", "--oneline", "-1", "--format=%s").trim();
+  assert.match(updateSubj, /field:title/, `a no-intent write to an existing id must trace as field:…, got: ${updateSubj}`);
+  assert.notEqual(createSubj, updateSubj, "create and update must leave distinguishable traces (never byte-identical)");
+});
+
+test("AC4 — status-only flip 不传意图声明仍 exit 0（goal-driver 机械 flip 不回归）", () => {
+  const { root } = gitRepo("intent-ac4");
+  const n = (cmd) => runCli([...cmd, "--root", root]);
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  n(["write", "AC-001", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
+  const flip = n(["write", "AC-001", "--status", "achieved"]); // no --origin, no intent
+  assert.equal(flip.status, 0, "status-only flip without intent must still exit 0:\n" + flip.stdout + flip.stderr);
+  assert.equal(JSON.parse(n(["get", "AC-001"]).stdout).status, "achieved");
+  // 已存在的记录 + 不声明意图仍走 patch 语义（不误触 intent 闸）。
+  const patch = n(["write", "GOAL-001", "--title", "p2"]);
+  assert.equal(patch.status, 0, patch.stdout + patch.stderr);
 });

@@ -260,6 +260,41 @@ export function isCriterionId(id: string): boolean {
   return typeof id === "string" && AC_ID_RE.test(id);
 }
 
+/**
+ * gap-goal-store-write-no-create-vs-update-intent-guard — the intent-conflict error class.
+ *
+ * `write` previously fused CREATE and UPDATE into one verb with patch semantics, so a caller
+ * whose (stale) existence check said "absent" would silently overwrite a record that another
+ * session created in between (the 2026-09-10 GOAL-013 incident). `write` now accepts a declared
+ * intent — `expect: "absent"` (I intend to create; refuse if it exists) or `expect: "existing"`
+ * (I intend to update; refuse if it's absent) — and this class is the distinguishable failure it
+ * throws on mismatch, mirroring quay-native `store.ts`'s `ConflictError` for `task_write`'s
+ * `expectedStatus` CAS (⛔ a separate class, never a generic `Error` with a parseable message:
+ * callers `catch (err) { if (err instanceof GoalIntentConflictError) … }` to detect the race
+ * specifically). Thrown INSIDE `withFileLock`, before any mutation, so the write is aborted with
+ * nothing written to disk.
+ */
+export class GoalIntentConflictError extends Error {
+  id: string;
+  expect: "absent" | "existing";
+  actual: "present" | "absent";
+  constructor(id: string, expect: "absent" | "existing", actual: "present" | "absent") {
+    super(
+      `goal-store intent conflict on ${id}: declared ${
+        expect === "absent" ? "--expect-absent (create intent)" : "--expect-existing (update intent)"
+      } but ${
+        actual === "present" ? "the record already exists" : "the record does not exist"
+      } — refusing to ${
+        expect === "absent" ? "overwrite" : "create"
+      } (write() aborted, nothing written to disk)`
+    );
+    this.name = "GoalIntentConflictError";
+    this.id = id;
+    this.expect = expect;
+    this.actual = actual;
+  }
+}
+
 // ── lastProgressAt / firstEvidenceAt for GOAL rows (M1 time columns) ──────────────────────────
 // A GOAL's time is DERIVED from its ACs' ledger-derived evidence — NEVER its own `updatedAt`
 // (mtime) and never a stored field (hard rule 4b: a quantity the measured object produces is not
@@ -626,6 +661,7 @@ export function createGoalStore(
     reason,
     dryRun = false,
     commit = true,
+    intent,
   }: {
     title?: string;
     status?: string;
@@ -648,6 +684,14 @@ export function createGoalStore(
     /** batch (gap-store-commit-action-and-actor AC3): write the file but defer the git commit to a
      *  `writeBatch` flush (⛔ not used by the per-write CLI path). */
     commit?: boolean;
+    /** gap-goal-store-write-no-create-vs-update-intent-guard — the declared write intent, the goal
+     *  store's counterpart to task_write's `expectedStatus` CAS: `"absent"` = "I intend to CREATE,
+     *  refuse if it already exists", `"existing"` = "I intend to UPDATE, refuse if it is absent".
+     *  Mismatch throws GoalIntentConflictError inside the lock, before any mutation (nothing written).
+     *  ⛔ Omitted (undefined) keeps patch semantics — the no-intent path is unchanged for the existing
+     *  callers (goal-driver status flips, meta-driver writes); its create-vs-update outcome is still
+     *  distinguishable in the commit subject (`create` vs `field:…`). */
+    intent?: "absent" | "existing";
   }): GoalViewModel {
     assertSafeId(id);
     assertSafeStatus(status);
@@ -667,6 +711,22 @@ export function createGoalStore(
         const parsed = parseFrontmatter(fs.readFileSync(path.join(goalDir, existingFile), "utf8"));
         frontmatter = { ...(parsed.frontmatter as GoalFrontmatter) };
         existingBody = parsed.body;
+      }
+      // gap-goal-store-write-no-create-vs-update-intent-guard — the declared-intent guard (an
+      // existence CAS, the goal store's counterpart to task_write's `expectedStatus`). A caller
+      // who DECLARED create (`intent: "absent"`) must never silently overwrite a record that
+      // another session created in between (the 2026-09-10 GOAL-013 incident); a caller who
+      // DECLARED update (`intent: "existing"`) must never silently create. Thrown INSIDE the lock,
+      // before any mutation, so the refused write leaves nothing on disk — and as a distinct class
+      // (never a generic `Error` with a parseable message) it is catchable via
+      // `instanceof GoalIntentConflictError`.
+      if (intent !== undefined) {
+        if (intent === "absent" && existingFile) {
+          throw new GoalIntentConflictError(id, "absent", "present");
+        }
+        if (intent === "existing" && !existingFile) {
+          throw new GoalIntentConflictError(id, "existing", "absent");
+        }
       }
       // The body that will land: an explicit `body` param, else the stored body (patch
       // semantics — omitting `body` on an update keeps it, the same as `origin`).
@@ -982,6 +1042,9 @@ export function createGoalStore(
 //   get <id>                  — one record as JSON
 //   write <id> [--title ...] [--status ...] [--goal ...] [--criterion ...] [--expect ...]
 //              [--origin ...] [--body ...] [--actor ...] [--reason ...] [--force] [--dry-run]
+//              [--expect-absent] [--expect-existing]
+//              (--expect-absent = create intent, refuse if it exists; --expect-existing =
+//              update intent, refuse if absent — the goal store's expectedStatus-CAS counterpart)
 //   batch --json '<array>'  — write N records in ONE commit (each: id + the write fields)
 //              (`--origin` is REQUIRED on create, OPTIONAL on update — patch semantics keep the
 //              stored value; `--dry-run` validates without persisting; `--force` skips the
@@ -1066,12 +1129,15 @@ async function main(argv: string[]) {
       const opts: Record<string, unknown> = {};
       let force = false;
       let dryRun = false;
+      let intent: "absent" | "existing" | undefined;
       for (let i = 1; i < rest.length; i++) {
         const k = rest[i];
         if (!k.startsWith("--")) continue;
         const key = k.slice(2);
         if (key === "force") { force = true; continue; }
         if (key === "dry-run") { dryRun = true; continue; }
+        if (key === "expect-absent") { intent = "absent"; continue; }
+        if (key === "expect-existing") { intent = "existing"; continue; }
         const v = rest[i + 1];
         if (key === "title" || key === "status" || key === "goal" || key === "criterion" ||
             key === "expect" || key === "origin" || key === "body" || key === "superseded-by" ||
@@ -1111,6 +1177,7 @@ async function main(argv: string[]) {
           actor: opts.actor as string | undefined,
           reason: opts.reason as string | undefined,
           dryRun,
+          intent,
         });
         process.stdout.write(JSON.stringify(rec, null, 2) + "\n");
         return 0;
