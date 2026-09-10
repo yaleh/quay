@@ -2,7 +2,7 @@
 id: gap-kernel-sibling-check-blind-to-cross-package-source-anchors
 title: GOAL-012 的 kernel-sibling 检查器只认 plugin/scripts 兄弟脚本，漏认
   repoRoot()+packages/quay/src/** 跨包源码锚点——同族缺陷刚在生产复现
-status: todo
+status: ready
 labels:
   - gap
   - defect
