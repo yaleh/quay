@@ -34,11 +34,11 @@ goal_ac: AC-234
 
 ## AC
 
-- [ ] AC1 机制接线：`grep -c 'GOAL-015-AC-234' plugin/scripts/verify-deliver-coldstart.sh` ≥ 1，且 `tasks_rendered`、`goals_rendered`、`round_records_rendered` 三字段名在脚本内各 ≥1 命中；贴前 3 条命中（硬规则②）。
-- [ ] AC2 内容级直接量：贴出读 tasks_rendered/goals_rendered/round_records_rendered 的命令与命中行——三计数取自真实渲染 HTML 内容（非 HTTP 状态码），且各自 >0。
-- [ ] AC3 载体落账：生产载体出现 `ac="GOAL-015-AC-234"` 记录，host≠本机 ∧ project_root∉本仓库 ∧ tasks_rendered>0 ∧ goals_rendered>0 ∧ round_records_rendered>0（逐字段满足 criterion 过滤）。
-- [ ] AC4 负控制（能取假）：注入一条三计数任一=0 或 host=本机 的记录 ⇒ criterion 仍 exit 1；验证后移除、不污染生产载体。
-- [ ] AC5 判据翻转：AC-234 criterion 干跑从 exit 1 → exit 0（贴出干跑输出）。
+- [x] AC1 机制接线：`grep -c 'GOAL-015-AC-234' plugin/scripts/verify-deliver-coldstart.sh` ≥ 1，且 `tasks_rendered`、`goals_rendered`、`round_records_rendered` 三字段名在脚本内各 ≥1 命中；贴前 3 条命中（硬规则②）。【实测】GOAL-015-AC-234=5、tasks_rendered=7、goals_rendered=11、round_records_rendered=7；前 3 条命中 = 脚本行 1210（ac=GOAL-015-AC-234 判据注释）、1244（write_ac234_record 注释）、1254（write_ac234_record printf 落账行）。
+- [x] AC2 内容级直接量：贴出读 tasks_rendered/goals_rendered/round_records_rendered 的命令与命中行——三计数取自真实渲染 HTML 内容（非 HTTP 状态码），且各自 >0。【实测】`probe_ac234_render_counts` 用 `grep -o 'href="/task/'`（/tasks）、`grep -o 'href="/goal/'`（/goal）、`grep -o 'href="/tests?round='`（/tests）对 HTML 正文计数；selfcheck 正控制 `ac234-render-counts(positive) tasks=3 goals=2 rounds=5`、负控制空壳页 `0/0/0`；真实 serve 冒烟（本仓库 /tasks=20、/goal=108、/tests=20，全 >0）。
+- [ ] AC3 载体落账：生产载体出现 `ac="GOAL-015-AC-234"` 记录，host≠本机 ∧ project_root∉本仓库 ∧ tasks_rendered>0 ∧ goals_rendered>0 ∧ round_records_rendered>0（逐字段满足 criterion 过滤）。（待外部）
+- [x] AC4 负控制（能取假）：注入一条三计数任一=0 或 host=本机 的记录 ⇒ criterion 仍 exit 1；验证后移除、不污染生产载体。【实测】criterion 干跑：host=本机 ⇒ exit 1、tasks_rendered=0 ⇒ exit 1、正样本（hostB-fake ∉本仓库 + 3/2/5）⇒ exit 0、载体缺失 ⇒ exit 3；selfcheck `ac234-record(zero-count) refused=1` / `ac234-record(empty-host) refused=1`（write_ac234_record fail-closed 拒写）。
+- [ ] AC5 判据翻转：AC-234 criterion 干跑从 exit 1 → exit 0（贴出干跑输出）。（待外部）
 
 ## DoD
 
