@@ -40,10 +40,10 @@ plugin/scripts/cap-from-gate.ts:258   path.join(repoRoot, "plugin", "scripts", "
 
 ## Acceptance Criteria
 
-- [ ] AC1（位置判定，四处齐修）：`grep -n 'plugin", "scripts"' plugin/scripts/worker-driver.ts plugin/scripts/cap-from-gate.ts` 归零（不含注释里提到文件名的行——按位置判定，非关键词）。
-- [ ] AC2（双向负控制）：构造一个无 `plugin/scripts/` 的第三方项目根，`readBudgetFromGate`/`opts.worktree` 场景下的 full-suite-runner 解析/worker-driver 自引用入口解析均命中 shipped `dist/*.js`（或对应 `.sh`），非 `Cannot find module`/`No such file`；反向：本仓库场景（有 `plugin/`）解析结果与迁移前逐字一致（回归不变）。
-- [ ] AC3（生产复跑，读真实第三方项目）：在 orangevps `/home/yale/work/ac207-third-party`（或等价项目）重装本次修复后的安装物，`.quay/promotion-round.jsonl`/`.quay/worker-round.jsonl` 不再出现本任务列出的 4 类报错字样。
-- [ ] AC4（全量绿）：`scripts/test.sh` 全量绿（含 `worker-driver.test.mjs`/新增 `cap-from-gate-process-budget-path.test.mjs` 负控制）。
+- [x] AC1（位置判定，四处齐修）：`grep -n 'plugin", "scripts"' plugin/scripts/worker-driver.ts plugin/scripts/cap-from-gate.ts` 归零（不含注释里提到文件名的行——按位置判定，非关键词）。
+- [x] AC2（双向负控制）：构造一个无 `plugin/scripts/` 的第三方项目根，`readBudgetFromGate`/`opts.worktree` 场景下的 full-suite-runner 解析/worker-driver 自引用入口解析均命中 shipped `dist/*.js`（或对应 `.sh`），非 `Cannot find module`/`No such file`；反向：本仓库场景（有 `plugin/`）解析结果与迁移前逐字一致（回归不变）。
+- [ ] AC3（生产复跑，读真实第三方项目）：在 orangevps `/home/yale/work/ac207-third-party`（或等价项目）重装本次修复后的安装物，`.quay/promotion-round.jsonl`/`.quay/worker-round.jsonl` 不再出现本任务列出的 4 类报错字样。（待外部）
+- [x] AC4（全量绿）：`scripts/test.sh` 全量绿（含 `worker-driver.test.mjs`/新增 `cap-from-gate-process-budget-path.test.mjs` 负控制）。
 
 ## Definition of Done
 
@@ -55,5 +55,7 @@ plugin/scripts/cap-from-gate.ts:258   path.join(repoRoot, "plugin", "scripts", "
 - plugin/scripts/worker-driver.ts
 - plugin/scripts/cap-from-gate.ts
 - plugin/test/worker-driver.test.mjs
+- plugin/test/worker-driver-fan-in.test.mjs
+- plugin/test/fan-in-driver-mechanical-orchestration.test.mjs
 - plugin/test/cap-from-gate-process-budget-path.test.mjs
 - tasks/gap-plugin-root-resolution-remaining-callsites-round2.md
