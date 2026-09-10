@@ -1,7 +1,7 @@
 ---
 id: AC-226
 title: B域身份字面量检查器：存在 + 枚举归零 + 被突变覆盖，三者缺一不可（GOAL-012 退出条件①⑤）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-012
 criterion: node --no-warnings --experimental-strip-types --test
@@ -41,4 +41,9 @@ statusLog:
     to: active
     actor: cli:human-ruling-2026-09-10
     reason: 人授权激活（单次授权）
+  - at: 2026-09-10T05:42:55.178Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
