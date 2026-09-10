@@ -2,7 +2,7 @@
 id: gap-meta-outer-driver
 title: Wire outer-driver into the canonical startup set — done kind (gap-ac143)
   running nowhere
-status: todo
+status: ready
 labels:
   - meta-driver
   - driver-candidate
