@@ -2,7 +2,7 @@
 id: AC-230
 title: AC-225 真实历史案例双向回归——扩面前判 vacuous / 扩面后判 faithful，夹具逐字 vendor ⛔ 不锚 commit
   SHA（GOAL-013 退出条件⑤②）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-013
 criterion: node --no-warnings --experimental-strip-types --test
@@ -43,4 +43,9 @@ statusLog:
     actor: cli:human-ruling-2026-09-10
     reason: 人 2026-09-10 裁定：命题实测未达成（真判定器对 pre/post 均判 faithful ⇒ 判别力 0），且原判据被改成断言
       expect ① 的反面而仍 pass ⇒ 判据不再测量本 AC 声称的对象。退回 active 并改锚到读真判定器原始输出落盘文件。
+  - at: 2026-09-10T13:17:21.805Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
