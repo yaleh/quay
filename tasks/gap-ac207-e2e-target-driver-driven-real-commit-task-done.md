@@ -1,7 +1,8 @@
 ---
 id: gap-ac207-e2e-target-driver-driven-real-commit-task-done
 title: 端到端：目标项目自己的 *-drivers 驱动出真实开发提交且任务翻 done，落 ac=GOAL-009-AC-207 记录（AC-207）
-status: ready
+status: needs-human
+needs_human_cause: unclassified
 labels:
   - gap
   - delivery-critical
@@ -122,3 +123,13 @@ AC1/AC4 实现已 done 不变；AC2/AC3/AC5 仍阻塞，需修该缺陷（新任
 **⚠️ 证据取回纪律（AC-207 的 goal 记录 body 已逐字写入「执行说明：跑成功之后必须把证据取回家」）**：远端（host B/C）产出的记录**不会自动回到本机载体**——必须**显式取回**本机 `.quay/productization-verification.jsonl` 并**复跑判据确认**（AC5 干跑 exit 1 → exit 0）。⛔ 不得手写/注入记录；⛔ 不得搬运出自坏构建的记录（安装物必须是当前 develop tip 现 build 的那一份）。
 
 ⛔ **本次 retreat 不勾选任何 AC**——AC2/AC3/AC5 仍须真实 e2e 复跑验证后方可勾选；本段仅记录阻塞解除与现场事实。
+
+## Needs-Human
+
+**执行 2026-09-10T09:42:15.042Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 成因类：unclassified
+- 失败步/判词：AC 未全勾（checked 2/5，剩余未勾 3）——续做只需验证并勾选 AC
+- run_id：wk-prod-1788972473
+- session_id：1cbac9f1-899e-4faf-adac-f9b9c7a29354
