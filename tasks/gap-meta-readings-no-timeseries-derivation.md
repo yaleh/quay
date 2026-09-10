@@ -1,7 +1,7 @@
 ---
 id: gap-meta-readings-no-timeseries-derivation
 title: meta-driver 读数全是快照、无时序派生层 ⇒ 跨轮持续空转（AC-214 连 8 轮零产出）在任何单轮读数里都不存在；实例已修但类未闭
-status: ready
+status: done
 labels:
   - gap
   - mechanism
