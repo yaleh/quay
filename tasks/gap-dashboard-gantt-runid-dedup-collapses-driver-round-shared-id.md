@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-gantt-runid-dedup-collapses-driver-round-shared-id
 title: 循环脉搏甘特图按 run_id 去重，而 run_id 是 driver 轮次共享值（非每任务唯一）⇒ 历史任务块被误判重复几乎全部丢弃
-status: todo
+status: ready
 labels:
   - gap
   - defect
