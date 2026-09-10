@@ -1,7 +1,7 @@
 ---
 id: gap-config-key-consumer-check-mechanical-enumeration
 title: 机械枚举交付配置键消费者——零消费者键（merge_target）接线或删除，config-key-consumer-check 可取假且 covered
-status: ready
+status: done
 labels:
   - gap
 parent: null
