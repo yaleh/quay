@@ -43,13 +43,13 @@ goal_ac: AC-228
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据前件：`grep -q 'conformance-target' scripts/test.sh` exit 0；贴命中的行（含行号与上下文）。
-- [ ] AC2 判据后件：`node --no-warnings --experimental-strip-types --test plugin/test/conformance-target-fixture.test.mjs` exit 0；贴完整输出（含 P-real 正向 + P-self 负控制 + 双向负控制全部断言名）。
-- [ ] AC3 P-real 由真 quay-init 生成：夹具 spawn `bash plugin/scripts/quay-init.sh`（⛔ 非手写 config、非提交快照）；断言 P-real 三轴成立——无 `plugin/` 目录、工作分支非 `author`、无 `scripts/test.sh` 而 `loop.test_command` 在 `.quay/config.yml`；贴三轴断言片段。
-- [ ] AC4 P-real 做闸（正向）：三域解析/命令构造函数在 P-real 上不锚本仓库 `plugin/`、分支读 target、无 `scripts/test.sh` ⇒ 委托 `test_command` / 独立「能力不存在」取值、无 `exit 127`；贴断言名与通过片段。
-- [ ] AC5 P-self 负控制（降级不回流）：P-self（本仓库形态）上三步命令与迁移前逐字一致，⛔ 降级不回流污染本仓库；贴断言名与通过片段。
-- [ ] AC6 双向负控制（三域逐条）：A 域退回「锚 target root」、B 域退回「字面量分支名」、C 域退回「无条件调 dev-tree 专属脚本」各使夹具**先红**（gate 断言失败），正确形态下绿；贴三个域的 RED→GREEN 断言片段。
-- [ ] AC7 卫生：夹具 mkdtemp 生成、teardown 清理、不落在仓库树内（`find . -name 'conformance-target-*'` 在仓库树 = 0）、无提交进仓库的夹具快照；贴 teardown 与检查读数。
+- [x] AC1 判据前件：`grep -q 'conformance-target' scripts/test.sh` exit 0；贴命中的行（含行号与上下文）。
+- [x] AC2 判据后件：`node --no-warnings --experimental-strip-types --test plugin/test/conformance-target-fixture.test.mjs` exit 0；贴完整输出（含 P-real 正向 + P-self 负控制 + 双向负控制全部断言名）。
+- [x] AC3 P-real 由真 quay-init 生成：夹具 spawn `bash plugin/scripts/quay-init.sh`（⛔ 非手写 config、非提交快照）；断言 P-real 三轴成立——无 `plugin/` 目录、工作分支非 `author`、无 `scripts/test.sh` 而 `loop.test_command` 在 `.quay/config.yml`；贴三轴断言片段。
+- [x] AC4 P-real 做闸（正向）：三域解析/命令构造函数在 P-real 上不锚本仓库 `plugin/`、分支读 target、无 `scripts/test.sh` ⇒ 委托 `test_command` / 独立「能力不存在」取值、无 `exit 127`；贴断言名与通过片段。
+- [x] AC5 P-self 负控制（降级不回流）：P-self（本仓库形态）上三步命令与迁移前逐字一致，⛔ 降级不回流污染本仓库；贴断言名与通过片段。
+- [x] AC6 双向负控制（三域逐条）：A 域退回「锚 target root」、B 域退回「字面量分支名」、C 域退回「无条件调 dev-tree 专属脚本」各使夹具**先红**（gate 断言失败），正确形态下绿；贴三个域的 RED→GREEN 断言片段。
+- [x] AC7 卫生：夹具 mkdtemp 生成、teardown 清理、不落在仓库树内（`find . -name 'conformance-target-*'` 在仓库树 = 0）、无提交进仓库的夹具快照；贴 teardown 与检查读数。
 
 ## Definition of Done
 
