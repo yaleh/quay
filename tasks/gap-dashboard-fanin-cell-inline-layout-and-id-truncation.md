@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-fanin-cell-inline-layout-and-id-truncation
 title: Fan-in 卡字段改单行内联排版 + 任务 id 单行省略号（收窄纵向堆叠）
-status: ready
+status: done
 labels:
   - gap
 parent: null
