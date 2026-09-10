@@ -1,33 +1,18 @@
 ---
 id: GOAL-013
-title: meta-driver 是否新增「动作记录失败聚合」读数维度（重复工具/skill 调用失败）
+title: 判据保真性——criterion 必须能在它 expect 声称的对象上取假，把「achieved-but-vacuous」从三条不变式的盲区变成激活期可判
 status: active
 kind: goal
-origin: >-
-  【要裁定什么】META-005 三条线索中：①（跨部署健康）已由 GOAL-009 AC-203~207（在飞）+
-  gap-third-party-fixture-smoke-test-driver-family 覆盖，③（per-AC 时序空转）已由
-  gap-goal-gap-done-task-not-traction-respawns-every-round 覆盖且在修；仅②（重复工具/skill
-  调用失败无人汇总）是无主的新读数维度。是否把它纳入 meta-driver 读数，以及按什么触发与成本约束纳入？
-
-  【选项与代价】① 纳入：定期经 meta-cc 扫 24h 会话语料，按「同错误×跨会话重复次数」聚合，仅越过阈值才进
-  digest（机械形态须能取假、fail-closed、未评估独立取值；成本=新增扫描载体+阈值触发设计，须防原始计数每轮变导致 digest 恒真烧
-  LLM）；② 不纳入：维持快照状态载体读数，盲区靠人/子代理周期性扫语料后回溯（成本=结构性盲区持续、每次人工撞坑）；③
-  窄覆盖：只对「已立案但长期未生效」的机制任务加失效告警，覆盖②的具体实例
-  gap-filing-agent-skill-and-goal-mcp-unavailable-fallback，不建通用聚合（成本=改动小但覆盖窄）
-
-  【实测依据】metaRecords = [META-005]（meta-driver 机械采集于 2026-09-10T09:29:42Z）
-
-  【为什么不能机械决定】②的失败计数不在我任何现有读数里（恰是结构性盲区），无法用 evidenceKey 落地 autoDrive；又无活跃 goal 可挂
-  proposal；扩读数面=给 meta-driver 加新感官，涉及每轮 LLM 成本与触发设计（META-005
-  已自标成本约束），是机器不应单方面决定的 scope+成本选择
-
-  【怎么关闭】认可某个选项 ⇒ goal-store write GOAL-013 --status active；否决 ⇒ 保持 draft 或标
-  superseded。
-
-  【本条为何由人工写入】meta-driver 在 2026-09-10T09:29:42Z 一轮已自行产出本决策并尝试落地，因 fileDecisions
-  建 GOAL 时不传 --body 而 exit 2 失败（缺陷已立案
-  gap-meta-filedecisions-goal-write-omits-body）。上面的 question/options/为什么不能机械决定
-  三段**逐字复用其产出**，人工只补了它没能传的 body 三段。
+origin: '立条依据（人 2026-09-10 授权执行）：GOAL-012 于 07:03:36Z flip achieved，其 AC-225 于
+  07:00:55Z flip achieved（reason "I2: criterion pass"），而该判据背后的
+  kernel-sibling-resolution-check 当时对【跨包源码锚点】结构上不可能红——同族锚点 worker-driver.ts 的
+  path.join(repoRoot(),"packages","quay","src","gate","gate-event-store.ts")
+  就在其扫描面内且已在 orangevps 第三方项目 e2e 上造成真实故障（MODULE_NOT_FOUND ⇒ gate-events.jsonl
+  永不写 ⇒ GOAL-009 AC-207 判据恒不满足）。实质缺口由 aca7a0511（08:16:28Z）扩面闭合，比 achieved 晚 73
+  分钟。⇒ 缺陷由生产发现而非机制发现；I2 误触发、I4 不适用、I5 全盲（判据仍 pass，什么都没回退）。人 2026-09-10 裁定：goal
+  应以业务价值实现为目标，achieved 后发现进一步问题而要求修改/重开是诚实行为，且该行为模式需被机制承载而非靠自觉。本 goal
+  即该裁定的机制落点。发生率：AC-212 origin 已记录三次假 achieved（纯语法合取即关闭），本次第四次且首次由生产实证（硬规则 12
+  查历史不等下一轮）。'
 activatedAt: 2026-09-10T10:07:41.713Z
 statusLog:
   - at: 2026-09-10T10:07:41.713Z
@@ -39,29 +24,81 @@ statusLog:
 ---
 ## 背景
 
-**实证（2026-09-10 一次会话语料扫描，窗口 24h / 顶层会话 871 个 / 工具错误 180 条散在 87 个会话）**：至少 6 个互不相同的会话各自尝试 `quay-file-task` → 再试 `quay:quay-file-task` → 均报 `Unknown skill`，合计 12+ 次；每个会话随后**各自现场**读到已存在的任务体 `gap-filing-agent-skill-and-goal-mcp-unavailable-fallback` 再做回退。⇒ 一个已立案却显然长期未生效的机制缺口，代价是每个子代理各撞一遍、各自发现、各自绕行，而**没有任何机件把这 12 次汇总成一个信号**。
+**2026-09-10 实测时序（本 goal 的立条依据，非主张）**：
 
-**为什么这在现有读数里不可见**：meta-driver 的六类读数（goals/criteria、6 种 driver 的 running/staleSecs、syncHealth、metaRecords、inertCheckers、focus）**全部读的是状态载体**（`.quay/*.jsonl`、goal store、git），**没有一类读动作记录**（谁试了什么、失败了几次）。`inertCheckers` 管的是**方向相反**的东西（从不报红的惰性守卫），不覆盖「反复报红但无人汇总」。
+```
+07:00:55Z  goal-driver flip AC-225 → achieved   reason "I2: criterion pass"
+07:03:36Z  goal-driver flip GOAL-012 → achieved reason "I2: all ACs achieved + sufficiency covered"
+           ↑ 此刻 kernel-sibling-resolution-check 的对象定义只覆盖 plugin/scripts 兄弟脚本（P1/P2/P3），
+             对【跨包源码锚点】结构上不可能红
+08:16:28Z  aca7a0511 扩面落地（P4 三形态 + 突变用例 + 单测）——实质缺口在 73 分钟后才闭合
+```
 
-**为什么它不能靠 meta-driver 自驱解决（结构性理由）**：`autoDrive` 通道强制 `evidenceKey` 必须在**本轮读数**里解析得出 ⇒ 一个**尚不在读数里**的量，在构造上永远不可能成为 autoDrive 的证据。**盲区不可自驱**——这正是本条必须走人工裁定通道的原因，不是谨慎，是机制约束。
+AC-225 的 criterion 是跑 `kernel-sibling-resolution-check.ts --root . --json` 期望 exit 0，而它的 `expect` **逐字声称**：「完整性由检查器的机械枚举给出，不是手工清单——人工枚举已做过 3 次、3 次都有遗漏。」
 
-**更一般的形状**：`digest` 由读数算出，故任何**从未被读**的量永远不改变 digest ⇒ 无论它怎样恶化，变化检测闸都不会因它唤醒语义半。**缺席不自报缺席。**
+而同族锚点 `worker-driver.ts` 的 `path.join(repoRoot(), "packages", "quay", "src", "gate", "gate-event-store.ts")` **当时就在该检查器的扫描面里**，且**已在生产上造成真实故障**：orangevps 第三方项目 e2e fan-in 末步 `append-complete-gate-event` 报 MODULE_NOT_FOUND（shipped 包把 `packages/quay/` 打平到包根）⇒ `.quay/gate-events.jsonl` 永不写 ⇒ GOAL-009 AC-207 的判据 `gate_events > 0` 恒不满足。
+
+⇒ **AC-225 拿到的那个 `0` 是定义太窄换来的 0**（硬规则 4：一个结构上不可能取假的量，不是测量）。**缺陷由生产发现，不是由机制发现。**
+
+**为什么现有三条不变式一条都报不出来**：
+
+| 不变式 | 它抓什么 | 本例 |
+|---|---|---|
+| I2 | criterion pass ⇒ flip achieved | **误触发**（判据确实 pass） |
+| I4 | active 而全部 AC achieved（该关没关） | 不适用 |
+| I5 | achieved 而 criterion **现在转 fail** | **全盲**（判据仍 pass，什么都没回退） |
+
+⇒ 缺的是第四类：**achieved-but-vacuous —— criterion pass，但它测量的对象比自己 `expect` 声称的窄。**
+与 I5 **方向相反**：I5 是「曾真、后回退」，本类是「**从未测量它声称的对象**」。
+
+**⛔ 与 AC-180/184/186 退役非同类**（这一条必须写明，因为它已经被混淆过一次）：那三条退役理由是「**活性量自行回退**」——进程存活/进程比源码新，量会自己变假，而 goal-driver 无反向翻转 ⇒ 记录会永久声称一件已不成立的事。本类**什么都没回退**，是判据从一开始就没测量它 `expect` 声称的对象。**两者的修法也不同**：那三条的修法是「别把这类量写成判据」，本条的修法是「让空洞判据进不来」。
+
+**发生率（硬规则 12：查历史，不等下一轮）**：`AC-212` 的 origin 已记录「纯语法合取即关闭」造成的**三次假 achieved**，充分性闸正是那三次的机制回应。本次是**第四次，且是第一次由生产实证**。⇒ 该类别不是首发，造机制够格，⛔ 不是凭空设前置。
+
+**GOAL-012 因此【不重开】**：其退出条件此刻实质成立，三条实测读数——扩面后 checker `--root .` exit 0 / 突变用例六形态注入全红且两条豁免不误伤（exit 0）/ 单测 21 pass（含 P4 三形态 RED + 相对 import·bin 布局边界 GREEN）。本 goal 管的是「**机制为什么没先抓到**」，不是「那个缺陷有没有修」。
 
 ## 范围与非目标
 
-**范围**：是否把「动作记录（会话语料）中的工具/skill 调用失败重复模式」纳入 meta-driver 读数；若纳入，采什么触发形态与成本约束（见 origin 的三个选项）。
+**范围**：
 
-**非目标（⛔ 逐条排除，避免本条膨胀成「读数面总改造」）**：
-- ⛔ **不含 ①（跨部署/第三方环境健康度）**——归 GOAL-012 与 `gap-third-party-fixture-smoke-test-driver-family`（done，落在套件闸上）。
-- ⛔ **不含 ③（通用时序派生层）**——已另立 `gap-meta-readings-no-timeseries-derivation`。
-- ⛔ **不含修复 `quay-file-task` 技能名解析本身**——那是实例问题，归 `gap-filing-agent-skill-and-goal-mcp-unavailable-fallback`；本条问的是「这 12 次失败为何没有任何机件看见」。
-- ⛔ **不在本条内定阈值数值**——成本结构未实测前不设数值阈值（硬规则 4 推论一）；阈值属于选定方案后的实现细节。
+① **判据保真性判定**——给定一条 criterion 记录（`criterion` + `expect`），判「这条 criterion 能否在它 `expect` 声称的对象上取假」，三态输出 `faithful` / `vacuous` / `not-evaluated`；⛔ `not-evaluated` 不与 `faithful` 同形（硬规则 3b）。
 
-**已知成本约束（选 ① 时必须遵守）**：只把「聚合结果是否越过阈值」这个**位**进 `readingsDigest`，⛔ 不把原始计数进——计数每轮都变 ⇒ 摘要恒不相等 ⇒ 闸恒为真 ⇒ 每轮都烧 LLM。另：24h 内 871 个会话，`query_sessions` 的 stats_only 实测 >120s ⇒ 读语料**必须增量**（since = 上轮时刻）且**必须用聚合形态**，⛔ 不能每轮拉全量、更不能拉全文。
+② **接在【激活期】，不是关闭期**——落点是 `packages/quay/src/goal-store.ts` 的 P6 activation gate（draft→active 已经在跑一次 criterion 以要求它「**可评估**」）。本 goal 给同一个钩子加**第二问**：不止「跑得动」，还要「**测得着**」。
+   ⛔ 不接在关闭期：那等于让一条空洞判据先在 ~42 秒的热循环里绿着转，且 achieved 之后只有人能翻回（裁定 3：激活归人）。
+
+③ **复用充分性闸的既有机件与词表**——`AC-212/213/222` 的 `covered/insufficient/not-evaluated` 三态与 `parseSemanticSufficiencyVerdict` 的 fail-closed 手法；⛔ 不另起炉灶。
+
+④ **给硬规则 4c 补上产物**——「判据落笔当轮就要取一次真实读数」此前只是散文纪律、**无产物**（AC-224/225 的 origin 都写了「已干跑取真实读数」，而那是**自述**，与没跑同形）。
+
+**非目标（明确排除）**：
+
+- **不追求纯机械判定**——「criterion 是否测量了 expect 声称的对象」需要语义（同充分性闸 `covered` 那一半）；⛔ 不做一个做不出来的承诺。机械半只覆盖**可枚举**的部分（是否存在能取假的负控制）。
+- **不回溯重判存量 228 条 AC**——逐条重判的成本从未测量（硬规则 4 推论：成本结构未知前不设数值阈值）。本 goal 只管**从此刻起新激活的**；存量归例行/观察项。
+- **不改 I5 的语义、不与其合并**——两者方向相反（同 `goal-store.ts` 对 I4/I5 分工的 ⛔ never merged 注释）。
+- **不给 goal-driver 加反向翻转**——裁定 3（激活归人）原样保留。本 goal 让空洞判据**进不来**，不是让它**出得去**。
+- **不改任何现存 AC 的状态**——包括 AC-225 本身（它的 criterion 在扩面后已是真测量）。
 
 ## 退出条件
 
-1. 人在 origin 列出的三个选项中作出选择并留痕——**激活本条（draft→active）即裁定本身**；否决则保持 draft 或标 `superseded`。
-2. 若选 ① 或 ③：由该选择产生的实现工作**已立案**（含具体 Touches 与能取假的 AC），⛔ 不以「已回答」本身充当完成。
-3. 若选 ②（不纳入）：该判断连同理由写进可被后续读到的正本，且 meta-driver 的读数面说明中记明「动作记录不在读数范围内」——⛔ 不留成一个未被记录的默认（否则下一次有人扫语料又会重新发现同一件事）。
-4. ⚠️ **激活前须按 AC-217 给本 GOAL 至少配一条 AC 判据**（活跃 GOAL 无退出条件不可判定达成）——本条现为 draft 故尚不违反该判据。
+1. 一条 criterion 记录 draft→active 时，除「可评估」外还判一次「保真」：判出 `vacuous` ⇒ **拒绝激活**且理由可见；`not-evaluated` ⇒ **不放行**（fail-closed，⛔ 不与 `faithful` 同形）。
+2. 该判定**能取假**——双向突变用例：喂一条已知空洞的判据 ⇒ 必须判 `vacuous`；喂一条已知保真的判据 ⇒ 必须判 `faithful`。⛔ **恒 `faithful` 的保真性判定器正是它自己要禁的东西**（自指风险，见风险 2）。
+3. 判定结果与理由**落在记录自身**（字段或 statusLog 条目），⛔ 不只打印到 stderr——否则「判过且保真」与「没判成」在载体上同形。
+4. **既有 228 条 AC 的激活路径逐字不变**——只加一问，不改 I2/I4/I5 语义，不改任何现存记录状态。
+5. **AC-225 这个真实历史案例被用作回归夹具**：把 `aca7a0511` 之前的检查器形态 + AC-225 的 criterion/expect 喂进判定器 ⇒ 必须判 `vacuous`。⛔ 该夹具**逐字 vendor 进仓库**，不得锚在 commit SHA（硬规则 5b 已记：判据不得引用生命周期短于判据本身的对象——rebase/squash 后假阴性）。
+
+机器判据在本 GOAL 名下的 AC 记录里，**不在本节**。
+
+## 风险
+
+1. **语义判定的成本**——判定接在激活期而非每轮热循环：激活是低频事件（整个项目寿命至今 13 个 goal / 230 条 AC）⇒ 成本可接受。**但若有人把它接进 ~42 秒热循环就会原样重演 `gap-goal-gate-timestamp-commit-flood`**（实测 gate-events 最近 400 条全是 goal-driver 每 42 秒的 gate）。⇒ 落点必须钉在激活期钩子上，判据里要写明。
+2. **判定器自己空洞（自指，本 goal 最容易犯的错）**——一个总是判 `faithful` 的保真性判定器，正是本 goal 要禁的那一类东西，且它会**与「一切判据都保真」同形**。⇒ 退出条件 2 的双向突变用例是唯一对冲，且退出条件 5 要求其中一例是**真实历史案例**而非合成夹具（硬规则 4 推论三：只能被 fixture 满足的判据不是测量）。
+3. **误拒合法的短判据**——生产里有合法的 19 字符判据与 `exit 0` 形（`goal-store.ts` 注释已记，且其 re-write 负控制会拒绝它们）。⇒ 判准是「**能否在 expect 声称的对象上取假**」，⛔ 不是长度/复杂度/形态。
+4. **`not-evaluated` 变成事实上的全面拒绝闸**——语义判定不可用（超时/无凭据/读不懂）时 fail-closed 会挡住所有新 AC 激活。⇒ 需一条显式 `--force` 逃逸（同 P6 现有手法「我知道它不可评估」），且 **force 必须在记录里留痕**，⛔ 不得静默越权。
+5. **判据的类别纪律**（承 GOAL-012 同款）：本 GOAL 的判据只引用不会自行回退的量——代码状态与套件绿红；⛔ 不含进程存活/远程可达性/LLM 当次可用性。
+
+## 与其他 goal 的关系
+
+- **`GOAL-010`（goal 机制的语义闸）建的是 goal 层的一问**：「这组 AC 是否覆盖退出条件」（充分性，AC-212/213/222）。**本 goal 是它下一层的镜像**：「这条 criterion 是否测量了它 `expect` 声称的对象」（保真性）。同机件、同三态词表、同 fail-closed 手法 ⇒ ⛔ 不另起炉灶。
+- **`GOAL-012` 提供本 goal 的立条实证与退出条件 5 的历史夹具**，但**GOAL-012 不重开**（退出条件此刻实质成立，三读数已附）。分工：GOAL-012 = 那一类缺陷不再发生；**本 goal = 机制能在关门前发现自己没测到**。
+- **`GOAL-009` 是本 goal 的实证来源**（AC-207 的 `gate_events > 0` 恒不满足正是那处空洞判据放过去的缺陷造成的），但二者不共享 AC。
+- 受 I1′ cap=3 约束：立条时 active = `GOAL-009` 一条，本条激活后 **2/3**。
