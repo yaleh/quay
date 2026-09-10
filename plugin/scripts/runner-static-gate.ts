@@ -600,6 +600,17 @@ run_static_checks() {
   # 红钉住（硬规则 3/4）。
   # @static-tier full
   run_checker "config-key-consumer-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/config-key-consumer-check.ts" --root "${repo_root}"
+  echo "== host-repo-surface ratchet (GOAL-015 退出条件④ / AC-236, gap-host-repo-surface-ratchet) =="
+  # 本仓库表层单调棘轮：CLI 动词集（quay.ts --help 真实输出，⛔ 不读源码字面量——同时证明入口本身跑得起来）、
+  # web 路由集（serve-handlers.ts + serve.ts 的 url.pathname === "…" 位置命中）、有消费者的配置键集
+  # （config-key-consumer-check.ts --json 的 has-consumer，复用既有机件）三者逐一与已提交基线比对，
+  # 基线 ⊆ 当前才 exit 0——新增允许、删除/改名转红。⛔ 守的是 AC-233 修法会删掉 packages/quay/bin/quay.ts
+  # 这个本仓库自己的开发入口（CLAUDE.md Commands 段记的正本），删文件不产生失败断言（硬规则 3b）。
+  # 三态可区分：基线缺失 ⇒ exit 1（任务没做完）；源文件读不到 / 入口 spawn 失败 ⇒ exit 3 NOT-EVALUATED
+  # （stderr，硬规则 3b）。⛔ 落在 full（不 scoped）——全店枚举，不随单任务 Touches 收窄。负控制由
+  # mutation case 注入缩水即红钉住（硬规则 3/4）。
+  # @static-tier full
+  run_checker "host-repo-surface-ratchet" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/host-repo-surface-ratchet.ts" --root "${repo_root}"
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait
