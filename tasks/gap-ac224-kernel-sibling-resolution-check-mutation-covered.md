@@ -35,17 +35,17 @@ goal_ac: AC-224
 - `plugin/scripts/kernel-sibling-resolution-check.ts`
 - `plugin/scripts/checker-mutation-cases/kernel-sibling-resolution-check.sh`
 - `plugin/test/kernel-sibling-resolution-check.test.mjs`
-- `scripts/test.sh`
+- `plugin/scripts/runner-static-gate.ts`
 - `plugin/scripts/capability-catalog.sh`
 - `tasks/gap-ac224-kernel-sibling-resolution-check-mutation-covered.md`
 
 ## Acceptance Criteria
 
-- [ ] AC1 检查器存在且可跑：`test -f plugin/scripts/kernel-sibling-resolution-check.ts && node --no-warnings --experimental-strip-types plugin/scripts/kernel-sibling-resolution-check.ts --root . --json` 可执行且输出结构完整（含 violations 数组，非 spawn 失败）；贴输出前 3 条。
-- [ ] AC2 登记 covered:true：`bash plugin/scripts/checker-mutation-check.sh --list --json | python3 -c 'import json,sys; m=json.load(sys.stdin); ok=any(c.get("name")=="kernel-sibling-resolution-check" and c.get("covered") for c in m.get("checkers",[])); print("registered:",ok); sys.exit(0 if ok else 1)'` 输出 `registered: true`；贴 checkers 数组里该条目原文。
-- [ ] AC3 双向能取假（本条重点）：`node --no-warnings --experimental-strip-types --test plugin/test/kernel-sibling-resolution-check.test.mjs` 全绿，且断言覆盖两个方向——干净夹具 ⇒ 检查器绿；注入 `path.join(__dirname, "x.sh")` / `path.join(root, "plugin", "scripts", …)` / 模板字符串形态 **各一例** ⇒ 检查器红（三种形态逐条断言，⛔ 不止一种拼接形态，GOAL-012 风险 4）。
-- [ ] AC4 突变用例生效：`bash plugin/scripts/checker-mutation-cases/kernel-sibling-resolution-check.sh <tmpdir>` exit 0（baseline GREEN → inject → RED → restore → GREEN 全程证明，⛔ 非 STAYED-GREEN 非 ALWAYS-RED）。
-- [ ] AC5 判据翻转：AC-224 criterion 干跑 exit 0（贴完整命令与输出）。
+- [x] AC1 检查器存在且可跑：`test -f plugin/scripts/kernel-sibling-resolution-check.ts && node --no-warnings --experimental-strip-types plugin/scripts/kernel-sibling-resolution-check.ts --root . --json` 可执行且输出结构完整（含 violations 数组，非 spawn 失败）；贴输出前 3 条。
+- [x] AC2 登记 covered:true：`bash plugin/scripts/checker-mutation-check.sh --list --json | python3 -c 'import json,sys; m=json.load(sys.stdin); ok=any(c.get("name")=="kernel-sibling-resolution-check" and c.get("covered") for c in m.get("checkers",[])); print("registered:",ok); sys.exit(0 if ok else 1)'` 输出 `registered: true`；贴 checkers 数组里该条目原文。
+- [x] AC3 双向能取假（本条重点）：`node --no-warnings --experimental-strip-types --test plugin/test/kernel-sibling-resolution-check.test.mjs` 全绿，且断言覆盖两个方向——干净夹具 ⇒ 检查器绿；注入 `path.join(__dirname, "x.sh")` / `path.join(root, "plugin", "scripts", …)` / 模板字符串形态 **各一例** ⇒ 检查器红（三种形态逐条断言，⛔ 不止一种拼接形态，GOAL-012 风险 4）。
+- [x] AC4 突变用例生效：`bash plugin/scripts/checker-mutation-cases/kernel-sibling-resolution-check.sh <tmpdir>` exit 0（baseline GREEN → inject → RED → restore → GREEN 全程证明，⛔ 非 STAYED-GREEN 非 ALWAYS-RED）。
+- [x] AC5 判据翻转：AC-224 criterion 干跑 exit 0（贴完整命令与输出）。
 
 ## Definition of Done
 
