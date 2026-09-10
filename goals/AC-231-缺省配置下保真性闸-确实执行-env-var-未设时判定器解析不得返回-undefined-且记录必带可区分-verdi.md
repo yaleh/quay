@@ -2,7 +2,7 @@
 id: AC-231
 title: 缺省配置下保真性闸【确实执行】——env var 未设时判定器解析不得返回 undefined，且记录必带可区分 verdict（GOAL-013
   退出条件①③）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-013
 criterion: node --no-warnings --experimental-strip-types --test
@@ -41,4 +41,12 @@ origin: 'GOAL-013 的机器判据之一，人 2026-09-10 授权补立。立条�
   tasks/gap-fidelity-judge-unwired-in-production-and-verdict-stubbed-in-tests（本条
   = 该任务 AC2 在 goal 层的锚点）。本条判据在立条当轮已干跑取真实读数：exit 1（"Could not find <file>" ⇒
   可评估、非 spawn 失败），符合硬规则 4c。判据只引用不会自行回退的量——代码状态与套件绿红，⛔ 不含进程存活/远程可达性/LLM 当次可用性。'
+activatedAt: 2026-09-10T11:39:29.189Z
+statusLog:
+  - at: 2026-09-10T11:39:29.189Z
+    from: draft
+    to: active
+    actor: cli:human-ruling-2026-09-10
+    reason: 人 2026-09-10 授权补立：趁 GOAL-013 仍 active（I4 已报
+      divergent）钉住「闸在生产缺省配置下确实执行」，防它在闸从未执行的情况下 flip achieved
 ---
