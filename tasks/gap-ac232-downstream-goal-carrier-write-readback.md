@@ -2,7 +2,7 @@
 id: gap-ac232-downstream-goal-carrier-write-readback
 title: 下游 goal 载体必须能写、能读回——AC-206 只断言目录建了与可读，补 goal 写+读回 e2e 步骤落
   ac=GOAL-009-AC-232 记录（AC-232）
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical
