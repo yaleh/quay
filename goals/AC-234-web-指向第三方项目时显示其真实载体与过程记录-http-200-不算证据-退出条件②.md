@@ -30,10 +30,17 @@ criterion: >-
   sys.exit(1)
 
   P
-expect: 读真实第三方项目取得的记录： 且 host≠本机 ∧ project_root∉本仓库 ∧ **tasks_rendered>0 ∧
-  goals_rendered>0 ∧
-  round_records_rendered>0**。三个计数缺一不可——只断言服务起得来会与「渲染出空壳页面」同形（硬规则
-  4：结构上不可能取假的量不是测量；GOAL-015 风险 2 逐字点名「HTTP 200 不算证据」）。立条时载体无该记录 ⇒ exit 1。
+expect: >-
+  读**真实第三方项目**取得的记录：`ac="GOAL-015-AC-234"` 且 `host ≠ 本机` ∧ `project_root ∉ 本仓库`
+  ∧ **`tasks_rendered > 0` ∧ `goals_rendered > 0` ∧ `round_records_rendered >
+  0`**。
+
+
+  三个计数缺一不可——只断言「服务起得来」会与「渲染出一个空壳页面」同形（硬规则 4：结构上不可能取假的量不是测量）。GOAL-015 风险 2 逐字点名：⛔
+  HTTP 200 不算证据，判据必须落到具体载体内容（task/goal 记录、round jsonl）。
+
+
+  立条时载体无该记录 ⇒ 干跑 exit 1（可评估且红）。证据取回同 AC-207：远端产出不会自动回本机载体，须显式取回并复跑判据，⛔ 不得手写/注入。
 origin: >-
   GOAL-015 的机器判据之一。立条依据见 GOAL-015 的 origin（人 2026-09-10 令「应当优先更新 goal；必要时可创建新
   goal」后设立；实测缺口：orangevps Node 18.19.1 上 shipped CLI 拒跑而同机 driver dist
