@@ -59,6 +59,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import YAML from "yaml";
 import {
   parseFrontmatter,
@@ -70,6 +71,7 @@ import {
 import { runAcceptance } from "./gate/acceptance-runner.ts";
 import { queryGateEvents } from "./gate/gate-event-store.ts";
 import { commitStoreWrite, commitStoreBatch, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
+import { criterionFidelityVerdict, type FidelityInvokeJudge } from "./criterion-fidelity.ts";
 
 export const VALID_GOAL_STATUSES = ["draft", "active", "achieved", "superseded", "retired", "needs-human"];
 
@@ -97,7 +99,7 @@ export const GOAL_ACCEPTANCE_ACTIVE_ENV = "QUAY_GOAL_ACCEPTANCE_ACTIVE";
 // (any future field) is preserved verbatim — the same discipline as adr-store/document-store.
 const OWNED_KEYS = new Set([
   "id", "title", "status", "kind", "goal", "criterion", "expect", "origin", "activatedAt", "statusLog",
-  "labels", "posture", "supersedes", "superseded-by", "long-term",
+  "labels", "posture", "supersedes", "superseded-by", "long-term", "fidelity",
 ]);
 
 // ── evidence is ledger-DERIVED (gap-goal-evidence-cache-should-not-enter-git) ───────────────────
@@ -205,6 +207,8 @@ interface GoalFrontmatter {
   "superseded-by"?: string[];
   /** AC-216：显式「长期保证」声明——`true` 的 achieved AC 其 GOAL 已 achieved/关闭也仍在 I5 复验域。 */
   "long-term"?: boolean;
+  /** 保真性闸（GOAL-013）——draft→active 激活时保真性判定的结果与理由，落在记录自身（⛔ 不只 stderr）。 */
+  fidelity?: { verdict: string; reason: string; at: string };
 }
 
 interface GoalFilter {
@@ -231,6 +235,8 @@ interface GoalViewModel {
   supersededBy: unknown[];
   /** AC-216：`long-term: true` 的 achieved AC 跨 GOAL 关闭仍在 I5 复验域（frontmatter `long-term` 投影）。 */
   longTerm: unknown;
+  /** 保真性闸（GOAL-013）——激活期保真性判定的结果与理由（frontmatter `fidelity` 投影）。 */
+  fidelity: unknown;
   body: string;
   updatedAt?: number;
   /** Ledger-derived (never stored, never mtime): the record's most recent goal-gate-event time. */
@@ -330,14 +336,22 @@ function commitGoalFile(goalDir: string, fileName: string, id: string, action: s
 
 /**
  * @param {string} goalDir absolute path to the goal directory (e.g. `<workspaceRoot>/goals`)
- * @param {{cap?: number, staleMs?: number}} opts I1′/I3 policy values; default cap=3, stale=7d
- *   (readGoalConfig supplies the .quay/config.yml values at the CLI entry; library callers that
- *   only list/get omit opts and get the defaults).
+ * @param {{cap?: number, staleMs?: number, fidelityJudge?: FidelityInvokeJudge}} opts I1′/I3 policy
+ *   values (default cap=3, stale=7d — readGoalConfig supplies the .quay/config.yml values at the CLI
+ *   entry) + the GOAL-013 fidelity-judge seam. `fidelityJudge` is OPTIONAL: when absent, the
+ *   draft→active fidelity question is SKIPPED (the pre-GOAL-013 activation path is verbatim
+ *   unchanged — a caller that only lists/gets, or a mechanical flipper with no judge wired, behaves
+ *   exactly as before). When present, the P6 gate asks the second question ("can it be false on the
+ *   claimed object") and rejects vacuous/not-evaluated criteria.
  */
-export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?: number } = {}) {
+export function createGoalStore(
+  goalDir: string,
+  opts: { cap?: number; staleMs?: number; fidelityJudge?: FidelityInvokeJudge } = {},
+) {
   fs.mkdirSync(goalDir, { recursive: true });
   const cap = opts.cap ?? DEFAULT_GOAL_CAP;
   const staleMs = opts.staleMs ?? DEFAULT_STALE_MS;
+  const fidelityJudge = opts.fidelityJudge;
 
   function assertSafeId(id: string) {
     if (typeof id !== "string" || !(GOAL_ID_RE.test(id) || AC_ID_RE.test(id))) {
@@ -374,6 +388,7 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       origin: frontmatter.origin,
       posture: frontmatter.posture,
       longTerm: frontmatter["long-term"] === true,
+      fidelity: frontmatter.fidelity,
       evidence,
       // Own-record time (a criterion): lastProgressAt = its LAST gate=goal event, firstEvidenceAt =
       // its FIRST. A GOAL's own fields are undefined here (GOALs carry no criterion and are never
@@ -774,6 +789,35 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
         console.error(`goal-store: activated ${id} — criterion ran in ${wallMs}ms (${gateRes.ok ? "pass" : "fail"})`);
       }
 
+      // P6b — fidelity question (GOAL-013, gap-criterion-fidelity-gate-activation-blind-to-vacuous-
+      // criteria): the evaluability gate above proves the criterion can RUN; this proves it can be
+      // FALSE on the object its `expect` claims (hard rule 4 — a quantity structurally incapable of
+      // being false is not a measurement). Only fires when a judge is wired (`fidelityJudge` seam);
+      // absent ⇒ the pre-GOAL-013 activation path is verbatim unchanged. ⛔ NOT in the ~42s hot
+      // loop — this is the activation hook only (goal-driver's per-round gate path never calls it).
+      if (activating && !isGoalRecord && !force && typeof fidelityJudge === "function") {
+        const fidelityCmd = typeof frontmatter.criterion === "string" ? frontmatter.criterion : "";
+        const expectText = typeof frontmatter.expect === "string" ? frontmatter.expect : "";
+        const fidelityRoot = resolveGitRoot(goalDir) ?? path.dirname(goalDir);
+        const fRes = criterionFidelityVerdict(fidelityCmd, expectText, fidelityJudge, { root: fidelityRoot });
+        if (fRes.verdict === "vacuous" || fRes.verdict === "not-evaluated") {
+          throw new Error(`cannot activate ${id}: criterion ${fRes.verdict} (${fRes.reason}) — pass --force to override`);
+        }
+        // 判定结果 + 理由落在记录自身 (GOAL-013 退出条件③) — ⛔ 不只打印 stderr，否则「判过且保真」
+        // 与「没判成」在载体上同形。
+        frontmatter.fidelity = { verdict: fRes.verdict, reason: fRes.reason, at: new Date().toISOString() };
+      }
+
+      // P6c — force escape trace (GOAL-013 风险 4): `--force` skips BOTH activation gates. The
+      // override must leave a trace on the record itself, ⛔ never a silent overreach.
+      if (activating && !isGoalRecord && force) {
+        frontmatter.fidelity = {
+          verdict: "forced",
+          reason: "--force override (skipped evaluability + fidelity gates)",
+          at: new Date().toISOString(),
+        };
+      }
+
       // P3 — status-change provenance (gap-goal-store-write-surface-semantics): `activatedAt`
       // (first-activation timestamp) + `statusLog` (append-only status-change history).
       //
@@ -837,7 +881,7 @@ export function createGoalStore(goalDir: string, opts: { cap?: number; staleMs?:
       const ordered: GoalFrontmatter = {};
       for (const k of [
         "id", "title", "status", "kind", "goal", "criterion", "expect", "origin", "activatedAt", "statusLog",
-        "labels", "posture", "supersedes", "superseded-by", "long-term",
+        "labels", "posture", "supersedes", "superseded-by", "long-term", "fidelity",
       ]) {
         if (frontmatter[k] !== undefined) ordered[k] = frontmatter[k];
       }
@@ -977,7 +1021,28 @@ async function main(argv: string[]) {
   const goalDir = path.join(root, "goals");
   const logPath = path.join(root, ".quay", "gate-events.jsonl");
   const goalCfg = readGoalConfig(root);
-  const store = createGoalStore(goalDir, { cap: goalCfg.cap, staleMs: goalCfg.staleMs });
+  // GOAL-013 fidelity-judge seam (`QUAY_GOAL_FIDELITY_JUDGE`): the CLI does NOT spawn an LLM itself
+  // (Core carries no process responsibility — criterion-fidelity.ts is pure). When this env var
+  // names a judge command PREFIX, the CLI builds a synchronous spawnSync seam (the prompt is appended
+  // as the LAST argv element — the same convention as goal-driver's `sufficiencyCmd` array). Unset ⇒
+  // fidelityJudge undefined ⇒ the pre-GOAL-013 activation path is verbatim unchanged (fails-open).
+  // ⛔ The value is a whitespace-split argv prefix (⛔ no shell metacharacters / quotes), matching
+  // driver-runtime.splitArgs semantics — a real LLM prefix ends in `-p` so the prompt lands as its
+  // one argv element; a test prefix is e.g. `node -e <js-without-spaces>`.
+  let fidelityJudge: FidelityInvokeJudge | undefined;
+  const judgeCmd = process.env.QUAY_GOAL_FIDELITY_JUDGE;
+  if (judgeCmd && judgeCmd.trim() !== "") {
+    const judgeArgv = judgeCmd.trim().split(/\s+/);
+    fidelityJudge = (prompt: string) => {
+      const r = spawnSync(judgeArgv[0], [...judgeArgv.slice(1), prompt], {
+        encoding: "utf8",
+        timeout: 120_000,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      return { stdout: typeof r.stdout === "string" ? r.stdout : null, exitCode: r.status ?? null };
+    };
+  }
+  const store = createGoalStore(goalDir, { cap: goalCfg.cap, staleMs: goalCfg.staleMs, fidelityJudge });
 
   const [sub, ...rest] = args;
   switch (sub) {
