@@ -235,6 +235,7 @@ export {
   type LivenessResult,
 } from "./driver-runtime.ts";
 import { computeDocCheckFaceKey, readDocCheckCache, writeDocCheckCache } from "./doc-check-cache.ts";
+import { parse as parseYaml } from "yaml";
 
 // ── 常量 ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -1163,12 +1164,91 @@ function acCheckNote(): string {
   ].join(" ");
 }
 
+/** 单一定义点：一个目录内本仓库测试入口 scripts/test.sh 的绝对路径（第三方项目 quay-init 不铺
+ *  scripts/ 目录，无此文件）。⛔ 其余处不再各自 path.join(dir, "scripts", "test.sh")。 */
+function testShAt(dir: string): string {
+  return path.join(dir, "scripts", "test.sh");
+}
+
+/** 一个目录是否「本仓库形态」（有 scripts/test.sh）——第三方项目无此文件，doc-check / scoped-gate /
+ *  suite 三步据此退化为「跳过 / 委托 loop.test_command」，⛔ 不调用本仓库专属脚本。 */
+function hasTestSh(dir: string): boolean {
+  return fs.existsSync(testShAt(dir));
+}
+
+/** 单引号 shell 转义（第三方 test_command 需 `cd <worktree> && <test_command>` 在工作树内跑——worktree
+ *  路径可能含空格/特殊字符，⛔ 不裸拼）。 */
+function shq(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/** 读 <dir>/.quay/config.yml 的 loop.test_command（第三方项目 quay-init --loop 写入的全量测试命令，
+ *  如 `node --test`）。缺失/不可解析/非字符串 ⇒ null。⛔ 不依赖 packages/quay/src/config.ts
+ *  （第三方安装物可能无 packages/ 树）——直接 YAML 读，与 driver-config.ts 同法。 */
+function readLoopTestCommand(dir: string): string | null {
+  const file = path.join(dir, ".quay", "config.yml");
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(text);
+  } catch {
+    return null;
+  }
+  const loop = (parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).loop : undefined) as
+    | Record<string, unknown>
+    | undefined;
+  const cmd = loop && typeof loop === "object" ? (loop as Record<string, unknown>).test_command : undefined;
+  return typeof cmd === "string" && cmd.trim() ? cmd.trim() : null;
+}
+
+/** scoped-gate 命令的解析结果（gap-driver-fanin-hardcoded-test-sh-third-party）：
+ *  - run  argv  — 本仓库（有 scripts/test.sh）⇒ bash <argvDir>/scripts/test.sh --for-task <task>
+ *                --allow-thin（与修改前逐字一致）；第三方（无 test.sh 但有 loop.test_command）⇒
+ *                bash -c <test_command>（全量，第三方无 "scoped" 能力）。
+ *  - skip       — 两者皆无 ⇒ 第三方项目无 scoped 能力，fan-in 跳过 scoped 门直接进全量 suite 步骤。
+ *  argvDir 拼命令路径、capabilityDir 判能力（execution 侧二者都 = worktree；prompt 侧 capabilityDir
+ *  = root、argvDir = 占位符 worktree 路径——同一 repo 二者同形，因 scripts/test.sh 与 .quay/config.yml
+ *  都随 worktree 铺出）。 */
+export type ScopedGateResolution =
+  | { kind: "run"; argv: string[] }
+  | { kind: "skip"; reason: string };
+
+/** 解析 scoped-gate 命令（单一真相源，fan-in 执行侧与 worker prompt 侧共用——⛔ 两处不得出现两套
+ *  标准）。 */
+export function resolveScopedGateCommand(task: string, capabilityDir: string, argvDir: string): ScopedGateResolution {
+  if (hasTestSh(capabilityDir)) {
+    return { kind: "run", argv: ["bash", testShAt(argvDir), "--for-task", task, "--allow-thin"] };
+  }
+  const testCommand = readLoopTestCommand(capabilityDir);
+  if (testCommand !== null) {
+    // 第三方全量 test_command（如 `node --test`）依赖 cwd 定位测试树 ⇒ 显式 cd 进 argvDir（execution
+    // 侧 = worktree）再跑。⛔ step()/mechSh spawn 不设 cwd（驱动 cwd 是主检出，非 worktree）。
+    return { kind: "run", argv: ["bash", "-c", `cd ${shq(argvDir)} && ${testCommand}`] };
+  }
+  return { kind: "skip", reason: "third-party-no-scoped-tooling" };
+}
+
 /** 机械 fan-in 的 scoped 门缺省命令（gap-worker-premerge-scoped-gate-cache 抽成单一真相源）：
- *  bash <worktree>/scripts/test.sh --for-task <task> --allow-thin。fan-in 侧（runMechanicalFanIn 的
- *  scopedCmd）与 worker prompt 侧（preMergeNote 的「跑与 fan-in 相同的 scoped 门」）共用——⛔ 两处不得
- *  出现两套标准。 */
-export function scopedGateCommandFor(task: string, worktree: string): string[] {
-  return ["bash", path.join(worktree, "scripts", "test.sh"), "--for-task", task, "--allow-thin"];
+ *  bash <worktree>/scripts/test.sh --for-task <task> --allow-thin（本仓库）；第三方项目无
+ *  scripts/test.sh ⇒ 退化为 loop.test_command（bash -c <test_command>）；两者皆无 ⇒ null（fan-in 跳过
+ *  scoped 门）。⛔ 不再是唯一硬编码的 worktree scripts/test.sh 路径（本缺陷）。 */
+export function scopedGateCommandFor(task: string, worktree: string): string[] | null {
+  const r = resolveScopedGateCommand(task, worktree, worktree);
+  return r.kind === "run" ? r.argv : null;
+}
+
+/** 机械 fan-in 的 doc-check 缺省命令（gap-driver-fanin-hardcoded-test-sh-third-party）：
+ *  本仓库有 scripts/test.sh ⇒ bash <worktree>/scripts/test.sh --static-checks-doc（与修改前逐字一致）；
+ *  第三方项目无该文件 ⇒ null（fan-in 跳过 doc-check，可区分取值 third-party-no-doc-check-tooling，
+ *  ⛔ 不与「doc 检查真的跑了且失败」同形——硬规则 3b）。 */
+export function docCheckCommandFor(worktree: string): string[] | null {
+  const testSh = testShAt(worktree);
+  return hasTestSh(worktree) ? ["bash", testSh, "--static-checks-doc"] : null;
 }
 
 /** 解析本 kernel 的一个 shell sibling（.sh）到 kernel plugin root 的 scripts/<name>（⛔ 非 root ——
@@ -1215,14 +1295,25 @@ function scopedGateCacheWriteSignature(task: string, root: string, worktree: str
  *  而非纯机械脚本：收益不只是「更早发现问题」，而是「很大一部分冲突在此被直接解决掉，根本不再进入
  *  fan-in 失败路径」。创建 prompt 与续做 prompt 共用（worktree 路径由调用方填）。 */
 function preMergeNote(task: string, root: string, worktree: string): string {
-  return [
+  const scoped = resolveScopedGateCommand(task, root, worktree);
+  const lines = [
     `before exiting, do the pre-merge + scoped-gate step in your worktree:`,
     `(i) merge develop into your worktree (\`git -C ${worktree} merge --no-edit develop\`) — resolve any conflict with the Edit tool, do NOT skip;`,
-    `(ii) run the SAME scoped gate the driver's fan-in runs: \`${scopedGateCommandFor(task, worktree).join(" ")}\`;`,
-    `(iii) if red, fix and rerun until green;`,
-    `(iv) once green, record the scoped-gate cache so fan-in skips the now-redundant scoped gate: \`${scopedGateCacheWriteSignature(task, root, worktree)}\`;`,
-    `(v) commit and exit.`,
-  ].join(" ");
+  ];
+  if (scoped.kind === "run") {
+    lines.push(
+      `(ii) run the SAME scoped gate the driver's fan-in runs: \`${scoped.argv.join(" ")}\`;`,
+      `(iii) if red, fix and rerun until green;`,
+      `(iv) once green, record the scoped-gate cache so fan-in skips the now-redundant scoped gate: \`${scopedGateCacheWriteSignature(task, root, worktree)}\`;`,
+      `(v) commit and exit.`,
+    );
+  } else {
+    lines.push(
+      `(ii) skip the scoped gate (${scoped.reason}: third-party project has no scripts/test.sh and no loop.test_command — the driver's fan-in goes straight to the full-suite step);`,
+      `(iii) commit and exit.`,
+    );
+  }
+  return lines.join(" ");
 }
 
 /** dispatch-worktree-setup.sh 调用签名（gap-dispatch-worktree-setup-zero-production-callers）：每个
@@ -2864,10 +2955,12 @@ export interface MechanicalFanInOptions {
    *  用它）。gap-mechanical-fan-in-per-suite-runid-unified。 */
   perSuiteRunId?: string;
   mergeTarget?: string;
-  /** suite 命令（测试缝）；缺省 = node full-suite-runner.ts --buckets <task>（--root <worktree>
-   *  --state-dir <root>/.quay --runner inner --log-file <suiteLogFile>）。gap-fan-in-red-bucket-run-
-   *  not-recorded：机械路径不再跑平行 `bash scripts/test.sh --buckets`（绕开 verification-round 唯一
-   *  writer），改走正确的 runner——green+red 桶轮次都入 verification-round.jsonl（state=red 记录可见）。 */
+  /** suite 命令（测试缝）；缺省 = defaultMechanicalSuiteCommand（本仓库 node full-suite-runner.ts
+   *  --buckets <task> --root <worktree> --state-dir <root>/.quay --runner inner --log-file
+   *  <suiteLogFile>；第三方项目无 scripts/test.sh ⇒ bash -c "cd <worktree> && <loop.test_command>"）。
+   *  gap-fan-in-red-bucket-run-not-recorded：机械路径不再跑平行 `bash scripts/test.sh --buckets`
+   *  （绕开 verification-round 唯一 writer），改走正确的 runner——green+red 桶轮次都入
+   *  verification-round.jsonl（state=red 记录可见）。 */
   suiteCommand?: string[];
   /** suite 单飞槽 base（测试缝）；缺省 = suiteLockBase(root)。 */
   slotBase?: string;
@@ -2882,9 +2975,11 @@ export interface MechanicalFanInOptions {
   suiteCapture?: string;
   /** 强制跑 suite（跳过 doc-only 判定；测试缝）。 */
   forceSuite?: boolean;
-  /** scoped 门命令（测试缝）；缺省 = bash <worktree>/scripts/test.sh --for-task <task> --allow-thin。 */
+  /** scoped 门命令（测试缝）；缺省 = scopedGateCommandFor(task, worktree)（本仓库 test.sh --for-task；
+   *  第三方退化为 loop.test_command；两者皆无 ⇒ null 跳过 scoped 门）。 */
   scopedGateCommand?: string[];
-  /** doc 检查命令（测试缝）；缺省 = bash <worktree>/scripts/test.sh --static-checks-doc。 */
+  /** doc 检查命令（测试缝）；缺省 = docCheckCommandFor(worktree)（本仓库 test.sh --static-checks-doc；
+   *  第三方无该文件 ⇒ null 跳过 doc-check）。 */
   docCheckCommand?: string[];
   /** doc-check 缓存文件（测试缝）；缺省 = <root>/.quay/doc-check-cache.json（gitignored 运行时缓存，
    *  gap-fan-in-doc-check-cache）。doc 面未变时命中缓存跳过 doc-check（~0s），变化失效重跑。 */
@@ -3424,15 +3519,30 @@ export function defaultMechanicalSuiteCommand(opts: {
   suiteLogFile: string;
   runId: string;
 }): string[] {
-  return [
-    "node", "--no-warnings", ...kernelSiblingArgv("full-suite-runner.ts"),
-    "--buckets", opts.task,
-    "--root", opts.worktree,
-    "--state-dir", path.join(opts.root, ".quay"),
-    "--runner", "inner",
-    "--log-file", opts.suiteLogFile,
-    "--run-id", opts.runId,
-  ];
+  // 本仓库（scripts/test.sh 存在）⇒ full-suite-runner（本仓库 bucket 化测试基建，行为与修改前逐字
+  // 一致）；第三方项目无该文件 ⇒ 直接委托 loop.test_command（全量）——⛔ 不调用 full-suite-runner
+  // （其内部锚点假设本仓库结构，gap-driver-fanin-hardcoded-test-sh-third-party 范围扩展：修 5 处
+  // __dirname 是治标，第三方本就不该走这条路径）。
+  if (hasTestSh(opts.worktree)) {
+    return [
+      "node", "--no-warnings", ...kernelSiblingArgv("full-suite-runner.ts"),
+      "--buckets", opts.task,
+      "--root", opts.worktree,
+      "--state-dir", path.join(opts.root, ".quay"),
+      "--runner", "inner",
+      "--log-file", opts.suiteLogFile,
+      "--run-id", opts.runId,
+    ];
+  }
+  const testCommand = readLoopTestCommand(opts.worktree);
+  if (testCommand !== null) {
+    // 第三方全量 test_command（如 `node --test`）依赖 cwd 定位测试树 ⇒ 显式 cd 进 worktree 再跑
+    // （spawnSuiteAndWait spawn 不设 cwd）。
+    return ["bash", "-c", `cd ${shq(opts.worktree)} && ${testCommand}`];
+  }
+  // 无 scripts/test.sh 且无 loop.test_command ⇒ 无测试能力（quay-init 对第三方已 fail-closed 缺
+  // test_command，此分支仅防半初始化工作区）。fail-closed 且可区分（⛔ 与「suite 跑了且失败」同形）。
+  return ["bash", "-c", `echo 'third-party-no-test-tooling: no scripts/test.sh and no loop.test_command' >&2; exit 127`];
 }
 
 /** fan-in 过程日志文件名（`.quay/fan-in-<task>-<runId>.log` 的 basename）。runId 唯一后缀 ⇒ 跨 relaunch
@@ -3758,13 +3868,21 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     // 5. ts-typecheck ∥ doc-check 并行（merge+anti-drift 后二者相互独立，可并行；doc-check 提前到
     //    scoped-gate 之前——廉价失败先于昂贵）。合并为一次 gate 判定：任一非零 ⇒ red → 语义会话兜底。
     //    失败报告顺序 typecheck 先于 doc-check（与串行序一致——AC3 判定一致性的读面）。
-    const docCmd = opts.docCheckCommand ?? ["bash", path.join(worktree, "scripts", "test.sh"), "--static-checks-doc"];
+    const docCmd = opts.docCheckCommand ?? docCheckCommandFor(worktree);
     // doc-check 缓存（gap-fan-in-doc-check-cache）：doc 面 = run_doc_checks 读的全部输入（@static-object
     // 判定对象 + plugin/scripts 检查器/仪器面 + scripts/test.sh + .gitignore + 全树文件结构）。面未变 ⇒
     // 命中上次绿 verdict（~0s，reason=cache-hit）；面变 ⇒ 失效重跑。⛔ 只缓存绿、⛔ 键算不出 ⇒ 照跑（fail-closed）。
     const docCacheFile = opts.docCheckCacheFile ?? path.join(root, ".quay", "doc-check-cache.json");
     const docCheckLeg = async (): Promise<MechShResult> => {
       const t0 = Date.now();
+      // 第三方项目：无 doc-check 工具（scripts/test.sh 不存在）⇒ 跳过，可区分取值
+      // third-party-no-doc-check-tooling（⛔ 不与「doc 检查真的跑了且失败」同形，硬规则 3b）。
+      if (docCmd === null) {
+        const reason = "third-party-no-doc-check-tooling";
+        appendFanInStepTrace(root, task, runId, "doc-check", "end", { ok: true, reason });
+        trace({ step: "doc-check", exit: 0, wall_ms: Date.now() - t0, ok: true, reason });
+        return { ok: true, status: 0, stdout: "", stderr: "", error: null };
+      }
       const docKey = computeDocCheckFaceKey(worktree);
       const cachedDocOk = docKey === null ? null : readDocCheckCache(docCacheFile, docKey);
       if (cachedDocOk === true) {
@@ -3794,13 +3912,21 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     const scopedCmd = opts.scopedGateCommand ?? scopedGateCommandFor(task, worktree);
     const scopedCacheFile = opts.scopedGateCacheFile ?? path.join(root, ".quay", "scoped-gate-cache.json");
     const scopedT0 = Date.now();
-    const scopedDevelopSha = (await mechSh(["git", "-C", worktree, "rev-parse", mergeTarget], 30_000)).stdout.trim();
-    const scopedCacheHit = scopedDevelopSha !== "" && readScopedGateCache(scopedCacheFile, scopedGateKey(task, scopedDevelopSha)) === true;
-    if (scopedCacheHit) {
-      trace({ step: "scoped-gate", exit: 0, wall_ms: Date.now() - scopedT0, ok: true, reason: "cache-hit(worker-premerge)" });
+    // 第三方项目：无 scoped 能力（scripts/test.sh 与 loop.test_command 皆无）⇒ 跳过 scoped 门直接进
+    // 全量 suite，可区分取值 third-party-no-scoped-tooling（⛔ 不与「scoped 门跑了且失败」同形，硬规则 3b）。
+    if (scopedCmd === null) {
+      const reason = "third-party-no-scoped-tooling";
+      appendFanInStepTrace(root, task, runId, "scoped-gate", "end", { ok: true, reason });
+      trace({ step: "scoped-gate", exit: 0, wall_ms: Date.now() - scopedT0, ok: true, reason });
     } else {
-      a = await step("scoped-gate", scopedCmd, 600_000);
-      if (!a.ok) return fail("scoped-gate", a);
+      const scopedDevelopSha = (await mechSh(["git", "-C", worktree, "rev-parse", mergeTarget], 30_000)).stdout.trim();
+      const scopedCacheHit = scopedDevelopSha !== "" && readScopedGateCache(scopedCacheFile, scopedGateKey(task, scopedDevelopSha)) === true;
+      if (scopedCacheHit) {
+        trace({ step: "scoped-gate", exit: 0, wall_ms: Date.now() - scopedT0, ok: true, reason: "cache-hit(worker-premerge)" });
+      } else {
+        a = await step("scoped-gate", scopedCmd, 600_000);
+        if (!a.ok) return fail("scoped-gate", a);
+      }
     }
 
     // 7. suite（driver 子进程 + 异步 poll，⛔ 不 detach——AC3）。suite_head 在 merge + 各闸之后取。

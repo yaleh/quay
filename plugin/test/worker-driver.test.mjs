@@ -125,6 +125,8 @@ import {
   adoptOrphanWorker,
   WORKER_DISPATCH_REL,
   scopedGateCommandFor,
+  resolveScopedGateCommand,
+  docCheckCommandFor,
   scopedGateKey,
   readScopedGateCache,
   writeScopedGateCache,
@@ -566,17 +568,21 @@ test("gap-suite-lock-starvation AC2 — readLockMetricsForRun reads lock_wait_ms
 // 红桶轮次零记录——硬规则 3b「没跑过」与「跑了但红」同形）。现在缺省命令统一到 full-suite-runner.ts
 // --buckets：green+red 桶轮次都在 suite 退出时入账，/tests 趋势账本看到完整真相。
 
-test("AC2 — the mechanical fan-in default suite command is full-suite-runner.ts --buckets (not a parallel test.sh harness)", () => {
+test("AC2 — the mechanical fan-in default suite command is full-suite-runner.ts --buckets（本仓库形态：scripts/test.sh 存在）", (t) => {
+  const wt = fs.mkdtempSync(path.join(os.tmpdir(), "mech-suite-quay-"));
+  t.after(() => fs.rmSync(wt, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(wt, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(wt, "scripts", "test.sh"), "#!/usr/bin/env bash\nexit 0\n", "utf8");
   const cmd = defaultMechanicalSuiteCommand({
     task: "gap-mech-red-bucket",
-    worktree: "/tmp/wt",
+    worktree: wt,
     root: "/tmp/root",
     suiteLogFile: "/tmp/fan-in-suite-gap-mech-red-bucket.log",
     runId: "mfi-gap-mech-red-bucket-1788022868-abc123",
   });
   assert.ok(cmd.some((a) => a.endsWith("full-suite-runner.ts")), "the default suite command must be full-suite-runner.ts");
   assert.ok(cmd.includes("--buckets") && cmd.includes("gap-mech-red-bucket"), "must pass --buckets <task>");
-  assert.ok(cmd.includes("--root") && cmd.includes("/tmp/wt"), "must pass --root <worktree> (the tested checkout)");
+  assert.ok(cmd.includes("--root") && cmd.includes(wt), "must pass --root <worktree> (the tested checkout)");
   assert.ok(cmd.includes("--state-dir") && cmd.includes("/tmp/root/.quay"), "must pass --state-dir <root>/.quay (the shared checkout ledger)");
   assert.ok(cmd.includes("--runner") && cmd.includes("inner"), "must pass --runner inner (explicit layer identity)");
   assert.ok(cmd.includes("--log-file") && cmd.includes("/tmp/fan-in-suite-gap-mech-red-bucket.log"), "must pass --log-file <suiteLogFile> (the silence-watchdog tee)");
@@ -586,34 +592,37 @@ test("AC2 — the mechanical fan-in default suite command is full-suite-runner.t
   assert.ok(!cmd.some((a) => a.includes("scripts/test.sh")), "must NOT run a parallel `bash scripts/test.sh` harness");
 });
 
-// gap-plugin-root-resolution-remaining-callsites-round2 AC2 负控制：第三方项目（quay-init 布下的面）
-// 无 plugin/scripts/*.ts，只有 shipped dist/*.js。defaultMechanicalSuiteCommand 的 full-suite-runner 经
-// kernelSiblingArgv 回退到 dist/full-suite-runner.js 且不带 --experimental-strip-types（stripTypes=false）。
-test("defaultMechanicalSuiteCommand — 无 plugin/ 的第三方项目解析到 shipped dist/full-suite-runner.js（stripTypes=false）", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "mech-suite-third-party-"));
-  try {
-    const dist = path.join(root, "scripts", "dist");
-    fs.mkdirSync(dist, { recursive: true });
-    fs.writeFileSync(path.join(dist, "full-suite-runner.js"), "// bundled\n", "utf8");
-    const saved = process.env.QUAY_PLUGIN_ROOT;
-    process.env.QUAY_PLUGIN_ROOT = root; // resolveKernelScriptsDir() = <root>/scripts，无 <root>/scripts/*.ts
-    try {
-      const cmd = defaultMechanicalSuiteCommand({
-        task: "gap-mech-red-bucket",
-        worktree: "/tmp/wt",
-        root: "/tmp/root",
-        suiteLogFile: "/tmp/fan-in-suite.log",
-        runId: "mfi-gap-mech-red-bucket-1788022868-abc123",
-      });
-      assert.equal(cmd[2], path.join(root, "scripts", "dist", "full-suite-runner.js"), "the runner must resolve to the shipped dist/full-suite-runner.js (⛔ worktree/plugin/scripts/full-suite-runner.ts)");
-      assert.ok(!cmd.includes("--experimental-strip-types"), "stripTypes=false ⇒ 不带 flag");
-    } finally {
-      if (saved === undefined) delete process.env.QUAY_PLUGIN_ROOT;
-      else process.env.QUAY_PLUGIN_ROOT = saved;
-    }
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
+// gap-driver-fanin-hardcoded-test-sh-third-party 范围扩展：第三方项目（无 scripts/test.sh）的 suite 步
+// ⛔ 不再调用 full-suite-runner（本仓库专属基建，内部锚点假设本仓库结构）——直接委托 loop.test_command。
+test("defaultMechanicalSuiteCommand — 第三方项目（无 scripts/test.sh，有 loop.test_command）⇒ 委托 test_command，⛔ 不调用 full-suite-runner", (t) => {
+  const wt = fs.mkdtempSync(path.join(os.tmpdir(), "mech-suite-third-party-"));
+  t.after(() => fs.rmSync(wt, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(wt, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(wt, ".quay", "config.yml"), "loop:\n  test_command: node --test\n", "utf8");
+  const cmd = defaultMechanicalSuiteCommand({
+    task: "gap-mech-red-bucket",
+    worktree: wt,
+    root: "/tmp/root",
+    suiteLogFile: "/tmp/fan-in-suite.log",
+    runId: "mfi-gap-mech-red-bucket-1788022868-abc123",
+  });
+  assert.deepEqual(cmd, ["bash", "-c", `cd '${wt}' && node --test`],
+    "third-party suite 退化为全量 test_command（cd 进 worktree 再跑）");
+  assert.ok(!cmd.some((a) => a.includes("full-suite-runner")), "⛔ 不得调用 full-suite-runner（本仓库专属基建）");
+});
+
+test("defaultMechanicalSuiteCommand — 第三方项目（scripts/test.sh 与 test_command 皆无）⇒ fail-closed 可区分取值", (t) => {
+  const wt = fs.mkdtempSync(path.join(os.tmpdir(), "mech-suite-no-tooling-"));
+  t.after(() => fs.rmSync(wt, { recursive: true, force: true }));
+  const cmd = defaultMechanicalSuiteCommand({
+    task: "gap-mech-red-bucket",
+    worktree: wt,
+    root: "/tmp/root",
+    suiteLogFile: "/tmp/fan-in-suite.log",
+    runId: "mfi-gap-mech-red-bucket-1788022868-abc123",
+  });
+  assert.equal(cmd[0], "bash");
+  assert.match(cmd[2], /third-party-no-test-tooling/, "无测试能力 ⇒ 可区分取值（⛔ 不与「suite 跑了且失败」同形）");
 });
 
 test("gap-mechanical-fan-in-per-suite-runid-unified AC2 — newMechanicalSuiteRunId is per-suite unique (two tasks ⇒ two ids, one per fan-in)", () => {
@@ -1030,21 +1039,33 @@ test("AC6 (能取假) — 真实案例回放：observation.test.mjs 判 unrelate
 
 // ── gap-worker-premerge-scoped-gate-cache — worker 退出前 pre-merge + scoped-gate 缓存 ─────────────
 
-test("AC1 (gap-worker-premerge-scoped-gate-cache) — buildWorkerPrompt 含「退出前 merge develop + 跑 scoped 门」指令，且命令与 scopedGateCommandFor 单一真相源一致", () => {
-  const prompt = buildWorkerPrompt("gap-x", "/r");
-  const scopedCmd = scopedGateCommandFor("gap-x", "<the worktree path you created in step 1>").join(" ");
-  assert.ok(prompt.includes(scopedCmd), "prompt carries the exact scopedGateCommandFor command string (single source, ⛔ 两套标准)");
+test("AC1 (gap-worker-premerge-scoped-gate-cache) — buildWorkerPrompt 含「退出前 merge develop + 跑 scoped 门」指令，且命令与 resolveScopedGateCommand 单一真相源一致（本仓库形态：scripts/test.sh 存在）", (t) => {
+  const root = makeRoot("prompt-scg");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(root, "scripts", "test.sh"), "#!/usr/bin/env bash\nexit 0\n", "utf8");
+  const prompt = buildWorkerPrompt("gap-x", root);
+  const resolution = resolveScopedGateCommand("gap-x", root, "<the worktree path you created in step 1>");
+  assert.equal(resolution.kind, "run", "scripts/test.sh 存在 ⇒ run");
+  const scopedCmd = resolution.argv.join(" ");
+  assert.ok(prompt.includes(scopedCmd), "prompt carries the exact resolveScopedGateCommand command string (single source, ⛔ 两套标准)");
   assert.match(prompt, /--for-task gap-x --allow-thin/, "command tail matches the fan-in scopedCmd form");
   assert.match(prompt, /merge --no-edit develop/, "instructs the pre-merge of develop");
   assert.match(prompt, /--write-scoped-gate-cache/, "instructs the mechanical cache write");
 });
 
-test("AC2 (gap-worker-premerge-scoped-gate-cache) — buildContinueWorkerPrompt 同样携带该步骤（独立断言，⛔ 不靠共用文本含糊）", () => {
-  const cont = buildContinueWorkerPrompt("gap-x", "/r", {
+test("AC2 (gap-worker-premerge-scoped-gate-cache) — buildContinueWorkerPrompt 同样携带该步骤（本仓库形态，独立断言，⛔ 不靠共用文本含糊）", (t) => {
+  const root = makeRoot("prompt-scg-cont");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(root, "scripts", "test.sh"), "#!/usr/bin/env bash\nexit 0\n", "utf8");
+  const cont = buildContinueWorkerPrompt("gap-x", root, {
     worktreePath: "/wt", branchCommits: 3, branchHeadSubject: "x", acChecked: 2, acTotal: 5, failureReason: "r",
   });
-  const scopedCmd = scopedGateCommandFor("gap-x", "/wt").join(" ");
-  assert.ok(cont.includes(scopedCmd), "continue prompt carries the exact scopedGateCommandFor command (real worktree path)");
+  const resolution = resolveScopedGateCommand("gap-x", root, "/wt");
+  assert.equal(resolution.kind, "run", "scripts/test.sh 存在 ⇒ run");
+  const scopedCmd = resolution.argv.join(" ");
+  assert.ok(cont.includes(scopedCmd), "continue prompt carries the exact resolveScopedGateCommand command (real worktree path)");
   assert.match(cont, /merge --no-edit develop/, "continue prompt instructs the pre-merge");
   assert.match(cont, /--write-scoped-gate-cache/, "continue prompt instructs the cache write");
 });
@@ -1066,6 +1087,48 @@ test("AC3 (gap-worker-premerge-scoped-gate-cache) — scoped-gate 缓存读写�
 
   fs.writeFileSync(cacheFile, JSON.stringify({ key: k1, ok: false }));
   assert.equal(readScopedGateCache(cacheFile, k1), null, "非绿 (ok!=true) 永不命中");
+});
+
+// ── gap-driver-fanin-hardcoded-test-sh-third-party — doc-check / scoped-gate 不再硬编码
+//    <worktree>/scripts/test.sh：第三方项目（无 scripts/test.sh）doc-check 跳过、scoped-gate 退化到
+//    loop.test_command，两者皆无 ⇒ 直接进全量 suite。 ─────────────────────────────────────────────────
+
+test("AC2 (gap-driver-fanin-hardcoded-test-sh-third-party) — 第三方（无 scripts/test.sh、有 loop.test_command）⇒ scoped-gate 退化为 bash -c <test_command>、doc-check 跳过", (t) => {
+  const root = makeRoot("tp-tc");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(root, ".quay", "config.yml"), "loop:\n  test_command: node --test\n", "utf8");
+
+  const scoped = scopedGateCommandFor("gap-x", root);
+  assert.deepEqual(scoped, ["bash", "-c", `cd '${root}' && node --test`],
+    "第三方 scoped 门退化为全量 test_command（cd 进 worktree 再跑；temp root 无单引号 ⇒ shq 即单引号包裹）");
+  assert.equal(docCheckCommandFor(root), null, "无 scripts/test.sh ⇒ doc-check 跳过（null，可区分取值）");
+  const r = resolveScopedGateCommand("gap-x", root, root);
+  assert.equal(r.kind, "run");
+});
+
+test("AC2 (gap-driver-fanin-hardcoded-test-sh-third-party) — 第三方（scripts/test.sh 与 test_command 皆无）⇒ scoped-gate/doc-check 都跳过", (t) => {
+  const root = makeRoot("tp-none");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  assert.equal(scopedGateCommandFor("gap-x", root), null, "无 test.sh、无 test_command ⇒ scoped-gate 跳过（null）");
+  assert.equal(docCheckCommandFor(root), null, "doc-check 跳过（null）");
+  const r = resolveScopedGateCommand("gap-x", root, root);
+  assert.equal(r.kind, "skip");
+  assert.match(r.reason, /third-party-no-scoped-tooling/);
+});
+
+test("AC2 (gap-driver-fanin-hardcoded-test-sh-third-party) — 本仓库（scripts/test.sh 存在）⇒ scoped-gate/doc-check 与修改前逐字一致", (t) => {
+  const root = makeRoot("this-repo");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(root, "scripts", "test.sh"), "#!/usr/bin/env bash\nexit 0\n", "utf8");
+
+  assert.deepEqual(scopedGateCommandFor("gap-x", root),
+    ["bash", path.join(root, "scripts", "test.sh"), "--for-task", "gap-x", "--allow-thin"],
+    "scoped 门命令与修改前逐字一致");
+  assert.deepEqual(docCheckCommandFor(root),
+    ["bash", path.join(root, "scripts", "test.sh"), "--static-checks-doc"],
+    "doc-check 命令与修改前逐字一致");
 });
 
 // AC4 — runMechanicalFanIn 锁内 merge-develop 之后、scoped-gate 之前接入缓存判定（命中跳过，未命中照跑）。
@@ -1175,6 +1238,69 @@ test("AC4 (gap-worker-premerge-scoped-gate-cache) — 缓存未命中 ⇒ 照跑
   const line = readScopedGateTraceLine(repo, "scg-miss-1");
   assert.ok(line, "scoped-gate trace line present");
   assert.equal(line.reason, undefined, "miss trace has NO reason (byte-identical to today's step() trace)");
+});
+
+// ── gap-driver-fanin-hardcoded-test-sh-third-party — 第三方项目（无 scripts/test.sh）fan-in 全链路 ───
+// doc-check / scoped-gate / suite 三步都退化为「跳过 / 委托 loop.test_command」，⛔ 不再调用本仓库专属
+// 脚本（scripts/test.sh、full-suite-runner.ts）。
+
+/** 第三方项目 hermetic 仓库 + worktree：无 scripts/test.sh，有 loop.test_command（写 marker 验证
+ *  「scoped-gate / suite 实际执行 test_command」）。 */
+function makeThirdPartyRepo() {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "wd-tp-"));
+  const repo = path.join(base, "repo");
+  const worktree = path.join(base, "wt");
+  const marker = path.join(base, "test-command-ran");
+  fs.mkdirSync(repo, { recursive: true });
+  runGit(repo, ["init", "-q"]);
+  runGit(repo, ["config", "user.name", "tp-test"]);
+  runGit(repo, ["config", "user.email", "tp@example.com"]);
+  runGit(repo, ["branch", "-M", "develop"]);
+  fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "tasks", `${SCG_TASK}.md`), scgTaskBody(), "utf8");
+  fs.mkdirSync(path.join(repo, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(repo, ".quay", "config.yml"),
+    `loop:\n  test_command: ${JSON.stringify(`echo ran >> ${marker}`)}\n`, "utf8");
+  runGit(repo, ["add", "-A"]);
+  runGit(repo, ["commit", "-q", "-m", "base"]);
+  runGit(repo, ["worktree", "add", worktree, "-b", `task/${SCG_TASK}`]);
+  runGit(repo, ["checkout", "-q", "-b", "develop-work"]);
+  fs.mkdirSync(path.join(worktree, "docs"), { recursive: true });
+  fs.writeFileSync(path.join(worktree, "docs", "feature.md"), "# feature\n", "utf8");
+  runGit(worktree, ["add", "-A"]);
+  runGit(worktree, ["commit", "-q", "-m", "implement feature"]);
+  return { base, repo, worktree, marker };
+}
+
+function readFanInTraceLine(repo, runId, step) {
+  const fanInLog = path.join(repo, ".quay", `fan-in-${SCG_TASK}-${runId}.log`);
+  const lines = fs.readFileSync(fanInLog, "utf8").split("\n").map((l) => l.trim()).filter(Boolean).map((l) => JSON.parse(l));
+  return lines.find((e) => e.step === step) ?? null;
+}
+
+test("AC2 (gap-driver-fanin-hardcoded-test-sh-third-party) — 第三方 fan-in 全链路：doc-check 跳过（可区分）、scoped-gate + suite 都执行 test_command、landed", async (t) => {
+  const { base, repo, worktree, marker } = makeThirdPartyRepo();
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const r = await runMechanicalFanIn({
+    task: SCG_TASK, worktree, root: repo, runId: "tp-fanin-1", mergeTarget: "develop", forceSuite: true,
+    scriptsDir: SCRIPTS_DIR, ffMergeModule: FF_MERGE_MODULE,
+    slotBase: path.join(base, "full-suite.lock"), slotLib: SLOT_LIB,
+    silenceMs: 5000, suiteCapture: path.join(base, "suite.env"),
+    suiteLogFile: path.join(base, "suite.log"),
+    // ⛔ 不传 scopedGateCommand / docCheckCommand / suiteCommand ⇒ 走缺省（第三方退化路径）。
+  });
+  assert.equal(r.outcome, "landed", `third-party fan-in must land, got ${r.outcome} step=${r.step} reason=${r.reason}`);
+
+  const docLine = readFanInTraceLine(repo, "tp-fanin-1", "doc-check");
+  assert.ok(docLine, "doc-check trace line present");
+  assert.equal(docLine.ok, true, "doc-check skipped ⇒ ok:true");
+  assert.match(docLine.reason ?? "", /third-party-no-doc-check-tooling/, "doc-check 跳过取可区分取值（⛔ 与「doc 检查跑了且失败」同形）");
+
+  assert.ok(readFanInTraceLine(repo, "tp-fanin-1", "scoped-gate"), "scoped-gate trace line present");
+
+  // scoped-gate + suite 各执行一次 test_command ⇒ marker 被追加两行。
+  const ran = fs.existsSync(marker) ? fs.readFileSync(marker, "utf8").split("\n").filter((l) => l.trim()).length : 0;
+  assert.equal(ran, 2, `scoped-gate + suite 各执行一次 test_command ⇒ marker 2 行（got ${ran}）`);
 });
 
 test("stashIfDirty — non-git ⇒ no-op; clean ⇒ files=[]; dirty ⇒ observe but NEVER stash others' changes (归属区分)", () => {
