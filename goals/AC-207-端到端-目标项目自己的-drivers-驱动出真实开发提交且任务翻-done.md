@@ -75,3 +75,12 @@ ssh <目标主机> "grep 'GOAL-009-AC-207' <该主机上的 --ac89 路径>"
 3. **搬运后必须复跑判据**，以判据的退出码为准，⛔ 不以拷贝动作本身为准。
 
 **这一步没有机制兜底，是执行者的显式义务**——若认为它应当机制化（例如让 `--ac89` 指向一个跨机同步的路径，或给脚本加一个回传步骤），那是另立任务的事，⛔ 不在本 AC 范围内。
+## 执行说明（临时，随机制落地即退役）：先按宿主模型栈配置目标项目 profiles
+
+**2026-09-10 实测**：全新 quay-init 出来的目标项目铺的是 shipped 通用默认（`launcher: claude` / `model: null` / `auth: key`），⇒ 模型名落到**宿主机全局 claude 配置**。在 orangevps 上该值是不带后缀的 `deepseek-v4-pro`，端点无对应 fallback group ⇒ worker 起来即 `API Error: 400 … No fallback model group found for original model_group=deepseek-v4-pro` ⇒ **连续 3 次 <60s 秒死 ⇒ 退避上限 ⇒ 目标项目任务翻 needs-human ⇒ e2e 永远走不到 fan-in**。
+
+⇒ **跑 e2e 之前必须显式做一步**：把驱动方仓库 `.quay/profiles.yml` 里 `worker-default` 的 `launcher` / `model` / `auth` 写进目标项目的 `.quay/profiles.yml`（本仓库当前取值：`claude-fjdac` / `deepseek-v4-pro-anthropic` / `token`）。⛔ 不要依赖宿主全局默认——那正是本缺陷。⛔ 手改**不继承**：每个全新 quay-init 的项目都要重做，直到机制落地。
+
+**这一步改变命题的范围，必须照实说**：e2e 于是证明的是「**配置妥当后**，目标项目自己的 drivers 能驱动出真实提交」，⛔ 不是「零配置开箱即用」。这是诚实的边界——任何真实消费者同样要配自己的模型栈。
+
+**退役条件**：`gap-verify-coldstart-does-not-configure-target-profiles`（已立案，`goal_ac: AC-207`）把这一步固化进 `verify-deliver-coldstart.sh` 并落进证据之后，本段**连同这条人工步骤一并作废**——⛔ 不要在机制已生效后继续手工重复它。
