@@ -1,7 +1,7 @@
 ---
 id: gap-ac207-e2e-target-driver-driven-real-commit-task-done
 title: 端到端：目标项目自己的 *-drivers 驱动出真实开发提交且任务翻 done，落 ac=GOAL-009-AC-207 记录（AC-207）
-status: needs-human
+status: ready
 needs_human_cause: unclassified
 labels:
   - gap
@@ -18,6 +18,12 @@ extra:
     efa0bd33e 现 build 重装 orangevps /tmp/ac207-prefix + 两 driver
     重启解除（develop..main = 0）。人 2026-09-10 授权 retreat 回 ready 续验 AC2/AC3/AC5。
 goal_ac: AC-207
+depends_on:
+  - gap-driver-resource-gate-path-anchored-at-root-third-party
+  - gap-shipped-profiles-missing-worker-roles
+  - gap-promotion-driver-ready-pool-check-path-third-party
+  - gap-doc-branch-hardcoded-author-breaks-third-party-develop-sync
+  - gap-fanin-gate-event-store-path-shipped-unsafe
 ---
 ## Proposal
 
@@ -33,6 +39,7 @@ goal_ac: AC-207
 
 1. **接线验证步骤**：`plugin/scripts/verify-deliver-coldstart.sh` 新增 AC-207 端到端段——在 host B/C 的第三方项目里，用已 shipped 的 `quay-init.sh` + goals+tasks 双载体创建一条真实任务，由其自身 promotion-driver → worker-driver 驱动：建任务 worktree → 产生实现提交（⛔ 排除 `chore(quay-init):` auto-commit，硬规则 4b）→ 记 gate 事件 → 翻 done。
 2. **直接量读取**：`commit_sha` = 第三方项目 `git log`（任务 worktree 提交）；`task_id`/`task_status` = 目标项目 task store；`gate_events` = `.quay/gate-events.jsonl` 计数；`produced_by_driver` = 「提交出自 driver 建的任务 worktree ∧ gate 事件齐全 ∧ 时间线交错」；缺任一读数不写（fail-closed，硬规则 3b）。
+2b. **（第 11 轮新增，必做第一步）先在本任务 worktree 执行 `git merge develop`**——理由、冲突面与解法见下方「结构性阻塞：验证脚本的两半分居两个分支」一节。⛔ 不做这一步的任何一次验证跑，用的都是缺一半的脚本。
 3. **载体落账**：经 `ac89_append_goal009()` 落账（`build_sha`/`ts` 由 helper 统一补——AC-214 新鲜度锚只认 top-level `build_sha`），追加 `{"ac":"GOAL-009-AC-207","host","project_root","commit_sha","task_id","task_status","gate_events","produced_by_driver"}`；⛔ `commit_sha` 是异仓库 sha，不作新鲜度锚。
 4. **生产复跑**（host B/C + 第三方项目）使判据 exit 1 → exit 0。
 
@@ -124,6 +131,46 @@ AC1/AC4 实现已 done 不变；AC2/AC3/AC5 仍阻塞，需修该缺陷（新任
 
 ⛔ **本次 retreat 不勾选任何 AC**——AC2/AC3/AC5 仍须真实 e2e 复跑验证后方可勾选；本段仅记录阻塞解除与现场事实。
 
+---
+
+## 结构性阻塞：验证脚本的两半分居两个分支（第 11 轮，人 2026-09-10 授权 retreat needs-human→todo→ready）
+
+**六层阻塞现已全部修复并落 develop**（逐层，均按位置实测核实）：① resource-gate 路径锚死 ② shipped `profiles.yml` 缺 worker roles ③ `ready-pool-check` + `worker-driver` + `cap-from-gate` 路径锚点 ④ `DOC_BRANCH` 硬编码 ⑤ fan-in 三步硬编码 `scripts/test.sh` ⑥ gate-event-store 跨包锚点（`resolveKernelSrcModule`）。此外 `gap-verify-coldstart-does-not-configure-target-profiles` **亦已 done 并落 develop**——新增 `--target-launcher` / `--target-model` / `--target-auth` 三个 flag，缺省由**驱动方仓库**的 `.quay/profiles.yml` 派生。
+
+**⚠️ 但本轮识别出一个新的、结构性的阻塞——它不是某个具体缺陷，而是 AC-207 长期无法收敛的机制原因：**
+
+**验证脚本 `plugin/scripts/verify-deliver-coldstart.sh` 的两个必需部分分别在两个分支上，哪一边都不全。** 实测计数（按位置，非关键词）：
+
+| 读法 | `--ac207-e2e` | `--target-launcher` |
+|---|---|---|
+| `git show develop:plugin/scripts/verify-deliver-coldstart.sh` | **0 处** | **8 处** |
+| 本任务 worktree 的同一文件 | **5 处** | **0 处** |
+
+且**本任务 worktree 落后 develop 306 个提交**。
+
+**根因**：本任务**从未 fan-in 过**（长期在 ready ↔ needs-human 之间循环），所以 `--ac207-e2e` 段从未落 develop；而 develop 上的六层修复也从未进本 worktree。⇒ **每一次验证跑用的脚本都缺另一半**——要么有 e2e 段但驱动全是坏的，要么驱动修好了但根本没有 e2e 段可跑。**这是机制原因，不是某个具体缺陷；不先合并，第 11 轮会与前 10 轮同形失败。**
+
+### 执行者第一步必须做的事（Plan 步骤 2b）
+
+**先在本任务 worktree 执行 `git merge develop`。** 合并面已预先探过（探完即 `git merge --abort` 还原；worktree 现为**干净**、`HEAD = b62557cd3`）：
+
+- **只有 `plugin/scripts/verify-deliver-coldstart.sh` 一个文件冲突**，共 **4 处**；
+- **4 处全部是「两边各加各的功能」的纯并集**，**无意图冲突**：
+  1. **用法行**——两组 flag，两组都保留；
+  2. **帮助文本**——两段，两段都保留；
+  3. **两段独立注释块**——各自保留；
+  4. **selfcheck 条件列表**——须保留 develop 侧新增的 `&& [ "$tp_ok" = "1" ]`（这一处最容易漏，务必逐字核对）。
+- **合并后脚本两者兼有**（预探实测：`--ac207-e2e` 5 处 + `--target-launcher` 8 处）。
+- 解完冲突**建议跑 `--help` 与 `--selfcheck`** 验证语法与语义。
+
+### 重跑时的现场约束（重申，此前已写进任务体）
+
+- 用**全新 `--root`** 与**全新 `--prefix`**：旧项目 `/home/yale/work/ac207-third-party` 与 `/home/yale/work/ac207-e2e-verify` 中 `e2e-verify-207` **已存在**，`task create` 会失败并使该步 fail-closed。
+- 跑完必须**把证据取回本机载体** `.quay/productization-verification.jsonl` 并**复跑判据确认**（AC5 干跑 exit 1 → exit 0）。
+- ⛔ 不得手写/注入记录；⛔ 不得搬运出自坏构建的记录（安装物必须是当前 develop tip 现 build 的那一份）。
+
+⛔ **本次 retreat 同样不勾选任何 AC**——AC2/AC3/AC5 仍须真实 e2e 复跑验证后方可勾选。
+
 ## Needs-Human
 
 **执行 2026-09-10T09:42:15.042Z — 连续修满重试上限仍不合格（标 needs-human）**
@@ -133,3 +180,5 @@ AC1/AC4 实现已 done 不变；AC2/AC3/AC5 仍阻塞，需修该缺陷（新任
 - 失败步/判词：AC 未全勾（checked 2/5，剩余未勾 3）——续做只需验证并勾选 AC
 - run_id：wk-prod-1788972473
 - session_id：1cbac9f1-899e-4faf-adac-f9b9c7a29354
+
+（⚠️ 该 needs-human 记录已由人 2026-09-10 授权解除 → 本任务已 retreat 回 ready，见上一节「结构性阻塞：验证脚本的两半分居两个分支」。）
