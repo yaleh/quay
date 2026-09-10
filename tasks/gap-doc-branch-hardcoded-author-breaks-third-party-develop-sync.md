@@ -1,7 +1,7 @@
 ---
 id: gap-doc-branch-hardcoded-author-breaks-third-party-develop-sync
 title: DOC_BRANCH 硬编码 "author"——第三方项目（工作分支非 author）的 develop 同步恒 no-refs，晋升写入永久对派发不可见
-status: todo
+status: ready
 labels:
   - gap
   - defect
