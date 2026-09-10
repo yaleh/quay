@@ -1,7 +1,7 @@
 ---
 id: GOAL-015
 title: 交付出去的东西下游真的能用——可观测面（CLI/web 在下游可起、能显示真实载体与过程记录）与配置面（交付的每个配置键都有消费者）
-status: draft
+status: active
 kind: goal
 origin: >-
   立条依据（人 2026-09-10 令「应当优先更新 goal；必要时可创建新 goal」后设立）：
@@ -46,6 +46,13 @@ origin: >-
 
 
   【判据类别纪律】只引用不会自行回退的量：代码状态、append-only 载体的历史事实、机械枚举计数；⛔ 不含进程存活与远程主机当前可达性。
+activatedAt: 2026-09-10T13:41:27.342Z
+statusLog:
+  - at: 2026-09-10T13:41:27.342Z
+    from: draft
+    to: active
+    actor: cli:human-ruling-2026-09-10
+    reason: 人令：激活 GOAL-015
 ---
 
 ## 背景
