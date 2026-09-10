@@ -2,7 +2,7 @@
 id: gap-fidelity-judge-cannot-discriminate-the-founding-vacuous-case
 title: 保真性判定器对「扩面前（结构上不可能取假）」与「扩面后」两个逐字历史夹具给出同一判决 faithful——判别力实测为 0，闸接上也会放行
   AC-225 那条空洞判据（GOAL-013 风险 2 已实测发生）
-status: ready
+status: done
 labels:
   - gap
   - defect
