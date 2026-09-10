@@ -1,7 +1,7 @@
 ---
 id: AC-236
 title: 本仓库自身行为不得因本 GOAL 的改动而回退——CLI 动词集 / web 路由集 / 有消费者的配置键集单调不缩（退出条件④）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-015
 criterion: test -f plugin/scripts/host-repo-surface-ratchet.ts && node
@@ -63,4 +63,15 @@ origin: >-
 
   ⚠️ 本条自身的可证伪性提示（留给后来者的对照）：若某次改动只是**新增**动词/路由/配置键，本条应保持 exit
   0；只有**删除或改名**才转红。若发现它对新增也报红，那是检查器写反了方向，不是本仓库回退。
+activatedAt: 2026-09-10T22:34:49.665Z
+statusLog:
+  - at: 2026-09-10T22:34:49.665Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-10T22:34:49.665Z
 ---
