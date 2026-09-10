@@ -2,7 +2,7 @@
 id: gap-webui-goal-list-tab-split-goal-ac
 title: web goal 页拆分为 Goals / Criteria 两个 tab——GOAL/AC 混排逼出 3 列结构性死格子、11
   列挤压成表头都被截断，复用既有 kind 参数路由，保持单次 goalList() 调用不变式
-status: todo
+status: ready
 labels:
   - gap
 parent: null
