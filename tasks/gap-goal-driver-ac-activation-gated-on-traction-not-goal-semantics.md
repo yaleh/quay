@@ -1,7 +1,7 @@
 ---
 id: gap-goal-driver-ac-activation-gated-on-traction-not-goal-semantics
 title: goal-driver 的 AC 激活判据是"有没有任务牵引"而非目标语义——与立案机制互为前提，构成无出口的循环依赖
-status: todo
+status: ready
 labels:
   - gap
   - defect
