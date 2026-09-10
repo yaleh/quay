@@ -37,9 +37,9 @@ function makeWorkspace() {
   return tmp;
 }
 
-function writeDraftAc(tmp, { id = 'AC-901', goal = 'GOAL-001', criterion = 'true', expect = 'the criterion measures X' } = {}) {
+function writeDraftAc(tmp, { id = 'AC-901', goal = 'GOAL-001', criterion = 'true', expect = 'the criterion measures X', status = 'draft' } = {}) {
   const lines = [
-    '---', `id: ${id}`, 'title: t', 'status: draft', 'kind: criterion', `goal: ${goal}`,
+    '---', `id: ${id}`, 'title: t', `status: ${status}`, 'kind: criterion', `goal: ${goal}`,
     'criterion: |', `  ${criterion}`, 'expect: >-', `  ${expect}`, 'origin: test fixture', '---', '',
   ];
   fs.writeFileSync(path.join(tmp, 'goals', `${id}-t.md`), lines.join('\n'), 'utf8');
@@ -177,5 +177,69 @@ test('⑥ --fidelity-judge-argv（JSON argv 数组）⇒ 跑判定器：vacuous 
     assert.ok(raw.includes('verdict: faithful'), '判定结果落在记录自身（fidelity.verdict=faithful）');
   } finally {
     fs.rmSync(tmpFaithful, { recursive: true, force: true });
+  }
+});
+
+// ── ⑦ achieved→active 重开也过保真性闸（gap-activation-gates-bypassed-on-reopen-path-…）──
+// 改动前：`activating` 只认 draft→active ⇒ 重开路径（achieved/needs-human → active）三道闸一道不触发。
+// 改动后：任何进入 active 的转换都触发保真性闸 ⇒ 重开记录必须留 fidelity.verdict（字段缺失不算通过）。
+
+test('⑦ achieved→active 重开 ⇒ 保真性闸生效（faithful 放行 + fidelity.verdict 落记录）', () => {
+  const tmp = makeWorkspace();
+  try {
+    writeDraftAc(tmp, { id: 'AC-901', status: 'achieved' });
+    const r = activate(tmp, 'AC-901', { judge: JUDGE_FAITHFUL });
+    assert.equal(r.status, 0, `achieved→active faithful ⇒ exit 0（stderr: ${r.stderr}）`);
+    const raw = readRecordFile(tmp, 'AC-901');
+    assert.ok(/^status: active/m.test(raw), 'achieved→active ⇒ 状态确实变 active');
+    assert.ok(raw.includes('fidelity:') && raw.includes('faithful'), '⛔ 字段缺失不算通过——fidelity.verdict=faithful 落记录');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('⑦b achieved→active 重开 + vacuous 判定器 ⇒ 拒绝激活（非零退出 + 不写状态）', () => {
+  const tmp = makeWorkspace();
+  try {
+    writeDraftAc(tmp, { id: 'AC-901', status: 'achieved' });
+    const r = activate(tmp, 'AC-901', { judge: JUDGE_VACUOUS });
+    assert.notEqual(r.status, 0, 'achieved→active vacuous ⇒ 非零退出（闸能拒，非恒放行）');
+    const raw = readRecordFile(tmp, 'AC-901');
+    assert.ok(/^status: achieved/m.test(raw), '⛔ 不写状态——记录仍是 achieved，未变 active');
+    assert.ok(String(r.stderr).includes('vacuous'), `理由可见于 stderr（含 "vacuous"）：${r.stderr}`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── ⑧ needs-human→active（历史 3/5 的多数重开路径）也过保真性闸 ──────────────────────
+
+test('⑧ needs-human→active 重开 ⇒ 保真性闸生效（faithful 放行 + fidelity.verdict 落记录）', () => {
+  const tmp = makeWorkspace();
+  try {
+    writeDraftAc(tmp, { id: 'AC-901', status: 'needs-human' });
+    const r = activate(tmp, 'AC-901', { judge: JUDGE_FAITHFUL });
+    assert.equal(r.status, 0, `needs-human→active faithful ⇒ exit 0（stderr: ${r.stderr}）`);
+    const raw = readRecordFile(tmp, 'AC-901');
+    assert.ok(/^status: active/m.test(raw), 'needs-human→active ⇒ 状态确实变 active');
+    assert.ok(raw.includes('fidelity:') && raw.includes('faithful'), '⛔ needs-human 路径（历史 3/5）字段缺失不算通过');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── ⑨ --force 重开也留痕（改动前该分支在重开路径不触发 ⇒ 静默越权）────────────────────
+
+test('⑨ --force 重开（achieved→active）⇒ fidelity.verdict === "forced"（⛔ 静默越权被堵）', () => {
+  const tmp = makeWorkspace();
+  try {
+    writeDraftAc(tmp, { id: 'AC-901', status: 'achieved' });
+    const r = activate(tmp, 'AC-901', { force: true });
+    assert.equal(r.status, 0, `--force 重开 ⇒ exit 0（stderr: ${r.stderr}）`);
+    const raw = readRecordFile(tmp, 'AC-901');
+    assert.ok(/^status: active/m.test(raw), '--force ⇒ 状态变 active');
+    assert.ok(raw.includes('verdict: forced'), '⛔ --force 重开必须在记录里留痕（fidelity.verdict=forced）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
