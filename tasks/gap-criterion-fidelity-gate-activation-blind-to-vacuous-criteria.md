@@ -2,7 +2,7 @@
 id: gap-criterion-fidelity-gate-activation-blind-to-vacuous-criteria
 title: goal-store 的 P6 激活闸只问「判据跑得动吗」不问「测得着吗」——空洞判据（对其 expect
   声称的对象结构上不可能取假）可直接激活并被 I2 翻 achieved，I5 全盲
-status: todo
+status: ready
 labels:
   - gap
   - defect
