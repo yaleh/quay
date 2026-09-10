@@ -632,15 +632,16 @@ test('real ring: 载体有 verdict + evidence 不回写 + I2 flip + draft 不动
   }
 });
 
-// ── 裁定 3 边界 + AC-219（gap-meta-goal-triage-fresh-draft-not-retire）：active GOAL 下的 draft AC
-//    不被翻成 achieved/active/retired（裁定 3，draft→active 归人/manager），且无牵引 ⇒ 分诊判 hold
-//    （⛔ 不判 retire——「无任务牵引」≠「死信」）⇒ driver 不 flip、仍 draft。──────────────────
+// ── I2 边界 + AC-219（gap-meta-goal-triage-fresh-draft-not-retire）：active GOAL 下的 draft AC
+//    不被 I2 翻成 achieved（裁定 3，I2 只翻 active）、不被翻 retired（放弃归人）；无牵引 ⇒ 分诊判
+//    activate ⇒ 翻 active（gap-goal-driver-ac-activation-gated-on-traction-not-goal-semantics：
+//    激活判据 =「判据就绪」而非「有牵引」）。──────────────────
 
-test('real ring: draft AC under active GOAL 不被翻成 achieved/active/retired；无牵引 ⇒ hold ⇒ 不 flip（仍 draft）', async () => {
+test('real ring: draft AC under active GOAL 无牵引 ⇒ 分诊 activate ⇒ 翻 active（⛔ 不翻 achieved/retired）', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-draftac-'));
   try {
     fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
-    // GOAL-001（active）两条 AC：AC-001 active（pass ⇒ flip achieved）、AC-002 draft（无牵引 ⇒ 分诊 hold ⇒ 不 flip）。
+    // GOAL-001（active）两条 AC：AC-001 active（pass ⇒ flip achieved）、AC-002 draft（无牵引 ⇒ 分诊 activate ⇒ 翻 active）。
     writeGoalFile(tmp, { id: 'GOAL-001', status: 'active', kind: 'goal' });
     writeGoalFile(tmp, { id: 'AC-001', status: 'active', kind: 'criterion', goal: 'GOAL-001', criterion: 'true' });
     writeGoalFile(tmp, { id: 'AC-002', status: 'draft', kind: 'criterion', goal: 'GOAL-001', criterion: 'true' });
@@ -662,23 +663,23 @@ test('real ring: draft AC under active GOAL 不被翻成 achieved/active/retired
     const a2 = fs.readFileSync(path.join(tmp, 'goals', 'AC-002-t.md'), 'utf8');
     const g1 = fs.readFileSync(path.join(tmp, 'goals', 'GOAL-001-t.md'), 'utf8');
     assert.match(a1, /^status: achieved$/m, 'active AC pass ⇒ flip achieved（裁定 5）');
-    // AC-219：无牵引 draft AC 分诊判 hold ⇒ driver 不 flip ⇒ 仍 draft（⛔ 不翻 achieved/active/retired）。
-    assert.match(a2, /^status: draft$/m, 'draft AC 无牵引 ⇒ hold ⇒ 不 flip（仍 draft，⛔ AC-219 不判 retire）');
-    assert.doesNotMatch(a2, /^status: achieved$/m, 'draft AC 不得翻 achieved（裁定 3）');
-    assert.doesNotMatch(a2, /^status: active$/m, 'draft AC 不得翻 active（裁定 3：激活归人）');
+    // AC-219 + gap-goal-driver-ac-activation-gated-on-traction-not-goal-semantics：无牵引 draft AC
+    // 分诊判 activate ⇒ 翻 active（⛔ 不翻 achieved/retired——I2 只翻 active、放弃归人）。
+    assert.match(a2, /^status: active$/m, 'draft AC 无牵引 ⇒ activate ⇒ 翻 active（激活判据 = 判据就绪，非牵引）');
+    assert.doesNotMatch(a2, /^status: achieved$/m, 'draft AC 不得被 I2 翻 achieved（裁定 3：I2 只翻 active）');
     assert.doesNotMatch(a2, /^status: retired$/m, 'draft AC 不得翻 retired（放弃归人，AC-211）');
     // AC-2（行为级）+ AC-212 充分性闸：draft AC 不再阻塞目标达成判定（纯函数层已证，见 goalAchievedFromRecords
     // 单测），但 GOAL 层 flip 还要过充分性闸——GOAL-001 body 无 `## 退出条件` ⇒ insufficient ⇒ 不 flip。
     assert.match(g1, /^status: active$/m, 'draft 不阻塞但充分性 insufficient ⇒ 不 flip GOAL（AC-212）');
 
-    // 负控制：flips 里 AC-002 不在（⛔ 不 flip——hold 只是落痕建议，非状态翻写，AC-219）。
+    // flips：AC-001 → achieved、AC-002 → active（activate 判决被 ⑧ 消费，⛔ 非只落痕）。
     const lines = fs.readFileSync(roundLog, 'utf8').trim().split('\n');
     const rec = JSON.parse(lines[lines.length - 1]);
     const goalFact = rec.facts.find((f) => f.name === 'goal-ring');
     assert.ok(goalFact, 'round record 含 goal-ring fact');
     const flipsById = new Map((goalFact.value.flips ?? []).map((f) => [f.id, f.to]));
     assert.equal(flipsById.get('AC-001'), 'achieved', 'active AC 在 flips 里 to=achieved（达成翻转）');
-    assert.equal(flipsById.get('AC-002'), undefined, 'draft AC 无牵引 ⇒ hold ⇒ 不在 flips（⛔ 不翻 needs-human，AC-219）');
+    assert.equal(flipsById.get('AC-002'), 'active', 'draft AC 无牵引 ⇒ activate ⇒ flips 里 to=active（⛔ 不翻 needs-human，AC-219）');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
