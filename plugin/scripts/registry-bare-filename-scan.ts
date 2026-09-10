@@ -592,6 +592,17 @@ const DIRNAME_JOIN_RE = /path\.join\(\s*__dirname\s*,\s*(['"])([A-Za-z0-9._-]+)\
  *  quay-init.sh:1219 的 laydown 闭包同形；cap-from-gate.sh:24、send-keys-reliable.sh:57）。仅当载体
  *  在 plugin/scripts/ 顶层时 `$SCRIPT_DIR` 才解析为该目录。 */
 const SCRIPT_DIR_REF_RE = /(?:\$\{SCRIPT_DIR\}\/|\$SCRIPT_DIR\/)([A-Za-z0-9][A-Za-z0-9._-]*)/g;
+/** `resolveKernelSibling("<name>")` —— 执行核经 driver-runtime.ts 的 kernel 安装位置解析 sibling 脚本
+ *  （gap-ac225 迁移后的新锚点：suite-state-trigger.ts 的 full-suite-runner.ts、full-suite-runner.ts 的
+ *  worktree-process-reaper.ts / suite-load-sampler.ts、promotion-driver.ts 的 ready-pool-check.ts）。
+ *  name 是脚本 basename（.ts/.sh/.mjs）。与 __dirname/$SCRIPT_DIR 同为「目录相对执行形式」，仅在载体
+ *  处于 plugin/scripts/ 顶层时才算生产调用者（同一目录限定，见 (2b)）。 */
+const KERNEL_SIBLING_RE = /resolveKernelSibling\(\s*(['"])([A-Za-z0-9._-]+)\1\s*\)/g;
+/** `path.join(resolveKernelPluginRoot(), "scripts", "<name>")` —— 同上，但直接拼 scripts 目录
+ *  （gap-ac225：runner-tree-state.ts 的 assert-clean-tree.sh、full-suite-runner.ts 的
+ *  provision-verify-worktree.sh / resource-gate.sh、runner-concurrency.ts 的 process-budget.sh、
+ *  worker-driver.ts 的 dispatch-worktree-setup.sh / suite-slot-lib.sh）。 */
+const KERNEL_PLUGIN_SCRIPTS_RE = /resolveKernelPluginRoot\(\s*\)\s*,\s*(['"])scripts\1\s*,\s*(['"])([A-Za-z0-9._-]+)\2/g;
 
 // ── 四类引用（gap-dead-set-closure-misses-four-reference-kinds）──────────────────────────────────
 // §12e 传递闭包只认「调用形式」（import 说明符、node|bash|sh|tsx <path>、${repo_root}/ 插值、
@@ -794,12 +805,15 @@ export function buildReferenceMap(
       const s = m[1];
       if (scriptSet.has(s) && path.resolve(abs) !== scriptAbsPath(root, s)) referrers.get(s)!.add(abs);
     }
-    // (2b) 目录相对执行形式：载体在 plugin/scripts/ 顶层时，__dirname（TS/JS）与 $SCRIPT_DIR（bash）都
-    //      解析为 plugin/scripts/。两种写法都算生产调用者：
-    //        - path.join(__dirname, "<name>")           （runner-tree-state.ts:50 assert-clean-tree.sh、
-    //          full-suite-runner.ts:1495 provision-verify-worktree.sh）
+    // (2b) 目录相对执行形式：载体在 plugin/scripts/ 顶层时，__dirname（TS/JS）、$SCRIPT_DIR（bash）与
+    //      kernel 安装位置（resolveKernelSibling / resolveKernelPluginRoot）都解析为 plugin/scripts/。
+    //      四种写法都算生产调用者：
+    //        - path.join(__dirname, "<name>")           （legacy；gap-ac225 已迁移掉活样本）
     //        - $SCRIPT_DIR/<name> / ${SCRIPT_DIR}/<name>（bash 包装器：cap-from-gate.sh:24 cap-from-gate.ts、
     //          send-keys-reliable.sh:57 transcript-delivery-check.ts）
+    //        - resolveKernelSibling("<name>")           （gap-ac225：suite-state-trigger.ts full-suite-runner.ts）
+    //        - path.join(resolveKernelPluginRoot(), "scripts", "<name>")（gap-ac225：runner-tree-state.ts
+    //          assert-clean-tree.sh、full-suite-runner.ts provision-verify-worktree.sh）
     //      仅当载体文件本身在 plugin/scripts/ 顶层时才解析为该目录（packages/*/bin 的 __dirname 不在此列）。
     const isCode = ext === ".ts" || ext === ".mjs" || ext === ".js" || ext === ".sh";
     if (isCode && path.dirname(path.relative(root, abs)).split(path.sep).join("/") === SCRIPTS_DIR_REL) {
@@ -812,6 +826,16 @@ export function buildReferenceMap(
       SCRIPT_DIR_REF_RE.lastIndex = 0;
       while ((dm = SCRIPT_DIR_REF_RE.exec(cleanedCode)) !== null) {
         const s = dm[1];
+        if (scriptSet.has(s) && path.resolve(abs) !== scriptAbsPath(root, s)) referrers.get(s)!.add(abs);
+      }
+      KERNEL_SIBLING_RE.lastIndex = 0;
+      while ((dm = KERNEL_SIBLING_RE.exec(cleanedCode)) !== null) {
+        const s = dm[2];
+        if (scriptSet.has(s) && path.resolve(abs) !== scriptAbsPath(root, s)) referrers.get(s)!.add(abs);
+      }
+      KERNEL_PLUGIN_SCRIPTS_RE.lastIndex = 0;
+      while ((dm = KERNEL_PLUGIN_SCRIPTS_RE.exec(cleanedCode)) !== null) {
+        const s = dm[3];
         if (scriptSet.has(s) && path.resolve(abs) !== scriptAbsPath(root, s)) referrers.get(s)!.add(abs);
       }
     }
