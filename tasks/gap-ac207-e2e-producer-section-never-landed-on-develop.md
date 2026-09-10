@@ -2,7 +2,7 @@
 id: gap-ac207-e2e-producer-section-never-landed-on-develop
 title: AC-207 的记录产出者（--ac207-e2e 段，201 行）12 轮从未落
   develop——机制半边与端到端自证半边捆在一个任务里，fan-in 的 all-or-nothing AC 闸让前者永远等后者
-status: todo
+status: ready
 labels:
   - gap
   - delivery-critical
@@ -12,6 +12,8 @@ children: []
 extra:
   schema: execution
 goal_ac: AC-207
+depends_on:
+  - gap-third-party-evidence-no-transport-to-driving-repo-carrier
 ---
 ## Proposal
 

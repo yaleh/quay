@@ -2,7 +2,7 @@
 id: gap-cross-host-evidence-run-incomplete-and-step-order-makes-ac234-unsatisfiable
 title: 跨机证据运行只产出 6 种记录里的 2 种：写 goal 的步骤排在读 web 的步骤之后 ⇒ AC-234 的 goals_rendered
   结构上恒 0；两个步骤 flag 未传 ⇒ AC-203/205 永不产出；远端 stdout 被丢弃 ⇒ fail-closed 的步骤无法诊断
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -13,6 +13,8 @@ children: []
 extra:
   schema: execution
 goal_ac: AC-234
+depends_on:
+  - gap-third-party-evidence-no-transport-to-driving-repo-carrier
 ---
 ## Proposal
 
