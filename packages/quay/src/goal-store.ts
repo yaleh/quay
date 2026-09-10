@@ -72,6 +72,7 @@ import { runAcceptance } from "./gate/acceptance-runner.ts";
 import { queryGateEvents } from "./gate/gate-event-store.ts";
 import { commitStoreWrite, commitStoreBatch, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
 import { criterionFidelityVerdict, type FidelityInvokeJudge } from "./criterion-fidelity.ts";
+import { resolvePluginRoot } from "./plugin-root.ts";
 
 export const VALID_GOAL_STATUSES = ["draft", "active", "achieved", "superseded", "retired", "needs-human"];
 
@@ -1105,6 +1106,114 @@ function judgeFromArgv(judgeArgv: string[]): FidelityInvokeJudge {
   };
 }
 
+// ── 缺省 wiring：从【配置】读判定器 argv 前缀（gap-fidelity-gate-not-wired-on-the-dominant-cli-activation-path）──
+// 实测：20/21 次 AC 激活走人/CLI 路径，而保真性闸此前【只】接在 goal-driver ⑧（1/21）那条路径上
+// （goal-driver.ts:211 只在 ⑧ 激活时传 --fidelity-judge-argv）。CLI 缺省（无 QUAY_GOAL_FIDELITY_JUDGE env、
+// 无 --fidelity-judge-argv）⇒ fidelityJudge undefined ⇒ fails-open 记 "no judge configured"。⇒ 闸在承载
+// 95% 激活的路径上完全不跑。修法：CLI 缺省从【配置】读判定器 argv 前缀——⛔ 不 import plugin/*
+// （launchArgv 住在 plugin/scripts/driver-runtime.ts，Core 依赖 kernel 正是 GOAL-012 要除的），只读两份
+// 配置：
+//   .quay/profiles.yml              — fix-worker role → launcher/model/bare/name + env/unset
+//   .claude/launch.settings.json    — settings env（dev-tree 优先，plugin 出厂 fallback）
+// 产物与 launchArgv("fix-worker", "", root).slice(0, -1) 同构（真 LLM argv 前缀，prompt 作末参数追加）。
+// 配置缺失/非法/role 缺 ⇒ null ⇒ 调用方落回 "no judge configured" 可见性分支（fail-open + 诚实留痕，
+// ⛔ 不回落 faithful）。判据 cost：只构造 argv、不 spawn（本函数不调 LLM；LLM 只在 write() 激活钩子被
+// spawnSync 触发，⛔ 不在 goal-driver 每轮 ~42s 的 gate 路径）。
+
+/** env 合并（复刻 profile-policy mergeEnv：override 中 "" = 删键，其余含 "0" 保留）。 */
+function mergeProfileEnv(base: Record<string, string>, override: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = { ...base };
+  for (const [k, v] of Object.entries(override)) {
+    if (v === "") delete out[k];
+    else out[k] = v;
+  }
+  return out;
+}
+
+/** 读 .quay/profiles.yml → 顶层对象；缺失/非法 ⇒ null（fail-closed，⛔ 不静默冒充空配置）。 */
+function readProfilesYaml(root: string): Record<string, unknown> | null {
+  const file = path.join(root, ".quay", "profiles.yml");
+  if (!fs.existsSync(file)) return null;
+  try {
+    const doc = YAML.parse(fs.readFileSync(file, "utf8"));
+    return doc && typeof doc === "object" && !Array.isArray(doc) ? (doc as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 拼 --settings 参数（复刻 driver-runtime launchSettingsArg）：无 unset 且无 env ⇒ settings 文件路径；
+ *  否则合并成 JSON。dev-tree `<root>/.claude/launch.settings.json` 优先，plugin 出厂 fallback。读不到 ⇒ null。 */
+function fidelitySettingsArg(root: string, resolvedEnv: Record<string, string>, unset: string[]): string | null {
+  const devTree = path.join(root, ".claude", "launch.settings.json");
+  let settingsFile: string | null = null;
+  if (fs.existsSync(devTree)) {
+    settingsFile = devTree;
+  } else {
+    const pluginRoot = resolvePluginRoot();
+    if (pluginRoot) {
+      const shipped = path.join(pluginRoot, ".claude", "launch.settings.json");
+      if (fs.existsSync(shipped)) settingsFile = shipped;
+    }
+  }
+  if (!settingsFile) return null;
+  let settings: Record<string, unknown>;
+  try {
+    settings = JSON.parse(fs.readFileSync(settingsFile, "utf8"));
+  } catch {
+    return null;
+  }
+  const baseEnv = (settings.env && typeof settings.env === "object" ? settings.env : {}) as Record<string, string>;
+  const env = { ...baseEnv };
+  for (const k of unset) delete env[k];
+  Object.assign(env, resolvedEnv);
+  const needsJson = unset.length > 0 || Object.keys(resolvedEnv).length > 0;
+  return needsJson ? JSON.stringify({ ...settings, env }) : settingsFile;
+}
+
+/**
+ * 缺省配置下的保真性判定器 argv 前缀（CLI 激活路径的缺省 wiring）。与
+ * launchArgv("fix-worker", "", root).slice(0, -1) 同构。⛔ 只读配置、不 import plugin/*。
+ * 返回 null ⇒ 配置缺失/非法/role 缺 ⇒ 调用方落回 "no judge configured"（既有可见性分支）。
+ */
+export function resolveFidelityJudgeArgvFromConfig(root: string): string[] | null {
+  const profiles = readProfilesYaml(root);
+  if (!profiles) return null;
+  const roles = (profiles.roles ?? {}) as Record<string, Record<string, unknown>>;
+  const profileMap = (profiles.profiles ?? {}) as Record<string, Record<string, unknown>>;
+  const role = roles["fix-worker"];
+  if (!role || typeof role !== "object") return null;
+  const profileName = typeof role.profile === "string" ? role.profile : "worker-default";
+  const profile = profileMap[profileName];
+  if (!profile || typeof profile !== "object") return null;
+
+  const launcher = profile.launcher ?? role.launcher;
+  if (typeof launcher !== "string" || launcher === "") return null;
+  const model = role.model !== undefined ? role.model : profile.model;
+  const bare = role.bare !== undefined ? role.bare === true : profile.bare === true;
+  const name = typeof role.name === "string" && role.name !== "" ? role.name : "quay-fix-worker";
+
+  const baseEnv = (profile.env && typeof profile.env === "object" ? profile.env : {}) as Record<string, string>;
+  const roleEnv = (role.env && typeof role.env === "object" ? role.env : {}) as Record<string, string>;
+  const env = mergeProfileEnv(baseEnv, roleEnv);
+  const unset = [
+    ...(Array.isArray(profile.unset) ? profile.unset.map(String) : []),
+    ...(Array.isArray(role.unset) ? role.unset.map(String) : []),
+  ];
+  for (const k of unset) delete env[k];
+
+  const settingsArg = fidelitySettingsArg(root, env, unset);
+  if (settingsArg === null) return null;
+
+  const argv = [launcher, "--settings", settingsArg];
+  if (profiles.excludeDynamicSystemPromptSections === true) argv.push("--exclude-dynamic-system-prompt-sections");
+  if (profiles.promptSuggestions === false) argv.push("--prompt-suggestions", "false");
+  if (typeof model === "string" && model !== "") argv.push("--model", model);
+  if (bare === true) argv.push("--bare");
+  argv.push("-n", name, "-p");
+  return argv;
+}
+
 async function main(argv: string[]) {
   const args = argv.slice(2);
   const rootFlagIdx = args.indexOf("--root");
@@ -1143,6 +1252,12 @@ async function main(argv: string[]) {
   const judgeCmd = process.env.QUAY_GOAL_FIDELITY_JUDGE;
   if (judgeCmd && judgeCmd.trim() !== "") {
     fidelityJudge = judgeFromArgv(judgeCmd.trim().split(/\s+/));
+  } else {
+    // 缺省 wiring（gap-fidelity-gate-not-wired-on-the-dominant-cli-activation-path）：无 env seam 时从配置
+    // 读判定器 argv 前缀——人/CLI 激活路径（承载 20/21 激活）不再惰性。配置缺失/非法 ⇒ null ⇒ 落回
+    // "no judge configured" 可见性分支（fail-open + 诚实留痕，⛔ 不回落 faithful）。
+    const cfgArgv = resolveFidelityJudgeArgvFromConfig(root);
+    if (cfgArgv) fidelityJudge = judgeFromArgv(cfgArgv);
   }
   const store = createGoalStore(goalDir, { cap: goalCfg.cap, staleMs: goalCfg.staleMs, fidelityJudge });
 
