@@ -31,10 +31,10 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 夹具最小可用：合成夹具目录结构与 quay-init 产物的关键特征一致（无 `plugin/`、`main`+`develop` 双分支、`.quay/config.yml` 存在），一条命令可重建。
-- [ ] AC2（A 类回归）：针对夹具跑 `resourceGateCheck`/`defaultPromotionCheckArgv`/`readBudgetFromGate`/`analyzeTasks` 均不抛路径解析错误（本轮 6 处缺陷若任一复现，该测试必须先红）。
-- [ ] AC3（B 类回归）：针对夹具跑 `syncDocDevelopBidirectional`，返回值 ≠ `"no-refs"`（`DOC_BRANCH` 缺陷若复现，该测试必须先红）。
-- [ ] AC4：`scripts/test.sh` 全量绿，新增测试文件纳入现有泳道（不新建并发/超时机制）。
+- [x] AC1 夹具最小可用：合成夹具目录结构与 quay-init 产物的关键特征一致（无 `plugin/`、`main`+`develop` 双分支、`.quay/config.yml` 存在），一条命令可重建。
+- [x] AC2（A 类回归）：针对夹具跑 `resourceGateCheck`/`defaultPromotionCheckArgv`/`readBudgetFromGate`/`analyzeTasks` 均不抛路径解析错误（本轮 6 处缺陷若任一复现，该测试必须先红）。
+- [x] AC3（B 类回归）：针对夹具跑 `syncDocDevelopBidirectional`，返回值 ≠ `"no-refs"`（`DOC_BRANCH` 缺陷若复现，该测试必须先红）。
+- [x] AC4：`scripts/test.sh` 全量绿，新增测试文件纳入现有泳道（不新建并发/超时机制）。
 
 ## Definition of Done
 
