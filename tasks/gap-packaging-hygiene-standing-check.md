@@ -1,7 +1,7 @@
 ---
 id: gap-packaging-hygiene-standing-check
 title: 打包卫生缺陷转为常设检查项——把 GOAL-015 捕捉的 files 白名单误装/配置键悬空类问题接入 loop.routines
-status: todo
+status: ready
 labels:
   - gap
 parent: null

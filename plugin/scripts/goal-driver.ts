@@ -41,6 +41,7 @@
 
 import path from "node:path";
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 // Layer 0（driver-runtime 单一实现）：DRIVER_KINDS（controlFile/carriers 单源）、runAsync（非阻塞
@@ -433,16 +434,47 @@ export function buildSufficiencyPrompt(
   ].join("\n");
 }
 
-/** 充分性语义判定（AC-222 语义半）：机械可证部分判不出（有退出条件 + 有在域 AC）时，spawn 短命 LLM
- *  判「这组 AC 是否覆盖退出条件」⇒ covered / insufficient。⛔ 硬约束：LLM 不可用 / 超时 / 读不懂 ⇒
- *  not-evaluated，绝不允许回落成 covered（parseSemanticSufficiencyVerdict 的 fail-closed）。
- *  sufficiencyCmd = 测试缝（同 readyPoolCmd 的数组形态：覆盖命令前缀，prompt 作末参数追加）；
- *  缺省 = launchArgv("fix-worker") 真 LLM。 */
-export async function semanticSufficiencyVerdict(
+/** 充分性判定的输入哈希（确定性缓存 key）：goal.id ‖ 退出条件文本 ‖ 在域 AC 的 (id,title,expect)
+ *  有序列表——即 buildSufficiencyPrompt 的全部【语义】输入（⛔ root 与固定指令文本是常量，不入 key；
+ *  换机器/换指令文本会按各自常量独立判，不影响「语义输入是否变化」）。任一在域 AC 的 expect / goal
+ *  退出条件 / AC 集合（增删序）变化 ⇒ 哈希变 ⇒ 自动重判（AC3 的「输入变化必重判」）。 */
+export function sufficiencyCacheKey(
+  goal: Record<string, unknown>,
+  inScopeAcs: Array<Record<string, unknown>>,
+): string {
+  const canonical = JSON.stringify({
+    goal: String(goal.id ?? ""),
+    exit: exitConditionsText(String(goal.body ?? "")),
+    acs: inScopeAcs.map((ac) => [String(ac.id ?? ""), String(ac.title ?? ""), String(ac.expect ?? "")]),
+  });
+  return createHash("sha256").update(canonical).digest("hex");
+}
+
+/** 充分性裁决的确定性缓存（模块级）：key = sufficiencyCacheKey，value = 已【确定】的 SufficiencyVerdict
+ *  （covered / insufficient）。⛔ not-evaluated 永不入缓存——缓存只对【已确定】的输入生效（硬规则 3b：
+ *  缓存不得把「判不出」变成「合格」）。模块级 ⇒ 常驻 driver 同一进程内跨轮持久（每轮 runGoalRound →
+ *  semanticSufficiencyVerdict 命中同一份 Map）；进程重启即清空，重启后首次判定重新 2 次取样并 commit，
+ *  确定性随即可恢复（⛔ 仍要 2 次一致才入缓存，不是把一次抽签 latch 成永久答案）。 */
+const sufficiencyCache = new Map<string, SufficiencyVerdict>();
+
+/** 清空充分性裁决缓存（测试缝：不同 test 隔离状态；⛔ 生产不调）。 */
+export function resetSufficiencyCacheForTest(): void {
+  sufficiencyCache.clear();
+}
+
+/** 充分性裁决缓存的只读快照（测试断言「入缓存 / 不入缓存」用；⛔ 生产不调）。 */
+export function sufficiencyCacheSnapshot(): ReadonlyMap<string, SufficiencyVerdict> {
+  return sufficiencyCache;
+}
+
+/** 单次充分性语义采样（一次 LLM spawn）。⛔ 不可用 / 超时 / 读不懂 ⇒ not-evaluated，绝不回落 covered
+ *  （parseSemanticSufficiencyVerdict 的 fail-closed）。从 semanticSufficiencyVerdict 抽出，供「2 次一致
+ *  才入缓存」的一致性守卫对同一输入做两次独立采样。 */
+async function sampleSemanticSufficiency(
   goal: Record<string, unknown>,
   inScopeAcs: Array<Record<string, unknown>>,
   root: string,
-  opts: { sufficiencyCmd?: string[] | null; sufficiencyTimeoutMs?: number } = {},
+  opts: { sufficiencyCmd?: string[] | null; sufficiencyTimeoutMs?: number },
 ): Promise<SufficiencyVerdict> {
   const prompt = buildSufficiencyPrompt(goal, inScopeAcs, root);
   let argv: string[];
@@ -460,6 +492,41 @@ export async function semanticSufficiencyVerdict(
   const r = await runAsync(argv, { timeoutMs: opts.sufficiencyTimeoutMs ?? SUFFICIENCY_TIMEOUT_MS });
   if (r.error) return "not-evaluated";
   return parseSemanticSufficiencyVerdict(r.stdout, r.status);
+}
+
+/** 充分性语义判定（AC-222 语义半 + 本条确定性缓存）：机械可证部分判不出（有退出条件 + 有在域 AC）时，
+ *  判「这组 AC 是否覆盖退出条件」⇒ covered / insufficient。⛔ 硬约束：LLM 不可用 / 超时 / 读不懂 ⇒
+ *  not-evaluated，绝不允许回落成 covered（parseSemanticSufficiencyVerdict 的 fail-closed）。
+ *
+ *  确定性（本条）：同一输入（sufficiencyCacheKey 相同）跨轮/跨调用给出同一裁决——
+ *  ① 命中缓存 ⇒ 直接返回缓存值（⛔ 不重问 LLM）；
+ *  ② 缓存未命中 ⇒ 首次判定做 2 次独立采样，2 次一致才入缓存并返回（防把一次抽签 latch 成永久答案）；
+ *     2 次不一致 ⇒ 记 not-evaluated、不入缓存，下一轮再试（⛔ 不取多数票——那仍是概率判定，且更贵）；
+ *  ③ 缓存未命中 ∧ 采样判不出（不可用/超时/读不懂）⇒ not-evaluated（⛔ 不把「判不出」变「合格」，也不
+ *     沿用别的输入的缓存值——缓存 key 按输入隔离）。
+ *  sufficiencyCmd = 测试缝（同 readyPoolCmd 的数组形态：覆盖命令前缀，prompt 作末参数追加）；
+ *  缺省 = launchArgv("fix-worker") 真 LLM。 */
+export async function semanticSufficiencyVerdict(
+  goal: Record<string, unknown>,
+  inScopeAcs: Array<Record<string, unknown>>,
+  root: string,
+  opts: { sufficiencyCmd?: string[] | null; sufficiencyTimeoutMs?: number } = {},
+): Promise<SufficiencyVerdict> {
+  const key = sufficiencyCacheKey(goal, inScopeAcs);
+  const cached = sufficiencyCache.get(key);
+  if (cached !== undefined) return cached;
+
+  // 缓存未命中 ⇒ 首次判定：2 次独立采样，2 次一致才入缓存。
+  const s1 = await sampleSemanticSufficiency(goal, inScopeAcs, root, opts);
+  if (s1 === "not-evaluated") return "not-evaluated";
+  const s2 = await sampleSemanticSufficiency(goal, inScopeAcs, root, opts);
+  if (s2 === "not-evaluated") return "not-evaluated";
+  if (s1 === s2) {
+    sufficiencyCache.set(key, s1);
+    return s1;
+  }
+  // 2 次不一致 ⇒ 判不出、不入缓存，下一轮再试（⛔ 不取多数票）。
+  return "not-evaluated";
 }
 
 // ── 缺口五态（G7 + G9 stalled + done-unresolved，硬规则 3b：读不懂输入不得返回与「合格」同形——
