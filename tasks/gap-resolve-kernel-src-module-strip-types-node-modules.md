@@ -3,7 +3,7 @@ id: gap-resolve-kernel-src-module-strip-types-node-modules
 title: resolveKernelSrcModule 把动态 import 的 ff-merge.ts/gate-event-store.ts 解析到
   node_modules 下 .ts ⇒ ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING ⇒ 机械 fan-in
   ff 步在第三方项目必挂
-status: ready
+status: done
 labels:
   - gap
   - defect
