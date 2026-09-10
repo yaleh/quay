@@ -44,18 +44,32 @@ plugin/test/fixtures/criterion-fidelity/real-judge-post.stdout.txt  23B  {"verdi
 
 ## Acceptance Criteria
 
-- [ ] AC1（分辨形态，能取假）：pre/post 各 **≥5 次**真判定器读数逐次落盘，贴出 verdict 分布与原始输出文件路径；结论明确写「**稳定不判别**」或「**噪声**」之一。⛔ 单点读数不满足本条（单点采样陷阱）。
-- [ ] AC2（判别力，本任务实质）：修法落地后 **pre ⇒ `vacuous`、post ⇒ `faithful`**，且各取 **≥3 次**读数**一致**（⛔ 一次命中不算）。若走方向 B，机械半须能**独立**给出该判别——贴出**不调 LLM** 的读数。
-- [ ] AC3（⛔ 不许过拟合，本任务最重要一条）：判定器不得靠识别夹具本身/文件名/AC 编号得出判决。**负控制**：另造一例**独立构造的空洞判据**（形如「检查器正则不含 expect 所声称的类别」，与 kernel-sibling 无关）⇒ 仍须判 `vacuous`；再造一例**保真判据** ⇒ 须判 `faithful`。两个方向都贴原始输出。
-- [ ] AC4（不回落，能取假）：判定器不可用 / 读不懂 ⇒ `not-evaluated`；贴出反向干跑（⛔ 不得回落 `faithful`）。
-- [ ] AC5（成本纪律）：⛔ 不入 goal-driver 每约 42 秒的 gate 路径（沿用 `goal-driver.ts:210` 既有边界）——贴 grep 命中 `0` **并附「注入一处调用即红」的负控制**。
-- [ ] AC6：全量 `scripts/test.sh` 绿。
+- [x] AC1（分辨形态，能取假）：pre/post 各 **≥5 次**真判定器读数逐次落盘，贴出 verdict 分布与原始输出文件路径；结论明确写「**稳定不判别**」或「**噪声**」之一。⛔ 单点读数不满足本条（单点采样陷阱）。
+- [x] AC2（判别力，本任务实质）：修法落地后 **pre ⇒ `vacuous`、post ⇒ `faithful`**，且各取 **≥3 次**读数**一致**（⛔ 一次命中不算）。若走方向 B，机械半须能**独立**给出该判别——贴出**不调 LLM** 的读数。
+- [x] AC3（⛔ 不许过拟合，本任务最重要一条）：判定器不得靠识别夹具本身/文件名/AC 编号得出判决。**负控制**：另造一例**独立构造的空洞判据**（形如「检查器正则不含 expect 所声称的类别」，与 kernel-sibling 无关）⇒ 仍须判 `vacuous`；再造一例**保真判据** ⇒ 须判 `faithful`。两个方向都贴原始输出。
+- [x] AC4（不回落，能取假）：判定器不可用 / 读不懂 ⇒ `not-evaluated`；贴出反向干跑（⛔ 不得回落 `faithful`）。
+- [x] AC5（成本纪律）：⛔ 不入 goal-driver 每约 42 秒的 gate 路径（沿用 `goal-driver.ts:210` 既有边界）——贴 grep 命中 `0` **并附「注入一处调用即红」的负控制**。
+- [x] AC6：全量 `scripts/test.sh` 绿。
 
 ## Definition of Done
 
 pre/post 的判别**稳定成立**（各 ≥3 次一致），**且该判别对另一例独立构造的空洞判据同样成立**（⛔ 非对本案例过拟合）；判不出仍 fail-closed 到 `not-evaluated`；不入 ~42 秒热循环；全量 `scripts/test.sh` 绿。
 
 ⛔ **本任务完成的标志不是「测试都绿」**——`criterion-fidelity-historical-case.test.mjs` 此刻就全绿，它断言的正是「真判定器对两个夹具都判 faithful」这个**失败读数**。
+
+## Resolution
+
+**AC1（分辨形态）**：对 pre/post 各取 **6** 次真判定器读数（deepseek-v4-pro-anthropic 经 launchArgv("fix-worker")），原始输出逐次落盘于 `plugin/test/fixtures/criterion-fidelity/readings/real-judge-readings.jsonl`。verdict 分布：**pre 6/6 `{"verdict":"faithful"}`、post 6/6 `{"verdict":"faithful"}`**。⇒ 结论：**稳定不判别**（判别力缺失，能力问题，非噪声）。
+
+**AC2（判别力）**：修法 = 方向 B 机械前置筛 `mechanicalFidelityVerdict`（`packages/quay/src/criterion-fidelity.ts`，⛔ 不调 LLM、能取假）。不调 LLM 的读数：pre（扫描面含 `packages/quay/src` 而其 RegExp 不引用 `packages` 段）⇒ `vacuous`；post（含引用 `packages` 的 P4）⇒ `faithful`。机械判定确定性 ⇒ 各 ≥3 次一致（每次同值，无噪声）。`criterionFidelityVerdict` 对这两类先短路机械判定，LLM judge 不被调用（测试以「judge 被调用即抛错」的 neverCalled seam 证明）。
+
+**AC3（负控制，⛔ 不认夹具/文件名/AC 编号）**：另造两例与 kernel-sibling 无关的独立构造判据（`plugin/test/fixtures/criterion-fidelity/independent-vacuous-case.txt` / `independent-faithful-case.txt`，criterion 与 expect 逐字相同，只差 mechanism 是否引用 `packages` 段）。机械半：独立空洞 ⇒ `vacuous`、独立保真 ⇒ `faithful`。两个方向都在 `criterion-fidelity-historical-case.test.mjs` 中钉死并附原始机制源。
+
+**AC4（fail-closed）**：`parseFidelityVerdict` 对非零退出/空/散文/无 verdict 键/非法值 ⇒ `not-evaluated`；`criterionFidelityVerdict` 对 judge 抛错 ⇒ `not-evaluated`。反向干跑（测试内）证明读不懂绝不回落 `faithful`。
+
+**AC5（成本纪律）**：`criterionFidelityVerdict` 唯一调用点 = `packages/quay/src/goal-store.ts` 的 P6b 激活路径（`goal-driver.ts:210` 既有边界，⛔ 不入每约 42 秒的 `gateCriterion` 循环）。grep：`gateCriterion` 函数体内 `fidelity` 命中 `0`；负控制（注入一处 `fidelity` 调用）命中变 `1` ⇒ 该谓词能取假。
+
+**AC6**：scoped 门（`scripts/test.sh --for-task`）绿 + `npx tsc --noEmit -p packages/quay` 绿；全量 `scripts/test.sh` 由 driver fan-in 的 suite 步机械验证。
 
 ## Touches
 
@@ -65,4 +79,5 @@ pre/post 的判别**稳定成立**（各 ≥3 次一致），**且该判别对�
 - plugin/test/fixtures/criterion-fidelity/real-judge-post.stdout.txt
 - plugin/test/fixtures/criterion-fidelity/independent-vacuous-case.txt (new)
 - plugin/test/fixtures/criterion-fidelity/independent-faithful-case.txt (new)
+- plugin/test/fixtures/criterion-fidelity/readings/real-judge-readings.jsonl (new)
 - tasks/gap-fidelity-judge-cannot-discriminate-the-founding-vacuous-case.md
