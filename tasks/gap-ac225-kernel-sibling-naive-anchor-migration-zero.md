@@ -50,6 +50,7 @@ AC1–AC4 全绿；AC-225 criterion exit 0（检查器**机械枚举 0 处**，�
 - `plugin/scripts/quality-gate-driver.ts`
 - `plugin/scripts/quay-init-closure-assertion.ts`
 - `plugin/scripts/quay-init-closure-ratchet.ts`
+- `plugin/scripts/registry-bare-filename-scan.ts`
 - `plugin/scripts/rhythm-consumer-check.ts`
 - `plugin/scripts/runner-concurrency.ts`
 - `plugin/scripts/runner-tree-state.ts`
@@ -60,5 +61,6 @@ AC1–AC4 全绿；AC-225 criterion exit 0（检查器**机械枚举 0 处**，�
 - `plugin/test/full-suite-runner.test.mjs`
 - `plugin/test/suite-state-trigger.test.mjs`
 - `plugin/test/runner-concurrency.test.mjs`
+- `plugin/test/registry-bare-filename-scan.test.mjs`
 - `tasks/gap-ac225-kernel-sibling-naive-anchor-migration-zero.md`
 - `experiments/quay-perpetual-stream/scripts/workflow-journal.ts`

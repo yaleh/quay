@@ -1,7 +1,7 @@
 ---
 id: gap-ac226-target-identity-literal-check
 title: B域身份字面量检查器 target-identity-literal-check：存在 + 枚举归零 + 被突变覆盖（AC-226）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -33,10 +33,10 @@ goal_ac: AC-226
 2. 消除唯一残量 `plugin/scripts/driver-filters.ts:441` `DOC_BRANCH = "author"`：给 doc 工作分支一个 override 通道（读目标 `.quay/config.yml` 或实时 git 状态），或去除该裸字面量、以运行时派生为唯一来源（GOAL-012 TARGET 域正解：读目标 config / 实时 git 状态，⛔ 不得是 kernel 代码里的字面量）。以 AC-226 判别标准（逐项目不同 ∧ 无 override）为验收线。
 3. 建突变用例 `plugin/scripts/checker-mutation-cases/target-identity-literal-check.sh`（baseline GREEN → inject → RED → restore → GREEN），使 `covered: true`。
 4. 建 `plugin/test/target-identity-literal-check.test.mjs`：自建夹具双向跑通——注入「分支名 / `test_command` / `tasks_dir` 各一例」无 override 字面量 ⇒ 检查器红；移除 ⇒ 绿；负控制断言 develop/integration/master 合法默认值不被误报。
-5. 登记进 `scripts/test.sh` 的 run_static_checks 与 `plugin/scripts/capability-catalog.sh`（⛔ 否则 unclassified 红 + `--list` 不收录）。⛔ 新 plugin/scripts/*.ts 若触发 laydown 登记闸，同步 quay-init --loop laydown + closure-ratchet baseline（以 suite 实测为准）。
+5. 登记进 run_static_checks（`plugin/scripts/runner-static-gate.ts`）与 `plugin/scripts/capability-catalog.sh`（⛔ 否则 unclassified 红 + `--list` 不收录）。
 6. 干跑 AC-226 criterion 至 exit 0。
 
-**边界（照实说明，⛔ 不假装机械）**：A 域（AC-224/225，kernel-sibling-resolution-check）与 C 域（AC-227/228，能力降级+一致性夹具）属同 goal 的兄弟任务，⛔ 不属本任务。本任务只建 B 域检查器 + 消除 DOC_BRANCH 残量 + 证双向 + 登记。`scripts/test.sh` 与 `capability-catalog.sh` 与 AC-224 任务共享 Touches，派发时注意重叠（dispatch-order-by-touches-overlap-direction 纪律）。
+**边界（照实说明，⛔ 不假装机械）**：A 域（AC-224/225，kernel-sibling-resolution-check）与 C 域（AC-227/228，能力降级+一致性夹具）属同 goal 的兄弟任务，⛔ 不属本任务。本任务只建 B 域检查器 + 消除 DOC_BRANCH 残量 + 证双向 + 登记。`runner-static-gate.ts` 与 `capability-catalog.sh` 与 AC-224 任务共享 Touches，派发时注意重叠（dispatch-order-by-touches-overlap-direction 纪律）。
 
 ## Touches
 
@@ -45,19 +45,19 @@ goal_ac: AC-226
 - `plugin/test/target-identity-literal-check.test.mjs`
 - `plugin/scripts/driver-filters.ts`
 - `plugin/test/driver-filters.test.mjs`
-- `scripts/test.sh`
+- `plugin/scripts/runner-static-gate.ts`
 - `plugin/scripts/capability-catalog.sh`
 - `tasks/gap-ac226-target-identity-literal-check.md`
 
 ## Acceptance Criteria
 
-- [ ] AC1 检查器存在且可跑（判据②前件）：`test -f plugin/scripts/target-identity-literal-check.ts && node --no-warnings --experimental-strip-types plugin/scripts/target-identity-literal-check.ts --root . --json` 可执行且输出结构完整（含 violations 数组，非 spawn 失败）；贴输出前 3 条。
-- [ ] AC2 本仓库枚举归零（判据②）：同一命令 exit 0，violations 数组长度为 0；贴完整命令与输出。⛔ `DOC_BRANCH` 残量已消除——逐项目不同的身份不再以无 override 裸字面量存在。
-- [ ] AC3 登记 covered:true（判据③）：`bash plugin/scripts/checker-mutation-check.sh --list --json | python3 -c 'import json,sys; m=json.load(sys.stdin); ok=any(c.get("name")=="target-identity-literal-check" and c.get("covered") for c in m.get("checkers",[])); print("registered:",ok); sys.exit(0 if ok else 1)'` 输出 `registered: true`；贴 checkers 数组里该条目原文。
-- [ ] AC4 双向能取假（判据①，本条重点）：`node --no-warnings --experimental-strip-types --test plugin/test/target-identity-literal-check.test.mjs` 全绿，断言覆盖两个方向——注入「分支名 / `test_command` / `tasks_dir` 各一例」无 override 字面量 ⇒ 检查器红；移除 ⇒ 绿；负控制：develop/integration/master 合法默认值不被误报（⛔ 三种身份逐条断言，⛔ 不止一种形态）。
-- [ ] AC5 突变用例生效：`bash plugin/scripts/checker-mutation-cases/target-identity-literal-check.sh <tmpdir>` exit 0（baseline GREEN → inject → RED → restore → GREEN 全程证明，⛔ 非 STAYED-GREEN 非 ALWAYS-RED）。
-- [ ] AC6 判据翻转：AC-226 criterion 干跑 exit 0（贴完整命令与输出）。
+- [x] AC1 检查器存在且可跑（判据②前件）：`test -f plugin/scripts/target-identity-literal-check.ts && node --no-warnings --experimental-strip-types plugin/scripts/target-identity-literal-check.ts --root . --json` 可执行且输出结构完整（含 violations 数组，非 spawn 失败）；贴输出前 3 条。
+- [x] AC2 本仓库枚举归零（判据②）：同一命令 exit 0，violations 数组长度为 0；贴完整命令与输出。⛔ `DOC_BRANCH` 残量已消除——逐项目不同的身份不再以无 override 裸字面量存在。
+- [x] AC3 登记 covered:true（判据③）：`bash plugin/scripts/checker-mutation-check.sh --list --json | python3 -c 'import json,sys; m=json.load(sys.stdin); ok=any(c.get("name")=="target-identity-literal-check" and c.get("covered") for c in m.get("checkers",[])); print("registered:",ok); sys.exit(0 if ok else 1)'` 输出 `registered: true`；贴 checkers 数组里该条目原文。
+- [x] AC4 双向能取假（判据①，本条重点）：`node --no-warnings --experimental-strip-types --test plugin/test/target-identity-literal-check.test.mjs` 全绿，断言覆盖两个方向——注入「分支名 / `test_command` / `tasks_dir` 各一例」无 override 字面量 ⇒ 检查器红；移除 ⇒ 绿；负控制：develop/integration/master 合法默认值不被误报（⛔ 三种身份逐条断言，⛔ 不止一种形态）。
+- [x] AC5 突变用例生效：`bash plugin/scripts/checker-mutation-cases/target-identity-literal-check.sh <tmpdir>` exit 0（baseline GREEN → inject → RED → restore → GREEN 全程证明，⛔ 非 STAYED-GREEN 非 ALWAYS-RED）。
+- [x] AC6 判据翻转：AC-226 criterion 干跑 exit 0（贴完整命令与输出）。
 
 ## Definition of Done
 
-AC1–AC6 全绿；AC-226 criterion exit 0（三断言：双向单测绿 ∧ 枚举归零 ∧ manifest `covered: true`）。B 域检查器落地 + `DOC_BRANCH` 残量消除（无 override 的裸字面量不再存在）+ `scripts/test.sh` / `capability-catalog.sh` / 突变清单登记完成；合法默认值（develop/integration/master）不被误报。⛔ 「会红」由 AC4 专用单测直接证明，不靠 covered 字段冒充；⛔ 判别标准（逐项目不同 ∧ 无 override 通道）写进检查器实现，不留给读者意会。
+AC1–AC6 全绿；AC-226 criterion exit 0（三断言：双向单测绿 ∧ 枚举归零 ∧ manifest `covered: true`）。B 域检查器落地 + `DOC_BRANCH` 残量消除（无 override 的裸字面量不再存在）+ run_static_checks / `capability-catalog.sh` / 突变清单登记完成；合法默认值（develop/integration/master）不被误报。⛔ 「会红」由 AC4 专用单测直接证明，不靠 covered 字段冒充；⛔ 判别标准（逐项目不同 ∧ 无 override 通道）写进检查器实现，不留给读者意会。
