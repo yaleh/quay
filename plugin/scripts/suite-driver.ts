@@ -1,25 +1,27 @@
-// plugin/scripts/suite-driver.ts — per-task suite 生命周期收进一个常驻 driver kind。
-// (tasks/gap-suite-lifecycle-driver-kind / SPEC-suite-lifecycle-and-failure-semantics-2026-08-26 §3)
+// plugin/scripts/suite-driver.ts — per-task suite 的共享 spawn+wait 函数库（⛔ 不再是常驻 driver kind）。
+// (tasks/gap-suite-lifecycle-driver-kind / SPEC-suite-lifecycle-and-failure-semantics-2026-08-26 §3；
+//  gap-retire-resident-suite-driver-kind —— 人 2026-09-07 A 裁定退役常驻 suite kind)
 //
 // WHY THIS EXISTS（SPEC §3.1 实测）：per-task suite 必须 detach 于 subagent（Bash 单次 600s 硬顶 +
-// `run_in_background` 被 harness 连带杀），但现有 detach 由 `setsid + & + disown` 起在独立 session
-// （fan-in-execute.js SUITE_LAUNCH）——【没有任何进程在 wait 它】，挂死检测只有辅（外部定时扫）、
-// 没有主（父进程 wait）。代价：ac143 挂死 33.7 分钟、lpt-lookback 挂死 199.5 分钟，全靠人工 kill。
-// 常驻 driver 不是 subagent —— 它可以直接 spawn 并 wait，拿回进程级父子关系。
+// `run_in_background` 被 harness 连带杀），但可以由 worker-driver 在机械 fan-in 中【进程内】直接 spawn
+// 并 wait（进程级父子），拿回「父进程 wait」这一挂死检测主通道——原 `setsid + & + disown` detach 没有
+// 任何进程在 wait，挂死检测只有辅（外部定时扫），ac143 挂死 33.7 分钟 / lpt-lookback 挂死 199.5 分钟
+// 全靠人工 kill。
 //
-// 本 driver 是【唯一】spawn per-task suite 的地方：
-//   主（进程级，自动）  driver 直接 spawn suite 并 wait ⇒ 子进程退出立即得知，三态可分：
-//                      正常退出 / 非零退出 / 被信号杀
-//   辅（定时，兜底）    同一 wait 循环顺带查「活着但无输出 ≥N 秒」⇒ 判静默挂死 ⇒ 杀 + 记可区分失败态
-//   资源集成            spawn 前取单飞槽（经统一后的 full_suite_lock_acquire 同一套 slot 文件）、
-//                       子进程终结后释放槽 ⇒ 取/放同一执行点 ⇒「让槽不让 lane」结构上不可能再发生
-//   carriers            suite-round.jsonl（每轮一条，outcome 三态可分：done / red / hung）
+// 常驻 suite driver kind 已按人 2026-09-07 A 裁定退役：它从未在生产启动（start-drivers.ts 的
+// DRIVER_KINDS 不含 suite；.quay/suite-requests|suite-results 目录无 writer 无 reader），而与它矛盾的
+// 这条【进程内 spawn+wait】路径才是生产每轮都在跑的。本文件因此保留为【共享函数库】，由 worker-driver
+// 消费（worker-driver.ts:202 import spawnSuiteAndWait）。⛔ 不再注册进 DRIVER_KINDS、⛔ 无常驻循环、
+// ⛔ 无 request/result 协议。
 //
-// 分层（AC151 两级抽象）：继承 Layer 0（driver-runtime：isHalted / appendHeartbeatLine / ts / sleep /
-// DRIVER_KINDS registry / supervisor respawn / 五运维动词）。⛔ 不继承 Layer 1a（无候选池 / 无选择 /
-// 无 verify）也⛔ 不继承 Layer 1b（单元不是例程）——本 driver 的单元是【suite 运行请求】，产出是
-// 【三态 outcome】。slot 槽路径读 TS 侧单一真相源 suite-lock-slots.ts（与 bash suite-slot-lib.sh 同一
-// 语义，suite-slot-ssot-check 校验两边一致）。
+// 保留的共享函数：
+//   spawnSuiteAndWait  spawn suite 并 wait（进程级父子）+ 定时兜底静默看门狗 + 三态 outcome
+//                      （正常退出 / 非零退出 / 被信号杀；挂死 ⇒ hung，可区分独立取值）
+//   slotHolderArgv     取槽 + exec 同一执行点（acquire 与 exec 同函数，exec 持锁跨 suite、随子进程终结
+//                      自然释放 ⇒「让槽不让 lane」结构上不可能再发生）
+//   logMtimeMs / killTree / appendSuiteRound / computeSuiteRound —— spawn+wait 与 round 载体的支撑函数。
+// slot 槽路径读 TS 侧单一真相源 suite-lock-slots.ts（与 bash suite-slot-lib.sh 同一语义，
+// suite-slot-ssot-check 校验两边一致）。
 //
 // 硬规则 3b（AC2 判据）：`hung` 是与 `done`、与 `red` 可区分的独立取值——挂死被杀后绝不记成「红」或
 // 「没跑完」（三种成因压成一个值正是 SPEC §1.1 泄漏② 要修的病）。
@@ -28,24 +30,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
-// Layer 0（driver-runtime 单一实现）：registry（controlFile/carriers 单源）、isHalted（控制面 halt）、
-// ts / sleep / appendHeartbeatLine（心跳/载体）。⛔ 不从 worker/promotion/quality 中转。
-import { DRIVER_KINDS, isHalted, ts, sleep, appendHeartbeatLine } from "./driver-runtime.ts";
+// Layer 0（driver-runtime 单一实现）：ts（round 记录时间戳）、appendHeartbeatLine（心跳/载体落点）。
+// ⛔ 不再 import DRIVER_KINDS / isHalted / sleep（常驻 driver kind 面已按人 2026-09-07 裁定退役）。
+import { ts, appendHeartbeatLine } from "./driver-runtime.ts";
 // suite 槽路径单一真相源（TS 侧；与 bash suite-slot-lib.sh 同语义）。
 import { suiteLockBase } from "./suite-lock-slots.ts";
 
-// ── 常量（由 DRIVER_KINDS registry 派生，⛔ 不另写一份路径字面量）──────────────────────────
-const SUITE_SPEC = DRIVER_KINDS.suite;
-/** 主载体（.quay/suite-round.jsonl，gitignored 运行时日志——每轮一条三态 outcome）。 */
-export const ROUND_LOG_REL = SUITE_SPEC.carriers[0];
-/** 控制态文件（.quay/suite-control.json，halt 单一真相源，与其它 kind 同族）。 */
-export const SUITE_CONTROL_STATE_REL = path.posix.join(".quay", SUITE_SPEC.controlFile);
-/** 请求/结果目录（相对 <root>/.quay/；fan-in 写请求、读结果，driver 写结果）。 */
-export const SUITE_REQUESTS_DIR_REL = path.posix.join(".quay", "suite-requests");
-export const SUITE_RESULTS_DIR_REL = path.posix.join(".quay", "suite-results");
-
-/** 轮间隔缺省（毫秒）。占位节奏——生产部署由启动命令传 --interval 覆盖；测试传小值。 */
-export const INTERVAL_MS_DEFAULT = 1000;
+// ── 常量（⛔ suite kind 已从 DRIVER_KINDS registry 退役——载体路径改为字面量，不再由 registry 派生）──
+/** 主载体（.quay/suite-round.jsonl，gitignored 运行时日志——一轮一条三态 outcome）。 */
+export const ROUND_LOG_REL = "suite-round.jsonl";
 
 /** 静默挂死阈值缺省（毫秒）：活着但无输出 ≥N 秒 ⇒ 判挂死。与 full-suite-runner 的 SUITE_SILENCE_MS
  *  同族（15 分钟）；测试经 --silence-timeout-ms 或 env QUAY_TEST_SUITE_DRIVER_SILENCE_MS 传小值。 */
@@ -265,49 +258,6 @@ export async function spawnSuiteAndWait(args: {
   });
 }
 
-// ── 请求 / 结果协议（fan-in 写请求、读结果；driver 读请求、写结果）────────────────────────
-export interface SuiteRequest {
-  task: string;
-  worktree: string;
-  runId: string;
-  /** driver 实际 spawn 的命令（会被 slot-holder 包一层）。缺省 = test.sh --buckets <task>。 */
-  suiteCommand: string[];
-  /** 静默看门狗盯的日志文件（suite 输出 tee 到这里）。 */
-  logFile: string | null;
-  requestedAt: string;
-}
-
-/** 解析一个请求 JSON。读不懂/结构不完整 ⇒ null（fail-closed 跳过该请求，⛔ 不伪装已处理）。 */
-export function parseSuiteRequest(text: string): SuiteRequest | null {
-  try {
-    const j = JSON.parse(text);
-    if (!j || typeof j.task !== "string" || !j.task) return null;
-    const suiteCommand = Array.isArray(j.suiteCommand) && j.suiteCommand.every((x: unknown) => typeof x === "string")
-      ? (j.suiteCommand as string[])
-      : [];
-    if (suiteCommand.length === 0) return null;
-    return {
-      task: j.task,
-      worktree: typeof j.worktree === "string" ? j.worktree : "",
-      runId: typeof j.runId === "string" ? j.runId : "",
-      suiteCommand,
-      logFile: typeof j.logFile === "string" ? j.logFile : null,
-      requestedAt: typeof j.requestedAt === "string" ? j.requestedAt : "",
-    };
-  } catch {
-    return null;
-  }
-}
-
-/** 写一个结果文件（原子语义不需要——driver 单写者；mkdir -p）。返回落盘路径。 */
-export function writeSuiteResult(root: string, task: string, result: SuiteRunResult & { runId: string }): string {
-  const dir = path.join(root, ".quay", "suite-results");
-  fs.mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, `${task}.json`);
-  fs.writeFileSync(file, JSON.stringify(result) + "\n", "utf8");
-  return file;
-}
-
 /** 追加一条三态 outcome 到主载体 suite-round.jsonl（每轮一条；一行一 JSON）。 */
 export function appendSuiteRound(root: string, record: Record<string, unknown>): string {
   return appendHeartbeatLine(path.join(root, ROUND_LOG_REL), record);
@@ -336,133 +286,23 @@ export function computeSuiteRound(args: {
   };
 }
 
-// ── 常驻循环（AC1：复用 Layer 0 控制面 + 心跳；单元是【请求】不是【任务】）────────────────
-export interface SuiteLoopOptions {
-  root: string;
-  intervalMs: number;
-  once: boolean;
-  maxRounds: number | null;
-  runId: string;
-  json: boolean;
-  pidFile?: string;
-  silenceMs: number;
-  slotLib: string;
-}
-
-/** 列出一个任务是否已有结果（processed）或仍在飞（in-flight set 有它）。 */
-export function isSuiteRequestPending(root: string, task: string, inFlight: Set<string>): boolean {
-  if (inFlight.has(task)) return false;
-  const resultFile = path.join(root, ".quay", "suite-results", `${task}.json`);
-  return !fs.existsSync(resultFile);
-}
-
-/** 读请求目录里待处理的请求（无结果文件且未在飞的）。缺目录/读失败 ⇒ 空列表（⛔ 不抛）。 */
-export function listPendingSuiteRequests(root: string, inFlight: Set<string>): Array<{ task: string; request: SuiteRequest; file: string }> {
-  const dir = path.join(root, ".quay", "suite-requests");
-  const out: Array<{ task: string; request: SuiteRequest; file: string }> = [];
-  let names: string[] = [];
-  try {
-    names = fs.readdirSync(dir).filter((n) => n.endsWith(".json"));
-  } catch {
-    return out;
-  }
-  for (const n of names) {
-    const file = path.join(dir, n);
-    let text: string;
-    try {
-      text = fs.readFileSync(file, "utf8");
-    } catch {
-      continue;
-    }
-    const request = parseSuiteRequest(text);
-    if (!request) continue;
-    if (!isSuiteRequestPending(root, request.task, inFlight)) continue;
-    out.push({ task: request.task, request, file });
-  }
-  return out;
-}
-
-/**
- * 常驻循环：每轮读控制态（halt ⇒ 记 halted 轮退出）→ 扫描请求目录 → 对每个待处理请求
- * spawnSuiteAndWait（异步，不阻塞其它请求；并发受单飞槽 S 自然限制）→ 写结果 + suite-round。
- * SIGINT/SIGTERM / --once / --max-rounds 停。
- */
-export async function runResidentSuiteLoop(opts: SuiteLoopOptions): Promise<number> {
-  const { root, intervalMs, once, maxRounds, runId, json, pidFile, silenceMs, slotLib } = opts;
-  if (pidFile) {
-    try { fs.writeFileSync(pidFile, `${process.pid}\n`, "utf8"); } catch { /* pid-file 只供外部观测 */ }
-  }
-  const slotBase = suiteLockBase(root);
-  let stopRequested = false;
-  let wakeResolve: (() => void) | null = null;
-  const requestStop = () => { stopRequested = true; if (wakeResolve) { const w = wakeResolve; wakeResolve = null; w(); } };
-  process.on("SIGINT", requestStop);
-  process.on("SIGTERM", requestStop);
-  const sleepFn = (ms: number) => new Promise<void>((resolve) => {
-    wakeResolve = resolve;
-    setTimeout(() => { if (wakeResolve === resolve) wakeResolve = null; resolve(); }, ms);
-  });
-
-  const inFlight = new Set<string>();
-  let round = 0;
-  while (!stopRequested) {
-    round += 1;
-    if (isHalted(root, process.env, SUITE_CONTROL_STATE_REL)) {
-      const rec = { round, run_id: runId, pid: process.pid, ts: ts(), halted: true };
-      try { appendSuiteRound(root, rec); } catch { /* 记录写失败不致命 */ }
-      if (json) process.stdout.write(`${JSON.stringify({ event: "halted", round })}\n`);
-      break;
-    }
-    for (const { task, request } of listPendingSuiteRequests(root, inFlight)) {
-      inFlight.add(task);
-      // 异步 spawn+wait（⛔ 不用 spawnSync 阻塞循环——并发 suite 由单飞槽 S 限制）。
-      spawnSuiteAndWait({
-        slotBase,
-        slotLib,
-        suiteCommand: request.suiteCommand,
-        logFile: request.logFile,
-        silenceMs,
-        // QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT 由 spawnSuiteAndWait 强制注入（结构不变式），caller 不传。
-      }).then((result) => {
-        inFlight.delete(task);
-        try { writeSuiteResult(root, task, { ...result, runId: request.runId }); } catch { /* 结果写失败不致命 */ }
-        try { appendSuiteRound(root, computeSuiteRound({ runId: request.runId, task, result, slotBase })); } catch { /* 载体写失败不致命 */ }
-        if (json) process.stdout.write(`${JSON.stringify({ event: "suite", task, outcome: result.outcome })}\n`);
-      }).catch(() => { inFlight.delete(task); });
-    }
-    if (json) process.stdout.write(`${JSON.stringify({ event: "round", round, in_flight: inFlight.size })}\n`);
-    if (once) break;
-    if (maxRounds !== null && round >= maxRounds) break;
-    await sleepFn(intervalMs);
-  }
-  if (json && stopRequested) {
-    process.stdout.write(`${JSON.stringify({ event: "stop", reason: "signal", round })}\n`);
-  }
-  return 0;
-}
-
-// ── CLI ─────────────────────────────────────────────────────────────────────────────────────
+// ── CLI（⛔ 常驻模式已按人 2026-09-07 裁定退役；保留 --run 单发作为手动/测试缝）────────────────
 
 const HELP = [
-  "suite-driver — per-task suite 生命周期 driver kind（SPEC-suite-lifecycle §3，继承 Layer 0）。",
-  "常驻模式：每轮扫描 .quay/suite-requests/ → 取槽 → spawn suite → wait → 静默看门狗 → 写三态 outcome。",
-  "一次性模式（--run）：spawn 单个 suite + wait + 看门狗，写结果与 suite-round 后退出（测试/手动单发）。",
+  "suite-driver — per-task suite 共享 spawn+wait 函数库（⛔ 常驻 driver kind 已按人 2026-09-07 裁定退役）。",
+  "一次性模式（--run）：spawn 单个 suite + wait + 静默看门狗 + 三态 outcome，写 suite-round 后退出（手动/测试单发）。",
   "  --root <repo>              仓库根（缺省 cwd）",
-  "  --interval <ms>            轮间隔（缺省 1000）",
-  "  --once                     跑一轮即退出",
-  "  --max-rounds <n>           跑满 N 轮退出（测试缝）",
   "  --run                      一次性模式：跑 --suite-command 一个 suite 后退出",
-  "  --task <id>                一次性模式的任务 id（写结果/载体用）",
+  "  --task <id>                一次性模式的任务 id（写 round 载体用）",
   "  --worktree <path>          一次性模式的 worktree（缺省 = --root）",
   "  --run-id <id>              run id（缺省 st-prod-<epoch>）",
-  "  --suite-command <argv>     覆盖 suite 命令（空格分隔；测试缝——缺省 bash <worktree>/scripts/test.sh --buckets <task>）",
-  "  --suite-command-file <p>   从文件读 suite 命令脚本（bash <file>）——fan-in 把 baked 的 inner block 落盘后交给 driver 跑",
+  "  --suite-command <argv>     覆盖 suite 命令（空格分隔；缺省 bash <worktree>/scripts/test.sh --buckets <task>）",
+  "  --suite-command-file <p>   从文件读 suite 命令脚本（bash <file>）",
   "  --log-file <path>          静默看门狗盯的日志文件（suite 输出 tee 到这里）",
   "  --silence-timeout-ms <n>   静默挂死阈值（缺省 15min；测试传小值）",
   "  --slot-base <path>         覆盖 suite 单飞槽 base（测试缝——hermetic 临时锁文件）",
   "  --slot-lib <path>          suite-slot-lib.sh 路径（测试缝）",
-  "  --pid-file <path>          把驱动自身 pid 写到该文件",
-  "  --json                     每轮向 stdout 打一条 JSON 事件行",
+  "  --json                     结果向 stdout 打一条 JSON 事件行",
 ].join("\n");
 
 /** 空格分隔 argv 切分（与 driver-runtime.splitArgs 同族；测试缝注入覆盖命令）。 */
@@ -478,9 +318,6 @@ export async function main(argv: string[]): Promise<number> {
   const args = argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) { console.log(HELP); return 0; }
   let root: string | undefined;
-  let intervalRaw: string | undefined;
-  let once = false;
-  let maxRounds: number | null = null;
   let run = false;
   let task: string | undefined;
   let worktree: string | undefined;
@@ -491,15 +328,11 @@ export async function main(argv: string[]): Promise<number> {
   let silenceRaw: string | undefined;
   let slotBase: string | undefined;
   let slotLib: string | undefined;
-  let pidFile: string | undefined;
   let json = false;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === "--root") root = args[++i];
-    else if (a === "--interval") intervalRaw = args[++i];
-    else if (a === "--once") once = true;
-    else if (a === "--max-rounds") maxRounds = Number(args[++i]);
     else if (a === "--run") run = true;
     else if (a === "--task") task = args[++i];
     else if (a === "--worktree") worktree = args[++i];
@@ -510,47 +343,41 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--silence-timeout-ms") silenceRaw = args[++i];
     else if (a === "--slot-base") slotBase = args[++i];
     else if (a === "--slot-lib") slotLib = args[++i];
-    else if (a === "--pid-file") pidFile = args[++i];
     else if (a === "--json") json = true;
     else { console.error(`suite-driver: unknown argument: ${a}`); return 2; }
+  }
+
+  if (!run) {
+    console.error("suite-driver: 常驻模式已按人 2026-09-07 裁定退役——本文件保留为共享 spawn+wait 函数库；单发请用 --run");
+    return 2;
   }
 
   const rootDir = root ? path.resolve(root) : path.resolve(process.cwd());
   const resolvedRunId = runId || `st-prod-${Math.floor(Date.now() / 1000)}`;
   const silenceMs = silenceRaw !== undefined && isNonNegInt(silenceRaw) ? Number(silenceRaw) : SILENCE_MS_DEFAULT;
-  const resolvedSlotLib = slotLib ? path.resolve(slotLib) : path.join(rootDir, "plugin", "scripts", "suite-slot-lib.sh");
+  const resolvedSlotLib = slotLib ? path.resolve(slotLib) : path.join(rootDir, "plugin", "scripts", "suite-slot-lib.sh");  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   const resolvedSlotBase = slotBase ?? suiteLockBase(rootDir);
 
-  if (run) {
-    if (!task) { console.error("suite-driver: --run requires --task"); return 2; }
-    const wt = worktree ? path.resolve(worktree) : rootDir;
-    const cmd = suiteCommandFile
-      ? ["bash", path.resolve(suiteCommandFile)]
-      : suiteCommand
-        ? splitArgs(suiteCommand)
-        : ["bash", path.join(wt, "scripts", "test.sh"), "--buckets", task];
-    const result = await spawnSuiteAndWait({
-      slotBase: resolvedSlotBase,
-      slotLib: resolvedSlotLib,
-      suiteCommand: cmd,
-      logFile: logFile ?? null,
-      silenceMs,
-      // QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT 由 spawnSuiteAndWait 强制注入（结构不变式），caller 不传。
-    });
-    writeSuiteResult(rootDir, task, { ...result, runId: resolvedRunId });
-    appendSuiteRound(rootDir, computeSuiteRound({ runId: resolvedRunId, task, result, slotBase: resolvedSlotBase }));
-    if (json) process.stdout.write(`${JSON.stringify({ event: "suite", task, outcome: result.outcome, exit_code: result.exitCode, signal_code: result.signalCode, hung_by_watchdog: result.hungByWatchdog })}\n`);
-    // 一次性模式的退出码承载三态 outcome（0=done / 1=red / 2=hung）——调用方（如 fan-in 的 `rc=$?`）
-    // 不必读结果文件就能区分绿/红/挂死（⛔ hung 不得与 red 同形，硬规则 3b）。
-    return result.outcome === "done" ? 0 : result.outcome === "red" ? 1 : 2;
-  }
-
-  const interval = intervalRaw !== undefined && isNonNegInt(intervalRaw) ? Number(intervalRaw) : INTERVAL_MS_DEFAULT;
-  if (maxRounds !== null && (!Number.isInteger(maxRounds) || maxRounds < 1)) {
-    console.error("suite-driver: --max-rounds must be a positive integer");
-    return 2;
-  }
-  return runResidentSuiteLoop({ root: rootDir, intervalMs: interval, once, maxRounds, runId: resolvedRunId, json, pidFile, silenceMs, slotLib: resolvedSlotLib });
+  if (!task) { console.error("suite-driver: --run requires --task"); return 2; }
+  const wt = worktree ? path.resolve(worktree) : rootDir;
+  const cmd = suiteCommandFile
+    ? ["bash", path.resolve(suiteCommandFile)]
+    : suiteCommand
+      ? splitArgs(suiteCommand)
+      : ["bash", path.join(wt, "scripts", "test.sh"), "--buckets", task];
+  const result = await spawnSuiteAndWait({
+    slotBase: resolvedSlotBase,
+    slotLib: resolvedSlotLib,
+    suiteCommand: cmd,
+    logFile: logFile ?? null,
+    silenceMs,
+    // QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT 由 spawnSuiteAndWait 强制注入（结构不变式），caller 不传。
+  });
+  appendSuiteRound(rootDir, computeSuiteRound({ runId: resolvedRunId, task, result, slotBase: resolvedSlotBase }));
+  if (json) process.stdout.write(`${JSON.stringify({ event: "suite", task, outcome: result.outcome, exit_code: result.exitCode, signal_code: result.signalCode, hung_by_watchdog: result.hungByWatchdog })}\n`);
+  // 一次性模式的退出码承载三态 outcome（0=done / 1=red / 2=hung）——调用方不必读结果文件就能区分
+  // 绿/红/挂死（⛔ hung 不得与 red 同形，硬规则 3b）。
+  return result.outcome === "done" ? 0 : result.outcome === "red" ? 1 : 2;
 }
 
 // Direct entry guard (gate-script-base convention)：仅当本文件是入口时跑 main()。

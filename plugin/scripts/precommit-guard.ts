@@ -63,7 +63,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 // Touches「一条目一路径」judgment — the SAME judgment the static checker uses (no second parser).
 import { checkTaskOneEntryOnePath, readOneEntryBaseline } from "./touches-one-entry-one-path-check.ts";
-import { repoRoot } from "./repo-root.ts";
+import { repoRoot, mainCheckoutRoot } from "./repo-root.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -180,7 +180,7 @@ export function staticObjectPatterns(root: string): string[] {
   const sources: string[] = [];
   const testSh = path.join(root, "scripts", "test.sh");
   if (fs.existsSync(testSh)) sources.push(fs.readFileSync(testSh, "utf8"));
-  const staticGate = path.join(root, "plugin", "scripts", "runner-static-gate.ts");
+  const staticGate = path.join(root, "plugin", "scripts", "runner-static-gate.ts");  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   if (fs.existsSync(staticGate)) sources.push(fs.readFileSync(staticGate, "utf8"));
   const patterns = new Set<string>();
   for (const src of sources) {
@@ -439,6 +439,28 @@ export function judge(
 
 // ── 钩子安装/卸载 ────────────────────────────────────────────────────────────────────────────────────
 
+/** The `exec node …` line the hook shim runs — the guard's OWN resolved executable, baked at INSTALL
+ *  time. ⛔ Not `"$ROOT/plugin/scripts/…"` — AC168 removes the workspace copy, and a runtime `$ROOT`
+ *  join would hit a worktree copy (AC139-4). The guard is SELF-REFERENTIAL (it locates itself, not an
+ *  arbitrary plugin script), so the resolution is its own `import.meta.url` (raw `.ts` in the dev
+ *  tree, the bundled `dist/*.js` in the shipped artifact — strip-types follows the extension) PLUS the
+ *  plugin layer's existing `mainCheckoutRoot` (repo-root.ts) to redirect a worktree copy to the main
+ *  checkout. ⛔ Not the Core `plugin-root.ts` resolver: a plugin→Core static import breaks under
+ *  npm-pack staging (esbuild cannot resolve `../../packages/quay/src/…` from the staged
+ *  `packages/quay/plugin/scripts/…`), and the self-location idiom is the correct resolution for a
+ *  self-referential hook rather than re-inventing the Core resolver in bash. */
+function guardExecLine(merge: boolean): string {
+  const selfPath = fileURLToPath(import.meta.url);
+  let scriptPath = selfPath;
+  const main = mainCheckoutRoot(path.dirname(selfPath));
+  if (main) {
+    const mainGuard = path.join(main, "plugin", "scripts", HOOK_FINGERPRINT);
+    if (fs.existsSync(mainGuard)) scriptPath = mainGuard;
+  }
+  const strip = scriptPath.endsWith(".ts") ? " --experimental-strip-types" : "";
+  return `exec node --no-warnings${strip} "${scriptPath}" --root "$ROOT"${merge ? " --merge" : ""}`;
+}
+
 function hookShim(root: string): string {
   return [
     "#!/usr/bin/env bash",
@@ -451,7 +473,7 @@ function hookShim(root: string): string {
     "# (③ rejecting running-round assertion-surface commits was RETIRED under AC64 — see",
     "# orchestration/archive/AC58-retired-clauses.md#R27.)",
     'ROOT="$(git rev-parse --show-toplevel)"',
-    `exec node --no-warnings --experimental-strip-types "$ROOT/plugin/scripts/${HOOK_FINGERPRINT}" --root "$ROOT"`,
+    guardExecLine(false),
     "",
   ].join("\n");
 }
@@ -473,7 +495,7 @@ export function preMergeCommitShim(root: string): string {
     "# (③ rejecting running-round merges was RETIRED under AC64 — see",
     "# orchestration/archive/AC58-retired-clauses.md#R27.)",
     'ROOT="$(git rev-parse --show-toplevel)"',
-    `exec node --no-warnings --experimental-strip-types "$ROOT/plugin/scripts/${HOOK_FINGERPRINT}" --root "$ROOT" --merge`,
+    guardExecLine(true),
     "",
   ].join("\n");
 }

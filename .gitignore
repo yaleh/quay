@@ -119,7 +119,30 @@ packages/quay/plugin/
 # supervisor state files + control state (halt/control plane quality-control.json). All runtime
 # state, never git-tracked; same gitignored family as promotion/worker round+control.
 **/.quay/quality-round.jsonl
+# gap-quality-driver-architecture-review-routine (2026-09-05): the quality-gate driver's third
+# routine (architecture review) verdict carrier — one line per judged/failed/not-triggered round.
+# Same gitignored runtime-state family as quality-round.jsonl (never git-tracked).
+**/.quay/architecture-review-round.jsonl
 **/.quay/quality-control.json
+# meta-driver v0（SPEC-capability-planes §12.2 提名管线第一片）：每轮一条记录——机械读数
+# （active goal 的 AC criterion 真跑 verdict）+ divergence + 语义半的提案处置。
+# Same gitignored runtime-state family as quality-round.jsonl（never git-tracked）。
+**/.quay/meta-driver-round.jsonl
+**/.quay/meta-control.json
+# meta-driver 的变化检测状态（语义半的触发闸输入：上次判读的读数摘要 + 时刻）。
+**/.quay/meta-driver-state.json
+# gap-goal-driver-mechanical-ring (2026-09-06, G6): the goal mechanical-ring driver's production
+# launch state — round heartbeat (unconditional per-loop record of criterion verdicts, AC1 carrier) +
+# supervisor state files + control state (halt/control plane goal-control.json). All runtime state,
+# never git-tracked; same gitignored family as outer/quality round+control.
+**/.quay/goal-round.jsonl
+**/.quay/goal-control.json
+**/.quay/goal-driver.pid
+**/.quay/goal-driver-supervisor.pid
+**/.quay/goal-driver.log
+**/.quay/goal-driver-supervisor.log
+**/.quay/goal-driver-liveness.log
+**/.quay/goal-driver.stop
 **/.quay/quality-driver.pid
 **/.quay/quality-driver-supervisor.pid
 **/.quay/quality-driver.log

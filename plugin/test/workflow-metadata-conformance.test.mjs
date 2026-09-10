@@ -41,13 +41,13 @@ const STALE_FIX = path.join(FIX, "workflow-metadata-conformance-stale.js");
 const CLEAN_FIX = path.join(FIX, "workflow-metadata-conformance-clean.js");
 
 // Surviving workflows after the prepare/execute pipeline retirement (ADR-022 /
-// gap-retire-the-prepare-execute-pipeline-cluster): drain-directives + run-routines have plugin
-// mirrors. prepare-milestone.js / execute-milestone.js are gone; select-preflight.js was retired
-// with the classic OUTER-LOOP SELECT phase (gap-select-preflight-retirement-decision, 2026-08-16).
-const REAL_DRAIN = path.resolve(REPO_ROOT, ".claude", "workflows", "drain-directives.js");
-const REAL_DRAIN_MIRROR = path.resolve(REPO_ROOT, "plugin", "workflows", "drain-directives.js");
-const REAL_ROUTINES = path.resolve(REPO_ROOT, ".claude", "workflows", "run-routines.js");
-const REAL_ROUTINES_MIRROR = path.resolve(REPO_ROOT, "plugin", "workflows", "run-routines.js");
+// gap-retire-the-prepare-execute-pipeline-cluster): drain-directives + run-routines live in
+// plugin/workflows/ (single source — the .claude/workflows/ dual copies were retired by
+// gap-ac166-second-copy-retirement). prepare-milestone.js / execute-milestone.js are gone;
+// select-preflight.js was retired with the classic OUTER-LOOP SELECT phase
+// (gap-select-preflight-retirement-decision, 2026-08-16).
+const REAL_DRAIN = path.resolve(REPO_ROOT, "plugin", "workflows", "drain-directives.js");
+const REAL_ROUTINES = path.resolve(REPO_ROOT, "plugin", "workflows", "run-routines.js");
 
 function runScript(args) {
   const result = spawnSync("node", [SCRIPT, ...args], { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
@@ -123,11 +123,12 @@ test("C3: --json output carries failures[]/warnings[] and only failures drive ex
   assert.equal(warnOnly.status, 0, `WARN-only run must exit 0, got ${warnOnly.status}`);
 });
 
-// ── AC4/AC5/AC9: surviving real workflows GREEN baseline + parseability regression ────────────────
+// ── AC4/AC5: surviving real workflows GREEN baseline + parseability regression ─────────────────────
 // prepare-milestone.js / execute-milestone.js were retired (ADR-022); select-preflight.js was
 // retired with the classic OUTER-LOOP SELECT phase (gap-select-preflight-retirement-decision,
-// 2026-08-16). The surviving checked-in workflows are drain-directives.js + run-routines.js (with
-// plugin mirrors). These assertions pin the GREEN baseline for what the DoD clause now actually checks.
+// 2026-08-16). The surviving checked-in workflows are drain-directives.js + run-routines.js (single
+// source in plugin/workflows/). These assertions pin the GREEN baseline for what the DoD clause now
+// actually checks.
 test("AC4/AC5: the surviving real workflows are parseable and produce ZERO FAILs (GREEN baseline)", async () => {
   const m = await loadModule();
   for (const file of [REAL_DRAIN, REAL_ROUTINES]) {
@@ -140,15 +141,6 @@ test("AC4/AC5: the surviving real workflows are parseable and produce ZERO FAILs
     const res = m.checkFile(file, src);
     assert.equal(res.failures.length, 0, `${file} must have zero FAILs (GREEN baseline): ${JSON.stringify(res.failures)}`);
   }
-});
-
-test("AC9: mirror byte-identity on the surviving mirrored workflows (both pairs identical → no mirror FAIL)", async () => {
-  const m = await loadModule();
-  const result = m.checkAll([REAL_DRAIN, REAL_DRAIN_MIRROR, REAL_ROUTINES, REAL_ROUTINES_MIRROR]);
-  assert.equal(result.mirrored.length, 2, "two mirror pairs expected");
-  assert.ok(result.mirrored.every((mm) => mm.identical), `mirror pairs must be identical: ${JSON.stringify(result.mirrored)}`);
-  assert.ok(!result.failures.some((f) => f.check === "mirror-identity"), "no mirror-identity FAIL expected on the live tree");
-  assert.equal(result.ok, true, `checkAll must be ok (GREEN baseline): ${JSON.stringify(result.failures)}`);
 });
 
 // ── AC15: extraction-function API (pure functions, independently exercised) ──────────────────────
@@ -291,8 +283,8 @@ test("C8: nodeConventionWarn is suppressed by a documented-intent comment", asyn
 });
 
 // ── C4: fixture isolation from production workflow files ─────────────────────────────────────────
-test("C4: stale/clean fixture filenames never appear in .claude/workflows/", () => {
-  const workflowsDir = path.resolve(REPO_ROOT, ".claude", "workflows");
+test("C4: stale/clean fixture filenames never appear in plugin/workflows/", () => {
+  const workflowsDir = path.resolve(REPO_ROOT, "plugin", "workflows");
   const files = fs.readdirSync(workflowsDir).map((f) => path.join(workflowsDir, f));
   for (const f of files) {
     const src = fs.readFileSync(f, "utf8");
@@ -302,14 +294,14 @@ test("C4: stale/clean fixture filenames never appear in .claude/workflows/", () 
 });
 
 // ── AC3/C6: DoD-gate shell-out contract (the clause runs the script with --json from repo root) ──
-test("C6: the script's default invocation (no --files) resolves the 4 surviving workflow files from the workspace root", () => {
-  // The DoD clause shells out with no --files and cwd = repo root; the checker must find the 4
-  // surviving workflow files (drain-directives + run-routines pairs; select-preflight.js was
-  // retired with the classic OUTER-LOOP SELECT phase) and report the GREEN baseline (exit 0) —
+test("C6: the script's default invocation (no --files) resolves the 2 surviving workflow files from the workspace root", () => {
+  // The DoD clause shells out with no --files and cwd = repo root; the checker must find the 2
+  // surviving workflow files (drain-directives + run-routines in plugin/workflows/; select-preflight.js
+  // was retired with the classic OUTER-LOOP SELECT phase) and report the GREEN baseline (exit 0) —
   // proving the clause's child process is not vacuously green (it actually reads and checks the files).
   const r = spawnSync("node", [SCRIPT, "--json"], { cwd: REPO_ROOT, encoding: "utf8" });
   assert.equal(r.status, 0, `default invocation must exit 0 on the GREEN baseline, got ${r.status}`);
   const json = JSON.parse(r.stdout);
-  assert.equal(json.files.length, 4, `default invocation must check exactly 4 files, got ${json.files.length}`);
+  assert.equal(json.files.length, 2, `default invocation must check exactly 2 files, got ${json.files.length}`);
   assert.equal(json.failures.length, 0, `default invocation must surface ZERO FAILs (GREEN baseline), got ${json.failures.length}`);
 });

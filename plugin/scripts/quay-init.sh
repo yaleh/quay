@@ -1,67 +1,35 @@
 #!/usr/bin/env bash
-# quay-init.sh — mechanized implementation of the quay:init skill's copy logic.
-# gap-loop-mechanism-lives-outside-the-package-and-cannot-ship: consolidates the
-# idempotent-copy + `--loop` lay-down + config generation into ONE executable,
-# so the e2e (test/cold-start-e2e.sh) and the skill (plugin/skills/init/SKILL.md) both
-# exercise the SAME mechanism (ADR-004: hard checks over prose; no second copy of the
-# copy logic).
+# quay-init.sh — quay project initializer (SPEC §6 closed set; gap-quay-init-closure-shrink-body, AC168).
 #
-# gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them: install is
-# CONFIGURATION-DRIVEN, not text-substitution. Every laid-down file is byte-identical
-# to the product artifact (`cmp`-checkable, AC1). The target-project values
-# (repo_root / test_command / tmux_session) live in ONE config file
-# (`.quay/config.yml` `loop:` section, AC2); scripts and tick docs read them at runtime
-# (AC3), so nothing is baked in and two installs of the same product are byte-identical
-# except the config (AC4). The upgrade path replaces install-managed stale files (AC5)
-# while a genuine user edit still raises CONFLICT and is preserved (AC6).
+# 裁定 6（SPEC-plugin-lifecycle-single-bundle-2026-09-02）：quay-init 的**主要操作 = 创建符合 quay 要求的
+# 项目文件**（任务目录、quay 配置），⛔ 不复制任何 Claude Code 扩展或脚本。它是一个**项目初始化器，
+# 不是一个安装器**。扩展与脚本由 quay Claude Code plugin 原生交付（skill 载入时 ${CLAUDE_PLUGIN_ROOT}
+# 文本级展开 / 非 skill 入口走 packages/quay/src/plugin-root.ts 解析器）。
 #
-# The skill's inline bash was the original source of truth; this script is that logic
-# extracted + extended with the `--loop` category. The skill now delegates here, so
-# there is exactly one lay-down implementation.
+# 写入闭集（QUAY-INIT-CLOSED-SET）——只写这 7 项：
+#   .quay/config.yml         provider map + loop 参数（生成）
+#   .quay/profiles.yml       launcher/model 承载（模板 verbatim）
+#   tasks/                   任务目录（mkdir）
+#   goals/                   目标目录（mkdir，与 tasks/ 双载体）
+#   .gitignore               quay 运行时状态条目（追加，幂等）
+#   .claude/launch.settings.json   每角色启动配置模板（模板 verbatim）
+#   .claude/settings.json    enabledPlugins + permissions.allow（生成）
 #
-# Categories:
-#   --workflows     plugin/workflows/     → <workspace>/.claude/workflows/
-#   --agents        plugin/agents/        → <workspace>/.claude/agents/
-#   --loop          two-layer loop mechanism (tick docs + checkers + gate + token + observation).
-#                   ALSO lays --workflows (the loop execution cores reference .claude/workflows/* —
-#                   fan-in-execute / execute-suite-fix / pool-quality-judge — so a loop without its
-#                   workflows is a broken loop; AC91 gap-ac91-delivery-core-refs-undelivered-files)
-#   --all           all of the above except --loop (matching the skill's historical default)
-# NOTE (2026-08-05 retirement): the old gate-script category that copied the plugin's
-# classic-pipeline era gates (it0-*/audit-*/drain-*/vmeta-lag) into <workspace>/scripts/gates/
-# is RETIRED. Those gates were laid into every target project but nothing called them — dead
-# weight shipped to every install. 分层退休（Layered retirement）: the files
-# stay in the plugin tree, but no category lays them down and sync.sh no longer syncs them. The
-# live fast-mode gate scripts ship via the --loop plugin/scripts/ landing.
-# Flags:
-#   --force         overwrite on conflict (backup the existing file first)
-#   --dry-run       list what would happen, copy nothing
-#   --manager       with --loop: ALSO lay the opt-in manager exec core
-#                   (orchestration/manager-tick-core.md — gap-ac37-exec-core-ships-with-package).
-#                   The typical path is two-layer (outer + inner), so the default --loop set does
-#                   NOT include the manager core; --manager opts in.
-# Read-only report modes (no category dispatch, no target writes):
-#   --check-drift                  drift report over the derived laydown set (漂移/缺失/一致, L_D)
-#   --check-dependency-closure     dependency-closure report over the derived laydown set
-#                                  (dependency_closure_gaps: N; band 0 — 铺了消费者必然铺依赖)
-# Loop params (consumed only by --loop):
-#   --root <dir>           workspace root (default: cwd)
-#   --project <name>       project name (default: basename of --root)
-#   --repo-root <path>     the target project root, recorded in .quay/config.yml loop.repo_root
-#                          (default: --root)
-#   --tmux-session <sess>  tmux session, recorded in .quay/config.yml loop.tmux_session and
-#                          orchestration/session-liveness.env (default: DETECTED from
-#                          `tmux list-sessions` by project name; when nothing unique is detected
-#                          the install FAILS CLOSED — never a guessed "<project>-0:0.0", see
-#                          detect_tmux_session / gap-init-guesses-the-tmux-session)
-#   --test-command <cmd>   the target project's test command, recorded in .quay/config.yml
-#                          loop.test_command (REQUIRED for --loop; there is no universal default)
-#   --worktree-root <dir>  worktree root, recorded in .quay/config.yml loop.worktree_root
-#                          (default: <repo_root>/../<basename>-worktrees, a DISK path — /tmp is
-#                          tmpfs, and every worktree on tmpfs is RAM; a machine-wide OOM traced
-#                          straight to it. Fail-closed on a tmpfs root, AC3/AC4)
+# ⚠️ 显式安装步骤（AC4 / T3）：enabledPlugins 只能启用【已安装】插件、不会安装它，未信任目录的项目
+# settings 整份不被读 ⇒「配置提交进仓库就自动装上」不成立——输出文案显式指引 `claude plugin marketplace
+# add` + `claude plugin install`（或 npm 全局 register-plugin.mjs），不暗示"配置即生效"。
 #
-# Plugin root: ${CLAUDE_PLUGIN_ROOT} or --plugin-root <dir>. Fail-closed if unset/missing.
+# 已退役（copy 机器，AC1 archive）：copy_one/copy_dir/write_state_file/write_session_env + managed/
+# conflict/stale 三态判定 + .quay/runtime 铺设 + ensure_vendor_runtime + verify_provider_runtime_existence
+# + --check-drift/--check-dependency-closure 的铺设面消费。⚠️ 保留为【库函数】（供 laydown-set-check.sh /
+# build-plugin-dist.mjs 等 SOURCE 后调用，本脚本的 library-mode guard 使 source 不执行安装流）：
+# derive_loop_scripts / verify_referenced_landed / _read_declarations 及其 helper——它们不再是 quay-init
+# 的写路径，只是仍然被下游机件按库方式消费；它们的整体退役属 AC158/AC159 波次。
+#
+# Flags: 见 plugin/skills/init/SKILL.md（--root/--project/--repo-root/--test-command/--tmux-session/
+# --worktree-root/--plugin-root/--force/--dry-run/--auto-commit-confirm/--auto-commit-skip）。
+# --all/--loop/--manager/--workflows/--agents 为向后兼容 no-op（收敛到同一闭集）。
+# Plugin root: ${CLAUDE_PLUGIN_ROOT} 或 --plugin-root <dir>。Fail-closed if unset/missing.
 
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
@@ -159,7 +127,7 @@ RUNTIME_BASE="$WORKSPACE_ROOT/.quay/runtime"
 # (gap-quay-init-config-preserving-incremental-upgrade). An EXISTING consumer's `.quay/config.yml`
 # `loop:` section carries values the project already chose (repo_root / test_command / tmux_session /
 # worktree_root — the fast-mode keys — AND board / gates / stop / policy / concurrency_bands /
-# fork_baseline / merge_target / routines — the loop-driver + fast-mode keys). The upgrade must KEEP
+# fork_baseline / routines — the loop-driver + fast-mode keys). The upgrade must KEEP
 # those values, never re-detect/re-derive them: an explicit CLI flag wins, otherwise the existing
 # config value wins, otherwise the fresh-install default/detection applies. Reads ONE key from an
 # existing config (empty when the config is absent or the key is unset).
@@ -189,7 +157,11 @@ fi
 # "<project>-0:0.0" (gap-init-guesses-the-tmux-session): it only worked for the project it was
 # written for, and a monitor aimed at a nonexistent session reports a LIVE inner as GONE (the
 # false-negative this monitor must never emit). The --loop block DETECTS the real session by
-# project name and FAILS CLOSED when none is found — never a guess.
+# project name as a BEST-EFFORT convenience — since the outer/inner dual-tmux model retired
+# (SPEC-tmux-retirement-2026-09-03) the session is OPTIONAL: quay-init's seven-item closed-set write
+# never uses tmux, so a missing/ambiguous session leaves loop.tmux_session null instead of failing
+# the init (gap-quay-init-hard-requires-tmux-session-and-leaves-partial-write). Only a downstream
+# action that actually uses tmux fails closed at runtime — never this initializer.
 
 # Verify plugin root.
 if [ -z "$PLUGIN_ROOT" ]; then
@@ -203,6 +175,7 @@ fi
 PLUGIN_ROOT="$(cd "$PLUGIN_ROOT" && pwd)"
 
 PLUGIN_VERSION="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["version"])' "$PLUGIN_ROOT/.claude-plugin/plugin.json" 2>/dev/null || echo unknown)"
+PLUGIN_NAME="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["name"])' "$PLUGIN_ROOT/.claude-plugin/plugin.json" 2>/dev/null || echo quay)"
 
 # ── helpers ─────────────────────────────────────────────────────────────────────────────────────────
 COPIED=0; SKIPPED=0; CONFLICTED=0; CLEANED=0
@@ -311,6 +284,23 @@ _dst_sha256() {
   fi
 }
 
+# _LAID_TOOK[rel]=1 — the set of workspace-rel paths whose lay-down TOOK EFFECT this round: the
+# installer wrote the product (copied / clean-replaced / managed-replaced / --force overwritten) or
+# found the disk already byte-identical to the product (skipped). write_state_file only recomputes
+# laidFiles hashes for THIS set; every other path — the CONFLICT branches, where a user edit is
+# PRESERVED and the installer wrote nothing — keeps the previous round's record, so a preserved edit
+# is never mis-recorded as "laid" (gap-quay-init-write-state-file-corrupts-hash-after-conflict:
+# unconditionally hashing current disk content made a preserved CONFLICT edit look stale-installed
+# next round, and a zero-change 3rd run silently ate the edit without reporting CONFLICT).
+declare -A _LAID_TOOK=()
+
+# _record_laid_took <dst>: mark an absolute dst path's workspace-rel form as "took effect this round".
+_record_laid_took() {
+  local dst="$1"
+  [ -n "$dst" ] || return
+  _LAID_TOOK["${dst#"$WORKSPACE_ROOT"/}"]=1
+}
+
 # idempotent copy of one file. The 3rd arg MODE ("clean"|"preserve"|"managed", default preserve)
 # distinguishes three conflict classes for a same-name-different-content target:
 #   clean    — PRODUCT-OWNED files (loop mechanism executables: 可执行文件一律原样复制，只生成配置).
@@ -342,8 +332,10 @@ copy_one() {
       echo "  copied: $dst"
     fi
     COPIED=$((COPIED + 1))
+    _record_laid_took "$dst"
   elif _is_identical "$src" "$dst"; then
     SKIPPED=$((SKIPPED + 1))
+    _record_laid_took "$dst"
     if [ "$DRY_RUN" = true ]; then
       echo "  would-skip (identical): $dst"
     else
@@ -366,6 +358,7 @@ copy_one() {
       echo "    backup: $backup_dir/$fname"
     fi
     COPIED=$((COPIED + 1))
+    _record_laid_took "$dst"
   elif [ "$mode" = "managed" ]; then
     # Install-managed localizable file (config-driven install, SPEC AC5/AC6). A target that
     # still equals the previous install's recorded laid-down hash is stale product from an
@@ -388,6 +381,7 @@ copy_one() {
         echo "    backup: $backup_dir/$fname"
       fi
       COPIED=$((COPIED + 1))
+      _record_laid_took "$dst"
     elif [ "$FORCE" = true ]; then
       if [ "$DRY_RUN" = true ]; then
         echo "  would-overwrite (conflict, --force): $dst"
@@ -398,6 +392,7 @@ copy_one() {
         echo "  overwritten (backed up): $dst"
       fi
       COPIED=$((COPIED + 1))
+      _record_laid_took "$dst"
     else
       CONFLICTED=$((CONFLICTED + 1))
       if [ "$DRY_RUN" = true ]; then
@@ -418,6 +413,7 @@ copy_one() {
         echo "  overwritten (backed up): $dst"
       fi
       COPIED=$((COPIED + 1))
+      _record_laid_took "$dst"
     else
       CONFLICTED=$((CONFLICTED + 1))
       if [ "$DRY_RUN" = true ]; then
@@ -527,8 +523,8 @@ sys.exit(1)
 # Prints:
 #   exactly one match  → the session name on stdout, exit 0 (caller writes it)
 #   multiple matches   → each matching session name on its own line, exit 2 (ambiguous — the
-#                        caller REQUIRES explicit --tmux-session, never picks one)
-#   zero matches       → nothing, exit 1 (caller FAILS CLOSED — never write a guess)
+#                        caller leaves loop.tmux_session null, never picks one)
+#   zero matches       → nothing, exit 1 (caller leaves loop.tmux_session null — never write a guess)
 detect_tmux_session() {
   local project="$1" m
   local -a matches=()
@@ -572,7 +568,7 @@ detect_tmux_session() {
 # CONFIG-PRESERVING UPGRADE (gap-quay-init-config-preserving-incremental-upgrade, AC1): the loop
 # section is MERGED, never replaced. `data["loop"] = {...}` (the pre-fix form) DESTROYED every
 # non-fast-mode key the consumer owned — the loop-driver schema (board / gates / stop / policy) and
-# the fast-mode schema's extras (concurrency_bands / fork_baseline / merge_target / routines) were
+# the fast-mode schema's extras (concurrency_bands / fork_baseline / routines) were
 # silently dropped on upgrade. The fix updates ONLY the four fast-mode keys and leaves every other
 # loop: key byte-for-byte intact (the consumer's loop values survive the upgrade unchanged).
 ensure_loop_config() {
@@ -592,7 +588,10 @@ if not isinstance(loop, dict):
     loop = {}
 loop["repo_root"] = repo
 loop["test_command"] = test
-loop["tmux_session"] = tmux
+# gap-quay-init-hard-requires-tmux-session-and-leaves-partial-write: an empty session (no tmux
+# host / no matching session) is written as an explicit YAML null, not an empty string — the
+# session is optional since SPEC-tmux-retirement-2026-09-03, and null is the honest "not set".
+loop["tmux_session"] = tmux if tmux else None
 loop["worktree_root"] = wtroot
 data["loop"] = loop
 with open(cfg, "w", encoding="utf-8") as f:
@@ -621,8 +620,8 @@ PYEOF
 # (verify FAILS CLOSED on a dangling mcp_entry it cannot recognize) keeps its meaning.
 migrate_stale_mcp_entry() {
   local cfg="$WORKSPACE_ROOT/.quay/config.yml"
-  local install_provider="${WORKSPACE_ROOT}/.quay/runtime"
-  local install_runtime="${install_provider}/bin/quay-native.js"
+  local install_provider="${PLUGIN_ROOT}/vendor/quay-native"
+  local install_runtime="${install_provider}/dist/quay-native.js"
   if [ "$DRY_RUN" = true ]; then
     echo "  would-migrate: stale provider path/mcp_entry -> ${install_provider} (upgrade-channel config migration — AC4)"
     return
@@ -776,20 +775,18 @@ providers:
       QUAY_NATIVE_TASKS_DIR: "${WORKSPACE_ROOT}/tasks"
 # Target-project loop values (gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them,
 # SPEC AC2): the single config source for repo_root / test_command / tmux_session / worktree_root,
-# plus the branch-model keys fork_baseline / merge_target (SPEC-branching-model current ruling:
-# develop/integration are the working branches — defaults ship WITH quay-init, never hardcoded
-# master, so a brand-new host's first quay-init --loop does not silently fall back to the retired
-# master-only model). Scripts and tick docs read these at runtime instead of having them baked in
-# at install (AC3).
+# plus the branch-model key fork_baseline (SPEC-branching-model current ruling: develop is the fork
+# baseline — the default ships WITH quay-init, never hardcoded master, so a brand-new host's first
+# quay-init --loop does not silently fall back to the retired master-only model). Scripts and tick
+# docs read these at runtime instead of having them baked in at install (AC3).
 loop:
   repo_root: ${REPO_ROOT}
   test_command: ${TEST_COMMAND}
-  tmux_session: ${TMUX_SESSION}
+  tmux_session: ${TMUX_SESSION:-null}
   worktree_root: ${WORKTREE_ROOT}
   fork_baseline: develop
-  merge_target: integration
 EOF
-    echo "  wrote: .quay/config.yml (provider mcp_entry → project-local absolute paths — AC7b; loop: repo_root/test_command/tmux_session/worktree_root/fork_baseline/merge_target — SPEC AC2 + SPEC-branching-model)"
+    echo "  wrote: .quay/config.yml (provider mcp_entry → project-local absolute paths — AC7b; loop: repo_root/test_command/tmux_session/worktree_root/fork_baseline — SPEC AC2 + SPEC-branching-model)"
   fi
 }
 
@@ -806,9 +803,18 @@ write_state_file() {
     # A workspace without .quay/ still gets the state record in a sibling location.
     mkdir -p "$WORKSPACE_ROOT/.quay"
   fi
-  local laid_rel_file root f
+  local laid_rel_file took_rel_file root f rel
   laid_rel_file="$(mktemp)"
   : > "$laid_rel_file"
+  took_rel_file="$(mktemp)"
+  : > "$took_rel_file"
+  # The paths whose lay-down TOOK EFFECT this round (copy_one's _record_laid_took). write_state_file
+  # only recomputes laidFiles hashes for THIS set; every other path keeps the previous round's record
+  # (gap-quay-init-write-state-file-corrupts-hash-after-conflict — a CONFLICT-preserved user edit must
+  # NOT be re-hashed into laidFiles, or a zero-change next run mis-reads it as stale-installed).
+  for rel in "${!_LAID_TOOK[@]}"; do
+    printf '%s\n' "$rel" >> "$took_rel_file"
+  done
   # Every root-relative path quay-init --loop lays/owns. Files listed directly; dirs expand to all
   # files under them (sorted). .quay/quay-init-state.json is included so the record self-tracks.
   for root in \
@@ -824,9 +830,9 @@ write_state_file() {
       done < <(find "$WORKSPACE_ROOT/$root" -type f | sort)
     fi
   done
-  python3 - "$PLUGIN_VERSION" "$WORKSPACE_ROOT/.quay/quay-init-state.json" "$WORKSPACE_ROOT" "$laid_rel_file" <<'PYEOF'
+  python3 - "$PLUGIN_VERSION" "$WORKSPACE_ROOT/.quay/quay-init-state.json" "$WORKSPACE_ROOT" "$laid_rel_file" "$took_rel_file" <<'PYEOF'
 import json, os, sys, time, hashlib
-version, path, workspace_root, rel_file = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+version, path, workspace_root, rel_file, took_file = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
 state = {}
 if os.path.exists(path):
     try:
@@ -840,6 +846,8 @@ state["previousPluginVersion"] = prev if prev and prev != version else state.get
 state["laidAt"] = time.time()
 with open(rel_file, encoding="utf-8") as f:
     rels = [line.strip() for line in f if line.strip()]
+with open(took_file, encoding="utf-8") as f:
+    took = {line.strip() for line in f if line.strip()}
 # laidCategories: derive from the laid roots (stable tokens, not just {"loop"}).
 cats = set(state.get("laidCategories", []))
 if any(r.startswith("plugin/scripts") for r in rels): cats.add("scripts")
@@ -856,19 +864,33 @@ state["laidCategories"] = sorted(cats)
 # install makes this distinction possible: every laid-down file is byte-identical to the product,
 # so the ONLY reason a managed file can differ on upgrade is either a stale previous install or a
 # user edit — and the hash tells them apart.
+# gap-quay-init-write-state-file-corrupts-hash-after-conflict: only recompute the hash for a path
+# whose lay-down TOOK EFFECT this round (copy_one wrote the product, or found it already identical).
+# Every other path keeps the previous round's record UNCHANGED — a CONFLICT branch preserved a user
+# edit (the installer wrote nothing), and re-hashing that edit into laidFiles would make the next
+# zero-change run mis-read it as a stale install and silently overwrite it without reporting CONFLICT.
+prev_laid = state.get("laidFiles", {})
 laid = {}
 for rel in rels:
-    p = os.path.join(workspace_root, rel)
-    if os.path.isfile(p):
-        with open(p, "rb") as f:
-            laid[rel] = hashlib.sha256(f.read()).hexdigest()
+    if rel in took:
+        p = os.path.join(workspace_root, rel)
+        if os.path.isfile(p):
+            with open(p, "rb") as f:
+                laid[rel] = hashlib.sha256(f.read()).hexdigest()
+        # a took path that is no longer a file is dropped (the copy wrote it, so this is unexpected)
+    elif rel in prev_laid:
+        # Not written this round (CONFLICT-preserved user edit, or a skipped product that was
+        # already recorded) → keep the previous record byte-for-byte.
+        laid[rel] = prev_laid[rel]
+    # else: not written this round AND no prior record → leave out (honest "unknown", never hashing
+    # a pre-existing file the installer did not lay down).
 state["laidFiles"] = laid
 with open(path, "w", encoding="utf-8") as f:
     json.dump(state, f, indent=2)
     f.write("\n")
 print(f"  state: .quay/quay-init-state.json pluginVersion={version} previous={prev or 'none'} laidFiles={len(laid)} laidCategories={','.join(sorted(cats))}")
 PYEOF
-  rm -f "$laid_rel_file"
+  rm -f "$laid_rel_file" "$took_rel_file"
 }
 
 # write_session_env: generate/update orchestration/session-liveness.env with the per-project
@@ -1095,13 +1117,33 @@ _derive_loop_scripts_once() {
   #   to closure step (d) (same class as repo-root.ts / checker-io.ts / canonical-test-files.ts above) —
   #   without explicit entries a laid-down inner-blocked-signal.ts / judge / shim dies with
   #   ERR_MODULE_NOT_FOUND.
+  #   per-file-cpu-report.mjs (gap-perfile-cpu-cost-collection): full-suite-runner.ts (laid down via
+  #   fan-in-execute.js rule (a)) loads this preload seam at RUNTIME via `NODE_OPTIONS=--require=<abs>`
+  #   built from a path.join STRING constant (PER_FILE_CPU_PRELOAD) — NOT an ESM `./` import, NOT a
+  #   `${SCRIPT_DIR}/` shell sibling ref, NOT a doc `plugin/scripts/` path, so (a)/(b)/(d) all miss it.
+  #   Without this explicit entry a cold-started consumer lays down full-suite-runner.ts and dies at
+  #   suite launch with ERR_MODULE_NOT_FOUND (the --require target is absent). Same class as
+  #   suite-params.ts / repo-root.ts above.
+  #   task-ops.ts (gap-task-ops-consolidate-driver-frontmatter-writers): the single library owning
+  #   "parse task frontmatter, mutate a field, commit it". driver-filters.ts / worker-driver.ts /
+  #   ready-pool-check.ts (all laid down via (a)/(b)) import it via ESM `./task-ops.ts`, which is
+  #   INVISIBLE to closure step (d) (same class as task-schema.ts above) — without this explicit entry a
+  #   cold-started consumer lays the drivers without their shared parse/patch/commit library and dies
+  #   with ERR_MODULE_NOT_FOUND.
+  #   shape-sections.ts (gap-shape-section-tables-dual-copy-no-single-source): the PURE-DATA single
+  #   source of the shape section-heading lists. ready-pool-check.ts (laid down) imports it via ESM
+  #   `./shape-sections.ts` (INVISIBLE to closure step (d), same class as task-schema.ts / task-ops.ts
+  #   above), AND packages/quay-native/src/store.ts imports it via a relative path that esbuild inlines
+  #   into the dist bundle. Without this explicit entry a cold-started consumer lays ready-pool-check.ts
+  #   with no sibling shape-sections.ts and dies with ERR_MODULE_NOT_FOUND (this is exactly the defect
+  #   this task closed: the section list lived in store.ts which is NOT laid down).
   printf '%s\n' inner-idle-log.ts it0-split-or-commit-check.ts pipe-exit-code-check.sh \
-    gate-script-base.ts workflow-event-schema.mjs task-schema.ts touches-parser.ts task-status.ts wiring-coverage-check.ts \
+    gate-script-base.ts workflow-event-schema.mjs task-schema.ts task-ops.ts shape-sections.ts touches-parser.ts task-status.ts wiring-coverage-check.ts \
     capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh inner-blocked-signal.ts \
     inner-forensics.mjs task-contract-check.ts task-status-drift-check.ts touches-orthogonality-check.ts \
     verify-delivery-surface.ts precommit-guard.ts touches-one-entry-one-path-check.ts quay-session.ts \
     repo-root.sh repo-root.ts checker-io.ts driver-result.ts canonical-test-files.ts suite-params.ts \
-    over90-task-gate.ts semantic-trigger.ts main-thread-edit-check.ts >> "$out"
+    over90-task-gate.ts semantic-trigger.ts main-thread-edit-check.ts per-file-cpu-report.mjs >> "$out"
   # (c3) exec-core tick docs (gap-ac37-exec-core-ships-with-package): the three ≤80-line execution
   #   cores ship with the loop so an installed project can read "每轮该做什么" — the shipped tick
   #   templates (orchestrator-loop-tick.md / fast-mode-loop-tick.md) reference them by the
@@ -1123,6 +1165,16 @@ _derive_loop_scripts_once() {
     printf '%s\n' "$f" >> "$out"
   done
   sort -u "$out" -o "$out"
+  # archive/** exclusion (§12c, SPEC-plugin-lifecycle-single-bundle-2026-09-02): a doc-referenced
+  # script that has been archived (moved to archive/<date>/plugin/scripts/<name>) is no longer part of
+  # the laydown set — restore re-registers it (SPEC §12b-3). Only consult archive/ when it exists.
+  if [ -d "${PLUGIN_ROOT}/../archive" ]; then
+    _archived_names="$(find "${PLUGIN_ROOT}/../archive" -type f 2>/dev/null | sed 's#.*/##' | sort -u | tr '\n' ' ')"
+    if [ -n "${_archived_names}" ]; then
+      awk -v names="${_archived_names}" 'BEGIN{split(names,a," "); for(i in a) skip[a[i]]=1} !($0 in skip)' "$out" > "$out.archfilt"
+      mv "$out.archfilt" "$out"
+    fi
+  fi
   # (d) dependency closure — repeat until fixpoint. ONE python3 pass replaces the retired per-script
   # `grep -oE … | sed … | sort -u` triple + per-dep `grep -qxF` (the per-script subprocess spawns were
   # the dominant wall-clock cost of derive_loop_scripts; gap-quay-init-install-wall-clock-slow AC1/AC3
@@ -1484,6 +1536,35 @@ verify_referenced_landed() {
   return 0
 }
 
+# verify_delivery_surface_l1 — gap-complete-delivery-surface-spec-and-l1-verification (AC5): the
+# SIX-category L1 delivery-completeness check. verify_referenced_landed (above) covers category 1
+# (mechanisms/runtime: referenced ⊆ landed); this extends the L1 surface to ALL SIX categories —
+# each category's deliverables present + owning gap task filed (SPEC §6 machine-readable list is
+# the single source). Runs against the SHIPPED delivery surface (the quay checkout root — the SPEC
+# lives at <repo>/orchestration/, outside the plugin bundle), fail-closed on any uncovered category.
+# In a BARE plugin copy (hermetic tests) the repo-level SPEC is absent → SKIP (referenced⊆landed
+# still guards the mechanism axis). This wiring was re-added after being removed by the AC168
+# closed-set shrink (commit 6358b2cd6) — the L1 check ships in the derived laydown set (explicit
+# addition `l1-delivery-surface-check.ts` in derive_loop_scripts) and must still be invoked post-init
+# beside verify_referenced_landed (the AC5 wiring contract, gap-suite-baseline-red-l1-wiring-...).
+verify_delivery_surface_l1() {
+  local delivery_root spec_file
+  l1_script="$PLUGIN_ROOT/scripts/l1-delivery-surface-check.ts"
+  delivery_root="$(cd "$(dirname "$PLUGIN_ROOT")" && pwd)"
+  spec_file="$delivery_root/orchestration/SPEC-complete-delivery-surface-2026-08-05.md"
+  if [ -f "$l1_script" ] && [ -f "$spec_file" ]; then
+    if node --no-warnings --experimental-strip-types "$l1_script" --surface --root "$delivery_root" --spec "$spec_file"; then
+      : # six-category delivery surface complete — the OK line is on the check's stdout
+    else
+      echo "ERROR: delivery-surface L1 check failed — the six-category delivery surface is incomplete." >&2
+      return 1
+    fi
+  elif [ -f "$l1_script" ]; then
+    echo "  delivery-surface-l1: SKIP (repo-level SPEC not found at $spec_file — bare plugin copy; referenced⊆landed still guards the mechanism axis)"
+  fi
+  return 0
+}
+
 # dist_stale <bundle> <src_dir> — AC1 stale detection for the vendored runtime bundle
 # (gap-upgrade-channel-cant-sync-build-artifacts-dist-stale). A git pull syncs SOURCE (tracked)
 # but not the gitignored dist/, so the bundle can be older than the source that produced it — the
@@ -1840,93 +1921,217 @@ if [ "${BASH_SOURCE[0]}" != "${0}" ]; then
   return 0
 fi
 
-# ── categories ─────────────────────────────────────────────────────────────────────────────────────
-echo "quay-init (plugin v${PLUGIN_VERSION})"
-
-# ── --check-drift (gap-delivery-surface-grows-but-target-freezes-no-upgrade) ────────────────────────
-# The L2 "upgrade correctness" drift report (Contract measure: the 漂移/缺失/一致 numbers on stdout).
-# Read-only — never writes to the target; exit 0 always (a report, not a gate). Runs the SAME
-# derived-set derivation the --loop lay-down uses, so the denominator is the CURRENT delivery
-# surface, not a frozen snapshot.
-if [ "$DO_CHECK_DRIFT" = true ]; then
-  echo "  drift report (派生集轴, not file count — the delivery surface GROWS, the target must follow):"
-  drift_report
-  exit 0
-fi
-
-# Per-category counters via deltas on the global COPIED/SKIPPED/CONFLICTED.
-record_category() {
-  local label="$1" base_copied="$2" base_skipped="$3" base_conflicted="$4"
-  echo "  $label: copied=$((COPIED - base_copied)) skipped=$((SKIPPED - base_skipped)) conflicted=$((CONFLICTED - base_conflicted))"
+# report_closed_set_state — the AC3 failure-path report: mechanically list the seven-item closed-set
+# written/unwritten state (gap-quay-init-hard-requires-tmux-session-and-leaves-partial-write). Wired as
+# an EXIT trap below so a non-zero exit — a pre-write fail-closed check (test command / plugin root /
+# worktree root), a mid-write abort, or a post-write auto-commit failure — always reports WHICH items
+# landed. This makes "initialized half-way" distinguishable from "not initialized" (hard rule 3b
+# write-side mirror: a failed init must not be conflated with a complete one).
+report_closed_set_state() {
+  for p in .quay/config.yml .quay/profiles.yml tasks goals .gitignore .claude/launch.settings.json .claude/settings.json; do
+    if [ -e "$WORKSPACE_ROOT/$p" ]; then
+      echo "  written:   $p" >&2
+    else
+      echo "  unwritten: $p" >&2
+    fi
+  done
 }
 
-# ── pre-existing uncommitted changes snapshot (gap-quay-init-never-commits-broken-committed-state) ──
-# Captured BEFORE any category lays files down: the consumer repo's uncommitted working-tree delta
-# (vs HEAD) that quay-init did NOT produce. AC3: quay-init must never silently sweep these into its
-# auto-commit — it stages ONLY its own laid-down paths, and it prompts when these exist. Empty when
-# the workspace is not a git repo (auto-commit is then a no-op) or the tree is clean.
-PRE_EXISTING_CHANGES=""
-if [ "$DRY_RUN" != true ] && git -C "$WORKSPACE_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  PRE_EXISTING_CHANGES="$(git -C "$WORKSPACE_ROOT" status --porcelain 2>/dev/null || true)"
-fi
+# _on_exit — EXIT trap: report the closed-set state on a non-zero exit only (a success run is already
+# fully reported by the install flow's own output).
+_on_exit() {
+  local rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "quay-init FAILED (exit $rc) — closed-set write state:" >&2
+    report_closed_set_state
+  fi
+}
+trap _on_exit EXIT
 
-# auto_commit_laid_down — gap-quay-init-never-commits-broken-committed-state AC1/AC2/AC3.
-# quay-init 铺文件但从不 commit ⇒ consumer 仓库的机制默认活在未提交工作树里，committed 态是否自洽纯属
-# 运气（archguard 实测：提交了 ready-pool-check 却没提交它的三个 helper ⇒ fresh-clone broken）。
-# 铺完机制后自动 commit（固定 `chore(quay-init):` 前缀）⇒ committed 态自洽、git log 直接回答「装的是
-# 哪一版机制」（补齐交付契约 铺设→版本→提交→升级 的「提交」环）。
-#   AC1/AC2 — 自动提交：non-git 工作区跳过（没有 commit 的目标）；工作树无变化跳过；否则 stage 本机件
-#              铺设的路径并 `git commit`。
-#   AC3 — 已有未提交改动时 不静默覆盖：检测（PRE_EXISTING_CHANGES）+ 提示 + 待确认。默认只在 TTY 上
-#         交互确认；非交互（脚本/测试/CI）没有显式 --auto-commit-confirm 时 fail-closed 不提交（提示后
-#         退出 0——安装本身成功了，只是 delivery 的提交环节被用户/调用方搁置）。提交只 stage 本机件铺设
-#         的路径（.gitignore / .quay/config.yml / .quay/quay-init-state.json / plugin/scripts /
-#         orchestration / docs/analysis / .claude/{workflows,agents} / tasks），绝不 `git add -A` ——
-#         使用者的未提交改动留在工作树里，不被卷进 quay-init 的提交。
-# `.quay/runtime/`（安装产物 bundle，AC10）已由 ensure_runtime_gitignore 写进 .gitignore，不在提交面。
+# ── closed-set write (SPEC §6 / gap-quay-init-closure-shrink-body AC168) ────────────────────────────
+echo "quay-init (plugin v${PLUGIN_VERSION})"
+echo "  closed set: .quay/config.yml, .quay/profiles.yml, tasks/, goals/, .gitignore, .claude/launch.settings.json, .claude/settings.json"
+
+# write_config — generate .quay/config.yml (provider map → the plugin's vendored native runtime; loop section).
+write_config() {
+  local cfg="$WORKSPACE_ROOT/.quay/config.yml"
+  if [ "$DRY_RUN" = true ]; then
+    echo "  would-write: .quay/config.yml (provider map → plugin vendored native runtime; loop: repo_root/test_command/tmux_session/worktree_root/fork_baseline)"
+    return
+  fi
+  if [ -f "$cfg" ]; then
+    echo "  note: .quay/config.yml already exists — keep the provider mcp_entry on the plugin's vendored native runtime"
+    migrate_stale_mcp_entry
+    ensure_loop_config
+  else
+    mkdir -p "$WORKSPACE_ROOT/.quay" "$WORKSPACE_ROOT/tasks"
+    cat > "$cfg" <<EOF
+# .quay/config.yml — generated by quay-init (SPEC §6 closed set).
+# The provider mcp_entry points at the quay PLUGIN's vendored native runtime (delivered by the plugin,
+# not laid down into this project). The loop section carries the target-project values the driver reads.
+providers:
+  native:
+    enabled: true
+    path: "${PLUGIN_ROOT}/vendor/quay-native"
+    tasks_dir: "${WORKSPACE_ROOT}/tasks"
+    mcp_entry: ["node", "${PLUGIN_ROOT}/vendor/quay-native/dist/quay-native.js", "mcp"]
+    env:
+      QUAY_NATIVE_TASKS_DIR: "${WORKSPACE_ROOT}/tasks"
+loop:
+  repo_root: ${REPO_ROOT}
+  test_command: ${TEST_COMMAND}
+  tmux_session: ${TMUX_SESSION:-null}
+  worktree_root: ${WORKTREE_ROOT}
+  fork_baseline: develop
+EOF
+    echo "  wrote: .quay/config.yml (provider map → plugin vendored native runtime; loop: repo_root/test_command/tmux_session/worktree_root/fork_baseline)"
+  fi
+}
+
+# write_template <src> <dst> [label] — verbatim copy of ONE closed-set template (no managed/conflict/stale
+# judgment; a same-name target is left untouched unless --force — config is the consumer's to edit).
+write_template() {
+  local src="$1" dst="$2" label="${3:-$dst}"
+  if [ ! -f "$src" ]; then
+    echo "  WARN: template missing from plugin: $src" >&2
+    return
+  fi
+  if [ -f "$dst" ]; then
+    if [ "$FORCE" = true ]; then
+      if [ "$DRY_RUN" = true ]; then
+        echo "  would-overwrite: $dst (--force)"
+      else
+        cp "$dst" "$dst.bak.$(date +%s)"
+        cp "$src" "$dst"
+        echo "  overwritten (backed up): $dst"
+      fi
+    elif [ "$DRY_RUN" = true ]; then
+      echo "  would-skip (exists): $dst"
+    else
+      echo "  skipped (exists): $dst"
+    fi
+  else
+    if [ "$DRY_RUN" = true ]; then
+      echo "  would-copy: $dst"
+    else
+      mkdir -p "$(dirname "$dst")"
+      cp "$src" "$dst"
+      echo "  wrote: $dst ($label)"
+    fi
+  fi
+}
+
+# ensure_gitignore — append the quay runtime-state ignore (idempotent, non-destructive; .quay/config.yml
+# + .quay/profiles.yml stay tracked).
+ensure_gitignore() {
+  local gi="$WORKSPACE_ROOT/.gitignore" entry=".quay/*"
+  if [ -f "$gi" ] && grep -qxF "$entry" "$gi"; then
+    [ "$DRY_RUN" = true ] || echo "  skipped: .gitignore already carries $entry"
+    return
+  fi
+  if [ "$DRY_RUN" = true ]; then
+    echo "  would-append: $entry (+ negation for config.yml/profiles.yml) to .gitignore"
+    return
+  fi
+  {
+    printf '# quay runtime state (generated by the loop — .quay/config.yml + .quay/profiles.yml stay tracked)\n'
+    printf '%s\n' "$entry"
+    printf '!.quay/config.yml\n'
+    printf '!.quay/profiles.yml\n'
+  } >> "$gi"
+  echo "  appended: $entry (+ negation for config.yml/profiles.yml) to .gitignore"
+}
+
+# write_claude_settings — generate .claude/settings.json (project-level enable + MCP pre-approval).
+write_claude_settings() {
+  local dst="$WORKSPACE_ROOT/.claude/settings.json"
+  if [ "$DRY_RUN" = true ]; then
+    echo "  would-write: .claude/settings.json (enabledPlugins: {\"${PLUGIN_NAME}@${PLUGIN_NAME}\": true} + permissions.allow: [\"mcp__plugin_${PLUGIN_NAME}_${PLUGIN_NAME}__*\"])"
+    return
+  fi
+  if [ -f "$dst" ] && [ "$FORCE" != true ]; then
+    echo "  note: .claude/settings.json already exists — leave it untouched (re-run with --force to add the quay enabledPlugins block)"
+    return
+  fi
+  mkdir -p "$(dirname "$dst")"
+  python3 - "$dst" "$PLUGIN_NAME" <<'PYEOF'
+import json, sys, os
+dst, name = sys.argv[1], sys.argv[2]
+data = {}
+if os.path.exists(dst):
+    try:
+        with open(dst, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        data = {}
+ep = data.setdefault("enabledPlugins", {})
+ep[f"{name}@{name}"] = True
+perm = data.setdefault("permissions", {})
+allow = perm.setdefault("allow", [])
+entry = f"mcp__plugin_{name}_{name}__*"
+if entry not in allow:
+    allow.append(entry)
+with open(dst, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PYEOF
+  echo "  wrote: .claude/settings.json (enabledPlugins: {\"${PLUGIN_NAME}@${PLUGIN_NAME}\": true} + permissions.allow: [\"mcp__plugin_${PLUGIN_NAME}_${PLUGIN_NAME}__*\"])"
+}
+
+# print_install_steps — explicit install steps (AC4 / SPEC §6 T3): never imply "config-just-works".
+print_install_steps() {
+  echo
+  echo "━━━ quay plugin install steps (explicit — config does NOT auto-install) ━━━"
+  cat <<'EOF'
+The files just written ENABLE the quay plugin for this project, but they DO NOT install it.
+`enabledPlugins` only toggles an ALREADY-INSTALLED plugin, and an untrusted directory's project
+settings are not read at all — so "config committed => auto-installed" is FALSE. Install it first:
+
+  # 1. register the marketplace source (User Scope, machine-specific path — not committed):
+EOF
+  printf '  claude plugin marketplace add quay "%s"\n\n' "$PLUGIN_ROOT"
+  cat <<'EOF'
+  # 2. install the plugin (writes the install + shells out to install):
+  claude plugin install quay@quay
+
+  # (or the npm-global path: `npm install -g quay` — its register-plugin.mjs postinstall does the same)
+
+  # 3. accept the trust dialog the FIRST time you enter this directory, then restart the session.
+After that, the enabledPlugins block below takes effect (a restart is required to apply).
+EOF
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+}
+
+# auto_commit_laid_down — stage ONLY the closed-set paths and commit (so the enable propagates on clone).
 auto_commit_laid_down() {
-  local changes p n
   if ! git -C "$WORKSPACE_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     echo "  auto-commit: SKIP (not a git repository — the laid-down files are not committed; init a repo or commit manually)"
     return 0
   fi
+  local changes
   changes="$(git -C "$WORKSPACE_ROOT" status --porcelain 2>/dev/null || true)"
   if [ -z "$changes" ]; then
     echo "  auto-commit: nothing to commit (working tree clean)"
     return 0
   fi
   local do_commit=1
-  if [ -n "$PRE_EXISTING_CHANGES" ]; then
-    echo "  auto-commit: WARNING — the consumer repo already had uncommitted change(s) BEFORE quay-init ran; they are NOT silently swept into the commit:" >&2
-    printf '%s\n' "$PRE_EXISTING_CHANGES" | sed 's/^/    /' >&2
-    echo "  auto-commit will stage ONLY quay-init's laid-down paths; the pre-existing change(s) stay uncommitted." >&2
-    case "$AUTO_COMMIT_CONFIRM" in
-      yes) do_commit=1 ;;
-      no)  do_commit=0 ;;
-      *)
-        if [ -t 0 ]; then
-          local resp=""
-          read -r -p "  Proceed with auto-commit? (only quay-init's laid-down files are staged; pre-existing changes stay uncommitted) [y/N] " resp
-          case "$resp" in
-            [yY]|[yY][eE][sS]) do_commit=1 ;;
-            *) do_commit=0 ;;
-          esac
-        else
-          echo "  auto-commit: DECLINED (non-interactive — pass --auto-commit-confirm to commit, or --auto-commit-skip to skip). Laid-down files remain uncommitted." >&2
-          do_commit=0
-        fi
-        ;;
-    esac
+  if [ "$AUTO_COMMIT_CONFIRM" = "no" ]; then
+    do_commit=0
+  elif [ "$AUTO_COMMIT_CONFIRM" != "yes" ]; then
+    if [ -t 0 ]; then
+      local resp=""
+      read -r -p "  Proceed with auto-commit? (only quay-init's laid-down files are staged) [y/N] " resp
+      case "$resp" in [yY]|[yY][eE][sS]) do_commit=1 ;; *) do_commit=0 ;; esac
+    else
+      echo "  auto-commit: DECLINED (non-interactive — pass --auto-commit-confirm to commit, or --auto-commit-skip to skip)" >&2
+      do_commit=0
+    fi
   fi
   if [ "$do_commit" = 0 ]; then
-    echo "  auto-commit: skipped as chosen — the laid-down files remain uncommitted in the working tree" >&2
+    echo "  auto-commit: skipped as chosen — the laid-down files remain uncommitted"
     return 0
   fi
-  # Stage ONLY the paths quay-init owns/lays down (never `git add -A` when the repo may carry
-  # unrelated uncommitted work — AC3). Missing paths are skipped; gitignored runtime bundles never
-  # reach the stage. Runs in a subshell at the workspace root so the literal `git add` / `git commit`
-  # (the Contract invoke's surface) are the real operations, not prose.
-  for p in .gitignore .quay/config.yml .quay/profiles.yml .quay/quay-init-state.json plugin/scripts orchestration docs/analysis .claude/workflows .claude/agents .claude/launch.settings.json tasks; do
+  for p in .quay/config.yml .quay/profiles.yml tasks .gitignore .claude/launch.settings.json .claude/settings.json; do
     if [ -e "$WORKSPACE_ROOT/$p" ]; then
       ( cd "$WORKSPACE_ROOT" && git add -- "$p" ) 2>/dev/null || true
     fi
@@ -1935,128 +2140,62 @@ auto_commit_laid_down() {
     echo "  auto-commit: nothing staged (all laid-down files are gitignored or already committed)"
     return 0
   fi
+  local n
   n="$(git -C "$WORKSPACE_ROOT" diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')"
-  # gap-precommit-guard-wire-into-quay-init-and-cold-start (回归修正, 2026-08-13): quay-init's OWN
-  # auto-commit must not be blocked by the pre-commit guard it just provisioned. The guard FAILS-LOUD
-  # on a missing .quay/full-suite-state.json (AC2 of the guard task: 参照系缺失时谓词必须崩) — and a
-  # FRESH project (never had a round) has NO state file. This is the documented override case:
-  # QUAY_ALLOW_DIRTY_ROUND=1 IS the "确认这是刻意维护缺口" escape hatch, and auto-commit is a
-  # PROVISIONING step (lays down quay-init's own paths — the delivery commit), NOT an in-round dirty
-  # write by a round participant. The override is scoped to THIS commit only (env form — the ONLY
-  # channel a pre-commit hook receives; the guard records it as allow-dirty-round-override). It does
-  # NOT weaken the guard for any other commit — a real running-round assertion-surface commit (the
-  # AC4 case, the main checkout's actual round) still rejects.
-  if ( cd "$WORKSPACE_ROOT" && QUAY_ALLOW_DIRTY_ROUND=1 git commit -q -m "chore(quay-init): lay down quay plugin mechanism files (v${PLUGIN_VERSION})" ); then
+  if ( cd "$WORKSPACE_ROOT" && git commit -q -m "chore(quay-init): initialize quay project files (plugin v${PLUGIN_VERSION})" ); then
     echo "  auto-commit: committed ${n} file(s) as chore(quay-init) (plugin v${PLUGIN_VERSION})"
   else
-    echo "ERROR: auto-commit failed (git commit returned non-zero). The laydown is complete but the delivery contract's 提交 环节 was not met." >&2
-    echo "       Configure the repo's git identity (user.name/user.email), then re-run quay-init (idempotent) to commit." >&2
+    echo "ERROR: auto-commit failed (git commit returned non-zero). Configure git identity, then re-run quay-init (idempotent) to commit." >&2
     exit 2
   fi
 }
 
-if [ "$DO_WORKFLOWS" = true ]; then
-  local_base_copied="$COPIED"; local_base_skipped="$SKIPPED"; local_base_conflicted="$CONFLICTED"
-  echo "  workflows:"
-  copy_dir "$PLUGIN_ROOT/workflows" "$WORKSPACE_ROOT/.claude/workflows"
-  record_category "workflows" "$local_base_copied" "$local_base_skipped" "$local_base_conflicted"
+# ── loop params (config.yml loop: section — resolved for EVERY mode; the driver reads them) ───────────
+if [ -z "$TEST_COMMAND" ]; then
+  TEST_COMMAND="$(read_existing_loop_value test_command)"
+  [ -n "$TEST_COMMAND" ] && echo "  using existing config loop.test_command: $TEST_COMMAND (config-preserving upgrade — explicit --test-command overrides)"
+else
+  echo "  using explicit --test-command: $TEST_COMMAND"
+fi
+if [ -z "$TEST_COMMAND" ]; then
+  if DETECTED="$(detect_test_command "$WORKSPACE_ROOT")"; then
+    TEST_COMMAND="$DETECTED"
+    echo "  detected test command: $TEST_COMMAND (from the target project — confirm this is correct)"
+  else
+    echo "ERROR: quay-init needs the target project's test command but none could be detected in $WORKSPACE_ROOT." >&2
+    echo "       Searched: scripts/test.sh → package.json scripts.test → go.mod → Cargo.toml." >&2
+    echo "       Pass --test-command <cmd> explicitly." >&2
+    exit 2
+  fi
 fi
 
-if [ "$DO_AGENTS" = true ]; then
-  local_base_copied="$COPIED"; local_base_skipped="$SKIPPED"; local_base_conflicted="$CONFLICTED"
-  echo "  agents:"
-  copy_dir "$PLUGIN_ROOT/agents" "$WORKSPACE_ROOT/.claude/agents"
-  record_category "agents" "$local_base_copied" "$local_base_skipped" "$local_base_conflicted"
+if [ -z "$TMUX_SESSION" ]; then
+  TMUX_SESSION="$(read_existing_loop_value tmux_session)"
+  [ -n "$TMUX_SESSION" ] && echo "  using existing config loop.tmux_session: $TMUX_SESSION (config-preserving upgrade — explicit --tmux-session overrides)"
+else
+  echo "  using explicit --tmux-session: $TMUX_SESSION"
+fi
+if [ -z "$TMUX_SESSION" ]; then
+  # tmux session is OPTIONAL since the outer/inner dual-tmux model retired (SPEC-tmux-retirement-
+  # 2026-09-03): quay-init's seven-item closed-set write never uses tmux, so a missing/ambiguous
+  # session must NOT fail the init (gap-quay-init-hard-requires-tmux-session-and-leaves-partial-
+  # write). Detection is best-effort — exactly one match wins; zero or multiple matches leave
+  # loop.tmux_session null (never a guess, never a hard failure). Only a downstream action that
+  # actually uses tmux fails closed at runtime.
+  DETECT_RC=0
+  DETECT_OUT="$(detect_tmux_session "$PROJECT_NAME")" || DETECT_RC=$?
+  if [ "$DETECT_RC" = 0 ]; then
+    TMUX_SESSION="$DETECT_OUT"
+    echo "  detected tmux session: $TMUX_SESSION (matching project '$PROJECT_NAME' — confirm this is correct)"
+  elif [ "$DETECT_RC" = 2 ]; then
+    echo "  note: multiple tmux sessions match project '$PROJECT_NAME' — loop.tmux_session left null (tmux is optional; pass --tmux-session to pin one)"
+  else
+    echo "  note: no tmux session detected for project '$PROJECT_NAME' — loop.tmux_session left null (tmux is optional; SPEC-tmux-retirement-2026-09-03)"
+  fi
 fi
 
-if [ "$DO_LOOP" = true ]; then
-  local_base_copied="$COPIED"; local_base_skipped="$SKIPPED"; local_base_conflicted="$CONFLICTED"
-  # AC2 (gap-cold-start-...-eight-steps): the target project's test command is DETECTABLE, not
-  # something the human must know in advance. An explicit --test-command always wins; otherwise the
-  # priority ladder (scripts/test.sh → package.json scripts.test → go.mod → Cargo.toml) detects it
-  # and a successful detection is PRINTED for the human to confirm. A detection MISS FAILS CLOSED
-  # (AC3) naming every location searched — the 判绿 convention (grep 'cancelled 0' / FULL-SUITE-EXIT /
-  # tests=N) needs a concrete command, and a guessed default is exactly what the negative control
-  # forbids (no leaking the quay-specific scripts/test.sh into a laid-down copy that doesn't use it).
-  if [ -z "$TEST_COMMAND" ]; then
-    # Config-preserving upgrade (gap-quay-init-config-preserving-incremental-upgrade AC1): an
-    # existing consumer's recorded loop.test_command is KEPT — never re-detected/re-derived. An
-    # explicit --test-command on the upgrade command line overrides it.
-    TEST_COMMAND="$(read_existing_loop_value test_command)"
-    if [ -n "$TEST_COMMAND" ]; then
-      echo "  using existing config loop.test_command: $TEST_COMMAND (config-preserving upgrade — explicit --test-command overrides)"
-    fi
-  else
-    echo "  using explicit --test-command: $TEST_COMMAND"
-  fi
-  if [ -z "$TEST_COMMAND" ]; then
-    if DETECTED="$(detect_test_command "$WORKSPACE_ROOT")"; then
-      TEST_COMMAND="$DETECTED"
-      echo "  detected test command: $TEST_COMMAND (from the target project — confirm this is correct)"
-    else
-      echo "ERROR: --loop needs the target project's test command but none could be detected in $WORKSPACE_ROOT." >&2
-      echo "       Searched these detection sources (in order):" >&2
-      echo "         - scripts/test.sh" >&2
-      echo "         - package.json (a scripts.test entry)" >&2
-      echo "         - go.mod" >&2
-      echo "         - Cargo.toml" >&2
-      echo "       There is no universal default (quay uses scripts/test.sh, archguard uses npm test, meta-cc uses go test)." >&2
-      echo "       Pass --test-command <cmd> explicitly to set the target's test command." >&2
-      exit 2
-    fi
-  fi
-
-  # AC1/AC2/AC3 (gap-init-guesses-the-tmux-session): the target project's tmux session is
-  # DETECTED, not guessed. An explicit --tmux-session always wins; otherwise tmux list-sessions
-  # is matched by project name: a UNIQUE match is used (printed for the human to confirm), a
-  # MULTIPLE match requires explicit --tmux-session (never pick one), and a ZERO match FAILS
-  # CLOSED (AC2) — the old "<project>-0:0.0" default only worked for the project it was written
-  # for, and a monitor aimed at a nonexistent session reports a LIVE inner as GONE (the
-  # false-negative this task exists to kill). Never write a guessed value into the monitor config.
-  if [ -z "$TMUX_SESSION" ]; then
-    # Config-preserving upgrade (gap-quay-init-config-preserving-incremental-upgrade AC1): an
-    # existing consumer's recorded loop.tmux_session is KEPT — the upgrade must not re-detect (and
-    # possibly fail closed on) a session that is not running RIGHT NOW. An explicit --tmux-session
-    # on the upgrade command line overrides it.
-    TMUX_SESSION="$(read_existing_loop_value tmux_session)"
-    if [ -n "$TMUX_SESSION" ]; then
-      echo "  using existing config loop.tmux_session: $TMUX_SESSION (config-preserving upgrade — explicit --tmux-session overrides)"
-    fi
-  else
-    echo "  using explicit --tmux-session: $TMUX_SESSION"
-  fi
-  if [ -z "$TMUX_SESSION" ]; then
-    # set -euo pipefail would terminate the script the instant detect_tmux_session returns
-    # non-zero, so a bare `DETECT_RC=$?` on the next line never ran — the exit code was
-    # hijacked into the script's own and the stderr branch was skipped. Capture it on the
-    # SAME command line, zero-initialized (gap-init-guesses-the-tmux-session AC2/AC3 fix).
-    DETECT_RC=0
-    DETECT_OUT="$(detect_tmux_session "$PROJECT_NAME")" || DETECT_RC=$?
-    if [ "$DETECT_RC" = 0 ]; then
-      TMUX_SESSION="$DETECT_OUT"
-      echo "  detected tmux session: $TMUX_SESSION (from tmux list-sessions matching project '$PROJECT_NAME' — confirm this is correct)"
-    elif [ "$DETECT_RC" = 2 ]; then
-      echo "ERROR: multiple tmux sessions match project '$PROJECT_NAME':" >&2
-      printf '%s\n' "$DETECT_OUT" | sed 's/^/         - /' >&2
-      echo "       Refusing to guess which one is the target session — a guessed value writes a lying monitor." >&2
-      echo "       Pass --tmux-session <sess> explicitly (e.g. 'tmux list-sessions' to see the real sessions)." >&2
-      exit 2
-    else
-      echo "ERROR: --loop needs the target project's tmux session but none could be detected." >&2
-      echo "       Searched: tmux list-sessions -F '#{session_name}' for sessions matching '$PROJECT_NAME'." >&2
-      echo "       There is no universal default — the old '<project>-0:0.0' only works for the project it was written for." >&2
-      echo "       Pass --tmux-session <sess> explicitly (e.g. 'tmux list-sessions' to see the real sessions)." >&2
-      exit 2
-    fi
-  fi
-
-  # worktree_root (gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs AC2):
-  # resolved from an existing config loop.worktree_root first (an upgrade keeps its chosen path),
-  # else --worktree-root, else the sibling-of-repo DISK default. Fail-closed on tmpfs (AC3) — a
-  # real disk root proceeds (AC4). Written into .quay/config.yml below so tick docs + skills read
-  # it at runtime instead of spelling a literal path (AC2).
-  if [ -z "$WORKTREE_ROOT" ] && [ -f "$WORKSPACE_ROOT/.quay/config.yml" ]; then
-    WORKTREE_ROOT="$(python3 - "$WORKSPACE_ROOT/.quay/config.yml" <<'PYEOF' 2>/dev/null || true
+if [ -z "$WORKTREE_ROOT" ] && [ -f "$WORKSPACE_ROOT/.quay/config.yml" ]; then
+  WORKTREE_ROOT="$(python3 - "$WORKSPACE_ROOT/.quay/config.yml" <<'PYEOF' 2>/dev/null || true
 import sys, yaml
 try:
     with open(sys.argv[1], encoding="utf-8") as f:
@@ -2066,323 +2205,42 @@ except Exception:
     pass
 PYEOF
 )"
-  fi
-  if [ -z "$WORKTREE_ROOT" ]; then
-    WORKTREE_ROOT="${REPO_ROOT}/../$(basename "$REPO_ROOT")-worktrees"
-  fi
-  validate_worktree_root "$WORKTREE_ROOT" || exit 2
-
-  echo "  loop (two-layer mechanism):"
-  mkdir -p "$WORKSPACE_ROOT/plugin/scripts"
-  mkdir -p "$WORKSPACE_ROOT/orchestration"
-  mkdir -p "$WORKSPACE_ROOT/docs/analysis"
-
-  # Config-preserving upgrade (gap-quay-init-config-preserving-incremental-upgrade AC2): back up the
-  # consumer's .quay/config.yml BEFORE the upgrade modifies it, and arm the EXIT-trap rollback so a
-  # failed upgrade restores the config byte-for-byte unchanged. Disarmed below once the config is in
-  # its final good state (after the post-laydown verifications). A config-less fresh install gets an
-  # empty CONFIG_BACKUP → the trap is a no-op → AC3 (fresh install path unaffected) holds.
-  CONFIG_BACKUP="$(backup_config)"
-  if [ -n "$CONFIG_BACKUP" ]; then
-    trap rollback_config_on_exit EXIT
-  fi
-
-  # Mechanism scripts (checkers + gate + token + observation) → <workspace>/plugin/scripts/.
-  # gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down, Chosen-mechanism (a): the landing
-  # list for scripts is DERIVED from the shipped skills + tick docs' own `plugin/scripts/*`
-  # references — precise (only what is called ships, no dev-tree-only tools like sync-vendor.sh)
-  # and drift-immune (a new reference auto-ships; there is no second hand-maintained copy to drift
-  # from). The explicit additions below are ONLY files the docs call by BARE NAME (no
-  # `plugin/scripts/` prefix, so not derivable) plus the checkers' TRANSITIVE DEPENDENCIES
-  # (imported by them, not doc-referenced — the laid-down mechanism must be functional; e2e proved
-  # the checkers cannot run without gate-script-base.ts / workflow-event-schema.mjs). The
-  # referenced-set ⊆ landed-set invariant is mechanically enforced by verify_referenced_landed
-  # below — a future skill/tick reference to a script that does not exist in the plugin FAILS the
-  # install (never the empty-set verifier).
-  # NOTE: inner-state.sh is deliberately NOT here (gap-retire-inner-state-one-observer-targets-by-
-  # parameter AC3) — it is retired and not referenced by any shipped doc; observation has exactly
-  # (the observer mechanism was retired 2026-09-03; its env config was the session config).
-  # gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure: the laydown set
-  # is DERIVED from the shipped mechanism docs' OWN references at BOTH spellings (path-prefixed AND
-  # bare filename) PLUS the laid-down scripts' TRANSITIVE SIBLING DEPENDENCIES — so the mechanism
-  # is functional and reference-spelling-independent (see derive_loop_scripts above; the old
-  # hand-written explicit list now lives in derive_loop_scripts' source-(c) additions).
-  # shellcheck disable=SC2207
-  LOOP_SCRIPTS=()
-  while IFS= read -r s; do LOOP_SCRIPTS+=("$s"); done < <(derive_loop_scripts)
-
-  # AC1/AC2 (gap-delivery-surface-grows-but-target-freezes-no-upgrade): the upgrade/refresh path's
-  # drift report. BEFORE the update, classify the target's derived scripts (漂移/缺失/一致 on the
-  # derived-set axis) so the upgrade action below is preceded by the L2 "升级正确性" diagnosis —
-  # exactly what the frozen-at-install-time target needs: what it is missing (auto-added) and what
-  # has drifted (backed up + replaced, never silent). LOOP_SCRIPTS is populated above so the
-  # before-report's derived-set is non-empty (compute_drift_report reads the global — a stale
-  # empty-array call reported derived-set 0 and the before/after reports disagreed with reality).
-  # The POST report after the loop proves the upgrade brought the derived set to 一致.
-  # gap-suite-serial-install-copy-one-subprocess-batching: build ONE (src,dst) manifest for the
-  # loop-scripts lay-down and precompute the PRE-COPY byte-comparison state in a single python3 pass.
-  # This one pass feeds BOTH the before-drift report and the copy loop's copy_one decisions (which,
-  # like the pre-batch per-file `cmp -s`, see the target as it was BEFORE any copy). The manager-
-  # tick-core opt-in skip mirrors the copy loop below so the two never disagree on the pair set.
-  _laydown_manifest="$(mktemp)"
-  for s in "${LOOP_SCRIPTS[@]}"; do
-    if [ -f "$PLUGIN_ROOT/scripts/$s" ]; then
-      printf '%s\t%s\n' "$PLUGIN_ROOT/scripts/$s" "$WORKSPACE_ROOT/plugin/scripts/$s" >> "$_laydown_manifest"
-    elif [ -f "$PLUGIN_ROOT/loop/$s" ]; then
-      [ "$s" = "manager-tick-core.md" ] && [ "$DO_MANAGER" != true ] && continue
-      printf '%s\t%s\n' "$(resolve_tick_core_src "$s")" "$WORKSPACE_ROOT/orchestration/$s" >> "$_laydown_manifest"
-    fi
-  done
-  _precompute_states "$_laydown_manifest"
-
-  echo "  drift report (before upgrade):"
-  compute_drift_report "$WORKSPACE_ROOT"
-  for s in "${LOOP_SCRIPTS[@]}"; do
-    if [ -f "$PLUGIN_ROOT/scripts/$s" ]; then
-      # mode "clean": a stale same-name target is RESIDUE (AC4) — backed up + replaced, never
-      # silently skipped. Mechanism executables must be current (verify-installed-executables.sh
-      # fails closed on any drift, so a leftover stale copy would otherwise abort the install).
-      copy_one "$PLUGIN_ROOT/scripts/$s" "$WORKSPACE_ROOT/plugin/scripts/$s" clean
-    elif [ -f "$PLUGIN_ROOT/loop/$s" ]; then
-      # exec-core tick doc (gap-ac37-exec-core-ships-with-package): the ≤80-line execution cores
-      # lay VERBATIM to orchestration/ (the path the shipped tick templates reference) in "managed"
-      # mode, like the other tick docs. manager-tick-core.md is OPT-IN (--manager): laid only when
-      # requested, but still reported here so the operator knows it is available.
-      if [ "$s" = "manager-tick-core.md" ] && [ "$DO_MANAGER" != true ]; then
-        echo "  skip (opt-in): orchestration/$s — manager exec core requires --manager"
-        continue
-      fi
-      # resolve_tick_core_src: a pointerized shipped core (plugin/loop/manager-tick-core.md is a
-      # one-line pointer to orchestration/ 正本) lays down the REAL core — byte-identical to 正本,
-      # cold-start readable — never the pointer line (gap-quay-init-real-install-regression-fix ②).
-      copy_one "$(resolve_tick_core_src "$s")" "$WORKSPACE_ROOT/orchestration/$s" managed
-    else
-      echo "  WARN: loop mechanism file missing from plugin: plugin/scripts/$s (or plugin/loop/$s)" >&2
-    fi
-  done
-  # Re-precompute AFTER the copies: the after-drift report must see the UPDATED targets the copy
-  # loop just wrote, not the stale pre-copy state (the copy loop laid byte-identical content, so
-  # the after-report proves 漂移→一致 — the same semantics as the pre-batch per-file cmp re-scan).
-  _precompute_states "$_laydown_manifest"
-  rm -f "$_laydown_manifest"
-  echo "  drift report (after upgrade):"
-  compute_drift_report "$WORKSPACE_ROOT"
-
-  # Probes (routine-track probe specs — DIR-056) → <workspace>/plugin/probes/.
-  # AC3 (gap-delivery-outline-vs-verify-surface-single-source): probes are a DELIVERABLE
-  # (human ruling 2026-08-06) but quay-init never laid them down (grep 0) — a cold-started
-  # target had no probe specs on disk for the routine track's readProbeSpec("<probe>", pluginRoot)
-  # to resolve against the target's own plugin/ tree (self-contained runtime, same as the laid
-  # plugin/scripts/). Lay them VERBATIM — product-owned .md, mode "clean" (a stale same-name
-  # target is residue, backed up + replaced like the mechanism executables).
-  if [ -d "$PLUGIN_ROOT/probes" ]; then
-    mkdir -p "$WORKSPACE_ROOT/plugin/probes"
-    for pprobe in "$PLUGIN_ROOT"/probes/*; do
-      [ -f "$pprobe" ] || continue
-      copy_one "$pprobe" "$WORKSPACE_ROOT/plugin/probes/${pprobe##*/}" clean
-    done
-    echo "  probes: copied from plugin/probes/ (routine-track probe specs — DIR-056)"
-  else
-    echo "  WARN: probe specs missing from plugin: $PLUGIN_ROOT/probes" >&2
-  fi
-
-  # Tick docs → <workspace>/orchestration/ and <workspace>/docs/analysis/ (mirroring the quay repo's
-  # own layout so the docs' internal relative references resolve), laid down VERBATIM — no text
-  # substitution (gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them). The target
-  # project's values live in `.quay/config.yml` `loop:` and are read at runtime, so the laid-down
-  # copy is byte-identical to the product (SPEC AC1/AC3). mode "managed" distinguishes a stale
-  # install-managed copy (previous install laid it — replaced on upgrade, AC5) from a genuine user
-  # edit (CONFLICT, AC6).
-  for pair in \
-    "orchestrator-loop-tick.md:orchestration/orchestrator-loop-tick.md" \
-    "fast-mode-loop-tick.md:docs/analysis/fast-mode-loop-tick.md"; do
-    src_name="${pair%%:*}"
-    dst_rel="${pair##*:}"
-    src="$PLUGIN_ROOT/loop/$src_name"
-    dst="$WORKSPACE_ROOT/$dst_rel"
-    if [ ! -f "$src" ]; then
-      echo "  WARN: loop tick doc missing from plugin: plugin/loop/$src_name" >&2
-      continue
-    fi
-    copy_one "$src" "$dst" managed
-  done
-
-  # Per-project session config (SESSION_TMUX_SESSION): written to orchestration/session-liveness.env
-  # so the session topology/check scripts (quay-topology.sh / topology-check.sh / session-bootstrap.sh)
-  # resolve the real session name without a guessed default. The observer that previously consumed
-  # this config was retired 2026-09-03; the session-name config itself is still needed by topology.
-  write_session_env
-
-  # Launch config (gap-quay-init-coldstart-usability-launch-not-used-... F4/AC2): the checked-in
-  # per-role launch command lives in <target>/.claude/launch.settings.json (Claude Code 认识的键
-  # $schema/permissions/env) + <target>/.quay/profiles.yml（AC154 profile 抽层后 launcher/model/--bare/
-  # -n/unset + flag-only 参数的承载），materialized by quay-launch.sh — but quay-init NEVER laid it
-  # down, so a cold-started third-party target had a laid-down quay-launch.sh that FAILED CLOSED
-  # ("launch settings file not found") and consumers hand-started sessions without --settings /
-  # without the role-convention name (measured 2026-08-11 on ad-arm1 archguard). Lay the DEFAULT
-  # template verbatim; the consumer edits model/env per project (the launcher reads it at runtime —
-  # no bake-in). mode "managed" (like tick docs): a target that still equals the previous install's
-  # laid-down hash is stale install → replaced on upgrade; a genuine user edit differs from both
-  # product and hash → CONFLICT, preserved (never a silent overwrite of a customized launch config).
-  ls_src="$PLUGIN_ROOT/.claude/launch.settings.json"
-  ls_dst="$WORKSPACE_ROOT/.claude/launch.settings.json"
-  if [ ! -f "$ls_src" ]; then
-    echo "  WARN: launch settings template missing from plugin: $ls_src" >&2
-  else
-    copy_one "$ls_src" "$ls_dst" managed
-    echo "  launch-config: laid down .claude/launch.settings.json (default template — edit model/env per project; quay-launch.sh materializes it)"
-  fi
-  # profiles.yml 同源铺设（AC154）：profile/roles/flags 承载；缺 plugin 模板则警告、不影响已铺设的 settings。
-  pf_src="$PLUGIN_ROOT/.quay/profiles.yml"
-  pf_dst="$WORKSPACE_ROOT/.quay/profiles.yml"
-  if [ ! -f "$pf_src" ]; then
-    echo "  WARN: profiles template missing from plugin: $pf_src" >&2
-  else
-    copy_one "$pf_src" "$pf_dst" managed
-    echo "  launch-config: laid down .quay/profiles.yml (default profile carrier — edit launcher/model per project)"
-  fi
-
-  # AC7b (gap-cold-start-...-eight-steps) + gap-vendor-runtime-not-in-git-clone-broken-mcp-entry
-  # (AC1/AC2): lay the runtime INTO the target. The target's loop must NOT depend on the quay dev
-  # tree through PATH symlinks (quay-native → /home/yale/work/quay/packages/quay-native/dist/). The
-  # built Core runtime (plugin/vendor/quay/dist/quay.js) AND the built native provider runtime
-  # (plugin/vendor/quay-native/dist/quay-native.js + provider.yml — the self-contained provider
-  # bundle, gap-ac3b-prove-installed-quay-runs-without-dev-tree) are copied into the target so the
-  # target's .quay/config.yml can point its provider mcp_entry at a PROJECT-LOCAL copy of the
-  # provider runtime (an absolute path into .quay/runtime/, never a bare `quay-native` that
-  # PATH-resolves to a dev tree). The two laid-down files must stay together: the bundle resolves
-  # provider.yml relative to its own location (so the bundle sits in `.quay/runtime/bin/` and
-  # provider.yml in `.quay/runtime/` — one level up, exactly the `../provider.yml` contract). The
-  # runtimes are GENERATED artifacts (gitignored dist/ — M172), so a fresh
-  # plugin clone has none: ensure_vendor_runtime AUTO-BUILDS them via sync-vendor.sh (AC2) or FAILS
-  # CLOSED (AC1) — never a WARN-and-complete with a broken mcp_entry. After it returns, both bundles
-  # are guaranteed present, so the lay-down is unconditional.
-  ensure_vendor_runtime
-  # gap-the-runtime-has-nowhere-safe-to-land: the runtime lands in .quay/runtime/ — quay's
-  # own namespace — NOT vendor/ (a Go reserved dir whose mere presence flips a Go module
-  # with dependencies into vendor mode → "inconsistent vendoring" build failure) and NOT
-  # node_modules / target / build / dist (other language conventions, AC9). The bundle's
-  # internal `bin/` subdir keeps the native provider's `../provider.yml` resolution intact.
-  # ensure_runtime_gitignore then writes the .gitignore entry so the 1.3MB install-generated
-  # bundles are never committed (AC10) — the target's commit stays under any large-file hook.
-  copy_one "$PLUGIN_ROOT/vendor/quay/dist/quay.js" "$WORKSPACE_ROOT/.quay/runtime/bin/quay.js" clean
-  copy_one "$PLUGIN_ROOT/vendor/quay-native/dist/quay-native.js" "$WORKSPACE_ROOT/.quay/runtime/bin/quay-native.js" clean
-  copy_one "$PLUGIN_ROOT/vendor/quay-native/provider.yml" "$WORKSPACE_ROOT/.quay/runtime/provider.yml" clean
-  ensure_runtime_gitignore
-  write_provider_config
-
-  # Upgrade-path state record (AC5): detect prior plugin version + already-laid assets.
-  if [ -f "$WORKSPACE_ROOT/.quay/quay-init-state.json" ]; then
-    prev="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("pluginVersion","?"))' "$WORKSPACE_ROOT/.quay/quay-init-state.json" 2>/dev/null || echo '?')"
-    echo "  upgrade: previous quay-init pluginVersion=${prev} → ${PLUGIN_VERSION}"
-  fi
-  write_state_file
-  record_category "loop" "$local_base_copied" "$local_base_skipped" "$local_base_conflicted"
-
-  # AC6/AC7 (gap-quay-init-rewrites-an-executable-instead-of-generating-config): after the lay-down,
-  # assert EVERY installed executable under plugin/scripts/ is byte-identical to its plugin source.
-  # Config-class files are explicit exceptions (tick docs — prose, laid verbatim but still localizable
-  # via the `managed` mode; orchestration/session-liveness.env — 生成配置). Fail-closed: a future
-  # regression that re-introduces install-time rewriting of an executable stops the install here.
-  # The executor is every quay-init --loop run (incl. cold-start-e2e in CI).
-  if [ "$DRY_RUN" != true ] && [ -f "$PLUGIN_ROOT/scripts/verify-installed-executables.sh" ]; then
-    bash "$PLUGIN_ROOT/scripts/verify-installed-executables.sh" "$PLUGIN_ROOT" "$WORKSPACE_ROOT"
-  fi
-
-  # gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down: after the lay-down, enforce
-  # "referenced set ⊆ landed set" mechanically (verify_referenced_landed above). This is the
-  # two-hand-maintained-lists bond: a shipped skill/tick doc referencing a file that did NOT land
-  # (and is not declared self-create/reference-doc) FAILS the install instead of shipping a
-  # mechanism that calls files it never laid down. Same executor as the AC6 check — every --loop run.
-  if [ "$DRY_RUN" != true ]; then
-    verify_referenced_landed "$WORKSPACE_ROOT" || exit 2
-    # AC3 (gap-vendor-runtime-not-in-git-clone-broken-mcp-entry): verify_referenced_landed checks
-    # the LANDING SET; this second check verifies the provider config's mcp_entry references a
-    # runtime that ACTUALLY EXISTS in the target — the referenced-not-landed complement. Defense in
-    # depth after AC1's fail-closed (a config that already exists still gets checked every run).
-    verify_provider_runtime_existence "$WORKSPACE_ROOT" "$PLUGIN_ROOT" || exit 2
-    # gap-complete-delivery-surface-spec-and-l1-verification (AC2): the SIX-category L1
-    # delivery-completeness check. verify_referenced_landed above covers category 1 (mechanisms/
-    # runtime: referenced ⊆ landed); this extends the L1 surface to ALL SIX categories — each
-    # category's deliverables present + owning gap task filed (SPEC §6 machine-readable list is the
-    # single source). Runs post-laydown against the SHIPPED delivery surface (the quay checkout
-    # root — the SPEC lives at <repo>/orchestration/, outside the plugin bundle), fail-closed on any
-    # uncovered category. In a BARE plugin copy (hermetic tests) the repo-level SPEC is absent →
-    # SKIP (referenced⊆landed still guards the mechanism axis).
-    l1_script="$PLUGIN_ROOT/scripts/l1-delivery-surface-check.ts"
-    delivery_root="$(cd "$(dirname "$PLUGIN_ROOT")" && pwd)"
-    spec_file="$delivery_root/orchestration/SPEC-complete-delivery-surface-2026-08-05.md"
-    if [ -f "$l1_script" ] && [ -f "$spec_file" ]; then
-      if node --no-warnings --experimental-strip-types "$l1_script" --surface --root "$delivery_root" --spec "$spec_file"; then
-        : # six-category delivery surface complete — the OK line is on the check's stdout
-      else
-        echo "ERROR: delivery-surface L1 check failed — the six-category delivery surface is incomplete." >&2
-        exit 2
-      fi
-    elif [ -f "$l1_script" ]; then
-      echo "  delivery-surface-l1: SKIP (repo-level SPEC not found at $spec_file — bare plugin copy; referenced⊆landed still guards the mechanism axis)"
-    fi
-  fi
-
-  # Config-preserving upgrade (AC2): the config is now in its final good state — DISARM the
-  # rollback. A later auto-commit failure is a git failure, not a config failure; rolling back the
-  # config then would discard a valid upgrade.
-  CONFIG_BACKUP=""
-  trap - EXIT
 fi
+if [ -z "$WORKTREE_ROOT" ]; then
+  WORKTREE_ROOT="${REPO_ROOT}/../$(basename "$REPO_ROOT")-worktrees"
+fi
+validate_worktree_root "$WORKTREE_ROOT" || exit 2
 
-# gap-quay-init-never-commits-broken-committed-state AC1/AC2/AC3: after ANY real laydown category,
-# auto-commit the laid-down mechanism files (chore(quay-init): prefix) so the consumer repo's
-# committed state is self-consistent (fresh-clone + quay-init ⇒ 机制完整, no broken committed state).
-# Never in --dry-run (nothing was written); the read-only report modes (--check-drift /
-# --check-dependency-closure) already exited above.
+# ── main dispatch: the SEVEN-item closed set ────────────────────────────────────────────────────────────
 if [ "$DRY_RUN" = true ]; then
-  echo "  auto-commit: SKIP (--dry-run — nothing was written, nothing to commit)"
-else
-  auto_commit_laid_down
+  write_config
+  write_template "$PLUGIN_ROOT/.quay/profiles.yml" "$WORKSPACE_ROOT/.quay/profiles.yml" "profile carrier (template)"
+  echo "  would-create: tasks/"
+  echo "  would-create: goals/"
+  ensure_gitignore
+  write_template "$PLUGIN_ROOT/.claude/launch.settings.json" "$WORKSPACE_ROOT/.claude/launch.settings.json" "launch template"
+  write_claude_settings
+  echo "  auto-commit: SKIP (--dry-run — nothing was written)"
+  print_install_steps
+  echo "quay-init complete (dry-run)."
+  exit 0
 fi
 
-# ── pre-commit guard hook (gap-precommit-guard-wire-into-quay-init-and-cold-start AC1) ────────────────
-# The pre-commit guard (plugin/scripts/precommit-guard.ts, laid down by --loop above) is only ACTIVE
-# when the hook is installed — "built ≠ active" is the exact gap this wiring closes. The hook is
-# CLONE-LOCAL (.git/hooks/pre-commit): provisioning the guard here means the guard runs for every
-# subsequent commit in THIS clone (provisioned = active). It is installed AFTER the auto-commit —
-# a fresh target has no .quay/full-suite-state.json yet, and the guard FAILS-LOUD on a missing state
-# file (AC2 of the guard task: 参照系缺失时谓词必须崩), which would block quay-init's OWN delivery
-# commit. Order: lay down → auto-commit → install hook ⇒ the auto-commit is not blocked and every
-# later commit is guarded. Non-git targets skip (no commit surface); --dry-run skips (nothing written).
-if [ "$DO_LOOP" = true ]; then
-  if [ "$DRY_RUN" = true ]; then
-    echo "  pre-commit guard hook: SKIP (--dry-run — nothing written)"
-  elif ! git -C "$WORKSPACE_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    echo "  pre-commit guard hook: SKIP (target is not a git repository — no commit surface to guard)"
-  elif [ ! -f "$WORKSPACE_ROOT/plugin/scripts/precommit-guard.ts" ]; then
-    echo "ERROR: pre-commit guard script not laid down (plugin/scripts/precommit-guard.ts missing) — hook not installed" >&2
-    exit 2
-  else
-    if node --no-warnings --experimental-strip-types "$WORKSPACE_ROOT/plugin/scripts/precommit-guard.ts" --install-hook --root "$WORKSPACE_ROOT"; then
-      : # installed (idempotent) — the install line is on the guard's stdout
-    else
-      echo "ERROR: pre-commit guard hook install failed (precommit-guard.ts --install-hook returned non-zero)." >&2
-      echo "       A pre-existing UNRELATED pre-commit hook refuses to be clobbered — merge the guard shim manually, then re-run quay-init (idempotent)." >&2
-      exit 2
-    fi
-  fi
-fi
+write_config
+write_template "$PLUGIN_ROOT/.quay/profiles.yml" "$WORKSPACE_ROOT/.quay/profiles.yml" "profile carrier (template)"
+mkdir -p "$WORKSPACE_ROOT/tasks"
+echo "  created: tasks/"
+mkdir -p "$WORKSPACE_ROOT/goals"
+echo "  created: goals/"
+ensure_gitignore
+write_template "$PLUGIN_ROOT/.claude/launch.settings.json" "$WORKSPACE_ROOT/.claude/launch.settings.json" "launch template"
+write_claude_settings
 
-# ── summary ─────────────────────────────────────────────────────────────────────────────────────────
+# L1 delivery-surface check (post-init, beside verify_referenced_landed): the six-category delivery
+# surface of the SHIPPED quay checkout is complete. Read-only over the plugin's own root — never
+# writes to the target, so the seven-item closed set is unaffected.
+verify_delivery_surface_l1 || exit 2
+
+auto_commit_laid_down
+print_install_steps
 echo "quay-init complete."
-
-# AC4: residue disposal is VISIBLE — when any stale same-name product file was cleaned, report
-# the count and the backup location (never a silent overwrite).
-if [ "$CLEANED" -gt 0 ]; then
-  echo "cleaned-residue: ${CLEANED} stale same-name product file(s) — backups under ${WORKSPACE_ROOT}/.quay/quay-init-backups/${BACKUP_TS}/"
-fi
-
-if [ "$CONFLICTED" -gt 0 ]; then
-  echo "Conflicts detected. To overwrite: /quay:init --force"
-  echo "To see diffs: diff <target> ${PLUGIN_ROOT}/<category>/<file>"
-  # Conflicts are REPORTED, not fatal: the upgrade path (AC5) must surface them for a human
-  # without aborting the non-conflicting copies. Exit 0 so callers can distinguish "reported
-  # conflicts" from "copy failed".
-fi

@@ -241,6 +241,29 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/ scripts/ plugin/scripts/concurrency-literal-check.ts plugin/test/concurrency-literal-check.test.mjs
   run_checker "concurrency-literal-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/concurrency-literal-check.ts" --gate --root "${repo_root}"
+  echo "== target-identity-literal check (gap-ac226-target-identity-literal-check, GOAL-012 B 域) =="
+  # TARGET 域（GOAL-012 B 域）：shipped kernel 把逐项目不同的身份（分支名 / test_command / tasks_dir）
+  # 写成无 override 通道的裸字面量、而非从目标项目 config / 运行时 git 状态派生。判别标准（写进实现，
+  # ⛔ 不留给读者意会）：逐项目不同 ∧ 无 override 通道；合法默认值（develop/integration/master/tasks/
+  # HEAD——逐项目不变）不误报。按位置判定（buildNonCodeMask——注释/字符串里拼写不报）。exit 1 违规即红
+  # （set -euo pipefail），一个把目标身份写死的裸字面量在提交时刻红，不用等换第三方项目才暴露。
+  # @static-tier change
+  # @static-object plugin/scripts/ packages/quay/src/ plugin/scripts/target-identity-literal-check.ts plugin/test/target-identity-literal-check.test.mjs
+  run_checker "target-identity-literal-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/target-identity-literal-check.ts" --root "${repo_root}"
+  echo "== task-file-bypass check (gap-adr013-gate-blind-spots-and-task-bypass-ratchet, AC4/AC5) =="
+  # Fail-closed ratchet on direct `tasks/*.md` access outside the Provider ABI: a `tasks/` path literal
+  # used as the argument of a file-operation (fs.* / readFileSync / writeFileSync / execFileSync /
+  # spawnSync / git-show-on-task-path / shell grep-cat-test) in a file OUTSIDE the ALLOWLIST is a NEW
+  # bypass → exit 1. The ALLOWLIST (exported constant, one entry per line) is the baseline of today's
+  # known, currently-necessary bypass sites — the sibling tasks
+  # gap-task-ops-consolidate-driver-frontmatter-writers / gap-quay-task-consolidated-subagent /
+  # gap-worker-prompt-ac-check-via-abi-not-hand-edit shrink it; an allowlisted file's hit-count drift is
+  # a WARN (not a fail), so shrinking the allowlist is a deliberate, reviewed edit, never a silent
+  # capability loss. Positional (hard rule 2): a tasks/ string used as a search needle / path-prefix
+  # classification / comment mention / a call spelled inside a string literal does NOT report.
+  # @static-tier change
+  # @static-object packages/quay/src/ plugin/ plugin/scripts/task-file-bypass-check.ts plugin/test/task-file-bypass-check.test.mjs
+  run_checker "task-file-bypass-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/task-file-bypass-check.ts" --gate --root "${repo_root}"
   echo "== suite-slot SSoT check (gap-suite-concurrency-ff-gate-and-slot-ssot, AC4 行为层不变量) =="
   # suite 并发量「能跑几个 suite」的单一定义点行为层不变量:
   #   I1 — fan-in-ff-merge.sh 代码不含 'full-suite.lock' 读取 (ff 闸只读本任务 capture, AC1 收窄)
@@ -378,6 +401,19 @@ run_static_checks() {
   # @static-tier change
   # @static-object orchestration/SPEC-*.md plugin/skills/** plugin/scripts/spec-declaration-point-check.ts plugin/test/spec-declaration-point-check.test.mjs plugin/scripts/checker-mutation-cases/spec-declaration-point-check.sh
   run_checker "spec-declaration-point-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/spec-declaration-point-check.ts" --root "${repo_root}"
+  echo "== skill allowed-tools namespace check (tasks/gap-skill-allowed-tools-plugin-namespace, AC2/AC4) =="
+  # `allowed-tools` is exact-string matching, no prefix alias (SPEC §3c) — the quay MCP server ships as a
+  # plugin so a correctly-onboarded downstream project sees ONLY `mcp__plugin_quay_quay__*`, and the bare
+  # `mcp__quay__*` list in plugin/skills/{loop-driver,routines}/SKILL.md fires for no supported channel. This
+  # checker makes the invariant mechanical (SPEC §8 AC2): every `mcp__` tool name in plugin/skills/*/SKILL.md
+  # must be `mcp__plugin_quay_quay__*`. POSITIONAL (hard rule 2): only the `allowed-tools` frontmatter field
+  # value is judged — prose/body mentions do NOT count. exit 1 on a bare/mis-namespaced name (set -euo
+  # pipefail abort) so the next skill author writing a bare name reddens the commit, not ships a dead list.
+  # NOT-EVALUATED (exit 3) when no skills dir / no SKILL.md (hard rule 3b). Negative control + mutation case:
+  # plugin/test/allowed-tools-plugin-prefix-check.test.mjs + checker-mutation-cases/<name>.sh.
+  # @static-tier change
+  # @static-object plugin/skills/** plugin/scripts/allowed-tools-plugin-prefix-check.ts plugin/test/allowed-tools-plugin-prefix-check.test.mjs plugin/scripts/checker-mutation-cases/allowed-tools-plugin-prefix-check.sh
+  run_checker "allowed-tools-plugin-prefix-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/allowed-tools-plugin-prefix-check.ts" --root "${repo_root}"
   echo "== retired-clause check (gap-ac58-retired-clauses-delete-and-archive, AC58 判据1-3) =="
   # AC58 退役即迁出 enforcement: the registry (the 落点映射) records every retired clause/annotation
   # migrated OUT of the high-frequency files INTO orchestration/archive/AC58-retired-clauses.md#<id>.
@@ -397,6 +433,15 @@ run_static_checks() {
   # （outer-anchor-check.ts 带标记）。whole-store 引用扫描 ⇒ full（scoped 模式推迟到 full-suite 门）。
   # @static-tier full
   run_checker "outer-retirement-precondition-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/outer-retirement-precondition-check.ts" --root "${repo_root}"
+  echo "== registry-bare-filename-scan check (tasks/gap-dead-set-registry-bare-filename-scan, SPEC §12f) =="
+  # AC156 裸文件名扫描 (SPEC §12f): 注册表/清单载体里以裸文件名登记的脚本（quay-deliver.ts MEMBERS
+  #   file: 字段、*.json 清单键/值）是 §12e 闭包漏掉的引用形式。--check 模式判两件：① 真样本 canary
+  #   （supervisor-bus-identity.sh 必须被 quay-deliver.ts 以裸文件名引用——证明扫描器载体检测+匹配在
+  #   活仓库上没坏）；② 死集一致性（docs/analysis/dead-set-recomputed.json 的 after.dead 不得含任何被
+  #   裸文件名引用的脚本）。NOT-EVALUATED (exit 3) 当死集文件缺失/不可解析（独立取值，硬规则 3b）。
+  #   负控制由 mutation case + 单测钉住。whole-store 扫描 ⇒ full（scoped 模式推迟到 full-suite 门）。
+  # @static-tier full
+  run_checker "registry-bare-filename-scan" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/registry-bare-filename-scan.ts" --check --root "${repo_root}"
   echo "== ac61-staleness-disposition check (tasks/gap-ac61-staleness-list-item-disposition, AC61 判据1-3 + DoD 负控制) =="
   # AC61 清单逐条处置 enforcement: the task file's `## AC61 处置记录` section must carry a record for
   # EVERY A-1..A-7 / B-1..B-4 item (迁出带落点映射 或 经核实仍有效+读数). CHECK-A (判据1/DoD 负控):
@@ -444,19 +489,22 @@ run_static_checks() {
   # @static-tier change
   # @static-object docs/analysis/ac69-slot-release-vs-dispatch-gap.json plugin/scripts/ac69-slot-queue-gap-check.ts plugin/scripts/checker-mutation-cases/ac69-slot-queue-gap-check.sh plugin/test/ac69-slot-queue-gap-check.test.mjs
   run_checker "ac69-slot-queue-gap-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/ac69-slot-queue-gap-check.ts" --root "${repo_root}"
-  echo "== workflows-dual-copy-drift-check (gap-workflows-dual-copy-drift-unchecked — .claude/workflows/ vs plugin/workflows/ 双副本漂移) =="
-  # The five dual-copy workflow files (drain-directives / fan-in-execute / run-routines /
-  # execute-suite-fix / pool-quality-judge — AC91 added the last two: the shipped
-  # orchestrator-tick-core.md references them, so the plugin/workflows/ mirror must carry them) live
-  # in BOTH .claude/workflows/ (what runs here) and plugin/workflows/ (what quay-init --workflows
-  # ships to installed targets). A one-sided edit (改正本而落地副本不跟 — the A6/fan-in-execute.js class)
-  # previously had NO consumer that went red: the shipped workflow script silently went stale. This
-  # is the workflows-copy of the execution-core drift gate (orchestration/*-tick-core.md vs
-  # plugin/loop/*-tick-core.md, tick-core-static-check --check-drift) — AC73 判据4 boundary extended
-  # to the workflows dual-copy. Wired here as a code-class 每轮 gate; exit 1 on any pair drift.
+  echo "== mirror-pair-drift-check (gap-mirror-pair-drift-policy-plugin-scripts-experiments — plugin/scripts/ vs experiments/quay-perpetual-stream/scripts/ 镜像漂移) =="
+  # The general mirror-pair drift gate: plugin/scripts/ and experiments/quay-perpetual-stream/scripts/
+  # carry 40 real-file copies (21 more same-name entries are experiments→plugin SYMLINKS — single-source
+  # references that cannot drift, excluded). The only prior drift checkers were PINNED single-file-pair
+  # lists (workflows-dual-copy / suite-bucket); this checker AUTO-DISCOVERS every same-basename
+  # REAL-FILE pair and byte-compares them, so a future copy drift (any extension) goes RED without
+  # anyone remembering to add the filename to a list (doc §2.2/§2.8 R6/R7). The 12 syncable copies
+  # were re-synced (experiments ← plugin, the canonical layer); the 2 structural copies
+  # (tree-hygiene-check.sh / worktree-branch-hygiene-check.sh — repo-root resolution is directory-depth
+  # -dependent, so byte-identity is the WRONG invariant) are allow-listed with a sha256 signature: a
+  # drift whose signature MATCHES the allow-list is ALLOWED (visible, not red), but if either side's
+  # sha256 changes the drift EXPANDED ⇒ RED (the exemption is re-checked, never a blind pass). Exit 1 on
+  # any unexempted/expanded drift; exit 3 (NOT-EVALUATED) when the experiments mirror dir is absent.
   # @static-tier change
-  # @static-object .claude/workflows/* plugin/workflows/* plugin/scripts/workflows-dual-copy-drift-check.ts plugin/test/workflows-dual-copy-drift-check.test.mjs
-  run_checker "workflows-dual-copy-drift-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/workflows-dual-copy-drift-check.ts" --root "${repo_root}"
+  # @static-object plugin/scripts/ experiments/quay-perpetual-stream/scripts/ plugin/scripts/mirror-pair-drift-check.ts plugin/scripts/mirror-pair-drift-allowlist.json plugin/test/mirror-pair-drift-check.test.mjs
+  run_checker "mirror-pair-drift-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/mirror-pair-drift-check.ts" --root "${repo_root}"
   echo "== rhythm-consumer-check (gap-ac73 判据1/2/3 — cadence consumer contract gate) =="
   # AC73's own checker — the rhythm column's consumer contract: non-按需 mechanisms must have a
   # call site in test.sh / an execution core (or wired elsewhere, or baselined), 按需 mechanisms
@@ -484,6 +532,63 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/test/ packages/*/test/ experiments/*/test/ scripts/test.sh plugin/scripts/test-file-snapshot.sh
   run_checker "test-file-snapshot-check" bash "${repo_root}/plugin/scripts/test-file-snapshot.sh" --repo-relative check "${repo_root}/docs/analysis/test-file-baseline.txt"
+  echo "== quay-init laydown footprint ratchet (gap-quay-init-closure-assertion-first, SPEC AC168 判据先行) =="
+  # AC168 判据先行 (SPEC §8 AC3/AC4 — 安装写入闭集): the shrink-only ratchet over the REAL
+  # `quay-init --all --loop --manager` laydown footprint (files + bytes). Baseline = the measured
+  # current footprint (recorded in the task body; §2.9 measured 142 files / 7.1 MB — the current value
+  # is lower after mechanism-layer script retirements). 只许降不许升 — any change that makes quay-init
+  # lay ONE MORE file/byte goes RED immediately; the closure shrink (AC168 body) later walks the
+  # baseline down to the §6 闭集. The measurement is the PRODUCTION CARRIER: the checker RUNS a real
+  # laydown into a fresh temp target (never reads derive_loop_scripts' static derivation, never a
+  # fixture — SPEC AC4 反例判据). NOT-EVALUATED (exit 3) when the laydown cannot run (硬规则 3b:
+  # 读不懂输入 ≠ 合格). Negative controls (baseline-1 ⇒ RED / baseline+1 ⇒ GREEN) pinned by
+  # plugin/test/quay-init-closure-ratchet.test.mjs + checker-mutation-cases/quay-init-closure-ratchet.sh.
+  # @static-tier full  (whole-store ratchet — deferred to the full-suite gate in scoped mode)
+  run_checker "quay-init-closure-ratchet" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/quay-init-closure-ratchet.ts" --gate --root "${repo_root}"
+  echo "== quay-init laydown footprint re-anchor freshness (gap-quay-init-closure-ratchet-manual-reanchor-recurs) =="
+  # A change-tier companion to the full-tier byte ratchet above: CHEAP (hashes the laydown SOURCE
+  # tree — no real laydown) and detects "a laydown source file changed but the committed baseline
+  # was not re-anchored" at the CHANGER's own scoped gate, instead of at an unrelated task's
+  # full-suite fan-in (the 8th-recurrence defect this task closes). Exit 1 when the current source
+  # fingerprint differs from docs/analysis/quay-init-closure-ratchet.baseline.json (stale — run
+  # `node --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --reanchor`); exit 3
+  # (NOT-EVALUATED) when the baseline/set cannot be read. The full-tier ratchet (above) still measures
+  # the REAL laydown and still reds on true bloat (negative control — never relaxed into constant-true).
+  # Pinned by plugin/test/quay-init-closure-ratchet.test.mjs (stale on a changed source; fresh after
+  # re-anchor). Object = the precise laydown source dirs (NOT all of plugin/scripts — ~200 harness
+  # scripts there are not laid down; the derived set + wholesale dirs are the fingerprint scope).
+  # @static-tier change
+  # @static-object plugin/scripts/ plugin/workflows/ plugin/agents/ plugin/probes/ plugin/loop/ plugin/.claude/ orchestration/
+  run_checker "quay-init-closure-ratchet-stale" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/quay-init-closure-ratchet.ts" --check-stale --root "${repo_root}"
+  echo "== goal-driver task-boundary check (DIR-131, gap-goal-driver-task-boundary-check) =="
+  # goal/task 职责边界防回归（DIR-131）：goal-driver.ts 不得出现 task 写路径调用点——task_write /
+  # lifecycle_promote / lifecycle_retreat / lifecycle_complete 或指向 tasks/ 的 fs.write*/writeFileSync。
+  # 按位置判定（屏蔽注释与字符串字面量，硬规则 2）；负控制由单测 + mutation case 钉住（硬规则 3b/4）。
+  # 单文件（goal-driver.ts）判定 ⇒ change（scoped 模式在 task Touches 命中 goal-driver.ts 时运行）。
+  # @static-tier change
+  # @static-object plugin/scripts/goal-driver.ts plugin/scripts/goal-driver-task-boundary-check.ts plugin/test/goal-driver-task-boundary-check.test.mjs plugin/scripts/checker-mutation-cases/goal-driver-task-boundary-check.sh
+  run_checker "goal-driver-task-boundary-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/goal-driver-task-boundary-check.ts" --root "${repo_root}"
+  echo "== kernel-sibling-resolution check (GOAL-012 A 域, gap-ac224-kernel-sibling-resolution-check-mutation-covered) =="
+  # KERNEL 域 naive sibling 解析检查器：shipped kernel 把自己的 sibling 脚本锚在 naive `__dirname` /
+  # target root / 模板字符串而非经 resolveKernelSibling/resolveKernelPluginRoot 即违规（AC-203 前例）。
+  # Whole-store 扫描（plugin/scripts + packages/quay/src），DEV-TREE-ONLY 豁免标记带理由可复核。
+  # ⛔ 落在 full（不 scoped）——全店枚举，不随单任务 Touches 收窄。
+  # Fail-closed（不带 --no-block）：AC-225 迁移已归零（实测 --root . --json ⇒ violations: [] / total: 0），
+  #   枚举归零这一半由此重新有强制力——新落一处 naive __dirname / 跨包源码锚点即红，与 B 域
+  #   target-identity-literal-check（:252，fail-closed）对称。负控制由 scoped-static-checks.test.mjs 的
+  #   注册行断言（不得带 --no-block）+ 注入即红干跑钉住（硬规则 3/4）。
+  # @static-tier full
+  run_checker "kernel-sibling-resolution-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/kernel-sibling-resolution-check.ts" --root "${repo_root}" --json
+  echo "== config-key-consumer check (GOAL-015 退出条件③ / AC-235, gap-config-key-consumer-check-mechanical-enumeration) =="
+  # 交付配置键消费者枚举：quay-init 写入下游 .quay/config.yml loop: 的每个键都必须有代码消费者
+  # （零消费者的键已接线或已删）。writer 面机械派生自 quay-init.sh（heredoc + python 升级写手），
+  # consumer 面机械 grep（plugin/scripts/*.ts + packages/quay/src/*.ts，排除测试与自身）——与 AC-235
+  # 判据同一口径。三态可区分（has-consumer / no-consumer-to-wire / documented-with-reason），豁免必须
+  # 带理由文本（GOAL-015 风险 3，⛔ 不是无理由 allowlist）。no-consumer-to-wire > 0 ⇒ exit 1。
+  # ⛔ 落在 full（不 scoped）——全店枚举，不随单任务 Touches 收窄。负控制由 mutation case 注入孤儿键即
+  # 红钉住（硬规则 3/4）。
+  # @static-tier full
+  run_checker "config-key-consumer-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/config-key-consumer-check.ts" --root "${repo_root}"
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait
@@ -604,7 +709,7 @@ run_operational_checks() {
   run_checker "fan-in-ff-protocol-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-ff-protocol-check.ts" --root "${main_root}" --baseline 19fea6f0 --json
   echo "== fan-in-materialize-check (gap-workflow-scriptpath-materialize-falls-back-main — workflow scriptPath 静默回退主检出版) =="
   # Detects the M176-family materialization fallback: a bootstrap-HIT fan-in dispatched with
-  # scriptPath=<worktree>/.claude/workflows/fan-in-execute.js must run the WORKTREE version (so the
+  # scriptPath=<worktree>/plugin/workflows/fan-in-execute.js must run the WORKTREE version (so the
   # task's own fix to the pipeline is verified by its own fan-in), but the SDK sometimes silently
   # materializes the MAIN checkout version. This checker reads the PRODUCTION CARRIER — the SDK-written
   # ~/.claude/projects/<slug>/<session>/workflows/wf_*.json records (which carry BOTH the passed
@@ -615,7 +720,7 @@ run_operational_checks() {
   # materialized script equals the pre-task base while the task's own commits touched the workflow).
   # @static-tier change
   # @static-class operational
-  # @static-object plugin/scripts/fan-in-materialize-check.ts plugin/scripts/select-static-checks-for-touches.ts .claude/workflows/fan-in-execute.js plugin/test/fan-in-materialize-check.test.mjs
+  # @static-object plugin/scripts/fan-in-materialize-check.ts plugin/scripts/select-static-checks-for-touches.ts plugin/workflows/fan-in-execute.js plugin/test/fan-in-materialize-check.test.mjs
   # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): the wf_*.json records +
   # .workflow-events + task Touches this checker audits are MAIN-checkout state, absent from the
   # one-shot verify worktree. Pointing --root at the main checkout makes the worktree round read the
@@ -657,6 +762,41 @@ run_operational_checks() {
   # Pointing --root at the main checkout makes the worktree round read the SAME ledger as a main run
   # (verdicts identical); on a main run main_root == repo_root ⇒ unchanged.
   run_checker "suite-duration-exceed-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-duration-exceed-check.ts" --root "${main_root}" --no-block
+  echo "== instrument-decay-check (gap-archguard-p5-instrument-decay-standing-guard, P5 instrument-decay detector) =="
+  # docs/proposals/archguard-generation-era-primitives.md §3 P5: a telemetry carrier's group stops
+  # writing while its companion groups in the SAME carrier keep writing (writer split / rate → 0).
+  # The canonical case: fan-in-step-trace.jsonl's ac-precheck/suite-start/suite-end/suite-skip went
+  # to the per-run fan-in-<task>-<runId>.log under a5a301e03 while merge-develop/typecheck/scoped-gate
+  # still write the shared carrier — "没有任何机制发现它" (§2.5). Companion contrast, NOT an absolute
+  # rate threshold (a low-frequency single-stream carrier like message-receipts.jsonl must not trip).
+  # Wired REPORT-ONLY via --no-block: the decay it reports is the PAST/current shared-carrier state
+  # (the sibling fix gap-fan-in-step-trace-suite-step-stopped-writing may still be in flight), so a
+  # blocking wire would red the current suite for a transient peer-task state. The DEFAULT (no
+  # --no-block) stays fail-closed for on-demand diagnosis / a future manager gate. CI inherits it free
+  # (the operational tier's only invocation is `bash scripts/test.sh --static-checks-operational`).
+  # @static-tier full  (whole-store observability — deferred to the full-suite gate in scoped mode)
+  # @static-class operational
+  # @static-object .quay/fan-in-step-trace.jsonl .quay/fan-in-lock-events.jsonl plugin/scripts/instrument-decay-check.ts plugin/test/instrument-decay-check.test.mjs
+  # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): the fan-in-step-trace /
+  # lock-events carriers are MAIN-checkout gitignored runtime state, absent from the one-shot verify
+  # worktree. Pointing --root at the main checkout makes the worktree round read the SAME carriers as
+  # a main run (verdicts identical); on a main run main_root == repo_root ⇒ unchanged.
+  run_checker "instrument-decay-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/instrument-decay-check.ts" --root "${main_root}" --no-block
+  echo "== release-freshness deliver-orphan detector (gap-deliver-verification-trigger-orphaned-after-land-path-migration, AC4/AC5) =="
+  # The deliver orphan detector: how far develop has run ahead of the last cross-host deliver
+  # (.quay/develop-deliver-state.json, written by develop-deliver-tgz.sh). stale OR not-evaluated
+  # (state file missing / unreadable) ⇒ exit 1 (RED) — the "file absent" state is NOT 合格 (硬规则 3b;
+  # that silence is how the trigger went 18 days orphaned with nothing red). Fail-closed (no --no-block):
+  # a stale/missing deliver is a persistent "the trigger stopped" condition, not a transient round
+  # state — the ACTIVE host's opt-in `--static-checks-operational` SHOULD go red until the trigger
+  # runs again. Not in the full-suite gate (operational class), so a passive checkout stays green on
+  # code alone.
+  # @static-tier full  (whole-store runtime-state observability — deferred to the full-suite gate in scoped mode)
+  # @static-class operational
+  # @static-object .quay/develop-deliver-state.json plugin/scripts/release-freshness-check.sh plugin/scripts/develop-deliver-tgz.sh plugin/scripts/checker-mutation-cases/release-freshness-check.sh plugin/test/release-freshness-check.test.mjs
+  # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): the .quay/develop-deliver-state.json
+  # carrier is MAIN-checkout gitignored runtime state, absent from the one-shot verify worktree.
+  run_checker "release-freshness-check" bash "${repo_root}/plugin/scripts/release-freshness-check.sh" --root "${main_root}" --deliver --json
   # Wait for all parallelized checkers and fail closed if any failed (same barrier as
   # run_static_checks — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait

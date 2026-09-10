@@ -4,20 +4,23 @@
 // WHY THIS EXISTS（manager-phase-goal.md ### AC144）：「质量把关」不是一件事——一股脑并入
 // promotion-driver 会造 god-object（其 scope 是任务合格化，不是冲突解析/止损判断）。本 driver 是
 // 【例程型】kind（继承 Layer 0 + 1b，同 manager-kind AC143），只承接四种形状里【可机械/机械触发】的
-// 两件，其余两件结构上不能是 driver（driver 读不出「听起来自洽但错了」的因果故事）：
+// 两件，其余两件结构上不能是 driver（driver 读不出「听起来自洽但错了」的因果故事）；另承接第三条
+// 例程——架构复核（gap-quality-driver-architecture-review-routine：把 P1/P2/P4 三个检测器接上轮子）：
 //
 //   B15 pool 质量语义闸   机械触发 + LLM judge + JS 聚合（ADR-033）⇒ 本 driver 跑
 //                         （原调用方 = outer tick 的 B15 步，本任务把调用方换成 driver）
 //   B17 判据消费纪律       纯机械审计（judgment-consumer-check.ts）⇒ 本 driver 跑
+//   架构复核               机械聚类（identity-replication / deletion-closure / guard-lineage 三
+//                         检测器 --json）→ LLM judge → JS 合并 → 判词载体 ⇒ 本 driver 跑
 //   B16-C 冲突意图        要读两边意图 ⇒ ⛔ 不在本 driver，归 AC145 语义面 subagent
 //   B18 止损义务          对一个【活场景】的判断 ⇒ ⛔ 不在本 driver，归 AC145 语义面 subagent
 //
 // 取假（AC1，一条命令可验）：
-//   ① 上述四项被并入同一个 driver kind ⇒ 假（god-object）。本文件只有 B15/B17 两条例程；
+//   ① 上述四项被并入同一个 driver kind ⇒ 假（god-object）。本文件只有 B15/B17 + 架构复核三条例程；
 //      B16-C/B18 的归属指针在 orchestration/manager-phase-goal.md（归 AC145），本文件不写它们的
 //      执行路径（grep 本文件无「B16-C」「B18」的运行分支）。
-//   ② B16-C / B18 被声称「已驱动化」而无 LLM 参与 ⇒ 假。本文件的 LLM 参与只有 B15 的 judge spawn
-//      （launchArgv role=pool-judge）；B16-C/B18 没有机械运行路径，谈不上「伪装成机械判断」。
+//   ② B16-C / B18 被声称「已驱动化」而无 LLM 参与 ⇒ 假。本文件的 LLM 参与只有 B15 与架构复核的
+//      judge spawn（launchArgv role=pool-judge）；B16-C/B18 没有机械运行路径，谈不上「伪装成机械判断」。
 //
 // 分层（AC151 两级抽象）：
 //   - 本文件继承 Layer 0（driver-runtime：launchArgv / isHalted / resourceGateCheck / 心跳 append）
@@ -27,7 +30,6 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 // Layer 0（driver-runtime 单一实现）：DRIVER_KINDS registry（controlFile/carriers 单源）、launchArgv
 // （LLM judge spawn）、isHalted / resourceGateCheck（判停/资源门）。Layer 1b：RoutineSpec / Fact /
@@ -35,6 +37,7 @@ import { isDirectEntry } from "./gate-script-base.ts";
 import {
   DRIVER_KINDS,
   launchArgv,
+  runAsync,
   scheduleIsDue,
   isHalted,
   resourceGateCheck,
@@ -54,6 +57,23 @@ import {
   type VerdictRecord,
   type QualityRoundRecord,
 } from "./pool-quality-judge.ts";
+// 架构复核例程的确定性一半（机械聚类纯函数 + 判词载体单一真相源，gap-quality-driver-architecture-
+// review-routine）。⛔ 聚类不重新实现三个检测器——只读它们的 --json 输出（本文件负责 spawn）。
+import {
+  appendArchReviewRound,
+  buildArchReviewRoundRecord,
+  clusterDetectorOutputs,
+  computeArchReviewTrigger,
+  deletionClosureComponents,
+  mergeClusterVerdicts,
+  type ArchReviewRoundRecord,
+  type ArchReviewClusterVerdict,
+  type Cluster,
+  type DeletionReportView,
+  type IdentityReportView,
+  type JudgeClusterVerdict,
+  type LineageReportView,
+} from "./architecture-review-cluster.ts";
 // AC155：轮询间隔的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量——同
 // outer-driver / promotion-driver 的接法）。quality 段由此前的「字面量 60_000」改为从
 // loadDriverConfig(root).quality.intervalMs 派生（缺省 30000，与 outer 例程型 kind 对齐）。
@@ -71,13 +91,27 @@ export const QUALITY_CONTROL_STATE_REL = path.posix.join(".quay", QUALITY_SPEC.c
  *  --interval 覆盖；测试传小值。 */
 export const INTERVAL_MS_DEFAULT = defaultDriverConfig().quality.intervalMs;
 
-/** 两条例程各自的缺省复核间隔（分钟）。同上——占位节奏，非未测量过的阈值。 */
+/** 三条例程各自的缺省复核间隔（分钟）。同上——占位节奏，非未测量过的阈值。 */
 export const POOL_JUDGE_INTERVAL_MIN_DEFAULT = 10;
 export const JUDGMENT_INTERVAL_MIN_DEFAULT = 30;
+export const ARCH_REVIEW_INTERVAL_MIN_DEFAULT = 60;
 
-/** 单次 spawn 的 wall-clock 上限（毫秒）。LLM judge spawn 与 mechanical plan/audit spawn 共用
- *  一个上限（⛔ 不为 judge 另设阈值——硬规则 4 推论；与 promotion-driver 的 ROUND_TIMEOUT_MS 同族）。 */
+/** 机械 spawn 的 wall-clock 上限（毫秒）——--plan 枚举 / --record-last-round / B17 审计共用（全部是
+ *  快速机械 node 调用，非 LLM）。⛔ LLM judge spawn 不设固定上限（runAsync timeoutMs=Infinity，
+ *  unbounded）——judge 真实耗时在并发负载下无实测上界，设 180_000 字面量正是
+ *  gap-quality-gate-driver-pool-judge-spawn-timeout 的病根（硬规则 4 推论：成本结构未知前不设数值阈值）。 */
 export const ROUTINE_TIMEOUT_MS = 180_000;
+
+/** 例程看门狗缺省（毫秒）——【循环】这一侧的 caller 兜底，⛔ 不是 judge 耗时的指标。
+ *  judge spawn（runAsync timeoutMs=Infinity）无上限 ⇒ 挂死的 claude 子进程会让常驻循环冻结在
+ *  `await r.run()` 上（.quay/quality-round.jsonl 冻结、进程仍活 ⇒ supervisor 永不重生）。
+ *  driver-runtime 的 runAsync 注释已写明「死持有者由调用侧的 watchdog 兜底，不靠此处 SIGKILL」——
+ *  那个「调用侧」就是本循环。本看门狗在例程 wall-clock 超界时记一条 failed Fact（routine timed out）
+ *  并继续下一例程/写心跳，⛔ 不 await 已挂的 routine promise（那会让循环同死）。
+ *  ⛔ 这不是给 judge 成本设数值阈值（judge 无实测上界，硬规则 4）——是 liveness 安全界（同 suite-driver
+ *  SILENCE_MS_DEFAULT 15min 的语义：给「活着但不动」一个上限，防静默冻结）。生产可用 --routine-watchdog
+ *  覆盖；测试经 env QUAY_TEST_QUALITY_GATE_DRIVER_ROUTINE_WATCHDOG_MS 或 --routine-watchdog 传小值。 */
+export const ROUTINE_WATCHDOG_MS_DEFAULT = Number(process.env.QUAY_TEST_QUALITY_GATE_DRIVER_ROUTINE_WATCHDOG_MS ?? 30 * 60_000);
 
 // ── B17 · 判据消费纪律（纯机械审计）────────────────────────────────────────────────────────
 
@@ -85,7 +119,7 @@ export const ROUTINE_TIMEOUT_MS = 180_000;
 export function defaultJudgmentConsumerArgv(root: string): string[] {
   return [
     "node", "--experimental-strip-types",
-    path.join(root, "plugin", "scripts", "judgment-consumer-check.ts"),
+    path.join(root, "plugin", "scripts", "judgment-consumer-check.ts"),  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     "--root", root, "--json",
   ];
 }
@@ -120,14 +154,9 @@ export function parseJudgmentConsumerReport(stdout: string): JudgmentConsumerFac
 
 /** B17 例程：跑一次判据消费审计。exit 0（无 drift）⇒ verified；exit 1（drift）⇒ failed；
  *  exit 2 / spawn 失败 / 读不懂 ⇒ not-evaluated（硬规则 3b：读不懂 ≠ 合格）。 */
-export function runJudgmentConsumerCheck(root: string, cmd: string[] | null): Fact<JudgmentConsumerFactValue | null> {
+export async function runJudgmentConsumerCheck(root: string, cmd: string[] | null): Promise<Fact<JudgmentConsumerFactValue | null>> {
   const argv = cmd ?? defaultJudgmentConsumerArgv(root);
-  let r: ReturnType<typeof spawnSync>;
-  try {
-    r = spawnSync(argv[0], argv.slice(1), { encoding: "utf8", timeout: ROUTINE_TIMEOUT_MS });
-  } catch (e) {
-    return { name: "judgment-consumer-check", value: null, state: "not-evaluated", reason: `spawn failed: ${(e as Error).message}` };
-  }
+  const r = await runAsync(argv, { timeoutMs: ROUTINE_TIMEOUT_MS });
   if (r.error) {
     return { name: "judgment-consumer-check", value: null, state: "not-evaluated", reason: `spawn error: ${r.error.message}` };
   }
@@ -150,7 +179,7 @@ export function runJudgmentConsumerCheck(root: string, cmd: string[] | null): Fa
 export function defaultPoolQualityPlanArgv(root: string): string[] {
   return [
     "node", "--no-warnings", "--experimental-strip-types",
-    path.join(root, "plugin", "scripts", "pool-quality-judge.ts"),
+    path.join(root, "plugin", "scripts", "pool-quality-judge.ts"),  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     "--root", root, "--plan",
   ];
 }
@@ -212,16 +241,18 @@ export function defaultPoolJudgeArgv(plan: PoolQualityPlan, root: string): strin
   return launchArgv("pool-judge", poolJudgePrompt(plan, root), root);
 }
 
-/** 写端（B15）：judge 完成后持久化 lastRound（every-10-rounds 触发重置）。单写者 = 本 driver 完成路径。 */
-function recordLastJudgeRound(root: string): { recorded: boolean; lastRound: number | null } {
+/** 写端（B15）：judge 完成后持久化 lastRound（every-10-rounds 触发重置）。单写者 = 本 driver 完成路径。
+ *  机械 node 调用（快速，非 LLM）——runAsync 非阻塞替代 spawnSync（同 gap-worker-driver-async-
+ *  selector-readypool 的循环体异步化修法）。 */
+async function recordLastJudgeRound(root: string): Promise<{ recorded: boolean; lastRound: number | null }> {
   const argv = [
     "node", "--no-warnings", "--experimental-strip-types",
-    path.join(root, "plugin", "scripts", "pool-quality-judge.ts"),
+    path.join(root, "plugin", "scripts", "pool-quality-judge.ts"),  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     "--root", root, "--record-last-round",
   ];
+  const r = await runAsync(argv, { timeoutMs: ROUTINE_TIMEOUT_MS });
+  if (r.error || r.status !== 0) return { recorded: false, lastRound: null };
   try {
-    const r = spawnSync(argv[0], argv.slice(1), { encoding: "utf8", timeout: ROUTINE_TIMEOUT_MS });
-    if (r.error || r.status !== 0) return { recorded: false, lastRound: null };
     const j = JSON.parse(String(r.stdout ?? "").trim());
     return { recorded: !!j.recorded, lastRound: typeof j.lastRound === "number" ? j.lastRound : null };
   } catch {
@@ -261,21 +292,23 @@ function failedQualityRoundRecord(root: string, reasons: string[], reason: strin
 /** B15 例程：机械触发（--plan）→ 命中则 LLM judge → JS 聚合（aggregateVerdicts 单一实现）→
  *  写端（--record-last-round + 判词载体 .quay/quality-round.jsonl）。读不懂 --plan ⇒ not-evaluated
  *  （硬规则 3b）；judge 失败 ⇒ failed（落 failed 载体记录）；未命中 ⇒ verified（查过且无需 judge——
- *  fired=false 是真实测量，非「读不懂装合格」）。 */
-export function runPoolQualityJudge(
+ *  fired=false 是真实测量，非「读不懂装合格」）。
+ *  ⛔ 循环体异步化（gap-quality-gate-driver-pool-judge-spawn-timeout AC1）：--plan / judge / 写端全部
+ *  spawnSync → runAsync（非阻塞 spawn，同 gap-worker-driver-async-selector-readypool）。judge（真实
+ *  claude -p）不再设 180_000 固定字面量上限（缺省 unbounded，judge 完成是唯一唤醒源——硬规则 4
+ *  推论：成本结构未知前不设数值阈值）。judgeTimeoutMs 是 AC5 负控制缝（测试注入「明显不够的值」复现
+ *  timeout 失败），生产缺省 Infinity。 */
+export async function runPoolQualityJudge(
   root: string,
   planCmd: string[] | null,
   judgeArgv: string[] | null,
   resourceGateArgv: string[] | null = null,
   recordVerdicts: boolean = true,
-): Fact<PoolQualityFactValue | null> {
+  judgeTimeoutMs: number = Infinity,
+  halted: boolean = false,
+): Promise<Fact<PoolQualityFactValue | null>> {
   const planArgv = planCmd ?? defaultPoolQualityPlanArgv(root);
-  let planR: ReturnType<typeof spawnSync>;
-  try {
-    planR = spawnSync(planArgv[0], planArgv.slice(1), { encoding: "utf8", timeout: ROUTINE_TIMEOUT_MS });
-  } catch (e) {
-    return { name: "pool-quality-judge", value: null, state: "not-evaluated", reason: `plan spawn failed: ${(e as Error).message}` };
-  }
+  const planR = await runAsync(planArgv, { timeoutMs: ROUTINE_TIMEOUT_MS });
   if (planR.error) {
     return { name: "pool-quality-judge", value: null, state: "not-evaluated", reason: `plan spawn error: ${planR.error.message}` };
   }
@@ -298,6 +331,11 @@ export function runPoolQualityJudge(
   if (!plan.triggers.fired) {
     return { name: "pool-quality-judge", value: base, state: "verified", reason: `not-triggered (${plan.triggers.reasons.length} reasons: ${plan.triggers.reasons.join(",") || "none"})` };
   }
+  // halt 闸（gap-drain-on-routine-driver-empties-round-and-respawn-loops）：halted ⇒ 只挡受闸动作
+  // （LLM judge spawn），机械 --plan 读数照跑（fired 已读出）。⛔ 不 spawn judge、不落判词载体。
+  if (halted) {
+    return { name: "pool-quality-judge", value: base, state: "verified", reason: "halted: judge deferred (mechanical --plan read; no LLM spawn)" };
+  }
   // 资源门（AC150-1 同族）：spawn LLM judge 前经 resourceGateCheck 判定，WAIT ⇒ 退避本轮（⛔ 机械 --plan
   // 不受约束，零 LLM）。资源门 WAIT 是瞬时态（⛔ 不 latch），下一轮重读。resourceGateArgv = 测试缝。
   const gate = resourceGateCheck(root, resourceGateArgv);
@@ -305,13 +343,7 @@ export function runPoolQualityJudge(
     return { name: "pool-quality-judge", value: base, state: "not-evaluated", reason: `resource-gate-wait: ${gate.reason} (judge deferred)` };
   }
   const argv = judgeArgv ?? defaultPoolJudgeArgv(plan, root);
-  let judgeR: ReturnType<typeof spawnSync>;
-  try {
-    judgeR = spawnSync(argv[0], argv.slice(1), { encoding: "utf8", timeout: ROUTINE_TIMEOUT_MS });
-  } catch (e) {
-    writeRecord(failedQualityRoundRecord(root, plan.triggers.reasons, `judge spawn failed: ${(e as Error).message}`));
-    return { name: "pool-quality-judge", value: base, state: "failed", reason: `judge spawn failed: ${(e as Error).message}` };
-  }
+  const judgeR = await runAsync(argv, { timeoutMs: judgeTimeoutMs, collectStderr: true });
   if (judgeR.error || judgeR.status !== 0) {
     const reason = `judge exited ${judgeR.status ?? "null"}: ${judgeR.error?.message ?? String(judgeR.stderr ?? "").slice(0, 200)}`;
     writeRecord(failedQualityRoundRecord(root, plan.triggers.reasons, reason));
@@ -327,7 +359,7 @@ export function runPoolQualityJudge(
   }
   // JS 聚合（单一实现 aggregateVerdicts——should-remove → remove-or-rescope 路由）。
   const agg = aggregateVerdicts(verdicts);
-  const recorded = recordLastJudgeRound(root);
+  const recorded = await recordLastJudgeRound(root);
   // 判词载体写端（AC1）：判过且有结果 ⇒ 追加一条 judged 记录；判词为空 ⇒ 不写空记录（AC1）。
   const judgedAt = new Date().toISOString();
   const round = recorded.lastRound ?? 0;
@@ -355,6 +387,230 @@ export function runPoolQualityJudge(
   };
 }
 
+// ── 架构复核 · 机械聚类（复用三个既有检测器，⛔ 不重新实现）────────────────────────────────
+
+/** 缺省 identity-replication-check --json 命令（P2 身份复制）。 */
+export function defaultIdentityReplicationArgv(root: string): string[] {
+  return [
+    "node", "--experimental-strip-types",
+    path.join(root, "plugin", "scripts", "identity-replication-check.ts"),  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+    "--root", root, "--json",
+  ];
+}
+
+/** 缺省 guard-lineage-check --json 命令（P4 守卫谱系）。 */
+export function defaultGuardLineageArgv(root: string): string[] {
+  return [
+    "node", "--experimental-strip-types",
+    path.join(root, "plugin", "scripts", "guard-lineage-check.ts"),  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+    "--root", root, "--json",
+  ];
+}
+
+/** 缺省 deletion-closure-check --json 命令（P1 删除闭包）。components 由 identity 报告推导（硬编码
+ *  实体）；无候选构件时不 spawn 本检测器。 */
+export function defaultDeletionClosureArgv(root: string, components: string[]): string[] {
+  return [
+    "node", "--experimental-strip-types",
+    path.join(root, "plugin", "scripts", "deletion-closure-check.ts"),  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+    ...components, "--root", root, "--json",
+  ];
+}
+
+/** 解析一个检测器的 --json 输出为最小结构视图。读不懂/非对象 ⇒ null（调用方记 not-evaluated，⛔ 不伪装合格）。 */
+function parseDetectorJson<T>(stdout: string): T | null {
+  try {
+    const j = JSON.parse(String(stdout ?? "").trim());
+    if (!j || typeof j !== "object" || Array.isArray(j)) return null;
+    return j as T;
+  } catch {
+    return null;
+  }
+}
+
+/** 架构复核 judge prompt（单个 `claude -p` 判整批候选簇；机械聚类来自三个检测器，判定交给 LLM）。
+ *  ⛔ 不按簇拆 schema agent（那是 Workflow 工具的形态，driver 进程没有）——本 driver 用单一批判
+ *  `claude -p`，输出 JSON 数组，聚合仍走 architecture-review-cluster.ts 的单一 JS 算术。 */
+function archReviewJudgePrompt(clusters: Cluster[], root: string): string {
+  const summary = clusters
+    .map((c) => `  ${c.clusterId} [${c.primitive}] files=${c.files.length} rawCount=${c.rawCount} — ${c.label} — ${c.files.slice(0, 12).join(", ")}${c.files.length > 12 ? ", …" : ""}`)
+    .join("\n");
+  return [
+    "You are the architecture-review judge for the quay repo (docs/proposals/archguard-generation-era-primitives.md §3).",
+    "Mechanical clustering already grouped suspicious files into candidate clusters — trust it as arithmetic, NOT a verdict.",
+    `Repo root: ${root}. Candidate clusters:`,
+    summary || "(none)",
+    "For EACH cluster decide: does it warrant abstracting/merging (real identity replication / deletion-closure debt), or is it coincidental similarity to keep as-is?",
+    "Reply with ONLY a JSON array, one object per cluster:",
+    '[{"clusterId":"<id>","verdict":"abstract|coincidental|uncertain","reasoning":"<one line>","suggestedAction":"<one line>"}]',
+  ].join("\n");
+}
+
+/** 缺省架构复核 judge 命令（launchArgv role=pool-judge → 短命 claude -p，复用 B15 的 profile 机制）。 */
+export function defaultArchReviewJudgeArgv(clusters: Cluster[], root: string): string[] {
+  return launchArgv("pool-judge", archReviewJudgePrompt(clusters, root), root);
+}
+
+/** 架构复核读数的值面（写进 round record 的 fact.value）。fired=false ⇒ 候选簇为空，不 judge。 */
+export interface ArchReviewFactValue {
+  fired: boolean;
+  reasons: string[];
+  clusterCount: number;
+  judgedCount: number;
+  distribution: Record<string, number> | null;
+}
+
+/** 判词载体写失败不致命（运行时日志，⛔ 不因日志炸循环）。 */
+function appendArchReviewRoundSafe(root: string, record: ArchReviewRoundRecord): void {
+  try { appendArchReviewRound(root, record); } catch { /* 载体写失败不致命 */ }
+}
+
+/** 架构复核例程：机械聚类（三个检测器 --json）→ 命中则 LLM judge → JS 合并 → 判词载体
+ *  （.quay/architecture-review-round.jsonl）。读不懂任一检测器输出 ⇒ not-evaluated（硬规则 3b）；
+ *  judge 失败/判词为空 ⇒ failed（落 failed 载体记录）；候选簇为空 ⇒ not-triggered（fired=false 是
+ *  真实测量，非「读不懂装合格」）。
+ *  ⛔ 循环体异步化（同 B15 的 runAsync 修法）；judge（真实 claude -p）不设固定字面量上限（缺省
+ *  unbounded）；judgeTimeoutMs 是负控制缝（测试注入「明显不够的值」），生产缺省 Infinity。 */
+export async function runArchitectureReview(
+  root: string,
+  identityCmd: string[] | null,
+  lineageCmd: string[] | null,
+  deletionCmd: string[] | null,
+  judgeArgv: string[] | null,
+  resourceGateArgv: string[] | null = null,
+  recordVerdicts: boolean = true,
+  judgeTimeoutMs: number = Infinity,
+  halted: boolean = false,
+): Promise<Fact<ArchReviewFactValue | null>> {
+  // 1. P2 身份复制（必需——既产 P2 簇又推导 P1 候选构件）。
+  const identityArgv = identityCmd ?? defaultIdentityReplicationArgv(root);
+  const identityR = await runAsync(identityArgv, { timeoutMs: ROUTINE_TIMEOUT_MS });
+  if (identityR.error) {
+    return { name: "architecture-review", value: null, state: "not-evaluated", reason: `identity-replication spawn error: ${identityR.error.message}` };
+  }
+  const identity = parseDetectorJson<IdentityReportView>(identityR.stdout ?? "");
+  if (identity === null) {
+    return { name: "architecture-review", value: null, state: "not-evaluated", reason: `unparseable identity-replication output (exit ${identityR.status})` };
+  }
+
+  // 2. P4 守卫谱系（必需）。
+  const lineageArgv = lineageCmd ?? defaultGuardLineageArgv(root);
+  const lineageR = await runAsync(lineageArgv, { timeoutMs: ROUTINE_TIMEOUT_MS });
+  if (lineageR.error) {
+    return { name: "architecture-review", value: null, state: "not-evaluated", reason: `guard-lineage spawn error: ${lineageR.error.message}` };
+  }
+  const lineage = parseDetectorJson<LineageReportView>(lineageR.stdout ?? "");
+  if (lineage === null) {
+    return { name: "architecture-review", value: null, state: "not-evaluated", reason: `unparseable guard-lineage output (exit ${lineageR.status})` };
+  }
+
+  // 3. P1 删除闭包（候选构件由 identity 报告推导；无候选 ⇒ 空报告，跳过 spawn）。
+  const components = deletionClosureComponents(identity);
+  let deletion: DeletionReportView = { components: [], dc: [], counts: { dcTotal: 0, callGraphTotal: 0, ratio: null } };
+  if (components.length > 0) {
+    const deletionArgv = deletionCmd ?? defaultDeletionClosureArgv(root, components);
+    const deletionR = await runAsync(deletionArgv, { timeoutMs: ROUTINE_TIMEOUT_MS });
+    if (deletionR.error) {
+      return { name: "architecture-review", value: null, state: "not-evaluated", reason: `deletion-closure spawn error: ${deletionR.error.message}` };
+    }
+    const parsed = parseDetectorJson<DeletionReportView>(deletionR.stdout ?? "");
+    if (parsed === null) {
+      return { name: "architecture-review", value: null, state: "not-evaluated", reason: `unparseable deletion-closure output (exit ${deletionR.status})` };
+    }
+    deletion = parsed;
+  }
+
+  // 4. 机械聚类 → 触发评估。
+  const clusters = clusterDetectorOutputs({ identity, lineage, deletion });
+  const trigger = computeArchReviewTrigger(clusters);
+  const base: ArchReviewFactValue = {
+    fired: trigger.fired,
+    reasons: trigger.reasons,
+    clusterCount: trigger.clusterCount,
+    judgedCount: 0,
+    distribution: null,
+  };
+  const writeRecord = (record: ArchReviewRoundRecord): void => {
+    if (recordVerdicts) appendArchReviewRoundSafe(root, record);
+  };
+  if (!trigger.fired) {
+    writeRecord(buildArchReviewRoundRecord({
+      round: readCurrentRound(root),
+      judgedAt: new Date().toISOString(),
+      state: "not-triggered",
+      triggerReasons: trigger.reasons,
+      clusters: [],
+      reason: "no candidate clusters (three detectors produced zero suspicious groupings)",
+    }));
+    return { name: "architecture-review", value: base, state: "verified", reason: `not-triggered (no candidate clusters)` };
+  }
+
+  // 5. halt 闸（gap-drain-on-routine-driver-empties-round-and-respawn-loops）：halted ⇒ 只挡受闸动作
+  // （LLM judge spawn），机械聚类读数照跑（fired 已读出）。⛔ 不 spawn judge、不落判词载体。
+  if (halted) {
+    return { name: "architecture-review", value: base, state: "verified", reason: "halted: judge deferred (mechanical clustering read; no LLM spawn)" };
+  }
+
+  // 6. 资源门（spawn LLM judge 前判定，同 B15）。WAIT ⇒ 退避本轮。
+  const gate = resourceGateCheck(root, resourceGateArgv);
+  if (!gate.go) {
+    return { name: "architecture-review", value: base, state: "not-evaluated", reason: `resource-gate-wait: ${gate.reason} (judge deferred)` };
+  }
+
+  // 7. LLM judge（真实 claude -p，单批）。
+  const argv = judgeArgv ?? defaultArchReviewJudgeArgv(clusters, root);
+  const judgeR = await runAsync(argv, { timeoutMs: judgeTimeoutMs, collectStderr: true });
+  if (judgeR.error || judgeR.status !== 0) {
+    const reason = `judge exited ${judgeR.status ?? "null"}: ${judgeR.error?.message ?? String(judgeR.stderr ?? "").slice(0, 200)}`;
+    writeRecord(buildArchReviewRoundRecord({
+      round: readCurrentRound(root),
+      judgedAt: new Date().toISOString(),
+      state: "failed",
+      triggerReasons: trigger.reasons,
+      clusters: [],
+      reason,
+    }));
+    return { name: "architecture-review", value: base, state: "failed", reason };
+  }
+  let verdicts: JudgeClusterVerdict[];
+  try {
+    const parsed = JSON.parse(String(judgeR.stdout ?? "").trim());
+    verdicts = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    const reason = "judge output not a JSON array";
+    writeRecord(buildArchReviewRoundRecord({
+      round: readCurrentRound(root),
+      judgedAt: new Date().toISOString(),
+      state: "failed",
+      triggerReasons: trigger.reasons,
+      clusters: [],
+      reason,
+    }));
+    return { name: "architecture-review", value: base, state: "failed", reason };
+  }
+
+  // 7. JS 合并（判词 → 逐簇载体记录）。判词为空 ⇒ failed（⛔ 不写空 judged 记录）。
+  const judgedAt = new Date().toISOString();
+  const round = readCurrentRound(root);
+  const merged: ArchReviewClusterVerdict[] = mergeClusterVerdicts(clusters, verdicts, judgedAt, round);
+  if (merged.length === 0) {
+    const reason = "judge produced no valid cluster verdicts";
+    writeRecord(buildArchReviewRoundRecord({
+      round, judgedAt, state: "failed", triggerReasons: trigger.reasons, clusters: [], reason,
+    }));
+    return { name: "architecture-review", value: base, state: "failed", reason };
+  }
+  const distribution: Record<string, number> = {};
+  for (const m of merged) distribution[m.verdict] = (distribution[m.verdict] ?? 0) + 1;
+  writeRecord(buildArchReviewRoundRecord({ round, judgedAt, state: "judged", triggerReasons: trigger.reasons, clusters: merged }));
+  return {
+    name: "architecture-review",
+    value: { ...base, judgedCount: merged.length, distribution },
+    state: "verified",
+    reason: `judged ${merged.length} cluster(s): ${Object.entries(distribution).map(([k, v]) => `${k}=${v}`).join(" ") || "none"}`,
+  };
+}
+
 // ── 例程表（Layer 1b：routines = [{name, schedule, run() → Facts}]）──────────────────────────
 
 /** 例程装配缝（测试可注入覆盖命令/间隔；缺省 = 生产缺省）。 */
@@ -362,23 +618,38 @@ export interface QualityGateOptions {
   planCmd: string[] | null;
   judgeArgv: string[] | null;
   judgmentCmd: string[] | null;
+  identityCmd: string[] | null;
+  lineageCmd: string[] | null;
+  deletionCmd: string[] | null;
+  archJudgeArgv: string[] | null;
   resourceGateArgv: string[] | null;
   poolJudgeIntervalMinutes: number;
   judgmentIntervalMinutes: number;
+  archReviewIntervalMinutes: number;
 }
 
-/** 两条例程（B15 pool-quality-judge + B17 judgment-consumer-check）。⛔ 只此两条——B16-C/B18 归 AC145。 */
+/** 三条例程（B15 pool-quality-judge + B17 judgment-consumer-check + 架构复核）。⛔ 只此三条——
+ *  B16-C/B18 归 AC145（本 driver 不承接）；架构复核是本 driver 承接的第三条例程（读数非任务终态）。 */
 export function qualityGateRoutines(root: string, opts: QualityGateOptions): RoutineSpec[] {
   return [
     {
       name: "pool-quality-judge",
       schedule: { kind: "interval", minutes: opts.poolJudgeIntervalMinutes },
-      run: () => [runPoolQualityJudge(root, opts.planCmd, opts.judgeArgv, opts.resourceGateArgv)],
+      // ctx.halted ⇒ 只挡 LLM judge spawn（机械 --plan 仍跑）——halt 是轮内闸，⛔ 不挡观测。
+      run: async (ctx) => [await runPoolQualityJudge(root, opts.planCmd, opts.judgeArgv, opts.resourceGateArgv, true, Infinity, ctx?.halted === true)],
     },
     {
       name: "judgment-consumer-check",
       schedule: { kind: "interval", minutes: opts.judgmentIntervalMinutes },
-      run: () => [runJudgmentConsumerCheck(root, opts.judgmentCmd)],
+      // 纯机械审计（零 LLM），halt 不挡——观测照跑。⛔ runJudgmentConsumerCheck 是 async（runAsync），
+      // 例程 run 也 async：挂死的审计子进程由 caller 侧看门狗兜底，⛔ 不同步阻塞事件循环。
+      run: async () => [await runJudgmentConsumerCheck(root, opts.judgmentCmd)],
+    },
+    {
+      name: "architecture-review",
+      schedule: { kind: "interval", minutes: opts.archReviewIntervalMinutes },
+      // ctx.halted ⇒ 只挡 LLM judge spawn（机械聚类仍跑）——halt 是轮内闸，⛔ 不挡观测。
+      run: async (ctx) => [await runArchitectureReview(root, opts.identityCmd, opts.lineageCmd, opts.deletionCmd, opts.archJudgeArgv, opts.resourceGateArgv, true, Infinity, ctx?.halted === true)],
     },
   ];
 }
@@ -396,6 +667,15 @@ export interface QualityGateLoopOptions {
   json: boolean;
   pidFile?: string;
   routines: RoutineSpec[];
+  /** 例程看门狗（毫秒）：单条例程 wall-clock 上限（caller 侧兜底，防挂死的 judge spawn 冻结循环）。
+   *  缺省 = ROUTINE_WATCHDOG_MS_DEFAULT（30min liveness 安全界）。Infinity / ≤0 = 显式不设限
+   *  （⛔ 生产不传，测试负控制用它复现「无看门狗 ⇒ 冻结」）。 */
+  routineWatchdogMs?: number;
+  /** 控制态文件（相对 root）。缺省 = quality 自己的。**参数化的理由**：本循环体除这一处外
+   *  已经是【通用的例程型常驻循环】（收 RoutineSpec[]、评估 due、汇 Facts、写轮记录），
+   *  复用它比让下一个例程型 driver 再抄 95 行样板正确（SPEC §4 正是要消灭那种重复）。
+   *  ⛔ 不同 kind 必须用各自的控制面——共用会让一个 kind 的 halt 误停另一个。 */
+  controlStateRel?: string;
 }
 
 /** 组装一条 round 记录（heartbeat carrier 的一行）。facts 是轮内跑出的全部例程读数。 */
@@ -411,11 +691,37 @@ export function computeRoundRecord(args: {
   return { round, run_id: runId, pid, ts: at, halted, facts };
 }
 
-/** 常驻循环：每轮读控制态（halt ⇒ 记 halted 轮退出）→ 评估 due 例程（scheduleIsDue + 内存 lastRun）→
- *  跑 due 例程 → 汇集 Facts → 写 round 心跳。SIGINT/SIGTERM / --once / --max-rounds 停。
- *  lastRun 是进程内存态（例程 interval 调度用）；重启 ⇒ never-ran ⇒ 首轮两例程均 due（该跑）。 */
+/** 单条例程的 caller 侧看门狗：race `r.run(ctx)` 对 `watchdogMs`。例程 wall-clock 超界 ⇒ 返回一条
+ *  failed Fact（routine timed out）并继续——⛔ 不 await 已挂的 routine promise。judge spawn 是
+ *  runAsync(Infinity)，挂死时该 promise 永不 settle，await 它会让常驻循环同死（心跳冻结）。
+ *  Infinity / ≤0 ⇒ 直跑（显式不设限，测试负控制用）；例程自身 throw / reject 自然传播，交外层
+ *  try/catch 记「routine threw」（与既有语义一致，⛔ 本函数只处理超时这一态）。 */
+async function runRoutineWithWatchdog(r: RoutineSpec, ctx: { halted: boolean }, watchdogMs: number): Promise<Fact<unknown>[]> {
+  if (!Number.isFinite(watchdogMs) || watchdogMs <= 0) {
+    return await r.run(ctx);
+  }
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const timeoutFact: Fact<unknown>[] = [
+      { name: r.name, value: null, state: "failed", reason: `routine timed out after ${watchdogMs}ms (caller-side watchdog)` },
+    ];
+    return await Promise.race([
+      r.run(ctx),
+      new Promise<Fact<unknown>[]>((resolve) => { timer = setTimeout(() => resolve(timeoutFact), watchdogMs); }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** 常驻循环：每轮读控制态（halt ⇒ 记 halted 轮【继续循环】，⛔ 不退出——halt 是轮内闸，只挡受闸动作
+ *  spawn，观测/心跳照跑，见 gap-drain-on-routine-driver-empties-round-and-respawn-loops）→ 评估 due 例程
+ *  （scheduleIsDue + 内存 lastRun）→ 跑 due 例程 → 汇集 Facts → 写 round 心跳。SIGINT/SIGTERM / --once /
+ *  --max-rounds 停。lastRun 是进程内存态（例程 interval 调度用）；重启 ⇒ never-ran ⇒ 首轮例程均 due（该跑）。 */
 export async function runResidentQualityGateLoop(opts: QualityGateLoopOptions): Promise<number> {
   const { root, intervalMs, once, maxRounds, roundLogFile, runId, json, pidFile, routines } = opts;
+  const controlStateRel = opts.controlStateRel ?? QUALITY_CONTROL_STATE_REL;
+  const routineWatchdogMs = opts.routineWatchdogMs ?? ROUTINE_WATCHDOG_MS_DEFAULT;
   if (pidFile) {
     try { fs.writeFileSync(pidFile, `${process.pid}\n`, "utf8"); } catch { /* pid-file 只供外部观测，写失败不致命 */ }
   }
@@ -433,25 +739,26 @@ export async function runResidentQualityGateLoop(opts: QualityGateLoopOptions): 
   let round = 0;
   while (!stopRequested) {
     round += 1;
-    // 控制面（halt）：读 .quay/quality-control.json 单一真相源，halted ⇒ 记 halted 轮后退出。
-    if (isHalted(root, process.env, QUALITY_CONTROL_STATE_REL)) {
-      const rec = computeRoundRecord({ round, runId, pid: process.pid, at: new Date().toISOString(), facts: [], halted: true });
-      try { fs.appendFileSync(roundLogFile, JSON.stringify(rec) + "\n", "utf8"); } catch { /* 记录写失败不致命 */ }
-      if (json) process.stdout.write(`${JSON.stringify({ event: "halted", round })}\n`);
-      break;
-    }
+    // 控制面（halt）：读 <kind>-control.json 单一真相源。halted ⇒ 本轮【不做受闸动作（spawn）】，但
+    // 【观测继续、心跳继续、循环继续】——halt 是轮内的闸，⛔ 不是进程的终止条件
+    // （gap-drain-on-routine-driver-empties-round-and-respawn-loops：旧的 break 让进程 return 0 结束，
+    //  supervisor 每 5s 重生一次 ⇒ 无限 respawn 循环 + 空轮记录）。halted 经 ctx 传给例程：只挡
+    // 受闸动作（LLM spawn），机械读数照跑（goal 的 criterion/缺口、quality 的 --plan/聚类均零 LLM）。
+    const halted = isHalted(root, process.env, controlStateRel);
     const facts: Fact<unknown>[] = [];
     for (const r of routines) {
       const state = { now: Date.now(), lastRun: lastRun[r.name] };
       if (!scheduleIsDue(r.schedule, state)) continue;
       lastRun[r.name] = state.now;
       try {
-        facts.push(...(await r.run()));
+        // caller 侧看门狗（gap-meta-quality-gate-driver）：judge spawn runAsync(Infinity) 挂死时，
+        // 看门狗在例程 wall-clock 超界后返回 failed Fact 继续写心跳，⛔ 不 await 已挂的 promise。
+        facts.push(...(await runRoutineWithWatchdog(r, { halted }, routineWatchdogMs)));
       } catch (e) {
         facts.push({ name: r.name, value: null, state: "failed", reason: `routine threw: ${(e as Error).message}` });
       }
     }
-    const rec = computeRoundRecord({ round, runId, pid: process.pid, at: new Date().toISOString(), facts });
+    const rec = computeRoundRecord({ round, runId, pid: process.pid, at: new Date().toISOString(), facts, halted });
     try {
       fs.mkdirSync(path.dirname(roundLogFile), { recursive: true });
       fs.appendFileSync(roundLogFile, JSON.stringify(rec) + "\n", "utf8");
@@ -471,16 +778,22 @@ export async function runResidentQualityGateLoop(opts: QualityGateLoopOptions): 
 
 const HELP = [
   "quality-gate-driver — AC144：质量把关按【形状】分开驱动化（例程型，继承 Layer 0 + 1b）。",
-  "每轮评估 due 例程（B15 pool-quality-judge + B17 judgment-consumer-check）→ 跑 due → 汇集 Facts → 写 round 心跳。",
+  "每轮评估 due 例程（B15 pool-quality-judge + B17 judgment-consumer-check + 架构复核）→ 跑 due → 汇集 Facts → 写 round 心跳。",
   "  --root <repo> [--interval <ms>] [--once] [--max-rounds <n>] [--round-log <p>] [--run-id <id>] [--pid-file <p>] [--json]",
   "  --interval <ms>           轮间隔（缺省 30000，来自 drivers.yml quality.interval_ms；测试缝传小值）",
   "  --once                    跑一轮即退出（手动单发 / 测试）",
   "  --max-rounds <n>          跑满 N 轮退出（测试缝，防常驻环无限跑）",
+  "  --routine-watchdog <ms>   例程看门狗（毫秒，缺省 30min；测试传小值）",
   "  --pool-judge-interval <m> B15 例程复核间隔（分钟，缺省 10）",
   "  --judgment-interval <m>   B17 例程复核间隔（分钟，缺省 30）",
+  "  --arch-review-interval <m> 架构复核例程间隔（分钟，缺省 60）",
   "  --plan-cmd <argv>         覆盖 --plan 命令（测试缝）",
   "  --judge-cmd <argv>        覆盖 LLM judge 命令（测试缝；prompt 由驱动拼，末参数追加）",
   "  --judgment-cmd <argv>     覆盖 judgment-consumer-check 命令（测试缝）",
+  "  --identity-cmd <argv>     覆盖 identity-replication-check 命令（测试缝）",
+  "  --lineage-cmd <argv>      覆盖 guard-lineage-check 命令（测试缝）",
+  "  --deletion-cmd <argv>     覆盖 deletion-closure-check 命令（测试缝）",
+  "  --arch-judge-cmd <argv>   覆盖架构复核 LLM judge 命令（测试缝）",
   "  --resource-gate-cmd <argv> 覆盖 resource-gate 命令（测试缝；起 judge 前判定，exit 0=GO）",
   "  --round-log <path>        轮记录文件（缺省 <root>/.quay/quality-round.jsonl）",
   "  --pid-file <path>         把驱动自身 pid 写到该文件（外部观测 + kill 抓手）",
@@ -508,9 +821,15 @@ export async function main(argv: string[]): Promise<number> {
   let json = false;
   let poolJudgeIntervalRaw: string | undefined;
   let judgmentIntervalRaw: string | undefined;
+  let archReviewIntervalRaw: string | undefined;
+  let routineWatchdogRaw: string | undefined;
   let planCmd: string | undefined;
   let judgeCmd: string | undefined;
   let judgmentCmd: string | undefined;
+  let identityCmd: string | undefined;
+  let lineageCmd: string | undefined;
+  let deletionCmd: string | undefined;
+  let archJudgeCmd: string | undefined;
   let resourceGateCmd: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
@@ -524,9 +843,15 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--pid-file") pidFile = args[++i];
     else if (a === "--pool-judge-interval") poolJudgeIntervalRaw = args[++i];
     else if (a === "--judgment-interval") judgmentIntervalRaw = args[++i];
+    else if (a === "--arch-review-interval") archReviewIntervalRaw = args[++i];
+    else if (a === "--routine-watchdog") routineWatchdogRaw = args[++i];
     else if (a === "--plan-cmd") planCmd = args[++i];
     else if (a === "--judge-cmd") judgeCmd = args[++i];
     else if (a === "--judgment-cmd") judgmentCmd = args[++i];
+    else if (a === "--identity-cmd") identityCmd = args[++i];
+    else if (a === "--lineage-cmd") lineageCmd = args[++i];
+    else if (a === "--deletion-cmd") deletionCmd = args[++i];
+    else if (a === "--arch-judge-cmd") archJudgeCmd = args[++i];
     else if (a === "--resource-gate-cmd") resourceGateCmd = args[++i];
     else if (a === "--json") json = true;
     else if (a === "--help" || a === "-h") { console.log(HELP); return 0; }
@@ -543,19 +868,31 @@ export async function main(argv: string[]): Promise<number> {
     ? Number(poolJudgeIntervalRaw) : POOL_JUDGE_INTERVAL_MIN_DEFAULT;
   const judgmentIntervalMinutes = judgmentIntervalRaw !== undefined && isNonNegInt(judgmentIntervalRaw)
     ? Number(judgmentIntervalRaw) : JUDGMENT_INTERVAL_MIN_DEFAULT;
+  const archReviewIntervalMinutes = archReviewIntervalRaw !== undefined && isNonNegInt(archReviewIntervalRaw)
+    ? Number(archReviewIntervalRaw) : ARCH_REVIEW_INTERVAL_MIN_DEFAULT;
+  const routineWatchdogMs = routineWatchdogRaw !== undefined && isNonNegInt(routineWatchdogRaw)
+    ? Number(routineWatchdogRaw) : ROUTINE_WATCHDOG_MS_DEFAULT;
 
-  const roundLogFile = roundLogPath ? path.resolve(roundLogPath) : path.join(rootDir, ROUND_LOG_REL);
+  // 心跳落点 = .quay/。ROUND_LOG_REL 是 .quay/-相对路径（registry carriers[0]），⛔ 直接 join rootDir
+  // 会把心跳写到 repo-root quality-round.jsonl，与 driver-runtime carrierStats 读 .quay/ 分叉 ⇒
+  // liveness 监测读不到心跳、假报 stall（gap-meta-round-log-rel）。
+  const roundLogFile = roundLogPath ? path.resolve(roundLogPath) : path.join(rootDir, ".quay", ROUND_LOG_REL);
   const resolvedRunId = runId || `qg-${Date.now()}`;
   const routines = qualityGateRoutines(rootDir, {
     planCmd: planCmd ? splitArgs(planCmd) : null,
     judgeArgv: judgeCmd ? splitArgs(judgeCmd) : null,
     judgmentCmd: judgmentCmd ? splitArgs(judgmentCmd) : null,
+    identityCmd: identityCmd ? splitArgs(identityCmd) : null,
+    lineageCmd: lineageCmd ? splitArgs(lineageCmd) : null,
+    deletionCmd: deletionCmd ? splitArgs(deletionCmd) : null,
+    archJudgeArgv: archJudgeCmd ? splitArgs(archJudgeCmd) : null,
     resourceGateArgv: resourceGateCmd ? splitArgs(resourceGateCmd) : null,
     poolJudgeIntervalMinutes,
     judgmentIntervalMinutes,
+    archReviewIntervalMinutes,
   });
 
-  return runResidentQualityGateLoop({ root: rootDir, intervalMs: interval, once, maxRounds, roundLogFile, runId: resolvedRunId, json, pidFile, routines });
+  return runResidentQualityGateLoop({ root: rootDir, intervalMs: interval, once, maxRounds, roundLogFile, runId: resolvedRunId, json, pidFile, routines, routineWatchdogMs });
 }
 
 // Direct entry guard (gate-script-base convention)：仅当本文件是入口时跑 main()。

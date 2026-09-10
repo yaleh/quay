@@ -210,3 +210,48 @@ test("AC0 — task-worker keeps its own env (CLAUDE_CODE_PRINT_BG_WAIT_CEILING_M
   const tw = resolveRole(cfg, "task-worker");
   assert.equal(tw.env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS, "0");
 });
+
+// ── SHIPPED — plugin/.quay/profiles.yml 出厂模板的 worker roles 键集与 dev-tree 一致 ──────────────
+// gap-shipped-profiles-missing-worker-roles：quay-init verbatim 铺 shipped 模板进第三方项目
+// .quay/profiles.yml；worker-driver 派发 `launchArgv("task-worker", …)` 经 resolveRole 对缺失 role
+// 抛 `role not found: "task-worker"`（fail-closed）⇒ 第三方项目永不派发。钉死 shipped 模板的
+// worker roles 可解析（负控制：role 缺失时 resolveRole 抛错）。
+
+test("SHIPPED — plugin/.quay/profiles.yml resolves task-worker with launcher=claude (bare-machine default)", () => {
+  const shipped = readProfilesConfig(path.join(REPO_ROOT, "plugin"));
+  const tw = resolveRole(shipped, "task-worker");
+  assert.equal(tw.launcher, "claude", "shipped worker-default keeps launcher=claude (bare-machine default)");
+  assert.equal(tw.model, null, "shipped worker-default keeps model=null (bare-machine default)");
+  assert.equal(tw.name, "quay-task-worker");
+  // 角色自身不重复 launcher/model（与 dev-tree 同构，从 profile 继承）。
+  assert.equal(shipped.roles["task-worker"].launcher, undefined);
+  assert.equal(shipped.roles["task-worker"].model, undefined);
+});
+
+test("SHIPPED — the five worker roles (task-worker/selector/fix-worker/pool-judge/meta-driver) are all present", () => {
+  const shipped = readProfilesConfig(path.join(REPO_ROOT, "plugin"));
+  for (const role of ["task-worker", "selector", "fix-worker", "pool-judge", "meta-driver"]) {
+    const r = resolveRole(shipped, role);
+    assert.ok(r.launcher, `shipped role ${role} must resolve a non-empty launcher`);
+    assert.equal(r.launcher, "claude", `shipped role ${role} must resolve launcher=claude`);
+    assert.ok(r.name, `shipped role ${role} must carry a name`);
+  }
+});
+
+test("SHIPPED — role key set matches dev-tree (isomorphic, only launcher/model values differ)", () => {
+  const dev = readProfilesConfig(REPO_ROOT);
+  const shipped = readProfilesConfig(path.join(REPO_ROOT, "plugin"));
+  assert.deepEqual(
+    Object.keys(shipped.roles).sort(),
+    Object.keys(dev.roles).sort(),
+    "shipped roles key set must equal dev-tree roles key set"
+  );
+});
+
+test("SHIPPED — task-worker/fix-worker keep CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 (同 dev-tree role diff)", () => {
+  const shipped = readProfilesConfig(path.join(REPO_ROOT, "plugin"));
+  for (const role of ["task-worker", "fix-worker"]) {
+    const r = resolveRole(shipped, role);
+    assert.equal(r.env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS, "0");
+  }
+});

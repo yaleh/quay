@@ -14,7 +14,8 @@
 // reported in_use=5 with 1 real node-MainThread test process, so the WAIT verdict that dropped the cap
 // was built on a wrong count). The dispatch cap is now FIXED at 5:
 //
-//   effective_cap = FIXED_EFFECTIVE_CAP (5), constant, regardless of cpu pressure / suite state / budget.
+//   effective_cap = driverCap(root, "worker") — the configured worker cap (drivers.yml), constant
+//   regardless of cpu pressure / suite state / budget.
 //
 // The cpu-pressure band + hysteresis + budget reasoning are KEPT ONLY AS OBSERVATION: this helper still
 // prints the signal/band/budget lines (so the human/outer can SEE load), but those readings participate
@@ -86,7 +87,7 @@
 //   bash plugin/scripts/cap-from-gate.sh [--root <repo>]
 //
 // Output (stdout): signal/band/budget OBSERVATION lines + a LAST `effective_cap=N` line the tick
-// extracts. effective_cap is ALWAYS FIXED_EFFECTIVE_CAP (5) — the dynamic cap is retired
+// extracts. effective_cap is ALWAYS the configured worker cap (driverCap) — the dynamic cap is retired
 // (gap-fixed-cap-5-dynamic-cap-retired). Exit 0 always (a detector/recommender, not a gate).
 
 import fs from "node:fs";
@@ -95,16 +96,18 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 import { isDirectEntry } from "./gate-script-base.ts";
-import { defaultDriverConfig, driverCap } from "./driver-config.ts";
+import { driverCap } from "./driver-config.ts";
+import { resolveResourceGateScript } from "./driver-shared.ts";
+import { resolveKernelPluginRoot } from "./driver-runtime.ts";
 
 /** FIXED dispatch cap (gap-fixed-cap-5-dynamic-cap-retired, human ruling 2026-08-09): the dynamic
- *  adaptive cap is retired. effective_cap is this constant — 5 — regardless of cpu pressure, suite
- *  state, or process budget. The band/budget fields returned alongside it are PURE OBSERVATION and
- *  must NOT participate in any decision (dispatch / slot-refill / floor all use this fixed 5).
- *  AC155: 单一真相源 —— 值从 driver-config 的声明式配置（drivers.yml）派生（⛔ 不再有本文件独立的
- *  并发字面量；computeEffectiveCap 现在经 driverCap 现读 drivers.yml）。保留本符号仅为旧 import 面
- *  （cap-from-gate-*.test.mjs 用「同一值」断言 effective_cap 恒固定）。 */
-export const FIXED_EFFECTIVE_CAP = defaultDriverConfig().worker.cap;
+ *  adaptive cap is retired. effective_cap is the CONFIGURED worker cap — read live from the single
+ *  source (driver-config's declarative `plugin/scripts/drivers.yml` via `driverCap(root,"worker")`,
+ *  defaulting to 5 when the file is absent/unparseable) — regardless of cpu pressure, suite state,
+ *  or process budget. The band/budget fields returned alongside it are PURE OBSERVATION and must NOT
+ *  participate in any decision. AC155 + gap-cap-from-gate-effective-cap-dual-source-blocks-yml-override:
+ *  ⛔ 不再有本文件独立的并发字面量/常量 —— computeEffectiveCap 现读 drivers.yml（消除「运行时读 yml /
+ *  常量读代码默认」的双来源分叉）。 */
 
 /** Default GO/WAIT/EXTREME caps when config declares no concurrency_bands. quay's default (5/2/1);
  *  a project overrides in `.quay/config.yml` `loop:concurrency_bands` (e.g. archguard 4/2/1).
@@ -253,7 +256,13 @@ export function readBudgetFromGate(
   repoRoot: string,
   env: NodeJS.ProcessEnv = process.env,
 ): BudgetSnapshot | null {
-  const budgetScript = path.join(repoRoot, "plugin", "scripts", "process-budget.sh");
+  // ⛔ 非 repoRoot 锚定（gap-plugin-root-resolution-remaining-callsites-round2：第三方项目无
+  // plugin/scripts/，`bash <repoRoot>/plugin/scripts/process-budget.sh` 会 No such file ⇒ 静默 fail-open
+  // 让跨层预算这个次要约束不生效）。改为从 kernel 安装位置解析（resolveKernelPluginRoot 单一真相源 +
+  // env.QUAY_PLUGIN_ROOT 测试缝，同 resolveResourceGateScript 手法）。fail-open 语义不变：脚本缺失或
+  // exit 非 0 仍返回 null。
+  const pluginRoot = env.QUAY_PLUGIN_ROOT || resolveKernelPluginRoot();
+  const budgetScript = path.join(pluginRoot, "scripts", "process-budget.sh");
   const res = spawnSync("bash", [budgetScript], { cwd: repoRoot, encoding: "utf8", env });
   if (res.status !== 0) return null;
   const out = `${res.stdout}\n${res.stderr}`;
@@ -269,7 +278,10 @@ export function readBudgetFromGate(
  *  NB: reads `some avg10`, NOT `some avg300` — the avg300 field is churn-dominated and structurally
  *  dead (see header comment, gap-cap-from-gate-avg300-driven-by-claude-session-churn-structural-cap-2). */
 export function readCpuStallFromGate(repoRoot: string, env: NodeJS.ProcessEnv = process.env): number | null {
-  const gate = path.join(repoRoot, "plugin", "scripts", "resource-gate.sh");
+  // ⛔ 非 repoRoot 锚定（gap-driver-resource-gate-path-anchored-at-root-third-party）：第三方项目没有
+  // plugin/scripts/，resolveResourceGateScript 从 kernel 安装位置解析；找不到 ⇒ null（unmeasurable）。
+  const gate = resolveResourceGateScript(env);
+  if (!gate) return null;
   const res = spawnSync("bash", [gate], { cwd: repoRoot, encoding: "utf8", env });
   if (res.status !== 0) {
     // report mode always exits 0 — a non-zero means the script itself is broken; fail closed.
@@ -288,7 +300,9 @@ export function readCpuStallFromGate(repoRoot: string, env: NodeJS.ProcessEnv = 
  *  Returns null when UNMEASURABLE. Note the cap itself is FIXED (gap-fixed-cap-5-dynamic-cap-retired)
  *  — this is observation only, so dispatch sees the same overload-window signal the gate refuses on. */
 export function readLoadAvgFromGate(repoRoot: string, env: NodeJS.ProcessEnv = process.env): number | null {
-  const gate = path.join(repoRoot, "plugin", "scripts", "resource-gate.sh");
+  // ⛔ 非 repoRoot 锚定（gap-driver-resource-gate-path-anchored-at-root-third-party）：同 readCpuStallFromGate。
+  const gate = resolveResourceGateScript(env);
+  if (!gate) return null;
   const res = spawnSync("bash", [gate], { cwd: repoRoot, encoding: "utf8", env });
   if (res.status !== 0) return null;
   const m = `${res.stdout}\n${res.stderr}`.match(/loadavg=([0-9.]+|UNMEASURABLE)/);

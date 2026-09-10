@@ -60,6 +60,9 @@ capabilities:
                      # Provider was itself live-verified by QN-035's own
                      # gh-7 lifecycle drive (iteration 25); no longer scoped
                      # to primitive tasks only, matching `gate` above.
+  goal: false         # goals are NOT supported (stub: goal_list → [], goal_get/
+                     # goal_write/goal_gate → isError "not supported") — no AC
+                     # sub-record mapping on GitHub Issues (SPEC-goal-mechanism §5.4)
 
 # status model (design §3) — same 4-state vocabulary as native; GitHub has
 # no native status field, so this Provider derives status from issue.state

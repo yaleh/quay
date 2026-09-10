@@ -1,6 +1,6 @@
 // @test-group engine
 // fan-in-execute-paths.test.mjs — gap-fan-in-execute-three-unverified-paths: the three UNVERIFIED
-// hot points of .claude/workflows/fan-in-execute.js, exercised through the REAL invocation path
+// hot points of plugin/workflows/fan-in-execute.js, exercised through the REAL invocation path
 // (判据3 — NOT fixture-only pure-function mocks; the AC78 lesson: "改 workflow 的唯一有效验证=实调").
 //
 //   REAL-INVOCATION harness: every test first vm-EXECUTES the actual workflow file
@@ -46,7 +46,7 @@ import { buildTaskManifest, checkTaskAntiDrift } from "../scripts/anti-drift-tou
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
-const WORKFLOW = path.join(REPO_ROOT, ".claude", "workflows", "fan-in-execute.js");
+const WORKFLOW = path.join(REPO_ROOT, "plugin", "workflows", "fan-in-execute.js");
 
 // ── REAL-INVOCATION harness: vm-execute the actual workflow file ────────────────────────────────────
 // The workflow file is ESM-ish (`export const meta`) with a top-level `return` (workflow-runtime-only),
@@ -295,14 +295,14 @@ function makeDir127ReplayHome() {
 
 // ── ① code_delta regex classification (REAL git execution, 判据3) ─────────────────────────────────
 
-test("① REAL code delta — .claude/workflows/fan-in-execute.js must classify as code (rerun full suite)", async (t) => {
+test("① REAL code delta — plugin/workflows/fan-in-execute.js must classify as code (rerun full suite)", async (t) => {
   // 判据2 ① 能取假: a code-face delta wrongly classified as doc would SKIP the full suite (漏检).
   // This is the AC78 承重点 file itself — editing it MUST trigger the full suite. The classify script
-  // reads the registry (fan-in-workflow-check `@static-object .claude/workflows/fan-in-execute.js`), so
+  // reads the registry (fan-in-workflow-check `@static-object plugin/workflows/fan-in-execute.js`), so
   // no hand-written exclude list can hide it.
-  const codeDelta = await classifyRealDelta({ ".claude/workflows/fan-in-execute.js": "export const meta = {}\n" });
+  const codeDelta = await classifyRealDelta({ "plugin/workflows/fan-in-execute.js": "export const meta = {}\n" });
   assert.notEqual(codeDelta, "", `code delta must be non-empty for a .js workflow file, got: ${JSON.stringify(codeDelta)}`);
-  assert.match(codeDelta, /\.claude\/workflows\/fan-in-execute\.js/);
+  assert.match(codeDelta, /plugin\/workflows\/fan-in-execute\.js/);
 });
 
 test("① REAL test delta — plugin/test/*.test.mjs must classify as code (test assertion face reruns)", async (t) => {
@@ -311,13 +311,14 @@ test("① REAL test delta — plugin/test/*.test.mjs must classify as code (test
   assert.match(codeDelta, /plugin\/test\//);
 });
 
-test("① REAL doc delta — tasks/ + docs/ + adr/ + .quay/ only must classify as doc (skip full suite)", async (t) => {
+test("① REAL doc delta — tasks/ + goals/ + docs/ + adr/ + .quay/ only must classify as doc (skip full suite)", async (t) => {
   // 判据2 ① 镜像: a pure-doc delta classified as code would WASTE a full-suite run (该跳却重跑).
   // NOTE: orchestration/*-tick-core.md is deliberately NOT here — it is read by tick-core-static-check
   // / rhythm-consumer (`@static-object orchestration/*-tick-core.md`), so it classifies as CODE
   // (gap-fan-in-delta-scope-doc-only-skip AC2 取假二).
   const files = {
     "tasks/gap-fan-in-execute-three-unverified-paths.md": "status: ready\n",
+    "goals/AC-999-fake.md": "status: ready\n",
     "docs/proposals/exp5-crystallization-strategy.md": "x\n",
     "docs/references/git.md": "y\n",
     "adr/ADR-010-scheduled-milestone-e2e-incl-browser-tests.md": "y\n",
@@ -327,6 +328,15 @@ test("① REAL doc delta — tasks/ + docs/ + adr/ + .quay/ only must classify a
   };
   const codeDelta = await classifyRealDelta(files);
   assert.equal(codeDelta, "", `pure-doc delta must produce empty code_delta, got: ${JSON.stringify(codeDelta)}`);
+});
+
+test("① REAL doc delta negative — packages/quay/src/goal-store.ts must classify as code (goals/ is a prefix, not substring goal)", async (t) => {
+  // gap-doc-surfaces-missing-goals-prefix AC4: a real code file whose path CONTAINS "goal" but is NOT
+  // under the goals/ directory must stay CODE. The DOC_SURFACES entry is the prefix "goals/", not a
+  // substring match on "goal" — an over-broad fix (substring) would misclassify this as doc and skip.
+  const codeDelta = await classifyRealDelta({ "packages/quay/src/goal-store.ts": "export const x = 1\n" });
+  assert.notEqual(codeDelta, "", `packages/quay/src/goal-store.ts must classify as code (not goals/ prefix), got empty`);
+  assert.match(codeDelta, /packages\/quay\/src\/goal-store\.ts/);
 });
 
 test("① REAL decision — code delta ⇒ rerun decision, doc delta ⇒ skip decision (AC75 semantics)", async (t) => {
@@ -769,7 +779,7 @@ test("⑨ wiring — the phase-2 prompt carries a land-time anti-drift block BEF
   const step5Idx = p2.indexOf("【持锁段 step 5");
   const landIdx = p2.indexOf("# anti-drift-land-block-start");
   const flipIdx = p2.indexOf("# flip-block-start");
-  const ffIdx = p2.indexOf("fan-in-ff-merge.sh --task");
+  const ffIdx = p2.indexOf("ff-merge.ts --task");
   assert.ok(step5Idx !== -1, "phase-2 prompt must carry 持锁段 step 5");
   assert.ok(landIdx > step5Idx, "land block must be inside step 5 (持锁段)");
   assert.ok(flipIdx > landIdx, "land block must come BEFORE the flip block (flip done)");
@@ -889,7 +899,7 @@ test("⑥ wiring — the fan-in prompt carries a bracket-close block targeting O
   const p2 = promptContaining(prompts, "# bracket-close-block-start");
   assert.ok(p2.includes("bracketClosed"), "the return contract must carry the bracket-closure result");
   // placement: the block runs AFTER the ff-merge call and BEFORE the worktree cleanup.
-  const ffIdx = p2.indexOf("fan-in-ff-merge.sh --task");
+  const ffIdx = p2.indexOf("ff-merge.ts --task");
   const blockIdx = p2.indexOf("# bracket-close-block-start");
   const cleanupIdx = p2.indexOf("ff 成功后清理");
   assert.ok(ffIdx !== -1, "ff-merge call present");
@@ -985,7 +995,6 @@ test("⑦ worktree-resolution — every fan-in orchestration script call is ${wo
     "select-static-checks-for-touches.ts --classify-delta", // step 2 (phase 1)
     "per-task-suite-record.ts",                             // step 4.5 (phase 2)
     "fan-in-ac-completion-gate.ts",                         // step 5 (phase 2)
-    "fan-in-ff-merge.sh",                                   // step 5 (phase 2)
     "closure-lag-check.sh",                                 // step 5.5 (phase 2)
     "anti-drift-touches-check.ts",                          // step 1 (phase 1)
     "fan-in-ts-typecheck-gate.ts",                          // step 3 (phase 1)
@@ -997,6 +1006,12 @@ test("⑦ worktree-resolution — every fan-in orchestration script call is ${wo
     assert.ok(line, `a prompt must carry a ${WT}-rooted call to ${frag}`);
     assert.doesNotMatch(line, /bash \$\{?root\}?\/plugin\/scripts/, `call must NOT be root-rooted: ${line}`);
   }
+  // The ff-merge moved to the TS module (gap-fan-in-ff-merge-sh-retire-dead-shell-still-registered-
+  // live): it is worktree-rooted at packages/quay/src/fan-in/ff-merge.ts — a DIFFERENT path prefix
+  // than the plugin/scripts orchestration scripts above, so it is asserted separately.
+  const ffLine = all.split("\n").find((l) => l.includes("ff-merge.ts --task"));
+  assert.ok(ffLine, "a prompt must carry a worktree-rooted ff-merge.ts call");
+  assert.ok(ffLine.includes(`${WT}/packages/quay/src/fan-in/ff-merge.ts`), `ff-merge must be ${WT}-rooted at packages/quay/src/fan-in, not plugin/scripts: ${ffLine}`);
   // The scoped gate (step 4) still runs `cd ${worktree} && bash scripts/test.sh --for-task` (worktree-rooted);
   // the full-suite bucket path is the SUITE_LAUNCH `cd "$1" && node plugin/scripts/full-suite-runner.ts` —
   // also worktree-rooted (the runner resolves through the worktree's plugin tree).
@@ -1008,15 +1023,15 @@ test("⑦ worktree-resolution — every fan-in orchestration script call is ${wo
   assert.ok(classifyLine.includes(`${WT}/plugin/scripts/`), `classify must be ${WT}-rooted, got: ${classifyLine}`);
 });
 
-test("⑦ 取假一 — a branch modifying .claude/workflows/fan-in-execute.js ⇒ step-0 verdict HIT + WARN (dispatch must use the worktree scriptPath)", async (t) => {
-  const repo = makeRepoWithDelta({ ".claude/workflows/fan-in-execute.js": "export const meta = { name: 'fan-in-execute-branch-version' }\n" });
+test("⑦ 取假一 — a branch modifying plugin/workflows/fan-in-execute.js ⇒ step-0 verdict HIT + WARN (dispatch must use the worktree scriptPath)", async (t) => {
+  const repo = makeRepoWithDelta({ "plugin/workflows/fan-in-execute.js": "export const meta = { name: 'fan-in-execute-branch-version' }\n" });
   t.after(() => cleanup(repo));
-  symlinkRuntimeTrees(repo, { ".claude/workflows/fan-in-execute.js": "" });
+  symlinkRuntimeTrees(repo, { "plugin/workflows/fan-in-execute.js": "" });
   const block = await bootstrapBlockFor("gap-test-bs-hit", repo, REPO_ROOT);
   const r = runBash(block, { cwd: repo });
   assert.equal(r.status, 0, `step-0 bash failed: ${r.stderr}`);
   assert.match(r.stdout, /FAN-IN-BOOTSTRAP=hit/, `branch modifying fan-in-execute.js must be detected as a hit, got stdout:\n${r.stdout}`);
-  assert.match(r.stdout, /\.claude\/workflows\/fan-in-execute\.js/, "the hit must name the modified orchestration file");
+  assert.match(r.stdout, /plugin\/workflows\/fan-in-execute\.js/, "the hit must name the modified orchestration file");
   // 取假一 WARN (falsifiable): the running workflow is the ROOT version (REPO_ROOT), which differs from
   // the branch's committed fan-in-execute.js ⇒ the self-bootstrap gap is detected at runtime (if the A6
   // dispatcher followed the hit and used the worktree scriptPath, this WARN would NOT fire).
@@ -1090,12 +1105,12 @@ function makeStaleBootstrapRepo() {
   run(["config", "user.email", "test@test"]);
   run(["config", "user.name", "test"]);
   fs.writeFileSync(path.join(dir, "README.md"), "base\n");
-  fs.mkdirSync(path.join(dir, ".claude", "workflows"), { recursive: true });
-  fs.writeFileSync(path.join(dir, ".claude", "workflows", "fan-in-execute.js"), "OLD-fan-in-execute\n");
+  fs.mkdirSync(path.join(dir, "plugin", "workflows"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "plugin", "workflows", "fan-in-execute.js"), "OLD-fan-in-execute\n");
   run(["add", "-A"]);
   run(["commit", "-qm", "old-base"]);
   // develop advances with the poll-bounded fix to fan-in-execute.js
-  fs.writeFileSync(path.join(dir, ".claude", "workflows", "fan-in-execute.js"), "POLL-BOUNDED-fan-in-execute\n");
+  fs.writeFileSync(path.join(dir, "plugin", "workflows", "fan-in-execute.js"), "POLL-BOUNDED-fan-in-execute\n");
   run(["add", "-A"]);
   run(["commit", "-qm", "poll-bounded-fix"]);
   // task branch forks from the OLD base (HEAD~1) and modifies a DIFFERENT orchestration file
@@ -1144,15 +1159,15 @@ test("⑦b wiring — the step-0 prompt carries the --bootstrap-sync call (workt
 test("⑦b REAL stale sync — a bootstrap-HIT worktree forked before the poll-bounded fix lands: --bootstrap-sync merges develop ⇒ fan-in-execute.js becomes the latest", async (t) => {
   const repo = makeStaleBootstrapRepo();
   t.after(() => cleanup(repo));
-  symlinkRuntimeTrees(repo, { "plugin/scripts/fan-in-ff-merge.sh": "", ".claude/workflows/fan-in-execute.js": "" });
+  symlinkRuntimeTrees(repo, { "plugin/scripts/fan-in-ff-merge.sh": "", "plugin/workflows/fan-in-execute.js": "" });
   // Before: the worktree's fan-in-execute.js is the OLD (fork-time) version.
-  assert.equal(fs.readFileSync(path.join(repo, ".claude", "workflows", "fan-in-execute.js"), "utf8").trim(), "OLD-fan-in-execute");
+  assert.equal(fs.readFileSync(path.join(repo, "plugin", "workflows", "fan-in-execute.js"), "utf8").trim(), "OLD-fan-in-execute");
   const r = runSyncCli(repo, ["--merge-target", "develop"]);
   assert.equal(r.status, 0, `sync cli failed: ${r.stderr}`);
   assert.match(r.stdout, /merged=1/, `the stale worktree must merge develop, got stdout:\n${r.stdout}`);
   assert.doesNotMatch(r.stdout, /conflict=1/, "a non-overlapping merge must not conflict");
   // After: the worktree's fan-in-execute.js is the develop-latest (POLL-BOUNDED).
-  assert.equal(fs.readFileSync(path.join(repo, ".claude", "workflows", "fan-in-execute.js"), "utf8").trim(), "POLL-BOUNDED-fan-in-execute");
+  assert.equal(fs.readFileSync(path.join(repo, "plugin", "workflows", "fan-in-execute.js"), "utf8").trim(), "POLL-BOUNDED-fan-in-execute");
   // The branch's OWN orchestration modification is preserved (self-validation survives the sync).
   assert.equal(fs.readFileSync(path.join(repo, "plugin", "scripts", "fan-in-ff-merge.sh"), "utf8").trim(), "branch-modified-ff-merge");
 });
@@ -1160,10 +1175,10 @@ test("⑦b REAL stale sync — a bootstrap-HIT worktree forked before the poll-b
 test("⑦b REAL conflict — branch AND develop both modify fan-in-execute.js ⇒ conflict=1 + abort (worktree clean, branch version preserved; step-1 will resolve)", async (t) => {
   const repo = makeStaleBootstrapRepo();
   t.after(() => cleanup(repo));
-  symlinkRuntimeTrees(repo, { "plugin/scripts/fan-in-ff-merge.sh": "", ".claude/workflows/fan-in-execute.js": "" });
+  symlinkRuntimeTrees(repo, { "plugin/scripts/fan-in-ff-merge.sh": "", "plugin/workflows/fan-in-execute.js": "" });
   // Branch also modifies fan-in-execute.js (overlapping with develop's poll-bounded fix ⇒ conflict)
-  fs.writeFileSync(path.join(repo, ".claude", "workflows", "fan-in-execute.js"), "BRANCH-CHANGED-fan-in-execute\n");
-  runBash("git add .claude/workflows/fan-in-execute.js && git commit -qm 'branch also changes fan-in-execute'", { cwd: repo });
+  fs.writeFileSync(path.join(repo, "plugin", "workflows", "fan-in-execute.js"), "BRANCH-CHANGED-fan-in-execute\n");
+  runBash("git add plugin/workflows/fan-in-execute.js && git commit -qm 'branch also changes fan-in-execute'", { cwd: repo });
   const r = runSyncCli(repo, ["--merge-target", "develop"]);
   assert.equal(r.status, 0, `sync cli failed: ${r.stderr}`);
   assert.match(r.stdout, /conflict=1/, `overlapping fan-in-execute.js edits must conflict, got stdout:\n${r.stdout}`);
@@ -1171,13 +1186,13 @@ test("⑦b REAL conflict — branch AND develop both modify fan-in-execute.js �
   // Abort left the worktree clean and the branch version intact.
   const status = runBash("git status --porcelain --untracked-files=no", { cwd: repo });
   assert.equal(status.stdout.trim(), "", `worktree must be clean after abort, got: ${status.stdout}`);
-  assert.equal(fs.readFileSync(path.join(repo, ".claude", "workflows", "fan-in-execute.js"), "utf8").trim(), "BRANCH-CHANGED-fan-in-execute");
+  assert.equal(fs.readFileSync(path.join(repo, "plugin", "workflows", "fan-in-execute.js"), "utf8").trim(), "BRANCH-CHANGED-fan-in-execute");
 });
 
 test("⑦b REAL dirty — a worktree with a tracked modification ⇒ skipped (step-1 merge handles it; never clobbers local work)", async (t) => {
   const repo = makeStaleBootstrapRepo();
   t.after(() => cleanup(repo));
-  symlinkRuntimeTrees(repo, { "plugin/scripts/fan-in-ff-merge.sh": "", ".claude/workflows/fan-in-execute.js": "" });
+  symlinkRuntimeTrees(repo, { "plugin/scripts/fan-in-ff-merge.sh": "", "plugin/workflows/fan-in-execute.js": "" });
   fs.writeFileSync(path.join(repo, "README.md"), "uncommitted local edit\n");
   const r = runSyncCli(repo, ["--merge-target", "develop"]);
   assert.equal(r.status, 0, `sync cli failed: ${r.stderr}`);
@@ -1188,7 +1203,7 @@ test("⑦b REAL dirty — a worktree with a tracked modification ⇒ skipped (st
 test("⑦b REAL json — the sync reports a machine-readable outcome (merged/conflict/skipped) for the dispatch rule", async (t) => {
   const repo = makeStaleBootstrapRepo();
   t.after(() => cleanup(repo));
-  symlinkRuntimeTrees(repo, { "plugin/scripts/fan-in-ff-merge.sh": "", ".claude/workflows/fan-in-execute.js": "" });
+  symlinkRuntimeTrees(repo, { "plugin/scripts/fan-in-ff-merge.sh": "", "plugin/workflows/fan-in-execute.js": "" });
   const r = spawnSync("node", ["--experimental-strip-types", SEL_CLI, "--bootstrap-sync", "--worktree", repo, "--merge-target", "develop", "--json"], {
     encoding: "utf8", timeout: 30_000,
   });
@@ -1314,7 +1329,7 @@ test("⑧ stage-2 wait — the SINGLE stage-2 agent drives the GREEN path: suite
   const p2 = promptContaining(prompts, "# flip-block-start");
   assert.ok(p2.includes("POLL=not-done"), "stage-2 prompt must carry the wait block (single agent loops <600s Bash)");
   assert.ok(p2.includes("per-task-suite-record.ts"), "stage-2 must write the per-task-suite record (step 4.5)");
-  assert.ok(p2.includes("fan-in-ff-merge.sh --task"), "stage-2 must run the ff-merge (step 5)");
+  assert.ok(p2.includes("ff-merge.ts --task"), "stage-2 must run the ff-merge (step 5)");
   assert.ok(p2.includes("--worktree /tmp/wt"), "stage-2 must pass --worktree to the ff-merge (stale-lock reclaim scope, gap-worktree-remove-orphans-probes)");
   assert.ok(p2.includes("# bracket-close-block-start"), "stage-2 must close the telemetry bracket (step 5.5)");
   assert.ok(p2.includes("worktree-process-reaper.ts"), "stage-2 must reap live processes under the worktree before removal (gap-worktree-remove-orphans-probes)");
@@ -2252,6 +2267,66 @@ test("fix-scope REAL negative control — in-Touches red → inScope(fix); out-o
   const reasons = Object.fromEntries(verdict.outOfScope.map((f) => [f.file, f.reason]));
   assert.equal(reasons["pkg/OTHER/stray.test.mjs"], "other-task", "an out-of-Touches red must defer as other-task");
   assert.equal(reasons["plugin/test/cold-start-skill.test.mjs"], "load-sensitive", "a load-sensitive family red must release (not fix)");
+});
+
+test("fix-scope REAL new-event routing — a never-failed file's out-of-Touches red routes to new-event (escalate), NOT other-task (defer); a fails>0 file routes back to other-task", async (t) => {
+  const task = "gap-test-fixscope-new-event";
+  const dir = makeFixScopeDir("fan-in-fixscope-ne-", task, [
+    "---",
+    `id: ${task}`,
+    "status: ready",
+    "---",
+    "## Touches",
+    `- tasks/${task}.md`,
+    "- pkg/a/**",
+  ].join("\n") + "\n");
+  t.after(() => cleanup(dir));
+
+  // A mock gitignored carrier. The gate reads it via QUAY_PERFILE_RATE_ROOT (the test seam for the
+  // same --root/QUAY_MAIN_CHECKOUT resolution the production gate uses) — a fake worktree has no
+  // real .quay/verification-round.jsonl.
+  const carrierDir = fs.mkdtempSync(path.join(os.tmpdir(), "perfile-rate-mock-"));
+  t.after(() => cleanup(carrierDir));
+  fs.mkdirSync(path.join(carrierDir, ".quay"), { recursive: true });
+  const carrierFile = path.join(carrierDir, ".quay", "verification-round.jsonl");
+  const rel = "pkg/OTHER/never-failed.test.mjs";
+  const mkPerFile = (runs, failIdxs) => {
+    const failSet = new Set(failIdxs);
+    return Array.from({ length: runs }, (_, i) => ({
+      file: rel, passed: !failSet.has(i), startedAtMs: 1000 + i, endedAtMs: 1100 + i, durationMs: 10,
+    }));
+  };
+  const writeCarrier = (recs) => fs.writeFileSync(carrierFile, JSON.stringify({ round: 1, perFile: recs }) + "\n", "utf8");
+
+  const log = `/tmp/fan-in-suite-${task}.log`;
+  fs.writeFileSync(log, `__PERFILE__ duration_ms=1.2 ${dir}/${rel} passed=false\n`, "utf8");
+  t.after(() => { try { fs.rmSync(log, { force: true }); } catch (_) { /* best-effort */ } });
+
+  const block = await fixScopeGateBlockFor(task, dir);
+  const env = { ...process.env, QUAY_PERFILE_RATE_ROOT: carrierDir };
+
+  // Case 1: never-failed (fails=0) ⇒ the gate routes it new-event (escalate), not other-task (defer).
+  writeCarrier(mkPerFile(60, []));
+  const r1 = runBash(block + '\necho "GATE_OUT=[$fix_scope_out]"', { cwd: dir, env });
+  assert.equal(r1.status, 0, r1.stderr);
+  const v1 = JSON.parse(r1.stdout.match(/GATE_OUT=\[(.*)\]/s)[1]);
+  const o1 = v1.outOfScope.find((f) => f.file === rel);
+  assert.ok(o1, "the out-of-Touches red must be in outOfScope");
+  assert.equal(o1.reason, "new-event", "a never-failed file must escalate (new-event), not defer (other-task)");
+  assert.deepEqual(o1.baseline, { runs: 60, fails: 0, rate: 0, classification: "new-event" }, "baseline carries runs/fails/rate/classification");
+  assert.deepEqual(v1.baselines[rel], { runs: 60, fails: 0, rate: 0, classification: "new-event" }, "every failure's baseline is in the verdict baselines map");
+
+  // Case 2: same file now has fails>0 spread across BOTH halves ⇒ within-baseline ⇒ routes back to
+  // other-task (defer), NOT new-event (escalate). This is the 能取假 direction: flip the history, the
+  // route flips.
+  writeCarrier(mkPerFile(60, [10, 45]));
+  const r2 = runBash(block + '\necho "GATE_OUT=[$fix_scope_out]"', { cwd: dir, env });
+  assert.equal(r2.status, 0, r2.stderr);
+  const v2 = JSON.parse(r2.stdout.match(/GATE_OUT=\[(.*)\]/s)[1]);
+  const o2 = v2.outOfScope.find((f) => f.file === rel);
+  assert.equal(o2.reason, "other-task", "a fails>0 within-baseline file must defer (other-task), not escalate");
+  assert.equal(o2.baseline.classification, "within-baseline");
+  assert.equal(o2.baseline.fails, 2);
 });
 
 test("fix-scope REAL machine-partition — a task WITHOUT a ## Touches section ⇒ scoped=false, load-sensitive still released, rest inScope", async (t) => {

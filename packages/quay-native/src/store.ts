@@ -8,14 +8,30 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import YAML from "yaml";
 import { TASK_STATUSES, TASK_STATUS, isTaskStatus, type Task, type TaskStatus } from '../../quay/src/abi.ts';
-// gap-unified-frontmatter-parser: the ONE complete frontmatter parser lives in plugin/scripts/
-// task-schema.ts (the schema authority). This store READS through it rather than re-deriving a
-// private YAML.parse — parseTask/readDependsOn/store.parse all delegate to the same function, so the
-// schema can never drift across the three readers. The write-side serialize()/validateWrittenYaml()
-// keep their own YAML.stringify/YAML.parse: serialization correctness is the store's, not the schema's.
-import { parseFrontmatterCompletely } from "../../../plugin/scripts/task-schema.ts";
+// gap-unified-frontmatter-parser: the ONE complete frontmatter parser now lives in the product layer
+// (packages/quay/src/task-parsing.ts, next to abi.ts — gap-abi-promote-section-parsing-flip-store-
+// reverse-import). This store READS through it rather than re-deriving a private YAML.parse —
+// parseTask/readDependsOn/store.parse all delegate to the same function, so the schema can never
+// drift across the three readers. The write-side serialize()/validateWrittenYaml() keep their own
+// YAML.stringify/YAML.parse: serialization correctness is the store's, not the schema's.
+import { parseFrontmatterCompletely } from "../../quay/src/task-parsing.ts";
+// SPEC-store-commit-unification §4: the commit-after-write PRIMITIVE (four-state return, rev-parse
+// root, pathspec-limited add+commit) lives in the product layer next to task-parsing.ts. This store
+// delegates its add/commit to it and keeps only its own branch-aware ff-to-develop propagation —
+// the primitive's "develop" propagate is too coarse for task/ worktree branches (fan-in ff-merge is
+// the sole path into develop from a task worktree).
+import { commitStoreWrite } from "../../quay/src/store-commit.ts";
+// gap-shape-section-tables-dual-copy-no-single-source: the shape section-heading lists (which
+// headings count as proposal/plan/ac/dod per shape) live in ONE place — plugin/scripts/shape-
+// sections.ts — imported by BOTH this store (product judge) and ready-pool-check.ts (methodology
+// judge). They live in plugin/scripts/ (not packages/) because quay-init lays the mechanism layer
+// but NOT the packages/ source tree into consumers, so a laid-down ready-pool-check.ts can only
+// reach a sibling plugin/scripts file; esbuild inlines this import into the self-contained dist
+// bundle so the product build stays standalone.
+import { SHAPE_SECTIONS } from "../../../plugin/scripts/shape-sections.ts";
 
 export const VALID_STATUSES: readonly string[] = TASK_STATUSES;
 
@@ -41,58 +57,51 @@ export const VALID_STATUSES: readonly string[] = TASK_STATUSES;
  * Every shape's contract is complete on its own dimension; the gate dispatches
  * by shape rather than waiving checks (invariant 分派 ≠ 豁免).
  */
+
+// gap-shape-section-tables-dual-copy-no-single-source: the section-heading lists (proposal/plan/
+// ac/dod per shape) and the suffixed/draft heading variants previously lived HERE and were
+// hand-copied into ready-pool-check.ts (drifted twice). They now live in ONE place —
+// plugin/scripts/shape-sections.ts (imported at the top of this file) — and this registry DERIVES
+// its `sections` from it. `planKeys` (the contract shape's extra artifact keys) stay here: they are
+// not part of the AC/DoD heading-list drift and only the store consumes them. Adding a heading
+// variant to shape-sections.ts is seen by BOTH this store (check()) and ready-pool-check.ts
+// (artifactsComplete()) at once.
 export const SHAPE_REGISTRY = {
   contract: {
     planKeys: ["measure", "band", "invariant", "invoke", "control", "resume"],
-    sections: {
-      // `## 人的裁定` is the directive-variant proposal-slot: a directive task
-      // (type: directive) carries the human ruling as its proposal, with the
-      // implementation contract in `## Contract` (DIR-123-aarch64,
-      // gap-cli-quay-init-collides). Same alias principle as finding's
-      // `## Finding` mapping into the proposal-slot.
-      proposal: ["Proposal", "人的裁定"],
-      plan: ["Contract"],
-      ac: ["AC", "Acceptance Criteria"],
-      dod: ["DoD", "Definition of Done"],
-    },
+    // `## 人的裁定` is the directive-variant proposal-slot (DIR-123-aarch64,
+    // gap-cli-quay-init-collides): a directive task carries the human ruling as proposal, the
+    // implementation contract in `## Contract`.
+    sections: SHAPE_SECTIONS.contract,
   },
   finding: {
     planKeys: [],
-    sections: {
-      proposal: ["Finding"],
-      ac: ["AC", "Acceptance Criteria"],
-      dod: ["DoD", "Definition of Done"],
-    },
+    sections: SHAPE_SECTIONS.finding,
   },
   plan: {
     planKeys: [],
-    sections: {
-      proposal: ["Proposal"],
-      plan: ["Plan"],
-      ac: ["AC", "Acceptance Criteria"],
-      dod: ["DoD", "Definition of Done"],
-    },
+    sections: SHAPE_SECTIONS.plan,
   },
-  // proposal shape (2026-08-11, DIR-127 + gap-mcp-server-test-deadlocks): a task
-  // whose own complete contract is Proposal / AC / DoD with NO plan dimension —
-  // symmetric with `finding` (which uses `## Finding` as its proposal-slot), but
-  // the proposal-slot is the literal `## Proposal`. Recording-type directives
-  // (DIR-028: "只记录方向,不要求立刻做") and execution tasks that carry their
-  // approach inside `## Proposal` (no separate `## Plan`) are complete on this
-  // dimension — adding a fabricated `## Contract` to them would be a shape change
-  // (gap-todo-shape-mismatch-author-gate's "分派 ≠ 豁免": a shape is complete on
-  // its OWN dimension, not lazily skipping the plan check).
+  // proposal shape (2026-08-11, DIR-127 + gap-mcp-server-test-deadlocks): a task whose own complete
+  // contract is Proposal / AC / DoD with NO plan dimension — symmetric with `finding` (which uses
+  // `## Finding` as its proposal-slot), but the proposal-slot is the literal `## Proposal`.
   proposal: {
     planKeys: [],
-    sections: {
-      proposal: ["Proposal"],
-      ac: ["AC", "Acceptance Criteria"],
-      dod: ["DoD", "Definition of Done"],
-    },
+    sections: SHAPE_SECTIONS.proposal,
   },
 } as const;
 
 export type TaskShape = keyof typeof SHAPE_REGISTRY | "unknown";
+
+/** Escape regex-special characters so a heading is matched LITERALLY. Without this, a registered
+ *  heading like `AC (draft)` or `Acceptance Criteria (runnable)` would be built into a `^##\s+<h>\s*$`
+ *  regex where the parentheses become capture groups and NEVER match the literal `## AC (draft)` line.
+ *  All the pre-variant headings are plain section names (no special chars), so escaping is a no-op for
+ *  them — it only matters for the parenthesized suffix/draft variants now registered in SHAPE_REGISTRY.
+ *  Mirrors ready-pool-check.ts's own escapeRegExp (same byte semantics — the single-judge contract). */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 /** Does `body` contain a `## <heading>` line that is EXACTLY that heading
  *  (trailing whitespace allowed)? Exact match prevents false positives from
@@ -155,7 +164,7 @@ export function sectionAfterHeading(body: string, headings: string[]): string {
     // by the iteration-1 G3 audit against QN-005's own AC text, which
     // contains the word "zero"). Correct JS end-of-string lookahead is
     // `(?![\s\S])` (no characters remain).
-    const headingRe = new RegExp(`^##\\s+${h}\\s*$`, "im");
+    const headingRe = new RegExp(`^##\\s+${escapeRegExp(h)}\\s*$`, "im");
     const m = headingRe.exec(body);
     if (!m) continue;
     // Content = everything after the heading line up to the next `## ` heading
@@ -173,7 +182,7 @@ export function sectionAfterHeading(body: string, headings: string[]): string {
 /**
  * Contract shape (AC4): verify the `## Contract` section carries ALL six
  * mandatory keys (measure/band/invariant/invoke/control/resume) — the format
- * `plugin/scripts/task-contract-check.ts` consumes. Returns a per-key boolean
+ * `task-contract-check.ts` consumes. Returns a per-key boolean
  * map. Only meaningful when `detectShape(body) === "contract"`.
  */
 export function contractKeysPresent(body: string): Record<string, boolean> {
@@ -823,6 +832,12 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       role: (children.length > 0 ? "compound" : "primitive") as Task['role'],
       extra,
       body,
+      // gap-webui-goal-task-rollup-via-shared-summary-cache: surface the top-level goal_ac
+      // (task→AC linkage, G7) in the view-model so read surfaces can consume the structured
+      // relationship. null = unset (缺值 = 未查, distinguishable from a concrete AC id), never a
+      // fabricated value. Previously goal_ac was WRITE-only: task_write accepted it, task_list
+      // silently dropped it — the relationship was recorded but no read surface could see it.
+      goal_ac: typeof frontmatter.goal_ac === "string" ? frontmatter.goal_ac : null,
     };
     // QX-008 (experiment 4, iteration 2): include updatedAt (file mtime as ms
     // since epoch) when the caller provides it. Callers that don't need mtime
@@ -1022,6 +1037,245 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     invalidateCache(parentId);
   }
 
+  // ── COMMIT-AFTER-WRITE (gap-abi-missing-commit-delete-dependson-primitives) ──────────────────────
+  // task_write / task_delete write to disk; every consumer of task state on the dispatch/lifecycle
+  // spine (ready-pool-check / slot-refill / worker-driver / Web UI) reads `git show develop:tasks/
+  // <id>.md`, never disk. A disk-only write is therefore dispatch-invisible until something ELSE
+  // commits and (when the write happened in a task worktree) ff-merges it into develop — the disk
+  // value silently loses to the git-ref value, indistinguishable from "the edit never happened"
+  // (CLAUDE.md 硬规则 3b/4b). This block adds a scoped, branch-aware commit primitive to the write
+  // path: commit `tasks/<id>.md` ALONE (pathspec, never `-A`), and — when on the main checkout (a
+  // branch that is NOT develop and NOT a `task/<id>` worktree branch) — ff-push to develop so the
+  // write becomes dispatch-visible. Inside a task worktree the commit lands on the worktree's own
+  // branch and develop is left untouched (fan-in ff-merge remains the only path into develop, AC2).
+
+  /** The git root containing `tasksDir`, or null when not inside a git work tree (unit-test temp
+   *  dirs / repo-less roots — the commit is then a no-op, never a throw). Memoized: `tasksDir` does
+   *  not move for the store's lifetime, so a temp-dir store pays exactly ONE failed `rev-parse`. */
+  let _gitRoot: string | null | undefined;
+  function resolveGitRoot(): string | null {
+    if (_gitRoot !== undefined) return _gitRoot;
+    try {
+      const out = execFileSync("git", ["-C", tasksDir, "rev-parse", "--show-toplevel"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      _gitRoot = out.trim() || null;
+    } catch {
+      _gitRoot = null;
+    }
+    return _gitRoot;
+  }
+
+  /** Current branch name of the git root, or null (detached HEAD / not in git). */
+  function currentBranch(root: string): string | null {
+    try {
+      const out = execFileSync("git", ["-C", root, "branch", "--show-current"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      return out.trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Whether `rel` exists in HEAD (the git blob `HEAD:<rel>`). False when the file was never
+   *  committed — the "nothing to stage" guard for deleting an untracked file. */
+  function inHead(root: string, rel: string): boolean {
+    try {
+      execFileSync("git", ["-C", root, "cat-file", "-e", `HEAD:${rel}`], { stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** ff-push `branch` to develop (fast-forward only, `git push . <branch>:develop`). Non-ff / git
+   *  error ⇒ false. The semantic-sync fallback for a forked main checkout is NOT this store's job —
+   *  the driver's standing `propagateDocBranchToDevelop` owns that case. */
+  function ffPushToDevelop(root: string, branch: string): boolean {
+    try {
+      execFileSync("git", ["-C", root, "push", ".", `${branch}:develop`], { stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // ── gap-store-commit-propagation-field-aware (SPEC-store-commit-unification §5) ────────────────
+  // Field-level propagation judgment: a write's strategy is decided by WHO reads the changed field,
+  // not WHO wrote it. Three field classes are read ONLY by the task's own fan-in (ac-precheck /
+  // flip AC gate / Evidence rendering) and may therefore stay on the task's branch until fan-in:
+  //   · AC/DoD checkbox toggles (`- [ ]` ↔ `- [x]`)
+  //   · `## Evidence` section content (append/edit — incl. suffixed variants `## Evidence（…）`)
+  //   · the task's own goal association (`goal_ac` top-level, `extra.goal` nested)
+  // A write whose change set is ONLY these is "self-only": even on a non-`task/*` branch it must
+  // NOT ff to develop (the task's own fan-in carries it to develop with the worktree branch).
+  // Anything else — new-task creation, status/lifecycle flips, title/labels/parent/children, any
+  // non-goal `extra` key, any body edit outside Evidence/checkbox markers — is "must-propagate"
+  // and keeps the current behavior (宁可多推、不可少推: a mixed write is never misread as pure-AC).
+
+  /** Order-insensitive deep equality — used only to compare two frontmatter objects field-by-field
+   *  with the self-only goal fields masked out. */
+  function deepEqualSelfOnly(a: unknown, b: unknown): boolean {
+    if (a === b) return true;
+    if (typeof a !== typeof b) return false;
+    if (a === null || b === null) return false;
+    if (Array.isArray(a) || Array.isArray(b)) {
+      if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+      return a.every((v, i) => deepEqualSelfOnly(v, b[i]));
+    }
+    if (typeof a === "object" && typeof b === "object") {
+      const ak = Object.keys(a as Record<string, unknown>);
+      const bk = Object.keys(b as Record<string, unknown>);
+      if (ak.length !== bk.length) return false;
+      const bs = new Set(bk);
+      if (!ak.every((k) => bs.has(k))) return false;
+      return ak.every((k) => deepEqualSelfOnly((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
+    }
+    return false;
+  }
+
+  /** Strip the self-only frontmatter fields (`goal_ac`, `extra.goal`) so any OTHER frontmatter
+   *  change surfaces as a difference. */
+  function stripSelfOnlyFrontmatter(fm: Record<string, unknown>): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(fm)) {
+      if (k === "goal_ac") continue;
+      if (k === "extra") {
+        const e = v && typeof v === "object" && !Array.isArray(v) ? { ...(v as Record<string, unknown>) } : {};
+        delete e.goal;
+        out[k] = e;
+        continue;
+      }
+      out[k] = v;
+    }
+    return out;
+  }
+
+  /** Normalize the body's self-only changes: (a) AC/DoD checkbox markers → canonical `[·]` so a
+   *  `- [ ]`↔`- [x]` toggle is invisible; (b) the ENTIRE `## Evidence` section (heading + content,
+   *  incl. suffixed variants) is stripped, so appending/editing/removing evidence — read only by
+   *  the task's own fan-in — is invisible too. */
+  function maskSelfOnlyBody(body: string): string {
+    let out = body.replace(/^([ \t]*[-*][ \t]+)\[[ xX~]\]([ \t]+)/gm, "$1[·]$2");
+    for (;;) {
+      const m = /^##[ \t]+Evidence\b.*$/m.exec(out);
+      if (!m) break;
+      const headingStart = m.index;
+      const contentStart = m.index + m[0].length;
+      const rest = out.slice(contentStart);
+      const next = /^##[ \t]/m.exec(rest);
+      const contentEnd = contentStart + (next ? next.index : rest.length);
+      out = out.slice(0, headingStart) + out.slice(contentEnd);
+    }
+    // Strip a trailing Evidence section leaves its leading blank-line separator as trailing
+    // whitespace (before ends at the previous section, after ends with the separator). Trailing
+    // whitespace is not a field — trim it so an Evidence-only append compares equal (end-of-file
+    // whitespace is not read by any consumer).
+    return out.trimEnd();
+  }
+
+  /** Field-level change classification: "self-only" iff the ONLY differences between the before
+   *  and after (frontmatter + body) are the three self-only field classes above. */
+  function classifyTaskWriteChange(
+    beforeFrontmatter: Record<string, unknown>,
+    beforeBody: string,
+    afterFrontmatter: Record<string, unknown>,
+    afterBody: string,
+  ): "self-only" | "must-propagate" {
+    if (!deepEqualSelfOnly(stripSelfOnlyFrontmatter(beforeFrontmatter), stripSelfOnlyFrontmatter(afterFrontmatter))) {
+      return "must-propagate";
+    }
+    if (maskSelfOnlyBody(beforeBody) !== maskSelfOnlyBody(afterBody)) return "must-propagate";
+    return "self-only";
+  }
+
+  /** GOAL-011 AC-220（gap-store-commit-propagation-log，退出条件①②的直接生产证据）：把
+   *  `commitTaskWrite` 每一次「committed:true」的传播决定追加写入
+   *  `<root>/.quay/store-commit-propagation.jsonl`（gitignored 运行时日志，worker-outcome.jsonl
+   *  同族）——这是该函数自己的决定，不是从 ff-red 率反推的间接信号（硬规则「推论三」：measure the
+   *  actual production carrier, not a downstream noisy symptom）。⛔ 日志写入失败不得影响真实的
+   *  commit/propagate 结果（best-effort、try/catch 吞掉）——观测不得阻塞主执行
+   *  （observation-must-not-block-main-execution，人 2026-08-30 裁定）。 */
+  function logPropagationOutcome(root: string, rec: {
+    id: string;
+    verb: "task_write" | "task_delete";
+    changeKind: "self-only" | "must-propagate";
+    branchClass: "develop" | "task-branch" | "other";
+    propagated: boolean;
+  }): void {
+    try {
+      const file = path.join(root, ".quay", "store-commit-propagation.jsonl");
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.appendFileSync(file, JSON.stringify({ ts: new Date().toISOString(), ...rec }) + "\n", "utf8");
+    } catch {
+      // best-effort telemetry — never let a log-write failure affect the real commit outcome.
+    }
+  }
+
+  /** Commit `tasks/<id>.md` (branch-aware) after a successful write/delete, delegating the git
+   *  add/commit to the shared primitive `commitStoreWrite` (SPEC-store-commit-unification §3) and
+   *  keeping only this store's own branch-aware ff-to-develop propagation. Returns
+   *  `{ committed, propagated, status }` — honest, distinguishable outcomes, never "silent success"
+   *  (硬规则 3b):
+   *    status "committed"  — the change is on the current branch's git history (propagated reports
+   *                          whether it also reached develop).
+   *    status "not-in-git" — the store's tasksDir is not inside a git work tree (unit-test temp
+   *                          dirs): a deliberate no-op, NOT a failure.
+   *    status "nothing"    — nothing to stage/commit (deleting a never-committed untracked file, or
+   *                          a byte-identical write the primitive restored to HEAD).
+   *    status "failed"     — the git add/commit itself errored: a REAL failure (the disk change is
+   *                          not on any branch's history).
+   *  Callers log only `failed` — the other non-committed states are expected and must not be
+   *  mistaken for a broken commit. */
+  function commitTaskWrite(id: string, verb: "task_write" | "task_delete", changeKind: "self-only" | "must-propagate" = "must-propagate"): { committed: boolean; propagated: boolean; status: "committed" | "not-in-git" | "nothing" | "failed" } {
+    const root = resolveGitRoot();
+    if (root === null) return { committed: false, propagated: false, status: "not-in-git" };
+    const rel = path.join("tasks", `${id}.md`);
+    // "nothing" guard BEFORE delegating: deleting a never-committed untracked file has no index
+    // entry to stage — a DISTINGUISHABLE no-op, never conflated with "failed" (硬规则 3b). The
+    // primitive's four states have no "nothing" (SPEC §3), so this edge stays here.
+    if (!fs.existsSync(path.join(root, rel)) && !inHead(root, rel)) {
+      return { committed: false, propagated: false, status: "nothing" };
+    }
+    const res = commitStoreWrite({
+      relPath: rel,
+      kind: "tasks",
+      id,
+      action: verb,
+      root,
+      propagate: "none", // branch-aware ff below; the primitive's "develop" is too coarse for task/ branches
+    });
+    if (res.outcome === "not-in-git") return { committed: false, propagated: false, status: "not-in-git" };
+    if (res.outcome === "unchanged") return { committed: false, propagated: false, status: "nothing" };
+    if (res.outcome === "failed") return { committed: false, propagated: false, status: "failed" };
+    const branch = currentBranch(root);
+    if (branch === null || branch === "develop") {
+      // detached HEAD, or already on develop — nothing further to propagate.
+      const propagated = branch === "develop";
+      logPropagationOutcome(root, { id, verb, changeKind, branchClass: "develop", propagated });
+      return { committed: true, propagated, status: "committed" };
+    }
+    if (branch.startsWith("task/")) {
+      // Task worktree: commit to the worktree's own branch only; fan-in ff-merge is the sole path
+      // into develop (AC2 negative control).
+      logPropagationOutcome(root, { id, verb, changeKind, branchClass: "task-branch", propagated: false });
+      return { committed: true, propagated: false, status: "committed" };
+    }
+    if (verb === "task_write" && changeKind === "self-only") {
+      // Self-only write (AC ticks / Evidence / goal association) on a non-task/* branch: do NOT ff
+      // to develop — the task's own fan-in carries it to develop with the worktree branch
+      // (gap-store-commit-propagation-field-aware, SPEC §5).
+      logPropagationOutcome(root, { id, verb, changeKind, branchClass: "other", propagated: false });
+      return { committed: true, propagated: false, status: "committed" };
+    }
+    const propagated = ffPushToDevelop(root, branch);
+    logPropagationOutcome(root, { id, verb, changeKind, branchClass: "other", propagated });
+    return { committed: true, propagated, status: "committed" };
+  }
+
   /**
    * Raw file write — used by both `task create` (internal convenience,
    * not part of the ABI surface table but needed to seed tasks) and `edit`.
@@ -1068,7 +1322,10 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
    * only ordinary last-writer-wins sequencing (identical to every other
    * field this store already handles).
    */
-  function write(id: string, { title, status, labels, parent, children, extra, body, depends_on, expectedStatus }: { title?: string; status?: string; labels?: string[]; parent?: string | null; children?: string[]; extra?: Record<string, unknown>; body?: string; depends_on?: string[]; expectedStatus?: string }): (Task & { updatedAt?: number }) | null {
+  function write(id: string, { title, status, labels, parent, children, extra, body, depends_on, goal_ac, expectedStatus }: { title?: string; status?: string; labels?: string[]; parent?: string | null; children?: string[]; extra?: Record<string, unknown>; body?: string; depends_on?: string[]; goal_ac?: string; expectedStatus?: string }, opts?: { commit?: boolean }): (Task & { updatedAt?: number }) | null {
+    // COMMIT-AFTER-WRITE (gap-abi-missing-commit-delete-dependson-primitives): commit-by-default,
+    // opt-out per call via `{ commit: false }` (multi-file batch editors commit once at the end).
+    const commit = opts?.commit !== false;
     if (status && !VALID_STATUSES.includes(status)) {
       throw new Error(
         `invalid status "${status}" — must be one of ${VALID_STATUSES.join(", ")}`
@@ -1085,12 +1342,18 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
 
     // QN-006: read-modify-write is lock-protected so CLI and MCP writers
     // (the same store.js core, design §6) never interleave on the same file.
-    return withLocks(lockIds, () => {
+    // gap-store-commit-propagation-field-aware: default "must-propagate" so a NEW file (no before
+    // state) and any error path keep the current ff-to-develop behavior — the field-level judgment
+    // can only downgrade a write to "self-only", never the other way.
+    let writeChangeKind: "self-only" | "must-propagate" = "must-propagate";
+    const result = withLocks(lockIds, () => {
       const existingRaw = readRaw(id);
       let frontmatter: Record<string, unknown> = { id, title, status, labels: labels ?? [], parent: parent ?? null, children: children ?? [] };
       let existingBody = "";
+      let beforeFrontmatter: Record<string, unknown> | null = null;
       if (existingRaw !== null) {
         const parsed = parse(existingRaw);
+        beforeFrontmatter = parsed.frontmatter;
         frontmatter = { ...parsed.frontmatter };
         existingBody = parsed.body;
         // QN-015: the CAS check MUST happen here, inside the same lock
@@ -1111,6 +1374,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
         if (parent !== undefined) frontmatter.parent = parent;
         if (extra !== undefined) frontmatter.extra = extra;
         if (depends_on !== undefined) frontmatter.depends_on = depends_on;
+        if (goal_ac !== undefined) frontmatter.goal_ac = goal_ac;
       } else {
         // No existing file: there is no "current status" to compare against,
         // so any expectedStatus is by definition a mismatch (there is
@@ -1120,6 +1384,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
         }
         frontmatter.extra = extra ?? {};
         if (depends_on !== undefined) frontmatter.depends_on = depends_on;
+        if (goal_ac !== undefined) frontmatter.goal_ac = goal_ac;
         // DIR-047 (ADR-004 single-source): apply the configured creation
         // default when creating a NEW task with no explicit status.
         // storeDefaultStatus is the per-provider default_task_status from
@@ -1131,6 +1396,11 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       }
       const finalBody = body !== undefined ? body : existingBody;
       const raw = serialize(frontmatter, finalBody);
+      // Field-level propagation judgment (SPEC §5) — classify BEFORE the file write so the caller's
+      // change set (not a re-read of the just-written file) decides whether to ff to develop.
+      if (beforeFrontmatter !== null) {
+        writeChangeKind = classifyTaskWriteChange(beforeFrontmatter, existingBody, frontmatter, finalBody);
+      }
       const taskFilePath = filePathFor(id);
       // M89 (exp5-DEFECT-YAML-FRONTMATTER-COLON-CRASH): post-write YAML
       // validation — write, then immediately re-parse the frontmatter.
@@ -1169,6 +1439,59 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       }
 
       return get(id);
+    });
+    // Commit AFTER the lock is released (a git commit is not a file-lock concern; holding the
+    // advisory lock across a git subprocess would serialize writers for no data-integrity gain).
+    if (commit && result !== null) {
+      const c = commitTaskWrite(id, "task_write", writeChangeKind);
+      if (c.status === "failed") {
+        // The disk write succeeded but the git commit (the dispatch-visibility half) genuinely
+        // FAILED — never throw (the caller's write IS on disk), but surface on stderr so the failure
+        // is observable, not silent (硬规则 3b). "not-in-git" (temp dirs) and "nothing" are expected
+        // no-ops and deliberately do NOT log.
+        console.error(
+          `quay-native store: task_write "${id}" wrote to disk but the commit FAILED (committed=${c.committed}, propagated=${c.propagated})`
+        );
+      }
+    }
+    return result;
+  }
+
+  /**
+   * task_delete (gap-abi-missing-commit-delete-dependson-primitives): remove a task file (unlink) +
+   * the same branch-aware commit as write. Fail-closed on a missing id (a delete that removes nothing
+   * must NOT read as success — 硬规则 3b, no silent no-op). Drops the task's parse-cache entry (its
+   * advisory lock is released by withLock). Returns `{ id, ok, reason, committed, propagated }` —
+   * `ok:false` with `reason:"missing"` is the not-found contract the MCP handler maps to isError.
+   */
+  function deleteTask(id: string, opts?: { commit?: boolean }): { id: string; ok: boolean; reason: string; committed: boolean; propagated: boolean } {
+    const commit = opts?.commit !== false;
+    const taskFilePath = filePathFor(id);
+    if (!fs.existsSync(taskFilePath)) {
+      return { id, ok: false, reason: "missing", committed: false, propagated: false };
+    }
+    return withLock(id, () => {
+      // Re-check under the lock (the file may have vanished between the existsSync above and here).
+      if (!fs.existsSync(taskFilePath)) {
+        return { id, ok: false, reason: "missing", committed: false, propagated: false };
+      }
+      fs.rmSync(taskFilePath, { force: true });
+      invalidateCache(id);
+      let committed = false;
+      let propagated = false;
+      if (commit) {
+        const c = commitTaskWrite(id, "task_delete");
+        committed = c.committed;
+        propagated = c.propagated;
+        if (c.status === "failed") {
+          // The file removal succeeded but the deletion commit genuinely FAILED — surface on stderr
+          // (observable, not silent; 硬规则 3b). "not-in-git" / "nothing" are expected no-ops.
+          console.error(
+            `quay-native store: task_delete "${id}" removed the file but the deletion commit FAILED (committed=${c.committed}, propagated=${c.propagated})`
+          );
+        }
+      }
+      return { id, ok: true, reason: "deleted", committed, propagated };
     });
   }
 
@@ -1259,7 +1582,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
         // so `## 人的裁定` (last char 定 is CJK, next char is the newline)
         // never matched the old `^##\s+人的裁定\b` — the registered alias was
         // dead code and the proposal artifact read false for a present section.
-        if (!new RegExp(`^##\\s+${h}\\s*$`, "im").test(body)) continue;
+        if (!new RegExp(`^##\\s+${escapeRegExp(h)}\\s*$`, "im").test(body)) continue;
         const content = sectionAfterHeading(body, [h]);
         const nonWhitespaceLen = content.replace(/\s/g, "").length;
         if (nonWhitespaceLen >= MIN_SECTION_CHARS) return true;
@@ -1505,6 +1828,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     listWithMalformed,
     get,
     write,
+    delete: deleteTask,
     appendNote,
     check,
     artifactSections,

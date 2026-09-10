@@ -47,7 +47,7 @@ test("GREEN: config.yml without a suite: key → {} (providers/loop only)", () =
   assert.deepEqual(readSuiteParams(ws), {});
 });
 
-test("GREEN: a full valid suite: section returns all 8 typed values", () => {
+test("GREEN: a full valid suite: section returns all 7 typed values", () => {
   const ws = tmpWs();
   writeConfig(
     ws,
@@ -59,7 +59,6 @@ test("GREEN: a full valid suite: section returns all 8 typed values", () => {
       "  lowconc_concurrency: 3",
       "  max_concurrent_suites: 2",
       "  max_oversubscription: 1.5",
-      "  main_tail_overlap_lanes: 0",
       "  main_tail_stall_pct: 6",
       "",
     ].join("\n"),
@@ -71,7 +70,6 @@ test("GREEN: a full valid suite: section returns all 8 typed values", () => {
     lowconc_concurrency: 3,
     max_concurrent_suites: 2,
     max_oversubscription: 1.5,
-    main_tail_overlap_lanes: 0,
     main_tail_stall_pct: 6,
   });
 });
@@ -116,12 +114,6 @@ test("RED: an out-of-range knob (max_concurrent_suites: 0) throws FAIL-CLOSED", 
   assert.throws(() => readSuiteParams(ws), /FAIL-CLOSED/);
 });
 
-test("RED: a negative knob (main_tail_overlap_lanes: -1) throws FAIL-CLOSED", () => {
-  const ws = tmpWs();
-  writeConfig(ws, "suite:\n  main_tail_overlap_lanes: -1\n");
-  assert.throws(() => readSuiteParams(ws), /FAIL-CLOSED/);
-});
-
 test("RED: an out-of-range stall threshold (main_tail_stall_pct: 150) throws FAIL-CLOSED", () => {
   const ws = tmpWs();
   writeConfig(ws, "suite:\n  main_tail_stall_pct: 150\n");
@@ -157,7 +149,7 @@ test("suiteParamsToEnv maps present knobs to their env vars (absent → omitted)
   );
 });
 
-test("SUITE_KNOBS declares exactly the 8 config→env mappings (the 7 from the Proposal + main_tail_stall_pct + suite_scheduler)", () => {
+test("SUITE_KNOBS declares exactly the 7 config→env mappings", () => {
   assert.deepEqual(SUITE_KNOBS, {
     suite_scheduler: "QUAY_SUITE_SCHEDULER",
     phase_overlap: "QUAY_PHASE_OVERLAP",
@@ -165,7 +157,6 @@ test("SUITE_KNOBS declares exactly the 8 config→env mappings (the 7 from the P
     lowconc_concurrency: "QUAY_LOWCONC_CONCURRENCY",
     max_concurrent_suites: "QUAY_MAX_CONCURRENT_SUITES",
     max_oversubscription: "QUAY_MAX_OVERSUBSCRIPTION",
-    main_tail_overlap_lanes: "QUERY_MAIN_TAIL_OVERLAP",
     main_tail_stall_pct: "QUAY_MAIN_TAIL_STALL_PCT",
   });
 });

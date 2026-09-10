@@ -157,6 +157,11 @@ export function issueToViewModel(issue: Record<string, unknown>, parentIndex: Ma
 
   const body = (issue.body as string | null | undefined) ?? "";
   const children = extractChildRefs(body);
+  // gap-cli-write-surface-lacks-toplevel-fields: surface the native top-level
+  // depends_on/goal_ac fields (stored in the body's quay-meta block) through
+  // `extra` — the GitHub Provider's escape hatch for provider-specific data,
+  // same as `number`/`lane`/`multipleParents` below.
+  const quayMeta = extractQuayMeta(body);
   const issueNumber = issue.number as number;
   const parents = parentIndex?.get(`gh-${issueNumber}`) ?? [];
   // Canonical view-model's `parent` is singular (design §7.1); if more than
@@ -173,6 +178,8 @@ export function issueToViewModel(issue: Record<string, unknown>, parentIndex: Ma
     state: issue.state,
     ...(parents.length > 1 ? { multipleParents: parents } : {}),
     ...(lane !== null ? { lane } : {}),
+    ...(quayMeta.depends_on !== undefined ? { depends_on: quayMeta.depends_on } : {}),
+    ...(quayMeta.goal_ac !== undefined ? { goal_ac: quayMeta.goal_ac } : {}),
   };
 
   return {
@@ -248,6 +255,58 @@ export function setChildCheckboxes(body: string | null | undefined, desiredChild
   }
 
   return out;
+}
+
+// gap-cli-write-surface-lacks-toplevel-fields: native top-level `depends_on`/`goal_ac` fields
+// have no GitHub-issue equivalent (no frontmatter, and the ABI `Task` view-model does not carry
+// them), so the GitHub Provider stores them in a hidden HTML-comment metadata block inside the
+// issue body — invisible in rendered markdown, and non-conflicting with the checkbox-in-body
+// parent/children convention above. The block looks like:
+//
+//   <!-- quay-meta
+//   depends_on: gh-12,gh-13
+//   goal_ac: AC-177
+//   -->
+//
+// Read/write round-trips through this single convention (single source, no second parser).
+
+const QUAY_META_RE = /<!-- quay-meta\n([\s\S]*?)\n-->/;
+
+/** Extract `depends_on` / `goal_ac` from an issue body's quay-meta block. */
+export function extractQuayMeta(body: string | null | undefined): { depends_on?: string[]; goal_ac?: string } {
+  if (!body) return {};
+  const m = QUAY_META_RE.exec(body);
+  if (!m) return {};
+  const out: { depends_on?: string[]; goal_ac?: string } = {};
+  for (const line of m[1].split("\n")) {
+    const idx = line.indexOf(":");
+    if (idx === -1) continue;
+    const key = line.slice(0, idx).trim();
+    const val = line.slice(idx + 1).trim();
+    if (key === "depends_on") {
+      out.depends_on = val ? val.split(",").map((s) => s.trim()).filter(Boolean) : [];
+    } else if (key === "goal_ac") {
+      out.goal_ac = val === "" ? undefined : val;
+    }
+  }
+  return out;
+}
+
+/** Merge `fields` into the issue body's quay-meta block (preserving the other field), and return
+ *  the new body. Prepend a fresh block when the body has none yet. */
+export function setQuayMeta(body: string | null | undefined, fields: { depends_on?: string[]; goal_ac?: string }): string {
+  const src = body ?? "";
+  const current = extractQuayMeta(src);
+  const merged = { ...current, ...fields };
+  const lines: string[] = [];
+  if (merged.depends_on !== undefined) lines.push(`depends_on: ${merged.depends_on.join(",")}`);
+  if (merged.goal_ac !== undefined) lines.push(`goal_ac: ${merged.goal_ac}`);
+  const block = `<!-- quay-meta\n${lines.join("\n")}\n-->`;
+  if (QUAY_META_RE.test(src)) {
+    return src.replace(QUAY_META_RE, block);
+  }
+  if (src.trim() === "") return block;
+  return `${block}\n${src}`;
 }
 
 /** Build a childId -> [parentIds] index from a full list of raw issues, by
@@ -946,5 +1005,21 @@ export function createGithubClient({ owner, repo }: { owner: string; repo: strin
     return checkGate(task, get);
   }
 
-  return { list, get, setStatus, writeFields, writeRelations, check, create };
+  // gap-cli-write-surface-lacks-toplevel-fields: depends_on/goal_ac WRITE. GitHub has no
+  // frontmatter, so both fields are stored in the issue body's hidden quay-meta block
+  // (setQuayMeta above) — a single-issue body mutation, mirroring how `children` writes mutate
+  // the task's OWN body (and distinct from `parent`, which is a cross-issue body mutation).
+  function writeMeta(id: string, fields: { depends_on?: string[]; goal_ac?: string }): Task | null {
+    const m = /^gh-(\d+)$/.exec(id);
+    if (!m) throw new Error(`quay-github: invalid task id for writeMeta: ${id}`);
+    const number = m[1];
+    const currentBody = fetchRawBody(number);
+    const newBody = setQuayMeta(currentBody, fields);
+    if (newBody !== currentBody) {
+      patchBody(number, newBody);
+    }
+    return get(id);
+  }
+
+  return { list, get, setStatus, writeFields, writeRelations, writeMeta, check, create };
 }

@@ -56,6 +56,11 @@ import {
   aliveness,
   statePaths,
   kernelSelfPath,
+  watchedSourceFiles,
+  sourceFilesMaxMtimeMs,
+  sourceChangedSince,
+  supervisorStaleness,
+  procStartTimeMs,
 } from "../scripts/driver-runtime.ts";
 import { isDue } from "../scripts/routine-scheduler.ts";
 import * as worker from "../scripts/worker-driver.ts";
@@ -88,9 +93,13 @@ const FAKE_WORKER_DRIVER = [
 ].join("\n");
 
 function run(args, opts = {}) {
+  const env = { ...process.env, ...(opts.env || {}) };
+  // AC-203：kernel 从自身安装位置（或 QUAY_PLUGIN_ROOT）解析 driver/脚本——测试的 fake driver 住在
+  // <tmp>/plugin/scripts/，故经 QUAY_PLUGIN_ROOT 指向 fake plugin root（同 Core plugin-root.ts 手法）。
+  if (opts.pluginRoot) env.QUAY_PLUGIN_ROOT = opts.pluginRoot;
   return spawnSync(process.execPath, ["--experimental-strip-types", KERNEL, ...args], {
     encoding: "utf8",
-    env: opts.env || { ...process.env },
+    env,
     timeout: opts.timeout || 30000,
   });
 }
@@ -114,6 +123,25 @@ function makeWorkerRoot(tag) {
 function readPid(root, name) {
   const p = path.join(root, ".quay", name);
   return fs.existsSync(p) ? fs.readFileSync(p, "utf8").trim() : "";
+}
+
+// Poll a JSON file that a (possibly non-atomic) writer creates-then-writes. Treats "file exists but
+// content not yet fully written" (JSON.parse throws) as "not yet complete — keep polling", ⛔ not a
+// fatal parse error (gap-driver-test-fixture-json-read-before-write-complete-race). Returns the
+// parsed object, or null on timeout.
+async function pollJsonFile(p, timeoutMs = 5000, stepMs = 50) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(p)) {
+      try {
+        return JSON.parse(fs.readFileSync(p, "utf8"));
+      } catch {
+        // created but not fully written — keep polling
+      }
+    }
+    await new Promise((r) => setTimeout(r, stepMs));
+  }
+  return null;
 }
 
 function killIfAlive(pid) {
@@ -213,7 +241,10 @@ test("AC1 — Layer 1b (routine) reuses L0 schedule/heartbeat/notify; ⛔ 不重
 // ── AC2（supervisor 港进 TS）：registry 单一数据表 + 可单测纯函数 ─────────────────────────────────
 
 test("AC2 — 8 张 bash registry 表 → DRIVER_KINDS 单一 TS 数据表", () => {
-  assert.deepEqual(KNOWN_KINDS, ["promotion", "worker", "outer", "quality", "suite"], "五个 kind，registry 数据表承载差异");
+  // 2026-09-06 +meta（机制演进复核例程型 kind）+goal（G6 goal 机械环例程型 kind）。基线断言
+  // 【有意更新】——它的作用是让新增 kind 必须显式过一次这条断言，而不是悄悄混进来；故保持逐字
+  // 列举，⛔ 不改成 length 或 includes。
+  assert.deepEqual(KNOWN_KINDS, ["promotion", "worker", "outer", "quality", "meta", "goal"], "六个 kind（suite 已按人 2026-09-07 裁定退役），registry 数据表承载差异");
   assert.equal(DRIVER_KINDS.promotion.driver, "promotion-driver.ts");
   assert.equal(DRIVER_KINDS.promotion.capFlag, "--cap", "promotion capFlag = --cap");
   assert.equal(DRIVER_KINDS.promotion.hasInterval, true);
@@ -241,6 +272,14 @@ test("AC2 — 8 张 bash registry 表 → DRIVER_KINDS 单一 TS 数据表", () 
   assert.equal(DRIVER_KINDS.quality.pidSelf, true);
   assert.deepEqual(DRIVER_KINDS.quality.carriers, ["quality-round.jsonl"]);
   assert.equal(DRIVER_KINDS.quality.controlFile, "quality-control.json");
+  // G6：goal 机械环例程型 kind（Layer 0 + 1b），registry 加一行接入（同 quality/meta）。
+  assert.equal(DRIVER_KINDS.goal.driver, "goal-driver.ts");
+  assert.equal(DRIVER_KINDS.goal.capFlag, "", "goal 无任务池 ⇒ 无 cap");
+  assert.equal(DRIVER_KINDS.goal.hasInterval, true);
+  assert.equal(DRIVER_KINDS.goal.hasReconcile, false);
+  assert.equal(DRIVER_KINDS.goal.pidSelf, true);
+  assert.deepEqual(DRIVER_KINDS.goal.carriers, ["goal-round.jsonl"]);
+  assert.equal(DRIVER_KINDS.goal.controlFile, "goal-control.json");
 });
 
 test("AC2 — driverArgvForKind maps --cap → per-kind cap flag (worker --concurrency)", () => {
@@ -269,6 +308,40 @@ test("AC2 — carrierStats reads ALL carriers; last_record_ts = max across outco
   assert.match(st.primaryPath, /worker-outcome\.jsonl$/, "primary carrier is outcome");
 });
 
+test("gap-meta-carrierstats — quality carrier timestamp key is judgedAt (⛔ not ts)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dr-carrier-q-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  // quality 判词载体记录的时间戳键是 judgedAt（pool-quality-judge.ts buildQualityRoundRecord），
+  // ⛔ 不是 ts。键不匹配会把 15 条真实记录读成 lastTs=null ⇒ 停摆与健康同形。
+  fs.writeFileSync(
+    path.join(root, ".quay", "quality-round.jsonl"),
+    '{"round":1,"judgedAt":"2026-09-05T15:41:19.134Z","state":"failed"}\n' +
+      '{"round":2,"judgedAt":"2026-09-05T15:44:02.000Z","state":"judged","distribution":{},"shouldRemoveIds":[],"verdicts":[]}\n',
+    "utf8",
+  );
+  const st = carrierStats(root, "quality");
+  assert.equal(st.records, 2, "both quality records counted");
+  assert.equal(st.lastTs, "2026-09-05T15:44:02.000Z", "lastTs = max judgedAt, ⛔ null");
+});
+
+test("gap-meta-round-log-rel — quality carrier reads BOTH ts (heartbeat) and judgedAt, freshest wins", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dr-carrier-qmix-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  // quality-round.jsonl 混两种键：心跳（ts，每 30s 一条 liveness 直接量）+ 判词（judgedAt，间歇量）。
+  // 修复前只读 judgedAt ⇒ 心跳不可见 ⇒ 池不触发就假报 stall；修复后两者较新者作 lastTs。
+  fs.writeFileSync(
+    path.join(root, ".quay", "quality-round.jsonl"),
+    '{"round":1,"judgedAt":"2026-09-06T10:00:00.000Z","state":"failed"}\n' +
+      '{"round":2,"run_id":"qg-x","pid":1,"ts":"2026-09-06T10:00:30.000Z","halted":false,"facts":[]}\n',
+    "utf8",
+  );
+  const st = carrierStats(root, "quality");
+  assert.equal(st.records, 2, "both heartbeat + judgment counted");
+  assert.equal(st.lastTs, "2026-09-06T10:00:30.000Z", "lastTs = fresher heartbeat ts (⛔ judgedAt-only ⇒ stale)");
+});
+
 test("AC2 — pidAlive / readPidFile / aliveness (death direct-quantity, ⛔ not carrier-stall)", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dr-alive-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -291,7 +364,7 @@ test("AC1 (稳定承载) — start from a worktree ⇒ supervisor/driver carried
     fs.rmSync(wt, { recursive: true, force: true });
   });
 
-  const start = run(["start", "--root", wt, "--restart-delay", "1", "--run-id", "dr-ac1"]);
+  const start = run(["start", "--root", wt, "--restart-delay", "1", "--run-id", "dr-ac1"], { pluginRoot: path.join(main, "plugin") });
   assert.equal(start.status, 0, `start failed: ${start.stdout}\n${start.stderr}`);
   assert.match(start.stderr, /relocating/, `relocation announced on stderr: ${start.stderr}`);
 
@@ -332,7 +405,7 @@ test("AC2 positive — live supervisor+driver ⇒ liveness exit 0 + deaths=none"
     run(["stop", "--root", root], { timeout: 15000 });
     fs.rmSync(root, { recursive: true, force: true });
   });
-  const start = run(["start", "--root", root, "--restart-delay", "1", "--run-id", "dr-ac2pos"]);
+  const start = run(["start", "--root", root, "--restart-delay", "1", "--run-id", "dr-ac2pos"], { pluginRoot: path.join(root, "plugin") });
   assert.equal(start.status, 0, `start failed: ${start.stdout}\n${start.stderr}`);
   assert.ok(readPid(root, "promotion-driver-supervisor.pid"), "supervisor pid written");
   assert.ok(readPid(root, "promotion-driver.pid"), "driver pid written");
@@ -354,7 +427,7 @@ test("AC3 (supervisor 死) — kill -9 supervisor ⇒ supervisor_dead + orphan d
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  const start = run(["start", "--root", root, "--restart-delay", "1", "--run-id", "dr-ac3"]);
+  const start = run(["start", "--root", root, "--restart-delay", "1", "--run-id", "dr-ac3"], { pluginRoot: path.join(root, "plugin") });
   assert.equal(start.status, 0, `start failed: ${start.stdout}\n${start.stderr}`);
   const supervisorPid = spid();
   assert.ok(supervisorPid, "supervisor pid recorded");
@@ -401,18 +474,10 @@ test("AC1 (worker cap) — start --kind worker --cap 2 ⇒ driver argv carries -
     run(["stop", "--kind", "worker", "--root", root], { timeout: 15000 });
     fs.rmSync(root, { recursive: true, force: true });
   });
-  const r = run(["restart", "--kind", "worker", "--cap", "2", "--root", root, "--restart-delay", "1", "--run-id", "dr-wac1"]);
+  const r = run(["restart", "--kind", "worker", "--cap", "2", "--root", root, "--restart-delay", "1", "--run-id", "dr-wac1"], { pluginRoot: path.join(root, "plugin") });
   assert.equal(r.status, 0, `restart failed: ${r.stdout}\n${r.stderr}`);
   assert.ok(!/unknown argument: --concurrency/.test(r.stderr), `supervisor self-restart must accept --cap: ${r.stderr}`);
-  const dump = await (async () => {
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline) {
-      const p = path.join(root, ".quay", "worker-argv-dump.json");
-      if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, "utf8"));
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    return null;
-  })();
+  const dump = await pollJsonFile(path.join(root, ".quay", "worker-argv-dump.json"));
   assert.ok(dump, "worker driver dumped its argv");
   assert.ok(dump.argv.includes("--concurrency") && dump.argv.includes("2"), `driver argv carries --concurrency 2: ${JSON.stringify(dump.argv)}`);
 });
@@ -428,18 +493,160 @@ test("AC2 (worker 并发缺省) — start --kind worker with NO --cap ⇒ superv
   // QUAY_MAX_TASK_SUBAGENTS 使本测对「supervisor 是否注入」敏感（旧行为注入 "5" ⇒ 本测 FAIL，⛔ 防假绿）。
   const env = { ...process.env };
   delete env.QUAY_MAX_TASK_SUBAGENTS;
-  const r = run(["start", "--kind", "worker", "--root", root, "--restart-delay", "1", "--run-id", "dr-wac2"], { env });
+  const r = run(["start", "--kind", "worker", "--root", root, "--restart-delay", "1", "--run-id", "dr-wac2"], { env, pluginRoot: path.join(root, "plugin") });
   assert.equal(r.status, 0, `start failed: ${r.stdout}\n${r.stderr}`);
-  const dump = await (async () => {
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline) {
-      const p = path.join(root, ".quay", "worker-argv-dump.json");
-      if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, "utf8"));
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    return null;
-  })();
+  const dump = await pollJsonFile(path.join(root, ".quay", "worker-argv-dump.json"));
   assert.ok(dump, "worker driver dumped its argv/env");
   assert.equal(dump.capEnv, null, `supervisor must NOT inject QUAY_MAX_TASK_SUBAGENTS (driver resolves cap from drivers.yml itself): ${JSON.stringify(dump)}`);
   assert.ok(!dump.argv.includes("--concurrency"), `default resolved by driver from drivers.yml, not an explicit flag: ${JSON.stringify(dump.argv)}`);
+});
+
+// ── negative control（gap-driver-test-fixture-json-read-before-write-complete-race AC3）────────────
+// 故意制造 "文件存在但内容未写完" 的中间态：旧的 existsSync-then-JSON.parse 读法会报错，新的
+// pollJsonFile 会把它当 "还没写完" 继续轮询，最终读到完整内容。
+
+test("negative control — pollJsonFile waits through a torn (exists-but-partial) JSON file instead of a fatal parse error", async (t) => {
+  const root = makeWorkerRoot("nc-torn");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const p = path.join(root, ".quay", "worker-argv-dump.json");
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+
+  // (a) 旧逻辑（existsSync → JSON.parse）在中间态报错——先证负控制非空（旧读法确实会撞竞态）。
+  fs.writeFileSync(p, '{"argv":["--concurrency"', "utf8");
+  assert.throws(() => JSON.parse(fs.readFileSync(p, "utf8")), "old existsSync-then-JSON.parse read throws on a torn file");
+
+  // (b) 新逻辑在中间态继续轮询，等写入方补完内容后读到完整 JSON。
+  const complete = { argv: ["--concurrency", "2"], capEnv: null };
+  const finish = new Promise((resolve) => setTimeout(() => {
+    fs.writeFileSync(p, JSON.stringify(complete), "utf8");
+    resolve();
+  }, 60));
+  const dump = await pollJsonFile(p, 2000, 10);
+  await finish;
+  assert.deepEqual(dump, complete, "poller waited through the torn state and read the completed file");
+});
+
+// ── source-refresh（AC-184 陈旧写者收尾）：supervisor 在源码推进到 driver 启动时刻之后重拉 driver ──
+// 判据（AC）：`node --experimental-strip-types --test plugin/test/driver-runtime.test.mjs` 里，下面的
+// 集成测试证明 supervisor 在 driver-filters.ts 推进到运行中 driver 之后 respawn 该 driver——常驻 driver
+// 因此自刷新，AC-184 不再每提交一次就陈旧写者复发。判据取假（DoD）：删掉 runSupervisor 里的 sourceCheck
+// 对照 ⇒ 源码推进后 pid 永不变 ⇒ 集成测试红。
+
+test("source-refresh — watchedSourceFiles / sourceFilesMaxMtimeMs / sourceChangedSince 纯函数可单测且取假", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dr-src-fn-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const scripts = path.join(root, "plugin", "scripts");
+  fs.mkdirSync(scripts, { recursive: true });
+  const filtersFile = path.join(scripts, "driver-filters.ts");
+  fs.writeFileSync(filtersFile, "v1", "utf8");
+  // AC-203：sourceFilesMaxMtimeMs 锚在 kernel 自身安装位置（或 QUAY_PLUGIN_ROOT），⛔ 非 root 参数。
+  const savedPluginRoot = process.env.QUAY_PLUGIN_ROOT;
+  process.env.QUAY_PLUGIN_ROOT = path.join(root, "plugin");
+  t.after(() => { if (savedPluginRoot === undefined) delete process.env.QUAY_PLUGIN_ROOT; else process.env.QUAY_PLUGIN_ROOT = savedPluginRoot; });
+
+  // watched 集 = driver 自身入口 + 共享 Layer 0/1a 模块（含 driver-filters.ts——AC-184 的根）。
+  const watched = watchedSourceFiles("promotion");
+  assert.ok(watched.includes("promotion-driver.ts"), "driver 自身入口在监视集");
+  assert.ok(watched.includes("driver-filters.ts"), "driver-filters.ts 在监视集");
+
+  const m0 = sourceFilesMaxMtimeMs(root, "promotion");
+  assert.ok(m0 > 0, "mtime 读自被写文件（⛔ 非恒真 0）");
+
+  // 取假：since 取「未来」⇒ 不变更；since 取 0（过去）⇒ 变更。对照真读 mtime，⛔ 恒真/恒假。
+  assert.equal(sourceChangedSince(root, "promotion", m0 + 1000), false, "源码不晚于 since ⇒ 不变更");
+  assert.equal(sourceChangedSince(root, "promotion", 0), true, "源码晚于 epoch 0 ⇒ 变更");
+
+  // 推进 mtime ⇒ max 增大（可观测非静默——⛔ 不是结构上恒真的量）。
+  const later = new Date(m0 + 5000);
+  fs.utimesSync(filtersFile, later, later);
+  assert.ok(sourceFilesMaxMtimeMs(root, "promotion") > m0, "推进 mtime ⇒ max 增大");
+});
+
+test("source-refresh — supervisor respawns driver when driver-filters.ts advances past the running driver", async (t) => {
+  const root = makeRoot("src-respawn");
+  // driver-filters.ts 先于 driver 启动写入（mtime < driver 启动时刻），确保初始不触发 respawn。
+  const filtersFile = path.join(root, "plugin", "scripts", "driver-filters.ts");
+  fs.writeFileSync(filtersFile, "v1", "utf8");
+  t.after(() => {
+    run(["stop", "--root", root], { timeout: 15000 });
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  const start = run(["start", "--root", root, "--restart-delay", "1", "--run-id", "dr-src-respawn"], { pluginRoot: path.join(root, "plugin") });
+  assert.equal(start.status, 0, `start failed: ${start.stdout}\n${start.stderr}`);
+  const p1 = readPid(root, "promotion-driver.pid");
+  assert.ok(p1, "driver pid recorded");
+
+  // 确保 driver 已运行 ≥150ms，使「重写 driver-filters.ts 的 mtime」严格晚于 driver 启动时刻；
+  // 且 mtime 落在「现在」（⛔ 未来）——respawn 后的新 driver 启动时刻更晚，故不进入 respawn 死循环。
+  await new Promise((r) => setTimeout(r, 150));
+  fs.writeFileSync(filtersFile, "v2", "utf8");
+
+  let p2 = p1;
+  for (let i = 0; i < 80; i++) {
+    p2 = readPid(root, "promotion-driver.pid");
+    if (p2 && p2 !== p1) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.notEqual(p2, p1, `driver pid changed (respawned) after driver-filters.ts advanced: ${p1} → ${p2}`);
+});
+
+// ── supervisor 陈旧判定（gap-supervisor-never-self-refreshes-no-detector）─────────────────────────
+// sourceCheck（AC-184）杀的是 driver（child），从不包括 supervisor 自己：supervisor 常驻、内存 kernel 是
+// 启动那一刻的版本。新增直接量 = supervisor 启动时刻 vs 被监视源码最新 mtime。判据取假（DoD）：
+// 删掉 aliveness() 里 supervisorStaleness 的判定分支 ⇒ supervisorStale 恒 undefined ⇒ 下面的集成测试红。
+// 三态：读不到启动时刻 ⇒ not-evaluated（⛔ 与「新鲜」同形，硬规则 3b）。
+
+test("supervisor-stale — supervisorStaleness 三态：死 pid / 无 pid ⇒ not-evaluated；活 pid + 源码早于启动 ⇒ fresh", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dr-supst-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  // 死 pid / 无 pid ⇒ not-evaluated（⛔ 不与 fresh 同形）。
+  assert.equal(supervisorStaleness(root, "promotion", Number(deadPid())).state, "not-evaluated");
+  assert.equal(supervisorStaleness(root, "promotion", null).state, "not-evaluated");
+
+  // 活 pid（自己）+ 空 root（无被监视源码 ⇒ mtime 0）⇒ fresh（源码不晚于启动时刻）。
+  const fresh = supervisorStaleness(root, "promotion", process.pid);
+  assert.equal(fresh.state, "fresh");
+  assert.equal(typeof fresh.supervisorStartedAt, "number", "supervisorStartedAt 读得（epoch ms）");
+  assert.ok(fresh.supervisorStartedAt > 0, "启动时刻非恒 0");
+
+  // procStartTimeMs(自己) 落在 [进程启动, 现在] 之间（epoch ms 上下界）。
+  const start = procStartTimeMs(process.pid);
+  assert.ok(start != null && start > Date.now() - 60_000 && start <= Date.now(), `procStartTimeMs 合理: ${start}`);
+});
+
+test("supervisor-stale — aliveness 报 supervisorStale=true 当被监视源码推进到 supervisor 启动时刻之后；重启后回 fresh（双向取假）", async (t) => {
+  const root = makeRoot("sup-stale");
+  // AC-203：aliveness 直接调用（同进程）经 sourceFilesMaxMtimeMs 读 kernel 自身安装位置（或
+  // QUAY_PLUGIN_ROOT），⛔ 非 root 参数——本测直接 import 调用，故须在进程 env 上设 QUAY_PLUGIN_ROOT。
+  const savedPluginRoot = process.env.QUAY_PLUGIN_ROOT;
+  process.env.QUAY_PLUGIN_ROOT = path.join(root, "plugin");
+  t.after(() => {
+    run(["stop", "--root", root], { timeout: 15000 });
+    fs.rmSync(root, { recursive: true, force: true });
+    if (savedPluginRoot === undefined) delete process.env.QUAY_PLUGIN_ROOT; else process.env.QUAY_PLUGIN_ROOT = savedPluginRoot;
+  });
+  const start = run(["start", "--root", root, "--restart-delay", "1", "--run-id", "dr-sup-stale"], { pluginRoot: path.join(root, "plugin") });
+  assert.equal(start.status, 0, `start failed: ${start.stdout}\n${start.stderr}`);
+  assert.ok(readPid(root, "promotion-driver-supervisor.pid"), "supervisor pid recorded");
+
+  // 初始：supervisor 晚于被监视源码（FAKE_DRIVER 在 start 前写入）⇒ fresh。
+  const before = aliveness(root, "promotion");
+  assert.equal(before.supervisorStale, false, `fresh before source advances: ${JSON.stringify(before)}`);
+  assert.equal(typeof before.supervisorStartedAt, "number", "supervisorStartedAt 进 aliveness 读数");
+
+  // 推进被监视源码 mtime 到 supervisor 启动时刻之后 ⇒ stale（判据取真）。
+  const srcFile = path.join(root, "plugin", "scripts", "promotion-driver.ts");
+  await new Promise((r) => setTimeout(r, 150));
+  fs.writeFileSync(srcFile, FAKE_DRIVER + "\n// touched\n", "utf8");
+
+  const after = aliveness(root, "promotion");
+  assert.equal(after.supervisorStale, true, `stale after source advances: ${JSON.stringify(after)}`);
+
+  // 反向：重启该 kind（新 supervisor 启动晚于源码）⇒ 同一读数不再报陈旧（⛔ 恒报陈旧不算通过）。
+  const restart = run(["restart", "--root", root, "--restart-delay", "1", "--run-id", "dr-sup-stale-r"], { pluginRoot: path.join(root, "plugin") });
+  assert.equal(restart.status, 0, `restart failed: ${restart.stdout}\n${restart.stderr}`);
+  const afterRestart = aliveness(root, "promotion");
+  assert.equal(afterRestart.supervisorStale, false, `fresh again after restart: ${JSON.stringify(afterRestart)}`);
 });

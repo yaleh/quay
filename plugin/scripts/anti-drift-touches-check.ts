@@ -109,9 +109,15 @@ function getArgValue(args, name) {
 /** Compute the files the fan-in would land: `git diff --name-only <merge-target>...HEAD` in the
  *  worktree. After the fan-in workflow's step-1 merge of the merge-target into the task worktree,
  *  this is exactly the set of files the ff-merge would move onto the merge target. Fail-closed: a
- *  git error THROWS — the caller maps it to a usage/env error (exit 2), never a silent OK. */
+ *  git error THROWS — the caller maps it to a usage/env error (exit 2), never a silent OK.
+ *  ⚠️ `-c core.quotepath=false`：git 默认对含非 ASCII 的文件名输出 C-quoted 形态（前导引号 +
+ *  `\ooo` 八进制转义），使本函数的逐字节 `--name-only` 结果与声明 `## Touches` 的真实 UTF-8
+ *  文件名无法匹配 ⇒ 非 ASCII 文件被误判 out-of-declared（gap-branch-rename-manager-doc-to-author
+ *  触碰 docs/references/维度边界…md 时实测触发）。关闭 quotepath 让 `--name-only` 输出原始路径
+ *  字节，恢复对非 ASCII 路径的精确匹配（同 direct-to-develop-bypass-check.ts gitCommitFiles 的
+ *  修法）。 */
 export function computeActualFiles(worktree, mergeTarget) {
-  const out = execFileSync("git", ["-C", worktree, "diff", "--name-only", `${mergeTarget}...HEAD`], {
+  const out = execFileSync("git", ["-C", worktree, "-c", "core.quotepath=false", "diff", "--name-only", `${mergeTarget}...HEAD`], {
     encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "ignore"],
   });
   return out.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);

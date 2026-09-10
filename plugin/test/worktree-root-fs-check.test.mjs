@@ -54,9 +54,10 @@ test('AC3 — a worktree root on tmpfs makes quay-init --loop fail closed with a
   }
   const ws = diskTemp('quay-wt-ws-');
   const tmpfsRoot = path.join(tmpfsBase, `quay-wt-ac3-${process.pid}`);
-  // Explicit --tmux-session: this test does not care about tmux, but quay-init --loop now
-  // fail-closes on an undetectable session (gap-init-guesses-the-tmux-session) — pass one so the
-  // tmpfs worktree-root validation is what runs (same precedent as cold-start-skill.test.mjs:137).
+  // Explicit --tmux-session: this test does not care about tmux, but it pins an explicit value so
+  // the worktree-root validation is what runs, independent of ambient tmux session detection
+  // (tmux session is optional since SPEC-tmux-retirement-2026-09-03 — same precedent as
+  // cold-start-skill.test.mjs:137).
   const r = runInit(ws, ['--loop', '--dry-run', '--test-command', 'scripts/test.sh', '--worktree-root', tmpfsRoot, '--tmux-session', 'proj-0:0.0']);
   assert.notEqual(r.status, 0, `tmpfs worktree root must fail closed, got status ${r.status}\n${r.stdout}${r.stderr}`);
   assert.match(r.stderr, /on tmpfs.*memory|memory.*not disk|this is memory/i,

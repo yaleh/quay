@@ -67,12 +67,18 @@ export async function handleTaskEdit({ positional, flags, wantsJson }: CliCtx) {
     patch.body = await resolveBody(flags);
   }
   if (flags["expect-status"] !== undefined) patch.expectedStatus = flags["expect-status"];
+  // gap-cli-write-surface-lacks-toplevel-fields: `depends_on` and `goal_ac` are first-class
+  // TOP-LEVEL frontmatter fields on the native Provider (the single write-surface source of truth
+  // is the native MCP task_write zod inputSchema). They previously had MCP-write only, no CLI flag
+  // — this adds the CLI surface, mirroring `--children` (comma-split array) and `--parent` (scalar).
+  if (flags["depends-on"] !== undefined) patch.depends_on = String(flags["depends-on"]).split(",").filter(Boolean);
+  if (flags["goal-ac"] !== undefined) patch.goal_ac = flags["goal-ac"];
 
   if (Object.keys(patch).length === 0 && flags["append-notes"] === undefined
       && flags.acceptance === undefined) {
     console.error(
       "quay task edit: at least one of --title/--status/--body/--body-file/--labels/--extra/" +
-      "--parent/--children/--acceptance/--append-notes is required"
+      "--parent/--children/--depends-on/--goal-ac/--acceptance/--append-notes is required"
     );
     process.exitCode = 1;
     return;

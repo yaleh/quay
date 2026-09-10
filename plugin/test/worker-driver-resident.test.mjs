@@ -110,6 +110,7 @@ import {
   spawnMechanicalFanIn,
   readFanInLockHold,
 } from "../scripts/worker-driver.ts";
+import { resolveKernelScriptsDir } from "../scripts/driver-runtime.ts";
 import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
 import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
 import { suiteLockBase, suiteLockSlotPaths } from "../scripts/suite-lock-slots.ts";
@@ -233,7 +234,7 @@ test("AC129 pure — defaultSelectorArgv / defaultReadyPoolArgv are launch / nod
   assert.match(sel[sel.length - 1], /gap-a, gap-b/, "candidate ids are inlined into the selector prompt");
   const rpc = defaultReadyPoolArgv("/r", ["gap-a"], 3);
   assert.equal(rpc[0], "node");
-  assert.deepEqual(rpc.slice(1, 5), ["--experimental-strip-types", "/r/plugin/scripts/ready-pool-check.ts", "--root", "/r"]);
+  assert.deepEqual(rpc.slice(1, 5), ["--experimental-strip-types", path.join(resolveKernelScriptsDir(), "ready-pool-check.ts"), "--root", "/r"]);
   assert.ok(rpc.includes("--in-flight"), "in-flight ids are passed to ready-pool-check");
   assert.ok(rpc.includes("gap-a"));
 });
@@ -491,6 +492,121 @@ test("liveness wiring — resident loop calls the liveness checker each round (F
   for (const rec of rounds) {
     assert.ok(rec.liveness !== null, `round carries a liveness result (wiring exists): ${JSON.stringify(rec.liveness)}`);
   }
+});
+
+// ── gap-superseded-task-residual-worktree-never-reclaimed：reconcile 步接线 + 端到端回收 ─────────────
+// AC6（接线，非「函数存在」）：常驻循环 reconcile 步实际调用 reclaimSupersededWorktrees（⛔ 仅导出函数而
+// reconcile 步不调 ⇒ round 记录无 superseded_reclaim 字段 ⇒ 该 AC 假）。AC7（读生产载体）：候选数为 0
+// 也记 0（⛔ 不省略）——「跑过且无候选」与「压根没跑」在载体上可区分；关掉注入缝（spawnResident 不注入
+// 任何 reclaim 缝，走真实 git//proc）后仍通过（否则它只是回声）。
+
+test("AC6 (superseded-reclaim wiring) — reconcile step actually calls reclaimSupersededWorktrees (round carries superseded_reclaim, candidate 0 recorded)", async (t) => {
+  const root = makeGitRoot("sup-wire");
+  writeTaskFile(root, "gap-a", "done");
+  // 池空 ⇒ 无派发，但 reconcile 步每轮照跑 ⇒ round 记录必须带 superseded_reclaim（候选 0 记 0，⛔ 省略）。
+  const drv = spawnResident(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:[],pool:0}))",
+    "--selector-cmd", "node -e console.log('gap-a\\x20pick')",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(0)",
+    "--interval", "20",
+  ]);
+  t.after(() => drv.stop());
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  await waitFor(() => readRoundLines(root).length >= 1, 15000);
+  const rounds = readRoundLines(root);
+  assert.ok(rounds.length >= 1, "at least one round ran");
+  for (const rec of rounds) {
+    assert.ok(rec.superseded_reclaim !== null && rec.superseded_reclaim !== undefined,
+      `round carries a superseded_reclaim result (reconcile wiring exists): ${JSON.stringify(rec.superseded_reclaim)}`);
+    assert.equal(rec.superseded_reclaim.candidateCount, 0, "AC7: candidate 0 is recorded (⛔ not omitted)");
+  }
+});
+
+test("AC6 end-to-end (superseded-reclaim) — a real superseded worktree is reclaimed by the resident loop (worktree removed, branch preserved)", async (t) => {
+  const root = makeGitRoot("sup-wire-e2e");
+  writeTaskFile(root, "gap-sup-wire", "superseded");
+  runGit(root, ["branch", "develop"]); // readTaskStatus 读 develop ref；develop 指到含 superseded 任务文件的 commit
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  runGit(root, ["worktree", "add", "-q", "-b", "task/gap-sup-wire", wtPath]);
+  assert.equal(worktreePresentForTask(root, "gap-sup-wire"), true, "precondition: superseded worktree present");
+
+  const drv = spawnResident(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:[],pool:0}))",
+    "--selector-cmd", "node -e console.log('gap-a\\x20pick')",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(0)",
+    "--interval", "20",
+  ]);
+  t.after(() => drv.stop());
+  await waitFor(() => {
+    const r = readRoundLines(root).find((rec) => rec.superseded_reclaim && rec.superseded_reclaim.reclaimed.includes("gap-sup-wire"));
+    return r != null;
+  }, 20000);
+  const rounds = readRoundLines(root);
+  const reclaimRound = rounds.find((rec) => rec.superseded_reclaim && rec.superseded_reclaim.reclaimed.includes("gap-sup-wire"));
+  assert.ok(reclaimRound, "a round record shows gap-sup-wire was reclaimed by the reconcile step");
+  assert.ok(reclaimRound.superseded_reclaim.candidateCount >= 1, "candidateCount reflects the superseded worktree");
+  assert.equal(worktreePresentForTask(root, "gap-sup-wire"), false, "the superseded worktree is actually removed");
+  assert.match(runGit(root, ["branch", "--list", "task/gap-sup-wire"]), /gap-sup-wire/, "branch preserved (⛔ never git branch -D)");
+});
+
+// ── gap-superseded-mid-flight-live-worker-not-stopped：superseded 活 worker 被 reconcile 步 SIGTERM ──
+// AC5（接线，非「函数存在」）：常驻循环 reconcile 步真实走到本次改动——superseded + 存活 worker 的任务，
+//   其 round 记录 perTask 条目带 liveWorkerSignaled=true（⛔ 仅改导出函数而 reconcile 步不调 ⇒ round 记
+//   录无该字段 ⇒ 该 AC 假）。AC6（读生产载体，默认 process.kill）：spawnResident 不注入任何缝（走真实
+//   git//proc + 默认 process.kill）——round 记录带 liveWorkerSignaled 字段，且 fake worker 真被 SIGTERM
+//   杀死（⛔ 只是 flag 自证 = 回声，硬规则 4 推论三）。
+
+test("AC5/AC6 (superseded-mid-flight wiring + production carrier) — a live worker on a superseded task is SIGTERM'd by the reconcile step; round record carries liveWorkerSignaled", async (t) => {
+  const root = makeGitRoot("sup-mf-wire");
+  const taskId = "gap-sup-mf-wire";
+  writeTaskFile(root, taskId, "superseded");
+  runGit(root, ["branch", "develop"]); // readTaskStatus 读 develop ref；develop 指到含 superseded 任务文件的 commit
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  runGit(root, ["worktree", "add", "-q", "-b", `task/${taskId}`, wtPath]);
+  assert.equal(worktreePresentForTask(root, taskId), true, "precondition: superseded worktree present");
+
+  // 存活 worker：cmdline 含 quay-task-worker + task id（hasLiveWorkerForTask / findLiveWorkerPid 命中）。
+  const fake = spawn(process.execPath, ["-e", "setTimeout(()=>{},60000)", WORKER_PROCESS_NAME, taskId], { stdio: "ignore" });
+  t.after(() => { try { fake.kill("SIGKILL"); } catch { /* gone */ } });
+  const fakeExited = new Promise((resolve) => fake.once("exit", (code, signal) => resolve(signal)));
+  await new Promise((r) => setTimeout(r, 100)); // 让 /proc/<pid>/cmdline 可读
+
+  const drv = spawnResident(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:[],pool:0}))",
+    "--selector-cmd", "node -e console.log('gap-a\\x20pick')",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(0)",
+    "--interval", "20",
+  ]);
+  t.after(() => drv.stop());
+
+  await waitFor(() =>
+    readRoundLines(root).some((rec) =>
+      rec.superseded_reclaim &&
+      Array.isArray(rec.superseded_reclaim.perTask) &&
+      rec.superseded_reclaim.perTask.some((p) => p.taskId === taskId && p.liveWorkerSignaled === true)
+    ), 30000);
+
+  const rounds = readRoundLines(root);
+  const signaledRound = rounds.find((rec) =>
+    rec.superseded_reclaim && rec.superseded_reclaim.perTask.some((p) => p.taskId === taskId && p.liveWorkerSignaled === true));
+  assert.ok(signaledRound, "AC5: a round record shows the reconcile step reached the mid-flight signal path (liveWorkerSignaled true)");
+  const entry = signaledRound.superseded_reclaim.perTask.find((p) => p.taskId === taskId);
+  assert.equal(entry.liveWorkerSignaled, true, "AC6: production carrier perTask entry carries liveWorkerSignaled=true");
+  assert.equal(entry.skippedLiveWorker, true, "still skippedLiveWorker this round (disk reclaim deferred to next round)");
+  assert.equal(await fakeExited, "SIGTERM", "AC6: default process.kill delivered SIGTERM to the live worker (⛔ not just a flag)");
 });
 
 // ── gap-worker-driver-resident-loop-intermittent-hang：挂起复现负控制 ───────────────────────────────
@@ -1094,5 +1210,37 @@ test("B (能取假) — buildContinueWorkerPrompt 带前 N 次 (ts,step,reason) 
   assert.match(p, /\.quay\/fan-in-suite-/, "含 .quay/fan-in-suite- 字面路径");
   assert.ok(p.includes(suiteAbs), `含 suite 日志绝对路径 ${suiteAbs}`);
   assert.ok(fs.existsSync(suiteAbs), "该路径在盘上存在（AC2 判据）");
+});
+
+// ── negative control（gap-driver-test-fixture-json-read-before-write-complete-race AC3）────────────
+// 故意制造 "文件存在但最后一行只写了一半" 的中间态（常驻 driver 另一进程正在追加写 JSONL）：旧的
+// readFileSync→split→JSON.parse 读法会在半行上报错，新的 readRoundLines/readOutcomeLines 把半行当
+// "还没写完" 丢弃、只返回完整行；补完后该行出现（调用方的 waitFor 重轮询即读到）。
+
+test("negative control — torn trailing JSONL line is treated as not-yet-written, then read once completed", (t) => {
+  const root = makeRoot("nc-torn-jsonl");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const line1 = JSON.stringify({ action: "stop", stop_reason: "pool-empty", in_flight: 0, ts: "2026-09-06T00:00:00Z" });
+  const line2 = JSON.stringify({ action: "dispatch", task: "gap-a", in_flight: 1, ts: "2026-09-06T00:00:01Z" });
+  const roundFile = path.join(root, WORKER_ROUND_REL);
+  const outcomeFile = path.join(root, WORKER_OUTCOME_REL);
+
+  // torn：完整一行 + 第二行只写了开头（另一进程正在追加写入）。
+  const torn = '{"action":"dispatch","task":"gap-';
+  fs.writeFileSync(roundFile, line1 + "\n" + torn, "utf8");
+  fs.writeFileSync(outcomeFile, line1 + "\n" + torn, "utf8");
+
+  // (a) 旧逻辑（split→JSON.parse）在半行上报错——先证负控制非空。
+  const naive = (f) => fs.readFileSync(f, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.throws(() => naive(roundFile), "old readRoundLines throws on a torn trailing line");
+  assert.throws(() => naive(outcomeFile), "old readOutcomeLines throws on a torn trailing line");
+
+  // (b) 新逻辑把半行当 "还没写完" 丢弃，只返回完整行，不抛错。
+  assert.deepEqual(readRoundLines(root).map((r) => r.action), ["stop"], "readRoundLines returns only the complete line");
+  assert.deepEqual(readOutcomeLines(root).map((r) => r.action), ["stop"], "readOutcomeLines returns only the complete line");
+
+  // (c) 补完该行后，调用方重轮询即可读到——半行不是被永久吞掉，只是 "还没写完"。
+  fs.writeFileSync(roundFile, line1 + "\n" + line2, "utf8");
+  assert.deepEqual(readRoundLines(root).map((r) => r.action), ["stop", "dispatch"], "completed line now read");
 });
 

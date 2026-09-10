@@ -1,4 +1,4 @@
-// @test-group lowconc
+// @test-group engine
 // @load-sensitive wall-clock
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — the rehearsal
 // test below runs a real quay-init --loop project + a real --task-start; it passes isolated under low
@@ -135,8 +135,15 @@ test('AC2 — the skill teaches the reliable-send delivery criterion (transcript
 
 // ── Mechanical rehearsal: a real --task-start in a quay-init --loop project produces the record ───────
 // The skill's step 8 asserts `<root>/.workflow-events/*.jsonl` carries a --task-start record. That
-// assertion is only meaningful if the laid-down mechanism actually produces it — checked here in a
+// assertion is only meaningful if the delivered mechanism actually produces it — checked here in a
 // throwaway project (no live session, no monitor mount needed).
+// PATH RESOLUTION (gap-suite-baseline-red-l1-wiring-... AC4): quay-init --loop no longer lays down
+// `plugin/scripts/*` into the target — the six-item closed set (gap-quay-init-closure-shrink-body
+// AC168, SPEC-plugin-lifecycle-single-bundle-2026-09-02) makes the plugin the single deliverer of its
+// scripts. So fast-mode-telemetry.ts is resolved from the PLUGIN root (pluginDir), NOT the laid-down
+// `<ws>/plugin/scripts/` (which quay-init no longer creates — the prior path was a MODULE_NOT_FOUND).
+// The --task-start write target is still `<root>` (= ws), so `.workflow-events/` lands in the project
+// the skill checks, unchanged.
 test('rehearsal — a real --task-start against a quay-init --loop project writes the .workflow-events/ record the skill asserts', () => {
   const ws = makeTmp();
   try {
@@ -146,7 +153,7 @@ test('rehearsal — a real --task-start against a quay-init --loop project write
       { cwd: ws, encoding: 'utf8', env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginDir } });
     assert.equal(init.status, 0, `quay-init --loop must succeed:\n${init.stderr}`);
     const ts = spawnSync('node', ['--experimental-strip-types',
-      path.join(ws, 'plugin', 'scripts', 'fast-mode-telemetry.ts'),
+      path.join(pluginDir, 'scripts', 'fast-mode-telemetry.ts'),
       '--task-start', '--taskId', 'cold-start-rehearsal', '--root', ws],
       { cwd: ws, encoding: 'utf8' });
     assert.equal(ts.status, 0, `--task-start must succeed:\n${ts.stderr}`);

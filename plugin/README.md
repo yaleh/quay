@@ -1,6 +1,6 @@
 # quay plugin
 
-quay plugin v0.4.0 — distributes the quay MCP server, skills, vendored agent types, and distributable workflows and gate scripts.
+quay plugin v0.6.1 — distributes the quay MCP server, skills, vendored agent types, and distributable workflows and gate scripts.
 
 ## Installation
 
@@ -84,9 +84,7 @@ fast-mode gate scripts ship under `plugin/scripts/` via the `--loop` category in
 
 ### Agent types (`plugin/agents/`)
 
-- `baime-iteration-executor.md` — iteration executor agent (vendored from baime)
-
-**Agent dependency declaration:** The `baime:iteration-executor` agent references meta-agents, capabilities, and skills defined by the baime plugin. For full functionality, install the baime plugin alongside quay. Without baime, the agent's lifecycle phases that reference `meta-agents/*.md` and baime-specific skills will degrade — the agent shell is present but the runtime ecosystem it expects may be incomplete.
+- `quay-task.md` — task CRUD/lifecycle agent, the single ABI-only entry point for task operations
 
 ## Sync: keep plugin assets current
 

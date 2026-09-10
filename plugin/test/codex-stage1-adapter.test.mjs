@@ -151,19 +151,19 @@ test('A2: both .agents/skills entries are discoverable with valid name/descripti
   }
 });
 
-test('A3: Claude and Codex directive surfaces resolve to ONE canonical source (no drift)', () => {
-  const claudeReal = fs.realpathSync(path.join(repoRoot, '.claude', 'skills', 'quay-directive', 'SKILL.md'));
+test('A3: Codex directive surface resolves to ONE canonical source (no drift); .claude/skills/ directive retired', () => {
+  // gap-ac166-second-copy-retirement: the .claude/skills/quay-directive symlink was a second copy
+  // (retired → archived under archive/). Only .agents/skills/quay-directive remains as a symlink
+  // into the canonical plugin/skills/quay-directive source.
+  assert.ok(!fs.existsSync(path.join(repoRoot, '.claude', 'skills', 'quay-directive')), '.claude/skills/quay-directive must be retired (archived)');
   const agentsReal = fs.realpathSync(path.join(repoRoot, '.agents', 'skills', 'quay-directive', 'SKILL.md'));
-  assert.equal(claudeReal, agentsReal, '.claude and .agents directive SKILL.md must resolve to the same file');
-  assert.ok(claudeReal.startsWith(fs.realpathSync(path.join(repoRoot, 'plugin', 'skills', 'quay-directive'))),
+  assert.ok(agentsReal.startsWith(fs.realpathSync(path.join(repoRoot, 'plugin', 'skills', 'quay-directive'))),
     'the shared canonical source must live under plugin/skills/quay-directive');
-  assert.equal(read(claudeReal), read(agentsReal), 'resolved directive content must be byte-identical');
   // The operator surface likewise resolves into the canonical plugin source.
   const opReal = fs.realpathSync(path.join(repoRoot, '.agents', 'skills', 'quay-task-operator', 'SKILL.md'));
   assert.ok(opReal.startsWith(fs.realpathSync(path.join(repoRoot, 'plugin', 'skills', 'quay-task-operator'))),
     '.agents quay-task-operator must resolve under plugin/skills/quay-task-operator');
-  // Both host directive entries are symlinks (not independent copies that could drift).
-  assert.ok(fs.lstatSync(path.join(repoRoot, '.claude', 'skills', 'quay-directive')).isSymbolicLink(), '.claude/skills/quay-directive must be a symlink');
+  // The host directive entry is a symlink (not an independent copy that could drift).
   assert.ok(fs.lstatSync(path.join(repoRoot, '.agents', 'skills', 'quay-directive')).isSymbolicLink(), '.agents/skills/quay-directive must be a symlink');
 });
 

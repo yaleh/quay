@@ -1645,7 +1645,12 @@ async function main() {
   // test below compares observation.ts's pairing against the real aggregate()/readAllEvents.
   {
     const obsTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-obs-test-"));
-    const obsWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-obs-workspace-"));
+    // gap-serve-board-test-workspace-couples-to-shared-tmp-quay-worktrees: nest the workspace root
+    // under a private parent so dirname(obsWorkspaceRoot)/quay-worktrees is test-private (never the
+    // shared /tmp/quay-worktrees).
+    const obsParent = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-obs-workspace-"));
+    const obsWorkspaceRoot = path.join(obsParent, "main");
+    fs.mkdirSync(obsWorkspaceRoot, { recursive: true });
     fs.mkdirSync(path.join(obsWorkspaceRoot, ".quay"), { recursive: true });
     fs.writeFileSync(
       path.join(obsWorkspaceRoot, ".quay", "config.yml"),
@@ -1729,7 +1734,7 @@ async function main() {
       assert(live.body.includes("OBS-A"), "AC2: /live page shows the in-flight task id (OBS-A)");
       assert(!live.body.includes("OBS-B"), "AC2: /live does NOT list the completed task (OBS-B)");
       assert(!live.body.includes("OBS-BLK"), "AC2: /live does NOT list the blocked-wait event (OBS-BLK)");
-      assert(live.body.includes("并发数"), "AC2: /live shows the concurrency summary");
+      assert(live.body.includes("上限"), "AC2: /live shows the cap label (上限), not the retired 并发数 summary");
       assert(live.body.includes("分钟"), "AC2: /live shows the elapsed-minutes column");
       if (fs.existsSync("/proc/pressure/cpu")) {
         assert(live.body.includes("CPU 压力"), "AC2: /live shows the CPU-pressure row when /proc/pressure/cpu is readable");
@@ -1847,7 +1852,7 @@ async function main() {
       }
       process.chdir(obsOrigCwd);
       fs.rmSync(obsTasksDir, { recursive: true, force: true });
-      fs.rmSync(obsWorkspaceRoot, { recursive: true, force: true });
+      fs.rmSync(obsParent, { recursive: true, force: true });
     }
   }
 
@@ -2016,7 +2021,7 @@ async function main() {
     // AC4 (two-axis render): 状态列 = lifecycle (axis 1), 阶段列 = phase enum (axis 2) — the two
     // axes are no longer crammed into one label (the old 「已完工待落地」 is gone).
     {
-      const base = { status: "ok", reason: null, concurrency: 2, cpuPressure: null, liveState: "running", liveExplanation: null, activity: null };
+      const base = { status: "ok", reason: null, concurrencyCap: 2, cpuPressure: null, liveState: "running", liveExplanation: null, activity: null };
       const t = (taskId, status, phase) => ({
         taskId, runId: `worker-${taskId}`, pid: "4242", sessionId: null, startedAtMs: Date.now() - 60_000,
         implCompletedAtMs: null, status, phase, suite: null, minutes: 1, liveness: "alive", blocks: [], blockedBy: [],

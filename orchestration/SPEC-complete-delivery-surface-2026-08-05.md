@@ -140,14 +140,10 @@
     {
       "id": 4,
       "name": "session-topology",
-      "label": "会话拓扑",
-      "deliverables": [
-        "plugin/scripts/quay-topology.sh",
-        "plugin/scripts/topology-check.sh",
-        "plugin/skills/session-topology/SKILL.md"
-      ],
-      "attribution": ["gap-tmux-session-topology-no-factory-definition"],
-      "criterion": "三窗口（outer/inner/manager）拓扑出厂定义：quay-topology.sh + topology-check.sh + session-topology skill（每层起什么命令、谁驱动谁）"
+      "label": "会话拓扑（已退役）",
+      "deliverables": [],
+      "attribution": ["gap-retire-outer-tmux-window-logic"],
+      "criterion": "outer 独立会话角色已撤销——会话拓扑工厂/检查/技能（quay-topology.sh + topology-check.sh + session-topology skill）随 outer 删除；本类目 deliverables 留空使恒 covered（vacuous）"
     },
     {
       "id": 5,
@@ -235,9 +231,8 @@
 <!-- l1-category: 1; name: mechanisms-runtime; deliverable: plugin/scripts; deliverable: plugin/vendor; task: gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down -->
 <!-- l1-category: 2; name: loop-docs; deliverable: plugin/loop/fast-mode-loop-tick.md; deliverable: plugin/loop/orchestrator-loop-tick.md; deliverable: plugin/skills/manager/SKILL.md; task: gap-productize-the-manager-layer -->
 <!-- l1-category: 3; name: launch-config; deliverable: .claude/launch.settings.json; deliverable: .quay/profiles.yml; deliverable: plugin/scripts/quay-launch.sh; task: gap-crystallize-launch-config-into-checked-in-settings-file -->
-<!-- l1-category: 4; name: session-topology; deliverable: plugin/skills/session-topology/SKILL.md; deliverable: plugin/scripts/quay-topology.sh; deliverable: plugin/scripts/topology-check.sh; task: gap-tmux-session-topology-no-factory-definition -->
-<!-- l1-category: 5; name: periodic-anchors; deliverable: plugin/scripts/os-anchor-install.sh; deliverable: plugin/scripts/os-anchor-watchdog.sh; task: gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash -->
-<!-- l1-category: 6; name: observation-verification; deliverable: orchestration/SPEC-complete-delivery-surface-2026-08-05.md; deliverable: plugin/scripts/trend-check.ts; deliverable: plugin/scripts/l1-delivery-surface-check.ts; task: gap-quality-criteria-are-point-in-time-no-trend-criteria -->
+<!-- l1-category: 4; name: periodic-anchors; deliverable: plugin/scripts/os-anchor-install.sh; deliverable: plugin/scripts/os-anchor-watchdog.sh; task: gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash -->
+<!-- l1-category: 5; name: observation-verification; deliverable: orchestration/SPEC-complete-delivery-surface-2026-08-05.md; deliverable: plugin/scripts/trend-check.ts; deliverable: plugin/scripts/l1-delivery-surface-check.ts; task: gap-quality-criteria-are-point-in-time-no-trend-criteria -->
 
 **层次二活实例（2026-08-05，`gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed`）——
 「循环在转」判据**：本文件 §2 实测的 meta-cc/archguard「29 小时零进展却全绿 + 自报健康」暴露了

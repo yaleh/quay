@@ -4,7 +4,7 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import type { Task, AdrRecord, Manifest } from './abi.ts';
+import type { Task, AdrRecord, Manifest, TaskDeleteResult, GoalRecord, MetaRecord } from './abi.ts';
 
 export interface ConnectProviderOptions {
   command: string;
@@ -37,10 +37,18 @@ export interface ProviderClient {
   taskList(filter?: Record<string, unknown>): Promise<TaskListResult>;
   taskGet(id: string): Promise<Task>;
   taskWrite(patch: Record<string, unknown>): Promise<Task>;
+  taskDelete(id: string): Promise<TaskDeleteResult>;
   taskCheck(id: string): Promise<unknown>;          // gate result — keep unknown
   adrList(filter?: Record<string, unknown>): Promise<AdrRecord[]>;
   adrGet(id: string): Promise<AdrRecord>;
   adrWrite(patch: Record<string, unknown>): Promise<AdrRecord>;
+  goalList(filter?: Record<string, unknown>): Promise<GoalRecord[]>;
+  goalGet(id: string): Promise<GoalRecord>;
+  goalWrite(patch: Record<string, unknown>): Promise<GoalRecord>;
+  goalGate(id: string): Promise<unknown>;
+  metaList(filter?: Record<string, unknown>): Promise<MetaRecord[]>;
+  metaGet(id: string): Promise<MetaRecord>;
+  metaWrite(patch: Record<string, unknown>): Promise<MetaRecord>;
   manifest(): Promise<Manifest>;
   close(): Promise<void>;
 }
@@ -113,6 +121,14 @@ export async function connectProvider({ command, args, env, cwd }: ConnectProvid
     return (r.structuredContent as {task?: Task})?.task ?? null as unknown as Task;
   }
 
+  // gap-abi-missing-commit-delete-dependson-primitives: task_delete passthrough, mirroring taskWrite.
+  // A not-found id surfaces as isError from the provider → throw (fail-closed, never a silent no-op).
+  async function taskDelete(id: string): Promise<TaskDeleteResult> {
+    const r = await client.callTool({ name: "task_delete", arguments: { id } });
+    if (r.isError) throw new Error((r.content as Array<{text?: string}>)?.[0]?.text ?? "task_delete failed");
+    return (r.structuredContent ?? { id, ok: false, reason: "no result" }) as TaskDeleteResult;
+  }
+
   // QN-027 (iteration 13): generic task_check passthrough, mirroring
   // taskWrite's pattern exactly — provider-agnostic, no backend branch.
   // Whether the active Provider actually implements task_check (gate
@@ -147,6 +163,57 @@ export async function connectProvider({ command, args, env, cwd }: ConnectProvid
     return (r.structuredContent as {adr?: AdrRecord})?.adr ?? null as unknown as AdrRecord;
   }
 
+  // ── Goal ABI (separate object kind — provider-backed storage, SPEC §5.2). Same
+  // graceful-degradation contract as ADR: goalList degrades to [] on isError so a
+  // goal-less provider (github stub, backlog) renders cleanly; goalGet returns null
+  // on isError (mirrors adrGet); goalWrite throws (mirrors adrWrite); goalGate
+  // returns the provider's gate verdict, throwing on isError (mirrors taskCheck).
+  async function goalList(filter: Record<string, unknown> = {}): Promise<GoalRecord[]> {
+    const r = await client.callTool({ name: "goal_list", arguments: filter });
+    if (r.isError) return [];
+    return (r.structuredContent as {goals?: GoalRecord[]})?.goals ?? [];
+  }
+
+  async function goalGet(id: string): Promise<GoalRecord> {
+    const r = await client.callTool({ name: "goal_get", arguments: { id } });
+    if (r.isError) return null as unknown as GoalRecord;
+    return (r.structuredContent as {goal?: GoalRecord})?.goal ?? null as unknown as GoalRecord;
+  }
+
+  async function goalWrite(patch: Record<string, unknown>): Promise<GoalRecord> {
+    const r = await client.callTool({ name: "goal_write", arguments: patch });
+    if (r.isError) throw new Error((r.content as Array<{text?: string}>)?.[0]?.text ?? "goal_write failed");
+    return (r.structuredContent as {goal?: GoalRecord})?.goal ?? null as unknown as GoalRecord;
+  }
+
+  async function goalGate(id: string): Promise<unknown> {
+    const r = await client.callTool({ name: "goal_gate", arguments: { id } });
+    if (r.isError) throw new Error((r.content as Array<{text?: string}>)?.[0]?.text ?? "goal_gate failed");
+    return r.structuredContent ?? null;
+  }
+
+  // ── Meta ABI (separate object kind — message→meta-driver, answered on the same record). Same
+  // graceful-degradation contract as ADR/goal: metaList degrades to [] on isError so a meta-less
+  // provider renders cleanly; metaGet returns null on isError (mirrors goalGet); metaWrite throws
+  // (mirrors goalWrite).
+  async function metaList(filter: Record<string, unknown> = {}): Promise<MetaRecord[]> {
+    const r = await client.callTool({ name: "meta_list", arguments: filter });
+    if (r.isError) return [];
+    return (r.structuredContent as {metas?: MetaRecord[]})?.metas ?? [];
+  }
+
+  async function metaGet(id: string): Promise<MetaRecord> {
+    const r = await client.callTool({ name: "meta_get", arguments: { id } });
+    if (r.isError) return null as unknown as MetaRecord;
+    return (r.structuredContent as {meta?: MetaRecord})?.meta ?? null as unknown as MetaRecord;
+  }
+
+  async function metaWrite(patch: Record<string, unknown>): Promise<MetaRecord> {
+    const r = await client.callTool({ name: "meta_write", arguments: patch });
+    if (r.isError) throw new Error((r.content as Array<{text?: string}>)?.[0]?.text ?? "meta_write failed");
+    return (r.structuredContent as {meta?: MetaRecord})?.meta ?? null as unknown as MetaRecord;
+  }
+
   async function manifest(): Promise<Manifest> {
     const r = await client.readResource({ uri: "provider://manifest" });
     return JSON.parse((r.contents[0] as {text: string}).text) as Manifest;
@@ -156,5 +223,5 @@ export async function connectProvider({ command, args, env, cwd }: ConnectProvid
     await client.close();
   }
 
-  return { taskList, taskGet, taskWrite, taskCheck, adrList, adrGet, adrWrite, manifest, close };
+  return { taskList, taskGet, taskWrite, taskDelete, taskCheck, adrList, adrGet, adrWrite, goalList, goalGet, goalWrite, goalGate, metaList, metaGet, metaWrite, manifest, close };
 }

@@ -30,7 +30,7 @@ checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 main_root="${workdir}/main-root"
 project_dir="${workdir}/projects"
 worktree_root="${workdir}/worktrees/gap-foo"
-worktree_wf="${worktree_root}/.claude/workflows/fan-in-execute.js"
+worktree_wf="${worktree_root}/plugin/workflows/fan-in-execute.js"
 workflow_events="${workdir}/events"
 mkdir -p "${main_root}" "${workflow_events}" "$(dirname "${worktree_wf}")"
 
@@ -41,8 +41,8 @@ mkdir -p "${main_root}" "${workflow_events}" "$(dirname "${worktree_wf}")"
 git -C "${main_root}" init -q 2>/dev/null
 git -C "${main_root}" config user.email "mutation@test.invalid"
 git -C "${main_root}" config user.name "mutation"
-mkdir -p "${main_root}/.claude/workflows"
-printf 'BASE' > "${main_root}/.claude/workflows/fan-in-execute.js"
+mkdir -p "${main_root}/plugin/workflows"
+printf 'BASE' > "${main_root}/plugin/workflows/fan-in-execute.js"
 git -C "${main_root}" add .
 git -C "${main_root}" commit -q -m base
 BASE_SHA=$(git -C "${main_root}" rev-parse HEAD)
@@ -51,7 +51,7 @@ git -C "${main_root}" add .
 git -C "${main_root}" commit -q -m develop-advance
 DEVELOP_SHA=$(git -C "${main_root}" rev-parse HEAD)
 git -C "${main_root}" checkout -q -b task "${BASE_SHA}"
-printf 'TASK' > "${main_root}/.claude/workflows/fan-in-execute.js"
+printf 'TASK' > "${main_root}/plugin/workflows/fan-in-execute.js"
 git -C "${main_root}" add .
 git -C "${main_root}" commit -q -m task-change
 git -C "${main_root}" merge -q -m "fan-in merge" "${DEVELOP_SHA}"

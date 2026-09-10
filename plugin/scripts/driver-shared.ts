@@ -18,6 +18,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { writeJsonAtomic } from "./write-json-atomic.ts";
 
 // ── 常量 ───────────────────────────────────────────────────────────────────────────────────────────
@@ -206,10 +207,39 @@ export function headerValue(
 
 // ── 资源门（AC150-1）：起 LLM worker / fix worker 前经同一个资源门判定 ──────────────────────────────
 
-/** 判停条件之二：resource-gate 是否报 WAIT（AC3）。cmd 覆盖是测试缝；缺省 = 本仓库 resource-gate.sh
- *  `--for full-suite --json`。exit 0 = GO，非 0 = WAIT（读不懂/读失败 ⇒ fail-closed WAIT，硬规则 3b）。 */
+/** 解析 resource-gate.sh 到本 kernel 安装位置（⛔ 非 opts.root —— gap-driver-resource-gate-path-
+ *  anchored-at-root-third-party：quay-init 后的第三方项目没有 plugin/scripts/，锚在 opts.root 会
+ *  `bash <不存在路径>` exit 127 ⇒ 恒 WAIT（fail-closed）⇒ 永不派发）。QUAY_PLUGIN_ROOT 覆盖基准
+ *  （同 driver-runtime.ts resolveKernelPluginRoot 的手法）。覆盖两种形态：dev-tree（本 .ts 与
+ *  resource-gate.sh 同住 plugin/scripts/，dir 的 basename 是 scripts）与 installed-artifact（本模块
+ *  bundle 进 plugin/scripts/dist/，dir 的 basename 是 dist ⇒ 上跳两级到 plugin root 再进 scripts/）。
+ *  找不到 ⇒ null（调用方 fail-closed，⛔ 不静默 GO）。 */
+export function resolveResourceGateScript(env: NodeJS.ProcessEnv = process.env): string | null {
+  const override = env.QUAY_PLUGIN_ROOT;
+  let pluginRoot: string;
+  if (override) {
+    pluginRoot = override;
+  } else {
+    const dir = path.dirname(fileURLToPath(import.meta.url));
+    pluginRoot = path.basename(dir) === "dist" ? path.dirname(path.dirname(dir)) : path.dirname(dir);
+  }
+  const script = path.join(pluginRoot, "scripts", "resource-gate.sh");
+  return fs.existsSync(script) ? script : null;
+}
+
+/** 判停条件之二：resource-gate 是否报 WAIT（AC3）。cmd 覆盖是测试缝；缺省 = kernel 安装位置的
+ *  resource-gate.sh `--for full-suite --json`（resolveResourceGateScript，⛔ 非 opts.root）。exit 0 = GO，
+ *  非 0 = WAIT（读不懂/读失败 ⇒ fail-closed WAIT，硬规则 3b）。`root` 参数已不再用于路径解析，仅为
+ *  调用方 API 兼容保留。 */
 export function resourceGateCheck(root: string, cmd: string[] | null): { go: boolean; reason: string } {
-  const argv = cmd ?? ["bash", path.join(root, "plugin", "scripts", "resource-gate.sh"), "--for", "full-suite", "--json"];
+  let argv: string[];
+  if (cmd) {
+    argv = cmd;
+  } else {
+    const gate = resolveResourceGateScript();
+    if (!gate) return { go: false, reason: "resource-gate.sh not found (kernel install location) — fail-closed" };
+    argv = ["bash", gate, "--for", "full-suite", "--json"];
+  }
   let r: ReturnType<typeof spawnSync>;
   try {
     r = spawnSync(argv[0], argv.slice(1), {

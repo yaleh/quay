@@ -25,7 +25,7 @@ task 的**状态/body/updated 三类读面应统一以 develop git ref 为单一
 **实证 2026-08-30（本次审计）**：`gap-suite-extend-shared-install-cache` 05:12:41 被 driver 在 develop 翻 done，主检出 disk 在 done 之后被 05:02 的未提交 task_write（范围重写）与 05:14 的内容中立写两次 bump mtime ⇒ web 列表显示 `done`（develop 覆盖）而 `updated` 显示「10m ago」（disk mtime）——**同一行的 status 与 updated 读两个源**；点进详情页读 disk ⇒ 列表 `done`、详情页 `ready`，自相矛盾。根因同硬规则 4b：**status 有了两个可分歧的读源，web 按列各取一边**。
 
 **设计原则（整体设计，非补丁）**：
-- **develop 是 task 状态/body/updated 的唯一正源**；主检出 disk（main/manager-doc 工作树）只是**写入目标** + 未提交任务的兜底，永不作显示/决策读面。
+- **develop 是 task 状态/body/updated 的唯一正源**；主检出 disk（author 工作树）只是**写入目标** + 未提交任务的兜底，永不作显示/决策读面。
 - **读法只用对象库**：`git show develop:tasks/<id>.md` / `git cat-file --batch` / `git log -1 --format=%cI develop -- tasks/<id>.md`。**⛔ 不得 `git checkout develop` / `git worktree add ... develop`**——会把 develop 检出到工作树，与在飞 fan-in 冲突、挡 push develop（同 `gap-web-task-status-reads-stale-main-checkout` 的既有裁定）。
 - **读面形态 = `readTaskStatusForLive` 泛化**（observation.ts:1109 已有正形）：develop 命中 → develop 值；develop 读不到（纯未提交任务）→ disk 兜底。
 - **updated 与 status 同源**：develop 派生的 status ⇒ updated = 该文件在 develop 的末次提交时刻（`%cI`）；disk 兜底的 status ⇒ updated = disk mtime（现状不变）。merge/stash/未提交写不再污染显示。

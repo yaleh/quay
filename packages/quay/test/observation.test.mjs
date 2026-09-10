@@ -1,4 +1,4 @@
-// @test-group product
+// @test-group lowconc
 // gap-git-history-counts-stale-branches — readGitHistory must count only ACTIVE local branches as
 // chart lanes. The old `git log --branches --source` counted every local branch, so a merged-but-
 // never-deleted leftover branch (a fan-in source left dangling) kept polluting the lane count long
@@ -13,136 +13,10 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { readGitHistory, parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readTranscriptTail, readSession, parseClaudeAgentsJson, readTaskStatusAtRef, readTaskAtRefMeta, readTaskTitleMapAtRef, readTaskCommitTimesAtRef, readTaskCommitTimeAtRef, readTaskStatusMapAtRef, refreshDevelopRefCaches, clearTaskStatusRefCache } from "../src/observation.ts";
+import { parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readTranscriptTail, readSession, parseClaudeAgentsJson, readTaskStatusAtRef, readTaskAtRefMeta, readTaskTitleMapAtRef, readTaskCommitTimesAtRef, readTaskCommitTimeAtRef, readTaskStatusMapAtRef, refreshDevelopRefCaches, clearTaskStatusRefCache } from "../src/observation.ts";
 import { renderSessionPage } from "../src/serve-handlers.ts";
 import { taskRunsBlock, handleTaskList } from "../src/serve-task.ts";
 
-/** Commit helper with a fixed clock (committer date = author date = `t`), per-branch file. */
-function commitAt(ws, msg, t, file = "log.txt") {
-  const env = {
-    ...process.env,
-    GIT_AUTHOR_DATE: new Date(t * 1000).toISOString(),
-    GIT_COMMITTER_DATE: new Date(t * 1000).toISOString(),
-  };
-  fs.appendFileSync(path.join(ws, file), `${msg}\n`);
-  execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], { cwd: ws, env });
-  execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", msg], { cwd: ws, env });
-}
-
-test("readGitHistory excludes a merged-but-stale branch from the lanes (negative control)", () => {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "obs-gh-"));
-  try {
-    execFileSync("git", ["init", "-q"], { cwd: ws });
-    fs.writeFileSync(path.join(ws, "README.md"), "fixture\n");
-    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], { cwd: ws });
-    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"], { cwd: ws });
-
-    const nowSec = Math.floor(Date.now() / 1000);
-    // The exact pollution shape the finding names: a fan-in leftover whose work was merged into the
-    // mainline but whose branch ref was never deleted — tip is 30 days old (stale).
-    execFileSync("git", ["checkout", "-q", "-b", "verify/stale"], { cwd: ws });
-    commitAt(ws, "stale work", nowSec - 30 * 86400, "stale.txt");
-    execFileSync("git", ["checkout", "-q", "master"], { cwd: ws });
-    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "merge", "-q", "--no-ff", "verify/stale", "-m", "merge verify/stale"], { cwd: ws });
-    commitAt(ws, "main recent", nowSec - 60);
-
-    const hist = readGitHistory(ws);
-    assert.equal(hist.status, "ok");
-    const refs = new Set(hist.commits.map((c) => c.ref));
-    assert.ok(!refs.has("verify/stale"), `stale branch must not be a lane (lanes: ${[...refs].join(", ")})`);
-    assert.ok(refs.has("master"), "the active mainline branch is still a lane");
-    assert.ok(hist.commits.some((c) => c.subject === "stale work"), "the stale branch's merged commit is still shown (relabeled to the mainline, not dropped)");
-  } finally {
-    fs.rmSync(ws, { recursive: true, force: true });
-  }
-});
-
-test("readGitHistory degrades to 「无活跃分支」 when every branch is stale and there is no mainline", () => {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "obs-gh-old-"));
-  try {
-    execFileSync("git", ["init", "-q"], { cwd: ws });
-    fs.writeFileSync(path.join(ws, "README.md"), "fixture\n");
-    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], { cwd: ws });
-    // The ONLY commit is 30 days old → no branch has a commit in the active window.
-    const oldSec = Math.floor(Date.now() / 1000) - 30 * 86400;
-    const env = {
-      ...process.env,
-      GIT_AUTHOR_DATE: new Date(oldSec * 1000).toISOString(),
-      GIT_COMMITTER_DATE: new Date(oldSec * 1000).toISOString(),
-    };
-    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "old"], { cwd: ws, env });
-    // Rename away from the mainline: a stale non-mainline-only repo must still degrade (the
-    // mainline refs develop/master are ALWAYS kept, so "every branch stale" only fires without one).
-    execFileSync("git", ["branch", "-m", "verify/stale"], { cwd: ws });
-
-    const hist = readGitHistory(ws);
-    assert.equal(hist.status, "empty");
-    assert.match(hist.reason || "", /无活跃分支/, "reason says no active branch, not 「无提交记录」");
-  } finally {
-    fs.rmSync(ws, { recursive: true, force: true });
-  }
-});
-
-test("readGitHistory always keeps master (and develop) even when their tip is >24h stale", () => {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "obs-gh-mainline-"));
-  try {
-    execFileSync("git", ["init", "-q"], { cwd: ws });
-    fs.writeFileSync(path.join(ws, "README.md"), "fixture\n");
-    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], { cwd: ws });
-    // master's ONLY commit is 30 days old — far outside the 7-day active window, but a mainline
-    // lane must never drop out (gap-git-history-clickable-branches-window: the 24h window used to
-    // exclude master entirely).
-    const oldSec = Math.floor(Date.now() / 1000) - 30 * 86400;
-    const env = {
-      ...process.env,
-      GIT_AUTHOR_DATE: new Date(oldSec * 1000).toISOString(),
-      GIT_COMMITTER_DATE: new Date(oldSec * 1000).toISOString(),
-    };
-    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "old"], { cwd: ws, env });
-
-    const hist = readGitHistory(ws);
-    assert.equal(hist.status, "ok");
-    const refs = new Set(hist.commits.map((c) => c.ref));
-    assert.ok(refs.has("master"), `stale master is still a lane (lanes: ${[...refs].join(", ")})`);
-  } finally {
-    fs.rmSync(ws, { recursive: true, force: true });
-  }
-});
-
-test("gap-git-history-branch-summary-wrong-numbers: a branch whose tip is newer than the mainline shows only its OWN commits, not the shared ancestry", () => {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "obs-gh-excl-"));
-  try {
-    execFileSync("git", ["init", "-q"], { cwd: ws });
-    fs.writeFileSync(path.join(ws, "README.md"), "fixture\n");
-    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], { cwd: ws });
-    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"], { cwd: ws });
-
-    const nowSec = Math.floor(Date.now() / 1000);
-    // Mainline: init + two commits, tip at nowSec-400.
-    commitAt(ws, "main one", nowSec - 500);
-    commitAt(ws, "main two", nowSec - 400);
-    // A task branch forked from the mainline, with a tip NEWER than the mainline tip (nowSec-200).
-    execFileSync("git", ["checkout", "-q", "-b", "task/gap-x"], { cwd: ws });
-    commitAt(ws, "branch one", nowSec - 300, "branch.txt");
-    commitAt(ws, "branch two", nowSec - 200, "branch.txt");
-    execFileSync("git", ["checkout", "-q", "master"], { cwd: ws });
-
-    const hist = readGitHistory(ws);
-    assert.equal(hist.status, "ok");
-    const branchCommits = hist.commits.filter((c) => c.ref === "task/gap-x");
-    assert.deepEqual(
-      branchCommits.map((c) => c.subject).sort(),
-      ["branch one", "branch two"],
-      `the branch lane carries only its own commits (got: ${branchCommits.map((c) => c.subject).join(", ")})`,
-    );
-    // The shared mainline ancestry must NOT be attributed to the branch (the 481/111 symptom).
-    const branchSubjects = new Set(branchCommits.map((c) => c.subject));
-    assert.ok(!branchSubjects.has("init"), "the repo's first commit is the mainline's, not the branch's");
-    assert.ok(!branchSubjects.has("main one") && !branchSubjects.has("main two"), "mainline commits stay on the mainline");
-  } finally {
-    fs.rmSync(ws, { recursive: true, force: true });
-  }
-});
 
 test("AC127: parseVerificationRound extracts the bucket-execution fields (buckets/bucket_files/bucket_duration_ms) and tolerates their absence on legacy rows (never a fabricated \"full\")", () => {
   // gap-ac127-suite-bucket-web-tests-page-visible — AC126 landed these three fields on bucket-mode
@@ -254,7 +128,36 @@ test("AC1: readLive removes a released-worktree ghost (start-no-end + worktree a
     const live = readLive(root, { nowMs: Date.now() });
     assert.ok(!live.inFlight.some((t) => t.taskId === "GHOST-1"),
       "AC1: the released-worktree ghost is removed from readLive inFlight (not shown as 实现中)");
-    assert.equal(live.concurrency, 0, "AC1: the ghost does not inflate the in-flight concurrency count");
+    assert.equal(live.inFlight.length, 0, "AC1: the ghost does not inflate the in-flight count");
+    assert.ok(Number.isInteger(live.concurrencyCap) && live.concurrencyCap >= 1,
+      "AC1: concurrencyCap is the worker cap (an independent integer ≥1), not a duplicate of inFlight.length");
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test("AC1 (concurrencyCap): readLive returns concurrencyCap = driverCap(root,'worker') (drivers.yml worker.cap=7), distinct from inFlight.length (2)", () => {
+  // gap-dashboard-live-concurrency-duplicates-inflight-count AC1: the old `concurrency` field was
+  // just `inFlight.length` re-named, so the display showed two identical numbers. The new field is
+  // the REAL worker cap from drivers.yml — assert the two values DIFFER (7 vs 2), proving the cap is
+  // no longer a duplicate of the in-flight count.
+  const { parent, root, namespace } = ghostWorkspace("cap-distinct");
+  try {
+    // drivers.yml worker.cap=7 — the single source of truth driverCap(root,"worker") reads.
+    const scriptsDir = path.join(root, "plugin", "scripts");
+    fs.mkdirSync(scriptsDir, { recursive: true });
+    fs.writeFileSync(path.join(scriptsDir, "drivers.yml"), "version: 1\nkinds:\n  worker:\n    cap: 7\n", "utf8");
+    // Two in-flight tasks, each with its worktree slot occupied (so neither is trimmed as a ghost).
+    fs.mkdirSync(namespace, { recursive: true });
+    for (const id of ["CAP-A", "CAP-B"]) {
+      fs.mkdirSync(path.join(namespace, id), { recursive: true });
+      writeStartEvent(root, id, Date.now() - 60_000);
+    }
+    const live = readLive(root, { nowMs: Date.now() });
+    assert.equal(live.concurrencyCap, 7, "concurrencyCap === driverCap(root,'worker') === drivers.yml worker.cap (7)");
+    assert.equal(live.inFlight.length, 2, "inFlight.length is 2 (the two in-flight tasks)");
+    assert.notEqual(live.concurrencyCap, live.inFlight.length,
+      "concurrencyCap (7) ≠ inFlight.length (2) — the cap is no longer the same number duplicated");
   } finally {
     fs.rmSync(parent, { recursive: true, force: true });
   }
@@ -464,10 +367,10 @@ test("readLiveWorkerProcesses: scans a fake /proc for worker cmdlines + start ti
       `${pid} (node) S 1 ${pid} ${pid} 0 -1 4194560 10 0 0 0 0 0 0 0 20 0 1 0 ${starttime} 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
     fs.mkdirSync(path.join(procDir, "100"));
     fs.writeFileSync(path.join(procDir, "100", "cmdline"),
-      `node /x/quay-launch.sh ${WORKER_PROCESS_NAME} -p Task: gap-first. Repo root: /tmp/ws. … `);
+      `node\x00/x/quay-launch.sh\x00${WORKER_PROCESS_NAME}\x00-p\x00Task: gap-first. Repo root: /tmp/ws.\x00…\x00`);
     fs.writeFileSync(path.join(procDir, "100", "stat"), statPid(100, 10000));
     fs.mkdirSync(path.join(procDir, "101"));
-    fs.writeFileSync(path.join(procDir, "101", "cmdline"), "node not-a-worker \n");
+    fs.writeFileSync(path.join(procDir, "101", "cmdline"), "node\x00not-a-worker\x00\n");
     fs.writeFileSync(path.join(procDir, "101", "stat"), statPid(101, 20000));
 
     const workers = readLiveWorkerProcesses(procDir);
@@ -1135,7 +1038,11 @@ test("readTranscriptTail surfaces queue-operation as an external preview entry",
 });
 
 test("AC1 — readLive drops a task landed on develop (done) whose stale disk still says ready", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "live-stale-"));
+  // gap-serve-board-test-workspace-couples-to-shared-tmp-quay-worktrees: nest root under a private
+  // parent so dirname(root)/quay-worktrees is test-private (never the shared /tmp/quay-worktrees).
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "live-stale-"));
+  const root = path.join(parent, "main");
+  fs.mkdirSync(root, { recursive: true });
   try {
     const tasksDir = path.join(root, "tasks");
     fs.mkdirSync(tasksDir, { recursive: true });
@@ -1175,7 +1082,7 @@ test("AC1 — readLive drops a task landed on develop (done) whose stale disk st
     assert.ok(!ids.has("gap-stale"), "AC1: develop=done drops gap-stale even though disk=ready (⛔ 仍显示在飞 ⇒ 假)");
     assert.ok(ids.has("gap-fresh"), "AC2: gap-fresh (ready in both) stays in-flight");
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(parent, { recursive: true, force: true });
   }
 });
 

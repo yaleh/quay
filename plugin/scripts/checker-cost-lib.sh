@@ -6,7 +6,7 @@
 #   run_checker <name> <cmd...>
 # e.g. run_checker "it0-split-or-commit" bash "${repo_root}/plugin/scripts/it0-split-or-commit-check.sh" "${repo_root}"
 #
-# run_checker TIMES the command, appends ONE `{name, ms, n, load, at}` line to
+# run_checker TIMES the command, appends ONE `{name, ms, n, load, at, verdict}` line to
 # .quay/checker-cost.jsonl (PURE APPEND, ZERO JUDGMENT — no threshold, no flag), and returns the
 # command's exit code (so a failing checker still aborts the suite under `set -e`, unchanged).
 #
@@ -41,8 +41,11 @@ _checker_cost_ms_between() {
 }
 
 # ── append one cost row (no timing — the caller already measured ms) ────────────────────────────────
+# verdict ∈ {pass, fail, not-evaluated} is derived by the CALLER from the command's exit code via the
+# same three-state convention as RUN_CHECKER_EXIT_NOT_EVALUATED (0→pass, 3→not-evaluated, other
+# non-zero→fail) — the field is recorded, never judged here (gap-checker-cost-jsonl-add-verdict-field).
 checker_cost_append() {
-  local _name="$1" _ms="$2" _n="${3:-1}"
+  local _name="$1" _ms="$2" _n="${3:-1}" _verdict="${4:-}"
   local _load _file _at
   if [ -n "${CHECKER_COST_LOAD_OVERRIDE:-}" ]; then
     _load="${CHECKER_COST_LOAD_OVERRIDE}"
@@ -53,8 +56,8 @@ checker_cost_append() {
   _at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   mkdir -p "$(dirname "$_file")"
   # names are [a-z0-9-]+ identifiers — safe to embed directly (documented constraint).
-  printf '{"name":"%s","ms":%s,"n":%s,"load":%s,"at":"%s"}\n' \
-    "$_name" "$_ms" "$_n" "$_load" "$_at" >> "$_file"
+  printf '{"name":"%s","ms":%s,"n":%s,"load":%s,"at":"%s","verdict":"%s"}\n' \
+    "$_name" "$_ms" "$_n" "$_load" "$_at" "$_verdict" >> "$_file"
 }
 
 # ── run a criterion, time it, record its cost, return its exit code ────────────────────────────────
@@ -63,7 +66,7 @@ checker_cost_append() {
 # The timed+recorded core is _run_checker_one; run_checker dispatches on RUN_CHECKER_PARALLEL.
 _run_checker_one() {
   local _name="$1"; shift
-  local _start _end _ms _rc=0
+  local _start _end _ms _rc=0 _verdict
   _start="$(_checker_cost_now_ns)"
   if "$@"; then
     _rc=0
@@ -72,7 +75,18 @@ _run_checker_one() {
   fi
   _end="$(_checker_cost_now_ns)"
   _ms="$(_checker_cost_ms_between "$_start" "$_end")"
-  checker_cost_append "$_name" "$_ms" "${CHECKER_COST_N:-1}"
+  # Map the ALREADY-computed _rc to a three-state verdict (gap-checker-cost-jsonl-add-verdict-field):
+  # 0→pass, RUN_CHECKER_EXIT_NOT_EVALUATED(3)→not-evaluated, other non-zero→fail. The parallel path
+  # reaches here through the SAME _run_checker_one (run_checker backgrounds `_run_checker_one`), so
+  # this is the single mapping site — the verdict is passed down, never recomputed.
+  if [ "$_rc" -eq 0 ]; then
+    _verdict="pass"
+  elif [ "$_rc" -eq "$RUN_CHECKER_EXIT_NOT_EVALUATED" ]; then
+    _verdict="not-evaluated"
+  else
+    _verdict="fail"
+  fi
+  checker_cost_append "$_name" "$_ms" "${CHECKER_COST_N:-1}" "$_verdict"
   return "$_rc"
 }
 

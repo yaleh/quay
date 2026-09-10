@@ -8,9 +8,10 @@
 //
 // AC1  — 冷启动 gate = 派生铺设集内脚本全绿（铺什么验什么），非「整个套件绿」：gate 只跑铺设集的
 //        测试文件，铺设集外的测试（哪怕是红的）不参与判定。
-// AC2  — 铺设集机械派生：`grep plugin/skills/*/SKILL.md + plugin/loop/*.md` 里的 `plugin/scripts/*`
-//        引用，与 quay-init.sh 的 `DERIVED_SCRIPTS` 同一派生源（无手写清单，漂移免疫）。测试断言
-//        helper 的派生集 == 复刻 quay-init 同一 grep 的输出。
+// AC2  — 铺设集机械派生：helper CALLS quay-init.sh 的 `derive_loop_scripts()`（单一正本，无手写清单，
+//        漂移免疫）——不再是自己复刻的 grep。测试断言 helper 的派生集 == derive_loop_scripts() 输出。
+// AC3  — 静态检查：laydown-set-check.sh 里不存在独立的 `grep ... plugin/scripts/` 派生（必须调用
+//        derive_loop_scripts，不得自己再枚举），防止未来再分裂出第三份实现。
 // AC4  — 真实使用：session-liveness.sh / session-liveness-mount.sh 在铺设集内（M3 回归会随铺扩散，
 //        所以本次等待正确）；铺设集外失败不阻塞。
 // AC6  — 本测试用 node:test 且带 `// @test-group engine`。
@@ -39,6 +40,24 @@ function runHelper(args, opts = {}) {
   });
 }
 
+// deriveViaQuayInit() — the SINGLE source of truth for "该落地哪些脚本": SOURCE quay-init.sh in its
+// library mode (the guard stops before the install flow) and call derive_loop_scripts() directly.
+// Mirrors the runSourced pattern in quay-init.test.mjs (gap-quay-init-reduce-real-install-count).
+function deriveViaQuayInit() {
+  const script = '_fargs=("$@")\nset --\nsource "$QUAY_INIT_SCRIPT"\nderive_loop_scripts';
+  const r = spawnSync('bash', ['-c', script, 'quay-init-sourced'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      CLAUDE_PLUGIN_ROOT: pluginDir,
+      QUAY_INIT_SCRIPT: path.join(pluginDir, 'scripts', 'quay-init.sh'),
+    },
+  });
+  assert.equal(r.status, 0, `derive_loop_scripts() must run when sourced:\n${r.stderr}`);
+  return r.stdout.trim().split('\n').filter(Boolean).sort();
+}
+
 function makeFixture() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'lsc-'));
 }
@@ -63,7 +82,7 @@ const PASSING_TEST = `import { test } from 'node:test';\nimport assert from 'nod
 const FAILING_TEST = `import { test } from 'node:test';\nimport assert from 'node:assert/strict';\ntest('fails', () => { assert.equal(1, 2); });\n`;
 
 // ── AC2: 机械派生 == quay-init.sh 同一派生源（漂移免疫，无手写清单）──────────────────────────────
-test('AC2 — the helper derives the laydown set by the SAME grep as quay-init.sh (single source)', () => {
+test('AC2 — the helper derives the laydown set by CALLING quay-init.sh derive_loop_scripts() (single source)', () => {
   assert.ok(fs.existsSync(HELPER), 'laydown-set-check.sh must exist in plugin/scripts/');
   const list = runHelper(['--list', '--json']);
   assert.equal(list.status, 0, `--list must exit 0:\n${list.stderr}`);
@@ -71,15 +90,21 @@ test('AC2 — the helper derives the laydown set by the SAME grep as quay-init.s
   assert.ok(Array.isArray(parsed.scripts), '--list --json must expose scripts[]');
   assert.ok(parsed.derived_scripts > 0, 'the derived set must be non-empty');
 
-  // 复刻 quay-init.sh 的 DERIVED_SCRIPTS grep（plugin/scripts/quay-init.sh 第 969 行）——单源漂移免疫。
-  const q = spawnSync('bash', ['-c',
-    `grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' "$ROOT/plugin/skills"/*/SKILL.md "$ROOT/plugin"/loop/*.md 2>/dev/null | sed 's#^plugin/scripts/##' | sort -u`,
-  ], { encoding: 'utf8', env: { ...process.env, ROOT: repoRoot } });
-  assert.equal(q.status, 0, `quay-init derivation grep must run:\n${q.stderr}`);
-  const quayDerived = q.stdout.trim().split('\n').filter(Boolean).sort();
-
+  // 单一正本：helper 的派生集 == quay-init.sh derive_loop_scripts() 的完整输出（不再是自己复刻的 grep）。
+  const quayDerived = deriveViaQuayInit();
   assert.deepEqual(parsed.scripts, quayDerived,
-    'helper derived set must EQUAL quay-init DERIVED_SCRIPTS (same grep, no second list)');
+    'helper derived set must EQUAL quay-init derive_loop_scripts() (single source, no second list)');
+});
+
+// ── AC3: 静态检查 ——「该落地什么」只有一处实现（laydown-set-check.sh 调用 derive_loop_scripts，不得自己重枚举）──
+test('AC3 — laydown-set-check.sh has NO independent derivation; it CALLS derive_loop_scripts (single implementation)', () => {
+  const src = fs.readFileSync(HELPER, 'utf8');
+  // 唯一实现 = quay-init.sh 的 derive_loop_scripts；本脚本必须调用它。
+  assert.match(src, /derive_loop_scripts/,
+    'laydown-set-check.sh must CALL quay-init.sh\'s derive_loop_scripts (the single implementation)');
+  // 独立重枚举的特征 = 本脚本自己跑 `grep -ohE 'plugin/scripts/…'` 的派生；必须不存在。
+  assert.doesNotMatch(src, /grep\s+-ohE\s+'plugin\/scripts\//,
+    'laydown-set-check.sh must NOT re-enumerate via its own grep (the old independent derivation)');
 });
 
 test('AC4 — the retired observer scripts are NOT in the derived set (deleted, no referenced-not-landed)', () => {

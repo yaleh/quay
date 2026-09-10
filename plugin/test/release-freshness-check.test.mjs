@@ -279,3 +279,110 @@ t("exit 2 — threshold must be a non-negative integer", () => {
     assert.match(r.stderr, /--threshold/);
   } finally { rmrf(root); }
 });
+
+// ── deliver orphan detector (--deliver, gap-deliver-verification-trigger-orphaned-after-land-path-migration AC4) ──
+// The deliver detector reads .quay/develop-deliver-state.json (written by develop-deliver-tgz.sh) and
+// reports deliver_state ∈ {fresh, stale, not-evaluated}. stale (ahead over --deliver-ahead) ⇒ exit 1;
+// MISSING state file ⇒ not-evaluated ⇒ exit 1 too, DISTINGUISHABLY (硬规则 3b — "file absent" must not
+// read as 合格). fresh ⇒ no red from the deliver signal.
+
+const DELIVER_TGZ = path.join(REPO_ROOT, "plugin", "scripts", "develop-deliver-tgz.sh");
+
+function writeDeliverState(root, lastDelivered, timestamp) {
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, ".quay", "develop-deliver-state.json"),
+    JSON.stringify({ lastDelivered, hosts: { B: "200", C: "200" }, timestamp }) + "\n"
+  );
+}
+
+t("deliver detector — missing state.json ⇒ deliver_state=not-evaluated + exit 1 (distinguishable from FRESH)", () => {
+  const root = makeRepo();
+  try {
+    const r = runCheck(root, ["--deliver", "--threshold", "999999"]);
+    assert.equal(r.status, 1, `missing deliver state must RED:\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stdout, /deliver_state=not-evaluated/);
+    assert.match(r.stdout, /verdict=STALE/);
+  } finally { rmrf(root); }
+});
+
+t("deliver detector — fresh state (lastDelivered == develop tip) ⇒ deliver_state=fresh + exit 0", () => {
+  const root = makeRepo();
+  try {
+    const tip = git(root, "rev-parse", "develop");
+    writeDeliverState(root, tip, "2026-09-08T00:00:00Z");
+    const r = runCheck(root, ["--deliver", "--threshold", "999999"]);
+    assert.equal(r.status, 0, `fresh deliver state must be FRESH:\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stdout, /deliver_state=fresh/);
+    assert.match(r.stdout, /verdict=FRESH/);
+  } finally { rmrf(root); }
+});
+
+t("deliver detector — stale state (ahead over threshold) ⇒ deliver_state=stale + exit 1", () => {
+  const root = makeRepo();
+  try {
+    // develop advances with a NON-delivery commit (README) so drift_dirs stays 0 and ahead=1.
+    fs.writeFileSync(path.join(root, "README.md"), "# readme\n");
+    git(root, "add", "-A");
+    git(root, "commit", "-q", "-m", "non-delivery develop commit");
+    const parent = git(root, "rev-parse", "develop~1");
+    writeDeliverState(root, parent, "2026-09-08T00:00:00Z");
+    const r = runCheck(root, ["--deliver", "--deliver-ahead", "0", "--threshold", "999999"]);
+    assert.equal(r.status, 1, `stale deliver must RED:\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stdout, /deliver_state=stale/);
+    assert.match(r.stdout, /deliver_ahead=1/);
+  } finally { rmrf(root); }
+});
+
+t("deliver detector — JSON carries deliver_state + deliver_ahead (not-evaluated shape)", () => {
+  const root = makeRepo();
+  try {
+    const r = runCheck(root, ["--deliver", "--threshold", "999999", "--json"]);
+    assert.equal(r.status, 1, r.stderr);
+    const j = JSON.parse(r.stdout);
+    assert.equal(j.deliver_state, "not-evaluated");
+    assert.equal(j.deliver_ahead, null);
+    assert.equal(j.verdict, "STALE");
+  } finally { rmrf(root); }
+});
+
+// ── low-frequency deliver trigger (develop-deliver-tgz.sh --check, AC3) ────────────────────────────
+// The trigger decision reads direct quantities: develop tip vs state.json.lastDelivered + age vs
+// --max-age. Both directions asserted once (AC3): == tip ⇒ fresh (不投递); != tip ∧ over max-age ⇒ deliver.
+
+function runTriggerCheck(root, extraArgs = []) {
+  const res = spawnSync("bash", [DELIVER_TGZ, "--check", "--root", root, ...extraArgs], { encoding: "utf8" });
+  return { status: res.status, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
+}
+
+t("trigger — lastDelivered == develop tip ⇒ decision=fresh (AC3 direction 1: 不投递)", () => {
+  const root = makeRepo();
+  try {
+    const tip = git(root, "rev-parse", "develop");
+    writeDeliverState(root, tip, "2026-09-08T00:00:00Z");
+    const r = runTriggerCheck(root);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /"decision":"fresh"/);
+  } finally { rmrf(root); }
+});
+
+t("trigger — lastDelivered != tip ∧ age over --max-age ⇒ decision=deliver (AC3 direction 2: 投递)", () => {
+  const root = makeRepo();
+  try {
+    writeDeliverState(root, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "2020-01-01T00:00:00Z");
+    const r = runTriggerCheck(root, ["--max-age", "0"]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /"decision":"deliver"/);
+  } finally { rmrf(root); }
+});
+
+t("trigger — lastDelivered != tip but age within --max-age ⇒ decision=too-soon (low-frequency hold)", () => {
+  const root = makeRepo();
+  try {
+    const now = new Date().toISOString();
+    writeDeliverState(root, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef", now);
+    const r = runTriggerCheck(root, ["--max-age", "999999"]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /"decision":"too-soon"/);
+  } finally { rmrf(root); }
+});

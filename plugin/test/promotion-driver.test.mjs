@@ -242,13 +242,44 @@ function writeDoDFixer(root) {
 test("defaultPromotionCheckArgv — full-pool --apply (never --targeted) + --cap + --json", () => {
   const argv = defaultPromotionCheckArgv("/r", 5);
   assert.equal(argv[0], "node");
+  // gap-promotion-driver-ready-pool-check-path-third-party：脚本锚在本 kernel 安装位置（dev tree =
+  // 本仓库 plugin/scripts/ready-pool-check.ts，带 --experimental-strip-types），⛔ 非 /r/plugin/scripts/。
   assert.equal(argv[1], "--experimental-strip-types");
-  assert.equal(argv[2], "/r/plugin/scripts/ready-pool-check.ts");
+  assert.ok(argv[2].endsWith(`${path.sep}plugin${path.sep}scripts${path.sep}ready-pool-check.ts`), `argv[2] 是 kernel 侧 .ts：${argv[2]}`);
+  assert.ok(!argv[2].startsWith("/r/"), `argv[2] ⛔ 不锚在 task root：${argv[2]}`);
   assert.ok(argv.includes("--apply"), "AC130: the resident round applies promotions (A22 heartbeat path)");
   assert.ok(argv.includes("--json"));
   assert.deepEqual(argv.slice(argv.indexOf("--root"), argv.indexOf("--root") + 2), ["--root", "/r"]);
   assert.deepEqual(argv.slice(argv.indexOf("--cap"), argv.indexOf("--cap") + 2), ["--cap", "5"]);
   assert.ok(!argv.includes("--targeted"), "AC130: full-pool determination, NOT a single --targeted task");
+});
+
+// gap-promotion-driver-ready-pool-check-path-third-party AC2 负控制：第三方项目（quay-init 布下的面）
+// 无 plugin/scripts/*.ts，只有 shipped dist/*.js。resolveKernelSibling 须回退到 dist/*.js 且不带
+// --experimental-strip-types（stripTypes=false），⛔ 不得拼出 root/plugin/scripts/ready-pool-check.ts。
+test("defaultPromotionCheckArgv — 无 plugin/ 的第三方项目解析到 shipped dist/ready-pool-check.js（stripTypes=false）", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "promotion-third-party-"));
+  try {
+    const dist = path.join(root, "scripts", "dist");
+    fs.mkdirSync(dist, { recursive: true });
+    fs.writeFileSync(path.join(dist, "ready-pool-check.js"), "// bundled\n", "utf8");
+    const saved = process.env.QUAY_PLUGIN_ROOT;
+    process.env.QUAY_PLUGIN_ROOT = root; // resolveKernelScriptsDir() = <root>/scripts，<root>/scripts/*.ts 不存在
+    try {
+      const argv = defaultPromotionCheckArgv("/task-root", 5);
+      assert.equal(argv[0], "node");
+      // ⛔ stripTypes=false ⇒ 无 --experimental-strip-types flag，argv[1] 直接是 bundled .js。
+      assert.equal(argv[1], path.join(root, "scripts", "dist", "ready-pool-check.js"));
+      assert.ok(!argv.includes("--experimental-strip-types"), "stripTypes=false ⇒ 不带 flag");
+      assert.ok(!argv.some((a) => a.includes("/task-root/plugin/scripts/ready-pool-check.ts")), "⛔ 不锚在 task root 的 .ts");
+      assert.ok(argv.includes("--apply") && argv.includes("--json"));
+    } finally {
+      if (saved === undefined) delete process.env.QUAY_PLUGIN_ROOT;
+      else process.env.QUAY_PLUGIN_ROOT = saved;
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("parseIntervalMs / resolveCap — defaults + valid + invalid (fail-closed on bad input)", () => {
@@ -565,8 +596,42 @@ test("runFixPass — fixable spawns (exit 0), unfixable records reason without s
     { id: "gap-nofix", fixable: false, missing: [], unfixable: ["depsReady=false"], prompt: null },
   ];
   const outcomes = runFixPass(decisions, root, "node -e process.exit(0)");
-  assert.deepEqual(outcomes[0], { id: "gap-fix", spawned: true, missing: ["fourArtifacts=false missing=[dod]"], unfixable: [], exitCode: 0, stderr: null, timedOut: false });
-  assert.deepEqual(outcomes[1], { id: "gap-nofix", spawned: false, missing: [], unfixable: ["depsReady=false"], exitCode: null, stderr: null, timedOut: false });
+  assert.equal(outcomes[0].id, "gap-fix");
+  assert.equal(outcomes[0].spawned, true);
+  assert.deepEqual(outcomes[0].missing, ["fourArtifacts=false missing=[dod]"]);
+  assert.equal(outcomes[0].exitCode, 0);
+  assert.equal(outcomes[0].stderr, null);
+  assert.equal(outcomes[0].timedOut, false);
+  // gap-fix-worker-spawn-timeout-persists-post-fix AC4：spawn 的 argv + durationMs 落进 outcome。
+  assert.deepEqual(outcomes[0].argv.slice(0, 3), ["node", "-e", "process.exit(0)"], "AC4: argv prefix recorded verbatim");
+  assert.ok(outcomes[0].argv.length > 3 && outcomes[0].argv[3].includes("structured_missing"), "AC4: argv carries the appended fix prompt (last arg)");
+  assert.ok(Number.isFinite(outcomes[0].durationMs) && outcomes[0].durationMs >= 0, `AC4: durationMs recorded: ${outcomes[0].durationMs}`);
+  assert.deepEqual(outcomes[1], { id: "gap-nofix", spawned: false, missing: [], unfixable: ["depsReady=false"], exitCode: null, stderr: null, timedOut: false, argv: null, durationMs: null });
+});
+
+test("gap-fix-worker-spawn-timeout-persists-post-fix AC4 — failure record carries argv + durationMs + exitCode", (t) => {
+  const root = makeRoot("ac4-diag");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // 非零退出（失败）：argv 逐字、durationMs 有限、exitCode 落盘。
+  const argv = ["node", "-e", "process.stderr.write('boom');process.exit(3)"];
+  const r = spawnFixWorker(argv, root, 5000);
+  assert.equal(r.exitCode, 3, "exit code recorded");
+  assert.deepEqual(r.argv, argv, "argv recorded verbatim");
+  assert.ok(Number.isFinite(r.durationMs) && r.durationMs >= 0, `durationMs recorded: ${r.durationMs}`);
+  // 超时（失败）：同样带 argv + durationMs（AC4 点名「失败时」——超时是失败的一种，此前只留 stderr 首行）。
+  const rt = spawnFixWorker(["sleep", "5"], root, 200);
+  assert.equal(rt.timedOut, true);
+  assert.deepEqual(rt.argv, ["sleep", "5"], "timeout path also records argv");
+  assert.ok(Number.isFinite(rt.durationMs) && rt.durationMs >= 0, `timeout path also records durationMs: ${rt.durationMs}`);
+  // 失败记录序列化进 round 记录（promotion-round.jsonl 的 fixes[] 可 grep 到三项）。
+  const rec = computeRoundRecord({
+    round: 1, runId: "pm-1", pid: 1, at: "t", pool: 0, shouldApply: false, promotedIds: [], applied: [], error: null, promotePathLlmInvoked: false,
+    fixes: [{ id: "gap-x", spawned: true, missing: ["selfTouchOk=false"], unfixable: [], exitCode: r.exitCode, stderr: r.stderr, timedOut: false, argv: r.argv, durationMs: r.durationMs }],
+  });
+  const j = JSON.stringify(rec);
+  assert.ok(j.includes('"argv"'), "round record JSON carries argv key (grep-able)");
+  assert.ok(j.includes('"durationMs"'), "round record JSON carries durationMs key (grep-able)");
+  assert.ok(j.includes('"exitCode"'), "round record JSON carries exitCode key (grep-able)");
 });
 
 test("AC142 AC1 — spawnFixWorker captures stderr; outcome result.detail carries it (spawn 失败不再零诊断)", (t) => {

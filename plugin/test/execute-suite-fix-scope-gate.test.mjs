@@ -43,7 +43,6 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
 const COPIES = [
   path.join(REPO_ROOT, "plugin", "workflows", "execute-suite-fix.js"),
-  path.join(REPO_ROOT, ".claude", "workflows", "execute-suite-fix.js"),
 ];
 
 // ── REAL-INVOCATION harness: vm-execute the actual workflow file ────────────────────────────────
@@ -170,10 +169,10 @@ test("AC1 — both Fix prompts (initial + real-red-round) carry the fix-scope ga
   }
 });
 
-test("AC1 — both execute-suite-fix.js copies are byte-identical (dual-copy drift guard)", () => {
+test("AC1 — execute-suite-fix.js lives ONLY in plugin/workflows/ (the .claude/workflows/ dual-copy is retired)", () => {
   const a = fs.readFileSync(COPIES[0], "utf8");
-  const b = fs.readFileSync(COPIES[1], "utf8");
-  assert.equal(a, b, "plugin/workflows and .claude/workflows copies must be byte-identical");
+  assert.ok(a.length > 0, "plugin/workflows/execute-suite-fix.js must have content");
+  assert.ok(!fs.existsSync(path.join(REPO_ROOT, ".claude", "workflows", "execute-suite-fix.js")), ".claude/workflows/execute-suite-fix.js must be retired (archived)");
 });
 
 // ── AC2 — negative control: an out-of-scope red classifies to ZERO inScope (REAL files) ──────────

@@ -107,12 +107,14 @@ export function extractSection(fullText, heading) {
 //     parent?: string | null;      // parent task id (relation edge)
 //     children?: string[];         // child task ids (relation edge)
 //     depends_on?: string[];       // prerequisite task ids (relation edge; top-level OR legacy extra)
+//     goal_ac?: string;            // owning goal AC id (task→AC linkage, G7; top-level single scalar, optional)
 //     extra?: {
 //       schema?: string;           // "v1" — the schema marker (the grandfather boundary)
 //       dirFile?: string;          // projection-scaffolding field (forbidden by assertion A6)
 //       dirStatus?: string;        // directive disposition
 //       depends_on?: string[];     // legacy home — task_write used to nest it under extra
 //       malformed?: string[];      // store-injected diagnosis markers
+//       deliveryCriticalSource?: string; // "evidence" | "adhoc" — which source attached the delivery-critical label
 //       [key: string]: unknown;
 //     };
 //     [key: string]: unknown;      // forward-compatible: unknown fields survive the round-trip
@@ -148,6 +150,43 @@ export function frontmatterExtra(fm) {
 export function frontmatterDependsOn(fm) {
   const nested = fm.extra && typeof fm.extra === "object" && !Array.isArray(fm.extra) ? fm.extra.depends_on : undefined;
   return asStringArray(Array.isArray(fm.depends_on) ? fm.depends_on : nested);
+}
+
+// goal_ac is a single optional TOP-LEVEL scalar (task→AC linkage, G7). Unlike depends_on (an array of
+// prerequisite ids), a task declares AT MOST ONE owning AC — so this is a string, not a list. Absent /
+// empty / non-string ⇒ null (缺值 = 未查, 硬规则 6 — "no goal_ac" stays distinguishable from any concrete
+// AC id). It is deliberately NOT read from `extra` (the depends_on legacy home) — the G7 field is
+// top-level by design (per AC-178: nested-under-extra was the depends_on read-failure lesson).
+export function frontmatterGoalAc(fm) {
+  const s = fm && typeof fm === "object" && !Array.isArray(fm) ? fm.goal_ac : undefined;
+  return typeof s === "string" && s.trim() !== "" ? s.trim() : null;
+}
+
+// ── frontmatterDeliveryCriticalSource — the `extra.deliveryCriticalSource` three-state projection
+//    (gap-delivery-critical-source-distinction-outer-retired). ──
+// The `delivery-critical` label now has TWO legal sources that were previously conflated into a single
+// prose claim ("由 outer 按证据打，从不移除"): `evidence` (attached at filing/promotion by the promote
+// gate's determination) and `adhoc` (attached by the manager under DIR-130's standing authorization for
+// human-priority instructions). This projection makes "which source is THIS label" mechanically readable.
+// It is an EXPLICIT THREE-STATE (hard rule 3b): the two concrete sources are returned verbatim, and
+// everything else — absent (a legacy task that predates the field) OR an unparseable value — returns the
+// DISTINCT `"unknown"` marker, never conflated with either concrete source. Mirrors frontmatterStatus's
+// "缺值 = 未查" shape, but as a named third state (the label's absence of a source is a legitimate
+// legacy condition, not an error).
+export function frontmatterDeliveryCriticalSource(fm) {
+  const s = frontmatterExtra(fm).deliveryCriticalSource;
+  return s === "evidence" || s === "adhoc" ? s : "unknown";
+}
+
+// ── frontmatterStatus — the `status:` projection (same family as frontmatterLabels/frontmatterExtra/
+//    frontmatterDependsOn; gap-task-status-parsing-reimplemented-13-sites). ──
+// Projects the `status:` scalar from a PARSED frontmatter (the `fm` object the other projections take).
+// Absent / empty / non-string ⇒ null (缺值 = 未查, 硬规则 6 — "no status" stays distinguishable from any
+// concrete status word, never conflated with an empty string). The raw-text reader is readTaskStatusAtRef
+// below, which routes through the single parser (parseFrontmatterCompletely) + THIS projection.
+export function frontmatterStatus(fm) {
+  const s = fm && typeof fm === "object" && !Array.isArray(fm) ? fm.status : undefined;
+  return typeof s === "string" && s.trim() !== "" ? s.trim() : null;
 }
 //
 // ── WRITE-OWNERSHIP SEPARATION (gap-task-file-develop-integration-drift-fan-in-conflicts, AC3) ────
@@ -202,22 +241,31 @@ export function appendBodySection(fullText, heading, content) {
 
 // ── parseTask — delegate to parseFrontmatterCompletely. ──────────────────────────────────────────
 // Splits on the first two `---` fences, then reads the COMPLETE frontmatter via the single parser and
-// projects the { labels, extra } view the schema checks consume. (parseTask only ever READS frontmatter;
-// the write-ownership separation above is unchanged — the outer layer owns frontmatter writes.)
+// projects the { labels, extra, depends_on } view the schema checks consume. (parseTask only ever READS
+// frontmatter; the write-ownership separation above is unchanged — the outer layer owns frontmatter writes.)
 // Supported `extra` structures: scalar values AND nested lists/maps (e.g. `extra.depends_on: [a, b]`,
 // `extra.meta: { k: v }`). Nested structures round-trip faithfully as arrays/objects — never flattened
 // to scalar strings (gap-parseTask-nested-extra-support).
-// Limitation: parseTask projects only { labels, extra } — it does NOT expose `depends_on`. Call
-// readDependsOn() (below) for the prerequisite edge; both delegate to the same single parser.
+// gap-abi-missing-commit-delete-dependson-primitives: parseTask now ALSO surfaces `depends_on`
+// directly (via frontmatterDependsOn — top-level field first, legacy extra-nested form as fallback),
+// so consumers no longer need the `extra` escape hatch. readDependsOn() remains for the raw
+// frontmatter-string form; both delegate to the same single parser.
 export function parseTask(fullText) {
   const fmMatch = fullText.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!fmMatch) {
-    return { labels: [], extra: {}, frontmatterRaw: "", body: fullText };
+    return { labels: [], extra: {}, depends_on: [], frontmatterRaw: "", body: fullText };
   }
   const frontmatterRaw = fmMatch[1];
   const body = fmMatch[2];
   const complete = parseFrontmatterCompletely(frontmatterRaw);
-  return { labels: frontmatterLabels(complete), extra: frontmatterExtra(complete), frontmatterRaw, body };
+  return {
+    labels: frontmatterLabels(complete),
+    extra: frontmatterExtra(complete),
+    depends_on: frontmatterDependsOn(complete),
+    goal_ac: frontmatterGoalAc(complete),
+    frontmatterRaw,
+    body,
+  };
 }
 
 // ── readDependsOn — delegate to parseFrontmatterCompletely. ──────────────────────────────────────
@@ -230,6 +278,61 @@ export function parseTask(fullText) {
 // first, then the legacy extra-nested form).
 export function readDependsOn(frontmatterRaw) {
   return frontmatterDependsOn(parseFrontmatterCompletely(frontmatterRaw));
+}
+
+// ── readGoalAc — the `goal_ac:` raw-frontmatter reader (mirrors readDependsOn). ────────────────────
+// Delegates to the single parser (parseFrontmatterCompletely) + the single projection
+// (frontmatterGoalAc). null = the task declares no goal AC (缺值 = 未查, 硬规则 6 — distinguishable
+// from a concrete AC id, never conflated with an empty string).
+export function readGoalAc(frontmatterRaw) {
+  return frontmatterGoalAc(parseFrontmatterCompletely(frontmatterRaw));
+}
+
+// ── readTaskStatusAtRef / fetchTaskStatusAtRef — the ONE status-at-a-ref reader (sync + async variant),
+//    gap-task-status-parsing-reimplemented-13-sites. ──
+// Formerly VERBATIM-COPIED 3× (driver-filters.ts, ready-pool-check.ts, worker-driver.ts async) with zero
+// shared import — ready-pool-check.ts even acknowledged "worker-driver.ts's async readTaskStatusAtRef is
+// the same judgment". Reads `<ref>:tasks/<taskId>.md` via `git show`, then projects `status:` through the
+// single parser (parseFrontmatterCompletely) + single projection (frontmatterStatus) — there is no second
+// status reader to drift out of sync. null when the ref/path is absent, git fails, or the frontmatter is
+// unreadable (缺值 = 未查, 硬规则 6 — "no status" stays distinguishable from any concrete status word).
+import { execFile, execFileSync } from "node:child_process";
+
+function statusFromTaskFileRaw(raw) {
+  const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!fmMatch) return null;
+  return frontmatterStatus(parseFrontmatterCompletely(fmMatch[1]));
+}
+
+export function readTaskStatusAtRef(root, ref, taskId) {
+  let raw;
+  try {
+    raw = execFileSync("git", ["-C", root, "show", `${ref}:tasks/${taskId}.md`], {
+      timeout: 30_000,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).toString("utf8");
+  } catch {
+    return null;
+  }
+  return statusFromTaskFileRaw(raw);
+}
+
+// Async variant of readTaskStatusAtRef (same judgment, promise form) — worker-driver's resident loop
+// calls this (its former private async reader of the same name); the loop must NOT block on
+// execFileSync (AC4).
+export async function fetchTaskStatusAtRef(root, ref, taskId) {
+  let raw;
+  try {
+    raw = await new Promise((resolve, reject) => {
+      execFile("git", ["-C", root, "show", `${ref}:tasks/${taskId}.md`], { timeout: 30_000, encoding: "utf8" }, (err, stdout) => {
+        if (err) return reject(err);
+        resolve(stdout);
+      });
+    });
+  } catch {
+    return null;
+  }
+  return statusFromTaskFileRaw(raw);
 }
 
 // ── Marker read (canonical grandfather boundary). ─────────────────────────────────────────────────
@@ -303,6 +406,31 @@ export function countBoxes(sectionBody) {
   const unchecked = lines.filter((l) => UNCHECKED_BOX_RE.test(l)).length;
   const checked = lines.filter((l) => CHECKED_BOX_RE.test(l)).length;
   return { unchecked, checked, total: unchecked + checked };
+}
+
+// ── AC checkbox matching — SINGLE-SOURCE (gap-ac-checkbox-counting-four-counters-drifted) ────────
+// "数任务体里的 AC/DoD 复选框" 这个判定曾有 4 个零共享 import 的独立实现（countAcCheckboxes /
+// checkedAcCount / readAcCheckState / task-ac-carryover-check 的勾选提取），并已产生行为分歧：
+// countAcCheckboxes 把 `- [~]`（部分完成）计入 total 但算未勾，而 worker-driver 的 readAcCheckState
+// 正则完全看不见 `[~]` ⇒ 同一任务文件在两个计数器下得到不同 total。此函数是复选框匹配的单一实现，
+// 其余 3 处（stale-ready-audit / worker-driver / task-ac-carryover-check）与 task-status-drift-check
+// 的重导出全部改为调用它；`[~]` 语义以此为准（计入 total、算未勾）。
+//
+// 与 packages/quay/src/task-parsing.ts 的 product 层副本行为一致（byte-identical 逻辑，
+// plugin/test/task-parsing-parity.test.mjs 钉住），机制层不能静态 import packages/ 树。
+export function countAcCheckboxes(acSection) {
+  if (acSection == null) {
+    // FAIL-CLOSED (gap-ac47-completion-predicate-consumer-fail-closed, AC1): an ABSENT / UNREADABLE
+    // section must NOT read as `{ unchecked: 0 }`. `sectionFound:false` is the distinguishable state
+    // for readers that check it; `total: NaN` is the STRUCTURAL guarantee that OLD destructuring
+    // read-patterns (`const { total, checked } = …`) cannot obtain a pass (`total === 0` and
+    // `checked === total` are both FALSE for NaN).
+    return { total: NaN, checked: NaN, unchecked: NaN, sectionFound: false };
+  }
+  const boxes = acSection.match(/^\s*-\s+\[(.)\]/gm) ?? [];
+  let checked = 0;
+  for (const b of boxes) if (/\[[xX]\]/.test(b)) checked++;
+  return { total: boxes.length, checked, unchecked: boxes.length - checked, sectionFound: true };
 }
 
 export function checkAcceptanceChecklist(task) {

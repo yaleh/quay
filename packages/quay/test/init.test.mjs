@@ -519,3 +519,66 @@ test("gap-launch-settings: quay init --force overwrites a stale launch.settings.
   assert.ok(!("_launchSpec" in second), "--force must strip the stale _launchSpec (AC154)");
   assert.notEqual(afterRaw, staleRaw, "stale file must be overwritten on --force");
 });
+
+// ---------------------------------------------------------------------------
+// gap-ac168-quay-init-contract-closed-set (2026-09-07).
+// The CLI `quay init` laydown must be a SUBSET of the SPEC §6 closed set (the
+// QUAY-INIT-CLOSED-SET:BEGIN/END marker block in
+// orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md). This is the
+// machine-readable contract the AC-168 goal criterion reads: produced ⊆ allowed,
+// else fail. The negative control proves the check can take false (delete one
+// allowed line ⇒ red), so this is a measurement, not a恒真回显 (硬规则 4).
+// ---------------------------------------------------------------------------
+
+const SPEC_CLOSED_SET_PATH = path.join(__dirname, "../../..", "orchestration", "SPEC-plugin-lifecycle-single-bundle-2026-09-02.md");
+
+function listFilesRecursive(dir) {
+  const out = [];
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const full = path.join(d, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (e.isFile()) out.push(path.relative(dir, full).split(path.sep).join("/"));
+    }
+  };
+  walk(dir);
+  return out.sort();
+}
+
+function readClosedSet(specPath) {
+  const raw = fs.readFileSync(specPath, "utf8");
+  const lines = raw.split("\n");
+  let inBlock = false;
+  const allowed = [];
+  for (const line of lines) {
+    if (line === "QUAY-INIT-CLOSED-SET:BEGIN") { inBlock = true; continue; }
+    if (line === "QUAY-INIT-CLOSED-SET:END") { inBlock = false; continue; }
+    if (inBlock && line.startsWith("- ")) allowed.push(line.slice(2));
+  }
+  return allowed;
+}
+
+function computeOutsideClosedSet(produced, allowed) {
+  return produced.filter((p) => !allowed.includes(p));
+}
+
+test("AC168-closed-set: CLI quay init laydown ⊆ SPEC §6 closed set", () => {
+  const dir = tmpDir("ac168-closedset");
+  runQuay(["init", "--root", dir], dir);
+
+  const produced = listFilesRecursive(dir);
+  const allowed = readClosedSet(SPEC_CLOSED_SET_PATH);
+
+  assert.ok(allowed.length > 0, "SPEC §6 closed-set block must be non-empty");
+  const outside = computeOutsideClosedSet(produced, allowed);
+  assert.deepEqual(outside, [], `quay init produced files outside the closed set: ${outside.join(", ")}`);
+});
+
+test("AC168-closed-set negative control: removing .quay/config.yml from the block makes the check fail", () => {
+  // The check must be able to take false — feed it a closed set missing one
+  // load-bearing member and assert the produced file is flagged. (Equiv. of the
+  // manual "delete .quay/config.yml from the block ⇒ red" negative control.)
+  const allowed = readClosedSet(SPEC_CLOSED_SET_PATH).filter((p) => p !== ".quay/config.yml");
+  const outside = computeOutsideClosedSet([".quay/config.yml"], allowed);
+  assert.deepEqual(outside, [".quay/config.yml"], "a produced file missing from the block must be flagged");
+});

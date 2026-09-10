@@ -7,10 +7,10 @@
  *
  * It enforces this mechanically, not in prose:
  *
- *  1. SINGLE-SOURCE directive lifecycle: `.claude/skills/quay-directive` and
- *     `.agents/skills/quay-directive` must BOTH be symlinks whose realpath is the
- *     SAME file under the runtime-neutral canonical source `plugin/skills/quay-directive/`.
- *     Two realpaths, or a non-symlink (an independent drifting copy), FAILS.
+ *  1. SINGLE-SOURCE directive lifecycle: `.agents/skills/quay-directive` must be a
+ *     symlink whose realpath is the runtime-neutral canonical source
+ *     `plugin/skills/quay-directive/`. A non-symlink (an independent drifting copy) FAILS.
+ *     (gap-ac166-second-copy-retirement: the `.claude/skills/quay-directive` second copy was retired.)
  *  2. SINGLE-SOURCE operator contract: `.agents/skills/quay-task-operator` must be a
  *     symlink resolving under `plugin/skills/quay-task-operator/`.
  *  3. PROHIBITED-ACTIONS set identity: the `<!-- PROHIBITED-AUTONOMOUS-ACTIONS -->`
@@ -66,7 +66,6 @@ function read(p: string): string | null {
 
 // --- 1 & 2: single-source symlink resolution ---------------------------------
 
-const claudeDirectiveLink = resolve(repoRoot, ".claude/skills/quay-directive");
 const agentsDirectiveLink = resolve(repoRoot, ".agents/skills/quay-directive");
 const agentsOperatorLink = resolve(repoRoot, ".agents/skills/quay-task-operator");
 const canonicalDirectiveDir = resolve(repoRoot, "plugin/skills/quay-directive");
@@ -88,26 +87,13 @@ function assertSymlinkToCanonical(linkPath: string, canonicalDir: string, label:
   return real;
 }
 
-const claudeDirectiveReal = assertSymlinkToCanonical(claudeDirectiveLink, canonicalDirectiveDir, "directive/.claude");
+// gap-ac166-second-copy-retirement: the .claude/skills/quay-directive symlink was a second copy
+// (retired → archived). Only .agents/skills/quay-directive remains as the directive host surface.
 const agentsDirectiveReal = assertSymlinkToCanonical(agentsDirectiveLink, canonicalDirectiveDir, "directive/.agents");
 assertSymlinkToCanonical(agentsOperatorLink, canonicalOperatorDir, "operator/.agents");
 
-if (claudeDirectiveReal && agentsDirectiveReal) {
-  ok(
-    claudeDirectiveReal === agentsDirectiveReal,
-    "directive lifecycle: .claude and .agents resolve to the SAME canonical file (cannot silently disagree)"
-  );
-}
-
-// Byte-identity of the resolved directive SKILL.md across both host surfaces.
-const claudeDirectiveSkill = read(resolve(claudeDirectiveLink, "SKILL.md"));
+// The surviving directive SKILL.md resolves through the .agents symlink to the canonical source.
 const agentsDirectiveSkill = read(resolve(agentsDirectiveLink, "SKILL.md"));
-if (claudeDirectiveSkill !== null && agentsDirectiveSkill !== null) {
-  ok(
-    claudeDirectiveSkill === agentsDirectiveSkill,
-    "directive lifecycle: Claude-facing and Codex-facing SKILL.md are byte-identical (one canonical source)"
-  );
-}
 
 // --- 3: prohibited-actions set identity (AGENTS.md vs canonical operator) ------
 
@@ -181,7 +167,7 @@ if (agentsMd !== null && operatorSkill !== null) {
 
 // --- 5: canonical directive lifecycle markers ---------------------------------
 
-if (claudeDirectiveSkill !== null) {
+if (agentsDirectiveSkill !== null) {
   const lifecycle: [string, RegExp][] = [
     ["task-canonical (DIR-028)", /DIR-028|task-canonical/i],
     ["schema v1 marker", /schema[:\s"]*v1|extra\.schema/i],
@@ -190,7 +176,7 @@ if (claudeDirectiveSkill !== null) {
     ["task_write via Provider ABI", /task_write/i],
   ];
   for (const [label, re] of lifecycle) {
-    ok(re.test(claudeDirectiveSkill), `canonical directive skill carries lifecycle contract: ${label}`);
+    ok(re.test(agentsDirectiveSkill), `canonical directive skill carries lifecycle contract: ${label}`);
   }
 }
 
@@ -205,5 +191,5 @@ if (failures > 0) {
   console.error(`DRIFT: ${failures} check(s) failed — .claude and .agents surfaces disagree about task authority/lifecycle.`);
   process.exit(1);
 }
-console.log("OK: .claude and .agents surfaces resolve to one canonical contract; no drift.");
+console.log("OK: .agents surface resolves to one canonical contract; no drift.");
 process.exit(0);

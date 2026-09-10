@@ -17,7 +17,7 @@ extra:
 
 `runMechanicalFanIn`（`plugin/scripts/worker-driver.ts`）内部已产出丰富、分步、结构化的结果（outcome / step / 每步 verdict / suiteOutcome / landedSha）。但落盘时这个富结构被投影到三个 ad-hoc、有损或陈旧的载体上，丢掉结构。2026-08-28/29 的 14h fan-in 停摆暴露了三个同根缺陷：
 
-1. **D5 — 「landed 却记成 exited-not-landed」**（`worker-driver.ts:702` `computeLandingState` + `:1883` `syncDocBranchToDevelop`）：落地判定用 `readTaskStatus(主检出)` 验证 `status=done`，但主检出停在 `main/manager-doc`（doc-only 工作分支、合法滞后 develop），flip-done + ff 推进的是 develop。`syncDocBranchToDevelop` 是 best-effort + 静默 `catch {}` 的补丁，冲突即假 exited-not-landed。实证 2 条：retire 04:26、archguard 05:10 均 `mfi.outcome=landed` 却 `final_state=exited-not-landed` + `failure_reason="task status=ready (not done)"`。
+1. **D5 — 「landed 却记成 exited-not-landed」**（`worker-driver.ts:702` `computeLandingState` + `:1883` `syncDocBranchToDevelop`）：落地判定用 `readTaskStatus(主检出)` 验证 `status=done`，但主检出停在 `author`（doc-only 工作分支、合法滞后 develop），flip-done + ff 推进的是 develop。`syncDocBranchToDevelop` 是 best-effort + 静默 `catch {}` 的补丁，冲突即假 exited-not-landed。实证 2 条：retire 04:26、archguard 05:10 均 `mfi.outcome=landed` 却 `final_state=exited-not-landed` + `failure_reason="task status=ready (not done)"`。
 
 2. **D6 — reason 字段 lossy**（`worker-driver.ts:1759` `fail()`）：`reason = (a.stderr || a.stdout).trim()` 只取单流（stderr 优先，丢弃含真正测试结果的 stdout）+ 裸流 dump（MODULE_TYPELESS 警告占满）+ 不指日志文件。实测 12/18 scoped-gate、5/5 anti-drift 失败从记录无法定位真实原因——判「fix 是否完整」这件事本身不可靠（硬规则 3b：有损投影）。
 

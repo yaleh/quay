@@ -40,6 +40,7 @@
 // The reporter is a measurement instrument only — it never touches test files or
 // assertions.
 import path from "node:path";
+import crypto from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 
 // gap-reduce-sync-spawn-floor-suite-slowdown: opt-in EXECVE (process-spawn)
@@ -127,6 +128,32 @@ function readConcurrency() {
   return 1; // default: serial semantics (cc=1) — safest when unknown
 }
 
+// gap-perfile-cpu-cost-collection — per-file CPU (cost_f) via route (a) 子进程自报.
+// The preload seam (plugin/scripts/per-file-cpu-report.mjs, loaded via NODE_OPTIONS=--require) writes
+// each isolated test-file child's OWN process.cpuUsage() to `<QUAY_PERFILE_CPU_DIR>/<sha256(abs)> .cpu`
+// on the child's exit. This reporter reads that file back at the file's `test:complete` event — the
+// child's exit handler runs BEFORE the parent emits test:complete, so the write is on disk and there is
+// no race. The key (sha256(path.resolve(file))[:16]) MUST match the preload's key byte-for-byte.
+// Returns the CPU milliseconds, or undefined when the dir is unset / the file was never written — the
+// caller then OMITS `cpu_ms` from the line (absent = "not measured", never a fabricated 0; 硬规则 3b).
+// Exported so the unified scheduler (suite-scheduler.ts) REUSES this single reader — ⛔ the
+// __PERFILE__ line has TWO emission points (this reporter's legacy/LPT path + the scheduler's own
+// finishFile), and a second hand-rolled read here would be the exact "two writers only one changed"
+// drift (gap-suite-scheduler-perfile-cpu-emitter-missing). Shared, never duplicated.
+export function readPerFileCpuMs(file) {
+  const dir = process.env.QUAY_PERFILE_CPU_DIR;
+  if (!dir) return undefined;
+  try {
+    const key = crypto.createHash("sha256").update(path.resolve(file)).digest("hex").slice(0, 16);
+    const raw = readFileSync(path.join(dir, `${key}.cpu`), "utf8").trim();
+    if (!raw) return undefined;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : undefined;
+  } catch {
+    return undefined; // no report for this file (dir missing / write failed / not wired)
+  }
+}
+
 export default async function* perFileReporter(source) {
   const cc = readConcurrency();
   /** full path -> { dur, passed } */
@@ -165,7 +192,12 @@ export default async function* perFileReporter(source) {
       // `duration_ms=` BEFORE the path matches the contract measure regex
       // (`duration_ms.*test\.mjs`), so the real full-suite log's per-file lines are
       // greppable by the suite-cost gate.
-      console.error(`__PERFILE__ duration_ms=${dur} ${d.file} passed=${passed} end_ms=${endedAtMs}`);
+      // gap-perfile-cpu-cost-collection — append the per-file CPU (route a 子进程自报) as an optional
+      // trailing field, same shape as end_ms: present only when a report was actually written (a file
+      // with no report — not wired / never sampled — omits the field, never emits a fabricated 0).
+      const cpuMs = readPerFileCpuMs(d.file);
+      const cpuPart = cpuMs !== undefined ? ` cpu_ms=${cpuMs}` : "";
+      console.error(`__PERFILE__ duration_ms=${dur} ${d.file} passed=${passed} end_ms=${endedAtMs}${cpuPart}`);
     }
   }
 

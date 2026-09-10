@@ -61,12 +61,12 @@ extra:
 
 **已激活**：主检出已切到 doc-only 工作分支 `main/manager-doc`（从 develop f0d11209a 创建）；develop 已不被任何检出占用；ff dual-mode 现走 push-mode（ref-update，脏树结构上无关）。
 
-**激活暴露的真实缺口（已实现部分）**：主检出停工作分支后，promotion-driver 的 ready-pool-check --apply 翻转 commit 到 main/manager-doc 但不到 develop ⇒ 任务 worktree（从 develop 分支）看不到新 status，fan-in 闸错读（派发看到 ready、worktree 旧状态）。**已修**：ready-pool-check `commitTaskStatus` 后调 `propagateDocBranchToDevelop`（push main/manager-doc → develop；develop 已前进则先 merge 再 push，best-effort）——f0d11209a。
+**激活暴露的真实缺口（已实现部分）**：主检出停工作分支后，promotion-driver 的 ready-pool-check --apply 翻转 commit 到 author 但不到 develop ⇒ 任务 worktree（从 develop 分支）看不到新 status，fan-in 闸错读（派发看到 ready、worktree 旧状态）。**已修**：ready-pool-check `commitTaskStatus` 后调 `propagateDocBranchToDevelop`（push author → develop；develop 已前进则先 merge 再 push，best-effort）——f0d11209a。
 
 **剩余（新 AC）**：
-- **AC7 反向同步**：每次落地后 driver 循环把 develop merge 进 main/manager-doc（否则 computeLandingState 读陈旧主检出 → 假 not-landed——watchdog 实证：落地成功但验证读到旧 status 误标 needs-human）。
+- **AC7 反向同步**：每次落地后 driver 循环把 develop merge 进 author（否则 computeLandingState 读陈旧主检出 → 假 not-landed——watchdog 实证：落地成功但验证读到旧 status 误标 needs-human）。
 - **AC8 激活验证**：完整自主闭环（派发 → 翻转传播 → worktree 从 develop 见新状态 → 机械 fan-in → push-mode ff 落地 → 反向同步 → computeLandingState 绿）端到端跑通 ≥1 任务。
-- ⛔ **worktree 不从 main/manager-doc 分支**：改 base 会让未 push 的 .md 翻转进 fan-in delta → anti-drift out-of-declared HARD FAIL（anti-drift-touches-check.ts:183 实证）。传播机制（翻转 push 到 develop）后，从 develop 分支即见新状态，无需改 base。
+- ⛔ **worktree 不从 author 分支**：改 base 会让未 push 的 .md 翻转进 fan-in delta → anti-drift out-of-declared HARD FAIL（anti-drift-touches-check.ts:183 实证）。传播机制（翻转 push 到 develop）后，从 develop 分支即见新状态，无需改 base。
 
 ## Acceptance Criteria
 
@@ -74,9 +74,9 @@ extra:
 - [x] AC2（能取假，doc-only 机械强制 + 负控制）：工作分支含代码变更时 `--classify-delta` 非空即拒合并；负控制：真代码变更必须被拒；（⛔ 代码变更放行 ⇒ 假）。
 - [x] AC3（能取假，B类保护不破坏）：merge target 错配、非 ff、suite 运行中、锁超时等原有环境错误仍正确 `exit 2` 拒绝；（⛔ 保护退化 ⇒ 假）。
 - [x] AC4（能取假，C类 + 二阶效应逐项确认）：47 处 develop 引用 A/B/C 分类逐条留理由；C 类备份语义（periodic-push-backup）+ 二阶效应①消费者枚举（ready-pool-check/slot-refill/promotion-driver/web server）逐项确认受影响面并留理由，⛔ 不盲改；（⛔ 有 C 类/消费者未确认即改 ⇒ 假）。
-- [x] AC5（能取假，激活已做）：主检出停 main/manager-doc，develop 未检出，ff dual-mode 走 push-mode（⛔ 主检出仍停 develop ⇒ 假）。**Evidence: main/manager-doc 已激活，f0d11209a 同步**
-- [x] AC6（能取假，翻转传播已实现）：promotion 翻转 commit 到 main/manager-doc 后自动 push 到 develop（⛔ 翻转滞留工作分支 ⇒ 假）。**Evidence: ready-pool-check propagateDocBranchToDevelop，f0d11209a + 本任务新增传播测试（ff / non-ff reconcile），119/119 ready-pool 绿**
-- [x] AC7（能取假，反向同步）：每次落地后 develop merge 进 main/manager-doc（⛔ 主检出滞后 develop ⇒ computeLandingState 假 not-landed）。**Evidence: 反向同步补丁（syncDocBranchToDevelop, 27aa6faa5）已由 D5 取代退役（f3115bf81, gap-mechanical-fan-in-result-single-authoritative-structured）——computeLandingState(root, task, landedSha) 改从 ff 结果派生落地判定，⛔ 不再读滞后主检出 tasks/*.md ⇒ AC7 守卫的失败模式（主检出滞后 ⇒ 假 not-landed）结构上消除；反向同步是 best-effort+静默 catch 补丁（冲突即假 exited-not-landed），D5 是更彻底的正解**
+- [x] AC5（能取假，激活已做）：主检出停 author，develop 未检出，ff dual-mode 走 push-mode（⛔ 主检出仍停 develop ⇒ 假）。**Evidence: main/manager-doc 已激活，f0d11209a 同步**
+- [x] AC6（能取假，翻转传播已实现）：promotion 翻转 commit 到 author 后自动 push 到 develop（⛔ 翻转滞留工作分支 ⇒ 假）。**Evidence: ready-pool-check propagateDocBranchToDevelop，f0d11209a + 本任务新增传播测试（ff / non-ff reconcile），119/119 ready-pool 绿**
+- [x] AC7（能取假，反向同步）：每次落地后 develop merge 进 author（⛔ 主检出滞后 develop ⇒ computeLandingState 假 not-landed）。**Evidence: 反向同步补丁（syncDocBranchToDevelop, 27aa6faa5）已由 D5 取代退役（f3115bf81, gap-mechanical-fan-in-result-single-authoritative-structured）——computeLandingState(root, task, landedSha) 改从 ff 结果派生落地判定，⛔ 不再读滞后主检出 tasks/*.md ⇒ AC7 守卫的失败模式（主检出滞后 ⇒ 假 not-landed）结构上消除；反向同步是 best-effort+静默 catch 补丁（冲突即假 exited-not-landed），D5 是更彻底的正解**
 - [x] AC8（能取假，激活端到端验证）：完整自主闭环 ≥1 任务落地且 computeLandingState 绿（⛔ 闭环中断 ⇒ 假）。**Evidence: 生产闭环已跑通 ≥1 任务且 computeLandingState 绿——D5 落地后 gap-mechanical-fan-in-result-single-authoritative-structured 机械 fan-in 落地（480043e7b, Aug 29 10:10:41Z, driver 机械 fan-in，status=done）走 landedSha 派生判定（landedSha 是 develop tip/祖先 ∧ 无残留 worktree）；更早 gap-b5-input-shape-path-to-content 机械 fan-in 落地（Aug 28 15:01:56Z, landedSha=318390290=develop）走反向同步路径验证旧机制（1c483d387「Merge develop into main/manager-doc」15:24:00Z landing 后）**
 
 ## Definition of Done
@@ -86,7 +86,7 @@ ff 以 dual-mode 落地（develop 仍检出 ⇒ `git merge --ff-only`；已脱�
 ## Touches
 
 - plugin/scripts/fan-in-ff-merge.sh（ff 改 dual-mode：merge target 已脱离 ⇒ `git push .` ref 更新；仍检出 ⇒ `git merge --ff-only` + clean-tree 检查保留）
-- plugin/scripts/ready-pool-check.ts（翻转传播：commitTaskStatus 后 propagateDocBranchToDevelop → push main/manager-doc → develop）
+- plugin/scripts/ready-pool-check.ts（翻转传播：commitTaskStatus 后 propagateDocBranchToDevelop → push author → develop）
 - plugin/scripts/worker-driver.ts（反向同步：landing 后 syncDocBranchToDevelop → merge develop 进 doc 分支）
 - plugin/scripts/develop-work-ff.sh（新：doc-only 工作分支 → develop 的 ref 更新 + `--classify-delta` 机械强制）
 - plugin/scripts/capability-catalog.sh（注册 develop-work-ff.sh 六表 + fan-in-ff-merge.sh 描述随 ff 改 ref 更新同步）

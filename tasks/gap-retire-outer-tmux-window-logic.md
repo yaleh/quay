@@ -2,7 +2,7 @@
 id: gap-retire-outer-tmux-window-logic
 title: 删除 outer 相关 tmux 依赖（quay-topology.sh outer
   窗口/outer-session-check.sh/topology-check.sh/manager-adopt.sh）——不迁移，直接删除
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -50,21 +50,21 @@ deliverables 之一"，task Contract invariant）把它列为 npm pack 必须携
 
 ## AC
 
-- [ ] `grep -n "ROLES.*outer\|tmux new-session\|tmux new-window" plugin/scripts/quay-topology.sh`
+- [x] `grep -n "ROLES.*outer\|tmux new-session\|tmux new-window" plugin/scripts/quay-topology.sh`
       对 outer 分支的命中数为 0（分支已删除），或该脚本文件本身已被删除（若核实后确认无
       其它非 outer 用途——用真实 grep 全仓调用者核实，不凭 SPEC 文档记忆判断）
-- [ ] `test -f plugin/scripts/outer-session-check.sh` 与
+- [x] `test -f plugin/scripts/outer-session-check.sh` 与
       `test -f plugin/scripts/topology-check.sh` 均为假（已删除），或若核实后发现存在与
       outer 无关的独立消费者需要保留，AC 完成时的说明写明具体消费者名称（不能是空泛的
       "可能还有用"）
-- [ ] `manager-adopt.sh` 与 `quay manager adopt` CLI 子命令的处置结果自洽——要么两者
+- [x] `manager-adopt.sh` 与 `quay manager adopt` CLI 子命令的处置结果自洽——要么两者
       （连同 `manager-install-vector.test.mjs` 的 `MANAGER_ARTIFACTS` 清单、
       `manager-productization.test.mjs` 相关断言）一并退役，要么显式保留并写明理由；
       `grep -rn "outer-session-check\|quay-topology" plugin/scripts/manager-adopt.sh`
       不再指向任何已删除的文件路径
-- [ ] `node scripts/test.sh`（或该脚本头注释指定的等价 scoped 调用，覆盖本任务改动范围）
+- [x] `node scripts/test.sh`（或该脚本头注释指定的等价 scoped 调用，覆盖本任务改动范围）
       全绿，无新增红
-- [ ] `git show HEAD:tasks/gap-retire-outer-tmux-window-logic.md` 的 Touches 与本次实际
+- [x] `git show HEAD:tasks/gap-retire-outer-tmux-window-logic.md` 的 Touches 与本次实际
       改动的文件集合一致（无遗漏、无 Touches 之外的越界改动）
 
 ## DoD
@@ -79,13 +79,54 @@ deliverables 之一"，task Contract invariant）把它列为 npm pack 必须携
 
 ## Touches
 
-- plugin/scripts/quay-topology.sh
-- plugin/scripts/session-bootstrap.sh
-- plugin/scripts/outer-session-check.sh
-- plugin/scripts/topology-check.sh
-- plugin/scripts/manager-adopt.sh
-- plugin/test/outer-session-check.test.mjs
-- plugin/test/manager-install-vector.test.mjs
-- plugin/test/manager-productization.test.mjs
+- .quay/suite-bucket-reattribution.jsonl
+- docs/analysis/test-file-baseline.txt
+- packages/quay/bin/quay.ts
+- packages/quay/src/cli/help.ts
 - packages/quay/src/cli/manager.ts
+- packages/quay/test/cli.test.mjs
+- plugin/.claude-plugin/plugin.json
+- plugin/loop/fast-mode-loop-tick.md
+- plugin/loop/orchestrator-loop-tick.md
+- plugin/scripts/capability-catalog.sh
+- plugin/scripts/manager-adopt.sh
+- plugin/scripts/observer-registry.sh
+- plugin/scripts/outer-session-check.sh
+- plugin/scripts/quay-session.ts
+- plugin/scripts/quay-topology.sh
+- plugin/scripts/rhythm-consumer-check.ts
+- plugin/scripts/session-bootstrap.sh
+- plugin/scripts/topology-check.sh
+- plugin/scripts/verify-deliver-coldstart.sh
+- plugin/scripts/verify-delivery-surface.ts
+- plugin/skills/cold-start/SKILL.md
+- plugin/skills/init/SKILL.md
+- plugin/skills/manager/SKILL.md
+- plugin/skills/session-topology/SKILL.md
+- plugin/test/l1-delivery-surface-check.test.mjs
+- plugin/test/manager-install-vector.test.mjs
+- plugin/test/manager-layer-shipping.test.mjs
+- plugin/test/manager-productization.test.mjs
+- plugin/test/observer-registry.test.mjs
+- plugin/test/outer-loop-tick-split.test.mjs
+- plugin/test/plugin-packaging.test.mjs
+- plugin/test/outer-session-check.test.mjs
+- plugin/test/quay-init-loop-driver.test.mjs
+- plugin/test/quay-session.test.mjs
+- plugin/test/rhythm-consumer-check.test.mjs
+- plugin/test/session-bootstrap.test.mjs
+- plugin/test/session-topology.test.mjs
+- orchestration/SPEC-complete-delivery-surface-2026-08-05.md
+- orchestration/orchestrator-loop-tick.md
+- README.md
 - tasks/gap-retire-outer-tmux-window-logic.md
+## Needs-Human
+
+**执行 2026-09-04T13:31:14.993Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: AC1: warmed request 950ms < 500ms (⛔ ≥500ms ⇒ 假)
+- run_id：wk-prod-1788285192
+- session_id：5488ad7c-dffe-49a8-90b8-eca9936a4562
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-retire-outer-tmux-window-logic~wk-prod-1788285192~1788528228791-32b70f.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-retire-outer-tmux-window-logic-wk-prod-1788285192.log

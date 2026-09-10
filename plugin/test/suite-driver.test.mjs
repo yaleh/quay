@@ -1,11 +1,10 @@
 // @test-group engine
 // suite-driver.test.mjs — gap-suite-lifecycle-driver-kind (SPEC-suite-lifecycle-and-failure-semantics §3):
-// per-task suite 生命周期收进一个常驻 driver kind——进程级父子 wait + 定时兜底静默检测，单飞锁回归纯
-// 资源限制器。本文件验证 suite-driver.ts 的四条 AC（fake suite 命令缝，不真跑 19+min 全量套件）。
+// per-task suite 的共享 spawn+wait 函数库——进程级父子 wait + 定时兜底静默检测，单飞锁回归纯资源
+// 限制器（⛔ 常驻 suite driver kind 已按人 2026-09-07 裁定退役，本文件只覆盖保留的共享函数）。
+// 本文件验证 suite-driver.ts 的 spawnSuiteAndWait 三条 AC（fake suite 命令缝，不真跑 19+min 全量套件）。
 //
 // Coverage map (task ACs):
-//   AC1 — kind 落地复用骨架：DRIVER_KINDS.suite 存在且 driver="suite-driver.ts"、verbs 含五运维动词；
-//         suite-driver.ts 从 driver-runtime.ts import（Layer 0 复用，⛔ 不新造接口/第二份 respawn/循环）。
 //   AC2 — 进程级父子 + 三态：spawnSuiteAndWait 直接 spawn suite 并 wait，子进程退出立即得知；
 //         三态 outcome 可分（done / red / hung），hung 是可区分独立取值（⛔ 与 red/done 同形）。
 //   AC3 — 静默挂死自动检测：活着但无输出 ≥N 秒 ⇒ 自动判挂死 → SIGKILL + outcome=hung（不再靠人工 kill）。
@@ -24,18 +23,10 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import {
-  DRIVER_KINDS,
-} from "../scripts/driver-runtime.ts";
-import {
-  ROUND_LOG_REL,
-  SUITE_CONTROL_STATE_REL,
   SILENCE_MS_DEFAULT,
   spawnSuiteAndWait,
   slotHolderArgv,
-  parseSuiteRequest,
   computeSuiteRound,
-  listPendingSuiteRequests,
-  writeSuiteResult,
 } from "../scripts/suite-driver.ts";
 import { suiteLockBase, suiteLockSlotPaths } from "../scripts/suite-lock-slots.ts";
 
@@ -64,30 +55,6 @@ function hermeticSuite(tmp) {
   const logFile = path.join(tmp, "suite.log");
   return { slotBase, logFile };
 }
-
-// ── AC1 — kind 落地复用骨架 ────────────────────────────────────────────────────────────────
-
-test("AC1: DRIVER_KINDS.suite 落地且复用五运维动词 + Layer 0（不新造接口）", () => {
-  const spec = DRIVER_KINDS.suite;
-  assert.ok(spec, "DRIVER_KINDS.suite must exist");
-  assert.equal(spec.driver, "suite-driver.ts");
-  assert.equal(spec.prefix, "suite-driver");
-  assert.equal(spec.carriers[0], "suite-round.jsonl");
-  assert.equal(spec.controlFile, "suite-control.json");
-  // 五运维动词（start/stop/drain/resume/status/restart/liveness——与其它 kind 同族，非新造接口）。
-  for (const v of ["start", "stop", "drain", "resume", "status", "restart", "liveness"]) {
-    assert.ok(spec.verbs.includes(v), `suite kind must support verb ${v}`);
-  }
-  // Layer 0 复用（⛔ 不新造接口/第二份 respawn/循环）：suite-driver.ts 从 driver-runtime.ts import
-  // DRIVER_KINDS / isHalted / appendHeartbeatLine——不是另写一份循环/心跳/判停。
-  const src = fs.readFileSync(SUITE_DRIVER_SRC, "utf8");
-  assert.match(src, /from "\.\/driver-runtime\.ts"/, "suite-driver.ts must import Layer 0 driver-runtime");
-  assert.match(src, /DRIVER_KINDS/, "must reuse the DRIVER_KINDS registry (single source)");
-  assert.match(src, /isHalted/, "must reuse Layer 0 stopCondition/halt (not re-implement)");
-  // 取假（AC1 判据）：suite-driver.ts 不另写 respawn 循环（respawn 只在 driver-runtime.runSupervisor 一份）。
-  assert.doesNotMatch(src, /runSupervisor\s*\(/, "must NOT re-implement supervisor respawn");
-  assert.doesNotMatch(src, /function\s+respawn/i, "must NOT carry a second respawn loop");
-});
 
 // ── gap-verification-round-single-writer AC3 — 红平行写已删（runner 是唯一 writer）─────────────────
 // writeRedSuiteRecord（suite-driver.ts 曾并行补写红 verification-round，红绿双 writer 混写）已删除：
@@ -314,16 +281,7 @@ test("AC4: 取/放是同一执行点（slot-holder 一个函数内 acquire+exec+
   assert.doesNotMatch(src, /spawn_suite_lock_hold_watchdog/, "no separate hold-watchdog that releases the slot (取放分离的反例已被排除)");
 });
 
-// ── 协议 / 载体 / 常驻循环（辅：请求/结果/round 三态写端）──────────────────────────────────
-
-test("parseSuiteRequest 读不懂 ⇒ null（硬规则 3b：不伪装已处理）", () => {
-  assert.equal(parseSuiteRequest("{not json"), null);
-  assert.equal(parseSuiteRequest("{}"), null);
-  assert.equal(parseSuiteRequest(JSON.stringify({ task: "x", suiteCommand: [] })), null);
-  const ok = parseSuiteRequest(JSON.stringify({ task: "gap-x", suiteCommand: ["bash", "true"], logFile: null, runId: "r", worktree: "/w", requestedAt: "t" }));
-  assert.equal(ok.task, "gap-x");
-  assert.deepEqual(ok.suiteCommand, ["bash", "true"]);
-});
+// ── round 载体（computeSuiteRound 三态 outcome 写端）────────────────────────────────────────
 
 test("computeSuiteRound 三态 outcome 落进 round 记录（done/red/hung 字段可取假）", () => {
   const rec = computeSuiteRound({
@@ -337,29 +295,11 @@ test("computeSuiteRound 三态 outcome 落进 round 记录（done/red/hung 字�
   assert.equal(rec.task, "gap-x");
 });
 
-test("writeSuiteResult + listPendingSuiteRequests：写结果后请求不再 pending（在飞/已处理可区分）", () => {
-  const tmp = makeTmp();
-  const reqDir = path.join(tmp, ".quay", "suite-requests");
-  fs.mkdirSync(reqDir, { recursive: true });
-  fs.writeFileSync(path.join(reqDir, "gap-x.json"), JSON.stringify({ task: "gap-x", suiteCommand: ["true"], logFile: null }), "utf8");
-  const pending = listPendingSuiteRequests(tmp, new Set());
-  assert.equal(pending.length, 1);
-  assert.equal(pending[0].task, "gap-x");
-  writeSuiteResult(tmp, "gap-x", { outcome: "done", exitCode: 0, signalCode: null, hungByWatchdog: false, startedAt: "s", finishedAt: "f", durationMs: 1, error: null, runId: "r" });
-  assert.equal(listPendingSuiteRequests(tmp, new Set()).length, 0, "a written result makes the request no longer pending");
-  fs.rmSync(tmp, { recursive: true, force: true });
-});
-
 test("suiteLockBase 复用 TS 单一真相源（suite-driver 与 full-suite-runner 同一 slot 语义）", () => {
   const base = suiteLockBase(REPO_ROOT);
   assert.ok(base.endsWith("full-suite.lock"), `suite lock base should resolve to full-suite.lock, got ${base}`);
   const n = suiteLockSlotPaths(base).length;
   assert.ok(n >= 1, `slot count must be >= 1, got ${n}`);
-});
-
-test("ROUND_LOG_REL / SUITE_CONTROL_STATE_REL 由 registry 派生（与其它 kind 同族）", () => {
-  assert.equal(ROUND_LOG_REL, "suite-round.jsonl");
-  assert.equal(SUITE_CONTROL_STATE_REL, ".quay/suite-control.json");
 });
 
 test("SILENCE_MS_DEFAULT 是正数（缺省 15min 同族；测试经 seam 覆盖）", () => {

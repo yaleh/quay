@@ -43,6 +43,16 @@ function get(port, urlPath) {
   });
 }
 
+/** GET a route and return the redirect status + Location header (drains the body). */
+function getRedirect(port, urlPath) {
+  return new Promise((resolve, reject) => {
+    http.get({ host: "127.0.0.1", port, path: urlPath }, (res) => {
+      res.resume();
+      res.on("end", () => resolve({ status: res.statusCode, location: res.headers.location || "" }));
+    }).on("error", reject);
+  });
+}
+
 // The 14 navGroupDefs routes (the design's navGroupDefs, key → href) — the FULL enumeration.
 // The 4 detail pages map to their list page's current-key.
 const ALL_NAV_HREFS = [
@@ -94,16 +104,17 @@ before(async () => {
   fs.writeFileSync(path.join(adrDir, "ADR-101-nav.md"),
     "---\nid: ADR-101\ntitle: nav adr\nstatus: accepted\ndate: 2026-08-17\n---\n## Context\nc\n## Decision\nd\n## Consequences\ne\n");
   // goal store at <workspaceRoot>/goals, document store at <workspaceRoot>/docs-managed.
-  fs.mkdirSync(path.join(workspaceRoot, "goals"), { recursive: true });
+  const goalsDir = path.join(workspaceRoot, "goals");
+  fs.mkdirSync(goalsDir, { recursive: true });
   fs.mkdirSync(path.join(workspaceRoot, "docs-managed"), { recursive: true });
-  // goal ids are PHASE-NNN / AC-NNN (goal-store.ts), doc ids are DOC-NNN (document-store.ts).
+  // goal ids are GOAL-NNN / AC-NNN (goal-store.ts), doc ids are DOC-NNN (document-store.ts).
   fs.writeFileSync(path.join(workspaceRoot, "goals", "AC-101-criterion.md"),
-    "---\nid: AC-101\ntitle: nav criterion\nstatus: active\nkind: criterion\nphase: PHASE-101\ncriterion: echo ok\nexpect: \"=0\"\norigin: 2026-08-17 fixture\n---\n## Rationale\nmeasured\n");
+    "---\nid: AC-101\ntitle: nav criterion\nstatus: active\nkind: criterion\ngoal: GOAL-101\ncriterion: echo ok\nexpect: \"=0\"\norigin: 2026-08-17 fixture\n---\n## Rationale\nmeasured\n");
   fs.writeFileSync(path.join(workspaceRoot, "docs-managed", "DOC-101-nav-doc.md"),
     "---\nid: DOC-101\ntitle: nav doc\nstatus: active\nkind: skill\n---\n## Body\nthe doc\n");
   fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
   fs.writeFileSync(path.join(workspaceRoot, ".quay", "config.yml"),
-    `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"\n      QUAY_NATIVE_ADR_DIR: "${adrDir.replaceAll("\\", "\\\\")}"\n`);
+    `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"\n      QUAY_NATIVE_ADR_DIR: "${adrDir.replaceAll("\\", "\\\\")}"\n      QUAY_NATIVE_GOAL_DIR: "${goalsDir.replaceAll("\\", "\\\\")}"\n`);
   execFileSync("git", ["init", "-q"], { cwd: workspaceRoot });
   fs.writeFileSync(path.join(workspaceRoot, "README.md"), "nav fixture workspace\n");
   execFileSync("git", ["-c", "user.email=test@test", "-c", "user.name=test", "add", "."], { cwd: workspaceRoot });
@@ -261,4 +272,12 @@ test("AC5 — the task list page's nav still links to /live and /journal (observ
   assert.equal(r.status, 200);
   assert.ok(r.body.includes('href="/live"') && r.body.includes('href="/journal"'),
     "task list nav links to /live and /journal");
+});
+
+// ── gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead AC5: /git redirects ──────────
+
+test("gap-git-graph-fold-control AC5 — /git 302s to the canonical /git-history", async () => {
+  const r = await getRedirect(port, "/git");
+  assert.ok(r.status === 301 || r.status === 302, `GET /git returns a redirect (got ${r.status})`);
+  assert.ok(r.location.endsWith("/git-history"), `redirect_url ends with /git-history (got "${r.location}")`);
 });

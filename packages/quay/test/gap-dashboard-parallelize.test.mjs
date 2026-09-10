@@ -31,7 +31,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { readManager, readManagerLight, clearPoolMetricsCache, POOL_METRICS_CACHE_TTL_MS } from "../src/observation.ts";
+import { readManager, readManagerLight, readLive, readTests, readGitHistory, clearPoolMetricsCache, clearVerificationRoundCache, clearGitHistoryCache, POOL_METRICS_CACHE_TTL_MS, VERIFICATION_ROUND_CACHE_TTL_MS, GIT_HISTORY_CACHE_TTL_MS } from "../src/observation.ts";
 import { readTaskSummary, clearTaskSummaryCache, TASK_SUMMARY_CACHE_TTL_MS } from "../src/serve-handlers.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -106,7 +106,12 @@ test("AC1: readManager runs its async probes concurrently (Promise.all)", () => 
 
 test("AC2: handleDashboard runs readSystem + readManagerLight + readTaskSummary concurrently (Promise.all)", () => {
   const src = fs.readFileSync(SERVE_DASHBOARD_SRC, "utf8");
-  assertConcurrent(src, "handleDashboard", ["readSystem", "readManagerLight", "readTaskSummary"]);
+  // gap-webui-dashboard-regressed-to-12-60s-past-two-done-tasks: the dashboard now reads system +
+  // manager through the short-TTL-cached dashboard wrappers (readDashboardSystem / readDashboardManagerLight),
+  // which still sit in the SAME single Promise.all as readTaskSummary. Asserting the wrapper names keeps
+  // the pin precise (the bare "readSystem"/"readManagerLight" strings would otherwise match as substrings
+  // of the wrapper names — a grep-false-positive the repo's hard rules forbid).
+  assertConcurrent(src, "handleDashboard", ["readDashboardSystem", "readDashboardManagerLight", "readTaskSummary"]);
 });
 
 // gap-webui-dashboard-load-time-optimization AC1: the dashboard's manager probe is the LIGHT path —
@@ -252,5 +257,99 @@ test("AC3: readTaskSummary caches the task array for 30s and never re-calls the 
     assert.ok(TASK_SUMMARY_CACHE_TTL_MS > 0 && TASK_SUMMARY_CACHE_TTL_MS <= 60_000, `TTL ${TASK_SUMMARY_CACHE_TTL_MS}ms is a short bounded window`);
   } finally {
     clearTaskSummaryCache();
+  }
+});
+
+// ── Regression pin: gap-webui-dashboard-regressed-to-12-60s-past-two-done-tasks ───────────────────
+//
+// WHY the old cases did NOT catch this regression (the DoD asks for the reason, not just "add a test"):
+// the old AC1/AC2/AC3 cases all pin the CODE PATH (serial→parallel Promise.all, pool probe removed from
+// the light path, the pool-metrics cache) against a SMALL fixture task store (makeWorkspace: 0 tasks).
+// The regression was NOT a code-path revert — it was a cost that grows MONOTONICALLY with the task store
+// (`readLive` → `computeInFlightBlocking` → `readTaskBlockingInputs`, which reads + YAML-parses every
+// tasks/*.md; and `readTests` re-parsing the unboundedly-growing verification-round.jsonl). Against a
+// 0-task fixture both of those are ~0ms, so a test that only exercises a tiny store can never fail when
+// the real store grows past the point where the dashboard blows its ≤5s budget. The pin below asserts the
+// MECHANISM the fix introduces (the dashboard path skips the full-store scan; the two growing carriers
+// are short-TTL-cached), which is the only thing a unit test can pin that scales-independent-of-fixture.
+
+test("regression: readLive skips the full task-store scan when computeBlocking:false", () => {
+  const src = fs.readFileSync(OBSERVATION_SRC, "utf8");
+  const body = fnBody(src, "readLive");
+  assert.ok(/computeBlocking\s*=\s*true/.test(body), "readLive declares computeBlocking (default true)");
+  assert.ok(/if\s*\(\s*computeBlocking\s*\)/.test(body), "readLive guards computeInFlightBlocking behind computeBlocking");
+  assert.ok(/computeInFlightBlocking/.test(body), "computeInFlightBlocking is the guarded full-store scan");
+});
+
+test("regression: the dashboard readLive (readDashboardLive) passes computeBlocking:false", () => {
+  const src = fs.readFileSync(SERVE_DASHBOARD_SRC, "utf8");
+  const body = fnBody(src, "readDashboardLive");
+  assert.ok(/computeBlocking:\s*false/.test(body), "readDashboardLive calls readLive with computeBlocking:false");
+  const dash = fnBody(src, "handleDashboard");
+  assert.ok(/readDashboardLive\(/.test(dash), "handleDashboard reads live via readDashboardLive (not a bare readLive)");
+  assert.ok(!/readLive\(cfg\.workspaceRoot\)/.test(dash), "handleDashboard no longer calls readLive() with default blocking");
+});
+
+test("regression: readLive(computeBlocking:false) leaves blocks/blockedBy empty (no store scan)", () => {
+  // A bare workspace with NO tasks/: with computeBlocking:false the blocking scan is skipped entirely, so
+  // blocks/blockedBy stay empty even though an in-flight task is present (a carrier-only read, no store).
+  const ws = makeWorkspace("gap-reg-");
+  try {
+    const live = readLive(ws, { computeBlocking: false });
+    for (const t of live.inFlight) {
+      assert.deepEqual(t.blocks, [], "blocks is empty when the store scan is skipped");
+      assert.deepEqual(t.blockedBy, [], "blockedBy is empty when the store scan is skipped");
+    }
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("regression: readTests is short-TTL-cached and clears on demand", () => {
+  const ws = makeWorkspace("gap-reg-tests-");
+  const roundLine = `${JSON.stringify({ round: 1, startedAt: new Date().toISOString(), state: "green", pass: 5, tests: 5, durationMs: 1000 })}\n`;
+  try {
+    clearVerificationRoundCache();
+    fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), roundLine, "utf8");
+    const t1 = readTests(ws);
+    assert.equal(t1.status, "ok");
+    assert.equal(t1.runs.length, 1, "one round parsed");
+
+    // Same root within TTL → cache hit: the SAME result object, no re-parse.
+    fs.writeFileSync(path.join(ws, ".quay", "verification-round.jsonl"), roundLine + roundLine, "utf8");
+    const t2 = readTests(ws);
+    assert.equal(t2, t1, "second read within TTL returns the SAME cached result (no re-read)");
+
+    // clearVerificationRoundCache() forces a fresh parse → a DIFFERENT object with the new round count.
+    clearVerificationRoundCache();
+    const t3 = readTests(ws);
+    assert.notEqual(t3, t1, "clearing the cache forces a fresh read");
+    assert.equal(t3.runs.length, 2, "fresh read sees the appended round");
+
+    assert.ok(VERIFICATION_ROUND_CACHE_TTL_MS > 0 && VERIFICATION_ROUND_CACHE_TTL_MS <= 60_000, `TTL ${VERIFICATION_ROUND_CACHE_TTL_MS}ms is a short bounded window`);
+  } finally {
+    clearVerificationRoundCache();
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("regression: readGitHistory is short-TTL-cached and clears on demand", () => {
+  const ws = makeWorkspace("gap-reg-gh-");
+  try {
+    clearGitHistoryCache();
+    const h1 = readGitHistory(ws);
+    assert.ok(h1.status === "ok" || h1.status === "empty", "fixture git history reads without error");
+
+    const h2 = readGitHistory(ws);
+    assert.equal(h2, h1, "second read within TTL returns the SAME cached result (no re-walk)");
+
+    clearGitHistoryCache();
+    const h3 = readGitHistory(ws);
+    assert.notEqual(h3, h1, "clearing the cache forces a fresh git walk");
+
+    assert.ok(GIT_HISTORY_CACHE_TTL_MS > 0 && GIT_HISTORY_CACHE_TTL_MS <= 60_000, `TTL ${GIT_HISTORY_CACHE_TTL_MS}ms is a short bounded window`);
+  } finally {
+    clearGitHistoryCache();
+    fs.rmSync(ws, { recursive: true, force: true });
   }
 });

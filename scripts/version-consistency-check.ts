@@ -82,15 +82,27 @@ export function resolveRepoRoot(callerDir?: string): string {
   return callerDir ? resolve(callerDir, '..') : repoRoot;
 }
 
+/**
+ * archive/** exclusion (§12c, SPEC-plugin-lifecycle-single-bundle-2026-09-02): a version-bearing
+ * file that was archived (archive/<date>/<original-path>) is a stale version source — an old
+ * package.json under archive/ must not participate in the lockstep check. True iff the path lives
+ * under the repo-root archive/ directory.
+ */
+export function isArchivedPath(relPath: string): boolean {
+  return relPath === "archive" || relPath.startsWith("archive/") || relPath.includes("/archive/");
+}
+
 export function readVersions(root: string): { label: string; path: string; version: string; error?: string }[] {
-  return VERSION_ENTRIES.map((entry) => {
-    try {
-      const raw = readFileSync(resolve(root, entry.path), 'utf-8');
-      return { label: entry.label, path: entry.path, version: entry.extract(raw) };
-    } catch (e: any) {
-      return { label: entry.label, path: entry.path, version: '', error: e.message };
-    }
-  });
+  return VERSION_ENTRIES
+    .filter((entry) => !isArchivedPath(entry.path))
+    .map((entry) => {
+      try {
+        const raw = readFileSync(resolve(root, entry.path), 'utf-8');
+        return { label: entry.label, path: entry.path, version: entry.extract(raw) };
+      } catch (e: any) {
+        return { label: entry.label, path: entry.path, version: '', error: e.message };
+      }
+    });
 }
 
 export interface CheckResult {

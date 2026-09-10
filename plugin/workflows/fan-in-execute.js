@@ -318,12 +318,22 @@ fix_scope_out=$(node --no-warnings --experimental-strip-types --input-type=modul
 import { parseTouches, matchGlob, normalizePath } from "${worktree}/plugin/scripts/touches-orthogonality-check.ts";
 import { scanFamily, kindForFile } from "${worktree}/plugin/scripts/known-load-sensitive.ts";
 import { TMUX_LEAK_FAIL_RE } from "${worktree}/plugin/scripts/tmux-leak-fail-re.ts";
+import { readCarrierPerFile, groupByFile, baselineOf, classifyFailure } from "${worktree}/plugin/scripts/perfile-failure-rate.ts";
 const taskFile = process.argv[1]; const wt = process.argv[2]; const logFile = process.argv[3]; const releaseLedger = process.argv[4]; const isolateFile = process.argv[5];
 const livelockRounds = Number(process.argv[6] || 3);
 const deferLedger = process.argv[7]; const deferLivelockRounds = Number(process.argv[8] || 3);
 let globs = null;
 try { const tb = fs.readFileSync(taskFile, "utf8"); const p = parseTouches(tb); if (p.hasSection) globs = p.globs; } catch (e) { globs = null; }
 const family = scanFamily(wt);
+// per-file failure-rate baseline (gap-perfile-failure-rate-baseline-step-change): read the gitignored
+// carrier from --root/QUAY_MAIN_CHECKOUT (argv[9]=${root}) or the QUAY_PERFILE_RATE_ROOT test seam; an
+// absent carrier ⇒ empty history ⇒ classifyFailure returns "insufficient" (fail-closed: never a
+// fabricated "new-event" — a fresh worktree must not escalate every red on a missing carrier).
+const carrierRoot = process.env.QUAY_PERFILE_RATE_ROOT || process.env.QUAY_MAIN_CHECKOUT || process.argv[9] || "";
+const carrier = carrierRoot ? readCarrierPerFile(carrierRoot) : { found: false, path: "", recs: [] };
+const byFile = carrier.found ? groupByFile(carrier.recs) : new Map();
+const baselines = {};
+const baselineFor = (rel) => { const history = byFile.get(rel) ?? []; const b = baselineOf(history); const out = { runs: b.runs, fails: b.fails, rate: b.rate, classification: classifyFailure(history) }; baselines[rel] = out; return out; };
 let logText = ""; try { logText = fs.readFileSync(logFile, "utf8"); } catch (e) { logText = ""; }
 // gap-fan-in-suite-log-cross-relaunch-reuse: 按当前轮起始标记切片——只读最后一个 __FANIN_SUITE_START__
 // 之后的内容（当前轮），不整份线性 grep 旧轮；无标记（full-suite-runner/测试手写日志）⇒ 整份（向后兼容）。
@@ -344,10 +354,13 @@ while ((m = re.exec(logText)) !== null) {
   rel = normalizePath(rel);
   if (seen.has(rel)) continue;
   seen.add(rel);
+  const b = baselineFor(rel);
   const kind = kindForFile(family, rel);
-  if (kind !== undefined) { const rounds = (typeof prior[rel] === "number" ? prior[rel] : 0) + 1; prior[rel] = rounds; loadSensitiveFiles.push(rel); if (rounds >= livelockRounds) livelock = true; outOfScope.push({ file: rel, reason: "load-sensitive", kind, releasedRounds: rounds, livelock: rounds >= livelockRounds }); continue; }
+  if (kind !== undefined) { const rounds = (typeof prior[rel] === "number" ? prior[rel] : 0) + 1; prior[rel] = rounds; loadSensitiveFiles.push(rel); if (rounds >= livelockRounds) livelock = true; outOfScope.push({ file: rel, reason: "load-sensitive", kind, releasedRounds: rounds, livelock: rounds >= livelockRounds, baseline: b }); continue; }
   if (globs === null) { inScope.push(rel); continue; }
-  if (globs.some((g) => matchGlob(normalizePath(g), rel))) inScope.push(rel); else outOfScope.push({ file: rel, reason: "other-task" });
+  if (globs.some((g) => matchGlob(normalizePath(g), rel))) { inScope.push(rel); continue; }
+  const escalate = b.classification === "new-event" || b.classification === "step-change";
+  outOfScope.push({ file: rel, reason: escalate ? "new-event" : "other-task", baseline: b });
 }
 if (TMUX_LEAK_FAIL_RE.test(logText)) outOfScope.push({ file: null, reason: "leak-residual" });
 if (inScope.length === 0 && outOfScope.length === 0 && /run_static_checks|static-check/i.test(logText)) outOfScope.push({ file: null, reason: "checker-misreport" });
@@ -364,7 +377,7 @@ const isPureDefer = inScope.length === 0 && loadSensitiveFiles.length === 0 && o
 if (isPureDefer) { deferRounds += 1; } else { deferRounds = 0; }
 let deferLivelock = deferRounds >= deferLivelockRounds;
 if (deferLedger) { try { fs.writeFileSync(deferLedger, JSON.stringify({ rounds: deferRounds })); } catch (e) {} }
-process.stdout.write(JSON.stringify({ scoped: globs !== null, inScope, outOfScope, isolateRerun, livelock, deferRounds, deferLivelock }));' "$fix_scope_touches" "${worktree}" "$fix_scope_log" "$fix_scope_release" "$fix_scope_isolate" "${releaseLivelockRounds}" "$fix_scope_defer" "${maxDeferRelaunches}" 2>&1) || { echo "FIX_SCOPE_NOT_EVALUATED=1"; fix_scope_out=""; }
+process.stdout.write(JSON.stringify({ scoped: globs !== null, inScope, outOfScope, baselines, isolateRerun, livelock, deferRounds, deferLivelock }));' "$fix_scope_touches" "${worktree}" "$fix_scope_log" "$fix_scope_release" "$fix_scope_isolate" "${releaseLivelockRounds}" "$fix_scope_defer" "${maxDeferRelaunches}" "${root}" 2>&1) || { echo "FIX_SCOPE_NOT_EVALUATED=1"; fix_scope_out=""; }
 echo "FIX_SCOPE_VERDICT=$fix_scope_out"
 # fix-scope-gate-block-end
 判定（读上面的 FIX_SCOPE_VERDICT JSON）：
@@ -373,6 +386,7 @@ echo "FIX_SCOPE_VERDICT=$fix_scope_out"
     * reason=load-sensitive（in_family，kind 已标注，携带 releasedRounds = 已连续 release 的轮数含本轮）⇒ 释放：不修。⛔ 幂等持久：同一 load-sensitive 红无论重跑几轮都【继续 release】，任何一轮都不得转 fix——重跑后仍红 ⇒ 仍 release（不是「重跑确认后改修」）。releasedRounds ≥ 1 的项本轮仍 release，note 里写「load-sensitive 释放（第 N 轮，幂等持久），⛔ 不得转 fix」，N = releasedRounds 的值。release 落账由 gate 自动持久化到 fix_scope_release ledger（跨重跑轮次递增），下一轮 gate 会读到 releasedRounds 递增——这是机制保证，不是靠记性。⛔ release 动作三态（见下方「重新启动 suite」步骤）：有 inScope 修复 ⇒ 全量 relaunch；纯 load-sensitive 释放且 FIX_SCOPE_VERDICT.livelock=false ⇒ 【C11 隔离重跑】（只重跑失败家族文件、低并发，非全量 relaunch）；FIX_SCOPE_VERDICT.livelock=true（任一 load-sensitive 项 releasedRounds ≥ ${releaseLivelockRounds}）⇒ 【anti-livelock 兜底】：不再 relaunch、escalate（relaunched:false）。
     * reason=checker-misreport ⇒ defer：不修，note 里要求 defer 独立任务。
     * reason=other-task / leak-residual ⇒ 别任务 bug / 环境残留：不修，note 里要求 defer 独立任务。
+    * reason=new-event（baseline.classification ∈ new-event|step-change 的越界红——该文件历史从未失败过、或失败率发生阶跃，见 baselines 字段）⇒ 【升级语义分析】：不修、也不 defer-retry，note 里要求把「一个一直全绿的文件开始红了」这件事升级到语义层分析（可能是一个真实的偶现 bug——defer 会把真实缺陷静默归进环境性；本 gate 造出这个类别正是为了不再这么做）。
     * FIX_SCOPE_VERDICT.deferLivelock=true（连续纯 defer 轮数 ≥ ${maxDeferRelaunches}——inScope 空、无 load-sensitive、只有 other-task/leak/checker defer）⇒ 【defer anti-livelock 兜底】：不再 relaunch、escalate（relaunched:false，note 写「other-task defer anti-livelock（deferRounds≥${maxDeferRelaunches}）」）——确定性失败重跑零信息，⛔ 不得无限重跑。
 - FIX_SCOPE_NOT_EVALUATED=1 ⇒ fail-closed：本任务不修任何失败，全部 defer（无法评估 ≠ 合格）。
 修完 inScope 后照常重新启动全量 suite。返回的 failuresFixed 只列 inScope 修复；越界 defer/release 写进 note。重跑后 suite 仍红的 load-sensitive 红 ⇒ 仍按本 gate release，⛔ 绝不转 fix。`
@@ -553,8 +567,8 @@ if [ -n "$bootstrap_hit" ]; then
   # 自举警示（取假一能取假）：同步后若 worktree 与主检出的 fan-in-execute.js 仍不一致 ⇒ 本分支修改了它
   # ⇒ 自举要求派发用 worktree 版 scriptPath（若本次派发误用了主检出版，本任务对 fan-in-execute.js 的
   # 修复未被自己验证）。同步已让未修改的 fan-in-execute.js 与主检出一致 ⇒ 此警示只在本分支确实改了它时触发。
-  if [ -f "${worktree}/.claude/workflows/fan-in-execute.js" ]; then
-    if ! cmp -s "${worktree}/.claude/workflows/fan-in-execute.js" "${root}/.claude/workflows/fan-in-execute.js" 2>/dev/null; then
+  if [ -f "${worktree}/plugin/workflows/fan-in-execute.js" ]; then
+    if ! cmp -s "${worktree}/plugin/workflows/fan-in-execute.js" "${root}/plugin/workflows/fan-in-execute.js" 2>/dev/null; then
       echo "FAN-IN-BOOTSTRAP-WARN: worktree 与主检出的 fan-in-execute.js 不一致（本分支修改了它 ⇒ 须用 worktree 版 scriptPath；若派发误用主检出版，本任务修复未被自己验证）" >&2
     fi
   fi
@@ -862,9 +876,9 @@ fi
 agent_id=$(basename "$self" .jsonl 2>/dev/null | sed 's/^agent-//')
 if [ -z "$agent_id" ]; then echo "FATAL: 未能从 $self 提取 agent id（--agent-id 不能由调用方填）" >&2; exit 2; fi
 # selfloc-block-end
-bash ${worktree}/plugin/scripts/fan-in-ff-merge.sh --task ${task} --run-id ${runId} --agent-id "$agent_id" --root ${root} --merge-target ${mergeTarget} --worktree ${worktree} --lock-wait ${mergeLockWaitSecs}
+node --experimental-strip-types ${worktree}/packages/quay/src/fan-in/ff-merge.ts --task ${task} --run-id ${runId} --agent-id "$agent_id" --root ${root} --merge-target ${mergeTarget} --worktree ${worktree} --lock-wait ${mergeLockWaitSecs} --token "$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo fan-in-fallback-token)"
 ff_rc=$?
-# 本任务 suite capture 的使命已尽（ff 闸已在 fan-in-ff-merge.sh 内读过它）——清理掉；若 ff 失败重试，
+# 本任务 suite capture 的使命已尽（ff 闸已在 ff-merge.ts 内读过它）——清理掉；若 ff 失败重试，
 # step 4 会重写新 capture（gap-suite-concurrency-ff-gate-and-slot-ssot）。不在此 exit：step 5.5（仅 ff
 # 成功时执行）与清理仍需按序运行。ff_rc 由你在返回时上报（0=green, 1/3=ff-retry, 2=red）。
 rm -f "$suite_capture" 2>/dev/null || true

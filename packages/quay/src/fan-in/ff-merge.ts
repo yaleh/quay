@@ -26,8 +26,9 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL, fileURLToPath } from "node:url";
+import { pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
+import { resolvePluginRoot } from "../plugin-root.ts";
 
 // ── types ────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -39,6 +40,13 @@ export interface FfMergeArgs {
   /** the branch the task fast-forwards into. Default `develop`. */
   mergeTarget?: string;
   runId?: string | null;
+  /** per-dispatch attempt key (gap-ff-retry-counter-runid-no-longer-per-dispatch): the retry counter's
+   *  grouping key. `runId` became a driver-process-lifetime id (`wk-prod-<epoch>`, constant across
+   *  dispatches), so the per-runId counter (gap-fan-in-ff-retry-counter-scope) now accumulates across
+   *  dispatches. The caller passes a per-dispatch identity here (the mechanical fan-in passes its
+   *  per-suite runId `mfi-<task>-<epoch>-<rand>`). Absent ⇒ falls back to `runId` (direct CLI /
+   *  semantic-fallback calls that predate the key). */
+  attemptKey?: string | null;
   agentId?: string | null;
   /** L1 token gate: the driver-injected one-time token. Absent ⇒ fail-closed (exit 2). */
   token?: string | null;
@@ -52,7 +60,7 @@ export interface FfMergeArgs {
   escalations?: string;
   lockWaitSecs?: number;
   worktree?: string;
-  /** test seam — the plugin/scripts dir (self-bootstrapping default is <root>/plugin/scripts). */
+  /** test seam — the plugin/scripts dir (self-bootstrapping default is the SPEC §6b resolver). */
   scriptsDir?: string;
   now?: () => Date;
 }
@@ -197,7 +205,7 @@ function cleanTreeCheck(args: FfMergeArgs, root: string): { ok: boolean; stderrL
       benignPaths.push(ppath);
     }
     if (benignOk && benignPaths.length > 0) {
-      const scriptsDir = args.scriptsDir ?? path.join(root, "plugin", "scripts");
+      const scriptsDir = scriptsDirOf(args) ?? "";
       const touchesScript = path.join(scriptsDir, "touches-orthogonality-check.ts");
       const verdict = sh(["node", "--experimental-strip-types", touchesScript, "--runtime-dirty", "--task", args.task, "--root", root, ...benignPaths]);
       if (verdict.status !== 0 || !verdict.stdout.trim().startsWith("BENIGN")) benignOk = false;
@@ -270,7 +278,7 @@ function suiteCertGate(args: FfMergeArgs, root: string): { ok: boolean; reason: 
   }
   const delta = git(root, "diff", "--name-only", suiteHead, suiteTip).stdout.trim();
   if (delta !== "") {
-    const scriptsDir = args.scriptsDir ?? path.join(root, "plugin", "scripts");
+    const scriptsDir = scriptsDirOf(args) ?? "";
     const classifyScript = path.join(scriptsDir, "select-static-checks-for-touches.ts");
     // classify-root = the repo root the registry (scripts/test.sh) lives at — two levels up from
     // plugin/scripts (matches the bash's `dirname BASH_SOURCE/../..`).
@@ -324,7 +332,7 @@ function acquireMergeLockAsync(lockFile: string, lockWaitSecs: number): Promise<
 // ── classify-delta (the computed inert-delta classifier, no hand-written path table) ────────────────
 
 function classifyDelta(args: FfMergeArgs, root: string, files: string[]): string {
-  const scriptsDir = args.scriptsDir ?? path.join(root, "plugin", "scripts");
+  const scriptsDir = scriptsDirOf(args) ?? "";
   const classifyScript = path.join(scriptsDir, "select-static-checks-for-touches.ts");
   const classifyRoot = path.resolve(scriptsDir, "..", "..");
   const r = sh(["node", "--experimental-strip-types", classifyScript, "--classify-delta", "--root", classifyRoot, ...files]);
@@ -333,10 +341,15 @@ function classifyDelta(args: FfMergeArgs, root: string, files: string[]): string
 
 // ── main ─────────────────────────────────────────────────────────────────────────────────────────────
 
-/** The repo root the MODULE lives in (for self-bootstrapping the classifier/touches/reaper scripts —
- *  the analog of the retired bash's `dirname BASH_SOURCE/../..`). The worker-driver overrides this via
- *  `scriptsDir` when it loads a worktree copy. */
-const MODULE_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
+/** The plugin `scripts/` dir — caller override (worker-driver's worktree seam) else the canonical
+ *  resolver (SPEC §6b: never the workspace root, never an import.meta.url walk-up without a worktree
+ *  check — the pre-migration `MODULE_REPO_ROOT` and `root/plugin/scripts` defaults). null when
+ *  unresolvable (callers fail closed). */
+function scriptsDirOf(args: FfMergeArgs): string | null {
+  if (args.scriptsDir) return args.scriptsDir;
+  const pluginRoot = resolvePluginRoot();
+  return pluginRoot ? path.join(pluginRoot, "scripts") : null;
+}
 
 /** The full 持锁段 ff, as an importable function (used by `quay task fan-in` and worker-driver.ts). */
 export async function ffMerge(args: FfMergeArgs): Promise<FfMergeResult> {
@@ -351,7 +364,10 @@ export async function ffMerge(args: FfMergeArgs): Promise<FfMergeResult> {
   const lockEvents = args.lockEvents ?? path.join(root, ".quay", "fan-in-merge-lock-events.jsonl");
   const retryRecord = args.retryRecord ?? path.join(root, ".quay", "fan-in-retries.jsonl");
   const escalations = args.escalations ?? path.join(root, ".quay", "fan-in-ff-escalations.jsonl");
-  const scriptsDir = args.scriptsDir ?? path.join(MODULE_REPO_ROOT, "plugin", "scripts");
+  const scriptsDir = scriptsDirOf(args);
+  if (!scriptsDir) {
+    return { code: 2, stdout: "", stderr: "fan-in-ff-merge: plugin scripts dir not resolvable (SPEC §6b — no QUAY_PLUGIN_ROOT, not under a quay checkout/install)", landedSha: null };
+  }
   args.scriptsDir = scriptsDir;
 
   const out: string[] = [];
@@ -403,17 +419,23 @@ export async function ffMerge(args: FfMergeArgs): Promise<FfMergeResult> {
     return { code: 2, stdout: out.join("\n"), stderr: err.join("\n"), landedSha: null };
   }
 
-  // attempt counting (per-runId scope, gap-fan-in-ff-retry-counter-scope).
+  // attempt counting (per-dispatch scope, gap-ff-retry-counter-runid-no-longer-per-dispatch).
+  // The key is the per-dispatch identity (attemptKey), NOT runId: runId became a driver-process-lifetime
+  // id (`wk-prod-<epoch>`, constant across dispatches), so the per-runId counter (gap-fan-in-ff-retry-
+  // counter-scope — correct when runId WAS per-dispatch) now latches a task across independent dispatches.
+  // Fall back to runId when attemptKey is absent (direct CLI / semantic-fallback calls that predate the key).
   const runIdJson = args.runId ?? null;
   const agentIdJson = args.agentId ?? null;
+  const attemptKeyJson = args.attemptKey ?? null;
+  const countKey = attemptKeyJson ?? runIdJson;
   let prior = 0;
   if (fs.existsSync(retryRecord)) {
     const text = fs.readFileSync(retryRecord, "utf8");
     for (const line of text.split("\n")) {
       if (!line.trim()) continue;
-      let rec: { taskId?: string; runId?: string | null } | null = null;
+      let rec: { taskId?: string; runId?: string | null; attemptKey?: string | null } | null = null;
       try { rec = JSON.parse(line); } catch { continue; }
-      if (rec && rec.taskId === args.task && (rec.runId ?? null) === (args.runId ?? null)) prior++;
+      if (rec && rec.taskId === args.task && (rec.attemptKey ?? rec.runId ?? null) === countKey) prior++;
     }
   }
   const attempt = prior + 1;
@@ -478,12 +500,13 @@ export async function ffMerge(args: FfMergeArgs): Promise<FfMergeResult> {
     const developHeadNow = git(root, "rev-parse", mergeTarget).stdout.trim() || "unresolvable";
     fs.appendFileSync(retryRecord, JSON.stringify({
       taskId: args.task, attempt, developHead: developHeadNow, ts: iso(t1), epoch: epoch(t1),
-      runId: runIdJson, agentId: agentIdJson, mergeTarget, error: mergeErr,
+      runId: runIdJson, agentId: agentIdJson, mergeTarget, error: mergeErr, attemptKey: attemptKeyJson,
     }) + "\n");
     if (attempt >= 3) {
       fs.appendFileSync(escalations, JSON.stringify({
         event: "ff-escalation", taskId: args.task, attempt, developHead: developHeadNow, ts: iso(t1),
         epoch: epoch(t1), runId: runIdJson, agentId: agentIdJson, mergeTarget, action: "stop-retry",
+        attemptKey: attemptKeyJson,
       }) + "\n");
       err.push(
         `fan-in-ff-merge: FF FAILED (attempt ${attempt} >= 3) — ANTI-LIVELOCK (SPEC §7, gap-ff-livelock-trigger-no-action): develop keeps advancing; escalating + STOPPING automatic retry. Escalation record written to ${escalations}. Do NOT auto-retry: re-merge develop and re-run the fan-in once develop settles.`,
@@ -532,6 +555,7 @@ function parseArgv(argv: string[]): { args: FfMergeArgs; help: boolean } {
       case "--root": args.root = next(); break;
       case "--merge-target": args.mergeTarget = next(); break;
       case "--run-id": args.runId = next(); break;
+      case "--attempt-key": args.attemptKey = next(); break;
       case "--agent-id": args.agentId = next(); break;
       case "--token": args.token = next(); break;
       case "--suite-state": args.suiteState = next(); break;
@@ -553,7 +577,7 @@ function parseArgv(argv: string[]): { args: FfMergeArgs; help: boolean } {
 const HELP = `fan-in-ff-merge (TS module) — AC62 持锁段: a merge lock that wraps ONLY the ff.
 Usage:
   node --experimental-strip-types packages/quay/src/fan-in/ff-merge.ts --task <taskId> [--root <repo>]
-    [--merge-target <branch>] [--run-id <runId>] [--agent-id <id>] [--token <token>] [--suite-capture <file>]
+    [--merge-target <branch>] [--run-id <runId>] [--attempt-key <key>] [--agent-id <id>] [--token <token>] [--suite-capture <file>]
     [--lock-events <file>] [--retry-record <file>] [--escalations <file>] [--lock-wait <secs>] [--worktree <path>]
 Exit codes: 0 = ff performed; 1 = develop advanced (retry); 2 = usage/env/token; 3 = anti-livelock.
 `;

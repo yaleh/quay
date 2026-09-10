@@ -132,8 +132,8 @@ function collectBespokeDriverFiles(repoRoot: string): string[] {
     // gap-select-preflight-retirement-decision: select-preflight.js retired with the classic
     // OUTER-LOOP SELECT phase (ADR-022); the surviving bespoke driver workflows are run-routines
     // and drain-directives.
-    path.join(repoRoot, ".claude/workflows/run-routines.js"),
-    path.join(repoRoot, ".claude/workflows/drain-directives.js"),
+    path.join(repoRoot, "plugin/workflows/run-routines.js"),
+    path.join(repoRoot, "plugin/workflows/drain-directives.js"),
   ];
   const scriptsDir = path.join(repoRoot, "experiments/quay-perpetual-stream/scripts");
   let entries: string[] = [];
@@ -198,14 +198,14 @@ function checkRoutinesBespokeReader(repoRoot: string): EvidenceResult {
   // Fall back to the legacy backward-compat wrapper so an old deployment is still recognized —
   // but flag the dead-config gap explicitly (the field is read by a RETIRED-path wrapper, not the
   // live fast-mode driver).
-  const file = path.join(repoRoot, ".claude/workflows/run-routines.js");
+  const file = path.join(repoRoot, "plugin/workflows/run-routines.js");
   const src = readFileSafe(file);
   const legacyOk = /routines:/.test(src) && /\.quay\/loop\.yml/.test(src) && /routine-scheduler/.test(src);
   return {
     ok: legacyOk,
     evidence: legacyOk
-      ? `'.claude/workflows/run-routines.js' (legacy wrapper) references the routine track, but the LIVE fast-mode tick docs (plugin/loop/*.md) do NOT — a configured 'routines:' with no live caller is dead config (AC3c)`
-      : `no live caller reads 'routines:': the fast-mode tick docs (plugin/loop/*.md) do not reference the routine track and the legacy .claude/workflows/run-routines.js does not either — 'routines:' is configured but nobody reads it (config-validate only checks syntax, not consumption)`,
+      ? `'plugin/workflows/run-routines.js' (legacy wrapper) references the routine track, but the LIVE fast-mode tick docs (plugin/loop/*.md) do NOT — a configured 'routines:' with no live caller is dead config (AC3c)`
+      : `no live caller reads 'routines:': the fast-mode tick docs (plugin/loop/*.md) do not reference the routine track and the legacy plugin/workflows/run-routines.js does not either — 'routines:' is configured but nobody reads it (config-validate only checks syntax, not consumption)`,
   };
 }
 

@@ -1,29 +1,38 @@
 #!/usr/bin/env node
-// suite-scheduler.ts — the unified suite scheduler (gap-suite-dynamic-waterline-scheduler).
+// suite-scheduler.ts — the unified suite scheduler (gap-suite-dynamic-waterline-scheduler; the
+// waterline semantics REDEFINED as a RELIABILITY cap by gap-suite-scheduler-reliability-cap-not-speed).
 //
-// Replaces the static phase-splitting (static → serial → lowconc → main, + PHASE_OVERLAP + the A
-// main-tail-overlap watcher) with ONE event-driven loop: every test file keeps its group
+// Replaces the static phase-splitting (static → serial → lowconc → main, + PHASE_OVERLAP) with ONE
+// event-driven loop: every test file keeps its group
 // (serial / lowconc / main), each group has its own concurrency budget (host-derived, reused from
-// the existing formulas), and the scheduler dispatches greedily per group with a MONOTONIC WATERLINE.
+// the existing formulas), and the scheduler dispatches greedily per group under ONE TOTAL CAP.
 //
-// THE WATERLINE (the semantic this task exists to establish — 水位语义, NOT a global min lock):
-//   - serial  files run at ≤ serial_budget,  independently of every other group.
-//   - lowconc files run at ≤ lowconc_budget, independently of every other group.
-//   - main    files run at ≤ main_budget − (ACTIVE serial + ACTIVE lowconc)  — "main uses the
-//     remaining capacity". As the finite low groups complete, active serial/lowconc only DEcrease
-//     (they are dispatched greedily up-front), so main's capacity rises MONOTONICALLY toward the
-//     main budget. There is NO CPU-load detection — the waterline is a STRUCTURAL guarantee that
-//     replaces the A watcher's stall-polling.
+// THE WATERLINE (redefined as a RELIABILITY cap, NOT a speed optimization — 水位语义):
+//   - At any instant, the TOTAL concurrency across ALL THREE groups (serial + lowconc + main) must
+//     not exceed the MINIMUM budget among the groups that currently have ≥1 file running
+//     (currentCap). A group that is not running imposes no cap.
+//   - This is a MIN-LOCK OVER THE ACTIVE GROUPS (人 2026-09-04 ruling). The goal is RELIABILITY —
+//     never run more files than the lowest concurrency tier that is currently loaded can tolerate.
+//     The OLD semantic — "main uses the remaining capacity (main_budget − active_serial −
+//     active_lowconc)" — let main balloon to its large budget alongside serial/lowconc and saturate
+//     every core (round #985: 92% of wall time pinned at 28–29 concurrent), starving the B-class
+//     waiting probes (loadavg 22–26 / cpu_stall 37–62%). SPEED WAS NEVER A VALID AC for this
+//     mechanism (人 2026-09-04).
+//   - HISTORICAL NOTE: the original gap-suite-dynamic-waterline-scheduler chose "main uses
+//     remaining" over a min lock on the strength of a ONE-OFF simulation (706s vs 515s). That
+//     comparison was NEVER validated against a real full-suite round (its AC4/AC5 sat unchecked,
+//     marked 待外部) and is hereby OVERRULED — it must not be cited as a design basis again.
 //
-// A global min lock (cap EVERYTHING at min(S,L,M)) is the REJECTED alternative: it forces the whole
-// suite to the lowest group's concurrency whenever a single low-conc file is present, discarding the
-// serial∥lowconc overlap parallelism the current phased schedule already has (the proposal's
-// simulation measured min-lock 706s vs waterline 515s, i.e. min-lock is +8% SLOWER).
+// A STATIC global min lock (cap EVERYTHING at min(S,L,M) even when only main is active) is NOT this
+// semantic: currentCap locks only over the groups that are CURRENTLY active, so once serial/lowconc
+// drain to zero, main recovers its FULL budget (no permanent slow-down from a tier that has already
+// finished — the AC3 regression).
 //
 // This module is TWO layers:
-//   1. PURE scheduling core (mainCapacity / nextDispatch / simulateSchedule / simulateMinLock) — no
-//      process spawning, unit-tested by plugin/test/suite-scheduler.test.mjs for the waterline
-//      semantics, monotonicity, pass/fail-neutrality, and the min-lock control.
+//   1. PURE scheduling core (currentCap / nextDispatch / simulateSchedule) — no process spawning,
+//      unit-tested by plugin/test/suite-scheduler.test.mjs for the reliability-cap invariant
+//      (total ≤ min active budget at every event), the low-tier-drain → main-recovers regression,
+//      and pass/fail-neutrality.
 //   2. The execution entry (runScheduler + CLI) — runs each dispatched file through node:test's
 //      run({files:[file], isolation:"process"}) with dropRawDiagnostics→spec→stdout (the outer
 //      runner's 判绿 markers) and emits the SAME per-file/group markers the downstream accounting
@@ -48,7 +57,7 @@
 //      --main-root/.quay/verification-round.jsonl — the EXISTING carrier, no new measurer). LPT is
 //      scheduling-only (every file emitted exactly once) and FAIL-OPEN (no history ⇒ unchanged);
 //      QUAY_TEST_LPT_ORDER=0 is the one-key rollback.
-//   3. SCHEDULES via the waterline (runScheduler below).
+//   3. SCHEDULES via the reliability cap (runScheduler below).
 //
 // The only forwarded node --test flag is --test-name-pattern[=X] (mapped to run()'s testNamePatterns,
 // the same parse as suite-lpt-runner.mjs); any --test-concurrency[=N] flag is STRIPPED (the scheduler
@@ -61,12 +70,13 @@ import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { classifyFile, type DeclaredGroup } from "./runner-grouping.ts";
 import { loadDurationAverages, orderByLpt } from "./suite-lpt-order.ts";
+import { readPerFileCpuMs } from "./measure-suite-reporter.mjs";
 
 export type SuiteGroup = "serial" | "lowconc" | "main";
 export const SUITE_GROUPS: SuiteGroup[] = ["serial", "lowconc", "main"];
 
-/** The per-group concurrency budgets. serial/lowconc are INDEPENDENT (each capped only by its own
- *  budget); main is the total pool that the low groups borrow from (see mainCapacity). */
+/** The per-group concurrency budgets. The TOTAL across all three groups is capped at the MINIMUM
+ *  budget among the groups that currently have ≥1 file running (see currentCap). */
 export interface SchedulerBudgets {
   serial: number;
   lowconc: number;
@@ -86,37 +96,48 @@ export interface GroupQueues {
   main: string[];
 }
 
-/** THE waterline: main runs in the leftover capacity after the low groups take their independent
- *  budgets — `main_budget − (active serial + active lowconc)`, clamped ≥ 0. NOT a global min lock
- *  (that would be `min(S,L,M) − active_any`). Clamped so a low-group budget exceeding the main
- *  budget simply blocks main until enough low files drain (monotonic rise, never negative). */
-export function mainCapacity(budgets: SchedulerBudgets, active: ActiveCounts): number {
-  return Math.max(0, budgets.main - active.serial - active.lowconc);
+/** THE reliability cap: the MINIMUM budget among the groups that currently have ≥1 file running
+ *  (active[g] > 0). A group with active[g] === 0 imposes NO cap (it does not participate in the
+ *  min). When NOTHING is running the cap is +∞ (no total limit — the per-group budgets decide who
+ *  starts first). This is a min-lock OVER THE ACTIVE GROUPS (人 2026-09-04), NOT the old
+ *  "main uses the remaining capacity" — the three-group total must stay ≤ this cap at every instant. */
+export function currentCap(budgets: SchedulerBudgets, active: ActiveCounts): number {
+  let cap = Infinity;
+  if (active.serial > 0 && budgets.serial < cap) cap = budgets.serial;
+  if (active.lowconc > 0 && budgets.lowconc < cap) cap = budgets.lowconc;
+  if (active.main > 0 && budgets.main < cap) cap = budgets.main;
+  return cap;
 }
 
-/** Start as many queued files as each group's budget allows. serial and lowconc are INDEPENDENT
- *  (each bounded only by its own budget, running in PARALLEL — the overlap never degrades); main
- *  fills the remaining capacity (mainCapacity) LAST, so the low groups always grab their budget
- *  first (preserving the "serial/lowconc judged red at the boundary" start-order property).
- *  MUTATES queues (shift) and active (increment); returns the started {file, group} pairs. */
+/** Start queued files under the reliability cap, in serial → lowconc → main priority order.
+ *  A FIXED-POINT loop: before starting any file it recomputes currentCap from the would-be active
+ *  state (active with that group +1) and refuses the start if the resulting TOTAL concurrency
+ *  (serial+lowconc+main) would exceed that cap. The serial→lowconc→main TRY order is preserved (the
+ *  low tiers are attempted first, keeping the "low tier starts first / judged red at the boundary"
+ *  property). MUTATES queues (shift) and active (increment); returns the started {file, group} pairs. */
 export function nextDispatch(
   budgets: SchedulerBudgets,
   queues: GroupQueues,
   active: ActiveCounts,
 ): Array<{ file: string; group: SuiteGroup }> {
   const started: Array<{ file: string; group: SuiteGroup }> = [];
-  while (active.serial < budgets.serial && queues.serial.length > 0) {
-    started.push({ file: queues.serial.shift() as string, group: "serial" });
-    active.serial++;
-  }
-  while (active.lowconc < budgets.lowconc && queues.lowconc.length > 0) {
-    started.push({ file: queues.lowconc.shift() as string, group: "lowconc" });
-    active.lowconc++;
-  }
-  const cap = mainCapacity(budgets, active);
-  while (active.main < cap && queues.main.length > 0) {
-    started.push({ file: queues.main.shift() as string, group: "main" });
-    active.main++;
+  const order: SuiteGroup[] = ["serial", "lowconc", "main"];
+  for (;;) {
+    let startedOne = false;
+    for (const g of order) {
+      if (active[g] >= budgets[g] || queues[g].length === 0) continue;
+      // Would-be state AFTER starting one more file in this group — the invariant must hold at the
+      // post-start instant (total ≤ min budget of the groups that are then active), because a low
+      // tier becoming active can LOWER the cap below the pre-start total (hard rule: cap at any instant).
+      const after: ActiveCounts = { serial: active.serial, lowconc: active.lowconc, main: active.main };
+      after[g]++;
+      if (after.serial + after.lowconc + after.main > currentCap(budgets, after)) continue;
+      started.push({ file: queues[g].shift() as string, group: g });
+      active[g]++;
+      startedOne = true;
+      break; // re-run the fixed-point loop from the updated active state
+    }
+    if (!startedOne) break;
   }
   return started;
 }
@@ -132,16 +153,15 @@ export interface SimulationResult {
   makespan: number;
   /** Completion events in time order (every file exactly once — pass/fail-neutral by construction). */
   events: SimEvent[];
-  /** The main capacity sampled at each completion event, in time order — asserts monotonic rise. */
-  mainCapacityTrace: number[];
+  /** Per-completion snapshots of the total concurrency and the reliability cap, in time order —
+   *  the AC2 invariant (total ≤ cap at every event). cap is +∞ when nothing is running. */
+  trace: Array<{ total: number; cap: number }>;
 }
 
 /** A deterministic event-driven simulation of the dispatch loop given per-file durations — the SAME
- *  nextDispatch loop the real runner executes, so the test can prove the waterline/monotonicity/
- *  pass/fail-neutrality properties WITHOUT spawning processes. Durations are wall units (any scale);
- *  a file with no recorded duration is treated as 0. The low groups are dispatched greedily up-front
- *  (nextDispatch fills serial then lowconc then main), so after the first tick active serial/lowconc
- *  only DEcrease ⇒ main capacity only rises (the monotonic waterline trace). */
+ *  nextDispatch loop the real runner executes, so the test can prove the reliability-cap invariant
+ *  (total ≤ min active budget at every event) and pass/fail-neutrality WITHOUT spawning processes.
+ *  Durations are wall units (any scale); a file with no recorded duration is treated as 0. */
 export function simulateSchedule(
   budgets: SchedulerBudgets,
   groups: GroupQueues,
@@ -151,7 +171,7 @@ export function simulateSchedule(
   const active: ActiveCounts = { serial: 0, lowconc: 0, main: 0 };
   const running = new Map<string, { group: SuiteGroup; end: number }>();
   const events: SimEvent[] = [];
-  const trace: number[] = [];
+  const trace: Array<{ total: number; cap: number }> = [];
   let t = 0;
 
   for (;;) {
@@ -172,35 +192,9 @@ export function simulateSchedule(
     running.delete(earliest);
     active[ev.group]--;
     events.push({ file: earliest, group: ev.group, start: t - (durations.get(earliest) ?? 0), end: t });
-    trace.push(mainCapacity(budgets, active));
+    trace.push({ total: active.serial + active.lowconc + active.main, cap: currentCap(budgets, active) });
   }
-  return { makespan: t, events, mainCapacityTrace: trace };
-}
-
-/** The REJECTED alternative — a GLOBAL min lock: every file (all groups) shares ONE pool at
- *  concurrency min(S,L,M). Kept here ONLY as the AC2 control: the test asserts the waterline
- *  makespan ≤ the min-lock makespan on a workload where serial∥lowconc overlap parallelism matters
- *  (reproducing the proposal's 706s min-lock vs 515s waterline direction). */
-export function simulateMinLock(budgets: SchedulerBudgets, groups: GroupQueues, durations: Map<string, number>): number {
-  const cap = Math.min(budgets.serial, budgets.lowconc, budgets.main);
-  const all: Array<{ file: string; dur: number }> = [];
-  for (const g of SUITE_GROUPS) for (const f of groups[g]) all.push({ file: f, dur: durations.get(f) ?? 0 });
-  all.sort((a, b) => b.dur - a.dur); // LPT across ALL groups (single queue)
-  const queue = all.map((x) => x.file);
-  const running = new Map<string, number>(); // file → end
-  let t = 0;
-  for (;;) {
-    while (running.size < cap && queue.length > 0) {
-      const f = queue.shift()!;
-      running.set(f, t + (durations.get(f) ?? 0));
-    }
-    if (running.size === 0) break;
-    let earliestEnd = Infinity;
-    for (const end of running.values()) if (end < earliestEnd) earliestEnd = end;
-    t = earliestEnd;
-    for (const [f, end] of [...running]) if (end === t) running.delete(f);
-  }
-  return t;
+  return { makespan: t, events, trace };
 }
 
 // ── classification + LPT layer (gap-suite-classification-lpt-scheduler-ts-ization) ────────────────
@@ -347,7 +341,13 @@ export function runScheduler(opts: {
         failedFiles.push(rec.file);
       }
       st.endMs = Date.now();
-      process.stderr.write(`__PERFILE__ duration_ms=${dur} ${rec.file} passed=${passed} end_ms=${st.endMs}\n`);
+      // gap-suite-scheduler-perfile-cpu-emitter-missing — the unified scheduler's __PERFILE__ line
+      // must carry the SAME per-file CPU the legacy/LPT path emits. Reuse measure-suite-reporter's
+      // single reader (readPerFileCpuMs) — ⛔ NOT a second hand-rolled read: absent = "not measured"
+      // (field omitted), never a fabricated 0 (硬规则 3b).
+      const cpuMs = readPerFileCpuMs(rec.file);
+      const cpuPart = cpuMs !== undefined ? ` cpu_ms=${cpuMs}` : "";
+      process.stderr.write(`__PERFILE__ duration_ms=${dur} ${rec.file} passed=${passed} end_ms=${st.endMs}${cpuPart}\n`);
       // A group closes when its queue is drained AND nothing of it is still running — emit its
       // __GROUP__ + __OVERHEAD__ <group>_phase_ms once, at close (the downstream accounting reads
       // one __GROUP__ per group, same shape as measure-suite-reporter's per-phase line).
@@ -520,7 +520,7 @@ async function main(argv: string[]): Promise<number> {
     return 2;
   }
   process.stderr.write(
-    `scheduler: serial=${groups.serial.length}≤${budgets.serial} lowconc=${groups.lowconc.length}≤${budgets.lowconc} main=${groups.main.length}≤${budgets.main} (waterline: main uses remaining capacity)\n`,
+    `scheduler: serial=${groups.serial.length}≤${budgets.serial} lowconc=${groups.lowconc.length}≤${budgets.lowconc} main=${groups.main.length}≤${budgets.main} (reliability cap: total ≤ min budget of active groups)\n`,
   );
   const result = await runScheduler({ budgets, groups, testNamePatterns });
   return result.failed > 0 ? 1 : 0;

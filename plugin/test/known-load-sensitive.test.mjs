@@ -124,11 +124,14 @@ test("AC1 — kindForFile resolves the root causes distinctly (no conflation)", 
   assert.equal(kindForFile(family, "plugin/test/supervisor-preempt-candidates.test.mjs"), "wall-clock");
   assert.equal(kindForFile(family, "plugin/test/cold-start-skill.test.mjs"), "wall-clock");
   assert.equal(kindForFile(family, "plugin/test/runner-grouping-list-groups.test.mjs"), "nested-spawn");
-  assert.equal(kindForFile(family, "plugin/test/quay-init-loop-core.test.mjs"), "nested-spawn");
+  // RETIRED (gap-quay-init-closure-shrink-body AC168, commit 40743cf74): the copy-machinery test
+  // files quay-init-loop-core / quay-init-loop-driver / runtime-landing were archived to
+  // archive/2026-09-08-quay-init-copy-machinery-retirement/ (no longer in the canonical glob), so
+  // they are no longer family members and kindForFile returns undefined for them. The nested-spawn
+  // and real-install root causes stay covered by the LIVE members below (runner-grouping-list-groups
+  // for nested-spawn; quay-init.test.mjs / npm-pack-e2e for real-install).
   // AC2/AC3 (gap-suite-tiering-kind-heavy-not-a-mechanism): heavy split into real-install + child-spawn.
   assert.equal(kindForFile(family, "plugin/test/quay-init.test.mjs"), "real-install");
-  assert.equal(kindForFile(family, "plugin/test/runtime-landing.test.mjs"), "real-install");
-  assert.equal(kindForFile(family, "plugin/test/quay-init-loop-driver.test.mjs"), "real-install");
   assert.equal(kindForFile(family, "packages/quay/test/npm-pack-e2e.test.mjs"), "real-install");
   assert.equal(kindForFile(family, "experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs"), "child-spawn");
   assert.equal(kindForFile(family, "packages/quay-github/test/create.test.mjs"), "child-spawn");
@@ -409,9 +412,13 @@ test("AC3 — the real repo: 27 evidenced files moved out of serial/lowconc to t
     if (isSerialGroupFile(text)) serialFiles.push(rel);
     if (/^\s*\/\/\s*@test-group\s+lowconc\b/m.test(text)) lowconcFiles.push(rel);
   }
-  // The 3 quay-init-loop files that WERE lowconc are now in the default group (engine) — moved out
-  // by gap-suite-move-27-evidenced-files-out-serial-lowconc (fail=0 high-load evidence). The vendor
-  // member was split into 7 per-scenario files, each inheriting the default-group (engine) move.
+  // The 3 quay-init-loop files that WERE lowconc were moved to the default group (engine) by
+  // gap-suite-move-27-evidenced-files-out-serial-lowconc (fail=0 high-load evidence), then RETIRED
+  // (gap-quay-init-closure-shrink-body AC168, commit 40743cf74) to
+  // archive/2026-09-08-quay-init-copy-machinery-retirement/. The vendor member was split into 7
+  // per-scenario files, each inheriting the default-group (engine) move — then retired alongside.
+  // The "not in serial/lowconc" guard below still holds (retirement removes them from every lane),
+  // and stays as a resurrection guard: un-archiving one into a wrong lane would fail here.
   const movedToDefault = [
     "plugin/test/quay-init-loop-driver.test.mjs",
     "plugin/test/quay-init-loop-runtime.test.mjs",
@@ -427,10 +434,11 @@ test("AC3 — the real repo: 27 evidenced files moved out of serial/lowconc to t
     assert.ok(!lowconcFiles.includes(rel), `${rel} must no longer be in the lowconc lane (moved to default group)`);
     assert.ok(!serialFiles.includes(rel), `${rel} must no longer be in the serial lane (moved to default group)`);
   }
-  // The 2 remaining real-install files STAY in lowconc (NOT in the 27-file move set).
+  // The 1 remaining real-install file STAYS in lowconc (NOT in the 27-file move set).
+  // runtime-landing.test.mjs was RETIRED (AC168, commit 40743cf74 → archive/2026-09-08-quay-init-
+  // copy-machinery-retirement/), so it is no longer in any lane.
   const stillLowconc = [
     "plugin/test/quay-init-tmux-detection.test.mjs",
-    "plugin/test/runtime-landing.test.mjs",
   ];
   for (const rel of stillLowconc) {
     assert.ok(lowconcFiles.includes(rel), `${rel} must still be in the lowconc lane (AC3)`);
@@ -445,8 +453,10 @@ test("AC3 — the real repo: 27 evidenced files moved out of serial/lowconc to t
     assert.ok(!serialFiles.includes(rel), `${rel} must no longer be in the serial lane (moved to default group)`);
     assert.ok(!lowconcFiles.includes(rel), `${rel} must not be in the lowconc lane (moved to default group)`);
   }
-  // checker-cost stays serial (child-spawn broke at lowconc c3) — NOT in the 27-file move set.
-  assert.ok(serialFiles.includes("plugin/test/checker-cost.test.mjs"), "checker-cost stays serial (child-spawn broke at lowconc c3)");
+  // Negative control: the serial lane is NOT empty (the 27-file move did not drain it). checker-cost
+  // (the original "stays serial" example, child-spawn broke at lowconc c3) was RETIRED to
+  // archive/2026-09-07-zero-call-scripts/; quay-init.test.mjs (real-install) still stays serial.
+  assert.ok(serialFiles.includes("plugin/test/quay-init.test.mjs"), "quay-init.test.mjs stays serial (real-install — NOT in the 27-file move set)");
 });
 
 test("AC3/AC2 — the real repo: every serial family member declares a mechanism kind (no heavy left in the lane)", () => {

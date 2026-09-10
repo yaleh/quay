@@ -365,6 +365,24 @@ t("buildCommand — the task-file checker's scoped command inherits --no-block (
   assert.match(carry.commandLine, /--no-block/, `full registry line must carry --no-block: ${carry.commandLine}`);
 });
 
+// gap-kernel-sibling-check-stays-no-block-after-ac225-migration-zero — the kernel-sibling checker's
+// AC-225 migration reached zero (violations: [] / total: 0), so its run_static_checks registration
+// is fail-closed again: the `run_checker "kernel-sibling-resolution-check"` LINE must NOT carry
+// --no-block. Positional by construction — `commandLine` is the exact parsed run_checker line, so a
+// --no-block spelled only inside a COMMENT (or any other checker's line) does NOT trip this. The
+// mirror direction of the task-contract/task-ac-carryover test above (those still have violations ⇒
+// still REPORT-ONLY). A negative control that "re-adds --no-block ⇒ this test fails" is the AC3 反跑.
+t("kernel-sibling-resolution-check is fail-closed (its run_checker line carries no --no-block)", async () => {
+  const mod = await importMod();
+  const registry = mod.parseStaticCheckRegistry(fs.readFileSync(TEST_SH, "utf8"));
+  const sibling = registry.find((c) => c.name === "kernel-sibling-resolution-check");
+  assert.ok(sibling, "kernel-sibling-resolution-check must be in the registry");
+  assert.ok(
+    !sibling.commandLine.includes("--no-block"),
+    `kernel-sibling-resolution-check must be fail-closed (no --no-block): ${sibling.commandLine}`,
+  );
+});
+
 // ── AC2: the full set is unchanged (registry coverage vs checker-mutation-check's own parser) ───────
 
 t("AC2 — every run_static_checks checker checker-mutation-check sees is in the tier registry", async () => {
@@ -399,6 +417,8 @@ t("AC2 — every run_static_checks checker checker-mutation-check sees is in the
     "fan-in-materialize-check",
     "direct-to-develop-bypass-check",
     "suite-duration-exceed-check",
+    "instrument-decay-check",
+    "release-freshness-check",
   ]);
   // checker-mutation-check.sh's own manifest parser (list_run_static_checks_checkers) extracts the
   // same invocation set from run_static_checks + run_operational_checks + run_doc_checks — the tier

@@ -76,6 +76,29 @@ function resolveDocsDir() {
   return path.resolve(process.cwd(), "docs-managed");
 }
 
+function resolveGoalDir() {
+  // Goals (SPEC-goal-mechanism-2026-09-06.md §5.2) are now provider-backed: they
+  // live in a directory that SHARES a common parent with tasks/ (a repo-root
+  // sibling by default, like adr/). Env override QUAY_NATIVE_GOAL_DIR, else
+  // repo-root ./goals.
+  const envDir = process.env.QUAY_NATIVE_GOAL_DIR;
+  if (envDir) return path.resolve(envDir);
+  const repoRoot = findRepoRoot(process.cwd());
+  if (repoRoot) return path.resolve(repoRoot, "goals");
+  return path.resolve(process.cwd(), "goals");
+}
+
+function resolveMetaDir() {
+  // Meta records (gap-meta-records-should-be-a-first-class-store-kind-not-a-task-label) are
+  // provider-backed like goals: a repo-root sibling of tasks/ (default ./meta). Env override
+  // QUAY_NATIVE_META_DIR, else repo-root ./meta.
+  const envDir = process.env.QUAY_NATIVE_META_DIR;
+  if (envDir) return path.resolve(envDir);
+  const repoRoot = findRepoRoot(process.cwd());
+  if (repoRoot) return path.resolve(repoRoot, "meta");
+  return path.resolve(process.cwd(), "meta");
+}
+
 /**
  * DIR-047: load the per-provider `default_task_status` from .quay/config.yml.
  * Walks upward from CWD using the same root-finding logic as resolveTasksDir().
@@ -135,7 +158,7 @@ async function main() {
     // .quay/config.yml, then pass it to the MCP server so task_write (status
     // omitted on a new task) uses the same configured default as the CLI.
     const defaultStatus = loadDefaultStatus();
-    await startMcpServer({ tasksDir: resolveTasksDir(), adrDir: resolveAdrDir(), defaultStatus });
+    await startMcpServer({ tasksDir: resolveTasksDir(), adrDir: resolveAdrDir(), goalDir: resolveGoalDir(), metaDir: resolveMetaDir(), defaultStatus });
     return;
   }
 
@@ -394,6 +417,10 @@ Description:
       // identically). Omitted entirely => patch.expectedStatus stays
       // undefined => store.write()'s existing, unaffected behavior.
       if (flags["expect-status"] !== undefined) patch.expectedStatus = flags["expect-status"];
+      // gap-cli-write-surface-lacks-toplevel-fields: top-level `depends_on`/`goal_ac` (the same
+      // first-class fields the native MCP task_write zod schema accepts) get their CLI surface.
+      if (flags["depends-on"] !== undefined) patch.depends_on = String(flags["depends-on"]).split(",").filter(Boolean);
+      if (flags["goal-ac"] !== undefined) patch.goal_ac = flags["goal-ac"];
       if (flags["append-notes"] !== undefined) {
         const t = store.appendNote(id, flags["append-notes"]);
         if (flags.json) printJson(t);
@@ -435,6 +462,9 @@ Description:
         parent: flags.parent,
         body: flags.body ?? "",
       };
+      // gap-cli-write-surface-lacks-toplevel-fields: same top-level fields as `task edit`.
+      if (flags["depends-on"] !== undefined) patch.depends_on = String(flags["depends-on"]).split(",").filter(Boolean);
+      if (flags["goal-ac"] !== undefined) patch.goal_ac = flags["goal-ac"];
       const t = store.write(id, patch);
       if (flags.json) printJson(t);
       else console.log(`created ${id}`);

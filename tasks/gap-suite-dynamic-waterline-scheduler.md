@@ -74,3 +74,9 @@ extra:
 - 聚焦修 `--list-files` 分组分类一致性——runner-grouping-list-groups AC6（`--group product,engine ∪ --group lowconc = no-args` 字节一致）被破坏，违反本任务 AC3 pass/fail-neutral（只改调度、不改测试集/断言）。
 - 定位对照：`QUAY_SUITE_SCHEDULER=0` 回退 legacy 跑 AC6——legacy 过 / scheduler 红 ⇒ bug 在 suite-scheduler.ts 的 `__GROUP__`/分类逻辑；legacy 也红 ⇒ 更早的 --list-files 改动，需另归因。
 - worktree 72c91ba31 可救（HEAD 已修过一次「__GROUP__ capped 字段误写为 st.failed」）；AC 0/5 待勾，修完勾 AC。
+
+## Correction（2026-09-04，判据依据被 gap-suite-scheduler-reliability-cap-not-speed 推翻）
+
+本任务的调度语义「main 用剩余容量」已被 `gap-suite-scheduler-reliability-cap-not-speed`（2026-09-04 立案）重定义为可靠性总量约束：**三组（serial+lowconc+main）总并发 ≤ 当前活跃组的最小预算**（人 2026-09-04 裁定「min 锁死式总量约束才是水位线机制期望的行为，速度从来不是它的 AC」）。
+
+当初选「main 用剩余容量」而非 min 锁死的**唯一理由**是一次性离线模拟的 706s vs 515s 速度对比；**验证该对比在真实生产全量轮是否成立的 AC4/AC5 从未被验证**——两条复选框为空且标注「（待外部）」，与 DoD 文字「AC1-AC5 全勾」互相矛盾（status/DoD/AC 三者不一致）。该速度判据依据自此被推翻，不得再作为设计依据引用。

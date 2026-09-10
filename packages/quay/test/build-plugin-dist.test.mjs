@@ -36,6 +36,11 @@ import {
   rewriteMarkdown,
   rewriteShell,
   rewriteInvokers,
+  deriveEntries,
+  scanCoreReferences,
+  scanPluginSelfReferences,
+  closureMissing,
+  bundleEntries,
 } from "../scripts/build-plugin-dist.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -152,4 +157,182 @@ test("AC5 — a BARE .ts token (no plugin/scripts/ prefix) is deliberately NOT r
   const out = rewriteMarkdown(prose);
   assert.ok(out.includes("transcript-delivery-check.ts"),
     "a bare-name .ts token without a plugin/scripts/ prefix must stay untouched");
+});
+
+// ── gap-plugin-dist-entry-derivation-blind-to-core-and-table-refs ────────────────────────────────
+// The entry set was previously hand-maintained for Core references (CORE_REFERENCED, 2 items) and
+// blind to table/list rows (`dist/<name>.js`) — so driver-runtime.ts and suite-execution-form-counter.ts
+// never shipped, and `quay driver` died in any installed project. These tests pin the mechanical
+// derivation (Core scan + dist reverse-lookup) and the fail-able reference-closure gate.
+
+const PLUGIN_ROOT = path.resolve(__dirname, "..", "..", "..", "plugin");
+
+test("AC1/AC6 — deriveEntries DERIVES driver-runtime.ts from Core refs (no hand-maintained CORE_REFERENCED)", () => {
+  const { scripts } = deriveEntries(PLUGIN_ROOT);
+  assert.ok(scripts.includes("scripts/driver-runtime.ts"),
+    "Core-referenced driver-runtime.ts (cli/driver.ts + plugin-root.ts KERNEL_RELS) must be a derived entry");
+  // The former CORE_REFERENCED members must STILL be derived (mechanical, not dropped).
+  assert.ok(scripts.includes("scripts/runtime-usage-inventory.ts"), "former CORE_REFERENCED member still derived");
+  assert.ok(scripts.includes("scripts/task-status-drift-check.ts"), "former CORE_REFERENCED member still derived");
+});
+
+test("AC2 — deriveEntries DERIVES suite-execution-form-counter.ts from deliver-verify-usage.sh's dist/*.js table row", () => {
+  const { scripts } = deriveEntries(PLUGIN_ROOT);
+  assert.ok(scripts.includes("scripts/suite-execution-form-counter.ts"),
+    "a table-row `dist/<name>.js` reference must reverse-lookup the same-named .ts into the entry set");
+});
+
+test("AC6 — scanCoreReferences derives driver-runtime.ts from Core source (the list is a scan expression, not a literal)", () => {
+  const core = scanCoreReferences();
+  assert.ok(core.has("driver-runtime.ts"), "Core scan must find the driver-runtime.ts reference");
+  assert.ok(core.has("runtime-usage-inventory.ts"), "Core scan must find runtime-usage-inventory.ts");
+  assert.ok(core.has("task-status-drift-check.ts"), "Core scan must find task-status-drift-check.ts");
+});
+
+test("AC5 — the closure gate takes false (removing an entry makes closureMissing flag it)", () => {
+  // Positive control: a referenced bundle present in the tarball → closure holds.
+  assert.deepEqual(
+    closureMissing(["suite-execution-form-counter"], ["package/plugin/scripts/dist/suite-execution-form-counter.js"]),
+    [],
+    "a referenced bundle present in the tarball must satisfy the closure"
+  );
+  // Negative control: the SAME reference with the bundle absent → flagged (the gate is not恒绿).
+  assert.deepEqual(
+    closureMissing(["suite-execution-form-counter"], ["package/plugin/scripts/dist/other.js"]),
+    ["suite-execution-form-counter"],
+    "a referenced bundle absent from the tarball must be flagged missing"
+  );
+  // gate-scripts layout resolves too.
+  assert.deepEqual(
+    closureMissing(["gate-script-base"], ["package/plugin/gate-scripts/dist/gate-script-base.js"]),
+    [],
+    "a gate-scripts/dist/<name>.js entry must resolve under the gate-scripts layout"
+  );
+});
+
+test("AC5 — a Core-referenced bundle (driver-runtime) is part of the closure; removing it flags red", () => {
+  const required = [...scanCoreReferences()].map((t) => t.replace(/\.ts$/, ""));
+  assert.ok(required.includes("driver-runtime"), "the closure's required set derives driver-runtime from Core source");
+  const missing = closureMissing(required, ["package/plugin/scripts/dist/suite-execution-form-counter.js"]);
+  assert.ok(missing.includes("driver-runtime"),
+    "a tarball without dist/driver-runtime.js must be flagged (the gate sees Core's reference)");
+});
+
+// ── gap-driver-kinds-table-literal-not-in-dist-entry ────────────────────────────────────────────
+// The entry set was blind to plugin SOURCE's own spawn references: driver-runtime.ts's DRIVER_KINDS
+// `driver: "X.ts"` data-table fields (the 6 driver kinds) and its `path.join(…,"plugin","scripts",
+// "X.ts")` spawn helpers (send-to-session.ts / ready-pool-check.ts). A third-party
+// `quay driver start --kind promotion` resolves `<root>/plugin/scripts/promotion-driver.ts`, which
+// never shipped → GOAL-009's `driver not found`. These tests pin the mechanical derivation
+// (scanPluginSelfReferences over driver-runtime.ts) and the criterion's fail-ability.
+
+const REQUIRED_DRIVER_KINDS = [
+  "promotion-driver.ts",
+  "worker-driver.ts",
+  "outer-driver.ts",
+  "quality-gate-driver.ts",
+  "meta-driver.ts",
+  "goal-driver.ts",
+];
+
+/** Replicate the AC-202 criterion's required-vs-shipped check (the goal file's inline script). */
+function ac202Missing(pluginRoot) {
+  const { scripts, gateScripts } = deriveEntries(pluginRoot);
+  const shipped = new Set([...scripts, ...gateScripts].map((p) => p.split("/").pop()));
+  const rt = fs.readFileSync(path.join(pluginRoot, "scripts", "driver-runtime.ts"), "utf8");
+  const required = new Set();
+  for (const x of rt.matchAll(/driver:\s*"([A-Za-z0-9_.-]+\.ts)"/g)) required.add(x[1]);
+  for (const x of rt.matchAll(/"plugin",\s*"scripts",\s*"([A-Za-z0-9_.-]+\.ts)"/g)) required.add(x[1]);
+  for (const x of rt.matchAll(/resolveKernelSibling\(\s*"([A-Za-z0-9_.-]+\.ts)"\s*\)/g)) required.add(x[1]);
+  return [...required].filter((n) => !shipped.has(n));
+}
+
+test("AC1/AC3 — deriveEntries DERIVES the 6 driver kinds + send-to-session.ts from driver-runtime.ts (plugin-self scan)", () => {
+  const { scripts } = deriveEntries(PLUGIN_ROOT);
+  for (const n of [...REQUIRED_DRIVER_KINDS, "send-to-session.ts"]) {
+    assert.ok(scripts.includes(`scripts/${n}`),
+      `${n} (a driver-runtime.ts spawn) must be a derived entry`);
+  }
+  assert.ok(scripts.includes("scripts/ready-pool-check.ts"),
+    "ready-pool-check.ts (defaultReadyPoolArgv) must be a derived entry");
+  // The AC-202 criterion's own check: shipped ⊇ required → no missing → exit 0.
+  assert.deepEqual(ac202Missing(PLUGIN_ROOT), [], "the AC-202 criterion must be satisfied (exit 0)");
+});
+
+test("AC5 — scanPluginSelfReferences derives by regex over driver-runtime.ts, not a literal list", () => {
+  const self = scanPluginSelfReferences(PLUGIN_ROOT);
+  assert.deepEqual([...self].sort(), [...REQUIRED_DRIVER_KINDS, "ready-pool-check.ts", "send-to-session.ts"].sort(),
+    "the scan must return exactly the two regex forms' matches from driver-runtime.ts");
+});
+
+test("AC4 — negative control: the 6 drivers + send-to-session are NOT derivable from the Core scan alone (the scan is load-bearing)", () => {
+  const core = scanCoreReferences();
+  for (const n of [...REQUIRED_DRIVER_KINDS, "send-to-session.ts"]) {
+    assert.ok(!core.has(n),
+      `${n} must NOT be derivable from the Core scan — disabling the plugin-self scan leaves it missing (criterion exit 1)`);
+  }
+});
+
+test("AC4 — negative control: the criterion takes false when a driver-runtime.ts reference names no shipped script", () => {
+  const dir = tmp();
+  try {
+    fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+    // A driver field naming a script that has no .ts file in the plugin root: the scan derives it
+    // but the `existing` intersection drops it, so shipped lacks it while the criterion's required
+    // set has it → missing → the criterion reports a defect rather than passing恒绿.
+    fs.writeFileSync(path.join(dir, "scripts", "driver-runtime.ts"),
+      'export const K = { promotion: { driver: "promotion-driver.ts" } };\n', "utf8");
+    assert.deepEqual(ac202Missing(dir), ["promotion-driver.ts"],
+      "a driver field whose target script does not exist must be reported missing (criterion exit 1)");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC4 — negative control: removing the driver field empties the derived set (the scan reads the source, not a hardcoded list)", () => {
+  const dir = tmp();
+  try {
+    fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "scripts", "driver-runtime.ts"),
+      'export const K = { promotion: { driver: "promotion-driver.ts" } };\n', "utf8");
+    assert.deepEqual([...scanPluginSelfReferences(dir)], ["promotion-driver.ts"],
+      "a driver field must be derived");
+    fs.writeFileSync(path.join(dir, "scripts", "driver-runtime.ts"), "export const K = {};\n", "utf8");
+    assert.deepEqual([...scanPluginSelfReferences(dir)], [],
+      "removing the driver field empties the derived set — the derivation is mechanical, not a literal");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── gap-ac205-session-delivery-channel-transcript-confirmed ──────────────────────────────────────
+// send-to-session.ts:53 does `await import("../../packages/quay/src/serve-send.ts")` — a dev-tree
+// relative path. The shipped dist/send-to-session.js must be SELF-CONTAINED (serve-send inlined,
+// no runtime dev-tree dynamic import), or the installed artifact (no packages/ source tree) fails at
+// runtime with "共享投递模块不可用" (send-to-session.ts:134). esbuild inlines the dynamic import; the
+// `packages/quay/src` tokens that remain in the bundle are esbuild's __esm/__commonJS lazy-init
+// registry keys + source-boundary comments (shared by 15 of 76 bundles — meta-driver.js,
+// worker-driver.js, …), NOT runtime imports. This test pins the ACTUAL failure mode: the bundle must
+// carry sendSessionFrames (inlined) and zero runtime `import("...packages/quay/src...")` /
+// `../../packages/quay/src` dev-tree relative path.
+test("AC1 (AC-205) — bundled send-to-session.js is self-contained (serve-send inlined, no runtime dev-tree import)", async () => {
+  const dir = tmp();
+  try {
+    fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+    // Copy send-to-session.ts to a NON-repo-root temp plugin root: its `../../packages/quay/src/`
+    // dynamic import can then only resolve via coreSrcAliasPlugin (the dev-tree path does not exist
+    // there — this is the STAGED-layout shape the alias plugin must cover).
+    fs.copyFileSync(path.join(PLUGIN_ROOT, "scripts", "send-to-session.ts"), path.join(dir, "scripts", "send-to-session.ts"));
+    const outfiles = await bundleEntries(dir, ["scripts/send-to-session.ts"]);
+    assert.equal(outfiles.length, 1, "send-to-session.ts must bundle");
+    const bundle = fs.readFileSync(outfiles[0], "utf8");
+    assert.ok(bundle.includes("sendSessionFrames"),
+      "serve-send.ts must be inlined (sendSessionFrames symbol present)");
+    assert.ok(!/import\("[^"]*packages\/quay\/src/.test(bundle),
+      "no runtime dynamic import of the dev-tree packages/quay/src may survive (self-contained)");
+    assert.ok(!/\.\.\/\.\.\/packages\/quay\/src/.test(bundle),
+      "the dev-tree relative path literal must not survive as a runtime reference");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

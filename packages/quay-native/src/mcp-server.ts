@@ -12,8 +12,20 @@ import { createStore } from "./store.ts";
 // (Core) — see bin/quay-native.js for the full rationale (ADR-013 / DIR-035-A).
 import { createAdrStore } from "quay/adr-store";
 import { readManifest } from "./manifest.ts";
+// Goal store is PROVIDER-OWNED (SPEC-goal-mechanism-2026-09-06.md §5.2): the goal
+// schema lives here in quay-native, NOT in Core (Core keeps only the view-model +
+// a delegation shim). The generic frontmatter plumbing it reuses is Core's
+// frontmatter-store-base, reached by relative path (see that file's header).
+import { createGoalStore, readGoalConfig } from "./goal-store.ts";
+// Meta store is PROVIDER-OWNED like the goal store (gap-meta-records-should-be-a-first-class-store-
+// kind-not-a-task-label): the META record schema lives in Core, re-exported here, and the provider
+// exposes meta_list/meta_get/meta_write over the ABI.
+import { createMetaStore } from "./meta-store.ts";
+// `goal_gate` runs a goal record's `criterion` through Core's acceptance runner —
+// the SAME single runner every Core gate uses (no duplicated timeout/kill logic).
+import { runAcceptance } from "../../quay/src/gate/acceptance-runner.ts";
 
-export async function startMcpServer({ tasksDir, adrDir, defaultStatus }: { tasksDir: string; adrDir?: string; defaultStatus?: string }): Promise<void> {
+export async function startMcpServer({ tasksDir, adrDir, goalDir, metaDir, defaultStatus }: { tasksDir: string; adrDir?: string; goalDir?: string; metaDir?: string; defaultStatus?: string }): Promise<void> {
   // DIR-047: pass the per-provider default_task_status through to the store
   // (already validated by the caller — see bin/quay-native.js loadDefaultStatus()).
   // ADR-004 single-source: the store is the one place the creation default is
@@ -23,6 +35,19 @@ export async function startMcpServer({ tasksDir, adrDir, defaultStatus }: { task
   // tasks/ — default to `<parent-of-tasksDir>/adr` when adrDir is not supplied.
   const resolvedAdrDir = adrDir ?? path.join(path.dirname(tasksDir), "adr");
   const adrStore = createAdrStore(resolvedAdrDir);
+  // Goals are a SEPARATE kind (goal-store.ts), stored in a sibling directory of
+  // tasks/ — default to `<parent-of-tasksDir>/goals` when goalDir is not supplied
+  // (the same repo-root-sibling resolution shape as adr/). cap/stale (I1′/I3 policy
+  // values) are read from `.quay/config.yml`'s `goals:` section at the workspace root
+  // (goalDir's parent), honoring the configurable-value discipline of SPEC §4.2.
+  const resolvedGoalDir = goalDir ?? path.join(path.dirname(tasksDir), "goals");
+  const goalCfg = readGoalConfig(path.dirname(resolvedGoalDir));
+  const goalStore = createGoalStore(resolvedGoalDir, { cap: goalCfg.cap, staleMs: goalCfg.staleMs });
+  // Meta records are a SEPARATE kind (meta-store.ts), stored in a sibling directory of tasks/ —
+  // default to `<parent-of-tasksDir>/meta` when metaDir is not supplied (same repo-root-sibling
+  // resolution shape as adr/ and goals/).
+  const resolvedMetaDir = metaDir ?? path.join(path.dirname(tasksDir), "meta");
+  const metaStore = createMetaStore(resolvedMetaDir);
 
   const server = new McpServer({
     name: "quay-native",
@@ -137,6 +162,11 @@ export async function startMcpServer({ tasksDir, adrDir, defaultStatus }: { task
         //   canonical (new writes):   depends_on: ["dep1", "dep2"]
         //   legacy (still readable):  extra: { depends_on: [dep1, dep2], schema: "v1" }
         depends_on: z.array(z.string()).optional(),
+        // gap-goal-ac-task-linkage-top-level-field: `goal_ac` is the owning goal AC id (task→AC
+        // linkage, G7). Like `depends_on`, it is stored TOP-LEVEL (a single scalar, not an array —
+        // a task declares at most one owning AC), and read back by readGoalAc()/parseTask() through
+        // the single frontmatter parser. It is optional (gap-* defect tasks carry none).
+        goal_ac: z.string().optional(),
         body: z.string().optional(),
         // QN-007: `extra` (design §7.1's "escape hatch for backend-specific
         // fields") was missing from this schema entirely — the MCP SDK's
@@ -176,6 +206,30 @@ export async function startMcpServer({ tasksDir, adrDir, defaultStatus }: { task
         }
         throw err;
       }
+    }
+  );
+
+  // task_delete — data.write (gap-abi-missing-commit-delete-dependson-primitives): the ABI verb the
+  // native Provider was missing. Unlinks the task file + branch-aware commit (same primitive as
+  // task_write). Fail-closed: a not-found id returns isError:true, never a silent no-op.
+  server.registerTool(
+    "task_delete",
+    {
+      description: "Delete one task by id from the native Provider's task store (unlink + branch-aware commit). Fails closed (isError) on a non-existent id.",
+      inputSchema: { id: z.string() },
+    },
+    async ({ id }) => {
+      const result = store.delete(id);
+      if (!result.ok) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: result.reason === "missing" ? `no such task: ${id}` : result.reason }],
+        };
+      }
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        structuredContent: result,
+      };
     }
   );
 
@@ -263,10 +317,187 @@ export async function startMcpServer({ tasksDir, adrDir, defaultStatus }: { task
     }
   );
 
+  // ── Goal tools (separate object kind — provider-backed storage, SPEC §5.2) ──
+  // goal_list — data.read
+  server.registerTool(
+    "goal_list",
+    {
+      description: "List goal records (GOAL-NNN + AC-NNN) in the native store, optionally filtered by status/kind/goal.",
+      inputSchema: { status: z.string().optional(), kind: z.string().optional(), goal: z.string().optional() },
+    },
+    async ({ status, kind, goal }) => {
+      const goals = goalStore.list({ status, kind, goal });
+      return {
+        content: [{ type: "text", text: JSON.stringify(goals, null, 2) }],
+        structuredContent: { goals },
+      };
+    }
+  );
+
+  // goal_get — data.read
+  server.registerTool(
+    "goal_get",
+    {
+      description: "Get one goal record by id (GOAL-NNN or AC-NNN) from the native store.",
+      inputSchema: { id: z.string() },
+    },
+    async ({ id }) => {
+      let goal = null;
+      try {
+        goal = goalStore.get(id);
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err.message }] };
+      }
+      if (!goal) return { isError: true, content: [{ type: "text", text: `no such goal: ${id}` }] };
+      return {
+        content: [{ type: "text", text: JSON.stringify(goal, null, 2) }],
+        structuredContent: { goal },
+      };
+    }
+  );
+
+  // goal_write — data.write. I1′ (hard cap) is enforced by the provider's write
+  // path (SPEC §5.2: the invariant lives in the provider so a future provider
+  // cannot bypass it). `origin` is required; AC records must declare `goal:`.
+  server.registerTool(
+    "goal_write",
+    {
+      description: "Write/patch one goal record (GOAL-NNN or AC-NNN) in the native store. status ∈ draft|active|achieved|superseded|retired. Completeness is kind-split: a GOAL record requires a non-empty `body` (≥40 non-whitespace chars — background / scope & non-goals / exit conditions; `origin` is only a provenance citation, never the body) plus `origin`; an AC record requires `criterion` + `expect` + `goal: GOAL-NNN` (its content lives in those fields, `body` optional) plus `origin`. Empty `origin` writes nothing. Activating past the active-GOAL cap (default 3) is rejected unless the same call disposes an active goal.",
+      inputSchema: {
+        id: z.string(),
+        title: z.string().optional(),
+        status: z.string().optional(),
+        goal: z.string().optional(),
+        criterion: z.string().optional(),
+        expect: z.string().optional(),
+        origin: z.string().optional(),
+        evidence: z.object({ at: z.string().optional(), verdict: z.string().optional(), reading: z.string().optional() }).optional(),
+        supersedes: z.array(z.string()).optional(),
+        superseded_by: z.array(z.string()).optional(),
+        body: z.string().optional(),
+        disposeOld: z.object({ id: z.string(), to: z.enum(["achieved", "superseded"]) }).optional(),
+      },
+    },
+    async ({ id, superseded_by, disposeOld, ...rest }) => {
+      try {
+        const goal = goalStore.write(id, { ...rest, supersededBy: superseded_by, disposeOld: disposeOld as { id: string; to: "achieved" | "superseded" } | undefined });
+        return {
+          content: [{ type: "text", text: JSON.stringify(goal, null, 2) }],
+          structuredContent: { goal },
+        };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err.message }] };
+      }
+    }
+  );
+
+  // goal_gate — run the record's `criterion` via Core's acceptance runner and
+  // return the verdict. Empty criterion fails closed (never a silent PASS).
+  server.registerTool(
+    "goal_gate",
+    {
+      description: "Run one goal record's `criterion` via the acceptance runner and return the verdict (empty criterion fails closed).",
+      inputSchema: { id: z.string() },
+    },
+    async ({ id }) => {
+      let goal = null;
+      try {
+        goal = goalStore.get(id);
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err.message }] };
+      }
+      if (!goal) return { isError: true, content: [{ type: "text", text: `no such goal: ${id}` }] };
+      const criterion = (goal as unknown as Record<string, unknown>).criterion;
+      let verdict: string;
+      let reason: string;
+      if (typeof criterion !== "string" || criterion.trim() === "") {
+        verdict = "fail";
+        reason = `${id} has no criterion defined (fail-closed — an unenforceable AC must never silently pass)`;
+      } else {
+        const result = runAcceptance({ command: criterion, cwd: path.dirname(resolvedGoalDir), timeoutMs: 60000 });
+        verdict = result.ok ? "pass" : "fail";
+        reason = result.reason;
+      }
+      const out = { id, verdict, reason, timestamp: new Date().toISOString() };
+      return {
+        content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
+        structuredContent: out,
+      };
+    }
+  );
+
+  // ── Meta tools (separate object kind — message SENT TO the meta-driver, answered on the same
+  // record; proposed→answered lifecycle, never "done") ──
+  // meta_list — data.read
+  server.registerTool(
+    "meta_list",
+    {
+      description: "List META records (META-NNN) in the native store, optionally filtered by status. META records are a separate kind from tasks (message→meta-driver lifecycle: proposed→answered).",
+      inputSchema: { status: z.string().optional() },
+    },
+    async ({ status }) => {
+      const metas = metaStore.list({ status });
+      return {
+        content: [{ type: "text", text: JSON.stringify(metas, null, 2) }],
+        structuredContent: { metas },
+      };
+    }
+  );
+
+  // meta_get — data.read
+  server.registerTool(
+    "meta_get",
+    {
+      description: "Get one META record by id (META-NNN) from the native store.",
+      inputSchema: { id: z.string() },
+    },
+    async ({ id }) => {
+      let meta = null;
+      try {
+        meta = metaStore.get(id);
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err.message }] };
+      }
+      if (!meta) return { isError: true, content: [{ type: "text", text: `no such META: ${id}` }] };
+      return {
+        content: [{ type: "text", text: JSON.stringify(meta, null, 2) }],
+        structuredContent: { meta },
+      };
+    }
+  );
+
+  // meta_write — data.write. status ∈ proposed|answered (never "done"); `handler` defaults to
+  // "meta-driver" (the only kind semi-processed by a driver's semantics).
+  server.registerTool(
+    "meta_write",
+    {
+      description: "Write/patch one META record (META-NNN) in the native store. status ∈ proposed|answered; `handler` defaults to meta-driver; `reply` embeds the meta-driver's answer on the same record.",
+      inputSchema: {
+        id: z.string(),
+        title: z.string().optional(),
+        status: z.string().optional(),
+        handler: z.string().optional(),
+        reply: z.string().optional(),
+        body: z.string().optional(),
+      },
+    },
+    async ({ id, ...rest }) => {
+      try {
+        const meta = metaStore.write(id, rest);
+        return {
+          content: [{ type: "text", text: JSON.stringify(meta, null, 2) }],
+          structuredContent: { meta },
+        };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err.message }] };
+      }
+    }
+  );
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
   // Server now runs until stdin closes; log to stderr (stdout is the MCP channel).
-  console.error(`quay-native mcp: serving tasks from ${tasksDir}, ADRs from ${resolvedAdrDir}`);
+  console.error(`quay-native mcp: serving tasks from ${tasksDir}, ADRs from ${resolvedAdrDir}, meta from ${resolvedMetaDir}`);
 
   // gap-suite-speedup (task gap-suite-speedup): when the client disconnects
   // (stdin EOF), close the transport so the process exits promptly. The SDK

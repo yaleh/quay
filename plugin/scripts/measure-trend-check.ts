@@ -64,6 +64,10 @@ export interface PerFileRecord {
   endedAtMs?: number;
   /** Derived start = endedAtMs − durationMs (reporter records END; start is back-computed). */
   startedAtMs?: number;
+  /** gap-perfile-cpu-cost-collection — the file's OWN process.cpuUsage() in ms (route a 子进程自报).
+   *  Present only when the reporter's `__PERFILE__` line carried `cpu_ms=` (a report was actually
+   *  written); ABSENT on legacy lines (field omitted ≠ 0 — "not measured" vs "measured 0", 硬规则 3b). */
+  cpuMs?: number;
 }
 
 export interface HistoryLine extends PerFileRecord {
@@ -135,7 +139,7 @@ export function parsePerFileLines(text: string): PerFileRecord[] {
   const mk = lastSuiteStartOffset(text);
   const body = mk === -1 ? text : text.slice(mk);
   for (const line of body.split("\n")) {
-    const m = line.match(/^__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false)(?: end_ms=([0-9]+))?$/);
+    const m = line.match(/^__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false)(?: end_ms=([0-9]+))?(?: cpu_ms=([0-9.]+))?$/);
     if (m) {
       const dur = parseFloat(m[1]);
       if (Number.isFinite(dur) && dur > 0) {
@@ -145,6 +149,14 @@ export function parsePerFileLines(text: string): PerFileRecord[] {
           if (Number.isFinite(endedAtMs)) {
             rec.endedAtMs = endedAtMs;
             rec.startedAtMs = endedAtMs - dur;
+          }
+        }
+        // gap-perfile-cpu-cost-collection — optional trailing cpu_ms (route a 子进程自报). Present only
+        // when the line carried it; a legacy line leaves the field ABSENT (never a fabricated 0).
+        if (m[5] != null) {
+          const cpuMs = Number(m[5]);
+          if (Number.isFinite(cpuMs) && cpuMs >= 0) {
+            rec.cpuMs = cpuMs;
           }
         }
         out.push(rec);

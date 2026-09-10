@@ -92,6 +92,10 @@
 #                 different file each round: drift-report/governance, loop-core/serial,
 #                 install-config/lowconc): the whole family is now consolidated into the
 #                 concurrency-1 serial phase (gap-install-family-tests-rotate-flakes-under-full-suite).
+#                 The conformance-target fixture (plugin/test/conformance-target-fixture.test.mjs,
+#                 gap-ac228-conformance-target-fixture-real-quay-init) also joins serial: it spawns a
+#                 real quay-init --loop tree to build the GOAL-012 exit-③ consistency target, same
+#                 install-family load profile as quay-init.test.mjs.
 #                 (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests).
 #   - lowconc     hermetic-but-load-sensitive B-class session-observation family (each private
 #                 socket / wall-clock wait) — its own phase at host-derived concurrency (= serial).
@@ -203,7 +207,9 @@ main_root="$(node --no-warnings --experimental-strip-types "${repo_root}/plugin/
 case " $* " in
   *"--list-files"*|*"--list-groups"*) ;;
   *)
-    if [ -f "${repo_root}/plugin/scripts/refresh-worktree-quay.sh" ]; then
+    if [ "${QUAY_TEST_SKIP_QUAY_REFRESH:-0}" = "1" ]; then
+      echo "scripts/test.sh: QUAY_TEST_SKIP_QUAY_REFRESH=1 — skipping worktree .quay refresh (nested selection/smoke run; outer suite already refreshed)" >&2
+    elif [ -f "${repo_root}/plugin/scripts/refresh-worktree-quay.sh" ]; then
       bash "${repo_root}/plugin/scripts/refresh-worktree-quay.sh" "${repo_root}" \
         || echo "scripts/test.sh: WARNING — refresh-worktree-quay.sh failed (exit $?); the suite may be environmentally red in this worktree" >&2
     fi
@@ -532,76 +538,6 @@ LOWCONC_CONCURRENCY="${QUAY_LOWCONC_CONCURRENCY:-$(lowconc_concurrency_default)}
 # the sequential serial→lowconc→main baseline (ONE-KEY ROLLBACK).
 PHASE_OVERLAP="${QUAY_PHASE_OVERLAP:-1}"
 
-# ── main-tail-overlap knob (gap-suite-main-overlaps-load-sensitive-tail-experiment) ────────────────
-# LEGACY FALLBACK (QUAY_SUITE_SCHEDULER=0) ONLY: the A watcher below only launches on the legacy
-# phased path (the unified scheduler absorbs the stall-polling via its structural waterline). RETIRED,
-# kept only for the ONE-KEY ROLLBACK fallback.
-# QUERY_MAIN_TAIL_OVERLAP=<lanes> (default 0 = current behavior). When >0, the MAIN phase starts
-# EARLY — before the serial+lowconc window fully closes — at concurrency <lanes>, overlapping with the
-# window's latency-bound tail (the ~130s near-idle tail the director's load curve measured: 23/48
-# samples stall<3%; healthy idle tails dip to ~4-6% — round 773/795/798 measured 4.3-5.8% — hence the
-# default $MAIN_TAIL_STALL_PCT=6 below). The remaining wall-clock-wait / real-install tests hold their
-# processes at ~zero CPU. The start trigger is LOAD-DRIVEN (⛔ not a fixed delay): a watcher polls
-# cpu_stall
-# (/proc/pressure/cpu `some avg10`) and fires once it has stayed ≤ $MAIN_TAIL_STALL_PCT for
-# $MAIN_TAIL_HOLD_S consecutive seconds — i.e. the window's CPU work has drained — then launches main
-# at the knob's lanes. Total CPU load during the overlap = main lanes + the near-zero latency-bound
-# tail, so the experiment's lane sweep (0/4/8/12) is the independent variable; the observed load is
-# READ from /proc/loadavg at fire time (host-derived, never a literal — hard rule 4 推论二), and the
-# fire is announced on the stream (`main-tail-overlap: lanes=N load=X`) so full-suite-runner.ts records
-# main_tail_overlap_lanes + main_tail_overlap_load. ONE-KEY ROLLBACK: unset / 0 = the sequential
-# baseline (main runs at window close, unchanged). Only the overlap path (PHASE_OVERLAP=1, the AC2
-# control) launches the watcher; the sequential path is unchanged (the experiment fixes overlap=1).
-MAIN_TAIL_OVERLAP="${QUERY_MAIN_TAIL_OVERLAP:-0}"
-if ! awk -v v="${MAIN_TAIL_OVERLAP}" 'BEGIN { exit !(v ~ /^[0-9]+$/) }'; then
-  MAIN_TAIL_OVERLAP=0
-fi
-MAIN_TAIL_STALL_PCT="${QUAY_MAIN_TAIL_STALL_PCT:-6}"
-MAIN_TAIL_HOLD_S="${QUAY_MAIN_TAIL_HOLD_S:-5}"
-MAIN_TAIL_POLL_S="${QUAY_MAIN_TAIL_POLL_S:-1}"
-MAIN_TAIL_WAIT_MAX_S="${QUAY_MAIN_TAIL_WAIT_MAX_S:-300}"
-
-# main_tail_overlap_wait — block until the machine's CPU work has drained (cpu_stall ≤
-# $MAIN_TAIL_STALL_PCT for $MAIN_TAIL_HOLD_S consecutive polls), or until every TRACKED phase process
-# exits (no tail left to overlap), or until $MAIN_TAIL_WAIT_MAX_S elapses (bounded: the watcher must
-# never outlive the window). Returns 0 = fired (launch main early), 1 = fall through (main runs
-# normally at window close). Reads the caller's $serial_pid / $lowconc_pid to detect window close —
-# the full path sets BOTH (serial+lowconc run in parallel); the bucket-subset path sets only
-# lowconc_pid (serial already finished sequentially before it — legacy phased path only). Hermetic test seams:
-# QUAY_MAIN_TAIL_STALL_FILE / QUAY_MAIN_TAIL_LOADAVG_FILE override the /proc paths (the resource-gate
-# seam family).
-main_tail_overlap_wait() {
-  local stall_file="${QUAY_MAIN_TAIL_STALL_FILE:-/proc/pressure/cpu}"
-  local -i held=0 elapsed=0 max_s poll_s hold_s
-  max_s="${MAIN_TAIL_WAIT_MAX_S}"
-  poll_s="${MAIN_TAIL_POLL_S}"
-  hold_s="${MAIN_TAIL_HOLD_S}"
-  while [ "$elapsed" -lt "$max_s" ]; do
-    # Window-closed fallback: every TRACKED phase process (serial and/or lowconc) has exited ⇒ no tail
-    # left to overlap ⇒ fall through. A pid is tracked iff non-empty; the window closes iff ≥1 is
-    # tracked AND every tracked pid is dead. The full path tracks both (they run in parallel); the
-    # bucket-subset path tracks only lowconc (serial_pid is empty = "not tracked" there).
-    if { [ -n "${serial_pid:-}" ] || [ -n "${lowconc_pid:-}" ]; } \
-       && { [ -z "${serial_pid:-}" ] || ! kill -0 "${serial_pid}" 2>/dev/null; } \
-       && { [ -z "${lowconc_pid:-}" ] || ! kill -0 "${lowconc_pid}" 2>/dev/null; }; then
-      return 1
-    fi
-    local stall=""
-    stall="$(awk '{ for (i=1;i<=NF;i++) if ($i ~ /^avg10=/) { sub(/^avg10=/,"",$i); print $i; exit } }' "$stall_file" 2>/dev/null)" || stall=""
-    if [ -n "$stall" ] && awk -v s="$stall" -v t="$MAIN_TAIL_STALL_PCT" 'BEGIN{ exit !(s+0 <= t+0) }'; then
-      held=$((held + 1))
-    else
-      held=0
-    fi
-    if [ "$held" -ge "$hold_s" ]; then
-      return 0
-    fi
-    sleep "$poll_s"
-    elapsed=$((elapsed + poll_s))
-  done
-  return 1
-}
-
 # has_explicit_concurrency <args...> — whether the args already carry a --test-concurrency flag (the
 # `=` spelling, or the bare space-form marker). An explicit flag is the SINGLE concurrency source, so
 # the derived default MUST NOT be prepended (gap-full-suite-runner-concurrency-default-and-gate AC2:
@@ -869,13 +805,20 @@ build_deduped_files() {
     exit "$rc"
   fi
   _RG_META="${meta}"
+  # archive/** exclusion (§12c, SPEC-plugin-lifecycle-single-bundle-2026-09-02): an archived test
+  # (archive/<date>/plugin/test/*.test.mjs) must never re-enter the run set. The canonical glob
+  # patterns are non-recursive and cannot reach archive/ at the repo root, but the filter keeps the
+  # run set correct if a future glob grows a recursive `**` segment.
+  if [ -n "${_RG_META}" ]; then
+    _RG_META="$(printf '%s\n' "${_RG_META}" | awk -F'\t' '$1 !~ "(^|/)archive/"')"
+  fi
   _RG_META_READY=1
   _RG_FILES=()
   local f
   while IFS=$'\t' read -r f _; do
     [ -n "${f}" ] || continue
     _RG_FILES+=("$f")
-  done <<< "${meta}"
+  done <<< "${_RG_META}"
   printf '%s\n' "${_RG_META}"
 }
 
@@ -1100,11 +1043,6 @@ run_selected() {
     # waste). Phases are independent and serially sequenced (no shared state between phase runs),
     # so the reorder changes wall-clock latency only, never correctness.
     local code=0
-    # main-tail-overlap coordination (gap-suite-main-overlaps-load-sensitive-tail-experiment): the
-    # overlap branch's watcher may launch main early in the background. main_early_pid = the watcher
-    # process; main_early_code_file carries its verdict ("pending" → "fallthrough" → <exit-code>).
-    # Empty on the sequential / knob-0 path (main runs synchronously, unchanged).
-    local main_early_pid="" main_early_code_file=""
     # SERIAL GROUP phase (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests):
     # ⚠️ LEGACY FALLBACK (QUAY_SUITE_SCHEDULER=0) ONLY — under the unified scheduler (the default,
     # gap-suite-dynamic-waterline-scheduler) serial∥lowconc∥main run CONCURRENTLY via the group-budget
@@ -1151,9 +1089,9 @@ run_selected() {
     lpt_order_files serial_files
     lpt_order_files lowconc_files
     # ── unified scheduler (gap-suite-dynamic-waterline-scheduler) ─────────────────────────────────
-    # Replaces the phased execution BELOW (static→serial→lowconc→main + PHASE_OVERLAP + the A
-    # main-tail-overlap watcher) with ONE event-driven loop. Since gap-suite-classification-lpt-
-    # scheduler-ts-ization the scheduler receives the RAW deduped file list (no pre-classification, no
+    # Replaces the phased execution BELOW (static→serial→lowconc→main + PHASE_OVERLAP) with ONE
+    # event-driven loop. Since gap-suite-classification-lpt-scheduler-ts-ization the scheduler
+    # receives the RAW deduped file list (no pre-classification, no
     # pre-LPT): it classifies each file (product+engine → main, serial → serial, lowconc → lowconc),
     # LPT-orders each bucket, and schedules via the waterline — serial ≤ $SERIAL_CONCURRENCY and
     # lowconc ≤ $LOWCONC_CONCURRENCY run in PARALLEL (independent budgets), main filling the remaining
@@ -1198,10 +1136,10 @@ run_selected() {
     fi
     # ════════════════════════════════════════════════════════════════════════════════════════════
     # LEGACY PHASED PATH (RETIRED — reached ONLY when QUAY_SUITE_SCHEDULER=0, the ONE-KEY ROLLBACK):
-    # everything below (PHASE_OVERLAP serial+lowconc overlap, MAIN_TAIL_OVERLAP A watcher, the
-    # sequential serial→lowconc→main baseline, and the "main runs LAST" phase order) is the RETIRED
-    # static phase-splitting model. The unified scheduler above replaces it with one concurrent
-    # waterline loop (serial∥lowconc∥main). Kept solely as the fallback safety net.
+    # everything below (PHASE_OVERLAP serial+lowconc overlap, the sequential serial→lowconc→main
+    # baseline, and the "main runs LAST" phase order) is the RETIRED static phase-splitting model. The
+    # unified scheduler above replaces it with one concurrent waterline loop (serial∥lowconc∥main).
+    # Kept solely as the fallback safety net.
     # ════════════════════════════════════════════════════════════════════════════════════════════
     # PHASE OVERLAP (gap-phase-overlap-two-phase-parallel-exploration AC1, default-ON since AC101):
     # when QUAY_PHASE_OVERLAP=1 (the default) AND both phases are non-empty, run serial + lowconc in
@@ -1225,30 +1163,6 @@ run_selected() {
       node --test-concurrency="$SERIAL_CONCURRENCY" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${serial_files[@]}" & serial_pid=$!
       overlap_l_start=$(_oh_mark)
       node --test-concurrency="$LOWCONC_CONCURRENCY" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${lowconc_files[@]}" & lowconc_pid=$!
-      # main-tail-overlap (gap-suite-main-overlaps-load-sensitive-tail-experiment): when the knob is
-      # >0, launch a WATCHER that fires the MAIN phase EARLY (at the knob's lanes) once the window's
-      # CPU work drains — overlapping main with the latency-bound tail. The watcher LPT-reorders
-      # `files` (the SAME order the normal main phase uses) and writes its verdict to
-      # $main_early_code_file ("fallthrough" = trigger never fired ⇒ main runs normally at window
-      # close; a number = main's exit code). The main phase below adopts it (no double-run). The
-      # subshell inherits `set +e` (the enclosing full-suite block), so a red early main still writes
-      # its exit code before the watcher exits.
-      if [ "$MAIN_TAIL_OVERLAP" -gt 0 ]; then
-        lpt_order_files files
-        main_early_code_file="$(mktemp "${TMPDIR:-/tmp}/main-tail-overlap.XXXXXX")"
-        printf '%s' "pending" > "$main_early_code_file"
-        (
-          if main_tail_overlap_wait; then
-            _tail_load="$(awk '{print $1}' "${QUAY_MAIN_TAIL_LOADAVG_FILE:-/proc/loadavg}" 2>/dev/null || true)"
-            echo "main-tail-overlap: lanes=${MAIN_TAIL_OVERLAP}${_tail_load:+ load=${_tail_load}}" >&2
-            node --test-concurrency="$MAIN_TAIL_OVERLAP" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "$@" "${files[@]}"
-            printf '%s' "$?" > "$main_early_code_file"
-          else
-            printf '%s' "fallthrough" > "$main_early_code_file"
-          fi
-        ) &
-        main_early_pid=$!
-      fi
       wait "$serial_pid"; serial_code=$?
       overlap_s_end=$(_oh_mark)
       echo "__OVERHEAD__ overlap_serial_ms=$((overlap_s_end - overlap_s_start))" >&2
@@ -1307,30 +1221,10 @@ run_selected() {
     # runner composes spec→stdout + measure-suite-reporter→stderr (the suite_reporter_flags
     # equivalents), so the per-file attribution + LPT input carrier stay intact.
     local mcode=0
-    # main-tail-overlap (gap-suite-main-overlaps-load-sensitive-tail-experiment): adopt the watcher's
-    # early-main verdict when it fired (a numeric exit code) and skip the normal main phase; otherwise
-    # run the normal main phase. ⚠️ The `if`/`fi` below sit at the SAME indent as their body so the two
-    # pinned main-phase lines keep their original `lpt_order_files files` + `node --test-concurrency=
-    # "$(bucket_test_concurrency "$@")"` adjacency — suite-lpt-order.test.mjs AC1 pins that exact
-    # adjacency (do NOT re-indent those two lines, and do NOT insert a line between them).
-    local _tail_skip_main=0
-    if [ -n "$main_early_pid" ]; then
-      wait "$main_early_pid" 2>/dev/null || true
-      local _tail_verdict=""
-      _tail_verdict="$(cat "$main_early_code_file" 2>/dev/null || true)"
-      rm -f "$main_early_code_file"
-      if [ -n "$_tail_verdict" ] && [ "$_tail_verdict" != "fallthrough" ] && [ "$_tail_verdict" != "pending" ]; then
-        mcode="$_tail_verdict"
-        if [ "$mcode" -ne 0 ]; then code="$mcode"; fi
-        _tail_skip_main=1
-      fi
-    fi
-    if [ "$_tail_skip_main" != "1" ]; then
     lpt_order_files files
     node --test-concurrency="$(bucket_test_concurrency "$@")" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "$@" "${files[@]}"
     mcode=$?
     [ "$mcode" -eq 0 ] || code="$mcode"
-    fi
     [ "$oh_full" -eq 1 ] && oh_t7=$(_oh_mark)
     # Fixed-overhead breakdown (gap-suite-fixed-overhead-decomposition AC2): emit the deterministic
     # serial-segment durations. Each is a DIRECT measurement of one sequential step — decidable,
@@ -1761,8 +1655,8 @@ elif [ "${1:-}" = "--buckets" ]; then
     exit "${bucket_code}"
   fi
   # LEGACY PHASED BUCKET PATH (RETIRED — reached ONLY when QUAY_SUITE_SCHEDULER=0): serial→lowconc→main
-  # static phases + the MAIN_TAIL_OVERLAP A watcher below are the RETIRED model; the unified scheduler
-  # bucket path above replaces it. Kept solely as the ONE-KEY ROLLBACK fallback.
+  # static phases are the RETIRED model; the unified scheduler bucket path above replaces it. Kept solely
+  # as the ONE-KEY ROLLBACK fallback.
   bucket_code=0
   if [ "${#bucket_serial_files[@]}" -gt 0 ]; then
     echo "selected ${#bucket_serial_files[@]} files (groups=serial)"
@@ -1770,37 +1664,12 @@ elif [ "${1:-}" = "--buckets" ]; then
     _bscode=$?
     [ "$_bscode" -eq 0 ] || bucket_code="$_bscode"
   fi
-  # main-tail-overlap coordination (gap-suite-main-tail-overlap-bucket-subset): the bucket path has NO
-  # serial+lowconc overlap window — serial runs sequentially BEFORE lowconc (legacy phased path only) — so the trigger simplifies
-  # to the LOWCONC tail (the latency-bound segment the director's round-774 curve measured: 106s lowconc
-  # at ~zero CPU). bucket_lowconc runs in the BACKGROUND so its pid can be watched; when QUERY_MAIN_TAIL_
-  # OVERLAP>0, a watcher polls cpu_stall (main_tail_overlap_wait) and fires MAIN early at the knob's
-  # lanes once the lowconc tail's CPU work drains; lowconc exit / $MAIN_TAIL_WAIT_MAX_S ⇒ fallthrough
-  # (main runs normally after lowconc). Same knob / watcher / stream marker as the full path (A).
+  # bucket_lowconc runs in the BACKGROUND so its pid can be watched (legacy phased path only).
   bucket_lowconc_pid=""
-  bucket_main_early_pid=""
-  bucket_main_early_code_file=""
   if [ "${#bucket_lowconc_files[@]}" -gt 0 ]; then
     echo "selected ${#bucket_lowconc_files[@]} files (groups=lowconc)"
     node --test-concurrency="$LOWCONC_CONCURRENCY" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${bucket_lowconc_files[@]}" &
     bucket_lowconc_pid=$!
-    if [ "$MAIN_TAIL_OVERLAP" -gt 0 ] && [ "${#bucket_main_files[@]}" -gt 0 ]; then
-      bucket_main_early_code_file="$(mktemp "${TMPDIR:-/tmp}/main-tail-overlap.XXXXXX")"
-      printf '%s' "pending" > "$bucket_main_early_code_file"
-      (
-        serial_pid=""
-        lowconc_pid="$bucket_lowconc_pid"
-        if main_tail_overlap_wait; then
-          _tail_load="$(awk '{print $1}' "${QUAY_MAIN_TAIL_LOADAVG_FILE:-/proc/loadavg}" 2>/dev/null || true)"
-          echo "main-tail-overlap: lanes=${MAIN_TAIL_OVERLAP}${_tail_load:+ load=${_tail_load}}" >&2
-          node --test-concurrency="$MAIN_TAIL_OVERLAP" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${rest_args[@]}" "${bucket_main_files[@]}"
-          printf '%s' "$?" > "$bucket_main_early_code_file"
-        else
-          printf '%s' "fallthrough" > "$bucket_main_early_code_file"
-        fi
-      ) &
-      bucket_main_early_pid=$!
-    fi
     wait "$bucket_lowconc_pid"
     _blcode=$?
     [ "$_blcode" -eq 0 ] || bucket_code="$_blcode"
@@ -1812,20 +1681,8 @@ elif [ "${1:-}" = "--buckets" ]; then
   # <path> passed=<bool> — the fix-scope gate's per-file attribution AND the LPT ordering's own
   # input carrier; if this breaks the per-file duration data goes dark and LPT has no input ⇒
   # self-defeating). Concurrency rides in execArgv (--test-concurrency=N) so the reporter's
-  # readConcurrency() sees the SAME value (single source, no drift). When the watcher fired, adopt its
-  # early-main exit code and skip the normal run; otherwise run the normal bucket main (unchanged).
-  bucket_tail_skip_main=0
-  if [ -n "$bucket_main_early_pid" ]; then
-    wait "$bucket_main_early_pid" 2>/dev/null || true
-    bucket_tail_verdict="$(cat "$bucket_main_early_code_file" 2>/dev/null || true)"
-    rm -f "$bucket_main_early_code_file"
-    if [ -n "$bucket_tail_verdict" ] && [ "$bucket_tail_verdict" != "fallthrough" ] && [ "$bucket_tail_verdict" != "pending" ]; then
-      _bmcode="$bucket_tail_verdict"
-      [ "$_bmcode" -eq 0 ] || bucket_code="$_bmcode"
-      bucket_tail_skip_main=1
-    fi
-  fi
-  if [ "$bucket_tail_skip_main" != "1" ] && [ "${#bucket_main_files[@]}" -gt 0 ]; then
+  # readConcurrency() sees the SAME value (single source, no drift).
+  if [ "${#bucket_main_files[@]}" -gt 0 ]; then
     node --test-concurrency="$(bucket_test_concurrency "${rest_args[@]}")" "${repo_root}/plugin/scripts/suite-lpt-runner.mjs" "${rest_args[@]}" "${bucket_main_files[@]}"
     _bmcode=$?
     [ "$_bmcode" -eq 0 ] || bucket_code="$_bmcode"

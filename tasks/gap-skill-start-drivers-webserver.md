@@ -1,7 +1,7 @@
 ---
 id: gap-skill-start-drivers-webserver
 title: 新增"启动 drivers + web server"skill——会话内一次调用封装 quay driver start / quay serve
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -48,21 +48,21 @@ halt with resume first"、"Starting from a git worktree is REJECTED — 必须�
 
 ## AC
 
-- [ ] `plugin/skills/drivers/SKILL.md` 存在——该 skill 在会话内调用后，
+- [x] `plugin/skills/drivers/SKILL.md` 存在——该 skill 在会话内调用后，
       `quay driver status --kind promotion` 与 `quay driver status --kind worker` 均报告
       `alive: true`（或已有等价日志证明其已启动）
-- [ ] `quay serve` 已被同一 skill（或该 skill 明确文档化的配套调用）覆盖，调用后可通过
+- [x] `quay serve` 已被同一 skill（或该 skill 明确文档化的配套调用）覆盖，调用后可通过
       `curl -sf http://<host>:<port>/` 或等价探针确认 web server 已监听
-- [ ] 幂等性验证：对同一 workspace 连续调用两次该 skill，第二次调用不产生"重复启动"错误，
+- [x] 幂等性验证：对同一 workspace 连续调用两次该 skill，第二次调用不产生"重复启动"错误，
       不产生第二组重复的 driver/serve 进程（对照 `init` skill 的幂等设计手法）
-- [ ] 已知失败路径被正确处理/传达：driver halted 时的报错信息引导用户先 `quay driver resume`；
+- [x] 已知失败路径被正确处理/传达：driver halted 时的报错信息引导用户先 `quay driver resume`；
       从非 worktree-root（如任务 worktree）调用 `quay driver start` 时的拒绝行为被正确透传，
       不被 skill 吞掉或误报成别的错误
-- [ ] 若实现新增了 `plugin/scripts/*.ts` 脚本文件（而非纯 SKILL.md 内直接调用既有 CLI），
+- [x] 若实现新增了 `plugin/scripts/*.ts` 脚本文件（而非纯 SKILL.md 内直接调用既有 CLI），
       已完成三面注册（outline + capability-catalog + laydown，
       `plugin/scripts/capability-catalog.sh` 头注释）——若无新脚本，在完成时注明
       "无新脚本，不适用"，不能留空
-- [ ] `node scripts/test.sh`（或等价 scoped 调用）全绿，新增至少一个测试文件覆盖该 skill
+- [x] `node scripts/test.sh`（或等价 scoped 调用）全绿，新增至少一个测试文件覆盖该 skill
       的封装脚本/逻辑（若 SKILL.md 是纯文档型 skill 无可测代码,以 skill 自身的
       dry-run/结构检查作为等价覆盖并说明）
 
@@ -77,5 +77,9 @@ halt with resume first"、"Starting from a git worktree is REJECTED — 必须�
 ## Touches
 
 - plugin/skills/drivers/SKILL.md
+- plugin/.claude-plugin/plugin.json
+- plugin/scripts/start-drivers.ts
 - plugin/scripts/capability-catalog.sh
+- plugin/test/start-drivers.test.mjs
+- plugin/test/plugin-packaging.test.mjs
 - tasks/gap-skill-start-drivers-webserver.md

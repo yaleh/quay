@@ -82,10 +82,10 @@ import { matchesObject, FAN_IN_ORCHESTRATION_FILES } from "./select-static-check
 export const WORKFLOW_BASENAME = "fan-in-execute.js";
 
 /** The default relative path of the workflow file inside a repo/worktree. */
-export const DEFAULT_WORKFLOW_REL = `.claude/workflows/${WORKFLOW_BASENAME}`;
+export const DEFAULT_WORKFLOW_REL = `plugin/workflows/${WORKFLOW_BASENAME}`;
 
 /** The workflow-file's parent marker in a worktree scriptPath. */
-export const WORKFLOW_MARKER = `/.claude/workflows/${WORKFLOW_BASENAME}`;
+export const WORKFLOW_MARKER = `/plugin/workflows/${WORKFLOW_BASENAME}`;
 
 // ── Pure: materialized-record model ─────────────────────────────────────────────────────────────────
 

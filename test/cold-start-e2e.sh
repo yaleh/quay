@@ -189,7 +189,7 @@ if [ -e "$PROJECT/plugin/scripts/inner-state.sh" ]; then
 fi
 # --all categories
 assert_file "$PROJECT/.claude/workflows/drain-directives.js"
-assert_file "$PROJECT/.claude/agents/baime-iteration-executor.md"
+assert_file "$PROJECT/.claude/agents/quay-task.md"
 # gap-gate-scripts-laid-down-but-dead-and-not-mutation-checked (2026-08-05): the retired
 # plugin/gate-scripts/ category is NO LONGER laid down — the classic-pipeline era gates were dead
 # weight in target projects. Negative control: scripts/gates/ must NOT exist after --all --loop.

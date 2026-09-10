@@ -63,7 +63,7 @@ import { spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 // AC151：promotion 继承 Layer 0（driver-runtime：profile/liveness）。splitArgs/launchArgv/runLivenessCheck/
 // LivenessResult 直接从 Layer 0 import（⛔ 不再经 worker-driver 中转——两 driver 平级继承同一层）。
-import { splitArgs, launchArgv, runLivenessCheck, type LivenessResult } from "./driver-runtime.ts";
+import { splitArgs, launchArgv, runLivenessCheck, resolveKernelSibling, resolveKernelScriptsDir, type LivenessResult } from "./driver-runtime.ts";
 // AC151：re-export 保持旧 import 面（promotion-driver.test.mjs 等）——两 driver 经同一函数身份
 // 证「继承 Layer 0 的 profile/liveness 单一实现」。
 export { splitArgs, launchArgv, runLivenessCheck, type LivenessResult } from "./driver-runtime.ts";
@@ -116,11 +116,20 @@ export const LLM_COMMAND_SET_DEFAULT: readonly string[] = ["claude"];
 
 // ── 纯函数（可单测） ───────────────────────────────────────────────────────────────────────────────
 
-/** 缺省 ready-pool-check 命令（全池 + --apply 落地晋升）。输出须为 analyzeTasks JSON。 */
+/** 缺省 ready-pool-check 命令（全池 + --apply 落地晋升）。输出须为 analyzeTasks JSON。
+ *  脚本路径锚在本 kernel 自身安装位置（resolveKernelSibling，⛔ 非 root —— gap-promotion-driver-
+ *  ready-pool-check-path-third-party：quay-init 后的第三方项目没有 plugin/scripts/，锚在 root 会
+ *  `Cannot find module` exit 1 ⇒ 永不晋升）。与 Layer 0 defaultReadyPoolArgv 同一解析器：原始 .ts
+ *  （dev tree，带 --experimental-strip-types）或 bundled dist/ready-pool-check.js（installed，不带
+ *  flag）。两者都不在 ⇒ 回退 kernelScriptsDir/ready-pool-check.ts（spawn 时 fail-closed，⛔ 不伪装
+ *  成「无候选」）。 */
 export function defaultPromotionCheckArgv(root: string, cap: number): string[] {
+  const sibling = resolveKernelSibling("ready-pool-check.ts");
+  const scriptArgs = sibling
+    ? (sibling.stripTypes ? ["--experimental-strip-types", sibling.path] : [sibling.path])
+    : ["--experimental-strip-types", path.join(resolveKernelScriptsDir(), "ready-pool-check.ts")];
   return [
-    "node", "--experimental-strip-types",
-    path.join(root, "plugin", "scripts", "ready-pool-check.ts"),
+    "node", ...scriptArgs,
     "--root", root, "--cap", String(cap), "--apply", "--json",
   ];
 }
@@ -233,13 +242,19 @@ export function buildFixWorkerArgv(id: string, missing: string[], root: string, 
 }
 
 /** spawn 一个短命 fix worker 的结果（AC142 诊断面：stdout/stderr/timedOut 落进可查载体，spawn 失败
- *  不再零诊断信息——对照 gap-fix-worker-spawn-zero-diagnostic-info 的 10 条 `spawned exit=1` 无 stderr）。 */
+ *  不再零诊断信息——对照 gap-fix-worker-spawn-zero-diagnostic-info 的 10 条 `spawned exit=1` 无 stderr）。
+ *  gap-fix-worker-spawn-timeout-persists-post-fix AC4：补 argv + durationMs——失败记录可 grep 到
+ *  「命令 + 耗时 + 退出码」三项，诊断不再只能靠人当场复现。 */
 export interface FixWorkerSpawnResult {
   exitCode: number | null;
   error: string | null;
   stdout: string | null;
   stderr: string | null;
   timedOut: boolean;
+  /** AC4 诊断面：spawn 的完整 argv（命令 + 参数，含 --model / --settings / prompt）。 */
+  argv: string[] | null;
+  /** AC4 诊断面：spawn 的墙钟耗时（毫秒，Date.now 差值）。spawnSync 超时 ⇒ ≈ timeoutMs。 */
+  durationMs: number | null;
 }
 
 /** spawn 一个短命 fix worker（claude -p，或 --fix-worker-cmd 覆盖前缀），同步等待其退出。
@@ -248,21 +263,23 @@ export interface FixWorkerSpawnResult {
  *  （AC133），⛔ 不信 worker 自述。 */
 export function spawnFixWorker(argv: string[], root: string, timeoutMs: number = FIX_WORKER_TIMEOUT_MS): FixWorkerSpawnResult {
   if (!Array.isArray(argv) || argv.length === 0) {
-    return { exitCode: null, error: "empty fix-worker argv", stdout: null, stderr: null, timedOut: false };
+    return { exitCode: null, error: "empty fix-worker argv", stdout: null, stderr: null, timedOut: false, argv: null, durationMs: null };
   }
+  const startMs = Date.now();
   try {
     const r = spawnSync(argv[0], argv.slice(1), {
       cwd: root, encoding: "utf8", timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024,
       stdio: ["ignore", "pipe", "pipe"],
     });
+    const durationMs = Date.now() - startMs;
     const stdout = String(r.stdout ?? "").trim() || null;
     const stderr = String(r.stderr ?? "").trim() || null;
     const timedOut = !!(r.error && (r.error as { code?: string }).code === "ETIMEDOUT");
-    if (r.error) return { exitCode: null, error: String(r.error.message || r.error), stdout, stderr, timedOut };
-    return { exitCode: r.status, error: null, stdout, stderr, timedOut };
+    if (r.error) return { exitCode: null, error: String(r.error.message || r.error), stdout, stderr, timedOut, argv, durationMs };
+    return { exitCode: r.status, error: null, stdout, stderr, timedOut, argv, durationMs };
   } catch (e) {
     const msg = e && typeof e === "object" && "message" in e ? String(e.message) : String(e);
-    return { exitCode: null, error: msg, stdout: null, stderr: null, timedOut: false };
+    return { exitCode: null, error: msg, stdout: null, stderr: null, timedOut: false, argv, durationMs: Date.now() - startMs };
   }
 }
 
@@ -355,6 +372,10 @@ export interface FixOutcome {
   stderr: string | null;
   /** AC142 诊断面：fix worker 是否超时（spawnSync timeout ETIMEDOUT）。 */
   timedOut: boolean;
+  /** gap-fix-worker-spawn-timeout-persists-post-fix AC4：spawn 的完整 argv（失败记录可 grep 命令）。 */
+  argv: string[] | null;
+  /** gap-fix-worker-spawn-timeout-persists-post-fix AC4：spawn 的墙钟耗时（毫秒）。 */
+  durationMs: number | null;
 }
 
 export function computeRoundRecord(opts: {
@@ -408,11 +429,11 @@ export function computeRoundRecord(opts: {
 export function runFixPass(fixDecisions: FixDecision[], root: string, fixWorkerCmd: string | null): FixOutcome[] {
   return fixDecisions.map((d) => {
     if (!d.fixable) {
-      return { id: d.id, spawned: false, missing: d.missing, unfixable: d.unfixable, exitCode: null, stderr: null, timedOut: false };
+      return { id: d.id, spawned: false, missing: d.missing, unfixable: d.unfixable, exitCode: null, stderr: null, timedOut: false, argv: null, durationMs: null };
     }
     const argv = buildFixWorkerArgv(d.id, d.missing, root, fixWorkerCmd);
-    const { exitCode, stderr, timedOut } = spawnFixWorker(argv, root);
-    return { id: d.id, spawned: true, missing: d.missing, unfixable: [], exitCode, stderr, timedOut };
+    const { exitCode, stderr, timedOut, argv: spawnedArgv, durationMs } = spawnFixWorker(argv, root);
+    return { id: d.id, spawned: true, missing: d.missing, unfixable: [], exitCode, stderr, timedOut, argv: spawnedArgv, durationMs };
   });
 }
 
@@ -661,7 +682,7 @@ export async function runResidentPromotionLoop(opts: ResidentLoopOptions): Promi
       if (json) process.stdout.write(`${JSON.stringify({ event: "halted", round })}\n`);
       break;
     }
-    // gap-main-manager-doc-doc-only-ff-only-tracking AC4：每轮启动前把主检出（main/manager-doc）快进到
+    // gap-main-manager-doc-doc-only-ff-only-tracking AC4：每轮启动前把主检出（author）快进到
     // develop（机械 ff-only，⛔ 静默 merge-fallback）。主检出落后 develop 时生产跑旧代码（promotion-driver
     // 常驻从主检出工作树加载）——syncDevelopToDoc 是 develop→doc 方向的机械同步单一真相源
     // （driver-filters.ts）：非 ff 报「not-ff」落痕（分叉 guard）、成功亦写 doc-develop-sync-ff-synced

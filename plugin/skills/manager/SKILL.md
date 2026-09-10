@@ -15,6 +15,11 @@ startup, AC8).
 This skill is the **installable crystallization** of the manager layer. It ships under `plugin/` so
 any quay install can bring up a manager; it is not a quay-local artifact in `orchestration/`.
 
+**Default activation: session embodiment.** To become the manager, invoke this skill in the current
+Claude Code session — that session *transforms into* the manager in place (initializes the manager
+home, loads the methodology docs, arms the tick anchor; see "Activation" below). A separate manager
+session via `quay manager start` is the bare-metal cold-start fallback only.
+
 ## The three layers
 
 | Layer | Where it ships | Runs | Owns |
@@ -25,8 +30,8 @@ any quay install can bring up a manager; it is not a quay-local artifact in `orc
 
 **manager is above outer, below the human.** It is started by the human (or an OS anchor), never by
 a project's outer, and never by a project's cold start. A project cold-start skill
-(`plugin/skills/cold-start/SKILL.md`) must NOT start it — `quay-topology.sh` builds `outer`+`inner`
-only, and the cold-start's `TOPOLOGY-IN-PLACE` key excludes manager.
+(`plugin/skills/cold-start/SKILL.md`) must NOT start it — the manager is cross-project and NOT part
+of any project's session topology (one network = one manager).
 
 ## Cadence — the daily review (mechanism, not memory)
 
@@ -133,24 +138,46 @@ convention, tmux layout conventions — `heavy-op-token.sh` was retired 2026-08-
 deliverable is a **request to the outer layer**, not a self-written script. A `.sh`/`.ts`
 implementation appearing in the manager's hands is the overreach signal.
 
-## How the manager itself starts (launch config, not tribal knowledge)
+## Activation — session embodiment (default) vs bare-metal fallback
 
-The manager's launch command is an INTERNAL implementation detail of the launch mechanism — a
-human/agent never types it directly. The per-role launch command lives in the checked-in
-`.claude/launch.settings.json` (`_launchSpec.roles.*`, settings-schema keys + `_launchSpec`
-extension); the manager role runs the Anthropic default model — the deepseek 917k
-context/compaction vars are outer/inner-only by `_launchSpec` design. To start the manager,
-invoke the skill that owns launching (the `quay-session-topology` skill's Method, or the session
-bootstrap) — never hand-type a shell one-liner from memory. The launch script is the skill's
-internal pipe, not a user-facing deliverable.
+The manager has **two activation routes**. The **default is session embodiment**: invoke this skill
+in the current Claude Code session, and that session *transforms into* the manager in place — no new
+session is spawned, no tmux, no hand-typed launch one-liner. The session initializes the manager
+home, loads the methodology docs, and arms the tick anchor, then acts as manager per
+`orchestration/manager-loop-tick.md`.
+
+The **fallback is `quay manager start`** (the manager's own launch script,
+`plugin/scripts/manager-start.sh`): a dedicated tmux session + home for a third-party machine with no
+quay dev tree (bare-metal cold start). It is the machine-cold-start path, not the day-to-day
+activation path.
+
+The per-role launch command (used only when a separate session is needed at all) lives in the
+checked-in `.claude/launch.settings.json`; the manager role runs the Anthropic default model — the
+deepseek 917k context/compaction vars are outer/inner-only. Never hand-type a shell one-liner from
+memory.
+
+### Session-activation steps (idempotent — safe to re-run)
+
+1. **Initialize the manager home** — `mkdir -p ~/.quay-global/manager/` (idempotent; write the
+   `identity` file with `role=manager` only if missing).
+2. **Load the methodology docs** — read `orchestration/REVIEW-cadence.md` (the daily-review cadence)
+   and `orchestration/manager-loop-tick.md` (the operational tick, incl. §1.5/§1.6).
+3. **Arm the tick anchor** — `bash <repo>/plugin/scripts/manager-arm-loop.sh --home ~/.quay-global/manager/`
+   (sentinel-swept: deletes every existing `[manager-tick]`, creates exactly one), then in-session
+   `CronList` → delete every `[manager-tick]` → `CronCreate` with
+   `cat orchestration/manager-tick-prompt.txt`, then write the real cron id back via
+   `manager-arm-loop.sh --record-cron <id> --home ~/.quay-global/manager/`.
+4. **Run the first tick** — `orchestration/manager-loop-tick.md` (the first tick is the daily-review
+   entry point).
 
 ## Delivery ≠ startup (AC8)
 
 The plugin **ships** the manager layer (any network with more than one project needs it — not
 shipping it means every network re-invents it). But a **project cold start does NOT start it**: the
 manager is cross-project, one per network, and is the human's/OS-anchor's to start. A cold-start
-skill must never start the manager just because the plugin contains it — the two-window project
-topology is `outer`+`inner` only.
+skill must never start the manager just because the plugin contains it — the manager is NOT part of
+any project's session topology (the outer/inner two-session topology was retired with the outer
+tmux session, `gap-retire-outer-tmux-window-logic`).
 
 ## Methodology sources (SPEC index — referenced, not batch-crystallized)
 
@@ -196,6 +223,9 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-fan-in-workflow-lock-and-S1-2026-08-26.md` — fan-in workflow 锁 + S=1：把 merge 锁从毫秒级 ff 扩大到整个 fan-in（merge→suite→ff）使 develop 不前进、ff 结构上不输，S 改 1（fan-in 锁串行化 suite）；修订 AC4 + 两锁固定顺序 + driver 看门狗；与语义 subagent 的 ff-race-loss 二选一（proposal·待 outer 立案、待人裁定排期）
 - `orchestration/SPEC-fan-in-driver-mechanical-orchestration-2026-08-27.md` — fan-in 机械编排：取消 fan-in workflow 子代理、机械部分（锁/merge/判定/typecheck/scoped门/suite/ff）交 driver、语义部分（冲突/红 suite/typecheck 红/anti-drift 越界）单独 Claude 会话；suite 不再 detach、fan-in 锁机械包裹 suite 锁；取代 S=1 workflow 锁的解法（保留其诊断），锁时长从模型 30min 塌缩到机械 ~10min（proposal·待 outer 立案、待人裁定排期）
 - `orchestration/SPEC-tmux-retirement-2026-09-03.md` — tmux 机制退役（先退 tmux 机制本身、outer 会话留待之后；驱动/观测另一 Claude Code 会话从 tmux send-keys/capture-pane 迁移到 background job session 模型）
+- `orchestration/SPEC-capability-planes-and-mechanism-lifecycle-2026-09-05.md` — 能力面分层与机制生命周期：把「能力」而非「文件」作为架构单元（probe = routine 的 LLM 形态，⛔ 不新增 kind）· Layer 0 继承强制化 · 机制注册/生命周期（proposal·待人裁定）
+- `orchestration/SPEC-goal-mechanism-2026-09-06.md` — goal 机制启用与改造（PHASE→GOAL 命名、多目标并发、ABI 封装、driver 驱动）：GOAL-NNN 取代 PHASE-NNN、draft 状态、cap=3/stale=7 天硬上限；修订并启用 SPEC-0809（人 2026-09-06 五条裁定）
+- `orchestration/SPEC-store-commit-unification-2026-09-08.md` — 五 store kind 提交面统一（单一 commitStoreWrite 原语：四态返回 committed/unchanged/not-in-git/failed、rev-parse root、pathspec 限定 add+commit；三阶段 ①原语+五 kind 接线 ②传播按读者归位 ③驱动侧直写点）
 
 Cross-references:
 - `orchestration/REVIEW-cadence.md` — the daily-review cadence mechanism (this skill's cadence hook)
@@ -305,11 +335,24 @@ allowed-tools: Bash, Read, Monitor
 
 ---
 
-## 5. 启动配置（可安装）——部落知识 → 交付物
+## 5. 会话内激活（默认路线）——当前会话变身为 manager
 
-启动参数**只存在于检查进仓库的** `.claude/launch.settings.json`（settings-schema 键 + `_launchSpec`
-扩展），由本 skill 的内部启动器物化为真实命令——**永不手打一行 shell**；启动脚本是 skill 背后的
-内部实现，不是用户/agent 直接调用面（启动走 `quay-session-topology` skill 的 Method）。
+**两条启动路线，默认是会话内激活。** 人在已跑过 init + drivers skill 的 Claude Code 会话里，调用本
+skill（`/quay-manager` / Skill 工具），**当前会话即变身为 manager**——就地初始化 manager 家目录、
+加载方法论文档、武装定时锚点，之后按 `orchestration/manager-loop-tick.md` 以 manager 角色行事。
+**不需要人另外手动敲 tmux/CLI 命令启动「新的 manager 会话」。**
+
+**备选路线（第三方裸机冷启动）**：`quay manager start`（`plugin/scripts/manager-start.sh`）——第三方
+裸机（无 quay 开发树）装 manager 的**已验证路径**是 `npm i -g <quay.tgz>` 后 `quay manager start`，
+CLI 从安装包定位 `plugin/scripts/manager-start.sh`，它建独立 tmux 会话（`quay-manager`）+ 自己的家
+（`$QUAY_GLOBAL_DIR/manager/`）+ 武装 loop 锚点。这是**机器冷启动**路径，不是日常激活路径。武装锚点
+的 prompt 是指针：dev-tree/`--loop --manager` 消费项目指 `orchestration/manager-loop-tick.md`；裸机包
+（无 orchestration/）由 `manager-arm-loop.sh` 按存在性解析指针目标（AC4 不铺虚空武装器——指针解析在
+脚本内，SKILL 不引 bundle 源码路径）。
+
+启动参数（仅当需要另起会话时）只存在于检查进仓库的 `.claude/launch.settings.json`（settings-schema
+键 + `_launchSpec` 扩展）——**永不手打一行 shell**。裸机取**出厂拷贝** `plugin/.claude/launch.settings.json`
+（npm 产物不带包根 `.claude/`，启动器回退到 plugin 出厂份；dev-tree 仍优先包根份）。
 
 - **outer / inner**：`claude-deepseek --model deepseek-v4-flash` + `CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000`
   （launcher 统一追加 `--prompt-suggestions false`——**REQUIRED**，ghost-suggestion 故障 6 从源头消除，
@@ -317,14 +360,22 @@ allowed-tools: Bash, Read, Monitor
 - **manager**：`claude`（Anthropic 默认模型，不带 917k 覆盖——917k 只给 deepseek 角色，避免真实窗口
   之上压缩过晚导致 API 报错，session-launch-recipes §5）
 
-**冷启动向量（bare-metal，gap-manager-layer-no-verified-install-vector）**：第三方裸机（无 quay 开发树）
-装 manager 的**已验证路径**是 `npm i -g <quay.tgz>` 后 `quay manager start`——CLI 从安装包定位
-`plugin/scripts/manager-start.sh`，它建独立 tmux 会话（`quay-manager`）+ 自己的家
-（`$QUAY_GLOBAL_DIR/manager/`）+ 武装 loop 锚点。启动 settings 在裸机取**出厂拷贝**
-`plugin/.claude/launch.settings.json`（npm 产物不带包根 `.claude/`，启动器回退到 plugin 出厂份；
-dev-tree 仍优先包根份——manager 角色 `claude`/`quay-manager` 两份一致）。武装锚点的 prompt 是指针：dev-tree/`--loop --manager` 消费项目指
-`orchestration/manager-loop-tick.md`；裸机包（无 orchestration/）由 `manager-arm-loop.sh`
-按存在性解析指针目标（AC4 不铺虚空武装器——指针解析在脚本内，SKILL 不引 bundle 源码路径）。
+### 5.1 会话内激活步骤（幂等——重复调用安全）
+
+1. **初始化 manager 家目录**（幂等）：`mkdir -p ~/.quay-global/manager/`；`identity` 文件只在缺失时写
+   `role=manager`（`if [ ! -f ~/.quay-global/manager/identity ]`）。
+2. **加载方法论文档**：读 `orchestration/REVIEW-cadence.md`（每日复盘节奏）+
+   `orchestration/manager-loop-tick.md`（运维 tick，含 §1.5/§1.6）。
+3. **武装定时锚点**（幂等，哨兵清扫）：`bash <repo>/plugin/scripts/manager-arm-loop.sh --home ~/.quay-global/manager/`
+   （删光既有 `[manager-tick]` 哨兵、恰好建一个），然后会话内 `CronList` → 删光 `[manager-tick]` →
+   `CronCreate` 用 `cat orchestration/manager-tick-prompt.txt` → 把真实 cron id 写回收据
+   `bash <repo>/plugin/scripts/manager-arm-loop.sh --record-cron <id> --home ~/.quay-global/manager/`。
+4. **跑第一个 tick**：按 `orchestration/manager-loop-tick.md`（第一个 tick = 每日复盘入口）。
+
+**幂等性**：`mkdir -p` 天然幂等；`identity` 只在缺失时写；锚点哨兵清扫（CronList → 删光 → 建一个）
+保证同一会话连续调用两次仍恰好一个 manager loop，不产生重复初始化/覆盖错误（同 drivers skill 的
+幂等设计）。**失败路径**：家目录建不起来（如无权限 `~/.quay-global/`）→ `mkdir -p` 非零退出，立即
+报出可操作错误（「无权限创建 ~/.quay-global/manager/」），不静默继续（fail loud）。
 
 ---
 
@@ -334,9 +385,9 @@ dev-tree 仍优先包根份——manager 角色 `claude`/`quay-manager` 两份�
 同样需要跨项目协调；**不交付 = 人人重发明**。
 
 **启动**：项目的 cold-start（`plugin/skills/cold-start/SKILL.md`）**不得启动** manager——manager 不属
-项目冷启动范围，**一个 network 一个 manager 就够**。项目拓扑工厂 `plugin/scripts/quay-topology.sh`
-只建 `outer inner` 两窗口（`ROLES="outer inner"`）；cold-start 的 `TOPOLOGY-IN-PLACE` 键明示
-「manager is cross-project and NOT part of this topology」。机械复制 quay 三窗口到 meta-cc/archguard
+项目冷启动范围，**一个 network 一个 manager 就够**。会话拓扑工厂已随 outer tmux 会话退役
+（`gap-retire-outer-tmux-window-logic`）；cold-start 明示「manager is cross-project and NOT part of
+this topology」。机械复制 quay 会话拓扑到 meta-cc/archguard
 已犯过（管理者自陈 + 自查改回 bash/outer/inner）——**交付物里有 manager 不意味着冷启动要启动它。**
 
 ---
@@ -354,7 +405,7 @@ dev-tree 仍优先包根份——manager 角色 `claude`/`quay-manager` 两份�
 | 2 | `CRON-CREATED` | `CronList` 恰一 `[manager-tick]`（agent 在会话内确认；bash 看不到） | `CronList` 输出 |
 | 3 | `REGISTRY-MATCHES` | 注册表 ↔ 真 cron 可核实：`bash <quay>/plugin/scripts/manager-arm-loop.sh --verify --home <home>` 报 `registry-verified`（恰一哨兵 + 新鲜 CronCreate 收据；`registry-only` = 注册表说武装了但没核实 = 缺陷） | `--verify` 输出 |
 | 4 | `FIRST-TICK-LANDED` | 首轮 tick 落行：`bash <quay>/plugin/scripts/manager-tick-log-check.sh --log <home>/manager-tick-log.md` PASS | check 输出 |
-| 5 | `NOT-STARTED-BY-PROJECT` | manager 是跨项目第三层，**不属于任何项目的 `outer`+`inner` 拓扑**——`topology-check.sh --session <proj>` 只报两窗口，`quay manager start` 拒收项目参数（start/adopt 分离，C5） | topology `--json` + start 拒绝输出 |
+| 5 | `NOT-STARTED-BY-PROJECT` | manager 是跨项目第三层，**不属于任何项目的会话拓扑**——`quay manager start` 拒收项目参数（C5） | start 拒绝输出 |
 
 判据能机械回答的四问：**cron 存在?（#2/#3）首轮 tick 留痕?（#4）家目录三件套齐?（#1）**——
 没有一条是「agent 说完成了」。

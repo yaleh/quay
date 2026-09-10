@@ -220,7 +220,7 @@ export function matchesObject(object, touch) {
  *  verified by the scoped + doc phases the fan-in always runs. Registry overrides fire first (a
  *  checker-read path under docs/, e.g. docs/analysis/ac69-*.json, is code). */
 export const DOC_SURFACES = [
-  "tasks/", "docs/", "adr/", ".quay/", "measurements/", "milestones/",
+  "tasks/", "goals/", "docs/", "adr/", ".quay/", "measurements/", "milestones/",
   "orchestration/archive/", "plugin/loop/",
 ];
 
@@ -274,8 +274,7 @@ export function isDocPath(pathStr, registry) {
  *  must be exercised by that task's own fan-in. Enumerated per AC1 of
  *  gap-fan-in-orchestration-bootstrap-self-fix; extend here (and ONLY here) when the pipeline grows. */
 export const FAN_IN_ORCHESTRATION_FILES = [
-  ".claude/workflows/fan-in-execute.js",
-  "plugin/workflows/fan-in-execute.js", // dual-copy mirror (workflows-dual-copy-drift-check)
+  "plugin/workflows/fan-in-execute.js",
   "plugin/scripts/select-static-checks-for-touches.ts",
   "plugin/scripts/fan-in-ff-merge.sh",
   "plugin/scripts/per-task-suite-record.ts",

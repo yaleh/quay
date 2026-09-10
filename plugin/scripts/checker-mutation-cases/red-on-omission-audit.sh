@@ -23,7 +23,7 @@ checker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 mkdir -p "${workdir}/orchestration"
 mkdir -p "${workdir}/plugin/scripts"
-mkdir -p "${workdir}/.claude/workflows"
+mkdir -p "${workdir}/plugin/workflows"
 mkdir -p "${workdir}/scripts"
 
 # ── Fixture: 最小 workspace，每条 registry redReading 均 DECLARED（GREEN baseline）───────────────
@@ -67,7 +67,7 @@ export interface SuiteState {
 }
 EOF
 
-cat > "${workdir}/.claude/workflows/execute-suite-fix.js" <<'EOF'
+cat > "${workdir}/plugin/workflows/execute-suite-fix.js" <<'EOF'
 // fan-in consumer (Merge step): requires a scope=worktree round record with state green
 const gate = state === 'green' && scope === 'worktree';
 EOF

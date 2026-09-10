@@ -23,9 +23,9 @@
 //             (index only, no batch crystallization) — every on-disk SPEC is listed.
 //   AC7     — this file is node:test + // @test-group engine.
 //   AC8     — delivery vs startup independence: the plugin SHIPS the manager layer (the file above),
-//             but the project cold-start does NOT start it — quay-topology.sh builds only
-//             `outer`, and the cold-start TOPOLOGY-IN-PLACE key states manager is NOT part of
-//             the project topology (one network = one manager).
+//             but the project cold-start does NOT start it — the cold-start states manager is NOT
+//             part of the project topology (one network = one manager). (The outer session topology
+//             factory was retired with the outer tmux session — gap-retire-outer-tmux-window-logic.)
 //
 // Run:
 //   scripts/test.sh plugin/test/manager-layer-shipping.test.mjs
@@ -45,7 +45,6 @@ const MANAGER_SKILL = path.join(pluginDir, 'skills', 'manager', 'SKILL.md');
 const COLD_START_SKILL = path.join(pluginDir, 'skills', 'cold-start', 'SKILL.md');
 const LAUNCH_SETTINGS = path.join(repoRoot, '.claude', 'launch.settings.json');
 const PROFILES = path.join(repoRoot, '.quay', 'profiles.yml');
-const TOPOLOGY_FACTORY = path.join(pluginDir, 'scripts', 'quay-topology.sh');
 const PORTABILITY_DOC = path.join(repoRoot, 'docs', 'proposals', 'fast-mode-cross-project-portability.md');
 const SPEC_DIR = path.join(repoRoot, 'orchestration');
 
@@ -117,20 +116,35 @@ test('AC6 — the manager SKILL indexes every on-disk orchestration/SPEC-*.md (i
 });
 
 // ── AC8: delivery vs startup independence — the plugin ships the manager, the cold-start does NOT start it ──
-test('AC8 — cold-start must NOT start the manager (one network = one manager); the topology factory builds only outer', () => {
-  const cold = fs.readFileSync(COLD_START_SKILL, 'utf8');
-  // The TOPOLOGY-IN-PLACE key must state manager is NOT part of the project topology.
-  assert.match(cold, /manager is cross-project and NOT part of this topology|manager 跨项目|manager is cross-project/,
-    'cold-start TOPOLOGY-IN-PLACE must state manager is NOT part of the project topology (AC8)');
-  // The cold-start must NOT instruct creating/driving a manager window.
-  const managerStartHits = cold.split('\n').filter((l) => /manager/i.test(l) && /(quay-launch\.sh manager|:manager|manager 窗口|manager window)/i.test(l));
-  assert.deepEqual(managerStartHits, [], 'cold-start must not instruct starting a manager window (AC8)');
+// The sanctioned manager-start form is the skill invocation `/quay:manager` (session-embodiment:
+// the manager skill turns the current session into the manager — one network = one manager). A bare
+// `:manager` substring (tmux window key) or `quay-launch.sh manager` (shell spawn) is a real violation.
+const SANCTIONED_MANAGER_SKILL_MENTION = /\/quay:manager\b/;
+const managerStartViolation = (l) => /manager/i.test(l) &&
+  /(quay-launch\.sh manager|:manager|manager 窗口|manager window)/i.test(l) &&
+  !SANCTIONED_MANAGER_SKILL_MENTION.test(l);
 
-  // The topology factory builds outer only (the manager and the retired inner are not project-topology windows).
-  assert.ok(fs.existsSync(TOPOLOGY_FACTORY), 'plugin/scripts/quay-topology.sh must exist');
-  const topo = fs.readFileSync(TOPOLOGY_FACTORY, 'utf8');
-  assert.match(topo, /ROLES="outer"/, 'quay-topology.sh must build ONLY the outer window (AC8)');
-  assert.ok(!/ROLES=.*manager/.test(topo), 'quay-topology.sh must NOT include manager in the project-topology roles (AC8)');
+test('AC8 — cold-start must NOT start the manager (one network = one manager)', () => {
+  const cold = fs.readFileSync(COLD_START_SKILL, 'utf8');
+  // The cold-start must state manager is NOT part of the project topology.
+  assert.match(cold, /manager is cross-project and NOT part of this topology|manager 跨项目|manager is cross-project/,
+    'cold-start must state manager is NOT part of the project topology (AC8)');
+  // The cold-start must NOT instruct creating/driving a manager window (shell/tmux form) — the
+  // sanctioned `/quay:manager` skill-invocation mention is excluded from the guard.
+  const managerStartHits = cold.split('\n').filter(managerStartViolation);
+  assert.deepEqual(managerStartHits, [], 'cold-start must not instruct starting a manager window (AC8)');
+  // Positive control: the sanctioned skill-invocation mention itself must still be present (the
+  // exclusion must not silently swallow real content) — dual-direction check discipline (硬规则 2).
+  assert.match(cold, SANCTIONED_MANAGER_SKILL_MENTION,
+    'cold-start must reference /quay:manager as the sanctioned manager-start form (AC8)');
+  // Negative control: a real violation NOT wrapped in the sanctioned skill form must still be caught
+  // (the narrowing must not weaken the guard into a vacuous green — 硬规则 3b).
+  const violations = [
+    'bash /repo/plugin/scripts/quay-launch.sh manager',
+    'tmux new-window -t quay-session:manager',
+  ];
+  assert.deepEqual(violations.filter(managerStartViolation), violations,
+    'AC8 guard must still capture real shell/tmux manager-start forms (negative control)');
 });
 
 // ── Contract measure guard: the shipping scan must not be starved ───────────────────────────────────

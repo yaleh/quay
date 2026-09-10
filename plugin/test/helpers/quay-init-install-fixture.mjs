@@ -178,16 +178,11 @@ export function _pluginSurfaceHash(pluginRoot) {
   const roots = [
     path.join(pluginRoot, "scripts"),
     path.join(pluginRoot, "loop"),
-    // Shipped workflows (plugin/workflows/* → <workspace>/.claude/workflows/ on install) AND the
-    // live repo-root copy (.claude/workflows/* — the dual-copy source of the shipped bundle,
-    // gap-fixture-hash-omits-workflows-dirs). A fan-in-execute.js edit changes BOTH; either alone
-    // must invalidate the fixture. Without these roots a workflow-only change reused a stale
-    // fixture and real-target-verify reported a false would-conflict (occurrence 2/日 2026-08-17).
-    // For a pluginRoot that is NOT the live plugin (an old-plugin copy in /tmp), the repo-root copy
-    // does not exist beside it — _hashOfRoots skips it, which is correct (the copy lays its OWN
-    // plugin/workflows, fully captured above).
+    // Shipped workflows (plugin/workflows/* — the single source after the repo-root dual-copy
+    // retirement, gap-ac166-second-copy-retirement). A workflow-only change must invalidate the
+    // fixture: without this root a workflow edit reused a stale fixture and real-target-verify
+    // reported a false would-conflict (occurrence 2/日 2026-08-17).
     path.join(pluginRoot, "workflows"),
-    path.join(pluginRoot, "..", ".claude", "workflows"),
     // Shipped probes (plugin/probes/* → <workspace>/plugin/probes/ on install, quay-init.sh:2145) —
     // the routine-track probe specs (DIR-056) are a DELIVERABLE laid verbatim, so a probe-spec
     // change must invalidate the fixture (gap-fixture-hash-omits-shipped-files: probes were the

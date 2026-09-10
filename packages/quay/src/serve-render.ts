@@ -25,6 +25,15 @@ export function escapeHtml(s: unknown): string {
   }[c] as string));
 }
 
+// gap-webui-list-table-no-overflow-container: the shared data-table shell. Wrap a (possibly wide)
+// list-page table element in a `.table-wrap` scroll container so it scrolls INSIDE its container
+// instead of widening the page — the one shell every data-dense list page routes through, so a wide
+// table is handled by a single mechanism rather than per-page width tuning. `inner` is the
+// already-built table markup; pass the page's own table HTML through verbatim.
+export function tableWrap(inner: string): string {
+  return `<div class="table-wrap">${inner}</div>`;
+}
+
 // QX-028 (experiment 4, iteration 7): strip structural heading lines from
 // body content before using it as a search index. Lines matching /^#+\s/
 // (one or more # followed by a space) are structural headers ("## Proposal",
@@ -102,6 +111,33 @@ tr:last-child td { border-bottom: none; }
 tr:hover td { background: var(--color-neutral-100); }
 .malformed-row td { background: var(--color-accent-100); color: var(--color-accent-800); font-weight: 600; }
 .malformed-row a { color: var(--color-accent-800); }
+/* gap-webui-list-table-no-overflow-container: the shared data-table shell. A wide table must
+   scroll INSIDE its container (never widen the page) on desktop AND mobile alike — the pre-fix
+   horizontal-scroll fallback lived only in the detail view's stylesheet (its ≤600px media query),
+   so the data-dense LIST pages (/goal /live /board /needs-human /tests) had no scroll rule, and
+   the base sheet's "table { display:block }" mobile hack broke the table's real layout (headers
+   folded to vertical single chars). Wrapping in a plain <div class="table-wrap"> keeps the
+   table's layout intact while the wrapper scrolls. ".table-wrap table { display:table }"
+   (specificity 0,1,1) beats the ≤600px "table { display:block }" (0,0,1), so a wrapped table is
+   never display:block. */
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.table-wrap table {
+  display: table;
+  min-width: 100%;
+}
+.table-wrap th { white-space: nowrap; }
+/* Prose column clamp: a long prose cell must not blow the table to viewport width. The full text
+   stays reachable via the cell's title attribute / the detail page. */
+.clamp {
+  max-width: 22rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 button {
   background: var(--color-accent);
   color: var(--color-bg);
@@ -112,7 +148,7 @@ button {
   cursor: pointer;
   margin: 0 0.25rem 0.25rem 0;
 }
-button:hover { background: var(--color-accent-600); }
+button:hover { background: var(--color-accent-800); }
 .meta { color: var(--color-neutral-700); font-size: 0.9rem; margin: 0.5rem 0 1rem; }
 .meta a { text-decoration: underline; }
 .body { margin-top: 1rem; }
@@ -133,6 +169,10 @@ button:hover { background: var(--color-accent-600); }
   border-radius: 3px;
   padding: 0.1em 0.35em;
   font-size: 0.88em;
+  /* gap-webui-list-table-no-overflow-container: long unbreakable inline code (a commit hash,
+     a long path, a criterion shell one-liner in /journal) must wrap instead of widening the page
+     past the viewport on mobile — same wrap the detail view already gets on its inline-code rule. */
+  overflow-wrap: anywhere;
 }
 .body pre code { background: none; padding: 0; font-size: inherit; }
 hr { border: none; border-top: 1px solid var(--color-divider); margin: 1rem 0; }
@@ -150,6 +190,23 @@ hr { border: none; border-top: 1px solid var(--color-divider); margin: 1rem 0; }
   white-space: nowrap;
   border: 0;
 }
+/* AC4 (gap-webui-a11y-focus-ring-and-token-contrast-unvalidated): skip-link — the FIRST tab
+   stop on every page, visually hidden until focused. It targets <main id="main"> so keyboard
+   users skip the 15-item site nav straight to the page content. Off-screen via transform (kept
+   in the tab order), revealed on :focus; the same :focus outline rule from the Modernist sheet
+   makes the revealed link visible. */
+.skip-link {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translateY(-100%);
+  background: var(--color-bg);
+  color: var(--color-accent);
+  padding: var(--space-2) var(--space-3);
+  z-index: 100;
+  font-weight: 600;
+}
+.skip-link:focus { transform: translateY(0); }
 /* QX-015 (experiment 4, iteration 3): project orientation banner — REMOVED by
    DIR-007 (iteration 10). Banner had two problems: (1) depicted needs-human as
    sequential step in todo→ready→needs-human→done chain rather than as a
@@ -251,9 +308,17 @@ hr { border: none; border-top: 1px solid var(--color-divider); margin: 1rem 0; }
 .verdict-pass { color: var(--color-positive-700); }
 .verdict-fail { color: var(--color-accent-800); }
 /* AC102: git-history SVG mark colours — token-derived so the client-rendered chart carries
-   no hardcoded hex. The hex values live only in webui-modernist.css. */
+   no hardcoded hex. The hex values live only in webui-modernist.css, except the per-lane
+   categorical palette (gap-git-graph-lane-visual-encoding-and-fixed-width), whose hex lives in
+   serve-git.ts and is emitted per-page as a scoped --color-lane-* token sheet (gitGraphLaneTokenCss)
+   — the renderer script references the tokens, never the hex. */
 .git-svg-surface { background: var(--color-neutral-100); }
+/* grid stays the faint neutral-200 (real grid lines only) — the trunk axis is .git-svg-trunk. */
 .git-svg-grid { stroke: var(--color-neutral-200); }
+/* trunk vertical spine: a visible dark neutral (the old grid neutral-200 measured 1.13:1 on the
+   surface and was invisible at 2x zoom). neutral-700 also holds ≥4.5:1 against both text
+   backgrounds, so the matching legend glyph is not a text-contrast violation. */
+.git-svg-trunk { stroke: var(--color-neutral-700); }
 .git-svg-commit { fill: var(--color-accent-600); }
 .git-svg-merge { fill: var(--color-accent-2-500); }
 .git-svg-ink { fill: var(--color-text); }
@@ -408,7 +473,7 @@ export function detailStyles(): string {
 .detail-page .meta {
   font-size: 13px;
   margin: 0 0 var(--space-3);
-  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+  color: var(--color-neutral-700);
 }
 .detail-page .meta strong { color: var(--color-text); font-weight: var(--font-heading-weight); }
 .detail-page .meta a { text-decoration: underline; }
@@ -430,10 +495,17 @@ export function detailStyles(): string {
   font-size: 0.88em;
 }
 .detail-page article pre code { background: none; padding: 0; font-size: inherit; }
+/* gap-webui-detail-page-head-drops-pagestyles AC4: long unbreakable inline code (e.g. a goal
+   detail's criterion shell command in the .meta line) must wrap on the 390px mobile form —
+   otherwise it widens the page past the viewport and re-introduces a horizontal scrollbar
+   (scrollWidth > clientWidth) even after the double-nav is gone. overflow-wrap: anywhere
+   breaks only the tokens that would otherwise overflow; pre code is unaffected (its pre
+   keeps white-space: pre, which disables wrapping). */
+.detail-page code { overflow-wrap: anywhere; }
 .detail-page table { border-collapse: collapse; width: 100%; font-size: 14px; margin-top: var(--space-3); }
 .detail-page th {
   text-align: left; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
-  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+  color: var(--color-neutral-700);
   padding: var(--space-2); border-bottom: 2px solid var(--color-divider);
 }
 .detail-page td { padding: var(--space-2); border-bottom: 1px solid var(--color-divider); }
@@ -447,12 +519,56 @@ export function detailStyles(): string {
 </style>`;
 }
 
+// gap-webui-detail-page-head-drops-pagestyles: the page SHELL's styles are now ONE atomic entry —
+// a page cannot render the nav markup (renderSiteNav / renderMobileChrome) without the sheet that
+// makes it visible. pageStyles() carries the .nav-* + .mobile-chrome rules AND the ≤600px @media
+// overrides (`.mobile-chrome { display:none }` desktop / `display:block` mobile; `.site-nav { display:none }`
+// mobile); detailStyles() has only .detail-page typography — ZERO nav rules. gap-ac100 swapped
+// pageStyles()→detailStyles() on the three detail pages ("换成" not "追加"), which DROPPED the shell:
+// bare nav on desktop, double nav + horizontal overflow on mobile. shellStyles(kind) ALWAYS includes
+// the shell (modernistStyles + pageStyles); the "detail" kind layers detail typography ON TOP (last
+// wins). A page rendered with shellStyles("detail") can never lose the nav/mobile-chrome rules.
+export function shellStyles(kind: "list" | "detail" = "list"): string {
+  const detail = kind === "detail" ? detailStyles() : "";
+  return `${modernistStyles()}${pageStyles()}${detail}`;
+}
+
 // QW-002: minimal inline markdown-to-HTML renderer. Handles the constructs
 // found in quay task bodies: fenced code blocks, ATX headings (#/##/###),
 // bold (**...**), inline code (`...`), unordered lists (- item), ordered
 // lists (1. item), horizontal rules (---/***), and paragraph breaks.
 // Uses a line-by-line state machine; no external dependency.
-export function renderMarkdown(text: string | undefined | null): string {
+// gap-webui-goal-detail-no-entity-links: two backward-compatible opt-ins on renderMarkdown
+// (default opts reproduce the exact pre-task output, so the task page and /live are untouched):
+//   - `headingOffset` (default 1): the ATX '#' count's offset. The task detail page keeps the
+//     historical `# → h2, ## → h3` demotion ("h1 is the page title"); the three ENTITY detail
+//     pages (/goal /adr /doc) pass 0 so a body `## Section` renders as `<h2>` and never skips
+//     straight from the page `<h1>` to `<h3>` (AC5).
+//   - `linkResolver` (default undefined): when set, bare entity ids (AC-?\d+ / GOAL-\d+ / DIR-\d+
+//     / ADR-\d+) the resolver maps to an href are turned into `<a>` links; ids the resolver
+//     rejects stay plain text (AC3 — never fabricate a dead link).
+export interface RenderMarkdownOpts {
+  linkResolver?: (id: string) => string | null;
+  headingOffset?: number;
+}
+
+// Entity-id shape shared by the three entity detail pages' body back-links. `AC-?` admits both
+// the prose form "AC156" (no dash) and the canonical "AC-156" — the resolver normalizes to the
+// canonical id before its existence lookup.
+const ENTITY_REF_RE = /\b(AC-?\d+|GOAL-\d+|DIR-\d+|ADR-\d+)\b/g;
+
+// Pure linkifier: turn every entity-shaped token for which `hrefFor` returns a non-null href into
+// an <a>; leave the rest as plain text (AC3 — a non-existent id must never become a dead link).
+export function linkifyEntities(text: string, hrefFor: (id: string) => string | null): string {
+  return text.replace(ENTITY_REF_RE, (match, id: string) => {
+    const href = hrefFor(id);
+    return href ? `<a href="${escapeHtml(href)}">${id}</a>` : match;
+  });
+}
+
+export function renderMarkdown(text: string | undefined | null, opts: RenderMarkdownOpts = {}): string {
+  const headingOffset = opts.headingOffset ?? 1;
+  const linkResolver = opts.linkResolver;
   const lines = String(text ?? "").split(/\r?\n/);
   const out: string[] = [];
   let inFence = false;
@@ -477,10 +593,10 @@ export function renderMarkdown(text: string | undefined | null): string {
       if (cbm) {
         const checked = cbm[1].toLowerCase() === "x";
         out.push(
-          `<li class="task-list-item"><input type="checkbox" disabled${checked ? " checked" : ""}> ${inlineMarkdown(cbm[2])}</li>`
+          `<li class="task-list-item"><input type="checkbox" disabled${checked ? " checked" : ""}> ${inlineMarkdown(cbm[2], opts)}</li>`
         );
       } else {
-        out.push(`<li>${inlineMarkdown(item)}</li>`);
+        out.push(`<li>${inlineMarkdown(item, opts)}</li>`);
       }
     }
     out.push(`</${tag}>`);
@@ -491,7 +607,7 @@ export function renderMarkdown(text: string | undefined | null): string {
   function flushPara(): void {
     if (paraBuf.length === 0) return;
     const text2 = paraBuf.join(" ");
-    if (text2.trim()) out.push(`<p>${inlineMarkdown(text2)}</p>`);
+    if (text2.trim()) out.push(`<p>${inlineMarkdown(text2, opts)}</p>`);
     paraBuf = [];
   }
 
@@ -520,7 +636,7 @@ export function renderMarkdown(text: string | undefined | null): string {
     if (hm) {
       flushList();
       flushPara();
-      const lvl = hm[1].length + 1; // # → h2, ## → h3, ### → h4 (h1 is the page title)
+      const lvl = hm[1].length + headingOffset; // default # → h2, ## → h3 (task page); detail pages pass 0 → ## → h2
       out.push(`<h${lvl}>${escapeHtml(hm[2].trim())}</h${lvl}>`);
       continue;
     }
@@ -576,19 +692,20 @@ export function renderMarkdown(text: string | undefined | null): string {
 
 // Inline markdown: code spans, bold, italic — with correct HTML escaping.
 // Process segments: alternate between code spans and the rest.
-export function inlineMarkdown(text: string): string {
+export function inlineMarkdown(text: string, opts: RenderMarkdownOpts = {}): string {
   // Process segments: alternate between code spans and the rest.
   const parts = text.split(/(`[^`]*`)/);
   return parts.map((part, i) => {
     if (i % 2 === 1) {
-      // Code span
+      // Code span — entity ids inside code are code, never links.
       const inner = part.slice(1, -1);
       return `<code>${escapeHtml(inner)}</code>`;
     }
-    // Regular text: escape HTML, then apply bold/italic
+    // Regular text: escape HTML, then apply bold/italic, then linkify entity ids.
     let s = escapeHtml(part);
     s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
     s = s.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+    if (opts.linkResolver) s = linkifyEntities(s, opts.linkResolver);
     return s;
   }).join("");
 }
@@ -729,8 +846,16 @@ function navItem(key: string, label: string, current: string, prefix: "nav-" | "
  *  inactive → text + weight 600), and the Board NEW badge. The `.site-nav` strip sits OUTSIDE
  *  <main> (an independent full-width bar) and is hidden on mobile — its links live in the
  *  hamburger menu (renderMobileMenu). */
+/** AC4 (gap-webui-a11y-focus-ring-and-token-contrast-unvalidated): skip-link — the first
+ *  keyboard tab stop on every page, jumping straight to <main id="main">. Emitted as the FIRST
+ *  element of the site nav so every page that renders renderSiteNav gets it with zero per-page
+ *  churn; the .skip-link class (pageStyles) keeps it visually hidden until :focus. */
+export function renderSkipLink(): string {
+  return html`<a class="skip-link" href="#main">跳到主要内容</a>`;
+}
+
 export function renderSiteNav(current: string): string {
-  return html`<nav class="site-nav" aria-label="Site navigation">
+  return html`${renderSkipLink()}<nav class="site-nav" aria-label="Site navigation">
     <div class="nav">
       <span class="nav-brand">Quay</span>
       ${SITE_NAV_GROUPS.map((g) => html`<span class="nav-group">${
@@ -771,6 +896,14 @@ export function renderMobileChrome(current: string, pageLabel: string): string {
       ${renderMobileMenu(current)}
     </nav>
   </div>`;
+}
+
+// gap-webui-goal-detail-no-entity-links (AC4): the three entity detail pages (/goal /adr /doc)
+// each render a "back to the list" link as the FIRST element of <main> — previously none of them
+// had any way back to their list (main a[href="/goal"] did not exist). One shared helper, one
+// href each, so the affordance stays consistent and is never re-invented per page.
+export function renderBackLink(href: string): string {
+  return html`<p class="meta"><a class="back-link" href="${href}">← 返回列表</a></p>`;
 }
 
 // ── Small shared helpers used by multiple domain handlers ────────────────────

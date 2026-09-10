@@ -213,7 +213,7 @@ export function enumerateGates(root) {
 
 /** Static checkers from runner-static-gate.ts's run_static_checks + CI workflows (same mechanical source as checker-mutation-check.sh — run_static_checks moved OUT of scripts/test.sh, gap-ac128-hub-split-harness-concerns). */
 export function enumerateStaticCheckers(root) {
-  const staticGate = readFile(path.join(root, "plugin", "scripts", "runner-static-gate.ts"));
+  const staticGate = readFile(path.join(root, "plugin", "scripts", "runner-static-gate.ts"));  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   const names = new Set();
   for (const m of extractFunctionBody(staticGate, "run_static_checks").matchAll(/\$\{repo_root\}\/plugin\/scripts\/([A-Za-z0-9_.-]+)\.(?:sh|ts)/g)) {
     names.add(m[1]);

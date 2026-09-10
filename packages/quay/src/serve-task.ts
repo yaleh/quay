@@ -465,7 +465,7 @@ export async function handleTaskList(
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay task list — ${escapeHtml(manifest.name)}">${modernistStyles()}${pageStyles()}<title>Quay — ${escapeHtml(manifest.name)}</title></head>
-    <body>${renderMobileChrome("tasks", "task list")}${renderSiteNav("tasks")}<main>
+    <body>${renderMobileChrome("tasks", "task list")}${renderSiteNav("tasks")}<main id="main">
       <!-- QX-015 orientation banner removed by DIR-007 (iteration 10): misleading
            needs-human placement + disproportionate layout cost. -->
       <h1>Quay — task list (${escapeHtml(manifest.id)} provider)</h1>
@@ -504,19 +504,36 @@ export async function handleTaskList(
 /** Render one attempt's mechanical-fan-in cell (gap-mech-fan-in-log-webui-visible-clickable B2):
  *  landed/red + first failing step + lock hold + suite outcome + landed sha, plus a view/download
  *  link when the record carries a fanInLog file name. A null record renders an honest "—" (never a
- *  fabricated "landed"). */
-export function renderFanInCell(taskId: string, r: WorkerOutcomeRecord): string {
+ *  fabricated "landed").
+ *
+ *  gap-dashboard-fanin-card-hide-reason: `mfi.reason` is unbounded free text (measured up to 1084
+ *  chars) — right on /task/<id>'s Runs table (one cell per attempt), but it balloons the dashboard's
+ *  five-row FAN-IN overview card. The `showReason` option (default true → /task/<id> unchanged) lets
+ *  the dashboard skip that one span entirely, rather than truncate. */
+export function renderFanInCell(
+  taskId: string,
+  r: WorkerOutcomeRecord,
+  opts: { showReason?: boolean } = {},
+): string {
   const mfi = r.mechanical_fan_in;
   if (mfi == null) return "—";
+  const showReason = opts.showReason ?? true;
   const parts: string[] = [];
-  if (mfi.outcome === "landed") parts.push(html`<strong>landed</strong>`);
-  else if (mfi.outcome === "red") parts.push(html`<strong>red</strong>`);
-  else parts.push(escapeHtml(mfi.outcome ?? "?"));
-  if (mfi.outcome === "red" && mfi.step) parts.push(`step ${escapeHtml(mfi.step)}`);
-  if (mfi.reason != null) parts.push(html`<span style="font-size:0.75rem;color:var(--color-neutral-700)">${escapeHtml(mfi.reason)}</span>`);
-  if (mfi.lockHoldSecs != null) parts.push(`lock ${mfi.lockHoldSecs}s`);
+  // gap-dashboard-status-tag-badges: landed/red/unknown were bare <strong> text with no background,
+  // so the outcome blended into the row copy. Reuse the .tag soft-badge set (landed → tag-positive,
+  // red → tag-accent, unknown → tag-neutral); the failing step tag shares tag-neutral so both read
+  // as one badge family. Reason/lock/suite/sha stay plain text.
+  if (mfi.outcome === "landed") parts.push(html`<span class="tag tag-positive">landed</span>`);
+  else if (mfi.outcome === "red") parts.push(html`<span class="tag tag-accent">red</span>`);
+  else parts.push(html`<span class="tag tag-neutral">${escapeHtml(mfi.outcome ?? "?")}</span>`);
+  if (mfi.outcome === "red" && mfi.step) parts.push(html`<span class="tag tag-neutral">step ${escapeHtml(mfi.step)}</span>`);
+  if (showReason && mfi.reason != null) parts.push(html`<span style="font-size:0.75rem;color:var(--color-neutral-700)">${escapeHtml(mfi.reason)}</span>`);
+  // gap-dashboard-fanin-monospace-ids: sha/lock are git hash / duration data — same monospace stack as
+  // the 「最近提交」 card (serve-dashboard.ts) and the system resources card (serve-system.ts), so they
+  // align vertically and read as data instead of prose. Zero extra font files (system stack).
+  if (mfi.lockHoldSecs != null) parts.push(html`<span style="font-family:ui-monospace,monospace">lock ${mfi.lockHoldSecs}s</span>`);
   if (mfi.suiteOutcome != null) parts.push(`suite ${escapeHtml(mfi.suiteOutcome)}`);
-  if (mfi.landedSha != null) parts.push(`sha <code>${escapeHtml(mfi.landedSha.slice(0, 7))}</code>`);
+  if (mfi.landedSha != null) parts.push(html`<span style="font-family:ui-monospace,monospace">sha <code>${escapeHtml(mfi.landedSha.slice(0, 7))}</code></span>`);
   if (mfi.fanInLog != null && mfi.fanInLog.length > 0) {
     parts.push(html`<a href="/fan-in-log/${encodeURIComponent(taskId)}/${encodeURIComponent(mfi.fanInLog)}">view</a> · <a href="/fan-in-log/${encodeURIComponent(taskId)}/${encodeURIComponent(mfi.fanInLog)}/download">download</a>`);
   }
@@ -640,7 +657,7 @@ export async function handleTaskDetail(
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(t.id)}: ${escapeHtml(t.title)}">${modernistStyles()}${pageStyles()}<title>${escapeHtml(t.id)}</title></head>
-    <body>${renderMobileChrome("tasks", t.id)}${renderSiteNav("tasks")}<main>
+    <body>${renderMobileChrome("tasks", t.id)}${renderSiteNav("tasks")}<main id="main">
       <!-- QX-011: back link uses ?from= param to restore filter context (UQ-009).
            The site-nav above already carries the full 15-view nav; this contextual
            link restores the list's filter/sort/page context. -->

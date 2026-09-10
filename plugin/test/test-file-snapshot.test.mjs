@@ -1,4 +1,4 @@
-// @test-group lowconc
+// @test-group engine
 // gap-global-count-assertions-fragile-relative-baseline — AC2/AC3: the baseline-snapshot helper
 // (plugin/scripts/test-file-snapshot.sh) replaces fragile ABSOLUTE global-count assertions
 // (EXPECTED_ENGINE = 58 — stale the moment any test file is added, B3-2 red on fan-in) with a

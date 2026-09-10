@@ -133,6 +133,7 @@ import { runOnce, isRunnerInFlight, type SuiteState as TriggerSuiteState } from 
 // excluded). The runner snapshots that surface to DETECT a mid-round edit to a file the running round
 // reads — reuse the single source, never a hand-rolled copy (CLAUDE.md 硬规则 1).
 import { resolveAssertionSurface } from "./precommit-guard.ts";
+import { resolveKernelSibling, resolveKernelPluginRoot } from "./driver-runtime.ts";
 import { getLoad1 } from "./checker-cost.ts";
 import { scanFamily, kindForFile } from "./known-load-sensitive.ts";
 // gap-leak-residue-per-run-namespace-isolation — the runner-level unified cleanup REUSES the
@@ -167,7 +168,7 @@ import { readSuiteParams, suiteParamsToEnv } from "./suite-params.ts";
 // suite (harness-critical must be fully verified). `writeState` is imported but NOT re-exported (it
 // stays module-private to this boundary, same as before the split).
 import { gateScanCause, isFailureLine, buildStaticCheckFailures } from "./runner-red-parse.ts";
-import { concurrentSuiteSlots, hostParallelism, spliceConcurrency, defaultLowconcConcurrency } from "./runner-concurrency.ts";
+import { concurrentSuiteSlots, hostParallelism, spliceConcurrency, defaultLowconcConcurrency, testProcessesInUse } from "./runner-concurrency.ts";
 import { readVerifiedCommit, readTreeState, contentHash, snapshotAssertionSurface } from "./runner-tree-state.ts";
 import type { AssertionSurfaceSnapshot } from "./runner-tree-state.ts";
 import { writeState, appendVerificationRound } from "./runner-state-write.ts";
@@ -181,6 +182,21 @@ export { readStateRunId, writeStateGuarded, appendVerificationRound } from "./ru
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
+
+// gap-perfile-cpu-cost-collection — route (a) 子进程自报 preload seam. The preload module
+// (plugin/scripts/per-file-cpu-report.mjs), loaded into every node process of a measured suite via
+// `NODE_OPTIONS=--require=<this>`, reports each isolated test-file child's OWN process.cpuUsage() into
+// a per-run dir; measure-suite-reporter.mjs reads it back to append `cpu_ms=<n>` to the `__PERFILE__`
+// line. Append (never overwrite) a pre-existing NODE_OPTIONS so a caller-set value survives (NODE_OPTIONS
+// is space-separated flags; the last --require wins in node, but we only ADD ours, never drop theirs).
+export const PER_FILE_CPU_PRELOAD = path.join(resolveKernelPluginRoot(), "scripts", "per-file-cpu-report.mjs");
+
+/** Append the per-file-CPU preload `--require` to an existing NODE_OPTIONS value (or build it fresh). */
+export function withPerFileCpuPreload(existingNodeOptions: string | undefined): string {
+  const requireFlag = `--require=${PER_FILE_CPU_PRELOAD}`;
+  const prior = existingNodeOptions && existingNodeOptions.trim() ? existingNodeOptions.trim() : "";
+  return prior ? `${prior} ${requireFlag}` : requireFlag;
+}
 
 export type SuiteStateValue = "running" | "green" | "red";
 // gap-full-suite-state-red-no-failure-detail-static-check-invisible AC3 — a FOURTH reason value:
@@ -395,6 +411,18 @@ export interface SuiteState {
    */
   staticCheck?: SuiteStateStaticCheck;
   /**
+   * gap-not-evaluated-checkers-never-persisted — the checkers that could NOT be evaluated this round
+   * (checker-cost-lib's `STATIC_CHECK_NOT_EVALUATED: <name>` machine line, exit 3 = a THIRD state, NOT
+   * a red and NOT a pass). A checker that "reads unclassifiable input" exits 0 and the suite passes
+   * GREEN, so its inertness is invisible on the `failedCheckers` axis — the round-xx `direct-to-develop-
+   * bypass-check` shape (unclassifiable-commits-in-range, exit 0, the six meta-driver commits it was
+   * supposed to catch sailed straight through). This field is ALWAYS present on a terminal state (empty
+   * array = "no checker was not-evaluated this round" — DISTINGUISHABLE from an absent field = "this
+   * dimension was never recorded", hard rule 3b). Written top-level (NOT inside `staticCheck`, which is
+   * absent on green) so a GREEN round still carries the inert-guard signal.
+   */
+  notEvaluatedCheckers?: NotEvaluatedChecker[];
+  /**
    * gap-full-suite-state-red-no-failure-detail-static-check-invisible AC6 — the RUNNER's PID, written
    * on EVERY state (via the `base` object) so a consumer (suite-state-trigger's runOnce crash-watchdog)
    * can tell "the suite is genuinely running" (PID alive ⇒ `process.kill(pid, 0)` does not throw ESRCH)
@@ -539,6 +567,11 @@ const STATIC_CHECK_RATCHET_RE = /^ratchet ceiling:\s*(\d+);\s*new since baseline
 // checker-cost-lib fail-closed line (gap-static-check-red-failures-capture-only-task-contract-shape):
 //   STATIC_CHECK_FAILED: <name> exit=<rc>  (one line per failing checker, on stderr)
 const STATIC_CHECK_FAILED_RE = /^STATIC_CHECK_FAILED:\s*(\S+)\s+exit=(\d+)/;
+// checker-cost-lib not-evaluated line (gap-not-evaluated-checkers-never-persisted):
+//   STATIC_CHECK_NOT_EVALUATED: <name>  (one line per inert checker, on stderr, exit 3 → return 0)
+// No exit code — it is a THIRD state (NOT a red, NOT a pass), so it must never match
+// isStaticCheckFailureLine / STATIC_CHECK_FAILED_RE (which would turn an inert guard into a red).
+const STATIC_CHECK_NOT_EVALUATED_RE = /^STATIC_CHECK_NOT_EVALUATED:\s*(\S+)/;
 
 /** Does a stream line carry a STATIC-CHECK FAILURE signal (a passing run never emits it)? */
 export function isStaticCheckFailureLine(line: string): boolean {
@@ -600,6 +633,33 @@ export function extractFailClosedChecker(line: string): FailClosedChecker | null
   const exitCode = Number(m[2]);
   if (!Number.isInteger(exitCode) || exitCode < 0) return null;
   return { name: m[1], exitCode, line };
+}
+
+/**
+ * One NOT-EVALUATED static-check checker (gap-not-evaluated-checkers-never-persisted): checker-cost-lib
+ * emits `STATIC_CHECK_NOT_EVALUATED: <name>` (one line per inert checker, on stderr) when a
+ * run_static_checks checker exits 3 (a THIRD state — the checker could not evaluate its input, so it
+ * neither fail-closed (red) nor passed). The whole point of this task: the line was HONESTLY produced
+ * then thrown away at the stderr boundary — never parsed, never persisted, so an inert guard is a
+ * structurally-undetectable failure class. `name` is the checker id; `line` the raw stream line (no
+ * exit code — there is none worth recording: exit 3 is the constant NOT-EVALUATED code, not a
+ * per-checker value).
+ */
+export interface NotEvaluatedChecker {
+  name: string;
+  line: string;
+}
+
+/**
+ * Parse ONE checker-cost-lib not-evaluated line into a NotEvaluatedChecker (best-effort; null when the
+ * line is not a `STATIC_CHECK_NOT_EVALUATED:` shape). ⛔ A NOT-EVALUATED line must NEVER match the
+ * fail-closed parse (`STATIC_CHECK_FAILED_RE` requires `exit=<rc>`, which this line lacks) and must
+ * NEVER be flagged by `isStaticCheckFailureLine` (it is not a failure — the suite continues GREEN).
+ */
+export function extractNotEvaluatedChecker(line: string): NotEvaluatedChecker | null {
+  const m = STATIC_CHECK_NOT_EVALUATED_RE.exec(line);
+  if (!m) return null;
+  return { name: m[1], line };
 }
 
 
@@ -929,6 +989,10 @@ export interface SuiteRoundRecord {
    * that lands measure-history.jsonl, so the two carriers share one 口径: repo-root-relative `file`
    * keys via normalizePerFileKey, duration>0 filter). Present only when the round actually emitted
    * __PERFILE__ lines (a scoped/legacy run with no reporter omits the field — never a fabricated []).
+   * gap-perfile-cpu-cost-collection — each record ALSO carries `cpuMs` (the file's OWN
+   * process.cpuUsage() in ms, route a 子进程自报) when the reporter's `__PERFILE__` line carried
+   * `cpu_ms=`; absent on legacy lines (缺键 ≠ 0, the same absent-field contract as endedAtMs). This
+   * writer forms perFile from the shared parser, so cpuMs rides the record automatically — 禁止只改一边.
    */
   perFile?: PerFileRecord[];
   /**
@@ -1058,23 +1122,29 @@ export function isAbortLine(line: string): boolean {
 
 /**
  * AC1 — the DEFAULT laneCount is nproc-derived, using the SAME formula as test.sh's AC5
- * derivation: max(1, floor(nproc × oversub / S)). nproc = host parallelism
- * (os.availableParallelism() — read-host, never a literal, hard-rule-4 推论二 family); S = the
- * concurrent-suite slot count (旋钮② QUAY_MAX_CONCURRENT_SUITES, default 1 — the SAME
- * definition-point read as concurrentSuiteSlots()); oversub = 旋钮③ QUAY_MAX_OVERSUBSCRIPTION
- * (default 1, current value not a recommendation).
+ * derivation: max(1, floor((nproc − in_use) × oversub / S)). nproc = host parallelism
+ * (os.availableParallelism() — read-host, never a literal, hard-rule-4 推论二 family); in_use =
+ * testProcessesInUse() (the cross-layer throttle-able node --test process count — the
+ * gap-process-budget-in-use-structurally-zero-never-throttles fix: the pre-fix in_use was
+ * structurally 0 ⇒ the "subtract in-use" term never subtracted, so a busy host still derived the
+ * idle-host lane count); S = the concurrent-suite slot count (旋钮② QUAY_MAX_CONCURRENT_SUITES,
+ * default 1 — the SAME definition-point read as concurrentSuiteSlots()); oversub = 旋钮③
+ * QUAY_MAX_OVERSUBSCRIPTION (default 1, current value not a recommendation).
  *
  * gap-suite-budget-oversubscribe (human 14:4xZ 修正方向 — (b) 认领制/(c) 锁发配额 均被否，纯计算零新增
  * 运行时状态): the previous AC74 formula (nproc ÷ AMPLIFICATION on the runner, nproc − in_use on the
  * direct path) had NO structural bound tying the sum of all running suites' lanes to the host: two
- * concurrent suites derived nproc each (16+8=24 > 16, load 29.23 on 2026-08-14 14:39Z). The new
- * formula is PURE computation — S suites each derive nproc×oversub/S ⇒ Σ lane ≤ nproc×oversub
- * structurally, no claim-ledger / no lock-carried quota. A single suite gets nproc/S (8 on this host)
- * — the known cost of the pure-computation approach (判据4), not a defect; express "single suite uses
- * the whole host" via the oversub knob instead (⛔ never dynamic run-count amplification).
- * RESOURCE_GATE_NPROC / QUAY_MAX_CONCURRENT_SUITES / QUAY_MAX_OVERSUBSCRIPTION are the
- * deterministic test seams (RESOURCE_GATE_NPROC the same seam test.sh reads; the S/oversub knobs are
- * read via their production env so tests drive them directly).
+ * concurrent suites derived nproc each (16+8=24 > 16, load 29.23 on 2026-08-14 14:39Z). The S divisor
+ * is the structural bound — S suites each derive ≤ nproc×oversub/S ⇒ Σ lane ≤ nproc×oversub, no
+ * claim-ledger / no lock-carried quota. The in_use subtraction reintroduced here is a ONE-DIRECTIONAL
+ * DOWNWARD adjustment WITHIN that bound: it only ever reduces the lane count (a busy host takes fewer
+ * lanes), so it cannot reintroduce the cross-suite oversubscription — the worst case (in_use=0) is the
+ * pure formula. A single suite on an idle host gets nproc/S; express "single suite uses the whole
+ * host" via the oversub knob instead (⛔ never dynamic run-count amplification).
+ * RESOURCE_GATE_NPROC / QUAY_MAX_CONCURRENT_SUITES / QUAY_MAX_OVERSUBSCRIPTION / RESOURCE_GATE_TEST_NODE_PROCS
+ * are the deterministic test seams (RESOURCE_GATE_NPROC the same seam test.sh reads; the S/oversub
+ * knobs are read via their production env so tests drive them directly; RESOURCE_GATE_TEST_NODE_PROCS
+ * pins in_use for the budget-aware half).
  */
 export function defaultLaneCount(): number {
   const ncpuRaw = process.env.RESOURCE_GATE_NPROC ?? String(
@@ -1088,9 +1158,10 @@ export function defaultLaneCount(): number {
   // pre-fix「只让槽不让 lane」double oversubscription (each suite × nproc×oversub/S with no bound on the
   // slot-less one). A lone suite (no yielded slot) keeps the pure S formula unchanged (AC2 no-regression).
   const yielded = yieldedSuiteSlotCount();
+  const inUse = testProcessesInUse();
   const oversubRaw = Number(process.env.QUAY_MAX_OVERSUBSCRIPTION ?? "1");
   const oversub = Number.isFinite(oversubRaw) && oversubRaw > 0 ? oversubRaw : 1;
-  return Math.max(1, Math.floor((Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1) * oversub / (slots + yielded)));
+  return Math.max(1, Math.floor(((Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1) - inUse) * oversub / (slots + yielded)));
 }
 
 /**
@@ -1422,7 +1493,7 @@ export function provisionOneShotWorktree(mainRoot: string): string {
   });
   // Provision the gitignored runtime files the fresh worktree lacks: config.yml + vendor dist
   // (worktree-include.sh) + node_modules symlink + Core CLI dist build (provision-verify-worktree.sh).
-  const provisionScript = path.join(__dirname, "provision-verify-worktree.sh");
+  const provisionScript = path.join(resolveKernelPluginRoot(), "scripts", "provision-verify-worktree.sh");
   execFileSync("bash", [provisionScript, "--worktree", wtPath, "--root", mainRoot], {
     cwd: mainRoot,
     encoding: "utf8",
@@ -1436,7 +1507,7 @@ export function provisionOneShotWorktree(mainRoot: string): string {
  *  the suite verdict (the leak is reclaimable by worktree-branch-hygiene-check.sh). */
 export function teardownOneShotWorktree(mainRoot: string, wtPath: string): void {
   try {
-    const provisionScript = path.join(__dirname, "provision-verify-worktree.sh");
+    const provisionScript = path.join(resolveKernelPluginRoot(), "scripts", "provision-verify-worktree.sh");
     execFileSync("bash", [provisionScript, "--worktree", wtPath, "--root", mainRoot, "--teardown"], {
       cwd: mainRoot,
       encoding: "utf8",
@@ -1462,7 +1533,7 @@ export function teardownOneShotWorktree(mainRoot: string, wtPath: string): void 
  * to the machine.
  */
 export function checkResourceGate(root: string): { ok: boolean; output: string } {
-  const gate = path.join(__dirname, "resource-gate.sh");
+  const gate = path.join(resolveKernelPluginRoot(), "scripts", "resource-gate.sh");
   const gateArgs = ["--for", "full-suite"];
   if (!isGitWorktree(root)) gateArgs.push("--main-repo-priority");
   try {
@@ -1843,6 +1914,11 @@ export async function run(argv: string[]): Promise<number> {
   // bound. Every producer inherits it from the child env, INCLUDING worktree runs (the same env
   // flow — a worktree full-suite run passes --root <worktree>, not a different spawn path).
   const shortRunId = runId.replace(/-/g, "").slice(0, 8);
+  // gap-perfile-cpu-cost-collection — the per-run directory the preload seam writes each test file's
+  // own process.cpuUsage() into (keyed by sha256(path.resolve(file))[:16]); measure-suite-reporter
+  // reads it back at test:complete to append cpu_ms. Per-run so two concurrent suites never collide
+  // on the same file key; removed post-suite (see the cleanup block).
+  const perFileCpuDir = path.join(stateDir, `per-file-cpu-${shortRunId}`);
 
   // gap-leak-residue-per-run-namespace-isolation AC2/AC3 — RUNNER-LEVEL UNIFIED CLEANUP runs
   // BEFORE the suite starts (and hence before the suite-tail leak-scan — the 次序 constraint):
@@ -1899,7 +1975,11 @@ export async function run(argv: string[]): Promise<number> {
   // the production path (no env) is unchanged.
   if (process.env.QUAY_TEST_SKIP_PRE_SUITE_REAPER !== "1") {
     try {
-      execFileSync("node", ["--no-warnings", "--experimental-strip-types", path.join(__dirname, "worktree-process-reaper.ts"), "--orphans", "--root", root, "--json"], { stdio: "ignore" });
+      const reaper = resolveKernelSibling("worktree-process-reaper.ts");
+      const reaperArgs = reaper
+        ? (reaper.stripTypes ? ["--experimental-strip-types", reaper.path] : [reaper.path])
+        : ["--experimental-strip-types", path.join(resolveKernelPluginRoot(), "scripts", "worktree-process-reaper.ts")];
+      execFileSync("node", ["--no-warnings", ...reaperArgs, "--orphans", "--root", root, "--json"], { stdio: "ignore" });
     } catch (e) {
       process.stderr.write(`full-suite-runner: pre-suite orphan-probe reap failed (continuing): ${e instanceof Error ? e.message : String(e)}\n`);
     }
@@ -2080,13 +2160,16 @@ export async function run(argv: string[]): Promise<number> {
     const intervalArg = Number(process.env.QUAY_SUITE_LOAD_SAMPLER_INTERVAL ?? "5");
     const interval = Number.isFinite(intervalArg) && intervalArg > 0 ? intervalArg : 5;
     const outFile = path.join(stateDir, `suite-load-${runId}.jsonl`);
+    const sampler = resolveKernelSibling("suite-load-sampler.ts");
+    const samplerArgs = sampler
+      ? (sampler.stripTypes ? ["--experimental-strip-types", sampler.path] : [sampler.path])
+      : ["--experimental-strip-types", path.join(resolveKernelPluginRoot(), "scripts", "suite-load-sampler.ts")];
     try {
       const child = spawn(
         process.execPath,
         [
           "--no-warnings",
-          "--experimental-strip-types",
-          path.join(__dirname, "suite-load-sampler.ts"),
+          ...samplerArgs,
           "--state-file",
           stateFile,
           "--out-file",
@@ -2270,6 +2353,12 @@ export async function run(argv: string[]): Promise<number> {
     // (no main regression, AC2); on a one-shot round it is the real main checkout and the worktree
     // round's checkers read the SAME data as a main run ⇒ verdicts are identical (AC3).
     QUAY_MAIN_CHECKOUT: mainRoot,
+    // gap-perfile-cpu-cost-collection — per-file CPU collection (route a 子进程自报). The preload seam
+    // (NODE_OPTIONS=--require) loads into every node process of the suite; each isolated test-file child
+    // reports its own process.cpuUsage() into perFileCpuDir at exit, and measure-suite-reporter reads it
+    // back to append cpu_ms. NODE_OPTIONS is APPENDED (never overwritten) so a caller-set value survives.
+    QUAY_PERFILE_CPU_DIR: perFileCpuDir,
+    NODE_OPTIONS: withPerFileCpuPreload(process.env.NODE_OPTIONS),
   };
   if (useSystemdRun) {
     const sdArgv = buildSystemdRunArgv(command, systemdLimits);
@@ -2379,6 +2468,12 @@ export async function run(argv: string[]): Promise<number> {
   // capture could not see. Accumulated on every line alongside staticCheckDetails; failures[] +
   // staticCheck.failedCheckers carry them on a static-check red (AC1/AC2).
   const failClosedCheckers: FailClosedChecker[] = [];
+  // gap-not-evaluated-checkers-never-persisted — the INERT checkers (`STATIC_CHECK_NOT_EVALUATED:
+  // <name>` lines). Accumulated on every line alongside failClosedCheckers, but written to the state
+  // on EVERY terminal state (green AND red) — NOT gated on staticCheckDetected, because an inert
+  // checker exits 0 and the suite passes GREEN (the very invisibility this task fixes). Sibling of
+  // failClosedCheckers: red checkers are named, inert checkers must be too (hard rule 3: enumerate).
+  const notEvaluatedCheckers: NotEvaluatedChecker[] = [];
   let staticCheckViolations: number | null = null;
   let staticCheckTaskCount: number | null = null;
   let staticCheckCeiling: number | null = null;
@@ -2548,10 +2643,10 @@ export async function run(argv: string[]): Promise<number> {
   // phase ⇒ every spawned round gets ≥1 phase record (AC4 coverage 100%, incl. red/abort rounds).
   let phaseNodeActive = false; // a phase's node --test is the current stream producer (its __GROUP__ closes it)
   let overlapPhaseActive = false; // the QUAY_PHASE_OVERLAP combined serial+lowconc window is active
-  // gap-suite-scheduler-legacy-phase-splitting-cleanup: overlapPhaseActive / phaseOverlapRan /
-  // mainTailOverlap* below are LEGACY-FALLBACK observability — they read `overlap: running` /
-  // `overlap_<phase>_done=1` / `main-tail-overlap:` markers that ONLY the QUAY_SUITE_SCHEDULER=0
-  // phased path emits; under the unified scheduler these stay false/null (the fields stay absent).
+  // gap-suite-scheduler-legacy-phase-splitting-cleanup: overlapPhaseActive / phaseOverlapRan
+  // below are LEGACY-FALLBACK observability — they read `overlap: running` /
+  // `overlap_<phase>_done=1` markers that ONLY the QUAY_SUITE_SCHEDULER=0 phased path emits; under
+  // the unified scheduler these stay false/null (the fields stay absent).
   // gap-phase-overlap-field-always-false-negative — LATCHED (never reset): the suite ACTUALLY ran
   // the overlap scheduling. Unlike overlapPhaseActive (a transient window state that resets to false
   // when the window closes), this latches true the moment test.sh emits `overlap: running` and stays
@@ -2559,15 +2654,6 @@ export async function run(argv: string[]): Promise<number> {
   // the runner's own process.env.QUAY_PHASE_OVERLAP, which the production chain (fan-in-execute.js)
   // never sets (the env knob defaults to 1 only INSIDE test.sh, invisible to this parent process).
   let phaseOverlapRan = false;
-  // gap-suite-main-overlaps-load-sensitive-tail-experiment — main-tail-overlap observability. LATCHED
-  // from test.sh's `main-tail-overlap: lanes=N [load=X]` stream marker (emitted by the tail-overlap
-  // watcher when it actually fires main early), NOT from process.env.QUERY_MAIN_TAIL_OVERLAP — the
-  // same false-negative lesson as phaseOverlapRan: the production chain never sets the env on this
-  // parent process (the knob default 0 lives only inside test.sh). null on a baseline/sequential
-  // round (knob 0, or trigger never fired) — the reader tolerates absence (same absent-field
-  // contract as phase_overlap).
-  let mainTailOverlapLanes: number | null = null;
-  let mainTailOverlapLoad: number | null = null;
   let mainClosed = false; // the main→end boundary already fired
   // gap-verification-round-phases-overlap-merged — on the overlap path test.sh emits
   // `__OVERHEAD__ overlap_<phase>_done=1` right after EACH parallel phase's `wait`. The window
@@ -2584,6 +2670,23 @@ export async function run(argv: string[]): Promise<number> {
   const phaseOverlapSerialDone = /^__OVERHEAD__\s+overlap_serial_done=1/;
   const phaseOverlapLowconcDone = /^__OVERHEAD__\s+overlap_lowconc_done=1/;
   const phaseOverlapDone = /^__OVERHEAD__\s+overlap_(?:serial|lowconc)_done=1/;
+  // gap-mechanical-fan-in-loses-per-phase-accounting — the UNIFIED SCHEDULER path (the default since
+  // gap-suite-dynamic-waterline-scheduler) runs serial/lowconc/main CONCURRENTLY via the group-budget
+  // waterline, so it emits NO `selected N files (groups=serial|lowconc)` serial-phase markers — the
+  // legacy boundaries above never fire and the whole concurrent test window collapses into ONE lanes=1
+  // "static" phase (the record then claims a ~47s serial run while the real suite ran minutes at
+  // laneCount — the record and the run diverged, and the main-phase PSI went dark). Its real markers are
+  // test.sh's `scheduler: unified group-budget scheduler …` (the test window START) and the scheduler's
+  // own `__OVERHEAD__ <group>_phase_ms` group-close burst (the test window END). The scheduler's
+  // serial/lowconc/main groups OVERLAP, so there is no honest per-group differential — the whole
+  // concurrent window is ONE "main" phase at laneCount (its psi is the window's psi), with the
+  // per-group walls still carried by the *_phase_ms fields (unchanged). `scheduler_ms` is the scheduler's
+  // own always-emitted total-wall marker — the main→end fallback when main never closes (e.g. a bucket
+  // with no main-group files).
+  let schedulerActive = false; // the unified scheduler path is the current stream producer
+  const schedulerStartRe = /^scheduler:\s+unified group-budget scheduler/;
+  const schedulerMainDoneRe = /^__OVERHEAD__\s+main_phase_ms=/;
+  const schedulerEndRe = /^__OVERHEAD__\s+scheduler_ms=/;
   // gap-suite-main-overlaps-load-sensitive-tail-experiment — test.sh's tail-overlap watcher announces
   // its fire on the stream. Distinct from the __OVERHEAD__ family (which the phase boundary machine
   // treats as the end-of-round burst) so a mid-window fire can never prematurely close the overlap
@@ -2622,7 +2725,27 @@ export async function run(argv: string[]): Promise<number> {
     // cumulative counters at each boundary and records the completed phase). Pure addition: it
     // cannot flip the verdict, and a boundary-detection failure only affects the `phases` field.
     if (phaseAccount) {
-      if (phaseMarkerSerialStart.test(line)) {
+      if (schedulerStartRe.test(line)) {
+        // gap-mechanical-fan-in-loses-per-phase-accounting — the unified scheduler's test window
+        // START. static→main (the concurrent window is ONE "main" phase at laneCount; its psi is the
+        // window's psi). Latching schedulerActive makes every subsequent line skip the legacy
+        // serial-phase machine below — its `selected N files (groups=…)` / `__GROUP__` boundaries do
+        // not exist on the scheduler path and would otherwise close main→end at the FIRST group close
+        // (serial closes first, so main would be recorded as a ~0s stub).
+        phaseAccount.boundary("main");
+        schedulerActive = true;
+        phaseNodeActive = false;
+        overlapPhaseActive = false;
+      } else if (schedulerActive) {
+        // Scheduler path owns the stream: the only boundaries left are main→end at the main group's
+        // close (`__OVERHEAD__ main_phase_ms=`) or — when main never ran — the scheduler's own total
+        // wall marker (`__OVERHEAD__ scheduler_ms=`). Everything else (__PERFILE__ / __GROUP__ /
+        // __OVERHEAD__ <serial|lowconc>_phase_ms) is concurrent-window noise, not a phase boundary.
+        if (!mainClosed && (schedulerMainDoneRe.test(line) || schedulerEndRe.test(line))) {
+          phaseAccount.boundary("end");
+          mainClosed = true;
+        }
+      } else if (phaseMarkerSerialStart.test(line)) {
         // static→serial (sequential path). Closes whatever phase was open (static, or a gap if the
         // previous phase's __GROUP__ already fired) and opens serial.
         phaseAccount.boundary("serial");
@@ -2767,18 +2890,6 @@ export async function run(argv: string[]): Promise<number> {
     // line fell through to failures[] as a false red, round 137 __OVERHEAD__ build_dist_ms=479).
     const overheadM = line.match(/^__OVERHEAD__\s+([A-Za-z0-9_]+)_ms=(\d+)(?:\s+partial=1)?$/);
     if (overheadM) phaseMs[overheadM[1]] = Number(overheadM[2]);
-    // gap-suite-main-overlaps-load-sensitive-tail-experiment — first marker wins (test.sh's watcher
-    // fires at most once). Pure addition: it cannot flip the verdict, and a missed marker only omits
-    // the two observability fields (缺键, never a fabricated 0 — the same absent-field contract as
-    // phase_overlap). load is explicit-absent (stays null) when the marker carried no readable load.
-    const tailOverlapM = line.match(mainTailOverlapRe);
-    if (tailOverlapM) {
-      mainTailOverlapLanes = Number(tailOverlapM[1]);
-      if (tailOverlapM[2] !== undefined && tailOverlapM[2] !== "") {
-        const parsedLoad = Number(tailOverlapM[2]);
-        mainTailOverlapLoad = Number.isFinite(parsedLoad) ? parsedLoad : null;
-      }
-    }
     // gap-ceiling-floor-ms-not-landed-in-verification-round AC1/AC2 — parse the reporter's
     // `__CEILING__ <path> duration_ms=<dur> floor_ms=<floor> 封顶者/该拆` line (^ anchored — the
     // ^__PERFILE__ self-match family: a PASSING test whose NAME quotes the shape is ✔-prefixed and
@@ -2827,6 +2938,11 @@ export async function run(argv: string[]): Promise<number> {
     // (same as staticCheckDetails); only failure-relevant when the failure marker fires below.
     const failClosed = extractFailClosedChecker(line);
     if (failClosed) failClosedCheckers.push(failClosed);
+    // gap-not-evaluated-checkers-never-persisted — accumulate INERT checkers on every line (same as
+    // failClosed). NOT failure-relevant: an inert checker exits 0, so it never sets staticCheckDetected
+    // and never aborts the suite — it is captured purely so the terminal state names it.
+    const notEvaluated = extractNotEvaluatedChecker(line);
+    if (notEvaluated) notEvaluatedCheckers.push(notEvaluated);
     // Enrich a pending failure with its file context (TAP detail block / stack frames follow the
     // `not ok` line; the file is NOT on the failure line itself). Best-effort, bounded lookahead.
     if (pendingFailure && detailRemaining > 0) {
@@ -3200,6 +3316,11 @@ export async function run(argv: string[]): Promise<number> {
         ...base,
         finishedAt,
         durationMs,
+        // gap-not-evaluated-checkers-never-persisted — ALWAYS present on a terminal state (empty array
+        // = "no inert checker this round", DISTINGUISHABLE from an absent field = "dimension never
+        // recorded", hard rule 3b). On green this is the ONLY place an inert guard is visible (it exits
+        // 0, never sets staticCheckDetected, never appears in failures[]/failedCheckers).
+        notEvaluatedCheckers,
         // gap-concurrent-write-mutable-tree-false-positive-red — carry the tree-mutation annotation
         // on green too: the explicit field keeps the negative control visible (treeMutatedMidRound:
         // false on a clean window). Since gap-verifiedcommit-dirty-tree-false-certificate AC5 a green
@@ -3222,6 +3343,10 @@ export async function run(argv: string[]): Promise<number> {
         ...base,
         finishedAt,
         durationMs,
+        // gap-not-evaluated-checkers-never-persisted — same as the green branch: ALWAYS present on a
+        // terminal state, so a red round ALSO names any inert checker that ran alongside the failure
+        // (a red does not erase the not-evaluated signal).
+        notEvaluatedCheckers,
         // carry the failure location(s) — the SUITE-RED event's failureLocation source. Segmented
         // (gap-streaming-red-cascade-amplifies-failures-array AC1/AC2): failures[] main set carries
         // only real file-attributable non-cascade failures; cascade + no-file entries ride the
@@ -3335,6 +3460,14 @@ export async function run(argv: string[]): Promise<number> {
     }
   } catch (e) {
     process.stderr.write(`full-suite-runner: post-suite cleanup failed (continuing): ${e instanceof Error ? e.message : String(e)}\n`);
+  }
+  // gap-perfile-cpu-cost-collection — remove this run's per-file-CPU report dir (the .cpu files were
+  // written by the now-dead isolated children; the values were already read by the reporter). Best-
+  // effort — a cleanup failure must never change the verdict, and the dir lives in gitignored .quay/.
+  try {
+    fs.rmSync(perFileCpuDir, { recursive: true, force: true });
+  } catch {
+    // best-effort (dir may not exist on a hermetic/no-preload round)
   }
   // TRUE-CATCH-ALL (teardown-ol-scd-cf-leak): kill THIS run's still-alive
   // registered servers (safety net after the suite-tail scan-kill — e.g. a process whose server
@@ -3509,15 +3642,6 @@ export async function run(argv: string[]): Promise<number> {
     // 241 records, phase_overlap:true only 3×, all manual exploration rounds. The `overlap: running`
     // stream marker is test.sh's ground-truth signal that the parallel branch ACTUALLY ran.
     ...(phaseOverlapRan ? { phase_overlap: true } : {}),
-    // gap-suite-main-overlaps-load-sensitive-tail-experiment AC1/AC3 — the tail-overlap observability.
-    // Present only when test.sh's watcher ACTUALLY fired main early (knob >0 AND the load trigger
-    // fired). main_tail_overlap_lanes = the early-start concurrency (the knob value / experiment's
-    // lane level); main_tail_overlap_load = /proc/loadavg 1-min at fire time (the observed total load
-    // during the overlap). Absent on a baseline/sequential round (knob 0, or trigger never fired) —
-    // the same absent-field contract as phase_overlap. Feeds AC3's "档位 → 总负载 → flake 率 →
-    // wall-clock" table (load is the observed host value, never a literal — hard rule 4 推论二).
-    ...(mainTailOverlapLanes !== null ? { main_tail_overlap_lanes: mainTailOverlapLanes } : {}),
-    ...(mainTailOverlapLoad !== null ? { main_tail_overlap_load: mainTailOverlapLoad } : {}),
     // gap-ceiling-floor-ms-not-landed-in-verification-round AC1/AC3 — the reporter's per-group
     // floors (各相) + capped-file list. Both appear together (every __CEILING__ line carries a
     // floor_ms, so floorMsSeen non-empty ⟺ ceilingFiles non-empty), and BOTH are omitted on a
@@ -3567,6 +3691,19 @@ export async function run(argv: string[]): Promise<number> {
     ...(phaseAccount ? { phases: phaseAccount.records } : {}),
     ...(phaseAccount?.read_error ? { phase_counter_error: phaseAccount.read_error } : {}),
     ...(phaseAccount?.finalReadError ? { phase_final_read_error: phaseAccount.finalReadError } : {}),
+    // gap-mechanical-fan-in-loses-per-phase-accounting AC5 — a single-phase round must NOT be shaped
+    // like a normal multi-phase round: the whole-run-collapsed-into-one-`static` degradation (the pre-
+    // fix scheduler round claimed a ~47s serial run for a minutes-long 16-lane suite) is indistinguishable
+    // from a genuine static-check abort unless the record names the reason. `single_phase` + a reason
+    // field are present ONLY on a 1-phase round (a multi-phase round omits them — same absent-field
+    // contract as *_phase_ms). reason is "static-check-abort" when the suite never left the pre-test
+    // static-check phase, else "no-phase-boundary-markers" (the suite ran but no boundary was detected).
+    ...(phaseAccount && phaseAccount.records.length === 1
+      ? {
+          single_phase: true,
+          single_phase_reason: testPhaseStarted ? "no-phase-boundary-markers" : "static-check-abort",
+        }
+      : {}),
     // gap-ac124-suite-bucket-production-carrier-benefit — the bucket-execution fields. Present only on
     // a bucket-mode round (test.sh emitted __BUCKETS__); the default full suite omits them (a reader
     // must tolerate their absence). bucket_duration_ms is the round's own durationMs (the round IS the

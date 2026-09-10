@@ -5,7 +5,8 @@
 // AC56 判据1: `recommended` must be an UNORDERED feasible set OR a dictionary (lexicographic) order
 //   with an explicit "order meaningless" annotation.
 // AC56 判据2 (FALSIFIABLE): if the output is STILL ordered by a meaningful priority (1/cost — in this
-//   repo the blocking_suite → delivery_critical → id sort), the check MUST go RED.
+//   repo the blocking_suite → id sort; the delivery_critical axis was RETIRED 2026-09-07,
+//   gap-delivery-critical-mechanical-axis-orphaned-needs-ruling), the check MUST go RED.
 // AC56 判据3 (ANTI-只改文案): the check reads the OUTPUT ITSELF (the `recommended` array + the
 //   `recommended_order` / `recommended_unordered` field), NEVER documentation/comments — a comment
 //   claiming "序无意义" while the array still encodes a priority order is caught by the lexicographic
@@ -189,10 +190,11 @@ test("RED — recommended is not an array ⇒ RED", () => {
 // ── END-TO-END: REAL slot-refill CLI + checker (the DoD 实跑 shape) ───────────────────────────────
 // Run the REAL slot-refill.ts CLI against a temp workspace (with a delivery-critical label present so
 // the OLD priority sort WOULD have put it first), feed the JSON to the checker → the checker is GREEN
-// because `recommended` is de-ordered (lexicographic) + annotated, while `ranking` (the AC36
-// diagnostic) still carries the priority order. This is the exact evidence AC56's DoD calls for.
+// because `recommended` is de-ordered (lexicographic) + annotated. The `ranking` diagnostic now carries
+// only (suiteBlocking, rank) — the AC36 delivery-critical axis was RETIRED
+// (gap-delivery-critical-mechanical-axis-orphaned-needs-ruling, 人 2026-09-07 裁定).
 
-test("END-TO-END — real slot-refill CLI: recommended is de-ordered (lexicographic) + annotated; checker GREEN; ranking still exposes the priority order (AC36 diagnostic intact)", (t) => {
+test("END-TO-END — real slot-refill CLI: recommended is de-ordered (lexicographic) + annotated; checker GREEN; ranking no longer exposes the retired DC axis", (t) => {
   const root = makeWorkspace("e2e");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTask(root, "ac56-aaa", { labels: ["gap"], body: dispatchableBody(["- code/aaa.ts (new)"]) });
@@ -208,11 +210,13 @@ test("END-TO-END — real slot-refill CLI: recommended is de-ordered (lexicograp
   fs.writeFileSync(inputPath, JSON.stringify(out));
   const cli = runCheckerCli(["--input", inputPath]);
   assert.match(cli, /PASS/, cli);
-  // AC36 diagnostic stays intact: ranking (which inner does NOT consume for dispatch) still carries
-  // the priority order — DC task rank 0.
+  // AC36 机械排序轴已退役 (gap-delivery-critical-mechanical-axis-orphaned-needs-ruling, 人 2026-09-07
+  // 裁定): ranking 不再暴露 deliveryCritical，只带 (suiteBlocking, rank)。排序键回到
+  // (blocking_suite, id) ⇒ 本 fixture 无 suite-blocker，ac56-aaa 字典序在前 = rank 0。
   const dc = out.ranking.find((e) => e.id === "ac56-e2e");
-  assert.equal(dc.deliveryCritical, true, "ranking exposes the DC axis");
-  assert.equal(dc.rank, 0, "ranking keeps the priority order (DC first) — the AC36 diagnostic surface");
+  assert.equal(dc.deliveryCritical, undefined, "ranking no longer exposes the retired DC axis");
+  assert.equal(dc.suiteBlocking, false, "no suite-blocker in this fixture");
+  assert.equal(out.ranking.find((e) => e.id === "ac56-aaa").rank, 0, "ranking is (blocking_suite, id): lexicographic ⇒ aaa first");
 });
 
 test("END-TO-END RED — the checker CLI exits 1 on a 1/cost-sorted (priority-ordered) sample", (t) => {

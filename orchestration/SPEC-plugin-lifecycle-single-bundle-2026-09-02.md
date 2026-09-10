@@ -120,7 +120,7 @@ plugin/                     唯一扩展载体（git 跟踪，一棵树）
 不进仓库；项目意愿（启用）进仓库、随 clone 传播。**两者本来就该分层，此前是被安装脚本合并了。**
 
 **AC5（能取假）**：在任一**非** quay 项目起会话 ⇒ `PATH` 不含 `<quay>/plugin/bin`
-**且** `quay:author` NOT-AVAILABLE。*取假方式*：把用户级启用改回 `true` 即红——**当前状态就是红**。
+**且** `quay:execute` NOT-AVAILABLE。*取假方式*：把用户级启用改回 `true` 即红——**当前状态就是红**。
 
 **⚠️ 与 T3 的相互作用（落地时必须一并处理，否则会把自己锁在门外）**：
 项目级启用要求 ①插件**已安装**（启用 ≠ 安装，§9-T3）②该目录**已被信任**（未信任 ⇒ 项目 settings 整份不读）。
@@ -154,12 +154,23 @@ plugin/                     唯一扩展载体（git 跟踪，一棵树）
 .quay/config.yml         provider map + loop 参数
 .quay/profiles.yml       launcher/model
 tasks/                   任务目录（数据，不是扩展代码）
+goals/                   目标目录（数据，与 tasks/ 双载体）
 .gitignore               若干条目
 
 【Claude Code 侧——只写配置，不写扩展】
 .claude/settings.json    enabledPlugins（本项目启用，裁定 5）
                          + permissions.allow: ["mcp__plugin_quay_quay__*"]
 ```
+QUAY-INIT-CLOSED-SET:BEGIN
+- .quay/config.yml
+- .quay/profiles.yml
+- tasks/
+- goals/
+- .gitignore
+- .claude/launch.settings.json
+- .claude/settings.json
+QUAY-INIT-CLOSED-SET:END
+
 **⊢ 两组的区别是本质的**：上组是 **quay 这个产品要求的项目结构**（换个宿主也需要）；
 下组是**让宿主 Claude Code 知道去哪找已装好的插件**（一次性、幂等、纯配置）。
 **⛔ `extraKnownMarketplaces` 不进项目 settings**——它是机器特定绝对路径，属 User Scope（§4b）。
@@ -175,6 +186,74 @@ tasks/                   任务目录（数据，不是扩展代码）
 **⛔ 不得把这一步写成「配置即生效」——那会退回本仓库最贵的那类失败：存在≠生效。**
 **⛔ 不再写入**：`.claude/workflows/`、`.claude/agents/`、`plugin/scripts/` 副本、
 `orchestration/` tick 文档、`docs/analysis/`——**以及随之退役的 managed/conflict/stale 整套机器。**
+
+## 6b. 非 skill 入口如何定位 plugin 脚本（**AC168 的承重前提，2026-09-05 补**）
+
+**⚠️ 本节是本规格 09-02 初稿的一个缺口，不是新增需求。** §9-T1 实测「`${CLAUDE_PLUGIN_ROOT}` 零复制直调成立」
+**只覆盖 skill 载入路径**（它是 skill 载入时的文本级展开）；而**两层循环的引擎不是 skill 起的**。
+
+**实测（2026-09-05，读码 + 行号核对，非推断）**：
+```
+packages/quay/src/cli/driver.ts:166   const kernel = path.join(root, "plugin/scripts/driver-runtime.ts")
+                        :167-169      缺失即 `driver runtime kernel not found` 退出
+                        :16-20        注释写明这是 AC139-4 故意为之——⛔ 不得用 import.meta.url walk-up，
+                                      它会命中 worktree 副本（2026-08-23 常驻 supervisor 挂在短命 worktree
+                                      上的载体死亡根因）
+```
+⇒ **今天下游项目能跑两层循环，恰恰依赖 quay-init 复制进去的那 117–131 个脚本。**
+⇒ **§6 闭集一旦生效（不复制脚本），`quay driver start` 在每一个下游项目都会失败。**
+**⊢ 最贵的一点：这个失败在本仓库永远复现不出来**（本仓库自带 `plugin/`，解析恒成功）
+——**"在这里绿"是结构上不可能取假的量**（硬规则 4），判据必须落在一个**无本地 `plugin/`** 的 workspace 上。
+
+**解析器契约（三条约束，缺一即不成立）**：
+
+| # | 约束 | 为什么不能放弃 |
+|---|---|---|
+| ① | 从 worktree 调用时**永不**命中 worktree 副本 | AC139-4 的原始约束，有一次真实载体死亡作背书 |
+| ② | **不要求**目标项目本地存在 `plugin/` 副本 | 否则等于没废除复制，裁定 1 落空 |
+| ③ | npm-global 与 plugin marketplace **两条安装路径都能解析到** | 两条都是受支持渠道（§6 已把显式安装步骤写进交付流程） |
+
+**⇒ 落点**：`tasks/gap-plugin-root-resolution-non-skill-entrypoints`（2026-09-05 立案，已实现并回填）。
+
+**选定方案（2026-09-05 回填）**：单一解析器 `packages/quay/src/plugin-root.ts`，导出
+`resolvePluginRoot()` / `resolvePluginScript()`。解析顺序：① `QUAY_PLUGIN_ROOT` env 显式指针
+（hermetic 测试 / 运维覆盖）→ ② 若本模块（`import.meta.url`）从 linked worktree 载入 ⇒ 改解析到
+**主检出** `plugin/`——`mainCheckoutRoot()` 用 `git worktree list --porcelain` 判非主 worktree（首条
+= 主检出），fail-closed，永不回退到 worktree 副本 → ③ 从模块自身安装位置向上走（8 跳），每层探
+`plugin/scripts/driver-runtime.ts` 与 `scripts/driver-runtime.ts` 两种 rel 形。`cli/driver.ts` 的内核
+解析改走 `resolvePluginScript("scripts/driver-runtime.ts")`，AC139-4 的「拒绝 worktree root」一层仍在
+driver 内，解析器内部的 worktree 重定向是第二层防御。
+
+**被否方案与理由**：
+
+| 被否 | 理由 |
+|---|---|
+| workspace root 拼 `plugin/scripts`（`driver.ts:166` 旧式，也是 serve-sessions.ts / ff-merge.ts / mcp-server.ts 的现式） | 违反 ②——要求本地副本；AC168 落地后每个下游项目都失败 |
+| `import.meta.url` walk-up **无** worktree 判（`manager.ts:51-64` 现式） | 违反 ①——从 worktree 载入时命中 worktree 副本（AC139-4 的载体死亡根因） |
+| `${CLAUDE_PLUGIN_ROOT}` 文本展开 | 只在 skill 载入时展开，CLI/cron/OS anchor 拿不到（§9-T1 已证） |
+
+**旁注（2026-09-08，`gap-plugin-root-resolution-remaining-callsites` 的 AC1 分类结论）**——上表「被否方案」里的
+「现式」点位并非全部下游可达；逐点分类后两类豁免（**仓库内部专用**，不走迁移，同 `scripts/test.sh`）：
+
+| 豁免点 | 证据（逐条独立验证，非直觉） |
+|---|---|
+| `scripts/test.sh`（数十条 `${repo_root}/plugin/scripts/`） | 开发期测试入口：不在 npm `files` 白名单（`packages/quay/package.json` 的 `scripts/register-plugin.mjs` 是 `packages/quay/scripts/` 下，非 repo-root `scripts/test.sh`）；`plugin/.claude-plugin/plugin.json` 只 ship `skills/`+`agents/`；`quay-init.sh` 只 detect 不 copy（`:2058` 明写「no leaking the quay-specific scripts/test.sh」） |
+| `os-anchor-watchdog.sh` / `os-anchor-install.sh` | 各自 header 明写「⚠ NOT A SHIPPED DELIVERABLE (human ruling 2026-08-06)… quay-init.sh never installs or invokes it」；实测 `quay-init.sh` 0 引用、`orchestration/*tick-core*.md` 0 引用（loop tick 文档里的「os-anchor-watchdog」只是观察者名单的散文提及，非调用指令） |
+
+其余下游可达点（serve-sessions / ff-merge / mcp-server / precommit-guard / cli/manager / observation /
+serve-send）已在该任务迁到本解析器（含 dist-bundle dev/dist 回退），负控制实测跑红、无本地 `plugin/` workspace
+实测跑通（读数见任务体 Evidence）。
+
+**三条约束 → 可执行判据**（缺一即不成立）：
+① = 测试从 worktree 载入时断言解析结果在主检出、不在 worktree（把返回值改成 worktree 路径即红，
+`mainCheckoutRoot()` 单测配真实 temp worktree 恒跑）；② = 无本地 `plugin/` 的临时 workspace 里仍解析到
+（把解析器改回 workspace-root 拼接即红，实测跑出红）；③ = 两种 rel 形各覆盖一条安装路径——
+`plugin/scripts/…` 覆盖 npm-global（`files` 白名单打包出 `<pkg>/plugin/`），`scripts/…` 覆盖
+plugin marketplace（marketplace 根即 `scripts/` 的父目录）。
+
+**⊢ 顺序是硬的：该任务 → AC168。** 反序 = 先把下游项目的循环引擎删掉，再去想怎么找它。
+**⊢ 本任务只答「怎么解析」，不做 AC168 收缩本体；其余 workspace-root 拼接点（serve-sessions / ff-merge /
+mcp-server / os-anchor / precommit-guard / scripts/test.sh）的迁移是收缩本体的连带面，不在此任务 Touches 内。**
 
 ## 7. 退役 / 改造清单
 
@@ -210,7 +289,7 @@ tasks/                   任务目录（数据，不是扩展代码）
   且**不含任何 `.claude/{skills,workflows,agents}` 或脚本副本**（裁定 6）。
   *能取假*：恢复任一类铺设即红。
 - **AC5 作用域不外溢**（裁定 5，判据全文见 §4b）：非 quay 项目的会话中
-  `PATH` 不含 `<quay>/plugin/bin` **且** `quay:author` NOT-AVAILABLE。
+  `PATH` 不含 `<quay>/plugin/bin` **且** `quay:execute` NOT-AVAILABLE。
   *能取假*：**当前状态即红**（实测 `/home/yale` 会话 PATH 含该路径两次）——先红后绿。
 - **AC6 用户级只承载源**：`~/.claude/settings.json` 中与 quay 相关的键
   **只有** `extraKnownMarketplaces.quay`，**没有** `enabledPlugins["quay@quay"]`。
@@ -224,7 +303,7 @@ tasks/                   任务目录（数据，不是扩展代码）
 |---|---|---|
 | **T1** `${CLAUDE_PLUGIN_ROOT}` | ✅ **可用，skill 载入时文本级展开为绝对路径** | 磁盘 `quay-task-operator/SKILL.md:71` 写 `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-schema-check.ts"`；载入会话后收到的是 `node "/home/yale/work/quay/plugin/scripts/task-schema-check.ts"`。连传入的 ARGUMENTS 串一并被替换 |
 | **T2** 改动是否热生效 | ❌ **需重启会话**（**未在活会话直接实测**，见下方限定） | `claude plugin update` 帮助文本「**restart required to apply**」；`claude plugin init`「**auto-loads next session**」；`claude plugin` 子命令表**无 reload** |
-| **T3** clone 者是否自动装上 | ❌ **不会**。①**启用 ≠ 安装** ②**未信任目录下项目 settings 整份不读** | ①差分：`--settings '{"enabledPlugins":{"quay@quay":false}}'` ⇒ `quay:author` **NO**；无旗标 ⇒ **YES**（证明 settings 路径确实生效）；而声明了 marketplace+enabledPlugins 的探针插件全程 NOT-AVAILABLE ⇒ 差异只能归于「没装」。②探针项目的 `env` 键同样不生效，且该项目不在 `~/.claude.json` `projects` 表中（`hasTrustDialogAccepted` 键存在于该表）；`--dangerously-skip-permissions` 不解此门 |
+| **T3** clone 者是否自动装上 | ❌ **不会**。①**启用 ≠ 安装** ②**未信任目录下项目 settings 整份不读** | ①差分：`--settings '{"enabledPlugins":{"quay@quay":false}}'` ⇒ `quay:execute` **NO**；无旗标 ⇒ **YES**（证明 settings 路径确实生效）；而声明了 marketplace+enabledPlugins 的探针插件全程 NOT-AVAILABLE ⇒ 差异只能归于「没装」。②探针项目的 `env` 键同样不生效，且该项目不在 `~/.claude.json` `projects` 表中（`hasTrustDialogAccepted` 键存在于该表）；`--dangerously-skip-permissions` 不解此门 |
 | **T4** `bin/` 上 PATH | ✅ **成立** | 本会话 PATH 含 `/home/yale/work/quay/plugin/bin`——**而该目录并不存在**；meta-cc/archguard 的 `bin` 同形在列 ⇒ Claude Code 对每个启用插件无条件加入该路径 |
 
 **T1 的后果**：§6 闭集**不需要**裁定 3 允许的那条 plugin-root 文件指针——那条退路用不上。
@@ -290,6 +369,23 @@ tasks/                   任务目录（数据，不是扩展代码）
 **⇒ 它自报的 live=112 与本规格实测的 178 相差约 66 个脚本。**
 **⛔ 它的 `unaccounted` 清单不得作为退役依据**（会删掉每天被调用几十次的脚本）。
 **⊢ 与 CLAUDE.md 记载的 meta-cc `include_subagents` 坑同形**——只是这次犯在本仓库自己的普查器上。
+
+### 11b-i. 排序补正：**修这个仪器必须排在「执行 archive」之前**（2026-09-05 补）
+
+初稿把本条放在**乙组（AC160）**，位置在甲组的 AC158（执行 archive）**之后**。**这个顺序是错的**：
+§12e 明写「**执行 archive 前须按 §12d 重算一次**」，而 §12d 的判据是「**三天零执行** ∧ 无生产调用者」
+——**"零执行"读数正是本盲区的受害者**，本节自己也写了「⛔ 它的 `unaccounted` 清单不得作为退役依据」。
+⇒ **不修就重算 = 按一份已知有缺口的读数删 97 个脚本**，其中可能含每天被调用几十次的对象。
+**⊢ 硬顺序更正为：AC160 ──► AC156 重算 ──► AC158 执行 archive。**（`manager-phase-goal.md` 的顺序块已同步。）
+
+### 11b-ii. ⚠️ 本节的两个负控制样本已腐烂一个（2026-09-05 核实）
+
+`monitor-mount-check.sh` **已随 session-liveness 退役被删除**（`f2525e075` / `5444b8bf2`，2026-09 初；
+2026-09-05 `ls` 核实不存在）⇒ **它不能再作判据锚点**。幸存的已知真样本是 **`quay-session.ts`**
+（被判 `library`/executed=0，实际 68 次、52 次在盲区层）。
+**⊢ 这是本规格自身的一个实例，值得记**：§12e 已自述死集名单是「带日期的快照，不是活文档」，
+**而同样的腐烂也发生在【判据引用的样本】上**——判据必须锚在**执行当下核实过存在**的对象上，
+不是立规格那天存在的对象上。落点：`tasks/gap-runtime-usage-inventory-workflow-blind-spot`（2026-09-05 立案）。
 
 ## 12. 统一 archive 机制（裁定：零调用先退役，需要时再恢复）
 
@@ -365,6 +461,17 @@ npm 侧无需处理（`files` 是白名单，`archive/` 天然不在内）。
 
 **⚠️ 本清单是【带测量日期的快照】，不是活文档。** 判据（§12d）是耐久的，名单会随代码演化过期；
 **执行 archive 前须按 §12d 重算一次**，以重算结果为准。
+
+**⊕ 死集重算回写（2026-09-08，`gap-dead-set-closure-misses-four-reference-kinds` 补认四类引用后）**：
+按 §12d（三天零执行 ∧ 无生产调用者）+ §12e 传递闭包（补认 `${repo_root}/plugin/scripts/<name>`、
+`path.join(__dirname, "<name>")`、`$SCRIPT_DIR/<name>` 三种执行形式，**再加四类引用**：bash `source`/`.`
+内建（执行）、`plugin/test` 存在性钉、`.quay/config.yml` gate 注册、wrapper→委托模块对称对）+
+§12f 裸文件名边重算；方法窗口与完整名单见 `docs/analysis/dead-set-recomputed.json`
+（`generatedAt` 2026-09-08T06:32:14.678Z；窗口 2026-09-05T06:28:00.783Z → 2026-09-08T06:28:00.783Z，72h；
+`executionDataSource` = 三层 transcript 普查，非 runtime-usage-inventory.ts）。
+
+- 扫描前死集: 31
+- 扫描后死集: 31
 
 #### 安全核 94 个（`plugin/scripts/` 下，两口径下均判死；56 个自带测试须同批移动）
 
@@ -453,6 +560,30 @@ workflow-replay.ts                       worktree-branch-hygiene-check.sh
 **状态**：规格已裁定；**§9 四项实测已全部完成（T2 为 CLI 自述、未活体验证）**；
 **§11 三天使用实测已完成**；**§12e 传递闭包已算毕，人裁定后死集 = 97**（94 安全核 + 3 个原待裁）；
 **§12f 的裸文件名扫描是执行 archive 的前置**；§7 退役清单 + §12e/§12f 待拆条执行。
+
+**⊕ 2026-09-05 更新（人令「创建第一波任务」后）——两处补正 + 第一波 6 条已立案**：
+
+两处**本规格自身的缺陷**（均在立案核查中发现，非读文档推得）：
+① **§6b 新增**——`cli/driver.ts:166` 从 workspace root 解析驱动内核 ⇒ AC168 停止复制会让**下游 `quay driver start` 全线失效**，
+   §9-T1 的 `${CLAUDE_PLUGIN_ROOT}` 只覆盖 skill 载入路径，救不了 CLI/cron/OS anchor。**AC168 的硬前置。**
+② **§11b-i 排序补正**——AC160（修仪器盲区）必须排在 AC158（执行 archive）**之前**，否则按已知有缺口的执行读数删 97 个脚本；
+   **§11b-ii** 并记：该节引用的负控制样本 `monitor-mount-check.sh` 已被删除，判据改锚 `quay-session.ts`。
+
+**第一波 6 条任务（2026-09-05 立案，promotion-driver 已机械晋升 ready）**：
+
+| 任务 | 对应 | 一句话 |
+|---|---|---|
+| `gap-plugin-root-resolution-non-skill-entrypoints` | §6b（新） | 非 skill 入口的 plugin-root 解析，AC168 硬前置 |
+| `gap-skill-allowed-tools-plugin-namespace` | AC163 | 两处裸名改插件前缀 + 恒定判据；AC165 的硬前置 |
+| `gap-runtime-usage-inventory-workflow-blind-spot` | AC160 | 修枚举盲区；**须先于 AC158** |
+| `gap-archive-mechanism-and-exclusion-wiring` | AC157 | archive 机制 + 五面排除接线 |
+| `gap-dead-set-registry-bare-filename-scan` | AC156 | 裸文件名扫描 + 死集重算（⛔ 不沿用 09-02 快照） |
+| `gap-quay-init-closure-assertion-first` | AC168 判据先行 | 落地量棘轮（取实测基线，只降不升），收缩本体留后续波次 |
+
+**⊢ 尚未立案的（等第一波落地后再拆，避免"永远差最后一步"）**：AC158/AC159（执行 archive 与连带文档）、
+AC161/AC162（作用域外溢，其中 AC161 改 `~/.claude/settings.json`，**建议人执行**）、AC164/AC165（命名空间承接与撤裸）、
+AC166/AC167（第二副本与 `manager-tick-core.js` 迁移，608 次/3 天的路径换文件，**须单独判据**）、
+AC168 收缩本体与 AC169 交付面同步。
 
 **退役清单的可量化收益（2026-09-02 实测，`claude plugin details quay`）**：
 14 个 skill **每会话常驻 ~2,706 tok**；其中 `quay-native-methodology`(~210) 与

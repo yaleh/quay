@@ -143,6 +143,54 @@ t("AC1 symlink path — root auto-derived from git worktree list when --root abs
   }
 });
 
+// ── branch self-check (gap-task-branch-prefix-assumption-scattered-read-sites-orphan-enumeration-blind) ──
+// 写方唯一化并强制：任务 worktree 分支必须是 task/<id>。一个 develop 分支 worktree（2026-09-08 实测
+// worker 把 worktree 建在 develop 上、提交直接落 develop 绕过 fan-in）必须被拒；task/<id> 仍成功。
+
+/** A throwaway REAL git repo + a worktree on an arbitrary branch. Returns { root, wt }. */
+function makeRepoWithBranchWorktree(branch) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dispatch-branch-"));
+  const git = (...args) => {
+    const r = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+    assert.equal(r.status, 0, `git ${args.join(" ")} failed: ${r.stderr ?? ""}`);
+    return r.stdout.trim();
+  };
+  git("init", "-q");
+  git("config", "user.email", "t@test");
+  git("config", "user.name", "t");
+  fs.writeFileSync(path.join(root, "README.md"), "# repo\n");
+  git("add", "-A");
+  git("commit", "-q", "-m", "baseline");
+  fs.mkdirSync(path.join(root, "node_modules"), { recursive: true });
+  const wt = path.join(root, "wt");
+  git("worktree", "add", "-q", "-b", branch, wt, "HEAD");
+  return { root, wt };
+}
+
+t("branch self-check — a develop-branch worktree is refused (exit 2 + reported)", () => {
+  const { root, wt } = makeRepoWithBranchWorktree("develop");
+  try {
+    const r = bash(SETUP, [wt, "--root", root]);
+    assert.equal(r.status, 2, `develop-branch worktree must exit 2, got ${r.status}`);
+    assert.match(r.stderr, /develop/, "the offending branch must be named in the failure");
+    assert.match(r.stderr, /not task\/<id>/, "the refusal reason must name the task/<id> convention");
+    assert.ok(!fs.existsSync(path.join(wt, "node_modules")), "nothing must be provisioned on refusal");
+  } finally {
+    rmrf(root);
+  }
+});
+
+t("branch self-check — a task/<id>-branch worktree still provisions (negative control)", () => {
+  const { root, wt } = makeRepoWithBranchWorktree("task/gap-setup-ok");
+  try {
+    const r = bash(SETUP, [wt, "--root", root]);
+    assert.equal(r.status, 0, `task/<id>-branch worktree must exit 0, got ${r.status}: ${r.stdout} ${r.stderr}`);
+    assert.ok(fs.lstatSync(path.join(wt, "node_modules")).isSymbolicLink(), "task/<id> branch must still get node_modules");
+  } finally {
+    rmrf(root);
+  }
+});
+
 // ── AC1 install path ────────────────────────────────────────────────────────────────────────────
 
 t("AC1 install path — main has NO node_modules ⇒ npm install inside the worktree (stub npm)", () => {

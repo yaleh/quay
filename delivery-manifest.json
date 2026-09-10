@@ -35,5 +35,15 @@
       "bundle-type": "marketplace",
       "note": "Distributed via marketplace JSON files (.claude-plugin/marketplace.json + plugin/.claude-plugin/marketplace.json) checked into the repo and version-bumped with each release. Included in the npm-pack tarball. Not a separate GitHub Release asset."
     }
-  }
+  },
+  "excludedPackages": [
+    {
+      "package": "quay-github",
+      "reason": "Reference Provider implementation proving the Provider ABI transfers to GitHub Issues as a real backend. Intentionally not published — no dist/ build, no npm tarball, no SEA binary. Run from source only. See README 'The four packages'."
+    },
+    {
+      "package": "quay-backlog",
+      "reason": "Reference, read-only Provider implementation proving the Provider ABI transfers to a third, heterogeneous real backend (Backlog.md boards, DIR-039-B). Intentionally not published — no dist/ build, no npm tarball, no SEA binary. Run from source only. See README 'The four packages'."
+    }
+  ]
 }

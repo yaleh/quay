@@ -257,7 +257,7 @@ async function main() {
     const after = run(["task", "view", "gh-3", "--provider", "github", "--json"], ghSpawnOpts);
     const gh3After = JSON.parse(after.stdout);
     const hasFloorMsg = /unsupported field\(s\) \[extra\]/.test(r.stderr) &&
-      /Supported fields: id, status, title, body, labels, parent, children/.test(r.stderr);
+      /Supported fields: id, status, title, body, labels, parent, children, depends_on, goal_ac/.test(r.stderr);
     const unmodified = gh3After.title === gh3Before.title && gh3After.body === gh3Before.body &&
       JSON.stringify(gh3After.labels) === JSON.stringify(gh3Before.labels);
     const ok = r.status === 1 && hasFloorMsg && unmodified;

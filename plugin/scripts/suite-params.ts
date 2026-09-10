@@ -1,21 +1,19 @@
 #!/usr/bin/env node
 // suite-params.ts — read + validate the `.quay/config.yml` `suite:` section (the suite-level knobs'
-// config-file default). The SINGLE definition point for "what the 8 suite knobs default to from config".
+// config-file default). The SINGLE definition point for "what the 7 suite knobs default to from config".
 //
 // Task: gap-suite-knobs-config-file-priority (config < env < CLI).
 //
 // WHY THIS EXISTS: every suite knob was env-only (QUAY_PHASE_OVERLAP / QUAY_SERIAL_CONCURRENCY /
-// QUAY_LOWCONC_CONCURRENCY / QUAY_MAX_CONCURRENT_SUITES / QUAY_MAX_OVERSUBSCRIPTION /
-// QUERY_MAIN_TAIL_OVERLAP). A driver restart drops env, so an experiment knob injected via env is
-// silently lost (2026-08-31: QUERY_MAIN_TAIL_OVERLAP=12 lost on driver stop → round 775 full-suite
-// main-tail-overlap never fired). A config-file default survives restart; env/CLI stay as
-// debug/one-off overrides.
+// QUAY_LOWCONC_CONCURRENCY / QUAY_MAX_CONCURRENT_SUITES / QUAY_MAX_OVERSUBSCRIPTION). A driver restart
+// drops env, so an experiment knob injected via env is silently lost. A config-file default survives
+// restart; env/CLI stay as debug/one-off overrides.
 //
 // Contract: readSuiteParams(workspaceRoot) → SuiteParams | throws Error("FAIL-CLOSED: ...")
 //   - No `.quay/config.yml` → returns {} (empty). The `suite:` section is OPTIONAL — a workspace
 //     without one keeps its host-derived / env-only behavior (AC4 pass/fail-neutral).
 //   - `.quay/config.yml` present but no `suite:` key → returns {} (same neutrality).
-//   - `.quay/config.yml` present with a `suite:` key → CLOSED schema: the only valid keys are the 8
+//   - `.quay/config.yml` present with a `suite:` key → CLOSED schema: the only valid keys are the 7
 //     below; an UNKNOWN key, a WRONG-TYPED value, or an OUT-OF-RANGE value throws FAIL-CLOSED
 //     (DIR-050 discipline — a malformed config must not silently degrade to env defaults; AC5).
 //   - `.quay/config.yml` present but malformed YAML → throws FAIL-CLOSED (same as loop-params.ts).
@@ -25,8 +23,8 @@
 // its env var ONLY when that env var is unset/empty (env wins), and their existing CLI-flag logic
 // stays above env. That keeps ONE precedence chain, read at the single definition point.
 //
-// The 6 knobs with a FIXED default (suite_scheduler / phase_overlap / max_concurrent_suites /
-// max_oversubscription / main_tail_overlap_lanes / main_tail_stall_pct) are listed in the shipped
+// The 5 knobs with a FIXED default (suite_scheduler / phase_overlap / max_concurrent_suites /
+// max_oversubscription / main_tail_stall_pct) are listed in the shipped
 // `.quay/config.yml` — suite_scheduler defaults ON via test.sh's `${QUAY_SUITE_SCHEDULER:-1}`
 // fallback rather than a shipped literal (a `suite_scheduler: 1` line would be redundant).
 // serial_concurrency and lowconc_concurrency both default to the SAME HOST-DERIVED value
@@ -39,12 +37,11 @@ import path from "node:path";
 import YAML from "yaml";
 import { isDirectEntry } from "./gate-script-base.ts";
 
-/** The 8 suite knobs: config key → env key (config-first per the same policy). `suite_scheduler`
+/** The 7 suite knobs: config key → env key (config-first per the same policy). `suite_scheduler`
  *  (gap-suite-dynamic-waterline-scheduler) turns the unified group-budget scheduler ON (default) /
- *  OFF (ONE-KEY ROLLBACK to the legacy phased path). `phase_overlap` / `main_tail_overlap_lanes` /
- *  `main_tail_stall_pct` are RETIRED-BY-SCHEDULER: they stay in the CLOSED schema so an existing
- *  config that still sets them (the production config carries main_tail_overlap_lanes: 16) keeps
- *  validating — but they only take effect on the QUAY_SUITE_SCHEDULER=0 legacy fallback path. */
+ *  OFF (ONE-KEY ROLLBACK to the legacy phased path). `phase_overlap` / `main_tail_stall_pct` are
+ *  RETIRED-BY-SCHEDULER: they stay in the CLOSED schema so an existing config that still sets them
+ *  keeps validating — but they only take effect on the QUAY_SUITE_SCHEDULER=0 legacy fallback path. */
 export const SUITE_KNOBS = {
   suite_scheduler: "QUAY_SUITE_SCHEDULER",
   phase_overlap: "QUAY_PHASE_OVERLAP",
@@ -52,7 +49,6 @@ export const SUITE_KNOBS = {
   lowconc_concurrency: "QUAY_LOWCONC_CONCURRENCY",
   max_concurrent_suites: "QUAY_MAX_CONCURRENT_SUITES",
   max_oversubscription: "QUAY_MAX_OVERSUBSCRIPTION",
-  main_tail_overlap_lanes: "QUERY_MAIN_TAIL_OVERLAP",
   main_tail_stall_pct: "QUAY_MAIN_TAIL_STALL_PCT",
 } as const;
 
@@ -67,7 +63,6 @@ export interface SuiteParams {
   lowconc_concurrency?: number;
   max_concurrent_suites?: number;
   max_oversubscription?: number;
-  main_tail_overlap_lanes?: number;
   main_tail_stall_pct?: number;
 }
 
@@ -79,7 +74,6 @@ const KNOB_SPEC: Record<SuiteKnobKey, { ok: (v: unknown) => boolean; must: strin
   lowconc_concurrency: { ok: (v) => typeof v === "number" && Number.isInteger(v) && v >= 1, must: "an integer >= 1" },
   max_concurrent_suites: { ok: (v) => typeof v === "number" && Number.isInteger(v) && v >= 1, must: "an integer >= 1" },
   max_oversubscription: { ok: (v) => typeof v === "number" && Number.isFinite(v) && v > 0, must: "a positive number" },
-  main_tail_overlap_lanes: { ok: (v) => typeof v === "number" && Number.isInteger(v) && v >= 0, must: "an integer >= 0" },
   main_tail_stall_pct: { ok: (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 100, must: "a number in [0, 100] (PSI stall %)" },
 };
 
@@ -151,7 +145,7 @@ Usage:
       print shell assignment lines, one per PRESENT knob, of the form
         QUAY_X="\${QUAY_X:-<value>}"
       (env wins over config — the :- form leaves an already-set env var untouched). Safe to \`eval\`:
-      var names are the fixed 8-knob whitelist and values are schema-validated numbers.
+      var names are the fixed 7-knob whitelist and values are schema-validated numbers.
 
 Exit codes: 0 ok; 1 FAIL-CLOSED (malformed suite: section — the suite must not silently degrade).`;
 

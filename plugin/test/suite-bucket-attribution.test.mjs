@@ -17,8 +17,8 @@
 // (the baseline records the COUNTS — 12 / 23 / 11 — and these lists are the files that satisfy the
 // mechanism's reference-closure judgment). A group mismatch (wrong count, or any file attributed to
 // the wrong bucket) fails the test:
-//   (a) 12 `packages/quay/test/*` files that touch `plugin/scripts`  → cross-bucket P AND M
-//   (b) 23 `plugin/test/*` files that touch `packages/*/src|bin|dist` → cross-bucket (contain P)
+//   (a) 8 `packages/quay/test/*` files that touch `plugin/scripts`  → cross-bucket P AND M
+//   (b) 21 `plugin/test/*` files that touch `packages/*/src|bin|dist` → cross-bucket (contain P)
 //   (c) statically-unlocatable `plugin/test/*` files                   → UNRESOLVED
 //
 // Note on (c): the phase-goal baseline names "11 不可定位" as a COUNT, not a list. The strict
@@ -53,36 +53,30 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".
 
 // ── AC2 known-sample groups (exact lists, replay of the baseline) ───────────────────────────────────
 
-// (a) 11 `packages/quay/test/*` files that touch `plugin/scripts` → cross-bucket P+M.
+// (a) 8 `packages/quay/test/*` files that touch `plugin/scripts` → cross-bucket P+M.
 const GROUP_A = [
   "build-plugin-dist.test.mjs",
   "gap-dashboard-parallelize.test.mjs",
-  "install-config-driven-e2e-runtime.test.mjs",
-  "install-config-driven-e2e-upgrade.test.mjs",
   "install-config-driven-e2e.test.mjs",
   "mcp-server.test.mjs",
   "npm-pack-e2e.test.mjs",
-  "sea-artifact-consumer-e2e.test.mjs",
   "serve-ac95-views.test.mjs",
   "serve-board.test.mjs",
   "serve.test.mjs",
 ];
 
-// (b) 22 `plugin/test/*` files that touch `packages/*/src|bin|dist` → cross-bucket (contain P).
+// (b) 19 `plugin/test/*` files that touch `packages/*/src|bin|dist` → cross-bucket (contain P).
 const GROUP_B = [
   "branch-model.test.mjs",
   "build-evidence-manifest.test.mjs",
-  "checker-cost.test.mjs",
   "checker-mutation-check.test.mjs",
   "codex-stage1-adapter.test.mjs",
   "direct-to-develop-bypass-check.test.mjs",
   "execute-suite-fix-scope-gate.test.mjs",
   "fan-in-execute-paths.test.mjs",
   "fan-in-ts-typecheck-gate.test.mjs",
-  "needs-human-recheck.test.mjs",
   "prepare-admission-check.test.mjs",
   "provision-verify-worktree.test.mjs",
-  "quay-init-loop-runtime.test.mjs",
   "resource-gate.test.mjs",
   "retreat-ac-uncheck.test.mjs",
   "select-tests-for-touches.test.mjs",
@@ -112,14 +106,13 @@ const GROUP_C = [
 const GROUP_D = {
   "integration-batch-merge.test.mjs": ["M"], // join(repoRoot, "plugin", "scripts", …) — destructured `join`
   "sync-lag-check.test.mjs": ["M"],          // join(repoRoot, "plugin", "scripts", …)
-  "measure-suite.test.mjs": ["M"],           // path.join(repoRoot, "plugin", "scripts", …)
   "plugin-vendor-standalone.test.mjs": ["P"], // path.join(repoRoot, "packages", "quay-native", "bin", …)
 };
 
 // ── AC2(a) ───────────────────────────────────────────────────────────────────────────────────────────
 
-test("AC2(a): the 11 packages/quay/test files touching plugin/scripts are cross-bucket P AND M", () => {
-  assert.equal(GROUP_A.length, 11, "group (a) must be exactly 11 files");
+test("AC2(a): the 8 packages/quay/test files touching plugin/scripts are cross-bucket P AND M", () => {
+  assert.equal(GROUP_A.length, 8, "group (a) must be exactly 8 files");
   for (const f of GROUP_A) {
     const rel = `packages/quay/test/${f}`;
     const buckets = bucketSetOf(rel, ROOT);
@@ -130,8 +123,8 @@ test("AC2(a): the 11 packages/quay/test files touching plugin/scripts are cross-
 
 // ── AC2(b) ───────────────────────────────────────────────────────────────────────────────────────────
 
-test("AC2(b): the 22 plugin/test files touching packages src are cross-bucket (contain P)", () => {
-  assert.equal(GROUP_B.length, 22, "group (b) must be exactly 22 files");
+test("AC2(b): the 19 plugin/test files touching packages src are cross-bucket (contain P)", () => {
+  assert.equal(GROUP_B.length, 19, "group (b) must be exactly 19 files");
   for (const f of GROUP_B) {
     const rel = `plugin/test/${f}`;
     const buckets = bucketSetOf(rel, ROOT);
@@ -151,7 +144,7 @@ test("AC2(c): statically-unlocatable files return UNRESOLVED, never a silent def
 // ── AC2(d) — the segmented-literal blind spot ────────────────────────────────────────────────────────
 
 test("AC2(d): segmented path.join/path.resolve subjects attribute to their source-tree bucket", () => {
-  assert.equal(Object.keys(GROUP_D).length, 4, "group (d) must be exactly 4 files");
+  assert.equal(Object.keys(GROUP_D).length, 3, "group (d) must be exactly 3 files");
   for (const [f, want] of Object.entries(GROUP_D)) {
     const rel = `plugin/test/${f}`;
     const buckets = bucketSetOf(rel, ROOT);

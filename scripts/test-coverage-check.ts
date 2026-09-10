@@ -56,6 +56,10 @@ const EXCLUDE_DIR_NAMES = new Set([
   ".archguard",
   "experiments",
   "fixtures",
+  // archive/ is the retired-file graveyard (§12, SPEC-plugin-lifecycle-single-bundle-2026-09-02):
+  // an archived test (archive/<date>/plugin/test/*.test.mjs) has its impl archived beside it, so
+  // it is an "orphan" only in the deliberate, frozen sense — never a live DIR-110 coverage gap.
+  "archive",
 ]);
 
 function readFileSafe(p: string): string {

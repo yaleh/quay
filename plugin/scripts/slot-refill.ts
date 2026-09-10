@@ -145,7 +145,7 @@ import { listWorktrees, taskIdFromBranch } from "./fast-mode-telemetry.ts";
 // cap derives from driver-config's defaultDriverConfig().worker.cap — the SAME single source
 // cap-from-gate.ts (FIXED_EFFECTIVE_CAP) / promotion-driver.ts (CAP_DEFAULT) / worker-driver.ts
 // (driverCap) consume (AC155). No parallel `= 5` literal in slot-refill.
-import { defaultDriverConfig } from "./driver-config.ts";
+import { defaultDriverConfig, driverCap } from "./driver-config.ts";
 
 /** FIXED dispatch cap (gap-fixed-cap-5-dynamic-cap-retired, human ruling 2026-08-09): the dynamic
  *  adaptive cap is retired. `--cap` defaults to this value — 5 — so slot-refill and its derived
@@ -863,8 +863,8 @@ export function checkTouchesPairInFlight(candidateParsed, inFlightParsed, expand
  *      (gap-over90-clock-measures-queue-time-not-work-time) is the array of {id, reason} step-4
  *      skips — the candidates whose open bracket must be closed on defer (--close-task --outcome
  *      deferred) so the queue segment never counts toward OVER90; `ranking` (gap-ac36-recommended-
- *      exposes-sort-key) is the parallel array of {id, deliveryCritical, suiteBlocking, rank} that
- *      exposes each recommended id's sort axes for AC36 判据②'s mechanical check.
+ *      exposes-sort-key) is the parallel array of {id, suiteBlocking, rank} that exposes each
+ *      recommended id's suite-blocking axis.
  */
 export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], subagentsInFlight = 0, runningSubagentCount = null, measurementSource = null, measurementError = null, integrationBacklog, redBacklogCap = RED_BACKLOG_CAP_DEFAULT, dispatchGate = null, inFlightWorktrees = undefined, continueExemptIds = undefined, taskReadRef = "develop" }) {
   // B3 ①/④ ARBITRATION (gap-red-window-cap-trigger-backlog-not-suite-red): ① (in_flight<cap ⇒ dispatch)
@@ -926,12 +926,12 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   // ac56-recommended-deordered-check.ts from the OUTPUT ITSELF (判据3 — never a comment).
   let recommendedOrder = "none";
   // RANKING EXPOSURE (gap-ac36-recommended-exposes-sort-key AC2): the `ranking` array carries each
-  // recommended id's sort axes — `deliveryCritical` / `suiteBlocking` (the two axes candidates.sort
-  // ranks on) and its `rank` (0-based position WITHIN `recommended`). This is what makes AC36 判据②
-  // mechanical: an independent checker
-  // (ac36-sortkey-criterion-check.ts) can assert "DC task strictly moved forward / same-family
-  // non-DC unchanged / blocking_suite above DC" from two runs' `ranking` arrays instead of a human
-  // eyeballing two JSON dumps. The `recommended` STRING array is unchanged (backward compat).
+  // recommended id's suite-blocking axis (`suiteBlocking`) and its `rank` (0-based position WITHIN
+  // the priority-ordered recommendation). The delivery-critical axis this array used to also expose
+  // was RETIRED (gap-delivery-critical-mechanical-axis-orphaned-needs-ruling, 人 2026-09-07 裁定):
+  // delivery-critical priority is carried entirely by the selector's semantic judgment
+  // (orchestration/dispatch-preference.md), no mechanical axis. The `recommended` STRING array is
+  // unchanged (backward compat).
   let ranking = [];
   // DEFER ACCOUNTING (gap-over90-clock-measures-queue-time-not-work-time): the deferred candidates
   // (step-4-skips) accumulate at function scope. Surfaced
@@ -1156,21 +1156,14 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   // Ties stay id-deterministic. The signal only re-ranks; the step-4 dispatch checks above still
   // gate admission (a suite-blocker that fails touches-resolve/deps/disjoint is never forced in).
   const suiteBlockingIds = new Set((pool.suite_blocking && pool.suite_blocking.tasks) || []);
-  // DELIVERY-CRITICAL SECOND AXIS (gap-ac36-delivery-critical-priority-axis): the sort key is now
-  // (blocking_suite, delivery_critical, id). `deliveryCritical` comes from parseCandidate (which
-  // reads the task's frontmatter `labels` via task-schema's parseTask — reuse, no new parser). A
-  // task labeled `delivery-critical` ranks below a suite-blocker but ABOVE plain id order, so the
-  // productization-delivery phase's AC tasks are picked by the refill before ordinary pool work.
-  // The signal only re-ranks (SIGNAL, not a gate): the step-4 dispatch checks above still gate
-  // admission, and a delivery-critical task that fails touches-resolve/deps/disjoint is never
-  // forced in.
+  // DELIVERY-CRITICAL SECOND AXIS RETIRED (gap-delivery-critical-mechanical-axis-orphaned-needs-
+  // ruling, 人 2026-09-07 裁定): the sort key is back to (blocking_suite, id). delivery-critical
+  // priority is carried entirely by the selector's semantic judgment
+  // (orchestration/dispatch-preference.md), no mechanical axis.
   candidates.sort((a, b) => {
     const ab = suiteBlockingIds.has(a.id) ? 0 : 1;
     const bb = suiteBlockingIds.has(b.id) ? 0 : 1;
     if (ab !== bb) return ab - bb;
-    const ad = a.deliveryCritical ? 0 : 1;
-    const bd = b.deliveryCritical ? 0 : 1;
-    if (ad !== bd) return ad - bd;
     return a.id.localeCompare(b.id);
   });
   // MUTEX-CLIQUE LANDED-IGNORE (tasks/gap-slot-refill-clique-ignores-landed-touches): a
@@ -1203,27 +1196,25 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   // NOT carry a meaningful priority order — an inner that reads "the mechanism's first pick" gets
   // anchored even against its own semantic leanings (SPEC §5; 不去序则新划分只是名义上的). Re-sort
   // lexicographically by id: a deterministic, obviously-meaningless dictionary order (判据1 option 2).
-  // The priority sort above (candidates.sort: blocking_suite → delivery_critical → id) still happens
-  // and still drives WHICH candidates the greedy disjoint batch admits; it is merely no longer the
-  // order of the OUTPUT array. The priority order remains machine-readable in the `ranking`
-  // diagnostic below (AC36 判据②), which the inner tick does NOT consume for dispatch — de-ordering
-  // `recommended` is the anchor removal; `ranking` stays a verification surface.
+  // The priority sort above (candidates.sort: blocking_suite → id) still happens and still drives
+  // WHICH candidates the greedy disjoint batch admits; it is merely no longer the order of the
+  // OUTPUT array. The priority order remains machine-readable in the `ranking` diagnostic below,
+  // which the inner tick does NOT consume for dispatch — de-ordering `recommended` is the anchor
+  // removal; `ranking` stays a verification surface.
   recommended.sort((a, b) => a.localeCompare(b));
   recommendedOrder = "lexicographic-by-id (order meaningless — 字典序，不代表优先级)";
-  // Build the ranking array from the PRIORITY-SORTED candidate order (blocking_suite →
-  // delivery_critical → id — the same order candidates.sort produced above), filtered to the
-  // recommended SET and capped at the same slots_free window. `rank` = position WITHIN the
-  // priority-ordered recommendation, NOT the de-ordered `recommended` array's position — this keeps
-  // AC36 判据② mechanically assertable (DC strict forward movement / blocking_suite above DC) while
-  // the dispatch-facing `recommended` array itself stays de-ordered. deliveryCritical comes from the
-  // SAME parseCandidate source the sort used — never a second parser (rule: reuse, no parallel
-  // copy). suiteBlocking is derived from the same suiteBlockingIds set the sort's first axis used.
+  // Build the ranking array from the PRIORITY-SORTED candidate order (blocking_suite → id — the same
+  // order candidates.sort produced above), filtered to the recommended SET and capped at the same
+  // slots_free window. `rank` = position WITHIN the priority-ordered recommendation, NOT the de-
+  // ordered `recommended` array's position. The delivery-critical axis this ranking used to carry was
+  // RETIRED (gap-delivery-critical-mechanical-axis-orphaned-needs-ruling, 人 2026-09-07 裁定) — only
+  // suiteBlocking remains. suiteBlocking is derived from the same suiteBlockingIds set the sort's
+  // first axis used.
   const recommendedSet = new Set(recommended);
   ranking = candidates
     .filter((c) => recommendedSet.has(c.id))
     .map((c, rank) => ({
       id: c.id,
-      deliveryCritical: c.deliveryCritical,
       suiteBlocking: suiteBlockingIds.has(c.id),
       rank,
     }));
@@ -1385,8 +1376,8 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
     // (gap-superseded-modeled-as-task-lifecycle-terminal, of 17 landed-but-not-flipped).
     phantom_killer_false_negative_caught: phantomKillerFalseNegativeCaught,
     // RANKING EXPOSURE (gap-ac36-recommended-exposes-sort-key AC2): per-recommended-id sort axes
-    // ({id, deliveryCritical, suiteBlocking, rank}) so AC36 判据②'s "strict forward movement +
-    // negative control" is mechanically assertable from the JSON alone.
+    // ({id, suiteBlocking, rank}) — the delivery-critical axis was RETIRED (人 2026-09-07 裁定,
+    // gap-delivery-critical-mechanical-axis-orphaned-needs-ruling).
     ranking,
     // AC2/AC3 (gap-delivery-critical-label-at-promote-not-after-dispatch): the delivery-critical
     // tasks EXCLUDED from this round's recommendation because they are IN-FLIGHT (touches-overlap-
@@ -1461,6 +1452,7 @@ export function resolveInFlightId(tasksDir, input) {
 function main(argv) {
   let root = null;
   let cap = FIXED_DISPATCH_CAP;
+  let capExplicit = false;
   let floorMult = POOL_FLOOR_MULT_DEFAULT;
   // AC115 (SPEC-worker-driven-inner-2026-08-16 §5 阶段 1): in-flight is now the worker driver's
   // DIRECT child-process count (--in-flight-count <n>), NOT a caller-maintained id list. The retired
@@ -1473,13 +1465,18 @@ function main(argv) {
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") root = args[++i];
     else if (args[i] === "--json") { /* output is always JSON — accepted for Contract parity */ }
-    else if (args[i] === "--cap") cap = Number(args[++i]);
+    else if (args[i] === "--cap") { cap = Number(args[++i]); capExplicit = true; }
     else if (args[i] === "--floor-mult") floorMult = Number(args[++i]);
     else if (args[i] === "--in-flight-count") inFlightCount = Number(args[++i]);
     else if (args[i] === "--integration-backlog") integrationBacklog = Number(args[++i]);
     else if (args[i] === "--red-backlog-cap") redBacklogCap = Number(args[++i]);
   }
   const rootDir = root ? path.resolve(root) : repoRoot(process.cwd());
+  // gap-cap-from-gate-effective-cap-dual-source-blocks-yml-override AC2: the bare-CLI default cap must
+  // read the SAME single source the runtime uses (driverCap → drivers.yml), not the code-default
+  // FIXED_DISPATCH_CAP literal — otherwise `slot-refill --json` reports 5 even when drivers.yml worker.cap
+  // is changed. An explicit --cap still wins; FIXED_DISPATCH_CAP remains the library-fallback default.
+  if (!capExplicit) cap = driverCap(rootDir, "worker");
   const tasksDir = path.join(rootDir, "tasks");
   // AC115 RETIREMENT (SPEC §5 阶段 1 退役清单): the CLI no longer passes --in-flight/--closed-but-live/
   // --running id lists NOR measures in-flight from telemetry brackets. In-flight = the driver's direct

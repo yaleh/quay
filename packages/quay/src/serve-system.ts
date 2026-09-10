@@ -1,10 +1,55 @@
 // serve-system.ts — /system + /manager route handlers, split from serve-handlers.ts.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readSystem, readManager, type SystemResult, type ManagerResult } from "./observation.ts";
+import { readSystem, readManager, type SystemResult, type ManagerResult, type ResourceGateReading } from "./observation.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote } from "./serve-render.ts";
 
 // ── /system ─────────────────────────────────────────────────────────────────────────────────────────
+
+/** Meter-bar percentage: `val / numericLimit` clamped to 0–100. Returns `null` (「无法评估」) when
+ *  the denominator is missing / non-finite / ≤ 0 — never silently degrades to 1 (硬规则 3b/4: a
+ *  reading that can't be evaluated must not look identical to a valid 100%). */
+export function meterPct(val: number, numericLimit: number | null): number | null {
+  if (numericLimit == null || !Number.isFinite(numericLimit) || numericLimit <= 0) return null;
+  return Math.min(100, Math.max(0, (val / numericLimit) * 100));
+}
+
+/** One /system meter-bar definition: label + value + numeric denominator + the right-side caption. */
+export interface MeterBarSpec {
+  label: string;
+  val: number | null;
+  numericLimit: number | null;
+  displayLimit: string | null;
+}
+
+/** Every /system progress-bar call site — the single source of truth (AC4 enumerates over it, so a
+ *  newly added bar can't escape the denominator check). `limit` is SPLIT: `numericLimit` is the
+ *  percentage denominator, `displayLimit` is the human caption (e.g. `nproc×2≈32`). */
+export function systemBars(rg: ResourceGateReading): MeterBarSpec[] {
+  return [
+    { label: "cpu_stall (avg10)", val: rg.cpuStallAvg10, numericLimit: 60, displayLimit: "60" },
+    { label: "cpu_stall (avg300)", val: rg.cpuStallAvg300, numericLimit: 60, displayLimit: "60" },
+    {
+      label: "loadavg (1m)",
+      val: rg.loadAvg,
+      numericLimit: rg.loadThreshold,
+      displayLimit: rg.loadThreshold != null ? `nproc×${rg.loadOverFactor ?? "?"}≈${rg.loadThreshold}` : "nproc×factor",
+    },
+  ];
+}
+
+/** Render one meter bar. A fill bar is drawn ONLY when the numeric limit is evaluable (a value AND
+ *  a finite-positive denominator); otherwise the bar is omitted and an explicit `（未知上限）` marker
+ *  is shown — never a fake 100% (硬规则 3b: 「无法评估」 gets its own value). */
+export function renderBar(label: string, val: number | null, numericLimit: number | null, displayLimit: string | null): string {
+  const pct = val != null ? meterPct(val, numericLimit) : null;
+  const unknown = val != null && pct == null
+    ? html` <span style="color:var(--color-neutral-700)">（未知上限）</span>`
+    : "";
+  return html`<div><div style="display:flex;justify-content:space-between;font-size:0.9rem;margin-bottom:2px">
+    <span>${escapeHtml(label)}</span><span>${val != null ? escapeHtml(String(val)) : "—"}${displayLimit ? html` <span style="color:var(--color-neutral-700)">/ ${escapeHtml(displayLimit)}</span>` : ""}${unknown}</span>
+  </div>${pct != null ? html`<div style="height:8px;background:var(--color-neutral-300)"><div style="height:100%;width:${pct.toFixed(1)}%;background:var(--color-text)"></div></div>` : ""}</div>`;
+}
 
 function renderSystemPage(sys: SystemResult): string {
   const rg = sys.resourceGate;
@@ -14,24 +59,16 @@ function renderSystemPage(sys: SystemResult): string {
   const banner = bothOk
     ? html`<div class="${goVerdict ? "success-banner" : "error-banner"}" role="status"><strong>⇒ ${goVerdict ? "GO" : "WAIT"}</strong>：${goVerdict ? "资源充足，可以跑" : "资源受限，等待"}</div>`
     : "";
-  const bar = (label: string, val: number | null, limit: string | null): string => {
-    const pct = val != null ? Math.min(100, Math.max(1, (val / (Number(limit) || 1)) * 100)) : 0;
-    return html`<div><div style="display:flex;justify-content:space-between;font-size:0.9rem;margin-bottom:2px">
-      <span>${escapeHtml(label)}</span><span>${val != null ? escapeHtml(String(val)) : "—"}${limit ? html` <span style="color:var(--color-neutral-700)">/ ${escapeHtml(limit)}</span>` : ""}</span>
-    </div>${val != null ? html`<div style="height:8px;background:var(--color-neutral-300)"><div style="height:100%;width:${pct.toFixed(1)}%;background:var(--color-text)"></div></div>` : ""}</div>`;
-  };
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay system — resource gate and process budget">${modernistStyles()}${pageStyles()}<title>System — 系统状态</title></head>
-    <body>${renderMobileChrome("system", "system")}${renderSiteNav("system")}<main>
+    <body>${renderMobileChrome("system", "system")}${renderSiteNav("system")}<main id="main">
       <h1>System — 系统状态</h1>
       <p class="meta">数据源：<code>resource-gate.sh --json</code> · <code>process-budget.sh --json</code>（稳定机读 JSON 输出）</p>
       ${banner}
       ${obsNote(rg.status, rg.reason)}
       <h2>resource-gate.sh</h2>
       ${rg.status === "ok" ? html`<div style="display:flex;flex-direction:column;gap:0.75rem;max-width:640px">
-        ${bar("cpu_stall (avg10)", rg.cpuStallAvg10, "60")}
-        ${bar("cpu_stall (avg300)", rg.cpuStallAvg300, "60")}
-        ${bar("loadavg (1m)", rg.loadAvg, rg.loadThreshold != null ? `nproc×${rg.loadOverFactor ?? "?"}≈${rg.loadThreshold}` : "nproc×factor")}
+        ${systemBars(rg).map((b) => renderBar(b.label, b.val, b.numericLimit, b.displayLimit)).join("")}
         <div style="display:flex;justify-content:space-between;font-size:0.9rem"><span>mem_avail</span><span>${rg.memAvailMb != null ? `${escapeHtml(String(rg.memAvailMb))} MB` : "—"}</span></div>
         <div style="display:flex;justify-content:space-between;font-size:0.9rem"><span>nproc / node_procs</span><span>${rg.nproc != null ? escapeHtml(String(rg.nproc)) : "—"} / ${rg.nodeProcs != null ? escapeHtml(String(rg.nodeProcs)) : "—"}</span></div>
         <div style="display:flex;justify-content:space-between;font-size:0.9rem"><span>verdict</span><span>${escapeHtml(rg.verdict ?? "—")}</span></div>
@@ -108,7 +145,7 @@ function renderManagerPage(mgr: ManagerResult): string {
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay manager — Manager/Outer/Inner 三层状态">${modernistStyles()}${pageStyles()}<title>Manager / Outer / Inner</title></head>
-    <body>${renderMobileChrome("manager", "manager")}${renderSiteNav("manager")}<main>
+    <body>${renderMobileChrome("manager", "manager")}${renderSiteNav("manager")}<main id="main">
       <h1>Manager / Outer / Inner — 三层状态</h1>
       <p class="meta">三层自适应探测：多信号加权判定，缺失信号诚实标注「未检测到」，不静默假设。</p>
       <h2>Loop / 会话</h2>

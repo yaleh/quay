@@ -190,7 +190,7 @@ function factOf<T>(name: string, value: T | null, notEvaluatedReason: string): F
 export function occupancyRoutine(root: string, cmd: string[] | null): () => Fact[] {
   return () => {
     const argv = cmd ?? ["node", "--no-warnings", "--experimental-strip-types",
-      path.join(root, "plugin", "scripts", "slot-refill.ts"), "--root", root, "--cap", "5", "--json"];
+      path.join(root, "plugin", "scripts", "slot-refill.ts"), "--root", root, "--cap", "5", "--json"];  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     const parsed = runJson(argv, root);
     const v = parsed && typeof parsed === "object" ? parseSlotRefill(JSON.stringify(parsed)) : null;
     const value = v === null ? null : { in_flight: v.inFlight, occupied_slots: v.occupiedSlots, cap: v.effectiveCap };
@@ -202,7 +202,7 @@ export function occupancyRoutine(root: string, cmd: string[] | null): () => Fact
 export function notYetFlippedRoutine(root: string, cmd: string[] | null): () => Fact[] {
   return () => {
     const argv = cmd ?? ["node", "--no-warnings", "--experimental-strip-types",
-      path.join(root, "plugin", "scripts", "ready-pool-check.ts"), "--root", root, "--cap", "5", "--json"];
+      path.join(root, "plugin", "scripts", "ready-pool-check.ts"), "--root", root, "--cap", "5", "--json"];  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     const parsed = runJson(argv, root);
     const v = parsed && typeof parsed === "object" ? parseNotYetFlipped(JSON.stringify(parsed)) : null;
     return [factOf("not_yet_flipped", v, "ready-pool-check unreadable/unparseable")];
@@ -212,7 +212,7 @@ export function notYetFlippedRoutine(root: string, cmd: string[] | null): () => 
 /** A10 · closure-lag 信号：`closure-lag-check.sh`（无参信号检查），退出非 0 ⇒ 报出。 */
 export function closureLagRoutine(root: string, cmd: string[] | null): () => Fact[] {
   return () => {
-    const argv = cmd ?? ["bash", path.join(root, "plugin", "scripts", "closure-lag-check.sh")];
+    const argv = cmd ?? ["bash", path.join(root, "plugin", "scripts", "closure-lag-check.sh")];  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     const r = runExit(argv, root);
     if (!r.ok) return [{ name: "closure_lag", value: null, state: "not-evaluated", reason: "closure-lag-check unreadable" }];
     // exit 0 = 正常（无信号）；非 0 = 信号触发（报出，但这是读数不是门控——判断归 manager）。
@@ -224,7 +224,7 @@ export function closureLagRoutine(root: string, cmd: string[] | null): () => Fac
 export function slotRefillRoutine(root: string, cmd: string[] | null): () => Fact[] {
   return () => {
     const argv = cmd ?? ["node", "--no-warnings", "--experimental-strip-types",
-      path.join(root, "plugin", "scripts", "slot-refill.ts"), "--root", root, "--cap", "5", "--json"];
+      path.join(root, "plugin", "scripts", "slot-refill.ts"), "--root", root, "--cap", "5", "--json"];  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     const parsed = runJson(argv, root);
     const v = parsed && typeof parsed === "object" ? parseSlotRefill(JSON.stringify(parsed)) : null;
     const value = v === null ? null : {
@@ -274,7 +274,7 @@ export function livenessDirectRoutine(root: string): () => Fact[] {
 /** B1 · 收尾 pass：`closure-lag-check.sh --close-terminal --json`（机械闭合终态括号）→ { scanned, closed }。 */
 export function closurePassRoutine(root: string, cmd: string[] | null): () => Fact[] {
   return () => {
-    const argv = cmd ?? ["bash", path.join(root, "plugin", "scripts", "closure-lag-check.sh"), "--close-terminal", "--json"];
+    const argv = cmd ?? ["bash", path.join(root, "plugin", "scripts", "closure-lag-check.sh"), "--close-terminal", "--json"];  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     const parsed = runJson(argv, root);
     const v = parsed && typeof parsed === "object" ? parseClosureTerminal(JSON.stringify(parsed)) : null;
     return [factOf("closure_pass", v, "closure pass unreadable/unparseable")];
@@ -284,7 +284,7 @@ export function closurePassRoutine(root: string, cmd: string[] | null): () => Fa
 /** B2 · 留痕：`closure-lag-check.sh --record --flipped <N>`（零收尾也写 0）。 */
 export function closureRecordRoutine(root: string, flipped: number, cmd: string[] | null): () => Fact[] {
   return () => {
-    const argv = cmd ?? ["bash", path.join(root, "plugin", "scripts", "closure-lag-check.sh"), "--record", "--flipped", String(flipped)];
+    const argv = cmd ?? ["bash", path.join(root, "plugin", "scripts", "closure-lag-check.sh"), "--record", "--flipped", String(flipped)];  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     const r = runExit(argv, root);
     if (!r.ok) return [{ name: "closure_record", value: null, state: "not-evaluated", reason: "closure record unreadable" }];
     return [{ name: "closure_record", value: { exit: r.exit, flipped }, state: "verified", reason: null }];
@@ -295,7 +295,7 @@ export function closureRecordRoutine(root: string, flipped: number, cmd: string[
 export function telemetrySnapshotRoutine(root: string, cmd: string[] | null): () => Fact[] {
   return () => {
     const argv = cmd ?? ["node", "--no-warnings", "--experimental-strip-types",
-      path.join(root, "plugin", "scripts", "fast-mode-telemetry.ts"), "--snapshot", "--root", root];
+      path.join(root, "plugin", "scripts", "fast-mode-telemetry.ts"), "--snapshot", "--root", root];  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     const r = runExit(argv, root);
     if (!r.ok) return [{ name: "telemetry_snapshot", value: null, state: "not-evaluated", reason: "telemetry snapshot unreadable" }];
     return [{ name: "telemetry_snapshot", value: { exit: r.exit }, state: "verified", reason: null }];
@@ -306,7 +306,7 @@ export function telemetrySnapshotRoutine(root: string, cmd: string[] | null): ()
 export function judgmentConsumerRoutine(root: string, cmd: string[] | null): () => Fact[] {
   return () => {
     const argv = cmd ?? ["node", "--no-warnings", "--experimental-strip-types",
-      path.join(root, "plugin", "scripts", "judgment-consumer-check.ts"), "--json"];
+      path.join(root, "plugin", "scripts", "judgment-consumer-check.ts"), "--json"];  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     const parsed = runJson(argv, root);
     const v = parsed && typeof parsed === "object" ? parseJudgmentConsumer(JSON.stringify(parsed)) : null;
     return [factOf("judgment_consumer", v, "judgment-consumer-check unreadable/unparseable")];
@@ -381,7 +381,9 @@ export function computeOuterRoundRecord(opts: {
 }
 
 /** 跑常驻循环：每轮跑一遍例程（collectFacts）→ 写 round 记录 → 按间隔进入下一轮，直到信号停机或
- *  --once/--max-rounds。halted ⇒ 写一条 halted round 后退出（与 promotion/worker 同族）。 */
+ *  --once/--max-rounds。halted ⇒ 记 halted 轮【继续循环】，⛔ 不退出——halt 是轮内闸，非进程终止条件
+ *  （gap-drain-on-routine-driver-empties-round-and-respawn-loops：旧的 break 让进程 return 0 结束、
+ *  supervisor 每 5s 重生一次）。outer 例程全机械（零 LLM），halted 轮照跑全部例程，无 spawn 可挡。 */
 export async function runResidentOuterLoop(opts: ResidentOuterLoopOptions): Promise<number> {
   const { root, intervalMs, once, maxRounds, roundLogFile, runId, json, pidFile, routines } = opts;
 
@@ -404,13 +406,11 @@ export async function runResidentOuterLoop(opts: ResidentOuterLoopOptions): Prom
   let selfStopCounter = 0;
   while (!stopRequested) {
     round += 1;
-    // 控制面：起新一轮前读控制态（.quay/outer-control.json 单一真相源）。halted ⇒ 写 halted round 退出。
-    if (isHalted(root, process.env, OUTER_CONTROL_STATE_REL)) {
-      const record = computeOuterRoundRecord({ round, runId, pid: process.pid, at: ts(), facts: [], halted: true, error: null });
-      try { appendHeartbeatLine(roundLogFile, record); } catch { /* 日志写失败不致命 */ }
-      if (json) process.stdout.write(`${JSON.stringify({ event: "halted", round })}\n`);
-      break;
-    }
+    // 控制面：起新一轮前读控制态（.quay/outer-control.json 单一真相源）。halted ⇒ 本轮【不做受闸动作】，
+    // 但【观测继续、心跳继续、循环继续】——halt 是轮内闸，⛔ 不是进程的终止条件
+    // （gap-drain-on-routine-driver-empties-round-and-respawn-loops）。outer 例程全机械（零 LLM），
+    // 故 halted 轮照跑全部例程（无 spawn 可挡），只在 round 记录里标 halted: true。
+    const halted = isHalted(root, process.env, OUTER_CONTROL_STATE_REL);
 
     // 例程调度（Layer 1b schedule）：每轮跑 due 的例程。全部是 EVERY_ROUND ⇒ 每轮全跑。
     const due = routines.filter((r) => scheduleIsDue(r.schedule, { iteration: round }));
@@ -439,7 +439,7 @@ export async function runResidentOuterLoop(opts: ResidentOuterLoopOptions): Prom
       facts.push({ name: "self_stop", value: { counter: selfStop.counter }, state: "verified", reason: null });
     }
 
-    const record = computeOuterRoundRecord({ round, runId, pid: process.pid, at: ts(), facts, halted: false, error: null });
+    const record = computeOuterRoundRecord({ round, runId, pid: process.pid, at: ts(), facts, halted, error: null });
     try { appendHeartbeatLine(roundLogFile, record); } catch { /* 日志写失败不致命 */ }
     if (json) process.stdout.write(`${JSON.stringify({ event: "round", ...record })}\n`);
 

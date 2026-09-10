@@ -41,6 +41,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 import YAML from "yaml";
 import { createStore } from "../src/store.ts";
 
@@ -335,5 +336,174 @@ test("AC5: real-store scan — 0 parse failures; hazardous titles read back unch
     `${parseFailures} parse failures, ${truncated} truncations, ${missingTitle} title-less (pre-existing)`);
   if (missingTitle > 0) {
     console.log(`AC5: title-less files (pre-existing, not this task's scope): ${missingTitleExamples.join(", ")}`);
+  }
+});
+
+// ── gap-abi-missing-commit-delete-dependson-primitives: commit-after-write + task_delete ─────────
+
+function git(root, ...args) {
+  return execFileSync("git", ["-C", root, ...args], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+}
+
+/** A disposable store whose tasksDir lives inside a real git repo (so commit-after-write has a
+ *  target). The default branch is renamed to `branch` ("develop") — the ref the dispatch spine reads. */
+function makeGitStore({ branch = "develop" } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "quay-store-commit-test-"));
+  execFileSync("git", ["init", "-q", root]);
+  execFileSync("git", ["-C", root, "config", "user.email", "test@example.com"]);
+  execFileSync("git", ["-C", root, "config", "user.name", "Test"]);
+  fs.writeFileSync(path.join(root, "README.md"), "fixture\n", "utf8");
+  execFileSync("git", ["-C", root, "add", "README.md"]);
+  execFileSync("git", ["-C", root, "commit", "-q", "--no-verify", "-m", "initial"]);
+  execFileSync("git", ["-C", root, "branch", "-M", branch]);
+  const tasksDir = path.join(root, "tasks");
+  fs.mkdirSync(tasksDir, { recursive: true });
+  const store = createStore(tasksDir);
+  return { store, tasksDir, root };
+}
+
+test("AC1 (commit-after-write): store.write commits tasks/<id>.md to git", () => {
+  const { store, root } = makeGitStore();
+  try {
+    assert.equal(git(root, "log", "-1", "--format=%H", "--", "tasks/RT.md"), "", "no prior commit for RT.md");
+    store.write("RT", { title: "commit test", status: "todo" });
+    const after = git(root, "log", "-1", "--format=%H", "--", "tasks/RT.md");
+    assert.match(after, /^[0-9a-f]{40}$/, `a NEW commit for tasks/RT.md exists (got "${after}")`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 (branch-aware): store.write in a task/<id> branch does NOT advance develop", () => {
+  const { store, root } = makeGitStore({ branch: "develop" });
+  try {
+    const developBefore = git(root, "rev-parse", "develop");
+    execFileSync("git", ["-C", root, "checkout", "-q", "-b", "task/scratch"]);
+    store.write("RT", { title: "worktree write", status: "todo" });
+    assert.equal(git(root, "rev-parse", "develop"), developBefore, "develop unchanged after a task-worktree write");
+    assert.notEqual(git(root, "rev-parse", "task/scratch"), developBefore, "the task branch advanced");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC3 (task_delete): store.delete removes the file and commits the deletion", () => {
+  const { store, root } = makeGitStore();
+  try {
+    store.write("SCRATCH", { title: "to delete", status: "todo" });
+    assert.ok(fs.existsSync(path.join(root, "tasks", "SCRATCH.md")), "scratch file exists before delete");
+    const res = store.delete("SCRATCH");
+    assert.equal(res.ok, true, "delete succeeds");
+    assert.equal(res.committed, true, "deletion committed");
+    assert.ok(!fs.existsSync(path.join(root, "tasks", "SCRATCH.md")), "file absent from disk after delete");
+    assert.equal(store.get("SCRATCH"), null, "store.get returns null after delete");
+    let absentFromHead = false;
+    try { execFileSync("git", ["-C", root, "show", "HEAD:tasks/SCRATCH.md"], { stdio: "ignore" }); }
+    catch { absentFromHead = true; }
+    assert.ok(absentFromHead, "SCRATCH.md absent from HEAD after the delete commit");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC4 (task_delete fail-closed): store.delete of a non-existent id reports ok:false", () => {
+  const { store, root } = makeGitStore();
+  try {
+    const res = store.delete("NOPE");
+    assert.equal(res.ok, false, "delete of a missing id is not ok");
+    assert.equal(res.reason, "missing", "reason is 'missing' (distinguishable, not silent)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── gap-store-commit-propagation-field-aware: field-level propagation judgment ──────────────────
+// A write whose change set is ONLY the self-only fields (AC/DoD checkbox toggles, ## Evidence
+// content, extra.goal / goal_ac) must NOT ff to develop even on a non-task/* branch — the task's
+// own fan-in carries it to develop with the worktree branch (SPEC-store-commit-unification §5).
+// A mixed write (AC toggle + status flip) keeps the current ff-to-develop behavior.
+
+test("AC5 (field-aware): pure AC-checkbox write on a non-task/* branch does NOT advance develop", () => {
+  const { store, root } = makeGitStore({ branch: "develop" });
+  try {
+    store.write("RT", { title: "field-aware", status: "todo", body: "## Acceptance Criteria\n\n- [ ] do a thing\n" });
+    const developBefore = git(root, "rev-parse", "develop");
+    execFileSync("git", ["-C", root, "checkout", "-q", "-b", "author"]);
+    // pure AC toggle: only the checkbox flips, no other field changes.
+    store.write("RT", { body: "## Acceptance Criteria\n\n- [x] do a thing\n" });
+    assert.equal(git(root, "rev-parse", "develop"), developBefore, "develop unchanged after a pure-AC write on a non-task branch");
+    assert.notEqual(git(root, "rev-parse", "author"), developBefore, "the author branch advanced (the tick is on its own branch)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC6 (field-aware negative control): mixed write (AC toggle + status flip) DOES advance develop", () => {
+  const { store, root } = makeGitStore({ branch: "develop" });
+  try {
+    store.write("RT", { title: "field-aware", status: "todo", body: "## Acceptance Criteria\n\n- [ ] do a thing\n" });
+    const developBefore = git(root, "rev-parse", "develop");
+    execFileSync("git", ["-C", root, "checkout", "-q", "-b", "author"]);
+    // mixed write: status lifecycle flip + AC toggle together ⇒ must-propagate (the field-level
+    // judgment must NOT widen its net to swallow a status flip).
+    store.write("RT", { status: "ready", body: "## Acceptance Criteria\n\n- [x] do a thing\n" });
+    assert.notEqual(git(root, "rev-parse", "develop"), developBefore, "develop advanced after a mixed write (status flip + AC toggle)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC7 (field-aware): ## Evidence append on a non-task/* branch does NOT advance develop", () => {
+  const { store, root } = makeGitStore({ branch: "develop" });
+  try {
+    store.write("RT", { title: "field-aware", status: "todo", body: "## Acceptance Criteria\n\n- [x] do a thing\n" });
+    const developBefore = git(root, "rev-parse", "develop");
+    execFileSync("git", ["-C", root, "checkout", "-q", "-b", "author"]);
+    store.write("RT", { body: "## Acceptance Criteria\n\n- [x] do a thing\n\n## Evidence\n\nran the suite, green\n" });
+    assert.equal(git(root, "rev-parse", "develop"), developBefore, "develop unchanged after an Evidence-only append on a non-task branch");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── GOAL-011 AC-220 (gap-store-commit-propagation-log): durable audit trail ─────────────────────
+// commitTaskWrite must log its OWN propagation decision to .quay/store-commit-propagation.jsonl —
+// the direct production carrier AC-220's new criterion reads, replacing the confounded "ff-red
+// rate vs 7-day baseline" proxy (too many unrelated causes mixed in).
+
+test("AC8 (propagation log): self-only write logs changeKind=self-only propagated=false", () => {
+  const { store, root } = makeGitStore({ branch: "develop" });
+  try {
+    store.write("RT", { title: "field-aware", status: "todo", body: "## Acceptance Criteria\n\n- [ ] do a thing\n" });
+    execFileSync("git", ["-C", root, "checkout", "-q", "-b", "author"]);
+    store.write("RT", { body: "## Acceptance Criteria\n\n- [x] do a thing\n" });
+    const logPath = path.join(root, ".quay", "store-commit-propagation.jsonl");
+    assert.ok(fs.existsSync(logPath), "propagation log file created");
+    const records = fs.readFileSync(logPath, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const last = records.at(-1);
+    assert.equal(last.id, "RT");
+    assert.equal(last.changeKind, "self-only");
+    assert.equal(last.propagated, false, "self-only write must log propagated:false — the exact invariant AC-220 checks in production");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC9 (propagation log negative control): mixed write logs changeKind=must-propagate propagated=true", () => {
+  const { store, root } = makeGitStore({ branch: "develop" });
+  try {
+    store.write("RT", { title: "field-aware", status: "todo", body: "## Acceptance Criteria\n\n- [ ] do a thing\n" });
+    execFileSync("git", ["-C", root, "checkout", "-q", "-b", "author"]);
+    store.write("RT", { status: "ready", body: "## Acceptance Criteria\n\n- [x] do a thing\n" });
+    const logPath = path.join(root, ".quay", "store-commit-propagation.jsonl");
+    const records = fs.readFileSync(logPath, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const last = records.at(-1);
+    assert.equal(last.changeKind, "must-propagate");
+    assert.equal(last.propagated, true, "mixed write must log propagated:true — negative control, ⛔ the log itself must not fabricate a uniform false");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });

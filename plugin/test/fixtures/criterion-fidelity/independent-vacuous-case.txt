@@ -1,0 +1,31 @@
+// legacy-anchor-resolution-check.ts — 【独立构造】的静态检查器（与本仓库 kernel-sibling 无关）：
+// 扫描 shipped 源码里把【遗留模块】锚在 naive 位置而非经解析器的调用点。
+// 扫描面 = plugin/scripts + packages/legacy-mod/src。
+//
+// 判定（按位置，硬规则 2）：
+//   L1 naive-__dirname — `path.join(__dirname, "<name>.<ext>")`，第二参是字面量脚本文件名。
+//   L2 target-root    — `path.join(<root>, "plugin", "scripts", "<name>.<ext>")`。
+// ⛔ 本条检查器【没有】引用 "packages" 段——它扫描 packages/legacy-mod/src 却无法标记
+//    `path.join(<root>, "packages", "legacy-mod", "src", …)` 形态的锚定 ⇒ 对该类别空洞。
+//
+// Run: node … legacy-anchor-resolution-check.ts --root . --json
+
+import fs from "node:fs";
+import path from "node:path";
+
+const SCRIPT_EXT = "(?:ts|js|mjs)";
+
+export const L1_NAIVE_DIRNAME_RE = new RegExp(
+  `path\\.(join|resolve)\\(\\s*__dirname\\s*,\\s*["']([A-Za-z0-9_.-]+\\.${SCRIPT_EXT})["']`,
+  "g",
+);
+
+export const L2_TARGET_ROOT_RE = new RegExp(
+  `path\\.(join|resolve)\\(\\s*[A-Za-z_$][A-Za-z0-9_$]*\\s*,\\s*["']plugin["']\\s*,\\s*["']scripts["']\\s*,\\s*["']([A-Za-z0-9_.-]+\\.${SCRIPT_EXT})["']`,
+  "g",
+);
+
+const SCAN_ROOTS = [
+  { dir: "plugin/scripts", rel: "plugin/scripts" },
+  { dir: "packages/legacy-mod/src", rel: "packages/legacy-mod/src" },
+];

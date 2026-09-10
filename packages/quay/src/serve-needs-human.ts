@@ -25,7 +25,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
 import type { Manifest } from "./serve-render.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, relativeTime, renderSiteNav, renderMobileChrome } from "./serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, relativeTime, renderSiteNav, renderMobileChrome, tableWrap } from "./serve-render.ts";
 import { readNeedsHumanLedger } from "./observation.ts";
 import { TASK_STATUS } from "./abi.ts";
 
@@ -61,34 +61,34 @@ export function renderNeedsHumanPage(active: ActiveRow[], ledger: LedgerRow[], m
     : active.map((r) => html`<tr>
         <td><a href="/task/${encodeURIComponent(r.id)}">${escapeHtml(r.id)}</a></td>
         <td>${escapeHtml(r.title)}${r.labels.length > 0 ? ` · ${escapeHtml(r.labels.join(", "))}` : ""}</td>
-        <td>${r.reason != null ? escapeHtml(r.reason) : html`<span style="color:var(--color-neutral-700)">未记录</span>`}</td>
+        <td class="clamp" title="${r.reason != null ? escapeHtml(r.reason) : "未记录"}">${r.reason != null ? escapeHtml(r.reason) : html`<span style="color:var(--color-neutral-700)">未记录</span>`}</td>
       </tr>`).join("\n");
 
   const ledgerRows = ledger.length === 0
     ? html`<tr><td colspan="3">无 needs-human 升级记录（<code>.quay/promotion-outcome.jsonl</code>）。</td></tr>`
     : ledger.map((r) => html`<tr>
         <td><a href="/task/${encodeURIComponent(r.taskId)}">${escapeHtml(r.taskId)}</a></td>
-        <td>${r.detail != null ? escapeHtml(r.detail) : "—"}</td>
+        <td class="clamp" title="${r.detail != null ? escapeHtml(r.detail) : "—"}">${r.detail != null ? escapeHtml(r.detail) : "—"}</td>
         <td>${r.ts != null ? escapeHtml(relativeTime(Date.parse(r.ts))) : "—"}</td>
       </tr>`).join("\n");
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay needs-human — 显式人机承接界面">${modernistStyles()}${pageStyles()}<title>Needs Human — ${escapeHtml(manifest.name)}</title></head>
-    <body>${renderMobileChrome("needs-human", "needs human")}${renderSiteNav("needs-human")}<main>
+    <body>${renderMobileChrome("needs-human", "needs human")}${renderSiteNav("needs-human")}<main id="main">
       <h1>Needs Human — 待人类决定</h1>
       <p class="meta">人机接口的显式承接者：一条 <code>needs-human</code> 产生后，无需读任何 transcript，在此页即可看到。上面是「当前待办」，下面是「升级台账」（含状态已流转的历史样本）。</p>
 
       <h2>当前待办（<code>status: needs-human</code>）</h2>
-      <table>
+      ${tableWrap(html`<table>
         <tr><th>id</th><th>title</th><th>阻碍原因</th></tr>
         ${activeRows}
-      </table>
+      </table>`)}
 
       <h2>升级台账（<code>action: needs-human</code>）</h2>
-      <table>
+      ${tableWrap(html`<table>
         <tr><th>task_id</th><th>detail</th><th>ts</th></tr>
         ${ledgerRows}
-      </table>
+      </table>`)}
     </main></body></html>`;
 }
 

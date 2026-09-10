@@ -15,7 +15,7 @@ extra:
 
 ## Proposal
 
-Web 显示层的 task status 读面是**主检出 disk 的 `tasks/*.md`**（`main/manager-doc` 工作分支），而任务落地在 develop。主检出落后 develop 直到被 sync merge 追上 ⇒ 显示失真：
+Web 显示层的 task status 读面是**主检出 disk 的 `tasks/*.md`**（`author` 工作分支），而任务落地在 develop。主检出落后 develop 直到被 sync merge 追上 ⇒ 显示失真：
 
 1. **/tasks 与 /board**：`serve-task.ts:53` 与 `serve-board.ts:200` 都走 `client.taskList()` → native provider 读 `workspaceRoot`（=主检出）disk。实证 2026-08-30：02:21 主检出 `Merge branch 'develop' into main/manager-doc`（c48ebc0d3）一次性触碰 14 个任务文件 mtime ⇒ 账本把 20:28→01:30 的 14 个真实落地全部显示成「5m ago」——真实落地时刻被压缩到一个同步点。
 2. **/live 的「已落地→移出在飞」过滤**：`observation.ts` `readTaskStatusOnDisk(root, id)`（:978/:1154）读主检出 disk。任务在 develop 翻 done 但主检出未同步 ⇒ 仍显示在飞。
@@ -28,13 +28,13 @@ web 显示的任务 status 读面从「主检出 disk」改「develop git ref」
 
 - **/tasks 与 /board**：任务列表改从 develop 读。1500+ 任务逐条 `git show` 太慢 ⇒ 一次 `git show develop:tasks`（整树 ~几 MB）+ 短 TTL 缓存，或 diff overlay（disk 为基础 + `git diff develop -- tasks/` 覆盖 status）。⛔ 不做主检出 ff 同步（band-aid，读 develop ref 一次性根除，同 dispatch 案的裁定）。
 - **/live done 过滤**：`readTaskStatusOnDisk` 的显示路径改读 develop ref。
-- ⛔ 主检出保持 `main/manager-doc`，**不得** `git checkout develop` / `git worktree add` 到 develop（会挡 fan-in 推 develop）。
+- ⛔ 主检出保持 `author`，**不得** `git checkout develop` / `git worktree add` 到 develop（会挡 fan-in 推 develop）。
 
 ## Acceptance Criteria
 
 - [x] AC1（能取假）：构造「主检出 status=ready、develop status=done」的 case → /tasks 与 /live 按 develop 判 done（落地任务不再显示成 ready/在飞）；（⛔ 仍按主检出 ready ⇒ 假）。
 - [x] AC2（能取假，回归）：主检出与 develop 同 status 时显示不变（fresh 任务不受读源改影响）。
-- [x] AC3（能取假）：改动代码无任何 `git checkout develop` / `git worktree add` 指向 develop（grep 变更集确认）；主检出分支保持 main/manager-doc。
+- [x] AC3（能取假）：改动代码无任何 `git checkout develop` / `git worktree add` 指向 develop（grep 变更集确认）；主检出分支保持 author。
 - [x] AC4（能取假）：1500+ 任务场景下 /tasks 渲染延迟可接受（批量读/缓存生效，不逐任务 git show）。
 
 ## Definition of Done

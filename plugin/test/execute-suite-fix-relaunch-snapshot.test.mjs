@@ -33,7 +33,6 @@ const SCAN_SH = path.join(REPO_ROOT, "plugin", "scripts", "tmux-leak-scan.sh");
 
 const COPIES = [
   path.join(REPO_ROOT, "plugin", "workflows", "execute-suite-fix.js"),
-  path.join(REPO_ROOT, ".claude", "workflows", "execute-suite-fix.js"),
 ];
 
 // AC1 — the relaunch launchCmd must explicitly generate a fresh before-run snapshot before launch.
@@ -55,11 +54,11 @@ test("AC1 — execute-suite-fix.js relaunch launchCmd explicitly snapshots tmux-
   }
 });
 
-// AC3 (dual-copy) — the shipped mirror must stay byte-identical to the checked-in source.
-test("AC3 — both execute-suite-fix.js copies are byte-identical", () => {
+// AC3 (single-source) — the .claude/workflows/ dual-copy is retired; only plugin/workflows/ remains.
+test("AC3 — execute-suite-fix.js lives ONLY in plugin/workflows/ (the .claude/workflows/ dual-copy is retired)", () => {
   const a = fs.readFileSync(COPIES[0], "utf8");
-  const b = fs.readFileSync(COPIES[1], "utf8");
-  assert.equal(a, b, "plugin/workflows and .claude/workflows copies must be byte-identical");
+  assert.ok(a.length > 0, "plugin/workflows/execute-suite-fix.js must have content");
+  assert.ok(!fs.existsSync(path.join(REPO_ROOT, ".claude", "workflows", "execute-suite-fix.js")), ".claude/workflows/execute-suite-fix.js must be retired (archived)");
 });
 
 // AC2 — the suite-tail --check must use a FRESH snapshot (not a stale one), and must not

@@ -5,7 +5,13 @@
   --color-bg: #f3f2f2;
   --color-surface: #eae9e9;
   --color-text: #201e1d;
-  --color-accent: #ec3013;
+  /* gap-webui-a11y-focus-ring-and-token-contrast-unvalidated: the default accent was #ec3013,
+     which as TEXT on --color-surface/#eae9e9 measures 3.47:1 (WCAG AA needs ≥4.5 for normal
+     text) and as a BACKGROUND under light text ~3.76:1. It is darkened to #ae1800 (the former
+     --color-accent-700) so the SAME token passes ≥4.5 in BOTH its text role (5.91:1 on surface)
+     and its background role (~6.9:1 under --color-bg). Bright-red fills that need no text
+     contrast keep using the numbered ramp (accent-500/600) below. */
+  --color-accent: #ae1800;
   --color-accent-2: #e15b47;
   --color-divider: color-mix(in srgb, #201e1d 40%, transparent);
 
@@ -42,9 +48,12 @@
   --color-accent-2-900: #471d16;
 
   /* Positive (success) semantic hue — a distinct green separate from the red-orange accent
-     family, so pass/alive/GO reads as a different hue, not a deeper shade of warning. */
-  --color-positive-700: #157a45;
-  --color-positive-800: #0c5933;
+     family, so pass/alive/GO reads as a different hue, not a deeper shade of warning.
+     gap-webui-a11y-focus-ring-and-token-contrast-unvalidated: darkened one step — #157a45 as
+     TEXT on --color-surface/#eae9e9 measured 4.44:1 (< 4.5 AA); #0c5933 measures 6.95:1. */
+  --color-positive-100: #e8f5ec;
+  --color-positive-700: #0c5933;
+  --color-positive-800: #0a4527;
 
   --font-heading: "Archivo", system-ui, sans-serif;
   --font-heading-weight: 800;
@@ -102,11 +111,15 @@ img { display: block; max-width: 100%; }
 figure { margin: 0; }
 figcaption {
   font-size: 11px; margin-top: var(--space-1);
-  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+  color: var(--color-neutral-700);
 }
-.text-muted { color: color-mix(in srgb, var(--color-text) 55%, transparent); }
-:focus { outline: none; }
-:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.text-muted { color: var(--color-neutral-700); }
+/* gap-webui-a11y-focus-ring-and-token-contrast-unvalidated: the old `:focus { outline: none }`
+   made programmatic (and pointer) focus INVISIBLE — a keyboard/mouse user's cursor position had
+   no visible indicator. `:focus` AND `:focus-visible` now share the same 2px solid outline
+   (--color-accent = #ae1800, ≥3:1 on both --color-bg and --color-surface), so every focus state
+   is visible without a pointer/keyboard heuristic. */
+:focus, :focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 ::selection { background: color-mix(in srgb, var(--color-accent) 30%, transparent); }
 
 /* — rules — */
@@ -129,8 +142,8 @@ figcaption {
 .btn svg { display: block; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn-primary { background: var(--color-accent); color: var(--color-bg); }
-.btn-primary:hover { background: var(--color-accent-600); }
-.btn-primary:active { background: var(--color-accent-700); }
+.btn-primary:hover { background: var(--color-accent-800); }
+.btn-primary:active { background: var(--color-accent-900); }
 .btn-secondary { border-color: var(--color-divider); }
 .btn-secondary:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
 .btn-secondary:active { background: color-mix(in srgb, var(--color-text) 14%, transparent); }
@@ -194,7 +207,7 @@ textarea.input { min-height: 90px; resize: vertical; }
 .card-body { margin: 0; font-size: 13px; opacity: 0.8; flex: 1; }
 .card-meta {
   display: flex; align-items: center; gap: 6px; font-size: 11px;
-  color: color-mix(in srgb, var(--color-text) 50%, transparent);
+  color: var(--color-neutral-700);
 }
 .elev-sm { box-shadow: var(--shadow-sm); }
 .elev-md { box-shadow: var(--shadow-md); }
@@ -208,6 +221,7 @@ textarea.input { min-height: 90px; resize: vertical; }
 }
 .tag-accent { background: var(--color-accent-100); color: var(--color-accent-800); }
 .tag-accent-2 { background: var(--color-accent-2-100); color: var(--color-accent-2-800); }
+.tag-positive { background: var(--color-positive-100); color: var(--color-positive-700); }
 .tag-neutral { background: var(--color-neutral-100); color: var(--color-neutral-800); }
 .tag-outline { border: 1px solid var(--color-accent); color: var(--color-accent); }
 
@@ -228,7 +242,7 @@ textarea.input { min-height: 90px; resize: vertical; }
 .table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .table th {
   text-align: left; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
-  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+  color: var(--color-neutral-700);
   padding: var(--space-2); border-bottom: 2px solid var(--color-divider);
 }
 .table td {

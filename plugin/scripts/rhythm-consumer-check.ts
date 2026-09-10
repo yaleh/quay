@@ -93,7 +93,6 @@ export const KNOWN_UNWIRED: Record<string, string> = {
   "gate-staleness-check.sh": "legacy staleness check — superseded by gate-staleness-check.ts sibling (also unwired)",
   "live-repo-literal-assert-check.ts": "live-repo literal-assertion linter — maintenance tool, not yet suite-wired",
   "load-sensitive-release-check.ts": "release-time load-sensitivity triage — ad hoc, cadence aspirational",
-  "manager-adopt.sh": "manager adoption bootstrap — invoked manually at adoption, not every round",
   "measure-suite.mjs": "suite cost-measurement runner — invoked by measure-suite-reporter.mjs's sibling flow, not a gate",
   "mechanism-vitality-check.ts": "crystallization ①②③④ triage — invoked ad hoc (--check/--selftest), cadence aspirational",
   "needs-human-recheck.ts": "needs-human pool recheck scheduler — invoked by the needs-human path, not every round",
@@ -255,7 +254,7 @@ const DEFAULT_ROOT = path.resolve(SELF_DIR, "../..");
  *  always emits the JSON on stdout; its AC1c entry-gate exit code is a SEPARATE signal (a script
  *  entered unclassified) — we read the rows regardless so 判据1/2/3 can judge against the real data. */
 export function loadCatalogDecls(root: string): CatalogDecl[] {
-  const r = spawnSync("bash", [path.join(root, "plugin", "scripts", "capability-catalog.sh"), "--json"], {
+  const r = spawnSync("bash", [path.join(root, "plugin", "scripts", "capability-catalog.sh"), "--json"], {  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     cwd: root,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
@@ -277,7 +276,7 @@ export function loadCatalogDecls(root: string): CatalogDecl[] {
 export function strictSurfaceFiles(root: string): string[] {
   const out = [
     path.join(root, "scripts", "test.sh"),
-    path.join(root, "plugin", "scripts", "runner-static-gate.ts"),
+    path.join(root, "plugin", "scripts", "runner-static-gate.ts"),  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   ];
   for (const dir of ["orchestration", "plugin/loop"]) {
     const d = path.join(root, dir);
@@ -374,7 +373,7 @@ export function runCheck(root: string, asJson: boolean): number {
   // ── 判据3 — --no-block checkers must declare who reads the output ────────────────────────────────
   // The --no-block run_checker invocations live in run_static_checks, which moved to runner-static-gate.ts
   // (gap-ac128-hub-split-harness-concerns) — read that file, not scripts/test.sh.
-  const testShPath = path.join(root, "plugin", "scripts", "runner-static-gate.ts");
+  const testShPath = path.join(root, "plugin", "scripts", "runner-static-gate.ts");  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   const noBlock = fs.existsSync(testShPath) ? extractNoBlockCheckers(fs.readFileSync(testShPath, "utf8")) : [];
   const c3: any[] = [];
   for (const nb of noBlock) {

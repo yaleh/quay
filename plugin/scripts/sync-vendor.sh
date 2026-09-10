@@ -247,19 +247,18 @@ if $SYNC_DIST_MODE; then
 fi
 
 # ---------------------------------------------------------------------------
-# 2. Author/execute skills
+# 2. Execute skill (author skill retired — gap-retire-unused-quay-author-skill)
 # ---------------------------------------------------------------------------
 if $CHECK_MODE; then
-  echo "[sync-vendor --check] verifying author/execute skills ..."
-  for name in author execute; do
+  echo "[sync-vendor --check] verifying execute skill ..."
+  for name in execute; do
     cmp_or_report "skills/${name}" \
       "${REPO_ROOT}/packages/quay-native/skills/${name}/SKILL.md" \
       "${PLUGIN_DIR}/skills/${name}/SKILL.md"
   done
 else
-  echo "[sync-vendor] mirroring quay-native author/execute skills -> plugin/skills/{author,execute} ..."
-  mkdir -p "${PLUGIN_DIR}/skills/author" "${PLUGIN_DIR}/skills/execute"
-  cp "${REPO_ROOT}/packages/quay-native/skills/author/SKILL.md" "${PLUGIN_DIR}/skills/author/SKILL.md"
+  echo "[sync-vendor] mirroring quay-native execute skill -> plugin/skills/execute ..."
+  mkdir -p "${PLUGIN_DIR}/skills/execute"
   cp "${REPO_ROOT}/packages/quay-native/skills/execute/SKILL.md" "${PLUGIN_DIR}/skills/execute/SKILL.md"
 fi
 

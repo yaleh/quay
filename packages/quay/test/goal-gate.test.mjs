@@ -27,6 +27,11 @@ test.after(() => {
   for (const dir of _createdDirs) fs.rmSync(dir, { recursive: true, force: true });
 });
 
+// gap-goal-record-completeness-undefined: a GOAL's body is required (≥40 non-whitespace chars)
+// and a criterion's content lives in criterion+expect — these keep every fixture write complete.
+const GOAL_BODY = "goal body: background, scope, non-goals and exit conditions — long enough to satisfy the 40-char minimum";
+const EXPECT = "the expected outcome this criterion proves";
+
 test("goal gate fails-closed when the goal record does not exist", async () => {
   const dir = tmpGoalDir("missing");
   const r = await makeGoalGate("AC-999", dir)({ id: "T" });
@@ -37,8 +42,12 @@ test("goal gate fails-closed when the goal record does not exist", async () => {
 test("goal gate fails-closed when the criterion is empty/missing (AC2)", async () => {
   const dir = tmpGoalDir("nocriterion");
   const store = createGoalStore(dir);
-  store.write("PHASE-001", { title: "p", status: "active", origin: "o" });
-  store.write("AC-020", { title: "no-criterion", status: "active", phase: "PHASE-001", origin: "o" });
+  store.write("GOAL-001", { title: "p", status: "active", origin: "o", body: GOAL_BODY });
+  // A criterion-less record is now unrepresentable via write() (gap-goal-record-completeness-undefined
+  // requires criterion+expect for criterion records), so hand-write a legacy file to keep the gate's
+  // fail-closed-on-empty-criterion path tested on a pre-existing record.
+  fs.writeFileSync(path.join(dir, "AC-020-legacy.md"),
+    "---\nid: AC-020\ntitle: no-criterion\nstatus: active\nkind: criterion\ngoal: GOAL-001\norigin: o\n---\n## Rationale\nlegacy\n", "utf8");
   const r = await makeGoalGate("AC-020", dir)({ id: "T" });
   assert.equal(r.ok, false);
   assert.match(r.reason, /fail-closed/);
@@ -47,9 +56,9 @@ test("goal gate fails-closed when the criterion is empty/missing (AC2)", async (
 test("goal gate PASSes a criterion that exits 0 and FAILs one that exits non-zero", async () => {
   const dir = tmpGoalDir("real");
   const store = createGoalStore(dir);
-  store.write("PHASE-001", { title: "p", status: "active", origin: "o" });
-  store.write("AC-010", { title: "pass", status: "active", phase: "PHASE-001", criterion: "true", origin: "o" });
-  store.write("AC-011", { title: "fail", status: "active", phase: "PHASE-001", criterion: "false", origin: "o" });
+  store.write("GOAL-001", { title: "p", status: "active", origin: "o", body: GOAL_BODY });
+  store.write("AC-010", { title: "pass", status: "active", goal: "GOAL-001", criterion: "true", expect: EXPECT, origin: "o" });
+  store.write("AC-011", { title: "fail", status: "active", goal: "GOAL-001", criterion: "false", expect: EXPECT, origin: "o" });
 
   const pass = await makeGoalGate("AC-010", dir)({ id: "T" });
   assert.equal(pass.ok, true, `expected pass; reason=${pass.reason}`);
@@ -62,8 +71,8 @@ test("goal gate PASSes a criterion that exits 0 and FAILs one that exits non-zer
 test("a dynamically registered goal-<id> gate runs through the registry (same shape as doc/adr)", async () => {
   const dir = tmpGoalDir("registry");
   const store = createGoalStore(dir);
-  store.write("PHASE-001", { title: "p", status: "active", origin: "o" });
-  store.write("AC-100", { title: "conforming", status: "active", phase: "PHASE-001", criterion: "true", origin: "o" });
+  store.write("GOAL-001", { title: "p", status: "active", origin: "o", body: GOAL_BODY });
+  store.write("AC-100", { title: "conforming", status: "active", goal: "GOAL-001", criterion: "true", expect: EXPECT, origin: "o" });
   registerGoalGate("goal-fixture-pass", dir, "AC-100");
   const r = await gateRegistry["goal-fixture-pass"]({ id: "T" });
   assert.equal(r.ok, true, `expected pass; reason=${r.reason}`);
@@ -73,4 +82,48 @@ test("listGates() includes a goal gate once one is registered", () => {
   const dir = tmpGoalDir("list");
   registerGoalGate("goal-list-check", dir, "AC-100");
   assert.ok(listGates().includes("goal-list-check"), `gates: ${listGates().join(", ")}`);
+});
+
+// gap-ac168-criterion-sh-incompatible — the goal gate executes criteria through
+// runAcceptance's `spawnSync({shell:true})`, which runs `/bin/sh` (dash on this host),
+// NOT bash. A criterion that uses bash-only process substitution `<(...)` is therefore
+// a Syntax error under sh (exit 2) even though the same text passes under bash. The
+// POSIX fix (temp files + `comm -23 "$f1" "$f2"`) runs identically under both shells.
+test("goal gate executes via sh: bash process-substitution criterion fails (exit 2), POSIX temp-file comm passes", async () => {
+  const dir = tmpGoalDir("sh-compat");
+  const store = createGoalStore(dir);
+  store.write("GOAL-001", { title: "p", status: "active", origin: "o", body: GOAL_BODY });
+
+  // `<(...)` is bash-only: under /bin/sh (dash) → "Syntax error: ( unexpected" → exit 2.
+  store.write("AC-020", {
+    title: "bash-process-substitution",
+    status: "active",
+    goal: "GOAL-001",
+    criterion: `comm -23 <(echo a) <(echo a) | grep -q . && exit 1
+exit 0`,
+    expect: EXPECT,
+    origin: "o",
+  });
+  const bashOnly = await makeGoalGate("AC-020", dir)({ id: "T" });
+  assert.equal(bashOnly.ok, false, `expected fail; reason=${bashOnly.reason}`);
+  assert.match(bashOnly.reason, /exit 2/);
+
+  // POSIX temp-file + `comm -23 "$f1" "$f2"` runs identically under sh and bash → exit 0.
+  store.write("AC-021", {
+    title: "posix-temp-file-comm",
+    status: "active",
+    goal: "GOAL-001",
+    criterion: `f1=$(mktemp)
+f2=$(mktemp)
+echo a > "$f1"
+echo a > "$f2"
+echo b >> "$f2"
+comm -23 "$f1" "$f2" | grep -q . && { rm -f "$f1" "$f2"; exit 1; }
+rm -f "$f1" "$f2"
+exit 0`,
+    expect: EXPECT,
+    origin: "o",
+  });
+  const posix = await makeGoalGate("AC-021", dir)({ id: "T" });
+  assert.equal(posix.ok, true, `expected pass; reason=${posix.reason}`);
 });

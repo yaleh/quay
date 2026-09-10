@@ -9,10 +9,11 @@
 // This hook is the missing registration step.
 //
 // Mechanism (matching a machine whose config is known-good): write the installed
-// plugin directory as a Claude Code DIRECTORY marketplace and enable it:
+// plugin directory as a Claude Code DIRECTORY marketplace source and materialize it
+// via the CLI. It does NOT write a user-level enabledPlugins entry — enabling is
+// left to the target project's <repo>/.claude/settings.json (AC-161).
 //
-//   "extraKnownMarketplaces": { "quay": { "source": { "source": "directory", "path": "<installed>/quay/plugin" } } },
-//   "enabledPlugins":         { "quay@quay": true }
+//   "extraKnownMarketplaces": { "quay": { "source": { "source": "directory", "path": "<installed>/quay/plugin" } } }
 //
 // The directory must contain `.claude-plugin/marketplace.json` + `plugin.json`;
 // the shipped tarball carries both (verified at pack time, AC16), so the
@@ -62,7 +63,7 @@ for (const f of [marketplaceJson, pluginJson]) {
   }
 }
 
-// 4. Derive the enabledPlugins key (`pluginName@marketplaceName`) from the
+// 4. Derive the plugin reference (`pluginName@marketplaceName`) from the
 //    manifests so it stays correct if either name ever changes.
 let marketplace;
 let plugin;
@@ -79,7 +80,7 @@ if (!marketplaceName || !pluginName) {
   console.error("[quay] ERROR: plugin manifest missing name fields — cannot register.");
   process.exit(1);
 }
-const enabledKey = `${pluginName}@${marketplaceName}`;
+const pluginRef = `${pluginName}@${marketplaceName}`;
 
 // 5. Merge into ~/.claude/settings.json, preserving every other key.
 const home = os.homedir();
@@ -99,11 +100,9 @@ if (typeof settings !== "object" || settings === null || Array.isArray(settings)
   process.exit(1);
 }
 settings.extraKnownMarketplaces = settings.extraKnownMarketplaces || {};
-settings.enabledPlugins = settings.enabledPlugins || {};
 settings.extraKnownMarketplaces[marketplaceName] = {
   source: { source: "directory", path: pluginDir },
 };
-settings.enabledPlugins[enabledKey] = true;
 
 // 6. Write atomically (temp file + rename) so a crash never leaves a truncated settings.json.
 try {
@@ -119,7 +118,7 @@ try {
 
 console.log("[quay] Registered the installed quay plugin with Claude Code:");
 console.log(`       marketplace "${marketplaceName}" -> ${pluginDir}`);
-console.log(`       enabled plugin "${enabledKey}"`);
+console.log(`       plugin "${pluginRef}"`);
 console.log(`       wrote ${settingsPath}`);
 
 // 7. BEST-EFFORT materialization: writing settings.json makes the marketplace

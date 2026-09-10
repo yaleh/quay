@@ -17,7 +17,7 @@ import { handleGoalList, handleGoalDetail } from "./serve-goal.ts";
 import { handleDocList, handleDocDetail } from "./serve-doc.ts";
 import { handleLive, handleJournal } from "./serve-live.ts";
 import { handleBoard } from "./serve-board.ts";
-import { handleGitHistory } from "./serve-git.ts";
+import { handleGitHistory, handleGitHistoryJson } from "./serve-git.ts";
 import { handleSystem, handleManager } from "./serve-system.ts";
 import { handleTests, handleTestsFile } from "./serve-tests.ts";
 import { handleSessions, handleSession, handleSessionEarlier, handleSessionDownload, handleDriverLifecycle, handleNewSession, handleResumeSession, handleFanInLogView, handleFanInLogDownload } from "./serve-sessions.ts";
@@ -101,7 +101,7 @@ export async function handleAllRoutes(
   // gap-dashboard-testscard-livecard-auto-refresh — the JSON data endpoint the dashboard liveCard/
   // testsCard auto-refresh script polls. Re-renders ONLY those two cards (no sys/mgr/tasks probes).
   if (url.pathname === "/dashboard/cards") {
-    await handleDashboardCards(req, res, cfg);
+    await handleDashboardCards(req, res, client, cfg);
     return;
   }
 
@@ -196,10 +196,27 @@ export async function handleAllRoutes(
     return;
   }
 
+  // gap-git-graph-fold-control-lands-offscreen-and-row-hit-zone-dead AC5: /git is the short alias
+  // people type for the git history view; it 302s to the canonical /git-history (the old bare /git
+  // returned 404 and left a console error).
+  if (url.pathname === "/git") {
+    res.writeHead(302, { Location: "/git-history" });
+    res.end();
+    return;
+  }
+
   // gap-git-history-svg-server-rendered: server-rendered git history SVG. Reads git via the same
   // workspace-observation path as /live + /journal (observation.ts shells out to git too).
   if (url.pathname === "/git-history") {
-    await handleGitHistory(req, res, cfg);
+    await handleGitHistory(req, res, cfg, url);
+    return;
+  }
+
+  // gap-git-graph-drops-commits-while-overflowcount-reports-zero: the on-demand pagination endpoint
+  // the scroll loader calls. Distinct path shape from /git-history (the `.json` suffix), routed AFTER
+  // the HTML page matcher so the two never shadow each other.
+  if (url.pathname === "/git-history.json") {
+    await handleGitHistoryJson(req, res, cfg, url);
     return;
   }
 
@@ -234,14 +251,14 @@ export async function handleAllRoutes(
   // (which had NO route — grep -c document = 0), both following the /adr shape. The
   // goal page shows target / criterion / status / recent verdict+time / origin.
   if (url.pathname === "/goal") {
-    await handleGoalList(req, res, url, cfg);
+    await handleGoalList(req, res, url, client, cfg.workspaceRoot);
     return;
   }
 
   const goalM = /^\/goal\/([^/]+)$/.exec(url.pathname);
   if (goalM) {
     const id = decodeURIComponent(goalM[1]);
-    await handleGoalDetail(req, res, id, cfg);
+    await handleGoalDetail(req, res, id, client, cfg.workspaceRoot);
     return;
   }
 

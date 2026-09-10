@@ -68,6 +68,7 @@
 // genuinely mutates real issue bodies on gh-12/gh-13/gh-14).
 
 import { test, after } from "node:test";
+import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -76,6 +77,7 @@ import os from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
+import { connectProvider } from "../src/provider-client.ts";
 
 // The native-leg tasks dir is removed once at the end of this file (the carrier-array + after()
 // pattern) — a mkdtemp fixture without cleanup leaks a /tmp dir per run.
@@ -200,6 +202,46 @@ async function main() {
     const sc = r.structuredContent;
     record("native", "compound", "task_check", typeof sc?.ok === "boolean" && Array.isArray(sc?.childrenStatus),
       `task_check ABI-C1 (compound, child done) -> ok=${sc?.ok}, childrenStatus present=${Array.isArray(sc?.childrenStatus)}`);
+  }
+
+  // --- native / depends_on first-class + task_delete (gap-abi-missing-commit-delete-dependson-primitives) ---
+  {
+    // task_write with a top-level `depends_on` param (AC5): the schema accepts it and the field
+    // lands TOP-LEVEL in the file (not nested under `extra`).
+    const w = await nativeClient.callTool({ name: "task_write", arguments: { id: "ABI-P1", depends_on: ["ABI-C1"] } });
+    const raw = fs.readFileSync(path.join(tasksDir, "ABI-P1.md"), "utf8");
+    const topLevelDependsOn = /^depends_on:/m.test(raw);
+    record("native", "primitive", "task_write-depends-on",
+      !w.isError && w.structuredContent?.task?.id === "ABI-P1" && topLevelDependsOn,
+      `task_write depends_on:["ABI-C1"] -> accepted=${!w.isError}, top-level depends_on in file=${topLevelDependsOn}`);
+  }
+  {
+    // task_write with a top-level `goal_ac` param (gap-goal-ac-task-linkage-top-level-field AC5):
+    // the schema accepts it and the field lands TOP-LEVEL in the file (not nested under `extra`).
+    // Round-trip: the written value reads back byte-identically from the top-level frontmatter line.
+    const w = await nativeClient.callTool({ name: "task_write", arguments: { id: "ABI-C1", goal_ac: "AC-177" } });
+    const raw = fs.readFileSync(path.join(tasksDir, "ABI-C1.md"), "utf8");
+    const topLevelGoalAc = /^goal_ac: AC-177$/m.test(raw);
+    record("native", "compound", "task_write-goal-ac",
+      !w.isError && topLevelGoalAc,
+      `task_write goal_ac:"AC-177" -> accepted=${!w.isError}, top-level goal_ac in file=${topLevelGoalAc}`);
+  }
+  {
+    // task_delete of an existing task (AC3): ok:true, then task_get on the same id returns
+    // isError (not-found) AND the file is absent from disk.
+    const del = await nativeClient.callTool({ name: "task_delete", arguments: { id: "ABI-P1" } });
+    const gone = await nativeClient.callTool({ name: "task_get", arguments: { id: "ABI-P1" } });
+    const fileAbsent = !fs.existsSync(path.join(tasksDir, "ABI-P1.md"));
+    record("native", "primitive", "task_delete",
+      !del.isError && del.structuredContent?.ok === true && gone.isError === true && fileAbsent,
+      `task_delete ABI-P1 -> ok=${del.structuredContent?.ok}, task_get.isError=${gone.isError}, file absent=${fileAbsent}`);
+  }
+  {
+    // task_delete of a non-existent id (AC4): fails closed (isError), never a silent no-op.
+    const del = await nativeClient.callTool({ name: "task_delete", arguments: { id: "ABI-NOPE" } });
+    record("native", "primitive", "task_delete-missing-fail-closed",
+      del.isError === true,
+      `task_delete ABI-NOPE (non-existent) -> isError=${del.isError} (fail-closed, not silent)`);
   }
 
   await nativeClient.close();
@@ -493,3 +535,62 @@ test(
   },
   main
 );
+
+// ── Goal ABI (SPEC-goal-mechanism-2026-09-06.md §5.2 / AC-176) ──
+// ALWAYS runs (NOT gated on live GitHub): the native goal verbs and the github
+// goal STUBS are both offline (the stubs never shell out to `gh`). This is the
+// AC-176 goal group — native goal_list non-empty via the REAL write path (goal
+// write, not a hand-written fixture file — "非 fixture 注入"), and the github
+// negative control (goal_list → [], goal_write → isError).
+test("provider-abi-conformance: goal ABI — native goal_list non-empty via goal_write; github stubs fail-closed", async () => {
+  // ── native leg ── goal storage is provider-backed (quay-native/src/goal-store.ts).
+  // Create a goal through Core's provider-client `goalWrite` (the real write path),
+  // then read it back through `goalList` — proves goal_list + goal_write + the
+  // provider-client's goal verbs all work end-to-end without a fixture file.
+  const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-abi-goal-tasks-"));
+  _tmpDirs.push(tasksDir);
+  const goalDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-abi-goal-goals-"));
+  _tmpDirs.push(goalDir);
+  const coreClient = await connectProvider({
+    command: "node",
+    args: [nativeBin, "mcp"],
+    cwd: path.join(__dirname, "..", "..", "quay-native"),
+    env: { QUAY_NATIVE_TASKS_DIR: tasksDir, QUAY_NATIVE_GOAL_DIR: goalDir },
+  });
+  try {
+    const written = await coreClient.goalWrite({
+      id: "GOAL-001",
+      title: "goal ABI conformance",
+      status: "active",
+      origin: "provider-abi-conformance (AC-176 goal group)",
+      // gap-goal-record-completeness-undefined: a GOAL's body is required (≥40 chars) —
+      // origin is provenance only, never the body.
+      body: "goal body: background, scope, non-goals and exit conditions — long enough to satisfy the 40-char minimum",
+    });
+    assert.ok(written && written.id === "GOAL-001", `goalWrite created GOAL-001 (got ${JSON.stringify(written?.id)})`);
+    const goals = await coreClient.goalList();
+    assert.ok(Array.isArray(goals) && goals.some((g) => g.id === "GOAL-001"),
+      `goal_list via provider-client returns GOAL-001 (got ${goals.length} goals)`);
+  } finally {
+    await coreClient.close();
+  }
+
+  // ── github leg ── negative control: goal_list → [] (renders "no goals", not an
+  // error), goal_write / goal_get → isError "not supported".
+  const githubEnv = { QUAY_GITHUB_REPO: "yaleh/quay" };
+  const githubClient = await connectStdio("node", [githubBin, "mcp"], githubEnv);
+  try {
+    const lr = await githubClient.callTool({ name: "goal_list", arguments: {} });
+    assert.ok(!lr.isError, "github goal_list is not an error");
+    assert.deepEqual(lr.structuredContent?.goals ?? null, [], "github goal_list returns []");
+    const wr = await githubClient.callTool({
+      name: "goal_write",
+      arguments: { id: "GOAL-001", title: "x", status: "active", origin: "x" },
+    });
+    assert.equal(wr.isError, true, "github goal_write returns isError (negative control)");
+    const gr = await githubClient.callTool({ name: "goal_get", arguments: { id: "GOAL-001" } });
+    assert.equal(gr.isError, true, "github goal_get returns isError");
+  } finally {
+    await githubClient.close();
+  }
+});

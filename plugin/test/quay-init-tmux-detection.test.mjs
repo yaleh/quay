@@ -16,16 +16,16 @@
 // The installer once guessed "<project>-0:0.0" as the tmux session (no detection) and wrote the
 // guess into orchestration/session-liveness.env (the monitor config). A monitor aimed at a
 // nonexistent session reports a LIVE inner as GONE — the false-negative the monitor must never
-// emit. The invariant: 检测不到真实会话时必须 fail-closed；绝不把猜测值写进监视器配置.
+// emit. The invariant: 绝不把猜测值写进监视器配置. Since the outer/inner dual-tmux model retired
+// (SPEC-tmux-retirement-2026-09-03), detection is now BEST-EFFORT: a unique match is written, and
+// a zero/ambiguous match leaves loop.tmux_session null — the init never hard-fails on tmux
+// (gap-quay-init-hard-requires-tmux-session-and-leaves-partial-write).
 //
 // AC1  — a UNIQUE `tmux list-sessions` match by project name is detected and written
-// AC2  — ZERO matches ⇒ refuse to write, exit non-zero, error names --tmux-session (负控制;
-//        "AC2 不过则 AC1 不算数" — 立案理由正是猜测值被写进了配置)
-// AC3  — MULTIPLE matches ⇒ require explicit --tmux-session, never pick one
-// AC4  — no --tmux-session ⇒ either the real session is written or the install clearly fails
+// AC2  — ZERO matches ⇒ still succeed (exit 0, seven items), loop.tmux_session left null (never a guess)
+// AC3  — MULTIPLE matches ⇒ still succeed (exit 0, seven items), loop.tmux_session left null (never pick one)
+// AC4  — an explicit --tmux-session always wins over detection
 // AC5  — the written value resolves: `tmux has-session -t <value>` exits 0
-// (The retired observer itself used to fail closed when NO session was configured — the old
-// "<basename>-0" fallback was the same guess shape — the monitor must never guess a session).
 //
 // Detection is exercised against a HERMETIC tmux server on a private socket (TMUX_TMPDIR), so
 // the machine's real sessions (quay-0 / meta-cc-4 / ...) can never leak into the assertion and
@@ -166,10 +166,9 @@ test('AC1 — a UNIQUE matching tmux session is detected and written (no --tmux-
     assert.match(r.stdout, /detected tmux session: ac1proj-0/,
       `must report the detected session for the human to confirm:\n${r.stdout}`);
 
-    // The detected session — NOT a guess — is written to the monitor config and the loop config.
-    const envFile = fs.readFileSync(path.join(ws, 'orchestration', 'session-liveness.env'), 'utf8');
-    assert.match(envFile, /SESSION_TMUX_SESSION=ac1proj-0/,
-      'the DETECTED session must be written to orchestration/session-liveness.env');
+    // The detected session — NOT a guess — is written to the loop config (the session-name home,
+    // gap-quay-init-closure-shrink-body: orchestration/session-liveness.env is retired with the copy
+    // machinery — the session value now lives ONLY in .quay/config.yml loop.tmux_session).
     const cfg = fs.readFileSync(path.join(ws, '.quay', 'config.yml'), 'utf8');
     assert.match(cfg, /tmux_session:\s*ac1proj-0/,
       'the detected session must be written to .quay/config.yml loop.tmux_session');
@@ -185,10 +184,10 @@ test('AC1 — a UNIQUE matching tmux session is detected and written (no --tmux-
   }
 });
 
-// ── AC2: zero matches ⇒ fail closed, never write a guess (the 立案 reason) ──────────────────────────
-// NOT gated on tmux availability: fail-closed must hold even when tmux is entirely absent (the
-// detector returns "no match" and the installer refuses to write — never a guess).
-test('AC2 — NO matching tmux session: fail-closed (exit 2), refuses to write, names --tmux-session; the monitor config is never written', () => {
+// ── AC2: zero matches ⇒ optional, never write a guess (the 立案 reason, now demoted) ────────────────
+// NOT gated on tmux availability: the optional path must hold even when tmux is entirely absent (the
+// detector returns "no match" and the installer proceeds with loop.tmux_session null — never a guess).
+test('AC2 — NO matching tmux session: init still succeeds (exit 0, seven items), loop.tmux_session null (never a guess)', () => {
   const ws = makeTmp();
   const sockDir = path.join(ws, 'sock'); fs.mkdirSync(sockDir, { recursive: true });
   const env = isolateTmuxEnv(sockDir); // private socket — on a tmux box this is a server with NO sessions
@@ -196,22 +195,23 @@ test('AC2 — NO matching tmux session: fail-closed (exit 2), refuses to write, 
     fs.mkdirSync(path.join(ws, 'scripts'), { recursive: true });
     fs.writeFileSync(path.join(ws, 'scripts', 'test.sh'), '#!/bin/bash\necho test\n');
     const r = runInit(ws, ['--loop', '--root', ws, '--project', 'ac2proj'], env);
-    assert.equal(r.status, 2, 'no matching session must fail closed (exit 2)');
-    assert.match(r.stderr, /none could be detected/, 'must state nothing was detected');
-    assert.match(r.stderr, /--tmux-session/, 'must tell the human to pass --tmux-session explicitly');
-    assert.match(r.stderr, /no universal default/, 'must state no default is guessed');
-    // The negative control that defines the task: the guess must NOT be written.
-    assert.ok(!fs.existsSync(path.join(ws, 'orchestration', 'session-liveness.env')),
-      'AC2: must NOT write a guessed value into the monitor config');
-    assert.ok(!fs.existsSync(path.join(ws, '.quay', 'config.yml')),
-      'AC2: must NOT write the loop config with a guessed session');
+    assert.equal(r.status, 0, `no matching session must NOT fail closed:\n${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /no tmux session detected for project 'ac2proj'/,
+      'must report that nothing was detected (best-effort, not a failure)');
+    // The negative control that defines the task: the guess must NOT be written — null instead.
+    const cfg = fs.readFileSync(path.join(ws, '.quay', 'config.yml'), 'utf8');
+    assert.match(cfg, /tmux_session:\s*null/,
+      'AC2: must write loop.tmux_session null, not a guessed session');
+    for (const c of ['.quay/config.yml', '.quay/profiles.yml', 'tasks', 'goals', '.gitignore', '.claude/launch.settings.json', '.claude/settings.json']) {
+      assert.ok(fs.existsSync(path.join(ws, c)), `closed-set member must be laid down: ${c}`);
+    }
   } finally {
     cleanup(ws);
   }
 });
 
-// ── AC3: multiple matches ⇒ require explicit --tmux-session, never pick one ─────────────────────────
-test('AC3 — MULTIPLE matching sessions: require explicit --tmux-session (never pick the first); with it, the install proceeds', { skip: tmuxAvailable ? false : 'tmux not installed' }, () => {
+// ── AC3: multiple matches ⇒ optional, never pick one ────────────────────────────────────────────────
+test('AC3 — MULTIPLE matching sessions: init still succeeds, loop.tmux_session null (never pick the first); explicit --tmux-session still wins', { skip: tmuxAvailable ? false : 'tmux not installed' }, () => {
   const ws = makeTmp();
   const sockDir = path.join(ws, 'sock'); fs.mkdirSync(sockDir, { recursive: true });
   const env = isolateTmuxEnv(sockDir);
@@ -222,21 +222,19 @@ test('AC3 — MULTIPLE matching sessions: require explicit --tmux-session (never
     fs.writeFileSync(path.join(ws, 'scripts', 'test.sh'), '#!/bin/bash\necho test\n');
 
     const r = runInit(ws, ['--loop', '--root', ws, '--project', 'ac3proj'], env);
-    assert.equal(r.status, 2, 'multiple matches must fail closed (exit 2)');
-    assert.match(r.stderr, /multiple tmux sessions match project 'ac3proj'/,
+    assert.equal(r.status, 0, `multiple matches must NOT fail closed:\n${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /multiple tmux sessions match project 'ac3proj'/,
       'must say multiple sessions match');
-    assert.match(r.stderr, /ac3proj-0/, 'must list the matching sessions');
-    assert.match(r.stderr, /ac3proj-1/, 'must list the matching sessions');
-    assert.match(r.stderr, /--tmux-session/, 'must tell the human to pass --tmux-session');
-    assert.ok(!fs.existsSync(path.join(ws, 'orchestration', 'session-liveness.env')),
-      'AC3: must NOT pick one and write it (no guess, no first-match)');
+    const cfg = fs.readFileSync(path.join(ws, '.quay', 'config.yml'), 'utf8');
+    assert.match(cfg, /tmux_session:\s*null/,
+      'AC3: must leave loop.tmux_session null (no guess, no first-match)');
 
     // With an explicit --tmux-session the install proceeds and writes the explicit value.
     const r2 = runInit(ws, ['--loop', '--root', ws, '--project', 'ac3proj', '--tmux-session', 'ac3proj-1'], env);
     assert.equal(r2.status, 0, `explicit --tmux-session must succeed:\n${r2.stderr}`);
     assert.match(r2.stdout, /using explicit --tmux-session: ac3proj-1/, 'must report the explicit session');
-    const envFile = fs.readFileSync(path.join(ws, 'orchestration', 'session-liveness.env'), 'utf8');
-    assert.match(envFile, /SESSION_TMUX_SESSION=ac3proj-1/, 'the explicit value must be written');
+    const cfg2 = fs.readFileSync(path.join(ws, '.quay', 'config.yml'), 'utf8');
+    assert.match(cfg2, /tmux_session:\s*ac3proj-1/, 'the explicit value must be written to .quay/config.yml loop.tmux_session');
     assert.equal(tmux(['has-session', '-t', 'ac3proj-1'], env).status, 0, 'AC5: the written value must resolve');
   } finally {
     // AC2b: kill-session per created session (never kill-server — see socketPathFor comment).
@@ -263,8 +261,8 @@ test('explicit --tmux-session takes priority over detection (the fallback the hu
       'the explicit value must be used, not the detected one');
     assert.ok(!/detected tmux session/.test(r.stdout),
       'an explicit --tmux-session must suppress detection');
-    const envFile = fs.readFileSync(path.join(ws, 'orchestration', 'session-liveness.env'), 'utf8');
-    assert.match(envFile, /SESSION_TMUX_SESSION=myexplicit/, 'the explicit value must be written');
+    const cfg = fs.readFileSync(path.join(ws, '.quay', 'config.yml'), 'utf8');
+    assert.match(cfg, /tmux_session:\s*myexplicit/, 'the explicit value must be written to .quay/config.yml loop.tmux_session');
   } finally {
     // AC2b: kill-session per created session (never kill-server — see socketPathFor comment).
     tmuxAt(socketPathFor(sockDir), ['kill-session', '-t', 'ac2bproj-0'], env);

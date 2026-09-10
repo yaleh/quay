@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
 import { readBoardLanding, readBoardExecution, readTaskStatusMapAtRef, type BoardLanding, type BoardExecution } from "./observation.ts";
 import type { Manifest } from "./serve-render.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, DEFAULT_PAGE_SIZE, buildHref, renderSiteNav, renderMobileChrome } from "./serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, DEFAULT_PAGE_SIZE, buildHref, renderSiteNav, renderMobileChrome, tableWrap } from "./serve-render.ts";
 
 // ── /board — 三源 join 看板 (gap-web-board-needs-an-inconsistency-verdict-it-does-not-have) ──
 // The board joins 意图 (task store) + 执行 (telemetry) + 落地 (git code existence). The LANDING
@@ -158,17 +158,17 @@ export function renderBoardPage(board: {
 
   return html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay board — 三源 join 看板">${modernistStyles()}${pageStyles()}<title>Board — 三源 join 看板</title></head>
-    <body>${renderMobileChrome("board", "board")}${renderSiteNav("board")}<main>
+    <body>${renderMobileChrome("board", "board")}${renderSiteNav("board")}<main id="main">
       <h1>Board — 意图 / 执行 / 落地</h1>
       <p class="meta">${intentNote} · ${execNote} · ${landingNote}</p>
       ${filterForm}
       ${filterNav}
       ${pageSizeNav}
       ${pageNav}
-      <table>
+      ${tableWrap(html`<table>
         <tr><th>id</th><th>意图</th><th>执行</th><th>落地</th></tr>
         ${rows}
-      </table>
+      </table>`)}
     </main></body></html>`;
 }
 

@@ -11,17 +11,24 @@
 // 直接提交 develop 且触及代码/断言面、且不在任何 ff-lock 事件时间窗内 ⇒ 报「直接提交绕过 fan-in 机件」。
 // （7e64a86b → plugin/skills/init/SKILL.md 曾是此类——现 init/ 已入排除集，见下。）
 //
-// 判定原理（ledger 优先，reflog 回退，剪后退 NOT-EVALUATED）：`git merge --ff-only` 只移动 ref、
-// 不创建 commit——一个通过 fan-in 落地的 task 提交在 DAG 上与直接提交看起来完全一样（单亲线性链，
-// ⛔ 故不能判父数区分）。区分它们的读面有【两个】：
+// 判定原理（ledger 优先，reflog 括注回退，剪后退 NOT-EVALUATED）：`git merge --ff-only`（或机械
+// `git push . src:develop`）只移动 ref、不创建 commit——一个通过 fan-in 落地的 task 提交在 DAG 上与直接
+// 提交看起来完全一样（单亲线性链，⛔ 故不能判父数区分）。区分它们的读面有【两个】：
 //   ① 持久化 ledger——fan-in-ff-merge.sh 每次真实 ff 落地，在 .quay/fan-in-merge-lock-events.jsonl
 //     的 release 事件上记 `landedSha` 字段（成功 = 落地 sha，失败 = null；gap-direct-to-develop-check-
 //     reflog-to-revlist, AC1）。事件发生当下 append，不依赖可被 gc 回收的易失状态。
-//   ② develop 的 REFLOG——fan-in 落地记 `merge task/<id>: Fast-forward`，直接提交记 `commit: <msg>`
-//     （或 `commit (amend):` / `commit (merge):`）。但 reflog 会被 gc 全局剪 ⇒ 老 commit 条目过期。
-// 三态判定（AC2/AC3）：`git rev-list` 全量扫描 develop 历史（不受 gc 剪）→ 对每条命中的 commit——
-// 在 ledger ⇒ fan-in 落地不算直投；不在 ledger 且 reflog 有「直接 commit」标签 ⇒ 直接提交（报红候选）；
-// ledger 无记录 且 reflog 也查不到 ⇒ NOT-EVALUATED（⛔ 不伪装成「未发现 direct」，硬规则 3b）。
+//   ② develop 的 REFLOG——fan-in 落地记 `push` 或 `merge task/<id>: Fast-forward`（isReflogFanIn），
+//     直接提交记 `commit: <msg>`（或 `commit (amend):` / `commit (merge):`）。但 reflog 会被 gc 全局剪
+//     ⇒ 老 commit 条目过期。
+// 扫描（gap-ac194-bypass-check-unclassifiable-window）：只扫 `git rev-list --first-parent baseline..develop`
+// 的 first-parent spine（直投 commit 结构上必在 spine——直投那一刻成为 develop tip；off-spine commit 从未是
+// tip ⇒ 结构上非直投、不参与判定，附读数 `offSpine`）。⛔ 不再扫全 DAG——ff/merge 只把 tip 记进 reflog，
+// 分支上被并入的中间 commit 无独立 reflog 条目，扫全 DAG 会把 62%+ 的 commit 判成 unclassifiable 使判据
+// 恒 fail。中间 spine commit 用 reflog 括注分类：落在某 fan-in 落地 [P, T]（T=落地 tip，P=前一条更旧 reflog
+// 条目）之间 ⇒ fan-in delivered。
+// 三态判定（AC2/AC3 + AC194）：对每条命中的 spine commit——在 ledger ⇒ fan-in 落地不算直投；不在 ledger 且
+// reflog 有「直接 commit」标签 ⇒ 直接提交（报红候选）；是 fanin tip 或被括注覆盖 ⇒ fan-in delivered；ledger
+// 无记录、非 direct、也不落进任何括注 ⇒ NOT-EVALUATED（⛔ 不伪装成「未发现 direct」，硬规则 3b）。
 // （CLAUDE.md 硬规则 2：按位置判定，不按关键词——commit subject 里出现「fan-in」不算，reflog action
 // 或 ledger 记录才算。）
 //
@@ -76,8 +83,17 @@
 // 会红）。`--commits <csv>` = 显式回放指定 commit（真样本 replay 的 fixture seam，跳过 reflog
 // 扫描）。
 //
-// Exit codes: 0 = PASS / NOT-EVALUATED（读 `evaluated`：false = 无法评估，绝不与合格同形）；
-//             1 = RED（直接提交绕过 fan-in 机件）；2 = usage/environment 错误。
+// Exit codes: 0 = PASS；1 = RED（直接提交绕过 fan-in 机件）；2 = usage/environment 错误；
+//             3 = NOT-EVALUATED（`evaluated:false`——读不懂输入，硬规则 3b）。⛔ 与 PASS 不再共用
+//             exit 0：只看退出码的消费者 `run_checker` 会把「读不懂却 exit 0」读成「合格」，把本
+//             检测器要抓的直投提交静默放行（本任务 gap-bypass-check-unclassifiable-exits-zero 的
+//             缺陷正是这一层——JSON 里已带 evaluated:false，但 ok:true ∧ exit 0 并列）。
+//
+// 分类覆盖率（AC4）+ 根因（AC3/AC194）：ff-merge（或 `git push .`）只在 reflog 记 tip、分支上的逐个
+//   commit 无独立 reflog 条目 + reflog 深度有限（被 gc 剪）⇒ 旧全 DAG 扫描把 off-spine 621+ 条混进分类
+//   分母、62% 不可分类。gap-ac194 修法 = 只扫 first-parent spine（100 条）+ reflog 括注把中间 spine commit
+//   判 fan-in delivered ⇒ develop~100 窗 unclassifiable 归零、AC-194 `expect: exit 0` 可达。输出
+//   `classification.{classified,total,firstParent,offSpine,ratio}` 把「这个守卫今天看得见多少」变成可读数。
 //
 // Run:
 //   node --experimental-strip-types direct-to-develop-bypass-check.ts --root <dir>
@@ -370,6 +386,54 @@ export function buildReflogIndex(reflogLines) {
   return { direct, seen };
 }
 
+/** 一条 develop reflog action 是否为「fan-in 落地」——`push`（`git push . src:develop`，driver-filters.ts /
+ *  develop-work-ff.sh 的机械落地形态）或 `merge …: Fast-forward`（旧 `git merge --ff-only` 形态）。两者都只
+ *  前移 develop ref、不建 commit，与直接提交的 `commit:` 区分；reflog 里的 `reset` / `rebase` / `checkout`
+ *  等 action 均不命中（它们既非直投也非 fan-in 落地，落不进括注 ⇒ 保持 unclassifiable，fail-closed）。
+ *  PURE。 */
+export function isReflogFanIn(gs) {
+  const s = String(gs ?? "");
+  return s === "push" || /Fast-forward/.test(s);
+}
+
+/** 从有序 reflog 行（`git log -g --format=%H%x09%gs develop` 输出，newest first）建立 fan-in 括注结构。
+ *  返回 `{ faninTips, brackets }`：
+ *   · `faninTips` = 所有 fan-in 落地 tip（push / Fast-forward）的 sha 集——tip 自己是 fan-in 落地（含 reflog
+ *     最老一条 fan-in tip，其「之前」超出 reflog 保留、无前一条条目可配对）；
+ *   · `brackets` = 时间序（newest first）的 `{T, P}` 对——T = 本次 fan-in 落地 tip，P = 前一条 reflog 条目
+ *     （更旧）的 sha；`rev-list --first-parent P..T` 即本次落地带入的 first-parent 提交（中间 commit 无独立
+ *     reflog 条目，gap-ac194 括注分类）。
+ *   ⛔ 最老一条 reflog 条目（无前一条）不产生括注——其「之前」超出 reflog 保留、不可分类（硬规则③b，不伪装
+ *     成合格）。PURE。 */
+export function buildFanInBrackets(reflogLines) {
+  const faninTips = new Set();
+  const brackets = [];
+  const entries = (reflogLines ?? []).map((line) => line.split("\t")).filter((p) => p[0] && p[1] != null);
+  for (let i = 0; i < entries.length; i++) {
+    const [sha, gs] = entries[i];
+    if (!isReflogFanIn(gs)) continue;
+    faninTips.add(sha);
+    const prev = i + 1 < entries.length ? entries[i + 1][0] : null; // 前一条（更旧）
+    if (prev) brackets.push({ T: sha, P: prev });
+  }
+  return { faninTips, brackets };
+}
+
+/** spine 提交的落地方式（gap-ac194 括注分类的三态，纯判定——`gitDevelopDirectCommits` 把括注覆盖集算好后
+ *  逐条喂入）：
+ *   "fan-in"         ledger 有记录，或 faninTips（push/Fast-forward tip），或括注覆盖（中间 commit）
+ *   "direct"         reflog 有「直接 commit」条目（报红候选）
+ *   "unclassifiable" ledger 无记录、非 direct、非 faninTips、也不在任何括注区间（reflog 被 gc 剪 / 落不进
+ *                    括注的老 commit ⇒ NOT-EVALUATED，⛔ 不与合格同形）
+ *  PURE。 */
+export function classifySpineLandingMode(sha, ledgerShas, directSet, faninTips, faninCovered) {
+  if (ledgerShas?.has(sha)) return "fan-in";
+  if (!directSet) return "unclassifiable"; // reflog 不可读
+  if (directSet.has(sha)) return "direct";
+  if (faninTips?.has(sha) || faninCovered?.has(sha)) return "fan-in";
+  return "unclassifiable";
+}
+
 /** 一条 commit 的落地方式（AC2/AC3 三态）。
  *   "fan-in"          ledger 有记录，或 reflog 有非 commit 条目（merge … Fast-forward）
  *   "direct"          reflog 有「直接 commit」条目（报红候选）
@@ -510,33 +574,72 @@ function gitCommitMessage(root, sha) {
  *   · ledger 无记录 且 reflog 也查不到 ⇒ unclassifiable（AC3——返回 sha 列表，调用方据此
  *     NOT-EVALUATED，⛔ 不伪装成「未发现 direct」，硬规则 3b）
  *
- * 返回 `{ direct, unclassifiable }`；rev-list 不可读（git 错误）⇒ 返回 null。只报【reachable from
- * develop】的提交（rev-list 本身就只给出 develop 可达集）；baseline 用 `git rev-list <baseline>..develop`
- * 一次完成 reachability + baseline 过滤。
+ * 返回 `{ direct, unclassifiable, totalReachable }`（totalReachable = rev-list 命中条数，供
+ * 分类覆盖率 `classified / total` 读数——AC4）；rev-list 不可读（git 错误）⇒ 返回 null。只报
+ * 【reachable from develop】的提交（rev-list 本身就只给出 develop 可达集）；baseline 用
+ * `git rev-list <baseline>..develop` 一次完成 reachability + baseline 过滤。
  */
 export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
-  let revs;
+  // first-parent spine 扫描（gap-ac194-bypass-check-unclassifiable-window）：直投 commit 结构上必在 spine
+  // （直投那一刻成为 develop tip），off-spine commit 从未是 tip ⇒ 结构上非直投、不参与判定。⛔ 不再扫全 DAG
+  // （旧全 DAG 把 merge 引入的 off-spine 621+ 条混进分类分母，把不可分类率推高到 62% 使判据恒 fail）。
+  let spine;
   try {
-    revs = baseline
-      ? git(root, ["rev-list", `${baseline}..${develop}`])
-      : git(root, ["rev-list", develop]);
+    spine = baseline
+      ? git(root, ["rev-list", "--first-parent", `${baseline}..${develop}`])
+      : git(root, ["rev-list", "--first-parent", develop]);
   } catch {
     return null;
   }
-  const reachable = revs.split("\n").map((s) => s.trim()).filter(Boolean);
+  const reachable = spine.split("\n").map((s) => s.trim()).filter(Boolean);
+  const spineSet = new Set(reachable);
 
+  // off-spine 读数（AC4 附读数）：full DAG − first-parent = 结构上非直投、不参与判定的条数。
+  let fullDag = null;
+  try {
+    fullDag = git(root, baseline ? ["rev-list", `${baseline}..${develop}`] : ["rev-list", develop])
+      .split("\n").filter(Boolean);
+  } catch {
+    fullDag = null;
+  }
+  const offSpineCommits = fullDag ? Math.max(0, fullDag.length - reachable.length) : null;
+
+  // reflog：direct（commit 直投）+ fan-in 括注（push / Fast-forward 落地）。
   let reflogIndex = null;
+  let faninTips = new Set();
+  let brackets = [];
   try {
     const out = git(root, ["log", "-g", "--format=%H%x09%gs", develop]);
-    reflogIndex = buildReflogIndex(out.split("\n").filter(Boolean));
+    const reflogLines = out.split("\n").filter(Boolean);
+    reflogIndex = buildReflogIndex(reflogLines);
+    const fb = buildFanInBrackets(reflogLines);
+    faninTips = fb.faninTips;
+    brackets = fb.brackets;
   } catch {
     reflogIndex = null; // reflog 不可读 ⇒ 所有非 ledger commit 都 unclassifiable（3b）
+  }
+
+  // 括注分类（gap-ac194）：spine 上无独立 reflog 条目的中间 commit，落在某 fan-in 落地 [P, T] 之间 ⇒ fan-in
+  // delivered（非直投、非 unclassifiable）。只处理 T 落在 baseline 窗内的括注（更旧的括注不引入窗内 spine
+  // commit，省去其 subprocess）。
+  const faninCovered = new Set();
+  if (reflogIndex) {
+    const windowDag = fullDag ? new Set(fullDag) : null;
+    for (const { T, P } of brackets) {
+      if (baseline && windowDag && !windowDag.has(T)) continue;
+      try {
+        const intro = git(root, ["rev-list", "--first-parent", `${P}..${T}`]).split("\n").filter(Boolean);
+        for (const s of intro) if (spineSet.has(s)) faninCovered.add(s);
+      } catch {
+        // 括注不可读 ⇒ 该括注不覆盖任何 spine commit（其余保持 unclassifiable，fail-closed）
+      }
+    }
   }
 
   const direct = [];
   const unclassifiable = [];
   for (const sha of reachable) {
-    const mode = classifyLandingMode(sha, ledgerShas, reflogIndex);
+    const mode = classifySpineLandingMode(sha, ledgerShas, reflogIndex?.direct ?? null, faninTips, faninCovered);
     if (mode === "fan-in") continue;
     if (mode === "unclassifiable") { unclassifiable.push(sha); continue; }
     // direct：逐条读 files/epoch/message（与 --commits 回放同源）。
@@ -548,7 +651,13 @@ export function gitDevelopDirectCommits(root, develop, baseline, ledgerShas) {
     const message = gitCommitMessage(root, sha); // AC65 验证证据读取面
     direct.push({ sha, subject, action: "commit", epoch, files, message });
   }
-  return { direct, unclassifiable };
+  return {
+    direct,
+    unclassifiable,
+    totalReachable: reachable.length,
+    firstParentCommits: reachable.length,
+    offSpineCommits,
+  };
 }
 
 function readJsonlLines(file) {
@@ -602,9 +711,10 @@ Usage:
   --help               this help
 
 Exit codes:
-  0  PASS or NOT-EVALUATED (read \`evaluated\` — false = could not judge, never conflated with green)
+  0  PASS — evaluated and no bypass
   1  RED — a direct commit to develop bypasses the fan-in mechanism
-  2  usage / environment error`;
+  2  usage / environment error
+  3  NOT-EVALUATED — could not judge (read \`evaluated\`: false), never conflated with PASS (exit 0), 硬规则 3b`;
 
 export function main(argv) {
   const args = argv.slice(2);
@@ -621,6 +731,9 @@ export function main(argv) {
 
   let commits = null;
   let unclassifiable = [];
+  let totalScanned = 0;
+  let firstParentCommits = 0;
+  let offSpineCommits = null;
   let lockHoldIntervals = null;
   let lockSubEvaluated = false;
   let lockSubReason = "";
@@ -659,6 +772,7 @@ export function main(argv) {
       if (files === null || epoch === null) return null;
       return { sha, subject: gitCommitSubject(root, sha), action: "commit", epoch, files, message: gitCommitMessage(root, sha) };
     }).filter(Boolean);
+    totalScanned = commits.length;
     if (commits.length === 0) {
       process.stderr.write(`direct-to-develop-bypass-check: --commits resolved to 0 readable commits (shas: ${commitsArg})\n`);
       return 2;
@@ -674,10 +788,13 @@ export function main(argv) {
       };
       if (asJson) process.stdout.write(JSON.stringify(result, null, 2) + "\n");
       else console.log(`direct-to-develop-bypass-check: evaluated=false ok=true (${result.reason})`);
-      return 0;
+      return 3;
     }
     commits = collected.direct;
     unclassifiable = collected.unclassifiable;
+    totalScanned = collected.totalReachable;
+    firstParentCommits = collected.firstParentCommits ?? totalScanned;
+    offSpineCommits = collected.offSpineCommits ?? null;
   }
 
   const verdict = checkDirectCommits(commits, lockHoldIntervals);
@@ -725,6 +842,10 @@ export function main(argv) {
     reason = "unclassifiable-commits-in-range";
   }
 
+  // 分类覆盖率（AC4）：classified = 扫描范围内能被判定 landing-mode（fan-in / direct）的条数，
+  // total = rev-list 命中总数；unclassifiable = total − classified（既不在 ledger 也不在 reflog）。
+  const classified = totalScanned - unclassifiable.length;
+
   const result = {
     evaluated,
     ok,
@@ -733,6 +854,13 @@ export function main(argv) {
     develop,
     unclassifiableCommits: unclassifiable.length,
     unclassifiableSample: unclassifiable.slice(0, 20),
+    classification: {
+      classified,
+      total: totalScanned,
+      ratio: totalScanned > 0 ? classified / totalScanned : null,
+      firstParent: firstParentCommits,
+      offSpine: offSpineCommits,
+    },
     denominator: {
       totalDirectCommits: verdict.totalCommits,
       codeSurfaceCommits: verdict.codeSurfaceCommits,
@@ -741,6 +869,10 @@ export function main(argv) {
       ac65AuthorizedCommits: verdict.ac65AuthorizedCommits,
       ruledHistoricalCommits: verdict.ruledHistoricalCommits,
       unclassifiableCommits: unclassifiable.length,
+      classifiedCommits: classified,
+      totalScannedCommits: totalScanned,
+      firstParentCommits,
+      offSpineCommits,
       predicate: "design-internal exclusion set (see header / task body): tasks/ docs/ orchestration/ adr/ .quay/ plugin/loop/ measurements/ milestones/ .claude/ plugin/skills/manager/ plugin/skills/init/ CLAUDE.md README.md .gitignore .gitattributes .npmrc .github/ plugin/scripts/fan-in-* plugin/test/fan-in-*",
       ac65CarveOut: "AC65-authorized direct-fix (two predicates; sha table retired to display-only): commit message has AC65 declaration (/^AC65:/m) AND verification artifact (/AC65-Verified:/m) ⇒ ac65AuthorizedDirectFix (visible, NOT bypass); declaration with no verification artifact ⇒ RED (criterion-3); no declaration code-surface direct commit ⇒ RED. Legacy 02b2b2fc form (AC65 一条命令验证：<output>) tolerated. NOT a plugin/scripts/* filename exemption.",
       ruledHistoricalCarveOut: "RULED_HISTORICAL_COMMITS one-off exemption (manager 2026-08-15 ruling, tasks/gap-direct-to-develop-ruled-historical-cddc55e2): sha prefix match on the bounded ruled table ⇒ ruledHistorical (visible, NOT bypass, NOT ac65Authorized); any non-table direct commit still RED (exemption cannot be silently extended). Criterion-3 (declaration without verification ⇒ RED) unchanged.",
@@ -764,6 +896,7 @@ export function main(argv) {
   } else {
     console.log(`direct-to-develop-bypass-check: evaluated=${evaluated} ok=${ok} (${reason})`);
     console.log(`  denominator: total=${verdict.totalCommits} code-surface=${verdict.codeSurfaceCommits} design-internal=${verdict.designInternalCommits} in-lock-window=${verdict.inLockWindowCommits} ac65-authorized=${verdict.ac65AuthorizedCommits} ruled-historical=${verdict.ruledHistoricalCommits} unclassifiable=${unclassifiable.length}`);
+    console.log(`  classification: classified=${classified} total=${totalScanned} first-parent=${firstParentCommits} off-spine=${offSpineCommits ?? "n/a"} ratio=${totalScanned > 0 ? (classified / totalScanned).toFixed(4) : "n/a"}`);
     console.log(`  lock-window: evaluated=${lockSubEvaluated} (${lockSubReason})`);
     for (const c of codeSurfaceCandidates) {
       const tag = c.ruledHistorical ? "RULED-HISTORICAL" : c.bypass ? "RED" : c.ac65Authorized ? "AC65-AUTHORIZED" : c.inLockWindow ? "SKIP(in-lock-window)" : "design-internal";
@@ -774,7 +907,10 @@ export function main(argv) {
     }
     if (verdict.totalCommits === 0) console.log("  (no direct commits in scan range)");
   }
-  return evaluated && !ok ? 1 : 0;
+  // 退出码三态（硬规则 3b + gap-not-evaluated-harness-third-state）：NOT-EVALUATED（evaluated:false）
+  // ⇒ exit 3，⛔ 不再与 PASS（exit 0）同形——否则只看退出码的 `run_checker` 把「读不懂」读成「合格」。
+  if (!evaluated) return 3;
+  return ok ? 0 : 1;
 }
 
 if (isDirectEntry(import.meta, undefined, "direct-to-develop-bypass-check")) {

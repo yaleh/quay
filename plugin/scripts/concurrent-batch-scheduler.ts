@@ -31,10 +31,6 @@ import {
 // (which verifies ACTUAL `git diff --numstat` files) — a wrong guess can only mis-batch (caught at
 // fan-in), never let a bad write land.
 import { deriveTouches } from "./derive-touches-heuristic.ts";
-// AC36 (gap-ac36-delivery-critical-priority-axis): parseTask is the ONE lenient frontmatter parse
-// (task-schema.ts) that reads `labels` — reused here so parseCandidate can expose a
-// delivery-critical flag without a second labels parser (slot-refill.ts:250 already uses it).
-import { parseTask } from "./task-schema.ts";
 // IN-FLIGHT WORKTREE DIRECT QUANTITY (tasks/gap-scheduler-inflight-detection-misses-fan-in-worktree):
 // the open-worktree enumerator (`git worktree list --porcelain`) + the `task/<id>`-branch → task-id
 // resolver — single source (fast-mode-telemetry's listWorktrees/taskIdFromBranch, not a parallel
@@ -107,15 +103,11 @@ export function parseCandidate(id, charterText, repoRoot) {
   // **Value type:** ...") and/or with parenthetical prose between the label and the colon.
   const vm = String(charterText).match(/value[\s-]?type\b[^:\n]*:\s*\*{0,2}\s*`?([a-zA-Z][\w-]*)/i);
   if (vm) valueType = vm[1].toLowerCase();
-  // AC36 (gap-ac36-delivery-critical-priority-axis): expose the candidate's frontmatter `labels`
-  // (via parseTask — same single-source parse slot-refill.ts uses) and a derived `deliveryCritical`
-  // boolean. A candidate with no frontmatter / no such label ⇒ labels=[] / deliveryCritical=false
-  // (conservative default). This is what lets slot-refill's candidates.sort rank delivery-critical
-  // tasks as a SECOND axis — below blocking_suite, above plain id order.
-  const parsed = parseTask(String(charterText));
-  const labels = parsed.labels || [];
-  const deliveryCritical = labels.includes("delivery-critical");
-  return { id, touches, type, valueType, labels, deliveryCritical };
+  // delivery-critical is NOT a parseCandidate output anymore: the AC36 mechanical sort axis was
+  // RETIRED (gap-delivery-critical-mechanical-axis-orphaned-needs-ruling, 人 2026-09-07 裁定) —
+  // delivery-critical priority is carried entirely by the selector's semantic judgment
+  // (orchestration/dispatch-preference.md), so no derived boolean / labels exposure is needed here.
+  return { id, touches, type, valueType };
 }
 
 // ── isCapabilityGrowth ───────────────────────────────────────────────────────────────────────────

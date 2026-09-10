@@ -100,3 +100,30 @@ test("binary file (NUL in first 32 KiB) is classified engine even with a @test-g
   const line = r.stdout.trim();
   assert.ok(line.endsWith("\tengine"), `binary file must be engine: ${line}`);
 });
+
+// ── gap-load-sensitive-tests-undeclared-run-in-main-lane-block-fan-in ─────────────────────────
+// AC1（由分组机制的输出证明，⛔ 不读文件字符串——硬规则②按位置判定）：三个负载敏感文件必须被
+// scripts/test.sh 的分组读取路径（runner-grouping-metadata.mjs = build_deduped_files 的分类器）
+// 实际路由到 lowconc。能取假：把任一文件头改回 product/engine ⇒ 本断言立即变红（AC3 隔离对照）。
+// ⛔ 注意 observation.test.mjs：它曾含 8 个 NUL 字节（fake /proc cmdline fixture），使 GNU grep 的
+// binary 检测把它恒分类为 engine——只改泳道声明不够，须同时把 NUL 换成 \x00 转义（运行时字符串
+// 不变），否则本断言恒红。本断言同时钉住这一点。
+
+const LOAD_SENSITIVE_FILES = [
+  "plugin/test/worker-driver-resident.test.mjs",
+  "packages/quay/test/observation.test.mjs",
+  "packages/quay/test/ts-typecheck-gate-config-wiring.test.mjs",
+];
+
+test("gap-load-sensitive-tests — AC1: the three load-sensitive files route to lowconc via the grouping read path (⛔ not by reading the file string)", () => {
+  const files = LOAD_SENSITIVE_FILES.map((f) => join(repoRoot, f));
+  const r = runHelper(files);
+  assert.equal(r.status, 0, `helper exit ${r.status}\nstderr: ${r.stderr}`);
+  const got = new Map(r.stdout.trim().split("\n").filter(Boolean).map((l) => {
+    const i = l.lastIndexOf("\t");
+    return [l.slice(0, i), l.slice(i + 1)];
+  }));
+  for (const f of files) {
+    assert.equal(got.get(realpathSync(f)), "lowconc", `${f}: grouped ${got.get(realpathSync(f))}, expected lowconc`);
+  }
+});

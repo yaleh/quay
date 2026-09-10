@@ -176,7 +176,7 @@ orchestration/SPEC-*.md（新增/删除）     → **两个断言者，缺一即
                                           ⇒ 新增 SPEC 必然产生一条【跨面债】：我改 ①，② 必须投给 outer 落
                                           （先例 7e64a86b 即由此路径落的同类一行声明；init/SKILL.md:130 逐字写着这条契约）
                                           ⇒ **新增 SPEC 时必须同轮投出 ②，⛔ 不得只做 ① 就当完成**
-.claude/workflows/manager-tick-core.js  → 实跑一次 Workflow(scriptPath)（该文件自述 node --check 会假绿）
+plugin/workflows/manager-tick-core.js     → 实跑一次 Workflow(scriptPath)（该文件自述 node --check 会假绿）
 ```
 **⊢ 立条代价（就是不做这一步的代价）**：`84985e66` 新增 SPEC 未同步索引 ⇒ **round179/180 连红两轮**，
 `635ec831` 才修好。**那次我事后跑了测试，而这条要求的是【提交前】跑，并且并进同一条命令。**

@@ -20,7 +20,7 @@ import os from "node:os";
 import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
-import { layoutGitGraph, groupCommitsByBranch, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, bucketSetOfFile, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, taskIdFromBranchRef, gitGraphClientScript, taskRunsBlock, renderFanInCell, fanInLogPath, driverActionSpec, newSessionArgs, resumeSessionArgs, WEB_DRIVER_VERBS, WEB_DRIVER_KINDS } from "../src/serve-handlers.ts";
+import { layoutGitGraph, renderLoadCurveSvg, readSuiteLoadSamples, clipSuiteLoadSamplesToWindow, renderPerFileTable, renderPerFileTimelineSvg, bucketSetOfFile, collectFileHistory, renderFileDurationTrendSvg, renderFileHistoryTable, gitGraphClientScript, taskRunsBlock, renderFanInCell, fanInLogPath, driverActionSpec, newSessionArgs, resumeSessionArgs, WEB_DRIVER_VERBS, WEB_DRIVER_KINDS } from "../src/serve-handlers.ts";
 import { readGitHistory, readLive, liveSessionIdForPid, sessionTranscriptPath, isValidSessionId, readWorkerOutcomeRecords } from "../src/observation.ts";
 import { renderLivePage } from "../src/serve-live.ts";
 import { sendSessionFrames, verdictStateToDeliveryState, classifyReceipt, resolveSessionEndpoint, sendToSession, renderSendResult, HELD_EXPIRY_MS, WEB_SEND_FROM_NAME } from "../src/serve-send.ts";
@@ -52,101 +52,6 @@ function get(port, urlPath) {
     }).on("error", reject);
   });
 }
-
-/** A commit fixture (shape matches observation.GitHistoryCommit). `parentHashes` = parent hashes. */
-function c(hash, t, ref, parentHashes, subject) {
-  return { hash, t, ref, parents: parentHashes.length, parentHashes, subject };
-}
-
-/** A minimal ok GitHistoryResult for the pure layout. */
-function hist(commits, head, heads = {}) {
-  return { status: "ok", reason: null, commits, head, heads };
-}
-
-// ── AC1 unit: layoutGitGraph computes the vertical trunk + branch fork/merge ──
-
-test("AC1: layoutGitGraph yields a vertical trunk (first-parent chain) + branch fork/merge edges", () => {
-  const t0 = 1_700_000_000;
-  const commits = [
-    c("a000000", t0, "master", [], "base"),
-    c("b000000", t0 + 1, "master", ["a000000"], "trunk two"),
-    c("x000000", t0 + 2, "task/x", ["b000000"], "branch commit"),
-    c("m000000", t0 + 3, "master", ["b000000", "x000000"], "merge task/x"),
-  ];
-  const layout = layoutGitGraph(hist(commits, "m000000", { master: "m000000", "task/x": "x000000" }));
-  assert.ok(layout, "an ok history yields a layout");
-  // trunk = first-parent chain from HEAD, oldest → newest
-  assert.deepEqual(layout.trunk.commits.map((x) => x.hash), ["a000000", "b000000", "m000000"], "trunk is the first-parent chain, oldest-first");
-  assert.equal(layout.trunk.ref, "master", "trunk carries the mainline ref name");
-  // the merge's second parent becomes a branch lane: fork at b, merge at m
-  assert.equal(layout.branches.length, 1, "exactly one branch lane");
-  const b = layout.branches[0];
-  assert.equal(b.ref, "task/x", "branch ref name");
-  assert.deepEqual(b.commits.map((x) => x.hash), ["x000000"], "branch commits are the lateral commits");
-  assert.equal(b.fork, "b000000", "fork point = the trunk commit the branch diverged from");
-  assert.equal(b.merge, "m000000", "merge point = the trunk merge commit");
-});
-
-test("AC1: a linear history has a trunk and NO branch lanes (negative control)", () => {
-  const t0 = 1_700_000_000;
-  const commits = [
-    c("a000000", t0, "master", [], "base"),
-    c("b000000", t0 + 1, "master", ["a000000"], "two"),
-    c("c000000", t0 + 2, "master", ["b000000"], "three"),
-  ];
-  const layout = layoutGitGraph(hist(commits, "c000000", { master: "c000000" }));
-  assert.deepEqual(layout.trunk.commits.map((x) => x.hash), ["a000000", "b000000", "c000000"], "trunk = whole chain");
-  assert.equal(layout.branches.length, 0, "no merge → no branch lanes");
-});
-
-test("AC2: branches are collapsed by default and carry full commits + time span for expansion", () => {
-  const t0 = 1_700_000_000;
-  const commits = [
-    c("a000000", t0, "master", [], "base"),
-    c("b000000", t0 + 1, "master", ["a000000"], "trunk"),
-    c("x100000", t0 + 2, "task/x", ["b000000"], "branch one"),
-    c("x200000", t0 + 3, "task/x", ["x100000"], "branch two"),
-    c("m000000", t0 + 4, "master", ["b000000", "x200000"], "merge task/x"),
-  ];
-  const layout = layoutGitGraph(hist(commits, "m000000", { master: "m000000", "task/x": "x200000" }));
-  const b = layout.branches[0];
-  assert.equal(b.collapsed, true, "AC2: branch is collapsed by default");
-  assert.equal(b.commits.length, 2, "the full commit list is present (for expansion)");
-  assert.deepEqual(b.commits.map((x) => x.hash), ["x100000", "x200000"], "branch commits oldest → newest");
-  assert.equal(b.firstT, t0 + 2, "firstT = oldest branch commit landing time");
-  assert.equal(b.lastT, t0 + 3, "lastT = newest branch commit landing time (the time span)");
-});
-
-test("degradation: non-ok or empty history yields no layout", () => {
-  assert.equal(layoutGitGraph({ status: "empty", reason: "x", commits: [], head: null, heads: {} }), null);
-  assert.equal(layoutGitGraph({ status: "error", reason: "y", commits: [], head: null, heads: {} }), null);
-  assert.equal(layoutGitGraph({ status: "ok", reason: null, commits: [], head: null, heads: {} }), null);
-});
-
-test("groupCommitsByBranch groups into lanes sorted by most-recent landing, commits oldest-first", () => {
-  const branches = groupCommitsByBranch([
-    c("aaa", 1_700_000_000, "integration", [], "a"),
-    c("bbb", 1_700_000_300, "task/z", [], "z"),
-    c("ccc", 1_700_000_200, "integration", [], "c"),
-  ]);
-  assert.deepEqual(branches.map((b) => b.ref), ["task/z", "integration"], "most-recent-landing branch first");
-  const integration = branches.find((b) => b.ref === "integration");
-  assert.deepEqual(integration.commits.map((x) => x.hash), ["aaa", "ccc"], "lane commits oldest→newest");
-});
-
-// ── integration: real git workspace, /git-history serves the vertical-graph JSON + inlined D3 ──
-
-// ── AC1: branch names on the /git-history chart link out to their task's /task/<id> ──
-
-test("AC1: taskIdFromBranchRef maps task/<id> → <id> and leaves non-task refs unlinked", () => {
-  assert.equal(taskIdFromBranchRef("task/gap-git-history-clickable-branches-window"), "gap-git-history-clickable-branches-window");
-  assert.equal(taskIdFromBranchRef("task/"), null, "a bare task/ prefix has no task id");
-  assert.equal(taskIdFromBranchRef("develop"), null, "develop is a mainline ref, not a task");
-  assert.equal(taskIdFromBranchRef("master"), null);
-  assert.equal(taskIdFromBranchRef("integration"), null);
-  assert.equal(taskIdFromBranchRef("verify/stale"), null);
-  assert.equal(taskIdFromBranchRef("feature/alpha"), null);
-});
 
 // gap-webui-git-history-svg-unreadable: the client renderer must draw the viewBox at its NATIVE
 // width/height (1:1) instead of width=100% + max-height:75vh + default preserveAspectRatio meet,
@@ -227,39 +132,79 @@ test("integration: GET /git-history serves the vertical-graph JSON payload + an 
 
     const r = await get(port, "/git-history");
     assert.equal(r.status, 200, "GET /git-history returns 200");
-    // AC1: the graph mount + embedded JSON payload (vertical trunk + fork/merge structure).
+    // The graph mount + embedded JSON payload (per-commit rows with git column + %D decorations).
     assert.ok(r.body.includes('id="git-graph"'), "the vertical graph mount is present");
     // gap-webui-git-history-svg-unreadable AC2: the mount scrolls horizontally so the native-width
     // SVG is never squashed into the viewport (falsifiable — absent before the fix).
     assert.ok(r.body.includes('overflow-x:auto'), "the graph mount scrolls horizontally (native width)");
     assert.ok(r.body.includes('id="git-graph-data"'), "the embedded graph JSON payload is present");
-    assert.ok(r.body.includes('"fork"'), "the JSON payload carries fork edges");
-    assert.ok(r.body.includes('"merge"'), "the JSON payload carries merge edges");
-    assert.ok(r.body.includes('"collapsed":true'), "AC2: branches are collapsed by default in the payload");
-    assert.ok(r.body.includes("feature/alpha"), "the feature branch appears");
+    assert.ok(r.body.includes('"rows"'), "the JSON payload carries per-commit rows (not lanes)");
+    assert.ok(r.body.includes('"col"'), "each row carries its git column number");
+    assert.ok(r.body.includes('"decorations"'), "each row carries %D decorations");
+    assert.ok(r.body.includes("feature/alpha"), "the feature branch tip decoration appears");
+    assert.ok(r.body.includes("task/GH-1"), "the task branch tip decoration appears");
     assert.ok(r.body.includes("master") || r.body.includes("main"), "the main branch appears");
     // AC3: client JS + the third-party D3 library are now inlined (the retired zero-client-JS invariant).
     assert.ok(r.body.includes("d3js.org"), "the inlined D3 library is present");
     assert.ok((r.body.match(/<script/g) || []).length >= 3, "the page carries the data/lib/client <script> tags");
-    assert.ok(r.body.includes("分支汇总"), "the server-rendered summary table is still present");
-    // readGitHistory now exposes the DAG edges (parentHashes + heads) the layout consumes.
+    // readGitHistory now exposes the DAG edges (parentHashes) + %D decorations the layout consumes.
     const h = readGitHistory(ws);
     assert.equal(h.status, "ok");
     assert.ok(h.head, "readGitHistory resolves HEAD");
     assert.ok(h.commits.some((x) => x.parents > 1), "git history source sees a merge commit");
     assert.ok(h.commits.some((x) => x.parentHashes.length === 2), "a merge commit carries 2 parent hashes");
     const layout = layoutGitGraph(h);
-    assert.ok(layout.branches.some((b) => b.ref === "feature/alpha"), "layout places the feature branch as a fork/merge lane");
-    assert.ok(layout.branches.every((b) => b.collapsed === true), "AC2: every branch is collapsed by default");
+    // gap-git-graph-adopt-git-column-algorithm-and-decorate-labels: one row per commit, in git emission
+    // order; a branch name decorates ONLY the commit its ref points at (the merge keeps feature/alpha
+    // and the unmerged task/GH-1 branch still decorate their own tips).
+    assert.equal(layout.rows.length, h.commits.length, "every fetched commit becomes one row");
+    assert.ok(layout.rows.some((row) => row.decorations.includes("feature/alpha")), "the feature branch tip is decorated");
+    assert.ok(layout.rows.some((row) => row.decorations.includes("task/GH-1")), "the unmerged task branch tip is decorated");
+  } finally {
+    if (server) {
+      server.close();
+      if (server.client) await server.client.close();
+    }
+    process.chdir(cwd0);
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
 
-    // gap-git-history-branch-summary-wrong-numbers: a branch lane carries only its OWN commits, never
-    // the shared mainline ancestry (the 481/111 symptom). feature/alpha was --no-ff merged into
-    // master, so it has ZERO exclusive commits (correctly no phantom summary lane); task/GH-1 is
-    // unmerged and carries exactly its one commit.
-    const featureCommits = h.commits.filter((x) => x.ref === "feature/alpha");
-    assert.equal(featureCommits.length, 0, "a fully-merged branch has no phantom lane (0 exclusive commits)");
-    const taskCommits = h.commits.filter((x) => x.ref === "task/GH-1");
-    assert.deepEqual(taskCommits.map((x) => x.subject), ["task work"], "the unmerged task branch carries exactly its own commit");
+test("?view=task routing: /git-history serves the task view; default = ?view=git (byte-identical)", async () => {
+  const { ws, tasksDir } = makeWorkspace("gh-view-");
+  const cwd0 = process.cwd();
+  let server;
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: ws });
+    fs.writeFileSync(path.join(ws, "README.md"), "git-history view fixture\n");
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], { cwd: ws });
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"], { cwd: ws });
+    const nowSec = Math.floor(Date.now() / 1000);
+    gitCommit(ws, "chore: baseline", { t: nowSec - 400 });
+    gitCommit(ws, "gap-1: implement", { t: nowSec - 300 });
+    gitCommit(ws, "tasks: 翻 gap-1 done（driver 机械 fan-in）", { t: nowSec - 200 });
+    createStore(tasksDir).write("gap-1", { title: "view task", status: "todo" });
+
+    const port = await freePort();
+    process.chdir(ws);
+    server = await startServer({ port });
+
+    const def = await get(port, "/git-history");
+    const gitView = await get(port, "/git-history?view=git");
+    const taskView = await get(port, "/git-history?view=task");
+    const bogus = await get(port, "/git-history?view=bogus");
+
+    assert.equal(def.status, 200);
+    assert.equal(gitView.status, 200);
+    assert.equal(taskView.status, 200);
+    assert.equal(def.body, gitView.body, "default /git-history is byte-identical to ?view=git");
+    assert.equal(def.body, bogus.body, "an unknown ?view= value fails closed to the git default");
+    assert.ok(def.body.includes("git-graph-data"), "the default page embeds the git-view data script");
+    assert.ok(!def.body.includes("任务分组（按 task id 聚合）"), "the default page does NOT render the task grouping");
+    assert.ok(taskView.body.includes("任务分组（按 task id 聚合）"), "?view=task renders the task grouping");
+    assert.ok(taskView.body.includes("未归属"), "?view=task shows the unattributed group explicitly");
+    assert.ok(taskView.body.includes("gap-1"), "the task group names the task id");
   } finally {
     if (server) {
       server.close();
@@ -1445,7 +1390,11 @@ function writeLiveGhostFixture(root, entries) {
 }
 
 test("AC1/AC2/AC3 — readLive drops terminal-status ghosts, keeps a ready task (workflow-events source)", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "live-ghost-"));
+  // gap-serve-board-test-workspace-couples-to-shared-tmp-quay-worktrees: nest root under a private
+  // parent so dirname(root)/quay-worktrees is test-private (never the shared /tmp/quay-worktrees).
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "live-ghost-"));
+  const root = path.join(parent, "main");
+  fs.mkdirSync(root, { recursive: true });
   try {
     const nowMs = writeLiveGhostFixture(root, [
       { runId: "fm-SUP-1", taskId: "SUP", status: "superseded" },
@@ -1462,7 +1411,7 @@ test("AC1/AC2/AC3 — readLive drops terminal-status ghosts, keeps a ready task 
     assert.ok(!ids.has("NH"), "AC3: a needs-human task with an orphan START event is NOT in-flight (no worker is running)");
     assert.ok(ids.has("RDY"), "AC2: a ready task with an orphan START event IS still in-flight (negative control — not over-trimmed)");
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(parent, { recursive: true, force: true });
   }
 });
 
@@ -1875,12 +1824,18 @@ test("AC3 (integration) — POST /sessions/driver rejects interactive kinds + no
 test("AC1 (falsifiable) — POST /sessions/driver delegates to runDriver and forwards --kind (worker action targets worker, ⛔ 漏 --kind ⇒ 默认 promotion ⇒ 假)", async () => {
   const { ws, tasksDir } = makeWorkspace("lifecycle-ac1-");
   const cwd0 = process.cwd();
+  const prevPluginRoot = process.env.QUAY_PLUGIN_ROOT;
   let server;
   try {
     // Mock the supervisor kernel to echo its argv (⛔ 不真起 driver — 只验证 --kind 透传).
+    // ⛔ The kernel is now resolved via plugin-root.ts (SPEC §6b), NOT from the workspace root —
+    // so point the resolver at this mock with the explicit QUAY_PLUGIN_ROOT override (the seam
+    // plugin-root.ts exposes for hermetic tests / operator override), else the real main-checkout
+    // kernel runs and stdout is "not-running" instead of the echoed argv.
     const scriptDir = path.join(ws, "plugin", "scripts");
     fs.mkdirSync(scriptDir, { recursive: true });
     fs.writeFileSync(path.join(scriptDir, "driver-runtime.ts"), "process.stdout.write(process.argv.slice(2).join(' '));\n");
+    process.env.QUAY_PLUGIN_ROOT = path.join(ws, "plugin");
 
     const port = await freePort();
     process.chdir(ws);
@@ -1900,6 +1855,8 @@ test("AC1 (falsifiable) — POST /sessions/driver delegates to runDriver and for
       if (server.client) await server.client.close();
     }
     process.chdir(cwd0);
+    if (prevPluginRoot === undefined) delete process.env.QUAY_PLUGIN_ROOT;
+    else process.env.QUAY_PLUGIN_ROOT = prevPluginRoot;
     fs.rmSync(tasksDir, { recursive: true, force: true });
     fs.rmSync(ws, { recursive: true, force: true });
   }

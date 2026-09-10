@@ -5,463 +5,236 @@
 // each test spawns a real quay-init.sh --loop install subprocess tree. The install/quay-init family
 // rotated flakes across groups under full-suite load, so the whole family is consolidated into the
 // concurrency-1 serial phase (gap-install-family-tests-rotate-flakes-under-full-suite).
-// quay-init.test.mjs — gap-ac37-exec-core-ships-with-package (执行核随包走).
+// quay-init.test.mjs — gap-quay-init-closure-shrink-body (SPEC §6 / AC168 收缩本体).
 //
-// The three ≤80-line execution cores (plugin/loop/{manager,orchestrator,fast-mode}-tick-core.md)
-// previously lived ONLY in orchestration/ — they did NOT ship with the loop (quay-init.sh had zero
-// `tick-core` hits) and an installed project got the 1000+-line rationale archives with NO execution
-// path. This file pins the fix:
-//   AC2 — the three cores are in the DERIVED loop laydown set (derive_loop_scripts): a --loop
-//       install lays orchestrator-tick-core.md + fast-mode-tick-core.md into orchestration/ and the
-//       `quay-init.sh --loop | grep -c tick-core` measure is ≥ 3.
-//   AC3 — manager-tick-core.md is OPT-IN (--manager): a default --loop does NOT lay it; --loop
-//       --manager DOES.
-//   AC4 — the existing referenced ⊆ landed gate (:1081) covers the three cores (no new check): a
-//       --loop install passes verify-referenced-landed with them landed (their reference-doc
-//       declarations were REMOVED so the gate now validates the landing, not a declaration).
-//   AC5 — cold-start readable: the laid-down cores are readable in the target's orchestration/.
+// The new quay-init contract: a PROJECT INITIALIZER whose write surface is the SEVEN-item closed set —
+//   .quay/config.yml / .quay/profiles.yml / tasks/ / goals/ / .gitignore /
+//   .claude/launch.settings.json / .claude/settings.json
+// — and NOTHING else (no .claude/{skills,workflows,agents}, no plugin/scripts copies, no .quay/runtime).
+// It is NOT an installer: the extension files + scripts are delivered by the quay Claude Code plugin,
+// so the output must carry an EXPLICIT install step (`claude plugin marketplace add` +
+// `claude plugin install`), never a "config-just-works" implication (AC4 / SPEC §6 T3).
 //
 // Run:
 //   scripts/test.sh plugin/test/quay-init.test.mjs
 //   node --test plugin/test/quay-init.test.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
-import { makeTmp, cleanup, runInit, pluginDir, laydownWorkspace, diskWorktreeRoot } from "./quay-init-loop-helpers.mjs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const pluginDir = path.resolve(__dirname, "..");
+
+const _tmp = [];
+function makeTmp(prefix = "qinit-") {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  _tmp.push(d);
+  return d;
+}
+function cleanup(d) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* best-effort */ } }
+after(() => { for (const d of _tmp) cleanup(d); });
+
+function diskWorktreeRoot() {
+  const d = fs.mkdtempSync(path.join("/var/tmp", "qinit-wt-"));
+  _tmp.push(d);
+  return d;
+}
+
+function runInitEnv(ws, args = [], envExtra = {}) {
+  const extra = args.includes("--loop") && !args.some((a) => a === "--worktree-root")
+    ? ["--worktree-root", diskWorktreeRoot()] : [];
+  return spawnSync("bash", [path.join(pluginDir, "scripts", "quay-init.sh"), ...extra, ...args], {
+    cwd: ws,
+    encoding: "utf8",
+    env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginDir, ...envExtra },
+  });
+}
+function runInit(ws, args = []) {
+  return runInitEnv(ws, args);
+}
+
+// noTmuxPathPrefix — a temp dir whose `tmux` is a stub that reports NO sessions (exit 1), prepended to
+// PATH so quay-init's detection resolves the stub instead of a real tmux. This is the AC4 "no-tmux
+// host" simulation: `command -v tmux` succeeds but `tmux list-sessions` yields nothing ⇒ the detector
+// returns "zero matches" — the exact path a real no-tmux host (CI/container/plain ssh) takes.
+function noTmuxPathPrefix() {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "qinit-notmux-"));
+  _tmp.push(d);
+  fs.writeFileSync(path.join(d, "tmux"), "#!/bin/sh\n# simulated no-tmux host: list-sessions yields nothing\nexit 1\n", { mode: 0o755 });
+  return d;
+}
 
 const INIT_ARGS = (ws) => [
   "--loop", "--root", ws, "--project", "proj",
   "--test-command", "node --test", "--tmux-session", "proj-0:0.0",
 ];
 
-const CORE_BASENAMES = [
-  "orchestrator-tick-core.md",
-  "fast-mode-tick-core.md",
-  "manager-tick-core.md",
+// The seven-item closed set (SPEC §6) — the exact relative paths quay-init may write.
+const CLOSED_SET = [
+  ".quay/config.yml",
+  ".quay/profiles.yml",
+  ".gitignore",
+  ".claude/launch.settings.json",
+  ".claude/settings.json",
 ];
 
-// ── AC2: the three exec cores ship in the derived set + are laid down ────────────────────────────────
-test("AC2 — the three exec-core docs are in the derived laydown set; a --loop install lays them to orchestration/", () => {
-  // AC3 (gap-serial-install-family-shared-prebuilt-fixture): the initial install is pure setup — copy
-  // it from the shared prebuilt fixture; the `measure` re-run below stays a REAL install.
-  const { ws, install: r } = laydownWorkspace();
-  try {
-    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
-    assert.match(r.stdout, /verify-referenced-landed: OK/, "referenced ⊆ landed must pass with the cores landed");
-    // The two default-loop cores land in the target's orchestration/ (the path the tick templates reference).
-    for (const core of ["orchestrator-tick-core.md", "fast-mode-tick-core.md"]) {
-      const landed = path.join(ws, "orchestration", core);
-      assert.ok(fs.existsSync(landed), `the exec core must be laid down: orchestration/${core}`);
+function listFiles(root) {
+  const out = [];
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else out.push(path.relative(root, p));
     }
-    // fast-mode-tick-core.md ships as REAL content (normalized-byte semantic landing) — cold-start
-    // readable (AC5): byte-identical to the shipped plugin/loop/ canonical copy.
-    {
-      const core = "fast-mode-tick-core.md";
-      const landed = path.join(ws, "orchestration", core);
-      const shipped = path.join(pluginDir, "loop", core);
-      assert.ok(fs.existsSync(shipped), `the shipped canonical copy must exist: plugin/loop/${core}`);
-      assert.equal(fs.readFileSync(landed, "utf8"), fs.readFileSync(shipped, "utf8"),
-        `laid-down ${core} must be byte-identical to the shipped copy`);
-    }
-    // orchestrator-tick-core.md's shipped plugin/loop/ copy is a one-line POINTER
-    // (gap-inner-content-cleanup, 2026-09-02, mirroring gap-plugin-loop-manager-drifted-copies-
-    // pointerize) — resolve_tick_core_src follows it to the orchestration/ 正本, so the laid-down
-    // file must be the REAL core, byte-identical to that 正本, not the pointer line.
-    {
-      const core = "orchestrator-tick-core.md";
-      const landed = path.join(ws, "orchestration", core);
-      const shipped = path.join(pluginDir, "loop", core);
-      assert.match(fs.readFileSync(shipped, "utf8"), /^> 正本: orchestration\/orchestrator-tick-core\.md/,
-        "plugin/loop/orchestrator-tick-core.md must be a pointer to its orchestration/ 正本");
-      const canonical = path.join(path.resolve(pluginDir, ".."), "orchestration", core);
-      assert.ok(fs.existsSync(canonical), `the orchestration/ 正本 must exist: ${canonical}`);
-      assert.equal(fs.readFileSync(landed, "utf8"), fs.readFileSync(canonical, "utf8"),
-        `laid-down ${core} must be the REAL core, byte-identical to the orchestration/ 正本 (not the plugin/loop pointer)`);
-    }
-    // The measure: `quay-init.sh --loop | grep -c tick-core` ≥ 3 (the three cores are in the derived set).
-    const measure = runInit(ws, INIT_ARGS(ws));
-    const hits = (measure.stdout.match(/tick-core/g) || []).length;
-    assert.ok(hits >= 3, `the --loop output must mention tick-core at least 3 times (three cores in the derived set); got ${hits}`);
-  } finally { cleanup(ws); }
-});
+  };
+  walk(root);
+  return out.sort();
+}
 
-// ── AC2 (gap-quay-init-coldstart-usability-launch-not-used-... F4): the laid-down launch is usable ────
-// quay-launch.sh reads <target>/.claude/launch.settings.json + <target>/.quay/profiles.yml (AC154) — a
-// --loop install must lay BOTH so a cold-started consumer's quay-launch.sh does NOT fail closed
-// ("launch settings file not found"), and the materialized command carries --settings + the role name.
-test("AC2-launch — --loop lays down .claude/launch.settings.json + .quay/profiles.yml; the laid-down quay-launch.sh materializes --settings + role names", () => {
-  const { ws, install: r } = laydownWorkspace();
-  try {
-    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
-    assert.match(r.stdout, /launch-config: laid down .claude\/launch\.settings\.json/,
-      "the install must report the launch-config laydown");
-    const settings = path.join(ws, ".claude", "launch.settings.json");
-    assert.ok(fs.existsSync(settings), "a --loop install must lay .claude/launch.settings.json (the launcher's input)");
-    const s = JSON.parse(fs.readFileSync(settings, "utf8"));
-    assert.ok(!("_launchSpec" in s), "the laid template must NOT carry _launchSpec (AC154 profile 抽层)");
-    // AC154: roles now live in the SIBLING .quay/profiles.yml laid beside the settings file.
-    const profiles = path.join(ws, ".quay", "profiles.yml");
-    assert.ok(fs.existsSync(profiles), "a --loop install must lay .quay/profiles.yml (the profile carrier)");
-    const py = spawnSync("python3", ["-c", "import sys,yaml,json; print(json.dumps(yaml.safe_load(open(sys.argv[1]))))", profiles], { encoding: "utf8" });
-    assert.equal(py.status, 0, `laid profiles.yml must parse as YAML:\n${py.stderr}`);
-    const p = JSON.parse(py.stdout);
-    const names = new Set(Object.values(p.roles).map((r) => r.name));
-    assert.equal(names.has("quay-outer"), true, "outer role must carry the role-convention name quay-outer");
-    assert.equal(names.has("quay-inner"), false, "inner role retired (inner 层已由 *-driver 取代) — must NOT carry the role-convention name quay-inner");
-    // The launcher in the laid-down target materializes --settings + the role name (F4's missing half).
-    const launcher = path.join(ws, "plugin", "scripts", "quay-launch.sh");
-    const dry = spawnSync("bash", [launcher, "outer", "--dry-run"], { encoding: "utf8", env: { ...process.env, QUAY_LAUNCH_SETTINGS: settings } });
-    assert.equal(dry.status, 0, `laid-down quay-launch.sh outer --dry-run must exit 0:\n${dry.stderr}`);
-    assert.ok(dry.stdout.includes("--settings"), "the materialized command must carry --settings");
-    assert.ok(dry.stdout.includes("-n quay-outer"), "the materialized command must carry the role-convention name quay-outer");
-  } finally { cleanup(ws); }
-});
-
-// ── AC3: manager-tick-core is opt-in (--manager), not in the default --loop set ───────────────────────
-test("AC3 — manager-tick-core.md is OPT-IN: absent in a default --loop, present with --manager", () => {
-  // Default --loop: the manager core must NOT land. AC3: the default install is pure setup — copy it
-  // from the shared prebuilt fixture (a default --loop install, so it has no --manager core and its
-  // output carries the opt-in skip report).
-  const { ws: wsDefault, install: r } = laydownWorkspace();
-  try {
-    assert.equal(r.status, 0, `default init must exit 0:\n${r.stderr}`);
-    assert.ok(!fs.existsSync(path.join(wsDefault, "orchestration", "manager-tick-core.md")),
-      "default --loop must NOT lay manager-tick-core.md (opt-in via --manager)");
-    assert.match(r.stdout, /skip \(opt-in\): orchestration\/manager-tick-core\.md/,
-      "the default install must report the manager core as opt-in");
-  } finally { cleanup(wsDefault); }
-
-  // --loop --manager: the manager core DOES land.
-  const wsMgr = makeTmp();
-  try {
-    const r = runInit(wsMgr, [...INIT_ARGS(wsMgr), "--manager"]);
-    assert.equal(r.status, 0, `--manager init must exit 0:\n${r.stderr}`);
-    assert.ok(fs.existsSync(path.join(wsMgr, "orchestration", "manager-tick-core.md")),
-      "--loop --manager must lay manager-tick-core.md");
-    const landed = path.join(wsMgr, "orchestration", "manager-tick-core.md");
-    // The shipped plugin/loop/manager-tick-core.md is a one-line POINTER to the 正本
-    // (gap-plugin-loop-manager-drifted-copies-pointerize) — the laid-down file must be the REAL
-    // core, byte-identical to the orchestration/ 正本, not the pointer line (cold-start readable).
-    const canonical = path.join(path.resolve(pluginDir, ".."), "orchestration", "manager-tick-core.md");
-    assert.ok(fs.existsSync(canonical), `the orchestration/ 正本 must exist: ${canonical}`);
-    assert.equal(fs.readFileSync(landed, "utf8"), fs.readFileSync(canonical, "utf8"),
-      "laid-down manager-tick-core.md must be the REAL core, byte-identical to the orchestration/ 正本 (not the plugin/loop pointer)");
-  } finally { cleanup(wsMgr); }
-});
-
-// ── AC4: referenced ⊆ landed covers the three cores (no new check) ───────────────────────────────────
-test("AC4 — the referenced⊆landed gate validates the three cores: removing one shipped core FAILS the install (declaration removed, landing required)", () => {
-  // The two default-loop cores are NO LONGER declared reference-doc in init/SKILL.md — so if the
-  // laydown cannot land one, the install must FAIL (the gate now validates the LANDING, not a
-  // declaration). This is the "自动生效" the task's prescription names (:1081, no new check).
-  const src = makeTmp();
-  try {
-    fs.cpSync(pluginDir, src, { recursive: true });
-    // A freshly cloned plugin has NO built vendor runtime; the test only needs the LAYDOWN + gate,
-    // but ensure_vendor_runtime would fail-closed before the gate runs. Build-less is fine: we
-    // delete the core from the PLUGIN source so the laydown cannot ship it, and assert the gate
-    // names it. (The vendor-runtime fail-closed would mask this — so pre-copy the runtime if present.)
-    const rtDir = path.join(pluginDir, "vendor", "quay", "dist");
-    if (fs.existsSync(rtDir)) {
-      fs.cpSync(rtDir, path.join(src, "vendor", "quay", "dist"), { recursive: true });
-      fs.cpSync(path.join(pluginDir, "vendor", "quay-native", "dist"),
-        path.join(src, "vendor", "quay-native", "dist"), { recursive: true });
-    }
-    fs.rmSync(path.join(src, "loop", "orchestrator-tick-core.md"), { force: true });
-    fs.rmSync(path.join(src, "loop", "fast-mode-tick-core.md"), { force: true });
-    const ws = makeTmp();
-    try {
-      const r = runInit(ws, INIT_ARGS(ws), src);
-      assert.notEqual(r.status, 0, "--loop must FAIL when a referenced exec core cannot land");
-      assert.match(r.stderr, /referenced-not-landed/, "must use the referenced-not-landed category");
-      assert.match(r.stderr, /orchestrator-tick-core\.md/, "must name the missing exec core");
-      assert.match(r.stderr, /fast-mode-tick-core\.md/, "must name the missing exec core");
-    } finally { cleanup(ws); }
-  } finally { cleanup(src); }
-});
-
-// ── AC5: --loop lays all three cores when opted in; manager core's own deps are gate-validated ───────
-test("AC5 — --loop --manager lays all three cores (cold-start readable); quay-session.ts (the manager core's dep) ships", () => {
+// ── AC1: the write surface is the seven-item closed set ──────────────────────────────────────────────
+test("AC1 — a real quay-init --loop laydown writes ONLY the seven-item closed set (no extension/script copies)", () => {
   const ws = makeTmp();
   try {
-    const r = runInit(ws, [...INIT_ARGS(ws), "--manager"]);
-    assert.equal(r.status, 0, `--manager init must exit 0:\n${r.stderr}`);
-    assert.match(r.stdout, /verify-referenced-landed: OK/, "referenced ⊆ landed must pass with all three cores");
-    for (const core of CORE_BASENAMES) {
-      const landed = path.join(ws, "orchestration", core);
-      assert.ok(fs.existsSync(landed), `all three cores must be readable in the target: orchestration/${core}`);
+    const r = runInit(ws, INIT_ARGS(ws));
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stdout}${r.stderr}`);
+
+    const files = listFiles(ws);
+    for (const f of files) {
+      const ok = CLOSED_SET.includes(f) || f.startsWith("tasks/") || f.startsWith("goals/");
+      assert.ok(ok, `a laid-down path must be in the closed set ∪ tasks/ and goals/ descendants; got ${f} (all: ${files.join(", ")})`);
     }
-    // quay-session.ts is referenced by manager-tick-core.md — it must ship (gate-validated dep).
-    assert.ok(fs.existsSync(path.join(ws, "plugin", "scripts", "quay-session.ts")),
-      "the manager core's referenced dep plugin/scripts/quay-session.ts must be laid down");
+    for (const c of CLOSED_SET) {
+      assert.ok(files.includes(c), `the closed-set member must be laid down: ${c}`);
+    }
+    assert.ok(fs.existsSync(path.join(ws, "goals")), "goals/ must be created (dual carrier)");
+    // The retired extension-file copy surface must be ABSENT (裁定 6: 不复制扩展或脚本).
+    assert.ok(!fs.existsSync(path.join(ws, ".claude", "workflows")), "no .claude/workflows copy");
+    assert.ok(!fs.existsSync(path.join(ws, ".claude", "agents")), "no .claude/agents copy");
+    assert.ok(!fs.existsSync(path.join(ws, ".claude", "skills")), "no .claude/skills copy");
+    assert.ok(!fs.existsSync(path.join(ws, "plugin")), "no plugin/scripts copy");
+    assert.ok(!fs.existsSync(path.join(ws, "orchestration")), "no orchestration/ copy");
+    assert.ok(!fs.existsSync(path.join(ws, "docs")), "no docs/analysis/ copy");
+    // The retired runtime laydown is gone (no .quay/runtime).
+    assert.ok(!fs.existsSync(path.join(ws, ".quay", "runtime")), "no .quay/runtime laydown");
   } finally { cleanup(ws); }
 });
 
-// ── torn-read simulation seam (gap-quay-init-torn-read-derive-loop-scripts) ────────────────────────
-// derive_loop_scripts() derives the --loop laydown set by grep over the shipped corpus
-// (skills/*/SKILL.md + loop/*.md + workflows/*.js). Under heavy concurrent load a grep/sort in a
-// command substitution can be killed mid-stream (the pipeline's `|| true` masks the death), returning
-// a PARTIAL (torn) set — the laydown then lays FEWER scripts than the docs reference, and
-// verify_referenced_landed (which re-derives the reference set independently) false-positives every
-// missing script as referenced-not-landed (observed at cc8: 104 scripts ≈ the ENTIRE reference set).
-// The fix (derive_loop_scripts stability check) runs TWO independent passes and requires them to be
-// IDENTICAL, so a torn pass (which truncates at a nondeterministic point) retries; only two agreeing
-// non-empty passes are accepted. A stable corpus derives deterministically, so real drift is never
-// masked (a genuinely-absent script is absent from EVERY pass and the downstream gate fail-closes).
-//
-// These tests SOURCE the REAL quay-init.sh and call derive_loop_scripts directly (免完整安装 —
-// gap-quay-init-reduce-real-install-count), with a fake `grep` injected first on PATH. The fake
-// passes through every invocation to the real grep EXCEPT the (a) corpus scan — the
-// grep whose pattern starts with `plugin/scripts/` (the ONLY such grep in the derivation;
-// verify_referenced_landed's reference-scan pattern starts with `(` and is unaffected). On a torn
-// policy it truncates that one grep's output to the first KEEP lines, simulating a grep killed
-// mid-stream. The drop schedule tears only the FIRST corpus read (tornUntil=1) and lets reads 2+
-// return the full set — the first derive_loop_scripts pass is torn, the second is full, so the
-// stability check's two passes disagree and it retries to two agreeing full passes. A pre-fix
-// (unwrapped) derive_loop_scripts would lay down the torn set and fail referenced-not-landed.
-const FAKE_GREP_SOURCE = String.raw`#!/usr/bin/env bash
-# Torn-read simulation grep (quay-init derive_loop_scripts torn-read regression test only).
-# Passes through to the real grep EXCEPT the (a) corpus scan (pattern starting with plugin/scripts/).
-set -u
-real_grep="$REAL_GREP"
-policy="$FAKE_GREP_POLICY"
+// ── config.yml: provider map + loop params ───────────────────────────────────────────────────────────
+test("config.yml carries a provider map + the loop params the driver reads", () => {
+  const ws = makeTmp();
+  try {
+    const r = runInit(ws, INIT_ARGS(ws));
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    const cfg = fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8");
+    assert.match(cfg, /providers:\s*\n\s+native:\s*\n\s+enabled: true/, "provider map must declare the native provider enabled");
+    assert.match(cfg, /mcp_entry: \["node", .*quay-native\.js", "mcp"\]/, "provider mcp_entry must launch the native runtime");
+    assert.match(cfg, /loop:\s*\n\s+repo_root:/, "loop section must carry repo_root");
+    assert.match(cfg, /test_command: node --test/, "loop section must carry test_command");
+    assert.match(cfg, /tmux_session: proj-0:0\.0/, "loop section must carry tmux_session");
+    assert.match(cfg, /fork_baseline: develop/, "loop section must carry fork_baseline");
+    // gap-config-key-consumer-check-mechanical-enumeration: the zero-consumer key is deleted from the
+    // writer face — the negative control is that the dead key is NOT written (not merely unwired).
+    assert.doesNotMatch(cfg, /merge_target/, "loop section must NOT carry the deleted zero-consumer key");
+  } finally { cleanup(ws); }
+});
 
-corpus_scan=no
-for a in "$@"; do
-  case "$a" in
-    plugin/scripts/*) corpus_scan=yes ;;
-  esac
-done
+// ── .claude/settings.json: enabledPlugins + permissions.allow ────────────────────────────────────────
+test(".claude/settings.json enables the plugin (project-level) + pre-approves the plugin MCP namespace", () => {
+  const ws = makeTmp();
+  try {
+    const r = runInit(ws, INIT_ARGS(ws));
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    const settings = JSON.parse(fs.readFileSync(path.join(ws, ".claude", "settings.json"), "utf8"));
+    assert.equal(settings.enabledPlugins?.["quay@quay"], true, "the plugin must be enabled at project level");
+    assert.ok(Array.isArray(settings.permissions?.allow), "permissions.allow must be an array");
+    assert.ok(settings.permissions.allow.includes("mcp__plugin_quay_quay__*"), "the plugin MCP namespace must be pre-approved");
+  } finally { cleanup(ws); }
+});
 
-if [ "$corpus_scan" = "yes" ] && [ "$policy" = "torn" ]; then
-  full="$("$real_grep" "$@" 2>/dev/null || true)"
-  rseq=0
-  if [ -f "$FAKE_GREP_COUNTER" ]; then
-    rseq="$(cat "$FAKE_GREP_COUNTER" 2>/dev/null || echo 0)"
-  fi
-  rseq=$((rseq + 1))
-  printf '%s' "$rseq" > "$FAKE_GREP_COUNTER"
+// ── AC4: explicit install steps (config does NOT auto-install) ──────────────────────────────────────
+test("AC4 — the output carries the explicit install steps and never implies config-just-works", () => {
+  const ws = makeTmp();
+  try {
+    const r = runInit(ws, INIT_ARGS(ws));
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    const out = r.stdout;
+    // The explicit install step (SPEC §6 / T3): 启用 ≠ 安装, 未信任目录 settings 不被读 ⇒ 必须显式装.
+    assert.match(out, /claude plugin marketplace add/, "must print the marketplace-add step");
+    assert.match(out, /claude plugin install/, "must print the plugin-install step (or the npm-global register-plugin.mjs path)");
+    // The negative control (硬规则 4 / SPEC §6): the forbidden "配置即生效" implication is absent.
+    assert.doesNotMatch(out, /配置即生效/, "must not print the forbidden config-just-works phrasing");
+    assert.doesNotMatch(out, /自动安装|自动装上/, "must not imply auto-install from config alone");
+  } finally { cleanup(ws); }
+});
 
-  torn=no
-  if [ "$rseq" -le "$FAKE_GREP_TORN_UNTIL" ]; then
-    torn=yes
-  fi
+// ── --dry-run: writes nothing ────────────────────────────────────────────────────────────────────────
+test("--dry-run lists the closed set and writes nothing", () => {
+  const ws = makeTmp();
+  try {
+    const r = runInit(ws, [...INIT_ARGS(ws), "--dry-run"]);
+    assert.equal(r.status, 0, `--dry-run must exit 0:\n${r.stderr}`);
+    assert.match(r.stdout, /closed set:/, "must report the closed set");
+    assert.equal(listFiles(ws).length, 0, "--dry-run must write no files");
+  } finally { cleanup(ws); }
+});
 
-  if [ "$torn" = "yes" ]; then
-    keep="$FAKE_GREP_KEEP"
-    n=0
-    printed=0
-    while IFS= read -r line; do
-      [ -z "$line" ] && continue
-      n=$((n + 1))
-      if [ "$n" -le "$keep" ]; then
-        printf '%s\n' "$line"
-        printed=$((printed + 1))
-      fi
-    done <<< "$full"
-    printf 'corpus %s %s %s\n' "$rseq" "yes" "$printed" >> "$FAKE_GREP_LOG"
-  else
-    printf '%s\n' "$full"
-    printf 'corpus %s %s %s\n' "$rseq" "no" "full" >> "$FAKE_GREP_LOG"
-  fi
-  exit 0
-fi
-
-exec "$real_grep" "$@"
-`;
-
-function realGrepPath() {
-  for (const d of (process.env.PATH || "").split(":")) {
-    const p = path.join(d, "grep");
-    if (fs.existsSync(p)) return p;
-  }
-  return "/usr/bin/grep";
-}
-
-// runSourced(fnLine, { env, args, cwd }) — SOURCE quay-init.sh and invoke ONE of its top-level
-// derivation/stability functions DIRECTLY (no full install), with the fake-grep seam (env) in place.
-// gap-quay-init-reduce-real-install-count: the torn-read family previously ran a full `--loop` install
-// (~33s) per test just to exercise one stability check; quay-init.sh is now sourceable (its
-// library-mode guard stops before the install flow), so the test calls the function itself. fnLine is
-// the LAST command of a `bash -c`, so the child's exit code IS the function's return code and stderr
-// carries any FAIL line (e.g. referenced-not-landed).
-function runSourced(fnLine, { env = {}, args = [], cwd } = {}) {
-  // Capture the positional args into _fargs and CLEAR $@ BEFORE sourcing: quay-init.sh parses $@ at
-  // the top level (its arg parser rejects an unknown positional with "unknown argument"), and
-  // sourcing would otherwise feed it the fnLine's args (e.g. the workspace path). fnLine reads them
-  // back via ${_fargs[0]}.
-  const script = '_fargs=("$@")\nset --\nsource "$QUAY_INIT_SCRIPT"\n' + fnLine;
-  return spawnSync("bash", ["-c", script, "quay-init-sourced", ...args], {
-    cwd: cwd || pluginDir,
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      CLAUDE_PLUGIN_ROOT: pluginDir,
-      QUAY_INIT_SCRIPT: path.join(pluginDir, "scripts", "quay-init.sh"),
-      ...env,
-    },
-  });
-}
-
-// Async spawn variant (the concurrency test must run N installs in PARALLEL, not serially).
-function runInitAsync(workspace, args, pluginRoot = pluginDir) {
-  return new Promise((resolve) => {
-    const argv = ["bash", path.join(pluginRoot, "scripts", "quay-init.sh")];
-    if (args.includes("--loop") && !args.some((a) => a === "--worktree-root")) {
-      argv.push("--worktree-root", diskWorktreeRoot());
+// ── AC1/AC4: a no-tmux host must NOT hard-fail the init (tmux session is optional) ─────────────────
+// gap-quay-init-hard-requires-tmux-session-and-leaves-partial-write. tmux is shadowed by a stub that
+// reports no sessions — the exact "no tmux host" path (CI/container/plain ssh). The init must exit 0,
+// lay all seven closed-set items, and write loop.tmux_session: null (never a guess, never exit 2).
+// Negative control ① (removing the simulation ⇒ still green): the assertion only checks exit 0 + six
+// items + null — with a REAL tmux present the detector still finds zero MATCHING sessions for the
+// unique project name `proj-notmux`, so the same optional path continues and the test stays green.
+// Negative control ② (reverting tmux to hard-fail ⇒ red): if the detector again `exit 2`s on a miss,
+// r.status becomes 2 and both asserts below (status 0 + /needs the target project's tmux/ absent) turn red.
+test("no-tmux host: quay-init exits 0, lays the seven-item closed set, and writes tmux_session: null", () => {
+  const ws = makeTmp();
+  try {
+    const prefix = noTmuxPathPrefix();
+    const r = runInitEnv(ws,
+      ["--loop", "--root", ws, "--project", "proj-notmux", "--test-command", "node --test"],
+      { PATH: prefix + ":" + (process.env.PATH || "") });
+    assert.equal(r.status, 0, `init must exit 0 on a no-tmux host:\n${r.stdout}${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /needs the target project's tmux session/,
+      "must not hard-fail on a missing tmux session (the retired dual-tmux prerequisite)");
+    for (const c of CLOSED_SET) {
+      assert.ok(fs.existsSync(path.join(ws, c)), `closed-set member must be laid down: ${c}`);
     }
-    argv.push(...args);
-    const child = spawn(argv[0], argv.slice(1), {
-      cwd: workspace,
-      env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginRoot },
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (d) => { stdout += d; });
-    child.stderr.on("data", (d) => { stderr += d; });
-    child.on("error", (e) => resolve({ status: null, stdout, stderr: `${stderr}${e}` }));
-    child.on("close", (code) => resolve({ status: code, stdout, stderr }));
-  });
-}
-
-// Writes the fake grep into binDir and returns the env the install must run with.
-function tornEnv(binDir, opts) {
-  const fakeGrep = path.join(binDir, "grep");
-  fs.writeFileSync(fakeGrep, FAKE_GREP_SOURCE);
-  fs.chmodSync(fakeGrep, 0o755);
-  return {
-    PATH: `${binDir}:${process.env.PATH || ""}`,
-    REAL_GREP: realGrepPath(),
-    FAKE_GREP_POLICY: opts.policy,
-    FAKE_GREP_COUNTER: path.join(binDir, "counter"),
-    FAKE_GREP_LOG: path.join(binDir, "corpus-reads.log"),
-    FAKE_GREP_TORN_UNTIL: String(opts.tornUntil ?? 0),
-    FAKE_GREP_KEEP: String(opts.keep ?? 5),
-  };
-}
-
-function readCorpusLog(logPath) {
-  if (!fs.existsSync(logPath)) return [];
-  return fs.readFileSync(logPath, "utf8").trim().split("\n").filter(Boolean).map((line) => {
-    const [kind, rseq, torn, printed] = line.split(" ");
-    return { kind, rseq: Number(rseq), torn, printed };
-  });
-}
-
-// ── torn-read regression (gap-quay-init-torn-read-derive-loop-scripts) ─────────────────────────────
-// The stability check: two independent derivation passes must agree before a laydown set is accepted.
-// This test tears ONLY the first corpus read (truncating it to 5 lines) and lets every later read
-// return the full set — the first pass is torn, the second is full, so the two passes disagree and
-// the check retries to two agreeing full passes. A pre-fix (unwrapped) derivation would lay the torn
-// set and fail referenced-not-landed on ~100 missing scripts.
-test("torn-read stability — a torn corpus derivation (grep truncated) is retried; derive_loop_scripts still returns a stable set", () => {
-  const binDir = makeTmp("torn-grep-");
-  const env = tornEnv(binDir, { policy: "torn", tornUntil: 1, keep: 5 });
-  try {
-    const r = runSourced("derive_loop_scripts", { env });
-    assert.equal(r.status, 0,
-      `a torn corpus read must NOT fail the derivation (the stability check retries to a clean pass):\n${r.stdout}${r.stderr}`);
-
-    // The fake-grep log proves the tear really fired and that the check read PAST it (a full read
-    // followed the torn one). A torn read that never happened would make this test vacuous; a full
-    // read never following would mean the tear was never absorbed.
-    const log = readCorpusLog(env.FAKE_GREP_LOG);
-    assert.ok(log.length >= 1, "the fake-grep seam must have intercepted at least one corpus scan");
-    assert.equal(log[0].torn, "yes", "the FIRST corpus read must be torn (the tear actually fired)");
-    assert.ok(Number(log[0].printed) >= 1 && Number(log[0].printed) <= 5,
-      `the torn read must be truncated (printed ${log[0].printed} lines, expected ≤ 5)`);
-    assert.ok(log.length >= 3,
-      `the stability check must read past the torn pass (≥3 corpus reads; 2-pass agreement requires a retry), got ${log.length}`);
-    assert.ok(log.some((e) => e.torn === "no"),
-      "a complete (non-torn) corpus read must follow the torn one — the retry moved past it");
-  } finally { cleanup(binDir); }
+    assert.ok(fs.existsSync(path.join(ws, "tasks")), "tasks/ must be created");
+    assert.ok(fs.existsSync(path.join(ws, "goals")), "goals/ must be created (dual carrier)");
+    const cfg = fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8");
+    assert.match(cfg, /tmux_session:\s*null/, "loop.tmux_session must be null when no session is detected");
+  } finally { cleanup(ws); }
 });
 
-test("torn-read control — the pass-through seam preserves the happy path: consistent reads exit 0", () => {
-  const binDir = makeTmp("torn-grep-");
-  const env = tornEnv(binDir, { policy: "pass" });
+// ── AC3: a mid-write failure reports the per-item written/unwritten state (mechanically parseable) ──
+// A `.claude` FILE (not a dir) makes the launch.settings.json lay-down's `mkdir -p .claude` abort AFTER
+// config.yml/profiles.yml/tasks/goals/.gitignore were written — the exact partial-write shape the task
+// describes. The EXIT trap must list which of the seven items landed (written:) and which did not
+// (unwritten:), so "initialized half-way" is distinguishable from "not initialized".
+test("AC3 — a mid-write failure lists the seven-item written/unwritten state", () => {
+  const ws = makeTmp();
   try {
-    const r = runSourced("derive_loop_scripts", { env });
-    assert.equal(r.status, 0, `the pass-through seam must not change a clean derivation verdict:\n${r.stdout}${r.stderr}`);
-  } finally { cleanup(binDir); }
-});
-
-// ── concurrency negative control (gap-quay-init-torn-read-derive-loop-scripts AC2) ──────────────────
-// Real concurrent --loop installs must each derive a COMPLETE (non-torn) laydown set: every install
-// exits 0 and passes verify-referenced-landed (the false-positive detector). A torn read in any one
-// install would surface as referenced-not-landed false positives and a non-zero exit.
-test("concurrent --loop installs derive a stable loop set — no torn-read false positive (negative control)", async () => {
-  const N = 4;
-  const wss = Array.from({ length: N }, () => makeTmp("conc-init-"));
-  try {
-    const results = await Promise.all(wss.map((ws) => runInitAsync(ws, INIT_ARGS(ws))));
-    for (const r of results) {
-      assert.equal(r.status, 0, `concurrent install must exit 0:\n${r.stdout}${r.stderr}`);
-      assert.match(r.stdout, /verify-referenced-landed: OK/,
-        "referenced ⊆ landed must pass under concurrency (no torn-read false positive)");
+    fs.mkdirSync(path.join(ws, "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "scripts", "test.sh"), "#!/bin/bash\necho test\n");
+    fs.writeFileSync(path.join(ws, ".claude"), "not a dir\n");
+    const r = runInit(ws, ["--loop", "--root", ws, "--test-command", "node --test", "--tmux-session", "proj-0:0.0"]);
+    assert.notEqual(r.status, 0, `a mid-write failure must exit non-zero:\n${r.stdout}${r.stderr}`);
+    const combined = r.stdout + "\n" + r.stderr;
+    // written before the abort.
+    for (const p of [".quay/config.yml", ".quay/profiles.yml", "tasks", "goals", ".gitignore"]) {
+      assert.match(combined, new RegExp(`written:\\s*${p.replace(/\./g, "\\.")}`),
+        `the report must mark ${p} written`);
     }
-  } finally { wss.forEach(cleanup); }
-});
-
-// ── torn declaration-read regression (gap-quay-init-escalations-vendor-freshness-false-positive) ──────
-// verify_referenced_landed's declaration read (self-create / reference-doc) is the SAME torn-read class
-// as derive_loop_scripts: under concurrent --loop load a grep in a command substitution can be killed
-// mid-stream (the pipeline's `|| true` masks the death), returning a PARTIAL declaration set. A torn
-// self-create read that drops `orchestration/escalations.md` (declared at init/SKILL.md:143) would
-// false-positive it as referenced-not-landed — the gap's subject. The stability check (two agreeing
-// passes + sentinel) must absorb a torn pass and recover the FULL declaration set. This fake grep tears
-// the self-create declaration scan to its FIRST line (tick-log.md — the sentinel) for the first N reads,
-// then passes through; a torn pass therefore differs from a full pass and the stability check retries.
-const SELFCREATE_TORN_GREP = String.raw`#!/usr/bin/env bash
-# Torn-read simulation grep (declaration-read stability regression test only).
-# Passes through to the real grep EXCEPT the self-create declaration scan (pattern starting with
-# '<!-- self-create:'), which it truncates to the first line for the first FAKE_GREP_TORN_UNTIL reads.
-set -u
-real_grep="$REAL_GREP"
-is_selfcreate=no
-for a in "$@"; do
-  case "$a" in
-    '<!-- self-create:'*) is_selfcreate=yes ;;
-  esac
-done
-if [ "$is_selfcreate" = "yes" ]; then
-  n=0
-  if [ -f "$FAKE_GREP_COUNTER" ]; then n="$(cat "$FAKE_GREP_COUNTER" 2>/dev/null || echo 0)"; fi
-  n=$((n + 1)); printf '%s' "$n" > "$FAKE_GREP_COUNTER"
-  if [ "$n" -le "$FAKE_GREP_TORN_UNTIL" ]; then
-    "$real_grep" "$@" 2>/dev/null | head -n 1 || true
-    exit 0
-  fi
-fi
-exec "$real_grep" "$@"
-`;
-
-function selfcreateTornEnv(binDir, opts) {
-  const fakeGrep = path.join(binDir, "grep");
-  fs.writeFileSync(fakeGrep, SELFCREATE_TORN_GREP);
-  fs.chmodSync(fakeGrep, 0o755);
-  return {
-    PATH: `${binDir}:${process.env.PATH || ""}`,
-    REAL_GREP: realGrepPath(),
-    FAKE_GREP_COUNTER: path.join(binDir, "counter"),
-    FAKE_GREP_TORN_UNTIL: String(opts.tornUntil ?? 0),
-  };
-}
-
-test("torn self-create declaration read is retried — a declared self-create (escalations.md) is recovered", () => {
-  const binDir = makeTmp("torn-decl-");
-  const env = selfcreateTornEnv(binDir, { tornUntil: 1 });
-  try {
-    // Tear ONLY the first self-create read (to the sentinel tick-log.md); the second read is full, so
-    // the two reads disagree and the stability check retries to two agreeing FULL passes.
-    const r = runSourced('_read_declarations; echo "SC=$QUAY_INIT_SELFCREATE"', { env });
-    assert.equal(r.status, 0, `sourcing must succeed:\n${r.stderr}`);
-    assert.match(r.stdout, /orchestration\/escalations\.md/,
-      "the stability-checked declaration read must recover the declared self-create orchestration/escalations.md (the gap's false-positive victim)");
-    assert.match(r.stdout, /orchestration\/tick-log\.md/,
-      "the sentinel self-create orchestration/tick-log.md must also be present in the recovered set");
-  } finally { cleanup(binDir); }
+    // never reached.
+    for (const p of [".claude/launch.settings.json", ".claude/settings.json"]) {
+      assert.match(combined, new RegExp(`unwritten:\\s*${p.replace(/\./g, "\\.")}`),
+        `the report must mark ${p} unwritten`);
+    }
+  } finally { cleanup(ws); }
 });

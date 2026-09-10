@@ -360,12 +360,13 @@ async function main() {
     assert(!list.body.includes('border="1"'),
       "GET / table does not use border=\"1\" attribute (QW-001: CSS replaces inline styling)");
 
-    // <main> wrapper present in list page (semantic structure)
-    assert(list.body.includes("<main>"),
+    // <main> wrapper present in list page (semantic structure; may carry id="main" — the
+    // skip-link target added by gap-webui-a11y-focus-ring-and-token-contrast-unvalidated).
+    assert(/<main[\s>]/.test(list.body),
       "GET / body includes <main> wrapper element (QW-001: semantic structure)");
 
     // <main> wrapper present in detail page
-    assert(detail1.body.includes("<main>"),
+    assert(/<main[\s>]/.test(detail1.body),
       "GET /task/WUI-1 body includes <main> wrapper element (QW-001: semantic structure)");
 
     // <nav> element wraps back link in detail page (semantic structure)

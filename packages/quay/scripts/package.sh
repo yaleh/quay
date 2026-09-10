@@ -172,6 +172,21 @@ if [ -z "${ARTIFACT}" ]; then
   exit 1
 fi
 
+# ── gap-plugin-dist-entry-derivation-blind-to-core-and-table-refs (reference closure) ───────────
+# A referenced `dist/<name>.js` must actually be INSIDE the tarball. The entry set is derived from
+# the shipped surface's references (Core source .ts refs + shipped-text dist/*.js refs), but that
+# derivation can silently miss a reference (a Core-only consumer like driver-runtime.ts, or a
+# table/list row like deliver-verify-usage.sh's VERIFY_SET) — and the missing bundle only manifests
+# as "quay driver kernel not found" in a DIFFERENT project, structurally invisible to this repo's
+# own self-test. This gate re-scans the staged text + Core source and asserts each referenced bundle
+# is present in the actual `npm pack` listing — crossing both the staging copy and the pack, so it
+# takes false when a bundle is dropped. Negative control: removing an entry makes it exit 1.
+echo "Verifying dist reference closure against the tarball (every referenced dist/*.js is packed)..."
+# ⛔ Derive the required set from the SOURCE plugin root (PLUGIN_SRC, raw .ts still present), NOT
+# the staged copy (PLUGIN_DEST, whose raw .ts were deleted above) — deriveEntries needs the .ts to
+# intersect references against. The assertion itself lands on the tarball listing.
+node "${SCRIPT_DIR}/build-plugin-dist.mjs" --verify-closure "${PLUGIN_SRC}" "${ARTIFACT}"
+
 echo "Artifact: ${PACKAGE_DIR}/${ARTIFACT}"
 echo ""
 echo "Install globally:  npm install -g ${ARTIFACT}"

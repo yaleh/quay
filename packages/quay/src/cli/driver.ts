@@ -8,27 +8,29 @@
 // status/liveness/start/stop/drain). This CLI handler is a THIN dispatch layer (same shape as
 // cli/manager.ts's delegate) that:
 //   - validates the verb + --kind
-//   - resolves the kernel path from the WORKSPACE ROOT (AC139-4, see below)
-//   - rejects a worktree root (AC139-4)
+//   - rejects a worktree root (AC139-4, see below)
+//   - resolves the kernel via plugin-root.ts (the module-location resolver, SPEC §6b — the
+//     workspace root no longer carries plugin/scripts once AC168 stops copying scripts)
 //   - spawns the TS kernel (node --experimental-strip-types driver-runtime.ts) with the same argv
 //
 // ⛔ AC139-4 (承载路径显式从 workspace root 解析, 拒绝 worktree): this is NOT the manager.ts
 //   import.meta.url walk-up. That walk-up finds the *worktree copy* of plugin/scripts when the CLI
 //   is invoked from a worktree — the exact 2026-08-23 carrier-death cause (resident supervisor
-//   hanging on a short-lived worktree). Here the kernel path is resolved from the workspace root
-//   (discovered via .quay/config.yml or --root), and a worktree root is REJECTED — not relocated,
-//   not silently started (relocation is the kernel's own second-layer defense for direct kernel
-//   invocation; the CLI entry is the first layer).
+//   hanging on a short-lived worktree). A workspace root that IS a worktree is REJECTED here (first
+//   layer), and plugin-root.ts independently relocates to the MAIN checkout when IT is loaded from a
+//   worktree (second layer) — so the kernel never hangs on a short-lived worktree copy.
 
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
-import { parseFlags, fsSyncExists } from "./flags.ts";
+import { parseFlags } from "./flags.ts";
 import { findConfig } from "../config.ts";
+import { resolvePluginScriptExec } from "../plugin-root.ts";
 import type { CliCtx } from "./context.ts";
 
 const VERBS = ["start", "stop", "drain", "resume", "status", "restart"];
-const KINDS = ["promotion", "worker", "outer", "quality"];
-const DRIVER_RUNTIME_REL = path.join("plugin", "scripts", "driver-runtime.ts");
+// ⛔ 白名单必须与 kernel 的 DRIVER_KINDS 一致（suite 已按人 2026-09-07 裁定退役移除）。导出供
+// goal-driver.test.mjs 断言两者集合相等（gap-goal-driver-mechanical-ring AC6）。
+export const KINDS = ["promotion", "worker", "outer", "quality", "meta", "goal"];
 
 /** Resolve the workspace root from `--root` (walk-up) or the process cwd; null when no config. */
 function resolveRoot(rootFlag: string | undefined): string | null {
@@ -163,16 +165,23 @@ export function runDriver(
     };
   }
 
-  const kernel = path.join(root, DRIVER_RUNTIME_REL);
-  if (!fsSyncExists(kernel)) {
-    return { ok: false, reason: `quay driver: driver runtime kernel not found at ${kernel}`, stdout: "", stderr: "", exitCode: 1 };
+  const kernel = resolvePluginScriptExec(path.join("scripts", "driver-runtime.ts"));
+  if (!kernel) {
+    return { ok: false, reason: `quay driver: driver runtime kernel not found (no plugin root resolved — no local plugin/ copy and no installed quay plugin)`, stdout: "", stderr: "", exitCode: 1 };
   }
 
   // Forward the user's argv verbatim (rest already carries --kind/--root/--json/…), then pin
   // --root to the resolved workspace root (last-wins in the kernel's parser) so the kernel runs
   // against the same root this handler resolved — never a stale/missing one. AC151: the supervisor
   // is TS now — spawn the kernel with `node --experimental-strip-types` (⛔ no more bash .sh).
+  // The dev tree kernel is the raw `driver-runtime.ts` (run WITH --experimental-strip-types); the
+  // shipped artifact carries it ONLY as the bundled `dist/driver-runtime.js` (a plain ESM bundle,
+  // run WITHOUT the flag) — resolvePluginScriptExec applies that dev/dist fallback
+  // (gap-plugin-dist-entry-derivation-blind-to-core-and-table-refs).
   const args = [verb, ...rest, "--root", root];
-  const r = spawnSync(process.execPath, ["--experimental-strip-types", kernel, ...args], { encoding: "utf8" });
+  const spawnArgs = kernel.stripTypes
+    ? ["--experimental-strip-types", kernel.path, ...args]
+    : [kernel.path, ...args];
+  const r = spawnSync(process.execPath, spawnArgs, { encoding: "utf8" });
   return { ok: true, reason: null, stdout: r.stdout ?? "", stderr: r.stderr ?? "", exitCode: r.status ?? 1 };
 }

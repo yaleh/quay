@@ -1,7 +1,7 @@
 {
   "name": "quay",
   "version": "0.6.1",
-  "description": "quay: a provider-agnostic task board. Bundles the quay MCP server, skills (author, execute, quay-directive, quay-file-task, loop-driver, init, quay-cold-start, quay-task-operator, quay-task-to-plan, routines, quay-native-methodology, quay-webui-bootstrap-methodology, session-topology, manager), vendored agent types, and distributable workflows and gate scripts for Tier-3 full-methodology workspace adoption.",
+  "description": "quay: a provider-agnostic task board. Bundles the quay MCP server, skills (execute, quay-directive, quay-file-task, loop-driver, init, quay-cold-start, quay-drivers, quay-task-operator, quay-task-to-plan, routines, quay-native-methodology, quay-webui-bootstrap-methodology, manager), vendored agent types, and distributable workflows and gate scripts for Tier-3 full-methodology workspace adoption.",
   "author": {
     "name": "Yale Huang",
     "url": "https://github.com/yaleh"
@@ -10,22 +10,21 @@
   "homepage": "https://github.com/yaleh/quay",
   "repository": "https://github.com/yaleh/quay",
   "commands": [
-    "./skills/author/SKILL.md",
     "./skills/execute/SKILL.md",
     "./skills/quay-directive/SKILL.md",
     "./skills/quay-file-task/SKILL.md",
     "./skills/loop-driver/SKILL.md",
     "./skills/init/SKILL.md",
     "./skills/cold-start/SKILL.md",
+    "./skills/drivers/SKILL.md",
     "./skills/manager/SKILL.md",
     "./skills/quay-task-operator/SKILL.md",
     "./skills/quay-task-to-plan/SKILL.md",
     "./skills/routines/SKILL.md",
     "./skills/quay-native-methodology/SKILL.md",
-    "./skills/quay-webui-bootstrap-methodology/SKILL.md",
-    "./skills/session-topology/SKILL.md"
+    "./skills/quay-webui-bootstrap-methodology/SKILL.md"
   ],
   "agents": [
-    "./agents/baime-iteration-executor.md"
+    "./agents/quay-task.md"
   ]
 }

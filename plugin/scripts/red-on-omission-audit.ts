@@ -124,7 +124,7 @@ export const REGISTRY: RedReadingEntry[] = [
       "`.quay/verification-round.jsonl` 无 `scope=worktree`+`state=green` 记录 ⇒ fan-in 拒（门拒）；`scope` 字段缺失 ⇒ 无法判 ⇒ 拒",
     verify: (root) => {
       const runner = readUnder(root, "plugin/scripts/full-suite-runner.ts");
-      const fix = readUnder(root, ".claude/workflows/execute-suite-fix.js");
+      const fix = readUnder(root, "plugin/workflows/execute-suite-fix.js");
       const okField = has(runner, 'scope?: "main" | "worktree"');
       const okConsumer =
         has(fix, "scope=worktree") && hasRe(fix, /state\s*===\s*'green'|state\s*===["']green["']/);

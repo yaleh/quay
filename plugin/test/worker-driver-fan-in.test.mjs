@@ -1,4 +1,4 @@
-// @test-group lowconc
+// @test-group engine
 // worker-driver-fan-in.test.mjs — mechanical fan-in (locks/merge/trace) + dispatch filters + cold-start + retry/backoff. Split from gap-suite-file-split-two-longest.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -1190,31 +1190,33 @@ test("AC1 (integration) — runMechanicalFanIn writes a per-step trace covering 
 test("AC1 (gap-fan-in-token-gate-version-mismatch-self-lock) — 每任务新进程：finishAsync 调 spawnMechanicalFanIn 加载当前代码（⛔ 不再 in-process）", () => {
   const src = fs.readFileSync(DRIVER, "utf8");
   assert.match(src, /mechResult = await spawnMechanicalFanIn\(\{ task: taskId, worktree: paths\[0\], root: rootDir, runId \}\)/, "finishAsync spawns a fresh mechanical fan-in process (⛔ in-process runMechanicalFanIn)");
-  assert.match(src, /const entry = path\.join\(opts\.root, "plugin", "scripts", "worker-driver\.ts"\)/, "spawnMechanicalFanIn loads the ROOT checkout's worker-driver.ts (⛔ worktree：stale worktree 缺新 argv ⇒ unknown argument)");
-  assert.match(src, /process\.execPath, "--experimental-strip-types", entry,\s*\n\s*"--mechanical-fan-in"/, "the fresh process is node --experimental-strip-types <root>/worker-driver.ts --mechanical-fan-in");
+  assert.match(src, /const entry = kernelSiblingArgv\("worker-driver\.ts"\)/, "spawnMechanicalFanIn anchors the executor at the kernel install location (⛔ opts.root/plugin/scripts/worker-driver.ts — gap-plugin-root-resolution-remaining-callsites-round2)");
+  assert.match(src, /process\.execPath, \.\.\.entry,\s*\n\s*"--mechanical-fan-in"/, "the fresh process is node <kernel-sibling>/worker-driver.(ts|js) --mechanical-fan-in");
   assert.match(src, /if \(mechanicalFanIn\) \{\s*\n\s*const task = tasks\[0\]/, "--mechanical-fan-in mode exists in main()");
   assert.match(src, /worktree: mechWorktree,/, "--mechanical-fan-in mode passes the worktree to runMechanicalFanIn");
 });
 
-// ── gap-fan-in-spawn-stale-worktree-executor-missing-argv：执行器 entry 用主检出（⛔ worktree）────
+// ── gap-fan-in-spawn-stale-worktree-executor-missing-argv：执行器 entry 用 kernel 安装位置（⛔ worktree）────
 // fresh-process fan-in spawn 用 worktree 的 worker-driver.ts 当执行器时，stale worktree（未 merge
 // develop）的旧 worker-driver.ts 缺新 argv（--mechanical-fan-in）⇒ fresh 进程报 unknown argument ⇒
-// 无 JSON 输出 ⇒ parse-mechanical-fan-in red。修法：entry = opts.root/plugin/scripts/worker-driver.ts
-// （与 driver 同版），worktree 只提供任务 delta、不提供执行器代码。AC2 负控制：root entry（有 argv）
-// 与 stale worktree entry（无 argv）两个 stub——entry 若指回 worktree 则 spawn 加载 stale stub ⇒
-// unknown argument ⇒ red（本测试断言 outcome=landed，改回即红）。
+// 无 JSON 输出 ⇒ parse-mechanical-fan-in red。修法：entry = kernel 安装位置（resolveKernelSibling，与
+// driver 同版；⛔ opts.root/plugin/scripts/worker-driver.ts —— gap-plugin-root-resolution-remaining-
+// callsites-round2：第三方项目无 plugin/scripts/），worktree 只提供任务 delta、不提供执行器代码。
+// AC2 负控制：kernel entry（有 argv）与 stale worktree entry（无 argv）两个 stub——entry 若指回
+// worktree 则 spawn 加载 stale stub ⇒ unknown argument ⇒ red（本测试断言 outcome=landed，改回即红）。
 
-test("AC2 (gap-fan-in-spawn-stale-worktree-executor-missing-argv) — stale worktree 缺 --mechanical-fan-in argv 仍 spawn 成功（entry=root，⛔ 改回 opts.worktree ⇒ unknown argument ⇒ parse-mechanical-fan-in red）", async (t) => {
+test("AC2 (gap-fan-in-spawn-stale-worktree-executor-missing-argv) — stale worktree 缺 --mechanical-fan-in argv 仍 spawn 成功（entry=kernel 安装位置，⛔ 改回 opts.worktree ⇒ unknown argument ⇒ parse-mechanical-fan-in red）", async (t) => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "stale-exec-"));
   t.after(() => fs.rmSync(base, { recursive: true, force: true }));
   const root = path.join(base, "root");
   const worktree = path.join(base, "wt");
+  const pluginRoot = path.join(base, "plugin"); // kernel 安装位置（QUAY_PLUGIN_ROOT 缝）
 
-  // root 的 worker-driver.ts = 当前版（有 --mechanical-fan-in argv）——最小自足 stub（无 import），
-  // 命中 --mechanical-fan-in 即打一行 JSON result 退出。模拟「主检出当前版」。
-  fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
-  fs.writeFileSync(path.join(root, "plugin", "scripts", "worker-driver.ts"), [
-    "// current worker-driver.ts (root entry): has --mechanical-fan-in argv",
+  // kernel 安装位置的 worker-driver.ts = 当前版（有 --mechanical-fan-in argv）——最小自足 stub（无
+  // import），命中 --mechanical-fan-in 即打一行 JSON result 退出。模拟「与 driver 同版」。
+  fs.mkdirSync(path.join(pluginRoot, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(pluginRoot, "scripts", "worker-driver.ts"), [
+    "// current worker-driver.ts (kernel entry): has --mechanical-fan-in argv",
     "const argv = process.argv.slice(2);",
     'if (argv.includes("--mechanical-fan-in")) {',
     '  process.stdout.write(JSON.stringify({ outcome: "landed", step: null, reason: null, verdict: null }) + "\\n");',
@@ -1226,7 +1228,8 @@ test("AC2 (gap-fan-in-spawn-stale-worktree-executor-missing-argv) — stale work
   ].join("\n"), "utf8");
 
   // worktree 的 worker-driver.ts = 陈旧版（无 --mechanical-fan-in argv，任何 --* 都 unknown argument）。
-  // 模拟 stale worktree：落后 develop、缺新 argv。
+  // 模拟 stale worktree：落后 develop、缺新 argv。entry 现在锚在 kernel 安装位置（QUAY_PLUGIN_ROOT），
+  // ⛔ 不读 worktree ⇒ stale stub 不被加载。
   fs.mkdirSync(path.join(worktree, "plugin", "scripts"), { recursive: true });
   fs.writeFileSync(path.join(worktree, "plugin", "scripts", "worker-driver.ts"), [
     "// STALE worker-driver.ts: no --mechanical-fan-in argv (any --* flag => unknown argument)",
@@ -1236,9 +1239,52 @@ test("AC2 (gap-fan-in-spawn-stale-worktree-executor-missing-argv) — stale work
     "process.exit(2);",
   ].join("\n"), "utf8");
 
-  const r = await spawnMechanicalFanIn({ task: "gap-stale", worktree, root, runId: "r1" });
-  assert.equal(r.outcome, "landed", "stale worktree must not break spawn — entry=root has --mechanical-fan-in (⛔ 改回 opts.worktree ⇒ unknown argument ⇒ parse-mechanical-fan-in red)");
-  assert.equal(r.step, null, "no failure step when the root entry handles --mechanical-fan-in");
+  const saved = process.env.QUAY_PLUGIN_ROOT;
+  process.env.QUAY_PLUGIN_ROOT = pluginRoot;
+  try {
+    const r = await spawnMechanicalFanIn({ task: "gap-stale", worktree, root, runId: "r1" });
+    assert.equal(r.outcome, "landed", "stale worktree must not break spawn — entry=kernel install location has --mechanical-fan-in (⛔ 改回 opts.worktree ⇒ unknown argument ⇒ parse-mechanical-fan-in red)");
+    assert.equal(r.step, null, "no failure step when the kernel entry handles --mechanical-fan-in");
+  } finally {
+    if (saved === undefined) delete process.env.QUAY_PLUGIN_ROOT;
+    else process.env.QUAY_PLUGIN_ROOT = saved;
+  }
+});
+
+// gap-plugin-root-resolution-remaining-callsites-round2 AC2 负控制：第三方项目（quay-init 布下的面）
+// 无 plugin/scripts/*.ts，只有 shipped dist/*.js。spawnMechanicalFanIn 的 worker-driver 自入口经
+// kernelSiblingArgv 回退到 dist/worker-driver.js 且不带 --experimental-strip-types（stripTypes=false）。
+test("AC2 (gap-plugin-root-resolution-remaining-callsites-round2) — worker-driver 自入口在无 plugin/ 的第三方项目解析到 shipped dist/worker-driver.js（stripTypes=false）", async (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "stale-exec-dist-"));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const root = path.join(base, "root");
+  const worktree = path.join(base, "wt");
+  const pluginRoot = path.join(base, "plugin");
+
+  // kernel 安装位置的 bundled dist/worker-driver.js = 当前版（无 import 自足 stub，命中
+  // --mechanical-fan-in 即打一行 JSON result 退出）。scripts/*.ts 不放 ⇒ resolveKernelSibling 回退 .js。
+  const dist = path.join(pluginRoot, "scripts", "dist");
+  fs.mkdirSync(dist, { recursive: true });
+  fs.writeFileSync(path.join(dist, "worker-driver.js"), [
+    "// bundled current worker-driver.js: has --mechanical-fan-in argv",
+    "const argv = process.argv.slice(2);",
+    'if (argv.includes("--mechanical-fan-in")) {',
+    '  process.stdout.write(JSON.stringify({ outcome: "landed", step: null, reason: null, verdict: null }) + "\\n");',
+    "  process.exit(0);",
+    "}",
+    "process.exit(2);",
+  ].join("\n"), "utf8");
+
+  const saved = process.env.QUAY_PLUGIN_ROOT;
+  process.env.QUAY_PLUGIN_ROOT = pluginRoot;
+  try {
+    const r = await spawnMechanicalFanIn({ task: "gap-stale-dist", worktree, root, runId: "r1" });
+    assert.equal(r.outcome, "landed", "worker-driver self-entry resolves to shipped dist/worker-driver.js (stripTypes=false, no --experimental-strip-types)");
+    assert.equal(r.step, null, "no failure step when the dist entry handles --mechanical-fan-in");
+  } finally {
+    if (saved === undefined) delete process.env.QUAY_PLUGIN_ROOT;
+    else process.env.QUAY_PLUGIN_ROOT = saved;
+  }
 });
 
 // ── gap-fan-in-subprocess-hang-timeout-recovery ────────────────────────────────────────────────
@@ -1360,9 +1406,15 @@ test("AC1 (gap-fan-in-subprocess-hang-timeout-recovery / gap-mech-fan-in-log-web
   for (const step of ["merge-develop", "anti-drift", "typecheck", "scoped-gate", "doc-check", "anti-drift-land", "ac-gate"]) {
     assert.ok(src.includes(`step("${step}"`), `step ${step} must go through the step() wrapper (begin/end + A1 trace)`);
   }
-  // 自定义步（delta / suite 起止 / flip-done / cleanup / ff）写 A1 过程日志 trace。
-  for (const step of ["delta", "suite-start", "suite-end", "flip-done", "cleanup", "ff"]) {
+  // 自定义步（delta / flip-done / cleanup / ff）写 A1 过程日志 trace。
+  for (const step of ["delta", "flip-done", "cleanup", "ff"]) {
     assert.ok(src.includes(`step: "${step}"`), `custom step ${step} must write an A1 trace`);
+  }
+  // suite 决策事件（ac-precheck / suite-start / suite-end / suite-skip）走 traceSuiteEvent 两路 trace
+  // （per-run 过程日志 + 共享 fan-in-step-trace.jsonl——gap-fan-in-step-trace-suite-step-stopped-writing，
+  // ⛔ 只写一路 ⇒ 共享读者永久看不到这批步骤）。
+  for (const step of ["ac-precheck", "suite-start", "suite-end", "suite-skip"]) {
+    assert.ok(src.includes(`traceSuiteEvent("${step}"`), `suite decision ${step} must write via traceSuiteEvent (both carriers)`);
   }
   // step() 包层内 begin/end 两路都写（挂起定位：begin 无 end 可区分）。
   assert.ok(src.includes('appendFanInStepTrace(root, task, runId, name, "begin")'), "step() emits a begin trace");
@@ -1421,6 +1473,57 @@ test("AC4 (gap-fan-in-subprocess-hang-timeout-recovery) — 任一 fan-in 子进
   // 锁在 finally 释放：事件文件里恰一对 acquire→release（⛔ 挂起残留锁阻塞全仓 fan-in）。
   const lock = readFanInLockHold(m.repo, "gap-mfh", runId);
   assert.ok(lock.lockAcquireEpoch !== null && lock.lockReleaseEpoch !== null, "hang ⇒ lock released (finally) — clean acquire+release pair");
+});
+
+// ── gap-mechanical-fan-in-red-lock-times-null ──────────────────────────────────────────────────────
+// 病根：失败路径（fail/verdictOf/failSuite/catch failClean）硬编码 lockHoldSecs/lockAcquireEpoch/
+// lockReleaseEpoch = null，而数据已落盘（acquire/release 事件文件）。修法 = 失败结果在 finally
+// release 之后读真实锁时间（同成功路径时机）。两个陷阱：① 早读（release 事件未落盘 ⇒ lockHoldSecs
+// 恒 null）；② 事后补读（后续重试追加更新的 acquire/release ⇒ readFanInLockHold 取最后一组 ⇒ 张冠李戴）。
+
+test("AC2 (gap-mechanical-fan-in-red-lock-times-null) — 同一 taskId+runId 已有多组 acquire/release：失败结果拿到【本次尝试自己的】区间，不是文件里既有的组（防事后补读）", async (t) => {
+  const m = makeMechRepo("lock-times-ac2");
+  const runId = "mf-run-lock-times-ac2";
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  // fixture：同一 taskId+runId 的两组 acquire/release（模拟「先失败(1000-1020) → 重试成功(2000-2271)」）。
+  // 哨兵 epoch 远早于真实时间——若修法读错组（取第一组/取文件里最后一组既有组），会拿到这些哨兵值。
+  const eventsFile = path.join(m.repo, ".quay", "fan-in-lock-events.jsonl");
+  fs.mkdirSync(path.dirname(eventsFile), { recursive: true });
+  const ev = (event, epoch) => JSON.stringify({ event, ts: "1970-01-01T00:00:00Z", epoch, taskId: "gap-mfh", pid: 1, runId, agentId: null }) + "\n";
+  fs.writeFileSync(eventsFile,
+    ev("acquire", 1000) + ev("release", 1020) + // 先失败（第一组）
+    ev("acquire", 2000) + ev("release", 2271)   // 重试成功（最后一组）
+  );
+  // 驱动一次真实失败（suite 红）——本次尝试会向同一文件【追加第三组】真实 acquire/release。
+  const r = await runMechanicalFanIn(mechOpts(m, runId, { suiteCommand: ["bash", "-c", "exit 1"] }));
+  assert.equal(r.outcome, "red");
+  assert.equal(r.step, "suite");
+  assert.ok(typeof r.lockAcquireEpoch === "number" && r.lockAcquireEpoch > 10000, `本次尝试真实 acquire（got ${r.lockAcquireEpoch}，⛔ 哨兵 1000/2000）`);
+  assert.ok(typeof r.lockReleaseEpoch === "number" && r.lockReleaseEpoch > 10000, `本次尝试真实 release（got ${r.lockReleaseEpoch}，⛔ 哨兵 1020/2271）`);
+  assert.notEqual(r.lockAcquireEpoch, 1000, "⛔ 拿到第一组(先失败)的哨兵 acquire");
+  assert.notEqual(r.lockAcquireEpoch, 2000, "⛔ 拿到最后一组(重试成功)的哨兵 acquire");
+  // 与事件文件里【最后一组】（本次尝试自己追加的）一致——证明修法在写入时序上读的是本次区间，
+  // 不是事后补读（事后补读会因文件里已有多组而张冠李戴）。
+  const last = readFanInLockHold(m.repo, "gap-mfh", runId);
+  assert.equal(r.lockAcquireEpoch, last.lockAcquireEpoch, "失败结果 acquire 与本次尝试追加的事件一致");
+  assert.equal(r.lockReleaseEpoch, last.lockReleaseEpoch, "失败结果 release 与本次尝试追加的事件一致");
+});
+
+test("AC3 (gap-mechanical-fan-in-red-lock-times-null) — 真实失败步骤(suite 红)的结果带非 null 锁时间，且与测试自建事件文件一致", async (t) => {
+  const m = makeMechRepo("lock-times-ac3");
+  const runId = "mf-run-lock-times-ac3";
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  const r = await runMechanicalFanIn(mechOpts(m, runId, { suiteCommand: ["bash", "-c", "exit 1"] }));
+  assert.equal(r.outcome, "red");
+  assert.equal(r.step, "suite");
+  // 锁被真实持有 ⇒ 失败结果不再是 null，而是具体数值。
+  assert.ok(typeof r.lockAcquireEpoch === "number" && r.lockAcquireEpoch > 0, `失败结果 lockAcquireEpoch 非 null（got ${r.lockAcquireEpoch}）`);
+  assert.ok(typeof r.lockReleaseEpoch === "number" && r.lockReleaseEpoch > 0, `失败结果 lockReleaseEpoch 非 null（got ${r.lockReleaseEpoch}）`);
+  // 与该测试自己驱动产生的 fan-in-lock-events.jsonl 里对应 acquire/release 一致（⛔ 不改动生产 .quay/ 历史记录）。
+  const lock = readFanInLockHold(m.repo, "gap-mfh", runId);
+  assert.equal(r.lockAcquireEpoch, lock.lockAcquireEpoch, "失败结果 acquire 与事件文件一致");
+  assert.equal(r.lockReleaseEpoch, lock.lockReleaseEpoch, "失败结果 release 与事件文件一致");
+  assert.equal(r.lockHoldSecs, lock.lockHoldSecs, "失败结果 lockHoldSecs 与事件文件一致");
 });
 
 // ── gap-fan-in-ac-precheck-before-suite ─────────────────────────────────────────────────────────────
@@ -1781,6 +1884,55 @@ test("AC2 (gap-fan-in-continue-doc-only-advance-reuse-suite) — develop code �
   assert.equal(r.outcome, "landed", `code develop advance must re-run suite and land (step=${r.step} reason=${r.reason})`);
   assert.equal(r.suiteOutcome, "done", "suite must RUN (code advance ⇒ no reuse)");
   assert.equal(fs.existsSync(marker), true, "suite command must execute (code develop advance ⇒ re-run)");
+});
+
+// ── gap-fan-in-step-trace-suite-step-stopped-writing ───────────────────────────────────────────
+// 病根：a5a301e03（gap-mech-fan-in-log-webui-visible-clickable）把 suite 决策步骤（ac-precheck /
+// suite-start / suite-end / suite-skip）的 trace 目标从共享 .quay/fan-in-step-trace.jsonl 改指向
+// per-run .quay/fan-in-<task>-<runId>.log，没同步保留共享写 ⇒ 依赖共享文件做跨任务/跨时间聚合的
+// 读者（伴生对照停写检测、gap-archguard-p5-instrument-decay-standing-guard）从此看不到这批步骤。
+// 修法：traceSuiteEvent 两路都写（共享 + per-run）；两载体 suite 决策条目数一致。
+
+test("AC2/AC3 (gap-fan-in-step-trace-suite-step-stopped-writing) — suite 决策步骤同时写共享 fan-in-step-trace.jsonl 与 per-run 日志（同 runId 两载体条目数一致且都 > 0）", async (t) => {
+  const m = makeMechRepo("step-trace-suite");
+  const runId = "mf-run-step-trace-suite";
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  const r = await runMechanicalFanIn(mechOpts(m, runId));
+  assert.equal(r.outcome, "landed", `fan-in must land (step=${r.step} reason=${r.reason})`);
+  // 共享载体：同一 runId 下 suite 决策步骤各出现一次（AC2）。
+  const sharedFile = path.join(m.repo, ".quay", "fan-in-step-trace.jsonl");
+  const suiteSteps = fs.readFileSync(sharedFile, "utf8").trim().split("\n").filter(Boolean)
+    .map((l) => JSON.parse(l))
+    .filter((l) => l.runId === runId && ["ac-precheck", "suite-start", "suite-end", "suite-skip"].includes(l.step));
+  assert.ok(suiteSteps.some((l) => l.step === "ac-precheck"), "shared carrier must have ac-precheck");
+  assert.ok(suiteSteps.some((l) => l.step === "suite-start"), "shared carrier must have suite-start");
+  assert.ok(suiteSteps.some((l) => l.step === "suite-end"), "shared carrier must have suite-end");
+  assert.equal(suiteSteps.some((l) => l.step === "suite-skip"), false, "needSuite path must NOT write suite-skip");
+  assert.equal(suiteSteps.length, 3, "needSuite path ⇒ ac-precheck + suite-start + suite-end = 3 shared suite entries");
+  // per-run 载体：suite 决策条目数与共享一致（AC3 两载体对照）。
+  const perRun = fs.readFileSync(path.join(m.repo, ".quay", fanInLogFileName("gap-mfh", runId)), "utf8")
+    .trim().split("\n").filter(Boolean).map((l) => JSON.parse(l))
+    .filter((l) => ["ac-precheck", "suite-start", "suite-end", "suite-skip"].includes(l.step));
+  assert.equal(perRun.length, suiteSteps.length, "per-run and shared carriers carry the same count of suite decision entries (AC3)");
+});
+
+test("AC2/AC3 (跳过路径) — doc-only develop 前进 ⇒ suite-skip 也两路都写", async (t) => {
+  const m = makeReuseRepo("step-trace-skip", "doc");
+  const runId = "mf-run-step-trace-skip";
+  t.after(() => fs.rmSync(m.base, { recursive: true, force: true }));
+  const r = await runMechanicalFanIn(mechOpts(m, runId, { task: "gap-reuse", forceSuite: false }));
+  assert.equal(r.outcome, "landed", `doc-only develop advance must reuse prev green and land (step=${r.step} reason=${r.reason})`);
+  const sharedFile = path.join(m.repo, ".quay", "fan-in-step-trace.jsonl");
+  const sharedSkip = fs.readFileSync(sharedFile, "utf8").trim().split("\n").filter(Boolean)
+    .map((l) => JSON.parse(l))
+    .filter((l) => l.runId === runId && ["ac-precheck", "suite-start", "suite-end", "suite-skip"].includes(l.step));
+  assert.equal(sharedSkip.length, 1, "skip path ⇒ exactly one suite decision entry in shared carrier (suite-skip)");
+  assert.equal(sharedSkip[0].step, "suite-skip");
+  assert.match(sharedSkip[0].reason ?? "", /develop-advance-doc-only-reuse/, "shared suite-skip carries the reuse reason");
+  const perRun = fs.readFileSync(path.join(m.repo, ".quay", fanInLogFileName("gap-reuse", runId)), "utf8")
+    .trim().split("\n").filter(Boolean).map((l) => JSON.parse(l))
+    .filter((l) => ["ac-precheck", "suite-start", "suite-end", "suite-skip"].includes(l.step));
+  assert.equal(perRun.length, 1, "per-run carrier must match (suite-skip only)");
 });
 
 // ── gap-worker-execution-history-index-not-reachable-from-task（A：suiteLog 记录）──────────────────

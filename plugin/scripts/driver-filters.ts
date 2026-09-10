@@ -22,7 +22,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { readFrontmatter } from "./gate-script-base.ts";
-import { parseTask, readDependsOn } from "./task-schema.ts";
+import { parseTask, readDependsOn, readTaskStatusAtRef, parseFrontmatterCompletely } from "./task-schema.ts";
+// gap-task-ops-consolidate-driver-frontmatter-writers：frontmatter parse/patch + commit 单一真相源
+// 上收到 task-ops.ts（⛔ 本文件不再各写一份 regex+writeFileSync+git 序列）。
+import { splitTaskFile, statusFromFrontmatter, patchStatusField, commitTaskFile, hasPriorCommit } from "./task-ops.ts";
 import { parseTouches, checkTouchesPair } from "./touches-orthogonality-check.ts";
 import { expandDeclaredTouches } from "./concurrent-batch-scheduler.ts";
 import { TASK_STATUS } from "./task-status.ts";
@@ -66,27 +69,11 @@ export function allDepsDone(depIds: string[], statusOf: (depId: string) => strin
   return true;
 }
 
-/** 读 `<ref>:tasks/<taskId>.md` 的 status frontmatter（git show；ref 不存在 / 文件缺失 / 读不懂 ⇒ null）。
- *  canonical source = develop ref——主检出（main/manager-doc）盘上 status 是陈旧快照（硬规则 4b 的
- *  代理量），派发谓词读它会把已 done/ready 的任务按陈旧 needs-human 滤掉
- *  （gap-driver-filters-readtaskstatus-stale-main-checkout）。与 ready-pool-check.ts 的
- *  readTaskStatusAtRef（batch 读，dispatch 整池）同判词；本文件取单任务 `git show` 形态——调用点是
- *  逐 id 的（notNeedsHuman 逐候选、depsSatisfied 逐依赖），⛔ 不上 batch（读一条却 batch 是浪费）。 */
-export function readTaskStatusAtRef(root: string, ref: string, taskId: string): string | null {
-  let raw: string;
-  try {
-    raw = execFileSync("git", ["-C", root, "show", `${ref}:tasks/${taskId}.md`], {
-      timeout: 30_000,
-      stdio: ["ignore", "pipe", "ignore"],
-    }).toString("utf8");
-  } catch {
-    return null;
-  }
-  const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!m) return null;
-  const statusLine = m[1].split("\n").map((l) => l.trim()).find((l) => l.startsWith("status:"));
-  return statusLine ? (statusLine.slice("status:".length).trim() || null) : null;
-}
+// readTaskStatusAtRef — SINGLE-SOURCE in task-schema.ts (gap-task-status-parsing-reimplemented-13-sites).
+// Formerly verbatim-copied here + ready-pool-check.ts + worker-driver.ts (async); now imported + re-exported
+// (driver-filters.test.mjs imports it from this module). The canonical-source rationale (develop ref, NOT
+// the stale main checkout — 硬规则 4b) is documented on readTaskStatus below.
+export { readTaskStatusAtRef };
 
 /** 读任务 status frontmatter。canonical source = develop ref（readTaskStatusAtRef）；ref 读不可用
  *  （非 git root / 任务尚未入 develop）⇒ 退回盘上 `<root>/tasks/<id>.md`（既有行为——单测临时目录、
@@ -212,62 +199,14 @@ export function reconcileNeedsHumanWithDisk(state: RetryState, root: string): st
   return cleared;
 }
 
-// ── commit-after-write（主检出 status 翻转写盘即提交；单一真相源，⛔ 不各写一份） ───────────────────
+// ── commit-after-write / first-registration 判定（单一真相源已上收 task-ops.ts，⛔ 本文件不各写一份） ──
+// isInsideGitWorkTree / commitTaskFile / hasPriorCommit 迁至 task-ops.ts（gap-task-ops-consolidate-
+// driver-frontmatter-writers），本文件 import 复用——markNeedsHuman 与 ready-pool-check.ts 的
+// commitTaskStatus 共用同一份 commit primitive（gap-mark-needs-human-commit-after-write 修过的缺陷
+// 不再在第四处复发）。
 
-/** True when `root` is inside a git work tree (production root = the main checkout). False when git
- *  itself errors (unit-test temp dirs, or a repo-less root) — the commit is then a no-op, not a throw. */
-export function isInsideGitWorkTree(root: string): boolean {
-  try {
-    const out = execFileSync("git", ["-C", root, "rev-parse", "--is-inside-work-tree"], {
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    return out.toString().trim() === "true";
-  } catch {
-    return false;
-  }
-}
-
-/** COMMIT-AFTER-WRITE (gap-mark-needs-human-commit-after-write): commit a single task file to git
- *  immediately after a mechanical status flip. pathspec-limited to `rel` (⛔ never a bare `git commit`,
- *  which would sweep whatever another layer staged into the SHARED index — memory
- *  git-commit-no-pathspec-commits-shared-index). `--no-verify` skips the pre-commit hook: a mechanical
- *  status flip is content-neutral. Repo-less unit-test temp dirs are a no-op (return false, not a throw).
- *  Returns true when the commit landed; false on repo-less / git error (surfaced as `committed: false`,
- *  observable not silent). */
-export function commitTaskFile(root: string, rel: string, message: string): boolean {
-  if (!isInsideGitWorkTree(root)) return false;
-  try {
-    execFileSync("git", ["-C", root, "add", "--", rel]);
-    execFileSync("git", ["-C", root, "commit", "--no-verify", "-m", message, "--", rel]);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** FIRST-REGISTRATION JUDGMENT (gap-promotion-commit-message-misleading-on-first-track): true when
- *  `rel` already has a commit in git history (`git log -1 --format=%H -- <rel>` non-empty). A file on
- *  disk but never committed — the case where a promotion/needs-human flip is actually the file's BIRTH
- *  commit, not a status transition — returns false, so callers can label it "首次登记" instead of
- *  claiming a flip that never happened. Repo-less root ⇒ false (same no-op shape as commitTaskFile;
- *  there is no history to consult). ⛔ 不改 commitTaskFile 签名：它只负责执行提交，本判断由调用方在
- *  组装 message 前自行调用（两个调用点：ready-pool-check.ts commitTaskStatus 与 driver-filters.ts
- *  markNeedsHuman）。 */
-export function hasPriorCommit(root: string, rel: string): boolean {
-  if (!isInsideGitWorkTree(root)) return false;
-  try {
-    const out = execFileSync("git", ["-C", root, "log", "-1", "--format=%H", "--", rel], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    return out.trim().length > 0;
-  } catch {
-    return false;
-  }
-}
-
-// ── main/manager-doc ↔ develop 同步（gap-doc-develop-sync-semantic-conflict-resolution）──────────────
-// 人 2026-08-31 裁定反转：写面保留 main/manager-doc，但状态/任务文件变更必须以 develop 为终点。同步 =
+// ── author ↔ develop 同步（gap-doc-develop-sync-semantic-conflict-resolution）──────────────
+// 人 2026-08-31 裁定反转：写面保留 author，但状态/任务文件变更必须以 develop 为终点。同步 =
 // 机械 ff-only + 语义兜底（机械失败升级确定性语义同步，develop 权威 wins），⛔ 静默 catch。
 // 原实现（gap-fan-in-ff-ref-update-detach-develop）是 `: void` + `catch(_){}` 全吞 + `git merge develop`
 // 静默 merge-fallback——实证 2026-08-31 一次 propagate 静默失败 ⇒ 4 任务状态分叉 + 主检出落后 develop
@@ -309,13 +248,18 @@ function currentBranchName(root: string): string | null {
   }
 }
 
-/** 机械 ff-only push：把 `src` 快进到 develop（`git push . src:develop`）。ff 不成立 / git 出错 ⇒ false。 */
-function ffPushToDevelop(root: string, src: string): boolean {
+/** 机械 ff-only push：把 `src` 快进到 develop（`git push . src:develop`）。成功 ⇒ { ok:true }；
+ *  失败（ff 不成立 / git 出错）⇒ { ok:false, detail }，detail = 真实 git stderr（⛔ 不丢弃——
+ *  此前 semantic-ff-failed 8/15 次不可归因，硬规则 3b）。捕获 stderr 的写法与 syncDevelopToDoc
+ *  的 ff-error 同形（trim + 前 3 行 + 300 字符截断）。 */
+function ffPushToDevelop(root: string, src: string): { ok: boolean; detail?: string } {
   try {
-    execFileSync("git", ["-C", root, "push", ".", `${src}:develop`], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
+    execFileSync("git", ["-C", root, "push", ".", `${src}:develop`], { stdio: ["ignore", "ignore", "pipe"] });
+    return { ok: true };
+  } catch (e) {
+    const err = e as { stderr?: Buffer | string };
+    const detail = String(err?.stderr ?? "").trim().split("\n").slice(0, 3).join(" | ").slice(0, 300);
+    return { ok: false, detail: detail || "<no-stderr-captured>" };
   }
 }
 
@@ -324,6 +268,34 @@ function ffPushToDevelop(root: string, src: string): boolean {
  *  提交都进历史，⛔ 不 reset/checkout 丢提交，AC4）；② 分叉任务状态按确定性优先级对齐（AC2，永不 LLM）；
  *  ③ ff push develop + 事件落痕。合并冲突（code/docs 语义冲突，机械不能消解）⇒ `git merge --abort`
  *  保树干净 + 事件升级（Claude Code 语义合并接手），返回 false。 */
+/** 结构冲突下的终局解：硬取 develop，丢弃 doc 侧独有提交（人 2026-09-06 裁定允许）。
+ *  **这是让「语义同步必成功、永不卡死」第一次真正成立的那一步**——在此之前结构冲突即
+ *  return false 且无升级接线（实测 21/26 卡死在那里）。
+ *  ⛔ 允许丢失 ≠ 允许静默丢失：被丢弃的提交先逐条枚举进事件（硬规则 3 枚举不布尔），
+ *  再 reset。丢了什么在载体里查得到，⛔ 不是「同步成功」四个字。 */
+export function takeDevelopDiscardingDoc(root: string, cur: string): boolean {
+  let discarded: string[] = [];
+  try {
+    const out = execFileSync("git", ["-C", root, "log", "--oneline", "--no-decorate", "develop..HEAD"], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    });
+    discarded = out.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 50);
+  } catch {
+    discarded = ["<enumerate-failed>"]; // 读不出 ≠ 没丢（硬规则 6）——留一个可区分的取值
+  }
+  try {
+    execFileSync("git", ["-C", root, "reset", "--hard", "develop"], { stdio: "ignore" });
+  } catch {
+    writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-semantic-take-develop-failed", phase: "reset", branch: cur });
+    return false;
+  }
+  writeDocDevelopSyncEvent(root, {
+    event: "doc-develop-sync-semantic-resolved", phase: "take-develop", branch: cur,
+    resolution: "discarded-doc-commits", discardedCount: discarded.length, discarded,
+  });
+  return true;
+}
+
 export function semanticSyncDocToDevelop(root: string, cur: string): boolean {
   writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-semantic", phase: "begin", branch: cur });
 
@@ -338,7 +310,13 @@ export function semanticSyncDocToDevelop(root: string, cur: string): boolean {
   } catch {
     try { execFileSync("git", ["-C", root, "merge", "--abort"], { stdio: "ignore" }); } catch { /* 无 merge 可 abort */ }
     writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-semantic-conflict", phase: "merge", branch: cur });
-    return false;
+    // ⊕ 人 2026-09-06 裁定：「merge 冲突时可以损失 author 分支的变更」。
+    // 该裁定消解了原设计里的矛盾——`-X theirs` 只消解【内容】冲突，结构冲突（add/add、
+    // delete/modify、rename）仍 throw；此前到此即 return false，且【无任何升级接线】
+    // ⇒ 实测 26 次进入语义兜底、21 次停在这里，「必成功永不卡死」从未成立。
+    // 现在结构冲突有了永远有效的解：硬取 develop。
+    // ⛔ 允许丢失 ≠ 允许静默丢失：先枚举将被丢弃的 doc 侧提交并落痕，再重置。
+    return takeDevelopDiscardingDoc(root, cur);
   }
 
   // 回写优先级胜出的任务状态（仅当 doc 侧更前进时；否则 -X theirs 的 develop 侧已是正确值）。
@@ -348,8 +326,9 @@ export function semanticSyncDocToDevelop(root: string, cur: string): boolean {
   }
 
   // ③ ff push develop + 落痕。
-  if (!ffPushToDevelop(root, cur)) {
-    writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-semantic-ff-failed", phase: "push", branch: cur });
+  const pushed = ffPushToDevelop(root, cur);
+  if (!pushed.ok) {
+    writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-semantic-ff-failed", phase: "push", branch: cur, detail: pushed.detail });
     return false;
   }
   writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-semantic-resolved", phase: "done", branch: cur });
@@ -384,23 +363,19 @@ function listTaskFiles(root: string, cur: string): string[] {
   }
 }
 
-/** 读 `<ref>:<rel>` 的 status frontmatter（`git show`）。ref/文件缺失 / 读不懂 ⇒ null。 */
+/** 读 `<ref>:<rel>` 的 status frontmatter（`git show`）。ref/文件缺失 / 读不懂 ⇒ null。
+ *  gap-task-ops-consolidate-driver-frontmatter-writers：委托 task-schema.ts 的 readTaskStatusAtRef
+ *  （单一 frontmatter parser，⛔ 不再本文件手搓 fence 切分 + startsWith 读 status）。 */
 function statusAtRef(root: string, ref: string, rel: string): string | null {
-  let text: string;
-  try {
-    text = execFileSync("git", ["-C", root, "show", `${ref}:${rel}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-  } catch {
-    return null;
-  }
-  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
-  if (!m) return null;
-  const line = m[1].split("\n").map((l) => l.trim()).find((l) => l.startsWith("status:"));
-  return line ? line.slice("status:".length).trim() || null : null;
+  return readTaskStatusAtRef(root, ref, path.basename(rel, ".md"));
 }
 
 /** 回写任务状态对齐（合并后）：对每个 {rel → status}，把工作树文件的 status 行改写为胜者（已对齐
  *  则跳过），`git add` 后一次性 `git commit --no-verify`（路径限定到改写过的文件，⛔ 裸 commit 扫共享
- *  索引）。无改写 ⇒ true（no-op）。写/提交失败 ⇒ false（事件落痕由调用方）。 */
+ *  索引）。无改写 ⇒ true（no-op）。写/提交失败 ⇒ false（事件落痕由调用方）。
+ *  gap-task-ops-consolidate-driver-frontmatter-writers：status 读/写经 task-ops.ts（splitTaskFile /
+ *  statusFromFrontmatter / patchStatusField，单一 frontmatter parser，⛔ 不再本文件手搓 fence 切分 +
+ *  status 行正则）。 */
 function applyStatusAlignments(root: string, alignments: Map<string, string>): boolean {
   const changed: string[] = [];
   for (const [rel, status] of alignments) {
@@ -411,14 +386,12 @@ function applyStatusAlignments(root: string, alignments: Map<string, string>): b
     } catch {
       return false;
     }
-    const m = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(raw);
-    if (!m) return false;
-    const [, open, fm, close] = m;
-    const statusLine = /^status:\s*\S+\s*$/m.exec(fm);
-    if (!statusLine) return false;
-    if (statusLine[0].replace(/^status:\s*/, "").trim() === status) continue; // 已对齐（merge 已保留 doc 侧胜者）
-    const newFm = fm.replace(statusLine[0], `status: ${status}`);
-    fs.writeFileSync(file, `${open}${newFm}${close}${raw.slice(m[0].length)}`, "utf8");
+    const split = splitTaskFile(raw);
+    if (!split) return false;
+    if (statusFromFrontmatter(split.frontmatterRaw) === status) continue; // 已对齐（merge 已保留 doc 侧胜者）
+    const patched = patchStatusField(split.frontmatterRaw, status);
+    if (!patched.ok) return false;
+    fs.writeFileSync(file, `${split.open}${patched.fm}${split.close}${split.body}`, "utf8");
     changed.push(rel);
   }
   if (changed.length === 0) return true;
@@ -438,7 +411,7 @@ function applyStatusAlignments(root: string, alignments: Map<string, string>): b
 }
 
 /** Propagate the doc branch to develop（gap-doc-develop-sync-semantic-conflict-resolution）：主检出在
- *  doc-only 工作分支（main/manager-doc），翻转提交到那里必须到 develop，任务 worktree（从 develop 分支）
+ *  doc-only 工作分支（author），翻转提交到那里必须到 develop，任务 worktree（从 develop 分支）
  *  才看得到新 status。同步 = 机械 ff-only + 语义兜底：ff 快进成功 ⇒ true；ff 不成立 ⇒ 升级语义兜底
  *  （semanticSyncDocToDevelop）。⛔ 静默 catch 已消除——每一步失败都写事件（DOC_DEVELOP_SYNC_EVENT_REL）
  *  并返回 boolean（false = 未同步，可观测非静默）。 */
@@ -449,20 +422,26 @@ export function propagateDocBranchToDevelop(root: string): boolean {
     return false;
   }
   if (cur === "develop") return true; // 已在 develop ⇒ 无需同步（非失败）
-  if (ffPushToDevelop(root, cur)) return true; // 机械 ff-only 成功
+  if (ffPushToDevelop(root, cur).ok) return true; // 机械 ff-only 成功
   return semanticSyncDocToDevelop(root, cur); // 机械失败 ⇒ 升级语义兜底
 }
 
 // ── develop→doc 机械同步（ff-only + 分叉 guard，gap-main-manager-doc-doc-only-ff-only-tracking）───────
-// 主检出（main/manager-doc）落后 develop 时生产跑的是旧代码（promotion-driver 常驻从主检出工作树加载，
+// 主检出（author）落后 develop 时生产跑的是旧代码（promotion-driver 常驻从主检出工作树加载，
 // CLAUDE.md 分支同步纪律「需定期 merge develop 追上」）。旧实现是静默 merge-fallback——`git merge develop`
 // 每次冲突，近 30 天 1795 次 "Merge branch 'develop' into main/manager-doc" 全由其产生。机械半边 =
 // `git merge --ff-only develop`（纯快进；⛔ 分叉即拒绝，不静默 merge）；分叉即 guard 报红（独立取值，
 // ⛔ 非「同步成功」同形，硬规则 3b）。语义兜底（分叉后怎么融）归父任务 gap-doc-develop-sync-semantic-
 // conflict-resolution 的 semanticSyncDocToDevelop。
 
-/** doc 工作分支名（主检出所在；develop = 权威基线）。 */
-export const DOC_BRANCH = "main/manager-doc";
+/** 运行时派生 doc 工作分支名：唯一来源 = 当前 checked-out 分支（主检出所在），⛔ 不再硬编码 "author"。
+ *  gap-doc-branch-hardcoded-author-breaks-third-party-develop-sync：第三方项目工作分支非 author 时，
+ *  硬编码恒 no-refs ⇒ 晋升写入对派发永久不可见。git 读分支失败 ⇒ null（⛔ 不兜底一个裸字面量——
+ *  "author" 是本仓库自己的命名约定，逐项目不同；无 override 裸字面量正是 GOAL-012 B 域 TARGET
+ *  target-identity-literal-check 的违例形。调用方以事件落痕 + 独立取值处理 null，硬规则 3b）。 */
+export function resolveDocBranch(root: string): string | null {
+  return currentBranchName(root);
+}
 
 /** `git rev-list --count <from>..<to>` 的提交数（to 独有、from 未含）。git 出错 / 非数 ⇒ null
  *  （读不懂 ≠ 0，⛔ 硬规则 6 不把读失败伪装成「无分叉」）。 */
@@ -481,7 +460,8 @@ function revCountAhead(root: string, from: string, to: string): number | null {
 
 /** 分叉 guard：doc 分支有 develop 未含的提交（`git rev-list --count develop..<docBranch>` > 0）⇒ 分叉
  *  （ff-only 无法同步 ⇒ 报红，返回 true）。读失败 ⇒ null（读不懂 ≠ 无分叉）。 */
-export function docBranchForkedFromDevelop(root: string, docBranch: string = DOC_BRANCH): boolean | null {
+export function docBranchForkedFromDevelop(root: string, docBranch: string | null = resolveDocBranch(root)): boolean | null {
+  if (docBranch === null) return null; // 读分支失败 ⇒ null（读不懂 ≠ 无分叉）
   const ahead = revCountAhead(root, "develop", docBranch);
   return ahead === null ? null : ahead > 0;
 }
@@ -495,21 +475,35 @@ export function docBranchForkedFromDevelop(root: string, docBranch: string = DOC
  *   - "error"   — git 出错 / 读分支失败（非静默）
  *  失败（not-ff / error）与成功（synced）都落痕到 DOC_DEVELOP_SYNC_EVENT_REL（⛔ 静默）——synced 也写
  *  事件是 AC4 生产载体（硬规则 3c）：成功同步若不留痕，「生产载体有记录」结构上不可满足（恒假）。
+ *  not-doc 亦落痕 doc-develop-sync-branch-mismatch（携带 cur/expected）——分支改名 / driver 常驻进程里
+ *  缓存的 doc 分支名陈旧时，这是唯一的观测信号（⛔ 裸 return 静默则与「无事发生」同形，硬规则 3b，
+ *  gap-sync-develop-to-doc-not-doc-silent-noop）。
  *  already 不写（no-op，每轮写会刷日志）。 */
-export function syncDevelopToDoc(root: string, docBranch: string = DOC_BRANCH): string {
+export function syncDevelopToDoc(root: string, docBranch: string | null = resolveDocBranch(root)): string {
   const cur = currentBranchName(root);
   if (cur === null) {
     writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-ff-error", phase: "read-branch" });
     return "error";
   }
-  if (cur !== docBranch) return "not-doc";
+  if (docBranch === null || cur !== docBranch) {
+    writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-branch-mismatch", phase: "not-doc", cur, expected: docBranch });
+    return "not-doc";
+  }
   const forked = docBranchForkedFromDevelop(root, docBranch);
   if (forked === null) {
     writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-ff-error", phase: "rev-count" });
     return "error";
   }
   if (forked) {
-    writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-not-ff", phase: "forked", branch: cur });
+    // ⛔ 此前只记 {ts,event,phase,branch} ⇒ 该读数【结构上不可解读】：无法区分「只领先
+    // （良性——author 刚提交任务状态、无物可拉）」与「既领先又落后（真分叉）」。
+    // 两个计数都记上，not-ff 才是一个能说明问题的量，而不只是一个计数器。
+    const ahead = revCountAhead(root, "develop", docBranch);   // author 独有
+    const behind = revCountAhead(root, docBranch, "develop");  // develop 独有
+    writeDocDevelopSyncEvent(root, {
+      event: "doc-develop-sync-not-ff", phase: "forked", branch: cur,
+      ahead, behind, benign: behind === 0,
+    });
     return "not-ff";
   }
   const behind = revCountAhead(root, docBranch, "develop");
@@ -519,11 +513,19 @@ export function syncDevelopToDoc(root: string, docBranch: string = DOC_BRANCH): 
   }
   if (behind === 0) return "already";
   try {
-    execFileSync("git", ["-C", root, "merge", "--ff-only", "develop"], { stdio: "ignore" });
+    // ⛔ 不用 stdio:"ignore"：此前 44 次 ff-error 全是 phase=merge，而 git 的错误原因被丢弃
+    // ⇒ 最常见的硬失败【不可归因】（工作树脏？index lock？钩子？无从分辨）。捕获 stderr。
+    execFileSync("git", ["-C", root, "merge", "--ff-only", "develop"], { stdio: ["ignore", "ignore", "pipe"] });
     writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-ff-synced", phase: "synced", branch: cur });
     return "synced";
-  } catch {
-    writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-ff-error", phase: "merge" });
+  } catch (e) {
+    // git 的 stderr 进事件 ⇒ 失败可归因（工作树脏 / index lock / 钩子拒绝各自可辨）。
+    const err = e as { stderr?: Buffer | string };
+    const detail = String(err?.stderr ?? "").trim().split("\n").slice(0, 3).join(" | ").slice(0, 300);
+    writeDocDevelopSyncEvent(root, {
+      event: "doc-develop-sync-ff-error", phase: "merge",
+      detail: detail || "<no-stderr-captured>",
+    });
     return "error";
   }
 }
@@ -531,7 +533,7 @@ export function syncDevelopToDoc(root: string, docBranch: string = DOC_BRANCH): 
 // ── 双向分歧检测同步（gap-sync-trigger-divergence-detection-bidirectional）─────────────────────────
 // 两 driver 同步触发点原为「committed 翻转才触发」的单向 propagate——只在有翻转落地时触发且仅
 // doc→develop 单向。缺口 2026-08-31：池空无翻转时同步一次不跑，develop 靠 fan-in 前进 ⇒ 主检出
-// 落后 10 提交。本函数改【分歧检测】：读两 ref（main/manager-doc ↔ develop）不同即双向同步，⛔ 不依赖
+// 落后 10 提交。本函数改【分歧检测】：读两 ref（author ↔ develop）不同即双向同步，⛔ 不依赖
 // 翻转落地。方向：
 //   - develop→doc = syncDevelopToDoc（机械 ff-only，develop 前进时把主检出快进）
 //   - doc→develop = propagateDocBranchToDevelop（ff-only + 语义兜底，主检出翻转/立案到达 develop）
@@ -555,16 +557,18 @@ function revParse(root: string, ref: string): string | null {
 }
 
 /** 双向分歧检测同步（gap-sync-trigger-divergence-detection-bidirectional）：读两 ref 不同即触发双向
- *  同步（develop→doc 后 doc→develop）。返回独立取值：
+ *  同步（develop→doc 后 doc→develop）。`docBranch` 缺省 = 运行时派生的当前 checked-out 分支
+ *  （resolveDocBranch，⛔ 非硬编码 "author"——第三方项目工作分支任意命名）。返回独立取值：
  *   - "no-refs" — 读 ref 失败 / 双分支未建（非 git / bare test repo）⇒ 无同步对象（⛔ 非「无分歧」）
  *   - "already" — 两 ref 相同 ⇒ 无分歧（no-op，不写事件）
  *   - "synced"  — 分歧 ⇒ 双向同步已执行 + 落痕 doc-develop-sync-bidirectional 事件 */
-export function syncDocDevelopBidirectional(root: string): string {
-  const docSha = revParse(root, DOC_BRANCH);
+export function syncDocDevelopBidirectional(root: string, docBranch: string | null = resolveDocBranch(root)): string {
+  if (docBranch === null) return "no-refs"; // 读分支失败 ⇒ 无同步对象（⛔ 非「无分歧」）
+  const docSha = revParse(root, docBranch);
   const developSha = revParse(root, "develop");
   if (docSha === null || developSha === null) return "no-refs";
   if (docSha === developSha) return "already";
-  const developToDoc = syncDevelopToDoc(root);
+  const developToDoc = syncDevelopToDoc(root, docBranch);
   const docToDevelop = propagateDocBranchToDevelop(root);
   writeDocDevelopSyncEvent(root, {
     event: "doc-develop-sync-bidirectional",
@@ -670,25 +674,208 @@ export function lastExitedNotLandedReason(root: string, taskId: string): string 
   return attempts.length > 0 ? attempts[attempts.length - 1].reason : null;
 }
 
+// ── needs-human 成因类（gap-needs-human-overloaded-two-populations-one-state）────────────────────
+// `needs-human` 一个状态承载两个处理者相反的群体：① 人须裁决（方向取舍/授权/跨层冲突/任务自身 AC
+// 不达标）——处理者是人；② worker 落不了地（ff 闩锁 / flaky / 无关红 / 宿主负载）——正确动作是阻塞
+// 解除后重新派发。二者在 status/载体/读法上逐字段同形 ⇒ 翻转时必须写入【机械可读】的成因类
+// （三态可枚举，⛔ 非散文、⛔ 非布尔），第二类据此可被证据谓词（blockedOutsideTaskResolved）判定再入队。
+
+/** needs-human 成因类三态（可枚举取值，⛔ 非散文非布尔——第三态 unclassified 独立取值，硬规则 3b）。 */
+export const NEEDS_HUMAN_CAUSE = {
+  /** 人须裁决：方向取舍/授权/跨层冲突/任务自身 AC 不达标（处理者仍是人，本条不改其语义）。 */
+  HUMAN_ADJUDICATION: "human-adjudication",
+  /** 阻塞在任务之外：ff 闩锁 / flaky / 无关红 / 宿主负载（正确动作 = 阻塞解除后重新派发）。 */
+  BLOCKED_OUTSIDE_TASK: "blocked-outside-task",
+  /** 未能分类：解析不出判词（⛔ 不得落成前两者之一，硬规则 3b）。 */
+  UNCLASSIFIED: "unclassified",
+} as const;
+
+/** 成因类取值类型（三态可枚举）。 */
+export type NeedsHumanCause = (typeof NEEDS_HUMAN_CAUSE)[keyof typeof NEEDS_HUMAN_CAUSE];
+
+/** 三态枚举序（固定，供测试/校验枚举完备性）。 */
+export const NEEDS_HUMAN_CAUSES: readonly NeedsHumanCause[] = [
+  NEEDS_HUMAN_CAUSE.HUMAN_ADJUDICATION,
+  NEEDS_HUMAN_CAUSE.BLOCKED_OUTSIDE_TASK,
+  NEEDS_HUMAN_CAUSE.UNCLASSIFIED,
+];
+
+/** 值是否为一个合法成因类（机械可读取值校验，⛔ 非散文匹配）。 */
+export function isNeedsHumanCause(v: unknown): v is NeedsHumanCause {
+  return typeof v === "string" && (NEEDS_HUMAN_CAUSES as readonly string[]).includes(v);
+}
+
+/** 归「人须裁决」的机械 fan-in 步——这些步的失败是【任务自身缺陷】（merge-develop 冲突 / anti-drift
+ *  违反 / typecheck / doc-check / scoped-gate / suite 红 / AC 未全勾 / flip 失败 / 锁与异常），处理者
+ *  仍是人。⛔ 不含 "ff"——ff 步失败 = develop 前进/无法 fast-forward，阻塞对象在任务之外。 */
+const HUMAN_ADJUDICATION_STEPS: ReadonlySet<string> = new Set([
+  "merge-develop", "anti-drift", "typecheck", "doc-check", "scoped-gate",
+  "suite", "anti-drift-land", "ac-precheck", "ac-gate", "flip-done",
+  "acquire-fan-in-lock", "exception",
+]);
+
+/** 成因分类器（纯函数）：读【结构化】的 mechanical_fan_in.step（⛔ 不读 ## Needs-Human 散文——判词是
+ *  自由散文，解析它违反硬规则②）。`reason` 仅作签名保留不参与判定（同硬规则②）。映射：
+ *    step === "ff"                  ⇒ blocked-outside-task（ff 闩锁 = develop 前进/无法 ff，阻塞在任务外）
+ *    step ∈ HUMAN_ADJUDICATION_STEPS ⇒ human-adjudication（任务自身缺陷，处理者仍是人）
+ *    其余（step 为 null / 未知步）     ⇒ unclassified（解析不出判词，⛔ 不得落成前两者之一） */
+export function classifyNeedsHumanCause(step: string | null, _reason: string | null): NeedsHumanCause {
+  if (step === "ff") return NEEDS_HUMAN_CAUSE.BLOCKED_OUTSIDE_TASK;
+  if (step !== null && HUMAN_ADJUDICATION_STEPS.has(step)) return NEEDS_HUMAN_CAUSE.HUMAN_ADJUDICATION;
+  return NEEDS_HUMAN_CAUSE.UNCLASSIFIED;
+}
+
+/** 成因类的前端 frontmatter 字段名（top-level 标量，机械可读，⛔ 非 ## Needs-Human 散文段）。 */
+export const NEEDS_HUMAN_CAUSE_FIELD = "needs_human_cause";
+
+/** 从已解析 frontmatter 投影成因类（委托单一 parser parseFrontmatterCompletely 的产物，⛔ 不 grep 正文）。
+ *  缺值 / 非字符串 / 非法取值 ⇒ null（缺值 = 未查，硬规则 6——「无成因类」与任一具体取值可区分）。 */
+export function frontmatterNeedsHumanCause(fm: unknown): NeedsHumanCause | null {
+  const obj = fm && typeof fm === "object" && !Array.isArray(fm) ? (fm as Record<string, unknown>) : null;
+  const v = obj ? obj[NEEDS_HUMAN_CAUSE_FIELD] : undefined;
+  return isNeedsHumanCause(v) ? v : null;
+}
+
+/** 写成因类到 frontmatter（byte-preserving 行级编辑，⛔ 不 YAML 整体回写——与 patchStatusField 同族）。
+ *  已有该字段 ⇒ 就地换值；无 ⇒ 在 status 行后插入。无 status 行 ⇒ fail-closed（markNeedsHuman 必含 status）。 */
+export function patchNeedsHumanCauseField(
+  frontmatterRaw: string,
+  cause: NeedsHumanCause,
+): { ok: true; fm: string; added: boolean } | { ok: false; reason: string } {
+  const lineRe = /^needs_human_cause:[ \t]*[^\r\n]*$/m;
+  if (lineRe.test(frontmatterRaw)) {
+    return { ok: true, fm: frontmatterRaw.replace(lineRe, `needs_human_cause: ${cause}`), added: false };
+  }
+  const statusRe = /^status:[ \t]*[^\r\n]*$/m;
+  const m = statusRe.exec(frontmatterRaw);
+  if (!m) return { ok: false, reason: "no-status-line" };
+  const insertAt = m.index + m[0].length;
+  return {
+    ok: true,
+    fm: frontmatterRaw.slice(0, insertAt) + `\nneeds_human_cause: ${cause}` + frontmatterRaw.slice(insertAt),
+    added: true,
+  };
+}
+
+/** 读任务的成因类（读盘上任务文件的【结构化 frontmatter 字段】，⛔ 不 grep ## Needs-Human 散文）。
+ *  读失败 / 字段缺 / 非法取值 ⇒ null（缺值 = 未查，硬规则 6）。 */
+export function readNeedsHumanCause(root: string, taskId: string): NeedsHumanCause | null {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(path.join(root, "tasks", `${taskId}.md`), "utf8");
+  } catch {
+    return null;
+  }
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(raw);
+  if (!m) return null;
+  return frontmatterNeedsHumanCause(parseFrontmatterCompletely(m[1]));
+}
+
+// ── 第二类（blocked-outside-task）的再入队证据谓词（AC4）────────────────────────────────────────
+// 正确动作是「阻塞解除后重新派发」，⛔ 但不得按时间/次数自动重派（复活活锁）。再入队条件必须由【证据】
+// 触发：ff 闩锁的阻塞对象 = 上次 ff-escalation 记录的 developHead（develop 前进、任务分支无法 fast-forward）。
+// 阻塞解除的证据 = 该 developHead 现已并入任务分支（ff 可快进）。⛔ 不是「距上次失败超过 N 分钟」。
+
+/** ff-escalation 载体的仓库相对路径（ff-merge.ts 写 event:"ff-escalation" / "ff-escalation-resolved"）。 */
+export const FF_ESCALATIONS_REL = ".quay/fan-in-ff-escalations.jsonl";
+
+/** 一条 ff-escalation 记录的投影（只读所需字段）。 */
+export interface FfEscalationRecord {
+  event?: string;
+  taskId?: string;
+  attempt?: number;
+  developHead?: string;
+  ts?: string;
+  epoch?: number;
+}
+
+/** 读该 task 最近一条 ff-escalation 记录（文件行序 = 时间序，取最后一条）。无记录 / 读失败 ⇒ null。 */
+export function readLatestFfEscalation(root: string, taskId: string): FfEscalationRecord | null {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(root, FF_ESCALATIONS_REL), "utf8");
+  } catch {
+    return null;
+  }
+  let latest: FfEscalationRecord | null = null;
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let rec: FfEscalationRecord;
+    try {
+      rec = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    if (rec.event === "ff-escalation" && rec.taskId === taskId) latest = rec;
+  }
+  return latest;
+}
+
+/** `git merge-base --is-ancestor <ancestor> <branch>`：ancestor 是否已并入 branch。
+ *  exit 0 ⇒ true（已并入）；exit 1 ⇒ false（未并入）；其它（branch 不存在/坏对象）⇒ null（读不懂，硬规则 6）。 */
+function isAncestorOfBranch(root: string, ancestor: string, branch: string): boolean | null {
+  try {
+    execFileSync("git", ["-C", root, "merge-base", "--is-ancestor", ancestor, branch], { stdio: "ignore" });
+    return true;
+  } catch (e) {
+    const status = (e as { status?: number }).status;
+    if (status === 1) return false;
+    return null;
+  }
+}
+
+/** 第二类的再入队证据谓词（AC4，能取假）：阻塞证据仍在 ⇒ false（不再入队）；阻塞证据消失 ⇒ true
+ *  （可再入队）。证据 = 最近一次 ff-escalation 记录的 developHead 已并入任务分支（task/<id>）。
+ *  无 escalation 记录 / 无 developHead / git 读不懂 ⇒ null（缺值 = 未查，⛔ 与「已解除 true」区分）。 */
+export function blockedOutsideTaskResolved(root: string, taskId: string): boolean | null {
+  const esc = readLatestFfEscalation(root, taskId);
+  if (esc === null) return null;
+  const developHead = typeof esc.developHead === "string" && esc.developHead ? esc.developHead : null;
+  if (developHead === null) return null;
+  return isAncestorOfBranch(root, developHead, `task/${taskId}`);
+}
+
+/** 成因分类的批量回放（AC5，纯函数）：输入 = 一组翻转的【结构化】失败步，输出 = 三态各若干条。
+ *  「人须裁决」条数由输入决定（⛔ 非硬编码）——喂不同输入 ⇒ 不同计数。 */
+export function tallyNeedsHumanCauses(
+  records: ReadonlyArray<{ step: string | null }>,
+): Record<NeedsHumanCause, number> {
+  const tally: Record<NeedsHumanCause, number> = {
+    [NEEDS_HUMAN_CAUSE.HUMAN_ADJUDICATION]: 0,
+    [NEEDS_HUMAN_CAUSE.BLOCKED_OUTSIDE_TASK]: 0,
+    [NEEDS_HUMAN_CAUSE.UNCLASSIFIED]: 0,
+  };
+  for (const r of records) {
+    tally[classifyNeedsHumanCause(r.step, null)] += 1;
+  }
+  return tally;
+}
+
 /** 把修满/派满上限仍不合格的任务标 needs-human（status todo/ready → needs-human）+ 追加一条
  *  `## Needs-Human` 审计记录（grep-able 原因，⛔ 静默翻转）。worker 派发的是 ready 任务、promotion
  *  修的是 todo 任务 ⇒ 两者都可翻 needs-human；其它状态（needs-human/done/superseded…）拒写。
  *  只在 status ∈ {todo, ready} 时写（并发保护，同 ready-pool-check 的 setTaskStatus）。
  *  COMMIT-AFTER-WRITE (gap-mark-needs-human-commit-after-write)：写盘即提交（复用 commitTaskFile 族，
  *  ⛔ 不写第四份）——翻转后主检出不留脏树（硬规则 11b：盘上翻转改变派发计算但对读 git 的人不可见）。
- *  返回 { id, ok, reason, committed }——ok=false 表示未写（missing/无 frontmatter/非 todo·ready）；
- *  committed=false 表示未提交（repo-less 单测临时目录 no-op，或 git 提交失败）。 */
-export function markNeedsHuman(root: string, id: string, reason: string): { id: string; ok: boolean; reason: string; committed: boolean } {
+ *  返回 { id, ok, reason, committed, cause }——ok=false 表示未写（missing/无 frontmatter/非 todo·ready；
+ *  cause=null）；committed=false 表示未提交（repo-less 单测临时目录 no-op，或 git 提交失败）。
+ *  gap-needs-human-overloaded-two-populations-one-state：翻转同时写【机械可读】的成因类
+ *  （needs_human_cause frontmatter 字段，三态可枚举）——由最近一条 exited-not-landed 的【结构化】
+ *  mechanical_fan_in.step 分类（⛔ 不读 ## Needs-Human 散文）。无任何 exited-not-landed 尝试（promotion
+ *  连续修满仍不合格 / 快速死亡退避上限）⇒ 任务自身缺陷未解 ⇒ human-adjudication（⛔ 不落 unclassified）。 */
+export function markNeedsHuman(root: string, id: string, reason: string): { id: string; ok: boolean; reason: string; committed: boolean; cause: NeedsHumanCause | null } {
   const file = path.join(root, "tasks", `${id}.md`);
-  if (!fs.existsSync(file)) return { id, ok: false, reason: "missing", committed: false };
+  if (!fs.existsSync(file)) return { id, ok: false, reason: "missing", committed: false, cause: null };
   const raw = fs.readFileSync(file, "utf8");
-  const m = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(raw);
-  if (!m) return { id, ok: false, reason: "no-frontmatter", committed: false };
-  const [, open, fm, close] = m;
-  const fromMatch = /^status:\s*(todo|ready)\s*$/m.exec(fm);
-  if (!fromMatch) return { id, ok: false, reason: "not-todo", committed: false };
-  const newFm = fm.replace(/^status:\s*(todo|ready)\s*$/m, "status: needs-human");
-  const body = raw.slice(m[0].length);
+  // gap-task-ops-consolidate-driver-frontmatter-writers：frontmatter 读/写经 task-ops.ts（splitTaskFile /
+  // statusFromFrontmatter / patchStatusField，单一 parser，⛔ 不再手搓 status 行正则）。
+  const split = splitTaskFile(raw);
+  if (!split) return { id, ok: false, reason: "no-frontmatter", committed: false, cause: null };
+  const from = statusFromFrontmatter(split.frontmatterRaw);
+  if (from !== TASK_STATUS.TODO && from !== TASK_STATUS.READY) return { id, ok: false, reason: "not-todo", committed: false, cause: null };
+  const patched = patchStatusField(split.frontmatterRaw, TASK_STATUS.NEEDS_HUMAN);
+  if (!patched.ok) return { id, ok: false, reason: patched.reason, committed: false, cause: null };
   // gap-needs-human-note-carries-step-verdict：注记携带最近 exited-not-landed 的实际失败步+判词
   // （⛔ 只写模板句会把 merge 冲突 / suite 红 / ac-gate 未勾等完全不同真因压扁成同一句——读注记无法区分）。
   // 无记录 / 读不懂 ⇒ 不追加该行（与旧行为同形，⛔ 不伪造成「有失败步」）。
@@ -698,25 +885,33 @@ export function markNeedsHuman(root: string, id: string, reason: string): { id: 
   const attempts = exitedNotLandedAttempts(root, id);
   const lastAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null;
   const stepVerdict = lastAttempt ? lastAttempt.reason : null;
+  // 成因类读【结构化】的 mechanical_fan_in.step（⛔ 不读散文判词）。无任何 exited-not-landed 尝试
+  // （promotion 连续修满仍不合格 / 快速死亡退避上限）⇒ 任务自身缺陷未解 ⇒ human-adjudication。
+  const cause = lastAttempt
+    ? classifyNeedsHumanCause(lastAttempt.step, lastAttempt.reason)
+    : NEEDS_HUMAN_CAUSE.HUMAN_ADJUDICATION;
+  const patchedCause = patchNeedsHumanCauseField(patched.fm, cause);
+  if (!patchedCause.ok) return { id, ok: false, reason: patchedCause.reason, committed: false, cause: null };
   const record =
     `\n## Needs-Human\n\n**执行 ${new Date().toISOString()} — 连续修满重试上限仍不合格（标 needs-human）**\n\n` +
     `- 阻碍原因：${reason}\n` +
+    `- 成因类：${cause}\n` +
     (stepVerdict ? `- 失败步/判词：${stepVerdict}\n` : "") +
     (lastAttempt?.runId ? `- run_id：${lastAttempt.runId}\n` : "") +
     (lastAttempt?.sessionId ? `- session_id：${lastAttempt.sessionId}\n` : "") +
     (lastAttempt?.suiteLog ? `- suite 日志：${lastAttempt.suiteLog}\n` : "") +
     (lastAttempt?.fanInLog ? `- fan-in 日志：${lastAttempt.fanInLog}\n` : "");
-  fs.writeFileSync(file, `${open}${newFm}${close}${body}${record}`);
+  fs.writeFileSync(file, `${split.open}${patchedCause.fm}${split.close}${split.body}${record}`);
   const rel = path.join("tasks", `${id}.md`);
   // FIRST-REGISTRATION JUDGMENT (gap-promotion-commit-message-misleading-on-first-track)：目标文件此前
   // 从未提交（本次提交是其 git 诞生提交，谈不上 todo→needs-human「翻转」）⇒ 如实标「首次登记」，不得
   // 沿用暗示翻转发生的「重试上限机械翻转」措辞。已有提交历史 ⇒ 真实翻转，沿用原有文案。
   const message = hasPriorCommit(root, rel)
-    ? `tasks: ${id} ${fromMatch[1]}→needs-human（重试上限机械翻转）`
+    ? `tasks: ${id} ${from}→needs-human（重试上限机械翻转）`
     : `tasks: ${id} 首次登记（status=needs-human，重试上限机械落盘）`;
   const committed = commitTaskFile(root, rel, message);
   syncDocDevelopBidirectional(root); // 分歧检测双向同步（⛔ 不依赖 committed 翻转）
-  return { id, ok: true, reason, committed };
+  return { id, ok: true, reason, committed, cause };
 }
 
 /** 候选未被标 needs-human（status 非 needs-human）。读不懂 ⇒ fail-closed 滤掉（⛔ 读不懂 ≠ 合格）。 */

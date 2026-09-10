@@ -35,18 +35,26 @@ const MOD = path.resolve(__dirname, "..", "scripts", "write-json-atomic.ts");
 // in small chunks over the same fd, so a concurrent reader observes a partial JSON prefix (a torn
 // state) for a wide window — unlike a single fs.writeFileSync, whose only torn window is the narrow
 // truncate→write gap that a fast machine can hide (the source of this negative control's flakiness).
+// The two alternating payloads are serialized ONCE up front: JSON.stringify of a multi-MB value is
+// the loop's dominant cost, and doing it inline (as the pre-fix writer did) widens the COMPLETE-file
+// gap between torn windows — under load the reader then lands mostly on a fully-written file and
+// misses every tear. Precomputing keeps the chunked same-fd write (the torn window) the dominant
+// phase, so a concurrent reader that is merely scheduled during the write window is almost certain
+// to bite.
 const WRITER = `
 import fs from "node:fs";
 import { writeJsonAtomic } from ${JSON.stringify(MOD)};
 const [file, mode, size, durationMs] = process.argv.slice(2);
 const payload = "y".repeat(Number(size));
 const end = Date.now() + Number(durationMs);
+const bufB = Buffer.from(JSON.stringify({ marker: "B", payload, n: 1 }) + "\\n", "utf8");
+const bufC = Buffer.from(JSON.stringify({ marker: "C", payload, n: 2 }) + "\\n", "utf8");
 let i = 0;
 while (Date.now() < end) {
-  const v = { marker: i % 2 ? "B" : "C", payload, n: i };
-  if (mode === "atomic") writeJsonAtomic(file, v);
-  else {
-    const buf = Buffer.from(JSON.stringify(v) + "\\n", "utf8");
+  if (mode === "atomic") {
+    writeJsonAtomic(file, { marker: i % 2 ? "B" : "C", payload, n: i });
+  } else {
+    const buf = i % 2 ? bufB : bufC;
     const fd = fs.openSync(file, "w");
     const CHUNK = 64 * 1024;
     for (let off = 0; off < buf.length; off += CHUNK) {
@@ -66,14 +74,21 @@ async function runConcurrentRead(mode) {
   fs.writeFileSync(writerPath, WRITER, "utf8");
 
   const size = 4 * 1024 * 1024; // 4MB — large enough that an in-place write is observably torn
-  const durationMs = 1000;
+  // The write window is deliberately LONG (10s — 10× the old 1s) and the reader overlaps it
+  // end-to-end. The old 1s window plus a 20s stable tail meant a reader descheduled during that
+  // single short window (full-suite load ~45) caught zero tears and the negative control flipped
+  // (gap-writestate-torn-read-assertion-load-sensitive-flaky). A 10s window with no stable tail
+  // removes the single-race dependency: the reader is almost certain to be scheduled during some
+  // torn write.
+  const durationMs = 10000;
+  const readGraceMs = 5000; // reader tail past the writer's window — covers child startup latency under load
   const child = spawn(
     process.execPath,
     ["--experimental-strip-types", writerPath, file, mode, String(size), String(durationMs)],
     { stdio: "ignore" }
   );
 
-  const readEnd = Date.now() + durationMs + 20000;
+  const readEnd = Date.now() + durationMs + readGraceMs;
   let reads = 0;
   let torn = 0;
   const seen = new Set();

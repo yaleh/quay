@@ -23,6 +23,7 @@ import {
   isStaticCheckFailureLine,
   extractStaticCheckDetail,
   extractFailClosedChecker,
+  extractNotEvaluatedChecker,
   buildStaticCheckFailures,
   isGitWorktree,
   readStateRunId,
@@ -164,6 +165,7 @@ test("AC1 — a green run writes the exact suite-state shape to .quay/full-suite
       "durationMs",
       "finishedAt",
       "laneCount",
+      "notEvaluatedCheckers",
       "pid",
       "runId",
       "runner",
@@ -171,7 +173,7 @@ test("AC1 — a green run writes the exact suite-state shape to .quay/full-suite
       "startedAt",
       "state",
     ],
-    "exact suite-state shape (AC1 + gap-worktree-scoped-runs-consume-resources-but-produce-no-signal AC1 scope + gap-full-suite-state-race-last-write-wins-no-generation-guard runId + gap-full-suite-state-red-no-failure-detail-static-check-invisible AC6 pid)",
+    "exact suite-state shape (AC1 + gap-worktree-scoped-runs-consume-resources-but-produce-no-signal AC1 scope + gap-full-suite-state-race-last-write-wins-no-generation-guard runId + gap-full-suite-state-red-no-failure-detail-static-check-invisible AC6 pid + gap-not-evaluated-checkers-never-persisted notEvaluatedCheckers)",
   );
   assert.equal(s.state, "green");
   assert.equal(s.runner, "outer");
@@ -223,6 +225,33 @@ test("gap-verification-round-static-fail-no-record AC3 — --buckets <task-id> r
     const vr = lastRoundRecord(root);
     assert.ok(vr, "a verification-round row was appended");
     assert.equal(vr.taskId, "gap-test-bucket-task", "the bucket-mode row carries taskId (AC3)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("gap-perfile-cpu-cost-collection AC3 — the runner's verification-round perFile[] carries cpuMs (writer 之一)", async () => {
+  // The writer path: a suite that emits __PERFILE__ lines WITH `cpu_ms=` lands perFile records whose
+  // `cpuMs` is parsed (via the shared parsePerFileLines); a legacy line without `cpu_ms` leaves the
+  // field ABSENT (never a fabricated 0). This is the full-suite-runner.ts half of the two-writer
+  // contract (the pre-verified-round-record.ts half lives in its own test file).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-perfile-cpu-"));
+  const { f, dir } = fakeSuite(
+    'echo "__PERFILE__ duration_ms=123.456 /repo/a.test.mjs passed=true end_ms=1724000000123 cpu_ms=45.6"\n' +
+      'echo "__PERFILE__ duration_ms=9 /repo/b.test.mjs passed=true"\n' +
+      'echo "# tests 2"\necho "# pass 2"\necho "# fail 0"\necho "# cancelled 0"\nexit 0'
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const rec = lastRoundRecord(root);
+    assert.ok(rec && Array.isArray(rec.perFile), "perFile[] present on the round row");
+    const a = rec.perFile.find((r) => r.file.endsWith("a.test.mjs"));
+    const b = rec.perFile.find((r) => r.file.endsWith("b.test.mjs"));
+    assert.equal(a.cpuMs, 45.6, "cpu_ms is parsed into cpuMs on the runner's writer path");
+    assert.equal(b.cpuMs, undefined, "legacy __PERFILE__ line → cpuMs absent (缺键 ≠ 0)");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
@@ -714,6 +743,54 @@ test("AC2 unit — extractFailClosedChecker parses checker-cost-lib's fail-close
   assert.equal(extractFailClosedChecker("checker-cost-lib: run_checker_parallel_wait — static checks FAILED (fail-closed): threshold-scope-check(exit=1)"), null, "the human summary line is NOT machine-parsed (only the STATIC_CHECK_FAILED: line is)");
   assert.equal(extractFailClosedChecker("not ok 1 - boom"), null);
   assert.equal(extractFailClosedChecker("STATIC_CHECK_FAILED: no-exit-code"), null, "missing exit=<rc> is not a parseable fail-closed checker");
+});
+
+test("gap-not-evaluated-checkers-never-persisted AC1 unit — extractNotEvaluatedChecker parses the NOT-EVALUATED machine line; ⛔ it is NOT a static-check failure (an inert guard is NOT a red)", () => {
+  // checker-cost-lib emits `STATIC_CHECK_NOT_EVALUATED: <name>` (exit 3 = a THIRD state, NOT a red,
+  // NOT a pass) and returns 0 — so the suite continues GREEN. This pins: (a) the parse path, (b) the
+  // inert line must NEVER be flagged as a failure (which would turn an inert guard into a red).
+  const ne = extractNotEvaluatedChecker("STATIC_CHECK_NOT_EVALUATED: direct-to-develop-bypass-check");
+  assert.deepEqual(ne, { name: "direct-to-develop-bypass-check", line: "STATIC_CHECK_NOT_EVALUATED: direct-to-develop-bypass-check" });
+  assert.equal(isStaticCheckFailureLine("STATIC_CHECK_NOT_EVALUATED: direct-to-develop-bypass-check"), false, "the inert line is NOT a static-check failure marker (it exits 0 — green)");
+  assert.equal(extractNotEvaluatedChecker("STATIC_CHECK_FAILED: threshold-scope-check exit=1"), null, "the fail-closed line is NOT the not-evaluated line");
+  assert.equal(extractNotEvaluatedChecker("not ok 1 - boom"), null, "a test failure line is NOT a not-evaluated line");
+  assert.equal(extractNotEvaluatedChecker("checker-cost-lib: run_checker_parallel_wait — static checks FAILED (fail-closed): foo(exit=1)"), null, "the human summary line is NOT machine-parsed");
+});
+
+test("gap-not-evaluated-checkers-never-persisted AC1/AC2 — a GREEN run with a NOT-EVALUATED line persists notEvaluatedCheckers (non-empty); a GREEN run WITHOUT it persists an EMPTY ARRAY (⛔ not undefined)", async () => {
+  // The defect: an inert checker exits 0 ⇒ the suite is GREEN, and its "读不懂输入" signal was thrown
+  // away at the stderr boundary. Now a green terminal state carries notEvaluatedCheckers — the ONLY
+  // place the inert guard is visible. AC2 falsifiable side: no such line ⇒ [] (not undefined).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-inert-"));
+  try {
+    // With the line: the state names the inert checker.
+    const { f, dir } = fakeSuite(
+      'echo "STATIC_CHECK_NOT_EVALUATED: direct-to-develop-bypass-check" >&2\n' +
+        'echo "# tests 5"\necho "# pass 5"\necho "# fail 0"\necho "# cancelled 0"\nexit 0',
+    );
+    const child = runRunner({ root, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "the inert guard exits 0 ⇒ the suite is GREEN (not red)");
+    const s = readState(root);
+    assert.equal(s.state, "green", "an inert guard does NOT red the suite");
+    assert.ok(Array.isArray(s.notEvaluatedCheckers), "notEvaluatedCheckers is present (an array)");
+    assert.deepEqual(s.notEvaluatedCheckers.map((x) => x.name), ["direct-to-develop-bypass-check"], "the inert checker is named by the state");
+    fs.rmSync(dir, { recursive: true, force: true });
+
+    // Without the line: the field is an EMPTY ARRAY, not undefined (AC2 — "no inert checker this round"
+    // must be distinguishable from "this dimension was never recorded").
+    const root2 = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-inert2-"));
+    const { f: f2, dir: dir2 } = fakeSuite('echo "# tests 5"\necho "# pass 5"\necho "# fail 0"\necho "# cancelled 0"\nexit 0');
+    const child2 = runRunner({ root: root2, command: `bash ${f2}`, laneCount: 8 });
+    const { code: code2 } = await waitExit(child2);
+    assert.equal(code2, 0, "plain green run exits 0");
+    const s2 = readState(root2);
+    assert.deepEqual(s2.notEvaluatedCheckers, [], "no NOT-EVALUATED line ⇒ notEvaluatedCheckers is an EMPTY ARRAY, not undefined");
+    fs.rmSync(root2, { recursive: true, force: true });
+    fs.rmSync(dir2, { recursive: true, force: true });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("AC1/AC2 — buildStaticCheckFailures carries BOTH the VIOLATION details AND the fail-closed checkers, all staticCheck:true; the fail-closed checker (real gate, exit≠0) sorts FIRST so failures[0] is the gate's identity (gap-static-check-red-failures0-misattributed, round181/182)", () => {

@@ -61,13 +61,14 @@ before(async () => {
     "---\nid: ADR-099\ntitle: Old\nstatus: superseded\n---\n## Context\nold\n## Decision\nold\n");
   fs.mkdirSync(path.join(workspaceRoot, "goals"), { recursive: true });
   fs.mkdirSync(path.join(workspaceRoot, "docs-managed"), { recursive: true });
-  fs.writeFileSync(path.join(workspaceRoot, "goals", "AC-100-criterion.md"),
-    "---\nid: AC-100\ntitle: consistency\nstatus: active\nkind: criterion\nphase: PHASE-001\ncriterion: grep -cE '#[0-9a-fA-F]{6}'\nexpect: \"=0\"\norigin: 2026-08-16 measured criterion\nevidence:\n  at: 2026-08-16T00:00:00Z\n  verdict: pass\n  reading: \"0\"\n---\n## Rationale\nmeasured\n");
+  const goalsDir = path.join(workspaceRoot, "goals");
+  fs.writeFileSync(path.join(goalsDir, "AC-100-criterion.md"),
+    "---\nid: AC-100\ntitle: consistency\nstatus: active\nkind: criterion\ngoal: GOAL-001\ncriterion: grep -cE '#[0-9a-fA-F]{6}'\nexpect: \"=0\"\norigin: 2026-08-16 measured criterion\nevidence:\n  at: 2026-08-16T00:00:00Z\n  verdict: pass\n  reading: \"0\"\n---\n## Rationale\nmeasured\n");
   fs.writeFileSync(path.join(workspaceRoot, "docs-managed", "DOC-100-modernist.md"),
     "---\nid: DOC-100\ntitle: modernist doc\nstatus: active\nkind: skill\n---\n## Body\nthe modernist doc body\n");
   fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
   fs.writeFileSync(path.join(workspaceRoot, ".quay", "config.yml"),
-    `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"\n      QUAY_NATIVE_ADR_DIR: "${adrDir.replaceAll("\\", "\\\\")}"\n`);
+    `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"\n      QUAY_NATIVE_ADR_DIR: "${adrDir.replaceAll("\\", "\\\\")}"\n      QUAY_NATIVE_GOAL_DIR: "${goalsDir.replaceAll("\\", "\\\\")}"\n`);
   originalCwd = process.cwd();
   process.chdir(workspaceRoot);
   server = await startServer({ port: 0 });
@@ -113,10 +114,14 @@ test("AC100(b) — legacy /adr and /goal LIST pages still render (no regression)
   const adr = await get(port, "/adr");
   assert.equal(adr.status, 200);
   assert.match(adr.body, /ADR-100/);
+  // gap-webui-goal-list-tab-split-goal-ac: the merged GOAL+AC view split — criteria now render on
+  // the Criteria tab (which carries goalEvidenceCell's verdict column), goals on the default tab.
   const goal = await get(port, "/goal");
   assert.equal(goal.status, 200);
-  assert.match(goal.body, /AC-100/);
-  assert.match(goal.body, /verdict-pass/);          // goalEvidenceCell shared with list page
+  const criteria = await get(port, "/goal?kind=criterion");
+  assert.equal(criteria.status, 200);
+  assert.match(criteria.body, /AC-100/);
+  assert.match(criteria.body, /verdict-pass/);      // goalEvidenceCell shared with list page
 });
 
 // ── (c) static source check: the judge's grep over the detail-page render path ──

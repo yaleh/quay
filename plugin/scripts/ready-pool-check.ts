@@ -158,12 +158,28 @@
 
 import fs from "node:fs";
 import { repoRoot } from "./repo-root.ts";
+// gap-shape-section-tables-dual-copy-no-single-source: the shape section-name lists (which headings
+// count as proposal/plan/ac/dod per shape) were hand-copied twice — SHAPE_SECTIONS below and
+// packages/quay-native/src/store.ts's SHAPE_REGISTRY — and had already drifted twice (draft + suffix
+// variants landed only on this side). Now imported from plugin/scripts/shape-sections.ts (the single
+// source, shared with store.ts). It lives in plugin/scripts/ (not packages/) because quay-init lays
+// this dir into consumers WITHOUT a packages/ source tree — a static `import` of store.ts from here
+// would ERR_MODULE_NOT_FOUND in a laid-down consumer.
+import { SHAPE_SECTIONS } from "./shape-sections.ts";
+// Re-export for backward-compat importers (e.g. gate-shape-dispatch.test.mjs) — SHAPE_SECTIONS is
+// the single source now, not a local hand-copied map.
+export { SHAPE_SECTIONS };
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { parseTask, extractSection, readDependsOn } from "./task-schema.ts";
+import { parseTask, extractSection, readDependsOn, readTaskStatusAtRef } from "./task-schema.ts";
+// gap-task-ops-consolidate-driver-frontmatter-writers：frontmatter parse/patch + commit 单一真相源
+// 上收到 task-ops.ts（setTaskStatus / retreatReadyToTodo / commitTaskStatus 共用，⛔ 不再本文件手搓
+// fence 切分 + status/labels 行正则）。ensureDeliveryCriticalLabel re-export 保持旧 import 面。
+import { splitTaskFile, statusFromFrontmatter, patchStatusField, ensureDeliveryCriticalLabel, commitTaskFile, hasPriorCommit } from "./task-ops.ts";
+export { ensureDeliveryCriticalLabel } from "./task-ops.ts";
 // AC152：依赖全部 done 的判定核复用 driver-filters.ts 的 allDepsDone（depsSatisfied 谓词同一份实现，
 // ⛔ 不各写一遍「逐个查 status !== done」的循环）。
-import { allDepsDone, commitTaskFile, hasPriorCommit, syncDocDevelopBidirectional } from "./driver-filters.ts";
+import { allDepsDone, syncDocDevelopBidirectional } from "./driver-filters.ts";
 // criterion-cost self-record (gap-no-criterion-records-its-own-cost-checker-cost-jsonl): this
 // criterion KNOWS its input size n (the ready pool count) — the ONLY field that splits "the
 // criterion got slower" into "n got bigger" vs "the machine got busier" (the 35.8→91.2→157.0
@@ -207,7 +223,7 @@ import { defaultDriverConfig } from "./driver-config.ts";
 // git-history-signal): ONE `git log` over all of the landing ref (integration/develop/master per
 // landingRef — gap-git-history-landed-master-stale-under-two-line-model), matched in memory per task,
 // instead of ~30-50 per-task `git log -- <paths>` calls (each O(history) — the >150s pool-check timeout).
-import { taskWorkLanded, buildGitHistoryIndex, countAcCheckboxes, landingRef, wordMatch } from "./task-status-drift-check.ts";
+import { taskWorkLanded, buildGitHistoryIndex, countAcCheckboxes, landingRef, wordMatch, isCodeTouchEntry } from "./task-status-drift-check.ts";
 // RETIRED-MECHANISM INTERCEPT (gap-ready-pool-promotion-ignores-retired-mechanism-candidate-check):
 // promotion must NOT advance a candidate that references an ADR-022-deleted classic-pipeline script
 // (prepare-milestone.js / execute-milestone.js / milestone-worktree.ts) without annotation — a todo
@@ -235,6 +251,11 @@ import { listWorktrees, worktreeExists } from "./fast-mode-telemetry.ts";
 // record). Single source: checkTaskOneEntryOnePath — the SAME judge precommit-guard.ts uses (no
 // second Touches parser).
 import { checkTaskOneEntryOnePath, readOneEntryBaseline } from "./touches-one-entry-one-path-check.ts";
+// TOUCH-ABSENT-FROM-REF VETO (gap-nyf-doneflipready-arm-bypasses-leftover-worktree-exemption): parse
+// the task's ## Touches with STRUCTURAL TAGS (`(new)`/`(delete)`) — the tag-aware read from the
+// touches-parser single source, so a `(delete)`-tagged touch (whose absence from the landing ref is
+// the DESIRED end state) is excluded from the veto below.
+import { parseTouchEntriesWithTags } from "./touches-parser.ts";
 
 /** Default concurrency cap (max in-flight subagents) — derived from driver-config's
  *  defaultDriverConfig().worker.cap (the DISPATCH single source, AC155), NOT a parallel literal.
@@ -586,23 +607,37 @@ export function mergeSurfaceBlock(parsed, surfaces, expand) {
 
 // ── Value-prioritization relevance signal (tasks/gap-value-prioritization-has-no-mechanism) ─────────
 // The "which of the N todos matters most" question gets a MECHANICAL answer (no human scoring, AC3).
-// Three signal sources, all mechanical:
-//   strategic — body references a written strategic question: the orchestration/ strategic-doc
-//               naming convention FINDING-* / SYNTHESIS-* / SPEC-* / REVIEW-cadence (grep).
-//   blocking  — dependency reverse edges: the task is a parent (children non-empty) OR is named
-//               as `parent:` by another task OR is listed in another task's `depends_on` (the
-//               depends_on reverse-edge, gap-value-priority-signal-degraded-to-1-over-cost AC1) —
-//               landing it unblocks that dependent.
-//   cost      — declared Touches scale (parseTouches glob count; a MISSING Touches section is
-//               unknown scope, treated as high cost — the same conservative stance the dispatch gate
-//               takes: no usable Touches collides with everything).
-// value = strategic*STRATEGIC_WEIGHT + blocking*BLOCKING_WEIGHT + costBenefit(1/cost capped at 1).
-// The weights make the dominance chain STRICT: strategic (min 4) > non-strategic max (blocking 2 +
-// costBenefit max 1 = 3), and blocking (min 2) > costBenefit max (1). So a traceable task always
-// ranks before an untraceable one, a blocking task before a non-blocking one, and small-cost /
-// high-benefit breaks ties within a class. Sort is value desc (stable by id asc). Output to JSON as
-// `top_relevance` (the --top N todo query) + `ready_relevance` (the ready pool, "who to dispatch
-// next" — AC6). The existing gap-* > DIR-* / disjointness promotion ORDER is untouched (AC4).
+// Four signal sources, all mechanical:
+//   strategic     — body references a written strategic question: the orchestration/ strategic-doc
+//                   naming convention FINDING-* / SYNTHESIS-* / SPEC-* / REVIEW-cadence (grep).
+//   blocking      — dependency reverse edges: the task is a parent (children non-empty) OR is named
+//                   as `parent:` by another task OR is listed in another task's `depends_on` (the
+//                   depends_on reverse-edge, gap-value-priority-signal-degraded-to-1-over-cost AC1) —
+//                   landing it unblocks that dependent.
+//   consolidating — SUBTRACTION/CONSOLIDATION merit (gap-dispatch-value-has-no-consolidation-axis):
+//                   the task declares `extra.consolidates: N` (N = the number of duplicate
+//                   implementations it consolidates away). A MECHANICAL FRONTMATTER declaration, NOT
+//                   body prose — a task that merely SAYS it consolidates in prose gets NO weight (the
+//                   negative control that keeps this axis from becoming a second STRATEGIC_REF_RE
+//                   keyword match). Read via readConsolidates (task.extra).
+//   cost          — declared Touches scale (parseTouches glob count; a MISSING Touches section is
+//                   unknown scope, treated as high cost — the same conservative stance the dispatch
+//                   gate takes: no usable Touches collides with everything).
+// value = strategic*STRATEGIC_WEIGHT + blocking*BLOCKING_WEIGHT + consolidating*CONSOLIDATION_WEIGHT
+//       + costBenefit(1/cost capped at 1).
+// The consolidation axis is BINARY (consolidating = extra.consolidates > 0), not scaled by the
+// declared magnitude N — the magnitude is reported (for post-landing reverse-verification of the
+// net-deleted implementation count) but multiplying value by N would make it unbounded and gameable
+// (a task could claim consolidates: 99999). CONSOLIDATION_WEIGHT = 1 is the MINIMAL weight that makes
+// EVERY consolidating task (however wide — costBenefit → 0) outrank EVERY pure-cost task (however
+// narrow — costBenefit 1), which is exactly the starvation this axis fixes (a 120-touch consolidation
+// read 1/120 = 0.008 and was 40× below a 3-touch guard's 1/3); it is the dominance requirement, not a
+// fabricated magnitude, and AC4 confirms it against real ordering. It sits STRICTLY below blocking
+// (min 2) and strategic (min 4) — consolidation re-ranks WITHIN the non-traceable, non-blocking
+// class instead of displacing the "unblocks a dependent" priority. Sort is value desc (stable by id
+// asc). Output to JSON as `top_relevance` (the --top N todo query) + `ready_relevance` (the ready
+// pool, "who to dispatch next" — AC6). The existing gap-* > DIR-* / disjointness promotion ORDER is
+// untouched (AC4).
 // gap-value-priority-signal-degraded-to-1-over-cost AC1 — the strategic axis取数 bug: the old regex
 // required a literal hyphen after the strategic-doc prefix (`SPEC-`), so a body that references the
 // strategic doc as `SPEC §11 阶段 2` (the pilot's actual reference form — the SPEC doc is cited by
@@ -612,6 +647,11 @@ export function mergeSurfaceBlock(parsed, surfaces, expand) {
 export const STRATEGIC_REF_RE = /\b(?:SPEC|FINDING|SYNTHESIS)\b|REVIEW-cadence/;
 export const STRATEGIC_WEIGHT = 4;
 export const BLOCKING_WEIGHT = 2;
+// gap-dispatch-value-has-no-consolidation-axis — the SUBTRACTION/CONSOLIDATION axis weight. See the
+// value-function comment above for the calibration rationale (minimal weight that lifts a
+// consolidating task above EVERY pure-cost task, keeping the strict chain blocking(2) > consolidation
+// (1) > costBenefit(≤1)). NOT scaled by the declared N — binary (consolidating Y/N).
+export const CONSOLIDATION_WEIGHT = 1;
 
 // ── SUITE-BLOCKING signal (tasks/gap-ready-relevance-blind-to-suite-blocking-signal) ────────────────
 // computeRelevance's `blocking` axis used to read ONLY static parent/children dependency — a defect
@@ -630,70 +670,13 @@ export const SUITE_BLOCKING_WEIGHT = 2;
  *  连续 ≥3 轮红同一 Touches 命中 ⇒ blocking true). */
 export const RED_WINDOW_MIN_DEFAULT = 3;
 
-// Shape-aware registered sections (mirrors quay-native store.ts SHAPE_REGISTRY, single-source shape
-// dispatch: contract → finding → plan; unknown fails closed). The four artifacts are the shape's own
-// registered sections — a `finding`-shape task has no plan dimension, a `contract`-shape task uses
-// `## Contract` as its plan artifact.
-//
-// GAP-TODO-SHAPE-MISMATCH (2026-08-09, tasks/gap-todo-shape-mismatch-author-gate): the finding shape
-// additionally recognizes the draft-heading variants `## AC（draft）` / `## DoD（draft）` (and their
-// half-width-paren form `## AC (draft)`) that 9 real finding-shape gap-* tasks in this store use for
-// their AC/DoD sections. They ARE the AC/DoD artifacts — the `（draft）` suffix is a heading-label
-// convention, not an absent section — so the four-artifacts gate must count them, or those todo tasks
-// are wrongly ineligible for author→ready promotion (the 38-todo shape-vs-gate mismatch).
-// AC/DoD SUFFIXED-HEADING VARIANTS (gap-ac47-completion-predicate-consumer-fail-closed, AC3):
-// suffixed AC/DoD headings real directive tasks in this store use — `## Acceptance Criteria
-// (runnable)`, `## Acceptance Criteria (runnable — artifacts are necessary-not-sufficient)`,
-// `## Definition of Done — REAL LANDING is the bar, not artifacts`, `## Definition of Done — REAL
-// LANDING, subtractive (…)`. Explicitly REGISTERED (manager 2026-08-13 preference) rather than
-// prefix-matched — a prefix would ALSO swallow `## Acceptance Criteria for the OLD design`, adding
-// uncertainty to an already-fragile matcher. An UNREGISTERED suffixed variant is NOT matched here and
-// therefore fails CLOSED at countAcCheckboxes (null section → NaN total → every consumer fails
-// "complete/landed"), consistent with the existing `（draft）`-variant handling (explicit registration,
-// unregistered ⇒ fail-closed).
-const AC_SUFFIX_VARIANTS = [
-  "Acceptance Criteria (runnable)",
-  "Acceptance Criteria (runnable — artifacts are necessary-not-sufficient)",
-];
-const DOD_SUFFIX_VARIANTS = [
-  "Definition of Done — REAL LANDING is the bar, not artifacts",
-  "Definition of Done — REAL LANDING, subtractive (DIR-026 Reading A preserved)",
-];
-
-const SHAPE_SECTIONS = {
-  contract: {
-    // `## 人的裁定` is the directive-variant proposal-slot (type: directive tasks
-    // carry the human ruling as proposal, implementation in ## Contract —
-    // DIR-123-aarch64, gap-cli-quay-init-collides). Same alias principle as
-    // finding's `## Finding` mapping into the proposal-slot.
-    proposal: ["Proposal", "人的裁定"],
-    plan: ["Contract"],
-    ac: ["AC", "Acceptance Criteria", ...AC_SUFFIX_VARIANTS],
-    dod: ["DoD", "Definition of Done", ...DOD_SUFFIX_VARIANTS],
-  },
-  finding: {
-    proposal: ["Finding"],
-    ac: ["AC", "Acceptance Criteria", "AC（draft）", "AC (draft)", ...AC_SUFFIX_VARIANTS],
-    dod: ["DoD", "Definition of Done", "DoD（draft）", "DoD (draft)", ...DOD_SUFFIX_VARIANTS],
-  },
-  plan: {
-    proposal: ["Proposal"],
-    plan: ["Plan"],
-    ac: ["AC", "Acceptance Criteria", ...AC_SUFFIX_VARIANTS],
-    dod: ["DoD", "Definition of Done", ...DOD_SUFFIX_VARIANTS],
-  },
-  // proposal shape (2026-08-11, mirrors store.ts SHAPE_REGISTRY): a task whose own
-  // complete contract is Proposal / AC / DoD with NO plan dimension — symmetric
-  // with `finding` but the proposal-slot is the literal `## Proposal`. Recording-type
-  // directives (DIR-028: "只记录方向,不要求立刻做") and execution tasks carrying their
-  // approach inside `## Proposal` (no separate `## Plan`) are complete on this
-  // dimension. Adding a fabricated `## Contract` would be a shape change, not a fix.
-  proposal: {
-    proposal: ["Proposal"],
-    ac: ["AC", "Acceptance Criteria", ...AC_SUFFIX_VARIANTS],
-    dod: ["DoD", "Definition of Done", ...DOD_SUFFIX_VARIANTS],
-  },
-};
+// Shape-aware registered sections — SINGLE SOURCE is plugin/scripts/shape-sections.ts (imported +
+// re-exported at the top of this file). This map USED to be a hand-copied second list that drifted
+// twice: the finding-shape DRAFT-heading variants (`## AC（draft）` / `## DoD（draft）`,
+// gap-todo-shape-mismatch-author-gate) and the AC/DoD SUFFIXED-HEADING variants (`## Acceptance
+// Criteria (runnable)` etc., gap-ac47-completion-predicate-consumer-fail-closed AC3) landed ONLY here,
+// so store.check() and artifactsComplete() disagreed on the SAME body. Both lists now live in
+// shape-sections.ts; adding a heading variant there is seen by both judges at once.
 
 /** Detect a task body's shape by exact heading presence (contract → finding → plan → proposal → unknown). */
 export function detectShape(body) {
@@ -902,6 +885,58 @@ export function isPendingImplementationItem(text) {
   return !isExternalVerificationItem(text);
 }
 
+// ── TOUCH-ABSENT-FROM-REF VETO (gap-nyf-doneflipready-arm-bypasses-leftover-worktree-exemption) ─────
+// The landed signals (taskWorkLanded's symbol-resolution / touch-file existence) read the main
+// checkout's DISK working tree — a file the task EDITS already exists there regardless of whether THIS
+// task's change landed, so "the file exists" carries zero information (hard rule 4b, measured
+// 2026-09-08: gap-mechanical-fan-in-loses-per-phase-accounting declared
+// `plugin/test/suite-accounting.test.mjs` — ABSENT from develop — yet taskWorkLanded read true via
+// symbol-resolution in the PRE-EXISTING `suite-accounting.ts`). The DIRECT quantity is "is every
+// declared specific code-root Touches file present in the LANDING REF's tree" — a file ABSENT from the
+// ref is positive evidence the work has NOT landed. The veto only fires on POSITIVE absence evidence:
+// an unreadable ref (non-git root) does NOT veto, because a false veto (keep dispatching) is
+// self-healing while a false non-veto is the exact "task disappears from the pool FOREVER" failure.
+
+/** Does the landing ref resolve in this repo? Non-git roots (the makeWorkspace test fixture) have no
+ *  ref — there is no tree to check against, so the veto must stay OFF (fail-soft, original behavior). */
+function gitRefExists(repoRoot, ref) {
+  try {
+    const out = execFileSync("git", ["-C", repoRoot, "rev-parse", "--verify", "-q", ref], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Is `path` present in the landing ref's tree? `git cat-file -e <ref>:<path>` exit 0 ⇒ present. */
+function gitFileExistsAtRef(repoRoot, ref, pathName) {
+  try {
+    execFileSync("git", ["-C", repoRoot, "cat-file", "-e", `${ref}:${pathName}`], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True when a declared CODE-ROOT Touches file (specific, non-glob, non-`(delete)`) is ABSENT from the
+ *  landing ref's tree — the veto that suppresses the landed arms. A `(delete)`-tagged touch is excluded
+ *  (its absence from the ref is the DESIRED end state); bookkeeping paths (tasks/** etc.) are excluded
+ *  (not implementation evidence); globs are excluded (can't `cat-file` a pattern). */
+function hasTouchAbsentFromRef(taskBody, repoRoot, opts) {
+  const touchesSection = extractSection(taskBody, "Touches");
+  if (!touchesSection) return false;
+  const ref = landingRef(repoRoot, opts);
+  if (!gitRefExists(repoRoot, ref)) return false; // fail-soft: no ref ⇒ no veto
+  return parseTouchEntriesWithTags(touchesSection)
+    .filter((e) => e.tag !== "delete")
+    .map((e) => e.path)
+    .filter((p) => p && !p.includes("*") && !p.includes("?"))
+    .filter((p) => isCodeTouchEntry(p))
+    .some((p) => !gitFileExistsAtRef(repoRoot, ref, p));
+}
+
 /** True when the task is in the "this batch done, not yet flipped to done" state — the declared
  *  work has landed on the mainline (task-status-drift-check's symbol-resolution / touch-file /
  *  git-history evidence — the last over integration/develop/master per landingRef, not hardcoded
@@ -951,6 +986,20 @@ export function notYetFlipped(task, repoRoot, gitIndex, opts = null) {
   const o = { taskId: task.id };
   if (gitIndex) o.gitIndex = gitIndex; // batched git-history index (see buildGitHistoryIndex)
   if (opts && !Array.isArray(opts) && opts.ref) o.ref = opts.ref; // landing ref (two-line model)
+  // LEFTOVER-WORKTREE EXEMPTION — HOISTED ABOVE EVERY ARM
+  // (gap-nyf-doneflipready-arm-bypasses-leftover-worktree-exemption): an OPEN `task/<id>` worktree is
+  // the DIRECT "fan-in not yet complete" quantity (ff-merge success is what deletes it) — while it
+  // exists the task must stay dispatchable REGARDLESS of any landed/completion signal. The OLD form
+  // (gap-ready-pool-notyflipped-allchecked-leftover-worktree-exemption) gated ONLY the standalone
+  // `allChecked` arm, so a FALSE "landed" on the `doneFlipReady` arm (symbol-resolution / touch-file
+  // existence reading the main checkout's DISK working tree instead of the landing ref — hard rule 4b)
+  // bypassed the exemption entirely and made a worktree-open task disappear from the pool FOREVER
+  // (measured 2026-09-08: gap-mechanical-fan-in-loses-per-phase-accounting + gap-perfile-failure-rate-
+  // baseline-step-change, both worktree-open + taskWorkLanded=true while their files are ABSENT from
+  // develop). Hoisting also skips the taskWorkLanded grep for worktree-open tasks. `worktreeExists` is
+  // fail-soft (non-git root / unreadable list ⇒ false ⇒ the arms below still judge normally).
+  const hasLeftoverWorktree = worktreeExists(repoRoot, task.id);
+  if (hasLeftoverWorktree) return false;
   const workLanded = taskWorkLanded(task.body, repoRoot, o);
   // COMMIT-TRACE (gap-nyf-branch-existence-vs-commit-trace): a commit whose subject names the task in
   // the inner:/fan-in: conventions is a PERSISTENT work-landed record — it survives branch deletion AND
@@ -994,22 +1043,15 @@ export function notYetFlipped(task, repoRoot, gitIndex, opts = null) {
   // trace — the trace alone is never enough.
   const commitTraceReady = traced && (allChecked || total === 0);
   const workLandedReady = workLanded && (allChecked || remainingAllExternal || total === 0);
-  const doneFlipReady = workLandedReady || commitTraceReady;
-  // LEFTOVER-WORKTREE EXEMPTION (gap-ready-pool-notyflipped-allchecked-leftover-worktree-exemption):
-  // the standalone `allChecked` arm (added 2026-08-08) excludes a ready task purely on its
-  // SELF-DECLARED completion — no landing evidence at all — so it judged not-yet-flipped and deferred
-  // forever. A mechanical fan-in FAILURE (suite red / merge-develop conflict) leaves the task
-  // `ready + all-checked + un-landed` WITH its `task/<id>` worktree still open (ff-merge success is
-  // what deletes it) — and the old arm excluded it every round, so the landing path (worker dispatch →
-  // driver fan-in) never ran again: permanent stranding that only a manual AC-uncheck could undo, and
-  // one such dead task froze the whole dispatch pool (dispatchable_disjoint 0). The open worktree is
-  // the DIRECT "fan-in not yet complete" quantity (same `git worktree list` source as
-  // computeInFlightWorktreeTouches): while it exists the task must stay dispatchable so the next
-  // dispatch triggers the driver's mechanical fan-in retry (self-heal). No worktree (true landed / the
-  // 2026-08-08 prose-AC shape) keeps the original exclude behavior. `worktreeExists` is fail-soft
-  // (non-git root / unreadable list ⇒ false ⇒ original behavior preserved).
-  const hasLeftoverWorktree = worktreeExists(repoRoot, task.id);
-  return doneFlipReady || (allChecked && !hasLeftoverWorktree);
+  // TOUCH-ABSENT-FROM-REF VETO (gap-nyf-doneflipready-arm-bypasses-leftover-worktree-exemption, step 2):
+  // a declared CODE-ROOT Touches file ABSENT from the landing ref's tree is DIRECT evidence the work
+  // has NOT landed — the existence / symbol-resolution landed signals read the main checkout's DISK
+  // working tree, which contains pre-existing files the task EDITS (existence ⇒ zero information, hard
+  // rule 4b). Absent ⇒ the landed arms must not fire (fail-closed toward dispatchable). The veto is
+  // fail-soft: an unreadable ref (non-git root) does NOT veto — a false veto (keep dispatching) is
+  // self-healing, while a false non-veto is the exact "disappear from the pool FOREVER" catastrophe.
+  const doneFlipReady = !hasTouchAbsentFromRef(task.body, repoRoot, o) && (workLandedReady || commitTraceReady);
+  return doneFlipReady || allChecked;
 }
 
 export function isFixture(task) {
@@ -1083,25 +1125,48 @@ export function readChildren(frontmatterRaw) {
 // excluded from the ready pool and ineligible for author→ready promotion (it stays dispatchable ONLY
 // when the prose prereq is ALSO a relation edge — a normal dependency, handled by depsReadyFor).
 //
-// Precision constraints (verified against the real store, 2026-08-11):
+// Precision constraints (verified against the real store, 2026-08-11; widened 2026-09-10):
 //   - WIKILINKS INSIDE CODE SPANS ARE SKIPPED: a paragraph QUOTING another task's prereq prose inside
 //     backticks (`` `[[gap-…]]` `` — e.g. this very task's Proposal describing the empirical task) is
-//     an illustrative mention, not a prereq declaration. stripCode removes fenced blocks + inline
-//     backtick spans before wikilink matching.
-//   - A prereq keyword ALONE is not enough — the paragraph must ALSO carry a wikilink to an EXISTING
-//     task file (a broken link is a different defect, not a prereq claim).
+//     an illustrative mention, not a prereq declaration. The WIKILINK arm matches on an inline-stripped
+//     copy so a QUOTED wikilink stays skipped, while the BACKTICK arm (below) matches the repo's
+//     DOMINANT citation form `` `gap-xxx` ``.
+//   - A prereq keyword ALONE is not enough — the paragraph must ALSO carry a resolvable task-id
+//     reference (wikilink or backtick span) to an EXISTING task file (a broken link is a different
+//     defect, not a prereq claim).
 //   - "依赖" alone is deliberately NOT in the keyword set (a "无代码依赖 / no code dependency" mention
-//     would false-fire); only gating constructions qualify.
-const PREREQ_KEYWORD_RE =
-  /前置|depends?\s+on|depends_on|do\s+not\s+dispatch|勿派|不得派发|不得派|禁止派发|先决|前序|声明依赖|依赖前序|先落地|先完成|先跑/i;
+//     would false-fire); only gating constructions qualify. "阻塞" IS in the set — it is the repo's
+//     dominant blocking word (empirically 102 paragraphs vs 1 for the prior table; the pre-edge
+//     AC-207 corpus had 63/64 paragraphs invisible to the old table for exactly this reason).
+export const PREREQ_KEYWORD_RE =
+  /前置|depends?\s+on|depends_on|do\s+not\s+dispatch|勿派|不得派发|不得派|禁止派发|先决|前序|声明依赖|依赖前序|先落地|先完成|先跑|阻塞/i;
 const WIKILINK_RE = /\[\[([A-Za-z0-9][A-Za-z0-9-]*)(?:[#|][^\]]*)?\]\]/g;
+// The repo's DOMINANT task-id citation form is the inline backtick span (`gap-xxx`): 740 task files
+// cite ids this way vs 67 wikilink files (≈11:1). These are the citation convention itself, NOT code
+// — so they are matched alongside wikilinks, gated by the prereq keyword on the paragraph (the keyword
+// gate decides whether the paragraph DECLARES a prereq; a pure example mention like "同族于 `gap-x`"
+// carries no keyword and is skipped). A bare single-token span (`done` / `阻塞`) has no dash and never
+// matches; the existsSync resolution below filters out non-task ids (code files, skill names).
+const BACKTICK_ID_RE = /`([A-Za-z0-9][A-Za-z0-9]*(?:-[A-Za-z0-9]+)+)`/g;
+
+/** Strip fenced code blocks (```…``` / ~~~…~~~). Inline backticks are NOT stripped here — they are the
+ *  repo's citation form, matched separately by BACKTICK_ID_RE in prosePrereqRefs. */
+function stripFences(text) {
+  return text.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, " ");
+}
+
+/** Strip inline backtick spans (`…`) only (no fences). Used for the WIKILINK arm of prosePrereqRefs so
+ *  a QUOTED wikilink stays an illustrative mention. */
+function stripInlineCodeSpans(text) {
+  return text.replace(/`[^`\n]*`/g, " ");
+}
 
 /** Strip fenced code blocks (```…``` / ~~~…~~~) and inline backtick spans (`…`) so a QUOTED wikilink
  *  inside code is not read as a prereq declaration. Fences are removed before inline spans (an inline
- *  backtick can appear inside a fence). */
+ *  backtick can appear inside a fence). Exported — strategic-doc-staleness-check.ts reuses it (its
+ *  contract is fence+inline stripping, so it is left unchanged). */
 export function stripCodeSpans(text) {
-  const noFence = text.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, " ");
-  return noFence.replace(/`[^`\n]*`/g, " ");
+  return stripInlineCodeSpans(stripFences(text));
 }
 
 /** The task's declared relation-edge set — parent + children + depends_on (the fields every
@@ -1115,16 +1180,73 @@ export function relationEdges(frontmatterRaw) {
   return edges;
 }
 
-/** Task ids referenced as wikilinks inside prereq-declaration paragraphs of the body (code spans
- *  stripped; only ids that resolve to an existing task file). */
+/** Sibling/heritage/example markers: a task-id mention introduced by one of these is NOT a prereq
+ *  declaration — it names a RELATED / sibling / root-cause / heritage task ("同族于 X"、"已另立 X"、
+ *  "此外 X 亦已 done"、"且是 X 遗漏的调用点"、"架构性任务 X"、"它是 X 的产物"、"实证对象：X"、纯
+ *  "参见 X" 例举). Genuine prereq declarations ("阻塞 X"、"待 X 落地"、"前序任务 X"、"修复任务 X"、
+ *  "depends on X") carry no such marker. Corpus-derived from the AC-207 body + this task's own Proposal. */
+const SIBLING_MENTION_RE = /同族于|已另立|另立|此外|参见|类似|参照|产物|实证对象|架构性任务|遗漏的调用点|遗漏调用点/;
+
+/** A ref is a sibling/heritage mention when a sibling marker sits within this many chars of the span
+ *  (before or after). Tight enough that "阻塞 X；此外还…" does not bleed, wide enough for "已另立 X". */
+const SIBLING_MENTION_WINDOW = 16;
+function isSiblingMention(para, start, end) {
+  const before = para.slice(Math.max(0, start - SIBLING_MENTION_WINDOW), start);
+  const after = para.slice(end, end + SIBLING_MENTION_WINDOW);
+  if (SIBLING_MENTION_RE.test(before) || SIBLING_MENTION_RE.test(after)) return true;
+  // List continuation: "另立两任务 `A`（ready）与 `B`（ready）" — the second item is introduced by
+  // "与" and inherits sibling-ness from the "另立" list-opener earlier in the same clause. Genuine
+  // "阻塞 `A` 与 `B`" lists are untouched (no "另立" opener, so the second item is still flagged).
+  const farBefore = para.slice(Math.max(0, start - 80), start);
+  if (/与\s*$/.test(before) && /另立/.test(farBefore)) return true;
+  return false;
+}
+
+/** Read a task's `status:` frontmatter field straight off disk (null when the file/field is absent).
+ *  Used to drop refs to SUPERSEDED tasks — a retired task is not a valid current-prereq target (its
+ *  body reference is a stale name; the successor carries the real dependency). */
+function readTaskStatusOnDisk(tasksDir, id) {
+  const file = path.join(tasksDir, `${id}.md`);
+  if (!fs.existsSync(file)) return null;
+  const head = fs.readFileSync(file, "utf8");
+  const fm = head.match(/^---\n([\s\S]*?)\n---/);
+  return fm ? readFrontField(fm[1], "status") : null;
+}
+
+/** Task ids referenced inside prereq-declaration paragraphs of the body. Two citation forms are
+ *  recognized (both gated by the prereq keyword on the paragraph — the keyword decides whether the
+ *  paragraph DECLARES a prerequisite at all):
+ *    - wikilinks `[[id]]`, matched on an inline-backtick-stripped copy so a QUOTED wikilink stays an
+ *      illustrative mention (the original stripCodeSpans intent);
+ *    - inline backtick spans `` `id` `` — the repo's dominant citation form (≈11:1 over wikilinks),
+ *      matched on a fence-only copy (inline spans are KEPT here because they ARE the citation).
+ *  Two ref-level filters keep the widen PRECISE (a sibling/heritage mention is not a prereq):
+ *    - a ref whose context carries a sibling marker is dropped (see SIBLING_MENTION_RE);
+ *    - a ref to a SUPERSEDED task is dropped (retired task — its successor is the real prereq).
+ *  Only ids that resolve to an existing, non-superseded task file are returned. */
 export function prosePrereqRefs(body, tasksDir) {
   const refs = new Set();
-  const clean = stripCodeSpans(body);
-  for (const para of clean.split(/\r?\n\s*\r?\n/)) {
+  const noFence = stripFences(body);
+  const inlineStripped = stripInlineCodeSpans(noFence);
+  const paras = noFence.split(/\r?\n\s*\r?\n/);
+  const inlineParas = inlineStripped.split(/\r?\n\s*\r?\n/);
+  const add = (id) => {
+    if (refs.has(id)) return;
+    if (readTaskStatusOnDisk(tasksDir, id) === "superseded") return;
+    const file = path.join(tasksDir, `${id}.md`);
+    if (fs.existsSync(file)) refs.add(id);
+  };
+  for (let i = 0; i < paras.length; i++) {
+    const para = paras[i];
     if (!PREREQ_KEYWORD_RE.test(para)) continue;
-    for (const m of para.matchAll(WIKILINK_RE)) {
-      const id = m[1];
-      if (fs.existsSync(path.join(tasksDir, `${id}.md`))) refs.add(id);
+    const inlinePara = inlineParas[i] ?? "";
+    for (const m of inlinePara.matchAll(WIKILINK_RE)) {
+      if (isSiblingMention(inlinePara, m.index, m.index + m[0].length)) continue;
+      add(m[1]);
+    }
+    for (const m of para.matchAll(BACKTICK_ID_RE)) {
+      if (isSiblingMention(para, m.index, m.index + m[0].length)) continue;
+      add(m[1]);
     }
   }
   return [...refs];
@@ -1153,6 +1275,21 @@ export function touchesScale(body) {
   return { hasSection, count: globs.length };
 }
 
+/** The consolidation declaration — `extra.consolidates: N` (N = the number of duplicate
+ *  implementations this task consolidates away). A MECHANICAL frontmatter field (parseTask's `extra`
+ *  projection, the same single YAML parser readDependsOn uses), NOT body prose — a task that only
+ *  SAYS it consolidates in prose has no `extra.consolidates` field and reads 0 here (the negative
+ *  control: this axis must not become a second STRATEGIC_REF_RE keyword match). Returns the declared
+ *  N as a non-negative integer; 0 when the field is absent / non-numeric / ≤0 (fail-open — absence
+ *  means "not consolidating"). The axis weight is BINARY (N>0), not scaled by N: the magnitude is
+ *  reported for post-landing reverse-verification (net-deleted implementation count), but scaling
+ *  value by N would make it unbounded and gameable. */
+export function readConsolidates(task) {
+  const extra = task && task.extra && typeof task.extra === "object" && !Array.isArray(task.extra) ? task.extra : {};
+  const n = Number(extra.consolidates);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
 /** The composite relevance signal for one task. All inputs mechanical (grep / frontmatter fields /
  *  touches count) — no human scoring. `childrenByTask` / `parentRefCount` are precomputed once per
  *  analyzeTasks call (blocking needs to know if ANY other task names this id as its parent).
@@ -1170,10 +1307,15 @@ export function computeRelevance(id, task, childrenByTask = new Map(), parentRef
   // `dependedOnCount` counts how many tasks list this id in their `depends_on`; >0 flips blocking true.
   const dependedOn = (dependedOnCount.get(id) || 0) > 0;
   const blocking = children.length > 0 || (parentRefCount.get(id) || 0) > 0 || dependedOn || suiteBlocking;
+  // gap-dispatch-value-has-no-consolidation-axis — the SUBTRACTION/CONSOLIDATION axis: a mechanical
+  // `extra.consolidates: N` declaration (N = duplicate implementations consolidated away), NOT body
+  // prose. Binary (N>0), weighted CONSOLIDATION_WEIGHT — see the value-function comment for why.
+  const consolidates = readConsolidates(task);
+  const consolidating = consolidates > 0;
   const { hasSection, count } = touchesScale(task.body);
   const cost = hasSection ? count : 0;
   const costBenefit = hasSection && count > 0 ? Math.min(1, 1 / count) : 0;
-  const value = (strategic ? STRATEGIC_WEIGHT : 0) + (blocking ? BLOCKING_WEIGHT : 0) + (suiteBlocking ? SUITE_BLOCKING_WEIGHT : 0) + costBenefit;
+  const value = (strategic ? STRATEGIC_WEIGHT : 0) + (blocking ? BLOCKING_WEIGHT : 0) + (suiteBlocking ? SUITE_BLOCKING_WEIGHT : 0) + (consolidating ? CONSOLIDATION_WEIGHT : 0) + costBenefit;
   const v = Number(value.toFixed(3));
   // reason's blocking clause names the blocking source(s): children / parent-ref / depends-on / suite.
   const blockSources = [];
@@ -1186,12 +1328,15 @@ export function computeRelevance(id, task, childrenByTask = new Map(), parentRef
     strategic,
     blocking,
     blocking_suite: suiteBlocking,
+    consolidating,
+    consolidates,
     cost,
     value: v,
     reason:
       `value ${v} · strategic ${strategic ? "Y" : "N"} · ` +
       `blocking ${blocking ? `Y(${blockSources.join(" · ")})` : "N"} · ` +
       `suite-blocking ${suiteBlocking ? "Y" : "N"} · ` +
+      `consolidating ${consolidating ? `Y(${consolidates})` : "N"} · ` +
       `cost ${cost} touch${cost === 1 ? "" : "es"}`,
   };
 }
@@ -1753,6 +1898,12 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
   // setTaskStatus/applyPromotions. A candidate with no frontmatter / no such label ⇒ false
   // (conservative default, matching the dispatch side).
   const deliveryCritical = (task.labels || []).includes("delivery-critical");
+  // LONG-TERM-GUARANTEE FILING-TIME GATE (gap-long-term-guarantee-registry-hand-maintained): 立案时必填 —
+  // a delivery-critical candidate must declare a non-empty goal_ac (task→AC linkage, parseTask's
+  // frontmatterGoalAc projection: absent/empty ⇒ null). This is the filing-time half of the positional
+  // judgment that replaced the retired hand-maintained registry; the goal-layer half (the
+  // long-term-guarantee-goal-backed-check) enforces the same rule on post-cutoff tasks every round.
+  const goalAcMissing = deliveryCritical && !task.goal_ac;
   // PRIORITY TIEBREAKER (gap-priority-has-no-mechanism-reader): the explicit `priority:*` label
   // (p1 > p2 > none), read from the SAME frontmatter-labels source (parseTask) the dispatch sort
   // reads. A PREFERENCE, never a safety override — the promotion sort ranks disjointScore FIRST
@@ -1783,6 +1934,9 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     // determination — consumed by applyPromotions so the label is written AT PROMOTE (标签与 ready
     // 同现). Same frontmatter-labels source the dispatch sort reads.
     deliveryCritical,
+    // LONG-TERM-GUARANTEE FILING-TIME GATE (gap-long-term-guarantee-registry-hand-maintained): a
+    // delivery-critical candidate without goal_ac is never promotion-eligible (立案时必填, fail-closed).
+    goalAcMissing,
     // PRIORITY TIEBREAKER (gap-priority-has-no-mechanism-reader): the candidate's explicit
     // `priority:*` label rank (p1=1, p2=2, none=Infinity) — consumed by the promotion sort as the
     // tiebreaker WITHIN an equal-disjointness bucket (AC1). Never above disjointScore (AC3).
@@ -1818,7 +1972,7 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     // TOUCHES-WIDTH (2026-08-28): the touchesNarrow guard is ADDED — a candidate with a
     // directory-level `## Touches` glob is never eligible (it would silently lock the whole dispatch
     // pool while in flight; the fix-worker narrows it before it ever enters ready).
-    eligible: depsReady && four.complete && touchesResolve && touchesNarrow.narrow && !retiredMechanism && !superseded && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok,
+    eligible: depsReady && four.complete && touchesResolve && touchesNarrow.narrow && !retiredMechanism && !superseded && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok && !goalAcMissing,
   };
 }
 
@@ -1914,6 +2068,22 @@ export function buildTargetedPromotion(id, task, root, allTasks, develop = "deve
       checks: { retiredMechanism: true, retiredRefs: staleRefs },
     };
   }
+  // LONG-TERM-GUARANTEE FILING-TIME GATE (gap-long-term-guarantee-registry-hand-maintained): the same
+  // 立案时必填 fail-closed as the bulk path — a delivery-critical candidate without goal_ac is never
+  // targeted-promotable either (an outer stage-goal selection must not bypass it).
+  const deliveryCritical = (task.labels || []).includes("delivery-critical");
+  const goalAcMissing = deliveryCritical && !task.goal_ac;
+  if (goalAcMissing) {
+    return {
+      id,
+      found: true,
+      status: task.status,
+      eligible: false,
+      floor_independent: true,
+      reason: `goal-ac-missing: ${id} is delivery-critical but declares no goal_ac (立案时必填, fail-closed) — not promotable`,
+      checks: { goalAcMissing: true },
+    };
+  }
   const four = artifactsComplete(task.body);
   const depsReady = depsReadyFor(task, allTasks, root, develop);
   const touches = checkTaskTouchesResolve(task.body, root);
@@ -1922,7 +2092,7 @@ export function buildTargetedPromotion(id, task, root, allTasks, develop = "deve
   // PROSE-PREREQUISITE GAP (AC3): targeted promotion must NOT advance a task whose prose-declared
   // prereqs have no relation edge — same fail-closed as the bulk path.
   const prosePrereqGapIds = prosePrereqGap(task.body, task.frontmatterRaw, path.join(root, "tasks"));
-  const eligible = four.complete && depsReady && touchesResolve && touchesNarrow.narrow && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok;
+  const eligible = four.complete && depsReady && touchesResolve && touchesNarrow.narrow && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok && !goalAcMissing;
   const checks = {
     fourArtifacts: four.complete,
     missingArtifacts: four.missing,
@@ -1937,6 +2107,7 @@ export function buildTargetedPromotion(id, task, root, allTasks, develop = "deve
     retiredMechanism: false,
     compound,
     selfTouchOk: selfTouch.ok,
+    goalAcMissing,
   };
   return {
     id,
@@ -2014,16 +2185,12 @@ export function readTaskFileAtRef(root, ref, taskId) {
   return readTaskFilesAtRefBatch(root, ref, [taskId]).get(taskId) ?? null;
 }
 
-/** Read `<ref>:tasks/<id>.md` `status:` frontmatter (the status half of readTaskFileAtRef).
- *  null when the ref/path is unavailable or the frontmatter is unreadable. */
-export function readTaskStatusAtRef(root, ref, taskId) {
-  const raw = readTaskFileAtRef(root, ref, taskId);
-  if (raw === null) return null;
-  const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!m) return null;
-  const statusLine = m[1].split("\n").map((l) => l.trim()).find((l) => l.startsWith("status:"));
-  return statusLine ? (statusLine.slice("status:".length).trim() || null) : null;
-}
+// readTaskStatusAtRef — SINGLE-SOURCE in task-schema.ts (gap-task-status-parsing-reimplemented-13-sites).
+// Formerly verbatim-copied here + driver-filters.ts + worker-driver.ts (async); now imported + re-exported
+// (ready-pool-check.test.mjs / slot-refill.test.mjs import it from this module). readTaskFileAtRef /
+// readTaskFilesAtRefBatch above are unchanged — they read the RAW file content (the batched dispatch read),
+// distinct from the status projection now owned by task-schema.ts.
+export { readTaskStatusAtRef };
 
 /** Analyze a task store. Returns { pool, floor, cap, floorMult, deficit, dispatchable_disjoint,
  *  criterion_met, pool_big_all_colliding, report, ready, excluded, candidates, promotions,
@@ -2431,48 +2598,8 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
 // candidate promotes regardless of pool size (合格即晋). The negative control (AC3) is structural:
 // an empty `promotions` array (no eligible candidate) ⇒ zero writes.
 
-/** Ensure the frontmatter carries the `delivery-critical` label. Mirrors parseTask's label reading
- *  (task-schema.ts — block list OR flow list OR absent), then ADDS the label when missing. This is
- *  the "标签与 ready 同现" write: the promote gate determines delivery-critical at promote time, and
- *  this helper makes the label physically present in the frontmatter AT ready-entry — so the
- *  dispatch-time sort key (slot-refill's deliveryCritical axis, which reads the same labels via
- *  parseTask/parseCandidate) can act on it in the NEXT selection.
- *  @param {string} fm  the frontmatter text between the `---` fences
- *  @returns {{ fm: string, added: boolean, deliveryCritical: boolean }}  `deliveryCritical` is true
- *      when the label is present after the operation (already there, or newly added). */
-export function ensureDeliveryCriticalLabel(fm) {
-  // flow list: `labels: [a, b]`
-  const flow = /^(labels:\s*\[)([^\]]*)(\]\s*)$/m.exec(fm);
-  if (flow) {
-    const list = flow[2];
-    const items = list.split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
-    if (items.includes("delivery-critical")) return { fm, added: false, deliveryCritical: true };
-    const sep = list.trim() ? ", " : "";
-    return {
-      fm: fm.replace(/^(labels:\s*\[)([^\]]*)(\]\s*)$/m, `$1${list}${sep}delivery-critical$3`),
-      added: true,
-      deliveryCritical: true,
-    };
-  }
-  // block list: `labels:\n  - a\n  - b`
-  if (/^labels:\s*$/m.test(fm)) {
-    const lines = fm.split(/\r?\n/);
-    const idx = lines.findIndex((l) => /^labels:\s*$/.test(l));
-    const hasDc = lines.slice(idx + 1).some((l) => /^\s+-\s+["']?delivery-critical["']?\s*$/.test(l));
-    if (hasDc) return { fm, added: false, deliveryCritical: true };
-    // Insert a new `  - delivery-critical` item at the end of the labels block (before the next
-    // top-level key, or at the frontmatter end when labels is the last field).
-    let insertAt = lines.length;
-    for (let i = idx + 1; i < lines.length; i++) {
-      if (/^\S/.test(lines[i])) { insertAt = i; break; }
-    }
-    lines.splice(insertAt, 0, "  - delivery-critical");
-    return { fm: lines.join("\n"), added: true, deliveryCritical: true };
-  }
-  // No labels field at all — append a block list at the end of the frontmatter (before the closing
-  // fence, which the caller owns).
-  return { fm: `${fm.replace(/\n*$/, "")}\nlabels:\n  - delivery-critical\n`, added: true, deliveryCritical: true };
-}
+// ensureDeliveryCriticalLabel 已迁至 task-ops.ts（gap-task-ops-consolidate-driver-frontmatter-writers），
+// 本文件 re-export 保持旧 import 面（ready-pool-check.test.mjs 直接 import 它）。单一实现，⛔ 无平行副本。
 
 /** Patch ONE task file's frontmatter `status` line. Only rewrites when the current status is `todo`
  *  (a concurrently-flipped task is left alone — no clobbering a `ready`/`done` written by another
@@ -2489,27 +2616,29 @@ export function setTaskStatus(root, id, newStatus, opts = {}) {
   const file = path.join(root, "tasks", `${id}.md`);
   if (!fs.existsSync(file)) return { id, ok: false, reason: "missing" };
   const raw = fs.readFileSync(file, "utf8");
-  const m = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(raw);
-  if (!m) return { id, ok: false, reason: "no-frontmatter" };
-  const [, open, fm, close] = m;
+  // gap-task-ops-consolidate-driver-frontmatter-writers：frontmatter 读/写经 task-ops.ts（splitTaskFile /
+  // statusFromFrontmatter / patchStatusField，单一 parser，⛔ 不再手搓 fence 切分 + status/labels 行正则）。
+  const split = splitTaskFile(raw);
+  if (!split) return { id, ok: false, reason: "no-frontmatter" };
   // 判「当前是否 todo」读 develop ref（canonical），⛔ 读工作树盘上 status——上一轮 commitTaskStatus
   // 提交失败会残留【未提交的 ready】，把后续轮毒化成 not-todo 永不重提交（develop 永远 todo；
   // gap-promotion-uncommitted-flip-poisons-settaskstatus，硬规则 4b 代理量）。develop 不可用
   // （非 git root / 任务尚未入 develop）退回盘上（既有行为）。develop 仍 todo 而盘上残留 ready 时，
-  // 下面的 replace 是 no-op（盘上无 `todo` 可替换），写回即把残留 ready 重新提交 → develop 收敛。
+  // 下面的 patch 是 no-op（盘上无 `todo` 可替换），写回即把残留 ready 重新提交 → develop 收敛。
   const developStatus = readTaskStatusAtRef(root, "develop", id);
   const currentIsTodo = developStatus !== null
     ? developStatus === TASK_STATUS.TODO
-    : /^status:\s*todo\s*$/m.test(fm);
+    : statusFromFrontmatter(split.frontmatterRaw) === TASK_STATUS.TODO;
   if (!currentIsTodo) return { id, ok: false, reason: "not-todo" };
-  let newFm = fm.replace(/^status:\s*todo\s*$/m, `status: ${newStatus}`);
+  let patched = patchStatusField(split.frontmatterRaw, newStatus, TASK_STATUS.TODO);
+  if (!patched.ok) return { id, ok: false, reason: patched.reason };
   let deliveryCritical = opts.ensureDeliveryCritical === true;
   if (deliveryCritical) {
-    const ensured = ensureDeliveryCriticalLabel(newFm);
-    newFm = ensured.fm;
+    const ensured = ensureDeliveryCriticalLabel(patched.fm);
+    patched = { ...patched, fm: ensured.fm };
     deliveryCritical = ensured.deliveryCritical;
   }
-  fs.writeFileSync(file, `${open}${newFm}${close}${raw.slice(m[0].length)}`);
+  fs.writeFileSync(file, `${split.open}${patched.fm}${split.close}${split.body}`);
   return { id, ok: true, from: TASK_STATUS.TODO, to: newStatus, deliveryCritical };
 }
 
@@ -2525,8 +2654,9 @@ export function setTaskStatus(root, id, newStatus, opts = {}) {
  *  status flip is content-neutral (the hook's doc-class + Touches checks guard authored CONTENT, and
  *  shelling `scripts/test.sh --static-checks-doc` per promotion is slow and could fail on a doc change
  *  another layer left in-flight). Returns true when the commit landed.
- *  ⛔ 单一真相源：git add/commit 与 propagateDocBranchToDevelop 都复用 driver-filters.ts 的 commitTaskFile
- *  族（gap-mark-needs-human-commit-after-write 收敛），本函数只剩「组装 message + 落 committed」。
+ *  ⛔ 单一真相源：git add/commit 复用 task-ops.ts 的 commitTaskFile 族（gap-task-ops-consolidate-
+ *  driver-frontmatter-writers 收敛；gap-mark-needs-human-commit-after-write 修过的缺陷不再复发），
+ *  本函数只剩「组装 message + 落 committed」。
  *  @param {string} root  repo root (tasks/<id>.md lives here)
  *  @param {string} id    task id
  *  @param {string} from  old status (todo)
@@ -2599,7 +2729,7 @@ export function applyPromotions(opts) {
     }
   }
   // 分歧检测双向同步（gap-sync-trigger-divergence-detection-bidirectional）：每轮无条件触发——读两 ref
-  // （main/manager-doc ↔ develop）不同即双向同步，⛔ 不依赖 shouldApply/翻转落地（池空无翻转也要同步，
+  // （author ↔ develop）不同即双向同步，⛔ 不依赖 shouldApply/翻转落地（池空无翻转也要同步，
   // 缺口 2026-08-31 主检出落后 10 提交）。syncDocDevelopBidirectional 内部按分歧门控，无分歧/非 git
   // no-op。
   syncDocDevelopBidirectional(opts.root);
@@ -2617,16 +2747,17 @@ export function retreatReadyToTodo(root, id, reasons = []) {
   const file = path.join(root, "tasks", `${id}.md`);
   if (!fs.existsSync(file)) return { id, ok: false, reason: "missing" };
   const raw = fs.readFileSync(file, "utf8");
-  const m = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(raw);
-  if (!m) return { id, ok: false, reason: "no-frontmatter" };
-  const [, open, fm, close] = m;
-  if (!/^status:\s*ready\s*$/m.test(fm)) return { id, ok: false, reason: "not-ready" };
-  const newFm = fm.replace(/^status:\s*ready\s*$/m, "status: todo");
-  const body = raw.slice(m[0].length);
+  // gap-task-ops-consolidate-driver-frontmatter-writers：frontmatter 读/写经 task-ops.ts（单一 parser，
+  // ⛔ 不再手搓 fence 切分 + status 行正则）。
+  const split = splitTaskFile(raw);
+  if (!split) return { id, ok: false, reason: "no-frontmatter" };
+  if (statusFromFrontmatter(split.frontmatterRaw) !== TASK_STATUS.READY) return { id, ok: false, reason: "not-ready" };
+  const patched = patchStatusField(split.frontmatterRaw, TASK_STATUS.TODO);
+  if (!patched.ok) return { id, ok: false, reason: patched.reason };
   const record =
     `\n## Revaluation\n\n**执行 ${new Date().toISOString()} — 静态条件变质，ready.back="todo"**\n\n` +
     `- 去向：ready → todo\n- 阻碍原因：${reasons.join(", ")}\n`;
-  fs.writeFileSync(file, `${open}${newFm}${close}${body}${record}`);
+  fs.writeFileSync(file, `${split.open}${patched.fm}${split.close}${split.body}${record}`);
   return { id, ok: true, from: TASK_STATUS.READY, to: TASK_STATUS.TODO, reasons, record };
 }
 

@@ -42,9 +42,11 @@ import {
   readChildren,
   strategicTraceable,
   touchesScale,
+  readConsolidates,
   STRATEGIC_REF_RE,
   STRATEGIC_WEIGHT,
   BLOCKING_WEIGHT,
+  CONSOLIDATION_WEIGHT,
   computeLandingBlocked,
   detectLandingBlocked,
   LANDING_STALENESS_MS_DEFAULT,
@@ -83,6 +85,9 @@ import {
   unmergedConflictPaths,
   readTaskFileAtRef,
   readTaskStatusAtRef,
+  prosePrereqRefs,
+  prosePrereqGap,
+  PREREQ_KEYWORD_RE,
 } from "../scripts/ready-pool-check.ts";
 import { INFLIGHT_WORKTREE_STALE_MS } from "../scripts/concurrent-batch-scheduler.ts";
 import { propagateDocBranchToDevelop } from "../scripts/driver-filters.ts";
@@ -100,7 +105,7 @@ function makeWorkspace(tag) {
   return dir;
 }
 
-function writeTask(root, id, { status = "todo", labels = [], parent = null, children = [], role = null, body }) {
+function writeTask(root, id, { status = "todo", labels = [], parent = null, children = [], role = null, goal_ac = null, body }) {
   const fm = [
     "---",
     `id: ${id}`,
@@ -112,6 +117,7 @@ function writeTask(root, id, { status = "todo", labels = [], parent = null, chil
     `parent: ${parent}`,
     children.length > 0 ? "children:" : "children: []",
     ...children.map((c) => `  - ${c}`),
+    goal_ac ? `goal_ac: ${goal_ac}` : null,
     "extra:",
     "  schema: v1",
     "---",
@@ -790,6 +796,99 @@ test("LEFTOVER-WORKTREE — a single allChecked dead task no longer zeroes the p
   assert.equal(r.pool, 1, "the single allChecked dead task is counted in the pool, not dropped (AC4)");
   assert.equal(r.dispatchable_disjoint, 1, "dispatchable_disjoint ≥ 1 — the dead task is itself dispatchable, no longer zeroed (AC4)");
   assert.equal(r.pool_big_all_colliding, false, "pool_big_all_colliding stays false (AC4)");
+});
+
+// ── HOISTED leftover-worktree exemption + touch-absent-from-ref veto
+// (gap-nyf-doneflipready-arm-bypasses-leftover-worktree-exemption) ───────────────────────────────────
+// The leftover-worktree exemption used to gate ONLY the standalone `allChecked` arm, so the
+// `doneFlipReady` arm (workLandedReady || commitTraceReady) BYPASSED it: a worktree-open task whose
+// taskWorkLanded read true (via symbol-resolution / touch-file existence over the main checkout's DISK
+// tree — a proxy that fires on PRE-EXISTING files the task EDITS, hard rule 4b) was judged not-yet-
+// flipped and left the pool FOREVER. Two fixes: (1) hoist the worktree exemption ABOVE every arm —
+// an open `task/<id>` worktree is the DIRECT "fan-in not yet complete" quantity, so it suppresses ALL
+// landed/completion signals; (2) a declared code-root Touches file ABSENT from the landing ref's tree
+// vetoes the landed arms (file-existence is zero information; presence in the ref is the direct read).
+
+test("AC1 — open worktree suppresses the workLanded done-flip arm (allChecked + workLanded stays dispatchable)", (t) => {
+  const root = makeRealGitRepo("nyf-wl-worktree");
+  const wtPath = path.join(root, "..", `${path.basename(root)}-wt`);
+  t.after(() => { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(wtPath, { recursive: true, force: true }); });
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  fs.writeFileSync(path.join(root, "code", "seed.ts"), "export const seed = 1;\n");
+  // workLanded fires: the (new)-tagged touch EXISTS on disk and is committed (so it is IN the ref —
+  // the touch-absent veto is clear, isolating the worktree hoist as the only suppressor).
+  fs.writeFileSync(path.join(root, "code", "landed.ts"), "export const landed = 1;\n");
+  gitCommit(root, "seed + landed");
+  const id = "gap-nyf-wl";
+  const body = fourArtifactBody({ checkedAc: 4, touches: ["- code/landed.ts (new)"] });
+  writeTask(root, id, { status: "ready", labels: ["gap"], body });
+  const task = { id, status: "ready", body };
+  // Precondition (RED on the OLD code — doneFlipReady fired regardless of the open-worktree state).
+  assert.equal(notYetFlipped(task, root), true, "no worktree + workLanded + allChecked is a done-flip (precondition)");
+  execFileSync("git", ["-C", root, "worktree", "add", "-q", "-b", `task/${id}`, wtPath]);
+  assert.equal(notYetFlipped(task, root), false, "open worktree suppresses the workLanded done-flip arm (AC1)");
+});
+
+test("AC2 — open worktree suppresses the commit-trace done-flip arm (commitTraceReady stays dispatchable)", (t) => {
+  const root = makeRealGitRepo("nyf-trace-worktree");
+  const wtPath = path.join(root, "..", `${path.basename(root)}-wt`);
+  t.after(() => { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(wtPath, { recursive: true, force: true }); });
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  fs.writeFileSync(path.join(root, "code", "seed.ts"), "export const seed = 1;\n");
+  gitCommit(root, "seed");
+  const id = "gap-nyf-trace";
+  const body = fourArtifactBody({ checkedAc: 4, touches: ["- code/never.ts"] });
+  writeTask(root, id, { status: "ready", labels: ["gap"], body });
+  const task = { id, status: "ready", body };
+  // A commit subject naming the task in the inner: convention ⇒ commitTraceReady = true.
+  const commitTraceSubjects = ["inner: gap-nyf-trace — implementation landed"];
+  execFileSync("git", ["-C", root, "worktree", "add", "-q", "-b", `task/${id}`, wtPath]);
+  assert.equal(notYetFlipped(task, root, null, { commitTraceSubjects }), false,
+    "open worktree suppresses the commit-trace done-flip arm (AC2)");
+});
+
+test("AC3 — regression: worktree removed + allChecked + landed is a done-flip again (original behavior, bidirectional)", (t) => {
+  const root = makeRealGitRepo("nyf-regress");
+  const wtPath = path.join(root, "..", `${path.basename(root)}-wt`);
+  t.after(() => { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(wtPath, { recursive: true, force: true }); });
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  fs.writeFileSync(path.join(root, "code", "seed.ts"), "export const seed = 1;\n");
+  fs.writeFileSync(path.join(root, "code", "landed.ts"), "export const landed = 1;\n");
+  gitCommit(root, "seed + landed");
+  const id = "gap-nyf-regress";
+  const body = fourArtifactBody({ checkedAc: 4, touches: ["- code/landed.ts (new)"] });
+  writeTask(root, id, { status: "ready", labels: ["gap"], body });
+  const task = { id, status: "ready", body };
+  execFileSync("git", ["-C", root, "worktree", "add", "-q", "-b", `task/${id}`, wtPath]);
+  assert.equal(notYetFlipped(task, root), false, "open worktree keeps it dispatchable (bidirectional setup)");
+  execFileSync("git", ["-C", root, "worktree", "remove", "--force", wtPath]);
+  assert.equal(notYetFlipped(task, root), true, "worktree removed + allChecked + landed is a done-flip again (AC3)");
+});
+
+test("AC4 — a declared Touches file ABSENT from the landing ref vetoes the landed signal (fail-closed dispatchable)", (t) => {
+  const root = makeRealGitRepo("nyf-absent-touch");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  fs.writeFileSync(path.join(root, "code", "seed.ts"), "export const seed = 1;\n");
+  gitCommit(root, "seed");
+  // A (new)-tagged touch that EXISTS on disk (so taskWorkLanded's touch-existence signal fires) but is
+  // NOT committed to the landing ref — file-existence is a PROXY reading the disk tree; "absent from
+  // the ref" is the DIRECT quantity (hard rule 4b). The veto must suppress the landed arms.
+  fs.writeFileSync(path.join(root, "code", "absent.ts"), "export const absent = 1;\n");
+  const task = {
+    status: "ready",
+    body: "## Acceptance Criteria\nprose only, no checkboxes\n## Touches\n- code/absent.ts (new)\n## Definition of Done\nstandard",
+  };
+  assert.equal(taskWorkLanded(task.body, root), true, "precondition: the touch-existence signal fires (file on disk)");
+  assert.equal(notYetFlipped(task, root), false, "Touches file absent from the landing ref ⇒ landed signal suppressed (AC4)");
+  // Negative control: land the file into the ref ⇒ the veto clears ⇒ the no-AC landed shape is a
+  // done-flip again (a parameter flip flips the conclusion — hard rule 4 / 推论四).
+  gitCommit(root, "land the absent file");
+  assert.equal(notYetFlipped(task, root), true, "once the Touches file IS in the ref, the landed signal fires again (AC4 negative control)");
 });
 
 // ── no-AC-section fallback (gap-git-history-landed-master-stale-under-two-line-model AC4) ──────────
@@ -1856,6 +1955,79 @@ test("CLI smoke: --top 5 emits top_relevance value-sorted array with reasons (AC
   assert.ok(parsed.top_relevance.every((e) => typeof e.value === "number" && typeof e.reason === "string"));
 });
 
+// ── CONSOLIDATION AXIS (gap-dispatch-value-has-no-consolidation-axis) ──────────────────────────────
+// The three original merit axes (strategic / blocking / suite-blocking) had NO axis for
+// SUBTRACTION/CONSOLIDATION merit — a task that deletes 119 duplicate implementations was billed
+// only by its Touches width (costBenefit 1/120 ≈ 0.008), 40× below a 3-touch guard (1/3), so wide
+// consolidation tasks were structurally starved in the dispatch queue. The fix adds a fourth axis
+// whose value comes from a MECHANICAL frontmatter declaration `extra.consolidates: N` (NOT body
+// prose — the negative control that keeps it from becoming a second STRATEGIC_REF_RE keyword match).
+
+test("readConsolidates: mechanical extra.consolidates declaration; prose-only / absent / non-numeric read 0 (AC2/AC3)", () => {
+  // parseTask's `extra` projection (the single YAML parser readDependsOn uses) carries the number.
+  const declared = parseTask("---\nid: x\nextra:\n  schema: v1\n  consolidates: 119\n---\nbody");
+  assert.equal(readConsolidates(declared), 119, "extra.consolidates: 119 ⇒ 119");
+  assert.equal(readConsolidates({ extra: { consolidates: "12" } }), 12, "string N coerces to number");
+  assert.equal(readConsolidates({ extra: { consolidates: 0 } }), 0, "0 ⇒ not consolidating");
+  assert.equal(readConsolidates({ extra: { consolidates: -3 } }), 0, "negative ⇒ not consolidating");
+  assert.equal(readConsolidates({ extra: {} }), 0, "absent ⇒ not consolidating");
+  assert.equal(readConsolidates({ extra: { consolidates: "not-a-number" } }), 0, "non-numeric ⇒ 0 (fail-open)");
+  // negative control (AC3): a task that only SAYS it consolidates in prose, with NO declaration, reads 0.
+  assert.equal(readConsolidates({ body: "we consolidate 119 duplicate checker implementations into one template" }), 0,
+    "prose-only consolidation claim ⇒ no declaration ⇒ 0");
+});
+
+test("computeRelevance: consolidation axis adds weight from the declaration; prose-only gets nothing (AC2/AC3)", () => {
+  // A WIDE consolidation task (120 touches → costBenefit 1/120) with the mechanical declaration.
+  const wide = computeRelevance("gap-consolidate-checkers", {
+    body: "plain\n## Touches\n" + Array.from({ length: 120 }, (_, i) => `- code/checker${i}.ts`).join("\n"),
+    extra: { consolidates: 119 },
+  });
+  assert.equal(wide.consolidating, true);
+  assert.equal(wide.consolidates, 119);
+  assert.equal(wide.value, Number((CONSOLIDATION_WEIGHT + 1 / 120).toFixed(3)),
+    "value = consolidation(1) + costBenefit(1/120), NOT 1/120");
+  assert.match(wide.reason, /consolidating Y\(119\)/);
+
+  // negative control: prose-only consolidation claim (no extra.consolidates) gets NO weight.
+  const proseOnly = computeRelevance("gap-prose-consolidation", {
+    body: "we consolidate 119 duplicate checker implementations into one template\n## Touches\n- code/a.ts",
+  });
+  assert.equal(proseOnly.consolidating, false);
+  assert.equal(proseOnly.value, 1, "prose-only ⇒ pure costBenefit (1 touch) = 1");
+
+  // the starvation fix: the wide consolidation task outranks a narrow non-consolidation guard.
+  const narrowGuard = computeRelevance("gap-narrow-guard", {
+    body: "plain\n## Touches\n- code/a.ts\n- code/b.ts\n- code/c.ts",
+  });
+  assert.equal(narrowGuard.value, Number((1 / 3).toFixed(3)));
+  assert.ok(wide.value > narrowGuard.value, "wide consolidation task outranks a narrow guard (AC4)");
+});
+
+test("analyzeTasks --top: wide consolidation todo ranks above a narrow guard (AC4 end-to-end)", (t) => {
+  const root = makeWorkspace("consolidate-top");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-narrow-guard", gapTask("gap-narrow-guard", {
+    body: fourArtifactBody({ touches: ["- code/a.ts", "- code/b.ts", "- code/c.ts"] }),
+  }));
+  writeTask(root, "gap-consolidate-checkers", gapTask("gap-consolidate-checkers", {
+    body: fourArtifactBody({ touches: Array.from({ length: 120 }, (_, i) => `- code/checker${i}.ts`) }),
+  }));
+  // Inject the mechanical declaration into the consolidation task's frontmatter `extra` block.
+  const f = path.join(root, "tasks", "gap-consolidate-checkers.md");
+  fs.writeFileSync(f, fs.readFileSync(f, "utf8").replace("  schema: v1\n", "  schema: v1\n  consolidates: 119\n"));
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1, topN: 2 });
+  assert.equal(r.top_relevance.length, 2, "exactly the two todos");
+  assert.equal(r.top_relevance[0].id, "gap-consolidate-checkers", "consolidation todo ranks first (AC4)");
+  assert.equal(r.top_relevance[0].consolidating, true, "the mechanical declaration flips consolidating");
+  assert.equal(r.top_relevance[0].consolidates, 119);
+  assert.equal(r.top_relevance[1].id, "gap-narrow-guard", "narrow guard ranks second");
+  assert.equal(r.top_relevance[1].consolidating, false, "narrow guard has no declaration ⇒ not consolidating");
+  assert.ok(r.top_relevance[0].value > r.top_relevance[1].value,
+    "consolidation value strictly above the narrow guard (AC4)");
+});
+
 // ── Cross-machine merge regression (AC17 catch-up): computeRelevance arity — blocking must work ──
 // The merge left a 3-arg call to the 4-param computeRelevance; the default empty Map silently
 // zeroed blocking (allTasks landed in childrenByTask, .get() → task object, .length undefined).
@@ -2443,7 +2615,7 @@ test("applyPromotions never-committed file → 首次登记 message, not 机械�
 });
 
 // ── DETACH PROPAGATION (gap-fan-in-ff-ref-update-detach-develop AC6 → gap-doc-develop-sync-…-resolution) ──
-// The main checkout sits on a doc-only work branch (main/manager-doc) while develop is bare (the
+// The main checkout sits on a doc-only work branch (author) while develop is bare (the
 // detach). A promotion flip committed on the doc branch must reach develop — fast-forward push —
 // so task worktrees branching from develop see the new status (otherwise dispatch reads ready on the
 // doc branch while the worktree base still has the old status). Non-ff (develop advanced independently)
@@ -2461,17 +2633,17 @@ test("propagateDocBranchToDevelop: doc-branch flip fast-forwards to develop (AC6
   git("add", ".");
   git("commit", "-q", "-m", "init");
   // The detach: the main checkout moves to a doc-only branch; develop is no longer checked out anywhere.
-  git("checkout", "-q", "-b", "main/manager-doc");
+  git("checkout", "-q", "-b", "author");
   const developBefore = git("rev-parse", "develop");
   // A flip lands on the doc branch (what commitTaskStatus commits before propagate).
   writeTask(root, "gap-flip", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   git("add", ".");
   git("commit", "-q", "-m", "tasks: gap-flip todo→ready（promotion-driver 机械晋升）");
-  assert.notEqual(git("rev-parse", "main/manager-doc"), developBefore, "doc branch advanced past develop");
+  assert.notEqual(git("rev-parse", "author"), developBefore, "doc branch advanced past develop");
 
   propagateDocBranchToDevelop(root);
 
-  assert.equal(git("rev-parse", "develop"), git("rev-parse", "main/manager-doc"),
+  assert.equal(git("rev-parse", "develop"), git("rev-parse", "author"),
     "AC6: develop fast-forwarded to the doc branch head — the flip is visible to task worktrees");
 });
 
@@ -2486,7 +2658,7 @@ test("propagateDocBranchToDevelop: develop advanced independently ⇒ semantic s
   writeTask(root, "gap-base", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   git("add", ".");
   git("commit", "-q", "-m", "init");
-  git("checkout", "-q", "-b", "main/manager-doc");
+  git("checkout", "-q", "-b", "author");
   // Doc branch commits a flip (its own file).
   writeTask(root, "gap-flip", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   git("add", ".");
@@ -2497,7 +2669,7 @@ test("propagateDocBranchToDevelop: develop advanced independently ⇒ semantic s
   git("add", ".");
   git("commit", "-q", "-m", "land on develop");
   const developHead = git("rev-parse", "develop");
-  git("checkout", "-q", "main/manager-doc");
+  git("checkout", "-q", "author");
 
   propagateDocBranchToDevelop(root);
 
@@ -2541,19 +2713,19 @@ test("applyPromotions 每轮无条件双向同步——池空无翻转也同步�
   writeTask(root, "gap-done", { status: "done", labels: ["gap"], body: fourArtifactBody({ checkedAc: 4 }) });
   git("add", ".");
   git("commit", "-q", "-m", "init with done task");
-  git("checkout", "-q", "-b", "main/manager-doc");
+  git("checkout", "-q", "-b", "author");
   // develop 前进（模拟 fan-in 落地），doc 落后 develop——池空无翻转也必须同步。
   git("checkout", "-q", "develop");
   writeTask(root, "gap-landed", { status: "done", labels: ["gap"], body: fourArtifactBody({ checkedAc: 4 }) });
   git("add", ".");
   git("commit", "-q", "-m", "develop-only: gap-landed done (fan-in)");
-  git("checkout", "-q", "main/manager-doc");
+  git("checkout", "-q", "author");
 
   const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 };
   const r = applyPromotions(opts);
   assert.equal(r.should_apply, false, "无合格候选 ⇒ 池空无翻转（缺口的前提）");
   assert.equal(
-    git("rev-parse", "main/manager-doc"),
+    git("rev-parse", "author"),
     git("rev-parse", "develop"),
     "池空无翻转 ⇒ applyPromotions 仍双向同步（doc 追上 develop）",
   );
@@ -2651,7 +2823,7 @@ test("setTaskStatus judges todo from develop — a dirty ready leftover re-commi
   writeTask(root, "gap-candidate", gapTask("gap-candidate"));
   git("add", ".");
   git("commit", "-q", "-m", "init todo");
-  git("checkout", "-q", "-b", "main/manager-doc");
+  git("checkout", "-q", "-b", "author");
   // The poison: the flip landed on disk (ready) but the commit failed — develop/HEAD stay todo.
   writeTask(root, "gap-candidate", { ...gapTask("gap-candidate"), status: "ready" });
   assert.match(git("show", "develop:tasks/gap-candidate.md"), /^status:\s*todo$/m,
@@ -2681,7 +2853,7 @@ test("setTaskStatus still no-ops when develop is already ready — no duplicate 
   writeTask(root, "gap-ready", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   git("add", ".");
   git("commit", "-q", "-m", "init ready");
-  git("checkout", "-q", "-b", "main/manager-doc");
+  git("checkout", "-q", "-b", "author");
 
   const out = setTaskStatus(root, "gap-ready", "ready");
   assert.equal(out.ok, false, "AC2: develop already ready ⇒ no duplicate flip");
@@ -2803,7 +2975,7 @@ test("applyPromotions: a delivery-critical todo enters ready WITH its label (AC1
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
-  writeTask(root, "gap-crit", gapTask("gap-crit", { labels: ["gap", "delivery-critical"] }));
+  writeTask(root, "gap-crit", gapTask("gap-crit", { labels: ["gap", "delivery-critical"], goal_ac: "AC-190" }));
 
   const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 }; // floor 3, pool 2
   const r = applyPromotions(opts);
@@ -2815,6 +2987,22 @@ test("applyPromotions: a delivery-critical todo enters ready WITH its label (AC1
   const task = parseTask(fs.readFileSync(path.join(root, "tasks", "gap-crit.md"), "utf8"));
   assert.match(task.frontmatterRaw, /^status:\s*ready$/m, "status landed on disk");
   assert.ok(task.labels.includes("delivery-critical"), "the label is in the frontmatter at ready-entry (标签与 ready 同现)");
+});
+
+test("applyPromotions: a delivery-critical todo WITHOUT goal_ac is NOT promoted (立案时必填 fail-closed)", (t) => {
+  const root = makeWorkspace("apply-dc-no-goal-ac");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-crit", gapTask("gap-crit", { labels: ["gap", "delivery-critical"] }));
+
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 };
+  const r = applyPromotions(opts);
+  assert.equal(r.should_apply, false, "no eligible candidate ⇒ nothing to apply");
+  assert.equal(r.applied_promotions.length, 0, "delivery-critical without goal_ac is never promoted");
+
+  const task = parseTask(fs.readFileSync(path.join(root, "tasks", "gap-crit.md"), "utf8"));
+  assert.match(task.frontmatterRaw, /^status:\s*todo$/m, "status stays todo — filing-time gate holds");
 });
 
 test("applyPromotions: a non-delivery-critical candidate is promoted WITHOUT the label (AC1 negative control)", (t) => {
@@ -3604,6 +3792,92 @@ test("todo candidate with prose prereq and NO edge ⇒ ineligible for promotion 
   assert.deepEqual(cand.prosePrereqGap, ["gap-prereq-a"]);
 });
 
+// ── prose-prereq widen: 阻塞 keyword + backtick citation form (gap-prose-prereq-detector-blind-to-repo-own-conventions) ──
+// A representative pre-edge AC-207 body snippet — 3 阻塞 paragraphs, each carrying a backtick-cited
+// task id. The pre-fix keyword table had none of 阻塞, so 63/64 paragraphs of the real body never
+// entered the scan; the pre-fix ref matcher only recognized wikilinks, so even a matched paragraph
+// yielded 0 ids (the repo cites ids with backticks 740:67 over wikilinks).
+const PRE_EDGE_AC207_SNIPPET = [
+  "AC2/AC3/AC5 ⛔ 阻塞（第 4 轮）：原阻塞已解除——`gap-driver-resource-gate-path-anchored-at-root-third-party` 已 done 落 develop。",
+  "AC2/AC3/AC5 ⛔ 阻塞复核（第 5 轮）：修复任务 `gap-shipped-profiles-missing-worker-roles` 已 ready、AC1/AC2 已勾。",
+  "AC2/AC3/AC5 ⛔ 阻塞复核（第 7 轮）：第三阻塞 `gap-promotion-driver-ready-pool-check-path-third-party` 仍未落 develop。",
+].join("\n\n");
+
+test("PREREQ_KEYWORD_RE now matches 阻塞 paragraphs — the pre-fix table saw none of them (AC1)", () => {
+  const hits = PRE_EDGE_AC207_SNIPPET.split(/\r?\n\s*\r?\n/).filter((p) => PREREQ_KEYWORD_RE.test(p));
+  assert.ok(hits.length > 1, `阻塞 must make >1 paragraph match (got ${hits.length})`);
+  assert.equal(PREREQ_KEYWORD_RE.test("第四阻塞 `gap-x` 仍未解除"), true, "阻塞 is in the widened keyword table");
+  assert.equal(PREREQ_KEYWORD_RE.test("前序任务 `gap-x`"), true, "前序 stays in the table");
+});
+
+test("prosePrereqRefs finds backtick-cited ids inside 阻塞 paragraphs (AC2)", (t) => {
+  const root = makeWorkspace("prereq-backtick");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const ids = [
+    "gap-driver-resource-gate-path-anchored-at-root-third-party",
+    "gap-shipped-profiles-missing-worker-roles",
+    "gap-promotion-driver-ready-pool-check-path-third-party",
+  ];
+  for (const id of ids) writeTask(root, id, { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  const refs = prosePrereqRefs(PRE_EDGE_AC207_SNIPPET, path.join(root, "tasks"));
+  assert.ok(refs.length >= 1, `must find ≥1 backtick-cited id (got ${refs.length})`);
+  assert.deepEqual(refs.slice().sort(), ids.slice().sort(), "all three backtick-cited ids are recovered");
+  for (const r of refs) assert.ok(fs.existsSync(path.join(root, "tasks", `${r}.md`)), `${r} must resolve to a real task file`);
+});
+
+test("non-prereq backtick mentions are NOT refs — 同族于 / 参见 (AC3)", (t) => {
+  const root = makeWorkspace("prereq-negative");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-ac207-e2e-target-driver-driven-real-commit-task-done", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  assert.deepEqual(prosePrereqRefs("同族于 `gap-ac207-e2e-target-driver-driven-real-commit-task-done` 的缺陷形态。", path.join(root, "tasks")), [], "同族于 is not a prereq declaration");
+  assert.deepEqual(prosePrereqRefs("参见 `gap-ac207-e2e-target-driver-driven-real-commit-task-done` 的判据。", path.join(root, "tasks")), [], "参见 is not a prereq declaration");
+});
+
+test("sibling / heritage / example mentions inside a keyword paragraph are NOT prereq refs (precision)", (t) => {
+  const root = makeWorkspace("prereq-sibling");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-x", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-y", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-z", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  // Each paragraph carries a prereq keyword (so it passes the gate) but the refs are sibling/heritage
+  // mentions, not the object of the blocking — they must be dropped.
+  const body = [
+    "第四个阻塞仍未解除——同期另立两任务 `gap-x`（ready）与 `gap-y`（ready），均未 done。",
+    "第三个阻塞已解除——已另立 `gap-x` 续做剩余锚点。",
+    "此外 `gap-z` 亦已 done 并落 develop。",
+  ].join("\n\n");
+  assert.deepEqual(prosePrereqRefs(body, path.join(root, "tasks")), [], "sibling/heritage mentions are not prereq refs");
+  // The genuine blocking form IS still a ref: 阻塞 names the blocker directly.
+  const genuine = "第四阻塞 `gap-x` 仍未解除。";
+  assert.deepEqual(prosePrereqRefs(genuine, path.join(root, "tasks")), ["gap-x"], "阻塞 X is a prereq ref");
+});
+
+test("backtick-cited prose prereqs fully covered by depends_on ⇒ prosePrereqGap == [] (AC4)", (t) => {
+  const root = makeWorkspace("prereq-ac4");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-prereq-a", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-prereq-b", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-edged", {
+    status: "ready",
+    labels: ["gap"],
+    parent: null,
+    children: [],
+    body: [
+      "## Proposal",
+      "A proposal paragraph that is definitely more than forty non-whitespace chars in total length.",
+      "**Do not dispatch until**: `gap-prereq-a` and `gap-prereq-b` both land.",
+      "## Acceptance Criteria",
+      "- [ ] an AC item that is long enough",
+    ].join("\n"),
+  });
+  const file = path.join(root, "tasks", "gap-edged.md");
+  const raw = fs.readFileSync(file, "utf8").replace("parent: null", "depends_on:\n  - gap-prereq-a\n  - gap-prereq-b\nparent: null");
+  fs.writeFileSync(file, raw);
+  const fm = raw.match(/^---\n([\s\S]*?)\n---/)[1];
+  const bodyOnly = raw.slice(raw.indexOf("\n\n") + 2);
+  assert.deepEqual(prosePrereqGap(bodyOnly, fm, path.join(root, "tasks")), [], "edges cover the prose prereqs ⇒ no gap");
+});
+
 // ── AC46 — pool-layer static criteria into the todo→ready gate + ready↔todo revaluation executor ──
 // (tasks/gap-ac46-pool-criteria-in-gate-plus-revaluation-executor)
 //   AC1  compound / self-touch / deps / touches-resolve / artifacts gate the todo→ready promotion
@@ -3664,7 +3938,11 @@ test("AC5 production negative control: the promotion gate rejects compound/self-
   // can never gain a self-touch (direction records, not execution candidates); verify with
   // buildTargetedPromotion before swapping.
   const rejectIds = ["gap-quay-has-never-self-hosted-its-own-cold-start", "DIR-001"];
-  const admitIds = ["gap-spec11-stage2-retest-with-concurrency", "gap-slot-refill-clique-ignores-landed-touches", "gap-landing-target-branch-consistency-check"];
+  // gap-spec11 was previously an admit sample but the prose-prereq widen (this task) now sees its
+  // "试点 `gap-spec-11-…-pilot` 已 done … 它是停全局轮的唯一前置" paragraph as a prose prereq
+  // (pilot is a backtick-cited predecessor with no depends_on edge). Replaced with a genuinely-clean
+  // execution candidate (gap-ac120: eligible, prosePrereqGap=[], self-touch present, not compound).
+  const admitIds = ["gap-ac120-suite-bucket-attribution-mechanism", "gap-slot-refill-clique-ignores-landed-touches", "gap-landing-target-branch-consistency-check"];
   // Build allTasks from the REAL task files (REAL statuses — a dependency that is done stays done, so
   // the gate's deps check resolves; the negative-control SAMPLES are real, never fabricated).
   const allTasks = new Map();

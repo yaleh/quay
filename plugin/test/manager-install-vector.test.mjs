@@ -54,11 +54,11 @@ function resolveNodeModulesSource() {
   return null;
 }
 
-/** The six manager deliverables the npm pack must carry (task Contract invariant). */
+/** The five manager deliverables the npm pack must carry (task Contract invariant).
+ *  (manager-adopt.sh retired with the outer tmux session — gap-retire-outer-tmux-window-logic.) */
 const MANAGER_ARTIFACTS = [
   "plugin/skills/manager/SKILL.md",
   "plugin/scripts/manager-start.sh",
-  "plugin/scripts/manager-adopt.sh",
   "plugin/scripts/manager-arm-loop.sh",
   "plugin/loop/manager-loop-tick.md",
   "plugin/loop/manager-tick-core.md",
@@ -104,7 +104,7 @@ function cleanup(tmp) {
 }
 
 // ── AC3 / invariant manager_artifacts_landed: the pack carries the six manager artifacts ─────────────
-test("AC3 invariant manager_artifacts_landed — the bare pack ships all six manager artifacts (SKILL/start/adopt/arm-loop/loop tick docs)", () => {
+test("AC3 invariant manager_artifacts_landed — the bare pack ships all five manager artifacts (SKILL/start/arm-loop/loop tick docs)", () => {
   const { tmp, pkg } = stagePack();
   try {
     for (const rel of MANAGER_ARTIFACTS) {
