@@ -45,10 +45,10 @@ mini-list 缺的正是这同一个惯用法的文字版。
    - 在飞任务数 = 0 时（空态分支）不受影响，既有测试不回归。
 
 ## Acceptance Criteria
-- [ ] 在飞任务数 > 3 时，`renderLiveCard` 输出的字符串包含 `+${N-3} 更多`（N 为实际在飞数），单测对
+- [x] 在飞任务数 > 3 时，`renderLiveCard` 输出的字符串包含 `+${N-3} 更多`（N 为实际在飞数），单测对
       N=5、N=4 两个具体值分别断言出精确数字。
-- [ ] 在飞任务数 ≤ 3 时，输出不包含"更多"字样，单测覆盖 N=3 边界。
-- [ ] 既有 `gap-dashboard-live-swimlane-fixed-lane-gantt-timeline.test.mjs` 等测试无回归红（mini-list
+- [x] 在飞任务数 ≤ 3 时，输出不包含"更多"字样，单测覆盖 N=3 边界。
+- [x] 既有 `gap-dashboard-live-swimlane-fixed-lane-gantt-timeline.test.mjs` 等测试无回归红（mini-list
       本体渲染逻辑未被替换，只是追加了一行）。
 
 ## Definition of Done
