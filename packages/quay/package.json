@@ -22,7 +22,6 @@
     "README.md",
     "CHANGELOG.md",
     "LICENSE.md",
-    "bin",
     "src",
     "dist",
     "plugin",
