@@ -42,12 +42,12 @@ goal_ac: AC-207
 
 ## Acceptance Criteria
 
-- [ ] AC1 机制落地（能取假）：`grep -n -- '--verify-coldstart)' plugin/scripts/develop-deliver-tgz.sh` ≥ 1 命中且位于 arg parser 的 `case` 分支位置（贴命中行与其上下各 2 行）；改前该 grep = 0（贴改前读数）。
-- [ ] AC2 远端执行 + 取回：跑一次 `--verify-coldstart --hosts B`，贴出 ① 远端证据文件的行数读数 ② 把它 scp 回本地的命令与落地路径 ③ 追加后本地载体的行数前后差。
-- [ ] AC3 直接量落账：跑完后 `python3` 读本地 `.quay/productization-verification.jsonl`，存在 ≥1 条满足 `ac` 以 `GOAL-009-AC-` 开头 ∧ `host` 非空且 ≠ 本机 `socket.gethostname()` ∧ `os.path.realpath(project_root)` 不在本仓库路径下的记录；贴出该记录全文与判定命令。
-- [ ] AC4 负控制（能取假）：远端证据文件不存在（或传一个不可读路径）时，该模式**不新增本地记录**且退出码非 0 / 打印 `NOT-EVALUATED`；贴出该次运行的输出与本地载体行数不变的前后读数。
-- [ ] AC5 测试钉死：新增 `plugin/test/develop-deliver-tgz-evidence-transport.test.mjs`，两方向各一条——① 给一份含 `GOAL-009-AC-*` 行的证据文件 ⇒ 目标载体新增对应行且重复调用不产生重复条目 ② 给空/缺失文件 ⇒ 返回可区分的未评估取值而非成功；`node --test plugin/test/develop-deliver-tgz-evidence-transport.test.mjs` exit 0。
-- [ ] AC6 注释与实现一致：`verify-deliver-coldstart.sh:48` 描述的机件在 `develop-deliver-tgz.sh` 中可枚举到（AC1 的命中即证），且注释中的路径/flag 名与实现逐字一致（贴两侧文本）。
+- [x] AC1 机制落地（能取假）：`grep -n -- '--verify-coldstart)' plugin/scripts/develop-deliver-tgz.sh` ≥ 1 命中且位于 arg parser 的 `case` 分支位置（贴命中行与其上下各 2 行）；改前该 grep = 0（贴改前读数）。
+- [x] AC2 远端执行 + 取回：跑一次 `--verify-coldstart --hosts B`，贴出 ① 远端证据文件的行数读数 ② 把它 scp 回本地的命令与落地路径 ③ 追加后本地载体的行数前后差。
+- [x] AC3 直接量落账：跑完后 `python3` 读本地 `.quay/productization-verification.jsonl`，存在 ≥1 条满足 `ac` 以 `GOAL-009-AC-` 开头 ∧ `host` 非空且 ≠ 本机 `socket.gethostname()` ∧ `os.path.realpath(project_root)` 不在本仓库路径下的记录；贴出该记录全文与判定命令。
+- [x] AC4 负控制（能取假）：远端证据文件不存在（或传一个不可读路径）时，该模式**不新增本地记录**且退出码非 0 / 打印 `NOT-EVALUATED`；贴出该次运行的输出与本地载体行数不变的前后读数。
+- [x] AC5 测试钉死：新增 `plugin/test/develop-deliver-tgz-evidence-transport.test.mjs`，两方向各一条——① 给一份含 `GOAL-009-AC-*` 行的证据文件 ⇒ 目标载体新增对应行且重复调用不产生重复条目 ② 给空/缺失文件 ⇒ 返回可区分的未评估取值而非成功；`node --test plugin/test/develop-deliver-tgz-evidence-transport.test.mjs` exit 0。
+- [x] AC6 注释与实现一致：`verify-deliver-coldstart.sh:48` 描述的机件在 `develop-deliver-tgz.sh` 中可枚举到（AC1 的命中即证），且注释中的路径/flag 名与实现逐字一致（贴两侧文本）。
 
 ## Definition of Done
 
