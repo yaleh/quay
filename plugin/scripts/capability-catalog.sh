@@ -1724,6 +1724,7 @@ declare -A CONSUMER=(
   [suite-driver.ts]="谁按：worker-driver 机械 fan-in 在进程内按（import spawnSuiteAndWait 直接 spawn+wait——⛔ 常驻 suite kind 已按人 2026-09-07 裁定退役，无常驻循环/无 .quay/suite-requests 队列）；另有 --run 单发作为手动/测试缝；条件=fan-in 的 per-task suite 要由 worker-driver 进程内 spawn+wait 承接（spawn+wait+静默看门狗+取放槽，退出码 0/1/2=done/red/hung）"
   [suite-duration-exceed-check.ts]="消费方：外层/人每轮读 full-suite.log 里打印的 SUITE-DURATION-EXCEEDED 行据此动作（超长轮趋势可见不静默）；--no-block 故不阻产品验证轮（趋势观测≠代码类不变量，超长历史轮不得红整轮）"
   [instrument-decay-check.ts]="消费方：外层/人/manager 读 --static-checks-operational 输出里打印的 INSTRUMENT-DECAY 行据此动作（哪个载体的哪个分组停写、伴生分组是谁，据此立案修写手或转 P4 守卫谱系复核 expected 词表）；--no-block 故不阻产品验证轮（遥测腐烂观测≠代码类不变量，历史/transient 腐烂不得红整轮；fail-closed 默认态留给按需诊断与未来 manager 闸）"
+  [kernel-sibling-resolution-check.ts]="消费方：AC-225（gap-ac225-kernel-sibling-naive-anchor-migration-zero）实现者读 --root . --json 的 violations 清单作为迁移的完整性 oracle（机械枚举取代三次都漏的人工枚举，逐处迁至归零）；--no-block 只在 AC-224 落地窗口——残量未迁移时不得红全量 suite（检查器正确标红这 9 处直至 AC-225 完成），迁移归零后移除 --no-block 转 fail-closed（run_static_checks 常驻闸即其消费方）"
   [guard-lineage-check.ts]="谁按：架构复核者/人在做 P4 守卫谱系体检（docs/proposals/archguard-generation-era-primitives.md §3，与里程碑 done 前 L_D/L_G 检查同族）时按；条件=要判定「已声明守卫对象比例」「窗口内曾变红比例」「某守卫对象是否仍存在」或「某从未变红守卫是预防性还是可疑」"
   [suite-lpt-order.ts]="谁按：scripts/test.sh --buckets 生成 M bucket 文件列表后按；条件=要按已知耗时降序（LPT）重排文件列表以最小化 makespan（长测试先抢 lane 与短测试并行）"
   [suite-lpt-runner.mjs]="谁按：scripts/test.sh --buckets 生成 LPT 排序后的 M bucket 文件列表后按；条件=要把该列表按 run({files}) 保序交给 node:test（node --test CLI 会按字母序重排位置参数，丢掉 LPT 顺序）"
