@@ -1,7 +1,7 @@
 ---
 id: gap-third-party-fixture-smoke-test-driver-family
 title: driver 家族缺一个「无 plugin/、工作分支非 author」的第三方最小夹具冒烟测试——本轮 6 个同类缺陷全靠真实生产环境试错才发现
-status: ready
+status: done
 labels:
   - gap
 parent: null
