@@ -62,8 +62,7 @@ dashboard 的 fan-in 概览卡（仅展示 5 条记录的紧凑卡片）。2026-
       `/task/<id>` Runs 表格的现有渲染（`layout` 默认值路径）无视觉变化。
 - [x] `packages/quay/test/gap-dashboard-fanin-cell-inline-layout-and-id-truncation.test.mjs` 存在且按
       具体字符串/属性断言，随 scoped gate 跑绿。
-- [ ] 生产 `/dashboard` 页面人工截图核实：fan-in 卡每条记录收窄到约 3 行（id 单行省略号 + 字段一行 +
-      时间戳一行），5 条记录的整卡高度较改动前明显变短；`/task/<id>` 页面 Runs 表格视觉不变。（待外部）
+- [ ] 生产 `/dashboard` 页面人工截图核实：fan-in 卡每条记录收窄到约 3 行（id 单行省略号 + 字段一行 + 时间戳一行），5 条记录的整卡高度较改动前明显变短；`/task/<id>` 页面 Runs 表格视觉不变。（待外部）
 
 ## Touches
 - packages/quay/src/serve-task.ts
