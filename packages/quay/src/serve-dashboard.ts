@@ -316,10 +316,14 @@ export interface LiveGanttInterval {
 }
 
 /** Merge readLive's in-flight runs (open interval to `now`) with worker-outcome history (closed
- *  interval, filtered to `[windowStartMs, nowMs]`) into ONE interval list, deduplicated by `run_id`
- *  (a run that is both in-flight AND already on the outcome carrier appears once). Pure — no I/O.
- *  In-flight wins the dedup (added first); a record with a null/empty `run_id` cannot collide and is
- *  always kept (dropping it would lose history for no dedup benefit). */
+ *  interval, filtered to `[windowStartMs, nowMs]`) into ONE interval list. Pure — no I/O.
+ *  A run that is both in-flight AND already on the outcome carrier appears once: in-flight wins
+ *  (added first). The dedup key is (taskId, startMs) — NOT `run_id`, which is the driver-process
+ *  round id shared by EVERY task dispatched in that driver lifetime (⛔ gap-dashboard-gantt-
+ *  runid-dedup-collapses-driver-round-shared-id: deduping on run_id collapsed dozens of distinct
+ *  historical tasks per driver round into one). (taskId, startMs) is unique per dispatch and, for
+ *  the same run, `Date.parse(started_at)` round-trips to the exact `startedAtMs` the in-flight
+ *  side carries, so the cross-source dedup still fires for a genuinely-shared run. */
 export function mergeLiveAndHistoryIntervals(
   inFlight: InFlightTask[],
   records: WorkerOutcomeRecord[],
@@ -329,10 +333,11 @@ export function mergeLiveAndHistoryIntervals(
   const seen = new Set<string>();
   const out: LiveGanttInterval[] = [];
   const add = (iv: LiveGanttInterval): void => {
-    if (iv.runId !== "") {
-      if (seen.has(iv.runId)) return;
-      seen.add(iv.runId);
-    }
+    // startMs is always finite here (both callers guard it), so the key is always well-defined even
+    // when taskId is "" (an unknown task — the key still distinguishes by start time).
+    const key = `${iv.taskId}|${iv.startMs}`;
+    if (seen.has(key)) return;
+    seen.add(key);
     out.push(iv);
   };
   for (const t of inFlight) {

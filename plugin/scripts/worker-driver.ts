@@ -3542,7 +3542,9 @@ export function defaultMechanicalSuiteCommand(opts: {
   }
   // 无 scripts/test.sh 且无 loop.test_command ⇒ 无测试能力（quay-init 对第三方已 fail-closed 缺
   // test_command，此分支仅防半初始化工作区）。fail-closed 且可区分（⛔ 与「suite 跑了且失败」同形）。
-  return ["bash", "-c", `echo 'third-party-no-test-tooling: no scripts/test.sh and no loop.test_command' >&2; exit 127`];
+  // ⛔ 不再以「命令不存在」的 exit code 127 形态出现——「能力不存在」须可区分于「命令不存在」
+  // （GOAL-012 退出条件②；gap-ac227-third-party-capability-degradation）。
+  return ["bash", "-c", `echo 'third-party-no-test-tooling: no scripts/test.sh and no loop.test_command' >&2; exit 2`];
 }
 
 /** fan-in 过程日志文件名（`.quay/fan-in-<task>-<runId>.log` 的 basename）。runId 唯一后缀 ⇒ 跨 relaunch

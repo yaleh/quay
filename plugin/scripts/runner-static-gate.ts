@@ -241,6 +241,15 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/ scripts/ plugin/scripts/concurrency-literal-check.ts plugin/test/concurrency-literal-check.test.mjs
   run_checker "concurrency-literal-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/concurrency-literal-check.ts" --gate --root "${repo_root}"
+  echo "== target-identity-literal check (gap-ac226-target-identity-literal-check, GOAL-012 B 域) =="
+  # TARGET 域（GOAL-012 B 域）：shipped kernel 把逐项目不同的身份（分支名 / test_command / tasks_dir）
+  # 写成无 override 通道的裸字面量、而非从目标项目 config / 运行时 git 状态派生。判别标准（写进实现，
+  # ⛔ 不留给读者意会）：逐项目不同 ∧ 无 override 通道；合法默认值（develop/integration/master/tasks/
+  # HEAD——逐项目不变）不误报。按位置判定（buildNonCodeMask——注释/字符串里拼写不报）。exit 1 违规即红
+  # （set -euo pipefail），一个把目标身份写死的裸字面量在提交时刻红，不用等换第三方项目才暴露。
+  # @static-tier change
+  # @static-object plugin/scripts/ packages/quay/src/ plugin/scripts/target-identity-literal-check.ts plugin/test/target-identity-literal-check.test.mjs
+  run_checker "target-identity-literal-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/target-identity-literal-check.ts" --root "${repo_root}"
   echo "== task-file-bypass check (gap-adr013-gate-blind-spots-and-task-bypass-ratchet, AC4/AC5) =="
   # Fail-closed ratchet on direct `tasks/*.md` access outside the Provider ABI: a `tasks/` path literal
   # used as the argument of a file-operation (fs.* / readFileSync / writeFileSync / execFileSync /

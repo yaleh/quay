@@ -30,10 +30,10 @@ goal_ac: AC-225
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据翻转（判据本体）：`test -f plugin/scripts/kernel-sibling-resolution-check.ts && node --no-warnings --experimental-strip-types plugin/scripts/kernel-sibling-resolution-check.ts --root . --json` exit 0，violations 数组长度为 0（枚举 0 处）；贴完整命令与输出。
-- [ ] AC2 九处残量迁移（位置判定）：4 个源文件里 9 处 naive sibling 锚点改经 `resolveKernelSibling`/`resolveKernelPluginRoot`，`grep -nE 'path\.join\(__dirname, "(assert-clean-tree|full-suite-runner|process-budget|provision-verify-worktree|resource-gate|worktree-process-reaper|suite-load-sampler)\.(sh|ts)"|PER_FILE_CPU_PRELOAD = path\.join\(REPO_ROOT' plugin/scripts/full-suite-runner.ts plugin/scripts/runner-tree-state.ts plugin/scripts/suite-state-trigger.ts plugin/scripts/runner-concurrency.ts` 归零（⛔ 注释/字符串 fixture 不计——实现时同步更新/删除过时注释）。
-- [ ] AC3 双向负控制：无 `plugin/` 的第三方项目根夹具下，受影响 sibling 解析命中 shipped `dist/*.js` / `scripts/*.sh`（非 `Cannot find module` / `No such file`）；本仓库场景解析结果与迁移前逐字一致（回归）。
-- [ ] AC4 全量绿：`scripts/test.sh` 全量绿（含受迁移影响的 `full-suite-runner.test.mjs` / `suite-state-trigger.test.mjs` / `runner-concurrency.test.mjs`）。
+- [x] AC1 判据翻转（判据本体）：`test -f plugin/scripts/kernel-sibling-resolution-check.ts && node --no-warnings --experimental-strip-types plugin/scripts/kernel-sibling-resolution-check.ts --root . --json` exit 0，violations 数组长度为 0（枚举 0 处）；贴完整命令与输出。
+- [x] AC2 九处残量迁移（位置判定）：4 个源文件里 9 处 naive sibling 锚点改经 `resolveKernelSibling`/`resolveKernelPluginRoot`，`grep -nE 'path\.join\(__dirname, "(assert-clean-tree|full-suite-runner|process-budget|provision-verify-worktree|resource-gate|worktree-process-reaper|suite-load-sampler)\.(sh|ts)"|PER_FILE_CPU_PRELOAD = path\.join\(REPO_ROOT' plugin/scripts/full-suite-runner.ts plugin/scripts/runner-tree-state.ts plugin/scripts/suite-state-trigger.ts plugin/scripts/runner-concurrency.ts` 归零（⛔ 注释/字符串 fixture 不计——实现时同步更新/删除过时注释）。
+- [x] AC3 双向负控制：无 `plugin/` 的第三方项目根夹具下，受影响 sibling 解析命中 shipped `dist/*.js` / `scripts/*.sh`（非 `Cannot find module` / `No such file`）；本仓库场景解析结果与迁移前逐字一致（回归）。
+- [x] AC4 全量绿：`scripts/test.sh` 全量绿（含受迁移影响的 `full-suite-runner.test.mjs` / `suite-state-trigger.test.mjs` / `runner-concurrency.test.mjs`）。
 
 ## Definition of Done
 
@@ -41,11 +41,26 @@ AC1–AC4 全绿；AC-225 criterion exit 0（检查器**机械枚举 0 处**，�
 
 ## Touches
 
+- `plugin/scripts/axis-generator.ts`
 - `plugin/scripts/full-suite-runner.ts`
-- `plugin/scripts/runner-tree-state.ts`
-- `plugin/scripts/suite-state-trigger.ts`
+- `plugin/scripts/goal-driver.ts`
+- `plugin/scripts/guard-lineage-check.ts`
+- `plugin/scripts/outer-driver.ts`
+- `plugin/scripts/precommit-guard.ts`
+- `plugin/scripts/quality-gate-driver.ts`
+- `plugin/scripts/quay-init-closure-assertion.ts`
+- `plugin/scripts/quay-init-closure-ratchet.ts`
+- `plugin/scripts/registry-bare-filename-scan.ts`
+- `plugin/scripts/rhythm-consumer-check.ts`
 - `plugin/scripts/runner-concurrency.ts`
+- `plugin/scripts/runner-tree-state.ts`
+- `plugin/scripts/suite-driver.ts`
+- `plugin/scripts/suite-slot-ssot-check.ts`
+- `plugin/scripts/suite-state-trigger.ts`
+- `plugin/scripts/workflow-journal.ts`
 - `plugin/test/full-suite-runner.test.mjs`
 - `plugin/test/suite-state-trigger.test.mjs`
 - `plugin/test/runner-concurrency.test.mjs`
+- `plugin/test/registry-bare-filename-scan.test.mjs`
 - `tasks/gap-ac225-kernel-sibling-naive-anchor-migration-zero.md`
+- `experiments/quay-perpetual-stream/scripts/workflow-journal.ts`

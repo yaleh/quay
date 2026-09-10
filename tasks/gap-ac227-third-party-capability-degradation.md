@@ -2,7 +2,7 @@
 id: gap-ac227-third-party-capability-degradation
 title: C域「能力不存在」独立取值 + 防降级回流污染：hermetic 双向测试
   third-party-capability-degradation（AC-227）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -42,10 +42,10 @@ goal_ac: AC-227
 
 ## Acceptance Criteria
 
-- [ ] AC1 判据翻转：`node --no-warnings --experimental-strip-types --test plugin/test/third-party-capability-degradation.test.mjs` exit 0；贴完整输出（含正向+反向断言名）。
-- [ ] AC2 正向 hermetic：同一测试自建目标（无 `scripts/test.sh`、只有 `loop.test_command`）上，doc-check / scoped-gate / suite 三步命令构造函数各产「能力不存在」独立取值（doc-check ⇒ skip；scoped-gate/suite ⇒ 委托 test_command），且 argv 不含 exit 127；贴断言名与通过片段。
-- [ ] AC3 反向负控制：同一测试在本仓库形态（有 `scripts/test.sh`）上，三步命令与迁移前逐字一致（doc-check=`bash <dir>/scripts/test.sh --static-checks-doc`、scoped-gate=`bash <dir>/scripts/test.sh --for-task <task> --allow-thin`、suite=full-suite-runner argv）；贴断言名与通过片段。
-- [ ] AC4 残余 exit 127 消除：`grep -c 'exit 127' plugin/scripts/worker-driver.ts` = 0（⛔ 能力不存在不再以 exit 127 形态出现——GOAL-012 退出条件②）；且 `grep -c 'third-party-no-test-tooling' plugin/scripts/worker-driver.ts` ≥ 1（可区分取值仍在）；且 `node --no-warnings --experimental-strip-types --test plugin/test/worker-driver.test.mjs` 仍绿；贴三个读数。
+- [x] AC1 判据翻转：`node --no-warnings --experimental-strip-types --test plugin/test/third-party-capability-degradation.test.mjs` exit 0；贴完整输出（含正向+反向断言名）。
+- [x] AC2 正向 hermetic：同一测试自建目标（无 `scripts/test.sh`、只有 `loop.test_command`）上，doc-check / scoped-gate / suite 三步命令构造函数各产「能力不存在」独立取值（doc-check ⇒ skip；scoped-gate/suite ⇒ 委托 test_command），且 argv 不含 exit 127；贴断言名与通过片段。
+- [x] AC3 反向负控制：同一测试在本仓库形态（有 `scripts/test.sh`）上，三步命令与迁移前逐字一致（doc-check=`bash <dir>/scripts/test.sh --static-checks-doc`、scoped-gate=`bash <dir>/scripts/test.sh --for-task <task> --allow-thin`、suite=full-suite-runner argv）；贴断言名与通过片段。
+- [x] AC4 残余 exit 127 消除：`grep -c 'exit 127' plugin/scripts/worker-driver.ts` = 0（⛔ 能力不存在不再以 exit 127 形态出现——GOAL-012 退出条件②）；且 `grep -c 'third-party-no-test-tooling' plugin/scripts/worker-driver.ts` ≥ 1（可区分取值仍在）；且 `node --no-warnings --experimental-strip-types --test plugin/test/worker-driver.test.mjs` 仍绿；贴三个读数。
 
 ## Definition of Done
 
