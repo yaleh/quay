@@ -573,12 +573,12 @@ run_static_checks() {
   # target root / 模板字符串而非经 resolveKernelSibling/resolveKernelPluginRoot 即违规（AC-203 前例）。
   # Whole-store 扫描（plugin/scripts + packages/quay/src），DEV-TREE-ONLY 豁免标记带理由可复核。
   # ⛔ 落在 full（不 scoped）——全店枚举，不随单任务 Touches 收窄。
-  # ⛔ 常驻路径用 --no-block（REPORT-ONLY，exit 0 但打印违规）：本检查器默认 fail-closed（AC-225
-  #   criterion 与突变用例/单测都以默认跑），但本任务落地时全店仍有 ~9 处 naive __dirname 残量 +
-  #   一批待补 DEV-TREE-ONLY 标记的 target-root 站点（AC-225 迁移范围）——fail-closed 会让全量
-  #   suite 恒红、挡住所有 fan-in。AC-225 迁移归零后移除此 flag 转 fail-closed。
+  # Fail-closed（不带 --no-block）：AC-225 迁移已归零（实测 --root . --json ⇒ violations: [] / total: 0），
+  #   枚举归零这一半由此重新有强制力——新落一处 naive __dirname / 跨包源码锚点即红，与 B 域
+  #   target-identity-literal-check（:252，fail-closed）对称。负控制由 scoped-static-checks.test.mjs 的
+  #   注册行断言（不得带 --no-block）+ 注入即红干跑钉住（硬规则 3/4）。
   # @static-tier full
-  run_checker "kernel-sibling-resolution-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/kernel-sibling-resolution-check.ts" --root "${repo_root}" --json --no-block
+  run_checker "kernel-sibling-resolution-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/kernel-sibling-resolution-check.ts" --root "${repo_root}" --json
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait
