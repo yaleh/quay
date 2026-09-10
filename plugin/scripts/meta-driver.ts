@@ -168,6 +168,9 @@ export interface MetaRoundReadings {
 export function goalStoreArgv(scriptRoot: string, sub: string[], dataRoot: string = scriptRoot): string[] {
   return [
     "node", "--no-warnings", "--experimental-strip-types",
+    // kernel-sibling-dev-tree-only: meta-driver 是 dev-tree-only 观测例程（本文件头部「源树直跑、
+    // 不经 bundle」，且经相对 import ../../packages/quay/src 只吃源树），scriptRoot 恒为含 packages/
+    // 的源树根 ⇒ 锚 packages/quay/src 是正确行为，⛔ 非第三方 shipped 解析。
     path.join(scriptRoot, "packages", "quay", "src", "goal-store.ts"),
     ...sub, "--root", dataRoot,
   ];
