@@ -2,7 +2,7 @@
 id: AC-231
 title: 缺省配置下保真性闸【确实执行】——env var 未设时判定器解析不得返回 undefined，且记录必带可区分 verdict（GOAL-013
   退出条件①③）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-013
 criterion: node --no-warnings --experimental-strip-types --test
@@ -49,4 +49,9 @@ statusLog:
     actor: cli:human-ruling-2026-09-10
     reason: 人 2026-09-10 授权补立：趁 GOAL-013 仍 active（I4 已报
       divergent）钉住「闸在生产缺省配置下确实执行」，防它在闸从未执行的情况下 flip achieved
+  - at: 2026-09-10T15:34:15.338Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
