@@ -1070,8 +1070,8 @@ export function renderFanInCardFromRecords(
         ? html`<div style="color:var(--color-neutral-700)">${relativeTime(key * 1000)}</div>`
         : "";
       return html`<div style="${i > 0 ? "border-top:1px solid var(--color-divider);padding-top:6px;" : ""}display:flex;flex-direction:column;gap:2px;font-size:0.75rem;line-height:1.4">
-        <a href="/task/${encodeURIComponent(r.task ?? "")}" style="color:var(--color-text);text-decoration:none;font-weight:600">${escapeHtml(r.task ?? "?")}</a>
-        <div style="color:var(--color-neutral-700)">${renderFanInCell(r.task ?? "", r, { showReason: false })}</div>
+        <a href="/task/${encodeURIComponent(r.task ?? "")}" title="${escapeHtml(r.task ?? "")}" style="color:var(--color-text);text-decoration:none;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.task ?? "?")}</a>
+        <div style="color:var(--color-neutral-700)">${renderFanInCell(r.task ?? "", r, { showReason: false, layout: "inline" })}</div>
         ${tsLine}
       </div>`;
     });

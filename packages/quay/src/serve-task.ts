@@ -509,15 +509,21 @@ export async function handleTaskList(
  *  gap-dashboard-fanin-card-hide-reason: `mfi.reason` is unbounded free text (measured up to 1084
  *  chars) — right on /task/<id>'s Runs table (one cell per attempt), but it balloons the dashboard's
  *  five-row FAN-IN overview card. The `showReason` option (default true → /task/<id> unchanged) lets
- *  the dashboard skip that one span entirely, rather than truncate. */
+ *  the dashboard skip that one span entirely, rather than truncate.
+ *
+ *  gap-dashboard-fanin-cell-inline-layout-and-id-truncation: `layout` switches field *layout* (not
+ *  field selection — `showReason` already does that). `"inline"` joins the parts with " · " on one
+ *  line for the dashboard's compact five-row card; the default `"stacked"` keeps the `<br>`-separated
+ *  vertical stack for /task/<id>'s Runs table (its call site is unchanged). */
 export function renderFanInCell(
   taskId: string,
   r: WorkerOutcomeRecord,
-  opts: { showReason?: boolean } = {},
+  opts: { showReason?: boolean; layout?: "stacked" | "inline" } = {},
 ): string {
   const mfi = r.mechanical_fan_in;
   if (mfi == null) return "—";
   const showReason = opts.showReason ?? true;
+  const layout = opts.layout ?? "stacked";
   const parts: string[] = [];
   // gap-dashboard-status-tag-badges: landed/red/unknown were bare <strong> text with no background,
   // so the outcome blended into the row copy. Reuse the .tag soft-badge set (landed → tag-positive,
@@ -537,7 +543,7 @@ export function renderFanInCell(
   if (mfi.fanInLog != null && mfi.fanInLog.length > 0) {
     parts.push(html`<a href="/fan-in-log/${encodeURIComponent(taskId)}/${encodeURIComponent(mfi.fanInLog)}">view</a> · <a href="/fan-in-log/${encodeURIComponent(taskId)}/${encodeURIComponent(mfi.fanInLog)}/download">download</a>`);
   }
-  return parts.join("<br>");
+  return parts.join(layout === "inline" ? " · " : "<br>");
 }
 
 export function taskRunsBlock(
