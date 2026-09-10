@@ -119,7 +119,7 @@ export const ROUTINE_WATCHDOG_MS_DEFAULT = Number(process.env.QUAY_TEST_QUALITY_
 export function defaultJudgmentConsumerArgv(root: string): string[] {
   return [
     "node", "--experimental-strip-types",
-    path.join(root, "plugin", "scripts", "judgment-consumer-check.ts"),
+    path.join(root, "plugin", "scripts", "judgment-consumer-check.ts"),  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     "--root", root, "--json",
   ];
 }
@@ -179,7 +179,7 @@ export async function runJudgmentConsumerCheck(root: string, cmd: string[] | nul
 export function defaultPoolQualityPlanArgv(root: string): string[] {
   return [
     "node", "--no-warnings", "--experimental-strip-types",
-    path.join(root, "plugin", "scripts", "pool-quality-judge.ts"),
+    path.join(root, "plugin", "scripts", "pool-quality-judge.ts"),  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     "--root", root, "--plan",
   ];
 }
@@ -247,7 +247,7 @@ export function defaultPoolJudgeArgv(plan: PoolQualityPlan, root: string): strin
 async function recordLastJudgeRound(root: string): Promise<{ recorded: boolean; lastRound: number | null }> {
   const argv = [
     "node", "--no-warnings", "--experimental-strip-types",
-    path.join(root, "plugin", "scripts", "pool-quality-judge.ts"),
+    path.join(root, "plugin", "scripts", "pool-quality-judge.ts"),  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     "--root", root, "--record-last-round",
   ];
   const r = await runAsync(argv, { timeoutMs: ROUTINE_TIMEOUT_MS });
@@ -393,7 +393,7 @@ export async function runPoolQualityJudge(
 export function defaultIdentityReplicationArgv(root: string): string[] {
   return [
     "node", "--experimental-strip-types",
-    path.join(root, "plugin", "scripts", "identity-replication-check.ts"),
+    path.join(root, "plugin", "scripts", "identity-replication-check.ts"),  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     "--root", root, "--json",
   ];
 }
@@ -402,7 +402,7 @@ export function defaultIdentityReplicationArgv(root: string): string[] {
 export function defaultGuardLineageArgv(root: string): string[] {
   return [
     "node", "--experimental-strip-types",
-    path.join(root, "plugin", "scripts", "guard-lineage-check.ts"),
+    path.join(root, "plugin", "scripts", "guard-lineage-check.ts"),  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     "--root", root, "--json",
   ];
 }
@@ -412,7 +412,7 @@ export function defaultGuardLineageArgv(root: string): string[] {
 export function defaultDeletionClosureArgv(root: string, components: string[]): string[] {
   return [
     "node", "--experimental-strip-types",
-    path.join(root, "plugin", "scripts", "deletion-closure-check.ts"),
+    path.join(root, "plugin", "scripts", "deletion-closure-check.ts"),  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     ...components, "--root", root, "--json",
   ];
 }

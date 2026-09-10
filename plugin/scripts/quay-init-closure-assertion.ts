@@ -94,7 +94,7 @@ export function assertClosure(relPaths: string[]): ClosureAssertionVerdict {
  * Returns null (NOT-EVALUATED) when quay-init.sh is absent or the laydown exits non-zero.
  */
 export function runLaydownPaths(root: string): string[] | null {
-  const quayInit = path.join(root, "plugin", "scripts", "quay-init.sh");
+  const quayInit = path.join(root, "plugin", "scripts", "quay-init.sh");  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   if (!fs.existsSync(quayInit)) return null;
   const tmpBase = fs.mkdtempSync(path.join(path.dirname(root), "quay-init-assertion-"));
   const target = path.join(tmpBase, "target");
@@ -170,7 +170,7 @@ export interface FailureStateReport {
  * failure but saw none must not look like "覆盖了失败路径").
  */
 export function runFailureStateReport(root: string): FailureStateReport | null {
-  const quayInit = path.join(root, "plugin", "scripts", "quay-init.sh");
+  const quayInit = path.join(root, "plugin", "scripts", "quay-init.sh");  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   if (!fs.existsSync(quayInit)) return null;
   const tmpBase = fs.mkdtempSync(path.join(path.dirname(root), "quay-init-fail-"));
   const target = path.join(tmpBase, "target");
