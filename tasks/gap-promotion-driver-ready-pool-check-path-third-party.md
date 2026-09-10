@@ -2,7 +2,7 @@
 id: gap-promotion-driver-ready-pool-check-path-third-party
 title: Layer-1b 驱动仍把脚本锚在 root/plugin/scripts —— 第三方项目 promotion
   恒「ready-pool-check exited 1」，挡 AC-207 端到端
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical
