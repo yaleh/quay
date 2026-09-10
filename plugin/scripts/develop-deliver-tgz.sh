@@ -505,8 +505,20 @@ verify_coldstart_mode() {
       fail=1
       continue
     fi
-    echo "develop-deliver: ${hk} (${target}) — scp verify-deliver-coldstart.sh + both .tgz"
-    if ! scp "${ssh_opts[@]}" "${SCRIPT_DIR}/verify-deliver-coldstart.sh" "${quay_tgz}" "${qn_tgz}" "${target}:~/" >/dev/null 2>&1; then
+    echo "develop-deliver: ${hk} (${target}) — scp verify-deliver-coldstart.sh + its \$SCRIPT_DIR siblings + SPEC + both .tgz"
+    # verify-deliver-coldstart.sh resolves its sibling tools by \$SCRIPT_DIR (pane-state-classify.ts,
+    # quay-init-closure-assertion.ts → gate-script-base.ts + repo-root.ts) and its L1 closed-set by the
+    # SPEC — all five + the SPEC must travel with the script or the remote verify aborts under `set -e`
+    # before writing the AC89 evidence (the closure is enumerated here, not tar'd, so a new \$SCRIPT_DIR
+    # dependency is an explicit edit, not a silent remote failure).
+    if ! scp "${ssh_opts[@]}" \
+        "${SCRIPT_DIR}/verify-deliver-coldstart.sh" \
+        "${SCRIPT_DIR}/pane-state-classify.ts" \
+        "${SCRIPT_DIR}/quay-init-closure-assertion.ts" \
+        "${SCRIPT_DIR}/gate-script-base.ts" \
+        "${SCRIPT_DIR}/repo-root.ts" \
+        "${SCRIPT_DIR}/../../orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md" \
+        "${quay_tgz}" "${qn_tgz}" "${target}:~/" >/dev/null 2>&1; then
       echo "develop-deliver: ${hk} (${target}) — scp FAILED (NOT-EVALUATED)"
       fail=1
       continue
@@ -521,6 +533,7 @@ bash "\${HOME}/verify-deliver-coldstart.sh" \
   --build-date "${build_date}" \
   --host "${hk}" \
   --ac89 "\${EV}" \
+  --spec "\${HOME}/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md" \
   --prefix "\${HOME}/quay-verify-coldstart-${develop_tip:0:8}.npm" \
   --project "quay-verify-coldstart-${develop_tip:0:8}" \
   --root "\${HOME}/quay-verify-coldstart-${develop_tip:0:8}-root" \
