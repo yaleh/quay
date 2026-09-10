@@ -63,9 +63,9 @@ goal_ac: AC-229
 ## Touches
 
 - packages/quay/src/goal-store.ts
-- packages/quay/src/criterion-fidelity.ts
-- plugin/test/criterion-fidelity-gate.test.mjs
-- plugin/test/criterion-fidelity-historical-case.test.mjs
-- plugin/test/fixtures/criterion-fidelity/kernel-sibling-pre-aca7a0511.ts
-- plugin/test/fixtures/criterion-fidelity/kernel-sibling-post-aca7a0511.ts
+- packages/quay/src/criterion-fidelity.ts (new)
+- plugin/test/criterion-fidelity-gate.test.mjs (new)
+- plugin/test/criterion-fidelity-historical-case.test.mjs (new)
+- plugin/test/fixtures/criterion-fidelity/kernel-sibling-pre-aca7a0511.ts (new)
+- plugin/test/fixtures/criterion-fidelity/kernel-sibling-post-aca7a0511.ts (new)
 - tasks/gap-criterion-fidelity-gate-activation-blind-to-vacuous-criteria.md
