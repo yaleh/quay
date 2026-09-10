@@ -1,7 +1,7 @@
 ---
 id: gap-ac226-target-identity-literal-check
 title: B域身份字面量检查器 target-identity-literal-check：存在 + 枚举归零 + 被突变覆盖（AC-226）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
