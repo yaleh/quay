@@ -32,9 +32,9 @@ AC-207 端到端第 10 轮实测暴露第五个 shipped-unsafe 锚点（同族�
 
 ## Acceptance Criteria
 
-- [ ] AC1 位置判定：`appendCompleteGateEvent` 与 `ffMergeModule` 两处 `packages/quay/src` 锚点改为 dist/shipped 感知解析（grep 旧锚点归零，贴前 3 条命中，硬规则②）。
-- [ ] AC2 shipped 负控制：包根打平布局（无 packages/quay/src）下动态 import `gate-event-store.ts` 成功并可写 gate-events.jsonl。
-- [ ] AC3 双向不变：源树场景两 import 行为逐字不变，existing tests 绿。
+- [x] AC1 位置判定：`appendCompleteGateEvent` 与 `ffMergeModule` 两处 `packages/quay/src` 锚点改为 dist/shipped 感知解析（grep 旧锚点归零，贴前 3 条命中，硬规则②）。
+- [x] AC2 shipped 负控制：包根打平布局（无 packages/quay/src）下动态 import `gate-event-store.ts` 成功并可写 gate-events.jsonl。
+- [x] AC3 双向不变：源树场景两 import 行为逐字不变，existing tests 绿。
 
 ## Definition of Done
 
