@@ -4,16 +4,19 @@ title: A域检查器被突变机制覆盖——「能取假」由清单证明，
 status: draft
 kind: criterion
 goal: GOAL-012
-criterion: bash plugin/scripts/checker-mutation-check.sh --list --json | python3
-  -c 'import json,sys; m=json.load(sys.stdin); names=json.dumps(m);
-  ok="kernel-sibling-resolution-check" in names; print("covered:",ok);
-  sys.exit(0 if ok else 1)'
-expect: "`checker-mutation-check.sh --list --json` 的清单里出现
-  `kernel-sibling-resolution-check`
-  且被标为已覆盖——即该检查器**有突变用例证明它会红**。这是「能取假」的机械证据：一个从不变红的检查器与「永远 pass」不可区分（本仓库
-  gap-checkers-have-never-been-shown-to-fail 的既定纪律）。⛔
-  只断言「检查器文件存在」不算——那正是恒绿检查器能混过去的形态。反向由该机制自身的 `--check` fail-closed
-  闸保证：新检查器若无突变用例，闸会红，不可能静默入册。立条时实测 `covered: False`（检查器尚不存在）⇒ 红。"
+criterion: node --no-warnings --experimental-strip-types --test
+  plugin/test/kernel-sibling-resolution-check.test.mjs && bash
+  plugin/scripts/checker-mutation-check.sh --list --json | python3 -c 'import
+  json,sys; m=json.load(sys.stdin);
+  ok=any(c.get("name")=="kernel-sibling-resolution-check" and c.get("covered")
+  for c in m.get("checkers",[])); print("registered:",ok); sys.exit(0 if ok else
+  1)'
+expect: |-
+  双向，两个断言缺一不可：**①能取假（本条的重点）**——`plugin/test/kernel-sibling-resolution-check.test.mjs` 在**自建夹具**上跑通两个方向：干净树 ⇒ 检查器绿；注入一处 naive 锚点（`path.join(__dirname, "x.sh")` / `path.join(root, "plugin", "scripts", ...)` / 模板字符串形态**各一例**，⛔ 不止一种拼接形态——GOAL-012 风险 4）⇒ 检查器**必须红**。**②登记**——该检查器出现在 `checker-mutation-check.sh --list --json` 的 checkers 数组里且 `covered: true`，从而被本仓库既有的 `--check` fail-closed 闸长期看住。
+
+  ⛔ 本条**不**把 `--check` 本身当判据：它会因**别的**检查器的问题而红（立条时实测 `--check` 就是 FAIL），判据将不再隔离本 GOAL；且 72.6s × 每轮的代价过大。`covered: true` 只证明"登记了突变用例"、不证明"会红"（立条时实测 `checkers_total: 63 / checkers_with_mutation: 63`）——所以"会红"由断言①的专用单测直接证明，⛔ 不靠 `covered` 字段冒充。
+
+  **可直接验证**：两个断言都是当前树的纯函数，跑一次即得，⛔ 不依赖任何需要多轮积累的生产读数。
 origin: >-
   GOAL-012 的机器判据之一。立条依据见 GOAL-012 的 origin（人 2026-09-10 三条裁定后授权设立；8 个缺陷同属
   kernel↔target 边界三域归属缺口；§6b 已有契约但只覆盖一域且无强制力，人工枚举 3 次 3 漏）。
