@@ -1,7 +1,7 @@
 ---
 id: AC-224
 title: A域检查器被突变机制覆盖——「能取假」由清单证明，⛔ 恒绿检查器不算保证（GOAL-012 退出条件⑤）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-012
 criterion: node --no-warnings --experimental-strip-types --test
@@ -25,4 +25,11 @@ origin: >-
   本条判据在立条当轮已干跑取真实读数：exit 1（可评估、非 spawn 失败），符合「判据落笔当轮必须取一次真实读数」（硬规则
   4c）。判据只引用不会自行回退的量——代码状态与套件绿红，⛔ 不含进程存活/远程主机可达性/真实第三方项目当前跑通状态（后者归 GOAL-009
   AC-207 与例行监控）。
+activatedAt: 2026-09-10T03:05:02.728Z
+statusLog:
+  - at: 2026-09-10T03:05:02.729Z
+    from: draft
+    to: active
+    actor: cli:human-ruling-2026-09-10
+    reason: 人授权激活（单次授权）
 ---

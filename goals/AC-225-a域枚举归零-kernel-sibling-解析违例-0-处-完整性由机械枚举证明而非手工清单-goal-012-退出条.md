@@ -1,7 +1,7 @@
 ---
 id: AC-225
 title: A域枚举归零——kernel sibling 解析违例 0 处，完整性由机械枚举证明而非手工清单（GOAL-012 退出条件①）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-012
 criterion: test -f plugin/scripts/kernel-sibling-resolution-check.ts && node
@@ -20,4 +20,11 @@ origin: >-
   本条判据在立条当轮已干跑取真实读数：exit 1（可评估、非 spawn 失败），符合「判据落笔当轮必须取一次真实读数」（硬规则
   4c）。判据只引用不会自行回退的量——代码状态与套件绿红，⛔ 不含进程存活/远程主机可达性/真实第三方项目当前跑通状态（后者归 GOAL-009
   AC-207 与例行监控）。
+activatedAt: 2026-09-10T03:05:03.797Z
+statusLog:
+  - at: 2026-09-10T03:05:03.798Z
+    from: draft
+    to: active
+    actor: cli:human-ruling-2026-09-10
+    reason: 人授权激活（单次授权）
 ---
