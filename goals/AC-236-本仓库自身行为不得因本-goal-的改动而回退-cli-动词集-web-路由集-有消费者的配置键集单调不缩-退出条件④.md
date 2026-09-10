@@ -1,7 +1,7 @@
 ---
 id: AC-236
 title: 本仓库自身行为不得因本 GOAL 的改动而回退——CLI 动词集 / web 路由集 / 有消费者的配置键集单调不缩（退出条件④）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-015
 criterion: test -f plugin/scripts/host-repo-surface-ratchet.ts && node
@@ -70,6 +70,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-09-10T23:25:08.631Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
