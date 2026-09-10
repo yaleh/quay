@@ -137,7 +137,9 @@ test("config.yml carries a provider map + the loop params the driver reads", () 
     assert.match(cfg, /test_command: node --test/, "loop section must carry test_command");
     assert.match(cfg, /tmux_session: proj-0:0\.0/, "loop section must carry tmux_session");
     assert.match(cfg, /fork_baseline: develop/, "loop section must carry fork_baseline");
-    assert.match(cfg, /merge_target: integration/, "loop section must carry merge_target");
+    // gap-config-key-consumer-check-mechanical-enumeration: the zero-consumer key is deleted from the
+    // writer face — the negative control is that the dead key is NOT written (not merely unwired).
+    assert.doesNotMatch(cfg, /merge_target/, "loop section must NOT carry the deleted zero-consumer key");
   } finally { cleanup(ws); }
 });
 
