@@ -2,7 +2,7 @@
 id: gap-meta-outer-driver-2
 title: Outer driver not running — restart it so the landed start-drivers.ts
   wiring activates
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
