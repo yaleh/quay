@@ -1,7 +1,7 @@
 ---
 id: GOAL-011
 title: store-commit 传播策略按读者归位——AC/evidence 类写跟分支走，不再抢跑 develop（SPEC 阶段2）
-status: active
+status: achieved
 kind: goal
 origin: >-
   规格正本：orchestration/SPEC-store-commit-unification-2026-09-08.md §5「阶段
@@ -30,6 +30,12 @@ origin: >-
 
 
   人在本轮对话中裁定：「根据该 SPEC 创建 goal；并激活（单次授权）」。
+statusLog:
+  - at: 2026-09-10T04:28:29.676Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 ---
 ## 背景
 
