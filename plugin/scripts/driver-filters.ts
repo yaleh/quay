@@ -434,18 +434,13 @@ export function propagateDocBranchToDevelop(root: string): boolean {
 // ⛔ 非「同步成功」同形，硬规则 3b）。语义兜底（分叉后怎么融）归父任务 gap-doc-develop-sync-semantic-
 // conflict-resolution 的 semanticSyncDocToDevelop。
 
-/** doc 工作分支名（主检出所在；develop = 权威基线）。⚠️ 这是【本仓库自己】的命名约定，⛔ 不是协议的
- *  固定部分——第三方项目的工作分支可以是任意名（main 等）。shipped 代码里凡以它作缺省同步对象的处所都
- *  已改为运行时派生（resolveDocBranch），本常量仅作 git 读分支失败时的兜底缺省（gap-doc-branch-
- *  hardcoded-author-breaks-third-party-develop-sync）。 */
-export const DOC_BRANCH = "author";
-
-/** 运行时派生 doc 工作分支名：默认 = 当前 checked-out 分支（主检出所在），⛔ 不再硬编码 "author"。
+/** 运行时派生 doc 工作分支名：唯一来源 = 当前 checked-out 分支（主检出所在），⛔ 不再硬编码 "author"。
  *  gap-doc-branch-hardcoded-author-breaks-third-party-develop-sync：第三方项目工作分支非 author 时，
- *  硬编码恒 no-refs ⇒ 晋升写入对派发永久不可见。git 读分支失败 ⇒ 兜底 DOC_BRANCH（向后兼容；⛔ 不
- *  新增配置面——运行时派生已是正确的通用默认，不为「可配置」过度设计）。 */
-export function resolveDocBranch(root: string): string {
-  return currentBranchName(root) ?? DOC_BRANCH;
+ *  硬编码恒 no-refs ⇒ 晋升写入对派发永久不可见。git 读分支失败 ⇒ null（⛔ 不兜底一个裸字面量——
+ *  "author" 是本仓库自己的命名约定，逐项目不同；无 override 裸字面量正是 GOAL-012 B 域 TARGET
+ *  target-identity-literal-check 的违例形。调用方以事件落痕 + 独立取值处理 null，硬规则 3b）。 */
+export function resolveDocBranch(root: string): string | null {
+  return currentBranchName(root);
 }
 
 /** `git rev-list --count <from>..<to>` 的提交数（to 独有、from 未含）。git 出错 / 非数 ⇒ null
@@ -465,7 +460,8 @@ function revCountAhead(root: string, from: string, to: string): number | null {
 
 /** 分叉 guard：doc 分支有 develop 未含的提交（`git rev-list --count develop..<docBranch>` > 0）⇒ 分叉
  *  （ff-only 无法同步 ⇒ 报红，返回 true）。读失败 ⇒ null（读不懂 ≠ 无分叉）。 */
-export function docBranchForkedFromDevelop(root: string, docBranch: string = resolveDocBranch(root)): boolean | null {
+export function docBranchForkedFromDevelop(root: string, docBranch: string | null = resolveDocBranch(root)): boolean | null {
+  if (docBranch === null) return null; // 读分支失败 ⇒ null（读不懂 ≠ 无分叉）
   const ahead = revCountAhead(root, "develop", docBranch);
   return ahead === null ? null : ahead > 0;
 }
@@ -480,16 +476,16 @@ export function docBranchForkedFromDevelop(root: string, docBranch: string = res
  *  失败（not-ff / error）与成功（synced）都落痕到 DOC_DEVELOP_SYNC_EVENT_REL（⛔ 静默）——synced 也写
  *  事件是 AC4 生产载体（硬规则 3c）：成功同步若不留痕，「生产载体有记录」结构上不可满足（恒假）。
  *  not-doc 亦落痕 doc-develop-sync-branch-mismatch（携带 cur/expected）——分支改名 / driver 常驻进程里
- *  的 DOC_BRANCH 常量陈旧时，这是唯一的观测信号（⛔ 裸 return 静默则与「无事发生」同形，硬规则 3b，
+ *  缓存的 doc 分支名陈旧时，这是唯一的观测信号（⛔ 裸 return 静默则与「无事发生」同形，硬规则 3b，
  *  gap-sync-develop-to-doc-not-doc-silent-noop）。
  *  already 不写（no-op，每轮写会刷日志）。 */
-export function syncDevelopToDoc(root: string, docBranch: string = resolveDocBranch(root)): string {
+export function syncDevelopToDoc(root: string, docBranch: string | null = resolveDocBranch(root)): string {
   const cur = currentBranchName(root);
   if (cur === null) {
     writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-ff-error", phase: "read-branch" });
     return "error";
   }
-  if (cur !== docBranch) {
+  if (docBranch === null || cur !== docBranch) {
     writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-branch-mismatch", phase: "not-doc", cur, expected: docBranch });
     return "not-doc";
   }
@@ -566,7 +562,8 @@ function revParse(root: string, ref: string): string | null {
  *   - "no-refs" — 读 ref 失败 / 双分支未建（非 git / bare test repo）⇒ 无同步对象（⛔ 非「无分歧」）
  *   - "already" — 两 ref 相同 ⇒ 无分歧（no-op，不写事件）
  *   - "synced"  — 分歧 ⇒ 双向同步已执行 + 落痕 doc-develop-sync-bidirectional 事件 */
-export function syncDocDevelopBidirectional(root: string, docBranch: string = resolveDocBranch(root)): string {
+export function syncDocDevelopBidirectional(root: string, docBranch: string | null = resolveDocBranch(root)): string {
+  if (docBranch === null) return "no-refs"; // 读分支失败 ⇒ 无同步对象（⛔ 非「无分歧」）
   const docSha = revParse(root, docBranch);
   const developSha = revParse(root, "develop");
   if (docSha === null || developSha === null) return "no-refs";

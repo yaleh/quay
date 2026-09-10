@@ -32,7 +32,6 @@ import {
   STATUS_PRIORITY,
   syncDevelopToDoc,
   docBranchForkedFromDevelop,
-  DOC_BRANCH,
   syncDocDevelopBidirectional,
   NEEDS_HUMAN_CAUSE,
   NEEDS_HUMAN_CAUSES,
@@ -47,6 +46,11 @@ import {
 import { readTaskStatus as workerReadTaskStatus } from "../scripts/worker-driver.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// 测试夹具的 doc 工作分支名（本仓库自己的命名约定 "author"）。⛔ 测试局部常量，非 shipped kernel——
+// 生产代码里该值早已只经 resolveDocBranch 运行时派生（gap-ac226-target-identity-literal-check 消除
+// DOC_BRANCH 残量）。
+const DOC_BRANCH = "author";
 
 function makeRoot(tag) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `driver-filters-${tag}-`));
