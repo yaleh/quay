@@ -2,7 +2,7 @@
 id: gap-ac227-third-party-capability-degradation
 title: C域「能力不存在」独立取值 + 防降级回流污染：hermetic 双向测试
   third-party-capability-degradation（AC-227）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
