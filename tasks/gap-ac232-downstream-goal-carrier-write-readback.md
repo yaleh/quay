@@ -38,11 +38,11 @@ B. **载体写**：经 `ac89_append_goal009`（同 AC-203/205/207 锚字段路�
 
 ## Acceptance Criteria
 
-- [ ] AC1 机制接线：`grep -c 'GOAL-009-AC-232' plugin/scripts/verify-deliver-coldstart.sh` ≥1，且 `goal_write_ok`/`goal_read_back_ok`/`goal_records` 三字段名在脚本内各 ≥1 命中；贴前 3 条命中（硬规则②）。
-- [ ] AC2 写命令正确 + 能取假：贴出对下游 `--root` 执行的 `goal write GOAL-001 --body ...` 与读回命令及命中行；selfcheck 负控制（写失败/读回空）使 criterion 不 exit 0（硬规则 3b：写调用 0 与空文件同形）。
-- [ ] AC3 载体落账：生产载体出现 `ac="GOAL-009-AC-232"` 记录，host≠本机 ∧ project_root∉本仓库 ∧ goal_write_ok=true ∧ goal_read_back_ok=true ∧ goal_records>0（逐字段满足 criterion 过滤）。
-- [ ] AC4 负控制（能取假）：注入一条 goal_write_ok=false 或 goal_records=0 的记录 ⇒ criterion 仍 exit 1；验证后移除、不污染生产载体。
-- [ ] AC5 判据翻转：AC-232 criterion 干跑从 exit 1 → exit 0（贴出干跑输出）。
+- [x] AC1 机制接线：`grep -c 'GOAL-009-AC-232' plugin/scripts/verify-deliver-coldstart.sh` ≥1，且 `goal_write_ok`/`goal_read_back_ok`/`goal_records` 三字段名在脚本内各 ≥1 命中；贴前 3 条命中（硬规则②）。【实测】GOAL-009-AC-232=5、goal_write_ok=11、goal_read_back_ok=10、goal_records=10；前 3 条命中 = 脚本行 1321（判据注释 ac="GOAL-009-AC-232"）、1374（write_ac232_record 注释）、1387（write_ac232_record printf 落账行）。
+- [x] AC2 写命令正确 + 能取假：贴出对下游 `--root` 执行的 `goal write GOAL-001 --body ...` 与读回命令及命中行；selfcheck 负控制（写失败/读回空）使 criterion 不 exit 0（硬规则 3b：写调用 0 与空文件同形）。【实测】写命令 `node "$qrl" goal write GOAL-001 --title "..." --origin "..." --body "<≥40 非空白>" --root "$root"` exit 0 且 `goals/GOAL-001-*.md` 落盘；读回 `node "$qrl" goal show GOAL-001 --root "$root"` 输出含 id 且非空、`node "$qrl" goal list --root "$root" --json` 计数=1（全新第三方项目实测：quay-init 铺 project-local `path: $root/.quay/runtime` ⇒ goal store 正确 scope 到 `$root/goals`）；selfcheck 负控制 `ac232-record(write-failed) neg_ok=1`（goal_write_ok=false 仍写，缺件如实非静默 ⇒ criterion 不 exit 0）。
+- [ ] AC3 载体落账：生产载体出现 `ac="GOAL-009-AC-232"` 记录，host≠本机 ∧ project_root∉本仓库 ∧ goal_write_ok=true ∧ goal_read_back_ok=true ∧ goal_records>0（逐字段满足 criterion 过滤）。（待外部）
+- [x] AC4 负控制（能取假）：注入一条 goal_write_ok=false 或 goal_records=0 的记录 ⇒ criterion 仍 exit 1；验证后移除、不污染生产载体。【实测】criterion 干跑（临时载体逐 case 注入后移除）：载体缺失 ⇒ exit 3、host=本机 ⇒ exit 1、goal_write_ok=false ⇒ exit 1、goal_read_back_ok=false ⇒ exit 1、goal_records=0 ⇒ exit 1、正样本（hostB-fake ∉本仓库 + true/true/5）⇒ exit 0；selfcheck `ac232-record(write-failed) neg_ok=1` / `ac232-record(empty-host) refused=1`（write_ac232_record fail-closed 拒写缺 host）。
+- [ ] AC5 判据翻转：AC-232 criterion 干跑从 exit 1 → exit 0（贴出干跑输出）。（待外部）
 
 ## Definition of Done
 
