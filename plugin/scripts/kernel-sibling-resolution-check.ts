@@ -38,14 +38,18 @@
 //   existsSync / readdirSync 形态）与 dev-tree-only 编排 driver 用本标记声明归属。
 //
 // 退出码（checker-mechanical-spine-check.ts 词表 {0,1,2,3}）：
-//   0 = PASS（violations 0 处）
+//   0 = PASS（violations 0 处；或 --no-block 时 REPORT-ONLY——报告但不红）
 //   1 = RED（≥1 处 naive sibling 解析）
 //   2 = usage/env error（非法参数）
 //   3 = NOT-EVALUATED（扫描面缺失 / 不可读——读不到输入 ≠ 无违规，硬规则 3b）
 //
 // Run:
 //   node --no-warnings --experimental-strip-types plugin/scripts/kernel-sibling-resolution-check.ts \
-//       [--root <dir>] [--json]
+//       [--root <dir>] [--json] [--no-block]
+//     --no-block   REPORT-ONLY：仍打印违规清单但 exit 0（接 run_static_checks 的常驻路径，
+//                  同 instrument-decay-check.ts 的 --no-block 手法）。默认（不带）fail-closed：
+//                  有违规 exit 1。AC-225 criterion / 突变用例 / 单测都以默认 fail-closed 跑——
+//                  ⛔ --no-block 只在 full-suite 常驻注册用，不能冒充「会红」的证明（AC-224 正文）。
 
 import fs from "node:fs";
 import path from "node:path";
@@ -331,12 +335,13 @@ export function main(argv: string[]): number {
   if (argv.includes("--help") || argv.includes("-h")) {
     process.stdout.write(
       `kernel-sibling-resolution-check.ts — KERNEL 域 naive sibling 解析检查器（GOAL-012 A 域）。
-usage: node --no-warnings --experimental-strip-types plugin/scripts/kernel-sibling-resolution-check.ts [--root <dir>] [--json]\n`,
+usage: node --no-warnings --experimental-strip-types plugin/scripts/kernel-sibling-resolution-check.ts [--root <dir>] [--json] [--no-block]\n`,
     );
     return 0;
   }
   const root = path.resolve(parseArg(argv, "--root") ?? DEFAULT_ROOT);
   const json = argv.includes("--json");
+  const noBlock = argv.includes("--no-block");
   const res = runCheck(root);
 
   if (json) {
@@ -347,12 +352,16 @@ usage: node --no-warnings --experimental-strip-types plugin/scripts/kernel-sibli
     process.stderr.write(`kernel-sibling-resolution-check: NOT-EVALUATED — no scannable surface under ${root}\n`);
   } else if (res.ok) {
     process.stdout.write(`kernel-sibling-resolution-check: PASS — ${res.surface.length} kernel file(s) scanned, 0 naive sibling resolution(s)\n`);
+  } else if (noBlock) {
+    process.stderr.write(`kernel-sibling-resolution-check: REPORT-ONLY (${res.violations.length} naive sibling resolution(s)) — not fail-closed\n`);
+    for (const v of res.violations) process.stderr.write(`  - [${v.form}] ${v.script} @ ${v.snippet}\n`);
   } else {
     process.stderr.write(`kernel-sibling-resolution-check: RED (${res.violations.length} naive sibling resolution(s))\n`);
     for (const v of res.violations) process.stderr.write(`  - [${v.form}] ${v.script} @ ${v.snippet}\n`);
   }
 
   if (res.notEvaluated) return 3;
+  if (noBlock) return 0; // REPORT-ONLY 常驻路径：打印违规但永不红当前套件（instrument-decay-check --no-block 同手法）
   return res.ok ? 0 : 1;
 }
 

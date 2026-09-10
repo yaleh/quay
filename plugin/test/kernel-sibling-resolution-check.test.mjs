@@ -143,6 +143,20 @@ test("CLI --root over an injected fixture (naive __dirname): exit 1, fail, 1 vio
   assert.equal(out.violations[0].form, "naive-__dirname");
 });
 
+test("CLI --no-block over an injected fixture: exit 0 but reports the violation (report-only, not fail-closed)", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kern-sib-noblock-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(dir, "plugin", "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "plugin", "scripts", "fixture.ts"),
+    'const __dirname = path.dirname(fileURLToPath(import.meta.url));\nexport const gate = path.join(__dirname, "resource-gate.sh");\n');
+  const { result, stdout } = captureConsole(() => main(["node", "kernel-sibling-resolution-check.ts", "--root", dir, "--json", "--no-block"]));
+  assert.equal(result, 0, stdout);
+  const out = JSON.parse(stdout);
+  assert.equal(out.status, "fail");
+  assert.equal(out.violations.length, 1);
+  assert.equal(out.violations[0].form, "naive-__dirname");
+});
+
 test("CLI --root over a missing surface: exit 3, not-evaluated (硬规则 3b — 读不到 ≠ 无违规)", (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kern-sib-empty-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
