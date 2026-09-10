@@ -1,11 +1,14 @@
 // @test-group engine
 // criterion-fidelity-historical-case.test.mjs — AC-230 (tasks/gap-criterion-fidelity-gate-activation-
-// blind-to-vacuous-criteria)：AC-225 真实历史案例双向回归（⛔ 非合成夹具——本 goal 唯一的生产实证）：
-//   ① 扩面前（只有 P1/P2/P3、无 P4 跨包形态）⇒ 判 vacuous
-//   ② 扩面后（含 P4 三形态）⇒ 判 faithful
-//   两方向用【同一个真实案例】，缺②即与「恒判 vacuous」同形（那样的判定器会挡住一切激活）。
-// 两个检查器形态逐字 vendor 成仓库内文件（plugin/test/fixtures/criterion-fidelity/），⛔ 不锚 commit
-// SHA（硬规则 5b：判据不得引用生命周期短于判据本身的对象，rebase/squash 后假阴性）。
+// blind-to-vacuous-criteria) + gap-fidelity-judge-unwired-in-production-and-verdict-stubbed-in-tests
+// 缺陷 B 修法：AC-225 真实历史案例的判决由【真判定器】给出并 vendor 原始输出——⛔ 不再由测试自算
+// verdict 喂回解析器（原 judgeByMechanism stub 即缺陷 B）。两个检查器形态逐字 vendor 成仓库内文件
+// （plugin/test/fixtures/criterion-fidelity/），⛔ 不锚 commit SHA（硬规则 5b）。
+//
+// ⚠️ 实测（2026-09-10，deepseek-v4-pro-anthropic 经 launchArgv("fix-worker")）：真判定器对 pre/post
+// 两个夹具【都判 faithful】（原始输出均为 {"verdict":"faithful"}）——⛔ 未复现「扩面前 vacuous」的预期。
+// 这是【发现】：原 stub 自算的「扩面前 vacuous」并非真判定器的实际判决。本测试只钉「解析器对真判定器
+// 原始输出」给出的 verdict 与真判定器记录一致，⛔ 不再自算（AC3 已按本条「与预期不符则降为发现」处理）。
 //
 // Run: node --no-warnings --experimental-strip-types --test plugin/test/criterion-fidelity-historical-case.test.mjs
 
@@ -29,7 +32,6 @@ const fixtureDir = path.join(repoRoot, 'plugin', 'test', 'fixtures', 'criterion-
 const AC225_CRITERION = `test -f plugin/scripts/kernel-sibling-resolution-check.ts && node --no-warnings --experimental-strip-types plugin/scripts/kernel-sibling-resolution-check.ts --root . --json`;
 const AC225_EXPECT = `\`kernel-sibling-resolution-check.ts\` 存在，且在本仓库当前树上跑 exit 0——即 KERNEL 域违例（把自己的 sibling 脚本锚在 target root / worktree / naive \`__dirname\` 而非经 \`resolveKernelSibling\`/\`resolveKernelPluginRoot\`）**枚举为 0 处**。立条时实测残量 **9 处** naive \`__dirname\` ⇒ 红。本条与 AC-224 构成双向：AC-224 证明该检查器会红（能取假），本条证明它此刻是绿（迁移已完成）。⛔ 完整性由检查器的机械枚举给出，不是手工清单——人工枚举已做过 3 次、3 次都有遗漏。`;
 
-const preSource = fs.readFileSync(path.join(fixtureDir, 'kernel-sibling-pre-aca7a0511.ts'), 'utf8');
 const postSource = fs.readFileSync(path.join(fixtureDir, 'kernel-sibling-post-aca7a0511.ts'), 'utf8');
 
 // ── 解析器 fail-closed（复刻 parseSemanticSufficiencyVerdict 手法）────────────
@@ -57,30 +59,18 @@ test('buildFidelityPrompt: 内嵌 criterion + expect 逐字 + mechanism 源，�
   assert.ok(p.includes('P4_CROSS_PACKAGE_JOIN_RE'), 'prompt 内嵌 mechanism 源（扩面后形态含 P4）');
 });
 
-// ── 双向真实历史回归（同一个案例，缺②即与恒判 vacuous 同形）───────────────
+// ── 真判定器读数（AC3，⛔ 非 stub 自算）───────────────
 
-// 确定性判定器（测试缝）：代理「检查器是否枚举 cross-package 跨包源码锚点」这个历史语义区分。
-// 扩面前 form 枚举只含 naive-__dirname/target-root/template-string（无 cross-package）⇒ 对 expect
-// 声称的完整 KERNEL 域违例类别结构上不可能红 ⇒ vacuous；扩面后含 P4 cross-package ⇒ faithful。
-function judgeByMechanism(prompt) {
-  const hasCrossPackage = prompt.includes('cross-package');
-  return { stdout: JSON.stringify({ verdict: hasCrossPackage ? 'faithful' : 'vacuous' }), exitCode: 0 };
-}
+// 真判定器对两个逐字夹具各跑一次的【原始输出】vendor 成文件（⛔ 不是测试按夹具自算 verdict——
+// 缺陷 B 即原 judgeByMechanism 用 prompt.includes('cross-package') 自算判决再喂回解析器，那证明的是
+// 「管道通」不是「真语义判定会判成 vacuous」）。真读数见上方实测注释：pre/post 都判 faithful（⛔
+// 未复现「扩面前 vacuous」，已按 AC3 降为发现）。测试只钉「解析器对真判定器原始输出」的判决一致。
+const realJudgePre = fs.readFileSync(path.join(fixtureDir, 'real-judge-pre.stdout.txt'), 'utf8');
+const realJudgePost = fs.readFileSync(path.join(fixtureDir, 'real-judge-post.stdout.txt'), 'utf8');
 
-test('① 扩面前（P1/P2/P3，无 P4）⇒ vacuous —— 2026-09-10 07:00:55Z 那 73 分钟里真实发生过的输入', () => {
-  const r = criterionFidelityVerdict(AC225_CRITERION, AC225_EXPECT, judgeByMechanism, {
-    root: repoRoot,
-    mechanism: preSource,
-  });
-  assert.equal(r.verdict, 'vacuous', '扩面前 ⇒ vacuous（结构上不可能对声称对象取假）');
-});
-
-test('② 扩面后（含 P4 三形态）⇒ faithful —— 缺此向即与恒判 vacuous 同形', () => {
-  const r = criterionFidelityVerdict(AC225_CRITERION, AC225_EXPECT, judgeByMechanism, {
-    root: repoRoot,
-    mechanism: postSource,
-  });
-  assert.equal(r.verdict, 'faithful', '扩面后 ⇒ faithful（能在声称对象上取假）');
+test('真判定器读数：对两个逐字夹具的原始输出解析出与真判定器记录一致的 verdict', () => {
+  assert.equal(parseFidelityVerdict(realJudgePre, 0), 'faithful', 'pre 夹具真判定器判 faithful（⛔ 非 vacuous——见实测注释，已降为发现）');
+  assert.equal(parseFidelityVerdict(realJudgePost, 0), 'faithful', 'post 夹具真判定器判 faithful');
 });
 
 // ── not-evaluated 传播（判定器不可用/读不懂 ⇒ not-evaluated，绝不回落 faithful）──

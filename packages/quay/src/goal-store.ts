@@ -374,10 +374,12 @@ function commitGoalFile(goalDir: string, fileName: string, id: string, action: s
  * @param {{cap?: number, staleMs?: number, fidelityJudge?: FidelityInvokeJudge}} opts I1′/I3 policy
  *   values (default cap=3, stale=7d — readGoalConfig supplies the .quay/config.yml values at the CLI
  *   entry) + the GOAL-013 fidelity-judge seam. `fidelityJudge` is OPTIONAL: when absent, the
- *   draft→active fidelity question is SKIPPED (the pre-GOAL-013 activation path is verbatim
- *   unchanged — a caller that only lists/gets, or a mechanical flipper with no judge wired, behaves
- *   exactly as before). When present, the P6 gate asks the second question ("can it be false on the
- *   claimed object") and rejects vacuous/not-evaluated criteria.
+ *   draft→active activation still proceeds (the pre-GOAL-013 path is verbatim unchanged — fails-open),
+ *   BUT the record now carries a distinguishable `fidelity: {verdict:"not-evaluated", reason:"no judge
+ *   configured"}` value so "the gate never ran" is no longer carrier-identical to "the gate ran and
+ *   passed" (gap-fidelity-judge-unwired-in-production-and-verdict-stubbed-in-tests; hard rule 3b).
+ *   When present, the P6 gate asks the second question ("can it be false on the claimed object") and
+ *   rejects vacuous/not-evaluated criteria.
  */
 export function createGoalStore(
   goalDir: string,
@@ -386,7 +388,7 @@ export function createGoalStore(
   fs.mkdirSync(goalDir, { recursive: true });
   const cap = opts.cap ?? DEFAULT_GOAL_CAP;
   const staleMs = opts.staleMs ?? DEFAULT_STALE_MS;
-  const fidelityJudge = opts.fidelityJudge;
+  const storeFidelityJudge = opts.fidelityJudge;
 
   function assertSafeId(id: string) {
     if (typeof id !== "string" || !(GOAL_ID_RE.test(id) || AC_ID_RE.test(id))) {
@@ -662,6 +664,7 @@ export function createGoalStore(
     dryRun = false,
     commit = true,
     intent,
+    fidelityJudge,
   }: {
     title?: string;
     status?: string;
@@ -673,6 +676,9 @@ export function createGoalStore(
     supersededBy?: string[];
     body?: string;
     disposeOld?: DisposeOld;
+    /** P6b: a per-call fidelity judge overriding the store-level seam (the CLI's
+     *  `--fidelity-judge-argv` path). `undefined` ⇒ fall back to the store-level `fidelityJudge`. */
+    fidelityJudge?: FidelityInvokeJudge;
     /** P6: skip the draft→active activation gate (a deliberate "I know it's not evaluable" override). */
     force?: boolean;
     /** P3: the actor recorded in a statusLog entry (default "goal-cli"). */
@@ -852,20 +858,31 @@ export function createGoalStore(
       // P6b — fidelity question (GOAL-013, gap-criterion-fidelity-gate-activation-blind-to-vacuous-
       // criteria): the evaluability gate above proves the criterion can RUN; this proves it can be
       // FALSE on the object its `expect` claims (hard rule 4 — a quantity structurally incapable of
-      // being false is not a measurement). Only fires when a judge is wired (`fidelityJudge` seam);
-      // absent ⇒ the pre-GOAL-013 activation path is verbatim unchanged. ⛔ NOT in the ~42s hot
-      // loop — this is the activation hook only (goal-driver's per-round gate path never calls it).
-      if (activating && !isGoalRecord && !force && typeof fidelityJudge === "function") {
-        const fidelityCmd = typeof frontmatter.criterion === "string" ? frontmatter.criterion : "";
-        const expectText = typeof frontmatter.expect === "string" ? frontmatter.expect : "";
-        const fidelityRoot = resolveGitRoot(goalDir) ?? path.dirname(goalDir);
-        const fRes = criterionFidelityVerdict(fidelityCmd, expectText, fidelityJudge, { root: fidelityRoot });
-        if (fRes.verdict === "vacuous" || fRes.verdict === "not-evaluated") {
-          throw new Error(`cannot activate ${id}: criterion ${fRes.verdict} (${fRes.reason}) — pass --force to override`);
+      // being false is not a measurement). Only judges when a judge is wired (`fidelityJudge` seam
+      // or the per-call `--fidelity-judge-argv` override); absent ⇒ the pre-GOAL-013 activation path
+      // is verbatim unchanged (fails-open) BUT the record still carries a distinguishable
+      // `not-evaluated / "no judge configured"` value (visibility — 字段缺失不再与「判过且放行」同形).
+      // ⛔ NOT in the ~42s hot loop — this is the activation hook only (goal-driver's per-round gate
+      // path never calls it).
+      if (activating && !isGoalRecord && !force) {
+        const judge = fidelityJudge ?? storeFidelityJudge;
+        if (typeof judge === "function") {
+          const fidelityCmd = typeof frontmatter.criterion === "string" ? frontmatter.criterion : "";
+          const expectText = typeof frontmatter.expect === "string" ? frontmatter.expect : "";
+          const fidelityRoot = resolveGitRoot(goalDir) ?? path.dirname(goalDir);
+          const fRes = criterionFidelityVerdict(fidelityCmd, expectText, judge, { root: fidelityRoot });
+          if (fRes.verdict === "vacuous" || fRes.verdict === "not-evaluated") {
+            throw new Error(`cannot activate ${id}: criterion ${fRes.verdict} (${fRes.reason}) — pass --force to override`);
+          }
+          // 判定结果 + 理由落在记录自身 (GOAL-013 退出条件③) — ⛔ 不只打印 stderr，否则「判过且保真」
+          // 与「没判成」在载体上同形。
+          frontmatter.fidelity = { verdict: fRes.verdict, reason: fRes.reason, at: new Date().toISOString() };
+        } else {
+          // Visibility (gap-fidelity-judge-unwired-in-production-and-verdict-stubbed-in-tests):
+          // judge NOT configured ⇒ activation still proceeds (fails-open), but the record carries a
+          // distinguishable value so "the gate never ran" ≠ "the gate ran and passed" on the carrier.
+          frontmatter.fidelity = { verdict: "not-evaluated", reason: "no judge configured", at: new Date().toISOString() };
         }
-        // 判定结果 + 理由落在记录自身 (GOAL-013 退出条件③) — ⛔ 不只打印 stderr，否则「判过且保真」
-        // 与「没判成」在载体上同形。
-        frontmatter.fidelity = { verdict: fRes.verdict, reason: fRes.reason, at: new Date().toISOString() };
       }
 
       // P6c — force escape trace (GOAL-013 风险 4): `--force` skips BOTH activation gates. The
@@ -1042,7 +1059,7 @@ export function createGoalStore(
 //   get <id>                  — one record as JSON
 //   write <id> [--title ...] [--status ...] [--goal ...] [--criterion ...] [--expect ...]
 //              [--origin ...] [--body ...] [--actor ...] [--reason ...] [--force] [--dry-run]
-//              [--expect-absent] [--expect-existing]
+//              [--expect-absent] [--expect-existing] [--fidelity-judge-argv '<json argv array>']
 //              (--expect-absent = create intent, refuse if it exists; --expect-existing =
 //              update intent, refuse if absent — the goal store's expectedStatus-CAS counterpart)
 //   batch --json '<array>'  — write N records in ONE commit (each: id + the write fields)
@@ -1061,6 +1078,26 @@ export function createGoalStore(
 //                               exists OR the scope is empty — evaluated:false; runs each achieved
 //                               AC's criterion under a re-entrancy guard). Carries scopeSize.
 import { fileURLToPath } from "node:url";
+
+/** 保真性判定器 spawnSync 的 wall-clock 上限（毫秒）。单次一锤 LLM 判定（criterion + expect 已内嵌，
+ *  ⛔ 无需工具调用）——成本结构与 goal-driver 的 SUFFICIENCY_TIMEOUT_MS（180_000）同族，故取同值。
+ *  超时 ⇒ spawnSync 返回 status=null ⇒ exitCode=null ⇒ parseFidelityVerdict ⇒ not-evaluated ⇒
+ *  拒绝激活（fail-closed，⛔ 不回落 faithful）。 */
+const FIDELITY_JUDGE_TIMEOUT_MS = 180_000;
+
+/** 从 argv 前缀构造同步判定器 seam（prompt 作末参数追加——同 goal-driver `sufficiencyCmd` 的约定）。
+ *  ⛔ Core 无进程责任：这里只是「把 argv 跑起来」，argv 本身由调用方（env var / `--fidelity-judge-argv`
+ *  旗标）供给，Core 永不 import plugin/* 去构造真 LLM argv。 */
+function judgeFromArgv(judgeArgv: string[]): FidelityInvokeJudge {
+  return (prompt: string) => {
+    const r = spawnSync(judgeArgv[0], [...judgeArgv.slice(1), prompt], {
+      encoding: "utf8",
+      timeout: FIDELITY_JUDGE_TIMEOUT_MS,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return { stdout: typeof r.stdout === "string" ? r.stdout : null, exitCode: r.status ?? null };
+  };
+}
 
 async function main(argv: string[]) {
   const args = argv.slice(2);
@@ -1088,22 +1125,18 @@ async function main(argv: string[]) {
   // (Core carries no process responsibility — criterion-fidelity.ts is pure). When this env var
   // names a judge command PREFIX, the CLI builds a synchronous spawnSync seam (the prompt is appended
   // as the LAST argv element — the same convention as goal-driver's `sufficiencyCmd` array). Unset ⇒
-  // fidelityJudge undefined ⇒ the pre-GOAL-013 activation path is verbatim unchanged (fails-open).
+  // fidelityJudge undefined ⇒ the pre-GOAL-013 activation path proceeds but the record carries a
+  // distinguishable `not-evaluated / "no judge configured"` value (visibility, hard rule 3b).
   // ⛔ The value is a whitespace-split argv prefix (⛔ no shell metacharacters / quotes), matching
   // driver-runtime.splitArgs semantics — a real LLM prefix ends in `-p` so the prompt lands as its
   // one argv element; a test prefix is e.g. `node -e <js-without-spaces>`.
+  // The per-write `--fidelity-judge-argv <json-array>` flag is the ROBUST form (a full argv array as
+  // JSON — carries `--settings <json>` with spaces, which the whitespace-split env form cannot) and
+  // is what goal-driver's production activation path uses (⛔ Core never imports plugin/* to build it).
   let fidelityJudge: FidelityInvokeJudge | undefined;
   const judgeCmd = process.env.QUAY_GOAL_FIDELITY_JUDGE;
   if (judgeCmd && judgeCmd.trim() !== "") {
-    const judgeArgv = judgeCmd.trim().split(/\s+/);
-    fidelityJudge = (prompt: string) => {
-      const r = spawnSync(judgeArgv[0], [...judgeArgv.slice(1), prompt], {
-        encoding: "utf8",
-        timeout: 120_000,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      return { stdout: typeof r.stdout === "string" ? r.stdout : null, exitCode: r.status ?? null };
-    };
+    fidelityJudge = judgeFromArgv(judgeCmd.trim().split(/\s+/));
   }
   const store = createGoalStore(goalDir, { cap: goalCfg.cap, staleMs: goalCfg.staleMs, fidelityJudge });
 
@@ -1130,6 +1163,7 @@ async function main(argv: string[]) {
       let force = false;
       let dryRun = false;
       let intent: "absent" | "existing" | undefined;
+      let fidelityJudgeArgv: string[] | undefined;
       for (let i = 1; i < rest.length; i++) {
         const k = rest[i];
         if (!k.startsWith("--")) continue;
@@ -1138,6 +1172,22 @@ async function main(argv: string[]) {
         if (key === "dry-run") { dryRun = true; continue; }
         if (key === "expect-absent") { intent = "absent"; continue; }
         if (key === "expect-existing") { intent = "existing"; continue; }
+        if (key === "fidelity-judge-argv") {
+          // Robust per-write judge seam (JSON argv array): carries `--settings <json>` (with spaces),
+          // which the whitespace-split env var cannot. The prompt is appended as the LAST argv element.
+          const raw = rest[i + 1];
+          if (raw === undefined) { console.error("goal-store: --fidelity-judge-argv requires a JSON argv array"); return 2; }
+          let parsed: unknown;
+          try { parsed = JSON.parse(raw); } catch {
+            console.error("goal-store: --fidelity-judge-argv is not valid JSON"); return 2;
+          }
+          if (!Array.isArray(parsed) || parsed.length === 0 || parsed.some((x) => typeof x !== "string")) {
+            console.error("goal-store: --fidelity-judge-argv must be a non-empty JSON array of strings"); return 2;
+          }
+          fidelityJudgeArgv = parsed as string[];
+          i++;
+          continue;
+        }
         const v = rest[i + 1];
         if (key === "title" || key === "status" || key === "goal" || key === "criterion" ||
             key === "expect" || key === "origin" || key === "body" || key === "superseded-by" ||
@@ -1178,6 +1228,10 @@ async function main(argv: string[]) {
           reason: opts.reason as string | undefined,
           dryRun,
           intent,
+          // Per-write judge seam (the `--fidelity-judge-argv` flag). undefined ⇒ fall back to the
+          // store-level judge (from QUAY_GOAL_FIDELITY_JUDGE), or to the "no judge configured"
+          // visibility branch when neither is present.
+          fidelityJudge: fidelityJudgeArgv ? judgeFromArgv(fidelityJudgeArgv) : undefined,
         });
         process.stdout.write(JSON.stringify(rec, null, 2) + "\n");
         return 0;

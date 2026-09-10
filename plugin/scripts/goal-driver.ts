@@ -200,16 +200,29 @@ export async function writeGoalStatus(
   id: string,
   status: string,
   dataRoot: string,
-  opts: { actor?: string; reason?: string } = {},
+  opts: { actor?: string; reason?: string; fidelityJudgeArgv?: string } = {},
 ): Promise<{ ok: boolean; reason: string }> {
   const extra: string[] = [];
   if (opts.actor) extra.push("--actor", opts.actor);
   if (opts.reason) extra.push("--reason", opts.reason);
+  // 保真性判定器 argv（JSON 数组）——仅激活路径传；goal-store 把 prompt 作末参数追加。缺省不传 ⇒
+  // goal-store 记 `fidelity: {verdict:"not-evaluated", reason:"no judge configured"}`（诚实留痕，
+  // fail-open）。⛔ 不入每轮 gate 路径（本函数只被 ⑧ 激活与 I2 达成两处调用，达成不传）。
+  if (opts.fidelityJudgeArgv) extra.push("--fidelity-judge-argv", opts.fidelityJudgeArgv);
   const argv = goalStoreArgv(scriptRoot, ["write", id, "--status", status, ...extra], dataRoot);
   const r = await runAsync(argv, { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
   if (r.error) return { ok: false, reason: `write spawn error: ${r.error.message}` };
   if (r.status !== 0) return { ok: false, reason: `write exit ${r.status}: ${(r.stderr || "").trim().slice(0, 200)}` };
   return { ok: true, reason: "written" };
+}
+
+/** 保真性判定器 argv 前缀的 JSON 编码（真 LLM，launchArgv 单一构造点——⛔ 不手拼 `claude -p`）。
+ *  goal-store 的 `--fidelity-judge-argv` seam 把 prompt 作末参数追加，故此处取
+ *  launchArgv("fix-worker", "", root) 去掉末尾空 prompt 后的 `-p` 前缀。⛔ profiles.yml 缺失/非法 ⇒
+ *  launchArgv 抛错（调用方 catch 后不传 seam ⇒ goal-store 记 "no judge configured"，fail-open +
+ *  诚实留痕，AC1）。 */
+export function fidelityJudgeArgvJson(root: string): string {
+  return JSON.stringify(launchArgv("fix-worker", "", root).slice(0, -1));
 }
 
 /** 读 I3 三桶 + I4 分歧（复用 goal-store 的单一真相源 checkStaleness，⛔ 不在本文件重算）。
@@ -985,9 +998,22 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   // 条目调 writeGoalStatus 把 draft AC 机械翻 active。激活走 goal-store write，会被 P6
   // not-evaluated 前置闸与 cap 闸挡住（AC-223 origin 风险 C 的守护，driver 无需复制该判断）。
   // ⛔ 不写 retired（裁定 1，AC-211 单测守着）；re-anchor / needs-human / hold 仍不 flip。
+  //
+  // gap-fidelity-judge-unwired-in-production-and-verdict-stubbed-in-tests — 激活接线真保真性判定器：
+  // 激活路径经 `--fidelity-judge-argv` 把 launchArgv("fix-worker") 的真 LLM argv 前缀传给 goal-store，
+  // 由 goal-store 跑判定并拒 vacuous/not-evaluated（P6b）。profiles.yml 缺失 ⇒ 不传 ⇒ goal-store
+  // 诚实记 "no judge configured"（fail-open + 留痕）。⛔ 不在每轮 gate 路径（gateCriterion 不碰它）。
   for (const t of triage) {
     if (t.decision !== "activate") continue;
-    const w = await writeGoalStatus(scriptRoot, t.ac, "active", dataRoot, { actor: "goal-driver", reason: "triage: activate" });
+    let fidelityJudgeArgv: string | undefined;
+    try {
+      fidelityJudgeArgv = fidelityJudgeArgvJson(root);
+    } catch {
+      fidelityJudgeArgv = undefined; // profiles.yml 缺失/非法 ⇒ 不传 seam，goal-store 记 "no judge configured"
+    }
+    const w = await writeGoalStatus(scriptRoot, t.ac, "active", dataRoot, {
+      actor: "goal-driver", reason: "triage: activate", fidelityJudgeArgv,
+    });
     flips.push({ id: t.ac, to: "active", ok: w.ok, reason: w.reason });
   }
 

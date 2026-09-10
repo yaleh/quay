@@ -1,12 +1,15 @@
 // @test-group engine
 // criterion-fidelity-gate.test.mjs — AC-229 (tasks/gap-criterion-fidelity-gate-activation-blind-
-// to-vacuous-criteria)：保真性闸接在【真实激活路径】上——测试 spawn 真的 goal-store.ts CLI 对一个
+// to-vacuous-criteria) + gap-fidelity-judge-unwired-in-production-and-verdict-stubbed-in-tests 的
+// AC1 可见性半边：保真性闸接在【真实激活路径】上——测试 spawn 真的 goal-store.ts CLI 对一个
 // hermetic 临时 goals 目录（⛔ 不是只 import 判定函数做单测，硬规则 4 推论三：生产载体就是激活路径本身），
-// 四方向缺一不可：
+// 方向缺一不可：
 //   ① vacuous       ⇒ 拒绝激活（非零退出 + 不写状态 + 理由可见于 stderr）
 //   ② faithful      ⇒ 放行（exit 0 + 状态确实变 active —— 防「恒拒」的负控制）
 //   ③ not-evaluated ⇒ 不放行，且与 vacuous 取值可区分（stderr 理由含不同词）
 //   ④ --force       ⇒ 越权，且越权在记录里留痕（fidelity.verdict === "forced"）
+//   ⑤ 无 seam       ⇒ 激活仍放行（fail-open），但记录留 `not-evaluated / "no judge configured"`（可见性）
+//   ⑥ --fidelity-judge-argv（JSON argv 数组）⇒ 与 env seam 同效（robust 形态：带空格的 argv 也能过）
 //
 // Run: node --no-warnings --experimental-strip-types --test plugin/test/criterion-fidelity-gate.test.mjs
 
@@ -48,10 +51,12 @@ function readRecordFile(tmp, id) {
   return f ? fs.readFileSync(path.join(tmp, 'goals', f), 'utf8') : null;
 }
 
-/** spawn 真 goal-store CLI 激活一条 AC。judge===undefined ⇒ 不注入 seam（沿用既有激活路径）。 */
-function activate(tmp, id, { judge = undefined, force = false } = {}) {
+/** spawn 真 goal-store CLI 激活一条 AC。judge===undefined ⇒ 不注入 env seam；judgeArgv 给定时经
+ *  `--fidelity-judge-argv`（JSON argv 数组）注入 robust seam。 */
+function activate(tmp, id, { judge = undefined, judgeArgv = undefined, force = false } = {}) {
   const args = ['--no-warnings', '--experimental-strip-types', goalStorePath, 'write', id, '--status', 'active', '--root', tmp];
   if (force) args.push('--force');
+  if (judgeArgv !== undefined) args.push('--fidelity-judge-argv', JSON.stringify(judgeArgv));
   const env = { ...process.env };
   if (judge === undefined) delete env.QUAY_GOAL_FIDELITY_JUDGE;
   else env.QUAY_GOAL_FIDELITY_JUDGE = judge;
@@ -125,18 +130,52 @@ test('④ --force ⇒ 越权，且越权在记录里留痕（fidelity.verdict ==
   }
 });
 
-// ── 既有激活路径逐字不变（无 seam ⇒ 不触发保真性闸，fails-open）──────────
+// ── ⑤ 无 seam ⇒ 放行（fail-open）但记录留「no judge configured」（可见性，AC1 半边）──────────
 
-test('无 seam（不注入 judge）⇒ 既有激活路径逐字不变：保真性闸不触发', () => {
+test('⑤ 无 seam（不注入 judge）⇒ 激活仍放行（fail-open），但记录留 not-evaluated/"no judge configured"（⛔ 非字段缺失）', () => {
   const tmp = makeWorkspace();
   try {
     writeDraftAc(tmp, { id: 'AC-901' });
     const r = activate(tmp, 'AC-901', { judge: undefined });
-    assert.equal(r.status, 0, `无 seam ⇒ 既有路径 exit 0（stderr: ${r.stderr}）`);
+    assert.equal(r.status, 0, `无 seam ⇒ 既有路径 exit 0（fail-open）（stderr: ${r.stderr}）`);
     const raw = readRecordFile(tmp, 'AC-901');
     assert.ok(/^status: active/m.test(raw), '无 seam ⇒ 状态变 active（既有路径不变）');
-    assert.ok(!raw.includes('fidelity:'), '无 seam ⇒ 不落 fidelity 字段（fails-open，非静默越权）');
+    // 可见性（gap-fidelity-judge-unwired...）：字段不再缺失——「闸从未跑」在载体上与「闸跑过且放行」
+    // 不同形（硬规则 3b）。
+    assert.ok(raw.includes('verdict: not-evaluated'), '无 seam ⇒ 记录留 fidelity.verdict=not-evaluated（可见性，⛔ 字段缺失不算通过）');
+    assert.ok(raw.includes('no judge configured'), '无 seam ⇒ reason 指明 "no judge configured"（可区分取值）');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── ⑥ --fidelity-judge-argv（JSON argv 数组，robust seam）⇒ 与 env seam 同效 ──────────
+
+test('⑥ --fidelity-judge-argv（JSON argv 数组）⇒ 跑判定器：vacuous 拒绝、faithful 放行', () => {
+  const tmpVacuous = makeWorkspace();
+  try {
+    writeDraftAc(tmpVacuous, { id: 'AC-901' });
+    // 带空格的 argv 数组（robust 形态——env whitespace-split seam 承载不了的空格在此可过）。
+    const judgeArgvVacuous = ['node', '-e', 'process.stdout.write(JSON.stringify({verdict:"vacuous"}))'];
+    const r = activate(tmpVacuous, 'AC-901', { judgeArgv: judgeArgvVacuous });
+    assert.notEqual(r.status, 0, '--fidelity-judge-argv vacuous ⇒ 非零退出');
+    const raw = readRecordFile(tmpVacuous, 'AC-901');
+    assert.ok(/^status: draft/m.test(raw), 'vacuous ⇒ 不写状态（仍 draft）');
+    assert.ok(String(r.stderr).includes('vacuous'), `stderr 含 "vacuous"：${r.stderr}`);
+  } finally {
+    fs.rmSync(tmpVacuous, { recursive: true, force: true });
+  }
+
+  const tmpFaithful = makeWorkspace();
+  try {
+    writeDraftAc(tmpFaithful, { id: 'AC-901' });
+    const judgeArgvFaithful = ['node', '-e', 'process.stdout.write(JSON.stringify({verdict:"faithful"}))'];
+    const r = activate(tmpFaithful, 'AC-901', { judgeArgv: judgeArgvFaithful });
+    assert.equal(r.status, 0, `--fidelity-judge-argv faithful ⇒ exit 0（stderr: ${r.stderr}）`);
+    const raw = readRecordFile(tmpFaithful, 'AC-901');
+    assert.ok(/^status: active/m.test(raw), 'faithful ⇒ 状态变 active');
+    assert.ok(raw.includes('verdict: faithful'), '判定结果落在记录自身（fidelity.verdict=faithful）');
+  } finally {
+    fs.rmSync(tmpFaithful, { recursive: true, force: true });
   }
 });
