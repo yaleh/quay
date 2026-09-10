@@ -61,3 +61,4 @@ AC1–AC4 全绿；AC-225 criterion exit 0（检查器**机械枚举 0 处**，�
 - `plugin/test/suite-state-trigger.test.mjs`
 - `plugin/test/runner-concurrency.test.mjs`
 - `tasks/gap-ac225-kernel-sibling-naive-anchor-migration-zero.md`
+- `experiments/quay-perpetual-stream/scripts/workflow-journal.ts`
