@@ -48,7 +48,11 @@ import { resolveKernelSibling, resolveKernelPluginRoot, resolveKernelScriptsDir 
 import { resolvePluginScript } from "../../packages/quay/src/plugin-root.ts";
 // B domain — doc-branch derivation (runtime-derived from the target's checked-out branch, ⛔ not the
 // hardcoded literal DOC_BRANCH "author").
-import { resolveDocBranch, DOC_BRANCH } from "../scripts/driver-filters.ts";
+import { resolveDocBranch } from "../scripts/driver-filters.ts";
+// The OLD hardcoded form, kept as a LOCAL constant (⛔ non-shipped kernel — driver-filters.ts's
+// `export const DOC_BRANCH = "author"` residual was eliminated by AC-226, gap-ac226-target-identity-
+// literal-check d650099c8). It exists only to model "the old form misreads a non-author branch" (AC6 B).
+const DOC_BRANCH = "author";
 // C domain — test command construction (delegates to loop.test_command for a third-party project,
 // ⛔ not unconditionally calling this repo's dev-tree scripts/test.sh).
 import { docCheckCommandFor, resolveScopedGateCommand, defaultMechanicalSuiteCommand } from "../scripts/worker-driver.ts";
