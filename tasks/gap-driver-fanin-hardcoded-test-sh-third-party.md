@@ -3,7 +3,7 @@ id: gap-driver-fanin-hardcoded-test-sh-third-party
 title: fan-in 的 doc-check/scoped-gate 硬编码
   <worktree>/scripts/test.sh，第三方项目无此文件——exit 127 阻断整条 fan-in，config 的
   test_command 从未被读
-status: ready
+status: done
 labels:
   - gap
   - defect
