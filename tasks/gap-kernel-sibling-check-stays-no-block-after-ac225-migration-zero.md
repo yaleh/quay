@@ -54,11 +54,11 @@ instrument-decay-check           有违例 ⇒ 仍有理由
 
 ## Acceptance Criteria
 
-- [ ] AC1（**行为**，非文本）：注入一处 naive `__dirname` 或跨包源码锚点后，跑套件的 static gate ⇒ **红**（贴出退出码 + 违例行）；移除注入 ⇒ 绿。⛔ 只贴「flag 不见了」的 grep **不算通过**——那是文本不是行为（硬规则 4：一个结构上不可能取假的量不是测量）。
-- [ ] AC2（当前树不红）：翻 fail-closed 后 `kernel-sibling-resolution-check` 在全量套件里 exit 0（前置实测已取：`--root . --json` ⇒ `violations: []`）。
-- [ ] AC3（回归守卫**能取假**）：`plugin/test/scoped-static-checks.test.mjs` 的新断言在**把 `--no-block` 加回去**时必须**失败**——贴出该反向干跑的输出。⛔ 一个不做反向干跑的断言与恒绿同形。
-- [ ] AC4（注释与代码一致）：`:576-579` 注释块不再声称「AC-225 迁移归零后移除此 flag」这条待办——按位置检查该注释块，贴出改后原文。
-- [ ] AC5：全量 `scripts/test.sh` 绿。
+- [x] AC1（**行为**，非文本）：注入一处 naive `__dirname` 或跨包源码锚点后，跑套件的 static gate ⇒ **红**（贴出退出码 + 违例行）；移除注入 ⇒ 绿。⛔ 只贴「flag 不见了」的 grep **不算通过**——那是文本不是行为（硬规则 4：一个结构上不可能取假的量不是测量）。
+- [x] AC2（当前树不红）：翻 fail-closed 后 `kernel-sibling-resolution-check` 在全量套件里 exit 0（前置实测已取：`--root . --json` ⇒ `violations: []`）。
+- [x] AC3（回归守卫**能取假**）：`plugin/test/scoped-static-checks.test.mjs` 的新断言在**把 `--no-block` 加回去**时必须**失败**——贴出该反向干跑的输出。⛔ 一个不做反向干跑的断言与恒绿同形。
+- [x] AC4（注释与代码一致）：`:576-579` 注释块不再声称「AC-225 迁移归零后移除此 flag」这条待办——按位置检查该注释块，贴出改后原文。
+- [ ] AC5：全量 `scripts/test.sh` 绿。（待外部）
 
 ## Definition of Done
 

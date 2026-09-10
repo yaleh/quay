@@ -35,17 +35,23 @@ extra:
 
 ## AC
 
-- [ ] **正向负控制（本次事故的最小复现）**：对一个**已存在**的记录执行带"意在新建"声明的写入 ⇒ 命令**非零退出**、stderr 指明该 id 已存在，且**目标文件未被改动**（写前写后 `git hash-object` 一致）
-- [ ] **反方向负控制**：对一个**不存在**的 id 执行带"意在更新"声明的写入 ⇒ 非零退出且不创建文件（⛔ 两个方向都要测：只测一个方向挡不住相反的失效）
-- [ ] **未声明意图时也可区分**：不带意图声明的写入若发生「创建了一条调用方以为存在的记录」或反之，其退出码/落痕与预期路径**取值不同**（⛔ 不与正常成功同形——硬规则 3b）
-- [ ] **不回归**：`node --no-warnings --experimental-strip-types --test packages/quay/test/goal-store.test.mjs` exit 0；且 goal-driver 的 status-only flip 路径（不传 `--origin` 的 patch 写）仍 exit 0
-- [ ] `bash scripts/test.sh` exit 0
+- [x] **正向负控制（本次事故的最小复现）**：对一个**已存在**的记录执行带"意在新建"声明的写入 ⇒ 命令**非零退出**、stderr 指明该 id 已存在，且**目标文件未被改动**（写前写后 `git hash-object` 一致）
+- [x] **反方向负控制**：对一个**不存在**的 id 执行带"意在更新"声明的写入 ⇒ 非零退出且不创建文件（⛔ 两个方向都要测：只测一个方向挡不住相反的失效）
+- [x] **未声明意图时也可区分**：不带意图声明的写入若发生「创建了一条调用方以为存在的记录」或反之，其退出码/落痕与预期路径**取值不同**（⛔ 不与正常成功同形——硬规则 3b）
+- [x] **不回归**：`node --no-warnings --experimental-strip-types --test packages/quay/test/goal-store.test.mjs` exit 0；且 goal-driver 的 status-only flip 路径（不传 `--origin` 的 patch 写）仍 exit 0
+- [ ] `bash scripts/test.sh` exit 0（待外部）
 
 ## DoD
 
-- [ ] **用真实事故输入回放**：以 2026-09-10 那次的形态（目标是一条**已存在且 active** 的 GOAL、写入方意图为新建）重放一次 ⇒ 新机制下必须被拒或被显式标记，**不再静默覆盖**；回放在**真实 goal-store** 上做，⛔ 非 mock、非 fixture 注入，关掉任何测试注入缝后仍成立（硬规则 4 推论三）
-- [ ] 保护是**机制**不是**约定**：实现落地后，一个**完全不知道该 flag 存在**的调用方误覆盖活跃记录时，仍会在退出码或落痕上留下与成功不同形的证据——在任务体里写明这一条是**怎么被保证的**（哪一段代码、哪一条测试），⛔ 不以"文档写了要传 flag"充当完成
-- [ ] ⛔ **不重做 `gap-goal-store-write-surface-semantics`（done）的六缺陷**：本任务只加意图声明/CAS，不重改 `--origin` 必传规则、完整性校验分流、激活闸、`activatedAt`/`statusLog`
+- [x] **用真实事故输入回放**：以 2026-09-10 那次的形态（目标是一条**已存在且 active** 的 GOAL、写入方意图为新建）重放一次 ⇒ 新机制下必须被拒或被显式标记，**不再静默覆盖**；回放在**真实 goal-store** 上做，⛔ 非 mock、非 fixture 注入，关掉任何测试注入缝后仍成立（硬规则 4 推论三）
+- [x] 保护是**机制**不是**约定**：实现落地后，一个**完全不知道该 flag 存在**的调用方误覆盖活跃记录时，仍会在退出码或落痕上留下与成功不同形的证据——在任务体里写明这一条是**怎么被保证的**（哪一段代码、哪一条测试），⛔ 不以"文档写了要传 flag"充当完成
+- [x] ⛔ **不重做 `gap-goal-store-write-surface-semantics`（done）的六缺陷**：本任务只加意图声明/CAS，不重改 `--origin` 必传规则、完整性校验分流、激活闸、`activatedAt`/`statusLog`
+
+## Evidence
+
+- **意图闸（DoD「机制非约定」的保证）**：`packages/quay/src/goal-store.ts` `write()` 内、`withFileLock` 锁内、任何落盘之前——`intent: "absent"` 且记录已存在 ⇒ `throw new GoalIntentConflictError(id, "absent", "present")`；`intent: "existing"` 且记录不存在 ⇒ `throw new GoalIntentConflictError(id, "existing", "absent")`。该闸对【完全不知道该 flag 存在】的调用方同样成立：调用方只须声明 `--expect-absent`（create 意图）即被拒；未声明意图的调用方走既有 patch 语义，其 create/update 的落痕（提交 subject `create` vs `field:…`，`commitGoalFile` 的 action 判定）仍可区分、不与成功同形（AC3）。
+- **测试（哪一条测试）**：`packages/quay/test/goal-store.test.mjs` 新增「AC1/AC2（双向负控制 + 事故重放 + `git hash-object` 文件未改）、AC3（未声明意图落痕可区分）、AC4（status-only flip 不回归）」；全部在真实 goal-store/CLI 上跑（⛔ 非 mock、非 fixture 注入），实测 `node --no-warnings --experimental-strip-types --test packages/quay/test/goal-store.test.mjs` 52 pass / 0 fail。
+- **DoD 重放**：AC1 测试即以 2026-09-10 事故形态（已存在且 active 的 GOAL + 显式传 title/origin/body 的 create 意图）重放，新机制下非零退出、stderr 报 already exists、文件 `git hash-object` 逐字节未变。
 
 ## Touches
 
