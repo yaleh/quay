@@ -1,7 +1,7 @@
 ---
 id: gap-ac207-e2e-target-driver-driven-real-commit-task-done
 title: 端到端：目标项目自己的 *-drivers 驱动出真实开发提交且任务翻 done，落 ac=GOAL-009-AC-207 记录（AC-207）
-status: ready
+status: needs-human
 labels:
   - gap
   - delivery-critical
@@ -84,3 +84,5 @@ AC2/AC3/AC5 ⛔ 阻塞复核（CONTINUE 第 7 轮，2026-09-09T23:5xZ）：第�
 - 后果：promotion-driver 每 30s 把 e2e-verify-207 todo→ready 翻转（promotion-outcome detail=todo->ready）但提交只落 main（git log af37560「todo→ready」），`git show develop:tasks/e2e-verify-207.md` 仍 status:todo ⇒ ready-pool-check/worker-driver 读 develop ⇒ `pool:0 ready:[] excluded:[]`、worker-round `stop_reason:"pool-empty"` ⇒ 永不派发 ⇒ e2e 永不完成。
 
 AC1/AC4 实现已 done 不变；AC2/AC3/AC5 仍阻塞，需修该缺陷（新任务 gap-doc-branch-hardcoded-author-breaks-fresh-project）后重跑 e2e ⇒ 本任务翻 needs-human 停派。
+
+**AC2/AC3/AC5 ⛔ 阻塞复核（CONTINUE 第 9 轮，2026-09-10）**：第四阻塞 `gap-doc-branch-hardcoded-author-breaks-fresh-project` 仍未解除——且其状态已从 round 8 的 todo 变为 **needs-human（`3a86b79a6`「todo→needs-human（重试上限机械翻转）」：连续修满 3 次仍不合格，闸在重验证后仍判不合格，成因类 human-adjudication）**。位置判定复核（非关键词）：`git show develop:plugin/scripts/driver-filters.ts` :438 仍是 `export const DOC_BRANCH = "author";`，且 :457 `docBranchForkedFromDevelop(docBranch = DOC_BRANCH)`、:475 `syncDevelopToDoc(docBranch = DOC_BRANCH)`、:558 `syncDocDevelopBidirectional` 内 `revParse(root, DOC_BRANCH)` 三处仍引用该硬编码常量（动态 `currentBranchName` 修复未落 develop）。同期 develop 另立两任务 `gap-doc-branch-hardcoded-author-breaks-third-party-develop-sync`（ready）与 `gap-third-party-fixture-smoke-test-driver-family`（ready），均未 done ⇒ 缺陷仍在解决中。⇒ 第三方项目 doc 分支 `main` ≠ `author` ⇒ promotion 翻转提交仍到不了 develop ⇒ worker 读 develop pool=0 永不派发 ⇒ e2e 无法驱动 ⇒ AC2/AC3/AC5 仍阻塞。AC1/AC4 实现已 done 不变；本任务翻 needs-human 停派，待 doc→develop 硬编码缺陷落 develop（fix 任务 human-adjudication 或新任务）后由人翻回 ready 续验。
