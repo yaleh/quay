@@ -2,7 +2,7 @@
 id: gap-fidelity-gate-not-wired-on-the-dominant-cli-activation-path
 title: 保真性闸只接在 goal-driver ⑧ 激活路径上（实测 1/21 次激活），而 20/21 次走 cli/人激活路径且缺省不传判定器 ⇒
   闸在主要路径上惰性；并补建 AC-231 判据点名的测试文件（该文件从未进入任何任务 Touches）
-status: ready
+status: done
 labels:
   - gap
   - defect
