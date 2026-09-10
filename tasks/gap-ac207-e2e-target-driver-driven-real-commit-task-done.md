@@ -1,7 +1,7 @@
 ---
 id: gap-ac207-e2e-target-driver-driven-real-commit-task-done
 title: 端到端：目标项目自己的 *-drivers 驱动出真实开发提交且任务翻 done，落 ac=GOAL-009-AC-207 记录（AC-207）
-status: ready
+status: needs-human
 labels:
   - gap
   - delivery-critical
@@ -10,6 +10,10 @@ parent: null
 children: []
 extra:
   schema: execution
+  needs_human_cause: e2e landed 但 gate_events=0（appendCompleteGateEvent
+    shipped-unsafe MODULE_NOT_FOUND，已立
+    gap-fanin-gate-event-store-path-shipped-unsafe）+ 安装物陈旧（缺
+    resolveDocBranch）——两缺陷均在本任务 Touches 之外
 goal_ac: AC-207
 ---
 ## Proposal
@@ -88,3 +92,13 @@ AC1/AC4 实现已 done 不变；AC2/AC3/AC5 仍阻塞，需修该缺陷（新任
 **AC2/AC3/AC5 ⛔ 阻塞复核（CONTINUE 第 9 轮，2026-09-10）**：第四阻塞 `gap-doc-branch-hardcoded-author-breaks-fresh-project` 仍未解除——且其状态已从 round 8 的 todo 变为 **needs-human（`3a86b79a6`「todo→needs-human（重试上限机械翻转）」：连续修满 3 次仍不合格，闸在重验证后仍判不合格，成因类 human-adjudication）**。位置判定复核（非关键词）：`git show develop:plugin/scripts/driver-filters.ts` :438 仍是 `export const DOC_BRANCH = "author";`，且 :457 `docBranchForkedFromDevelop(docBranch = DOC_BRANCH)`、:475 `syncDevelopToDoc(docBranch = DOC_BRANCH)`、:558 `syncDocDevelopBidirectional` 内 `revParse(root, DOC_BRANCH)` 三处仍引用该硬编码常量（动态 `currentBranchName` 修复未落 develop）。同期 develop 另立两任务 `gap-doc-branch-hardcoded-author-breaks-third-party-develop-sync`（ready）与 `gap-third-party-fixture-smoke-test-driver-family`（ready），均未 done ⇒ 缺陷仍在解决中。⇒ 第三方项目 doc 分支 `main` ≠ `author` ⇒ promotion 翻转提交仍到不了 develop ⇒ worker 读 develop pool=0 永不派发 ⇒ e2e 无法驱动 ⇒ AC2/AC3/AC5 仍阻塞。AC1/AC4 实现已 done 不变；本任务翻 needs-human 停派，待 doc→develop 硬编码缺陷落 develop（fix 任务 human-adjudication 或新任务）后由人翻回 ready 续验。
 
 **第四阻塞解除记录（人 2026-09-10 授权 retreat needs-human→todo→ready，续验 AC2/AC3/AC5）**：第四阻塞（`DOC_BRANCH = "author"` 硬编码未落 develop）已解除，位置判定逐字核实（非关键词）：`git show develop:plugin/scripts/driver-filters.ts` :442 `export function resolveDocBranch(root)`，且三处此前引用硬编码常量的签名全部改为运行时派生——:463 `docBranchForkedFromDevelop(root, docBranch = resolveDocBranch(root))`、:482 `syncDevelopToDoc(..., docBranch = resolveDocBranch(root))`、:565 `syncDocDevelopBidirectional(..., docBranch = resolveDocBranch(root))`；修复任务 `gap-doc-branch-hardcoded-author-breaks-third-party-develop-sync` 已 **done**。同期另一阻塞（fan-in 三步硬编码 `scripts/test.sh`）亦已解除：`git show develop:plugin/scripts/worker-driver.ts` :1174/:1185/:1205/:1211 已按 `.quay/config.yml` 的 `loop.test_command` 退化，修复任务 `gap-driver-fanin-hardcoded-test-sh-third-party` 已 **done**；架构性任务 `gap-third-party-fixture-smoke-test-driver-family` 亦已 **done**。承载这三条的 **GOAL-012 已 achieved**（5 条 AC 全 achieved，五条判据经独立重跑全部 exit 0 复核）。⇒ 本任务由 needs-human retreat 回 ready 续做 AC2/AC3/AC5（第三方项目 e2e 驱动、直接量读取、载体落账、判据干跑翻转）。⛔ AC2/AC3/AC5 未勾——仍须真实 e2e 复跑方可验证，本次仅解除阻塞、不预先勾选。
+
+**AC2/AC3/AC5 ⛔ 阻塞复核（CONTINUE 第 10 轮，2026-09-10）**：e2e 首次真正 landed（进步），但 `append-complete-gate-event` 步骤失败 ⇒ gate_events=0 + 安装物陈旧 ⇒ 仍两缺陷，均在本任务 Touches 之外。
+
+① e2e 已 landed：orangevps 第三方项目 e2e-verify-207 已由其自身 worker-driver 机械 fan-in 翻 done 落地（`worker-outcome.jsonl` `final_state:"completed"`、`mechanical_fan_in.outcome:"landed"`、`landedSha:a319990759...`；`git show develop:tasks/e2e-verify-207.md` = `status: done`；`git log --all` 有真实实现提交，非 `chore(quay-init):`）。
+
+② 缺陷 A（新）——gate_events=0：第三方项目 `.quay/gate-events.jsonl` 不存在。fan-in step-trace 末条 `{"step":"append-complete-gate-event","exit":1,"ok":false,"reason":"Cannot find module '/home/yale/work/ac207-third-party/packages/quay/src/gate/gate-event-store.ts' ..."}`。根因：`worker-driver.ts` `appendCompleteGateEvent` 动态 import `path.join(repoRoot(), "packages", "quay", "src", "gate", "gate-event-store.ts")`，shipped 包把 `packages/quay/` 打平到包根（`src/gate/gate-event-store.ts` 在、`packages/` 不在）⇒ MODULE_NOT_FOUND 被吞 ⇒ gate-events 永不写 ⇒ criterion `gate_events>0` 恒不满足。已立新任务 `gap-fanin-gate-event-store-path-shipped-unsafe`。
+
+③ 缺陷 B（残留）——安装物陈旧：安装物 worker-driver.js `resolveDocBranch` = 0 命中（doc-branch 修复落 develop 未重装）；`.quay/doc-develop-sync.jsonl` 仍 `cur:main expected:author` ⇒ main=needs-human vs develop=done 分叉 ⇒ criterion task_status 读数（工作树=main）≠ done。
+
+⇒ AC2 直接量已读但 gate_events=0、task_status 不一致；AC3 生产载体 `.quay/productization-verification.jsonl` 仍 0 条 `ac="GOAL-009-AC-207"`；AC5 判据干跑仍 exit 1。AC1/AC4 已 done 不变。两缺陷均需外部修复（缺陷 A 新任务 + 缺陷 B 重装）⇒ 本任务翻 needs-human 停派。

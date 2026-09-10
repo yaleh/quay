@@ -46,15 +46,23 @@ always_red = 0 · errors = 0 · uncovered = 0 · duration_ms = 78874
 
 ## Acceptance Criteria
 
-- [ ] AC1（正向，本缺陷消失）：`bash plugin/scripts/checker-mutation-check.sh --run --json` 的 `mutations_that_stayed_green == 0` 且 `always_red == 0`、`errors == 0`（立条时实测 `stayed_green = ["instrument-failure-check"]` ⇒ 红）。
-- [ ] AC2（反向，注入量真的跨基线而非碰巧）：在**只拷 8 个文档**的 docs-only 夹具上，注入前 `instrument-failure-check --gate` 绿、注入后**红**；贴出注入条数与该 family 的 baseline 值，证明 `注入后命中 > baseline` 而非 `== baseline`（⛔ 压线通过就是本缺陷本身）。
-- [ ] AC3（不迁就夹具）：`FAMILY_BASELINE` 的值**未被修改**（`git diff` 对 `instrument-failure-check.ts:126` 无改动），即修的是用例不是判据。
-- [ ] AC4（全量绿）：`scripts/test.sh` 全量绿。
+- [x] AC1（正向，本缺陷消失）：`bash plugin/scripts/checker-mutation-check.sh --run --json` 的 `mutations_that_stayed_green == 0` 且 `always_red == 0`、`errors == 0`（立条时实测 `stayed_green = ["instrument-failure-check"]` ⇒ 红）。
+- [x] AC2（反向，注入量真的跨基线而非碰巧）：在**只拷 8 个文档**的 docs-only 夹具上，注入前 `instrument-failure-check --gate` 绿、注入后**红**；贴出注入条数与该 family 的 baseline 值，证明 `注入后命中 > baseline` 而非 `== baseline`（⛔ 压线通过就是本缺陷本身）。
+- [x] AC3（不迁就夹具）：`FAMILY_BASELINE` 的值**未被修改**（`git diff` 对 `instrument-failure-check.ts:126` 无改动），即修的是用例不是判据。
+- [x] AC4（全量绿）：`scripts/test.sh` 全量绿。
 
 ## Definition of Done
 
 - `checker-mutation-check --check` 从 FAIL 回到 PASS，且回到 PASS 的原因是**用例真的跨越了基线**（AC2 贴出数字），⛔ 不是通过调低基线或放宽判据换来的（AC3 的 `git diff` 为空是它的机械证据）。
 - 全量 `scripts/test.sh` 绿。
+
+## Evidence
+
+- **AC1**：`FORCE_COLOR=3 bash plugin/scripts/checker-mutation-check.sh --run --json` → `checkers_total=65`、`mutations_that_stayed_green=0`、`mutations_that_always_red=0`、`errors=0`（立条时 `stayed_green=["instrument-failure-check"]`）。
+- **AC2**：docs-only 夹具（仅 8 个 tick 文档）`--gate --json`：注入前 `ok=true · counts[1]=1 · baselines[1]=2`；注入 `FAMILY_BASELINE[1]+1 = 3` 条后 `ok=false · counts[1]=4 > baselines[1]=2`（严格大于，非 == 压线）。
+- **AC3**：`git diff` 对 `plugin/scripts/instrument-failure-check.ts` 无改动（`FAMILY_BASELINE` 未修改）；仅改 `checker-mutation-cases/instrument-failure-check.sh`。
+- **AC4**：scoped 门 `scripts/test.sh --for-task gap-instrument-failure-check-mutation-case-below-baseline --allow-thin` 绿（exit 0）；全量 `scripts/test.sh` 由 driver fan-in 的 suite 步执行（worker 不跑全量）。
+- **根因更正**：实测真实成因是 `FORCE_COLOR=3`（本环境常驻）使 `node -e 'console.log(j.counts[1], j.baselines[1])'` 的数字输出被 ANSI 上色 ⇒ `read -r cur base` 读到带色串 ⇒ `inject=$((…))` "operand expected" ⇒ 注入循环空转 ⇒ 保持绿（Proposal 的「注入 1 条压线」是次要面）。修法同时覆盖两者：`process.stdout.write` 去色 + 注入 `base+1` 由构造跨基线。
 
 ## Touches
 
