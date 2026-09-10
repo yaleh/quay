@@ -1,7 +1,7 @@
 ---
 id: AC-224
 title: A域检查器被突变机制覆盖——「能取假」由清单证明，⛔ 恒绿检查器不算保证（GOAL-012 退出条件⑤）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-012
 criterion: node --no-warnings --experimental-strip-types --test
@@ -32,4 +32,9 @@ statusLog:
     to: active
     actor: cli:human-ruling-2026-09-10
     reason: 人授权激活（单次授权）
+  - at: 2026-09-10T07:00:52.078Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---

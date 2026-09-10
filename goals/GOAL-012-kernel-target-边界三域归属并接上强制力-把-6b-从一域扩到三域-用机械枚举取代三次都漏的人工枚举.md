@@ -1,7 +1,7 @@
 ---
 id: GOAL-012
 title: kernel↔target 边界三域归属并接上强制力——把 §6b 从一域扩到三域，用机械枚举取代三次都漏的人工枚举
-status: active
+status: achieved
 kind: goal
 origin: >-
   立条依据（人 2026-09-10 裁定三条后授权设立）：
@@ -54,6 +54,11 @@ statusLog:
     to: active
     actor: cli:human-ruling-2026-09-10
     reason: 人裁定③：现在立（cap=3 立后占满）
+  - at: 2026-09-10T07:03:36.110Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 ---
 
 ## 背景
