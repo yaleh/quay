@@ -29,6 +29,7 @@ depends_on:
   - gap-fanin-gate-event-store-path-shipped-unsafe
   - gap-resolve-kernel-src-module-strip-types-node-modules
   - gap-third-party-evidence-no-transport-to-driving-repo-carrier
+  - gap-ac207-e2e-producer-section-never-landed-on-develop
 ---
 ## Proposal
 
