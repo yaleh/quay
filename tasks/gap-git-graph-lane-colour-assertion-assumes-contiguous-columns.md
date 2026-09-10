@@ -2,7 +2,7 @@
 id: gap-git-graph-lane-colour-assertion-assumes-contiguous-columns
 title: AC9 配色断言假设列号连续，而生产窗口列号稀疏 ⇒ col % 8 必碰撞 ⇒ 间歇红烧掉无关任务的 fan-in（已实测 3 次 / 2
   个任务，其一是 GOAL-015 的 AC-233，被推进 needs-human）
-status: ready
+status: done
 labels:
   - gap
   - defect
