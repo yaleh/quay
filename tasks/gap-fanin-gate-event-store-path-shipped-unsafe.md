@@ -3,7 +3,7 @@ id: gap-fanin-gate-event-store-path-shipped-unsafe
 title: fan-in 的 appendCompleteGateEvent 硬编码
   packages/quay/src/gate/gate-event-store.ts —— shipped 上下文 MODULE_NOT_FOUND ⇒
   gate-events.jsonl 永不写，AC-207 判据 gate_events>0 恒不满足
-status: ready
+status: done
 labels:
   - gap
   - defect
