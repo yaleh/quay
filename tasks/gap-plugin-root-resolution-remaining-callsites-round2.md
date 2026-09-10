@@ -2,7 +2,7 @@
 id: gap-plugin-root-resolution-remaining-callsites-round2
 title: worker-driver.ts 剩 3 处 + cap-from-gate.ts 一处仍锚在
   root/worktree/plugin/scripts——同族第三次撞坑，round2 补齐
-status: todo
+status: ready
 labels:
   - gap
 parent: null
