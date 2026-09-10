@@ -53,12 +53,12 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] `triageDraftAc` 对「goal 锚合法 + criterion 非空 + 无 posture + 无任务牵引」的 draft AC 判 `activate`（不再 `hold`）：`node --no-warnings --experimental-strip-types --test plugin/test/goal-triage.test.mjs` exit 0，且新增/改写的用例逐条断言该形状
-- [ ] 三道前置闸原样有效（负控制，⛔ 不得因本改动放宽）：goal 锚非法 ⇒ `re-anchor`；criterion 空 ⇒ `needs-human`；goal 有 posture ⇒ `hold`（AC-215 不受影响）；`node --no-warnings --experimental-strip-types --test plugin/test/goal-posture-blocks-activate.test.mjs` exit 0
-- [ ] 循环依赖已解除的端到端证据：真实环下，一条 active GOAL 名下结构完备且**零关联任务**的 draft AC，跑一轮后 status 变 active，且同轮或次轮被 `computeGoalGaps` 计为 `gap`（即立案机制现在看得见它）；`node --no-warnings --experimental-strip-types --test plugin/test/goal-triage-activate-executed.test.mjs` exit 0
-- [ ] `goal-triage-fresh-draft-not-retire.test.mjs` 与 `goal-triage-activate-executed.test.mjs` 中被本改动波及的 2 条断言，已改为断言其**原始意图**（⛔ 不判 retire、⛔ 不翻 needs-human；负控制 (a) 改用 posture / criterion-空 样例），⛔ 不是删除断言了事；两文件 exit 0
-- [ ] `triageDraftAc` 函数头注释与 `runGoalRound` 的实际行为一致（现注释仍写「判决只【记录】，⛔ 不 flip 任何 AC status」，而调用侧已会对 activate 判决调 `writeGoalStatus` 落地——本轮一并修正该既有漂移）
-- [ ] `scripts/test.sh` 全量绿
+- [x] `triageDraftAc` 对「goal 锚合法 + criterion 非空 + 无 posture + 无任务牵引」的 draft AC 判 `activate`（不再 `hold`）：`node --no-warnings --experimental-strip-types --test plugin/test/goal-triage.test.mjs` exit 0，且新增/改写的用例逐条断言该形状
+- [x] 三道前置闸原样有效（负控制，⛔ 不得因本改动放宽）：goal 锚非法 ⇒ `re-anchor`；criterion 空 ⇒ `needs-human`；goal 有 posture ⇒ `hold`（AC-215 不受影响）；`node --no-warnings --experimental-strip-types --test plugin/test/goal-posture-blocks-activate.test.mjs` exit 0
+- [x] 循环依赖已解除的端到端证据：真实环下，一条 active GOAL 名下结构完备且**零关联任务**的 draft AC，跑一轮后 status 变 active，且同轮或次轮被 `computeGoalGaps` 计为 `gap`（即立案机制现在看得见它）；`node --no-warnings --experimental-strip-types --test plugin/test/goal-triage-activate-executed.test.mjs` exit 0
+- [x] `goal-triage-fresh-draft-not-retire.test.mjs` 与 `goal-triage-activate-executed.test.mjs` 中被本改动波及的 2 条断言，已改为断言其**原始意图**（⛔ 不判 retire、⛔ 不翻 needs-human；负控制 (a) 改用 posture / criterion-空 样例），⛔ 不是删除断言了事；两文件 exit 0
+- [x] `triageDraftAc` 函数头注释与 `runGoalRound` 的实际行为一致（现注释仍写「判决只【记录】，⛔ 不 flip 任何 AC status」，而调用侧已会对 activate 判决调 `writeGoalStatus` 落地——本轮一并修正该既有漂移）
+- [x] `scripts/test.sh` 全量绿
 
 ## Definition of Done
 
@@ -69,5 +69,6 @@ extra:
 - plugin/test/goal-triage.test.mjs
 - plugin/test/goal-triage-fresh-draft-not-retire.test.mjs
 - plugin/test/goal-triage-activate-executed.test.mjs
+- plugin/test/goal-driver.test.mjs
 - plugin/test/goal-posture-blocks-activate.test.mjs
 - tasks/gap-goal-driver-ac-activation-gated-on-traction-not-goal-semantics.md
