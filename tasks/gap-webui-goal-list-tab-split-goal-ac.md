@@ -132,4 +132,5 @@ tableW 868 / mainW 900，rowCount 98（12 GOAL + 86 AC，`ls goals/*.md` 现读�
 - `packages/quay/test/serve-goal-doc.test.mjs`
 - `packages/quay/test/webui-modernist-sync.test.mjs`
 - `packages/quay/test/gap-webui-goal-task-rollup-via-shared-summary-cache.test.mjs`
+- `packages/quay/test/gap-webui-tests-page-unpaginated-tables.test.mjs`
 - `tasks/gap-webui-goal-list-tab-split-goal-ac.md`
