@@ -57,10 +57,10 @@ plugin/scripts/runner-concurrency.ts:70         process-budget.sh
 
 ## Acceptance Criteria
 
-- [ ] AC1（位置判定）：`grep -n 'path.join(worktree, "scripts", "test.sh")' plugin/scripts/worker-driver.ts` 的两处调用点、以及 `defaultMechanicalSuiteCommand` 对 `full-suite-runner.ts` 的调用，都改为条件分支（先判是否存在 `test_command` 配置/`scripts/test.sh` 文件），不再是唯一硬编码路径。
-- [ ] AC2（双向负控制）：无 `scripts/test.sh` 但有 `test_command` 的第三方场景下，doc-check 返回 ok:true（跳过，可区分取值）、scoped-gate 与 suite 均实际执行 `test_command`；反向：本仓库场景（`scripts/test.sh` 存在）三步行为与修改前逐字一致。
-- [ ] AC3（生产复现，移除手工 shim 后复跑）：orangevps 第三方项目移除 `scripts/test.sh` 手工 shim，重装本次修复后的安装物，`e2e-verify-207` 完整走完 fan-in（merge→delta→doc-check→typecheck→scoped门→suite→ff）翻 done，`.quay/fan-in-step-trace.jsonl` 中该任务全部步骤 `ok:true`。
-- [ ] AC4（全量绿）：`scripts/test.sh` 全量绿（含 `worker-driver.test.mjs` 新增负控制）。
+- [x] AC1（位置判定）：`grep -n 'path.join(worktree, "scripts", "test.sh")' plugin/scripts/worker-driver.ts` 的两处调用点、以及 `defaultMechanicalSuiteCommand` 对 `full-suite-runner.ts` 的调用，都改为条件分支（先判是否存在 `test_command` 配置/`scripts/test.sh` 文件），不再是唯一硬编码路径。
+- [x] AC2（双向负控制）：无 `scripts/test.sh` 但有 `test_command` 的第三方场景下，doc-check 返回 ok:true（跳过，可区分取值）、scoped-gate 与 suite 均实际执行 `test_command`；反向：本仓库场景（`scripts/test.sh` 存在）三步行为与修改前逐字一致。
+- [ ] AC3（生产复现，移除手工 shim 后复跑）：orangevps 第三方项目移除 `scripts/test.sh` 手工 shim，重装本次修复后的安装物，`e2e-verify-207` 完整走完 fan-in（merge→delta→doc-check→typecheck→scoped门→suite→ff）翻 done，`.quay/fan-in-step-trace.jsonl` 中该任务全部步骤 `ok:true`。（待外部）
+- [ ] AC4（全量绿）：`scripts/test.sh` 全量绿（含 `worker-driver.test.mjs` 新增负控制）。（待外部）
 
 ## Definition of Done
 
