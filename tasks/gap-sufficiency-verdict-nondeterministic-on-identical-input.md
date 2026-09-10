@@ -2,7 +2,7 @@
 id: gap-sufficiency-verdict-nondeterministic-on-identical-input
 title: 充分性裁决对同一输入不确定：12 轮逐字相同的输入产出 covered/insufficient/not-evaluated 三种结果，而
   goalAchieved 与它是合取 ⇒ 目标算不算达成取决于看的是哪一轮
-status: ready
+status: done
 labels:
   - gap
   - defect
