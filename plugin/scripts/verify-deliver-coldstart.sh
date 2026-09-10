@@ -62,7 +62,8 @@
 #       [--test-command <cmd>] [--tmux-session <sess>] \
 #       [--wait <s>] [--liveness-window <min>] \
 #       [--skip-cold-start-drive] [--cold-start-drive] [--verify-only] [--require-live] \
-#       [--evidence <path>] [--ac89 <path>] [--host <B|C>] [--spec <path>] [--channel npm-global|marketplace] [--ac205-session] [--selfcheck] [--help]
+#       [--evidence <path>] [--ac89 <path>] [--host <B|C>] [--spec <path>] [--channel npm-global|marketplace] [--ac205-session] [--selfcheck] [--help] \
+#       [--target-launcher <l>] [--target-model <m>] [--target-auth <a>] [--driving-profiles <p>]
 #
 #   --build-root <repo> 该次验证【自己】从 <repo> 的 develop-tip 现 build quay+quay-native tgz
 #                       （AC5 主路径：build_sha/日期/产物 sha256 全由本脚本取，不引用外部产物），
@@ -83,7 +84,12 @@
 #                    发 probe，读目标 transcript（transcript-delivery-check.js --check）判 delivered
 #                    ⇒ 写 AC-205 记录（transcript_confirmed=true）。opt-in：需同址 live 目标会话。
 #   --require-live   ③ 若 COLDSTART_LIVE != yes 则 exit 1（严格验证——冷启动确认跑用）。
-#   --selfcheck      全 hermetically 自检（AC2 直接量正/负控制 + L1 闭集解析/未评估正负控制 + AC5 判据正/负控制），不碰真实安装。exit 0/1。
+#   --target-launcher/--target-model/--target-auth  配置目标项目 profiles 的 CLI 覆盖
+#                    （gap-verify-coldstart-does-not-configure-target-profiles）。缺省由驱动方仓库
+#                    .quay/profiles.yml 的 worker-default 派生（单一真相源，⛔ 不写第二份字面量）；
+#                    --driving-profiles <p> 显式指定该来源。launcher/model 任一缺 ⇒
+#                    target-profiles: not-configured（可区分取值，⛔ 不静默跳过，硬规则 3b）。
+#   --selfcheck      全 hermetically 自检（AC2 直接量正/负控制 + L1 闭集解析/未评估正负控制 + AC5 判据正/负控制 + 目标项目 profiles 配置正/负/覆盖控制），不碰真实安装。exit 0/1。
 #   --help           用法在前、退出 0、无副作用（gap-scripts-sprawl 约定）。
 
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
@@ -168,6 +174,23 @@ AC205_TRANSCRIPT_CONFIRMED=0                 # 1 = transcript-delivery-check 判
 AC205_EVALUATED=0                            # 1 = send 已发 + transcript 已读
 AC205_SESSION=0                              # 1 = --ac205-session 触发（需同址目标会话，opt-in）
 
+# ── 目标项目 profiles 配置（gap-verify-coldstart-does-not-configure-target-profiles）────────
+# verify-deliver-coldstart 要证明「目标项目自己的 drivers 能驱动真实提交」，就必须先把目标项目配置到
+# 在该宿主上真的能起 worker 的状态——否则它测的是「宿主碰巧有没有可用的裸 claude 凭据」（实证
+# 2026-09-10 orangevps：全新 quay-init 项目 shipped worker-default launcher=claude/model=null ⇒
+# 模型名落到宿主全局 claude 配置的 deepseek-v4-pro（无后缀）⇒ 400 fallback 组缺失 ⇒ worker 秒死）。
+# 单一真相源 = 驱动方仓库自己的 .quay/profiles.yml worker-default（⛔ 不在本脚本写第二份字面量，
+# 硬规则 4c）；可选 CLI 覆盖 --target-launcher/--target-model/--target-auth。launcher 或 model 任一缺
+# ⇒ TARGET_PROFILES_STATUS=not-configured（可区分取值，⛔ 不静默跳过——硬规则 3b「没配」≠「配好了」）。
+TARGET_LAUNCHER=""                          # --target-launcher 覆盖（缺省由驱动方 profiles 派生）
+TARGET_MODEL=""                             # --target-model 覆盖
+TARGET_AUTH=""                              # --target-auth 覆盖
+DRIVING_PROFILES=""                         # --driving-profiles 显式路径；缺省由 --build-root/dev-tree 推导
+TARGET_PROFILES_STATUS="not-configured"     # configured | not-configured（缺输入 ≠ 配置好了）
+TARGET_PROFILES_LAUNCHER=""                 # 实际写入目标项目的 launcher（证据/AC3 可核）
+TARGET_PROFILES_MODEL=""                    # 实际写入目标项目的 model
+TARGET_PROFILES_AUTH=""                     # 实际写入目标项目的 auth
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --tgz) QUAY_TGZ="$2"; shift 2 ;;
@@ -193,6 +216,10 @@ while [ $# -gt 0 ]; do
     --spec) SPEC_PATH="$2"; shift 2 ;;
     --channel) CHANNEL="$2"; shift 2 ;;
     --ac205-session) AC205_SESSION=1; shift ;;
+    --target-launcher) TARGET_LAUNCHER="$2"; shift 2 ;;
+    --target-model) TARGET_MODEL="$2"; shift 2 ;;
+    --target-auth) TARGET_AUTH="$2"; shift 2 ;;
+    --driving-profiles) DRIVING_PROFILES="$2"; shift 2 ;;
     --selfcheck) DO_SELFCHECK=1; shift ;;
     *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -709,6 +736,81 @@ step2_init() {
   STEP2_OK=1
   echo "  quay-init complete (log → ${ROOT}/quay-init.log)"
   echo "  L1: closed_set=${L1_CLOSED_SET:-<none>} present=$L1_CLOSED_SET_PRESENT/$L1_CLOSED_SET_COUNT missing=${L1_CLOSED_SET_MISSING:-<none>} not_evaluated=$L1_NOT_EVALUATED"
+  return 0
+}
+
+# ── 目标项目 profiles 配置（gap-verify-coldstart-does-not-configure-target-profiles）────────
+# 单一真相源 = 驱动方仓库自己的 .quay/profiles.yml worker-default（⛔ 不在本脚本写第二份字面量，
+# 硬规则 4c）。shipped plugin/.quay/profiles.yml 与 dev-tree 根 .quay/profiles.yml 结构一致、只差
+# launcher/model 取值，sed range 锚定 worker-default 段替换三字段、不碰 manager-local 同名键。
+
+# profile_worker_default_field <profiles.yml> <launcher|model|auth> — 读 worker-default 段一个字段。
+# 锚定 sed range（^  worker-default: 到下一个 2-space 缩进 key），值剥离行内注释与尾随空白。
+# 读不到（文件缺失 / 段无该键）⇒ return 非 0（缺值 ≠ 合格，硬规则 3b）。
+profile_worker_default_field() {
+  local f="$1" field="$2" v
+  [ -f "$f" ] || return 1
+  v="$(sed -n '/^  worker-default:/,/^  [a-zA-Z_-]*:/p' "$f" \
+        | sed -n "s/^    ${field}:[[:space:]]*//p" | head -1)"
+  [ -n "$v" ] || return 1
+  v="${v%%#*}"                                   # 剥离行内注释（auth: token  # …）
+  v="$(printf '%s' "$v" | sed 's/[[:space:]]*$//')"   # 剥离尾随空白
+  [ -n "$v" ] || return 1
+  printf '%s' "$v"
+}
+
+# resolve_driving_profiles — 驱动方仓库 profiles 路径推导：--driving-profiles 显式 >
+# --build-root <repo>/.quay/profiles.yml > dev-tree 推导（SCRIPT_DIR 两级上）。不存在 ⇒ 空串。
+resolve_driving_profiles() {
+  local dev_root
+  if [ -n "$DRIVING_PROFILES" ] && [ -f "$DRIVING_PROFILES" ]; then printf '%s' "$DRIVING_PROFILES"; return 0; fi
+  if [ -n "$BUILD_ROOT" ] && [ -f "$BUILD_ROOT/.quay/profiles.yml" ]; then printf '%s' "$BUILD_ROOT/.quay/profiles.yml"; return 0; fi
+  dev_root="$(cd "$SCRIPT_DIR/../.." 2>/dev/null && pwd)"
+  if [ -f "$dev_root/.quay/profiles.yml" ]; then printf '%s' "$dev_root/.quay/profiles.yml"; return 0; fi
+  return 1
+}
+
+# configure_target_profiles <target-root> <driving-profiles> <launcher-override> <model-override> <auth-override>
+# 把 worker-default 的 launcher/model/auth 写进目标项目 .quay/profiles.yml（CLI 覆盖 > 驱动方派生）。
+# 返回 0 = configured；2 = not-configured（launcher/model 缺输入，或目标 profiles.yml 未由 quay-init 铺）。
+configure_target_profiles() {
+  local target="$1" src="$2" launcher="$3" model="$4" auth="$5"
+  local prof="$target/.quay/profiles.yml" derived_launcher="" derived_model="" derived_auth=""
+
+  if [ -n "$src" ]; then
+    derived_launcher="$(profile_worker_default_field "$src" launcher 2>/dev/null || true)"
+    derived_model="$(profile_worker_default_field "$src" model 2>/dev/null || true)"
+    derived_auth="$(profile_worker_default_field "$src" auth 2>/dev/null || true)"
+  fi
+  launcher="${launcher:-$derived_launcher}"
+  model="${model:-$derived_model}"
+  auth="${auth:-$derived_auth}"
+
+  TARGET_PROFILES_LAUNCHER="$launcher"
+  TARGET_PROFILES_MODEL="$model"
+  TARGET_PROFILES_AUTH="$auth"
+
+  # launcher 或 model 任一缺 ⇒ not-configured（驱动方 profiles 无 worker-default 取值且无覆盖）。
+  # ⛔ 不静默跳过：可区分取值让读者知道这一步没做（硬规则 3b「没配」与「配好了」不得同形）。
+  if [ -z "$launcher" ] || [ -z "$model" ]; then
+    TARGET_PROFILES_STATUS="not-configured"
+    echo "  target-profiles: not-configured (launcher/model 缺输入——驱动方 profiles 无 worker-default 取值, 且无 --target-launcher/--target-model 覆盖; 这一步没做)"
+    return 2
+  fi
+  if [ ! -f "$prof" ]; then
+    TARGET_PROFILES_STATUS="not-configured"
+    echo "  target-profiles: not-configured (目标项目 $prof 不存在——quay-init 未铺, 不静默)"
+    return 2
+  fi
+
+  # 精准替换 worker-default 段的三字段（sed range 锚定 worker-default，⛔ 不碰 manager-local 同名键）。
+  sed -i -e "/^  worker-default:/,/^  [a-zA-Z_-]*:/ { s|^    launcher:.*|    launcher: ${launcher}|; s|^    model:.*|    model: ${model}|; }" "$prof"
+  if [ -n "$auth" ]; then
+    sed -i -e "/^  worker-default:/,/^  [a-zA-Z_-]*:/ { s|^    auth:.*|    auth: ${auth}|; }" "$prof"
+  fi
+
+  TARGET_PROFILES_STATUS="configured"
+  echo "  target-profiles: configured (launcher=${launcher} model=${model} auth=${auth:-<derived-none>} → $prof)"
   return 0
 }
 
@@ -1455,6 +1557,64 @@ Enter to confirm · Esc to cancel"
   echo "selfcheck: ac205-record(transcript_confirmed=false) refused=$ac205_conf_refused (expect 1 — transcript 未物化拒写, AC4 负控制)"
   echo "selfcheck: ac205-record(empty-host) refused=$ac205_host_refused (expect 1 — 缺 host 拒写)"
 
+  # control 25/26/27 (目标项目 profiles 配置, gap-verify-coldstart-does-not-configure-target-profiles):
+  #   单一真相源 = 驱动方 profiles worker-default。正(25)：驱动方有 worker-default 取值 ⇒ 目标 profiles
+  #   worker-default 三字段被改写、status=configured（AC1 正向）。负(26)：无驱动方 + 无覆盖 ⇒
+  #   not-configured、return 2（AC2 反向，⛔ 不静默跳过，硬规则 3b）。覆盖(27)：--target-launcher/model
+  #   覆盖派生（auth 仍走派生）——AC2 CLI 覆盖面。
+  local tp_driving="$tmp/tp-driving-profiles.yml" tp_target="$tmp/tp-target" tp_ok=0
+  local tp_pos_rc=0 tp_pos_status="" tp_pos_launcher="" tp_pos_model="" tp_pos_auth=""
+  local tp_neg_status="" tp_neg_rc=0 tp_ovr_status="" tp_ovr_launcher="" tp_ovr_model="" tp_ovr_auth=""
+  local tp_res1="" tp_res2="" tp_buildroot="$tmp/tp-buildroot"
+  printf 'version: 1\nprofiles:\n  worker-default:\n    launcher: claude-fjdac\n    model: deepseek-v4-pro-anthropic\n    bare: false\n    auth: token\n  manager-local:\n    launcher: claude\n    model: null\n    bare: false\n    auth: key\n' > "$tp_driving"
+  mkdir -p "$tp_target/.quay"
+  printf 'version: 1\nprofiles:\n  worker-default:\n    launcher: claude\n    model: null\n    bare: false\n    auth: key\n  manager-local:\n    launcher: claude\n    model: null\n    bare: false\n    auth: key\n' > "$tp_target/.quay/profiles.yml"
+
+  # control 25 (正向): 驱动方派生写入目标（launcher/model 非 null，auth 同写）。
+  if configure_target_profiles "$tp_target" "$tp_driving" "" "" ""; then
+    tp_pos_rc=0
+  else
+    tp_pos_rc=$?
+  fi
+  tp_pos_status="$TARGET_PROFILES_STATUS"
+  tp_pos_launcher="$(profile_worker_default_field "$tp_target/.quay/profiles.yml" launcher 2>/dev/null || true)"
+  tp_pos_model="$(profile_worker_default_field "$tp_target/.quay/profiles.yml" model 2>/dev/null || true)"
+  tp_pos_auth="$(profile_worker_default_field "$tp_target/.quay/profiles.yml" auth 2>/dev/null || true)"
+
+  # control 26 (负向): 无驱动方 + 无覆盖 ⇒ not-configured（可区分取值，⛔ 不静默跳过）。
+  if configure_target_profiles "$tp_target" "" "" "" ""; then
+    tp_neg_rc=0
+  else
+    tp_neg_rc=$?
+  fi
+  tp_neg_status="$TARGET_PROFILES_STATUS"
+
+  # control 27 (覆盖): --target-launcher/model 覆盖派生（auth 仍走派生）。
+  configure_target_profiles "$tp_target" "$tp_driving" "custom-launcher" "custom-model" "" || true
+  tp_ovr_status="$TARGET_PROFILES_STATUS"
+  tp_ovr_launcher="$(profile_worker_default_field "$tp_target/.quay/profiles.yml" launcher 2>/dev/null || true)"
+  tp_ovr_model="$(profile_worker_default_field "$tp_target/.quay/profiles.yml" model 2>/dev/null || true)"
+  tp_ovr_auth="$(profile_worker_default_field "$tp_target/.quay/profiles.yml" auth 2>/dev/null || true)"
+
+  # control 28 (路径推导): --driving-profiles 显式 > --build-root <repo>/.quay/profiles.yml。
+  DRIVING_PROFILES="$tp_driving"; tp_res1="$(resolve_driving_profiles || true)"
+  DRIVING_PROFILES=""; mkdir -p "$tp_buildroot/.quay"
+  printf 'version: 1\nprofiles:\n  worker-default:\n    launcher: x\n    model: y\n' > "$tp_buildroot/.quay/profiles.yml"
+  BUILD_ROOT="$tp_buildroot"; tp_res2="$(resolve_driving_profiles || true)"
+  DRIVING_PROFILES=""; BUILD_ROOT=""
+
+  if [ "$tp_pos_rc" = "0" ] && [ "$tp_pos_status" = "configured" ] \
+     && [ "$tp_pos_launcher" = "claude-fjdac" ] && [ "$tp_pos_model" = "deepseek-v4-pro-anthropic" ] && [ "$tp_pos_auth" = "token" ] \
+     && [ "$tp_neg_rc" = "2" ] && [ "$tp_neg_status" = "not-configured" ] \
+     && [ "$tp_ovr_status" = "configured" ] && [ "$tp_ovr_launcher" = "custom-launcher" ] && [ "$tp_ovr_model" = "custom-model" ] && [ "$tp_ovr_auth" = "token" ] \
+     && [ "$tp_res1" = "$tp_driving" ] && [ "$tp_res2" = "$tp_buildroot/.quay/profiles.yml" ]; then
+    tp_ok=1
+  fi
+  echo "selfcheck: target-profiles(derived) status=$tp_pos_status rc=$tp_pos_rc launcher=$tp_pos_launcher model=$tp_pos_model auth=$tp_pos_auth (expect configured/0/claude-fjdac/deepseek-v4-pro-anthropic/token)"
+  echo "selfcheck: target-profiles(no-source) status=$tp_neg_status rc=$tp_neg_rc (expect not-configured/2 — 缺输入 ≠ 配置好了, 硬规则 3b)"
+  echo "selfcheck: target-profiles(override) status=$tp_ovr_status launcher=$tp_ovr_launcher model=$tp_ovr_model auth=$tp_ovr_auth (expect configured/custom-launcher/custom-model/token)"
+  echo "selfcheck: target-profiles(resolve) explicit=$([ "$tp_res1" = "$tp_driving" ] && echo 1 || echo 0) buildroot=$([ "$tp_res2" = "$tp_buildroot/.quay/profiles.yml" ] && echo 1 || echo 0) (expect 1/1 — 显式 > --build-root)"
+
   if [ "$d1" = "1" ] && [ "$d2" = "no" ] && [ "$a1" = "1" ] && [ "$a2" = "yes" ] \
      && [ "$c3_e" = "1" ] && [ "$c3_ok" = "1" ] \
      && [ "$c4_e" = "1" ] && [ "$c4_ok" = "0" ] \
@@ -1477,11 +1637,12 @@ Enter to confirm · Esc to cancel"
      && [ "$ac204_wrote" = "1" ] && [ "$ac204_fields_ok" = "1" ] && [ "$ac204_refused_fc" = "1" ] && [ "$ac204_refused_en" = "1" ] \
      && [ "$ac205_tc_hit" = "1" ] && [ "$ac205_tc_miss" = "0" ] \
      && [ "$ac205_wrote" = "1" ] && [ "$ac205_fields_ok" = "1" ] \
-     && [ "$ac205_ship_refused" = "1" ] && [ "$ac205_conf_refused" = "1" ] && [ "$ac205_host_refused" = "1" ]; then
+     && [ "$ac205_ship_refused" = "1" ] && [ "$ac205_conf_refused" = "1" ] && [ "$ac205_host_refused" = "1" ] \
+     && [ "$tp_ok" = "1" ]; then
     echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed); AC-204 carrier record writes the five criterion fields verbatim (forbidden_count=0 integer, enable_declared=true literal) and refuses a forbidden-copy or no-enable record (fail-closed, 成对判定); AC-205 carrier record writes the three criterion fields verbatim (shipped_from_installed_artifact=true + transcript_confirmed=true literals, top-level build_sha) with transcript_confirmed derived from transcript-delivery-check reading the transcript (hit ⇒ delivered / miss ⇒ not) — never from a send exit code — and refuses shipped=false / transcript_confirmed=false / empty-host (fail-closed, AC4 负控制)"
     rc=0
   else
-    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc m4_reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused ac201_pos_w=$ac201_pos_w ac201_sha_len=${#ac201_pos_sha} ac201_tgz_len=${#ac201_pos_tgz} ac201_pos_ac=$ac201_pos_ac ac201_neg_w=$ac201_neg_w ac201_neg_lines=$ac201_neg_lines g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused ac204_wrote=$ac204_wrote ac204_fields_ok=$ac204_fields_ok ac204_refused_fc=$ac204_refused_fc ac204_refused_en=$ac204_refused_en ac205_tc_hit=$ac205_tc_hit ac205_tc_miss=$ac205_tc_miss ac205_wrote=$ac205_wrote ac205_fields_ok=$ac205_fields_ok ac205_ship_refused=$ac205_ship_refused ac205_conf_refused=$ac205_conf_refused ac205_host_refused=$ac205_host_refused" >&2
+    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc m4_reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused ac201_pos_w=$ac201_pos_w ac201_sha_len=${#ac201_pos_sha} ac201_tgz_len=${#ac201_pos_tgz} ac201_pos_ac=$ac201_pos_ac ac201_neg_w=$ac201_neg_w ac201_neg_lines=$ac201_neg_lines g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused ac204_wrote=$ac204_wrote ac204_fields_ok=$ac204_fields_ok ac204_refused_fc=$ac204_refused_fc ac204_refused_en=$ac204_refused_en ac205_tc_hit=$ac205_tc_hit ac205_tc_miss=$ac205_tc_miss ac205_wrote=$ac205_wrote ac205_fields_ok=$ac205_fields_ok ac205_ship_refused=$ac205_ship_refused ac205_conf_refused=$ac205_conf_refused ac205_host_refused=$ac205_host_refused tp_ok=$tp_ok tp_pos_status=$tp_pos_status tp_pos_launcher=$tp_pos_launcher tp_pos_model=$tp_pos_model tp_pos_auth=$tp_pos_auth tp_neg_status=$tp_neg_status tp_neg_rc=$tp_neg_rc tp_ovr_launcher=$tp_ovr_launcher tp_ovr_model=$tp_ovr_model tp_ovr_auth=$tp_ovr_auth tp_res1=$tp_res1 tp_res2=$tp_res2" >&2
     rc=1
   fi
   rm -rf "$tmp"
@@ -1549,6 +1710,10 @@ else
       echo "AC88_VERIFY=fail (step ② quay-init failed)"
       exit 1
     fi
+    # 配置目标项目 profiles（单一真相源 = 驱动方 profiles worker-default / CLI 覆盖）——
+    # 让目标项目在该宿主上真的能起 worker。not-configured 是可区分取值（硬规则 3b），⛔ 不静默跳过；
+    # 非 0 返回只置 TARGET_PROFILES_STATUS（不 crash，缺配置由后续 ③ 冷启动的 worker 秒死如实暴露）。
+    configure_target_profiles "$ROOT" "$(resolve_driving_profiles || true)" "$TARGET_LAUNCHER" "$TARGET_MODEL" "$TARGET_AUTH" || true
     step_ac204_forbidden_surface "$ROOT"
     step3_coldstart
     step4_driver_liveness "$ROOT"
@@ -1588,6 +1753,10 @@ fi
 echo ""
 echo "STEP1_OK=$STEP1_OK"
 echo "STEP2_OK=$STEP2_OK"
+echo "TARGET_PROFILES_STATUS=$TARGET_PROFILES_STATUS (configured | not-configured — 缺输入 ≠ 配置好了, 硬规则 3b)"
+echo "TARGET_PROFILES_LAUNCHER=${TARGET_PROFILES_LAUNCHER:-<none>}"
+echo "TARGET_PROFILES_MODEL=${TARGET_PROFILES_MODEL:-<none>}"
+echo "TARGET_PROFILES_AUTH=${TARGET_PROFILES_AUTH:-<none>}"
 echo "NPM_BIN_DISPATCH=$NPM_BIN_DISPATCH"
 echo "CHANNEL=$CHANNEL (step① install path: npm-global | marketplace)"
 echo "MP_EVALUATED=$MP_EVALUATED (1 = marketplace branch ran; 0 = npm-global channel — 未验 ≠ 通过)"
@@ -1659,6 +1828,10 @@ cat > "$EVIDENCE" <<EOF
   "mp_entry_path": "${MP_ENTRY_PATH:-}",
   "mp_enabled_leak": $MP_ENABLED_LEAK,
   "mp_settings_path": "${MP_SETTINGS_PATH:-}",
+  "target_profiles_status": "$TARGET_PROFILES_STATUS",
+  "target_profiles_launcher": "${TARGET_PROFILES_LAUNCHER:-}",
+  "target_profiles_model": "${TARGET_PROFILES_MODEL:-}",
+  "target_profiles_auth": "${TARGET_PROFILES_AUTH:-}",
   "liveness_window_min": $LIVENESS_WINDOW
 }
 EOF
@@ -1669,7 +1842,7 @@ echo "evidence written → $EVIDENCE"
 mkdir -p "$(dirname "$AC89")"
 bool() { [ "$1" = "1" ] && printf true || printf false; }
 step3=0; [ "$COLDSTART_LIVE" = "yes" ] && step3=1
-detail="steps: install(1)=$STEP1_OK init(2)=$STEP2_OK coldstart(3) live=$COLDSTART_LIVE git_age=${L2_GIT_COMMIT_AGE_MIN}min quayinit_commit=$L2_GIT_IS_QUAYINIT_COMMIT worktree=$L2_INNER_WORKTREE_COUNT proc_cwd=$L2_LAYER_PROCESS_CWD startup_prompt=$L2_STARTUP_PROMPT dead_loop=$L2_DEAD_LOOP_STATE build_sha=${BUILD_SHA:-} build_date=${BUILD_DATE:-} sha256_quay=${SHA256_QUAY:-0} sha256_qn=${SHA256_QN:-0} ac5_ok=$AC5_OK l1_closed_set=${L1_CLOSED_SET:-none} l1_not_evaluated=$L1_NOT_EVALUATED l1_closed_set_present=$L1_CLOSED_SET_PRESENT/$L1_CLOSED_SET_COUNT l1_closed_set_missing=${L1_CLOSED_SET_MISSING:-none}"
+detail="steps: install(1)=$STEP1_OK init(2)=$STEP2_OK coldstart(3) live=$COLDSTART_LIVE git_age=${L2_GIT_COMMIT_AGE_MIN}min quayinit_commit=$L2_GIT_IS_QUAYINIT_COMMIT worktree=$L2_INNER_WORKTREE_COUNT proc_cwd=$L2_LAYER_PROCESS_CWD startup_prompt=$L2_STARTUP_PROMPT dead_loop=$L2_DEAD_LOOP_STATE build_sha=${BUILD_SHA:-} build_date=${BUILD_DATE:-} sha256_quay=${SHA256_QUAY:-0} sha256_qn=${SHA256_QN:-0} ac5_ok=$AC5_OK l1_closed_set=${L1_CLOSED_SET:-none} l1_not_evaluated=$L1_NOT_EVALUATED l1_closed_set_present=$L1_CLOSED_SET_PRESENT/$L1_CLOSED_SET_COUNT l1_closed_set_missing=${L1_CLOSED_SET_MISSING:-none} target_profiles_status=${TARGET_PROFILES_STATUS:-not-configured} target_profiles_launcher=${TARGET_PROFILES_LAUNCHER:-none} target_profiles_model=${TARGET_PROFILES_MODEL:-none} target_profiles_auth=${TARGET_PROFILES_AUTH:-none}"
 ac_tag="AC88"
 okflag=false; [ "$AC88_VERIFY" = "ok" ] && okflag=true
 mp_json=""
