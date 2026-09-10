@@ -1,14 +1,38 @@
 ---
 id: AC-233
-title: 下游 CLI 底线自洽——同一宿主上 driver 可跑而 CLI 拒跑的不一致必须被报出，⛔ 不让人自己去撞（退出条件①）
+title: 交付包不得含「形如入口、却在安装位置下无法运行」的文件——原「底线不一致」前提已证否，收窄至真实残余
 status: draft
 kind: criterion
 goal: GOAL-015
 criterion: node --no-warnings --experimental-strip-types --test
-  plugin/test/downstream-cli-floor-consistency.test.mjs
-expect: 双向：正向——hermetic 单测证明「driver 可跑而 CLI 拒跑」这类同宿主不一致会被判出并以**可区分取值**报出（如
-  floor-inconsistent），⛔ 不是静默让人去撞；反向——本仓库场景（宿主满足底线）不得误报不一致。⛔ 本 AC 不裁定 Node
-  底线该取多少（GOAL-015 非目标），只要求底线自洽且该不一致可见。立条时该测试文件不存在 ⇒ exit 1。
+  plugin/test/shipped-entry-runnable.test.mjs
+expect: >-
+  **本条已于 2026-09-10 收窄——原判据的前提被证否，如实记录**：原文要求「同一宿主上 driver 可跑而 CLI
+  拒跑的不一致必须被报出」。该不一致**不存在**：立条者调错了入口（调了包内源码探针 `bin/quay.js`，而 `package.json` 的
+  bin 是 `./dist/quay.js`），正确入口在 Node 18 与 25 上均正常。⛔ 不保留一条建立在错误前提上的判据。
+
+
+  **收窄后的对象（真实残余）**：交付包的 `files` 装入了 `bin/quay.js` +
+  `bin/quay.ts`，二者**在安装位置下结构上不可运行**——Node 对 `node_modules/`
+  下的文件拒绝类型剥离（`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`），与 Node 版本无关。它们既非声明的
+  bin、又长得像入口 ⇒ 会把调用者引向假结论（立条者本人即第一个受害者）。
+
+
+  **双向，缺一不可**：
+
+  - **正向**——`plugin/test/shipped-entry-runnable.test.mjs` 枚举「随包装入且形如入口」的文件（可执行位
+  / shebang / 位于 `bin/`），断言每一个**要么**是 `package.json` `bin`
+  声明的且能从**安装位置布局**跑起来，**要么**不在 `files` 装入范围内。
+
+  - **反向（能取假）**——注入一个「装入 `files` 但从安装位置跑会结构性失败」的入口文件 ⇒ 该测试**必须红**；移除 ⇒ 绿。⛔
+  只断言「声明的 bin 能跑」不算——那恰好是本缺陷能溜过去的形态（坏文件不是声明的 bin）。
+
+
+  **⛔ 本条不裁定 Node 底线取值**（GOAL-015 非目标），也不要求把 `bin/quay.ts` 改成可运行——**排除出 `files`
+  同样是合格解**。
+
+
+  立条时该测试文件不存在 ⇒ 干跑 exit 1（可评估且红）。
 origin: >-
   GOAL-015 的机器判据之一。立条依据见 GOAL-015 的 origin（人 2026-09-10 令「应当优先更新 goal；必要时可创建新
   goal」后设立；实测缺口：orangevps Node 18.19.1 上 shipped CLI 拒跑而同机 driver dist
