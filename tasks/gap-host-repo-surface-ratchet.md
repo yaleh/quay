@@ -2,7 +2,7 @@
 id: gap-host-repo-surface-ratchet
 title: 本仓库表层棘轮缺失：CLI 动词集 / web 路由集 /
   有消费者的配置键集只能靠人记得，没有任何机件在「交付面修法删掉本仓库自己的入口」时报红（GOAL-015 退出条件④ / AC-236）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
