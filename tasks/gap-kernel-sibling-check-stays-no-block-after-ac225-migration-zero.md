@@ -3,7 +3,7 @@ id: gap-kernel-sibling-check-stays-no-block-after-ac225-migration-zero
 title: kernel-sibling 检查器在套件里仍带 --no-block（REPORT-ONLY
   不阻塞），而代码注释自己写明的移除条件「AC-225 迁移归零」已满足——叠加 GOAL-012 关闭后 AC-225 退出 I5
   复验域，「枚举归零」此刻无任何会红的守卫
-status: todo
+status: ready
 labels:
   - gap
   - defect
