@@ -2,7 +2,7 @@
 id: gap-meta-filedecisions-goal-write-omits-body
 title: fileDecisions 建 GOAL 时不传 --body ⇒ decision 通道自 body≥40 引入（80d12fe42,
   09-08）后结构性损坏：GOAL-013 exit 2 未落地，盲区类问题失去唯一出路
-status: ready
+status: done
 labels:
   - gap
   - defect
