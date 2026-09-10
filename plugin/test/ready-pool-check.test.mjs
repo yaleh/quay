@@ -85,6 +85,9 @@ import {
   unmergedConflictPaths,
   readTaskFileAtRef,
   readTaskStatusAtRef,
+  prosePrereqRefs,
+  prosePrereqGap,
+  PREREQ_KEYWORD_RE,
 } from "../scripts/ready-pool-check.ts";
 import { INFLIGHT_WORKTREE_STALE_MS } from "../scripts/concurrent-batch-scheduler.ts";
 import { propagateDocBranchToDevelop } from "../scripts/driver-filters.ts";
@@ -3789,6 +3792,92 @@ test("todo candidate with prose prereq and NO edge ⇒ ineligible for promotion 
   assert.deepEqual(cand.prosePrereqGap, ["gap-prereq-a"]);
 });
 
+// ── prose-prereq widen: 阻塞 keyword + backtick citation form (gap-prose-prereq-detector-blind-to-repo-own-conventions) ──
+// A representative pre-edge AC-207 body snippet — 3 阻塞 paragraphs, each carrying a backtick-cited
+// task id. The pre-fix keyword table had none of 阻塞, so 63/64 paragraphs of the real body never
+// entered the scan; the pre-fix ref matcher only recognized wikilinks, so even a matched paragraph
+// yielded 0 ids (the repo cites ids with backticks 740:67 over wikilinks).
+const PRE_EDGE_AC207_SNIPPET = [
+  "AC2/AC3/AC5 ⛔ 阻塞（第 4 轮）：原阻塞已解除——`gap-driver-resource-gate-path-anchored-at-root-third-party` 已 done 落 develop。",
+  "AC2/AC3/AC5 ⛔ 阻塞复核（第 5 轮）：修复任务 `gap-shipped-profiles-missing-worker-roles` 已 ready、AC1/AC2 已勾。",
+  "AC2/AC3/AC5 ⛔ 阻塞复核（第 7 轮）：第三阻塞 `gap-promotion-driver-ready-pool-check-path-third-party` 仍未落 develop。",
+].join("\n\n");
+
+test("PREREQ_KEYWORD_RE now matches 阻塞 paragraphs — the pre-fix table saw none of them (AC1)", () => {
+  const hits = PRE_EDGE_AC207_SNIPPET.split(/\r?\n\s*\r?\n/).filter((p) => PREREQ_KEYWORD_RE.test(p));
+  assert.ok(hits.length > 1, `阻塞 must make >1 paragraph match (got ${hits.length})`);
+  assert.equal(PREREQ_KEYWORD_RE.test("第四阻塞 `gap-x` 仍未解除"), true, "阻塞 is in the widened keyword table");
+  assert.equal(PREREQ_KEYWORD_RE.test("前序任务 `gap-x`"), true, "前序 stays in the table");
+});
+
+test("prosePrereqRefs finds backtick-cited ids inside 阻塞 paragraphs (AC2)", (t) => {
+  const root = makeWorkspace("prereq-backtick");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const ids = [
+    "gap-driver-resource-gate-path-anchored-at-root-third-party",
+    "gap-shipped-profiles-missing-worker-roles",
+    "gap-promotion-driver-ready-pool-check-path-third-party",
+  ];
+  for (const id of ids) writeTask(root, id, { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  const refs = prosePrereqRefs(PRE_EDGE_AC207_SNIPPET, path.join(root, "tasks"));
+  assert.ok(refs.length >= 1, `must find ≥1 backtick-cited id (got ${refs.length})`);
+  assert.deepEqual(refs.slice().sort(), ids.slice().sort(), "all three backtick-cited ids are recovered");
+  for (const r of refs) assert.ok(fs.existsSync(path.join(root, "tasks", `${r}.md`)), `${r} must resolve to a real task file`);
+});
+
+test("non-prereq backtick mentions are NOT refs — 同族于 / 参见 (AC3)", (t) => {
+  const root = makeWorkspace("prereq-negative");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-ac207-e2e-target-driver-driven-real-commit-task-done", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  assert.deepEqual(prosePrereqRefs("同族于 `gap-ac207-e2e-target-driver-driven-real-commit-task-done` 的缺陷形态。", path.join(root, "tasks")), [], "同族于 is not a prereq declaration");
+  assert.deepEqual(prosePrereqRefs("参见 `gap-ac207-e2e-target-driver-driven-real-commit-task-done` 的判据。", path.join(root, "tasks")), [], "参见 is not a prereq declaration");
+});
+
+test("sibling / heritage / example mentions inside a keyword paragraph are NOT prereq refs (precision)", (t) => {
+  const root = makeWorkspace("prereq-sibling");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-x", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-y", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-z", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  // Each paragraph carries a prereq keyword (so it passes the gate) but the refs are sibling/heritage
+  // mentions, not the object of the blocking — they must be dropped.
+  const body = [
+    "第四个阻塞仍未解除——同期另立两任务 `gap-x`（ready）与 `gap-y`（ready），均未 done。",
+    "第三个阻塞已解除——已另立 `gap-x` 续做剩余锚点。",
+    "此外 `gap-z` 亦已 done 并落 develop。",
+  ].join("\n\n");
+  assert.deepEqual(prosePrereqRefs(body, path.join(root, "tasks")), [], "sibling/heritage mentions are not prereq refs");
+  // The genuine blocking form IS still a ref: 阻塞 names the blocker directly.
+  const genuine = "第四阻塞 `gap-x` 仍未解除。";
+  assert.deepEqual(prosePrereqRefs(genuine, path.join(root, "tasks")), ["gap-x"], "阻塞 X is a prereq ref");
+});
+
+test("backtick-cited prose prereqs fully covered by depends_on ⇒ prosePrereqGap == [] (AC4)", (t) => {
+  const root = makeWorkspace("prereq-ac4");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-prereq-a", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-prereq-b", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-edged", {
+    status: "ready",
+    labels: ["gap"],
+    parent: null,
+    children: [],
+    body: [
+      "## Proposal",
+      "A proposal paragraph that is definitely more than forty non-whitespace chars in total length.",
+      "**Do not dispatch until**: `gap-prereq-a` and `gap-prereq-b` both land.",
+      "## Acceptance Criteria",
+      "- [ ] an AC item that is long enough",
+    ].join("\n"),
+  });
+  const file = path.join(root, "tasks", "gap-edged.md");
+  const raw = fs.readFileSync(file, "utf8").replace("parent: null", "depends_on:\n  - gap-prereq-a\n  - gap-prereq-b\nparent: null");
+  fs.writeFileSync(file, raw);
+  const fm = raw.match(/^---\n([\s\S]*?)\n---/)[1];
+  const bodyOnly = raw.slice(raw.indexOf("\n\n") + 2);
+  assert.deepEqual(prosePrereqGap(bodyOnly, fm, path.join(root, "tasks")), [], "edges cover the prose prereqs ⇒ no gap");
+});
+
 // ── AC46 — pool-layer static criteria into the todo→ready gate + ready↔todo revaluation executor ──
 // (tasks/gap-ac46-pool-criteria-in-gate-plus-revaluation-executor)
 //   AC1  compound / self-touch / deps / touches-resolve / artifacts gate the todo→ready promotion
@@ -3849,7 +3938,11 @@ test("AC5 production negative control: the promotion gate rejects compound/self-
   // can never gain a self-touch (direction records, not execution candidates); verify with
   // buildTargetedPromotion before swapping.
   const rejectIds = ["gap-quay-has-never-self-hosted-its-own-cold-start", "DIR-001"];
-  const admitIds = ["gap-spec11-stage2-retest-with-concurrency", "gap-slot-refill-clique-ignores-landed-touches", "gap-landing-target-branch-consistency-check"];
+  // gap-spec11 was previously an admit sample but the prose-prereq widen (this task) now sees its
+  // "试点 `gap-spec-11-…-pilot` 已 done … 它是停全局轮的唯一前置" paragraph as a prose prereq
+  // (pilot is a backtick-cited predecessor with no depends_on edge). Replaced with a genuinely-clean
+  // execution candidate (gap-ac120: eligible, prosePrereqGap=[], self-touch present, not compound).
+  const admitIds = ["gap-ac120-suite-bucket-attribution-mechanism", "gap-slot-refill-clique-ignores-landed-touches", "gap-landing-target-branch-consistency-check"];
   // Build allTasks from the REAL task files (REAL statuses — a dependency that is done stays done, so
   // the gate's deps check resolves; the negative-control SAMPLES are real, never fabricated).
   const allTasks = new Map();

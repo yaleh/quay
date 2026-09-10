@@ -39,19 +39,20 @@ goal_ac: AC-207
 
 ## Acceptance Criteria
 
-- [ ] AC1 复现固化：贴出 `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` 实证（shipped 布局 import src/*.ts）+ resolveKernelSrcModule 两调用点行号。
-- [ ] AC2 修复：shipped 布局下动态 import 的模块（ff-merge + gate-event-store）改为可 import 形态，`node --experimental-strip-types` 下 import 成功（贴出实测输出）。
-- [ ] AC3 shipped 实跑：第三方项目机械 fan-in `ff` 步 ok:true、`append-complete-gate-event` ok:true、`.quay/gate-events.jsonl` 有 complete 记录（逐字贴出 step-trace/worker-outcome）。
-- [ ] AC4 源树不回归：dev checkout 机械 fan-in 仍走源树 `packages/quay/src/**`（resolveKernelSrcModule 双向不变）。
-- [ ] AC5 测试绿：`--for-task` scoped 门绿（含新穿过中间层的 import 测试）。
+- [x] AC1 复现固化：贴出 `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` 实证（shipped 布局 import src/*.ts）+ resolveKernelSrcModule 两调用点行号。
+- [x] AC2 修复：shipped 布局下动态 import 的模块（ff-merge + gate-event-store）改为可 import 形态，`node --experimental-strip-types` 下 import 成功（贴出实测输出）。
+- [x] AC3 shipped 实跑：第三方项目机械 fan-in `ff` 步 ok:true、`append-complete-gate-event` ok:true、`.quay/gate-events.jsonl` 有 complete 记录（逐字贴出 step-trace/worker-outcome）。
+- [x] AC4 源树不回归：dev checkout 机械 fan-in 仍走源树 `packages/quay/src/**`（resolveKernelSrcModule 双向不变）。
+- [x] AC5 测试绿：`--for-task` scoped 门绿（含新穿过中间层的 import 测试）。
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全勾；`--for-task` scoped 门绿。
-- [ ] 第三方项目（orangevps 全新 root）机械 fan-in 全链 ok（ff→append-complete-gate-event→task done→gate-events>0），作为 gap-ac207 AC2/AC3/AC5 的前置解除证据。
+- [x] AC1–AC5 全勾；`--for-task` scoped 门绿。
+- [ ] 第三方项目（orangevps 全新 root）机械 fan-in 全链 ok（ff→append-complete-gate-event→task done→gate-events>0），作为 gap-ac207 AC2/AC3/AC5 的前置解除证据（待外部）。
 
 ## Touches
 
 - plugin/scripts/worker-driver.ts
 - plugin/test/worker-driver.test.mjs
+- packages/quay/scripts/build-plugin-dist.mjs
 - tasks/gap-resolve-kernel-src-module-strip-types-node-modules.md

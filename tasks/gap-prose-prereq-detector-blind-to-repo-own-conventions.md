@@ -2,7 +2,7 @@
 id: gap-prose-prereq-detector-blind-to-repo-own-conventions
 title: prosePrereqGap 两层盲区：关键词表无「阻塞」⇒ 63/64 段落不进扫描；且只认 wikilink 而全仓 740:67
   用反引号——AC-207 十轮 5 层阻塞零命中
-status: ready
+status: done
 labels:
   - gap
   - defect
