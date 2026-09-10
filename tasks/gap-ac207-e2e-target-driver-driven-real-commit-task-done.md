@@ -18,6 +18,12 @@ extra:
     efa0bd33e 现 build 重装 orangevps /tmp/ac207-prefix + 两 driver
     重启解除（develop..main = 0）。人 2026-09-10 授权 retreat 回 ready 续验 AC2/AC3/AC5。
 goal_ac: AC-207
+depends_on:
+  - gap-driver-resource-gate-path-anchored-at-root-third-party
+  - gap-shipped-profiles-missing-worker-roles
+  - gap-promotion-driver-ready-pool-check-path-third-party
+  - gap-doc-branch-hardcoded-author-breaks-third-party-develop-sync
+  - gap-fanin-gate-event-store-path-shipped-unsafe
 ---
 ## Proposal
 
