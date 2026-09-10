@@ -2,7 +2,7 @@
 id: gap-activation-gates-bypassed-on-reopen-path-non-draft-to-active
 title: 三道激活闸只认 draft→active，重开路径（achieved→active / needs-human→active，实测占激活总数
   19%）全部绕过——含 --force 留痕分支，故重开时的 --force 是静默越权
-status: done
+status: ready
 labels:
   - gap
   - defect
