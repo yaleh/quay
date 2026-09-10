@@ -44,3 +44,4 @@ AC1–AC3 全绿；`scripts/test.sh` 全量绿。orangevps 第三方项目重装
 
 - `plugin/scripts/worker-driver.ts`
 - `plugin/test/worker-driver.test.mjs`
+- `tasks/gap-fanin-gate-event-store-path-shipped-unsafe.md`
