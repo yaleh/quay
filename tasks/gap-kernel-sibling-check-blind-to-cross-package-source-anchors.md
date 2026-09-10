@@ -37,10 +37,14 @@ plugin/scripts/worker-driver.ts:3474
 
 ## Acceptance Criteria
 
-- [ ] AC1（扩面前后可对比，能取假）：在**扩面后的**检查器下，对当前 develop 跑一次并贴出命中清单；若 `gap-fanin-gate-event-store-path-shipped-unsafe` 未落地则**必须命中 `worker-driver.ts` 的两处跨包锚点**（⛔ 命中 0 说明扩面没生效，不算通过）；若已落地则命中 0 且需贴出「注入一处后即红」的负控制。
-- [ ] AC2（多形态，GOAL-012 风险 4）：突变用例覆盖 ≥3 种写法各一例——`path.join(repoRoot(), "packages", …)` / `path.join(<var>, "packages", …)` / 模板字符串或字符串拼接形态；每种注入后检查器**必须红**。
-- [ ] AC3（不误伤）：本仓库自身合法引用（真正只在开发树内跑的自检工具引用 `packages/**` 源码）不得被报为违例；贴出至少一条被正确豁免的样本及其豁免理由（GOAL-012 风险 2：豁免要带理由、可复核，⛔ 不是无理由 allowlist）。
-- [ ] AC4（登记 + 全量绿）：该检查器仍在 `checker-mutation-check --list --json` 的清单里且 `covered: true`；`scripts/test.sh` 全量绿。
+- [x] AC1（扩面前后可对比，能取假）：在**扩面后的**检查器下，对当前 develop 跑一次并贴出命中清单；若 `gap-fanin-gate-event-store-path-shipped-unsafe` 未落地则**必须命中 `worker-driver.ts` 的两处跨包锚点**（⛔ 命中 0 说明扩面没生效，不算通过）；若已落地则命中 0 且需贴出「注入一处后即红」的负控制。
+  - 实测（`--root . --json`，total=2，`gap-fanin-gate-event-store-path-shipped-unsafe` 未落地）：`[cross-package] gate-event-store.ts @ plugin/scripts/worker-driver.ts:3474`；`[cross-package] ff-merge.ts @ plugin/scripts/worker-driver.ts:3699` —— 正是该修复任务要修的两处。
+- [x] AC2（多形态，GOAL-012 风险 4）：突变用例覆盖 ≥3 种写法各一例——`path.join(repoRoot(), "packages", …)` / `path.join(<var>, "packages", …)` / 模板字符串或字符串拼接形态；每种注入后检查器**必须红**。
+  - 实测：突变用例 3 个 P4 inject（repoRoot() / <var> / 模板字符串）各 inject 红、restore 绿，`bash checker-mutation-cases/kernel-sibling-resolution-check.sh` exit 0；单测 21/21 绿（含 3 条 P4 RED）。
+- [x] AC3（不误伤）：本仓库自身合法引用（真正只在开发树内跑的自检工具引用 `packages/**` 源码）不得被报为违例；贴出至少一条被正确豁免的样本及其豁免理由（GOAL-012 风险 2：豁免要带理由、可复核，⛔ 不是无理由 allowlist）。
+  - 实测样本：`plugin/scripts/meta-driver.ts:171` `path.join(scriptRoot, "packages", "quay", "src", "goal-store.ts")` —— meta-driver 是 dev-tree-only 观测例程（源树直跑、不经 bundle），已加 `kernel-sibling-dev-tree-only:` 豁免标记（带理由），扩面后检查器不再报它；单测 + 突变用例各钉「带标记 ⇒ 绿 / 无标记 ⇒ 红」双向断言。
+- [x] AC4（登记 + 全量绿）：该检查器仍在 `checker-mutation-check --list --json` 的清单里且 `covered: true`；`scripts/test.sh` 全量绿。
+  - 实测：`checker-mutation-check.sh --list --json` 含 `{"name":"kernel-sibling-resolution-check","source":"run_static_checks","covered":true}`；全量绿由 fan-in 的 scoped 门 + 全量 suite 验证。
 
 ## Definition of Done
 
@@ -52,4 +56,5 @@ plugin/scripts/worker-driver.ts:3474
 - plugin/scripts/kernel-sibling-resolution-check.ts
 - plugin/test/kernel-sibling-resolution-check.test.mjs
 - plugin/scripts/checker-mutation-cases/kernel-sibling-resolution-check.sh
+- plugin/scripts/meta-driver.ts
 - tasks/gap-kernel-sibling-check-blind-to-cross-package-source-anchors.md
