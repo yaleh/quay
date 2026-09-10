@@ -746,6 +746,46 @@ test("AC4 (P6) — 激活不可评估 criterion 的 AC 被拒（stderr 含 not-e
   assert.equal(JSON.parse(n(["get", "AC-021"]).stdout).status, "active");
 });
 
+// ── gap-activation-gates-bypassed-on-reopen-path-non-draft-to-active：重开路径（非 draft→active）
+// 也必须过三道激活闸。改动前 `activating` 只认 draft→active ⇒ achieved/needs-human → active 一道闸都
+// 不触发（实测占激活总数 ~19%）。这里逐条在【真实 CLI】上跑（⛔ 非纯 import 单测）。
+
+test("AC1 (P6 reopen) — achieved→active 触发可评估性闸：不可评估拒且不写状态；可跑（含 exit≠0）放行", () => {
+  const root = tmpDir("cli-ac1-reopen");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  const n = (cmd) => runCli([...cmd, "--root", root]);
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  // 方向①放行：一条已 achieved、判据 exit≠0（`false`）的 AC——确定性判决 ⇒ 可评估 ⇒ 重开放行。
+  n(["write", "AC-001", "--title", "a", "--status", "achieved", "--goal", "GOAL-001", "--criterion", "false", "--origin", "o", "--expect", EXPECT]);
+  const ok = n(["write", "AC-001", "--status", "active"]);
+  assert.equal(ok.status, 0, "achieved→active with a runnable (exit≠0) criterion must pass:\n" + ok.stdout + ok.stderr);
+  assert.equal(JSON.parse(n(["get", "AC-001"]).stdout).status, "active");
+  // 方向②拒绝（空 criterion）：遗留 achieved 记录无 criterion 字段 ⇒ 重开被拒且状态不写（仍 achieved）。
+  fs.writeFileSync(path.join(root, "goals", "AC-003-legacy.md"),
+    "---\nid: AC-003\ntitle: no-criterion\nstatus: achieved\nkind: criterion\ngoal: GOAL-001\norigin: o\n---\n## Rationale\nlegacy\n", "utf8");
+  const bad = n(["write", "AC-003", "--status", "active"]);
+  assert.notEqual(bad.status, 0, "achieved→active with an empty criterion must fail:\n" + bad.stdout + bad.stderr);
+  assert.match(bad.stderr, /not-evaluated/);
+  assert.equal(JSON.parse(n(["get", "AC-003"]).stdout).status, "achieved", "⛔ 拒绝激活 ⇒ 状态不被写（仍 achieved）");
+});
+
+test("AC4 (P6 create) — create-as-active 不过闸（无 'criterion ran' 痕迹、不写 fidelity）", () => {
+  const root = tmpDir("cli-ac4-create-active");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  const n = (cmd) => runCli([...cmd, "--root", root]);
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  // 新建即 active（prevStatus === undefined）⇒ 不过闸：闸的两种可见副作用（stderr 的 "criterion ran"
+  // 痕迹 + 记录里的 fidelity 字段）都不出现。改动前 `activating` 的 create-as-active 豁免被保留。
+  const create = n(["write", "AC-004", "--title", "c", "--status", "active", "--goal", "GOAL-001", "--criterion", "false", "--origin", "o", "--expect", EXPECT]);
+  assert.equal(create.status, 0, "create-as-active must succeed:\n" + create.stdout + create.stderr);
+  assert.ok(!/activated .*criterion ran/.test(create.stderr), "create-as-active 不过闸 ⇒ 无 'criterion ran' 痕迹:\n" + create.stderr);
+  const rec = JSON.parse(n(["get", "AC-004"]).stdout);
+  assert.equal(rec.status, "active");
+  assert.equal(rec.fidelity, undefined, "create-as-active 不过闸 ⇒ fidelity 不写（闸从未跑）");
+});
+
 test("AC5 (P3) — draft→active 写 activatedAt + statusLog；title-only 不追加 statusLog", () => {
   const s = createGoalStore(tmpDir("ac5-p3"));
   s.write("GOAL-001", { title: "p", status: "active", origin: "o", body: GOAL_BODY });

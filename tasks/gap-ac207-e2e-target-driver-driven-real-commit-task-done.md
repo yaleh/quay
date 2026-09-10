@@ -1,7 +1,7 @@
 ---
 id: gap-ac207-e2e-target-driver-driven-real-commit-task-done
 title: 端到端：目标项目自己的 *-drivers 驱动出真实开发提交且任务翻 done，落 ac=GOAL-009-AC-207 记录（AC-207）
-status: ready
+status: needs-human
 needs_human_cause: unclassified
 labels:
   - gap
@@ -11,12 +11,14 @@ parent: null
 children: []
 extra:
   schema: execution
-  needs_human_cause: （已解除 2026-09-10）缺陷 A（gate_events=0 / appendCompleteGateEvent
-    shipped-unsafe MODULE_NOT_FOUND）已由
-    gap-fanin-gate-event-store-path-shipped-unsafe done 落
-    develop（resolveKernelSrcModule 双布局解析）；缺陷 B（安装物陈旧 + 分支分叉）已由 develop tip
-    efa0bd33e 现 build 重装 orangevps /tmp/ac207-prefix + 两 driver
-    重启解除（develop..main = 0）。人 2026-09-10 授权 retreat 回 ready 续验 AC2/AC3/AC5。
+  needs_human_cause: 第 12 轮（2026-09-10 14:1xZ）新阻塞：e2e 机械 fan-in 的 ff 步因
+    ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING 失败——worker-driver.ts
+    resolveKernelSrcModule 把动态 import 的 ff-merge.ts/gate-event-store.ts 解析到
+    node_modules 下的 .ts（shipped 打平布局），Node ≥23.7
+    拒剥。位置判定：resolveKernelSrcModule(:3468) + 两调用点 :3716/:3491；orangevps Node
+    v25.2.0 复现 exit。已立新任务
+    gap-resolve-kernel-src-module-strip-types-node-modules（todo）。AC1/AC4 done
+    不变；AC2/AC3/AC5 仍阻塞，待该任务落 develop + 第三方重装后复跑 e2e。
 goal_ac: AC-207
 depends_on:
   - gap-driver-resource-gate-path-anchored-at-root-third-party

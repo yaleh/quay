@@ -52,10 +52,10 @@ mini-list 缺的正是这同一个惯用法的文字版。
       本体渲染逻辑未被替换，只是追加了一行）。
 
 ## Definition of Done
-- [ ] 代码改动落在 `packages/quay/src/serve-dashboard.ts` 的 `renderLiveCard` 内。
-- [ ] `packages/quay/test/gap-dashboard-livecard-minilist-overflow-indicator.test.mjs` 存在且按具体
+- [x] 代码改动落在 `packages/quay/src/serve-dashboard.ts` 的 `renderLiveCard` 内。
+- [x] `packages/quay/test/gap-dashboard-livecard-minilist-overflow-indicator.test.mjs` 存在且按具体
       数字断言，随 scoped gate 跑绿。
-- [ ] 生产 `/dashboard` 页面人工截图核实：在飞任务数 > 3 时循环脉搏卡文字列表底部出现「+N 更多 →」，
+- [ ] 生产 `/dashboard` 页面人工截图核实：在飞任务数 > 3 时循环脉搏卡文字列表底部出现「+N 更多 →」，（待外部）
       点击跳转 `/live` 且该页能看到被截断的那几条。
 
 ## Touches
