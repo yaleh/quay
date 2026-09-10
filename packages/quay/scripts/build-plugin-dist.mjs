@@ -258,13 +258,24 @@ export function deriveEntries(pluginRoot) {
  * in the bundle are esbuild's __esm/__commonJS lazy-init registry keys + source-boundary comments
  * (shared by 15 of ~76 bundles), NOT runtime dev-tree imports — a bare-Node run of the installed
  * bundle reaches the socket-write stage, never the `共享投递模块不可用` exit-4 path.
+ *
+ * gap-resolve-kernel-src-module-strip-types-node-modules: the filter is extended to SUBDIRECTORY
+ * Core-src modules (`gate/gate-event-store.ts`, `fan-in/ff-merge.ts` — worker-driver.ts's two dynamic
+ * imports). The old `[A-Za-z0-9_.-]+` char class excludes `/`, so a `packages/quay/src/fan-in/ff-merge.ts`
+ * specifier did NOT match and esbuild could not re-point/inline it — the shipped dist/worker-driver.js
+ * then carried a runtime `import()` of a `.ts` under node_modules, which Node ≥23.7 refuses
+ * (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING). Now `[A-Za-z0-9_./-]+` matches the subdir and the
+ * mapping re-points by FULL relative path (not basename), preserving the single-segment behavior
+ * (serve-send.ts / goal-store.ts / meta-store.ts map identically to before).
  */
 function coreSrcAliasPlugin() {
   return {
     name: "core-src-alias",
     setup(build) {
-      build.onResolve({ filter: /packages\/quay\/src\/[A-Za-z0-9_.-]+\.ts$/ }, (args) => {
-        return { path: path.join(pkgDir, "src", args.path.split("/").pop()) };
+      build.onResolve({ filter: /packages\/quay\/src\/[A-Za-z0-9_./-]+\.ts$/ }, (args) => {
+        const idx = args.path.indexOf("packages/quay/src/");
+        const rel = idx >= 0 ? args.path.slice(idx + "packages/quay/src/".length) : args.path.split("/").pop();
+        return { path: path.join(pkgDir, "src", rel) };
       });
     },
   };

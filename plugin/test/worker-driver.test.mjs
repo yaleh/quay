@@ -150,6 +150,7 @@ import { suiteLockBase, suiteLockSlotPaths } from "../scripts/suite-lock-slots.t
 // 两 driver 共用（⛔ 非平行副本）。AC3 用同一函数身份证 promotion 不回归。
 import { advanceRetryCap, markNeedsHuman, RETRY_CAP_DEFAULT, applyTaskFilters, makeFilterContext } from "../scripts/driver-filters.ts";
 import { advanceRetryCap as promoAdvanceRetryCap, markNeedsHuman as promoMarkNeedsHuman, MAX_FIX_RETRIES_DEFAULT } from "../scripts/promotion-driver.ts";
+import { bundleEntries } from "../../packages/quay/scripts/build-plugin-dist.mjs";
 
 import {
   DRIVER,
@@ -2501,4 +2502,84 @@ test("AC2 (shipped 负控制) — 包根打平布局（无 packages/quay/src）�
   assert.equal(events.length, 1);
   assert.equal(events[0].gate, "complete");
   assert.equal(events[0].verdict, "pass");
+});
+
+// ── gap-resolve-kernel-src-module-strip-types-node-modules ──────────────────────────────────────────
+// 上一条 AC2（59f42b79e）只把模块放到 <tmp>/…/src/（非 node_modules）再 import——没穿过「Node ≥23.7
+// 拒剥 node_modules 下 .ts」这层 ⇒ 真 shipped 布局的 ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING 漏网。
+// 本条用真 bundle（worker-driver.js）放到 node_modules 下真 import：ff-merge + gate-event-store 已被
+// coreSrcAliasPlugin 内联（自包含），import 成功且 appendCompleteGateEvent 真能写 complete GateEvent。
+test("shipped 自包含 — bundle worker-driver.js 放 node_modules 下真 import：ff-merge + gate-event-store 内联，appendCompleteGateEvent ok:true", async (t) => {
+  // 1. stage 真实 shipped 布局：plugin/scripts 整树拷到 <stage>/node_modules/quay/plugin/scripts（模块位于
+  //    node_modules 下），且 <stage>/node_modules/quay/ 无 packages/quay 平级 ⇒ dev-tree
+  //    ../../packages/quay/src 无法按文件系统解析 ⇒ 强制走 coreSrcAliasPlugin（证 filter 的子目录扩展）。
+  const stage = fs.mkdtempSync(path.join(os.tmpdir(), "wd-shipped-"));
+  t.after(() => fs.rmSync(stage, { recursive: true, force: true }));
+  const quayPkg = path.join(stage, "node_modules", "quay");
+  const pluginStage = path.join(quayPkg, "plugin");
+  const scriptsStage = path.join(pluginStage, "scripts");
+  fs.cpSync(SCRIPTS_DIR, scriptsStage, { recursive: true, filter: (src) => !/\/dist(\/|$)/.test(src) });
+  // 依赖解析：esbuild 从 entry 向上找 node_modules——给 <stage>/node_modules/quay/node_modules 建 symlink
+  // 到真 node_modules（driver-shared.ts 的 zod/@modelcontextprotocol、driver-config.ts 的 yaml 才能解析）。
+  fs.symlinkSync(path.join(REPO_ROOT, "node_modules"), path.join(quayPkg, "node_modules"), "dir");
+
+  // 2. bundle worker-driver.ts（同 package.sh 的 bundleEntries 路径，输出落在 scripts/dist/）。
+  const outfiles = await bundleEntries(pluginStage, ["scripts/worker-driver.ts"]);
+  assert.equal(outfiles.length, 1, "worker-driver.ts 必须成功 bundle");
+  const bundlePath = outfiles[0];
+  assert.ok(bundlePath.startsWith(scriptsStage), `bundle 应落在 node_modules 下（actual=${bundlePath}）`);
+  assert.ok(bundlePath.endsWith(".js"), "bundle 是 .js（node_modules 下 .js 才可 import）");
+
+  // 3. 真 import——这正是 59f42b79e 的 AC2 漏掉的动作：模块位于 node_modules 下，import 必须成功。
+  const mod = await import(pathToFileURL(bundlePath).href);
+  assert.equal(typeof mod.appendCompleteGateEvent, "function", "appendCompleteGateEvent 可导出");
+  assert.equal(typeof mod.runMechanicalFanIn, "function", "runMechanicalFanIn 可导出");
+
+  // 4. gate-event-store 内联后运行时可用：appendCompleteGateEvent 真写 complete GateEvent（非只判路径）。
+  //    隔离 cwd：OLD 实现靠 repoRoot()→git rev-parse 回退找源树，测试进程 cwd 是 quay 源树会让 OLD 也
+  //    「假通过」——chdir 到非 git scratch 目录 ⇒ OLD 的 repoRoot() 落到无 packages/quay/src 的 scratch
+  //    ⇒ 退 shipped <包根>/src（node_modules 下 .ts）⇒ import 必挂。NEW（内联）不依赖 cwd。
+  const consumer = path.join(stage, "consumer");
+  fs.mkdirSync(path.join(consumer, ".quay"), { recursive: true });
+  const prevCwd = process.cwd();
+  process.chdir(consumer);
+  try {
+    const r = await mod.appendCompleteGateEvent(consumer, "gap-x");
+    assert.equal(r.ok, true, `appendCompleteGateEvent ok:true（actual reason=${r.reason}）`);
+  } finally {
+    process.chdir(prevCwd);
+  }
+  const events = fs.readFileSync(path.join(consumer, ".quay", "gate-events.jsonl"), "utf8")
+    .trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].gate, "complete");
+  assert.equal(events[0].verdict, "pass");
+
+  // 5. 自包含判据（判别器）：OLD 实现的 runtime pathToFileURL(resolveKernelSrcModule(...)) 调用必须消失，
+  //    ff-merge 符号已内联，无 dev-tree 相对路径 import 残留。
+  const text = fs.readFileSync(bundlePath, "utf8");
+  assert.ok(text.includes("ffMerge"), "ff-merge 内联（ffMerge 符号在 bundle 中）");
+  assert.ok(!/pathToFileURL\(resolveKernelSrcModule\(/.test(text), "OLD 运行时 pathToFileURL(resolveKernelSrcModule(...)) 调用已消除");
+  assert.ok(!/import\([^)]*packages\/quay\/src/.test(text), "无 runtime dev-tree packages/quay/src 动态 import");
+  assert.ok(!text.includes('"../../packages/quay/src'), "无 dev-tree 相对路径 import 残留");
+
+  // 6. shipped 全链路（AC3）：第三方 hermetic 仓库上跑【bundled】runMechanicalFanIn，⛔ 不传 ffMergeModule
+  //    ⇒ ff 步走内联的 ff-merge、append-complete 走内联的 gate-event-store，与 shipped 布局同形（无任何
+  //    runtime node_modules 下 .ts import）。ff 步 ok:true + flip done + gate-events 有 complete。
+  const { base, repo, worktree } = makeThirdPartyRepo();
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const r = await mod.runMechanicalFanIn({
+    task: SCG_TASK, worktree, root: repo, runId: "shipped-fanin-1", mergeTarget: "develop", forceSuite: true,
+    scriptsDir: SCRIPTS_DIR, // gate 编排脚本用源树（非本缺陷范围）；ff-merge + gate-event-store 走内联
+    slotBase: path.join(base, "full-suite.lock"), slotLib: SLOT_LIB,
+    silenceMs: 5000, suiteCapture: path.join(base, "suite.env"),
+    suiteLogFile: path.join(base, "suite.log"),
+  });
+  assert.equal(r.outcome, "landed", `shipped bundle fan-in must land, got ${r.outcome} step=${r.step} reason=${r.reason}`);
+  const ffLine = readFanInTraceLine(repo, "shipped-fanin-1", "ff");
+  assert.ok(ffLine, "ff trace line present");
+  assert.equal(ffLine.ok, true, "ff 步 ok:true（shipped 内联 ff-merge 执行成功）");
+  const gateEvents = fs.readFileSync(path.join(repo, ".quay", "gate-events.jsonl"), "utf8")
+    .trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.ok(gateEvents.some((e) => e.gate === "complete" && e.verdict === "pass"), "gate-events.jsonl 有 complete 记录");
 });
