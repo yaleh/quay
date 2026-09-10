@@ -3,7 +3,7 @@ id: gap-ac225-kernel-sibling-naive-anchor-migration-zero
 title: A域枚举归零：迁移 9 处 kernel sibling naive 锚点至
   resolveKernelSibling/resolveKernelPluginRoot，使 kernel-sibling-resolution-check
   exit 0（AC-225）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
