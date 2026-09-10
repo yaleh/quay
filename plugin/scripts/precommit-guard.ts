@@ -180,7 +180,7 @@ export function staticObjectPatterns(root: string): string[] {
   const sources: string[] = [];
   const testSh = path.join(root, "scripts", "test.sh");
   if (fs.existsSync(testSh)) sources.push(fs.readFileSync(testSh, "utf8"));
-  const staticGate = path.join(root, "plugin", "scripts", "runner-static-gate.ts");
+  const staticGate = path.join(root, "plugin", "scripts", "runner-static-gate.ts");  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   if (fs.existsSync(staticGate)) sources.push(fs.readFileSync(staticGate, "utf8"));
   const patterns = new Set<string>();
   for (const src of sources) {

@@ -77,6 +77,7 @@ import { fileURLToPath } from "node:url";
 
 import { matchGlob, parseTouches } from "./touches-orthogonality-check.ts";
 import { writeJsonAtomic } from "./write-json-atomic.ts";
+import { resolveKernelSibling, resolveKernelPluginRoot } from "./driver-runtime.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -1281,8 +1282,11 @@ export function spawnRetriggerRun(root: string, opts?: { verifyTarget?: string |
     }
     return;
   }
-  const runner = path.join(__dirname, "full-suite-runner.ts");
-  const args = ["--no-warnings", "--experimental-strip-types", runner, ...retriggerRunnerArgs(root, state)];
+  const runnerSibling = resolveKernelSibling("full-suite-runner.ts");
+  const runnerArgs = runnerSibling
+    ? (runnerSibling.stripTypes ? ["--experimental-strip-types", runnerSibling.path] : [runnerSibling.path])
+    : ["--experimental-strip-types", path.join(resolveKernelPluginRoot(), "scripts", "full-suite-runner.ts")];
+  const args = ["--no-warnings", ...runnerArgs, ...retriggerRunnerArgs(root, state)];
   const logPath = path.join(root, ".quay", "full-suite-retrigger.log");
   let fd: number | undefined;
   try {

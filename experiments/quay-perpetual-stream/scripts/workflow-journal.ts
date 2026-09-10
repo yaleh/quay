@@ -57,7 +57,7 @@ export function resolveMilestoneRoot(milestoneId: string, cwd: string): string {
   if (typeof milestoneId !== "string" || milestoneId.trim() === "") {
     throw new Error("milestone-id-invalid: milestoneId must be a non-empty string");
   }
-  const libPath = path.join(cwd, "plugin", "scripts", "gate-script-lib.sh");
+  const libPath = path.join(cwd, "plugin", "scripts", "gate-script-lib.sh");  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   if (!fs.existsSync(libPath)) {
     throw new Error(`milestone-root-unresolved: gate-script-lib.sh not found at ${libPath}`);
   }
@@ -490,8 +490,8 @@ export function selftest(): boolean {
     execSync("git commit -q -m fixture", { cwd: fixtureDir });
 
     // gate-script-lib.sh is needed for root resolution; copy the real one for the fixture
-    const realLib = path.join(savedCwd, "plugin", "scripts", "gate-script-lib.sh");
-    fs.copyFileSync(realLib, path.join(fixtureDir, "plugin", "scripts", "gate-script-lib.sh"));
+    const realLib = path.join(savedCwd, "plugin", "scripts", "gate-script-lib.sh");  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+    fs.copyFileSync(realLib, path.join(fixtureDir, "plugin", "scripts", "gate-script-lib.sh"));  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     process.chdir(fixtureDir);
 
     const store = new StageJournalStore({ milestoneId: "M254", cwd: fixtureDir });
