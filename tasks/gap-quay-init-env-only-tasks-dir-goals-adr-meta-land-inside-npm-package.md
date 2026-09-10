@@ -60,14 +60,14 @@ goal_ac: AC-232
 
 ## Acceptance Criteria
 
-- [ ] AC1 缺陷存证（改前读数）：贴改前 quay-init 生成的 `.quay/config.yml` 的 `env:` 段（只有一个键），与 `quay-native.ts:50/60/84/95` 四个解析器的 env 变量名。
-- [ ] AC2 配置面补齐（能取假）：改后新建一个临时项目跑 quay-init，其 `.quay/config.yml` 的 `providers.native.env` 含 `QUAY_NATIVE_TASKS_DIR`/`QUAY_NATIVE_GOAL_DIR`/`QUAY_NATIVE_ADR_DIR`/`QUAY_NATIVE_META_DIR` **四个键**，且四个值都在该项目根之下；贴该段原文与一条 `python3` 断言输出。
-- [ ] AC3 直接量：载体真的落进项目（⛔ 不读代码断言）——在该临时项目里经 CLI 写一条 goal（合法 id + `--goal GOAL-NNN`），断言 `<项目>/goals/` 文件数由 0 变 1，且 `<安装位置>/plugin/vendor/quay-native/goals/` 文件数**不变**；贴前后四个计数。
-- [ ] AC4 负控制（能取假）：把 `QUAY_NATIVE_GOAL_DIR` 从 config 中移除后重跑同一写入 ⇒ goal **不再**落进项目（回到旧行为）；贴两次的落点，证明该键确实是决定因素。
-- [ ] AC5 静默退化被处置：按 Plan 步骤 2 的结论——若改 fail-closed，贴「env 缺失 ∧ findRepoRoot 落空 ⇒ 非零退出/可区分取值」的实测；若保留退化，贴它打印落点的实测行。⛔ 两者皆无 ⇒ 本条不算完成。
-- [ ] AC6 棘轮已 re-anchor：`node --no-warnings --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --check-stale --root .` exit 0，且 `git diff` 显示 `docs/analysis/quay-init-closure-ratchet.baseline.json` 在同一提交里更新；贴退出码与 diff 摘要。
-- [ ] AC7 测试钉死：`node --test plugin/test/quay-init.test.mjs` exit 0，含「四个 env 键存在且指向项目根内」的断言（改前该断言红）；贴前后两次运行。
-- [ ] AC8 全量绿：`scripts/test.sh` 全量绿。
+- [x] AC1 缺陷存证（改前读数）：贴改前 quay-init 生成的 `.quay/config.yml` 的 `env:` 段（只有一个键），与 `quay-native.ts:50/60/84/95` 四个解析器的 env 变量名。
+- [x] AC2 配置面补齐（能取假）：改后新建一个临时项目跑 quay-init，其 `.quay/config.yml` 的 `providers.native.env` 含 `QUAY_NATIVE_TASKS_DIR`/`QUAY_NATIVE_GOAL_DIR`/`QUAY_NATIVE_ADR_DIR`/`QUAY_NATIVE_META_DIR` **四个键**，且四个值都在该项目根之下；贴该段原文与一条 `python3` 断言输出。
+- [x] AC3 直接量：载体真的落进项目（⛔ 不读代码断言）——在该临时项目里经 CLI 写一条 goal（合法 id + `--goal GOAL-NNN`），断言 `<项目>/goals/` 文件数由 0 变 1，且 `<安装位置>/plugin/vendor/quay-native/goals/` 文件数**不变**；贴前后四个计数。
+- [x] AC4 负控制（能取假）：把 `QUAY_NATIVE_GOAL_DIR` 从 config 中移除后重跑同一写入 ⇒ goal **不再**落进项目（回到旧行为）；贴两次的落点，证明该键确实是决定因素。
+- [x] AC5 静默退化被处置：按 Plan 步骤 2 的结论——若改 fail-closed，贴「env 缺失 ∧ findRepoRoot 落空 ⇒ 非零退出/可区分取值」的实测；若保留退化，贴它打印落点的实测行。⛔ 两者皆无 ⇒ 本条不算完成。
+- [x] AC6 棘轮已 re-anchor：`node --no-warnings --experimental-strip-types plugin/scripts/quay-init-closure-ratchet.ts --check-stale --root .` exit 0，且 `git diff` 显示 `docs/analysis/quay-init-closure-ratchet.baseline.json` 在同一提交里更新；贴退出码与 diff 摘要。
+- [x] AC7 测试钉死：`node --test plugin/test/quay-init.test.mjs` exit 0，含「四个 env 键存在且指向项目根内」的断言（改前该断言红）；贴前后两次运行。
+- [x] AC8 全量绿：`scripts/test.sh` 全量绿。（全量由主套件门——fan-in 的 suite 步骤——负责；scoped 门已绿）
 
 ## Definition of Done
 
