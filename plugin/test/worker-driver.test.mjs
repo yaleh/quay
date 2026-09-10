@@ -841,39 +841,47 @@ test("AC2 (能取假，负控制) — prompt no longer leaves bootstrap to agent
   assert.doesNotMatch(cont, /cp config\.yml/, "AC2: continue prompt must not instruct a hand-rolled config.yml copy");
 });
 
-// gap-promotion-driver-ready-pool-check-path-third-party AC2 负控制：第三方项目（quay-init 布下的面）
-// 无 plugin/scripts/*.ts，只有 shipped dist/*.js + loose scripts/*.sh。worker prompt 的
+// gap-promotion-driver-ready-pool-check-path-third-party AC2 负控制：kernel dist 布局（无
+// plugin/scripts/*.ts，只有 shipped dist/*.js + loose scripts/*.sh）时，worker prompt 的
 // scoped-gate-cache 写入入口须解析到 shipped dist/worker-driver.js（stripTypes=false，⛔ 不带
 // --experimental-strip-types），dispatch-worktree-setup.sh 须解析到 kernel scripts/（⛔ 非 task root）。
-test("gap-promotion-driver-ready-pool-check-path-third-party — 无 plugin/ 的第三方项目：buildWorkerPrompt 解析到 shipped dist/worker-driver.js 与 kernel scripts/*.sh（⛔ 非 root/plugin/scripts）", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "worker-third-party-"));
+// gap-driver-fanin-hardcoded-test-sh-third-party：preMergeNote 的 scoped-gate 分支现在按 worktree 是否
+// 有 scripts/test.sh 分叉——本负控制给 root 铺 scripts/test.sh（本仓库形态），使 cache-write 指令仍在
+// 「跑 scoped 门」分支内，仅验证 kernel 解析面（dist 布局）而非第三方退化面。
+test("gap-promotion-driver-ready-pool-check-path-third-party — kernel dist 布局 + worktree 有 scripts/test.sh：buildWorkerPrompt 解析到 shipped dist/worker-driver.js 与 kernel scripts/*.sh", () => {
+  const shipped = fs.mkdtempSync(path.join(os.tmpdir(), "worker-shipped-"));
+  const quayRoot = fs.mkdtempSync(path.join(os.tmpdir(), "worker-quay-root-"));
   try {
-    // 仿 shipped 布局：scripts/dist/worker-driver.js（bundled，无 raw .ts）+ scripts/*.sh（loose）。
-    const dist = path.join(root, "scripts", "dist");
+    // 仿 shipped kernel 布局：scripts/dist/worker-driver.js（bundled，无 raw .ts）+ scripts/*.sh（loose）。
+    const dist = path.join(shipped, "scripts", "dist");
     fs.mkdirSync(dist, { recursive: true });
     fs.writeFileSync(path.join(dist, "worker-driver.js"), "// bundled\n", "utf8");
-    fs.writeFileSync(path.join(root, "scripts", "dispatch-worktree-setup.sh"), "#!/usr/bin/env bash\n", "utf8");
-    fs.writeFileSync(path.join(root, "scripts", "suite-slot-lib.sh"), "#!/usr/bin/env bash\n", "utf8");
+    fs.writeFileSync(path.join(shipped, "scripts", "dispatch-worktree-setup.sh"), "#!/usr/bin/env bash\n", "utf8");
+    fs.writeFileSync(path.join(shipped, "scripts", "suite-slot-lib.sh"), "#!/usr/bin/env bash\n", "utf8");
+    // 本仓库形态 worktree root（有 scripts/test.sh ⇒ preMergeNote 走「跑 scoped 门」分支，含 cache-write 指令）。
+    fs.mkdirSync(path.join(quayRoot, "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(quayRoot, "scripts", "test.sh"), "#!/usr/bin/env bash\nexit 0\n", "utf8");
     const saved = process.env.QUAY_PLUGIN_ROOT;
-    process.env.QUAY_PLUGIN_ROOT = root; // resolveKernelScriptsDir() = <root>/scripts，<root>/scripts/*.ts 不存在
+    process.env.QUAY_PLUGIN_ROOT = shipped; // resolveKernelScriptsDir() = <shipped>/scripts，<shipped>/scripts/*.ts 不存在
     try {
-      const prompt = buildWorkerPrompt("gap-x", "/r");
-      // scoped-gate-cache 写入入口：node <root>/scripts/dist/worker-driver.js（⛔ 无 --experimental-strip-types）。
-      assert.ok(prompt.includes(`node ${path.join(root, "scripts", "dist", "worker-driver.js")} --write-scoped-gate-cache`),
+      const prompt = buildWorkerPrompt("gap-x", quayRoot);
+      // scoped-gate-cache 写入入口：node <shipped>/scripts/dist/worker-driver.js（⛔ 无 --experimental-strip-types）。
+      assert.ok(prompt.includes(`node ${path.join(shipped, "scripts", "dist", "worker-driver.js")} --write-scoped-gate-cache`),
         "cache-write entry resolves to shipped dist/worker-driver.js");
       assert.ok(prompt.includes("--write-scoped-gate-cache"), "cache-write flag present");
       assert.doesNotMatch(prompt, /--experimental-strip-types[^\n]*worker-driver\.ts/, "⛔ no strip-types + .ts form");
-      assert.doesNotMatch(prompt, /\/r\/plugin\/scripts\/worker-driver\.ts/, "⛔ not anchored at task root .ts");
-      // dispatch-worktree-setup.sh 锚在 kernel scripts/（⛔ 非 /r/plugin/scripts/）。
-      assert.ok(prompt.includes(`bash ${path.join(root, "scripts", "dispatch-worktree-setup.sh")}`),
+      assert.ok(!prompt.includes(`${quayRoot}/plugin/scripts/worker-driver.ts`), "⛔ not anchored at task root .ts");
+      // dispatch-worktree-setup.sh 锚在 kernel scripts/（⛔ 非 task root/plugin/scripts/）。
+      assert.ok(prompt.includes(`bash ${path.join(shipped, "scripts", "dispatch-worktree-setup.sh")}`),
         "dispatch setup resolves to kernel scripts/*.sh");
-      assert.doesNotMatch(prompt, /\/r\/plugin\/scripts\/dispatch-worktree-setup\.sh/, "⛔ not anchored at task root .sh");
+      assert.ok(!prompt.includes(`${quayRoot}/plugin/scripts/dispatch-worktree-setup.sh`), "⛔ not anchored at task root .sh");
     } finally {
       if (saved === undefined) delete process.env.QUAY_PLUGIN_ROOT;
       else process.env.QUAY_PLUGIN_ROOT = saved;
     }
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(shipped, { recursive: true, force: true });
+    fs.rmSync(quayRoot, { recursive: true, force: true });
   }
 });
 
