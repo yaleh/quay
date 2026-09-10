@@ -141,6 +141,7 @@ import {
   relatednessSignalsFor,
   formatRelatednessNote,
   reclaimSupersededWorktrees,
+  resolveKernelSrcModule,
 } from "../scripts/worker-driver.ts";
 import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
 import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
@@ -2449,4 +2450,55 @@ test("④ (记录缺失不越权) — orphanDispatchCandidates：无记录 ⇒ �
   assert.deepEqual(orphanDispatchCandidates({ "gap-x": rec }, []), [{ taskId: "gap-x", record: rec }]);
   // 有记录但在 running（本驱动自己的在飞 dispatch）⇒ 跳过（runOneWorker 管理，⛔ 不重复 adopt/finalize）。
   assert.deepEqual(orphanDispatchCandidates({ "gap-x": rec }, ["gap-x"]), []);
+});
+
+// ── gap-fanin-gate-event-store-path-shipped-unsafe ────────────────────────────────────────────────
+// appendCompleteGateEvent 与 ffMergeModule 的 packages/quay/src 布局锚点原为仓库布局硬编码，shipped
+// npm 包（把 packages/quay/ 打平到包根）下 MODULE_NOT_FOUND 被 best-effort catch 静默吞 ⇒
+// gate-events.jsonl 永不写。改为 resolveKernelSrcModule：源树上下文逐字不变，shipped 打平布局退 <包根>/src。
+test("AC1/AC3 (源树双向不变) — resolveKernelSrcModule 源树上下文返回 packages/quay/src 布局（两锚点逐字不变）", () => {
+  const gate = resolveKernelSrcModule(REPO_ROOT, "gate/gate-event-store.ts");
+  assert.equal(gate, path.join(REPO_ROOT, "packages", "quay", "src", "gate", "gate-event-store.ts"),
+    "源树：gate-event-store.ts 解析到 packages/quay/src（逐字不变）");
+  assert.ok(fs.existsSync(gate), "源树 gate-event-store.ts 存在");
+
+  const ff = resolveKernelSrcModule(REPO_ROOT, "fan-in/ff-merge.ts");
+  assert.equal(ff, path.join(REPO_ROOT, "packages", "quay", "src", "fan-in", "ff-merge.ts"),
+    "源树：ff-merge.ts 解析到 packages/quay/src（逐字不变）");
+  assert.ok(fs.existsSync(ff), "源树 ff-merge.ts 存在");
+});
+
+test("AC2 (shipped 负控制) — 包根打平布局（无 packages/quay/src）：resolveKernelSrcModule 退 <包根>/src，动态 import gate-event-store.ts 成功并可写 gate-events.jsonl", async (t) => {
+  const pkg = fs.mkdtempSync(path.join(os.tmpdir(), "shipped-src-"));
+  const consumer = path.join(pkg, "consumer-wt"); // 第三方项目 worktree：无 packages/quay/src
+  fs.mkdirSync(path.join(pkg, "src", "gate"), { recursive: true });
+  fs.mkdirSync(path.join(pkg, "plugin"), { recursive: true });
+  // 打平布局：包根 src/gate/gate-event-store.ts（⛔ 无 packages/quay/ 前缀）。
+  fs.copyFileSync(
+    path.join(REPO_ROOT, "packages", "quay", "src", "gate", "gate-event-store.ts"),
+    path.join(pkg, "src", "gate", "gate-event-store.ts"),
+  );
+  const prev = process.env.QUAY_PLUGIN_ROOT;
+  process.env.QUAY_PLUGIN_ROOT = path.join(pkg, "plugin"); // resolveKernelPluginRoot()=<pkg>/plugin ⇒ dirname=<pkg>
+  t.after(() => {
+    if (prev === undefined) delete process.env.QUAY_PLUGIN_ROOT; else process.env.QUAY_PLUGIN_ROOT = prev;
+    fs.rmSync(pkg, { recursive: true, force: true });
+  });
+
+  const resolved = resolveKernelSrcModule(consumer, "gate/gate-event-store.ts");
+  assert.equal(resolved, path.join(pkg, "src", "gate", "gate-event-store.ts"),
+    "打平布局：解析到 <包根>/src/gate/gate-event-store.ts（⛔ 无 packages/quay 前缀）");
+
+  const ff = resolveKernelSrcModule(consumer, "fan-in/ff-merge.ts");
+  assert.equal(ff, path.join(pkg, "src", "fan-in", "ff-merge.ts"),
+    "打平布局：ff-merge.ts 同样退 <包根>/src");
+
+  const { appendGateEvent } = await import(pathToFileURL(resolved).href);
+  const log = path.join(consumer, ".quay", "gate-events.jsonl");
+  appendGateEvent(log, { id: "e1", item_id: "gap-x", pipeline_id: "gap-x", gate: "complete", actor: "quay-driver", verdict: "pass", timestamp: new Date().toISOString(), payload: { from: "ready", to: "done" } });
+  assert.ok(fs.existsSync(log), "打平布局下 appendGateEvent 成功写 gate-events.jsonl");
+  const events = fs.readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].gate, "complete");
+  assert.equal(events[0].verdict, "pass");
 });

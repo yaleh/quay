@@ -2990,8 +2990,9 @@ export interface MechanicalFanInOptions {
   scopedGateCacheFile?: string;
   /** fan-in 编排脚本目录（测试缝）；缺省 = <worktree>/plugin/scripts（自举：本分支的编排脚本自验）。 */
   scriptsDir?: string;
-  /** ff-merge TS 模块路径（测试缝）；缺省 = <worktree>/packages/quay/src/fan-in/ff-merge.ts
-   *  （自举：本分支的 ff-merge 模块自验，P2 —— fan-in-ff-merge.sh 的 TS 化产物）。 */
+  /** ff-merge TS 模块路径（测试缝）；缺省 = resolveKernelSrcModule(<worktree>, "fan-in/ff-merge.ts")
+   *  （源树自举：本分支的 ff-merge 模块自验，P2 —— fan-in-ff-merge.sh 的 TS 化产物；shipped 打平布局
+   *  退 <包根>/src/fan-in/ff-merge.ts —— gap-fanin-gate-event-store-path-shipped-unsafe）。 */
   ffMergeModule?: string;
   /** 权威 suite 状态载体 full-suite-state.json 的路径（D7 测试缝）；缺省 = <root>/.quay/full-suite-state.json。 */
   suiteStateFile?: string;
@@ -3454,6 +3455,22 @@ async function flipTaskDone(
   return { ok: false, reason: `expected status 'ready' or 'done', got ${from === null ? "none" : JSON.stringify(from)}` };
 }
 
+/** 解析 `packages/quay/src/` 子树下一模块（shipped 感知，⛔ 硬编码 packages/quay/src 布局锚点）：
+ *  源树上下文（base 是 quay 源树，含 packages/quay/src/<rel>）⇒ base/packages/quay/src/<rel>；
+ *  shipped 上下文（npm 包把 packages/quay/ 打平到包根、base 无 packages/）⇒ <包根>/src/<rel>。
+ *  包根 = resolveKernelPluginRoot() 的父目录（源树 = <repo>/plugin 的父 <repo>；shipped = <pkg>/plugin
+ *  的父 <pkg>——实测 /tmp/ac207-prefix/lib/node_modules/quay/ 下 src/ 与 plugin/ 平级）。存在性判定
+ *  （fs.existsSync）先试源树形、再退 shipped 形；两形互斥（同一 base 不会同时命中两种布局）。两形皆无
+ *  时返回 shipped 形路径，import 的 MODULE_NOT_FOUND 由调用方 best-effort 捕获（与现状一致，不在此抛）。
+ *  gap-fanin-gate-event-store-path-shipped-unsafe：appendCompleteGateEvent 与 ffMergeModule 两处
+ *  packages/quay/src 锚点原为仓库布局硬编码，shipped npm 包（打平布局）下 MODULE_NOT_FOUND 被静默吞。
+ */
+export function resolveKernelSrcModule(base: string, rel: string): string {
+  const sourcePath = path.join(base, "packages", "quay", "src", rel);
+  if (fs.existsSync(sourcePath)) return sourcePath;
+  return path.join(path.dirname(resolveKernelPluginRoot()), "src", rel);
+}
+
 /** gap-mechanical-fan-in-writes-no-complete-gateevent — 机械 fan-in 翻 done 后经既有 gate-event-store
  *  写 `complete` pass GateEvent（恢复 gap-loop-completion-path-produces-zero-gateevents AC2 在新路径上
  *  成立；⛔ 不手搓 append）。事件写到 <root>/.quay/gate-events.jsonl——与 CLI/loop 同一载体，
@@ -3467,11 +3484,11 @@ export async function appendCompleteGateEvent(
   actor = "quay-driver",
 ): Promise<{ ok: boolean; reason: string | null }> {
   try {
-    // Module 经 repo-root.ts 单一真相源解析（⛔ 不用 root：测试里 root 是 scratch 空仓，无 packages/
-    // 树 ⇒ MODULE_NOT_FOUND；也⛔ 手搓 __dirname→../..——bundle 落 scripts/dist 时错一级）。repoRoot()
-    // 从本文件所在目录向上找 bundle/consumer/git 根，源运行（strip-types）与 bundle 运行都正确。
+    // Module 经 resolveKernelSrcModule 单一真相源解析（shipped 感知，⛔ 硬编码 packages/quay/src）：
+    // 源树 base=repoRoot() 含 packages/quay/src 命中；shipped 打平布局退 <包根>/src。⛔ 不用 root
+    // （测试里 root 是 scratch 空仓）——resolveKernelSrcModule 的 base 只判源树形、不写目标载体。
     const { appendGateEvent } = await import(
-      /* @vite-ignore */ pathToFileURL(path.join(repoRoot(), "packages", "quay", "src", "gate", "gate-event-store.ts")).href
+      /* @vite-ignore */ pathToFileURL(resolveKernelSrcModule(repoRoot(), "gate/gate-event-store.ts")).href
     ) as { appendGateEvent: (logPath: string, event: unknown) => void };
     appendGateEvent(path.join(root, ".quay", "gate-events.jsonl"), {
       id: randomUUID(),
@@ -3696,7 +3713,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   // P2 (gap-execution-loop-productization-p2-p4): the ff 持锁段 is now a TS module (packages/quay/
   // fan-in/ff-merge.ts), IMPORTED — ⛔ no shell-out to the retired bash fan-in-ff-merge.sh.
   const ffMergeModule =
-    opts.ffMergeModule ?? path.join(worktree, "packages", "quay", "src", "fan-in", "ff-merge.ts");
+    opts.ffMergeModule ?? resolveKernelSrcModule(worktree, "fan-in/ff-merge.ts");
   // 编排脚本（anti-drift/classify/typecheck/ac-gate）：opts.scriptsDir 覆盖（hermetic 测试缝，⛔ 生产不用）
   // ⇒ <scriptsDir>/<name>.ts 直拼（带 --experimental-strip-types）；缺省 ⇒ kernelSiblingArgv（第三方项目无
   // plugin/scripts/，.ts 已 bundle 成 dist/*.js，resolveKernelSibling 回退到 .js 且不带 flag——
