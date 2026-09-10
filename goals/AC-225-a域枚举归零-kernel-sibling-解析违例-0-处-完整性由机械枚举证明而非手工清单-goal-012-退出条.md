@@ -1,7 +1,7 @@
 ---
 id: AC-225
 title: A域枚举归零——kernel sibling 解析违例 0 处，完整性由机械枚举证明而非手工清单（GOAL-012 退出条件①）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-012
 criterion: test -f plugin/scripts/kernel-sibling-resolution-check.ts && node
@@ -27,4 +27,9 @@ statusLog:
     to: active
     actor: cli:human-ruling-2026-09-10
     reason: 人授权激活（单次授权）
+  - at: 2026-09-10T07:00:55.022Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
