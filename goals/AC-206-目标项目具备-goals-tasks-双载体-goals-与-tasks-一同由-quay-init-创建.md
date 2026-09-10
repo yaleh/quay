@@ -1,7 +1,7 @@
 ---
 id: AC-206
 title: 目标项目具备 goals+tasks 双载体——goals/ 与 tasks/ 一同由 quay-init 创建
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-009
 criterion: |-
@@ -46,5 +46,10 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-09-10T22:49:16.953Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
 **判据（能取假）**：2026-09-09 干跑 exit 1，报 SPEC closed set lacks goals/。**六处同步改动（硬规则 5b：修好一个 ≠ 只在一处）**：① SPEC-plugin-lifecycle-single-bundle-2026-09-02.md:163-170 的 QUAY-INIT-CLOSED-SET 机器可读块（verify-deliver-coldstart.sh:568 解析它，是闭集的唯一正本）；② quay-init.sh:2220/2232/2233 的 dry-run 文案 + mkdir + created 文案；③ quay-init-closure-assertion.ts:36 的 CLOSED_SET_DIRS；④ docs/analysis/quay-init-closure-ratchet.baseline.json 重锚（⛔ 机械 --reanchor，非手工并 JSON）；⑤ plugin/scripts/laydown-set-check.sh；⑥ plugin/test/quay-init*.test.mjs 五个测试。判据同时读①②③，任一漏改即红。

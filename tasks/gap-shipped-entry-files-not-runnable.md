@@ -2,6 +2,7 @@
 id: gap-shipped-entry-files-not-runnable
 title: AC-233 交付包 files 装入 bin/quay.js+bin/quay.ts——形如入口却在安装位置不可运行：加枚举测试并排除
 status: ready
+needs_human_cause: human-adjudication
 labels:
   - gap
 parent: "null"
@@ -9,6 +10,8 @@ children: []
 extra:
   schema: execution
 goal_ac: AC-233
+depends_on:
+  - gap-git-graph-lane-colour-assertion-assumes-contiguous-columns
 ---
 ## Proposal
 
@@ -34,3 +37,14 @@ goal_ac: AC-233
 - plugin/test/shipped-entry-runnable.test.mjs
 - packages/quay/package.json
 - tasks/gap-shipped-entry-files-not-runnable.md
+## Needs-Human
+
+**执行 2026-09-10T16:55:27.776Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: distinct column colours = min(8, 8) (got 5)
+- run_id：wk-prod-1788972473
+- session_id：7e1e51e6-f56e-4503-8cb9-5102482bd71e
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-shipped-entry-files-not-runnable~wk-prod-1788972473~1789058133821-b831ed.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-shipped-entry-files-not-runnable-wk-prod-1788972473.log
