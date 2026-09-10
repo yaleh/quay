@@ -197,6 +197,9 @@ import {
   parseSelectorOutput,
   runSelectorWorker,
   makeStopCondition,
+  resolveKernelSibling,
+  resolveKernelScriptsDir,
+  resolveKernelPluginRoot,
   type LivenessResult,
 } from "./driver-runtime.ts";
 // 机械 fan-in（gap-fan-in-driver-mechanical-orchestration / SPEC-fan-in-driver-mechanical-
@@ -1168,12 +1171,33 @@ export function scopedGateCommandFor(task: string, worktree: string): string[] {
   return ["bash", path.join(worktree, "scripts", "test.sh"), "--for-task", task, "--allow-thin"];
 }
 
+/** 解析本 kernel 的一个 shell sibling（.sh）到 kernel plugin root 的 scripts/<name>（⛔ 非 root ——
+ *  gap-promotion-driver-ready-pool-check-path-third-party：第三方项目无 plugin/scripts/，.sh 以 loose
+ *  形态随包住在 scripts/ 而非 dist/）。缺 ⇒ null（调用方 fail-closed）。与 driver-shared.ts
+ *  resolveResourceGateScript 同法，但经 resolveKernelPluginRoot 单一真相源（⛔ 不各写一份
+ *  basename==="dist" 上跳逻辑）。 */
+function resolveKernelShellSibling(name: string): string | null {
+  const script = path.join(resolveKernelPluginRoot(), "scripts", name);
+  return fs.existsSync(script) ? script : null;
+}
+
+/** worker-driver 自入口的 spawn 前缀（"node" + 可选 --experimental-strip-types + 路径）。锚在本 kernel
+ *  安装位置（resolveKernelSibling("worker-driver.ts")，⛔ 非 root）：原始 .ts（dev tree，带 flag）或
+ *  bundled dist/worker-driver.js（installed，不带 flag）。两者都不在 ⇒ 回退 kernelScriptsDir 下的 .ts
+ *  （运行期 fail-closed）。 */
+function workerDriverSelfArgv(): string[] {
+  const sibling = resolveKernelSibling("worker-driver.ts");
+  return ["node", ...(sibling
+    ? (sibling.stripTypes ? ["--experimental-strip-types", sibling.path] : [sibling.path])
+    : ["--experimental-strip-types", path.join(resolveKernelScriptsDir(), "worker-driver.ts")])];
+}
+
 /** worker 侧 scoped-gate 缓存写入 CLI 签名（gap-worker-premerge-scoped-gate-cache 阶段 a）：worker 在
  *  退出前跑绿 scoped 门后，用这条命令机械写入 (task, developSha, pass) 缓存（⛔ 不靠 agent 手写 JSON）。
- *  developSha 用 `git -C <worktree> rev-parse develop`（worker 已 merge develop ⇒ develop 即其验证过的 tip）。 */
+ *  developSha 用 `git -C <worktree> rev-parse develop`（worker 已 merge develop ⇒ develop 即其验证过的 tip）。
+ *  入口经 workerDriverSelfArgv 锚在本 kernel 安装位置（⛔ 非 root/plugin/scripts/worker-driver.ts）。 */
 function scopedGateCacheWriteSignature(task: string, root: string, worktree: string): string {
-  const entry = path.join(root, "plugin", "scripts", "worker-driver.ts");
-  return `node --experimental-strip-types ${entry} --write-scoped-gate-cache --task ${task} --develop-sha "$(git -C ${worktree} rev-parse develop)" --root ${root}`;
+  return `${workerDriverSelfArgv().join(" ")} --write-scoped-gate-cache --task ${task} --develop-sha "$(git -C ${worktree} rev-parse develop)" --root ${root}`;
 }
 
 /** worker 退出前 pre-merge + scoped test 步骤（gap-worker-premerge-scoped-gate-cache 阶段 a）：worker
@@ -1198,7 +1222,10 @@ function preMergeNote(task: string, root: string, worktree: string): string {
  *  worktree-include.sh），机制接管 bootstrap——worker 不再手工 `ln -s`/`cp config.yml`（正是该脚本被
  *  写出来要消灭的 AGENT-REMEMBERING 失败模式）。脚本幂等：已 provision 的 worktree 重跑是 no-op。 */
 function dispatchSetupSignature(root: string, worktree: string): string {
-  const setupScript = path.join(root, "plugin", "scripts", "dispatch-worktree-setup.sh");
+  // ⛔ 非 root/plugin/scripts/（第三方项目无 plugin/）——resolveKernelShellSibling 锚在本 kernel 安装
+  // 位置；缺 ⇒ 回退 kernel plugin root 下的同路径（运行期 `bash <缺失路径>` 报错 ⇒ fail-closed）。
+  const setupScript = resolveKernelShellSibling("dispatch-worktree-setup.sh")
+    ?? path.join(resolveKernelPluginRoot(), "scripts", "dispatch-worktree-setup.sh");
   return `bash ${setupScript} ${worktree}`;
 }
 
@@ -3528,7 +3555,10 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   const perSuiteRunId = opts.perSuiteRunId ?? newMechanicalSuiteRunId(task);
   const mergeTarget = opts.mergeTarget ?? "develop";
   const slotBase = opts.slotBase ?? suiteLockBase(root);
-  const slotLib = opts.slotLib ?? path.join(root, "plugin", "scripts", "suite-slot-lib.sh");
+  // ⛔ 非 root/plugin/scripts/（第三方项目无 plugin/）——resolveKernelShellSibling 锚在本 kernel 安装
+  // 位置；缺 ⇒ 回退 kernel plugin root 下的同路径（suite 取槽时 `source <缺失路径>` 报错 ⇒ fail-closed）。
+  const slotLib = opts.slotLib ?? (resolveKernelShellSibling("suite-slot-lib.sh")
+    ?? path.join(resolveKernelPluginRoot(), "scripts", "suite-slot-lib.sh"));
   const suiteCapture = opts.suiteCapture ?? `/tmp/fan-in-suite-${task}.env`;
   const runIdSafe = runId.replace(/[^A-Za-z0-9_.-]/g, "_");
   // 过程日志（A1，gitignored 运行时日志）：.quay/fan-in-<task>-<runId>.log，逐步骤 trace。

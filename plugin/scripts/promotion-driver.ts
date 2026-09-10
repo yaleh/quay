@@ -63,7 +63,7 @@ import { spawnSync } from "node:child_process";
 import { isDirectEntry } from "./gate-script-base.ts";
 // AC151：promotion 继承 Layer 0（driver-runtime：profile/liveness）。splitArgs/launchArgv/runLivenessCheck/
 // LivenessResult 直接从 Layer 0 import（⛔ 不再经 worker-driver 中转——两 driver 平级继承同一层）。
-import { splitArgs, launchArgv, runLivenessCheck, type LivenessResult } from "./driver-runtime.ts";
+import { splitArgs, launchArgv, runLivenessCheck, resolveKernelSibling, resolveKernelScriptsDir, type LivenessResult } from "./driver-runtime.ts";
 // AC151：re-export 保持旧 import 面（promotion-driver.test.mjs 等）——两 driver 经同一函数身份
 // 证「继承 Layer 0 的 profile/liveness 单一实现」。
 export { splitArgs, launchArgv, runLivenessCheck, type LivenessResult } from "./driver-runtime.ts";
@@ -116,11 +116,20 @@ export const LLM_COMMAND_SET_DEFAULT: readonly string[] = ["claude"];
 
 // ── 纯函数（可单测） ───────────────────────────────────────────────────────────────────────────────
 
-/** 缺省 ready-pool-check 命令（全池 + --apply 落地晋升）。输出须为 analyzeTasks JSON。 */
+/** 缺省 ready-pool-check 命令（全池 + --apply 落地晋升）。输出须为 analyzeTasks JSON。
+ *  脚本路径锚在本 kernel 自身安装位置（resolveKernelSibling，⛔ 非 root —— gap-promotion-driver-
+ *  ready-pool-check-path-third-party：quay-init 后的第三方项目没有 plugin/scripts/，锚在 root 会
+ *  `Cannot find module` exit 1 ⇒ 永不晋升）。与 Layer 0 defaultReadyPoolArgv 同一解析器：原始 .ts
+ *  （dev tree，带 --experimental-strip-types）或 bundled dist/ready-pool-check.js（installed，不带
+ *  flag）。两者都不在 ⇒ 回退 kernelScriptsDir/ready-pool-check.ts（spawn 时 fail-closed，⛔ 不伪装
+ *  成「无候选」）。 */
 export function defaultPromotionCheckArgv(root: string, cap: number): string[] {
+  const sibling = resolveKernelSibling("ready-pool-check.ts");
+  const scriptArgs = sibling
+    ? (sibling.stripTypes ? ["--experimental-strip-types", sibling.path] : [sibling.path])
+    : ["--experimental-strip-types", path.join(resolveKernelScriptsDir(), "ready-pool-check.ts")];
   return [
-    "node", "--experimental-strip-types",
-    path.join(root, "plugin", "scripts", "ready-pool-check.ts"),
+    "node", ...scriptArgs,
     "--root", root, "--cap", String(cap), "--apply", "--json",
   ];
 }

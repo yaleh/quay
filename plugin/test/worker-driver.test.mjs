@@ -776,7 +776,10 @@ test("AC1 (能取假) — buildWorkerPrompt wires dispatch-worktree-setup.sh aft
   const prompt = buildWorkerPrompt("gap-x", "/r");
   // 结构针：grep 到调用 + 位置在 worktree 创建之后。
   assert.match(prompt, /dispatch-worktree-setup\.sh/, "AC1: create prompt names the setup script");
-  assert.match(prompt, /\/r\/plugin\/scripts\/dispatch-worktree-setup\.sh/, "AC1: setup script is the real absolute path under root");
+  // gap-promotion-driver-ready-pool-check-path-third-party：脚本锚在本 kernel 安装位置（dev tree =
+  // 本仓库 plugin/scripts/dispatch-worktree-setup.sh），⛔ 非 /r/plugin/scripts/（第三方项目无 plugin/）。
+  assert.match(prompt, /plugin\/scripts\/dispatch-worktree-setup\.sh/, "AC1: setup script resolves to a kernel plugin/scripts path");
+  assert.doesNotMatch(prompt, /\/r\/plugin\/scripts\/dispatch-worktree-setup\.sh/, "AC1: ⛔ not anchored at the task root");
   const createIdx = prompt.indexOf("create an isolated git worktree");
   const setupIdx = prompt.indexOf("dispatch-worktree-setup.sh");
   assert.ok(createIdx !== -1, "create instruction present");
@@ -797,6 +800,42 @@ test("AC2 (能取假，负控制) — prompt no longer leaves bootstrap to agent
   });
   assert.doesNotMatch(cont, /ln -s/, "AC2: continue prompt must not instruct a hand-rolled node_modules symlink");
   assert.doesNotMatch(cont, /cp config\.yml/, "AC2: continue prompt must not instruct a hand-rolled config.yml copy");
+});
+
+// gap-promotion-driver-ready-pool-check-path-third-party AC2 负控制：第三方项目（quay-init 布下的面）
+// 无 plugin/scripts/*.ts，只有 shipped dist/*.js + loose scripts/*.sh。worker prompt 的
+// scoped-gate-cache 写入入口须解析到 shipped dist/worker-driver.js（stripTypes=false，⛔ 不带
+// --experimental-strip-types），dispatch-worktree-setup.sh 须解析到 kernel scripts/（⛔ 非 task root）。
+test("gap-promotion-driver-ready-pool-check-path-third-party — 无 plugin/ 的第三方项目：buildWorkerPrompt 解析到 shipped dist/worker-driver.js 与 kernel scripts/*.sh（⛔ 非 root/plugin/scripts）", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "worker-third-party-"));
+  try {
+    // 仿 shipped 布局：scripts/dist/worker-driver.js（bundled，无 raw .ts）+ scripts/*.sh（loose）。
+    const dist = path.join(root, "scripts", "dist");
+    fs.mkdirSync(dist, { recursive: true });
+    fs.writeFileSync(path.join(dist, "worker-driver.js"), "// bundled\n", "utf8");
+    fs.writeFileSync(path.join(root, "scripts", "dispatch-worktree-setup.sh"), "#!/usr/bin/env bash\n", "utf8");
+    fs.writeFileSync(path.join(root, "scripts", "suite-slot-lib.sh"), "#!/usr/bin/env bash\n", "utf8");
+    const saved = process.env.QUAY_PLUGIN_ROOT;
+    process.env.QUAY_PLUGIN_ROOT = root; // resolveKernelScriptsDir() = <root>/scripts，<root>/scripts/*.ts 不存在
+    try {
+      const prompt = buildWorkerPrompt("gap-x", "/r");
+      // scoped-gate-cache 写入入口：node <root>/scripts/dist/worker-driver.js（⛔ 无 --experimental-strip-types）。
+      assert.ok(prompt.includes(`node ${path.join(root, "scripts", "dist", "worker-driver.js")} --write-scoped-gate-cache`),
+        "cache-write entry resolves to shipped dist/worker-driver.js");
+      assert.ok(prompt.includes("--write-scoped-gate-cache"), "cache-write flag present");
+      assert.doesNotMatch(prompt, /--experimental-strip-types[^\n]*worker-driver\.ts/, "⛔ no strip-types + .ts form");
+      assert.doesNotMatch(prompt, /\/r\/plugin\/scripts\/worker-driver\.ts/, "⛔ not anchored at task root .ts");
+      // dispatch-worktree-setup.sh 锚在 kernel scripts/（⛔ 非 /r/plugin/scripts/）。
+      assert.ok(prompt.includes(`bash ${path.join(root, "scripts", "dispatch-worktree-setup.sh")}`),
+        "dispatch setup resolves to kernel scripts/*.sh");
+      assert.doesNotMatch(prompt, /\/r\/plugin\/scripts\/dispatch-worktree-setup\.sh/, "⛔ not anchored at task root .sh");
+    } finally {
+      if (saved === undefined) delete process.env.QUAY_PLUGIN_ROOT;
+      else process.env.QUAY_PLUGIN_ROOT = saved;
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("AC_A1 (能取假) — buildWorkerPrompt 经 Provider ABI 记录 AC：点名 task_check + task_write，⛔ 不含手改复选框字面 (gap-worker-prompt-ac-check-via-abi-not-hand-edit)", () => {
