@@ -1181,15 +1181,23 @@ function resolveKernelShellSibling(name: string): string | null {
   return fs.existsSync(script) ? script : null;
 }
 
-/** worker-driver 自入口的 spawn 前缀（"node" + 可选 --experimental-strip-types + 路径）。锚在本 kernel
- *  安装位置（resolveKernelSibling("worker-driver.ts")，⛔ 非 root）：原始 .ts（dev tree，带 flag）或
- *  bundled dist/worker-driver.js（installed，不带 flag）。两者都不在 ⇒ 回退 kernelScriptsDir 下的 .ts
- *  （运行期 fail-closed）。 */
-function workerDriverSelfArgv(): string[] {
-  const sibling = resolveKernelSibling("worker-driver.ts");
-  return ["node", ...(sibling
+/** 解析一个 kernel sibling 脚本到运行 argv 前缀（不含 "node" 可执行名）：原始 .ts ⇒
+ *  ["--experimental-strip-types", <path>]；bundled dist/*.js ⇒ [<path>]（不带 flag）。两者都不在 ⇒
+ *  ["--experimental-strip-types", <resolveKernelScriptsDir()>/<name>]（spawn 时 fail-closed）。
+ *  resolveKernelSibling 单一真相源（⛔ 各 spawn 点不再各自重写 .ts/.js 回退——同
+ *  defaultPromotionCheckArgv 手法）。 */
+function kernelSiblingArgv(name: string): string[] {
+  const sibling = resolveKernelSibling(name);
+  return sibling
     ? (sibling.stripTypes ? ["--experimental-strip-types", sibling.path] : [sibling.path])
-    : ["--experimental-strip-types", path.join(resolveKernelScriptsDir(), "worker-driver.ts")])];
+    : ["--experimental-strip-types", path.join(resolveKernelScriptsDir(), name)];
+}
+
+/** worker-driver 自入口的 spawn 前缀（"node" + kernelSiblingArgv("worker-driver.ts")）。锚在本 kernel
+ *  安装位置（⛔ 非 root）：原始 .ts（dev tree，带 flag）或 bundled dist/worker-driver.js（installed，
+ *  不带 flag）。两者都不在 ⇒ 回退 kernelScriptsDir 下的 .ts（运行期 fail-closed）。 */
+function workerDriverSelfArgv(): string[] {
+  return ["node", ...kernelSiblingArgv("worker-driver.ts")];
 }
 
 /** worker 侧 scoped-gate 缓存写入 CLI 签名（gap-worker-premerge-scoped-gate-cache 阶段 a）：worker 在
@@ -3405,6 +3413,9 @@ export function newMechanicalSuiteRunId(task: string): string {
  *  --run-id <runId> 把 per-suite 身份传给 runner（gap-mechanical-fan-in-per-suite-runid-unified：
  *  runner 用它当 runId，贯穿 full-suite-state / generation guard / suite-load-<runId>.jsonl / 记录，
  *  使 /tests 按记录 runId 查得到负载曲线）。
+ *  runner 路径经 kernelSiblingArgv 锚在本 kernel 安装位置（⛔ 非 opts.worktree ——
+ *  gap-plugin-root-resolution-remaining-callsites-round2：第三方项目无 plugin/scripts/，锚在 worktree
+ *  会 Cannot find module ⇒ 挡住任务落地）。
  *  抽成纯函数便于 worker-driver.test.mjs 断言缺省命令是 runner 而非 test.sh harness（AC2）。 */
 export function defaultMechanicalSuiteCommand(opts: {
   task: string;
@@ -3414,8 +3425,7 @@ export function defaultMechanicalSuiteCommand(opts: {
   runId: string;
 }): string[] {
   return [
-    "node", "--no-warnings", "--experimental-strip-types",
-    path.join(opts.worktree, "plugin", "scripts", "full-suite-runner.ts"),
+    "node", "--no-warnings", ...kernelSiblingArgv("full-suite-runner.ts"),
     "--buckets", opts.task,
     "--root", opts.worktree,
     "--state-dir", path.join(opts.root, ".quay"),
@@ -3570,15 +3580,23 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   const suiteLogFile =
     opts.suiteLogFile ?? path.join(root, ".quay", suiteLogFileName(task, runId, newSuiteLogAttemptSuffix()));
   const suiteStateFile = opts.suiteStateFile ?? path.join(root, ".quay", "full-suite-state.json");
-  const scriptsDir = opts.scriptsDir ?? path.join(worktree, "plugin", "scripts");
+  const scriptsDir = opts.scriptsDir ?? resolveKernelScriptsDir();
   // P2 (gap-execution-loop-productization-p2-p4): the ff 持锁段 is now a TS module (packages/quay/
   // fan-in/ff-merge.ts), IMPORTED — ⛔ no shell-out to the retired bash fan-in-ff-merge.sh.
   const ffMergeModule =
     opts.ffMergeModule ?? path.join(worktree, "packages", "quay", "src", "fan-in", "ff-merge.ts");
-  const antiDrift = path.join(scriptsDir, "anti-drift-touches-check.ts");
-  const classify = path.join(scriptsDir, "select-static-checks-for-touches.ts");
-  const typecheck = path.join(scriptsDir, "fan-in-ts-typecheck-gate.ts");
-  const acGate = path.join(scriptsDir, "fan-in-ac-completion-gate.ts");
+  // 编排脚本（anti-drift/classify/typecheck/ac-gate）：opts.scriptsDir 覆盖（hermetic 测试缝，⛔ 生产不用）
+  // ⇒ <scriptsDir>/<name>.ts 直拼（带 --experimental-strip-types）；缺省 ⇒ kernelSiblingArgv（第三方项目无
+  // plugin/scripts/，.ts 已 bundle 成 dist/*.js，resolveKernelSibling 回退到 .js 且不带 flag——
+  // gap-plugin-root-resolution-remaining-callsites-round2）。
+  const gateArgv = (name: string): string[] =>
+    opts.scriptsDir
+      ? ["node", "--experimental-strip-types", path.join(opts.scriptsDir, name)]
+      : ["node", ...kernelSiblingArgv(name)];
+  const antiDrift = gateArgv("anti-drift-touches-check.ts");
+  const classify = gateArgv("select-static-checks-for-touches.ts");
+  const typecheck = gateArgv("fan-in-ts-typecheck-gate.ts");
+  const acGate = gateArgv("fan-in-ac-completion-gate.ts");
 
   // gap-mechanical-fan-in-red-lock-times-null：失败结果在【release 之后】才读锁时间（同成功路径
   // :3625 的时机）——⛔ 不能在 try 内 return 时就地读（release 事件尚未落盘 ⇒ lockHoldSecs 恒 null），
@@ -3703,7 +3721,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     if (!a.ok) return fail("merge-develop", a);
 
     // 3. anti-drift Touches 核对（HARD FAIL ⇒ red）。
-    a = await step("anti-drift", ["node", "--experimental-strip-types", antiDrift, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000);
+    a = await step("anti-drift", [...antiDrift, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000);
     if (!a.ok) return fail("anti-drift", a);
 
     // 4. delta 断言面判定（doc-only 跳过 suite，code 跑 suite；判不出 fail-closed 跑 suite）。
@@ -3713,7 +3731,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     const deltaList = (deltaFiles.stdout || "").split("\n").map((s) => s.trim()).filter(Boolean);
     let codeDelta = "";
     if (deltaList.length > 0) {
-      const cd = await mechSh(["node", "--experimental-strip-types", classify, "--classify-delta", "--root", worktree, ...deltaList], 120_000);
+      const cd = await mechSh([...classify, "--classify-delta", "--root", worktree, ...deltaList], 120_000);
       codeDelta = cd.ok ? (cd.stdout || "").trim() : "__CLASSIFY_FAILED__";
     }
     // 4b. develop 前进面复用（gap-fan-in-continue-doc-only-advance-reuse-suite）：任务自身 delta 是 code
@@ -3729,7 +3747,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
         if (anc.ok) {
           const sincePrev = await mechSh(["git", "-C", worktree, "diff", "--name-only", prevCommit, "HEAD"], 30_000);
           const sinceList = (sincePrev.stdout || "").split("\n").map((s) => s.trim()).filter(Boolean);
-          const adv = await mechSh(["node", "--experimental-strip-types", classify, "--classify-delta", "--root", worktree, ...sinceList], 120_000);
+          const adv = await mechSh([...classify, "--classify-delta", "--root", worktree, ...sinceList], 120_000);
           reuseSkip = adv.ok && (adv.stdout || "").trim() === ""; // 前进面全 doc/inert ⇒ 复用上一 green
         }
       }
@@ -3758,7 +3776,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       return r;
     };
     const [tc, dc] = await Promise.all([
-      step("typecheck", ["node", "--experimental-strip-types", typecheck, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000),
+      step("typecheck", [...typecheck, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000),
       docCheckLeg(),
     ]);
     if (!tc.ok) return fail("typecheck", tc);
@@ -3794,7 +3812,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       // flip 闸 fan-in-ac-completion-gate.ts 一致）。not-evaluated（段缺失）fail-closed 拒翻（硬规则 3b：
       // 无法评估 ≠ 合格）。⛔ 保留 step 8 的 ac-gate（flip 闸）——flip 前再判一次（幂等双保险）。
       const acPreT0 = Date.now();
-      const acPre = await mechSh(["node", "--experimental-strip-types", acGate, "--task", task, "--worktree", worktree, "--json"], 60_000);
+      const acPre = await mechSh([...acGate, "--task", task, "--worktree", worktree, "--json"], 60_000);
       if (!acPre.ok) {
         let checkedTotal = "?/?";
         let status = "fail";
@@ -3856,9 +3874,9 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     }
 
     // 8. land 前 anti-drift 重跑 + AC 完成闸 + flip done（先 flip 后 ff，人 2026-08-14 裁定）。
-    a = await step("anti-drift-land", ["node", "--experimental-strip-types", antiDrift, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000);
+    a = await step("anti-drift-land", [...antiDrift, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000);
     if (!a.ok) return fail("anti-drift-land", a);
-    a = await step("ac-gate", ["node", "--experimental-strip-types", acGate, "--task", task, "--worktree", worktree], 60_000);
+    a = await step("ac-gate", [...acGate, "--task", task, "--worktree", worktree], 60_000);
     if (!a.ok) return fail("ac-gate", a);
     const flipT0 = Date.now();
     const flip = await flipTaskDone(worktree, task, mergeTarget);
@@ -3941,19 +3959,20 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
 /**
  * 每任务新进程执行（gap-fan-in-token-gate-version-mismatch-self-lock AC1）：机械 fan-in 不在守护进程
  * in-process 跑（守护是主检出旧代码、但 fan-in 编排脚本从 worktree 加载 ⇒ 版本错位），改为每任务 spawn
- * 一个 fresh node 进程加载 worker-driver.ts --mechanical-fan-in。执行器（entry）用【主检出】的
- * worker-driver.ts（opts.root/plugin/scripts/worker-driver.ts，与 driver 同版）——⛔ 不用 worktree 的
- * （gap-fan-in-spawn-stale-worktree-executor-missing-argv：stale worktree 缺新 argv 如 --mechanical-fan-in
- * ⇒ fresh 进程报 unknown argument ⇒ 无 JSON 输出 ⇒ parse-mechanical-fan-in red）。fan-in 编排器本就是
- * 基础设施，应跟 driver 同版；任务 delta（含对 worker-driver.ts 自身的改动）由 suite step（worktree
- * test.sh）验证，不因执行器用主检出版而丢。锁半（acquireFanInLock，ADR-034）与编排半
- * （ff-merge.ts 模块）仍在 worktree 同源。结果经 stdout 单行 JSON 回传（--mechanical-fan-in 只打一行
- * result JSON）；spawn 失败/输出不可解析 fail-closed 为 red（硬规则 3b：读不懂 ≠ 合格）。
+ * 一个 fresh node 进程加载 worker-driver.ts --mechanical-fan-in。执行器（entry）锚在本 kernel 安装位置
+ * （kernelSiblingArgv("worker-driver.ts") = resolveKernelSibling，与 driver 同版）——⛔ 不用 worktree 的、
+ * 也⛔ 不锚在 opts.root/plugin/scripts（gap-plugin-root-resolution-remaining-callsites-round2：第三方
+ * 项目无 plugin/scripts/）。（gap-fan-in-spawn-stale-worktree-executor-missing-argv：stale worktree 缺
+ * 新 argv 如 --mechanical-fan-in ⇒ fresh 进程报 unknown argument ⇒ 无 JSON 输出 ⇒ parse-mechanical-fan-in
+ * red）。fan-in 编排器本就是基础设施，应跟 driver 同版；任务 delta（含对 worker-driver.ts 自身的改动）
+ * 由 suite step（worktree test.sh）验证，不因执行器用 kernel 版而丢。锁半（acquireFanInLock，ADR-034）
+ * 与编排半（ff-merge.ts 模块）仍在 worktree 同源。结果经 stdout 单行 JSON 回传（--mechanical-fan-in
+ * 只打一行 result JSON）；spawn 失败/输出不可解析 fail-closed 为 red（硬规则 3b：读不懂 ≠ 合格）。
  */
 export async function spawnMechanicalFanIn(opts: MechanicalFanInOptions): Promise<MechanicalFanInResult> {
-  const entry = path.join(opts.root, "plugin", "scripts", "worker-driver.ts");
+  const entry = kernelSiblingArgv("worker-driver.ts");
   const argv = [
-    process.execPath, "--experimental-strip-types", entry,
+    process.execPath, ...entry,
     "--mechanical-fan-in",
     "--task", opts.task,
     "--worktree", opts.worktree,

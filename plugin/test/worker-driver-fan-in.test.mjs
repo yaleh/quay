@@ -1190,31 +1190,33 @@ test("AC1 (integration) — runMechanicalFanIn writes a per-step trace covering 
 test("AC1 (gap-fan-in-token-gate-version-mismatch-self-lock) — 每任务新进程：finishAsync 调 spawnMechanicalFanIn 加载当前代码（⛔ 不再 in-process）", () => {
   const src = fs.readFileSync(DRIVER, "utf8");
   assert.match(src, /mechResult = await spawnMechanicalFanIn\(\{ task: taskId, worktree: paths\[0\], root: rootDir, runId \}\)/, "finishAsync spawns a fresh mechanical fan-in process (⛔ in-process runMechanicalFanIn)");
-  assert.match(src, /const entry = path\.join\(opts\.root, "plugin", "scripts", "worker-driver\.ts"\)/, "spawnMechanicalFanIn loads the ROOT checkout's worker-driver.ts (⛔ worktree：stale worktree 缺新 argv ⇒ unknown argument)");
-  assert.match(src, /process\.execPath, "--experimental-strip-types", entry,\s*\n\s*"--mechanical-fan-in"/, "the fresh process is node --experimental-strip-types <root>/worker-driver.ts --mechanical-fan-in");
+  assert.match(src, /const entry = kernelSiblingArgv\("worker-driver\.ts"\)/, "spawnMechanicalFanIn anchors the executor at the kernel install location (⛔ opts.root/plugin/scripts/worker-driver.ts — gap-plugin-root-resolution-remaining-callsites-round2)");
+  assert.match(src, /process\.execPath, \.\.\.entry,\s*\n\s*"--mechanical-fan-in"/, "the fresh process is node <kernel-sibling>/worker-driver.(ts|js) --mechanical-fan-in");
   assert.match(src, /if \(mechanicalFanIn\) \{\s*\n\s*const task = tasks\[0\]/, "--mechanical-fan-in mode exists in main()");
   assert.match(src, /worktree: mechWorktree,/, "--mechanical-fan-in mode passes the worktree to runMechanicalFanIn");
 });
 
-// ── gap-fan-in-spawn-stale-worktree-executor-missing-argv：执行器 entry 用主检出（⛔ worktree）────
+// ── gap-fan-in-spawn-stale-worktree-executor-missing-argv：执行器 entry 用 kernel 安装位置（⛔ worktree）────
 // fresh-process fan-in spawn 用 worktree 的 worker-driver.ts 当执行器时，stale worktree（未 merge
 // develop）的旧 worker-driver.ts 缺新 argv（--mechanical-fan-in）⇒ fresh 进程报 unknown argument ⇒
-// 无 JSON 输出 ⇒ parse-mechanical-fan-in red。修法：entry = opts.root/plugin/scripts/worker-driver.ts
-// （与 driver 同版），worktree 只提供任务 delta、不提供执行器代码。AC2 负控制：root entry（有 argv）
-// 与 stale worktree entry（无 argv）两个 stub——entry 若指回 worktree 则 spawn 加载 stale stub ⇒
-// unknown argument ⇒ red（本测试断言 outcome=landed，改回即红）。
+// 无 JSON 输出 ⇒ parse-mechanical-fan-in red。修法：entry = kernel 安装位置（resolveKernelSibling，与
+// driver 同版；⛔ opts.root/plugin/scripts/worker-driver.ts —— gap-plugin-root-resolution-remaining-
+// callsites-round2：第三方项目无 plugin/scripts/），worktree 只提供任务 delta、不提供执行器代码。
+// AC2 负控制：kernel entry（有 argv）与 stale worktree entry（无 argv）两个 stub——entry 若指回
+// worktree 则 spawn 加载 stale stub ⇒ unknown argument ⇒ red（本测试断言 outcome=landed，改回即红）。
 
-test("AC2 (gap-fan-in-spawn-stale-worktree-executor-missing-argv) — stale worktree 缺 --mechanical-fan-in argv 仍 spawn 成功（entry=root，⛔ 改回 opts.worktree ⇒ unknown argument ⇒ parse-mechanical-fan-in red）", async (t) => {
+test("AC2 (gap-fan-in-spawn-stale-worktree-executor-missing-argv) — stale worktree 缺 --mechanical-fan-in argv 仍 spawn 成功（entry=kernel 安装位置，⛔ 改回 opts.worktree ⇒ unknown argument ⇒ parse-mechanical-fan-in red）", async (t) => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "stale-exec-"));
   t.after(() => fs.rmSync(base, { recursive: true, force: true }));
   const root = path.join(base, "root");
   const worktree = path.join(base, "wt");
+  const pluginRoot = path.join(base, "plugin"); // kernel 安装位置（QUAY_PLUGIN_ROOT 缝）
 
-  // root 的 worker-driver.ts = 当前版（有 --mechanical-fan-in argv）——最小自足 stub（无 import），
-  // 命中 --mechanical-fan-in 即打一行 JSON result 退出。模拟「主检出当前版」。
-  fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
-  fs.writeFileSync(path.join(root, "plugin", "scripts", "worker-driver.ts"), [
-    "// current worker-driver.ts (root entry): has --mechanical-fan-in argv",
+  // kernel 安装位置的 worker-driver.ts = 当前版（有 --mechanical-fan-in argv）——最小自足 stub（无
+  // import），命中 --mechanical-fan-in 即打一行 JSON result 退出。模拟「与 driver 同版」。
+  fs.mkdirSync(path.join(pluginRoot, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(pluginRoot, "scripts", "worker-driver.ts"), [
+    "// current worker-driver.ts (kernel entry): has --mechanical-fan-in argv",
     "const argv = process.argv.slice(2);",
     'if (argv.includes("--mechanical-fan-in")) {',
     '  process.stdout.write(JSON.stringify({ outcome: "landed", step: null, reason: null, verdict: null }) + "\\n");',
@@ -1226,7 +1228,8 @@ test("AC2 (gap-fan-in-spawn-stale-worktree-executor-missing-argv) — stale work
   ].join("\n"), "utf8");
 
   // worktree 的 worker-driver.ts = 陈旧版（无 --mechanical-fan-in argv，任何 --* 都 unknown argument）。
-  // 模拟 stale worktree：落后 develop、缺新 argv。
+  // 模拟 stale worktree：落后 develop、缺新 argv。entry 现在锚在 kernel 安装位置（QUAY_PLUGIN_ROOT），
+  // ⛔ 不读 worktree ⇒ stale stub 不被加载。
   fs.mkdirSync(path.join(worktree, "plugin", "scripts"), { recursive: true });
   fs.writeFileSync(path.join(worktree, "plugin", "scripts", "worker-driver.ts"), [
     "// STALE worker-driver.ts: no --mechanical-fan-in argv (any --* flag => unknown argument)",
@@ -1236,9 +1239,52 @@ test("AC2 (gap-fan-in-spawn-stale-worktree-executor-missing-argv) — stale work
     "process.exit(2);",
   ].join("\n"), "utf8");
 
-  const r = await spawnMechanicalFanIn({ task: "gap-stale", worktree, root, runId: "r1" });
-  assert.equal(r.outcome, "landed", "stale worktree must not break spawn — entry=root has --mechanical-fan-in (⛔ 改回 opts.worktree ⇒ unknown argument ⇒ parse-mechanical-fan-in red)");
-  assert.equal(r.step, null, "no failure step when the root entry handles --mechanical-fan-in");
+  const saved = process.env.QUAY_PLUGIN_ROOT;
+  process.env.QUAY_PLUGIN_ROOT = pluginRoot;
+  try {
+    const r = await spawnMechanicalFanIn({ task: "gap-stale", worktree, root, runId: "r1" });
+    assert.equal(r.outcome, "landed", "stale worktree must not break spawn — entry=kernel install location has --mechanical-fan-in (⛔ 改回 opts.worktree ⇒ unknown argument ⇒ parse-mechanical-fan-in red)");
+    assert.equal(r.step, null, "no failure step when the kernel entry handles --mechanical-fan-in");
+  } finally {
+    if (saved === undefined) delete process.env.QUAY_PLUGIN_ROOT;
+    else process.env.QUAY_PLUGIN_ROOT = saved;
+  }
+});
+
+// gap-plugin-root-resolution-remaining-callsites-round2 AC2 负控制：第三方项目（quay-init 布下的面）
+// 无 plugin/scripts/*.ts，只有 shipped dist/*.js。spawnMechanicalFanIn 的 worker-driver 自入口经
+// kernelSiblingArgv 回退到 dist/worker-driver.js 且不带 --experimental-strip-types（stripTypes=false）。
+test("AC2 (gap-plugin-root-resolution-remaining-callsites-round2) — worker-driver 自入口在无 plugin/ 的第三方项目解析到 shipped dist/worker-driver.js（stripTypes=false）", async (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "stale-exec-dist-"));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const root = path.join(base, "root");
+  const worktree = path.join(base, "wt");
+  const pluginRoot = path.join(base, "plugin");
+
+  // kernel 安装位置的 bundled dist/worker-driver.js = 当前版（无 import 自足 stub，命中
+  // --mechanical-fan-in 即打一行 JSON result 退出）。scripts/*.ts 不放 ⇒ resolveKernelSibling 回退 .js。
+  const dist = path.join(pluginRoot, "scripts", "dist");
+  fs.mkdirSync(dist, { recursive: true });
+  fs.writeFileSync(path.join(dist, "worker-driver.js"), [
+    "// bundled current worker-driver.js: has --mechanical-fan-in argv",
+    "const argv = process.argv.slice(2);",
+    'if (argv.includes("--mechanical-fan-in")) {',
+    '  process.stdout.write(JSON.stringify({ outcome: "landed", step: null, reason: null, verdict: null }) + "\\n");',
+    "  process.exit(0);",
+    "}",
+    "process.exit(2);",
+  ].join("\n"), "utf8");
+
+  const saved = process.env.QUAY_PLUGIN_ROOT;
+  process.env.QUAY_PLUGIN_ROOT = pluginRoot;
+  try {
+    const r = await spawnMechanicalFanIn({ task: "gap-stale-dist", worktree, root, runId: "r1" });
+    assert.equal(r.outcome, "landed", "worker-driver self-entry resolves to shipped dist/worker-driver.js (stripTypes=false, no --experimental-strip-types)");
+    assert.equal(r.step, null, "no failure step when the dist entry handles --mechanical-fan-in");
+  } finally {
+    if (saved === undefined) delete process.env.QUAY_PLUGIN_ROOT;
+    else process.env.QUAY_PLUGIN_ROOT = saved;
+  }
 });
 
 // ── gap-fan-in-subprocess-hang-timeout-recovery ────────────────────────────────────────────────

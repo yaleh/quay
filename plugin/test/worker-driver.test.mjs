@@ -586,6 +586,36 @@ test("AC2 — the mechanical fan-in default suite command is full-suite-runner.t
   assert.ok(!cmd.some((a) => a.includes("scripts/test.sh")), "must NOT run a parallel `bash scripts/test.sh` harness");
 });
 
+// gap-plugin-root-resolution-remaining-callsites-round2 AC2 负控制：第三方项目（quay-init 布下的面）
+// 无 plugin/scripts/*.ts，只有 shipped dist/*.js。defaultMechanicalSuiteCommand 的 full-suite-runner 经
+// kernelSiblingArgv 回退到 dist/full-suite-runner.js 且不带 --experimental-strip-types（stripTypes=false）。
+test("defaultMechanicalSuiteCommand — 无 plugin/ 的第三方项目解析到 shipped dist/full-suite-runner.js（stripTypes=false）", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "mech-suite-third-party-"));
+  try {
+    const dist = path.join(root, "scripts", "dist");
+    fs.mkdirSync(dist, { recursive: true });
+    fs.writeFileSync(path.join(dist, "full-suite-runner.js"), "// bundled\n", "utf8");
+    const saved = process.env.QUAY_PLUGIN_ROOT;
+    process.env.QUAY_PLUGIN_ROOT = root; // resolveKernelScriptsDir() = <root>/scripts，无 <root>/scripts/*.ts
+    try {
+      const cmd = defaultMechanicalSuiteCommand({
+        task: "gap-mech-red-bucket",
+        worktree: "/tmp/wt",
+        root: "/tmp/root",
+        suiteLogFile: "/tmp/fan-in-suite.log",
+        runId: "mfi-gap-mech-red-bucket-1788022868-abc123",
+      });
+      assert.equal(cmd[2], path.join(root, "scripts", "dist", "full-suite-runner.js"), "the runner must resolve to the shipped dist/full-suite-runner.js (⛔ worktree/plugin/scripts/full-suite-runner.ts)");
+      assert.ok(!cmd.includes("--experimental-strip-types"), "stripTypes=false ⇒ 不带 flag");
+    } finally {
+      if (saved === undefined) delete process.env.QUAY_PLUGIN_ROOT;
+      else process.env.QUAY_PLUGIN_ROOT = saved;
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("gap-mechanical-fan-in-per-suite-runid-unified AC2 — newMechanicalSuiteRunId is per-suite unique (two tasks ⇒ two ids, one per fan-in)", () => {
   const a = newMechanicalSuiteRunId("gap-task-a");
   const b = newMechanicalSuiteRunId("gap-task-b");
