@@ -1,7 +1,7 @@
 ---
 id: gap-git-graph-scroll-panel-no-visual-affordance
 title: git-history 滚动面板机制正确但零视觉存在感：贴视口边缘、无边框/背景/滚动条提示，用户误以为内容到此为止
-status: todo
+status: ready
 labels:
   - gap
   - webui
