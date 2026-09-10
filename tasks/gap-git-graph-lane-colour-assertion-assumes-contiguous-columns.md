@@ -53,12 +53,12 @@ cols=12 稀疏=[0,1,2,3,4,5,8,9,10,16,17,24]    -> distinct=6  (断言期望 8)
 
 ## Acceptance Criteria
 
-- [ ] AC1 根因存证（位置判定）：贴 `serve-git.ts:445` 的 `laneColor` 实现与 `:65` 的不变量注释原文，说明测试断言强于该不变量；并贴改前 `:354` 的断言原文。
-- [ ] AC2 稀疏输入确定性用例：新增一条用**固定稀疏列号集**（不读生产仓库状态）的用例，改前它红、改后它绿；贴前后两次运行输出。
-- [ ] AC3 负控制（能取假）：把 `laneColor` 临时改为返回常量 ⇒ 新断言红；还原 ⇒ 绿；贴两次输出与还原后的 `git diff` 为空。
-- [ ] AC4 生产窗口不再决定成败：`node --test packages/quay/test/gap-git-graph-cross-column-edges-drawn-as-fixed-stubs-not-anchored.test.mjs` 连跑 3 次全绿；且在**人为制造稀疏列号**（如临时多建几个分支引入非连续列）后再跑一次仍绿——贴四次的退出码与当次 `cols.length`/`distinct.size` 读数。
-- [ ] AC5 渲染器未被改动：`git diff --stat packages/quay/src/serve-git.ts` 为空（本任务不改渲染行为）。
-- [ ] AC6 全量绿：`scripts/test.sh` 全量绿。
+- [x] AC1 根因存证（位置判定）：贴 `serve-git.ts:445` 的 `laneColor` 实现与 `:65` 的不变量注释原文，说明测试断言强于该不变量；并贴改前 `:354` 的断言原文。
+- [x] AC2 稀疏输入确定性用例：新增一条用**固定稀疏列号集**（不读生产仓库状态）的用例，改前它红、改后它绿；贴前后两次运行输出。
+- [x] AC3 负控制（能取假）：把 `laneColor` 临时改为返回常量 ⇒ 新断言红；还原 ⇒ 绿；贴两次输出与还原后的 `git diff` 为空。
+- [x] AC4 生产窗口不再决定成败：`node --test packages/quay/test/gap-git-graph-cross-column-edges-drawn-as-fixed-stubs-not-anchored.test.mjs` 连跑 3 次全绿；且在**人为制造稀疏列号**（如临时多建几个分支引入非连续列）后再跑一次仍绿——贴四次的退出码与当次 `cols.length`/`distinct.size` 读数。
+- [x] AC5 渲染器未被改动：`git diff --stat packages/quay/src/serve-git.ts` 为空（本任务不改渲染行为）。
+- [ ] AC6 全量绿：`scripts/test.sh` 全量绿。（待外部）
 
 ## Definition of Done
 
