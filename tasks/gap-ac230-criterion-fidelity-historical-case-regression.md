@@ -2,7 +2,7 @@
 id: gap-ac230-criterion-fidelity-historical-case-regression
 title: AC-230 真实历史双向回归：aca7a0511 前后两个 kernel-sibling-resolution-check 形态逐字
   vendor 进仓库，喂判定器断言 vacuous/faithful（GOAL-013 退出条件⑤②）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
