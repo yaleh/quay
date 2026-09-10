@@ -33,31 +33,40 @@ plugin/scripts/worker-driver.ts:1171  scopedGateCommandFor(task, worktree) → [
 
 **更关键的一层**：`.quay/config.yml` 的 `loop.test_command` 字段（本项目实际配置为 `test_command: node --test`）**正是为这个用途设计的**——但全仓 `grep -rl 'test_command' plugin/scripts/*.ts` 只命中 `packages/quay/src/config.ts`（配置解析本身），**没有任何 driver 代码读取并使用它**。这个字段目前只被单项目 `quay:loop-driver` 的 `iterate` 单循环消费，两层 worker-driven 模型（本项目实际驱动方式）完全没有接线。
 
-**影响范围比之前发现的都大**：本轮先后发现的 5 处 A 类锚点缺陷只挡"driver 能不能启动/派发"；`DOC_BRANCH` 缺陷挡"状态写入能不能被派发看见"；**本缺陷挡的是 fan-in 全链路（merge→delta→doc-check→typecheck→scoped门→suite→ff）能不能走完**——只要 doc-check 或 scoped-gate 任一步 exit 127，整条 fan-in 中止，**任何第三方项目的任务永远无法真正翻 done**，即使实现完全正确。这是本次 AC-207 端到端验证目前发现的最严重的一条。
+**⚠️ 范围扩展（2026-09-10 追加实测，人已裁定合并处理而非另开任务）**：用手工 shim 解锁 doc-check/scoped-gate 两步后，fan-in 走到了第三步 `suite-end`，**同一个架构性缺口在这里以更大规模重现**——`defaultMechanicalSuiteCommand`（`worker-driver.ts:3420`）派发 `full-suite-runner.ts` 去跑"suite"，而 `full-suite-runner.ts` 内部至少 **5 处**独立的 naive `path.join(__dirname, ...)` 拼接（未经 `resolveKernelPluginRoot`/`resolveKernelSibling` 的 dist-感知解析），第三方项目下逐一 `Cannot find module`/`No such file`：
 
-**当前务实解法（不是修复，是给本次验证解锁）**：已在 orangevps 该第三方项目根手工加了一个最小 `scripts/test.sh` shim（识别 `--static-checks-doc`/`--for-task --allow-thin` 两种调用形态，分别 no-op 或委托 `node --test`），仅解锁本次验证，⛔ 不是通用修法——真正的第三方项目不该被要求手写这个文件。
+```
+plugin/scripts/full-suite-runner.ts:1495/:1509  provision-verify-worktree.sh
+plugin/scripts/full-suite-runner.ts:1535        resource-gate.sh
+plugin/scripts/full-suite-runner.ts:1977        worktree-process-reaper.ts
+plugin/scripts/full-suite-runner.ts:2164        suite-load-sampler.ts
+plugin/scripts/runner-concurrency.ts:70         process-budget.sh
+```
+
+**逐个修补这 5 处不是正确修法**——`full-suite-runner.ts` 是本仓库自己的 bucket 化测试基建（找测试文件、分桶、并发调度），第三方项目根本没有这套概念可对应；即使补完这 5 处，下一层大概率还有更多依赖同样假设仓库结构的调用。**正确修法与 doc-check/scoped-gate 同源**：第三方项目（无 `plugin/`，走 `test_command` 配置）的 suite 步骤根本不该调用 `full-suite-runner.ts`，应直接委托 `test_command`。三步（doc-check / scoped-gate / suite）在第三方项目里是**同一个退化路径**：都退化为"有没有等价配置，没有就跳过/委托，不尝试调用本仓库专属脚本"。
 
 ## Plan
 
-1. `docCheckCommand`/`scopedGateCommandFor` 的默认值改为：优先读 `.quay/config.yml` 的 `loop.test_command`（若存在），委托给它并传相应标志/上下文（`--static-checks-doc`/`--for-task <id> --allow-thin` 这两个标志是本仓库 `scripts/test.sh` 的私有约定，对通用 `test_command` 不适用——需要重新设计"doc-check"和"scoped-gate"这两个概念在通用第三方项目里对应什么）：
-   - **doc-check**（纯文档类静态检查）：第三方项目大概率没有对应概念，缺省应是**跳过**（no-op ok:true），而不是尝试调用一个不存在的脚本。
-   - **scoped-gate**（该任务改动范围内的测试子集）：通用形态退化为跑 `test_command`（全量，因为没有"scoped"这个能力），或注解为"第三方项目暂不支持 scoped，直接进入全量 suite 步骤"。
-2. `scripts/test.sh` 不存在时 fail-closed 但报**可区分的**取值（"third-party-no-doc-check-tooling"），⛔ 不与"文档检查真的跑了且失败"同形（硬规则 3b）。
-3. 双向负控制：本仓库场景（有 `scripts/test.sh`）行为逐字不变；第三方场景（无该文件，`test_command` 存在）doc-check 跳过、scoped-gate 走 `test_command`，fan-in 能走到 suite/ff 步骤。
-4. 生产复跑：orangevps 第三方项目移除手工 shim，重装本次修复后的安装物，`e2e-verify-207` 的 fan-in 不再在 doc-check/scoped-gate 报 exit 127。
+1. `docCheckCommand`/`scopedGateCommandFor` 的默认值改为：优先读 `.quay/config.yml` 的 `loop.test_command`（若存在），委托给它并传相应标志/上下文：
+   - **doc-check**：第三方项目大概率没有对应概念，缺省应是**跳过**（no-op ok:true），而不是尝试调用一个不存在的脚本。
+   - **scoped-gate**：通用形态退化为跑 `test_command`（全量，因为没有"scoped"这个能力）。
+2. **`defaultMechanicalSuiteCommand`（suite 步骤）同法退化**：第三方项目（无 `plugin/`）下不调用 `full-suite-runner.ts`，直接执行 `test_command`（`opts.suiteCommand` 已是可覆盖测试缝，缺省值改为条件分支）；⛔ 不去逐个修 `full-suite-runner.ts` 内部的 `__dirname` 锚点——那是治标，第三方项目本就不该走这条代码路径。
+3. `scripts/test.sh` 不存在时 fail-closed 但报**可区分的**取值（"third-party-no-doc-check-tooling"），⛔ 不与"文档检查真的跑了且失败"同形（硬规则 3b）。
+4. 双向负控制：本仓库场景（有 `scripts/test.sh`）三步行为逐字不变；第三方场景（无该文件，`test_command` 存在）doc-check 跳过、scoped-gate/suite 都走 `test_command`，fan-in 能走完全程翻 done。
+5. 生产复跑：orangevps 第三方项目移除手工 shim，重装本次修复后的安装物，`e2e-verify-207` 的 fan-in 不再在任一步报 exit 127/Cannot find module。
 
 ## Acceptance Criteria
 
-- [ ] AC1（位置判定）：`grep -n 'path.join(worktree, "scripts", "test.sh")' plugin/scripts/worker-driver.ts` 的两处调用点都改为条件分支（先判是否存在 `test_command` 配置/`scripts/test.sh` 文件），不再是唯一硬编码路径。
-- [ ] AC2（双向负控制）：无 `scripts/test.sh` 但有 `test_command` 的第三方场景下，doc-check 返回 ok:true（跳过，可区分取值）、scoped-gate 实际执行 `test_command`；反向：本仓库场景（`scripts/test.sh` 存在）两步行为与修改前逐字一致。
+- [ ] AC1（位置判定）：`grep -n 'path.join(worktree, "scripts", "test.sh")' plugin/scripts/worker-driver.ts` 的两处调用点、以及 `defaultMechanicalSuiteCommand` 对 `full-suite-runner.ts` 的调用，都改为条件分支（先判是否存在 `test_command` 配置/`scripts/test.sh` 文件），不再是唯一硬编码路径。
+- [ ] AC2（双向负控制）：无 `scripts/test.sh` 但有 `test_command` 的第三方场景下，doc-check 返回 ok:true（跳过，可区分取值）、scoped-gate 与 suite 均实际执行 `test_command`；反向：本仓库场景（`scripts/test.sh` 存在）三步行为与修改前逐字一致。
 - [ ] AC3（生产复现，移除手工 shim 后复跑）：orangevps 第三方项目移除 `scripts/test.sh` 手工 shim，重装本次修复后的安装物，`e2e-verify-207` 完整走完 fan-in（merge→delta→doc-check→typecheck→scoped门→suite→ff）翻 done，`.quay/fan-in-step-trace.jsonl` 中该任务全部步骤 `ok:true`。
 - [ ] AC4（全量绿）：`scripts/test.sh` 全量绿（含 `worker-driver.test.mjs` 新增负控制）。
 
 ## Definition of Done
 
-- 第三方项目不再需要手工制造 `scripts/test.sh` 才能让任务通过 fan-in 翻 done——以 AC3 的生产复现（移除手工 shim 后仍能走完）为准。
+- 第三方项目不再需要手工制造 `scripts/test.sh` 才能让任务通过 fan-in 翻 done——以 AC3 的生产复现（移除手工 shim 后仍能走完，且不再需要逐个修补 `full-suite-runner.ts` 的内部锚点）为准。
 - 全量绿。
-- 完成后知会 `gap-ac207-e2e-target-driver-driven-real-commit-task-done` 与预防性任务 `gap-third-party-fixture-smoke-test-driver-family`——后者的夹具测试应把本缺陷也纳入回归覆盖（无 `scripts/test.sh` 场景）。
+- 完成后知会 `gap-ac207-e2e-target-driver-driven-real-commit-task-done` 与预防性任务 `gap-third-party-fixture-smoke-test-driver-family`——后者的夹具测试应把三步（doc-check/scoped-gate/suite）全部纳入回归覆盖。
 
 ## Touches
 
