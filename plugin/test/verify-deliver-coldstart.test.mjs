@@ -162,6 +162,17 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
     "AC-234 record: any zero count ⇒ refused (fail-closed)");
   assert.match(r.stdout, /ac234-record\(empty-host\) refused=1/,
     "AC-234 record: empty host ⇒ refused (fail-closed)");
+  // AC-232 (gap-ac232-downstream-goal-carrier-write-readback): the --selfcheck must ALSO exercise the
+  // downstream-goal-carrier write+read-back record writer's positive/negative controls — writes the three
+  // criterion fields verbatim (goal_write_ok/goal_read_back_ok as JSON literals, goal_records as a JSON
+  // integer) + top-level build_sha; truthfully writes false/0 when the write fails or read-back is empty
+  // (AC4 负控制 — 写调用 0 与空文件同形, the criterion can take false); refuses empty-host (fail-closed).
+  assert.match(r.stdout, /ac232-record\(valid\) wrote=1 fields_ok=1/,
+    "AC-232 record: valid record written with goal_write_ok=true + goal_read_back_ok=true + goal_records=5 + build_sha");
+  assert.match(r.stdout, /ac232-record\(write-failed\) neg_ok=1/,
+    "AC-232 record: write-failed ⇒ goal_write_ok=false still written (缺件如实非静默 — criterion can take false)");
+  assert.match(r.stdout, /ac232-record\(empty-host\) refused=1/,
+    "AC-232 record: empty host ⇒ refused (fail-closed, 缺值≠合格)");
   // gap-verify-coldstart-does-not-configure-target-profiles: the --selfcheck must ALSO exercise the
   // target-profiles configuration controls — derived (driving profiles worker-default written into the
   // target), no-source (not-configured, distinct — 硬规则 3b), override (--target-launcher/model win),

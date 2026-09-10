@@ -1317,6 +1317,98 @@ step_ac234_web_render() {
   return 0
 }
 
+# ── AC-232（GOAL-009）：下游 goal 载体必须能写、能读回 ─────────────────────────────────────────
+# 判据（goals/AC-232-*.md）：载体存在 ac="GOAL-009-AC-232" 记录，且 host≠本机 ∧ project_root∉本仓库
+# ∧ goal_write_ok=true ∧ goal_read_back_ok=true ∧ goal_records>0。三字段缺一不可——只断言「写调用返回 0」
+# 与「写了个空文件」同形（硬规则 3b）。AC-206 只断言 goals/ 目录建了与可读、不断言能写；本步骤补「能写 + 能读回」。
+AC232_HOST=""                                # 目标宿主 hostname（criterion 要求 host≠本机）
+AC232_PROJECT_ROOT=""                        # 第三方项目绝对路径（criterion 要求 ∉ 本仓库）
+AC232_GOAL_WRITE_OK=0                        # 1 = goal write exit 0 ∧ goals/GOAL-*.md 落盘
+AC232_GOAL_READ_BACK_OK=0                    # 1 = goal show 读回该 id 且 stdout 含该 id
+AC232_GOAL_RECORDS=-1                        # goal list 计数（-1 = 未读）
+AC232_EVALUATED=0                            # 1 = write + read-back + list 都执行且计数完成
+
+# probe_ac232_goal_write_readback <root>
+# 用 installed quay CLI 对下游项目（--root）经 Provider ABI 写一条 GOAL 记录再读回（⛔ 不走任务侧、不经 HTTP）。
+#   goal_write_ok     = goal write exit 0 ∧ goals/GOAL-*.md 落盘（写调用 0 与空文件同形 ⇒ 必须双判，硬规则 3b）
+#   goal_read_back_ok = goal show GOAL-001 读回该 id 且 stdout 含该 id（写了读不回 = 未持久/格式不可解）
+#   goal_records      = goal list --json 数组长度（空 goals/ ⇒ 0，非未读）
+# 缺有效读数如实置 0/-1；AC232_EVALUATED 区分「未评估」与「合格」（硬规则 3b）。
+probe_ac232_goal_write_readback() {
+  local root="$1" qrl goal_title goal_body show_out list_json n
+  AC232_GOAL_WRITE_OK=0; AC232_GOAL_READ_BACK_OK=0; AC232_GOAL_RECORDS=-1
+  AC232_EVALUATED=0
+  qrl="${STEP1_PREFIX}/bin/quay"
+  qrl="$(readlink -f "$qrl" 2>/dev/null || echo "$qrl")"
+  goal_title="下游 goal 载体写读回验证 (AC-232)"
+  goal_body="第三方项目 goal 载体写读回验证用 GOAL——由 verify-deliver-coldstart AC-232 步骤经 Provider ABI 写入（背景：AC-206 只断言 goals/ 目录建了与可读，本步骤证明下游 goal 载体真的能写、能读回）。"
+  # (a) 写：经 Provider ABI（quay goal write），body ≥40 非空白（goal-store MIN_GOAL_BODY_CHARS=40），
+  #     id GOAL-001 匹配 GOAL-\d{3,}（goal-store.ts:86）。⛔ 不传 body 的 write 是 09-10 goal write failed 的根因。
+  if node "$qrl" goal write GOAL-001 --title "$goal_title" \
+      --origin "verify-deliver-coldstart AC-232 步骤经 Provider ABI 写入——证明下游 goal 载体能写" \
+      --body "$goal_body" --root "$root" >/dev/null 2>&1 \
+     && [ -n "$(find "$root/goals" -maxdepth 1 -name 'GOAL-*.md' -print -quit 2>/dev/null)" ]; then
+    AC232_GOAL_WRITE_OK=1
+  fi
+  # (b) 读回：show 读回该 id 且 stdout 含该 id（非空 + 命中 id——「写了读不回」与「读回空」同形）。
+  if show_out="$(node "$qrl" goal show GOAL-001 --root "$root" 2>/dev/null)" \
+     && [ -n "$show_out" ] && printf '%s' "$show_out" | grep -q 'GOAL-001'; then
+    AC232_GOAL_READ_BACK_OK=1
+  fi
+  # (c) list 计数：JSON 数组长度（空 goals/ ⇒ 0，非未读——硬规则 3b）。
+  if list_json="$(node "$qrl" goal list --root "$root" --json 2>/dev/null)"; then
+    n="$(printf '%s' "$list_json" | "$VC_NODE" --no-warnings -e '
+      let s="";
+      process.stdin.on("data", d => s += d).on("end", () => {
+        try { const j = JSON.parse(s); console.log(Array.isArray(j) ? j.length : -1); }
+        catch { console.log(-1); }
+      });
+    ' 2>/dev/null)"
+    case "$n" in ''|*[!0-9]*) n=-1 ;; esac
+    AC232_GOAL_RECORDS="$n"
+  fi
+  AC232_EVALUATED=1
+  return 0
+}
+
+# 写 GOAL-009-AC-232 记录（经 ac89_append_goal009 统一补 top-level build_sha/ts——AC-214 新鲜度锚）。
+# 缺 host/project_root ⇒ 不写 return 1（fail-closed，缺值≠合格）；三字段是【数据】（布尔/整数如实写，
+# false/0 也是有效读数——AC4 负控制据此注入能取假的记录，criterion 读 false/0 仍 exit 1）。
+write_ac232_record() {
+  local host="$1" project_root="$2" gwo="$3" grbo="$4" grec="$5"
+  [ -n "$host" ] || return 1
+  [ -n "$project_root" ] || return 1
+  case "$gwo" in 0|1) ;; *) return 1 ;; esac
+  case "$grbo" in 0|1) ;; *) return 1 ;; esac
+  [ "$grec" -ge 0 ] 2>/dev/null || return 1
+  local b_gwo=false b_grbo=false
+  [ "$gwo" = "1" ] && b_gwo=true
+  [ "$grbo" = "1" ] && b_grbo=true
+  ac89_append_goal009 ",\"ac\":\"GOAL-009-AC-232\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"goal_write_ok\":$b_gwo,\"goal_read_back_ok\":$b_grbo,\"goal_records\":$grec"
+}
+
+# step ⑨：下游 goal 载体写+读回（AC-232）——经 Provider ABI 对第三方项目（$ROOT）写一条 GOAL 记录再读回
+# ⇒ goal_write_ok=1 ∧ goal_read_back_ok=1 ∧ goal_records>0 时写 ac="GOAL-009-AC-232" 记录（fail-closed）。
+step_ac232_goal_carrier_write() {
+  local root="$1"
+  AC232_HOST="$(hostname 2>/dev/null || echo '')"
+  AC232_PROJECT_ROOT="$(readlink -f "$root" 2>/dev/null || echo "$root")"
+  echo "== ⑨ goal carrier write+read-back (AC-232): goal write + show/list read-back into the third-party project =="
+  probe_ac232_goal_write_readback "$root"
+  echo "  goal_write_ok=$AC232_GOAL_WRITE_OK goal_read_back_ok=$AC232_GOAL_READ_BACK_OK goal_records=$AC232_GOAL_RECORDS evaluated=$AC232_EVALUATED host=${AC232_HOST:-<none>} project_root=$AC232_PROJECT_ROOT"
+  if [ "$AC232_EVALUATED" = "1" ] \
+     && [ "$AC232_GOAL_WRITE_OK" = "1" ] \
+     && [ "$AC232_GOAL_READ_BACK_OK" = "1" ] \
+     && [ "$AC232_GOAL_RECORDS" -gt 0 ] 2>/dev/null; then
+    if write_ac232_record "$AC232_HOST" "$AC232_PROJECT_ROOT" "1" "1" "$AC232_GOAL_RECORDS"; then
+      echo "  ac232 record written → $AC89"
+      return 0
+    fi
+  fi
+  echo "  NOTE: AC-232 record NOT written (goal write/read-back 未达标 —— 写调用 0 与空文件同形，三字段缺一不可，硬规则 3b)"
+  return 0
+}
+
 # ── 自检（hermetic：AC1 顺序 + AC2 直接量正/负控制，不碰真实安装）────────────────────────
 selfcheck() {
   local tmp rc=1
@@ -1769,6 +1861,41 @@ Enter to confirm · Esc to cancel"
   echo "selfcheck: ac234-record(zero-count) refused=$ac234_refused_zc (expect 1 — 三计数任一≤0 拒写)"
   echo "selfcheck: ac234-record(empty-host) refused=$ac234_refused_em (expect 1 — 缺 host 拒写)"
 
+  # control 33/34/35 (AC-232 下游 goal 载体写+读回记录正/负控制, hermetic ——
+  # gap-ac232-downstream-goal-carrier-write-readback):
+  #   记录(33 正)：write_ac232_record 写出的记录三字段逐字满足 criterion 过滤（goal_write_ok/goal_read_back_ok
+  #     是 JSON 字面 true、goal_records 是 JSON 整数 5），并带 top-level build_sha（AC-214 新鲜度锚）。
+  #   记录(34 负, 写失败/读回空)：write_ac232_record 如实写 goal_write_ok=false / goal_read_back_ok=false /
+  #     goal_records=0（false/0 是有效读数——AC4 负控制据此注入能取假的记录，criterion 读 false/0 仍 exit 1）。
+  #   记录(35 负, fail-closed)：host 空 ⇒ 拒写（缺值≠合格，硬规则 3b）。
+  local ac232_file ac232_wrote=0 ac232_fields_ok=0 ac232_neg_ok=0 ac232_refused=0
+  ac232_file="$tmp/ac232.jsonl"
+  AC89="$ac232_file"; TS="2026-09-10T00:00:00Z"; BUILD_SHA="0123456789abcdef0123456789abcdef01234567"
+  if write_ac232_record "hostB-fake" "/tmp/third-party-fake" "1" "1" "5"; then
+    ac232_wrote=1
+    if grep -q '"ac":"GOAL-009-AC-232"' "$ac232_file" \
+       && grep -q '"host":"hostB-fake"' "$ac232_file" \
+       && grep -q '"project_root":"/tmp/third-party-fake"' "$ac232_file" \
+       && grep -q '"goal_write_ok":true' "$ac232_file" \
+       && grep -q '"goal_read_back_ok":true' "$ac232_file" \
+       && grep -q '"goal_records":5' "$ac232_file" \
+       && grep -q '"build_sha":"0123456789abcdef0123456789abcdef01234567"' "$ac232_file"; then
+      ac232_fields_ok=1
+    fi
+  fi
+  if write_ac232_record "hostB-fake" "/tmp/third-party-fake" "0" "0" "0"; then
+    if grep -q '"goal_write_ok":false' "$ac232_file" && grep -q '"goal_read_back_ok":false' "$ac232_file" && grep -q '"goal_records":0' "$ac232_file"; then
+      ac232_neg_ok=1
+    fi
+  fi
+  if ! write_ac232_record "" "/tmp/third-party-fake" "1" "1" "5" 2>/dev/null; then
+    ac232_refused=1
+  fi
+  AC89=""; TS=""; BUILD_SHA=""
+  echo "selfcheck: ac232-record(valid) wrote=$ac232_wrote fields_ok=$ac232_fields_ok (expect 1/1)"
+  echo "selfcheck: ac232-record(write-failed) neg_ok=$ac232_neg_ok (expect 1 — goal_write_ok=false 仍写, 缺件如实非静默)"
+  echo "selfcheck: ac232-record(empty-host) refused=$ac232_refused (expect 1 — 缺 host 拒写, 缺值≠合格)"
+
   if [ "$d1" = "1" ] && [ "$d2" = "no" ] && [ "$a1" = "1" ] && [ "$a2" = "yes" ] \
      && [ "$c3_e" = "1" ] && [ "$c3_ok" = "1" ] \
      && [ "$c4_e" = "1" ] && [ "$c4_ok" = "0" ] \
@@ -1795,11 +1922,12 @@ Enter to confirm · Esc to cancel"
      && [ "$ac234_tasks_pos" = "3" ] && [ "$ac234_goals_pos" = "2" ] && [ "$ac234_rounds_pos" = "5" ] \
      && [ "$ac234_tasks_neg" = "0" ] && [ "$ac234_goals_neg" = "0" ] && [ "$ac234_rounds_neg" = "0" ] \
      && [ "$ac234_wrote" = "1" ] && [ "$ac234_fields_ok" = "1" ] && [ "$ac234_refused_zc" = "1" ] && [ "$ac234_refused_em" = "1" ] \
+     && [ "$ac232_wrote" = "1" ] && [ "$ac232_fields_ok" = "1" ] && [ "$ac232_neg_ok" = "1" ] && [ "$ac232_refused" = "1" ] \
      && [ "$tp_ok" = "1" ]; then
-    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed); AC-204 carrier record writes the five criterion fields verbatim (forbidden_count=0 integer, enable_declared=true literal) and refuses a forbidden-copy or no-enable record (fail-closed, 成对判定); AC-205 carrier record writes the three criterion fields verbatim (shipped_from_installed_artifact=true + transcript_confirmed=true literals, top-level build_sha) with transcript_confirmed derived from transcript-delivery-check reading the transcript (hit ⇒ delivered / miss ⇒ not) — never from a send exit code — and refuses shipped=false / transcript_confirmed=false / empty-host (fail-closed, AC4 负控制); AC-234 render counts are derived from rendered HTML content (task/goal anchors + round-row anchors — never an HTTP status code, AC2) and can take false (empty-shell page ⇒ 0/0/0); the AC-234 carrier record writes the six criterion fields verbatim (tasks_rendered/goals_rendered/round_records_rendered as JSON integers) and refuses a zero-count or empty-host record (fail-closed, AC4 负控制)"
+    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed); AC-204 carrier record writes the five criterion fields verbatim (forbidden_count=0 integer, enable_declared=true literal) and refuses a forbidden-copy or no-enable record (fail-closed, 成对判定); AC-205 carrier record writes the three criterion fields verbatim (shipped_from_installed_artifact=true + transcript_confirmed=true literals, top-level build_sha) with transcript_confirmed derived from transcript-delivery-check reading the transcript (hit ⇒ delivered / miss ⇒ not) — never from a send exit code — and refuses shipped=false / transcript_confirmed=false / empty-host (fail-closed, AC4 负控制); AC-234 render counts are derived from rendered HTML content (task/goal anchors + round-row anchors — never an HTTP status code, AC2) and can take false (empty-shell page ⇒ 0/0/0); the AC-234 carrier record writes the six criterion fields verbatim (tasks_rendered/goals_rendered/round_records_rendered as JSON integers) and refuses a zero-count or empty-host record (fail-closed, AC4 负控制); the AC-232 carrier record writes the three criterion fields verbatim (goal_write_ok/goal_read_back_ok as JSON literals, goal_records as a JSON integer) with a top-level build_sha anchor, truthfully writes false/0 when the goal write fails or read-back is empty (缺件如实非静默, AC4 负控制 — 写调用 0 与空文件同形), and refuses an empty-host record (fail-closed, 硬规则 3b)"
     rc=0
   else
-    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc m4_reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused ac201_pos_w=$ac201_pos_w ac201_sha_len=${#ac201_pos_sha} ac201_tgz_len=${#ac201_pos_tgz} ac201_pos_ac=$ac201_pos_ac ac201_neg_w=$ac201_neg_w ac201_neg_lines=$ac201_neg_lines g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused ac204_wrote=$ac204_wrote ac204_fields_ok=$ac204_fields_ok ac204_refused_fc=$ac204_refused_fc ac204_refused_en=$ac204_refused_en ac205_tc_hit=$ac205_tc_hit ac205_tc_miss=$ac205_tc_miss ac205_wrote=$ac205_wrote ac205_fields_ok=$ac205_fields_ok ac205_ship_refused=$ac205_ship_refused ac205_conf_refused=$ac205_conf_refused ac205_host_refused=$ac205_host_refused ac234_tasks_pos=$ac234_tasks_pos ac234_goals_pos=$ac234_goals_pos ac234_rounds_pos=$ac234_rounds_pos ac234_tasks_neg=$ac234_tasks_neg ac234_goals_neg=$ac234_goals_neg ac234_rounds_neg=$ac234_rounds_neg ac234_wrote=$ac234_wrote ac234_fields_ok=$ac234_fields_ok ac234_refused_zc=$ac234_refused_zc ac234_refused_em=$ac234_refused_em tp_ok=$tp_ok tp_pos_status=$tp_pos_status tp_pos_launcher=$tp_pos_launcher tp_pos_model=$tp_pos_model tp_pos_auth=$tp_pos_auth tp_neg_status=$tp_neg_status tp_neg_rc=$tp_neg_rc tp_ovr_launcher=$tp_ovr_launcher tp_ovr_model=$tp_ovr_model tp_ovr_auth=$tp_ovr_auth tp_res1=$tp_res1 tp_res2=$tp_res2" >&2
+    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc m4_reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused ac201_pos_w=$ac201_pos_w ac201_sha_len=${#ac201_pos_sha} ac201_tgz_len=${#ac201_pos_tgz} ac201_pos_ac=$ac201_pos_ac ac201_neg_w=$ac201_neg_w ac201_neg_lines=$ac201_neg_lines g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused ac204_wrote=$ac204_wrote ac204_fields_ok=$ac204_fields_ok ac204_refused_fc=$ac204_refused_fc ac204_refused_en=$ac204_refused_en ac205_tc_hit=$ac205_tc_hit ac205_tc_miss=$ac205_tc_miss ac205_wrote=$ac205_wrote ac205_fields_ok=$ac205_fields_ok ac205_ship_refused=$ac205_ship_refused ac205_conf_refused=$ac205_conf_refused ac205_host_refused=$ac205_host_refused ac234_tasks_pos=$ac234_tasks_pos ac234_goals_pos=$ac234_goals_pos ac234_rounds_pos=$ac234_rounds_pos ac234_tasks_neg=$ac234_tasks_neg ac234_goals_neg=$ac234_goals_neg ac234_rounds_neg=$ac234_rounds_neg ac234_wrote=$ac234_wrote ac234_fields_ok=$ac234_fields_ok ac234_refused_zc=$ac234_refused_zc ac234_refused_em=$ac234_refused_em ac232_wrote=$ac232_wrote ac232_fields_ok=$ac232_fields_ok ac232_neg_ok=$ac232_neg_ok ac232_refused=$ac232_refused tp_ok=$tp_ok tp_pos_status=$tp_pos_status tp_pos_launcher=$tp_pos_launcher tp_pos_model=$tp_pos_model tp_pos_auth=$tp_pos_auth tp_neg_status=$tp_neg_status tp_neg_rc=$tp_neg_rc tp_ovr_launcher=$tp_ovr_launcher tp_ovr_model=$tp_ovr_model tp_ovr_auth=$tp_ovr_auth tp_res1=$tp_res1 tp_res2=$tp_res2" >&2
     rc=1
   fi
   rm -rf "$tmp"
@@ -1876,6 +2004,7 @@ else
     step4_driver_liveness "$ROOT"
     step5_dual_carrier "$ROOT"
     step_ac234_web_render "$ROOT"
+    step_ac232_goal_carrier_write "$ROOT"
     if [ "$AC205_SESSION" = "1" ]; then
       step_ac205_session_delivery "$ROOT"
     fi
@@ -1942,6 +2071,8 @@ echo "AC5_EVALUATED=$AC5_EVALUATED (1 = judged; 0 = no input, distinct from fail
 echo "AC5_OK=$AC5_OK (1 = build_sha 40-hex + build_date >= ${AC5_MIN_BUILD_DATE} + both sha256 present)"
 echo "AC234_TASKS_RENDERED=$AC234_TASKS_RENDERED AC234_GOALS_RENDERED=$AC234_GOALS_RENDERED AC234_ROUND_RECORDS_RENDERED=$AC234_ROUND_RECORDS_RENDERED (三计数取真实渲染 HTML 内容，⛔ 非 HTTP 200 探活；-1 = 未评估)"
 echo "AC234_HOST=${AC234_HOST:-} AC234_PROJECT_ROOT=${AC234_PROJECT_ROOT:-}"
+echo "AC232_GOAL_WRITE_OK=$AC232_GOAL_WRITE_OK AC232_GOAL_READ_BACK_OK=$AC232_GOAL_READ_BACK_OK AC232_GOAL_RECORDS=$AC232_GOAL_RECORDS (三字段取真实 goal write+show+list 内容，⛔ 非 HTTP 探活；-1 = 未评估)"
+echo "AC232_HOST=${AC232_HOST:-} AC232_PROJECT_ROOT=${AC232_PROJECT_ROOT:-}"
 echo "AC88_VERIFY=$AC88_VERIFY"
 
 # ── 证据 (AC5) ────────────────────────────────────────────────────────────────────────
