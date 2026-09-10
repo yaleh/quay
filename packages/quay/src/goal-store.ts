@@ -207,7 +207,7 @@ interface GoalFrontmatter {
   "superseded-by"?: string[];
   /** AC-216：显式「长期保证」声明——`true` 的 achieved AC 其 GOAL 已 achieved/关闭也仍在 I5 复验域。 */
   "long-term"?: boolean;
-  /** 保真性闸（GOAL-013）——draft→active 激活时保真性判定的结果与理由，落在记录自身（⛔ 不只 stderr）。 */
+  /** 保真性闸（GOAL-013）——激活（任何进入 active 的转换）时保真性判定的结果与理由，落在记录自身（⛔ 不只 stderr）。 */
   fidelity?: { verdict: string; reason: string; at: string };
 }
 
@@ -374,7 +374,7 @@ function commitGoalFile(goalDir: string, fileName: string, id: string, action: s
  * @param {{cap?: number, staleMs?: number, fidelityJudge?: FidelityInvokeJudge}} opts I1′/I3 policy
  *   values (default cap=3, stale=7d — readGoalConfig supplies the .quay/config.yml values at the CLI
  *   entry) + the GOAL-013 fidelity-judge seam. `fidelityJudge` is OPTIONAL: when absent, the
- *   draft→active activation still proceeds (the pre-GOAL-013 path is verbatim unchanged — fails-open),
+ *   activation (any transition INTO active) still proceeds (the pre-GOAL-013 path is verbatim unchanged — fails-open),
  *   BUT the record now carries a distinguishable `fidelity: {verdict:"not-evaluated", reason:"no judge
  *   configured"}` value so "the gate never ran" is no longer carrier-identical to "the gate ran and
  *   passed" (gap-fidelity-judge-unwired-in-production-and-verdict-stubbed-in-tests; hard rule 3b).
@@ -679,7 +679,7 @@ export function createGoalStore(
     /** P6b: a per-call fidelity judge overriding the store-level seam (the CLI's
      *  `--fidelity-judge-argv` path). `undefined` ⇒ fall back to the store-level `fidelityJudge`. */
     fidelityJudge?: FidelityInvokeJudge;
-    /** P6: skip the draft→active activation gate (a deliberate "I know it's not evaluable" override). */
+    /** P6: skip the activation gate (a deliberate "I know it's not evaluable" override). */
     force?: boolean;
     /** P3: the actor recorded in a statusLog entry (default "goal-cli"). */
     actor?: string;
@@ -754,12 +754,17 @@ export function createGoalStore(
       if (supersedes !== undefined) frontmatter.supersedes = supersedes;
       if (supersededBy !== undefined) frontmatter["superseded-by"] = supersededBy;
       const statusChanged = prevStatus !== undefined && nextStatus !== prevStatus;
-      // ⛔ "activation" here is EXACTLY draft→active (SPEC §6 裁定 3: activation is manual; the
-      // goal-driver never flips INTO active). create-as-active is NOT gated — a new record's
-      // criterion is validated by the create completeness contract, and the P6 round-trip concern
-      // ("does the criterion still run after YAML round-trip?") only exists once a record has
-      // been stored once and later activated.
-      const activating = nextStatus === "active" && prevStatus === "draft";
+      // ⛔ "activation" here is ANY transition INTO active (SPEC §6 裁定 3: activation is manual; the
+      // goal-driver never flips INTO active). Reopen paths — achieved→active, needs-human→active,
+      // superseded→active, retired→active — are activations too (gap-activation-gates-bypassed-on-
+      // reopen-path-non-draft-to-active: they were ~19% of all activations and walked past all three
+      // gates, so a criterion rewritten mid-reopen entered active unchecked). create-as-active is NOT
+      // gated — a new record's criterion is validated by the create completeness contract, and the P6
+      // round-trip concern ("does the criterion still run after YAML round-trip?") only exists once a
+      // record has been stored once and later activated. active→active (no status change) is not an
+      // activation. ⛔ The most-frequent reopen shape is needs-human→active (3/5) — the human re-arms
+      // a record after a ruling, precisely when criterion/expect were most likely just rewritten.
+      const activating = nextStatus === "active" && prevStatus !== undefined && prevStatus !== "active";
 
       // A criterion record MUST point at a goal (its activeness derives from that goal).
       if (!isGoalRecord && (typeof frontmatter.goal !== "string" || frontmatter.goal.trim() === "")) {
@@ -831,7 +836,8 @@ export function createGoalStore(
       }
 
       // P6 — activation gate (gap-goal-store-write-surface-semantics): a CRITERION record
-      // transitioning draft→active must carry an EVALUABLE criterion — run it ONCE and require a
+      // transitioning INTO active (draft / achieved / needs-human / superseded / retired → active)
+      // must carry an EVALUABLE criterion — run it ONCE and require a
       // definitive verdict (pass OR fail both prove "it can run"; a hard-true criterion is
       // evaluable and passes). "not-evaluated" (empty criterion, or the command fails to spawn)
       // ⇒ REJECT with the reason surfaced on stderr. `--force` overrides for a deliberate
@@ -1065,7 +1071,7 @@ export function createGoalStore(
 //   batch --json '<array>'  — write N records in ONE commit (each: id + the write fields)
 //              (`--origin` is REQUIRED on create, OPTIONAL on update — patch semantics keep the
 //              stored value; `--dry-run` validates without persisting; `--force` skips the
-//              draft→active activation gate)
+//              activation gate)
 //   gate <id> [--dry-run]     — run the record's `criterion` via the acceptance runner and append
 //                               one GateEvent (verdict+timestamp) to <root>/.quay/gate-events.jsonl
 //                               (--dry-run runs the criterion but appends nothing);
