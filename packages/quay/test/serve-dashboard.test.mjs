@@ -1,8 +1,11 @@
 // @test-group product
 // serve-dashboard.test.mjs — gap-dashboard-live-swimlane-fixed-lane-gantt-timeline: the 循环脉搏卡
 // swimlane becomes a fixed-5-lane gantt merging in-flight + worker-outcome history.
-//   AC1 — mergeLiveAndHistoryIntervals dedups by run_id (a run in BOTH sources appears once) and uses
-//         ended_at for historical end / now for in-flight end.
+//   AC1 — mergeLiveAndHistoryIntervals dedups a run present in BOTH sources by (taskId, startMs) —
+//         NOT run_id (which is the driver-round id shared by every task in that driver lifetime) — and
+//         uses ended_at for historical end / now for in-flight end. A regression test pins that
+//         distinct tasks sharing one run_id ALL survive (gap-dashboard-gantt-runid-dedup-collapses-
+//         driver-round-shared-id).
 //   AC2 — packLanes greedy packing: (a) non-overlap → one lane; (b) 5 overlap → exactly 5 lanes;
 //         (c) a 6th overlap → overflow (no index clip, not silently dropped).
 //   AC3 — renderLiveGanttSvg renders one <rect> per input interval + exactly 5 lane guide lines.
@@ -34,7 +37,7 @@ function workerWorkspace(prefix) {
   return ws;
 }
 
-test("AC1: mergeLiveAndHistoryIntervals dedups by run_id, ends historical at ended_at and in-flight at now", () => {
+test("AC1: mergeLiveAndHistoryIntervals dedups a run in BOTH sources by (taskId, startMs), ends historical at ended_at and in-flight at now", () => {
   const nowMs = FIXED_NOW_MS;
   const winStart = nowMs - 3 * HOUR_MS;
   const endedMs = nowMs - 30 * 60_000;
@@ -61,6 +64,43 @@ test("AC1: mergeLiveAndHistoryIntervals dedups by run_id, ends historical at end
   const histOnly = out.find((i) => i.runId === "R3");
   assert.equal(histOnly.endMs, endedMs, "a historical interval ends at ended_at");
   assert.equal(histOnly.fanInOutcome, "landed", "the mechanical fan-in outcome is carried through");
+});
+
+// gap-dashboard-gantt-runid-dedup-collapses-driver-round-shared-id AC1: the production shape that the
+// old run_id-keyed dedup silently destroyed — one driver round (one shared run_id) dispatches MANY
+// distinct tasks; every one must survive as its own interval.
+test("regression: distinct tasks sharing one run_id (driver round id) are each kept, not collapsed", () => {
+  const nowMs = FIXED_NOW_MS;
+  const winStart = nowMs - 12 * HOUR_MS;
+  const records = [
+    { task: "gap-a", run_id: "wk-prod-1", started_at: new Date(nowMs - 5 * HOUR_MS).toISOString(), ended_at: new Date(nowMs - 4 * HOUR_MS).toISOString(), final_state: "completed", mechanical_fan_in: null },
+    { task: "gap-b", run_id: "wk-prod-1", started_at: new Date(nowMs - 3 * HOUR_MS).toISOString(), ended_at: new Date(nowMs - 2 * HOUR_MS).toISOString(), final_state: "completed", mechanical_fan_in: { outcome: "landed" } },
+    { task: "gap-c", run_id: "wk-prod-1", started_at: new Date(nowMs - 1 * HOUR_MS).toISOString(), ended_at: new Date(nowMs - 30 * 60_000).toISOString(), final_state: "failed", mechanical_fan_in: null },
+  ];
+
+  const out = mergeLiveAndHistoryIntervals([], records, winStart, nowMs);
+
+  assert.equal(out.length, 3, "three distinct tasks sharing one run_id all survive");
+  assert.deepEqual(out.map((i) => i.taskId).sort(), ["gap-a", "gap-b", "gap-c"], "each task keeps its own block");
+});
+
+// gap-dashboard-gantt-runid-dedup-collapses-driver-round-shared-id AC2: the dedup still fires for a
+// genuinely-shared run — in-flight + its terminal outcome record, same taskId and same startedAtMs —
+// because Date.parse(started_at) round-trips to the exact startedAtMs the in-flight side carries.
+test("regression: the (taskId, startMs) key still dedups a run that is both in-flight AND terminal-outcome", () => {
+  const nowMs = FIXED_NOW_MS;
+  const winStart = nowMs - 3 * HOUR_MS;
+  const startMs = nowMs - 10 * 60_000;
+  const inFlight = [{ taskId: "T-shared", runId: "R1", startedAtMs: startMs, phase: "implementing" }];
+  const records = [
+    { task: "T-shared", run_id: "R1", started_at: new Date(startMs).toISOString(), ended_at: new Date(nowMs - 5 * 60_000).toISOString(), final_state: "completed", mechanical_fan_in: null },
+  ];
+
+  const out = mergeLiveAndHistoryIntervals(inFlight, records, winStart, nowMs);
+
+  assert.equal(out.length, 1, "the same run in both sources collapses to one interval");
+  assert.equal(out[0].endMs, nowMs, "in-flight wins: end is now, not the outcome ended_at");
+  assert.equal(out[0].phase, "implementing", "in-flight wins: the phase survives");
 });
 
 test("AC2: packLanes greedy packing — non-overlap, exactly-cap overlap, and the overflow arm", () => {
