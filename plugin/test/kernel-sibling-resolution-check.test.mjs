@@ -89,6 +89,49 @@ test("RED (P3): template-string — `${__dirname}/x.sh` interpolation is a viola
   assert.equal(v[0].script, "resource-gate.sh");
 });
 
+// ── RED: 跨包源码锚点（P4）三种写法【各一例】⇒ 检查器红（GOAL-012 风险 4 扩面；gap-kernel-sibling-check-blind-…）──
+test("RED (P4 join): path.join(repoRoot(), \"packages\", …) cross-package source anchor is a violation", () => {
+  const src =
+    'import { repoRoot } from "./repo-root.ts";\n' +
+    'const mod = await import(pathToFileURL(path.join(repoRoot(), "packages", "quay", "src", "gate", "gate-event-store.ts")).href);\n';
+  const v = scanText(src);
+  assert.equal(v.length, 1, JSON.stringify(v));
+  assert.equal(v[0].form, "cross-package");
+  assert.equal(v[0].script, "gate-event-store.ts");
+});
+
+test("RED (P4 join): path.join(<var>, \"packages\", …) cross-package source anchor is a violation", () => {
+  const src = 'export function run(root: string) { return path.join(root, "packages", "quay", "src", "fan-in", "ff-merge.ts"); }\n';
+  const v = scanText(src);
+  assert.equal(v.length, 1, JSON.stringify(v));
+  assert.equal(v[0].form, "cross-package");
+  assert.equal(v[0].script, "ff-merge.ts");
+});
+
+test("RED (P4 template): `${root}/packages/…/src/…` cross-package source anchor is a violation", () => {
+  const src = 'export function run(root: string) { return `${root}/packages/quay/src/goal-store.ts`; }\n';
+  const v = scanText(src);
+  assert.equal(v.length, 1, JSON.stringify(v));
+  assert.equal(v[0].form, "cross-package");
+  assert.equal(v[0].script, "goal-store.ts");
+});
+
+// ── 不误伤（P4 边界）：相对 import / bin 布局 / 非 packages 前缀不命中 ───────────────────────────────────
+test("GREEN: a RELATIVE import of a packages/** source module is NOT a cross-package violation", () => {
+  const src = 'const mod = await import("../../packages/quay/src/serve-send.ts");\n';
+  assert.deepEqual(scanText(src), [], JSON.stringify(scanText(src)));
+});
+
+test("GREEN: a packages/<pkg>/bin anchor is NOT a cross-package SOURCE violation (src 面之外)", () => {
+  const src = 'export const bin = path.join(root, "packages", "quay", "bin", "quay.ts");\n';
+  assert.deepEqual(scanText(src), [], JSON.stringify(scanText(src)));
+});
+
+test("GREEN: a non-packages path.join does NOT report as cross-package", () => {
+  const src = 'export const x = path.join(root, "src", "config.ts");\n';
+  assert.deepEqual(scanText(src), [], JSON.stringify(scanText(src)));
+});
+
 // ── DEV-TREE-ONLY 豁免（GOAL-012 风险 2：豁免带理由、可复核，⛔ 不是恒绿） ──────────────────────────
 test("GREEN: a naive anchor WITH the kernel-sibling-dev-tree-only marker is exempted", () => {
   const src =
@@ -103,6 +146,22 @@ test("RED: the SAME anchor WITHOUT the marker is a violation (豁免不是恒绿
   const v = scanText(src);
   assert.equal(v.length, 1, JSON.stringify(v));
   assert.equal(v[0].form, "naive-__dirname");
+});
+
+test("GREEN: a cross-package anchor WITH the kernel-sibling-dev-tree-only marker is exempted (AC3 豁免可复核)", () => {
+  const src =
+    'import path from "node:path";\n' +
+    "// kernel-sibling-dev-tree-only: 本仓库自检工具只在 dev tree 内跑，读自己的 packages/ 树做检查（源树直跑、不经 bundle），锚 root 是正确行为。\n" +
+    'export const store = path.join(scriptRoot, "packages", "quay", "src", "goal-store.ts");\n';
+  assert.deepEqual(scanText(src), [], JSON.stringify(scanText(src)));
+});
+
+test("RED: the SAME cross-package anchor WITHOUT the marker is a violation (豁免不是恒绿)", () => {
+  const src = 'import path from "node:path";\nexport const store = path.join(scriptRoot, "packages", "quay", "src", "goal-store.ts");\n';
+  const v = scanText(src);
+  assert.equal(v.length, 1, JSON.stringify(v));
+  assert.equal(v[0].form, "cross-package");
+  assert.equal(v[0].script, "goal-store.ts");
 });
 
 // ── 扫描面（AC1：shipped kernel 面显式枚举 plugin/scripts + packages/quay/src） ────────────────────

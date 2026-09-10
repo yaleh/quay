@@ -6,11 +6,14 @@
 //
 // 回答的问题（capability-catalog QUESTION）：
 //   shipped kernel 代码（plugin/scripts/*.{ts,mjs,js} + packages/quay/src/**/*.ts）里，是否存在把
-//   自己的 sibling 脚本锚在 naive `__dirname` / target root / 模板字符串拼接处、而非经
-//   `resolveKernelSibling`/`resolveKernelPluginRoot` 的调用点？——即 GOAL-012 退出条件①的 A 域
-//   「手工枚举 3 次 3 漏」被机械枚举取代的落点。AC-203 前例：`cli/driver.ts` 曾用
+//   自己的 sibling 脚本（P1/P2/P3）或跨包源码模块（P4，`packages/*/src/**`）锚在 naive `__dirname` /
+//   target root / 模板字符串拼接处、而非经 `resolveKernelSibling`/`resolveKernelPluginRoot`（及
+//   Core 的 dist/shipped 感知解析器）的调用点？——即 GOAL-012 退出条件①的 A 域「手工枚举 3 次 3 漏」
+//   被机械枚举取代的落点。AC-203 前例：`cli/driver.ts` 曾用
 //   `path.join(<workspace root>, "plugin/scripts/driver-runtime.ts")` 解析 kernel，quay-init 取消
-//   plugin/ 拷贝后每个第三方项目都死于 "kernel not found"。
+//   plugin/ 拷贝后每个第三方项目都死于 "kernel not found"。P4 同族前例（2026-09-10 生产复现）：
+//   `worker-driver.ts` 用 `path.join(repoRoot(), "packages", "quay", "src", …)` 锚 gate-event-store
+//   模块，shipped 包把 packages/quay/ 打平到包根 ⇒ MODULE_NOT_FOUND 被吞 ⇒ gate-events.jsonl 永不写。
 //
 // 判定（能取假，硬规则 3/4）——按位置判定（硬规则 2），只屏蔽注释、不屏蔽字符串字面量：
 //   P1 naive-__dirname — `path.join(__dirname, "<name>.<ext>")` / `path.resolve(__dirname,
@@ -22,6 +25,16 @@
 //     `${<var>}/plugin/scripts/<name>.<ext>`（插值后【紧邻】脚本路径，⛔ 中间夹 prose 不算——
 //     `` `${HOOK_FINGERPRINT} — installed by plugin/scripts/…` `` 不是路径拼接）。GOAL-012 风险 4：
 //     三种拼接形态各一例，⛔ 不止一种。
+//   P4 cross-package — `path.join(<rootExpr>, "packages", "<pkg>", "src", …)` / 模板字面量
+//     `` `${<rootExpr>}/packages/<pkg>/src/…` ``，把【另一个包的源码模块】(`packages/*/src/**`)
+//     锚在一个 root 上。判据是「该路径指向的东西随包出厂、其在 shipped 布局下的位置与源树不同」：
+//     shipped npm 包把 packages/<pkg>/ 打平到包根 ⇒ 源树里的 `packages/<pkg>/src/x.ts` 在 shipped
+//     布局下是 `src/x.ts`、`packages/` 段不存在 ⇒ 运行时 MODULE_NOT_FOUND。这是 P2(target-root) 的
+//     跨包镜像：P2 锚的是 plugin/scripts 兄弟脚本（第三方项目无 plugin/），P4 锚的是另一个包的 src
+//     模块（第三方项目无 packages/）。<rootExpr> 接受裸标识符（`root`/`worktree`/`scriptRoot`）或
+//     调用形（`repoRoot()`）。⛔ 不匹配相对 import（`import("../../packages/quay/src/…")`——那经
+//     esbuild bundle 在构建期解析，非运行时 root 拼接）；⛔ 不匹配 `packages/<pkg>/bin/…`（bin 是
+//     另一布局锚点类别，不在本条 src 面内）。
 //
 // ⛔ 为什么不屏蔽字符串（对 P1/P2）：`buildNonCodeMask` 的线性状态机在嵌套模板字面量
 // （`` `${foo(`inner`)}` ``）处会把一大段真代码误当字符串，从而漏报 full-suite-runner.ts 里 4 处
@@ -83,12 +96,28 @@ export const P3_TEMPLATE_ROOT_RE = new RegExp(
   `\\$\\{[A-Za-z_$][A-Za-z0-9_$]*\\}/plugin/scripts/[A-Za-z0-9_.-]+\\.${SCRIPT_EXT}`,
 );
 
+/** P4 — cross-package source anchor：`path.join(<rootExpr>, "packages", "<pkg>", "src", …)` 的多参
+ *  形态。第一参是根表达式（裸标识符或调用形 `repoRoot()`），随后字面量 "packages"/包名/"src"，
+ *  其后 ≥1 个字符串字面量段、末段是 `.ts` 模块名（组 2 = 末段文件名）。⛔ 只匹配 `.ts`（src 面），
+ *  bin/ 布局锚点不在本条面内。⛔ 第一参只收单层调用（`foo()`），不收 `a.b.c()` 复合调用——
+ *  缺陷实测形态是 `repoRoot()`/裸 root 变量，多段成员表达式另类。 */
+export const P4_CROSS_PACKAGE_JOIN_RE = new RegExp(
+  `path\\.(join|resolve)\\(\\s*[A-Za-z_$][A-Za-z0-9_$]*(?:\\s*\\([^)]*\\))?\\s*,\\s*["']packages["']\\s*,\\s*["'][A-Za-z0-9_.-]+["']\\s*,\\s*["']src["']\\s*,\\s*(?:["'][^"']*["']\\s*,\\s*)*["']([A-Za-z0-9_.-]+\\.ts)["']`,
+  "g",
+);
+
+/** P4 — cross-package source anchor：模板字面量 `` `${<rootExpr>}/packages/<pkg>/src/<…>.ts` ``。
+ *  组 1 = `src/` 之后的 `.ts` 相对路径（可含子目录，末段即模块文件名）。 */
+export const P4_TEMPLATE_CROSS_PACKAGE_RE = new RegExp(
+  `\\$\\{[A-Za-z_$][A-Za-z0-9_$]*\\}/packages/[A-Za-z0-9_.-]+/src/((?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\\.ts)`,
+);
+
 /** DEV-TREE-ONLY 豁免标记（命中行或紧邻注释块携带即豁免，⛔ 带理由）。 */
 export const DEV_TREE_ONLY_MARKER = "kernel-sibling-dev-tree-only";
 
 export interface SiblingViolation {
-  /** 拼接形态：naive-__dirname / target-root / template-string。 */
-  form: "naive-__dirname" | "target-root" | "template-string";
+  /** 拼接形态：naive-__dirname / target-root / template-string / cross-package。 */
+  form: "naive-__dirname" | "target-root" | "template-string" | "cross-package";
   /** 命中的脚本文件名。 */
   script: string;
   /** 1-based 行号。 */
@@ -261,6 +290,14 @@ export function scanText(src: string): SiblingViolation[] {
     push("target-root", m[2], m.index);
   }
 
+  // P4 — cross-package join（`path.join(<root>, "packages", <pkg>, "src", …)`；同 P1/P2：命中起点的
+  //  `path.` 必须是代码位置；组 2 = 末段 .ts 模块文件名）。
+  P4_CROSS_PACKAGE_JOIN_RE.lastIndex = 0;
+  while ((m = P4_CROSS_PACKAGE_JOIN_RE.exec(src)) !== null) {
+    if (comment[m.index] === 1) continue;
+    push("cross-package", m[2], m.index);
+  }
+
   // P3 — 模板字符串（只在反引号跨度内匹配；开反引号须不是注释位置）。
   for (const { start, body } of templateLiteralBodies(src)) {
     if (comment[start] === 1) continue;
@@ -271,6 +308,17 @@ export function scanText(src: string): SiblingViolation[] {
     }
     const rm = body.match(P3_TEMPLATE_ROOT_RE);
     if (rm) push("template-string", scriptFromMatch(rm[0]), start);
+  }
+
+  // P4 — cross-package template（`${<root>}/packages/<pkg>/src/<…>.ts`；组 1 = src 之后的 .ts 相对路径，
+  //  末段即模块文件名）。
+  for (const { start, body } of templateLiteralBodies(src)) {
+    if (comment[start] === 1) continue;
+    const pm = body.match(P4_TEMPLATE_CROSS_PACKAGE_RE);
+    if (pm) {
+      const seg = pm[1].split("/");
+      push("cross-package", seg[seg.length - 1], start);
+    }
   }
 
   return violations.sort((a, b) => a.line - b.line);
@@ -351,12 +399,12 @@ usage: node --no-warnings --experimental-strip-types plugin/scripts/kernel-sibli
   } else if (res.notEvaluated) {
     process.stderr.write(`kernel-sibling-resolution-check: NOT-EVALUATED — no scannable surface under ${root}\n`);
   } else if (res.ok) {
-    process.stdout.write(`kernel-sibling-resolution-check: PASS — ${res.surface.length} kernel file(s) scanned, 0 naive sibling resolution(s)\n`);
+    process.stdout.write(`kernel-sibling-resolution-check: PASS — ${res.surface.length} kernel file(s) scanned, 0 naive kernel resource resolution(s)\n`);
   } else if (noBlock) {
-    process.stderr.write(`kernel-sibling-resolution-check: REPORT-ONLY (${res.violations.length} naive sibling resolution(s)) — not fail-closed\n`);
+    process.stderr.write(`kernel-sibling-resolution-check: REPORT-ONLY (${res.violations.length} naive kernel resource resolution(s)) — not fail-closed\n`);
     for (const v of res.violations) process.stderr.write(`  - [${v.form}] ${v.script} @ ${v.snippet}\n`);
   } else {
-    process.stderr.write(`kernel-sibling-resolution-check: RED (${res.violations.length} naive sibling resolution(s))\n`);
+    process.stderr.write(`kernel-sibling-resolution-check: RED (${res.violations.length} naive kernel resource resolution(s))\n`);
     for (const v of res.violations) process.stderr.write(`  - [${v.form}] ${v.script} @ ${v.snippet}\n`);
   }
 
