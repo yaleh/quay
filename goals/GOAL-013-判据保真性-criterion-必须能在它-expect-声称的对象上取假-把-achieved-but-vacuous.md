@@ -1,7 +1,7 @@
 ---
 id: GOAL-013
 title: 判据保真性——criterion 必须能在它 expect 声称的对象上取假，把「achieved-but-vacuous」从三条不变式的盲区变成激活期可判
-status: active
+status: achieved
 kind: goal
 origin: '立条依据（人 2026-09-10 授权执行）：GOAL-012 于 07:03:36Z flip achieved，其 AC-225 于
   07:00:55Z flip achieved（reason "I2: criterion pass"），而该判据背后的
@@ -21,6 +21,11 @@ statusLog:
     actor: cli:human-ruling-2026-09-10
     reason: 人 2026-09-10 裁定后授权执行：achieved 后发现进一步问题而要求修改/重开是诚实行为，且该行为模式需被机制承载——本 goal
       是该裁定的机制落点（激活期保真性闸）。立条时 active=GOAL-009 一条，本条激活后 2/3。
+  - at: 2026-09-10T15:35:00.855Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 ---
 ## 背景
 
