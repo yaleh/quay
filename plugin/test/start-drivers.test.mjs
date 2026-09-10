@@ -1,7 +1,7 @@
 // @test-group engine
 // start-drivers.test.mjs — tasks/gap-skill-start-drivers-webserver.
 // Tests for plugin/scripts/start-drivers.ts — the idempotent wrapper that brings the promotion +
-// worker + goal drivers and the web server into a running state via the quay CLI (the drivers
+// worker + outer + goal drivers and the web server into a running state via the quay CLI (the drivers
 // skill's ONE executable delegate).
 //
 // Coverage:
@@ -163,16 +163,16 @@ test("resolveCliInvocation — explicit .ts / explicit .js / source-tree / PATH 
 
 test("planActions — the idempotency decision is pure", () => {
   assert.deepEqual(
-    planActions({ promotionAlive: true, workerAlive: true, goalAlive: true, serveListening: true }),
-    { startPromotion: false, startWorker: false, startGoal: false, startServe: false },
+    planActions({ promotionAlive: true, workerAlive: true, outerAlive: true, goalAlive: true, serveListening: true }),
+    { startPromotion: false, startWorker: false, startOuter: false, startGoal: false, startServe: false },
   );
   assert.deepEqual(
-    planActions({ promotionAlive: false, workerAlive: false, goalAlive: false, serveListening: false }),
-    { startPromotion: true, startWorker: true, startGoal: true, startServe: true },
+    planActions({ promotionAlive: false, workerAlive: false, outerAlive: false, goalAlive: false, serveListening: false }),
+    { startPromotion: true, startWorker: true, startOuter: true, startGoal: true, startServe: true },
   );
   assert.deepEqual(
-    planActions({ promotionAlive: true, workerAlive: false, goalAlive: true, serveListening: true }),
-    { startPromotion: false, startWorker: true, startGoal: false, startServe: false },
+    planActions({ promotionAlive: true, workerAlive: false, outerAlive: true, goalAlive: true, serveListening: true }),
+    { startPromotion: false, startWorker: true, startOuter: false, startGoal: false, startServe: false },
   );
 });
 
@@ -202,17 +202,19 @@ test("full flow — run#1 starts drivers + serve, run#2 starts nothing (idempote
     assert.equal(first.status, 0, `first run must exit 0:\n${first.stdout}\n${first.stderr}`);
     assert.match(first.stdout, /promotion: started/);
     assert.match(first.stdout, /worker: started/);
+    assert.match(first.stdout, /outer: started/);
     assert.match(first.stdout, /goal: started/);
     assert.match(first.stdout, /serve: started/);
-    assert.deepEqual(readLogLines(log), [["start", "promotion"], ["start", "worker"], ["start", "goal"], ["serve"]]);
+    assert.deepEqual(readLogLines(log), [["start", "promotion"], ["start", "worker"], ["start", "outer"], ["start", "goal"], ["serve"]]);
 
     const second = runScript(args, { env });
     assert.equal(second.status, 0, `second run must exit 0:\n${second.stdout}\n${second.stderr}`);
     assert.match(second.stdout, /promotion: already running/);
     assert.match(second.stdout, /worker: already running/);
+    assert.match(second.stdout, /outer: already running/);
     assert.match(second.stdout, /goal: already running/);
     assert.match(second.stdout, /serve: already listening/);
-    assert.deepEqual(readLogLines(log), [["start", "promotion"], ["start", "worker"], ["start", "goal"], ["serve"]],
+    assert.deepEqual(readLogLines(log), [["start", "promotion"], ["start", "worker"], ["start", "outer"], ["start", "goal"], ["serve"]],
       "second run must not re-start anything");
 
     // Reap the detached fake serve (pid written to .quay/serve.pid).

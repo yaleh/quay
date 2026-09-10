@@ -35,5 +35,36 @@
       "bundle-type": "marketplace",
       "note": "Distributed via marketplace JSON files (.claude-plugin/marketplace.json + plugin/.claude-plugin/marketplace.json) checked into the repo and version-bumped with each release. Included in the npm-pack tarball. Not a separate GitHub Release asset."
     }
-  }
+  },
+  "capabilities": [
+    { "name": "promotion", "kind": "driver-kind", "sourceRef": "plugin/scripts/driver-runtime.ts:DRIVER_KINDS", "verifiedBy": "packages/quay/scripts/build-plugin-dist.mjs" },
+    { "name": "worker", "kind": "driver-kind", "sourceRef": "plugin/scripts/driver-runtime.ts:DRIVER_KINDS", "verifiedBy": "packages/quay/scripts/build-plugin-dist.mjs" },
+    { "name": "outer", "kind": "driver-kind", "sourceRef": "plugin/scripts/driver-runtime.ts:DRIVER_KINDS", "verifiedBy": "packages/quay/scripts/build-plugin-dist.mjs" },
+    { "name": "quality", "kind": "driver-kind", "sourceRef": "plugin/scripts/driver-runtime.ts:DRIVER_KINDS", "verifiedBy": "packages/quay/scripts/build-plugin-dist.mjs" },
+    { "name": "meta", "kind": "driver-kind", "sourceRef": "plugin/scripts/driver-runtime.ts:DRIVER_KINDS", "verifiedBy": "packages/quay/scripts/build-plugin-dist.mjs" },
+    { "name": "goal", "kind": "driver-kind", "sourceRef": "plugin/scripts/driver-runtime.ts:DRIVER_KINDS", "verifiedBy": "packages/quay/scripts/build-plugin-dist.mjs" },
+    { "name": "adr", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
+    { "name": "action", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
+    { "name": "adjudicate", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
+    { "name": "complete", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
+    { "name": "config", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
+    { "name": "driver", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
+    { "name": "gate", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
+    { "name": "gate-log", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
+    { "name": "goal", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
+    { "name": "init", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
+    { "name": "manager", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
+    { "name": "mcp", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
+    { "name": "meta", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
+    { "name": "migrate", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
+    { "name": "promote", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
+    { "name": "retreat", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
+    { "name": "run", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
+    { "name": "serve", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
+    { "name": "task", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
+    { "name": "quay", "kind": "mcp-server", "sourceRef": "packages/quay/src/mcp-server.ts", "verifiedBy": "packages/quay/test/mcp-server.test.mjs" },
+    { "name": "quay-native", "kind": "mcp-server", "sourceRef": "packages/quay-native/src/mcp-server.ts", "verifiedBy": "packages/quay-native/test/abi-symmetry.mjs" },
+    { "name": "quay-github", "kind": "mcp-server", "sourceRef": "packages/quay-github/src/mcp-server.ts", "verifiedBy": "packages/quay-github/test/mcp-server.test.mjs" },
+    { "name": "quay-backlog", "kind": "mcp-server", "sourceRef": "packages/quay-backlog/src/mcp-server.ts", "verifiedBy": "packages/quay-backlog/test/mcp-server.test.mjs" }
+  ]
 }

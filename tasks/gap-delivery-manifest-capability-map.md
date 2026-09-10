@@ -1,7 +1,7 @@
 ---
 id: gap-delivery-manifest-capability-map
 title: delivery-manifest.json 从产物列表升级为「能力→打包路径→验证闸」映射表
-status: ready
+status: done
 labels:
   - gap
 parent: null

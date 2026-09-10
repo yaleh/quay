@@ -1,5 +1,6 @@
 // start-drivers.ts — `quay driver start --kind promotion` + `quay driver start --kind worker` +
-// `quay driver start --kind goal` + `quay serve` wrapped into ONE idempotent in-session call.
+// `quay driver start --kind outer` + `quay driver start --kind goal` + `quay serve` wrapped into
+// ONE idempotent in-session call.
 // (tasks/gap-skill-start-drivers-webserver — SPEC-tmux-retirement-2026-09-03 §1.4 Layer 3b 第④步)
 //
 // The drivers skill (`plugin/skills/drivers/SKILL.md`) delegates to this executable rather than
@@ -7,7 +8,7 @@
 // `quay-init.sh` (a second copy of the start logic is exactly the drift this repo keeps removing).
 //
 // What it does (idempotent — safe to run twice):
-//   - For each driver kind (promotion, worker, goal): `quay driver status --kind <kind> --json` says
+//   - For each driver kind (promotion, worker, outer, goal): `quay driver status --kind <kind> --json` says
 //     `alive: 1` ⇒ skip; otherwise `quay driver start --kind <kind> --root <root>`. The driver
 //     kernel (driver-runtime.ts startKind) is itself idempotent (`already-running`), so a race
 //     between two invocations cannot double-spawn — the status pre-check is a fast path, not the
@@ -30,7 +31,7 @@ import path from "node:path";
 import http from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 
-const DRIVER_KINDS = ["promotion", "worker", "goal"] as const;
+const DRIVER_KINDS = ["promotion", "worker", "outer", "goal"] as const;
 const DEFAULT_SERVE_HOST = "0.0.0.0";
 const DEFAULT_SERVE_PORT = 4173;
 const DEFAULT_SERVE_TIMEOUT_MS = 30000;
@@ -130,10 +131,11 @@ export function probeUrl(host: string, port: number, timeoutMs = 2000): Promise<
 
 /** Pure decision: given the current live state, which start actions are needed? Idempotency is
  *  this function's whole point — nothing already-running is re-started. */
-export function planActions(opts: { promotionAlive: boolean; workerAlive: boolean; goalAlive: boolean; serveListening: boolean }) {
+export function planActions(opts: { promotionAlive: boolean; workerAlive: boolean; outerAlive: boolean; goalAlive: boolean; serveListening: boolean }) {
   return {
     startPromotion: !opts.promotionAlive,
     startWorker: !opts.workerAlive,
+    startOuter: !opts.outerAlive,
     startGoal: !opts.goalAlive,
     startServe: !opts.serveListening,
   };
@@ -213,7 +215,7 @@ function parseArgs(argv: string[]): Options | null {
     else if (a === "--serve-timeout") opts.serveTimeoutMs = Number(argv[++i]);
     else if (a === "--json") opts.json = true;
     else if (a === "--help" || a === "-h") {
-      process.stdout.write(`start-drivers — start promotion + worker + goal drivers and the web server (idempotent)
+      process.stdout.write(`start-drivers — start promotion + worker + outer + goal drivers and the web server (idempotent)
 
 Usage:
   node --experimental-strip-types plugin/scripts/start-drivers.ts [flags]
