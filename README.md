@@ -12,13 +12,27 @@ development backlog is driven, progressively, by `quay-native` itself. See
 [**docs/proposals/**](docs/proposals/) below if you want that deeper story —
 it is not required reading to install or use `quay`.
 
-## The three packages
+## The four packages
 
-| Package | Role | Binary |
-|---|---|---|
-| [`packages/quay`](packages/quay) | **Core** — provider-agnostic CLI, web UI, and MCP client. Talks to whichever Provider is enabled in `.quay/config.yml` over the Provider ABI. | `quay` |
-| [`packages/quay-native`](packages/quay-native) | **Native Provider** (the reference implementation) — a markdown+frontmatter task store on local disk, exposed over both a raw CLI and an MCP server. | `quay-native` |
-| [`packages/quay-github`](packages/quay-github) | **GitHub Provider** — maps GitHub Issues onto the same canonical task view-model, proving the ABI transfers to a second, real backend. | `quay-github` |
+| Package | Role | Binary | Published? |
+|---|---|---|---|
+| [`packages/quay`](packages/quay) | **Core** — provider-agnostic CLI, web UI, and MCP client. Talks to whichever Provider is enabled in `.quay/config.yml` over the Provider ABI. | `quay` | **Yes** — npm tarball, SEA binary, Claude Code plugin (see `delivery-manifest.json`) |
+| [`packages/quay-native`](packages/quay-native) | **Native Provider** (the reference implementation) — a markdown+frontmatter task store on local disk, exposed over both a raw CLI and an MCP server. | `quay-native` | **Yes** — SEA binary (bundled inside the `quay` SEA archive) |
+| [`packages/quay-github`](packages/quay-github) | **GitHub Provider** — maps GitHub Issues onto the same canonical task view-model, proving the ABI transfers to a second, real backend. | `quay-github` | No — reference implementation only |
+| [`packages/quay-backlog`](packages/quay-backlog) | **Backlog.md Provider** — read-only, maps a local [Backlog.md](https://github.com/MrLesk/Backlog.md) board onto the same task view-model; a third, heterogeneous real backend (DIR-039-B). | `quay-backlog` | No — reference implementation only |
+
+`quay-github` and `quay-backlog` exist to **prove the Provider ABI
+transfers** to real, independent backends (GitHub Issues; a third-party
+markdown board format) — that is their whole job, and they do it by being
+runnable straight from source (`node --experimental-strip-types
+packages/quay-github/bin/quay-github.ts <cmd>` /
+`node --experimental-strip-types packages/quay-backlog/bin/quay-backlog.ts <cmd>`,
+same as the "from source" install path below). They deliberately have
+**no `dist/` build step and no release artifact**: no npm tarball, no SEA
+binary, no entry in `delivery-manifest.json`. This is a scoping decision,
+not an oversight — only `quay` (Core) + `quay-native` are the productized,
+published deliverable; `quay-github`/`quay-backlog` stay reference-only
+until there is a concrete reason to publish them independently.
 
 A task has an `id`, `title`, `status` (`todo` / `ready` / `in-progress` /
 `done`, etc. — Provider-defined), `role` (`primitive` or `compound`),
