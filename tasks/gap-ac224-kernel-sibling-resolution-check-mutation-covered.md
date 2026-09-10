@@ -1,7 +1,7 @@
 ---
 id: gap-ac224-kernel-sibling-resolution-check-mutation-covered
 title: A域检查器 kernel-sibling-resolution-check 被突变机制覆盖：能取假由清单证明，恒绿不算保证（AC-224）
-status: done
+status: ready
 labels:
   - gap
   - mechanism
