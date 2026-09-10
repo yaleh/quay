@@ -1,7 +1,7 @@
 ---
 id: gap-config-key-consumer-check-mechanical-enumeration
 title: 机械枚举交付配置键消费者——零消费者键（merge_target）接线或删除，config-key-consumer-check 可取假且 covered
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -29,12 +29,12 @@ AC-235（GOAL-015 退出条件③）有结构性缺口：要求「交付的每�
 
 ## AC
 
-- [ ] `node --no-warnings --experimental-strip-types plugin/scripts/config-key-consumer-check.ts --root . --json` exit 0，且零消费者键计数为 0
-- [ ] `bash plugin/scripts/checker-mutation-check.sh --list --json` 输出含 `config-key-consumer-check` 且该条 `covered: true`（能取假；恒绿即假保证）
-- [ ] 枚举输出三态可区分：has-consumer / no-consumer-to-wire / documented-with-reason，豁免条目带理由文本可复核
-- [ ] `grep -rn 'merge_target' plugin/scripts/*.ts packages/quay/src/*.ts` 零命中，且 `plugin/scripts/quay-init.sh` 不再写入该键（或已接线消费者并给出证据）
-- [ ] mutation case 注入零消费者键 ⇒ checker RED，恢复 ⇒ GREEN（covered 的负控制证据）
-- [ ] `scripts/test.sh` 全量绿（含新 checker 注册、capability-catalog AC1c、closure-ratchet、checker-mutation-check）
+- [x] `node --no-warnings --experimental-strip-types plugin/scripts/config-key-consumer-check.ts --root . --json` exit 0，且零消费者键计数为 0
+- [x] `bash plugin/scripts/checker-mutation-check.sh --list --json` 输出含 `config-key-consumer-check` 且该条 `covered: true`（能取假；恒绿即假保证）
+- [x] 枚举输出三态可区分：has-consumer / no-consumer-to-wire / documented-with-reason，豁免条目带理由文本可复核
+- [x] `grep -rn 'merge_target' plugin/scripts/*.ts packages/quay/src/*.ts` 零命中，且 `plugin/scripts/quay-init.sh` 不再写入该键（或已接线消费者并给出证据）
+- [x] mutation case 注入零消费者键 ⇒ checker RED，恢复 ⇒ GREEN（covered 的负控制证据）
+- [x] `scripts/test.sh` 全量绿（含新 checker 注册、capability-catalog AC1c、closure-ratchet、checker-mutation-check）
 
 ## DoD
 
@@ -47,6 +47,7 @@ AC-235（GOAL-015 退出条件③）有结构性缺口：要求「交付的每�
 - plugin/scripts/capability-catalog.sh（注册六表；改后需 quay-init-closure-ratchet --reanchor）
 - docs/analysis/quay-init-closure-ratchet.baseline.json（re-anchor）
 - plugin/scripts/quay-init.sh（删 merge_target 写入；必要时显式 laydown 清单）
-- scripts/test.sh（run_static_checks 注册）
+- plugin/scripts/runner-static-gate.ts（run_static_checks 注册——AC128 hub 拆分后正本，非 scripts/test.sh）
 - plugin/test/config-key-consumer-check.test.mjs（新建）
+- plugin/test/quay-init.test.mjs（merge_target 断言改负控：键不再写入）
 - tasks/gap-config-key-consumer-check-mechanical-enumeration.md（本任务）
