@@ -4,10 +4,10 @@
 // 判 activate 的 draft AC 经一轮 driver 后被 writeGoalStatus 以 "active" 翻写（判决不再零消费）。
 //
 // 覆盖（AC-223 机制半 + DoD 三条负控制各带「改坏 ⇒ 测试红」的取假路径）：
-//  ① 正向：判 activate 的 draft AC ⇒ 一轮后 flips 含 to=="active" 且目标 status 翻 active
-//     （writeGoalStatus 以 "active" 被调；改坏=不消费判决会红）。
-//  ② 负控制 (a)：判 needs-human / hold 的 draft AC 不被激活（flips 无该 ac 的 to=="active"；
-//     改坏=只按牵引激活、无视判决会红）。
+//  ① 正向：结构完备 + 零关联任务的 draft AC 一轮后 flips 含 to=="active" 且目标 status 翻 active，
+//     且次轮被 computeGoalGaps 计为 gap（牵引不再是激活判据；改坏=不消费判决会红）。
+//  ② 负控制 (a)：判 needs-human 的 draft AC 不被激活（flips 无该 ac 的 to=="active"；
+//     改坏=无视判决把非 activate 也激活会红）。
 //  ③ 负控制 (b)：GOAL 声明 posture（measure-only）名下 draft AC 不被激活（改坏=无视 posture
 //     自行激活会红）。
 //  ④ 负控制 (c)：driver 不写 retired（flips 无 to=="retired"；改坏=把本任务的 "active" 写成
@@ -46,39 +46,35 @@ function writeTaskFile(tmp, { id, status, goalAc }) {
   fs.writeFileSync(path.join(tmp, 'tasks', `${id}.md`), lines.join('\n'), 'utf8');
 }
 
-// ── ① 正向 + ② 负控制(a) + ④ 负控制(c)：一轮 driver 内三条 draft AC 分诊异判，只 activate 被翻 ──
+// ── ① 正向 + ② 负控制(a) + ④ 负控制(c)：正向零牵引也激活，needs-human / retired 不被翻 ──
 
-test('正向：判 activate 的 draft AC 一轮后 flips 含 to=="active" 且目标 status 翻 active', async () => {
+test('正向：结构完备 + 零关联任务的 draft AC 一轮后翻 active，次轮被 computeGoalGaps 计为 gap', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-activate-'));
   try {
     fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
     fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true });
     writeGoalFile(tmp, { id: 'GOAL-009', status: 'active', kind: 'goal' });
-    // AC-903：criterion 真 + 有牵引 ⇒ activate（正向对象）。
-    writeGoalFile(tmp, { id: 'AC-903', status: 'draft', kind: 'criterion', goal: 'GOAL-009', criterion: 'true' });
-    writeTaskFile(tmp, { id: 'T-903', status: 'todo', goalAc: 'AC-903' });
-    // AC-902：criterion 真 + 无牵引 ⇒ hold（负控制 a 对象）。
-    writeGoalFile(tmp, { id: 'AC-902', status: 'draft', kind: 'criterion', goal: 'GOAL-009', criterion: 'true' });
-    // AC-901：criterion 空 + 有牵引 ⇒ needs-human（负控制 a 对象）。
+    // AC-903：criterion 非空 + 零关联任务（无牵引）⇒ activate（本任务核心：牵引不再是激活判据）。
+    // criterion `false`（可评估、判 fail）⇒ 次轮不被 I2 翻 achieved，仍 active，可被 computeGoalGaps 计为 gap。
+    writeGoalFile(tmp, { id: 'AC-903', status: 'draft', kind: 'criterion', goal: 'GOAL-009', criterion: 'false' });
+    // AC-901：criterion 空 ⇒ needs-human（负控制 a 对象）。
     writeGoalFile(tmp, { id: 'AC-901', status: 'draft', kind: 'criterion', goal: 'GOAL-009', criterion: '' });
-    writeTaskFile(tmp, { id: 'T-901', status: 'todo', goalAc: 'AC-901' });
 
     const { fact } = await runGoalRound(tmp, { scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'] });
     const flips = fact.value.flips;
     assert.ok(Array.isArray(flips), 'value.flips 是数组');
 
-    // 正向：AC-903 翻 active。
+    // 正向：AC-903 翻 active（零关联任务也激活——牵引不再是判据）。
     const flip903 = flips.find((f) => f.id === 'AC-903' && f.to === 'active');
     assert.ok(flip903, 'AC-903 在 flips 中有 to=="active" 条目（判 activate ⇒ writeGoalStatus("active") 被执行）');
-    assert.equal(flip903.ok, true, 'AC-903 激活写成功（criterion true 可评估，P6 放行）');
+    assert.equal(flip903.ok, true, 'AC-903 激活写成功（criterion false 可评估为 fail，P6 放行）');
 
-    // 负控制 (a)：needs-human 的 AC-901 / hold 的 AC-902 不被激活。
+    // 负控制 (a)：needs-human 的 AC-901 不被激活。
     // （re-anchor 在 runGoalRound 的分诊循环里结构上不可达——循环以 active GOAL 的 gid 过滤
     // 名下 AC，`String(r.goal)===gid` 恒为合法 GOAL-NNN，triageDraftAc 的 re-anchor 前置恒假；
-    // 故驱动层的非 activate 判决只可能是 needs-human / hold 两态，此处逐态各取一对象。）
+    // 故驱动层的非 activate 判决只可能是 needs-human / hold（posture）两态，hold 由 ③ 覆盖。）
     const activeIds = new Set(flips.filter((f) => f.to === 'active').map((f) => f.id));
-    assert.ok(!activeIds.has('AC-901'), 'needs-human 的 AC-901 不被激活（改坏=无视判决按牵引激活会红）');
-    assert.ok(!activeIds.has('AC-902'), 'hold 的 AC-902 不被激活（改坏=无视判决按牵引激活会红）');
+    assert.ok(!activeIds.has('AC-901'), 'needs-human 的 AC-901 不被激活（改坏=无视判决把非 activate 也激活会红）');
 
     // 负控制 (c)：flips 无 to=="retired"（driver 永不写 retired；改坏=把 "active" 写成 "retired" 会红）。
     assert.ok(flips.every((f) => f.to !== 'retired'), 'flips 无 to=="retired"（driver 不写 retired，AC-211）');
@@ -88,6 +84,12 @@ test('正向：判 activate 的 draft AC 一轮后 flips 含 to=="active" 且目
     const ac903 = records.find((r) => String(r.id) === 'AC-903');
     assert.ok(ac903, 'AC-903 在读回列表中');
     assert.equal(ac903.status, 'active', 'AC-903 目标 status 翻 active（goal-store 写面生效）');
+
+    // 次轮：AC-903 已 active + 零关联任务 ⇒ computeGoalGaps 计为 gap（循环依赖解除的端到端证据）。
+    const second = await runGoalRound(tmp, { scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'] });
+    const gap903 = (second.fact.value.gaps ?? []).find((g) => g.ac === 'AC-903');
+    assert.ok(gap903, '次轮：AC-903 被 computeGoalGaps 看见（立案机制现在看得见它）');
+    assert.equal(gap903.state, 'gap', 'AC-903 计为 gap（零关联任务 ⇒ 缺口语义环会立案）');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

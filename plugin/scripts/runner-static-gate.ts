@@ -241,6 +241,15 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/ scripts/ plugin/scripts/concurrency-literal-check.ts plugin/test/concurrency-literal-check.test.mjs
   run_checker "concurrency-literal-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/concurrency-literal-check.ts" --gate --root "${repo_root}"
+  echo "== target-identity-literal check (gap-ac226-target-identity-literal-check, GOAL-012 B 域) =="
+  # TARGET 域（GOAL-012 B 域）：shipped kernel 把逐项目不同的身份（分支名 / test_command / tasks_dir）
+  # 写成无 override 通道的裸字面量、而非从目标项目 config / 运行时 git 状态派生。判别标准（写进实现，
+  # ⛔ 不留给读者意会）：逐项目不同 ∧ 无 override 通道；合法默认值（develop/integration/master/tasks/
+  # HEAD——逐项目不变）不误报。按位置判定（buildNonCodeMask——注释/字符串里拼写不报）。exit 1 违规即红
+  # （set -euo pipefail），一个把目标身份写死的裸字面量在提交时刻红，不用等换第三方项目才暴露。
+  # @static-tier change
+  # @static-object plugin/scripts/ packages/quay/src/ plugin/scripts/target-identity-literal-check.ts plugin/test/target-identity-literal-check.test.mjs
+  run_checker "target-identity-literal-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/target-identity-literal-check.ts" --root "${repo_root}"
   echo "== task-file-bypass check (gap-adr013-gate-blind-spots-and-task-bypass-ratchet, AC4/AC5) =="
   # Fail-closed ratchet on direct `tasks/*.md` access outside the Provider ABI: a `tasks/` path literal
   # used as the argument of a file-operation (fs.* / readFileSync / writeFileSync / execFileSync /
@@ -559,6 +568,17 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/goal-driver.ts plugin/scripts/goal-driver-task-boundary-check.ts plugin/test/goal-driver-task-boundary-check.test.mjs plugin/scripts/checker-mutation-cases/goal-driver-task-boundary-check.sh
   run_checker "goal-driver-task-boundary-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/goal-driver-task-boundary-check.ts" --root "${repo_root}"
+  echo "== kernel-sibling-resolution check (GOAL-012 A 域, gap-ac224-kernel-sibling-resolution-check-mutation-covered) =="
+  # KERNEL 域 naive sibling 解析检查器：shipped kernel 把自己的 sibling 脚本锚在 naive `__dirname` /
+  # target root / 模板字符串而非经 resolveKernelSibling/resolveKernelPluginRoot 即违规（AC-203 前例）。
+  # Whole-store 扫描（plugin/scripts + packages/quay/src），DEV-TREE-ONLY 豁免标记带理由可复核。
+  # ⛔ 落在 full（不 scoped）——全店枚举，不随单任务 Touches 收窄。
+  # Fail-closed（不带 --no-block）：AC-225 迁移已归零（实测 --root . --json ⇒ violations: [] / total: 0），
+  #   枚举归零这一半由此重新有强制力——新落一处 naive __dirname / 跨包源码锚点即红，与 B 域
+  #   target-identity-literal-check（:252，fail-closed）对称。负控制由 scoped-static-checks.test.mjs 的
+  #   注册行断言（不得带 --no-block）+ 注入即红干跑钉住（硬规则 3/4）。
+  # @static-tier full
+  run_checker "kernel-sibling-resolution-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/kernel-sibling-resolution-check.ts" --root "${repo_root}" --json
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait

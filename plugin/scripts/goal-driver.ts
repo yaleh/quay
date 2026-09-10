@@ -20,9 +20,11 @@
 //      worker-driver 驱动。⛔ goal 侧对 needs-human 只如实报 stalled 并停止空派 gap-filing agent，
 //      不去替 task 机制恢复它（落地速率 / ready 池积压 / needs-human 恢复都是 task 机制的指标，
 //      不是 goal 机制的缺陷——DIR-131 Finding 里的错误归因反例）。
-//   ⛔ draft→active（激活）——人/manager 手动（裁定 3「暂不做自动晋升」），本 driver 不碰。
+//   ⛔ draft→active（激活）——只经分诊判 activate + ⑧ 落地（裁定「晋升应当是语义的」；激活判据 =
+//      「这条 AC 作为判据是否就绪」而非「有没有任务牵引」——gap-goal-driver-ac-activation-gated-on-
+//      traction-not-goal-semantics）。re-anchor / needs-human / hold 只落痕不 flip。
 //   ⛔ active→retired（放弃）——人裁定。放弃是判断不是计算，本 driver 只报红不翻状态。
-//      分诊不再判「retire」（AC-219：无任务牵引≠死信）——draft AC 无牵引分诊为 hold，⛔ 不翻 retired。
+//      分诊不再判「retire」（AC-219：无任务牵引≠死信）——draft AC 无牵引分诊为 activate，⛔ 不翻 retired。
 //   ⛔ 不直接改 task 状态（撞 lifecycle/promotion-driver 的 expectedStatus CAS）。
 //   ⛔ 不机械写 tasks/*.md（全仓四个 driver 零先例）——缺口立案由 G9 的语义环 spawn 短命 agent
 //      经 ABI（quay-file-task）做，driver 自己仍不手写任务文件。
@@ -198,16 +200,29 @@ export async function writeGoalStatus(
   id: string,
   status: string,
   dataRoot: string,
-  opts: { actor?: string; reason?: string } = {},
+  opts: { actor?: string; reason?: string; fidelityJudgeArgv?: string } = {},
 ): Promise<{ ok: boolean; reason: string }> {
   const extra: string[] = [];
   if (opts.actor) extra.push("--actor", opts.actor);
   if (opts.reason) extra.push("--reason", opts.reason);
+  // 保真性判定器 argv（JSON 数组）——仅激活路径传；goal-store 把 prompt 作末参数追加。缺省不传 ⇒
+  // goal-store 记 `fidelity: {verdict:"not-evaluated", reason:"no judge configured"}`（诚实留痕，
+  // fail-open）。⛔ 不入每轮 gate 路径（本函数只被 ⑧ 激活与 I2 达成两处调用，达成不传）。
+  if (opts.fidelityJudgeArgv) extra.push("--fidelity-judge-argv", opts.fidelityJudgeArgv);
   const argv = goalStoreArgv(scriptRoot, ["write", id, "--status", status, ...extra], dataRoot);
   const r = await runAsync(argv, { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
   if (r.error) return { ok: false, reason: `write spawn error: ${r.error.message}` };
   if (r.status !== 0) return { ok: false, reason: `write exit ${r.status}: ${(r.stderr || "").trim().slice(0, 200)}` };
   return { ok: true, reason: "written" };
+}
+
+/** 保真性判定器 argv 前缀的 JSON 编码（真 LLM，launchArgv 单一构造点——⛔ 不手拼 `claude -p`）。
+ *  goal-store 的 `--fidelity-judge-argv` seam 把 prompt 作末参数追加，故此处取
+ *  launchArgv("fix-worker", "", root) 去掉末尾空 prompt 后的 `-p` 前缀。⛔ profiles.yml 缺失/非法 ⇒
+ *  launchArgv 抛错（调用方 catch 后不传 seam ⇒ goal-store 记 "no judge configured"，fail-open +
+ *  诚实留痕，AC1）。 */
+export function fidelityJudgeArgvJson(root: string): string {
+  return JSON.stringify(launchArgv("fix-worker", "", root).slice(0, -1));
 }
 
 /** 读 I3 三桶 + I4 分歧（复用 goal-store 的单一真相源 checkStaleness，⛔ 不在本文件重算）。
@@ -569,7 +584,7 @@ function acExpectOf(records: Array<Record<string, unknown>>, id: string): string
 export async function readReadyPoolJudgment(root: string, readyPoolCmd: string[] | null = null): Promise<ReadyPoolJudgment | null> {
   const argv = readyPoolCmd ?? [
     "node", "--experimental-strip-types",
-    path.join(root, "plugin", "scripts", "ready-pool-check.ts"),
+    path.join(root, "plugin", "scripts", "ready-pool-check.ts"),  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     "--root", root, "--json",
   ];
   const r = await runAsync(argv, { timeoutMs: CRITERION_TIMEOUT_MS });
@@ -602,12 +617,15 @@ export async function readReadyPoolJudgment(root: string, readyPoolCmd: string[]
 // 对象集 = active GOAL 名下 status=draft 的 AC（扩 G9 的 active-only 对象集，⛔ 不影响
 // computeGoalGaps 只数 active 的口径）。对每条 draft AC 出四态判决之一：
 //   activate / re-anchor / needs-human / hold
-// 判决只【记录】，⛔ 不 flip 任何 AC status（draft→active 归人/manager 裁定 3；放弃 retired 归人）。
-// 「无任务牵引」≠「死信」——刚提案的 draft AC 天然无牵引，分诊为 hold 而非 retire→needs-human
+// 激活判据 =「这条 AC 作为判据是否就绪」（goal 锚合法 + criterion 非空 + 无 posture），⛔ 不是
+// 「有没有任务牵引」——牵引是下游调度事实，由 computeGoalGaps 四态读，不决定是否纳入判定
+// （gap-goal-driver-ac-activation-gated-on-traction-not-goal-semantics）。activate 判决被 ⑧
+// 消费（writeGoalStatus 翻 active）；re-anchor / needs-human / hold 仍只落痕不 flip。
+// 「无任务牵引」≠「死信」——刚提案的 draft AC 天然无牵引，分诊为 activate 而非 retire→needs-human
 // （AC-219，gap-meta-goal-triage-fresh-draft-not-retire）。
 //
-// 判决函数是纯函数（record + goal posture + taskFacts ⇒ decision），⛔ 不读进程存活/时钟——
-// 使四态可单测（goal-triage.test.mjs），并使 AC-215（posture 挡 activate）可落地。
+// 判决函数是纯函数（record + goal posture ⇒ decision；taskFacts 参数不再参与判决），
+// ⛔ 不读进程存活/时钟——使四态可单测（goal-triage.test.mjs），并使 AC-215（posture 挡 activate）可落地。
 
 /** 四态判决词表（AC-210 判据读它；retire 已按 AC-219 移除——「无任务牵引」≠「死信」，放弃归人）。
  *  ⛔ 加态即改判据与 AC-215 的「其余三态」口径。 */
@@ -627,15 +645,18 @@ export interface TriageEntry {
  *  - record     该 draft AC 的 goal-store 视图模型（id / goal / criterion / expect / …）
  *  - goalPosture 所属 GOAL 的 posture（AC-215 的读取端，本任务只收不读——production 侧由 AC-215
  *               从 goal 记录读出后传入；非空即视为「declared hold」，具体词表由 AC-215 定）
- *  - taskFacts  readTaskFacts 的读数（可能 null = 读不到 tasks ⇒ 按无牵引处理）
+ *  - taskFacts  readTaskFacts 的读数（可能 null = 读不到 tasks）。⛔ 不再参与判决——激活判据是
+ *               「这条 AC 作为判据是否就绪」，不是「有没有任务牵引」（牵引由 computeGoalGaps 四态
+ *               读，不决定是否纳入判定——gap-goal-driver-ac-activation-gated-on-traction-not-
+ *               goal-semantics）。
  *
  * 判决顺序（每条各判一个可区分的前置，⛔ 顺序即语义）：
  *  1. re-anchor   goal 锚缺失/非法（非 GOAL-NNN）⇒ 需重指向一条 GOAL-NNN
  *  2. needs-human criterion 缺失/空 ⇒ 无法评估，需人补判据或确认退役
  *  3. hold        goal 声明 posture ⇒ 按住不激活（尊重人「先测量后承诺」的姿态，AC-215）
- *  4. activate    有关联任务推进（todo/ready/needs-human）⇒ 建议激活进入判定
- *  5. hold        其余（结构完备、active goal、无 posture、无牵引）⇒ 待人工激活/补任务，按住
- *                 （⛔ 不判退役——「无任务牵引」≠「死信」，刚提案的 draft AC 天然无牵引，AC-219）
+ *  4. activate    其余（结构完备 = goal 锚合法 + criterion 非空 + 无 posture）⇒ 建议激活进入
+ *                 判定。「无任务牵引」≠「死信」也≠「不激活」——刚提案的 draft AC 天然无牵引，
+ *                 激活后 computeGoalGaps 会看见它并立案（⛔ 不判退役，AC-219）
  */
 export function triageDraftAc(
   record: Record<string, unknown>,
@@ -646,10 +667,6 @@ export function triageDraftAc(
   const goalRef = String(record.goal ?? "").trim();
   const criterion = String(record.criterion ?? "").trim();
   const posture = typeof goalPosture === "string" ? goalPosture.trim() : "";
-  // 「牵引」口径 = isTractionStatus（与 computeGoalGaps 同一单一真相源）；done/superseded 不是牵引。
-  const hasTraction = taskFacts !== null && taskFacts.some(
-    (t) => t.goalAc === ac && isTractionStatus(t.status),
-  );
 
   if (goalRef === "" || !/^GOAL-\d{3,}$/.test(goalRef)) {
     return { ac, decision: "re-anchor", reason: `goal 锚缺失/非法（"${goalRef}"）——需重指向一条 GOAL-NNN` };
@@ -660,10 +677,7 @@ export function triageDraftAc(
   if (posture !== "") {
     return { ac, decision: "hold", reason: `goal 声明 posture "${posture}"——按住不激活（尊重人姿态）` };
   }
-  if (hasTraction) {
-    return { ac, decision: "activate", reason: "有关联任务推进（todo/ready/needs-human）——建议激活进入判定" };
-  }
-  return { ac, decision: "hold", reason: "结构完备但无关联任务推进——待人工激活/补任务，按住（⛔ 不判退役：无任务牵引≠死信，AC-219）" };
+  return { ac, decision: "activate", reason: "结构完备（goal 锚合法 + criterion 非空 + 无 posture）——这条 AC 作为判据已就绪，建议激活进入判定（牵引由 computeGoalGaps 读，不决定是否纳入判定）" };
 }
 
 // ── G9 缺口语义环（spawn 短命 agent 经 ABI 立案，照 promotion-driver 的 fix-worker 现成形态）──────
@@ -984,9 +998,22 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   // 条目调 writeGoalStatus 把 draft AC 机械翻 active。激活走 goal-store write，会被 P6
   // not-evaluated 前置闸与 cap 闸挡住（AC-223 origin 风险 C 的守护，driver 无需复制该判断）。
   // ⛔ 不写 retired（裁定 1，AC-211 单测守着）；re-anchor / needs-human / hold 仍不 flip。
+  //
+  // gap-fidelity-judge-unwired-in-production-and-verdict-stubbed-in-tests — 激活接线真保真性判定器：
+  // 激活路径经 `--fidelity-judge-argv` 把 launchArgv("fix-worker") 的真 LLM argv 前缀传给 goal-store，
+  // 由 goal-store 跑判定并拒 vacuous/not-evaluated（P6b）。profiles.yml 缺失 ⇒ 不传 ⇒ goal-store
+  // 诚实记 "no judge configured"（fail-open + 留痕）。⛔ 不在每轮 gate 路径（gateCriterion 不碰它）。
   for (const t of triage) {
     if (t.decision !== "activate") continue;
-    const w = await writeGoalStatus(scriptRoot, t.ac, "active", dataRoot, { actor: "goal-driver", reason: "triage: activate" });
+    let fidelityJudgeArgv: string | undefined;
+    try {
+      fidelityJudgeArgv = fidelityJudgeArgvJson(root);
+    } catch {
+      fidelityJudgeArgv = undefined; // profiles.yml 缺失/非法 ⇒ 不传 seam，goal-store 记 "no judge configured"
+    }
+    const w = await writeGoalStatus(scriptRoot, t.ac, "active", dataRoot, {
+      actor: "goal-driver", reason: "triage: activate", fidelityJudgeArgv,
+    });
     flips.push({ id: t.ac, to: "active", ok: w.ok, reason: w.reason });
   }
 

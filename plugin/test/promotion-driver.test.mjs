@@ -242,13 +242,44 @@ function writeDoDFixer(root) {
 test("defaultPromotionCheckArgv — full-pool --apply (never --targeted) + --cap + --json", () => {
   const argv = defaultPromotionCheckArgv("/r", 5);
   assert.equal(argv[0], "node");
+  // gap-promotion-driver-ready-pool-check-path-third-party：脚本锚在本 kernel 安装位置（dev tree =
+  // 本仓库 plugin/scripts/ready-pool-check.ts，带 --experimental-strip-types），⛔ 非 /r/plugin/scripts/。
   assert.equal(argv[1], "--experimental-strip-types");
-  assert.equal(argv[2], "/r/plugin/scripts/ready-pool-check.ts");
+  assert.ok(argv[2].endsWith(`${path.sep}plugin${path.sep}scripts${path.sep}ready-pool-check.ts`), `argv[2] 是 kernel 侧 .ts：${argv[2]}`);
+  assert.ok(!argv[2].startsWith("/r/"), `argv[2] ⛔ 不锚在 task root：${argv[2]}`);
   assert.ok(argv.includes("--apply"), "AC130: the resident round applies promotions (A22 heartbeat path)");
   assert.ok(argv.includes("--json"));
   assert.deepEqual(argv.slice(argv.indexOf("--root"), argv.indexOf("--root") + 2), ["--root", "/r"]);
   assert.deepEqual(argv.slice(argv.indexOf("--cap"), argv.indexOf("--cap") + 2), ["--cap", "5"]);
   assert.ok(!argv.includes("--targeted"), "AC130: full-pool determination, NOT a single --targeted task");
+});
+
+// gap-promotion-driver-ready-pool-check-path-third-party AC2 负控制：第三方项目（quay-init 布下的面）
+// 无 plugin/scripts/*.ts，只有 shipped dist/*.js。resolveKernelSibling 须回退到 dist/*.js 且不带
+// --experimental-strip-types（stripTypes=false），⛔ 不得拼出 root/plugin/scripts/ready-pool-check.ts。
+test("defaultPromotionCheckArgv — 无 plugin/ 的第三方项目解析到 shipped dist/ready-pool-check.js（stripTypes=false）", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "promotion-third-party-"));
+  try {
+    const dist = path.join(root, "scripts", "dist");
+    fs.mkdirSync(dist, { recursive: true });
+    fs.writeFileSync(path.join(dist, "ready-pool-check.js"), "// bundled\n", "utf8");
+    const saved = process.env.QUAY_PLUGIN_ROOT;
+    process.env.QUAY_PLUGIN_ROOT = root; // resolveKernelScriptsDir() = <root>/scripts，<root>/scripts/*.ts 不存在
+    try {
+      const argv = defaultPromotionCheckArgv("/task-root", 5);
+      assert.equal(argv[0], "node");
+      // ⛔ stripTypes=false ⇒ 无 --experimental-strip-types flag，argv[1] 直接是 bundled .js。
+      assert.equal(argv[1], path.join(root, "scripts", "dist", "ready-pool-check.js"));
+      assert.ok(!argv.includes("--experimental-strip-types"), "stripTypes=false ⇒ 不带 flag");
+      assert.ok(!argv.some((a) => a.includes("/task-root/plugin/scripts/ready-pool-check.ts")), "⛔ 不锚在 task root 的 .ts");
+      assert.ok(argv.includes("--apply") && argv.includes("--json"));
+    } finally {
+      if (saved === undefined) delete process.env.QUAY_PLUGIN_ROOT;
+      else process.env.QUAY_PLUGIN_ROOT = saved;
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("parseIntervalMs / resolveCap — defaults + valid + invalid (fail-closed on bad input)", () => {

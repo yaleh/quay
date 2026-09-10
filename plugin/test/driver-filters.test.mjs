@@ -32,7 +32,6 @@ import {
   STATUS_PRIORITY,
   syncDevelopToDoc,
   docBranchForkedFromDevelop,
-  DOC_BRANCH,
   syncDocDevelopBidirectional,
   NEEDS_HUMAN_CAUSE,
   NEEDS_HUMAN_CAUSES,
@@ -47,6 +46,11 @@ import {
 import { readTaskStatus as workerReadTaskStatus } from "../scripts/worker-driver.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// 测试夹具的 doc 工作分支名（本仓库自己的命名约定 "author"）。⛔ 测试局部常量，非 shipped kernel——
+// 生产代码里该值早已只经 resolveDocBranch 运行时派生（gap-ac226-target-identity-literal-check 消除
+// DOC_BRANCH 残量）。
+const DOC_BRANCH = "author";
 
 function makeRoot(tag) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `driver-filters-${tag}-`));
@@ -712,7 +716,7 @@ test("AC3 — 负控制：develop 前进（纯 ff）⇒ syncDevelopToDoc 后两 
   );
 });
 
-test("AC3 (补) — syncDevelopToDoc 在 develop 分支 / 非 doc 分支 ⇒ not-doc；无变化 ⇒ already", (t) => {
+test("AC3 (补) — syncDevelopToDoc 显式 docBranch ≠ 当前分支 ⇒ not-doc；无变化 ⇒ already", (t) => {
   const root = makeGitRoot("doc-already");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTask(root, "gap-a", "---\nid: gap-a\nstatus: ready\n---");
@@ -720,10 +724,11 @@ test("AC3 (补) — syncDevelopToDoc 在 develop 分支 / 非 doc 分支 ⇒ not
   git(root, "commit", "-q", "-m", "baseline");
   git(root, "branch", "develop");
 
-  // 已在 develop 分支 ⇒ 不适用。
-  assert.equal(syncDevelopToDoc(root), "not-doc", "develop 分支 ⇒ not-doc");
+  // 当前分支（git 默认分支，非 author）≠ 显式 docBranch=author ⇒ 不适用（not-doc 契约经显式参数触发，
+  // ⛔ no-arg 缺省已改为运行时派生 = 当前分支，不再触发 not-doc——gap-doc-branch-hardcoded-author-…）。
+  assert.equal(syncDevelopToDoc(root, "author"), "not-doc", "显式 author 而当前分支非 author ⇒ not-doc");
 
-  // 切到 doc 分支且与 develop 同 commit ⇒ already。
+  // 切到 doc 分支且与 develop 同 commit ⇒ already（no-arg 缺省派生 = 当前分支，仍走「无分歧」）。
   git(root, "checkout", "-q", "-b", DOC_BRANCH);
   assert.equal(syncDevelopToDoc(root), "already", "doc 已与 develop 同 commit ⇒ already");
 });
@@ -817,7 +822,7 @@ test("AC1 — 两触发点改分歧检测：markNeedsHuman 与 applyPromotions �
 test("AC2 — 双向：syncDocDevelopBidirectional 函数体同时调用 develop→doc 与 doc→develop 两方向", () => {
   const src = fs.readFileSync(path.join(__dirname, "../scripts/driver-filters.ts"), "utf8");
   const fn = src.match(/export function syncDocDevelopBidirectional[\s\S]*?\n}/)?.[0] ?? "";
-  assert.match(fn, /syncDevelopToDoc\s*\(\s*root\s*\)/, "develop→doc 方向调用 syncDevelopToDoc");
+  assert.match(fn, /syncDevelopToDoc\s*\(\s*root\s*,\s*docBranch\s*\)/, "develop→doc 方向调用 syncDevelopToDoc（携带派生 docBranch）");
   assert.match(fn, /propagateDocBranchToDevelop\s*\(\s*root\s*\)/, "doc→develop 方向调用 propagateDocBranchToDevelop");
 });
 
@@ -888,6 +893,43 @@ test("负控制 — 双分支未建 ⇒ no-refs（可区分取值，⛔ 与「�
   git(root, "add", "--", "tasks/gap-b.md");
   git(root, "commit", "-q", "-m", "baseline");
   assert.equal(syncDocDevelopBidirectional(root), "no-refs", "读 ref 失败 ⇒ no-refs（非「无分歧」）");
+});
+
+// ── doc 分支运行时派生（gap-doc-branch-hardcoded-author-breaks-third-party-develop-sync）─────────────
+// 硬编码 DOC_BRANCH="author" 使第三方项目（工作分支非 author）的 syncDocDevelopBidirectional 恒 no-refs，
+// 晋升写入对派发永久不可见。修法：DOC_BRANCH 仅作 git 读失败兜底，缺省同步对象改运行时派生
+// （resolveDocBranch = 当前 checked-out 分支）。
+
+test("AC1 (位置判定) — syncDocDevelopBidirectional 不再直接引用 DOC_BRANCH 常量（改经 resolveDocBranch/docBranch）", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../scripts/driver-filters.ts"), "utf8");
+  const fn = src.match(/export function syncDocDevelopBidirectional[\s\S]*?\n}/)?.[0] ?? "";
+  assert.doesNotMatch(fn, /DOC_BRANCH/, "函数体不再直接引用模块级 DOC_BRANCH 常量（⛔ 仍硬编码 ⇒ 假）");
+  assert.match(fn, /resolveDocBranch\s*\(\s*root\s*\)/, "缺省走运行时派生 resolveDocBranch");
+  assert.match(fn, /revParse\s*\(\s*root\s*,\s*docBranch\s*\)/, "doc sha 读自派生 docBranch（⛔ 仍读硬编码 author ⇒ 假）");
+});
+
+test("AC2 (负控制) — 非 author 工作分支（feature-x）⇒ syncDocDevelopBidirectional 运行时派生 ⛔ 不再恒 no-refs", (t) => {
+  const root = makeGitRoot("doc-non-author");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", "---\nid: gap-a\nstatus: ready\n---");
+  git(root, "add", "--", "tasks/gap-a.md");
+  git(root, "commit", "-q", "-m", "baseline");
+  git(root, "branch", "develop");
+  git(root, "checkout", "-q", "-b", "feature-x"); // 工作分支 ≠ author
+
+  // feature-x 前进（翻转），develop 停在 baseline。
+  writeTask(root, "gap-a", "---\nid: gap-a\nstatus: done\n---");
+  git(root, "add", "--", "tasks/gap-a.md");
+  git(root, "commit", "-q", "-m", "feature-x: gap-a done");
+
+  const res = syncDocDevelopBidirectional(root);
+  assert.notEqual(res, "no-refs", "非 author 分支 ⇒ 不再 no-refs（运行时派生读出两个真实 sha）");
+  assert.equal(res, "synced", "真实分歧 ⇒ 双向同步执行");
+  assert.equal(
+    git(root, "rev-parse", "develop").trim(),
+    git(root, "rev-parse", "feature-x").trim(),
+    "develop 快进到 feature-x（ff push 成功，⛔ 仍停在 baseline ⇒ 假）",
+  );
 });
 
 // ── gap-worker-execution-history-index-not-reachable-from-task（C：Needs-Human 指针）──────────────

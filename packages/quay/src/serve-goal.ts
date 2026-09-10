@@ -88,18 +88,40 @@ function sortGoalRows(rows: Record<string, unknown>[], sort: string | null, dir:
   });
 }
 
-/** M2 default order: kind:goal on top (id asc), then criteria grouped by `goal` (contiguous) with
- *  AC id DESC within each group. */
+// gap-webui-goal-list-tab-split-goal-ac: the merged view is gone — GOAL and AC are two different
+// objects that no longer share one table, so their default orders split too. The Goals tab's
+// highest-frequency query is "which goals are being worked on now", hence status priority (active
+// first, then draft → achieved → superseded → retired, id asc within each group) instead of the old
+// pure id-locale order. Unknown statuses sink to the bottom (fail-closed: never interleave with
+// ranked states — hard rule 3b).
+const GOAL_STATUS_ORDER = ["active", "draft", "achieved", "superseded", "retired"];
+
+function goalStatusRank(s: unknown): number {
+  const i = GOAL_STATUS_ORDER.indexOf(String(s));
+  return i === -1 ? GOAL_STATUS_ORDER.length : i;
+}
+
+/** Goals-tab default order: status priority (active → draft → achieved → superseded → retired),
+ *  then id asc within each group. */
 function defaultSortGoalRows(rows: Record<string, unknown>[]): Record<string, unknown>[] {
-  const isGoal = (g: Record<string, unknown>) => String(g.kind) === "goal";
-  const goals = rows.filter(isGoal).sort((a, b) => String(a.id).localeCompare(String(b.id)));
-  const criteria = rows.filter((g) => !isGoal(g)).sort((a, b) => {
+  return [...rows].sort((a, b) => {
+    const ra = goalStatusRank(a.status);
+    const rb = goalStatusRank(b.status);
+    if (ra !== rb) return ra - rb;
+    return String(a.id).localeCompare(String(b.id));
+  });
+}
+
+/** Criteria-tab default order: group by `goal` (contiguous) with AC id DESC within each group —
+ *  the SAME group-by-goal / AC-id-desc logic the merged view used, minus the now-impossible GOAL
+ *  branch (this table only renders criteria). */
+function defaultSortCriteriaRows(rows: Record<string, unknown>[]): Record<string, unknown>[] {
+  return [...rows].sort((a, b) => {
     const ga = String(a.goal ?? "");
     const gb = String(b.goal ?? "");
     if (ga !== gb) return ga.localeCompare(gb);
     return String(b.id).localeCompare(String(a.id)); // within a goal, AC id DESC
   });
-  return [...goals, ...criteria];
 }
 
 // M1: the list table must fit inside <main> (AC1). Removing the whole-prose `origin` column alone
@@ -107,7 +129,22 @@ function defaultSortGoalRows(rows: Record<string, unknown>[]): Record<string, un
 // `criterion` shell command still pushed the table to 1404px vs a 900px <main> and rows to 132px.
 // `table-layout: fixed` + per-column widths makes the table exactly `main`'s width, and
 // nowrap+ellipsis keeps every row single-line (the full title stays reachable via the `title` attr).
-const GOAL_COL_WIDTHS = ["10%", "7%", "9%", "8%", "18%", "12%", "8%", "7%", "7%", "6%", "8%"];
+//
+// gap-webui-goal-list-tab-split-goal-ac: the tab split lets each table carry ONLY its own columns,
+// so every remaining header fits WITHOUT truncation (AC3: no `<th>` scrollWidth > clientWidth) and
+// the semantic columns get a wider budget — title is the widest on both tabs (30% / 16%), up from
+// the merged view's 18% (the pre-fix 336px-vs-156px title squeeze came from packing 11 columns).
+// Goals tab (7 cols): id / status / title / AC 达成 / last progress / first evidence / 挂靠任务.
+// Widths are sized so every `<th>` label fits WITHOUT ellipsis (AC3: no header scrollWidth >
+// clientWidth, measured at 1440px = 868px table). `title` keeps the widest share (34%, up from the
+// merged view's 18% / 156px) — the pre-fix 336px title truncated 180px; at ~295px it truncates ~41px
+// (a ~77% reduction). The long time labels (last progress / first evidence) need ≥128px / ≥132px.
+const GOAL_COL_WIDTHS = ["5%", "9%", "34%", "10%", "15%", "16%", "11%"];
+// Criteria tab (8 cols): id / goal / status / title / criterion / recent verdict / last progress /
+// 挂靠任务. Same header-fit discipline: `recent verdict` (the longest label) needs ≥135px; title
+// keeps 24% (208px — still wider than the merged view's 156px) while the long labels keep their
+// exact-required shares.
+const CRITERIA_COL_WIDTHS = ["5%", "8%", "9%", "24%", "11%", "16%", "15%", "12%"];
 
 function goalTableStyles(): string {
   return `<style>.goal-table{table-layout:fixed;width:100%}.goal-table th,.goal-table td{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.goal-table th a{color:inherit}</style>`;
@@ -180,6 +217,80 @@ async function readGoalTasks(workspaceRoot: string, client: ProviderClient): Pro
   }
 }
 
+/** Goals-tab table (7 cols): id / status / title / AC 达成 / last progress / first evidence /
+ *  挂靠任务. The "AC 达成" and "挂靠任务" cells link to `/goal?kind=criterion&goal=<id>` (proposal 4:
+ *  "先看 GOAL 概览、点进去看它的 AC 明细" without leaving the list page). */
+function renderGoalsTable(
+  rows: Record<string, unknown>[],
+  all: Record<string, unknown>[],
+  taskRead: GoalTaskRead,
+  th: (col: string, label: string) => string,
+): string {
+  // AC rollup over the UNFILTERED array (renderGoalCard's own formula: acs = goal==gid, achieved =
+  // status=="achieved") — so a goal with 0 criteria shows 0/0, never a hard-rule-6 "—".
+  const rollupFor = (gid: string): { achieved: number; total: number } => {
+    const acs = all.filter((r) => String(r.goal ?? "") === gid);
+    const achieved = acs.filter((r) => r.status === "achieved").length;
+    return { achieved, total: acs.length };
+  };
+  // AC ids of ONE goal (the task-attach口径: a task hangs on an AC, never directly on the goal —
+  // the same `goal == gid && id != gid` filter the detail page's criteria block uses).
+  const criteriaIdsFor = (gid: string): string[] =>
+    all.filter((r) => String(r.goal ?? "") === gid && String(r.id ?? "") !== gid).map((r) => String(r.id));
+  const criteriaHref = (gid: string): string => `/goal?kind=criterion&goal=${encodeURIComponent(gid)}`;
+  const body = rows.map((g) => {
+    const gid = String(g.id ?? "");
+    const rollup = rollupFor(gid);
+    const taskAttach = renderTaskAttachText(taskRead, criteriaIdsFor(gid));
+    return html`<tr>
+      <td>${goalIdLink(g.id)}</td>
+      <td>${escapeHtml(String(g.status ?? ""))}</td>
+      <td title="${escapeHtml(String(g.title ?? ""))}">${escapeHtml(String(g.title ?? ""))}</td>
+      <td class="ac-rollup"><a href="${criteriaHref(gid)}">${rollup.achieved}/${rollup.total}</a></td>
+      <td>${timeCell(g.lastProgressAt)}</td>
+      <td>${timeCell(g.firstEvidenceAt)}</td>
+      <td class="task-attach"><a href="${criteriaHref(gid)}">${escapeHtml(taskAttach)}</a></td>
+    </tr>`;
+  }).join("\n");
+  return html`<table class="goal-table">
+    <colgroup>${GOAL_COL_WIDTHS.map((w) => html`<col style="width:${w}">`).join("")}</colgroup>
+    <tr>${th("id", "id")}${th("status", "status")}${th("title", "title")}<th>AC 达成</th>${th("lastProgressAt", "last progress")}${th("firstEvidenceAt", "first evidence")}<th>挂靠任务</th></tr>
+    ${body}
+  </table>`;
+}
+
+/** Criteria-tab table (8 cols): id / goal / status / title / criterion / recent verdict /
+ *  last progress / 挂靠任务. The `goal` cell is the NEW clickable entry point to the store's
+ *  long-supported `?goal=` filter (proposal 3 / AC4): `/goal?kind=criterion&goal=<id>`. */
+function renderCriteriaTable(
+  rows: Record<string, unknown>[],
+  taskRead: GoalTaskRead,
+  th: (col: string, label: string) => string,
+): string {
+  const body = rows.map((g) => {
+    const goal = String(g.goal ?? "");
+    const gid = String(g.id ?? "");
+    const criterion = typeof g.criterion === "string" ? g.criterion : "";
+    const criterionCell = criterion.length > 60 ? `${escapeHtml(criterion.slice(0, 60))}…` : escapeHtml(criterion);
+    const taskAttach = renderTaskAttachText(taskRead, [gid]);
+    return html`<tr>
+      <td>${goalIdLink(g.id)}</td>
+      <td>${goal ? html`<a href="/goal?kind=criterion&goal=${encodeURIComponent(goal)}">${escapeHtml(goal)}</a>` : "—"}</td>
+      <td>${escapeHtml(String(g.status ?? ""))}</td>
+      <td title="${escapeHtml(String(g.title ?? ""))}">${escapeHtml(String(g.title ?? ""))}</td>
+      <td><code>${criterionCell || "—"}</code></td>
+      <td>${goalEvidenceCell(g)}</td>
+      <td>${timeCell(g.lastProgressAt)}</td>
+      <td class="task-attach">${escapeHtml(taskAttach)}</td>
+    </tr>`;
+  }).join("\n");
+  return html`<table class="goal-table">
+    <colgroup>${CRITERIA_COL_WIDTHS.map((w) => html`<col style="width:${w}">`).join("")}</colgroup>
+    <tr>${th("id", "id")}${th("goal", "goal")}${th("status", "status")}${th("title", "title")}${th("criterion", "criterion")}${th("verdict", "recent verdict")}${th("lastProgressAt", "last progress")}<th>挂靠任务</th></tr>
+    ${body}
+  </table>`;
+}
+
 export async function handleGoalList(
   req: IncomingMessage,
   res: ServerResponse,
@@ -196,8 +307,9 @@ export async function handleGoalList(
   let all: Record<string, unknown>[] = [];
   let readError: string | null = null;
   // M4: ONE unfiltered read. list() reads every file then filters in memory anyway (a filtered call
-  // is exactly as expensive as an unfiltered one), so the status/kind/goal filters, the draft count,
-  // AND the AC rollup are ALL derived in memory from this single 65-record array — 2 calls → 1.
+  // is exactly as expensive as an unfiltered one), so the status/kind/goal filters, the draft counts,
+  // AND the AC rollup are ALL derived in memory from this single array — the tab split (proposal 5)
+  // only changes the RENDER, never the query: both tabs share this one `client.goalList()`.
   try {
     all = (await client.goalList()) as unknown as Record<string, unknown>[];
   } catch (err) {
@@ -210,54 +322,25 @@ export async function handleGoalList(
   const taskRead = await readGoalTasks(workspaceRoot, client);
 
   // draft = 唯一「等着人裁定」的态（SPEC-goal-mechanism 裁定 3：draft→active 保留给人）。
-  // 它必须【在任何筛选下都可见】——否则提案写了也没人看得见。故从【未筛选】的全集计数。
-  const draftCount = all.filter((g) => g.status === "draft").length;
+  // 它必须【在任何筛选下都可见】——否则提案写了也没人看得见。故从【未筛选】的全集计数，且
+  // 拆成两个量（proposal 4）：每个 tab 显示自己那类，另一类有待裁定时跨 tab 加一行提示。
+  const draftGoalCount = all.filter((g) => g.status === "draft" && g.kind === "goal").length;
+  const draftAcCount = all.filter((g) => g.status === "draft" && g.kind === "criterion").length;
 
-  // In-memory filters (M3: `goal` reached the store but was dropped HERE — now honored).
-  let goals = all;
-  if (statusFilter) goals = goals.filter((g) => g.status === statusFilter);
-  if (kindFilter) goals = goals.filter((g) => g.kind === kindFilter);
-  if (goalFilter) goals = goals.filter((g) => String(g.goal) === goalFilter);
+  // Tab routing (proposal 1): reuse the existing `kind` param — no new `tab=` param (single source
+  // of truth). `/goal` (no kind) and `?kind=goal` both land on the Goals tab; `?kind=criterion`
+  // lands on the Criteria tab. The "All" merged view is gone.
+  const tab = kindFilter === "criterion" ? "criterion" : "goal";
 
-  // M2: sort in the handler. ?sort is whitelisted; absent → the goal-first default order.
-  goals = sortParam ? sortGoalRows(goals, sortParam, dirParam) : defaultSortGoalRows(goals);
+  // In-memory filters: rows of the ACTIVE tab only, then status/goal (M3: `goal` is honored).
+  let rows = all.filter((g) => String(g.kind ?? "") === tab);
+  if (statusFilter) rows = rows.filter((g) => g.status === statusFilter);
+  if (goalFilter) rows = rows.filter((g) => String(g.goal) === goalFilter);
 
-  // M4: AC rollup over the UNFILTERED array — so ?kind=goal does NOT collapse it to 0 (hard rule 3b).
-  // The formula is renderGoalCard's own: acs = goal==gid, achieved = status=="achieved".
-  const rollupFor = (gid: string): { achieved: number; total: number } => {
-    const acs = all.filter((r) => String(r.goal ?? "") === gid);
-    const achieved = acs.filter((r) => r.status === "achieved").length;
-    return { achieved, total: acs.length };
-  };
-
-  // AC ids of ONE goal (the task-attach口径: a task hangs on an AC, never directly on the goal — the
-  // same `goal == gid && id != gid` filter the detail page's criteria block uses).
-  const criteriaIdsFor = (gid: string): string[] =>
-    all.filter((r) => String(r.goal ?? "") === gid && String(r.id ?? "") !== gid).map((r) => String(r.id));
-
-  const rows = goals.map((g) => {
-    const kind = String(g.kind ?? "");
-    const goal = String(g.goal ?? "");
-    const gid = String(g.id ?? "");
-    const criterion = typeof g.criterion === "string" ? g.criterion : "";
-    const criterionCell = criterion.length > 60 ? `${escapeHtml(criterion.slice(0, 60))}…` : escapeHtml(criterion);
-    const rollup = kind === "goal" ? rollupFor(gid) : null;
-    // A goal row rolls up over its criteria; a criterion row counts its OWN AC id.
-    const taskAttach = renderTaskAttachText(taskRead, kind === "goal" ? criteriaIdsFor(gid) : [gid]);
-    return html`<tr>
-      <td>${goalIdLink(g.id)}</td>
-      <td>${escapeHtml(kind)}</td>
-      <td>${escapeHtml(String(g.status ?? ""))}</td>
-      <td>${goal ? html`<a href="/goal?goal=${encodeURIComponent(goal)}">${escapeHtml(goal)}</a>` : "—"}</td>
-      <td title="${escapeHtml(String(g.title ?? ""))}">${escapeHtml(String(g.title ?? ""))}</td>
-      <td><code>${criterionCell || "—"}</code></td>
-      <td>${goalEvidenceCell(g)}</td>
-      <td>${timeCell(g.lastProgressAt)}</td>
-      <td>${timeCell(g.firstEvidenceAt)}</td>
-      <td class="ac-rollup">${rollup ? html`${rollup.achieved}/${rollup.total}` : "—"}</td>
-      <td class="task-attach">${escapeHtml(taskAttach)}</td>
-    </tr>`;
-  }).join("\n");
+  // M2: sort in the handler. ?sort is whitelisted; absent → the tab's own default order.
+  rows = sortParam
+    ? sortGoalRows(rows, sortParam, dirParam)
+    : tab === "goal" ? defaultSortGoalRows(rows) : defaultSortCriteriaRows(rows);
 
   const statusNav = [
     !statusFilter ? html`<strong>All</strong>` : html`<a href="${goalListHref({ kind: kindFilter, goal: goalFilter })}">All</a>`,
@@ -269,14 +352,13 @@ export async function handleGoalList(
         : html`<a href="${goalListHref({ status: s, kind: kindFilter, goal: goalFilter })}">${s}</a>`
     ),
   ].join(" · ");
-  const kindNav = [
-    !kindFilter ? html`<strong>All</strong>` : html`<a href="${goalListHref({ status: statusFilter, goal: goalFilter })}">All</a>`,
-    ...["goal", "criterion"].map((k) =>
-      k === kindFilter
-        ? html`<strong>${k}</strong>`
-        : html`<a href="${goalListHref({ kind: k, status: statusFilter, goal: goalFilter })}">${k}</a>`
-    ),
-  ].join(" · ");
+  // Tab nav (proposal 1): two pure server-rendered links (no client JS), reusing the kindNav styling
+  // discipline. Goals = `/goal` (no kind, the default tab); Criteria = `/goal?kind=criterion`.
+  const tabNav = html`${tab === "goal"
+    ? `<strong>Goals</strong>`
+    : `<a href="${goalListHref({ status: statusFilter, goal: goalFilter })}">Goals</a>`} · ${tab === "criterion"
+      ? `<strong>Criteria</strong>`
+      : `<a href="${goalListHref({ kind: "criterion", status: statusFilter, goal: goalFilter })}">Criteria</a>`}`;
   // Sortable column headers (M2): each is a link that toggles asc↔desc, preserving all filters.
   const th = (col: string, label: string): string => {
     const active = sortParam === col;
@@ -285,33 +367,43 @@ export async function handleGoalList(
     return html`<th><a href="${goalListHref({ status: statusFilter, kind: kindFilter, goal: goalFilter, sort: col, dir: nextDir })}">${label}${arrow}</a></th>`;
   };
 
+  // Draft banner (proposal 4 / AC5): the current tab's own drafts + a cross-tab hint when the OTHER
+  // tab has drafts. Both counts came from the one unfiltered read above — never a second query.
+  const ownDraft = tab === "goal" ? draftGoalCount : draftAcCount;
+  const otherDraft = tab === "goal" ? draftAcCount : draftGoalCount;
+  const ownLabel = tab === "goal" ? "GOAL" : "AC";
+  const otherLabel = tab === "goal" ? "AC" : "GOAL";
+  const otherHref = tab === "goal"
+    ? goalListHref({ kind: "criterion", status: "draft" })
+    : goalListHref({ status: "draft" });
+  const otherTabLabel = tab === "goal" ? "Criteria" : "Goals";
+
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${shellStyles()}${goalTableStyles()}<title>Goals</title></head>
     <body>${renderMobileChrome("goal", "goals")}${renderSiteNav("goal")}<main id="main">
-      <h1>Goals — 阶段目标与 AC (${goals.length})</h1>
+      <h1>Goals — ${tab === "goal" ? "阶段目标" : "AC / criterion"} (${rows.length})</h1>
       ${readError ? html`<div class="error-banner" role="alert"><strong>读失败:</strong> ${escapeHtml(readError)}</div>` : ""}
-      ${draftCount > 0 && statusFilter !== "draft"
+      ${statusFilter !== "draft" && (ownDraft > 0 || otherDraft > 0)
         ? html`<div class="info-banner" role="status">
-            <p><strong>${String(draftCount)} 条待人裁定</strong> — draft 记录不会自己生效：
+            ${ownDraft > 0 ? html`<p><strong>${String(ownDraft)} 条 ${ownLabel} 待裁定</strong> — draft 记录不会自己生效：
             激活是人的动作（<code>goal-store.ts write &lt;id&gt; --status active</code>），
-            不激活就一直是提案。<a href="${goalListHref({ status: "draft", kind: kindFilter, goal: goalFilter })}">查看待裁定</a></p>
+            不激活就一直是提案。<a href="${goalListHref({ status: "draft", kind: kindFilter, goal: goalFilter })}">查看待裁定</a></p>` : ""}
+            ${otherDraft > 0 ? html`<p><strong>另有 ${String(otherDraft)} 条 ${otherLabel} 待裁定</strong> → <a href="${otherHref}">去 ${otherTabLabel} tab 查看</a></p>` : ""}
           </div>`
         : ""}
-      <p class="meta">Kind: ${kindNav}</p>
+      <p class="meta">Tab: ${tabNav}</p>
       <p class="meta">Status: ${statusNav}</p>
-      ${goals.length === 0
+      ${rows.length === 0
         ? (readError
             ? "" /* 读失败：上方 error-banner 已传达，空态不得再叠加误导性的「目录为空」（live 空态同纪律） */
             : html`<div class="info-banner" role="status">
-                <p><strong>${statusFilter || kindFilter || goalFilter ? "当前筛选下无记录" : "goals/ 目录为空"}</strong> — 本页是 goal-store 的机读视图，<code>goals/</code> 即正本。</p>
+                <p><strong>${statusFilter || goalFilter ? "当前筛选下无记录" : "goals/ 目录为空"}</strong> — 本页是 goal-store 的机读视图，<code>goals/</code> 即正本。</p>
                 <p class="meta">（此处原先指向 <code>orchestration/manager-phase-goal.md</code>，该文件已随 G3 降级为归档，不再是正本——指针已修正。）</p>
               </div>`)
-        : tableWrap(html`<table class="goal-table">
-          <colgroup>${GOAL_COL_WIDTHS.map((w) => html`<col style="width:${w}">`).join("")}</colgroup>
-          <tr>${th("id", "id")}${th("kind", "kind")}${th("status", "status")}${th("goal", "goal")}${th("title", "title")}${th("criterion", "criterion")}${th("verdict", "recent verdict")}${th("lastProgressAt", "last progress")}${th("firstEvidenceAt", "first evidence")}<th>AC 达成</th><th>挂靠任务</th></tr>
-          ${rows}
-        </table>`)}
+        : tableWrap(tab === "goal"
+          ? renderGoalsTable(rows, all, taskRead, th)
+          : renderCriteriaTable(rows, taskRead, th))}
     </main></body></html>`);
 }
 

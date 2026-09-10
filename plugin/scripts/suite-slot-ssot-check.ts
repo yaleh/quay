@@ -225,7 +225,7 @@ export function checkConsumersReadCanonical(root: string): SsotVerdict {
 /** I4 — the bash canonical and the TS canonical agree on the slot count under the same env
  *  (a cross-language drift detector — the two canons cannot silently diverge). */
 export function checkBashTsCountAgree(root: string): SsotVerdict {
-  const lib = path.join(root, "plugin", "scripts", "suite-slot-lib.sh");
+  const lib = path.join(root, "plugin", "scripts", "suite-slot-lib.sh");  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   if (!fs.existsSync(lib)) {
     return { id: "I4", ok: false, evaluated: false, detail: "suite-slot-lib.sh not found (cannot judge)" };
   }
@@ -328,7 +328,7 @@ export function runConcurrencyProbe(script: string, base: string, N: number, env
  *  exclusive by default; `QUAY_TEST_SSOT_I5_FLOCK=shared` injects a shared flock so the checker
  *  itself can go RED end-to-end (硬规则 3b — a verdict that can never go RED is a false guarantee). */
 export function checkRuntimeConcurrencyCapped(root: string): SsotVerdict {
-  const lib = path.join(root, "plugin", "scripts", "suite-slot-lib.sh");
+  const lib = path.join(root, "plugin", "scripts", "suite-slot-lib.sh");  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   if (!fs.existsSync(lib)) {
     return { id: "I5", ok: false, evaluated: false, detail: "suite-slot-lib.sh not found (cannot judge — NOT-EVALUATED, never conflated with green)" };
   }

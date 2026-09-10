@@ -158,6 +158,18 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
     "AC-205 record: transcript_confirmed=false ⇒ refused (AC4 negative — send exit 0 but transcript not materialized)");
   assert.match(r.stdout, /ac205-record\(empty-host\) refused=1/,
     "AC-205 record: empty host ⇒ refused (fail-closed)");
+  // gap-verify-coldstart-does-not-configure-target-profiles: the --selfcheck must ALSO exercise the
+  // target-profiles configuration controls — derived (driving profiles worker-default written into the
+  // target), no-source (not-configured, distinct — 硬规则 3b), override (--target-launcher/model win),
+  // and path resolution (--driving-profiles explicit > --build-root).
+  assert.match(r.stdout, /target-profiles\(derived\) status=configured rc=0 launcher=claude-fjdac model=deepseek-v4-pro-anthropic auth=token/,
+    "target-profiles positive (AC1): driving profiles worker-default is written into the target");
+  assert.match(r.stdout, /target-profiles\(no-source\) status=not-configured rc=2/,
+    "target-profiles negative (AC2): no source + no override ⇒ not-configured (distinct, 硬规则 3b)");
+  assert.match(r.stdout, /target-profiles\(override\) status=configured launcher=custom-launcher model=custom-model auth=token/,
+    "target-profiles override: --target-launcher/model win over derivation");
+  assert.match(r.stdout, /target-profiles\(resolve\) explicit=1 buildroot=1/,
+    "target-profiles resolve: --driving-profiles explicit > --build-root");
 });
 
 test("AC1 — --selfcheck is hermetic: it does not touch a real install and runs offline", () => {
@@ -299,6 +311,14 @@ test("AC4 — --verify-only (no build, no tgz sha256) does NOT append an AC-201 
       "the ordinary AC88 record IS still appended in verify-only mode");
     assert.ok(!/GOAL-009-AC-201/.test(contents),
       "verify-only (no build, no tgz sha256) must NOT append an AC-201 record");
+    // AC3 (gap-verify-coldstart-does-not-configure-target-profiles): the ac89 detail must CARRY the
+    // target-profiles fields (grep-able). verify-only never configures ⇒ honestly not-configured
+    // (a distinct value, never a silent "configured" — 硬规则 3b).
+    assert.match(contents, /target_profiles_status=not-configured/,
+      "ac89 detail must carry target_profiles_status (verify-only honestly reports not-configured)");
+    const ev = fs.readFileSync(path.join(tmp, "e.json"), "utf8");
+    assert.match(ev, /"target_profiles_status": "not-configured"/,
+      "evidence JSON must carry target_profiles_status (grep-able, AC3)");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

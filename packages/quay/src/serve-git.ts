@@ -690,9 +690,27 @@ export function gitGraphClientScript(): string {
     }
   }
 
+  // ── bottom "more below" affordance (gap-git-graph-scroll-panel-no-visual-affordance) ──────────
+  // #git-graph-more-hint is a sticky-bottom pill pinned to the container's VISIBLE bottom edge. It
+  // stays visible while the container is not yet scrolled to its own bottom and hides once
+  // scrollTop + clientHeight reaches scrollHeight — so a first-time visitor can tell at a glance
+  // "this is a bounded sub-panel with more content below", not "the page ends here". This is the
+  // DISCOVERABILITY half of gap-git-graph-no-bounded-scroll-panel (that task made the container
+  // scrollable; this one makes that scrollability visible).
+  var moreHint = document.getElementById("git-graph-more-hint");
+  function updateScrollHint() {
+    if (!scrollEl || !moreHint) { return; }
+    var atBottom = scrollEl.scrollTop + scrollEl.clientHeight >= scrollEl.scrollHeight - 2;
+    moreHint.style.display = atBottom ? "none" : "flex";
+  }
   if (scrollEl) {
     layoutScrollHeight();
-    if (typeof window.addEventListener === "function") { window.addEventListener("resize", layoutScrollHeight); }
+    if (moreHint && typeof scrollEl.addEventListener === "function") {
+      scrollEl.addEventListener("scroll", updateScrollHint);
+    }
+    if (typeof window.addEventListener === "function") {
+      window.addEventListener("resize", function () { layoutScrollHeight(); updateScrollHint(); });
+    }
   }
 
   function coverageSpan() {
@@ -740,6 +758,7 @@ export function gitGraphClientScript(): string {
           recomputeLayout();
           updateCoverage();
           render();
+          updateScrollHint();
           // Reset BEFORE chaining: the self-chain call below must see loadingOlder === false, or the
           // chain dead-stops after one page (gap-git-graph-scroll-loader-self-chain-blocked-by-loadingolder-flag).
           loadingOlder = false;
@@ -768,6 +787,7 @@ export function gitGraphClientScript(): string {
 
   recomputeLayout();
   render();
+  updateScrollHint();
 })();`;
 }
 
@@ -892,8 +912,12 @@ export function renderGitHistoryPage(history: GitHistoryResult, view: GitGraphVi
   // container so the IntersectionObserver can target it against the container's own scrollport (AC2).
   // max-height is a calc() FALLBACK so the page is usable before JS runs — the client script overwrites
   // it with a precise px value computed from the header's actual height on load + resize (Plan step 3).
+  // The container ALSO carries a visible panel boundary (border + shadow + surface background) and a
+  // sticky-bottom `#git-graph-more-hint` so the bounded sub-panel is DISCOVERABLE, not just functional
+  // (gap-git-graph-scroll-panel-no-visual-affordance — the mechanism was already correct; the visual
+  // affordance was missing, so the panel read as "the page ends here").
   const graph = layout
-    ? html`<div id="git-graph-scroll" aria-label="Git 纵向时间轴（可滚动）" style="overflow-x:auto;overflow-y:auto;max-height:calc(100vh - 240px)"><div id="git-graph" aria-label="Git 纵向时间轴">${gitGraphLegendHtml()}</div><div id="git-graph-sentinel" class="meta" style="padding:0.6rem 0;color:var(--color-neutral-700);font-size:0.75rem">加载更早提交…</div></div>`
+    ? html`<div id="git-graph-scroll" aria-label="Git 纵向时间轴（可滚动）" style="overflow-x:auto;overflow-y:auto;max-height:calc(100vh - 240px);border:1px solid var(--color-divider);border-radius:6px;background:var(--color-surface);box-shadow:var(--shadow-sm)"><div id="git-graph" aria-label="Git 纵向时间轴">${gitGraphLegendHtml()}</div><div id="git-graph-sentinel" class="meta" style="padding:0.6rem 0;color:var(--color-neutral-700);font-size:0.75rem">加载更早提交…</div><div id="git-graph-more-hint" aria-hidden="true" style="position:sticky;bottom:0;display:flex;justify-content:center;align-items:center;gap:0.35rem;padding:0.5rem 0.6rem 0.6rem;background:linear-gradient(to top,var(--color-surface) 55%,transparent);font-size:0.75rem;color:var(--color-neutral-700);pointer-events:none">↓ 更多提交</div></div>`
     : "";
   // The data JSON is embedded with `<` escaped to \u003c so a commit subject can never break out of
   // the <script> element. d3 + the client renderer are emitted only when there is a graph to draw.

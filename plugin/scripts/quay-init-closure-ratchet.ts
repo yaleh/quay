@@ -153,7 +153,7 @@ export function countTree(dir: string, exclude: ReadonlySet<string> = new Set())
  * whole laydown into the repo — the exact pollution this ratchet exists to prevent). Removed in finally.
  */
 export function runLaydown(root: string, opts: { timeoutMs?: number } = {}): LaydownResult {
-  const quayInit = path.join(root, "plugin", "scripts", "quay-init.sh");
+  const quayInit = path.join(root, "plugin", "scripts", "quay-init.sh");  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   if (!fs.existsSync(quayInit)) {
     return { evaluated: false, files: 0, bytes: 0, error: `quay-init.sh not found at ${quayInit}` };
   }

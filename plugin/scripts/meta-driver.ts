@@ -157,6 +157,11 @@ export interface MetaRoundReadings {
    *   inert checker this round" (distinguishable from a missing dimension). */
   inertCheckers: string[];
   focus: string | null;
+  /** 【时序派生层】跨轮派生量（streak）——⛔ 快照量里都不存在「连续 N 轮空转」这个信息
+   *  （gap-meta-readings-no-timeseries-derivation）。count 每轮变 ⇒ ⛔ 不进 digest（进了会让摘要
+   *  恒不相等、变化检测闸失效，硬规则 4 推论一）；只有 crossed 位进（见 readingsDigest），
+   *  与 drivers 只取 running 位、divergences 不取 repeatCount 同一条纪律。 */
+  timeSeries: TimeSeriesSignal[];
 }
 
 // ── 机械半 ────────────────────────────────────────────────────────────────────────────────────────
@@ -168,6 +173,9 @@ export interface MetaRoundReadings {
 export function goalStoreArgv(scriptRoot: string, sub: string[], dataRoot: string = scriptRoot): string[] {
   return [
     "node", "--no-warnings", "--experimental-strip-types",
+    // kernel-sibling-dev-tree-only: meta-driver 是 dev-tree-only 观测例程（本文件头部「源树直跑、
+    // 不经 bundle」，且经相对 import ../../packages/quay/src 只吃源树），scriptRoot 恒为含 packages/
+    // 的源树根 ⇒ 锚 packages/quay/src 是正确行为，⛔ 非第三方 shipped 解析。
     path.join(scriptRoot, "packages", "quay", "src", "goal-store.ts"),
     ...sub, "--root", dataRoot,
   ];
@@ -304,11 +312,12 @@ export function extractJudgeRounds(records: Array<Record<string, unknown>>): Arr
   return out;
 }
 
-/** 读自己的载体（解析不了的行跳过，⛔ 不因一行坏 JSON 使机制失明）。读不到 ⇒ 空数组
- *  （「没有历史」——与 computeDivergenceRecurrence 的 0 同义，⛔ 不返回 null 冒充「读失败」）。 */
-export function readMetaCarrier(root: string): Array<Record<string, unknown>> {
+/** 通用轮载体读取：解析 jsonl（坏行跳过，⛔ 一行坏 JSON 不使机制失明）。读不到 ⇒ 空数组
+ *  （「没有历史」——⛔ 不返回 null 冒充「读失败」，硬规则 6）。单一真相源：meta 载体与 goal 载体
+ *  共用这一条读取逻辑（⛔ 不各写一份解析，硬规则 5b）。 */
+export function readRoundCarrier(root: string, rel: string): Array<Record<string, unknown>> {
   let text: string;
-  try { text = fs.readFileSync(path.join(root, ROUND_CARRIER_REL), "utf8"); } catch { return []; }
+  try { text = fs.readFileSync(path.join(root, rel), "utf8"); } catch { return []; }
   const out: Array<Record<string, unknown>> = [];
   for (const line of text.split("\n")) {
     const t = line.trim();
@@ -316,6 +325,12 @@ export function readMetaCarrier(root: string): Array<Record<string, unknown>> {
     try { out.push(JSON.parse(t) as Record<string, unknown>); } catch { /* 坏行跳过 */ }
   }
   return out;
+}
+
+/** 读自己的载体（解析不了的行跳过，⛔ 不因一行坏 JSON 使机制失明）。读不到 ⇒ 空数组
+ *  （「没有历史」——与 computeDivergenceRecurrence 的 0 同义，⛔ 不返回 null 冒充「读失败」）。 */
+export function readMetaCarrier(root: string): Array<Record<string, unknown>> {
+  return readRoundCarrier(root, ROUND_CARRIER_REL);
 }
 
 /** 对当前每条 divergence 算「已连续多少轮产生同一 (id, kind) 建议」。
@@ -339,6 +354,130 @@ export function computeDivergenceRecurrence(
       if (!captured) { captured = true; last = typeof hit.recommendation === "string" ? (hit.recommendation as string) : null; }
     }
     out.set(k, { repeatCount: count, lastRecommendation: last });
+  }
+  return out;
+}
+
+// ── 时序派生层（gap-meta-readings-no-timeseries-derivation）────────────────────────────────
+// 问题：collectReadings 产出的 MetaRoundReadings 全部是【快照量】——每条 AC 的 verdict/status、
+// 每个 driver 的 running/staleSecs、syncHealth 窗口统计、metaRecords、inertCheckers、focus。
+// 没有任何【跨轮派生量】（streak / 斜率 /「连续 N 轮某事没发生」）。于是「连续 N 轮空转」
+// 在【任何单轮】的快照里都不存在（实例：GOAL-009 AC-214 连续 8 轮 spawn 零产出，轮长从 ~60s
+// 退化到 5–9 分钟，任何一轮读数都看不见）。修法不是给某个载体加一个计数器（那又是只修被报出来
+// 的那一个，硬规则 5b），而是给读数加一个【通用时序层】：对已在读的载体自动派生两类 streak——
+// (a) 连续 N 轮取值不变；(b) 连续 N 轮「应发生而未发生」（如 spawn 了但产出为 0）。
+
+/** 时序信号的两种模式。 */
+export type StreakMode = "unchanged" | "expected-absent";
+
+/** 一条派生存续信号。⛔ count 每轮都可能 +1 ⇒ 不进 readingsDigest（进了会让摘要恒不相等、
+ *  变化检测闸失效——同 staleSecs/记录数/repeatCount 的道理，硬规则 4 推论一）；只有 crossed
+ *  （是否越阈）这个位进。evaluated=false 与「count=0 / crossed=false」不同形（硬规则 3b）。 */
+export interface TimeSeriesSignal {
+  key: string;
+  mode: StreakMode;
+  count: number;
+  crossed: boolean;
+  evaluated: boolean;
+  threshold: number;
+}
+
+/** 一条 streak 计算结果（evaluated:false = 读不出/无历史，⛔ 不与 count=0 同形）。 */
+export interface StreakResult { evaluated: boolean; count: number }
+
+/** (a) 连续 N 轮取值不变。values 时间序（旧→新），null = 该轮无此值（打断连续）。
+ *  空 / 尾值 null ⇒ evaluated:false（⛔ 不冒充「streak=0」，硬规则 3b）。 */
+export function unchangedStreak(values: Array<string | null>): StreakResult {
+  if (values.length === 0) return { evaluated: false, count: 0 };
+  const last = values[values.length - 1];
+  if (last === null) return { evaluated: false, count: 0 };
+  let n = 0;
+  for (let i = values.length - 1; i >= 0; i--) { if (values[i] !== last) break; n++; }
+  return { evaluated: true, count: n };
+}
+
+/** (b) 连续 N 轮「应发生而未发生」。absent 时间序（旧→新）：true = 该轮应发生而未发生；
+ *  false = 该轮【发生了】（打断连续）；null = 读不出/不适用（打断连续）。
+ *  空 / 尾值 null ⇒ evaluated:false；尾值 false ⇒ count=0（发生了，⛔ 不是未评估）。 */
+export function absentStreak(absent: Array<boolean | null>): StreakResult {
+  if (absent.length === 0) return { evaluated: false, count: 0 };
+  const last = absent[absent.length - 1];
+  if (last === null) return { evaluated: false, count: 0 };
+  let n = 0;
+  for (let i = absent.length - 1; i >= 0; i--) { if (absent[i] !== true) break; n++; }
+  return { evaluated: true, count: n };
+}
+
+/** goal 载体的轮记录路径（driver-runtime DRIVER_KINDS.goal 的 carriers[0]，⛔ 与那处一致）。 */
+export const GOAL_ROUND_CARRIER_REL = path.join(".quay", "goal-round.jsonl");
+
+/** 一条轮记录里 goal-ring 的 value（facts 里 name==="goal-ring" 的 value）。读不出 ⇒ null。 */
+export function goalRingValue(round: Record<string, unknown>): Record<string, unknown> | null {
+  const facts = round.facts;
+  if (!Array.isArray(facts)) return null;
+  for (const f of facts) {
+    if (!f || typeof f !== "object") continue;
+    if ((f as Record<string, unknown>).name !== "goal-ring") continue;
+    const v = (f as Record<string, unknown>).value;
+    if (v && typeof v === "object") return v as Record<string, unknown>;
+    return null;
+  }
+  return null;
+}
+
+/** 「连续 N 轮 spawn 了但零产出」的阈值——安全网非调优值（⛔ 不是按成本/收益调出来的，硬规则 4 推论一）。
+ *  实测分布（2026-09-09 生产 goal-round.jsonl，48 个 AC 的 spawn-zero-output streak 长度）：
+ *    streak=1 占 36 条（正常时延：本轮 spawn、下轮 taskCount≥1）、2–7 共 9 条、尾部两条 21（AC-158）
+ *    与 24（AC-214——本任务点名的「连续 8 轮」窗口所在的那段更长 streak）。
+ *  阈值 8 落在「正常时延（≤7）」与「真持续空转（21/24）」之间的空隙，只为把「持续空转」这个类挑出来，
+ *  ⛔ 不是从成本收益曲面里调出来的值。 */
+export const SPAWN_ZERO_OUTPUT_THRESHOLD = 8;
+/** 「连续 N 轮 verdict 取值不变」的阈值——同一安全网语义（见上：verdict 变是【会改变判读结论】的量，
+ *  但「已经连续 N 轮不变」这个【位】才是派生层要交的，N 本身不进 digest）。 */
+export const VERDICT_UNCHANGED_THRESHOLD = 8;
+
+/** 从 goal-round 载体派生存续信号（⛔ 纯函数：只读传入的轮记录数组，不碰磁盘）。
+ *  对每个 AC id 派生两类：verdict 取值不变（mode a）+ spawn 了但零产出（mode b）。
+ *  「spawn 了但零产出」= 该轮 gap_spawns 有该 AC（spawn 了）且 gaps 里它仍是 state==="gap"
+ *  （taskCount 仍 0 ⇒ 那次 spawn 没产出新任务）。⛔ 不重改 computeGoalGaps 的牵引口径——那是
+ *  gap-goal-gap-done-task-not-traction-respawns-every-round 已修好的实例，本函数只【读】它产出的
+ *  gap_spawns/gaps 快照，做跨轮派生（DoD3）。 */
+export function deriveGoalCarrierSignals(
+  rounds: Array<Record<string, unknown>>,
+  acIds: string[],
+  opts: { spawnZeroThreshold?: number; verdictUnchangedThreshold?: number } = {},
+): TimeSeriesSignal[] {
+  const spawnZeroThreshold = opts.spawnZeroThreshold ?? SPAWN_ZERO_OUTPUT_THRESHOLD;
+  const verdictUnchangedThreshold = opts.verdictUnchangedThreshold ?? VERDICT_UNCHANGED_THRESHOLD;
+  const out: TimeSeriesSignal[] = [];
+  for (const ac of acIds) {
+    const verdicts: Array<string | null> = [];
+    const spawnZero: Array<boolean | null> = [];
+    for (const round of rounds) {
+      const v = goalRingValue(round);
+      if (v === null) { verdicts.push(null); spawnZero.push(null); continue; }
+      const criteria = Array.isArray(v.criteria) ? (v.criteria as Array<Record<string, unknown>>) : [];
+      const c = criteria.find((x) => String(x.id ?? "") === ac);
+      verdicts.push(c ? String(c.verdict ?? "") : null);
+      const spawned = Array.isArray(v.gap_spawns) && (v.gap_spawns as Array<Record<string, unknown>>)
+        .some((s) => String(s.ac ?? "") === ac);
+      if (!spawned) { spawnZero.push(null); continue; } // 本轮没 spawn ⇒ 不适用（打断连续）
+      const gaps = Array.isArray(v.gaps) ? (v.gaps as Array<Record<string, unknown>>) : [];
+      const stillGap = gaps.some((g) => String(g.ac ?? "") === ac && g.state === "gap");
+      spawnZero.push(stillGap); // spawn 了且仍 gap ⇒ 零产出；spawn 了且不再 gap ⇒ 有产出
+    }
+    const vr = unchangedStreak(verdicts);
+    const sr = absentStreak(spawnZero);
+    out.push({
+      key: `goal:${ac}:verdict`, mode: "unchanged",
+      count: vr.count, crossed: vr.evaluated && vr.count >= verdictUnchangedThreshold,
+      evaluated: vr.evaluated, threshold: verdictUnchangedThreshold,
+    });
+    out.push({
+      key: `goal:${ac}:spawn-zero-output`, mode: "expected-absent",
+      count: sr.count, crossed: sr.evaluated && sr.count >= spawnZeroThreshold,
+      evaluated: sr.evaluated, threshold: spawnZeroThreshold,
+    });
   }
   return out;
 }
@@ -382,12 +521,16 @@ export async function collectReadings(root: string, cliFocus: string | null): Pr
   }
   // CLI --focus（一次性）优先；否则每轮现读文件覆盖段（常驻的人给方向通道）。两者都缺 ⇒ null。
   const focus = cliFocus ?? readFocusFile(root);
+  // 时序派生层：读 goal-round 载体一次，对当前 criteria 里每个 AC 派生存续信号（⛔ 只读一次载体，
+  // 每个 AC 重读一遍会线性放大 IO）。载体读不到 ⇒ 每条信号 evaluated:false（⛔ 不冒充「streak=0」）。
+  const timeSeries = deriveGoalCarrierSignals(readRoundCarrier(root, GOAL_ROUND_CARRIER_REL), criteria.map((c) => c.id));
   return {
     goals, criteria, divergences, drivers,
     syncHealth: collectSyncHealth(root),
     metaRecords: collectMetaRecords(root),
     inertCheckers: collectInertCheckers(root),
     focus,
+    timeSeries,
   };
 }
 
@@ -680,6 +823,10 @@ export function readingsDigest(readings: MetaRoundReadings): string {
     // gap-not-evaluated-checkers-never-persisted — 惰性守卫的名字必须进摘要（⛔ 只进计数会让新出现的
     // 惰性守卫不改变摘要 ⇒ 语义半永不被唤醒；逐名进，某个 guard 从在→不在/不在→在都改变摘要）。
     ...readings.inertCheckers.map((n) => `inert:${n}`).sort(),
+    // 时序派生信号：只进「是否越阈」的位（⛔ 不进 count——count 每轮 +1，进了摘要恒变、闸失效；
+    //  同 drivers 只取 running 位、divergences 不取 repeatCount 的纪律）。evaluated=false 单列 token
+    //  "u"（⛔ 不与 crossed=false 同形，硬规则 3b）。
+    ...readings.timeSeries.map((s) => `sig:${s.key}:${s.evaluated ? (s.crossed ? 1 : 0) : "u"}`).sort(),
     // 人工转向（覆盖段内容）：人编辑才变，进摘要 ⇒ 变了判读一次、不变不判读（「变了」而非「非空」）。
     // ⛔ 它恰是【人编辑才变】的量（与 staleSecs/记录数相反——那些每轮都变，进摘要会让变化检测恒为真）。
     `focus:${readings.focus ?? "none"}`,
@@ -1191,6 +1338,37 @@ export function renderDecisionOrigin(item: DecisionItem, evidence: unknown, at: 
   ].join("\n");
 }
 
+/** 决策的 body 正文：GOAL 契约要求的三段（背景 / 范围与非目标 / 退出条件）。
+ *  ⛔ 与 renderDecisionOrigin 分工：origin = 出处引用（要裁什么/选项/实测依据/为何不能机械决定/怎么关闭，
+ *  待裁定面上可见的一列）；body = 实质（goal 的 substance，goal-store 对 goal kind 的 create 要求
+ *  ≥ MIN_GOAL_BODY_CHARS 非空白）。两者分离，⛔ 不是把 origin 复制进 body（store 契约明文拒绝
+ *  「互为副本」的形态——origin 只是 provenance citation，不是 body）。 */
+export function renderDecisionBody(item: DecisionItem): string {
+  const scope = String(item.scope ?? "").trim();
+  return [
+    "## 背景",
+    `待裁定的方向问题：${item.question}`,
+    `为何机器不能自决：${item.origin}`,
+    "",
+    "## 范围与非目标",
+    `作用域：${scope || "（未声明）"}`,
+    `选项与代价：${item.options}`,
+    "非目标：本记录只承载「要人作何选择」，不预先承诺任一选项的落地——选定后的落地作为后续工作另立案。",
+    "",
+    "## 退出条件",
+    "认可某个选项 ⇒ goal-store write <id> --status active；否决 ⇒ 保持 draft 或标 superseded。",
+  ].join("\n");
+}
+
+/** carrier=goal 决策的 write argv（单一构造点——单测据此直接断言 argv 含 `--body` 且其值 ≥40，
+ *  ⛔ 不靠读落盘文件反推）。body = renderDecisionBody 的三段正文，origin = renderDecisionOrigin 的出处引用。
+ *  `dataRoot` 缺省 = scriptRoot（生产同源）；测试传临时目录隔离落盘（同 fileProposals 的 dataRoot 手法）。 */
+export function decisionGoalWriteArgv(
+  scriptRoot: string, id: string, item: DecisionItem, origin: string, body: string, dataRoot: string = scriptRoot,
+): string[] {
+  return goalStoreArgv(scriptRoot, ["write", id, "--title", item.title, "--origin", origin, "--body", body], dataRoot);
+}
+
 /** 决策自己的质量判据。⛔ 不复用 gateFinding 的 quality 闸——那个 EVIDENCE 正则是为【缺陷发现】
  *  调的（要求正文含文件路径/sha/`exit N` 这类代码形 token），而一个架构方向问题合理地可以不含
  *  这种 token。实测误杀：「变化检测是否上升为平台能力」被拒，理由 "no actionable ## Finding with
@@ -1314,7 +1492,7 @@ export interface DecisionResult { item: DecisionItem; id: string | null; accepte
 export async function fileDecisions(
   root: string, items: DecisionItem[], readings: MetaRoundReadings,
   records: Array<Record<string, unknown>>,
-  opts: { cap: number; dryRun: boolean; at: string },
+  opts: { cap: number; dryRun: boolean; at: string; dataRoot?: string },
 ): Promise<DecisionResult[]> {
   const out: DecisionResult[] = [];
   const keys = new Set<string>();
@@ -1371,7 +1549,8 @@ export async function fileDecisions(
     if (opts.dryRun) {
       out.push({ item, id, accepted: true, reason: "dry-run: would file as draft GOAL" });
     } else {
-      const argv = goalStoreArgv(root, ["write", id, "--title", item.title, "--origin", origin]);
+      const body = renderDecisionBody(item);
+      const argv = decisionGoalWriteArgv(root, id, item, origin, body, opts.dataRoot ?? root);
       const r = await runAsync(argv, { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
       if (r.error || r.status !== 0) {
         out.push({ item, id, accepted: false, reason: `goal write failed (exit ${r.status}): ${(r.stderr || "").trim().slice(0, 200)}` });
@@ -1572,6 +1751,9 @@ async function runMetaRoundInner(opts: MetaRoundOptions): Promise<MetaRoundResul
     // 寄给它的消息也必须进记录：否则「这个入口有没有被消费」在生产载体上不可见。
     // （实测 2026-09-06：加了 addressedTasks 读数却漏了记录处，把「字段缺失」误读成「命中 0 条」。）
     metaRecords: readings.metaRecords,
+    // 时序派生信号也进记录（DoD1：生产载体上可见——⛔ 不以单测绿充当完成）。count 进记录但⛔ 不进
+    // digest（digest 只取 crossed 位），故「count 递增、未越阈」的轮摘要不变、不烧 LLM。
+    timeSeries: readings.timeSeries,
     // 结算处置进读数：evidenceKept 非空 = 本轮真有 verdict 变化（有信息，待提交）；
     // 全 restored = 本轮只是刷新了时间戳（无信息）。这让「观测的副作用」自身可观测。
     evidenceRestored: settlement.restored.length,

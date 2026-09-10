@@ -197,6 +197,9 @@ import {
   parseSelectorOutput,
   runSelectorWorker,
   makeStopCondition,
+  resolveKernelSibling,
+  resolveKernelScriptsDir,
+  resolveKernelPluginRoot,
   type LivenessResult,
 } from "./driver-runtime.ts";
 // 机械 fan-in（gap-fan-in-driver-mechanical-orchestration / SPEC-fan-in-driver-mechanical-
@@ -232,6 +235,7 @@ export {
   type LivenessResult,
 } from "./driver-runtime.ts";
 import { computeDocCheckFaceKey, readDocCheckCache, writeDocCheckCache } from "./doc-check-cache.ts";
+import { parse as parseYaml } from "yaml";
 
 // ── 常量 ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -1160,20 +1164,128 @@ function acCheckNote(): string {
   ].join(" ");
 }
 
+/** 单一定义点：一个目录内本仓库测试入口 scripts/test.sh 的绝对路径（第三方项目 quay-init 不铺
+ *  scripts/ 目录，无此文件）。⛔ 其余处不再各自 path.join(dir, "scripts", "test.sh")。 */
+function testShAt(dir: string): string {
+  return path.join(dir, "scripts", "test.sh");
+}
+
+/** 一个目录是否「本仓库形态」（有 scripts/test.sh）——第三方项目无此文件，doc-check / scoped-gate /
+ *  suite 三步据此退化为「跳过 / 委托 loop.test_command」，⛔ 不调用本仓库专属脚本。 */
+function hasTestSh(dir: string): boolean {
+  return fs.existsSync(testShAt(dir));
+}
+
+/** 单引号 shell 转义（第三方 test_command 需 `cd <worktree> && <test_command>` 在工作树内跑——worktree
+ *  路径可能含空格/特殊字符，⛔ 不裸拼）。 */
+function shq(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/** 读 <dir>/.quay/config.yml 的 loop.test_command（第三方项目 quay-init --loop 写入的全量测试命令，
+ *  如 `node --test`）。缺失/不可解析/非字符串 ⇒ null。⛔ 不依赖 packages/quay/src/config.ts
+ *  （第三方安装物可能无 packages/ 树）——直接 YAML 读，与 driver-config.ts 同法。 */
+function readLoopTestCommand(dir: string): string | null {
+  const file = path.join(dir, ".quay", "config.yml");
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(text);
+  } catch {
+    return null;
+  }
+  const loop = (parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).loop : undefined) as
+    | Record<string, unknown>
+    | undefined;
+  const cmd = loop && typeof loop === "object" ? (loop as Record<string, unknown>).test_command : undefined;
+  return typeof cmd === "string" && cmd.trim() ? cmd.trim() : null;
+}
+
+/** scoped-gate 命令的解析结果（gap-driver-fanin-hardcoded-test-sh-third-party）：
+ *  - run  argv  — 本仓库（有 scripts/test.sh）⇒ bash <argvDir>/scripts/test.sh --for-task <task>
+ *                --allow-thin（与修改前逐字一致）；第三方（无 test.sh 但有 loop.test_command）⇒
+ *                bash -c <test_command>（全量，第三方无 "scoped" 能力）。
+ *  - skip       — 两者皆无 ⇒ 第三方项目无 scoped 能力，fan-in 跳过 scoped 门直接进全量 suite 步骤。
+ *  argvDir 拼命令路径、capabilityDir 判能力（execution 侧二者都 = worktree；prompt 侧 capabilityDir
+ *  = root、argvDir = 占位符 worktree 路径——同一 repo 二者同形，因 scripts/test.sh 与 .quay/config.yml
+ *  都随 worktree 铺出）。 */
+export type ScopedGateResolution =
+  | { kind: "run"; argv: string[] }
+  | { kind: "skip"; reason: string };
+
+/** 解析 scoped-gate 命令（单一真相源，fan-in 执行侧与 worker prompt 侧共用——⛔ 两处不得出现两套
+ *  标准）。 */
+export function resolveScopedGateCommand(task: string, capabilityDir: string, argvDir: string): ScopedGateResolution {
+  if (hasTestSh(capabilityDir)) {
+    return { kind: "run", argv: ["bash", testShAt(argvDir), "--for-task", task, "--allow-thin"] };
+  }
+  const testCommand = readLoopTestCommand(capabilityDir);
+  if (testCommand !== null) {
+    // 第三方全量 test_command（如 `node --test`）依赖 cwd 定位测试树 ⇒ 显式 cd 进 argvDir（execution
+    // 侧 = worktree）再跑。⛔ step()/mechSh spawn 不设 cwd（驱动 cwd 是主检出，非 worktree）。
+    return { kind: "run", argv: ["bash", "-c", `cd ${shq(argvDir)} && ${testCommand}`] };
+  }
+  return { kind: "skip", reason: "third-party-no-scoped-tooling" };
+}
+
 /** 机械 fan-in 的 scoped 门缺省命令（gap-worker-premerge-scoped-gate-cache 抽成单一真相源）：
- *  bash <worktree>/scripts/test.sh --for-task <task> --allow-thin。fan-in 侧（runMechanicalFanIn 的
- *  scopedCmd）与 worker prompt 侧（preMergeNote 的「跑与 fan-in 相同的 scoped 门」）共用——⛔ 两处不得
- *  出现两套标准。 */
-export function scopedGateCommandFor(task: string, worktree: string): string[] {
-  return ["bash", path.join(worktree, "scripts", "test.sh"), "--for-task", task, "--allow-thin"];
+ *  bash <worktree>/scripts/test.sh --for-task <task> --allow-thin（本仓库）；第三方项目无
+ *  scripts/test.sh ⇒ 退化为 loop.test_command（bash -c <test_command>）；两者皆无 ⇒ null（fan-in 跳过
+ *  scoped 门）。⛔ 不再是唯一硬编码的 worktree scripts/test.sh 路径（本缺陷）。 */
+export function scopedGateCommandFor(task: string, worktree: string): string[] | null {
+  const r = resolveScopedGateCommand(task, worktree, worktree);
+  return r.kind === "run" ? r.argv : null;
+}
+
+/** 机械 fan-in 的 doc-check 缺省命令（gap-driver-fanin-hardcoded-test-sh-third-party）：
+ *  本仓库有 scripts/test.sh ⇒ bash <worktree>/scripts/test.sh --static-checks-doc（与修改前逐字一致）；
+ *  第三方项目无该文件 ⇒ null（fan-in 跳过 doc-check，可区分取值 third-party-no-doc-check-tooling，
+ *  ⛔ 不与「doc 检查真的跑了且失败」同形——硬规则 3b）。 */
+export function docCheckCommandFor(worktree: string): string[] | null {
+  const testSh = testShAt(worktree);
+  return hasTestSh(worktree) ? ["bash", testSh, "--static-checks-doc"] : null;
+}
+
+/** 解析本 kernel 的一个 shell sibling（.sh）到 kernel plugin root 的 scripts/<name>（⛔ 非 root ——
+ *  gap-promotion-driver-ready-pool-check-path-third-party：第三方项目无 plugin/scripts/，.sh 以 loose
+ *  形态随包住在 scripts/ 而非 dist/）。缺 ⇒ null（调用方 fail-closed）。与 driver-shared.ts
+ *  resolveResourceGateScript 同法，但经 resolveKernelPluginRoot 单一真相源（⛔ 不各写一份
+ *  basename==="dist" 上跳逻辑）。 */
+function resolveKernelShellSibling(name: string): string | null {
+  const script = path.join(resolveKernelPluginRoot(), "scripts", name);
+  return fs.existsSync(script) ? script : null;
+}
+
+/** 解析一个 kernel sibling 脚本到运行 argv 前缀（不含 "node" 可执行名）：原始 .ts ⇒
+ *  ["--experimental-strip-types", <path>]；bundled dist/*.js ⇒ [<path>]（不带 flag）。两者都不在 ⇒
+ *  ["--experimental-strip-types", <resolveKernelScriptsDir()>/<name>]（spawn 时 fail-closed）。
+ *  resolveKernelSibling 单一真相源（⛔ 各 spawn 点不再各自重写 .ts/.js 回退——同
+ *  defaultPromotionCheckArgv 手法）。 */
+function kernelSiblingArgv(name: string): string[] {
+  const sibling = resolveKernelSibling(name);
+  return sibling
+    ? (sibling.stripTypes ? ["--experimental-strip-types", sibling.path] : [sibling.path])
+    : ["--experimental-strip-types", path.join(resolveKernelScriptsDir(), name)];
+}
+
+/** worker-driver 自入口的 spawn 前缀（"node" + kernelSiblingArgv("worker-driver.ts")）。锚在本 kernel
+ *  安装位置（⛔ 非 root）：原始 .ts（dev tree，带 flag）或 bundled dist/worker-driver.js（installed，
+ *  不带 flag）。两者都不在 ⇒ 回退 kernelScriptsDir 下的 .ts（运行期 fail-closed）。 */
+function workerDriverSelfArgv(): string[] {
+  return ["node", ...kernelSiblingArgv("worker-driver.ts")];
 }
 
 /** worker 侧 scoped-gate 缓存写入 CLI 签名（gap-worker-premerge-scoped-gate-cache 阶段 a）：worker 在
  *  退出前跑绿 scoped 门后，用这条命令机械写入 (task, developSha, pass) 缓存（⛔ 不靠 agent 手写 JSON）。
- *  developSha 用 `git -C <worktree> rev-parse develop`（worker 已 merge develop ⇒ develop 即其验证过的 tip）。 */
+ *  developSha 用 `git -C <worktree> rev-parse develop`（worker 已 merge develop ⇒ develop 即其验证过的 tip）。
+ *  入口经 workerDriverSelfArgv 锚在本 kernel 安装位置（⛔ 非 root/plugin/scripts/worker-driver.ts）。 */
 function scopedGateCacheWriteSignature(task: string, root: string, worktree: string): string {
-  const entry = path.join(root, "plugin", "scripts", "worker-driver.ts");
-  return `node --experimental-strip-types ${entry} --write-scoped-gate-cache --task ${task} --develop-sha "$(git -C ${worktree} rev-parse develop)" --root ${root}`;
+  return `${workerDriverSelfArgv().join(" ")} --write-scoped-gate-cache --task ${task} --develop-sha "$(git -C ${worktree} rev-parse develop)" --root ${root}`;
 }
 
 /** worker 退出前 pre-merge + scoped test 步骤（gap-worker-premerge-scoped-gate-cache 阶段 a）：worker
@@ -1183,14 +1295,25 @@ function scopedGateCacheWriteSignature(task: string, root: string, worktree: str
  *  而非纯机械脚本：收益不只是「更早发现问题」，而是「很大一部分冲突在此被直接解决掉，根本不再进入
  *  fan-in 失败路径」。创建 prompt 与续做 prompt 共用（worktree 路径由调用方填）。 */
 function preMergeNote(task: string, root: string, worktree: string): string {
-  return [
+  const scoped = resolveScopedGateCommand(task, root, worktree);
+  const lines = [
     `before exiting, do the pre-merge + scoped-gate step in your worktree:`,
     `(i) merge develop into your worktree (\`git -C ${worktree} merge --no-edit develop\`) — resolve any conflict with the Edit tool, do NOT skip;`,
-    `(ii) run the SAME scoped gate the driver's fan-in runs: \`${scopedGateCommandFor(task, worktree).join(" ")}\`;`,
-    `(iii) if red, fix and rerun until green;`,
-    `(iv) once green, record the scoped-gate cache so fan-in skips the now-redundant scoped gate: \`${scopedGateCacheWriteSignature(task, root, worktree)}\`;`,
-    `(v) commit and exit.`,
-  ].join(" ");
+  ];
+  if (scoped.kind === "run") {
+    lines.push(
+      `(ii) run the SAME scoped gate the driver's fan-in runs: \`${scoped.argv.join(" ")}\`;`,
+      `(iii) if red, fix and rerun until green;`,
+      `(iv) once green, record the scoped-gate cache so fan-in skips the now-redundant scoped gate: \`${scopedGateCacheWriteSignature(task, root, worktree)}\`;`,
+      `(v) commit and exit.`,
+    );
+  } else {
+    lines.push(
+      `(ii) skip the scoped gate (${scoped.reason}: third-party project has no scripts/test.sh and no loop.test_command — the driver's fan-in goes straight to the full-suite step);`,
+      `(iii) commit and exit.`,
+    );
+  }
+  return lines.join(" ");
 }
 
 /** dispatch-worktree-setup.sh 调用签名（gap-dispatch-worktree-setup-zero-production-callers）：每个
@@ -1198,7 +1321,10 @@ function preMergeNote(task: string, root: string, worktree: string): string {
  *  worktree-include.sh），机制接管 bootstrap——worker 不再手工 `ln -s`/`cp config.yml`（正是该脚本被
  *  写出来要消灭的 AGENT-REMEMBERING 失败模式）。脚本幂等：已 provision 的 worktree 重跑是 no-op。 */
 function dispatchSetupSignature(root: string, worktree: string): string {
-  const setupScript = path.join(root, "plugin", "scripts", "dispatch-worktree-setup.sh");
+  // ⛔ 非 root/plugin/scripts/（第三方项目无 plugin/）——resolveKernelShellSibling 锚在本 kernel 安装
+  // 位置；缺 ⇒ 回退 kernel plugin root 下的同路径（运行期 `bash <缺失路径>` 报错 ⇒ fail-closed）。
+  const setupScript = resolveKernelShellSibling("dispatch-worktree-setup.sh")
+    ?? path.join(resolveKernelPluginRoot(), "scripts", "dispatch-worktree-setup.sh");
   return `bash ${setupScript} ${worktree}`;
 }
 
@@ -2829,10 +2955,12 @@ export interface MechanicalFanInOptions {
    *  用它）。gap-mechanical-fan-in-per-suite-runid-unified。 */
   perSuiteRunId?: string;
   mergeTarget?: string;
-  /** suite 命令（测试缝）；缺省 = node full-suite-runner.ts --buckets <task>（--root <worktree>
-   *  --state-dir <root>/.quay --runner inner --log-file <suiteLogFile>）。gap-fan-in-red-bucket-run-
-   *  not-recorded：机械路径不再跑平行 `bash scripts/test.sh --buckets`（绕开 verification-round 唯一
-   *  writer），改走正确的 runner——green+red 桶轮次都入 verification-round.jsonl（state=red 记录可见）。 */
+  /** suite 命令（测试缝）；缺省 = defaultMechanicalSuiteCommand（本仓库 node full-suite-runner.ts
+   *  --buckets <task> --root <worktree> --state-dir <root>/.quay --runner inner --log-file
+   *  <suiteLogFile>；第三方项目无 scripts/test.sh ⇒ bash -c "cd <worktree> && <loop.test_command>"）。
+   *  gap-fan-in-red-bucket-run-not-recorded：机械路径不再跑平行 `bash scripts/test.sh --buckets`
+   *  （绕开 verification-round 唯一 writer），改走正确的 runner——green+red 桶轮次都入
+   *  verification-round.jsonl（state=red 记录可见）。 */
   suiteCommand?: string[];
   /** suite 单飞槽 base（测试缝）；缺省 = suiteLockBase(root)。 */
   slotBase?: string;
@@ -2847,9 +2975,11 @@ export interface MechanicalFanInOptions {
   suiteCapture?: string;
   /** 强制跑 suite（跳过 doc-only 判定；测试缝）。 */
   forceSuite?: boolean;
-  /** scoped 门命令（测试缝）；缺省 = bash <worktree>/scripts/test.sh --for-task <task> --allow-thin。 */
+  /** scoped 门命令（测试缝）；缺省 = scopedGateCommandFor(task, worktree)（本仓库 test.sh --for-task；
+   *  第三方退化为 loop.test_command；两者皆无 ⇒ null 跳过 scoped 门）。 */
   scopedGateCommand?: string[];
-  /** doc 检查命令（测试缝）；缺省 = bash <worktree>/scripts/test.sh --static-checks-doc。 */
+  /** doc 检查命令（测试缝）；缺省 = docCheckCommandFor(worktree)（本仓库 test.sh --static-checks-doc；
+   *  第三方无该文件 ⇒ null 跳过 doc-check）。 */
   docCheckCommand?: string[];
   /** doc-check 缓存文件（测试缝）；缺省 = <root>/.quay/doc-check-cache.json（gitignored 运行时缓存，
    *  gap-fan-in-doc-check-cache）。doc 面未变时命中缓存跳过 doc-check（~0s），变化失效重跑。 */
@@ -2860,8 +2990,9 @@ export interface MechanicalFanInOptions {
   scopedGateCacheFile?: string;
   /** fan-in 编排脚本目录（测试缝）；缺省 = <worktree>/plugin/scripts（自举：本分支的编排脚本自验）。 */
   scriptsDir?: string;
-  /** ff-merge TS 模块路径（测试缝）；缺省 = <worktree>/packages/quay/src/fan-in/ff-merge.ts
-   *  （自举：本分支的 ff-merge 模块自验，P2 —— fan-in-ff-merge.sh 的 TS 化产物）。 */
+  /** ff-merge TS 模块路径（测试缝）；缺省 = resolveKernelSrcModule(<worktree>, "fan-in/ff-merge.ts")
+   *  （源树自举：本分支的 ff-merge 模块自验，P2 —— fan-in-ff-merge.sh 的 TS 化产物；shipped 打平布局
+   *  退 <包根>/src/fan-in/ff-merge.ts —— gap-fanin-gate-event-store-path-shipped-unsafe）。 */
   ffMergeModule?: string;
   /** 权威 suite 状态载体 full-suite-state.json 的路径（D7 测试缝）；缺省 = <root>/.quay/full-suite-state.json。 */
   suiteStateFile?: string;
@@ -3324,6 +3455,22 @@ async function flipTaskDone(
   return { ok: false, reason: `expected status 'ready' or 'done', got ${from === null ? "none" : JSON.stringify(from)}` };
 }
 
+/** 解析 `packages/quay/src/` 子树下一模块（shipped 感知，⛔ 硬编码 packages/quay/src 布局锚点）：
+ *  源树上下文（base 是 quay 源树，含 packages/quay/src/<rel>）⇒ base/packages/quay/src/<rel>；
+ *  shipped 上下文（npm 包把 packages/quay/ 打平到包根、base 无 packages/）⇒ <包根>/src/<rel>。
+ *  包根 = resolveKernelPluginRoot() 的父目录（源树 = <repo>/plugin 的父 <repo>；shipped = <pkg>/plugin
+ *  的父 <pkg>——实测 /tmp/ac207-prefix/lib/node_modules/quay/ 下 src/ 与 plugin/ 平级）。存在性判定
+ *  （fs.existsSync）先试源树形、再退 shipped 形；两形互斥（同一 base 不会同时命中两种布局）。两形皆无
+ *  时返回 shipped 形路径，import 的 MODULE_NOT_FOUND 由调用方 best-effort 捕获（与现状一致，不在此抛）。
+ *  gap-fanin-gate-event-store-path-shipped-unsafe：appendCompleteGateEvent 与 ffMergeModule 两处
+ *  packages/quay/src 锚点原为仓库布局硬编码，shipped npm 包（打平布局）下 MODULE_NOT_FOUND 被静默吞。
+ */
+export function resolveKernelSrcModule(base: string, rel: string): string {
+  const sourcePath = path.join(base, "packages", "quay", "src", rel);
+  if (fs.existsSync(sourcePath)) return sourcePath;
+  return path.join(path.dirname(resolveKernelPluginRoot()), "src", rel);
+}
+
 /** gap-mechanical-fan-in-writes-no-complete-gateevent — 机械 fan-in 翻 done 后经既有 gate-event-store
  *  写 `complete` pass GateEvent（恢复 gap-loop-completion-path-produces-zero-gateevents AC2 在新路径上
  *  成立；⛔ 不手搓 append）。事件写到 <root>/.quay/gate-events.jsonl——与 CLI/loop 同一载体，
@@ -3337,11 +3484,11 @@ export async function appendCompleteGateEvent(
   actor = "quay-driver",
 ): Promise<{ ok: boolean; reason: string | null }> {
   try {
-    // Module 经 repo-root.ts 单一真相源解析（⛔ 不用 root：测试里 root 是 scratch 空仓，无 packages/
-    // 树 ⇒ MODULE_NOT_FOUND；也⛔ 手搓 __dirname→../..——bundle 落 scripts/dist 时错一级）。repoRoot()
-    // 从本文件所在目录向上找 bundle/consumer/git 根，源运行（strip-types）与 bundle 运行都正确。
+    // Module 经 resolveKernelSrcModule 单一真相源解析（shipped 感知，⛔ 硬编码 packages/quay/src）：
+    // 源树 base=repoRoot() 含 packages/quay/src 命中；shipped 打平布局退 <包根>/src。⛔ 不用 root
+    // （测试里 root 是 scratch 空仓）——resolveKernelSrcModule 的 base 只判源树形、不写目标载体。
     const { appendGateEvent } = await import(
-      /* @vite-ignore */ pathToFileURL(path.join(repoRoot(), "packages", "quay", "src", "gate", "gate-event-store.ts")).href
+      /* @vite-ignore */ pathToFileURL(resolveKernelSrcModule(repoRoot(), "gate/gate-event-store.ts")).href
     ) as { appendGateEvent: (logPath: string, event: unknown) => void };
     appendGateEvent(path.join(root, ".quay", "gate-events.jsonl"), {
       id: randomUUID(),
@@ -3378,6 +3525,9 @@ export function newMechanicalSuiteRunId(task: string): string {
  *  --run-id <runId> 把 per-suite 身份传给 runner（gap-mechanical-fan-in-per-suite-runid-unified：
  *  runner 用它当 runId，贯穿 full-suite-state / generation guard / suite-load-<runId>.jsonl / 记录，
  *  使 /tests 按记录 runId 查得到负载曲线）。
+ *  runner 路径经 kernelSiblingArgv 锚在本 kernel 安装位置（⛔ 非 opts.worktree ——
+ *  gap-plugin-root-resolution-remaining-callsites-round2：第三方项目无 plugin/scripts/，锚在 worktree
+ *  会 Cannot find module ⇒ 挡住任务落地）。
  *  抽成纯函数便于 worker-driver.test.mjs 断言缺省命令是 runner 而非 test.sh harness（AC2）。 */
 export function defaultMechanicalSuiteCommand(opts: {
   task: string;
@@ -3386,16 +3536,32 @@ export function defaultMechanicalSuiteCommand(opts: {
   suiteLogFile: string;
   runId: string;
 }): string[] {
-  return [
-    "node", "--no-warnings", "--experimental-strip-types",
-    path.join(opts.worktree, "plugin", "scripts", "full-suite-runner.ts"),
-    "--buckets", opts.task,
-    "--root", opts.worktree,
-    "--state-dir", path.join(opts.root, ".quay"),
-    "--runner", "inner",
-    "--log-file", opts.suiteLogFile,
-    "--run-id", opts.runId,
-  ];
+  // 本仓库（scripts/test.sh 存在）⇒ full-suite-runner（本仓库 bucket 化测试基建，行为与修改前逐字
+  // 一致）；第三方项目无该文件 ⇒ 直接委托 loop.test_command（全量）——⛔ 不调用 full-suite-runner
+  // （其内部锚点假设本仓库结构，gap-driver-fanin-hardcoded-test-sh-third-party 范围扩展：修 5 处
+  // __dirname 是治标，第三方本就不该走这条路径）。
+  if (hasTestSh(opts.worktree)) {
+    return [
+      "node", "--no-warnings", ...kernelSiblingArgv("full-suite-runner.ts"),
+      "--buckets", opts.task,
+      "--root", opts.worktree,
+      "--state-dir", path.join(opts.root, ".quay"),
+      "--runner", "inner",
+      "--log-file", opts.suiteLogFile,
+      "--run-id", opts.runId,
+    ];
+  }
+  const testCommand = readLoopTestCommand(opts.worktree);
+  if (testCommand !== null) {
+    // 第三方全量 test_command（如 `node --test`）依赖 cwd 定位测试树 ⇒ 显式 cd 进 worktree 再跑
+    // （spawnSuiteAndWait spawn 不设 cwd）。
+    return ["bash", "-c", `cd ${shq(opts.worktree)} && ${testCommand}`];
+  }
+  // 无 scripts/test.sh 且无 loop.test_command ⇒ 无测试能力（quay-init 对第三方已 fail-closed 缺
+  // test_command，此分支仅防半初始化工作区）。fail-closed 且可区分（⛔ 与「suite 跑了且失败」同形）。
+  // ⛔ 不再以「命令不存在」的 exit code 127 形态出现——「能力不存在」须可区分于「命令不存在」
+  // （GOAL-012 退出条件②；gap-ac227-third-party-capability-degradation）。
+  return ["bash", "-c", `echo 'third-party-no-test-tooling: no scripts/test.sh and no loop.test_command' >&2; exit 2`];
 }
 
 /** fan-in 过程日志文件名（`.quay/fan-in-<task>-<runId>.log` 的 basename）。runId 唯一后缀 ⇒ 跨 relaunch
@@ -3528,7 +3694,10 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   const perSuiteRunId = opts.perSuiteRunId ?? newMechanicalSuiteRunId(task);
   const mergeTarget = opts.mergeTarget ?? "develop";
   const slotBase = opts.slotBase ?? suiteLockBase(root);
-  const slotLib = opts.slotLib ?? path.join(root, "plugin", "scripts", "suite-slot-lib.sh");
+  // ⛔ 非 root/plugin/scripts/（第三方项目无 plugin/）——resolveKernelShellSibling 锚在本 kernel 安装
+  // 位置；缺 ⇒ 回退 kernel plugin root 下的同路径（suite 取槽时 `source <缺失路径>` 报错 ⇒ fail-closed）。
+  const slotLib = opts.slotLib ?? (resolveKernelShellSibling("suite-slot-lib.sh")
+    ?? path.join(resolveKernelPluginRoot(), "scripts", "suite-slot-lib.sh"));
   const suiteCapture = opts.suiteCapture ?? `/tmp/fan-in-suite-${task}.env`;
   const runIdSafe = runId.replace(/[^A-Za-z0-9_.-]/g, "_");
   // 过程日志（A1，gitignored 运行时日志）：.quay/fan-in-<task>-<runId>.log，逐步骤 trace。
@@ -3540,15 +3709,23 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   const suiteLogFile =
     opts.suiteLogFile ?? path.join(root, ".quay", suiteLogFileName(task, runId, newSuiteLogAttemptSuffix()));
   const suiteStateFile = opts.suiteStateFile ?? path.join(root, ".quay", "full-suite-state.json");
-  const scriptsDir = opts.scriptsDir ?? path.join(worktree, "plugin", "scripts");
+  const scriptsDir = opts.scriptsDir ?? resolveKernelScriptsDir();
   // P2 (gap-execution-loop-productization-p2-p4): the ff 持锁段 is now a TS module (packages/quay/
   // fan-in/ff-merge.ts), IMPORTED — ⛔ no shell-out to the retired bash fan-in-ff-merge.sh.
   const ffMergeModule =
-    opts.ffMergeModule ?? path.join(worktree, "packages", "quay", "src", "fan-in", "ff-merge.ts");
-  const antiDrift = path.join(scriptsDir, "anti-drift-touches-check.ts");
-  const classify = path.join(scriptsDir, "select-static-checks-for-touches.ts");
-  const typecheck = path.join(scriptsDir, "fan-in-ts-typecheck-gate.ts");
-  const acGate = path.join(scriptsDir, "fan-in-ac-completion-gate.ts");
+    opts.ffMergeModule ?? resolveKernelSrcModule(worktree, "fan-in/ff-merge.ts");
+  // 编排脚本（anti-drift/classify/typecheck/ac-gate）：opts.scriptsDir 覆盖（hermetic 测试缝，⛔ 生产不用）
+  // ⇒ <scriptsDir>/<name>.ts 直拼（带 --experimental-strip-types）；缺省 ⇒ kernelSiblingArgv（第三方项目无
+  // plugin/scripts/，.ts 已 bundle 成 dist/*.js，resolveKernelSibling 回退到 .js 且不带 flag——
+  // gap-plugin-root-resolution-remaining-callsites-round2）。
+  const gateArgv = (name: string): string[] =>
+    opts.scriptsDir
+      ? ["node", "--experimental-strip-types", path.join(opts.scriptsDir, name)]
+      : ["node", ...kernelSiblingArgv(name)];
+  const antiDrift = gateArgv("anti-drift-touches-check.ts");
+  const classify = gateArgv("select-static-checks-for-touches.ts");
+  const typecheck = gateArgv("fan-in-ts-typecheck-gate.ts");
+  const acGate = gateArgv("fan-in-ac-completion-gate.ts");
 
   // gap-mechanical-fan-in-red-lock-times-null：失败结果在【release 之后】才读锁时间（同成功路径
   // :3625 的时机）——⛔ 不能在 try 内 return 时就地读（release 事件尚未落盘 ⇒ lockHoldSecs 恒 null），
@@ -3673,7 +3850,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     if (!a.ok) return fail("merge-develop", a);
 
     // 3. anti-drift Touches 核对（HARD FAIL ⇒ red）。
-    a = await step("anti-drift", ["node", "--experimental-strip-types", antiDrift, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000);
+    a = await step("anti-drift", [...antiDrift, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000);
     if (!a.ok) return fail("anti-drift", a);
 
     // 4. delta 断言面判定（doc-only 跳过 suite，code 跑 suite；判不出 fail-closed 跑 suite）。
@@ -3683,7 +3860,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     const deltaList = (deltaFiles.stdout || "").split("\n").map((s) => s.trim()).filter(Boolean);
     let codeDelta = "";
     if (deltaList.length > 0) {
-      const cd = await mechSh(["node", "--experimental-strip-types", classify, "--classify-delta", "--root", worktree, ...deltaList], 120_000);
+      const cd = await mechSh([...classify, "--classify-delta", "--root", worktree, ...deltaList], 120_000);
       codeDelta = cd.ok ? (cd.stdout || "").trim() : "__CLASSIFY_FAILED__";
     }
     // 4b. develop 前进面复用（gap-fan-in-continue-doc-only-advance-reuse-suite）：任务自身 delta 是 code
@@ -3699,7 +3876,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
         if (anc.ok) {
           const sincePrev = await mechSh(["git", "-C", worktree, "diff", "--name-only", prevCommit, "HEAD"], 30_000);
           const sinceList = (sincePrev.stdout || "").split("\n").map((s) => s.trim()).filter(Boolean);
-          const adv = await mechSh(["node", "--experimental-strip-types", classify, "--classify-delta", "--root", worktree, ...sinceList], 120_000);
+          const adv = await mechSh([...classify, "--classify-delta", "--root", worktree, ...sinceList], 120_000);
           reuseSkip = adv.ok && (adv.stdout || "").trim() === ""; // 前进面全 doc/inert ⇒ 复用上一 green
         }
       }
@@ -3710,13 +3887,21 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     // 5. ts-typecheck ∥ doc-check 并行（merge+anti-drift 后二者相互独立，可并行；doc-check 提前到
     //    scoped-gate 之前——廉价失败先于昂贵）。合并为一次 gate 判定：任一非零 ⇒ red → 语义会话兜底。
     //    失败报告顺序 typecheck 先于 doc-check（与串行序一致——AC3 判定一致性的读面）。
-    const docCmd = opts.docCheckCommand ?? ["bash", path.join(worktree, "scripts", "test.sh"), "--static-checks-doc"];
+    const docCmd = opts.docCheckCommand ?? docCheckCommandFor(worktree);
     // doc-check 缓存（gap-fan-in-doc-check-cache）：doc 面 = run_doc_checks 读的全部输入（@static-object
     // 判定对象 + plugin/scripts 检查器/仪器面 + scripts/test.sh + .gitignore + 全树文件结构）。面未变 ⇒
     // 命中上次绿 verdict（~0s，reason=cache-hit）；面变 ⇒ 失效重跑。⛔ 只缓存绿、⛔ 键算不出 ⇒ 照跑（fail-closed）。
     const docCacheFile = opts.docCheckCacheFile ?? path.join(root, ".quay", "doc-check-cache.json");
     const docCheckLeg = async (): Promise<MechShResult> => {
       const t0 = Date.now();
+      // 第三方项目：无 doc-check 工具（scripts/test.sh 不存在）⇒ 跳过，可区分取值
+      // third-party-no-doc-check-tooling（⛔ 不与「doc 检查真的跑了且失败」同形，硬规则 3b）。
+      if (docCmd === null) {
+        const reason = "third-party-no-doc-check-tooling";
+        appendFanInStepTrace(root, task, runId, "doc-check", "end", { ok: true, reason });
+        trace({ step: "doc-check", exit: 0, wall_ms: Date.now() - t0, ok: true, reason });
+        return { ok: true, status: 0, stdout: "", stderr: "", error: null };
+      }
       const docKey = computeDocCheckFaceKey(worktree);
       const cachedDocOk = docKey === null ? null : readDocCheckCache(docCacheFile, docKey);
       if (cachedDocOk === true) {
@@ -3728,7 +3913,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       return r;
     };
     const [tc, dc] = await Promise.all([
-      step("typecheck", ["node", "--experimental-strip-types", typecheck, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000),
+      step("typecheck", [...typecheck, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000),
       docCheckLeg(),
     ]);
     if (!tc.ok) return fail("typecheck", tc);
@@ -3746,13 +3931,21 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     const scopedCmd = opts.scopedGateCommand ?? scopedGateCommandFor(task, worktree);
     const scopedCacheFile = opts.scopedGateCacheFile ?? path.join(root, ".quay", "scoped-gate-cache.json");
     const scopedT0 = Date.now();
-    const scopedDevelopSha = (await mechSh(["git", "-C", worktree, "rev-parse", mergeTarget], 30_000)).stdout.trim();
-    const scopedCacheHit = scopedDevelopSha !== "" && readScopedGateCache(scopedCacheFile, scopedGateKey(task, scopedDevelopSha)) === true;
-    if (scopedCacheHit) {
-      trace({ step: "scoped-gate", exit: 0, wall_ms: Date.now() - scopedT0, ok: true, reason: "cache-hit(worker-premerge)" });
+    // 第三方项目：无 scoped 能力（scripts/test.sh 与 loop.test_command 皆无）⇒ 跳过 scoped 门直接进
+    // 全量 suite，可区分取值 third-party-no-scoped-tooling（⛔ 不与「scoped 门跑了且失败」同形，硬规则 3b）。
+    if (scopedCmd === null) {
+      const reason = "third-party-no-scoped-tooling";
+      appendFanInStepTrace(root, task, runId, "scoped-gate", "end", { ok: true, reason });
+      trace({ step: "scoped-gate", exit: 0, wall_ms: Date.now() - scopedT0, ok: true, reason });
     } else {
-      a = await step("scoped-gate", scopedCmd, 600_000);
-      if (!a.ok) return fail("scoped-gate", a);
+      const scopedDevelopSha = (await mechSh(["git", "-C", worktree, "rev-parse", mergeTarget], 30_000)).stdout.trim();
+      const scopedCacheHit = scopedDevelopSha !== "" && readScopedGateCache(scopedCacheFile, scopedGateKey(task, scopedDevelopSha)) === true;
+      if (scopedCacheHit) {
+        trace({ step: "scoped-gate", exit: 0, wall_ms: Date.now() - scopedT0, ok: true, reason: "cache-hit(worker-premerge)" });
+      } else {
+        a = await step("scoped-gate", scopedCmd, 600_000);
+        if (!a.ok) return fail("scoped-gate", a);
+      }
     }
 
     // 7. suite（driver 子进程 + 异步 poll，⛔ 不 detach——AC3）。suite_head 在 merge + 各闸之后取。
@@ -3764,7 +3957,7 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       // flip 闸 fan-in-ac-completion-gate.ts 一致）。not-evaluated（段缺失）fail-closed 拒翻（硬规则 3b：
       // 无法评估 ≠ 合格）。⛔ 保留 step 8 的 ac-gate（flip 闸）——flip 前再判一次（幂等双保险）。
       const acPreT0 = Date.now();
-      const acPre = await mechSh(["node", "--experimental-strip-types", acGate, "--task", task, "--worktree", worktree, "--json"], 60_000);
+      const acPre = await mechSh([...acGate, "--task", task, "--worktree", worktree, "--json"], 60_000);
       if (!acPre.ok) {
         let checkedTotal = "?/?";
         let status = "fail";
@@ -3826,9 +4019,9 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     }
 
     // 8. land 前 anti-drift 重跑 + AC 完成闸 + flip done（先 flip 后 ff，人 2026-08-14 裁定）。
-    a = await step("anti-drift-land", ["node", "--experimental-strip-types", antiDrift, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000);
+    a = await step("anti-drift-land", [...antiDrift, "--task", task, "--worktree", worktree, "--merge-target", mergeTarget], 120_000);
     if (!a.ok) return fail("anti-drift-land", a);
-    a = await step("ac-gate", ["node", "--experimental-strip-types", acGate, "--task", task, "--worktree", worktree], 60_000);
+    a = await step("ac-gate", [...acGate, "--task", task, "--worktree", worktree], 60_000);
     if (!a.ok) return fail("ac-gate", a);
     const flipT0 = Date.now();
     const flip = await flipTaskDone(worktree, task, mergeTarget);
@@ -3911,19 +4104,20 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
 /**
  * 每任务新进程执行（gap-fan-in-token-gate-version-mismatch-self-lock AC1）：机械 fan-in 不在守护进程
  * in-process 跑（守护是主检出旧代码、但 fan-in 编排脚本从 worktree 加载 ⇒ 版本错位），改为每任务 spawn
- * 一个 fresh node 进程加载 worker-driver.ts --mechanical-fan-in。执行器（entry）用【主检出】的
- * worker-driver.ts（opts.root/plugin/scripts/worker-driver.ts，与 driver 同版）——⛔ 不用 worktree 的
- * （gap-fan-in-spawn-stale-worktree-executor-missing-argv：stale worktree 缺新 argv 如 --mechanical-fan-in
- * ⇒ fresh 进程报 unknown argument ⇒ 无 JSON 输出 ⇒ parse-mechanical-fan-in red）。fan-in 编排器本就是
- * 基础设施，应跟 driver 同版；任务 delta（含对 worker-driver.ts 自身的改动）由 suite step（worktree
- * test.sh）验证，不因执行器用主检出版而丢。锁半（acquireFanInLock，ADR-034）与编排半
- * （ff-merge.ts 模块）仍在 worktree 同源。结果经 stdout 单行 JSON 回传（--mechanical-fan-in 只打一行
- * result JSON）；spawn 失败/输出不可解析 fail-closed 为 red（硬规则 3b：读不懂 ≠ 合格）。
+ * 一个 fresh node 进程加载 worker-driver.ts --mechanical-fan-in。执行器（entry）锚在本 kernel 安装位置
+ * （kernelSiblingArgv("worker-driver.ts") = resolveKernelSibling，与 driver 同版）——⛔ 不用 worktree 的、
+ * 也⛔ 不锚在 opts.root/plugin/scripts（gap-plugin-root-resolution-remaining-callsites-round2：第三方
+ * 项目无 plugin/scripts/）。（gap-fan-in-spawn-stale-worktree-executor-missing-argv：stale worktree 缺
+ * 新 argv 如 --mechanical-fan-in ⇒ fresh 进程报 unknown argument ⇒ 无 JSON 输出 ⇒ parse-mechanical-fan-in
+ * red）。fan-in 编排器本就是基础设施，应跟 driver 同版；任务 delta（含对 worker-driver.ts 自身的改动）
+ * 由 suite step（worktree test.sh）验证，不因执行器用 kernel 版而丢。锁半（acquireFanInLock，ADR-034）
+ * 与编排半（ff-merge.ts 模块）仍在 worktree 同源。结果经 stdout 单行 JSON 回传（--mechanical-fan-in
+ * 只打一行 result JSON）；spawn 失败/输出不可解析 fail-closed 为 red（硬规则 3b：读不懂 ≠ 合格）。
  */
 export async function spawnMechanicalFanIn(opts: MechanicalFanInOptions): Promise<MechanicalFanInResult> {
-  const entry = path.join(opts.root, "plugin", "scripts", "worker-driver.ts");
+  const entry = kernelSiblingArgv("worker-driver.ts");
   const argv = [
-    process.execPath, "--experimental-strip-types", entry,
+    process.execPath, ...entry,
     "--mechanical-fan-in",
     "--task", opts.task,
     "--worktree", opts.worktree,

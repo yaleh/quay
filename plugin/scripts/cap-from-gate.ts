@@ -98,6 +98,7 @@ import { parse as parseYaml } from "yaml";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { driverCap } from "./driver-config.ts";
 import { resolveResourceGateScript } from "./driver-shared.ts";
+import { resolveKernelPluginRoot } from "./driver-runtime.ts";
 
 /** FIXED dispatch cap (gap-fixed-cap-5-dynamic-cap-retired, human ruling 2026-08-09): the dynamic
  *  adaptive cap is retired. effective_cap is the CONFIGURED worker cap — read live from the single
@@ -255,7 +256,13 @@ export function readBudgetFromGate(
   repoRoot: string,
   env: NodeJS.ProcessEnv = process.env,
 ): BudgetSnapshot | null {
-  const budgetScript = path.join(repoRoot, "plugin", "scripts", "process-budget.sh");
+  // ⛔ 非 repoRoot 锚定（gap-plugin-root-resolution-remaining-callsites-round2：第三方项目无
+  // plugin/scripts/，`bash <repoRoot>/plugin/scripts/process-budget.sh` 会 No such file ⇒ 静默 fail-open
+  // 让跨层预算这个次要约束不生效）。改为从 kernel 安装位置解析（resolveKernelPluginRoot 单一真相源 +
+  // env.QUAY_PLUGIN_ROOT 测试缝，同 resolveResourceGateScript 手法）。fail-open 语义不变：脚本缺失或
+  // exit 非 0 仍返回 null。
+  const pluginRoot = env.QUAY_PLUGIN_ROOT || resolveKernelPluginRoot();
+  const budgetScript = path.join(pluginRoot, "scripts", "process-budget.sh");
   const res = spawnSync("bash", [budgetScript], { cwd: repoRoot, encoding: "utf8", env });
   if (res.status !== 0) return null;
   const out = `${res.stdout}\n${res.stderr}`;

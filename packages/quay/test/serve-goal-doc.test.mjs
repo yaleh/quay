@@ -71,16 +71,23 @@ after(async () => {
   process.chdir(originalCwd);
 });
 
-test("AC5 — GET /goal lists goal + criterion records with recent verdict (origin moved off the list)", async () => {
-  const r = await get(port, "/goal");
-  assert.equal(r.status, 200);
-  assert.match(r.body, /GOAL-001/);
-  assert.match(r.body, /AC-028/);
-  assert.match(r.body, /three-layer unification/);
-  assert.match(r.body, /experience flows/);
+test("AC5 — GET /goal lists goals; /goal?kind=criterion lists criteria with recent verdict (origin moved off the list)", async () => {
+  // gap-webui-goal-list-tab-split-goal-ac: the merged GOAL+AC list split into two tabs. Goals render
+  // on the default tab; the criterion (AC-028) and its ledger-derived verdict render on the
+  // Criteria tab.
+  const goals = await get(port, "/goal");
+  assert.equal(goals.status, 200);
+  assert.match(goals.body, /GOAL-001/);
+  assert.match(goals.body, /three-layer unification/);
+  assert.doesNotMatch(goals.body, /AC-028/, "criteria are not on the Goals tab");
   // gap-webui-goal-list-sort-and-column-set AC1: the whole-prose `origin` column left the list
   // (it lives on the detail page now) — the list must no longer render it.
-  assert.doesNotMatch(r.body, /origin/, "origin is no longer a list column");
+  assert.doesNotMatch(goals.body, /origin/, "origin is no longer a list column");
+
+  const r = await get(port, "/goal?kind=criterion");
+  assert.equal(r.status, 200);
+  assert.match(r.body, /AC-028/);
+  assert.match(r.body, /experience flows/);
   // The most valuable column: recent verdict + time — now from the LEDGER, not the file.
   assert.match(r.body, /pass/);
   assert.match(r.body, /2026-09-06T12:00:00Z/);
@@ -104,7 +111,7 @@ test("AC3 (evidence-out-of-git) — 无账本记录的 AC 显示「—」，⛔ 
   assert.equal(detail.status, 200);
   assert.doesNotMatch(detail.body, /最近 verdict/, "no ledger event ⇒ the detail page omits the recent-verdict line");
   assert.doesNotMatch(detail.body, /2020-01-01/, "stale file evidence must never render");
-  const list = await get(port, "/goal");
+  const list = await get(port, "/goal?kind=criterion");
   assert.doesNotMatch(list.body, /2020-01-01/, "no stale inherited reading anywhere in the list");
 });
 
@@ -160,21 +167,23 @@ test("draft 在筛选器里可达（此前缺失 ⇒ 提案不可见）", async 
   assert.match(r.body, /status=draft/, "筛选器必须提供 draft 入口");
 });
 
-test("有 draft 时首页显示待裁定横幅与条数；无 draft 时不显示", async () => {
+test("有 draft AC 时 Goals tab 显示跨 tab 待裁定横幅与条数；无 draft 时不显示", async () => {
   const draftPath = path.join(workspaceRoot, "goals", "AC-900-draft-proposal.md");
   fs.writeFileSync(draftPath,
     "---\nid: AC-900\ntitle: a proposed criterion\nstatus: draft\nkind: criterion\ngoal: GOAL-001\ncriterion: exit 0\nexpect: \"exit 0\"\norigin: meta-driver 提案，依据 .quay/gate-events.jsonl 计数\n---\n## Rationale\nproposed\n");
   try {
+    // gap-webui-goal-list-tab-split-goal-ac: a draft CRITERION is the Criteria tab's own count, so
+    // the default Goals tab shows the cross-tab hint ("另有 N 条 AC 待裁定"), not its own banner.
     const r = await get(port, "/goal");
-    assert.match(r.body, /1 条待人裁定/);
-    assert.match(r.body, /查看待裁定/);
+    assert.match(r.body, /另有 1 条 AC 待裁定/);
+    assert.match(r.body, /href="\/goal\?status=draft&kind=criterion"/);
     // 已经在 draft 筛选下时不重复提示（避免同一信息叠加两次）。
     const d = await get(port, "/goal?status=draft");
-    assert.doesNotMatch(d.body, /条待人裁定/);
+    assert.doesNotMatch(d.body, /待裁定/, "?status=draft 不叠加横幅");
   } finally {
     fs.rmSync(draftPath, { force: true });
   }
   // 负控制：draft 清零后横幅必须消失（⛔ 不得是恒显示的装饰）。
   const after = await get(port, "/goal");
-  assert.doesNotMatch(after.body, /条待人裁定/);
+  assert.doesNotMatch(after.body, /待裁定/);
 });

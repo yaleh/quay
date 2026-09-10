@@ -162,16 +162,19 @@ test("run_checker ${repo_root}/plugin/scripts/<name> survives a # @static-object
   }
 });
 
-test("real repo: live checkers hit their execution-core caller via run_checker / path.join / $SCRIPT_DIR", () => {
+test("real repo: live checkers hit their execution-core caller via run_checker / kernel-resolution / $SCRIPT_DIR", () => {
   const scripts = listScriptBasenames(repoRoot);
   const bareRefs = scanBareFilenameRefs(repoRoot).refs;
   const { referrers } = buildReferenceMap(repoRoot, scripts, bareRefs, true);
   const cases = [
-    // [script, expected caller] — AC1 样本 + path.join(__dirname) + $SCRIPT_DIR 三种执行形式。
-    ["tmp-leak-pairing-check.sh", "plugin/scripts/runner-static-gate.ts"],
-    ["assert-clean-tree.sh", "plugin/scripts/runner-tree-state.ts"],
-    ["provision-verify-worktree.sh", "plugin/scripts/full-suite-runner.ts"],
-    ["transcript-delivery-check.ts", "plugin/scripts/send-keys-reliable.sh"],
+    // [script, expected caller] — run_checker / $SCRIPT_DIR / resolveKernelSibling /
+    // path.join(resolveKernelPluginRoot()) 四种执行形式各钉一个已知为真样本。
+    // （gap-ac225 后 path.join(__dirname) 活样本已迁移为 kernel 锚点，故此样本清单不再含 __dirname 形。）
+    ["tmp-leak-pairing-check.sh", "plugin/scripts/runner-static-gate.ts"], // run_checker ${repo_root}/plugin/scripts/<name>
+    ["assert-clean-tree.sh", "plugin/scripts/runner-tree-state.ts"], // path.join(resolveKernelPluginRoot(), "scripts", <name>)
+    ["provision-verify-worktree.sh", "plugin/scripts/full-suite-runner.ts"], // 同上
+    ["full-suite-runner.ts", "plugin/scripts/suite-state-trigger.ts"], // resolveKernelSibling("<name>")
+    ["transcript-delivery-check.ts", "plugin/scripts/send-keys-reliable.sh"], // $SCRIPT_DIR/<name>
   ];
   for (const [script, expectedCaller] of cases) {
     const refs = [...(referrers.get(script) ?? [])].map((f) => path.relative(repoRoot, f));

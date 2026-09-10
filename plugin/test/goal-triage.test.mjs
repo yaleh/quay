@@ -2,10 +2,10 @@
 // goal-triage.test.mjs — GOAL-010 范围② / AC-210 (tasks/gap-goal-driver-draft-ac-triage):
 // draft AC 分诊——active GOAL 名下每条 draft AC 出四态判决之一（activate / re-anchor /
 // needs-human / hold）并逐条落痕到轮记录 value.triage。retire 已按 AC-219 移除——
-// 「无任务牵引」≠「死信」，刚提案的 draft AC 无牵引分诊为 hold 而非 retire→needs-human。
+// 「无任务牵引」≠「死信」，刚提案的 draft AC 无牵引分诊为 activate 而非 retire→needs-human。
 //
 // 覆盖四件事：①四态词表（decision ∈ 四态，且四态各至少一条输入可达——AC2）；②纯函数
-// triageDraftAc 的判决语义（goal 锚 / criterion / posture / 牵引 / 无牵引——AC2/AC3）；
+// triageDraftAc 的判决语义（goal 锚 / criterion / posture / 无牵引——AC2/AC3；牵引不再是激活判据）；
 // ③真实机械环端到端（active GOAL 名下 draft AC 跑一轮后轮记录 facts[].value.triage[] 逐条含该
 // AC——AC1，⛔ 不注入 seam，跑真的 goal-store CLI）；④无 draft AC 时 triage 为 [] 且字段仍在
 // （与「未跑分诊」按字段存在性区分，硬规则 3b）；⑤AC-210 判据（python 一行）的双向控制
@@ -48,15 +48,13 @@ test('AC2 四态词表：四态各至少一条输入可达（decision ∈ 四态
   const traction = [{ id: 't', status: 'todo', goalAc: 'AC-900' }];
   const seen = new Set();
 
-  // activate：goal 锚合法 + criterion 非空 + 无 posture + 有关联任务推进。
-  seen.add(triageDraftAc({ id: 'AC-900', goal: 'GOAL-009', criterion: 'true' }, null, traction).decision);
+  // activate（无牵引）：goal 锚合法 + criterion 非空 + 无 posture ⇒ 建议激活进入判定
+  // （gap-goal-driver-ac-activation-gated-on-traction-not-goal-semantics：牵引不再是激活判据）。
+  seen.add(triageDraftAc({ id: 'AC-900', goal: 'GOAL-009', criterion: 'true' }, null, null).decision);
+  seen.add(triageDraftAc({ id: 'AC-900', goal: 'GOAL-009', criterion: 'true' }, null, []).decision);
   // re-anchor：goal 锚缺失 / 非法（非 GOAL-NNN）。
   seen.add(triageDraftAc({ id: 'AC-900', goal: '', criterion: 'true' }, null, traction).decision);
   seen.add(triageDraftAc({ id: 'AC-900', goal: 'PHASE-001', criterion: 'true' }, null, traction).decision);
-  // hold（无牵引）：结构完备 + 无 posture + 无牵引（taskFacts null / 空）⇒ 待人工激活/补任务
-  // （AC-219：⛔ 不判 retire——「无任务牵引」≠「死信」）。
-  seen.add(triageDraftAc({ id: 'AC-900', goal: 'GOAL-009', criterion: 'true' }, null, null).decision);
-  seen.add(triageDraftAc({ id: 'AC-900', goal: 'GOAL-009', criterion: 'true' }, null, []).decision);
   // needs-human：criterion 缺失/空。
   seen.add(triageDraftAc({ id: 'AC-900', goal: 'GOAL-009', criterion: '' }, null, traction).decision);
   seen.add(triageDraftAc({ id: 'AC-900', goal: 'GOAL-009' }, null, traction).decision);
@@ -72,6 +70,12 @@ test('AC2 判决语义：posture 挡住 activate 落在 hold（⛔ 不判 activa
   assert.equal(triageDraftAc({ id: 'AC-900', goal: 'GOAL-009', criterion: 'true' }, 'measure-only', traction).decision, 'hold');
   // 无牵引但 posture 声明 ⇒ hold（不因无牵引而变态）。
   assert.equal(triageDraftAc({ id: 'AC-900', goal: 'GOAL-009', criterion: 'true' }, 'measure-only', []).decision, 'hold');
+});
+
+test('AC1：结构完备 + 无任务牵引 ⇒ 判 activate（⛔ 不再 hold——激活判据是「判据就绪」而非「有牵引」）', () => {
+  const wellFormed = { id: 'AC-900', goal: 'GOAL-009', criterion: 'true' };
+  assert.equal(triageDraftAc(wellFormed, null, null).decision, 'activate', 'taskFacts=null（无牵引）⇒ activate');
+  assert.equal(triageDraftAc(wellFormed, null, []).decision, 'activate', 'taskFacts=[]（无牵引）⇒ activate');
 });
 
 // ── AC3 逐条落痕（纯函数面：ac 唯一、非空，decision 非空）────────────────────────────────
@@ -97,7 +101,7 @@ test('AC1 对象集扩展：active GOAL 名下 draft AC 跑一轮后轮记录 fa
   try {
     fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
     fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true });
-    // active GOAL-009 名下两条 draft AC（criterion `true` 可跑，但 status=draft ⇒ 不 flip）。
+    // active GOAL-009 名下两条 draft AC（分诊对象集 = draft；criterion `true` 可评估）。
     writeGoalFile(tmp, { id: 'GOAL-009', status: 'active', kind: 'goal' });
     writeGoalFile(tmp, { id: 'AC-900', status: 'draft', kind: 'criterion', goal: 'GOAL-009', criterion: 'true' });
     writeGoalFile(tmp, { id: 'AC-901', status: 'draft', kind: 'criterion', goal: 'GOAL-009', criterion: 'true' });

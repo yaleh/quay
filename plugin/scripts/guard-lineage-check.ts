@@ -406,7 +406,7 @@ export function main(argv: string[]): number {
     console.error(`guard-lineage-check: plugin/scripts not found under ${root} — is --root correct?`);
     return 2;
   }
-  const catalogFile = opts.catalog ? path.resolve(opts.catalog) : path.join(root, "plugin", "scripts", "capability-catalog.sh");
+  const catalogFile = opts.catalog ? path.resolve(opts.catalog) : path.join(root, "plugin", "scripts", "capability-catalog.sh");  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   const costFile = opts.costFile ? path.resolve(opts.costFile) : path.join(root, ".quay", "checker-cost.jsonl");
   const report = analyze(root, { catalogFile, costFile });
   if (opts.json) printJson(report);

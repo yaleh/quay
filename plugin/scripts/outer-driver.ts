@@ -190,7 +190,7 @@ function factOf<T>(name: string, value: T | null, notEvaluatedReason: string): F
 export function occupancyRoutine(root: string, cmd: string[] | null): () => Fact[] {
   return () => {
     const argv = cmd ?? ["node", "--no-warnings", "--experimental-strip-types",
-      path.join(root, "plugin", "scripts", "slot-refill.ts"), "--root", root, "--cap", "5", "--json"];
+      path.join(root, "plugin", "scripts", "slot-refill.ts"), "--root", root, "--cap", "5", "--json"];  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     const parsed = runJson(argv, root);
     const v = parsed && typeof parsed === "object" ? parseSlotRefill(JSON.stringify(parsed)) : null;
     const value = v === null ? null : { in_flight: v.inFlight, occupied_slots: v.occupiedSlots, cap: v.effectiveCap };
@@ -202,7 +202,7 @@ export function occupancyRoutine(root: string, cmd: string[] | null): () => Fact
 export function notYetFlippedRoutine(root: string, cmd: string[] | null): () => Fact[] {
   return () => {
     const argv = cmd ?? ["node", "--no-warnings", "--experimental-strip-types",
-      path.join(root, "plugin", "scripts", "ready-pool-check.ts"), "--root", root, "--cap", "5", "--json"];
+      path.join(root, "plugin", "scripts", "ready-pool-check.ts"), "--root", root, "--cap", "5", "--json"];  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     const parsed = runJson(argv, root);
     const v = parsed && typeof parsed === "object" ? parseNotYetFlipped(JSON.stringify(parsed)) : null;
     return [factOf("not_yet_flipped", v, "ready-pool-check unreadable/unparseable")];
@@ -212,7 +212,7 @@ export function notYetFlippedRoutine(root: string, cmd: string[] | null): () => 
 /** A10 · closure-lag 信号：`closure-lag-check.sh`（无参信号检查），退出非 0 ⇒ 报出。 */
 export function closureLagRoutine(root: string, cmd: string[] | null): () => Fact[] {
   return () => {
-    const argv = cmd ?? ["bash", path.join(root, "plugin", "scripts", "closure-lag-check.sh")];
+    const argv = cmd ?? ["bash", path.join(root, "plugin", "scripts", "closure-lag-check.sh")];  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     const r = runExit(argv, root);
     if (!r.ok) return [{ name: "closure_lag", value: null, state: "not-evaluated", reason: "closure-lag-check unreadable" }];
     // exit 0 = 正常（无信号）；非 0 = 信号触发（报出，但这是读数不是门控——判断归 manager）。
@@ -224,7 +224,7 @@ export function closureLagRoutine(root: string, cmd: string[] | null): () => Fac
 export function slotRefillRoutine(root: string, cmd: string[] | null): () => Fact[] {
   return () => {
     const argv = cmd ?? ["node", "--no-warnings", "--experimental-strip-types",
-      path.join(root, "plugin", "scripts", "slot-refill.ts"), "--root", root, "--cap", "5", "--json"];
+      path.join(root, "plugin", "scripts", "slot-refill.ts"), "--root", root, "--cap", "5", "--json"];  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     const parsed = runJson(argv, root);
     const v = parsed && typeof parsed === "object" ? parseSlotRefill(JSON.stringify(parsed)) : null;
     const value = v === null ? null : {
@@ -274,7 +274,7 @@ export function livenessDirectRoutine(root: string): () => Fact[] {
 /** B1 · 收尾 pass：`closure-lag-check.sh --close-terminal --json`（机械闭合终态括号）→ { scanned, closed }。 */
 export function closurePassRoutine(root: string, cmd: string[] | null): () => Fact[] {
   return () => {
-    const argv = cmd ?? ["bash", path.join(root, "plugin", "scripts", "closure-lag-check.sh"), "--close-terminal", "--json"];
+    const argv = cmd ?? ["bash", path.join(root, "plugin", "scripts", "closure-lag-check.sh"), "--close-terminal", "--json"];  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     const parsed = runJson(argv, root);
     const v = parsed && typeof parsed === "object" ? parseClosureTerminal(JSON.stringify(parsed)) : null;
     return [factOf("closure_pass", v, "closure pass unreadable/unparseable")];
@@ -284,7 +284,7 @@ export function closurePassRoutine(root: string, cmd: string[] | null): () => Fa
 /** B2 · 留痕：`closure-lag-check.sh --record --flipped <N>`（零收尾也写 0）。 */
 export function closureRecordRoutine(root: string, flipped: number, cmd: string[] | null): () => Fact[] {
   return () => {
-    const argv = cmd ?? ["bash", path.join(root, "plugin", "scripts", "closure-lag-check.sh"), "--record", "--flipped", String(flipped)];
+    const argv = cmd ?? ["bash", path.join(root, "plugin", "scripts", "closure-lag-check.sh"), "--record", "--flipped", String(flipped)];  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     const r = runExit(argv, root);
     if (!r.ok) return [{ name: "closure_record", value: null, state: "not-evaluated", reason: "closure record unreadable" }];
     return [{ name: "closure_record", value: { exit: r.exit, flipped }, state: "verified", reason: null }];
@@ -295,7 +295,7 @@ export function closureRecordRoutine(root: string, flipped: number, cmd: string[
 export function telemetrySnapshotRoutine(root: string, cmd: string[] | null): () => Fact[] {
   return () => {
     const argv = cmd ?? ["node", "--no-warnings", "--experimental-strip-types",
-      path.join(root, "plugin", "scripts", "fast-mode-telemetry.ts"), "--snapshot", "--root", root];
+      path.join(root, "plugin", "scripts", "fast-mode-telemetry.ts"), "--snapshot", "--root", root];  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     const r = runExit(argv, root);
     if (!r.ok) return [{ name: "telemetry_snapshot", value: null, state: "not-evaluated", reason: "telemetry snapshot unreadable" }];
     return [{ name: "telemetry_snapshot", value: { exit: r.exit }, state: "verified", reason: null }];
@@ -306,7 +306,7 @@ export function telemetrySnapshotRoutine(root: string, cmd: string[] | null): ()
 export function judgmentConsumerRoutine(root: string, cmd: string[] | null): () => Fact[] {
   return () => {
     const argv = cmd ?? ["node", "--no-warnings", "--experimental-strip-types",
-      path.join(root, "plugin", "scripts", "judgment-consumer-check.ts"), "--json"];
+      path.join(root, "plugin", "scripts", "judgment-consumer-check.ts"), "--json"];  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     const parsed = runJson(argv, root);
     const v = parsed && typeof parsed === "object" ? parseJudgmentConsumer(JSON.stringify(parsed)) : null;
     return [factOf("judgment_consumer", v, "judgment-consumer-check unreadable/unparseable")];
