@@ -147,6 +147,21 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
     "AC-205 record: transcript_confirmed=false ⇒ refused (AC4 negative — send exit 0 but transcript not materialized)");
   assert.match(r.stdout, /ac205-record\(empty-host\) refused=1/,
     "AC-205 record: empty host ⇒ refused (fail-closed)");
+  // AC-234 (gap-ac234-web-third-party-renders-carriers-and-round-records): the --selfcheck must ALSO
+  // exercise the web-render content-count positive/negative controls (three counts derived from
+  // rendered HTML content — task/goal anchors + round-row anchors — never an HTTP status code) and the
+  // carrier-record writer's positive/negative controls (writes the six criterion fields verbatim;
+  // refuses zero-count / empty-host — fail-closed, AC4 负控制).
+  assert.match(r.stdout, /ac234-render-counts\(positive\) tasks=3 goals=2 rounds=5/,
+    "AC-234 positive: rendered HTML content yields tasks_rendered=3 goals_rendered=2 round_records_rendered=5 (content, not HTTP status)");
+  assert.match(r.stdout, /ac234-render-counts\(negative,empty-shell\) tasks=0 goals=0 rounds=0/,
+    "AC-234 negative: an empty-shell page yields 0/0/0 (the criterion can take false — 三计数缺一不可)");
+  assert.match(r.stdout, /ac234-record\(valid\) wrote=1 fields_ok=1/,
+    "AC-234 record: valid record written with the six criterion fields verbatim (tasks/goals/rounds as JSON integers)");
+  assert.match(r.stdout, /ac234-record\(zero-count\) refused=1/,
+    "AC-234 record: any zero count ⇒ refused (fail-closed)");
+  assert.match(r.stdout, /ac234-record\(empty-host\) refused=1/,
+    "AC-234 record: empty host ⇒ refused (fail-closed)");
   // gap-verify-coldstart-does-not-configure-target-profiles: the --selfcheck must ALSO exercise the
   // target-profiles configuration controls — derived (driving profiles worker-default written into the
   // target), no-source (not-configured, distinct — 硬规则 3b), override (--target-launcher/model win),
