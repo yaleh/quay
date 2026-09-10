@@ -48,7 +48,7 @@ goal_ac: AC-207
 ## Definition of Done
 
 - [x] AC1–AC5 全勾；`--for-task` scoped 门绿。
-- [ ] 第三方项目（orangevps 全新 root）机械 fan-in 全链 ok（ff→append-complete-gate-event→task done→gate-events>0），作为 gap-ac207 AC2/AC3/AC5 的前置解除证据（待外部）。
+- [ ] 第三方项目（orangevps 全新 root）机械 fan-in 全链 ok（ff→append-complete-gate-event→task done→gate-events>0），作为 gap-ac207 AC2/AC3/AC5 的前置解除证据（待外部）
 
 ## Touches
 
