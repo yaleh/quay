@@ -25,6 +25,7 @@ depends_on:
   - gap-shipped-profiles-missing-worker-roles
   - gap-promotion-driver-ready-pool-check-path-third-party
   - gap-doc-branch-hardcoded-author-breaks-third-party-develop-sync
+  - gap-driver-fanin-hardcoded-test-sh-third-party
   - gap-fanin-gate-event-store-path-shipped-unsafe
 ---
 ## Proposal

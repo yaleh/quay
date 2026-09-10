@@ -18,12 +18,12 @@ goal_ac: AC-233
 
 ## AC
 
-- [ ] `plugin/test/shipped-entry-runnable.test.mjs` 存在、带 `// @test-group product`，且被测试入口发现（`node --test plugin/test/shipped-entry-runnable.test.mjs` 可执行并定位到该文件）
-- [ ] 正向：测试枚举「随包装入且形如入口」的文件（可执行位 / shebang / 位于 `bin/`），逐个断言「是 `package.json` `bin` 声明 ∧ 从安装位置布局可跑」∨「不在 `files` 装入范围」；对当前状态（`bin/quay.js`+`bin/quay.ts` 在 `files` 内且不合格）该断言红（exit 非 0）
-- [ ] 反向能取假：注入一个「装入 `files` 但从安装位置跑会结构性失败」的入口文件 ⇒ 测试红；移除 ⇒ 绿（一条命令可复现，非只断言声明的 bin 能跑）
-- [ ] 包修复：`packages/quay/package.json` 的 `files` 不再装入 `bin/quay.js` + `bin/quay.ts`——`cd packages/quay && npm pack --dry-run` 的文件清单不含这二者（`node-version-check.cjs` 按真实依赖保留或一并排除）
-- [ ] 声明 bin 未受损：`./dist/quay.js` 从安装位置布局可跑（Node 18 或 25 其一）
-- [ ] `node plugin/scripts/task-schema-check.ts tasks/gap-shipped-entry-files-not-runnable.md` ⇒ exit 0
+- [x] `plugin/test/shipped-entry-runnable.test.mjs` 存在、带 `// @test-group product`，且被测试入口发现（`node --test plugin/test/shipped-entry-runnable.test.mjs` 可执行并定位到该文件）
+- [x] 正向：测试枚举「随包装入且形如入口」的文件（可执行位 / shebang / 位于 `bin/`），逐个断言「是 `package.json` `bin` 声明 ∧ 从安装位置布局可跑」∨「不在 `files` 装入范围」；对当前状态（`bin/quay.js`+`bin/quay.ts` 在 `files` 内且不合格）该断言红（exit 非 0）
+- [x] 反向能取假：注入一个「装入 `files` 但从安装位置跑会结构性失败」的入口文件 ⇒ 测试红；移除 ⇒ 绿（一条命令可复现，非只断言声明的 bin 能跑）
+- [x] 包修复：`packages/quay/package.json` 的 `files` 不再装入 `bin/quay.js` + `bin/quay.ts`——`cd packages/quay && npm pack --dry-run` 的文件清单不含这二者（`node-version-check.cjs` 按真实依赖保留或一并排除）
+- [x] 声明 bin 未受损：`./dist/quay.js` 从安装位置布局可跑（Node 18 或 25 其一）
+- [x] `node plugin/scripts/task-schema-check.ts tasks/gap-shipped-entry-files-not-runnable.md` ⇒ exit 0
 
 ## DoD
 
