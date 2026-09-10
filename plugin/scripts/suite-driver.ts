@@ -355,7 +355,7 @@ export async function main(argv: string[]): Promise<number> {
   const rootDir = root ? path.resolve(root) : path.resolve(process.cwd());
   const resolvedRunId = runId || `st-prod-${Math.floor(Date.now() / 1000)}`;
   const silenceMs = silenceRaw !== undefined && isNonNegInt(silenceRaw) ? Number(silenceRaw) : SILENCE_MS_DEFAULT;
-  const resolvedSlotLib = slotLib ? path.resolve(slotLib) : path.join(rootDir, "plugin", "scripts", "suite-slot-lib.sh");
+  const resolvedSlotLib = slotLib ? path.resolve(slotLib) : path.join(rootDir, "plugin", "scripts", "suite-slot-lib.sh");  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
   const resolvedSlotBase = slotBase ?? suiteLockBase(rootDir);
 
   if (!task) { console.error("suite-driver: --run requires --task"); return 2; }

@@ -569,7 +569,7 @@ function acExpectOf(records: Array<Record<string, unknown>>, id: string): string
 export async function readReadyPoolJudgment(root: string, readyPoolCmd: string[] | null = null): Promise<ReadyPoolJudgment | null> {
   const argv = readyPoolCmd ?? [
     "node", "--experimental-strip-types",
-    path.join(root, "plugin", "scripts", "ready-pool-check.ts"),
+    path.join(root, "plugin", "scripts", "ready-pool-check.ts"),  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     "--root", root, "--json",
   ];
   const r = await runAsync(argv, { timeoutMs: CRITERION_TIMEOUT_MS });
