@@ -44,10 +44,10 @@ develop 分支（派发实际读的）：git show develop:tasks/e2e-verify-207.m
 
 ## Acceptance Criteria
 
-- [ ] AC1（位置判定）：`grep -n 'DOC_BRANCH = "author"' plugin/scripts/driver-filters.ts` 归零或该常量不再被 `syncDocDevelopBidirectional` 直接引用（贴出修改后的引用形式）。
-- [ ] AC2（双向负控制）：构造 `docBranch="feature-x"`（非 author）的临时 git 仓库+develop 分支，`syncDocDevelopBidirectional` 返回值 ≠ `"no-refs"`（读出两个真实 sha 并按分歧执行同步）；反向：本仓库真实场景（author）下同步行为与修改前逐字一致（回归不变，贴前后对比）。
-- [ ] AC3（生产复现，读真实第三方项目）：在 orangevps `/home/yale/work/ac207-third-party` 上，人工制造一次 main 领先 develop 的分叉（如撤销本次人工 `git branch -f`），重装本次修复后的安装物，跑一轮 promotion-driver 后 `git -C <project> log develop --oneline -1` 应与 `main` 一致，且 `.quay/promotion-round.jsonl` 不再出现"同一任务连续多轮重复 promoted_ids"的模式。
-- [ ] AC4（全量绿）：`scripts/test.sh` 全量绿（含 `driver-filters.test.mjs` 新增负控制）。
+- [x] AC1（位置判定）：`grep -n 'DOC_BRANCH = "author"' plugin/scripts/driver-filters.ts` 归零或该常量不再被 `syncDocDevelopBidirectional` 直接引用（贴出修改后的引用形式）。
+- [x] AC2（双向负控制）：构造 `docBranch="feature-x"`（非 author）的临时 git 仓库+develop 分支，`syncDocDevelopBidirectional` 返回值 ≠ `"no-refs"`（读出两个真实 sha 并按分歧执行同步）；反向：本仓库真实场景（author）下同步行为与修改前逐字一致（回归不变，贴前后对比）。
+- [ ] AC3（生产复现，读真实第三方项目）：在 orangevps `/home/yale/work/ac207-third-party` 上，人工制造一次 main 领先 develop 的分叉（如撤销本次人工 `git branch -f`），重装本次修复后的安装物，跑一轮 promotion-driver 后 `git -C <project> log develop --oneline -1` 应与 `main` 一致，且 `.quay/promotion-round.jsonl` 不再出现"同一任务连续多轮重复 promoted_ids"的模式。（待外部）
+- [ ] AC4（全量绿）：`scripts/test.sh` 全量绿（含 `driver-filters.test.mjs` 新增负控制）。（待外部）
 
 ## Definition of Done
 
