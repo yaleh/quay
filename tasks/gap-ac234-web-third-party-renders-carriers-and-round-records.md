@@ -1,7 +1,7 @@
 ---
 id: gap-ac234-web-third-party-renders-carriers-and-round-records
 title: web 指向第三方项目时显示其真实载体与过程记录——落 ac="GOAL-015-AC-234" 记录（AC-234）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
