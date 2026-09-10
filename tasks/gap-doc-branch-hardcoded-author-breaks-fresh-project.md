@@ -2,7 +2,8 @@
 id: gap-doc-branch-hardcoded-author-breaks-fresh-project
 title: doc→develop 同步硬编码 DOC_BRANCH="author"，fresh 项目工作分支是 main ⇒ 双向同步
   no-op、promotion 翻转到不了 develop、worker 永不派发
-status: todo
+status: needs-human
+needs_human_cause: human-adjudication
 labels:
   - gap
   - defect
@@ -36,3 +37,10 @@ AC1–AC3 全绿；`scripts/test.sh` 全量绿。fresh/第三方项目 doc→dev
 
 - plugin/scripts/driver-filters.ts
 - plugin/test/driver-filters.test.mjs
+- tasks/gap-doc-branch-hardcoded-author-breaks-fresh-project.md
+## Needs-Human
+
+**执行 2026-09-10T01:44:33.136Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：连续修满 3 次仍不合格（闸在重验证后仍判不合格）
+- 成因类：human-adjudication
