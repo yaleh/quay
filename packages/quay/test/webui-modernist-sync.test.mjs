@@ -114,10 +114,14 @@ test("AC100(b) — legacy /adr and /goal LIST pages still render (no regression)
   const adr = await get(port, "/adr");
   assert.equal(adr.status, 200);
   assert.match(adr.body, /ADR-100/);
+  // gap-webui-goal-list-tab-split-goal-ac: the merged GOAL+AC view split — criteria now render on
+  // the Criteria tab (which carries goalEvidenceCell's verdict column), goals on the default tab.
   const goal = await get(port, "/goal");
   assert.equal(goal.status, 200);
-  assert.match(goal.body, /AC-100/);
-  assert.match(goal.body, /verdict-pass/);          // goalEvidenceCell shared with list page
+  const criteria = await get(port, "/goal?kind=criterion");
+  assert.equal(criteria.status, 200);
+  assert.match(criteria.body, /AC-100/);
+  assert.match(criteria.body, /verdict-pass/);      // goalEvidenceCell shared with list page
 });
 
 // ── (c) static source check: the judge's grep over the detail-page render path ──

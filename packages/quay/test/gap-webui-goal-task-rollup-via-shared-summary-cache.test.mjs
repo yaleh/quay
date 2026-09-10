@@ -43,7 +43,10 @@ function captureRes() {
   };
 }
 
-/** Parse the /goal list table into rows. The task-attach column is the 11th (index 10). */
+/** Parse the /goal list table into rows. gap-webui-goal-list-tab-split-goal-ac: the list is now the
+ *  Goals tab (7 cols: id / status / title / AC 达成 / last progress / first evidence / 挂靠任务), so
+ *  the task-attach cell is index 6 and — because it links cross-tab — is wrapped in an <a>. Strip the
+ *  anchor to read the plain count text the detail page (which renders no anchor) shares. */
 function goalTableRows(html) {
   const m = /<table[^>]*>([\s\S]*?)<\/table>/.exec(html);
   if (!m) return [];
@@ -53,8 +56,8 @@ function goalTableRows(html) {
     const idM = /href="\/goal\/([^"]+)"/.exec(cells[0] || "");
     return {
       id: idM ? idM[1] : "",
-      kind: (cells[1] || "").trim(),
-      taskAttach: (cells[10] || "").trim(),
+      kind: "goal",
+      taskAttach: (cells[6] || "").replace(/<[^>]*>/g, "").trim(),
     };
   });
 }
@@ -144,10 +147,11 @@ test("AC5: taskList failure renders 未读到 with the reason, never a bare —"
     ],
     taskList: async () => { throw new Error("boom-read-failed"); },
   };
+  // gap-webui-goal-list-tab-split-goal-ac: criteria render on the Criteria tab — the criterion
+  // row's 挂靠任务 cell is where the three-state 未读到（reason） shows up.
   const res = captureRes();
-  await handleGoalList({}, res, new URL("http://localhost/goal"), client, "ws");
+  await handleGoalList({}, res, new URL("http://localhost/goal?kind=criterion"), client, "ws");
   assert.equal(res.statusCode, 200, "fail-open: page still 200");
-  assert.match(res.body, /GOAL-001/, "goal row still renders");
   assert.match(res.body, /AC-101/, "criterion row still renders");
   assert.match(res.body, /未读到/, "stats column shows the 未读到 state");
   assert.match(res.body, /boom-read-failed/, "未读到 carries the failure reason substring");

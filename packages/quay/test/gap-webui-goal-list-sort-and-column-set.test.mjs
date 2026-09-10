@@ -12,7 +12,16 @@
 // the AC rollup are all derived in memory; `origin` leaves the list (detail keeps it in its own
 // block); two ledger-derived time columns (lastProgressAt / firstEvidenceAt, NEVER mtime) join the
 // list and the detail page; sort moves to the handler (?sort=<col>&dir=); the goal column links to
-// ?goal=<id>; the default order puts kind:goal on top.
+// ?goal=<id>.
+//
+// gap-webui-goal-list-tab-split-goal-ac (follow-up, NOT a duplicate): the merged GOAL+AC view was
+// then split into two tabs — `/goal` (default) = Goals tab (7 cols, goal rows only) and
+// `/goal?kind=criterion` = Criteria tab (8 cols, criterion rows only; `firstEvidenceAt` left the
+// criteria list — it remains on the detail page). The surviving list assertions below therefore
+// target the tab whose rows they concern: criteria-time/sort/goal-filter tests hit
+// `?kind=criterion`, goal-rollup/detail-sync tests hit `/goal` (Goals tab). The tab-split invariants
+// themselves (column sets, cross-tab links, status-priority default, draft cross-tab banner) live in
+// gap-webui-goal-list-tab-split-goal-ac.test.mjs.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
@@ -55,29 +64,38 @@ function mainHtml(html) {
   return end === -1 ? html.slice(start) : html.slice(start, end);
 }
 
-/** Parse the /goal list table into row objects. Time cells expose the absolute `title` timestamp
- *  (null when the cell is the 未记录 marker) and the raw cell HTML for the marker assertion. */
-function listRows(html) {
+/** Parse a tab's list table into row objects. `tab` selects the column map:
+ *   - "goal"      (7 cols): id / status / title / AC rollup / last progress / first evidence / 挂靠任务
+ *   - "criterion" (8 cols): id / goal / status / title / criterion / recent verdict / last progress / 挂靠任务
+ *  Time cells expose the absolute `title` timestamp (null when the cell is the 未记录 marker). */
+function listRows(html, tab) {
   const m = /<table[^>]*>([\s\S]*?)<\/table>/.exec(html);
   if (!m) return [];
   const trs = [...m[1].matchAll(/<tr>([\s\S]*?)<\/tr>/g)].map((x) => x[1]).filter((r) => !/<th/.test(r));
+  const idOf = (cell) => (/href="\/goal\/([^"]+)"/.exec(cell || "") || [])[1] || "";
+  const titleOf = (cell) => (/title="([^"]*)"/.exec(cell || "") || [])[1] ?? null;
   return trs.map((r) => {
     const cells = [...r.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((c) => c[1]);
-    const idM = /href="\/goal\/([^"]+)"/.exec(cells[0] || "");
-    const goalM = /href="\/goal\?goal=([^"]+)"/.exec(cells[3] || "");
-    const lastM = /title="([^"]*)"/.exec(cells[7] || "");
-    const firstM = /title="([^"]*)"/.exec(cells[8] || "");
-    const rollupM = /(\d+)\/(\d+)/.exec(cells[9] || "");
+    if (tab === "goal") {
+      const rollupM = /(\d+)\/(\d+)/.exec(cells[3] || "");
+      return {
+        id: idOf(cells[0]),
+        kind: "goal",
+        status: (cells[1] || "").trim(),
+        lastAt: titleOf(cells[4]),
+        firstAt: titleOf(cells[5]),
+        lastRaw: cells[4] || "",
+        firstRaw: cells[5] || "",
+        rollup: rollupM ? { achieved: Number(rollupM[1]), total: Number(rollupM[2]) } : null,
+      };
+    }
     return {
-      id: idM ? idM[1] : "",
-      kind: (cells[1] || "").trim(),
+      id: idOf(cells[0]),
+      kind: "criterion",
       status: (cells[2] || "").trim(),
-      goal: goalM ? goalM[1] : "",
-      lastAt: lastM ? lastM[1] : null,
-      firstAt: firstM ? firstM[1] : null,
-      lastRaw: cells[7] || "",
-      firstRaw: cells[8] || "",
-      rollup: rollupM ? { achieved: Number(rollupM[1]), total: Number(rollupM[2]) } : null,
+      goal: (/href="\/goal\?kind=criterion&goal=([^"]+)"/.exec(cells[1] || "") || [])[1] || "",
+      lastAt: titleOf(cells[6]),
+      lastRaw: cells[6] || "",
     };
   });
 }
@@ -204,10 +222,13 @@ test("AC1: origin column removed; time + rollup columns present", async () => {
 });
 
 // ── AC2: the two time columns are ledger-derived (max / min) ─────────────────────────────────
+// (gap-webui-goal-list-tab-split-goal-ac: the criteria now live on the Criteria tab; `lastProgressAt`
+// is its surviving time column — `firstEvidenceAt` left the criteria list but stays on the detail
+// page, still derived from the same ledger extremes.)
 
-test("AC2: lastProgressAt == ledger max, firstEvidenceAt == ledger min (3 ACs)", async () => {
-  const r = await get(port, "/goal");
-  const rows = listRows(r.body);
+test("AC2: lastProgressAt == ledger max on the Criteria tab (3 ACs)", async () => {
+  const r = await get(port, "/goal?kind=criterion");
+  const rows = listRows(r.body, "criterion");
   const logPath = path.join(workspaceRoot, ".quay", "gate-events.jsonl");
   const mismatches = [];
   for (const id of ["AC-101", "AC-102", "AC-103"]) {
@@ -215,7 +236,6 @@ test("AC2: lastProgressAt == ledger max, firstEvidenceAt == ledger min (3 ACs)",
     assert.ok(row, `row for ${id} present`);
     const exp = ledgerExtremes(logPath, id);
     if (row.lastAt !== exp.last) mismatches.push(`(${id}, last=${row.lastAt}, ledger=${exp.last})`);
-    if (row.firstAt !== exp.first) mismatches.push(`(${id}, first=${row.firstAt}, ledger=${exp.first})`);
   }
   assert.deepEqual(mismatches, [], `time-column mismatches:\n  ${mismatches.join("\n  ")}`);
 });
@@ -225,7 +245,7 @@ test("AC2: lastProgressAt == ledger max, firstEvidenceAt == ledger min (3 ACs)",
 test("AC3: touch (mtime only) leaves the two time columns byte-identical, while updatedAt changes", async () => {
   const goalFile = path.join(goalsDir, "GOAL-001-goal.md");
   const before = await get(port, "/goal");
-  const beforeGoal = listRows(before.body).find((x) => x.id === "GOAL-001");
+  const beforeGoal = listRows(before.body, "goal").find((x) => x.id === "GOAL-001");
   assert.ok(beforeGoal, "GOAL-001 row present pre-touch");
   const mtimeBefore = fs.statSync(goalFile).mtimeMs;
   await new Promise((r) => setTimeout(r, 5));
@@ -233,7 +253,7 @@ test("AC3: touch (mtime only) leaves the two time columns byte-identical, while 
   const mtimeAfter = fs.statSync(goalFile).mtimeMs;
   assert.notEqual(mtimeAfter, mtimeBefore, "mtime actually changed (the touch took effect)");
   const after = await get(port, "/goal");
-  const afterGoal = listRows(after.body).find((x) => x.id === "GOAL-001");
+  const afterGoal = listRows(after.body, "goal").find((x) => x.id === "GOAL-001");
   assert.equal(afterGoal.lastAt, beforeGoal.lastAt, "lastProgressAt unchanged by touch (ledger-derived)");
   assert.equal(afterGoal.firstAt, beforeGoal.firstAt, "firstEvidenceAt unchanged by touch (ledger-derived)");
 });
@@ -241,15 +261,13 @@ test("AC3: touch (mtime only) leaves the two time columns byte-identical, while 
 // ── AC4: 未记录 is a distinct value; a real (old) timestamp is not the marker ────────────────
 
 test("AC4: no-event → 未记录 (no timestamp, not —); with-event → real timestamp", async () => {
-  const r = await get(port, "/goal");
-  const rows = listRows(r.body);
+  const r = await get(port, "/goal?kind=criterion");
+  const rows = listRows(r.body, "criterion");
   const noEvent = rows.find((x) => x.id === "AC-801");
   assert.ok(noEvent, "AC-801 (no ledger event) present");
   assert.equal(noEvent.lastAt, null, "no-event lastProgressAt carries no timestamp");
-  assert.equal(noEvent.firstAt, null, "no-event firstEvidenceAt carries no timestamp");
   assert.match(noEvent.lastRaw, /未记录/, "last progress cell renders the 未记录 marker");
   assert.doesNotMatch(noEvent.lastRaw, /—/, "the 未记录 marker is not —");
-  assert.match(noEvent.firstRaw, /未记录/, "first evidence cell renders the 未记录 marker");
   const oldEvent = rows.find((x) => x.id === "AC-201");
   assert.ok(oldEvent, "AC-201 (old event) present");
   assert.equal(oldEvent.lastAt, "2020-01-01T00:00:00.000Z", "old-event record renders its real timestamp");
@@ -259,36 +277,30 @@ test("AC4: no-event → 未记录 (no timestamp, not —); with-event → real t
 // ── AC5: server-side sort really reorders; no client sorting script ──────────────────────────
 
 test("AC5: ?sort=<col>&dir= reverses first row for >= 4 columns; no client script", async () => {
-  for (const col of ["id", "kind", "status", "title", "lastProgressAt"]) {
-    const asc = await get(port, `/goal?sort=${col}&dir=asc`);
-    const desc = await get(port, `/goal?sort=${col}&dir=desc`);
-    const ascFirst = listRows(asc.body)[0];
-    const descFirst = listRows(desc.body)[0];
+  for (const col of ["id", "status", "title", "goal", "lastProgressAt"]) {
+    const asc = await get(port, `/goal?kind=criterion&sort=${col}&dir=asc`);
+    const desc = await get(port, `/goal?kind=criterion&sort=${col}&dir=desc`);
+    const ascFirst = listRows(asc.body, "criterion")[0];
+    const descFirst = listRows(desc.body, "criterion")[0];
     assert.ok(ascFirst && descFirst, `sort=${col} returns rows`);
     assert.notEqual(ascFirst.id, descFirst.id, `sort=${col}: first id must differ asc vs desc`);
   }
-  const r = await get(port, "/goal?sort=id&dir=asc");
+  const r = await get(port, "/goal?kind=criterion&sort=id&dir=asc");
   assert.doesNotMatch(r.body, /addEventListener/, "no client-side sorting script added");
 });
 
-// ── AC6: default order — goals on top, then grouped by goal (contiguous) with AC id desc ──────
+// ── AC6: Criteria-tab default order — grouped by goal (contiguous), AC id desc within group ──
 
-test("AC6: default order — goals on top, criteria contiguous by goal, AC id desc within group", async () => {
-  const r = await get(port, "/goal");
-  const rows = listRows(r.body);
-  const goalIds = rows.filter((x) => x.kind === "goal").map((x) => x.id);
-  assert.ok(goalIds.length >= 3, `found ${goalIds.length} goal rows`);
-  const firstN = rows.slice(0, goalIds.length);
-  assert.ok(firstN.every((x) => x.kind === "goal"),
-    `first ${goalIds.length} rows must be goals; got kinds: ${firstN.map((x) => x.kind).join(",")}`);
-  const crit = rows.slice(goalIds.length);
-  assert.ok(crit.length > 0, "criteria present after goals");
-  assert.ok(crit.every((x) => x.kind === "criterion"), "remaining rows are criteria");
+test("AC6: Criteria-tab default order — criteria contiguous by goal, AC id desc within group", async () => {
+  const r = await get(port, "/goal?kind=criterion");
+  const rows = listRows(r.body, "criterion");
+  assert.ok(rows.length > 0, "criteria present");
+  assert.ok(rows.every((x) => x.kind === "criterion"), "all rows are criteria");
   let prevGoal = null;
   let prevId = null;
   const seenGoals = new Set();
   const order = [];
-  for (const c of crit) {
+  for (const c of rows) {
     if (c.goal !== prevGoal) {
       if (seenGoals.has(c.goal)) order.push(`goal ${c.goal} reappears (not contiguous)`);
       seenGoals.add(c.goal);
@@ -326,12 +338,12 @@ test("AC8: AC rollup == renderGoalCard per goal, and does not collapse under ?ki
   const expected = renderGoalCardRollups(store.list());
   assert.ok(Object.keys(expected).length >= 3, `renderGoalCard has ${Object.keys(expected).length} active goals`);
   const r = await get(port, "/goal");
-  const goalRows = listRows(r.body).filter((x) => x.rollup !== null);
+  const goalRows = listRows(r.body, "goal").filter((x) => x.rollup !== null);
   for (const gr of goalRows) {
     assert.deepEqual(gr.rollup, expected[gr.id], `rollup for ${gr.id} matches renderGoalCard`);
   }
   const rk = await get(port, "/goal?kind=goal");
-  const goalRowsK = listRows(rk.body).filter((x) => x.rollup !== null);
+  const goalRowsK = listRows(rk.body, "goal").filter((x) => x.rollup !== null);
   assert.ok(goalRowsK.length >= 3, "?kind=goal still shows goal rows");
   for (const gr of goalRowsK) {
     assert.deepEqual(gr.rollup, expected[gr.id], `rollup for ${gr.id} survives ?kind=goal (not 0/N)`);
@@ -340,21 +352,21 @@ test("AC8: AC rollup == renderGoalCard per goal, and does not collapse under ?ki
 
 // ── AC9: ?goal= filter narrows and every row's goal matches; goal column is a link ────────────
 
-test("AC9: ?goal=GOAL-008 narrows rows; all rows goal == GOAL-008; goal column links", async () => {
-  const unfiltered = listRows((await get(port, "/goal")).body);
-  const r = await get(port, "/goal?goal=GOAL-008");
-  const rows = listRows(r.body);
-  assert.ok(rows.length > 0, "?goal=GOAL-008 returns rows");
-  assert.ok(rows.length < unfiltered.length, `?goal=GOAL-008 rows (${rows.length}) < unfiltered (${unfiltered.length})`);
+test("AC9: ?kind=criterion&goal=GOAL-008 narrows rows; all rows goal == GOAL-008; goal column links", async () => {
+  const unfiltered = listRows((await get(port, "/goal?kind=criterion")).body, "criterion");
+  const r = await get(port, "/goal?kind=criterion&goal=GOAL-008");
+  const rows = listRows(r.body, "criterion");
+  assert.ok(rows.length > 0, "?kind=criterion&goal=GOAL-008 returns rows");
+  assert.ok(rows.length < unfiltered.length, `GOAL-008 rows (${rows.length}) < unfiltered (${unfiltered.length})`);
   const violations = rows.filter((x) => x.goal !== "GOAL-008").map((x) => `id=${x.id} goal=${x.goal}`);
   assert.deepEqual(violations, [], `rows whose goal != GOAL-008:\n  ${violations.join("\n  ")}`);
-  assert.match(r.body, /href="\/goal\?goal=GOAL-008"/, "goal column renders a link to ?goal=GOAL-008");
+  assert.match(r.body, /href="\/goal\?kind=criterion&goal=GOAL-008"/, "goal column renders a link to ?kind=criterion&goal=GOAL-008");
 });
 
 // ── AC10: detail page has the same time info as the list; no >400-char p.meta ─────────────────
 
 test("AC10: detail time info == list time info; no p.meta over 400 chars", async () => {
-  const listGoal = listRows((await get(port, "/goal")).body).find((x) => x.id === "GOAL-001");
+  const listGoal = listRows((await get(port, "/goal")).body, "goal").find((x) => x.id === "GOAL-001");
   assert.ok(listGoal, "GOAL-001 in list");
   const detail = await get(port, "/goal/GOAL-001");
   assert.equal(detail.status, 200);

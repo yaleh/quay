@@ -92,6 +92,10 @@
 #                 different file each round: drift-report/governance, loop-core/serial,
 #                 install-config/lowconc): the whole family is now consolidated into the
 #                 concurrency-1 serial phase (gap-install-family-tests-rotate-flakes-under-full-suite).
+#                 The conformance-target fixture (plugin/test/conformance-target-fixture.test.mjs,
+#                 gap-ac228-conformance-target-fixture-real-quay-init) also joins serial: it spawns a
+#                 real quay-init --loop tree to build the GOAL-012 exit-③ consistency target, same
+#                 install-family load profile as quay-init.test.mjs.
 #                 (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests).
 #   - lowconc     hermetic-but-load-sensitive B-class session-observation family (each private
 #                 socket / wall-clock wait) — its own phase at host-derived concurrency (= serial).
