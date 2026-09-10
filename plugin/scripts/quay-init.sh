@@ -127,7 +127,7 @@ RUNTIME_BASE="$WORKSPACE_ROOT/.quay/runtime"
 # (gap-quay-init-config-preserving-incremental-upgrade). An EXISTING consumer's `.quay/config.yml`
 # `loop:` section carries values the project already chose (repo_root / test_command / tmux_session /
 # worktree_root — the fast-mode keys — AND board / gates / stop / policy / concurrency_bands /
-# fork_baseline / merge_target / routines — the loop-driver + fast-mode keys). The upgrade must KEEP
+# fork_baseline / routines — the loop-driver + fast-mode keys). The upgrade must KEEP
 # those values, never re-detect/re-derive them: an explicit CLI flag wins, otherwise the existing
 # config value wins, otherwise the fresh-install default/detection applies. Reads ONE key from an
 # existing config (empty when the config is absent or the key is unset).
@@ -568,7 +568,7 @@ detect_tmux_session() {
 # CONFIG-PRESERVING UPGRADE (gap-quay-init-config-preserving-incremental-upgrade, AC1): the loop
 # section is MERGED, never replaced. `data["loop"] = {...}` (the pre-fix form) DESTROYED every
 # non-fast-mode key the consumer owned — the loop-driver schema (board / gates / stop / policy) and
-# the fast-mode schema's extras (concurrency_bands / fork_baseline / merge_target / routines) were
+# the fast-mode schema's extras (concurrency_bands / fork_baseline / routines) were
 # silently dropped on upgrade. The fix updates ONLY the four fast-mode keys and leaves every other
 # loop: key byte-for-byte intact (the consumer's loop values survive the upgrade unchanged).
 ensure_loop_config() {
@@ -775,20 +775,18 @@ providers:
       QUAY_NATIVE_TASKS_DIR: "${WORKSPACE_ROOT}/tasks"
 # Target-project loop values (gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them,
 # SPEC AC2): the single config source for repo_root / test_command / tmux_session / worktree_root,
-# plus the branch-model keys fork_baseline / merge_target (SPEC-branching-model current ruling:
-# develop/integration are the working branches — defaults ship WITH quay-init, never hardcoded
-# master, so a brand-new host's first quay-init --loop does not silently fall back to the retired
-# master-only model). Scripts and tick docs read these at runtime instead of having them baked in
-# at install (AC3).
+# plus the branch-model key fork_baseline (SPEC-branching-model current ruling: develop is the fork
+# baseline — the default ships WITH quay-init, never hardcoded master, so a brand-new host's first
+# quay-init --loop does not silently fall back to the retired master-only model). Scripts and tick
+# docs read these at runtime instead of having them baked in at install (AC3).
 loop:
   repo_root: ${REPO_ROOT}
   test_command: ${TEST_COMMAND}
   tmux_session: ${TMUX_SESSION:-null}
   worktree_root: ${WORKTREE_ROOT}
   fork_baseline: develop
-  merge_target: integration
 EOF
-    echo "  wrote: .quay/config.yml (provider mcp_entry → project-local absolute paths — AC7b; loop: repo_root/test_command/tmux_session/worktree_root/fork_baseline/merge_target — SPEC AC2 + SPEC-branching-model)"
+    echo "  wrote: .quay/config.yml (provider mcp_entry → project-local absolute paths — AC7b; loop: repo_root/test_command/tmux_session/worktree_root/fork_baseline — SPEC AC2 + SPEC-branching-model)"
   fi
 }
 
@@ -1958,7 +1956,7 @@ echo "  closed set: .quay/config.yml, .quay/profiles.yml, tasks/, goals/, .gitig
 write_config() {
   local cfg="$WORKSPACE_ROOT/.quay/config.yml"
   if [ "$DRY_RUN" = true ]; then
-    echo "  would-write: .quay/config.yml (provider map → plugin vendored native runtime; loop: repo_root/test_command/tmux_session/worktree_root/fork_baseline/merge_target)"
+    echo "  would-write: .quay/config.yml (provider map → plugin vendored native runtime; loop: repo_root/test_command/tmux_session/worktree_root/fork_baseline)"
     return
   fi
   if [ -f "$cfg" ]; then
@@ -1985,9 +1983,8 @@ loop:
   tmux_session: ${TMUX_SESSION:-null}
   worktree_root: ${WORKTREE_ROOT}
   fork_baseline: develop
-  merge_target: integration
 EOF
-    echo "  wrote: .quay/config.yml (provider map → plugin vendored native runtime; loop: repo_root/test_command/tmux_session/worktree_root/fork_baseline/merge_target)"
+    echo "  wrote: .quay/config.yml (provider map → plugin vendored native runtime; loop: repo_root/test_command/tmux_session/worktree_root/fork_baseline)"
   fi
 }
 

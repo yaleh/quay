@@ -579,6 +579,16 @@ run_static_checks() {
   #   注册行断言（不得带 --no-block）+ 注入即红干跑钉住（硬规则 3/4）。
   # @static-tier full
   run_checker "kernel-sibling-resolution-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/kernel-sibling-resolution-check.ts" --root "${repo_root}" --json
+  echo "== config-key-consumer check (GOAL-015 退出条件③ / AC-235, gap-config-key-consumer-check-mechanical-enumeration) =="
+  # 交付配置键消费者枚举：quay-init 写入下游 .quay/config.yml loop: 的每个键都必须有代码消费者
+  # （零消费者的键已接线或已删）。writer 面机械派生自 quay-init.sh（heredoc + python 升级写手），
+  # consumer 面机械 grep（plugin/scripts/*.ts + packages/quay/src/*.ts，排除测试与自身）——与 AC-235
+  # 判据同一口径。三态可区分（has-consumer / no-consumer-to-wire / documented-with-reason），豁免必须
+  # 带理由文本（GOAL-015 风险 3，⛔ 不是无理由 allowlist）。no-consumer-to-wire > 0 ⇒ exit 1。
+  # ⛔ 落在 full（不 scoped）——全店枚举，不随单任务 Touches 收窄。负控制由 mutation case 注入孤儿键即
+  # 红钉住（硬规则 3/4）。
+  # @static-tier full
+  run_checker "config-key-consumer-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/config-key-consumer-check.ts" --root "${repo_root}"
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait
