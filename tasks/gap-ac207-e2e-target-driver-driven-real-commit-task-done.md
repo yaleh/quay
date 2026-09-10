@@ -29,6 +29,10 @@ goal_ac: AC-207
 3. **载体落账**：经 `ac89_append_goal009()` 落账（`build_sha`/`ts` 由 helper 统一补——AC-214 新鲜度锚只认 top-level `build_sha`），追加 `{"ac":"GOAL-009-AC-207","host","project_root","commit_sha","task_id","task_status","gate_events","produced_by_driver"}`；⛔ `commit_sha` 是异仓库 sha，不作新鲜度锚。
 4. **生产复跑**（host B/C + 第三方项目）使判据 exit 1 → exit 0。
 
+## Touches
+
+- `tasks/gap-ac207-e2e-target-driver-driven-real-commit-task-done.md`
+
 ## Acceptance Criteria
 
 - [x] AC1 机制接线：`grep -c 'GOAL-009-AC-207' plugin/scripts/verify-deliver-coldstart.sh` ≥ 1，且 `produced_by_driver`、`gate_events` 两字段名在脚本内各 ≥ 1 命中；贴前 3 条命中（硬规则②）。
@@ -70,3 +74,13 @@ AC2/AC3/AC5 ⛔ 阻塞（CONTINUE 第 6 轮，2026-09-09T23:4xZ）：前两阻�
 AC2/AC3/AC5 ⛔ 阻塞复核（CONTINUE 第 7 轮，2026-09-09T23:5xZ）：第三阻塞 `gap-promotion-driver-ready-pool-check-path-third-party` 仍未落 develop（其 status=todo，AC1–AC4 全未勾）。位置判定复核（非关键词）：`git show develop:plugin/scripts/promotion-driver.ts` :123 仍是 `path.join(root, "plugin", "scripts", "ready-pool-check.ts")`；`git show develop:plugin/scripts/worker-driver.ts` :1175/:1201/:3531 仍是 `path.join(root, "plugin", "scripts", …)` ⇒ shipped 驱动锚死 bug 未修。orangevps 第三方项目 `/home/yale/work/ac207-third-party` 的 `.quay/promotion-round.jsonl` 每轮仍 `error="ready-pool-check exited 1"`（最新 round 43 @2026-09-09T23:45Z；gate GO、liveness running 但 pool=null ⇒ 永不晋升、worker 不派发）。生产载体 `.quay/productization-verification.jsonl` 仍 0 条 `ac="GOAL-009-AC-207"`；criterion 干跑仍 exit 1（本机 host=boheidc）。AC1/AC4 实现已 done 不变；AC2/AC3/AC5 需外部 e2e 方可验，e2e 被该第三阻塞卡死 ⇒ 本任务翻 needs-human 停派，待 `gap-promotion-driver-ready-pool-check-path-third-party` 落 develop + 第三方重装后由人翻回 ready 续做。
 
 **第三阻塞解除记录（人 2026-09-10 授权，retreat todo→ready 续验 AC2/AC3/AC5）**：`gap-promotion-driver-ready-pool-check-path-third-party` 已 done 并落 develop。续后发现该修复漏了 `worker-driver.ts` 另外 3 处 + `cap-from-gate.ts` 1 处同族锚点，已另立 `gap-plugin-root-resolution-remaining-callsites-round2`，该任务同样已 done 并落 develop（develop HEAD `fa8dfaf897f53d142c5473ca0298cd06bfb1139a`；`git show develop:plugin/scripts/worker-driver.ts`/`cap-from-gate.ts`/`promotion-driver.ts` 三文件 `grep -c 'plugin", "scripts"'` 逐一核实为 0 或仅剩与第三方项目无关的 dev-tree 自检/死代码引用）。orangevps 已从 develop tip `fa8dfaf897f53d142c5473ca0298cd06bfb1139a` 现 build 新 tgz，重装进 `/home/yale/work/ac207-third-party`，重启 promotion+worker driver（新 supervisor pid 2824641/2824789）。⇒ 第三阻塞（round2 覆盖的 worker-driver.ts/cap-from-gate.ts 剩余锚点）已解除并落 develop，人 2026-09-10 授权续验 AC2/AC3/AC5。
+
+**AC2/AC3/AC5 ⛔ 阻塞复核（CONTINUE 第 8 轮，2026-09-10）**：前三个阻塞（profiles worker roles / OAuth→claude-fjdac / promotion+worker+cap-from-gate 路径锚）均已解除并落 develop。续做实测发现**第四个阻塞（产品缺陷，同族）**：**doc→develop 同步硬编码 `DOC_BRANCH = "author"`，而 fresh 第三方项目的 doc 工作分支是 git 默认 `main`（verify-deliver-coldstart.sh step2_init 的 `git init -b main`），`author` 只存在于本仓库（gap-branch-rename-manager-doc-to-author 改名而来）、quay-init 不创建 author 分支。**
+
+位置判定（非关键词）：
+- 第三方项目 `git branch` ⇒ 仅 `develop`+`main`，无 `author`/`integration`。
+- `driver-filters.ts:438` `DOC_BRANCH="author"` 硬编码；`syncDocDevelopBidirectional`(:557) `revParse(root,"author")`=null ⇒ return "no-refs"；`syncDevelopToDoc`(:475) `cur!=="author"` ⇒ "not-doc"。
+- 实测 `.quay/doc-develop-sync.jsonl` 每轮 `doc-develop-sync-branch-mismatch cur:main expected:author`（gap-sync-develop-to-doc-not-doc-silent-noop 补的落痕，恰好暴露它当时只修了「静默」没修「硬编码」）。
+- 后果：promotion-driver 每 30s 把 e2e-verify-207 todo→ready 翻转（promotion-outcome detail=todo->ready）但提交只落 main（git log af37560「todo→ready」），`git show develop:tasks/e2e-verify-207.md` 仍 status:todo ⇒ ready-pool-check/worker-driver 读 develop ⇒ `pool:0 ready:[] excluded:[]`、worker-round `stop_reason:"pool-empty"` ⇒ 永不派发 ⇒ e2e 永不完成。
+
+AC1/AC4 实现已 done 不变；AC2/AC3/AC5 仍阻塞，需修该缺陷（新任务 gap-doc-branch-hardcoded-author-breaks-fresh-project）后重跑 e2e ⇒ 本任务翻 needs-human 停派。
