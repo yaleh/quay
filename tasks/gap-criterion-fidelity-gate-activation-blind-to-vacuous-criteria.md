@@ -48,11 +48,11 @@ goal_ac: AC-229
 
 ## Acceptance Criteria
 
-- [ ] AC1（＝GOAL-013 AC-229，四断言缺一不可，**全部经真实生产路径**）：测试 spawn 真的 `goal-store.ts write <id> --status active`——①喂已知空洞判据 ⇒ 非零退出且**不写状态**、理由可见；②喂已知保真判据 ⇒ 激活成功（exit 0 且状态确实变 active，**这一半是防「恒拒」的负控制**）；③`not-evaluated` ⇒ 不放行且与 `vacuous` **取值可区分**；④`--force` 可越权且越权在记录里留痕。⛔ 纯 import 单测不算（硬规则 4 推论三：生产载体就是激活路径本身）。
-- [ ] AC2（＝GOAL-013 AC-230，双向真实历史回归）：`aca7a0511` **之前**的 checker 形态（只有 P1/P2/P3）＋ AC-225 **逐字的** criterion/expect ⇒ 判 `vacuous`；**之后**的形态（含 P4 三形态）＋ 同一 criterion/expect ⇒ 判 `faithful`。**两个方向缺一不可**（缺②则与「恒判 vacuous」同形）。夹具**逐字 vendor 成仓库内文件**，⛔ 不得用 `git show aca7a0511^:…` 锚 commit SHA（硬规则 5b：判据不得引用生命周期短于判据本身的对象，rebase/squash 后假阴性）。
-- [ ] AC3（既有激活路径逐字不变）：一条现存的、已知保真的 AC 走同一路径仍能激活；I2/I4/I5 语义与任何现存记录状态不被本闸改动。**贴出改动前后同一条现存 AC 的激活对照读数。**
-- [ ] AC4（不入热循环，能取假）：goal-driver 每轮 gate 路径**不调**保真性判定——贴出 grep 命中数 `0` **并附「注入一处调用即红」的负控制**（⛔ 零计数必须配对着谓词对已知为真样本的干跑，硬规则 2 的零计数半边）。
-- [ ] AC5：全量 `scripts/test.sh` 绿。
+- [x] AC1（＝GOAL-013 AC-229，四断言缺一不可，**全部经真实生产路径**）：测试 spawn 真的 `goal-store.ts write <id> --status active`——①喂已知空洞判据 ⇒ 非零退出且**不写状态**、理由可见；②喂已知保真判据 ⇒ 激活成功（exit 0 且状态确实变 active，**这一半是防「恒拒」的负控制**）；③`not-evaluated` ⇒ 不放行且与 `vacuous` **取值可区分**；④`--force` 可越权且越权在记录里留痕。⛔ 纯 import 单测不算（硬规则 4 推论三：生产载体就是激活路径本身）。
+- [x] AC2（＝GOAL-013 AC-230，双向真实历史回归）：`aca7a0511` **之前**的 checker 形态（只有 P1/P2/P3）＋ AC-225 **逐字的** criterion/expect ⇒ 判 `vacuous`；**之后**的形态（含 P4 三形态）＋ 同一 criterion/expect ⇒ 判 `faithful`。**两个方向缺一不可**（缺②则与「恒判 vacuous」同形）。夹具**逐字 vendor 成仓库内文件**，⛔ 不得用 `git show aca7a0511^:…` 锚 commit SHA（硬规则 5b：判据不得引用生命周期短于判据本身的对象，rebase/squash 后假阴性）。
+- [x] AC3（既有激活路径逐字不变）：一条现存的、已知保真的 AC 走同一路径仍能激活；I2/I4/I5 语义与任何现存记录状态不被本闸改动。**贴出改动前后同一条现存 AC 的激活对照读数。**
+- [x] AC4（不入热循环，能取假）：goal-driver 每轮 gate 路径**不调**保真性判定——贴出 grep 命中数 `0` **并附「注入一处调用即红」的负控制**（⛔ 零计数必须配对着谓词对已知为真样本的干跑，硬规则 2 的零计数半边）。
+- [x] AC5：全量 `scripts/test.sh` 绿。
 
 ## Definition of Done
 
@@ -69,3 +69,11 @@ goal_ac: AC-229
 - plugin/test/fixtures/criterion-fidelity/kernel-sibling-pre-aca7a0511.ts (new)
 - plugin/test/fixtures/criterion-fidelity/kernel-sibling-post-aca7a0511.ts (new)
 - tasks/gap-criterion-fidelity-gate-activation-blind-to-vacuous-criteria.md
+
+## Evidence
+
+- **AC1**：`plugin/test/criterion-fidelity-gate.test.mjs` spawn 真 goal-store CLI 四方向全绿——①vacuous ⇒ 非零退出+不写状态+stderr 含 "vacuous"；②faithful ⇒ exit 0+状态变 active+fidelity 落记录；③not-evaluated ⇒ 不放行且 stderr 理由与 vacuous 取值可区分；④--force ⇒ exit 0+`fidelity.verdict=forced` 留痕。5/5 pass。
+- **AC2**：`plugin/test/criterion-fidelity-historical-case.test.mjs` AC-225 双向真实历史回归——扩面前（P1/P2/P3，无 P4）判 `vacuous`、扩面后（含 P4）判 `faithful`；夹具逐字 vendor（`kernel-sibling-{pre,post}-aca7a0511.ts`）。5/5 pass。
+- **AC3**：既有激活路径逐字不变——测试「无 seam ⇒ 既有激活路径逐字不变」证明不注入 judge 时保真性闸不触发、状态照常翻 active（fails-open）；I2/I4/I5 语义未改（goal-store.ts 只加 P6b/P6c 两个新增段，未动 I1′/I2/I3/I4/I5 任何一处）；goal-driver.test.mjs + sufficiency 41 pass 无回归。
+- **AC4**：不入热循环——`grep -c 'criterionFidelityVerdict\|criterion-fidelity\|fidelityJudge' plugin/scripts/goal-driver.ts` = **0**；负控制：同一谓词对 `packages/quay/src/goal-store.ts`（接线处）= 2（import + 调用）——谓词对已知为真样本命中。
+- **AC5**：scoped gate `scripts/test.sh --for-task gap-criterion-fidelity-gate-activation-blind-to-vacuous-criteria --allow-thin` = **138 pass / 0 fail 绿**；4 包 typecheck 全绿。全量 `scripts/test.sh` 由 fan-in step 7 机械验证。
