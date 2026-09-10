@@ -15,12 +15,10 @@
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { suiteLockSlotCount } from "./suite-lock-slots.ts";
 import { mainCheckoutRoot } from "./repo-root.ts";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+import { resolveKernelPluginRoot } from "./driver-runtime.ts";
 
 /**
  * QUAY_MAX_CONCURRENT_SUITES — knob ② (旋钮②) of the 人 2026-08-13 框架: the concurrent full-suite
@@ -67,7 +65,7 @@ export function testProcessesInUse(): number {
   const seam = process.env.RESOURCE_GATE_TEST_NODE_PROCS;
   if (seam !== undefined && seam !== "" && /^[0-9]+$/.test(seam)) return Number(seam);
   try {
-    const out = execFileSync("bash", [path.join(__dirname, "process-budget.sh"), "--json"], {
+    const out = execFileSync("bash", [path.join(resolveKernelPluginRoot(), "scripts", "process-budget.sh"), "--json"], {
       encoding: "utf8",
       timeout: 5000,
     });

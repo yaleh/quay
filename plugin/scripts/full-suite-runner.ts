@@ -133,6 +133,7 @@ import { runOnce, isRunnerInFlight, type SuiteState as TriggerSuiteState } from 
 // excluded). The runner snapshots that surface to DETECT a mid-round edit to a file the running round
 // reads — reuse the single source, never a hand-rolled copy (CLAUDE.md 硬规则 1).
 import { resolveAssertionSurface } from "./precommit-guard.ts";
+import { resolveKernelSibling, resolveKernelPluginRoot } from "./driver-runtime.ts";
 import { getLoad1 } from "./checker-cost.ts";
 import { scanFamily, kindForFile } from "./known-load-sensitive.ts";
 // gap-leak-residue-per-run-namespace-isolation — the runner-level unified cleanup REUSES the
@@ -188,7 +189,7 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..");
 // a per-run dir; measure-suite-reporter.mjs reads it back to append `cpu_ms=<n>` to the `__PERFILE__`
 // line. Append (never overwrite) a pre-existing NODE_OPTIONS so a caller-set value survives (NODE_OPTIONS
 // is space-separated flags; the last --require wins in node, but we only ADD ours, never drop theirs).
-export const PER_FILE_CPU_PRELOAD = path.join(REPO_ROOT, "plugin", "scripts", "per-file-cpu-report.mjs");
+export const PER_FILE_CPU_PRELOAD = path.join(resolveKernelPluginRoot(), "scripts", "per-file-cpu-report.mjs");
 
 /** Append the per-file-CPU preload `--require` to an existing NODE_OPTIONS value (or build it fresh). */
 export function withPerFileCpuPreload(existingNodeOptions: string | undefined): string {
@@ -1492,7 +1493,7 @@ export function provisionOneShotWorktree(mainRoot: string): string {
   });
   // Provision the gitignored runtime files the fresh worktree lacks: config.yml + vendor dist
   // (worktree-include.sh) + node_modules symlink + Core CLI dist build (provision-verify-worktree.sh).
-  const provisionScript = path.join(__dirname, "provision-verify-worktree.sh");
+  const provisionScript = path.join(resolveKernelPluginRoot(), "scripts", "provision-verify-worktree.sh");
   execFileSync("bash", [provisionScript, "--worktree", wtPath, "--root", mainRoot], {
     cwd: mainRoot,
     encoding: "utf8",
@@ -1506,7 +1507,7 @@ export function provisionOneShotWorktree(mainRoot: string): string {
  *  the suite verdict (the leak is reclaimable by worktree-branch-hygiene-check.sh). */
 export function teardownOneShotWorktree(mainRoot: string, wtPath: string): void {
   try {
-    const provisionScript = path.join(__dirname, "provision-verify-worktree.sh");
+    const provisionScript = path.join(resolveKernelPluginRoot(), "scripts", "provision-verify-worktree.sh");
     execFileSync("bash", [provisionScript, "--worktree", wtPath, "--root", mainRoot, "--teardown"], {
       cwd: mainRoot,
       encoding: "utf8",
@@ -1532,7 +1533,7 @@ export function teardownOneShotWorktree(mainRoot: string, wtPath: string): void 
  * to the machine.
  */
 export function checkResourceGate(root: string): { ok: boolean; output: string } {
-  const gate = path.join(__dirname, "resource-gate.sh");
+  const gate = path.join(resolveKernelPluginRoot(), "scripts", "resource-gate.sh");
   const gateArgs = ["--for", "full-suite"];
   if (!isGitWorktree(root)) gateArgs.push("--main-repo-priority");
   try {
@@ -1974,7 +1975,11 @@ export async function run(argv: string[]): Promise<number> {
   // the production path (no env) is unchanged.
   if (process.env.QUAY_TEST_SKIP_PRE_SUITE_REAPER !== "1") {
     try {
-      execFileSync("node", ["--no-warnings", "--experimental-strip-types", path.join(__dirname, "worktree-process-reaper.ts"), "--orphans", "--root", root, "--json"], { stdio: "ignore" });
+      const reaper = resolveKernelSibling("worktree-process-reaper.ts");
+      const reaperArgs = reaper
+        ? (reaper.stripTypes ? ["--experimental-strip-types", reaper.path] : [reaper.path])
+        : ["--experimental-strip-types", path.join(resolveKernelPluginRoot(), "scripts", "worktree-process-reaper.ts")];
+      execFileSync("node", ["--no-warnings", ...reaperArgs, "--orphans", "--root", root, "--json"], { stdio: "ignore" });
     } catch (e) {
       process.stderr.write(`full-suite-runner: pre-suite orphan-probe reap failed (continuing): ${e instanceof Error ? e.message : String(e)}\n`);
     }
@@ -2155,13 +2160,16 @@ export async function run(argv: string[]): Promise<number> {
     const intervalArg = Number(process.env.QUAY_SUITE_LOAD_SAMPLER_INTERVAL ?? "5");
     const interval = Number.isFinite(intervalArg) && intervalArg > 0 ? intervalArg : 5;
     const outFile = path.join(stateDir, `suite-load-${runId}.jsonl`);
+    const sampler = resolveKernelSibling("suite-load-sampler.ts");
+    const samplerArgs = sampler
+      ? (sampler.stripTypes ? ["--experimental-strip-types", sampler.path] : [sampler.path])
+      : ["--experimental-strip-types", path.join(resolveKernelPluginRoot(), "scripts", "suite-load-sampler.ts")];
     try {
       const child = spawn(
         process.execPath,
         [
           "--no-warnings",
-          "--experimental-strip-types",
-          path.join(__dirname, "suite-load-sampler.ts"),
+          ...samplerArgs,
           "--state-file",
           stateFile,
           "--out-file",

@@ -8,18 +8,17 @@
 // suite-bucket-hub-list.ts HUB_FILES). Extracting it out of the monolith shrinks that monolith WITHOUT
 // weakening the hub rule (a change here still forces the full suite).
 //
-// Moved verbatim from full-suite-runner.ts. `__dirname` is re-derived here (same value: this file
-// lives in the same plugin/scripts/ directory, so `path.join(__dirname, "assert-clean-tree.sh")`
-// resolves identically). Re-exported from full-suite-runner.ts so its public API surface is unchanged.
+// Extracted from full-suite-runner.ts. The assert-clean-tree.sh sibling is resolved from the kernel
+// install location via resolveKernelPluginRoot() (⛔ not __dirname — gap-ac225): scripts/
+// assert-clean-tree.sh resolves identically in the dev tree and the shipped install. Re-exported from
+// full-suite-runner.ts so its public API surface is unchanged.
 
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { fileURLToPath } from "node:url";
 import { resolveAssertionSurface } from "./precommit-guard.ts";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+import { resolveKernelPluginRoot } from "./driver-runtime.ts";
 
 /**
  * gap-merge-green-snapshot-verified-commit-livelock AC2 — the TESTED COMMIT: `git rev-parse HEAD` in
@@ -47,7 +46,7 @@ export function readVerifiedCommit(root: string): string | undefined {
 export function readTreeState(root: string): TreeState | undefined {
   let treeDirty: boolean;
   try {
-    const assertClean = path.join(__dirname, "assert-clean-tree.sh");
+    const assertClean = path.join(resolveKernelPluginRoot(), "scripts", "assert-clean-tree.sh");
     try {
       // Exit 0 = clean; exit 1 = dirty (the FAIL branch); exit 2 = usage / not a git work tree —
       // any status OTHER than 1 degrades to undefined (fail open: no detection, never a verdict).
