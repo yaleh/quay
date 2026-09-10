@@ -353,6 +353,17 @@ run_static_checks() {
   # @static-tier change
   # @static-object .claude/workflows/ plugin/workflows/
   run_checker "delivery-inventory-drift-gate" bash "${repo_root}/plugin/scripts/delivery-inventory-drift-gate.sh" --root "${repo_root}"
+  echo "== capability-manifest check (gap-delivery-manifest-capability-map, AC1-AC4) =="
+  # Bidirectional capability↔delivery-manifest enumeration: every SOURCE capability (driver kind /
+  # CLI top-level command / MCP server) must be REGISTERED in delivery-manifest.json's capabilities
+  # array, and every registered capability must still exist in source. The AC-202 root cause
+  # (gap-driver-kinds-table-literal-not-in-dist-entry) was that packaging/closure checks are
+  # scan-references heuristics — a NEW literal table/file is structurally invisible to them; a
+  # capability INVENTORY (the manifest) to diff against closes that blind spot. exit 1 = unregistered
+  # /stale; exit 2 = NOT-EVALUATED (source/manifest unreadable — never conflated with "0 drift").
+  # @static-tier change
+  # @static-object delivery-manifest.json plugin/scripts/driver-runtime.ts packages/quay/bin/quay.ts packages/quay/src/mcp-server.ts packages/quay-native/src/mcp-server.ts packages/quay-github/src/mcp-server.ts packages/quay-backlog/src/mcp-server.ts plugin/scripts/capability-manifest-check.ts plugin/test/capability-manifest-check.test.mjs plugin/scripts/checker-mutation-cases/capability-manifest-check.sh
+  run_checker "capability-manifest-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/capability-manifest-check.ts" --root "${repo_root}"
   echo "== checker-mutation check (gap-checkers-have-never-been-shown-to-fail, AC1-AC6) =="
   # The L_S instrument: mutation-test the checkers THEMSELVES, not product code. The manifest is
   # parsed from THIS function + CI (never hand-written), so a checker added here (or to a CI
@@ -579,6 +590,27 @@ run_static_checks() {
   #   注册行断言（不得带 --no-block）+ 注入即红干跑钉住（硬规则 3/4）。
   # @static-tier full
   run_checker "kernel-sibling-resolution-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/kernel-sibling-resolution-check.ts" --root "${repo_root}" --json
+  echo "== config-key-consumer check (GOAL-015 退出条件③ / AC-235, gap-config-key-consumer-check-mechanical-enumeration) =="
+  # 交付配置键消费者枚举：quay-init 写入下游 .quay/config.yml loop: 的每个键都必须有代码消费者
+  # （零消费者的键已接线或已删）。writer 面机械派生自 quay-init.sh（heredoc + python 升级写手），
+  # consumer 面机械 grep（plugin/scripts/*.ts + packages/quay/src/*.ts，排除测试与自身）——与 AC-235
+  # 判据同一口径。三态可区分（has-consumer / no-consumer-to-wire / documented-with-reason），豁免必须
+  # 带理由文本（GOAL-015 风险 3，⛔ 不是无理由 allowlist）。no-consumer-to-wire > 0 ⇒ exit 1。
+  # ⛔ 落在 full（不 scoped）——全店枚举，不随单任务 Touches 收窄。负控制由 mutation case 注入孤儿键即
+  # 红钉住（硬规则 3/4）。
+  # @static-tier full
+  run_checker "config-key-consumer-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/config-key-consumer-check.ts" --root "${repo_root}"
+  echo "== host-repo-surface ratchet (GOAL-015 退出条件④ / AC-236, gap-host-repo-surface-ratchet) =="
+  # 本仓库表层单调棘轮：CLI 动词集（quay.ts --help 真实输出，⛔ 不读源码字面量——同时证明入口本身跑得起来）、
+  # web 路由集（serve-handlers.ts + serve.ts 的 url.pathname === "…" 位置命中）、有消费者的配置键集
+  # （config-key-consumer-check.ts --json 的 has-consumer，复用既有机件）三者逐一与已提交基线比对，
+  # 基线 ⊆ 当前才 exit 0——新增允许、删除/改名转红。⛔ 守的是 AC-233 修法会删掉 packages/quay/bin/quay.ts
+  # 这个本仓库自己的开发入口（CLAUDE.md Commands 段记的正本），删文件不产生失败断言（硬规则 3b）。
+  # 三态可区分：基线缺失 ⇒ exit 1（任务没做完）；源文件读不到 / 入口 spawn 失败 ⇒ exit 3 NOT-EVALUATED
+  # （stderr，硬规则 3b）。⛔ 落在 full（不 scoped）——全店枚举，不随单任务 Touches 收窄。负控制由
+  # mutation case 注入缩水即红钉住（硬规则 3/4）。
+  # @static-tier full
+  run_checker "host-repo-surface-ratchet" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/host-repo-surface-ratchet.ts" --root "${repo_root}"
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait

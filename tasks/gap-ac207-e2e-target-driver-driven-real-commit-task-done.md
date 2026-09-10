@@ -11,19 +11,25 @@ parent: null
 children: []
 extra:
   schema: execution
-  needs_human_cause: （已解除 2026-09-10）缺陷 A（gate_events=0 / appendCompleteGateEvent
-    shipped-unsafe MODULE_NOT_FOUND）已由
-    gap-fanin-gate-event-store-path-shipped-unsafe done 落
-    develop（resolveKernelSrcModule 双布局解析）；缺陷 B（安装物陈旧 + 分支分叉）已由 develop tip
-    efa0bd33e 现 build 重装 orangevps /tmp/ac207-prefix + 两 driver
-    重启解除（develop..main = 0）。人 2026-09-10 授权 retreat 回 ready 续验 AC2/AC3/AC5。
+  needs_human_cause: 第 12 轮（2026-09-10 14:1xZ）新阻塞：e2e 机械 fan-in 的 ff 步因
+    ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING 失败——worker-driver.ts
+    resolveKernelSrcModule 把动态 import 的 ff-merge.ts/gate-event-store.ts 解析到
+    node_modules 下的 .ts（shipped 打平布局），Node ≥23.7
+    拒剥。位置判定：resolveKernelSrcModule(:3468) + 两调用点 :3716/:3491；orangevps Node
+    v25.2.0 复现 exit。已立新任务
+    gap-resolve-kernel-src-module-strip-types-node-modules（todo）。AC1/AC4 done
+    不变；AC2/AC3/AC5 仍阻塞，待该任务落 develop + 第三方重装后复跑 e2e。
 goal_ac: AC-207
 depends_on:
   - gap-driver-resource-gate-path-anchored-at-root-third-party
   - gap-shipped-profiles-missing-worker-roles
   - gap-promotion-driver-ready-pool-check-path-third-party
   - gap-doc-branch-hardcoded-author-breaks-third-party-develop-sync
+  - gap-driver-fanin-hardcoded-test-sh-third-party
   - gap-fanin-gate-event-store-path-shipped-unsafe
+  - gap-resolve-kernel-src-module-strip-types-node-modules
+  - gap-third-party-evidence-no-transport-to-driving-repo-carrier
+  - gap-ac207-e2e-producer-section-never-landed-on-develop
 ---
 ## Proposal
 
@@ -182,3 +188,12 @@ AC1/AC4 实现已 done 不变；AC2/AC3/AC5 仍阻塞，需修该缺陷（新任
 - session_id：1cbac9f1-899e-4faf-adac-f9b9c7a29354
 
 （⚠️ 该 needs-human 记录已由人 2026-09-10 授权解除 → 本任务已 retreat 回 ready，见上一节「结构性阻塞：验证脚本的两半分居两个分支」。）
+
+
+## ⚠️ 现场更正（2026-09-10T23:5xZ，本轮派发前追加，覆盖上文两处已过期的纪律）
+
+**① 证据取回：不要再手工搬运——机件已经有了。** 上文「远端产出的记录不会自动回到本机载体，必须显式取回」写于回传机件存在之前。现在 `plugin/scripts/develop-deliver-tgz.sh --verify-coldstart` 已落 develop（提交 c7d571099 + 5f3895c50，arg parser 里有 --verify-coldstart)），它自己 scp 脚本+两个 tgz 到目标机、以显式 --ac89 执行、把证据文件 scp 回来并按 (ts,ac,host,project_root) 去重追加进本机载体；远端零证据 ⇒ NOT-EVALUATED + 非零退出。**请走这条机件产出 AC-207 记录，⛔ 不要手工 scp 或手写记录**（手工搬运的记录不构成本 goal 要的机制自证）。该机件已实测跑通：2026-09-10T22:45Z 首次送回 GOAL-009-AC-204 / AC-206 两条，两条判据随即 exit 0 并被 goal-driver 翻成 achieved。
+
+**② 「验证脚本两半分居两个分支」那一节已过期，不要照它解冲突。** 产出者已由 gap-ac207-e2e-producer-section-never-landed-on-develop 单独落 develop。develop 当前实测：--ac207-e2e 5 处、GOAL-009-AC-207 5 处、--target-launcher 8 处、tp_ok 4 处——**两半都在，且那处最易漏的 tp_ok 已保住**。本 worktree 落后 develop 240 提交且自己也带着同一段实现 ⇒ merge develop 时 verify-deliver-coldstart.sh 大概率冲突，**解法是取 develop 侧**（它是经独立任务验证后落地的权威版本），解完用上面四个计数复核一遍即可。
+
+**③ 本任务现在只剩 AC2/AC3/AC5**，全部需要一次真实的跨机 e2e：用全新的 --root 与 --prefix（旧项目里 e2e-verify-207 已存在，task create 会 fail-closed），跑完后复跑 AC-207 criterion 确认 exit 1 → exit 0。⛔ 仍不得勾选未经真实验证的 AC。

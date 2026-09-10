@@ -57,6 +57,16 @@
 #                  is younger than this, decision=too-soon (no deliver). Default 21600 (6h).
 #     --selfcheck  hermetic positive/negative controls of the verify criterion + state aggregation
 #                  (offline, no build/scp/ssh) — the AC3/AC4/AC5 negative controls, exit 0/1
+#     --verify-coldstart  cross-host evidence transport (gap-third-party-evidence-no-transport-to-
+#                  driving-repo-carrier): build the two .tgz at the develop tip, scp
+#                  verify-deliver-coldstart.sh + the two .tgz to each host, run it there with an
+#                  explicit --ac89 <remote tmp path>, scp that evidence file back, and append its
+#                  lines into <repo>/.quay/productization-verification.jsonl (dedup on
+#                  (ts,ac,host,project_root)). A host that produces no evidence ⇒ NOT-EVALUATED +
+#                  exit 1 (硬规则 3b). Distinct from the deliver mode (no http/usage surface verify).
+#     --selfcheck-evidence [positive|negative|both]  hermetic controls of the evidence-transport
+#                  append/dedup function (offline, no build/scp/ssh) — the AC5 negative/positive
+#                  controls of gap-third-party-evidence-…, exit 0/1
 #
 # Host table (B/C node paths verified 2026-08-11 by outer ssh probes):
 #   B = orangevps.wan.hwang.men   node: ~/.nvm/versions/node/v22.23.1/bin (also v25.2.0)
@@ -75,6 +85,9 @@ force=0
 check_only=0
 max_age=21600   # low-frequency hold: don't re-deliver within this many seconds of the last deliver (6h)
 selfcheck=0
+verify_coldstart=0
+selfcheck_evidence=0
+selfcheck_evidence_scenario="both"
 while [ $# -gt 0 ]; do
   case "$1" in
     --root) repo_root="$2"; shift 2 ;;
@@ -83,6 +96,11 @@ while [ $# -gt 0 ]; do
     --check) check_only=1; shift ;;
     --max-age) max_age="$2"; shift 2 ;;
     --selfcheck) selfcheck=1; shift ;;
+    --verify-coldstart) verify_coldstart=1; shift ;;
+    --selfcheck-evidence)
+      selfcheck_evidence=1
+      case "${2:-}" in positive|negative|both) selfcheck_evidence_scenario="$2"; shift 2 ;; *) shift ;; esac
+      ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -247,8 +265,125 @@ STUB
   return "${rc}"
 }
 
+# ── transport_evidence_append <local-carrier> <evidence-file> ───────────────────────────────
+# Append the non-empty JSON lines of <evidence-file> into <local-carrier>, deduped on the
+# (ts, ac, host, project_root) signature so re-transporting the SAME evidence file is idempotent
+# (Plan step 3: repeated transport must not inflate a single record into many — AC-214 freshness).
+# Returns 0 + prints `EVIDENCE-TRANSPORT appended=N`; returns 1 + prints `NOT-EVALUATED` when
+# <evidence-file> is missing / unreadable / has zero non-empty lines (硬规则 3b: 缺值 ≠ 合格,
+# and never silent exit 0 on "no evidence").
+transport_evidence_append() {
+  local carrier="$1" evidence="$2" appended
+  if [ ! -f "$evidence" ] || [ ! -r "$evidence" ]; then
+    echo "NOT-EVALUATED evidence-file-missing-or-unreadable path=${evidence}"
+    return 1
+  fi
+  if [ "$(grep -c '.' "$evidence" 2>/dev/null || true)" -eq 0 ]; then
+    echo "NOT-EVALUATED evidence-file-zero-lines path=${evidence}"
+    return 1
+  fi
+  mkdir -p "$(dirname "$carrier")"
+  appended="$(python3 - "$carrier" "$evidence" <<'PY'
+import json, sys
+carrier, evidence = sys.argv[1], sys.argv[2]
+def sig(r):
+    return json.dumps([r.get("ts",""), r.get("ac",""), r.get("host",""), r.get("project_root","")], sort_keys=True)
+existing = set()
+try:
+    with open(carrier, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                existing.add(sig(json.loads(line)))
+            except Exception:
+                pass
+except FileNotFoundError:
+    pass
+appended = 0
+with open(carrier, "a", encoding="utf-8") as out, open(evidence, encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            r = json.loads(line)
+        except Exception:
+            continue
+        s = sig(r)
+        if s in existing:
+            continue
+        existing.add(s)
+        out.write(line + "\n")
+        appended += 1
+print(appended)
+PY
+)"
+  if [ -z "$appended" ]; then
+    echo "NOT-EVALUATED evidence-parse-failed path=${evidence}"
+    return 1
+  fi
+  case "$appended" in ''|*[!0-9]*) echo "NOT-EVALUATED evidence-parse-failed path=${evidence}"; return 1 ;; esac
+  echo "EVIDENCE-TRANSPORT appended=${appended} carrier=${carrier} evidence=${evidence}"
+  return 0
+}
+
+# ── selfcheck_evidence [positive|negative|both] — hermetic controls of the transport fn ──────
+# AC5 of gap-third-party-evidence-…: ① a fixture evidence file carrying GOAL-009-AC-* lines appends
+# into the target carrier and a repeat call appends 0 (idempotent) ② a missing / empty evidence file
+# returns a distinguishable NOT-EVALUATED (non-zero) rather than success, and the carrier is unchanged.
+selfcheck_evidence() {
+  local scenario="${1:-both}" tmp rc=0 carrier ev after n
+  tmp="$(mktemp -d 2>/dev/null)" || { echo "selfcheck-evidence: FAIL — cannot create temp dir" >&2; return 1; }
+  if [ "${scenario}" = "positive" ] || [ "${scenario}" = "both" ]; then
+    carrier="${tmp}/carrier.jsonl"
+    ev="${tmp}/evidence-good.jsonl"
+    cat > "${ev}" <<'EVID'
+{"ts":"2026-09-10T00:00:00Z","ac":"GOAL-009-AC-206","host":"orangevps","project_root":"/home/verify/quay-verify-coldstart-root","goals_dir_created":true,"tasks_dir_created":true,"goal_store_readable":true,"task_store_readable":true}
+{"ts":"2026-09-10T00:00:00Z","ac":"GOAL-009-AC-203","host":"orangevps","project_root":"/home/verify/quay-verify-coldstart-root","has_plugin_dir":false,"driver_alive":1,"carrier_records":3}
+EVID
+    after="$(transport_evidence_append "${carrier}" "${ev}")" || rc=1
+    echo "selfcheck-evidence: positive first-append → ${after}"
+    printf '%s' "${after}" | grep -q 'appended=2' || rc=1
+    after="$(transport_evidence_append "${carrier}" "${ev}")" || rc=1
+    echo "selfcheck-evidence: positive repeat-append → ${after}"
+    printf '%s' "${after}" | grep -q 'appended=0' || rc=1
+    n="$(grep -c '.' "${carrier}" 2>/dev/null || true)"
+    [ -n "${n}" ] || n=0
+    [ "${n}" = "2" ] || { echo "selfcheck-evidence: carrier lines=${n} (expect 2 — repeat must not duplicate)" >&2; rc=1; }
+    [ "${rc}" -eq 0 ] && echo "selfcheck-evidence: positive PASS (2 lines appended; repeat idempotent)"
+  fi
+  if [ "${scenario}" = "negative" ] || [ "${scenario}" = "both" ]; then
+    carrier="${tmp}/carrier-neg.jsonl"
+    if transport_evidence_append "${carrier}" "${tmp}/evidence-missing.jsonl"; then
+      echo "selfcheck-evidence: negative FAIL — missing evidence returned success" >&2; rc=1
+    else
+      echo "selfcheck-evidence: negative missing → NOT-EVALUATED (non-zero, as required)"
+    fi
+    : > "${tmp}/evidence-empty.jsonl"
+    if transport_evidence_append "${carrier}" "${tmp}/evidence-empty.jsonl"; then
+      echo "selfcheck-evidence: negative FAIL — empty evidence returned success" >&2; rc=1
+    else
+      echo "selfcheck-evidence: negative empty → NOT-EVALUATED (non-zero, as required)"
+    fi
+    n="$(grep -c '.' "${carrier}" 2>/dev/null || true)"
+    [ -n "${n}" ] || n=0
+    echo "selfcheck-evidence: negative carrier lines=${n}"
+    [ "${n}" = "0" ] || { echo "selfcheck-evidence: negative FAIL — carrier lines=${n} (expect 0 — carrier unchanged)" >&2; rc=1; }
+    [ "${rc}" -eq 0 ] && echo "selfcheck-evidence: negative PASS (missing/empty evidence → NOT-EVALUATED, carrier unchanged)"
+  fi
+  rm -rf "${tmp}"
+  return "${rc}"
+}
+
 if [ "${selfcheck}" -eq 1 ]; then
   selfcheck
+  exit $?
+fi
+
+if [ "${selfcheck_evidence}" -eq 1 ]; then
+  selfcheck_evidence "${selfcheck_evidence_scenario}"
   exit $?
 fi
 
@@ -313,35 +448,155 @@ fi
 echo "develop-deliver: develop tip = ${develop_tip:0:12} (${develop_tip})"
 
 # ── 1. Build the two .tgz from a detached worktree at develop-tip ──────────────────────────────
-wt="${worktree_base}-${develop_tip:0:12}"
-if [ -e "${wt}" ]; then
-  git -C "${repo_root}" worktree remove --force "${wt}" 2>/dev/null || rm -rf "${wt}"
-fi
-echo "develop-deliver: creating detached worktree at develop tip: ${wt}"
-git -C "${repo_root}" worktree add --detach "${wt}" "${develop_tip}" >/dev/null 2>&1
-# symlink the main checkout's node_modules (hoisted, pure-JS deps) so build-dist/esbuild resolve
-ln -s "${repo_root}/node_modules" "${wt}/node_modules" 2>/dev/null || true
+# Factored so both the deliver mode and the --verify-coldstart mode build the SAME fresh
+# hardware-independent artifact at the develop tip (NOT the primary checkout HEAD). Sets the globals
+# quay_tgz / qn_tgz and leaves the build worktree in place (the caller removes it).
+build_develop_tgz() {
+  wt="${worktree_base}-${develop_tip:0:12}"
+  if [ -e "${wt}" ]; then
+    git -C "${repo_root}" worktree remove --force "${wt}" 2>/dev/null || rm -rf "${wt}"
+  fi
+  echo "develop-deliver: creating detached worktree at develop tip: ${wt}"
+  git -C "${repo_root}" worktree add --detach "${wt}" "${develop_tip}" >/dev/null 2>&1
+  # symlink the main checkout's node_modules (hoisted, pure-JS deps) so build-dist/esbuild resolve
+  ln -s "${repo_root}/node_modules" "${wt}/node_modules" 2>/dev/null || true
 
-build_ok=0
-if [ -f "${wt}/packages/quay/scripts/package.sh" ]; then
-  echo "develop-deliver: package.sh (quay .tgz)..."
-  if (cd "${wt}" && bash packages/quay/scripts/package.sh) >/dev/null 2>&1; then
-    quay_tgz="$(ls -1t "${wt}/packages/quay/"quay-*.tgz 2>/dev/null | head -1 || true)"
-    echo "  → ${quay_tgz:-MISSING}"
-    if [ -n "${quay_tgz}" ] && [ -f "${quay_tgz}" ]; then
-      # quay-native: build-dist + npm pack (no package.sh — files array covers dist/)
-      if (cd "${wt}/packages/quay-native" && bash scripts/build-dist.sh && npm pack --pack-destination "${wt}/packages/quay-native/") >/dev/null 2>&1; then
-        qn_tgz="$(ls -1t "${wt}/packages/quay-native/"quay-native-*.tgz 2>/dev/null | head -1 || true)"
-        echo "  → ${qn_tgz:-MISSING}"
-        [ -n "${qn_tgz}" ] && [ -f "${qn_tgz}" ] && build_ok=1
+  local build_ok=0
+  if [ -f "${wt}/packages/quay/scripts/package.sh" ]; then
+    echo "develop-deliver: package.sh (quay .tgz)..."
+    if (cd "${wt}" && bash packages/quay/scripts/package.sh) >/dev/null 2>&1; then
+      quay_tgz="$(ls -1t "${wt}/packages/quay/"quay-*.tgz 2>/dev/null | head -1 || true)"
+      echo "  → ${quay_tgz:-MISSING}"
+      if [ -n "${quay_tgz}" ] && [ -f "${quay_tgz}" ]; then
+        # quay-native: build-dist + npm pack (no package.sh — files array covers dist/)
+        if (cd "${wt}/packages/quay-native" && bash scripts/build-dist.sh && npm pack --pack-destination "${wt}/packages/quay-native/") >/dev/null 2>&1; then
+          qn_tgz="$(ls -1t "${wt}/packages/quay-native/"quay-native-*.tgz 2>/dev/null | head -1 || true)"
+          echo "  → ${qn_tgz:-MISSING}"
+          [ -n "${qn_tgz}" ] && [ -f "${qn_tgz}" ] && build_ok=1
+        fi
       fi
     fi
   fi
+
+  if [ "${build_ok}" -eq 0 ]; then
+    echo "develop-deliver: BUILD FAILED — see worktree ${wt}" >&2
+    git -C "${repo_root}" worktree remove --force "${wt}" 2>/dev/null || rm -rf "${wt}"
+    return 1
+  fi
+  return 0
+}
+
+# ── verify_coldstart_mode — cross-host evidence transport (gap-third-party-evidence-no-transport-…) ──
+# Plan step 1: scp verify-deliver-coldstart.sh + the two .tgz to each host, run it there with an
+# explicit --ac89 <remote tmp path>, scp that evidence file back, and append its lines into the
+# local carrier (dedup on (ts,ac,host,project_root)). Plan step 2: a host that yields no evidence
+# file (verify failed before writing / scp-back failed) is NOT-EVALUATED and the run exits non-zero
+# (硬规则 3b — never a silent exit 0 on "no evidence").
+verify_coldstart_mode() {
+  local build_date local_carrier fail hk target remote_script out remote_rc remote_evidence remote_lines evidence_local
+  build_date="$(git -C "${repo_root}" log -1 --format=%cI refs/heads/develop 2>/dev/null || echo "")"
+  local_carrier="${repo_root}/.quay/productization-verification.jsonl"
+  echo "develop-deliver: --verify-coldstart develop=${develop_tip:0:12} build_date=${build_date} carrier=${local_carrier}"
+  fail=0
+  for hk in ${hosts}; do
+    target="${host_target[$hk]:-}"
+    if [ -z "${target}" ]; then
+      echo "develop-deliver: ${hk} — unknown host key (NOT-EVALUATED)"
+      fail=1
+      continue
+    fi
+    echo "develop-deliver: ${hk} (${target}) — scp verify-deliver-coldstart.sh + its \$SCRIPT_DIR siblings + SPEC + both .tgz"
+    # verify-deliver-coldstart.sh resolves its sibling tools by \$SCRIPT_DIR (pane-state-classify.ts,
+    # quay-init-closure-assertion.ts → gate-script-base.ts + repo-root.ts) and its L1 closed-set by the
+    # SPEC — all five + the SPEC must travel with the script or the remote verify aborts under `set -e`
+    # before writing the AC89 evidence (the closure is enumerated here, not tar'd, so a new \$SCRIPT_DIR
+    # dependency is an explicit edit, not a silent remote failure).
+    if ! scp "${ssh_opts[@]}" \
+        "${SCRIPT_DIR}/verify-deliver-coldstart.sh" \
+        "${SCRIPT_DIR}/pane-state-classify.ts" \
+        "${SCRIPT_DIR}/quay-init-closure-assertion.ts" \
+        "${SCRIPT_DIR}/gate-script-base.ts" \
+        "${SCRIPT_DIR}/repo-root.ts" \
+        "${SCRIPT_DIR}/../../orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md" \
+        "${quay_tgz}" "${qn_tgz}" "${target}:~/" >/dev/null 2>&1; then
+      echo "develop-deliver: ${hk} (${target}) — scp FAILED (NOT-EVALUATED)"
+      fail=1
+      continue
+    fi
+    remote_script=$(cat <<REMOTE
+EV="\${HOME}/quay-verify-coldstart-evidence-${develop_tip:0:8}.jsonl"
+rm -f "\${EV}"
+bash "\${HOME}/verify-deliver-coldstart.sh" \
+  --tgz "\${HOME}/$(basename "${quay_tgz}")" \
+  --tgz-native "\${HOME}/$(basename "${qn_tgz}")" \
+  --build-sha "${develop_tip}" \
+  --build-date "${build_date}" \
+  --host "${hk}" \
+  --ac89 "\${EV}" \
+  --spec "\${HOME}/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md" \
+  --prefix "\${HOME}/quay-verify-coldstart-${develop_tip:0:8}.npm" \
+  --project "quay-verify-coldstart-${develop_tip:0:8}" \
+  --root "\${HOME}/quay-verify-coldstart-${develop_tip:0:8}-root" \
+  --worktree-root "\${HOME}/quay-verify-coldstart-${develop_tip:0:8}-worktrees"
+RC=\$?
+echo "VERIFY-RC \${RC}"
+if [ -f "\${EV}" ]; then
+  echo "EVIDENCE-PATH \${EV}"
+  echo "EVIDENCE-LINES \$(wc -l < "\${EV}")"
+else
+  echo "EVIDENCE-ABSENT \${EV}"
+fi
+REMOTE
+)
+    set +e
+    out="$(ssh "${ssh_opts[@]}" "${target}" "bash -s" <<< "${remote_script}" 2>&1)"
+    remote_rc=$?
+    set -e
+    remote_evidence="$(printf '%s\n' "${out}" | grep -oE 'EVIDENCE-PATH .*' | tail -1 | sed 's/^EVIDENCE-PATH //' || echo "")"
+    remote_lines="$(printf '%s\n' "${out}" | grep -oE 'EVIDENCE-LINES [0-9]+' | tail -1 | sed 's/^EVIDENCE-LINES //' || echo "")"
+    echo "develop-deliver: ${hk} (${target}) remote verify rc=${remote_rc} evidence_lines=${remote_lines:-<none>}"
+    if [ "${remote_rc}" -ne 0 ]; then printf '%s\n' "${out}" | tail -8; fi
+    if [ -z "${remote_evidence}" ]; then
+      echo "develop-deliver: ${hk} (${target}) — NOT-EVALUATED (remote produced no evidence path)"
+      fail=1
+      continue
+    fi
+    evidence_local="${repo_root}/.quay/verify-coldstart-evidence-${hk}-${develop_tip:0:8}.jsonl"
+    rm -f "${evidence_local}"
+    echo "develop-deliver: ${hk} (${target}) — scp back: scp ${ssh_opts[*]} ${target}:${remote_evidence} ${evidence_local}"
+    if ! scp "${ssh_opts[@]}" "${target}:${remote_evidence}" "${evidence_local}" >/dev/null 2>&1; then
+      echo "develop-deliver: ${hk} (${target}) — evidence scp-back FAILED (NOT-EVALUATED)"
+      fail=1
+      continue
+    fi
+    if ! transport_evidence_append "${local_carrier}" "${evidence_local}"; then
+      echo "develop-deliver: ${hk} (${target}) — evidence NOT-EVALUATED (no transport)"
+      rm -f "${evidence_local}"
+      fail=1
+      continue
+    fi
+    rm -f "${evidence_local}"
+  done
+  # clean up the build worktree (both .tgz already scp'd to every host)
+  git -C "${repo_root}" worktree remove --force "${wt}" 2>/dev/null || rm -rf "${wt}"
+  if [ "${fail}" -eq 1 ]; then
+    echo "develop-deliver: --verify-coldstart PARTIAL FAILURE (some hosts NOT-EVALUATED — no transport for those hosts)" >&2
+    exit 1
+  fi
+  echo "develop-deliver: --verify-coldstart OK — evidence transported into ${local_carrier}"
+  return 0
+}
+
+if [ "${verify_coldstart}" -eq 1 ]; then
+  if ! build_develop_tgz; then
+    exit 1
+  fi
+  verify_coldstart_mode
+  exit $?
 fi
 
-if [ "${build_ok}" -eq 0 ]; then
-  echo "develop-deliver: BUILD FAILED — see worktree ${wt}" >&2
-  git -C "${repo_root}" worktree remove --force "${wt}" 2>/dev/null || rm -rf "${wt}"
+# ── Deliver mode: build + install + verify the served surface ──────────────────────────────
+if ! build_develop_tgz; then
   exit 1
 fi
 

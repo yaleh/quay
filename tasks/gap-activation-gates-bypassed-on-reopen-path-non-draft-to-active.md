@@ -2,7 +2,7 @@
 id: gap-activation-gates-bypassed-on-reopen-path-non-draft-to-active
 title: 三道激活闸只认 draft→active，重开路径（achieved→active / needs-human→active，实测占激活总数
   19%）全部绕过——含 --force 留痕分支，故重开时的 --force 是静默越权
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -72,12 +72,12 @@ needs-human → active   3 次   AC-217 / AC-218 / AC-219 (均 2026-09-09)
 
 ## Acceptance Criteria
 
-- [ ] AC1（重开触发可评估性闸，双向能取假）：对一条已 `achieved` 的 AC 做 `achieved→active`——criterion 为空/不可 spawn ⇒ **拒绝激活且不写状态**；criterion 可评估（**含 `exit ≠ 0`**）⇒ **放行**。两个方向各贴一次**真实 CLI** 读数（⛔ 非纯 import 单测）。
-- [ ] AC2（重开触发保真性闸，**两条来源路径各测一次**）：配置判定器后，`achieved→active` 与 **`needs-human→active`** 两条路径上激活的记录都必须留 `fidelity.verdict`；⛔ 字段缺失不算通过。**⛔ 不得只测 `achieved` 那条**——历史上 `needs-human` 占 3/5。
-- [ ] AC3（force 留痕不再被绕过）：`--force` 做重开 ⇒ 记录留 `fidelity.verdict === "forced"`。**改动前实测该分支在重开路径上不触发**（静默越权）——贴出改动前后对照。
-- [ ] AC4（⛔ 不误伤 create-as-active）：创建即 `active`（`prevStatus === undefined`）仍**不过闸**，保留 `:756-761` 记录的设计意图；贴出对照读数。
-- [ ] AC5（⛔ 不误伤既有 draft→active）：既有 21 条历史所走的形态照常放行——贴一条真实 `draft→active` 的对照读数。
-- [ ] AC6：全量 `scripts/test.sh` 绿。
+- [x] AC1（重开触发可评估性闸，双向能取假）：对一条已 `achieved` 的 AC 做 `achieved→active`——criterion 为空/不可 spawn ⇒ **拒绝激活且不写状态**；criterion 可评估（**含 `exit ≠ 0`**）⇒ **放行**。两个方向各贴一次**真实 CLI** 读数（⛔ 非纯 import 单测）。
+- [x] AC2（重开触发保真性闸，**两条来源路径各测一次**）：配置判定器后，`achieved→active` 与 **`needs-human→active`** 两条路径上激活的记录都必须留 `fidelity.verdict`；⛔ 字段缺失不算通过。**⛔ 不得只测 `achieved` 那条**——历史上 `needs-human` 占 3/5。
+- [x] AC3（force 留痕不再被绕过）：`--force` 做重开 ⇒ 记录留 `fidelity.verdict === "forced"`。**改动前实测该分支在重开路径上不触发**（静默越权）——贴出改动前后对照。
+- [x] AC4（⛔ 不误伤 create-as-active）：创建即 `active`（`prevStatus === undefined`）仍**不过闸**，保留 `:756-761` 记录的设计意图；贴出对照读数。
+- [x] AC5（⛔ 不误伤既有 draft→active）：既有 21 条历史所走的形态照常放行——贴一条真实 `draft→active` 的对照读数。
+- [x] AC6：全量 `scripts/test.sh` 绿。
 
 ## Definition of Done
 

@@ -13,7 +13,7 @@
 //   AC6  文本不再截断：页面级 #main 覆盖 ≥ 1320px（1440px 视口下内容宽 ≥ 1288px 的 SVG）。
 //   AC7  不动全局样式：serve-render.ts 仍保留裸 main { max-width: 900px }。
 //   AC8  正交圆角连线：.git-svg-edge 的 d 只允许 M/H/V/Q/Z（无 L），且带非退化 Q 圆角（半径 > 0）。
-//   AC9  按列分色：列线按列号取 var(--color-lane-N)，不同描边色数 = min(8, 列数)，相邻两列不同色。
+//   AC9  按列分色：列线按列号取 var(--color-lane-N)，不同描边色数 = |{列号 mod 8}|，索引相邻两列不同色。
 //   AC10 色板逐值一致：恢复的 8 个 hex 与 git show 303a94950^ 的 GIT_GRAPH_LANE_PALETTE 逐项相等。
 //
 // Run (scoped): node --test packages/quay/test/gap-git-graph-cross-column-edges-drawn-as-fixed-stubs-not-anchored.test.mjs
@@ -339,35 +339,89 @@ test("AC8 negative control: a straight diagonal path is rejected by the orthogon
   assert.ok(edgePathViolation("M 56,48 H 120 V 72") !== null, "a right-angle (no Q) path is caught by the AC8 judge");
 });
 
-// ── AC9: per-column hue coding (distinct colours = min(8, columnCount); adjacent differ) ────────
+// ── AC9: per-column hue coding (distinct colours = |{col % 8}|; INDEX-adjacent differ) ──────────
+// gap-git-graph-lane-colour-assertion-assumes-contiguous-columns: the renderer's ONLY promised
+// invariant is serve-git.ts:445 `laneColor(col) = lanePalette[col % lanePalette.length]` (and :65's
+// "two ADJACENT columns differ") — it says NOTHING about the drawn column set being contiguous.
+// `readGitHistory` walks `git log --all --topo-order`, so the window's column indices are whatever the
+// live branch/worktree graph yields: sparse (e.g. [0,1,2,8,9]) or dense, and `col % 8` collides under
+// sparsity. The old `distinct === min(8, cols.length)` (and the old "consecutive DRAWN columns differ"
+// loop) assumed contiguity and fired intermittently on unrelated tasks' fan-ins. The judge below
+// asserts exactly the renderer's promise: green for BOTH inputs, still red when laneColor is constant.
 
-test("AC9: column lines are per-column hue-coded (distinct colours = min(8, columnCount); adjacent differ)", () => {
-  const { columns } = renderProduction();
+/** AC9 colour judge (single source — main test / sparse case / negative control all reuse it): map
+ *  each drawn column line's x1 back to its column index, then compare the stroke SET against the
+ *  renderer's promise. Returns { cols, distinct, expected, adjacentViolations } for caller-side
+ *  assertion messages (hard rule 3: enumerate the drawn columns, never a bare boolean). */
+function ac9ColourVerdict(columns) {
   const byCol = new Map();
   for (const line of columns) {
     const col = Math.round((Number(line.attrs.x1) - GIT_GRAPH_TRUNK_X) / GIT_GRAPH_LANE_GAP);
     byCol.set(col, line.attrs.stroke);
   }
   const cols = [...byCol.keys()].sort((a, b) => a - b);
-  assert.ok(cols.length > 0, "the production window has at least one column");
   const distinct = new Set(cols.map((c) => byCol.get(c)));
-  assert.equal(distinct.size, Math.min(8, cols.length), `distinct column colours = min(8, ${cols.length}) (got ${distinct.size})`);
+  const expected = new Set(cols.map((c) => c % GIT_GRAPH_LANE_PALETTE.length)).size;
+  // The renderer promises INDEX-adjacent columns (c and c+1) differ, NOT that consecutive DRAWN
+  // columns differ — under a sparse set [0,8] both draw lane-0, so the old loop was itself flaky.
+  const adjacentViolations = [];
   for (let k = 1; k < cols.length; k++) {
-    assert.notEqual(byCol.get(cols[k]), byCol.get(cols[k - 1]), `adjacent columns ${cols[k - 1]} and ${cols[k]} differ in colour`);
+    if (cols[k] !== cols[k - 1] + 1) continue;
+    if (byCol.get(cols[k]) === byCol.get(cols[k - 1])) adjacentViolations.push(`${cols[k - 1]} vs ${cols[k]}`);
   }
+  return { cols, distinct, expected, adjacentViolations };
+}
+
+/** Deterministic sparse-lane rows (AC2): a fixed commit DAG — a 10-parent merge whose 5 in-window
+ *  children land at columns [0,1,2,8,9] (ghost parents g3..g7 hold the gap lanes 3..7, and each lane's
+ *  tail parent L*h is out-of-window so the lane never closes) — NO production repo state is read.
+ *  `col % 8` collides (0≡8, 1≡9) ⇒ the old min(8, cols.length) assertion is red here, the
+ *  renderer-promise assertion is green. */
+function sparseLaneRows() {
+  return [
+    { hash: "M", parents: 10, parentHashes: ["L0", "L1", "L2", "g3", "g4", "g5", "g6", "g7", "L8", "L9"], subject: "sparse merge", decorations: [] },
+    { hash: "L0", parents: 1, parentHashes: ["L0h"], subject: "lane 0", decorations: [] },
+    { hash: "L1", parents: 1, parentHashes: ["L1h"], subject: "lane 1", decorations: [] },
+    { hash: "L2", parents: 1, parentHashes: ["L2h"], subject: "lane 2", decorations: [] },
+    { hash: "L8", parents: 1, parentHashes: ["L8h"], subject: "lane 8", decorations: [] },
+    { hash: "L9", parents: 1, parentHashes: ["L9h"], subject: "lane 9", decorations: [] },
+  ];
+}
+
+test("AC9: column lines are per-column hue-coded (distinct colours = |{col % 8}|; index-adjacent differ)", () => {
+  const { columns } = renderProduction();
+  const v = ac9ColourVerdict(columns);
+  assert.ok(v.cols.length > 0, "the production window has at least one column");
+  assert.equal(v.distinct.size, v.expected, `distinct column colours = |{col % 8}| = ${v.expected} (got ${v.distinct.size}; drawn cols [${v.cols}])`);
+  assert.deepEqual(v.adjacentViolations, [], `index-adjacent drawn columns differ in hue (violations: ${v.adjacentViolations.join(", ") || "none"})`);
   // the token mechanism: gitGraphLaneTokenCss() emits the --color-lane-N sheet the renderer references.
   const css = gitGraphLaneTokenCss();
   assert.ok(css.includes("--color-lane-0:#b71c1c"), "the token sheet defines --color-lane-0 from the palette");
   assert.ok(css.includes("--color-lane-7:#1a237e"), "the token sheet defines --color-lane-7 from the palette");
 });
 
-test("AC9 negative control: monochrome column lines give distinct colour count = 1", () => {
-  const { rows } = renderProduction();
+test("AC9 sparse input (deterministic): the |{col % 8}| judge is green on fixed sparse columns [0,1,2,8,9]", () => {
+  const rows = sparseLaneRows();
+  const colOf = assignGitColumns(rows);
+  const drawn = [...new Set(rows.map((r) => colOf.get(r.hash)))].sort((a, b) => a - b);
+  // Pin the fixture: non-contiguous AND with a mod-8 collision — exactly the production shape that made
+  // the old assertion red, so this case regresses it deterministically (never depends on live refs).
+  assert.deepEqual(drawn, [0, 1, 2, 8, 9], `the sparse fixture draws columns [0,1,2,8,9] (got [${drawn}])`);
+  const mount = executeScript(gitGraphClientScript(), rows);
+  const v = ac9ColourVerdict(collectByClass(mount, "git-svg-column"));
+  assert.equal(v.distinct.size, v.expected, `sparse columns keep distinct = |{col % 8}| = ${v.expected} (got ${v.distinct.size})`);
+  assert.deepEqual(v.adjacentViolations, [], `index-adjacent sparse columns differ in hue (violations: ${v.adjacentViolations.join(", ") || "none"})`);
+});
+
+test("AC9 negative control: a constant laneColor breaks the |{col % 8}| assertion (judge can be false)", () => {
   const script = gitGraphClientScript().replace("lanePalette[col % lanePalette.length]", "lanePalette[0]");
   assert.notEqual(script, gitGraphClientScript(), "the mono substitution changed the script");
-  const mount = executeScript(script, rows);
-  const strokes = new Set(collectByClass(mount, "git-svg-column").map((l) => l.attrs.stroke));
-  assert.equal(strokes.size, 1, `monochrome column lines have exactly 1 distinct colour (got ${strokes.size})`);
+  const mount = executeScript(script, sparseLaneRows());
+  const v = ac9ColourVerdict(collectByClass(mount, "git-svg-column"));
+  assert.ok(v.cols.length > 0, "the mono render has columns to judge");
+  assert.equal(v.distinct.size, 1, `a constant laneColor yields exactly 1 colour (got ${v.distinct.size})`);
+  assert.ok(v.expected > 1, `the |{col % 8}| promise is ${v.expected} distinct colours (non-vacuous)`);
+  assert.notEqual(v.distinct.size, v.expected, `the judge goes false: distinct ${v.distinct.size} ≠ expected ${v.expected}`);
 });
 
 // ── AC10: the restored palette matches 303a94950^ item-by-item ─────────────────────────────────

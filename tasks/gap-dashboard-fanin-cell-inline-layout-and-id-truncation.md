@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-fanin-cell-inline-layout-and-id-truncation
 title: Fan-in 卡字段改单行内联排版 + 任务 id 单行省略号（收窄纵向堆叠）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -48,22 +48,21 @@ dashboard 的 fan-in 概览卡（仅展示 5 条记录的紧凑卡片）。2026-
      `text-overflow:ellipsis` 与匹配的 `title` 属性。
 
 ## Acceptance Criteria
-- [ ] `renderFanInCell(..., { layout: "inline" })` 输出不含 `<br>`，字段以 `" · "` 连接，单测对固定样本
+- [x] `renderFanInCell(..., { layout: "inline" })` 输出不含 `<br>`，字段以 `" · "` 连接，单测对固定样本
       断言出完整拼接字符串。
-- [ ] `renderFanInCell` 不传 `layout` 时输出与改动前逐字节一致（`<br>` 分隔未变），既有
+- [x] `renderFanInCell` 不传 `layout` 时输出与改动前逐字节一致（`<br>` 分隔未变），既有
       `gap-mech-fan-in-log-webui-visible-clickable`、`gap-dashboard-status-tag-badges`、
       `gap-dashboard-fanin-monospace-ids` 相关测试无回归红。
-- [ ] `renderFanInCardFromRecords` 渲染的任务 id `<a>` 标签同时带
+- [x] `renderFanInCardFromRecords` 渲染的任务 id `<a>` 标签同时带
       `overflow:hidden;text-overflow:ellipsis;white-space:nowrap` 与 `title` 属性，单测对长 id 样本断言。
 
 ## Definition of Done
-- [ ] 代码改动落在 `packages/quay/src/serve-task.ts`（`renderFanInCell`）与
+- [x] 代码改动落在 `packages/quay/src/serve-task.ts`（`renderFanInCell`）与
       `packages/quay/src/serve-dashboard.ts`（`renderFanInCardFromRecords` 调用点 + id 链接样式）之内，
       `/task/<id>` Runs 表格的现有渲染（`layout` 默认值路径）无视觉变化。
-- [ ] `packages/quay/test/gap-dashboard-fanin-cell-inline-layout-and-id-truncation.test.mjs` 存在且按
+- [x] `packages/quay/test/gap-dashboard-fanin-cell-inline-layout-and-id-truncation.test.mjs` 存在且按
       具体字符串/属性断言，随 scoped gate 跑绿。
-- [ ] 生产 `/dashboard` 页面人工截图核实：fan-in 卡每条记录收窄到约 3 行（id 单行省略号 + 字段一行 +
-      时间戳一行），5 条记录的整卡高度较改动前明显变短；`/task/<id>` 页面 Runs 表格视觉不变。
+- [ ] 生产 `/dashboard` 页面人工截图核实：fan-in 卡每条记录收窄到约 3 行（id 单行省略号 + 字段一行 + 时间戳一行），5 条记录的整卡高度较改动前明显变短；`/task/<id>` 页面 Runs 表格视觉不变。（待外部）
 
 ## Touches
 - packages/quay/src/serve-task.ts

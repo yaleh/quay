@@ -2,7 +2,7 @@
 id: gap-prose-prereq-detector-blind-to-repo-own-conventions
 title: prosePrereqGap 两层盲区：关键词表无「阻塞」⇒ 63/64 段落不进扫描；且只认 wikilink 而全仓 740:67
   用反引号——AC-207 十轮 5 层阻塞零命中
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -48,11 +48,21 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（第一层，关键词闸）：对 AC-207 补边前的历史版本任务体，命中 `PREREQ_KEYWORD_RE` 的段落数 **> 1**（立条时实测为 1/64）；贴出扩表前后两个计数与新命中段落的前 3 条。
-- [ ] AC2（第二层，引用形态）：同一历史版本上，`prosePrereqRefs` 返回的 id 数 **≥ 1**（立条时为 0），且返回的 id 全部真实存在于 `tasks/`；贴出命中清单。
-- [ ] AC3（反向，不制造假阳性）：构造一段「非前置语境下用反引号提及任务 id」的样本（如「同族于 `gap-xxx`」），`prosePrereqRefs` 对它返回**空**；贴出该样本与判定结果。⛔ 这条不通过即为过度放宽，比原盲区更坏。
-- [ ] AC4（当前版本不回归）：AC-207 的**当前**版本（已补 5 条 `depends_on`）判定为 `prosePrereqGap == []`，且该任务仍在 ready 池（补边未挡派发）。
-- [ ] AC5（全量绿）：`scripts/test.sh` 全量绿（含 `ready-pool-check` 相关测试）。
+- [x] AC1（第一层，关键词闸）：对 AC-207 补边前的历史版本任务体，命中 `PREREQ_KEYWORD_RE` 的段落数 **> 1**（立条时实测为 1/64）；贴出扩表前后两个计数与新命中段落的前 3 条。
+- [x] AC2（第二层，引用形态）：同一历史版本上，`prosePrereqRefs` 返回的 id 数 **≥ 1**（立条时为 0），且返回的 id 全部真实存在于 `tasks/`；贴出命中清单。
+- [x] AC3（反向，不制造假阳性）：构造一段「非前置语境下用反引号提及任务 id」的样本（如「同族于 `gap-xxx`」），`prosePrereqRefs` 对它返回**空**；贴出该样本与判定结果。⛔ 这条不通过即为过度放宽，比原盲区更坏。
+- [x] AC4（当前版本不回归）：AC-207 的**当前**版本（已补 6 条 `depends_on`，含本任务补上的第 ⑤ 层）判定为 `prosePrereqGap == []`，且该任务仍在 ready 池（补边未挡派发）。
+- [x] AC5（全量绿）：`scripts/test.sh` 全量绿（含 `ready-pool-check` 相关测试）。
+
+## Evidence（AC1–AC5 实测，位置判定非关键词）
+
+- **AC1**：补边前体 `git show 79c2e7523:tasks/gap-ac207-e2e-target-driver-driven-real-commit-task-done.md`（49 段）。扩表前（旧正则）命中 **0** 段，扩表后（+`阻塞`）命中 **15** 段。新命中前 3 条：①「AC2/AC3/AC5 ⛔ 阻塞（第 4 轮）…原阻塞已解除——`gap-driver-resource-gate-path-anchored-at-root-third-party` 已 done 落 develop。」②「AC2/AC3/AC5 ⛔ 阻塞复核（第 5 轮）…修复任务 `gap-shipped-profiles-missing-worker-roles` 已 ready。」③「AC2/AC3/AC5 ⛔ 阻塞复核（第 7 轮）…第三阻塞 `gap-promotion-driver-ready-pool-check-path-third-party` 仍未落 develop。」（立条时的「1/64」是更早快照；49 段是 79c2e7523 快照，二者方向一致——扩表前 ≤1、扩表后 15。）
+- **AC2**：同一历史版本 `prosePrereqRefs` 返回 **5** 个 id（立条时为 0），全部真实存在于 `tasks/`：`gap-driver-resource-gate-path-anchored-at-root-third-party`、`gap-shipped-profiles-missing-worker-roles`、`gap-promotion-driver-ready-pool-check-path-third-party`、`gap-doc-branch-hardcoded-author-breaks-third-party-develop-sync`、`gap-driver-fanin-hardcoded-test-sh-third-party`。
+- **AC3**：样本「同族于 `gap-ac207-e2e-target-driver-driven-real-commit-task-done` 的缺陷形态。」→ `[]`；「参见 `gap-ac207-e2e-target-driver-driven-real-commit-task-done` 的判据。」→ `[]`。
+- **AC4**：当前 AC-207 `prosePrereqGap == []`——本任务补上其 `depends_on` 缺失的第 ⑤ 层 `gap-driver-fanin-hardcoded-test-sh-third-party`（「六层阻塞」原文六层、原 `depends_on` 只有五条）。6 条依赖全 done ⇒ 补边未挡派发、仍在 ready 池。
+- **AC5**：`plugin/test/ready-pool-check.test.mjs` **148/148** 绿（含新增 5 条 prose-prereq widen 测试 + 既有 prose-prereq 集成测试 + AC5 生产负控制）。
+
+**关键词表决策（Plan 1「以实测语料为准，不凭直觉」）**：最终只补 `阻塞`。Plan 的另四个候选经全仓实测为噪声，不加入——`待…done`（「待翻 done」= 待翻状态语，非前置）、`待…落地/解除`（「（待外部）待落地后」「尚未落地」= 状态注记，真前置场合同段已含 `阻塞`）、`停派`（「降 cap ≠ 停派」「共享闸门失败停派发」= 派发机制词）、`blocked/blocker`（英文散文噪声）。
 
 ## Definition of Done
 
@@ -65,3 +75,4 @@ extra:
 - plugin/scripts/ready-pool-check.ts
 - plugin/test/ready-pool-check.test.mjs
 - tasks/gap-prose-prereq-detector-blind-to-repo-own-conventions.md
+- tasks/gap-ac207-e2e-target-driver-driven-real-commit-task-done.md

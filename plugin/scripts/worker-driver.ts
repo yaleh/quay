@@ -2990,9 +2990,9 @@ export interface MechanicalFanInOptions {
   scopedGateCacheFile?: string;
   /** fan-in 编排脚本目录（测试缝）；缺省 = <worktree>/plugin/scripts（自举：本分支的编排脚本自验）。 */
   scriptsDir?: string;
-  /** ff-merge TS 模块路径（测试缝）；缺省 = resolveKernelSrcModule(<worktree>, "fan-in/ff-merge.ts")
-   *  （源树自举：本分支的 ff-merge 模块自验，P2 —— fan-in-ff-merge.sh 的 TS 化产物；shipped 打平布局
-   *  退 <包根>/src/fan-in/ff-merge.ts —— gap-fanin-gate-event-store-path-shipped-unsafe）。 */
+  /** ff-merge TS 模块路径（测试缝，hermetic 仓库 worktree 无 packages/quay/src ⇒ 测试显式传 FF_MERGE_MODULE）；
+   *  生产不传 ⇒ 走静态字面量动态 import "packages/quay/src/fan-in/ff-merge.ts"（源树相对解析；shipped
+   *  bundle 由 coreSrcAliasPlugin 内联——gap-resolve-kernel-src-module-strip-types-node-modules）。 */
   ffMergeModule?: string;
   /** 权威 suite 状态载体 full-suite-state.json 的路径（D7 测试缝）；缺省 = <root>/.quay/full-suite-state.json。 */
   suiteStateFile?: string;
@@ -3464,6 +3464,9 @@ async function flipTaskDone(
  *  时返回 shipped 形路径，import 的 MODULE_NOT_FOUND 由调用方 best-effort 捕获（与现状一致，不在此抛）。
  *  gap-fanin-gate-event-store-path-shipped-unsafe：appendCompleteGateEvent 与 ffMergeModule 两处
  *  packages/quay/src 锚点原为仓库布局硬编码，shipped npm 包（打平布局）下 MODULE_NOT_FOUND 被静默吞。
+ *  ⚠️ gap-resolve-kernel-src-module-strip-types-node-modules：上述两调用点已改静态字面量动态 import
+ *  （shipped bundle 由 coreSrcAliasPlugin 内联，消除 node_modules 下 .ts 的 runtime import）。本函数
+ *  保留为布局解析单一真相源 + 测试锚点（AC4「双向不变」）；生产已无调用点。
  */
 export function resolveKernelSrcModule(base: string, rel: string): string {
   const sourcePath = path.join(base, "packages", "quay", "src", rel);
@@ -3484,11 +3487,14 @@ export async function appendCompleteGateEvent(
   actor = "quay-driver",
 ): Promise<{ ok: boolean; reason: string | null }> {
   try {
-    // Module 经 resolveKernelSrcModule 单一真相源解析（shipped 感知，⛔ 硬编码 packages/quay/src）：
-    // 源树 base=repoRoot() 含 packages/quay/src 命中；shipped 打平布局退 <包根>/src。⛔ 不用 root
-    // （测试里 root 是 scratch 空仓）——resolveKernelSrcModule 的 base 只判源树形、不写目标载体。
+    // gap-resolve-kernel-src-module-strip-types-node-modules: shipped npm 包把 packages/quay/ 打平到
+    // 包根，resolveKernelSrcModule 会解析到 <包根>/src/gate/gate-event-store.ts（node_modules 下的 .ts）
+    // ⇒ Node ≥23.7 拒剥 ⇒ ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING。改静态字面量动态 import（同
+    // send-to-session.ts 的 gap-ac205 手法）：源树相对路径直接解析；shipped bundle 由 build-plugin-dist.mjs
+    // 的 coreSrcAliasPlugin 重指并 INLINE（bundle:true），无 runtime 落 node_modules .ts 的 import。
+    // ⛔ 不用 pathToFileURL(计算路径)——esbuild 无法内联计算 specifier，shipped 下必挂。
     const { appendGateEvent } = await import(
-      /* @vite-ignore */ pathToFileURL(resolveKernelSrcModule(repoRoot(), "gate/gate-event-store.ts")).href
+      "../../packages/quay/src/gate/gate-event-store.ts"
     ) as { appendGateEvent: (logPath: string, event: unknown) => void };
     appendGateEvent(path.join(root, ".quay", "gate-events.jsonl"), {
       id: randomUUID(),
@@ -3712,8 +3718,9 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   const scriptsDir = opts.scriptsDir ?? resolveKernelScriptsDir();
   // P2 (gap-execution-loop-productization-p2-p4): the ff 持锁段 is now a TS module (packages/quay/
   // fan-in/ff-merge.ts), IMPORTED — ⛔ no shell-out to the retired bash fan-in-ff-merge.sh.
-  const ffMergeModule =
-    opts.ffMergeModule ?? resolveKernelSrcModule(worktree, "fan-in/ff-merge.ts");
+  // gap-resolve-kernel-src-module-strip-types-node-modules: 生产走静态字面量动态 import（源树相对解析，
+  // shipped bundle 由 coreSrcAliasPlugin 内联）；opts.ffMergeModule 测试缝保留（hermetic 仓库 worktree
+  // 无 packages/quay/src ⇒ 由测试显式传 FF_MERGE_MODULE）。
   // 编排脚本（anti-drift/classify/typecheck/ac-gate）：opts.scriptsDir 覆盖（hermetic 测试缝，⛔ 生产不用）
   // ⇒ <scriptsDir>/<name>.ts 直拼（带 --experimental-strip-types）；缺省 ⇒ kernelSiblingArgv（第三方项目无
   // plugin/scripts/，.ts 已 bundle 成 dist/*.js，resolveKernelSibling 回退到 .js 且不带 flag——
@@ -4033,8 +4040,10 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     const ffT0 = Date.now();
     appendFanInStepTrace(root, task, runId, "ff", "begin");
     const ffToken = randomUUID();
-    const { ffMerge: ffMergeFn } = await import(
-      /* @vite-ignore */ pathToFileURL(ffMergeModule).href
+    const { ffMerge: ffMergeFn } = await (
+      opts.ffMergeModule
+        ? import(/* @vite-ignore */ pathToFileURL(opts.ffMergeModule).href)
+        : import("../../packages/quay/src/fan-in/ff-merge.ts")
     ) as { ffMerge: (o: { task: string; root: string; mergeTarget: string; runId: string; attemptKey: string; worktree: string; suiteCapture: string; suiteState: string; lockWaitSecs: number; token: string; scriptsDir: string }) => Promise<{ code: number; stdout: string; stderr: string; landedSha: string | null }> };
     // attemptKey = perSuiteRunId (mfi-<task>-<epoch>-<rand>, generated once per fan-in): the per-dispatch
     // identity for the ff retry counter. ⛔ NOT runId (wk-prod-<epoch>) — that is the driver-process

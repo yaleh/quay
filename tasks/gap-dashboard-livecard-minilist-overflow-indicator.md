@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-livecard-minilist-overflow-indicator
 title: 循环脉搏卡 mini-list 截断加「+N 更多」提示（复用甘特图已有措辞）
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -45,17 +45,17 @@ mini-list 缺的正是这同一个惯用法的文字版。
    - 在飞任务数 = 0 时（空态分支）不受影响，既有测试不回归。
 
 ## Acceptance Criteria
-- [ ] 在飞任务数 > 3 时，`renderLiveCard` 输出的字符串包含 `+${N-3} 更多`（N 为实际在飞数），单测对
+- [x] 在飞任务数 > 3 时，`renderLiveCard` 输出的字符串包含 `+${N-3} 更多`（N 为实际在飞数），单测对
       N=5、N=4 两个具体值分别断言出精确数字。
-- [ ] 在飞任务数 ≤ 3 时，输出不包含"更多"字样，单测覆盖 N=3 边界。
-- [ ] 既有 `gap-dashboard-live-swimlane-fixed-lane-gantt-timeline.test.mjs` 等测试无回归红（mini-list
+- [x] 在飞任务数 ≤ 3 时，输出不包含"更多"字样，单测覆盖 N=3 边界。
+- [x] 既有 `gap-dashboard-live-swimlane-fixed-lane-gantt-timeline.test.mjs` 等测试无回归红（mini-list
       本体渲染逻辑未被替换，只是追加了一行）。
 
 ## Definition of Done
-- [ ] 代码改动落在 `packages/quay/src/serve-dashboard.ts` 的 `renderLiveCard` 内。
-- [ ] `packages/quay/test/gap-dashboard-livecard-minilist-overflow-indicator.test.mjs` 存在且按具体
+- [x] 代码改动落在 `packages/quay/src/serve-dashboard.ts` 的 `renderLiveCard` 内。
+- [x] `packages/quay/test/gap-dashboard-livecard-minilist-overflow-indicator.test.mjs` 存在且按具体
       数字断言，随 scoped gate 跑绿。
-- [ ] 生产 `/dashboard` 页面人工截图核实：在飞任务数 > 3 时循环脉搏卡文字列表底部出现「+N 更多 →」，
+- [ ] 生产 `/dashboard` 页面人工截图核实：在飞任务数 > 3 时循环脉搏卡文字列表底部出现「+N 更多 →」，（待外部）
       点击跳转 `/live` 且该页能看到被截断的那几条。
 
 ## Touches

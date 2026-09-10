@@ -90,6 +90,14 @@ export function renderLiveCard(
       ${title != null ? html`<div style="color:var(--color-text);font-size:0.75rem">${escapeHtml(title)}</div>` : ""}
     </div>`;
   }).join("");
+  // gap-dashboard-livecard-minilist-overflow-indicator: the mini-list is capped at 3 rows, but the card
+  // header shows the TRUE in-flight count — when more than 3 are in flight, append the same "+N 更多"
+  // idiom the gantt overflow badge uses (renderLiveGanttSvg) so the truncation reads as intentional, not
+  // as missing data. Link to /live, which lists every in-flight task. (The slice(0, 3) cap itself stays:
+  // concurrencyCap can be higher in other workspaces, and a hint scales better than widening the cap.)
+  const liveMiniListOverflow = live.inFlight.length > 3
+    ? html`<a href="/live" style="font-size:0.78rem;color:var(--color-accent);text-decoration:none">+${live.inFlight.length - 3} 更多 →</a>`
+    : "";
   // gap-dashboard-live-swimlane-fixed-lane-gantt-timeline: the once in-flight-only swimlane is now a
   // fixed-5-lane gantt that ALSO renders history (worker-outcome.jsonl) — merge the two sources and
   // greedily pack them onto FIXED_GANTT_LANES lanes, so throughput / idle gaps / long-tail blocking
@@ -107,7 +115,7 @@ export function renderLiveCard(
     <div style="font-weight:800">${escapeHtml(liveStateText)}</div>
     <p style="margin:0;font-size:0.8rem;opacity:0.8">在飞 ${live.inFlight.length} / 上限 ${live.concurrencyCap}</p>
     ${gantt}
-    ${live.status === "ok" && live.inFlight.length > 0 ? html`<div style="display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--color-divider);padding-top:6px">${liveMiniList}</div>` : ""}
+    ${live.status === "ok" && live.inFlight.length > 0 ? html`<div style="display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--color-divider);padding-top:6px">${liveMiniList}${liveMiniListOverflow}</div>` : ""}
     <a href="/live" style="font-size:0.8rem;color:var(--color-accent);text-decoration:none;margin-top:auto">查看 Live →</a>
   </div>`;
 }
@@ -1062,8 +1070,8 @@ export function renderFanInCardFromRecords(
         ? html`<div style="color:var(--color-neutral-700)">${relativeTime(key * 1000)}</div>`
         : "";
       return html`<div style="${i > 0 ? "border-top:1px solid var(--color-divider);padding-top:6px;" : ""}display:flex;flex-direction:column;gap:2px;font-size:0.75rem;line-height:1.4">
-        <a href="/task/${encodeURIComponent(r.task ?? "")}" style="color:var(--color-text);text-decoration:none;font-weight:600">${escapeHtml(r.task ?? "?")}</a>
-        <div style="color:var(--color-neutral-700)">${renderFanInCell(r.task ?? "", r, { showReason: false })}</div>
+        <a href="/task/${encodeURIComponent(r.task ?? "")}" title="${escapeHtml(r.task ?? "")}" style="color:var(--color-text);text-decoration:none;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.task ?? "?")}</a>
+        <div style="color:var(--color-neutral-700)">${renderFanInCell(r.task ?? "", r, { showReason: false, layout: "inline" })}</div>
         ${tsLine}
       </div>`;
     });

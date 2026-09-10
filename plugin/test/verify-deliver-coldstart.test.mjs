@@ -158,6 +158,32 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
     "AC-205 record: transcript_confirmed=false ⇒ refused (AC4 negative — send exit 0 but transcript not materialized)");
   assert.match(r.stdout, /ac205-record\(empty-host\) refused=1/,
     "AC-205 record: empty host ⇒ refused (fail-closed)");
+  // AC-234 (gap-ac234-web-third-party-renders-carriers-and-round-records): the --selfcheck must ALSO
+  // exercise the web-render content-count positive/negative controls (three counts derived from
+  // rendered HTML content — task/goal anchors + round-row anchors — never an HTTP status code) and the
+  // carrier-record writer's positive/negative controls (writes the six criterion fields verbatim;
+  // refuses zero-count / empty-host — fail-closed, AC4 负控制).
+  assert.match(r.stdout, /ac234-render-counts\(positive\) tasks=3 goals=2 rounds=5/,
+    "AC-234 positive: rendered HTML content yields tasks_rendered=3 goals_rendered=2 round_records_rendered=5 (content, not HTTP status)");
+  assert.match(r.stdout, /ac234-render-counts\(negative,empty-shell\) tasks=0 goals=0 rounds=0/,
+    "AC-234 negative: an empty-shell page yields 0/0/0 (the criterion can take false — 三计数缺一不可)");
+  assert.match(r.stdout, /ac234-record\(valid\) wrote=1 fields_ok=1/,
+    "AC-234 record: valid record written with the six criterion fields verbatim (tasks/goals/rounds as JSON integers)");
+  assert.match(r.stdout, /ac234-record\(zero-count\) refused=1/,
+    "AC-234 record: any zero count ⇒ refused (fail-closed)");
+  assert.match(r.stdout, /ac234-record\(empty-host\) refused=1/,
+    "AC-234 record: empty host ⇒ refused (fail-closed)");
+  // AC-232 (gap-ac232-downstream-goal-carrier-write-readback): the --selfcheck must ALSO exercise the
+  // downstream-goal-carrier write+read-back record writer's positive/negative controls — writes the three
+  // criterion fields verbatim (goal_write_ok/goal_read_back_ok as JSON literals, goal_records as a JSON
+  // integer) + top-level build_sha; truthfully writes false/0 when the write fails or read-back is empty
+  // (AC4 负控制 — 写调用 0 与空文件同形, the criterion can take false); refuses empty-host (fail-closed).
+  assert.match(r.stdout, /ac232-record\(valid\) wrote=1 fields_ok=1/,
+    "AC-232 record: valid record written with goal_write_ok=true + goal_read_back_ok=true + goal_records=5 + build_sha");
+  assert.match(r.stdout, /ac232-record\(write-failed\) neg_ok=1/,
+    "AC-232 record: write-failed ⇒ goal_write_ok=false still written (缺件如实非静默 — criterion can take false)");
+  assert.match(r.stdout, /ac232-record\(empty-host\) refused=1/,
+    "AC-232 record: empty host ⇒ refused (fail-closed, 缺值≠合格)");
   // gap-verify-coldstart-does-not-configure-target-profiles: the --selfcheck must ALSO exercise the
   // target-profiles configuration controls — derived (driving profiles worker-default written into the
   // target), no-source (not-configured, distinct — 硬规则 3b), override (--target-launcher/model win),
@@ -170,6 +196,17 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
     "target-profiles override: --target-launcher/model win over derivation");
   assert.match(r.stdout, /target-profiles\(resolve\) explicit=1 buildroot=1/,
     "target-profiles resolve: --driving-profiles explicit > --build-root");
+  // AC-207 carrier record (gap-ac207-e2e-target-driver-driven-real-commit-task-done): the AC-207
+  // record writer must append the seven criterion fields verbatim (produced_by_driver=true literal,
+  // gate_events>0, task_status=done, commit_sha/task_id non-empty, top-level build_sha via the GOAL-009
+  // anchor) and refuse produced_by_driver=false / gate_events=0 — the criterion's `is True` / `>0`
+  // predicates must be able to take false (硬规则 3b / 硬规则 4).
+  assert.match(r.stdout, /ac207-record\(valid\) wrote=1 fields_ok=1/,
+    "positive control: a valid AC-207 record (all seven criterion fields) is written");
+  assert.match(r.stdout, /ac207-record\(produced_by_driver=false\) refused=1/,
+    "negative control: produced_by_driver=false is refused (criterion `is True` can take false)");
+  assert.match(r.stdout, /ac207-record\(gate_events=0\) refused=1/,
+    "negative control: gate_events=0 is refused (criterion `>0` can take false)");
 });
 
 test("AC1 — --selfcheck is hermetic: it does not touch a real install and runs offline", () => {
