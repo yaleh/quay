@@ -1,0 +1,35 @@
+// legacy-anchor-resolution-check.ts — 同一【独立构造】检查器的【保真】形态（与 kernel-sibling 无关）：
+// 扫描面不变（plugin/scripts + packages/legacy-mod/src），但本形态【加了】 L3 cross-package 模式，
+// 引用 "packages" 段 ⇒ 能标记 packages/… 锚定 ⇒ 计数可被证伪 ⇒ 保真。
+//
+// 判定（按位置，硬规则 2）：
+//   L1 naive-__dirname — `path.join(__dirname, "<name>.<ext>")`。
+//   L2 target-root    — `path.join(<root>, "plugin", "scripts", "<name>.<ext>")`。
+//   L3 cross-package  — `path.join(<root>, "packages", "<pkg>", "src", …)`。
+//
+// Run: node … legacy-anchor-resolution-check.ts --root . --json
+
+import fs from "node:fs";
+import path from "node:path";
+
+const SCRIPT_EXT = "(?:ts|js|mjs)";
+
+export const L1_NAIVE_DIRNAME_RE = new RegExp(
+  `path\\.(join|resolve)\\(\\s*__dirname\\s*,\\s*["']([A-Za-z0-9_.-]+\\.${SCRIPT_EXT})["']`,
+  "g",
+);
+
+export const L2_TARGET_ROOT_RE = new RegExp(
+  `path\\.(join|resolve)\\(\\s*[A-Za-z_$][A-Za-z0-9_$]*\\s*,\\s*["']plugin["']\\s*,\\s*["']scripts["']\\s*,\\s*["']([A-Za-z0-9_.-]+\\.${SCRIPT_EXT})["']`,
+  "g",
+);
+
+export const L3_CROSS_PACKAGE_RE = new RegExp(
+  `path\\.(join|resolve)\\(\\s*[A-Za-z_$][A-Za-z0-9_$]*\\s*,\\s*["']packages["']\\s*,\\s*["'][A-Za-z0-9_.-]+["']\\s*,\\s*["']src["']\\s*,\\s*(?:["'][^"']*["']\\s*,\\s*)*["']([A-Za-z0-9_.-]+\\.ts)["']`,
+  "g",
+);
+
+const SCAN_ROOTS = [
+  { dir: "plugin/scripts", rel: "plugin/scripts" },
+  { dir: "packages/legacy-mod/src", rel: "packages/legacy-mod/src" },
+];

@@ -1,0 +1,12 @@
+{"fixture":"pre","n":1,"at":"2026-09-10T12:43:28.874Z","wallMs":45221,"exitCode":0,"stdout":"{\"verdict\":\"faithful\"}"}
+{"fixture":"pre","n":2,"at":"2026-09-10T12:44:24.654Z","wallMs":55778,"exitCode":0,"stdout":"{\"verdict\":\"faithful\"}"}
+{"fixture":"pre","n":3,"at":"2026-09-10T12:45:56.600Z","wallMs":91946,"exitCode":0,"stdout":"{\"verdict\":\"faithful\"}"}
+{"fixture":"pre","n":4,"at":"2026-09-10T12:47:08.684Z","wallMs":72084,"exitCode":0,"stdout":"{\"verdict\":\"faithful\"}"}
+{"fixture":"pre","n":5,"at":"2026-09-10T12:47:37.364Z","wallMs":28680,"exitCode":0,"stdout":"{\"verdict\":\"faithful\"}"}
+{"fixture":"pre","n":6,"at":"2026-09-10T12:48:14.177Z","wallMs":36813,"exitCode":0,"stdout":"{\"verdict\":\"faithful\"}"}
+{"fixture":"post","n":1,"at":"2026-09-10T12:48:43.842Z","wallMs":29654,"exitCode":0,"stdout":"{\"verdict\":\"faithful\"}"}
+{"fixture":"post","n":2,"at":"2026-09-10T12:49:39.756Z","wallMs":55913,"exitCode":0,"stdout":"{\"verdict\":\"faithful\"}"}
+{"fixture":"post","n":3,"at":"2026-09-10T12:50:46.821Z","wallMs":67065,"exitCode":0,"stdout":"Both falsifiability paths verified:\n\n1. **Fail-closed (NOT-EVALUATED ≠ pass):** `--root /nonexistent-dir-xyz` → `status:\"not-evaluated\"`, **exit 3** (non-zero). A vanished/unreadable scan surface makes the criterion false, not green — hard rule 3b satisfied (distinct value, not \"pass\").\n\n2. **RED path reachable:** `scanText` on synthetic input flags all 4 forms (naive-`__dirname`, target-root, cross-package, template-string) = 4 violations. The checker mechanically enumerates; a reintroduced naive sibling anchor would make the criterion exit 1.\n\nThe criterion additionally goes false if `test -f` fails (file missing). It is a real measurement with three independent false states (file-absent → 1, violations → 1, surface-empty → 3), currently green (0 violations) because the migration is complete, not because the check cannot fail.\n\n{\"verdict\":\"faithful\"}"}
+{"fixture":"post","n":4,"at":"2026-09-10T12:51:36.844Z","wallMs":50023,"exitCode":0,"stdout":"{\"verdict\":\"faithful\"}"}
+{"fixture":"post","n":5,"at":"2026-09-10T12:52:10.158Z","wallMs":33314,"exitCode":0,"stdout":"{\"verdict\":\"faithful\"}"}
+{"fixture":"post","n":6,"at":"2026-09-10T12:54:05.440Z","wallMs":115282,"exitCode":0,"stdout":"{\"verdict\":\"faithful\"}"}
