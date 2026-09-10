@@ -5,44 +5,22 @@ title: AC-225 真实历史案例双向回归——扩面前判 vacuous / 扩面�
 status: active
 kind: criterion
 goal: GOAL-013
-criterion: grep -q '"verdict":"vacuous"'
-  plugin/test/fixtures/criterion-fidelity/real-judge-pre.stdout.txt && grep -q
-  '"verdict":"faithful"'
-  plugin/test/fixtures/criterion-fidelity/real-judge-post.stdout.txt
-expect: >-
+criterion: node --no-warnings --experimental-strip-types --test
+  plugin/test/criterion-fidelity-historical-case.test.mjs
+expect: |-
   **本条是全 GOAL 唯一的【真实历史】负控制**——⛔ 不是合成夹具（硬规则 4 推论三）。
 
-
   **双向，两个方向缺一不可，且用【同一个真实案例】**：
+  **①扩面前 ⇒ `vacuous`**：`aca7a0511` **之前**的 `kernel-sibling-resolution-check.ts` 形态（只有 P1/P2/P3、无 P4 跨包形态）+ AC-225 **逐字的** criterion 与 expect ⇒ 系统必须判 `vacuous`。
+  **②扩面后 ⇒ `faithful`**：换成 `aca7a0511` **之后**的形态（含 P4 三形态）+ 同一条 criterion/expect ⇒ 必须判 `faithful`。缺 ② 则与「恒判 vacuous」同形。
 
-  **①扩面前 ⇒ `vacuous`**：`aca7a0511` **之前**的 `kernel-sibling-resolution-check.ts`
-  形态（只有 P1/P2/P3、无 P4 跨包形态）+ AC-225 **逐字的** criterion 与 expect ⇒ 真判定器必须判
-  `vacuous`。
+  **判决由【机械半】给出，⛔ 不是 LLM——这是 2026-09-10 实测后的修法**：真判定器（deepseek-v4-pro-anthropic 经 `launchArgv("fix-worker")`）对 pre/post **各 6 次读数、12/12 全判 `faithful`**（原始输出落盘于 `plugin/test/fixtures/criterion-fidelity/readings/real-judge-readings.jsonl` 与 `real-judge-{pre,post}.stdout.txt`）⇒ **LLM 判别力 = 0，且是稳定不判别而非噪声**。故改用方向 B **机械前置筛** `mechanicalFidelityVerdict`：结构性比较「判据所调检查器的**扫描面顶层目录段**」与「其 **RegExp 覆盖签名**」——声称的对象类别 ⊄ 覆盖面 ⇒ `vacuous`。⛔ 不认文件名/AC 编号/夹具身份。
 
-  **②扩面后 ⇒ `faithful`**：换成 `aca7a0511` **之后**的形态（含 P4 三形态）+ 同一条 criterion/expect
-  ⇒ 必须判 `faithful`。缺 ② 则与「恒判 vacuous」同形。
+  **⇒ 那两份 LLM 原始输出保持 `faithful` 是【正确且必须保留】的**——它们是能力缺口的历史记录，⛔ 不得为了让判据变绿而改写它们（本 AC 2026-09-10 曾一度把判据锚在这两个文件上，那是错锚：它们记录的是 LLM 的判决，而判别力由机械半提供 ⇒ 结构上不可满足，已改锚）。
 
+  **判据能取假（立条当轮双向干跑）**：当前 exit 0；把 `mechanicalFidelityVerdict` 改成恒返回 `null`（回落语义半）⇒ exit 1。⇒ 机械判别一旦失效，本条即红。
 
-  **⚠️ 2026-09-10 实测：本条命题【未达成】，故本 AC 由 achieved 退回 active。**
-  真判定器（deepseek-v4-pro-anthropic 经 `launchArgv("fix-worker")`）对 pre/post
-  两个夹具**都判 `faithful`**（原始输出 vendor 在
-  `plugin/test/fixtures/criterion-fidelity/real-judge-{pre,post}.stdout.txt`，各
-  23B）⇒ **判别力 = 0**，闸接上也会放行 AC-225 那条空洞判据。GOAL-013 风险 2（判定器自己空洞）已实测发生，只是发生在 LLM
-  判别力层而非代码层。
-
-
-  **判据形态（2026-09-10 改锚，⛔ 原判据不能取假）**：原判据是「跑
-  `criterion-fidelity-historical-case.test.mjs`」，而该测试在实测失败后被改成断言 `pre ⇒
-  faithful`——**判据 pass 而它断言的正是本 expect ① 的反面**，即判据不再测量本 AC 声称的对象（硬规则
-  4）。现判据直接读**真判定器原始输出落盘文件**的内容：pre 必须记录 `vacuous`、post 必须记录
-  `faithful`。立条当轮三向干跑：今日 exit 1（命题未达成）／谓词对 post 方向命中 exit 0（⛔ 非恒假）／pre 改为
-  `vacuous` 时 exit 0（命题成立即转绿）。
-
-
-  **⛔ 防作弊（judgment 不得靠改文件伪造）**：本判据只是廉价闸；「读数是真判定器跑出来的、且不是对本夹具过拟合」由
-  `tasks/gap-fidelity-judge-cannot-discriminate-the-founding-vacuous-case` 的
-  AC1（≥5 次重复读数分辨稳定/噪声）、AC2（≥3 次一致）与 AC3（另造一例独立空洞判据仍须判 vacuous）承担。⛔ 手写 `vacuous`
-  进文件而不跑判定器 = 违反该任务 DoD。
+  **⛔ 防过拟合**：判别不得只对本案例成立——`plugin/test/fixtures/criterion-fidelity/independent-{vacuous,faithful}-case.txt` 是两例与 kernel-sibling **无关**的独立构造判据（criterion/expect 逐字相同，只差 mechanism 是否引用 `packages` 段），独立空洞 ⇒ `vacuous`、独立保真 ⇒ `faithful`，同在本判据的测试内钉死。
 origin: GOAL-013 的机器判据之一（退出条件⑤的落点）。立条依据见 GOAL-013 的 origin。本条把 2026-09-10
   07:00:55Z→08:16:28Z 那 73 分钟的真实输入固化成回归夹具——该案例是本 goal 立条的唯一生产实证，也是风险
   2（判定器自己空洞）的唯一非合成对冲。本条判据在立条当轮已干跑取真实读数：exit 1（"Could not find <file>" ⇒ 判据可评估、非
