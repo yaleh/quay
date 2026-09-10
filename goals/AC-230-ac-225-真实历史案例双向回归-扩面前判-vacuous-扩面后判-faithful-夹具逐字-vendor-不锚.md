@@ -2,7 +2,7 @@
 id: AC-230
 title: AC-225 真实历史案例双向回归——扩面前判 vacuous / 扩面后判 faithful，夹具逐字 vendor ⛔ 不锚 commit
   SHA（GOAL-013 退出条件⑤②）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-013
 criterion: node --no-warnings --experimental-strip-types --test
@@ -33,4 +33,11 @@ origin: GOAL-013 的机器判据之一（退出条件⑤的落点）。立条依
   07:00:55Z→08:16:28Z 那 73 分钟的真实输入固化成回归夹具——该案例是本 goal 立条的唯一生产实证，也是风险
   2（判定器自己空洞）的唯一非合成对冲。本条判据在立条当轮已干跑取真实读数：exit 1（"Could not find <file>" ⇒ 判据可评估、非
   spawn 失败），符合硬规则 4c。判据只引用不会自行回退的量——代码状态与套件绿红。
+activatedAt: 2026-09-10T10:07:23.900Z
+statusLog:
+  - at: 2026-09-10T10:07:23.901Z
+    from: draft
+    to: active
+    actor: cli:human-ruling-2026-09-10
+    reason: 人 2026-09-10 授权执行（单次授权）：立 GOAL-013 判据保真性闸
 ---
