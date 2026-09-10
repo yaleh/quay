@@ -434,8 +434,19 @@ export function propagateDocBranchToDevelop(root: string): boolean {
 // ⛔ 非「同步成功」同形，硬规则 3b）。语义兜底（分叉后怎么融）归父任务 gap-doc-develop-sync-semantic-
 // conflict-resolution 的 semanticSyncDocToDevelop。
 
-/** doc 工作分支名（主检出所在；develop = 权威基线）。 */
+/** doc 工作分支名（主检出所在；develop = 权威基线）。⚠️ 这是【本仓库自己】的命名约定，⛔ 不是协议的
+ *  固定部分——第三方项目的工作分支可以是任意名（main 等）。shipped 代码里凡以它作缺省同步对象的处所都
+ *  已改为运行时派生（resolveDocBranch），本常量仅作 git 读分支失败时的兜底缺省（gap-doc-branch-
+ *  hardcoded-author-breaks-third-party-develop-sync）。 */
 export const DOC_BRANCH = "author";
+
+/** 运行时派生 doc 工作分支名：默认 = 当前 checked-out 分支（主检出所在），⛔ 不再硬编码 "author"。
+ *  gap-doc-branch-hardcoded-author-breaks-third-party-develop-sync：第三方项目工作分支非 author 时，
+ *  硬编码恒 no-refs ⇒ 晋升写入对派发永久不可见。git 读分支失败 ⇒ 兜底 DOC_BRANCH（向后兼容；⛔ 不
+ *  新增配置面——运行时派生已是正确的通用默认，不为「可配置」过度设计）。 */
+export function resolveDocBranch(root: string): string {
+  return currentBranchName(root) ?? DOC_BRANCH;
+}
 
 /** `git rev-list --count <from>..<to>` 的提交数（to 独有、from 未含）。git 出错 / 非数 ⇒ null
  *  （读不懂 ≠ 0，⛔ 硬规则 6 不把读失败伪装成「无分叉」）。 */
@@ -454,7 +465,7 @@ function revCountAhead(root: string, from: string, to: string): number | null {
 
 /** 分叉 guard：doc 分支有 develop 未含的提交（`git rev-list --count develop..<docBranch>` > 0）⇒ 分叉
  *  （ff-only 无法同步 ⇒ 报红，返回 true）。读失败 ⇒ null（读不懂 ≠ 无分叉）。 */
-export function docBranchForkedFromDevelop(root: string, docBranch: string = DOC_BRANCH): boolean | null {
+export function docBranchForkedFromDevelop(root: string, docBranch: string = resolveDocBranch(root)): boolean | null {
   const ahead = revCountAhead(root, "develop", docBranch);
   return ahead === null ? null : ahead > 0;
 }
@@ -472,7 +483,7 @@ export function docBranchForkedFromDevelop(root: string, docBranch: string = DOC
  *  的 DOC_BRANCH 常量陈旧时，这是唯一的观测信号（⛔ 裸 return 静默则与「无事发生」同形，硬规则 3b，
  *  gap-sync-develop-to-doc-not-doc-silent-noop）。
  *  already 不写（no-op，每轮写会刷日志）。 */
-export function syncDevelopToDoc(root: string, docBranch: string = DOC_BRANCH): string {
+export function syncDevelopToDoc(root: string, docBranch: string = resolveDocBranch(root)): string {
   const cur = currentBranchName(root);
   if (cur === null) {
     writeDocDevelopSyncEvent(root, { event: "doc-develop-sync-ff-error", phase: "read-branch" });
@@ -550,16 +561,17 @@ function revParse(root: string, ref: string): string | null {
 }
 
 /** 双向分歧检测同步（gap-sync-trigger-divergence-detection-bidirectional）：读两 ref 不同即触发双向
- *  同步（develop→doc 后 doc→develop）。返回独立取值：
+ *  同步（develop→doc 后 doc→develop）。`docBranch` 缺省 = 运行时派生的当前 checked-out 分支
+ *  （resolveDocBranch，⛔ 非硬编码 "author"——第三方项目工作分支任意命名）。返回独立取值：
  *   - "no-refs" — 读 ref 失败 / 双分支未建（非 git / bare test repo）⇒ 无同步对象（⛔ 非「无分歧」）
  *   - "already" — 两 ref 相同 ⇒ 无分歧（no-op，不写事件）
  *   - "synced"  — 分歧 ⇒ 双向同步已执行 + 落痕 doc-develop-sync-bidirectional 事件 */
-export function syncDocDevelopBidirectional(root: string): string {
-  const docSha = revParse(root, DOC_BRANCH);
+export function syncDocDevelopBidirectional(root: string, docBranch: string = resolveDocBranch(root)): string {
+  const docSha = revParse(root, docBranch);
   const developSha = revParse(root, "develop");
   if (docSha === null || developSha === null) return "no-refs";
   if (docSha === developSha) return "already";
-  const developToDoc = syncDevelopToDoc(root);
+  const developToDoc = syncDevelopToDoc(root, docBranch);
   const docToDevelop = propagateDocBranchToDevelop(root);
   writeDocDevelopSyncEvent(root, {
     event: "doc-develop-sync-bidirectional",
