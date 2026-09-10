@@ -45,7 +45,10 @@
 #   判据能取假：冷启动没做/没活 ⇒ AC88_VERIFY=not-live（非恒绿）。
 #
 # 运行形态：本脚本在【目标宿主上】运行（B/C 机 local 模式）；跨主机驱动由 develop-deliver-tgz.sh
-#   --verify-coldstart 承担（scp 本脚本 + .tgz 过去执行，再取回证据）。
+#   --verify-coldstart 承担：scp 本脚本 + 两个 .tgz 到目标机 → 远端以显式 --ac89 <远端临时路径>
+#   执行（--build-sha/--build-date/--host 由驱动方传入）→ scp 该证据文件回本地 → 追加进驱动方仓库
+#   .quay/productization-verification.jsonl（按 (ts,ac,host,project_root) 去重；远端无证据 ⇒
+#   NOT-EVALUATED + 非零退出，硬规则 3b）。
 #
 # 产物 (AC5，可机械核对 + 达成条件 = 该 build 的 commit sha 新于 2026-08-16 阶段切换)：
 #   1) stdout 可解析字段（STEP1_OK / STEP2_OK / L1_* / L2_* / COLDSTART_LIVE / AC5_OK / AC88_VERIFY）
