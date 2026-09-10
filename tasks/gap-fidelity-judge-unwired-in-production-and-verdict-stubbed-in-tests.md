@@ -2,7 +2,7 @@
 id: gap-fidelity-judge-unwired-in-production-and-verdict-stubbed-in-tests
 title: 保真性闸在生产里从不触发（judge 未接线 ⇒ fail-open 且字段缺失与「判过且放行」同形），且 AC-230 的历史判决由测试
   stub 自算而非真判定器给出
-status: ready
+status: done
 labels:
   - gap
   - defect
