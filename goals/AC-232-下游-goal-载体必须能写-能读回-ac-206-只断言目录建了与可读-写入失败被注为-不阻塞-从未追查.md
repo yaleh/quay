@@ -1,7 +1,7 @@
 ---
 id: AC-232
 title: 下游 goal 载体必须能写、能读回——AC-206 只断言目录建了与可读，写入失败被注为「不阻塞」从未追查
-status: draft
+status: active
 kind: criterion
 goal: GOAL-009
 criterion: >-
@@ -73,4 +73,15 @@ origin: >-
 
 
   【类别纪律】判据只引用不会自行回退的量——append-only 载体里的历史事实，⛔ 不含进程存活/远程主机可达性。
+activatedAt: 2026-09-10T14:05:04.892Z
+statusLog:
+  - at: 2026-09-10T14:05:04.892Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-10T14:05:04.892Z
 ---
