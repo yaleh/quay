@@ -2,7 +2,7 @@
 id: gap-verify-coldstart-does-not-configure-target-profiles
 title: verify-deliver-coldstart 不给目标项目配宿主模型栈——每个全新 quay-init 验证项目的 worker
   必然秒死，e2e 永远走不到 fan-in
-status: todo
+status: ready
 labels:
   - gap
   - defect
