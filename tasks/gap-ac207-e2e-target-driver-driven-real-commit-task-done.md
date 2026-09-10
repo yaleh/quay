@@ -1,7 +1,7 @@
 ---
 id: gap-ac207-e2e-target-driver-driven-real-commit-task-done
 title: 端到端：目标项目自己的 *-drivers 驱动出真实开发提交且任务翻 done，落 ac=GOAL-009-AC-207 记录（AC-207）
-status: needs-human
+status: ready
 labels:
   - gap
   - delivery-critical
@@ -10,10 +10,12 @@ parent: null
 children: []
 extra:
   schema: execution
-  needs_human_cause: e2e landed 但 gate_events=0（appendCompleteGateEvent
-    shipped-unsafe MODULE_NOT_FOUND，已立
-    gap-fanin-gate-event-store-path-shipped-unsafe）+ 安装物陈旧（缺
-    resolveDocBranch）——两缺陷均在本任务 Touches 之外
+  needs_human_cause: （已解除 2026-09-10）缺陷 A（gate_events=0 / appendCompleteGateEvent
+    shipped-unsafe MODULE_NOT_FOUND）已由
+    gap-fanin-gate-event-store-path-shipped-unsafe done 落
+    develop（resolveKernelSrcModule 双布局解析）；缺陷 B（安装物陈旧 + 分支分叉）已由 develop tip
+    efa0bd33e 现 build 重装 orangevps /tmp/ac207-prefix + 两 driver
+    重启解除（develop..main = 0）。人 2026-09-10 授权 retreat 回 ready 续验 AC2/AC3/AC5。
 goal_ac: AC-207
 ---
 ## Proposal
@@ -102,3 +104,21 @@ AC1/AC4 实现已 done 不变；AC2/AC3/AC5 仍阻塞，需修该缺陷（新任
 ③ 缺陷 B（残留）——安装物陈旧：安装物 worker-driver.js `resolveDocBranch` = 0 命中（doc-branch 修复落 develop 未重装）；`.quay/doc-develop-sync.jsonl` 仍 `cur:main expected:author` ⇒ main=needs-human vs develop=done 分叉 ⇒ criterion task_status 读数（工作树=main）≠ done。
 
 ⇒ AC2 直接量已读但 gate_events=0、task_status 不一致；AC3 生产载体 `.quay/productization-verification.jsonl` 仍 0 条 `ac="GOAL-009-AC-207"`；AC5 判据干跑仍 exit 1。AC1/AC4 已 done 不变。两缺陷均需外部修复（缺陷 A 新任务 + 缺陷 B 重装）⇒ 本任务翻 needs-human 停派。
+
+---
+
+**第 10 轮两阻塞解除记录 + 续做现场说明（人 2026-09-10 授权 retreat needs-human→todo→ready，续验 AC2/AC3/AC5）**
+
+**解除证据（全部按位置实测核实，非采信自述）**：
+
+- **缺陷 A（gate_events=0）已修并已装**：修复任务 `gap-fanin-gate-event-store-path-shipped-unsafe` 已 **done** 并落 develop。develop 上 `worker-driver.ts` 已引入 `resolveKernelSrcModule(base, rel)`——双布局解析（源树 `packages/quay/src/**` / shipped 包根 `src/**`）；`appendCompleteGateEvent` 与 `ffMergeModule` 两处锚点均已改走它。残留的 1 处 `"packages","quay","src"` 字面量位于该解析器**内部**（是它必须认识的源树分支），合法、非遗漏。
+- **缺陷 B（安装物陈旧 + 分支分叉）已解除**：已从 develop tip `efa0bd33e38039895185d5166ae119d5574bdf78` 现 build 并重装 orangevps 的 `/tmp/ac207-prefix`，逐项核实新装物含四层修复——`resolveKernelSrcModule` 4 处 / `resolveDocBranch` 4 处 / `test_command` 退化 3 处 / resource-gate 锚 pluginRoot 1 处。两个 driver 已用新装物重启（supervisor pid 3066484 / 3066670）。分支分叉已自愈：`git rev-list --count develop..main` = **0**，工作树上 `e2e-verify-207` 现读 `done`，同步事件逐字 `{"event":"doc-develop-sync-bidirectional","docToDevelop":"true"}`。
+
+**⚠️ 续做时必须知道的两个现场事实（执行者先读这两条再动手）**：
+
+1. **`gate-events.jsonl` 目前不存在，且不会自行出现**——写它的 `appendCompleteGateEvent` **只在 fan-in 期间执行**，而 orangevps 现有第三方项目 `/home/yale/work/ac207-third-party` 的唯一任务 `e2e-verify-207` **已 done**，不会再触发 fan-in。⇒ 要拿到 `gate_events > 0`，**必须再驱动一个任务走一遍修好后的 fan-in**，不能等它自己出现。
+2. **重跑必须指向一个全新的第三方项目目录（新的 `--root`）**——⛔ **不要复用 `/home/yale/work/ac207-third-party`**：`verify-deliver-coldstart.sh` 的 `step5_e2e` 会 `task create e2e-verify-207`，而该 id 在旧项目里**已存在且已 done**，create 会失败并使该步 fail-closed 返回。全新目录可让 install→quay-init→建任务→自驱→落账整条链在**修好后的产物**上完整跑一遍。
+
+**⚠️ 证据取回纪律（AC-207 的 goal 记录 body 已逐字写入「执行说明：跑成功之后必须把证据取回家」）**：远端（host B/C）产出的记录**不会自动回到本机载体**——必须**显式取回**本机 `.quay/productization-verification.jsonl` 并**复跑判据确认**（AC5 干跑 exit 1 → exit 0）。⛔ 不得手写/注入记录；⛔ 不得搬运出自坏构建的记录（安装物必须是当前 develop tip 现 build 的那一份）。
+
+⛔ **本次 retreat 不勾选任何 AC**——AC2/AC3/AC5 仍须真实 e2e 复跑验证后方可勾选；本段仅记录阻塞解除与现场事实。
