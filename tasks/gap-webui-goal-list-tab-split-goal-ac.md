@@ -85,35 +85,35 @@ tableW 868 / mainW 900，rowCount 98（12 GOAL + 86 AC，`ls goals/*.md` 现读�
 
 ## Acceptance Criteria
 
-- [ ] AC1 生产载体读数(取假:改动前 `/goal` 单页含 `kind=goal` 与 `kind=criterion` 两种行,
+- [x] AC1 生产载体读数(取假:改动前 `/goal` 单页含 `kind=goal` 与 `kind=criterion` 两种行,
       表头 11 列):加载 `/goal`(无参数),断言页面渲染的表格 `<th>` 数 == 7 且不含
       `criterion`/`recent verdict`/`kind`;渲染的所有行 `kind` 均为 `goal`(枚举打印不符的行)。
-- [ ] AC2 加载 `/goal?kind=criterion`,断言表格 `<th>` 数 == 8 且不含 `AC 达成`/`kind`,含新增的
+- [x] AC2 加载 `/goal?kind=criterion`,断言表格 `<th>` 数 == 8 且不含 `AC 达成`/`kind`,含新增的
       `goal` 列;所有行 `kind` 均为 `criterion`。
-- [ ] AC3 挤压问题实测收窄(能取假,对照 AC1 现场基线数字):在两个 tab 分别测最长内容单元格的
+- [x] AC3 挤压问题实测收窄(能取假,对照 AC1 现场基线数字):在两个 tab 分别测最长内容单元格的
       `scrollWidth - clientWidth`(取当前 12 条 GOAL / 86 条 AC 里最长的 title 行),断言差值相对
       改动前基线(title 336-156=180px)**下降至少 50%**;并断言**没有任何 `<th>` 的
       `scrollWidth > clientWidth`**(取假:改动前 `recent verdict`/`last progress`/`first
       evidence`/`AC 达成`/`挂靠任务` 五个表头均被截断)。
-- [ ] AC4 `?goal=` 筛选在 Criteria tab 有可点入口(M3 的 UI 化):断言 Criteria tab 每一行的
+- [x] AC4 `?goal=` 筛选在 Criteria tab 有可点入口(M3 的 UI 化):断言 Criteria tab 每一行的
       `goal` 列渲染为指向 `/goal?kind=criterion&goal=<该行goal id>` 的 `<a>`;再断言 Goals tab
       每一行的"AC 达成"或"挂靠任务"单元格同样渲染为指向 `/goal?kind=criterion&goal=<该行id>`
       的 `<a>`(枚举一行验证跳转后 `<tr>` 数与该 goal 名下 AC 数一致)。
-- [ ] AC5 draft 跨 tab 可见性(硬性,取假用真实构造的负控制):用 `goal-store.ts write` 或
+- [x] AC5 draft 跨 tab 可见性(硬性,取假用真实构造的负控制):用 `goal-store.ts write` 或
       MCP 构造一条 `status: draft` 的 AC(挂在某个 GOAL 下),加载 Goals tab(默认),断言页面
       出现"另有 N 条 AC 待裁定"提示且链到 `/goal?kind=criterion&status=draft`;反向构造一条
       `status: draft` 的 GOAL,加载 Criteria tab,断言出现对称的"另有 N 条 GOAL 待裁定"提示。
       两个方向都断言,只测一侧不算通过。
-- [ ] AC6 性能不变式不倒退(取假,回归 `gap-webui-goal-list-sort-and-column-set` AC7 的判据):
+- [x] AC6 性能不变式不倒退(取假,回归 `gap-webui-goal-list-sort-and-column-set` AC7 的判据):
       对 `/goal` 与 `/goal?kind=criterion` 各发一次请求,断言单次请求内 `client.goalList()`
       调用次数 **== 1**、`ledgerEvidenceMap` 调用次数 **== 1**(spy 计数);且两个 tab 的 p50
       响应时间均 **<= 改动前 `/goal` 基线**(现读一次作为基线,不用旧文档里的历史数字)。
-- [ ] AC7 Goals tab 默认排序(取假,改动前是纯 id 字典序):构造一组含 active/draft/achieved 的
+- [x] AC7 Goals tab 默认排序(取假,改动前是纯 id 字典序):构造一组含 active/draft/achieved 的
       GOAL 混合数据,加载 Goals tab 无 `?sort=` 参数,断言渲染顺序中所有 `status:active` 行排在
       所有非-active 行之前;`sort=`/`dir=` 显式参数仍可覆盖默认序(复用现有机制,断言不回归)。
-- [ ] AC8 站内出链不回归:断言 `serve-dashboard.ts` 渲染的 `/goal` 链接("查看 Goals →")落地页
+- [x] AC8 站内出链不回归:断言 `serve-dashboard.ts` 渲染的 `/goal` 链接("查看 Goals →")落地页
       确为 Goals tab(即等价于 `?kind=goal` 的渲染结果,而非旧的"All"合并视图)。
-- [ ] AC9 `bash scripts/test.sh --for-task gap-webui-goal-list-tab-split-goal-ac` 退出码 0。
+- [x] AC9 `bash scripts/test.sh --for-task gap-webui-goal-list-tab-split-goal-ac` 退出码 0。
 
 ## Definition of Done
 
@@ -129,4 +129,7 @@ tableW 868 / mainW 900，rowCount 98（12 GOAL + 86 AC，`ls goals/*.md` 现读�
 - `packages/quay/src/serve-dashboard.ts`
 - `packages/quay/test/gap-webui-goal-list-sort-and-column-set.test.mjs`
 - `packages/quay/test/gap-webui-goal-list-tab-split-goal-ac.test.mjs`
+- `packages/quay/test/serve-goal-doc.test.mjs`
+- `packages/quay/test/webui-modernist-sync.test.mjs`
+- `packages/quay/test/gap-webui-goal-task-rollup-via-shared-summary-cache.test.mjs`
 - `tasks/gap-webui-goal-list-tab-split-goal-ac.md`
