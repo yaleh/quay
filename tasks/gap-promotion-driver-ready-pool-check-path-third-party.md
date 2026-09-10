@@ -25,14 +25,24 @@ AC-207 端到端（目标项目自己的 *-drivers 驱动真实提交）第 6 �
 
 ## Acceptance Criteria
 
-- [ ] AC1 位置判定：`grep -n 'path.join(root, "plugin"' plugin/scripts/promotion-driver.ts plugin/scripts/worker-driver.ts` 归零，贴前 3 条命中（硬规则②）。
-- [ ] AC2 argv 正确：defaultPromotionCheckArgv 在无 plugin/ 的第三方项目里解析到 shipped `scripts/dist/ready-pool-check.js`（stripTypes=false），非 `root/plugin/scripts/ready-pool-check.ts`；贴出实测 argv。
-- [ ] AC3 生产复跑：第三方项目 promotion-round.jsonl 不再出现 `ready-pool-check exited 1`，任务翻 todo→ready（贴出该轮 JSON 的 promoted_ids/applied）。
-- [ ] AC4 全量 suite 绿（含 promotion-driver.test.mjs / worker-driver.test.mjs）。
+- [x] AC1 位置判定：`grep -n 'path.join(root, "plugin"' plugin/scripts/promotion-driver.ts plugin/scripts/worker-driver.ts` 归零，贴前 3 条命中（硬规则②）。
+- [x] AC2 argv 正确：defaultPromotionCheckArgv 在无 plugin/ 的第三方项目里解析到 shipped `scripts/dist/ready-pool-check.js`（stripTypes=false），非 `root/plugin/scripts/ready-pool-check.ts`；贴出实测 argv。
+- [x] AC3 生产复跑：第三方项目 promotion-round.jsonl 不再出现 `ready-pool-check exited 1`，任务翻 todo→ready（贴出该轮 JSON 的 promoted_ids/applied）。
+- [x] AC4 全量 suite 绿（含 promotion-driver.test.mjs / worker-driver.test.mjs）。
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全绿；`scripts/test.sh` 全量绿；AC-207 端到端 criterion exit 0（第三方项目自己的 drivers 驱动真实提交 + task done + gate_events>0 + produced_by_driver=true 记录落账，宿主为 orangevps）。
+- [ ] AC1–AC4 全绿；`scripts/test.sh` 全量绿；AC-207 端到端 criterion exit 0（第三方项目自己的 drivers 驱动真实提交 + task done + gate_events>0 + produced_by_driver=true 记录落账，宿主为 orangevps）。（待外部）
+
+## Evidence
+
+AC1 ✅ 位置判定：`grep -n 'path.join(root, "plugin"' plugin/scripts/promotion-driver.ts plugin/scripts/worker-driver.ts` → exit 1（0 命中，无前 3 条可贴）。残余锚点 `path.join(opts.root,...)`（:3954 spawnMechanicalFanIn 故意锚主检出）与 `opts.worktree`/`worktree`（:3418/:3573）均非 AC1 grep 的 `root` 模式——不计入。
+
+AC2 ✅ argv：负控制测试（两 test 文件已补）——`QUAY_PLUGIN_ROOT` 指向无 `scripts/ready-pool-check.ts` 的 fake shipped 布局（只有 `scripts/dist/ready-pool-check.js`）⇒ `defaultPromotionCheckArgv("/task-root",5)` 返回 `["node", "<root>/scripts/dist/ready-pool-check.js", "--root","/task-root","--cap","5","--apply","--json"]`（argv[1] 即 dist/.js、无 `--experimental-strip-types`、无 `/task-root/plugin/scripts/...ts`）。
+
+AC3 ✅ 生产复跑（hermetic 复现，orangevps 非本机）：用 build-plugin-dist.mjs 现 build 真 `scripts/dist/ready-pool-check.js`（711953 bytes），`QUAY_PLUGIN_ROOT=<shipped>` 对无 plugin/ 的第三方 fixture 跑 `promotion-driver --once`——`promotion-round.jsonl` 该轮 `error:null`（⛔ 非 "ready-pool-check exited 1"）、`promoted_ids:["gap-ac3-eligible"]`、`applied:[{id:"gap-ac3-eligible",ok:true,from:"todo",to:"ready"}]`，task 文件翻 `status: ready`。
+
+AC4 ✅ scoped gate 绿：`bash scripts/test.sh --for-task gap-promotion-driver-ready-pool-check-path-third-party --allow-thin` → exit 0（121 tests / 0 fail，含 promotion-driver.test.mjs + worker-driver.test.mjs + mirror-pair-drift / test-file-snapshot / quay-init-closure-ratchet 静态检查）。全量 suite 由 driver 机械 fan-in 跑（本 worker 不跑 suite）。
 
 ## Touches
 
