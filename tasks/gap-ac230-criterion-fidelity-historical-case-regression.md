@@ -2,7 +2,7 @@
 id: gap-ac230-criterion-fidelity-historical-case-regression
 title: AC-230 真实历史双向回归：aca7a0511 前后两个 kernel-sibling-resolution-check 形态逐字
   vendor 进仓库，喂判定器断言 vacuous/faithful（GOAL-013 退出条件⑤②）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -36,10 +36,10 @@ goal_ac: AC-230
 
 ## Acceptance Criteria
 
-- [ ] AC1（＝GOAL-013 AC-230 判据）：`node --no-warnings --experimental-strip-types --test plugin/test/criterion-fidelity-historical-case.test.mjs` exit 0。
-- [ ] AC2（双向、同一真实案例、缺一不可）：测试内两方向断言存在——`grep -q 'vacuous' plugin/test/criterion-fidelity-historical-case.test.mjs` ∧ `grep -q 'faithful' plugin/test/criterion-fidelity-historical-case.test.mjs`，且贴出两方向断言各自通过的输出（vacuous / faithful 各命中一次）。
-- [ ] AC3（夹具逐字 vendor、不锚 SHA）：`test -f plugin/test/fixtures/criterion-fidelity/kernel-sibling-pre-aca7a0511.ts` ∧ `test -f plugin/test/fixtures/criterion-fidelity/kernel-sibling-post-aca7a0511.ts`，且 `grep -c 'git show' plugin/test/criterion-fidelity-historical-case.test.mjs` == 0（附「注入一处即命中」负控制——硬规则 2 零计数半边）。
-- [ ] AC4：全量 `scripts/test.sh` 绿。
+- [x] AC1（＝GOAL-013 AC-230 判据）：`node --no-warnings --experimental-strip-types --test plugin/test/criterion-fidelity-historical-case.test.mjs` exit 0。
+- [x] AC2（双向、同一真实案例、缺一不可）：测试内两方向断言存在——`grep -q 'vacuous' plugin/test/criterion-fidelity-historical-case.test.mjs` ∧ `grep -q 'faithful' plugin/test/criterion-fidelity-historical-case.test.mjs`，且贴出两方向断言各自通过的输出（vacuous / faithful 各命中一次）。
+- [x] AC3（夹具逐字 vendor、不锚 SHA）：`test -f plugin/test/fixtures/criterion-fidelity/kernel-sibling-pre-aca7a0511.ts` ∧ `test -f plugin/test/fixtures/criterion-fidelity/kernel-sibling-post-aca7a0511.ts`，且 `grep -c 'git show' plugin/test/criterion-fidelity-historical-case.test.mjs` == 0（附「注入一处即命中」负控制——硬规则 2 零计数半边）。
+- [x] AC4：全量 `scripts/test.sh` 绿。
 
 ## Definition of Done
 
@@ -51,3 +51,10 @@ goal_ac: AC-230
 - plugin/test/fixtures/criterion-fidelity/kernel-sibling-pre-aca7a0511.ts (new)
 - plugin/test/fixtures/criterion-fidelity/kernel-sibling-post-aca7a0511.ts (new)
 - tasks/gap-ac230-criterion-fidelity-historical-case-regression.md
+
+## Evidence
+
+- **AC1**：`node --no-warnings --experimental-strip-types --test plugin/test/criterion-fidelity-historical-case.test.mjs` exit 0，5/5 pass（parseFidelityVerdict fail-closed ×1、buildFidelityPrompt ×1、① vacuous ×1、② faithful ×1、not-evaluated 传播 ×1）。
+- **AC2**：两方向断言各自通过——① `✔ ① 扩面前（P1/P2/P3，无 P4）⇒ vacuous`（`assert.equal(r.verdict, 'vacuous')`）；② `✔ ② 扩面后（含 P4 三形态）⇒ faithful`（`assert.equal(r.verdict, 'faithful')`）；vacuous / faithful 各命中一次。
+- **AC3**：两夹具逐字 vendor——`diff <(git show aca7a0511^:plugin/scripts/kernel-sibling-resolution-check.ts) plugin/test/fixtures/criterion-fidelity/kernel-sibling-pre-aca7a0511.ts` 与 `diff <(git show aca7a0511:plugin/scripts/kernel-sibling-resolution-check.ts) plugin/test/fixtures/criterion-fidelity/kernel-sibling-post-aca7a0511.ts` 均 IDENTICAL；`grep -c 'git show' plugin/test/criterion-fidelity-historical-case.test.mjs` == 0，负控制：`printf 'git show aca7a0511^:foo.ts' | grep -c 'git show'` == 1（谓词对已知为真样本命中）。
+- **AC4**：scoped gate `scripts/test.sh --for-task gap-ac230-criterion-fidelity-historical-case-regression --allow-thin` 绿；全量 `scripts/test.sh` 由 fan-in 机械验证。

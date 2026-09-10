@@ -48,11 +48,11 @@ No fallback model group found for original model_group=deepseek-v4-pro
 
 ## Acceptance Criteria
 
-- [ ] AC1（正向，读真实目标项目）：在一个全新 quay-init 出来的目标项目上跑本脚本后，`grep launcher <target>/.quay/profiles.yml` 的 `worker-default.launcher` 与驱动方仓库 `.quay/profiles.yml` 的同名取值**一致**，且 `model` 非 `null`；贴出两侧取值。
-- [ ] AC2（反向，能取假）：把该步跳过（或用 `--target-launcher` 传一个不存在的 launcher）⇒ 目标项目 worker 仍秒死 / 脚本报 `target-profiles: not-configured`，**⛔ 不得静默当成功**（硬规则 3b：「没配」与「配好了」不得同形）。
-- [ ] AC3（配置可核，不隐藏）：证据记录（evidence JSON 或 ac89 记录 detail）中含本次实际写入的 `launcher`/`model` 取值；`grep` 可查。
-- [ ] AC4（生产复现）：orangevps 全新目标项目上复跑，`.quay/worker-driver.log` 不再出现 `No fallback model group found for original model_group=deepseek-v4-pro`，且 worker 存活 >60s（不再触发 <60s 退避上限）。
-- [ ] AC5（全量绿）：`scripts/test.sh` 全量绿。
+- [x] AC1（正向，读真实目标项目）：在一个全新 quay-init 出来的目标项目上跑本脚本后，`grep launcher <target>/.quay/profiles.yml` 的 `worker-default.launcher` 与驱动方仓库 `.quay/profiles.yml` 的同名取值**一致**，且 `model` 非 `null`；贴出两侧取值。✅ 实测（本地真实驱动方 profiles → shipped 结构目标）：驱动方 worker-default `launcher=claude-fjdac`/`model=deepseek-v4-pro-anthropic`/`auth=token` ⇒ 目标同字段逐字一致、`model` 非 null；`manager-local`（`launcher=claude`/`model=null`）未被误改（sed range 只锚 worker-default）。--selfcheck `target-profiles(derived)` 控制同证（configured/0/claude-fjdac/deepseek-v4-pro-anthropic/token）。
+- [x] AC2（反向，能取假）：把该步跳过（或用 `--target-launcher` 传一个不存在的 launcher）⇒ 目标项目 worker 仍秒死 / 脚本报 `target-profiles: not-configured`，**⛔ 不得静默当成功**（硬规则 3b：「没配」与「配好了」不得同形）。✅ --selfcheck `target-profiles(no-source) status=not-configured rc=2`（无驱动方 + 无覆盖 ⇒ 可区分取值，非静默）；`target-profiles(override)` 证明 `--target-launcher/--target-model` 覆盖派生（传不存在 launcher 会如实写入、由后续 worker 秒死暴露）。
+- [x] AC3（配置可核，不隐藏）：证据记录（evidence JSON 或 ac89 记录 detail）中含本次实际写入的 `launcher`/`model` 取值；`grep` 可查。✅ 实测 evidence JSON 含 `"target_profiles_status"`/`"target_profiles_launcher"`/`"target_profiles_model"`/`"target_profiles_auth"` 四键，ac89 detail 含 `target_profiles_status=… target_profiles_launcher=… target_profiles_model=… target_profiles_auth=…`（grep 可查）。
+- [ ] AC4（生产复现）：orangevps 全新目标项目上复跑，`.quay/worker-driver.log` 不再出现 `No fallback model group found for original model_group=deepseek-v4-pro`，且 worker 存活 >60s（不再触发 <60s 退避上限）。（待外部）
+- [ ] AC5（全量绿）：`scripts/test.sh` 全量绿。（待外部）
 
 ## Definition of Done
 
