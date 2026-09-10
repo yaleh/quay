@@ -1,7 +1,7 @@
 ---
 id: GOAL-012
 title: kernel↔target 边界三域归属并接上强制力——把 §6b 从一域扩到三域，用机械枚举取代三次都漏的人工枚举
-status: draft
+status: active
 kind: goal
 origin: >-
   立条依据（人 2026-09-10 裁定三条后授权设立）：
@@ -47,6 +47,13 @@ origin: >-
 
   【关系】GOAL-009 = 验证型（证明跑通一次），本 GOAL = 机制型（让该类结构上不可能再发生），同 GOAL-001→GOAL-010
   的关系。AC-207 留在 GOAL-009，本 GOAL 是它的前置。
+activatedAt: 2026-09-10T02:42:13.085Z
+statusLog:
+  - at: 2026-09-10T02:42:13.086Z
+    from: draft
+    to: active
+    actor: cli:human-ruling-2026-09-10
+    reason: 人裁定③：现在立（cap=3 立后占满）
 ---
 
 ## 背景
