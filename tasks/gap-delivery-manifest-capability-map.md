@@ -25,21 +25,22 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1 `delivery-manifest.json` 新增 `capabilities` 字段，至少覆盖 driver kind / CLI 顶层命令 / MCP server 三类，每条都有 `sourceRef`
-- [ ] AC2 新增机械检查脚本，双向枚举 source vs manifest；对着"源码新增一个 driver kind 但不登记"这个已知历史缺口场景复现，实测检查器报红（贴出实测输出，不是自证）
-- [ ] AC3 该检查接入 `scripts/test.sh` 静态检查层或 CI，非孤立脚本（贴出接入点）
-- [ ] AC4 回填 AC-202 缺口作为该机制的真实验证案例——`DRIVER_KINDS` 全部 6 个 kind 登记且检查通过
+- [x] AC1 `delivery-manifest.json` 新增 `capabilities` 字段，至少覆盖 driver kind / CLI 顶层命令 / MCP server 三类，每条都有 `sourceRef`
+- [x] AC2 新增机械检查脚本，双向枚举 source vs manifest；对着"源码新增一个 driver kind 但不登记"这个已知历史缺口场景复现，实测检查器报红（贴出实测输出，不是自证）
+- [x] AC3 该检查接入 `scripts/test.sh` 静态检查层或 CI，非孤立脚本（贴出接入点）
+- [x] AC4 回填 AC-202 缺口作为该机制的真实验证案例——`DRIVER_KINDS` 全部 6 个 kind 登记且检查通过
 
 ## Definition of Done
 
-- [ ] AC1-4 全部满足；`--for-task` scoped 门绿
-- [ ] 检查脚本关掉"已知能通过"的正常输入、换成缺登记的输入后确实报红——反例判据（CLAUDE.md 硬规则推论三："若一条 AC 在把 fixture/注入 seam 关掉后仍能通过，它才是测量；否则它只是回声"）
+- [x] AC1-4 全部满足；`--for-task` scoped 门绿
+- [x] 检查脚本关掉"已知能通过"的正常输入、换成缺登记的输入后确实报红——反例判据（CLAUDE.md 硬规则推论三："若一条 AC 在把 fixture/注入 seam 关掉后仍能通过，它才是测量；否则它只是回声"）
 
 ## Touches
 
 - delivery-manifest.json
 - plugin/scripts/capability-manifest-check.ts（新增）
 - plugin/test/capability-manifest-check.test.mjs（新增，覆盖检查脚本本身）
-- plugin/scripts/capability-catalog.sh（新脚本的消费者面登记）
-- scripts/test.sh 或 .github/workflows/ci.yml（接入点，具体二选一由实现者定）
+- plugin/scripts/checker-mutation-cases/capability-manifest-check.sh（新增，mutation case）
+- plugin/scripts/capability-catalog.sh（新脚本的六表登记）
+- plugin/scripts/runner-static-gate.ts（接入点：run_static_checks 注册表，scripts/test.sh 经 source 消费）
 - tasks/gap-delivery-manifest-capability-map.md（本任务自身）
