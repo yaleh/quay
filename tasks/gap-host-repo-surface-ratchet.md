@@ -50,12 +50,12 @@ AC-236 的 criterion 在本仓库根干跑 exit 0；该棘轮已接进 `runner-s
 
 ## Touches
 
-- plugin/scripts/host-repo-surface-ratchet.ts
-- packages/quay/plugin/scripts/host-repo-surface-ratchet.ts
-- plugin/scripts/checker-mutation-cases/host-repo-surface-ratchet.sh
+- plugin/scripts/host-repo-surface-ratchet.ts (new)
+- packages/quay/plugin/scripts/host-repo-surface-ratchet.ts (new)
+- plugin/scripts/checker-mutation-cases/host-repo-surface-ratchet.sh (new)
 - plugin/scripts/capability-catalog.sh
 - plugin/scripts/runner-static-gate.ts
-- plugin/test/host-repo-surface-ratchet.test.mjs
-- docs/analysis/goal-015-host-repo-surface.baseline.json
+- plugin/test/host-repo-surface-ratchet.test.mjs (new)
+- docs/analysis/goal-015-host-repo-surface.baseline.json (new)
 - docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-host-repo-surface-ratchet.md
