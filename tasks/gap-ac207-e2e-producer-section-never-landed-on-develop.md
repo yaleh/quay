@@ -50,13 +50,13 @@ depends_on:
 
 ## Acceptance Criteria
 
-- [ ] AC1 产出者已在 develop（能取假）：`git show develop:plugin/scripts/verify-deliver-coldstart.sh | grep -c 'ac207-e2e'` ≥ 1 且 `| grep -c 'GOAL-009-AC-207'` ≥ 1；贴**改前**两个读数（各为 0）与**改后**两个读数。
-- [ ] AC2 两半兼有（防合并时丢掉 develop 侧）：同一份 develop 文件里 `--target-launcher` 命中数 ≥ 8 **且** `--ac207-e2e` 命中数 ≥ 1；贴两个计数。
-- [ ] AC3 最易漏的那一处保留：develop 侧 selfcheck 条件列表逐字含 `[ "$tp_ok" = "1" ]`；贴该行及上下各 2 行。
-- [ ] AC4 脚本自检绿：`bash plugin/scripts/verify-deliver-coldstart.sh --selfcheck` exit 0，且输出含 ac207-record 的正控制与两条负控制（`produced_by_driver=false` refused / `gate_events=0` refused）；贴三行。
-- [ ] AC5 单测绿：`node --test plugin/test/verify-deliver-coldstart.test.mjs` exit 0；贴 pass/fail 计数。
-- [ ] AC6 镜像无漂移：`node --no-warnings --experimental-strip-types plugin/scripts/mirror-pair-drift-check.ts --root .` exit 0。
-- [ ] AC7 全量绿：`scripts/test.sh` 全量绿。
+- [x] AC1 产出者已在 develop（能取假）：`git show develop:plugin/scripts/verify-deliver-coldstart.sh | grep -c 'ac207-e2e'` ≥ 1 且 `| grep -c 'GOAL-009-AC-207'` ≥ 1；贴**改前**两个读数（各为 0）与**改后**两个读数。
+- [x] AC2 两半兼有（防合并时丢掉 develop 侧）：同一份 develop 文件里 `--target-launcher` 命中数 ≥ 8 **且** `--ac207-e2e` 命中数 ≥ 1；贴两个计数。
+- [x] AC3 最易漏的那一处保留：develop 侧 selfcheck 条件列表逐字含 `[ "$tp_ok" = "1" ]`；贴该行及上下各 2 行。
+- [x] AC4 脚本自检绿：`bash plugin/scripts/verify-deliver-coldstart.sh --selfcheck` exit 0，且输出含 ac207-record 的正控制与两条负控制（`produced_by_driver=false` refused / `gate_events=0` refused）；贴三行。
+- [x] AC5 单测绿：`node --test plugin/test/verify-deliver-coldstart.test.mjs` exit 0；贴 pass/fail 计数。
+- [x] AC6 镜像无漂移：`node --no-warnings --experimental-strip-types plugin/scripts/mirror-pair-drift-check.ts --root .` exit 0。
+- [ ] AC7 全量绿：`scripts/test.sh` 全量绿。（待外部）
 
 ## Definition of Done
 
@@ -68,3 +68,13 @@ depends_on:
 - packages/quay/plugin/scripts/verify-deliver-coldstart.sh
 - plugin/test/verify-deliver-coldstart.test.mjs
 - tasks/gap-ac207-e2e-producer-section-never-landed-on-develop.md
+
+## Evidence
+
+- AC1（改后，分支 ff 后即 develop）：`ac207-e2e`=5、`GOAL-009-AC-207`=5（改前均为 0，见 Proposal 表）。
+- AC2：`--target-launcher`=8、`--ac207-e2e`=5（同一份 `plugin/scripts/verify-deliver-coldstart.sh`）。
+- AC3：`plugin/scripts/verify-deliver-coldstart.sh:2116` → `     && [ "$tp_ok" = "1" ]; then`（develop 侧 selfcheck 条件列表逐字保留，前两行为 ac207 负控制条件、后为 PASS echo）。
+- AC4：`--selfcheck` exit 0；`selfcheck: ac207-record(valid) wrote=1 fields_ok=1 (expect 1/1)`；`selfcheck: ac207-record(produced_by_driver=false) refused=1 (expect 1 — 假值≠合格)`；`selfcheck: ac207-record(gate_events=0) refused=1 (expect 1 — gate_events=0 拒写)`。
+- AC5：`node --test plugin/test/verify-deliver-coldstart.test.mjs` exit 0；pass 11 / fail 0。
+- AC6：`node --no-warnings --experimental-strip-types plugin/scripts/mirror-pair-drift-check.ts --root .` exit 0 PASS（verify-deliver-coldstart.sh 为 plugin-only 文件，无 experiments 镜像对）。
+- AC7：全量 suite 由机械 fan-in 的 suite 步跑，非本 worker 职责（待外部）。
