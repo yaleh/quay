@@ -45,6 +45,8 @@ import {
   fileDecisions,
   nextGoalId,
   renderDecisionOrigin,
+  renderDecisionBody,
+  decisionGoalWriteArgv,
   decisionQuality,
   collectDriverReadings,
   collectInertCheckers,
@@ -774,6 +776,76 @@ test('renderDecisionOrigin: 问题/选项/读数/关闭方式都进 origin（那
   }
   assert.ok(o.includes('syncHealth.notFf'), '证据键必须可核');
   assert.ok(o.includes('41'), '解析出的读数值必须逐字写入');
+});
+
+// ── decision 通道的 goal 载体 body（gap-meta-filedecisions-goal-write-omits-body）────────────
+// 缺陷：fileDecisions 的 carrier=goal 分支只传 --title/--origin，而 goal-store 对 goal kind 的
+// create 要求 body ≥40 非空白 ⇒ 每条 carrier=goal 决策都 exit 2。修法：补 --body，正文（三段）与
+// 出处（origin）分离。四条：argv 断言 / 三段单测 / 真 goal-store 端到端 / 突变负控制。
+
+test('decisionGoalWriteArgv: goal 分支 argv 含 --body 且值 ≥40 非空白（⛔ 直接断言 argv，非反推）', () => {
+  const origin = renderDecisionOrigin(goodDecision, 41, 'now');
+  const body = renderDecisionBody(goodDecision);
+  const argv = decisionGoalWriteArgv(repoRoot, 'GOAL-004', goodDecision, origin, body);
+  const i = argv.indexOf('--body');
+  assert.ok(i !== -1, 'argv 必须含 --body');
+  assert.ok(typeof argv[i + 1] === 'string', '--body 后必须跟一个值');
+  assert.ok(argv[i + 1].replace(/\s/g, '').length >= 40, '--body 值 ≥40 非空白字符');
+});
+
+test('renderDecisionBody: 三段各非空、合计 ≥40 非空白、且 ≠ origin（防把 origin 复制进 body）', () => {
+  const b = renderDecisionBody(goodDecision);
+  const o = renderDecisionOrigin(goodDecision, 41, 'now');
+  const sections = b.split(/^## /m);
+  assert.equal(sections.length, 4, '应有 背景/范围与非目标/退出条件 三段');
+  for (let i = 1; i < 4; i++) {
+    assert.ok(sections[i].replace(/\s/g, '').length > 0, `第 ${i} 段必须非空`);
+  }
+  assert.ok(b.replace(/\s/g, '').length >= 40, 'body 非空白字符合计 ≥40');
+  assert.notEqual(b, o, 'body 与 origin 必须不同——否则就是把 origin 复制进 body 的伪修复');
+});
+
+test('fileDecisions: carrier=goal 经真 goal-store 落地（非 mock、非 dry-run）——文件出现、body ≥40', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-dec-e2e-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    const dec = { ...goodDecision, scope: 'plugin/scripts, packages/quay/src, tasks' };
+    const r = await fileDecisions(repoRoot, [dec], ecoReadings, [{ id: 'GOAL-003' }],
+      { cap: 2, dryRun: false, at: 'now', dataRoot: tmp });
+    assert.equal(r[0].accepted, true, `写入应成功，实际: ${r[0].reason}`);
+    assert.equal(r[0].id, 'GOAL-004');
+    const files = fs.readdirSync(path.join(tmp, 'goals'));
+    const written = files.find((f) => f.startsWith('GOAL-004'));
+    assert.ok(written, `应写出 GOAL-004 文件，实际目录: ${files.join(', ')}`);
+    const text = fs.readFileSync(path.join(tmp, 'goals', written), 'utf8');
+    assert.match(text, /^status: draft$/m, '决策必须落为 draft，⛔ 绝不能是 active');
+    const segs = text.split(/^---\s*$/m);
+    const body = segs.length >= 3 ? segs.slice(2).join('---') : '';
+    assert.ok(body.replace(/\s/g, '').length >= 40, `落盘的 body 非空白字符 ≥40，实得 ${body.replace(/\s/g, '').length}`);
+    assert.ok(body.includes('## 背景') && body.includes('## 范围与非目标') && body.includes('## 退出条件'), 'body 必须含三段');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('突变负控制：去掉 --body 后 goal-store write 必须 fail exit 2（⛔ 判据能取假，非恒绿）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-dec-mut-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    const origin = renderDecisionOrigin(goodDecision, 41, 'now');
+    const body = renderDecisionBody(goodDecision);
+    const full = decisionGoalWriteArgv(repoRoot, 'GOAL-004', goodDecision, origin, body, tmp);
+    const i = full.indexOf('--body');
+    assert.ok(i !== -1, '前置：完整 argv 含 --body');
+    const mutated = [...full.slice(0, i), ...full.slice(i + 2)]; // 去掉 --body 与其值
+    assert.throws(
+      () => execFileSync(mutated[0], mutated.slice(1), { encoding: 'utf8', stdio: 'pipe' }),
+      (err) => err.status === 2,
+      '去掉 --body 后必须 exit 2（goal-store 对 goal kind 的 create 要求 body ≥40）',
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('fileDecisions: evidenceKey 解析不出 ⇒ 拒（决策也要有实测依据）', async (t) => {

@@ -1194,6 +1194,37 @@ export function renderDecisionOrigin(item: DecisionItem, evidence: unknown, at: 
   ].join("\n");
 }
 
+/** 决策的 body 正文：GOAL 契约要求的三段（背景 / 范围与非目标 / 退出条件）。
+ *  ⛔ 与 renderDecisionOrigin 分工：origin = 出处引用（要裁什么/选项/实测依据/为何不能机械决定/怎么关闭，
+ *  待裁定面上可见的一列）；body = 实质（goal 的 substance，goal-store 对 goal kind 的 create 要求
+ *  ≥ MIN_GOAL_BODY_CHARS 非空白）。两者分离，⛔ 不是把 origin 复制进 body（store 契约明文拒绝
+ *  「互为副本」的形态——origin 只是 provenance citation，不是 body）。 */
+export function renderDecisionBody(item: DecisionItem): string {
+  const scope = String(item.scope ?? "").trim();
+  return [
+    "## 背景",
+    `待裁定的方向问题：${item.question}`,
+    `为何机器不能自决：${item.origin}`,
+    "",
+    "## 范围与非目标",
+    `作用域：${scope || "（未声明）"}`,
+    `选项与代价：${item.options}`,
+    "非目标：本记录只承载「要人作何选择」，不预先承诺任一选项的落地——选定后的落地作为后续工作另立案。",
+    "",
+    "## 退出条件",
+    "认可某个选项 ⇒ goal-store write <id> --status active；否决 ⇒ 保持 draft 或标 superseded。",
+  ].join("\n");
+}
+
+/** carrier=goal 决策的 write argv（单一构造点——单测据此直接断言 argv 含 `--body` 且其值 ≥40，
+ *  ⛔ 不靠读落盘文件反推）。body = renderDecisionBody 的三段正文，origin = renderDecisionOrigin 的出处引用。
+ *  `dataRoot` 缺省 = scriptRoot（生产同源）；测试传临时目录隔离落盘（同 fileProposals 的 dataRoot 手法）。 */
+export function decisionGoalWriteArgv(
+  scriptRoot: string, id: string, item: DecisionItem, origin: string, body: string, dataRoot: string = scriptRoot,
+): string[] {
+  return goalStoreArgv(scriptRoot, ["write", id, "--title", item.title, "--origin", origin, "--body", body], dataRoot);
+}
+
 /** 决策自己的质量判据。⛔ 不复用 gateFinding 的 quality 闸——那个 EVIDENCE 正则是为【缺陷发现】
  *  调的（要求正文含文件路径/sha/`exit N` 这类代码形 token），而一个架构方向问题合理地可以不含
  *  这种 token。实测误杀：「变化检测是否上升为平台能力」被拒，理由 "no actionable ## Finding with
@@ -1317,7 +1348,7 @@ export interface DecisionResult { item: DecisionItem; id: string | null; accepte
 export async function fileDecisions(
   root: string, items: DecisionItem[], readings: MetaRoundReadings,
   records: Array<Record<string, unknown>>,
-  opts: { cap: number; dryRun: boolean; at: string },
+  opts: { cap: number; dryRun: boolean; at: string; dataRoot?: string },
 ): Promise<DecisionResult[]> {
   const out: DecisionResult[] = [];
   const keys = new Set<string>();
@@ -1374,7 +1405,8 @@ export async function fileDecisions(
     if (opts.dryRun) {
       out.push({ item, id, accepted: true, reason: "dry-run: would file as draft GOAL" });
     } else {
-      const argv = goalStoreArgv(root, ["write", id, "--title", item.title, "--origin", origin]);
+      const body = renderDecisionBody(item);
+      const argv = decisionGoalWriteArgv(root, id, item, origin, body, opts.dataRoot ?? root);
       const r = await runAsync(argv, { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
       if (r.error || r.status !== 0) {
         out.push({ item, id, accepted: false, reason: `goal write failed (exit ${r.status}): ${(r.stderr || "").trim().slice(0, 200)}` });
