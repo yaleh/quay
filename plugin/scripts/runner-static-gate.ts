@@ -559,6 +559,15 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/goal-driver.ts plugin/scripts/goal-driver-task-boundary-check.ts plugin/test/goal-driver-task-boundary-check.test.mjs plugin/scripts/checker-mutation-cases/goal-driver-task-boundary-check.sh
   run_checker "goal-driver-task-boundary-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/goal-driver-task-boundary-check.ts" --root "${repo_root}"
+  echo "== kernel-sibling-resolution check (GOAL-012 A 域, gap-ac224-kernel-sibling-resolution-check-mutation-covered) =="
+  # KERNEL 域 naive sibling 解析检查器：shipped kernel 把自己的 sibling 脚本锚在 naive `__dirname` /
+  # target root / 模板字符串而非经 resolveKernelSibling/resolveKernelPluginRoot 即违规（AC-203 前例）。
+  # Whole-store 扫描（plugin/scripts + packages/quay/src），DEV-TREE-ONLY 豁免标记带理由可复核。
+  # exit 1 违规即红（set -euo pipefail）。⛔ 落在 full（不 scoped）——它是全店枚举，不随单任务 Touches
+  # 收窄；且本任务落地时全店仍有 ~9 处 naive __dirname 残量（AC-225 迁移范围），scoped 模式跑它会
+  # 让本任务的 scoped 门恒红。
+  # @static-tier full
+  run_checker "kernel-sibling-resolution-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/kernel-sibling-resolution-check.ts" --root "${repo_root}" --json
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait
