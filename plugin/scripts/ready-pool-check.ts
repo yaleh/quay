@@ -1125,25 +1125,48 @@ export function readChildren(frontmatterRaw) {
 // excluded from the ready pool and ineligible for author→ready promotion (it stays dispatchable ONLY
 // when the prose prereq is ALSO a relation edge — a normal dependency, handled by depsReadyFor).
 //
-// Precision constraints (verified against the real store, 2026-08-11):
+// Precision constraints (verified against the real store, 2026-08-11; widened 2026-09-10):
 //   - WIKILINKS INSIDE CODE SPANS ARE SKIPPED: a paragraph QUOTING another task's prereq prose inside
 //     backticks (`` `[[gap-…]]` `` — e.g. this very task's Proposal describing the empirical task) is
-//     an illustrative mention, not a prereq declaration. stripCode removes fenced blocks + inline
-//     backtick spans before wikilink matching.
-//   - A prereq keyword ALONE is not enough — the paragraph must ALSO carry a wikilink to an EXISTING
-//     task file (a broken link is a different defect, not a prereq claim).
+//     an illustrative mention, not a prereq declaration. The WIKILINK arm matches on an inline-stripped
+//     copy so a QUOTED wikilink stays skipped, while the BACKTICK arm (below) matches the repo's
+//     DOMINANT citation form `` `gap-xxx` ``.
+//   - A prereq keyword ALONE is not enough — the paragraph must ALSO carry a resolvable task-id
+//     reference (wikilink or backtick span) to an EXISTING task file (a broken link is a different
+//     defect, not a prereq claim).
 //   - "依赖" alone is deliberately NOT in the keyword set (a "无代码依赖 / no code dependency" mention
-//     would false-fire); only gating constructions qualify.
-const PREREQ_KEYWORD_RE =
-  /前置|depends?\s+on|depends_on|do\s+not\s+dispatch|勿派|不得派发|不得派|禁止派发|先决|前序|声明依赖|依赖前序|先落地|先完成|先跑/i;
+//     would false-fire); only gating constructions qualify. "阻塞" IS in the set — it is the repo's
+//     dominant blocking word (empirically 102 paragraphs vs 1 for the prior table; the pre-edge
+//     AC-207 corpus had 63/64 paragraphs invisible to the old table for exactly this reason).
+export const PREREQ_KEYWORD_RE =
+  /前置|depends?\s+on|depends_on|do\s+not\s+dispatch|勿派|不得派发|不得派|禁止派发|先决|前序|声明依赖|依赖前序|先落地|先完成|先跑|阻塞/i;
 const WIKILINK_RE = /\[\[([A-Za-z0-9][A-Za-z0-9-]*)(?:[#|][^\]]*)?\]\]/g;
+// The repo's DOMINANT task-id citation form is the inline backtick span (`gap-xxx`): 740 task files
+// cite ids this way vs 67 wikilink files (≈11:1). These are the citation convention itself, NOT code
+// — so they are matched alongside wikilinks, gated by the prereq keyword on the paragraph (the keyword
+// gate decides whether the paragraph DECLARES a prereq; a pure example mention like "同族于 `gap-x`"
+// carries no keyword and is skipped). A bare single-token span (`done` / `阻塞`) has no dash and never
+// matches; the existsSync resolution below filters out non-task ids (code files, skill names).
+const BACKTICK_ID_RE = /`([A-Za-z0-9][A-Za-z0-9]*(?:-[A-Za-z0-9]+)+)`/g;
+
+/** Strip fenced code blocks (```…``` / ~~~…~~~). Inline backticks are NOT stripped here — they are the
+ *  repo's citation form, matched separately by BACKTICK_ID_RE in prosePrereqRefs. */
+function stripFences(text) {
+  return text.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, " ");
+}
+
+/** Strip inline backtick spans (`…`) only (no fences). Used for the WIKILINK arm of prosePrereqRefs so
+ *  a QUOTED wikilink stays an illustrative mention. */
+function stripInlineCodeSpans(text) {
+  return text.replace(/`[^`\n]*`/g, " ");
+}
 
 /** Strip fenced code blocks (```…``` / ~~~…~~~) and inline backtick spans (`…`) so a QUOTED wikilink
  *  inside code is not read as a prereq declaration. Fences are removed before inline spans (an inline
- *  backtick can appear inside a fence). */
+ *  backtick can appear inside a fence). Exported — strategic-doc-staleness-check.ts reuses it (its
+ *  contract is fence+inline stripping, so it is left unchanged). */
 export function stripCodeSpans(text) {
-  const noFence = text.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, " ");
-  return noFence.replace(/`[^`\n]*`/g, " ");
+  return stripInlineCodeSpans(stripFences(text));
 }
 
 /** The task's declared relation-edge set — parent + children + depends_on (the fields every
@@ -1157,16 +1180,73 @@ export function relationEdges(frontmatterRaw) {
   return edges;
 }
 
-/** Task ids referenced as wikilinks inside prereq-declaration paragraphs of the body (code spans
- *  stripped; only ids that resolve to an existing task file). */
+/** Sibling/heritage/example markers: a task-id mention introduced by one of these is NOT a prereq
+ *  declaration — it names a RELATED / sibling / root-cause / heritage task ("同族于 X"、"已另立 X"、
+ *  "此外 X 亦已 done"、"且是 X 遗漏的调用点"、"架构性任务 X"、"它是 X 的产物"、"实证对象：X"、纯
+ *  "参见 X" 例举). Genuine prereq declarations ("阻塞 X"、"待 X 落地"、"前序任务 X"、"修复任务 X"、
+ *  "depends on X") carry no such marker. Corpus-derived from the AC-207 body + this task's own Proposal. */
+const SIBLING_MENTION_RE = /同族于|已另立|另立|此外|参见|类似|参照|产物|实证对象|架构性任务|遗漏的调用点|遗漏调用点/;
+
+/** A ref is a sibling/heritage mention when a sibling marker sits within this many chars of the span
+ *  (before or after). Tight enough that "阻塞 X；此外还…" does not bleed, wide enough for "已另立 X". */
+const SIBLING_MENTION_WINDOW = 16;
+function isSiblingMention(para, start, end) {
+  const before = para.slice(Math.max(0, start - SIBLING_MENTION_WINDOW), start);
+  const after = para.slice(end, end + SIBLING_MENTION_WINDOW);
+  if (SIBLING_MENTION_RE.test(before) || SIBLING_MENTION_RE.test(after)) return true;
+  // List continuation: "另立两任务 `A`（ready）与 `B`（ready）" — the second item is introduced by
+  // "与" and inherits sibling-ness from the "另立" list-opener earlier in the same clause. Genuine
+  // "阻塞 `A` 与 `B`" lists are untouched (no "另立" opener, so the second item is still flagged).
+  const farBefore = para.slice(Math.max(0, start - 80), start);
+  if (/与\s*$/.test(before) && /另立/.test(farBefore)) return true;
+  return false;
+}
+
+/** Read a task's `status:` frontmatter field straight off disk (null when the file/field is absent).
+ *  Used to drop refs to SUPERSEDED tasks — a retired task is not a valid current-prereq target (its
+ *  body reference is a stale name; the successor carries the real dependency). */
+function readTaskStatusOnDisk(tasksDir, id) {
+  const file = path.join(tasksDir, `${id}.md`);
+  if (!fs.existsSync(file)) return null;
+  const head = fs.readFileSync(file, "utf8");
+  const fm = head.match(/^---\n([\s\S]*?)\n---/);
+  return fm ? readFrontField(fm[1], "status") : null;
+}
+
+/** Task ids referenced inside prereq-declaration paragraphs of the body. Two citation forms are
+ *  recognized (both gated by the prereq keyword on the paragraph — the keyword decides whether the
+ *  paragraph DECLARES a prerequisite at all):
+ *    - wikilinks `[[id]]`, matched on an inline-backtick-stripped copy so a QUOTED wikilink stays an
+ *      illustrative mention (the original stripCodeSpans intent);
+ *    - inline backtick spans `` `id` `` — the repo's dominant citation form (≈11:1 over wikilinks),
+ *      matched on a fence-only copy (inline spans are KEPT here because they ARE the citation).
+ *  Two ref-level filters keep the widen PRECISE (a sibling/heritage mention is not a prereq):
+ *    - a ref whose context carries a sibling marker is dropped (see SIBLING_MENTION_RE);
+ *    - a ref to a SUPERSEDED task is dropped (retired task — its successor is the real prereq).
+ *  Only ids that resolve to an existing, non-superseded task file are returned. */
 export function prosePrereqRefs(body, tasksDir) {
   const refs = new Set();
-  const clean = stripCodeSpans(body);
-  for (const para of clean.split(/\r?\n\s*\r?\n/)) {
+  const noFence = stripFences(body);
+  const inlineStripped = stripInlineCodeSpans(noFence);
+  const paras = noFence.split(/\r?\n\s*\r?\n/);
+  const inlineParas = inlineStripped.split(/\r?\n\s*\r?\n/);
+  const add = (id) => {
+    if (refs.has(id)) return;
+    if (readTaskStatusOnDisk(tasksDir, id) === "superseded") return;
+    const file = path.join(tasksDir, `${id}.md`);
+    if (fs.existsSync(file)) refs.add(id);
+  };
+  for (let i = 0; i < paras.length; i++) {
+    const para = paras[i];
     if (!PREREQ_KEYWORD_RE.test(para)) continue;
-    for (const m of para.matchAll(WIKILINK_RE)) {
-      const id = m[1];
-      if (fs.existsSync(path.join(tasksDir, `${id}.md`))) refs.add(id);
+    const inlinePara = inlineParas[i] ?? "";
+    for (const m of inlinePara.matchAll(WIKILINK_RE)) {
+      if (isSiblingMention(inlinePara, m.index, m.index + m[0].length)) continue;
+      add(m[1]);
+    }
+    for (const m of para.matchAll(BACKTICK_ID_RE)) {
+      if (isSiblingMention(para, m.index, m.index + m[0].length)) continue;
+      add(m[1]);
     }
   }
   return [...refs];
