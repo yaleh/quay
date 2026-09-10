@@ -1,7 +1,7 @@
 ---
 id: gap-dashboard-livecard-minilist-overflow-indicator
 title: 循环脉搏卡 mini-list 截断加「+N 更多」提示（复用甘特图已有措辞）
-status: done
+status: ready
 labels:
   - gap
 parent: null
