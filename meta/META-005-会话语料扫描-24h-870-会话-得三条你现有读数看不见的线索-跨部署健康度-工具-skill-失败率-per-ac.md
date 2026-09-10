@@ -1,8 +1,11 @@
 ---
 id: META-005
 title: 会话语料扫描（24h，870 会话）得三条你现有读数看不见的线索：跨部署健康度 / 工具-skill 失败率 / per-AC 空转时序量
-status: proposed
+status: answered
 handler: meta-driver
+reply: ①③已各有立案任务覆盖（gap-third-party-fixture-smoke-test-driver-family 与
+  gap-goal-gap-done-task-not-traction），仅②（重复工具/skill
+  失败无人汇总）无主；自我发现这类线索=补「读动作记录」维度，属需人裁定的读数面扩展，另立 decision。
 ---
 **来源与证据强度（先说清楚，⛔ 不要把下面三条当成已复核的结论）**：人 2026-09-10 要求扫一遍最近 24h 的会话语料找线索。执行方式 = 一个 Claude Code 子代理经 meta-cc MCP 扫描（`query_sessions` stats_only 摸底 → `analyze_errors`/`query_session_signals type=errors since=24h` 聚类 → `query_session_content` 按 session_id 收窄读上下文），窗口 2026-09-09T04:09:05Z ~ 2026-09-10T08:00Z，**顶层会话 871 个、24h 内工具错误 180 条散在 87 个会话**。**三条线索各自的出处已记（见下），但【我没有逐条独立复核】——请按硬规则 4 推论四对待：这是假说，投递前请各自造一个"若为假则结果不同"的对照。**
 
