@@ -353,6 +353,17 @@ run_static_checks() {
   # @static-tier change
   # @static-object .claude/workflows/ plugin/workflows/
   run_checker "delivery-inventory-drift-gate" bash "${repo_root}/plugin/scripts/delivery-inventory-drift-gate.sh" --root "${repo_root}"
+  echo "== capability-manifest check (gap-delivery-manifest-capability-map, AC1-AC4) =="
+  # Bidirectional capability↔delivery-manifest enumeration: every SOURCE capability (driver kind /
+  # CLI top-level command / MCP server) must be REGISTERED in delivery-manifest.json's capabilities
+  # array, and every registered capability must still exist in source. The AC-202 root cause
+  # (gap-driver-kinds-table-literal-not-in-dist-entry) was that packaging/closure checks are
+  # scan-references heuristics — a NEW literal table/file is structurally invisible to them; a
+  # capability INVENTORY (the manifest) to diff against closes that blind spot. exit 1 = unregistered
+  # /stale; exit 2 = NOT-EVALUATED (source/manifest unreadable — never conflated with "0 drift").
+  # @static-tier change
+  # @static-object delivery-manifest.json plugin/scripts/driver-runtime.ts packages/quay/bin/quay.ts packages/quay/src/mcp-server.ts packages/quay-native/src/mcp-server.ts packages/quay-github/src/mcp-server.ts packages/quay-backlog/src/mcp-server.ts plugin/scripts/capability-manifest-check.ts plugin/test/capability-manifest-check.test.mjs plugin/scripts/checker-mutation-cases/capability-manifest-check.sh
+  run_checker "capability-manifest-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/capability-manifest-check.ts" --root "${repo_root}"
   echo "== checker-mutation check (gap-checkers-have-never-been-shown-to-fail, AC1-AC6) =="
   # The L_S instrument: mutation-test the checkers THEMSELVES, not product code. The manifest is
   # parsed from THIS function + CI (never hand-written), so a checker added here (or to a CI
