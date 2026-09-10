@@ -3,7 +3,7 @@ id: gap-third-party-evidence-no-transport-to-driving-repo-carrier
 title: 第三方主机产出的 GOAL-009/015 证据没有回传机件 —— 8 条 goal
   判据要求「host≠本机」的记录落在驱动方载体里，而唯一写入者只在它自己运行的那台机上写，注释里点名的 develop-deliver-tgz.sh
   --verify-coldstart 不存在
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical

@@ -34,15 +34,15 @@ goal_ac: AC-236
 
 ## Acceptance Criteria
 
-- [ ] AC1 机件存在且绿：`node --no-warnings --experimental-strip-types plugin/scripts/host-repo-surface-ratchet.ts --root . --json` exit 0，且输出含三集合的基数；贴命令与输出。
-- [ ] AC2 正方向：基线已提交，`git show HEAD:docs/analysis/goal-015-host-repo-surface.baseline.json` 可读且三个键非空；贴三键基数（立案时的真实读数为 cli_verbs=19 / web_routes=25 / config_keys_with_consumer=5，实现时以当轮实测为准，⛔ 不照抄本行）。
-- [ ] AC3 负方向（能取假）：往基线注入一个当前已不存在的元素（如路由 `/goals`）⇒ 检查器 exit 1 并逐字打印缩水的元素；验证后还原基线，贴前后命令与输出。
-- [ ] AC4 未评估态可区分（硬规则 3b）：把被枚举的源文件之一临时改名 / 令入口 spawn 失败 ⇒ 退出码 3 且 stderr 含 `NOT-EVALUATED`，**与 exit 0 和 exit 1 三者互不同形**；贴三种退出码各一次的实测输出。
-- [ ] AC5 新增允许（方向正确性，⛔ 防写反）：在基线之外**新增**一个元素（临时加一条路由或一个动词）⇒ 检查器仍 exit 0；贴命令与输出。
-- [ ] AC6 突变覆盖：`bash plugin/scripts/checker-mutation-check.sh --list --json` 中存在 `name=="host-repo-surface-ratchet"` 且 `covered: true`；贴该条 JSON。
-- [ ] AC7 三闸齐全：`bash plugin/scripts/capability-catalog.sh --json` 中该脚本 `question` 非 null；`mirror-pair-drift-check` 与 `quay-init-closure-ratchet --check-stale` 各 exit 0；贴三条命令的退出码。
-- [ ] AC8 单测：`node --test plugin/test/host-repo-surface-ratchet.test.mjs` exit 0，含 AC3/AC4/AC5 三方向各 ≥1 条断言。
-- [ ] AC9 AC-236 判据翻转：`goals/AC-236-*.md` 的 criterion 干跑从 exit 1 → exit 0（贴干跑输出）。
+- [x] AC1 机件存在且绿：`node --no-warnings --experimental-strip-types plugin/scripts/host-repo-surface-ratchet.ts --root . --json` exit 0，且输出含三集合的基数；贴命令与输出。
+- [x] AC2 正方向：基线已提交，`git show HEAD:docs/analysis/goal-015-host-repo-surface.baseline.json` 可读且三个键非空；贴三键基数（立案时的真实读数为 cli_verbs=19 / web_routes=25 / config_keys_with_consumer=5，实现时以当轮实测为准，⛔ 不照抄本行）。
+- [x] AC3 负方向（能取假）：往基线注入一个当前已不存在的元素（如路由 `/goals`）⇒ 检查器 exit 1 并逐字打印缩水的元素；验证后还原基线，贴前后命令与输出。
+- [x] AC4 未评估态可区分（硬规则 3b）：把被枚举的源文件之一临时改名 / 令入口 spawn 失败 ⇒ 退出码 3 且 stderr 含 `NOT-EVALUATED`，**与 exit 0 和 exit 1 三者互不同形**；贴三种退出码各一次的实测输出。
+- [x] AC5 新增允许（方向正确性，⛔ 防写反）：在基线之外**新增**一个元素（临时加一条路由或一个动词）⇒ 检查器仍 exit 0；贴命令与输出。
+- [x] AC6 突变覆盖：`bash plugin/scripts/checker-mutation-check.sh --list --json` 中存在 `name=="host-repo-surface-ratchet"` 且 `covered: true`；贴该条 JSON。
+- [x] AC7 三闸齐全：`bash plugin/scripts/capability-catalog.sh --json` 中该脚本 `question` 非 null；`mirror-pair-drift-check` 与 `quay-init-closure-ratchet --check-stale` 各 exit 0；贴三条命令的退出码。
+- [x] AC8 单测：`node --test plugin/test/host-repo-surface-ratchet.test.mjs` exit 0，含 AC3/AC4/AC5 三方向各 ≥1 条断言。
+- [x] AC9 AC-236 判据翻转：`goals/AC-236-*.md` 的 criterion 干跑从 exit 1 → exit 0（贴干跑输出）。
 
 ## Definition of Done
 
