@@ -2,7 +2,7 @@
 id: gap-instrument-failure-check-mutation-case-below-baseline
 title: instrument-failure-check 的突变用例注入量比基线小一个——checker-mutation-check --check 恒
   FAIL，"检测仪器故障的仪器"自己的取假证明失效
-status: todo
+status: ready
 labels:
   - gap
   - defect
