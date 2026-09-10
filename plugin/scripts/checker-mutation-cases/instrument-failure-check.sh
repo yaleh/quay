@@ -53,13 +53,24 @@ if checker_cmd "${workdir}"; then :; else
 fi
 
 # INJECT (shrink-only): push family-1 over its baseline → MUST go RED.
-# Adaptive inject count: baseline - current + 1. From any green surface (current ≤ baseline,
-# guaranteed by the baseline check above) this always exceeds FAMILY_BASELINE[1], so the checker
-# cannot stay green regardless of doc churn. (Pre-2026-08-12 this hardcoded ONE instance, which
-# broke when the AC38 doc-split shrank family-1 from 2 to 1 — injecting 1 gave 1→2 ≤ baseline=2,
-# a stale-mutation-case false-green, exactly the 7e6cec77 static-check red.)
-read -r cur base <<< "$(checker_json "${workdir}" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const j=JSON.parse(d);console.log(j.counts[1],j.baselines[1])})')"
-inject=$(( base - cur + 1 ))
+# Inject FAMILY_BASELINE[1] + 1 instances, so the crossing holds BY CONSTRUCTION regardless of how
+# much of the --gate scan surface the fixture reproduces: FAMILY_BASELINE is calibrated on the FULL
+# surface (8 tick docs ∪ plugin/scripts/*.{ts,sh}), but copy_surface() reproduces only the 8 docs
+# (plugin/scripts is absent ⇒ gateSurface's instrument half is empty). In the docs-only fixture
+# family-1 count=1 vs baseline=2 — injecting only enough to REACH the baseline (count → 2) stays
+# green, because the shrink-only judgment is `hits ≤ baseline` (== baseline is a pass). base+1 always
+# lands strictly ABOVE: count + base + 1 > base. (Pre-2026-08-12 hardcoded ONE instance — the
+# AC38 doc-split broke it exactly this way, 1→2 ≤ baseline=2, the 7e6cec77 red; the 2026-08-12
+# `base - cur + 1` form was arithmetically correct but broke under FORCE_COLOR=3 — see below.)
+# The `node -e` must emit NON-COLORIZABLE output: FORCE_COLOR=3 (ambient here) makes console.log
+# colorize NUMBERS even when piped (console.log(1,2) → "\x1b[33m1\x1b[39m \x1b[33m2\x1b[39m"),
+# which corrupts `read -r cur base` → `inject=$((…))` errors "operand expected" → the inject loop
+# never runs → the checker stays green → a FALSE static-check RED. process.stdout.write of a
+# template literal is raw (no util.inspect) and never colorized. (The suite-wide side is handled by
+# scripts/test.sh `unset FORCE_COLOR` — gap-suite-force-color-ansi-test-sh-normalize; this is the
+# standalone/direct `bash checker-mutation-check.sh --run` site, which has no such normalization.)
+read -r cur base <<< "$(checker_json "${workdir}" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const j=JSON.parse(d);process.stdout.write(`${j.counts[1]} ${j.baselines[1]}\n`)})')"
+inject=$(( base + 1 ))
 for _ in $(seq 1 "${inject}"); do
   echo "" >> "${workdir}/orchestration/orchestrator-loop-tick.md"
   echo "> pgrep -f 'quay.ts serve' 又一条自匹配" >> "${workdir}/orchestration/orchestrator-loop-tick.md"
