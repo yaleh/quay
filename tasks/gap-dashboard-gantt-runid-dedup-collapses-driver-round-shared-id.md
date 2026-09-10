@@ -32,10 +32,10 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] 用真实生产数据形状构造回归测试：多条 `WorkerOutcomeRecord`（不同 `task`、不同 `started_at`/`ended_at`）共享同一个 `run_id`（如 `wk-prod-1`），断言 `mergeLiveAndHistoryIntervals()` 的输出**每条历史记录都独立保留**（不因共享 run_id 被误判为重复而丢弃）——单测覆盖当前 `serve-dashboard.test.mjs` AC1 遗漏的这个具体生产形状
-- [ ] 保留原有「同一次运行既在 `inFlight` 又在 `worker-outcome.jsonl`（in-flight 侧尚未终态化前被重复计入）不应重复画两个块」的去重语义，但去重键改为不依赖跨任务共享的 `run_id`（如 `taskId + started_at` 组合，或直接依据两源在时间上不重叠的事实简化/移除跨源去重）——单测覆盖新去重键在真正同一次运行（in-flight + 其终态 outcome 记录，taskId 和 startedAtMs 一致）时仍正确去重为一条
-- [ ] 对生产 `.quay/worker-outcome.jsonl` 12h 窗口跑一次 `mergeLiveAndHistoryIntervals()`（集成测试或手动验证脚本均可，但需落一条可复核的命令+输出到 PR/commit），确认修复后输出条数与「窗口内 started_at/ended_at 均可解析且相交的记录数」量级一致（不再因去重键误判被砍到个位数）
-- [ ] `scripts/test.sh` 全绿
+- [x] 用真实生产数据形状构造回归测试：多条 `WorkerOutcomeRecord`（不同 `task`、不同 `started_at`/`ended_at`）共享同一个 `run_id`（如 `wk-prod-1`），断言 `mergeLiveAndHistoryIntervals()` 的输出**每条历史记录都独立保留**（不因共享 run_id 被误判为重复而丢弃）——单测覆盖当前 `serve-dashboard.test.mjs` AC1 遗漏的这个具体生产形状
+- [x] 保留原有「同一次运行既在 `inFlight` 又在 `worker-outcome.jsonl`（in-flight 侧尚未终态化前被重复计入）不应重复画两个块」的去重语义，但去重键改为不依赖跨任务共享的 `run_id`（如 `taskId + started_at` 组合，或直接依据两源在时间上不重叠的事实简化/移除跨源去重）——单测覆盖新去重键在真正同一次运行（in-flight + 其终态 outcome 记录，taskId 和 startedAtMs 一致）时仍正确去重为一条
+- [x] 对生产 `.quay/worker-outcome.jsonl` 12h 窗口跑一次 `mergeLiveAndHistoryIntervals()`（集成测试或手动验证脚本均可，但需落一条可复核的命令+输出到 PR/commit），确认修复后输出条数与「窗口内 started_at/ended_at 均可解析且相交的记录数」量级一致（不再因去重键误判被砍到个位数）
+- [x] `scripts/test.sh` 全绿
 
 ## Definition of Done
 
