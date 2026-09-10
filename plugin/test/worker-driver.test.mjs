@@ -623,6 +623,10 @@ test("defaultMechanicalSuiteCommand — 第三方项目（scripts/test.sh 与 te
   });
   assert.equal(cmd[0], "bash");
   assert.match(cmd[2], /third-party-no-test-tooling/, "无测试能力 ⇒ 可区分取值（⛔ 不与「suite 跑了且失败」同形）");
+  // gap-ac227-third-party-capability-degradation — 「能力不存在」不再以 exit 127（command-not-found）
+  // 形态出现（GOAL-012 退出条件②）；fail-closed 仍保持非零退出（suite 判 red ⇒ 拒翻 done）。
+  assert.ok(!cmd[2].includes("exit 127"), "⛔ 不得以 exit 127 形态出现（能力不存在 ≠ 命令不存在）");
+  assert.match(cmd[2], /exit\s+[1-9][0-9]*/, "仍 fail-closed（非零退出 ⇒ suite 判 red）");
 });
 
 test("gap-mechanical-fan-in-per-suite-runid-unified AC2 — newMechanicalSuiteRunId is per-suite unique (two tasks ⇒ two ids, one per fan-in)", () => {
