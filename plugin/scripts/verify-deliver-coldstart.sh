@@ -603,11 +603,17 @@ step5_e2e() {
 
 ## Acceptance Criteria
 
-- [ ] AC1 e2e-marker.txt 存在且内容为 ac207
+- [ ] AC1 e2e-marker.txt 存在于项目根，内容恰为一行 "ac207"，且该提交主题不含 chore(quay-init): 前缀（区分自动落盘提交与真实开发提交）。
+- [ ] AC2 该提交可在本项目 git log 中查到，commit sha 非空。
 
 ## Definition of Done
 
-- [ ] e2e-marker.txt 已提交且为一条非 chore(quay-init) 提交
+- [ ] e2e-marker.txt 已提交且为一条非 chore(quay-init) 提交，git log 可见该提交对应的真实 commit sha。
+
+## Touches
+
+- e2e-marker.txt
+- tasks/e2e-verify-207.md
 BODY
   if ! (cd "$root" && node "$qrl" goal write "$goal_id" --origin "AC-207 端到端自证" --title "e2e target goal" --goal "GOAL-E2E" --criterion "true") >/dev/null 2>&1; then
     echo "  NOTE: goal write failed — 双载体 goal 侧未落地（不阻塞任务侧；AC-207 记录只读 task 侧）"
