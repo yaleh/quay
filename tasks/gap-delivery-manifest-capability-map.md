@@ -21,6 +21,7 @@ extra:
 2. 新增一个机械检查脚本（如 `plugin/scripts/capability-manifest-check.ts`），双向枚举：源码里实际存在的这几类对象 vs manifest 里登记的集合——源码有而 manifest 未登记 ⇒ 报"未登记能力"；manifest 登记但源码里已不存在 ⇒ 报"陈旧登记"。判据要能取假：对着一个已知的历史缺口（AC-202 的 `DRIVER_KINDS` 6 个 kind 曾经遗漏的场景）复现一次，证明检查器真的会报红，而不是自证通过（CLAUDE.md 硬规则 3b/4）。
 3. 接入 `scripts/test.sh` 的静态检查层或 `.github/workflows/ci.yml`（与 `dist-verify-node-floor` 同级职责：packaging e2e 类，不是 `node --test`）。
 4. 用该机制回填 AC-202 的真实案例——把 `DRIVER_KINDS` 的 6 个 driver kind、CLI 顶层命令、MCP server 列表实际登记进 manifest，作为第一批验证对象。
+5. `capability-manifest-check.ts` 是新增的 `plugin/scripts/*.ts` 文件，本身会触发仓库既有的三个注册闸（outline 登记 / `capability-catalog.sh` 消费者面登记 / laydown 打包登记）——实现时一并登记，不留新脚本自己成为下一个"未登记能力"的反讽。
 
 ## Acceptance Criteria
 
@@ -39,5 +40,6 @@ extra:
 - delivery-manifest.json
 - plugin/scripts/capability-manifest-check.ts（新增）
 - plugin/test/capability-manifest-check.test.mjs（新增，覆盖检查脚本本身）
+- plugin/scripts/capability-catalog.sh（新脚本的消费者面登记）
 - scripts/test.sh 或 .github/workflows/ci.yml（接入点，具体二选一由实现者定）
 - tasks/gap-delivery-manifest-capability-map.md（本任务自身）
