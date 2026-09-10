@@ -28,17 +28,17 @@ extra:
 
 ## AC
 
-- [ ] **读真实历史而非 fixture**：把 `.quay/goal-round.jsonl` 中 AC-214 那一段**真实记录**喂进派生函数 ⇒ 报出该 AC 的零产出 streak ≥ 8（硬规则 4 推论三：只能被构造数据满足的判据不是测量）
-- [ ] **digest 纪律的双向负控制**：streak 递增但**未越阈**的两轮 ⇒ `readingsDigest` **相同**；**越阈**那一轮 ⇒ digest **改变**。两个方向都要有用例（只测一个方向挡不住「恒变」或「恒不变」这两种相反的失效）
-- [ ] **未评估独立取值**：载体读不出 / 无历史 ⇒ 返回 `evaluated:false`，⛔ 不与 `streak=0` 同形（硬规则 3b：读不懂不得与合格共用输出）
-- [ ] `node --no-warnings --experimental-strip-types --test plugin/test/meta-driver.test.mjs` exit 0
-- [ ] `bash scripts/test.sh` exit 0
+- [x] **读真实历史而非 fixture**：把 `.quay/goal-round.jsonl` 中 AC-214 那一段**真实记录**喂进派生函数 ⇒ 报出该 AC 的零产出 streak ≥ 8（硬规则 4 推论三：只能被构造数据满足的判据不是测量）
+- [x] **digest 纪律的双向负控制**：streak 递增但**未越阈**的两轮 ⇒ `readingsDigest` **相同**；**越阈**那一轮 ⇒ digest **改变**。两个方向都要有用例（只测一个方向挡不住「恒变」或「恒不变」这两种相反的失效）
+- [x] **未评估独立取值**：载体读不出 / 无历史 ⇒ 返回 `evaluated:false`，⛔ 不与 `streak=0` 同形（硬规则 3b：读不懂不得与合格共用输出）
+- [x] `node --no-warnings --experimental-strip-types --test plugin/test/meta-driver.test.mjs` exit 0
+- [ ] `bash scripts/test.sh` exit 0（待外部）
 
 ## DoD
 
-- [ ] **生产载体上可见**：实现落地**之后**的时间窗内，`.quay/meta-driver-round.jsonl` 至少一条轮记录携带该时序字段（⛔ 不以单测绿充当完成——硬规则 4 推论三：实现了、测试绿了、但生产没跑过，与「没实现」同形）
-- [ ] **阈值不是拍脑袋**：先给出现有载体上 streak 取值的实测分布再定阈值，或显式声明该阈值是**安全网而非调优值**（硬规则 4 推论一：成本结构未实测前不设数值阈值）
-- [ ] ⛔ 不因本任务把「实例修复」再做一遍——`gap-goal-gap-done-task-not-traction-respawns-every-round` 已 done，本任务**只加通用维度**，不重改 `computeGoalGaps` 的牵引口径
+- [ ] **生产载体上可见**：实现落地**之后**的时间窗内，`.quay/meta-driver-round.jsonl` 至少一条轮记录携带该时序字段（⛔ 不以单测绿充当完成——硬规则 4 推论三：实现了、测试绿了、但生产没跑过，与「没实现」同形）（待外部）
+- [x] **阈值不是拍脑袋**：先给出现有载体上 streak 取值的实测分布再定阈值，或显式声明该阈值是**安全网而非调优值**（硬规则 4 推论一：成本结构未实测前不设数值阈值）
+- [x] ⛔ 不因本任务把「实例修复」再做一遍——`gap-goal-gap-done-task-not-traction-respawns-every-round` 已 done，本任务**只加通用维度**，不重改 `computeGoalGaps` 的牵引口径
 
 ## Touches
 
