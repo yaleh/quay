@@ -233,6 +233,16 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
     "AC3 negative: a bookkeeping-only third-party project writes NO record (carrier lines 0→0) and leaves the AC207-NO-IMPLEMENTATION-COMMIT trace (⛔ not silent, ⛔ not a bookkeeping commit filling the slot)");
   assert.match(r.stdout, /ac207-e2e-write\(with-impl-commit\) line=1 files=\["e2e-marker\.txt"\]/,
     "AC3 positive counterpart: the same fixture + one implementation commit writes exactly one record with commit_files outside the bookkeeping triplet");
+  // produced_by_driver must not be decided by `git … | grep -q`: under `set -o pipefail` a matching
+  // grep exits early, git takes SIGPIPE, the pipeline returns 141, and the predicate reads FALSE
+  // exactly when the condition is TRUE. Measured 2026-09-11 on orangevps against the real third-party
+  // root: implementation commit + 1 gate event + status=done all held, yet produced_by_driver was 0
+  // and no record was written (OLD=0 / NEW=1 on that host). The race is host-dependent — this
+  // machine's GNU grep reads to EOF (10/10 pipelines returned 0, so the old form passes here) while
+  // orangevps's grep exits early (5/5 returned 141) — so the deterministic local guard is the
+  // STRUCTURAL control: probe_ac207_measures's body must carry no pipe into grep.
+  assert.match(r.stdout, /ac207-produced-by-driver\(no-pipe-into-grep\)=1/,
+    "produced_by_driver must be decided by captured text + case matching, not `git … | grep -q` (pipefail SIGPIPE reads false exactly when the condition is true)");
 });
 
 test("AC1 — --selfcheck is hermetic: it does not touch a real install and runs offline", () => {
