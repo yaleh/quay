@@ -2,7 +2,7 @@
 id: gap-ff-merge-suite-cert-classifier-unshipped-and-misreported
 title: ff-merge 的 suite 证书闸在【安装布局】下把「分类器根本没跑起来」误报成「delta 被 @static-object
   覆盖（非惰性）」——每个任务的首次 fan-in 必然落地失败
-status: ready
+status: done
 labels:
   - gap
 parent: null
