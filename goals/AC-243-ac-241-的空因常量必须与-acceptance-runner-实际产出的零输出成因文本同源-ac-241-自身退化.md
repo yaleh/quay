@@ -1,7 +1,7 @@
 ---
 id: AC-243
 title: AC-241 的空因常量必须与 acceptance-runner 实际产出的零输出成因文本同源——AC-241 自身退化为恒绿时必须报红
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-009
 criterion: >-
@@ -56,6 +56,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-09-11T09:38:19.382Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
