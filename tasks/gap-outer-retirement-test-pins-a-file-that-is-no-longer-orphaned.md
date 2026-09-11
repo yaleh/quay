@@ -3,7 +3,7 @@ id: gap-outer-retirement-test-pins-a-file-that-is-no-longer-orphaned
 title: 全量套件确定性红 1 条：outer-retirement 测试硬钉
   retiredWithMarker==['outer-anchor-check.ts']，而该文件已不再是孤儿（检查器自己 ok:true）⇒ 每次
   fan-in 都在 suite 步被烧
-status: ready
+status: done
 labels:
   - gap
   - defect
