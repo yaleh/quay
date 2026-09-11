@@ -2,7 +2,7 @@
 id: gap-acceptance-runner-failure-reason-drops-criterion-stderr
 title: runAcceptance 的失败 reason 只由退出码构成、丢弃判据自己写的 stderr ⇒ goal gate
   每条红灯都不可归因（AC-214 连续 720 轮同值红而无法判因）
-status: todo
+status: ready
 labels:
   - gap
   - defect
