@@ -1,7 +1,7 @@
 ---
 id: gap-upgrade-entry-never-establishes-branch-model
 title: 交付/升级入口 shipped quay-init.sh 从不建立分支模型——落地基线的 remedy 对真实用户不可达，升级后的旧项目结构性落不了地
-status: done
+status: ready
 labels:
   - gap
   - defect
