@@ -1,15 +1,11 @@
 ---
 id: GOAL-009
 title: 交付面端到端自证 —— 从 build 到「driver 驱动第三方项目开发」的闭环
-status: achieved
+status: active
 kind: goal
-origin: 人 2026-09-09 四条裁定：① 点火依靠会话投递，后续驱动依靠
-  *-drivers，但仍应可间断使用会话（和会话投递）进行调节（典型地是问题分析与创建 goal/task），就像本项目当前的状态；② 退役
-  2026-08-16 裁定「冷启动活性必须用真实交互式 tmux + Claude Code 会话验证，claude -p headless 不算」；③
-  claude --bg 不作为产品能力交付，仅作为本次验证使用的手段——实际用户使用 quay 驱动其它项目开发时会手动启动若干 Claude Code
-  会话，SPEC-tmux-retirement-2026-09-03「quay 不管会话生命周期」的产品判断原样保留（本 GOAL 含一条退役、零 SPEC
-  反转）；④ goals/ 目录应当和 tasks/ 目录一起由 quay-init 创建。实测来源：2026-09-08/09 在
-  B(orangevps)/C(ad-arm1) 与第三方项目 meta-cc 克隆上的跨主机跨项目验证。
+origin: 人 2026-09-11：orangevps meta-cc 副本升级路径验证需要一条挂在本 goal 下的新
+  AC（AC-238）才能进入持续复验范围；GOAL-009 已第二次被 goal-driver 机械 flip 回
+  achieved（印证其自身文档风险5「达成即停止复验」），趁窗口重新打开时挂新 AC。
 activatedAt: 2026-09-09T11:49:40.080Z
 statusLog:
   - at: 2026-09-09T09:03:58.541Z
@@ -27,6 +23,11 @@ statusLog:
     to: achieved
     actor: goal-driver
     reason: "I2: all ACs achieved + sufficiency covered"
+  - at: 2026-09-11T03:11:05.813Z
+    from: achieved
+    to: active
+    actor: goal-cli
+    reason: ""
 ---
 ## 背景
 
