@@ -155,6 +155,11 @@ test('runPackagingHygiene drift ⇒ failed + gap-filing spawned (AC3)', async (t
     checkCmd: ['node', check],
     gapWorkerCmd: `node ${capture}`,
     gapWorkerTimeoutMs: 10_000,
+    // ⛔ 必须注入资源门缝，否则本用例读【真实宿主】的 resource-gate.sh —— 套件运行时宿主正被
+    // 自己压着，闸返回 WAIT ⇒ gapFiled 恒 false ⇒ 用例在全量套件里红、单跑绿（实测 2026-09-11：
+    // 同一文件 08:31 passed=true / 10:41 与 10:49 passed=false，且 10:41 那次属于【另一个任务】的
+    // fan-in —— 载荷随宿主漂移，非本任务回归）。['true'] = 确定性 GO，与 goal-driver.test.mjs 同款。
+    resourceGateArgv: ['true'],
   });
   assert.equal(fact.name, 'packaging-hygiene');
   assert.equal(fact.state, 'failed');
@@ -163,6 +168,24 @@ test('runPackagingHygiene drift ⇒ failed + gap-filing spawned (AC3)', async (t
   const prompt = fs.readFileSync(marker, 'utf8');
   assert.ok(prompt.includes('orphan_key'), 'gap-filing prompt must name the drift item');
   assert.ok(prompt.includes('quay-file-task'), 'gap-filing prompt must route through quay-file-task');
+});
+
+test('runPackagingHygiene drift + resource-gate WAIT ⇒ failed but gap-filing deferred (AC150-1 同族)', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pkg-hyg-wait-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const check = fakeCheckScript(tmp, DRIFT_JSON);
+  const marker = path.join(tmp, 'prompt.txt');
+  const capture = fakeGapCaptureScript(tmp, marker);
+  const fact = await runPackagingHygiene(tmp, {
+    checkCmd: ['node', check],
+    gapWorkerCmd: `node ${capture}`,
+    gapWorkerTimeoutMs: 10_000,
+    resourceGateArgv: ['bash', '-c', 'exit 1'],   // WAIT（非 0 退出）——同 goal-driver.test.mjs 的负控制
+  });
+  assert.equal(fact.state, 'failed', 'WAIT defers the spawn, ⛔ 不把 drift 吞掉（三态不得压平）');
+  assert.equal(fact.value.gapFiled, false, 'resource-gate WAIT must defer the gap-filing spawn');
+  assert.ok(!fs.existsSync(marker), 'no gap-filing spawn ⇒ no captured prompt');
+  assert.ok(/deferred/.test(fact.reason ?? ''), 'reason must carry the deferral cause, ⛔ not a bare "failed"');
 });
 
 test('runPackagingHygiene halted ⇒ drift reported but gap-filing deferred (halt is a round-internal gate)', async (t) => {
