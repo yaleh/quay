@@ -139,7 +139,7 @@ export function runLaydownPaths(root: string): string[] | null {
 }
 
 /** The SEVEN-item closed set (SPEC §6 QUAY-INIT-CLOSED-SET), `tasks/` and `goals/` directory members
- *  included — the exact paths whose written/unwritten state a failing quay-init must mechanically
+ *  included — the exact paths whose per-item state a failing quay-init must mechanically
  *  report (AC3). */
 export const CLOSED_SET_ALL: readonly string[] = [
   ".quay/config.yml",
@@ -151,20 +151,45 @@ export const CLOSED_SET_ALL: readonly string[] = [
   ".claude/settings.json",
 ];
 
+/** The four states a failing quay-init's closed-set report can carry (gap-quay-init-failure-report-
+ *  existence-proxy-overreports-on-upgrade). `pre-existing` is the state that existence alone cannot
+ *  express: the item was already there before the run and the run left it byte-unchanged — the
+ *  distinction an UPGRADE target needs, and the one whose absence made a no-op failure look like a
+ *  partial takeover. `unreadable` keeps "could not look" out of `unwritten` (hard rule 3b). */
+export type ClosedSetItemState = "written" | "pre-existing" | "unwritten" | "unreadable";
+
+export const CLOSED_SET_ITEM_STATES: readonly ClosedSetItemState[] = [
+  "written",
+  "pre-existing",
+  "unwritten",
+  "unreadable",
+];
+
 export interface FailureStateReport {
   /** exit code of the failed run (must be non-zero — a success is NOT-EVALUATED, never a pass). */
   exitCode: number;
-  /** items reported as `written:` in the failure output. */
+  /** items reported as `written:` — this run created them or changed their content. */
   written: string[];
-  /** items reported as `unwritten:` in the failure output. */
+  /** items reported as `pre-existing:` — already there before this run, left byte-unchanged. */
+  preExisting: string[];
+  /** items reported as `unwritten:` — not there now. */
   unwritten: string[];
+  /** items reported as `unreadable:` — present but their content could not be read. */
+  unreadable: string[];
   /** raw stdout+stderr of the failed run (diagnostics). */
   output: string;
 }
 
+/** every closed-set item the report accounted for, across ALL recognized states. A parser that knows
+ *  only a subset of the vocabulary silently drops the rest, so consumers must union the whole set. */
+export function reportedItems(report: FailureStateReport): string[] {
+  return [...report.written, ...report.preExisting, ...report.unwritten, ...report.unreadable];
+}
+
 /**
  * Run ONE real FAILING quay-init (a bare target with no detectable test command, so the run
- * fail-closes BEFORE any write) and parse the AC3 closed-set state report (`written:`/`unwritten:`
+ * fail-closes BEFORE any write) and parse the AC3 closed-set state report (one `written:` /
+ * `pre-existing:` / `unwritten:` / `unreadable:`
  * lines a non-zero exit must emit). Returns null when quay-init.sh is absent (the same NOT-EVALUATED
  * condition as runLaydownPaths) or when the run unexpectedly exits 0 (a checker that expected a
  * failure but saw none must not look like "覆盖了失败路径").
@@ -194,15 +219,22 @@ export function runFailureStateReport(root: string): FailureStateReport | null {
     if (exitCode === 0) return null; // expected a failure; a success is NOT-EVALUATED (unreadable input)
     const output = stdout + "\n" + stderr;
     const written: string[] = [];
+    const preExisting: string[] = [];
     const unwritten: string[] = [];
+    const unreadable: string[] = [];
+    // Every state the reporter emits must be listed in the alternation, longest-first (a state the
+    // parser cannot name would drop its item out of every bucket — hard rule 3b: a parser that cannot
+    // read a value must not silently look like it accounted for it).
     for (const line of output.split("\n")) {
-      const m = line.match(/^\s*(written|unwritten):\s*(.+?)\s*$/);
+      const m = line.match(/^\s*(pre-existing|unwritten|unreadable|written):\s*(.+?)\s*$/);
       if (!m) continue;
       const item = m[2].trim();
       if (m[1] === "written") written.push(item);
-      else unwritten.push(item);
+      else if (m[1] === "pre-existing") preExisting.push(item);
+      else if (m[1] === "unwritten") unwritten.push(item);
+      else unreadable.push(item);
     }
-    return { exitCode, written, unwritten, output };
+    return { exitCode, written, preExisting, unwritten, unreadable, output };
   } finally {
     try {
       fs.rmSync(tmpBase, { recursive: true, force: true });
@@ -242,16 +274,17 @@ function main(argv: string[]): number {
 
   // AC5 failure path (gap-quay-init-hard-requires-tmux-session-and-leaves-partial-write): the checker
   // must cover the FAILURE path too, not just the happy-path membership. A failing quay-init must
-  // mechanically report the seven-item written/unwritten state (AC3) — assert every closed-set item
-  // appears in the report (written OR unwritten), so a report that silently omits an item is a FAIL.
+  // mechanically report the seven-item state (AC3) — assert every closed-set item appears in the
+  // report, in ANY of the four states (written / pre-existing / unwritten / unreadable), so a report
+  // that silently omits an item is a FAIL.
   const failReport = runFailureStateReport(root);
   const failMissing: string[] = [];
   if (failReport === null) {
     failMissing.push("(failure path NOT-EVALUATED: a failing quay-init did not run to a non-zero exit)");
   } else {
+    const seen = reportedItems(failReport);
     for (const item of CLOSED_SET_ALL) {
-      const seen = failReport.written.includes(item) || failReport.unwritten.includes(item);
-      if (!seen) failMissing.push(item);
+      if (!seen.includes(item)) failMissing.push(item);
     }
   }
 

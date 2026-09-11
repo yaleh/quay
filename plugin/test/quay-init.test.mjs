@@ -237,7 +237,7 @@ test("no-tmux host: quay-init exits 0, lays the seven-item closed set, and write
   } finally { cleanup(ws); }
 });
 
-// ── AC3: a mid-write failure reports the per-item written/unwritten state (mechanically parseable) ──
+// ── AC3: a mid-write failure reports the per-item state (mechanically parseable) ───────────────────
 // A `.claude` FILE (not a dir) makes the launch.settings.json lay-down's `mkdir -p .claude` abort AFTER
 // config.yml/profiles.yml/tasks/goals/.gitignore were written — the exact partial-write shape the task
 // describes. The EXIT trap must list which of the seven items landed (written:) and which did not
@@ -261,5 +261,106 @@ test("AC3 — a mid-write failure lists the seven-item written/unwritten state",
       assert.match(combined, new RegExp(`unwritten:\\s*${p.replace(/\./g, "\\.")}`),
         `the report must mark ${p} unwritten`);
     }
+  } finally { cleanup(ws); }
+});
+
+// ── AC1/AC2/AC3: the failure report states WHAT THIS RUN WROTE, not what merely EXISTS ───────────────
+// gap-quay-init-failure-report-existence-proxy-overreports-on-upgrade. The report used to classify each
+// item by `[ -e <path> ]` — EXISTENCE — which coincides with "this run wrote it" ONLY on a fresh target.
+// On a non-empty target (the upgrade path: a project that already ran quay-native) the two quantities
+// separate: a pre-write failure credited this run with files it never touched, describing a run that
+// changed nothing as a partial takeover. The three tests below are the AC1 (non-empty), AC2 (fresh
+// negative control) and AC3 (three-state vocabulary) pair — AC4's "new coverage uses a non-empty
+// target": the pre-existing mid-write test above uses an EMPTY target, the AC1/AC3 tests do not.
+const CLOSED_SET_ALL = [
+  ".quay/config.yml",
+  ".quay/profiles.yml",
+  "tasks",
+  "goals",
+  ".gitignore",
+  ".claude/launch.settings.json",
+  ".claude/settings.json",
+];
+
+// Every state the reporter can emit, longest-first (so `pre-existing` is not shadowed). An item that
+// lands in NO bucket is a parse failure, never a silent absence — a vocabulary the parser cannot read
+// must not look like a clean report.
+const REPORT_STATES = ["written", "pre-existing", "unwritten", "unreadable"];
+function parseClosedSetReport(combined) {
+  const byState = Object.fromEntries(REPORT_STATES.map((s) => [s, []]));
+  for (const line of combined.split("\n")) {
+    const m = line.match(/^\s*(pre-existing|unwritten|unreadable|written):\s*(.+?)\s*$/);
+    if (!m) continue;
+    byState[m[1]].push(m[2].trim());
+  }
+  return byState;
+}
+
+test("AC1 — a pre-write failure on a NON-EMPTY target never marks an untouched file as written", () => {
+  const ws = makeTmp("qinit-nonempty-");
+  try {
+    // Exactly what an upgrade target looks like: .quay/config.yml and tasks/ already there.
+    fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+    fs.mkdirSync(path.join(ws, "tasks"), { recursive: true });
+    const cfg = path.join(ws, ".quay", "config.yml");
+    fs.writeFileSync(cfg, "# hand-written config\nproviders:\n  native:\n    enabled: true\n");
+    fs.writeFileSync(path.join(ws, "tasks", "already-here.md"), "# a task the project already had\n");
+    const before = fs.readFileSync(cfg);
+
+    // NO --test-command ⇒ nothing is detectable in the target ⇒ fail-closed BEFORE any write.
+    const r = runInit(ws, ["--root", ws, "--project", "proj-nonempty", "--plugin-root", pluginDir]);
+    assert.notEqual(r.status, 0, `the run must fail closed:\n${r.stdout}${r.stderr}`);
+
+    // Precondition (the RED condition this AC forbids): the bytes never changed…
+    assert.equal(Buffer.compare(before, fs.readFileSync(cfg)), 0,
+      "precondition: this run must not have touched .quay/config.yml's bytes");
+    // …so the report may not claim it wrote them.
+    const states = parseClosedSetReport(r.stdout + "\n" + r.stderr);
+    assert.ok(!states.written.includes(".quay/config.yml"),
+      `.quay/config.yml is byte-identical across the run but the report claims written:\n${r.stderr}`);
+    assert.ok(!states.written.includes("tasks"),
+      `tasks/ already existed and this run did not touch it, but the report claims written:\n${r.stderr}`);
+    // The honest state it must carry instead: present before, untouched by this run.
+    assert.ok(states["pre-existing"].includes(".quay/config.yml"),
+      `.quay/config.yml must be reported pre-existing: (it was there, this run left it alone)\n${r.stderr}`);
+    assert.ok(states["pre-existing"].includes("tasks"),
+      `tasks/ must be reported pre-existing:\n${r.stderr}`);
+  } finally { cleanup(ws); }
+});
+
+test("AC2 — negative control: on a fresh EMPTY target the same failure still reports all seven unwritten", () => {
+  const ws = makeTmp("qinit-empty-");
+  try {
+    const r = runInit(ws, ["--root", ws, "--project", "proj-empty", "--plugin-root", pluginDir]);
+    assert.notEqual(r.status, 0, `the run must fail closed:\n${r.stdout}${r.stderr}`);
+    const states = parseClosedSetReport(r.stdout + "\n" + r.stderr);
+    assert.deepEqual(states.written, [], "nothing was written, so nothing may be reported written:");
+    assert.deepEqual(states["pre-existing"], [], "the target was empty, so nothing may be pre-existing:");
+    assert.deepEqual(states.unreadable, [], "nothing was unreadable in this fixture:");
+    for (const p of CLOSED_SET_ALL) {
+      assert.ok(states.unwritten.includes(p),
+        `${p} must be reported unwritten: on a fresh target (the predecessor task's AC3 behaviour)\n${r.stderr}`);
+    }
+  } finally { cleanup(ws); }
+});
+
+test("AC3 — one run's output carries ≥3 distinguishable states (written / pre-existing / unwritten)", () => {
+  const ws = makeTmp("qinit-threestate-");
+  try {
+    // tasks/ pre-exists and `mkdir -p` leaves it alone ⇒ pre-existing.
+    fs.mkdirSync(path.join(ws, "tasks"), { recursive: true });
+    // A `.claude` FILE aborts the launch.settings.json lay-down mid-write ⇒ the items after it stay
+    // absent ⇒ unwritten. config.yml/profiles.yml/goals/.gitignore are created before the abort.
+    fs.writeFileSync(path.join(ws, ".claude"), "not a dir\n");
+    const r = runInit(ws, ["--loop", "--root", ws, "--project", "proj-three",
+      "--test-command", "node --test", "--tmux-session", "proj-three-0:0.0"]);
+    assert.notEqual(r.status, 0, `a mid-write failure must exit non-zero:\n${r.stdout}${r.stderr}`);
+    const states = parseClosedSetReport(r.stdout + "\n" + r.stderr);
+    const observed = REPORT_STATES.filter((s) => states[s].length > 0);
+    assert.ok(observed.length >= 3,
+      `the report vocabulary must separate ≥3 states in ONE run, observed ${JSON.stringify(observed)}:\n${r.stderr}`);
+    assert.ok(states.written.includes(".quay/config.yml"), "config.yml is created by this run ⇒ written:");
+    assert.ok(states["pre-existing"].includes("tasks"), "tasks/ was already there, untouched ⇒ pre-existing:");
+    assert.ok(states.unwritten.includes(".claude/settings.json"), "never reached ⇒ unwritten:");
   } finally { cleanup(ws); }
 });
