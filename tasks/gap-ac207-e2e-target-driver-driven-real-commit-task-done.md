@@ -1,8 +1,8 @@
 ---
 id: gap-ac207-e2e-target-driver-driven-real-commit-task-done
 title: 端到端：目标项目自己的 *-drivers 驱动出真实开发提交且任务翻 done，落 ac=GOAL-009-AC-207 记录（AC-207）
-status: ready
-needs_human_cause: unclassified
+status: needs-human
+needs_human_cause: human-adjudication
 labels:
   - gap
   - delivery-critical
@@ -230,3 +230,16 @@ AC1/AC4 实现已 done 不变；AC2/AC3/AC5 仍阻塞，需修该缺陷（新任
 **本轮修法（落本任务分支）**：`develop-deliver-tgz.sh` 的 `--ac207-e2e` 接线补传 `AC207_POLL_SECS=3600`——e2e 任务首次 worker 尝试可因 fan-in suite 证书非惰性而失败重试，任务 done 实测 ~30min，脚本默认 1800s 轮询窗口实测恰在 done 前 ~19s 过期 ⇒ 记录未写；3600s 给足双次尝试余量（本轮实测记录即由此产出）。
 
 **机件回传留痕**：`develop-deliver-tgz: --verify-coldstart OK — evidence transported into /home/yale/work/quay/.quay/productization-verification.jsonl`（appended=6，含本条 AC-207 记录）。
+
+## Needs-Human
+
+**执行 2026-09-11T01:59:37.789Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 成因类：human-adjudication
+- 失败步/判词：step=merge-develop: Auto-merging plugin/scripts/develop-deliver-tgz.sh
+CONFLICT (content): Merge conflict in plugin/scripts/develop-deliver-tgz.sh
+Automatic merge failed; fix conflicts and then commit the result.
+- run_id：wk-prod-1788972473
+- session_id：69cba467-fd63-46a5-a53e-b6ddfc17da38
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-ac207-e2e-target-driver-driven-real-commit-task-done-wk-prod-1788972473.log
