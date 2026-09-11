@@ -1,7 +1,7 @@
 ---
 id: gap-fixture-dir-write-races-whole-tree-copy
 title: 测试往已签入的 fixtures 目录里建/删临时目录 —— 与任何整树拷贝并发即产生假红
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
