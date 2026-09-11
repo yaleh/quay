@@ -87,3 +87,18 @@ state: verified | reason: sufficiency=not-evaluated（在域 AC 9 条）
 - plugin/test/goal-sufficiency-determinism.test.mjs
 - tasks/gap-sufficiency-verdict-nondeterministic-on-identical-input.md
 - tasks/gap-sufficiency-cache-in-memory-only-and-not-evaluated-cause-not-distinguishable.md
+
+
+## 实测补充（2026-09-11T00:1xZ，独立探针，直接调 semanticSufficiencyVerdict）
+
+**读数**：对 GOAL-009 的当前输入（在域 9 条 AC：AC-201/202/203/204/205/206/207/214/232，prompt 3854 字符）调用一次 `semanticSufficiencyVerdict`，传 `sufficiencyTimeoutMs: 200000`：
+
+```
+CALL-1 verdict=not-evaluated elapsed=234.3s
+```
+
+**成本结论（与成因无关，独立成立）**： 对同一输入取**两次**独立样本，每次上限 `SUFFICIENCY_TIMEOUT_MS = 180_000`。⇒ **一次缓存未命中的充分性判定，最坏 360 秒**；本次实测总墙钟 **234.3 秒**（两次样本合计，平均约 117 秒/次）。当前有 2 个 active goal ⇒ 冷缓存时单轮最坏约 **12 分钟**只花在充分性上。这解释了为什么 goal-driver 重启后连续多轮读不到确定裁决——**缓存是内存的（本任务 ①），重启即冷，而冷缓存的代价是分钟级的**。⇒ ① 的落盘不只是正确性问题，也是成本问题。
+
+**⚠️ 成因仍未定（⛔ 不要据本段下结论）**：234.3 秒是**两次样本的总和**，无法分解。至少两种分解都与它相容——(a) 两次各约 117 秒、都成功但**裁决不一致**（守卫在正确工作）；(b) 一次在 200 秒超时 + 另一次 34 秒返回（判定器过慢）。**本探针分不出 (a) 与 (b)，这正是本任务 ② 要补的东西**（AC3 的三方向成因实测）。⛔ 实现者不得把本段当成「已确认是超时」或「已确认是分歧」。
+
+**一个相容的旁证（同样不构成结论）**：goal-driver 重启后 GOAL-009 连续 4 轮 `not-evaluated`，第 5 轮翻 `covered` 并随后稳定——与「两次取样时而一致时而不一致」相容，也与「判定器延迟在超时边界上下浮动」相容。
