@@ -2,7 +2,7 @@
 id: gap-upgrade-verify-transport-missing-binding-checker
 title: AC-238/239 跨主机验证器传输漏带 provider-binding-resolvability-check.ts（且它 import 裸
   `yaml`）——AC-238 记录在真机上结构上写不出，⑦b 前置永不成立
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -54,6 +54,24 @@ Error: Cannot find module '/home/yale/provider-binding-resolvability-check.ts'
 ⇒ 修法要在**两个**方向上都成立，⛔ 只加一行 scp 不够。可用的一个现成事实：安装前缀里**有** yaml
 （`<prefix>/lib/node_modules/quay/node_modules/yaml`，实测存在）。
 
+**对照测量（2026-09-11 补，硬规则 4 推论四：附一个若假说为假则结果会不同的对照）**
+
+把「scp 枚举实际送出的那七个文件」在本地复制成一个目录，用**同一个 `binding_state` 函数**、
+对**同一个项目**（`/home/yale/work/quay`，一个绑定肯定正常的项目）跑：
+
+```
+$ ls -1 /tmp/ac239-fake-remote        # 逐字就是那次 scp 送出的集合
+gate-script-base.ts  pane-state-classify.ts  quay-init-closure-assertion.ts  repo-root.ts
+runner-state-write.ts  verify-deliver-coldstart.sh  write-json-atomic.ts
+
+$ SCRIPT_DIR=<本仓库 plugin/scripts>   binding_state /home/yale/work/quay  ⇒  path-resolved   # 检查器在场
+$ SCRIPT_DIR=/tmp/ac239-fake-remote     binding_state /home/yale/work/quay  ⇒  unreadable     # 传输后的布局
+```
+
+**同一个函数、同一个项目，唯一差别是那个检查器在不在** ⇒ 成因是**传输漏件**，不是被检项目有问题
+（⛔ 不是「那个项目绑定坏了」这种更弱的归因）。这也说明：**任何**远端项目（含绑定完全正常的）在这套
+传输下都会读到 `unreadable` —— 它是**恒**的，与被测对象无关。
+
 **后果（这是本条为什么是 delivery-critical）**：`verify-deliver-coldstart.sh` 的 AC-238 门逐字含
 `[ "$AC238_POST_BINDING" = "path-resolved" ]`。远端恒 `unreadable` ⇒ 该门**结构上不可能通过** ⇒
 `AC238_EVALUATED` 恒 0 ⇒ **AC-238 记录在真机上永远写不出** ⇒ 7b（AC-239）的前置
@@ -79,6 +97,8 @@ Error: Cannot find module '/home/yale/provider-binding-resolvability-check.ts'
        必须自足」这条不变式重新成立——⛔ 但那要动另一个文件，且必须同时在**产品面**（不只远端）生效。
 3. **加一条能取假的判据**：在远端的真实布局（不是本仓库）上跑一次 `binding_state`，断言取到
    `path-resolved`；并保留一个负控制（把检查器移走 ⇒ 必须变 `unreadable`，⛔ 不是静默 `path-resolved`）。
+   ⚠️ 本条 Finding 里那个「复制成一目录 + 换 SCRIPT_DIR」的**本地**对照已能机械复现该形状，可作为
+   该判据的 hermetic 形态（⛔ 但不能替代在真机传输布局上的那一次读数）。
 
 ## Acceptance Criteria
 
