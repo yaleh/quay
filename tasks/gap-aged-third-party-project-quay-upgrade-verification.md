@@ -1,7 +1,7 @@
 ---
 id: gap-aged-third-party-project-quay-upgrade-verification
 title: 升级路径验证：真实旧痕迹第三方项目（meta-cc 副本）能否被当前 develop tip 干净接管
-status: ready
+status: done
 labels:
   - gap
 parent: null
