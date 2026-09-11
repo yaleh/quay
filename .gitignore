@@ -41,6 +41,11 @@ packages/quay/plugin/
 **/dist-sea/
 **/dist-sea-release/
 **/.quay/gate-events.jsonl
+# (.quay/goal-freshness-margin.json) — AC6 runtime carrier: the achieved-AC freshness
+# margin (distance/K) snapshot written by AC-214's criterion, so the margin is readable BEFORE
+# the criterion turns red (the runner surfaces a criterion's output only on failure). Runtime
+# state, never git-tracked.
+**/.quay/goal-freshness-margin.json
 **/.quay/supervisor-bus-ledger.jsonl
 **/.quay/inner-wakeup-heartbeat-refusals.jsonl
 # serve-send.ts runtime message-delivery receipts (SendMessage cross-session delivery record) — runtime

@@ -369,6 +369,61 @@ export function inAchievedReverifyScope(
 }
 
 /**
+ * One ANNOTATED row of the reverify-scope reading (gap-closed-goal-acs-leave-reverify-scope-standing-
+ * invariants-undeclared AC1/AC4). `goal`/`goalStatus`/`longTerm` are the DISCRIMINATING fields:
+ * `inAchievedReverifyScope` has exactly TWO branches (under an ACTIVE goal, OR declared long-term),
+ * and a bare id list cannot tell them apart — so a reader could see that an AC left the scope but not
+ * WHY, and could not audit the leaving set against the ruling (hard rule 3: enumerate, don't boolean).
+ */
+export interface ReverifyScopeEntry {
+  id: string;
+  goal: string;
+  /** The owning GOAL's CURRENT status; `absent` when no GOAL record carries that id. ⛔ Never "" —
+   *  hard rule 6: a missing value must not be shaped like a present one. */
+  goalStatus: string;
+  longTerm: boolean;
+}
+
+/**
+ * Parse the ADJUDICATION TABLE (AC2) — the per-AC ruling 「一次性验收 / 常设不变式」, recorded as a
+ * markdown table in the task body. ⛔ This is a DECLARATION and it is deliberately NOT derivable from
+ * the store: the store can only report what the `long-term` FIELD currently is, while only the ruling
+ * says what it OUGHT to be. That gap is the whole point of AC1/AC4 — a ruling that never landed as a
+ * field is invisible on every carrier, and a rule whose observance cannot be distinguished from its
+ * breach is not a rule (hard rule 9).
+ *
+ * Rows are `| AC-NNN | <ruling> | <reason> |`. Recognized rulings: `常设不变式` → standing,
+ * `一次性验收` → one-time. Anything else is returned in `unrecognized`, ⛔ never silently dropped:
+ * "could not evaluate" must not share an output shape with "evaluated and fine" (hard rule 3b).
+ */
+export function parseAdjudicationTable(text: string): {
+  standing: string[];
+  oneTime: string[];
+  unrecognized: Array<{ id: string; ruling: string }>;
+} {
+  const standing: string[] = [];
+  const oneTime: string[] = [];
+  const unrecognized: Array<{ id: string; ruling: string }> = [];
+  for (const line of text.split("\n")) {
+    const t = line.trim();
+    if (!t.startsWith("|")) continue;
+    const cells = t
+      .replace(/^\|/, "")
+      .replace(/\|$/, "")
+      .split("|")
+      .map((c) => c.trim().replace(/`/g, ""));
+    if (cells.length < 2) continue;
+    // Header (`| AC | 裁定 | 理由 |`) and separator (`|---|---|---|`) rows are excluded BY SHAPE —
+    // ⛔ not by skipping a line number, which would silently drop a row if the table moved.
+    if (!/^AC-\d+$/.test(cells[0])) continue;
+    if (cells[1] === "常设不变式") standing.push(cells[0]);
+    else if (cells[1] === "一次性验收") oneTime.push(cells[0]);
+    else unrecognized.push({ id: cells[0], ruling: cells[1] });
+  }
+  return { standing, oneTime, unrecognized };
+}
+
+/**
  * COMMIT-AFTER-WRITE (gap-meta-commitgoalfile; now unified by SPEC-store-commit-unification §4):
  * commit a goal file to git immediately after writeFileSync, via the shared primitive
  * `commitStoreWrite` — ⛔ no git plumbing here (the five store files' `git commit` has exactly one
@@ -657,6 +712,59 @@ export function createGoalStore(
       else process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = prev;
     }
     return { achievedButFailing, evaluated: scopeSize > 0, scopeSize, inScope: inScopeIds };
+  }
+
+  // AC1/AC4 reading (gap-closed-goal-acs-leave-reverify-scope-standing-invariants-undeclared): the
+  // ANNOTATED enumeration of the I5 reverify scope — WHO is in it, WHY (which branch of
+  // `inAchievedReverifyScope`), and WHO LEFT it. ⛔ Not merged with `checkAchievedFailing`: that
+  // returns a VERDICT (the achieved-but-failing ids); this returns the SUBSTRATE the adjudication is
+  // audited against. Two different questions; collapsing them would make "in scope" unattributable.
+  //
+  // PURE-READ (⛔ runs no criterion — that is `checkAchievedFailing`'s job and its ~42s cost).
+  // `inScope`/`scopeSize` use EXACTLY I5's predicate (achieved ∧ criterion non-empty ∧
+  // inAchievedReverifyScope) so `scopeSize` here and I5's `scopeSize` are the same number — ⛔ two
+  // readings of "the scope" that disagree would make AC4's delta check meaningless. ACs dropped for
+  // an EMPTY criterion are returned in `skippedNoCriterion` rather than vanishing silently (hard rule
+  // 3b: an object that left the enumeration must stay visible as such).
+  function checkReverifyScope(): {
+    scopeSize: number;
+    evaluated: boolean;
+    activeGoals: string[];
+    inScope: ReverifyScopeEntry[];
+    outOfScope: ReverifyScopeEntry[];
+    skippedNoCriterion: string[];
+  } {
+    const activeGoalIds = new Set(activeGoals().map((g) => String(g.id)));
+    const statusById = new Map<string, string>();
+    for (const g of list()) if (isGoalId(String(g.id))) statusById.set(String(g.id), String(g.status));
+    const inScope: ReverifyScopeEntry[] = [];
+    const outOfScope: ReverifyScopeEntry[] = [];
+    const skippedNoCriterion: string[] = [];
+    for (const ac of list()) {
+      if (!isCriterionId(String(ac.id))) continue;
+      if (ac.status !== "achieved") continue;
+      const goal = String(ac.goal ?? "");
+      const entry: ReverifyScopeEntry = {
+        id: String(ac.id),
+        goal,
+        goalStatus: statusById.get(goal) ?? "absent",
+        longTerm: ac.longTerm === true,
+      };
+      if (inAchievedReverifyScope(ac, activeGoalIds)) {
+        if (String(ac.criterion ?? "").trim() === "") skippedNoCriterion.push(entry.id);
+        else inScope.push(entry);
+      } else {
+        outOfScope.push(entry);
+      }
+    }
+    return {
+      scopeSize: inScope.length,
+      evaluated: inScope.length > 0,
+      activeGoals: [...activeGoalIds].sort(),
+      inScope,
+      outOfScope,
+      skippedNoCriterion,
+    };
   }
 
   /** Direct read-modify-write of the old goal's file (inside the NEW goal's write lock). */
@@ -1090,7 +1198,7 @@ export function createGoalStore(
     return results;
   }
 
-  return { list, get, write, writeBatch, activeGoals, listActiveCriteria, isGoalAchieved, checkWithinCap, checkStaleness, checkAchievedFailing };
+  return { list, get, write, writeBatch, activeGoals, listActiveCriteria, isGoalAchieved, checkWithinCap, checkStaleness, checkAchievedFailing, checkReverifyScope };
 }
 
 // ── Direct-invocation entry (Contract invoke: `node packages/quay/src/goal-store.ts`) ──────────────
@@ -1117,6 +1225,11 @@ export function createGoalStore(
 //   check --achieved-failing  — I5 achieved-but-failing (exit 1 when an achieved-but-failing AC
 //                               exists OR the scope is empty — evaluated:false; runs each achieved
 //                               AC's criterion under a re-entrancy guard). Carries scopeSize.
+//   check --reverify-scope [--adjudication <md>] — PURE-READ annotated enumeration of the I5 scope
+//                               (inScope/outOfScope, each with goal/status/longTerm). With
+//                               --adjudication <task.md> it cross-checks the AC2 ruling table: exit 1
+//                               names every 「常设不变式」 ruling that did NOT land as a `long-term`
+//                               field, plus the reverse error and unrecognized rulings.
 import { fileURLToPath } from "node:url";
 
 /** 保真性判定器 spawnSync 的 wall-clock 上限（毫秒）。单次一锤 LLM 判定（criterion + expect 已内嵌，
@@ -1490,6 +1603,49 @@ async function main(argv: string[]) {
       return verdict === "pass" ? 0 : 1;
     }
     case "check": {
+      // `check --reverify-scope [--adjudication <task.md>]` — AC1's reading command: the annotated
+      // enumeration of the I5 reverify scope. With `--adjudication`, it additionally CROSS-CHECKS the
+      // AC2 ruling table against the store: every AC ruled 「常设不变式」 must actually BE in scope
+      // (i.e. its `long-term: true` landed as a FIELD, not merely as prose). That cross-check is the
+      // falsifiable half — it is exit 1 exactly when a ruling has not landed.
+      if (rest.includes("--reverify-scope")) {
+        const r = store.checkReverifyScope();
+        const out: Record<string, unknown> = { ...r };
+        const violations: string[] = [];
+        const ai = rest.indexOf("--adjudication");
+        if (ai >= 0) {
+          const adjPath = rest[ai + 1];
+          if (adjPath === undefined || !fs.existsSync(adjPath)) {
+            console.error(`goal-store: --adjudication ${JSON.stringify(adjPath)} is not readable`);
+            return 2;
+          }
+          const adj = parseAdjudicationTable(fs.readFileSync(adjPath, "utf8"));
+          const inIds = new Set(r.inScope.map((e) => e.id));
+          // (b) the ruling landed as a field: every 「常设不变式」 AC is IN scope.
+          const standingMissing = adj.standing.filter((id) => !inIds.has(id));
+          // (a) ⛔ the reverse error: an AC ruled one-time that is nonetheless in scope ⇒ the field
+          // contradicts the ruling (the marking was never removed).
+          const oneTimeButInScope = adj.oneTime.filter((id) => inIds.has(id));
+          // The AC1 literal assertion: ⛔ no in-scope AC may sit under an achieved GOAL without a
+          // `long-term` declaration — that is the indiscriminate-widening shape the scope's own
+          // comment forbids. It holds before and after this task's change (it is a GUARD, not the
+          // differential); the differentials are `standingMissing` here and AC4's scopeSize delta.
+          const undeclaredInScope = r.inScope.filter((e) => e.goalStatus === "achieved" && !e.longTerm).map((e) => e.id);
+          out.adjudication = { ...adj, standingMissing, oneTimeButInScope, undeclaredInScope };
+          for (const id of adj.unrecognized) violations.push(`unrecognized ruling for ${id.id}: ${JSON.stringify(id.ruling)}`);
+          for (const id of standingMissing) violations.push(`ruled 常设不变式 but NOT in reverify scope (long-term not written): ${id}`);
+          for (const id of oneTimeButInScope) violations.push(`ruled 一次性验收 but IS in reverify scope: ${id}`);
+          for (const id of undeclaredInScope) violations.push(`in scope under an achieved GOAL without long-term: ${id}`);
+        }
+        out.violations = violations;
+        process.stdout.write(JSON.stringify(out, null, 2) + "\n");
+        if (violations.length > 0) {
+          for (const v of violations) console.error(`goal-store: ${v}`);
+          return 1;
+        }
+        // NOT-EVALUATED (⛔ never confounded with "in scope and all fine"): nothing to enumerate.
+        return r.scopeSize > 0 ? 0 : 3;
+      }
       if (rest.includes("--achieved-failing")) {
         const r = store.checkAchievedFailing();
         process.stdout.write(JSON.stringify(r, null, 2) + "\n");

@@ -1,7 +1,7 @@
 ---
 id: gap-closed-goal-acs-leave-reverify-scope-standing-invariants-undeclared
 title: 两目标关闭后 21 条判据离开 I5 复验域——哪些属常设不变式须逐条裁定并声明 long-term
-status: ready
+status: done
 labels:
   - gap
 parent: null
