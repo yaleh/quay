@@ -1103,6 +1103,10 @@ STEP1_REAL_HOME=""                    # 隔离【之前】的真实 HOME（guard
 STEP1_HOME=""                         # 段① 的隔离 HOME；== STEP1_REAL_HOME ⇒ 隔离未生效（可区分）
 STEP1_HOME_OVERRIDE=""                # 调用方显式指定隔离目标（空 = 推导 ${PREFIX}.home）；selfcheck 取其假
 STEP1_HOME_ISOLATED=0                 # 1 = 本次段① 确实跑在隔离 HOME 下
+# 段① 隔离 HOME 的【有效值】（隔离未生效时 = 真实 HOME）。既喂 npm（前缀赋值，⛔ 不 export HOME——
+# 本脚本后半段有步骤要读【操作者真实】~/.claude，如 AC-205 的 ~/.claude/sessions 枚举与 transcript
+# 路径：全局改 HOME 会让那些步骤静默看错目录），也喂段① 的 settings 断言。
+STEP1_SEGMENT_HOME=""
 STEP1_REAL_SETTINGS_PATH=""           # 操作者真实 ~/.claude/settings.json 路径
 STEP1_REAL_SETTINGS_SIG_BEFORE=""     # 段① 前签名（sha256:<hex> | ABSENT）
 STEP1_REAL_SETTINGS_SIG_AFTER=""      # 段① 后签名
@@ -1129,6 +1133,7 @@ step1_guard_begin() {
   else
     rm -rf "$STEP1_HOME"; mkdir -p "$STEP1_HOME"; STEP1_HOME_ISOLATED=1
   fi
+  STEP1_SEGMENT_HOME="$STEP1_HOME"
 }
 
 # 段① 终点：重取后签名并判「逐字节相同」。ABENT→ABSENT 也算相同（真·未变）。
@@ -1148,7 +1153,8 @@ step1_install() {
   real_home="$HOME"                     # 隔离【之前】的真实 HOME
   npm_cache="${npm_config_cache:-${real_home}/.npm}"   # 保缓存（性能）；它不是 ~/.claude，不在本判据面上
   step1_guard_begin "$real_home"
-  export HOME="$STEP1_HOME"
+  # ⛔ 不 export HOME（只对 npm 做前缀赋值）：见 STEP1_SEGMENT_HOME 处的注释——全局改 HOME 会让
+  # 后半段读操作者真实 ~/.claude 的步骤静默看错目录。
   rm -rf "$PREFIX"
   mkdir -p "$PREFIX"
   echo "== ① fresh .tgz install into isolated prefix $PREFIX =="
@@ -1276,8 +1282,12 @@ step1_marketplace() {
   fi
   # npm_config_global=true：register-plugin.mjs 的 guard #2 只在全局安装语义下生效（postinstall 同形）。
   # QUAY_SKIP_PLUGIN_CLI=1：register-plugin.mjs:146 优雅降级——只写 settings.json，不调 claude CLI。
+  # HOME：段① 的隔离 HOME（STEP1_SEGMENT_HOME，由 step1_install 设定；selfcheck 夹具无 step1_install
+  # ⇒ 回落到 $HOME=夹具自己 export 的目录）——register-plugin.mjs 经 os.homedir() 写 $HOME/.claude/
+  # settings.json，⛔ 不隔离就会写操作者真实那份（AC-161）。set-if-present 语义保住夹具的既有用法。
   set +e
-  npm_config_global=true QUAY_SKIP_PLUGIN_CLI=1 "$VC_NODE" --no-warnings "$register" >"${STEP1_PREFIX}/register-plugin.out" 2>&1
+  HOME="${STEP1_SEGMENT_HOME:-$HOME}" npm_config_global=true QUAY_SKIP_PLUGIN_CLI=1 \
+    "$VC_NODE" --no-warnings "$register" >"${STEP1_PREFIX}/register-plugin.out" 2>&1
   rc=$?
   set -e
   MP_REGISTER_RC="$rc"
@@ -1288,8 +1298,9 @@ step1_marketplace() {
     MP_FAIL_REASON="register-plugin.mjs exited $rc: $(tail -n 3 "${STEP1_PREFIX}/register-plugin.out" 2>/dev/null | tr '\n' ' ' | head -c 300)"
     echo "  register-plugin.mjs exited $rc (reason structured into record, not swallowed — AC5)"
   fi
-  # 断言 settings.json（register-plugin.mjs 经 os.homedir() 写入 $HOME/.claude/settings.json）
-  mp_assert_settings "${HOME}/.claude/settings.json" "$plugin_dir"
+  # 断言 settings.json（register-plugin.mjs 经 os.homedir() 写入上一步那个 HOME 下的 .claude/settings.json
+  # ——读的必须是【同一个】HOME，否则断言与写入错位：段① 隔离生效时读的是隔离那份）。
+  mp_assert_settings "${STEP1_SEGMENT_HOME:-$HOME}/.claude/settings.json" "$plugin_dir"
   if [ "$MP_REGISTER_OK" = "1" ] && [ "$MP_ENABLED_LEAK" = "1" ]; then
     # register 成功但 enabledPlugins 有用户级 quay 键 ⇒ 预存在状态（register-plugin.mjs 不写
     # enabledPlugins——AC-162 已改；这是 AC-161 迁移未覆盖到本机的旧残留，如实落结构字段，不静默）。
@@ -2373,6 +2384,9 @@ Enter to confirm · Esc to cancel"
   #   control 12 (负向,AC2): 只「安装」（fake 包在位）不跑 register ⇒ settings.json 无 marketplace 条目 ⇒ MP_SETTINGS_OK=0
   #   control 13 (enabledPlugins 外溢,AC-161 违反): 源正确但 enabledPlugins 有 quay@quay ⇒ MP_ENABLED_LEAK=1 MP_SETTINGS_OK=0
   local mp_prefix mp_pkg mp_home m1_ev m1_reg m1_ok m1_leak m2_ok m3_ok m3_leak
+  # 下面几个 control 直接调 step1_marketplace（不经 step1_install）⇒ 必须清掉段① 隔离态，
+  # 让断言回落到夹具自己 export 的 HOME（否则会继承上一次调用的段① 路径——自包含纪律）。
+  STEP1_SEGMENT_HOME=""
   mp_prefix="$tmp/mp-prefix"
   mp_pkg="$mp_prefix/lib/node_modules/quay"
   mkdir -p "$mp_pkg/scripts" "$mp_pkg/plugin/.claude-plugin"
@@ -2506,7 +2520,7 @@ FAKE_NPM
   fn_v_neg="$STEP1_HOME_ISOLATED"; fn_w_neg="$STEP1_REAL_SETTINGS_UNCHANGED"
   fn_sent_neg_after="$(step1_settings_sig "$fn_sent_neg/.claude/settings.json")"
 
-  STEP1_HOME_OVERRIDE=""; PREFIX=""; STEP1_PREFIX=""
+  STEP1_HOME_OVERRIDE=""; STEP1_SEGMENT_HOME=""; PREFIX=""; STEP1_PREFIX=""
   export HOME="$fn_guard_saved_home"; export PATH="$fn_guard_saved_path"
   # 独立第二读数：夹具自己比对 sentinel 前后签名（⛔ 不与产品 guard 共用同一个量——同形自证不算测量）。
   fn_sent_same=0; [ "$fn_sent_before" = "$fn_sent_after" ] && fn_sent_same=1
