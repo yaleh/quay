@@ -108,8 +108,10 @@ import {
 // NOT-YET-FLIPPED SKIP (gap-slot-refill-repeats-done-eligible-recommendations): the AC-completeness
 // gate (countAcCheckboxes — the SAME gate ready-pool-check's notYetFlipped applies, so an AC-incomplete
 // fan-in that is genuinely stuck-work stays dispatchable) + the durable fan-in signal (hasFanInMerge —
-// reads --all MERGE history, so it survives the two-line branch model's integration fan-in that the
-// master-only git-history signal misses).
+// reads MERGE commits REACHABLE FROM the integration line, so it survives the two-line branch model's
+// integration fan-in that the master-only git-history signal misses, without counting a task branch's
+// own pre-fan-in `Merge branch 'develop' into task/<id>`:
+// gap-hasfaninmerge-all-refs-strands-exited-not-landed-tasks).
 import { countAcCheckboxes } from "./task-status-drift-check.ts";
 // DEPENDENCY-GATE SHARED KERNEL (tasks/gap-slot-refill-depsreadyfor-ignores-depends-on + AC152): the
 // deps-ready judgment (all prerequisites done) reuses driver-filters' allDepsDone — the SAME single
@@ -500,18 +502,41 @@ function buildTaskMetaById(tasksDir, root, taskReadRef) {
   return metaById;
 }
 
+/** THE INTEGRATION LINE (gap-hasfaninmerge-all-refs-strands-exited-not-landed-tasks): the ONE literal
+ *  naming the branch a fan-in lands ON. Both branch-history signals in this file (`hasFanInMerge` and
+ *  `hasLandedImplementation`) read the SAME line, so this constant is their single default; a caller
+ *  whose project uses a different integration line (or the pre-two-line single-branch model) passes its
+ *  own ref explicitly instead. ⛔ Never write a second `"develop"` literal here — 硬规则 5b: the same
+ *  principle must not be applied at only one of its sites. */
+export const INTEGRATION_REF_DEFAULT = "develop";
+
 /** DURABLE FAN-IN SIGNAL (gap-slot-refill-repeats-done-eligible-recommendations): whether the task's
- *  branch was merged — a MERGE commit anywhere in `--all` history whose message references the task id.
+ *  branch was merged INTO THE INTEGRATION LINE — a MERGE commit reachable from `integrationRef`
+ *  (default INTEGRATION_REF_DEFAULT) whose message references the task id.
  *  This is the broadened sibling of inner-blocked-signal.hasMergeRecord (which greps only the canonical
  *  `task/<id>` fan-in branch convention): matching the BARE task id also catches the adhoc `merge:
  *  <id> — …` format (observed real fan-in, e.g. gap-runner-grouping-ac7-nested-spawn-load-flake), and
- *  it still fires on every `task/<id>` merge. Same durable fan-in evidence — survives `git branch -d`
- *  after fan-in, reads `--all` so the two-line model's INTEGRATION fan-in is visible where the
- *  master-only git-history signal sees nothing. Any git failure → false (never a positive from an
- *  unavailable source). */
-export function hasFanInMerge(root, taskId) {
+ *  it still fires on every `task/<id>` merge. Reads the integration line (NOT `--all`, and NOT
+ *  `master`) so the two-line model's INTEGRATION fan-in is visible where the master-only git-history
+ *  signal sees nothing; the merge commit stays reachable there after `git branch -d`, so the evidence
+ *  is still durable.
+ *
+ *  ⚠️ REACHABILITY, NOT EXISTENCE (gap-hasfaninmerge-all-refs-strands-exited-not-landed-tasks): the
+ *  pre-fix read was `git log --all`, which counts the TASK BRANCH ITSELF — and every worker runs
+ *  `git merge develop` on its task branch BEFORE fan-in, producing a `Merge branch 'develop' into
+ *  task/<id>` merge whose message contains the task id. So a task that reached the merge step and
+ *  then FAILED to land (exited-not-landed) looked permanently "fanned in": isNotYetFlippedSkip
+ *  deferred it as not-yet-flipped forever, while its outstanding ACs (usually "full suite green")
+ *  had no mechanism left to run — structurally stranded, both ends. `git log <integrationRef>` asks
+ *  the question that was always meant (is the merge an ANCESTOR of the integration line), which is
+ *  exactly the read the sibling `hasLandedImplementation` already used. Measured 2026-09-11: 7 ready
+ *  tasks in this repo had an id-matching merge and NONE reachable from develop (5 of them AC-complete
+ *  enough to be deferred by the not-yet-flipped arm).
+ *  Any git failure / absent integration ref → false (never a positive from an unavailable source);
+ *  false = "not landed" = still dispatchable, the safe direction. */
+export function hasFanInMerge(root, taskId, integrationRef = INTEGRATION_REF_DEFAULT) {
   try {
-    const out = execFileSync("git", ["-C", root, "log", "--all", "--format=%H", "--merges", "--grep", taskId], {
+    const out = execFileSync("git", ["-C", root, "log", integrationRef, "--format=%H", "--merges", "--grep", taskId], {
       encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
     });
     return out.trim().length > 0;
@@ -528,15 +553,18 @@ export function hasFanInMerge(root, taskId) {
  *       reason "not-yet-flipped" — the master-landed / all-ACs-checked case; slot-refill iterates
  *       pool.ready which is disjoint from excluded, so this arm is defense-in-depth that wires the
  *       existing signal into the candidate path per AC2), or
- *   (b) its branch was MERGED (hasFanInMerge — reads `--all` merge history, so it survives the
- *       two-line branch model's INTEGRATION fan-in that the master-only git-history signal misses)
+ *   (b) its branch was MERGED INTO THE INTEGRATION LINE (hasFanInMerge — reads the integration line,
+ *       so it survives the two-line branch model's INTEGRATION fan-in that the master-only git-history
+ *       signal misses, while a task-branch-only `Merge branch 'develop' into task/<id>` from a fan-in
+ *       that never landed is NOT counted: gap-hasfaninmerge-all-refs-strands-exited-not-landed-tasks)
  *       AND its ACs are substantially complete (>50% or all checked — the SAME AC-completeness gate
  *       ready-pool-check's notYetFlipped applies, so an AC-incomplete fan-in that is genuinely
  *       stuck-work stays dispatchable, gap-ready-pool-worklanded-traps-stuck-work).
- *  Pure + read-only; reuses the existing signals, never a parallel copy. */
-export function isNotYetFlippedSkip({ id, body, root, excludedNyfIds }) {
+ *  Pure + read-only; reuses the existing signals, never a parallel copy. `integrationRef` is threaded
+ *  to hasFanInMerge (default INTEGRATION_REF_DEFAULT) — the judge names no branch literal of its own. */
+export function isNotYetFlippedSkip({ id, body, root, excludedNyfIds, integrationRef = INTEGRATION_REF_DEFAULT }) {
   if (excludedNyfIds.has(id)) return true;
-  if (!hasFanInMerge(root, id)) return false;
+  if (!hasFanInMerge(root, id, integrationRef)) return false;
   const ac = extractSection(body, "Acceptance Criteria");
   const { total, checked, sectionFound } = countAcCheckboxes(ac);
   // AC47 (gap-ac47-completion-predicate-consumer-fail-closed, AC1/AC2): an ABSENT/UNREADABLE AC
@@ -604,15 +632,17 @@ export function isImplementationClassFile(p) {
  *       docs/analysis/*.md — both judged "landed" with AC 0/10, no fan-in). The evidence file must be
  *       an IMPLEMENTATION-CLASS file (isImplementationClassFile) — docs/milestones/.quay/telemetry
  *       sidecars never count.
- *  ONE git call: `git log --name-only -m --first-parent --grep <id> develop` returns each matching
- *  commit (marker line `@@COMMIT@@<hash>`) followed by its first-parent file list; a non-marker line
- *  outside `tasks/` that is implementation-class is the landed-implementation evidence. Fail-safe: any
- *  git failure / non-git root / no develop ref ⇒ false (never a positive from an unavailable source). */
-export function hasLandedImplementation(root, taskId) {
+ *  ONE git call: `git log <integrationRef> --name-only -m --first-parent --grep <id>` returns each
+ *  matching commit (marker line `@@COMMIT@@<hash>`) followed by its first-parent file list; a
+ *  non-marker line outside `tasks/` that is implementation-class is the landed-implementation
+ *  evidence. `integrationRef` defaults to INTEGRATION_REF_DEFAULT (the ONE shared literal — see
+ *  INTEGRATION_REF_DEFAULT). Fail-safe: any git failure / non-git root / no such ref ⇒ false (never
+ *  a positive from an unavailable source). */
+export function hasLandedImplementation(root, taskId, integrationRef = INTEGRATION_REF_DEFAULT) {
   try {
     const out = execFileSync(
       "git",
-      ["-C", root, "log", "develop", "--format=@@COMMIT@@%H", "--grep", taskId, "--name-only", "-m", "--first-parent"],
+      ["-C", root, "log", integrationRef, "--format=@@COMMIT@@%H", "--grep", taskId, "--name-only", "-m", "--first-parent"],
       { encoding: "utf8", timeout: 10_000, maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] },
     );
     let inCommit = false;
@@ -1004,8 +1034,11 @@ export function analyzeSlotRefill({ tasksDir, root, cap = FIXED_DISPATCH_CAP, fl
   // "not-yet-flipped"). Wire that signal into the candidate path (AC2) — it is disjoint from
   // pool.ready by construction, so this is the literal 4th step-4 check + defense-in-depth. The
   // hasMergeRecord arm inside isNotYetFlippedSkip additionally catches tasks whose work landed on
-  // the two-line model's INTEGRATION line (fan-in merged) — invisible to the master-only git-history
-  // signal, yet already "已 fan-in 待翻 done".
+  // the two-line model's INTEGRATION line (fan-in merge REACHABLE from it) — invisible to the
+  // master-only git-history signal, yet already "已 fan-in 待翻 done". The reachability direction is
+  // what keeps a fan-in that FAILED to land (task-branch-only `Merge branch 'develop' into
+  // task/<id>`) dispatchable instead of permanently deferred:
+  // gap-hasfaninmerge-all-refs-strands-exited-not-landed-tasks.
   const excludedNyfIds = new Set(
     (pool.excluded || []).filter((e) => e.reasons.includes("not-yet-flipped")).map((e) => e.id),
   );

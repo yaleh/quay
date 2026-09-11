@@ -600,6 +600,27 @@ run_static_checks() {
   # 红钉住（硬规则 3/4）。
   # @static-tier full
   run_checker "config-key-consumer-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/config-key-consumer-check.ts" --root "${repo_root}"
+  echo "== provider-binding resolvability check (gap-pre-fix-upgraded-project-unresolvable-binding-undetected) =="
+  # 项目的 provider 绑定能否【不借助外部 $PATH 辅助】解析出自己的 runtime？升级到 ba960f503 之前的
+  # 项目停在 mcp_entry: [quay-native, mcp] 裸名形态上——裸名只能由 OS $PATH（或 cwd）查找满足 ⇒ 该
+  # 项目能不能读自己的任务板取决于「跑它的那台机器恰好有什么」，而没有任何检查会报出来（实测两个
+  # 现场：orangevps /home/yale/quay-verify-upgrade-{9eda8c70,1c202737}-root，`spawn quay-native ENOENT`）。
+  # ⚠️ 判据【按形态】而非「在本机解析得开」——packages/quay/src/config-validate.ts:648 的 isPathBinary 正是
+  # 这个盲点的产品形态（token 在本进程 $PATH 上解析得开就报合格）。故本检查【刻意不查 $PATH】：裸名恒红，
+  # 与「恰好解析得开」无关；相对 token 按产品自己的口径对 provider.path 解析（cli/shared.ts:175，⛔ 不是对
+  # workspace root —— 否则本仓库自己的 ./bin/quay-native.ts 会被误报）。三态可区分：path-resolved（合格）/
+  # bare-path-name·dangling-*（红）/ no-mcp-entry·unrecognized-shape（NOT-EVALUATED，⛔ 不与合格同形）。
+  # 负控制由 mutation case（含 $PATH shim 反例：裸名 + shim 仍须红）钉住（硬规则 3/4）。
+  # ⚠️ `.quay/config.yml` 是 gitignored（.gitignore 的 `/.quay/config.yml`）⇒ 它【永远不会】出现在 scoped
+  # 门的 delta 里。故除判据对象本身外，把本检查自己的实现/负控制/单测一并列进 @static-object——这样
+  # 「改这个检查器」才会让 scoped 门选中它（与 per-task-suite-record-check / release-freshness-check 同形）。
+  # ⛔ 未列入则本检查在 scoped 门恒被 defer（只在 full 门跑）——不是漏跑，但反馈慢一整轮。
+  # 登记 `.quay/config.yml` 的副作用（isDocPath 先查注册表再查 DOC_SURFACES ⇒ 该路径由 doc 变 code）是
+  # 设计使然、非缺陷，与 docs/analysis/ac69-slot-release-vs-dispatch-gap.json 在 docs/ 面下同为 code 同类；
+  # plugin/test/fan-in-execute-paths.test.mjs 的 doc-delta fixture 已随之改用一个真正 doc-only 的 .quay/ 采样路径。
+  # @static-tier change
+  # @static-object .quay/config.yml plugin/scripts/provider-binding-resolvability-check.ts plugin/scripts/checker-mutation-cases/provider-binding-resolvability-check.sh plugin/test/provider-binding-resolvability-check.test.mjs
+  run_checker "provider-binding-resolvability-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/provider-binding-resolvability-check.ts" --root "${repo_root}"
   echo "== host-repo-surface ratchet (GOAL-015 退出条件④ / AC-236, gap-host-repo-surface-ratchet) =="
   # 本仓库表层单调棘轮：CLI 动词集（quay.ts --help 真实输出，⛔ 不读源码字面量——同时证明入口本身跑得起来）、
   # web 路由集（serve-handlers.ts + serve.ts 的 url.pathname === "…" 位置命中）、有消费者的配置键集
