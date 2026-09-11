@@ -1162,20 +1162,25 @@ probe_ac203_driver_status() {
   AC203_EVALUATED=1
 }
 
-# 写 GOAL-009-AC-203 记录。缺任一有效读数（host/project_root 空、driver_alive≠1、carrier_records 非正、
-# has_plugin_dir≠0）⇒ 不写 return 1（硬规则 3b：缺值 ≠ 合格）。五字段逐字满足 criterion 过滤：
+# 写 GOAL-009-AC-203 记录（经 ac89_append_goal009 统一补 top-level build_sha/ts——AC-214 新鲜度锚）。
+# 缺任一有效读数（host/project_root 空、driver_alive≠1、carrier_records 非正、has_plugin_dir≠0）
+# ⇒ 不写 return 1（硬规则 3b：缺值 ≠ 合格）。五字段逐字满足 criterion 过滤：
 # has_plugin_dir 必须是 JSON 字面 false（criterion 用 `is not False` 判）、driver_alive/carrier_records 是整数。
+# gap-ac203-record-lacks-build-sha-makes-ac214-permanently-unsatisfiable：本写入点原为裸 printf、不带
+# top-level build_sha，而 AC-214 的 NEED 含 GOAL-009-AC-203 且其判据取 `sha = r.get("build_sha") or
+# r.get("commit")`（取不到 ⇒ 该 ac 落进 missing ⇒ exit 1）⇒ AC-203 即便产出也被判「无证据」。
+# 改走本仓唯一补锚 choke point（同 AC-205/232/207 形）——⛔ 不在此处另写一份 `"build_sha"` 字面量：
+# 多一个补锚点 = 下次改锚格式必漏一处（硬规则① 用机件不手搓）。ts/BUILD_SHA/AC89 由 helper 统一取，
+# 调用方先置全局（同 control 16/17 的既有形态）。helper 的 fail-closed 语义原样保留：BUILD_SHA 非
+# 40-hex 或 AC89 空 ⇒ 不写且 return 非 0，⛔ 不降级成「至少写点什么」的无锚记录（硬规则 3b）。
 write_ac203_record() {
-  local ts="$1" host="$2" project_root="$3" has_plugin_dir="$4" driver_alive="$5" carrier_records="$6" ac89="$7"
+  local host="$1" project_root="$2" has_plugin_dir="$3" driver_alive="$4" carrier_records="$5"
   [ -n "$host" ] || return 1
   [ -n "$project_root" ] || return 1
   [ "$has_plugin_dir" = "0" ] || return 1
   [ "$driver_alive" = "1" ] || return 1
   [ "$carrier_records" -gt 0 ] 2>/dev/null || return 1
-  mkdir -p "$(dirname "$ac89")"
-  printf '{"ts":"%s","ac":"GOAL-009-AC-203","host":"%s","project_root":"%s","has_plugin_dir":false,"driver_alive":%s,"carrier_records":%s}\n' \
-    "$ts" "$host" "$project_root" "$driver_alive" "$carrier_records" >> "$ac89"
-  return 0
+  ac89_append_goal009 ",\"ac\":\"GOAL-009-AC-203\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"has_plugin_dir\":false,\"driver_alive\":$driver_alive,\"carrier_records\":$carrier_records"
 }
 
 # 写 GOAL-009-AC-206 记录（gap-ac206-goals-tasks-dual-carrier-quay-init-goals-closed-set）。
@@ -1255,8 +1260,14 @@ step4_driver_liveness() {
   done
   echo "  driver_alive=$AC203_DRIVER_ALIVE carrier_records=$AC203_CARRIER_RECORDS has_plugin_dir=$AC203_HAS_PLUGIN_DIR evaluated=$AC203_EVALUATED host=$AC203_HOST"
   if [ "$AC203_EVALUATED" = "1" ] && [ "$AC203_DRIVER_ALIVE" = "1" ] && [ "$AC203_CARRIER_RECORDS" -gt 0 ] 2>/dev/null && [ "$AC203_HAS_PLUGIN_DIR" = "0" ]; then
-    write_ac203_record "$TS" "$AC203_HOST" "$AC203_PROJECT_ROOT" "0" "1" "$AC203_CARRIER_RECORDS" "$AC89"
-    echo "  ac203 record written → $AC89"
+    # 写入点是 helper（统一补 top-level build_sha）；helper fail-closed ⇒ rc≠0 时【不写】。
+    # ⛔ 不因 rc≠0 中止本步（后续步骤不依赖该记录，且中止会把「缺锚」伪装成「脚本崩了」）；
+    # 但也 ⛔ 不静默——如实打印，与下一分支的 NOTE 同形（缺值≠合格，硬规则 3b）。
+    if write_ac203_record "$AC203_HOST" "$AC203_PROJECT_ROOT" "0" "1" "$AC203_CARRIER_RECORDS"; then
+      echo "  ac203 record written → $AC89"
+    else
+      echo "  NOTE: AC-203 record NOT written (fail-closed: BUILD_SHA missing/non-40-hex or AC89 path empty — 缺值≠合格)"
+    fi
     return 0
   fi
   echo "  NOTE: AC-203 record NOT written (driver not alive / no carrier records / plugin dir present — 缺值≠合格)"
@@ -1988,8 +1999,16 @@ Enter to confirm · Esc to cancel"
   # control 15 (AC-203 载体记录): write_ac203_record 写出的记录五字段逐字满足 criterion 过滤（
   # has_plugin_dir 是 JSON 字面 false、driver_alive/carrier_records 是整数）；driver_alive=0 ⇒ 拒写
   # （fail-closed，缺值≠合格）。host/project_root 用「非本机/非本仓库」的假值，证明 criterion 能取真。
+  # gap-ac203-record-lacks-build-sha-makes-ac214-permanently-unsatisfiable（AC3/AC4）：写入点改走
+  # ac89_append_goal009 后，记录必须带 top-level 40-hex build_sha（AC-214 唯一认的锚字段——缺它该 ac
+  # 落进 missing ⇒ AC-214 恒 exit 1）；⛔ 锚字段不靠读代码断言——断言读的是【载体上真写下的那一行】。
+  # 且 helper 的 fail-closed 未被降级：读数全有效但 BUILD_SHA 空 ⇒ 拒写【且载体行数不变】
+  # （⛔ 不降级成「至少写点什么」的无锚记录，硬规则 3b）。载体路径经全局 AC89 传（helper 的 choke
+  # point，与 control 16/17 同形）。
   local ac203_file="$tmp/ac203.jsonl" ac203_wrote=0 ac203_fields_ok=0 ac203_refused=0 ac203_ts="2026-09-09T00:00:00Z"
-  if write_ac203_record "$ac203_ts" "hostB-fake" "/tmp/third-party-fake" "0" "1" "5" "$ac203_file"; then
+  local ac203_sha_hex=0 ac203_line="" ac203_neg_rc=0 ac203_neg_msg=0 ac203_neg_err="" ac203_lb=0 ac203_la=0
+  AC89="$ac203_file"; TS="$ac203_ts"; BUILD_SHA="0123456789abcdef0123456789abcdef01234567"
+  if write_ac203_record "hostB-fake" "/tmp/third-party-fake" "0" "1" "5"; then
     ac203_wrote=1
     if grep -q '"ac":"GOAL-009-AC-203"' "$ac203_file" \
        && grep -q '"has_plugin_dir":false' "$ac203_file" \
@@ -1997,12 +2016,28 @@ Enter to confirm · Esc to cancel"
        && grep -q '"carrier_records":5' "$ac203_file"; then
       ac203_fields_ok=1
     fi
+    ac203_line="$(tail -n 1 "$ac203_file")"
+    # ⛔ 用 bash `=~` 而非 `printf | grep -q`：pipefail 下 grep -q 命中即早退 ⇒ printf 收 SIGPIPE
+    # ⇒ 管道 141 ⇒ 条件成立时反而判假（实测过的形态），且是否复现取决于宿主 grep。结构上避开管道。
+    if [[ "$ac203_line" =~ \"build_sha\":\"[0-9a-f]{40}\" ]]; then ac203_sha_hex=1; fi
   fi
-  if ! write_ac203_record "$ac203_ts" "hostB-fake" "/tmp/third-party-fake" "0" "0" "5" "$ac203_file" 2>/dev/null; then
+  if ! write_ac203_record "hostB-fake" "/tmp/third-party-fake" "0" "0" "5" 2>/dev/null; then
     ac203_refused=1
   fi
-  echo "selfcheck: ac203-record(valid) wrote=$ac203_wrote fields_ok=$ac203_fields_ok (expect 1/1)"
+  # AC4 负控制：读数全有效、唯独 BUILD_SHA 空 ⇒ helper 拒写（rc≠0 ∧ stderr 带拒写提示 ∧ 行数不变）。
+  ac203_lb="$(wc -l < "$ac203_file" 2>/dev/null || echo 0)"
+  BUILD_SHA=""
+  set +e
+  ac203_neg_err="$(write_ac203_record "hostB-fake" "/tmp/third-party-fake" "0" "1" "5" 2>&1 >/dev/null)"
+  ac203_neg_rc=$?
+  set -e
+  if [[ "$ac203_neg_err" == *"BUILD_SHA not 40-hex"* ]]; then ac203_neg_msg=1; fi
+  ac203_la="$(wc -l < "$ac203_file" 2>/dev/null || echo 0)"
+  AC89=""; TS=""; BUILD_SHA=""
+  echo "selfcheck: ac203-record(valid) wrote=$ac203_wrote fields_ok=$ac203_fields_ok build_sha_40hex=$ac203_sha_hex (expect 1/1/1 — top-level 40-hex build_sha)"
+  echo "selfcheck: ac203-record(valid) line=$ac203_line"
   echo "selfcheck: ac203-record(dead-driver) refused=$ac203_refused (expect 1 — driver_alive=0 拒写, 缺值≠合格)"
+  echo "selfcheck: ac203-record(no-build-sha) rc=$ac203_neg_rc msg=$ac203_neg_msg lines=$ac203_lb→$ac203_la (expect non-0/1/1→1 — 空 BUILD_SHA 拒写且不降级成无锚记录)"
 
   # control 15b (AC-203 status 解析, gap-cross-host-evidence-run-incomplete-… AC5 真因):
   #   probe_ac203_driver_status 的 node 曾把 alive= / recs= 打在同一行 ⇒ sed `^recs=` 永不命中（
