@@ -453,3 +453,90 @@ test("CLI: the config-free entry supersedes the config-exists refusal it shares 
   assert.match(bmo.stdout, /landing-baseline/, "the entry must still have run its judgment");
   assert.doesNotMatch(bmo.stderr, /already exists/);
 });
+
+// ── the SHIPPED entry: plugin/scripts/quay-init.sh must JUDGE the baseline, never assume it ──────
+// (gap-upgrade-entry-never-establishes-branch-model)
+//
+// This is the entry a REAL USER upgrades an already-initialized project with (SPEC §5; the
+// /quay:init skill runs it too) — and it is NOT the TS `quay init` every test above drives. Before
+// this task it wrote `fork_baseline: develop` into the target config while never judging or
+// establishing that ref, so an upgraded project whose own `develop` was an ancient foreign fork
+// stayed structurally un-landable, with the remedy unreachable (the one CLI面 that could repair it
+// also rewrote — i.e. destroyed — the user's `gates:` / `loop:` / `routines:`).
+//
+// The shell is a thin DELEGATOR (the judgment stays in `ensureBranchModel`), so what this test pins
+// is the delegation: drop the `ensure_target_branch_model` call site and the shipped entry goes back
+// to exiting 0 on a foreign baseline — silently.
+//
+// The refusal happens BEFORE the closed-set write, so this run is cheap and mutation-free.
+
+const REPO_ROOT = path.join(__dirname, "..", "..", "..");
+const SHIPPED_INIT = path.join(REPO_ROOT, "plugin", "scripts", "quay-init.sh");
+const VENDORED_CLI = path.join(REPO_ROOT, "plugin", "vendor", "quay", "dist", "quay.js");
+
+test("shipped quay-init.sh: a foreign landing baseline REFUSES the upgrade, config byte-identical", () => {
+  // Without the built bundle the shipped entry has NO judgment available (the vendored dist is a
+  // gitignored generated artifact; scripts/test.sh's build_dist_once produces it) — that is the
+  // script's own can't-evaluate path (exit 3), a DIFFERENT reading. Assert nothing about it rather
+  // than reporting a pass this test did not measure (hard rule 3b).
+  if (!fs.existsSync(VENDORED_CLI)) return;
+
+  const dir = initializedRepo("shipped-refusal");
+  // The shipped entry detects the target's test command BEFORE the branch-model step and fails
+  // closed without one — give it one so this test measures the branch-model step, not that guard.
+  fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "scripts", "test.sh"), "#!/usr/bin/env bash\nexit 0\n");
+  const cfg = path.join(dir, ".quay", "config.yml");
+  const beforeSha = sha256(cfg);
+  const beforeDevelop = git(dir, ["rev-parse", "develop"]);
+
+  let r;
+  try {
+    r = {
+      stdout: execFileSync(
+        "bash",
+        [SHIPPED_INIT, "--root", dir, "--repo-root", dir, "--worktree-root", `${dir}-worktrees`, "--auto-commit-skip"],
+        { encoding: "utf8", cwd: dir },
+      ),
+      stderr: "",
+      exitCode: 0,
+    };
+  } catch (err) {
+    r = { stdout: err.stdout ?? "", stderr: err.stderr ?? "", exitCode: err.status ?? 1 };
+  }
+
+  assert.equal(r.exitCode, 1, `the shipped upgrade entry must refuse a foreign baseline; got exit ${r.exitCode}\n--- stdout ---\n${r.stdout}\n--- stderr ---\n${r.stderr}`);
+  assert.match(r.stdout, /\[BLOCKED\] landing-baseline -> develop/, "the judgment must be the delivered CLI's own verdict");
+  assert.match(r.stderr, /REFUSES to upgrade/, "the operator must be told the upgrade was refused");
+  assert.match(r.stderr, /--adopt-branch-model/, "and handed the remedy verbatim");
+  assert.equal(sha256(cfg), beforeSha, "the refusal must leave the user's config byte-for-byte unchanged");
+  assert.equal(git(dir, ["rev-parse", "develop"]), beforeDevelop, "and move no ref");
+});
+
+test("shipped quay-init.sh: a compatible baseline is NOT refused (the AC4 arm of the shipped entry)", () => {
+  if (!fs.existsSync(VENDORED_CLI)) return;
+  const dir = initializedRepo("shipped-compatible");
+  git(dir, ["branch", "-f", "develop", "main"]); // main is now an ancestor of develop
+  fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "scripts", "test.sh"), "#!/usr/bin/env bash\nexit 0\n");
+  const beforeDevelop = git(dir, ["rev-parse", "develop"]);
+
+  let r;
+  try {
+    r = {
+      stdout: execFileSync(
+        "bash",
+        [SHIPPED_INIT, "--root", dir, "--repo-root", dir, "--worktree-root", `${dir}-worktrees`, "--auto-commit-skip"],
+        { encoding: "utf8", cwd: dir },
+      ),
+      stderr: "",
+      exitCode: 0,
+    };
+  } catch (err) {
+    r = { stdout: err.stdout ?? "", stderr: err.stderr ?? "", exitCode: err.status ?? 1 };
+  }
+
+  assert.doesNotMatch(r.stderr, /REFUSES to upgrade/, "a compatible baseline must never be refused");
+  assert.match(r.stdout, /\[REUSED\] landing-baseline -> develop/);
+  assert.equal(git(dir, ["rev-parse", "develop"]), beforeDevelop, "and no branch is moved");
+});
