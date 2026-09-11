@@ -9,16 +9,38 @@
 // node_modules/ (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`, independent of
 // Node version), and bin/quay.js is a dev-tree probe, not a declared bin.
 //
-// Invariant pinned here: every file that (a) gets packed into the tarball and
-// (b) looks like an entry (executable bit / shebang / under bin/) must be a
-// declared `package.json` bin that runs from an install-location layout. The
-// AC-233 fix removes `bin` from `files`, so the only shipped entry is the
-// declared bin `./dist/quay.js` (a self-contained esbuild bundle — the version
-// is embedded at build time, see src/version.ts).
+// Invariant pinned here: every packed file that IS a user entry must be a
+// declared `package.json` bin that runs from an install-location layout. A "user
+// entry" is exactly one of:
+//   (1) a declared `package.json` bin (anywhere in the package — dist/quay.js), or
+//   (2) a file under the conventional bin/ directory (entry-by-location).
+// The AC-233 fix removes bin/quay.js + bin/quay.ts (+ bin/node-version-check.cjs)
+// from `files`, so the only shipped entry is the declared bin `./dist/quay.js`
+// (a self-contained esbuild bundle — the version is embedded at build time).
 //
-// ⛔ NOT "the declared bin runs": the enumerated set is ALL packed entry-like
-// files. A non-declared entry-like file that sneaks into `files` (the exact
-// shape of the original defect) fails the assertion — that is the whole point.
+// ⛔ exec-bit / shebang ALONE is NOT entry evidence. The tarball legitimately
+// carries the whole plugin bundle (`files` includes "plugin" — the plugin IS the
+// delivery surface), and every plugin/*.sh carries a shebang + exec bit: those are
+// mechanisms invoked BY PATH by the driver/gate (capability-catalog.sh's table),
+// not user-facing commands. Treating "any shebang file" as an entry produced ~300
+// false violations (plugin/scripts/*.sh, plugin/gate-scripts/*.sh,
+// plugin/vendor/*/dist/*.js) — the over-wide definition this test now narrows to
+// a third, non-violating state (shipped-mechanism). The enumeration stays complete
+// (every packed file is classified); only "declared bin but not runnable" and
+// "bin/ file that is not a declared bin" are violations.
+//
+// ⛔ NOT "the declared bin runs": the enumerated set is ALL packed files. A
+// non-declared bin/ file that sneaks into `files` (the exact shape of the original
+// defect) fails the assertion — that is the whole point. A declared bin that does
+// not run from an install layout also fails it.
+//
+// Environment note: `npm pack --dry-run` packs `packages/quay/plugin/`, a
+// GITIGNORED generated snapshot (staged by scripts/package.sh before `npm pack`,
+// never tracked — .gitignore:26). It is present in the shared checkout (left over
+// from a prior package.sh run) and absent in a fresh worktree, so the file SET
+// differs (439 vs 95 files). The VERDICT is environment-independent: the shipped-
+// mechanism state absorbs the plugin bundle in the checkout that has it, and the
+// bin/ defect surface (tracked files) is present in both.
 //
 // Run: node --test plugin/test/shipped-entry-runnable.test.mjs
 import { test } from "node:test";
@@ -67,18 +89,6 @@ function readShebangPrefix(rel) {
   }
 }
 
-// A packed file "looks like an entry" if it has an executable bit, a shebang
-// first line, or sits in the conventional bin/ directory. The bin/ criterion
-// matters: bin/node-version-check.cjs has neither bit nor shebang but is still
-// entry-shaped by location.
-function isEntryLike(packedFile, shebangPrefix) {
-  const { path: rel, mode } = packedFile;
-  if (rel.split("/")[0] === "bin") return true;
-  if ((mode & 0o111) !== 0) return true;
-  if (shebangPrefix === "#!") return true;
-  return false;
-}
-
 // Files npm runs via package.json `scripts` (lifecycle hooks — postinstall,
 // build, ...) are invoked BY npm, not by a user, so they are not "entries" even
 // when they carry a shebang (scripts/register-plugin.mjs does). Exempting them
@@ -118,26 +128,83 @@ function runsFromInstallLayout(rel) {
   }
 }
 
+// The three distinguishable states of a packed file (Plan option (c) — keep the
+// enumeration complete, narrow what counts as a VIOLATION). Only the first two
+// "not runnable" states below are defects; "shipped mechanism" is the third,
+// non-violating state that absorbs the plugin bundle's shebang-carrying .sh files.
+const State = {
+  DECLARED_BIN_RUNNABLE: "declared-bin-runnable",
+  DECLARED_BIN_NOT_RUNNABLE: "declared-bin-not-runnable",
+  BIN_ENTRY_NOT_DECLARED: "bin-entry-not-declared",
+  SHIPPED_MECHANISM: "shipped-mechanism",
+  NON_ENTRY: "non-entry",
+};
+
+function classify(packedFile, shebangPrefix, binPaths) {
+  const { path: rel, mode } = packedFile;
+  if (binPaths.includes(rel)) {
+    // A declared bin (anywhere in the package) must run from an install layout.
+    return runsFromInstallLayout(rel)
+      ? State.DECLARED_BIN_RUNNABLE
+      : State.DECLARED_BIN_NOT_RUNNABLE;
+  }
+  if (rel.split("/")[0] === "bin") {
+    // Under the conventional bin/ directory but not a declared bin: the exact
+    // shape of the AC-233 defect (bin/quay.js, bin/quay.ts). Entry-by-location
+    // is enough — no exec bit / shebang required (bin/node-version-check.cjs).
+    return State.BIN_ENTRY_NOT_DECLARED;
+  }
+  if ((mode & 0o111) !== 0 || shebangPrefix === "#!") {
+    // Exec bit / shebang but NOT under bin/ and NOT a declared bin: a shipped
+    // mechanism (plugin/scripts/*.sh, plugin/gate-scripts/*.sh, plugin/vendor
+    // runtimes) invoked by path, not a user-facing command. NOT a violation.
+    return State.SHIPPED_MECHANISM;
+  }
+  return State.NON_ENTRY;
+}
+
 test("every packed entry-like file is a declared bin runnable from an install layout", () => {
   const binPaths = declaredBinPaths();
   const hookPaths = lifecycleHookPaths();
   const packed = packedFiles();
-  const violations = [];
+  const byState = {
+    [State.DECLARED_BIN_RUNNABLE]: [],
+    [State.DECLARED_BIN_NOT_RUNNABLE]: [],
+    [State.BIN_ENTRY_NOT_DECLARED]: [],
+    [State.SHIPPED_MECHANISM]: [],
+    [State.NON_ENTRY]: [],
+  };
+  let hookCount = 0;
   for (const f of packed) {
-    if (hookPaths.has(f.path)) continue; // lifecycle hook, not a user-facing entry
-    if (!isEntryLike(f, readShebangPrefix(f.path))) continue;
-    if (!binPaths.includes(f.path)) {
-      violations.push(`${f.path}: packed + entry-like but NOT a declared bin`);
-      continue;
+    if (hookPaths.has(f.path)) {
+      hookCount += 1;
+      continue; // lifecycle hook, not a user-facing entry
     }
-    if (!runsFromInstallLayout(f.path)) {
-      violations.push(`${f.path}: declared bin but does not run from an install layout`);
-    }
+    byState[classify(f, readShebangPrefix(f.path), binPaths)].push(f.path);
   }
+  const violations = [
+    ...byState[State.DECLARED_BIN_NOT_RUNNABLE].map(
+      (p) => `${p}: declared bin but does not run from an install layout`,
+    ),
+    ...byState[State.BIN_ENTRY_NOT_DECLARED].map(
+      (p) => `${p}: under bin/ but not a declared package.json bin`,
+    ),
+  ];
+  const ex = (list) => (list.length ? list[0] : "none");
+  // The three states are printed so the output itself distinguishes them (AC6):
+  console.log(
+    `# shipped-entry classification — ` +
+      `declared-bin-runnable=${byState[State.DECLARED_BIN_RUNNABLE].length} [${ex(byState[State.DECLARED_BIN_RUNNABLE])}] | ` +
+      `declared-bin-not-runnable=${byState[State.DECLARED_BIN_NOT_RUNNABLE].length} [${ex(byState[State.DECLARED_BIN_NOT_RUNNABLE])}] | ` +
+      `bin-entry-not-declared=${byState[State.BIN_ENTRY_NOT_DECLARED].length} [${ex(byState[State.BIN_ENTRY_NOT_DECLARED])}] | ` +
+      `shipped-mechanism=${byState[State.SHIPPED_MECHANISM].length} [${ex(byState[State.SHIPPED_MECHANISM])}] | ` +
+      `non-entry=${byState[State.NON_ENTRY].length} [${ex(byState[State.NON_ENTRY])}] | ` +
+      `lifecycle-hook=${hookCount}`,
+  );
   assert.deepEqual(
     violations,
     [],
-    `packed entry-like files must each be a declared bin runnable from an install layout. ` +
+    `packed entry files must each be a declared bin runnable from an install layout. ` +
       `Declared bins: ${JSON.stringify(binPaths)}. Violations:\n${violations.join("\n")}`,
   );
 });
