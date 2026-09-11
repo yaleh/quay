@@ -21,7 +21,10 @@
 #
 # 已退役（copy 机器，AC1 archive）：copy_one/copy_dir/write_state_file/write_session_env + managed/
 # conflict/stale 三态判定 + .quay/runtime 铺设 + ensure_vendor_runtime + verify_provider_runtime_existence
-# + --check-drift/--check-dependency-closure 的铺设面消费。⚠️ 保留为【库函数】（供 laydown-set-check.sh /
+# + --check-drift/--check-dependency-closure 的铺设面消费。⚠️ 铺设退役【不等于】既有项目的
+# `.quay/runtime/` 无人管：其继任者是 migrate_stale_mcp_entry（升级通道）——把 provider 绑定迁到
+# 插件交付的 runtime 绝对路径，并把无引用且陈旧的本地副本退役（gap-upgrade-leaves-legacy-project-
+# runtime-stale-and-unmigrated AC1/AC2，裁定见该函数头）。⚠️ 保留为【库函数】（供 laydown-set-check.sh /
 # build-plugin-dist.mjs 等 SOURCE 后调用，本脚本的 library-mode guard 使 source 不执行安装流）：
 # derive_loop_scripts / verify_referenced_landed / _read_declarations 及其 helper——它们不再是 quay-init
 # 的写路径，只是仍然被下游机件按库方式消费；它们的整体退役属 AC158/AC159 波次。
@@ -111,6 +114,57 @@ if [ ! -d "$WORKSPACE_ROOT" ]; then
   exit 2
 fi
 WORKSPACE_ROOT="$(cd "$WORKSPACE_ROOT" && pwd)"
+
+# ── pre-write closed-set snapshot (gap-quay-init-failure-report-existence-proxy-overreports-on-upgrade)
+# report_closed_set_state (below) classifies each of the seven closed-set items by comparing their
+# CURRENT fingerprint against this snapshot. Taken HERE — before any other statement can write — so the
+# comparison is by position (not by an argument that "nothing writes before the write section"), and
+# read back by the EXIT trap wherever the abort lands.
+#
+# Why the snapshot exists: the retired form tested `[ -e <path> ]` — EXISTENCE — which only coincides
+# with "this run wrote it" on a FRESH target. On a non-empty target (upgrading a project that already
+# ran quay-native) the two quantities separate and the report over-credits: a pre-write failure on an
+# existing project reported a byte-for-byte untouched `.quay/config.yml` as `written:`, i.e. it
+# described a run that changed nothing as a partial takeover (hard rule 4b: 代理量会与实际偏离 — here
+# on the dangerous side). The fingerprint comparison is CONTENT-level, so a run that rewrote a file
+# with identical bytes is also honestly reported as not-changed.
+#
+# Fingerprint: a file → sha256 of its bytes; a directory → sha256 of its sorted entry listing (the
+# exact content granularity of quay-init's only directory write, `mkdir -p`); ABSENT when the path is
+# not there. UNREADABLE is kept DISTINCT from ABSENT: a path that exists but whose content cannot be
+# read must never be reported as "not there / not written" (hard rule 3b — 读不懂输入不得返回与合格
+# 同形的值).
+CLOSED_SET_ITEMS=".quay/config.yml .quay/profiles.yml tasks goals .gitignore .claude/launch.settings.json .claude/settings.json"
+declare -A PRE_WRITE_FINGERPRINTS=()
+
+# _closed_set_fingerprint <abs-path> — ABSENT | UNREADABLE | <sha256>. Never fails the caller under
+# `set -e` (every subprocess is guarded), because it also runs inside the EXIT trap.
+_closed_set_fingerprint() {
+  local p="$1" out=""
+  if [ -d "$p" ]; then
+    out="$(ls -A "$p" 2>/dev/null | LC_ALL=C sort | sha256sum 2>/dev/null | cut -d' ' -f1)" || out=""
+    if [ -n "$out" ]; then echo "$out"; return 0; fi
+    if [ -d "$p" ]; then echo UNREADABLE; else echo ABSENT; fi
+  elif [ -f "$p" ]; then
+    out="$(sha256sum "$p" 2>/dev/null | cut -d' ' -f1)" || out=""
+    if [ -n "$out" ]; then echo "$out"; return 0; fi
+    if [ -f "$p" ]; then echo UNREADABLE; else echo ABSENT; fi
+  elif [ -e "$p" ]; then
+    echo UNREADABLE   # exists but is neither a regular file nor a directory — nothing comparable to
+  else
+    echo ABSENT
+  fi
+  return 0
+}
+
+_snapshot_closed_set() {
+  local p
+  for p in $CLOSED_SET_ITEMS; do
+    PRE_WRITE_FINGERPRINTS["$p"]="$(_closed_set_fingerprint "$WORKSPACE_ROOT/$p")"
+  done
+  return 0
+}
+_snapshot_closed_set
 
 # gap-the-runtime-has-nowhere-safe-to-land: the RUNTIME LANDING BASE. The quay runtime (Core
 # bundle + native-provider bundle + provider.yml) used to land under `<target>/vendor/quay/` —
@@ -571,18 +625,28 @@ detect_tmux_session() {
 # the fast-mode schema's extras (concurrency_bands / fork_baseline / routines) were
 # silently dropped on upgrade. The fix updates ONLY the four fast-mode keys and leaves every other
 # loop: key byte-for-byte intact (the consumer's loop values survive the upgrade unchanged).
+# NO GRATUITOUS REWRITE (gap-upgrade-leaves-legacy-project-runtime-stale-and-unmigrated AC3): the
+# write happens ONLY when a VALUE actually changed. `yaml.safe_dump` reformats the whole document
+# (an inline `mcp_entry: [...]` becomes a block sequence), so an unconditional write would mutate
+# the provider block of a project that needed no change at all — a byte-level side effect of a
+# value-level no-op. Values equal ⇒ no write, and the config survives byte-identical.
 ensure_loop_config() {
   local cfg="$WORKSPACE_ROOT/.quay/config.yml"
-  if [ "$DRY_RUN" = true ]; then
-    echo "  would-write: .quay/config.yml loop: (repo_root/test_command/tmux_session/worktree_root updated; 其余 loop 键保留 — config 保留 增量升级)"
-    return
-  fi
   if [ ! -f "$cfg" ]; then return; fi
-  python3 - "$cfg" "$REPO_ROOT" "$TEST_COMMAND" "$TMUX_SESSION" "$WORKTREE_ROOT" <<'PYEOF'
+  python3 - "$cfg" "$REPO_ROOT" "$TEST_COMMAND" "$TMUX_SESSION" "$WORKTREE_ROOT" "$DRY_RUN" <<'PYEOF'
 import sys, yaml
 cfg, repo, test, tmux, wtroot = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
+dry_run = sys.argv[6] == "true"
 with open(cfg, encoding="utf-8") as f:
     data = yaml.safe_load(f) or {}
+# gap-upgrade-leaves-legacy-project-runtime-stale-and-unmigrated AC3 (负控制: 不得做无谓改写):
+# a re-dump is not free — `yaml.safe_dump` REFORMATS the whole file (an inline `mcp_entry: [...]`
+# becomes a block sequence), so an upgrade that changes no VALUE must not rewrite the file at all.
+# Snapshot the data before the loop update and compare after: equal ⇒ skip the write, so a project
+# whose runtime binding is already current survives the upgrade byte-identical.
+def dump(d):
+    return yaml.safe_dump(d, allow_unicode=True, sort_keys=False, default_flow_style=False)
+before = dump(data)
 loop = data.get("loop")
 if not isinstance(loop, dict):
     loop = {}
@@ -594,52 +658,92 @@ loop["test_command"] = test
 loop["tmux_session"] = tmux if tmux else None
 loop["worktree_root"] = wtroot
 data["loop"] = loop
+after = dump(data)
+if after == before:
+    print("  unchanged: .quay/config.yml loop: (values already current — no gratuitous rewrite, AC3)")
+    sys.exit(0)
+if dry_run:
+    print("  would-write: .quay/config.yml loop: (repo_root/test_command/tmux_session/worktree_root updated; 其余 loop 键保留 — config 保留 增量升级)")
+    sys.exit(0)
 with open(cfg, "w", encoding="utf-8") as f:
-    yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
-print(f"  wrote: .quay/config.yml loop: (repo_root/test_command/tmux_session/worktree_root updated; 其余 loop 键保留 — config 保留 增量升级)")
+    f.write(after)
+print("  wrote: .quay/config.yml loop: (repo_root/test_command/tmux_session/worktree_root updated; 其余 loop 键保留 — config 保留 增量升级)")
 PYEOF
 }
 
-# migrate_stale_mcp_entry: upgrade-channel config migration (gap-dist-runtime-not-self-contained-
-# reads-external-package-json AC4). A pre-existing .quay/config.yml from an OLD install can carry a
-# provider `path` / `mcp_entry` that points at a path which does NOT exist in the target — the
-# manager-verified case is a dev-tree source residual (`path: <ws>/bin`, `mcp_entry: .../bin/quay-
-# native.ts`) left by an earlier install, which the AC3 referenced-existence verify would otherwise
-# FAIL CLOSED on forever (the "config already exists is never rewritten" upgrade hole). quay-init
-# lays the install-state provider (.quay/runtime/bin/quay-native.js + .quay/runtime/provider.yml)
-# BEFORE write_provider_config runs, so a stale provider path is migrated to that install-state
-# provider dir (bin/quay.ts uses `provider.path` as the provider spawn cwd — a nonexistent dir makes
-# the spawn ENOENT) and a dangling reference to a QUAY runtime file is migrated to the install-state
-# runtime bundle (config migration, not a blank rewrite — other keys are preserved). A config from
-# an install that laid the runtime under the OLD vendor/ layout is migrated to .quay/runtime/ even
-# when the stale vendor/ copy still exists (the layout moved — gap-the-runtime-has-nowhere-safe-to-
-# land). SCOPE GUARD:
-# only a `path` that is not a real directory AND only references whose basename is a quay runtime
-# file (`quay-native.js/ts`, `quay.js/ts`) are migrated; an arbitrary dangling path (e.g.
-# ./nonexistent/runtime.js) is left untouched so the landed vendor-runtime AC3 negative control
-# (verify FAILS CLOSED on a dangling mcp_entry it cannot recognize) keeps its meaning.
+# migrate_stale_mcp_entry: the UPGRADE-CHANNEL migration for the RETIRED project-local runtime
+# (gap-dist-runtime-not-self-contained-reads-external-package-json AC4; extended by
+# gap-upgrade-leaves-legacy-project-runtime-stale-and-unmigrated AC1/AC2/AC3).
+#
+# ── RULING (AC1) ────────────────────────────────────────────────────────────────────────────────
+# Of the three offered options (refresh the project-local runtime / remove it / point the config at
+# the plugin's vendored runtime), the ruling is **(c): the provider binding is migrated to THIS
+# plugin delivery's vendored runtime — an ABSOLUTE path under $PLUGIN_ROOT**. Rationale: 裁定 6
+# (SPEC-plugin-lifecycle-single-bundle-2026-09-02) retired `.quay/runtime` lay-down and made the
+# quay Claude Code plugin the SINGLE delivery surface for the runtime (quay-init is a project
+# initializer, not an installer) — so options (a) "refresh" would resurrect a mechanism a ratified
+# SPEC retired. Option (c)'s corollary for the now-unreferenced project-local copy is (b) "remove":
+# a stale copy that no product path updates is a FALSE TARGET (it silently looks like the runtime
+# while nothing maintains it), so it is retired — backed up, never silently deleted — but ONLY when
+# it is unreferenced, recognizably quay's own install-generated runtime, and STALE (a byte-current
+# copy is left byte-identical — AC3).
+#
+# ── WHAT WAS BROKEN ────────────────────────────────────────────────────────────────────────────
+# The pre-fix predicate recognized only `mcp_entry` refs whose BASENAME ended in `.js`/`.ts`
+# (`^quay(-native)?\.(js|ts)$`). A legacy project bound to the BARE PATH form
+# (`mcp_entry: ["quay-native", "mcp"]`) matched NEITHER branch ⇒ `changed` stayed False ⇒ the
+# config was preserved verbatim, the project stayed bound to "whatever $PATH happens to resolve
+# on this host", and its `.quay/runtime/bin/*` bundle became a copy no product path updates or
+# clears. Measured on a real legacy project 2026-09-11 (see the task's Finding).
+#
+# ── MIGRATION RULES ────────────────────────────────────────────────────────────────────────────
+#   path       : dangling, OR a quay runtime dir under a reserved segment (pre-fix vendor/ land),
+#                OR the RETIRED project-local `.quay/runtime` dir  -> $PLUGIN_ROOT/vendor/quay-native
+#   mcp_entry ①: the BARE PATH form (`quay` / `quay-native`, no path separator)  -> plugin runtime
+#   mcp_entry ②: a dangling reference to a quay runtime file (basename quay[-native].{js,ts}) -> plugin runtime
+#   mcp_entry ③: a reference into the RETIRED project-local runtime that is STALE (bytes differ
+#                from this delivery's bundle) -> plugin runtime
+#   mcp_entry ④: the legacy vendor/ layout (fires even when that stale copy still exists) -> plugin runtime
+# SCOPE GUARD (unchanged): an arbitrary dangling path (e.g. ./nonexistent/runtime.js) is left
+# untouched so the landed vendor-runtime negative control (verify FAILS CLOSED on a dangling
+# mcp_entry it cannot recognize) keeps its meaning.
+# AC3 NEGATIVE CONTROL (can take false): every rule above fires only on an OLD/AMBIGUOUS form. A
+# project whose `.quay/runtime/` is byte-identical to this delivery AND whose `mcp_entry` is
+# already an absolute path is left byte-for-byte untouched — including its runtime dir, which must
+# NOT be retired (a byte-current copy is indistinguishable from a legitimate one).
 migrate_stale_mcp_entry() {
   local cfg="$WORKSPACE_ROOT/.quay/config.yml"
   local install_provider="${PLUGIN_ROOT}/vendor/quay-native"
   local install_runtime="${install_provider}/dist/quay-native.js"
-  if [ "$DRY_RUN" = true ]; then
-    echo "  would-migrate: stale provider path/mcp_entry -> ${install_provider} (upgrade-channel config migration — AC4)"
-    return
-  fi
+  local install_core="${PLUGIN_ROOT}/vendor/quay/dist/quay.js"
   if [ ! -f "$cfg" ]; then return; fi
-  python3 - "$cfg" "$install_provider" "$install_runtime" "$WORKSPACE_ROOT" <<'PYEOF'
-import sys, os, re, yaml
-cfg, install_provider, install_runtime, ws_root = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+  python3 - "$cfg" "$install_provider" "$install_runtime" "$install_core" "$WORKSPACE_ROOT" "$DRY_RUN" "$BACKUP_TS" <<'PYEOF'
+import sys, os, re, yaml, hashlib, shutil
+cfg, install_provider, install_runtime, install_core, ws_root = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
+dry_run = sys.argv[6] == "true"
+backup_ts = sys.argv[7]
 with open(cfg, encoding="utf-8") as f:
     data = yaml.safe_load(f) or {}
 prov = (data.get("providers") or {}).get("native")
 if not isinstance(prov, dict):
     sys.exit(0)
+
+def sha(p):
+    try:
+        with open(p, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except Exception:
+        return None
+
+def under(path, base):
+    p = os.path.abspath(str(path))
+    return p == base or p.startswith(base + os.sep)
+
 # gap-the-runtime-has-nowhere-safe-to-land: reserved directory names that must never hold the quay
 # runtime in a target (Go vendor/, npm node_modules/, cargo target/, make/build/, bundler dist/).
 # The landing path check is by PATH LITERAL segment (task AC9), the same list here. An EXISTING
 # install (pre-fix) laid the runtime into `<target>/vendor/quay[-native]/` — on upgrade that dir
-# EXISTS, so the old `not os.path.isdir(p)` guard would never migrate it and the target would stay
+# EXISTS, so a bare `not os.path.isdir(p)` guard would never migrate it and the target would stay
 # pointed at the Go-reserved directory forever. The upgrade path therefore migrates any provider
 # path/mcp_entry that is (a) dangling, OR (b) a quay runtime path sitting under a reserved segment.
 RESERVED = {"vendor", "node_modules", "target", "build", "dist"}
@@ -649,38 +753,142 @@ def under_reserved(p):
 def is_quay_runtime_dir(p):
     base = os.path.basename(str(p).rstrip(os.sep))
     return base in ("quay", "quay-native")
+# The RETIRED project-local runtime dir + a predicate for "this reference points into it".
+rt_dir = os.path.join(ws_root, ".quay", "runtime")
+def in_retired_runtime(p):
+    s = str(p)
+    cands = [s] if os.path.isabs(s) else [s, os.path.join(ws_root, s)]
+    return any(under(c, rt_dir) for c in cands)
+# gap-upgrade-leaves-legacy-project-runtime-stale-and-unmigrated AC2: the BARE PATH form. The OS
+# resolves it through $PATH, so the effective runtime is "whatever this host happens to have" —
+# exactly the ambiguity AC2 forbids. No separator ⇒ it is a PATH lookup, not a path.
+def is_bare_path_quay(ref):
+    return os.sep not in str(ref) and str(ref) in ("quay", "quay-native")
+RUNTIME_BASENAME = re.compile(r"^quay(-native)?\.(js|ts)$")
+# The element that NAMES the runtime is NOT always index 1. The canonical node form is
+# ["node", <runtime>, "mcp"] (runtime at index 1), but the legacy BARE PATH form is
+# ["quay-native", "mcp"] — the executable is index 0 there. A fixed `me[1]` therefore read "mcp",
+# matched nothing, and left the whole bare form unmigrated. Scoped to the two real shapes (index 0
+# bare / index 1 runtime file) so an unrelated "quay" argument deeper in the list is never touched.
+def runtime_ref_index(me):
+    if not isinstance(me, list) or len(me) < 2:
+        return None
+    if isinstance(me[0], str) and is_bare_path_quay(me[0]):
+        return 0
+    if isinstance(me[1], str) and RUNTIME_BASENAME.match(os.path.basename(me[1])):
+        return 1
+    return None
+
+# retired_rt_state — the single source of truth for the fate of <ws>/.quay/runtime, computed ONCE
+# from the ORIGINAL bytes (before any move). Both the binding rules and the retirement below read
+# it, so "the runtime dir is stale" has one definition:
+#   absent  — nothing there
+#   retire  — recognizably quay's install-generated runtime, and STALE vs this delivery
+#   keep    — recognizably quay's install-generated runtime, and byte-identical (AC3: never touch)
+#   unknown — not quay's runtime shape, or the delivered bundle is unreadable ⇒ NEVER touch
+# The `unknown` state exists so "cannot evaluate" never shares an output with "evaluated, fine"
+# (硬规则 3b): a directory we cannot recognize is left alone rather than treated as stale.
+def retired_rt_state():
+    if not os.path.isdir(rt_dir):
+        return "absent"
+    known = [(os.path.join(rt_dir, "bin", "quay-native.js"), install_runtime),
+             (os.path.join(rt_dir, "bin", "quay.js"), install_core)]
+    known = [(t, s) for t, s in known if os.path.isfile(t)]
+    if not known or any(sha(s) is None for _, s in known):
+        return "unknown"
+    return "retire" if any(sha(t) != sha(s) for t, s in known) else "keep"
+
+rt_state = retired_rt_state()
+
 changed = False
+migrated = []   # (old, reason) — printed as the AC1/AC2 observable artifact
+
 # path: a stale provider dir is migrated to the install-state provider dir. "Stale" = the dir does
-# not exist, OR it is a quay runtime dir sitting under a reserved segment (the pre-fix vendor/ land).
+# not exist, OR it is a quay runtime dir sitting under a reserved segment (the pre-fix vendor/
+# land), OR it is the retired project-local runtime dir AND that runtime is stale. The staleness
+# gate matters: a byte-current project-local runtime is a working binding, and AC3 forbids
+# rewriting it (防「为修 A 而破坏 B」) — only a copy this delivery supersedes is migrated away.
 p = prov.get("path")
-if isinstance(p, str) and p != install_provider and (not os.path.isdir(p) or (under_reserved(p) and is_quay_runtime_dir(p))):
+if isinstance(p, str) and p != install_provider and (
+        (not os.path.isdir(p)) or (under_reserved(p) and is_quay_runtime_dir(p))
+        or (in_retired_runtime(p) and rt_state == "retire")):
     prov["path"] = install_provider
     changed = True
-# mcp_entry: a dangling reference to a QUAY runtime file is migrated to the install-state runtime.
+    migrated.append(f"path {p!r} -> {install_provider}")
+
+# mcp_entry: any OLD/AMBIGUOUS binding form is migrated to this delivery's runtime bundle.
 me = prov.get("mcp_entry")
 legacy_native = os.path.join(ws_root, "vendor", "quay-native", "dist", "quay-native.js")
 legacy_core = os.path.join(ws_root, "vendor", "quay", "dist", "quay.js")
 if isinstance(me, list) and len(me) >= 2 and isinstance(me[1], str):
-    ref = me[1]
-    is_quay_runtime = re.match(r"^quay(-native)?\.(js|ts)$", os.path.basename(ref)) is not None
-    # Scope guard (see header comment): only a dangling reference to a quay runtime file is migrated.
-    if re.match(r"^quay(-native)?\.(js|ts)$", os.path.basename(ref)) and ref != install_runtime and (not os.path.exists(ref) or under_reserved(ref)):
-        prov["mcp_entry"] = ["node", install_runtime, "mcp"] + (list(me[3:]) if len(me) > 3 else [])
-        changed = True
-    # Legacy layout migration (gap-the-runtime-has-nowhere-safe-to-land): a config from an
-    # install that laid the runtime under vendor/ (the OLD layout — vendor/ is a Go reserved
-    # dir and the 1.3MB bundles hit common large-file hooks) is moved to the .quay/runtime/
-    # layout. Fires EVEN IF the legacy vendor/ file still exists — the layout moved, and the
-    # config must not keep pinning the provider to the Go-reserved dir.
-    elif is_quay_runtime and ref in (legacy_native, legacy_core):
-        prov["mcp_entry"] = ["node", install_runtime, "mcp"] + (list(me[3:]) if len(me) > 3 else [])
+    idx = runtime_ref_index(me)
+    ref = me[idx] if idx is not None else None
+    reason = None
+    if idx is not None and ref != install_runtime:
+        if is_bare_path_quay(ref):
+            reason = f"bare PATH reference {ref!r} (resolved by whatever $PATH happens to hold)"
+        elif RUNTIME_BASENAME.match(os.path.basename(ref)) and (not os.path.exists(ref) or under_reserved(ref)):
+            reason = f"dangling reference to a quay runtime file {ref!r}"
+        # Legacy layout migration: a config from an install that laid the runtime under vendor/
+        # (the OLD layout — a Go-reserved dir whose 1.3MB bundles trip common large-file hooks).
+        # Fires EVEN IF the legacy vendor/ copy still exists — the layout moved.
+        elif RUNTIME_BASENAME.match(os.path.basename(ref)) and ref in (legacy_native, legacy_core):
+            reason = f"legacy vendor/ layout {ref!r}"
+        # Retired project-local runtime that is STALE: the binding must not stay pinned to a copy
+        # no product path updates. A byte-current copy is left alone (AC3 negative control) — it is
+        # indistinguishable from a legitimate one.
+        elif in_retired_runtime(ref) and rt_state == "retire":
+            reason = f"stale retired project-local runtime {ref!r}"
+    if reason:
+        # Rebuild canonically: ["node", <plugin runtime>] + everything the old entry carried after
+        # the runtime/executable token (the "mcp" verb + any trailing args) — identical to the
+        # pre-fix output for the index-1 form, and the correct shape for the index-0 bare form.
+        prov["mcp_entry"] = ["node", install_runtime] + list(me[idx + 1:])
         prov["path"] = install_provider
         changed = True
+        migrated.append(f"mcp_entry {reason} -> {install_runtime}")
+
+# ── retire the unreferenced project-local runtime (AC1 ruling (c) + its (b) corollary) ──────────
+# Decide the fate of <ws>/.quay/runtime AFTER the migrations above, from the state computed before
+# them. Retire it only when the post-migration binding no longer references it AND it is STALE. A
+# byte-current copy is left byte-identical (AC3); an unrecognized directory is NEVER touched. The
+# three outcomes each report a DISTINCT word so "retired" and "could not evaluate" never look alike.
+def referenced_by_binding():
+    refs = [prov.get("path")] if isinstance(prov.get("path"), str) else []
+    if isinstance(prov.get("mcp_entry"), list):
+        refs += [x for x in prov["mcp_entry"] if isinstance(x, str)]
+    return any(in_retired_runtime(r) for r in refs)
+
+backup_dir = os.path.join(ws_root, ".quay", "quay-init-backups", backup_ts)
+if rt_state == "retire" and not referenced_by_binding():
+    dest = os.path.join(backup_dir, "runtime")
+    if dry_run:
+        print(f"  would-retire-orphan-runtime: {rt_dir} -> {dest} (retired layout, unreferenced, stale vs this delivery — AC1)")
+    else:
+        os.makedirs(backup_dir, exist_ok=True)
+        n = 1
+        while os.path.exists(dest):
+            dest = os.path.join(backup_dir, f"runtime-{n}")
+            n += 1
+        shutil.move(rt_dir, dest)
+        print(f"  retired-orphan-runtime: {rt_dir} -> backup {dest} (retired layout, unreferenced, stale vs this delivery — AC1)")
+elif rt_state == "retire":
+    print(f"  kept-referenced-runtime: {rt_dir} (still referenced by the provider binding — NOT retired)")
+elif rt_state == "keep":
+    print(f"  kept-runtime-copy: {rt_dir} (byte-identical to this delivery — untouched, AC3)")
+elif rt_state == "unknown":
+    print(f"  kept-unrecognized-runtime-dir: {rt_dir} (not quay's install-generated runtime shape — never touched)")
+
 if not changed:
+    sys.exit(0)
+if dry_run:
+    for m in migrated:
+        print(f"  would-migrate: {m} (upgrade-channel runtime migration — AC1/AC2)")
     sys.exit(0)
 with open(cfg, "w", encoding="utf-8") as f:
     yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
-print(f"  migrated: stale provider config -> {install_provider} (upgrade-channel config migration — AC4)")
+for m in migrated:
+    print(f"  migrated: {m} (upgrade-channel runtime migration — AC1/AC2)")
 PYEOF
 }
 
@@ -1921,20 +2129,36 @@ if [ "${BASH_SOURCE[0]}" != "${0}" ]; then
   return 0
 fi
 
-# report_closed_set_state — the AC3 failure-path report: mechanically list the seven-item closed-set
-# written/unwritten state (gap-quay-init-hard-requires-tmux-session-and-leaves-partial-write). Wired as
-# an EXIT trap below so a non-zero exit — a pre-write fail-closed check (test command / plugin root /
-# worktree root), a mid-write abort, or a post-write auto-commit failure — always reports WHICH items
-# landed. This makes "initialized half-way" distinguishable from "not initialized" (hard rule 3b
-# write-side mirror: a failed init must not be conflated with a complete one).
+# report_closed_set_state — the AC3 failure-path report: mechanically list each of the seven closed-set
+# items in ONE of four states, by comparing the current fingerprint against the pre-write snapshot:
+#   written:      this run created it, or changed its content
+#   pre-existing: it was already there before this run and this run left it byte-unchanged
+#   unwritten:    it is not there now
+#   unreadable:   it is there but its content could not be read (never folded into `unwritten:` —
+#                 hard rule 3b: "could not look" must not be reported with the shape of a verdict)
+# Wired as an EXIT trap below so a non-zero exit — a pre-write fail-closed check (test command / plugin
+# root / worktree root), a mid-write abort, or a post-write auto-commit failure — always reports WHAT
+# THIS RUN ACTUALLY DID. The retired existence test (`[ -e ]`) could not tell "written now" from
+# "already there", so on a non-empty (upgrade) target it credited a no-op failure with rewriting config
+# (gap-quay-init-failure-report-existence-proxy-overreports-on-upgrade). This keeps "initialized
+# half-way" distinguishable from "not initialized" (hard rule 3b write-side mirror) AND from "already
+# initialized before this run" — the third distinction the upgrade path needs and existence cannot make.
 report_closed_set_state() {
-  for p in .quay/config.yml .quay/profiles.yml tasks goals .gitignore .claude/launch.settings.json .claude/settings.json; do
-    if [ -e "$WORKSPACE_ROOT/$p" ]; then
-      echo "  written:   $p" >&2
+  local p now before
+  for p in $CLOSED_SET_ITEMS; do
+    now="$(_closed_set_fingerprint "$WORKSPACE_ROOT/$p")"
+    before="${PRE_WRITE_FINGERPRINTS[$p]:-ABSENT}"
+    if [ "$now" = UNREADABLE ]; then
+      echo "  unreadable:   $p" >&2
+    elif [ "$now" = ABSENT ]; then
+      echo "  unwritten:    $p" >&2
+    elif [ "$before" = "$now" ]; then
+      echo "  pre-existing: $p" >&2
     else
-      echo "  unwritten: $p" >&2
+      echo "  written:      $p" >&2
     fi
   done
+  return 0
 }
 
 # _on_exit — EXIT trap: report the closed-set state on a non-zero exit only (a success run is already
@@ -1955,14 +2179,19 @@ echo "  closed set: .quay/config.yml, .quay/profiles.yml, tasks/, goals/, .gitig
 # write_config — generate .quay/config.yml (provider map → the plugin's vendored native runtime; loop section).
 write_config() {
   local cfg="$WORKSPACE_ROOT/.quay/config.yml"
-  if [ "$DRY_RUN" = true ]; then
-    echo "  would-write: .quay/config.yml (provider map → plugin vendored native runtime; loop: repo_root/test_command/tmux_session/worktree_root/fork_baseline)"
-    return
-  fi
+  # EXISTENCE FIRST, then --dry-run (gap-upgrade-leaves-legacy-project-runtime-stale-and-unmigrated):
+  # the pre-fix order returned on --dry-run BEFORE the existing-config branch, so on an existing
+  # project `--dry-run` printed "would-write: .quay/config.yml" (a fresh-install report) while the
+  # real run would NOT write the provider block at all — it would MIGRATE. A dry run whose report
+  # describes a different code path than the real run is worse than no dry run (硬规则 3b: the
+  # output must distinguish "nothing to migrate" from "would migrate"). Both callees handle
+  # DRY_RUN internally, so the upgrade path is now REPORTED in dry-run, not skipped.
   if [ -f "$cfg" ]; then
-    echo "  note: .quay/config.yml already exists — keep the provider mcp_entry on the plugin's vendored native runtime"
+    echo "  note: .quay/config.yml already exists — upgrade path: the provider binding is migrated to the plugin's delivered native runtime (absolute), and the retired project-local .quay/runtime/ is cleared if unreferenced + stale (AC1/AC2)"
     migrate_stale_mcp_entry
     ensure_loop_config
+  elif [ "$DRY_RUN" = true ]; then
+    echo "  would-write: .quay/config.yml (provider map → plugin vendored native runtime; loop: repo_root/test_command/tmux_session/worktree_root/fork_baseline)"
   else
     mkdir -p "$WORKSPACE_ROOT/.quay" "$WORKSPACE_ROOT/tasks"
     cat > "$cfg" <<EOF
