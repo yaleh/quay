@@ -72,3 +72,29 @@ test("③ partial evidence (2/6 expected records) → PARTIAL exit + missing ac 
   assert.match(r.stdout, /all-missing → rc=1/,
     "no expected record present ⇒ NOT-EVALUATED (exit 1, distinct from PARTIAL)");
 });
+
+// ⑤ (AC-240, gap-ac240-e2e-closure-same-run-pairing): record-KIND completeness is not closure. The
+// `expected_acs` set-difference is satisfied by AC-203 and AC-207 arriving from two DISJOINT batches
+// of witnesses — which is precisely the measured origin reading (AC-203 roots={63ee9681,b95bd6f1},
+// AC-207 roots={a2a5aac0}, intersection empty). Under --ac207-e2e the transport must ALSO judge the
+// (host, project_root) PAIRING and, when it is missing, report a value distinguishable from ok
+// (E2E_PAIR_MISSING=1 ⇒ the host is PARTIAL) instead of silently exiting 0 (硬规则 3b). Both
+// directions are driven through the real product function; the negative controls change the
+// JUDGMENT INPUT file, never the production carrier under .quay/.
+test("⑤ AC-240 — (host, project_root) pairing is judged, and a missing pair is not a silent ok", () => {
+  const r = run(["--selfcheck-e2e-pairing"]);
+  assert.equal(r.status, 0, `--selfcheck-e2e-pairing must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /selfcheck-e2e-pairing: PASS/, "the pairing selfcheck must report PASS");
+  // positive — both records share ONE project_root on one host ⇒ exit 0, no PARTIAL marker
+  assert.match(r.stdout, /positive → rc=0 .*E2E-PAIR OK host=hostB roots=\/home\/verify\/root-x/,
+    "paired records ⇒ exit 0 with an explicitly printed OK (never a bare exit 0)");
+  // negative ① — only AC-207 (the origin defect's shape) ⇒ exit 2 + E2E_PAIR_MISSING=1 + the root sets
+  assert.match(r.stdout, /ac207-only → rc=2 .*E2E_PAIR_MISSING=1 .*AC203_roots=\[\] AC207_roots=\['\/home\/verify\/root-x'\]/,
+    "AC-207 without AC-203 ⇒ exit 2 (PARTIAL) with E2E_PAIR_MISSING=1 and the per-host root sets printed");
+  // negative ② — both present but for different roots ⇒ exit 2 (the pairing is on the SAME root)
+  assert.match(r.stdout, /different-roots → rc=2 .*E2E_PAIR_MISSING=1 .*AC203_roots=\['\/home\/verify\/root-a'\] AC207_roots=\['\/home\/verify\/root-b'\]/,
+    "two records with different project_roots ⇒ exit 2 — 'both present' is not 'paired'");
+  // not-evaluated — unreadable/empty evidence is distinct from PAIR-MISSING (缺值 ≠ 合格)
+  assert.match(r.stdout, /empty-evidence → rc=1 NOT-EVALUATED/,
+    "empty evidence ⇒ exit 1 (NOT-EVALUATED), distinct from the exit-2 PAIR-MISSING verdict");
+});
