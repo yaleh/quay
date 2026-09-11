@@ -1,6 +1,6 @@
 {
-  "count": 33,
-  "inDomain": 92,
+  "count": 32,
+  "inDomain": 94,
   "entries": [
     {
       "id": "AC-157",
@@ -25,15 +25,6 @@
       "file": "AC-160-runtime-usage-inventory-blind-spot.md",
       "bareLines": [
         1
-      ]
-    },
-    {
-      "id": "AC-161",
-      "file": "AC-161-user-level-marketplace-only.md",
-      "bareLines": [
-        5,
-        6,
-        7
       ]
     },
     {
@@ -258,5 +249,5 @@
       ]
     }
   ],
-  "generatedAt": "2026-09-11T06:24:46.389Z"
+  "generatedAt": "2026-09-11T12:02:01.417Z"
 }

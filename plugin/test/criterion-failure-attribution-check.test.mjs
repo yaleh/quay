@@ -212,6 +212,23 @@ test("the COMMITTED baseline gates the REAL repo at exit 0, and its count IS the
   const out = JSON.parse(r.stdout);
   const committed = readBaseline(path.join(REPO_ROOT, BASELINE_REL));
   assert.ok(committed, "the committed baseline must exist and be well-shaped");
-  assert.equal(out.bareAcs, committed.count, "the live count must equal the committed count (⛔ not a constant that drifted)");
+  // ⛔ NOT an equality assertion: the ratchet is SHRINK-ONLY, so a legitimate fix by ANY task lowers the
+  // live count below the baseline and stays green. Asserting `===` turns every such fix into a red here
+  // (measured 2026-09-11: AC-161's fix landed on develop ⇒ live 32 vs committed 33 ⇒ this test went red
+  // while the checker itself was correctly green) — i.e. a test that fires on the BEST possible event.
+  assert.ok(
+    out.bareAcs <= committed.count,
+    `the ratchet must hold: live ${out.bareAcs} > committed ${committed.count} — a new bare-failure-exit criterion landed`,
+  );
+  // The anti-drift intent is kept, just aimed at the right quantity: the CLI's number must be a LIVE
+  // enumeration of goals/ on disk, not a constant someone typed. Compare it to an INDEPENDENT read of the
+  // same tree through the library entry point (the CLI number is the one under test).
+  const live = enumerateBareFailureExits(path.join(REPO_ROOT, "goals"));
+  assert.equal(live.evaluated, true, "the direct enumeration must have been evaluable (硬规则 3b)");
+  assert.equal(
+    out.bareAcs,
+    live.bareAcs.length,
+    "the CLI's count must equal a direct enumeration of goals/ (⛔ not a constant that drifted)",
+  );
   assert.ok(out.inDomain > 0, "the enumeration must have read a non-empty in-domain set");
 });
