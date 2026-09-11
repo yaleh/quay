@@ -214,6 +214,30 @@ AC207_PRODUCED_BY_DRIVER=0
 AC207_EVALUATED=0
 AC207_E2E=0                                  # 1 = --ac207-e2e 触发端到端段（昂贵，opt-in）
 
+# ── AC-238（GOAL-009）：【既有旧痕迹第三方项目】的升级路径（gap-aged-third-party-project-quay-upgrade-verification）
+# 与 ② 的区别是本质的：② 的 $ROOT 是 `rm -rf` 后新建的一次性靶子（全新 quay-init，GOAL-009 已有 9 条 AC
+# 全是这个形态）；本模式的 $ROOT 是一个**已经跑过 quay-native、带真实存量数据与旧版本 vendored runtime**
+# 的真实第三方项目。测四件事，全部取直接量（硬规则 4b：不用被测对象自报的量）：
+#   ① 存量不丢   pre/post 的 tasks/*.md 计数与逐文件 sha256 集合（磁盘直接数，非任务板自报）
+#   ② 旧 runtime 被本次真实交付物替换（.quay/runtime/bin/*.js 的 sha256 == 本次交付物 ∧ != 升级前）——
+#      两个方向都要成立：只「变了」可能是别的东西改的，只「等于交付物」可能本来就是新装的
+#   ③ 新 CLI 能读出旧存量（文件还在 ≠ 读得出）：fresh CLI 的 task list 计数 == pre ∧ 抽样 task view 内容一致
+#   ④ build_sha 非空（可溯源到具体 develop 提交）
+# ⛔ 任一读不出 ⇒ 对应字段留空/负值、AC238_EVALUATED 保持 0、记录不写（缺值≠合格，硬规则 3b/6）。
+UPGRADE_EXISTING=0                           # 1 = --upgrade-existing：$ROOT 是【非空】真实第三方项目
+UPGRADE_SOURCE=""                            # 非空 = 先从这个真实项目做隔离副本（⛔ 只读，不碰本体）
+AC238_EVALUATED=0
+AC238_PROJECT_ROOT=""
+AC238_PRE_TASK_COUNT=-1
+AC238_POST_TASK_COUNT=-1
+AC238_RUNTIME_AGE_DAYS=""
+AC238_RUNTIME_REPLACED=0
+AC238_TASK_LIST_OK=0
+AC238_SAMPLE_TASK=""
+AC238_PRE_RUNTIME_SHA=""
+AC238_FRESH_RUNTIME_SHA=""
+AC238_TASKSET_STABLE=0
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --tgz) QUAY_TGZ="$2"; shift 2 ;;
@@ -244,6 +268,8 @@ while [ $# -gt 0 ]; do
     --target-model) TARGET_MODEL="$2"; shift 2 ;;
     --target-auth) TARGET_AUTH="$2"; shift 2 ;;
     --driving-profiles) DRIVING_PROFILES="$2"; shift 2 ;;
+    --upgrade-existing) UPGRADE_EXISTING=1; shift ;;
+    --upgrade-source) UPGRADE_SOURCE="$2"; shift 2 ;;
     --selfcheck) DO_SELFCHECK=1; shift ;;
     *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -649,6 +675,179 @@ BODY
     return 0
   fi
   echo "  NOTE: AC-207 record NOT written (task not driven to done / no commit / no gate events — 缺值≠合格)"
+  return 0
+}
+
+# ── ⑦ 既有旧痕迹项目的升级路径（GOAL-009-AC-238）───────────────────────────────────────────
+# 四件要测的事与「为什么两个方向都要取」见顶部 --upgrade-existing 的变量块注释。本函数只做
+# 「取直接量 + 写记录」；升级动作本身 = 跑【本次交付物自带的】quay-init（SPEC §5 的部署/升级入口：
+# 已有 config ⇒ 配置保留分支，⛔ 不是空仓库重写），再把项目本地 runtime 换成本次交付物。
+# ⛔ 每个前置不成立都 return 0 且【不改 AC238_EVALUATED】——「读不出」是一个独立取值，不与「合格」同形
+# （硬规则 3b：恒绿的检查比没有检查更贵）。
+step_upgrade_existing() {
+  local root="$1" npmroot qinit fresh_quay fresh_qn rtbin
+  local pre_q pre_qn post_q post_qn fresh_q fresh_qn_sha
+  local old_epoch now_epoch init_rc=0 pre_set post_set tl_json tl_count sample_id sample_json
+  AC238_PROJECT_ROOT="$root"
+
+  # ⓪ 前置：目标必须真的是一个【非空、带旧 runtime】的 quay 项目。
+  # ⚠️ 顺序：给出 --upgrade-source 时 **$root 由 ① 的 cp 创建，此刻本就不存在** —— 所以这里查的是
+  # 【源】而不是 root（2026-09-11 本地实测抓到：先前在 cp 之前查 root 是否存在的版本，在带
+  # --upgrade-source 的正常路径上必然早退成 NOT-EVALUATED，即「正确输入被当成读不懂」的恒假形态）。
+  if [ -n "$UPGRADE_SOURCE" ] && [ "$UPGRADE_SOURCE" != "$root" ]; then
+    if [ ! -d "$UPGRADE_SOURCE" ]; then
+      echo "  NOT-EVALUATED: --upgrade-source is not a directory: $UPGRADE_SOURCE" >&2; return 0
+    fi
+    if [ ! -f "$UPGRADE_SOURCE/.quay/config.yml" ]; then
+      echo "  NOT-EVALUATED: no .quay/config.yml under --upgrade-source $UPGRADE_SOURCE — 本模式测的是【升级】既有项目,不是新装" >&2; return 0
+    fi
+  else
+    if [ -z "$root" ] || [ ! -d "$root" ]; then
+      echo "  NOT-EVALUATED: --root is not a directory: ${root:-<empty>}" >&2; return 0
+    fi
+    if [ ! -f "$root/.quay/config.yml" ]; then
+      echo "  NOT-EVALUATED: no .quay/config.yml under $root — 本模式测的是【升级】既有项目,不是新装" >&2; return 0
+    fi
+  fi
+  npmroot="$(npm root -g --prefix "$PREFIX")"
+  qinit="${npmroot}/quay/plugin/scripts/quay-init.sh"
+  fresh_quay="${npmroot}/quay/dist/quay.js"
+  fresh_qn="${npmroot}/quay-native/dist/quay-native.js"
+  for f in "$qinit" "$fresh_quay" "$fresh_qn"; do
+    [ -f "$f" ] || { echo "  NOT-EVALUATED: fresh deliverable missing: $f" >&2; return 0; }
+  done
+  echo "== ⑦ upgrade-existing: $root =="
+  echo "  fresh deliverable: $(basename "$fresh_quay") + $(basename "$fresh_qn") (from $PREFIX)"
+
+  # ① 隔离副本 —— ⛔ 只读复制，绝不碰 UPGRADE_SOURCE 本体（真实活项目的 102 个任务/backlog 不动）。
+  if [ -n "$UPGRADE_SOURCE" ] && [ "$UPGRADE_SOURCE" != "$root" ]; then
+    rm -rf "$root"
+    mkdir -p "$(dirname "$root")"
+    if ! cp -a "$UPGRADE_SOURCE" "$root"; then
+      echo "  NOT-EVALUATED: cp -a '$UPGRADE_SOURCE' -> '$root' failed" >&2; return 0
+    fi
+    echo "  isolated copy: $UPGRADE_SOURCE -> $root (source opened read-only, never written)"
+    if [ ! -f "$root/.quay/config.yml" ]; then
+      echo "  NOT-EVALUATED: copy at $root has no .quay/config.yml (cp incomplete?)" >&2; return 0
+    fi
+  fi
+
+  # ② 升级【前】直接量（磁盘直接数，非任务板自报 —— 硬规则 4b）
+  AC238_PRE_TASK_COUNT="$(find "$root/tasks" -maxdepth 1 -type f -name '*.md' 2>/dev/null | wc -l | tr -d ' ')"
+  rtbin="$root/.quay/runtime/bin"
+  if [ ! -d "$rtbin" ]; then
+    echo "  NOT-EVALUATED: no $rtbin — 目标没有旧 vendored runtime,不是本 AC 的形态" >&2; return 0
+  fi
+  if [ ! -f "$rtbin/quay.js" ] || [ ! -f "$rtbin/quay-native.js" ]; then
+    echo "  NOT-EVALUATED: $rtbin lacks quay.js/quay-native.js — 旧 runtime 形态不可识别" >&2; return 0
+  fi
+  old_epoch="$(find "$rtbin" -maxdepth 1 -type f -name '*.js' -printf '%T@\n' 2>/dev/null | sort -n | head -1)"
+  now_epoch="$(date +%s)"
+  [ -n "$old_epoch" ] || { echo "  NOT-EVALUATED: cannot read old runtime mtime under $rtbin" >&2; return 0; }
+  AC238_RUNTIME_AGE_DAYS="$(python3 -c "print(round((${now_epoch} - float('${old_epoch}'))/86400.0, 3))" 2>/dev/null || echo "")"
+  pre_q="$(sha256sum "$rtbin/quay.js" | awk '{print $1}')"
+  pre_qn="$(sha256sum "$rtbin/quay-native.js" | awk '{print $1}')"
+  # 存量指纹：逐文件 sha 的聚合（相对路径 + sort，故与本机绝对路径无关）。用于证明升级【没动】存量。
+  pre_set="$(cd "$root" && find tasks -maxdepth 1 -type f -name '*.md' -print0 2>/dev/null | sort -z | xargs -0 -r sha256sum 2>/dev/null | sha256sum | awk '{print $1}')"
+  echo "  pre: tasks=$AC238_PRE_TASK_COUNT runtime_age_days=$AC238_RUNTIME_AGE_DAYS taskset=$(printf '%.12s' "$pre_set")"
+
+  # ③ 升级动作 = 跑【本次交付物自带的】quay-init。已有 config ⇒ 配置保留分支（migrate_stale_mcp_entry
+  #    + ensure_loop_config），⛔ 不是空仓库重写；任务目录只 mkdir -p，不删不覆盖。
+  # ⛔ 刻意【不】把退出码捕获写成「命令 ... 或运算 赋给 rc」的一行形式：instrument-failure-check 的
+  # FAMILY-3 规则是 raw indexOf 找第一个竖线字符（不区分单竖线与双竖线），那种写法会被读成
+  # 「管道后读退出码」并往该族新增一条实例，而那一族的门是 shrink-only。本实现落地时被 pre-commit
+  # guard 实测拦下（计数 15→16）；⚠️ 该检测器是【行扫描器】，连注释里出现同形字面量也计入——
+  # 本条注释本身第一次就是这么被计进去的。改用本文件既有的 set +e / 取 rc / set -e 形
+  # （同 :973/:2116/:2156）。
+  set +e
+  CLAUDE_PLUGIN_ROOT="$(dirname "$(dirname "$qinit")")" \
+    bash "$qinit" --root "$root" --repo-root "$root" \
+      --worktree-root "$(dirname "$root")/$(basename "$root")-worktrees" \
+      --auto-commit-skip >"$root/.quay-upgrade-init.log" 2>&1
+  init_rc=$?
+  set -e
+  echo "  upgrade action: shipped quay-init (config-preserving branch) rc=$init_rc → $root/.quay-upgrade-init.log"
+
+  # ④ runtime 刷新 = 用本次真实交付物【就地替换】旧 vendored bundle。⛔ 不是旁路共存：换完之后
+  #    project-local runtime 的 .js 与本次交付物逐字一致。wrapper 重写为指向刷新后的本地 bundle
+  #    （旧 wrapper 指向的正是同一个绝对路径，此处保持同一形态、只换被指向的内容）。
+  cp -f "$fresh_quay" "$rtbin/quay.js" || { echo "  NOT-EVALUATED: refresh quay.js failed" >&2; return 0; }
+  cp -f "$fresh_qn"   "$rtbin/quay-native.js" || { echo "  NOT-EVALUATED: refresh quay-native.js failed" >&2; return 0; }
+  local nodebin; nodebin="$(command -v node)"
+  printf '#!/bin/bash\nexec %s %s/quay.js "$@"\n' "$nodebin" "$rtbin" > "$rtbin/quay"
+  printf '#!/bin/bash\nexec %s %s/quay-native.js "$@"\n' "$nodebin" "$rtbin" > "$rtbin/quay-native"
+  chmod +x "$rtbin/quay" "$rtbin/quay-native"
+  if [ -f "${npmroot}/quay-native/provider.yml" ]; then
+    mkdir -p "$root/.quay/runtime"
+    cp -f "${npmroot}/quay-native/provider.yml" "$root/.quay/runtime/provider.yml"
+  fi
+
+  # ⑤ 升级【后】直接量
+  AC238_POST_TASK_COUNT="$(find "$root/tasks" -maxdepth 1 -type f -name '*.md' 2>/dev/null | wc -l | tr -d ' ')"
+  post_set="$(cd "$root" && find tasks -maxdepth 1 -type f -name '*.md' -print0 2>/dev/null | sort -z | xargs -0 -r sha256sum 2>/dev/null | sha256sum | awk '{print $1}')"
+  [ -n "$post_set" ] && [ "$post_set" = "$pre_set" ] && AC238_TASKSET_STABLE=1
+  post_q="$(sha256sum "$rtbin/quay.js" | awk '{print $1}')"
+  post_qn="$(sha256sum "$rtbin/quay-native.js" | awk '{print $1}')"
+  fresh_q="$(sha256sum "$fresh_quay" | awk '{print $1}')"
+  fresh_qn_sha="$(sha256sum "$fresh_qn" | awk '{print $1}')"
+  AC238_FRESH_RUNTIME_SHA="${fresh_q},${fresh_qn_sha}"
+  # replaced 的两个方向（逐文件比较——⛔ 不把 sha 拼成一串比，glob 展开顺序会让拼接串在本就相同时判「不等」）：
+  if [ "$post_q" = "$fresh_q" ] && [ "$post_qn" = "$fresh_qn_sha" ] \
+     && { [ "$post_q" != "$pre_q" ] || [ "$post_qn" != "$pre_qn" ]; }; then
+    AC238_RUNTIME_REPLACED=1
+  fi
+  echo "  post: tasks=$AC238_POST_TASK_COUNT taskset_stable=$AC238_TASKSET_STABLE runtime_replaced=$AC238_RUNTIME_REPLACED"
+
+  # ⑥ 新 CLI 能读出旧存量（文件还在 ≠ 读得出）：用【刷新后的 project-local runtime】跑 task list。
+  #    PATH 前置本次安装前缀 ⇒ config 里那条裸 `quay-native`（mcp_entry）解析到本次交付物。
+  tl_json="$(cd "$root" && PATH="$PREFIX/bin:$PATH" node "$rtbin/quay.js" task list --root "$root" --json 2>/dev/null)"
+  tl_count="$(printf '%s' "$tl_json" | python3 -c 'import json,sys
+d=json.load(sys.stdin); print(len(d))' 2>/dev/null || echo "")"
+  # 抽样 task_get：优先 DIR-001（meta-cc 真实存量任务），否则字典序第一个。
+  sample_id=""
+  if [ -f "$root/tasks/DIR-001.md" ]; then sample_id="DIR-001"
+  else sample_id="$(find "$root/tasks" -maxdepth 1 -type f -name '*.md' -printf '%f\n' 2>/dev/null | sed 's/\.md$//' | sort | head -1)"; fi
+  AC238_SAMPLE_TASK="$sample_id"
+  sample_json=""
+  if [ -n "$sample_id" ]; then
+    sample_json="$(cd "$root" && PATH="$PREFIX/bin:$PATH" node "$rtbin/quay.js" task view "$sample_id" --root "$root" --json 2>/dev/null)"
+  fi
+  local sample_ok=0
+  if [ -n "$sample_json" ] && printf '%s' "$sample_json" | grep -q "\"$sample_id\""; then sample_ok=1; fi
+  if [ -n "$tl_count" ] && [ "$tl_count" = "$AC238_PRE_TASK_COUNT" ] && [ "$sample_ok" = "1" ] && [ "$AC238_TASKSET_STABLE" = "1" ]; then
+    AC238_TASK_LIST_OK=1
+  fi
+  echo "  cli read-back: list_count=${tl_count:-<unreadable>} sample=$sample_id sample_ok=$sample_ok task_list_ok=$AC238_TASK_LIST_OK"
+
+  # ⑦ 判定 + 记录（全部读数量都成立才写；⛔ 缺任一 ⇒ 不写并如实打印缺的是哪个）
+  local age_ok=0
+  if [ -n "$AC238_RUNTIME_AGE_DAYS" ]; then
+    age_ok="$(python3 -c "print(1 if float('${AC238_RUNTIME_AGE_DAYS}') >= 1 else 0)" 2>/dev/null || echo 0)"
+  fi
+  # ⚠️ init_rc 是门的一部分，不是诊断字段：**升级动作本身失败（rc≠0）却记录升级成功**是本 AC 最贵
+  # 的那类失败（「装好了」与「没装」在记录上同形）。实测 2026-09-11 本地夹具：quay-init 因目标无
+  # go.mod/package.json/scripts/test.sh 而 exit 2（闭集只写了一半），而只按「存量没丢 + runtime 换了」
+  # 判定会照样写出一条 runtime_replaced=true 的记录 —— 那条记录描述的是「我们手动换了两个文件」，
+  # 不是「quay-init 把项目接管了」。⇒ rc≠0 时留空，不写。
+  if [ "$AC238_PRE_TASK_COUNT" -gt 0 ] 2>/dev/null \
+     && [ "$AC238_POST_TASK_COUNT" = "$AC238_PRE_TASK_COUNT" ] \
+     && [ "$age_ok" = "1" ] && [ "$AC238_RUNTIME_REPLACED" = "1" ] \
+     && [ "$AC238_TASK_LIST_OK" = "1" ] && [ -n "${BUILD_SHA:-}" ] \
+     && [ "$init_rc" = "0" ]; then
+    AC238_EVALUATED=1
+  fi
+  if [ "$AC238_EVALUATED" = "1" ]; then
+    mkdir -p "$(dirname "$AC89")"
+    printf '{"ts":"%s","ac":"GOAL-009-AC-238","host":"%s","project_root":"%s","pre_upgrade_task_count":%s,"post_upgrade_task_count":%s,"pre_upgrade_runtime_age_days":%s,"runtime_replaced":true,"task_list_ok":true,"build_sha":"%s","upgrade_source":"%s","upgrade_init_rc":%s,"isolated_copy":%s,"taskset_stable":true,"sample_task":"%s","fresh_runtime_sha256":"%s"}\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${HOST:-unknown}" "$AC238_PROJECT_ROOT" \
+      "$AC238_PRE_TASK_COUNT" "$AC238_POST_TASK_COUNT" "$AC238_RUNTIME_AGE_DAYS" \
+      "$BUILD_SHA" "${UPGRADE_SOURCE:-none}" "$init_rc" \
+      "$([ -n "$UPGRADE_SOURCE" ] && [ "$UPGRADE_SOURCE" != "$root" ] && echo true || echo false)" \
+      "$AC238_SAMPLE_TASK" "$AC238_FRESH_RUNTIME_SHA" >> "$AC89"
+    echo "  ac238 record written → $AC89"
+  else
+    echo "  AC-238 record NOT written — 缺值≠合格 (pre_count=$AC238_PRE_TASK_COUNT post_count=$AC238_POST_TASK_COUNT age_days=${AC238_RUNTIME_AGE_DAYS:-<unread>} replaced=$AC238_RUNTIME_REPLACED task_list_ok=$AC238_TASK_LIST_OK build_sha=${BUILD_SHA:-<empty>} upgrade_init_rc=$init_rc)" >&2
+  fi
   return 0
 }
 
@@ -2318,7 +2517,12 @@ else
     echo "AC88_VERIFY=fail (step ① install failed)"
     exit 1
   fi
-  if [ "$CHANNEL" = "marketplace" ]; then
+  if [ "$UPGRADE_EXISTING" = 1 ]; then
+    # ── AC-238（GOAL-009）：既有旧痕迹项目的升级路径 —— 与 ② 的「rm -rf 后全新 quay-init」是两条
+    # 本质不同的路径（GOAL-009 已有 9 条 AC 的证据全在 ② 那条上）。本分支只跑 ⑦，不跑冷启动/驱动活性段
+    # （那些测的是「新项目能不能被驱动」，不是「既有项目能不能被接管」）。
+    step_upgrade_existing "$ROOT"
+  elif [ "$CHANNEL" = "marketplace" ]; then
     # marketplace 通道 = step① 安装路径验证（register-plugin.mjs 注册）；②③ 是 loop 活性验证
     # （npm-global/AC88 的关切），marketplace 通道不跑 ②③ —— register 失败也能写出记录（AC5），
     # 不被 ② quay-init 的失败吞掉 marketplace 结果。
@@ -2352,7 +2556,17 @@ else
 fi
 
 # ── 判定 ─────────────────────────────────────────────────────────────────────────────
-if [ "$CHANNEL" = "marketplace" ]; then
+if [ "$UPGRADE_EXISTING" = 1 ]; then
+  # AC-238 判定：install 成功 ∧ 四件读数全成立。AC238_EVALUATED=0 是「未评估」（缺值），与
+  # 「评估了且不合格」区分开（硬规则 3b）——留 not-live，不谎报 ok、也不谎报 fail。
+  if [ "$STEP1_OK" = 1 ] && [ "$AC238_EVALUATED" = 1 ]; then
+    AC88_VERIFY=ok
+  elif [ "$STEP1_OK" = 1 ]; then
+    AC88_VERIFY=not-live
+  else
+    AC88_VERIFY=fail
+  fi
+elif [ "$CHANNEL" = "marketplace" ]; then
   # marketplace 通道判定：分支跑了（MP_EVALUATED=1）且 install 成功 = 机制成功；MP_SETTINGS_OK 是【数据】
   # （注册成功=1 / 注册失败=0 均如实记录，AC5），不是控制流失败。
   if [ "$MP_EVALUATED" = "1" ] && [ "$STEP1_OK" = "1" ]; then
@@ -2414,6 +2628,12 @@ echo "AC234_HOST=${AC234_HOST:-} AC234_PROJECT_ROOT=${AC234_PROJECT_ROOT:-}"
 echo "AC232_GOAL_WRITE_OK=$AC232_GOAL_WRITE_OK AC232_GOAL_READ_BACK_OK=$AC232_GOAL_READ_BACK_OK AC232_GOAL_RECORDS=$AC232_GOAL_RECORDS (三字段取真实 goal write+show+list 内容，⛔ 非 HTTP 探活；-1 = 未评估)"
 echo "AC232_HOST=${AC232_HOST:-} AC232_PROJECT_ROOT=${AC232_PROJECT_ROOT:-}"
 echo "AC88_VERIFY=$AC88_VERIFY"
+echo "AC238_EVALUATED=$AC238_EVALUATED (1 = 四件读数全成立并已写记录；0 = 未评估 ≠ 不合格——硬规则 3b)"
+echo "AC238_PROJECT_ROOT=${AC238_PROJECT_ROOT:-<none>}"
+echo "AC238_PRE_TASK_COUNT=$AC238_PRE_TASK_COUNT AC238_POST_TASK_COUNT=$AC238_POST_TASK_COUNT"
+echo "AC238_PRE_UPGRADE_RUNTIME_AGE_DAYS=${AC238_RUNTIME_AGE_DAYS:-<unread>} AC238_RUNTIME_REPLACED=$AC238_RUNTIME_REPLACED"
+echo "AC238_TASK_LIST_OK=$AC238_TASK_LIST_OK AC238_TASKSET_STABLE=$AC238_TASKSET_STABLE AC238_SAMPLE_TASK=${AC238_SAMPLE_TASK:-<none>}"
+echo "AC238_FRESH_RUNTIME_SHA256=${AC238_FRESH_RUNTIME_SHA:-<none>}"
 
 # ── 证据 (AC5) ────────────────────────────────────────────────────────────────────────
 mkdir -p "$(dirname "$EVIDENCE")"
