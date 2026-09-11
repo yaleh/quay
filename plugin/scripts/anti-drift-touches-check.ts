@@ -15,6 +15,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { isDirectEntry, helpExit } from "./gate-script-base.ts";
 import { matchGlob, isOverbroadDeclaration, normalizePath, parseTouches } from "./touches-orthogonality-check.ts";
+import { classifyBranch, detectDefaultBranch } from "../../packages/quay/src/branch-model.ts";
 
 // normalizePath (canonical: strips ./, collapses //, resolves ./.. segments, drops trailing /, case
 // preserved for the case-significant Linux repo) is single-source in touches-orthogonality-check.mjs
@@ -157,6 +158,34 @@ function runTaskDriver({ taskId, worktree, mergeTarget, allowEmpty }) {
   if (!fs.existsSync(taskPath)) {
     process.stderr.write(`anti-drift-touches-check: task file not found: ${taskPath}\n`);
     return 2;
+  }
+  // ── BASELINE SANITY (gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing) ──────
+  // The judgment below is `git diff --name-only <mergeTarget>...HEAD` vs the task's declared
+  // `## Touches`. That diff is ONLY the task's own work when <mergeTarget> is the line the branch
+  // forked from / will be fast-forwarded onto. When the target is a FOREIGN line (not a
+  // continuation of the project's default branch) the three-dot diff is the mainline's entire
+  // divergence from it — measured 2026-09-11 on a real upgraded project copy: 1566 files, which no
+  // `## Touches` list can cover. The old output reported that as "1566 violation(s)", i.e. it
+  // blamed the TASK for the BASELINE's shape and cost the operator hours chasing a worker that had
+  // in fact implemented its fix correctly. Distinct cause ⇒ distinct verdict (never folded into the
+  // violation count) and a distinct exit code.
+  //
+  // `allowCurrentBranch: false`: inside a task worktree HEAD is `task/<id>`, never a default-branch
+  // proxy (using it would invert the predicate and misreport every healthy fan-in).
+  const defaultBranch = detectDefaultBranch(worktree, { allowCurrentBranch: false });
+  const baseline = classifyBranch(worktree, mergeTarget, defaultBranch);
+  if (baseline.state === "divergent") {
+    process.stdout.write(
+      `BASELINE-MISMATCH: merge target '${mergeTarget}' is not a continuation of the project's ` +
+      `default branch '${defaultBranch}' — ${baseline.detail}.\n` +
+      `  The ${mergeTarget}...HEAD diff is therefore the mainline's divergence, NOT task ${taskId}'s ` +
+      `own work; no declaration of ## Touches can satisfy it. This is a BASELINE defect, not an ` +
+      `out-of-declared write by the task.\n` +
+      `  Remedy: \`quay init --force --adopt-branch-model\` (preserves the old tip as ` +
+      `'${mergeTarget}-pre-quay-init-<sha>' and re-points '${mergeTarget}' at '${defaultBranch}'), ` +
+      `then re-dispatch the task.\n`,
+    );
+    return 3;
   }
   let actualFiles;
   try {
