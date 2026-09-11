@@ -2,7 +2,7 @@
 id: gap-upgrade-verify-transport-missing-binding-checker
 title: AC-238/239 跨主机验证器传输漏带 provider-binding-resolvability-check.ts（且它 import 裸
   `yaml`）——AC-238 记录在真机上结构上写不出，⑦b 前置永不成立
-status: ready
+status: done
 labels:
   - gap
   - defect
