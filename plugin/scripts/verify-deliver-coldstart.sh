@@ -263,6 +263,13 @@ AC238_SAMPLE_TASK=""
 AC238_PRE_RUNTIME_SHA=""
 AC238_FRESH_RUNTIME_SHA=""
 AC238_TASKSET_STABLE=0
+# 当前升级语义（裁定 c / ba960f503）多出来的三个读数：退休备份路径 / 它是否逐字等于升级前那份 /
+# 项目此刻绑定到的 bundle。⛔ 它们不是诊断装饰——runtime_replaced 由它们三者合取得出，且记录里带上
+# 它们才能把「旧语义升级出来的 root」与「新语义升级出来的 root」区分开（同一字段名下两代语义会让
+# 读者分不清 runtime_replaced=true 指的是哪一种替换）。
+AC238_RETIRED_DIR=""
+AC238_RETIRED_MATCHES_PRE=0
+AC238_BOUND_ENTRY=""
 
 # ── AC-239（GOAL-009）：升级【后】的闭环——已升级的旧项目自己的 *-drivers 还能不能接着干 ───────────
 # 与 AC-238 的分工是刻意的、不可互掩（人 2026-09-11 裁定拆条）：AC-238 是【静态/存量】维度（数据没丢、
@@ -287,6 +294,10 @@ AC239_PRODUCED_BY_DRIVER=0
 AC239_TASK_CREATED=0                         # 1 = 任务创建成功（⛔ 与「驱动到 done」分开记账，缺值可区分）
 AC239_DRIVERS_STARTED=0                      # 1 = promotion+worker driver start 均返回 0
 AC239_PROFILES_STATUS="not-attempted"        # configured | not-configured | not-attempted（三态，⛔ 不同形）
+AC239_WRITTEN_THIS_RUN=0                     # 1 = 本次运行写出了 AC-239 记录（⚠️ 必须在此声明：本脚本
+                                             # set -u，未声明的变量在末尾 summary 处会 unbound 而炸掉
+                                             # 整轮——实测 2026-09-11 06:0x 就是这么丢掉整次运行的证据的）
+AC239_WRITTEN_ROOT=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -718,12 +729,12 @@ write_ac239_record() {
 # 绿不证明产品绿，硬规则 4 推论三），但写入自己的 AC239_* 变量——⛔ 不借用 AC207_* 变量，否则 AC-207
 # 的写入路径与 E2E_CLOSURE_SELF_EVIDENCED 判定会被本条污染（两条 AC 必须可分别 pass/fail）。
 probe_ac239_measures() {
-  local root="$1" task_id="$2" rtbin="$3" status_json _ac239_files
+  local root="$1" task_id="$2" qrl="$3" status_json _ac239_files
   AC239_EVALUATED=0; AC239_COMMIT_SHA=""; AC239_COMMIT_FILES_JSON=""
   AC239_TASK_STATUS=""; AC239_GATE_EVENTS=-1; AC239_PRODUCED_BY_DRIVER=0
   [ -n "$root" ] || return 0
   [ -n "$task_id" ] || return 0
-  [ -n "$rtbin" ] || return 0
+  [ -n "$qrl" ] || return 0
   AC239_COMMIT_SHA="$(ac207_select_implementation_commit "$root" || true)"
   if [ -n "$AC239_COMMIT_SHA" ]; then
     mapfile -t _ac239_files < <(ac207_commit_files "$root" "$AC239_COMMIT_SHA")
@@ -731,7 +742,7 @@ probe_ac239_measures() {
   fi
   # task_status：用【升级后项目自己的 runtime】读它自己的任务板（⛔ 不是本次安装前缀的 CLI——本 AC 测的
   # 正是「这个被升级过的项目还能不能自己干活」，用外部 CLI 读会把被测对象换掉）。
-  status_json="$( (cd "$root" && node "$rtbin/quay.js" task view "$task_id" --root "$root" --json) 2>/dev/null || true)"
+  status_json="$( (cd "$root" && node "$qrl" task view "$task_id" --root "$root" --json) 2>/dev/null || true)"
   AC239_TASK_STATUS="$(printf '%s' "$status_json" | "$VC_NODE" --no-warnings -e '
     let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{ try{ const j=JSON.parse(s); console.log(j && j.status ? String(j.status) : ""); }catch{ console.log(""); } });
   ' 2>/dev/null)"
@@ -1026,39 +1037,57 @@ step_upgrade_existing() {
   set -e
   echo "  upgrade action: shipped quay-init (config-preserving branch) rc=$init_rc → $root/.quay-upgrade-init.log"
 
-  # ④ runtime 刷新 = 用本次真实交付物【就地替换】旧 vendored bundle。⛔ 不是旁路共存：换完之后
-  #    project-local runtime 的 .js 与本次交付物逐字一致。wrapper 重写为指向刷新后的本地 bundle
-  #    （旧 wrapper 指向的正是同一个绝对路径，此处保持同一形态、只换被指向的内容）。
-  cp -f "$fresh_quay" "$rtbin/quay.js" || { echo "  NOT-EVALUATED: refresh quay.js failed" >&2; return 0; }
-  cp -f "$fresh_qn"   "$rtbin/quay-native.js" || { echo "  NOT-EVALUATED: refresh quay-native.js failed" >&2; return 0; }
-  local nodebin; nodebin="$(command -v node)"
-  printf '#!/bin/bash\nexec %s %s/quay.js "$@"\n' "$nodebin" "$rtbin" > "$rtbin/quay"
-  printf '#!/bin/bash\nexec %s %s/quay-native.js "$@"\n' "$nodebin" "$rtbin" > "$rtbin/quay-native"
-  chmod +x "$rtbin/quay" "$rtbin/quay-native"
-  if [ -f "${npmroot}/quay-native/provider.yml" ]; then
-    mkdir -p "$root/.quay/runtime"
-    cp -f "${npmroot}/quay-native/provider.yml" "$root/.quay/runtime/provider.yml"
+  # ④ 升级【后】的 runtime 绑定 = 当前语义（裁定 c / ba960f503「quay-init: migrate the retired
+  #    project-local runtime on upgrade」）：**quay plugin 是 runtime 的单一交付面**，故升级一个旧项目
+  #    的动作是——把 project-local .quay/runtime/ **退休**到 .quay/quay-init-backups/<ts>/runtime/
+  #    （先备份、⛔ 不静默删），并把 config 的 providers.native.mcp_entry 改成指向【本次交付物】的
+  #    vendored bundle 的绝对路径。
+  #    ⛔ 旧实现（本函数 2026-09-11 03:0x 落地时）在这里 `cp -f` 覆盖 $rtbin/quay.js，那条路径现在
+  #    【正是 quay-init 要退休的】——继续覆盖等于把一个已被 SPEC 退休的机制复活，与裁定 c 相反；而且
+  #    quay-init 之后 $rtbin 已不存在，cp 必然失败（实测 2026-09-11 06:05 于 develop@9044f97a：
+  #    `cp: cannot create regular file .../runtime/bin/quay.js: No such file or directory` ⇒ 整条
+  #    AC-238 步骤 NOT-EVALUATED。这不是「升级坏了」，是**验证器没跟着裁定的语义改**。）
+  #    ⇒ 在新语义下「旧 vendored runtime 被本次交付物真实换掉」是【三个方向】，缺一不可：
+  #       ① 退休备份里那份逐字 == 升级前 live 的那份（退休动作没篡改旧 runtime——「换掉了」不是「丢了」）
+  #       ② live 位置不再有 .quay/runtime（旧 runtime 确实离开了被使用的路径）
+  #       ③ 项目此刻绑定到的 bundle 逐字 == 本次交付物（换上去的确实是本次交付物，不是别的东西）
+  #    ⛔ 只取 ②③ 会把「备份被篡改/丢失」读成合格；只取 ①③ 会把「退休了但 config 没改」读成合格。
+  local retired_dir retired_q="" retired_qn="" bound_entry="" bound_sha="" fresh_q fresh_qn_sha
+  retired_dir="$(find "$root/.quay/quay-init-backups" -maxdepth 2 -type d -name runtime 2>/dev/null | sort | tail -1 || true)"
+  if [ -n "$retired_dir" ] && [ -f "$retired_dir/bin/quay.js" ] && [ -f "$retired_dir/bin/quay-native.js" ]; then
+    retired_q="$(sha256sum "$retired_dir/bin/quay.js" | awk '{print $1}')"
+    retired_qn="$(sha256sum "$retired_dir/bin/quay-native.js" | awk '{print $1}')"
+  fi
+  bound_entry="$(config_native_mcp_entry "$root")"
+  if [ -n "$bound_entry" ] && [ -f "$bound_entry" ]; then
+    bound_sha="$(sha256sum "$bound_entry" | awk '{print $1}')"
+  fi
+  fresh_q="$(sha256sum "$fresh_quay" | awk '{print $1}')"
+  fresh_qn_sha="$(sha256sum "$fresh_qn" | awk '{print $1}')"
+  AC238_FRESH_RUNTIME_SHA="${bound_sha}"
+  AC238_BOUND_ENTRY="$bound_entry"
+  AC238_RETIRED_DIR="$retired_dir"
+  [ -n "$retired_q" ] && [ "$retired_q" = "$pre_q" ] && [ "$retired_qn" = "$pre_qn" ] && AC238_RETIRED_MATCHES_PRE=1
+  if [ "$AC238_RETIRED_MATCHES_PRE" = "1" ] && [ ! -e "$rtbin" ] \
+     && [ -n "$bound_sha" ] && [ "$bound_sha" = "$fresh_qn_sha" ]; then
+    AC238_RUNTIME_REPLACED=1
+  fi
+  echo "  post-binding: retired_to=${retired_dir:-<none>} retired_matches_pre=$AC238_RETIRED_MATCHES_PRE live_rt_gone=$([ -e "$rtbin" ] && echo 0 || echo 1) bound=${bound_entry:-<unread>} bound_sha=$(printf '%.12s' "${bound_sha:-<none>}") delivered_qn_sha=$(printf '%.12s' "$fresh_qn_sha")"
+  if [ "$AC238_RUNTIME_REPLACED" != "1" ]; then
+    echo "  NOTE: runtime_replaced=0 —— 三个方向未同时成立（① retired_matches_pre=$AC238_RETIRED_MATCHES_PRE ② live_rt_gone=$([ -e "$rtbin" ] && echo 0 || echo 1) ③ bound==delivered:$([ -n "$bound_sha" ] && [ "$bound_sha" = "$fresh_qn_sha" ] && echo 1 || echo 0)）；⛔ 不退化成写一条 runtime_replaced=true 的记录" >&2
   fi
 
   # ⑤ 升级【后】直接量
   AC238_POST_TASK_COUNT="$(find "$root/tasks" -maxdepth 1 -type f -name '*.md' 2>/dev/null | wc -l | tr -d ' ')"
   post_set="$(cd "$root" && find tasks -maxdepth 1 -type f -name '*.md' -print0 2>/dev/null | sort -z | xargs -0 -r sha256sum 2>/dev/null | sha256sum | awk '{print $1}')"
   [ -n "$post_set" ] && [ "$post_set" = "$pre_set" ] && AC238_TASKSET_STABLE=1
-  post_q="$(sha256sum "$rtbin/quay.js" | awk '{print $1}')"
-  post_qn="$(sha256sum "$rtbin/quay-native.js" | awk '{print $1}')"
-  fresh_q="$(sha256sum "$fresh_quay" | awk '{print $1}')"
-  fresh_qn_sha="$(sha256sum "$fresh_qn" | awk '{print $1}')"
-  AC238_FRESH_RUNTIME_SHA="${fresh_q},${fresh_qn_sha}"
-  # replaced 的两个方向（逐文件比较——⛔ 不把 sha 拼成一串比，glob 展开顺序会让拼接串在本就相同时判「不等」）：
-  if [ "$post_q" = "$fresh_q" ] && [ "$post_qn" = "$fresh_qn_sha" ] \
-     && { [ "$post_q" != "$pre_q" ] || [ "$post_qn" != "$pre_qn" ]; }; then
-    AC238_RUNTIME_REPLACED=1
-  fi
   echo "  post: tasks=$AC238_POST_TASK_COUNT taskset_stable=$AC238_TASKSET_STABLE runtime_replaced=$AC238_RUNTIME_REPLACED"
 
-  # ⑥ 新 CLI 能读出旧存量（文件还在 ≠ 读得出）：用【刷新后的 project-local runtime】跑 task list。
-  #    PATH 前置本次安装前缀 ⇒ config 里那条裸 `quay-native`（mcp_entry）解析到本次交付物。
-  tl_json="$(cd "$root" && PATH="$PREFIX/bin:$PATH" node "$rtbin/quay.js" task list --root "$root" --json 2>/dev/null)"
+  # ⑥ 新 CLI 能读出旧存量（文件还在 ≠ 读得出）。⛔ 不再 PATH 前置本次安装前缀：升级后 config 的
+  #    mcp_entry 是**绝对路径**（本次交付物的 vendored bundle），解析它【不应】依赖 $PATH——依赖
+  #    $PATH 正是 ba960f503 修掉的那个缺陷形态（裸 `quay-native` 由「$PATH 恰好有什么」决定）。
+  #    因此这里刻意**不给 PATH 辅助**：这条读数要证的是「升级后的绑定自己就能解析」。
+  tl_json="$(cd "$root" && node "$fresh_quay" task list --root "$root" --json 2>/dev/null)"
   tl_count="$(printf '%s' "$tl_json" | python3 -c 'import json,sys
 d=json.load(sys.stdin); print(len(d))' 2>/dev/null || echo "")"
   # 抽样 task_get：取存量里字典序第一个**真实既有**任务。候选集来自与上面同一个磁盘枚举 ⇒ 它必然是
@@ -1077,7 +1106,7 @@ d=json.load(sys.stdin); print(len(d))' 2>/dev/null || echo "")"
   AC238_SAMPLE_TASK="$sample_id"
   sample_json=""
   if [ -n "$sample_id" ]; then
-    sample_json="$(cd "$root" && PATH="$PREFIX/bin:$PATH" node "$rtbin/quay.js" task view "$sample_id" --root "$root" --json 2>/dev/null)"
+    sample_json="$(cd "$root" && node "$fresh_quay" task view "$sample_id" --root "$root" --json 2>/dev/null)"
   fi
   local sample_ok=0
   if [ -n "$sample_json" ] && printf '%s' "$sample_json" | grep -q "\"$sample_id\""; then sample_ok=1; fi
@@ -1105,12 +1134,17 @@ d=json.load(sys.stdin); print(len(d))' 2>/dev/null || echo "")"
   fi
   if [ "$AC238_EVALUATED" = "1" ]; then
     mkdir -p "$(dirname "$AC89")"
-    printf '{"ts":"%s","ac":"GOAL-009-AC-238","host":"%s","project_root":"%s","pre_upgrade_task_count":%s,"post_upgrade_task_count":%s,"pre_upgrade_runtime_age_days":%s,"runtime_replaced":true,"task_list_ok":true,"build_sha":"%s","upgrade_source":"%s","upgrade_init_rc":%s,"isolated_copy":%s,"taskset_stable":true,"sample_task":"%s","fresh_runtime_sha256":"%s","host_key":"%s"}\n' \
+    # ⛔ `binding`/`retired_runtime_backup`/`retired_backup_matches_pre` 三个字段存在的唯一理由：
+    # runtime_replaced=true 在今天有【两代语义】（旧：cp 覆盖 project-local runtime；新：退休它并把
+    # config 绑定到交付物）。字段名相同时代不同 ⇒ 读者分不清这个 true 指的是哪一种替换
+    # （硬规则同族：一个字段承载两个成因就等于没有区分维度）。判据侧只读老字段，这三个是给人看的。
+    printf '{"ts":"%s","ac":"GOAL-009-AC-238","host":"%s","project_root":"%s","pre_upgrade_task_count":%s,"post_upgrade_task_count":%s,"pre_upgrade_runtime_age_days":%s,"runtime_replaced":true,"task_list_ok":true,"build_sha":"%s","upgrade_source":"%s","upgrade_init_rc":%s,"isolated_copy":%s,"taskset_stable":true,"sample_task":"%s","fresh_runtime_sha256":"%s","host_key":"%s","binding":"delivered-vendor","retired_runtime_backup":"%s","retired_backup_matches_pre":true,"bound_mcp_entry":"%s"}\n' \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(hostname 2>/dev/null || echo '')" "$AC238_PROJECT_ROOT" \
       "$AC238_PRE_TASK_COUNT" "$AC238_POST_TASK_COUNT" "$AC238_RUNTIME_AGE_DAYS" \
       "$BUILD_SHA" "${UPGRADE_SOURCE:-none}" "$init_rc" \
       "$([ -n "$UPGRADE_SOURCE" ] && [ "$UPGRADE_SOURCE" != "$root" ] && echo true || echo false)" \
-      "$AC238_SAMPLE_TASK" "$AC238_FRESH_RUNTIME_SHA" "${HOST:-}" >> "$AC89"
+      "$AC238_SAMPLE_TASK" "$AC238_FRESH_RUNTIME_SHA" "${HOST:-}" \
+      "$AC238_RETIRED_DIR" "$AC238_BOUND_ENTRY" >> "$AC89"
     echo "  ac238 record written → $AC89"
   else
     echo "  AC-238 record NOT written — 缺值≠合格 (pre_count=$AC238_PRE_TASK_COUNT post_count=$AC238_POST_TASK_COUNT age_days=${AC238_RUNTIME_AGE_DAYS:-<unread>} replaced=$AC238_RUNTIME_REPLACED task_list_ok=$AC238_TASK_LIST_OK build_sha=${BUILD_SHA:-<empty>} upgrade_init_rc=$init_rc)" >&2
@@ -1130,11 +1164,17 @@ d=json.load(sys.stdin); print(len(d))' 2>/dev/null || echo "")"
 #      —— 「升级成功」与「升级后还能干活」必须落在【同一个 root】上。这是本 AC 防自证的全部机制：
 #      另起一个全新项目跑一遍 e2e 是很容易的，但那证明的是「新项目能跑」，不是「升级没把项目弄坏」。
 #      判据侧（goals/AC-239-*.md）另有独立的载体集合判定，两层不互替（硬规则 2 按位置 + 不靠单一处）。
-#   ③ 目标项目自己的 runtime 在（.quay/runtime/bin/quay.js）—— AC-238 已证明它与本次交付物逐字一致；
-#      本步骤【全部读写都走它】，因为被测对象正是这个 runtime，⛔ 不换成本次安装前缀的 CLI。
+#   ③ AC-238 本轮的「runtime 绑定」读数成立（AC238_RUNTIME_REPLACED=1）—— ② 已保证同一个 root，
+#      ③ 保证这个 root 的升级确实换掉了旧 runtime、绑到了本次交付物。
+# ⚠️ 被测对象是**哪个 CLI**：⛔ 不是 project-local `.quay/runtime/bin/quay.js`。那个布局在当前语义下
+#    已被 SPEC-plugin-lifecycle-single-bundle-2026-09-02 / 裁定 c 退休（quay plugin 是 runtime 的单一
+#    交付面），AC-238 步骤刚刚亲眼看着它被退休到 backup。⇒ 「这个项目自己的 runtime」在当前语义下
+#    **就是本次交付物**（config 的 mcp_entry 指过去的正是它）——所以本步骤用交付物 CLI 配 `--root $root`
+#    驱动，与 AC-207 同一形态；被测的「项目自身」由 `--root` + 它升级后的 config/loop/profiles 承载。
 step_upgrade_drive_continue() {
-  local root="$1" rtbin qrl task_id goal_id bodyfile i status_json
-  rtbin="$root/.quay/runtime/bin"
+  local root="$1" qrl task_id goal_id bodyfile i status_json
+  qrl="${STEP1_PREFIX}/bin/quay"
+  qrl="$(readlink -f "$qrl" 2>/dev/null || echo "$qrl")"
   AC239_PROJECT_ROOT="$root"
   AC239_HOST="$(hostname 2>/dev/null || echo '')"
   echo "== ⑦b post-upgrade continuation (AC-239): the upgraded project's OWN drivers drive a NEW task to done =="
@@ -1146,8 +1186,12 @@ step_upgrade_drive_continue() {
     echo "  not-evaluated: AC-238 未在【这个 root】上评估通过（evaluated=${AC238_EVALUATED} ac238_root=${AC238_PROJECT_ROOT:-<none>} root=$root）⇒ ⛔ 不写 AC-239 记录（若在此处写，AC-239 就退化成「另起一个项目也能跑」）"
     return 0
   fi
-  if [ ! -f "$rtbin/quay.js" ]; then
-    echo "  not-evaluated: 升级后项目本地 runtime 缺失 $rtbin/quay.js ⇒ 无被测对象"
+  if [ "$AC238_RUNTIME_REPLACED" != "1" ]; then
+    echo "  not-evaluated: 本轮 AC-238 的 runtime 绑定读数未成立（AC238_RUNTIME_REPLACED=$AC238_RUNTIME_REPLACED）⇒ 这个 root 还不能算「已升级」，驱动它证明不了 AC-239 要证的事"
+    return 0
+  fi
+  if [ ! -f "$qrl" ]; then
+    echo "  not-evaluated: 交付物 CLI 不在 $qrl ⇒ 无驱动入口（被测项目的 runtime 在当前语义下就是本次交付物，见上方注释）"
     return 0
   fi
   if ! command -v claude >/dev/null 2>&1; then
@@ -1221,10 +1265,10 @@ meta-cc 的 MCP 查询工具在【显式传入 `session_id`】时，`include_sub
 - internal/mcp/query/query_files_test.go
 - tasks/ac239-subagent-session-id-scan.md
 BODY
-  if ! (cd "$root" && node "$rtbin/quay.js" goal write "$goal_id" --origin "AC-239 升级后闭环自证" --title "e2e post-upgrade target goal" --goal "GOAL-E2E" --criterion "true") >/dev/null 2>&1; then
+  if ! (cd "$root" && node "$qrl" goal write "$goal_id" --origin "AC-239 升级后闭环自证" --title "e2e post-upgrade target goal" --goal "GOAL-E2E" --criterion "true") >/dev/null 2>&1; then
     echo "  [⑦b] NOTE: goal write 失败（不阻塞任务侧；AC-239 记录只读 task 侧）"
   fi
-  if ! (cd "$root" && node "$rtbin/quay.js" task create "$task_id" --title "修复 include_subagents 在显式 session_id 上传参时静默失效" --body-file "$bodyfile" --status todo --goal-ac "$goal_id") >/dev/null 2>&1; then
+  if ! (cd "$root" && node "$qrl" task create "$task_id" --title "修复 include_subagents 在显式 session_id 上传参时静默失效" --body-file "$bodyfile" --status todo --goal-ac "$goal_id") >/dev/null 2>&1; then
     rm -f "$bodyfile"
     echo "  [⑦b] not-evaluated: task create 失败 ⇒ 记录 NOT written（fail-closed）"
     return 0
@@ -1240,9 +1284,9 @@ BODY
   # set +e / 取 rc / set -e 既有形（该处注释记着同一件事，落地时被 pre-commit guard 实测拦下过）。
   local d_rc_p=0 d_rc_w=0
   set +e
-  (cd "$root" && node "$rtbin/quay.js" driver start --kind promotion --root "$root") >/dev/null 2>&1
+  (cd "$root" && node "$qrl" driver start --kind promotion --root "$root") >/dev/null 2>&1
   d_rc_p=$?
-  (cd "$root" && node "$rtbin/quay.js" driver start --kind worker --root "$root") >/dev/null 2>&1
+  (cd "$root" && node "$qrl" driver start --kind worker --root "$root") >/dev/null 2>&1
   d_rc_w=$?
   set -e
   if [ "$d_rc_p" = "0" ] && [ "$d_rc_w" = "0" ]; then AC239_DRIVERS_STARTED=1; fi
@@ -1254,18 +1298,24 @@ BODY
   # ③ 轮询 done（至多 AC239_POLL_SECS，缺省 3600s）。fail-closed：超时不写记录。
   #    本任务比 AC-207 的 marker 任务重得多（真实 Go 缺陷修复 + fan-in 全量 suite），故轮询窗更宽；
   #    ⛔ 不放宽到无限——「等不到」必须留下可核的痕迹，而不是一个永不返回的步骤。
-  for i in $(seq 1 "${AC239_POLL_SECS:-3600}"); do
-    status_json="$( (cd "$root" && node "$rtbin/quay.js" task view "$task_id" --root "$root" --json) 2>/dev/null || true)"
+  #    ⚠️ start 报了非 0 时把窗口收窄到 120s：`driver start` 的退出码不是「活没活」的直接量（AC-203 的
+  #    教训正是「start exit 0 而系统是死的」；反向也同形——已常驻时 restart 会报非 0 而 driver 是活的），
+  #    所以这里【不】据此判 not-evaluated，只据它决定「值不值得等一小时」。真起不来时 120s 足够让
+  #    「没派发」与「派发了但实现失败」在痕迹上分得开（前者 status 恒为 todo）。
+  local ac239_poll="${AC239_POLL_SECS:-3600}"
+  if [ "$AC239_DRIVERS_STARTED" != "1" ]; then ac239_poll=120; fi
+  for i in $(seq 1 "$ac239_poll"); do
+    status_json="$( (cd "$root" && node "$qrl" task view "$task_id" --root "$root" --json) 2>/dev/null || true)"
     AC239_TASK_STATUS="$(printf '%s' "$status_json" | "$VC_NODE" --no-warnings -e '
       let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{ try{ const j=JSON.parse(s); console.log(j && j.status ? String(j.status) : ""); }catch{ console.log(""); } });
     ' 2>/dev/null)"
     [ "$AC239_TASK_STATUS" = "done" ] && break
     sleep 1
   done
-  echo "  [⑦b] poll finished: task_status=${AC239_TASK_STATUS:-<unreadable>} (poll window ${AC239_POLL_SECS:-3600}s)"
+  echo "  [⑦b] poll finished: task_status=${AC239_TASK_STATUS:-<unreadable>} (poll window ${ac239_poll}s)"
 
   # ④ 读直接量 → 判定 → 写记录（单点，fail-closed）。⛔ 判据不是「本步骤跑完了」，而是四个外部可核量。
-  probe_ac239_measures "$root" "$task_id" "$rtbin"
+  probe_ac239_measures "$root" "$task_id" "$qrl"
   echo "  [⑦b] task_status=$AC239_TASK_STATUS commit_sha=${AC239_COMMIT_SHA:0:12} commit_files=$AC239_COMMIT_FILES_JSON gate_events=$AC239_GATE_EVENTS produced_by_driver=$AC239_PRODUCED_BY_DRIVER evaluated=$AC239_EVALUATED host=$AC239_HOST"
   if [ "$AC239_EVALUATED" = "1" ] && [ -z "$AC239_COMMIT_SHA" ] && [ "$AC239_TASK_STATUS" = "done" ]; then
     echo "  AC239-NO-IMPLEMENTATION-COMMIT: $root 的提交历史里筛不出实现提交（触及文件全在 tasks/ goals/ .quay/ 之下）⇒ 记录 NOT written（fail-closed；⛔ 不拿记账提交充数）"
@@ -1550,6 +1600,45 @@ profile_worker_default_field() {
   v="$(printf '%s' "$v" | sed 's/[[:space:]]*$//')"   # 剥离尾随空白
   [ -n "$v" ] || return 1
   printf '%s' "$v"
+}
+
+# ── config_native_mcp_entry <root> — 读升级后 config 的 providers.native.mcp_entry 里的可执行路径 ──
+# 当前升级语义（裁定 c / ba960f503）下，「项目此刻绑定到哪个 runtime」只写在 config 里：mcp_entry 从
+# 裸 PATH 名（或悬空路径）被迁成【本次交付物的 vendored bundle 绝对路径】。AC-238 的「旧 runtime 被真实
+# 换掉」与 AC-239 的「这个项目自己能不能读自己的盘」都以它为准 ⇒ 必须从 config 读，⛔ 不从「目录里
+# 有没有某个文件」推（那正是升级前的老读法，会把「退休了但 config 没改」读成合格）。
+# 输出：第一个以 .js 结尾的绝对路径元素；读不出/没有 ⇒ 空串（调用方 fail-closed）。
+# ⛔ 刻意【不】引入 yaml 依赖：远端不保证有 PyYAML，而这里要解的形态是闭集（`mcp_entry:` 后跟
+# `- item` 列表或 `[a, b]` 内联）。解析结果只参与 fail-closed 门（== 本次交付物），解错即门不开。
+config_native_mcp_entry() {
+  local root="$1"
+  [ -f "$root/.quay/config.yml" ] || return 0
+  python3 - "$root/.quay/config.yml" <<'PY'
+import re, sys
+path = sys.argv[1]
+in_block = False
+items = []
+for line in open(path, encoding="utf-8"):
+    s = line.strip()
+    if not in_block:
+        m = re.match(r'^mcp_entry\s*:(.*)$', s)
+        if m:
+            rest = m.group(1).strip()
+            if rest.startswith("["):
+                items = [x.strip().strip("\"'") for x in rest.strip("[]").split(",") if x.strip()]
+                break
+            if rest:
+                items = [rest.strip("\"'")]
+                break
+            in_block = True
+        continue
+    if s.startswith("-"):
+        items.append(s[1:].strip().strip("\"'"))
+    elif s and not s.startswith("#"):
+        break
+cand = [i for i in items if i.startswith("/") and i.endswith(".js")]
+sys.stdout.write(cand[0] if cand else "")
+PY
 }
 
 # resolve_driving_profiles — 驱动方仓库 profiles 路径推导：--driving-profiles 显式 >
@@ -3271,7 +3360,8 @@ echo "AC238_PROJECT_ROOT=${AC238_PROJECT_ROOT:-<none>}"
 echo "AC238_PRE_TASK_COUNT=$AC238_PRE_TASK_COUNT AC238_POST_TASK_COUNT=$AC238_POST_TASK_COUNT"
 echo "AC238_PRE_UPGRADE_RUNTIME_AGE_DAYS=${AC238_RUNTIME_AGE_DAYS:-<unread>} AC238_RUNTIME_REPLACED=$AC238_RUNTIME_REPLACED"
 echo "AC238_TASK_LIST_OK=$AC238_TASK_LIST_OK AC238_TASKSET_STABLE=$AC238_TASKSET_STABLE AC238_SAMPLE_TASK=${AC238_SAMPLE_TASK:-<none>}"
-echo "AC238_FRESH_RUNTIME_SHA256=${AC238_FRESH_RUNTIME_SHA:-<none>}"
+echo "AC238_FRESH_RUNTIME_SHA256=${AC238_FRESH_RUNTIME_SHA:-<none>} (当前语义下 = 项目升级后绑定到的交付物 bundle 的 sha256，⛔ 不是「本地 runtime 文件」的——该布局已被裁定 c 退休)"
+echo "AC238_BOUND_MCP_ENTRY=${AC238_BOUND_ENTRY:-<unread>} AC238_RETIRED_RUNTIME_BACKUP=${AC238_RETIRED_DIR:-<none>} AC238_RETIRED_MATCHES_PRE=$AC238_RETIRED_MATCHES_PRE"
 echo "AC239_EVALUATED=$AC239_EVALUATED (1 = 四个直接量全成立并已写记录；0 = 未评估 ≠ 不合格——硬规则 3b)"
 echo "AC239_PROJECT_ROOT=${AC239_PROJECT_ROOT:-<none>} (⛔ 必须与 AC238_PROJECT_ROOT 逐字一致，判据侧按载体集合再核一遍)"
 echo "AC239_TASK_ID=${AC239_TASK_ID:-<none>} AC239_TASK_CREATED=$AC239_TASK_CREATED AC239_DRIVERS_STARTED=$AC239_DRIVERS_STARTED"
