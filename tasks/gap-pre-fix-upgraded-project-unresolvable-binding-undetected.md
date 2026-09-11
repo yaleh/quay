@@ -153,6 +153,33 @@ Error: spawn quay-native ENOENT
 已落进本记录：Finding 的三条 ssh 实录（升级现场自身的 ENOENT 与 config 形态）＋ AC2 两侧读数
 ＋ 上节两条 `task list` 前后对照。
 
+### 收尾轮（2026-09-11）：判据对象登记引发的 delta 分类连带修复
+
+fan-in 全量 suite 红于 `plugin/test/fan-in-execute-paths.test.mjs` 的
+`① REAL doc delta — … .quay/ only must classify as doc`：
+`AssertionError: pure-doc delta must produce empty code_delta, got: ".quay/config.yml"`。
+
+**根因（已用对照定位，非猜测）**：`select-static-checks-for-touches.ts` 的 `isDocPath` **先查注册表、
+再查 `DOC_SURFACES`**（「a checker reads it ⇒ code」）——本任务把 `.quay/config.yml` 登记为判据对象，
+该路径遂由 doc 变 code，而 fixture 正把它当作 `.quay/` 面的纯 doc 采样。
+对照（同一分类器，仅切换注册表）：注册本 hunk ⇒ 该 fixture **8 条里只有 `.quay/config.yml` 一条**翻成
+code，其余 7 条不变；移除本 hunk ⇒ 8 条全 doc。
+**这不是缺陷而是既定设计**：同类翻转在 develop 上**已经发生**——`docs/analysis/ac69-slot-release-vs-dispatch-gap.json`
+登记后同样在 `docs/` 面下判为 code（同法实测），所以该 fixture 的 `docs/` 采样才取
+`docs/proposals/` + `docs/references/`。**⇒ 该 fixture 的 `.quay/` 采样路径随登记而迁，与 `docs/` 侧同法。**
+
+修复：fixture 的 `.quay/` 采样改为真正 doc-only 的 `.quay/prepare-epochs/DIR-999.json`（无注册表命中），
+并在该 test 内按既有 NOTE 体例写明原因。受影响测试实跑：`fan-in-execute-paths` **93 pass / 0 fail**
+（修复前该文件 1 fail），`provider-binding-resolvability-check` 13 pass，`select-static-checks-for-touches`
++ `scoped-static-checks` 29 pass。
+
+**同轮发现并修正的第二处（接线声明与事实不符）**：`.quay/config.yml` **是 gitignored 的**
+（`.gitignore` 的 `/.quay/config.yml`）⇒ 它**永远不会**出现在 scoped 门的 delta 里，故初版
+`@static-object .quay/config.yml` 单条目使 scoped 门**恒 defer** 本检查（只在 full 门跑）。
+已把本检查自己的实现/负控制/单测一并登记进 `@static-object`（与 `per-task-suite-record-check` /
+`release-freshness-check` 同形）——实测：Touches 命中 `provider-binding-resolvability-check.ts` 或
+其单测 ⇒ scoped 门选中它（改动前恒 `false`）。
+
 ### 两个存量现场的处理（DoD）
 
 | 现场 | 绑定形态 | config sha256 | 处置 |
@@ -168,8 +195,11 @@ Error: spawn quay-native ENOENT
 ### 机制登记
 
 - 检查器：`plugin/scripts/provider-binding-resolvability-check.ts`（新；exit 0/1/2/3；`--json`）
-- 接线：`plugin/scripts/runner-static-gate.ts` 的 `run_static_checks`（`@static-tier change`，
-  `@static-object .quay/config.yml`）——`.quay/config.yml` 被改时 scoped 门会跑到它
+- 接线：`plugin/scripts/runner-static-gate.ts` 的 `run_static_checks`（`@static-tier change`）。
+  **判据对象 `.quay/config.yml` 是 gitignored 的**（`.gitignore` 的 `/.quay/config.yml`）⇒ 它永远不会出现在
+  scoped 门的 delta 里，故 `@static-object` 连同本检查自己的实现/负控制/单测一并登记——这样「改这个检查器」
+  才会让 scoped 门选中它（与 `per-task-suite-record-check` / `release-freshness-check` 同形）。
+  ⛔ 只登记 `.quay/config.yml` 则 scoped 门恒 defer（不是漏跑——被 defer 的检查在 full 门照跑，但反馈慢一整轮）。
 - 负控制：`plugin/scripts/checker-mutation-cases/provider-binding-resolvability-check.sh`，
   含 **`$PATH` shim 反例**（给裸名在 `$PATH` 上造一个可执行 `quay-native`，检查器**仍须红**）——
   这一支正对着 `isPathBinary` 那个盲点
@@ -179,6 +209,9 @@ Error: spawn quay-native ENOENT
   `binding_state()` 读数——**刻意不注入任何 `$PATH` 辅助**，升级前取一次（存量读数）、升级后取一次
   （并入 AC-238 判定的**新门** `post_binding = path-resolved`）。旧读数带 `PATH="$PREFIX/bin:$PATH"`
   辅助时结构上取不到假（硬规则 4），新读数把「升级成功」与「升级后项目不可用」重新拆成两种取值。
+- 登记判据对象的副作用：`isDocPath` 先查注册表 ⇒ `.quay/config.yml` 由 doc 变 code（设计使然，
+  与 `docs/analysis/ac69-*.json` 同类）；`plugin/test/fan-in-execute-paths.test.mjs` 的 doc-delta fixture
+  的 `.quay/` 采样路径已随之迁移（详见「收尾轮」一节）。
 - 未改动 `plugin/scripts/quay-init.sh`（迁移机制已由 `ba960f503` 落地，本条补的是发现），
   ⇒ 已把它从 `## Touches` 移出。
 
@@ -215,4 +248,5 @@ Error: spawn quay-native ENOENT
 - plugin/scripts/runner-static-gate.ts
 - plugin/scripts/capability-catalog.sh
 - plugin/test/provider-binding-resolvability-check.test.mjs（新）
+- plugin/test/fan-in-execute-paths.test.mjs（判据对象登记使 `.quay/config.yml` 由 doc 变 code ⇒ doc-delta fixture 的 `.quay/` 采样路径随迁）
 - tasks/gap-pre-fix-upgraded-project-unresolvable-binding-undetected.md

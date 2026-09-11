@@ -611,8 +611,15 @@ run_static_checks() {
   # workspace root —— 否则本仓库自己的 ./bin/quay-native.ts 会被误报）。三态可区分：path-resolved（合格）/
   # bare-path-name·dangling-*（红）/ no-mcp-entry·unrecognized-shape（NOT-EVALUATED，⛔ 不与合格同形）。
   # 负控制由 mutation case（含 $PATH shim 反例：裸名 + shim 仍须红）钉住（硬规则 3/4）。
+  # ⚠️ `.quay/config.yml` 是 gitignored（.gitignore 的 `/.quay/config.yml`）⇒ 它【永远不会】出现在 scoped
+  # 门的 delta 里。故除判据对象本身外，把本检查自己的实现/负控制/单测一并列进 @static-object——这样
+  # 「改这个检查器」才会让 scoped 门选中它（与 per-task-suite-record-check / release-freshness-check 同形）。
+  # ⛔ 未列入则本检查在 scoped 门恒被 defer（只在 full 门跑）——不是漏跑，但反馈慢一整轮。
+  # 登记 `.quay/config.yml` 的副作用（isDocPath 先查注册表再查 DOC_SURFACES ⇒ 该路径由 doc 变 code）是
+  # 设计使然、非缺陷，与 docs/analysis/ac69-slot-release-vs-dispatch-gap.json 在 docs/ 面下同为 code 同类；
+  # plugin/test/fan-in-execute-paths.test.mjs 的 doc-delta fixture 已随之改用一个真正 doc-only 的 .quay/ 采样路径。
   # @static-tier change
-  # @static-object .quay/config.yml
+  # @static-object .quay/config.yml plugin/scripts/provider-binding-resolvability-check.ts plugin/scripts/checker-mutation-cases/provider-binding-resolvability-check.sh plugin/test/provider-binding-resolvability-check.test.mjs
   run_checker "provider-binding-resolvability-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/provider-binding-resolvability-check.ts" --root "${repo_root}"
   echo "== host-repo-surface ratchet (GOAL-015 退出条件④ / AC-236, gap-host-repo-surface-ratchet) =="
   # 本仓库表层单调棘轮：CLI 动词集（quay.ts --help 真实输出，⛔ 不读源码字面量——同时证明入口本身跑得起来）、
