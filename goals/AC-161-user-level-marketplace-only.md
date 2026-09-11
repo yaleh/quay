@@ -4,15 +4,23 @@ title: 用户级只留 marketplace 源，启用迁项目级
 status: achieved
 kind: criterion
 goal: GOAL-003
-criterion: |-
+criterion: >-
   python3 - <<'P'
+
   import json,os,sys
+
   p=os.path.expanduser('~/.claude/settings.json')
+
   try: d=json.load(open(p))
-  except Exception: sys.exit(1)
-  if any('quay' in k for k in (d.get('enabledPlugins') or {})): sys.exit(1)
-  if 'quay' in json.dumps(d.get('env') or {}): sys.exit(1)
+
+  except Exception as e:
+      sys.stderr.write("CAUSE=settings-unreadable — cannot read user-level ~/.claude/settings.json: %r\n" % (e,)); sys.exit(1)
+  if any('quay' in k for k in (d.get('enabledPlugins') or {})):
+      sys.stderr.write("CAUSE=user-enabled-plugins — user-level enabledPlugins still enables quay plugin(s): %s\n" % ",".join(k for k in (d.get('enabledPlugins') or {}) if 'quay' in k)); sys.exit(1)
+  if 'quay' in json.dumps(d.get('env') or {}):
+      sys.stderr.write("CAUSE=user-env-quay-path — user-level settings.json 'env' still carries a quay path in key(s): %s\n" % ",".join(k for k,v in (d.get('env') or {}).items() if 'quay' in str(v))); sys.exit(1)
   sys.exit(0)
+
   P
 expect: exit 0（用户级 ~/.claude/settings.json 的 enabledPlugins 无 quay 键 ∧ env 中不含
   quay 路径；读不到该文件即判假，不静默通过）
@@ -21,6 +29,7 @@ origin: >
 
   plugin marketplace 源」。正本 SPEC-plugin-lifecycle-single-bundle-2026-09-02.md
   §4b。
+long-term: true
 ---
 
 **判据（能取假）**：用户级只留 marketplace 源，启用迁项目级（SPEC §4b）。**迁移顺序**：确认已安装 →

@@ -33,6 +33,8 @@ import {
   GAP_WORKER_TIMEOUT_MS_DEFAULT,
   GOAL_SPAWN_CAP_DEFAULT,
   GOAL_ROUND_REL,
+  goalCloseBlockFromRecords,
+  probeLedger,
 } from '../scripts/goal-driver.ts';
 import { runResidentQualityGateLoop } from '../scripts/quality-gate-driver.ts';
 import { DRIVER_KINDS, KNOWN_KINDS } from '../scripts/driver-runtime.ts';
@@ -776,6 +778,137 @@ test('AC3 — runGoalRound 轮记录 value 带 scopeSize + evaluated（空作用
     assert.ok(v.achievedFailing != null, 'achievedFailing 非 null（读得到）');
     assert.equal(v.achievedFailing.scopeSize, 0, '轮记录 achievedFailing.scopeSize=0');
     assert.equal(v.achievedFailing.evaluated, false, '轮记录 achievedFailing.evaluated=false');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── 关闭前置：不许把「已知失败」冻结在复验域之外 ─────────────────────────────────────────
+// gap-goal-closure-freezes-failing-ac-outside-reverify-scope。缺陷实测（生产 round 149，
+// 2026-09-08T19:55:07.756Z）：AC-161 是唯一 fail 项，同一轮 GOAL-003 被机械 flip achieved ——
+// 关闭后每轮循环只遍历 activeGoals，该 AC 从此不再被 gate，失败被永久冻结，且 AC-241 结构上永不通过。
+
+test('goalCloseBlockFromRecords 三态臂：①全 pass ⇒ clear；②achieved+尾 fail 未声明 long-term ⇒ blocked-failing-ac 且枚举 AC；③声明 long-term ⇒ 恢复 clear', () => {
+  const fixture = (acLongTerm) => [
+    { id: 'GOAL-900', status: 'active', kind: 'goal' },
+    { id: 'AC-901', status: 'achieved', goal: 'GOAL-900', longTerm: false, evidence: { verdict: 'pass' } },
+    { id: 'AC-902', status: 'achieved', goal: 'GOAL-900', longTerm: acLongTerm, evidence: { verdict: 'fail' } },
+  ];
+  // ① 全 pass 且无 long-term ⇒ clear（⛔ 不是恒 blocked：谓词能取假）。
+  assert.deepEqual(
+    goalCloseBlockFromRecords(fixture(true), 'GOAL-900', { readable: true }),
+    { verdict: 'clear', acs: [], cause: null },
+    '臂①：无 achieved+fail 的 AC ⇒ clear');
+  // ② 一条 achieved ∧ 尾 fail ∧ 未声明 long-term ⇒ 不放行，且【枚举】被点名的 AC（硬规则 3，⛔ 不布尔）。
+  assert.deepEqual(
+    goalCloseBlockFromRecords(fixture(false), 'GOAL-900', { readable: true }),
+    { verdict: 'blocked-failing-ac', acs: ['AC-902'], cause: null },
+    '臂②：achieved+尾fail+未声明 long-term ⇒ blocked-failing-ac 并列出 AC-902');
+  // ③ 逃生口：该 AC 声明 long-term ⇒ 恢复 clear（AC-222『GOAL 必须能自动关闭』不被本前置永久堵死）。
+  assert.deepEqual(
+    goalCloseBlockFromRecords(fixture(true), 'GOAL-900', { readable: true }),
+    { verdict: 'clear', acs: [], cause: null },
+    '臂③：声明 long-term ⇒ 恢复可关闭（逃生口）');
+  // 负控制：status 不是 achieved 的 AC 即便尾 fail 也不阻塞（前置只针对「已达成却已变红」）。
+  const notAchieved = [
+    { id: 'GOAL-900', status: 'active', kind: 'goal' },
+    { id: 'AC-903', status: 'active', goal: 'GOAL-900', longTerm: false, evidence: { verdict: 'fail' } },
+  ];
+  assert.equal(goalCloseBlockFromRecords(notAchieved, 'GOAL-900', { readable: true }).verdict, 'clear',
+    '负控制：active AC 尾 fail 不阻塞关闭（那是 I5/缺口面的事，不是冻结）');
+  // 作用域：别的 GOAL 名下同样的 AC 不影响本 GOAL（⛔ 不是全库布尔）。
+  const otherGoal = [
+    { id: 'GOAL-900', status: 'active', kind: 'goal' },
+    { id: 'AC-904', status: 'achieved', goal: 'GOAL-999', longTerm: false, evidence: { verdict: 'fail' } },
+  ];
+  assert.equal(goalCloseBlockFromRecords(otherGoal, 'GOAL-900', { readable: true }).verdict, 'clear',
+    '作用域：别的 GOAL 名下的红 AC 不阻塞本 GOAL');
+});
+
+test('goalCloseBlockFromRecords 第三态 not-evaluated：台账读不到时不得与 clear 同形（硬规则 3b），且两种成因可分', () => {
+  const records = [{ id: 'AC-901', status: 'achieved', goal: 'GOAL-900', longTerm: false, evidence: null }];
+  const absent = goalCloseBlockFromRecords(records, 'GOAL-900', { readable: false, cause: 'ledger-absent' });
+  const unreadable = goalCloseBlockFromRecords(records, 'GOAL-900', { readable: false, cause: 'ledger-unreadable' });
+  assert.deepEqual(absent, { verdict: 'not-evaluated', acs: [], cause: 'ledger-absent' },
+    '台账缺失 ⇒ not-evaluated（⛔ 不与 clear 同形：否则删掉台账就能把任何红 AC 静默冻结）');
+  assert.equal(unreadable.cause, 'ledger-unreadable', '两种成因可区分（ledger-absent vs ledger-unreadable）');
+  assert.notDeepEqual(absent, unreadable, '⛔ 两种成因不得同形');
+  assert.notEqual(absent.verdict, 'clear', 'not-evaluated ≠ clear');
+  assert.notEqual(absent.verdict, 'blocked-failing-ac', 'not-evaluated ≠ blocked-failing-ac（三态互不同形）');
+  // 探针本身：真实临时目录（无台账）⇒ ledger-absent；建一个台账 ⇒ readable。
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-ledgerprobe-'));
+  try {
+    assert.deepEqual(probeLedger(tmp), { readable: false, cause: 'ledger-absent' }, '无台账 ⇒ ledger-absent');
+    fs.mkdirSync(path.join(tmp, '.quay'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, '.quay', 'gate-events.jsonl'), '', 'utf8');
+    assert.deepEqual(probeLedger(tmp), { readable: true }, '台账存在且可读 ⇒ readable');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('real ring: GOAL 名下 achieved AC 尾事件 fail ⇒ 关闭被拒（closeBlocks 落痕 + flips ok:false），声明 long-term 后恢复可关闭', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-closeblock-'));
+  const sufficiencyCmd = ['node', '-e', 'process.stdout.write(JSON.stringify({verdict:"covered"}))'];
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true });
+    // GOAL-001：有退出条件（机械可证部分判 not-evaluated ⇒ 走语义判定 seam ⇒ covered），
+    // AC-001 已经是 achieved 而 criterion 恒假 ⇒ 每轮 gate 都往台账写一条 fail 尾事件。
+    writeGoalFile(tmp, { id: 'GOAL-001', status: 'active', kind: 'goal' });
+    fs.writeFileSync(path.join(tmp, 'goals', 'GOAL-001-t.md'),
+      ['---', 'id: GOAL-001', 'title: t', 'status: active', 'kind: goal',
+       'origin: test fixture', '---', '', '## 退出条件', '', '1. 条件一', ''].join('\n'), 'utf8');
+    writeGoalFile(tmp, { id: 'AC-001', status: 'achieved', kind: 'criterion', goal: 'GOAL-001', criterion: 'false' });
+
+    const r1 = await runGoalRound(tmp, { scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'], sufficiencyCmd });
+    const b1 = r1.fact.value.closeBlocks.find((b) => b.goal === 'GOAL-001');
+    assert.ok(b1, 'closeBlocks 含 GOAL-001 一条（⛔ 不是缺席）');
+    assert.equal(b1.verdict, 'blocked-failing-ac', 'achieved+尾fail+未声明 long-term ⇒ 关闭被拒');
+    assert.deepEqual(b1.acs, ['AC-001'], '被点名的 AC 枚举在 closeBlocks.acs（⛔ 不布尔）');
+    assert.equal(b1.cause, null, 'blocked-failing-ac 的 cause 恒 null（与 not-evaluated 不同形）');
+    assert.match(fs.readFileSync(path.join(tmp, 'goals', 'GOAL-001-t.md'), 'utf8'), /^status: active$/m,
+      'GOAL 未被关闭（仍在 active）');
+    const refused = r1.fact.value.flips.find((f) => f.id === 'GOAL-001' && f.to === 'achieved');
+    assert.ok(refused && refused.ok === false, 'flip 记录里有一条 ok:false 的关闭尝试（区别于静默不关）');
+    assert.match(refused.reason, /^blocked-failing-ac: AC-001$/, '拒绝理由带独立成因取值与 AC 清单');
+    assert.notEqual(r1.sufficiencyFacts[0].value.sufficiency.verdict, 'insufficient',
+      '负控制：被拒不是因充分性不足（否则测的是另一条闸）');
+
+    // 逃生口（臂③）：给 AC-001 声明 long-term ⇒ 恢复可关闭。经 goal-store write（机件路径）。
+    const w = spawnSync('node', ['--experimental-strip-types', path.join(repoRoot, 'packages/quay/src/goal-store.ts'),
+      'write', 'AC-001', '--long-term', 'true', '--root', tmp], { encoding: 'utf8' });
+    assert.equal(w.status, 0, 'goal-store write --long-term true 成功:\n' + w.stdout + w.stderr);
+    const r2 = await runGoalRound(tmp, { scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'], sufficiencyCmd });
+    assert.equal(r2.fact.value.closeBlocks.find((b) => b.goal === 'GOAL-001').verdict, 'clear',
+      '声明 long-term ⇒ 恢复 clear（逃生口有效）');
+    assert.match(fs.readFileSync(path.join(tmp, 'goals', 'GOAL-001-t.md'), 'utf8'), /^status: achieved$/m,
+      '逃生口打开后 GOAL 确实被关闭');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('real ring: 无 achieved 红 AC 时 closeBlocks 恒有该 GOAL 一条且 verdict=clear（字段存在性，⛔ 不是缺席）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-closeblock-clear-'));
+  const sufficiencyCmd = ['node', '-e', 'process.stdout.write(JSON.stringify({verdict:"covered"}))'];
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true });
+    writeGoalFile(tmp, { id: 'GOAL-001', status: 'active', kind: 'goal' });
+    fs.writeFileSync(path.join(tmp, 'goals', 'GOAL-001-t.md'),
+      ['---', 'id: GOAL-001', 'title: t', 'status: active', 'kind: goal',
+       'origin: test fixture', '---', '', '## 退出条件', '', '1. 条件一', ''].join('\n'), 'utf8');
+    // AC 仍 active（判据 true ⇒ 本轮 I2 翻 achieved，尾事件是 pass）⇒ 不阻塞。
+    writeGoalFile(tmp, { id: 'AC-001', status: 'active', kind: 'criterion', goal: 'GOAL-001', criterion: 'true' });
+    const { fact } = await runGoalRound(tmp, { scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'], sufficiencyCmd });
+    const blocks = fact.value.closeBlocks;
+    assert.ok(Array.isArray(blocks), 'closeBlocks 是数组（字段存在 ⇒ 「查过且零条」与「未跑该判定」可分）');
+    assert.equal(blocks.length, 1, '一条 active GOAL ⇒ 一条 closeBlock');
+    assert.deepEqual(blocks[0], { goal: 'GOAL-001', verdict: 'clear', acs: [], cause: null },
+      '无 achieved 红 AC ⇒ clear（本条与上一条的 blocked 对照，证明谓词能取假）');
+    assert.match(fs.readFileSync(path.join(tmp, 'goals', 'GOAL-001-t.md'), 'utf8'), /^status: achieved$/m,
+      '对照：clear ⇒ GOAL 正常关闭');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
