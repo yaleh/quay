@@ -73,7 +73,7 @@ AC-239 | verdict=fail | reason="acceptance failed (exit 1) — criterion wrote n
   注入一条带裸失败退出的夹具判据（`AC-990-injected-fixture.md`，criterion = `python3 - <<P / sys.exit(1) / P`）⇒ `bareAcs=34 > baseline 33 (delta +1)`、`exit=1`；移除 ⇒ `bareAcs=33`、`exit=0`。
   三次读数 **33 / 34 / 33**（退出码 **0 / 1 / 0**）。接线：`plugin/scripts/runner-static-gate.ts`（`@static-tier change`）+ `plugin/scripts/capability-catalog.sh` + `plugin/scripts/checker-mutation-cases/criterion-failure-attribution-check.sh` + 单测 `plugin/test/criterion-failure-attribution-check.test.mjs`（11/11 pass）。
   **续做轮复验**：合并 develop 后在域数 92 → 94、`bareAcs` 与基线**逐字不变**（33），重跑三次读数仍为 **33 / 34 / 33**（`status` pass / fail / pass；`ids` 尾部新增的正是 `AC-990`）。单测数由 11 → **14**（新增值位屏蔽的负控制与两条正控制，见「本轮补充说明」③）。接线复验：`runner-static-gate.ts:655` 仍以 `--root` 跑本检查器、`:654` 的 `@static-object` 四项仍在；`capability-catalog.sh` 自报 `summary: 308 scripts | 308 declared | 0 unclassified`。
-  **最终合并态复验（读数下移，机制不变）**：AC-161 被另一任务修好并入 ⇒ 基线重新捕获为 **32**（`generatedAt=2026-09-11T12:02:01.417Z`），三次读数相应变为 **32 / 33 / 32**（注入 `AC-990` ⇒ `bareAcs=33 > baseline 32`、`added=["AC-990"]`、`status=fail`；移除 ⇒ 32、`pass`）。**这正是本条要的「能取假」**：计数随盘上内容动，既不是常量、也不被基线挡死。
+  **最终合并态复验（读数下移，机制不变）**：AC-161 被另一任务修好并入 ⇒ 基线重新捕获为 **32**（`generatedAt=2026-09-11T12:02:01.417Z`），三次读数相应变为 **32 / 33 / 32**（实测：注入 `AC-990` ⇒ `bareAcs=33 > baseline 32`、`delta=1`、`added=["AC-990"]`、`status=fail`、`exit=1`；移除 ⇒ `bareAcs=32`、`status=pass`、`exit=0`）。**这正是本条要的「能取假」**：计数随盘上内容动，既不是常量、也不被基线挡死。
 
 - [x] **AC5 棘轮生效（能取假）**：基线写入后人为让计数 +1 ⇒ 检查器报红 ——
   `FAIL: criterion failure attribution REGRESSED: bareAcs=34 > baseline 33 (delta +1); new bare-failure-exit AC(s): AC-990 — a failing criterion must write its cause to stderr/stdout`，`exit=1`；
@@ -114,7 +114,7 @@ AC-239 | verdict=fail | reason="acceptance failed (exit 1) — criterion wrote n
 5. **最终合并态：棘轮的【收缩方向】被一次真实事件走过，并暴露了一个会在「最好的事件」上变红的断言（已修）** ——
    · develop 上 AC-161 的判据被另一任务修好并并入 ⇒ 枚举器报 `fixed=["AC-161"]`、live 计数 **33 → 32**。**这是好事**（棘轮只许降），但它同时暴露两处：
    · **① 基线停在 33 ⇒ 棘轮留下一个静默的洞**：此后任何一条**新**裸失败退出只要落到 33 就等于基线 ⇒ 绿、无告警（`≤` 判定）。基线按设计由 `--capture` 从真实枚举生成、只许降不许升 ⇒ **重新捕获为 32**（`inDomain=94 bareLines=54`），把洞补上。⛔ 这不是「放宽检测器使计数归零」（DoD 禁止的那条）：把基线**压低**是收紧棘轮，方向相反。
-   · **② `plugin/test/…` 里 `assert.equal(out.bareAcs, committed.count)` 是个结构上会在「最好的事件」上变红的断言**：棘轮既然是只许降的，**任何**任务修好一条判据都会让 live < baseline ⇒ 该测试红，而检查器本身正确地是绿的（实测就是这一次）。这正是硬规则 4b 的反面教材——它测的不是「检查器对不对」，而是「后来又没人修好东西」。改为 `out.bareAcs <= committed.count`（棘轮成立），并把它原本的**防漂移**意图挪到正确的量上：CLI 报的数必须等于对 `goals/` 的一次**独立枚举**（`enumerateBareFailureFails` 的库入口）——仍然钉死「不是谁手打的一个常量」，但不再惩罚合法收缩。
+   · **② `plugin/test/criterion-failure-attribution-check.test.mjs` 里 `assert.equal(out.bareAcs, committed.count)` 是个结构上会在「最好的事件」上变红的断言**：棘轮既然是只许降的，**任何**任务修好一条判据都会让 live < baseline ⇒ 该测试红，而检查器本身正确地是绿的（实测就是这一次）。这正是硬规则 4b 的反面教材——它测的不是「检查器对不对」，而是「后来又没人修好东西」。改为 `out.bareAcs <= committed.count`（棘轮成立），并把它原本的**防漂移**意图挪到正确的量上：CLI 报的数必须等于对 `goals/` 的一次**独立枚举**（`enumerateBareFailureExits` 的库入口）——仍然钉死「不是谁手打的一个常量」，但不再惩罚合法收缩。
    · 单测 **14/14**；mutation case `RC=0`；scoped 门 `RC=0`（30/30）。
 
 ## Touches
