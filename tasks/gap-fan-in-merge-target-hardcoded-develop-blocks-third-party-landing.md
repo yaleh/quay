@@ -2,7 +2,7 @@
 id: gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing
 title: fan-in 的 merge target 硬编码 develop——真实项目主线不是 develop 时任务结构上永远无法落地（AC-239
   真机实测被此摧毁）
-status: todo
+status: ready
 labels:
   - gap
   - defect
