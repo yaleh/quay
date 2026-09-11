@@ -78,23 +78,23 @@ GOAL-003 随即关闭 ⇒ 关闭动作对判据读数**并非整体不敏感**�
 
 ## Acceptance Criteria
 
-- [ ] AC1 缺陷存证（改前读数）：贴 `.quay/gate-events.jsonl` 里 AC-161 尾事件原文（timestamp + verdict + reason）、
+- [x] AC1 缺陷存证（改前读数）：贴 `.quay/gate-events.jsonl` 里 AC-161 尾事件原文（timestamp + verdict + reason）、
       `goal-round.jsonl` round 148/149 含 `AC-161=fail` 的原文与 GOAL-003 关闭时刻，以及 AC-242 干跑的输出。
-- [ ] AC2 机制存在且能取假（三条臂，各贴读数）：夹具 GOAL —— ①AC 全 pass 且无 long-term ⇒ **关闭**；
+- [x] AC2 机制存在且能取假（三条臂，各贴读数）：夹具 GOAL —— ①AC 全 pass 且无 long-term ⇒ **关闭**；
       ②有一条 AC 尾 verdict=fail 且未声明 long-term ⇒ **不关闭**，且落痕含 `blocked-failing-ac` 与 AC 清单
       （与 insufficient / not-evaluated 不同形）；③该 AC 声明 long-term ⇒ 恢复可关闭。
-- [ ] AC3 生产上真的挡住过（⛔ 夹具不算，硬规则 4 推论三）：在**落地之后**的 `goal-round.jsonl` 轮记录里取到
+- [x] AC3 生产上真的挡住过（⛔ 夹具不算，硬规则 4 推论三）：在**落地之后**的 `goal-round.jsonl` 轮记录里取到
       ≥1 条「因 AC 在红而未关闭」的读数；若窗口内无此形态，须把该判定函数对一条**已知为真**的样本干跑一次并贴出
       输出（硬规则 2 的零计数半边），⛔ 不得以「没有 GOAL 在飞」当作通过。
-- [ ] AC4 存量消解可回读：`goal-store get AC-161` 回读 `longTerm === true`（机件回读，⛔ 不采信文件字面），
+- [x] AC4 存量消解可回读：`goal-store get AC-161` 回读 `longTerm === true`（机件回读，⛔ 不采信文件字面），
       且 `goal-store check --achieved-failing` 的 `inScope` 含 `AC-161`（AC-216 的复验域确实收回了它）。
-- [ ] AC5 AC-242 判据翻转：`node --experimental-strip-types packages/quay/src/goal-store.ts gate AC-242 --dry-run`
+- [x] AC5 AC-242 判据翻转：`node --experimental-strip-types packages/quay/src/goal-store.ts gate AC-242 --dry-run`
       从 exit 1 → exit 0（贴前后输出）。
-- [ ] AC6 下游解耦：AC-241 干跑输出中不再出现 `AC-161`（贴新旧 reason 对照）；若 AC-241 仍红，须逐字说明剩余
+- [x] AC6 下游解耦：AC-241 干跑输出中不再出现 `AC-161`（贴新旧 reason 对照）；若 AC-241 仍红，须逐字说明剩余
       项只有 `AC-239`（由 `gap-goal-criteria-bare-failing-exit-unattributable` 在飞）。
-- [ ] AC7 ⛔ 不改判定：AC-161 判据改动前后，对同一载体（当前 `~/.claude/settings.json`）退出码相同（贴两次）。
-- [ ] AC8 divergent 消费者枚举：贴枚举命令与命中清单，并给出「本改动未产生新的无主红」的判据；若产生，贴处置。
-- [ ] AC9 全量绿：`scripts/test.sh`。
+- [x] AC7 ⛔ 不改判定：AC-161 判据改动前后，对同一载体（当前 `~/.claude/settings.json`）退出码相同（贴两次）。
+- [x] AC8 divergent 消费者枚举：贴枚举命令与命中清单，并给出「本改动未产生新的无主红」的判据；若产生，贴处置。
+- [x] AC9 全量绿：`scripts/test.sh`。
 
 ## Definition of Done
 
