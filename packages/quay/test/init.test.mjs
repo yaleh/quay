@@ -582,3 +582,47 @@ test("AC168-closed-set negative control: removing .quay/config.yml from the bloc
   const outside = computeOutsideClosedSet([".quay/config.yml"], allowed);
   assert.deepEqual(outside, [".quay/config.yml"], "a produced file missing from the block must be flagged");
 });
+
+// ---------------------------------------------------------------------------
+// Branch model provisioning (gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing)
+// `quay init` now ESTABLISHES the landing baseline `develop` the fan-in/anti-drift path reads,
+// instead of assuming it. These three tests pin the REGRESSION arm: init on a directory that is
+// not a git repo, and on a repo that already carries quay's own topology, must behave exactly as
+// before. (The positive/adoption arm lives in branch-model.test.mjs.)
+// ---------------------------------------------------------------------------
+
+test("branch model: a NON-git directory still initializes (provisioning is skipped, never fatal)", () => {
+  const dir = tmpDir("bm-nogit");
+  const r = runQuayAllowFail(["init", "--root", dir], dir);
+  assert.equal(r.exitCode, 0, r.stderr);
+  assert.equal(fs.existsSync(path.join(dir, ".quay", "config.yml")), true, "a plain dir is a first-class target");
+});
+
+test("branch model: a repo whose `develop` continues its default branch is untouched (逐字不变)", () => {
+  const dir = tmpDir("bm-quay-shape");
+  const g = (args) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
+  g(["init", "-q", "-b", "main"]);
+  g(["config", "user.name", "init-test"]);
+  g(["config", "user.email", "init@example.com"]);
+  fs.writeFileSync(path.join(dir, "a.txt"), "1\n");
+  g(["add", "-A"]);
+  g(["commit", "-q", "-m", "base"]);
+  g(["branch", "develop"]);
+  g(["branch", "author"]);
+  const before = { develop: g(["rev-parse", "develop"]), author: g(["rev-parse", "author"]), main: g(["rev-parse", "main"]) };
+
+  const r = runQuayAllowFail(["init", "--root", dir], dir);
+  assert.equal(r.exitCode, 0, r.stderr);
+  assert.match(r.stdout, /\[REUSED\] landing-baseline -> develop/);
+  assert.equal(g(["rev-parse", "develop"]), before.develop);
+  assert.equal(g(["rev-parse", "author"]), before.author);
+  assert.equal(g(["rev-parse", "main"]), before.main);
+});
+
+test("branch model: --dry-run reports the plan and mutates no ref", () => {
+  const dir = tmpDir("bm-dryrun");
+  const r = runQuayAllowFail(["init", "--dry-run", "--root", dir], dir);
+  assert.equal(r.exitCode, 0, r.stderr);
+  assert.match(r.stdout, /branch model/);
+  assert.equal(fs.existsSync(path.join(dir, ".quay", "config.yml")), false, "dry run writes nothing");
+});

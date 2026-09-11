@@ -43,7 +43,19 @@ ready-made body.
    mechanism under different symptom wording; grep the *mechanism* term, not the reporter's
    symptom phrasing. A real duplicate → STOP, point to the existing task id, do not file a
    second one. A related-but-distinct task (different mechanism, same area) → proceed, and note
-   the related id in the new task's Proposal/Finding for traceability.
+   the related id in the new task's Proposal/Finding for traceability — **and when that backlink
+   paragraph also carries a gating word (`阻塞` / `前置` / `depends_on` / `先落地` / `先完成` …),
+   open the paragraph with the marker `<!-- dedup-ref -->`** (its own first thing on the line, no
+   leading prose). The two conventions otherwise fight: `ready-pool-check.ts`'s `prosePrereqGap`
+   fail-closed gate reads a gating word as a prerequisite DECLARATION, so a traceability backlink
+   written to satisfy THIS step could silently make your new task promotion-ineligible — it stays
+   at `todo` while `quay task check` reports `ok:true`. The marker makes the paragraph read as
+   traceability only, so no id in it is taken as a prereq. It is paragraph-scoped and anchored at
+   the paragraph start, so keep the marker outside any quoted text (quoting it mid-sentence
+   exempts nothing). Verify before landing: `node --experimental-strip-types
+   plugin/scripts/ready-pool-check.ts --json` must show your id with an empty `prosePrereqGap`
+   (or absent from `candidates[]`) — if it shows refs you did not mean as prerequisites, either
+   add the marker or rewrite the sentence as a denial.
 
 3. **Pick the shape and draft/accept content accordingly.** This workspace's todo→ready gate is
    shape-aware (`plugin/scripts/ready-pool-check.ts`'s `SHAPE_REGISTRY`, mirroring quay-native's

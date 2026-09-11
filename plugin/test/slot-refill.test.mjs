@@ -1835,6 +1835,162 @@ test("NOT-YET-FLIPPED — a leftover task/<id> worktree exempts the allChecked a
   assert.equal(excludedNyfIds2.has(id), true, "without the worktree the allChecked task is excluded again (AC5 negative control)");
 });
 
+// ── FAN-IN REACHABILITY, NOT EXISTENCE (tasks/gap-hasfaninmerge-all-refs-strands-exited-not-landed-tasks) ──
+// `hasFanInMerge` used `git log --all --merges --grep <id>`, which counts the TASK BRANCH ITSELF: every
+// worker runs `git merge develop` on its task branch BEFORE fan-in, producing a `Merge branch 'develop'
+// into task/<id>` merge whose message carries the task id. So a worker that reached the merge step and
+// then FAILED to land (exited-not-landed) looked permanently "fanned in" — isNotYetFlippedSkip deferred
+// it as not-yet-flipped forever (its remaining ACs are usually "全量绿" and nothing would ever run them)
+// ⇒ structurally stranded at both ends. The predicate that was always meant is REACHABILITY from the
+// integration line — the read the sibling `hasLandedImplementation` already used (`git log develop`).
+// Measured in this repo 2026-09-11: 7 ready tasks had an id-matching merge, none reachable from develop.
+
+/** The PRE-FIX read, verbatim (`git log --all --merges --grep <id>`), kept as a fixture control: it is
+ *  what "改前返回 true" means mechanically, so the AC1 red direction is asserted by EXECUTING the old
+ *  command, not by asserting it in prose. Never used by production code. */
+function legacyAllRefsHasFanInMerge(root, taskId) {
+  const out = execFileSync("git", ["-C", root, "log", "--all", "--format=%H", "--merges", "--grep", taskId], { encoding: "utf8" });
+  return out.trim().length > 0;
+}
+
+/** The REAL stranded shape (形态 A), built with real git — no mocks. `landed:false` ⇒ the task branch
+ *  carries a `Merge branch 'develop' into task/<id>` merge (the worker's pre-fan-in develop sync) and
+ *  the branch was NEVER merged back ⇒ that merge is reachable only from the task branch itself.
+ *  `landed:true` ⇒ the fan-in actually happened as an ff of develop onto the task branch (the
+ *  two-line model's landing) ⇒ the SAME merge commit becomes an ancestor of develop. One fixture,
+ *  one flag, so A and B differ by exactly the landing event and nothing else (AC4's control). */
+function makePreFanInMergeWorkspace(tag, { landed = false } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `slot-refill-prefan-${tag}-`));
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "code"), { recursive: true });
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  runGit(dir, "init", "-q");
+  runGit(dir, "config", "user.email", "t@t");
+  runGit(dir, "config", "user.name", "t");
+  // code/touched.ts exists on develop from the start ⇒ the fixture task's Touches resolve (it is NOT
+  // the branch's own landing evidence — the file is not what makes this fixture interesting).
+  fs.writeFileSync(path.join(dir, "code", "touched.ts"), "// pre-existing implementation file\n");
+  runGit(dir, "add", "-A");
+  runGit(dir, "commit", "-qm", "base");
+  runGit(dir, "branch", "-M", "develop");
+  const id = "gap-stranded";
+  // 1. the worker's task branch, forked from develop.
+  runGit(dir, "checkout", "-qb", `task/${id}`);
+  // 2. develop moves on (another task landed) — what makes the pre-fan-in merge non-trivial.
+  runGit(dir, "checkout", "-q", "develop");
+  fs.writeFileSync(path.join(dir, "code", "other.ts"), "// another task's landing\n");
+  runGit(dir, "add", "-A");
+  runGit(dir, "commit", "-qm", "other work on develop");
+  // 3. the worker syncs develop INTO its task branch — the merge commit that carries the task id and
+  //    that the pre-fix `--all` read mistook for the fan-in.
+  runGit(dir, "checkout", "-q", `task/${id}`);
+  runGit(dir, "merge", "--no-ff", "develop", "-m", `Merge branch 'develop' into task/${id}`);
+  runGit(dir, "checkout", "-q", "develop");
+  if (landed) {
+    // 4. the fan-in DID happen: ff develop onto the task branch (the two-line model's landing).
+    runGit(dir, "merge", "--ff-only", `task/${id}`);
+  }
+  return { dir, id };
+}
+
+test("FAN-IN REACHABILITY AC1 — 形态 A：任务分支上有一条 `Merge branch 'develop' into task/<id>` 且从未合回 develop，该 merge 对 --all 可见（缺陷复现：改前 hasFanInMerge 返回 true）", (t) => {
+  const { dir, id } = makePreFanInMergeWorkspace("ac1");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  // premise: the merge commit exists and its message carries the task id…
+  const merges = execFileSync("git", ["-C", dir, "log", "--all", "--format=%s", "--merges", "--grep", id], { encoding: "utf8" }).trim();
+  assert.equal(merges, `Merge branch 'develop' into task/${id}`, "fixture premise: the pre-fan-in develop-sync merge is the ONLY id-matching merge");
+  // …and the PRE-FIX read fires on it (this is the red direction AC1 names).
+  assert.equal(legacyAllRefsHasFanInMerge(dir, id), true, "改前读法（--all）对形态 A 返回 true — 缺陷复现");
+  // …while it is NOT an ancestor of develop (the branch never landed).
+  const reachable = execFileSync("git", ["-C", dir, "log", "develop", "--format=%H", "--merges", "--grep", id], { encoding: "utf8" }).trim();
+  assert.equal(reachable, "", "fixture premise: no id-matching merge is reachable from develop");
+});
+
+test("FAN-IN REACHABILITY AC3 — 修后 hasFanInMerge 对形态 A 返回 false（只数可达集成分支的 merge）", (t) => {
+  const { dir, id } = makePreFanInMergeWorkspace("ac3");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  assert.equal(hasFanInMerge(dir, id), false,
+    "a task-branch-only pre-fan-in `Merge branch 'develop' into task/<id>` is NOT fan-in evidence (AC3)");
+  // Negative control on the SAME fixture: a genuinely different id is also false (the false is not a
+  // blanket false-everything from a broken read), and the predicated id is the only difference.
+  assert.equal(hasFanInMerge(dir, "gap-nonexistent-xyz"), false);
+});
+
+test("FAN-IN REACHABILITY AC4 — 双向控制：形态 B（分支已 ff 进 develop）改前改后均返回 true，真 fan-in 未被一并判否", (t) => {
+  const { dir, id } = makePreFanInMergeWorkspace("ac4", { landed: true });
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  assert.equal(legacyAllRefsHasFanInMerge(dir, id), true, "改前读法对形态 B 返回 true（控制：形态 B 本来就是真 fan-in）");
+  assert.equal(hasFanInMerge(dir, id), true, "修后 hasFanInMerge 对形态 B 仍返回 true — 没有把真 fan-in 一并判否 (AC4)");
+  // The ONE difference between A and B is the landing: the same merge commit flips from
+  // not-reachable to reachable. Assert that directly so AC4 is not a fixture-identity claim.
+  const reachable = execFileSync("git", ["-C", dir, "log", "develop", "--format=%s", "--merges", "--grep", id], { encoding: "utf8" }).trim();
+  assert.equal(reachable, `Merge branch 'develop' into task/${id}`, "the pre-fan-in merge IS an ancestor of develop after the ff landing");
+});
+
+test("FAN-IN REACHABILITY AC2 — 集成分支由参数传入（非 develop 的集成分支可显式指定）：默认只认 develop", (t) => {
+  // A repo whose integration line is named `trunk` (NOT develop): the merge is reachable from trunk
+  // only. The DEFAULT call must not count it (the default resolves the develop line — behaviourally,
+  // not by asserting the constant's own value), and the explicit ref must.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `slot-refill-intref-`));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  for (const d of ["tasks", "code", ".quay"]) fs.mkdirSync(path.join(dir, d), { recursive: true });
+  runGit(dir, "init", "-q");
+  runGit(dir, "config", "user.email", "t@t");
+  runGit(dir, "config", "user.name", "t");
+  fs.writeFileSync(path.join(dir, "base.txt"), "base\n");
+  runGit(dir, "add", "-A");
+  runGit(dir, "commit", "-qm", "base");
+  runGit(dir, "branch", "-M", "develop");
+  const id = "gap-otherline";
+  runGit(dir, "checkout", "-qb", `task/${id}`);
+  runGit(dir, "checkout", "-q", "develop");
+  fs.writeFileSync(path.join(dir, "code", "elsewhere.ts"), "// develop work\n");
+  runGit(dir, "add", "-A");
+  runGit(dir, "commit", "-qm", "develop work");
+  runGit(dir, "checkout", "-q", `task/${id}`);
+  runGit(dir, "merge", "--no-ff", "develop", "-m", `Merge branch 'develop' into task/${id}`);
+  // the OTHER integration line: a ff-only landing on `trunk`, leaving develop behind.
+  runGit(dir, "checkout", "-q", "develop");
+  runGit(dir, "branch", "trunk");
+  runGit(dir, "checkout", "-q", "trunk");
+  runGit(dir, "merge", "--ff-only", `task/${id}`);
+  runGit(dir, "checkout", "-q", "develop");
+
+  assert.equal(hasFanInMerge(dir, id), false, "默认（develop）不把只落在别的集成分支上的 merge 算作 fan-in (AC2)");
+  assert.equal(hasFanInMerge(dir, id, "trunk"), true, "显式传入集成分支 ⇒ 该线上的 merge 被认作 fan-in (AC2)");
+  // The default is the develop line specifically — the two calls above differ ONLY by the ref, which
+  // is why the parameter (not a second hardcoded literal) is the mechanism.
+  assert.equal(isNotYetFlippedSkip({ id, body: fannedInBody(4, 5), root: dir, excludedNyfIds: new Set() }), false,
+    "isNotYetFlippedSkip 默认读 develop ⇒ 形态（只落在 trunk）不判 not-yet-flipped");
+  assert.equal(isNotYetFlippedSkip({ id, body: fannedInBody(4, 5), root: dir, excludedNyfIds: new Set(), integrationRef: "trunk" }), true,
+    "isNotYetFlippedSkip 接受同一个参数并透传 ⇒ trunk 上的落地被认作已 fan-in (AC2/AC5 参数链)");
+});
+
+test("FAN-IN REACHABILITY AC5 — isNotYetFlippedSkip 对形态 A 返回 false、对形态 B（AC 全勾）返回 true", (t) => {
+  const a = makePreFanInMergeWorkspace("ac5a");
+  const b = makePreFanInMergeWorkspace("ac5b", { landed: true });
+  t.after(() => { fs.rmSync(a.dir, { recursive: true, force: true }); fs.rmSync(b.dir, { recursive: true, force: true }); });
+  // 形態 A: 7/8 ACs (>50%) — under the pre-fix read this was `true` (deferred forever, the strand).
+  assert.equal(isNotYetFlippedSkip({ id: a.id, body: fannedInBody(7, 8), root: a.dir, excludedNyfIds: new Set() }), false,
+    "形态 A（merge 不可达 develop）⇒ 不判 not-yet-flipped ⇒ 可派发 (AC5)");
+  // 形态 B: all ACs checked, work really landed ⇒ deferred (not re-dispatched).
+  assert.equal(isNotYetFlippedSkip({ id: b.id, body: fannedInBody(3, 3), root: b.dir, excludedNyfIds: new Set() }), true,
+    "形态 B（已 ff 进 develop）⇒ 判 not-yet-flipped ⇒ 不重复派发 (AC5)");
+  // Same fixture family, AC-completeness arm unchanged (the fix touches reachability only).
+  assert.equal(isNotYetFlippedSkip({ id: b.id, body: fannedInBody(1, 3), root: b.dir, excludedNyfIds: new Set() }), false,
+    "形态 B 但 AC 仅 1/3 ⇒ 仍是 stuck-work，可派发（AC 闸未被本次修法改动）");
+});
+
+test("FAN-IN REACHABILITY AC5-consumer — 端到端：形态 A 的任务重新进入 recommended（不再被 step-4 判 not-yet-flipped）", (t) => {
+  const { dir, id } = makePreFanInMergeWorkspace("consumer");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  writeTask(dir, id, { status: "ready", labels: ["gap"], body: fannedInBody(7, 8) });
+  const r = analyzeSlotRefill({ tasksDir: path.join(dir, "tasks"), root: dir, cap: 3 });
+  const nyf = r.deferred.filter((d) => d.id === id && d.reason === "not-yet-flipped");
+  assert.deepEqual(nyf, [], "形态 A 的任务不再被 deferred as not-yet-flipped（AC3 在消费者层的读数）");
+  assert.ok(r.recommended.includes(id), "形态 A 的任务重新进入 recommended ⇒ 结构性搁浅解除 (AC5)");
+});
+
 // ── LANDED-IMPLEMENTATION (tasks/gap-slot-refill-recommends-landed-code-complete-tasks) ──────────────
 // slot-refill's recommended used to PERMANENTLY include tasks whose IMPLEMENTATION is already in the
 // tree — a develop commit whose message contains the task id AND changed files outside tasks/ — but

@@ -87,6 +87,7 @@ import {
   readTaskStatusAtRef,
   prosePrereqRefs,
   prosePrereqGap,
+  declaresPrereq,
   PREREQ_KEYWORD_RE,
 } from "../scripts/ready-pool-check.ts";
 import { INFLIGHT_WORKTREE_STALE_MS } from "../scripts/concurrent-batch-scheduler.ts";
@@ -2989,7 +2990,15 @@ test("applyPromotions: a delivery-critical todo enters ready WITH its label (AC1
   assert.ok(task.labels.includes("delivery-critical"), "the label is in the frontmatter at ready-entry (标签与 ready 同现)");
 });
 
-test("applyPromotions: a delivery-critical todo WITHOUT goal_ac is NOT promoted (立案时必填 fail-closed)", (t) => {
+// ── GOAL LAYER IS NOT AN ADMISSION INPUT (人 2026-09-11 裁定) ──────────────────────────────────────
+// The removed `goalAcMissing` conjunct made a delivery-critical todo WITHOUT `goal_ac` structurally
+// unpromotable (a zombie). The admission set is decided ONLY by the task's own self-sufficient
+// properties; the goal-layer half of the same rule lives in
+// long-term-guarantee-goal-backed-check.ts (per-round re-evaluation, WITH an activation line that
+// grandfathers the pre-cutoff stock — the admission gate had no such line, which is why the
+// half-patched simulation produced the zombie). Invariant is mechanically guarded by
+// plugin/scripts/eligible-no-goal-source-check.ts.
+test("applyPromotions: a delivery-critical todo WITHOUT goal_ac IS promoted (goal layer is not an admission input)", (t) => {
   const root = makeWorkspace("apply-dc-no-goal-ac");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
@@ -2998,11 +3007,115 @@ test("applyPromotions: a delivery-critical todo WITHOUT goal_ac is NOT promoted 
 
   const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 };
   const r = applyPromotions(opts);
-  assert.equal(r.should_apply, false, "no eligible candidate ⇒ nothing to apply");
-  assert.equal(r.applied_promotions.length, 0, "delivery-critical without goal_ac is never promoted");
+  assert.equal(r.should_apply, true, "a self-sufficient candidate is eligible regardless of goal_ac");
+  assert.equal(r.applied_promotions.length, 1);
+  assert.equal(r.applied_promotions[0].id, "gap-crit");
+  assert.equal(
+    r.applied_promotions[0].deliveryCritical,
+    true,
+    "the label is still a TASK-layer fact (co-occurs with ready) — it just is not an admission term",
+  );
 
   const task = parseTask(fs.readFileSync(path.join(root, "tasks", "gap-crit.md"), "utf8"));
-  assert.match(task.frontmatterRaw, /^status:\s*todo$/m, "status stays todo — filing-time gate holds");
+  assert.match(task.frontmatterRaw, /^status:\s*ready$/m, "status flipped todo→ready — no goal-layer admission term");
+  assert.ok(task.labels.includes("delivery-critical"), "the label is in the frontmatter at ready-entry");
+});
+
+test("buildTargetedPromotion: a delivery-critical todo WITHOUT goal_ac is targeted-promotable (both paths agree)", (t) => {
+  const root = makeWorkspace("targeted-dc-no-goal-ac");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(root, "code", "crit.ts"), "export const crit = 1;\n");
+  const body = fourArtifactBody({ touches: ["- code/crit.ts", "- tasks/gap-crit.md"] });
+  writeTask(root, "gap-crit", { status: "todo", labels: ["gap", "delivery-critical"], body });
+  const raw = fs.readFileSync(path.join(root, "tasks", "gap-crit.md"), "utf8");
+  // parseTask carries the body/frontmatter; `id` and `status` are supplied by the caller (the
+  // analyzeTasks map does the same — same fixture shape as the AC1 bulk-gate test above).
+  const task = { ...parseTask(raw), id: "gap-crit", status: "todo" };
+
+  const r = buildTargetedPromotion("gap-crit", task, root, new Map([["gap-crit", task]]), "develop");
+  assert.equal(r.eligible, true, "the targeted path must not carry a goal-layer admission term either");
+  assert.equal(r.checks.goalAcMissing, undefined, "the removed check field is not re-introduced");
+});
+
+test("READY-POOL candidate: no goal-source field on the candidate (the removed goalAcMissing is gone, not renamed)", (t) => {
+  const root = makeWorkspace("no-goal-field");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-crit", gapTask("gap-crit", { labels: ["gap", "delivery-critical"] }));
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  const c = r.candidates.find((x) => x.id === "gap-crit");
+  assert.ok(c, "the candidate is in the pool report");
+  assert.equal(c.eligible, true, "delivery-critical + no goal_ac is promotion-eligible");
+  const goalish = Object.keys(c).filter((k) => /goal/i.test(k));
+  assert.deepEqual(goalish, [], `no goal-source field may appear on the candidate (found: ${goalish.join(",")})`);
+});
+
+// ── eligible-no-goal-source-check: the anti-regression invariant + bidirectional negative control ──
+// AC3 (gap-promotion-admission-reads-goal-layer-field): the checker must be able to take the value
+// FALSE (injected fixture ⇒ exit non-zero), must be GREEN on this repo (exit 0), and must give
+// "cannot read the input" an INDEPENDENT value (NOT-EVALUATED / exit 3) — never the same shape as
+// "compliant" (硬规则③b). All three exit codes are asserted from REAL runs of the script.
+function runGoalSourceCheck(args) {
+  const script = path.resolve(__dirname, "..", "scripts", "eligible-no-goal-source-check.ts");
+  try {
+    return { code: 0, out: execFileSync(process.execPath, ["--no-warnings", "--experimental-strip-types", script, ...args], { encoding: "utf8" }) };
+  } catch (e) {
+    return { code: e.status ?? 1, out: `${e.stdout ?? ""}${e.stderr ?? ""}` };
+  }
+}
+
+test("eligible-no-goal-source-check: real repo GREEN (exit 0) ∧ injected goal-source fixture RED (exit 1)", () => {
+  const pass = runGoalSourceCheck([]);
+  assert.equal(pass.code, 0, `the anti-regression invariant must hold on this repo — got: ${pass.out}`);
+  assert.match(pass.out, /^PASS:/m, "a green run says PASS");
+
+  const injected = runGoalSourceCheck(["--inject-goal-source-fixture"]);
+  assert.notEqual(injected.code, 0, "the injected fixture MUST be judged non-zero — the checker has to be able to take the value false");
+  assert.equal(injected.code, 1, "the injected fixture is a FAIL (exit 1), not a usage/NOT-EVALUATED code");
+  assert.match(injected.out, /^FAIL:/m, "the injected fixture says FAIL");
+  assert.match(injected.out, /goalAcMissing|goal/i, "the fired control names the goal-source token it detected");
+});
+
+test("eligible-no-goal-source-check: 读不懂输入 gets an INDEPENDENT value — NOT-EVALUATED / exit 3, never PASS", (t) => {
+  const root = makeWorkspace("egs-not-evaluated");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  // (a) unreadable source
+  const missing = runGoalSourceCheck(["--source", path.join(root, "does-not-exist.ts")]);
+  assert.equal(missing.code, 3, "an unreadable judged source is NOT-EVALUATED, distinct from PASS");
+  assert.match(missing.out, /^NOT-EVALUATED:/m);
+
+  // (b) readable but with NO `eligible` membership expression — the extractor found nothing, so it
+  // must NOT report "compliant" (the comment-only mention below is deliberately NOT a site: 位置判定).
+  const noSite = path.join(root, "no-membership-site.ts");
+  fs.writeFileSync(noSite, "const promoted = four && deps;\n// eligible: not here any more\n");
+  const empty = runGoalSourceCheck(["--source", noSite]);
+  assert.equal(empty.code, 3, "no membership expression ⇒ NOT-EVALUATED, never PASS");
+  assert.match(empty.out, /^NOT-EVALUATED:/m);
+});
+
+test("eligible-no-goal-source-check: 位置判定 — a goal token only in a COMMENT or STRING is not a hit", (t) => {
+  const root = makeWorkspace("egs-positional");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const commented = path.join(root, "commented.ts");
+  fs.writeFileSync(
+    commented,
+    [
+      "// eligible: deps && goalAcMissing  (this comment must NOT count)",
+      "const eligible = deps && !superseded;",
+      'const reason = "eligible: goal_ac missing";',
+      "",
+    ].join("\n"),
+  );
+  const r = runGoalSourceCheck(["--source", commented]);
+  assert.equal(r.code, 0, `a mention in a comment/string must not be a hit — got: ${r.out}`);
+  assert.match(r.out, /^PASS:/m);
+
+  // …and the SAME file, with the token moved into the live expression, is red.
+  const live = path.join(root, "live.ts");
+  fs.writeFileSync(live, "const eligible = deps && !goalAcMissing;\n");
+  const bad = runGoalSourceCheck(["--source", live]);
+  assert.equal(bad.code, 1, "the same token on the LIVE surface is a hit");
 });
 
 test("applyPromotions: a non-delivery-critical candidate is promoted WITHOUT the label (AC1 negative control)", (t) => {
@@ -3876,6 +3989,154 @@ test("backtick-cited prose prereqs fully covered by depends_on ⇒ prosePrereqGa
   const fm = raw.match(/^---\n([\s\S]*?)\n---/)[1];
   const bodyOnly = raw.slice(raw.indexOf("\n\n") + 2);
   assert.deepEqual(prosePrereqGap(bodyOnly, fm, path.join(root, "tasks")), [], "edges cover the prose prereqs ⇒ no gap");
+});
+
+// ── prose-prereq SCOPE + POLARITY (gap-prose-prereq-negation-blind-and-paragraph-scoped) ──────────
+// The detector above scoped the keyword→id association to the whole PARAGRAPH and tested the keyword
+// with a bare `test()` — so one keyword occurrence claimed every id in the paragraph, and an
+// explicitly DENYING sentence was read as a declaring one. Two production tasks stalled at todo on
+// exactly this (one of them the only fix for a deterministic full-suite red), because `quay-file-task`
+// ORDERS a dedup backlink to the related-but-distinct ids and such a paragraph routinely says
+// "⛔ 不另立 depends_on 边" / "⛔ 不作为本任务的阻塞". AC1 reproduces both verbatim.
+
+/** The two production trigger paragraphs, verbatim (git: gap-outer-retirement-… line 55 at
+ *  3d5dd27967c61e9ab6d36568d1b38c2f49a008eb; gap-ac240-… line 43 at ee8b99648). The ids they cite
+ *  must exist as fixture tasks for the resolution filter to keep them. */
+const SAMPLE_1_DENYING_PARA =
+  "**⚠️ 这是今晚第三条同形缺陷**（记为观察项，⛔ 不作为本任务的阻塞）：`gap-git-graph-lane-colour-assertion-assumes-contiguous-columns`（断言强于渲染器承诺的不变量）、`gap-shipped-entry-test-treats-every-shebang-plugin-script-as-entry`（枚举面强于「入口」的真实定义）、本条（把一次快照当不变量）。三条都是**测试断言强于机制承诺**，且三条都是在别人的 fan-in 里以「无关红」的形态显形。若后续再出现，应考虑造一个针对该形态的检测器而非逐条修。";
+const SAMPLE_1_GENUINE_PARA =
+  "**⇒ 它正在烧每一次 fan-in**：上述 fan-in 已因此失败一次，该任务退回 ready 等重试；而它是 `gap-ac203-record-lacks-build-sha-makes-ac214-permanently-unsatisfiable` 的前置 ⇒ **AC-214 这条链整体被挡住**。";
+const SAMPLE_2_PARA =
+  "**相关但机制不同的既有任务（均不覆盖本条，⛔ 不重复立案）**：`gap-third-party-evidence-no-transport-to-driving-repo-carrier`（done，回传层）、`gap-cross-host-evidence-run-incomplete-and-step-order-makes-ac234-unsatisfiable`（done，步骤顺序/flag/远端 stdout）、`gap-ac214-freshness-anchor-build-sha-missing-on-203-205-207`（done，新鲜度锚）。同文件还有两条在飞任务（`gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit` ready、`gap-aged-project-post-upgrade-driver-e2e` todo）——Touches 重叠由派发锁串行化，⛔ 不另立 depends_on 边（它们不改变「配对」这一性质）。";
+const SAMPLE_IDS = [
+  "gap-git-graph-lane-colour-assertion-assumes-contiguous-columns",
+  "gap-shipped-entry-test-treats-every-shebang-plugin-script-as-entry",
+  "gap-third-party-evidence-no-transport-to-driving-repo-carrier",
+  "gap-cross-host-evidence-run-incomplete-and-step-order-makes-ac234-unsatisfiable",
+  "gap-ac214-freshness-anchor-build-sha-missing-on-203-205-207",
+  "gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit",
+  "gap-aged-project-post-upgrade-driver-e2e",
+  "gap-ac203-record-lacks-build-sha-makes-ac214-permanently-unsatisfiable",
+];
+
+test("AC1 — the two production deny-paragraphs no longer harvest ids; the genuine 前置 paragraph still does", (t) => {
+  const root = makeWorkspace("prereq-samples");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const id of SAMPLE_IDS) writeTask(root, id, { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  const tasksDir = path.join(root, "tasks");
+  // Sample 1 paragraph alone: pre-fix 2 ids (⛔ 不作为本任务的阻塞 harvested both). The paragraph is
+  // one sentence carrying the DENIAL and both ids, so only polarity — not scope — can drop them.
+  assert.deepEqual(prosePrereqRefs(SAMPLE_1_DENYING_PARA, tasksDir), [], "⛔ 不作为本任务的阻塞 denies — neither id is a prereq");
+  // Sample 2 paragraph alone: pre-fix 5 ids, and NOT ONE line in it carries both a keyword and an id
+  // (the only keyword hit is `depends_on` inside ⛔ 不另立 depends_on 边; the 3 ids of the first
+  // sentence come from a sentence with no keyword at all — scope drops those, polarity the last two).
+  assert.deepEqual(prosePrereqRefs(SAMPLE_2_PARA, tasksDir), [], "dedup backlink + ⛔ 不另立 depends_on 边 ⇒ no prereq refs");
+  // The genuine 前置 sentence in the same production task is NOT collateral damage:
+  assert.deepEqual(
+    prosePrereqRefs(SAMPLE_1_GENUINE_PARA, tasksDir),
+    ["gap-ac203-record-lacks-build-sha-makes-ac214-permanently-unsatisfiable"],
+    "「它是 `X` 的前置」 is still a prereq declaration",
+  );
+});
+
+test("AC2 — keyword→id association is SENTENCE-scoped, both directions (能取假)", (t) => {
+  const root = makeWorkspace("prereq-scope");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-para-same-sentence", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-para-other-sentence", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  // ① keyword and id in the SAME sentence ⇒ still a prereq. ② keyword and id in the same PARAGRAPH
+  // (single newlines, no blank line) but DIFFERENT sentences ⇒ NOT a prereq.
+  const body = [
+    "**Do not dispatch until** `gap-para-same-sentence` lands.",
+    "**Do not dispatch until** the full suite is green.",
+    "`gap-para-other-sentence` 只是同段的举例引用，与本条不相干。",
+  ].join("\n");
+  const refs = prosePrereqRefs(body, path.join(root, "tasks"));
+  assert.equal(refs.includes("gap-para-same-sentence"), true, "① same-sentence id is a prereq ref");
+  assert.equal(refs.includes("gap-para-other-sentence"), false, "② same-paragraph different-sentence id is NOT");
+  // ② 取假：the same paragraph with the id moved INTO the keyword sentence flips it back.
+  const flipped = "**Do not dispatch until** `gap-para-other-sentence` lands.";
+  assert.deepEqual(prosePrereqRefs(flipped, path.join(root, "tasks")), ["gap-para-other-sentence"], "② flipping the scope back re-arms the ref");
+});
+
+test("AC3 — an explicitly NEGATED keyword declares nothing; removing the negation re-arms it (能取假)", (t) => {
+  const root = makeWorkspace("prereq-negation");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-neg-a", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-neg-b", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  const tasksDir = path.join(root, "tasks");
+  // ① the denial ⇒ not a prereq (⛔ 不作为本任务的阻塞 is sample 1's real wording; ⛔ 不另立 depends_on 边
+  //    is sample 2's). The second is asserted at the polarity layer directly, because `另立` alone would
+  //    also be caught by the sibling guard — declaresPrereq must say NO on its own.
+  assert.deepEqual(prosePrereqRefs("⛔ 不作为本任务的阻塞：`gap-neg-a`。", tasksDir), [], "① denial ⇒ not a prereq");
+  assert.equal(declaresPrereq("⛔ 不另立 depends_on 边：`gap-neg-b`"), false, "① ⛔ 不另立 depends_on 边 denies at the polarity layer");
+  // ② 取假：drop the negation word ⇒ the same sentence declares again.
+  assert.deepEqual(prosePrereqRefs("依赖 `gap-neg-a` 先落地。", tasksDir), ["gap-neg-a"], "② 「依赖 `gap-neg-a` 先落地」 re-arms it");
+  assert.equal(declaresPrereq("阻塞复核：`gap-neg-a` 仍未落 develop。"), true, "② 阻塞 without a negation marker declares");
+});
+
+test("AC3b — the negation guard is LOCAL: unrelated 不 does not disarm a genuine declaration", () => {
+  // Negation is judged on the window IMMEDIATELY before the keyword occurrence, so:
+  assert.equal(declaresPrereq("不得派发"), true, "the negation inside the keyword 不得派发 is NOT a negation OF it");
+  assert.equal(declaresPrereq("⛔ 不要跳过：前置任务 `gap-x`"), true, "a marker in an earlier clause does not disarm the keyword");
+  assert.equal(declaresPrereq("不得不先完成 `gap-x`"), true, "the idiom 不得不 is an affirmative obligation, not a negation");
+  assert.equal(declaresPrereq("do not dispatch until `gap-x` lands"), true, "the English keyword keeps its own `not`");
+  // …and the denials it must catch:
+  assert.equal(declaresPrereq("非前置声明"), false, "非 + 前置 is a denial");
+  assert.equal(declaresPrereq("无需前置"), false, "无需 + 前置 is a denial");
+  assert.equal(declaresPrereq("不作为本任务的阻塞"), false, "不作为…的 + 阻塞 is a denial");
+});
+
+test("AC4 — a paragraph OPENED with <!-- dedup-ref --> is traceability, not a prereq claim (能取假)", (t) => {
+  const root = makeWorkspace("prereq-dedupref");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const id of ["gap-dd-a", "gap-dd-b", "gap-dd-c"]) writeTask(root, id, { status: "done", labels: ["gap"], body: fourArtifactBody() });
+  const tasksDir = path.join(root, "tasks");
+  const backlink = "前置追溯：`gap-dd-a`、`gap-dd-b`、`gap-dd-c`（与本条机制不同，仅作查重追溯）。";
+  // ② without the marker the paragraph still declares (so the fixture is not vacuously empty):
+  assert.deepEqual(
+    prosePrereqRefs(backlink, tasksDir).slice().sort(),
+    ["gap-dd-a", "gap-dd-b", "gap-dd-c"],
+    "without the marker all three ids are harvested",
+  );
+  // ① with the marker the whole paragraph is exempt:
+  assert.deepEqual(prosePrereqRefs(`<!-- dedup-ref --> ${backlink}`, tasksDir), [], "the marker exempts the paragraph wholesale");
+  // and the exemption is anchored at the paragraph START — a task merely quoting the marker mid-sentence
+  // (e.g. this task's own AC4) does not accidentally exempt the paragraph it quotes it in:
+  assert.deepEqual(
+    prosePrereqRefs(`${backlink} 见 \`<!-- dedup-ref -->\` 约定。`, tasksDir).slice().sort(),
+    ["gap-dd-a", "gap-dd-b", "gap-dd-c"],
+    "a mid-sentence QUOTE of the marker does not exempt",
+  );
+});
+
+test("AC6 negative control — a GENUINE prose prereq with no edge is STILL caught and still blocks promotion", (t) => {
+  const root = makeWorkspace("prereq-ac6");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-real-prereq", { status: "todo", labels: ["gap"], body: fourArtifactBody() });
+  const genuineBody = [
+    "**type:** execution",
+    "## Proposal",
+    "A real proposal paragraph that is definitely more than forty non-whitespace chars.",
+    "前序任务 `gap-real-prereq` 先落地，之后本任务才可派发。",
+    "## Contract",
+    "measure   ready_pool = `node plugin/scripts/ready-pool-check.ts` stdout 的 pool 字段",
+    "band      ready_pool = true",
+    "invoke    `node plugin/scripts/ready-pool-check.ts`",
+    "control   ok",
+    "resume    前置 done 后再 dispatch",
+    "## Acceptance Criteria",
+    "- [ ] an AC item that is long enough to count as a real acceptance criterion box",
+    "## Definition of Done",
+    "standard DoD — the five clauses; meta-enforcer fixture-pinned, definitely long enough content.",
+  ].join("\n");
+  writeTask(root, "gap-ac6-cand", { status: "todo", labels: ["gap"], parent: null, children: [], body: withSelfTouch(genuineBody, "gap-ac6-cand") });
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1, targetedId: "gap-ac6-cand" });
+  assert.deepEqual(r.targeted_promotion.checks.prosePrereqGap, ["gap-real-prereq"], "a real same-sentence 前序 prereq is still detected");
+  assert.equal(r.targeted_promotion.eligible, false, "…and the task is still not eligible (no widening into 恒绿)");
+  const cand = r.candidates.find((c) => c.id === "gap-ac6-cand");
+  assert.equal(cand.eligible, false, "bulk promotion rejects it too");
+  assert.deepEqual(cand.prosePrereqGap, ["gap-real-prereq"]);
 });
 
 // ── AC46 — pool-layer static criteria into the todo→ready gate + ready↔todo revaluation executor ──

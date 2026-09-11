@@ -151,6 +151,10 @@ import { suiteLockBase, suiteLockSlotPaths } from "../scripts/suite-lock-slots.t
 import { advanceRetryCap, markNeedsHuman, RETRY_CAP_DEFAULT, applyTaskFilters, makeFilterContext } from "../scripts/driver-filters.ts";
 import { advanceRetryCap as promoAdvanceRetryCap, markNeedsHuman as promoMarkNeedsHuman, MAX_FIX_RETRIES_DEFAULT } from "../scripts/promotion-driver.ts";
 import { bundleEntries } from "../../packages/quay/scripts/build-plugin-dist.mjs";
+// gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing: the AC4 e2e drives the REAL
+// mechanical fan-in on a third-party-shaped repo, before and after `quay init` establishes the
+// landing baseline.
+import { ensureBranchModel } from "../../packages/quay/src/branch-model.ts";
 
 import {
   DRIVER,
@@ -2582,4 +2586,116 @@ test("shipped 自包含 — bundle worker-driver.js 放 node_modules 下真 impo
   const gateEvents = fs.readFileSync(path.join(repo, ".quay", "gate-events.jsonl"), "utf8")
     .trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
   assert.ok(gateEvents.some((e) => e.gate === "complete" && e.verdict === "pass"), "gate-events.jsonl 有 complete 记录");
+});
+
+// ── landing-baseline e2e (gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing) ──
+// The AC-239 failure reproduced and then FIXED through the real driver path: a third-party project
+// whose own `develop` is an ancient fork of `main`, and a task that is IMPLEMENTED CORRECTLY.
+// Before the fix the mechanical fan-in reports the baseline's shape as the task's drift; after
+// `quay init` establishes the landing baseline, the same task LANDS.
+const TP3_TASK = "gap-3p-baseline";
+
+function tpTaskBody() {
+  return [
+    "---",
+    `id: ${TP3_TASK}`,
+    "title: third-party landing-baseline e2e",
+    "status: ready",
+    "labels: []",
+    "extra: {}",
+    "---",
+    "## Proposal",
+    "test",
+    "## Plan",
+    "test",
+    "## Touches",
+    "- src/feature.txt",
+    `- tasks/${TP3_TASK}.md`,
+    "## Acceptance Criteria",
+    "- [x] AC1 landed",
+    "## Definition of Done",
+    "- [x] landed",
+    "",
+  ].join("\n");
+}
+
+/** mainline `main` + a `develop` forked 3 commits back that was never merged forward. */
+function makeThirdPartyFanInRepo() {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "wd-3p-"));
+  const repo = path.join(base, "repo");
+  fs.mkdirSync(path.join(repo, "src"), { recursive: true });
+  runGit(repo, ["init", "-q", "-b", "main"]);
+  runGit(repo, ["config", "user.name", "3p-test"]);
+  runGit(repo, ["config", "user.email", "3p@example.com"]);
+  for (let i = 1; i <= 5; i++) {
+    fs.writeFileSync(path.join(repo, `src/m${i}.txt`), `${i}\n`);
+    runGit(repo, ["add", "-A"]);
+    runGit(repo, ["commit", "-q", "-m", `mainline ${i}`]);
+  }
+  runGit(repo, ["checkout", "-q", "-b", "develop", "main~3"]);
+  fs.writeFileSync(path.join(repo, "src/legacy.txt"), "ancient\n");
+  runGit(repo, ["add", "-A"]);
+  runGit(repo, ["commit", "-q", "-m", "ancient develop work (2025)"]);
+  runGit(repo, ["checkout", "-q", "main"]);
+  fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "tasks", `${TP3_TASK}.md`), tpTaskBody(), "utf8");
+  runGit(repo, ["add", "-A"]);
+  runGit(repo, ["commit", "-q", "-m", `task file: ${TP3_TASK}`]);
+  return { base, repo, worktree: path.join(base, "wt") };
+}
+
+function tpFanInArgs({ repo, worktree, base, runId }) {
+  return {
+    task: TP3_TASK, worktree, root: repo, runId, mergeTarget: "develop", forceSuite: true,
+    scriptsDir: SCRIPTS_DIR, ffMergeModule: FF_MERGE_MODULE,
+    slotBase: path.join(base, "full-suite.lock"), slotLib: SLOT_LIB,
+    silenceMs: 5000, suiteCapture: path.join(base, "suite.env"),
+    suiteLogFile: path.join(base, "suite.log"),
+    suiteCommand: ["bash", "-c", "exit 0"],
+    scopedGateCommand: ["bash", "-c", "exit 0"],
+    docCheckCommand: ["true"],
+  };
+}
+
+/** Fork the task worktree from `fromRef` and implement ONE declared file — a correct task. */
+function addCorrectTaskCommit(repo, worktree, fromRef) {
+  runGit(repo, ["worktree", "add", worktree, "-b", `task/${TP3_TASK}`, fromRef]);
+  fs.writeFileSync(path.join(worktree, "src", "feature.txt"), "feature\n");
+  runGit(worktree, ["add", "-A"]);
+  runGit(worktree, ["commit", "-q", "-m", "implement feature"]);
+}
+
+test("AC1 (取假): a FOREIGN develop makes a CORRECT task fail anti-drift — and the cause is the baseline", async (t) => {
+  const { base, repo, worktree } = makeThirdPartyFanInRepo();
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  // no branch-model provisioning: fork from main, i.e. the only usable line (the AC-239 shape)
+  addCorrectTaskCommit(repo, worktree, "main");
+
+  const r = await runMechanicalFanIn(tpFanInArgs({ repo, worktree, base, runId: "3p-red-1" }));
+  assert.equal(r.outcome, "red", `expected red, got landed=${r.landedSha}`);
+  assert.equal(r.step, "anti-drift");
+  assert.match(r.reason, /BASELINE-MISMATCH/, "the cause must be the BASELINE, not the task's Touches");
+  assert.match(r.reason, /not a continuation of the project's default branch/);
+  // The old reading blamed the task with an unattributable count ("1566 violation(s)"). The count
+  // must be GONE, not merely accompanied.
+  assert.doesNotMatch(r.reason, /violation\(s\)/, "the misleading violation count must not survive a baseline defect");
+});
+
+test("AC4 (端到端负控制): after `quay init` establishes the baseline, the SAME task LANDS", async (t) => {
+  const { base, repo, worktree } = makeThirdPartyFanInRepo();
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  // the fix: quay init establishes quay's branch model in the target project
+  const report = ensureBranchModel(repo, { adopt: true });
+  assert.equal(report.ok, true);
+  assert.equal(report.entries.find((e) => e.role === "landing-baseline").action, "adopted");
+  // re-dispatch: the task now forks the NEW develop (which continues the mainline)
+  addCorrectTaskCommit(repo, worktree, "develop");
+
+  const r = await runMechanicalFanIn(tpFanInArgs({ repo, worktree, base, runId: "3p-green-1" }));
+  assert.equal(r.outcome, "landed", `expected landed, got red step=${r.step} reason=${r.reason}`);
+  assert.ok(r.landedSha, "landedSha recorded");
+  const landed = runGit(repo, ["show", `develop:tasks/${TP3_TASK}.md`]);
+  assert.match(landed, /status: done/, "the task really landed on the branch the mechanism reads");
+  // and the pre-quay tip is preserved rather than destroyed
+  assert.ok(runGit(repo, ["branch", "--list", "develop-pre-quay-init-*"]).trim().length > 0, "old develop preserved");
 });
