@@ -156,7 +156,25 @@ echo "Delivery form measured: ${LOOSE_SH_COUNT} loose .sh staged | consumer-faci
 echo "Building the plugin's bundled dist entrypoints (scripts/dist/*.js + gate-scripts/dist/*.js)..."
 node "${SCRIPT_DIR}/build-plugin-dist.mjs" "${PLUGIN_DEST}"
 echo "Removing raw plugin .ts from the staged artifact (bundled/inlined into dist/*.js)..."
-find "${PLUGIN_DEST}/scripts" "${PLUGIN_DEST}/gate-scripts" -name '*.ts' -delete
+# ⛔ NOT a blanket `-name '*.ts' -delete`: that is a FORM match, and one file in plugin/scripts/ is a
+# .ts only in NAME. `runner-static-gate.ts` is the static-check REGISTRY — a BASH library that
+# scripts/test.sh sources in the dev tree, deliberately named `.ts` so the annotation parsers see it,
+# and NOT a bundle entry (esbuild on a bash file is a syntax error, so no dist/<name>.js exists).
+# Deleting it took the registry out of every install layout ⇒ `select-static-checks-for-touches
+# --classify-delta` had no registry to read and exited 2 ⇒ the fan-in suite-certificate gate could
+# never judge a non-empty delta (the whole class: gap-ff-merge-suite-cert-classifier-unshipped-and-
+# misreported). The shipped artifact is the only place a third-party project's cert gate can read it
+# from, so it ships VERBATIM (a data/library file, not a module).
+# ⛔ Adding another non-module `.ts` here is a deliberate act: name it in the exclusion AND say why.
+find "${PLUGIN_DEST}/scripts" "${PLUGIN_DEST}/gate-scripts" -name '*.ts' ! -name 'runner-static-gate.ts' -delete
+# Fail closed on a future edit that re-broadens the delete (the defect above was silent for exactly
+# one packaging surface — the stage step — and no gate looked at it).
+if [ ! -f "${PLUGIN_DEST}/scripts/runner-static-gate.ts" ]; then
+  echo "ERROR: the static-check registry (plugin/scripts/runner-static-gate.ts) is missing from the staged artifact." >&2
+  echo "       select-static-checks-for-touches --classify-delta reads it; without it the fan-in suite-certificate gate cannot judge a non-empty delta." >&2
+  exit 1
+fi
+echo "Kept (non-module .ts, read as data): plugin/scripts/runner-static-gate.ts (the static-check registry)"
 echo "Rewriting staged invokers (docs/.sh/quay-init) to reference the dist bundles..."
 node "${SCRIPT_DIR}/build-plugin-dist.mjs" --rewrite "${PLUGIN_DEST}"
 echo "Staged: ${PLUGIN_DEST} ($(find "${PLUGIN_DEST}" -type f | wc -l) files)"

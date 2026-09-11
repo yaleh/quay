@@ -206,9 +206,13 @@ function cleanTreeCheck(args: FfMergeArgs, root: string): { ok: boolean; stderrL
     }
     if (benignOk && benignPaths.length > 0) {
       const scriptsDir = scriptsDirOf(args) ?? "";
-      const touchesScript = path.join(scriptsDir, "touches-orthogonality-check.ts");
-      const verdict = sh(["node", "--experimental-strip-types", touchesScript, "--runtime-dirty", "--task", args.task, "--root", root, ...benignPaths]);
-      if (verdict.status !== 0 || !verdict.stdout.trim().startsWith("BENIGN")) benignOk = false;
+      const touchesArgv = siblingScriptArgv(scriptsDir, "touches-orthogonality-check.ts");
+      // unresolvable ⇒ benignOk stays false (fail-closed to "working tree not clean") — the honest
+      // reading: the judge could not run, so the tree is not certified benign.
+      const verdict = touchesArgv
+        ? sh([...touchesArgv, "--runtime-dirty", "--task", args.task, "--root", root, ...benignPaths])
+        : null;
+      if (!verdict || verdict.status !== 0 || !verdict.stdout.trim().startsWith("BENIGN")) benignOk = false;
       else {
         stderrLines.push(`fan-in-ff-merge: passed through a benign runtime-dirty tree (untracked .quay/ runtime files outside the task's ## Touches) — ${benignPaths.join(" ")}`);
         porcelain = "";
@@ -226,9 +230,91 @@ function cleanTreeCheck(args: FfMergeArgs, root: string): { ok: boolean; stderrL
   return { ok: true, stderrLines };
 }
 
+// ── kernel-sibling resolution (dev tree .ts / shipped dist bundle) ───────────────────────────────────
+// gap-ff-merge-suite-cert-classifier-unshipped-and-misreported: this file spawned its sibling scripts
+// as `path.join(scriptsDir, "<name>.ts")` + `--experimental-strip-types`. That resolves in a DEV TREE
+// only. The npm-pack artifact DELETES the raw plugin `.ts` (the shipped form of a TS module is its
+// bundle `dist/<name>.js`, gap-shipped-ts-files-are-not-bundled), so in ANY install layout the spawn
+// died with `Cannot find module` — and `scriptsDir` IS a shipped-layout dir in production
+// (worker-driver passes `resolveKernelScriptsDir()` = the dir of the bundled kernel, `…/scripts/dist`).
+// Resolve BOTH forms, exactly as the kernel does (`driver-runtime.ts:resolveKernelSibling`) and Core
+// does (`plugin-root.ts:resolvePluginScriptExec`) — never a bare `.ts` join.
+
+/** Resolve a sibling orchestration script under `scriptsDir` to its RUNNABLE argv prefix — the raw
+ *  `.ts` (dev tree, run with `--experimental-strip-types`) or the shipped bundle `dist/<name>.js`
+ *  (plain ESM, no flag). `scriptsDir` may ITSELF be the dist dir (shipped kernel). null ⇒ neither
+ *  form exists ⇒ the caller must report NOT-EVALUATED, ⛔ never a verdict (hard rule 3b). */
+function siblingScriptArgv(scriptsDir: string, name: string): string[] | null {
+  const raw = path.join(scriptsDir, name);
+  if (fs.existsSync(raw)) return ["node", ...(name.endsWith(".ts") ? ["--experimental-strip-types"] : []), raw];
+  if (name.endsWith(".ts")) {
+    const bundledDir = path.basename(scriptsDir) === "dist" ? scriptsDir : path.join(scriptsDir, "dist");
+    const bundled = path.join(bundledDir, name.replace(/\.ts$/, ".js"));
+    if (fs.existsSync(bundled)) return ["node", bundled];
+  }
+  return null;
+}
+
+/** Prepend `--no-warnings` to a sibling argv prefix (⛔ it is a NODE flag — it must precede the script
+ *  path, never be appended after it). null passes through. */
+function withNodeNoWarnings(argv: string[] | null): string[] | null {
+  return argv ? [argv[0], "--no-warnings", ...argv.slice(1)] : null;
+}
+
+/** Candidate roots for the classifier's REGISTRY lookup. `select-static-checks-for-touches.ts` reads
+ *  `<root>/plugin/scripts/runner-static-gate.ts` (its TEST_SH_REL) — i.e. the root must be the dir
+ *  that CARRIES a `plugin/scripts/` tree. dev tree: scriptsDir=<repo>/plugin/scripts ⇒ <repo>.
+ *  Shipped kernel: scriptsDir=<pkg>/plugin/scripts/dist ⇒ <pkg>. ⛔ Deliberately NOT a fixed `..`-hop
+ *  formula: `resolve(scriptsDir, "..", "..")` is the plugin root ITSELF in the shipped layout, and the
+ *  classifier then looks for `<pkg>/plugin/plugin/scripts/…` — one level too deep, silently. The
+ *  candidate is accepted by the classifier's OWN exit code (see classifyDeltaVerdict), so there is no
+ *  second copy of the registry path to drift. */
+function classifyRootCandidates(scriptsDir: string): string[] {
+  return [...new Set([
+    path.resolve(scriptsDir, "..", ".."),
+    path.resolve(scriptsDir, "..", "..", ".."),
+    path.resolve(scriptsDir, ".."),
+  ])];
+}
+
 // ── suite certificate gate ───────────────────────────────────────────────────────────────────────────
 // (gap-suite-concurrency-ff-gate-and-slot-ssot): the ff gate reads THIS task's capture (suite_exit=0 ∧
 // suite_head is an ancestor of the ff tip ∧ the suite_head..tip delta is classified inert). Fail-closed.
+
+/** The classifier's verdict — THREE states, ⛔ not a boolean: `not-evaluated` (classifier missing /
+ *  crashed / registry unresolvable) must NEVER share an output word with `non-inert` (a real judgment
+ *  that the delta is code a checker reads). Hard rule 3b: a judge that cannot read its input must not
+ *  return a value shaped like a verdict — the pre-fix code printed the LITERAL `covered` whenever the
+ *  classifier produced no stdout (i.e. whenever it never ran), misreporting "no classifier" as
+ *  "judged non-inert / covered by @static-object". */
+type DeltaClassification =
+  | { kind: "inert" }
+  | { kind: "non-inert"; paths: string[] }
+  | { kind: "not-evaluated"; detail: string };
+
+/** Run `--classify-delta` for `files` and return its three-state verdict. */
+function classifyDeltaVerdict(scriptsDir: string, files: string[]): DeltaClassification {
+  const argv = siblingScriptArgv(scriptsDir, "select-static-checks-for-touches.ts");
+  if (!argv) {
+    return {
+      kind: "not-evaluated",
+      detail: `classifier not resolvable under ${scriptsDir || "<no scripts dir>"} (neither select-static-checks-for-touches.ts nor dist/select-static-checks-for-touches.js)`,
+    };
+  }
+  const failures: string[] = [];
+  for (const root of classifyRootCandidates(scriptsDir)) {
+    const r = sh([...argv, "--classify-delta", "--root", root, ...files]);
+    if (r.status === 0) {
+      const paths = r.stdout.split("\n").map((s) => s.trim()).filter(Boolean);
+      return paths.length ? { kind: "non-inert", paths } : { kind: "inert" };
+    }
+    // non-zero = the classifier did not judge: a candidate root without the registry (exit 2,
+    // "registry file … not found at …") OR a real crash. Try the next candidate root; if none
+    // succeeds the collected details ARE the not-evaluated reason.
+    failures.push(`root=${root} exit=${r.status}${r.stderr.trim() ? ` (${r.stderr.trim().split("\n")[0]})` : ""}`);
+  }
+  return { kind: "not-evaluated", detail: `classifier produced no verdict — ${failures.join("; ")}` };
+}
 
 function readCaptureField(capture: string, key: string): string {
   if (!fs.existsSync(capture)) return "";
@@ -279,13 +365,14 @@ function suiteCertGate(args: FfMergeArgs, root: string): { ok: boolean; reason: 
   const delta = git(root, "diff", "--name-only", suiteHead, suiteTip).stdout.trim();
   if (delta !== "") {
     const scriptsDir = scriptsDirOf(args) ?? "";
-    const classifyScript = path.join(scriptsDir, "select-static-checks-for-touches.ts");
-    // classify-root = the repo root the registry (scripts/test.sh) lives at — two levels up from
-    // plugin/scripts (matches the bash's `dirname BASH_SOURCE/../..`).
-    const classifyRoot = path.resolve(scriptsDir, "..", "..");
-    const verdict = sh(["node", "--experimental-strip-types", classifyScript, "--classify-delta", "--root", classifyRoot, ...delta.split("\n").filter(Boolean)]);
-    if (verdict.status !== 0 || verdict.stdout.trim() !== "") {
-      return { ok: false, reason: `suite_head..tip delta classified non-inert (${verdict.stdout.trim() || "covered"})` };
+    const verdict = classifyDeltaVerdict(scriptsDir, delta.split("\n").filter(Boolean));
+    if (verdict.kind === "non-inert") {
+      return { ok: false, reason: `suite_head..tip delta classified non-inert (${verdict.paths.join(" ")})` };
+    }
+    if (verdict.kind === "not-evaluated") {
+      // ⛔ NOT `covered`, ⛔ not the non-inert shape: the classifier never judged. Fail-closed (the
+      // certificate cannot be granted on an unknown delta) but with a DISTINGUISHABLE reading.
+      return { ok: false, reason: `suite_head..tip delta NOT-EVALUATED — ${verdict.detail}; 证书闸按未知 delta fail-closed（⛔ 这不是判决：既非惰性、也非被 @static-object 覆盖）` };
     }
   }
   return { ok: true, reason: null };
@@ -332,11 +419,12 @@ function acquireMergeLockAsync(lockFile: string, lockWaitSecs: number): Promise<
 // ── classify-delta (the computed inert-delta classifier, no hand-written path table) ────────────────
 
 function classifyDelta(args: FfMergeArgs, root: string, files: string[]): string {
-  const scriptsDir = scriptsDirOf(args) ?? "";
-  const classifyScript = path.join(scriptsDir, "select-static-checks-for-touches.ts");
-  const classifyRoot = path.resolve(scriptsDir, "..", "..");
-  const r = sh(["node", "--experimental-strip-types", classifyScript, "--classify-delta", "--root", classifyRoot, ...files]);
-  return r.status === 0 ? r.stdout.trim() : "__CLASSIFY_FAILED__";
+  // Same three-state verdict as the certificate gate; this consumer's contract is the string form
+  // (`""` = inert ⇒ the in-lock retry may proceed, `__CLASSIFY_FAILED__` = no verdict ⇒ fail-closed
+  // to "do not retry"). ⛔ `not-evaluated` must NOT collapse into `""` (that would let an unknown
+  // delta take the inert-retry path).
+  const v = classifyDeltaVerdict(scriptsDirOf(args) ?? "", files);
+  return v.kind === "inert" ? "" : v.kind === "non-inert" ? v.paths.join("\n") : "__CLASSIFY_FAILED__";
 }
 
 // ── main ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -405,12 +493,19 @@ export async function ffMerge(args: FfMergeArgs): Promise<FfMergeResult> {
   const cert = suiteCertGate(args, root);
   if (!cert.ok) {
     // blocked path: run the reaper best-effort (gap-wiring-D-worktree-remove-orphans-reclaim-restore).
-    const reaper = path.join(scriptsDir, "worktree-process-reaper.ts");
-    if (fs.existsSync(reaper)) {
+    // gap-ff-merge-suite-cert-classifier-unshipped-and-misreported AC5: `worktree-process-reaper` is
+    // one of the two sibling names the packaging surface still DROPS (not in build-plugin-dist's
+    // derived entry set ⇒ its dist bundle is never produced) — resolvable in the dev tree only. It is
+    // best-effort cleanup on an already-refused path, so an unresolvable reaper is reported and
+    // skipped, never silently counted as "reaped".
+    const reaperArgv = withNodeNoWarnings(siblingScriptArgv(scriptsDir, "worktree-process-reaper.ts"));
+    if (reaperArgv) {
       if (args.worktree) {
-        sh(["node", "--no-warnings", "--experimental-strip-types", reaper, "--worktree", args.worktree, "--root", root, "--json"]);
+        sh([...reaperArgv, "--worktree", args.worktree, "--root", root, "--json"]);
       }
-      sh(["node", "--no-warnings", "--experimental-strip-types", reaper, "--orphans", "--stale-lock-holders-only", "--root", root, "--json"]);
+      sh([...reaperArgv, "--orphans", "--stale-lock-holders-only", "--root", root, "--json"]);
+    } else {
+      err.push("fan-in-ff-merge: worktree-process-reaper not resolvable under the plugin scripts dir (dev .ts or shipped dist bundle) — reaper SKIPPED (not-evaluated, ⛔ not \"nothing to reap\")");
     }
     err.push(
       `fan-in-ff-merge: 本任务 ${args.task} 的 suite 证书未满足 — ${cert.reason}; ` +
