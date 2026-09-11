@@ -2,7 +2,7 @@
 id: gap-develop-sync-reset-hard-destroys-third-party-project-tree
 title: develop 双向同步的终局解 `git reset --hard develop` 在第三方项目上摧毁它自己的分支与全部任务文件（真实项目
   develop 与 main 分叉是常态）
-status: todo
+status: ready
 labels:
   - gap
   - defect
