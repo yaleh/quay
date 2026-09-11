@@ -39,6 +39,7 @@ import {
   isLlmInvocation,
   runPromotionRound,
   computeRoundRecord,
+  prosePrereqGapReading,
   appendRoundRecord,
   computeOutcomeRecords,
   appendOutcomeRecord,
@@ -335,6 +336,23 @@ test("computeRoundRecord — action ∈ promote|fix|none|error derived from the 
   assert.equal(rec.promote_path_llm_invoked, false, "AC131: round record carries promote_path_llm_invoked=false on the mechanical promotion path");
   assert.deepEqual(rec.fixes, [], "AC132: no fix worker ⇒ fixes empty");
   assert.ok(rec.ts && rec.round, "ts/round present");
+});
+
+test("Plan 4 — prose_prereq_gap is a NAMED round-level reading, not only a nested fixes[].unfixable string", () => {
+  const base = { round: 1, runId: "pm-1", pid: 42, at: "2026-09-11T00:00:00.000Z", pool: 1, shouldApply: true, applied: [], promotePathLlmInvoked: false };
+  // A round whose one ineligible candidate is prose-prereq-blocked: the task id + the refs must be
+  // readable from the round record directly (pre-Plan-4 they existed only inside
+  // fixes[].unfixable as the string "prosePrereqGap=[…]").
+  const fixes = [
+    { id: "gap-stuck", spawned: false, missing: [], unfixable: ["prosePrereqGap=[gap-a,gap-b]"], exitCode: null },
+    { id: "gap-other", spawned: false, missing: [], unfixable: ["depsReady=false"], exitCode: null },
+  ];
+  const rec = computeRoundRecord({ ...base, promotedIds: [], error: null, fixes });
+  assert.deepEqual(rec.prose_prereq_gap, [{ id: "gap-stuck", refs: ["gap-a", "gap-b"] }], "names the task AND the refs");
+  assert.deepEqual(computeRoundRecord({ ...base, promotedIds: [], error: null, fixes: [] }).prose_prereq_gap, [], "no prose-prereq block ⇒ empty, never absent");
+  // Unit: the two miss-forms must not invent an entry.
+  assert.deepEqual(prosePrereqGapReading([{ id: "gap-ok", unfixable: [] }]), [], "an unfixable-free candidate contributes nothing");
+  assert.deepEqual(prosePrereqGapReading([{ id: "gap-no-unfixable" }]), [], "a missing unfixable field contributes nothing (缺值 = 未查, never a fabricated ref)");
 });
 
 test("appendRoundRecord — pure append, never truncates (two lines survive)", (t) => {
