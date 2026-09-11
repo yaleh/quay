@@ -1,7 +1,7 @@
 ---
 id: gap-goal-criteria-bare-failing-exit-unattributable
 title: 30/92 条在域判据的失败出口是裸 exit(1) 不写成因 ⇒ 它们一旦转红就在生产台账留下不可归因的 fail（AC-239 此刻正在这样）
-status: todo
+status: ready
 labels:
   - gap
   - defect
