@@ -1800,6 +1800,7 @@ declare -A CONSUMER=(
   [over90-task-gate.ts]="谁按：supervisor-preempt-candidates.ts（preemption 判据）· inner-blocked-signal.ts detectTaskOver90m（--detect-stop face）；条件=这两个消费者须 import 同一份三 helper 实现（函数级复用，⛔ 非复制粘贴）"
   [semantic-trigger.ts]="谁按：semantic-observer-judge.ts（AC3 触发，hash 变化或 spawn-limit 串出现时）；条件=judge import 同一份触发函数实现（函数级复用，⛔ 非复制粘贴）"
   [agent-panel-classify.ts]="谁按：agent-panel-classify.test.mjs（迁移测试）import 纯函数；条件=要复用面板行分类原语（函数级复用，⛔ 非复制粘贴）"
+  [packaging-hygiene-check.ts]="谁按：quality-gate-driver.ts 的 packaging-hygiene 例程按（interval 60min，runResidentQualityGateLoop 评估 due 后跑，⛔ 非 loop.routines——后者已死）；条件=两维度打包卫生检查要跑一轮（config-key 消费者枚举 + shipped-entry 可运行性），漂移非空时 spawn gap-filing agent 经 ABI（quay-file-task）立案"
 )
 # ── superseded capability table (gap-retired-script-still-callable, human ruling 2026-08-10) ──
 # One capability = ONE implementation. A superseded implementation must NOT exist in the
