@@ -10,6 +10,7 @@ extra:
   goal_ac: AC-239
 depends_on:
   - gap-aged-third-party-project-quay-upgrade-verification
+  - gap-develop-sync-reset-hard-destroys-third-party-project-tree
 goal_ac: AC-239
 ---
 ## Finding
@@ -170,7 +171,14 @@ Stage 4 — 缺陷分流：若过程中发现新的真实缺陷（不同于本�
       > ① 的缺陷修好、本任务被重新派发，即可继续。
 - [x] 若发现新缺陷，已另立任务追踪，且本任务描述中链接了该任务 id
       > 两个 id 与路径见 AC 最后一条；本条正文亦已引用。
-- [x] `extra.goal_ac: "AC-239"` 与 `depends_on: ["gap-aged-third-party-project-quay-upgrade-verification"]`
-      已随 task_write 写入并读回核对
-      > 实测读回：`goal_ac` = `AC-239`（`extra.goal_ac` 亦为 `AC-239`）；
-      > `depends_on` = `["gap-aged-third-party-project-quay-upgrade-verification"]`。
+- [x] `extra.goal_ac` 与 `depends_on` 已随 task_write 写入并读回核对
+      > 实测读回（2026-09-11，本任务 e2e 执行当时）：`goal_ac` = `AC-239`（`extra.goal_ac` 亦为 `AC-239`）；
+      > `depends_on` = `["gap-aged-third-party-project-quay-upgrade-verification"]`（**当时为一元素**）。
+      > **2026-09-11 追加（人裁定后）**：本任务 status 已回到 ready，而根因缺陷
+      > `gap-develop-sync-reset-hard-destroys-third-party-project-tree` 未修前一旦被重派，会再次触发
+      > `git reset --hard develop` 摧毁另一份升级副本的任务板 ⇒ 追加该条前置边。当前实测读回：
+      > `depends_on` = `["gap-aged-third-party-project-quay-upgrade-verification",
+      > "gap-develop-sync-reset-hard-destroys-third-party-project-tree"]`（**两元素**）。
+      > ⚠️ 上方一元素读数是写下当时的真实记录、非错误，故保留不改写（⛔ 证据载体不回溯覆写）。
+      > ⚠️ 本条标题原本内联了 `depends_on` 的字面值，而该值会变 ⇒ 标题必然过时（本次过时即源于此）；
+      > 已改为标题只点字段名、值放证据行（同 AC88：判据不得引用生命周期短于判据本身的对象）。

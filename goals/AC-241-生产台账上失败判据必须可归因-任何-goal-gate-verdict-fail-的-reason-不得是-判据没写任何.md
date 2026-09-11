@@ -24,15 +24,26 @@ criterion: >-
       if iid: last[iid]=e
   if not last:
       sys.stderr.write("NOT-EVALUATED: no goal gate events in ledger\n"); sys.exit(3)
-  # 空因模板必须【整条】匹配，不能只做子串包含：本判据自己的 fail reason 会逐字引用 AC-239 的 reason
 
-  # （"unattributable failing goal AC(s): AC-239: acceptance failed (exit 1) — criterion wrote no
+  # 空因模板是 runner 在判据【零输出】时写出的【整条 reason 正文】，不是一个可被引用的子串。
 
-  # output to stderr/stdout; …"），子串判定会把这种【带着成因的】嵌套引用误判为空因 ⇒ 本判据永远无法
+  # ⇒ 判定必须比对整条正文：聚合型判据（本判据自己就是一条，它把被点名 AC 的 reason 逐字抄进
 
-  # 转绿（自指）。锚定 ^…$ 后：AC-239 的裸模板仍命中，嵌套引用不再命中（硬规则 2：按位置判定）。
+  # 自己的 reason）用子串测试会把「引用了模板」误判成「本身就是模板」，于是每轮把自己也列进 bad。
 
-  BARE=re.compile(r"^acceptance failed \(exit \d+(?:, signal [^)]*)?\)\s*—\s*criterion wrote no output to stderr/stdout\s*$")
+  # 实测形态（gap-meta-withfailureoutput 立案时）：AC-241 的 reason 里 AC-239 与 AC-241 同时被点名。
+
+  # ⚠️ 与 runner 的模板措辞耦合：acceptance-runner 改这句文案，须同步改本判据，否则退化为恒绿。
+
+  T="criterion wrote no output to stderr/stdout"
+
+  PRE=re.compile(r"^acceptance failed \(exit [^)]*\)")
+
+  def bare(r):
+      s=" ".join(str(r).split())
+      if len(s)<24: return True
+      b=PRE.sub("",s).strip(" -—–\t")
+      return b=="" or b==T
 
   bad=[]
 
@@ -40,7 +51,7 @@ criterion: >-
       e=last[iid]
       if e.get("verdict")!="fail": continue
       r=str((e.get("payload") or {}).get("reason") or "")
-      if BARE.match(r.strip()) or len(r.strip())<24:
+      if bare(r):
           bad.append("%s: %s"%(iid,r or "<empty>"))
   if bad:
       sys.stderr.write("unattributable failing goal AC(s): %s\n"%("; ".join(bad))); sys.exit(1)
@@ -50,11 +61,8 @@ criterion: >-
 expect: exit 0 = 台账里每条 AC 的最近一次 goal-gate fail 记录，其 payload.reason
   都携带判据自己写出的成因（非 acceptance-runner 的『criterion wrote no output to
   stderr/stdout』空因模板、且非空）；exit 1 = 至少一条失败 AC 不可归因（当前 AC-239 即此形态）；exit 3 =
-  台账缺失或无 goal 事件（未评估，不算通过）。『空因』的判据是【整条 reason 就是模板自身】，即锚定
-  ^acceptance failed \(exit N(, signal X)?\) — criterion wrote no output to stderr/stdout$，⛔ 不是子串包含
-  ——子串包含会把本判据自己【引用 AC-239 原因】而生成的嵌套 reason 也误判为空因，使本判据自指永红（2026-09-11
-  实测：AC-241 的 8 条历史 fail 记录中最后一条即此形态，故锚定前本判据结构上不可能 exit 0）。⚠️ 与 runner 的
-  模板措辞仍有耦合：acceptance-runner 若改这句文案，须同步改本判据的锚定正则，否则会退化为恒绿。
+  台账缺失或无 goal 事件（未评估，不算通过）。⚠️ 与 runner 的模板措辞有耦合：acceptance-runner
+  若改这句文案，须同步改本判据，否则会退化为恒绿。
 origin: 本轮 readings：criteria[AC-239].verdict="fail"，reason="acceptance failed
   (exit 1) — criterion wrote no output to stderr/stdout"（同批另外 16 条 AC 全为
   pass）。同一形态在生产载体可复现：.quay/gate-events.jsonl 中 item_id=AC-239 的最后一条 gate=goal
