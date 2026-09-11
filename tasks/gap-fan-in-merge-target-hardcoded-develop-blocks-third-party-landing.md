@@ -201,7 +201,11 @@ goal-posture 1、goal-sufficiency-{gate,not-evaluated,semantic-covered} 各 1、
 `plugin/test/packaging-hygiene-check.test.mjs`(续做轮，见上面的套件红归因——测试隔离修复，非产品代码)。
 `plugin/scripts/worker-driver.ts` 与 `fan-in-ts-typecheck-gate.ts` 在 Touches 里但**未改**——
 判定收在 anti-drift 一处（它才是把基线变成硬失败的那一步），⛔ 不复制第二份判定。
-**scoped 门**：`bash scripts/test.sh --for-task <id> --allow-thin` 绿（281 pass / 0 fail）。
+**scoped 门**：`bash scripts/test.sh --for-task <id> --allow-thin` 绿。**续做轮的最终读数 =
+293 pass / 0 fail**（Touches 加入 `plugin/test/packaging-hygiene-check.test.mjs` 后重跑；比初轮的
+283 多的 10 条正是该文件 ⇒ 反证 Touches 更新确实把它纳入了选择面，不是只写在纸上）。同轮
+`anti-drift-touches-check --merge-target develop` = `ANTI-DRIFT OK — 10 actual file(s), all within
+declared Touches (12 glob(s))`（exit 0）。
 
 ## Proposal
 
