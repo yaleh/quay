@@ -294,6 +294,10 @@ AC239_PRODUCED_BY_DRIVER=0
 AC239_TASK_CREATED=0                         # 1 = 任务创建成功（⛔ 与「驱动到 done」分开记账，缺值可区分）
 AC239_DRIVERS_STARTED=0                      # 1 = promotion+worker driver start 均返回 0
 AC239_PROFILES_STATUS="not-attempted"        # configured | not-configured | not-attempted（三态，⛔ 不同形）
+AC239_TOOLCHAIN_STATUS="not-attempted"       # resolved | go-absent | not-attempted —— 目标项目是 Go 项目
+                                             # （① 的任务体 AC3/AC4 就是 go build/go test）⇒ worker 的
+                                             # 进程 env 里必须有 go，否则本步骤以「与 driver 坏了同形」
+                                             # 的长轮询超时收场（实测 2026-09-11 07:1xZ）
 AC239_WRITTEN_THIS_RUN=0                     # 1 = 本次运行写出了 AC-239 记录（⚠️ 必须在此声明：本脚本
                                              # set -u，未声明的变量在末尾 summary 处会 unbound 而炸掉
                                              # 整轮——实测 2026-09-11 06:0x 就是这么丢掉整次运行的证据的）
@@ -1208,6 +1212,26 @@ step_upgrade_drive_continue() {
     echo "  not-evaluated: 目标项目 profiles 未配置 ⇒ worker 无法 spawn，本步骤不做（可区分取值，⛔ 不与「驱动失败」同形）"
     return 0
   fi
+
+  # ⓪b 目标项目的【工具链】前置：本步骤刻意建的是一条**真实 Go 缺陷修复任务**（见 ① 的任务体——AC3/AC4
+  #     就是 `go build ./...` / `go test ./...`，worker-driver 派发时给的 scoped 门也是 `go test ./...`），
+  #     而 worker 的 Bash 工具继承的是**进程 env**，⛔ 不是 login shell。实测 2026-09-11 07:1xZ（本次真机
+  #     e2e，直接读活 worker 进程的 /proc/<pid>/environ）：worker PATH 里没有 go ⇒ `go test ./...` 报
+  #     `go: command not found`，而这一缺失会以【与「driver 坏了」同形】的长轮询超时收场（硬规则 3b）。
+  #     ⛔ 不硬编码 `$HOME/go-sdk/bin`（硬规则 4 推论二：依赖宿主的字面量换台机器即失效且静默）——从
+  #     login shell 解析 go 所在的 bin 目录（本机实测 ⇒ /home/yale/go-sdk/bin，go1.24.x）；解析不到就
+  #     如实报一个【可区分】的 not-evaluated，⛔ 不静默地放 worker 去撞。
+  local go_bin_dir=""
+  go_bin_dir="$(dirname "$(bash -lc 'command -v go' 2>/dev/null || true)" 2>/dev/null || true)"
+  case "$go_bin_dir" in ""|"."|"/") go_bin_dir="" ;; esac
+  if [ -z "$go_bin_dir" ]; then
+    AC239_TOOLCHAIN_STATUS="go-absent"
+    echo "  not-evaluated: login shell 解析不到 go，而目标项目是 Go 项目（见 ① 的任务体）⇒ worker 跑不了 'go test ./...'，本步骤不做（可区分取值，⛔ 不与「driver 起不来」同形）"
+    return 0
+  fi
+  AC239_TOOLCHAIN_STATUS="resolved"
+  export PATH="$go_bin_dir:$PATH"
+  echo "  [⑦b] go toolchain: $go_bin_dir ($(go version 2>/dev/null || echo 'version-unreadable'))"
 
   # ① 建一条**真实缺陷修复任务**。⛔ 不是占位标记文件：升级后的项目用它自己的任务板去修它自己的
   #    真实 bug，证据价值高于「能跑通一条空任务」（同 meta-cc 历史上 AC118 的形态）。任务内容就是
@@ -3366,6 +3390,7 @@ echo "AC239_EVALUATED=$AC239_EVALUATED (1 = 四个直接量全成立并已写记
 echo "AC239_PROJECT_ROOT=${AC239_PROJECT_ROOT:-<none>} (⛔ 必须与 AC238_PROJECT_ROOT 逐字一致，判据侧按载体集合再核一遍)"
 echo "AC239_TASK_ID=${AC239_TASK_ID:-<none>} AC239_TASK_CREATED=$AC239_TASK_CREATED AC239_DRIVERS_STARTED=$AC239_DRIVERS_STARTED"
 echo "AC239_PROFILES_STATUS=$AC239_PROFILES_STATUS"
+echo "AC239_TOOLCHAIN_STATUS=$AC239_TOOLCHAIN_STATUS (resolved | go-absent —— 目标项目是 Go 项目，缺 go 则 worker 跑不了它的 scoped 门)"
 echo "AC239_TASK_STATUS=${AC239_TASK_STATUS:-<unreadable>} AC239_COMMIT_SHA=${AC239_COMMIT_SHA:0:12} AC239_GATE_EVENTS=$AC239_GATE_EVENTS AC239_PRODUCED_BY_DRIVER=$AC239_PRODUCED_BY_DRIVER"
 echo "AC239_WRITTEN_THIS_RUN=$AC239_WRITTEN_THIS_RUN AC239_WRITTEN_ROOT=${AC239_WRITTEN_ROOT:-<none>}"
 # AC-240 运行级取值：闭环是否由【本次运行】自证（1 | 0 | not-evaluated，三态可区分）。
