@@ -155,6 +155,10 @@ test('runPackagingHygiene drift ⇒ failed + gap-filing spawned (AC3)', async (t
     checkCmd: ['node', check],
     gapWorkerCmd: `node ${capture}`,
     gapWorkerTimeoutMs: 10_000,
+    // 资源门测试缝（必须显式注入）：缺省 ⇒ resourceGateCheck 跑【真实宿主】的 resource-gate.sh，
+    // 而闸的 load 判据（load >= nproc × 2 ⇒ WAIT）在全量 suite 26 路并发下必取 WAIT ⇒ gapFiled
+    // 按设计为 false ⇒ 本断言变成宿主负载的函数（单跑绿、套件红）。见本文件末尾的 WAIT 负控制。
+    resourceGateArgv: ['true'],
   });
   assert.equal(fact.name, 'packaging-hygiene');
   assert.equal(fact.state, 'failed');
@@ -179,6 +183,23 @@ test('runPackagingHygiene halted ⇒ drift reported but gap-filing deferred (hal
   });
   assert.equal(fact.state, 'failed');
   assert.equal(fact.value.gapFiled, false, 'halted must defer the gap-filing spawn');
+  assert.ok(!fs.existsSync(marker), 'no gap-filing spawn ⇒ no captured prompt');
+});
+
+test('runPackagingHygiene resource-gate WAIT ⇒ drift reported but gap-filing deferred (fail-closed)', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pkg-hyg-wait-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const check = fakeCheckScript(tmp, DRIFT_JSON);
+  const marker = path.join(tmp, 'prompt.txt');
+  const capture = fakeGapCaptureScript(tmp, marker);
+  const fact = await runPackagingHygiene(tmp, {
+    checkCmd: ['node', check],
+    gapWorkerCmd: `node ${capture}`,
+    gapWorkerTimeoutMs: 10_000,
+    resourceGateArgv: ['bash', '-c', 'exit 1'],
+  });
+  assert.equal(fact.state, 'failed', 'drift is still reported when the gate defers');
+  assert.equal(fact.value.gapFiled, false, 'resource-gate WAIT must defer the gap-filing spawn');
   assert.ok(!fs.existsSync(marker), 'no gap-filing spawn ⇒ no captured prompt');
 });
 
