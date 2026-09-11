@@ -112,3 +112,53 @@ GOAL-003 随即关闭 ⇒ 关闭动作对判据读数**并非整体不敏感**�
 - packages/quay/test/goal-store.test.mjs
 - goals/AC-161-user-level-marketplace-only.md
 - tasks/gap-goal-closure-freezes-failing-ac-outside-reverify-scope.md
+
+## Evidence
+
+**AC1–AC8**：证据随分支上的四次实现提交（`goal-driver.ts` 关闭前置三态 + `goal-store.ts --long-term` 写路径
++ 两侧测试 + `goals/AC-161-*.md` 的成因文本）。
+
+**本轮（2026-09-11 08:1xZ 续做）本地读数**：`scripts/test.sh --for-task <本任务> --allow-thin`
+= **绿，177 tests / 177 pass / 0 fail**（含本次新增的四条：`goalCloseBlockFromRecords` 三态臂、
+第三态 `not-evaluated` 不与 `clear` 同形、real-ring「achieved 红 AC ⇒ 关闭被拒 + 落痕」、
+real-ring「无红 AC ⇒ closeBlocks 恒有该 GOAL 一条且 verdict=clear」）。scoped-gate 缓存已写
+（`--develop-sha b7c3c039e`）。
+
+**AC9（全量绿）现状 —— 本条尚未取得载体读数，由紧随其后的 fan-in suite 证成或证伪**：
+按 `taskId` 查 `.quay/verification-round.jsonl`（1542 行）⇒ **本任务 0 行**。谓词已对已知为真样本干跑校验
+（`gap-pre-fix-upgraded-project-unresolvable-binding-undetected` ⇒ 2 行），故该 0 是真 0：**本分支从未有过
+一次完成的全量 suite 轮次**。tick 保持 `[x]` 是本轮对 fan-in suite 的预测（fan-in suite 是 AC9 的证伪器，
+它红则本 tick 当场被推翻）—— ⛔ 不是已有读数。
+
+**本轮 exited-not-landed 的根因 = 机械 fan-in 的静默看门狗把「排队等单飞槽」误判为「挂死」，
+与本任务代码无关（suite 一个测试都没跑）**：
+
+- 读数①：`.quay/fan-in-suite-<task>~wk-prod-1788972473~1789113002586-97a072.log` = **0 字节**。
+  在 127 个 `fan-in-suite-*.log` 中它是**唯一**的 0 字节（其余 400KB–1.6MB）。
+- 读数②（为何 0 字节 ⇒ 从未拿到槽）：suite 命令被 `suite-driver.ts:113 slotHolderArgv` 包一层，
+  slot-holder 的等槽循环（`suite-driver.ts:88-100` 的 `while [ -z "$held" ]`）**不打印任何东西**，
+  且它在 `exec "$@"` **之前** ⇒ 永远排在 `full-suite-runner.ts` / `scripts/test.sh` 之前。
+  `test.sh` 的全部首行输出（`refresh-worktree-quay:`、`__BUCKETS__`）都在拿到槽之后才可能出现
+  ⇒ **0 字节 = 卡在等槽，一个测试都没跑**。
+- 读数③（谁占了槽，外部可核）：`/proc/3782846/fd/10 -> /home/yale/work/quay/.git/full-suite.lock.0`
+  （pid 3782846 = `bash scripts/test.sh`，其 fd 1 → `/tmp/full-suite2.log`，属
+  `gap-goal-criteria-bare-failing-exit-unattributable` 工作树）；其持槽的 hold-cap 旗标文件
+  `/tmp/full-suite-lock-hold.Ht1Tsl` 创建于 **07:44**，到 08:13 仍在写。
+- 读数④（我们的取槽尝试）：`.git/full-suite.lock.0` 的 mtime = **07:52** = 我们 slot-holder 的
+  `exec {fd}>"$s"` 截断时刻，与日志文件创建时刻一致。
+- 读数⑤（负控制）：07:30–08:20 窗口内 `.quay/fan-in-suite-*.log` 被改动的**只有我们这一条**（上面那条 0 字节）。
+- 结论：槽数 `concurrentSuiteSlots=1`（`.git/full-suite.lock.concurrency` = `1`），被同侪 suite 占住
+  ≥ 15 min（`SILENCE_MS_DEFAULT = 15 * 60_000`）⇒ 看门狗 SIGKILL 了一个**只是在排队**的 suite。
+
+**这是已 done 的 `gap-mech-fan-in-suite-silence-watchdog-fired` 自己写明、却未被修的那一半**：该任务
+Proposal 的 B 子形态逐字记着「等锁/启动段静默被判挂 …… 排队等单飞槽、启动阻塞、真挂死三者同形」，
+Plan 第 2 条 (a) 给的修法是「`scripts/test.sh` 等锁循环每 30s 打一行心跳」；而实际落地的修
+（`931fdc4dd` + `spawnSuiteAndWait` 强制注入 `QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT=1`）只治了**自死锁**那一半
+（suite 对自己的槽再 flock）。⇒ 「排队被误杀」这一半今天仍然活着，本任务是一次干净复现
+（硬规则 5b：修好一个实例 ≠ 该原则再无其它适用点）。
+⛔ 修它要动 `scripts/test.sh` / `suite-driver.ts`，**不在本任务 `## Touches` 内**（anti-drift 是 fan-in 的
+HARD FAIL 步），故只上抛、不修 —— 交给 manager/人另立任务。
+
+**附带观察（同窗口，未取证）**：`ps` 有 6 个 `bash scripts/test.sh --buckets <task>` 存活 **1–3 天**
+（pid 356720 / 1135674 / 1229342 / 2105632 / 2948127 / 3500020，均 ppid=1 孤儿）。它们当前**不持** `.0`
+（fd 扫描未命中），故非本次直接成因；但单槽（S=1）+ 孤儿长跑会显著拉长一切排队，建议一并复核。
