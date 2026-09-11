@@ -316,13 +316,20 @@ test("① REAL doc delta — tasks/ + goals/ + docs/ + adr/ + .quay/ only must c
   // NOTE: orchestration/*-tick-core.md is deliberately NOT here — it is read by tick-core-static-check
   // / rhythm-consumer (`@static-object orchestration/*-tick-core.md`), so it classifies as CODE
   // (gap-fan-in-delta-scope-doc-only-skip AC2 取假二).
+  // NOTE 2: `.quay/config.yml` is likewise NOT here — provider-binding-resolvability-check reads it
+  // (`@static-object .quay/config.yml`), so the registry override makes it CODE. That override is the
+  // DESIGNED precedence (see isDocPath: "a checker reads it ⇒ code"), and it already fires for a path
+  // under a doc surface today — docs/analysis/ac69-slot-release-vs-dispatch-gap.json is CODE, which is
+  // why this fixture samples docs/proposals/ + docs/references/ instead. Same class, same treatment:
+  // the `.quay/` surface stays covered below by a genuinely doc-only, non-checker-read path
+  // (gap-pre-fix-upgraded-project-unresolvable-binding-undetected).
   const files = {
     "tasks/gap-fan-in-execute-three-unverified-paths.md": "status: ready\n",
     "goals/AC-999-fake.md": "status: ready\n",
     "docs/proposals/exp5-crystallization-strategy.md": "x\n",
     "docs/references/git.md": "y\n",
     "adr/ADR-010-scheduled-milestone-e2e-incl-browser-tests.md": "y\n",
-    ".quay/config.yml": "providers: {}\n",
+    ".quay/prepare-epochs/DIR-999.json": "{}\n",
     "measurements/round-x.json": "{}\n",
     "milestones/fast-mode-telemetry/2026-08-16.json": "{}\n",
   };
