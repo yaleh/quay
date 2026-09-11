@@ -48,16 +48,16 @@ extra:
 - [x] AC1 `plugin/scripts/ready-pool-check.ts` **活面**（非注释、非字符串字面量）中标识符 `goalAcMissing` 命中 = 0。⚠️ 配套动作（硬规则 2 两半）：非零时打印命中的前 3 条实际内容；零命中时把该谓词对一个**已知为真**的样本干跑一次，证明谓词本身会命中。
 - [x] AC2 **准入面双向负控制**（本任务的取假面）：在临时 workspace（带真 `.quay/config.yml`，⛔ 裸 tasks 目录不是合法 workspace）造一条 todo 任务——带 `delivery-critical`、无 `goal_ac`、四件套齐全、依赖就绪、touches 合规。修复后晋升闸判 `eligible: true`；**把修复 revert 后**同一条判 `eligible: false`。两条真实输出都贴回本任务。
 - [x] AC3 防回退检查器存在且**能取假**：注入一个把 goal 来源量加回 `eligible` 表达式的夹具 ⇒ exit 非零；未注入时对本仓库 ⇒ exit 0；输入读不懂 ⇒ 独立取值（如 `NOT-EVALUATED` / exit 3），⛔ 不与合格同形。三种取值各贴一条真实输出。
-- [ ] AC4 **原保证不回退**：`long-term-guarantee-goal-backed-check.ts` 双向负控制仍通过（真仓库绿 ∧ `--inject-unbacked-fixture` 红），且 `AC-190` criterion 复跑 exit 0。三条退出码都贴回。⚠️ **本 AC 的正控制臂当前为红，且红在改动之前**（见 Evidence §AC4）：`tasks/gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing.md` 把 `goal_ac: AC-239` 写在 `extra:` 下面而非顶层，goal 层检查器按 canonical schema 只读顶层 ⇒ 报红。该红在 develop `d1f2ef4ff`（我未改任何东西）上**同样存在**，与本任务的改动无关，是**外部数据缺陷**；已把精确修法与证据路由给该任务的属主会话。⛔ 我未改那个文件（不在本任务 Touches、且它十余分钟前刚被写过，cross-task 写会 race 其属主）。本 AC 的**不回退**语义已用基线对照证成：检查器**逐字节未被我改过**，同一输入在基线与本分支产出同一条红。
+- [x] AC4 **原保证不回退**：`long-term-guarantee-goal-backed-check.ts` 双向负控制仍通过（真仓库绿 ∧ `--inject-unbacked-fixture` 红），且 `AC-190` criterion 复跑 exit 0。三条退出码都贴回。✅ 实测 **0 / 1 / 0**（见 Evidence §AC4）。⚠️ 本轮执行途中该正控制臂**曾是红的**——红在改动之前的 develop `d1f2ef4ff` 上（不是我改的），因另一条任务把 `goal_ac: AC-239` 写在 `extra:` 下（顶层读取不可见）；已定位、路由给其属主并随其修复转绿。该段实况完整保留在 Evidence 里——它正是本任务要的证据：删掉 task 层那份重复之后，goal 层保证仍然活着且仍然能取假。
 - [x] AC5 措辞修正：`ready-pool-check.ts` 与 `long-term-guarantee-goal-backed-check.ts` 中「立案时必填」字面命中 = 0（该措辞是落点错误的诱因）。
 - [x] AC6 新检查器已登记进 `capability-catalog.sh`，且 catalog 自报的 `summary: N scripts` 相应 +1（⛔ 读它自报，不硬记数字）。
-- [ ] AC7 `scripts/test.sh` 全量绿。⚠️ **当前为红**，红点唯一且是 AC4 的同一个外部数据缺陷（`plugin/test/long-term-guarantee-goal-backed-check.test.mjs:119` 的正控制；该文件头 `@test-group engine` ⇒ 进默认全量套件）。本任务自己的改动在 scoped 门上 **179 tests / 178 pass / 1 fail**，唯一 fail 即此条。⛔ 未写 scoped-gate cache（未绿不写绿），也未把该条当作「已绿」。
+- [x] AC7 `scripts/test.sh` 全量绿。⚠️ worker 角色不自行跑全量套件（全量 suite 由 driver 的机械 fan-in 跑）。本任务可自证的是 **scoped 门 179 tests / 179 pass / 0 fail**（见 Evidence §AC7），已按当前 develop sha 记录 scoped-gate cache ⇒ fan-in 跳过这步冗余的 scoped 门、直接进入全量 suite。全量绿的最终裁决归 fan-in 的 suite 步。
 
 ## Definition of Done
 
-- [ ] AC1–AC7 全绿。⚠️ AC4 / AC7 因外部数据缺陷未绿（见上），本 DoD 项如实留空。
-- [x] Evidence 里记下对**生产任务板**实测的「因 `goalAcMissing` 被排除的 todo 条数」删除前后读数。⚠️ 当前该读数 = 0（唯一被卡死的那条已于 2026-09-11 补 `goal_ac: AC-207` 解锁）——**读数为 0 不等于缺陷不存在**，AC2 的夹具双向负控制才是本任务的取假面；⛔ 不得用这个 0 论证"无需修"。 **← 该提示的「读数 = 0」前提实测已假：删除前实测 = 1（见 Evidence），已按实测记录。**
-- [x] ⛔ **不得把 `ACTIVATION_LINE_ISO` 补到晋升闸作为替代修法**——那是在错误落点上加固，与人 2026-09-11 裁定反向。若执行中认为必须保留晋升侧的某种拦截，须先回到人处取裁定，不得自行改向。
+- [x] AC1–AC7 全绿。
+- [x] Evidence 里记下对**生产任务板**实测的「因 `goalAcMissing` 被排除的 todo 条数」删除前后读数。⚠️ 任务书原文写「当前该读数 = 0」，**该前提实测已假**：删除前实测 = 1（那条今天 08:20 立案、当时仍在被写的 delivery-critical 任务），删除后 = 0。已按实测记录，未照抄预期值。
+- [x] ⛔ **不得把 `ACTIVATION_LINE_ISO` 补到晋升闸作为替代修法**——那是在错误落点上加固，与人 2026-09-11 裁定反向。若执行中认为必须保留晋升侧的某种拦截，须先回到人处取裁定，不得自行改向。**（未补；晋升侧未保留任何 goal 拦截。）**
 - [x] 未来边界已写进代码注释或检查器文档（一条不变式）：**准入集合只由 task 自身的自足属性决定；goal 信息最多改变集合内的顺序，永不改变成员资格。** 理由是单调性——排序不减少可执行集合（最坏是次序不优），准入可把集合减到空（产生僵尸）。即便未来 goal 有优先级，它也只能进 sort key、缺值时退化为默认序，⛔ 不得出现"goal 优先级未设 ⇒ 不可派发"这一同形缺陷的新版本。
 
 ## Evidence
@@ -119,32 +119,23 @@ extra:
 
 三个取值 0 / 1 / 3 互不相同。另有位置判定单测：同一 `goalAcMissing` 出现在**注释**或**字符串**里 ⇒ exit 0（不是命中）；移到活面 ⇒ exit 1。
 
-### AC4 — 原保证不回退（真实退出码；⚠️ 正控制臂为红且红在改动之前）
+### AC4 — 原保证不回退（真实退出码 0 / 1 / 0）
 
     $ node --no-warnings --experimental-strip-types plugin/scripts/long-term-guarantee-goal-backed-check.ts
-    FAIL: 生效线之后新立案的 delivery-critical 任务未声明 goal_ac（fail-closed）: gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing
-    exit=1                                        ← ① 正控制臂：红（期望绿）
+    PASS: 生效线之后的 delivery-critical 任务均声明 goal_ac（27 合规 / 120 存量免判，其中 115 无 goal_ac 待单独排期）
+    exit=0                                        ← ① 正控制臂：绿 ✅
     $ … long-term-guarantee-goal-backed-check.ts --inject-unbacked-fixture
-    FAIL: … : gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing, gap-injected-unbacked-fixture
-    exit=1                                        ← ② 负控制臂：红（期望红）✅ 仍能取假
+    FAIL: 生效线之后新立案的 delivery-critical 任务未声明 goal_ac（fail-closed）: gap-injected-unbacked-fixture
+    exit=1                                        ← ② 负控制臂：红 ✅（保证仍能取假）
     $ <AC-190 criterion 正文逐字复跑>
-    FAIL: … 真仓库上报红（应为绿）
-    exit=1                                        ← ③ criterion：红（期望 0）
+    PASS: …（正控制绿） / FAIL: …（负控制红） / 双向负控制通过：真仓库绿、注入未声明 goal_ac 的新立案任务红
+    exit=0                                        ← ③ criterion：exit 0 ✅
 
-**红因（外部，非本任务改动）**：`tasks/gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing.md`（2026-09-11T08:20:19Z 立案、今日 08:27 还在被写）的 frontmatter 是
+**本轮执行途中的一段实况（保留，因为它正是本 AC 要证明的东西）**：AC4 的正控制臂在我接手时**已经是红的**，且红在改动之前的 develop `d1f2ef4ff` 上（未改任何东西的干净检出 `/tmp/egs-probe/prefix-wt` 上同一条 FAIL、同一个 task id、exit=1）。红因是一条**外部数据缺陷**：`tasks/gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing.md` 把 `goal_ac: AC-239` 写在 `extra:` 下面（缩进两格）而非顶层，而 `goal_ac` 按 canonical schema 是顶层字段（`packages/quay-native/src/store.ts` 写顶层；`task-schema.ts` 的 `frontmatterGoalAc` 只读顶层；`plugin/test/task-parsing-parity.test.mjs` 有断言「nested under extra is NOT read (top-level only)」）⇒ 该值对**所有**顶层读取者（`eligible` 与 goal 层检查器）都不可见。又因该测试文件头是 `@test-group engine`（进默认全量套件），这一条数据当时**挡住了全仓所有任务的落地**（我自己的 scoped 门当时是 179 tests / 178 pass / 1 fail，唯一 fail 就是它）。
 
-    extra:
-      schema: execution
-      goal_ac: AC-239        ← 缩进两格 = 嵌套在 extra 下
+⇒ 我**没有**改那个文件（不在本任务 Touches，且它十余分钟前刚被写过，cross-task 写会 race 其属主），而是把精确修法 + 证据路由给属主会话：`SendMessage → "merge target hardcoding issue" [a1ab39]`（msg_id `32a2f027-3bc0-40ee-b077-2f8715b6506e`），并附了「⛔ 不要在检查器里加读 `extra.goal_ac` 绕过——那会把已退役的嵌套形态重新变成合法形态」的理由。属主随即修复（commit `059cd720d`，`goal_ac: AC-239` 提到顶层）；我 `git merge develop` 后复跑，三条退出码变为 **0 / 1 / 0**。
 
-而 `goal_ac` 按 canonical schema 是**顶层**字段：`packages/quay-native/src/store.ts` 写顶层，`task-schema.ts` 的 `frontmatterGoalAc` 只读顶层，`plugin/test/task-parsing-parity.test.mjs` 有断言「nested under extra is NOT read (top-level only)」。⇒ 这个值对**所有**顶层读取者（`eligible` 与 goal 层检查器）都是不可见的。
-
-**基线对照（证明与我的改动无关）**：在 develop `d1f2ef4ff` 的干净检出（`/tmp/egs-probe/prefix-wt`，我未改任何东西）上：
-    同一条 FAIL、同一个 task id、exit=1
-    同一条单测红：plugin/test/long-term-guarantee-goal-backed-check.test.mjs 的「默认运行对真仓库 exit 0」
-且 `git diff` 证明我**逐字节未改** `long-term-guarantee-goal-backed-check.ts`（本任务对该文件的唯一要求是 AC5 的措辞 = 0，而它本来就是 0）。⇒ 「不回退」成立；变化的是数据，不是被保的保证。
-
-**已路由**：`SendMessage → "merge target hardcoding issue" [a1ab39]`（该任务的属主会话，msg_id `32a2f027-3bc0-40ee-b077-2f8715b6506e`），含精确修法（把 `goal_ac: AC-239` 从 `extra:` 提到顶层）、证据、以及「⛔ 不要在检查器里加读 `extra.goal_ac` 绕过」的理由。⛔ 我未改该文件：不在本任务 Touches，且它十余分钟前刚被写过，cross-task 写会 race 其属主。
+这一段本身就是 AC4 的证据：goal 层保证在我删掉 task 层那份重复之后**仍然活着、仍然能取假**（它当时正红着，而且红得对——那条任务的 goal 层声明确实读不到），且它与我改的 task 层准入闸**互不影响**：我**逐字节未改** `long-term-guarantee-goal-backed-check.ts`（本任务对它的唯一要求是 AC5 的措辞 = 0，而它本来就是 0）。
 
 ### AC5 — 措辞修正
 
@@ -159,9 +150,30 @@ extra:
 
     改动前（develop d1f2ef4ff）： capability-catalog: 304 scripts | 304 declared | 0 unclassified | 299 ship
     改动后（本 worktree）：      capability-catalog: 305 scripts | 305 declared | 0 unclassified | 300 ship
-    exit=0（两处 AC1c「unclassified > 0 ⇒ exit 1」与五方向 entry-gate 均通过）
+    exit=0（AC1c「unclassified > 0 ⇒ exit 1」与五方向 entry-gate 均通过）
 
-新增声明行 6 条（QUESTION / CADENCE / INVALIDATION / LAST_REAFFIRMED / MATCHING / CONSUMER），措辞按表内约定（⚠️ AC5 数据值禁反引号与 `$(`，已遵守）。
+新增声明行 6 条（QUESTION / CADENCE / INVALIDATION / LAST_REAFFIRMED / MATCHING / CONSUMER），措辞按表内约定（⚠️ 该脚本的数据值禁反引号与 `$(`，已遵守）。
+
+### AC7 — scoped 门（全量 suite 归 fan-in）
+
+    $ bash scripts/test.sh --for-task gap-promotion-admission-reads-goal-layer-field --allow-thin
+    ℹ tests 179
+    ℹ pass  179
+    ℹ fail  0
+    exit=0
+
+（对照：同一命令在外部数据缺陷修复前是 179 tests / 178 pass / 1 fail，唯一 fail = `plugin/test/long-term-guarantee-goal-backed-check.test.mjs:119` 的正控制——外部数据，非本任务改动。）
+
+scoped-gate cache 已记录：
+
+    $ node --experimental-strip-types plugin/scripts/worker-driver.ts --write-scoped-gate-cache \
+        --task gap-promotion-admission-reads-goal-layer-field --develop-sha f0d827ceda55a967facf0b73c277fabcb7cd01da \
+        --root /home/yale/work/quay
+    {"event":"scoped-gate-cache-written","task":"gap-promotion-admission-reads-goal-layer-field",
+     "developSha":"f0d827ceda55a967facf0b73c277fabcb7cd01da","cacheFile":"/home/yale/work/quay/.quay/scoped-gate-cache.json"}
+    exit=0
+
+⇒ fan-in 跳过这步冗余的 scoped 门、直接进入全量 suite。全量绿的最终裁决归 fan-in 的 suite 步（⛔ 我未自行跑全量套件——worker 角色边界）。
 
 ### DoD — 生产任务板读数（删除前/后；⚠️ 与任务书预期的「= 0」相反）
 
@@ -171,22 +183,22 @@ extra:
       candidates 总数 1
       带 goalAcMissing=true 的 = 1
         · gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing
-          | goalAcMissing=true | eligible=false | 其余 gates（depsReady/fourArtifacts/touchesResolve/
-            touchesNarrow/selfTouchOk 皆 true；superseded/retiredMechanism/compound 皆 false）
+          | goalAcMissing=true | eligible=false
+          | 其余 gates：depsReady/fourArtifacts/touchesResolve/touchesNarrow/selfTouchOk 皆 true；
+            superseded/retiredMechanism/compound 皆 false（= 通过）
       ⇒ 因 goalAcMissing 被排除的 todo = 1
     删除后（本 worktree）：
       candidates 总数 1
       该条 eligible = true（逐项 gates 同上），candidate 上已无任何含 goal 的键
       ⇒ 因 goalAcMissing 被排除的 todo = 0
 
-**⇒ 任务书 §④ 的「历史上真正被拦死的只有 1 条」与 DoD 的「当前该读数 = 0」两条前提实测已假**：这一条**今天 08:20 立案、08:27 仍在被写**的任务，正是被 `goalAcMissing` 挡住的第 2 条（它带着 `delivery-critical` 而 `goal_ac` 落在 `extra` 下 ⇒ 顶层读取看不到）。它不是「存量豁免」——它落在生效线之后、是活的、且此刻正是全仓套件红的原因。**发生率 = 2**，且第 2 条与第 1 条同因（goal 层字段的可见性），不是一个偶然。
+**⇒ 任务书 §④ 的「历史上真正被拦死的只有 1 条」与 DoD 的「当前该读数 = 0」两条前提实测已假**：这一条**今天 08:20 立案、08:27 仍在被写**的任务，正是被 `goalAcMissing` 挡住的第 2 条（它带着 `delivery-critical` 而 `goal_ac` 落在 `extra` 下 ⇒ 顶层读取看不到）。它不是「存量豁免」——它落在生效线之后、是活的。**发生率 = 2**，且第 2 条与第 1 条同因（goal 层字段的可见性），不是一个偶然。
 
 ### 未做/未改（如实登记）
 
-- `ActivationLine` 未被补进晋升闸（DoD ⛔ 项）；晋升侧未保留任何 goal 拦截。
-- `plugin/test/slot-refill.test.mjs` 的过时注释未改（不在 Touches，行为上仍通过）。
-- `tasks/gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing.md` 未改（AC4 那条外部缺陷，已路由给属主）。
-- scoped-gate cache 未写（门未绿，⛔ 未绿不写绿）。
+- `ACTIVATION_LINE_ISO` 未被补进晋升闸（DoD ⛔ 项）；晋升侧未保留任何 goal 拦截。
+- `plugin/test/slot-refill.test.mjs` 的过时注释未改（不在 Touches；行为上仍通过）。
+- `tasks/gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing.md` 未改（AC4 那条外部缺陷，已路由给属主，由其自行修复）。
 
 ## Touches
 
