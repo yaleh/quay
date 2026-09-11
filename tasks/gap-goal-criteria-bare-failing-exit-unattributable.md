@@ -42,6 +42,10 @@ AC-239 | verdict=fail | reason="acceptance failed (exit 1) — criterion wrote n
 3. **只许降不许升的棘轮**：基线锚定当前实测值（30），此后**任何新增或修改的判据不得增加该计数**。⛔ 不要求一次归零——那会让本条不可达（硬规则 12 同源：别用未测量的残差挡住可达目标）。
 4. **三态保留**：检查器读不到 `goals/` 或解析不了 criterion ⇒ `NOT-EVALUATED` 并退出码与「合格」不同形（硬规则 3b）。
 
+> **⚠️ 读数时效（以此块为准）**：下面各条的「续做轮复验」句写于当轮。**最终合并态**（develop 上 AC-161 的判据被另一任务修好并已并入）的实测读数为
+> **`inDomain=94 bareAcs=32 bareLines=54`，`fixed=["AC-161"]`，基线已按只许降不许升重新捕获为 `count=32`（`generatedAt=2026-09-11T12:02:01.417Z`），检查器 `status=pass` / `exit=0`**。
+> 凡下文出现 `33` / `57` 之处，皆为**当轮**读数；以本块与 `--json` 为准（硬规则 2：条数一律以机械读数为准）。
+
 ## Acceptance Criteria
 
 - [x] **AC1 缺陷存证（改前读数）**：生产台账（主检出 `.quay/goal-round.jsonl`）逐字 ——
@@ -49,6 +53,7 @@ AC-239 | verdict=fail | reason="acceptance failed (exit 1) — criterion wrote n
   机械枚举 `node --experimental-strip-types plugin/scripts/criterion-failure-attribution-check.ts --root . --json`：`inDomain=92 bareAcs=33 bareLines=57`，前 5 条 = `AC-157, AC-158, AC-160, AC-161, AC-162`。
   ⚠️ 立案写的「30」是 2026-09-11 05:5xZ 的读数；develop 此后新增在域 AC ⇒ 本轮实测 **33**。条数一律以 `--json` 为准（硬规则 2：非零计数须打印命中）。
   **2026-09-11 续做轮复验**：合并 develop 后在域数由 92 → **94**（develop 新增 AC-243 等），`bareAcs=33 / bareLines=57` 与基线**逐字不变**；`--json` 的 `ids` 前 5 条仍为 `AC-157, AC-158, AC-160, AC-161, AC-162`。inDomain 不是棘轮量（只有 `bareAcs` 是），其漂移不触发判定。
+  **2026-09-11 最终合并态**：develop 上 **AC-161 的判据已被另一任务修好并并入** ⇒ 枚举器报 `fixed=["AC-161"]`、`bareAcs` **32**、`bareLines` **54**，`AC-161` 已从 `ids` 中消失。**这正是棘轮「只许降不许升」被真正用上一次的实证**（不是断言，是读数）。
 
 - [x] **AC2 止血且语义不变（能取假）**：AC-239 criterion 的两条失败出口各补一句成因、且两句**互不相同** ——
   `:48` `"AC-239 CAUSE-A: no anchorable upgrade site — the carrier holds no …"`（`upgraded` 集合为空）、
@@ -57,23 +62,24 @@ AC-239 | verdict=fail | reason="acceptance failed (exit 1) — criterion wrote n
   · 改前（`git show develop:goals/AC-239-*.md` 抽 criterion）⇒ `exit=1`，stderr **空**；
   · 改后（本分支）⇒ `exit=1`，stderr = `AC-239 CAUSE-B: 2 upgrade site(s) ARE anchored by AC-238 on this carrier (/home/yale/quay-verify-upgrade-1c202737-root,/home/yale/quay-verify-upgrade-9eda8c70-root), but no ac=GOAL-009-AC-239 external record exists on any of them (need commit_sha, task_id, task_status=done, gate_events>0, produced_by_driver=true). The site is known; its post-upgrade driver run has simply not happened yet.`
   ⇒ 退出码 **1 → 1 相同**，只改诊断，判定语义未动。
-  **2026-09-11 续做轮复验**：合并 develop 后 `grep -c "CAUSE-A\|CAUSE-B" goals/AC-239-*.md` = **2**，两分支文本互相不同且与 `git diff develop...HEAD` 的 hunk 一致。
+  **续做轮复验**：合并 develop 后 `grep -c "CAUSE-A\|CAUSE-B" goals/AC-239-*.md` = **2**，两分支文本互相不同且与 `git diff develop...HEAD` 的 hunk 一致。
 
 - [x] **AC3 台账上真的可归因（⛔ 夹具不算）**：用**真 goal-driver** `node --experimental-strip-types plugin/scripts/goal-driver.ts --root <worktree> --once --spawn-cap 0`（criterion 经 `goal-store gate` 真跑、真写 GateEvent）在真载体上跑一轮，落轮记录逐字：
   `{"round":1,"run_id":"ac241-evidence-3103552","ts":"2026-09-11T07:25:16.485Z"} | AC-239 verdict=fail | reason="acceptance failed (exit 1) — AC-239 CAUSE-B: 2 upgrade site(s) ARE anchored by AC-238 on this carrier (…) …"`
   同轮 `AC-241` 的 reason 由「AC-161: …; AC-239: …」收缩为「AC-161: …」——**AC-239 已从「不可归因」名单中消失**。
   ⚠️ 交付说明（读者须知）：worktree 的 `.quay/` 由 `scripts/test.sh` 的 `refresh-worktree-quay` 从主检出刷新（本轮实测：刷新后该轮即不在），故该记录在 worktree 上是**瞬时**的，上面已逐字留档；生产 root 上的同名记录在 fan-in 落地后由常驻 goal-driver 写出。
 
-- [x] **AC4 检测器存在且能取假**：`plugin/scripts/criterion-failure-attribution-check.ts` 对当前仓库报 `bareAcs=33`（= `docs/analysis/criterion-failure-attribution.baseline.json` 的 `count`；基线由 `--capture` 从真实枚举生成，`generatedAt=2026-09-11T06:24:46.389Z`）。
+- [x] **AC4 检测器存在且能取假**：`plugin/scripts/criterion-failure-attribution-check.ts` 对当前仓库报 `bareAcs=33`（= 当轮 `docs/analysis/criterion-failure-attribution.baseline.json` 的 `count`；基线由 `--capture` 从真实枚举生成）。
   注入一条带裸失败退出的夹具判据（`AC-990-injected-fixture.md`，criterion = `python3 - <<P / sys.exit(1) / P`）⇒ `bareAcs=34 > baseline 33 (delta +1)`、`exit=1`；移除 ⇒ `bareAcs=33`、`exit=0`。
   三次读数 **33 / 34 / 33**（退出码 **0 / 1 / 0**）。接线：`plugin/scripts/runner-static-gate.ts`（`@static-tier change`）+ `plugin/scripts/capability-catalog.sh` + `plugin/scripts/checker-mutation-cases/criterion-failure-attribution-check.sh` + 单测 `plugin/test/criterion-failure-attribution-check.test.mjs`（11/11 pass）。
-  **2026-09-11 续做轮复验**：合并 develop 后重跑三次读数仍为 **33 / 34 / 33**（`status` pass / fail / pass；`ids` 尾部新增的正是 `AC-990`）。⚠️ 单测数由 11 → **14**（本轮新增值位屏蔽的负控制与两条正控制，见下「本轮补充说明」③）。接线复验：`runner-static-gate.ts:655` 仍以 `--root` 跑本检查器、`:654` 的 `@static-object` 四项仍在；`capability-catalog.sh` 自报 `summary: 308 scripts | 308 declared | 0 unclassified`。
+  **续做轮复验**：合并 develop 后在域数 92 → 94、`bareAcs` 与基线**逐字不变**（33），重跑三次读数仍为 **33 / 34 / 33**（`status` pass / fail / pass；`ids` 尾部新增的正是 `AC-990`）。单测数由 11 → **14**（新增值位屏蔽的负控制与两条正控制，见「本轮补充说明」③）。接线复验：`runner-static-gate.ts:655` 仍以 `--root` 跑本检查器、`:654` 的 `@static-object` 四项仍在；`capability-catalog.sh` 自报 `summary: 308 scripts | 308 declared | 0 unclassified`。
+  **最终合并态复验（读数下移，机制不变）**：AC-161 被另一任务修好并入 ⇒ 基线重新捕获为 **32**（`generatedAt=2026-09-11T12:02:01.417Z`），三次读数相应变为 **32 / 33 / 32**（实测：注入 `AC-990` ⇒ `bareAcs=33 > baseline 32`、`delta=1`、`added=["AC-990"]`、`status=fail`、`exit=1`；移除 ⇒ `bareAcs=32`、`status=pass`、`exit=0`）。**这正是本条要的「能取假」**：计数随盘上内容动，既不是常量、也不被基线挡死。
 
 - [x] **AC5 棘轮生效（能取假）**：基线写入后人为让计数 +1 ⇒ 检查器报红 ——
   `FAIL: criterion failure attribution REGRESSED: bareAcs=34 > baseline 33 (delta +1); new bare-failure-exit AC(s): AC-990 — a failing criterion must write its cause to stderr/stdout`，`exit=1`；
-  恢复 ⇒ `PASS: criterion failure attribution intact: inDomain=92 bareAcs=33 ≤ baseline 33 (bareLines=57)`，`exit=0`。
-  两次退出码 **1 / 0**。同一条也被 mutation case 钉进套件（注入不红 ⇒ `exit 3 STAYED-GREEN`）。
-  **2026-09-11 续做轮复验**：mutation case 以 `<workdir>` 实跑 `RC=0`（A 基线绿 / B 注入必红 / C 恢复绿 / D 不可读 ⇒ exit 3 三态互异）。
+  恢复 ⇒ `PASS: … bareAcs=33 ≤ baseline 33 …`，`exit=0`。两次退出码 **1 / 0**。同一条也被 mutation case 钉进套件（注入不红 ⇒ `exit 3 STAYED-GREEN`）。
+  **续做轮复验**：mutation case 以 `<workdir>` 实跑 `RC=0`（A 基线绿 / B 注入必红 / C 恢复绿 / D 不可读 ⇒ exit 3 三态互异）。
+  **最终合并态复验**：本例的 **shrink 方向** 也被真实用上一次（AC-161 修好 ⇒ 计数 33 → 32）—— 棘轮「只许降」不只写在注释里，而是被一个真实事件走过；见「本轮补充说明」⑤。
 
 - [x] **AC6 三态可区分**：`goals/` 不可读 ⇒ `NOT-EVALUATED: … the goals dir (…) could not be read: ENOENT: no such file or directory, scandir '…' (a checker that cannot read its input is never conflated with "no bare failure exits")`，`exit=3`；合格 ⇒ `exit=0`；报红 ⇒ `exit=1` ⇒ **三者互不相同**。另：基线缺失/畸形同样 `exit=3`，不静默降级为「≤ baseline」。
 
@@ -82,14 +88,15 @@ AC-239 | verdict=fail | reason="acceptance failed (exit 1) — criterion wrote n
   实测：
   · `before`（生产台账副本 07:14:51，AC-239 未修）⇒ `unattributable failing goal AC(s): AC-161: acceptance failed (exit 1); AC-239: acceptance failed (exit 1) — criterion wrote no output to stderr/stdout`，`exit=1`；
   · `after`（AC-239 已可归因）⇒ `unattributable failing goal AC(s): AC-161: acceptance failed (exit 1)`，`exit=1`。
-  **根因不在本任务授权面内**：AC-161（goal GOAL-003，已 achieved、非 `long-term`、其 goal 已非 active ⇒ 无任何机制复验它）的台账尾事件是旧格式 `acceptance failed (exit 1)`（2026-09-07，无 `— ` 成因段），而 AC-241（**develop 版**，取自已落地的 `gap-meta-withfailureoutput`）把「整条正文剥掉 acceptance-failed 前缀后为空」也判为空因 ⇒ AC-161 永久命中。**该阻塞项已由 loop 自己立案为 goal AC-242**（`goals/AC-242-台账不得留下-已离开复验域却尾事件为-fail-的-ac-…md`，status active），其 origin 逐字点名本任务 AC7「按现有计划不可满足」，并指出本任务 Touches 不含 `goals/AC-161-*.md` ⇒ 授权面内改不到；且 AC-161 的 criterion 即使补上成因也不会产生新台账记录（GOAL-003 不在环内）。⇒ **AC7 须在 AC-242 的机制落地后重跑**；本轮不勾（不勾未满足的判据）。
-  **2026-09-11 续做轮复验**：合并 develop 后 `goals/AC-242-*.md` 仍为 `status: active`（**未落地**）⇒ 本条的阻塞前提未变。本轮以 AC-241 的**develop 版 criterion** 对**生产台账**（主检出 `.quay/gate-events.jsonl`，只读干跑）复现：`unattributable failing goal AC(s): AC-161: acceptance failed (exit 1); AC-239: acceptance failed (exit 1) — criterion wrote no output to stderr/stdout`，`exit=1` —— AC-239 仍留在生产台账上（本分支的修复尚未落地；落地后需由常驻 goal-driver 跑出新记录才会消失），而 **AC-161 与 AC-239 的处置是完全不同的两回事**：前者由 AC-242 承接（外部），后者正是本任务已修好的那一条。⇒ 残留部分**只依赖外部事件**，故本条标注为（待外部），⛔ 不勾。
+  **根因不在本任务授权面内**：AC-161（goal GOAL-003，已 achieved、非 `long-term`、其 goal 已非 active ⇒ 无任何机制复验它）的台账尾事件是旧格式 `acceptance failed (exit 1)`（2026-09-07，无 `— ` 成因段），而 AC-241（**develop 版**，取自已落地的 `gap-meta-withfailureoutput`）把「整条正文剥掉 acceptance-failed 前缀后为空」也判为空因 ⇒ AC-161 永久命中。**该阻塞项已由 loop 自己立案为 goal AC-242**（status active），其 origin 逐字点名本任务 AC7「按现有计划不可满足」，并指出本任务 Touches 不含 `goals/AC-161-*.md` ⇒ 授权面内改不到；且 AC-161 的 criterion 即使补上成因也不会产生新台账记录（GOAL-003 不在环内）。⇒ **AC7 须在 AC-242 的机制落地后重跑**；本轮不勾（不勾未满足的判据）。
+  **续做轮复验**：`goals/AC-242-*.md` 仍为 `status: active`（**未落地**）⇒ 阻塞前提未变。以 AC-241 的 develop 版 criterion 对生产台账（主检出 `.quay/gate-events.jsonl`，只读干跑）复现，逐字同上（AC-161 + AC-239，`exit=1`）。
+  **最终合并态复验（关键：AC-161 的判据被修 ≠ AC-161 不再被点名，两者是不同的量）**：develop 上 AC-161 的 **criterion 文本**确已修好（枚举器报 `fixed=["AC-161"]`，即它此后失败会写出成因），但 AC-241 点名的量是**台账里那条已存在的旧记录**（2026-09-07 写入、无成因段）——**改文本不会改写历史记录**。最终合并态下对生产台账与 worktree 台账各跑一次，**两者逐字相同**：`unattributable failing goal AC(s): AC-161: acceptance failed (exit 1); AC-239: acceptance failed (exit 1) — criterion wrote no output to stderr/stdout`，`exit=1`。⇒ 残留部分**只依赖外部事件**（AC-242 的机制），故本条标注为（待外部），⛔ 不勾。
 
 - [ ] **AC8 全量套件绿 —— 外层 verification-round 验证**（worker 结构上被禁跑全量 suite；本条的量的产生处是 fan-in/外层的 suite 轮，⛔ 不是 worker 自己的读数）
-  本轮为 1 条既有红（与本 delta 无关），故不勾：`bash scripts/test.sh`（全量，HEAD=`8bb042db2`）`RC=1`，唯一失败是
+  上轮为 1 条既有红（与本 delta 无关），故不勾：`bash scripts/test.sh`（全量，HEAD=`8bb042db2`）`RC=1`，唯一失败是
   `packages/quay/test/gap-git-graph-task-view-aggregate-commits-by-task-id.test.mjs:161` AC6 —— `group count (8) == subject-mention count (9)`。
-  归因（可复核）：该断言把「任务视图分组合并后的条数」与「同一 `--all -n 500` 窗口内 subject 提及该 id 的条数」对等，而分组**排除 merge**；本轮最新 done 任务 `gap-develop-sync-reset-hard-destroys-third-party-project-tree` 在窗口内有 2 条 merge（`a536cec8f`、`59c68db96`）。**同一条红在 develop 单独取窗口时同样成立**（`git log develop -n 500 --format=%s | grep -c <id>` = **9**）、在**主检出**复跑结果逐字相同（8 vs 9），而本 delta 不触碰 `packages/quay/src` 的 git-graph 代码或其测试。⇒ 既有、窗口依赖的脆弱断言，不是本次改动引入的红（fan-in 的「不产生新红」判据在此成立）。
-  **2026-09-11 续做轮复验（上次的归因已过期，此处更正，⛔ 不保留失效读数）**：合并 develop（106 提交）后，该测试在 worktree 上**单跑 7/7 全绿**（含 AC6）—— 即「窗口依赖」的推断成立：窗口内容一变，8 vs 9 的错配就消失了。⇒ 上段那条红的**具体归因不再复现**，不应继续被当作本任务的阻塞证据；**本 delta 是否产生新红，仍只能由 fan-in 的 suite 轮判定**（这正是本条标注为外层验证的理由）。本轮的 scoped 门 `bash scripts/test.sh --for-task gap-goal-criteria-bare-failing-exit-unattributable --allow-thin` **绿**（`PIPESTATUS[0]=0`，30/30 tests pass），这只覆盖 delta 相关的子集，**不等于**全量绿（CLAUDE.md：「一次绿的 `scripts/test.sh` 不是这两类的证据」）。
+  归因（可复核）：该断言把「任务视图分组合并后的条数」与「同一 `--all -n 500` 窗口内 subject 提及该 id 的条数」对等，而分组**排除 merge**；当时最新 done 任务 `gap-develop-sync-reset-hard-destroys-third-party-project-tree` 在窗口内有 2 条 merge（`a536cec8f`、`59c68db96`）。⇒ 既有、窗口依赖的脆弱断言，不是该轮改动引入的红。
+  **续做轮复验（上次的归因已过期，此处更正，⛔ 不保留失效读数）**：合并 develop（106 提交）后，该测试在 worktree 上**单跑 7/7 全绿**（含 AC6）—— 即「窗口依赖」的推断成立：窗口内容一变，8 vs 9 的错配就消失了。⇒ 上段那条红的**具体归因不再复现**，不应继续被当作本任务的阻塞证据；**本 delta 是否产生新红，仍只能由 fan-in 的 suite 轮判定**（这正是本条标注为外层验证的理由）。本轮 scoped 门 `bash scripts/test.sh --for-task gap-goal-criteria-bare-failing-exit-unattributable --allow-thin` **绿**（`RC=0`，30/30 tests pass），这只覆盖 delta 相关的子集，**不等于**全量绿（CLAUDE.md：「一次绿的 `scripts/test.sh` 不是这两类的证据」）。
 
 ## Definition of Done
 
@@ -97,15 +104,18 @@ AC-239 | verdict=fail | reason="acceptance failed (exit 1) — criterion wrote n
 
 ## 本轮补充说明（给 fan-in / 下一位 worker）
 
-1. **AC-241 判据文件的合并解 = 取 develop 版**（`git checkout develop -- goals/AC-241-*.md`）。本分支早先那版（锚定 `^…$` 整条模板）与 develop 上 `gap-meta-withfailureoutput` 刚落地的版本（按**整条正文**分类）是**同一个洞的两个实现**，develop 版是严格超集（它还多抓 `acceptance failed (exit 1)` 这类前缀型空因）；按合并规则「不得静默丢掉 develop 的改动」，取 develop 版。本分支因此**不再修改** AC-241 判据文件（Touches 里那一条保留为「已声明」）。
-2. **本轮新修的一个自造缺陷（已撤）**：`runner-static-gate.ts` 原先把 `goals/` 登记为 `@static-object`，而 `isDocPath` 的注册表覆盖**先于** `DOC_SURFACES` 生效 ⇒ 整个 `goals/` 面由 doc 翻成 CODE，打红 `plugin/test/fan-in-execute-paths.test.mjs` 的「① REAL doc delta」（`pure-doc delta must produce empty code_delta, got: "goals/AC-999-fake.md"`）。已撤掉该目录 glob 并把代价写进该处注释（只改 goals/ 的分支 code_delta 为空 ⇒ 跳过全量 suite ⇒ 那一轮本检查器不跑）。
-3. **2026-09-11 续做轮：棘轮在 develop 的新内容上报了一个【我的检测器的假阳性】，已修**（⛔ 不是把检测器放宽，是把误报改对）——
-   · **显形**：合并 develop 后 `bareAcs` 由 33 → **34**、`delta=+1`、`added=["AC-243"]` ⇒ 检查器（连同 `plugin/test/…:211` 的「COMMITTED baseline gates the REAL repo at exit 0」）报红，**挡住本任务落地**。新增的那条是 develop 刚落地的 `goals/AC-243-*.md`（status 已 achieved、fidelity faithful）。
-   · **根因（我的检测器的假阳性，非 AC-243 的缺陷）**：AC-243 的三条失败出口（`:22`/`:28`/`:30`）**都写 stderr**，它结构上不可能在台账留下不可归因的 fail；被命中的是它**传给 runner 的参数字符串** `command:"exit 1"` —— 那是**数据**，不是该判据执行的失败退出。检测器原文的「引号串一律不屏蔽」是为了保住 `bash -c "exit 1"`（那里引号前是 `c`，真的会退出），而值位（`key:`/`key=` 之后）的引号串是**交给 API 的数据**，两者语义不同。
-   · **修法**：新增 `maskValueStrings`，只屏蔽**值位**引号字面量；含命令替换的值位串（`x="$(exit 1)"`、`` x=`exit 1` ``）**仍不屏蔽**（屏蔽会制造假阴性——更贵的错）。实测该规则**恰好只放掉 AC-243 那 1 行**，其余 57 行裸退出**全部保留** ⇒ `bareAcs` 34 → **33** = 基线，绿。**基线未动**（仍是 33、`generatedAt` 不变）——因为基线本来就没有 AC-243（它是在基线生成之后才落地的）。
-   · **`（待外部）` 记号不是为了让门放过而加的**：AC7 的残留（AC-161）由**另一个已立案、仍 active 的 goal AC（AC-242）**承接，AC8 的量（全量 suite 绿）结构上由 **fan-in/外层的 suite 轮**产生、worker 被禁跑 —— 两者都精确落在 `isExternalVerificationItem` / `isOuterVerificationItem` 的既定词表内（`（待外部）` = 「只依赖外部事件（suite 绿 / 外层复验 / 别人的合并）」）。若把这两条按「本任务自己的剩余实现」留着不注记，本任务将**结构上永不落地**，而那正是这个注记机制存在的理由。
-   · **同轮发现但刻意【不】处理的一处既有过度上报（已记进代码注释，⛔ 不是静默忽略）**：`ATTRIBUTION_RE` 只认 stderr/`>&2`/`console.error`，而 `acceptance-runner.ts:134-143` 在 stderr 为空时会**回退到 stdout** ⇒ 33 条基线里有 **7 条**（AC-189/190/191/196/198/199/200）只因用 `echo`/`console.log` 就被判为裸。**刻意不放宽成 `echo`**：`echo` 是命令名而非流标记，放宽会把 `if echo x | grep -q y; then exit 1; fi` 这类**真实裸退出**吞掉（假阴性），而过度上报只是控告一条本可归因的判据——两个方向的代价不对称，保守方向保留，且其规模已写进注释而非隐藏。
-4. **本轮 touched 的一个自造缺陷（被 scoped 门当场抓到，已修）**：往 `capability-catalog.sh` 的目录条目里写反引号会被该脚本在**加载时**当命令替换执行，并被 `--superseded-check` 的 AC5 判红。已改为不带反引号的文本。
+1. **AC-241 判据文件的合并解 = 取 develop 版**（`git checkout develop -- goals/AC-241-*.md`）。本分支早先那版与 develop 上 `gap-meta-withfailureoutput` 落地的版本（按**整条正文**分类）是**同一个洞的两个实现**，develop 版是严格超集（还多抓 `acceptance failed (exit 1)` 这类前缀型空因）；按合并规则「不得静默丢掉 develop 的改动」，取 develop 版。本分支因此**不再修改** AC-241 判据文件（Touches 里那一条保留为「已声明」）。
+2. **本轮新修的一个自造缺陷（已撤）**：`runner-static-gate.ts` 原先把 `goals/` 登记为 `@static-object`，而 `isDocPath` 的注册表覆盖**先于** `DOC_SURFACES` 生效 ⇒ 整个 `goals/` 面由 doc 翻成 CODE，打红 `plugin/test/fan-in-execute-paths.test.mjs` 的「① REAL doc delta」。已撤掉该目录 glob 并把代价写进该处注释（只改 goals/ 的分支 code_delta 为空 ⇒ 跳过全量 suite ⇒ 那一轮本检查器不跑）。
+3. **续做轮：棘轮在 develop 的新内容上报了一个【我的检测器的假阳性】，已修**（⛔ 不是把检测器放宽，是把误报改对）——
+   · **显形**：合并 develop 后 `bareAcs` 由 33 → **34**、`delta=+1`、`added=["AC-243"]` ⇒ 检查器报红，**挡住本任务落地**。新增的那条是 develop 刚落地的 `goals/AC-243-*.md`（status 已 achieved、fidelity faithful）。
+   · **根因（我的检测器的假阳性，非 AC-243 的缺陷）**：AC-243 的三条失败出口（`:22`/`:28`/`:30`）**都写 stderr**，它结构上不可能在台账留下不可归因的 fail；被命中的是它**传给 runner 的参数字符串** `command:"exit 1"` —— 那是**数据**，不是该判据执行的失败退出。检测器原文的「引号串一律不屏蔽」是为了保住 `bash -c "exit 1"`（引号前是 `c`，真的会退出），而值位（`key:`/`key=` 之后）的引号串是**交给 API 的数据**。
+   · **修法**：新增 `maskValueStrings`，只屏蔽**值位**引号字面量；含命令替换的值位串（`x="$(exit 1)"`、`` x=`exit 1` ``）**仍不屏蔽**（屏蔽会制造假阴性——更贵的错）。实测该规则**恰好只放掉 AC-243 那 1 行**，其余裸退出**全部保留** ⇒ 计数回到基线，绿。
+4. **续做轮 touched 的一个自造缺陷（被 scoped 门当场抓到，已修）**：往 `capability-catalog.sh` 的目录条目里写反引号会被该脚本在**加载时**当命令替换执行，并被 `--superseded-check` 的 AC5 判红。已改为不带反引号的文本。
+5. **最终合并态：棘轮的【收缩方向】被一次真实事件走过，并暴露了一个会在「最好的事件」上变红的断言（已修）** ——
+   · develop 上 AC-161 的判据被另一任务修好并并入 ⇒ 枚举器报 `fixed=["AC-161"]`、live 计数 **33 → 32**。**这是好事**（棘轮只许降），但它同时暴露两处：
+   · **① 基线停在 33 ⇒ 棘轮留下一个静默的洞**：此后任何一条**新**裸失败退出只要落到 33 就等于基线 ⇒ 绿、无告警（`≤` 判定）。基线按设计由 `--capture` 从真实枚举生成、只许降不许升 ⇒ **重新捕获为 32**（`inDomain=94 bareLines=54`），把洞补上。⛔ 这不是「放宽检测器使计数归零」（DoD 禁止的那条）：把基线**压低**是收紧棘轮，方向相反。
+   · **② `plugin/test/criterion-failure-attribution-check.test.mjs` 里 `assert.equal(out.bareAcs, committed.count)` 是个结构上会在「最好的事件」上变红的断言**：棘轮既然是只许降的，**任何**任务修好一条判据都会让 live < baseline ⇒ 该测试红，而检查器本身正确地是绿的（实测就是这一次）。这正是硬规则 4b 的反面教材——它测的不是「检查器对不对」，而是「后来又没人修好东西」。改为 `out.bareAcs <= committed.count`（棘轮成立），并把它原本的**防漂移**意图挪到正确的量上：CLI 报的数必须等于对 `goals/` 的一次**独立枚举**（`enumerateBareFailureExits` 的库入口）——仍然钉死「不是谁手打的一个常量」，但不再惩罚合法收缩。
+   · 单测 **14/14**；mutation case `RC=0`；scoped 门 `RC=0`（30/30）。
 
 ## Touches
 

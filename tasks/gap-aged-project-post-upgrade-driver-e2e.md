@@ -12,6 +12,8 @@ depends_on:
   - gap-aged-third-party-project-quay-upgrade-verification
   - gap-develop-sync-reset-hard-destroys-third-party-project-tree
   - gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing
+  - gap-upgrade-entry-never-establishes-branch-model
+  - gap-upgrade-verify-transport-missing-binding-checker
 goal_ac: AC-239
 ---
 ## Finding
@@ -125,31 +127,47 @@ Stage 4 — 缺陷分流：若过程中发现新的真实缺陷（不同于本�
       > **2026-09-11 本轮追加**：本轮 e2e 另在 `/home/yale/quay-verify-upgrade-289a49dc-root` 上产出了
       > 第三条通过型 AC-238 记录（07:15:17Z，`pre=post=102`、`runtime_replaced=true`、`task_list_ok=true`），
       > 该记录先在远端 evidence 载体，随本轮传输侧收尾一并取回。
+      > **2026-09-11 续做轮追加**：`depends_on` 的三条前置**现在全部 status=done**
+      > （`gap-aged-third-party-project-quay-upgrade-verification`、`gap-develop-sync-reset-hard-destroys-`
+      > `third-party-project-tree`、`gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing`）
+      > —— 即本 AC 的前置条件已满足且不再是卡点。
 - [ ] 在该 project_root 上，目标项目自己的 `*-drivers` 驱动出一条**真实缺陷修复任务**到 done
       （meta-cc `include_subagents` 对显式 `session_id` 静默失效的修复），真实 git 提交存在
-      > ⛔ **仍未达成**，但卡点已从上一轮的「驱动被中途摧毁」**前移到最后一哩（落地闸门）**。2026-09-11
-      > 本轮真机 e2e（新副本 `/home/yale/quay-verify-upgrade-289a49dc-root`）实测，该副本**自己的**
-      > drivers 把这条任务驱动到了 fan-in 之前：
-      > - 任务被真实创建、被该项目的 promotion-driver 真实晋升 `todo→ready`；
-      > - worker 被真实 spawn（对**活 worker 进程** `/proc/<pid>/environ` 直读：PATH 首项 =
-      >   `/home/yale/go-sdk/bin`）；
-      > - **worker 真的实现了修复并提交**：`d8598f7 fix(mcp): honor include_subagents on the explicit
-      >   session_id path`，`+217/-16`，4 个文件（`internal/mcp/query/query.go`、
-      >   `internal/mcp/executor/provider_query.go`、以及两个新增/修改的测试
-      >   `internal/mcp/query/query_files_test.go`、`internal/mcp/executor/query_session_subagents_test.go`），
-      >   相关包 `go test` 绿（`ok query` / `ok executor`）。
-      > - **倒在落地闸门**：该副本 worker-driver 的机械 fan-in 步骤轨迹
-      >   （`.quay/fan-in-ac239-subagent-session-id-scan-wk-prod-*.log`）：
-      >   `{"step":"merge-develop","exit":0,"ok":true}` →
-      >   `{"step":"anti-drift","exit":1,"wall_ms":525,"ok":false,"reason":"ANTI-DRIFT HARD FAIL:
-      >   task ac239-subagent-session-id-scan — 1566 violation(s)"}` ⇒ `task_status` 停在 `ready`。
-      > - 根因已实测定位并另立任务（见最后一条）：fan-in 的合并/落地基线**硬编码 `develop`**，而该副本的
-      >   `develop` 是一支远古分叉（`d95dac8`，2025-10-14；`tasks/*.md` = **0** 个；`main` 领先 merge-base
-      >   **571** 提交）⇒ anti-drift 的 `git diff --name-only develop...HEAD` = **1566** 文件，
-      >   **结构上不可能**被任何 `## Touches` 覆盖。
-      > ⇒ 这是**产品缺陷导致的失败**，⛔ 不是「worker 没实现」这种更弱的归因（实现物在盘上、可核）。
-      > 详见 `/home/yale/work/quay/tasks/gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing.md`。
-      > ⚠️ 上一轮的读数（被 `git reset --hard develop` 摧毁任务板）保留在下方 DoD 里，不回溯覆写。
+      > ⛔ **仍未达成**。**2026-09-11 续做轮把卡点拆清楚了：不是一个「落地闸门」，是【两条互相独立的
+      > 产品缺陷】——两条都已另立任务（见最后一条 AC）**，⛔ 两者都不是「worker 没实现」这种更弱的归因。
+      > **直接量一：三份升级副本的落地基线全部不可用（本机直连 orangevps 的 git 输出）**
+      > ```
+      > 副本(orangevps $HOME)                      默认分支  develop    ancestor(main,develop)  develop 上 tasks/*.md
+      > quay-verify-upgrade-9eda8c70-root  (AC-238 通过)  main   d95dac8    FALSE                0
+      > quay-verify-upgrade-1c202737-root (AC-238 通过)  main   d95dac8    FALSE                0
+      > quay-verify-upgrade-289a49dc-root (AC-238 通过)  main   d95dac8    FALSE                0
+      > ```
+      > 三份均无 `origin/HEAD`、无 `master`；`develop` 停在 `d95dac8`（2025-10-14），其 merge-base 之后
+      > `main` 前进了 553–589 个提交。`merge-base --is-ancestor main develop` = FALSE **就是
+      > `packages/quay/src/branch-model.ts:classifyBranch` 的兼容性谓词本身** ⇒ `classifyBranch(develop)`
+      > = **divergent** ⇒ 三份副本的 `develop` 全部**不可用作落地基线**（`worker-driver.ts` 的
+      > `opts.mergeTarget ?? "develop"`，项目侧无旋钮）。
+      > **且不止本任务的人工任务**：meta-cc **自己既有的** `DIR-100` 在同一副本上以同一形态失败——
+      > `.quay/fan-in-DIR-100-wk-prod-1789111230.log`：`{"step":"anti-drift","exit":1,"reason":
+      > "ANTI-DRIFT HARD FAIL: task DIR-100 — 1566 violation(s)"}`（08:37:47Z，与人工任务 ac239 的
+      > 08:14:29Z 同形）⇒ **该副本上任何任务都落不了地**。
+      > ⇒ 成因**前移一层**：不是「anti-drift 报 1566」本身，而是**交付/升级入口 shipped `quay-init.sh`
+      > 从不建立分支模型**（对 `adopt` 的 grep 命中数 = 0），于是 blocker 任务给出的 remedy
+      > （`quay init --force --adopt-branch-model`）**对真实用户不可达** ⇒ 另立任务 ④。
+      > **直接量二（本轮新增的第二条独立卡点）**：`verify-deliver-coldstart.sh` 的 `binding_state()` 调的
+      > `provider-binding-resolvability-check.ts` **不在** `develop-deliver-tgz.sh` 的 scp 枚举里（该枚举
+      > 逐字只有 7 个文件），且它 `import { parse as parseYaml } from "yaml"`（裸 npm 说明符，远端
+      > `$HOME/node_modules` 不存在）⇒ 远端**恒 `unreadable`** ⇒ AC-238 的门
+      > `[ "$AC238_POST_BINDING" = "path-resolved" ]` **结构上不可能通过** ⇒ AC-238 记录写不出 ⇒ ⑦b 的
+      > 前置（`AC238_EVALUATED=1` ∧ 同一 root）**永不成立** ⇒ 另立任务 ⑤。
+      > **实测现场（orangevps `$HOME`，上一次 verify-upgrade 留下的布局）**：七个随行 sibling 都在；
+      > `ls provider-binding-resolvability-check.ts` ⇒ `No such file or directory`；
+      > `ls -d $HOME/node_modules/yaml` ⇒ `No such file or directory`；
+      > 直接 `node --experimental-strip-types "$HOME/provider-binding-resolvability-check.ts"` ⇒
+      > `Error: Cannot find module`。
+      > ⇒ **本 AC 的达成同时依赖 ④ 与 ⑤**（两条已写入 `depends_on`，见下方 DoD 最后一条）。
+      > ⚠️ 上一轮「worker 真的实现了修复并提交 `d8598f7`（+217/-16，4 文件，`go test` 绿）却倒在
+      > anti-drift」那一半读数**仍然成立**，只是它现在被定位为**结果**而不是**根因**。
 - [x] 该修复任务自身带有可机械验收的判据（新增/修改测试用例，修复前失败、修复后通过）
       > 实测：`--ac239-e2e` 步骤在升级后副本里真实创建的 `ac239-subagent-session-id-scan` 任务体带四条
       > 可机械验收的 AC（① 新增/修改的 Go 测试在修复前 FAIL、修复后 PASS 且两条真实输出贴回；
@@ -162,40 +180,60 @@ Stage 4 — 缺陷分流：若过程中发现新的真实缺陷（不同于本�
       `task_id` 非空，`task_status=done`，`gate_events>0`，`produced_by_driver=true`）已取回本机
       `.quay/productization-verification.jsonl`
       > ⛔ **仍未达成**——`task_status=done` 从未成立（任务停在 fan-in 的 anti-drift 硬失败），因此 AC-239
-      > 记录按设计 fail-closed **未写出**、也未取回。**本轮实测读数**：
-      > `.quay/productization-verification.jsonl` 中 `ac=GOAL-009-AC-239` 的记录数 = **0**
-      > （`ac=GOAL-009-AC-238` = 2 条，roots `9eda8c70` / `1c202737`）；远端
-      > `/home/yale/quay-verify-upgrade-evidence-289a49dc.jsonl` = **1 行（只有 AC-238）**。
+      > 记录按设计 fail-closed **未写出**、也未取回。**2026-09-11 续做轮实测读数**：
+      > `.quay/productization-verification.jsonl` 中 `ac=GOAL-009-AC-239` 的记录数 = **0**；
+      > `ac=GOAL-009-AC-238` = **3** 条（roots `9eda8c70` / `1c202737` / `289a49dc`，host=orangevps）。
       > ⛔ 没有用任何绕过手段补一条记录：`write_ac239_record` 与 `check_upgrade_pairing` 都是 fail-closed，
       > 缺任一读数即不写。⛔ 也**刻意没有**换一个「`develop` 恰好正常」的夹具项目去把它刷绿——那正是
       > 「另起一个项目冒充升级后」的变体，判据与被测对象都会一起失去意义（硬规则 4 推论三）。
+      > ⛔ 同样**刻意没有**在验证器里替项目做 adopt 决定来绕过 ④：那会把「真实用户同样做不到」这件事
+      > 盖住，正是 Plan Stage 4 禁止的掩盖。
 - [x] AC-239 判据复跑后有明确、可核的退出码结果（翻绿，或如实记录仍为 fail 并说明卡在哪一步）
-      > 实测（机件 `packages/quay/src/goal-store.ts gate`，⛔ 非手搓）：**本轮复跑**
+      > 实测（机件 `packages/quay/src/goal-store.ts gate`，⛔ 非手搓）：**2026-09-11 续做轮复跑**
       > `node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts gate AC-239 --root /home/yale/work/quay`
-      > ⇒ `verdict: fail`，**退出码 1**，reason `acceptance failed (exit 1)`，记录时刻
-      > `2026-09-11T08:27:39.318Z`。卡在哪一步见上两条（任务停在 fan-in 的 anti-drift 硬失败）。
+      > ⇒ `verdict: fail`，**退出码 1**，reason `acceptance failed (exit 1) — criterion wrote no output to
+      > stderr/stdout`，记录时刻 `2026-09-11T11:54:20.964Z`。卡在哪一步见上两条（④ 落地基线 + ⑤ 传输缺件）。
 - [x] 若发现新缺陷，已另开 finding/gap 任务承接，未在本任务里掩盖或悄悄修掉
-      > 实测：本任务至今共另立**三条** gap 任务（均已 `task_get` 读回核对）：
-      > ① `gap-develop-sync-reset-hard-destroys-third-party-project-tree` —— 上一轮的摧毁成因（已 done）；
+      > 实测：本任务至今共另立**五条** gap 任务（均已 `task_get`/`task_list` 读回核对）：
+      > ① `gap-develop-sync-reset-hard-destroys-third-party-project-tree` —— 更早一轮的摧毁成因（已 done）；
       > ② `gap-pre-fix-upgraded-project-unresolvable-binding-undetected` —— 升级验证器里的另一条残留
       > （早于 `ba960f503` 升级过的项目停在解析不到的裸 `quay-native` 上，且无检查会发现）；
-      > ③ `gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing` —— **本轮**的直接成因
-      > （fan-in 的合并/落地基线硬编码 `develop`，无项目侧旋钮）。
-      > ⛔ 三条都**未在本任务里修**（本任务只修了为让 AC-239 可测而必须对齐的
-      > `step_upgrade_existing` 语义与 ⑦b 的工具链前置，见下方 DoD 说明）。
+      > ③ `gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing`（已 done）—— 上一轮的
+      > 直接成因（fan-in 的合并/落地基线硬编码 `develop`）；
+      > ④ `gap-upgrade-entry-never-establishes-branch-model`（todo，delivery-critical，goal_ac=AC-239）——
+      > **本轮**定位：交付/升级入口 shipped `quay-init.sh` 从不建立分支模型 ⇒ ③ 的 remedy 对真实用户不可达；
+      > ⑤ `gap-upgrade-verify-transport-missing-binding-checker`（todo，delivery-critical，goal_ac=AC-239）——
+      > **本轮**定位：跨主机传输漏带 `provider-binding-resolvability-check.ts` 且它依赖裸 `yaml`
+      > ⇒ AC-238 记录在真机上结构上写不出。
+      > ⛔ ⑤ 条都**未在本任务里修**。本任务自己只改了**在它 Touches 之内**、且为让 AC-239 可测/可归因而
+      > 必须改的东西：`step_upgrade_existing` 的 post-ba960f503 语义对齐、⑦b 的目标工具链前置、
+      > 以及**本轮新增的 ⑦b 落地基线前置**（见下方 DoD）。
 
 ## DoD
 
 - [x] AC-239 判据复跑后有明确结果，不得静默搁置不复跑
       > 已复跑，exit 1，如实记录（见 AC 第 5 条）。
+      > **本轮新增的机械配套**：⑦b 加了**落地基线前置** `AC239_BASELINE_STATUS`
+      > （compatible / divergent / absent / unreadable / not-attempted，五态，`unreadable` 是独立取值）——
+      > 它用**交付物自己的** `quay init --dry-run --adopt-branch-model`（该路径的每个变异点前都有
+      > `if (dryRun)` 分支，实测只判定、不改 ref、不写文件；已用前后 sha 逐字对照验证）读出副本落地基线
+      > 是否可用；`divergent`/`absent` ⇒ 当场 not-evaluated 返回，⛔ 不烧一小时轮询（那个非 done 的终态与
+      > 「worker 实现失败」同形）。解析器 `ac239_baseline_state` 已用**真实交付物产出**在三种拓扑上
+      > 逐一验过：`[ADOPTED]`⇒divergent（复制副本形态）、`[REUSED]`⇒compatible（唯一差别是拓扑的对照）、
+      > `[CREATED]`⇒absent；`--selfcheck` 新增控制 41 覆盖全部取值（一个只会返回 compatible 的解析器
+      > 即硬规则 4 的恒真量）。
+      > ⚠️ **可达性诚实说明**：该前置在 `AC238_EVALUATED=1` 那道门之后，所以**在 ⑤ 修好之前它在生产上
+      > 到不了**（⑦b 会更早返回）—— 这是脚本既有的顺序，不是缺口；它会在 ⑤ 落地后立刻生效。
 - [ ] meta-cc 的 `include_subagents`/`session_id` 缺陷已在升级后的副本上真实修复并验证
       > ⚠️ **已修复、未落地**——本轮 worker 在该副本里**真实实现了修复并提交**
       > （`d8598f7 fix(mcp): honor include_subagents on the explicit session_id path`，`+217/-16`，
       > 含新增/修改测试，相关包 `go test` 绿），但该提交**没能落地到 `develop`**
       > （fan-in anti-drift 硬失败，见 AC 第 2 条）⇒ 「验证」这一半未完成。
+      > **2026-09-11 续做轮补充**：落地失败的两条**产品**成因已分别另立 ④ / ⑤ 两条 delivery-critical
+      > 任务（见 AC 最后一条），⛔ 本任务不再把它当作「也许再跑一次就好」的偶发失败。
       > 缺陷内容与修法仍以任务体形式留在该副本的任务板上（`ac239-subagent-session-id-scan`）。
 - [x] 若发现新缺陷，已另立任务追踪，且本任务描述中链接了该任务 id
-      > 三个 id 与路径见 AC 最后一条；本条正文亦已引用。
+      > 五个 id 与路径见 AC 最后一条；本条正文亦已引用。
 - [x] `extra.goal_ac` 与 `depends_on` 已随 task_write 写入并读回核对
       > 实测读回（2026-09-11，本任务 e2e 执行当时）：`goal_ac` = `AC-239`（`extra.goal_ac` 亦为 `AC-239`）；
       > `depends_on` = `["gap-aged-third-party-project-quay-upgrade-verification"]`（**当时为一元素**）。
@@ -204,12 +242,15 @@ Stage 4 — 缺陷分流：若过程中发现新的真实缺陷（不同于本�
       > `git reset --hard develop` 摧毁另一份升级副本的任务板 ⇒ 追加该条前置边。当时实测读回：
       > `depends_on` = `["gap-aged-third-party-project-quay-upgrade-verification",
       > "gap-develop-sync-reset-hard-destroys-third-party-project-tree"]`（**两元素**）。
-      > **2026-09-11 本轮追加**：上一轮那条前置已 done（`7e8c17567`），但本轮实测暴露**新的**根因缺陷
-      > （fan-in 落地基线硬编码 `develop`）——它在修好之前，本任务每次被派发都必然在同一个
-      > anti-drift 闸门硬失败并原样退回 ⇒ 追加第三条前置边。当前实测读回：
-      > `depends_on` = `["gap-aged-third-party-project-quay-upgrade-verification",
+      > **2026-09-11 上一轮追加**：该轮实测暴露 fan-in 落地基线硬编码 `develop` ⇒ 追加第三条前置边。
+      > 当时实测读回 `depends_on` 为**三元素**。
+      > **2026-09-11 续做轮追加**：本轮把卡点拆成两条独立产品缺陷（④ 落地基线入口 / ⑤ 传输缺件），
+      > 两条都在修好之前使本任务**结构上不可能达成**（不是「再试一次」的问题）⇒ 追加两条前置边。
+      > 当前 `depends_on` = `["gap-aged-third-party-project-quay-upgrade-verification",
       > "gap-develop-sync-reset-hard-destroys-third-party-project-tree",
-      > "gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing"]`（**三元素**）。
-      > ⚠️ 上方一元素 / 两元素读数都是写下当时的真实记录、非错误，故保留不改写（⛔ 证据载体不回溯覆写）。
-      > ⚠️ 本条标题原本内联了 `depends_on` 的字面值，而该值会变 ⇒ 标题必然过时（本次过时即源于此）；
-      > 已改为标题只点字段名、值放证据行（同 AC88：判据不得引用生命周期短于判据本身的对象）。
+      > "gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing",
+      > "gap-upgrade-entry-never-establishes-branch-model",
+      > "gap-upgrade-verify-transport-missing-binding-checker"]`（**五元素**，已读回核对）。
+      > ⚠️ 上方一元素 / 两元素 / 三元素读数都是写下当时的真实记录、非错误，故保留不改写
+      > （⛔ 证据载体不回溯覆写）。⚠️ 本条标题只点字段名、值放证据行（同 AC88：判据不得引用生命周期
+      > 短于判据本身的对象）。
