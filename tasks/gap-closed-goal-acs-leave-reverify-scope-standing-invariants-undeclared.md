@@ -129,13 +129,24 @@ node --experimental-strip-types packages/quay/src/goal-store.ts check --reverify
   实测（红，`QUAY_GOAL009_FRESHNESS_K=1`）：
   `reason = acceptance failed (exit 1) — stale evidence: GOAL-009-AC-232:69/1 (margin -68), …`
   ⇒ **失败输出带「距离/K」**（⛔ 不是布尔）。
-- **I5 重跑痕迹（DoD）**：`scopeSize=16` 的那次 `check --achieved-failing` 把 12 条新入域判据**全部实跑**，
-  含 **AC-242**（专测「已离开复验域却尾事件为 fail」的那条，而本任务正是改变复验域的那一个）。
-- **单测**：`packages/quay/test/goal-store.test.mjs` 新增 5 例（`AC-reverify-1..5`），63/63 绿。
+- **单测**：`packages/quay/test/goal-store.test.mjs` 新增 5 例（`AC-reverify-1..5`），63/63 绿；
+  scoped 门 `scripts/test.sh --for-task <id> --allow-thin` 145/145 绿、exit 0。
 
-**⛔ AC7 不在本 worker 的取证面内**：全量套件由 fan-in 机械驱动运行（本 worker 只跑 `--for-task` scoped 门，
-实测 145/145 绿、exit 0），故 AC7 保持**未勾**并标注 `（待外部）`——仓库既有的「等外层验证」声明形态，
-⛔ 不是「已完成」的伪装。
+**⛔ AC7 不在本 worker 的取证面内**：全量套件由 fan-in 机械驱动运行（本 worker 只跑 `--for-task` scoped 门），
+故 AC7 保持**未勾**并标注 `（待外部）`——仓库既有的「等外层验证」声明形态，⛔ 不是「已完成」的伪装。
+
+**DoD 的载体面说明（诚实标注，⛔ 不把「痕迹尚未生成」冒充「已验证」）**：DoD 点名的 **`goal-round` 复验痕迹
+本 worker 造不出来**。实测：生产 goal-driver 以 `--root /home/yale/work/quay` 运行（pid 998575），
+它读的是**主检出**的 `goals/`，而本任务的 12 条 `long-term` 字段此刻只在任务分支上。取证：本工作树的
+`.quay/goal-round.jsonl` 与主检出的同名文件是**前缀拷贝**关系（`cmp` 通过，非同一 inode），
+且 round **163–168（17:42–17:47，标记全部落地之后）** 的 `goal-ring` 仍是 `criterionCount=4`、
+ids=`[AC-161,188,189,190]` ⇒ **该驱动读的不是本工作树**。
+⇒ DoD 的那半条是**落地后的自动生产事件**：fan-in ff 到 develop ⇒ promotion-driver 每轮启动前的
+`syncDevelopToDoc` 把主检出 ff 到 develop ⇒ 下一轮 `goal-ring` 即列出 16 条并逐条跑出 verdict。
+**本节能证的是**：①复验域读数已覆盖那 12 条（`scopeSize=16`、exit 0）；②它们**真的被跑**
+（16 条全部实跑，且 AC-202 的红控制证明被标记者确在执行路径上）；③`goal-ring` 用的就是同一个谓词
+（round 168 列出的 4 条正是此前已声明 long-term 的那 4 条）。**未证的是**主检出那份载体上的痕迹——
+它按上述机制自动生成，本任务不在此冒充已生成。
 
 ## Touches
 
