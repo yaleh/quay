@@ -278,8 +278,10 @@ AC238_BOUND_ENTRY=""
 # 但多一层**不可自证的关联**：本条的 project_root 必须是 AC-238 已经证明升级成功的【同一个】root
 # （判据在 goals/AC-239-*.md 里读载体做集合判定）。⇒ 本步骤只在 AC238_EVALUATED=1 ∧ 同一 $root 上运行，
 # ⛔ 绝不在没升级成功的 root 上写 AC-239 记录（那正是「另起新项目冒充升级后」的形态）。
-# 被测对象不是本仓库代码，而是【升级后的那个第三方项目自己的 runtime + drivers】——因此全部读写都走
-# 项目本地的 .quay/runtime/bin/quay.js（AC-238 已证明它与本次交付物逐字一致），而不是本次安装前缀的 CLI。
+# 被测对象不是本仓库代码，而是【升级后的那个第三方项目自己的 drivers】——而它的 runtime 在当前语义下
+# 就是本次交付物（quay plugin 是 runtime 的单一交付面；project-local `.quay/runtime/` 已被 quay-init
+# 退休，见 AC-238 第 ④ 步）。故 ⑦b 用交付物 CLI 配 `--root $root` 驱动，⛔ 不再走项目本地
+# `.quay/runtime/bin/quay.js`（该布局此刻已不存在）。
 # ⛔ 任一读不出 ⇒ 对应字段留空/负值、AC239_EVALUATED 保持 0、记录不写（缺值≠合格，硬规则 3b/6）。
 AC239_E2E=0                                  # 1 = --ac239-e2e（须与 --upgrade-existing 同用）
 AC239_EVALUATED=0
@@ -302,6 +304,10 @@ AC239_WRITTEN_THIS_RUN=0                     # 1 = 本次运行写出了 AC-239 
                                              # set -u，未声明的变量在末尾 summary 处会 unbound 而炸掉
                                              # 整轮——实测 2026-09-11 06:0x 就是这么丢掉整次运行的证据的）
 AC239_WRITTEN_ROOT=""
+AC239_BASELINE_STATUS="not-attempted"        # ⑦b 的前置读数：compatible | divergent | absent | unreadable |
+                                             # not-attempted。四态（+未尝试）——⛔ 不是两态：`unreadable`
+                                             # 是独立取值，既不算合格也不算不合格（硬规则 3b）。成因与
+                                             # 后果见 ⑦b 的 ⓪c。
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -1213,6 +1219,30 @@ d=json.load(sys.stdin); print(len(d))' 2>/dev/null || echo "")"
   return 0
 }
 
+# ac239_baseline_state <delivered-init-stdout> <rc> — classify the target project's LANDING baseline from
+# the delivered `quay init --dry-run --adopt-branch-model` report. Pure text→word: ⛔ no git of its own, no
+# second judgment (ADR-004 单一来源——分类本身在 packages/quay/src/branch-model.ts，这里只**读**它打出来
+# 的那一行)。⛔ 单独成函数是为了让 --selfcheck 能用合成报文直接驱动它、证明它能取到【每一个】值——
+# 一个只会返回 compatible 的解析器就是硬规则 4 的「结构上不可能取假的量」，比没有检查更贵。
+#
+#   compatible  — [REUSED]  landing-baseline：`develop` 已含默认分支 ⇒ 本副本可用作落地基线
+#   divergent   — [ADOPTED]/[BLOCKED] landing-baseline：`develop` 是不接主线的远古分叉 ⇒ 当前不可用
+#   absent      — [CREATED] landing-baseline：`develop` 不存在 ⇒ 当前不可用（fan-in 的 merge 直接失败）
+#   unreadable  — rc≠0，或交付物的报告里没有 landing-baseline 行 ⇒ ⛔ 既不算合格也不算不合格
+ac239_baseline_state() {
+  local out="$1" rc="$2" line
+  [ "$rc" = "0" ] || { printf 'unreadable'; return 0; }
+  line="$(printf '%s\n' "$out" | grep -m1 'landing-baseline' || true)"
+  case "$line" in
+    *"[REUSED] landing-baseline"*) printf 'compatible' ;;
+    *"[ADOPTED] landing-baseline"*) printf 'divergent' ;;
+    *"[BLOCKED] landing-baseline"*) printf 'divergent' ;;
+    *"[CREATED] landing-baseline"*) printf 'absent' ;;
+    *) printf 'unreadable' ;;
+  esac
+  return 0
+}
+
 # ── ⑦b 升级【后】的动态闭环（GOAL-009-AC-239）─────────────────────────────────────────────
 # 人 2026-09-11 裁定把 AC-238 原范围拆成两条互不掩盖的 AC：AC-238 管【静态/存量】（升级机制本身有
 # 没有丢数据、CLI 读不读得出、旧 runtime 换没换掉），本函数管【动态】——刚被升级过的那个项目，还能
@@ -1289,6 +1319,34 @@ step_upgrade_drive_continue() {
   AC239_TOOLCHAIN_STATUS="resolved"
   export PATH="$go_bin_dir:$PATH"
   echo "  [⑦b] go toolchain: $go_bin_dir ($(go version 2>/dev/null || echo 'version-unreadable'))"
+
+  # ⓪c 落地基线前置（read-only，5 秒）。本步骤要证的是「升级后的项目能驱动新任务到 done」，而 done
+  #     由该项目自己的 worker-driver 机械 fan-in 判定，其**落地基线是协议固定 ref `develop`**
+  #     （worker-driver.ts `opts.mergeTarget ?? "develop"`，项目侧无旋钮——见
+  #     tasks/gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing 的取证）。若该副本的
+  #     `develop` 是一条**不接主线**的远古分叉，anti-drift 的 `git diff --name-only develop...HEAD`
+  #     拿到的是【主线的整个分叉】而非本任务的改动（真机实测 2026-09-11：**1566** 文件），
+  #     **任何 `## Touches` 都盖不住** ⇒ 落地结构上不可能；而症状会以「轮询一小时仍未 done」这种
+  #     与「worker 实现失败」同形的形态收场（硬规则 3b）。
+  #     ⇒ 先用【交付物自己的】判定把这件事变成一个当场可归因的读数：`quay init --dry-run
+  #     --adopt-branch-model` 走 `ensureBranchModel` 的 dryRun 全路径——只判定，**不改任何 ref、不写任何
+  #     文件**（branch-model.ts 的每个变异点前都有 `if (dryRun)` 分支）。
+  #     ⛔ 这里**不**替项目做 adopt 决定：那样会把真正的产品缺陷（升级入口从不建立分支模型 ⇒ 该 remedy
+  #     对真实用户不可达）盖住，正是本任务 Plan Stage 4 禁止的「掩盖」。本步骤只如实报一个可区分取值。
+  local bl_out="" bl_rc=0
+  set +e
+  bl_out="$(cd "$root" && node "$qrl" init --dry-run --adopt-branch-model --root "$root" 2>/dev/null)"
+  bl_rc=$?
+  set -e
+  AC239_BASELINE_STATUS="$(ac239_baseline_state "$bl_out" "$bl_rc")"
+  echo "  [⑦b] landing-baseline pre-flight: state=$AC239_BASELINE_STATUS (delivered init --dry-run rc=$bl_rc) :: $(printf '%s\n' "$bl_out" | grep -m1 'landing-baseline' || echo '<no landing-baseline line in the delivered init report>')"
+  if [ "$AC239_BASELINE_STATUS" = "divergent" ] || [ "$AC239_BASELINE_STATUS" = "absent" ]; then
+    echo "  not-evaluated: 升级后副本的落地基线 'develop' 当前【不可用】（state=$AC239_BASELINE_STATUS —— divergent 指它是不接主线的远古分叉，absent 指它不存在）⇒ 该项目自己的机械 fan-in 会在 anti-drift 处结构上必然失败，'任务驱动到 done' 这一结果不可达。⛔ 不烧那一小时的轮询（它只会以与「实现失败」同形的形态收场），⛔ 也不写 AC-239 记录（缺值≠合格）。⛔ 本步骤不代项目做 adopt 决定（那会掩盖真实用户同样做不到这件事）——成因与 remedy 见本任务另立的 gap 任务。" >&2
+    return 0
+  fi
+  if [ "$AC239_BASELINE_STATUS" = "unreadable" ]; then
+    echo "  [⑦b] NOTE: 落地基线前置读数 unreadable（交付物 init --dry-run 报不出 landing-baseline 行 / rc≠0）——⛔ 不据此判不合格（读不懂与不合格不同形，硬规则 3b），照常进入下面的驱动链；真结论由那一轮的实际结果给。" >&2
+  fi
 
   # ① 建一条**真实缺陷修复任务**。⛔ 不是占位标记文件：升级后的项目用它自己的任务板去修它自己的
   #    真实 bug，证据价值高于「能跑通一条空任务」（同 meta-cc 历史上 AC118 的形态）。任务内容就是
@@ -3216,6 +3274,30 @@ Enter to confirm · Esc to cancel"
   ac240_step5_hits="$(printf '%s\n' "$ac240_step5_body" | grep -c 'write_ac203_record\|probe_ac203_driver_status' || true)"
   echo "selfcheck: ac240-ac203-write-point(in-step5_e2e) hits=$ac240_step5_hits (expect >=1 — AC-203 的探测/写入点必须落在 step⑤ 函数体内, 改前=0)"
 
+  # control 41 (AC-239 落地基线前置的解析, gap-aged-project-post-upgrade-driver-e2e 本轮新增):
+  #   ac239_baseline_state 必须能取到**每一个**取值——一个只会返回 compatible 的解析器就是硬规则 4 的
+  #   「结构上不可能取假的量」，比没有检查更贵（⑦b 会在一条不接主线的 `develop` 上照常烧完一小时轮询，
+  #   而那正是这个前置存在的理由）。合成交付物报告直驱【产品函数】（⛔ 不跑真 git、不碰真项目）：
+  #   REUSED⇒compatible / ADOPTED⇒divergent / BLOCKED⇒divergent / CREATED⇒absent /
+  #   无该行 ⇒ unreadable / rc≠0 ⇒ unreadable。后四个必须与 compatible **不同形**。
+  local bl_reused bl_adopted bl_blocked bl_created bl_noline bl_badrc bl_ok=0
+  bl_reused="$(ac239_baseline_state 'branch model (default branch: main):
+  [REUSED] default -> main — project default branch (master role)
+  [REUSED] doc-branch -> task/T-1 — derived at runtime
+  [REUSED] landing-baseline -> develop — contains main (12 ahead, 0 behind) — a valid quay landing baseline' 0)"
+  bl_adopted="$(ac239_baseline_state '  [ADOPTED] landing-baseline -> develop [backup: develop-pre-quay-init-d95dac8] — foreign fork' 0)"
+  bl_blocked="$(ac239_baseline_state '  [BLOCKED] landing-baseline -> develop — foreign fork; reuse refused' 0)"
+  bl_created="$(ac239_baseline_state '  [CREATED] landing-baseline -> develop at main (abc12345)' 0)"
+  bl_noline="$(ac239_baseline_state 'branch model (default branch: main):
+  [REUSED] default -> main — x' 0)"
+  bl_badrc="$(ac239_baseline_state '  [REUSED] landing-baseline -> develop — x' 3)"
+  echo "selfcheck: ac239-baseline-state(reused/adopted/blocked/created)=$bl_reused/$bl_adopted/$bl_blocked/$bl_created (expect compatible/divergent/divergent/absent)"
+  echo "selfcheck: ac239-baseline-state(no-line/rc-nonzero)=$bl_noline/$bl_badrc (expect unreadable/unreadable — 读不懂 ≠ 合格, 硬规则 3b)"
+  if [ "$bl_reused" = "compatible" ] && [ "$bl_adopted" = "divergent" ] && [ "$bl_blocked" = "divergent" ] \
+     && [ "$bl_created" = "absent" ] && [ "$bl_noline" = "unreadable" ] && [ "$bl_badrc" = "unreadable" ]; then
+    bl_ok=1
+  fi
+
   if [ "$d1" = "1" ] && [ "$d2" = "no" ] && [ "$a1" = "1" ] && [ "$a2" = "yes" ] \
      && [ "$c3_e" = "1" ] && [ "$c3_ok" = "1" ] \
      && [ "$c4_e" = "1" ] && [ "$c4_ok" = "0" ] \
@@ -3258,11 +3340,12 @@ Enter to confirm · Esc to cancel"
      && [ "$ac240_vdiff" = "0" ] && [ -n "$ac240_vdiff_note" ] \
      && [ "$ac240_vne" = "not-evaluated" ] && [ -n "$ac240_nne" ] \
      && [ "${ac240_step5_hits:-0}" -ge 1 ] 2>/dev/null \
+     && [ "$bl_ok" = "1" ] \
      && [ "$tp_ok" = "1" ]; then
-    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed); AC-204 carrier record writes the five criterion fields verbatim (forbidden_count=0 integer, enable_declared=true literal) and refuses a forbidden-copy or no-enable record (fail-closed, 成对判定); AC-205 carrier record writes the three criterion fields verbatim (shipped_from_installed_artifact=true + transcript_confirmed=true literals, top-level build_sha) with transcript_confirmed derived from transcript-delivery-check reading the transcript (hit ⇒ delivered / miss ⇒ not) — never from a send exit code — and refuses shipped=false / transcript_confirmed=false / empty-host (fail-closed, AC4 负控制); AC-234 render counts are derived from rendered HTML content (task/goal anchors + round-row anchors — never an HTTP status code, AC2) and can take false (empty-shell page ⇒ 0/0/0); the AC-234 carrier record writes the six criterion fields verbatim (tasks_rendered/goals_rendered/round_records_rendered as JSON integers) and refuses a zero-count or empty-host record (fail-closed, AC4 负控制); the AC-232 carrier record writes the three criterion fields verbatim (goal_write_ok/goal_read_back_ok as JSON literals, goal_records as a JSON integer) with a top-level build_sha anchor, truthfully writes false/0 when the goal write fails or read-back is empty (缺件如实非静默, AC4 负控制 — 写调用 0 与空文件同形), and refuses an empty-host record (fail-closed, 硬规则 3b); AC-207 carrier record writes the eight criterion fields verbatim (produced_by_driver=true literal, gate_events>0, task_status=done, commit_sha/task_id non-empty, commit_files non-empty JSON array with ≥1 path outside the tasks/ goals/ .quay/ triplet, top-level build_sha) and refuses produced_by_driver=false / gate_events=0 / bookkeeping-files-only / no-files (fail-closed, 硬规则 3b); AC-207 implementation-commit SELECTION picks the real implementation commit even when newer bookkeeping commits sit on top of it (the old grep-v-chore-quay-init-then-head-1 form picked the 翻-done commit — gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit), yields empty + non-zero when only bookkeeping commits exist (⇒ no record, never a bookkeeping commit dressed up as one), and the bookkeeping judgment is positional (touched files, not commit-message text); AC-240 run-level closure self-evidence takes three DISTINGUISHABLE values (1 = AC-203 and AC-207 both written by THIS run for the SAME project_root; 0 = this run attempted the e2e but the closure is not self-evidenced, with a non-empty NOTE naming the sub-reason; not-evaluated = --ac207-e2e not passed — 未评估 ≠ 不合格, 硬规则 3b), where 0 also covers the origin defect's own shape (AC-207 written, AC-203 never probed in step⑤) and the both-written-but-different-roots case (the pairing is on the SAME project_root, not on both being non-empty), and the AC-203 generation-side probe/write call is POSITIONALLY inside step5_e2e's body (0 before this task — the same-run pairing existed only as an accident, never as a requirement)"
+    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed); AC-204 carrier record writes the five criterion fields verbatim (forbidden_count=0 integer, enable_declared=true literal) and refuses a forbidden-copy or no-enable record (fail-closed, 成对判定); AC-205 carrier record writes the three criterion fields verbatim (shipped_from_installed_artifact=true + transcript_confirmed=true literals, top-level build_sha) with transcript_confirmed derived from transcript-delivery-check reading the transcript (hit ⇒ delivered / miss ⇒ not) — never from a send exit code — and refuses shipped=false / transcript_confirmed=false / empty-host (fail-closed, AC4 负控制); AC-234 render counts are derived from rendered HTML content (task/goal anchors + round-row anchors — never an HTTP status code, AC2) and can take false (empty-shell page ⇒ 0/0/0); the AC-234 carrier record writes the six criterion fields verbatim (tasks_rendered/goals_rendered/round_records_rendered as JSON integers) and refuses a zero-count or empty-host record (fail-closed, AC4 负控制); the AC-232 carrier record writes the three criterion fields verbatim (goal_write_ok/goal_read_back_ok as JSON literals, goal_records as a JSON integer) with a top-level build_sha anchor, truthfully writes false/0 when the goal write fails or read-back is empty (缺件如实非静默, AC4 负控制 — 写调用 0 与空文件同形), and refuses an empty-host record (fail-closed, 硬规则 3b); AC-207 carrier record writes the eight criterion fields verbatim (produced_by_driver=true literal, gate_events>0, task_status=done, commit_sha/task_id non-empty, commit_files non-empty JSON array with ≥1 path outside the tasks/ goals/ .quay/ triplet, top-level build_sha) and refuses produced_by_driver=false / gate_events=0 / bookkeeping-files-only / no-files (fail-closed, 硬规则 3b); AC-207 implementation-commit SELECTION picks the real implementation commit even when newer bookkeeping commits sit on top of it (the old grep-v-chore-quay-init-then-head-1 form picked the 翻-done commit — gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit), yields empty + non-zero when only bookkeeping commits exist (⇒ no record, never a bookkeeping commit dressed up as one), and the bookkeeping judgment is positional (touched files, not commit-message text); AC-240 run-level closure self-evidence takes three DISTINGUISHABLE values (1 = AC-203 and AC-207 both written by THIS run for the SAME project_root; 0 = this run attempted the e2e but the closure is not self-evidenced, with a non-empty NOTE naming the sub-reason; not-evaluated = --ac207-e2e not passed — 未评估 ≠ 不合格, 硬规则 3b), where 0 also covers the origin defect's own shape (AC-207 written, AC-203 never probed in step⑤) and the both-written-but-different-roots case (the pairing is on the SAME project_root, not on both being non-empty), and the AC-203 generation-side probe/write call is POSITIONALLY inside step5_e2e's body (0 before this task — the same-run pairing existed only as an accident, never as a requirement); and the AC-239 landing-baseline pre-flight classifier takes every value (REUSED⇒compatible / ADOPTED⇒divergent / BLOCKED⇒divergent / CREATED⇒absent / no-line-or-rc≠0⇒unreadable) — so a target copy whose 'develop' is a foreign fork stops ⑦b with an attributable 5-second reading instead of an hour-long poll whose non-done end state is indistinguishable from a worker that failed to implement (gap-aged-project-post-upgrade-driver-e2e 本轮新增)"
     rc=0
   else
-    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc m4_reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused ac203_parse_alive=$ac203_parse_alive ac203_parse_recs=$ac203_parse_recs ac201_pos_w=$ac201_pos_w ac201_sha_len=${#ac201_pos_sha} ac201_tgz_len=${#ac201_pos_tgz} ac201_pos_ac=$ac201_pos_ac ac201_neg_w=$ac201_neg_w ac201_neg_lines=$ac201_neg_lines g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused ac204_wrote=$ac204_wrote ac204_fields_ok=$ac204_fields_ok ac204_refused_fc=$ac204_refused_fc ac204_refused_en=$ac204_refused_en ac205_tc_hit=$ac205_tc_hit ac205_tc_miss=$ac205_tc_miss ac205_wrote=$ac205_wrote ac205_fields_ok=$ac205_fields_ok ac205_ship_refused=$ac205_ship_refused ac205_conf_refused=$ac205_conf_refused ac205_host_refused=$ac205_host_refused ac234_tasks_pos=$ac234_tasks_pos ac234_goals_pos=$ac234_goals_pos ac234_rounds_pos=$ac234_rounds_pos ac234_tasks_neg=$ac234_tasks_neg ac234_goals_neg=$ac234_goals_neg ac234_rounds_neg=$ac234_rounds_neg ac234_wrote=$ac234_wrote ac234_fields_ok=$ac234_fields_ok ac234_refused_zc=$ac234_refused_zc ac234_refused_em=$ac234_refused_em ac232_wrote=$ac232_wrote ac232_fields_ok=$ac232_fields_ok ac232_neg_ok=$ac232_neg_ok ac232_refused=$ac232_refused ac207_wrote=$ac207_wrote ac207_fields_ok=$ac207_fields_ok ac207_refused_pdb=$ac207_refused_pdb ac207_refused_ge=$ac207_refused_ge ac207_refused_bkfiles=$ac207_refused_bkfiles ac207_refused_nofiles=$ac207_refused_nofiles ac207_sel_rc=$ac207_sel_rc ac207_sel_subj='$ac207_sel_subj' ac207_only_out='$ac207_only_out' ac207_only_rc=$ac207_only_rc ac207_bk_tasks_only=$ac207_bk_tasks_only ac207_impl_marker=$ac207_impl_marker ac207_before=$ac207_before ac207_after_neg=$ac207_after_neg ac207_neg_trace=$ac207_neg_trace ac207_after_pos=$ac207_after_pos ac207_pos_files='$ac207_pos_files' ac207_pipe_grep=$ac207_pipe_grep ac240_v1=$ac240_v1 ac240_n1='$ac240_n1' ac240_v0=$ac240_v0 ac240_n0='$ac240_n0' ac240_vdiff=$ac240_vdiff ac240_vdiff_note='$ac240_vdiff_note' ac240_vne=$ac240_vne ac240_nne='$ac240_nne' ac240_step5_hits=$ac240_step5_hits tp_ok=$tp_ok tp_pos_status=$tp_pos_status tp_pos_launcher=$tp_pos_launcher tp_pos_model=$tp_pos_model tp_pos_auth=$tp_pos_auth tp_neg_status=$tp_neg_status tp_neg_rc=$tp_neg_rc tp_ovr_launcher=$tp_ovr_launcher tp_ovr_model=$tp_ovr_model tp_ovr_auth=$tp_ovr_auth tp_res1=$tp_res1 tp_res2=$tp_res2" >&2
+    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc m4_reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused ac203_parse_alive=$ac203_parse_alive ac203_parse_recs=$ac203_parse_recs ac201_pos_w=$ac201_pos_w ac201_sha_len=${#ac201_pos_sha} ac201_tgz_len=${#ac201_pos_tgz} ac201_pos_ac=$ac201_pos_ac ac201_neg_w=$ac201_neg_w ac201_neg_lines=$ac201_neg_lines g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused ac204_wrote=$ac204_wrote ac204_fields_ok=$ac204_fields_ok ac204_refused_fc=$ac204_refused_fc ac204_refused_en=$ac204_refused_en ac205_tc_hit=$ac205_tc_hit ac205_tc_miss=$ac205_tc_miss ac205_wrote=$ac205_wrote ac205_fields_ok=$ac205_fields_ok ac205_ship_refused=$ac205_ship_refused ac205_conf_refused=$ac205_conf_refused ac205_host_refused=$ac205_host_refused ac234_tasks_pos=$ac234_tasks_pos ac234_goals_pos=$ac234_goals_pos ac234_rounds_pos=$ac234_rounds_pos ac234_tasks_neg=$ac234_tasks_neg ac234_goals_neg=$ac234_goals_neg ac234_rounds_neg=$ac234_rounds_neg ac234_wrote=$ac234_wrote ac234_fields_ok=$ac234_fields_ok ac234_refused_zc=$ac234_refused_zc ac234_refused_em=$ac234_refused_em ac232_wrote=$ac232_wrote ac232_fields_ok=$ac232_fields_ok ac232_neg_ok=$ac232_neg_ok ac232_refused=$ac232_refused ac207_wrote=$ac207_wrote ac207_fields_ok=$ac207_fields_ok ac207_refused_pdb=$ac207_refused_pdb ac207_refused_ge=$ac207_refused_ge ac207_refused_bkfiles=$ac207_refused_bkfiles ac207_refused_nofiles=$ac207_refused_nofiles ac207_sel_rc=$ac207_sel_rc ac207_sel_subj='$ac207_sel_subj' ac207_only_out='$ac207_only_out' ac207_only_rc=$ac207_only_rc ac207_bk_tasks_only=$ac207_bk_tasks_only ac207_impl_marker=$ac207_impl_marker ac207_before=$ac207_before ac207_after_neg=$ac207_after_neg ac207_neg_trace=$ac207_neg_trace ac207_after_pos=$ac207_after_pos ac207_pos_files='$ac207_pos_files' ac207_pipe_grep=$ac207_pipe_grep ac240_v1=$ac240_v1 ac240_n1='$ac240_n1' ac240_v0=$ac240_v0 ac240_n0='$ac240_n0' ac240_vdiff=$ac240_vdiff ac240_vdiff_note='$ac240_vdiff_note' ac240_vne=$ac240_vne ac240_nne='$ac240_nne' ac240_step5_hits=$ac240_step5_hits tp_ok=$tp_ok tp_pos_status=$tp_pos_status tp_pos_launcher=$tp_pos_launcher tp_pos_model=$tp_pos_model tp_pos_auth=$tp_pos_auth tp_neg_status=$tp_neg_status tp_neg_rc=$tp_neg_rc tp_ovr_launcher=$tp_ovr_launcher tp_ovr_model=$tp_ovr_model tp_ovr_auth=$tp_ovr_auth tp_res1=$tp_res1 tp_res2=$tp_res2 bl_ok=$bl_ok bl_reused=$bl_reused bl_adopted=$bl_adopted bl_blocked=$bl_blocked bl_created=$bl_created bl_noline=$bl_noline bl_badrc=$bl_badrc" >&2
     rc=1
   fi
   rm -rf "$tmp"
@@ -3448,6 +3531,7 @@ echo "AC239_PROJECT_ROOT=${AC239_PROJECT_ROOT:-<none>} (⛔ 必须与 AC238_PROJ
 echo "AC239_TASK_ID=${AC239_TASK_ID:-<none>} AC239_TASK_CREATED=$AC239_TASK_CREATED AC239_DRIVERS_STARTED=$AC239_DRIVERS_STARTED"
 echo "AC239_PROFILES_STATUS=$AC239_PROFILES_STATUS"
 echo "AC239_TOOLCHAIN_STATUS=$AC239_TOOLCHAIN_STATUS (resolved | go-absent —— 目标项目是 Go 项目，缺 go 则 worker 跑不了它的 scoped 门)"
+echo "AC239_BASELINE_STATUS=$AC239_BASELINE_STATUS (compatible | divergent | absent | unreadable | not-attempted —— 升级后副本的落地基线 'develop' 是否可用；divergent/absent ⇒ 该项目自己的 fan-in 落地结构上不可能，⑦b 当场停在那里而不是烧一小时轮询)"
 echo "AC239_TASK_STATUS=${AC239_TASK_STATUS:-<unreadable>} AC239_COMMIT_SHA=${AC239_COMMIT_SHA:0:12} AC239_GATE_EVENTS=$AC239_GATE_EVENTS AC239_PRODUCED_BY_DRIVER=$AC239_PRODUCED_BY_DRIVER"
 echo "AC239_WRITTEN_THIS_RUN=$AC239_WRITTEN_THIS_RUN AC239_WRITTEN_ROOT=${AC239_WRITTEN_ROOT:-<none>}"
 # AC-240 运行级取值：闭环是否由【本次运行】自证（1 | 0 | not-evaluated，三态可区分）。
