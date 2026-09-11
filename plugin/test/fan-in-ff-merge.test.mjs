@@ -1298,26 +1298,58 @@ test("lock is a SEPARATE file from the suite lock (AC4 — 对象不相干)", ()
 // These cases pin (a) the shipped-layout resolution and (b) the three-state vocabulary, in ONE fixture
 // whose only variable is the delta path.
 
-/** A hermetic stand-in for the SHIPPED layout: `<dir>/scripts/dist/<name>.js` — a shim delegating to
- *  this repo's REAL classifier (so the judgment under test is the real one; only the FORM under test —
- *  "resolved from a dist dir, run without --experimental-strip-types" — is synthesized) — plus the
- *  repo's REAL registry at `<dir>/plugin/scripts/runner-static-gate.ts`. `<dir>` is the root the gate
- *  must pick for the registry lookup. */
+/** A hermetic stand-in for the SHIPPED layout: `<dir>/plugin/scripts/dist/<name>.js` — a shim
+ *  delegating to this repo's REAL classifier (so the judgment under test is the real one; only the
+ *  FORM under test — "resolved from a dist dir, run without --experimental-strip-types" — is
+ *  synthesized) — plus the repo's REAL registry at `<dir>/plugin/scripts/runner-static-gate.ts`.
+ *  `<dir>` models the installed package root `<pkg>` (⛔ the `plugin/scripts/dist` shape is the REAL
+ *  shipped one — `resolveKernelScriptsDir()` returns `<pkg>/plugin/scripts/dist`; a fixture that put
+ *  the dist dir at `<dir>/scripts/dist` would be satisfied by a DIFFERENT `..`-hop than production
+ *  and would therefore not be a measurement of the production layout, hard rule 4 推论三). */
 function shippedLayoutFixture(tag) {
   const dir = makeTmp(`shipped-${tag}`);
-  const distDir = path.join(dir, "scripts", "dist");
+  const distDir = path.join(dir, "plugin", "scripts", "dist");
   fs.mkdirSync(distDir, { recursive: true });
-  fs.mkdirSync(path.join(dir, "plugin", "scripts"), { recursive: true });
-  const realClassifier = path.join(REPO_ROOT, "plugin", "scripts", "select-static-checks-for-touches.ts");
   fs.copyFileSync(path.join(REPO_ROOT, "plugin", "scripts", "runner-static-gate.ts"),
     path.join(dir, "plugin", "scripts", "runner-static-gate.ts"));
+  writeClassifierShim(distDir);
+  return { dir, scriptsDir: distDir, registry: path.join(dir, "plugin", "scripts", "runner-static-gate.ts") };
+}
+
+/** The SHIPPED FORM of the classifier: `dist/<name>.js`, a shim delegating to this repo's REAL
+ *  classifier — so the judgment under test is the real one and only the resolution FORM is synthesized. */
+function writeClassifierShim(distDir) {
+  const realClassifier = path.join(REPO_ROOT, "plugin", "scripts", "select-static-checks-for-touches.ts");
   fs.writeFileSync(path.join(distDir, "select-static-checks-for-touches.js"),
     `import { spawnSync } from "node:child_process";\n` +
     `const r = spawnSync(process.execPath, ["--experimental-strip-types", ${JSON.stringify(realClassifier)}, ...process.argv.slice(2)], { encoding: "utf8" });\n` +
     `process.stdout.write(r.stdout ?? "");\n` +
     `process.stderr.write(r.stderr ?? "");\n` +
     `process.exit(r.status ?? 1);\n`, "utf8");
-  return { dir, scriptsDir: distDir, registry: path.join(dir, "plugin", "scripts", "runner-static-gate.ts") };
+}
+
+/** The layout the loop ACTUALLY runs in (dev/main checkout): `resolveKernelScriptsDir()` returns the
+ *  BUNDLED kernel's dir = `<build>/packages/quay/plugin/scripts/dist` — a gitignored build-output tree
+ *  with NO registry anywhere along its `..` chain. The registry lives at the MERGE ROOT. */
+function buildTreeLayoutFixture(tag) {
+  const build = makeTmp(`build-${tag}`);
+  const distDir = path.join(build, "packages", "quay", "plugin", "scripts", "dist");
+  fs.mkdirSync(distDir, { recursive: true });
+  writeClassifierShim(distDir);
+  return { build, scriptsDir: distDir };
+}
+
+/** Plant this repo's REAL registry at `<dir>/plugin/scripts/runner-static-gate.ts` (the merge root) and
+ *  COMMIT it on develop. ⛔ Committing is load-bearing, not tidiness: `makeTaskBranchWith` runs
+ *  `git add -A`, so an untracked registry would be swept into the TASK commit and then DELETED by the
+ *  `git checkout develop` that follows (the file is tracked on the branch, absent from develop) — the
+ *  fixture would then measure "no registry anywhere" instead of the layout under test. */
+function plantRegistryAtRepoRoot(dir) {
+  fs.mkdirSync(path.join(dir, "plugin", "scripts"), { recursive: true });
+  fs.copyFileSync(path.join(REPO_ROOT, "plugin", "scripts", "runner-static-gate.ts"),
+    path.join(dir, "plugin", "scripts", "runner-static-gate.ts"));
+  gitCmd(dir, "add", "-A");
+  gitCmd(dir, "commit", "-q", "-m", "chore: plant registry");
 }
 
 /** Create `task/<id>` from develop with ONE commit adding `relPath`, return { tip, base }, back on develop. */
@@ -1442,5 +1474,61 @@ test("AC4 — a classifier that CANNOT run yields a DISTINGUISHABLE not-evaluate
     assert.ok(!/classified non-inert/.test(rB.stderr), "⛔ never the non-inert shape");
   } finally {
     cleanup(dirA); cleanup(stA); cleanup(fx.dir); cleanup(emptyScripts);
+  }
+});
+
+// ── AC6: the layout THIS loop runs in — the registry is at the MERGE ROOT, unreachable by `..`-hops ───
+// AC2–AC4 pin the SHIPPED layout, where scriptsDir sits inside a package root that carries the registry
+// (`<pkg>/plugin/scripts/dist` ⇒ `<pkg>` is 3 hops up). That is NOT the layout this repo's own loop runs
+// in: there the driver passes `resolveKernelScriptsDir()` = the BUNDLED kernel's dir =
+// `<repo>/packages/quay/plugin/scripts/dist`, a gitignored BUILD-OUTPUT tree; the registry lives at
+// `<repo>/plugin/scripts/runner-static-gate.ts` — FIVE hops up, so NO `..`-hop formula reaches it, and
+// the gate fail-closed NOT-EVALUATED on every non-empty delta. The branch's own `flip-done` commit IS
+// such a delta ⇒ EVERY task burned a fan-in round (the observed production failure). Only `root` — the
+// tree the delta paths are relative to — reaches the registry. Single variable across the two halves
+// below: the delta PATH.
+
+test("AC6 — dev/build layout: the registry is at the MERGE ROOT (unreachable by any `..`-hop off scriptsDir) — a real verdict, and a doc-only delta LANDS first try", () => {
+  const dir = makeTmp("devtree");
+  const st = stateDir("devtree");
+  const fx = buildTreeLayoutFixture("dev");
+  // ⛔ deliberately NO `scripts/test.sh` entry in this list: R3 (test-isolation-check) flags any spawn
+  // whose argument region references a test.sh literal (same reason as AC3).
+  const candidates = ["packages/quay/src/fan-in/ff-merge.ts", "plugin/scripts/worker-driver.ts"];
+  try {
+    initRepo(dir);
+    plantRegistryAtRepoRoot(dir);
+    // Precondition: the fixture really is the "no `..`-hop reaches it" shape — assert it, do not assume.
+    for (const hop of [path.resolve(fx.scriptsDir, ".."), path.resolve(fx.scriptsDir, "..", ".."),
+      path.resolve(fx.scriptsDir, "..", "..", "..")]) {
+      assert.ok(!fs.existsSync(path.join(hop, "plugin", "scripts", "runner-static-gate.ts")),
+        `fixture broken: the registry IS reachable at ${hop} — this fixture must model the build-output tree`);
+    }
+
+    // (a) negative control — the SAME fixture, variable = the delta path: a registry-covered path must
+    //     still be judged NON-INERT and refuse (⛔ `root` must not degrade into "everything is inert").
+    const realClassifier = path.join(REPO_ROOT, "plugin", "scripts", "select-static-checks-for-touches.ts");
+    const p = spawnSync("node", ["--experimental-strip-types", realClassifier, "--classify-delta", "--root", dir, ...candidates], { encoding: "utf8" });
+    assert.equal(p.status, 0, `fixture broken: the planted registry must be readable: ${p.stderr}`);
+    const covered = p.stdout.split("\n").map((s) => s.trim()).filter(Boolean)[0];
+    assert.ok(covered, `fixture broken: none of ${candidates.join(", ")} is registry-covered`);
+
+    const { base: baseC } = makeTaskBranchWith(dir, "ac62-devcode", covered, "delta\n");
+    const capC = ["--suite-capture", writeSuiteCapture(st, "ac62-devcode", baseC)];
+    const rc = runMerge(["--task", "ac62-devcode", "--root", dir, "--scripts-dir", fx.scriptsDir, ...capC]);
+    assert.equal(rc.status, 2, `a registry-covered path must REFUSE:\n${rc.stdout}${rc.stderr}`);
+    assert.match(rc.stderr, new RegExp(`non-inert \\(${covered.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`),
+      `⛔ a REAL verdict must name the real path — NOT-EVALUATED here would mean \`root\` was not tried:\n${rc.stderr}`);
+    assert.ok(!/NOT-EVALUATED/.test(rc.stderr), `⛔ the classifier ran and judged; not-evaluated is the pre-fix failure:\n${rc.stderr}`);
+
+    // (b) the doc-only delta (exactly the branch's own `flip-done` commit: `tasks/<id>.md`) ⇒ INERT ⇒
+    //     the ff LANDS on the FIRST attempt. This is the product-level DoD: "第一次 fan-in 就能 ff 成功".
+    const { base, tip } = makeTaskBranchWith(dir, "ac62-dev", "tasks/ac62-dev.md", "---\nid: ac62-dev\n---\n");
+    const cap = ["--suite-capture", writeSuiteCapture(st, "ac62-dev", base)];
+    const r = runMerge(["--task", "ac62-dev", "--root", dir, "--scripts-dir", fx.scriptsDir, ...cap]);
+    assert.equal(r.status, 0, `a doc-only delta must be judged inert and LAND:\n${r.stdout}${r.stderr}`);
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), tip, "develop fast-forwarded to the task tip");
+  } finally {
+    cleanup(dir); cleanup(st); cleanup(fx.build);
   }
 });

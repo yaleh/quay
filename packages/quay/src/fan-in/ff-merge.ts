@@ -263,18 +263,29 @@ function withNodeNoWarnings(argv: string[] | null): string[] | null {
 
 /** Candidate roots for the classifier's REGISTRY lookup. `select-static-checks-for-touches.ts` reads
  *  `<root>/plugin/scripts/runner-static-gate.ts` (its TEST_SH_REL) — i.e. the root must be the dir
- *  that CARRIES a `plugin/scripts/` tree. dev tree: scriptsDir=<repo>/plugin/scripts ⇒ <repo>.
- *  Shipped kernel: scriptsDir=<pkg>/plugin/scripts/dist ⇒ <pkg>. ⛔ Deliberately NOT a fixed `..`-hop
- *  formula: `resolve(scriptsDir, "..", "..")` is the plugin root ITSELF in the shipped layout, and the
- *  classifier then looks for `<pkg>/plugin/plugin/scripts/…` — one level too deep, silently. The
+ *  that CARRIES a `plugin/scripts/` tree.
+ *
+ *  ⛔ `root` (the merge target — the tree the DELTA paths are relative to, and the tree whose suite the
+ *  certificate is about) is the SEMANTICALLY correct answer and is tried FIRST. It is also the only
+ *  candidate that works in the layout this repo actually runs in: the driver passes
+ *  `scriptsDir = resolveKernelScriptsDir()` = the BUNDLED kernel's dir, which here is
+ *  `<repo>/packages/quay/plugin/scripts/dist` (a build-output tree, gitignored) — the repo root is FIVE
+ *  hops up, so NO fixed `..`-hop formula reaches it. Ordering it first is what makes a task's FIRST
+ *  fan-in land; every derived candidate below is a `..`-hop guess at the shipped `<pkg>` root.
+ *
+ *  The `..`-hop candidates remain as fallbacks for a SHIPPED install in a consumer project whose own
+ *  root carries no registry: `<pkg>/plugin/scripts/dist` ⇒ `<pkg>` via `..`/`..`/`..`. ⛔ Deliberately
+ *  NOT a single fixed hop: `resolve(scriptsDir, "..", "..")` is the plugin root ITSELF there, and the
+ *  classifier then looks for `<pkg>/plugin/plugin/scripts/…` — one level too deep, silently. Every
  *  candidate is accepted by the classifier's OWN exit code (see classifyDeltaVerdict), so there is no
  *  second copy of the registry path to drift. */
-function classifyRootCandidates(scriptsDir: string): string[] {
+function classifyRootCandidates(root: string, scriptsDir: string): string[] {
   return [...new Set([
+    root,
     path.resolve(scriptsDir, "..", ".."),
     path.resolve(scriptsDir, "..", "..", ".."),
     path.resolve(scriptsDir, ".."),
-  ])];
+  ].filter(Boolean))];
 }
 
 // ── suite certificate gate ───────────────────────────────────────────────────────────────────────────
@@ -292,8 +303,8 @@ type DeltaClassification =
   | { kind: "non-inert"; paths: string[] }
   | { kind: "not-evaluated"; detail: string };
 
-/** Run `--classify-delta` for `files` and return its three-state verdict. */
-function classifyDeltaVerdict(scriptsDir: string, files: string[]): DeltaClassification {
+/** Run `--classify-delta` for `files` (repo-relative to `root`) and return its three-state verdict. */
+function classifyDeltaVerdict(root: string, scriptsDir: string, files: string[]): DeltaClassification {
   const argv = siblingScriptArgv(scriptsDir, "select-static-checks-for-touches.ts");
   if (!argv) {
     return {
@@ -302,8 +313,8 @@ function classifyDeltaVerdict(scriptsDir: string, files: string[]): DeltaClassif
     };
   }
   const failures: string[] = [];
-  for (const root of classifyRootCandidates(scriptsDir)) {
-    const r = sh([...argv, "--classify-delta", "--root", root, ...files]);
+  for (const candidate of classifyRootCandidates(root, scriptsDir)) {
+    const r = sh([...argv, "--classify-delta", "--root", candidate, ...files]);
     if (r.status === 0) {
       const paths = r.stdout.split("\n").map((s) => s.trim()).filter(Boolean);
       return paths.length ? { kind: "non-inert", paths } : { kind: "inert" };
@@ -311,7 +322,7 @@ function classifyDeltaVerdict(scriptsDir: string, files: string[]): DeltaClassif
     // non-zero = the classifier did not judge: a candidate root without the registry (exit 2,
     // "registry file … not found at …") OR a real crash. Try the next candidate root; if none
     // succeeds the collected details ARE the not-evaluated reason.
-    failures.push(`root=${root} exit=${r.status}${r.stderr.trim() ? ` (${r.stderr.trim().split("\n")[0]})` : ""}`);
+    failures.push(`root=${candidate} exit=${r.status}${r.stderr.trim() ? ` (${r.stderr.trim().split("\n")[0]})` : ""}`);
   }
   return { kind: "not-evaluated", detail: `classifier produced no verdict — ${failures.join("; ")}` };
 }
@@ -365,7 +376,7 @@ function suiteCertGate(args: FfMergeArgs, root: string): { ok: boolean; reason: 
   const delta = git(root, "diff", "--name-only", suiteHead, suiteTip).stdout.trim();
   if (delta !== "") {
     const scriptsDir = scriptsDirOf(args) ?? "";
-    const verdict = classifyDeltaVerdict(scriptsDir, delta.split("\n").filter(Boolean));
+    const verdict = classifyDeltaVerdict(root, scriptsDir, delta.split("\n").filter(Boolean));
     if (verdict.kind === "non-inert") {
       return { ok: false, reason: `suite_head..tip delta classified non-inert (${verdict.paths.join(" ")})` };
     }
@@ -423,7 +434,7 @@ function classifyDelta(args: FfMergeArgs, root: string, files: string[]): string
   // (`""` = inert ⇒ the in-lock retry may proceed, `__CLASSIFY_FAILED__` = no verdict ⇒ fail-closed
   // to "do not retry"). ⛔ `not-evaluated` must NOT collapse into `""` (that would let an unknown
   // delta take the inert-retry path).
-  const v = classifyDeltaVerdict(scriptsDirOf(args) ?? "", files);
+  const v = classifyDeltaVerdict(root, scriptsDirOf(args) ?? "", files);
   return v.kind === "inert" ? "" : v.kind === "non-inert" ? v.paths.join("\n") : "__CLASSIFY_FAILED__";
 }
 
