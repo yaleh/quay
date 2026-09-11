@@ -9,6 +9,7 @@ parent: null
 children: []
 extra: {}
 ---
+
 ## Finding
 AC-241 判据用子串测试 `"criterion wrote no output" in r` 判定某条 AC 不可归因，而它自己的 fail reason 又逐字引用被点名 AC 的 reason（其中含该模板）⇒ 它把自己也塞进 bad 列表；本 round readings 里 AC-241 的 fail reason 即为此形态（`…AC-239: …criterion wrote no output…; AC-241: …`），读者无法区分「AC-241 失败是因为真有 AC 不可归因」还是「因为它引用了自己」；且因 withFailureOutput 只保留 reason 头部 500 字符，该自我点名要等模板串被嵌套挤出窗口后才会自行消失（按代码推演的轮数，非读数）⇒ 既有的 ready 任务 gap-goal-criteria-bare-failing-exit-unattributable 的 AC7（要求 AC-241 干跑 exit 1→0）不由它自己授权的改动决定，而该 AC 的满足者 goals/AC-241-*.md 又不在它的 Touches 里。
 
@@ -16,12 +17,11 @@ AC-241 判据用子串测试 `"criterion wrote no output" in r` 判定某条 AC 
 涉及机制关键词：`withFailureOutput`（立案前已搜既有任务，无人认领）。
 
 ## AC（draft）
-- [ ] `python3 - <<'P'
+- [x] `python3 - <<'P'
 import re,json,os,subprocess,sys,tempfile,pathlib
 cand=list(pathlib.Path("goals").glob("AC-241-*.md"))
 if not cand: sys.stderr.write("NOT-EVALUATED: AC-241 record not found\n"); sys.exit(3)
-m=re.search(r"^criterion:\s*>-
-(.*?)^expect:", cand[0].read_text(encoding="utf-8"), re.S|re.M)
+m=re.search(r"^criterion:\s*>-\n(.*?)^expect:", cand[0].read_text(encoding="utf-8"), re.S|re.M)
 if not m: sys.stderr.write("NOT-EVALUATED: criterion block unparseable\n"); sys.exit(3)
 body="\n".join(l[2:] if l.startswith("  ") else l for l in m.group(1).splitlines())
 T="criterion wrote no output to stderr/stdout"
@@ -45,8 +45,8 @@ sys.exit(0)
 P` ⇒ exit 0 = 归因判据在【真不可归因 + 自我引用】夹具上仍报红、只点名真凶 AC-999 而不点名自己，且全绿夹具下仍退出 0（负控制，防被削弱为恒红/恒绿）；exit 1 = 仍自点名（未修好）或已不能区分真凶；exit 3 = AC-241 记录或其 criterion 块读不到（未评估）。判据跑在 mktemp 夹具的 cwd 上，不触碰生产台账。
 
 ## DoD（draft）
-- [ ] 上面的判据实跑通过，且判据本身能取假（改坏实现时会红）
-- [ ] 若结论是「已有机制在管、只是失败」，则修那个机制，⛔ 不新建并行机制
+- [x] 上面的判据实跑通过，且判据本身能取假（改坏实现时会红）
+- [x] 若结论是「已有机制在管、只是失败」，则修那个机制，⛔ 不新建并行机制
 
 ## Touches
 - `goals/AC-241-生产台账上失败判据必须可归因-任何-goal-gate-verdict-fail-的-reason-不得是-判据没写任何.md`
