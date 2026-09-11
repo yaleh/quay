@@ -68,7 +68,17 @@ export const IN_DOMAIN_STATUSES: readonly string[] = ["active", "achieved"];
  *  1 (`sys.exit(0 if ok else 1)`) is NOT matched — documented limitation, not a silent pass. */
 const FAILURE_EXIT_RE = /(?:sys\.)?exit\s*\(\s*1(?![\d])|\bexit\s+1\b/;
 
-/** An attribution: something the acceptance-runner captures (stderr) or the shell redirects to it. */
+/** An attribution: something the acceptance-runner captures (stderr) or the shell redirects to it.
+ *
+ *  ⚠️ KNOWN, MEASURED OVER-APPROXIMATION (2026-09-11): acceptance-runner.ts:134-143 folds stderr FIRST
+ *  and falls back to STDOUT, so `echo "cause"; exit 1` IS attributable — but `echo`/`console.log` are not
+ *  matched here, so such lines read as BARE. Measured with the real enumeration: 7 of the 33 baselined ACs
+ *  (AC-189/190/191/196/198/199/200) are bare ONLY via this class — i.e. the ratchet guards 33 where 26
+ *  carry a genuinely silent failure exit.
+ *  ⛔ Deliberately NOT widened to `echo`: `echo` is not a stream marker but a command name, so a line like
+ *  `if echo x | grep -q y; then exit 1; fi` would lose a REAL bare exit — a false NEGATIVE, the harder
+ *  error (hard rule 4). Over-reporting accuses an attributable criterion; under-reporting certifies a
+ *  silent one. The conservative direction is kept, and its size is stated here rather than hidden. */
 const ATTRIBUTION_RE = /stderr|>&2|console\.error/;
 
 // ── types ───────────────────────────────────────────────────────────────────────────────────────────
@@ -122,8 +132,10 @@ export interface RatchetVerdict {
 /** Blank an unquoted `#`-to-end-of-line comment. `#` is the comment starter in BOTH shells and python,
  *  and a criterion is a shell string whose embedded heredocs are usually python — so one masker covers
  *  both. Quote-aware: `#` inside '…' / "…" / `…` is data, not a comment. ⛔ Strings are deliberately NOT
- *  masked: unlike a C-style `//` slice, a shell criterion's quoted `bash -c "exit 1"` really does exit 1,
- *  so masking strings would manufacture false NEGATIVES — the harder error to notice (hard rule 4). */
+ *  masked HERE: unlike a C-style `//` slice, a shell criterion's quoted `bash -c "exit 1"` really does
+ *  exit 1, so masking strings wholesale would manufacture false NEGATIVES — the harder error to notice
+ *  (hard rule 4). `maskValueStrings` below masks ONLY the narrower value-position subset, for exactly
+ *  that reason. */
 export function maskHashComments(line: string): string {
   let out = "";
   let quote: string | null = null;
@@ -150,6 +162,37 @@ export function maskHashComments(line: string): string {
   return out;
 }
 
+/** Blank a quoted literal in VALUE position (`command:"exit 1"`, `cmd='exit 1'`) — the text is DATA
+ *  handed to an API, not a command the criterion itself executes.
+ *
+ *  WHY THIS IS NOT A CONTRADICTION OF THE RULE ABOVE (2026-09-11, surfaced by AC-243 — see below): the
+ *  exemption for quoted strings exists because `bash -c "exit 1"` really does exit 1. That case is
+ *  *preserved* here: the quote is preceded by `c`, not by `:`/`=`, so it is still scanned and still BARE.
+ *  What this masks is the strictly narrower shape where the quote is the VALUE of a `key:`/`key=` pair.
+ *
+ *  THE DEFECT IT FIXES (AC-243, real, found by the ratchet on develop's own new criterion): AC-243 proves
+ *  the runner's zero-output template by *invoking* it — `m.runAcceptance({command:"exit 1", …})`. AC-243's
+ *  own failure exits (:22/:28/:30) all write stderr, so it is fully attributable and can never leave an
+ *  unattributable ledger fail — yet the bare scan matched the `exit 1` inside that ARGUMENT STRING and
+ *  reported the achieved, faithful AC-243 as a REGRESSION, blocking an unrelated task from landing. A
+ *  detector that accuses an attributable criterion is itself an attribution defect (hard rule 3b: the
+ *  output must distinguish "查过且合格" from "读错了").
+ *
+ *  ⛔ TWO LIMITS, both deliberate, neither silent:
+ *   · A value string containing command substitution (`x="$(exit 1)"`, `` x=`exit 1` ``) EXECUTES and is
+ *     therefore NEVER masked — masking it would manufacture a false negative.
+ *   · Indirection a masker cannot follow (`c='exit 1'; eval "$c"`) becomes a false negative. Contrived, and
+ *     the safe direction is over-reporting, not under-reporting. */
+export function maskValueStrings(line: string): string {
+  return line.replace(
+    /([:=])([ \t]*)((?:"(?:[^"\\]|\\.)*")|(?:'(?:[^'\\]|\\.)*'))/g,
+    (m: string, sep: string, gap: string, lit: string) => {
+      if (lit.includes("$(") || lit.includes("`")) return m;
+      return sep + gap + " ".repeat(lit.length);
+    },
+  );
+}
+
 // ── enumeration ─────────────────────────────────────────────────────────────────────────────────────
 
 /** Split a goal file into (frontmatter, body). null when there is no `---` frontmatter block. */
@@ -161,9 +204,10 @@ export function splitFrontmatter(src: string): { fm: string } | null {
 }
 
 /** True iff this criterion LINE is a failure exit that writes no cause. Pure — the testable core.
- *  Judged BY POSITION (hard rule 2): a `#`-comment that merely mentions `exit 1` is not a failure exit. */
+ *  Judged BY POSITION (hard rule 2): a `#`-comment that merely mentions `exit 1` is not a failure exit,
+ *  and a quoted value (`command:"exit 1"`) is data, not one either (see maskValueStrings). */
 export function isBareFailureExitLine(line: string): boolean {
-  const code = maskHashComments(line);
+  const code = maskValueStrings(maskHashComments(line));
   return FAILURE_EXIT_RE.test(code) && !ATTRIBUTION_RE.test(code);
 }
 

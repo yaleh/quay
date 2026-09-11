@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import {
   isBareFailureExitLine,
   maskHashComments,
+  maskValueStrings,
   checkRatchet,
   enumerateBareFailureExits,
   readBaseline,
@@ -115,6 +116,28 @@ test("isBareFailureExitLine — negative control: exit(10) / exit(0) / exit(3) a
 test("maskHashComments is quote-aware — `#` inside a quoted string is data", () => {
   assert.equal(maskHashComments("  echo 'a#b' && exit 1"), "  echo 'a#b' && exit 1");
   assert.equal(maskHashComments("  exit 1  # why"), "  exit 1  ");
+});
+
+test("isBareFailureExitLine — negative control: a quoted VALUE holding `exit 1` is DATA, not an exit (AC-243)", () => {
+  // The exact line that made the ratchet report the achieved, fully-attributable AC-243 as a regression
+  // and block an unrelated task from landing (2026-09-11). AC-243's own failure exits all write stderr.
+  const ac243 = '   \'const r=m.runAcceptance({command:"exit 1",cwd:".",timeoutMs:10000});\'';
+  assert.equal(isBareFailureExitLine(ac243), false, "a string handed to an API as an argument is not a failure exit");
+  assert.equal(isBareFailureExitLine("  local cmd='exit 1'"), false, "same for a shell value assignment");
+});
+
+test("isBareFailureExitLine — positive control: the value-position mask must NOT swallow a real exit", () => {
+  // The exemption for quoted strings exists for THESE shapes; a value-position mask must leave them BARE.
+  assert.equal(isBareFailureExitLine('  bash -c "exit 1"'), true, "`-c` makes the string a COMMAND, not a value");
+  assert.equal(isBareFailureExitLine('  python3 -c "import sys; sys.exit(1)"'), true);
+  assert.equal(isBareFailureExitLine('  x="$(exit 1)"'), true, "command substitution inside a value still EXECUTES");
+  assert.equal(isBareFailureExitLine("  x=`exit 1`"), true);
+});
+
+test("maskValueStrings is pure and blanks only the value-position literal", () => {
+  assert.equal(maskValueStrings('a:"exit 1",b:1'), 'a:        ,b:1');
+  assert.equal(maskValueStrings('k="x"'), 'k=   ');
+  assert.equal(maskValueStrings('echo "exit 1"'), 'echo "exit 1"', "not in value position ⇒ untouched");
 });
 
 // ── the ratchet (shrink-only) ──────────────────────────────────────────────────────────────────────
