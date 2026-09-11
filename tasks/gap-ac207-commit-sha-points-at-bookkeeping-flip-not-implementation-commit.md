@@ -1,7 +1,7 @@
 ---
 id: gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit
 title: AC-207 记录的 commit_sha 指向「翻 done」记账提交而非实现提交，而判据只查该字段非空 ⇒ 一个零实现、只有记账提交的项目同样能让它通过
-status: done
+status: ready
 labels:
   - gap
   - defect
