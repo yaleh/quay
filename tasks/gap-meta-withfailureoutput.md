@@ -1,7 +1,7 @@
 ---
 id: gap-meta-withfailureoutput
 title: AC-241 归因判据把「引用了空因模板」误判为「本身就是空因模板」⇒ 它每轮把自己列为不可归因项（自引用假阳性）
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
