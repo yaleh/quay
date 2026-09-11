@@ -47,11 +47,41 @@ RC=1
 
 ## AC
 
-- [ ] AC1: 跑 `goals/AC-161-user-level-marketplace-only.md` 的 criterion 原文（python3 heredoc，逐字）⇒ **exit 0**（立案当轮实测 exit 1，`CAUSE=user-enabled-plugins — …: quay@quay`）。
-- [ ] AC2: `extraKnownMarketplaces.quay.source.path` 不再指向临时前缀——`python3 -c "import json,os,sys;d=json.load(open(os.path.expanduser('~/.claude/settings.json')));p=((d.get('extraKnownMarketplaces') or {}).get('quay') or {}).get('source',{}).get('path','');sys.exit(1 if '/tmp/' in p else 0)"` ⇒ exit 0（当前 `/tmp/dir3.npm/lib/node_modules/quay/plugin` ⇒ exit 1）。
-- [ ] AC3: 交付验证路径对真实 settings 零写入——`b=$(sha256sum ~/.claude/settings.json)`；跑修复后的 `verify-deliver-coldstart.sh` ①安装步（或该脚本的自检入口）；`a=$(sha256sum ~/.claude/settings.json)`；`[ "$b" = "$a" ]` ⇒ exit 0。
-- [ ] AC4: **取假对照（证明 AC3 不是恒真）**——把该路径换回修复前形态重跑 AC3 的同一条断言 ⇒ **红**（真实 settings 的 sha256 改变）；换回修复后 ⇒ 绿。对照组读数须贴进本任务。
-- [ ] AC5: 不引入新红——`bash plugin/scripts/verify-deliver-coldstart.sh --selfcheck` ⇒ exit 0（既有 control 11/12/13 不因本改动转红；该项是本改动的接线负控制，真因见硬规则：「不产生新红」本身不是接线成功的证据，故必须与 AC3/AC4 同读）。
+- [x] AC1: 跑 `goals/AC-161-user-level-marketplace-only.md` 的 criterion 原文（python3 heredoc，逐字）⇒ **exit 0**（立案当轮实测 exit 1，`CAUSE=user-enabled-plugins — …: quay@quay`）。
+- [x] AC2: `extraKnownMarketplaces.quay.source.path` 不再指向临时前缀——`python3 -c "import json,os,sys;d=json.load(open(os.path.expanduser('~/.claude/settings.json')));p=((d.get('extraKnownMarketplaces') or {}).get('quay') or {}).get('source',{}).get('path','');sys.exit(1 if '/tmp/' in p else 0)"` ⇒ exit 0（当前 `/tmp/dir3.npm/lib/node_modules/quay/plugin` ⇒ exit 1）。
+- [x] AC3: 交付验证路径对真实 settings 零写入——`b=$(sha256sum ~/.claude/settings.json)`；跑修复后的 `verify-deliver-coldstart.sh` ①安装步（或该脚本的自检入口）；`a=$(sha256sum ~/.claude/settings.json)`；`[ "$b" = "$a" ]` ⇒ exit 0。
+- [x] AC4: **取假对照（证明 AC3 不是恒真）**——把该路径换回修复前形态重跑 AC3 的同一条断言 ⇒ **红**（真实 settings 的 sha256 改变）；换回修复后 ⇒ 绿。对照组读数须贴进本任务。
+- [x] AC5: 不引入新红——`bash plugin/scripts/verify-deliver-coldstart.sh --selfcheck` ⇒ exit 0（既有 control 11/12/13 不因本改动转红；该项是本改动的接线负控制，真因见硬规则：「不产生新红」本身不是接线成功的证据，故必须与 AC3/AC4 同读）。
+
+## 结果（2026-09-11 实测读数）
+
+**① AC1 / AC2（状态恢复）**：criterion 立案当轮 `RC=1`（`CAUSE=user-enabled-plugins — …: quay@quay`）⇒ 恢复后 **exit 0**（`enabledPlugins` 只剩 meta-cc/archguard，用户级无 quay 键）；AC2 **exit 0**，`extraKnownMarketplaces.quay.source.path=/home/yale/work/quay/plugin`。恢复按 Plan 顺序（①②先确认、③最后）：① `installed_plugins.json` 已有 `scope: project` @ `/home/yale/work/quay`；② `<repo>/.claude/settings.json` 已是 `{"enabledPlugins":{"quay@quay":true}}`。
+**③/④ 都走机件，不手搓**：④ `claude plugin marketplace add /home/yale/work/quay/plugin` 一次调用同时修正了 `settings.json` 的 `extraKnownMarketplaces` **和** `~/.claude/plugins/known_marketplaces.json`（此前两者都指向 `/tmp/…`；后者是 criterion 看不见、但会让 plugin cache 悬空的另外半边）。**③ 的一个真读数**：`claude plugin disable quay@quay --scope user` **不够**——它把键置成 `false` 而不删键，criterion 的 `any('quay' in k …)` 仍命中 ⇒ 实测 `RC=1`；最终按 Plan ③ 逐字删掉 `enabledPlugins["quay@quay"]` 才翻绿（下次别再试 disable）。
+**非 quay 项目对照（AC-161 的 SPEC AC5 语义）**：`cd /tmp/ac161-nonquay && claude plugin list` ⇒ 四条 quay@quay 全部 `✘ disabled`——用户级不再为「本项目之外」启用 quay。
+
+**② AC3（交付验证路径对真实 settings 零写入）**：`BEFORE==AFTER=5e7bc46d1809c77fc5e663730dbae0266c751880865d8ea62743dd41641ce8fb`；脚本自报 `STEP1_HOME_ISOLATED=1`、`STEP1_REAL_SETTINGS_UNCHANGED=1`、`MP_SETTINGS_OK=1`、`MP_ENABLED_LEAK=0`、`AC88_VERIFY=ok`、`SCRIPT_RC=0`；跑完 `known_marketplaces.quay.source.path` 仍是 `/home/yale/work/quay/plugin`（未被动过）。
+跑法：`bash plugin/scripts/verify-deliver-coldstart.sh --tgz <staged quay-0.6.1.tgz> --tgz-native <staged> --channel marketplace --root/--prefix/--evidence/--ac89 全指向临时目录`——marketplace 通道 = 段① install + 段①b 注册，正好覆盖本缺陷的两个写入点。
+
+**③ AC4（取假对照）**：同一条断言、同一个产品函数，只把段① 换回修复前形态（scratch 副本逐字只改两处：`STEP1_HOME="$real_home"`（隔离未生效）+ npm 行去掉隔离前缀，即真实 HOME 且不设 `QUAY_SKIP_PLUGIN_CLI`）⇒
+
+```
+STEP1_HOME_ISOLATED=0   STEP1_REAL_SETTINGS_UNCHANGED=0
+sig: sha256:5e7bc46d1809c77f… -> sha256:6788ddca5764bc58…（段① 内）→ 最终 c953d6bf88d5f515…
+MP_SETTINGS_OK=0   MP_ENABLED_LEAK=1
+```
+
+真实 `~/.claude/settings.json` 的 sha256 确实改变 ⇒ **红**；换回修复后 ⇒ 绿（上一条）。对照组跑完后再按同样两步恢复状态，AC1/AC2 复验仍 exit 0。
+
+**④ AC5（不引入新红）**：`--selfcheck` ⇒ **exit 0 / `selfcheck: PASS`**；既有 control 11/12/13/14 与其余全部 control 未转红。新增 control 45/46：
+
+```
+selfcheck: step1-real-settings-guard(positive) STEP1_HOME_ISOLATED=1 STEP1_REAL_SETTINGS_UNCHANGED=1 isolated_home_written=1 sentinel_sig_same=1
+selfcheck: step1-real-settings-guard(falsifiable,pre-fix-semantics) STEP1_HOME_ISOLATED=0 STEP1_REAL_SETTINGS_UNCHANGED=0
+```
+
+`isolated_home_written=1` 是特意加的：只测「真实 settings 没变」会被「postinstall 根本没跑」满足 ⇒ 一个恒真的空转，恰是本任务要防的形态（硬规则 4c）；`sentinel_sig_same` 是夹具侧独立第二读数，⛔ 不与产品 guard 共用同一个量。两条都驱动**产品函数 `step1_install` 本体**（⛔ 不是夹具复刻一遍判定逻辑），`plugin/test/verify-deliver-coldstart.test.mjs` 同步钉住这两行。
+
+**⑤ 实现要点与已知残差（硬规则 5b：修好一处 ≠ 只此一处）**：修复 = 段① 两条独立防线——`HOME` 隔离到 `${PREFIX}.home`（**只经显式前缀赋值 + `STEP1_SEGMENT_HOME`，⛔ 不 `export HOME`**：全局改 HOME 会让 `--ac205-session` 段经 `os.homedir()` 去枚举隔离目录的 `~/.claude/sessions`，把「没有同址目标会话」误报成事实）+ `QUAY_SKIP_PLUGIN_CLI=1`。同形调用点全仓枚举（`npm install -g`，`scripts/` 下命中 2 处）：本处（已修）与 `plugin/scripts/develop-deliver-tgz.sh:1369`（远端 heredoc 内、目标是**交付宿主自己的** HOME，属另一条通道、本任务 Touches 未覆盖 ⇒ 未改，如实登记）。**另一条同类上游**：`packages/quay/scripts/register-plugin.mjs:132-166` 的 materialization 跑的 `claude plugin install` 就是「每次真实全局安装都会复红 AC-161」的根；把 materialization 落到哪个 scope 是产品决策（AC-162 只管脚本直接写那条），本任务按 DoD 的「堵 `step1_install` 的真实-HOME 通道」只做交付路径，故在该文件就地留 RESIDUAL 注释（本任务 Touches 已含该文件），⛔ 不静默。
 
 ## DoD
 
@@ -60,6 +90,7 @@ RC=1
 ## Touches
 
 - `plugin/scripts/verify-deliver-coldstart.sh`
+- `plugin/test/verify-deliver-coldstart.test.mjs`
 - `packages/quay/scripts/register-plugin.mjs`
 - `packages/quay/test/npm-pack-e2e.test.mjs`
 - `tasks/gap-ac161-user-scope-enable-repolluted-by-cli-materialization.md`
