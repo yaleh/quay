@@ -2,7 +2,7 @@
 id: AC-240
 title: 端到端闭环必须由【同一次验证运行】自证——AC-203 的 driver 存活证据与 AC-207 的 driver 产出提交证据须共享同一
   (host, project_root)
-status: draft
+status: active
 kind: criterion
 goal: GOAL-009
 criterion: >-
@@ -55,4 +55,15 @@ origin: readings.criteria 中 AC-203（verdict pass）与 AC-207（verdict
   quay-verify-coldstart-a2a5aac0-root，交集为空（AC-203 在 6 次运行中只产出 2 次）。读
   plugin/scripts/verify-deliver-coldstart.sh（step4_driver_liveness 与 ⑤ e2e
   共用同一次运行的 $root，:1136 / :574-651）确认单次运行【能】同时产出两者 ⇒ 该合取可满足、⛔ 非恒假判据，只是从来没有被判据要求过。
+activatedAt: 2026-09-11T03:28:27.435Z
+statusLog:
+  - at: 2026-09-11T03:28:27.435Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-11T03:28:27.429Z
 ---
