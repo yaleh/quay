@@ -11,7 +11,7 @@
 //
 // Run: node --test packages/quay/test/branch-model.test.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -33,6 +33,13 @@ const QUAY_CLI = path.join(__dirname, "..", "bin", "quay.ts");
 
 // ── fixtures ─────────────────────────────────────────────────────────────────────────────────────
 
+// Every mkdtemp is carried so a single teardown removes the whole tree (R6 mkdtemp-no-cleanup:
+// a per-run tmpdir leak is a violation the ratchet must not have to absorb).
+const TMP_DIRS = [];
+after(() => {
+  for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true });
+});
+
 function git(cwd, args) {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
 }
@@ -42,6 +49,7 @@ function commit(cwd, msg) {
 }
 function newRepo(tag) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-bm-${tag}-`));
+  TMP_DIRS.push(dir);
   git(dir, ["init", "-q", "-b", "main"]);
   git(dir, ["config", "user.name", "bm-test"]);
   git(dir, ["config", "user.email", "bm@example.com"]);
@@ -97,6 +105,7 @@ test("detectDefaultBranch: a clone's origin/HEAD declares the default branch aut
   commit(origin, "base");
   git(origin, ["branch", "-M", "master"]);
   const clone = fs.mkdtempSync(path.join(os.tmpdir(), "quay-bm-clone-"));
+  TMP_DIRS.push(clone);
   execFileSync("git", ["clone", "-q", origin, clone], { encoding: "utf8" });
   assert.equal(detectDefaultBranch(clone), "master");
 });
@@ -131,6 +140,7 @@ test("classifyBranch: absent / compatible / divergent / unreadable are distinct 
 
 test("classifyBranch: a non-git directory is unreadable, NOT compatible", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-bm-nogit-"));
+  TMP_DIRS.push(dir);
   const c = classifyBranch(dir, LANDING_BASELINE_ROLE, null);
   assert.equal(c.state, "unreadable");
   assert.equal(c.reason, "not-a-git-worktree");
