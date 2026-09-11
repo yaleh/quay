@@ -56,10 +56,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
-/** The landing baseline's quay role name — the SAME literal the shipped mechanism reads. */
+/**
+ * The landing baseline's quay role name — the SAME literal the shipped mechanism reads.
+ *
+ * `develop` is a PROTOCOL-FIXED git ref (it is in `target-identity-literal-check.ts`'s
+ * `LEGAL_IDENTITY_VALUES` alongside `integration`/`master`/`HEAD`), so naming it here is not a
+ * per-project identity assumption. The DOC branch role is the opposite case — see
+ * `resolveDocBranchRole` below.
+ */
 export const LANDING_BASELINE_ROLE = "develop";
-/** The doc-only work branch's quay role name. */
-export const DOC_BRANCH_ROLE = "author";
 
 /** Classification of ONE branch against the project's default branch. */
 export type RefState = "absent" | "compatible" | "divergent" | "unreadable";
@@ -129,6 +134,29 @@ function git(root: string, args: string[]): { ok: true; out: string } | { ok: fa
     const err = e instanceof Error ? e.message : String(e);
     return { ok: false, err };
   }
+}
+
+/**
+ * Resolve the DOC-branch role: the branch the main checkout is on.
+ *
+ * ⛔ NOT a name. `author` is quay's OWN naming convention, not part of the protocol, so hardcoding it
+ * is a per-project identity literal — exactly the defect
+ * `gap-doc-branch-hardcoded-author-breaks-third-party-develop-sync` removed from
+ * `driver-filters.ts` (whose `resolveDocBranch` is this same runtime derivation), and exactly what
+ * `target-identity-literal-check.ts` fails RED on (`LEGAL_IDENTITY_VALUES` deliberately excludes
+ * `author`). `quay init` therefore REPORTS which branch fills the role and **never creates** a doc
+ * branch: a created `author` in a third-party project would be a dead artifact, because the shipped
+ * mechanism derives the doc branch at runtime and would never return it.
+ *
+ * @returns the checked-out branch name, the default branch when HEAD is detached, or null.
+ */
+export function resolveDocBranchRole(root: string): string | null {
+  const cur = git(root, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
+  if (cur.ok) {
+    const ref = cur.out.trim();
+    if (ref) return ref;
+  }
+  return detectDefaultBranch(root);
 }
 
 /** Refs whose sha is resolvable (`git rev-parse --verify --quiet <ref>^{commit}`). */
@@ -356,24 +384,23 @@ export function ensureBranchModel(root: string, opts: EnsureBranchModelOptions =
         : `project default branch (master role; quay never renames or moves it)`,
   });
 
-  // `develop` is judged by the compatibility predicate; `author` is a doc-only branch that may
-  // legitimately run ahead of develop, so it is only ever created-if-absent — never blocked.
-  const roles: Array<{ role: string; name: string; judge: boolean }> = [
-    { role: "landing-baseline", name: LANDING_BASELINE_ROLE, judge: true },
-    { role: "doc-branch", name: DOC_BRANCH_ROLE, judge: false },
+  // `develop` is judged by the compatibility predicate and PROVISIONED. The doc-branch role is
+  // REPORTED only — its name is derived at runtime (resolveDocBranchRole), never a literal, and
+  // `quay init` does not create it (see that function's header). Divergence of the doc branch from
+  // develop is a normal synced state handled by driver-filters.ts, never a provisioning block.
+  const docName = resolveDocBranchRole(root);
+  entries.push(
+    docName === null
+      ? { role: "doc-branch", ref: "(unresolved)", action: "unreadable", sha: null, backupRef: null, detail: "the doc-branch role could not be resolved (detached HEAD with no default branch) — the shipped mechanism derives it at runtime and will report the same" }
+      : { role: "doc-branch", ref: docName, action: "reused", sha: resolveSha(root, docName), backupRef: null, detail: `the doc-only work branch is DERIVED at runtime (driver-filters.ts resolveDocBranch = the checked-out branch), so '${docName}' fills the role; ⛔ no name is created or assumed here` },
+  );
+
+  const roles: Array<{ role: string; name: string }> = [
+    { role: "landing-baseline", name: LANDING_BASELINE_ROLE },
   ];
 
-  for (const { role, name, judge } of roles) {
-    // The doc branch is create-if-absent ONLY: `author` legitimately runs ahead of develop (doc and
-    // status commits land there and develop converges from it via driver-filters.ts), so its
-    // divergence is a normal synced state, never a provisioning block. `judge === false` therefore
-    // short-circuits to a two-state existence test instead of the compatibility predicate.
-    const exists = resolveSha(root, name) !== null;
-    const cls: RefClassification = !judge
-      ? exists
-        ? { name, state: "compatible", sha: resolveSha(root, name), aheadOfDefault: null, behindDefault: null, reason: "present", detail: `'${name}' exists (doc-only branch; divergence from ${LANDING_BASELINE_ROLE} is a normal synced state)` }
-        : classifyBranch(root, name, defaultBranch)
-      : classifyBranch(root, name, defaultBranch);
+  for (const { role, name } of roles) {
+    const cls: RefClassification = classifyBranch(root, name, defaultBranch);
 
     if (cls.state === "absent") {
       if (dryRun) {

@@ -20,10 +20,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   LANDING_BASELINE_ROLE,
-  DOC_BRANCH_ROLE,
   classifyBranch,
   detectDefaultBranch,
   ensureBranchModel,
+  resolveDocBranchRole,
   verifyBranchModel,
 } from "../src/branch-model.ts";
 import { runInit } from "../src/init.ts";
@@ -167,7 +167,7 @@ test("shape ①: a quay-shaped repo is REUSED untouched — nothing is created, 
   assert.equal(report.defaultBranch, "main");
   assert.deepEqual(
     report.entries.map((e) => `${e.role}:${e.action}`),
-    ["default:reused", "landing-baseline:reused", "doc-branch:reused"],
+    ["default:reused", "doc-branch:reused", "landing-baseline:reused"],
   );
   // 逐字不变: every ref is bit-identical after `quay init`.
   assert.equal(git(dir, ["rev-parse", "develop"]), before.develop);
@@ -205,20 +205,29 @@ test("shape ②: adoption preserves the old tip as a backup ref and re-points `d
   assert.equal(classifyBranch(dir, LANDING_BASELINE_ROLE, "main").state, "compatible");
 });
 
-test("shape ②: `author` is created at the default tip when absent (never blocked)", () => {
+test("the doc-branch role is DERIVED from the checkout — never a literal, never created", () => {
+  // ⛔ Hardcoding a doc-branch NAME here would re-introduce exactly what
+  // gap-doc-branch-hardcoded-author-breaks-third-party-develop-sync removed: `author` is quay's own
+  // convention, and target-identity-literal-check.ts fails RED on it. The shipped mechanism derives
+  // the doc branch at runtime (driver-filters.ts resolveDocBranch = the checked-out branch), so
+  // creating a named branch would produce a dead artifact the mechanism never returns.
   const dir = thirdPartyShapedRepo();
+  assert.equal(resolveDocBranchRole(dir), "main", "the role is the checked-out branch");
   const report = ensureBranchModel(dir, { adopt: true });
   const doc = report.entries.find((e) => e.role === "doc-branch");
-  assert.equal(doc.action, "created");
-  assert.equal(doc.ref, DOC_BRANCH_ROLE);
-  assert.equal(git(dir, ["rev-parse", DOC_BRANCH_ROLE]), git(dir, ["rev-parse", "main"]));
+  assert.equal(doc.action, "reused");
+  assert.equal(doc.ref, "main");
+  assert.equal(git(dir, ["branch", "--list", "author"]), "", "no doc branch is invented");
 });
 
-test("shape ②: a divergent `author` is NOT a provisioning block (doc divergence is a synced state)", () => {
+test("shape ②: a doc branch parked on a foreign line is NOT a provisioning block", () => {
+  // doc divergence from develop is a normal synced state (driver-filters.ts syncs it both ways) —
+  // and here the role is not even provisioned, so nothing can block on it.
   const dir = thirdPartyShapedRepo();
-  const foreignDevelop = git(dir, ["rev-parse", "develop"]);
-  git(dir, ["branch", "author", "develop"]); // doc branch parked on the foreign line
+  git(dir, ["branch", "author", "develop"]); // an unrelated same-name branch: still not ours to touch
+  const foreignDevelop = git(dir, ["rev-parse", "author"]);
   const report = ensureBranchModel(dir, { adopt: true });
+  assert.equal(report.ok, true);
   assert.equal(report.entries.find((e) => e.role === "doc-branch").action, "reused");
   assert.equal(git(dir, ["rev-parse", "author"]), foreignDevelop, "left alone — never blocked, never moved");
 });
@@ -282,8 +291,23 @@ test("CLI: `quay init --adopt-branch-model` exits 0 and creates the branch model
   const r = runQuayInit(["init", "--adopt-branch-model", "--root", dir], dir);
   assert.equal(r.exitCode, 0, r.stderr);
   assert.match(r.stdout, /\[ADOPTED\] landing-baseline -> develop/);
-  assert.match(r.stdout, /\[CREATED\] doc-branch -> author/);
   assert.equal(git(dir, ["rev-parse", "develop"]), git(dir, ["rev-parse", "main"]));
+});
+
+test("shape ②b (AC6 second case): a project with NO develop gets one CREATED at the default tip", () => {
+  const dir = newRepo("no-develop");
+  fs.mkdirSync(path.join(dir, "src"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "src", "app.txt"), "x\n");
+  commit(dir, "base");
+  assert.equal(git(dir, ["branch", "--list", "develop"]), "", "premise: no develop exists");
+
+  const report = ensureBranchModel(dir);
+  assert.equal(report.ok, true);
+  const bl = report.entries.find((e) => e.role === "landing-baseline");
+  assert.equal(bl.action, "created");
+  assert.equal(git(dir, ["rev-parse", "develop"]), git(dir, ["rev-parse", "main"]));
+  // and the mechanism can now diff against it
+  assert.equal(classifyBranch(dir, LANDING_BASELINE_ROLE, "main").state, "compatible");
 });
 
 test("verifyBranchModel: the read-only verdict agrees with the mutating one", () => {
