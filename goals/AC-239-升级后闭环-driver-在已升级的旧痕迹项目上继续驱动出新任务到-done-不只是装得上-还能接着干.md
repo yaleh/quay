@@ -45,18 +45,30 @@ criterion: >-
       if not r.get("build_sha"): continue
       upgraded.add(os.path.realpath(str(r.get("project_root"))))
 
-  if not upgraded: sys.exit(1)
+  if not upgraded:
+      sys.stderr.write("CAUSE=no-upgraded-site \u2014 \u8f7d\u4f53\u4e2d\u6ca1\u6709\u4efb\u4f55\u4e00\u6761\u5916\u90e8 AC-238 \u901a\u8fc7\u578b\u8bb0\u5f55\uff08\u9700 host\u2260\u672c\u673a \u2227 project_root \u5728\u672c\u4ed3\u5916 \u2227 pre>0 \u2227 post==pre \u2227 age\u22651 \u2227 runtime_replaced \u2227 task_list_ok \u2227 build_sha\uff09\uff0c\u56e0\u6b64\u65e0\u6cd5\u6807\u5b9a\u201c\u5347\u7ea7\u540e\u201d\u73b0\u573a\uff1bAC-238 \u8bb0\u5f55\u603b\u6570=%d\n" % sum(1 for r in recs if r.get("ac")=="GOAL-009-AC-238"))
+      sys.exit(1)
 
+  rej=[]
 
   for r in recs:
-      if r.get("ac")!="GOAL-009-AC-239" or not external(r): continue
+      if r.get("ac")!="GOAL-009-AC-239": continue
+      if not external(r): rej.append("not-external(host=%r,root=%r)" % (r.get("host"), r.get("project_root"))); continue
       pr=os.path.realpath(str(r.get("project_root") or "/nonexistent"))
-      if pr not in upgraded: continue
-      if not r.get("commit_sha") or not r.get("task_id"): continue
-      if r.get("task_status")!="done": continue
-      if int(r.get("gate_events") or 0)<=0: continue
-      if r.get("produced_by_driver") is not True: continue
+      if pr not in upgraded: rej.append("root-not-upgraded(%s)" % pr); continue
+      if not r.get("commit_sha") or not r.get("task_id"): rej.append("missing-commit_sha-or-task_id"); continue
+      if r.get("task_status")!="done": rej.append("task_status=%r" % r.get("task_status")); continue
+      if int(r.get("gate_events") or 0)<=0: rej.append("gate_events=%r" % r.get("gate_events")); continue
+      if r.get("produced_by_driver") is not True: rej.append("produced_by_driver=%r" % r.get("produced_by_driver")); continue
       sys.exit(0)
+  sys.stderr.write("CAUSE=no-qualifying-ac239-record \u2014
+  \u5df2\u6807\u5b9a\u5347\u7ea7\u73b0\u573a %d
+  \u4e2a\uff0c\u4f46\u65e0\u4e00\u6761 ac=GOAL-009-AC-239
+  \u8bb0\u5f55\u5168\u90e8\u6ee1\u8db3\uff1bAC-239 \u5019\u9009\u8bb0\u5f55 %d
+  \u6761\uff0c\u9010\u6761\u88ab\u62d2\u539f\u56e0\uff1a%s\n" % (len(upgraded),
+  len(rej), "; ".join(rej[:12]) if rej else
+  "(\u4e00\u6761\u5019\u9009\u8bb0\u5f55\u90fd\u6ca1\u6709)"))
+
   sys.exit(1)
 
   P
