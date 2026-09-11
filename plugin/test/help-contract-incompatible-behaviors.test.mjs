@@ -14,7 +14,8 @@
 //   AC1 — every `-check.ts` exits 0 AND prints usage on `--help`; NEGATIVE CONTROL: running `--help`
 //         over all of them leaves the `.quay/` mtime set unchanged (a checker that writes on `--help`
 //         — as measure-trend-check did — fails this); resident-process runtime files (driver + the
-//         full-suite runner itself + the cap-observation chain + the session-liveness observer registry)
+//         full-suite runner itself + the cap-observation chain + the session-liveness observer registry +
+//         the suite-harness selection/gate caches)
 //         are excluded from the snapshot (gap-suite-help-contract-mtime-race +
 //         gap-concurrency-cap-state-help-contract-mtime-race: they tick independently, not on `--help`);
 //         the mtime check retries a bounded number of times
@@ -99,10 +100,45 @@ const CAP_OBSERVATION_FILES = new Set([
   "concurrency-cap-state.json", // cap-from-gate.ts STATE_FILE_NAME, written by computeEffectiveCap
 ]);
 
+// Suite-harness selection/gate caches (fan-in suite 实测暴露 2026-09-11, task
+// gap-ac161-user-scope-enable-repolluted-by-cli-materialization): rewritten by the SUITE HARNESS's
+// OWN selection machinery in the tested worktree — never by a checker `--help`. The writer chain
+// (verified by reading it, then reproduced directly):
+//   a concurrent/nested `scripts/test.sh` (cwd = the tested worktree)
+//     → run_static_checks → run_operational_checks
+//     → runner-static-gate.ts:705 `suite-bucket-drift-check.ts --gate --root <worktree>`
+//     → checkStaticVsTruth() / checkTruthSelection() → selectBucketsForTouches([...], root)
+//     → writeBucketAttribution() → rewrites `<worktree>/.quay/suite-bucket-effective.jsonl`
+// The rewrite is byte-identical (sha256 unchanged across the call; only mtime moves — 直接复现:
+// 前后 sha256 同为 bc813d3f…, mtime 1789138260.9 → 1789138278.1), i.e. a pure cache churn tick.
+// WHY EXCLUDED rather than "the checker writes it": an instrumented per-checker sweep (all 93
+// `-check.ts` spawned `--help` one at a time, artifact mtime read before/after EACH spawn) recorded
+// ZERO hits, and the only `-check.ts` that reaches the writer (suite-bucket-drift-check.ts) returns
+// from `--help` before the call — so no checker `--help` can produce this tick. Same class as
+// CAP_OBSERVATION_FILES above: an externally-driven runtime carrier, not a `--help` side effect.
+// The mtime-race AC3 negative control below still pins that a REAL `--help` side effect
+// (measure-history.jsonl) is caught.
+const SUITE_HARNESS_CACHE_FILES = new Set([
+  "suite-bucket-effective.jsonl", // suite-bucket-select.ts writeBucketAttribution (the observed tick)
+  // Same call graph, same worktree: scripts/test.sh's suite-AFTER tail (:1654/:1701) runs
+  // `suite-fs-trace.ts --update --limit 8` in the tested worktree, so a nested suite finishing
+  // mid-sweep can append newly-traced files to this incremental cache. Not yet observed ticking
+  // (its content-hash cache skips unchanged files), but the writer is the same harness path ⇒
+  // excluded on the same rationale rather than left as a latent member of this same race.
+  "suite-fs-trace.jsonl",
+]);
+
 /** True when `relPath` is a resident-process runtime file (never a checker `--help` side effect). */
 function isNonCheckerRuntimeFile(relPath) {
   const base = path.basename(relPath);
-  if (RESIDENT_DRIVER_FILES.has(base) || SUITE_RUNNER_FILES.has(base) || CAP_OBSERVATION_FILES.has(base)) return true;
+  if (
+    RESIDENT_DRIVER_FILES.has(base) ||
+    SUITE_RUNNER_FILES.has(base) ||
+    CAP_OBSERVATION_FILES.has(base) ||
+    SUITE_HARNESS_CACHE_FILES.has(base)
+  ) {
+    return true;
+  }
   // (a) driver supervisor/driver/liveness log + pid files (driver-runtime.ts prefix ∈ {promotion-driver,
   // worker-driver}): <prefix>.(log|pid), <prefix>-supervisor.(log|pid), <prefix>-liveness.log,
   // <prefix>-inflight.pid.
@@ -237,6 +273,10 @@ test("mtime-race AC3 (negative control not degraded): resident-process file excl
     fs.writeFileSync(path.join(tmp, "suite-load-mfi-x-123-abc.jsonl"), "x\n");
     fs.writeFileSync(path.join(tmp, "concurrency-cap-state.json"), "x\n");
     fs.writeFileSync(path.join(tmp, "session-liveness.305362.json"), "x\n");
+    // Suite-harness selection/gate caches (SUITE_HARNESS_CACHE_FILES) — same control as the rest:
+    // a tick on them must be invisible, and (below) a tick on the business file must still show.
+    fs.writeFileSync(path.join(tmp, "suite-bucket-effective.jsonl"), "x\n");
+    fs.writeFileSync(path.join(tmp, "suite-fs-trace.jsonl"), "x\n");
     fs.writeFileSync(path.join(tmp, "measure-history.jsonl"), "x\n");
     const before = snapshotMtimeSet(tmp);
 
@@ -248,6 +288,8 @@ test("mtime-race AC3 (negative control not degraded): resident-process file excl
     fs.appendFileSync(path.join(tmp, "suite-load-mfi-x-123-abc.jsonl"), "y\n");
     fs.appendFileSync(path.join(tmp, "concurrency-cap-state.json"), "y\n");
     fs.appendFileSync(path.join(tmp, "session-liveness.305362.json"), "y\n");
+    fs.appendFileSync(path.join(tmp, "suite-bucket-effective.jsonl"), "y\n");
+    fs.appendFileSync(path.join(tmp, "suite-fs-trace.jsonl"), "y\n");
     assert.deepEqual(diffMtimeSet(before, snapshotMtimeSet(tmp)), [], "resident-process tick mtime changes must be excluded");
 
     // A real `--help` side effect (a non-runtime file) must still be caught — exclusion is not over-broad.
