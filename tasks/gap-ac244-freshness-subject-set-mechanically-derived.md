@@ -1,7 +1,7 @@
 ---
 id: gap-ac244-freshness-subject-set-mechanically-derived
 title: AC-244：AC-214 的新鲜度主体集合改为机械推导——接线 AC-232/AC-238，新增载体型 AC 不得再静默逃出
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -53,8 +53,31 @@ goal_ac: AC-244
 
 AC1–AC6 全绿 + 全量套件绿（外层）。真实落地 = **生产载体上的读数**：`goal-store gate AC-244` 由 fail 变 pass、`gate AC-214` 保持 pass；且守卫在合成载体型 AC 上实测取假（AC4）、在无证据载体上不误红（AC5）。⛔ 只改测试/只改文档不算落地；⛔ 不以「判据文本里出现了 SUBJ 字样」代替 AC3/AC4 的行为读数（硬规则 4 推论三：判据 AC 必须至少有一条读生产载体，且负控制不得只由注入 seam 满足）。
 
+## Evidence（2026-09-11 续做轮：本轮 fan-in 的 suite 红与 AC-214 无关，是**整轮套件被卡死**）
+
+`AC1–AC6 已在前 6 个提交落地`（判据机械推导 + `unwired` 守卫 + 测试钉，见各 AC 与 `plugin/test/ac214-freshness-subject-set.test.mjs`）。本轮补的是 fan-in `step=suite` 红的根因。
+
+**读数**：`.quay/fan-in-<id>-wk-prod-1788972473.log:10` 逐字
+`{"step":"suite-end","exit":null,"wall_ms":1408323,"ok":false,"reason":"silence watchdog killed the suite (no output ≥ silence timeout)"}`
+——614 个文件的套件只跑完 **613** 个（`grep -c '^__PERFILE__'` = 613，distinct = 613），唯一没有完成的正是 `packages/quay/test/serve-needs-human.test.mjs`（它有 `✖ AC1 + AC2 …` 且**没有** __PERFILE__ 行）。
+
+**根因（物理证据 + 双向对照，不是推断）**：
+- **物理证据**：「suite 结束」40 分钟后该树的进程仍在（`bash scripts/test.sh` → suite-scheduler → `node --test …/serve-needs-human.test.mjs` → 一个**存活**的 `quay-native … mcp` 子进程，`QUAY_NATIVE_TASKS_DIR=/tmp/nh-page-ws-eXSG9B/tasks` = 该测试 AC1+AC2 的夹具 workspace）。夹具目录已被 `finally` 删除 ⇒ 该测试的 `startServer` **拒绝**了（`server` 为 undefined ⇒ finally 关不掉 client）。
+- **机制**：`startServer` 在 `server.listen()` **之前**就 `connectProvider()`（起子进程）；bind 失败时既没有 server 可关、也没关 client ⇒ 子进程泄漏 ⇒ 该 `node --test` 进程永不言退 ⇒ 套件静默 ⇒ 看门狗杀整轮。触发面：该文件用 `freePort()` **只探回环**，而 `startServer` 绑 **0.0.0.0**，本机 tailscaled 在 Tailscale 接口占着高端口（`ss -tlnp` 实测 `100.78.206.100:42585`，落在内核 ephemeral 区间内）⇒ EADDRINUSE。
+- **双向对照（一条命令，可复核）**：同一探针（占住 0.0.0.0:<p> 再 `startServer({port:p})`）——**修复前** reject 后进程不自退（被 45s timeout 杀掉，exit 143）；**修复后** reject 后自行退出（exit 0）。新测试 `packages/quay/test/serve-bind-failure-no-leak.test.mjs` 即此对照的常驻形态（修复前 ✖ `DID-NOT-EXIT`，修复后 ✔）。
+
+**修法（2 处代码 + 1 处测试钉；⛔ 不动 AC-214 的判据语义）**：
+1. `packages/quay/src/serve.ts` — `connectProvider` 之后的任一失败（`client.manifest()` 或 bind）先 `client.close()` 再抛（新增 `closeSetupFailure`）⇒ bind 失败不再泄漏子进程，代价从「整轮套件被杀」降为「单个测试红」。
+2. `packages/quay/test/serve-needs-human.test.mjs` — `freePort()` → `port: 0` + 读回 `server.address().port`（`gap-serve-pid-derived-port-collision-family` 已为 12 处建立该约定），消除本文件的触发面。
+3. `packages/quay/test/serve-bind-failure-no-leak.test.mjs`（new）— 钉住「bind 失败后进程必须自行退出」。
+
+**同类残差（硬规则 5b，本任务未修，留证）**：另有 **13 个**测试文件仍用 `freePort()`（探回环 → 绑 0.0.0.0），约 80 处调用点，最大者 `serve-handlers.test.mjs`（30 处）。它们仍可触发 EADDRINUSE，但修复 1 之后后果已由「整轮套件被杀」降为「单个测试红」。
+
 ## Touches
 
 - goals/AC-214-交付证据必须新鲜-四条载体型判据不得-一旦转绿即永久绿.md
 - plugin/test/ac214-freshness-subject-set.test.mjs (new)
+- packages/quay/src/serve.ts（本轮：bind 失败不泄漏 provider 子进程）
+- packages/quay/test/serve-needs-human.test.mjs（本轮：freePort → port:0 + 读回）
+- packages/quay/test/serve-bind-failure-no-leak.test.mjs (new)
 - tasks/gap-ac244-freshness-subject-set-mechanically-derived.md

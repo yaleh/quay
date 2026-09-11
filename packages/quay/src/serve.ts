@@ -168,6 +168,38 @@ export function logAccess(accessLogPath: string, method: string | undefined, url
   }
 }
 
+/**
+ * Close the provider client and re-throw `cause` — the "setup failed after the
+ * provider was connected" exit.
+ *
+ * gap-ac244-freshness-subject-set-mechanically-derived (2026-09-11): `connectProvider`
+ * SPAWNS A CHILD PROCESS, and startServer used to take ownership of it implicitly —
+ * only a successfully returned server carried the `client` handle a caller could close.
+ * Any failure between connectProvider and the successful return (a provider whose
+ * `manifest()` fails, or a bind failure such as EADDRINUSE) therefore rejected while
+ * leaving the child running, with NO handle for the caller to clean up. The leaked child
+ * keeps the caller's event loop alive forever.
+ *
+ * Measured cost of the missing cleanup (this is not hypothetical): in a `node --test`
+ * suite file, one such rejection meant the file's process never exited — the file never
+ * emitted its per-file completion line, so a 614-file suite finished 613 files and then
+ * sat in silence until the silence watchdog killed the run. 23.5 minutes of suite
+ * wall-clock lost, and the run reports "killed" instead of the failing test.
+ * ⛔ A bind failure must never leak a process. Close the client here, and keep `cause`
+ * as the reported error (a shutdown failure must not mask the setup failure).
+ */
+async function closeSetupFailure(client: ProviderClient, cause: unknown): Promise<never> {
+  try {
+    await client.close();
+  } catch (closeErr) {
+    console.error(
+      `[quay serve] provider client close failed after a setup failure (the setup failure below is the reported one):`,
+      (closeErr as Error).stack || String(closeErr),
+    );
+  }
+  throw cause;
+}
+
 export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath }: StartServerOptions = {}): Promise<Server & { client: ProviderClient }> {
   const cfg = loadConfig();
   // gap-web-server-access-logging (AC2): resolve the access-log path (default
@@ -193,7 +225,14 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
     env: resolveProviderEnv(cfg, provider),
   });
 
-  const manifest = await client.manifest();
+  // The client owns a live child process from here on: any failure below must close it
+  // (see closeSetupFailure) rather than reject past it.
+  let manifest: Awaited<ReturnType<ProviderClient["manifest"]>>;
+  try {
+    manifest = await client.manifest();
+  } catch (err) {
+    return await closeSetupFailure(client, err);
+  }
 
   // M26-adversarial-eval finding M26-F2 (Phase A audit): this request
   // handler had no top-level try/catch. Combined with provider-client.js's
@@ -258,15 +297,22 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
   server.on("error", (err) => {
     console.error(`[quay serve] server error:`, (err as Error).stack || String(err));
   });
-  await new Promise<void>((resolve, reject) => {
-    server.once("listening", resolve);
-    server.once("error", reject);
-    server.listen(port, host, () => {
-      const addr = server.address();
-      const actualPort = addr && typeof addr === "object" ? addr.port : port;
-      console.log(`quay serve: listening on http://${host}:${actualPort}`);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("listening", resolve);
+      server.once("error", reject);
+      server.listen(port, host, () => {
+        const addr = server.address();
+        const actualPort = addr && typeof addr === "object" ? addr.port : port;
+        console.log(`quay serve: listening on http://${host}:${actualPort}`);
+      });
     });
-  });
+  } catch (err) {
+    // A bind failure (EADDRINUSE when the caller probed the port on loopback only while we
+    // bind 0.0.0.0, or any other listen error) must leave no provider child behind — the
+    // caller has no server to close it from. See closeSetupFailure.
+    return await closeSetupFailure(client, err);
+  }
 
   // QN-031 (iteration 21): expose the underlying provider client so a caller
   // (notably an automated test) can shut down the MCP child process cleanly
