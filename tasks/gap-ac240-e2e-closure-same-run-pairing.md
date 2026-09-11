@@ -77,3 +77,16 @@ AC-203 的 root 集 = {63ee9681, b95bd6f1}；AC-207 的 root 集 = {a2a5aac0}；
 - plugin/test/verify-deliver-coldstart.test.mjs
 - plugin/test/develop-deliver-tgz-evidence-transport.test.mjs
 - tasks/gap-ac240-e2e-closure-same-run-pairing.md
+
+
+## 补注（manager，2026-09-11，仅澄清一处措辞，不改范围）
+
+Plan 步骤 1 写「⛔ 不得沿用 step4 那种字面量 "0" "1"」——作为**新写入点的指引**完全正确，请照做（新代码必须当场 probe）。
+
+但**不要据此去改 step4 本身**：我按位置核过它的调用点，literals 只在实测值等于它们时才可达——
+
+    if [ "$AC203_EVALUATED" = "1" ] && [ "$AC203_DRIVER_ALIVE" = "1" ] \
+       && [ "$AC203_CARRIER_RECORDS" -gt 0 ] && [ "$AC203_HAS_PLUGIN_DIR" = "0" ]; then
+        write_ac203_record "$TS" "$AC203_HOST" "$AC203_PROJECT_ROOT" "0" "1" "$AC203_CARRIER_RECORDS" "$AC89"
+
+且 write_ac203_record 自身还有 fail-closed 守卫（`[ "$has_plugin_dir" = "0" ] || return 1`）。⇒ step4 写出的记录内容是**实测门控后的序列化**，不是恒真量；它不在本任务范围内，改它会白费工夫且触碰一个正被其它任务竞争的文件。

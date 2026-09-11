@@ -31,6 +31,33 @@ AC-239 的判据刻意设计成**必须与 AC-238 的通过记录关联**（同�
 **本任务在时间上依赖 `gap-aged-third-party-project-quay-upgrade-verification` 先把 AC-238 跑出通过记录**
 （同一个 project_root 上的升级副本必须先真实存在且升级成功）,已用 `depends_on` 表达这个先后关系。
 
+**2026-09-11 追加：已找到具体化身**（人回忆 + 实测双重确认，人 2026-09-11 裁定用它作为本任务要驱动的
+那条新任务内容）：meta-cc 自己有一个真实、已验证、尚未修复的缺陷——`query_session_content` /
+`query_session_signals` / `analyze_errors` 等 meta-cc MCP 工具的 `include_subagents=true` 参数，配合
+**显式 `session_id` 传参**时**静默失效**（不报错，返回 0 条），只对 `scope=session` / `scope=project`
+两种隐式取值生效。
+
+**实证方法**（session-scoped，非全项目模糊搜索）：从本会话某历史子代理 transcript 中取一根只存在于该
+`subagents/agent-*.jsonl`、不在其主会话文件中的针（`"Let me first create the worktree"`，文件系统 grep
+直接确认两侧计数：主会话文件 0 次、子代理文件 ≥1 次），用当前安装的 meta-cc 跑
+`query_session_content(session_id=<该会话>, include_subagents=true, contains=<该针>)` ⇒ **返回 0 条**。
+本仓库 `CLAUDE.md` 硬规则1 早在 2026-08-14 就记录过同形状的失败（两根干净针分别查 ⇒ 都返回 0）；
+2026-09-11 用当前实际安装的版本重新复现，问题依旧存在。
+
+**版本核实（不只看 changelog）**：本地当前安装 = meta-cc **v3.8.3**（2026-08-02 发布，本会话正在用的
+那份）；orangevps 上 meta-cc 项目 = meta-cc **v3.8.4**（2026-08-21 发布）。v3.8.4 的 CHANGELOG 只有
+测试/CI 维护项和 AC118 任务流转记录，未提及 subagent / include_subagents。把两边全部 10 个引用了
+`"subagents"` 字符串的源文件（`internal/mcp/query/query.go`、`internal/mcp/executor/handlers.go`、
+`internal/mcp/executor/consolidated_handlers.go` 等）逐一 `diff` —— **全部 byte-identical**。
+⇒ **两个版本跑的是同一段代码，缺陷两边都在，未修**。
+
+`internal/mcp/query/query.go` 的注释显式承诺了两种取值：`"scope=session, includeSubagents=true →
+[<current_session>.jsonl] + <uuid>/subagents/*.jsonl"` 与 `"scope=project, includeSubagents=true →
+top-level + all */subagents/*.jsonl"`——**显式 `session_id` 参数是第三种取值，代码注释里完全没提**，
+这很可能就是根因所在：`session_id` 路径大概率没有像 `scope=session`/`scope=project` 那样接上
+`GetQueryFiles` 的 subagent 目录展开逻辑。**这是一条待确认的线索，不是最终结论**——具体根因需要执行者
+到 meta-cc 源码里实际定位、修复、验证，不得预设答案。
+
 ## Proposal
 
 **What/Why**：在 `gap-aged-third-party-project-quay-upgrade-verification` 已经把 meta-cc 副本升级成功
@@ -42,8 +69,14 @@ done,产出真实 git 提交,并把这次的证据记录（`ac: "GOAL-009-AC-239
 
 1. 确认 `gap-aged-third-party-project-quay-upgrade-verification` 已完成、AC-238 已有通过记录、
    目标副本（project_root）确实存在且处于升级后的状态。
-2. 在该副本项目里,用 quay-native 的 task/goal ABI 新建一条简单、可机械验收的任务（参照 GOAL-009 已有
-   e2e 先例 `task_id: e2e-verify-207` 的做法,比如加一个可核实的文件/标记）。
+2. **在该副本项目里,用 quay-native 的 task/goal ABI 新建一条真实的缺陷修复任务**（内容即上方 Finding
+   追加段落所述：meta-cc 的 `include_subagents=true` 配合显式 `session_id` 时静默失效），而不是一个
+   人造标记文件——让升级后的 meta-cc 副本用它自己的任务板去修它自己的真实 bug,证据价值高于占位标记
+   （同 meta-cc 历史上 AC118 的模式：真实发现、真实修复、真实验收）。该任务本身要有可机械验收的 AC，
+   例如：新增/修改一个 Go 测试用例，构造与本 Finding 相同的场景（`session_id` 显式传参 + 
+   `include_subagents=true` + 一根只存在于对应 `subagents/*.jsonl` 里、不在主会话文件里的针），断言
+   修复前该测试失败、修复后通过；`go build ./...` 与相关单测通过。根因定位与具体修法由执行该任务时
+   实际查 `internal/mcp/query/query.go` 等源码决定,不得预设。
 3. 启动或复用该项目自己的 promotion/worker drivers（不是本仓库的 drivers）,让它们把这条新任务驱动到
    done,机械 fan-in、写下真实 gate-event。
 4. 从**远端**（该副本所在主机）取得真实的 `commit_sha`、`task_id`、`task_status`、`gate_events` 计数、
@@ -55,7 +88,8 @@ done,产出真实 git 提交,并把这次的证据记录（`ac: "GOAL-009-AC-239
    另开独立的 gap/finding 任务承接,不在本任务里掩盖。
 
 **Out of scope**：不重做 AC-238 已经验证过的静态/存量维度；不碰 orangevps 上 meta-cc 的真实活项目
-（只用 `gap-aged-third-party-project-quay-upgrade-verification` 建的那份副本）。
+（只用 `gap-aged-third-party-project-quay-upgrade-verification` 建的那份副本）；**是否把这条修复上游
+贡献回 meta-cc 官方仓库是另一个独立决定，不在本任务范围内，除非人另有裁定**。
 
 ## Touches
 
@@ -68,21 +102,24 @@ done,产出真实 git 提交,并把这次的证据记录（`ac: "GOAL-009-AC-239
 Stage 1 — 前置核实：确认 `gap-aged-third-party-project-quay-upgrade-verification` 已 done 且 AC-238
 已有通过记录，取得其 `project_root`。
 
-Stage 2 — 建新任务并驱动：在该 project_root 上新建一条任务，让该项目自己的 drivers 驱动到 done，
+Stage 2 — 建新任务并驱动：在该 project_root 上新建一条**真实缺陷修复任务**（meta-cc 的
+`include_subagents` 对显式 `session_id` 路径静默失效，见 Finding），让该项目自己的 drivers 驱动到 done，
 产出真实 git 提交与 gate-event。
 
 Stage 3 — 证据取回：远端 grep 取回真实的这一条新记录（`ac=GOAL-009-AC-239`，`project_root` 与 AC-238
 通过记录一致），去重追加进本机 `.quay/productization-verification.jsonl`，复跑 AC-239 判据，以退出码
 为准记录结果。
 
-Stage 4 — 缺陷分流：若过程中发现真实缺陷，另立任务承接，本任务 DoD 不含"缺陷已修完"，只含
-"缺陷已被另立任务追踪"。
+Stage 4 — 缺陷分流：若过程中发现新的真实缺陷（不同于本任务已知的那个），另立任务承接，本任务 DoD
+不含"缺陷已修完"，只含"缺陷已被另立任务追踪"。
 
 ## Acceptance Criteria
 
 - [ ] 已确认 `gap-aged-third-party-project-quay-upgrade-verification` 完成、AC-238 有通过记录，
       取得其 project_root
-- [ ] 在该 project_root 上，目标项目自己的 `*-drivers` 驱动出一条新任务到 done，真实 git 提交存在
+- [ ] 在该 project_root 上，目标项目自己的 `*-drivers` 驱动出一条**真实缺陷修复任务**到 done
+      （meta-cc `include_subagents` 对显式 `session_id` 静默失效的修复），真实 git 提交存在
+- [ ] 该修复任务自身带有可机械验收的判据（新增/修改测试用例，修复前失败、修复后通过）
 - [ ] 真实产出的记录（`ac=GOAL-009-AC-239`，`project_root` 与 AC-238 通过记录一致，`commit_sha`/
       `task_id` 非空，`task_status=done`，`gate_events>0`，`produced_by_driver=true`）已取回本机
       `.quay/productization-verification.jsonl`
@@ -92,6 +129,7 @@ Stage 4 — 缺陷分流：若过程中发现真实缺陷，另立任务承接�
 ## DoD
 
 - [ ] AC-239 判据复跑后有明确结果，不得静默搁置不复跑
+- [ ] meta-cc 的 `include_subagents`/`session_id` 缺陷已在升级后的副本上真实修复并验证
 - [ ] 若发现新缺陷，已另立任务追踪，且本任务描述中链接了该任务 id
 - [ ] `extra.goal_ac: "AC-239"` 与 `depends_on: ["gap-aged-third-party-project-quay-upgrade-verification"]`
       已随 task_write 写入并读回核对
