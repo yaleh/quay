@@ -441,6 +441,30 @@ loop:
 YAML
 ```
 
+## fan-in 首轮红 —— develop 侧既有红（按 fail-closed 归本任务）
+
+`scripts/test.sh` 全量那一轮 `5658 pass / 1 fail`，唯一红不在本任务 Touches 内：
+`packages/quay/test/gap-git-graph-task-view-aggregate-commits-by-task-id.test.mjs` 的 AC6，
+`AssertionError: group count (27) == subject-mention count (28)`。按本仓库规矩（100% develop 侧的红
+在复现于 ≥2 个任务之前仍算本任务的红）先复现、再定位、再修，⛔ 不 exit-not-landed。
+
+**根因（实测，⛔ 非推断）**：`taskIdFromSubject` 的 Forms 2/3 用**闭集动词表** `翻|reset` 取
+`tasks:` 之后的**第一个** token 当任务 id。而 develop 上真实存在
+`3789315e0 tasks: carry gap-goal-criteria-bare-failing-exit-unattributable AC state from author (6/8 ticked)`
+（`git merge-base --is-ancestor 3789315e0 develop` = 真），`carry` 不在闭集里
+⇒ 该提交被判成任务 id **`carry`**，真正的 id 被漏掉 ⇒ AC6 的 subject-only 对账差 1。
+同一根在 500 提交窗口里还有 8 条 `carry` + 1 条 `refresh` 被同样错判（实测读数，见提交信息里的 5b grep）。
+
+**修法（定义机制，不是给动词表打补丁）**：把四个 form 各自的「已知前缀」守卫收敛成**一个**模块级常量
+（`TASK_ID_PREFIXES` / `TASK_ID_SLUG`，Forms 4/5/6 改为复用它），Forms 2/3 改为取
+「第一个**带已知前缀**的 token」而不是「第一个 token」。理由：动词表是开放集（每个 driver 动作一个动词，
+每加一个动词就漏一次 id —— `carry` 就是最新加的那个），守卫必须长在 **id** 上，这与 Forms 4–6 早已采用的
+判据一致。没有已知前缀 token ⇒ 返回 `null`（显式落进 `unattributedCount`），
+⛔ 不再返回 `carry` 这种「读不懂伪装成合格」（硬规则 3b）。
+
+⛔ 本任务的产品面（`quay-init.sh` / `init.ts` / `cli/help.ts`）**一字未改**；上面这条是 develop 侧既有红的
+修复，独立于分支模型改动，只是按 fan-in 的 fail-closed 规矩归本任务并写进 `## Touches`。
+
 ## Touches
 
 - `plugin/scripts/quay-init.sh`
@@ -449,5 +473,6 @@ YAML
 - `packages/quay/src/branch-model.ts`
 - `packages/quay/src/init.ts`
 - `packages/quay/test/branch-model.test.mjs`
+- `packages/quay/src/serve-git.ts`
 - `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `tasks/gap-upgrade-entry-never-establishes-branch-model.md`
