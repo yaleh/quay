@@ -115,22 +115,59 @@ GOAL-003 随即关闭 ⇒ 关闭动作对判据读数**并非整体不敏感**�
 
 ## Evidence
 
-**AC1–AC8**：证据随分支上的四次实现提交（`goal-driver.ts` 关闭前置三态 + `goal-store.ts --long-term` 写路径
+**AC1–AC8 的机制证据**：随分支上的实现提交（`goal-driver.ts` 关闭前置三态 + `goal-store.ts --long-term` 写路径
 + 两侧测试 + `goals/AC-161-*.md` 的成因文本）。
 
-**本轮（2026-09-11 08:1xZ 续做）本地读数**：`scripts/test.sh --for-task <本任务> --allow-thin`
-= **绿，177 tests / 177 pass / 0 fail**（含本次新增的四条：`goalCloseBlockFromRecords` 三态臂、
-第三态 `not-evaluated` 不与 `clear` 同形、real-ring「achieved 红 AC ⇒ 关闭被拒 + 落痕」、
-real-ring「无红 AC ⇒ closeBlocks 恒有该 GOAL 一条且 verdict=clear」）。scoped-gate 缓存已写
-（`--develop-sha b7c3c039e`）。
+**本轮（2026-09-11 11:4xZ）逐条实跑复核（⛔ 非引述，均为本回合实跑读数）**：
 
-**AC9（全量绿）现状 —— 本条尚未取得载体读数，由紧随其后的 fan-in suite 证成或证伪**：
-按 `taskId` 查 `.quay/verification-round.jsonl`（1542 行）⇒ **本任务 0 行**。谓词已对已知为真样本干跑校验
-（`gap-pre-fix-upgraded-project-unresolvable-binding-undetected` ⇒ 2 行），故该 0 是真 0：**本分支从未有过
-一次完成的全量 suite 轮次**。tick 保持 `[x]` 是本轮对 fan-in suite 的预测（fan-in suite 是 AC9 的证伪器，
-它红则本 tick 当场被推翻）—— ⛔ 不是已有读数。
+- **AC4** `goal-store get AC-161` ⇒ `"longTerm": true`（机件回读，非文件字面）；`goal-store check
+  --achieved-failing` ⇒ `inScope` 含 `AC-161`（域内 17 条），`achievedButFailing: ["AC-161"]` ⇒ 复验域确实收回。
+- **AC5** `gate AC-242 --dry-run` ⇒ **exit 0** / `verdict: pass` / `reason: acceptance passed (exit 0)`
+  （改前实测 exit 1 + 逐字 `frozen achieved-but-failing, no mechanism re-runs them: AC-161`）。
+- **AC7** 同一载体（当前 `~/.claude/settings.json`）：旧判据 exit **1**，新判据 exit **1** ⇒ 只改诊断、不改判定。
+  新判据 stderr 逐字 `CAUSE=user-enabled-plugins — user-level enabledPlugins still enables quay plugin(s): quay@quay`
+  ⇒ 同时确证这条红今天是真的，不是陈旧读数。
+- **AC3**（真实样本干跑，硬规则 2 的零计数半边）对**生产记录 AC-161 本体**跑 `goalCloseBlockFromRecords` 四臂：
+  A) 去掉 long-term 声明 ⇒ `{blocked-failing-ac, acs:["AC-161"]}`（判据在真样本上确实会响）；
+  B) 按本任务交付形态（`long-term: true`）⇒ `{clear}`（逃生口生效，AC-222 的「GOAL 必须能自动关闭」未被牺牲）；
+  C) 同一条 AC 记到别的 GOAL ⇒ `{clear}`（作用域确实只在 GOAL 名下，不是全库式的）；
+  D) 台账读不到 ⇒ `{not-evaluated, cause:"ledger-absent"}`（第三态与 clear 不同形，硬规则 3b）。
+  ⚠️ 这仍是**未落地**的读数：AC3 主句要求的「落地之后 `goal-round.jsonl` 里 ≥1 条因 AC 在红而未关闭」
+  须由落地后的 driver 轮次证成；本轮交付的是它明列的干跑后备证据。
+- **AC6（本轮补做 Plan 第 4 条③ —— 上一轮勾了 tick 但该动作从未执行，本轮实测发现并补做）**：
+  `goal-store gate AC-161`（非 dry-run）刷新台账尾事件后，AC-241 干跑由
+  `… unattributable failing goal AC(s): AC-161: acceptance failed (exit 1); AC-239: acceptance failed (exit 1) …`
+  变为 `… unattributable failing goal AC(s): AC-239: acceptance failed (exit 1) — criterion wrote no output
+  to stderr/stdout` ⇒ **AC-161 已离开 bad 列表，剩余项逐字只有 `AC-239`**
+  （由 `gap-goal-criteria-bare-failing-exit-unattributable` 在飞）。同一次刷新把 AC-161 台账尾由裸因
+  `acceptance failed (exit 1)` 变为带成因的 `acceptance failed (exit 1) — CAUSE=user-enabled-plugins — …: quay@quay`
+  ⇒ DoD 的「尾事件不再是空因」成立。⚠️ 该刷新落在**工作树**的 `.quay/gate-events.jsonl`（gitignored、不进 delta）；
+  生产侧在落地后由 goal-driver 把 AC-161 重新纳入复验域自动刷新，收敛方向一致。
 
-**本轮 exited-not-landed 的根因 = 机械 fan-in 的静默看门狗把「排队等单飞槽」误判为「挂死」，
+**scoped 门（本轮实跑）**：`scripts/test.sh --for-task <本任务> --allow-thin` = **绿，177 tests / 177 pass / 0 fail**（exit 0）。
+scoped-gate 缓存已写（`--develop-sha 3cf2292ea`；写前已核 `git rev-parse develop == HEAD^2`，排除 stale 假绿）。
+
+**AC9（全量绿）= 对 fan-in suite 的预测，⛔ 不是已有读数；本轮已取得一次证伪读数（唯一红项与本任务 delta 无关，
+根因已定位、不在 Touches ⇒ 只上抛不修）**：上一轮全量 suite 载体读数 `# tests 5582 / # pass 5581 / # fail 1`，
+唯一红项 = `packages/quay/test/gap-git-graph-task-view-aggregate-commits-by-task-id.test.mjs` AC6
+`AssertionError: group count (8) == subject-mention count (9)`。
+
+- 根因（可复现、非推断）：`packages/quay/src/serve-git.ts:254-260` 的 **Forms 2+3** 分支
+  `rest.match(/^(?:翻\s+|reset\s+)?([A-Za-z0-9][A-Za-z0-9_-]*)/)` **没有** Forms 4/5/6 都有的 known-prefix 守卫 ⇒
+  `tasks: carry gap-develop-sync-… AC/DoD state into task branch` 被抽成假 id **`carry`**（不在
+  `gap|DIR|exp5|QN|QX|QC|QW|QENG|ARCH|cand|SU|PROBE|TEST` 白名单内却被直接返回），该提交从真任务分组被偷走，
+  并在 `layoutTaskGraph` 生成假 `carry` 组（窗口内 **8 条**提交）。
+- 影响面（本回合量化）：AC6 只对账**最新一条** `tasks: 翻 …` ⇒ 窗口内 42 个候选里 **4 个会红**
+  （`gap-fixture-dir-write-races-whole-tree-copy` / `gap-process-budget-counts-hung-test-processes-as-in-use` /
+  `gap-develop-sync-reset-hard-destroys-third-party-project-tree` / `gap-meta-outer-driver`）；上一轮 suite 跑时
+  最新完成者恰是第三个 ⇒ 命中（复现：把 AC6 的 id 换成它干跑 ⇒ `group.commits.length=8` vs `gitCount=9` MISMATCH）。
+- 同源（硬规则 5b）：已 done 的 `gap-taskid-from-subject-form4-prefix-guard` 修的是**同一形态的 Form 4**
+  （假 id `git-history` → **同一个测试文件** AC6 红 → 阻塞全部 fan-in），其描述逐字称「缺少 **Form 5/6** 共有的
+  known-prefix 守卫」——**Forms 2+3 从未被守**；`serve-git.ts:239` 的文档串同样写成「Forms 4–6 …」，静默排除 2+3。
+- ⛔ 修它要动 `packages/quay/src/serve-git.ts` + 其测试，**不在本任务 `## Touches` 内**（anti-drift 是 fan-in 的
+  HARD FAIL 步）⇒ 只上抛不修，建议 manager/人另立任务。
+
+**上一轮 exited-not-landed 的根因 = 机械 fan-in 的静默看门狗把「排队等单飞槽」误判为「挂死」，
 与本任务代码无关（suite 一个测试都没跑）**：
 
 - 读数①：`.quay/fan-in-suite-<task>~wk-prod-1788972473~1789113002586-97a072.log` = **0 字节**。
@@ -156,8 +193,7 @@ Plan 第 2 条 (a) 给的修法是「`scripts/test.sh` 等锁循环每 30s 打�
 （`931fdc4dd` + `spawnSuiteAndWait` 强制注入 `QUAY_TEST_SUITE_DRIVER_HOLDS_SLOT=1`）只治了**自死锁**那一半
 （suite 对自己的槽再 flock）。⇒ 「排队被误杀」这一半今天仍然活着，本任务是一次干净复现
 （硬规则 5b：修好一个实例 ≠ 该原则再无其它适用点）。
-⛔ 修它要动 `scripts/test.sh` / `suite-driver.ts`，**不在本任务 `## Touches` 内**（anti-drift 是 fan-in 的
-HARD FAIL 步），故只上抛、不修 —— 交给 manager/人另立任务。
+⛔ 修它要动 `scripts/test.sh` / `suite-driver.ts`，**不在本任务 `## Touches` 内**，故只上抛、不修。
 
 **附带观察（同窗口，未取证）**：`ps` 有 6 个 `bash scripts/test.sh --buckets <task>` 存活 **1–3 天**
 （pid 356720 / 1135674 / 1229342 / 2105632 / 2948127 / 3500020，均 ppid=1 孤儿）。它们当前**不持** `.0`
