@@ -41,12 +41,12 @@ goal_ac: AC-244
 
 ## Acceptance Criteria
 
-- [ ] AC1 机制在位：`node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts get AC-214 --root .` 的输出中，`SUBJ`（机械推导块）与 `unwired`（守卫）各命中 ≥1；贴命中前 3 行（硬规则②：引用计数前先打印命中）。
-- [ ] AC2 接线：同一条输出中 `NEED = […]` 整行同时含 `GOAL-009-AC-232` 与 `GOAL-009-AC-238`；贴该行原文。
-- [ ] AC3 生产转绿（读生产载体）：worktree 内 `.quay/productization-verification.jsonl` 与生产主检出该文件 `sha256` 相同（贴两条 sha256），随后 `node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts gate AC-244 --root <worktree>` ⇒ `"verdict": "pass"`，同命令 `gate AC-214 --root <worktree>` ⇒ `"verdict": "pass"`；贴两份 JSON。对照（改前）：本次立案当轮 `gate AC-244 --root .` ⇒ `"verdict": "fail"`，reason 逐字含 `GOAL-009-AC-232,GOAL-009-AC-238`。
-- [ ] AC4 守卫取假（fixture 负控制）：夹具里额外放一条「判据只读载体、且不在 NEED」的 GOAL-009 AC（合成 `AC-239`）及其载体记录 ⇒ 判据 `exit 1`，stderr 含 `carrier-type AC with no freshness bound in NEED` **且**指名该 AC；贴输出与 exit code。
-- [ ] AC5 守卫不误红（fixture 正控制）：同夹具去掉那条额外 AC，载体里 6 条 NEED 记录**不带** `build_sha`/`commit` ⇒ 判据 `exit 1` 但 stderr 是 `no evidence yet:`（证明控制流越过守卫、到达新鲜度阶段，守卫不是恒红）；贴输出与 exit code。
-- [ ] AC6 测试钉：`node --test plugin/test/ac214-freshness-subject-set.test.mjs` 全绿（含 AC4/AC5 两向断言）；贴 `pass/fail` 计数行。
+- [x] AC1 机制在位：`node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts get AC-214 --root .` 的输出中，`SUBJ`（机械推导块）与 `unwired`（守卫）各命中 ≥1；贴命中前 3 行（硬规则②：引用计数前先打印命中）。
+- [x] AC2 接线：同一条输出中 `NEED = […]` 整行同时含 `GOAL-009-AC-232` 与 `GOAL-009-AC-238`；贴该行原文。
+- [x] AC3 生产转绿（读生产载体）：worktree 内 `.quay/productization-verification.jsonl` 与生产主检出该文件 `sha256` 相同（贴两条 sha256），随后 `node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts gate AC-244 --root <worktree>` ⇒ `"verdict": "pass"`，同命令 `gate AC-214 --root <worktree>` ⇒ `"verdict": "pass"`；贴两份 JSON。对照（改前）：本次立案当轮 `gate AC-244 --root .` ⇒ `"verdict": "fail"`，reason 逐字含 `GOAL-009-AC-232,GOAL-009-AC-238`。
+- [x] AC4 守卫取假（fixture 负控制）：夹具里额外放一条「判据只读载体、且不在 NEED」的 GOAL-009 AC（合成 `AC-239`）及其载体记录 ⇒ 判据 `exit 1`，stderr 含 `carrier-type AC with no freshness bound in NEED` **且**指名该 AC；贴输出与 exit code。
+- [x] AC5 守卫不误红（fixture 正控制）：同夹具去掉那条额外 AC，载体里 6 条 NEED 记录**不带** `build_sha`/`commit` ⇒ 判据 `exit 1` 但 stderr 是 `no evidence yet:`（证明控制流越过守卫、到达新鲜度阶段，守卫不是恒红）；贴输出与 exit code。
+- [x] AC6 测试钉：`node --test plugin/test/ac214-freshness-subject-set.test.mjs` 全绿（含 AC4/AC5 两向断言）；贴 `pass/fail` 计数行。
 - [ ] AC7 全量套件绿（外层 verification-round 验证）——本条的量的产生处是 fan-in/外层的 suite 轮，⛔ 不是 worker 自己的读数；worker 只提供 scoped 门读数（`bash scripts/test.sh --for-task gap-ac244-freshness-subject-set-mechanically-derived --allow-thin`），全量绿与否由外层判定。
 
 ## Definition of Done
