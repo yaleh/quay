@@ -147,6 +147,7 @@ Error: Cannot find module '…/plugin/scripts/select-static-checks-for-touches.t
 - `packages/quay/src/fan-in/ff-merge.ts`
 - `packages/quay/scripts/package.sh`
 - `plugin/test/fan-in-ff-merge.test.mjs`
+- `plugin/test/ac214-freshness-subject-set.test.mjs`
 - `tasks/gap-ff-merge-suite-cert-classifier-unshipped-and-misreported.md`
 
 ## Evidence
@@ -263,3 +264,32 @@ $ SD_OLD=<coldstart 前缀>/plugin/scripts/dist   # 修复前打出的真包
 + `<dir>/plugin/scripts/runner-static-gate.ts`，即安装布局形状）钉住「安装布局解析」与「三态词表」，
 唯一变量 = 被判的路径。**取假对照**：把 `ff-merge.ts` 换回 `develop` 版本（pre-fix），3 条**全红**
 （`node --test --test-name-pattern=…`，3 tests / 0 pass）；换回后 38/38 绿。
+
+### 附带修：AC-244 的接线钉在 AC-239 并入 NEED 后过期（**develop 侧**红，非本任务引入）
+
+本任务的 suite 步红在 `plugin/test/ac214-freshness-subject-set.test.mjs`，**与本任务 delta 无关**：
+该测试文件与 `goals/AC-214-*.md` 都与 `develop` 逐字相同（`git diff develop -- <两者>` 为空）。
+但它挡下了**每一个**在飞任务的 fan-in（fail-closed ⇒ 算在当轮任务头上），故按纪律一并修、并登记进 Touches。
+
+**根因（由一条命令的对照确定，硬规则 4 推论四）**：该测试原先**自己也复制了一份真相源** —— 硬写
+`NEED_IDS = [201,203,205,207,232,238]`，并把 `239` 当「NEED 之外」的探针。而 `a26bd6c66`
+把 `GOAL-009-AC-239` **正确地**并入了 AC-214 的 `NEED`：AC-239 的判据正文只读
+`.quay/productization-verification.jsonl`，`SRC_RE` 在其正文上**零命中** ⇒ 按 AC-244 自己的规则就是载体型。
+于是那份硬写副本过期，AC4 由「守卫指名 239」翻转成「守卫沉默 + `no evidence yet: …AC-239`」
+——**看起来像守卫坏了**，实则测试钉死了一个已不成立的假设。
+
+**对照（唯一变量 = 239 是否在 NEED 里；同一条命令、同一个夹具）**：
+
+```
+NEED 含 239（= develop 现状）   AC4 ✖   stderr = "no evidence yet: …AC-207,AC-232,AC-238,AC-239"
+NEED 摘掉 239（临时改判据）     AC4 ✔   5/5 全绿
+```
+
+**修法（⛔ 不是把 239 换成另一个写死的 id —— 同形会再犯）**：`needSubjectSet(CRITERION)` 从真判据正文
+机械推导主体集合，探针取 `max(NEED)+1`（**按构造**在 NEED 之外 ⇒ NEED 今后再增员也不会让它过期）。
+两个独立读法互校（按行取 `NEED = [` vs 全文取所有带引号的 `GOAL-009-AC-<n>`），计数不一致即报错 ——
+防某个正则静默少读几条、把一个更弱的判据跑成绿的（硬规则 3b）。
+
+**验证**：5/5 绿（AC5 现覆盖全部 7 条 NEED 成员，标题由推导值渲染）。
+**取假对照**：在判据的 `if unwired:` 前插一行 `unwired = []` 把守卫打瞎 ⇒ AC4 立刻红（连带 3 条兄弟红），
+证明这条钉仍可取假、不是被改成恒绿。
