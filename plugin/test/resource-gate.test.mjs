@@ -1487,7 +1487,7 @@ test("AC2 — the sampling window is a read-host KNOB (ms), clamped; never a cal
     );
   assert.equal(runWindow("2000").sample_window_ms, 2000, "the knob is honoured");
   assert.equal(runWindow("1").sample_window_ms, 200, "clamped UP — a 1 ms window has no tick resolution");
-  assert.equal(runWindow("999999").sample_window_ms, 3000, "clamped DOWN so the read stays inside testProcessesInUse()'s 5 s child timeout");
+  assert.equal(runWindow("999999").sample_window_ms, 2000, "clamped DOWN so the read stays inside testProcessesInUse()'s 5 s child timeout (measured: 3000 ms ran 4.47 s end-to-end)");
   assert.equal(runWindow("abc").sample_window_ms, 1000, "a non-numeric knob degrades to the default, never wedges the budget");
 });
 

@@ -82,7 +82,7 @@
 # Knob (the same definition-point pattern as 旋钮②/③ — read from env, never a bare literal at a
 # use site):
 #   PROCESS_BUDGET_SAMPLE_WINDOW_MS — the liveness sampling window in ms (default 1000, clamped to
-#                                     200..3000 so the read stays well inside the 5 s timeout its
+#                                     200..2000 so the read stays well inside the 5 s timeout its
 #                                     consumer `testProcessesInUse()` allows).
 #
 # Test seams (env overrides; for the unit test in plugin/test/resource-gate.test.mjs):
@@ -210,14 +210,30 @@ read_test_procs() {
 }
 
 # ── LIVENESS WINDOW (gap-process-budget-counts-hung-test-processes-as-in-use) ───────────────────────
-# proc_cpu_ticks <pid> — total CPU ticks (utime+stime = /proc/<pid>/stat fields 14+15) of a pid, or
-# the EMPTY STRING when the pid is gone/unreadable. A DIRECT kernel-reported quantity — the process
-# is never asked about itself (硬规则 4b: a quantity produced by the observed object cannot judge
-# the observed object). Fail-open: an unreadable pid simply yields no reading (the caller treats it
-# as "not consuming"), which is exactly the "process has exited" case.
-proc_cpu_ticks() {
-  awk '{print $14 + $15}' "/proc/${1}/stat" 2>/dev/null || true
-}
+# CPU_TICKS_AWK — print "pid<TAB>utime+stime" for each pid named on stdin (one per line), reading
+# /proc/<pid>/stat directly. A DIRECT kernel-reported quantity — the process is never asked about
+# itself (硬规则 4b: a quantity produced by the observed object cannot judge the observed object).
+# ONE awk for the whole candidate set (not one spawn per pid — the enumeration overhead is what the
+# consumer's 5 s child timeout has to absorb, see the window clamp below).
+# The comm field (stat field 2) is parenthesised and MAY CONTAIN SPACES AND PARENTHESES (a Node
+# process that sets process.title does), so the field-split is anchored on the LAST ')' — a naive
+# `$14 + $15` split mis-reads the CPU fields for such a process (and the naive split is exactly the
+# 硬规则 4 「读数看似合理但是错的」 shape: it still returns a number). After the comm is dropped the
+# first token is stat field 3, so field 14 (utime) is token 12 and field 15 (stime) is token 13.
+# A pid whose /proc entry is gone is simply absent from the output (fail-open — never wedges).
+readonly CPU_TICKS_AWK='
+  {
+    pid = $1
+    if (pid == "") next
+    line = ""
+    if ((getline line < ("/proc/" pid "/stat")) <= 0) { close("/proc/" pid "/stat"); next }
+    close("/proc/" pid "/stat")
+    sub(/^.*\)[ \t]*/, "", line)
+    n = split(line, f, /[ \t]+/)
+    if (n < 13) next
+    print pid "\t" (f[12] + f[13])
+  }
+'
 
 # ts_field <text> — render one TAB-separated record field. A cmdline can contain TAB / newline (both
 # would corrupt the record layout) and a node --test child cmdline runs ~1.5 KB (a dozen of them would
@@ -231,15 +247,9 @@ ts_field() {
 
 # sample_cpu_ticks — stdin = one pid per line; stdout = "pid<TAB>ticks" for every pid that is still
 # readable at sample time. Pids that vanished between the ps snapshot and the sample are simply
-# absent from the output (never wedges the budget).
+# absent from the output (never wedges the budget). One awk for the whole set (see CPU_TICKS_AWK).
 sample_cpu_ticks() {
-  local pid ticks
-  while IFS= read -r pid; do
-    [ -n "${pid}" ] || continue
-    ticks="$(proc_cpu_ticks "${pid}")"
-    [ -n "${ticks}" ] && printf '%s\t%s\n' "${pid}" "${ticks}"
-  done
-  return 0
+  awk "${CPU_TICKS_AWK}"
 }
 
 total_budget="${RESOURCE_GATE_TEST_NPROC:-$(nproc 2>/dev/null || echo 1)}"
@@ -258,12 +268,16 @@ excluded_count=0
 liveness_source="sampled"
 
 # The window knob — the same single-definition-point pattern as 旋钮②/③ (read from env, never a
-# bare literal at a use site). Clamped so the worst case (200..3000 ms) plus the two ps passes and
-# the /proc reads stays well inside the 5 s timeout testProcessesInUse() allows its child.
+# bare literal at a use site). The clamp bounds come from TWO EXTERNAL CONTRACTS, not from this host's
+# specs (硬规则 4 推论二): the lower bound from /proc tick resolution (a 1 ms window cannot see a
+# tick), the upper bound from `testProcessesInUse()`'s 5 s CHILD TIMEOUT — a timeout there degrades
+# fail-open to in_use=0, i.e. the budget would silently stop throttling. MEASURED 2026-09-11 on a
+# ~300-node-process host: the whole read costs ~0.34 s on top of the window (one ps pass per
+# enumeration + ONE awk for all /proc reads), so window=2000 ms ran 2.34 s — 2.6 s of margin.
 sample_window_ms="${RESOURCE_GATE_TEST_SAMPLE_WINDOW_MS:-${PROCESS_BUDGET_SAMPLE_WINDOW_MS:-1000}}"
 if ! [[ "${sample_window_ms}" =~ ^[0-9]+$ ]]; then sample_window_ms=1000; fi
 if [ "${sample_window_ms}" -lt 200 ]; then sample_window_ms=200; fi
-if [ "${sample_window_ms}" -gt 3000 ]; then sample_window_ms=3000; fi
+if [ "${sample_window_ms}" -gt 2000 ]; then sample_window_ms=2000; fi
 sample_window_s="$(awk -v ms="${sample_window_ms}" 'BEGIN{printf "%.3f", ms/1000}')"
 
 if [ -n "${RESOURCE_GATE_TEST_PROC_CMDLINES:-}" ]; then
