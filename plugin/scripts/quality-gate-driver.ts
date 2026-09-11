@@ -4,21 +4,25 @@
 // WHY THIS EXISTS（manager-phase-goal.md ### AC144）：「质量把关」不是一件事——一股脑并入
 // promotion-driver 会造 god-object（其 scope 是任务合格化，不是冲突解析/止损判断）。本 driver 是
 // 【例程型】kind（继承 Layer 0 + 1b，同 manager-kind AC143），只承接四种形状里【可机械/机械触发】的
-// 两件，其余两件结构上不能是 driver（driver 读不出「听起来自洽但错了」的因果故事）；另承接第三条
-// 例程——架构复核（gap-quality-driver-architecture-review-routine：把 P1/P2/P4 三个检测器接上轮子）：
+// 两件，其余两件结构上不能是 driver（driver 读不出「听起来自洽但错了」的因果故事）；另承接第三条例程
+// ——架构复核（gap-quality-driver-architecture-review-routine：把 P1/P2/P4 三个检测器接上轮子），以及
+// 第四条例程——打包卫生常设检查（gap-packaging-hygiene-standing-check：把 config-key-consumer-check
+// + shipped-entry-runnable 两个机械检测接上轮子，漂移时 spawn gap-filing agent 经 ABI 立案）：
 //
 //   B15 pool 质量语义闸   机械触发 + LLM judge + JS 聚合（ADR-033）⇒ 本 driver 跑
 //                         （原调用方 = outer tick 的 B15 步，本任务把调用方换成 driver）
 //   B17 判据消费纪律       纯机械审计（judgment-consumer-check.ts）⇒ 本 driver 跑
 //   架构复核               机械聚类（identity-replication / deletion-closure / guard-lineage 三
 //                         检测器 --json）→ LLM judge → JS 合并 → 判词载体 ⇒ 本 driver 跑
+//   packaging-hygiene     机械两维度检查（config-key 消费者 + shipped-entry 可运行性）→ 漂移非空
+//                         ⇒ spawn gap-filing agent（quay-file-task）⇒ 本 driver 跑
 //   B16-C 冲突意图        要读两边意图 ⇒ ⛔ 不在本 driver，归 AC145 语义面 subagent
 //   B18 止损义务          对一个【活场景】的判断 ⇒ ⛔ 不在本 driver，归 AC145 语义面 subagent
 //
 // 取假（AC1，一条命令可验）：
-//   ① 上述四项被并入同一个 driver kind ⇒ 假（god-object）。本文件只有 B15/B17 + 架构复核三条例程；
-//      B16-C/B18 的归属指针在 orchestration/manager-phase-goal.md（归 AC145），本文件不写它们的
-//      执行路径（grep 本文件无「B16-C」「B18」的运行分支）。
+//   ① 上述四项被并入同一个 driver kind ⇒ 假（god-object）。本文件只有 B15/B17 + 架构复核 +
+//      packaging-hygiene 四条例程；B16-C/B18 的归属指针在 orchestration/manager-phase-goal.md
+//      （归 AC145），本文件不写它们的执行路径（grep 本文件无「B16-C」「B18」的运行分支）。
 //   ② B16-C / B18 被声称「已驱动化」而无 LLM 参与 ⇒ 假。本文件的 LLM 参与只有 B15 与架构复核的
 //      judge spawn（launchArgv role=pool-judge）；B16-C/B18 没有机械运行路径，谈不上「伪装成机械判断」。
 //
@@ -91,10 +95,22 @@ export const QUALITY_CONTROL_STATE_REL = path.posix.join(".quay", QUALITY_SPEC.c
  *  --interval 覆盖；测试传小值。 */
 export const INTERVAL_MS_DEFAULT = defaultDriverConfig().quality.intervalMs;
 
-/** 三条例程各自的缺省复核间隔（分钟）。同上——占位节奏，非未测量过的阈值。 */
+/** 四条例程各自的缺省复核间隔（分钟）。同上——占位节奏，非未测量过的阈值。 */
 export const POOL_JUDGE_INTERVAL_MIN_DEFAULT = 10;
 export const JUDGMENT_INTERVAL_MIN_DEFAULT = 30;
 export const ARCH_REVIEW_INTERVAL_MIN_DEFAULT = 60;
+export const PACKAGING_HYGIENE_INTERVAL_MIN_DEFAULT = 60;
+
+/** packaging-hygiene 的机械 check spawn 上限（毫秒）——config-key 枚举是纯函数、shipped-entry 是
+ *  npm pack --dry-run + dist build（实测 ~2s / ~0.2s），180s 是给足余量的机械上限（⛔ 不是成本阈值，
+ *  是 liveness 安全界——同 ROUTINE_TIMEOUT_MS 语义，全部是快速机械 node 调用）。 */
+export const PACKAGING_CHECK_TIMEOUT_MS = 180_000;
+
+/** packaging-hygiene gap-filing agent spawn 的 wall-clock 上限【缺省回退值】（毫秒）。gap-filing 角色
+ *  （读 drift → 查重 → 撰四件套 → 过 ABI 落盘）与 goal-driver 的 gap-filing 同族——其单次墙钟实测
+ *  elapsed_s=602.9（goal-driver GAP_WORKER_TIMEOUT_MS_DEFAULT 的同一实测导出，⛔ 不另起测量），
+ *  900_000（900s）> 602.9s 留 ~1.5x 余量。 */
+export const PACKAGING_GAP_WORKER_TIMEOUT_MS_DEFAULT = 900_000;
 
 /** 机械 spawn 的 wall-clock 上限（毫秒）——--plan 枚举 / --record-last-round / B17 审计共用（全部是
  *  快速机械 node 调用，非 LLM）。⛔ LLM judge spawn 不设固定上限（runAsync timeoutMs=Infinity，
@@ -171,6 +187,157 @@ export async function runJudgmentConsumerCheck(root: string, cmd: string[] | nul
     return { name: "judgment-consumer-check", value, state: "not-evaluated", reason: `exit ${r.status}` };
   }
   return { name: "judgment-consumer-check", value, state: "verified", reason: null };
+}
+
+// ── packaging-hygiene · 打包卫生常设检查（机械检测 + 漂移时 gap-filing）────────────────────────
+// 任务 gap-packaging-hygiene-standing-check：GOAL-015 的 files 白名单误装 / 配置键悬空类缺陷会随
+// 代码演化复发，本 routine 把两个既有机械检测（config-key-consumer-check + shipped-entry-runnable
+// test）接上轮子——每轮跑 packaging-hygiene-check.ts（机械，零 LLM），漂移非空且过 halt/资源门时
+// spawn 一个短命 gap-filing agent 经 ABI（quay-file-task）立案。⛔ driver 自己仍不手写 tasks/*.md
+// （同 goal-driver G9 的边界：spawn 即达成，下一轮/下一次漂移消解独立复核，⛔ 不信 agent 自述）。
+
+/** 缺省 packaging-hygiene-check 命令（--json 机器面）。输出 = 两维度审计 report JSON。 */
+export function defaultPackagingCheckArgv(root: string): string[] {
+  return [
+    "node", "--no-warnings", "--experimental-strip-types",
+    path.join(root, "plugin", "scripts", "packaging-hygiene-check.ts"),  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+    "--root", root, "--json",
+  ];
+}
+
+/** packaging-hygiene-check --json 输出的解析面（driver 关心的字段）。 */
+export interface PackagingHygieneReport {
+  mode: string;
+  configKeys: { keysTotal: number; noConsumerToWire: string[]; state: string };
+  shippedEntries: { state: string; violations: string[]; reason: string | null };
+  drift: string[];
+}
+
+/** 解析 packaging-hygiene-check --json 输出。读不懂 ⇒ null（调用方记 not-evaluated，⛔ 不伪装合格）。 */
+export function parsePackagingHygieneReport(stdout: string): PackagingHygieneReport | null {
+  try {
+    const j = JSON.parse(String(stdout ?? "").trim());
+    if (j && j.mode === "packaging-hygiene-audit" && Array.isArray(j.drift)
+        && j.configKeys && Array.isArray(j.configKeys.noConsumerToWire)
+        && j.shippedEntries && typeof j.shippedEntries.state === "string") {
+      return {
+        mode: j.mode,
+        configKeys: {
+          keysTotal: typeof j.configKeys.keysTotal === "number" ? j.configKeys.keysTotal : 0,
+          noConsumerToWire: j.configKeys.noConsumerToWire.filter((x: unknown) => typeof x === "string"),
+          state: j.configKeys.state,
+        },
+        shippedEntries: {
+          state: j.shippedEntries.state,
+          violations: Array.isArray(j.shippedEntries.violations)
+            ? j.shippedEntries.violations.filter((x: unknown) => typeof x === "string")
+            : [],
+          reason: j.shippedEntries.reason ?? null,
+        },
+        drift: j.drift.filter((x: unknown) => typeof x === "string"),
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** gap-filing prompt：把漂移清单交给短命 agent，经 quay-file-task 立案（同 goal-driver G9 的措辞，
+ *  mechanism-based dedup）。 */
+export function buildPackagingGapWorkerPrompt(root: string, drift: string[]): string {
+  return [
+    "You are a gap-filing agent in the quay repo. A packaging-hygiene standing check found drift — delivered artifacts that are structurally broken (a config key with no consumer, or a shipped entry-like file not runnable from an install location) and will recur until fixed in source.",
+    `Repo root: ${root}.`,
+    "Drift items:",
+    ...drift.map((d) => `  - ${d}`),
+    "Read the named check (plugin/scripts/config-key-consumer-check.ts and/or plugin/test/shipped-entry-runnable.test.mjs) to understand the exact defect, then file ONE gap task that closes this drift via the `quay-file-task` skill (Skill tool).",
+    "The quay-file-task skill performs MECHANISM-BASED dedup: if a task already claims this drift (ANY status), do NOT file a duplicate — report the existing task id instead.",
+  ].join("\n");
+}
+
+/** gap-filing agent argv = launchArgv("fix-worker", <prompt>)。gapWorkerCmd 覆盖【前缀】时把 prompt
+ *  作为末参数追加（测试缝捕获真实 prompt，同 goal-driver 的 buildGapWorkerArgv）。 */
+export function buildPackagingGapWorkerArgv(root: string, drift: string[], cmd?: string | null): string[] {
+  const prompt = buildPackagingGapWorkerPrompt(root, drift);
+  if (cmd != null) {
+    const prefix = splitArgs(cmd);
+    if (prefix.length === 0) return launchArgv("fix-worker", prompt, root);
+    return [...prefix, prompt];
+  }
+  return launchArgv("fix-worker", prompt, root);
+}
+
+/** packaging-hygiene 例程的 fact.value（写进 round record）。gapFiled = 本轮是否 spawn 了 gap-filing。 */
+export interface PackagingHygieneFactValue {
+  mode: string;
+  configKeysTotal: number;
+  noConsumerToWire: string[];
+  shippedEntryState: string;
+  drift: string[];
+  gapFiled: boolean;
+  gapExitCode: number | null;
+  gapError: string | null;
+}
+
+/** packaging-hygiene 例程：跑一次两维度打包卫生检查。clean ⇒ verified；drift ⇒ failed（并 spawn
+ *  gap-filing，除非 halted / 资源门 WAIT）；读不懂/读不到 ⇒ not-evaluated（硬规则 3b：读不懂 ≠ 合格）。 */
+export async function runPackagingHygiene(
+  root: string,
+  opts: {
+    checkCmd?: string[] | null;
+    gapWorkerCmd?: string | null;
+    gapWorkerTimeoutMs?: number;
+    resourceGateArgv?: string[] | null;
+    halted?: boolean;
+  } = {},
+): Promise<Fact<PackagingHygieneFactValue | null>> {
+  const argv = opts.checkCmd ?? defaultPackagingCheckArgv(root);
+  const r = await runAsync(argv, { timeoutMs: PACKAGING_CHECK_TIMEOUT_MS, collectStderr: true });
+  if (r.error) {
+    return { name: "packaging-hygiene", value: null, state: "not-evaluated", reason: `spawn error: ${r.error.message}` };
+  }
+  const report = parsePackagingHygieneReport(r.stdout ?? "");
+  if (report === null) {
+    return { name: "packaging-hygiene", value: null, state: "not-evaluated", reason: `unparseable output (exit ${r.status})` };
+  }
+  const value: PackagingHygieneFactValue = {
+    mode: report.mode,
+    configKeysTotal: report.configKeys.keysTotal,
+    noConsumerToWire: report.configKeys.noConsumerToWire,
+    shippedEntryState: report.shippedEntries.state,
+    drift: report.drift,
+    gapFiled: false,
+    gapExitCode: null,
+    gapError: null,
+  };
+  // gap-filing（AC3）：drift 非空且未 halt 且资源门 GO ⇒ spawn 短命 agent 经 ABI 立案。
+  if (report.drift.length > 0 && opts.halted !== true) {
+    const gate = resourceGateCheck(root, opts.resourceGateArgv ?? null);
+    if (gate.go) {
+      const gapArgv = buildPackagingGapWorkerArgv(root, report.drift, opts.gapWorkerCmd ?? null);
+      const timeoutMs = opts.gapWorkerTimeoutMs ?? PACKAGING_GAP_WORKER_TIMEOUT_MS_DEFAULT;
+      const g = await runAsync(gapArgv, { timeoutMs, collectStderr: true });
+      value.gapFiled = true;
+      value.gapExitCode = g.status;
+      value.gapError = g.error
+        ? g.error.message
+        : g.status === 0
+          ? null
+          : (String(g.stderr ?? "").slice(0, 200) || null);
+    }
+  }
+  const state = report.drift.length > 0
+    ? "failed"
+    : report.configKeys.state === "not-evaluated" || report.shippedEntries.state === "not-evaluated"
+      ? "not-evaluated"
+      : "verified";
+  const reason = state === "failed"
+    ? `drift: ${report.drift.length} item(s)${value.gapFiled ? `; gap-filing spawned (exit ${value.gapExitCode})` : "; gap-filing deferred (halted/resource-gate)"}`
+    : state === "not-evaluated"
+      ? "a dimension could not be evaluated (see configKeys.state / shippedEntries.state)"
+      : null;
+  return { name: "packaging-hygiene", value, state, reason };
 }
 
 // ── B15 · pool 质量语义闸（机械触发 + LLM judge + JS 聚合）──────────────────────────────────
@@ -626,10 +793,15 @@ export interface QualityGateOptions {
   poolJudgeIntervalMinutes: number;
   judgmentIntervalMinutes: number;
   archReviewIntervalMinutes: number;
+  packagingCheckCmd: string[] | null;
+  packagingGapWorkerCmd: string | null;
+  packagingGapWorkerTimeoutMs: number;
+  packagingHygieneIntervalMinutes: number;
 }
 
-/** 三条例程（B15 pool-quality-judge + B17 judgment-consumer-check + 架构复核）。⛔ 只此三条——
- *  B16-C/B18 归 AC145（本 driver 不承接）；架构复核是本 driver 承接的第三条例程（读数非任务终态）。 */
+/** 四条例程（B15 pool-quality-judge + B17 judgment-consumer-check + 架构复核 + packaging-hygiene）。
+ *  ⛔ 只此四条——B16-C/B18 归 AC145（本 driver 不承接）；架构复核与 packaging-hygiene 是本 driver 承接的
+ *  第三/四条例程（读数非任务终态）。 */
 export function qualityGateRoutines(root: string, opts: QualityGateOptions): RoutineSpec[] {
   return [
     {
@@ -650,6 +822,18 @@ export function qualityGateRoutines(root: string, opts: QualityGateOptions): Rou
       schedule: { kind: "interval", minutes: opts.archReviewIntervalMinutes },
       // ctx.halted ⇒ 只挡 LLM judge spawn（机械聚类仍跑）——halt 是轮内闸，⛔ 不挡观测。
       run: async (ctx) => [await runArchitectureReview(root, opts.identityCmd, opts.lineageCmd, opts.deletionCmd, opts.archJudgeArgv, opts.resourceGateArgv, true, Infinity, ctx?.halted === true)],
+    },
+    {
+      name: "packaging-hygiene",
+      schedule: { kind: "interval", minutes: opts.packagingHygieneIntervalMinutes },
+      // ctx.halted ⇒ 只挡 gap-filing spawn（机械两维度检查仍跑）——halt 是轮内闸，⛔ 不挡观测。
+      run: async (ctx) => [await runPackagingHygiene(root, {
+        checkCmd: opts.packagingCheckCmd,
+        gapWorkerCmd: opts.packagingGapWorkerCmd,
+        gapWorkerTimeoutMs: opts.packagingGapWorkerTimeoutMs,
+        resourceGateArgv: opts.resourceGateArgv,
+        halted: ctx?.halted === true,
+      })],
     },
   ];
 }
@@ -778,7 +962,7 @@ export async function runResidentQualityGateLoop(opts: QualityGateLoopOptions): 
 
 const HELP = [
   "quality-gate-driver — AC144：质量把关按【形状】分开驱动化（例程型，继承 Layer 0 + 1b）。",
-  "每轮评估 due 例程（B15 pool-quality-judge + B17 judgment-consumer-check + 架构复核）→ 跑 due → 汇集 Facts → 写 round 心跳。",
+  "每轮评估 due 例程（B15 pool-quality-judge + B17 judgment-consumer-check + 架构复核 + packaging-hygiene）→ 跑 due → 汇集 Facts → 写 round 心跳。",
   "  --root <repo> [--interval <ms>] [--once] [--max-rounds <n>] [--round-log <p>] [--run-id <id>] [--pid-file <p>] [--json]",
   "  --interval <ms>           轮间隔（缺省 30000，来自 drivers.yml quality.interval_ms；测试缝传小值）",
   "  --once                    跑一轮即退出（手动单发 / 测试）",
@@ -787,6 +971,7 @@ const HELP = [
   "  --pool-judge-interval <m> B15 例程复核间隔（分钟，缺省 10）",
   "  --judgment-interval <m>   B17 例程复核间隔（分钟，缺省 30）",
   "  --arch-review-interval <m> 架构复核例程间隔（分钟，缺省 60）",
+  "  --packaging-hygiene-interval <m> 打包卫生例程间隔（分钟，缺省 60）",
   "  --plan-cmd <argv>         覆盖 --plan 命令（测试缝）",
   "  --judge-cmd <argv>        覆盖 LLM judge 命令（测试缝；prompt 由驱动拼，末参数追加）",
   "  --judgment-cmd <argv>     覆盖 judgment-consumer-check 命令（测试缝）",
@@ -795,6 +980,9 @@ const HELP = [
   "  --deletion-cmd <argv>     覆盖 deletion-closure-check 命令（测试缝）",
   "  --arch-judge-cmd <argv>   覆盖架构复核 LLM judge 命令（测试缝）",
   "  --resource-gate-cmd <argv> 覆盖 resource-gate 命令（测试缝；起 judge 前判定，exit 0=GO）",
+  "  --packaging-check-cmd <argv> 覆盖 packaging-hygiene-check 命令（测试缝）",
+  "  --packaging-gap-worker-cmd <argv> 覆盖 gap-filing agent 命令（测试缝；prompt 末参数追加）",
+  "  --packaging-gap-worker-timeout <ms> gap-filing spawn 上限（毫秒，缺省 900000）",
   "  --round-log <path>        轮记录文件（缺省 <root>/.quay/quality-round.jsonl）",
   "  --pid-file <path>         把驱动自身 pid 写到该文件（外部观测 + kill 抓手）",
   "  --json                    每轮向 stdout 打一条 JSON 事件行",
@@ -822,6 +1010,7 @@ export async function main(argv: string[]): Promise<number> {
   let poolJudgeIntervalRaw: string | undefined;
   let judgmentIntervalRaw: string | undefined;
   let archReviewIntervalRaw: string | undefined;
+  let packagingHygieneIntervalRaw: string | undefined;
   let routineWatchdogRaw: string | undefined;
   let planCmd: string | undefined;
   let judgeCmd: string | undefined;
@@ -831,6 +1020,9 @@ export async function main(argv: string[]): Promise<number> {
   let deletionCmd: string | undefined;
   let archJudgeCmd: string | undefined;
   let resourceGateCmd: string | undefined;
+  let packagingCheckCmd: string | undefined;
+  let packagingGapWorkerCmd: string | undefined;
+  let packagingGapWorkerTimeoutRaw: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -844,6 +1036,7 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--pool-judge-interval") poolJudgeIntervalRaw = args[++i];
     else if (a === "--judgment-interval") judgmentIntervalRaw = args[++i];
     else if (a === "--arch-review-interval") archReviewIntervalRaw = args[++i];
+    else if (a === "--packaging-hygiene-interval") packagingHygieneIntervalRaw = args[++i];
     else if (a === "--routine-watchdog") routineWatchdogRaw = args[++i];
     else if (a === "--plan-cmd") planCmd = args[++i];
     else if (a === "--judge-cmd") judgeCmd = args[++i];
@@ -853,6 +1046,9 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--deletion-cmd") deletionCmd = args[++i];
     else if (a === "--arch-judge-cmd") archJudgeCmd = args[++i];
     else if (a === "--resource-gate-cmd") resourceGateCmd = args[++i];
+    else if (a === "--packaging-check-cmd") packagingCheckCmd = args[++i];
+    else if (a === "--packaging-gap-worker-cmd") packagingGapWorkerCmd = args[++i];
+    else if (a === "--packaging-gap-worker-timeout") packagingGapWorkerTimeoutRaw = args[++i];
     else if (a === "--json") json = true;
     else if (a === "--help" || a === "-h") { console.log(HELP); return 0; }
     else { console.error(`quality-gate-driver: unknown argument: ${a}`); return 2; }
@@ -870,6 +1066,10 @@ export async function main(argv: string[]): Promise<number> {
     ? Number(judgmentIntervalRaw) : JUDGMENT_INTERVAL_MIN_DEFAULT;
   const archReviewIntervalMinutes = archReviewIntervalRaw !== undefined && isNonNegInt(archReviewIntervalRaw)
     ? Number(archReviewIntervalRaw) : ARCH_REVIEW_INTERVAL_MIN_DEFAULT;
+  const packagingHygieneIntervalMinutes = packagingHygieneIntervalRaw !== undefined && isNonNegInt(packagingHygieneIntervalRaw)
+    ? Number(packagingHygieneIntervalRaw) : PACKAGING_HYGIENE_INTERVAL_MIN_DEFAULT;
+  const packagingGapWorkerTimeoutMs = packagingGapWorkerTimeoutRaw !== undefined && isNonNegInt(packagingGapWorkerTimeoutRaw)
+    ? Number(packagingGapWorkerTimeoutRaw) : PACKAGING_GAP_WORKER_TIMEOUT_MS_DEFAULT;
   const routineWatchdogMs = routineWatchdogRaw !== undefined && isNonNegInt(routineWatchdogRaw)
     ? Number(routineWatchdogRaw) : ROUTINE_WATCHDOG_MS_DEFAULT;
 
@@ -890,6 +1090,10 @@ export async function main(argv: string[]): Promise<number> {
     poolJudgeIntervalMinutes,
     judgmentIntervalMinutes,
     archReviewIntervalMinutes,
+    packagingCheckCmd: packagingCheckCmd ? splitArgs(packagingCheckCmd) : null,
+    packagingGapWorkerCmd: packagingGapWorkerCmd ?? null,
+    packagingGapWorkerTimeoutMs,
+    packagingHygieneIntervalMinutes,
   });
 
   return runResidentQualityGateLoop({ root: rootDir, intervalMs: interval, once, maxRounds, roundLogFile, runId: resolvedRunId, json, pidFile, routines, routineWatchdogMs });
