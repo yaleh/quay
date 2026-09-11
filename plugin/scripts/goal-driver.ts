@@ -370,6 +370,105 @@ export function goalFlipDecision(
   return goalAchievedFromRecords(records, goalId) && sufficiency?.verdict === "covered";
 }
 
+// ── 关闭前置：不许把「已知失败」冻结在复验域之外（gap-goal-closure-freezes-failing-ac-outside-reverify-scope）──
+//
+// 缺陷（实测 2026-09-08）：`goalFlipDecision` 只读 AC 的【存储 status】与本轮充分性 verdict，**不读判据读数**。
+// 于是一条 `status=achieved` 而判据已变红的 AC，只要同 GOAL 其余 AC 全 achieved 且充分性 covered，GOAL 就照样
+// 被机械关闭 —— 关闭后 `:1105` 的每轮循环只遍历 activeGoals，该 AC 从此不再被 gate：台账尾事件永久定格为
+// `fail`，且没有任何机制会再跑它。实测：round 149（2026-09-08T19:55:07.756Z）中 AC-161 是唯一 fail 项，
+// 同一轮 GOAL-003 被 flip achieved。冻结的失败同时让 AC-241（「台账不得留下不可归因的 fail」）结构上永不通过，
+// 被误读成「还有真缺陷」——与 AC-216 的成本边界（未声明的 achieved AC 随 GOAL 关闭离开复验域）叠加后无人拥有。
+//
+// 修法：给机械关闭加一条与 AC-242 判据**同谓词**的前置 —— 该 GOAL 名下不得存在
+// `status=achieved ∧ 台账尾事件 verdict=fail ∧ 未声明 long-term: true` 的 AC。
+// ⛔ 数据来源是 goal-store 的 `evidence` 投影（`list` 已返回；它就是 `.quay/gate-events.jsonl` 中该 id 的
+// 最后一条 gate=goal 事件），**不是本轮 criteria 读数** —— gateCriterion 在判据输出读不懂时返回
+// not-evaluated，而台账尾事件仍是旧的 fail，用读数会漏报（硬规则 4c）。
+// ⛔ 不得反向翻转 AC 状态（achieved→active；裁定 3：激活归人）。本前置只约束【机械关闭】这一条路径；
+// 人工/`goal-cli` 的直接关闭（`goal-store write --status achieved`）不在射程内。
+// ⛔ 与 AC-222（「GOAL 必须能自动关闭」，防「永不达成」）的张力靠【逃生口】化解：声明的语义是 AC 自己写出
+// `long-term: true` ⇒ 它自认是常设不变式，不该拖住 GOAL 关闭。逃生口在 AC 侧、不在 GOAL 侧，故关闭路径
+// 无需豁免名单；负控制须双向证明（可关 vs 被挡）。
+
+/** 一条 AC 的台账尾 verdict（goal-store 的 `evidence` 投影；`null` = 该 AC 在台账中【零事件】——
+ *  ⛔ 与「尾事件是 fail」不同形，也⛔不与「台账读不到」同形，后者由 ledgerProbe 单独承载）。
+ *  evidence 形如 `{ at, verdict, reading, firstAt }`（`ledgerEvidenceMap` 的单趟投影，末条覆盖前条）。 */
+function ledgerTailVerdict(ac: Record<string, unknown>): string | null {
+  const ev = ac.evidence;
+  if (ev === null || typeof ev !== "object") return null;
+  const v = (ev as Record<string, unknown>).verdict;
+  return typeof v === "string" ? v : null;
+}
+
+/** 关闭阻塞三态词表（⛔ 加态即改 AC-242 之外的判据集合）：
+ *  clear             台账可读且该 GOAL 名下没有「achieved ∧ 尾 fail ∧ 未声明 long-term」的 AC ⇒ 放行关闭；
+ *  blocked-failing-ac 存在这样的 AC（枚举在 `acs`）⇒ 关闭被拒；
+ *  not-evaluated     台账读不到（成因在 `cause`）⇒ 关闭被拒（⛔ 不与 clear 同形，硬规则 3b：
+ *                    读不懂输入不得返回与合格同形的值——否则删掉台账就能把任何红 AC 静默冻结）。 */
+export type GoalCloseBlockVerdict = "clear" | "blocked-failing-ac" | "not-evaluated";
+
+/** not-evaluated 的成因（⛔ 两种成因仍都是 not-evaluated，只是【可区分】——硬规则 3b /
+ *  cause-carrier-must-be-distinguishable）：
+ *  ledger-absent     `.quay/gate-events.jsonl` 不存在（从未跑过任何判据，或台账被清掉）；
+ *  ledger-unreadable 存在但读不出来（权限 / I/O 错误）——环境问题，与判据内容无关。 */
+export type GoalCloseBlockCause = "ledger-absent" | "ledger-unreadable";
+
+export interface GoalCloseBlock {
+  verdict: GoalCloseBlockVerdict;
+  /** blocked-failing-ac 时非空：被点名的 AC id（排序，⛔ 枚举不布尔——硬规则 3）。 */
+  acs: string[];
+  /** 只在 verdict==="not-evaluated" 时非 null；clear / blocked-failing-ac 恒 null。 */
+  cause: GoalCloseBlockCause | null;
+}
+
+/** 台账探针结果（`probeLedger` 的返回类型 = `goalCloseBlockFromRecords` 的第三参）。
+ *  ⚠️ 两者共用一个判别联合，⛔ 不给判定函数另开一个 `{ledgerReadable, ledgerCause}` 选项面——
+ *  那样探针的 `{readable}` 传进去会静默落进「读不到」分支（`!undefined` 恒真），把每条 clear 判成
+ *  not-evaluated。这一形态实测发生过一次：`tsc` 对 `plugin/scripts/**` 结构上不覆盖
+ *  （根 tsconfig 的 `include` 只含 `packages/**`），故该错配一路绿到运行时才被测试抓到。 */
+export type LedgerProbe = { readable: true } | { readable: false; cause: GoalCloseBlockCause };
+
+/** 探针：`.quay/gate-events.jsonl` 是否可读。⚠️ 这是对【输入通道】的存在性探测，不是对台账内容的二次解析
+ *  ——尾 verdict 一律取自 goal-store 的 `evidence` 投影（单一真相源，⛔ 不在本文件重写一份 ledger 解析）。
+ *  必要性：`ledgerEvidenceMap` 在台账缺失时返回空 map，于是「台账不在」与「该 AC 零事件」在 records 上同形
+ *  ——那正是硬规则 3b 禁止的形态，故在此把它单独取出来。 */
+export function probeLedger(root: string): LedgerProbe {
+  const p = path.join(root, ".quay", "gate-events.jsonl");
+  if (!fs.existsSync(p)) return { readable: false, cause: "ledger-absent" };
+  try {
+    fs.accessSync(p, fs.constants.R_OK);
+    return { readable: true };
+  } catch {
+    return { readable: false, cause: "ledger-unreadable" };
+  }
+}
+
+/** 关闭前置判定（纯函数，⛔ 不跑判据、⛔ 不改状态）：该 GOAL 名下是否存在
+ *  `status=achieved ∧ 台账尾 verdict=fail ∧ longTerm !== true` 的 AC。
+ *
+ *  与 AC-242 判据同谓词，但作用域是【这条 GOAL 名下的 AC】而非全库：AC-242 断言的是「全库不许有这种 AC」，
+ *  本函数断言的是「不许带着这种 AC 关闭这条 GOAL」。两者互补——AC-242 是事后读数的红，本函数是事前关闭的闸。 */
+export function goalCloseBlockFromRecords(
+  records: Array<Record<string, unknown>>,
+  goalId: string,
+  ledger: LedgerProbe,
+): GoalCloseBlock {
+  if (!ledger.readable) {
+    return { verdict: "not-evaluated", acs: [], cause: ledger.cause };
+  }
+  const acs = records
+    .filter((r) =>
+      String(r.id ?? "").startsWith("AC-") &&
+      String(r.goal ?? "") === goalId &&
+      r.status === "achieved" &&
+      r.longTerm !== true &&
+      ledgerTailVerdict(r) === "fail")
+    .map((r) => String(r.id))
+    .sort();
+  if (acs.length > 0) return { verdict: "blocked-failing-ac", acs, cause: null };
+  return { verdict: "clear", acs: [], cause: null };
+}
+
 /** 取 body 的 `## 退出条件` 节文本（标题后至下一 `## ` 标题或结尾；节体 trim）。无该节 / 节体空 ⇒ ""。
  *  ⛔ 标题后只允许水平空白 [ \t]*，不用 \s*——\s 含 \n，会把「标题后紧跟的空行 + 下一节标题」吞进
  *  标题匹配，导致空节被误判为「有内容」。 */
@@ -1013,6 +1112,11 @@ export interface GoalRoundReadings {
   /** 本轮 driver 做的全部状态翻写：I2 达成翻转（to=achieved）+ ⑧ 分诊 activate 执行（to=active）。
    *  ⛔ 分诊不翻其余三态（re-anchor / needs-human / hold 只落痕，AC-219）。 */
   flips: Array<{ id: string; to: string; ok: boolean; reason: string }>;
+  /** 关闭前置读数（gap-goal-closure-freezes-failing-ac-outside-reverify-scope）：每条 active GOAL 一条
+   *  `{goal, verdict, acs, cause}`。verdict ∈ 三态 clear / blocked-failing-ac / not-evaluated（⛔ 三态
+   *  互不同形：blocked 带被点名 AC 清单、not-evaluated 带台账成因、clear 两者皆空）。空数组 = 本轮无
+   *  active GOAL——「查过且零条」与「未跑该判定」按字段存在性区分（硬规则 3b）。 */
+  closeBlocks: Array<{ goal: string; verdict: GoalCloseBlockVerdict; acs: string[]; cause: GoalCloseBlockCause | null }>;
   /** I3 三桶 + I4 分歧；null = check --staleness 读不到（⛔ 与「零 stale」不同形，硬规则 3b）。
    *  scopeSize = 枚举出的 active goal 数（作用域规模）；evaluated = scopeSize > 0。0 active goal ⇒
    *  evaluated:false、scopeSize:0——空作用域与「查过且全过」按字段区分（⛔ 同形，硬规则 3b）。 */
@@ -1089,9 +1193,17 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   const activeGoals = records.filter((r) => isGoal(r) && r.status === "active");
   const criteria: GoalRoundReadings["criteria"] = [];
   const flips: GoalRoundReadings["flips"] = [];
+  const closeBlocks: GoalRoundReadings["closeBlocks"] = [];
   const sufficiencyFacts: Array<Fact<Record<string, unknown>>> = [];
+  // 关闭判定【延后到本轮全部 gate 落账之后】（pass 2，见下）。原因（硬规则 4c：判据点名的量必须穿过所有
+  // 中间层还取得到）：`records` 是【轮开始时】读的快照，其 `evidence`（台账尾）比本轮晚一拍 —— 一条
+  // 「上一轮 pass、本轮转红」的 achieved AC，若拿轮初快照判，尾 verdict 仍是 pass ⇒ 漏报并放行关闭，
+  // 正是本任务要堵的缺陷形态。台账可读性探针同理放在 pass 2：本轮第一次 gate 之前台账可能尚不存在，
+  // 那时探针会报 ledger-absent 而把一条本该 clear 的 GOAL 记成 not-evaluated（探针测的是「此刻读不读得到」，
+  // 不是「历史上有没有过」）。
+  const pendingCloses: Array<{ goal: Record<string, unknown>; gid: string; sufficiency: SufficiencyVerdict }> = [];
 
-  // 对每个 active GOAL：① 跑其每条 AC 的 criterion；② I2 推导（AC pass→achieved，全达成→GOAL achieved）。
+  // pass 1 — 对每个 active GOAL：① 跑其每条 AC 的 criterion；② I2 推导（AC pass→achieved，全达成→GOAL achieved）。
   for (const goal of activeGoals) {
     const gid = String(goal.id);
     const acs = records.filter((r) => isAc(r) && String(r.goal ?? "") === gid);
@@ -1146,12 +1258,59 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
       state: "verified",
       reason: `sufficiency=${sufficiency}${sufficiencyCause !== null ? `（cause=${sufficiencyCause}）` : ""}（在域 AC ${inScope.length} 条）`,
     });
+    // 关闭判定不在本 pass 做——见上方 pendingCloses 与下方 pass 2（本轮全部 gate 落账后才刷台账尾）。
+    pendingCloses.push({ goal, gid, sufficiency });
+  }
+
+  // pass 2 — 刷新台账尾 verdict，再逐条判关闭。
+  //
+  // ⚠️ 刷新的是【尾 verdict】而非整份 records：status 的权威快照就是本轮这条（I2 已就地改过 `records`
+  // 里的 `ac.status`，且每次翻写都已落盘），重读整份再替换会让「本轮刚翻 achieved 的 AC 是否计入 GOAL
+  // 达成」这一语义在被测代码外悄悄变化。只把 `evidence` 换成 gate 落账后的读数，其余一切保持原样。
+  // `goal-store list` 是唯一真相源（`evidence` 由它从 `.quay/gate-events.jsonl` 派生，⛔ 本文件不重写
+  // 一份 ledger 解析）。重读失败 ⇒ 台账降级为「读不到」（fail-closed：宁可不关，也不拿不知新旧的读数放行）。
+  // 探针（每轮一次，⛔ 不逐 GOAL 重探）只把「台账读不到」与「该 AC 零事件」拆开——后者在 records 上
+  // 同形（都是 evidence===null），是硬规则 3b 禁止的形态。
+  let ledger = probeLedger(dataRoot);
+  if (ledger.readable) {
+    try {
+      const fresh = await listGoalRecords(scriptRoot, dataRoot);
+      const evidenceById = new Map(fresh.map((r) => [String(r.id ?? ""), r.evidence]));
+      for (const r of records) {
+        const id = String(r.id ?? "");
+        if (evidenceById.has(id)) r.evidence = evidenceById.get(id);
+      }
+    } catch {
+      ledger = { readable: false, cause: "ledger-unreadable" };
+    }
+  }
+
+  for (const { goal, gid, sufficiency } of pendingCloses) {
     // I2（GOAL 层）：充分性闸——全部在域 AC achieved 且充分性 covered ⇒ 机械 flip GOAL（裁定 5）。
     // insufficient / not-evaluated ⇒ 不 flip（GOAL-010 退出条件②：判不出取「未评估」而非放行）。
+    // ⛔ 追加前置（gap-goal-closure-freezes-failing-ac-outside-reverify-scope）：上述两项都满足也**不得**
+    // 在该 GOAL 名下有「achieved ∧ 台账尾 fail ∧ 未声明 long-term」的 AC 时关闭——否则该 AC 随 GOAL 离开
+    // 每轮 gate 循环，其失败被永久冻结在复验域之外，且 AC-241 结构上永不通过。
+    const closeBlock = goalCloseBlockFromRecords(records, gid, ledger);
+    closeBlocks.push({ goal: gid, verdict: closeBlock.verdict, acs: closeBlock.acs, cause: closeBlock.cause });
     if (goal.status === "active" && goalFlipDecision(records, gid, { verdict: sufficiency })) {
-      const w = await writeGoalStatus(scriptRoot, gid, "achieved", dataRoot, { actor: "goal-driver", reason: "I2: all ACs achieved + sufficiency covered" });
-      flips.push({ id: gid, to: "achieved", ok: w.ok, reason: w.reason });
-      if (w.ok) goal.status = "achieved";
+      if (closeBlock.verdict !== "clear") {
+        // 关闭【被拒】——落痕用独立成因取值（⛔ 不与 insufficient / not-evaluated-充分性 同形）：
+        // blocked-failing-ac 带被点名的 AC 清单；not-evaluated 带台账成因。`ok:false` 是消费方的判据
+        // （既有消费者只读 `ok`/`to`，一条 ok:false 的 to=achieved 不会被误读成「关了」）。
+        flips.push({
+          id: gid,
+          to: "achieved",
+          ok: false,
+          reason: closeBlock.verdict === "blocked-failing-ac"
+            ? `blocked-failing-ac: ${closeBlock.acs.join(", ")}`
+            : `not-evaluated: close-block ${closeBlock.cause}`,
+        });
+      } else {
+        const w = await writeGoalStatus(scriptRoot, gid, "achieved", dataRoot, { actor: "goal-driver", reason: "I2: all ACs achieved + sufficiency covered" });
+        flips.push({ id: gid, to: "achieved", ok: w.ok, reason: w.reason });
+        if (w.ok) goal.status = "achieved";
+      }
     }
   }
 
@@ -1226,6 +1385,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     criterionCount: criteria.length,
     criteria,
     flips,
+    closeBlocks,
     staleness,
     achievedFailing,
     gaps,
@@ -1253,7 +1413,9 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
       reason:
         `${criteria.length} criteria gated, ${flips.length} flip(s): ` +
         `fresh=${staleness.fresh.length} stale=${staleness.stale.length} notEvaluated=${staleness.notEvaluated.length} divergent=${staleness.divergent.length} ` +
-        `achievedButFailing=${achievedFailing ? achievedFailing.achievedButFailing.length : "?"}`,
+        `achievedButFailing=${achievedFailing ? achievedFailing.achievedButFailing.length : "?"} ` +
+        `closeBlocked=${closeBlocks.filter((b) => b.verdict === "blocked-failing-ac").length} ` +
+        `closeNotEvaluated=${closeBlocks.filter((b) => b.verdict === "not-evaluated").length}`,
     },
     sufficiencyFacts,
   };

@@ -658,7 +658,7 @@ export function createGoalStore(
 
   function write(id: string, {
     title, status, goal, criterion, expect, origin,
-    supersedes, supersededBy, body, disposeOld,
+    supersedes, supersededBy, body, disposeOld, longTerm,
     force = false,
     actor,
     reason,
@@ -677,6 +677,13 @@ export function createGoalStore(
     supersededBy?: string[];
     body?: string;
     disposeOld?: DisposeOld;
+    /** AC-216 declarative `long-term: true` — a machine write path for the field that until now could
+     *  only be added by hand-editing `goals/*.md` frontmatter (AC-188/189/190, commit a1cae4de0).
+     *  An achieved AC carrying it stays in the I5 reverify scope after its GOAL is achieved/closed.
+     *  ⛔ It is a DECLARATION, not a verdict: it never changes what the criterion returns, only
+     *  whether the AC leaves the reverify scope with its GOAL. `undefined` ⇒ patch semantics
+     *  (keep the stored value); `false` ⇒ explicitly clear it. */
+    longTerm?: boolean;
     /** P6b: a per-call fidelity judge overriding the store-level seam (the CLI's
      *  `--fidelity-judge-argv` path). `undefined` ⇒ fall back to the store-level `fidelityJudge`. */
     fidelityJudge?: FidelityInvokeJudge;
@@ -754,6 +761,8 @@ export function createGoalStore(
       if (origin !== undefined) frontmatter.origin = origin;
       if (supersedes !== undefined) frontmatter.supersedes = supersedes;
       if (supersededBy !== undefined) frontmatter["superseded-by"] = supersededBy;
+      // `long-term` is a stored DECLARATION (AC-216), so unlike `evidence` it is written verbatim.
+      if (longTerm !== undefined) frontmatter["long-term"] = longTerm;
       const statusChanged = prevStatus !== undefined && nextStatus !== prevStatus;
       // ⛔ "activation" here is ANY transition INTO active (SPEC §6 裁定 3: activation is manual; the
       // goal-driver never flips INTO active). Reopen paths — achieved→active, needs-human→active,
@@ -996,6 +1005,7 @@ export function createGoalStore(
           if (origin !== undefined) touched.push("origin");
           if (supersedes !== undefined) touched.push("supersedes");
           if (supersededBy !== undefined) touched.push("superseded-by");
+          if (longTerm !== undefined) touched.push("long-term");
           if (body !== undefined) touched.push("body");
           action = touched.length > 0 ? `field:${touched.join(",")}` : "update";
         }
@@ -1310,6 +1320,18 @@ async function main(argv: string[]) {
           continue;
         }
         const v = rest[i + 1];
+        if (key === "long-term") {
+          // AC-216 declaration, machine-writable. Strict `true|false` — ⛔ no truthy coercion: a typo
+          // like `--long-term yes` must not silently write `long-term: yes` (which `longTerm`
+          // projects as false and which AC-242's criterion does not recognise either).
+          if (v !== "true" && v !== "false") {
+            console.error("goal-store: --long-term must be exactly true or false");
+            return 2;
+          }
+          opts["long-term"] = v === "true";
+          i++;
+          continue;
+        }
         if (key === "title" || key === "status" || key === "goal" || key === "criterion" ||
             key === "expect" || key === "origin" || key === "body" || key === "superseded-by" ||
             key === "dispose-old" || key === "dispose-to" || key === "actor" || key === "reason") {
@@ -1344,6 +1366,10 @@ async function main(argv: string[]) {
             ? opts["superseded-by"] as string[]
             : (typeof opts["superseded-by"] === "string" ? [opts["superseded-by"] as string] : undefined),
           disposeOld,
+          // `--long-term true|false` (AC-216 declaration, machine-writable). `false` is MEANINGFUL
+          // (explicitly clear the declaration) — hence the `!== undefined` guard, not a truthiness
+          // test: passing the boolean straight through preserves the patch semantics in `write`.
+          longTerm: opts["long-term"] as boolean | undefined,
           force,
           actor: opts.actor as string | undefined,
           reason: opts.reason as string | undefined,

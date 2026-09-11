@@ -904,3 +904,71 @@ test("AC4 — status-only flip 不传意图声明仍 exit 0（goal-driver 机械
   const patch = n(["write", "GOAL-001", "--title", "p2"]);
   assert.equal(patch.status, 0, patch.stdout + patch.stderr);
 });
+
+// ── AC-216 `long-term` 的机器写路径（gap-goal-closure-freezes-failing-ac-outside-reverify-scope）────
+// AC-216 建立了 `long-term: true` 的语义（list 投影 longTerm / I5 复验域），但 `write` 的 flag 表
+// 没有它 —— 现有三条（AC-188/189/190）是直接改 frontmatter 加的（commit a1cae4de0）。本组测试锁住
+// `--long-term true|false` 这条机器写路径：它是「存量消解」的合规入口，⛔ 不手改 goals/*.md frontmatter。
+
+test("AC-longterm-1 — `--long-term true` 写入并经 get 回读 longTerm===true（机件回读，⛔ 不采信文件字面）", () => {
+  const root = tmpDir("longterm-write");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  const n = (cmd) => runCli(["--root", root, ...cmd]);
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  n(["write", "AC-001", "--title", "a", "--status", "achieved", "--goal", "GOAL-001", "--criterion", "false", "--origin", "o", "--expect", EXPECT]);
+  assert.equal(JSON.parse(n(["get", "AC-001"]).stdout).longTerm, false, "前置：未声明时 longTerm 为 false");
+  const w = n(["write", "AC-001", "--long-term", "true"]);
+  assert.equal(w.status, 0, `--long-term true 必须 exit 0:\n${w.stdout}${w.stderr}`);
+  const rec = JSON.parse(n(["get", "AC-001"]).stdout);
+  assert.equal(rec.longTerm, true, "get 回读 longTerm===true（view-model 投影，⛔ 不 grep 文件字面）");
+  assert.equal(rec.status, "achieved", "patch 语义：其余字段（status）保持原值");
+  assert.equal(rec.criterion, "false", "patch 语义：criterion 未被清空");
+});
+
+test("AC-longterm-2 — `--long-term false` 是【显式清除】而非 no-op（与省略该 flag 的 patch 语义可分）", () => {
+  const root = tmpDir("longterm-false");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  const n = (cmd) => runCli(["--root", root, ...cmd]);
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  n(["write", "AC-001", "--title", "a", "--status", "achieved", "--goal", "GOAL-001", "--criterion", "false", "--origin", "o", "--expect", EXPECT, "--long-term", "true"]);
+  assert.equal(JSON.parse(n(["get", "AC-001"]).stdout).longTerm, true, "前置：已声明");
+  // 省略 flag 的 patch 写 ⇒ 保留声明（⛔ 不能被无关字段更新顺手清掉）。
+  n(["write", "AC-001", "--title", "a2"]);
+  assert.equal(JSON.parse(n(["get", "AC-001"]).stdout).longTerm, true, "省略 --long-term ⇒ patch 语义保留已声明的 true");
+  // 显式 false ⇒ 清除。
+  const w = n(["write", "AC-001", "--long-term", "false"]);
+  assert.equal(w.status, 0, `--long-term false 必须 exit 0:\n${w.stdout}${w.stderr}`);
+  assert.equal(JSON.parse(n(["get", "AC-001"]).stdout).longTerm, false, "显式 false ⇒ 清除声明（与省略可分）");
+});
+
+test("AC-longterm-3 — `--long-term yes` ⇒ exit 2 且不落任何变更（⛔ 不做真值强转）", () => {
+  const root = tmpDir("longterm-strict");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  const n = (cmd) => runCli(["--root", root, ...cmd]);
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  n(["write", "AC-001", "--title", "a", "--status", "achieved", "--goal", "GOAL-001", "--criterion", "false", "--origin", "o", "--expect", EXPECT]);
+  for (const bad of ["yes", "1", "TRUE", ""]) {
+    const w = n(["write", "AC-001", "--long-term", bad]);
+    assert.equal(w.status, 2, `--long-term ${JSON.stringify(bad)} 必须 exit 2（fail-closed）:\n${w.stdout}${w.stderr}`);
+    assert.match(w.stderr, /--long-term must be exactly true or false/, "错误信息点名该 flag");
+  }
+  assert.equal(JSON.parse(n(["get", "AC-001"]).stdout).longTerm, false, "被拒的写不落任何变更（longTerm 仍 false）");
+  // 缺值（末参数）同样 exit 2——⛔ 不得静默写成 undefined/false。
+  const missing = runCli(["--root", root, "write", "AC-001", "--long-term"], { encoding: "utf8" });
+  assert.equal(missing.status, 2, "缺值 ⇒ exit 2");
+});
+
+test("AC-longterm-4 — 创建时即可声明（create 路径）且 commit subject 点名 long-term（可归因）", () => {
+  const { root, run } = gitRepo("longterm-create");
+  const n = (cmd) => runCli(["--root", root, ...cmd]);
+  n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  n(["write", "AC-001", "--title", "a", "--status", "achieved", "--goal", "GOAL-001", "--criterion", "false", "--origin", "o", "--expect", EXPECT]);
+  const flip = n(["write", "AC-001", "--long-term", "true"]);
+  assert.equal(flip.status, 0, flip.stdout + flip.stderr);
+  const subj = run("log", "--oneline", "-1", "--format=%s").trim();
+  assert.match(subj, /long-term/, `字段更新必须在 commit subject 里可归因，got: ${subj}`);
+  assert.equal(JSON.parse(n(["get", "AC-001"]).stdout).longTerm, true, "落盘后回读可见");
+});

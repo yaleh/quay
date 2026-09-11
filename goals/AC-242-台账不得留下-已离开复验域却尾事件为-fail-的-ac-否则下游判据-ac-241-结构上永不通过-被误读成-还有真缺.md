@@ -1,7 +1,7 @@
 ---
 id: AC-242
 title: 台账不得留下「已离开复验域却尾事件为 fail」的 AC —— 否则下游判据（AC-241）结构上永不通过，被误读成「还有真缺陷」
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-009
 criterion: >-
@@ -82,6 +82,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-09-11T12:00:57.374Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
