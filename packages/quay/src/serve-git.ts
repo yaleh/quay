@@ -222,6 +222,26 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
 }
 
 /**
+ * This repo's task-id prefixes. ONE source for every form below: a form that recovers an id WITHOUT
+ * this guard can hand back a verb particle as if it were a task id (硬规则 3b — 读不懂 ⇒ 伪装成合格).
+ * The real subject `tasks: carry <id> AC state from author (6/8 ticked)` did exactly that: Form 2/3's
+ * closed `翻|reset` particle list did not know `carry`, so the id was never recovered and the commit
+ * was filed under the bogus group `carry` — stranding it from its task and making the AC6
+ * subject-mention reconciliation come up one short.
+ */
+const TASK_ID_PREFIXES = "gap|DIR|exp5|QN|QX|QC|QW|QENG|ARCH|cand|SU|PROBE|TEST";
+/** A `<prefix>-<slug>` token. */
+const TASK_ID_SLUG = `(?:${TASK_ID_PREFIXES})-[A-Za-z0-9][A-Za-z0-9_-]*`;
+/** First `<prefix>-<slug>` token in a subject, left-anchored so a longer word never yields a partial. */
+const RE_ANY_TASK_ID = new RegExp(`(?:^|[^A-Za-z0-9_-])(${TASK_ID_SLUG})`);
+/** Form 4 — `<id>:` at the head of a subject. */
+const RE_HEAD_TASK_ID = new RegExp(`^(${TASK_ID_SLUG}):\\s`);
+/** Form 5 — `<type|scope>: <id> …`. */
+const RE_TYPED_TASK_ID = new RegExp(`^[A-Za-z0-9][A-Za-z0-9_-]*:\\s+(${TASK_ID_SLUG})`);
+/** Form 6 — `… (<id>)` at end-of-subject. */
+const RE_PAREN_TASK_ID = new RegExp(`\\((${TASK_ID_SLUG})\\)\\s*$`);
+
+/**
  * Extract a task id from a commit SUBJECT, covering this repo's four structured commit-message
  * shapes (gap-git-graph-task-view-aggregate-commits-by-task-id):
  *
@@ -236,12 +256,15 @@ export function layoutGitGraph(history: GitHistoryResult): GitGraphLayout | null
  *      mistaken for one (AC6 reconciliation)
  *
  * Unrecognised subjects (e.g. `chore: re-anchor …`) return `null`, never a guess (fail-visible —
- * 硬规则 3b). Forms 4–6 all gate the id's first segment on a KNOWN task-id prefix (this repo's task
- * slugs — `gap-…`, `DIR-…`, `exp5-…`, …), so a conventional type (`chore:`) or a component/page name
- * (`git-history: …` / `fix: git-history 分页页 …`) is never mistaken for a task id (AC1/AC6
- * reconciliation). This is a project-specific heuristic over driver commit-text conventions, not git
- * semantics — when the convention changes the task view degrades, while the git view is unaffected
- * (硬规则 4b).
+ * 硬规则 3b). EVERY form gates the id's first segment on a KNOWN task-id prefix (this repo's task
+ * slugs — `gap-…`, `DIR-…`, `exp5-…`, …), so a conventional type (`chore:`), a component/page name
+ * (`git-history: …` / `fix: git-history 分页页 …`), or a driver action verb (`carry` / `revert` /
+ * `refresh` — Forms 2/3 lead with one) is never mistaken for a task id (AC1/AC6 reconciliation).
+ * Forms 2/3 recover the FIRST known-prefix token rather than the first token outright, precisely
+ * because the verb vocabulary is open-ended (one verb per driver action, and every added verb used to
+ * strand the id) — the guard lives on the ID, never on a closed verb or type list. This is a
+ * project-specific heuristic over driver commit-text conventions, not git semantics — when the
+ * convention changes the task view degrades, while the git view is unaffected (硬规则 4b).
  */
 export function taskIdFromSubject(subject: string): string | null {
   const s = String(subject).trim();
@@ -251,18 +274,19 @@ export function taskIdFromSubject(subject: string): string | null {
   const mergeTask = s.match(/\btask\/([A-Za-z0-9][A-Za-z0-9_-]*)/);
   if (mergeTask) return mergeTask[1];
 
-  // Forms 2+3 — `tasks:` prefix, optionally led by a verb particle (`翻`/`reset`) that precedes the id.
+  // Forms 2+3 — `tasks:` prefix. The id may be preceded by an open-ended verb particle (`翻` / `reset`
+  // / `carry` / `refresh` / …) that names the action, and may be followed by prose that itself mentions
+  // the id — so recover the FIRST known-prefix token, not the first token. No known-prefix token at
+  // all ⇒ null (the commit is explicitly unattributed, never filed under a verb).
   if (s.startsWith("tasks:")) {
-    const rest = s.slice("tasks:".length).trim();
-    const m = rest.match(/^(?:翻\s+|reset\s+)?([A-Za-z0-9][A-Za-z0-9_-]*)/);
-    if (m) return m[1];
-    return null;
+    const m = s.slice("tasks:".length).match(RE_ANY_TASK_ID);
+    return m ? m[1] : null;
   }
 
   // Form 4 — `<id>: <说明>`, the id a multi-segment slug whose FIRST segment must be a KNOWN task-id
   // prefix (same guard as Forms 5/6), so a component/page name (`git-history: …`) is never mistaken
   // for a task id — it falls through to Form 6 and extracts the trailing-parens id instead.
-  const impl = s.match(/^((?:gap|DIR|exp5|QN|QX|QC|QW|QENG|ARCH|cand|SU|PROBE|TEST)-[A-Za-z0-9][A-Za-z0-9_-]*):\s/);
+  const impl = s.match(RE_HEAD_TASK_ID);
   if (impl) return impl[1];
 
   // Form 5 — `<type|scope>: <id> <说明>`: a conventional-commit type OR a worker scope prefix (this
@@ -271,13 +295,13 @@ export function taskIdFromSubject(subject: string): string | null {
   // re-anchor quay-init-closure-ratchet baseline`) or a page/file name (`fix: git-history 分页页 …`)
   // is never mistaken for a task id (AC1) — the guard lives on the ID, not on an ever-drifting closed
   // type list (a one-off `webui:` commit would otherwise strand its task id in AC6 reconciliation).
-  const typed = s.match(/^[A-Za-z0-9][A-Za-z0-9_-]*:\s+((?:gap|DIR|exp5|QN|QX|QC|QW|QENG|ARCH|cand|SU|PROBE|TEST)-[A-Za-z0-9][A-Za-z0-9_-]*)/);
+  const typed = s.match(RE_TYPED_TASK_ID);
   if (typed) return typed[1];
 
   // Form 6 — trailing-parens id: `<说明> (gap-…)` (e.g. `dashboard: 顶部行改 … (gap-dashboard-top-row-
   // asymmetric-columns)`). Same known-prefix guard as Form 5, anchored to end-of-subject so a bare
   // parenthetical (`… (updated)`) is never mistaken for a task id (AC6 reconciliation).
-  const paren = s.match(/\(((?:gap|DIR|exp5|QN|QX|QC|QW|QENG|ARCH|cand|SU|PROBE|TEST)-[A-Za-z0-9][A-Za-z0-9_-]*)\)\s*$/);
+  const paren = s.match(RE_PAREN_TASK_ID);
   if (paren) return paren[1];
 
   return null;
