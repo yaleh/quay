@@ -1,7 +1,7 @@
 ---
 id: AC-238
 title: 升级路径：带旧版 vendored runtime 的真实第三方项目（meta-cc 副本）被当前 develop tip 干净接管，任务存量不丢失
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-009
 criterion: >-
@@ -57,6 +57,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-09-11T04:00:52.975Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
