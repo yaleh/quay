@@ -2,7 +2,7 @@
 id: gap-shipped-entry-test-treats-every-shebang-plugin-script-as-entry
 title: shipped-entry-runnable 测试把每个带 shebang 的随包 plugin 脚本判为「入口」⇒ 主检出下约 300
   条违规恒红，而同一测试在 fan-in 的 worktree 环境不触发 ⇒ 判据结果依赖运行环境
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -64,13 +64,31 @@ function isEntryLike(packedFile, shebangPrefix) {
 
 ## Acceptance Criteria
 
-- [ ] AC1 缺陷存证（改前读数）：贴主检出经**套件入口**的失败摘要与三个前缀计数（`plugin/scripts/` 274 / `plugin/gate-scripts/` 24 / `plugin/vendor/` 2），以及 `:74-80` `isEntryLike` 原文。
-- [ ] AC2 环境依赖已量化：贴主检出与新 worktree 各一次 `npm pack --dry-run --json` 的文件计数与差集摘要，并说明它是否解释了「主检出红 / worktree 绿」；若不解释，写出实际成因与支撑读数。
-- [ ] AC3 两个环境都绿：改后在**主检出**与**一个新建 worktree**各经套件入口跑该文件，两次 exit 0；贴两次命令与退出码——⛔ 退出码取自 `test.sh` 本身，不得取自管道末段（`[[pipe-exit-code-last-segment-only]]`）。
-- [ ] AC4 原缺陷仍能取假（最关键的负控制）：临时从 `packages/quay/package.json` 的 `files` 移除 `!bin/quay.js` 与 `!bin/quay.ts` ⇒ 测试**变红**并逐字点名这两个文件；还原后转绿。贴两次输出与还原后 `git diff` 为空。
-- [ ] AC5 交付机件不再被误判：改后违规列表中 `plugin/scripts/` / `plugin/gate-scripts/` / `plugin/vendor/` 三个前缀命中数**均为 0**；贴计数命令与输出。
-- [ ] AC6 三态可区分（若采纳 (c)）：输出能区分「declared bin 且可跑」/「declared bin 但跑不起来」/「随包机件（非入口）」，各贴一条实例。若采纳 (a)/(b)，改为贴出被排除路径集合及其真相源，并说明该来源为何不会漂移。
-- [ ] AC7 全量绿：`scripts/test.sh` 全量绿。
+- [x] AC1 缺陷存证（改前读数）：贴主检出经**套件入口**的失败摘要与三个前缀计数（`plugin/scripts/` 274 / `plugin/gate-scripts/` 24 / `plugin/vendor/` 2），以及 `:74-80` `isEntryLike` 原文。
+- [x] AC2 环境依赖已量化：贴主检出与新 worktree 各一次 `npm pack --dry-run --json` 的文件计数与差集摘要，并说明它是否解释了「主检出红 / worktree 绿」；若不解释，写出实际成因与支撑读数。
+- [x] AC3 两个环境都绿：改后在**主检出**与**一个新建 worktree**各经套件入口跑该文件，两次 exit 0；贴两次命令与退出码——⛔ 退出码取自 `test.sh` 本身，不得取自管道末段（`[[pipe-exit-code-last-segment-only]]`）。
+- [x] AC4 原缺陷仍能取假（最关键的负控制）：临时从 `packages/quay/package.json` 的 `files` 移除 `!bin/quay.js` 与 `!bin/quay.ts` ⇒ 测试**变红**并逐字点名这两个文件；还原后转绿。贴两次输出与还原后 `git diff` 为空。
+- [x] AC5 交付机件不再被误判：改后违规列表中 `plugin/scripts/` / `plugin/gate-scripts/` / `plugin/vendor/` 三个前缀命中数**均为 0**；贴计数命令与输出。
+- [x] AC6 三态可区分（若采纳 (c)）：输出能区分「declared bin 且可跑」/「declared bin 但跑不起来」/「随包机件（非入口）」，各贴一条实例。若采纳 (a)/(b)，改为贴出被排除路径集合及其真相源，并说明该来源为何不会漂移。
+- [ ] AC7 全量绿：`scripts/test.sh` 全量绿（待外部）
+
+## Evidence
+
+**实现**：`plugin/test/shipped-entry-runnable.test.mjs`（task 分支提交 `050cb1c71`）采纳 Plan 选项 (c)——`classify()` 取代 `isEntryLike`，把「exec/shebang 但非 declared bin 且非 bin/ 下」降为第三态 `shipped-mechanism`（非违规）；只有「declared bin 却跑不起来」与「bin/ 下非 declared bin」两个态进违规列表；枚举保持完整（每个 packed 文件仍被分类）。
+
+**AC1 改前读数**：主检出经套件入口复现失败（AssertionError at :137，actual 非空 / expected []——见 Proposal）。按原 `isEntryLike` 逻辑对当前主检出 `npm pack --dry-run --json` 计数：`plugin/scripts/` **186**、`plugin/gate-scripts/` **12**、`plugin/vendor/` **2**（合计 **202**）；任务立条时记 274/24/2（300）——差是 `packages/quay/plugin/`（gitignored 生成快照 `.gitignore:26`，mtime 09:25）相对 repo-root `plugin/`（`.sh` 147 vs 快照 144）漂移所致，缺陷机制不受影响。
+
+**AC2 环境依赖量化**：主检出 `npm pack --dry-run --json` = **439** 文件（`plugin/scripts/` 235、`plugin/gate-scripts/` 14、`plugin/vendor/` 4）；新 worktree = **95** 文件（三前缀均 0）。差集全在 `plugin/**`——`packages/quay/plugin/` 是 gitignored 生成快照（package.sh 打包前才 stage），主检出有（上次 package.sh 遗留）、新 worktree 无。**完整解释「主检出红 / worktree 绿」**：原 `isEntryLike` 把该快照里每个带 shebang/exec 的 plugin 文件判为入口 ⇒ 主检出 202 条违规、worktree 0 条。
+
+**AC3 两环境都绿**：新 worktree（95 文件）经套件入口 exit **0**；把主检出快照复制进 worktree（439 文件）后再跑 exit **0**。两次退出码均取自 `test.sh` 本身（`echo "exit=$?"`，非管道末段）。
+
+**AC4 负控制**：临时移除 `!bin/quay.js` + `!bin/quay.ts` ⇒ 套件入口 exit **1**，断言逐字 `bin/quay.js: under bin/ but not a declared package.json bin` + `bin/quay.ts: under bin/ but not a declared package.json bin`；还原后 exit **0**，`git diff packages/quay/package.json` 为空。
+
+**AC5 交付机件不再误判**：改后违规列表为空——`plugin/scripts/` **0**、`plugin/gate-scripts/` **0**、`plugin/vendor/` **0**（total 0）。
+
+**AC6 三态可区分**（快照态分类摘要）：`declared-bin-runnable=1 [dist/quay.js] | declared-bin-not-runnable=0 | bin-entry-not-declared=0 | shipped-mechanism=201 [plugin/gate-scripts/audit-independence-check.sh] | non-entry=236 | lifecycle-hook=1`。三态实例：① declared bin 且可跑 = `dist/quay.js`；② declared bin 但跑不起来 = 0 条（健康 tarball 无此态；该态取假由第二个测试证明——node_modules/ 下的 `.ts` 入口被 `runsFromInstallLayout` 判不可跑）；③ 随包机件（非入口）= `plugin/gate-scripts/audit-independence-check.sh`。
+
+**AC7 全量绿**：待 fan-in 的 suite 步（worker-driver 机械 fan-in 在我退出后跑全量 suite）。
 
 ## Definition of Done
 

@@ -1,7 +1,7 @@
 ---
 id: gap-packaging-hygiene-standing-check
 title: 打包卫生缺陷转为常设检查项——把 GOAL-015 捕捉的 files 白名单误装/配置键悬空类问题接入 loop.routines
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -60,29 +60,58 @@ GOAL-015（AC-233/234/235）捕捉到的两类缺陷——交付包 `files` 白�
    并记录依赖任务 id，不得虚报覆盖）。
 3. probe 发现新漂移（新的零消费者配置键 / 新的不可运行入口文件）时，落一个新 gap 任务，不静默。
 
+## 实现记录（AC0 前置核实——路径 (b)）
+
+- `.quay/routine-last-run.json` 实况：**只有 `self-validation` 一个键**，mtime **2026-08-12 16:31 UTC**，
+  距今 29 天；2026-09-10 之后零真实 run。⇒ `loop.routines` 探针轨道是死的（写手从来不是机械，
+  SPEC §2.3）。
+- `SPEC-capability-planes-and-mechanism-lifecycle-2026-09-05.md` §5 的 probe 驱动化：**仍是 proposal，未落地**
+  （`llmProbeRoutine` 的「readProbeSpec → 派 subagent → routine-file-gate → FILE-ONLY → Fact[]」链条没有接到
+  任何活着的 driver 上；`readProbeSpec` 只有 meta-driver 用它读它自己的 probe，通用 probe 轨道零机械触发）。
+- **⇒ 走 (b) 路径**：把打包卫生检查接到 **quality-gate-driver**（活着的 Layer 1b 例程循环
+  `runResidentQualityGateLoop`；生产进程在跑、载体 `.quay/quality-round.jsonl` 活跃）上，不重建依赖已死机制的新 probe。
+
 ## Acceptance Criteria
 
-- [ ] AC0（新增，前置）：核实 `.quay/routine-last-run.json` 是否有落地后产生的真实 probe run，以及
+- [x] AC0（新增，前置）：核实 `.quay/routine-last-run.json` 是否有落地后产生的真实 probe run，以及
       SPEC-capability-planes-and-mechanism-lifecycle-2026-09-05.md §5 是否已从 proposal 落地；把核实
       结果（用的哪条路径 (a) 还是 (b)）写进本任务，作为 AC1-3 的前提说明，不得跳过直接假设机制在跑
-- [ ] AC1 打包卫生 probe 接到一个**当场核实过真实会被触发**的机制上（`loop.routines` 若已重新接线则
+      —— ✅ 见上方「实现记录（AC0 前置核实）」：routine-last-run.json 末次 2026-08-12、§5 仍是 proposal
+      ⇒ 走 (b)，核实结果已写进本任务体。
+- [x] AC1 打包卫生 probe 接到一个**当场核实过真实会被触发**的机制上（`loop.routines` 若已重新接线则
       用它；否则用 AC0 选定的替代机制），贴出触发声明片段
-- [ ] AC2 probe 执行体接上 config-key-consumer-check（若 gap-shipped-entry-files-not-runnable 已 done
+      —— ✅ 触发声明 = quality-gate-driver.ts `qualityGateRoutines` 第四条例程：
+      `{ name: "packaging-hygiene", schedule: { kind: "interval", minutes: opts.packagingHygieneIntervalMinutes }, … }`
+      （缺省 60min）。机制非死已当场核实：quality-gate-driver 生产进程在跑、载体 .quay/quality-round.jsonl 活跃。
+- [x] AC2 probe 执行体接上 config-key-consumer-check（若 gap-shipped-entry-files-not-runnable 已 done
       则两个维度都接，否则接一个维度 + 记录另一维度的依赖任务 id）
-- [ ] AC3 probe 发现漂移时能落一个新 gap 任务（不是只打印/只记日志），给出机制说明或实测证据
-- [ ] AC4 至少一次真实触发的 probe run 记录（非只接线未跑过——硬规则推论三：实现落地但生产没跑过一轮
+      —— ✅ 两维度都接（gap-shipped-entry-files-not-runnable 已 done）：packaging-hygiene-check.ts 的
+      config-key 维度 `import { audit } from "./config-key-consumer-check.ts"`（复用 AC-235 产物）；
+      shipped-entry 维度包装 `node --test plugin/test/shipped-entry-runnable.test.mjs`（复用 AC-233 产物，
+      npm pack --dry-run + install-layout 枚举）。真实 run 读数：configKeysTotal=5、noConsumerToWire=[]、
+      shippedEntryState=verified。
+- [x] AC3 probe 发现漂移时能落一个新 gap 任务（不是只打印/只记日志），给出机制说明或实测证据
+      —— ✅ 机制：runPackagingHygiene 漂移非空且过 halt/资源门 ⇒ spawn gap-filing agent
+      （launchArgv("fix-worker", prompt) → quay-file-task skill 经 ABI 立案）。实测证据：测试
+      plugin/test/packaging-hygiene-check.test.mjs「runPackagingHygiene drift ⇒ gap-filing spawned」用
+      --packaging-gap-worker-cmd seam 捕获真实 prompt（含 drift 项 + quay-file-task），gapFiled=true。
+- [x] AC4 至少一次真实触发的 probe run 记录（非只接线未跑过——硬规则推论三：实现落地但生产没跑过一轮
       ⇒ 与未实现同形，AC 不得只靠 fixture/注入满足；且该 run 记录的时间戳必须晚于本任务落地时刻，
       呼应 AC0 对"接线存在≠真的在跑"的区分）
+      —— ✅ 真实 run：.quay/quality-round.jsonl round=1 含 packaging-hygiene fact（state=verified、
+      configKeysTotal=5、drift=[]），ts=**2026-09-11T00:09:24.184Z**，晚于实现落地提交 ae2ae6e22；
+      该 run 对真实 repo 跑了真 config-key 枚举 + 真 shipped-entry（npm pack --dry-run），非 fixture/注入。
 
 ## Definition of Done
 
-- [ ] AC0-4 全部满足；`--for-task` scoped 门绿
-- [ ] 有一条记录载体里，落地后产生的真实 probe run（非 fixture），且其触发机制当场被核实为非死机制
+- [x] AC0-4 全部满足；`--for-task` scoped 门绿
+- [x] 有一条记录载体里，落地后产生的真实 probe run（非 fixture），且其触发机制当场被核实为非死机制
 
 ## Touches
 
-- .quay/config.yml
-- plugin/scripts/config-key-consumer-check.ts（如存在，复用其检测逻辑）
-- 新增或复用的 probe 触发脚本（路径由 AC0 核实结果决定，可能是 loop.routines 侧或 driver-runtime.ts
-  Layer 1b 侧）
+- plugin/scripts/packaging-hygiene-check.ts（新增——两维度机械检查）
+- plugin/scripts/quality-gate-driver.ts（新增 packaging-hygiene 例程 + gap-filing spawn）
+- plugin/scripts/capability-catalog.sh（注册新检查的 QUESTION/CADENCE/INVALIDATION/LAST_REAFFIRMED/MATCHING）
+- plugin/test/packaging-hygiene-check.test.mjs（新增测试）
+- plugin/test/quality-gate-driver.test.mjs（例程数 3→4 断言）
 - tasks/gap-packaging-hygiene-standing-check.md（本任务自身）

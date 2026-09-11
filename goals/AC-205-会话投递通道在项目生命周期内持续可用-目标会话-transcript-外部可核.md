@@ -1,7 +1,7 @@
 ---
 id: AC-205
 title: 会话投递通道在项目生命周期内持续可用——目标会话 transcript 外部可核
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-009
 criterion: >-
@@ -41,5 +41,10 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-09-11T00:20:45.682Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
 **判据（能取假）**：2026-09-09 干跑 exit 1。**三重已知障碍**（实现时逐个消除）：① send-to-session.ts 不在 entry 集 ⇒ 安装物里没有可执行形态（由 AC-202 覆盖）；② driver-runtime.ts:449 notifyManager 把它锚在 opts.root，且 fire-and-forget 无 ack ⇒ 失败不可见；③ 它靠 Unix socket + ~/.claude/sessions/<pid>.json 工作 ⇒ **发送方必须与目标会话同主机**，跨主机须先 ssh 过去再发。**⛔ 不采信发送方自述**：判据要求 transcript_confirmed 由读目标会话 transcript 得出（外部可核），而非 send 的退出码（socket 无 ack）。
