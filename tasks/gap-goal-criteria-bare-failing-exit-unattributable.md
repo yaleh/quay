@@ -92,11 +92,30 @@ AC-239 | verdict=fail | reason="acceptance failed (exit 1) — criterion wrote n
   **续做轮复验**：`goals/AC-242-*.md` 仍为 `status: active`（**未落地**）⇒ 阻塞前提未变。以 AC-241 的 develop 版 criterion 对生产台账（主检出 `.quay/gate-events.jsonl`，只读干跑）复现，逐字同上（AC-161 + AC-239，`exit=1`）。
   **最终合并态复验（关键：AC-161 的判据被修 ≠ AC-161 不再被点名，两者是不同的量）**：develop 上 AC-161 的 **criterion 文本**确已修好（枚举器报 `fixed=["AC-161"]`，即它此后失败会写出成因），但 AC-241 点名的量是**台账里那条已存在的旧记录**（2026-09-07 写入、无成因段）——**改文本不会改写历史记录**。最终合并态下对生产台账与 worktree 台账各跑一次，**两者逐字相同**：`unattributable failing goal AC(s): AC-161: acceptance failed (exit 1); AC-239: acceptance failed (exit 1) — criterion wrote no output to stderr/stdout`，`exit=1`。⇒ 残留部分**只依赖外部事件**（AC-242 的机制），故本条标注为（待外部），⛔ 不勾。
 
+  **2026-09-11 12:2xZ 复验（本条的前置「AC-242 落地」已满足，故本轮必须重跑）**：
+  · AC-242 状态实测 = `achieved`（`statusLog` 末条 `at: 2026-09-11T12:00:57.374Z`，`reason: "I2: criterion pass"`）⇒ ⛔ 不再以「AC-242 未落地」为由拖延本条。
+  · 重跑读数（对**生产台账**只读干跑；AC-241 的 develop 版 criterion 逐字取自 `goal-store list --root <主检出>`，⛔ 不手写）：
+    `unattributable failing goal AC(s): AC-161: acceptance failed (exit 1); AC-239: acceptance failed (exit 1) — criterion wrote no output to stderr/stdout`，`exit=1` —— **与合并态读数逐字相同，未翻转**。
+  · **AC-239 一侧（成立且可预期）**：AC-239 在域（`GOAL-009` = 唯一 active goal，`12:22:03Z` 刚被 goal-cli 跑过且仍 fail），其台账尾记录仍是**本分支修复之前**写下的 ⇒ 本分支落地后由下一轮 goal-driver 写出带 `CAUSE-B` 的记录，届时退出该名单。
+  · **AC-161 一侧（新读数，与「由 AC-242 承接」的预期不符）**：AC-242 的机制是给 AC-161 加 `long-term: true`（`git log -1 -S'long-term' -- goals/AC-161-*.md` = `834e54859`，2026-09-11T07:34:34Z），而 `goal-store.ts:607` 的 I5 域定义是「achieved AC 在 active goal 名下 **或** `longTerm === true`」⇒ 按设计它应回到复验域。**实测它没有被复跑**：AC-161 的台账尾事件仍是 `2026-09-08T19:54:48.864Z verdict=fail`。
+    **对照（区分性）**：同仓 `long-term: true` 的 **4 条**（AC-161/188/189/190）最后被跑时刻分别 `09-08T19:54:48Z` / `09-07T20:21:04Z` / `09-07T20:21:04Z` / `09-07T20:21:06Z`，**全部停在 09-07/08**；而同期 `12:15Z→12:23Z` 的四轮把 **17 条** achieved AC 全部跑过（`Counter({'GOAL-009': 17})`，**无一条 long-term**）⇒ 在**实际被跑的例程**里，「long-term 声明 ⇒ 回到复验域」没有体现。
+    ⚠️ **降为假说，不作结论**（硬规则 4 推论四：给不出区分性对照的说法不得作为结论投递）：上面对照能区分「long-term 被漏掉」，**但区分不了成因**——(a) 近期四轮就是 I5 的 `check --achieved-failing` 域（⇒ long-term 纳入失效），还是 (b) 近期四轮只是「active goal 名下 criteria」的另一条例程、I5 另有更慢节奏（⇒ 只是节奏）。判别需找到实际调用 `check --achieved-failing` 的例程及其周期，**本轮未做**。
+  · 另：AC-161 的 criterion 本身也已修好，本轮只读干跑为 `exit=1` 且 stderr 逐字 `CAUSE=user-enabled-plugins — user-level enabledPlugins still enables quay plugin(s): quay@quay` ⇒ 它此后失败**可归因**（满足 AC-241 的判据）；**缺的只是「让它再被跑一次」**。
+  · ⇒ **本条仍不勾**：`AC-241 exit 1 → 0` 的翻转**至少还缺 AC-161 那条记录被取代**，而它是否有机制发生，上面对照未能确定。
+
 - [ ] **AC8 全量套件绿 —— 外层 verification-round 验证**（worker 结构上被禁跑全量 suite；本条的量的产生处是 fan-in/外层的 suite 轮，⛔ 不是 worker 自己的读数）
   上轮为 1 条既有红（与本 delta 无关），故不勾：`bash scripts/test.sh`（全量，HEAD=`8bb042db2`）`RC=1`，唯一失败是
   `packages/quay/test/gap-git-graph-task-view-aggregate-commits-by-task-id.test.mjs:161` AC6 —— `group count (8) == subject-mention count (9)`。
   归因（可复核）：该断言把「任务视图分组合并后的条数」与「同一 `--all -n 500` 窗口内 subject 提及该 id 的条数」对等，而分组**排除 merge**；当时最新 done 任务 `gap-develop-sync-reset-hard-destroys-third-party-project-tree` 在窗口内有 2 条 merge（`a536cec8f`、`59c68db96`）。⇒ 既有、窗口依赖的脆弱断言，不是该轮改动引入的红。
   **续做轮复验（上次的归因已过期，此处更正，⛔ 不保留失效读数）**：合并 develop（106 提交）后，该测试在 worktree 上**单跑 7/7 全绿**（含 AC6）—— 即「窗口依赖」的推断成立：窗口内容一变，8 vs 9 的错配就消失了。⇒ 上段那条红的**具体归因不再复现**，不应继续被当作本任务的阻塞证据；**本 delta 是否产生新红，仍只能由 fan-in 的 suite 轮判定**（这正是本条标注为外层验证的理由）。本轮 scoped 门 `bash scripts/test.sh --for-task gap-goal-criteria-bare-failing-exit-unattributable --allow-thin` **绿**（`RC=0`，30/30 tests pass），这只覆盖 delta 相关的子集，**不等于**全量绿（CLAUDE.md：「一次绿的 `scripts/test.sh` 不是这两类的证据」）。
+
+  **2026-09-11 12:2xZ 本轮：上轮那条 suite 红的根因已定位并在本分支修掉**（它是 develop 侧的真实回归，不是本 delta 引入，但它结构上挡住本任务落地）——
+  · 失败清单（fan-in suite 日志逐字）：**5 条**，全在 `plugin/test/fan-in-execute-paths.test.mjs`，断言 `AssertionError [ERR_ASSERTION]: driver must print ANTI-DRIFT HARD FAIL`，实际输出为 `BASELINE-MISMATCH: merge target 'develop' is not a continuation of the project's default branch 'main' …`。
+  · 归属（可复核）：`plugin/test/fan-in-execute-paths.test.mjs` 与 `plugin/scripts/anti-drift-touches-check.ts` 与本分支 delta **逐字节相同于 develop**（`git diff develop HEAD --stat -- <两文件>` 为空）⇒ **红在 develop 上**。根因 = `d65482c03`（`fix(branch-model): quay init establishes the landing baseline instead of assuming develop`，已在 develop）给 anti-drift 加了基线分类，**更新了自己的测试却漏了这个夹具**。
+  · 夹具的错：`makeAntiDriftRepo` 把任务改动提交在 `main` 上、再把 `develop` 合进 `main` —— 这正是新检查**按设计**判为 `divergent` 的形态（main 不再是 develop 的祖先）⇒ 被那 5 条测试断言的那个 anti-drift 判定**根本没被执行到**。
+  · 修法（本分支 `45e56efa3`）：夹具改为建模 quay 初始化过的仓库——`main` 是 `develop` 的祖先、任务分支 `task/<id>` **从 `develop` 分叉**、`develop` 在任务期间前进使那次 merge 仍是真 merge。**断言一字未改**（越界的 `pkg/OTHER/stray.js` 仍 HARD-FAIL 且被点名；Touches 内的改动仍绿）。
+  · 读数（同一命令前后）：**修复前 `tests 93 / pass 88 / fail 5`**；**修复后 `tests 93 / pass 93 / fail 0`、`exit=0`**。
+  · ⇒ **本条仍不勾**：本条的量的产生处是 fan-in/外层的**全量** suite 轮（worker 结构上被禁跑全量），上面的读数只是「该红已消除」的**局部证据**（单文件 93/93），**不等于全量绿**。
 
 ## Definition of Done
 
@@ -117,6 +136,9 @@ AC-239 | verdict=fail | reason="acceptance failed (exit 1) — criterion wrote n
    · **② `plugin/test/criterion-failure-attribution-check.test.mjs` 里 `assert.equal(out.bareAcs, committed.count)` 是个结构上会在「最好的事件」上变红的断言**：棘轮既然是只许降的，**任何**任务修好一条判据都会让 live < baseline ⇒ 该测试红，而检查器本身正确地是绿的（实测就是这一次）。这正是硬规则 4b 的反面教材——它测的不是「检查器对不对」，而是「后来又没人修好东西」。改为 `out.bareAcs <= committed.count`（棘轮成立），并把它原本的**防漂移**意图挪到正确的量上：CLI 报的数必须等于对 `goals/` 的一次**独立枚举**（`enumerateBareFailureExits` 的库入口）——仍然钉死「不是谁手打的一个常量」，但不再惩罚合法收缩。
    · 单测 **14/14**；mutation case `RC=0`；scoped 门 `RC=0`（30/30）。
 
+6. **本轮修掉了一个 develop 侧的既有回归（不修则本任务结构上无法落地）**：`plugin/test/fan-in-execute-paths.test.mjs` 的 anti-drift 夹具（`makeAntiDriftRepo`）建的是 `d65482c03` 之后**按设计会被判 `divergent`** 的拓扑，导致该文件 5 条测试在 anti-drift 判定之前就死在 `BASELINE-MISMATCH`。**红在 develop 上**（两文件与 develop 逐字节相同），5 条全量 suite 失败即由此而来。已改为建模 quay 初始化过的分支模型；断言未改。该文件因此进入本任务 `## Touches`。详见 AC8 本轮条目。
+7. **AC-242 已 achieved，但 AC-241 未随之翻绿**（本轮复验，详见 AC7）：AC-239 一侧成立；AC-161 一侧的「`long-term: true` ⇒ 回到 I5 复验域」在**实际被跑的例程**里未体现（4 条 long-term AC 全部停在 09-07/08，同期 17 条非 long-term 每几分钟一跑）。**已按硬规则 4 推论四降为假说**（缺区分成因的对照），需要找到实际调用 `check --achieved-failing` 的例程及其周期才能定性。⛔ 本轮不据此改任何机制。
+
 ## Touches
 
 - goals/AC-239-升级后闭环-driver-在已升级的旧痕迹项目上继续驱动出新任务到-done-不只是装得上-还能接着干.md
@@ -127,4 +149,5 @@ AC-239 | verdict=fail | reason="acceptance failed (exit 1) — criterion wrote n
 - plugin/scripts/checker-mutation-cases/criterion-failure-attribution-check.sh (new)
 - plugin/test/criterion-failure-attribution-check.test.mjs (new)
 - docs/analysis/criterion-failure-attribution.baseline.json (new)
+- plugin/test/fan-in-execute-paths.test.mjs
 - tasks/gap-goal-criteria-bare-failing-exit-unattributable.md
