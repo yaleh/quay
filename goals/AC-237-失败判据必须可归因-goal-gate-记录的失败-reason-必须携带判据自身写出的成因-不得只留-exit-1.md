@@ -1,7 +1,7 @@
 ---
 id: AC-237
 title: 失败判据必须可归因——goal gate 记录的失败 reason 必须携带判据自身写出的成因，⛔ 不得只留 exit 1
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-009
 criterion: "node --experimental-strip-types -e 'const m = await
@@ -24,6 +24,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-09-11T03:40:24.638Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
