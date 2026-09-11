@@ -176,6 +176,16 @@ before/after 逐字节 diff」并列贴进 Evidence，证明两者的归属一�
 | `AC3 — a mid-write failure lists the seven-item state`（既有） | ✔ | ✔ |
 | 其余 7 条既有用例 | ✔ | ✔ |
 
+### scoped 门（`scripts/test.sh --for-task <id> --allow-thin`，worktree 内）
+
+`EXIT=0`，静态检查全 PASS，18/18 用例绿。其中两处需记录：
+① `quay-init-closure-ratchet-stale` 起初 **RED**——`plugin/scripts/quay-init.sh` 是 ratchet 指纹的
+四个源之一，改了它就必须显式 re-anchor；跑 checker 自带的 `--reanchor` 后 PASS，且**足迹未变**
+（仍 `3 files / 568 bytes`，见下）——本次改动改的是失败报告，不是它铺什么，所以只许降不许升的
+方向性完整保留，只有源指纹移动。
+② 该 re-anchor 写回的 `docs/analysis/quay-init-closure-ratchet.baseline.json` 已一并提交并登记进
+Touches。
+
 ### 成本（硬规则 4：先分解再谈指标）
 
 预写快照 = 每次 quay-init 多 7 次 `sha256sum`/`ls` 子进程。实测（本机，3 次取均，微小目标）：
@@ -188,4 +198,5 @@ before/after 逐字节 diff」并列贴进 Evidence，证明两者的归属一�
 - `plugin/scripts/quay-init-closure-assertion.ts`
 - `plugin/test/quay-init.test.mjs`
 - `plugin/test/quay-init-laydown-closure.test.mjs`
+- `docs/analysis/quay-init-closure-ratchet.baseline.json`
 - `tasks/gap-quay-init-failure-report-existence-proxy-overreports-on-upgrade.md`
