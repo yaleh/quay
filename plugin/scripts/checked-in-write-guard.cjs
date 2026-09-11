@@ -63,10 +63,14 @@ function recordRaw(obj) {
   try { ORIG_APPEND.call(fs, LOG, JSON.stringify(obj) + "\n"); } catch { /* the log is best-effort */ }
 }
 
-// ── temp allowance, resolved once ───────────────────────────────────────────────────────────
-// `os.tmpdir()` can itself be a symlink (/tmp -> /private/tmp on macOS); compare on realpaths so a
-// write through either spelling is recognised. A temp dir that cannot be realpath'd falls back to
-// its literal value — never to "allow everything".
+// ── path resolution ────────────────────────────────────────────────────────────────────────
+// A temp allowance is deliberately ABSENT: the judge's subject is the checked-in tree, so the whole
+// rule is "does the entry land inside the root" — a temp dir that lives inside the tree is still an
+// entry a whole-tree copier sees, and excusing it would be the defect. `TMP` is carried only as a
+// diagnostic in the guardLoaded record.
+// `os.tmpdir()` can itself be a symlink (/tmp -> /private/tmp on macOS), and so can the root; both
+// spellings are resolved so a path is recognised whichever way it was reached. A path that cannot
+// be realpath'd falls back to its literal value — never to "allow everything".
 function realTry(p) {
   try { return fs.realpathSync(p); } catch { return null; }
 }
