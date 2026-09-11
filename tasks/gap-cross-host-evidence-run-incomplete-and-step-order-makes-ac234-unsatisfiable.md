@@ -15,6 +15,7 @@ extra:
 goal_ac: AC-234
 depends_on:
   - gap-third-party-evidence-no-transport-to-driving-repo-carrier
+  - gap-outer-retirement-test-pins-a-file-that-is-no-longer-orphaned
 ---
 ## Proposal
 
