@@ -67,17 +67,60 @@ function recordRaw(obj) {
 // `os.tmpdir()` can itself be a symlink (/tmp -> /private/tmp on macOS); compare on realpaths so a
 // write through either spelling is recognised. A temp dir that cannot be realpath'd falls back to
 // its literal value — never to "allow everything".
-function realOrSelf(p) {
-  try { return fs.realpathSync(p); } catch { return p; }
+function realTry(p) {
+  try { return fs.realpathSync(p); } catch { return null; }
 }
+function realOrSelf(p) { return realTry(p) ?? p; }
 const TMP = realOrSelf(os.tmpdir());
-const ROOT_REAL = ROOT ? realOrSelf(ROOT) : "";
+const ROOT_LEX = ROOT ? path.resolve(ROOT) : "";
+const ROOT_REAL = ROOT_LEX ? realOrSelf(ROOT_LEX) : "";
 
 /** Is `target` strictly inside `base`? */
 function isInside(base, target) {
   if (!base || !target) return false;
   const rel = path.relative(base, target);
   return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+}
+
+/**
+ * WHERE does a call place (or remove) the entry named `target`? — the question the whole judge
+ * rests on, and the one both `path.resolve` and `realpathSync` get wrong.
+ *
+ * `realpathSync(target)` follows the FINAL component too. The legitimate pattern
+ * `symlinkSync(<repo>/plugin/scripts/f, <tmp>/plugin/scripts/f)` — which creates a link in a scratch
+ * workspace pointing at the repo and touches nothing in it — then resolves to the repo path and is
+ * reported as a tree write. Measured: 121 such false positives from one test file alone.
+ *
+ * The rule that holds for BOTH directions: resolve the nearest existing ANCESTOR and keep the
+ * remaining components literal, starting from `dirname(target)` — never from `target` itself.
+ *   · a new entry is placed at the location of its own NAME, so the final component must stay
+ *     literal (that is what makes the symlink-into-scratch pattern correct), and
+ *   · a path whose PARENT is a symlink into the tree DOES land in the tree, so ancestors must be
+ *     resolved (that direction stays catchable).
+ * DECLARED BOUNDARY: a content write THROUGH an existing final symlink that points into the tree
+ * (e.g. writeFileSync on a scratch path that is itself a link to a repo file) is not distinguished
+ * here — such a call is located at the link, not at its target. The invariant this judges is about
+ * creating and deleting ENTRIES under a checked-in path, which the location of the name answers.
+ */
+function locate(target) {
+  let cur = path.dirname(target);
+  const suffix = [path.basename(target)];
+  for (let i = 0; i < 128; i++) {
+    const real = realTry(cur);
+    if (real !== null) return path.join(real, ...suffix.reverse());
+    const parent = path.dirname(cur);
+    if (parent === cur) return target; // nothing resolved (relative path, or the filesystem root)
+    suffix.push(path.basename(cur));
+    cur = parent;
+  }
+  return target;
+}
+
+/** Does `located` sit inside the checked-in tree? Compared on both spellings of the root. */
+function inRoot(located) {
+  if (!ROOT_REAL) return false;
+  return located === ROOT_REAL || located === ROOT_LEX ||
+    isInside(ROOT_REAL, located) || isInside(ROOT_LEX, located);
 }
 
 // ── the write-verb table: fn name → index of the DESTINATION argument ──────────────────────
@@ -138,11 +181,13 @@ function noteOpened(fnName, args) {
   } catch { /* the guard must never break the host process */ }
 }
 
-/** Does this target exist right now? Used to tell a real deletion from a force-no-op. */
+/** Does this target exist right now? Used to tell a real deletion from a force-no-op.
+ *  `lstatSync`, not `existsSync`/`statSync`: those FOLLOW a symlink, so a dangling link — which
+ *  rmSync removes — would read as absent and its deletion would be excused as a no-op. */
 function existsAt(arg) {
   const t = toTarget(arg);
   if (t === null) return true; // not a path (fd) — assume an effect rather than excuse one
-  try { return fs.existsSync(t); } catch { return true; }
+  try { fs.lstatSync(t); return true; } catch { return false; }
 }
 
 /**
@@ -176,11 +221,14 @@ function hadEffect(fnName, args, outcome) {
 
 /** Write-verb calls this process actually judged — the denominator a PASS rests on. */
 let judged = 0;
-function record(fnName, argIndex, rawArg, target) {
+function record(fnName, argIndex, rawArg, target, located, outcome) {
   recordRaw({
     fn: fnName,
     argIndex,
     target,
+    located,
+    threw: outcome && outcome.threw === true,
+    err: outcome && outcome.threw ? String((outcome.err && outcome.err.message) || outcome.err) : null,
     rawArg: typeof rawArg === "string" ? rawArg : String(rawArg),
     cwd: process.cwd(),
     // the frames above this guard file — the call site that made the write, minus guard plumbing
@@ -193,24 +241,21 @@ function record(fnName, argIndex, rawArg, target) {
 function judge(fnName, args, outcome = { threw: false }) {
   try {
     noteOpened(fnName, args);
-    if (!ROOT) { record(fnName, -1, args[0], "<guard-not-configured: QUAY_WRITE_GUARD_ROOT unset>"); return; }
+    if (!ROOT) { record(fnName, -1, args[0], "<guard-not-configured: QUAY_WRITE_GUARD_ROOT unset>", "", outcome); return; }
     const idx = TABLE.get(fnName);
     if (idx === undefined) return;
     if (OPEN_VERBS.includes(fnName) && !OPEN_WRITE_FLAG_RE.test(String(args[1] ?? "r"))) return;
     const target = toTarget(args[idx]);
     if (target === null) return; // fd / non-path — not judgeable, and NOT counted as judged-clean
     judged++;
-    const targetReal = realOrSelf(target);
-    // ORDER IS LOAD-BEARING: root membership is judged FIRST, the temp allowance only covers paths
-    // that are NOT in the tree. A temp dir that lives inside the checked-in tree is not private —
-    // a whole-tree copier sees it exactly like any other entry — so "it is under os.tmpdir()" must
-    // not excuse it. Measured consequence of the opposite order: a fabricated root inside /tmp
-    // reported 0 violations for an input that created entries in it, i.e. the judge could not
-    // judge its own test. No test in this repo redirects os.tmpdir() into the tree (checked:
-    // the only TMPDIR-shaped assignments are TMUX_TMPDIR, which does not move os.tmpdir()).
-    if (!(targetReal === ROOT_REAL || isInside(ROOT_REAL, targetReal))) return; // outside the tree
-    if (!hadEffect(fnName, args, outcome)) return; // named the tree but changed nothing
-    record(fnName, idx, args[idx], target);
+    // Root membership is decided on WHERE THE ENTRY LANDS (`locate`), never on a bare realpath —
+    // see locate() for the measured false positive that distinction fixes. `os.tmpdir()` is
+    // recorded for diagnostics only and is NOT an allowance: a temp dir inside the checked-in tree
+    // is still an entry a whole-tree copier sees.
+    const located = locate(target);
+    if (!inRoot(located)) return; // outside the tree — not this criterion's object
+    if (!hadEffect(fnName, args, outcome)) return; // landed in the tree but changed nothing
+    record(fnName, idx, args[idx], target, located, outcome);
   } catch { /* the guard must never break the host process */ }
 }
 
@@ -239,14 +284,14 @@ function patchModule(mod, isPromise) {
           if (!p || typeof p.then !== "function") { judge(fnName, args, { threw: false, preNoEffect }); return p; }
           return p.then(
             (v) => { judge(fnName, args, { ret: v, threw: false, preNoEffect }); return v; },
-            (e) => { judge(fnName, args, { threw: true, preNoEffect }); throw e; },
+            (e) => { judge(fnName, args, { threw: true, err: e, preNoEffect }); throw e; },
           );
         }
       : function (...args) {
           const preNoEffect = preNoEffectFor(fnName, args);
           let ret, err, threw = false;
           try { ret = orig.apply(this, args); } catch (e) { threw = true; err = e; }
-          judge(fnName, args, { ret, threw, preNoEffect });
+          judge(fnName, args, { ret, threw, err, preNoEffect });
           if (threw) throw err;
           return ret;
         };

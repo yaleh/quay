@@ -64,6 +64,8 @@ export const DEFAULT_TIMEOUT_MS = 300_000;
 export interface WriteViolation {
   fn: string;
   target: string;
+  /** Where the entry actually lands (nearest existing ancestor resolved, final component literal). */
+  located: string;
   rawArg: string;
   cwd: string;
   stack: string;
@@ -132,6 +134,7 @@ export function parseGuardLog(text: string): {
       violations.push({
         fn: rec.fn,
         target: rec.target,
+        located: String(rec.located ?? rec.target),
         rawArg: String(rec.rawArg ?? ""),
         cwd: String(rec.cwd ?? ""),
         stack: String(rec.stack ?? ""),
@@ -302,13 +305,19 @@ export function main(argv: string[]): number {
   }
   if (!json) {
     for (const v of res.violations) {
-      process.stderr.write(`  ${v.fn}(${v.rawArg}) -> ${v.target}\n`);
+      // Report WHERE IT LANDED, not merely what was named — the landing path is the actionable fact
+      // (a call may name a scratch path and land in the tree through a symlinked parent).
+      process.stderr.write(
+        v.located === v.target
+          ? `  ${v.fn}(${v.rawArg}) -> ${v.located}\n`
+          : `  ${v.fn}(${v.rawArg}) -> ${v.located}  [named: ${v.target}]\n`,
+      );
       for (const line of v.stack.split("\n").filter(Boolean).slice(0, 3)) process.stderr.write(`      ${line.trim()}\n`);
     }
   }
   return emitFail(
     `${res.violations.length} write(s) into the checked-in tree across ${res.inputs.length} input(s): ` +
-    res.violations.slice(0, 4).map((v) => `${v.fn} -> ${v.target}`).join("; "),
+    res.violations.slice(0, 4).map((v) => `${v.fn} -> ${v.located}`).join("; "),
     res,
     { json },
   );

@@ -101,6 +101,44 @@ describe("checked-in-write-check", () => {
     assert.match(r.stdout, /PASS: no checked-in-tree writes/);
   });
 
+  // The judge's path resolution, pinned in BOTH directions. It followed the final component, so
+  // `symlinkSync(<tree>/file, <scratch>/file)` — which creates a link in a scratch workspace and
+  // touches nothing in the tree — resolved to the tree and was reported. Measured: 121 false
+  // positives from plugin/test/fan-in-execute-paths.test.mjs alone. Over-correcting the other way
+  // would be worse: a path whose PARENT is a symlink INTO the tree really does land in the tree.
+  it("GREEN: symlinking an in-tree file INTO a scratch workspace is not a tree write", (t) => {
+    const root = mkFakeRoot(t);
+    const ws = fs.mkdtempSync(path.join(os.tmpdir(), "ciw-ws-"));
+    t.after(() => fs.rmSync(ws, { recursive: true, force: true }));
+    fs.mkdirSync(path.join(ws, "scripts"), { recursive: true });
+    const input = mkInput(t, "symlink-out.test.mjs", `
+      import fs from "node:fs";
+      fs.symlinkSync(
+        ${JSON.stringify(path.join(root, "plugin", "fixtures", "wf"))},
+        ${JSON.stringify(path.join(ws, "scripts", "wf"))}, "dir");
+    `);
+    const r = runChecker(["--root", root, "--files", input]);
+    assert.equal(r.status, 0, `a link pointing INTO the tree is not a write to it, got ${r.status}\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stdout, /PASS: no checked-in-tree writes/);
+  });
+
+  it("RED: writing through a symlinked PARENT that points into the tree IS a tree write", (t) => {
+    const root = mkFakeRoot(t);
+    const ws = fs.mkdtempSync(path.join(os.tmpdir(), "ciw-ws-"));
+    t.after(() => fs.rmSync(ws, { recursive: true, force: true }));
+    fs.symlinkSync(path.join(root, "plugin", "fixtures"), path.join(ws, "link"), "dir");
+    const landed = path.join(root, "plugin", "fixtures", "_via-link");
+    const input = mkInput(t, "symlink-in.test.mjs", `
+      import fs from "node:fs";
+      fs.mkdirSync(${JSON.stringify(path.join(ws, "link", "_via-link"))}, { recursive: true });
+    `);
+    try {
+      const r = runChecker(["--root", root, "--files", input]);
+      assert.equal(r.status, 1, `expected exit 1, got ${r.status}\n${r.stdout}\n${r.stderr}`);
+      assert.ok(r.stderr.includes(landed), `the landing path is named:\n${r.stderr}`);
+    } finally { fs.rmSync(landed, { recursive: true, force: true }); }
+  });
+
   it("NOT-EVALUATED: no input files matched", (t) => {
     const root = mkFakeRoot(t);
     const r = runChecker(["--root", root, "--dir", "plugin/test-does-not-exist"]);
