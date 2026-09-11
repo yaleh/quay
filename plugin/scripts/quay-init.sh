@@ -2503,12 +2503,33 @@ ensure_target_branch_model() {
   if [ "$DRY_RUN" = true ]; then bm_args+=(--dry-run); fi
   bm_args+=(--root "$WORKSPACE_ROOT")
 
-  local bm_rc=0
+  # The report is captured (not just streamed) so the three outcomes stay DISTINGUISHABLE below. It
+  # is echoed verbatim either way — the operator sees the same lines they would have.
+  local bm_rc=0 bm_out=""
   set +e
-  node "$qrl" "${bm_args[@]}"
+  bm_out="$(node "$qrl" "${bm_args[@]}")"
   bm_rc=$?
   set -e
+  printf '%s\n' "$bm_out"
   if [ "$bm_rc" -eq 0 ]; then return 0; fi
+
+  # ⛔ A non-zero exit is NOT by itself the "divergent" verdict. A crash, an unknown flag, a CLI that
+  # could not read the project — none of those is "the landing baseline is a foreign fork", and
+  # printing the divergence text for them would be exactly the failure hard rule 3b names: a judge
+  # that could not read its input returning the value it returns on a verdict. So the refusal path is
+  # entered only when the delivered report LITERALLY carries the `[BLOCKED] landing-baseline` line.
+  # This COMPARES a token the report prints; it does not compute the verdict (branch-model.ts owns
+  # that). `case` (not `printf | grep -q`) on purpose: under `set -o pipefail` a `-q` grep can
+  # SIGPIPE its producer, making the predicate read FALSE when it is TRUE.
+  case "$bm_out" in
+    *"[BLOCKED] landing-baseline"*) ;;
+    *)
+      echo "ERROR: cannot judge this project's branch model — the delivered CLI exited ${bm_rc} without" >&2
+      echo "       reporting a landing-baseline verdict (its output is above)." >&2
+      echo "       Refusing to continue: an unjudged landing baseline is not a passing one." >&2
+      return 3
+      ;;
+  esac
 
   echo "" >&2
   echo "ERROR: quay-init REFUSES to upgrade this project — its landing baseline ('develop') is not a" >&2
