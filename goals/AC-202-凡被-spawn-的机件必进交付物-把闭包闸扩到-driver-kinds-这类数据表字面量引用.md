@@ -43,10 +43,9 @@ criterion: >-
 
   '
 expect: 'exit 0 = driver-runtime.ts 中以 driver: "X.ts" 数据表字段、
-  path.join(...,"plugin","scripts","X.ts") spawn 形式、或
-  resolveKernelSibling("X.ts") 调用（AC-203 迁移后的自身安装位置解析形式）点名的每一个脚本，都在
-  build-plugin-dist.mjs 的 entry 集内。exit 1 = 枚举缺件。exit 3 = required 集为空（仪器故障，⛔
-  不与合格同形）。'
+  path.join(...,"plugin","scripts","X.ts") spawn 形式、或 resolveKernelSibling("X.ts")
+  调用（AC-203 迁移后的自身安装位置解析形式）点名的每一个脚本，都在 build-plugin-dist.mjs
+  的 entry 集内。exit 1 = 枚举缺件。exit 3 = required 集为空（仪器故障，⛔ 不与合格同形）。'
 origin: 2026-09-09 实测：deriveEntries 跑出
   promotion/worker/outer/quality-gate/meta/goal-driver.ts + send-to-session.ts 共
   7 个 MISS。09-08 的 2afc38d91 已把 Core 直引机械化，但未覆盖数据表字面量这一引用形态。
