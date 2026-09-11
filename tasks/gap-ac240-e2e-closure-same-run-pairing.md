@@ -2,7 +2,7 @@
 id: gap-ac240-e2e-closure-same-run-pairing
 title: AC-240 端到端闭环须由同一次运行自证：step⑤ e2e 成功后必须为同一 (host, project_root) 写出 AC-203
   存活记录，且运行级判据对「两批互不相交的见证」给出可区分取值
-status: todo
+status: ready
 labels:
   - gap
   - delivery-critical
