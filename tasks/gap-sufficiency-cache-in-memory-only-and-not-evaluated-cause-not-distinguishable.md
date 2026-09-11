@@ -2,7 +2,7 @@
 id: gap-sufficiency-cache-in-memory-only-and-not-evaluated-cause-not-distinguishable
 title: 充分性缓存只在内存里（driver 重启即清空 ⇒ 跨重启仍抽签），且 not-evaluated 不区分成因 ⇒ 分不清守卫在工作还是 LLM
   在失败，并使「连续 N 轮同裁决」可被恒 not-evaluated 空转满足
-status: ready
+status: done
 labels:
   - gap
   - defect
