@@ -52,6 +52,7 @@ RC=1
 - [x] AC3: 交付验证路径对真实 settings 零写入——`b=$(sha256sum ~/.claude/settings.json)`；跑修复后的 `verify-deliver-coldstart.sh` ①安装步（或该脚本的自检入口）；`a=$(sha256sum ~/.claude/settings.json)`；`[ "$b" = "$a" ]` ⇒ exit 0。
 - [x] AC4: **取假对照（证明 AC3 不是恒真）**——把该路径换回修复前形态重跑 AC3 的同一条断言 ⇒ **红**（真实 settings 的 sha256 改变）；换回修复后 ⇒ 绿。对照组读数须贴进本任务。
 - [x] AC5: 不引入新红——`bash plugin/scripts/verify-deliver-coldstart.sh --selfcheck` ⇒ exit 0（既有 control 11/12/13 不因本改动转红；该项是本改动的接线负控制，真因见硬规则：「不产生新红」本身不是接线成功的证据，故必须与 AC3/AC4 同读）。
+- [x] AC6: fan-in 套件里打红本任务的**另一起因**（非同源）已消除且控制未被削弱——`plugin/test/help-contract-incompatible-behaviors.test.mjs` 的 AC1 `.quay` mtime 负控制不再被 suite-harness 自己的缓存写入打红：`node --test plugin/test/help-contract-incompatible-behaviors.test.mjs` ⇒ **4/4 pass（AC1 绿）**；且该修**能取假**——把新增的 `SUITE_HARNESS_CACHE_FILES` 从 `isNonCheckerRuntimeFile` 谓词移除重跑 ⇒ mtime-race AC3 断言**转红**（actual 恰为 `suite-bucket-effective.jsonl` / `suite-fs-trace.jsonl` 两条），换回 ⇒ 绿。
 
 ## 结果（2026-09-11 实测读数）
 
@@ -83,6 +84,22 @@ selfcheck: step1-real-settings-guard(falsifiable,pre-fix-semantics) STEP1_HOME_I
 
 **⑤ 实现要点与已知残差（硬规则 5b：修好一处 ≠ 只此一处）**：修复 = 段① 两条独立防线——`HOME` 隔离到 `${PREFIX}.home`（**只经显式前缀赋值 + `STEP1_SEGMENT_HOME`，⛔ 不 `export HOME`**：全局改 HOME 会让 `--ac205-session` 段经 `os.homedir()` 去枚举隔离目录的 `~/.claude/sessions`，把「没有同址目标会话」误报成事实）+ `QUAY_SKIP_PLUGIN_CLI=1`。同形调用点全仓枚举（`npm install -g`，`scripts/` 下命中 2 处）：本处（已修）与 `plugin/scripts/develop-deliver-tgz.sh:1369`（远端 heredoc 内、目标是**交付宿主自己的** HOME，属另一条通道、本任务 Touches 未覆盖 ⇒ 未改，如实登记）。**另一条同类上游**：`packages/quay/scripts/register-plugin.mjs:132-166` 的 materialization 跑的 `claude plugin install` 就是「每次真实全局安装都会复红 AC-161」的根；把 materialization 落到哪个 scope 是产品决策（AC-162 只管脚本直接写那条），本任务按 DoD 的「堵 `step1_install` 的真实-HOME 通道」只做交付路径，故在该文件就地留 RESIDUAL 注释（本任务 Touches 已含该文件），⛔ 不静默。
 
+**⑥ AC6（fan-in 套件红的另一起因——与本任务 ①②③④⑤ 无因果，独立处置）**：本轮两次 `exited-not-landed` 的 suite 红是 `step=suite: AssertionError … checkers with a --help side effect (.quay mtime changed)`，唯一 actual = `suite-bucket-effective.jsonl: 1789138022279.2754:59008 -> 1789138026768.6316:59008`（记为 `UNRELATED`，复跑后按「复现即当真」处置）。
+
+**真因（读代码 + 直接复现，非推断）**：`fabe76d82`（2026-09-05，`gap-serial-lowconc-reclassify-post-waterline-cap`）把本测试 `@test-group serial → engine`（并发 1 → 28），其头注释「必须不与其他 writer 竞争共享 worktree」的前提随之失效，而排除集没有跟着补齐——该任务的 AC3「≥20 轮真实生产监控窗口」当时**留空待外部**，本红正是它欠的读数。写入链：并发的/嵌套的 `scripts/test.sh`（cwd = 被测 worktree）→ `run_static_checks` → `runner-static-gate.ts:705` `suite-bucket-drift-check.ts --gate --root <worktree>` → `checkStaticVsTruth()`/`checkTruthSelection()` → `selectBucketsForTouches()` → `writeBucketAttribution()` → 重写 `<worktree>/.quay/suite-bucket-effective.jsonl`。
+**两条实测读数**：① 逐 checker 插桩扫（93 个 `-check.ts` 各跑一次 `--help`，每次 spawn 前后读该文件 mtime）**零命中**；唯一 import 该写入函数的 `-check.ts` 在 `--help` 分支先返回 ⇒ **不是 --help 副作用**。② 直接复现该写入：`suite-bucket-select.ts --summary` 前后 **sha256 同为 `bc813d3f…`**（逐字节相同）、mtime `1789138260.918 → 1789138278.110` ⇒ 纯缓存 churn tick。
+**处置**：新增 `SUITE_HARNESS_CACHE_FILES = {suite-bucket-effective.jsonl, suite-fs-trace.jsonl}` 并入 `isNonCheckerRuntimeFile`（第 4 类，与 `CAP_OBSERVATION_FILES` 同性质）。**同路径全量枚举（硬规则 5b，5 项逐项贴证据）**：harness 写入被测 worktree `.quay/` 的 = `checker-cost.jsonl` / `full-suite-state.json` / `full-suite.log` / `verification-round.jsonl`（前四条已在既有排除集）+ 本次两条；`node-compile-cache/` 已有目录级排除；`doc-check-cache` / `scoped-gate-cache` / `goal-sufficiency-cache` 在 `scripts/test.sh` 与 `runner-static-gate.ts` 中**零命中** ⇒ 不属该路径，未动。
+**控制能取假（AC6 的第二半）**：mtime-race AC3 夹具加进这两个文件后，把 `SUITE_HARNESS_CACHE_FILES` 从谓词移除重跑 ⇒
+
+```
+✖ mtime-race AC3 (negative control not degraded): resident-process file exclusion still catches a real side effect
+  AssertionError: resident-process tick mtime changes must be excluded
+  + [ 'suite-bucket-effective.jsonl: 1789138409322.026:2 -> 1789138409323.0261:4',
+  +   'suite-fs-trace.jsonl: 1789138409323.0261:2 -> 1789138409323.0261:4' ]
+```
+
+换回修复后 `node --test plugin/test/help-contract-incompatible-behaviors.test.mjs` ⇒ **4/4 pass**（`AC1 … zero .quay mtime change` 20816ms 绿），且「业务文件仍可见」那一半断言未退化。
+
 ## DoD
 
 真实对象被操作过、判据能取假：`~/.claude/settings.json` 被**真实编辑过并回读**——AC-161 criterion 在生产上 exit 0（直接读数，不是断言）；交付/验证路径被**真实跑过一次**而该文件 `sha256sum` 未变（AC3）；**取假对照**在修复前形态下真的转红（AC4）——三条缺一不可。AC-161 由 goal-driver 下一轮复跑后 verdict 由 fail 翻 pass（读 `.quay/goal-round.jsonl` 该 AC 的 verdict / `achievedFailing.inScope` 不再含 AC-161）。⛔ 只改仓库脚本而 `~/.claude/settings.json` 仍含 `quay@quay` ⇒ 判据仍红 ⇒ 不算达成。⛔ 只恢复状态而不堵 `step1_install` 的真实-HOME 通道 ⇒ 下一次交付验证原地复发（`gap-ac161-user-level-marketplace-only` 已经这样失败过一次）⇒ 不算达成。⛔ 反序（先删用户级再确认安装/项目级就绪）会把本机锁在「哪里都没有 quay」——按 Plan 顺序执行。
@@ -93,4 +110,5 @@ selfcheck: step1-real-settings-guard(falsifiable,pre-fix-semantics) STEP1_HOME_I
 - `plugin/test/verify-deliver-coldstart.test.mjs`
 - `packages/quay/scripts/register-plugin.mjs`
 - `packages/quay/test/npm-pack-e2e.test.mjs`
+- `plugin/test/help-contract-incompatible-behaviors.test.mjs`
 - `tasks/gap-ac161-user-scope-enable-repolluted-by-cli-materialization.md`
