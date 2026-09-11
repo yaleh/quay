@@ -121,6 +121,36 @@ Error: Cannot find module '…/plugin/scripts/select-static-checks-for-touches.t
    `not-evaluated` 的措辞**不与 `non-inert` 共用任何输出词**、⛔ 不再出现字面量 `covered`。
    `classifyRoot` 改为**存在性校验的候选根**，由分类器**自己的退出码**接受（⛔ 不再有第二份注册表路径可漂移）。
 
+### 落地（第二轮 — 同一族的第四个半边：候选根从不含被合并的那个 `root`）
+
+**续做现场（⛔ 不是推断，是驱动 fan-in 日志 `/home/yale/work/quay/.quay/fan-in-gap-ff-merge-suite-cert-classifier-unshipped-and-misreported-wk-prod-1789139008.log:25`）**：
+第一轮落地后 `ff` 仍红，但**读数变了** —— 从 `Cannot find module` 变成 `classifier produced no verdict`：
+
+```
+suite_head..tip delta NOT-EVALUATED — classifier produced no verdict —
+  root=/home/yale/work/quay/packages/quay/plugin          exit=2 (… registry file … not found at …/plugin/plugin/scripts/runner-static-gate.ts);
+  root=/home/yale/work/quay/packages/quay                 exit=2 (… not found at …/packages/quay/plugin/scripts/runner-static-gate.ts);
+  root=/home/yale/work/quay/packages/quay/plugin/scripts  exit=2 (… not found at …/plugin/scripts/plugin/scripts/runner-static-gate.ts)
+```
+
+**根因**：`classifyRootCandidates` 只从 `scriptsDir` 出发做 `..` 跳。而**本仓库自己的循环**里
+`resolveKernelScriptsDir()` 返回的是**被 bundle 的 kernel 所在目录** =
+`<repo>/packages/quay/plugin/scripts/dist` —— 一个 **gitignored 的构建产物树**（`.gitignore:26`
+`packages/quay/plugin/`）⇒ **仓库根在它五跳之上，没有任何 `..` 公式够得到**；而注册表
+`plugin/scripts/runner-static-gate.ts` 只在**被合并的那个 `root`** 上（`git ls-files` 可证它被跟踪）。
+⇒ dev 布局下只要 delta 非空，ff 必然 NOT-EVALUATED；而任务分支的 `flip-done` 提交**本身就是**这样的
+delta（`tasks/<id>.md`）⇒ **每个任务都白烧一轮 fan-in**（正是 Finding 里那条代价的机制）。
+
+**修法（与 AC2–AC4 同一族，⛔ 不是给这一处打补丁）**：`classifyRootCandidates(root, scriptsDir)` 把
+**`root`（被合并的那个树 —— delta 路径正是相对它取的 `git diff --name-only`）排在第一位**，三个
+`..` 跳候选仅作**装机布局的兜底**保留（消费方项目自己的 root 不带注册表时仍走它们）。
+语义与 `driver-runtime.ts:295 resolveKernelPluginRoot`（对 `dist` 显式三态）同源：**先问布局，再谈跳数**。
+
+**5b 扫描（其余 `scriptsDir`-跳候选的处置）**：全仓 grep `resolve(scriptsDir` / `scriptsDir, ".."`
+只命中两处 —— 本文件（已修）与 `plugin/scripts/loadbearing-test-gate.ts:241`
+（`testDir` 缺省 = **调用方显式传入的** `--scripts` 的兄弟 `test/`，不是自定位解析 ⇒ **不在本族**，未改）。
+`driver-runtime.ts:295 resolveKernelPluginRoot` / `:305 resolveKernelSibling` 已按 `dist` 显式分支 ⇒ 不在本族。
+
 ## Acceptance Criteria
 
 - [x] AC1 复现：在**安装布局**（npm 全局装出的 prefix，⛔ 不是开发检出）上跑
@@ -132,6 +162,10 @@ Error: Cannot find module '…/plugin/scripts/select-static-checks-for-touches.t
       ⛔ 不得是 `covered`、也不得与「非惰性判决」同形（真实输出贴回）。
 - [x] AC5 5b 产物：给出一份「运行时 spawn 的 `plugin/scripts/*.ts` 在安装布局下是否存在」的机械清单
       （命中数 + 前 3 条），并逐条说明处置。
+- [x] AC6 **同一族的第四个半边**：候选根必须含**被合并的那个 `root`** —— 在**生产 `scriptsDir`**
+      （`<repo>/packages/quay/plugin/scripts/dist`）上，`--root <repo>` ⇒ `tasks/<id>.md` 判**惰性**
+      （空输出 + exit 0）、code 路径判**非惰性**；三个 `..` 跳候选 ⇒ 逐条 exit 2（真实输出贴回）。
+      ⛔ 不是「dev 树另开一条路」，而是 `root` 进候选集；唯一变量 = `root`。
 
 ## Definition of Done
 
@@ -141,6 +175,8 @@ Error: Cannot find module '…/plugin/scripts/select-static-checks-for-touches.t
 - [x] 落地效果的判据是**产物**：在安装布局上，一个任务**第一次** fan-in 就能 ff 成功
       （⛔ 不是「我加了个解析分支」）—— 见 Evidence「AC2 端到端」：`suite_head` = 分支点（delta = 那条
       `flip-done` 提交 = `tasks/<id>.md`），**第一次**就把 develop 快进到任务 tip。
+- [x] AC6 的判据同样落在**产物**上：同一现场、唯一变量 = `root`（`root` ⇒ 惰性/非惰性两侧都取到；
+      三个 `..` 跳候选 ⇒ 逐条 exit 2），且单测做了**红/绿对照**（pre-AC6 版本红、当前 39/39 绿）。
 
 ## Touches
 
@@ -260,10 +296,41 @@ $ SD_OLD=<coldstart 前缀>/plugin/scripts/dist   # 修复前打出的真包
 **机械自证（本文件那一族被整体修掉）**：同一扫描在修复后**降到 12 个名字**（`ff-merge.ts` 的 3 个位点
 不再使用裸 `.ts` join 形态）——⛔ 不是「我加了个解析分支」。
 
-**单测（`plugin/test/fan-in-ff-merge.test.mjs`，新增 3 条）**：在**一个**夹具里（`<dir>/scripts/dist/*.js`
-+ `<dir>/plugin/scripts/runner-static-gate.ts`，即安装布局形状）钉住「安装布局解析」与「三态词表」，
-唯一变量 = 被判的路径。**取假对照**：把 `ff-merge.ts` 换回 `develop` 版本（pre-fix），3 条**全红**
-（`node --test --test-name-pattern=…`，3 tests / 0 pass）；换回后 38/38 绿。
+**单测（`plugin/test/fan-in-ff-merge.test.mjs`，第一轮新增 3 条）**：在**一个**夹具里（安装布局形状）
+钉住「安装布局解析」与「三态词表」，唯一变量 = 被判的路径。**取假对照**：把 `ff-merge.ts` 换回
+`develop` 版本（pre-fix），3 条**全红**（`node --test --test-name-pattern=…`，3 tests / 0 pass）；
+换回后 38/38 绿（第一轮结束时读数；第二轮加 AC6 后为 **39/39**）。
+
+**AC6 —— 生产载体上的真读数（⛔ 不是夹具）**
+
+现场 = **本仓库自己的 `scriptsDir`**（= 生产里 `resolveKernelScriptsDir()` 的返回值）
+`/home/yale/work/quay/packages/quay/plugin/scripts/dist`：
+
+```
+[A] node $SD/select-static-checks-for-touches.js --classify-delta --root /home/yale/work/quay tasks/<本任务>.md
+    stdout=''   exit=0                          ← 惰性（本条 `flip-done` 提交的 delta）
+[B] 三个 `..` 跳候选（= 修复前的【全部】候选；⛔ 逐字复现驱动日志的失败读数）：
+    root=<repo>/packages/quay/plugin          exit=2  registry file (runner-static-gate.ts) not found at …/plugin/plugin/scripts/runner-static-gate.ts
+    root=<repo>/packages/quay                 exit=2  registry file (runner-static-gate.ts) not found at …/packages/quay/plugin/scripts/runner-static-gate.ts
+    root=<repo>/packages/quay/plugin/scripts  exit=2  registry file (runner-static-gate.ts) not found at …/plugin/scripts/plugin/scripts/runner-static-gate.ts
+[C] 同一 root、一个 code 路径 ⇒ 仍判**非惰性**：
+    node $SD/select-static-checks-for-touches.js --classify-delta --root /home/yale/work/quay packages/quay/src/fan-in/ff-merge.ts
+    stdout='packages/quay/src/fan-in/ff-merge.ts'   exit=0
+```
+
+**唯一变量 = `root`**：[A] 放行、[C] 拒绝（⛔ 没有退化成「什么都惰性」，判据仍可取假）；
+[B] 三条**逐字复现**了驱动日志里那三行 —— 即修复前该布局下**必然** NOT-EVALUATED。
+
+**AC6 单测（`plugin/test/fan-in-ff-merge.test.mjs`，第 4 条）**：夹具 = **本循环真正跑的那个布局**
+（`root` 带注册表、而 `scriptsDir` 在一个 `..` 链上够不到注册表的构建产物树）——夹具**先自证形状**
+（断言三个跳候选**都没有**注册表，否则 `AssertionError: fixture broken`），再跑正负两侧。
+**取假对照**：把 `ff-merge.ts` 换回本分支 pre-AC6 版本（`git show HEAD:packages/quay/src/fan-in/ff-merge.ts`
+⇒ 当前分支 55a5865fb 的版本），AC6 **红**（读到 `NOT-EVALUATED` 而非具名路径）；换回后 **39/39 绿**
+（`node --test plugin/test/fan-in-ff-merge.test.mjs`）。
+
+> ⚠️ 夹具自己也修了一处**会伪造结论**的形态：注册表原先以**未跟踪**文件植入，会被 `makeTaskBranchWith`
+> 的 `git add -A` 扫进任务提交、再被随后的 `git checkout develop` 删掉 —— 夹具于是量到「哪里都没有
+> 注册表」，与真实布局无关。**同一形状的「未跟踪文件被 checkout 清掉」在本仓库其它夹具里同样致命。**
 
 ### 附带修：AC-244 的接线钉在 AC-239 并入 NEED 后过期（**develop 侧**红，非本任务引入）
 
