@@ -216,14 +216,16 @@ test("AC3 — runPoolQualityJudge judge exit non-zero ⇒ failed", async (t) => 
 
 // ── AC1 · 四形状不并同一 kind：两条例程，无 B16-C/B18 运行分支 ───────────────────────────────────
 
-test("AC1 — qualityGateRoutines returns EXACTLY the three driverized routines (B15 + B17 + 架构复核)", () => {
+test("AC1 — qualityGateRoutines returns EXACTLY the four driverized routines (B15 + B17 + 架构复核 + packaging-hygiene)", () => {
   const routines = qualityGateRoutines("/repo", {
     planCmd: null, judgeArgv: null, judgmentCmd: null, resourceGateArgv: null,
     identityCmd: null, lineageCmd: null, deletionCmd: null, archJudgeArgv: null,
     poolJudgeIntervalMinutes: 10, judgmentIntervalMinutes: 30, archReviewIntervalMinutes: 60,
+    packagingCheckCmd: null, packagingGapWorkerCmd: null, packagingGapWorkerTimeoutMs: 900_000,
+    packagingHygieneIntervalMinutes: 60,
   });
-  assert.deepEqual(routines.map((r) => r.name), ["pool-quality-judge", "judgment-consumer-check", "architecture-review"]);
-  assert.equal(routines.length, 3, "⛔ 不是 god-object——只此三条，B16-C/B18 归 AC145");
+  assert.deepEqual(routines.map((r) => r.name), ["pool-quality-judge", "judgment-consumer-check", "architecture-review", "packaging-hygiene"]);
+  assert.equal(routines.length, 4, "⛔ 不是 god-object——只此四条，B16-C/B18 归 AC145");
   for (const r of routines) assert.equal(r.schedule.kind, "interval", "例程调度 = interval (1b)");
 });
 
@@ -265,16 +267,19 @@ test("resident loop --once writes a round record with facts (spawn real process)
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const planCmd = path.join(tmp, "fake-plan.js");
   const judgmentCmd = path.join(tmp, "fake-judgment.js");
+  const packagingCmd = path.join(tmp, "fake-packaging.js");
   const identityCmd = fakeIdentityScript(tmp, false);
   const lineageCmd = fakeLineageScript(tmp, false);
   fs.writeFileSync(planCmd, `process.stdout.write(JSON.stringify({triggers:{fired:false,reasons:[],poolCount:0,oldestUnreviewedAgeMs:0,roundsSinceLastJudge:0},pool:[],tasks:[],lastJudgeState:{status:"ok"}}));`, "utf8");
   fs.writeFileSync(judgmentCmd, `process.stdout.write(JSON.stringify({mode:"judgment-consumer-audit",judgments_total:1,wired:1,unfinished:[],drift:false}));`, "utf8");
+  fs.writeFileSync(packagingCmd, `process.stdout.write(JSON.stringify({mode:"packaging-hygiene-audit",configKeys:{keysTotal:0,noConsumerToWire:[],state:"verified"},shippedEntries:{state:"verified",violations:[],reason:null},drift:[]}));`, "utf8");
   const roundLog = path.join(tmp, "quality-round.jsonl");
   const r = spawnSync(
     process.execPath,
     ["--experimental-strip-types", path.join(REPO_ROOT, "plugin", "scripts", "quality-gate-driver.ts"),
      "--root", REPO_ROOT, "--once", "--round-log", roundLog,
      "--plan-cmd", `node ${planCmd}`, "--judgment-cmd", `node ${judgmentCmd}`,
+     "--packaging-check-cmd", `node ${packagingCmd}`,
      "--identity-cmd", `node ${identityCmd}`, "--lineage-cmd", `node ${lineageCmd}`],
     { encoding: "utf8", timeout: 120_000 },
   );
@@ -283,9 +288,9 @@ test("resident loop --once writes a round record with facts (spawn real process)
   assert.equal(lines.length, 1, "one round ⇒ one heartbeat line");
   const rec = JSON.parse(lines[0]);
   assert.equal(rec.halted, false);
-  assert.equal(rec.facts.length, 3, "first round ⇒ all three routines due (never-ran ⇒ interval due)");
+  assert.equal(rec.facts.length, 4, "first round ⇒ all four routines due (never-ran ⇒ interval due)");
   const names = rec.facts.map((f) => f.name).sort();
-  assert.deepEqual(names, ["architecture-review", "judgment-consumer-check", "pool-quality-judge"]);
+  assert.deepEqual(names, ["architecture-review", "judgment-consumer-check", "packaging-hygiene", "pool-quality-judge"]);
 });
 
 test("gap-meta-round-log-rel — default round log path = .quay/quality-round.jsonl (⛔ repo-root)", (t) => {
@@ -293,16 +298,19 @@ test("gap-meta-round-log-rel — default round log path = .quay/quality-round.js
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const planCmd = path.join(tmp, "fake-plan.js");
   const judgmentCmd = path.join(tmp, "fake-judgment.js");
+  const packagingCmd = path.join(tmp, "fake-packaging.js");
   const identityCmd = fakeIdentityScript(tmp, false);
   const lineageCmd = fakeLineageScript(tmp, false);
   fs.writeFileSync(planCmd, `process.stdout.write(JSON.stringify({triggers:{fired:false,reasons:[],poolCount:0,oldestUnreviewedAgeMs:0,roundsSinceLastJudge:0},pool:[],tasks:[],lastJudgeState:{status:"ok"}}));`, "utf8");
   fs.writeFileSync(judgmentCmd, `process.stdout.write(JSON.stringify({mode:"judgment-consumer-audit",judgments_total:1,wired:1,unfinished:[],drift:false}));`, "utf8");
+  fs.writeFileSync(packagingCmd, `process.stdout.write(JSON.stringify({mode:"packaging-hygiene-audit",configKeys:{keysTotal:0,noConsumerToWire:[],state:"verified"},shippedEntries:{state:"verified",violations:[],reason:null},drift:[]}));`, "utf8");
   // ⛔ 不传 --round-log：测缺省落点。修复前 = repo-root quality-round.jsonl（与 carrierStats 读 .quay/ 分叉）。
   const r = spawnSync(
     process.execPath,
     ["--experimental-strip-types", path.join(REPO_ROOT, "plugin", "scripts", "quality-gate-driver.ts"),
      "--root", tmp, "--once",
      "--plan-cmd", `node ${planCmd}`, "--judgment-cmd", `node ${judgmentCmd}`,
+     "--packaging-check-cmd", `node ${packagingCmd}`,
      "--identity-cmd", `node ${identityCmd}`, "--lineage-cmd", `node ${lineageCmd}`],
     { encoding: "utf8", timeout: 120_000 },
   );
