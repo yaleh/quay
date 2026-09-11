@@ -1,7 +1,7 @@
 ---
 id: AC-238
 title: 升级路径：带旧版 vendored runtime 的真实第三方项目（meta-cc 副本）被当前 develop tip 干净接管，任务存量不丢失
-status: draft
+status: active
 kind: criterion
 goal: GOAL-009
 criterion: >-
@@ -50,4 +50,15 @@ origin: "2026-09-11 会话实测（orangevps ssh 外部可核）：meta-cc 是�
   自己的背景就是拿 meta-cc 当第三方验证靶子。同时实测 GOAL-009 已第二次被 goal-driver 机械 flip 回
   achieved（03:04:50Z，reason: all ACs achieved + sufficiency
   covered），印证其自身文档写的风险5『达成即停止复验』——本 AC 必须在窗口重新打开（已手工 reactivate）时立即挂上，不能等它『跑完』。"
+activatedAt: 2026-09-11T03:11:42.252Z
+statusLog:
+  - at: 2026-09-11T03:11:42.253Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-09-11T03:11:42.252Z
 ---
