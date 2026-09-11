@@ -10,6 +10,7 @@ extra:
   goal_ac: AC-239
 depends_on:
   - gap-aged-third-party-project-quay-upgrade-verification
+goal_ac: AC-239
 ---
 ## Finding
 
