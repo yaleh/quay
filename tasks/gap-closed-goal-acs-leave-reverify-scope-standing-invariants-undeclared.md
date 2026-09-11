@@ -78,12 +78,12 @@ long-term 的 AC」在**改前改后都为真**（改前复验域只有 4 条已
 
 ## AC
 
-- [ ] AC1（现状读数，可取假）：跑一条命令打印当前 I5 复验域的 `scopeSize` 与 `inScope` 全量清单，并逐条标注每个 id 的 goal 与 goal 的 status；断言清单中不含任何 goal 已 achieved 且未声明 long-term 的 AC——改前此断言应为**假**（当前 GOAL-009 的 17 条正是这种情形的反面：它们已不在清单里）。
-- [ ] AC2（逐条裁定，枚举非布尔）：对 GOAL-009 的 17 条与 GOAL-015 的 4 条**逐条**给出「一次性验收 / 常设不变式」的裁定与一句理由，落在本任务体的表格里；⛔ 不得整批同判。
-- [ ] AC3（裁定落地）：被判为常设不变式的 AC 全部写入 `long-term: true`；被判为一次性验收的保持原样。改动只碰该字段，其余字段与正文逐字节不变（改前改后 diff 为证）。
-- [ ] AC4（复验域读数变化）：改后重跑 AC1 的同一条命令，`scopeSize` 增加的条数 == AC3 中被标记的条数，且新增的 id 集合与被标记集合逐字相等。
-- [ ] AC5（取假控制）：对任取一条被标 long-term 的 AC，临时把其判据改成必然失败的形态并跑一次 I5，`achievedButFailing` 必须包含它；恢复后不再包含。证明它真的在被复跑，而不只是名字进了清单。
-- [ ] AC6（新鲜度余量可见）：给新鲜度类判据的失败输出补上「当前距离/K」的数字（⛔ 不是布尔），使「还剩多少余量」在红之前就能被读到。
+- [x] AC1（现状读数，可取假）：跑一条命令打印当前 I5 复验域的 `scopeSize` 与 `inScope` 全量清单，并逐条标注每个 id 的 goal 与 goal 的 status；断言清单中不含任何 goal 已 achieved 且未声明 long-term 的 AC——改前此断言应为**假**（当前 GOAL-009 的 17 条正是这种情形的反面：它们已不在清单里）。
+- [x] AC2（逐条裁定，枚举非布尔）：对 GOAL-009 的 17 条与 GOAL-015 的 4 条**逐条**给出「一次性验收 / 常设不变式」的裁定与一句理由，落在本任务体的表格里；⛔ 不得整批同判。
+- [x] AC3（裁定落地）：被判为常设不变式的 AC 全部写入 `long-term: true`；被判为一次性验收的保持原样。改动只碰该字段，其余字段与正文逐字节不变（改前改后 diff 为证）。
+- [x] AC4（复验域读数变化）：改后重跑 AC1 的同一条命令，`scopeSize` 增加的条数 == AC3 中被标记的条数，且新增的 id 集合与被标记集合逐字相等。
+- [x] AC5（取假控制）：对任取一条被标 long-term 的 AC，临时把其判据改成必然失败的形态并跑一次 I5，`achievedButFailing` 必须包含它；恢复后不再包含。证明它真的在被复跑，而不只是名字进了清单。
+- [x] AC6（新鲜度余量可见）：给新鲜度类判据的失败输出补上「当前距离/K」的数字（⛔ 不是布尔），使「还剩多少余量」在红之前就能被读到。
 - [ ] AC7（全量绿）：`scripts/test.sh` 全量绿（待外部）
 
 ## DoD
@@ -92,27 +92,50 @@ long-term 的 AC」在**改前改后都为真**（改前复验域只有 4 条已
 
 ## 执行记录（证据，AC1/3/4/5/6）
 
-命令（AC1/AC4 的同一条）：
+命令（AC1/AC4 的**同一条**，在工作树内跑；`--adjudication` 指向任务体自身）：
 
 ```
 node --experimental-strip-types packages/quay/src/goal-store.ts check --reverify-scope \
   --adjudication tasks/gap-closed-goal-acs-leave-reverify-scope-standing-invariants-undeclared.md
 ```
 
-- **AC1 改前读数**：`scopeSize=4`、`evaluated=true`、`inScope=[AC-161, AC-188, AC-189, AC-190]`（四条均
-  `longTerm=true`、goal 均 achieved）、`activeGoals=[]`；`standingMissing` = 12 条（= 上表全部常设不变式），
-  **exit 1**。⇒ 「裁定未落成字段」这条真缺陷在改前报红（这是 AC1 可取假的那一半）。
-- **AC3**：`goal-store write <id> --long-term true` 逐条写 12 条；`git diff` 为证：11 条恰好新增一行
-  `long-term: true`，AC-214 另有 AC6 的判据改动（见下）。
+- **AC2**：上表 21 行**逐条**裁定（12 常设 / 9 一次性），判据与理由见该节。
+- **AC1 改前读数**（本任务改动前、同一命令）：`scopeSize=4`、`evaluated=true`、
+  `inScope=[AC-161, AC-188, AC-189, AC-190]`（四条均 `longTerm=true`、goal 均 achieved）、`activeGoals=[]`；
+  `adjudication.standingMissing` = **12 条**（= 上表全部常设不变式），`violations=12`，**exit 1**。
+  ⇒ 「裁定未落成字段」在改前报红——这是**真正可取假**的那一半。
+  ⚠️ AC1 的字面断言（「清单中不含 goal 已 achieved 且未声明 long-term 的 AC」）改前改后**都为真**：
+  给定 `inAchievedReverifyScope`，goal 已 achieved ⇒ 不在 active 集 ⇒ 入域必靠 `longTerm` ⇒ 该谓词
+  结构上不可能命中。已在代码注释与 `AC-reverify-1` 里如实标为**对谓词的 tripwire**，⛔ 不当测量用。
+- **AC3**：`goal-store write <id> --long-term true` 逐条写 12 条。`git diff <分支起点> -- goals/` 为证：
+  **11 个文件各恰好新增一行 `long-term: true`、零删除**；AC-214 另有 AC6 的判据改动，是唯一多于一行的。
+  **实测涌现的缺陷（已修）**：AC-202 首次经 `store.write` 落字段时，序列化器把它**手工折行的 `expect`
+  标量重新折行** ⇒ 改动不再是「只碰该字段」。已按【原始字节 + 插入一行】重做（commit `aa36ed9b1`），
+  净 diff 回到一行。⇒ 定式：**store 的「写一个字段」不保证字节级最小 diff**；凡判据要求逐字节不变，
+  写完必须 `git diff` 核，⛔ 不许假定。
 - **AC4 改后读数**：同一条命令 `scopeSize=16`（+12）、`standingMissing=[]`、`violations=[]`、**exit 0**；
-  新增 id 集合 = {AC-202,204,206,214,233,235,236,237,241,242,243,244}，与 AC3 被标记集合逐字相等。
-- **AC5 取假控制**：取 AC-202，临时把 criterion 换成必然失败的命令（`store.write(..., {commit:false})`，
-  不落 git），跑 I5 `check --achieved-failing` ⇒ `achievedButFailing` 含 `AC-202`；字节级还原后重跑 ⇒ 不含。
-- **AC6**：AC-214 的判据改为对**每一条**主体 AC 恒打印 `freshness <ac>: <d>/<K> (margin <K-d>)`
-  （⛔ 数字，不是布尔），失败行 `stale evidence: <ac>:<d>/<K>` 亦带 K；⇒ 余量在转红之前就可读。
+  新增 id 集合 = {AC-202,204,206,214,233,235,236,237,241,242,243,244}，与 AC3 被标记集合**逐字相等**。
+- **AC5 取假控制（两向实测）**：取 AC-202，用 `store.write(..., {commit:false})`（⛔ 不落 git）把 criterion
+  换成 `echo AC5-CONTROL-INJECTED >&2; exit 1` ⇒ I5 `check --achieved-failing` 得
+  `scopeSize=16, achievedButFailing=["AC-202"]`、exit 1（19s）；再 `git checkout HEAD -- <file>` 还原，
+  sha256 与注入前**逐字节相同**（`cmp` exit 0、`git status` 干净）⇒ 重跑 I5 得 `achievedButFailing=[]`、exit 0。
+  ⇒ **AC-202 真的在被复跑**，不只是名字进了清单。
+- **AC6**：AC-214 的判据现在对**每一条**主体 AC 恒输出 `freshness <ac>: <d>/<K> (margin <K-d>)`，并把同一组
+  数字写进运行期载体 `.quay/goal-freshness-margin.json`（`.gitignore` 已登记该路径）。
+  **为什么必须落载体**：acceptance-runner 只在**失败**时把判据输出折进 `reason`（`withFailureOutput`）
+  ⇒ 若只写 stdout，本 AC 绿着的时候这些数字**到不了任何消费者**，「红之前就能被读到」不成立。
+  实测（绿，`at=2026-09-11T17:40:57Z`）：`k=200`，`AC-201/238/239 d=0 margin=200`；
+  `AC-203/205/207/232 d=69 margin=131`（与上方 Evidence 表的实测值一致）。
+  实测（红，`QUAY_GOAL009_FRESHNESS_K=1`）：
+  `reason = acceptance failed (exit 1) — stale evidence: GOAL-009-AC-232:69/1 (margin -68), …`
+  ⇒ **失败输出带「距离/K」**（⛔ 不是布尔）。
+- **I5 重跑痕迹（DoD）**：`scopeSize=16` 的那次 `check --achieved-failing` 把 12 条新入域判据**全部实跑**，
+  含 **AC-242**（专测「已离开复验域却尾事件为 fail」的那条，而本任务正是改变复验域的那一个）。
+- **单测**：`packages/quay/test/goal-store.test.mjs` 新增 5 例（`AC-reverify-1..5`），63/63 绿。
 
-**⛔ AC7 不在本 worker 的取证面内**：全量套件由 fan-in 机械驱动运行（本 worker 只跑 `--for-task` scoped 门），
-故 AC7 保持未勾并标注 `（待外部）`——这是仓库既有的「等外层验证」声明形态，⛔ 不是「已完成」的伪装。
+**⛔ AC7 不在本 worker 的取证面内**：全量套件由 fan-in 机械驱动运行（本 worker 只跑 `--for-task` scoped 门，
+实测 145/145 绿、exit 0），故 AC7 保持**未勾**并标注 `（待外部）`——仓库既有的「等外层验证」声明形态，
+⛔ 不是「已完成」的伪装。
 
 ## Touches
 
@@ -128,6 +151,7 @@ node --experimental-strip-types packages/quay/src/goal-store.ts check --reverify
 - goals/AC-242-台账不得留下-已离开复验域却尾事件为-fail-的-ac-否则下游判据-ac-241-结构上永不通过-被误读成-还有真缺.md
 - goals/AC-243-ac-241-的空因常量必须与-acceptance-runner-实际产出的零输出成因文本同源-ac-241-自身退化.md
 - goals/AC-244-新鲜度约束的主体集合必须由载体机械推导-后加入的载体型-ac-今天-ac-232-ac-238-不得自动逃出-ac-21.md
+- .gitignore
 - packages/quay/src/goal-store.ts
 - packages/quay/test/goal-store.test.mjs
 - tasks/gap-closed-goal-acs-leave-reverify-scope-standing-invariants-undeclared.md

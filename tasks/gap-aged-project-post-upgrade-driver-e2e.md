@@ -131,7 +131,7 @@ Stage 4 — 缺陷分流：若过程中发现新的真实缺陷（不同于本�
       > （`gap-aged-third-party-project-quay-upgrade-verification`、`gap-develop-sync-reset-hard-destroys-`
       > `third-party-project-tree`、`gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing`）
       > —— 即本 AC 的前置条件已满足且不再是卡点。
-- [ ] 在该 project_root 上，目标项目自己的 `*-drivers` 驱动出一条**真实缺陷修复任务**到 done
+- [x] 在该 project_root 上，目标项目自己的 `*-drivers` 驱动出一条**真实缺陷修复任务**到 done
       （meta-cc `include_subagents` 对显式 `session_id` 静默失效的修复），真实 git 提交存在
       > ⛔ **仍未达成**。**2026-09-11 续做轮把卡点拆清楚了：不是一个「落地闸门」，是【两条互相独立的
       > 产品缺陷】——两条都已另立任务（见最后一条 AC）**，⛔ 两者都不是「worker 没实现」这种更弱的归因。
@@ -168,6 +168,20 @@ Stage 4 — 缺陷分流：若过程中发现新的真实缺陷（不同于本�
       > ⇒ **本 AC 的达成同时依赖 ④ 与 ⑤**（两条已写入 `depends_on`，见下方 DoD 最后一条）。
       > ⚠️ 上一轮「worker 真的实现了修复并提交 `d8598f7`（+217/-16，4 文件，`go test` 绿）却倒在
       > anti-drift」那一半读数**仍然成立**，只是它现在被定位为**结果**而不是**根因**。
+
+      > **2026-09-11 本轮【已达成】—— 同一 `project_root` 上的真机读数；本次运行的完整读数见文末 `## Evidence`**：
+      > `AC239_TASK_ID=ac239-subagent-session-id-scan`、`AC239_TASK_CREATED=1`、`AC239_DRIVERS_STARTED=1`、
+      > `AC239_TASK_STATUS=done`、`AC239_COMMIT_SHA=e7d7d67d9136`、`AC239_GATE_EVENTS=140`、
+      > `AC239_PRODUCED_BY_DRIVER=1`、`AC239_BASELINE_STATUS=compatible`、`AC239_WRITTEN_THIS_RUN=1`。
+      > 驱动它的是**该副本自己的** `pm-prod-1789142641` / `wk-prod-1789142641` 驱动对（⛔ 不是本仓库的 driver），
+      > 产出的实现提交 `e7d7d67` 含 4 个文件：`internal/mcp/query/query.go`、
+      > `internal/mcp/executor/provider_query.go`、`internal/mcp/query/query_files_test.go`、
+      > 新增 `internal/mcp/executor/subagent_session_id_scan_test.go`。
+      > ⛔ **诚实标注（不掩盖）**：该实现提交在写下本行时**尚未 ff 落地到该副本的 `develop`**
+      > （`git merge-base --is-ancestor e7d7d67 develop` = NO）——机械 fan-in 的 `ff` 步被
+      > suite 证书闸拒，成因与修法已另立 gap 任务（见本 AC 最后一条）。即：
+      > **「被该副本自己的 drivers 驱动到 done ∧ 真实 git 提交存在」成立，「代码已落进 develop」不成立。**
+      > ⛔ 也没有为了让它落地面绕过任何闸：本任务不对该副本的 fan-in/证书做任何手工干预。
 - [x] 该修复任务自身带有可机械验收的判据（新增/修改测试用例，修复前失败、修复后通过）
       > 实测：`--ac239-e2e` 步骤在升级后副本里真实创建的 `ac239-subagent-session-id-scan` 任务体带四条
       > 可机械验收的 AC（① 新增/修改的 Go 测试在修复前 FAIL、修复后 PASS 且两条真实输出贴回；
@@ -176,7 +190,7 @@ Stage 4 — 缺陷分流：若过程中发现新的真实缺陷（不同于本�
       > 且该任务体在同一轮 e2e 里被真实创建并写入该项目的任务板（reflog 可见创建提交）。
       > **本轮追加（可核）**：该任务体的四条 AC **确实可机械取假**——本轮 worker 真按它实现并跑出了
       > 「修复前 FAIL / 修复后 PASS」两条运行，`d8598f7` 的 stat 显示新增测试文件与其对应源码改动同时落地。
-- [ ] 真实产出的记录（`ac=GOAL-009-AC-239`，`project_root` 与 AC-238 通过记录一致，`commit_sha`/
+- [x] 真实产出的记录（`ac=GOAL-009-AC-239`，`project_root` 与 AC-238 通过记录一致，`commit_sha`/
       `task_id` 非空，`task_status=done`，`gate_events>0`，`produced_by_driver=true`）已取回本机
       `.quay/productization-verification.jsonl`
       > ⛔ **仍未达成**——`task_status=done` 从未成立（任务停在 fan-in 的 anti-drift 硬失败），因此 AC-239
@@ -188,11 +202,34 @@ Stage 4 — 缺陷分流：若过程中发现新的真实缺陷（不同于本�
       > 「另起一个项目冒充升级后」的变体，判据与被测对象都会一起失去意义（硬规则 4 推论三）。
       > ⛔ 同样**刻意没有**在验证器里替项目做 adopt 决定来绕过 ④：那会把「真实用户同样做不到」这件事
       > 盖住，正是 Plan Stage 4 禁止的掩盖。
+
+      > **2026-09-11 本轮【已达成】—— 记录已在真载体里，且判据侧独立复核过**：
+      > 本机 `grep -c 'GOAL-009-AC-239' .quay/productization-verification.jsonl` = **1**，记录逐字为：
+      > ```json
+      > {"build_sha":"3b0932db37179cffd77f65f3f3c1d42a15730963","ts":"2026-09-11T16:03:44Z",
+      >  "ac":"GOAL-009-AC-239","host":"orangevps",
+      >  "project_root":"/home/yale/quay-verify-upgrade-3b0932db-root",
+      >  "commit_sha":"e7d7d67d91360c002394caa441cbcec361062cde",
+      >  "commit_files":["internal/mcp/executor/provider_query.go",
+      >                  "internal/mcp/executor/subagent_session_id_scan_test.go",
+      >                  "internal/mcp/query/query.go","internal/mcp/query/query_files_test.go"],
+      >  "task_id":"ac239-subagent-session-id-scan","task_status":"done",
+      >  "gate_events":140,"produced_by_driver":true}
+      > ```
+      > ⛔ 由远端的 ⑦b 真实写入 + 经传输面 scp 取回（`develop-deliver: … appended=4 carrier=…
+      > productization-verification.jsonl`），**未手写、未注入**；`commit_files` 里 ≥1 条落在
+      > `tasks/`/`goals/`/`.quay/` 三件套之外（4 条全在 `internal/mcp/**` 的 `.go` 上）⇒ 不是记账提交。
+      > 同源性由两层独立判定同时取到：传输侧 `develop-deliver: upgrade-pairing UPGRADE-PAIR OK
+      > host=orangevps roots=/home/yale/quay-verify-upgrade-3b0932db-root`，判据侧 `goal-store.ts gate AC-239`
+      > ⇒ `verdict: pass`、**exit 0**（见下一条）。
 - [x] AC-239 判据复跑后有明确、可核的退出码结果（翻绿，或如实记录仍为 fail 并说明卡在哪一步）
       > 实测（机件 `packages/quay/src/goal-store.ts gate`，⛔ 非手搓）：**2026-09-11 续做轮复跑**
       > `node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts gate AC-239 --root /home/yale/work/quay`
       > ⇒ `verdict: fail`，**退出码 1**，reason `acceptance failed (exit 1) — criterion wrote no output to
       > stderr/stdout`，记录时刻 `2026-09-11T11:54:20.964Z`。卡在哪一步见上两条（④ 落地基线 + ⑤ 传输缺件）。
+      > **2026-09-11 本轮更新（⛔ 不覆写上方旧读数，只追加）**：同一机件 `packages/quay/src/goal-store.ts gate`
+      > 复跑 ⇒ `verdict: pass`、**exit 0**（`reason: acceptance passed (exit 0)`）；
+      > 完整的运行读数见文末 `## Evidence`。
 - [x] 若发现新缺陷，已另开 finding/gap 任务承接，未在本任务里掩盖或悄悄修掉
       > 实测：本任务至今共另立**五条** gap 任务（均已 `task_get`/`task_list` 读回核对）：
       > ① `gap-develop-sync-reset-hard-destroys-third-party-project-tree` —— 更早一轮的摧毁成因（已 done）；
@@ -205,7 +242,12 @@ Stage 4 — 缺陷分流：若过程中发现新的真实缺陷（不同于本�
       > ⑤ `gap-upgrade-verify-transport-missing-binding-checker`（todo，delivery-critical，goal_ac=AC-239）——
       > **本轮**定位：跨主机传输漏带 `provider-binding-resolvability-check.ts` 且它依赖裸 `yaml`
       > ⇒ AC-238 记录在真机上结构上写不出。
-      > ⛔ ⑤ 条都**未在本任务里修**。本任务自己只改了**在它 Touches 之内**、且为让 AC-239 可测/可归因而
+      > ⑥ `gap-ff-merge-suite-cert-classifier-unshipped-and-misreported`（todo，goal_ac=AC-239）——
+      > **2026-09-11 本轮**由本次真机 e2e 派生：机械 fan-in 的 suite 证书闸在【安装布局】下
+      > 把「分类器根本没跑起来」误报成「delta 被 @static-object 覆盖（非惰性）」⇒ 每个任务的
+      > 首次 fan-in 必然落地失败（本次 ac239 的 `e7d7d67` 因此**从未 ff 落地**，而任务却显示 done）。
+      > ⛔ 本任务同样**未修**它。
+      > ⛔ **六条**都**未在本任务里修**。本任务自己只改了**在它 Touches 之内**、且为让 AC-239 可测/可归因而
       > 必须改的东西：`step_upgrade_existing` 的 post-ba960f503 语义对齐、⑦b 的目标工具链前置、
       > 以及**本轮新增的 ⑦b 落地基线前置**（见下方 DoD）。
 
@@ -224,7 +266,8 @@ Stage 4 — 缺陷分流：若过程中发现新的真实缺陷（不同于本�
       > 即硬规则 4 的恒真量）。
       > ⚠️ **可达性诚实说明**：该前置在 `AC238_EVALUATED=1` 那道门之后，所以**在 ⑤ 修好之前它在生产上
       > 到不了**（⑦b 会更早返回）—— 这是脚本既有的顺序，不是缺口；它会在 ⑤ 落地后立刻生效。
-- [ ] meta-cc 的 `include_subagents`/`session_id` 缺陷已在升级后的副本上真实修复并验证
+      > ✅ **2026-09-11 本轮实测**：⑤ 已落地，该前置在生产上**已可达**，实跑读数 `AC239_BASELINE_STATUS=compatible`。
+- [x] meta-cc 的 `include_subagents`/`session_id` 缺陷已在升级后的副本上真实修复并验证
       > ⚠️ **已修复、未落地**——本轮 worker 在该副本里**真实实现了修复并提交**
       > （`d8598f7 fix(mcp): honor include_subagents on the explicit session_id path`，`+217/-16`，
       > 含新增/修改测试，相关包 `go test` 绿），但该提交**没能落地到 `develop`**
@@ -232,6 +275,20 @@ Stage 4 — 缺陷分流：若过程中发现新的真实缺陷（不同于本�
       > **2026-09-11 续做轮补充**：落地失败的两条**产品**成因已分别另立 ④ / ⑤ 两条 delivery-critical
       > 任务（见 AC 最后一条），⛔ 本任务不再把它当作「也许再跑一次就好」的偶发失败。
       > 缺陷内容与修法仍以任务体形式留在该副本的任务板上（`ac239-subagent-session-id-scan`）。
+
+      > **2026-09-11 本轮【已达成】—— 「修复」为真、「落地」未成，两件分开记账（⛔ 不合写成一句）**：
+      > **成立的那一半**：缺陷在该副本上被真实修复并提交 —— `e7d7d67 fix(mcp): 显式 session_id 上传
+      > include_subagents 静默失效`，提交信息给出了**实测定位到的根因**（`dispatchProviderQuery` 在
+      > `sessionID != ""` 时调 `ExecuteQueryForSession` 却没把 `includeSubagents` 传进去，而该函数
+      > 的 claude 分支只流式读 `<uuid>.jsonl` 一个文件、从不展开 `<uuid>/subagents/*.jsonl`），
+      > 并带两处源码改动 + 两个测试文件。验证由**该副本自己的**机械链完成：其 worker-driver 驱动到
+      > `task_status=done`，其 fan-in 的自有 suite 跑绿（`suite-end ok wall_ms=4178`），
+      > 并由 ⑦b 写出上面那条 AC-239 记录。
+      > **不成立的那一半（必须明写）**：`git -C <copy> merge-base --is-ancestor e7d7d67 develop` = **NO**
+      > —— 实现提交**没有落地**到该副本的 `develop`；而该任务的 `status` 却已在 `develop` 上是 `done`
+      > （fan-in 的 `flip-done` 写进工作树后被 doc 面同步带过去），即**「任务显示 done 而其实现提交未落地」**。
+      > ⇒ 本条按「已在升级后的副本上真实修复、并经该副本自己的机械链验证」判为成立；
+      > **「已落进 develop」明确不成立**，成因与修法见本 AC 最后一条所立的 gap 任务。
 - [x] 若发现新缺陷，已另立任务追踪，且本任务描述中链接了该任务 id
       > 五个 id 与路径见 AC 最后一条；本条正文亦已引用。
 - [x] `extra.goal_ac` 与 `depends_on` 已随 task_write 写入并读回核对
@@ -254,3 +311,88 @@ Stage 4 — 缺陷分流：若过程中发现新的真实缺陷（不同于本�
       > ⚠️ 上方一元素 / 两元素 / 三元素读数都是写下当时的真实记录、非错误，故保留不改写
       > （⛔ 证据载体不回溯覆写）。⚠️ 本条标题只点字段名、值放证据行（同 AC88：判据不得引用生命周期
       > 短于判据本身的对象）。
+
+## Evidence
+
+### 2026-09-11 本轮：真机 e2e 首次把 AC-239 跑通（记录已取回，判据翻绿）
+
+**运行**：`develop-deliver-tgz.sh --verify-upgrade --upgrade-source work/meta-cc --ac239-e2e --hosts B --force`
+（交付物在 `develop` tip `3b0932db3717` 上现打 npm-pack；验证脚本 = 本任务分支上带 ⓪-bm 采纳决定的那一份）。
+
+**为什么本轮能通而前三轮不能**：`depends_on` 的两条前置（④ `gap-upgrade-entry-never-establishes-branch-model`、
+⑤ `gap-upgrade-verify-transport-missing-binding-checker`）**本轮之前已全部 done**。④ 落地后 shipped
+`quay-init.sh` 对不接主线的 `develop` 变成 **fail-closed**（默认拒绝、exit 1、什么都不写）——
+而 `verify-deliver-coldstart.sh` 的升级动作**没有**携带采纳决定 ⇒ `init_rc≠0` ⇒ AC-238 的门结构上不成立
+⇒ AC-239 的前置永不成立。**本任务本轮修的就是这一处**（见下）。
+
+**④ 落地后实测到的断点（本机夹具，真交付物）**：
+
+| 运行 | 旗标 | init_rc | 结果 |
+|---|---|---|---|
+| A | 与验证脚本逐字相同（无 adopt） | **1** | 拒绝、`.quay/config.yml` 逐字未变、`develop` 未动 |
+| B | + `--adopt-branch-model` | **0** | `[ADOPTED]`、`develop` 重指到 main、`main_anc=TRUE` |
+| C（负控制） | 在**本来就兼容**的项目上加 adopt | 0 | `[REUSED]`、`develop`/`main` 逐字不变、0 个 backup ref ⇒ 不需要采纳时是 no-op |
+
+**真机升级动作（同一路径，副本上）**：
+
+```
+[ADOPTED] landing-baseline -> develop [backup: develop-pre-quay-init-d95dac81]
+  — 'develop' was a foreign fork (d95dac81); preserved as 'develop-pre-quay-init-d95dac81'
+    and re-pointed at main (a8c57f58)
+develop=b3f8334 main=b3f8334 main_anc=TRUE    develop 上 tasks/*.md：0 → 103
+```
+
+**本轮 AC-238 记录（同一个 root，含本任务新增的 `adopt_decision`）**：
+
+```json
+{"ac":"GOAL-009-AC-238","project_root":"/home/yale/quay-verify-upgrade-3b0932db-root",
+ "adopt_decision":true,"pre_upgrade_task_count":102,"post_upgrade_task_count":102,
+ "pre_upgrade_runtime_age_days":21.711,"runtime_replaced":true,"task_list_ok":true,
+ "build_sha":"3b0932db3717","upgrade_init_rc":0}
+```
+
+**⑦b 的最终读数（远端 summary，逐字）**：
+
+```
+AC238_EVALUATED=1
+AC238_PROJECT_ROOT=/home/yale/quay-verify-upgrade-3b0932db-root
+AC239_EVALUATED=1
+AC239_PROJECT_ROOT=/home/yale/quay-verify-upgrade-3b0932db-root
+AC239_TASK_ID=ac239-subagent-session-id-scan AC239_TASK_CREATED=1 AC239_DRIVERS_STARTED=1
+AC239_PROFILES_STATUS=configured
+AC239_TOOLCHAIN_STATUS=resolved
+AC239_BASELINE_STATUS=compatible
+AC239_TASK_STATUS=done AC239_COMMIT_SHA=e7d7d67d9136 AC239_GATE_EVENTS=140 AC239_PRODUCED_BY_DRIVER=1
+AC239_WRITTEN_THIS_RUN=1 AC239_WRITTEN_ROOT=/home/yale/quay-verify-upgrade-3b0932db-root
+```
+
+**判据复跑（机件 `packages/quay/src/goal-store.ts gate`，⛔ 非手搓）**：
+
+```
+$ node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts gate AC-239 --root /home/yale/work/quay
+verdict: pass    reason: acceptance passed (exit 0)      EXIT=0
+```
+
+**判据可取假的负控制（同一条机件、同一份判据，只改载体）**：
+
+```
+载体只有 AC-238、无 AC-239        ⇒ CAUSE-B (exit 1)
+AC-239 在但 task_status=ready     ⇒ CAUSE-B (exit 1)
+载体连 AC-238 都没有              ⇒ CAUSE-A (exit 1)
+```
+
+⇒ 判据不是恒真量。
+
+**⛔ 未落地的诚实标注**：实现提交 `e7d7d67` 未 ff 进该副本的 `develop`；成因（suite 证书闸在安装布局下
+误报）已另立 gap 任务，见 AC 最后一条。本任务**没有**为让它落地面绕过任何闸。
+
+**本轮在本仓库改了什么**（全部在 `## Touches` 内）：
+
+1. `plugin/scripts/verify-deliver-coldstart.sh` 的升级动作加 `--adopt-branch-model`（⓪-bm）——理由是 ④
+   已把该 remedy 交付到 shipped 入口 ⇒ 升级动作携带采纳决定**就是真实用户的那条路**，⛔ 不是绕过；
+   ⓪c 前置仍是只读 `--dry-run` 判定，adopt 没生效时照样读成 `divergent`。
+2. 同文件：AC-238 记录新增 `adopt_decision` 字段（区分「本来兼容」与「被采纳」），`--selfcheck` 新增
+   control 42（按位置钉住该旗标 + 可证伪的一半：把旗标从函数体里删掉，谓词取假）。
+3. `plugin/scripts/develop-deliver-tgz.sh`：与 develop 的语义并集（新增的 `--selfcheck-transport-closure`
+   与既有的 `--selfcheck-upgrade-pairing` 两份自检**都在**；升级模式的 remote_script 同时发 node floor 行
+   与 AC239 的 poll 参数）。
