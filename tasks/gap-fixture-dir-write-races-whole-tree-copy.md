@@ -140,9 +140,15 @@ NOT-EVALUATED: 1/1 input(s) did not finish evaluation — a file that never load
   rmSync(.../_tmp-bad-schema) -> ...
 ```
 
-判据自身由 `plugin/test/checked-in-write-check.test.mjs` 钉住（6 臂：红 / 绿 / 绿-空操作 / 两项未评估 / 在本仓库上绿）：`ℹ tests 6 / ℹ pass 6 / ℹ fail 0`。
+判据自身由 `plugin/test/checked-in-write-check.test.mjs` 钉住（**8 臂**：红 / 绿 / 绿-空操作 / 绿-symlink 出树 / 红-symlink 进树 / 两项未评估 / 在本仓库上绿）：`ℹ tests 8 / ℹ pass 8 / ℹ fail 0`。
 
-**一处必须记下的既有盲区（本判据补上的正是它）**：仓库已有的静态规则 `test-isolation-check` 的 R1（`path.join(__dirname, ... ".tmp…")`）**看不见本次的施害者**。证据三条：①`plugin/test/workflow-replay.test.mjs` 不在 `plugin/test-isolation-violations.txt` 的 123 行基线里（`grep workflow-replay` 零命中）；②同一规则在同一次扫描里对**直接字面量**形状报了 12 条 `fixed-path-write`（`packages/quay-native/test/*` 的 `.tmp-*`），说明 `plugin/test/**` 确在扫描面内、本文件确被扫过而未被判出；③原因是结构性的是：施害者写的是 `path.join(FIXTURES_DIR, "_tmp-bad-schema")`，`__dirname` 在**另一个表达式、另一行**（`:11` 定义 `FIXTURES_DIR`）里，且字面量是 `_tmp-`（下划线）而非 `.tmp`。这正是该文件自己已记录过两次的同型盲区（R7 的立条理由逐字如此）。**⇒ 结论：路径表达式形状的静态谓词看不见经由间接层构造的路径；运行时判据按构造看得见。**
+**判据自身被扫出并修掉的两类误报**（面扫的副产品；硬规则 5b 的「兄弟实例」这回长在判据自己身上）：
+
+① **判「调用」而非判「事件」**：`createGoalStore() -> fs.mkdirSync(<repo>/goals, {recursive:true})` 是对**已存在**目录的空操作，却被报成在已签入树里建条目（一条名字叫正控制、实际只读的用例）。修法：读调用的**结果**——`mkdir/mkdirSync` 带 `recursive:true` 返回 `undefined` 即未创建（返回字符串＝创建了首个目录）；`rm/rmSync` 带 `force:true` 且调用前目标不存在即未删除（用 `lstatSync` 判在否，不用会跟随符号链接的 `existsSync`）；回调形态结果不可见 ⇒ 保守上报。新增一条绿臂钉住。
+
+② **路径解析跟随了末段符号链接**：`symlinkSync(<tree>/plugin/scripts/f, <scratch>/plugin/scripts/f)`——在**临时工作区**里建一个指向仓库的链接、仓库本身分毫未动——被 `realpathSync` 解析成仓库路径而报红。实测**单个文件 121 条**（`plugin/test/fan-in-execute-paths.test.mjs`，它的正当模式就是把仓库的 plugin/scripts 链进临时 worktree）。修法：判定**「这个名字被放在哪里」**——从 `dirname(target)` 起解析**最近的存在祖先**、末段保持字面量；这样「链出去」不报，而「经由指向树内的父目录写进去」照样能抓。违反报告现在同时打印**落点**与**所命名路径**（二者不同时并排显示），因为落点才是可行动的事实。
+
+**一处必须记下的既有盲区（本判据补上的正是它）**：仓库已有的静态规则 `test-isolation-check` 的 R1（`path.join(__dirname, ... ".tmp…")`）**看不见本次的施害者**。证据三条：①`plugin/test/workflow-replay.test.mjs` 不在 `plugin/test-isolation-violations.txt` 的 123 行基线里（`grep workflow-replay` 零命中）；②同一规则在同一次扫描里对**直接字面量**形状报了 12 条 `fixed-path-write`（`packages/quay-native/test/*` 的 `.tmp-*`），说明 `plugin/test/**` 确在扫描面内、本文件确被扫过而未被判出；③原因是结构性的：施害者写的是 `path.join(FIXTURES_DIR, "_tmp-bad-schema")`，`__dirname` 在**另一个表达式、另一行**（`:11` 定义 `FIXTURES_DIR`）里，且字面量是 `_tmp-`（下划线）而非 `.tmp`。这正是该文件自己已记录过两次的同型盲区（R7 的立条理由逐字如此）。**⇒ 结论：路径表达式形状的静态谓词看不见经由间接层构造的路径；运行时判据按构造看得见。**
 
 ### AC5 — 原语义不回退
 
@@ -155,15 +161,17 @@ NOT-EVALUATED: 1/1 input(s) did not finish evaluation — a file that never load
 
 ### Plan 第 4 步 — 能力清单登记
 
-`bash plugin/scripts/capability-catalog.sh --summary` ⇒ `capability-catalog: 305 scripts | 305 declared | 0 unclassified | 300 ship`；同命令在工作树 HEAD 之前为 **304**，本次 **+1** 已确认（`git ls-tree HEAD plugin/scripts/` 计 304）。`--json` 中本条的五个字段（question / cadence=按需 / invalidation / last_reaffirmed=2026-09-11 / matching=position）均已声明，入口闸通过。
+`bash plugin/scripts/capability-catalog.sh --summary` ⇒ 落地时 **304 → 305**（+1 已确认；`git ls-tree HEAD plugin/scripts/` 计 304）；合并 develop 后为 **306**（develop 侧另 +1，非本任务产物，不认领）。`--json` 中本条的六个字段（question / cadence=按需 / invalidation / last_reaffirmed=2026-09-11 / matching=position / consumer）均已声明——**consumer 是被 scoped 门逼出来的**，见下。
 
 ### 落地与门
 
-- 本分支 vs develop：6 个文件（`git diff --stat $(git merge-base HEAD develop)..HEAD`）——3 个新增判据半件 + 1 个新增测试 + `workflow-replay.test.mjs` + 能力清单。
+- 本分支 vs develop：**7 个文件**（3 个新增判据半件 + 1 个新增判据自测 + `workflow-replay.test.mjs` + 能力清单 + 任务体）。
 - ⛔ `test/cold-start-oneliner-e2e.sh` 未被本任务改动：`git diff --name-only $(git merge-base HEAD develop)..HEAD -- test/cold-start-oneliner-e2e.sh` = **0 行**（DoD 第 3 条）。
-- 不变式写进代码注释 5 处：guard 头、run 头、check 头、两个测试文件头。
-- scoped 门：`bash scripts/test.sh --for-task gap-fixture-dir-write-races-whole-tree-copy --allow-thin` ⇒ `SCOPED_EXIT=0`（首轮曾红：`test-isolation-check` 报本任务新增测试文件 `mkdtemp-no-cleanup` —— 判据自己泄漏临时目录，即它自己所判的那条规则；已改为 `t.after` 注册清理，并让判据自身递归清理其 scratch 日志目录）。
-- 面扫（硬规则 5b）**部分完成，不作完备性主张**：修复后的判据在 6 路并行下扫描 `plugin/test/**` 中的 **N/305**（读数随本轮实测填入下方；未扫完的部分**不**等于「无违例」）。首轮串行扫描（60/305）命中的唯一一条是 `createGoalStore() -> fs.mkdirSync(<repo>/goals, {recursive:true})` 的**空操作**误报（该目录已存在，`mkdirSync` 未创建任何条目），已由「判事件而非判调用」的修法排除，并新增一条绿臂钉住。
+- 不变式写进代码注释 **3 处**（`grep -l INVARIANT`）：`plugin/scripts/checked-in-write-guard.cjs`、`plugin/scripts/checked-in-write-check.ts`、`plugin/test/workflow-replay.test.mjs` —— 即「判据本体」「判据入口」「被修的那个测试」。另两个半件（`checked-in-write-run.cjs`、判据自测）不含该行；Evidence 不把它说成 5 处。
+- anti-drift（fan-in 硬失败步）在本工作树实跑：`ANTI-DRIFT OK: task gap-fixture-dir-write-races-whole-tree-copy — 7 actual file(s), all within declared Touches (7 glob(s))`。
+- scoped 门：`bash scripts/test.sh --for-task gap-fixture-dir-write-races-whole-tree-copy --allow-thin` ⇒ `SCOPED_EXIT=0`（`ℹ tests 45 / ℹ pass 45 / ℹ fail 0`）。**该门共红了两次，两次都是本任务自己的产物**：①`test-isolation-check` 报新增测试文件 `mkdtemp-no-cleanup`——判据自己泄漏临时目录，正是它自己所判的那条规则 ⇒ 改 `t.after` 注册清理，并让判据自身清理其 scratch 日志目录；②`rhythm-consumer-check` 判据2 报 `checked-in-write-check.ts: 按需 without a CONSUMER row — 「按需」=「无人」, no presser declared` ⇒ 补 CONSUMER 行声明谁按、什么条件按。**第 ② 条是能力清单自己的入口闸查不出来的**（它只要求 question/cadence/invalidation/last-reaffirmed/matching 五个字段）——「一个按需跑的检查若没人按，等于没有」这条只有 rhythm 检查看得见。
+- 面扫（硬规则 5b）**部分完成，不作完备性主张**：修复后的判据在 6 路并行、840s 预算内实测覆盖 `plugin/test/**` 的 **67/320** 个 `*.test.mjs`（子进程 guard 日志计数：`evaluated=67`、`violations=0`、`evaluationFailed=0`）；预算到时未扫完的部分**不**等于「无违例」。面扫此前抓到的两条都是判据自身的误报（见 AC4 末段），修完复扫 0 条真违例——但复扫覆盖率同样只有 67/320。
+- 一句题外观察（**未验证、不在本任务范围、不立前置**，硬规则 12）：同一「整树拷贝撞并发写者」形状在 `refresh-worktree-quay` 复制 `.quay/` 时也出现——scoped 门自己的输出里有 `cp: cannot stat '/home/yale/work/quay/.quay/fan-in-suite-*.log': No such file or directory`。写者是 driver 而非测试、载体是 gitignored 的运行时状态，危害未测 ⇒ 只记观察。
 
 ## Touches
 
