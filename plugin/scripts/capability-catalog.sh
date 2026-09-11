@@ -1704,6 +1704,7 @@ declare -A CONSUMER=(
   [ac61-staleness-disposition-check.ts]="谁按：manager 在 AC61 清单处置表态时按；条件=清单项要做 A-1..B-4 的处置判定"
   [anti-drift-touches-check.ts]="谁按：任务 subagent 在落地后核验 Touches 一致性时按；条件=任务落地要验证 touches 精确命中"
   [axis-generator.ts]="谁按：判据作者在定义新判据的测量轴时按；条件=要量化判据的时间/范围轴"
+   [checked-in-write-check.ts]="谁按：改动 plugin/test/** 下测试文件、或某测试被怀疑与整树拷贝并发产生假红时，由维护者手动跑（node --experimental-strip-types plugin/scripts/checked-in-write-check.ts --files <改动的测试文件>；全表面用 --dir plugin/test）；条件=要判定某个【已执行】的测试文件是否在已签入路径下建/删条目"
   [checker-lib.ts]="谁按：新检查器作者在实现按位置/枚举判定时 import；条件=要复用 matchAtCommandPosition / enumerativeExistence"
   [checker-io.ts]="谁按：已迁移到 DriverResult 的 checker（outer-anchor-check / load-sensitive-release-check / dead-code-after-return-check / adr016-screen-use-check）在判定函数返回 DriverResult 后经 driverResultToExit 映射退出码；条件=一个 checker 的判定结果要收敛到 DriverResult 词表（gap-b4-checker-reuse-driver-result）"
   [claim-task.sh]="谁按：派发器/inner 在认领任务分支时按；条件=任务要被某台机器认领（claim 协议）"
