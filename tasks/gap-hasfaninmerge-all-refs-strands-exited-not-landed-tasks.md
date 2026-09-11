@@ -1,7 +1,7 @@
 ---
 id: gap-hasfaninmerge-all-refs-strands-exited-not-landed-tasks
 title: slot-refill 的 hasFanInMerge 用 --all 判 fan-in，未落地任务被永久判为已 land 待翻 done
-status: todo
+status: ready
 labels:
   - gap
   - defect
