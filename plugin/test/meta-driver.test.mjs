@@ -1032,6 +1032,33 @@ test('collectSyncHealth: 按事件类型计数；载体缺失 ⇒ 全零而非�
   }
 });
 
+// gap-develop-sync-reset-hard-destroys-third-party-project-tree：终局解新增了一个【终止态——拒绝】
+// （被丢弃的提交不可弃 ⇒ 不 reset）。它必须进聚合面：拒绝事件后面还跟着一条双向同步汇总事件 ⇒
+// lastEvent 读到的是汇总而不是拒绝 ⇒ ⛔ 不单独计数则该状态在读数里【既不入桶也不是最后事件】，
+// 与「一切正常」同形（硬规则 3b；同 collectSyncHealth 上方 semanticConflict 已记过一次的错）。
+test('collectSyncHealth: take-develop-refused 必须单独计数（⛔ 不入桶 ⇒ 该终止态在读数里不可见）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-sync-refused-'));
+  try {
+    fs.mkdirSync(path.join(tmp, '.quay'), { recursive: true });
+    const lines = [
+      { ts: '2026-09-11T06:00:00Z', event: 'doc-develop-sync-semantic-take-develop-refused', reason: 'non-doc-paths' },
+      // 双向同步汇总事件【在拒绝之后】写 ⇒ lastEvent 读不到拒绝态（这正是必须单独计数的原因）。
+      { ts: '2026-09-11T06:00:01Z', event: 'doc-develop-sync-bidirectional' },
+    ].map((x) => JSON.stringify(x)).join('\n');
+    fs.writeFileSync(path.join(tmp, '.quay', 'doc-develop-sync.jsonl'), lines + '\n');
+
+    const h = collectSyncHealth(tmp);
+    assert.equal(h.semanticTakeDevelopRefused, 1, '拒绝态必须入桶');
+    assert.equal(h.lastEvent, 'doc-develop-sync-bidirectional', '最后事件被汇总事件占据（故 lastEvent 不足以观测拒绝）');
+    // 取假：没有该事件时计数为 0（⛔ 恒 1 的计数器不是测量）。
+    fs.writeFileSync(path.join(tmp, '.quay', 'doc-develop-sync.jsonl'),
+      JSON.stringify({ ts: '2026-09-11T06:00:02Z', event: 'doc-develop-sync-ff-synced' }) + '\n');
+    assert.equal(collectSyncHealth(tmp).semanticTakeDevelopRefused, 0, '无拒绝事件 ⇒ 0（⛔ 硬编码 ⇒ 假）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('collectDriverReadings: 覆盖全部注册 kind；读不出时刻 ⇒ staleSecs=null（⛔ 不填 0 冒充刚刚）', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-driver-drv-'));
   try {
