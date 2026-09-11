@@ -1,7 +1,7 @@
 ---
 id: gap-ac244-freshness-subject-set-mechanically-derived
 title: AC-244：AC-214 的新鲜度主体集合改为机械推导——接线 AC-232/AC-238，新增载体型 AC 不得再静默逃出
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
