@@ -10,6 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -205,5 +206,137 @@ test("main: EMPTY manifest → exit 1 (HARD FAIL, not OK); --allow-empty → exi
     assert.equal(await main(["node", "s", empty, "--allow-empty"]), 0, "--allow-empty waives the empty-set guard");
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+// ── BASELINE-MISMATCH: a foreign landing baseline is a DISTINCT cause ───────────────────────────
+// gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing. Measured 2026-09-11: a
+// project whose `develop` was an ancient fork of `main` made a CORRECTLY-implemented task report
+// "ANTI-DRIFT HARD FAIL: 1566 violation(s)" — the diff against a foreign baseline is the mainline's
+// divergence, not the task's work, so no `## Touches` can satisfy it and the old text blamed the
+// task. The cause is now a distinct verdict with a distinct exit code.
+//
+// FALSIFIABILITY: drop the `baseline.state === "divergent"` branch from runTaskDriver and the first
+// two tests below fail (exit becomes 1 with a violation count).
+
+function adGit(cwd, args) {
+  return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
+}
+function adCommit(cwd, msg) {
+  adGit(cwd, ["add", "-A"]);
+  adGit(cwd, ["commit", "-q", "-m", msg]);
+}
+function adRepo() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "antidrift-baseline-"));
+  adGit(dir, ["init", "-q", "-b", "main"]);
+  adGit(dir, ["config", "user.name", "ad-test"]);
+  adGit(dir, ["config", "user.email", "ad@example.com"]);
+  return dir;
+}
+/** Shape ②: mainline `main`; `develop` forked 30 commits back and never merged forward. */
+function foreignDevelopRepo() {
+  const dir = adRepo();
+  for (let i = 1; i <= 40; i++) {
+    fs.writeFileSync(path.join(dir, `m${i}.txt`), `${i}\n`);
+    adCommit(dir, `mainline commit ${i}`);
+  }
+  adGit(dir, ["checkout", "-q", "-b", "develop", "main~30"]);
+  fs.writeFileSync(path.join(dir, "legacy.txt"), "ancient\n");
+  adCommit(dir, "ancient develop work");
+  adGit(dir, ["checkout", "-q", "-b", "task/T-1", "main"]);
+  fs.mkdirSync(path.join(dir, "src"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "src", "feature.txt"), "feature\n");
+  fs.writeFileSync(path.join(dir, "tasks", "T-1.md"), "## Touches\n\n- src/feature.txt\n- tasks/T-1.md\n");
+  adCommit(dir, "implement feature");
+  // the fan-in's step 1: merge the landing baseline into the task worktree
+  try { adGit(dir, ["merge", "--no-edit", "develop"]); } catch { /* conflict: still a valid fixture */ }
+  return dir;
+}
+/** Shape ①: `develop` continues the default branch — the shipped behavior must be unchanged. */
+function quayShapedRepo() {
+  const dir = adRepo();
+  adGit(dir, ["branch", "-M", "master"]);
+  fs.mkdirSync(path.join(dir, "src"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "src", "base.txt"), "base\n");
+  adCommit(dir, "base");
+  adGit(dir, ["checkout", "-q", "-b", "develop"]);
+  adGit(dir, ["checkout", "-q", "-b", "task/T-1"]);
+  fs.writeFileSync(path.join(dir, "src", "feature.txt"), "feature\n");
+  fs.writeFileSync(path.join(dir, "tasks", "T-1.md"), "## Touches\n\n- src/feature.txt\n- tasks/T-1.md\n");
+  adCommit(dir, "implement feature");
+  adGit(dir, ["merge", "--no-edit", "develop"]);
+  return dir;
+}
+
+test("BASELINE-MISMATCH: a foreign `develop` is reported as a baseline defect, not a violation count", async () => {
+  const dir = foreignDevelopRepo();
+  try {
+    // premise: the diff quay would compute really is the mainline's divergence, not the task's work
+    const againstMain = adGit(dir, ["diff", "--name-only", "main...HEAD"]).split("\n").filter(Boolean).length;
+    const againstDevelop = adGit(dir, ["diff", "--name-only", "develop...HEAD"]).split("\n").filter(Boolean).length;
+    assert.ok(againstDevelop > againstMain + 20, `premise: develop diff (${againstDevelop}) dwarfs the task's own work (${againstMain})`);
+    assert.equal(await main(["node", "s", "--task", "T-1", "--worktree", dir, "--merge-target", "develop"]), 3, "distinct exit code for a distinct cause");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("BASELINE-MISMATCH: the message names the baseline and the remedy, and does NOT blame the task", async () => {
+  const dir = foreignDevelopRepo();
+  const chunks = [];
+  const write = process.stdout.write.bind(process.stdout);
+  process.stdout.write = (c) => { chunks.push(String(c)); return true; };
+  let code;
+  try {
+    code = await main(["node", "s", "--task", "T-1", "--worktree", dir, "--merge-target", "develop"]);
+  } finally {
+    process.stdout.write = write;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  const out = chunks.join("");
+  assert.equal(code, 3);
+  assert.match(out, /BASELINE-MISMATCH/);
+  assert.match(out, /not a continuation of the project's default branch 'main'/);
+  assert.match(out, /adopt-branch-model/, "the remedy must be actionable");
+  assert.doesNotMatch(out, /violation/, "the misleading violation count must be GONE, not appended to");
+});
+
+test("shape ①: a `develop` that continues the default branch judges normally (behavior unchanged)", async () => {
+  const dir = quayShapedRepo();
+  try {
+    assert.equal(await main(["node", "s", "--task", "T-1", "--worktree", dir, "--merge-target", "develop"]), 0, "a clean task on a healthy baseline still passes");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("shape ① control: the SAME repo with an out-of-declared write still HARD FAILS (exit 1)", async () => {
+  const dir = quayShapedRepo();
+  try {
+    fs.writeFileSync(path.join(dir, "stray.txt"), "stray\n");
+    adCommit(dir, "undeclared write");
+    assert.equal(await main(["node", "s", "--task", "T-1", "--worktree", dir, "--merge-target", "develop"]), 1, "the guardrail must still bite — the baseline check must not mask real drift");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("unresolvable default branch ⇒ NO verdict (unreadable is not divergent)", async () => {
+  // Hard rule 3b: "could not tell" must not be reported as "bad". A repo with no conventional
+  // default branch and a worktree-style HEAD proceeds to the NORMAL judgment.
+  const dir = adRepo();
+  try {
+    adGit(dir, ["branch", "-M", "trunk"]);
+    fs.mkdirSync(path.join(dir, "src"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "src", "feature.txt"), "feature\n");
+    fs.writeFileSync(path.join(dir, "tasks", "T-1.md"), "## Touches\n\n- src/feature.txt\n- tasks/T-1.md\n");
+    adCommit(dir, "base");
+    adGit(dir, ["checkout", "-q", "-b", "develop"]);
+    assert.equal(await main(["node", "s", "--task", "T-1", "--worktree", dir, "--merge-target", "develop"]), 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
