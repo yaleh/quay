@@ -1,0 +1,262 @@
+{
+  "count": 33,
+  "inDomain": 92,
+  "entries": [
+    {
+      "id": "AC-157",
+      "file": "AC-157-archive-mechanism-exclusion-wiring.md",
+      "bareLines": [
+        1,
+        3,
+        4
+      ]
+    },
+    {
+      "id": "AC-158",
+      "file": "AC-158-execute-archive-batch-one.md",
+      "bareLines": [
+        6,
+        8,
+        9
+      ]
+    },
+    {
+      "id": "AC-160",
+      "file": "AC-160-runtime-usage-inventory-blind-spot.md",
+      "bareLines": [
+        1
+      ]
+    },
+    {
+      "id": "AC-161",
+      "file": "AC-161-user-level-marketplace-only.md",
+      "bareLines": [
+        5,
+        6,
+        7
+      ]
+    },
+    {
+      "id": "AC-162",
+      "file": "AC-162-register-plugin-no-user-enabled.md",
+      "bareLines": [
+        1
+      ]
+    },
+    {
+      "id": "AC-163",
+      "file": "AC-163-allowed-tools-plugin-prefix.md",
+      "bareLines": [
+        1
+      ]
+    },
+    {
+      "id": "AC-164",
+      "file": "AC-164-plugin-namespace-takes-traffic.md",
+      "bareLines": [
+        1,
+        3,
+        6,
+        10
+      ]
+    },
+    {
+      "id": "AC-165",
+      "file": "AC-165-remove-root-mcp-json.md",
+      "bareLines": [
+        3,
+        4
+      ]
+    },
+    {
+      "id": "AC-166",
+      "file": "AC-166-second-copy-retirement.md",
+      "bareLines": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "id": "AC-167",
+      "file": "AC-167-baime-executor-removal.md",
+      "bareLines": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "id": "AC-168",
+      "file": "AC-168-quay-init-contract-closed-set.md",
+      "bareLines": [
+        1
+      ]
+    },
+    {
+      "id": "AC-169",
+      "file": "AC-169-delivery-surface-doc-sync.md",
+      "bareLines": [
+        2,
+        3
+      ]
+    },
+    {
+      "id": "AC-179",
+      "file": "AC-179-web-card-and-cli.md",
+      "bareLines": [
+        8
+      ]
+    },
+    {
+      "id": "AC-185",
+      "file": "AC-185-g9-driver-agent-abi.md",
+      "bareLines": [
+        4
+      ]
+    },
+    {
+      "id": "AC-189",
+      "file": "AC-189-task-goal-spec.md",
+      "bareLines": [
+        3,
+        4,
+        5
+      ]
+    },
+    {
+      "id": "AC-190",
+      "file": "AC-190-task-ac.md",
+      "bareLines": [
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "id": "AC-191",
+      "file": "AC-191-goal-ac-evidence-at.md",
+      "bareLines": [
+        10
+      ]
+    },
+    {
+      "id": "AC-192",
+      "file": "AC-192-ff-retry-counter-per-cycle.md",
+      "bareLines": [
+        28
+      ]
+    },
+    {
+      "id": "AC-194",
+      "file": "AC-194-no-direct-to-develop-bypass.md",
+      "bareLines": [
+        9
+      ]
+    },
+    {
+      "id": "AC-196",
+      "file": "AC-196-not-in-git-unchanged-boolean-0.md",
+      "bareLines": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "id": "AC-198",
+      "file": "AC-198-root-git-rev-parse-show-toplevel-path-dirname-kind-dir-git.md",
+      "bareLines": [
+        1,
+        2
+      ]
+    },
+    {
+      "id": "AC-199",
+      "file": "AC-199-test-group-suite.md",
+      "bareLines": [
+        2,
+        3
+      ]
+    },
+    {
+      "id": "AC-200",
+      "file": "AC-200-goal-文件里的存储-evidence-块残留清零-spec-8-要求-原五条-ac-未覆盖.md",
+      "bareLines": [
+        1
+      ]
+    },
+    {
+      "id": "AC-201",
+      "file": "AC-201-现-build-产物完整且可溯源-产物记录锚在-develop-祖先-commit-tgz-sha256.md",
+      "bareLines": [
+        11
+      ]
+    },
+    {
+      "id": "AC-203",
+      "file": "AC-203-driver-在无-plugin-的第三方项目里真活-判据读载体-不读-start-退出码.md",
+      "bareLines": [
+        17
+      ]
+    },
+    {
+      "id": "AC-204",
+      "file": "AC-204-quay-init-只写启用不写实现-禁列补-mcp-commands-hooks-且成对判定.md",
+      "bareLines": [
+        21
+      ]
+    },
+    {
+      "id": "AC-205",
+      "file": "AC-205-会话投递通道在项目生命周期内持续可用-目标会话-transcript-外部可核.md",
+      "bareLines": [
+        15
+      ]
+    },
+    {
+      "id": "AC-206",
+      "file": "AC-206-目标项目具备-goals-tasks-双载体-goals-与-tasks-一同由-quay-init-创建.md",
+      "bareLines": [
+        27
+      ]
+    },
+    {
+      "id": "AC-207",
+      "file": "AC-207-端到端-目标项目自己的-drivers-驱动出真实开发提交且任务翻-done.md",
+      "bareLines": [
+        21
+      ]
+    },
+    {
+      "id": "AC-217",
+      "file": "AC-217-每个活跃-goal-至少有一条-ac-活跃目标无退出条件不可判定达成.md",
+      "bareLines": [
+        1
+      ]
+    },
+    {
+      "id": "AC-232",
+      "file": "AC-232-下游-goal-载体必须能写-能读回-ac-206-只断言目录建了与可读-写入失败被注为-不阻塞-从未追查.md",
+      "bareLines": [
+        17
+      ]
+    },
+    {
+      "id": "AC-234",
+      "file": "AC-234-web-指向第三方项目时显示其真实载体与过程记录-http-200-不算证据-退出条件②.md",
+      "bareLines": [
+        17
+      ]
+    },
+    {
+      "id": "AC-238",
+      "file": "AC-238-升级路径-带旧版-vendored-runtime-的真实第三方项目-meta-cc-副本-被当前-develop-ti.md",
+      "bareLines": [
+        21
+      ]
+    }
+  ],
+  "generatedAt": "2026-09-11T06:24:46.389Z"
+}

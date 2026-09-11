@@ -611,6 +611,19 @@ run_static_checks() {
   # mutation case 注入缩水即红钉住（硬规则 3/4）。
   # @static-tier full
   run_checker "host-repo-surface-ratchet" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/host-repo-surface-ratchet.ts" --root "${repo_root}"
+  echo "== criterion failure attribution check (GOAL-009 AC-241, gap-goal-criteria-bare-failing-exit-unattributable) =="
+  # 判据失败出口的可归因性棘轮：机械枚举 goals/AC-*.md 中 status ∈ {active, achieved}（I5 复验域，
+  # achieved 的 AC 转红同样写台账）且有 criterion 的记录，逐行报出「失败退出不写成因」的条数——
+  # 失败退出 = 非注释行的 exit 1 / sys.exit(1)（含 sys.exit(1 if x else 0)）；不写成因 = 同一行无
+  # stderr / >&2 / console.error。⛔ 注释里的提及不算命中（硬规则 2，按位置判定）；字符串【不】屏蔽
+  # （shell 判据里 bash -c "exit 1" 真的会 exit 1，屏蔽字符串会制造假阴性）。
+  # 基线锚在 --capture 实测值（docs/analysis/criterion-failure-attribution.baseline.json），只许降不许升
+  # ——修好一条即降，判据新增/修改出裸失败退出即升 ⇒ 红。⛔ 不以归零为目标（硬规则 12：别用未测量的
+  # 残差挡住可达目标）。三态可区分：基线缺失/读不懂 goals/ ⇒ exit 3 NOT-EVALUATED（硬规则 3b）。
+  # 负控制由 mutation case 注入一条裸失败退出即红钉住（硬规则 3/4）。
+  # @static-tier change
+  # @static-object goals/ plugin/scripts/criterion-failure-attribution-check.ts docs/analysis/criterion-failure-attribution.baseline.json plugin/scripts/checker-mutation-cases/criterion-failure-attribution-check.sh plugin/test/criterion-failure-attribution-check.test.mjs
+  run_checker "criterion-failure-attribution-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/criterion-failure-attribution-check.ts" --root "${repo_root}"
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait
