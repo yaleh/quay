@@ -354,3 +354,97 @@ test("AC4 — --verify-only (no build, no tgz sha256) does NOT append an AC-201 
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// ── AC5 (gap-ac203-record-lacks-build-sha-makes-ac214-permanently-unsatisfiable) ─────────────
+//
+// AC-214 (goals/AC-214-*.md) is a freshness meta-criterion over four carrier records. For each ac in
+// its NEED list it keeps the NEWEST record and reads a top-level `build_sha` (or `commit`):
+//     sha = r.get("build_sha") or r.get("commit")
+//     if sha and (...) : newest[a] = ...
+//     missing = [a for a in NEED if a not in newest]   ⇒ exit 1
+// ⇒ a record WITHOUT that anchor is not "old evidence", it is NO evidence. AC-203's write point was a
+// bare printf that emitted no build_sha ⇒ AC-214 was structurally unsatisfiable once AC-203 produced.
+//
+// This is the DoD's mechanical guard (⛔ 不是人工清点一次): NEED is PARSED from the AC-214 criterion
+// source rather than copied here (硬规则 4c — a copy drifts), and for every enumerated ac the script's
+// record-PRODUCING statements are collected by POSITION (a pure-comment line never counts, 硬规则 2;
+// a selfcheck `grep -q '"ac":"…"'` assertion is not a producer) and each must carry the anchor.
+//
+// The two anchor forms accepted are exactly the two that exist in this file:
+//   (a) the shared helper `ac89_append_goal009` — injects top-level build_sha/ts (the single choke
+//       point; AC-203/205/207/232 go through it), or
+//   (b) an explicit top-level `"build_sha":` field in the record-producing printf (AC-201).
+// ⛔ Adding a third, unanchored write point for any NEED ac turns this test red — which is the point.
+
+// logicalStatements(): join backslash-continued physical lines into one statement, so a printf whose
+// format string and its `>> "$AC89"` redirection sit on different physical lines is judged as a whole.
+function logicalStatements(src) {
+  const out = [];
+  let cur = "";
+  for (const raw of src.split("\n")) {
+    const line = raw.replace(/\s+$/, "");
+    const cont = line.endsWith("\\");
+    const piece = cont ? line.slice(0, -1) : line;
+    cur = cur ? `${cur} ${piece.trim()}` : piece;
+    if (!cont) { out.push(cur); cur = ""; }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+// parseAc214Need(): the NEED list is the criterion's own source of truth — read it, never restate it.
+// A parse failure is reported as NOT-EVALUATED (a distinct outcome), never as a silent pass (硬规则 3b).
+function parseAc214Need(repoRoot) {
+  const dir = path.join(repoRoot, "goals");
+  const found = fs.existsSync(dir)
+    ? fs.readdirSync(dir).filter((n) => /^AC-214-.*\.md$/.test(n))
+    : [];
+  if (found.length !== 1) {
+    return { ok: false, reason: `expected exactly one goals/AC-214-*.md, found ${found.length}` };
+  }
+  const src = fs.readFileSync(path.join(dir, found[0]), "utf8");
+  const m = src.match(/NEED\s*=\s*\[([\s\S]*?)\]/);
+  if (!m) return { ok: false, reason: "AC-214 criterion has no `NEED = [...]` list" };
+  const ids = [...m[1].matchAll(/"(GOAL-009-AC-\d+)"/g)].map((x) => x[1]);
+  if (ids.length === 0) return { ok: false, reason: "NEED list parsed but enumerated no ac ids" };
+  return { ok: true, ids };
+}
+
+test("AC5 — every AC-214 NEED ac's write point carries a freshness anchor (mechanical enumeration)", () => {
+  const need = parseAc214Need(REPO_ROOT);
+  assert.ok(need.ok,
+    `AC-214's NEED must be mechanically parseable — an unparsed NEED is NOT-EVALUATED, not a pass (硬规则 3b): ${need.reason}`);
+  assert.ok(need.ids.length >= 2,
+    `NEED must enumerate the carrier acs (parsed ${need.ids.length}: ${need.ids.join(",")})`);
+
+  const stmts = logicalStatements(fs.readFileSync(SCRIPT, "utf8"));
+  // A record PRODUCER appends to the carrier: either the shared anchor helper, or a printf redirected
+  // into the AC89 carrier. A selfcheck assertion (`grep -q '"ac":"…"'`) matches the ac field but is
+  // not a producer, so it is excluded by position — not by a keyword.
+  const isProducer = (s) =>
+    s.includes("ac89_append_goal009") || />>\s*"\$\{?[Aa][Cc]89\}?"/.test(s);
+  // The anchor is a TOP-LEVEL build_sha on the produced record: the helper adds it (form a), or the
+  // printf spells it (form b).
+  const isAnchored = (s) => s.includes("ac89_append_goal009") || /"build_sha"\s*:/.test(s);
+
+  const problems = [];
+  for (const id of need.ids) {
+    const re = new RegExp(`ac":"${id}"`);   // backslashes stripped below (helper fragments are escaped)
+    const producers = stmts.filter((s) =>
+      !/^\s*#/.test(s) && re.test(s.replace(/\\/g, "")) && isProducer(s));
+    if (producers.length === 0) {
+      problems.push(`${id}: no record-producing write point found in ${path.relative(REPO_ROOT, SCRIPT)} ` +
+        `(cannot assert its anchor ⇒ NOT-EVALUATED, not a pass)`);
+      continue;
+    }
+    for (const p of producers) {
+      if (!isAnchored(p)) {
+        problems.push(`${id}: write point lacks a top-level build_sha anchor ⇒ AC-214 reads it as ` +
+          `NO evidence (exit 1): ${p.trim().slice(0, 140)}`);
+      }
+    }
+  }
+  assert.deepEqual(problems, [],
+    "every AC-214 NEED ac's write point must carry a top-level build_sha (via ac89_append_goal009 or an " +
+    `explicit field) — otherwise that ac is structurally unsatisfiable in AC-214:\n  ${problems.join("\n  ")}`);
+});
