@@ -96,6 +96,11 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
     "AC-203 record: valid record written with has_plugin_dir=false literal + driver_alive=1 + carrier_records>0");
   assert.match(r.stdout, /ac203-record\(dead-driver\) refused=1/,
     "AC-203 record: a dead-driver (driver_alive=0) record is refused — the criterion can take false");
+  // gap-cross-host-evidence-run-incomplete-… AC5 真因: probe_ac203_driver_status 的 node 曾把
+  // alive=/recs= 打在同一行 ⇒ sed ^recs= 永不命中、^alive= 抓到 "1 recs=2" ⇒ AC-203 记录结构上写不出。
+  // 此控制钉住两字段分两行解析（feed {"driver_alive":1,"carrier_records":2} ⇒ alive=1 recs=2）。
+  assert.match(r.stdout, /ac203-status-parse\(alive\+recs\) alive=1 recs=2/,
+    "AC-203 status parse: alive=1 recs=2 parsed from separate lines (single-line bug ⇒ '1 recs=2'/ -1)");
   // AC-201 controls (gap-ac201-productization-verification-build-sha-tgz-sha256-record):
   // the --selfcheck must ALSO exercise the AC-201 record append positive/negative controls — positive
   // injects a 40-hex BUILD_SHA + 64-hex SHA256_QUAY and asserts a top-level ac=GOAL-009-AC-201 record

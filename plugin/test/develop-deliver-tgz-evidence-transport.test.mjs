@@ -54,3 +54,21 @@ test("② empty/missing evidence → distinguishable NOT-EVALUATED, not success 
   assert.match(r.stdout, /negative carrier lines=0/,
     "the target carrier must be unchanged (0 lines) when evidence is absent/empty");
 });
+
+// ③④ (AC7/AC8, gap-cross-host-evidence-run-incomplete-…): the completeness check must make a PARTIAL
+// run (2 of 6 expected records returned) distinguishable from a COMPLETE run (all 6) — a partial
+// transport previously reported `evidence_lines=4` and exited 0 (与完全成功同形, 硬规则 3b 同族).
+test("③ partial evidence (2/6 expected records) → PARTIAL exit + missing ac list (both directions)", () => {
+  const r = run(["--selfcheck-evidence-completeness"]);
+  assert.equal(r.status, 0, `--selfcheck-evidence-completeness must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /selfcheck-evidence-completeness: PASS/,
+    "the completeness selfcheck must report PASS");
+  assert.match(r.stdout, /partial → rc=2 .*PARTIAL present=2 missing=4/,
+    "2/6 expected records ⇒ PARTIAL (exit 2) with present=2 missing=4");
+  assert.match(r.stdout, /missing=4 list=GOAL-009-AC-203,GOAL-009-AC-205,GOAL-009-AC-232,GOAL-015-AC-234/,
+    "the PARTIAL line must enumerate exactly the 4 missing ac kinds");
+  assert.match(r.stdout, /complete → rc=0 .*COMPLETE present=6/,
+    "all 6 expected records ⇒ COMPLETE (exit 0)");
+  assert.match(r.stdout, /all-missing → rc=1/,
+    "no expected record present ⇒ NOT-EVALUATED (exit 1, distinct from PARTIAL)");
+});

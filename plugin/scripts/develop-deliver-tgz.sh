@@ -95,6 +95,7 @@ verify_coldstart=0
 ac207_e2e=0       # 1 = also run the GOAL-009-AC-207 end-to-end step on each host (expensive: worker-driver spawns a real worker)
 selfcheck_evidence=0
 selfcheck_evidence_scenario="both"
+selfcheck_evidence_completeness=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --root) repo_root="$2"; shift 2 ;;
@@ -109,6 +110,7 @@ while [ $# -gt 0 ]; do
       selfcheck_evidence=1
       case "${2:-}" in positive|negative|both) selfcheck_evidence_scenario="$2"; shift 2 ;; *) shift ;; esac
       ;;
+    --selfcheck-evidence-completeness) selfcheck_evidence_completeness=1; shift ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -337,6 +339,63 @@ PY
   return 0
 }
 
+# ── check_evidence_completeness <evidence-file> "<expected-ac-list>" ───────────────────────────
+# Plan 5 of gap-cross-host-evidence-run-incomplete-…: 声明该次运行【预期】产出的 ac 集合，与实际回传的
+# 集合求差，缺失项逐条打印。此前「一次只回传 2 种记录」被当作成功（evidence_lines=4）——部分产出与
+# 完全成功同形（硬规则 3b 同族）。三个可区分取值：
+#   OK (exit 0)          —— expected 全在 present 里（完整）。
+#   NOT-EVALUATED (exit 1) —— evidence 缺/空/零行，或 present∩expected 为空（全缺，与「没证据」同判）。
+#   PARTIAL (exit 2)     —— 部分缺（present∩expected 非空但 missing 非空），逐条打印缺失 ac。
+# 入参 $2 = 空格分隔的预期 ac 列表（如 "GOAL-009-AC-203 GOAL-009-AC-204 …"）。expected 为空 ⇒ 跳过（exit 0）。
+check_evidence_completeness() {
+  local evidence="$1" expected="$2" result pyrc
+  [ -n "${expected}" ] || { echo "OK completeness skipped (no expected ac set declared)"; return 0; }
+  if [ ! -f "${evidence}" ] || [ ! -r "${evidence}" ]; then
+    echo "NOT-EVALUATED evidence-file-missing-or-unreadable path=${evidence}"
+    return 1
+  fi
+  if [ "$(grep -c '.' "${evidence}" 2>/dev/null || true)" -eq 0 ]; then
+    echo "NOT-EVALUATED evidence-file-zero-lines path=${evidence}"
+    return 1
+  fi
+  result="$(python3 - "${evidence}" "${expected}" <<'PY'
+import json, sys
+evidence, expected = sys.argv[1], sys.argv[2].split()
+present = set()
+with open(evidence, encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            r = json.loads(line)
+        except Exception:
+            continue
+        a = r.get("ac", "")
+        if a:
+            present.add(a)
+exp = set(expected)
+have = present & exp
+if not have:
+    print("ALL-MISSING present=%d" % len(present))
+    sys.exit(3)
+missing = sorted(exp - present)
+if missing:
+    print("PARTIAL present=%d missing=%d list=%s" % (len(have), len(missing), ",".join(missing)))
+    sys.exit(2)
+print("COMPLETE present=%d" % len(have))
+sys.exit(0)
+PY
+)"
+  pyrc=$?
+  echo "develop-deliver: evidence-completeness ${result}"
+  case "$pyrc" in
+    0) return 0 ;;
+    2) return 2 ;;
+    *) return 1 ;;
+  esac
+}
+
 # ── selfcheck_evidence [positive|negative|both] — hermetic controls of the transport fn ──────
 # AC5 of gap-third-party-evidence-…: ① a fixture evidence file carrying GOAL-009-AC-* lines appends
 # into the target carrier and a repeat call appends 0 (idempotent) ② a missing / empty evidence file
@@ -392,6 +451,69 @@ fi
 
 if [ "${selfcheck_evidence}" -eq 1 ]; then
   selfcheck_evidence "${selfcheck_evidence_scenario}"
+  exit $?
+fi
+
+# ── selfcheck_evidence_completeness — hermetic controls of check_evidence_completeness (AC7/AC8) ──
+# 两个方向：① 「预期 6 种、实际 2 种」⇒ PARTIAL（exit 2）且逐条列出 4 个缺失 ac；② 全产出 ⇒ COMPLETE
+# （exit 0）。另含全缺 ⇒ NOT-EVALUATED（exit 1）。offline：temp dir + python3，无 build/scp/ssh。
+selfcheck_evidence_completeness() {
+  local tmp rc=0 ev partial_out complete_out rc_partial rc_complete rc_allmissing
+  local expected="GOAL-009-AC-203 GOAL-009-AC-204 GOAL-009-AC-205 GOAL-009-AC-206 GOAL-009-AC-232 GOAL-015-AC-234"
+  tmp="$(mktemp -d 2>/dev/null)" || { echo "selfcheck-evidence-completeness: FAIL — cannot create temp dir" >&2; return 1; }
+
+  # ① PARTIAL：evidence 只含 2/6 种（AC-204、AC-206）⇒ exit 2 且逐条列出 4 个缺失。
+  ev="${tmp}/evidence-partial.jsonl"
+  cat > "${ev}" <<'EVID'
+{"ts":"2026-09-10T00:00:00Z","ac":"GOAL-009-AC-204","host":"B","project_root":"/tmp/x","forbidden_count":0,"enable_declared":true}
+{"ts":"2026-09-10T00:00:00Z","ac":"GOAL-009-AC-206","host":"B","project_root":"/tmp/x","goals_dir_created":true,"tasks_dir_created":true,"goal_store_readable":true,"task_store_readable":true}
+EVID
+  set +e
+  partial_out="$(check_evidence_completeness "${ev}" "${expected}" 2>&1)"
+  rc_partial=$?
+  set -e
+  echo "selfcheck-evidence-completeness: partial → rc=${rc_partial} ${partial_out}"
+  [ "${rc_partial}" = "2" ] || { echo "selfcheck-evidence-completeness: FAIL — 2/6 预期种应 exit 2 (PARTIAL), got ${rc_partial}" >&2; rc=1; }
+  printf '%s' "${partial_out}" | grep -q 'list=' && printf '%s' "${partial_out}" | grep -q 'missing=4' || { echo "selfcheck-evidence-completeness: FAIL — PARTIAL must print missing=4 + list" >&2; rc=1; }
+
+  # ② COMPLETE：evidence 含全 6 种 ⇒ exit 0。
+  ev="${tmp}/evidence-complete.jsonl"
+  cat > "${ev}" <<'EVID'
+{"ts":"2026-09-10T00:00:00Z","ac":"GOAL-009-AC-203","host":"B","project_root":"/tmp/x","has_plugin_dir":false,"driver_alive":1,"carrier_records":3}
+{"ts":"2026-09-10T00:00:00Z","ac":"GOAL-009-AC-204","host":"B","project_root":"/tmp/x","forbidden_count":0,"enable_declared":true}
+{"ts":"2026-09-10T00:00:00Z","ac":"GOAL-009-AC-205","host":"B","project_root":"/tmp/x","shipped_from_installed_artifact":true,"transcript_confirmed":true}
+{"ts":"2026-09-10T00:00:00Z","ac":"GOAL-009-AC-206","host":"B","project_root":"/tmp/x","goals_dir_created":true,"tasks_dir_created":true,"goal_store_readable":true,"task_store_readable":true}
+{"ts":"2026-09-10T00:00:00Z","ac":"GOAL-009-AC-232","host":"B","project_root":"/tmp/x","goal_write_ok":true,"goal_read_back_ok":true,"goal_records":1}
+{"ts":"2026-09-10T00:00:00Z","ac":"GOAL-015-AC-234","host":"B","project_root":"/tmp/x","tasks_rendered":1,"goals_rendered":1,"round_records_rendered":1}
+EVID
+  set +e
+  complete_out="$(check_evidence_completeness "${ev}" "${expected}" 2>&1)"
+  rc_complete=$?
+  set -e
+  echo "selfcheck-evidence-completeness: complete → rc=${rc_complete} ${complete_out}"
+  [ "${rc_complete}" = "0" ] || { echo "selfcheck-evidence-completeness: FAIL — 全 6 种应 exit 0 (COMPLETE), got ${rc_complete}" >&2; rc=1; }
+
+  # ③ 全缺（evidence 有非空行但无一预期 ac）⇒ NOT-EVALUATED exit 1。
+  ev="${tmp}/evidence-allmissing.jsonl"
+  printf '%s\n' '{"ts":"2026-09-10T00:00:00Z","ac":"AC88","ok":true}' > "${ev}"
+  set +e
+  check_evidence_completeness "${ev}" "${expected}" >/dev/null 2>&1
+  rc_allmissing=$?
+  set -e
+  echo "selfcheck-evidence-completeness: all-missing → rc=${rc_allmissing} (expect 1 — NOT-EVALUATED, 与「没证据」同判)"
+  [ "${rc_allmissing}" = "1" ] || { echo "selfcheck-evidence-completeness: FAIL — 全缺应 exit 1 (NOT-EVALUATED), got ${rc_allmissing}" >&2; rc=1; }
+
+  rm -rf "${tmp}"
+  if [ "${rc}" -eq 0 ]; then
+    echo "selfcheck-evidence-completeness: PASS (partial 2/6 → PARTIAL exit 2 + missing=4 list; complete 6/6 → exit 0; all-missing → NOT-EVALUATED exit 1)"
+  else
+    echo "selfcheck-evidence-completeness: FAIL" >&2
+  fi
+  return "${rc}"
+}
+
+if [ "${selfcheck_evidence_completeness}" -eq 1 ]; then
+  selfcheck_evidence_completeness
   exit $?
 fi
 
@@ -501,11 +623,16 @@ build_develop_tgz() {
 # file (verify failed before writing / scp-back failed) is NOT-EVALUATED and the run exits non-zero
 # (硬规则 3b — never a silent exit 0 on "no evidence").
 verify_coldstart_mode() {
-  local build_date local_carrier fail hk target remote_script out remote_rc remote_evidence remote_lines evidence_local ac207_extra ac207_path_export
+  local build_date local_carrier fail partial hk target remote_script out remote_rc remote_evidence remote_lines evidence_local ck_rc ac207_extra ac207_path_export
   build_date="$(git -C "${repo_root}" log -1 --format=%cI refs/heads/develop 2>/dev/null || echo "")"
   local_carrier="${repo_root}/.quay/productization-verification.jsonl"
   echo "develop-deliver: --verify-coldstart develop=${develop_tip:0:12} build_date=${build_date} carrier=${local_carrier}"
+  # Plan 5：该次跨机运行预期产出的 GOAL 记录集合（6 种）——与 scp 回的 evidence 求差，部分缺 ⇒ PARTIAL。
+  # ⛔ 不是硬编码的「6」数字：是本次 verify-coldstart 模式【声明要产出】的 ac 种类（AC-204/203/206/232/234
+  # 为默认步骤，AC-205 因 --ac205-session 传入而预期；AC-207 仅 --ac207-e2e 时预期，不在此列）。
+  expected_acs="GOAL-009-AC-203 GOAL-009-AC-204 GOAL-009-AC-205 GOAL-009-AC-206 GOAL-009-AC-232 GOAL-015-AC-234"
   fail=0
+  partial=0
   for hk in ${hosts}; do
     target="${host_target[$hk]:-}"
     if [ -z "${target}" ]; then
@@ -525,6 +652,8 @@ verify_coldstart_mode() {
         "${SCRIPT_DIR}/quay-init-closure-assertion.ts" \
         "${SCRIPT_DIR}/gate-script-base.ts" \
         "${SCRIPT_DIR}/repo-root.ts" \
+        "${SCRIPT_DIR}/runner-state-write.ts" \
+        "${SCRIPT_DIR}/write-json-atomic.ts" \
         "${SCRIPT_DIR}/../../orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md" \
         "${quay_tgz}" "${qn_tgz}" "${target}:~/" >/dev/null 2>&1; then
       echo "develop-deliver: ${hk} (${target}) — scp FAILED (NOT-EVALUATED)"
@@ -566,7 +695,8 @@ bash "\${HOME}/verify-deliver-coldstart.sh" \
   --prefix "\${HOME}/quay-verify-coldstart-${develop_tip:0:8}.npm" \
   --project "quay-verify-coldstart-${develop_tip:0:8}" \
   --root "\${HOME}/quay-verify-coldstart-${develop_tip:0:8}-root" \
-  --worktree-root "\${HOME}/quay-verify-coldstart-${develop_tip:0:8}-worktrees"${ac207_extra}
+  --worktree-root "\${HOME}/quay-verify-coldstart-${develop_tip:0:8}-worktrees" \
+  --ac205-session${ac207_extra}
 RC=\$?
 echo "VERIFY-RC \${RC}"
 if [ -f "\${EV}" ]; then
@@ -581,6 +711,13 @@ REMOTE
     out="$(ssh "${ssh_opts[@]}" "${target}" "bash -s" <<< "${remote_script}" 2>&1)"
     remote_rc=$?
     set -e
+    # 持久化远端 stdout（Plan 4，优先做）：out 落成本地日志并在结果里打印路径——此前只 grep 三个标记
+    # （VERIFY-RC / EVIDENCE-PATH / EVIDENCE-LINES）其余全丢，fail-closed 的步骤（如 AC-232 的 NOTE 行、
+    # AC-203 的 driver_alive 打印行）无从诊断。日志名含 <host>-<tip8> 唯一标识该次运行。
+    remote_log="${repo_root}/.quay/verify-coldstart-remote-${hk}-${develop_tip:0:8}.log"
+    mkdir -p "$(dirname "${remote_log}")"
+    printf '%s\n' "${out}" > "${remote_log}"
+    echo "develop-deliver: ${hk} (${target}) remote stdout persisted → ${remote_log} (${remote_rc:+rc=${remote_rc}})"
     remote_evidence="$(printf '%s\n' "${out}" | grep -oE 'EVIDENCE-PATH .*' | tail -1 | sed 's/^EVIDENCE-PATH //' || echo "")"
     remote_lines="$(printf '%s\n' "${out}" | grep -oE 'EVIDENCE-LINES [0-9]+' | tail -1 | sed 's/^EVIDENCE-LINES //' || echo "")"
     echo "develop-deliver: ${hk} (${target}) remote verify rc=${remote_rc} evidence_lines=${remote_lines:-<none>}"
@@ -604,10 +741,24 @@ REMOTE
       fail=1
       continue
     fi
+    # Plan 5：按 ac 种类核对回传完整性（transport 成功 ≠ 完整——「部分产出与完全成功同形」是硬规则 3b 同族）。
+    check_evidence_completeness "${evidence_local}" "${expected_acs}"
+    ck_rc=$?
+    if [ "${ck_rc}" = "2" ]; then
+      echo "develop-deliver: ${hk} (${target}) — PARTIAL (transport OK but some expected records missing)"
+      partial=1
+    elif [ "${ck_rc}" != "0" ]; then
+      echo "develop-deliver: ${hk} (${target}) — NOT-EVALUATED (all expected records absent from evidence)"
+      fail=1
+    fi
     rm -f "${evidence_local}"
   done
   # clean up the build worktree (both .tgz already scp'd to every host)
   git -C "${repo_root}" worktree remove --force "${wt}" 2>/dev/null || rm -rf "${wt}"
+  if [ "${partial}" -eq 1 ]; then
+    echo "develop-deliver: --verify-coldstart PARTIAL (some hosts transported evidence but are missing expected records — see per-host lines above)" >&2
+    exit 2
+  fi
   if [ "${fail}" -eq 1 ]; then
     echo "develop-deliver: --verify-coldstart PARTIAL FAILURE (some hosts NOT-EVALUATED — no transport for those hosts)" >&2
     exit 1
