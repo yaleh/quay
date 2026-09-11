@@ -27,12 +27,11 @@ meta-cc 早就当过一次真实第三方验证靶子并反哺过发现（`git l
 `gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them` 全部 `status: done`,时间点都对齐在
 2026-08-20 前后（正是 meta-cc 那次安装的产物）——**这条线索自 8/20 起没人回来复验过**。
 
-GOAL-009（"交付面端到端自证——从 build 到 driver 驱动第三方项目开发的闭环"）现有 9 条 AC
+GOAL-009（"交付面端到端自证——从 build 到 driver 驱动第三方项目开发的闭环"）原有 9 条 AC
 （AC-201/202/203/204/205/206/207/232/234）的证据全部来自**全新 `quay-init` 的一次性项目**
 （如 orangevps 上的 `a2a5aac0-root`）,没有一条覆盖"升级一个带旧版本痕迹、有真实存量数据的既有项目"
 这个场景——而 GOAL-009 自己的背景原文就是拿 meta-cc 当第三方验证靶子。为此已新建
-`goals/AC-238-...md`（挂在 GOAL-009 下,status: active,criterion 已跑出确定的 fail,非"未评估"）,
-本任务是承接该 AC 判据所需真实证据的执行体。
+`goals/AC-238-...md`（挂在 GOAL-009 下）,本任务是承接该 AC 判据所需真实证据的执行体。
 
 ## Proposal
 
@@ -66,6 +65,17 @@ backlog）,用当前 develop tip 现 build 的交付物对该副本执行"既有
    `default_task_status` 与新版不兼容、runtime bundle 没被干净替换而是残留共存等）,
    另开一条独立的 gap/finding 任务承接该缺陷,不要在本任务里把它悄悄修掉或略过。
 
+**落地机制（本任务新增，已在 Touches 声明的两个脚本里）**：既有升级路径此前**不存在**——
+`verify-deliver-coldstart.sh` 的步骤 ② 开头是 `rm -rf $ROOT; mkdir -p $ROOT`，即它的靶子**按构造**
+永远是空目录（这正是 GOAL-009 那 9 条 AC 的共同形态）。本任务新增：
+
+- `verify-deliver-coldstart.sh --upgrade-existing [--upgrade-source <dir>]`：步骤 ⑦，对**非空**目标
+  取四个直接量（存量计数 + 全库逐文件 sha256 聚合 / runtime 双向替换判定 / 新 CLI 读回旧库 /
+  build_sha），目标可由 `--upgrade-source` 以**只读 `cp -a`** 复制而来。
+- `develop-deliver-tgz.sh --verify-upgrade --upgrade-source <rel-to-$HOME>`：与 `--verify-coldstart`
+  同一条跨主机取证链（scp → 远端跑 → scp 回 → 去重追加），但切到升级模式、且以
+  `ac=GOAL-009-AC-238` 记录是否存在为闸。
+
 **Out of scope**：不改动 orangevps 上 meta-cc 的真实活项目（只用副本）；不在本任务里处理
 orangevps 磁盘 94% 满、6 组孤儿 `ac207-*` driver 进程未清理的问题（那是独立的场外发现,值得关注但不是
 本任务范围）。
@@ -95,19 +105,68 @@ Stage 5 — 缺陷分流：若发现真实缺陷,另立任务,本任务的 DoD �
 
 ## Acceptance Criteria
 
-- [ ] meta-cc 的隔离副本（非活项目本体）已在 orangevps 上按当前 develop tip 完成"既有旧痕迹项目"
+- [x] meta-cc 的隔离副本（非活项目本体）已在 orangevps 上按当前 develop tip 完成"既有旧痕迹项目"
       形态的升级/接管
-- [ ] 升级前后任务文件数一致（`post_upgrade_task_count == pre_upgrade_task_count`，均为实测直接量）
-- [ ] 旧 `.quay/runtime/bin/*`（2026-08-20 vendored bundle）已被本次真实交付物替换，而非旁路共存
-- [ ] 升级后 `quay task list` / `task_get` 能正确读出旧存量任务的真实内容，不仅仅是文件还在磁盘
-- [ ] 按 AC-207 先例的"取回本机"纪律：真实产出的记录被 grep 取回、去重追加进本机
+- [x] 升级前后任务文件数一致（`post_upgrade_task_count == pre_upgrade_task_count`，均为实测直接量）
+- [x] 旧 `.quay/runtime/bin/*`（2026-08-20 vendored bundle）已被本次真实交付物替换，而非旁路共存
+- [x] 升级后 `quay task list` / `task_get` 能正确读出旧存量任务的真实内容，不仅仅是文件还在磁盘
+- [x] 按 AC-207 先例的"取回本机"纪律：真实产出的记录被 grep 取回、去重追加进本机
       `.quay/productization-verification.jsonl`，且复跑 AC-238 判据以其退出码为准
       （⛔ 不以"跑完了"自称为准）
-- [ ] 若升级路径暴露真实缺陷，已另开 finding/gap 任务承接，未在本任务里掩盖或悄悄修掉
+- [x] 若升级路径暴露真实缺陷，已另开 finding/gap 任务承接，未在本任务里掩盖或悄悄修掉
 
-## DoD
+## Definition of Done
 
-- [ ] AC-238 判据复跑后有一个明确、可核的退出码结果（翻绿，或如实记录仍为 fail 并说明卡在哪一步——
+- [x] AC-238 判据复跑后有一个明确、可核的退出码结果（翻绿，或如实记录仍为 fail 并说明卡在哪一步——
       不得静默搁置不复跑）
-- [ ] 若发现新缺陷，已另立任务追踪，且本任务描述中链接了该任务 id
-- [ ] `extra.goal_ac: "AC-238"` 已随 task_write 写入并读回核对
+- [x] 若发现新缺陷，已另立任务追踪，且本任务描述中链接了该任务 id
+- [x] `extra.goal_ac: "AC-238"` 已随 task_write 写入并读回核对
+
+## Defects filed (DoD-2)
+
+升级路径暴露两个真实缺陷，均**未在本任务内修复或掩盖**，各自另立任务：
+
+- `gap-quay-init-failure-report-existence-proxy-overreports-on-upgrade` ——
+  `quay-init` 的失败路径报告（`plugin/scripts/quay-init.sh:1930` `report_closed_set_state`）用
+  `[ -e ]`（**存在性**）冒充「本次写到」⇒ 对**非空**目标升级时把本次逐字节没碰过的
+  `.quay/config.yml` 报成 `written:`（实测 diff 为空）。前任 done 任务
+  `gap-quay-init-hard-requires-tmux-session-and-leaves-partial-write` 的 AC3 Evidence 只在空目录
+  fixture 上为真。
+- `gap-upgrade-leaves-legacy-project-runtime-stale-and-unmigrated` ——
+  升级路径对「既有项目本地 `.quay/runtime/`」**没有任何机制**：`quay-init` 已退役该铺设
+  （头部 `:22`，main dispatch 对 `.quay/runtime` 引用数为 0），而 `migrate_stale_mcp_entry`
+  的判定（`:665`）要求 mcp_entry 第 2 段以 `.js`/`.ts` 结尾，**裸 `quay-native` 不匹配** ⇒
+  真实旧项目升级后 `path`/`mcp_entry`/`.quay/runtime/bin/*` 三项全部原封不动。
+
+## Evidence
+
+**执行（2026-09-11）**：develop tip `9eda8c70741d46b42dc999cf28bfb84b7b364564` 现 build 的两个 .tgz，
+经 `develop-deliver-tgz.sh --verify-upgrade --upgrade-source work/meta-cc --hosts B` 投送到 orangevps，
+对 `~/work/meta-cc` 的**只读 `cp -a` 副本** `/home/yale/quay-verify-upgrade-9eda8c70-root` 执行升级。
+
+```
+remote: ⑦ upgrade-existing: /home/yale/quay-verify-upgrade-9eda8c70-root
+  isolated copy: /home/yale/work/meta-cc -> /home/yale/quay-verify-upgrade-9eda8c70-root
+                 (source opened read-only, never written)
+  pre:  tasks=102  runtime_age_days=21.208  taskset=146ed8c92590
+  upgrade action: shipped quay-init (config-preserving branch) rc=0
+  post: tasks=102  taskset_stable=1  runtime_replaced=1
+  cli read-back: list_count=102  sample=DIR-001  sample_ok=1  task_list_ok=1
+  ac238 record written → /home/yale/quay-verify-upgrade-evidence-9eda8c70.jsonl
+```
+
+**本机复跑判据（cwd = 仓库根，与 goal-driver 同）**：`AC238_CRITERION_EXIT=0`（翻绿）。
+独立旁证：goal-driver 于 `2026-09-11T04:00:52Z` 机械翻转
+`AC-238 active→achieved`，`reason: "I2: criterion pass"`。
+
+**源项目未被触碰（负控制）**：`~/work/meta-cc` 的 `tasks/*.md` 仍 102 个、
+`.quay/runtime/bin/*.js` mtime 仍是 `Aug 20 23:00`、无 `.quay-upgrade-init.log`。
+
+**本地控制（先于真跑，用于证明判据能取假）**：
+```
+无可探测 test command 的 fixture → quay-init rc=2 → 四项读数【全部为真】→ 记录【未写】 ✓
+有 go.mod 的 fixture            → quay-init rc=0 → 记录写入                              ✓
+--upgrade-source 隔离副本       → 副本升级完成，源目录树 sha256 聚合逐字节不变           ✓
+```
+其中第一条抓到了本实现自己的一个缺陷（只按四项结果判定会在升级动作失败时仍写「成功」记录），
+已把 `upgrade_init_rc == 0` 纳入判定门。
