@@ -2,7 +2,7 @@
 id: gap-meta-rungoalround
 title: goal 机械环把 long-term AC 纳入复验域【读数】却从不重跑它们——gate 作用域补上 inScope（AC-161
   台账尾冻结在裸 fail ⇒ AC-241 恒红）
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
