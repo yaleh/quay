@@ -1,7 +1,7 @@
 ---
 id: AC-234
 title: web 指向第三方项目时显示其真实载体与过程记录——⛔ HTTP 200 不算证据（退出条件②）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-015
 criterion: >-
@@ -56,6 +56,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-09-11T00:21:00.462Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
