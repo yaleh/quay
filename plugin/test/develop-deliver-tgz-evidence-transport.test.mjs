@@ -97,4 +97,10 @@ test("⑤ AC-240 — (host, project_root) pairing is judged, and a missing pair 
   // not-evaluated — unreadable/empty evidence is distinct from PAIR-MISSING (缺值 ≠ 合格)
   assert.match(r.stdout, /empty-evidence → rc=1 NOT-EVALUATED/,
     "empty evidence ⇒ exit 1 (NOT-EVALUATED), distinct from the exit-2 PAIR-MISSING verdict");
+  // AC3 also requires the host to be marked PARTIAL — a function returning 2 that nobody reads is not a
+  // verdict. Positional wiring control: verify_coldstart_mode calls check_e2e_pairing, turns its exit 2
+  // into `partial=1`, and does so under the --ac207-e2e gate (an unconditional pairing check would
+  // report PARTIAL forever, since non-e2e evidence has no AC-207 to pair with).
+  assert.match(r.stdout, /wiring\(in-verify_coldstart_mode\) call=1 partial=1_on_exit2=1 gated_by_ac207_e2e=1/,
+    "the pairing verdict must be WIRED into verify_coldstart_mode (exit 2 ⇒ that host is PARTIAL), gated by --ac207-e2e");
 });

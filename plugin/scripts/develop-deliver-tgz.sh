@@ -532,9 +532,19 @@ EVID
   [ "${rc_neg}" = "2" ] || { echo "selfcheck-e2e-pairing: FAIL — AC-207-only must exit 2 (PAIR-MISSING), got ${rc_neg}" >&2; rc=1; }
   [ "${rc_diff}" = "2" ] || { echo "selfcheck-e2e-pairing: FAIL — different roots must exit 2, got ${rc_diff}" >&2; rc=1; }
   [ "${rc_missing}" = "1" ] || { echo "selfcheck-e2e-pairing: FAIL — empty evidence must exit 1 (NOT-EVALUATED), got ${rc_missing}" >&2; rc=1; }
+  # 接线控制（AC3：负控制须「该 host 记 PARTIAL」而不只是函数返回 2）——按位置断言 verify_coldstart_mode
+  # 函数体里【既调用 check_e2e_pairing，又在它返回 2 时置 partial=1】，且该块受 --ac207-e2e 门控
+  # （⛔ 不是无条件跑：非 e2e 模式没有 AC-207 可配，无条件跑会恒报 PARTIAL）。删掉接线此控制即取假。
+  local vcm_body vcm_call=0 vcm_partial=0 vcm_gated=0
+  vcm_body="$(sed -n '/^verify_coldstart_mode()/,/^}$/p' "$0" 2>/dev/null)"
+  case "$vcm_body" in *'check_e2e_pairing "${evidence_local}"'*) vcm_call=1 ;; esac
+  case "$vcm_body" in *'pair_rc}" = "2"'*'partial=1'*) vcm_partial=1 ;; esac
+  case "$vcm_body" in *'[ "${ac207_e2e}" -eq 1 ]'*'check_e2e_pairing'*) vcm_gated=1 ;; esac
+  if [ "${vcm_call}" != "1" ] || [ "${vcm_partial}" != "1" ] || [ "${vcm_gated}" != "1" ]; then rc=1; fi
+  echo "selfcheck-e2e-pairing: wiring(in-verify_coldstart_mode) call=${vcm_call} partial=1_on_exit2=${vcm_partial} gated_by_ac207_e2e=${vcm_gated} (expect 1/1/1 — 否则函数返回 2 也没人记 PARTIAL)"
   rm -rf "${tmp}"
   if [ "${rc}" -eq 0 ]; then
-    echo "selfcheck-e2e-pairing: PASS (paired ⇒ exit 0; AC-207-only ⇒ exit 2 + E2E_PAIR_MISSING=1; different roots ⇒ exit 2; empty evidence ⇒ exit 1 NOT-EVALUATED)"
+    echo "selfcheck-e2e-pairing: PASS (paired ⇒ exit 0; AC-207-only ⇒ exit 2 + E2E_PAIR_MISSING=1; different roots ⇒ exit 2; empty evidence ⇒ exit 1 NOT-EVALUATED; wiring present in verify_coldstart_mode)"
   else
     echo "selfcheck-e2e-pairing: FAIL" >&2
   fi
