@@ -188,10 +188,14 @@ scoped-gate cache 已记录：
 
     $ node --experimental-strip-types plugin/scripts/worker-driver.ts --write-scoped-gate-cache \
         --task gap-promotion-admission-reads-goal-layer-field \
-        --develop-sha 9fea109f6a4af816e6dff8c33447d1e7662ac2c7 --root /home/yale/work/quay
+        --develop-sha 0fc6d0dbd47db697729b38e3ea04b65ff7077055 --root /home/yale/work/quay
     {"event":"scoped-gate-cache-written","task":"gap-promotion-admission-reads-goal-layer-field",
-     "developSha":"9fea109f6a4af816e6dff8c33447d1e7662ac2c7","cacheFile":"/home/yale/work/quay/.quay/scoped-gate-cache.json"}
+     "developSha":"0fc6d0dbd47db697729b38e3ea04b65ff7077055","cacheFile":"/home/yale/work/quay/.quay/scoped-gate-cache.json"}
     exit=0
+
+⚠️ **该 sha 是「退出时刻」的值，而 develop 在本轮内移动了两次（`9fea109f6` → `2b1aae74e` → `0fc6d0dbd`）**
+——缓存是按 develop sha 取键的，它天然追不上一个持续前进的 develop。若 fan-in 启动时 develop 已再次前进，
+缓存失配的后果只是**多跑一次 scoped 门**（已实测绿），不是失败。故此处只如实记下退出时刻的读数，不追。
 
 ### AC8 — 伴生缺陷（e2e `--count-inputs` 竞态）：修复 + 判别性对照
 
