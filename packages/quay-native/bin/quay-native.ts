@@ -54,14 +54,31 @@ function resolveTasksDir() {
   return path.resolve(process.cwd(), "tasks");
 }
 
+// resolveSiblingDir — resolve a provider-carrier directory (adr/goal/meta) that SHARES a common
+// parent with tasks/ (a repo-root sibling by default). Priority: env override → repo-root sibling
+// → cwd fallback. The cwd fallback is the gap-quay-init-env-only-tasks-dir-goals-adr-meta-land-
+// inside-npm-package defect: when env is unset AND findRepoRoot finds no .quay/config.yml upward
+// (the provider is spawned in the vendored package dir, which has no project marker above it), the
+// silent `path.resolve(process.cwd(), kind)` lands the carrier INSIDE the installed npm package. We
+// keep the fallback (fail-open — a bare quay-native invocation has always resolved cwd-relative and
+// a hard failure would break existing callers) but PRINT where it resolved to (hard rule 3b: a value
+// that "could not be determined correctly" must not look identical to "resolved correctly").
+function resolveSiblingDir(envName, kind) {
+  const envDir = process.env[envName];
+  if (envDir) return path.resolve(envDir);
+  const repoRoot = findRepoRoot(process.cwd());
+  if (repoRoot) return path.resolve(repoRoot, kind);
+  const fallback = path.resolve(process.cwd(), kind);
+  console.error(
+    `quay-native: ${envName} not set and no .quay/config.yml found upward — defaulting ${kind} to ${fallback} (cwd-relative fallback; set ${envName} to point it inside the project)`,
+  );
+  return fallback;
+}
+
 function resolveAdrDir() {
   // ADRs live in a directory that SHARES a common parent with tasks/ (a repo-root
   // sibling by default). Env override QUAY_NATIVE_ADR_DIR, else repo-root ./adr.
-  const envDir = process.env.QUAY_NATIVE_ADR_DIR;
-  if (envDir) return path.resolve(envDir);
-  const repoRoot = findRepoRoot(process.cwd());
-  if (repoRoot) return path.resolve(repoRoot, "adr");
-  return path.resolve(process.cwd(), "adr");
+  return resolveSiblingDir("QUAY_NATIVE_ADR_DIR", "adr");
 }
 
 function resolveDocsDir() {
@@ -81,22 +98,14 @@ function resolveGoalDir() {
   // live in a directory that SHARES a common parent with tasks/ (a repo-root
   // sibling by default, like adr/). Env override QUAY_NATIVE_GOAL_DIR, else
   // repo-root ./goals.
-  const envDir = process.env.QUAY_NATIVE_GOAL_DIR;
-  if (envDir) return path.resolve(envDir);
-  const repoRoot = findRepoRoot(process.cwd());
-  if (repoRoot) return path.resolve(repoRoot, "goals");
-  return path.resolve(process.cwd(), "goals");
+  return resolveSiblingDir("QUAY_NATIVE_GOAL_DIR", "goals");
 }
 
 function resolveMetaDir() {
   // Meta records (gap-meta-records-should-be-a-first-class-store-kind-not-a-task-label) are
   // provider-backed like goals: a repo-root sibling of tasks/ (default ./meta). Env override
   // QUAY_NATIVE_META_DIR, else repo-root ./meta.
-  const envDir = process.env.QUAY_NATIVE_META_DIR;
-  if (envDir) return path.resolve(envDir);
-  const repoRoot = findRepoRoot(process.cwd());
-  if (repoRoot) return path.resolve(repoRoot, "meta");
-  return path.resolve(process.cwd(), "meta");
+  return resolveSiblingDir("QUAY_NATIVE_META_DIR", "meta");
 }
 
 /**

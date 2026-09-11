@@ -3,7 +3,7 @@ id: gap-quay-init-env-only-tasks-dir-goals-adr-meta-land-inside-npm-package
 title: quay-init 只写 QUAY_NATIVE_TASKS_DIR，goals/adr/meta 三个载体退到 cwd 相对解析 ⇒ 落进安装的
   npm 包内（实测：AC-232 写的 goal 躺在 vendor/quay-native/goals/，项目 goals/ 为空，goal list
   读的也是包里那份）
-status: ready
+status: done
 labels:
   - gap
   - defect

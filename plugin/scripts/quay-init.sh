@@ -1977,6 +1977,9 @@ providers:
     mcp_entry: ["node", "${PLUGIN_ROOT}/vendor/quay-native/dist/quay-native.js", "mcp"]
     env:
       QUAY_NATIVE_TASKS_DIR: "${WORKSPACE_ROOT}/tasks"
+      QUAY_NATIVE_GOAL_DIR: "${WORKSPACE_ROOT}/goals"
+      QUAY_NATIVE_ADR_DIR: "${WORKSPACE_ROOT}/adr"
+      QUAY_NATIVE_META_DIR: "${WORKSPACE_ROOT}/meta"
 loop:
   repo_root: ${REPO_ROOT}
   test_command: ${TEST_COMMAND}
