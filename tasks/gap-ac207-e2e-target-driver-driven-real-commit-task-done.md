@@ -1,7 +1,7 @@
 ---
 id: gap-ac207-e2e-target-driver-driven-real-commit-task-done
 title: 端到端：目标项目自己的 *-drivers 驱动出真实开发提交且任务翻 done，落 ac=GOAL-009-AC-207 记录（AC-207）
-status: needs-human
+status: ready
 needs_human_cause: human-adjudication
 labels:
   - gap
@@ -52,7 +52,8 @@ depends_on:
 
 ## Touches
 
-- `tasks/gap-ac207-e2e-target-driver-driven-real-commit-task-done.md`
+- tasks/gap-ac207-e2e-target-driver-driven-real-commit-task-done.md
+- plugin/scripts/develop-deliver-tgz.sh
 - `plugin/scripts/develop-deliver-tgz.sh`
 
 ## Acceptance Criteria
