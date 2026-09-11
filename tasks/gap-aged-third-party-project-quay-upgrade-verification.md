@@ -1,7 +1,7 @@
 ---
 id: gap-aged-third-party-project-quay-upgrade-verification
 title: 升级路径验证：真实旧痕迹第三方项目（meta-cc 副本）能否被当前 develop tip 干净接管
-status: todo
+status: ready
 labels:
   - gap
 parent: null
@@ -74,6 +74,7 @@ orangevps 磁盘 94% 满、6 组孤儿 `ac207-*` driver 进程未清理的问题
 
 - `plugin/scripts/develop-deliver-tgz.sh`
 - `plugin/scripts/verify-deliver-coldstart.sh`
+- `tasks/gap-aged-third-party-project-quay-upgrade-verification.md`
 
 ## Plan
 
