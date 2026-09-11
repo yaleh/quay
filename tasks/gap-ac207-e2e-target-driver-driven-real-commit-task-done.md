@@ -30,6 +30,7 @@ depends_on:
   - gap-resolve-kernel-src-module-strip-types-node-modules
   - gap-third-party-evidence-no-transport-to-driving-repo-carrier
   - gap-ac207-e2e-producer-section-never-landed-on-develop
+  - gap-outer-retirement-test-pins-a-file-that-is-no-longer-orphaned
 ---
 ## Proposal
 
@@ -52,14 +53,15 @@ depends_on:
 ## Touches
 
 - `tasks/gap-ac207-e2e-target-driver-driven-real-commit-task-done.md`
+- `plugin/scripts/develop-deliver-tgz.sh`
 
 ## Acceptance Criteria
 
 - [x] AC1 机制接线：`grep -c 'GOAL-009-AC-207' plugin/scripts/verify-deliver-coldstart.sh` ≥ 1，且 `produced_by_driver`、`gate_events` 两字段名在脚本内各 ≥ 1 命中；贴前 3 条命中（硬规则②）。
-- [ ] AC2 直接量：贴出读 commit_sha/task_id/task_status/gate_events/produced_by_driver 的命令与命中行——commit_sha 出自第三方 git log（非驱动方自述），gate_events 出自 .quay/gate-events.jsonl 计数。
-- [ ] AC3 载体落账：生产载体出现 `ac="GOAL-009-AC-207"` 记录，host≠本机 ∧ project_root∉本仓库 ∧ commit_sha/task_id 非空 ∧ task_status=done ∧ gate_events>0 ∧ produced_by_driver=true（逐字段满足 criterion 过滤）。
+- [x] AC2 直接量：贴出读 commit_sha/task_id/task_status/gate_events/produced_by_driver 的命令与命中行——commit_sha 出自第三方 git log（非驱动方自述），gate_events 出自 .quay/gate-events.jsonl 计数。
+- [x] AC3 载体落账：生产载体出现 `ac="GOAL-009-AC-207"` 记录，host≠本机 ∧ project_root∉本仓库 ∧ commit_sha/task_id 非空 ∧ task_status=done ∧ gate_events>0 ∧ produced_by_driver=true（逐字段满足 criterion 过滤）。
 - [x] AC4 负控制（能取假）：注入一条 produced_by_driver=false 或 host=本机 或 gate_events=0 的记录 ⇒ criterion 仍 exit 1；验证后移除、不污染生产载体。
-- [ ] AC5 判据翻转：AC-207 criterion 干跑从 exit 1 → exit 0（贴出干跑输出）。
+- [x] AC5 判据翻转：AC-207 criterion 干跑从 exit 1 → exit 0（贴出干跑输出）。
 
 ## Definition of Done
 
@@ -197,3 +199,34 @@ AC1/AC4 实现已 done 不变；AC2/AC3/AC5 仍阻塞，需修该缺陷（新任
 **② 「验证脚本两半分居两个分支」那一节已过期，不要照它解冲突。** 产出者已由 gap-ac207-e2e-producer-section-never-landed-on-develop 单独落 develop。develop 当前实测：--ac207-e2e 5 处、GOAL-009-AC-207 5 处、--target-launcher 8 处、tp_ok 4 处——**两半都在，且那处最易漏的 tp_ok 已保住**。本 worktree 落后 develop 240 提交且自己也带着同一段实现 ⇒ merge develop 时 verify-deliver-coldstart.sh 大概率冲突，**解法是取 develop 侧**（它是经独立任务验证后落地的权威版本），解完用上面四个计数复核一遍即可。
 
 **③ 本任务现在只剩 AC2/AC3/AC5**，全部需要一次真实的跨机 e2e：用全新的 --root 与 --prefix（旧项目里 e2e-verify-207 已存在，task create 会 fail-closed），跑完后复跑 AC-207 criterion 确认 exit 1 → exit 0。⛔ 仍不得勾选未经真实验证的 AC。
+
+## AC2/AC3/AC5 ✅ 完成（2026-09-11，机件产出，⛔ 非手工搬运）
+
+**机件**：`plugin/scripts/develop-deliver-tgz.sh --verify-coldstart --ac207-e2e --root /home/yale/work/quay --hosts B --force`。
+本任务分支的接线：`--ac207-e2e` 令远端 verify 带 `--ac207-e2e --driving-profiles`，scp 驱动方 `.quay/profiles.yml` 到目标机、把 `~/.local/bin` 放上 PATH、并传 `AC207_POLL_SECS=3600`。安装物 = develop tip `a2a5aac0366f74d2a3af509664ab8cc9046aa83d` 现 build 的两个 tgz。
+
+**AC2 ✅ 直接量**（第三方项目 `/home/yale/quay-verify-coldstart-a2a5aac0-root` on orangevps；命令 + 命中行）：
+
+| 量 | 命令 | 命中行 |
+|---|---|---|
+| commit_sha | `git -C <root> log --all --format='%H %s' | grep -v 'chore(quay-init):' | head -1` | `77794075008c776d289539111f73b422d1bb03e3 tasks: 翻 e2e-verify-207 done（driver 机械 fan-in）` |
+| task_status | `(cd <root> && node <installed quay> task view e2e-verify-207 --json)` | `status=done` |
+| gate_events | `wc -l <root>/.quay/gate-events.jsonl` | `1` |
+| gate-event 内容 | `cat <root>/.quay/gate-events.jsonl` | `{"item_id":"e2e-verify-207","pipeline_id":"e2e-verify-207","gate":"complete","actor":"quay-driver","verdict":"pass","payload":{"from":"ready","to":"done"}}` |
+| produced_by_driver 项 | `git -C <root> log --all --format=%s | grep -c e2e-verify-207` | `7` |
+
+第三方 git 历史含真实实现提交 `12899cd feat(e2e-verify-207): add e2e-marker.txt marker (ac207)`（非 `chore(quay-init):`，硬规则 4b 排除项）；gate 事件 `actor=quay-driver`（driver 产出）。
+
+**AC3 ✅ 载体落账**：生产载体 `.quay/productization-verification.jsonl` 出现逐字记录（机件 scp 回传 + 按 (ts,ac,host,project_root) 去重追加）：
+
+```
+{"build_sha":"a2a5aac0366f74d2a3af509664ab8cc9046aa83d","ts":"2026-09-11T01:21:19Z","ac":"GOAL-009-AC-207","host":"orangevps","project_root":"/home/yale/quay-verify-coldstart-a2a5aac0-root","commit_sha":"77794075008c776d289539111f73b422d1bb03e3","task_id":"e2e-verify-207","task_status":"done","gate_events":1,"produced_by_driver":true}
+```
+
+逐字段满足 criterion 过滤：host=`orangevps` ≠ boheidc（本机）、project_root ∉ 本仓库、commit_sha/task_id 非空、task_status=`done`、gate_events=1>0、produced_by_driver=`true`。
+
+**AC5 ✅ 判据翻转**：AC-207 criterion 干跑 `AC-207 CRITERION EXIT: 0`（此前 exit 1）。
+
+**本轮修法（落本任务分支）**：`develop-deliver-tgz.sh` 的 `--ac207-e2e` 接线补传 `AC207_POLL_SECS=3600`——e2e 任务首次 worker 尝试可因 fan-in suite 证书非惰性而失败重试，任务 done 实测 ~30min，脚本默认 1800s 轮询窗口实测恰在 done 前 ~19s 过期 ⇒ 记录未写；3600s 给足双次尝试余量（本轮实测记录即由此产出）。
+
+**机件回传留痕**：`develop-deliver-tgz: --verify-coldstart OK — evidence transported into /home/yale/work/quay/.quay/productization-verification.jsonl`（appended=6，含本条 AC-207 记录）。

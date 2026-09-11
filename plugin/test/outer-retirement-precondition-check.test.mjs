@@ -5,14 +5,14 @@
 // AC1 (前置检查存在): checker 枚举 outer 执行核直接引用的 `-check.{ts,sh}` checker 并逐个判定留存
 // 调用面（注册表 / 外部代码引用）。AC2 (负控制): 造一个只被退役层引用的 checker（无外部载体、无
 // 注册表、无显式退役标记）⇒ 必须 RED (exit 1)。AC3 (N→0): 带 RETIRED-WITH-RETIRING-LAYER 标记的
-// orphan checker ⇒ 已处置（不 RED）；真实仓库当前 N=0。
+// orphan checker ⇒ 已处置（不 RED）；真实仓库当前 undischarged N=0（orphan 集合可非空，但每一个都必须已处置）。
 //
 // 硬规则 3b/4: 执行核缺失 / 执行核未引用任何 plugin/scripts 脚本 ⇒ NOT-EVALUATED (exit 3)，绝不与
 // 绿混同。
 //
 // 本文件钉住:
 //   (a) 纯逻辑（CHECKER_RE / maskComments / codeOnlyText / referencedScripts / inStaticGateRegistry）;
-//   (b) 真实仓库 GREEN（orphan-checker N=0）;
+//   (b) 真实仓库 GREEN（undischarged N=0，且每个 orphan 都被分类进 retiredWithMarker/undischarged 之一）;
 //   (c) 负控制 AC2——只被退役层引用的 checker 无标记 ⇒ exit 1;
 //   (d) 显式退役标记 ⇒ 已处置（exit 0）;
 //   (e) 留存调用面两态（注册表 / 外部代码引用）⇒ 不 RED;
@@ -131,15 +131,21 @@ function runCli(root) {
 
 // ── 真实仓库 ─────────────────────────────────────────────────────────────────────────────────────────
 
-test("real repo is GREEN — orphan-checker N=0 (outer-anchor-check.ts explicitly retired)", () => {
+test("real repo is GREEN — no orphan checker lacks a disposition, and every orphan is classified", () => {
   const res = checkPrecondition(repoRoot);
   assert.equal(res.evaluated, true, "the real repo must be evaluable");
   // monitor-mount-check.sh 随 session-liveness 退役（2026-09-03），执行核引用 checker 数 10→9。
   assert.ok(res.checkerCount >= 9, `expected ≥9 referenced checkers, got ${res.checkerCount}`);
   assert.deepEqual(res.undischarged, [], `no orphan checker may lack a disposition: ${res.undischarged.join(", ")}`);
   assert.equal(res.ok, true, "the real repo must be green");
-  // outer-anchor-check.ts is the SPEC §2.3b N=1 — it must now carry the explicit retirement marker.
-  assert.deepEqual(res.retiredWithMarker, ["outer-anchor-check.ts"], "outer-anchor-check.ts must be explicitly retired");
+  // 分类完备性（机制不变量，非快照）：每个 orphan checker 都必须被分类为「带退役标记」或「缺处置」
+  // 二者之一、且二者不相交——分类漏掉某个 orphan 会立刻红。⛔ 不钉「当前恰好有哪一个文件是孤儿且
+  // 已标退役」——那类快照式期望随孤儿归类合法变化而漂移，正是本条反复烧 fan-in 的根因。
+  assert.deepEqual(
+    [...res.retiredWithMarker, ...res.undischarged].sort(),
+    [...res.orphanCheckers].sort(),
+    "every orphan checker must land in exactly one disposition bucket (retired-with-marker or undischarged)",
+  );
 });
 
 // ── 负控制 AC2 ───────────────────────────────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 ---
 id: AC-233
 title: 交付包不得含「形如入口、却在安装位置下无法运行」的文件——原「底线不一致」前提已证否，收窄至真实残余
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-015
 criterion: node --no-warnings --experimental-strip-types --test
@@ -48,6 +48,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-09-11T00:42:24.115Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"

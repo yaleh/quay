@@ -2,7 +2,7 @@
 id: gap-shipped-entry-test-treats-every-shebang-plugin-script-as-entry
 title: shipped-entry-runnable 测试把每个带 shebang 的随包 plugin 脚本判为「入口」⇒ 主检出下约 300
   条违规恒红，而同一测试在 fan-in 的 worktree 环境不触发 ⇒ 判据结果依赖运行环境
-status: ready
+status: done
 labels:
   - gap
   - defect
