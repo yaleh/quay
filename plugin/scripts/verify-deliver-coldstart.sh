@@ -270,6 +270,12 @@ AC238_TASKSET_STABLE=0
 AC238_RETIRED_DIR=""
 AC238_RETIRED_MATCHES_PRE=0
 AC238_BOUND_ENTRY=""
+# 升级动作是否**携带了显式采纳决定**（`--adopt-branch-model`）。存在的唯一理由：升级动作跑完之后，
+# 「这个副本的 `develop` 现在接主线了」有两种成因——①它本来就在主线上（compatible，无事发生）；
+# ②它是一条不接主线的旧分叉，本轮**被采纳决定重指到主线**（旧 tip 保留为 `<branch>-pre-quay-init-<sha>`）。
+# 两者在升级后的磁盘状态上同形（都是 compatible），但描述的是两件不同的事 ⇒ 记录里必须可区分，
+# 否则「adopt 过的副本」会被读成「天生就正常」，而后者正是本任务反复禁止的那种冒充。
+AC238_ADOPT_DECISION=0
 
 # ── AC-239（GOAL-009）：升级【后】的闭环——已升级的旧项目自己的 *-drivers 还能不能接着干 ───────────
 # 与 AC-238 的分工是刻意的、不可互掩（人 2026-09-11 裁定拆条）：AC-238 是【静态/存量】维度（数据没丢、
@@ -1080,13 +1086,26 @@ step_upgrade_existing() {
   # guard 实测拦下（计数 15→16）；⚠️ 该检测器是【行扫描器】，连注释里出现同形字面量也计入——
   # 本条注释本身第一次就是这么被计进去的。改用本文件既有的 set +e / 取 rc / set -e 形
   # （同 :973/:2116/:2156）。
+  # ⓪-bm 落地基线的【采纳决定】必须由本步骤给出 —— 2026-09-11 ④ 落地后这条不再可选：
+  #   `gap-upgrade-entry-never-establishes-branch-model`（done）把 shipped `quay-init.sh` 改成
+  #   **fail-closed**：目标项目的 `develop` 若不接主线（真实 meta-cc 副本就是这个形态，
+  #   `merge-base --is-ancestor main develop` = FALSE），默认升级动作**拒绝并 exit 1、什么都不写**。
+  #   ⇒ 不传该旗标时 `init_rc≠0` ⇒ AC-238 的门（含 `[ "$init_rc" = "0" ]`）结构上不成立 ⇒
+  #   `AC239` 的前置（`AC238_EVALUATED=1` ∧ 同一 root）永不成立。
+  #   ⛔ 这不是「绕过」：adopt 正是 ④ 为真实用户交付的那条 remedy（`quay-init.sh --adopt-branch-model`），
+  #   旧 tip 零销毁地保留为 `<branch>-pre-quay-init-<sha>`。升级动作**就是**操作者那一步，故采纳决定
+  #   落在它身上；⑦b 的 ⓪c 前置仍是**只读**判定（`--dry-run`），只报告不替项目做决定。
+  #   负控制（本机夹具实测）：compatible 项目上传该旗标 ⇒ `[REUSED]`、`develop`/`main` 逐字不变、
+  #   0 个 backup ref（该旗标在不需要采纳时是 no-op，故可以无条件传）。
   set +e
   CLAUDE_PLUGIN_ROOT="$(dirname "$(dirname "$qinit")")" \
     bash "$qinit" --root "$root" --repo-root "$root" \
       --worktree-root "$(dirname "$root")/$(basename "$root")-worktrees" \
+      --adopt-branch-model \
       --auto-commit-skip >"$root/.quay-upgrade-init.log" 2>&1
   init_rc=$?
   set -e
+  AC238_ADOPT_DECISION=1
   echo "  upgrade action: shipped quay-init (config-preserving branch) rc=$init_rc → $root/.quay-upgrade-init.log"
 
   # ④ 升级【后】的 runtime 绑定 = 当前语义（裁定 c / ba960f503「quay-init: migrate the retired
@@ -1204,14 +1223,15 @@ d=json.load(sys.stdin); print(len(d))' 2>/dev/null || echo "")"
     # 不可分）：`binding`/`retired_runtime_backup`/`retired_backup_matches_pre` 是【退休式】替换
     # （新语义：旧 runtime 退休到备份 + config 绑定到交付物）；`pre_binding`/`post_binding` 是
     # 【绑定形态】的前后读数（bare-path-name ⇒ 升级没把绑定迁到项目自己控制的路径上）。
-    printf '{"ts":"%s","ac":"GOAL-009-AC-238","host":"%s","project_root":"%s","pre_upgrade_task_count":%s,"post_upgrade_task_count":%s,"pre_upgrade_runtime_age_days":%s,"runtime_replaced":true,"task_list_ok":true,"build_sha":"%s","upgrade_source":"%s","upgrade_init_rc":%s,"isolated_copy":%s,"taskset_stable":true,"sample_task":"%s","fresh_runtime_sha256":"%s","pre_binding":"%s","post_binding":"%s","host_key":"%s","binding":"delivered-vendor","retired_runtime_backup":"%s","retired_backup_matches_pre":true,"bound_mcp_entry":"%s"}\n' \
+    printf '{"ts":"%s","ac":"GOAL-009-AC-238","host":"%s","project_root":"%s","pre_upgrade_task_count":%s,"post_upgrade_task_count":%s,"pre_upgrade_runtime_age_days":%s,"runtime_replaced":true,"task_list_ok":true,"build_sha":"%s","upgrade_source":"%s","upgrade_init_rc":%s,"isolated_copy":%s,"taskset_stable":true,"sample_task":"%s","fresh_runtime_sha256":"%s","pre_binding":"%s","post_binding":"%s","host_key":"%s","binding":"delivered-vendor","retired_runtime_backup":"%s","retired_backup_matches_pre":true,"bound_mcp_entry":"%s","adopt_decision":%s}\n' \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(hostname 2>/dev/null || echo '')" "$AC238_PROJECT_ROOT" \
       "$AC238_PRE_TASK_COUNT" "$AC238_POST_TASK_COUNT" "$AC238_RUNTIME_AGE_DAYS" \
       "$BUILD_SHA" "${UPGRADE_SOURCE:-none}" "$init_rc" \
       "$([ -n "$UPGRADE_SOURCE" ] && [ "$UPGRADE_SOURCE" != "$root" ] && echo true || echo false)" \
       "$AC238_SAMPLE_TASK" "$AC238_FRESH_RUNTIME_SHA" "${AC238_PRE_BINDING:-unreadable}" \
       "${AC238_POST_BINDING:-unreadable}" "${HOST:-}" \
-      "$AC238_RETIRED_DIR" "$AC238_BOUND_ENTRY" >> "$AC89"
+      "$AC238_RETIRED_DIR" "$AC238_BOUND_ENTRY" \
+      "$([ "$AC238_ADOPT_DECISION" = "1" ] && echo true || echo false)" >> "$AC89"
     echo "  ac238 record written → $AC89"
   else
     echo "  AC-238 record NOT written — 缺值≠合格 (pre_count=$AC238_PRE_TASK_COUNT post_count=$AC238_POST_TASK_COUNT age_days=${AC238_RUNTIME_AGE_DAYS:-<unread>} replaced=$AC238_RUNTIME_REPLACED task_list_ok=$AC238_TASK_LIST_OK post_binding=${AC238_POST_BINDING:-<unread>} build_sha=${BUILD_SHA:-<empty>} upgrade_init_rc=$init_rc)" >&2
@@ -1331,8 +1351,12 @@ step_upgrade_drive_continue() {
   #     ⇒ 先用【交付物自己的】判定把这件事变成一个当场可归因的读数：`quay init --dry-run
   #     --adopt-branch-model` 走 `ensureBranchModel` 的 dryRun 全路径——只判定，**不改任何 ref、不写任何
   #     文件**（branch-model.ts 的每个变异点前都有 `if (dryRun)` 分支）。
-  #     ⛔ 这里**不**替项目做 adopt 决定：那样会把真正的产品缺陷（升级入口从不建立分支模型 ⇒ 该 remedy
-  #     对真实用户不可达）盖住，正是本任务 Plan Stage 4 禁止的「掩盖」。本步骤只如实报一个可区分取值。
+  #     ⚠️ 2026-09-11 ④ 落地后本段的理由已更新：先前「不代项目做 adopt 决定」是因为**该 remedy 当时对
+  #     真实用户不可达**（shipped `quay-init.sh` 对 `adopt` 的 grep 命中数 = 0）——在那种世界里替项目
+  #     adopt 等于掩盖产品缺陷。④（`gap-upgrade-entry-never-establishes-branch-model`，done）把该 remedy
+  #     交付到了 shipped 入口 ⇒ 现在「升级动作携带采纳决定」（见上方 ⓪-bm）**就是真实用户的那条路**，
+  #     ⛔ 不是绕过。本前置仍是**只读**判定（`--dry-run`，不改任何 ref/文件）：它报告的是升级【之后】
+  #     这条基线到底可不可以用 —— 采纳成功 ⇒ `compatible`（并可据 `adopt_decision` 与「天生正常」区分）。
   local bl_out="" bl_rc=0
   set +e
   bl_out="$(cd "$root" && node "$qrl" init --dry-run --adopt-branch-model --root "$root" 2>/dev/null)"
@@ -1341,7 +1365,7 @@ step_upgrade_drive_continue() {
   AC239_BASELINE_STATUS="$(ac239_baseline_state "$bl_out" "$bl_rc")"
   echo "  [⑦b] landing-baseline pre-flight: state=$AC239_BASELINE_STATUS (delivered init --dry-run rc=$bl_rc) :: $(printf '%s\n' "$bl_out" | grep -m1 'landing-baseline' || echo '<no landing-baseline line in the delivered init report>')"
   if [ "$AC239_BASELINE_STATUS" = "divergent" ] || [ "$AC239_BASELINE_STATUS" = "absent" ]; then
-    echo "  not-evaluated: 升级后副本的落地基线 'develop' 当前【不可用】（state=$AC239_BASELINE_STATUS —— divergent 指它是不接主线的远古分叉，absent 指它不存在）⇒ 该项目自己的机械 fan-in 会在 anti-drift 处结构上必然失败，'任务驱动到 done' 这一结果不可达。⛔ 不烧那一小时的轮询（它只会以与「实现失败」同形的形态收场），⛔ 也不写 AC-239 记录（缺值≠合格）。⛔ 本步骤不代项目做 adopt 决定（那会掩盖真实用户同样做不到这件事）——成因与 remedy 见本任务另立的 gap 任务。" >&2
+    echo "  not-evaluated: 升级后副本的落地基线 'develop' 当前【不可用】（state=$AC239_BASELINE_STATUS —— divergent 指它仍是不接主线的远古分叉，absent 指它不存在）⇒ 该项目自己的机械 fan-in 会在 anti-drift 处结构上必然失败，'任务驱动到 done' 这一结果不可达。⛔ 不烧那一小时的轮询（它只会以与「实现失败」同形的形态收场），⛔ 也不写 AC-239 记录（缺值≠合格）。⚠️ 读到 divergent ⇒ 升级动作（⓪-bm）没能把基线采纳成主线，这是**升级侧**的失败读数，⛔ 不是「项目天生如此」。" >&2
     return 0
   fi
   if [ "$AC239_BASELINE_STATUS" = "unreadable" ]; then
@@ -3298,7 +3322,21 @@ Enter to confirm · Esc to cancel"
     bl_ok=1
   fi
 
+  # control 42 (AC-239 升级动作的采纳决定, gap-aged-project-post-upgrade-driver-e2e 本轮新增):
+  #   ④ 落地后 shipped `quay-init.sh` 对不接主线的 `develop` 是 fail-closed（默认拒绝、exit 1、什么都不写）
+  #   ⇒ 升级动作**必须**给出采纳决定，否则 `init_rc≠0` ⇒ AC-238 的门结构上不成立 ⇒ ⑦b 前置永不成立。
+  #   钉住【位置】（硬规则 ②）：该旗标必须落在 step_upgrade_existing 的函数体里（⛔ 不是散在别处/注释里）。
+  #   可证伪的一半（硬规则 4）：把同一段函数体里的该旗标删掉，谓词必须翻成 0 —— 否则它是个恒真量。
+  local bmw_body bmw_hits bmw_stripped bmw_fail=0 bmw_ok=0
+  bmw_body="$(sed -n '/^step_upgrade_existing()/,/^}$/p' "$0" 2>/dev/null | sed 's/#.*//')"
+  bmw_hits="$(printf '%s\n' "$bmw_body" | grep -c -- '--adopt-branch-model' || true)"
+  bmw_stripped="$(printf '%s\n' "$bmw_body" | sed 's/--adopt-branch-model//g')"
+  if printf '%s\n' "$bmw_stripped" | grep -q -- '--adopt-branch-model'; then bmw_ok=1; fi
+  echo "selfcheck: ac239-adopt-decision(in-step_upgrade_existing) hits=$bmw_hits negative-control(stripped)=$bmw_ok (expect >=1/0 — 升级动作必须携带采纳决定, 且该谓词删掉旗标即取假)"
+  if [ "$bmw_hits" -lt 1 ] || [ "$bmw_ok" != "0" ]; then bmw_fail=1; fi
+
   if [ "$d1" = "1" ] && [ "$d2" = "no" ] && [ "$a1" = "1" ] && [ "$a2" = "yes" ] \
+     && [ "$bl_ok" = "1" ] && [ "$bmw_fail" = "0" ] \
      && [ "$c3_e" = "1" ] && [ "$c3_ok" = "1" ] \
      && [ "$c4_e" = "1" ] && [ "$c4_ok" = "0" ] \
      && [ "$c5_e" = "0" ] && [ "$c5_ok" = "0" ] \
