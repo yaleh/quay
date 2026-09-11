@@ -83,15 +83,15 @@ ac234_round_records_rendered = 0
 
 ## Acceptance Criteria
 
-- [ ] AC1 顺序缺陷存证（改前读数）：贴改前 `:2006/:2007` 两行原文，与远端 `verify-deliver-evidence.json` 的 `ac234_evaluated=1` + 三个计数为 0 的四行。
-- [ ] AC2 顺序已改（能取假）：改后 `grep -n 'step_ac232_goal_carrier_write\|step_ac234_web_render' plugin/scripts/verify-deliver-coldstart.sh` 显示 ac232 的行号**小于** ac234；贴两行。
-- [ ] AC3 AC-234 三计数真转正（⛔ 生产载体，非夹具，硬规则 4 推论三）：一次真实跨机运行后，本机载体出现 `ac="GOAL-015-AC-234"` 且三计数全 >0 且 `host≠本机 ∧ project_root∉本仓库` 的记录；贴该记录全文与 AC-234 criterion 干跑 exit 0。
-- [ ] AC4 远端 stdout 已持久化（**先做**）：跑一次后本地存在该次运行的远端输出日志，且其中含 `step_ac232_goal_carrier_write` 与 `step4_driver_liveness` 两步的实际打印行；贴日志路径与这两行。
-- [ ] AC5 AC-203 真因据实定位：**基于 AC4 拿到的实际 stdout**，写出该步未写记录的真实原因（或证明它现在能写），并贴支撑读数。⛔ 不得沿用本任务 ④ 已证否的那个假设；若实测发现它现在就能产出记录，如实写「原因已消失」并贴记录。
-- [ ] AC6 AC-205 记录产出：传入 `--ac205-session` 后，本机载体出现满足其 criterion 全部字段条件的 `GOAL-009-AC-205` 记录，criterion 干跑 exit 0；贴记录与输出。若某宿主结构上不具备条件，**照实报告并说明它给出的可区分取值**，⛔ 不得为凑绿而伪造。
-- [ ] AC7 部分产出不再与成功同形（能取假）：构造一次「预期 6 种、实际回传 2 种」的运行 ⇒ 驱动方输出逐条列出缺失的 ac 种类且退出码非 0（PARTIAL）；再构造一次全产出 ⇒ exit 0。贴两次输出与退出码。
-- [ ] AC8 单测：扩 `plugin/test/develop-deliver-tgz-evidence-transport.test.mjs`（或新增同族测试），覆盖 AC7 的两个方向；`node --test` exit 0。
-- [ ] AC9 全量绿：`scripts/test.sh` 全量绿。
+- [x] AC1 顺序缺陷存证（改前读数）：贴改前 `:2006/:2007` 两行原文，与远端 `verify-deliver-evidence.json` 的 `ac234_evaluated=1` + 三个计数为 0 的四行。
+- [x] AC2 顺序已改（能取假）：改后 `grep -n 'step_ac232_goal_carrier_write\|step_ac234_web_render' plugin/scripts/verify-deliver-coldstart.sh` 显示 ac232 的行号**小于** ac234；贴两行。
+- [x] AC3 AC-234 三计数真转正（⛔ 生产载体，非夹具，硬规则 4 推论三）：一次真实跨机运行后，本机载体出现 `ac="GOAL-015-AC-234"` 且三计数全 >0 且 `host≠本机 ∧ project_root∉本仓库` 的记录；贴该记录全文与 AC-234 criterion 干跑 exit 0。
+- [x] AC4 远端 stdout 已持久化（**先做**）：跑一次后本地存在该次运行的远端输出日志，且其中含 `step_ac232_goal_carrier_write` 与 `step4_driver_liveness` 两步的实际打印行；贴日志路径与这两行。
+- [x] AC5 AC-203 真因据实定位：**基于 AC4 拿到的实际 stdout**，写出该步未写记录的真实原因（或证明它现在能写），并贴支撑读数。⛔ 不得沿用本任务 ④ 已证否的那个假设；若实测发现它现在就能产出记录，如实写「原因已消失」并贴记录。
+- [x] AC6 AC-205 记录产出：传入 `--ac205-session` 后，本机载体出现满足其 criterion 全部字段条件的 `GOAL-009-AC-205` 记录，criterion 干跑 exit 0；贴记录与输出。若某宿主结构上不具备条件，**照实报告并说明它给出的可区分取值**，⛔ 不得为凑绿而伪造。
+- [x] AC7 部分产出不再与成功同形（能取假）：构造一次「预期 6 种、实际回传 2 种」的运行 ⇒ 驱动方输出逐条列出缺失的 ac 种类且退出码非 0（PARTIAL）；再构造一次全产出 ⇒ exit 0。贴两次输出与退出码。
+- [x] AC8 单测：扩 `plugin/test/develop-deliver-tgz-evidence-transport.test.mjs`（或新增同族测试），覆盖 AC7 的两个方向；`node --test` exit 0。
+- [ ] AC9 全量绿：`scripts/test.sh` 全量绿（待外部）
 
 ## Definition of Done
 

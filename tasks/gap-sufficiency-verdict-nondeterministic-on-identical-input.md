@@ -69,7 +69,7 @@ return goalAchievedFromRecords(records, goalId) && sufficiency?.verdict === "cov
 - [x] AC3 输入变化必重判（防缓存过期为假保证）：改动任一在域 AC 的 `expect` 一个字符 ⇒ 哈希变 ⇒ 判定重新 spawn LLM（调用计数 +1）；还原后再调 ⇒ 命中原缓存不再 spawn。贴三次的调用计数序列。
 - [x] AC4 不得把判不出变成合格（硬规则 3b，能取假）：缓存未命中 ∧ 令 LLM 调用失败/超时 ⇒ 返回 `not-evaluated`（**不是** `covered`，也**不是**沿用别的输入的缓存值）；贴该次返回值与 `goalAchieved` 仍为 false 的读数。
 - [x] AC5 首次判定的一致性守卫：注入两次**不一致**的取样（一次 covered、一次 insufficient）⇒ 本轮结果为 `not-evaluated` 且**不入缓存**；下一轮两次一致 ⇒ 入缓存。贴两轮的裁决与缓存内容。
-- [ ] AC6 生产载体验证（⛔ 夹具不算，硬规则 4 推论三）：改动落地后，从 `goal-round.jsonl` 里取**落地时刻之后**连续 ≥10 轮，同一 goal 在其在域 AC 集合未变的前提下裁决**全部相同**；贴这 10 轮的 (round, 在域AC集合, 裁决) 三元组。（待外部）
+- [ ] AC6 生产载体验证（⛔ 夹具不算，硬规则 4 推论三）：改动落地后，从 `goal-round.jsonl` 里取**落地时刻之后**连续 ≥10 轮，同一 goal 在其在域 AC 集合未变的前提下裁决**全部相同**且该裁决 ∈ {covered, insufficient}；若这 10 轮确为 not-evaluated，则须贴出其 `cause` 字段并说明该成因真实存在（此时本 AC 不算达成，须继续观察）。贴这 10 轮的 (round, 在域AC集合, 裁决[, cause]) 三元/四元组。（待外部）
 - [x] AC7 单测：`node --test plugin/test/goal-sufficiency-determinism.test.mjs` exit 0，覆盖 AC2/AC3/AC4/AC5 四个方向。
 - [x] AC8 全量绿：`scripts/test.sh` 全量绿。（全量由主套件门——fan-in 的 suite 步骤——负责；scoped 门由 worker 在 worktree 内跑）
 
