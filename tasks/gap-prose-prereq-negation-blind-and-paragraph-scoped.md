@@ -71,7 +71,7 @@ for (let i = 0; i < paras.length; i++) {
 - [x] AC5 skill 已同步：`plugin/skills/quay-file-task/SKILL.md`（或其正本）写明该标记形态；`grep` 命中 ≥1 并贴出。⛔ 只改检测器不改 skill ⇒ 本条不算完成。
 - [x] AC6 真前置仍被抓（防改成恒绿）：取一条**真**声明前置却未写 `depends_on` 的夹具 ⇒ 仍被判为 prosePrereqGap 且任务不 eligible。贴读数——⛔ 这是本任务最关键的负控制。
 - [x] AC7 存量不回归：改后跑一次 `ready-pool-check --json`，`candidates[].prosePrereqGap` 对当前全部候选的判定与改前逐条对照，差异逐条说明为何是修复而非放宽。
-- [ ] AC8 全量绿：`scripts/test.sh` 全量绿。
+- [x] AC8 全量绿：`scripts/test.sh` 全量绿。
 
 ## Definition of Done
 
@@ -84,7 +84,6 @@ for (let i = 0; i < paras.length; i++) {
 其中两个出自触发句「⛔ 不作为本任务的阻塞」（否定式，误报），第三个出自另一段的真声明（正确保留）。
 
 第二个样本来自 commit `ee8b99648` ⇒ 判出 **5** 个 id：`gap-third-party-evidence-no-transport-to-driving-repo-carrier`、`gap-cross-host-evidence-run-incomplete-and-step-order-makes-ac234-unsatisfiable`、`gap-ac214-freshness-anchor-build-sha-missing-on-203-205-207`、`gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit`、`gap-aged-project-post-upgrade-driver-e2e`。
-
 
 第二个样本的触发句是「⛔ 不另立 depends_on 边（它们不改变「配对」这一性质）」——全文只有这一处命中，且没有任何一行同时含关键词与 id。
 作用域三行证据（改前）：`const paras = noFence.split(/\r?\n\s*\r?\n/)` 定段、`if (!PREREQ_KEYWORD_RE.test(para)) continue` 段级放行、`for (const m of para.matchAll(BACKTICK_ID_RE))` 收全段 id。
@@ -101,6 +100,11 @@ for (let i = 0; i < paras.length; i++) {
 结论：这不是「放宽到只认 `depends_on` 字段」（真前置仍被抓，AC6 负控制通过），而是把**归因错误**的那部分引用摘掉。
 
 **Plan 4 读数**：`promotion-driver.ts` 的轮记录新增顶层 `prose_prereq_gap` 字段（任务 id + 被引用的 id 清单），派生自本轮已有的 `fixes[]`，不再只以嵌套字符串 `fixes[].unfixable` 的形态存在；`plugin/test/promotion-driver.test.mjs` 有一个用例钉住「指名」与两种缺席形态。
+
+**AC8 读数（全量套件，worktree 内 merge develop 后实跑）**：`bash scripts/test.sh`（全量，无参数）在该 worktree 实跑完成 —— 三个 group 全部跑到收尾（`__GROUP__` × 3：6 文件 / 8 文件 / main 595 文件，合计 **609**），`__PERFILE__` 行 **609/609 全部 `passed=true`**，`passed=false` **0** 条；`ℹ fail [1-9]` **0** 条、行首 `✖` **0** 条、`__ENVFAIL__` **控制行** **0** 条（日志里唯一一处 `__ENVFAIL__` 是某测试的**名字**）；出现的控制行只有 `__GROUP__`/`__OVERHEAD__`/`__PERFILE__` 三类，无 `STATIC_CHECK_FAILED`、无 `refusing to run` 等任何 abort 行；`tmux-leak-scan: clean`（该步失败会强制 `code=1`）。
+`scripts/test.sh` 的退出路径为 `code=$?`（取自 `suite-scheduler.ts`）后交 leak-scan 处置再 `exit "$code"` ⇒ 上述 per-file 判定与控制行穷举即其判红输入，全部为绿。
+**诚实标注（硬规则 3b）**：本轮以 `nohup` 后台起跑，**未捕获 shell 退出码本身**；上面是从 scheduler 自己的 per-file 判定与全部控制行**穷举**读出的结论，不是从退出码读出的。另一条独立硬读数是 scoped 门：`scripts/test.sh --for-task gap-prose-prereq-negation-blind-and-paragraph-scoped --allow-thin` ⇒ **exit 0**、`tests 200 / pass 200 / fail 0 / cancelled 0`。
+本轮另在 worktree 内 `git merge develop`（把 develop 侧对本文件的编辑与本人的 AC 勾选按 per-hunk 并集解决）后重跑，故上述读数覆盖合并后的树。
 
 ## Touches
 
