@@ -5,10 +5,29 @@ import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(__dirname, "..", "fixtures", "workflow-replay");
+
+// INVARIANT (gap-fixture-dir-write-races-whole-tree-copy):
+//   测试不得在已签入路径下创建或删除条目；一切临时产物落在进程私有临时目录。
+//   A test must not create or delete entries under a checked-in path; every temporary artifact
+//   belongs in a process-private temp dir (os.tmpdir()/mkdtempSync).
+// WHY: FIXTURES_DIR is a checked-in tree that OTHER processes read — test/cold-start-oneliner-e2e.sh
+//   does `cp -r "$PLUGIN_SRC" "$QUAY_DEV/plugin"`, and a copier that has already readdir'd this
+//   directory will fail `stat` on an entry this test just removed (`cp: cannot stat …/_tmp-bad-schema`).
+//   The failure lands on the COPIER, not on the writer, so it is attributed to the wrong task.
+//   Measured pre-fix: 2/400 concurrent-arm failures vs 0/25 solo-arm (the concurrency is the
+//   independent variable, not noise). The guard `plugin/scripts/checked-in-write-check.ts` is the
+//   standing judge for this invariant; it reports these three dirs when they live here.
+/** A case dir for the schema-validation cases, in a private temp dir — never under FIXTURES_DIR. */
+function mkScratchCase(tag, files) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `workflow-replay-${tag}-`));
+  for (const [name, body] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), body);
+  return dir;
+}
 
 let runWorkflowReplay, runAllWorkflowReplays;
 
@@ -178,35 +197,38 @@ function minimalValidEvent(overrides = {}) {
 
 describe("schema validation", () => {
   it("bad schema version is rejected", () => {
-    const tmp = path.join(FIXTURES_DIR, "_tmp-bad-schema");
-    fs.mkdirSync(tmp, { recursive: true });
-    fs.writeFileSync(path.join(tmp, "events.jsonl"), minimalValidEvent({ schemaVersion: "99" }) + "\n");
-    fs.writeFileSync(path.join(tmp, "expectations.json"), '{"assertions":[]}');
-    const r = runWorkflowReplay(tmp);
-    assert.ok(!r.ok || r.errors.length > 0, `bad schema rejected, got ${r.verdict}`);
-    fs.rmSync(tmp, { recursive: true });
+    const tmp = mkScratchCase("bad-schema", {
+      "events.jsonl": minimalValidEvent({ schemaVersion: "99" }) + "\n",
+      "expectations.json": '{"assertions":[]}',
+    });
+    try {
+      const r = runWorkflowReplay(tmp);
+      assert.ok(!r.ok || r.errors.length > 0, `bad schema rejected, got ${r.verdict}`);
+    } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
   });
 
   it("missing required field is rejected", () => {
-    const tmp = path.join(FIXTURES_DIR, "_tmp-missing-field");
-    fs.mkdirSync(tmp, { recursive: true });
     const e = JSON.parse(minimalValidEvent());
     delete e.recordedAtMs; // the A1a v1 mandatory field this corpus restore is about
-    fs.writeFileSync(path.join(tmp, "events.jsonl"), JSON.stringify(e) + "\n");
-    fs.writeFileSync(path.join(tmp, "expectations.json"), '{"assertions":[]}');
-    const r = runWorkflowReplay(tmp);
-    assert.ok(!r.ok || r.errors.length > 0, `missing fields rejected, got ${r.verdict}`);
-    fs.rmSync(tmp, { recursive: true });
+    const tmp = mkScratchCase("missing-field", {
+      "events.jsonl": JSON.stringify(e) + "\n",
+      "expectations.json": '{"assertions":[]}',
+    });
+    try {
+      const r = runWorkflowReplay(tmp);
+      assert.ok(!r.ok || r.errors.length > 0, `missing fields rejected, got ${r.verdict}`);
+    } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
   });
 
   it("unknown classification label is rejected", () => {
-    const tmp = path.join(FIXTURES_DIR, "_tmp-bad-class");
-    fs.mkdirSync(tmp, { recursive: true });
-    fs.writeFileSync(path.join(tmp, "events.jsonl"), minimalValidEvent() + "\n");
-    fs.writeFileSync(path.join(tmp, "expectations.json"), JSON.stringify({assertions:[{id:"a1",description:"t",classification:"invalid-label",internalCategory:"normative",check:{predicate:"hasStage",args:{stage:"Verify"}},expected:true}]}));
-    const r = runWorkflowReplay(tmp);
-    assert.equal(r.verdict, "expectations-invalid", `bad classification rejected, got ${r.verdict}`);
-    assert.ok(!r.ok, "bad classification -> !ok");
-    fs.rmSync(tmp, { recursive: true });
+    const tmp = mkScratchCase("bad-class", {
+      "events.jsonl": minimalValidEvent() + "\n",
+      "expectations.json": JSON.stringify({assertions:[{id:"a1",description:"t",classification:"invalid-label",internalCategory:"normative",check:{predicate:"hasStage",args:{stage:"Verify"}},expected:true}]}),
+    });
+    try {
+      const r = runWorkflowReplay(tmp);
+      assert.equal(r.verdict, "expectations-invalid", `bad classification rejected, got ${r.verdict}`);
+      assert.ok(!r.ok, "bad classification -> !ok");
+    } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
   });
 });
