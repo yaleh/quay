@@ -1,7 +1,7 @@
 ---
 id: AC-242
 title: 台账不得留下「已离开复验域却尾事件为 fail」的 AC —— 否则下游判据（AC-241）结构上永不通过，被误读成「还有真缺陷」
-status: draft
+status: active
 kind: criterion
 goal: GOAL-009
 criterion: >-
@@ -75,4 +75,15 @@ origin: "本轮 readings：criteria 里 AC-241 的 verdict=fail、reason 逐字�
   md 正文第 32 行把 AC-161(3 处) 列为待修样例，但其 ## Touches 不含
   goals/AC-161-user-level-marketplace-only.md ⇒ 该 ready 任务在授权面内改不到这个文件，其 AC7（要求
   AC-241 干跑 exit 1→0）按现有计划不可满足。故本项不由任何既有任务覆盖。"
+activatedAt: 2026-09-11T07:15:57.975Z
+statusLog:
+  - at: 2026-09-11T07:15:57.975Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-11T07:15:57.974Z
 ---
