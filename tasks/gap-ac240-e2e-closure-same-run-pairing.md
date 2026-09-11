@@ -40,7 +40,7 @@ AC-203 的 root 集 = {63ee9681, b95bd6f1}；AC-207 的 root 集 = {a2a5aac0}；
 
 **判定侧也没有这条要求**：`plugin/scripts/develop-deliver-tgz.sh:632` 的 `expected_acs` 是**按 ac 种类的集合差**（6 种，含 `GOAL-009-AC-203`，注释逐字写「AC-207 仅 --ac207-e2e 时预期，不在此列」）；全仓库**没有任何 (host, project_root) 配对判定**（实测 `grep -n 'SELF_EVIDENCED\|同一次运行\|pairing' plugin/scripts/verify-deliver-coldstart.sh plugin/scripts/develop-deliver-tgz.sh` = **0 命中**）。⇒ 「同一次运行自证」既没有被产出，也没有被判过——它只是**恰好**从没发生过的可能性。
 
-**相关但机制不同的既有任务（均不覆盖本条，⛔ 不重复立案）**：`gap-third-party-evidence-no-transport-to-driving-repo-carrier`（done，回传层）、`gap-cross-host-evidence-run-incomplete-and-step-order-makes-ac234-unsatisfiable`（done，步骤顺序/flag/远端 stdout）、`gap-ac214-freshness-anchor-build-sha-missing-on-203-205-207`（done，新鲜度锚）。同文件还有两条在飞任务（`gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit` ready、`gap-aged-project-post-upgrade-driver-e2e` todo）——Touches 重叠由派发锁串行化，⛔ 不另立关系边（它们不改变「配对」这一性质；此处仅作查重追溯，非前置声明）。
+**相关但机制不同的既有任务（均不覆盖本条，⛔ 不重复立案）**：`gap-third-party-evidence-no-transport-to-driving-repo-carrier`（done，回传层）、`gap-cross-host-evidence-run-incomplete-and-step-order-makes-ac234-unsatisfiable`（done，步骤顺序/flag/远端 stdout）、`gap-ac214-freshness-anchor-build-sha-missing-on-203-205-207`（done，新鲜度锚）。同文件还有两条在飞任务（`gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit` ready、`gap-aged-project-post-upgrade-driver-e2e` todo）——Touches 重叠由派发锁串行化，⛔ 不另立关系边（它们不改变「配对」这一性质；此处列出仅为查重追溯）。
 
 ## Plan
 
