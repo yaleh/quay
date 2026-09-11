@@ -16,6 +16,8 @@ criterion: >-
 
   me=socket.gethostname(); here=os.path.realpath(".")
 
+  BOOK=("tasks/","goals/",".quay/")
+
   for l in open(p,encoding="utf-8"):
       if not l.strip(): continue
       r=json.loads(l)
@@ -26,13 +28,18 @@ criterion: >-
       if r.get("task_status")!="done": continue
       if int(r.get("gate_events") or 0)<=0: continue
       if r.get("produced_by_driver") is not True: continue   # 提交出自任务 worktree，非人手敲
+      cf=r.get("commit_files")                               # 【触及的文件】区分记账/实现，⛔ 非关键词
+      if not isinstance(cf,list) or not cf: continue         # 缺该字段/空 = 老形态记录 ⇒ 不满足（本缺陷正是它）
+      if all(str(x).startswith(BOOK) for x in cf): continue  # 全在 tasks/goals/.quay 下 ⇒ 记账提交，不算开发提交
       sys.exit(0)
   sys.exit(1)
 
   P
 expect: exit 0 = 载体中存在 ac=GOAL-009-AC-207 的记录，host≠本机 ∧ project_root ∉ 本仓库 ∧
-  commit_sha 与 task_id 非空 ∧ task_status=done ∧ gate_events>0 ∧
-  produced_by_driver=true。exit 1 = 无（当前，从未发生）。exit 3 = 载体缺失。
+  commit_sha 与 task_id 非空 ∧ task_status=done ∧ gate_events>0 ∧ produced_by_driver=true ∧
+  commit_files 是非空列表且至少一条路径不在 tasks/ goals/ .quay/ 之下（该字段是判「实现提交 vs
+  记账提交」的直接量——只看 commit_sha 非空曾让「零实现、只有记账提交」的项目同样通过）。
+  exit 1 = 无合格记录（含「只有记账提交」与「老形态无 commit_files 记录」）。exit 3 = 载体缺失。
 origin: 人 2026-09-09 要求①③：点火依靠会话投递，后续驱动依靠 *-drivers；目标项目中的实际开发活动应使用 goals 和
   tasks 等载体。人 2026-09-09 裁定②：退役 2026-08-16「必须真实交互式 tmux、claude -p
   不算」的裁定；裁定③：claude --bg 仅作本次验证手段，不作为产品能力交付。

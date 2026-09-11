@@ -191,16 +191,39 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
   assert.match(r.stdout, /target-profiles\(resolve\) explicit=1 buildroot=1/,
     "target-profiles resolve: --driving-profiles explicit > --build-root");
   // AC-207 carrier record (gap-ac207-e2e-target-driver-driven-real-commit-task-done): the AC-207
-  // record writer must append the seven criterion fields verbatim (produced_by_driver=true literal,
-  // gate_events>0, task_status=done, commit_sha/task_id non-empty, top-level build_sha via the GOAL-009
-  // anchor) and refuse produced_by_driver=false / gate_events=0 — the criterion's `is True` / `>0`
-  // predicates must be able to take false (硬规则 3b / 硬规则 4).
+  // record writer must append the eight criterion fields verbatim (produced_by_driver=true literal,
+  // gate_events>0, task_status=done, commit_sha/task_id non-empty, commit_files non-empty JSON array
+  // with ≥1 path outside tasks/goals/.quay, top-level build_sha via the GOAL-009 anchor) and refuse
+  // produced_by_driver=false / gate_events=0 — the criterion's `is True` / `>0` predicates must be
+  // able to take false (硬规则 3b / 硬规则 4).
   assert.match(r.stdout, /ac207-record\(valid\) wrote=1 fields_ok=1/,
-    "positive control: a valid AC-207 record (all seven criterion fields) is written");
+    "positive control: a valid AC-207 record (all eight criterion fields) is written");
   assert.match(r.stdout, /ac207-record\(produced_by_driver=false\) refused=1/,
     "negative control: produced_by_driver=false is refused (criterion `is True` can take false)");
   assert.match(r.stdout, /ac207-record\(gate_events=0\) refused=1/,
     "negative control: gate_events=0 is refused (criterion `>0` can take false)");
+  // gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit: the write point used
+  // to select "the newest commit that isn't chore(quay-init):" — which in a real e2e is the driver's
+  // 翻-done BOOKKEEPING commit (7 of 9 commits), while the criterion only asked commit_sha be
+  // non-empty ⇒ a zero-implementation project passed too. The controls below pin BOTH halves of the
+  // fix: (a) the writer refuses a record whose commit_files are all under tasks/goals/.quay (a
+  // bookkeeping commit can't be dressed up as an implementation one — the judgment is POSITIONAL,
+  // 硬规则 ②: touched files, so renaming the commit message can't get around it), and (b) the
+  // selection function picks the real implementation commit even when newer bookkeeping commits sit
+  // on top of it, and yields empty + non-zero when only bookkeeping commits exist (⇒ fail-closed,
+  // never a bookkeeping commit written to fill the slot).
+  assert.match(r.stdout, /ac207-record\(bookkeeping-files-only\) refused=1/,
+    "negative control: commit_files all under tasks/goals/.quay ⇒ refused (the defect: a bookkeeping commit is not an implementation commit)");
+  assert.match(r.stdout, /ac207-record\(no-files\) refused=1/,
+    "negative control: a missing commit_files ⇒ refused (缺值≠合格, 硬规则 6)");
+  assert.match(r.stdout, /ac207-select\(impl-behind-bookkeeping\) subj='feat\(e2e-verify-207\): add e2e-marker\.txt marker \(ac207\)' rc=0/,
+    "selection: the implementation commit is picked, NOT the newer 翻-done bookkeeping commit on top of it (the old head-1 form picked the bookkeeping commit)");
+  assert.match(r.stdout, /ac207-select\(bookkeeping-only\) out='' rc=1/,
+    "selection negative: a bookkeeping-only history selects nothing (⇒ no record written, 硬规则 3b)");
+  assert.match(r.stdout, /ac207-is-bookkeeping\(tasks-only\)=1/,
+    "positional judgment: a commit touching only tasks/ IS bookkeeping");
+  assert.match(r.stdout, /ac207-is-bookkeeping\(marker-file\)=1/,
+    "positional judgment: a commit touching e2e-marker.txt is NOT bookkeeping (same message text, different files — proves the judgment is positional)");
 });
 
 test("AC1 — --selfcheck is hermetic: it does not touch a real install and runs offline", () => {
