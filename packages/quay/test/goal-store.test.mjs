@@ -27,7 +27,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
-import { createGoalStore, VALID_GOAL_STATUSES, isGoalId, isCriterionId, GoalIntentConflictError } from "../src/goal-store.ts";
+import { createGoalStore, VALID_GOAL_STATUSES, isGoalId, isCriterionId, GoalIntentConflictError, parseAdjudicationTable } from "../src/goal-store.ts";
 import { gateFactories, makeGoalGate } from "../src/gate/factories/index.ts";
 
 const _createdDirs = [];
@@ -971,4 +971,122 @@ test("AC-longterm-4 — 创建时即可声明（create 路径）且 commit subje
   const subj = run("log", "--oneline", "-1", "--format=%s").trim();
   assert.match(subj, /long-term/, `字段更新必须在 commit subject 里可归因，got: ${subj}`);
   assert.equal(JSON.parse(n(["get", "AC-001"]).stdout).longTerm, true, "落盘后回读可见");
+});
+
+// ── gap-closed-goal-acs-leave-reverify-scope-standing-invariants-undeclared ───────────────────────
+// The defect: GOAL-009 (17 ACs) + GOAL-015 (4 ACs) closed on 2026-09-11 and their achieved ACs left
+// the I5 reverify scope wholesale. Which of them are STANDING guarantees (and must keep being
+// re-verified) is a HUMAN ruling — and until this task that ruling had nowhere to land: the store can
+// only report what the `long-term` FIELD is, never what it OUGHT to be. So the ruling lived as prose
+// and a ruling that never became a field was invisible on EVERY carrier (hard rule 9). These tests
+// cover the one command that closes that loop: it cross-checks the ruling table against the field.
+
+test("AC-reverify-1 — checkReverifyScope annotates each in-scope AC with goal / goalStatus / longTerm", () => {
+  const s = createGoalStore(tmpDir("reverify1"));
+  // GOAL-001 stays ACTIVE ⇒ its achieved AC is in scope via the FIRST branch of the predicate.
+  s.write("GOAL-001", { title: "active goal", status: "active", origin: "o", body: GOAL_BODY });
+  s.write("AC-001", { title: "under an active goal", status: "achieved", goal: "GOAL-001", criterion: "true", origin: "o", expect: EXPECT });
+  // GOAL-002 is CLOSED ⇒ its ACs leave the scope unless each carries `long-term: true`.
+  s.write("GOAL-002", { title: "closed goal", status: "active", origin: "o", body: GOAL_BODY });
+  s.write("AC-002", { title: "leaves with its GOAL", status: "achieved", goal: "GOAL-002", criterion: "true", origin: "o", expect: EXPECT });
+  s.write("AC-003", { title: "standing guarantee", status: "achieved", goal: "GOAL-002", criterion: "true", origin: "o", expect: EXPECT });
+  s.write("GOAL-002", { status: "achieved" });
+  s.write("AC-003", { longTerm: true });
+
+  const r = s.checkReverifyScope();
+  // The ANNOTATION is the point: a bare id list cannot tell "under an active goal" from "declared
+  // long-term", and without that dimension the leaving set cannot be audited against the ruling.
+  assert.deepEqual(r.inScope, [
+    { id: "AC-001", goal: "GOAL-001", goalStatus: "active", longTerm: false },
+    { id: "AC-003", goal: "GOAL-002", goalStatus: "achieved", longTerm: true },
+  ]);
+  assert.deepEqual(r.outOfScope, [
+    { id: "AC-002", goal: "GOAL-002", goalStatus: "achieved", longTerm: false },
+  ]);
+  assert.equal(r.scopeSize, 2, "scopeSize matches I5's own predicate");
+  assert.equal(r.evaluated, true);
+  // AC1's literal guard, kept as a TRIPWIRE ON THE PREDICATE (⛔ not as a measurement of the data):
+  // given `inAchievedReverifyScope` it is structurally empty — a GOAL whose status is `achieved` is
+  // not active, so membership required `longTerm: true`. It fires only if the predicate is WIDENED.
+  assert.deepEqual(r.inScope.filter((e) => e.goalStatus === "achieved" && !e.longTerm).map((e) => e.id), []);
+  assert.deepEqual(r.skippedNoCriterion, [], "an in-scope AC dropped for an empty criterion stays VISIBLE here");
+});
+
+test("AC-reverify-2 — a ruling that did not land as a field is reported; writing the field clears it", () => {
+  const root = tmpDir("reverify2");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  const n = (cmd) => runCli(["--root", root, ...cmd]);
+  n(["write", "GOAL-001", "--title", "closed", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  n(["write", "AC-001", "--title", "a", "--status", "achieved", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
+  n(["write", "GOAL-001", "--status", "achieved"]);
+
+  const table = path.join(root, "adjudication.md");
+  fs.writeFileSync(table, "| AC | 裁定 | 理由 |\n|---|---|---|\n| AC-001 | 常设不变式 | 会随时间自行失效 |\n");
+
+  // BEFORE: the ruling says "standing invariant" but no field carries it ⇒ the scope does NOT cover
+  // it. This is the falsifiable half — exit 1, and the AC is NAMED (enumerate, never boolean).
+  const before = n(["check", "--reverify-scope", "--adjudication", table]);
+  assert.equal(before.status, 1, `改前必须报红:\n${before.stdout}${before.stderr}`);
+  const b = JSON.parse(before.stdout);
+  assert.deepEqual(b.adjudication.standingMissing, ["AC-001"]);
+  assert.deepEqual(b.inScope, []);
+  assert.equal(b.scopeSize, 0);
+  assert.deepEqual(b.adjudication.unrecognized, [], "the ruling text itself parsed fine — the gap is the FIELD");
+
+  // AFTER: the same command, the only change being the field ⇒ green, and the AC is in scope.
+  const w = n(["write", "AC-001", "--long-term", "true"]);
+  assert.equal(w.status, 0, w.stdout + w.stderr);
+  const after = n(["check", "--reverify-scope", "--adjudication", table]);
+  assert.equal(after.status, 0, `改后必须绿:\n${after.stdout}${after.stderr}`);
+  const a = JSON.parse(after.stdout);
+  assert.deepEqual(a.adjudication.standingMissing, []);
+  assert.deepEqual(a.inScope.map((e) => e.id), ["AC-001"]);
+  assert.equal(a.scopeSize - b.scopeSize, 1, "AC4 — the scope grew by exactly the number marked");
+});
+
+test("AC-reverify-3 — the REVERSE error (ruled one-time yet still in scope) is reported, not ignored", () => {
+  const root = tmpDir("reverify3");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  const n = (cmd) => runCli(["--root", root, ...cmd]);
+  n(["write", "GOAL-001", "--title", "active", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  n(["write", "AC-001", "--title", "a", "--status", "achieved", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
+  const table = path.join(root, "adjudication.md");
+  // GOAL-001 is ACTIVE ⇒ AC-001 is in scope regardless of long-term; a ruling of "one-time" therefore
+  // contradicts the carrier. Without this arm the cross-check would only police one direction.
+  fs.writeFileSync(table, "| AC | 裁定 | 理由 |\n|---|---|---|\n| AC-001 | 一次性验收 | 不该还在域里 |\n");
+  const r = n(["check", "--reverify-scope", "--adjudication", table]);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout).adjudication.oneTimeButInScope, ["AC-001"]);
+});
+
+test("AC-reverify-4 — an unreadable ruling text is reported as `unrecognized`, never silently dropped", () => {
+  // hard rule 3b: "could not evaluate" must not share an output shape with "evaluated and fine".
+  const t = parseAdjudicationTable(
+    "| AC | 裁定 | 理由 |\n|---|---|---|\n| AC-001 | 常设不变式 | keep |\n| AC-002 | 一次性验收 | once |\n| AC-003 | 也许吧 | ambiguous |\n"
+  );
+  assert.deepEqual(t.standing, ["AC-001"]);
+  assert.deepEqual(t.oneTime, ["AC-002"]);
+  assert.deepEqual(t.unrecognized, [{ id: "AC-003", ruling: "也许吧" }]);
+  // Rows are excluded BY SHAPE (id cell must be AC-NNN), so a header/separator never parses as a row
+  // and a moved table cannot silently lose one.
+  assert.deepEqual(parseAdjudicationTable("| GOAL-001 | 常设不变式 | not an AC row |\n"), {
+    standing: [], oneTime: [], unrecognized: [],
+  });
+});
+
+test("AC-reverify-5 — the CLI reports NOT-EVALUATED (exit 3) when the scope is empty, ⛔ never exit 0", () => {
+  const root = tmpDir("reverify5");
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  const n = (cmd) => runCli(["--root", root, ...cmd]);
+  n(["write", "GOAL-001", "--title", "active", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
+  n(["write", "AC-001", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
+  const r = n(["check", "--reverify-scope"]);
+  // An unachieved AC is not in the I5 scope at all, so nothing was evaluated: "empty" must be
+  // distinguishable from "read and all fine" (hard rule 3b).
+  assert.equal(r.status, 3, `空域必须 exit 3（NOT-EVALUATED）而不是 0:\n${r.stdout}${r.stderr}`);
+  assert.equal(JSON.parse(r.stdout).scopeSize, 0);
+  assert.equal(JSON.parse(r.stdout).evaluated, false);
 });
