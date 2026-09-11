@@ -27,6 +27,7 @@ import {
   assertClosure,
   runLaydownPaths,
   runFailureStateReport,
+  reportedItems,
   CLOSED_SET_ALL,
 } from "../scripts/quay-init-closure-assertion.ts";
 
@@ -103,10 +104,13 @@ test("AC5 — the failure path is covered: a failing quay-init reports every clo
   const report = runFailureStateReport(REPO_ROOT);
   assert.ok(report !== null, "the failing quay-init must run to a non-zero exit (NOT-EVALUATED is a failure here)");
   assert.notEqual(report.exitCode, 0, "a failure-path run must exit non-zero");
-  const seen = [...report.written, ...report.unwritten];
+  // Union EVERY state the reporter can emit — a consumer that knows only a subset silently drops the
+  // rest (gap-quay-init-failure-report-existence-proxy-overreports-on-upgrade). reportedItems() is the
+  // single place that enumerates them, so this assertion cannot drift from the parser's vocabulary.
+  const seen = reportedItems(report);
   for (const item of CLOSED_SET_ALL) {
     assert.ok(seen.includes(item),
-      `the failure report must cover closed-set item: ${item} (written=${report.written} unwritten=${report.unwritten})`);
+      `the failure report must cover closed-set item: ${item} (written=${report.written} preExisting=${report.preExisting} unwritten=${report.unwritten} unreadable=${report.unreadable})`);
   }
 });
 

@@ -115,6 +115,57 @@ if [ ! -d "$WORKSPACE_ROOT" ]; then
 fi
 WORKSPACE_ROOT="$(cd "$WORKSPACE_ROOT" && pwd)"
 
+# ── pre-write closed-set snapshot (gap-quay-init-failure-report-existence-proxy-overreports-on-upgrade)
+# report_closed_set_state (below) classifies each of the seven closed-set items by comparing their
+# CURRENT fingerprint against this snapshot. Taken HERE — before any other statement can write — so the
+# comparison is by position (not by an argument that "nothing writes before the write section"), and
+# read back by the EXIT trap wherever the abort lands.
+#
+# Why the snapshot exists: the retired form tested `[ -e <path> ]` — EXISTENCE — which only coincides
+# with "this run wrote it" on a FRESH target. On a non-empty target (upgrading a project that already
+# ran quay-native) the two quantities separate and the report over-credits: a pre-write failure on an
+# existing project reported a byte-for-byte untouched `.quay/config.yml` as `written:`, i.e. it
+# described a run that changed nothing as a partial takeover (hard rule 4b: 代理量会与实际偏离 — here
+# on the dangerous side). The fingerprint comparison is CONTENT-level, so a run that rewrote a file
+# with identical bytes is also honestly reported as not-changed.
+#
+# Fingerprint: a file → sha256 of its bytes; a directory → sha256 of its sorted entry listing (the
+# exact content granularity of quay-init's only directory write, `mkdir -p`); ABSENT when the path is
+# not there. UNREADABLE is kept DISTINCT from ABSENT: a path that exists but whose content cannot be
+# read must never be reported as "not there / not written" (hard rule 3b — 读不懂输入不得返回与合格
+# 同形的值).
+CLOSED_SET_ITEMS=".quay/config.yml .quay/profiles.yml tasks goals .gitignore .claude/launch.settings.json .claude/settings.json"
+declare -A PRE_WRITE_FINGERPRINTS=()
+
+# _closed_set_fingerprint <abs-path> — ABSENT | UNREADABLE | <sha256>. Never fails the caller under
+# `set -e` (every subprocess is guarded), because it also runs inside the EXIT trap.
+_closed_set_fingerprint() {
+  local p="$1" out=""
+  if [ -d "$p" ]; then
+    out="$(ls -A "$p" 2>/dev/null | LC_ALL=C sort | sha256sum 2>/dev/null | cut -d' ' -f1)" || out=""
+    if [ -n "$out" ]; then echo "$out"; return 0; fi
+    if [ -d "$p" ]; then echo UNREADABLE; else echo ABSENT; fi
+  elif [ -f "$p" ]; then
+    out="$(sha256sum "$p" 2>/dev/null | cut -d' ' -f1)" || out=""
+    if [ -n "$out" ]; then echo "$out"; return 0; fi
+    if [ -f "$p" ]; then echo UNREADABLE; else echo ABSENT; fi
+  elif [ -e "$p" ]; then
+    echo UNREADABLE   # exists but is neither a regular file nor a directory — nothing comparable to
+  else
+    echo ABSENT
+  fi
+  return 0
+}
+
+_snapshot_closed_set() {
+  local p
+  for p in $CLOSED_SET_ITEMS; do
+    PRE_WRITE_FINGERPRINTS["$p"]="$(_closed_set_fingerprint "$WORKSPACE_ROOT/$p")"
+  done
+  return 0
+}
+_snapshot_closed_set
+
 # gap-the-runtime-has-nowhere-safe-to-land: the RUNTIME LANDING BASE. The quay runtime (Core
 # bundle + native-provider bundle + provider.yml) used to land under `<target>/vendor/quay/` —
 # `vendor/` is a RESERVED directory name in Go (module vendoring resolves it), and `<target>/dist/`
@@ -2078,20 +2129,36 @@ if [ "${BASH_SOURCE[0]}" != "${0}" ]; then
   return 0
 fi
 
-# report_closed_set_state — the AC3 failure-path report: mechanically list the seven-item closed-set
-# written/unwritten state (gap-quay-init-hard-requires-tmux-session-and-leaves-partial-write). Wired as
-# an EXIT trap below so a non-zero exit — a pre-write fail-closed check (test command / plugin root /
-# worktree root), a mid-write abort, or a post-write auto-commit failure — always reports WHICH items
-# landed. This makes "initialized half-way" distinguishable from "not initialized" (hard rule 3b
-# write-side mirror: a failed init must not be conflated with a complete one).
+# report_closed_set_state — the AC3 failure-path report: mechanically list each of the seven closed-set
+# items in ONE of four states, by comparing the current fingerprint against the pre-write snapshot:
+#   written:      this run created it, or changed its content
+#   pre-existing: it was already there before this run and this run left it byte-unchanged
+#   unwritten:    it is not there now
+#   unreadable:   it is there but its content could not be read (never folded into `unwritten:` —
+#                 hard rule 3b: "could not look" must not be reported with the shape of a verdict)
+# Wired as an EXIT trap below so a non-zero exit — a pre-write fail-closed check (test command / plugin
+# root / worktree root), a mid-write abort, or a post-write auto-commit failure — always reports WHAT
+# THIS RUN ACTUALLY DID. The retired existence test (`[ -e ]`) could not tell "written now" from
+# "already there", so on a non-empty (upgrade) target it credited a no-op failure with rewriting config
+# (gap-quay-init-failure-report-existence-proxy-overreports-on-upgrade). This keeps "initialized
+# half-way" distinguishable from "not initialized" (hard rule 3b write-side mirror) AND from "already
+# initialized before this run" — the third distinction the upgrade path needs and existence cannot make.
 report_closed_set_state() {
-  for p in .quay/config.yml .quay/profiles.yml tasks goals .gitignore .claude/launch.settings.json .claude/settings.json; do
-    if [ -e "$WORKSPACE_ROOT/$p" ]; then
-      echo "  written:   $p" >&2
+  local p now before
+  for p in $CLOSED_SET_ITEMS; do
+    now="$(_closed_set_fingerprint "$WORKSPACE_ROOT/$p")"
+    before="${PRE_WRITE_FINGERPRINTS[$p]:-ABSENT}"
+    if [ "$now" = UNREADABLE ]; then
+      echo "  unreadable:   $p" >&2
+    elif [ "$now" = ABSENT ]; then
+      echo "  unwritten:    $p" >&2
+    elif [ "$before" = "$now" ]; then
+      echo "  pre-existing: $p" >&2
     else
-      echo "  unwritten: $p" >&2
+      echo "  written:      $p" >&2
     fi
   done
+  return 0
 }
 
 # _on_exit — EXIT trap: report the closed-set state on a non-zero exit only (a success run is already
