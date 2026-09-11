@@ -545,7 +545,10 @@ verify_coldstart_mode() {
         fail=1
         continue
       fi
-      ac207_path_export='export PATH="$HOME/.local/bin:$PATH"'
+      # AC207_POLL_SECS: the e2e task's first worker attempt can fail the fan-in suite cert (non-inert
+      # delta) and need a retry, pushing task-done past the verify script's 1800s default poll window
+      # (实测 2026-09-11: done@~30min, poll 1800s 过期 ~19s 早 → 记录未写)。3600s 给足双次尝试余量。
+      ac207_path_export='export PATH="$HOME/.local/bin:$PATH"; export AC207_POLL_SECS="${AC207_POLL_SECS:-3600}"'
       ac207_extra=' --ac207-e2e --driving-profiles "$HOME/quay-driving-profiles.yml"'
     fi
     remote_script=$(cat <<REMOTE
