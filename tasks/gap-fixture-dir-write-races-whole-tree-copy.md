@@ -165,13 +165,89 @@ NOT-EVALUATED: 1/1 input(s) did not finish evaluation — a file that never load
 
 ### 落地与门
 
-- 本分支 vs develop：**7 个文件**（3 个新增判据半件 + 1 个新增判据自测 + `workflow-replay.test.mjs` + 能力清单 + 任务体）。
+- 本分支 vs develop：**8 个文件**（3 个新增判据半件 + 1 个新增判据自测 + `workflow-replay.test.mjs` + 能力清单 + 任务体 + 续做轮补缝的 `plugin/test/packaging-hygiene-check.test.mjs`，见下节）。
 - ⛔ `test/cold-start-oneliner-e2e.sh` 未被本任务改动：`git diff --name-only $(git merge-base HEAD develop)..HEAD -- test/cold-start-oneliner-e2e.sh` = **0 行**（DoD 第 3 条）。
 - 不变式写进代码注释 **3 处**（`grep -l INVARIANT`）：`plugin/scripts/checked-in-write-guard.cjs`、`plugin/scripts/checked-in-write-check.ts`、`plugin/test/workflow-replay.test.mjs` —— 即「判据本体」「判据入口」「被修的那个测试」。另两个半件（`checked-in-write-run.cjs`、判据自测）不含该行；Evidence 不把它说成 5 处。
 - anti-drift（fan-in 硬失败步）在本工作树实跑：`ANTI-DRIFT OK: task gap-fixture-dir-write-races-whole-tree-copy — 7 actual file(s), all within declared Touches (7 glob(s))`。
 - scoped 门：`bash scripts/test.sh --for-task gap-fixture-dir-write-races-whole-tree-copy --allow-thin` ⇒ `SCOPED_EXIT=0`（`ℹ tests 45 / ℹ pass 45 / ℹ fail 0`）。**该门共红了两次，两次都是本任务自己的产物**：①`test-isolation-check` 报新增测试文件 `mkdtemp-no-cleanup`——判据自己泄漏临时目录，正是它自己所判的那条规则 ⇒ 改 `t.after` 注册清理，并让判据自身清理其 scratch 日志目录；②`rhythm-consumer-check` 判据2 报 `checked-in-write-check.ts: 按需 without a CONSUMER row — 「按需」=「无人」, no presser declared` ⇒ 补 CONSUMER 行声明谁按、什么条件按。**第 ② 条是能力清单自己的入口闸查不出来的**（它只要求 question/cadence/invalidation/last-reaffirmed/matching 五个字段）——「一个按需跑的检查若没人按，等于没有」这条只有 rhythm 检查看得见。
 - 面扫（硬规则 5b）**部分完成，不作完备性主张**：修复后的判据在 6 路并行、840s 预算内实测覆盖 `plugin/test/**` 的 **67/320** 个 `*.test.mjs`（子进程 guard 日志计数：`evaluated=67`、`violations=0`、`evaluationFailed=0`）；预算到时未扫完的部分**不**等于「无违例」。面扫此前抓到的两条都是判据自身的误报（见 AC4 末段），修完复扫 0 条真违例——但复扫覆盖率同样只有 67/320。
 - 一句题外观察（**未验证、不在本任务范围、不立前置**，硬规则 12）：同一「整树拷贝撞并发写者」形状在 `refresh-worktree-quay` 复制 `.quay/` 时也出现——scoped 门自己的输出里有 `cp: cannot stat '/home/yale/work/quay/.quay/fan-in-suite-*.log': No such file or directory`。写者是 driver 而非测试、载体是 gitignored 的运行时状态，危害未测 ⇒ 只记观察。
+
+### 续做轮（2026-09-11）：解除阻断 fan-in 的套件红 —— 补 `resourceGateArgv` 测试缝
+
+本任务前两轮 fan-in 均以**同一条**套件红 exit-not-landed，而该红**不在本任务 delta 内**：
+
+```
+test at plugin/test/packaging-hygiene-check.test.mjs:148:1
+✖ runPackagingHygiene drift ⇒ failed + gap-filing spawned (AC3)
+  AssertionError [ERR_ASSERTION]: drift must trigger gap-filing
+      at .../plugin/test/packaging-hygiene-check.test.mjs:161:10
+```
+
+**成因（判别性对照，不是解释）**：该用例调 `runPackagingHygiene` 时漏传 `resourceGateArgv` ⇒ 内部
+`resourceGateCheck` 回落 `resolveResourceGateScript()`，跑**真实宿主**的 `plugin/scripts/resource-gate.sh
+--for full-suite --json`。该闸自 `d640b8e1b` 起带 load 判据（`load >= nproc × LOAD_OVER_FACTOR`，默认 2
+⇒ WAIT）⇒ 全量 suite 26 路并发把 load 推过阈值 ⇒ `gate.go=false` ⇒ `gapFiled` **按设计**为 false
+（fail-closed 推迟 spawn，**产品代码没错，错的是单测没注入已有的测试缝**）⇒ 断言恒红。
+失败因此是**宿主负载的函数**：隔离跑绿、套件内红。
+
+复现（一条命令，把闸强制推进 WAIT 带）：
+
+```
+$ RESOURCE_GATE_LOAD_OVER_FACTOR=0.01 node --test plugin/test/packaging-hygiene-check.test.mjs
+✖ runPackagingHygiene drift ⇒ failed + gap-filing spawned (AC3)
+  AssertionError [ERR_ASSERTION]: drift must trigger gap-filing
+      at .../plugin/test/packaging-hygiene-check.test.mjs:161:10   ← 与 suite 日志同一行、逐字同句
+ℹ tests 9 / ℹ pass 8 / ℹ fail 1
+```
+
+⇒ 成因被**独立复现**（同一断言原文、同一行号），不是「大概是环境抖动」。修复前该文件**不在**
+`known-load-sensitive` 注册表内（`grep packaging-hygiene plugin/scripts/known-load-sensitive.ts` 零命中）
+——它是确定性问题，注册表绕过不是正解。
+
+**修法与 5b 枚举**（先数同族，不只修被报出来的那一个）：
+
+```
+$ for f in $(grep -rln 'gapWorkerCmd|runPackagingHygiene' --include=*.mjs plugin/test packages/*/test); do
+    echo "$f calls=$(grep -c gapWorkerCmd $f) seams=$(grep -c resourceGateArgv $f)"; done
+goal-triage-fresh-draft-not-retire.test.mjs  calls=1  seams=1
+goal-driver.test.mjs                         calls=10 seams=7   ← 3 处差：1 处 halted 短路 + 2 处断言消息字符串，均非调用
+packaging-hygiene-check.test.mjs             calls=2  seams=0   ← 唯一例外（本处）
+goal-sufficiency-gate.test.mjs               calls=1  seams=1
+goal-sufficiency-not-evaluated.test.mjs      calls=1  seams=1
+goal-triage.test.mjs                         calls=2  seams=2
+goal-sufficiency-semantic-covered.test.mjs   calls=1  seams=1
+goal-triage-activate-executed.test.mjs       calls=3  seams=3
+goal-posture-blocks-activate.test.mjs        calls=1  seams=1
+```
+
+**全仓库恰一个文件漏缝**，即本文件；其另一处调用是 `halted: true` 短路（按设计不触闸）。
+同位素入口 `runPoolQualityJudge`（`plugin/test/quality-gate-driver.test.mjs`）走**位置参数** `gateArgv`，
+6 处可达闸的调用全部注入 fake GO 脚本 ⇒ **不同族**。
+
+修法 = 补既有的测试缝 `resourceGateArgv: ['true']`（仓库惯例：8 个兄弟文件已如此）。
+另补一条 **WAIT 负控制**（`['bash','-c','exit 1']`）⇒ 缝在**两个方向**都被钉住：删掉缝后，
+两个用例中必有一个变红，**与负载无关**。
+
+**能取假（双向对照）**：把两个缝各翻向反面 ⇒ 两条断言各自变红：
+
+```
+$ node --test plugin/test/packaging-hygiene-check.test.mjs      # 缝翻转后（临时）
+✖ runPackagingHygiene drift ⇒ failed + gap-filing spawned (AC3)
+  AssertionError [ERR_ASSERTION]: drift must trigger gap-filing
+✖ runPackagingHygiene resource-gate WAIT ⇒ drift reported but gap-filing deferred (fail-closed)
+  AssertionError [ERR_ASSERTION]: resource-gate WAIT must defer the gap-filing spawn
+ℹ tests 10 / ℹ pass 8 / ℹ fail 2
+```
+
+还原后逐字节相同（`diff` 空、打印 `RESTORED-IDENTICAL`），两臂全绿：
+
+```
+$ node --test plugin/test/packaging-hygiene-check.test.mjs                                      ℹ tests 10 / pass 10 / fail 0
+$ RESOURCE_GATE_LOAD_OVER_FACTOR=0.01 node --test plugin/test/packaging-hygiene-check.test.mjs  ℹ tests 10 / pass 10 / fail 0
+```
+
+提交 `627f3739d`。**本续做轮只加了一个测试缝 + 一条负控制用例，未改动任何 AC 判据、未翻任何复选框。**
 
 ## Touches
 
@@ -181,4 +257,5 @@ NOT-EVALUATED: 1/1 input(s) did not finish evaluation — a file that never load
 - plugin/scripts/checked-in-write-run.cjs
 - plugin/scripts/capability-catalog.sh
 - plugin/test/checked-in-write-check.test.mjs
+- plugin/test/packaging-hygiene-check.test.mjs
 - tasks/gap-fixture-dir-write-races-whole-tree-copy.md
