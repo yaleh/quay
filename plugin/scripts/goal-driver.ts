@@ -343,6 +343,22 @@ export function goalAchievedFromRecords(records: Array<Record<string, unknown>>,
  *  not-evaluated = 判不出（⛔ 不与 covered 同形，硬规则 3b——语义半不可用时不得放行关闭）。 */
 export type SufficiencyVerdict = "covered" | "insufficient" | "not-evaluated";
 
+/** not-evaluated 的成因（AC3 三方向可区分；⛔ 三种成因都仍是 not-evaluated，只是【可区分】——硬规则 3b
+ *  与 cause-carrier-must-be-distinguishable：把多个不同成因写成同一取值，会让「机制如实报语义分歧」与
+ *  「判定器根本没跑起来」同形）：
+ *  samples-disagree   两次取样不一致（一致性守卫正确工作——诚实报判不出，⛔ 不掷硬币），这是好消息；
+ *  judge-unavailable  判定器不可用：空命令前缀 / launchArgv 失败（profiles 缺失）/ spawn 失败 / 超时 /
+ *                     非零退出（判定器进程本身失败）——环境问题，与判据内容无关；
+ *  judge-unparseable  判定器跑通（exit 0）但 stdout 无法解析成明确的 covered/insufficient——读不懂。 */
+export type SufficiencyNotEvaluatedCause = "samples-disagree" | "judge-unavailable" | "judge-unparseable";
+
+/** 充分性语义判定的明细：verdict 三态 + not-evaluated 的成因。cause 只在 verdict==="not-evaluated"
+ *  时非 null；covered/insufficient 的 cause 恒 null（无成因可言）。 */
+export interface SufficiencyVerdictDetail {
+  verdict: SufficiencyVerdict;
+  cause: SufficiencyNotEvaluatedCause | null;
+}
+
 /** I2（GOAL 层）充分性闸：flip 当且仅当「全部【在域】AC achieved」且充分性判定为 `covered`。
  *  insufficient / not-evaluated / null ⇒ 不 flip（GOAL-010 退出条件②：覆盖与否判不出时取
  *  「未评估」而非放行；GOAL-010 风险 2：判不出 ⇒ 不 flip 且报 not-evaluated）。 */
@@ -450,83 +466,175 @@ export function sufficiencyCacheKey(
   return createHash("sha256").update(canonical).digest("hex");
 }
 
-/** 充分性裁决的确定性缓存（模块级）：key = sufficiencyCacheKey，value = 已【确定】的 SufficiencyVerdict
- *  （covered / insufficient）。⛔ not-evaluated 永不入缓存——缓存只对【已确定】的输入生效（硬规则 3b：
- *  缓存不得把「判不出」变成「合格」）。模块级 ⇒ 常驻 driver 同一进程内跨轮持久（每轮 runGoalRound →
- *  semanticSufficiencyVerdict 命中同一份 Map）；进程重启即清空，重启后首次判定重新 2 次取样并 commit，
- *  确定性随即可恢复（⛔ 仍要 2 次一致才入缓存，不是把一次抽签 latch 成永久答案）。 */
-const sufficiencyCache = new Map<string, SufficiencyVerdict>();
+/** 充分性裁决的确定性缓存（模块级）：key = sufficiencyCacheKey，value = 已【确定】的裁决 + 写入时刻。
+ *  ⛔ not-evaluated 永不入缓存——缓存只对【已确定】的输入生效（硬规则 3b：缓存不得把「判不出」变成
+ *  「合格」）。模块级 ⇒ 常驻 driver 同一进程内跨轮持久（每轮 runGoalRound → semanticSufficiencyVerdict
+ *  命中同一份 Map）。
+ *
+ *  跨重启持久（gap-sufficiency-cache-in-memory-only…）：内存 Map 之外另落盘到 .quay/ 下的载体
+ *  （sufficiencyCacheDir 指定目录；生产 runGoalRound 传 path.join(root, ".quay")）。进程启动时按该目录
+ *  加载，命中即用——同一输入跨 goal-driver 重启仍给同一裁决（⛔ 仍只缓存 2 次一致才 commit 的确定裁决，
+ *  不是把一次抽签 latch 成永久答案）。 */
+interface SufficiencyCacheEntry {
+  verdict: SufficiencyVerdict; // 只存 covered / insufficient（⛔ not-evaluated 永不入缓存）
+  ts: string;                  // 该裁决 commit 入缓存的写入时刻（ISO）
+}
 
-/** 清空充分性裁决缓存（测试缝：不同 test 隔离状态；⛔ 生产不调）。 */
+const sufficiencyCache = new Map<string, SufficiencyCacheEntry>();
+
+/** 缓存载体 basename（.quay/ 下，同 goal-round.jsonl 族——runtime 载体，gitignored/不 commit）。 */
+const SUFFICIENCY_CACHE_BASENAME = "goal-sufficiency-cache.json";
+
+/** 已加载缓存的目录（load 后）。null = 未加载（仅内存态，未指定落盘目录）。进程重启后回 null，
+ *  首次判定按传入目录重新加载（跨重启存活的那一半）。 */
+let sufficiencyCacheDir: string | null = null;
+
+/** 按目录加载落盘缓存（幂等：同目录只加载一次）。⛔ 读不到/读不懂 ⇒ 空缓存开始（fail-closed：
+ *  「读不懂」不得冒充「命中」——重新判，硬规则 3b）。只认已确定裁决（covered/insufficient）的条目，
+ *  not-evaluated 条目即使出现也被丢弃（防御性：写侧本就不落 not-evaluated）。 */
+function ensureSufficiencyCacheLoaded(dir: string): void {
+  if (sufficiencyCacheDir === dir) return;
+  sufficiencyCache.clear();
+  sufficiencyCacheDir = dir;
+  try {
+    const raw = fs.readFileSync(path.join(dir, SUFFICIENCY_CACHE_BASENAME), "utf8");
+    const parsed = JSON.parse(raw) as { entries?: unknown } | null;
+    const entries = parsed && typeof parsed === "object" ? parsed.entries : null;
+    if (entries && typeof entries === "object") {
+      for (const [k, v] of Object.entries(entries as Record<string, unknown>)) {
+        if (v && typeof v === "object") {
+          const verdict = (v as { verdict?: unknown }).verdict;
+          const ts = (v as { ts?: unknown }).ts;
+          if (verdict === "covered" || verdict === "insufficient") {
+            sufficiencyCache.set(k, { verdict, ts: typeof ts === "string" ? ts : "" });
+          }
+        }
+      }
+    }
+  } catch {
+    /* 无缓存文件 / 读不懂 ⇒ 空缓存开始（重新判，⛔ 不冒充命中） */
+  }
+}
+
+/** 落盘缓存（整份覆盖写；写失败 ⇒ 内存缓存仍在，跨重启退化到重新判——观测性退化，⛔ 非正确性破坏）。 */
+function persistSufficiencyCache(dir: string): void {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const entries: Record<string, SufficiencyCacheEntry> = {};
+    for (const [k, v] of sufficiencyCache) entries[k] = v;
+    fs.writeFileSync(path.join(dir, SUFFICIENCY_CACHE_BASENAME), JSON.stringify({ version: 1, entries }, null, 2) + "\n");
+  } catch {
+    /* 写失败 ⇒ 不抛（本轮裁决不受影响；跨重启存活退化为进程内持久） */
+  }
+}
+
+/** 清空充分性裁决缓存（测试缝：不同 test 隔离状态；⛔ 生产不调）。同时解绑落盘目录，使下一次按传入
+ *  目录重新加载（测试缝模拟「进程重启」：内存 Map 清空 + 从盘上重新 load，跨重启存活那条路径可被
+ *  直接测到，无需真的起两个进程）。 */
 export function resetSufficiencyCacheForTest(): void {
   sufficiencyCache.clear();
+  sufficiencyCacheDir = null;
 }
 
 /** 充分性裁决缓存的只读快照（测试断言「入缓存 / 不入缓存」用；⛔ 生产不调）。 */
-export function sufficiencyCacheSnapshot(): ReadonlyMap<string, SufficiencyVerdict> {
+export function sufficiencyCacheSnapshot(): ReadonlyMap<string, SufficiencyCacheEntry> {
   return sufficiencyCache;
 }
 
 /** 单次充分性语义采样（一次 LLM spawn）。⛔ 不可用 / 超时 / 读不懂 ⇒ not-evaluated，绝不回落 covered
  *  （parseSemanticSufficiencyVerdict 的 fail-closed）。从 semanticSufficiencyVerdict 抽出，供「2 次一致
- *  才入缓存」的一致性守卫对同一输入做两次独立采样。 */
+ *  才入缓存」的一致性守卫对同一输入做两次独立采样。
+ *
+ *  AC3 成因（cause）：把 not-evaluated 拆成可区分的三种成因，⛔ 三者仍是 not-evaluated（不新增「合格」态）：
+ *  judge-unavailable（空命令 / launchArgv 失败 / spawn 失败 / 超时 / 非零退出）与 judge-unparseable
+ *  （exit 0 但输出不可解析）在此处按「判定器跑没跑通」区分，samples-disagree 由上层 2 次取样不一致产出。 */
 async function sampleSemanticSufficiency(
   goal: Record<string, unknown>,
   inScopeAcs: Array<Record<string, unknown>>,
   root: string,
   opts: { sufficiencyCmd?: string[] | null; sufficiencyTimeoutMs?: number },
-): Promise<SufficiencyVerdict> {
+): Promise<{ verdict: SufficiencyVerdict; cause: SufficiencyNotEvaluatedCause | null }> {
   const prompt = buildSufficiencyPrompt(goal, inScopeAcs, root);
   let argv: string[];
   try {
     if (opts.sufficiencyCmd != null) {
-      if (opts.sufficiencyCmd.length === 0) return "not-evaluated";
+      if (opts.sufficiencyCmd.length === 0) return { verdict: "not-evaluated", cause: "judge-unavailable" };
       argv = [...opts.sufficiencyCmd, prompt];
     } else {
       argv = launchArgv("fix-worker", prompt, root);
     }
   } catch {
     // launchArgv 抛错（profiles.yml 缺失/非法）⇒ 判不出，⛔ 不回落 covered。
-    return "not-evaluated";
+    return { verdict: "not-evaluated", cause: "judge-unavailable" };
   }
   const r = await runAsync(argv, { timeoutMs: opts.sufficiencyTimeoutMs ?? SUFFICIENCY_TIMEOUT_MS });
-  if (r.error) return "not-evaluated";
-  return parseSemanticSufficiencyVerdict(r.stdout, r.status);
+  if (r.error) return { verdict: "not-evaluated", cause: "judge-unavailable" };
+  // 非零退出 = 判定器进程本身失败（未跑通）⇒ 不可用，⛔ 不是「输出不可解析」。
+  if (r.status !== 0) return { verdict: "not-evaluated", cause: "judge-unavailable" };
+  const parsed = parseSemanticSufficiencyVerdict(r.stdout, r.status);
+  if (parsed === "not-evaluated") return { verdict: "not-evaluated", cause: "judge-unparseable" };
+  return { verdict: parsed, cause: null };
 }
 
-/** 充分性语义判定（AC-222 语义半 + 本条确定性缓存）：机械可证部分判不出（有退出条件 + 有在域 AC）时，
- *  判「这组 AC 是否覆盖退出条件」⇒ covered / insufficient。⛔ 硬约束：LLM 不可用 / 超时 / 读不懂 ⇒
- *  not-evaluated，绝不允许回落成 covered（parseSemanticSufficiencyVerdict 的 fail-closed）。
+/** semanticSufficiencyVerdict / Detail 的选项。 */
+export interface SufficiencyVerdictOpts {
+  sufficiencyCmd?: string[] | null;
+  sufficiencyTimeoutMs?: number;
+  /** 缓存落盘目录（.quay 类）。null/undefined ⇒ 只内存缓存（⛔ 不落盘——单测直接调本函数默认此态，
+   *  不污染 repo .quay/）。生产 runGoalRound 传 path.join(root, ".quay") ⇒ 跨重启存活（AC2）。 */
+  sufficiencyCacheDir?: string | null;
+}
+
+/** 充分性语义判定（AC-222 语义半 + 确定性缓存 + 成因拆分）：机械可证部分判不出（有退出条件 + 有在域
+ *  AC）时，判「这组 AC 是否覆盖退出条件」⇒ covered / insufficient。⛔ 硬约束：LLM 不可用 / 超时 /
+ *  读不懂 ⇒ not-evaluated，绝不允许回落成 covered（parseSemanticSufficiencyVerdict 的 fail-closed）。
  *
- *  确定性（本条）：同一输入（sufficiencyCacheKey 相同）跨轮/跨调用给出同一裁决——
- *  ① 命中缓存 ⇒ 直接返回缓存值（⛔ 不重问 LLM）；
+ *  确定性（跨轮/跨重启）：同一输入（sufficiencyCacheKey 相同）给同一裁决——
+ *  ① 命中缓存 ⇒ 直接返回缓存值（⛔ 不重问 LLM）；sufficiencyCacheDir 指定时缓存落盘，进程重启后
+ *     按同目录重新加载 ⇒ 跨重启仍命中（AC2）；
  *  ② 缓存未命中 ⇒ 首次判定做 2 次独立采样，2 次一致才入缓存并返回（防把一次抽签 latch 成永久答案）；
- *     2 次不一致 ⇒ 记 not-evaluated、不入缓存，下一轮再试（⛔ 不取多数票——那仍是概率判定，且更贵）；
- *  ③ 缓存未命中 ∧ 采样判不出（不可用/超时/读不懂）⇒ not-evaluated（⛔ 不把「判不出」变「合格」，也不
- *     沿用别的输入的缓存值——缓存 key 按输入隔离）。
+ *     2 次不一致 ⇒ 记 not-evaluated（cause=samples-disagree）、不入缓存，下一轮再试（⛔ 不取多数票）；
+ *  ③ 缓存未命中 ∧ 采样判不出 ⇒ not-evaluated（cause=judge-unavailable / judge-unparseable），⛔ 不把
+ *     「判不出」变「合格」，也不沿用别的输入的缓存值——缓存 key 按输入隔离。
+ *  返回 SufficiencyVerdictDetail：verdict 三态 + not-evaluated 的成因（cause 只在 not-evaluated 时非 null，
+ *  ⛔ 成因不改变判定语义——三种成因都仍是 not-evaluated，goalFlipDecision 只看 verdict）。
  *  sufficiencyCmd = 测试缝（同 readyPoolCmd 的数组形态：覆盖命令前缀，prompt 作末参数追加）；
  *  缺省 = launchArgv("fix-worker") 真 LLM。 */
+export async function semanticSufficiencyVerdictDetail(
+  goal: Record<string, unknown>,
+  inScopeAcs: Array<Record<string, unknown>>,
+  root: string,
+  opts: SufficiencyVerdictOpts = {},
+): Promise<SufficiencyVerdictDetail> {
+  const key = sufficiencyCacheKey(goal, inScopeAcs);
+  if (opts.sufficiencyCacheDir) ensureSufficiencyCacheLoaded(opts.sufficiencyCacheDir);
+  const cached = sufficiencyCache.get(key);
+  if (cached !== undefined) return { verdict: cached.verdict, cause: null };
+
+  // 缓存未命中 ⇒ 首次判定：2 次独立采样，2 次一致才入缓存。
+  const s1 = await sampleSemanticSufficiency(goal, inScopeAcs, root, opts);
+  if (s1.verdict === "not-evaluated") return { verdict: "not-evaluated", cause: s1.cause };
+  const s2 = await sampleSemanticSufficiency(goal, inScopeAcs, root, opts);
+  if (s2.verdict === "not-evaluated") return { verdict: "not-evaluated", cause: s2.cause };
+  if (s1.verdict === s2.verdict) {
+    const entry: SufficiencyCacheEntry = { verdict: s1.verdict, ts: new Date().toISOString() };
+    sufficiencyCache.set(key, entry);
+    if (opts.sufficiencyCacheDir) persistSufficiencyCache(opts.sufficiencyCacheDir);
+    return { verdict: s1.verdict, cause: null };
+  }
+  // 2 次不一致 ⇒ 判不出、不入缓存，下一轮再试（⛔ 不取多数票）。
+  return { verdict: "not-evaluated", cause: "samples-disagree" };
+}
+
+/** 充分性语义判定的【仅裁决】视图（向后兼容既有调用/单测——只返回 SufficiencyVerdict，成因丢弃）。
+ *  需要成因的路径（runGoalRound 写轮记录）用 semanticSufficiencyVerdictDetail。 */
 export async function semanticSufficiencyVerdict(
   goal: Record<string, unknown>,
   inScopeAcs: Array<Record<string, unknown>>,
   root: string,
-  opts: { sufficiencyCmd?: string[] | null; sufficiencyTimeoutMs?: number } = {},
+  opts: SufficiencyVerdictOpts = {},
 ): Promise<SufficiencyVerdict> {
-  const key = sufficiencyCacheKey(goal, inScopeAcs);
-  const cached = sufficiencyCache.get(key);
-  if (cached !== undefined) return cached;
-
-  // 缓存未命中 ⇒ 首次判定：2 次独立采样，2 次一致才入缓存。
-  const s1 = await sampleSemanticSufficiency(goal, inScopeAcs, root, opts);
-  if (s1 === "not-evaluated") return "not-evaluated";
-  const s2 = await sampleSemanticSufficiency(goal, inScopeAcs, root, opts);
-  if (s2 === "not-evaluated") return "not-evaluated";
-  if (s1 === s2) {
-    sufficiencyCache.set(key, s1);
-    return s1;
-  }
-  // 2 次不一致 ⇒ 判不出、不入缓存，下一轮再试（⛔ 不取多数票）。
-  return "not-evaluated";
+  return (await semanticSufficiencyVerdictDetail(goal, inScopeAcs, root, opts)).verdict;
 }
 
 // ── 缺口五态（G7 + G9 stalled + done-unresolved，硬规则 3b：读不懂输入不得返回与「合格」同形——
@@ -952,7 +1060,8 @@ export interface GoalRoundOptions {
 
 export interface GoalRoundResult {
   fact: Fact<Record<string, unknown>>;
-  /** 每条 active GOAL 的充分性判定（独立 Fact，name="goal-sufficiency"，value.sufficiency={goal, verdict}，
+  /** 每条 active GOAL 的充分性判定（独立 Fact，name="goal-sufficiency"，value.sufficiency={goal, verdict}
+   *  ＋ not-evaluated 时另有 cause ∈ 三成因 samples-disagree/judge-unavailable/judge-unparseable；
    *  verdict ∈ 三态 covered/insufficient/not-evaluated）。AC-212 判据 grep 的正是 facts[].value.sufficiency。
    *  零 active GOAL ⇒ 空数组——字段仍在，「查过且零条」与「未跑判定」按字段存在性区分（硬规则 3b）。 */
   sufficiencyFacts: Array<Fact<Record<string, unknown>>>;
@@ -1009,18 +1118,33 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     // 充分性闸（AC-212 机械 + AC-222 语义）：先机械可证部分（无退出条件 / 零在域 AC ⇒ insufficient），
     // 有退出条件 + 有在域 AC ⇒ 语义判定（LLM 判 covered/insufficient；不可用/超时/读不懂 ⇒ not-evaluated，
     // ⛔ 绝不回落 covered——semanticSufficiencyVerdict 的 fail-closed）。
+    // 缓存落盘目录 = path.join(root, ".quay")（生产 root = 仓库根 ⇒ 跨重启存活；测试 root = 临时目录 ⇒
+    // 落临时目录、随 mkdtemp 清理，不污染 repo）。
     const mechanical = goalSufficiencyVerdict(goal, inScope);
-    const sufficiency = mechanical === "not-evaluated"
-      ? await semanticSufficiencyVerdict(goal, inScope, root, {
-          sufficiencyCmd: opts.sufficiencyCmd,
-          sufficiencyTimeoutMs: opts.sufficiencyTimeoutMs,
-        })
-      : mechanical;
+    let sufficiency: SufficiencyVerdict;
+    let sufficiencyCause: SufficiencyNotEvaluatedCause | null = null;
+    if (mechanical === "not-evaluated") {
+      const detail = await semanticSufficiencyVerdictDetail(goal, inScope, root, {
+        sufficiencyCmd: opts.sufficiencyCmd,
+        sufficiencyTimeoutMs: opts.sufficiencyTimeoutMs,
+        sufficiencyCacheDir: path.join(root, ".quay"),
+      });
+      sufficiency = detail.verdict;
+      sufficiencyCause = detail.cause;
+    } else {
+      sufficiency = mechanical;
+    }
     sufficiencyFacts.push({
       name: "goal-sufficiency",
-      value: { sufficiency: { goal: gid, verdict: sufficiency } },
+      value: {
+        sufficiency: {
+          goal: gid,
+          verdict: sufficiency,
+          ...(sufficiencyCause !== null ? { cause: sufficiencyCause } : {}),
+        },
+      },
       state: "verified",
-      reason: `sufficiency=${sufficiency}（在域 AC ${inScope.length} 条）`,
+      reason: `sufficiency=${sufficiency}${sufficiencyCause !== null ? `（cause=${sufficiencyCause}）` : ""}（在域 AC ${inScope.length} 条）`,
     });
     // I2（GOAL 层）：充分性闸——全部在域 AC achieved 且充分性 covered ⇒ 机械 flip GOAL（裁定 5）。
     // insufficient / not-evaluated ⇒ 不 flip（GOAL-010 退出条件②：判不出取「未评估」而非放行）。
