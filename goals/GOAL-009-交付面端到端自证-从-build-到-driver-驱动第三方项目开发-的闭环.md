@@ -1,7 +1,7 @@
 ---
 id: GOAL-009
 title: 交付面端到端自证 —— 从 build 到「driver 驱动第三方项目开发」的闭环
-status: active
+status: achieved
 kind: goal
 origin: 人 2026-09-09 四条裁定：① 点火依靠会话投递，后续驱动依靠
   *-drivers，但仍应可间断使用会话（和会话投递）进行调节（典型地是问题分析与创建 goal/task），就像本项目当前的状态；② 退役
@@ -22,6 +22,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-09-11T03:04:50.838Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 ---
 ## 背景
 
