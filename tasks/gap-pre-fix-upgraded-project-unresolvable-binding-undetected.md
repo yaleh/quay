@@ -1,7 +1,7 @@
 ---
 id: gap-pre-fix-upgraded-project-unresolvable-binding-undetected
 title: 按旧语义升级过的项目停在绑定不到的裸 `quay-native` 上，且没有任何检查会发现——只能靠人想起来重跑 quay-init
-status: todo
+status: ready
 labels:
   - gap
   - defect
