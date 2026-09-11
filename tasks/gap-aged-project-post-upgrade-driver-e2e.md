@@ -397,3 +397,52 @@ AC-239 在但 task_status=ready     ⇒ CAUSE-B (exit 1)
 3. `plugin/scripts/develop-deliver-tgz.sh`：与 develop 的语义并集（新增的 `--selfcheck-transport-closure`
    与既有的 `--selfcheck-upgrade-pairing` 两份自检**都在**；升级模式的 remote_script 同时发 node floor 行
    与 AC239 的 poll 参数）。
+
+### 2026-09-11 续做轮：`step=suite` 红的根因是**测试钉了一份自己不拥有的活产物的副本**（非本任务缺陷）
+
+**现象**：上一轮机械 fan-in 倒在 `step=suite`，全量套件 4452 tests / **1 fail**，唯一失败文件
+`plugin/test/ac214-freshness-subject-set.test.mjs`（`grep -c '^test at '` = 1、`__PERFILE__ passed=false` = 1）：
+AC4 期望 stderr 含守卫文本 `carrier-type AC with no freshness bound in NEED`，实际是
+`no evidence yet: …AC-239`。
+
+**归属判定（先判归属，不先修）**：该测试文件与 `goals/AC-214-*.md` 在本分支上**与 develop 逐字节相同**
+（`git diff develop...HEAD --stat` 对两者为空）⇒ **100% develop 侧红**，不是本任务 delta 引入的。
+
+**根因**：develop `a26bd6c66`（goal driver）把 `GOAL-009-AC-239` 折进 AC-214 的 `NEED`——这是**对的**
+（AC-239 判据正文只读载体、`SRC_RE` 不匹配任何源码扩展名 ⇒ 按 AC-244 自己的规则就是载体型）。
+但它让测试里那份 `NEED_IDS = [201,203,205,207,232,238]` 的**手写副本**过期，而该副本用 `239` 当
+「NEED 之外」的探针 ⇒ AC4 的命题**反转**：原本断言「守卫指名逃出的那条」，现在断言了反面。
+守卫因此**看起来**坏了，实际是测试钉住的前提不再成立。（该文件自己的头注释就写着「判据正文不从测试里
+复制一份」，而它复制的正是同类东西。）
+
+**修法（⛔ 不是换一个字面量）**：`needSubjectSet()` 从真判据正文**推导** NEED，探针取
+`max(NEED)+1`（由构造保证在集合之外）⇒ NEED 再增长也不会让钉过期；并对同一集合做**两次独立读法**
+（`NEED = [` 行 vs 判据全文里每个带引号的 `GOAL-009-AC-<n>`）互校，使「正则静默少读」**响亮地失败**，
+而不是悄悄跑一个更弱的钉（硬规则 3b）。实测探针现推导为 **AC-240**。
+
+**取用方式**：不在本分支另写一份——两条在飞分支（`task/gap-ff-merge-suite-cert-classifier-…` 的
+`fb488fc50`、`task/gap-closed-goal-acs-…` 的 `fbc0869aa`）**各自独立**收敛到同一份内容，blob 均为
+`d9862f9416cf204abad617d7fc602c58b08523b0` ⇒ 本分支取用该 blob（`git checkout fb488fc50 -- <file>`）；
+**谁先落地，其余两份的 merge 都是 no-op**。
+
+**本轮读数**：
+
+```
+单跑该文件        5/5 pass（AC5 现覆盖全部 7 条 NEED 成员；AC4 探针 = AC-240）
+anti-drift        ANTI-DRIFT OK — 4 actual file(s), all within declared Touches (4 glob(s))
+scoped 门         bash scripts/test.sh --for-task <id> --allow-thin ⇒ EXIT=0；
+                  20 条 scoped 静态检查全 PASS；所选测试 23 tests / 0 fail
+                  （含该文件的两条 AC 用例 ✔，以及 verify-deliver-coldstart 的 AC5
+                   「每条 NEED 都有写点」绿）
+AC-239 判据复跑    goal-store.ts gate AC-239 ⇒ verdict: pass, EXIT=0（18:11:28Z）
+```
+
+**`## Touches` 同步**：把 `plugin/test/ac214-freshness-subject-set.test.mjs` 写进 Touches——否则本分支
+对该文件的改动会被 fan-in 的 anti-drift 步判为越界（HARD FAIL）。这正是 anti-drift 的用途，
+⛔ 不是为了让闸好看而放宽声明。
+
+**⛔ 诚实标注**：这是 **develop 侧的测试基础设施红**，不是本任务交付物的一部分；按本仓既有做法处理
+（develop 侧红 fail-closed 算在当前任务头上，唯一解法是在本分支修好并把该文件写进 `## Touches`）。
+⛔ **未为此另立新任务**，理由是它的产物侧此刻已由三条在飞分支同时修复，另立会得到一条「工作已完成」
+的任务；其形状级教训（钉不得硬写自己不拥有的活产物）与修法已随本轮提交信息留档。
+本任务 AC 最后一条所列的六条 gap 任务不受影响。
