@@ -61,6 +61,12 @@ TEST_COMMAND=""
 WORKTREE_ROOT=""
 FORCE=false
 DRY_RUN=false
+# gap-upgrade-entry-never-establishes-branch-model: the branch-model adoption DECISION. Default false
+# ⇒ a divergent landing baseline REFUSES the whole upgrade (fail-closed, config untouched) and prints
+# the remedy; true ⇒ `ensureBranchModel` preserves the foreign tip under
+# `<branch>-pre-quay-init-<sha>` and re-points the branch at the default branch tip. The DECISION is
+# the operator's; the JUDGMENT is never re-implemented here (see ensure_target_branch_model).
+ADOPT_BRANCH_MODEL=false
 DO_WORKFLOWS=false
 DO_AGENTS=false
 DO_LOOP=false
@@ -86,6 +92,7 @@ while [ $# -gt 0 ]; do
     --all) DO_WORKFLOWS=true; DO_AGENTS=true; ANY_CATEGORY=true; shift ;;
     --force) FORCE=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
+    --adopt-branch-model) ADOPT_BRANCH_MODEL=true; shift ;;
     --auto-commit-confirm) AUTO_COMMIT_CONFIRM=yes; shift ;;
     --auto-commit-skip) AUTO_COMMIT_CONFIRM=no; shift ;;
     --check-drift) DO_CHECK_DRIFT=true; shift ;;
@@ -2442,6 +2449,79 @@ if [ -z "$WORKTREE_ROOT" ]; then
   WORKTREE_ROOT="${REPO_ROOT}/../$(basename "$REPO_ROOT")-worktrees"
 fi
 validate_worktree_root "$WORKTREE_ROOT" || exit 2
+
+# ── branch model (gap-upgrade-entry-never-establishes-branch-model) ────────────────────────────────────
+# THE DEFECT THIS CLOSES. quay's fan-in / anti-drift path judges a task's work by
+# `git diff --name-only develop...HEAD` (worker-driver.ts `opts.mergeTarget ?? "develop"`, anti-drift
+# `--merge-target ?? "develop"`). That judgment is only meaningful when the target project's `develop`
+# IS the mainline's continuation — the line the task branch forks from and fast-forwards onto. This
+# script used to write `fork_baseline: develop` into the config (`:995`/`:2217`) while never checking
+# that such a ref exists, let alone that it connects to the mainline.
+#
+# Measured (2026-09-11, real machine, three independent upgrade copies of an aged third-party project):
+# every copy's `develop` was an ancient foreign fork (`d95dac8`, 2025-10-14) whose merge-base with the
+# real mainline `main` was 553-589 commits back and whose tree held ZERO `tasks/*.md`. A worker that
+# implemented its fix CORRECTLY and committed it died at `ANTI-DRIFT HARD FAIL: <N> violation(s)`,
+# where N (1566) was the entire divergent history — a number no `## Touches` list can cover. The task
+# was structurally un-landable, and the failure text blamed the task rather than the baseline.
+#
+# ⛔ THE JUDGMENT IS NOT RE-IMPLEMENTED HERE. `classifyBranch` / `ensureBranchModel`
+# (packages/quay/src/branch-model.ts) is the single implementation (ADR-004), reached through the
+# delivery's own `quay init --branch-model-only` — the config-FREE entry, because the shipped upgrade
+# runs on projects that ALREADY have a `.quay/config.yml` and a full `quay init` would rewrite
+# (destroy) their `gates:` / `loop:` / `routines:`. ⇒ Do NOT add a `git merge-base --is-ancestor`
+# (or any other compatibility predicate) to this file: that would be a second implementation of the
+# same rule, drifting from the first.
+#
+# PLACEMENT IS PART OF THE CONTRACT. This runs BEFORE `write_config` and every other write below, so a
+# refusal leaves `.quay/config.yml` byte-for-byte unchanged (AC2) and never half-upgrades a project.
+ensure_target_branch_model() {
+  local qrl="$PLUGIN_ROOT/vendor/quay/dist/quay.js"
+  if [ ! -f "$qrl" ]; then
+    # Reuse the existing fail-closed runtime provisioning mechanism rather than hand-rolling a
+    # second remedy: a fresh plugin clone has NO built bundles (the vendored dist is a gitignored
+    # generated artifact), and `ensure_vendor_runtime` auto-builds them via sync-vendor.sh or exits 2
+    # naming the fix.
+    ensure_vendor_runtime
+  fi
+  if [ ! -f "$qrl" ]; then
+    # CANNOT-EVALUATE, kept DISTINCT from both "divergent" and "compatible" (hard rule 3b: a judge
+    # that cannot read its input must not return the value a judge that read it would return). The
+    # upgrade refuses — silently proceeding would report success for a project whose landing baseline
+    # was never judged, which is precisely the defect this step exists to end.
+    echo "ERROR: cannot judge this project's branch model — the delivered CLI is absent: $qrl" >&2
+    echo "       Refusing to continue: an unjudged landing baseline is not a passing one." >&2
+    return 3
+  fi
+
+  # Argument order matters: the CLI's flag parser only treats `--dry-run` as boolean (BOOLEAN_FLAGS),
+  # so a bare boolean flag is followed by the NEXT `--flag`. Every optional flag is therefore emitted
+  # before the value-bearing `--root` tail — do not reorder `--root` into the middle.
+  local -a bm_args
+  bm_args=(init --branch-model-only)
+  if [ "$ADOPT_BRANCH_MODEL" = true ]; then bm_args+=(--adopt-branch-model); fi
+  if [ "$DRY_RUN" = true ]; then bm_args+=(--dry-run); fi
+  bm_args+=(--root "$WORKSPACE_ROOT")
+
+  local bm_rc=0
+  set +e
+  node "$qrl" "${bm_args[@]}"
+  bm_rc=$?
+  set -e
+  if [ "$bm_rc" -eq 0 ]; then return 0; fi
+
+  echo "" >&2
+  echo "ERROR: quay-init REFUSES to upgrade this project — its landing baseline ('develop') is not a" >&2
+  echo "       continuation of the project's default branch, so every task would be structurally" >&2
+  echo "       un-landable (anti-drift would diff against the whole divergent history)." >&2
+  echo "       NOTHING WAS WRITTEN — .quay/config.yml is byte-for-byte unchanged." >&2
+  echo "       Re-run with the adoption decision to proceed; the existing tip is preserved under" >&2
+  echo "       '<branch>-pre-quay-init-<sha>' and NOTHING is destroyed:" >&2
+  echo "           bash $0 --root $WORKSPACE_ROOT --adopt-branch-model <same flags as before>" >&2
+  return 1
+}
+
+ensure_target_branch_model
 
 # ── main dispatch: the SEVEN-item closed set ────────────────────────────────────────────────────────────
 if [ "$DRY_RUN" = true ]; then

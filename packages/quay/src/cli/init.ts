@@ -20,6 +20,7 @@ export async function handleInit({ sub, rest }: CliCtx) {
 
 Usage:
   quay init [--force] [--dry-run] [--adopt-branch-model] [--root <path>]
+  quay init --branch-model-only [--adopt-branch-model] [--dry-run] [--root <path>]
 
 Flags:
   --force      Overwrite existing .quay/config.yml if present.
@@ -31,6 +32,13 @@ Flags:
                default branch tip. Without this flag such a project is REFUSED
                (fail-closed) — reusing a foreign branch silently would make every
                task's anti-drift diff meaningless.
+  --branch-model-only
+               Establish ONLY the quay branch model and touch NOTHING else: no
+               .quay/config.yml write, no tasks/ mkdir, no profiles / launch
+               settings lay-down. This is the entry for an ALREADY-initialized
+               project (an existing config is its normal input, so the
+               config-exists refusal does not apply). Exits 1 when the landing
+               baseline is divergent and no adoption was requested.
   --root <path>  Scaffold at <path> instead of the current working directory.
 
 Description:
@@ -47,6 +55,11 @@ Description:
   task's work).
 
   If .quay/config.yml already exists, refuses to overwrite unless --force.
+
+  Use --branch-model-only when the project is already initialized and you only
+  need the branch model established (the shipped plugin/scripts/quay-init.sh
+  upgrade entry calls this): it never rewrites config, so an existing project's
+  gates: / loop: / routines: survive.
 
   This command only scaffolds a brand-new EMPTY task store. It does NOT lay
   down the loop mechanism (workflows, agents, gate scripts, tick docs) — the
@@ -87,9 +100,30 @@ Description:
   const force = initFlags.force === true;
   const dryRun = initFlags["dry-run"] === true;
   const adoptBranchModel = initFlags["adopt-branch-model"] === true;
+  const branchModelOnly = initFlags["branch-model-only"] === true;
 
   try {
-    const result = runInit({ root: targetRoot, force, dryRun, adoptBranchModel });
+    const result = runInit({ root: targetRoot, force, dryRun, adoptBranchModel, branchModelOnly });
+
+    // The config-free branch-model entry (gap-upgrade-entry-never-establishes-branch-model). It
+    // reports the model and decides, nothing else — so the only outcomes it can reach are this one
+    // and the shared error path below.
+    if (result.outcome === "branch-model-only") {
+      console.log(result.branchModelReport);
+      if (result.branchModel.skipped) {
+        // Not a classifiable repo (no git / no commits). Reported as such, and NOT a failure —
+        // "could not evaluate" must not be reported with the shape of a verdict (hard rule 3b).
+        return;
+      }
+      if (!result.branchModel.ok && !dryRun) {
+        // Fail-closed: a divergent landing baseline without an adoption decision. The report already
+        // carries the remedy (`formatBranchModelReport` prints the `remedy:` line), so the caller
+        // (the shipped quay-init.sh upgrade entry) can relay it verbatim. `--dry-run` reports the
+        // same block but does not fail — a dry run's job is to say what WOULD happen.
+        process.exitCode = 1;
+      }
+      return;
+    }
 
     if (result.outcome === "skipped") {
       console.error(

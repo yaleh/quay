@@ -316,3 +316,140 @@ test("verifyBranchModel: the read-only verdict agrees with the mutating one", ()
   assert.equal(v.defaultBranch, "main");
   assert.equal(v.baseline.state, "divergent");
 });
+
+// ── the CONFIG-FREE entry: `quay init --branch-model-only` ───────────────────────────────────────
+// (gap-upgrade-entry-never-establishes-branch-model)
+//
+// The shipped upgrade entry (plugin/scripts/quay-init.sh — what a real user runs, and what
+// /quay:init runs) works on projects that ALREADY have a `.quay/config.yml`. The full `quay init`
+// cannot serve them: it REWRITES the config surface (`generateConfigContent`), so the only remedy
+// `ensureBranchModel`'s `branch-model-blocked` message pointed at also destroyed the user's
+// `gates:` / `loop:` / `routines:`. These tests pin the entry that makes the remedy reachable
+// WITHOUT that write — and pin the write-side negative control (config sha256 unchanged).
+
+/** sha256 of a file — the byte-identity witness for the "config untouched" negative control. */
+function sha256(p) {
+  return execFileSync("sha256sum", [p], { encoding: "utf8" }).split(" ")[0];
+}
+
+/** An ALREADY-initialized project (the shipped upgrade entry's normal input). */
+function initializedRepo(tag) {
+  const dir = thirdPartyShapedRepo();
+  fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, ".quay", "config.yml"),
+    "providers:\n  native:\n    enabled: true\ngates:\n  custom-user-gate:\n    - name: mine\nloop:\n  routines:\n    - user-owned\n",
+  );
+  return dir;
+}
+
+test("--branch-model-only: a divergent baseline is REPORTED and refused, config sha256 unchanged", () => {
+  const dir = initializedRepo("bmo-divergent");
+  const cfg = path.join(dir, ".quay", "config.yml");
+  const beforeSha = sha256(cfg);
+  const beforeDevelop = git(dir, ["rev-parse", "develop"]);
+
+  const result = runInit({ root: dir, force: false, dryRun: false, branchModelOnly: true });
+  assert.equal(result.outcome, "branch-model-only");
+  assert.equal(result.branchModel.ok, false, "a divergent baseline must not read as ok");
+  assert.match(result.branchModelReport, /\[BLOCKED\] landing-baseline -> develop/);
+  assert.match(result.branchModelReport, /remedy:.*adopt-branch-model/s);
+  // ⛔ THE POINT OF THE ENTRY: an existing config is the normal input, and it is not written.
+  assert.equal(sha256(cfg), beforeSha, "config must survive byte-for-byte");
+  assert.equal(git(dir, ["rev-parse", "develop"]), beforeDevelop, "the refusal must move nothing");
+});
+
+test("--branch-model-only: adoption repairs the baseline and STILL leaves config byte-identical", () => {
+  const dir = initializedRepo("bmo-adopt");
+  const cfg = path.join(dir, ".quay", "config.yml");
+  const beforeSha = sha256(cfg);
+  const oldDevelop = git(dir, ["rev-parse", "develop"]);
+  const main = git(dir, ["rev-parse", "main"]);
+
+  const result = runInit({ root: dir, force: false, dryRun: false, branchModelOnly: true, adoptBranchModel: true });
+  assert.equal(result.outcome, "branch-model-only");
+  assert.equal(result.branchModel.ok, true);
+  const bl = result.branchModel.entries.find((e) => e.role === "landing-baseline");
+  assert.equal(bl.action, "adopted");
+  assert.equal(git(dir, ["rev-parse", "develop"]), main, "develop now continues the mainline");
+  assert.equal(git(dir, ["rev-parse", bl.backupRef]), oldDevelop, "the foreign tip is preserved, not destroyed");
+  assert.equal(classifyBranch(dir, LANDING_BASELINE_ROLE, "main").state, "compatible");
+  assert.equal(sha256(cfg), beforeSha, "the repair must not touch the config surface");
+  // no other file of the full init was laid down either: this entry establishes a branch model only.
+  assert.equal(fs.existsSync(path.join(dir, ".quay", "profiles.yml")), false, "no profiles lay-down");
+  assert.equal(fs.existsSync(path.join(dir, ".claude", "launch.settings.json")), false, "no launch-settings lay-down");
+  assert.equal(fs.existsSync(path.join(dir, "tasks")), false, "no tasks/ mkdir");
+});
+
+test("--branch-model-only: a compatible baseline is a no-op (the AC4 negative control)", () => {
+  const dir = initializedRepo("bmo-compatible");
+  // Re-point develop onto the mainline first: a compatible project, still already-initialized.
+  git(dir, ["branch", "-f", "develop", "main"]);
+  const cfg = path.join(dir, ".quay", "config.yml");
+  const beforeSha = sha256(cfg);
+  const beforeDevelop = git(dir, ["rev-parse", "develop"]);
+  const beforeMain = git(dir, ["rev-parse", "main"]);
+
+  const result = runInit({ root: dir, force: false, dryRun: false, branchModelOnly: true });
+  assert.equal(result.branchModel.ok, true);
+  assert.match(result.branchModelReport, /\[REUSED\] landing-baseline -> develop/);
+  // 逐字不变 in BOTH directions: not refused, and not moved.
+  assert.equal(git(dir, ["rev-parse", "develop"]), beforeDevelop);
+  assert.equal(git(dir, ["rev-parse", "main"]), beforeMain);
+  assert.equal(sha256(cfg), beforeSha);
+});
+
+test("--branch-model-only: a non-git directory is SKIPPED, not failed (could-not-evaluate ≠ verdict)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-bm-bmo-nogit-"));
+  TMP_DIRS.push(dir);
+  const result = runInit({ root: dir, force: false, dryRun: false, branchModelOnly: true });
+  assert.equal(result.outcome, "branch-model-only");
+  assert.equal(result.branchModel.skipped, true, "unreadable input must not be turned into a block");
+  assert.equal(result.branchModel.ok, true, "and must not be turned into a pass with a verdict shape either");
+  assert.match(result.branchModelReport, /SKIPPED/);
+});
+
+test("CLI: `quay init --branch-model-only` on a divergent baseline exits 1 and prints the remedy", () => {
+  const dir = initializedRepo("bmo-cli-divergent");
+  const cfg = path.join(dir, ".quay", "config.yml");
+  const beforeSha = sha256(cfg);
+  const r = runQuayInit(["init", "--branch-model-only", "--root", dir], dir);
+  assert.equal(r.exitCode, 1, `expected exit 1, got ${r.exitCode}: ${r.stdout}${r.stderr}`);
+  assert.match(r.stdout, /\[BLOCKED\] landing-baseline -> develop/);
+  assert.match(r.stdout, /adopt-branch-model/, "the remedy must reach the operator verbatim");
+  assert.equal(sha256(cfg), beforeSha, "the refusal must leave config byte-identical");
+});
+
+test("CLI: `quay init --branch-model-only --adopt-branch-model` exits 0 and repairs the baseline", () => {
+  const dir = initializedRepo("bmo-cli-adopt");
+  const cfg = path.join(dir, ".quay", "config.yml");
+  const beforeSha = sha256(cfg);
+  const r = runQuayInit(["init", "--branch-model-only", "--adopt-branch-model", "--root", dir], dir);
+  assert.equal(r.exitCode, 0, r.stderr);
+  assert.match(r.stdout, /\[ADOPTED\] landing-baseline -> develop/);
+  assert.equal(git(dir, ["rev-parse", "develop"]), git(dir, ["rev-parse", "main"]));
+  assert.equal(sha256(cfg), beforeSha);
+});
+
+test("CLI: `--branch-model-only --dry-run` reports the block but does not fail (a plan is not a refusal)", () => {
+  const dir = initializedRepo("bmo-cli-dryrun");
+  const beforeDevelop = git(dir, ["rev-parse", "develop"]);
+  const r = runQuayInit(["init", "--branch-model-only", "--dry-run", "--root", dir], dir);
+  assert.equal(r.exitCode, 0, `a dry run plans, it does not refuse: ${r.stderr}`);
+  assert.match(r.stdout, /\[BLOCKED\] landing-baseline -> develop/);
+  assert.equal(git(dir, ["rev-parse", "develop"]), beforeDevelop, "--dry-run mutates nothing");
+});
+
+test("CLI: the config-free entry supersedes the config-exists refusal it shares a command with", () => {
+  // Regression arm for the ordering: `quay init` alone on an initialized project exits 1 with
+  // "already exists"; the branch-model entry must NOT be caught by that guard — an existing config
+  // is its normal input. Falsifiable: move the `branchModelOnly` block after the `configExists`
+  // check in runInit and this test goes red.
+  const dir = initializedRepo("bmo-supersede");
+  const plain = runQuayInit(["init", "--root", dir], dir);
+  assert.equal(plain.exitCode, 1);
+  assert.match(plain.stderr, /already exists/);
+  const bmo = runQuayInit(["init", "--branch-model-only", "--root", dir], dir);
+  assert.match(bmo.stdout, /landing-baseline/, "the entry must still have run its judgment");
+  assert.doesNotMatch(bmo.stderr, /already exists/);
+});
