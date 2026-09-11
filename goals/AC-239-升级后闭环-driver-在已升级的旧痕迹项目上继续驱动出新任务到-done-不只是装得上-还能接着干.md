@@ -1,7 +1,7 @@
 ---
 id: AC-239
 title: 升级后闭环：driver 在已升级的旧痕迹项目上继续驱动出新任务到 done（不只是装得上，还能接着干）
-status: draft
+status: active
 kind: criterion
 goal: GOAL-009
 criterion: >-
@@ -72,4 +72,15 @@ origin: 2026-09-11 人裁定：AC-238 范围要扩大到『升级后 driver 是�
   那样继续驱动新任务到 done』（动态维度）。判据形状复用 AC-207
   的『端到端』检查项（commit_sha/task_id/task_status=done/gate_events>0/produced_by_driver=true），但加了一层
   AC-238 通过记录的 project_root 关联，确保被验证的确实是『刚被升级过的那个旧项目』，不是另建一个新项目蒙混过关。
+activatedAt: 2026-09-11T03:22:39.016Z
+statusLog:
+  - at: 2026-09-11T03:22:39.016Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
+fidelity:
+  verdict: not-evaluated
+  reason: no judge configured
+  at: 2026-09-11T03:22:39.015Z
 ---
