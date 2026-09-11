@@ -1,7 +1,7 @@
 ---
 id: gap-process-budget-counts-hung-test-processes-as-in-use
 title: process-budget 把挂死的测试进程计入 in_use，活套件被压到 1 车道
-status: ready
+status: done
 labels:
   - gap
   - defect
