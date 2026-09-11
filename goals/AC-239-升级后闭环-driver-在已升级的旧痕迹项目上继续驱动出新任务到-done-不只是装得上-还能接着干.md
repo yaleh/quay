@@ -1,7 +1,7 @@
 ---
 id: AC-239
 title: 升级后闭环：driver 在已升级的旧痕迹项目上继续驱动出新任务到 done（不只是装得上，还能接着干）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-009
 criterion: >-
@@ -45,7 +45,12 @@ criterion: >-
       if not r.get("build_sha"): continue
       upgraded.add(os.path.realpath(str(r.get("project_root"))))
 
-  if not upgraded: sys.stderr.write("AC-239 CAUSE-A: no anchorable upgrade site — the carrier holds no ac=GOAL-009-AC-238 external PASS record on another host whose pre_upgrade_task_count>0, post_upgrade_task_count==pre, pre_upgrade_runtime_age_days>=1, runtime_replaced=true, task_list_ok=true and build_sha set. Nothing has yet proven a real upgrade finished, so AC-239 has no site to observe.\n"); sys.exit(1)
+  if not upgraded: sys.stderr.write("AC-239 CAUSE-A: no anchorable upgrade site
+  — the carrier holds no ac=GOAL-009-AC-238 external PASS record on another host
+  whose pre_upgrade_task_count>0, post_upgrade_task_count==pre,
+  pre_upgrade_runtime_age_days>=1, runtime_replaced=true, task_list_ok=true and
+  build_sha set. Nothing has yet proven a real upgrade finished, so AC-239 has
+  no site to observe.\n"); sys.exit(1)
 
 
   for r in recs:
@@ -57,7 +62,12 @@ criterion: >-
       if int(r.get("gate_events") or 0)<=0: continue
       if r.get("produced_by_driver") is not True: continue
       sys.exit(0)
-  sys.stderr.write("AC-239 CAUSE-B: %d upgrade site(s) ARE anchored by AC-238 on this carrier (%s), but no ac=GOAL-009-AC-239 external record exists on any of them (need commit_sha, task_id, task_status=done, gate_events>0, produced_by_driver=true). The site is known; its post-upgrade driver run has simply not happened yet.\n" % (len(upgraded), ",".join(sorted(upgraded)))); sys.exit(1)
+  sys.stderr.write("AC-239 CAUSE-B: %d upgrade site(s) ARE anchored by AC-238 on
+  this carrier (%s), but no ac=GOAL-009-AC-239 external record exists on any of
+  them (need commit_sha, task_id, task_status=done, gate_events>0,
+  produced_by_driver=true). The site is known; its post-upgrade driver run has
+  simply not happened yet.\n" % (len(upgraded), ",".join(sorted(upgraded))));
+  sys.exit(1)
 
   P
 expect: exit 0 = 载体中先存在至少一条 GOAL-009-AC-238 的通过型记录（标定出哪个 project_root
@@ -79,6 +89,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-09-11T17:08:52.069Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured

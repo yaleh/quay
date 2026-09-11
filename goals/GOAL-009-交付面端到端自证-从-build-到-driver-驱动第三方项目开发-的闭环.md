@@ -1,7 +1,7 @@
 ---
 id: GOAL-009
 title: 交付面端到端自证 —— 从 build 到「driver 驱动第三方项目开发」的闭环
-status: active
+status: achieved
 kind: goal
 origin: 人 2026-09-11：orangevps meta-cc 副本升级路径验证需要一条挂在本 goal 下的新
   AC（AC-238）才能进入持续复验范围；GOAL-009 已第二次被 goal-driver 机械 flip 回
@@ -38,6 +38,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-09-11T17:17:20.624Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 ---
 ## 背景
 
