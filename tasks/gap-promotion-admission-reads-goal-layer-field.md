@@ -1,7 +1,7 @@
 ---
 id: gap-promotion-admission-reads-goal-layer-field
 title: 晋升准入闸读 goal 层字段（goalAcMissing）——与人裁定【丁：上移 goal 层】反向，且因缺生效线造成僵尸任务
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
