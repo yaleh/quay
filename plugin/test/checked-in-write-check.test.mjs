@@ -23,9 +23,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, "..", "..");
 const CHECKER = path.join(REPO, "plugin", "scripts", "checked-in-write-check.ts");
 
-/** A minimal workspace the criterion can judge: <root>/plugin/{scripts,fixtures}. */
-function mkFakeRoot() {
+/** A minimal workspace the criterion can judge: <root>/plugin/{scripts,fixtures}.
+ *  Every temp dir this file creates is registered for cleanup with `t.after` — R6
+ *  (mkdtemp-no-cleanup) judges each mkdtemp result individually, and an uncleaned one leaks a
+ *  directory per run into a tmpfs that has already accumulated 20k+ entries / 3.9 GB. */
+function mkFakeRoot(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "ciw-root-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
   fs.mkdirSync(path.join(root, "plugin", "fixtures", "wf"), { recursive: true });
   for (const f of ["checked-in-write-guard.cjs", "checked-in-write-run.cjs"]) {
@@ -34,8 +38,9 @@ function mkFakeRoot() {
   return root;
 }
 
-function mkInput(name, body) {
+function mkInput(t, name, body) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ciw-in-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const p = path.join(dir, name);
   fs.writeFileSync(p, body);
   return p;
@@ -46,10 +51,10 @@ function runChecker(args) {
 }
 
 describe("checked-in-write-check", () => {
-  it("RED: an input creating an entry under the checked-in tree fails and names it", () => {
-    const root = mkFakeRoot();
+  it("RED: an input creating an entry under the checked-in tree fails and names it", (t) => {
+    const root = mkFakeRoot(t);
     const target = path.join(root, "plugin", "fixtures", "wf", "_probe");
-    const input = mkInput("red.test.mjs", `
+    const input = mkInput(t, "red.test.mjs", `
       import fs from "node:fs";
       import path from "node:path";
       const t = ${JSON.stringify(target)};
@@ -64,9 +69,9 @@ describe("checked-in-write-check", () => {
     assert.equal(fs.existsSync(target), false, "the probe cleaned up after itself");
   });
 
-  it("GREEN: an input writing only under os.tmpdir() passes", () => {
-    const root = mkFakeRoot();
-    const input = mkInput("green.test.mjs", `
+  it("GREEN: an input writing only under os.tmpdir() passes", (t) => {
+    const root = mkFakeRoot(t);
+    const input = mkInput(t, "green.test.mjs", `
       import fs from "node:fs";
       import os from "node:os";
       import path from "node:path";
@@ -79,17 +84,34 @@ describe("checked-in-write-check", () => {
     assert.match(r.stdout, /PASS: no checked-in-tree writes/);
   });
 
-  it("NOT-EVALUATED: no input files matched", () => {
-    const root = mkFakeRoot();
+  // The mirror of the RED arm, and the reason it exists: judging the CALL rather than the EFFECT
+  // reported a no-op as a write. Measured on this repository — a positive control that opens the
+  // real goal store runs createGoalStore() -> fs.mkdirSync(<repo>/goals, {recursive:true}) against a
+  // directory that already exists, and was reported as creating an entry in the checked-in tree
+  // until the guard learned to read the return value (a string = created, undefined = nothing).
+  it("GREEN: a no-op mkdir on an EXISTING in-tree dir is not a write", (t) => {
+    const root = mkFakeRoot(t);
+    const existing = path.join(root, "plugin", "fixtures", "wf");
+    const input = mkInput(t, "noop.test.mjs", `
+      import fs from "node:fs";
+      fs.mkdirSync(${JSON.stringify(existing)}, { recursive: true });
+    `);
+    const r = runChecker(["--root", root, "--files", input]);
+    assert.equal(r.status, 0, `a no-op must not be reported, got ${r.status}\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stdout, /PASS: no checked-in-tree writes/);
+  });
+
+  it("NOT-EVALUATED: no input files matched", (t) => {
+    const root = mkFakeRoot(t);
     const r = runChecker(["--root", root, "--dir", "plugin/test-does-not-exist"]);
     assert.equal(r.status, 3, `expected exit 3, got ${r.status}\n${r.stdout}\n${r.stderr}`);
     assert.match(r.stderr, /NOT-EVALUATED: /);
     assert.match(r.stderr, /nothing was judged/);
   });
 
-  it("NOT-EVALUATED: an input whose module evaluation never completed", () => {
-    const root = mkFakeRoot();
-    const input = mkInput("broken.test.mjs", `import { x } from "./no-such-module-xyz.mjs";\n`);
+  it("NOT-EVALUATED: an input whose module evaluation never completed", (t) => {
+    const root = mkFakeRoot(t);
+    const input = mkInput(t, "broken.test.mjs", `import { x } from "./no-such-module-xyz.mjs";\n`);
     const r = runChecker(["--root", root, "--files", input]);
     assert.equal(r.status, 3, `expected exit 3, got ${r.status}\n${r.stdout}\n${r.stderr}`);
     assert.match(r.stderr, /did not finish evaluation/);

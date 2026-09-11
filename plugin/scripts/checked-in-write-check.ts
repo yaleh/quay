@@ -213,6 +213,10 @@ export function checkCheckedInWrites(opts: {
   let text = "";
   try { text = fs.readFileSync(logPath, "utf8"); } catch { text = ""; }
   const parsed = parseGuardLog(text);
+  // This criterion's own scratch dir is process-private and must not outlive the run — the same
+  // invariant it judges (R6 mkdtemp-no-cleanup / gap-tmp-leak-is-live): a judge that leaks a temp
+  // dir per invocation into tmpfs would be the defect it reports.
+  try { fs.rmSync(logDir, { recursive: true, force: true }); } catch { /* best-effort */ }
 
   const base = {
     inputs: files,
@@ -225,10 +229,14 @@ export function checkCheckedInWrites(opts: {
   };
 
   if (parsed.guardLoaded === 0) {
+    // The scratch log is already gone by now (this criterion cleans up after itself), so carry the
+    // evidence that made the call into the message instead of pointing at a deleted path.
+    const sample = text.split("\n").filter(Boolean).slice(0, 2).join(" | ").slice(0, 300);
     return {
       ...base, ok: false, evaluated: false,
       notEvaluatedReason:
-        `the runtime guard never loaded (no guardLoaded marker in ${logPath}) — the ${files.length} input(s) were not judged`,
+        `the runtime guard never loaded (no guardLoaded marker; child status(es) ${JSON.stringify(childStatuses)}) — ` +
+        `the ${files.length} input(s) were not judged. First log line(s): ${sample || "<log empty>"}`,
     };
   }
   if (parsed.unread.length > 0) {

@@ -138,6 +138,42 @@ function noteOpened(fnName, args) {
   } catch { /* the guard must never break the host process */ }
 }
 
+/** Does this target exist right now? Used to tell a real deletion from a force-no-op. */
+function existsAt(arg) {
+  const t = toTarget(arg);
+  if (t === null) return true; // not a path (fd) — assume an effect rather than excuse one
+  try { return fs.existsSync(t); } catch { return true; }
+}
+
+/**
+ * Did the call actually change the tree? 硬规则 3b's mirror at the CALL level — a judge that asks
+ * "did you name a checked-in path?" reports a no-op as a write.
+ *
+ * Two forms really are no-ops, and both occur in this repo's own tests:
+ *   · fs.mkdirSync(p, { recursive: true }) on a path that already exists — returns undefined
+ *     (a string return is the first directory it created). Measured false positive: a positive
+ *     control that opens the real repo's goal store, createGoalStore() -> mkdirSync(<repo>/goals),
+ *     was reported as creating an entry in the checked-in tree.
+ *   · fs.rmSync(p, { recursive, force: true }) on a path that does not exist — deletes nothing.
+ * Everything else that returns without throwing did create, overwrite, mutate or remove something.
+ * The CALLBACK forms are judged conservatively (we cannot see their result here): a callback-form
+ * call that in fact no-op'd is reported, never the reverse.
+ */
+function hadEffect(fnName, args, outcome) {
+  if (outcome.threw) return true; // a failed write may still have left a partial entry
+  if (fnName === "mkdir" || fnName === "mkdirSync") {
+    if (typeof args[args.length - 1] === "function") return true; // callback form — opaque here
+    const opts = args[1];
+    const recursive = opts !== null && typeof opts === "object" && opts.recursive === true;
+    return !(recursive && outcome.ret === undefined);
+  }
+  if (fnName === "rm" || fnName === "rmSync") {
+    if (outcome.preNoEffect === true) return false;
+    return true;
+  }
+  return true;
+}
+
 /** Write-verb calls this process actually judged — the denominator a PASS rests on. */
 let judged = 0;
 function record(fnName, argIndex, rawArg, target) {
@@ -153,8 +189,8 @@ function record(fnName, argIndex, rawArg, target) {
   try { process.stderr.write(`[checked-in-write-guard] ${fnName}(${rawArg}) -> ${target}\n`); } catch { /* ignore */ }
 }
 
-/** Judge one call. Recording is the whole effect — nothing is thrown at the host. */
-function judge(fnName, args) {
+/** Judge one call, after it ran. Recording is the whole effect — nothing is thrown at the host. */
+function judge(fnName, args, outcome = { threw: false }) {
   try {
     noteOpened(fnName, args);
     if (!ROOT) { record(fnName, -1, args[0], "<guard-not-configured: QUAY_WRITE_GUARD_ROOT unset>"); return; }
@@ -172,19 +208,48 @@ function judge(fnName, args) {
     // reported 0 violations for an input that created entries in it, i.e. the judge could not
     // judge its own test. No test in this repo redirects os.tmpdir() into the tree (checked:
     // the only TMPDIR-shaped assignments are TMUX_TMPDIR, which does not move os.tmpdir()).
-    if (targetReal === ROOT_REAL || isInside(ROOT_REAL, targetReal)) { record(fnName, idx, args[idx], target); return; }
-    if (targetReal === TMP || isInside(TMP, targetReal)) return;
+    if (!(targetReal === ROOT_REAL || isInside(ROOT_REAL, targetReal))) return; // outside the tree
+    if (!hadEffect(fnName, args, outcome)) return; // named the tree but changed nothing
+    record(fnName, idx, args[idx], target);
   } catch { /* the guard must never break the host process */ }
 }
 
+/** Snapshot the one fact `hadEffect` needs from BEFORE the call: did a forced rm have a target? */
+function preNoEffectFor(fnName, args) {
+  try {
+    if (fnName !== "rm" && fnName !== "rmSync") return undefined;
+    const opts = args[1];
+    const force = opts !== null && typeof opts === "object" && opts.force === true;
+    if (!force) return undefined;
+    return !existsAt(args[0]);
+  } catch { return undefined; }
+}
+
 /** Patch one module object in place. Absent / frozen members are skipped, not forced. */
-function patchModule(mod) {
+function patchModule(mod, isPromise) {
   if (!mod || typeof mod !== "object") return 0;
   let n = 0;
   for (const fnName of TABLE.keys()) {
     const orig = mod[fnName];
     if (typeof orig !== "function") continue;
-    const wrapper = function (...args) { judge(fnName, args); return orig.apply(this, args); };
+    const wrapper = isPromise
+      ? function (...args) {
+          const preNoEffect = preNoEffectFor(fnName, args);
+          const p = orig.apply(this, args);
+          if (!p || typeof p.then !== "function") { judge(fnName, args, { threw: false, preNoEffect }); return p; }
+          return p.then(
+            (v) => { judge(fnName, args, { ret: v, threw: false, preNoEffect }); return v; },
+            (e) => { judge(fnName, args, { threw: true, preNoEffect }); throw e; },
+          );
+        }
+      : function (...args) {
+          const preNoEffect = preNoEffectFor(fnName, args);
+          let ret, err, threw = false;
+          try { ret = orig.apply(this, args); } catch (e) { threw = true; err = e; }
+          judge(fnName, args, { ret, threw, preNoEffect });
+          if (threw) throw err;
+          return ret;
+        };
     try {
       Object.defineProperty(wrapper, "name", { value: fnName, configurable: true });
       Object.defineProperty(wrapper, "length", { value: orig.length, configurable: true });
@@ -194,11 +259,11 @@ function patchModule(mod) {
   return n;
 }
 
-const patchedSync = patchModule(fs);
+const patchedSync = patchModule(fs, false);
 // fs.promises / node:fs/promises are the same object in this Node (measured), so one patch covers
 // both spellings — applied here, before any ESM facade for node:fs/promises can be instantiated.
 let patchedPromises = 0;
-try { patchedPromises = patchModule(fs.promises); } catch { /* ignore */ }
+try { patchedPromises = patchModule(fs.promises, true); } catch { /* ignore */ }
 
 // Record that the guard is alive, and — on the way out — how many write calls it judged, so the
 // checker can tell "the guard ran and found nothing" from "the guard never loaded" and can state a
