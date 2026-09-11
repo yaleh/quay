@@ -165,7 +165,7 @@ NOT-EVALUATED: 1/1 input(s) did not finish evaluation — a file that never load
 
 ### 落地与门
 
-- 本分支 vs develop：**8 个文件**（3 个新增判据半件 + 1 个新增判据自测 + `workflow-replay.test.mjs` + 能力清单 + 任务体 + 续做轮补缝的 `plugin/test/packaging-hygiene-check.test.mjs`，见下节）。
+- 本分支 vs develop：**7 个文件**（3 个新增判据半件 + 1 个新增判据自测 + `workflow-replay.test.mjs` + 能力清单 + 任务体）。
 - ⛔ `test/cold-start-oneliner-e2e.sh` 未被本任务改动：`git diff --name-only $(git merge-base HEAD develop)..HEAD -- test/cold-start-oneliner-e2e.sh` = **0 行**（DoD 第 3 条）。
 - 不变式写进代码注释 **3 处**（`grep -l INVARIANT`）：`plugin/scripts/checked-in-write-guard.cjs`、`plugin/scripts/checked-in-write-check.ts`、`plugin/test/workflow-replay.test.mjs` —— 即「判据本体」「判据入口」「被修的那个测试」。另两个半件（`checked-in-write-run.cjs`、判据自测）不含该行；Evidence 不把它说成 5 处。
 - anti-drift（fan-in 硬失败步）在本工作树实跑：`ANTI-DRIFT OK: task gap-fixture-dir-write-races-whole-tree-copy — 7 actual file(s), all within declared Touches (7 glob(s))`。
@@ -173,7 +173,7 @@ NOT-EVALUATED: 1/1 input(s) did not finish evaluation — a file that never load
 - 面扫（硬规则 5b）**部分完成，不作完备性主张**：修复后的判据在 6 路并行、840s 预算内实测覆盖 `plugin/test/**` 的 **67/320** 个 `*.test.mjs`（子进程 guard 日志计数：`evaluated=67`、`violations=0`、`evaluationFailed=0`）；预算到时未扫完的部分**不**等于「无违例」。面扫此前抓到的两条都是判据自身的误报（见 AC4 末段），修完复扫 0 条真违例——但复扫覆盖率同样只有 67/320。
 - 一句题外观察（**未验证、不在本任务范围、不立前置**，硬规则 12）：同一「整树拷贝撞并发写者」形状在 `refresh-worktree-quay` 复制 `.quay/` 时也出现——scoped 门自己的输出里有 `cp: cannot stat '/home/yale/work/quay/.quay/fan-in-suite-*.log': No such file or directory`。写者是 driver 而非测试、载体是 gitignored 的运行时状态，危害未测 ⇒ 只记观察。
 
-### 续做轮（2026-09-11）：解除阻断 fan-in 的套件红 —— 补 `resourceGateArgv` 测试缝
+### 续做轮（2026-09-11）：阻断 fan-in 的套件红 —— 诊断并修复，随后发现 develop 已独立落地同一修法（合并取 develop 的超集）
 
 本任务前两轮 fan-in 均以**同一条**套件红 exit-not-landed，而该红**不在本任务 delta 内**：
 
@@ -191,7 +191,7 @@ test at plugin/test/packaging-hygiene-check.test.mjs:148:1
 （fail-closed 推迟 spawn，**产品代码没错，错的是单测没注入已有的测试缝**）⇒ 断言恒红。
 失败因此是**宿主负载的函数**：隔离跑绿、套件内红。
 
-复现（一条命令，把闸强制推进 WAIT 带）：
+复现（一条命令，把闸强制推进 WAIT 带；此臂为**修复前**）：
 
 ```
 $ RESOURCE_GATE_LOAD_OVER_FACTOR=0.01 node --test plugin/test/packaging-hygiene-check.test.mjs
@@ -205,7 +205,7 @@ $ RESOURCE_GATE_LOAD_OVER_FACTOR=0.01 node --test plugin/test/packaging-hygiene-
 `known-load-sensitive` 注册表内（`grep packaging-hygiene plugin/scripts/known-load-sensitive.ts` 零命中）
 ——它是确定性问题，注册表绕过不是正解。
 
-**修法与 5b 枚举**（先数同族，不只修被报出来的那一个）：
+**5b 枚举**（先数同族，不只修被报出来的那一个）：
 
 ```
 $ for f in $(grep -rln 'gapWorkerCmd|runPackagingHygiene' --include=*.mjs plugin/test packages/*/test); do
@@ -225,29 +225,41 @@ goal-posture-blocks-activate.test.mjs        calls=1  seams=1
 同位素入口 `runPoolQualityJudge`（`plugin/test/quality-gate-driver.test.mjs`）走**位置参数** `gateArgv`，
 6 处可达闸的调用全部注入 fake GO 脚本 ⇒ **不同族**。
 
-修法 = 补既有的测试缝 `resourceGateArgv: ['true']`（仓库惯例：8 个兄弟文件已如此）。
-另补一条 **WAIT 负控制**（`['bash','-c','exit 1']`）⇒ 缝在**两个方向**都被钉住：删掉缝后，
-两个用例中必有一个变红，**与负载无关**。
+**我据此修了**（补缝 `resourceGateArgv: ['true']` + 一条 WAIT 负控制，提交 `627f3739d`），并做双向取假：
+把两个缝各翻向反面 ⇒ 两条断言各自变红（`ℹ tests 10 / ℹ pass 8 / ℹ fail 2`）；还原后逐字节相同
+（`diff` 空、打印 `RESTORED-IDENTICAL`），两臂全绿（含 `LOAD_OVER_FACTOR=0.01` 臂 `10/10`）。
 
-**能取假（双向对照）**：把两个缝各翻向反面 ⇒ 两条断言各自变红：
+**⚠️ 合并 develop 时发现 develop 已独立落地同一修法**（提交 `25f8cf6dd`
+「test(packaging-hygiene): inject the resource-gate seam — the AC3 case ran the REAL gate」，落于 `10:49Z`，
+早于本轮），且是**严格超集**：同样的缝、同形状的 WAIT 负控制，并多一条
+`assert.equal(fact.value.gapExitCode, null)`，注释还点名了同族任务
+`gap-resource-gate-psi-does-not-capture-load-flake-driver`。
 
-```
-$ node --test plugin/test/packaging-hygiene-check.test.mjs      # 缝翻转后（临时）
-✖ runPackagingHygiene drift ⇒ failed + gap-filing spawned (AC3)
-  AssertionError [ERR_ASSERTION]: drift must trigger gap-filing
-✖ runPackagingHygiene resource-gate WAIT ⇒ drift reported but gap-filing deferred (fail-closed)
-  AssertionError [ERR_ASSERTION]: resource-gate WAIT must defer the gap-filing spawn
-ℹ tests 10 / ℹ pass 8 / ℹ fail 2
-```
-
-还原后逐字节相同（`diff` 空、打印 `RESTORED-IDENTICAL`），两臂全绿：
+⇒ 冲突按「代码文件取**语义并集**」解析，**而 develop 侧恰好就是该并集**，故取 develop 版本：
 
 ```
-$ node --test plugin/test/packaging-hygiene-check.test.mjs                                      ℹ tests 10 / pass 10 / fail 0
-$ RESOURCE_GATE_LOAD_OVER_FACTOR=0.01 node --test plugin/test/packaging-hygiene-check.test.mjs  ℹ tests 10 / pass 10 / fail 0
+$ diff <(git show develop:plugin/test/packaging-hygiene-check.test.mjs) plugin/test/packaging-hygiene-check.test.mjs
+[空]  ⇒ FILE-NOW-IDENTICAL-TO-DEVELOP
+$ git diff --name-only develop...HEAD
+plugin/scripts/capability-catalog.sh
+plugin/scripts/checked-in-write-check.ts
+plugin/scripts/checked-in-write-guard.cjs
+plugin/scripts/checked-in-write-run.cjs
+plugin/test/checked-in-write-check.test.mjs
+plugin/test/workflow-replay.test.mjs
+tasks/gap-fixture-dir-write-races-whole-tree-copy.md
 ```
 
-提交 `627f3739d`。**本续做轮只加了一个测试缝 + 一条负控制用例，未改动任何 AC 判据、未翻任何复选框。**
+⇒ **本任务 delta 仍是 7 个文件**（该测试文件**不再**在 delta 内），Touches **不**增列该路径
+（本轮曾误列一次，已撤回；撤回后 anti-drift 实跑见上「落地与门」）。
+**本续做轮未改动任何 AC 判据、未翻任何复选框**——它诊断并解除了阻断本任务两轮的套件红，
+而最终生效的修法归 develop，不归本任务。
+
+**一条同轮观察（不立前置，硬规则 12）**：`quay-native task edit` **没有** `--body-file`（只有 `--body`）——
+该标志只有 `adr`/`doc` 子命令才有（`quay-native.ts:203` / `:239`）。我第一次用 `--body-file` 时它被**静默忽略**，
+而 CLI 仍打印 `updated <id>` 并把**同名内容**重新写了一遍（mtime 变、`git diff` 空）⇒
+**「成功」的外形与「什么都没做」同形**（硬规则 3b）。改用 argv 传正文并**回读核对**后才真正落地。
+证据：`grep -n 'body-file' quay-native.ts` 的命中全在 `adr`/`doc` 分支内，`task edit` 分支（`:409-452`）只认 `--body`。
 
 ## Touches
 
@@ -257,5 +269,4 @@ $ RESOURCE_GATE_LOAD_OVER_FACTOR=0.01 node --test plugin/test/packaging-hygiene-
 - plugin/scripts/checked-in-write-run.cjs
 - plugin/scripts/capability-catalog.sh
 - plugin/test/checked-in-write-check.test.mjs
-- plugin/test/packaging-hygiene-check.test.mjs
 - tasks/gap-fixture-dir-write-races-whole-tree-copy.md
