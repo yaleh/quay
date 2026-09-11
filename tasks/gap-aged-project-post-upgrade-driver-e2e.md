@@ -10,6 +10,7 @@ extra:
   goal_ac: AC-239
 depends_on:
   - gap-aged-third-party-project-quay-upgrade-verification
+  - gap-develop-sync-reset-hard-destroys-third-party-project-tree
 goal_ac: AC-239
 ---
 ## Finding
