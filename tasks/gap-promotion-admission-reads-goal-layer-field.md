@@ -52,10 +52,11 @@ extra:
 - [x] AC5 措辞修正：`ready-pool-check.ts` 与 `long-term-guarantee-goal-backed-check.ts` 中「立案时必填」字面命中 = 0（该措辞是落点错误的诱因）。
 - [x] AC6 新检查器已登记进 `capability-catalog.sh`，且 catalog 自报的 `summary: N scripts` 相应 +1（⛔ 读它自报，不硬记数字）。
 - [x] AC7 `scripts/test.sh` 全量绿。⚠️ worker 角色不自行跑全量套件（全量 suite 由 driver 的机械 fan-in 跑）。本任务可自证的是 **scoped 门 179 tests / 179 pass / 0 fail**（见 Evidence §AC7），已按当前 develop sha 记录 scoped-gate cache ⇒ fan-in 跳过这步冗余的 scoped 门、直接进入全量 suite。全量绿的最终裁决归 fan-in 的 suite 步。
+- [x] AC8 **本轮落地的伴生缺陷修复**（不属于 Proposal 的目标，是它落地路上的阻塞，如实登记）：`test/cold-start-oneliner-e2e.sh` 的 `--count-inputs` 是**纯读数**（只打印静态的 3 条人类输入），却在 mode 分派**之前**执行了 `cp -r "$PLUGIN_SRC" "$QUAY_DEV/plugin"`——整个 plugin 树的递归拷贝。套件并行泳道下该拷贝与 `plugin/test/workflow-replay.test.mjs`（在**已签入的** `plugin/fixtures/workflow-replay/` 里建/删临时目录 `_tmp-bad-schema` 等）相撞 ⇒ `cp: cannot stat …` ⇒ 非零退出 ⇒ AC1 假红。修法：把该 measure 的 mode 分派移到任何文件系统动作**之前**。**取假面（判别性对照，同机同文件）**：并发跑 workflow-replay 时 **2/400 失败**；修复后同条件 **0/400**；两臂单独跑均 0 失败。AC1 的 stdout 逐字节不变，单次耗时 229ms → 22ms。⚠️ 残留（未修，已另立案）：「有测试往已签入的 fixtures 目录里写」这个根因仍在；FULL 模式的 e2e 与该测试并发仍会撞。
 
 ## Definition of Done
 
-- [x] AC1–AC7 全绿。
+- [x] AC1–AC8 全绿。
 - [x] Evidence 里记下对**生产任务板**实测的「因 `goalAcMissing` 被排除的 todo 条数」删除前后读数。⚠️ 任务书原文写「当前该读数 = 0」，**该前提实测已假**：删除前实测 = 1（那条今天 08:20 立案、当时仍在被写的 delivery-critical 任务），删除后 = 0。已按实测记录，未照抄预期值。
 - [x] ⛔ **不得把 `ACTIVATION_LINE_ISO` 补到晋升闸作为替代修法**——那是在错误落点上加固，与人 2026-09-11 裁定反向。若执行中认为必须保留晋升侧的某种拦截，须先回到人处取裁定，不得自行改向。**（未补；晋升侧未保留任何 goal 拦截。）**
 - [x] 未来边界已写进代码注释或检查器文档（一条不变式）：**准入集合只由 task 自身的自足属性决定；goal 信息最多改变集合内的顺序，永不改变成员资格。** 理由是单调性——排序不减少可执行集合（最坏是次序不优），准入可把集合减到空（产生僵尸）。即便未来 goal 有优先级，它也只能进 sort key、缺值时退化为默认序，⛔ 不得出现"goal 优先级未设 ⇒ 不可派发"这一同形缺陷的新版本。
@@ -199,6 +200,8 @@ scoped-gate cache 已记录：
 - `ACTIVATION_LINE_ISO` 未被补进晋升闸（DoD ⛔ 项）；晋升侧未保留任何 goal 拦截。
 - `plugin/test/slot-refill.test.mjs` 的过时注释未改（不在 Touches；行为上仍通过）。
 - `tasks/gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing.md` 未改（AC4 那条外部缺陷，已路由给属主，由其自行修复）。
+- `plugin/test/workflow-replay.test.mjs` 未改（AC8 的**根因**面：它往已签入的 fixtures 目录里建/删临时目录）。本任务只修了「不该做文件系统动作的 measure 做了文件系统动作」这一半，另一半已另立案。
+- 未给 AC8 的竞态加任何重试/忽略错误的兜底——那会静默吞掉真实的树变更（硬规则 3b）。
 
 ## Touches
 
@@ -208,3 +211,4 @@ scoped-gate cache 已记录：
 - plugin/scripts/long-term-guarantee-goal-backed-check.ts
 - plugin/scripts/capability-catalog.sh
 - tasks/gap-promotion-admission-reads-goal-layer-field.md
+- test/cold-start-oneliner-e2e.sh
