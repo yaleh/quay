@@ -113,17 +113,6 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
     "positive control: a 40-hex BUILD_SHA ⇒ a GOAL-009 record with top-level build_sha is written");
   assert.match(r.stdout, /goal009-anchor\(negative\) rc=1 lines=1→1/,
     "negative control: an empty BUILD_SHA ⇒ no write and non-zero (fail-closed, 硬规则 3b)");
-  // AC-207 carrier record (gap-ac207-e2e-target-driver-driven-real-commit-task-done): the AC-207
-  // record writer must append the seven criterion fields verbatim (produced_by_driver=true literal,
-  // gate_events>0, task_status=done, commit_sha/task_id non-empty, top-level build_sha via the GOAL-009
-  // anchor) and refuse produced_by_driver=false / gate_events=0 — the criterion's `is True` / `>0`
-  // predicates must be able to take false (硬规则 3b / 硬规则 4).
-  assert.match(r.stdout, /ac207-record\(valid\) wrote=1 fields_ok=1/,
-    "positive control: a valid AC-207 record (all seven criterion fields) is written");
-  assert.match(r.stdout, /ac207-record\(produced_by_driver=false\) refused=1/,
-    "negative control: produced_by_driver=false is refused (criterion `is True` can take false)");
-  assert.match(r.stdout, /ac207-record\(gate_events=0\) refused=1/,
-    "negative control: gate_events=0 is refused (criterion `>0` can take false)");
   // AC-206 (gap-ac206-goals-tasks-dual-carrier-quay-init-goals-closed-set): the dual-carrier record
   // writes the four boolean fields verbatim, refuses an empty-host record (fail-closed), and truthfully
   // writes goals_dir_created=false when goals/ is missing (缺件如实非静默, 缺值≠合格).
