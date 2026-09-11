@@ -621,8 +621,16 @@ run_static_checks() {
   # ——修好一条即降，判据新增/修改出裸失败退出即升 ⇒ 红。⛔ 不以归零为目标（硬规则 12：别用未测量的
   # 残差挡住可达目标）。三态可区分：基线缺失/读不懂 goals/ ⇒ exit 3 NOT-EVALUATED（硬规则 3b）。
   # 负控制由 mutation case 注入一条裸失败退出即红钉住（硬规则 3/4）。
+  # ⛔ `goals/` 刻意【不】登记为 @static-object：本检查器确实读 goals/，但登记一个目录 glob 会命中
+  # goals/ 下的每条路径，而 `isDocPath` 的注册表覆盖【先于】DOC_SURFACES 生效 ⇒ 整个 goals/ 面由
+  # doc 翻成 CODE（实测：plugin/test/fan-in-execute-paths.test.mjs 的「① REAL doc delta」红，
+  # `pure-doc delta must produce empty code_delta, got: "goals/AC-999-fake.md"`）。DOC_SURFACES 里的
+  # `goals/` 是另一个任务（gap-doc-surfaces-missing-goals-prefix）钉过的结论，那条优先。代价诚实记下：
+  # **只改 goals/ 的分支 code_delta 为空 ⇒ 跳过全量 suite ⇒ 本检查器那一轮不跑**；覆盖来自
+  # ①本检查器自身文件（脚本/基线/mutation case/单测）被触碰时的 scoped 子集，②任何一次真正跑起来的全量
+  # suite（run_static_checks 里本行无条件执行）。⛔ 不要为了补这个洞把目录 glob 加回来。
   # @static-tier change
-  # @static-object goals/ plugin/scripts/criterion-failure-attribution-check.ts docs/analysis/criterion-failure-attribution.baseline.json plugin/scripts/checker-mutation-cases/criterion-failure-attribution-check.sh plugin/test/criterion-failure-attribution-check.test.mjs
+  # @static-object plugin/scripts/criterion-failure-attribution-check.ts docs/analysis/criterion-failure-attribution.baseline.json plugin/scripts/checker-mutation-cases/criterion-failure-attribution-check.sh plugin/test/criterion-failure-attribution-check.test.mjs
   run_checker "criterion-failure-attribution-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/criterion-failure-attribution-check.ts" --root "${repo_root}"
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
