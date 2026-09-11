@@ -19,17 +19,32 @@ export async function handleInit({ sub, rest }: CliCtx) {
     process.stdout.write(`quay init — scaffold a new quay workspace
 
 Usage:
-  quay init [--force] [--dry-run] [--root <path>]
+  quay init [--force] [--dry-run] [--adopt-branch-model] [--root <path>]
 
 Flags:
   --force      Overwrite existing .quay/config.yml if present.
   --dry-run    Print the generated config to stdout without writing to disk.
+  --adopt-branch-model
+               When the project already has a 'develop' (or 'author') that is NOT
+               a continuation of its default branch, preserve the existing tip
+               under '<branch>-pre-quay-init-<sha>' and re-point the branch at the
+               default branch tip. Without this flag such a project is REFUSED
+               (fail-closed) — reusing a foreign branch silently would make every
+               task's anti-drift diff meaningless.
   --root <path>  Scaffold at <path> instead of the current working directory.
 
 Description:
   Creates .quay/config.yml (with all 3 sections: providers, gates, loop) and
   a tasks/ directory at the project root. Auto-detects project type (Node.js /
   Go) to suggest appropriate gate defaults.
+
+  It also ESTABLISHES the quay branch model: the landing baseline 'develop'
+  (the ref the fan-in / anti-drift path diffs task branches against) and the
+  doc-only branch 'author' are created at the default branch tip when absent.
+  quay's fan-in reads 'develop'; without this step a project whose own
+  'develop' is an unrelated ancient fork makes every task structurally
+  un-landable (anti-drift reports thousands of violations that are not the
+  task's work).
 
   If .quay/config.yml already exists, refuses to overwrite unless --force.
 
@@ -71,14 +86,27 @@ Description:
   const targetRoot = typeof initFlags.root === "string" ? initFlags.root : process.cwd();
   const force = initFlags.force === true;
   const dryRun = initFlags["dry-run"] === true;
+  const adoptBranchModel = initFlags["adopt-branch-model"] === true;
 
   try {
-    const result = runInit({ root: targetRoot, force, dryRun });
+    const result = runInit({ root: targetRoot, force, dryRun, adoptBranchModel });
 
     if (result.outcome === "skipped") {
       console.error(
         `.quay/config.yml already exists at ${result.configPath}. ` +
         "Use --force to overwrite, or --dry-run to preview."
+      );
+      process.exitCode = 1;
+      return;
+    }
+
+    if (result.outcome === "branch-model-blocked") {
+      // Fail-closed, tree untouched: the project's landing baseline is a foreign line and silently
+      // reusing it would make every task's anti-drift diff meaningless. Nothing was written.
+      console.error(result.branchModelReport);
+      console.error(
+        "quay init: refusing to initialize — the project's landing baseline is not a continuation " +
+        "of its default branch. Nothing was written."
       );
       process.exitCode = 1;
       return;
@@ -91,6 +119,7 @@ Description:
       console.log(`# Would create: ${result.tasksDir}/`);
       console.log(`# Would create: ${result.launchSettingsPath}`);
       console.log(`# Would create: ${result.profilesPath}`);
+      console.log(`# ${result.branchModelReport}`);
       return;
     }
 
@@ -98,6 +127,7 @@ Description:
     console.log(`Created ${result.tasksDir}/ (or already existed)`);
     console.log(`Created ${result.launchSettingsPath}`);
     console.log(`Created ${result.profilesPath}`);
+    console.log(result.branchModelReport);
     printNextSteps("native", result.tasksDir);
   } catch (err) {
     console.error(`quay init: ${err instanceof Error ? err.message : String(err)}`);
