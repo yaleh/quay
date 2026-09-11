@@ -85,6 +85,25 @@ extra:
 3. 判据须**能取假**：构造一个「主线非 develop 且有分叉 develop」的第三方项目夹具，
    证明修复前该形态任务在 anti-drift 硬失败、修复后能落地；同时证明本仓库（develop 权威）行为**逐字不变**。
 
+**人裁定（2026-09-11，覆盖上面"不预设最终裁定"的开放性——落地基线的选择本身已被人定向）**：
+
+不走"从目标项目自身分支结构推导基线"这条路。改为：**应用本项目自己的 git branch 模式**——
+master = 项目默认分支；develop = 任务板权威基线/worktree 分叉点/fan-in 快进目标；author = doc-only
+工作分支（见本仓库 CLAUDE.md「分支同步（author ↔ develop）」一节的角色定义）。
+
+`quay init` 在为目标项目建仓时须**创建**符合此模式的分支（实测 2026-09-11：`packages/quay/src/init.ts`
+当前对 `branch`/`develop`/`author` 零命中——`grep -n "branch\|develop\|author\b" packages/quay/src/init.ts`
+无输出，即该文件当前完全不处理分支）。若目标项目尚无 `develop`/`author` 分支，`quay init` 建出来；
+若目标项目已有同名分支但语义不同（例如目标项目自己的 `develop` 本来就是「主线」），需要一个可判定
+的处理（不能悄悄复用同名分支去承载不同语义，那会重现本任务 Finding 里①描述的冲突）。
+
+这套分支须在**后续实际开发过程中被真正使用**——fan-in/anti-drift/晋升写面等机制的基线落到这些
+新建分支上，而不是目标项目原有的主线分支。
+
+⇒ 本任务的落地范围因此扩大到 `quay init` 的建仓步骤（`packages/quay/src/init.ts` /
+`packages/quay/src/cli/init.ts`），原 Touches 清单未覆盖，已在下面补充；执行者仍须自行核实具体
+接线点，本裁定只定方向，不预设实现细节。
+
 **Out of scope**：不重做前两条同族任务已修的东西；⛔ 不在本任务里改 AC-239 的判据。
 
 ## Acceptance Criteria
@@ -100,6 +119,10 @@ extra:
       （或至少：anti-drift 不再因基线选择而失败），读数不依赖 $PATH 辅助（硬规则 4b）
 - [ ] 与 `gap-doc-branch-hardcoded-author-breaks-third-party-develop-sync`、
       `gap-develop-sync-reset-hard-destroys-third-party-project-tree` 的关系已写明（三层同链，本条是第三层）
+- [ ] `quay init` 为目标项目创建符合本项目分支模式（master/develop/author）的分支，有真实跑过的
+      命令与输出（不是文档描述）；且后续开发过程（fan-in/anti-drift/晋升写面）实际以这些新建分支
+      为基线，而非目标项目原有的主线分支——用一个真实第三方项目形态（有自己的 `develop`/无 `develop`
+      两种情况）各跑一次证明
 
 ## Definition of Done
 
@@ -114,3 +137,5 @@ extra:
 - plugin/scripts/anti-drift-touches-check.ts
 - plugin/scripts/fan-in-ts-typecheck-gate.ts
 - tasks/gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing.md
+- packages/quay/src/init.ts
+- packages/quay/src/cli/init.ts
