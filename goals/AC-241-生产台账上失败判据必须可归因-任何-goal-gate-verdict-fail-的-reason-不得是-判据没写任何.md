@@ -1,7 +1,7 @@
 ---
 id: AC-241
 title: 生产台账上失败判据必须可归因：任何 goal-gate verdict=fail 的 reason 不得是「判据没写任何输出」的空因模板
-status: draft
+status: active
 kind: criterion
 goal: GOAL-009
 criterion: >-
@@ -53,4 +53,15 @@ origin: 本轮 readings：criteria[AC-239].verdict="fail"，reason="acceptance f
   激活，goals/AC-239-升级后闭环-driver-在已升级的旧痕迹项目上继续驱动出新任务到-done-不只是装得上-还能接着干.md）的两条失败出口都是裸
   sys.exit(1)（该文件 :48 与 :60），因此它每一轮都在台账里写一条不可归因的 fail。本判据把 AC-237 的同一条义务从
   fixture 挪到【生产台账】上，是其补面而非重复。
+activatedAt: 2026-09-11T06:07:04.128Z
+statusLog:
+  - at: 2026-09-11T06:07:04.128Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-11T06:07:04.127Z
 ---
