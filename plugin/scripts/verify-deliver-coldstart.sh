@@ -1111,6 +1111,8 @@ STEP1_REAL_SETTINGS_PATH=""           # 操作者真实 ~/.claude/settings.json 
 STEP1_REAL_SETTINGS_SIG_BEFORE=""     # 段① 前签名（sha256:<hex> | ABSENT）
 STEP1_REAL_SETTINGS_SIG_AFTER=""      # 段① 后签名
 STEP1_REAL_SETTINGS_UNCHANGED=0       # 1 = 前后签名相同（AC3 直接量；AC4 取假对照证明它非恒真）
+STEP1_REAL_SETTINGS_EVALUATED=0       # 1 = 上述读数【真的取过】（guard_end 跑到了）；0 = 段① 早退没测到
+                                      # —— 与 UNCHANGED=0 分开，⛔ 不让「没测」伪装成「测了且变了」（硬规则 3b）
 
 # 路径 → 签名。不存在 ⇒ "ABSENT"（独立取值，⛔ 不与「读到了但为空」同形）。
 step1_settings_sig() {
@@ -1127,6 +1129,7 @@ step1_guard_begin() {
   STEP1_REAL_SETTINGS_PATH="${real_home}/.claude/settings.json"
   STEP1_REAL_SETTINGS_SIG_BEFORE="$(step1_settings_sig "$STEP1_REAL_SETTINGS_PATH")"
   STEP1_REAL_SETTINGS_SIG_AFTER=""; STEP1_REAL_SETTINGS_UNCHANGED=0
+  STEP1_REAL_SETTINGS_EVALUATED=0
   STEP1_HOME="${STEP1_HOME_OVERRIDE:-${PREFIX}.home}"
   if [ "$STEP1_HOME" = "$real_home" ]; then
     STEP1_HOME_ISOLATED=0
@@ -1136,10 +1139,14 @@ step1_guard_begin() {
   STEP1_SEGMENT_HOME="$STEP1_HOME"
 }
 
-# 段① 终点：重取后签名并判「逐字节相同」。ABENT→ABSENT 也算相同（真·未变）。
+# 段① 终点：重取后签名并判「逐字节相同」。ABSENT→ABSENT 也算相同（真·未变）。
+# 没 begin 过（路径空）⇒ 早退且 ⛔ 不置 EVALUATED：该情况下 UNCHANGED 保持 0，
+# 调用方须靠 EVALUATED 区分「没测」与「测了且变了」——否则早退会被读成 AC-161 违反（假报警）。
 step1_guard_end() {
+  STEP1_REAL_SETTINGS_EVALUATED=0
   [ -n "$STEP1_REAL_SETTINGS_PATH" ] || return 0
   STEP1_REAL_SETTINGS_SIG_AFTER="$(step1_settings_sig "$STEP1_REAL_SETTINGS_PATH")"
+  STEP1_REAL_SETTINGS_EVALUATED=1
   if [ "$STEP1_REAL_SETTINGS_SIG_BEFORE" = "$STEP1_REAL_SETTINGS_SIG_AFTER" ]; then
     STEP1_REAL_SETTINGS_UNCHANGED=1
   else
@@ -1194,8 +1201,10 @@ step1_install() {
   fi
   # AC-161/AC3 读数：段① 结束（npm-global 通道到此为止；marketplace 通道由 step1_marketplace 再收一次尾）。
   step1_guard_end
-  echo "  STEP1_HOME_ISOLATED=$STEP1_HOME_ISOLATED STEP1_REAL_SETTINGS_UNCHANGED=$STEP1_REAL_SETTINGS_UNCHANGED (real settings sig: '${STEP1_REAL_SETTINGS_SIG_BEFORE}' -> '${STEP1_REAL_SETTINGS_SIG_AFTER}')"
-  if [ "$STEP1_REAL_SETTINGS_UNCHANGED" != "1" ]; then
+  echo "  STEP1_HOME_ISOLATED=$STEP1_HOME_ISOLATED STEP1_REAL_SETTINGS_EVALUATED=$STEP1_REAL_SETTINGS_EVALUATED STEP1_REAL_SETTINGS_UNCHANGED=$STEP1_REAL_SETTINGS_UNCHANGED (real settings sig: '${STEP1_REAL_SETTINGS_SIG_BEFORE}' -> '${STEP1_REAL_SETTINGS_SIG_AFTER}')"
+  # ⚠️ 只在【真的测过】时报警：EVALUATED=0（段① 早退，如 bin 缺失）时 UNCHANGED 也是 0，
+  # 不加这个条件就会把「没测」报成「AC-161 被违反了」（硬规则 3b）。
+  if [ "$STEP1_REAL_SETTINGS_EVALUATED" = "1" ] && [ "$STEP1_REAL_SETTINGS_UNCHANGED" != "1" ]; then
     echo "  WARNING: segment ① changed the operator's real ~/.claude/settings.json — AC-161 violated by this run." >&2
     echo "           before=${STEP1_REAL_SETTINGS_SIG_BEFORE} after=${STEP1_REAL_SETTINGS_SIG_AFTER} path=${STEP1_REAL_SETTINGS_PATH}" >&2
   fi
@@ -3127,7 +3136,7 @@ else
     # AC-161/AC3：段① 的完整窗口 = install + marketplace 注册；在此收尾（install 内已收过一次，
     # 此处把窗口延长到注册段结束）。两次都读同一文件，读数取更晚的一次。
     step1_guard_end
-    echo "STEP1_REAL_SETTINGS_UNCHANGED=$STEP1_REAL_SETTINGS_UNCHANGED (AC-161/AC3: 段① 全程对操作者真实 ~/.claude/settings.json 零写入)"
+    echo "STEP1_REAL_SETTINGS_EVALUATED=$STEP1_REAL_SETTINGS_EVALUATED STEP1_REAL_SETTINGS_UNCHANGED=$STEP1_REAL_SETTINGS_UNCHANGED (AC-161/AC3: 段① 全程对操作者真实 ~/.claude/settings.json 零写入)"
   else
     if ! step2_init; then
       echo "AC88_VERIFY=fail (step ② quay-init failed)"
@@ -3207,7 +3216,9 @@ echo "MP_SETTINGS_OK=$MP_SETTINGS_OK (1 = marketplace 源已注册 + enabledPlug
 echo "MP_ENTRY_PATH=${MP_ENTRY_PATH:-} MP_ENABLED_LEAK=$MP_ENABLED_LEAK"
 # AC-161/AC3 直接量：段① 前后操作者真实 ~/.claude/settings.json 的签名（逐字节相同 = 1）。
 echo "STEP1_HOME_ISOLATED=$STEP1_HOME_ISOLATED (1 = 段① 跑在隔离 HOME; 0 = 隔离未生效, 可区分)"
-echo "STEP1_REAL_SETTINGS_UNCHANGED=$STEP1_REAL_SETTINGS_UNCHANGED (1 = 段① 前后签名相同 — AC-161/AC3; NOT-EVALUATED = 段① 未跑)"
+# 三态可区分（硬规则 3b）：NOT-EVALUATED = 段① 早退没测到；0 = 测了且改了；1 = 测了且逐字节相同。
+echo "STEP1_REAL_SETTINGS_UNCHANGED=$([ "$STEP1_REAL_SETTINGS_EVALUATED" = 1 ] && echo "$STEP1_REAL_SETTINGS_UNCHANGED" || echo NOT-EVALUATED) (1 = 段① 前后签名相同 — AC-161/AC3)"
+echo "STEP1_REAL_SETTINGS_EVALUATED=$STEP1_REAL_SETTINGS_EVALUATED (0 = 段① 早退，上面的 NOT-EVALUATED 是真的没测, 不是合格)"
 echo "STEP1_REAL_SETTINGS_SIG_BEFORE=${STEP1_REAL_SETTINGS_SIG_BEFORE:-NOT-EVALUATED}"
 echo "STEP1_REAL_SETTINGS_SIG_AFTER=${STEP1_REAL_SETTINGS_SIG_AFTER:-NOT-EVALUATED}"
 echo "L1_NOT_EVALUATED=$L1_NOT_EVALUATED (1 = SPEC §6 闭集读不到，未评估 ≠ 合格——硬规则 3b)"
