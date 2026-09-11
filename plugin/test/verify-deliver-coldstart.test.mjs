@@ -90,6 +90,21 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
     "marketplace leak: a user-level quay@quay enabledPlugins entry is flagged (AC-161)");
   assert.match(r.stdout, /marketplace-register-fail\(AC5\) MP_REGISTER_OK=0 MP_REGISTER_RC=1 reason_present=1/,
     "marketplace register-failure (AC5): a non-zero register exit is recorded structurally, not swallowed");
+  // AC-161 regression (gap-ac161-user-scope-enable-repolluted-by-cli-materialization): segment ①
+  // (step1_install = the delivery-install path) must leave the operator's real
+  // ~/.claude/settings.json BYTE-IDENTICAL — the CLI materialization it triggered ("claude plugin
+  // install" writes user-level enabledPlugins) re-reddened the STANDING goal AC-161 every delivery
+  // verification. The --selfcheck must exercise BOTH halves:
+  //   positive    — HOME isolated ⇒ zero write to the real settings, AND the isolated HOME really
+  //                 received the postinstall write (so the green is not "postinstall never ran" —
+  //                 the vacuity shape this very task is about, 硬规则 4 推论三);
+  //   falsifiable — the isolation target pointed back at the real HOME (pre-fix semantics) ⇒ the
+  //                 same assertion goes red (AC4). Exercises the production step1_install, not a
+  //                 fixture copy of its judgment.
+  assert.match(r.stdout, /step1-real-settings-guard\(positive\) STEP1_HOME_ISOLATED=1 STEP1_REAL_SETTINGS_UNCHANGED=1 isolated_home_written=1 sentinel_sig_same=1/,
+    "segment ① positive: HOME isolation ⇒ operator settings untouched AND the isolated HOME was really written (non-vacuous)");
+  assert.match(r.stdout, /step1-real-settings-guard\(falsifiable,pre-fix-semantics\) STEP1_HOME_ISOLATED=0 STEP1_REAL_SETTINGS_UNCHANGED=0/,
+    "segment ① falsifiable (AC4): with isolation off, the same assertion takes false");
   // AC-203 (gap-driver-runtime-driver-path-anchored-at-project-root-not-dist): the carrier record writes
   // the five criterion fields verbatim and refuses a dead-driver record (fail-closed, 缺值≠合格).
   assert.match(r.stdout, /ac203-record\(valid\) wrote=1 fields_ok=1/,
