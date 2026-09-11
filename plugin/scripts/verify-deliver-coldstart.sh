@@ -1568,6 +1568,101 @@ step_ac232_goal_carrier_write() {
   return 0
 }
 
+# ── 下游 task 载体写+读回（AC-234 的 tasks_rendered>0 来源；Plan 2a）────────────────────────
+# quay-init 只 mkdir tasks/、不创建 task 记录（quay-init.sh:2236 同源）⇒ 全新第三方项目 /tasks 必为空
+# ⇒ tasks_rendered 结构上不可满足。本步骤经 Provider ABI（quay task create）写一条真实 task 再落盘核
+# tasks/<id>.md（同 AC-232 的 goal 写读回同族），使 /tasks 渲染真实 task 载体。⛔ 不在 AC-234 步骤内自造
+# 渲染内容（硬规则 4）——由本步骤写、AC-234 只渲染（DoD「别的步骤真实写进去的载体内容」）。
+AC234_TASK_WRITE_OK=0                       # 1 = task create exit 0 ∧ tasks/<id>.md 落盘
+AC234_TASK_READ_BACK_OK=0                   # 1 = task view 读回该 id 且 stdout 含该 id
+step_task_carrier_write() {
+  local root="$1" qrl task_id bodyfile show_out
+  qrl="${STEP1_PREFIX}/bin/quay"
+  qrl="$(readlink -f "$qrl" 2>/dev/null || echo "$qrl")"
+  task_id="verify-task-234"
+  AC234_TASK_WRITE_OK=0; AC234_TASK_READ_BACK_OK=0
+  echo "== task carrier write+read-back (AC-234 tasks_rendered>0 来源): task create + view read-back into the third-party project =="
+  bodyfile="$(mktemp -t verify-task-234-body.XXXXXX.md)" || return 0
+  cat > "$bodyfile" <<'BODY'
+## Proposal
+
+第三方项目 web 渲染验证用任务——由 verify-deliver-coldstart 任务载体步骤经 Provider ABI 写入（背景：证明 /tasks 渲染真实 task 载体，非空壳页）。
+
+## Plan
+
+1. 本任务仅作为 web 渲染验证的 task 载体存在，无实现动作。
+
+## Acceptance Criteria
+
+- [ ] AC1 任务已写入第三方项目 task store，/tasks 页面可见其锚点。
+
+## Definition of Done
+
+- [ ] 任务经 Provider ABI 创建，task view 可读回该 id。
+
+## Touches
+
+- tasks/verify-task-234.md
+BODY
+  if node "$qrl" task create "$task_id" --title "web 渲染验证 task (AC-234 载体)" \
+      --body-file "$bodyfile" --status todo --root "$root" >/dev/null 2>&1 \
+     && [ -n "$(find "$root/tasks" -maxdepth 1 -name "${task_id}.md" -print -quit 2>/dev/null)" ]; then
+    AC234_TASK_WRITE_OK=1
+  fi
+  rm -f "$bodyfile"
+  if show_out="$(node "$qrl" task view "$task_id" --root "$root" 2>/dev/null)" \
+     && [ -n "$show_out" ] && printf '%s' "$show_out" | grep -q "$task_id"; then
+    AC234_TASK_READ_BACK_OK=1
+  fi
+  echo "  task_write_ok=$AC234_TASK_WRITE_OK task_read_back_ok=$AC234_TASK_READ_BACK_OK task_id=$task_id"
+  if [ "$AC234_TASK_WRITE_OK" = "1" ]; then
+    echo "  task create via ABI: $task_id (quay-init does not create task records — tasks_rendered>0 前置)"
+  else
+    echo "  NOTE: task create via ABI failed — tasks_rendered 可能为 0（空 /tasks 状态如实计数，不伪造）"
+  fi
+  return 0
+}
+
+# ── 下游 round 载体写（AC-234 的 round_records_rendered>0 来源；Plan 2）───────────────────────
+# /tests 页只读 .quay/verification-round.jsonl（serve-tests 的唯一数据面载体）；第三方项目自己的 fan-in
+# 委托 loop.test_command 直跑、不调用 full-suite-runner ⇒ 该文件结构上从不被第三方 loop 写 ⇒
+# round_records_rendered 结构上不可满足。本步骤用【同一 writer】（runner-state-write.ts 的
+# appendVerificationRound，full-suite-runner 的 verification-round 唯一 writer）落一条真实记录——
+# 记录的是【本次跨机验证这一轮】真实发生的过程记录（startedAt/state/runner/commit 全部取自本次运行
+# 的实际值），⛔ 不在 AC-234 步骤内自造（硬规则 4）。writer 由回传机件 scp（runner-state-write.ts +
+# write-json-atomic.ts 二文件闭包，见 develop-deliver-tgz.sh verify_coldstart_mode）。
+AC234_ROUND_WRITE_OK=0                      # 1 = appendVerificationRound exit 0 ∧ verification-round.jsonl 落盘
+step_round_carrier_write() {
+  local root="$1" started_at state runner commit
+  AC234_ROUND_WRITE_OK=0
+  started_at="${TS:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+  state="green"                             # 本步骤只记录「载体已真实写入」这一轮的验证（goal/task 已在前两步落盘）
+  runner="verify-deliver-coldstart"
+  commit="${BUILD_SHA:-}"
+  echo "== round record write (AC-234 round_records_rendered>0 来源): append a real verification-round record for THIS verify run =="
+  if [ -f "$SCRIPT_DIR/runner-state-write.ts" ] && [ -f "$SCRIPT_DIR/write-json-atomic.ts" ]; then
+    if "$VC_NODE" --no-warnings --experimental-strip-types --input-type=module -e '
+      const { appendVerificationRound } = await import("file://" + process.argv[1]);
+      appendVerificationRound(process.argv[2], {
+        startedAt: process.argv[3],
+        state: process.argv[4],
+        runner: process.argv[5],
+        ...(process.argv[6] ? { commit: process.argv[6] } : {}),
+      });
+    ' "$SCRIPT_DIR/runner-state-write.ts" "$root/.quay" "$started_at" "$state" "$runner" "$commit" 2>/dev/null \
+       && [ -n "$(find "$root/.quay" -maxdepth 1 -name 'verification-round.jsonl' -print -quit 2>/dev/null)" ]; then
+      AC234_ROUND_WRITE_OK=1
+    fi
+  fi
+  echo "  round_write_ok=$AC234_ROUND_WRITE_OK state=$state runner=$runner started_at=$started_at commit=${commit:-<none>}"
+  if [ "$AC234_ROUND_WRITE_OK" = "1" ]; then
+    echo "  round record appended → $root/.quay/verification-round.jsonl (third-party loop never writes it — round_records_rendered>0 前置)"
+  else
+    echo "  NOTE: round record append failed (writer not shipped / node error) — round_records_rendered 可能为 0（如实计数，不伪造）"
+  fi
+  return 0
+}
+
 # ── 自检（hermetic：AC1 顺序 + AC2 直接量正/负控制，不碰真实安装）────────────────────────
 selfcheck() {
   local tmp rc=1
@@ -2193,8 +2288,12 @@ else
     step3_coldstart
     step4_driver_liveness "$ROOT"
     step5_dual_carrier "$ROOT"
-    step_ac234_web_render "$ROOT"
+    # AC-234 只渲染【别的步骤真实写进去的】载体内容（DoD：⛔ 不在 AC-234 步骤内自造渲染内容）。
+    # 三个来源必须在读 web 之前落盘：goal（AC-232）、task（task carrier）、round（round carrier）。
     step_ac232_goal_carrier_write "$ROOT"
+    step_task_carrier_write "$ROOT"
+    step_round_carrier_write "$ROOT"
+    step_ac234_web_render "$ROOT"
     if [ "$AC205_SESSION" = "1" ]; then
       step_ac205_session_delivery "$ROOT"
     fi
