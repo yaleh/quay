@@ -243,3 +243,21 @@ Automatic merge failed; fix conflicts and then commit the result.
 - run_id：wk-prod-1788972473
 - session_id：69cba467-fd63-46a5-a53e-b6ddfc17da38
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-ac207-e2e-target-driver-driven-real-commit-task-done-wk-prod-1788972473.log
+
+
+## 语义兜底裁决记录（2026-09-11T02:0xZ，manager 介入，非 worker 所为）
+
+**为什么介入**：本任务 5 条 AC 全勾、AC-207 判据已 achieved（记录经 ssh 外部核实为真），但机械 fan-in 在 merge-develop 步**连撞 3 次同一冲突**后翻 needs-human（成因类 human-adjudication）。冲突文件 plugin/scripts/develop-deliver-tgz.sh，两侧改的是**不同功能**——机械重试对这种情形无论多少次都不会成功，正是 CLAUDE.md「机械失败后由 Claude Code 做语义兜底」所指的场景。
+
+**怎么解的**：取并集，两处冲突逐一说明——
+  1) local 声明行：合并两边各自新增的变量（develop 的 partial/ck_rc + 本分支的 ac207_extra/ac207_path_export）
+  2) 远端调用 flag 列表：保留 develop 的 --ac205-session，并在其后追加 ${ac207_extra}
+     （该变量值以空格开头，接在 token 后语法安全——落笔前已读其赋值处确认）
+
+**核验读数**（⛔ 不以「编辑成功」为据）：残留冲突标记 0；bash -n 通过；两侧功能计数
+  --verify-coldstart 8 · --ac207-e2e 6 · --ac205-session 2 · partial 12 · ck_rc 4
+合并提交 8e673535e，worktree 干净。
+
+**顺带修正 Touches 欠声明**：原 Touches 只有本任务文件一行，而分支实际改了 plugin/scripts/develop-deliver-tgz.sh（+31/-2）——已补入并去重。这个欠声明此前已在 gap-ac207-e2e-producer-section-never-landed-on-develop 的正文里记过。
+
+**未勾任何 AC**：5 条本就已由 worker 勾满，本次介入只解冲突 + 修 Touches + 翻回 ready，⛔ 不代勾、不改判据。
