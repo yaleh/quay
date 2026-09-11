@@ -1,7 +1,7 @@
 ---
 id: gap-meta-computegoalgaps
 title: AC-216 声明的复验域只有 I5 在读：gate 写侧与缺口立案侧都不认它，long-term AC 的台账尾事件永久定格为裸 fail
-status: todo
+status: ready
 labels:
   - meta-driver
   - driver-candidate
