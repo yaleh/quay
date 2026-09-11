@@ -96,6 +96,7 @@ done,产出真实 git 提交,并把这次的证据记录（`ac: "GOAL-009-AC-239
 贡献回 meta-cc 官方仓库是另一个独立决定，不在本任务范围内，除非人另有裁定**。
 
 ## Touches
+- plugin/test/ac214-freshness-subject-set.test.mjs
 
 - `plugin/scripts/develop-deliver-tgz.sh`
 - `plugin/scripts/verify-deliver-coldstart.sh`
