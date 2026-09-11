@@ -2,7 +2,7 @@
 id: gap-quay-init-failure-report-existence-proxy-overreports-on-upgrade
 title: quay-init 失败路径报告用【存在】冒充【本次写到】⇒ 对非空目标升级时把本次根本没碰过的文件报成 written（实测
   config.yml 逐字节未变仍报 written:）
-status: todo
+status: ready
 labels:
   - gap
   - defect
