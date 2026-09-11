@@ -206,11 +206,26 @@ Examples:
     process.stdout.write(`quay init — scaffold a new quay workspace
 
 Usage:
-  quay init [--force] [--dry-run] [--root <path>]
+  quay init [--force] [--dry-run] [--adopt-branch-model] [--root <path>]
+  quay init --branch-model-only [--adopt-branch-model] [--dry-run] [--root <path>]
 
 Flags:
   --force      Overwrite existing .quay/config.yml if present.
   --dry-run    Print the generated config to stdout without writing to disk.
+  --adopt-branch-model
+               When the project already has a 'develop' (or 'author') that is NOT
+               a continuation of its default branch, preserve the existing tip
+               under '<branch>-pre-quay-init-<sha>' and re-point the branch at the
+               default branch tip. Without this flag such a project is REFUSED
+               (fail-closed) — reusing a foreign branch silently would make every
+               task's anti-drift diff meaningless.
+  --branch-model-only
+               Establish ONLY the quay branch model and touch NOTHING else: no
+               .quay/config.yml write, no tasks/ mkdir, no profiles / launch
+               settings lay-down. This is the entry for an ALREADY-initialized
+               project (an existing config is its normal input, so the
+               config-exists refusal does not apply). Exits 1 when the landing
+               baseline is divergent and no adoption was requested.
   --root <path>  Scaffold at <path> instead of the current working directory.
 
 Description:
@@ -218,7 +233,19 @@ Description:
   a tasks/ directory at the project root. Auto-detects project type (Node.js /
   Go) to suggest appropriate gate defaults.
 
+  It also ESTABLISHES the quay branch model: the landing baseline 'develop'
+  (the ref the fan-in / anti-drift path diffs task branches against) is created
+  at the default branch tip when absent. quay's fan-in reads 'develop'; without
+  this step a project whose own 'develop' is an unrelated ancient fork makes
+  every task structurally un-landable (anti-drift reports thousands of
+  violations that are not the task's work).
+
   If .quay/config.yml already exists, refuses to overwrite unless --force.
+
+  Use --branch-model-only when the project is already initialized and you only
+  need the branch model established (the shipped plugin/scripts/quay-init.sh
+  upgrade entry calls this): it never rewrites config, so an existing project's
+  gates: / loop: / routines: survive.
 
   This command only scaffolds a brand-new EMPTY task store. It does NOT lay
   down the loop mechanism (workflows, agents, gate scripts, tick docs) — the
