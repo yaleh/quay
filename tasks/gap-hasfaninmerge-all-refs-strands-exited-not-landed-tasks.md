@@ -35,13 +35,13 @@ exited-not-landed 的 CONTINUE 豁免救不了它：该豁免只跳过 touches-o
 
 ## AC
 
-- [ ] AC1（缺陷复现，可取假）：在 `plugin/test/slot-refill.test.mjs` 用真 git fixture 造形态 A——任务分支上有一条 `Merge branch 'develop' into task/<id>`，且该分支从未合回 develop。改前的 `hasFanInMerge` 对形态 A 返回 true（红）。
-- [ ] AC2（修法）：`hasFanInMerge` 只数**可达集成分支**的 merge（读法与同文件 `hasLandedImplementation` 一致），集成分支由参数传入、默认 `develop`，不新写死第二个字面量。
-- [ ] AC3（改后读数）：同一 fixture 形态 A 上 `hasFanInMerge` 返回 false。
-- [ ] AC4（双向控制）：fixture 形态 B——任务分支已 ff 进 develop——改前改后 `hasFanInMerge` 均返回 true，证明修法没有把真 fan-in 一并判否。
-- [ ] AC5（消费者层）：`isNotYetFlippedSkip` 对形态 A 返回 false、对形态 B（AC 全勾）返回 true。
-- [ ] AC6（生产读数，枚举非布尔）：修后在本仓库跑 `node --no-warnings --experimental-strip-types plugin/scripts/slot-refill.ts --json`，把 deferred 中 reason 为 `not-yet-flipped` 的 id **逐条列出**，并对每条打印其命中 merge 是否可达 develop；断言每一条都至少有一条可达的 merge（即不再有仅因本缺陷被判的条目）。
-- [ ] AC7（全量绿）：`scripts/test.sh` 全量绿。
+- [x] AC1（缺陷复现，可取假）：在 `plugin/test/slot-refill.test.mjs` 用真 git fixture 造形态 A——任务分支上有一条 `Merge branch 'develop' into task/<id>`，且该分支从未合回 develop。改前的 `hasFanInMerge` 对形态 A 返回 true（红）。
+- [x] AC2（修法）：`hasFanInMerge` 只数**可达集成分支**的 merge（读法与同文件 `hasLandedImplementation` 一致），集成分支由参数传入、默认 `develop`，不新写死第二个字面量。
+- [x] AC3（改后读数）：同一 fixture 形态 A 上 `hasFanInMerge` 返回 false。
+- [x] AC4（双向控制）：fixture 形态 B——任务分支已 ff 进 develop——改前改后 `hasFanInMerge` 均返回 true，证明修法没有把真 fan-in 一并判否。
+- [x] AC5（消费者层）：`isNotYetFlippedSkip` 对形态 A 返回 false、对形态 B（AC 全勾）返回 true。
+- [x] AC6（生产读数，枚举非布尔）：修后在本仓库跑 `node --no-warnings --experimental-strip-types plugin/scripts/slot-refill.ts --json`，把 deferred 中 reason 为 `not-yet-flipped` 的 id **逐条列出**，并对每条打印其命中 merge 是否可达 develop；断言每一条都至少有一条可达的 merge（即不再有仅因本缺陷被判的条目）。
+- [x] AC7（全量绿）：`scripts/test.sh` 全量绿。
 
 ## DoD
 
