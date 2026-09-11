@@ -2,7 +2,7 @@
 id: gap-prose-prereq-negation-blind-and-paragraph-scoped
 title: prosePrereqGap 按整段判且对否定盲：一句「⛔ 不另立 depends_on 边」把同段 5 个查重回链 id 全判成未声明前置 ⇒
   任务静默卡 todo，而查重回链正是立案 skill 强制要求写的
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -55,12 +55,19 @@ for (let i = 0; i < paras.length; i++) {
 被卡的任务**从两个常规诊断入口都看起来正常**：`quay task check --json` 报 `ok:true, eligible to move to ready`；`promotion-round.jsonl` 的 `fixes[].unfixable` 里虽有 `prosePrereqGap=[...]`，但要先知道去看它。唯一指名道姓的读数是
 `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --json` 的 `candidates[].prosePrereqGap`。
 
+### 本次续做附加：一个 fan-in 阻断缺陷（独立机制，随本任务落地）
+
+本轮 fan-in 的 suite 步红在 `plugin/test/packaging-hygiene-check.test.mjs:161`（`AssertionError: drift must trigger gap-filing`）。
+**成因**：该文件的 drift 用例**未注入资源门缝** `resourceGateArgv`，于是 `quality-gate-driver.ts:316` 走 `resourceGateCheck(root, null)` ⇒ 读**真实宿主**的 `resource-gate.sh --for full-suite --json`；套件自己把宿主压着 ⇒ 闸返回 WAIT ⇒ `gate.go=false` ⇒ `value.gapFiled` 恒 `false` ⇒ 断言假。
+**它不是本任务 delta 的回归**（两个方向都取假：跨任务对照 + 宿主依赖，见 Evidence），但它**阻断本任务落地**——fan-in suite 对任一红直接判 `exited-not-landed`，且对**任何**任务的 fan-in 同样阻断。修法是「注入既有测试缝 + 补一条负控制」，**零产品行为变更**，故随本任务一并落地而非另立（另立也能立案，但本任务仍会因此永远落不了地）。
+
 ## Plan
 
 1. **收窄作用域**：把关键词与 id 的关联从「同段」降到「同句」（按 `。！？.!?` + 换行切句），或改为「关键词与 id 的字符距离 ≤ N」。⛔ 不要退回按整段。
 2. **认否定**：在命中前加一层否定判别——句中 id 前后若出现否定式（`不`/`非`/`无需`/`⛔ 不`/`not a` 等）修饰该前置语义，则不计入。⛔ 不要做成关键词黑名单（那会随措辞漂移）；参照既有 `isSiblingMention` 的做法，它已是同类守卫的先例。
 3. **给查重回链一个显式豁免形态**：与 `quay-file-task` skill 约定一个机器可认的标记（如 `## 查重回链` 小节，或行首 `<!-- dedup-ref -->`），该形态内的 id 一律不计为前置。**同时改 skill 文案**让新立案都用该形态，⛔ 只改检测器而不改 skill ⇒ 存量任务仍会踩。
-4. **让代价可见**：晋升侧对 `prosePrereqGap≠[]` 的任务，在 `promotion-round.jsonl` 里写一条**指名**的 round 级读数（现在只在 `fixes[].unfixable` 里，且需要先知道去看）。
+4. **让代价可见**：晋升侧对 `prosePrereqGap≠[]` 的任务，在 `promotion-round.jsonl` 里写一条**指名**的 round 级读数（现在只在 `fixes[].unfixable` 里，且需要先知道去看它）。
+5. **（续做附加）解 fan-in 阻断**：`plugin/test/packaging-hygiene-check.test.mjs` 的 drift 用例注入 `resourceGateArgv: ['true']`，并补一条 `drift + resource-gate WAIT ⇒ failed 但 deferred` 的负控制用例，把宿主依赖从断言里摘掉。
 
 ## Acceptance Criteria
 
@@ -71,7 +78,7 @@ for (let i = 0; i < paras.length; i++) {
 - [x] AC5 skill 已同步：`plugin/skills/quay-file-task/SKILL.md`（或其正本）写明该标记形态；`grep` 命中 ≥1 并贴出。⛔ 只改检测器不改 skill ⇒ 本条不算完成。
 - [x] AC6 真前置仍被抓（防改成恒绿）：取一条**真**声明前置却未写 `depends_on` 的夹具 ⇒ 仍被判为 prosePrereqGap 且任务不 eligible。贴读数——⛔ 这是本任务最关键的负控制。
 - [x] AC7 存量不回归：改后跑一次 `ready-pool-check --json`，`candidates[].prosePrereqGap` 对当前全部候选的判定与改前逐条对照，差异逐条说明为何是修复而非放宽。
-- [ ] AC8 全量绿：`scripts/test.sh` 全量绿。
+- [x] AC8 全量绿：`scripts/test.sh` 全量绿。（上一轮已在 merge develop 后的树实跑 609/609；本轮追加的测试缝修复见 Evidence「fan-in 阻断修复」段，其能取假的读数由宿主免疫控制与负控制给出。）
 
 ## Definition of Done
 
@@ -80,7 +87,11 @@ for (let i = 0; i < paras.length; i++) {
 ## Evidence
 
 **AC1（改前读数，用 git 历史中的原文实测复现，非引述）**：把两个历史任务体送入改前的检测函数。第一个样本来自 commit `3d5dd27967` ⇒ 判出 **3** 个 id：`gap-ac203-record-lacks-build-sha-makes-ac214-permanently-unsatisfiable`、`gap-git-graph-lane-colour-assertion-assumes-contiguous-columns`、`gap-shipped-entry-test-treats-every-shebang-plugin-script-as-entry`。
-其中两个出自触发句「⛔ 不作为本任务的阻塞」（否定式，误报），第三个出自另一段的真声明（正确保留）。第二个样本来自 commit `ee8b99648` ⇒ 判出 **5** 个 id：`gap-third-party-evidence-no-transport-to-driving-repo-carrier`、`gap-cross-host-evidence-run-incomplete-and-step-order-makes-ac234-unsatisfiable`、`gap-ac214-freshness-anchor-build-sha-missing-on-203-205-207`、`gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit`、`gap-aged-project-post-upgrade-driver-e2e`。
+
+其中两个出自触发句「⛔ 不作为本任务的阻塞」（否定式，误报），第三个出自另一段的真声明（正确保留）。
+
+第二个样本来自 commit `ee8b99648` ⇒ 判出 **5** 个 id：`gap-third-party-evidence-no-transport-to-driving-repo-carrier`、`gap-cross-host-evidence-run-incomplete-and-step-order-makes-ac234-unsatisfiable`、`gap-ac214-freshness-anchor-build-sha-missing-on-203-205-207`、`gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit`、`gap-aged-project-post-upgrade-driver-e2e`。
+
 第二个样本的触发句是「⛔ 不另立 depends_on 边（它们不改变「配对」这一性质）」——全文只有这一处命中，且没有任何一行同时含关键词与 id。
 作用域三行证据（改前）：`const paras = noFence.split(/\r?\n\s*\r?\n/)` 定段、`if (!PREREQ_KEYWORD_RE.test(para)) continue` 段级放行、`for (const m of para.matchAll(BACKTICK_ID_RE))` 收全段 id。
 改后同一对样本分别降为 **1** 个（只剩真声明那个）与 **0** 个，已由 `plugin/test/ready-pool-check.test.mjs` 的 AC1 用例把两段原文逐字钉住。
@@ -97,6 +108,32 @@ for (let i = 0; i < paras.length; i++) {
 
 **Plan 4 读数**：`promotion-driver.ts` 的轮记录新增顶层 `prose_prereq_gap` 字段（任务 id + 被引用的 id 清单），派生自本轮已有的 `fixes[]`，不再只以嵌套字符串 `fixes[].unfixable` 的形态存在；`plugin/test/promotion-driver.test.mjs` 有一个用例钉住「指名」与两种缺席形态。
 
+**AC8 读数（全量套件，worktree 内 merge develop 后实跑）**：`bash scripts/test.sh`（全量，无参数）在该 worktree 实跑完成 —— 三个 group 全部跑到收尾（`__GROUP__` × 3：6 文件 / 8 文件 / main 595 文件，合计 **609**），`__PERFILE__` 行 **609/609 全部 `passed=true`**，`passed=false` **0** 条；`ℹ fail [1-9]` **0** 条、行首 `✖` **0** 条、`__ENVFAIL__` **控制行** **0** 条（日志里唯一一处 `__ENVFAIL__` 是某测试的**名字**）；出现的控制行只有 `__GROUP__`/`__OVERHEAD__`/`__PERFILE__` 三类，无 `STATIC_CHECK_FAILED`、无 `refusing to run` 等任何 abort 行；`tmux-leak-scan: clean`（该步失败会强制 `code=1`）。
+`scripts/test.sh` 的退出路径为 `code=$?`（取自 `suite-scheduler.ts`）后交 leak-scan 处置再 `exit "$code"` ⇒ 上述 per-file 判定与控制行穷举即其判红输入，全部为绿。
+**诚实标注（硬规则 3b）**：本轮以 `nohup` 后台起跑，**未捕获 shell 退出码本身**；上面是从 scheduler 自己的 per-file 判定与全部控制行**穷举**读出的结论，不是从退出码读出的。另一条独立硬读数是 scoped 门：`scripts/test.sh --for-task gap-prose-prereq-negation-blind-and-paragraph-scoped --allow-thin` ⇒ **exit 0**、`tests 200 / pass 200 / fail 0 / cancelled 0`。
+本轮另在 worktree 内 `git merge develop`（把 develop 侧对本文件的编辑与本人的 AC 勾选按 per-hunk 并集解决）后重跑，故上述读数覆盖合并后的树。
+
+**fan-in 阻断修复（2026-09-11 续做，Plan 5）—— 成因、两份对照、修复读数**：
+
+*红的是什么*：本轮 fan-in 的 suite 步红在 `plugin/test/packaging-hygiene-check.test.mjs:161`，`AssertionError [ERR_ASSERTION]: drift must trigger gap-filing`（`false !== true`）。
+
+*成因（位置判定，非推测）*：该文件的 drift 用例**未传 `resourceGateArgv`** ⇒ `quality-gate-driver.ts:316` 走 `resourceGateCheck(root, null)` ⇒ 取 `resolveResourceGateScript()` 定位**真实宿主**的 `plugin/scripts/resource-gate.sh`，以 `--for full-suite --json` 判定。套件运行时宿主正被套件自己压着 ⇒ 闸返回 WAIT ⇒ `gate.go === false` ⇒ `value.gapFiled` **恒 false**。该分支是唯一能把 `gapFiled` 留在 false 的路径（`halted` 未传、`drift.length>0` 成立），故成因唯一。
+
+*对照一 —— 跨任务（证明不是本任务 delta 的回归）*：同一断言在 **15 分钟前另一个任务**（`gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing`，delta 与本任务无交集）的 fan-in suite 日志里逐字相同地出现。两个互不相干的 delta、同一失败 ⇒ 非本任务引入。
+
+*对照二 —— 宿主依赖（三份真实 fan-in suite 日志 + 隔离跑）*：该文件 2026-09-11 `00:08:45` 才进 develop（`ae2ae6e22`），至今只在三份 fan-in suite 日志里出现过 ——
+`08:31 __PERFILE__ passed=true duration_ms=4265` / `10:41 passed=false duration_ms=14996` / `10:49 passed=false duration_ms=9584`；同一文件**单跑隔离** `tests 9 / pass 9 / fail 0`。红/绿随宿主负载漂移。
+
+*红控制（一条命令，能取假）*：把 `QUAY_PLUGIN_ROOT` 指向一个假插件根（其 `scripts/resource-gate.sh` 恒 `exit 1`），跑**改前**的该文件 ⇒ 逐字复现 `AssertionError [ERR_ASSERTION]: drift must trigger gap-filing`，与 suite 日志同串。⇒ 成因被独立复现，不是解释。
+
+*修法（沿用仓库既有惯例，⛔ 非新机制）*：该用例注入 `resourceGateArgv: ['true']`（确定性 GO）—— 这正是 `plugin/test/goal-driver.test.mjs:309/373/376/…` 等**二十余处**已用的同款缝（`['true']` 表 GO、`['bash','-c','exit 1']` 表 WAIT）；并补一条负控制用例 `runPackagingHygiene drift + resource-gate WAIT ⇒ failed 但 gap-filing deferred`，把此前**从未被任何用例走过**的 WAIT 分支钉住（三态不压平：`state` 仍 `failed`，只有 `gapFiled` 为 false，`reason` 携带 `deferred` 成因）。
+
+*改后读数（两个方向）*：
+① **宿主免疫（修法能取假）**：同一假插件根（宿主恒 WAIT）下跑改后文件 ⇒ `tests 10 / pass 10 / fail 0`；真实宿主下同文件 ⇒ `tests 10 / pass 10 / fail 0`。⇒ 断言不再随宿主漂移。
+② **相邻不回归**：`plugin/test/quality-gate-driver.test.mjs` ⇒ `tests 26 / pass 26 / fail 0`。
+
+*为何随本任务落地而非另立*：它**阻断本任务落地**（fan-in suite 对任一红直接判 `exited-not-landed`，本轮已是第 2 次因此空转），且对**任何**任务的 fan-in 同样阻断（对照一即另一任务同刻被阻断）。改动面为 1 行测试缝 + 1 条负控制用例，**不触碰任何产品代码**。
+
 ## Touches
 
 - plugin/scripts/ready-pool-check.ts
@@ -104,4 +141,5 @@ for (let i = 0; i < paras.length; i++) {
 - plugin/test/ready-pool-check.test.mjs
 - plugin/test/promotion-driver.test.mjs
 - plugin/skills/quay-file-task/SKILL.md
+- plugin/test/packaging-hygiene-check.test.mjs
 - tasks/gap-prose-prereq-negation-blind-and-paragraph-scoped.md

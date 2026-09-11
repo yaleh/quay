@@ -955,6 +955,42 @@ BODY
 # 已有 config ⇒ 配置保留分支，⛔ 不是空仓库重写），再把项目本地 runtime 换成本次交付物。
 # ⛔ 每个前置不成立都 return 0 且【不改 AC238_EVALUATED】——「读不出」是一个独立取值，不与「合格」同形
 # （硬规则 3b：恒绿的检查比没有检查更贵）。
+
+# binding_state <project-root> — the provider binding state word for a project, read by the mechanical
+# checker plugin/scripts/provider-binding-resolvability-check.ts. ⛔ 刻意【不】注入任何 $PATH 辅助。
+#
+# WHY THIS EXISTS (tasks/gap-pre-fix-upgraded-project-unresolvable-binding-undetected): the reading at
+# ⑥ below used to be the ONLY thing asking "can the upgraded project read its own board?", and it ran
+# the CLI as `PATH="$PREFIX/bin:$PATH" node …` — an external $PATH assist that SUPPLIES exactly the
+# resolution a pre-ba960f503 project's bare `mcp_entry: [quay-native, mcp]` depends on. That reading
+# was therefore structurally incapable of taking the false value (硬规则 4): "the upgrade succeeded"
+# and "the upgraded project is unusable" produced the SAME reading. Measured 2026-09-11 on two real
+# upgraded projects (orangevps), whose own CLI answers `Error: spawn quay-native ENOENT` the moment the
+# assist is removed. This reading takes the binding's FORM, never "does it happen to resolve here".
+#
+# Returns one of: path-resolved (合格) · bare-path-name / dangling-absolute / dangling-relative (RED) ·
+# no-mcp-entry / unrecognized-shape (NOT-EVALUATED) · unreadable (the checker could not run at all —
+# ⛔ a distinct word, never confused with 合格).
+binding_state() {
+  local r="$1" out
+  out="$(node --no-warnings --experimental-strip-types \
+    "$SCRIPT_DIR/provider-binding-resolvability-check.ts" --root "$r" --json 2>/dev/null)"
+  printf '%s' "$out" | python3 -c '
+import json,sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print("unreadable"); raise SystemExit
+rows = [p for p in (d.get("providers") or []) if p.get("enabled", True)]
+if not rows:
+    print("no-provider"); raise SystemExit
+for p in rows:
+    if p.get("state") in ("bare-path-name", "dangling-absolute", "dangling-relative"):
+        print(p["state"]); raise SystemExit
+print(rows[0].get("state", "unrecognized-shape"))
+' 2>/dev/null || echo "unreadable"
+}
+
 step_upgrade_existing() {
   local root="$1" npmroot qinit fresh_quay fresh_qn rtbin
   local pre_q pre_qn post_q post_qn fresh_q fresh_qn_sha
@@ -1024,6 +1060,12 @@ step_upgrade_existing() {
   pre_set="$(cd "$root" && find tasks -maxdepth 1 -type f -name '*.md' -print0 2>/dev/null | sort -z | xargs -0 -r sha256sum 2>/dev/null | sha256sum | awk '{print $1}')"
   echo "  pre: tasks=$AC238_PRE_TASK_COUNT runtime_age_days=$AC238_RUNTIME_AGE_DAYS taskset=$(printf '%.12s' "$pre_set")"
 
+  # ②b 【升级前】绑定可解析性直接量（无 $PATH 辅助）。这是本项目【本来就有】的存量读数：一个从
+  #     ba960f503 之前升级过来的现场，此刻停在裸名绑定上 ⇒ 本读数取 RED，而 ⑥（带 $PATH 辅助）照样绿。
+  #     ⛔ 信息量读数，不参与 AC238_EVALUATED 判定——源项目本来就可能是已迁移的（post 才是门）。
+  AC238_PRE_BINDING="$(binding_state "$root")"
+  echo "  pre binding: pre_binding=$AC238_PRE_BINDING (read with NO \$PATH assistance — the stale-inventory reading)"
+
   # ③ 升级动作 = 跑【本次交付物自带的】quay-init。已有 config ⇒ 配置保留分支（migrate_stale_mcp_entry
   #    + ensure_loop_config），⛔ 不是空仓库重写；任务目录只 mkdir -p，不删不覆盖。
   # ⛔ 刻意【不】把退出码捕获写成「命令 ... 或运算 赋给 rc」的一行形式：instrument-failure-check 的
@@ -1087,10 +1129,19 @@ step_upgrade_existing() {
   [ -n "$post_set" ] && [ "$post_set" = "$pre_set" ] && AC238_TASKSET_STABLE=1
   echo "  post: tasks=$AC238_POST_TASK_COUNT taskset_stable=$AC238_TASKSET_STABLE runtime_replaced=$AC238_RUNTIME_REPLACED"
 
-  # ⑥ 新 CLI 能读出旧存量（文件还在 ≠ 读得出）。⛔ 不再 PATH 前置本次安装前缀：升级后 config 的
-  #    mcp_entry 是**绝对路径**（本次交付物的 vendored bundle），解析它【不应】依赖 $PATH——依赖
-  #    $PATH 正是 ba960f503 修掉的那个缺陷形态（裸 `quay-native` 由「$PATH 恰好有什么」决定）。
-  #    因此这里刻意**不给 PATH 辅助**：这条读数要证的是「升级后的绑定自己就能解析」。
+  # ⑤b 【升级后】绑定可解析性直接量（⛔ 无 $PATH 辅助）。这是本 AC 的门：升级动作若没能把 provider
+  #     绑定迁到一条项目自己控制的路径上（migrate_stale_mcp_entry 不生效 / 被回归掉），post 会停在
+  #     bare-path-name——而带 $PATH 辅助的读法会把它盖成绿。取值可区分（develop 侧新增的判据）。
+  AC238_POST_BINDING="$(binding_state "$root")"
+  echo "  post binding: post_binding=$AC238_POST_BINDING (read with NO \$PATH assistance — the gate below)"
+
+  # ⑥ 新 CLI 能读出旧存量（文件还在 ≠ 读得出）。⛔ 不再 PATH 前置本次安装前缀、也⛔不用
+  #    `$rtbin/quay.js`：升级后的 config mcp_entry 是**绝对路径**（本次交付物的 vendored bundle），
+  #    而 project-local `.quay/runtime/` 已被 quay-init 退休（裁定 c / ba960f503）⇒ $rtbin 此刻
+  #    已不存在，拿它当被测 CLI 是对一个已被退休的布局的复活。解析这条绑定【不应】依赖 $PATH——
+  #    依赖 $PATH 正是 ba960f503 修掉的那个缺陷形态（裸 `quay-native` 由「$PATH 恰好有什么」决定），
+  #    也正是上面 `binding_state` 那道门单独承担的东西（两层不互替：这里证「读得出存量」，那里证
+  #    「绑定的形态本身可解析」）。故此处刻意**不给 PATH 辅助**。
   tl_json="$(cd "$root" && node "$fresh_quay" task list --root "$root" --json 2>/dev/null)"
   tl_count="$(printf '%s' "$tl_json" | python3 -c 'import json,sys
 d=json.load(sys.stdin); print(len(d))' 2>/dev/null || echo "")"
@@ -1133,6 +1184,7 @@ d=json.load(sys.stdin); print(len(d))' 2>/dev/null || echo "")"
      && [ "$AC238_POST_TASK_COUNT" = "$AC238_PRE_TASK_COUNT" ] \
      && [ "$age_ok" = "1" ] && [ "$AC238_RUNTIME_REPLACED" = "1" ] \
      && [ "$AC238_TASK_LIST_OK" = "1" ] && [ -n "${BUILD_SHA:-}" ] \
+     && [ "$AC238_POST_BINDING" = "path-resolved" ] \
      && [ "$init_rc" = "0" ]; then
     AC238_EVALUATED=1
   fi
@@ -1142,16 +1194,21 @@ d=json.load(sys.stdin); print(len(d))' 2>/dev/null || echo "")"
     # runtime_replaced=true 在今天有【两代语义】（旧：cp 覆盖 project-local runtime；新：退休它并把
     # config 绑定到交付物）。字段名相同时代不同 ⇒ 读者分不清这个 true 指的是哪一种替换
     # （硬规则同族：一个字段承载两个成因就等于没有区分维度）。判据侧只读老字段，这三个是给人看的。
-    printf '{"ts":"%s","ac":"GOAL-009-AC-238","host":"%s","project_root":"%s","pre_upgrade_task_count":%s,"post_upgrade_task_count":%s,"pre_upgrade_runtime_age_days":%s,"runtime_replaced":true,"task_list_ok":true,"build_sha":"%s","upgrade_source":"%s","upgrade_init_rc":%s,"isolated_copy":%s,"taskset_stable":true,"sample_task":"%s","fresh_runtime_sha256":"%s","host_key":"%s","binding":"delivered-vendor","retired_runtime_backup":"%s","retired_backup_matches_pre":true,"bound_mcp_entry":"%s"}\n' \
+    # ⛔ 字段并集：两代语义各有自己的可区分载体，⛔ 任一都不删（删掉任一半都让「哪个 true」重新变得
+    # 不可分）：`binding`/`retired_runtime_backup`/`retired_backup_matches_pre` 是【退休式】替换
+    # （新语义：旧 runtime 退休到备份 + config 绑定到交付物）；`pre_binding`/`post_binding` 是
+    # 【绑定形态】的前后读数（bare-path-name ⇒ 升级没把绑定迁到项目自己控制的路径上）。
+    printf '{"ts":"%s","ac":"GOAL-009-AC-238","host":"%s","project_root":"%s","pre_upgrade_task_count":%s,"post_upgrade_task_count":%s,"pre_upgrade_runtime_age_days":%s,"runtime_replaced":true,"task_list_ok":true,"build_sha":"%s","upgrade_source":"%s","upgrade_init_rc":%s,"isolated_copy":%s,"taskset_stable":true,"sample_task":"%s","fresh_runtime_sha256":"%s","pre_binding":"%s","post_binding":"%s","host_key":"%s","binding":"delivered-vendor","retired_runtime_backup":"%s","retired_backup_matches_pre":true,"bound_mcp_entry":"%s"}\n' \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(hostname 2>/dev/null || echo '')" "$AC238_PROJECT_ROOT" \
       "$AC238_PRE_TASK_COUNT" "$AC238_POST_TASK_COUNT" "$AC238_RUNTIME_AGE_DAYS" \
       "$BUILD_SHA" "${UPGRADE_SOURCE:-none}" "$init_rc" \
       "$([ -n "$UPGRADE_SOURCE" ] && [ "$UPGRADE_SOURCE" != "$root" ] && echo true || echo false)" \
-      "$AC238_SAMPLE_TASK" "$AC238_FRESH_RUNTIME_SHA" "${HOST:-}" \
+      "$AC238_SAMPLE_TASK" "$AC238_FRESH_RUNTIME_SHA" "${AC238_PRE_BINDING:-unreadable}" \
+      "${AC238_POST_BINDING:-unreadable}" "${HOST:-}" \
       "$AC238_RETIRED_DIR" "$AC238_BOUND_ENTRY" >> "$AC89"
     echo "  ac238 record written → $AC89"
   else
-    echo "  AC-238 record NOT written — 缺值≠合格 (pre_count=$AC238_PRE_TASK_COUNT post_count=$AC238_POST_TASK_COUNT age_days=${AC238_RUNTIME_AGE_DAYS:-<unread>} replaced=$AC238_RUNTIME_REPLACED task_list_ok=$AC238_TASK_LIST_OK build_sha=${BUILD_SHA:-<empty>} upgrade_init_rc=$init_rc)" >&2
+    echo "  AC-238 record NOT written — 缺值≠合格 (pre_count=$AC238_PRE_TASK_COUNT post_count=$AC238_POST_TASK_COUNT age_days=${AC238_RUNTIME_AGE_DAYS:-<unread>} replaced=$AC238_RUNTIME_REPLACED task_list_ok=$AC238_TASK_LIST_OK post_binding=${AC238_POST_BINDING:-<unread>} build_sha=${BUILD_SHA:-<empty>} upgrade_init_rc=$init_rc)" >&2
   fi
   return 0
 }

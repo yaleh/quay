@@ -7,6 +7,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { ensureBranchModel, formatBranchModelReport, type BranchModelReport } from "./branch-model.ts";
 
 /**
  * Result of an init operation.
@@ -28,6 +29,15 @@ export interface InitResult {
   profilesPath: string;
   /** The full generated .quay/profiles.yml content (for dry-run printing). */
   profilesContent: string;
+  /**
+   * The quay branch model this init established (or would establish). See branch-model.ts: the
+   * landing baseline (`develop`) the fan-in/anti-drift path reads is ESTABLISHED here, never
+   * assumed — that is the whole fix for
+   * gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing.
+   */
+  branchModel: BranchModelReport;
+  /** `formatBranchModelReport(branchModel)` — the operator-facing rendering. */
+  branchModelReport: string;
 }
 
 /**
@@ -42,6 +52,15 @@ export interface InitOptions {
   dryRun: boolean;
   /** Provider id override (default: auto-detect). */
   provider?: string;
+  /**
+   * Adopt a foreign landing baseline instead of refusing it (branch-model.ts). When the target
+   * project already has a `develop` (or `author`) that is NOT a continuation of its default branch,
+   * the default behavior is to REFUSE — reusing it silently would make every task's anti-drift diff
+   * meaningless. With this flag the existing tip is preserved under
+   * `<branch>-pre-quay-init-<sha>` and the branch is re-pointed at the default branch tip.
+   * Nothing is destroyed either way; the flag only decides whether init proceeds or stops.
+   */
+  adoptBranchModel?: boolean;
 }
 
 // These strings contain characters that confuse Node 26's TypeScript parser
@@ -394,8 +413,35 @@ export function runInit(opts: InitOptions): InitResult {
       launchSettingsContent: "",
       profilesPath,
       profilesContent: "",
+      branchModel: { ok: true, skipped: true, defaultBranch: null, entries: [], remedy: null },
+      branchModelReport: "",
     };
     return result;
+  }
+
+  // ── Branch model (gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing) ──────
+  // Run BEFORE writing anything: if the project's `develop` is a foreign line, init must stop with
+  // the tree untouched (a half-initialized project is worse than an uninitialized one). The
+  // landing baseline the fan-in / anti-drift path reads (`develop`) is ESTABLISHED here — that is
+  // what turns the shipped `?? "develop"` default from an assumption into a fact.
+  const branchModel = ensureBranchModel(root, {
+    adopt: opts.adoptBranchModel === true,
+    dryRun: opts.dryRun === true,
+  });
+  const branchModelReport = formatBranchModelReport(branchModel);
+  if (!branchModel.ok && !opts.dryRun) {
+    return {
+      outcome: "branch-model-blocked",
+      configPath,
+      tasksDir,
+      content: "",
+      launchSettingsPath,
+      launchSettingsContent: "",
+      profilesPath,
+      profilesContent: "",
+      branchModel,
+      branchModelReport,
+    };
   }
 
   // Detect project type.
@@ -411,7 +457,7 @@ export function runInit(opts: InitOptions): InitResult {
   const content = generateConfigContent({ providerId, providerPath, isNode, isGo });
 
   if (opts.dryRun) {
-    return { outcome: "dry-run", configPath, tasksDir, content, launchSettingsPath, launchSettingsContent, profilesPath, profilesContent };
+    return { outcome: "dry-run", configPath, tasksDir, content, launchSettingsPath, launchSettingsContent, profilesPath, profilesContent, branchModel, branchModelReport };
   }
 
   // Write config.
@@ -440,7 +486,7 @@ export function runInit(opts: InitOptions): InitResult {
     fs.writeFileSync(profilesPath, profilesContent, "utf8");
   }
 
-  return { outcome: "written", configPath, tasksDir, content, launchSettingsPath, launchSettingsContent, profilesPath, profilesContent };
+  return { outcome: "written", configPath, tasksDir, content, launchSettingsPath, launchSettingsContent, profilesPath, profilesContent, branchModel, branchModelReport };
 }
 
 /**

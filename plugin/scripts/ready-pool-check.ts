@@ -1202,6 +1202,91 @@ function isSiblingMention(para, start, end) {
   return false;
 }
 
+/** Sentence split for the prose-prereq scan. The keyword→id ASSOCIATION is SENTENCE-scoped, not
+ *  paragraph-scoped (gap-prose-prereq-negation-blind-and-paragraph-scoped Plan 1). The paragraph
+ *  scope let ONE keyword occurrence claim EVERY id in the paragraph, however many sentences away —
+ *  measured: `gap-ac240-e2e-closure-same-run-pairing` has exactly 1 keyword hit in its body
+ *  (`depends_on`, inside a sentence that DENIES a prereq) and 5 ids harvested from it, 3 of them in
+ *  a previous sentence carrying no keyword at all. Split on the terminators this repo's prose
+ *  actually uses (。！？ plus their ASCII forms) and on line breaks (hard-wrapped markdown). */
+export const SENTENCE_SPLIT_RE = /[。！？.!?]+|\r?\n+/;
+
+/** Negation of a prereq keyword. PREREQ_KEYWORD_RE is matched literally, so an explicitly DENYING
+ *  construction is indistinguishable from a declaring one under a bare `test()`:
+ *  "⛔ 不另立 `depends_on` 边" / "⛔ 不作为本任务的阻塞" / "非前置声明" all read as declarations.
+ *  Measured cost (2 occurrences, 2026-09-10): two tasks sat at todo — one of them the only fix for a
+ *  deterministic full-suite red — because their dedup-backlink paragraphs deny a prereq.
+ *
+ *  Shape: a negation marker sitting IMMEDIATELY before the keyword occurrence — at most 8 chars
+ *  between them, and NO clause boundary (，,；;：:、（）()[]。！？!?) in that gap. So a marker in an
+ *  earlier clause ("⛔ 不要跳过：前置 `gap-x`") does not negate this occurrence, and the match stays
+ *  local to the keyword. This is the same kind of lexical guard as `isSiblingMention` below — the
+ *  repo's accepted precedent that "a mention is not a declaration" — applied to the KEYWORD rather
+ *  than to the id (⛔ deliberately NOT a positive-keyword blacklist: that drifts with wording, and
+ *  the previous widen of the keyword set is precisely what amplified this false-positive side).
+ *
+ *  MEASURED on the full store at landing (2026-09-11, 2026 task files): scope+polarity together
+ *  drop 105 refs across 82 tasks — 102 by SCOPE, 3 by POLARITY, 0 ADDED anywhere (a strict
+ *  narrowing) — and all 82 are `done`/`superseded`, so the derived pool view (ready/excluded/
+ *  candidates/promotions) is byte-identical before and after. The guard fires rarely (3/2026
+ *  tasks) and each firing was inspected: all three sentences are traceability notes ("与已有任务
+ *  关系"、"不由本任务的阻塞承担"、"无法区分阻塞/非阻塞"), none is a prereq claim. */
+const NEGATION_MARKER_RE =
+  /(?:(?:不|非|无|未|勿)|(?<![A-Za-z0-9_-])(?:not|no)(?![A-Za-z0-9_-]))[^，,；;：:、（）()\[\]。！？!?]{0,8}$/;
+/** The fixed idiom 不得不 ("have to") is an AFFIRMATIVE obligation, not a negation — but it carries
+ *  不, so it would otherwise be read as one ("不得不先完成 `gap-x`" would lose a genuine prereq).
+ *  Neutralised (same-length, so the `$`-anchored geometry is unchanged) before the marker test. */
+const AFFIRMATIVE_IDIOM_RE = /不得不/g;
+/** How far before a keyword occurrence the negation window reaches. */
+const NEGATION_WINDOW = 16;
+
+/** Is the keyword occurrence at `keywordStart` explicitly negated? */
+function isNegatedPrereqKeyword(sentence, keywordStart) {
+  const before = sentence
+    .slice(Math.max(0, keywordStart - NEGATION_WINDOW), keywordStart)
+    .replace(AFFIRMATIVE_IDIOM_RE, "...");
+  return NEGATION_MARKER_RE.test(before);
+}
+
+/** Does this SENTENCE assert a prerequisite — i.e. carry ≥1 prereq-keyword occurrence that is not
+ *  negated? Negation is judged per occurrence, so a sentence that both denies one construction and
+ *  declares another still declares ("阻塞 `gap-a`；⛔ 不另立 depends_on 边：`gap-b`" keeps `gap-a`). */
+export function declaresPrereq(sentence) {
+  PREREQ_KEYWORD_SCAN_RE.lastIndex = 0;
+  let m;
+  while ((m = PREREQ_KEYWORD_SCAN_RE.exec(sentence)) !== null) {
+    if (!isNegatedPrereqKeyword(sentence, m.index)) return true;
+  }
+  return false;
+}
+
+/** Global scan copy of PREREQ_KEYWORD_RE (same source/flags + `g`), reset per declaresPrereq call.
+ *  Kept separate so the exported PREREQ_KEYWORD_RE stays the stateless `test()` predicate callers
+ *  (and tests) already use. */
+const PREREQ_KEYWORD_SCAN_RE = new RegExp(PREREQ_KEYWORD_RE.source, `${PREREQ_KEYWORD_RE.flags}g`);
+
+/** Dedup-backlink exemption marker (Plan 3). `quay-file-task` step 2 ORDERS the author of a new
+ *  task to cite the related-but-distinct ids it found — "note the related id in the new task's
+ *  Proposal/Finding for traceability" — and a traceability paragraph that happens to use a gating
+ *  word ("⛔ 不重复立案…不另立 depends_on 边") then silently made the task promotion-ineligible.
+ *  The two conventions fought each other. A paragraph whose first non-whitespace content is this
+ *  marker is read as traceability ONLY: no prereq keyword in it counts, whatever it says.
+ *
+ *  Node-side note: this is the marker the skill writes, so the two sides share one literal. */
+export const DEDUP_REF_MARKER = "<!-- dedup-ref -->";
+
+/** A paragraph is dedup-exempt when the marker OPENS it (first non-whitespace content). Anchoring on
+ *  the paragraph start — rather than "the marker appears anywhere" — keeps a task that merely QUOTES
+ *  the marker (e.g. this task's own AC4) from exempting the paragraph it quotes it in. */
+function isDedupExemptParagraph(para) {
+  return para.trimStart().startsWith(DEDUP_REF_MARKER);
+}
+
+/** Split a paragraph into sentences (empty/whitespace-only pieces dropped). */
+function splitSentences(text) {
+  return text.split(SENTENCE_SPLIT_RE).filter((s) => s.trim().length > 0);
+}
+
 /** Read a task's `status:` frontmatter field straight off disk (null when the file/field is absent).
  *  Used to drop refs to SUPERSEDED tasks — a retired task is not a valid current-prereq target (its
  *  body reference is a stale name; the successor carries the real dependency). */
@@ -1213,14 +1298,22 @@ function readTaskStatusOnDisk(tasksDir, id) {
   return fm ? readFrontField(fm[1], "status") : null;
 }
 
-/** Task ids referenced inside prereq-declaration paragraphs of the body. Two citation forms are
- *  recognized (both gated by the prereq keyword on the paragraph — the keyword decides whether the
- *  paragraph DECLARES a prerequisite at all):
+/** Task ids referenced inside prereq-declaration SENTENCES of the body. Two citation forms are
+ *  recognized (both gated by the prereq keyword on the sentence — the keyword decides whether the
+ *  sentence DECLARES a prerequisite at all):
  *    - wikilinks `[[id]]`, matched on an inline-backtick-stripped copy so a QUOTED wikilink stays an
  *      illustrative mention (the original stripCodeSpans intent);
  *    - inline backtick spans `` `id` `` — the repo's dominant citation form (≈11:1 over wikilinks),
  *      matched on a fence-only copy (inline spans are KEPT here because they ARE the citation).
- *  Two ref-level filters keep the widen PRECISE (a sibling/heritage mention is not a prereq):
+ *  Scope + polarity are the two axes the paragraph-scoped version got wrong
+ *  (gap-prose-prereq-negation-blind-and-paragraph-scoped):
+ *    - SCOPE is the SENTENCE, never the paragraph — a keyword in one sentence may not claim ids in
+ *      another (see SENTENCE_SPLIT_RE / splitSentences);
+ *    - POLARITY is checked per keyword occurrence — a sentence whose only keyword occurrences are
+ *      NEGATED ("⛔ 不另立 depends_on 边") declares nothing (see declaresPrereq);
+ *    - a paragraph OPENED with DEDUP_REF_MARKER is traceability, exempt wholesale.
+ *  Two further ref-level filters keep the detector PRECISE (a sibling/heritage mention is not a
+ *  prereq):
  *    - a ref whose context carries a sibling marker is dropped (see SIBLING_MENTION_RE);
  *    - a ref to a SUPERSEDED task is dropped (retired task — its successor is the real prereq).
  *  Only ids that resolve to an existing, non-superseded task file are returned. */
@@ -1238,15 +1331,27 @@ export function prosePrereqRefs(body, tasksDir) {
   };
   for (let i = 0; i < paras.length; i++) {
     const para = paras[i];
+    // Dedup-backlink exemption (Plan 3): a paragraph the author OPENED with the marker is
+    // traceability, not a prereq claim — no keyword in it counts (see DEDUP_REF_MARKER).
+    if (isDedupExemptParagraph(para)) continue;
+    // Cheap paragraph gate first (unchanged): no keyword anywhere ⇒ nothing to attribute.
     if (!PREREQ_KEYWORD_RE.test(para)) continue;
     const inlinePara = inlineParas[i] ?? "";
-    for (const m of inlinePara.matchAll(WIKILINK_RE)) {
-      if (isSiblingMention(inlinePara, m.index, m.index + m[0].length)) continue;
-      add(m[1]);
+    // The keyword→id association is SENTENCE-scoped (Plan 1) and a sentence only declares when it
+    // carries a NON-NEGATED keyword occurrence (Plan 2) — see SENTENCE_SPLIT_RE / declaresPrereq.
+    for (const sent of splitSentences(inlinePara)) {
+      if (!declaresPrereq(sent)) continue;
+      for (const m of sent.matchAll(WIKILINK_RE)) {
+        if (isSiblingMention(sent, m.index, m.index + m[0].length)) continue;
+        add(m[1]);
+      }
     }
-    for (const m of para.matchAll(BACKTICK_ID_RE)) {
-      if (isSiblingMention(para, m.index, m.index + m[0].length)) continue;
-      add(m[1]);
+    for (const sent of splitSentences(para)) {
+      if (!declaresPrereq(sent)) continue;
+      for (const m of sent.matchAll(BACKTICK_ID_RE)) {
+        if (isSiblingMention(sent, m.index, m.index + m[0].length)) continue;
+        add(m[1]);
+      }
     }
   }
   return [...refs];
@@ -1898,12 +2003,17 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
   // setTaskStatus/applyPromotions. A candidate with no frontmatter / no such label ⇒ false
   // (conservative default, matching the dispatch side).
   const deliveryCritical = (task.labels || []).includes("delivery-critical");
-  // LONG-TERM-GUARANTEE FILING-TIME GATE (gap-long-term-guarantee-registry-hand-maintained): 立案时必填 —
-  // a delivery-critical candidate must declare a non-empty goal_ac (task→AC linkage, parseTask's
-  // frontmatterGoalAc projection: absent/empty ⇒ null). This is the filing-time half of the positional
-  // judgment that replaced the retired hand-maintained registry; the goal-layer half (the
-  // long-term-guarantee-goal-backed-check) enforces the same rule on post-cutoff tasks every round.
-  const goalAcMissing = deliveryCritical && !task.goal_ac;
+  // GOAL-LAYER SOURCE IS NOT AN ADMISSION INPUT — the standing invariant (人 2026-09-11 裁定；
+  // 机械守着：plugin/scripts/eligible-no-goal-source-check.ts):
+  //   准入集合只由 task 自身的自足属性决定；goal 信息最多改变集合内的顺序，永不改变成员资格。
+  // 理由是单调性——排序不减少可执行集合（最坏是次序不优），准入可把集合减到空（产生僵尸）。
+  // ⛔ 即便未来 goal 加了优先级，它也只能进 sort key、缺值时退化为默认序；
+  //    绝不出现「goal 优先级未设 ⇒ 不可派发」这一同形缺陷的新版本。
+  // 此前这里有过一道 `goalAcMissing` 判据（delivery-critical 但无 goal_ac ⇒ 永不晋升）：
+  // 它与 goals/AC-190-task-ac.md 的 origin（人 2026-09-07 就 GOAL-007 裁定【丁：上移 goal 层】）
+  // 反向——长期保证的执行面在 goal 层（long-term-guarantee-goal-backed-check.ts，每轮重评估、
+  // 有生效线 ACTIVATION_LINE_ISO），在 task 层准入闸再塞一份就是落点错；且准入闸每轮重新评估
+  // 全部 todo，必须人工补一条 cutoff 去模拟「只对新立案生效」，补丁漏一半 ⇒ 僵尸任务。
   // PRIORITY TIEBREAKER (gap-priority-has-no-mechanism-reader): the explicit `priority:*` label
   // (p1 > p2 > none), read from the SAME frontmatter-labels source (parseTask) the dispatch sort
   // reads. A PREFERENCE, never a safety override — the promotion sort ranks disjointScore FIRST
@@ -1934,9 +2044,6 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     // determination — consumed by applyPromotions so the label is written AT PROMOTE (标签与 ready
     // 同现). Same frontmatter-labels source the dispatch sort reads.
     deliveryCritical,
-    // LONG-TERM-GUARANTEE FILING-TIME GATE (gap-long-term-guarantee-registry-hand-maintained): a
-    // delivery-critical candidate without goal_ac is never promotion-eligible (立案时必填, fail-closed).
-    goalAcMissing,
     // PRIORITY TIEBREAKER (gap-priority-has-no-mechanism-reader): the candidate's explicit
     // `priority:*` label rank (p1=1, p2=2, none=Infinity) — consumed by the promotion sort as the
     // tiebreaker WITHIN an equal-disjointness bucket (AC1). Never above disjointScore (AC3).
@@ -1972,7 +2079,9 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     // TOUCHES-WIDTH (2026-08-28): the touchesNarrow guard is ADDED — a candidate with a
     // directory-level `## Touches` glob is never eligible (it would silently lock the whole dispatch
     // pool while in flight; the fix-worker narrows it before it ever enters ready).
-    eligible: depsReady && four.complete && touchesResolve && touchesNarrow.narrow && !retiredMechanism && !superseded && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok && !goalAcMissing,
+    // GOAL-LAYER SOURCE IS NOT AN ADMISSION INPUT (see the invariant above): no goal-derived term
+    // may enter this conjunction — `eligible-no-goal-source-check.ts` asserts exactly that.
+    eligible: depsReady && four.complete && touchesResolve && touchesNarrow.narrow && !retiredMechanism && !superseded && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok,
   };
 }
 
@@ -2068,22 +2177,11 @@ export function buildTargetedPromotion(id, task, root, allTasks, develop = "deve
       checks: { retiredMechanism: true, retiredRefs: staleRefs },
     };
   }
-  // LONG-TERM-GUARANTEE FILING-TIME GATE (gap-long-term-guarantee-registry-hand-maintained): the same
-  // 立案时必填 fail-closed as the bulk path — a delivery-critical candidate without goal_ac is never
-  // targeted-promotable either (an outer stage-goal selection must not bypass it).
-  const deliveryCritical = (task.labels || []).includes("delivery-critical");
-  const goalAcMissing = deliveryCritical && !task.goal_ac;
-  if (goalAcMissing) {
-    return {
-      id,
-      found: true,
-      status: task.status,
-      eligible: false,
-      floor_independent: true,
-      reason: `goal-ac-missing: ${id} is delivery-critical but declares no goal_ac (立案时必填, fail-closed) — not promotable`,
-      checks: { goalAcMissing: true },
-    };
-  }
+  // GOAL-LAYER SOURCE IS NOT AN ADMISSION INPUT (人 2026-09-11 裁定；见 buildCandidate 处的不变式):
+  // the TARGETED path used to mirror the bulk path's `goalAcMissing` early return — an outer
+  // stage-goal selection could not promote a delivery-critical task lacking goal_ac either. That is
+  // the same wrong landing point and is removed with it: the goal-layer half lives in
+  // long-term-guarantee-goal-backed-check.ts (per-round re-evaluation, activation line), never here.
   const four = artifactsComplete(task.body);
   const depsReady = depsReadyFor(task, allTasks, root, develop);
   const touches = checkTaskTouchesResolve(task.body, root);
@@ -2092,7 +2190,8 @@ export function buildTargetedPromotion(id, task, root, allTasks, develop = "deve
   // PROSE-PREREQUISITE GAP (AC3): targeted promotion must NOT advance a task whose prose-declared
   // prereqs have no relation edge — same fail-closed as the bulk path.
   const prosePrereqGapIds = prosePrereqGap(task.body, task.frontmatterRaw, path.join(root, "tasks"));
-  const eligible = four.complete && depsReady && touchesResolve && touchesNarrow.narrow && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok && !goalAcMissing;
+  // No goal-derived term in the membership conjunction (invariant above).
+  const eligible = four.complete && depsReady && touchesResolve && touchesNarrow.narrow && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok;
   const checks = {
     fourArtifacts: four.complete,
     missingArtifacts: four.missing,
@@ -2107,7 +2206,6 @@ export function buildTargetedPromotion(id, task, root, allTasks, develop = "deve
     retiredMechanism: false,
     compound,
     selfTouchOk: selfTouch.ok,
-    goalAcMissing,
   };
   return {
     id,

@@ -213,6 +213,30 @@ export function classifyCandidate(c: CandidateChecks): FixDecision {
   return { id: c.id, fixable, missing, unfixable, prompt };
 }
 
+/** Plan 4 (gap-prose-prereq-negation-blind-and-paragraph-scoped)：prosePrereqGap 的【轮级指名读数】。
+ *  在此之前，被 prose-prereq 卡住的任务只以 `fixes[].unfixable` 里的 `prosePrereqGap=[…]` 一条
+ *  字符串存在——一个要先知道去看、再展开一层才看得到的嵌套字段；与此同时 `quay task check` 报
+ *  `ok:true`、池读数正常。实测两个样本正是这样静默卡在 todo（其一还是全套件确定性红的唯一修复）。
+ *  本函数把它提升为轮记录的顶层字段，指名【任务 id + 被引用的 id 清单】，一次读
+ *  promotion-round.jsonl 即可回答「谁卡在散文前置上、卡在哪些 id 上」。
+ *  派生自本轮已有的 `fixes[]`（⛔ 不第二次解析池 JSON——单一来源，无漂移）。 */
+export function prosePrereqGapReading(
+  fixes: Array<{ id: string; unfixable?: string[] }>,
+): Array<{ id: string; refs: string[] }> {
+  const out: Array<{ id: string; refs: string[] }> = [];
+  for (const f of fixes) {
+    const hit = (f.unfixable ?? []).find((u) => typeof u === "string" && u.startsWith("prosePrereqGap=["));
+    if (!hit) continue;
+    const refs = hit
+      .slice("prosePrereqGap=[".length, -1)
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    out.push({ id: f.id, refs });
+  }
+  return out;
+}
+
 /** fix worker prompt = 任务 id + 闸的结构化 missing 清单（⛔ 非「你去看看哪儿不对」散文指令）。
  *  AC2 能取假：prompt 必须含结构化的缺项标识（如 `fourArtifacts=false missing=[DoD]`）；
  *  若 prompt 只有任务 id 而无缺项清单 ⇒ 本条为假。 */
@@ -359,9 +383,10 @@ export function runPromotionRound(root: string, cmd: string[] | null, cap: numbe
 }
 
 /** 一条结构化 round 记录（字段：ts · round · run_id · pid · action · pool · should_apply ·
- *  promoted_ids · applied · error · promote_path_llm_invoked · fixes）。action ∈ promote|fix|none|error。
+ *  promoted_ids · applied · error · promote_path_llm_invoked · fixes · prose_prereq_gap）。action ∈ promote|fix|none|error。
  *  promote_path_llm_invoked 在晋升路径上为 false（机械 ready-pool-check，AC131）；AC132 的 fix worker 是
- *  `claude -p`（argv[0]=claude），其 spawn 在 fixes[].spawned=true 上可见。 */
+ *  `claude -p`（argv[0]=claude），其 spawn 在 fixes[].spawned=true 上可见。
+ *  prose_prereq_gap（Plan 4）把散文前置缺边【指名】提升到顶层——见 prosePrereqGapReading。 */
 export interface FixOutcome {
   id: string;
   spawned: boolean;
@@ -411,6 +436,8 @@ export function computeRoundRecord(opts: {
     ts: opts.at, round: opts.round, run_id: opts.runId, pid: opts.pid, action,
     pool: opts.pool, should_apply: opts.shouldApply, promoted_ids: opts.promotedIds,
     applied: opts.applied, error: opts.error, promote_path_llm_invoked: opts.promotePathLlmInvoked, fixes: opts.fixes,
+    // Plan 4：prosePrereqGap 的轮级指名读数（顶层；此前只在 fixes[].unfixable 这一嵌套字符串里）。
+    prose_prereq_gap: prosePrereqGapReading(opts.fixes),
     // AC133：重验证结果（null = 本轮无 fix worker 可重验证）与本轮新标 needs-human 的 id 清单。
     reverify: opts.reverify ?? null,
     needs_human: (opts.needsHuman ?? []).map((n) => n.id),
