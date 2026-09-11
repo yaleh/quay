@@ -741,6 +741,12 @@ export interface SyncHealth {
   semanticConflict: number;
   semanticAlignFailed: number;
   semanticFfFailed: number;
+  /** ⚠️ 2026-09-11 补（gap-develop-sync-reset-hard-destroys-third-party-project-tree）：终局解
+   *  `takeDevelopDiscardingDoc` 新增了一个**终止态——拒绝**（被丢弃的提交不可弃 ⇒ 不 reset）。
+   *  ⛔ 不数它就会重犯本接口上方 :739-741 已记过一次的错（「读数对主要失败态全盲」）：拒绝发生在
+   *  `…-take-develop-refused` 事件上，而它后面还跟着一条双向同步汇总事件 ⇒ `lastEvent` 也读不到，
+   *  于是新状态在聚合读数里**既不入桶也不当最后事件** ⇒ 与「一切正常」同形（硬规则 3b）。 */
+  semanticTakeDevelopRefused: number;
   lastEvent: string | null;
   lastTs: string | null;
 }
@@ -750,6 +756,7 @@ export function collectSyncHealth(root: string, window = 200): SyncHealth {
   const h: SyncHealth = {
     window, ffSynced: 0, notFf: 0, notFfBenign: 0, notFfBehind: 0, ffError: 0,
     semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0,
+    semanticTakeDevelopRefused: 0,
     lastEvent: null, lastTs: null,
   };
   let lines: string[];
@@ -773,6 +780,7 @@ export function collectSyncHealth(root: string, window = 200): SyncHealth {
     else if (e === "doc-develop-sync-semantic-conflict") h.semanticConflict++;
     else if (e === "doc-develop-sync-semantic-align-failed") h.semanticAlignFailed++;
     else if (e === "doc-develop-sync-semantic-ff-failed") h.semanticFfFailed++;
+    else if (e === "doc-develop-sync-semantic-take-develop-refused") h.semanticTakeDevelopRefused++;
     if (e) { h.lastEvent = e; h.lastTs = typeof r.ts === "string" ? r.ts : null; }
   }
   return h;
