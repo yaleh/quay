@@ -115,21 +115,62 @@ Stage 4 — 缺陷分流：若过程中发现新的真实缺陷（不同于本�
 
 ## Acceptance Criteria
 
-- [ ] 已确认 `gap-aged-third-party-project-quay-upgrade-verification` 完成、AC-238 有通过记录，
+- [x] 已确认 `gap-aged-third-party-project-quay-upgrade-verification` 完成、AC-238 有通过记录，
       取得其 project_root
+      > 实测：该任务 status=done；本机 `.quay/productization-verification.jsonl` 有两条通过型 AC-238 记录
+      > （`/home/yale/quay-verify-upgrade-9eda8c70-root` 04:00:43Z、`/home/yale/quay-verify-upgrade-1c202737-root`
+      > 04:10:09Z，host=orangevps）。两个 project_root 都是 meta-cc 的隔离副本。
 - [ ] 在该 project_root 上，目标项目自己的 `*-drivers` 驱动出一条**真实缺陷修复任务**到 done
       （meta-cc `include_subagents` 对显式 `session_id` 静默失效的修复），真实 git 提交存在
-- [ ] 该修复任务自身带有可机械验收的判据（新增/修改测试用例，修复前失败、修复后通过）
+      > ⛔ **未达成**——本次真机 e2e 在同一个 project_root 形态上（`/home/yale/quay-verify-upgrade-5ddbcf80-root`）
+      > 实测到一条**新缺陷**并把这次驱动摧毁在半路：任务已真实创建（`50e5d2d tasks: ac239-subagent-session-id-scan
+      > task_write by cli:2329001`）并被该项目自己的 promotion-driver 真实晋升
+      > （`794ab28 … todo→ready（promotion-driver 机械晋升）`），但同一次任务提交触发的
+      > `syncDocDevelopBidirectional` 走了终局解 `takeDevelopDiscardingDoc`（`git reset --hard develop`），
+      > 把该项目 `main` 上的 **50 个提交**（含三个 release 提交）与**全部 102 个任务文件**判为可丢并清除
+      > （`tasks/*.md` 计数 → 0，`.quay/config.yml` 一并消失），驱动随后服务一棵没有任务板的树。
+      > 判据侧读数：AC-239 criterion 复跑 **exit 1**（见下一条）。新缺陷已另立任务（见最后一条）。
+      > 详见 `/home/yale/work/quay/tasks/gap-develop-sync-reset-hard-destroys-third-party-project-tree.md`。
+- [x] 该修复任务自身带有可机械验收的判据（新增/修改测试用例，修复前失败、修复后通过）
+      > 实测：`--ac239-e2e` 步骤在升级后副本里真实创建的 `ac239-subagent-session-id-scan` 任务体带四条
+      > 可机械验收的 AC（① 新增/修改的 Go 测试在修复前 FAIL、修复后 PASS 且两条真实输出贴回；
+      > ② 判据按位置——针只存在于 `<session>/subagents/*.jsonl`，主会话文件里一次都不出现；
+      > ③ `go build ./...` 通过；④ `go test ./internal/mcp/query/... ./internal/mcp/executor/...` 通过），
+      > 且该任务体在同一轮 e2e 里被真实创建并写入该项目的任务板（reflog 可见创建提交）。
 - [ ] 真实产出的记录（`ac=GOAL-009-AC-239`，`project_root` 与 AC-238 通过记录一致，`commit_sha`/
       `task_id` 非空，`task_status=done`，`gate_events>0`，`produced_by_driver=true`）已取回本机
       `.quay/productization-verification.jsonl`
-- [ ] AC-239 判据复跑后有明确、可核的退出码结果（翻绿，或如实记录仍为 fail 并说明卡在哪一步）
-- [ ] 若发现新缺陷，已另开 finding/gap 任务承接，未在本任务里掩盖或悄悄修掉
+      > ⛔ **未达成**——`task_status=done` 从未成立（驱动被上一条的缺陷摧毁在半路），因此 AC-239 记录
+      > 按设计 fail-closed **未写出**、也未取回。`.quay/productization-verification.jsonl` 中
+      > `ac=GOAL-009-AC-239` 的记录数 = **0**（实测 grep）。⛔ 没有用任何绕过手段补一条记录：
+      > 新增的 `write_ac239_record` 与 `check_upgrade_pairing` 都是 fail-closed，缺任一读数即不写。
+      > ⚠️ 卡在哪一步：升级成功 → 真实任务创建/晋升成功 → **驱动到 done 之前**被
+      > `git reset --hard develop` 摧毁任务板。这是**判据的失败**（AC-239 对 meta-cc 形态项目被证否），
+      > 不是"没跑成"。
+- [x] AC-239 判据复跑后有明确、可核的退出码结果（翻绿，或如实记录仍为 fail 并说明卡在哪一步）
+      > 实测（机件 `packages/quay/src/goal-store.ts gate`，⛔ 非手搓）：
+      > `node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts gate AC-239 --root /home/yale/work/quay`
+      > ⇒ `verdict: fail`，**退出码 1**，reason `acceptance failed (exit 1)`。
+      > 卡在哪一步见上两条（驱动到 done 之前被 `git reset --hard develop` 摧毁任务板）。
+- [x] 若发现新缺陷，已另开 finding/gap 任务承接，未在本任务里掩盖或悄悄修掉
+      > 实测：本轮共另立两条 gap 任务（均已 `task_get` 读回核对）：
+      > ① `gap-develop-sync-reset-hard-destroys-third-party-project-tree` —— 本次 AC-239 被摧毁的直接成因；
+      > ② `gap-pre-fix-upgraded-project-unresolvable-binding-undetected` —— 升级验证器里的另一条残留
+      > （早于 `ba960f503` 升级过的项目停在解析不到的裸 `quay-native` 上，且无检查会发现）。
+      > ⛔ 两条都**未在本任务里修**（本任务只修了为让 AC-239 可测而必须对齐的
+      > `step_upgrade_existing` 语义，见下方 DoD 说明）。
 
 ## DoD
 
-- [ ] AC-239 判据复跑后有明确结果，不得静默搁置不复跑
+- [x] AC-239 判据复跑后有明确结果，不得静默搁置不复跑
+      > 已复跑，exit 1，如实记录（见 AC 第 5 条）。
 - [ ] meta-cc 的 `include_subagents`/`session_id` 缺陷已在升级后的副本上真实修复并验证
-- [ ] 若发现新缺陷，已另立任务追踪，且本任务描述中链接了该任务 id
-- [ ] `extra.goal_ac: "AC-239"` 与 `depends_on: ["gap-aged-third-party-project-quay-upgrade-verification"]`
+      > ⛔ 未达成：驱动在同一刻被 `git reset --hard develop` 摧毁任务板，worker 从未有机会实现该修复。
+      > 该修复内容已作为任务体写进升级后副本的任务板（`ac239-subagent-session-id-scan`），一旦
+      > ① 的缺陷修好、本任务被重新派发，即可继续。
+- [x] 若发现新缺陷，已另立任务追踪，且本任务描述中链接了该任务 id
+      > 两个 id 与路径见 AC 最后一条；本条正文亦已引用。
+- [x] `extra.goal_ac: "AC-239"` 与 `depends_on: ["gap-aged-third-party-project-quay-upgrade-verification"]`
       已随 task_write 写入并读回核对
+      > 实测读回：`goal_ac` = `AC-239`（`extra.goal_ac` 亦为 `AC-239`）；
+      > `depends_on` = `["gap-aged-third-party-project-quay-upgrade-verification"]`。
