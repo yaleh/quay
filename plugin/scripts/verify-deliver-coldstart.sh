@@ -837,6 +837,42 @@ BODY
 # 已有 config ⇒ 配置保留分支，⛔ 不是空仓库重写），再把项目本地 runtime 换成本次交付物。
 # ⛔ 每个前置不成立都 return 0 且【不改 AC238_EVALUATED】——「读不出」是一个独立取值，不与「合格」同形
 # （硬规则 3b：恒绿的检查比没有检查更贵）。
+
+# binding_state <project-root> — the provider binding state word for a project, read by the mechanical
+# checker plugin/scripts/provider-binding-resolvability-check.ts. ⛔ 刻意【不】注入任何 $PATH 辅助。
+#
+# WHY THIS EXISTS (tasks/gap-pre-fix-upgraded-project-unresolvable-binding-undetected): the reading at
+# ⑥ below used to be the ONLY thing asking "can the upgraded project read its own board?", and it ran
+# the CLI as `PATH="$PREFIX/bin:$PATH" node …` — an external $PATH assist that SUPPLIES exactly the
+# resolution a pre-ba960f503 project's bare `mcp_entry: [quay-native, mcp]` depends on. That reading
+# was therefore structurally incapable of taking the false value (硬规则 4): "the upgrade succeeded"
+# and "the upgraded project is unusable" produced the SAME reading. Measured 2026-09-11 on two real
+# upgraded projects (orangevps), whose own CLI answers `Error: spawn quay-native ENOENT` the moment the
+# assist is removed. This reading takes the binding's FORM, never "does it happen to resolve here".
+#
+# Returns one of: path-resolved (合格) · bare-path-name / dangling-absolute / dangling-relative (RED) ·
+# no-mcp-entry / unrecognized-shape (NOT-EVALUATED) · unreadable (the checker could not run at all —
+# ⛔ a distinct word, never confused with 合格).
+binding_state() {
+  local r="$1" out
+  out="$(node --no-warnings --experimental-strip-types \
+    "$SCRIPT_DIR/provider-binding-resolvability-check.ts" --root "$r" --json 2>/dev/null)"
+  printf '%s' "$out" | python3 -c '
+import json,sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print("unreadable"); raise SystemExit
+rows = [p for p in (d.get("providers") or []) if p.get("enabled", True)]
+if not rows:
+    print("no-provider"); raise SystemExit
+for p in rows:
+    if p.get("state") in ("bare-path-name", "dangling-absolute", "dangling-relative"):
+        print(p["state"]); raise SystemExit
+print(rows[0].get("state", "unrecognized-shape"))
+' 2>/dev/null || echo "unreadable"
+}
+
 step_upgrade_existing() {
   local root="$1" npmroot qinit fresh_quay fresh_qn rtbin
   local pre_q pre_qn post_q post_qn fresh_q fresh_qn_sha
@@ -906,6 +942,12 @@ step_upgrade_existing() {
   pre_set="$(cd "$root" && find tasks -maxdepth 1 -type f -name '*.md' -print0 2>/dev/null | sort -z | xargs -0 -r sha256sum 2>/dev/null | sha256sum | awk '{print $1}')"
   echo "  pre: tasks=$AC238_PRE_TASK_COUNT runtime_age_days=$AC238_RUNTIME_AGE_DAYS taskset=$(printf '%.12s' "$pre_set")"
 
+  # ②b 【升级前】绑定可解析性直接量（无 $PATH 辅助）。这是本项目【本来就有】的存量读数：一个从
+  #     ba960f503 之前升级过来的现场，此刻停在裸名绑定上 ⇒ 本读数取 RED，而 ⑥（带 $PATH 辅助）照样绿。
+  #     ⛔ 信息量读数，不参与 AC238_EVALUATED 判定——源项目本来就可能是已迁移的（post 才是门）。
+  AC238_PRE_BINDING="$(binding_state "$root")"
+  echo "  pre binding: pre_binding=$AC238_PRE_BINDING (read with NO \$PATH assistance — the stale-inventory reading)"
+
   # ③ 升级动作 = 跑【本次交付物自带的】quay-init。已有 config ⇒ 配置保留分支（migrate_stale_mcp_entry
   #    + ensure_loop_config），⛔ 不是空仓库重写；任务目录只 mkdir -p，不删不覆盖。
   # ⛔ 刻意【不】把退出码捕获写成「命令 ... 或运算 赋给 rc」的一行形式：instrument-failure-check 的
@@ -953,6 +995,12 @@ step_upgrade_existing() {
   fi
   echo "  post: tasks=$AC238_POST_TASK_COUNT taskset_stable=$AC238_TASKSET_STABLE runtime_replaced=$AC238_RUNTIME_REPLACED"
 
+  # ⑤b 【升级后】绑定可解析性直接量（同样无 $PATH 辅助）。这是本 AC 的【新门】：升级动作若没能把
+  #     provider 绑定迁到一条项目自己控制的路径上（即 ba960f503 的 migrate_stale_mcp_entry 不生效 /
+  #     被回归掉），post 会停在 bare-path-name——而 ⑥ 的 $PATH 辅助会把它盖成绿。两种取值可区分。
+  AC238_POST_BINDING="$(binding_state "$root")"
+  echo "  post binding: post_binding=$AC238_POST_BINDING (read with NO \$PATH assistance — the gate below)"
+
   # ⑥ 新 CLI 能读出旧存量（文件还在 ≠ 读得出）：用【刷新后的 project-local runtime】跑 task list。
   #    PATH 前置本次安装前缀 ⇒ config 里那条裸 `quay-native`（mcp_entry）解析到本次交付物。
   tl_json="$(cd "$root" && PATH="$PREFIX/bin:$PATH" node "$rtbin/quay.js" task list --root "$root" --json 2>/dev/null)"
@@ -997,20 +1045,22 @@ d=json.load(sys.stdin); print(len(d))' 2>/dev/null || echo "")"
      && [ "$AC238_POST_TASK_COUNT" = "$AC238_PRE_TASK_COUNT" ] \
      && [ "$age_ok" = "1" ] && [ "$AC238_RUNTIME_REPLACED" = "1" ] \
      && [ "$AC238_TASK_LIST_OK" = "1" ] && [ -n "${BUILD_SHA:-}" ] \
+     && [ "$AC238_POST_BINDING" = "path-resolved" ] \
      && [ "$init_rc" = "0" ]; then
     AC238_EVALUATED=1
   fi
   if [ "$AC238_EVALUATED" = "1" ]; then
     mkdir -p "$(dirname "$AC89")"
-    printf '{"ts":"%s","ac":"GOAL-009-AC-238","host":"%s","project_root":"%s","pre_upgrade_task_count":%s,"post_upgrade_task_count":%s,"pre_upgrade_runtime_age_days":%s,"runtime_replaced":true,"task_list_ok":true,"build_sha":"%s","upgrade_source":"%s","upgrade_init_rc":%s,"isolated_copy":%s,"taskset_stable":true,"sample_task":"%s","fresh_runtime_sha256":"%s","host_key":"%s"}\n' \
+    printf '{"ts":"%s","ac":"GOAL-009-AC-238","host":"%s","project_root":"%s","pre_upgrade_task_count":%s,"post_upgrade_task_count":%s,"pre_upgrade_runtime_age_days":%s,"runtime_replaced":true,"task_list_ok":true,"build_sha":"%s","upgrade_source":"%s","upgrade_init_rc":%s,"isolated_copy":%s,"taskset_stable":true,"sample_task":"%s","fresh_runtime_sha256":"%s","pre_binding":"%s","post_binding":"%s","host_key":"%s"}\n' \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(hostname 2>/dev/null || echo '')" "$AC238_PROJECT_ROOT" \
       "$AC238_PRE_TASK_COUNT" "$AC238_POST_TASK_COUNT" "$AC238_RUNTIME_AGE_DAYS" \
       "$BUILD_SHA" "${UPGRADE_SOURCE:-none}" "$init_rc" \
       "$([ -n "$UPGRADE_SOURCE" ] && [ "$UPGRADE_SOURCE" != "$root" ] && echo true || echo false)" \
-      "$AC238_SAMPLE_TASK" "$AC238_FRESH_RUNTIME_SHA" "${HOST:-}" >> "$AC89"
+      "$AC238_SAMPLE_TASK" "$AC238_FRESH_RUNTIME_SHA" "${AC238_PRE_BINDING:-unreadable}" \
+      "${AC238_POST_BINDING:-unreadable}" "${HOST:-}" >> "$AC89"
     echo "  ac238 record written → $AC89"
   else
-    echo "  AC-238 record NOT written — 缺值≠合格 (pre_count=$AC238_PRE_TASK_COUNT post_count=$AC238_POST_TASK_COUNT age_days=${AC238_RUNTIME_AGE_DAYS:-<unread>} replaced=$AC238_RUNTIME_REPLACED task_list_ok=$AC238_TASK_LIST_OK build_sha=${BUILD_SHA:-<empty>} upgrade_init_rc=$init_rc)" >&2
+    echo "  AC-238 record NOT written — 缺值≠合格 (pre_count=$AC238_PRE_TASK_COUNT post_count=$AC238_POST_TASK_COUNT age_days=${AC238_RUNTIME_AGE_DAYS:-<unread>} replaced=$AC238_RUNTIME_REPLACED task_list_ok=$AC238_TASK_LIST_OK post_binding=${AC238_POST_BINDING:-<unread>} build_sha=${BUILD_SHA:-<empty>} upgrade_init_rc=$init_rc)" >&2
   fi
   return 0
 }
