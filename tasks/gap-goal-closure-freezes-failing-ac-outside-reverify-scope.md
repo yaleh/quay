@@ -1,7 +1,7 @@
 ---
 id: gap-goal-closure-freezes-failing-ac-outside-reverify-scope
 title: GOAL 机械关闭只认存储 status、不看判据读数 ⇒ 正在红的 achieved AC 被冻结在复验域外（AC-242 每轮点名 AC-161）
-status: todo
+status: ready
 labels:
   - gap
   - defect
