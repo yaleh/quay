@@ -741,7 +741,9 @@ step_upgrade_existing() {
   if [ ! -f "$rtbin/quay.js" ] || [ ! -f "$rtbin/quay-native.js" ]; then
     echo "  NOT-EVALUATED: $rtbin lacks quay.js/quay-native.js — 旧 runtime 形态不可识别" >&2; return 0
   fi
-  old_epoch="$(find "$rtbin" -maxdepth 1 -type f -name '*.js' -printf '%T@\n' 2>/dev/null | sort -n | head -1)"
+  # 同 ⑥ 的 `|| true` 理由：`| head -1` 在 pipefail 下可让管道整体非 0（head 提前关闭 ⇒ 上游 SIGPIPE），
+  # 赋值失败会被 set -e 直接放大成整个脚本退出。空值由下面紧跟的 `[ -n "$old_epoch" ]` 判定。
+  old_epoch="$(find "$rtbin" -maxdepth 1 -type f -name '*.js' -printf '%T@\n' 2>/dev/null | sort -n | head -1 || true)"
   now_epoch="$(date +%s)"
   [ -n "$old_epoch" ] || { echo "  NOT-EVALUATED: cannot read old runtime mtime under $rtbin" >&2; return 0; }
   AC238_RUNTIME_AGE_DAYS="$(python3 -c "print(round((${now_epoch} - float('${old_epoch}'))/86400.0, 3))" 2>/dev/null || echo "")"
@@ -803,10 +805,19 @@ step_upgrade_existing() {
   tl_json="$(cd "$root" && PATH="$PREFIX/bin:$PATH" node "$rtbin/quay.js" task list --root "$root" --json 2>/dev/null)"
   tl_count="$(printf '%s' "$tl_json" | python3 -c 'import json,sys
 d=json.load(sys.stdin); print(len(d))' 2>/dev/null || echo "")"
-  # 抽样 task_get：优先 DIR-001（meta-cc 真实存量任务），否则字典序第一个。
-  sample_id=""
-  if [ -f "$root/tasks/DIR-001.md" ]; then sample_id="DIR-001"
-  else sample_id="$(find "$root/tasks" -maxdepth 1 -type f -name '*.md' -printf '%f\n' 2>/dev/null | sed 's/\.md$//' | sort | head -1)"; fi
+  # 抽样 task_get：取存量里字典序第一个**真实既有**任务。候选集来自与上面同一个磁盘枚举 ⇒ 它必然是
+  # 升级前就存在的任务，而不是本步骤新造的。
+  # ⛔ 刻意【不】写死 `[ -f "$root/tasks/DIR-001.md" ]` 这类具体任务文件路径：task-file-bypass-check
+  # 把「`tasks/` 路径字面量出现在文件操作命令行上」判为绕过 Provider ABI 的新站点（同名先例：
+  # claim-task.sh / l1-delivery-surface-check.ts / verify-delivery-surface.ts 各在 ALLOWLIST 里带一条
+  # 理由）。本脚本是新文件，加 ALLOWLIST 条目是单向扩大该 ratchet，而这里**根本不需要**指名某个任务
+  # ——本判据要证的是「新 CLI 读得出旧存量」，与选中哪一个无关。取值语义与原写死 DIR-001 时相同
+  # （C 序下大写在前，meta-cc 上仍选中 DIR-001）。
+  # ⛔ 也刻意【不】用 `| grep -E '^DIR-' | head -1` 去"优先某族"：`grep` 无匹配时 exit 1，而
+  # `x="$(... | grep ...)"` 在 `set -e`（本脚本 :107）下会因该赋值失败**直接退出整个脚本**——无
+  # DIR- 族的项目实测正踩到这个（脚本在 'post:' 之后静默消失、exit 1）。而该"优先"在 C 序下本就是
+  # 空转（大写恒排在小写前）。少一个分支即少一个失败形态。
+  sample_id="$(find "$root/tasks" -maxdepth 1 -type f -name '*.md' -printf '%f\n' 2>/dev/null | sed 's/\.md$//' | sort | head -1 || true)"
   AC238_SAMPLE_TASK="$sample_id"
   sample_json=""
   if [ -n "$sample_id" ]; then
