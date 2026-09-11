@@ -413,7 +413,11 @@ export function ensureBranchModel(root: string, opts: EnsureBranchModelOptions =
       }
       const r = git(root, ["branch", name, defaultBranch as string]);
       entries.push(
-        r.ok
+        // `=== true`, not truthiness: this repo's root tsconfig is `strict: false`, under which the
+        // NEGATIVE branch of a boolean-discriminant union is NOT narrowed — `r.err` below would be
+        // TS2339, which `tsc --noEmit` (the fan-in ts-typecheck gate) rejects. Literal comparison
+        // narrows both branches; the same form is used at every `.ok` union in this file.
+        r.ok === true
           ? { role, ref: name, action: "created", sha: frozenDefaultSha, backupRef: null, detail: `created '${name}' at ${defaultBranch} (${frozenDefaultSha.slice(0, 8)})` }
           : { role, ref: name, action: "unreadable", sha: null, backupRef: null, detail: `git branch ${name} failed: ${r.err}` },
       );
@@ -457,7 +461,7 @@ export function ensureBranchModel(root: string, opts: EnsureBranchModelOptions =
     }
     const backup = git(root, ["branch", backupRef, name]);
     const repoint = git(root, ["branch", "-f", name, defaultBranch as string]);
-    if (repoint.ok) {
+    if (repoint.ok === true) {
       entries.push({
         role,
         ref: name,
@@ -466,7 +470,7 @@ export function ensureBranchModel(root: string, opts: EnsureBranchModelOptions =
         backupRef,
         detail:
           `'${name}' was a foreign fork (${shortSha}); preserved as '${backupRef}' and re-pointed at ` +
-          `${defaultBranch} (${frozenDefaultSha.slice(0, 8)})${backup.ok ? "" : ` — ⚠️ backup failed: ${backup.err}`}`,
+          `${defaultBranch} (${frozenDefaultSha.slice(0, 8)})${backup.ok === true ? "" : ` — ⚠️ backup failed: ${backup.err}`}`,
       });
     } else {
       entries.push({ role, ref: name, action: "blocked", sha: cls.sha, backupRef, detail: `adopt failed: git branch -f ${name} returned non-zero: ${repoint.err}` });
