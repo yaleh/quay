@@ -1,7 +1,7 @@
 ---
 id: AC-243
 title: AC-241 的空因常量必须与 acceptance-runner 实际产出的零输出成因文本同源——AC-241 自身退化为恒绿时必须报红
-status: draft
+status: active
 kind: criterion
 goal: GOAL-009
 criterion: >-
@@ -49,4 +49,15 @@ origin: readings.criteria 中 AC-241 的 criterion 正文自带逐字告警：�
   AC-161 与 AC-239 两条不可归因 fail —— 即它是当前唯一在 ledger
   上把「不可归因的失败」变成红的东西；它一旦静默恒绿，GOAL-009 的失败归因面（AC-237 runner 侧 + AC-241 台账侧）就只剩
   AC-237 的 fixture 自证。
+activatedAt: 2026-09-11T09:37:17.717Z
+statusLog:
+  - at: 2026-09-11T09:37:17.717Z
+    from: draft
+    to: active
+    actor: goal-driver
+    reason: "triage: activate"
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-11T09:37:17.716Z
 ---
