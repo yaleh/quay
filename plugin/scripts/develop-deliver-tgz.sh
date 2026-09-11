@@ -89,6 +89,11 @@
 #     --selfcheck-evidence [positive|negative|both]  hermetic controls of the evidence-transport
 #                  append/dedup function (offline, no build/scp/ssh) — the AC5 negative/positive
 #                  controls of gap-third-party-evidence-…, exit 0/1
+#     --selfcheck-transport-closure  hermetic controls of the SHIPPED SET's closure (offline, no
+#                  build/scp/ssh): the real set ⇒ 0 violations; drop the checker ⇒ REF-UNSHIPPED;
+#                  drop node_modules/yaml ⇒ BARE-UNSHIPPED; drop gate-script-base.ts ⇒
+#                  IMPORT-UNSHIPPED. Prints the per-file import face (AC4 产物). This is what makes
+#                  the "explicit enumeration" promise mechanical instead of aspirational.
 #
 # Host table (B/C node paths verified 2026-08-11 by outer ssh probes):
 #   B = orangevps.wan.hwang.men   node: ~/.nvm/versions/node/v22.23.1/bin (also v25.2.0)
@@ -115,6 +120,7 @@ selfcheck_evidence=0
 selfcheck_evidence_scenario="both"
 selfcheck_evidence_completeness=0
 selfcheck_e2e_pairing=0   # 1 = hermetic controls of check_e2e_pairing (AC-240 传输侧配对判定)
+selfcheck_transport_closure_flag=0  # 1 = hermetic closure controls of the shipped set (AC1..AC4)
 while [ $# -gt 0 ]; do
   case "$1" in
     --root) repo_root="$2"; shift 2 ;;
@@ -133,6 +139,7 @@ while [ $# -gt 0 ]; do
       ;;
     --selfcheck-evidence-completeness) selfcheck_evidence_completeness=1; shift ;;
     --selfcheck-e2e-pairing) selfcheck_e2e_pairing=1; shift ;;
+    --selfcheck-transport-closure) selfcheck_transport_closure_flag=1; shift ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -202,6 +209,151 @@ build_state_json() {
   json="${json}},\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
   printf '%s' "${json}"
 }
+
+# ── the verify closure — the shipped set, its npm deps, and the mechanical proof that it is COMPLETE ─
+# verify-deliver-coldstart.sh resolves its sibling tools by $SCRIPT_DIR. The scp enumeration is
+# explicit (not tar'd) ON PURPOSE — "so a new $SCRIPT_DIR dependency is an explicit edit, not a
+# silent remote failure". That promise only holds if something MECHANICAL checks the enumeration
+# against the consumer. Until 2026-09-11 nothing did, and the promise was broken:
+#   `provider-binding-resolvability-check.ts` entered the verify script's own dependency set
+#   (e1bdd0292) but NEITHER enumeration ⇒ on the remote `node "$SCRIPT_DIR/provider-binding-…-check.ts"`
+#   died MODULE_NOT_FOUND ⇒ binding_state() read "unreadable" for EVERY project, including ones whose
+#   binding is perfectly good ⇒ AC-238's gate `[ "$AC238_POST_BINDING" = "path-resolved" ]` was
+#   STRUCTURALLY unsatisfiable and the AC-238 record could never be written in production.
+# It was invisible locally because --selfcheck runs in THIS repo, where the file (and node_modules)
+# exist — 硬规则 4 推论三: a criterion only the fixture can satisfy proves "can produce", never
+# "produced".
+#
+# The second half of the same defect: the checker imports the BARE npm specifier `yaml`, which no
+# shipped sibling did before it — and a bare specifier resolves only through a node_modules the
+# remote does not have (`NODE_PATH` has no effect on ESM resolution). So adding the file to the scp
+# list is NOT sufficient; its dependency must travel too. Both halves are checked mechanically below
+# (a hand-verified "I added the line" is exactly the形态 that failed here).
+
+# transport_flat_files — everything shipped to $HOME/ on the remote.
+# ⛔ SINGLE SOURCE: BOTH modes (verify_coldstart_mode / verify_upgrade_mode) ship from here, so a new
+# dependency is ONE edit. The 2026-09-11 defect was a two-place enumeration updated in neither place
+# (硬规则 5b: 修好一个实例 ≠ 该原则只在那一处适用).
+transport_flat_files() {
+  printf '%s\n' \
+    "${SCRIPT_DIR}/verify-deliver-coldstart.sh" \
+    "${SCRIPT_DIR}/pane-state-classify.ts" \
+    "${SCRIPT_DIR}/quay-init-closure-assertion.ts" \
+    "${SCRIPT_DIR}/gate-script-base.ts" \
+    "${SCRIPT_DIR}/repo-root.ts" \
+    "${SCRIPT_DIR}/runner-state-write.ts" \
+    "${SCRIPT_DIR}/write-json-atomic.ts" \
+    "${SCRIPT_DIR}/provider-binding-resolvability-check.ts" \
+    "${SCRIPT_DIR}/../../orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md"
+}
+
+# transport_node_modules_deps — the bare npm specifiers the shipped set imports, shipped to
+# $HOME/node_modules/<pkg> so ESM resolution finds them from the scripts' own directory ($HOME).
+# ⛔ Derived from $SCRIPT_DIR (never from the --root-overridable ${repo_root}): under an installed
+# artifact $SCRIPT_DIR/../.. IS the package root, which already carries its own nested
+# node_modules/yaml — so this resolves in both the dev-tree and the installed layouts.
+transport_node_modules_deps() {
+  printf '%s\n' "${SCRIPT_DIR}/../../node_modules/yaml"
+}
+
+# transport_imports_of <file> — every module specifier the file imports AT RUNTIME. `import type` /
+# `export type` statements are erased by --experimental-strip-types, so they are not remote
+# dependencies (runner-state-write.ts's type-only `./full-suite-runner.ts` is the live example —
+# flagging it would be a false positive, and a guard that cries wolf gets switched off).
+transport_imports_of() {
+  grep -vE '^[[:space:]]*(//|#|\*|/\*)' "$1" 2>/dev/null \
+    | grep -vE '^[[:space:]]*(import|export)[[:space:]]+type[[:space:]]' \
+    | grep -oE '(from|import)[[:space:]]*"[^"]+"' \
+    | sed -E 's/^[a-z]+[[:space:]]*"//; s/"$//' | sort -u
+}
+
+# transport_closure_violations <list-file> — print one line per closure violation; return the count.
+# A <list-file> is the newline-separated shipped set (flat files AND node_modules package dirs).
+#   0 = the enumeration IS complete (every consumer travels, every shipped file is self-sufficient
+#       at the remote, every listed path exists locally).
+# ⛔ 一个【读不懂输入】的清单（空文件 / 名字全写错）会得到 0 违规——与【合格】同形。调用方必须先
+# 断言清单非空（selfcheck_transport_closure 就是这么用的；硬规则 3b）。
+transport_closure_violations() {
+  local listfile="$1" n=0 f name imp pkg
+  local -a shipped=() pkgs=()
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    shipped+=("$f")
+    case "$f" in */node_modules/*) pkgs+=("$(basename "$f")") ;; esac
+  done < "$listfile"
+
+  in_shipped() { local x; for x in "${shipped[@]}"; do [ "$x" = "$1" ] && return 0; done; return 1; }
+  in_pkgs()    { local x; for x in "${pkgs[@]}";    do [ "$x" = "$1" ] && return 0; done; return 1; }
+
+  # (0) every listed path must exist — a typo in the enumeration is a silent remote failure too.
+  for f in "${shipped[@]}"; do
+    [ -e "$f" ] || { echo "MISSING-LOCAL: $f (enumerated but not on disk)"; n=$((n + 1)); }
+  done
+
+  # (1) REFERENCE closure — every $SCRIPT_DIR sibling the verify script invokes OUTSIDE its own
+  #     selfcheck() must travel. selfcheck() runs LOCALLY (--selfcheck), so its extra consumers
+  #     (transcript-delivery-check.ts) are legitimately local-only; excluding the function BODY is
+  #     what makes that distinction mechanical rather than an exemption list someone can extend.
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    in_shipped "${SCRIPT_DIR}/${name}" \
+      || { echo "REF-UNSHIPPED: ${name} — invoked by verify-deliver-coldstart.sh but absent from the shipped set"; n=$((n + 1)); }
+  done < <(sed '/^selfcheck() {/,/^}$/d' "${SCRIPT_DIR}/verify-deliver-coldstart.sh" 2>/dev/null \
+           | grep -oE '\$\{?SCRIPT_DIR\}?/[A-Za-z0-9._-]+\.(ts|mjs|js|sh)' \
+           | sed -E 's#^\$\{?SCRIPT_DIR\}?/##' | sort -u)
+
+  # (2) IMPORT closure — every shipped .ts must be self-sufficient at the remote: node builtins, a
+  #     ./ relative import that is itself shipped, or a bare specifier whose package travels under
+  #     node_modules/. Anything else is MODULE_NOT_FOUND on the remote.
+  for f in "${shipped[@]}"; do
+    case "$f" in *.ts) ;; *) continue ;; esac
+    while IFS= read -r imp; do
+      [ -n "$imp" ] || continue
+      case "$imp" in
+        node:*) continue ;;
+        ./*|../*)
+          in_shipped "${SCRIPT_DIR}/${imp#./}" || in_shipped "${SCRIPT_DIR}/${imp#./}.ts" \
+            || { echo "IMPORT-UNSHIPPED: $(basename "$f") imports ${imp} — not in the shipped set"; n=$((n + 1)); } ;;
+        *)
+          pkg="${imp%%/*}"
+          case "$imp" in @*/*) pkg="$(printf '%s' "$imp" | cut -d/ -f1,2)" ;; esac
+          in_pkgs "$pkg" || { echo "BARE-UNSHIPPED: $(basename "$f") imports bare \"${imp}\" — package \"${pkg}\" does not travel under node_modules/ (NODE_PATH does not apply to ESM)"; n=$((n + 1)); } ;;
+      esac
+    done < <(transport_imports_of "$f")
+  done
+  return "${n}"
+}
+
+# ship_verify_closure <target> [extra-file…] — copy the WHOLE closure to $HOME on <target>.
+# Returns 0 on success; ANY leg failing prints a distinguishable line and returns 1 so the caller
+# marks that host failed (硬规则 3b — never a silent continue on a partial ship).
+ship_verify_closure() {
+  local target="$1"; shift
+  local -a flat=() deps=() extra=("$@")
+  local f
+  while IFS= read -r f; do [ -n "$f" ] && flat+=("$f"); done < <(transport_flat_files)
+  while IFS= read -r f; do [ -n "$f" ] && deps+=("$f"); done < <(transport_node_modules_deps)
+
+  if ! scp "${ssh_opts[@]}" "${flat[@]}" ${extra[@]+"${extra[@]}"} "${target}:~/" >/dev/null 2>&1; then
+    echo "develop-deliver: ${target} — closure scp FAILED (flat set: verify-deliver-coldstart.sh + \$SCRIPT_DIR siblings + SPEC)" >&2
+    return 1
+  fi
+  if [ "${#deps[@]}" -gt 0 ]; then
+    # ⛔ scp -r does NOT create missing intermediate dirs (measured 2026-09-11: `scp -r d
+    # host:~/a/b/c` fails "path canonicalization failed" when ~/a/b is absent) — make the
+    # resolution root first, or the node_modules half silently does not arrive.
+    if ! ssh "${ssh_opts[@]}" "${target}" 'mkdir -p "$HOME/node_modules"' >/dev/null 2>&1; then
+      echo "develop-deliver: ${target} — closure mkdir \$HOME/node_modules FAILED (node_modules set)" >&2
+      return 1
+    fi
+    if ! scp "${ssh_opts[@]}" -r "${deps[@]}" "${target}:~/node_modules/" >/dev/null 2>&1; then
+      echo "develop-deliver: ${target} — closure scp FAILED (node_modules set — a bare specifier the pre-e1bdd0292 sibling set never had)" >&2
+      return 1
+    fi
+  fi
+  return 0
+}
+
 
 # ── selfcheck — hermetic positive/negative controls (offline, no build/scp/ssh) ─────────────────
 # Proves the verify criterion can take FALSE (404 / redirect-to-404 / empty body / missing marker)
@@ -551,6 +703,112 @@ EVID
   return "${rc}"
 }
 
+# ── selfcheck_transport_closure — hermetic controls of the shipped-set closure (AC1..AC4 正本) ──
+# The whole point of the explicit scp enumeration is that a new $SCRIPT_DIR dependency is an EXPLICIT
+# edit. This selfcheck is what makes "explicit" mechanical instead of aspirational.
+#   正控制  : the real set (transport_flat_files + transport_node_modules_deps) ⇒ 0 violations.
+#   负控制① : drop provider-binding-resolvability-check.ts ⇒ REF-UNSHIPPED (the 2026-09-11 本来形态).
+#   负控制② : keep the checker, drop node_modules/yaml ⇒ BARE-UNSHIPPED (the Finding's second half —
+#             proves that "只加一行 scp 不够" is mechanically visible, not just asserted).
+#   负控制③ : drop gate-script-base.ts ⇒ IMPORT-UNSHIPPED (the general relative-import form).
+#   负控制④ : a synthetic shipped file tests the type-erasure boundary — a VALUE ./ import must be
+#             flagged, a `import type` one must NOT (flagging it would be a false positive, and a
+#             guard that cries wolf gets switched off — runner-state-write.ts is the live case).
+#   可读性   : an EMPTY list still yields ≥1 violation — the REFERENCE half is driven by the CONSUMER
+#             (verify-deliver-coldstart.sh), not by the list, so an unreadable list cannot masquerade
+#             as 合格 (硬规则 3b). The non-empty assertion below is belt-and-braces on top of that.
+# Offline: no build/scp/ssh. Reads only this checkout.
+selfcheck_transport_closure() {
+  local tmp rc=0
+  tmp="$(mktemp -d 2>/dev/null)" || { echo "selfcheck-transport-closure: FAIL — cannot create temp dir" >&2; return 1; }
+  { transport_flat_files; transport_node_modules_deps; } > "${tmp}/real.list"
+
+  local n_flat n_dep
+  n_flat="$(transport_flat_files | grep -c . || true)"
+  n_dep="$(transport_node_modules_deps | grep -c . || true)"
+  echo "selfcheck-transport-closure: shipped set = ${n_flat} flat file(s) + ${n_dep} node_modules dep dir(s)"
+  # ⛔ 读不懂输入 ⇒ 0 违规（与合格同形）——所以这里先断言清单非空，再谈 0 违规。
+  if [ "${n_flat}" -lt 9 ] || [ "${n_dep}" -lt 1 ]; then
+    echo "selfcheck-transport-closure: FAIL — the shipped set is unreadable/truncated (${n_flat} flat, ${n_dep} dep); a 0-violation verdict on an empty list is NOT a pass" >&2
+    rm -rf "${tmp}"
+    return 1
+  fi
+
+  # AC4 产物：随行 sibling 的 import 面清单（每个 shipped .ts 实际要解析的模块说明符）。
+  local f imp m_face=0 m_self=1
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    case "$f" in *.ts) ;; *) continue ;; esac
+    m_face=$((m_face + 1))
+    imp="$(transport_imports_of "$f" | tr '\n' ' ')"
+    case "${imp}" in *yaml*) m_self=0 ;; esac
+    echo "selfcheck-transport-closure: import-face $(basename "$f") -> [${imp% }]"
+  done < "${tmp}/real.list"
+  if [ "${m_self}" -eq 0 ]; then
+    echo "selfcheck-transport-closure: import-face files=${m_face} non-self-sufficient=provider-binding-resolvability-check.ts (bare yaml, shipped under node_modules/)"
+  else
+    echo "selfcheck-transport-closure: import-face files=${m_face} non-self-sufficient=none"
+  fi
+
+  local out rc_real rc_nochecker rc_noyaml rc_nogate rc_empty
+  set +e
+  out="$(transport_closure_violations "${tmp}/real.list" 2>&1)"; rc_real=$?
+  echo "selfcheck-transport-closure: positive → violations=${rc_real} (expect 0)"
+  [ -n "${out}" ] && printf '%s\n' "${out}" | sed 's/^/selfcheck-transport-closure:   /'
+
+  grep -v 'provider-binding-resolvability-check\.ts$' "${tmp}/real.list" > "${tmp}/no-checker.list"
+  out="$(transport_closure_violations "${tmp}/no-checker.list" 2>&1)"; rc_nochecker=$?
+  echo "selfcheck-transport-closure: drop-checker → violations=${rc_nochecker} (expect ≥1, REF-UNSHIPPED)"
+  printf '%s\n' "${out}" | sed 's/^/selfcheck-transport-closure:   /'
+
+  grep -v 'node_modules/yaml$' "${tmp}/real.list" > "${tmp}/no-yaml.list"
+  out="$(transport_closure_violations "${tmp}/no-yaml.list" 2>&1)"; rc_noyaml=$?
+  echo "selfcheck-transport-closure: drop-yaml → violations=${rc_noyaml} (expect ≥1, BARE-UNSHIPPED)"
+  printf '%s\n' "${out}" | sed 's/^/selfcheck-transport-closure:   /'
+
+  grep -v 'gate-script-base\.ts$' "${tmp}/real.list" > "${tmp}/no-gate.list"
+  out="$(transport_closure_violations "${tmp}/no-gate.list" 2>&1)"; rc_nogate=$?
+  echo "selfcheck-transport-closure: drop-gate-script-base → violations=${rc_nogate} (expect ≥1, IMPORT-UNSHIPPED)"
+  printf '%s\n' "${out}" | sed 's/^/selfcheck-transport-closure:   /'
+
+  # 负控制④（类型擦除的边界）：一个合成 shipped 文件同时带【值】相对 import（必须报）、【type-only】
+  #   相对 import（⛔ 必须不报——--experimental-strip-types 会擦掉它，报它就是假阳性，而假阳性会让
+  #   这条守卫被关掉）、一个已随行的裸包和一个 node 内建（都必须不报）。
+  local syn_rc=0
+  cat > "${tmp}/x.ts" <<'SYN'
+import { foo } from "./not-shipped.ts";
+import type { Bar } from "./also-not-shipped.ts";
+import { parse } from "yaml";
+import path from "node:path";
+SYN
+  cat "${tmp}/real.list" > "${tmp}/synth.list"
+  printf '%s\n' "${tmp}/x.ts" >> "${tmp}/synth.list"
+  out="$(transport_closure_violations "${tmp}/synth.list" 2>&1)"; syn_rc=$?
+  echo "selfcheck-transport-closure: synthetic-type-erasure → violations=${syn_rc} (expect exactly 1: the VALUE relative import)"
+  printf '%s\n' "${out}" | sed 's/^/selfcheck-transport-closure:   /'
+
+  : > "${tmp}/empty.list"
+  out="$(transport_closure_violations "${tmp}/empty.list" 2>&1)"; rc_empty=$?
+  echo "selfcheck-transport-closure: empty-list → violations=${rc_empty} (expect ≥1 — the REFERENCE half is driven by the CONSUMER, not by the list, so an unreadable list cannot masquerade as 合格)"
+  printf '%s\n' "${out}" | sed 's/^/selfcheck-transport-closure:   /'
+  set -e
+
+  [ "${rc_real}" -eq 0 ] || { echo "selfcheck-transport-closure: FAIL — the REAL shipped set has closure violations" >&2; rc=1; }
+  [ "${rc_nochecker}" -ge 1 ] || { echo "selfcheck-transport-closure: FAIL — dropping the checker must be caught (got ${rc_nochecker})" >&2; rc=1; }
+  [ "${rc_noyaml}" -ge 1 ] || { echo "selfcheck-transport-closure: FAIL — dropping node_modules/yaml must be caught (got ${rc_noyaml})" >&2; rc=1; }
+  [ "${rc_nogate}" -ge 1 ] || { echo "selfcheck-transport-closure: FAIL — dropping a relative-import target must be caught (got ${rc_nogate})" >&2; rc=1; }
+  [ "${syn_rc}" -eq 1 ] || { echo "selfcheck-transport-closure: FAIL — the type-erasure boundary must yield EXACTLY 1 violation (value relative import); got ${syn_rc}" >&2; rc=1; }
+  [ "${rc_empty}" -ge 1 ] || { echo "selfcheck-transport-closure: FAIL — an unreadable (empty) list must not read as 合格 (got ${rc_empty})" >&2; rc=1; }
+
+  rm -rf "${tmp}"
+  if [ "${rc}" -eq 0 ]; then
+    echo "selfcheck-transport-closure: PASS (real set ⇒ 0 violations; drop-checker ⇒ REF-UNSHIPPED; drop-yaml ⇒ BARE-UNSHIPPED; drop-gate-script-base ⇒ IMPORT-UNSHIPPED; type-only ./ import NOT flagged, value ./ import flagged 1)"
+  else
+    echo "selfcheck-transport-closure: FAIL" >&2
+  fi
+  return "${rc}"
+}
+
 # ── selfcheck_evidence [positive|negative|both] — hermetic controls of the transport fn ──────
 # AC5 of gap-third-party-evidence-…: ① a fixture evidence file carrying GOAL-009-AC-* lines appends
 # into the target carrier and a repeat call appends 0 (idempotent) ② a missing / empty evidence file
@@ -677,6 +935,11 @@ if [ "${selfcheck_e2e_pairing}" -eq 1 ]; then
   exit $?
 fi
 
+if [ "${selfcheck_transport_closure_flag}" -eq 1 ]; then
+  selfcheck_transport_closure
+  exit $?
+fi
+
 # host_key -> (ssh_target, node_path)  — node_path uses $HOME, NOT ~ (tilde does not expand inside
 # double quotes in the remote `export PATH="...:..."`); both verified reachable BatchMode 2026-08-11.
 declare -A host_target host_node
@@ -776,6 +1039,20 @@ build_develop_tgz() {
   return 0
 }
 
+# verify_node_export_for <host-key> — the remote line that puts the host's Node ≥20 floor FIRST on
+# PATH. ⛔ Neither verify mode used to do this (only the deliver mode did, via `${node_path}`): the
+# verify run therefore inherited the ssh NON-INTERACTIVE PATH, where C's `node` is /usr/bin/node
+# v18.19.1 — below the engines floor — so `node --experimental-strip-types` dies with `bad option` and
+# binding_state() reads "unreadable" for EVERY project there (measured 2026-09-11 with the transport's
+# own probe `ssh C bash -s`: PATH carries no nvm/.local entry; `command -v node` → v18.19.1;
+# `--experimental-strip-types -e …` → "bad option"; the host node → v24.19.0, works). That is a
+# SECOND, independent reason AC-238 could never be recorded on C — same transport surface, same
+# symptom word — i.e. fixing the missing checker alone is NOT sufficient (硬规则 5b).
+# Single source: BOTH modes emit this line from here.
+verify_node_export_for() {
+  printf 'export PATH="%s:$PATH"\n' "${host_node[$1]:-\$PATH}"
+}
+
 # ── verify_coldstart_mode — cross-host evidence transport (gap-third-party-evidence-no-transport-…) ──
 # Plan step 1: scp verify-deliver-coldstart.sh + the two .tgz to each host, run it there with an
 # explicit --ac89 <remote tmp path>, scp that evidence file back, and append its lines into the
@@ -800,22 +1077,12 @@ verify_coldstart_mode() {
       fail=1
       continue
     fi
-    echo "develop-deliver: ${hk} (${target}) — scp verify-deliver-coldstart.sh + its \$SCRIPT_DIR siblings + SPEC + both .tgz"
-    # verify-deliver-coldstart.sh resolves its sibling tools by \$SCRIPT_DIR (pane-state-classify.ts,
-    # quay-init-closure-assertion.ts → gate-script-base.ts + repo-root.ts) and its L1 closed-set by the
-    # SPEC — all five + the SPEC must travel with the script or the remote verify aborts under `set -e`
-    # before writing the AC89 evidence (the closure is enumerated here, not tar'd, so a new \$SCRIPT_DIR
-    # dependency is an explicit edit, not a silent remote failure).
-    if ! scp "${ssh_opts[@]}" \
-        "${SCRIPT_DIR}/verify-deliver-coldstart.sh" \
-        "${SCRIPT_DIR}/pane-state-classify.ts" \
-        "${SCRIPT_DIR}/quay-init-closure-assertion.ts" \
-        "${SCRIPT_DIR}/gate-script-base.ts" \
-        "${SCRIPT_DIR}/repo-root.ts" \
-        "${SCRIPT_DIR}/runner-state-write.ts" \
-        "${SCRIPT_DIR}/write-json-atomic.ts" \
-        "${SCRIPT_DIR}/../../orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md" \
-        "${quay_tgz}" "${qn_tgz}" "${target}:~/" >/dev/null 2>&1; then
+    echo "develop-deliver: ${hk} (${target}) — scp verify-deliver-coldstart.sh + its FULL closure (\$SCRIPT_DIR siblings + node_modules deps) + SPEC + both .tgz"
+    # The closure (sibling set + npm deps) lives in ONE place — transport_flat_files /
+    # transport_node_modules_deps — and is PROVEN complete by transport_closure_violations
+    # (`--selfcheck-transport-closure`). ⛔ Do not re-inline the list here: two enumerations is
+    # exactly how the 2026-09-11 missing-checker defect stayed invisible in both modes.
+    if ! ship_verify_closure "${target}" "${quay_tgz}" "${qn_tgz}"; then
       echo "develop-deliver: ${hk} (${target}) — scp FAILED (NOT-EVALUATED)"
       fail=1
       continue
@@ -841,6 +1108,7 @@ verify_coldstart_mode() {
       ac207_extra=' --ac207-e2e --driving-profiles "$HOME/quay-driving-profiles.yml"'
     fi
     remote_script=$(cat <<REMOTE
+$(verify_node_export_for "${hk}")
 ${ac207_path_export}
 EV="\${HOME}/quay-verify-coldstart-evidence-${develop_tip:0:8}.jsonl"
 rm -f "\${EV}"
@@ -967,24 +1235,16 @@ verify_upgrade_mode() {
       fail=1
       continue
     fi
-    echo "develop-deliver: ${hk} (${target}) — scp verify-deliver-coldstart.sh + \$SCRIPT_DIR siblings + both .tgz"
-    # 同 verify_coldstart_mode：\$SCRIPT_DIR 的兄弟依赖必须一并 scp，否则远端在 set -e 下于写证据前夭折
-    # （显式枚举，不 tar —— 新增一个 \$SCRIPT_DIR 依赖是一次显式编辑，不是一次静默的远端失败）。
-    if ! scp "${ssh_opts[@]}" \
-        "${SCRIPT_DIR}/verify-deliver-coldstart.sh" \
-        "${SCRIPT_DIR}/pane-state-classify.ts" \
-        "${SCRIPT_DIR}/quay-init-closure-assertion.ts" \
-        "${SCRIPT_DIR}/gate-script-base.ts" \
-        "${SCRIPT_DIR}/repo-root.ts" \
-        "${SCRIPT_DIR}/runner-state-write.ts" \
-        "${SCRIPT_DIR}/write-json-atomic.ts" \
-        "${SCRIPT_DIR}/../../orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md" \
-        "${quay_tgz}" "${qn_tgz}" "${target}:~/" >/dev/null 2>&1; then
+    echo "develop-deliver: ${hk} (${target}) — scp verify-deliver-coldstart.sh + its FULL closure (\$SCRIPT_DIR siblings + node_modules deps) + both .tgz"
+    # 同 verify_coldstart_mode：闭集只有一处（transport_flat_files / transport_node_modules_deps），
+    # ⛔ 不在此处再抄一份——两份枚举正是 2026-09-11 漏件在两个模式下都不可见的成因。
+    if ! ship_verify_closure "${target}" "${quay_tgz}" "${qn_tgz}"; then
       echo "develop-deliver: ${hk} (${target}) — scp FAILED (NOT-EVALUATED)"
       fail=1
       continue
     fi
     remote_script=$(cat <<REMOTE
+$(verify_node_export_for "${hk}")
 EV="\${HOME}/quay-verify-upgrade-evidence-${develop_tip:0:8}.jsonl"
 rm -f "\${EV}"
 bash "\${HOME}/verify-deliver-coldstart.sh" \
