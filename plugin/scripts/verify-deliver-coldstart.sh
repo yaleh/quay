@@ -838,12 +838,12 @@ d=json.load(sys.stdin); print(len(d))' 2>/dev/null || echo "")"
   fi
   if [ "$AC238_EVALUATED" = "1" ]; then
     mkdir -p "$(dirname "$AC89")"
-    printf '{"ts":"%s","ac":"GOAL-009-AC-238","host":"%s","project_root":"%s","pre_upgrade_task_count":%s,"post_upgrade_task_count":%s,"pre_upgrade_runtime_age_days":%s,"runtime_replaced":true,"task_list_ok":true,"build_sha":"%s","upgrade_source":"%s","upgrade_init_rc":%s,"isolated_copy":%s,"taskset_stable":true,"sample_task":"%s","fresh_runtime_sha256":"%s"}\n' \
-      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${HOST:-unknown}" "$AC238_PROJECT_ROOT" \
+    printf '{"ts":"%s","ac":"GOAL-009-AC-238","host":"%s","project_root":"%s","pre_upgrade_task_count":%s,"post_upgrade_task_count":%s,"pre_upgrade_runtime_age_days":%s,"runtime_replaced":true,"task_list_ok":true,"build_sha":"%s","upgrade_source":"%s","upgrade_init_rc":%s,"isolated_copy":%s,"taskset_stable":true,"sample_task":"%s","fresh_runtime_sha256":"%s","host_key":"%s"}\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(hostname 2>/dev/null || echo '')" "$AC238_PROJECT_ROOT" \
       "$AC238_PRE_TASK_COUNT" "$AC238_POST_TASK_COUNT" "$AC238_RUNTIME_AGE_DAYS" \
       "$BUILD_SHA" "${UPGRADE_SOURCE:-none}" "$init_rc" \
       "$([ -n "$UPGRADE_SOURCE" ] && [ "$UPGRADE_SOURCE" != "$root" ] && echo true || echo false)" \
-      "$AC238_SAMPLE_TASK" "$AC238_FRESH_RUNTIME_SHA" >> "$AC89"
+      "$AC238_SAMPLE_TASK" "$AC238_FRESH_RUNTIME_SHA" "${HOST:-}" >> "$AC89"
     echo "  ac238 record written → $AC89"
   else
     echo "  AC-238 record NOT written — 缺值≠合格 (pre_count=$AC238_PRE_TASK_COUNT post_count=$AC238_POST_TASK_COUNT age_days=${AC238_RUNTIME_AGE_DAYS:-<unread>} replaced=$AC238_RUNTIME_REPLACED task_list_ok=$AC238_TASK_LIST_OK build_sha=${BUILD_SHA:-<empty>} upgrade_init_rc=$init_rc)" >&2
