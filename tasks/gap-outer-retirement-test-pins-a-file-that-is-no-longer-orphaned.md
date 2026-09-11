@@ -67,12 +67,24 @@ assert.deepEqual(res.retiredWithMarker, ["outer-anchor-check.ts"], "outer-anchor
 
 ## Acceptance Criteria
 
-- [ ] AC1 缺陷存证（改前读数）：贴该测试的失败输出（`actual []` / `expected ['outer-anchor-check.ts']`），以及检查器 `--json` 的实测读数（`ok:true`、`orphanCheckers:[]`、`surviving` 含该文件），说明 `[]` 是正确输出。
-- [ ] AC2 套件转绿（直接量）：改后 `bash scripts/test.sh plugin/test/outer-retirement-precondition-check.test.mjs` exit 0；退出码取自 `test.sh` 本身，⛔ 不得取自管道末段。
-- [ ] AC3 取假能力保留（最关键的负控制）：注入一个「被执行核引用 ∧ 不在 surviving ∧ 不含退役 marker」的 checker ⇒ 该测试**变红**并点名它；移除后转绿。贴两次输出与还原后 `git diff` 为空。
-- [ ] AC4 对两种孤儿归类都成立：分别在「`outer-anchor-check.ts` 在 surviving」（当前状态）与「人为让它成为孤儿且带 marker」两种情形下跑该测试，**两次均绿**；贴两次读数与当次的 `orphanCheckers`/`retiredWithMarker`。
-- [ ] AC5 检查器未被改动：`git diff --stat plugin/scripts/outer-retirement-precondition-check.ts` 为空（本任务只改断言，不改机制）。
-- [ ] AC6 全量绿：`scripts/test.sh` 全量绿，`# fail 0`；贴 `# tests / # pass / # fail` 三行。
+- [x] AC1 缺陷存证（改前读数）：贴该测试的失败输出（`actual []` / `expected ['outer-anchor-check.ts']`），以及检查器 `--json` 的实测读数（`ok:true`、`orphanCheckers:[]`、`surviving` 含该文件），说明 `[]` 是正确输出。
+- [x] AC2 套件转绿（直接量）：改后 `bash scripts/test.sh plugin/test/outer-retirement-precondition-check.test.mjs` exit 0；退出码取自 `test.sh` 本身，⛔ 不得取自管道末段。
+- [x] AC3 取假能力保留（最关键的负控制）：注入一个「被执行核引用 ∧ 不在 surviving ∧ 不含退役 marker」的 checker ⇒ 该测试**变红**并点名它；移除后转绿。贴两次输出与还原后 `git diff` 为空。
+- [x] AC4 对两种孤儿归类都成立：分别在「`outer-anchor-check.ts` 在 surviving」（当前状态）与「人为让它成为孤儿且带 marker」两种情形下跑该测试，**两次均绿**；贴两次读数与当次的 `orphanCheckers`/`retiredWithMarker`。
+- [x] AC5 检查器未被改动：`git diff --stat plugin/scripts/outer-retirement-precondition-check.ts` 为空（本任务只改断言，不改机制）。
+- [ ] AC6 全量绿：`scripts/test.sh` 全量绿，`# fail 0`；贴 `# tests / # pass / # fail` 三行。（待外部）
+
+**AC1 改前读数**：主检出复现失败（`AssertionError [ERR_ASSERTION]: outer-anchor-check.ts must be explicitly retired`，`actual: []` / `expected: ['outer-anchor-check.ts']`）；检查器 `--json` 实测 `ok:true`、`orphanCheckers:[]`、`retiredWithMarker:[]`、`undischarged:[]`、`surviving` 含 `outer-anchor-check.ts` ⇒ 该状态（孤儿集为空）下 `retiredWithMarker=[]` 是正确输出，`:142` 的快照期望 `["outer-anchor-check.ts"]` 失效。⛔ 该「anchor 在 surviving」态来自主检出的嵌套 worktree（`listExecutableFiles` 递归扫进 `.claude/worktrees/*` 里的引用），干净 worktree 里 anchor 是「带 marker 的孤儿」（`orphanCheckers=['outer-anchor-check.ts']`/`retiredWithMarker=['outer-anchor-check.ts']`）——同一条快照断言在两种环境给出相反结果，正是它必须被替换的直接证据。
+
+**AC2 套件转绿**：改后 `bash scripts/test.sh plugin/test/outer-retirement-precondition-check.test.mjs` 在 worktree exit **0**（15 pass / 0 fail；退出码取自 `test.sh` 本身 `EXIT_CODE=$?`）。
+
+**AC3 取假能力保留**：注入 `plugin/scripts/orphan-injection-check.ts`（执行核引用、无载体/注册表/marker）+ 执行核加引用行 ⇒ `node --test` 红并点名 `orphan-injection-check.ts`（`AssertionError: no orphan checker may lack a disposition: orphan-injection-check.ts`）；移除 ⇒ 绿（15 pass / 0 fail）；还原后 `git diff` 仅剩测试文件改动。
+
+**AC4 两种孤儿归类**：(a) 注入外部载体 `tmp-survivor-carrier.ts`（`import ... from "./outer-anchor-check.ts"`）⇒ `orphanCheckers=[]`/`retiredWithMarker=[]` ⇒ 绿；(b) 干净 worktree（anchor 带 marker 孤儿）⇒ `orphanCheckers=['outer-anchor-check.ts']`/`retiredWithMarker=['outer-anchor-check.ts']` ⇒ 绿。两次均绿。
+
+**AC5 检查器未被改动**：`git diff --stat plugin/scripts/outer-retirement-precondition-check.ts` 为空。
+
+**AC6 全量绿**：由 driver 机械 fan-in 的 suite 步验证（worker 只跑 scoped gate，不跑全量 suite——worker-driver 分工）。
 
 ## Definition of Done
 
