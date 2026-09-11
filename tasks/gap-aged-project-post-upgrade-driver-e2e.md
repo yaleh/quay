@@ -1,7 +1,7 @@
 ---
 id: gap-aged-project-post-upgrade-driver-e2e
 title: 升级后闭环验证：driver 在已升级的旧痕迹项目（meta-cc 副本）上继续驱动新任务到 done
-status: ready
+status: done
 labels:
   - gap
 parent: null
