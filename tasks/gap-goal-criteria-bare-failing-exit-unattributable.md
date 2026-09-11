@@ -60,6 +60,7 @@ AC-239 | verdict=fail | reason="acceptance failed (exit 1) — criterion wrote n
 ## Touches
 
 - goals/AC-239-升级后闭环-driver-在已升级的旧痕迹项目上继续驱动出新任务到-done-不只是装得上-还能接着干.md
+- goals/AC-241-生产台账上失败判据必须可归因-任何-goal-gate-verdict-fail-的-reason-不得是-判据没写任何.md
 - plugin/scripts/criterion-failure-attribution-check.ts (new)
 - plugin/scripts/capability-catalog.sh
 - plugin/scripts/runner-static-gate.ts
