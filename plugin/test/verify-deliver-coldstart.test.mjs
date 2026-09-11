@@ -243,6 +243,26 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
   // STRUCTURAL control: probe_ac207_measures's body must carry no pipe into grep.
   assert.match(r.stdout, /ac207-produced-by-driver\(no-pipe-into-grep\)=1/,
     "produced_by_driver must be decided by captured text + case matching, not `git … | grep -q` (pipefail SIGPIPE reads false exactly when the condition is true)");
+  // AC-240 (gap-ac240-e2e-closure-same-run-pairing): the run-level closure self-evidence must take
+  // THREE distinguishable values. AC-203 (driver alive) and AC-207 (driver produced) can each hold
+  // while coming from two DISJOINT batches of witnesses — measured 2026-09-11 on this repo's carrier:
+  // AC-203 roots={63ee9681,b95bd6f1}, AC-207 roots={a2a5aac0}, intersection empty. So "the closure is
+  // self-evidenced by ONE run" was neither produced nor judged — only accidentally never true.
+  assert.match(r.stdout, /e2e-closure\(pair-same-run-same-root\) E2E_CLOSURE_SELF_EVIDENCED=1 note_present=1/,
+    "positive control: AC-203 + AC-207 written by THIS run for the SAME project_root ⇒ E2E_CLOSURE_SELF_EVIDENCED=1");
+  assert.match(r.stdout, /e2e-closure\(ac207-only\) E2E_CLOSURE_SELF_EVIDENCED=0 note_present=1/,
+    "negative control: AC-207 written but AC-203 not written this run (the origin defect's own shape — step⑤ never probed) ⇒ 0 with a non-empty NOTE, never silent");
+  assert.match(r.stdout, /e2e-closure\(different-roots\) E2E_CLOSURE_SELF_EVIDENCED=0 note_present=1/,
+    "negative control: both written but for DIFFERENT project_roots ⇒ 0 — the pairing is on the SAME root, not on both being non-empty");
+  assert.match(r.stdout, /e2e-closure\(no-e2e-attempt\) E2E_CLOSURE_SELF_EVIDENCED=not-evaluated note_present=1/,
+    "not-evaluated: --ac207-e2e not passed ⇒ `not-evaluated`, DISTINCT from 0/1 (硬规则 3b: a verdict whose value set lacks a 未评估 state cannot tell 'checked and failed' from 'never checked')");
+  // AC-240 generation side, POSITIONAL (硬规则 ②): the AC-203 probe/write call must sit inside
+  // step5_e2e's body. Before this task the in-body hit count was 0 — step④ probed once in a 30s
+  // window right after `driver start`, so the project that actually got driven to done (the strongest
+  // available "the driver is really alive" direct measure) was never probed and the same run could
+  // only ever emit AC-207.
+  assert.match(r.stdout, /ac240-ac203-write-point\(in-step5_e2e\) hits=\d+ /,
+    "the AC-203 probe/write point must be located inside step5_e2e (before this task: 0 hits in its body)");
 });
 
 test("AC1 — --selfcheck is hermetic: it does not touch a real install and runs offline", () => {
@@ -417,6 +437,37 @@ test("AC4 — --verify-only (no build, no tgz sha256) does NOT append an AC-201 
 //       point; AC-203/205/207/232 go through it), or
 //   (b) an explicit top-level `"build_sha":` field in the record-producing printf (AC-201).
 // ⛔ Adding a third, unanchored write point for any NEED ac turns this test red — which is the point.
+
+// AC-240 AC1 — the generation-side AC-203 write point is POSITIONALLY inside step5_e2e's body, and
+// its driver_alive / carrier_records arguments are the values probed by probe_ac203_driver_status at
+// that moment — never the literals "0"/"1" that step④ happens to pass (⛔ and step④ is deliberately
+// NOT changed: its literals are only reachable behind a measured gate, so it is a serialization of
+// readings, not a tautology). This is a positional check (硬规则 ②): a comment mentioning the call
+// does not count, and moving the probe back out of step⑤ flips it — i.e. the same-run pairing stops
+// being an accident and becomes a requirement.
+test("AC1 (AC-240) — the AC-203 probe/write call sits inside step5_e2e and passes probed values", () => {
+  const lines = fs.readFileSync(SCRIPT, "utf8").split("\n");
+  const start = lines.findIndex((l) => /^step5_e2e\(\)/.test(l));
+  assert.ok(start >= 0, "step5_e2e must be defined");
+  let end = -1;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (lines[i] === "}") { end = i; break; }
+  }
+  assert.ok(end > start, "step5_e2e's body must terminate at a column-0 `}`");
+  // Comments stripped by POSITION (a bare `#` line is not a call site).
+  const body = lines.slice(start, end + 1).map((l) => l.replace(/#.*$/, "")).join("\n");
+  const probeCall = body.split("\n").filter((l) => /probe_ac203_driver_status/.test(l));
+  const writeCall = body.split("\n").filter((l) => /write_ac203_record/.test(l));
+  assert.ok(probeCall.length >= 1,
+    "step5_e2e must call probe_ac203_driver_status (before this task the in-body hit count was 0)");
+  assert.ok(writeCall.length >= 1,
+    "step5_e2e must call write_ac203_record (the single AC-203 write point, so no second writer is invented)");
+  const call = writeCall[0];
+  assert.match(call, /\$AC203_DRIVER_ALIVE/, "driver_alive must come from the live probe, not a literal");
+  assert.match(call, /\$AC203_CARRIER_RECORDS/, "carrier_records must come from the live probe, not a literal");
+  assert.ok(!/"0"\s+"1"/.test(call),
+    `the write call must not pass the literals "0" "1" (that would make the record a tautology): ${call.trim()}`);
+});
 
 // logicalStatements(): join backslash-continued physical lines into one statement, so a printf whose
 // format string and its `>> "$AC89"` redirection sit on different physical lines is judged as a whole.

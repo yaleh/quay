@@ -80,7 +80,12 @@ for (let i = 0; i < paras.length; i++) {
 ## Evidence
 
 **AC1（改前读数，用 git 历史中的原文实测复现，非引述）**：把两个历史任务体送入改前的检测函数。第一个样本来自 commit `3d5dd27967` ⇒ 判出 **3** 个 id：`gap-ac203-record-lacks-build-sha-makes-ac214-permanently-unsatisfiable`、`gap-git-graph-lane-colour-assertion-assumes-contiguous-columns`、`gap-shipped-entry-test-treats-every-shebang-plugin-script-as-entry`。
-其中两个出自触发句「⛔ 不作为本任务的阻塞」（否定式，误报），第三个出自另一段的真声明（正确保留）。第二个样本来自 commit `ee8b99648` ⇒ 判出 **5** 个 id：`gap-third-party-evidence-no-transport-to-driving-repo-carrier`、`gap-cross-host-evidence-run-incomplete-and-step-order-makes-ac234-unsatisfiable`、`gap-ac214-freshness-anchor-build-sha-missing-on-203-205-207`、`gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit`、`gap-aged-project-post-upgrade-driver-e2e`。
+
+其中两个出自触发句「⛔ 不作为本任务的阻塞」（否定式，误报），第三个出自另一段的真声明（正确保留）。
+
+第二个样本来自 commit `ee8b99648` ⇒ 判出 **5** 个 id：`gap-third-party-evidence-no-transport-to-driving-repo-carrier`、`gap-cross-host-evidence-run-incomplete-and-step-order-makes-ac234-unsatisfiable`、`gap-ac214-freshness-anchor-build-sha-missing-on-203-205-207`、`gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit`、`gap-aged-project-post-upgrade-driver-e2e`。
+
+
 第二个样本的触发句是「⛔ 不另立 depends_on 边（它们不改变「配对」这一性质）」——全文只有这一处命中，且没有任何一行同时含关键词与 id。
 作用域三行证据（改前）：`const paras = noFence.split(/\r?\n\s*\r?\n/)` 定段、`if (!PREREQ_KEYWORD_RE.test(para)) continue` 段级放行、`for (const m of para.matchAll(BACKTICK_ID_RE))` 收全段 id。
 改后同一对样本分别降为 **1** 个（只剩真声明那个）与 **0** 个，已由 `plugin/test/ready-pool-check.test.mjs` 的 AC1 用例把两段原文逐字钉住。

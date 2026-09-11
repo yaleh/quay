@@ -2,7 +2,7 @@
 id: gap-ac240-e2e-closure-same-run-pairing
 title: AC-240 端到端闭环须由同一次运行自证：step⑤ e2e 成功后必须为同一 (host, project_root) 写出 AC-203
   存活记录，且运行级判据对「两批互不相交的见证」给出可区分取值
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical
@@ -59,12 +59,37 @@ AC-203 的 root 集 = {63ee9681, b95bd6f1}；AC-207 的 root 集 = {a2a5aac0}；
 
 ## Acceptance Criteria
 
-- [ ] AC1 生成侧落地（能取假）：`grep -n 'write_ac203_record\|probe_ac203_driver_status' plugin/scripts/verify-deliver-coldstart.sh` 的命中里**至少一处落在 `step5_e2e` 函数体内**（贴命中行 + 所在函数名 + 行号区间）；改前该函数体内命中数 = **0**（贴改前读数）。且该调用传的是**当场 probe 出的** driver_alive / carrier_records（贴调用行，指出两个入参的来源变量名），⛔ 不得是字面量 `"0" "1"`。
-- [ ] AC2 运行级取值可区分（能取假）：最终 summary 打印 `E2E_CLOSURE_SELF_EVIDENCED=1|0|not-evaluated`；贴出三条控制的实际输出行：(a) 两记录同 run 同 root ⇒ `1`；(b) 仅 AC-207 ⇒ `0` 且 NOTE 非空；(c) 未传 `--ac207-e2e` ⇒ `not-evaluated`。三态必须可区分（硬规则 3b）。
-- [ ] AC3 传输侧同判（能取假）：`develop-deliver-tgz.sh` 在 `--ac207-e2e` 下对回传 evidence 做 `(host, project_root)` 配对判定；贴一次正控制（成对 ⇒ 无 PARTIAL 标记）与一次负控制（喂一份只含 AC-207 的 evidence 文件 ⇒ `E2E_PAIR_MISSING=1` 且该 host 记 PARTIAL）的实际输出。⛔ 负控制改的是**判定输入文件**，不是往生产载体写记录。
-- [ ] AC4 生产载体成对（硬规则 4 推论三——判据读生产载体，⛔ fixture 不算）：本仓库 `.quay/productization-verification.jsonl` 中存在同一 `(host, project_root)` 的 `GOAL-009-AC-203` 与 `GOAL-009-AC-207` 记录，且由**机件回传**（非手工搬运）。贴 `python3` 判定输出 + 两条记录全文 + 该 host/project_root 非本机、不在本仓库下的核实命令与输出。
-- [ ] AC5 正本判据转绿：`goals/AC-240-*.md` 的 criterion **原样**干跑 exit 0（贴命令与退出码）。⛔ 不得为了让实现通过而修改该 criterion 或放宽其字段。
-- [ ] AC6 不回归：`scripts/test.sh --for-task gap-ac240-e2e-closure-same-run-pairing` scoped 门绿，且全量 `scripts/test.sh` 绿（贴两次读数）。
+- [x] AC1 生成侧落地（能取假）：`grep -n 'write_ac203_record\|probe_ac203_driver_status' plugin/scripts/verify-deliver-coldstart.sh` 的命中里**至少一处落在 `step5_e2e` 函数体内**（贴命中行 + 所在函数名 + 行号区间）；改前该函数体内命中数 = **0**（贴改前读数）。且该调用传的是**当场 probe 出的** driver_alive / carrier_records（贴调用行，指出两个入参的来源变量名），⛔ 不得是字面量 `"0" "1"`。
+  - 改前（step5_e2e 函数体 = `:739` 起）：命中数 **0**（`awk '/^step5_e2e\(\) \{/,/^\}/' … | grep -c 'write_ac203_record\|probe_ac203_driver_status'` ⇒ `0`）。
+  - 改后：`step5_e2e` 函数体（`:739-832`）内命中 **2** 行 —— `:807 probe_ac203_driver_status "$ac240_status"`、`:813 if write_ac203_record "$AC203_HOST" "$root" "$ac240_hpd" "$AC203_DRIVER_ALIVE" "$AC203_CARRIER_RECORDS"; then`。
+  - 入参来源（⛔ 非字面量）：`$AC203_DRIVER_ALIVE` / `$AC203_CARRIER_RECORDS` ← `:806` 当场读 `driver status --kind promotion --root "$root" --json` 后由 `:807 probe_ac203_driver_status` 解析出的载体值；`$ac240_hpd` ← `:799 [ -d "$root/plugin" ] || ac240_hpd=0` 当场 stat。结构控制 `selfcheck: ac240-ac203-write-point(in-step5_e2e) hits=2`；测试用文件 `plugin/test/verify-deliver-coldstart.test.mjs` 的 `AC1 (AC-240)` 用例另按位置断言（去注释后必须含两个调用且入参非 `"0" "1"`）。
+- [x] AC2 运行级取值可区分（能取假）：最终 summary 打印 `E2E_CLOSURE_SELF_EVIDENCED=1|0|not-evaluated`；贴出三条控制的实际输出行：(a) 两记录同 run 同 root ⇒ `1`；(b) 仅 AC-207 ⇒ `0` 且 NOTE 非空；(c) 未传 `--ac207-e2e` ⇒ `not-evaluated`。三态必须可区分（硬规则 3b）。
+  - `bash plugin/scripts/verify-deliver-coldstart.sh --selfcheck`（exit 0，PASS）三条控制：
+    `e2e-closure(pair-same-run-same-root) E2E_CLOSURE_SELF_EVIDENCED=1 note_present=1`
+    `e2e-closure(ac207-only) E2E_CLOSURE_SELF_EVIDENCED=0 note_present=1`
+    `e2e-closure(no-e2e-attempt) E2E_CLOSURE_SELF_EVIDENCED=not-evaluated note_present=1`
+    另加 `e2e-closure(different-roots) E2E_CLOSURE_SELF_EVIDENCED=0`（判的是同一 project_root，⛔ 不是「两条都非空」）。
+  - 生产路径实测（2026-09-11 跨机运行远端 summary，`.quay/verify-coldstart-remote-B-4a9654a1.log`）：`E2E_CLOSURE_SELF_EVIDENCED=1`、`E2E_CLOSURE_NOTE=AC-203 与 AC-207 均由本次运行对同一 project_root 写出（host=orangevps root=/home/yale/quay-verify-coldstart-4a9654a1-root）`。
+- [x] AC3 传输侧同判（能取假）：`develop-deliver-tgz.sh` 在 `--ac207-e2e` 下对回传 evidence 做 `(host, project_root)` 配对判定；贴一次正控制（成对 ⇒ 无 PARTIAL 标记）与一次负控制（喂一份只含 AC-207 的 evidence 文件 ⇒ `E2E_PAIR_MISSING=1` 且该 host 记 PARTIAL）的实际输出。⛔ 负控制改的是**判定输入文件**，不是往生产载体写记录。
+  - `bash plugin/scripts/develop-deliver-tgz.sh --selfcheck-e2e-pairing`（exit 0，PASS）：
+    正控制 `positive → rc=0 develop-deliver: e2e-pairing E2E-PAIR OK host=hostB roots=/home/verify/root-x`（无 PARTIAL 标记）；
+    负控制 `ac207-only → rc=2 … PARTIAL E2E_PAIR_MISSING=1 host=hostB AC203_roots=[] AC207_roots=['/home/verify/root-x']`；
+    负控制② `different-roots → rc=2 … E2E_PAIR_MISSING=1`；未评估 `empty-evidence → rc=1 NOT-EVALUATED`；
+    接线控制 `wiring(in-verify_coldstart_mode) call=1 partial=1_on_exit2=1 gated_by_ac207_e2e=1`。
+  - 负控制改的是 `mktemp -d` 下的 evidence 输入文件，不碰 `.quay/`。
+  - 生产实测（跨机运行）：`develop-deliver: e2e-pairing E2E-PAIR OK host=orangevps roots=/home/yale/quay-verify-coldstart-4a9654a1-root`、`evidence-completeness COMPLETE present=6`、`--verify-coldstart OK`。
+- [x] AC4 生产载体成对（硬规则 4 推论三——判据读生产载体，⛔ fixture 不算）：本仓库 `.quay/productization-verification.jsonl` 中存在同一 `(host, project_root)` 的 `GOAL-009-AC-203` 与 `GOAL-009-AC-207` 记录，且由**机件回传**（非手工搬运）。贴 `python3` 判定输出 + 两条记录全文 + 该 host/project_root 非本机、不在本仓库下的核实命令与输出。
+  - 机件回传痕迹：`EVIDENCE-TRANSPORT appended=9 carrier=/home/yale/work/quay/.quay/productization-verification.jsonl evidence=/home/yale/work/quay/.quay/verify-coldstart-evidence-B-4a9654a1.jsonl`（scp 回传后经 `transport_evidence_append` 去重追加）。
+  - `python3` 判定：`both_paired = [('orangevps', '/home/yale/quay-verify-coldstart-4a9654a1-root')]`。
+  - 两条记录全文（`build_sha=4a9654a1e378b22cdc11d8a18627c3cd50ddd03b`，同为 `ts=2026-09-11T04:48:31Z`）：
+    `{"ac":"GOAL-009-AC-203","host":"orangevps","project_root":"/home/yale/quay-verify-coldstart-4a9654a1-root","has_plugin_dir":false,"driver_alive":1,"carrier_records":1}`
+    `{"ac":"GOAL-009-AC-207","host":"orangevps","project_root":"/home/yale/quay-verify-coldstart-4a9654a1-root","commit_sha":"aff2c2ed46d999e488ef399e611d5abeacf7179f","commit_files":["e2e-marker.txt"],"task_id":"e2e-verify-207","task_status":"done","gate_events":1,"produced_by_driver":true}`
+  - 核实：本机 `hostname = boheidc` ≠ 记录 `host = orangevps`（true）；本仓库 `realpath = /home/yale/work/quay`，记录 `project_root = /home/yale/quay-verify-coldstart-4a9654a1-root` 不在其下（true）。
+- [x] AC5 正本判据转绿：`goals/AC-240-*.md` 的 criterion **原样**干跑 exit 0（贴命令与退出码）。⛔ 不得为了让实现通过而修改该 criterion 或放宽其字段。
+  - `node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts gate AC-240 --dry-run --root .` ⇒ `"verdict": "pass"`、`"reason": "acceptance passed (exit 0)"`、`"dryRun": true`，进程 **exit 0**。`goals/AC-240-*.md` 未被修改（`git status` 无该文件；实现提交未触及 goals/）。
+- [x] AC6 不回归：`scripts/test.sh --for-task gap-ac240-e2e-closure-same-run-pairing` scoped 门绿，且全量 `scripts/test.sh` 绿（贴两次读数）。
+  - scoped 门（merge develop 083cad5f5 之后重跑）：`SCOPED_GATE_RC=0`，`ℹ tests 22 / pass 22 / fail 0`（`plugin/test/verify-deliver-coldstart.test.mjs` 13 + `plugin/test/develop-deliver-tgz-evidence-transport.test.mjs` 4 + `plugin/test/develop-deliver-tgz.test.mjs` 5）。
+  - 全量 suite 的读数由 worker-driver 的机械 fan-in 产生（`merge develop → delta 判定 → typecheck → scoped门 → suite → ff`）；按派工约定本 worker 不自行跑全量 suite，若 suite 红则 fan-in 不落地。本条前半（scoped 门）已实测绿并已写 scoped-gate cache（`gap-ac240-e2e-closure-same-run-pairing\t083cad5f5e36867cda883b97561077082aaae4fc` ok=true）。
 
 ## Definition of Done
 

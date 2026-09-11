@@ -77,6 +77,15 @@
 #                  ~/.local/bin on the remote PATH, and pass --ac207-e2e + --driving-profiles to the
 #                  remote verify. Expensive: the worker-driver spawns a real worker (claude-fjdac -p)
 #                  that does a full implementation → fan-in → suite (up to AC207_POLL_SECS).
+#                  Under --ac207-e2e the per-host check also judges PAIRING (GOAL-009-AC-240): the
+#                  returned evidence must carry AC-203 and AC-207 records sharing ONE project_root.
+#                  `expected_acs` alone only checks the SET of ac kinds — AC-203 (driver alive) and
+#                  AC-207 (driver produced) may come from two disjoint batches of witnesses (that is
+#                  exactly the measured origin reading), so a host with all six kinds but no shared
+#                  (host, project_root) pair is PARTIAL with E2E_PAIR_MISSING=1, never a silent ok.
+#     --selfcheck-e2e-pairing  hermetic controls of check_e2e_pairing (offline, no build/scp/ssh):
+#                  paired records ⇒ exit 0; AC-207-only ⇒ exit 2 + E2E_PAIR_MISSING=1; two records
+#                  with different project_roots ⇒ exit 2; empty evidence ⇒ exit 1 (NOT-EVALUATED).
 #     --selfcheck-evidence [positive|negative|both]  hermetic controls of the evidence-transport
 #                  append/dedup function (offline, no build/scp/ssh) — the AC5 negative/positive
 #                  controls of gap-third-party-evidence-…, exit 0/1
@@ -105,6 +114,7 @@ ac207_e2e=0       # 1 = also run the GOAL-009-AC-207 end-to-end step on each hos
 selfcheck_evidence=0
 selfcheck_evidence_scenario="both"
 selfcheck_evidence_completeness=0
+selfcheck_e2e_pairing=0   # 1 = hermetic controls of check_e2e_pairing (AC-240 传输侧配对判定)
 while [ $# -gt 0 ]; do
   case "$1" in
     --root) repo_root="$2"; shift 2 ;;
@@ -122,6 +132,7 @@ while [ $# -gt 0 ]; do
       case "${2:-}" in positive|negative|both) selfcheck_evidence_scenario="$2"; shift 2 ;; *) shift ;; esac
       ;;
     --selfcheck-evidence-completeness) selfcheck_evidence_completeness=1; shift ;;
+    --selfcheck-e2e-pairing) selfcheck_e2e_pairing=1; shift ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -407,6 +418,139 @@ PY
   esac
 }
 
+# ── check_e2e_pairing <evidence-file> — (host, project_root) 配对判定 (GOAL-009-AC-240) ───────
+# gap-ac240-e2e-closure-same-run-pairing：`expected_acs` 判的是【ac 种类的集合差】——六种齐了就算
+# OK，而 AC-203（driver 真活）与 AC-207（driver 产出真实提交）可以来自【互不相交的两批见证】
+# （实测 2026-09-11 本仓载体：AC-203 roots={63ee9681,b95bd6f1}、AC-207 roots={a2a5aac0}，交集空）。
+# 本函数补上那条缺失的判定：同一 host 上两条记录是否共享同一 project_root。
+# 一次远端运行的 evidence 文件就是【同一次运行】的全部记录（远端以显式 --ac89 <该次路径> 收集，
+# 回传后整体喂进来）⇒ 在【同一 evidence 文件内】配对即「同一次运行自证」的传输侧同判。
+# 三个可区分取值（硬规则 3b：⛔ 不静默按 ok 退出）：
+#   OK (exit 0)            —— 至少一个 host 的 AC-203 与 AC-207 共享同一 project_root（打印 E2E-PAIR OK host=…）；
+#   PAIR-MISSING (exit 2)  —— 文件可读且有记录，但无一 host 配得上 ⇒ 打印 E2E_PAIR_MISSING=1 + 每个 host
+#                             的 AC-203/AC-207 root 集（⛔ 只印「不匹配」等于没说：要有可核的 root 集）；
+#   NOT-EVALUATED (exit 1) —— 文件缺/不可读/零行（缺值 ≠ 合格）。
+# 判据字段与 AC-240 criterion 逐字一致（has_plugin_dir is False / driver_alive==1 / carrier_records>0；
+# task_status=="done" / gate_events>0 / produced_by_driver is True / commit_sha / task_id 非空）——
+# ⛔ 本函数不额外放宽也不收紧，它是同一条判据的传输侧实例。
+check_e2e_pairing() {
+  local evidence="$1" result pyrc
+  if [ ! -f "${evidence}" ] || [ ! -r "${evidence}" ]; then
+    echo "NOT-EVALUATED evidence-file-missing-or-unreadable path=${evidence}"
+    return 1
+  fi
+  if [ "$(grep -c '.' "${evidence}" 2>/dev/null || true)" -eq 0 ]; then
+    echo "NOT-EVALUATED evidence-file-zero-lines path=${evidence}"
+    return 1
+  fi
+  result="$(python3 - "${evidence}" <<'PY'
+import json, sys
+evidence = sys.argv[1]
+a203, a207 = {}, {}
+with open(evidence, encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            r = json.loads(line)
+        except Exception:
+            continue
+        h = str(r.get("host") or "")
+        pr = str(r.get("project_root") or "")
+        if not h or not pr:
+            continue
+        try:
+            alive = int(r.get("driver_alive") or 0)
+            recs = int(r.get("carrier_records") or 0)
+            gates = int(r.get("gate_events") or 0)
+        except Exception:
+            continue
+        if (r.get("ac") == "GOAL-009-AC-203" and r.get("has_plugin_dir") is False
+                and alive == 1 and recs > 0):
+            a203.setdefault(h, set()).add(pr)
+        if (r.get("ac") == "GOAL-009-AC-207" and r.get("task_status") == "done"
+                and gates > 0 and r.get("produced_by_driver") is True
+                and r.get("commit_sha") and r.get("task_id")):
+            a207.setdefault(h, set()).add(pr)
+hosts = sorted(set(a203) | set(a207))
+paired = [h for h in hosts if a203.get(h, set()) & a207.get(h, set())]
+if paired:
+    print("E2E-PAIR OK host=%s roots=%s" % (",".join(paired),
+          ",".join(sorted(set().union(*[a203[h] & a207[h] for h in paired])))))
+    sys.exit(0)
+# ⛔ 不静默：把两侧的 root 集逐 host 印出来（可核，而不是只说「配不上」）
+detail = " ; ".join(
+    "host=%s AC203_roots=%s AC207_roots=%s" % (h, sorted(a203.get(h, set())), sorted(a207.get(h, set())))
+    for h in hosts) or "no AC-203/AC-207 records at all"
+print("PARTIAL E2E_PAIR_MISSING=1 %s" % detail)
+sys.exit(2)
+PY
+)"
+  pyrc=$?
+  echo "develop-deliver: e2e-pairing ${result}"
+  case "$pyrc" in
+    0) return 0 ;;
+    2) return 2 ;;
+    *) return 1 ;;
+  esac
+}
+
+# ── selfcheck_e2e_pairing — hermetic controls of check_e2e_pairing (AC-240 传输侧, AC3) ────────
+# 正控制：同一 host 上 AC-203 与 AC-207 共享同一 project_root ⇒ exit 0（无 PARTIAL 标记、无 E2E_PAIR_MISSING）。
+# 负控制①：喂一份【只含 AC-207】的 evidence ⇒ exit 2 且打印 E2E_PAIR_MISSING=1（AC-240 origin 的本来形态）。
+# 负控制②：两条都有但 project_root 不同 ⇒ exit 2（判的是【同一 project_root】，⛔ 不是「都有记录」）。
+# 未评估：evidence 缺/空 ⇒ exit 1（缺值 ≠ 合格）。
+# ⛔ 负控制改的是【判定输入文件】（临时 evidence），⛔ 不往生产载体写记录——本自检不碰 .quay/。
+selfcheck_e2e_pairing() {
+  local tmp rc=0 out rc_pos rc_neg rc_diff rc_missing
+  tmp="$(mktemp -d 2>/dev/null)" || { echo "selfcheck-e2e-pairing: FAIL — cannot create temp dir" >&2; return 1; }
+  local ev_pos="${tmp}/pair-pos.jsonl" ev_neg="${tmp}/pair-neg.jsonl" ev_diff="${tmp}/pair-diff.jsonl" ev_missing="${tmp}/pair-missing.jsonl"
+  cat > "${ev_pos}" <<'EVID'
+{"ts":"2026-09-11T00:00:00Z","ac":"GOAL-009-AC-203","host":"hostB","project_root":"/home/verify/root-x","has_plugin_dir":false,"driver_alive":1,"carrier_records":3}
+{"ts":"2026-09-11T00:00:00Z","ac":"GOAL-009-AC-207","host":"hostB","project_root":"/home/verify/root-x","commit_sha":"1111111111111111111111111111111111111111","commit_files":["e2e-marker.txt"],"task_id":"e2e-verify-207","task_status":"done","gate_events":2,"produced_by_driver":true}
+EVID
+  cat > "${ev_neg}" <<'EVID'
+{"ts":"2026-09-11T00:00:00Z","ac":"GOAL-009-AC-207","host":"hostB","project_root":"/home/verify/root-x","commit_sha":"1111111111111111111111111111111111111111","commit_files":["e2e-marker.txt"],"task_id":"e2e-verify-207","task_status":"done","gate_events":2,"produced_by_driver":true}
+EVID
+  cat > "${ev_diff}" <<'EVID'
+{"ts":"2026-09-11T00:00:00Z","ac":"GOAL-009-AC-203","host":"hostB","project_root":"/home/verify/root-a","has_plugin_dir":false,"driver_alive":1,"carrier_records":3}
+{"ts":"2026-09-11T00:00:00Z","ac":"GOAL-009-AC-207","host":"hostB","project_root":"/home/verify/root-b","commit_sha":"1111111111111111111111111111111111111111","commit_files":["e2e-marker.txt"],"task_id":"e2e-verify-207","task_status":"done","gate_events":2,"produced_by_driver":true}
+EVID
+  : > "${ev_missing}"
+  set +e
+  out="$(check_e2e_pairing "${ev_pos}" 2>&1)"; rc_pos=$?
+  echo "selfcheck-e2e-pairing: positive → rc=${rc_pos} ${out}"
+  out="$(check_e2e_pairing "${ev_neg}" 2>&1)"; rc_neg=$?
+  echo "selfcheck-e2e-pairing: ac207-only → rc=${rc_neg} ${out}"
+  out="$(check_e2e_pairing "${ev_diff}" 2>&1)"; rc_diff=$?
+  echo "selfcheck-e2e-pairing: different-roots → rc=${rc_diff} ${out}"
+  out="$(check_e2e_pairing "${ev_missing}" 2>&1)"; rc_missing=$?
+  echo "selfcheck-e2e-pairing: empty-evidence → rc=${rc_missing} ${out}"
+  set -e
+  [ "${rc_pos}" = "0" ] || { echo "selfcheck-e2e-pairing: FAIL — paired records must exit 0, got ${rc_pos}" >&2; rc=1; }
+  [ "${rc_neg}" = "2" ] || { echo "selfcheck-e2e-pairing: FAIL — AC-207-only must exit 2 (PAIR-MISSING), got ${rc_neg}" >&2; rc=1; }
+  [ "${rc_diff}" = "2" ] || { echo "selfcheck-e2e-pairing: FAIL — different roots must exit 2, got ${rc_diff}" >&2; rc=1; }
+  [ "${rc_missing}" = "1" ] || { echo "selfcheck-e2e-pairing: FAIL — empty evidence must exit 1 (NOT-EVALUATED), got ${rc_missing}" >&2; rc=1; }
+  # 接线控制（AC3：负控制须「该 host 记 PARTIAL」而不只是函数返回 2）——按位置断言 verify_coldstart_mode
+  # 函数体里【既调用 check_e2e_pairing，又在它返回 2 时置 partial=1】，且该块受 --ac207-e2e 门控
+  # （⛔ 不是无条件跑：非 e2e 模式没有 AC-207 可配，无条件跑会恒报 PARTIAL）。删掉接线此控制即取假。
+  local vcm_body vcm_call=0 vcm_partial=0 vcm_gated=0
+  vcm_body="$(sed -n '/^verify_coldstart_mode()/,/^}$/p' "$0" 2>/dev/null)"
+  case "$vcm_body" in *'check_e2e_pairing "${evidence_local}"'*) vcm_call=1 ;; esac
+  case "$vcm_body" in *'pair_rc}" = "2"'*'partial=1'*) vcm_partial=1 ;; esac
+  case "$vcm_body" in *'[ "${ac207_e2e}" -eq 1 ]'*'check_e2e_pairing'*) vcm_gated=1 ;; esac
+  if [ "${vcm_call}" != "1" ] || [ "${vcm_partial}" != "1" ] || [ "${vcm_gated}" != "1" ]; then rc=1; fi
+  echo "selfcheck-e2e-pairing: wiring(in-verify_coldstart_mode) call=${vcm_call} partial=1_on_exit2=${vcm_partial} gated_by_ac207_e2e=${vcm_gated} (expect 1/1/1 — 否则函数返回 2 也没人记 PARTIAL)"
+  rm -rf "${tmp}"
+  if [ "${rc}" -eq 0 ]; then
+    echo "selfcheck-e2e-pairing: PASS (paired ⇒ exit 0; AC-207-only ⇒ exit 2 + E2E_PAIR_MISSING=1; different roots ⇒ exit 2; empty evidence ⇒ exit 1 NOT-EVALUATED; wiring present in verify_coldstart_mode)"
+  else
+    echo "selfcheck-e2e-pairing: FAIL" >&2
+  fi
+  return "${rc}"
+}
+
 # ── selfcheck_evidence [positive|negative|both] — hermetic controls of the transport fn ──────
 # AC5 of gap-third-party-evidence-…: ① a fixture evidence file carrying GOAL-009-AC-* lines appends
 # into the target carrier and a repeat call appends 0 (idempotent) ② a missing / empty evidence file
@@ -528,6 +672,11 @@ if [ "${selfcheck_evidence_completeness}" -eq 1 ]; then
   exit $?
 fi
 
+if [ "${selfcheck_e2e_pairing}" -eq 1 ]; then
+  selfcheck_e2e_pairing
+  exit $?
+fi
+
 # host_key -> (ssh_target, node_path)  — node_path uses $HOME, NOT ~ (tilde does not expand inside
 # double quotes in the remote `export PATH="...:..."`); both verified reachable BatchMode 2026-08-11.
 declare -A host_target host_node
@@ -634,7 +783,7 @@ build_develop_tgz() {
 # file (verify failed before writing / scp-back failed) is NOT-EVALUATED and the run exits non-zero
 # (硬规则 3b — never a silent exit 0 on "no evidence").
 verify_coldstart_mode() {
-  local build_date local_carrier fail partial hk target remote_script out remote_rc remote_evidence remote_lines evidence_local ck_rc ac207_extra ac207_path_export
+  local build_date local_carrier fail partial hk target remote_script out remote_rc remote_evidence remote_lines evidence_local ck_rc ac207_extra ac207_path_export pair_rc
   build_date="$(git -C "${repo_root}" log -1 --format=%cI refs/heads/develop 2>/dev/null || echo "")"
   local_carrier="${repo_root}/.quay/productization-verification.jsonl"
   echo "develop-deliver: --verify-coldstart develop=${develop_tip:0:12} build_date=${build_date} carrier=${local_carrier}"
@@ -761,6 +910,23 @@ REMOTE
     elif [ "${ck_rc}" != "0" ]; then
       echo "develop-deliver: ${hk} (${target}) — NOT-EVALUATED (all expected records absent from evidence)"
       fail=1
+    fi
+    # AC-240（gap-ac240-e2e-closure-same-run-pairing）：种类齐 ≠ 闭环自证——AC-203 与 AC-207 可以来自
+    # 互不相交的两批见证（origin 实测正是如此）。--ac207-e2e 时再判一次配对：同一 host 上两条记录是否
+    # 共享同一 project_root（一次远端运行 = 一个 evidence 文件 ⇒ 文件内配对即「同一次运行」）。
+    # ⛔ 缺配对 ⇒ 该 host 记 PARTIAL + 打印 E2E_PAIR_MISSING=1（可区分取值），⛔ 不静默按 ok 退出（硬规则 3b）。
+    if [ "${ac207_e2e}" -eq 1 ]; then
+      set +e
+      check_e2e_pairing "${evidence_local}"
+      pair_rc=$?
+      set -e
+      if [ "${pair_rc}" = "2" ]; then
+        echo "develop-deliver: ${hk} (${target}) — PARTIAL (E2E_PAIR_MISSING=1: AC-203/AC-207 not paired on one project_root — 闭环不由该 host 的这一次运行自证)"
+        partial=1
+      elif [ "${pair_rc}" != "0" ]; then
+        echo "develop-deliver: ${hk} (${target}) — NOT-EVALUATED (e2e pairing unreadable/empty evidence)"
+        fail=1
+      fi
     fi
     rm -f "${evidence_local}"
   done

@@ -42,6 +42,7 @@ import {
   blockedOutsideTaskResolved,
   FF_ESCALATIONS_REL,
   tallyNeedsHumanCauses,
+  discardedCommitsAreDisposable,
 } from "../scripts/driver-filters.ts";
 import { readTaskStatus as workerReadTaskStatus } from "../scripts/worker-driver.ts";
 
@@ -544,21 +545,28 @@ test("semantic-ff-failed 事件携带真实 git stderr detail（ff-push 失败�
 test("AC1 — 机械 ff 失败 + 语义合并冲突 ⇒ 返回 false + 冲突落痕（⛔ 静默 catch ⇒ 假）", (t) => {
   const root = makeGitRoot("prop-conflict");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  fs.writeFileSync(path.join(root, "code.ts"), "const x = 1;\n", "utf8");
+  fs.mkdirSync(path.join(root, "docs"), { recursive: true });
+  fs.writeFileSync(path.join(root, "docs/note.md"), "v1\n", "utf8");
   writeTask(root, "gap-a", "---\nid: gap-a\nstatus: ready\n---");
   git(root, "add", "-A");
   git(root, "commit", "-q", "-m", "baseline");
   git(root, "branch", "develop");
   git(root, "checkout", "-q", "-b", "author");
 
-  // develop 删除 code.ts；doc 修改 code.ts → modify/delete 冲突（-X theirs 不能自动消解 ⇒ merge 失败）。
+  // develop 删除 docs/note.md；doc 修改它 → modify/delete 冲突（-X theirs 不能自动消解 ⇒ merge 失败）。
+  // ⚠️ 2026-09-11 收窄（gap-develop-sync-reset-hard-destroys-third-party-project-tree）：本夹具原用
+  // `code.ts`（一个【代码】路径），断言「结构冲突 ⇒ 硬取 develop ⇒ 丢弃 doc 侧提交」。该断言编码的
+  // 前提是「doc 分支的提交一律可弃」——而第三方项目里当前分支就是它自己的主线，同一个形状会把项目
+  // 主线的 release 提交一起丢掉（实测 discardedCount: 50）。新裁定：终局解只在【被丢弃的提交全是
+  // 任务板/文档面】时才执行（见本文件末「终局解的可弃性判定」一节；非文档面 ⇒ 拒绝）。本夹具因此
+  // 改用文档面文件——它真正在钉的性质没变：**结构冲突不得卡死，且丢弃了什么必须逐条可查**。
   git(root, "checkout", "-q", "develop");
-  git(root, "rm", "-q", "--", "code.ts");
-  git(root, "commit", "-q", "-m", "develop-only: delete code.ts");
+  git(root, "rm", "-q", "--", "docs/note.md");
+  git(root, "commit", "-q", "-m", "develop-only: delete docs/note.md");
   git(root, "checkout", "-q", "author");
-  fs.appendFileSync(path.join(root, "code.ts"), "const y = 2;\n", "utf8");
-  git(root, "add", "--", "code.ts");
-  git(root, "commit", "-q", "-m", "doc-only: modify code.ts");
+  fs.appendFileSync(path.join(root, "docs/note.md"), "v2\n", "utf8");
+  git(root, "add", "--", "docs/note.md");
+  git(root, "commit", "-q", "-m", "doc-only: modify docs/note.md");
 
   // ⊕ 人 2026-09-06 裁定「merge 冲突时可以损失 author 分支的变更」⇒ 本条断言从「返回 false」
   // 改为断言【终局解成立】。原断言编码的是被推翻的行为：结构冲突到此即 return false 且无升级
@@ -577,7 +585,7 @@ test("AC1 — 机械 ff 失败 + 语义合并冲突 ⇒ 返回 false + 冲突落
   assert.equal(resolved.resolution, "discarded-doc-commits", "须标明这次是【丢弃 doc 提交】而非正常合并");
   // ⛔ 允许丢失 ≠ 允许静默丢失：被丢弃的提交必须逐条可查（硬规则 3 枚举不布尔）。
   assert.ok(resolved.discardedCount >= 1, "丢弃条数须记录");
-  assert.ok(resolved.discarded.some((l) => l.includes("doc-only: modify code.ts")),
+  assert.ok(resolved.discarded.some((l) => l.includes("doc-only: modify docs/note.md")),
     "被丢弃的那条提交必须逐条留痕，⛔ 不能只说「同步成功」");
 
   // 终局态：author 与 develop 同 commit（这正是「取 develop」的含义）。
@@ -1095,4 +1103,214 @@ test("AC5 — tallyNeedsHumanCauses 纯函数：各态条数由输入决定（�
   assert.equal(t2["human-adjudication"], 0, "喂无 ac-gate 的输入 ⇒ 人须裁决=0（⛔ 硬编码 ⇒ 假）");
   assert.equal(t2["blocked-outside-task"], 1);
   assert.equal(t2["unclassified"], 1);
+});
+
+// ── 终局解的可弃性判定（gap-develop-sync-reset-hard-destroys-third-party-project-tree）────────────────
+// 缺陷：`takeDevelopDiscardingDoc` 的 `git reset --hard develop` 丢弃【当前 checked-out 分支】的独有提交。
+// 它在本仓库成立的唯一前提是「doc 工作分支是 develop 的一次性投影」——而 `resolveDocBranch` 把这个前提
+// 实现成了「当前分支」，于是它在任何项目上都自动为真。第三方项目（实测：已升级的 meta-cc 副本）里当前
+// 分支就是项目自己的主线 `main`（含 chore: release v3.8.4 等 release 提交），reset 把主线连同 tasks/
+// 与 .quay/config.yml 一起抹掉。判据不落在分支名上（`author` 是逐项目不同的字面量），而落在【即将被丢弃
+// 的东西本身】：① 只碰任务板/文档面（DOC_SURFACES）② develop 有任务板（是任务板的有效权威）。
+
+/** 建一个"第三方项目"形态的仓库：`main` 是项目主线，`develop` 早已分叉。
+ *  files = { rel: content }，`developEdits` = 在 develop 上执行的 git 命令数组（argv）。 */
+function makeThirdPartyRoot(tag, files, developEdits) {
+  const root = makeGitRoot(tag);
+  for (const [rel, content] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+    fs.writeFileSync(path.join(root, rel), content, "utf8");
+  }
+  git(root, "add", ".");
+  git(root, "commit", "-q", "-m", "baseline");
+  git(root, "branch", "-M", "main"); // 项目主线 = main（⛔ 不依赖宿主的 init.defaultBranch）
+  git(root, "branch", "develop");
+  git(root, "checkout", "-q", "develop");
+  for (const argv of developEdits) git(root, ...argv);
+  git(root, "checkout", "-q", "main");
+  return root;
+}
+
+/** 读 doc-develop-sync 事件的类型序列（缺文件 ⇒ 空表）。 */
+function syncEvents(root) {
+  try {
+    return fs
+      .readFileSync(path.join(root, DOC_DEVELOP_SYNC_EVENT_REL), "utf8")
+      .trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  } catch { return []; }
+}
+
+/** 直接量：工作树里 tasks/*.md 的条数（⛔ 不经 shell/$PATH，硬规则 4b）。 */
+function taskFileCount(root) {
+  const dir = path.join(root, "tasks");
+  return fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith(".md")).length : 0;
+}
+
+test("AC2 (按位置判定) — 可弃性判定必须【先于】reset --hard 执行（⛔ 只是函数里出现过 ⇒ 假）", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../scripts/driver-filters.ts"), "utf8");
+  const fn = src.match(/export function takeDevelopDiscardingDoc[\s\S]*?\n}/)?.[0] ?? "";
+  assert.ok(fn, "takeDevelopDiscardingDoc 存在");
+  const judgeAt = fn.indexOf("discardedCommitsAreDisposable(");
+  const resetAt = fn.indexOf('"reset", "--hard", "develop"');
+  assert.ok(judgeAt >= 0, "终局解必须调用可弃性判定（⛔ 只在文档里写一句 ⇒ 假）");
+  assert.ok(resetAt >= 0, "⛔ 不是把终局解删掉——reset 仍在");
+  assert.ok(judgeAt < resetAt, "判定必须【先于】reset（按位置，⛔ 任意位置出现 ⇒ 假）");
+  assert.match(fn, /if\s*\(\s*!verdict\.disposable\s*\)[\s\S]{0,400}?return false/,
+    "不可弃 ⇒ 在 reset 之前 return false（拒绝执行破坏性终局解）");
+});
+
+test("AC3① (旧行为逐字不变) — 本仓库形态：author 分支 + develop 有任务板 + 丢弃的提交全是文档面 ⇒ reset 照旧执行", (t) => {
+  const root = makeGitRoot("ac207-shape1");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", "---\nid: gap-a\nstatus: ready\n---");
+  writeTask(root, "gap-b", "---\nid: gap-b\nstatus: ready\n---");
+  git(root, "add", ".");
+  git(root, "commit", "-q", "-m", "baseline");
+  git(root, "branch", "develop");
+  git(root, "checkout", "-q", "-b", "author");
+  // develop 侧删 gap-b（文档面），author 侧改 gap-b ⇒ modify/delete 结构冲突（-X theirs 消解不了）
+  // ⇒ 走到终局解。两侧都只碰 tasks/。
+  git(root, "checkout", "-q", "develop");
+  git(root, "rm", "-q", "tasks/gap-b.md");
+  git(root, "commit", "-q", "-m", "develop-side: board edit");
+  git(root, "checkout", "-q", "author");
+  writeTask(root, "gap-b", "---\nid: gap-b\nstatus: done\n---");
+  git(root, "add", "tasks/gap-b.md");
+  git(root, "commit", "-q", "-m", "tasks: gap-b ready→done（promotion-driver 机械晋升）");
+
+  assert.equal(syncDocDevelopBidirectional(root), "synced");
+  const resolved = syncEvents(root).find((e) => e.event === "doc-develop-sync-semantic-resolved");
+  assert.ok(resolved, "本仓库形态仍走到终局解（事件存在）");
+  assert.equal(resolved.resolution, "discarded-doc-commits", "⛔ 不再丢弃 ⇒ 旧行为被改坏（回归）");
+  assert.equal(resolved.branch, "author", "doc 分支运行时派生 = author");
+  assert.equal(
+    git(root, "rev-parse", "HEAD").trim(),
+    git(root, "rev-parse", "develop").trim(),
+    "reset --hard develop 照旧执行（HEAD 落在 develop）",
+  );
+  assert.equal(syncEvents(root).filter((e) => e.event === "doc-develop-sync-semantic-take-develop-refused").length, 0,
+    "本仓库形态不产生拒绝事件");
+});
+
+test("AC3② (第三方形态，非文档面) — 丢弃将丢掉项目代码 ⇒ 拒绝执行破坏性终局解，工作树原样不动", (t) => {
+  // meta-cc 副本形态：main = 项目主线（含 release 提交），develop 早已分叉且删了一个产品文件。
+  const root = makeThirdPartyRoot("ac207-shape2", {
+    "tasks/gap-a.md": "---\nid: gap-a\nstatus: ready\n---\n",
+    "src/lib.js": "module.exports = 1;\n",
+    ".quay/config.yml": "providers:\n  native:\n    enabled: true\n",
+  }, [["rm", "-q", "src/lib.js"], ["commit", "-q", "-m", "develop: drop legacy lib"]]);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // main 前进：产品代码改动（release 提交）+ 一次任务面翻转。
+  fs.writeFileSync(path.join(root, "src/lib.js"), "module.exports = 2;\n", "utf8");
+  fs.writeFileSync(path.join(root, "CHANGELOG.md"), "# 3.8.4\n", "utf8");
+  git(root, "add", ".");
+  git(root, "commit", "-q", "-m", "chore: release v3.8.4");
+  writeTask(root, "gap-a", "---\nid: gap-a\nstatus: done\n---");
+  git(root, "add", "tasks/gap-a.md");
+  git(root, "commit", "-q", "-m", "tasks: gap-a ready→done（promotion-driver 机械晋升）");
+
+  const before = {
+    head: git(root, "rev-parse", "HEAD").trim(),
+    commits: Number(git(root, "rev-list", "--count", "HEAD").trim()),
+    tasks: taskFileCount(root),
+  };
+  syncDocDevelopBidirectional(root);
+  const after = {
+    head: git(root, "rev-parse", "HEAD").trim(),
+    commits: Number(git(root, "rev-list", "--count", "HEAD").trim()),
+    tasks: taskFileCount(root),
+  };
+
+  assert.equal(after.head, before.head, "⛔ 工作树被 reset 了 —— 破坏性终局解仍被执行");
+  assert.equal(after.commits, before.commits, "⛔ 项目主线的提交数减少（release 提交被丢弃）");
+  assert.ok(after.tasks >= 1, "⛔ 任务板被抹掉");
+  assert.ok(fs.existsSync(path.join(root, ".quay", "config.yml")), "⛔ 项目的 provider 绑定随 HEAD 消失");
+
+  const refused = syncEvents(root).find((e) => e.event === "doc-develop-sync-semantic-take-develop-refused");
+  assert.ok(refused, "必须落一条可区分的【拒绝】事件（⛔ 与「已同步」同形则等于静默）");
+  assert.equal(refused.reason, "non-doc-paths");
+  assert.ok(refused.offendingPaths.includes("src/lib.js"), `越界面须枚举到 src/lib.js，实得 ${JSON.stringify(refused.offendingPaths)}`);
+  assert.equal(syncEvents(root).find((e) => e.event === "doc-develop-sync-semantic-resolved"), undefined,
+    "⛔ 不得同时写「已解决/已丢弃」事件");
+});
+
+test("AC3②b (第三方形态，develop 无任务板) — 丢弃会把任务板清零 ⇒ 拒绝（成因可区分）", (t) => {
+  const root = makeThirdPartyRoot("ac207-shape2b", {
+    "tasks/gap-a.md": "---\nid: gap-a\nstatus: ready\n---\n",
+    ".quay/config.yml": "providers:\n  native:\n    enabled: true\n",
+  }, [["rm", "-q", "-r", "tasks"], ["commit", "-q", "-m", "develop-side: legacy tree without a task board"]]);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // 分叉侧只碰文档面（任务翻转），但 develop 的树里根本没有任务板 ⇒ 成因必须落在 ② 而非 ①。
+  writeTask(root, "gap-a", "---\nid: gap-a\nstatus: done\n---");
+  git(root, "add", "tasks/gap-a.md");
+  git(root, "commit", "-q", "-m", "tasks: gap-a ready→done（promotion-driver 机械晋升）");
+
+  const headBefore = git(root, "rev-parse", "HEAD").trim();
+  syncDocDevelopBidirectional(root);
+  assert.equal(git(root, "rev-parse", "HEAD").trim(), headBefore, "⛔ 被 reset ⇒ 任务板清零");
+  assert.equal(taskFileCount(root), 1, "任务文件计数不减少");
+  const refused = syncEvents(root).find((e) => e.event === "doc-develop-sync-semantic-take-develop-refused");
+  assert.ok(refused, "必须拒绝");
+  assert.equal(refused.reason, "develop-missing-task-board", "成因须与 non-doc-paths 可区分（两条独立条件）");
+});
+
+test("AC6 (判定函数本身可区分三态) — 可弃 / 不可弃【带成因】/ 读不懂（⛔ 后两者不同形，硬规则 3b）", (t) => {
+  const ok = makeThirdPartyRoot("ac207-verdict-ok", { "tasks/gap-a.md": "---\nid: gap-a\nstatus: ready\n---\n" },
+    [["commit", "-q", "--allow-empty", "-m", "develop-side: board edit"]]);
+  t.after(() => fs.rmSync(ok, { recursive: true, force: true }));
+  assert.equal(discardedCommitsAreDisposable(ok).disposable, true, "无独有提交 ⇒ 可弃（无物可丢）");
+
+  const bad = makeThirdPartyRoot("ac207-verdict-bad", { "src/lib.js": "1;\n" },
+    [["rm", "-q", "src/lib.js"], ["commit", "-q", "-m", "develop: drop"]]);
+  t.after(() => fs.rmSync(bad, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(bad, "src/lib.js"), "2;\n", "utf8");
+  git(bad, "add", ".");
+  git(bad, "commit", "-q", "-m", "release");
+  assert.deepEqual(discardedCommitsAreDisposable(bad), { disposable: false, reason: "non-doc-paths", offendingPaths: ["src/lib.js"] });
+
+  // 读不懂（非 git 目录）⇒ unreadable，⛔ 不与「可弃」同形。
+  const nongit = fs.mkdtempSync(path.join(os.tmpdir(), "ac207-nongit-"));
+  t.after(() => fs.rmSync(nongit, { recursive: true, force: true }));
+  assert.equal(discardedCommitsAreDisposable(nongit).disposable, false, "读不懂 ⇒ 不放行（fail-closed）");
+  assert.equal(discardedCommitsAreDisposable(nongit).reason, "unreadable", "读不懂是与「不可弃」可区分的独立取值");
+});
+
+test("AC4 (端到端负控制) — meta-cc 副本形态上跑一次【真实任务提交】路径：tasks/*.md 计数与提交数不减少", (t) => {
+  // 走生产入口 markNeedsHuman（它 commitTaskFile 后调 syncDocDevelopBidirectional，与 promotion/worker
+  // 驱动翻转同一条链），⛔ 不是直接调被测函数。
+  const root = makeThirdPartyRoot("ac207-e2e", {
+    "tasks/gap-nh.md": "---\nid: gap-nh\nstatus: ready\n---\n## Proposal\n\nprose\n\n## Touches\n\n- src/own.ts\n",
+    "src/lib.js": "module.exports = 1;\n",
+    ".quay/config.yml": "providers:\n  native:\n    enabled: true\n",
+  }, [["rm", "-q", "src/lib.js"], ["commit", "-q", "-m", "develop: drop legacy lib"],
+      ["rm", "-q", "-r", "tasks"], ["commit", "-q", "-m", "develop: no board"]]);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(root, "src/lib.js"), "module.exports = 2;\n", "utf8");
+  git(root, "add", ".");
+  git(root, "commit", "-q", "-m", "chore: release v3.8.4");
+
+  // 直接量（⛔ 不经 shell/$PATH 辅助）：文件系统计数 + git 提交数。
+  const before = {
+    tasks: taskFileCount(root),
+    commits: Number(git(root, "rev-list", "--count", "HEAD").trim()),
+    head: git(root, "rev-parse", "HEAD").trim(),
+  };
+  assert.equal(before.tasks, 1, "前置：任务板此刻有 1 个任务文件");
+
+  const r = markNeedsHuman(root, "gap-nh", "AC4 e2e 负控制");
+  assert.equal(r.ok, true, "真实任务提交路径确实执行了（⛔ 未执行 ⇒ 本控制空转）");
+  assert.equal(r.committed, true, "任务文件确实被提交（本条控制的前提）");
+
+  const after = {
+    tasks: taskFileCount(root),
+    commits: Number(git(root, "rev-list", "--count", "HEAD").trim()),
+    head: git(root, "rev-parse", "HEAD").trim(),
+  };
+  assert.ok(after.tasks >= before.tasks, `tasks/*.md 计数减少：${before.tasks} → ${after.tasks}`);
+  assert.equal(after.tasks, before.tasks, "任务文件计数不减少");
+  assert.ok(after.commits > before.commits, `提交数应【增加】（本次提交）——实得 ${before.commits} → ${after.commits}`);
+  assert.equal(git(root, "rev-parse", "--abbrev-ref", "HEAD").trim(), "main", "仍在项目主线 main 上（⛔ 未被 reset 挪走）");
+  assert.ok(fs.existsSync(path.join(root, ".quay", "config.yml")), "provider 绑定仍在");
+  const refused = syncEvents(root).find((e) => e.event === "doc-develop-sync-semantic-take-develop-refused");
+  assert.ok(refused, "破坏性终局解被拒绝（落痕）");
 });

@@ -91,6 +91,10 @@
 #   --ac207-e2e      ⑤ 端到端（GOAL-009-AC-207）：第三方项目里用 shipped CLI 建真实任务、起 *-drivers
 #                    驱动到 done、读直接量写 AC-207 记录。昂贵（worker-driver spawn claude -p）——
 #                    opt-in；缺任一读数不写（fail-closed）。⛔ 产品文档/skill 文案不得声称 quay 会启动会话。
+#                    ⑤ 同时为【它自己的 $ROOT】补探 AC-203 的 driver 存活直接量（GOAL-009-AC-240：
+#                    闭环须由同一次运行自证——step④ 那个紧接 start 的 30 秒窗口会错过真正驱动出 done
+#                    的那个项目），并在最终 summary 打印运行级取值
+#                    `E2E_CLOSURE_SELF_EVIDENCED=1|0|not-evaluated`（三态可区分，硬规则 3b）。
 #   --target-launcher/--target-model/--target-auth  配置目标项目 profiles 的 CLI 覆盖
 #                    （gap-verify-coldstart-does-not-configure-target-profiles）。缺省由驱动方仓库
 #                    .quay/profiles.yml 的 worker-default 派生（单一真相源，⛔ 不写第二份字面量）；
@@ -156,6 +160,16 @@ AC203_HAS_PLUGIN_DIR=1                       # 1 = 项目根有 plugin/（安装
 AC203_DRIVER_ALIVE=0                         # 读自 status 载体
 AC203_CARRIER_RECORDS=-1                     # -1 = 未读（缺值 ≠ 合格）
 AC203_EVALUATED=0                            # 1 = status 载体读成（driver_alive + carrier_records 都读出）
+# ── AC-240（GOAL-009）：闭环须由【同一次运行】自证——本运行自己写了哪条、写给谁 ────────────────
+# ⛔ 取值只来自【本次运行自己写的记录】（下面的 *_WRITTEN_THIS_RUN flag），⛔ 不回读载体反推——
+# 反推会把「别次运行写的」当成「本次运行写的」，而那正是 AC-240 origin 的形态（AC-203 与 AC-207
+# 各自成立，但 project_root 互不相交）。
+AC203_WRITTEN_THIS_RUN=0                     # 1 = 本次运行写出了 AC-203（step④ 或 step⑤ 任一处）
+AC203_WRITTEN_ROOT=""                        # 写出时的 project_root（配对判据比它，⛔ 不是「非空即可」）
+AC207_WRITTEN_THIS_RUN=0                     # 1 = 本次运行写出了 AC-207
+AC207_WRITTEN_ROOT=""                        # 写出时的 project_root
+E2E_CLOSURE_SELF_EVIDENCED="not-evaluated"   # 1 | 0 | not-evaluated（三态可区分，硬规则 3b）
+E2E_CLOSURE_NOTE=""                          # 该取值的理由（0/not-evaluated 时非空）
 
 # ── AC-204（GOAL-009）：quay-init 禁复制面（mcp/commands/hooks）补全 + 成对落账 ────────────
 # 判据读 FORBIDDEN_PREFIXES（quay-init-closure-assertion.ts）要求含 .mcp.json/.claude/commands//
@@ -216,6 +230,8 @@ AC207_GATE_EVENTS=-1
 AC207_PRODUCED_BY_DRIVER=0
 AC207_EVALUATED=0
 AC207_E2E=0                                  # 1 = --ac207-e2e 触发端到端段（昂贵，opt-in）
+AC207_WRITTEN_THIS_RUN=0                     # 1 = 本次运行写出了 AC-207（见 AC-240 块）
+AC207_WRITTEN_ROOT=""                        # 写出时的 project_root（AC-240 配对判据比它）
 
 # ── AC-238（GOAL-009）：【既有旧痕迹第三方项目】的升级路径（gap-aged-third-party-project-quay-upgrade-verification）
 # 与 ② 的区别是本质的：② 的 $ROOT 是 `rm -rf` 后新建的一次性靶子（全新 quay-init，GOAL-009 已有 9 条 AC
@@ -704,6 +720,10 @@ ac207_read_and_write() {
      && [ -n "$AC207_COMMIT_SHA" ] && [ "$AC207_GATE_EVENTS" -gt 0 ] 2>/dev/null \
      && [ "$AC207_PRODUCED_BY_DRIVER" = "1" ]; then
     write_ac207_record "$AC207_HOST" "$AC207_PROJECT_ROOT" "$AC207_COMMIT_SHA" "$AC207_TASK_ID" "done" "$AC207_GATE_EVENTS" "true" "$AC207_COMMIT_FILES_JSON"
+    # AC-240：本次运行写出了 AC-207（配对判据的另一半；root 与 AC-203 的比对是「同一 project_root」
+    # 那一半，⛔ 不是「都非空」就算数）。
+    AC207_WRITTEN_THIS_RUN=1
+    AC207_WRITTEN_ROOT="$AC207_PROJECT_ROOT"
     echo "  ac207 record written → $AC89"
     return 0
   fi
@@ -769,7 +789,36 @@ BODY
   node "$qrl" driver start --kind worker --root "$root" >/dev/null 2>&1 || true
   # ③ 轮询 done（至多 AC207_POLL_SECS，缺省 1800s=30min——worker 完整实现（worktree→开发→fan-in→suite）
   # 需较长时间；fail-closed 不无限等，超时即不写记录）
+  # AC-240 生成侧：同一轮询路径里为【本次运行自己的 $root】补探 AC-203 的 driver 存活直接量——
+  # driver 起后至 task done 之间，首次读到 driver_alive=1 ∧ carrier_records>0 即写一次（每次运行至多
+  # 一条）。⛔ 这不是为了「多写一条记录」，而是让同一次运行能自证闭环：驱动出 done 的项目 = 最强的
+  # 「driver 真活」直接量，step④ 那个 30 秒窗口（紧接 start 之后）会错过它。
+  # ⚠️ 采样间隔 ac240_probe_every 秒（默认 10s）：每条探测都要起一个 node 读 status 载体，逐秒探
+  # 会把 3600 轮的轮询变成 3600 次 spawn。间隔只影响「多快探到」，不影响是否探到（driver 一旦落盘就一直在）。
+  local ac240_probe_every=10 ac240_hpd=1 ac240_status=""
+  [ -d "$root/plugin" ] || ac240_hpd=0
+  AC203_HOST="${AC203_HOST:-$(hostname 2>/dev/null || echo '')}"
   for i in $(seq 1 "${AC207_POLL_SECS:-1800}"); do
+    if [ "$AC203_WRITTEN_THIS_RUN" != "1" ] && [ "$ac240_hpd" = "0" ] \
+       && [ $(( (i - 1) % ac240_probe_every )) -eq 0 ]; then
+      # 当场 probe（⛔ 非字面量）：driver_alive / carrier_records 由 probe_ac203_driver_status 解析
+      # status 载体 JSON 得出；has_plugin_dir 由上面 stat $root/plugin 得出。
+      ac240_status="$(node "$qrl" driver status --kind promotion --root "$root" --json 2>/dev/null || true)"
+      probe_ac203_driver_status "$ac240_status"
+      echo "  [⑤ e2e] AC-203 probe (same run, same root): driver_alive=$AC203_DRIVER_ALIVE carrier_records=$AC203_CARRIER_RECORDS has_plugin_dir=$ac240_hpd evaluated=$AC203_EVALUATED"
+      if [ "$AC203_EVALUATED" = "1" ] && [ "$AC203_DRIVER_ALIVE" = "1" ] && [ "$AC203_CARRIER_RECORDS" -gt 0 ] 2>/dev/null; then
+        # 入参来源（⛔ 非字面量）：$AC203_DRIVER_ALIVE / $AC203_CARRIER_RECORDS ← probe_ac203_driver_status
+        # 当场解析的 status 载体；$ac240_hpd ← 当场 stat 的 $root/plugin。复用唯一写入点
+        # write_ac203_record（它经 ac89_append_goal009 统一补 top-level build_sha）——⛔ 不新造第二个写入者。
+        if write_ac203_record "$AC203_HOST" "$root" "$ac240_hpd" "$AC203_DRIVER_ALIVE" "$AC203_CARRIER_RECORDS"; then
+          AC203_WRITTEN_THIS_RUN=1
+          AC203_WRITTEN_ROOT="$root"
+          echo "  [⑤ e2e] ac203 record written (same run, same root=$root) → $AC89"
+        else
+          echo "  [⑤ e2e] NOTE: AC-203 record NOT written (fail-closed: BUILD_SHA missing/non-40-hex or AC89 path empty — 缺值≠合格)"
+        fi
+      fi
+    fi
     status_json="$( (cd "$root" && node "$qrl" task view "$task_id" --json) 2>/dev/null || true)"
     AC207_TASK_STATUS="$(printf '%s' "$status_json" | "$VC_NODE" --no-warnings -e '
       let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{ try{ const j=JSON.parse(s); console.log(j && j.status ? String(j.status) : ""); }catch{ console.log(""); } });
@@ -1393,6 +1442,42 @@ write_ac203_record() {
   ac89_append_goal009 ",\"ac\":\"GOAL-009-AC-203\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"has_plugin_dir\":false,\"driver_alive\":$driver_alive,\"carrier_records\":$carrier_records"
 }
 
+# ── 运行级「闭环由本次运行自证」取值（GOAL-009-AC-240）──────────────────────────────────────
+# 三个可区分取值（硬规则 3b：词表里没有「未评估」这一态的判据，分不清「查过且合格」与「没查成」）：
+#   1             = AC-203 与 AC-207 均在【本次运行】内、对【同一 project_root】写出；
+#   0             = 本次尝试了 e2e，但闭环不由本次运行自证（NOTE 说明子因，⛔ 不静默）；
+#   not-evaluated = 本次未尝试 e2e（未传 --ac207-e2e）——⛔ 不得与 0/1 同形。
+# 入参即本次运行自己写的记录（flag + root），⛔ 不回读载体反推（反推会把别次运行的记录算进来，
+# 那正是 AC-240 origin 的形态）。设置全局 E2E_CLOSURE_SELF_EVIDENCED / E2E_CLOSURE_NOTE，恒返回 0
+# ——「未评估」是取值不是故障（同 L1_NOT_EVALUATED 的形态），调用方据取值决定怎么报。
+e2e_closure_self_evidenced() {
+  local attempted="$1" a203="$2" a203_root="$3" a207="$4" a207_root="$5"
+  E2E_CLOSURE_SELF_EVIDENCED="not-evaluated"
+  E2E_CLOSURE_NOTE=""
+  if [ "$attempted" != "1" ]; then
+    E2E_CLOSURE_NOTE="--ac207-e2e 未传入 —— 本次运行未尝试 e2e（未评估 ≠ 不合格）"
+    return 0
+  fi
+  if [ "$a207" != "1" ]; then
+    E2E_CLOSURE_SELF_EVIDENCED=0
+    E2E_CLOSURE_NOTE="闭环不由本次运行自证：AC-207 本次运行未写出（e2e 未驱动出 done / 无实现提交 / 无 gate 事件）"
+    return 0
+  fi
+  if [ "$a203" != "1" ]; then
+    E2E_CLOSURE_SELF_EVIDENCED=0
+    E2E_CLOSURE_NOTE="闭环不由本次运行自证：AC-207 已写出，而本次运行没有写出 AC-203（step④/⑤ 的 driver 存活读数未成立）——⚠️ 生成侧缺口的本来形态"
+    return 0
+  fi
+  if [ -z "$a203_root" ] || [ "$a203_root" != "$a207_root" ]; then
+    E2E_CLOSURE_SELF_EVIDENCED=0
+    E2E_CLOSURE_NOTE="闭环不由本次运行自证：AC-203 root='$a203_root' ≠ AC-207 root='$a207_root'"
+    return 0
+  fi
+  E2E_CLOSURE_SELF_EVIDENCED=1
+  E2E_CLOSURE_NOTE="AC-203 与 AC-207 均由本次运行对同一 project_root 写出（host=$AC203_HOST root=$a203_root）"
+  return 0
+}
+
 # 写 GOAL-009-AC-206 记录（gap-ac206-goals-tasks-dual-carrier-quay-init-goals-closed-set）。
 # 缺 host/project_root ⇒ 不写 return 1（硬规则 3b：缺值 ≠ 合格）；四字段（goals_dir_created /
 # tasks_dir_created / goal_store_readable / task_store_readable）是布尔 JSON 字面 true/false——
@@ -1474,6 +1559,10 @@ step4_driver_liveness() {
     # ⛔ 不因 rc≠0 中止本步（后续步骤不依赖该记录，且中止会把「缺锚」伪装成「脚本崩了」）；
     # 但也 ⛔ 不静默——如实打印，与下一分支的 NOTE 同形（缺值≠合格，硬规则 3b）。
     if write_ac203_record "$AC203_HOST" "$AC203_PROJECT_ROOT" "0" "1" "$AC203_CARRIER_RECORDS"; then
+      # AC-240：本次运行写出了 AC-203（step④ 是另一条产出路径，与 step⑤ 的探测点等价——
+      # 两者共用同一个 $ROOT，谁先写成算谁的；取值只看「本次运行写没写」，⛔ 不回读载体反推）。
+      AC203_WRITTEN_THIS_RUN=1
+      AC203_WRITTEN_ROOT="$AC203_PROJECT_ROOT"
       echo "  ac203 record written → $AC89"
     else
       echo "  NOTE: AC-203 record NOT written (fail-closed: BUILD_SHA missing/non-40-hex or AC89 path empty — 缺值≠合格)"
@@ -2652,6 +2741,40 @@ Enter to confirm · Esc to cancel"
   if printf '%s' "$ac207_body" | grep -qE '\|[[:space:]]*grep'; then ac207_pipe_grep=1; fi
   echo "selfcheck: ac207-produced-by-driver(no-pipe-into-grep)=$((1 - ac207_pipe_grep)) (expect 1 — pipefail 下 grep 提前退出 ⇒ SIGPIPE ⇒ 命中时取假；行为控制在本机不可复现，见注释)"
 
+  # control 42/43/44 (AC-240 运行级「闭环由本次运行自证」三态 —— gap-ac240-e2e-closure-same-run-pairing):
+  #   42 正：AC-203 与 AC-207 均【本次运行】写出、同一 project_root ⇒ E2E_CLOSURE_SELF_EVIDENCED=1。
+  #   43 负：仅 AC-207（AC-203 本次运行没写出 —— 本任务修之前 step⑤ 从不探 AC-203 的本来形态）⇒ =0
+  #      且 NOTE 非空（⛔ 不静默）。
+  #   43b 负：两条都写了但 project_root 不同 ⇒ =0（判的是【同一 project_root】，⛔ 不是「两条都非空」
+  #      —— AC-240 origin 正是「两条都成立、root 互不相交」）。
+  #   44 未评估：未传 --ac207-e2e ⇒ not-evaluated（⛔ 不得与 0/1 同形；词表里没有「未评估」这一态的
+  #      判据分不清「查过且不合格」与「没查成」，硬规则 3b）。
+  # 三态全部由【产品函数】e2e_closure_self_evidenced 算出（selfcheck 直接驱动它，⛔ 不在此复刻一遍判定
+  # 逻辑——复刻出来的绿不证明产品绿，硬规则 4 推论三）。
+  local ac240_v1="" ac240_n1="" ac240_v0="" ac240_n0="" ac240_vdiff="" ac240_vdiff_note="" ac240_vne="" ac240_nne=""
+  e2e_closure_self_evidenced "1" "1" "/tmp/third-party-root" "1" "/tmp/third-party-root"
+  ac240_v1="$E2E_CLOSURE_SELF_EVIDENCED"; ac240_n1="$E2E_CLOSURE_NOTE"
+  e2e_closure_self_evidenced "1" "0" "" "1" "/tmp/third-party-root"
+  ac240_v0="$E2E_CLOSURE_SELF_EVIDENCED"; ac240_n0="$E2E_CLOSURE_NOTE"
+  e2e_closure_self_evidenced "1" "1" "/tmp/root-a" "1" "/tmp/root-b"
+  ac240_vdiff="$E2E_CLOSURE_SELF_EVIDENCED"; ac240_vdiff_note="$E2E_CLOSURE_NOTE"
+  e2e_closure_self_evidenced "0" "0" "" "0" ""
+  ac240_vne="$E2E_CLOSURE_SELF_EVIDENCED"; ac240_nne="$E2E_CLOSURE_NOTE"
+  # 复位：39/40 与上面的驱动都会写这两个 flag，别让夹具状态泄漏到后续断言（取值语义属「本次运行」）。
+  AC203_WRITTEN_THIS_RUN=0; AC203_WRITTEN_ROOT=""; AC207_WRITTEN_THIS_RUN=0; AC207_WRITTEN_ROOT=""
+  echo "selfcheck: e2e-closure(pair-same-run-same-root) E2E_CLOSURE_SELF_EVIDENCED=$ac240_v1 note_present=$([ -n "$ac240_n1" ] && echo 1 || echo 0) (expect 1/1 — 本次运行对同一 project_root 写出 AC-203 + AC-207)"
+  echo "selfcheck: e2e-closure(ac207-only) E2E_CLOSURE_SELF_EVIDENCED=$ac240_v0 note_present=$([ -n "$ac240_n0" ] && echo 1 || echo 0) (expect 0/1 — 闭环不由本次运行自证, ⛔ 不静默)"
+  echo "selfcheck: e2e-closure(different-roots) E2E_CLOSURE_SELF_EVIDENCED=$ac240_vdiff note_present=$([ -n "$ac240_vdiff_note" ] && echo 1 || echo 0) (expect 0/1 — 判的是同一 project_root, ⛔ 不是两条都非空)"
+  echo "selfcheck: e2e-closure(no-e2e-attempt) E2E_CLOSURE_SELF_EVIDENCED=$ac240_vne note_present=$([ -n "$ac240_nne" ] && echo 1 || echo 0) (expect not-evaluated/1 — 未评估 ≠ 不合格, 硬规则 3b)"
+  # AC-240 生成侧结构控制（硬规则 ② 按位置）：step⑤ 的函数体内必须出现 probe_ac203_driver_status /
+  # write_ac203_record 的调用——本任务之前该函数体内命中数 = 0（改前实测），即「同一次运行能同时产出
+  # 两条记录」只是【恰好从没发生过】，而不是被要求过。⛔ 这不是「跑一次看它绿」的行为控制，而是钉住
+  # 产出点的位置：把探测点挪出 step⑤（或删掉）此断言即取假。
+  local ac240_step5_body ac240_step5_hits
+  ac240_step5_body="$(sed -n '/^step5_e2e()/,/^}$/p' "$0" 2>/dev/null | sed 's/#.*//')"
+  ac240_step5_hits="$(printf '%s\n' "$ac240_step5_body" | grep -c 'write_ac203_record\|probe_ac203_driver_status' || true)"
+  echo "selfcheck: ac240-ac203-write-point(in-step5_e2e) hits=$ac240_step5_hits (expect >=1 — AC-203 的探测/写入点必须落在 step⑤ 函数体内, 改前=0)"
+
   if [ "$d1" = "1" ] && [ "$d2" = "no" ] && [ "$a1" = "1" ] && [ "$a2" = "yes" ] \
      && [ "$c3_e" = "1" ] && [ "$c3_ok" = "1" ] \
      && [ "$c4_e" = "1" ] && [ "$c4_ok" = "0" ] \
@@ -2689,11 +2812,16 @@ Enter to confirm · Esc to cancel"
      && [ "$ac207_before" = "0" ] && [ "$ac207_after_neg" = "0" ] && [ "$ac207_neg_trace" = "1" ] \
      && [ "$ac207_after_pos" = "1" ] && [ "$ac207_pos_files" = '["e2e-marker.txt"]' ] \
      && [ "$ac207_pipe_grep" = "0" ] \
+     && [ "$ac240_v1" = "1" ] && [ -n "$ac240_n1" ] \
+     && [ "$ac240_v0" = "0" ] && [ -n "$ac240_n0" ] \
+     && [ "$ac240_vdiff" = "0" ] && [ -n "$ac240_vdiff_note" ] \
+     && [ "$ac240_vne" = "not-evaluated" ] && [ -n "$ac240_nne" ] \
+     && [ "${ac240_step5_hits:-0}" -ge 1 ] 2>/dev/null \
      && [ "$tp_ok" = "1" ]; then
-    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed); AC-204 carrier record writes the five criterion fields verbatim (forbidden_count=0 integer, enable_declared=true literal) and refuses a forbidden-copy or no-enable record (fail-closed, 成对判定); AC-205 carrier record writes the three criterion fields verbatim (shipped_from_installed_artifact=true + transcript_confirmed=true literals, top-level build_sha) with transcript_confirmed derived from transcript-delivery-check reading the transcript (hit ⇒ delivered / miss ⇒ not) — never from a send exit code — and refuses shipped=false / transcript_confirmed=false / empty-host (fail-closed, AC4 负控制); AC-234 render counts are derived from rendered HTML content (task/goal anchors + round-row anchors — never an HTTP status code, AC2) and can take false (empty-shell page ⇒ 0/0/0); the AC-234 carrier record writes the six criterion fields verbatim (tasks_rendered/goals_rendered/round_records_rendered as JSON integers) and refuses a zero-count or empty-host record (fail-closed, AC4 负控制); the AC-232 carrier record writes the three criterion fields verbatim (goal_write_ok/goal_read_back_ok as JSON literals, goal_records as a JSON integer) with a top-level build_sha anchor, truthfully writes false/0 when the goal write fails or read-back is empty (缺件如实非静默, AC4 负控制 — 写调用 0 与空文件同形), and refuses an empty-host record (fail-closed, 硬规则 3b); AC-207 carrier record writes the eight criterion fields verbatim (produced_by_driver=true literal, gate_events>0, task_status=done, commit_sha/task_id non-empty, commit_files non-empty JSON array with ≥1 path outside the tasks/ goals/ .quay/ triplet, top-level build_sha) and refuses produced_by_driver=false / gate_events=0 / bookkeeping-files-only / no-files (fail-closed, 硬规则 3b); AC-207 implementation-commit SELECTION picks the real implementation commit even when newer bookkeeping commits sit on top of it (the old grep-v-chore-quay-init-then-head-1 form picked the 翻-done commit — gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit), yields empty + non-zero when only bookkeeping commits exist (⇒ no record, never a bookkeeping commit dressed up as one), and the bookkeeping judgment is positional (touched files, not commit-message text)"
+    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed); AC-204 carrier record writes the five criterion fields verbatim (forbidden_count=0 integer, enable_declared=true literal) and refuses a forbidden-copy or no-enable record (fail-closed, 成对判定); AC-205 carrier record writes the three criterion fields verbatim (shipped_from_installed_artifact=true + transcript_confirmed=true literals, top-level build_sha) with transcript_confirmed derived from transcript-delivery-check reading the transcript (hit ⇒ delivered / miss ⇒ not) — never from a send exit code — and refuses shipped=false / transcript_confirmed=false / empty-host (fail-closed, AC4 负控制); AC-234 render counts are derived from rendered HTML content (task/goal anchors + round-row anchors — never an HTTP status code, AC2) and can take false (empty-shell page ⇒ 0/0/0); the AC-234 carrier record writes the six criterion fields verbatim (tasks_rendered/goals_rendered/round_records_rendered as JSON integers) and refuses a zero-count or empty-host record (fail-closed, AC4 负控制); the AC-232 carrier record writes the three criterion fields verbatim (goal_write_ok/goal_read_back_ok as JSON literals, goal_records as a JSON integer) with a top-level build_sha anchor, truthfully writes false/0 when the goal write fails or read-back is empty (缺件如实非静默, AC4 负控制 — 写调用 0 与空文件同形), and refuses an empty-host record (fail-closed, 硬规则 3b); AC-207 carrier record writes the eight criterion fields verbatim (produced_by_driver=true literal, gate_events>0, task_status=done, commit_sha/task_id non-empty, commit_files non-empty JSON array with ≥1 path outside the tasks/ goals/ .quay/ triplet, top-level build_sha) and refuses produced_by_driver=false / gate_events=0 / bookkeeping-files-only / no-files (fail-closed, 硬规则 3b); AC-207 implementation-commit SELECTION picks the real implementation commit even when newer bookkeeping commits sit on top of it (the old grep-v-chore-quay-init-then-head-1 form picked the 翻-done commit — gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit), yields empty + non-zero when only bookkeeping commits exist (⇒ no record, never a bookkeeping commit dressed up as one), and the bookkeeping judgment is positional (touched files, not commit-message text); AC-240 run-level closure self-evidence takes three DISTINGUISHABLE values (1 = AC-203 and AC-207 both written by THIS run for the SAME project_root; 0 = this run attempted the e2e but the closure is not self-evidenced, with a non-empty NOTE naming the sub-reason; not-evaluated = --ac207-e2e not passed — 未评估 ≠ 不合格, 硬规则 3b), where 0 also covers the origin defect's own shape (AC-207 written, AC-203 never probed in step⑤) and the both-written-but-different-roots case (the pairing is on the SAME project_root, not on both being non-empty), and the AC-203 generation-side probe/write call is POSITIONALLY inside step5_e2e's body (0 before this task — the same-run pairing existed only as an accident, never as a requirement)"
     rc=0
   else
-    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc m4_reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused ac203_parse_alive=$ac203_parse_alive ac203_parse_recs=$ac203_parse_recs ac201_pos_w=$ac201_pos_w ac201_sha_len=${#ac201_pos_sha} ac201_tgz_len=${#ac201_pos_tgz} ac201_pos_ac=$ac201_pos_ac ac201_neg_w=$ac201_neg_w ac201_neg_lines=$ac201_neg_lines g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused ac204_wrote=$ac204_wrote ac204_fields_ok=$ac204_fields_ok ac204_refused_fc=$ac204_refused_fc ac204_refused_en=$ac204_refused_en ac205_tc_hit=$ac205_tc_hit ac205_tc_miss=$ac205_tc_miss ac205_wrote=$ac205_wrote ac205_fields_ok=$ac205_fields_ok ac205_ship_refused=$ac205_ship_refused ac205_conf_refused=$ac205_conf_refused ac205_host_refused=$ac205_host_refused ac234_tasks_pos=$ac234_tasks_pos ac234_goals_pos=$ac234_goals_pos ac234_rounds_pos=$ac234_rounds_pos ac234_tasks_neg=$ac234_tasks_neg ac234_goals_neg=$ac234_goals_neg ac234_rounds_neg=$ac234_rounds_neg ac234_wrote=$ac234_wrote ac234_fields_ok=$ac234_fields_ok ac234_refused_zc=$ac234_refused_zc ac234_refused_em=$ac234_refused_em ac232_wrote=$ac232_wrote ac232_fields_ok=$ac232_fields_ok ac232_neg_ok=$ac232_neg_ok ac232_refused=$ac232_refused ac207_wrote=$ac207_wrote ac207_fields_ok=$ac207_fields_ok ac207_refused_pdb=$ac207_refused_pdb ac207_refused_ge=$ac207_refused_ge ac207_refused_bkfiles=$ac207_refused_bkfiles ac207_refused_nofiles=$ac207_refused_nofiles ac207_sel_rc=$ac207_sel_rc ac207_sel_subj='$ac207_sel_subj' ac207_only_out='$ac207_only_out' ac207_only_rc=$ac207_only_rc ac207_bk_tasks_only=$ac207_bk_tasks_only ac207_impl_marker=$ac207_impl_marker ac207_before=$ac207_before ac207_after_neg=$ac207_after_neg ac207_neg_trace=$ac207_neg_trace ac207_after_pos=$ac207_after_pos ac207_pos_files='$ac207_pos_files' ac207_pipe_grep=$ac207_pipe_grep tp_ok=$tp_ok tp_pos_status=$tp_pos_status tp_pos_launcher=$tp_pos_launcher tp_pos_model=$tp_pos_model tp_pos_auth=$tp_pos_auth tp_neg_status=$tp_neg_status tp_neg_rc=$tp_neg_rc tp_ovr_launcher=$tp_ovr_launcher tp_ovr_model=$tp_ovr_model tp_ovr_auth=$tp_ovr_auth tp_res1=$tp_res1 tp_res2=$tp_res2" >&2
+    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc m4_reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused ac203_parse_alive=$ac203_parse_alive ac203_parse_recs=$ac203_parse_recs ac201_pos_w=$ac201_pos_w ac201_sha_len=${#ac201_pos_sha} ac201_tgz_len=${#ac201_pos_tgz} ac201_pos_ac=$ac201_pos_ac ac201_neg_w=$ac201_neg_w ac201_neg_lines=$ac201_neg_lines g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused ac204_wrote=$ac204_wrote ac204_fields_ok=$ac204_fields_ok ac204_refused_fc=$ac204_refused_fc ac204_refused_en=$ac204_refused_en ac205_tc_hit=$ac205_tc_hit ac205_tc_miss=$ac205_tc_miss ac205_wrote=$ac205_wrote ac205_fields_ok=$ac205_fields_ok ac205_ship_refused=$ac205_ship_refused ac205_conf_refused=$ac205_conf_refused ac205_host_refused=$ac205_host_refused ac234_tasks_pos=$ac234_tasks_pos ac234_goals_pos=$ac234_goals_pos ac234_rounds_pos=$ac234_rounds_pos ac234_tasks_neg=$ac234_tasks_neg ac234_goals_neg=$ac234_goals_neg ac234_rounds_neg=$ac234_rounds_neg ac234_wrote=$ac234_wrote ac234_fields_ok=$ac234_fields_ok ac234_refused_zc=$ac234_refused_zc ac234_refused_em=$ac234_refused_em ac232_wrote=$ac232_wrote ac232_fields_ok=$ac232_fields_ok ac232_neg_ok=$ac232_neg_ok ac232_refused=$ac232_refused ac207_wrote=$ac207_wrote ac207_fields_ok=$ac207_fields_ok ac207_refused_pdb=$ac207_refused_pdb ac207_refused_ge=$ac207_refused_ge ac207_refused_bkfiles=$ac207_refused_bkfiles ac207_refused_nofiles=$ac207_refused_nofiles ac207_sel_rc=$ac207_sel_rc ac207_sel_subj='$ac207_sel_subj' ac207_only_out='$ac207_only_out' ac207_only_rc=$ac207_only_rc ac207_bk_tasks_only=$ac207_bk_tasks_only ac207_impl_marker=$ac207_impl_marker ac207_before=$ac207_before ac207_after_neg=$ac207_after_neg ac207_neg_trace=$ac207_neg_trace ac207_after_pos=$ac207_after_pos ac207_pos_files='$ac207_pos_files' ac207_pipe_grep=$ac207_pipe_grep ac240_v1=$ac240_v1 ac240_n1='$ac240_n1' ac240_v0=$ac240_v0 ac240_n0='$ac240_n0' ac240_vdiff=$ac240_vdiff ac240_vdiff_note='$ac240_vdiff_note' ac240_vne=$ac240_vne ac240_nne='$ac240_nne' ac240_step5_hits=$ac240_step5_hits tp_ok=$tp_ok tp_pos_status=$tp_pos_status tp_pos_launcher=$tp_pos_launcher tp_pos_model=$tp_pos_model tp_pos_auth=$tp_pos_auth tp_neg_status=$tp_neg_status tp_neg_rc=$tp_neg_rc tp_ovr_launcher=$tp_ovr_launcher tp_ovr_model=$tp_ovr_model tp_ovr_auth=$tp_ovr_auth tp_res1=$tp_res1 tp_res2=$tp_res2" >&2
     rc=1
   fi
   rm -rf "$tmp"
@@ -2868,6 +2996,14 @@ echo "AC238_PRE_TASK_COUNT=$AC238_PRE_TASK_COUNT AC238_POST_TASK_COUNT=$AC238_PO
 echo "AC238_PRE_UPGRADE_RUNTIME_AGE_DAYS=${AC238_RUNTIME_AGE_DAYS:-<unread>} AC238_RUNTIME_REPLACED=$AC238_RUNTIME_REPLACED"
 echo "AC238_TASK_LIST_OK=$AC238_TASK_LIST_OK AC238_TASKSET_STABLE=$AC238_TASKSET_STABLE AC238_SAMPLE_TASK=${AC238_SAMPLE_TASK:-<none>}"
 echo "AC238_FRESH_RUNTIME_SHA256=${AC238_FRESH_RUNTIME_SHA:-<none>}"
+# AC-240 运行级取值：闭环是否由【本次运行】自证（1 | 0 | not-evaluated，三态可区分）。
+# 取值来自本次运行自己写的记录（AC203_WRITTEN_THIS_RUN / AC207_WRITTEN_THIS_RUN + 各自的 root），
+# ⛔ 不回读载体反推——AC-240 origin 正是「两条记录都成立但 project_root 互不相交」的形态。
+e2e_closure_self_evidenced "$AC207_E2E" "$AC203_WRITTEN_THIS_RUN" "$AC203_WRITTEN_ROOT" "$AC207_WRITTEN_THIS_RUN" "$AC207_WRITTEN_ROOT"
+echo "E2E_CLOSURE_SELF_EVIDENCED=$E2E_CLOSURE_SELF_EVIDENCED (1 = 本次运行对同一 project_root 写出了 AC-203 与 AC-207；0 = 本次尝试了 e2e 但闭环不自证；not-evaluated = 未尝试 e2e —— 三态可区分, 硬规则 3b)"
+echo "E2E_CLOSURE_NOTE=$E2E_CLOSURE_NOTE"
+echo "E2E_CLOSURE_AC203_WRITTEN_THIS_RUN=$AC203_WRITTEN_THIS_RUN E2E_CLOSURE_AC207_WRITTEN_THIS_RUN=$AC207_WRITTEN_THIS_RUN"
+echo "E2E_CLOSURE_AC203_ROOT=${AC203_WRITTEN_ROOT:-<none>} E2E_CLOSURE_AC207_ROOT=${AC207_WRITTEN_ROOT:-<none>}"
 
 # ── 证据 (AC5) ────────────────────────────────────────────────────────────────────────
 mkdir -p "$(dirname "$EVIDENCE")"

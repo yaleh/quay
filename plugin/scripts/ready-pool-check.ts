@@ -2003,12 +2003,17 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
   // setTaskStatus/applyPromotions. A candidate with no frontmatter / no such label ⇒ false
   // (conservative default, matching the dispatch side).
   const deliveryCritical = (task.labels || []).includes("delivery-critical");
-  // LONG-TERM-GUARANTEE FILING-TIME GATE (gap-long-term-guarantee-registry-hand-maintained): 立案时必填 —
-  // a delivery-critical candidate must declare a non-empty goal_ac (task→AC linkage, parseTask's
-  // frontmatterGoalAc projection: absent/empty ⇒ null). This is the filing-time half of the positional
-  // judgment that replaced the retired hand-maintained registry; the goal-layer half (the
-  // long-term-guarantee-goal-backed-check) enforces the same rule on post-cutoff tasks every round.
-  const goalAcMissing = deliveryCritical && !task.goal_ac;
+  // GOAL-LAYER SOURCE IS NOT AN ADMISSION INPUT — the standing invariant (人 2026-09-11 裁定；
+  // 机械守着：plugin/scripts/eligible-no-goal-source-check.ts):
+  //   准入集合只由 task 自身的自足属性决定；goal 信息最多改变集合内的顺序，永不改变成员资格。
+  // 理由是单调性——排序不减少可执行集合（最坏是次序不优），准入可把集合减到空（产生僵尸）。
+  // ⛔ 即便未来 goal 加了优先级，它也只能进 sort key、缺值时退化为默认序；
+  //    绝不出现「goal 优先级未设 ⇒ 不可派发」这一同形缺陷的新版本。
+  // 此前这里有过一道 `goalAcMissing` 判据（delivery-critical 但无 goal_ac ⇒ 永不晋升）：
+  // 它与 goals/AC-190-task-ac.md 的 origin（人 2026-09-07 就 GOAL-007 裁定【丁：上移 goal 层】）
+  // 反向——长期保证的执行面在 goal 层（long-term-guarantee-goal-backed-check.ts，每轮重评估、
+  // 有生效线 ACTIVATION_LINE_ISO），在 task 层准入闸再塞一份就是落点错；且准入闸每轮重新评估
+  // 全部 todo，必须人工补一条 cutoff 去模拟「只对新立案生效」，补丁漏一半 ⇒ 僵尸任务。
   // PRIORITY TIEBREAKER (gap-priority-has-no-mechanism-reader): the explicit `priority:*` label
   // (p1 > p2 > none), read from the SAME frontmatter-labels source (parseTask) the dispatch sort
   // reads. A PREFERENCE, never a safety override — the promotion sort ranks disjointScore FIRST
@@ -2039,9 +2044,6 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     // determination — consumed by applyPromotions so the label is written AT PROMOTE (标签与 ready
     // 同现). Same frontmatter-labels source the dispatch sort reads.
     deliveryCritical,
-    // LONG-TERM-GUARANTEE FILING-TIME GATE (gap-long-term-guarantee-registry-hand-maintained): a
-    // delivery-critical candidate without goal_ac is never promotion-eligible (立案时必填, fail-closed).
-    goalAcMissing,
     // PRIORITY TIEBREAKER (gap-priority-has-no-mechanism-reader): the candidate's explicit
     // `priority:*` label rank (p1=1, p2=2, none=Infinity) — consumed by the promotion sort as the
     // tiebreaker WITHIN an equal-disjointness bucket (AC1). Never above disjointScore (AC3).
@@ -2077,7 +2079,9 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     // TOUCHES-WIDTH (2026-08-28): the touchesNarrow guard is ADDED — a candidate with a
     // directory-level `## Touches` glob is never eligible (it would silently lock the whole dispatch
     // pool while in flight; the fix-worker narrows it before it ever enters ready).
-    eligible: depsReady && four.complete && touchesResolve && touchesNarrow.narrow && !retiredMechanism && !superseded && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok && !goalAcMissing,
+    // GOAL-LAYER SOURCE IS NOT AN ADMISSION INPUT (see the invariant above): no goal-derived term
+    // may enter this conjunction — `eligible-no-goal-source-check.ts` asserts exactly that.
+    eligible: depsReady && four.complete && touchesResolve && touchesNarrow.narrow && !retiredMechanism && !superseded && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok,
   };
 }
 
@@ -2173,22 +2177,11 @@ export function buildTargetedPromotion(id, task, root, allTasks, develop = "deve
       checks: { retiredMechanism: true, retiredRefs: staleRefs },
     };
   }
-  // LONG-TERM-GUARANTEE FILING-TIME GATE (gap-long-term-guarantee-registry-hand-maintained): the same
-  // 立案时必填 fail-closed as the bulk path — a delivery-critical candidate without goal_ac is never
-  // targeted-promotable either (an outer stage-goal selection must not bypass it).
-  const deliveryCritical = (task.labels || []).includes("delivery-critical");
-  const goalAcMissing = deliveryCritical && !task.goal_ac;
-  if (goalAcMissing) {
-    return {
-      id,
-      found: true,
-      status: task.status,
-      eligible: false,
-      floor_independent: true,
-      reason: `goal-ac-missing: ${id} is delivery-critical but declares no goal_ac (立案时必填, fail-closed) — not promotable`,
-      checks: { goalAcMissing: true },
-    };
-  }
+  // GOAL-LAYER SOURCE IS NOT AN ADMISSION INPUT (人 2026-09-11 裁定；见 buildCandidate 处的不变式):
+  // the TARGETED path used to mirror the bulk path's `goalAcMissing` early return — an outer
+  // stage-goal selection could not promote a delivery-critical task lacking goal_ac either. That is
+  // the same wrong landing point and is removed with it: the goal-layer half lives in
+  // long-term-guarantee-goal-backed-check.ts (per-round re-evaluation, activation line), never here.
   const four = artifactsComplete(task.body);
   const depsReady = depsReadyFor(task, allTasks, root, develop);
   const touches = checkTaskTouchesResolve(task.body, root);
@@ -2197,7 +2190,8 @@ export function buildTargetedPromotion(id, task, root, allTasks, develop = "deve
   // PROSE-PREREQUISITE GAP (AC3): targeted promotion must NOT advance a task whose prose-declared
   // prereqs have no relation edge — same fail-closed as the bulk path.
   const prosePrereqGapIds = prosePrereqGap(task.body, task.frontmatterRaw, path.join(root, "tasks"));
-  const eligible = four.complete && depsReady && touchesResolve && touchesNarrow.narrow && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok && !goalAcMissing;
+  // No goal-derived term in the membership conjunction (invariant above).
+  const eligible = four.complete && depsReady && touchesResolve && touchesNarrow.narrow && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok;
   const checks = {
     fourArtifacts: four.complete,
     missingArtifacts: four.missing,
@@ -2212,7 +2206,6 @@ export function buildTargetedPromotion(id, task, root, allTasks, develop = "deve
     retiredMechanism: false,
     compound,
     selfTouchOk: selfTouch.ok,
-    goalAcMissing,
   };
   return {
     id,
