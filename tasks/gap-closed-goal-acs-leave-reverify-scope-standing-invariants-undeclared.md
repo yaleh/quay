@@ -150,6 +150,7 @@ ids=`[AC-161,188,189,190]` ⇒ **该驱动读的不是本工作树**。
 
 ## Touches
 
+- plugin/test/ac214-freshness-subject-set.test.mjs
 - goals/AC-214-交付证据必须新鲜-四条载体型判据不得-一旦转绿即永久绿.md
 - goals/AC-202-凡被-spawn-的机件必进交付物-把闭包闸扩到-driver-kinds-这类数据表字面量引用.md
 - goals/AC-204-quay-init-只写启用不写实现-禁列补-mcp-commands-hooks-且成对判定.md
@@ -166,3 +167,34 @@ ids=`[AC-161,188,189,190]` ⇒ **该驱动读的不是本工作树**。
 - packages/quay/src/goal-store.ts
 - packages/quay/test/goal-store.test.mjs
 - tasks/gap-closed-goal-acs-leave-reverify-scope-standing-invariants-undeclared.md
+
+### develop 侧红修复：AC-244 的接线钉自己复制了真相源（2026-09-11 本轮）
+
+**症状（fan-in `step=suite`，非本任务缺陷，但按 fail-closed 归本任务）**：
+`plugin/test/ac214-freshness-subject-set.test.mjs` 的 AC4 红，stderr 为
+`no evidence yet: GOAL-009-AC-201,…,AC-239`（**看似「守卫坏了」**）。
+
+**真因（一条命令取证）**：`git merge-base --is-ancestor a26bd6c66 develop` ⇒ **YES**。
+该 develop 提交（17:16）把 `GOAL-009-AC-239` **正确地**并入 AC-214 的 `NEED`
+（AC-239 判据正文只读 `.quay/productization-verification.jsonl`、`SRC_RE` 零命中 ⇒ 按 AC-244 自己的规则确属载体型）。
+而该测试（12:54 落地）**硬写了一份 `NEED_IDS = [201,203,205,207,232,238]` 副本**，并把 `239` 当「NEED 之外」的探针
+⇒ 副本过期后 AC4 **语义反转**：它原本断言「守卫指名逃出的那条」，现在断言了反面。
+⇒ 不是守卫坏了，是**测试钉死了它并不拥有的一份活产物的快照**。`goals/` 与该测试均在 develop、
+本分支 delta 不含它们（`git diff develop...HEAD -- <两个路径>` 为空）。
+
+**修法（⛔ 不是把 239 换成另一个字面量——同形会再犯）**：主体集合与探针**都机械取自判据正文** ——
+`needSubjectSet(criterion)` 从 `NEED = [` 行取成员、探针取 `max(NEED)+1`（**按构造**在集合外，
+NEED 今后再增员也不会让它过期）；两个独立读法（按行 vs 全文引号匹配）互校，少读即当场报错（硬规则 3b）。
+
+**实测（三步，本地命令逐条可复跑）**：
+- **改后绿**：`node --test plugin/test/ac214-freshness-subject-set.test.mjs` ⇒ **5/5 pass**；
+  AC5 现在覆盖全部 **7** 条 NEED，AC4 探针自动推导为 **AC-240**（= `max(NEED)+1`）。
+- **仍可取假（红控制）**：把判据正文的 `unwired = sorted(SUBJ - set(NEED))` 换成 `unwired = []`
+  ⇒ **2 例转红**（AC4 + 「判据正文含 SUBJ 推导块与 unwired 守卫」）；`git checkout --` 还原后
+  sha256 `501fab0d…d441` **逐字节相同**、`git status` 干净。
+- **非空转**：AC4 仍钉着 `SRC_RE` 的 `\b` 词边界（探针正文含 `.jsonl`，子串写法会让候选集恒空）。
+
+**与兄弟分支的关系（诚实标注）**：同一修复已存在于在飞分支
+`task/gap-ff-merge-suite-cert-classifier-unshipped-and-misreported`（提交 `fb488fc50`，17:42）。
+本分支**逐字节取用同一份内容**（`git diff <该分支> -- <file>` 为空）——这不是抄近路，
+而是**故意让两侧改动字节相同**，从而使先落地的一方让另一方的合并成为 no-op、⛔ 不制造第二次冲突。
