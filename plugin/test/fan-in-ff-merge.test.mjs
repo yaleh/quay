@@ -1358,7 +1358,11 @@ test("AC2 — install layout: the delta classifier resolves to the shipped dist 
 test("AC3 — negative control, SAME install-layout fixture, single variable = the delta path: a checker-covered path ⇒ non-inert REFUSAL; a doc path ⇒ proceeds", () => {
   // The covered path is DERIVED from the real registry (never hand-picked): a candidate is covered iff
   // the real classifier prints it. ⛔ If none is covered the fixture is broken — say so, do not pass.
-  const candidates = ["scripts/test.sh", "packages/quay/src/fan-in/ff-merge.ts", "plugin/scripts/worker-driver.ts"];
+  // ⛔ deliberately NO `scripts/test.sh` entry: R3 (test-isolation-check) flags any spawn call whose
+  // argument region references a test.sh literal, and an array holding one makes EVERY spawn that
+  // uses it a violation. The covered path is any path a change/full checker reads; a registry hub
+  // path is not needed for that.
+  const candidates = ["packages/quay/src/fan-in/ff-merge.ts", "plugin/scripts/worker-driver.ts"];
   const fx = shippedLayoutFixture("ctl");
   const coverProbe = spawnSync("node", [path.join(fx.scriptsDir, "select-static-checks-for-touches.js"),
     "--classify-delta", "--root", fx.dir, ...candidates], { encoding: "utf8" });
