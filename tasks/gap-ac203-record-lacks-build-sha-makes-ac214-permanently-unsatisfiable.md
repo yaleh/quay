@@ -2,7 +2,7 @@
 id: gap-ac203-record-lacks-build-sha-makes-ac214-permanently-unsatisfiable
 title: AC-203 的记录写入点是裸 printf、不带 build_sha，而 AC-214 的新鲜度锚只认 build_sha ⇒
   该记录即便产出也被判为「无证据」⇒ AC-214 结构上永远 exit 1
-status: ready
+status: done
 labels:
   - gap
   - defect
