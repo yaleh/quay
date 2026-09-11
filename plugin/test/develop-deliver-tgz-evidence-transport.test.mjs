@@ -22,6 +22,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
@@ -103,4 +104,59 @@ test("⑤ AC-240 — (host, project_root) pairing is judged, and a missing pair 
   // report PARTIAL forever, since non-e2e evidence has no AC-207 to pair with).
   assert.match(r.stdout, /wiring\(in-verify_coldstart_mode\) call=1 partial=1_on_exit2=1 gated_by_ac207_e2e=1/,
     "the pairing verdict must be WIRED into verify_coldstart_mode (exit 2 ⇒ that host is PARTIAL), gated by --ac207-e2e");
+});
+
+test("⑥ shipped-set closure — the ENUMERATION is proven complete, not asserted (AC1..AC4)", () => {
+  const r = run(["--selfcheck-transport-closure"]);
+  assert.equal(r.status, 0, `--selfcheck-transport-closure must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /selfcheck-transport-closure: PASS/, "the closure selfcheck must report PASS");
+  // the real set is clean, and the two halves of the 2026-09-11 defect are BOTH visible
+  assert.match(r.stdout, /shipped set = 9 flat file\(s\) \+ 1 node_modules dep dir\(s\)/,
+    "the shipped set must be the 9 flat files + the 1 node_modules dep (yaml)");
+  assert.match(r.stdout, /positive → violations=0/,
+    "the REAL shipped set must have zero closure violations");
+  assert.match(r.stdout, /drop-checker → violations=1 \(expect ≥1, REF-UNSHIPPED\)/,
+    "removing the checker from the set must be caught (AC1's 本来形态: verify-deliver-coldstart.sh invokes it)");
+  assert.match(r.stdout, /REF-UNSHIPPED: provider-binding-resolvability-check\.ts/,
+    "the violation must NAME the missing sibling, not just count it");
+  // the second half — "只加一行 scp 不够" made mechanical rather than asserted
+  assert.match(r.stdout, /drop-yaml → violations=1 \(expect ≥1, BARE-UNSHIPPED\)/,
+    "keeping the checker but dropping node_modules/yaml must ALSO be caught — a bare specifier does not resolve remotely");
+  assert.match(r.stdout, /BARE-UNSHIPPED: provider-binding-resolvability-check\.ts imports bare "yaml"/,
+    "the bare-specifier violation must name the package (NODE_PATH does not apply to ESM)");
+  // the general relative-import form, and the guard's inability to be fooled by an unreadable list
+  assert.match(r.stdout, /drop-gate-script-base → violations=2 \(expect ≥1, IMPORT-UNSHIPPED\)/,
+    "dropping a ./ relative-import target must be caught (the general form of the same defect)");
+  assert.match(r.stdout, /synthetic-type-erasure → violations=1 \(expect exactly 1: the VALUE relative import\)/,
+    "the type-erasure boundary: a VALUE ./ import is flagged, an `import type` one is NOT (false positives get guards switched off)");
+  assert.match(r.stdout, /IMPORT-UNSHIPPED: x\.ts imports \.\/not-shipped\.ts/,
+    "…and the flagged one must be the value import, by name");
+  assert.ok(!/also-not-shipped/.test(r.stdout),
+    "the type-only ./also-not-shipped.ts import must never be reported (--experimental-strip-types erases it)");
+  assert.match(r.stdout, /empty-list → violations=5 \(expect ≥1/,
+    "an unreadable (empty) list must not read as 合格 — the reference half is driven by the CONSUMER");
+  // AC4 产物: the per-file import face must be printed (which sibling is not self-sufficient, and why)
+  assert.match(r.stdout, /import-face provider-binding-resolvability-check\.ts -> \[\.\/gate-script-base\.ts \.\/repo-root\.ts node:fs node:path yaml\]/,
+    "the import face of every shipped .ts must be printed — this is the artifact 硬规则 5b asks for");
+  assert.match(r.stdout, /import-face runner-state-write\.ts -> \[\.\/write-json-atomic\.ts node:fs node:path\]/,
+    "runner-state-write.ts's TYPE-ONLY ./full-suite-runner.ts import must NOT be flagged (erased by --experimental-strip-types)");
+  // wiring: the enumeration must have ONE home. Both scp sites go through ship_verify_closure and the
+  // sibling list appears exactly once — a second inline copy is precisely how the defect hid.
+  const src = readFileSync(SCRIPT, "utf8");
+  assert.equal((src.match(/^transport_flat_files\(\) \{/gm) || []).length, 1,
+    "transport_flat_files must be defined exactly once (single source for BOTH modes)");
+  assert.equal((src.match(/\$\{SCRIPT_DIR\}\/pane-state-classify\.ts/g) || []).length, 1,
+    "a shipped sibling must be listed exactly once — a second inline copy defeats the closure check");
+  assert.equal((src.match(/\$\{SCRIPT_DIR\}\/provider-binding-resolvability-check\.ts/g) || []).length, 1,
+    "the checker must be listed exactly once — inline copies are how 2026-09-11 stayed invisible in BOTH modes");
+  assert.equal((src.match(/^\s*if ! ship_verify_closure /gm) || []).length, 2,
+    "BOTH scp sites (verify_coldstart_mode / verify_upgrade_mode) must ship through ship_verify_closure");
+  // the SECOND, independent gap on the same transport surface (measured 2026-09-11): neither verify
+  // mode put the host's Node ≥20 floor on PATH, so on C the run inherits /usr/bin/node v18.19.1 and
+  // `node --experimental-strip-types` dies with "bad option" ⇒ binding_state() reads "unreadable" for
+  // EVERY project there too. Same syndrome, different cause — so it needs its own wiring control.
+  assert.equal((src.match(/^verify_node_export_for\(\) \{/gm) || []).length, 1,
+    "verify_node_export_for must be defined exactly once (single source for BOTH modes)");
+  assert.equal((src.match(/\$\(verify_node_export_for "\$\{hk\}"\)/g) || []).length, 2,
+    "BOTH verify modes' remote scripts must prepend the host's Node floor — the deliver mode always did");
 });
