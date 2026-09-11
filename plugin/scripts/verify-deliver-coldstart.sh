@@ -65,7 +65,7 @@
 #       [--test-command <cmd>] [--tmux-session <sess>] \
 #       [--wait <s>] [--liveness-window <min>] \
 #       [--skip-cold-start-drive] [--cold-start-drive] [--verify-only] [--require-live] \
-#       [--evidence <path>] [--ac89 <path>] [--host <B|C>] [--spec <path>] [--channel npm-global|marketplace] [--ac205-session] [--ac207-e2e] [--selfcheck] [--help] \
+#       [--evidence <path>] [--ac89 <path>] [--host <B|C>] [--spec <path>] [--channel npm-global|marketplace] [--ac205-session] [--ac207-e2e] [--ac239-e2e] [--selfcheck] [--help] \
 #       [--target-launcher <l>] [--target-model <m>] [--target-auth <a>] [--driving-profiles <p>]
 #
 #   --build-root <repo> 该次验证【自己】从 <repo> 的 develop-tip 现 build quay+quay-native tgz
@@ -95,6 +95,13 @@
 #                    闭环须由同一次运行自证——step④ 那个紧接 start 的 30 秒窗口会错过真正驱动出 done
 #                    的那个项目），并在最终 summary 打印运行级取值
 #                    `E2E_CLOSURE_SELF_EVIDENCED=1|0|not-evaluated`（三态可区分，硬规则 3b）。
+#   --ac239-e2e      （与 --upgrade-existing 同用）⑦ 的【动态】半边（GOAL-009-AC-239）：升级动作跑完
+#                    并 AC238_EVALUATED=1 之后，在【同一个 project_root】上用该项目自己的 runtime 建一条
+#                    **真实缺陷修复任务**（内容 = 执行者可查的真实 bug，含可机械验收的测试类 AC），起它
+#                    自己的 promotion/worker drivers 驱动到 done，再读直接量写 AC-239 记录。
+#                    ⛔ 与 AC-238 同 root 才写（AC-239 判据自己会再核这层关联）——另起新项目冒充「升级后」
+#                    被机制挡住，而不是被文案挡住。缺任一读数不写（fail-closed，硬规则 3b）。
+#                    昂贵（worker 做完整实现→fan-in，受 AC239_POLL_SECS 约束，缺省 3600s）。
 #   --target-launcher/--target-model/--target-auth  配置目标项目 profiles 的 CLI 覆盖
 #                    （gap-verify-coldstart-does-not-configure-target-profiles）。缺省由驱动方仓库
 #                    .quay/profiles.yml 的 worker-default 派生（单一真相源，⛔ 不写第二份字面量）；
@@ -257,6 +264,30 @@ AC238_PRE_RUNTIME_SHA=""
 AC238_FRESH_RUNTIME_SHA=""
 AC238_TASKSET_STABLE=0
 
+# ── AC-239（GOAL-009）：升级【后】的闭环——已升级的旧项目自己的 *-drivers 还能不能接着干 ───────────
+# 与 AC-238 的分工是刻意的、不可互掩（人 2026-09-11 裁定拆条）：AC-238 是【静态/存量】维度（数据没丢、
+# CLI 读得出、runtime 被换掉）；本 AC 是【动态】维度——升级动作成功 ≠ 升级后的项目还能被驱动。
+# 判据形状复用 AC-207（commit_sha / task_id / task_status=done / gate_events>0 / produced_by_driver=true），
+# 但多一层**不可自证的关联**：本条的 project_root 必须是 AC-238 已经证明升级成功的【同一个】root
+# （判据在 goals/AC-239-*.md 里读载体做集合判定）。⇒ 本步骤只在 AC238_EVALUATED=1 ∧ 同一 $root 上运行，
+# ⛔ 绝不在没升级成功的 root 上写 AC-239 记录（那正是「另起新项目冒充升级后」的形态）。
+# 被测对象不是本仓库代码，而是【升级后的那个第三方项目自己的 runtime + drivers】——因此全部读写都走
+# 项目本地的 .quay/runtime/bin/quay.js（AC-238 已证明它与本次交付物逐字一致），而不是本次安装前缀的 CLI。
+# ⛔ 任一读不出 ⇒ 对应字段留空/负值、AC239_EVALUATED 保持 0、记录不写（缺值≠合格，硬规则 3b/6）。
+AC239_E2E=0                                  # 1 = --ac239-e2e（须与 --upgrade-existing 同用）
+AC239_EVALUATED=0
+AC239_HOST=""
+AC239_PROJECT_ROOT=""
+AC239_TASK_ID=""
+AC239_TASK_STATUS=""
+AC239_COMMIT_SHA=""
+AC239_COMMIT_FILES_JSON=""
+AC239_GATE_EVENTS=-1
+AC239_PRODUCED_BY_DRIVER=0
+AC239_TASK_CREATED=0                         # 1 = 任务创建成功（⛔ 与「驱动到 done」分开记账，缺值可区分）
+AC239_DRIVERS_STARTED=0                      # 1 = promotion+worker driver start 均返回 0
+AC239_PROFILES_STATUS="not-attempted"        # configured | not-configured | not-attempted（三态，⛔ 不同形）
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --tgz) QUAY_TGZ="$2"; shift 2 ;;
@@ -282,6 +313,7 @@ while [ $# -gt 0 ]; do
     --spec) SPEC_PATH="$2"; shift 2 ;;
     --channel) CHANNEL="$2"; shift 2 ;;
     --ac207-e2e) AC207_E2E=1; shift ;;
+    --ac239-e2e) AC239_E2E=1; shift ;;
     --ac205-session) AC205_SESSION=1; shift ;;
     --target-launcher) TARGET_LAUNCHER="$2"; shift 2 ;;
     --target-model) TARGET_MODEL="$2"; shift 2 ;;
@@ -650,6 +682,77 @@ write_ac207_record() {
   ac89_append_goal009 ",\"ac\":\"GOAL-009-AC-207\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"commit_sha\":\"$commit_sha\",\"commit_files\":$commit_files_json,\"task_id\":\"$task_id\",\"task_status\":\"$task_status\",\"gate_events\":$gate_events,\"produced_by_driver\":$produced_by_driver"
 }
 
+# ── AC-239 记录写（fail-closed，硬规则 3b）─────────────────────────────────────────────────
+# 写 GOAL-009-AC-239 记录（经 ac89_append_goal009 统一补 top-level build_sha/ts——AC-214 新鲜度锚）。
+# 字段逐字满足 criterion 过滤（goal 的 criterion 与本函数是同一组谓词的两侧，改动须同步）：
+#   host 非空、project_root 非空、commit_sha 非空（异仓库【实现】提交）、task_id 非空、
+#   task_status="done"、gate_events>0（整数）、produced_by_driver=true（JSON 字面 true）。
+# commit_files 与 AC-207 同用【按位置】的「非记账」判定：本 AC 的新任务是一条**真实缺陷修复**任务，
+# 其实现提交必然触及源码（.go）——「文件全在 tasks/goals/.quay 之下」意味着只翻了状态、没有实现，
+# 正是「闭环是假的」的形态。⛔ 因此该字段不是装饰：它把「翻了个 done」与「真的干了活」分开。
+# ⛔ 本函数【不】自证 project_root 与 AC-238 同源——那是 criterion 的集合判定（upgraded set）；
+#    调用方另有一道同源门（AC239_PROJECT_ROOT = AC238_PROJECT_ROOT ∧ AC238_EVALUATED=1），两层不互替。
+write_ac239_record() {
+  local host="$1" project_root="$2" commit_sha="$3" task_id="$4" task_status="$5" gate_events="$6" produced_by_driver="$7" commit_files_json="${8:-}"
+  [ -n "$host" ] || return 1
+  [ -n "$project_root" ] || return 1
+  [ -n "$commit_sha" ] || return 1
+  [ -n "$task_id" ] || return 1
+  [ "$task_status" = "done" ] || return 1
+  [ "$gate_events" -gt 0 ] 2>/dev/null || return 1
+  [ "$produced_by_driver" = "true" ] || return 1
+  [ -n "$commit_files_json" ] || return 1
+  printf '%s' "$commit_files_json" | "$VC_NODE" --no-warnings -e '
+    let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
+      let f; try { f=JSON.parse(s); } catch { process.exit(1); }
+      if (!Array.isArray(f) || f.length===0) process.exit(1);
+      process.exit(f.some(p => !/^(tasks|goals|\.quay)\//.test(String(p))) ? 0 : 1);
+    });' || return 1
+  ac89_append_goal009 ",\"ac\":\"GOAL-009-AC-239\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"commit_sha\":\"$commit_sha\",\"commit_files\":$commit_files_json,\"task_id\":\"$task_id\",\"task_status\":\"$task_status\",\"gate_events\":$gate_events,\"produced_by_driver\":$produced_by_driver"
+}
+
+# ── AC-239 直接量读取（硬规则 4b：全部外部可核，⛔ 不采信驱动方自述）──────────────────────
+# 与 AC-207 的读数同形（同一组直接量：实现提交 sha / 任务状态 / gate 事件计数 / 提交出处），差别只在
+# 被测对象是【升级后的那个项目自己的 runtime】。复用 ac207_select_implementation_commit /
+# ac207_commit_files / ac207_files_to_json 三个【与 AC 编号无关】的通用辅助（⛔ 不复刻一份：复刻出来的
+# 绿不证明产品绿，硬规则 4 推论三），但写入自己的 AC239_* 变量——⛔ 不借用 AC207_* 变量，否则 AC-207
+# 的写入路径与 E2E_CLOSURE_SELF_EVIDENCED 判定会被本条污染（两条 AC 必须可分别 pass/fail）。
+probe_ac239_measures() {
+  local root="$1" task_id="$2" rtbin="$3" status_json _ac239_files
+  AC239_EVALUATED=0; AC239_COMMIT_SHA=""; AC239_COMMIT_FILES_JSON=""
+  AC239_TASK_STATUS=""; AC239_GATE_EVENTS=-1; AC239_PRODUCED_BY_DRIVER=0
+  [ -n "$root" ] || return 0
+  [ -n "$task_id" ] || return 0
+  [ -n "$rtbin" ] || return 0
+  AC239_COMMIT_SHA="$(ac207_select_implementation_commit "$root" || true)"
+  if [ -n "$AC239_COMMIT_SHA" ]; then
+    mapfile -t _ac239_files < <(ac207_commit_files "$root" "$AC239_COMMIT_SHA")
+    AC239_COMMIT_FILES_JSON="$(ac207_files_to_json "${_ac239_files[@]}")"
+  fi
+  # task_status：用【升级后项目自己的 runtime】读它自己的任务板（⛔ 不是本次安装前缀的 CLI——本 AC 测的
+  # 正是「这个被升级过的项目还能不能自己干活」，用外部 CLI 读会把被测对象换掉）。
+  status_json="$( (cd "$root" && node "$rtbin/quay.js" task view "$task_id" --root "$root" --json) 2>/dev/null || true)"
+  AC239_TASK_STATUS="$(printf '%s' "$status_json" | "$VC_NODE" --no-warnings -e '
+    let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{ try{ const j=JSON.parse(s); console.log(j && j.status ? String(j.status) : ""); }catch{ console.log(""); } });
+  ' 2>/dev/null)"
+  if [ -f "$root/.quay/gate-events.jsonl" ]; then
+    AC239_GATE_EVENTS="$(wc -l < "$root/.quay/gate-events.jsonl" 2>/dev/null | tr -d ' ' || echo 0)"
+  else
+    AC239_GATE_EVENTS=0
+  fi
+  # produced_by_driver：done ∧ gate>0 ∧（任务分支仍在 ∨ 全历史提交信息提到该 task_id）。
+  # ⚠️ 【先取回文本再 case 匹配】，⛔ 不用 `git … | grep -q`（本脚本 set -o pipefail，命中即 SIGPIPE ⇒
+  #    判据恰在【命中时】取假——AC-207 实测踩过一次，见那边注释）。
+  if [ "$AC239_TASK_STATUS" = "done" ] && [ "$AC239_GATE_EVENTS" -gt 0 ] 2>/dev/null && [ -n "$AC239_COMMIT_SHA" ]; then
+    local ac239_branches ac239_subjects
+    ac239_branches="$(git -C "$root" branch --list "task/$task_id" 2>/dev/null || true)"
+    ac239_subjects="$(git -C "$root" log --all --format='%s' 2>/dev/null || true)"
+    case "$ac239_branches" in *"task/$task_id"*) AC239_PRODUCED_BY_DRIVER=1 ;; esac
+    case "$ac239_subjects" in *"$task_id"*) AC239_PRODUCED_BY_DRIVER=1 ;; esac
+  fi
+  AC239_EVALUATED=1
+}
+
 # ── AC-207 直接量读取（硬规则 4b：全部外部可核，⛔ 不采信驱动方自述）──────────────────────
 #   commit_sha  = 第三方项目 git 历史中最新的【实现提交】——按位置排除记账提交（触及文件全在
 #                 tasks/goals/.quay 之下）与机械前缀（chore(quay-init): / tasks: / goals:）。
@@ -1011,6 +1114,174 @@ d=json.load(sys.stdin); print(len(d))' 2>/dev/null || echo "")"
     echo "  ac238 record written → $AC89"
   else
     echo "  AC-238 record NOT written — 缺值≠合格 (pre_count=$AC238_PRE_TASK_COUNT post_count=$AC238_POST_TASK_COUNT age_days=${AC238_RUNTIME_AGE_DAYS:-<unread>} replaced=$AC238_RUNTIME_REPLACED task_list_ok=$AC238_TASK_LIST_OK build_sha=${BUILD_SHA:-<empty>} upgrade_init_rc=$init_rc)" >&2
+  fi
+  return 0
+}
+
+# ── ⑦b 升级【后】的动态闭环（GOAL-009-AC-239）─────────────────────────────────────────────
+# 人 2026-09-11 裁定把 AC-238 原范围拆成两条互不掩盖的 AC：AC-238 管【静态/存量】（升级机制本身有
+# 没有丢数据、CLI 读不读得出、旧 runtime 换没换掉），本函数管【动态】——刚被升级过的那个项目，还能
+# 不能像 AC-207 那样被它自己的 *-drivers 接着驱动出新任务到 done。「装得上」与「还能接着干」是两件
+# 事，一条判据里塞两件会让人分不清是升级坏了还是 driver 坏了。
+#
+# ⛔ 前置（缺一即 not-evaluated：本函数直接 return 0，AC239_EVALUATED 保持 0）：
+#   ① AC239_E2E=1（opt-in，昂贵：worker 做完整实现 → fan-in → 全量 suite）
+#   ② AC238_EVALUATED=1 ∧ AC238_PROJECT_ROOT 逐字 == $root
+#      —— 「升级成功」与「升级后还能干活」必须落在【同一个 root】上。这是本 AC 防自证的全部机制：
+#      另起一个全新项目跑一遍 e2e 是很容易的，但那证明的是「新项目能跑」，不是「升级没把项目弄坏」。
+#      判据侧（goals/AC-239-*.md）另有独立的载体集合判定，两层不互替（硬规则 2 按位置 + 不靠单一处）。
+#   ③ 目标项目自己的 runtime 在（.quay/runtime/bin/quay.js）—— AC-238 已证明它与本次交付物逐字一致；
+#      本步骤【全部读写都走它】，因为被测对象正是这个 runtime，⛔ 不换成本次安装前缀的 CLI。
+step_upgrade_drive_continue() {
+  local root="$1" rtbin qrl task_id goal_id bodyfile i status_json
+  rtbin="$root/.quay/runtime/bin"
+  AC239_PROJECT_ROOT="$root"
+  AC239_HOST="$(hostname 2>/dev/null || echo '')"
+  echo "== ⑦b post-upgrade continuation (AC-239): the upgraded project's OWN drivers drive a NEW task to done =="
+  if [ "$AC239_E2E" != "1" ]; then
+    echo "  not-evaluated: --ac239-e2e 未传入（未尝试 ≠ 不合格）"
+    return 0
+  fi
+  if [ "$AC238_EVALUATED" != "1" ] || [ "$AC238_PROJECT_ROOT" != "$root" ]; then
+    echo "  not-evaluated: AC-238 未在【这个 root】上评估通过（evaluated=${AC238_EVALUATED} ac238_root=${AC238_PROJECT_ROOT:-<none>} root=$root）⇒ ⛔ 不写 AC-239 记录（若在此处写，AC-239 就退化成「另起一个项目也能跑」）"
+    return 0
+  fi
+  if [ ! -f "$rtbin/quay.js" ]; then
+    echo "  not-evaluated: 升级后项目本地 runtime 缺失 $rtbin/quay.js ⇒ 无被测对象"
+    return 0
+  fi
+  if ! command -v claude >/dev/null 2>&1; then
+    echo "  not-evaluated: claude 不在 PATH（worker-driver 需要它 spawn worker）"
+    return 0
+  fi
+
+  # ⓪ 目标项目 profiles：worker-default 的 launcher/model 必须能解析，否则 worker 起不来（起不来会
+  #    表现为「轮询超时」这类与「实现失败」同形的结果，故先在门口把它变成一个可区分取值）。
+  configure_target_profiles "$root" "$(resolve_driving_profiles || true)" "$TARGET_LAUNCHER" "$TARGET_MODEL" "$TARGET_AUTH" || true
+  AC239_PROFILES_STATUS="$TARGET_PROFILES_STATUS"
+  echo "  [⑦b] target-profiles: $AC239_PROFILES_STATUS (launcher=${TARGET_PROFILES_LAUNCHER:-<none>} model=${TARGET_PROFILES_MODEL:-<none>})"
+  if [ "$AC239_PROFILES_STATUS" != "configured" ]; then
+    echo "  not-evaluated: 目标项目 profiles 未配置 ⇒ worker 无法 spawn，本步骤不做（可区分取值，⛔ 不与「驱动失败」同形）"
+    return 0
+  fi
+
+  # ① 建一条**真实缺陷修复任务**。⛔ 不是占位标记文件：升级后的项目用它自己的任务板去修它自己的
+  #    真实 bug，证据价值高于「能跑通一条空任务」（同 meta-cc 历史上 AC118 的形态）。任务内容就是
+  #    本仓库 CLAUDE.md 硬规则 1 记过、2026-09-11 用当前安装版本重新复现过的那个缺陷。
+  task_id="ac239-subagent-session-id-scan"
+  goal_id="GOAL-E2E-239"
+  AC239_TASK_ID="$task_id"
+  bodyfile="$(mktemp -t ac239-task-body.XXXXXX.md)" || return 0
+  cat > "$bodyfile" <<'BODY'
+## Proposal
+
+meta-cc 的 MCP 查询工具在【显式传入 `session_id`】时，`include_subagents` 参数静默失效：磁盘上
+`<session-id>/subagents/agent-*.jsonl` 里明明有目标内容，查询却返回 0 条，**且不报错、不告警**——
+「查过且合格」与「根本没查」在返回值上同形。
+
+实测（可复现，非推断）：取一根只存在于某会话 `subagents/agent-*.jsonl`、不在该会话主 `.jsonl` 里的
+针，先用 `grep -rl` 在文件系统上确认两侧计数（主会话文件 0 次、子代理文件 ≥1 次），再对同一会话调用
+`query_session_content(session_id=<sid>, include_subagents=true, contains=<针>)` ⇒ 返回 0 条；
+而同一次查询若改走 `scope=session`（不传 `session_id`），同一根针能被找到。
+⇒ 差异被定位在**传参形态**上，不是「那根针不存在」。
+
+`internal/mcp/query/query.go` 的注释只承诺了两种取值（`scope=session` 与 `scope=project` 配
+`includeSubagents=true` 时的文件展开），**显式 `session_id` 是第三种取值，注释里没有它**——
+这与实测形态一致：该路径很可能没有接上 `GetQueryFiles` 的 subagent 目录展开。
+
+⛔ 上面是**待确认的线索，不是结论**。根因与修法必须在实现时到源码里实际定位（`query.go` /
+`stage.go` / `query_files_test.go` 与 `executor/handlers.go` 的调用链），不得照抄本段的猜测。
+
+## Plan
+
+1. 复现并定位：构造「主会话文件无针 ∧ `<sid>/subagents/agent-*.jsonl` 有针」的最小 fixture，
+   断言显式 `session_id` + `include_subagents=true` 时能查到 ⇒ 先看到它 FAIL。
+2. 在 `internal/mcp/query/` 的对应读取路径上把 subagent 目录展开接上（具体落点由第 1 步的定位决定）。
+3. 让第 1 步的测试转 PASS；`go build ./...` 与相关包既有测试保持通过。
+
+## Acceptance Criteria
+
+- [ ] AC1 新增/修改的 Go 测试在【修复前】失败、在【修复后】通过；两条命令与真实输出贴进本任务
+      （修复前的失败证据 = 把修复改动反向应用或 `git stash` 后跑同一条测试命令）。
+- [ ] AC2 该测试的判据是**按位置**的：针只存在于 `<session>/subagents/*.jsonl`，在主会话文件里
+      一次都不出现（夹具自己先断言这一点，⛔ 不靠文件名或注释声称）。
+- [ ] AC3 `go build ./...` 通过。
+- [ ] AC4 本次改动涉及的既有测试通过（至少 `go test ./internal/mcp/query/... ./internal/mcp/executor/...`）。
+
+## Definition of Done
+
+- [ ] 缺陷在源码层面被修复（不是把测试改成绕过它），修复落在 `internal/mcp/` 的查询路径上，改动可在 git log 中查到。
+- [ ] AC1 要求的「修复前失败 / 修复后通过」两条真实输出已贴进任务记录或提交信息。
+- [ ] 未被改坏的行为：显式传 `include_subagents=false` 时依旧不展开 subagent 目录。
+
+## Touches
+
+- internal/mcp/query/query.go
+- internal/mcp/query/stage.go
+- internal/mcp/query/query_files_test.go
+- tasks/ac239-subagent-session-id-scan.md
+BODY
+  if ! (cd "$root" && node "$rtbin/quay.js" goal write "$goal_id" --origin "AC-239 升级后闭环自证" --title "e2e post-upgrade target goal" --goal "GOAL-E2E" --criterion "true") >/dev/null 2>&1; then
+    echo "  [⑦b] NOTE: goal write 失败（不阻塞任务侧；AC-239 记录只读 task 侧）"
+  fi
+  if ! (cd "$root" && node "$rtbin/quay.js" task create "$task_id" --title "修复 include_subagents 在显式 session_id 上传参时静默失效" --body-file "$bodyfile" --status todo --goal-ac "$goal_id") >/dev/null 2>&1; then
+    rm -f "$bodyfile"
+    echo "  [⑦b] not-evaluated: task create 失败 ⇒ 记录 NOT written（fail-closed）"
+    return 0
+  fi
+  rm -f "$bodyfile"
+  AC239_TASK_CREATED=1
+  echo "  [⑦b] real defect-fix task created in the upgraded project: $task_id"
+
+  # ② 起【它自己的】promotion/worker drivers（⛔ 不是本仓库的 drivers）。
+  # ⛔ 刻意【不】把退出码捕获写成「命令 … 或运算 赋给 rc」的一行形式：instrument-failure-check 的
+  # FAMILY-3 规则是 raw indexOf 找第一个竖线字符（不区分单竖线与双竖线），那种写法会被读成
+  # 「管道后读退出码」并往该族新增一条实例，而那一族的门是 shrink-only。同本文件 ③ 升级动作那里的
+  # set +e / 取 rc / set -e 既有形（该处注释记着同一件事，落地时被 pre-commit guard 实测拦下过）。
+  local d_rc_p=0 d_rc_w=0
+  set +e
+  (cd "$root" && node "$rtbin/quay.js" driver start --kind promotion --root "$root") >/dev/null 2>&1
+  d_rc_p=$?
+  (cd "$root" && node "$rtbin/quay.js" driver start --kind worker --root "$root") >/dev/null 2>&1
+  d_rc_w=$?
+  set -e
+  if [ "$d_rc_p" = "0" ] && [ "$d_rc_w" = "0" ]; then AC239_DRIVERS_STARTED=1; fi
+  echo "  [⑦b] driver start: promotion rc=$d_rc_p worker rc=$d_rc_w started=$AC239_DRIVERS_STARTED"
+  if [ "$AC239_DRIVERS_STARTED" != "1" ]; then
+    echo "  [⑦b] not-evaluated: 升级后项目的 driver 起不来 ⇒ 记录 NOT written（这本身就是 AC-239 要测的失败，如实记，⛔ 不写成「未评估」以外的结论）"
+  fi
+
+  # ③ 轮询 done（至多 AC239_POLL_SECS，缺省 3600s）。fail-closed：超时不写记录。
+  #    本任务比 AC-207 的 marker 任务重得多（真实 Go 缺陷修复 + fan-in 全量 suite），故轮询窗更宽；
+  #    ⛔ 不放宽到无限——「等不到」必须留下可核的痕迹，而不是一个永不返回的步骤。
+  for i in $(seq 1 "${AC239_POLL_SECS:-3600}"); do
+    status_json="$( (cd "$root" && node "$rtbin/quay.js" task view "$task_id" --root "$root" --json) 2>/dev/null || true)"
+    AC239_TASK_STATUS="$(printf '%s' "$status_json" | "$VC_NODE" --no-warnings -e '
+      let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{ try{ const j=JSON.parse(s); console.log(j && j.status ? String(j.status) : ""); }catch{ console.log(""); } });
+    ' 2>/dev/null)"
+    [ "$AC239_TASK_STATUS" = "done" ] && break
+    sleep 1
+  done
+  echo "  [⑦b] poll finished: task_status=${AC239_TASK_STATUS:-<unreadable>} (poll window ${AC239_POLL_SECS:-3600}s)"
+
+  # ④ 读直接量 → 判定 → 写记录（单点，fail-closed）。⛔ 判据不是「本步骤跑完了」，而是四个外部可核量。
+  probe_ac239_measures "$root" "$task_id" "$rtbin"
+  echo "  [⑦b] task_status=$AC239_TASK_STATUS commit_sha=${AC239_COMMIT_SHA:0:12} commit_files=$AC239_COMMIT_FILES_JSON gate_events=$AC239_GATE_EVENTS produced_by_driver=$AC239_PRODUCED_BY_DRIVER evaluated=$AC239_EVALUATED host=$AC239_HOST"
+  if [ "$AC239_EVALUATED" = "1" ] && [ -z "$AC239_COMMIT_SHA" ] && [ "$AC239_TASK_STATUS" = "done" ]; then
+    echo "  AC239-NO-IMPLEMENTATION-COMMIT: $root 的提交历史里筛不出实现提交（触及文件全在 tasks/ goals/ .quay/ 之下）⇒ 记录 NOT written（fail-closed；⛔ 不拿记账提交充数）"
+  fi
+  if [ "$AC239_EVALUATED" = "1" ] && [ "$AC239_TASK_STATUS" = "done" ] \
+     && [ -n "$AC239_COMMIT_SHA" ] && [ "$AC239_GATE_EVENTS" -gt 0 ] 2>/dev/null \
+     && [ "$AC239_PRODUCED_BY_DRIVER" = "1" ]; then
+    if write_ac239_record "$AC239_HOST" "$AC239_PROJECT_ROOT" "$AC239_COMMIT_SHA" "$AC239_TASK_ID" "done" "$AC239_GATE_EVENTS" "true" "$AC239_COMMIT_FILES_JSON"; then
+      AC239_WRITTEN_THIS_RUN=1
+      AC239_WRITTEN_ROOT="$AC239_PROJECT_ROOT"
+      echo "  ac239 record written → $AC89 (same root as AC-238: $root) ✓"
+    else
+      echo "  [⑦b] NOTE: AC-239 record NOT written (fail-closed: BUILD_SHA missing/non-40-hex or AC89 path empty — 缺值≠合格)" >&2
+    fi
+  else
+    echo "  [⑦b] NOTE: AC-239 record NOT written (task not driven to done / no implementation commit / no gate events — 缺值≠合格)" >&2
   fi
   return 0
 }
@@ -2884,6 +3155,11 @@ else
     # 本质不同的路径（GOAL-009 已有 9 条 AC 的证据全在 ② 那条上）。本分支只跑 ⑦，不跑冷启动/驱动活性段
     # （那些测的是「新项目能不能被驱动」，不是「既有项目能不能被接管」）。
     step_upgrade_existing "$ROOT"
+    # ⑦b AC-239：升级【后】的动态闭环。⛔ 只在 ⑦ 已经在这个 root 上评估通过时才可能写记录——该门
+    # 在 step_upgrade_drive_continue 内部（它读 AC238_EVALUATED/AC238_PROJECT_ROOT），此处不重复判定。
+    if [ "$AC239_E2E" = "1" ]; then
+      step_upgrade_drive_continue "$ROOT"
+    fi
   elif [ "$CHANNEL" = "marketplace" ]; then
     # marketplace 通道 = step① 安装路径验证（register-plugin.mjs 注册）；②③ 是 loop 活性验证
     # （npm-global/AC88 的关切），marketplace 通道不跑 ②③ —— register 失败也能写出记录（AC5），
@@ -2996,6 +3272,12 @@ echo "AC238_PRE_TASK_COUNT=$AC238_PRE_TASK_COUNT AC238_POST_TASK_COUNT=$AC238_PO
 echo "AC238_PRE_UPGRADE_RUNTIME_AGE_DAYS=${AC238_RUNTIME_AGE_DAYS:-<unread>} AC238_RUNTIME_REPLACED=$AC238_RUNTIME_REPLACED"
 echo "AC238_TASK_LIST_OK=$AC238_TASK_LIST_OK AC238_TASKSET_STABLE=$AC238_TASKSET_STABLE AC238_SAMPLE_TASK=${AC238_SAMPLE_TASK:-<none>}"
 echo "AC238_FRESH_RUNTIME_SHA256=${AC238_FRESH_RUNTIME_SHA:-<none>}"
+echo "AC239_EVALUATED=$AC239_EVALUATED (1 = 四个直接量全成立并已写记录；0 = 未评估 ≠ 不合格——硬规则 3b)"
+echo "AC239_PROJECT_ROOT=${AC239_PROJECT_ROOT:-<none>} (⛔ 必须与 AC238_PROJECT_ROOT 逐字一致，判据侧按载体集合再核一遍)"
+echo "AC239_TASK_ID=${AC239_TASK_ID:-<none>} AC239_TASK_CREATED=$AC239_TASK_CREATED AC239_DRIVERS_STARTED=$AC239_DRIVERS_STARTED"
+echo "AC239_PROFILES_STATUS=$AC239_PROFILES_STATUS"
+echo "AC239_TASK_STATUS=${AC239_TASK_STATUS:-<unreadable>} AC239_COMMIT_SHA=${AC239_COMMIT_SHA:0:12} AC239_GATE_EVENTS=$AC239_GATE_EVENTS AC239_PRODUCED_BY_DRIVER=$AC239_PRODUCED_BY_DRIVER"
+echo "AC239_WRITTEN_THIS_RUN=$AC239_WRITTEN_THIS_RUN AC239_WRITTEN_ROOT=${AC239_WRITTEN_ROOT:-<none>}"
 # AC-240 运行级取值：闭环是否由【本次运行】自证（1 | 0 | not-evaluated，三态可区分）。
 # 取值来自本次运行自己写的记录（AC203_WRITTEN_THIS_RUN / AC207_WRITTEN_THIS_RUN + 各自的 root），
 # ⛔ 不回读载体反推——AC-240 origin 正是「两条记录都成立但 project_root 互不相交」的形态。
