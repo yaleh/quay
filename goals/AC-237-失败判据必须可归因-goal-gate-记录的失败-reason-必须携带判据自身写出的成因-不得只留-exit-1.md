@@ -29,6 +29,7 @@ statusLog:
     to: achieved
     actor: goal-driver
     reason: "I2: criterion pass"
+long-term: true
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
