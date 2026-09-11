@@ -64,27 +64,20 @@ START_TS="$(date +%s)"
 echo "== cold-start oneliner e2e =="
 echo "mode: $MODE | plugin source: $PLUGIN_SRC | from-build: $FROM_BUILD"
 
-BASE="$(mktemp -d)"
-cleanup() { rm -rf "$BASE"; }
-trap cleanup EXIT
-
-# ── 1. install source (the "product" the cold start installs from) ───────────────────────────────────
-QUAY_DEV="$BASE/quay-dev"
-mkdir -p "$QUAY_DEV"
-if [ "$FROM_BUILD" = true ]; then
-  E2E_BRANCH="e2e-oneliner-$$-$RANDOM"
-  bash "$REPO_ROOT/plugin/scripts/publish-dist-branch.sh" --branch "$E2E_BRANCH"
-  ORPHAN_SHA="$(git -C "$REPO_ROOT" rev-parse "$E2E_BRANCH")"
-  mkdir -p "$QUAY_DEV/plugin"
-  git -C "$REPO_ROOT" archive "$ORPHAN_SHA" | tar -x -C "$QUAY_DEV/plugin"
-  git -C "$REPO_ROOT" branch -D "$E2E_BRANCH" >/dev/null 2>&1 || true
-else
-  cp -r "$PLUGIN_SRC" "$QUAY_DEV/plugin"
-fi
-
 # ── AC1: the three human-input commands, recorded verbatim ───────────────────────────────────────────
 # The cold start is 3 inputs. The INNER start is DRIVEN by the /quay:cold-start skill (AC1 correction) —
 # it is never a separate human step.
+#
+# ⛔ ORDER IS LOAD-BEARING: this MEASURE is dispatched ABOVE the mktemp/install steps. `--count-inputs`
+#    only prints the static list below — it needs no filesystem work at all. While the recursive
+#    `cp -r "$PLUGIN_SRC"` ran first (before this dispatch), the mode raced
+#    `plugin/test/workflow-replay.test.mjs`, which creates and deletes temp dirs INSIDE
+#    `plugin/fixtures/workflow-replay/` (`_tmp-bad-schema` et al.). Under the suite's parallel lanes
+#    `cp` readdir'd an entry that had just been rmSync'd →
+#    `cp: cannot stat '.../plugin/fixtures/workflow-replay/_tmp-bad-schema': No such file or directory`
+#    → non-zero exit → a spurious AC1 red (2026-09-11: reproduced 2/400 concurrent runs, 0/25 isolated).
+#    ⚠️ Residual: the underlying anomaly (a test writing into the CHECKED-IN fixtures dir) is unfixed —
+#    a FULL-mode e2e run concurrent with that test would still race. Filed separately.
 HUMAN_INPUTS=(
   "bash plugin/scripts/publish-dist-branch.sh --branch cold8-dist   # install: build the plugin artifact"
   "bash <dist>/plugin/scripts/quay-init.sh --all --loop --root <proj> --project <proj>   # init: lay down the mechanism (test command auto-detected)"
@@ -105,6 +98,24 @@ count_inputs() {
 if [ "$MODE" = "count-inputs" ]; then
   count_inputs
   exit 0
+fi
+
+BASE="$(mktemp -d)"
+cleanup() { rm -rf "$BASE"; }
+trap cleanup EXIT
+
+# ── 1. install source (the "product" the cold start installs from) ───────────────────────────────────
+QUAY_DEV="$BASE/quay-dev"
+mkdir -p "$QUAY_DEV"
+if [ "$FROM_BUILD" = true ]; then
+  E2E_BRANCH="e2e-oneliner-$$-$RANDOM"
+  bash "$REPO_ROOT/plugin/scripts/publish-dist-branch.sh" --branch "$E2E_BRANCH"
+  ORPHAN_SHA="$(git -C "$REPO_ROOT" rev-parse "$E2E_BRANCH")"
+  mkdir -p "$QUAY_DEV/plugin"
+  git -C "$REPO_ROOT" archive "$ORPHAN_SHA" | tar -x -C "$QUAY_DEV/plugin"
+  git -C "$REPO_ROOT" branch -D "$E2E_BRANCH" >/dev/null 2>&1 || true
+else
+  cp -r "$PLUGIN_SRC" "$QUAY_DEV/plugin"
 fi
 
 # ── 2. empty target project (never used before) ──────────────────────────────────────────────────────
