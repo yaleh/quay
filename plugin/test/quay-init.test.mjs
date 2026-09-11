@@ -143,6 +143,31 @@ test("config.yml carries a provider map + the loop params the driver reads", () 
   } finally { cleanup(ws); }
 });
 
+// ── AC7 (gap-quay-init-env-only-tasks-dir-goals-adr-meta-land-inside-npm-package): the provider env
+// must carry ALL FOUR QUAY_NATIVE_*_DIR keys, each pointing INSIDE the project root. Before this fix
+// only QUAY_NATIVE_TASKS_DIR was written — the three carrier dirs (goals/adr/meta) then silently fell
+// back to cwd (the vendored npm package dir) when the provider was spawned with no .quay/config.yml
+// ancestor, so goals/adr/meta landed inside the installed package instead of the project.
+test("provider env carries all four QUAY_NATIVE_*_DIR keys, each pointing inside the project root", () => {
+  const ws = makeTmp();
+  try {
+    const r = runInit(ws, INIT_ARGS(ws));
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    const cfg = fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8");
+    const expected = {
+      QUAY_NATIVE_TASKS_DIR: "tasks",
+      QUAY_NATIVE_GOAL_DIR: "goals",
+      QUAY_NATIVE_ADR_DIR: "adr",
+      QUAY_NATIVE_META_DIR: "meta",
+    };
+    for (const [key, rel] of Object.entries(expected)) {
+      const m = cfg.match(new RegExp(`^\\s*${key}:\\s*"?([^"\\n]+)"?\\s*$`, "m"));
+      assert.ok(m, `provider env must carry ${key} (config:\n${cfg})`);
+      assert.equal(m[1].trim(), path.join(ws, rel), `${key} must point inside the project root (got ${m[1].trim()})`);
+    }
+  } finally { cleanup(ws); }
+});
+
 // ── .claude/settings.json: enabledPlugins + permissions.allow ────────────────────────────────────────
 test(".claude/settings.json enables the plugin (project-level) + pre-approves the plugin MCP namespace", () => {
   const ws = makeTmp();
