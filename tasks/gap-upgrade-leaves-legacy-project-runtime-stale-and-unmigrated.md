@@ -3,7 +3,7 @@ id: gap-upgrade-leaves-legacy-project-runtime-stale-and-unmigrated
 title: 升级路径对既有项目的项目本地 .quay/runtime/ 无任何机制：quay-init
   已退役该铺设、migrate_stale_mcp_entry 又不认裸 PATH 形式的 mcp_entry ⇒ 真实旧项目升级后 runtime
   面原封不动
-status: ready
+status: done
 labels:
   - gap
   - defect
