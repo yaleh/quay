@@ -140,20 +140,25 @@ Stage 5 — 缺陷分流：若发现真实缺陷,另立任务,本任务的 DoD �
 
 ## Evidence
 
-**执行（2026-09-11）**：develop tip `9eda8c70741d46b42dc999cf28bfb84b7b364564` 现 build 的两个 .tgz，
-经 `develop-deliver-tgz.sh --verify-upgrade --upgrade-source work/meta-cc --hosts B` 投送到 orangevps，
-对 `~/work/meta-cc` 的**只读 `cp -a` 副本** `/home/yale/quay-verify-upgrade-9eda8c70-root` 执行升级。
+**两次独立真跑，均在 orangevps 上对 `~/work/meta-cc` 的只读 `cp -a` 副本**（源项目全程未被写）。
+字段来源 = `develop-deliver-tgz.sh --verify-upgrade --upgrade-source work/meta-cc --hosts B`
+的远端 stdout（落盘于 `.quay/verify-upgrade-remote-B-<tip8>.log`）。
+
+**run #2（最终交付码，develop tip `1c202737ed2acb7e9ea93f96fb3b8a27437f5d66`）** —— 权威那一次：
 
 ```
-remote: ⑦ upgrade-existing: /home/yale/quay-verify-upgrade-9eda8c70-root
-  isolated copy: /home/yale/work/meta-cc -> /home/yale/quay-verify-upgrade-9eda8c70-root
+  isolated copy: /home/yale/work/meta-cc -> /home/yale/quay-verify-upgrade-1c202737-root
                  (source opened read-only, never written)
-  pre:  tasks=102  runtime_age_days=21.208  taskset=146ed8c92590
+  pre:  tasks=102  runtime_age_days=21.215  taskset=146ed8c92590
   upgrade action: shipped quay-init (config-preserving branch) rc=0
   post: tasks=102  taskset_stable=1  runtime_replaced=1
-  cli read-back: list_count=102  sample=DIR-001  sample_ok=1  task_list_ok=1
-  ac238 record written → /home/yale/quay-verify-upgrade-evidence-9eda8c70.jsonl
+  cli read-back: list_count=102  sample=AC118-001  sample_ok=1  task_list_ok=1
+  ac238 record written → …-evidence-1c202737.jsonl    (ts 2026-09-11T04:10:09Z)
 ```
+
+**run #1（tip `9eda8c70741d…`，早于本轮对 sample 选择逻辑的两处修复）**：同一四个读数全部成立，
+`sample=DIR-001`，记录 `ts 2026-09-11T04:00:43Z`。两次的 `fresh_runtime_sha256` 相同
+（同一对交付物）。⛔ 两次都保留在载体里，未删除——它是真实发生过的读数，不是草稿。
 
 **本机复跑判据（cwd = 仓库根，与 goal-driver 同）**：`AC238_CRITERION_EXIT=0`（翻绿）。
 独立旁证：goal-driver 于 `2026-09-11T04:00:52Z` 机械翻转
@@ -166,7 +171,9 @@ remote: ⑦ upgrade-existing: /home/yale/quay-verify-upgrade-9eda8c70-root
 ```
 无可探测 test command 的 fixture → quay-init rc=2 → 四项读数【全部为真】→ 记录【未写】 ✓
 有 go.mod 的 fixture            → quay-init rc=0 → 记录写入                              ✓
+无 DIR- 族任务 id 的 fixture     → 走兜底分支，四项成立、记录写入                        ✓
 --upgrade-source 隔离副本       → 副本升级完成，源目录树 sha256 聚合逐字节不变           ✓
 ```
-其中第一条抓到了本实现自己的一个缺陷（只按四项结果判定会在升级动作失败时仍写「成功」记录），
-已把 `upgrade_init_rc == 0` 纳入判定门。
+其中第一条抓到本实现自己的一个缺陷（只按四项结果判定会在升级动作失败时仍写「成功」记录），
+已把 `upgrade_init_rc == 0` 纳入判定门；第三条抓到第二个（`grep` 无匹配 exit 1 在 `set -e` 下
+直接杀死脚本），已改为单分支取值。
