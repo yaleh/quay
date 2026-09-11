@@ -2,7 +2,7 @@
 id: AC-240
 title: 端到端闭环必须由【同一次验证运行】自证——AC-203 的 driver 存活证据与 AC-207 的 driver 产出提交证据须共享同一
   (host, project_root)
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-009
 criterion: >-
@@ -62,6 +62,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-09-11T05:06:24.146Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
