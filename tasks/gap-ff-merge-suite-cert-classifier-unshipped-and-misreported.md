@@ -60,6 +60,16 @@ Error: Cannot find module '…/plugin/scripts/select-static-checks-for-touches.t
 本次执行者据此**差点**投出一条更强的错误结论（「安装布局下结构上永不落地」），是靠回头查
 `quay-verify-coldstart-a2a5aac0-root` 上 AC-207 的第二次尝试**成功**才自我推翻的——即该误报确实会误导读者。
 
+**第三个半边（执行时才暴露：分类器的【输入】根本没随包出厂）**
+
+`select-static-checks-for-touches --classify-delta` 读注册表 `plugin/scripts/runner-static-gate.ts`
+（它的 `TEST_SH_REL` 单一真相源）。该文件是一个**故意命名为 `.ts` 的 BASH 库**（注释解析器要看见它），
+**不是 bundle entry**（esbuild 对它报语法错），于是 `package.sh` 的 `find … -name '*.ts' -delete`
+把它一起删了 —— **分类器的代码出厂了（`dist/*.js`），它的输入没有**。
+实测（两个修复前的真实安装，⛔ 非推断）：本机 `quay-verify-coldstart.npm` 前缀与 orangevps 的
+`quay-verify-upgrade-3b0932db.npm` 前缀上 `find … -name 'runner-static-gate*'` 均**零命中**。
+⇒ 只修「按布局解析脚本」不够：分类器跑起来了，但 exit 2（registry not found），证书闸仍然判不了。
+
 **影响（实测，⛔ 不夸大）**
 
 - **不是**「永不落地」：`quay-verify-coldstart-a2a5aac0-root` 的 `e2e-verify-207` 第 1 次 ff 同样红、
@@ -95,33 +105,161 @@ Error: Cannot find module '…/plugin/scripts/select-static-checks-for-touches.t
 4. **5b 产物（必须）**：grep 出所有「运行时 spawn `plugin/scripts/*.ts`」的位点，列一份「在安装布局下
    解析不到」的清单（命中数 + 前 3 条），证明修的不是被报出来的这一个。
 
+## 落地（2026-09-11 执行）
+
+三条半边**全部落在产品面**，⛔ 无豁免、⛔ 无 `|| true`：
+
+1. **一个布局感知的 sibling 解析器**（`ff-merge.ts:siblingScriptArgv`）：dev 树取 `.ts`（带
+   `--experimental-strip-types`），安装布局取 `dist/<name>.js`（不带 flag）；`scriptsDir` **本身**
+   是 dist 目录时也对（生产正是如此：`resolveKernelScriptsDir()` = 被 bundle 的 kernel 所在目录）。
+   语义与 `driver-runtime.resolveKernelSibling` / 插件层既有 `resolvePluginScriptExec` 同形。
+   **本文件里的 4 个 spawn 位点全部改走它**（分类器 ×2 / anti-drift 落点 / reaper）——即修的是这一族。
+2. **注册表随包出厂**（`package.sh`）：`-name '*.ts' -delete` 是本条缺陷的第二个半边（**形态匹配**
+   而非「是不是模块」）。改为排除 `runner-static-gate.ts` 并在同一处**fail-closed 断言**它还在
+   （未来的编辑若重新放宽删除，打包当场红）。
+3. **三态取值**（`ff-merge.ts:classifyDeltaVerdict`）：`inert` / `non-inert(paths)` / `not-evaluated(detail)`，
+   `not-evaluated` 的措辞**不与 `non-inert` 共用任何输出词**、⛔ 不再出现字面量 `covered`。
+   `classifyRoot` 改为**存在性校验的候选根**，由分类器**自己的退出码**接受（⛔ 不再有第二份注册表路径可漂移）。
+
 ## Acceptance Criteria
 
-- [ ] AC1 复现：在**安装布局**（npm 全局装出的 prefix，⛔ 不是开发检出）上跑
+- [x] AC1 复现：在**安装布局**（npm 全局装出的 prefix，⛔ 不是开发检出）上跑
       `ff-merge` 判 delta 惰性的那条命令，修复前取到 `Cannot find module` / 非零（真实输出贴回）。
-- [ ] AC2 修复后同一现场取到一个**真实判决**（惰性 ⇒ 空输出且 exit 0；非惰性 ⇒ 非空输出），真实输出贴回。
-- [ ] AC3 负控制（判据可取假）：塞一个**真的**被 change/full 检查器 `@static-object` 覆盖的路径 ⇒
+- [x] AC2 修复后同一现场取到一个**真实判决**（惰性 ⇒ 空输出且 exit 0；非惰性 ⇒ 非空输出），真实输出贴回。
+- [x] AC3 负控制（判据可取假）：塞一个**真的**被 change/full 检查器 `@static-object` 覆盖的路径 ⇒
       必须仍被判非惰性并拒绝；塞一个纯 doc 面路径 ⇒ 必须放行。
-- [ ] AC4 可区分取值：注入「分类器缺失 / 崩溃」⇒ 输出必须是一个**独立的 not-evaluated 取值**，
+- [x] AC4 可区分取值：注入「分类器缺失 / 崩溃」⇒ 输出必须是一个**独立的 not-evaluated 取值**，
       ⛔ 不得是 `covered`、也不得与「非惰性判决」同形（真实输出贴回）。
-- [ ] AC5 5b 产物：给出一份「运行时 spawn 的 `plugin/scripts/*.ts` 在安装布局下是否存在」的机械清单
+- [x] AC5 5b 产物：给出一份「运行时 spawn 的 `plugin/scripts/*.ts` 在安装布局下是否存在」的机械清单
       （命中数 + 前 3 条），并逐条说明处置。
 
 ## Definition of Done
 
-- [ ] 修的是**产品面**（`ff-merge` 的判据解析 / 打包面 / 取值词表），⛔ 不是给某个 AC 加豁免、
+- [x] 修的是**产品面**（`ff-merge` 的判据解析 / 打包面 / 取值词表），⛔ 不是给某个 AC 加豁免、
       ⛔ 不是在 `fan-in-ff-merge.sh` 里塞一个 `|| true`。
-- [ ] AC3 的正负两侧都在**同一现场**取到，互为对照（同一判据、唯一变量是被判的路径）。
-- [ ] 落地效果的判据是**产物**：在安装布局上，一个任务**第一次** fan-in 就能 ff 成功
-      （⛔ 不是「我加了个解析分支」）。
+- [x] AC3 的正负两侧都在**同一现场**取到，互为对照（同一判据、唯一变量是被判的路径）。
+- [x] 落地效果的判据是**产物**：在安装布局上，一个任务**第一次** fan-in 就能 ff 成功
+      （⛔ 不是「我加了个解析分支」）—— 见 Evidence「AC2 端到端」：`suite_head` = 分支点（delta = 那条
+      `flip-done` 提交 = `tasks/<id>.md`），**第一次**就把 develop 快进到任务 tip。
 
 ## Touches
 
 - `packages/quay/src/fan-in/ff-merge.ts`
 - `packages/quay/scripts/package.sh`
+- `plugin/test/fan-in-ff-merge.test.mjs`
 - `tasks/gap-ff-merge-suite-cert-classifier-unshipped-and-misreported.md`
 
 ## Evidence
 
 （本条由 gap-aged-project-post-upgrade-driver-e2e 的一次真实 e2e 派生；原始读数见该任务体的
 `## Evidence` 一节，⛔ 不复刻第二份。）
+
+### 落地读数（2026-09-11，本机；现场 = 从本 worktree 打出的 npm 全局前缀 `/tmp/quay-ac-ff/lib/node_modules/quay`）
+
+命令里的 `$SD` = 该前缀的 `plugin/scripts/dist` —— **正是生产里 worker-driver 传给 ff-merge 的
+`resolveKernelScriptsDir()`**。
+
+**AC1（修复前，同一前缀上的那条命令）**
+
+```
+$ node --experimental-strip-types <prefix>/plugin/scripts/select-static-checks-for-touches.ts \
+      --classify-delta --root <prefix> tasks/x.md
+Error: Cannot find module '/tmp/quay-ac-ff/lib/node_modules/quay/plugin/scripts/select-static-checks-for-touches.ts'
+    code: 'MODULE_NOT_FOUND'
+$ echo $?  →  1
+```
+
+（同形在两个**修复前就存在的真实安装**上独立复现：本机 `quay-verify-coldstart.npm` 前缀、
+orangevps 的 `quay-verify-upgrade-3b0932db.npm` 前缀 —— `find … -name 'runner-static-gate*'` 均零命中。）
+
+**AC2（修复后，同一现场，真实判决）**
+
+```
+$ node $SD/select-static-checks-for-touches.js --classify-delta --root <prefix> tasks/ac239-….md
+stdout=''  exit=0                                          ← 惰性 = 空输出 + exit 0
+$ node $SD/select-static-checks-for-touches.js --classify-delta --root <prefix> \
+      packages/quay/src/fan-in/ff-merge.ts scripts/test.sh
+stdout='packages/quay/src/fan-in/ff-merge.ts
+scripts/test.sh'   exit=0                                  ← 非惰性 = 非空输出（真实路径）
+```
+
+证书闸端到端（同前缀、`--scripts-dir $SD`、`suite_head` = 分支点 ⇒ delta 非空）：
+
+```
+[doc-only delta，第一次尝试]  fan-in-ff-merge: OK — develop fast-forwarded to task/ac-ff (<tip>); measure ff_only_locked=true   EXIT=0
+[code delta]                  … suite 证书未满足 — suite_head..tip delta classified non-inert (packages/quay/src/fan-in/ff-merge.ts); …   EXIT=2
+```
+
+**AC3（同一现场、同一判据，唯一变量 = 被判的路径）**
+
+- **负侧**（真被 change/full 检查器覆盖的路径）⇒ 判**非惰性并拒绝**：上面 `[code delta]`，reason 里是
+  **真实路径**而非 `covered`。
+- **正侧**（纯 doc 面 `tasks/<id>.md`）⇒ **放行**：上面 `[doc-only delta]`，develop 快进到任务 tip。
+- **混合 delta**（一个 doc + 一个 code）⇒ 只打印 code 那一条：
+
+```
+… delta classified non-inert (packages/quay/src/fan-in/ff-merge.ts); …        ← doc 那条没被打印
+```
+
+⇒ 是**逐路径**判定，不是一个整体布尔。
+
+**AC4（分类器缺失 / 崩溃 ⇒ 独立取值）**
+
+```
+[分类器缺失]  … delta NOT-EVALUATED — classifier not resolvable under /tmp/ac-empty-scripts
+              (neither select-static-checks-for-touches.ts nor dist/select-static-checks-for-touches.js);
+              证书闸按未知 delta fail-closed（⛔ 这不是判决：既非惰性、也非被 @static-object 覆盖）        EXIT=2
+[分类器崩溃]  … delta NOT-EVALUATED — classifier produced no verdict —
+              root=… exit=3 (boom: injected classifier crash); …                                     EXIT=2
+```
+
+两侧都**不含**字面量 `covered`、也**不含** `classified non-inert` —— 这两条在单测里是断言（取假）。
+
+**AC2 对照（证明「注册表要随包出厂」这半边是承重的）**：同一条命令、同一个分类器，打在**修复前的真实包**上：
+
+```
+$ SD_OLD=<coldstart 前缀>/plugin/scripts/dist   # 修复前打出的真包
+… delta NOT-EVALUATED — classifier produced no verdict —
+  root=…/quay/plugin exit=2 (… registry file (runner-static-gate.ts) not found at …/quay/plugin/plugin/scripts/runner-static-gate.ts);
+  root=…/quay        exit=2 (… registry file (runner-static-gate.ts) not found at …/quay/plugin/scripts/runner-static-gate.ts);
+  …                                                                            EXIT=2
+```
+
+（第一条正是旧公式 `resolve(scriptsDir,"../..")` 的 `plugin/plugin/…` —— 深了一层。）
+
+**AC5 —— 5b 机械清单**
+
+扫描面 = shipped kernel（`plugin/scripts/*.{ts,mjs,js}` 顶层 + `packages/quay/src/**/*.ts`）；
+判据 = 「运行时 spawn 的 sibling `.ts`」是否在**安装布局**里解析得到（= 是否进了
+`build-plugin-dist.deriveEntries` 的派生入口集 ⇒ 有 `dist/<name>.js`）。
+**修复前：命中 14 个不同名字；其中 11 个有 dist bundle、2 个没有。**
+前 3 条：`fast-mode-telemetry.ts`（`accounting-emit.ts:204`）、`full-suite-runner.ts`
+（`suite-state-trigger.ts:1285`）、`goal-driver.ts`（`driver-runtime.ts:213`）。逐条处置：
+
+| # | 名字 | 位点 | 安装布局下存在? | 处置 |
+|---|---|---|---|---|
+| 1 | `select-static-checks-for-touches.ts` | `ff-merge.ts:282`,`:336` | 有 `dist/*.js` | **本任务修**：改走 `siblingScriptArgv` ⇒ AC2 实测真判决 |
+| 2 | `touches-orthogonality-check.ts` | `ff-merge.ts:209` | 有 | **本任务修**（同一解析器，anti-drift 落点） |
+| 3 | `worktree-process-reaper.ts` | `ff-merge.ts:408`；`full-suite-runner.ts:1978` | **无** | ff-merge 侧改走同一解析器 + 解析不到时**显式报** `reaper SKIPPED (not-evaluated)`（⛔ 不再与「没有孤儿」同形）；`full-suite-runner.ts:1978` 的下半**未修**（⛔ 不在本任务 Touches／属 build-plugin-dist 派生面） |
+| 4 | `suite-load-sampler.ts` | `full-suite-runner.ts:2163` | **无** | **未修**，同上（同因同源） |
+| 5–14 | 其余 10 个（driver kinds：`promotion/outer/meta/goal/quality-gate/worker-driver` + `ready-pool-check`/`send-to-session`/`full-suite-runner`/`fast-mode-telemetry`） | `driver-runtime.ts` 等 | 有 `dist/*.js` | 无需处置 |
+
+第 3/4 项的共同根因（读代码得，非推断）：`build-plugin-dist.mjs:scanPluginSelfReferences` 的扫描
+**只覆盖 `driver-runtime.ts` 一个文件**（该函数注释自己写明 "Scoped to driver-runtime.ts on purpose"），
+于是 `full-suite-runner.ts` 里**已经用对了 API** 的 `resolveKernelSibling("suite-load-sampler.ts")`
+这类调用点也进不了派生入口集 ⇒ 打包删除 ⇒ 运行时 `resolveKernelSibling` 返回 null ⇒ 落到 fallback
+的裸 `.ts` join。⇒ 正确修法在那条派生的 **scope**（`packages/quay/scripts/build-plugin-dist.mjs`）
+＋ `plugin/scripts/full-suite-runner.ts`，**本任务未修、记录在案**（硬规则 5b：列整族 + 逐条处置，
+⛔ 不是只修被报出来的那一个）。
+
+另一条**不属于 spawn 面、但同属「被调用的兄弟被交付面丢掉」**的：分类器**读**的注册表
+`plugin/scripts/runner-static-gate.ts`（`fs.readFileSync`，不是 spawn）—— 见上面 AC2 对照，
+不随包出厂则证书闸永远判不了，故一并修（`package.sh`）。
+
+**机械自证（本文件那一族被整体修掉）**：同一扫描在修复后**降到 12 个名字**（`ff-merge.ts` 的 3 个位点
+不再使用裸 `.ts` join 形态）——⛔ 不是「我加了个解析分支」。
+
+**单测（`plugin/test/fan-in-ff-merge.test.mjs`，新增 3 条）**：在**一个**夹具里（`<dir>/scripts/dist/*.js`
++ `<dir>/plugin/scripts/runner-static-gate.ts`，即安装布局形状）钉住「安装布局解析」与「三态词表」，
+唯一变量 = 被判的路径。**取假对照**：把 `ff-merge.ts` 换回 `develop` 版本（pre-fix），3 条**全红**
+（`node --test --test-name-pattern=…`，3 tests / 0 pass）；换回后 38/38 绿。
