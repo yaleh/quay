@@ -28,6 +28,9 @@ import { parseTask, readDependsOn, readTaskStatusAtRef, parseFrontmatterComplete
 import { splitTaskFile, statusFromFrontmatter, patchStatusField, commitTaskFile, hasPriorCommit } from "./task-ops.ts";
 import { parseTouches, checkTouchesPair } from "./touches-orthogonality-check.ts";
 import { expandDeclaredTouches } from "./concurrent-batch-scheduler.ts";
+// gap-develop-sync-reset-hard-destroys-third-party-project-tree：终局解可弃性判定复用【既有的】
+// 任务板/文档面清单（⛔ 不重写第二份——driver-filters.ts 自己的头注释即「不重写、只复用」）。
+import { DOC_SURFACES } from "./select-static-checks-for-touches.ts";
 import { TASK_STATUS } from "./task-status.ts";
 
 // ── 谓词上下文 ───────────────────────────────────────────────────────────────────────────────────────
@@ -268,11 +271,99 @@ function ffPushToDevelop(root: string, src: string): { ok: boolean; detail?: str
  *  提交都进历史，⛔ 不 reset/checkout 丢提交，AC4）；② 分叉任务状态按确定性优先级对齐（AC2，永不 LLM）；
  *  ③ ff push develop + 事件落痕。合并冲突（code/docs 语义冲突，机械不能消解）⇒ `git merge --abort`
  *  保树干净 + 事件升级（Claude Code 语义合并接手），返回 false。 */
+// ── 终局解的【可弃性判定】（gap-develop-sync-reset-hard-destroys-third-party-project-tree）──────────
+//
+// 缺陷（2026-09-11 实测，orangevps；真机 e2e 目标 = 已升级的 meta-cc 副本）：终局解
+// `git reset --hard develop` 丢弃的是【当前分支】的独有提交。它在本仓库成立的唯一前提是
+// 「doc 工作分支是 develop 的一次性投影」——而 `resolveDocBranch` 把这句话实现成了「当前 checked-out
+// 分支」（:442），于是该前提在**任何**项目上都自动为真。第三方项目里当前分支就是它自己的主线
+// （实测副本：`main`，含 `chore: release v3.8.4` 等 release 提交，`discardedCount: 50`），reset 把
+// 项目主线连同 `tasks/`（源项目 102 个任务文件）与 `.quay/config.yml` 一起抹掉。
+//
+// ⛔ 判据不落在分支名上：`author` 是逐项目不同的字面量（硬规则 4 推论二），且前一条任务
+// （gap-doc-branch-hardcoded-author-breaks-third-party-develop-sync）正是为消除它才把硬编码
+// DOC_BRANCH 改成运行时派生——再引入一个新的分支名字面量等于把那个缺陷换个方向重犯。
+// 判据落在**即将被丢弃的东西本身**（直接量，硬规则 4b）：
+//   ① 被丢弃的提交只碰任务板/文档面（DOC_SURFACES，复用既有单一定义）⇒ 没有任何项目代码会丢失；
+//   ② develop 的 `tasks/` 非空（当当前分支有任务板时）⇒ develop 是任务板的**有效权威**，
+//      而不是一棵从未见过任务板的树（实测现场 reset 后 `tasks/*.md` 计数 = 0）。
+// 两条都成立 ⇒ 丢掉的只是「develop 本可 supersede 的任务状态」⇒ 旧行为逐字不变
+// （本仓库真实生产载体 .quay/doc-develop-sync.jsonl 的 3 次 take-develop，唯一非空的一次丢弃的
+//  14 条全是 `goals: AC-NNN 写盘即提交（goal-store）` ⇒ ① 成立；develop 有任务板 ⇒ ② 成立）。
+// 任一条不成立 ⇒ **拒绝**：工作树原样不动、事件携带被枚举的提交与越界面、返回 false（未同步）。
+// ⛔ 返回 false 不是「静默失败」：调用方（promotion-driver:687-690）明示该返回值【仅供观测、不阻断本轮】，
+// 且本条额外写一条可区分的 `…-take-develop-refused` 事件（硬规则 3b：拒绝与「已同步」不同形）。
+
+/** 读 `<ref>:<dir>/` 下的文件清单（`git ls-tree -r --name-only <ref> -- <dir>`）。读失败 ⇒ null
+ *  （读不懂 ≠ 空，硬规则 6——「develop 没有任务板」与「读不出 develop」不得同形）。 */
+function lsTreeDir(root: string, ref: string, dir: string): string[] | null {
+  try {
+    const out = execFileSync("git", ["-C", root, "ls-tree", "-r", "--name-only", ref, "--", dir], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.split("\n").map((l) => l.trim()).filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+
+/** 将被 `reset --hard develop` 丢弃的提交所触碰的路径**并集**（`git log --pretty=format: --name-only
+ *  develop..HEAD`）。读失败 ⇒ null（读不懂 ≠ 无路径）。 */
+function discardedTouchedPaths(root: string): string[] | null {
+  try {
+    const out = execFileSync("git", ["-C", root, "log", "--pretty=format:", "--name-only", "develop..HEAD"], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    });
+    return [...new Set(out.split("\n").map((l) => l.trim()).filter(Boolean))];
+  } catch {
+    return null;
+  }
+}
+
+/** 路径是否落在任务板/文档面（DOC_SURFACES 单一真相源）。`tasks/` 等条目自带尾斜杠 ⇒ 同时匹配
+ *  目录本身与其内容（`tasks` / `tasks/x.md`）。未知路径 ⇒ false（fail-closed，硬规则 3b）。 */
+function isDiscardableSurfacePath(rel: string): boolean {
+  const p = String(rel).replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
+  if (!p) return true;
+  return DOC_SURFACES.some((s) => (s.endsWith("/") ? p === s.slice(0, -1) || p.startsWith(s) : p === s));
+}
+
+/** 可弃性判定结果（三态可区分：可弃 / 不可弃【带成因】/ 读不懂——⛔ 后两者不同形，硬规则 3b）。 */
+export interface DiscardabilityVerdict {
+  disposable: boolean;
+  /** disposable | non-doc-paths | develop-missing-task-board | unreadable */
+  reason: string;
+  /** reason=non-doc-paths 时越界的路径（截前 20 条）；其余成因 ⇒ 空表。 */
+  offendingPaths: string[];
+}
+
+/** 终局解前的可弃性判定：见本段顶部注释的 ①/②。⛔ 纯读探测，不改变任何东西。 */
+export function discardedCommitsAreDisposable(root: string): DiscardabilityVerdict {
+  const paths = discardedTouchedPaths(root);
+  if (paths === null) return { disposable: false, reason: "unreadable", offendingPaths: [] };
+  const offending = paths.filter((p) => !isDiscardableSurfacePath(p)).slice(0, 20);
+  if (offending.length > 0) return { disposable: false, reason: "non-doc-paths", offendingPaths: offending };
+  const headTasks = lsTreeDir(root, "HEAD", "tasks/");
+  const developTasks = lsTreeDir(root, "develop", "tasks/");
+  if (headTasks === null || developTasks === null) {
+    return { disposable: false, reason: "unreadable", offendingPaths: [] };
+  }
+  const boardOnHead = headTasks.filter((f) => f.endsWith(".md")).length;
+  const boardOnDevelop = developTasks.filter((f) => f.endsWith(".md")).length;
+  if (boardOnHead > 0 && boardOnDevelop === 0) {
+    return { disposable: false, reason: "develop-missing-task-board", offendingPaths: [] };
+  }
+  return { disposable: true, reason: "disposable", offendingPaths: [] };
+}
+
 /** 结构冲突下的终局解：硬取 develop，丢弃 doc 侧独有提交（人 2026-09-06 裁定允许）。
  *  **这是让「语义同步必成功、永不卡死」第一次真正成立的那一步**——在此之前结构冲突即
  *  return false 且无升级接线（实测 21/26 卡死在那里）。
  *  ⛔ 允许丢失 ≠ 允许静默丢失：被丢弃的提交先逐条枚举进事件（硬规则 3 枚举不布尔），
- *  再 reset。丢了什么在载体里查得到，⛔ 不是「同步成功」四个字。 */
+ *  再 reset。丢了什么在载体里查得到，⛔ 不是「同步成功」四个字。
+ *  ⛔ 允许丢失 ≠ 允许丢任何东西（gap-develop-sync-reset-hard-destroys-third-party-project-tree）：
+ *  人 2026-09-06 的裁定是【本仓库 doc 投影分支】的提交可弃，不是一个可以套到任意分支上的通行证。
+ *  先过 `discardedCommitsAreDisposable`——不可弃 ⇒ 拒绝 + 落痕 + false，reset 不执行。 */
 export function takeDevelopDiscardingDoc(root: string, cur: string): boolean {
   let discarded: string[] = [];
   try {
@@ -282,6 +373,18 @@ export function takeDevelopDiscardingDoc(root: string, cur: string): boolean {
     discarded = out.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 50);
   } catch {
     discarded = ["<enumerate-failed>"]; // 读不出 ≠ 没丢（硬规则 6）——留一个可区分的取值
+  }
+  // 可弃性判定（本段顶部）：不可弃 ⇒ 不执行 reset。工作树原样不动，事件必须带回【被枚举的提交 +
+  // 越界面 + 成因】——否则「拒绝了」与「同步成功了」在载体上同形（硬规则 3b）。
+  const verdict = discardedCommitsAreDisposable(root);
+  if (!verdict.disposable) {
+    writeDocDevelopSyncEvent(root, {
+      event: "doc-develop-sync-semantic-take-develop-refused", phase: "take-develop", branch: cur,
+      reason: verdict.reason, offendingPaths: verdict.offendingPaths,
+      discardedCount: discarded.length, discarded,
+      resolution: "refused-non-disposable-commits",
+    });
+    return false;
   }
   try {
     execFileSync("git", ["-C", root, "reset", "--hard", "develop"], { stdio: "ignore" });
