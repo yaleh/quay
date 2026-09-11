@@ -54,7 +54,6 @@ depends_on:
 
 - tasks/gap-ac207-e2e-target-driver-driven-real-commit-task-done.md
 - plugin/scripts/develop-deliver-tgz.sh
-- `plugin/scripts/develop-deliver-tgz.sh`
 
 ## Acceptance Criteria
 
