@@ -46,5 +46,6 @@ statusLog:
     to: achieved
     actor: goal-driver
     reason: "I2: criterion pass"
+long-term: true
 ---
 **判据（能取假）**：2026-09-09 干跑 exit 1，报 forbidden-list missing: ['.claude/commands/', '.claude/hooks/', '.mcp.json']。**为什么必须成对**：「禁列为空」单独成立时可被「什么都不做」满足——一个什么都不铺的 init 也过。故判据同时要求 enable_declared=true（项目级 enabledPlugins + permissions.allow 指向已安装插件）。这一对合起来才表达契约：**项目只写启用/授权，实现全部由 plugin bundle 原生提供**。
