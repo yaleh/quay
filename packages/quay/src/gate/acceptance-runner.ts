@@ -87,6 +87,63 @@ export function recordGateCost(cwd: string, name: string, ms: number, exit: numb
   }
 }
 
+// ── failure attribution (gap-acceptance-runner-failure-reason-drops-criterion-stderr) ────────────────
+// A criterion that exits nonzero almost always writes its OWN cause to stderr — AC-214's distinguishes
+// "no evidence yet: %s" from "stale evidence: %s", and BOTH exit 1. Reporting only
+// `acceptance failed (exit 1)` collapses two distinct causes (refresh mechanism never ran vs. evidence
+// needs a cross-machine re-run — opposite dispositions) into one value, so the goal-round ledger carried
+// 720 consecutive rounds of a red that was structurally un-attributable (hard rule ③: enumerate, don't
+// boolean — same family as "a diagnostic field must keep the dimension that distinguishes causes").
+//
+// Bounded on purpose: a failing criterion can print an entire suite log and `reason` is persisted every
+// round (`.quay/goal-round.jsonl`). 500 is not an invented threshold — `goal-driver.ts` `gateCriterion`
+// ALREADY slices the reason to 500 chars, so this cap makes the runner's own cut (which MARKS itself)
+// the one that takes effect instead of a silent downstream truncation.
+
+/** Upper bound, in characters, of a whole failure `reason` (prefix + the criterion's own output). */
+export const FAILURE_REASON_MAX_CHARS = 500;
+
+/** Collapse output to a single line — `reason` is a single-line summary field, and raw control
+ *  characters from a child process must not be able to reshape a log entry. */
+function flattenOutput(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/** Bound `text` to `budget` chars, MARKING the cut rather than hiding it. `head` picks which end
+ *  survives: a criterion states its cause up front on stderr, but summarises at the tail on stdout. */
+function boundedExcerpt(text: string, source: string, budget: number, head: boolean): string {
+  if (text.length <= budget) return text;
+  const marker = `[truncated, ${text.length} chars of ${source} omitted]`;
+  const keep = Math.max(0, budget - marker.length - 3);
+  return head ? `${text.slice(0, keep)} … ${marker}` : `… ${marker} ${text.slice(text.length - keep)}`;
+}
+
+/**
+ * Fold a FAILED criterion's own output into its `reason` so the failure is attributable.
+ *
+ * stderr is preferred (that is where a criterion that fails writes its cause); stdout is the fallback
+ * for criteria that report there. A criterion that wrote nothing says so explicitly — it must never be
+ * silently indistinguishable from a reason that was simply never populated (hard rule 3b).
+ *
+ * The prefix is preserved verbatim: `driver-cli-ac2-regression.test.mjs:24` matches `/FAIL — acceptance failed/`.
+ */
+export function withFailureOutput(
+  prefix: string,
+  r: { stdout?: string | null; stderr?: string | null },
+): string {
+  const errText = flattenOutput(String(r.stderr ?? ""));
+  const outText = flattenOutput(String(r.stdout ?? ""));
+  const sep = " — ";
+  const budget = FAILURE_REASON_MAX_CHARS - prefix.length - sep.length;
+  if (budget <= 0) return prefix.slice(0, FAILURE_REASON_MAX_CHARS);
+  const body = errText
+    ? boundedExcerpt(errText, "stderr", budget, true)
+    : outText
+      ? boundedExcerpt(outText, "stdout", budget, false)
+      : "criterion wrote no output to stderr/stdout";
+  return prefix + sep + body;
+}
+
 /**
  * Run `command` in `cwd` under a `timeoutMs` deadline.
  *
@@ -161,15 +218,20 @@ export function runAcceptance({ command, cwd, timeoutMs = 60000, envFile, name }
     timedOut: false,
     reason: ok
       ? "acceptance passed (exit 0)"
-      : `acceptance failed (exit ${r.status}${r.signal ? `, signal ${r.signal}` : ""})`,
+      : withFailureOutput(
+          `acceptance failed (exit ${r.status}${r.signal ? `, signal ${r.signal}` : ""})`,
+          r,
+        ),
   };
 }
 
 // DIR-103-A (M223): dry-run capture sibling — mirrors coverage-floor.ts's
-// spawnSyncCapture: runs the acceptance command and captures stdout/stderr
-// text, unlike `runAcceptance` which reports only ok/reason/code and discards
-// the output. A tiny sibling rather than changing `runAcceptance`'s return
-// shape (the codebase's explicit choice, per the DIR-103-A task Proposal).
+// spawnSyncCapture: runs the acceptance command and captures the FULL
+// stdout/stderr text. `runAcceptance` keeps only a bounded excerpt of that
+// output (and only on failure, folded into `reason`) — it still does not expose
+// the text as a field. A tiny sibling rather than changing `runAcceptance`'s
+// return shape (the codebase's explicit choice, per the DIR-103-A task
+// Proposal).
 
 export interface AcceptanceCaptureResult {
   /** combined stdout+stderr text (the whole point of a dry-run) */
@@ -186,8 +248,8 @@ export interface AcceptanceCaptureResult {
 
 /**
  * Run `command` in `cwd` under a `timeoutMs` deadline, capturing stdout/stderr
- * text (unlike `runAcceptance`, which discards it). Mirrors coverage-floor.ts's
- * `spawnSyncCapture` exactly.
+ * text (unlike `runAcceptance`, which keeps only a bounded failure excerpt).
+ * Mirrors coverage-floor.ts's `spawnSyncCapture` exactly.
  */
 export function runAcceptanceCapture({ command, cwd, timeoutMs = 60000 }: RunAcceptanceArgs): AcceptanceCaptureResult {
   const r = spawnSync(command, {
