@@ -63,13 +63,13 @@ if missing:
 
 ## Acceptance Criteria
 
-- [ ] AC1 缺陷存证（改前读数）：贴改前 `:912` 的完整 `printf` 语句（可见无 `build_sha`），与 AC-214 criterion 里 `sha = r.get("build_sha") or r.get("commit")` 那一行。
-- [ ] AC2 已改走 helper（能取假）：改后 `grep -nE '^\s*(printf .*GOAL-009-AC-203|ac89_append_goal009 ".*AC-203)' plugin/scripts/verify-deliver-coldstart.sh` 命中的是 `ac89_append_goal009` 形态；贴命中行。
-- [ ] AC3 记录真带锚（⛔ 不靠读代码断言）：用 hermetic 方式（`--selfcheck` 或等价的受控调用）让 AC-203 写入点真写一条记录到临时 `--ac89` 路径，`python3 -c` 读回该行并打印 `build_sha` 字段值为 40-hex；贴该行 JSON。
-- [ ] AC4 fail-closed 保留（能取假）：令 `BUILD_SHA` 为空或非 40-hex ⇒ 该写入点**不写记录**且返回非 0，stderr 含 helper 的拒写提示；贴输出与「临时载体行数未变」的前后读数。
-- [ ] AC5 同族防复发检查：新增/扩展一条机械检查——解析 AC-214 criterion 中的 NEED 列表，逐条断言其写入点带锚；对当前状态它应**改前红、改后绿**；贴前后两次运行输出。
-- [ ] AC6 镜像无漂移：`node --no-warnings --experimental-strip-types plugin/scripts/mirror-pair-drift-check.ts --root .` exit 0。
-- [ ] AC7 全量绿：`scripts/test.sh` 全量绿。
+- [x] AC1 缺陷存证（改前读数）：贴改前 `:912` 的完整 `printf` 语句（可见无 `build_sha`），与 AC-214 criterion 里 `sha = r.get("build_sha") or r.get("commit")` 那一行。
+- [x] AC2 已改走 helper（能取假）：改后 `grep -nE '^\s*(printf .*GOAL-009-AC-203|ac89_append_goal009 ".*AC-203)' plugin/scripts/verify-deliver-coldstart.sh` 命中的是 `ac89_append_goal009` 形态；贴命中行。
+- [x] AC3 记录真带锚（⛔ 不靠读代码断言）：用 hermetic 方式（`--selfcheck` 或等价的受控调用）让 AC-203 写入点真写一条记录到临时 `--ac89` 路径，`python3 -c` 读回该行并打印 `build_sha` 字段值为 40-hex；贴该行 JSON。
+- [x] AC4 fail-closed 保留（能取假）：令 `BUILD_SHA` 为空或非 40-hex ⇒ 该写入点**不写记录**且返回非 0，stderr 含 helper 的拒写提示；贴输出与「临时载体行数未变」的前后读数。
+- [x] AC5 同族防复发检查：新增/扩展一条机械检查——解析 AC-214 criterion 中的 NEED 列表，逐条断言其写入点带锚；对当前状态它应**改前红、改后绿**；贴前后两次运行输出。
+- [x] AC6 镜像无漂移：`node --no-warnings --experimental-strip-types plugin/scripts/mirror-pair-drift-check.ts --root .` exit 0。
+- [x] AC7 全量绿：`scripts/test.sh` 全量绿。
 
 ## Definition of Done
 
@@ -81,3 +81,120 @@ AC-214 的 NEED 列表里每一条 ac 的写入点都经 `ac89_append_goal009` �
 - packages/quay/plugin/scripts/verify-deliver-coldstart.sh
 - plugin/test/verify-deliver-coldstart.test.mjs
 - tasks/gap-ac203-record-lacks-build-sha-makes-ac214-permanently-unsatisfiable.md
+
+## Evidence
+
+**⚠️ 行号漂移（先记，防误读）**：下表与 Plan 写的 `:912` 是立案时的 develop 行号；develop 已前进
+（sibling `gap-ac214-freshness-anchor-build-sha-missing-on-203-205-207` 等落地），改前 AC-203 写入点现位于
+**`:1072`**。以下一律**按位置重新取证**，⛔ 不照抄正文行号。
+
+**AC1 缺陷存证（改前读数，`git show HEAD:plugin/scripts/verify-deliver-coldstart.sh`，HEAD = develop `cbea022e9`）**
+
+`:1072` 的完整写入语句（逐字，两物理行）——无 `build_sha`：
+
+```
+  printf '{"ts":"%s","ac":"GOAL-009-AC-203","host":"%s","project_root":"%s","has_plugin_dir":false,"driver_alive":%s,"carrier_records":%s}\n' \
+    "$ts" "$host" "$project_root" "$driver_alive" "$carrier_records" >> "$ac89"
+```
+
+AC-214 criterion（`goals/AC-214-*.md`）第 47 / 49 行：
+
+```
+47:          sha = r.get("build_sha") or r.get("commit")
+49:          if sha and (a not in newest or ts > newest[a][1]): newest[a] = (sha, ts)
+```
+
+⇒ 该 printf 产的记录对 AC-214 而言 `sha` 恒为空 ⇒ 跳过 ⇒ AC-203 进 `missing` ⇒ exit 1。
+
+**AC2 改后写入点（`grep -nE '^\s*(printf .*GOAL-009-AC-203|ac89_append_goal009 ".*AC-203)'` 唯一命中）**
+
+```
+1079:  ac89_append_goal009 ",\"ac\":\"GOAL-009-AC-203\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"has_plugin_dir\":false,\"driver_alive\":$driver_alive,\"carrier_records\":$carrier_records"
+```
+
+（`grep -c` = 1：原来那条裸 printf 已不存在，`printf .*GOAL-009-AC-203` 分支零命中。）
+同形：`write_ac203_record` 现与 `write_ac205_record`/`write_ac232_record`/`write_ac207_record` 一样只留
+「读数校验 + 一行 helper 调用」，`ts`/`BUILD_SHA`/`AC89` 全由 helper 取——⛔ 没有第二份 `"build_sha"` 字面量。
+
+**AC3 记录真带锚（读回的是载体上真写下的那一行，⛔ 不是读代码）**
+
+`bash plugin/scripts/verify-deliver-coldstart.sh --selfcheck` 的 control 15 让 **AC-203 写入点本身**
+写一条记录到临时载体，`python3` 读回：
+
+```json
+{"build_sha":"0123456789abcdef0123456789abcdef01234567","ts":"2026-09-09T00:00:00Z","ac":"GOAL-009-AC-203","host":"hostB-fake","project_root":"/tmp/third-party-fake","has_plugin_dir":false,"driver_alive":1,"carrier_records":5}
+```
+
+`build_sha = 0123456789abcdef0123456789abcdef01234567` / `is_40_hex = True` / `ac field = GOAL-009-AC-203`。
+自检断言行：`selfcheck: ac203-record(valid) wrote=1 fields_ok=1 build_sha_40hex=1 (expect 1/1/1 — top-level 40-hex build_sha)`
+（五字段逐字仍在：`has_plugin_dir` 是 JSON 字面 `false`、`driver_alive`/`carrier_records` 是整数）。
+⛔ 判 `build_sha` 是否 40-hex 用的是 bash `=~` 而非 `printf | grep -q`——pipefail 下 `grep -q` 命中即早退
+⇒ printf 收 SIGPIPE ⇒ 管道 141 ⇒ **条件成立时反而判假**（且是否复现取决于宿主 grep）；结构上避开管道。
+
+**AC4 fail-closed 保留（双向控制，⛔ 不降级成无锚记录）**
+
+- 空 `BUILD_SHA`：`selfcheck: ac203-record(no-build-sha) rc=1 msg=1 lines=1→1`——读数全有效、唯独 `BUILD_SHA`
+  空 ⇒ **拒写（rc≠0）∧ stderr 带拒写提示 ∧ 载体行数 1→1 不变**。
+- 拒写提示逐字：`ac89_append_goal009: BUILD_SHA not 40-hex (got '') — GOAL-009 record NOT written (fail-closed)`。
+- 非 40-hex（39 hex，等价受控调用直接调 helper）：`rc=1`，载体 0 行（文件根本没被创建）；
+  **同一输入换成 40-hex ⇒ `rc=0`，载体 1 行带锚记录**（正控制——证明负控制不是恒拒）。
+- 另：`write_ac203_record` 自身的读数校验（`driver_alive=0`）仍拒写：`ac203-record(dead-driver) refused=1`。
+- 调用点不吞：`step4_driver_liveness` 里 rc≠0 时打印
+  `NOTE: AC-203 record NOT written (fail-closed: BUILD_SHA missing/non-40-hex or AC89 path empty — 缺值≠合格)`
+  ——**不写但也不静默**（硬规则 3b），且⛔ 不中止后续步骤（缺锚不得伪装成「脚本崩了」）。
+
+**AC5 同族防复发（机械枚举，⛔ 非人工清点一次）**
+
+新增测试 `plugin/test/verify-deliver-coldstart.test.mjs` ：
+`AC5 — every AC-214 NEED ac's write point carries a freshness anchor (mechanical enumeration)`。
+
+- NEED 从 `goals/AC-214-*.md` 的 criterion **解析**（`NEED = [...]`），⛔ 不在此处复制一份（硬规则 4c）。
+- 逐条取该 ac 的**产出型写入语句**：先按反斜杠续行合成逻辑语句，**按位置**排除纯注释行（硬规则 2），
+  再用「产出谓词」（调 `ac89_append_goal009`，或 `printf` 重定向进 `$AC89`）排除 selfcheck 里的
+  `grep -q '"ac":"…"'` **断言**——它匹配 ac 字段但不是产出点。
+- 断言每条产出语句都带锚：经 `ac89_append_goal009`，或显式含顶层 `"build_sha":`（AC-201 的形态）。
+- **某条 ac 一条产出语句都找不到 ⇒ 判失败并点名**（无法断言其锚 ⇒ NOT-EVALUATED 不得与合格同形，硬规则 3b），
+  NEED 解析不出来同理——⛔ 不是静默跳过。
+
+两次运行（判据取假，硬规则 4c/5b）：
+
+```
+改前（git show HEAD:…verify-deliver-coldstart.sh 放回原位）:
+  ✖ AC5 — every AC-214 NEED ac's write point carries a freshness anchor (mechanical enumeration)
+  ℹ pass 0 / fail 1
+  GOAL-009-AC-203: write point lacks a top-level build_sha anchor ⇒ AC-214 reads it as NO evidence (exit 1):
+    printf '{"ts":"%s","ac":"GOAL-009-AC-203","host":"%s",…}\n'
+
+改后:
+  ✔ AC5 — every AC-214 NEED ac's write point carries a freshness anchor (mechanical enumeration)
+  ℹ tests 1 / pass 1 / fail 0
+```
+
+改前红**只点名 AC-203**（AC-201/205/207 两侧都过）⇒ 该检查不是「按构造恒红」，而是真的定位到了这一条。
+
+**AC6 镜像无漂移**
+
+`node --no-warnings --experimental-strip-types plugin/scripts/mirror-pair-drift-check.ts --root .` ⇒ `EXIT=0` /
+`mirror-pair-drift-check: PASS — every mirror pair matches or is allow-listed with an unchanged signature.`。
+本任务范围门内该检查同样 PASS。
+
+⚠️ **Touches 里 `packages/quay/plugin/scripts/verify-deliver-coldstart.sh` 不存在**——`ls packages/quay/` 无 `plugin/`
+目录、`git log -- packages/quay/plugin/…` 无任何历史；`find` 全仓只有 **1 份脚本 + 1 个测试**。本仓唯一的镜像对是
+`plugin/scripts/` ↔ `experiments/quay-perpetual-stream/scripts/`，本脚本在该对里**无成员**（`grep -c` = 0）
+⇒ **没有可同步的副本，Plan 第 3 步与那条 Touches 基于一个过期前提**。⛔ 未新造一个镜像去满足它
+（新造一份无人拥有的副本才是制造漂移）。Touches 保留原样（改 Touches 是派发后范围变更，不该由 worker 单方做）。
+
+**AC7 全量绿**
+
+本任务侧的直接读数：**本任务范围门 exit 0** 且目标测试文件 12/12 绿——
+
+```
+bash scripts/test.sh --for-task gap-ac203-record-lacks-build-sha-makes-ac214-permanently-unsatisfiable --allow-thin
+  ✔ AC5 — every AC-214 NEED ac's write point carries a freshness anchor (mechanical enumeration)
+  ℹ tests 12 / pass 12 / fail 0 / cancelled 0
+  EXIT=0
+```
+
+⚠️ **全量 `scripts/test.sh` 不由本 worker 跑**：dispatch prompt 明令「You do NOT run the suite」，全量 suite 是
+worker-driver 的 **fan-in suite 阶段**（在 ac-precheck 之后、ff 之前）机械执行的那一步；suite 红则 fan-in 拒 ff、
+本任务不落地。⇒ 本 AC 勾选时其全量读数的**机械核验责任在 fan-in**，本任务侧的证据是上面那次范围门。
