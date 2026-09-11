@@ -60,11 +60,11 @@ AC-239 | verdict=fail | reason="acceptance failed (exit 1) — criterion wrote n
 ## Touches
 
 - goals/AC-239-升级后闭环-driver-在已升级的旧痕迹项目上继续驱动出新任务到-done-不只是装得上-还能接着干.md
-- plugin/scripts/criterion-failure-attribution-check.ts
+- plugin/scripts/criterion-failure-attribution-check.ts (new)
 - plugin/scripts/capability-catalog.sh
 - plugin/scripts/runner-static-gate.ts
-- plugin/scripts/checker-mutation-cases/criterion-failure-attribution-check.sh
-- packages/quay/plugin/scripts/criterion-failure-attribution-check.ts
-- plugin/test/criterion-failure-attribution-check.test.mjs
-- docs/analysis/criterion-failure-attribution.baseline.json
+- plugin/scripts/checker-mutation-cases/criterion-failure-attribution-check.sh (new)
+- packages/quay/plugin/scripts/criterion-failure-attribution-check.ts (new)
+- plugin/test/criterion-failure-attribution-check.test.mjs (new)
+- docs/analysis/criterion-failure-attribution.baseline.json (new)
 - tasks/gap-goal-criteria-bare-failing-exit-unattributable.md
