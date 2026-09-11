@@ -106,6 +106,45 @@ master = 项目默认分支；develop = 任务板权威基线/worktree 分叉点
 
 **Out of scope**：不重做前两条同族任务已修的东西；⛔ 不在本任务里改 AC-239 的判据。
 
+## Plan（执行者按人裁定取证后落定的方案）
+
+**裁定：落地/合并基线的判定 = 本项目分支模式的 `develop` 角色，由 `quay init` 在目标项目里
+【建立】出来，而不是由机制去猜。**
+
+1. **取证结论（先做的三件事）**：
+   - 三处 `?? "develop"` 默认值**不是**同一个判定函数（三处独立字面量）；`fork-baseline.ts` 的
+     `--develop/--integration` 只管 **worktree 分叉基线**，与 fan-in 的 **merge target** 正交
+     （`fork-baseline.ts` 的 REF-AWARE OUTPUT 一节），所以本条的修法不是"接线既有函数"。
+   - 既有 `decideForkBaseline` 的输出在本仓库恰好也等于 `develop`，但它的语义是"任务从哪 fork"，
+     **不能**承担"落地基线可不可用"的判定。
+   - `anti-drift-touches-check.ts:119` 的 `git diff --name-only <mergeTarget>...HEAD` 是唯一把
+     基线选择变成**硬失败**的地方——也是 AC-239 报告的出处。
+2. **兼容性谓词（本方案的判定核）**：`develop` 是 quay 的落地基线，当且仅当
+   **项目默认分支是它的祖先**（`git merge-base --is-ancestor <default> develop`）。
+   实测校准：本仓库 `master` 是 `develop` 的祖先（落后 17197 提交）⇒ COMPATIBLE；
+   meta-cc 副本 `main` 不是它那个 `develop` 的祖先 ⇒ DIVERGENT。
+3. **三态以上，绝不两态**（硬规则 3b）：分类结果为
+   `absent` / `compatible` / `divergent` / `unreadable`，**`unreadable` 独立取值**，
+   ⛔ 既不等于 compatible 也不等于 divergent（读不懂 ⇒ 不判）。
+4. **可判定的处理**（人裁定明确要求"不能悄悄复用同名分支"）：
+   - `absent` ⇒ 在默认分支 tip 建出来（`git branch develop <default>`）；
+   - `compatible` ⇒ 原地不动（本仓库行为逐字不变）；
+   - `divergent` ⇒ **默认 fail-closed 拒绝**，树保持原样、什么都不写，并给出 remedy；
+     显式 `quay init --adopt-branch-model` 时，把旧 tip 保留为 `<branch>-pre-quay-init-<sha>`
+     再把该分支指到默认分支 tip（**零销毁**，两个状态都可复核）。
+   - `author`（doc-only 分支）只 create-if-absent：它天然可能领先 develop，其分歧是
+     `driver-filters.ts` 的双向同步常态，**不是** provisioning 阻断。
+5. **不引入新的分支名字面量**：`develop` / `author` 就是 shipped 机制与 `.quay/config.yml`
+   `fork_baseline` **已经在用的那两个**名字；本方案把它们**定义在一处**
+   （`packages/quay/src/branch-model.ts` 的 `LANDING_BASELINE_ROLE` / `DOC_BRANCH_ROLE`），
+   ⛔ 没有新增 `main`/`master`/项目名之类的第三条字面量，master 角色由项目既有默认分支填充、
+   `quay init` 不重命名也不复制它。
+6. **判据变可观**：`anti-drift-touches-check.ts` 在算 diff **之前**先分类基线；`divergent` 时
+   报 `BASELINE-MISMATCH`（独立退出码 3）并给出 remedy，**不再**把它折叠成
+   "N violation(s)" 那种把基线缺陷记到任务头上的读数（成因载体必须可区分）。
+   在任务 worktree 里检测默认分支时必须 `allowCurrentBranch: false`——那里的 HEAD 是
+   `task/<id>`，拿它当默认分支会把**每一次健康 fan-in** 误判成 foreign fork。
+
 ## Acceptance Criteria
 
 - [ ] 用一个**真实项目形态**（有分叉 `develop`、主线是 `main`）复现：任务在该项目里被 driver 驱动到
@@ -139,3 +178,7 @@ master = 项目默认分支；develop = 任务板权威基线/worktree 分叉点
 - tasks/gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing.md
 - packages/quay/src/init.ts
 - packages/quay/src/cli/init.ts
+- packages/quay/src/branch-model.ts
+- packages/quay/test/branch-model.test.mjs
+- packages/quay/test/init.test.mjs
+- experiments/quay-perpetual-stream/test/anti-drift-touches-check.test.mjs
