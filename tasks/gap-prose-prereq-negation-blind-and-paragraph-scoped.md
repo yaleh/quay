@@ -18,8 +18,8 @@ extra:
 
 | 任务 | 触发词所在句 | 被误判的 id 数 | 代价 |
 |---|---|---|---|
-| `gap-outer-retirement-test-pins-a-file-that-is-no-longer-orphaned` | 「⛔ **不作为本任务的阻塞**」 | 3 | 卡 todo，期间该任务正是全套件确定性红的唯一修复 |
-| `gap-ac240-e2e-closure-same-run-pairing` | 「⛔ **不另立 `depends_on` 边**（它们不改变「配对」这一性质）」 | 5 | 卡 todo，需人工改写措辞才解锁 |
+| gap-outer-retirement-test-pins-a-file-that-is-no-longer-orphaned | 「⛔ **不作为本任务的阻塞**」 | 3 | 卡 todo，期间该任务正是全套件确定性红的唯一修复 |
+| gap-ac240-e2e-closure-same-run-pairing | 「⛔ **不另立 `depends_on` 边**（它们不改变「配对」这一性质）」 | 5 | 卡 todo，需人工改写措辞才解锁 |
 
 **两句都是【明确否认前置】的话，却被读成【声明了前置】。**
 
@@ -48,7 +48,7 @@ for (let i = 0; i < paras.length; i++) {
 
 ### 前一次修复放大了这个面
 
-`60afce8b0 prosePrereqGap: widen keyword gate to 阻塞 + accept backtick task-id citations`（任务 `gap-prose-prereq-detector-blind-to-repo-own-conventions`，done）把 `阻塞` 加进关键词集——**样本 1 的触发词正是这个新加的 `阻塞`**。⇒ 扩关键词集在降低漏报的同时放大了误报，而误报这一侧当时没有配套的收窄。本条不是重复立案：那条治的是「关键词太窄 + 反引号引用不被认」，本条治的是「作用域过粗 + 对否定盲」，方向相反。
+`60afce8b0 prosePrereqGap: widen keyword gate to 阻塞 + accept backtick task-id citations`（任务 gap-prose-prereq-detector-blind-to-repo-own-conventions，done）把 `阻塞` 加进关键词集——**样本 1 的触发词正是这个新加的 `阻塞`**。⇒ 扩关键词集在降低漏报的同时放大了误报，而误报这一侧当时没有配套的收窄。本条不是重复立案：那条治的是「关键词太窄 + 反引号引用不被认」，本条治的是「作用域过粗 + 对否定盲」，方向相反。
 
 ### 为什么代价不可见
 
@@ -66,7 +66,7 @@ for (let i = 0; i < paras.length; i++) {
 
 - [ ] AC1 缺陷存证（改前读数）：贴两个样本各自的触发句原文与被误判的 id 列表；并贴 `prosePrereqRefs` 里 `paras.split` + `PREREQ_KEYWORD_RE.test(para)` + `para.matchAll(BACKTICK_ID_RE)` 三行，说明作用域是整段。
 - [ ] AC2 同句约束（能取假）：构造两条夹具任务体——① 关键词与 id **同句** ⇒ 仍被判为前置；② 关键词与 id **同段不同句** ⇒ **不**被判。两个方向各贴读数。
-- [ ] AC3 否定被认（能取假）：夹具「⛔ 不另立 depends_on 边：`gap-x`」⇒ 不判为前置；去掉否定词变「依赖 `gap-x` 先落地」⇒ 判为前置。贴两次读数。
+- [ ] AC3 否定被认（能取假）：夹具「⛔ 不另立 depends_on 边：gap-x」⇒ 不判为前置；去掉否定词变「依赖 gap-x 先落地」⇒ 判为前置。贴两次读数。
 - [ ] AC4 查重回链豁免：按 Plan 3 的标记写一段含 3 个 id 的回链 ⇒ 三者均不计为前置；把标记去掉 ⇒ 恢复原判定。贴两次读数。
 - [ ] AC5 skill 已同步：`plugin/skills/quay-file-task/SKILL.md`（或其正本）写明该标记形态；`grep` 命中 ≥1 并贴出。⛔ 只改检测器不改 skill ⇒ 本条不算完成。
 - [ ] AC6 真前置仍被抓（防改成恒绿）：取一条**真**声明前置却未写 `depends_on` 的夹具 ⇒ 仍被判为 prosePrereqGap 且任务不 eligible。贴读数——⛔ 这是本任务最关键的负控制。
