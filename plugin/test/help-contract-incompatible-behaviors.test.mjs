@@ -26,8 +26,14 @@
 //         a real __PERFILE__ log fixture is pointed at a temp --history/--log; the file must not
 //         be created).
 //
-// Runs in the `serial` phase (concurrency 1): it spawns ~160 child processes and compares an mtime
-// SET across the sweep, so it must not race another test writing to the shared worktree.
+// Runs in the `engine` group (@test-group above — the authoritative declaration; this line used to
+// claim "serial phase, concurrency 1" and was NOT updated by fabe76d82, the 2026-09-05
+// reclassification that moved it serial → engine). It spawns ~160 child processes and compares an
+// mtime SET across the sweep, so a CONCURRENT writer to the shared worktree's `.quay/` is the one
+// thing it cannot tolerate — under concurrency 1 that premise held by construction, under the
+// concurrent group it holds only because the exclusion set above is COMPLETE. That gap is what
+// produced the 2026-09-11 false red (see SUITE_HARNESS_CACHE_FILES): a reclassification must carry
+// its exclusion-set audit with it, or this control's red stops meaning "a checker has a side effect".
 //
 // Run:
 //   scripts/test.sh plugin/test/help-contract-incompatible-behaviors.test.mjs
