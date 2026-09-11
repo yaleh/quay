@@ -64,6 +64,13 @@
 #                  lines into <repo>/.quay/productization-verification.jsonl (dedup on
 #                  (ts,ac,host,project_root)). A host that produces no evidence ⇒ NOT-EVALUATED +
 #                  exit 1 (硬规则 3b). Distinct from the deliver mode (no http/usage surface verify).
+#     --verify-upgrade --upgrade-source <rel-to-$HOME>   GOAL-009-AC-238: the SAME transport, but the
+#                  remote script runs --upgrade-existing against an ISOLATED COPY of an AGED real
+#                  third-party project (already has .quay/config.yml + real tasks/ + an old vendored
+#                  .quay/runtime/bin/*) instead of a fresh quay-init target. Only the
+#                  ac=GOAL-009-AC-238 record is transported + dedup-appended; a host that produces no
+#                  such record ⇒ NOT-EVALUATED + exit 1. ⛔ The source project is only cp -a'd (read),
+#                  never written — the live project's backlog is untouched.
 #     --ac207-e2e     (with --verify-coldstart) additionally run the GOAL-009-AC-207 end-to-end step
 #                  on each host: scp the driving repo's .quay/profiles.yml (so the target project's
 #                  worker-default launcher/model/auth derive from the single source of truth), put
@@ -92,6 +99,8 @@ check_only=0
 max_age=21600   # low-frequency hold: don't re-deliver within this many seconds of the last deliver (6h)
 selfcheck=0
 verify_coldstart=0
+verify_upgrade=0  # 1 = GOAL-009-AC-238: upgrade an ISOLATED COPY of an AGED third-party project (not a fresh quay-init)
+upgrade_source="" # --upgrade-source: path RELATIVE TO $HOME on the remote host of the aged project to copy (read-only)
 ac207_e2e=0       # 1 = also run the GOAL-009-AC-207 end-to-end step on each host (expensive: worker-driver spawns a real worker)
 selfcheck_evidence=0
 selfcheck_evidence_scenario="both"
@@ -105,6 +114,8 @@ while [ $# -gt 0 ]; do
     --max-age) max_age="$2"; shift 2 ;;
     --selfcheck) selfcheck=1; shift ;;
     --verify-coldstart) verify_coldstart=1; shift ;;
+    --verify-upgrade) verify_upgrade=1; shift ;;
+    --upgrade-source) upgrade_source="$2"; shift 2 ;;
     --ac207-e2e) ac207_e2e=1; shift ;;
     --selfcheck-evidence)
       selfcheck_evidence=1
@@ -766,6 +777,128 @@ REMOTE
   echo "develop-deliver: --verify-coldstart OK — evidence transported into ${local_carrier}"
   return 0
 }
+
+# ── verify_upgrade_mode — GOAL-009-AC-238：既有旧痕迹项目的升级路径取证 ────────────────────────
+# 与 verify_coldstart_mode 的区别是本质的：那条跑远端 ② 的「rm -rf $ROOT 后全新 quay-init」
+# （GOAL-009 现有 9 条 AC 的证据全部出自该形态的一次性靶子）；本模式把远端脚本切到
+# --upgrade-existing，对一个【已经跑过 quay-native、带真实存量数据 + 旧版本 vendored runtime】的
+# 真实第三方项目做【隔离副本】升级，只取回 ac=GOAL-009-AC-238 那一条记录。
+# ⛔ upgrade_source 是【远端】路径（相对 $HOME），副本在该主机上创建；源目录只被 cp -a 读，从不写。
+verify_upgrade_mode() {
+  local build_date local_carrier fail hk target remote_script out remote_rc remote_log remote_evidence evidence_local ck_rc
+  build_date="$(git -C "${repo_root}" log -1 --format=%cI refs/heads/develop 2>/dev/null || echo "")"
+  local_carrier="${repo_root}/.quay/productization-verification.jsonl"
+  echo "develop-deliver: --verify-upgrade develop=${develop_tip:0:12} build_date=${build_date} source=\$HOME/${upgrade_source:-<unset>}"
+  if [ -z "${upgrade_source}" ]; then
+    echo "develop-deliver: --verify-upgrade requires --upgrade-source <path relative to \$HOME on the remote host>" >&2
+    return 2
+  fi
+  fail=0
+  for hk in ${hosts}; do
+    target="${host_target[$hk]:-}"
+    if [ -z "${target}" ]; then
+      echo "develop-deliver: ${hk} — unknown host key (NOT-EVALUATED)"
+      fail=1
+      continue
+    fi
+    echo "develop-deliver: ${hk} (${target}) — scp verify-deliver-coldstart.sh + \$SCRIPT_DIR siblings + both .tgz"
+    # 同 verify_coldstart_mode：\$SCRIPT_DIR 的兄弟依赖必须一并 scp，否则远端在 set -e 下于写证据前夭折
+    # （显式枚举，不 tar —— 新增一个 \$SCRIPT_DIR 依赖是一次显式编辑，不是一次静默的远端失败）。
+    if ! scp "${ssh_opts[@]}" \
+        "${SCRIPT_DIR}/verify-deliver-coldstart.sh" \
+        "${SCRIPT_DIR}/pane-state-classify.ts" \
+        "${SCRIPT_DIR}/quay-init-closure-assertion.ts" \
+        "${SCRIPT_DIR}/gate-script-base.ts" \
+        "${SCRIPT_DIR}/repo-root.ts" \
+        "${SCRIPT_DIR}/runner-state-write.ts" \
+        "${SCRIPT_DIR}/write-json-atomic.ts" \
+        "${SCRIPT_DIR}/../../orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md" \
+        "${quay_tgz}" "${qn_tgz}" "${target}:~/" >/dev/null 2>&1; then
+      echo "develop-deliver: ${hk} (${target}) — scp FAILED (NOT-EVALUATED)"
+      fail=1
+      continue
+    fi
+    remote_script=$(cat <<REMOTE
+EV="\${HOME}/quay-verify-upgrade-evidence-${develop_tip:0:8}.jsonl"
+rm -f "\${EV}"
+bash "\${HOME}/verify-deliver-coldstart.sh" \
+  --tgz "\${HOME}/$(basename "${quay_tgz}")" \
+  --tgz-native "\${HOME}/$(basename "${qn_tgz}")" \
+  --build-sha "${develop_tip}" \
+  --build-date "${build_date}" \
+  --host "${hk}" \
+  --ac89 "\${EV}" \
+  --evidence "\${HOME}/quay-verify-upgrade-evidence-${develop_tip:0:8}.json" \
+  --prefix "\${HOME}/quay-verify-upgrade-${develop_tip:0:8}.npm" \
+  --project "quay-verify-upgrade-${develop_tip:0:8}" \
+  --root "\${HOME}/quay-verify-upgrade-${develop_tip:0:8}-root" \
+  --upgrade-existing \
+  --upgrade-source "\${HOME}/${upgrade_source}"
+RC=\$?
+echo "VERIFY-RC \${RC}"
+if [ -f "\${EV}" ]; then
+  echo "EVIDENCE-PATH \${EV}"
+  echo "EVIDENCE-LINES \$(wc -l < "\${EV}")"
+else
+  echo "EVIDENCE-ABSENT \${EV}"
+fi
+REMOTE
+)
+    set +e
+    out="$(ssh "${ssh_opts[@]}" "${target}" "bash -s" <<< "${remote_script}" 2>&1)"
+    remote_rc=$?
+    set -e
+    remote_log="${repo_root}/.quay/verify-upgrade-remote-${hk}-${develop_tip:0:8}.log"
+    mkdir -p "$(dirname "${remote_log}")"
+    printf '%s\n' "${out}" > "${remote_log}"
+    echo "develop-deliver: ${hk} (${target}) remote stdout persisted → ${remote_log} (rc=${remote_rc})"
+    remote_evidence="$(printf '%s\n' "${out}" | grep -oE 'EVIDENCE-PATH .*' | tail -1 | sed 's/^EVIDENCE-PATH //' || echo "")"
+    if [ -z "${remote_evidence}" ]; then
+      echo "develop-deliver: ${hk} (${target}) — NOT-EVALUATED (remote produced no evidence path)"
+      printf '%s\n' "${out}" | tail -12
+      fail=1
+      continue
+    fi
+    evidence_local="${repo_root}/.quay/verify-upgrade-evidence-${hk}-${develop_tip:0:8}.jsonl"
+    rm -f "${evidence_local}"
+    if ! scp "${ssh_opts[@]}" "${target}:${remote_evidence}" "${evidence_local}" >/dev/null 2>&1; then
+      echo "develop-deliver: ${hk} (${target}) — evidence scp-back FAILED (NOT-EVALUATED)"
+      fail=1
+      continue
+    fi
+    if ! transport_evidence_append "${local_carrier}" "${evidence_local}"; then
+      echo "develop-deliver: ${hk} (${target}) — evidence NOT-EVALUATED (no transport)"
+      rm -f "${evidence_local}"
+      fail=1
+      continue
+    fi
+    # 传输成功 ≠ 产出完整：按 ac 种类核对取回的内容里确有 AC-238 那一条（硬规则 3b 同族）。
+    check_evidence_completeness "${evidence_local}" "GOAL-009-AC-238"
+    ck_rc=$?
+    if [ "${ck_rc}" != "0" ]; then
+      echo "develop-deliver: ${hk} (${target}) — NOT-EVALUATED (ac=GOAL-009-AC-238 absent from transported evidence)"
+      fail=1
+    else
+      echo "develop-deliver: ${hk} (${target}) — ac=GOAL-009-AC-238 transported into ${local_carrier} ✓"
+    fi
+    rm -f "${evidence_local}"
+  done
+  git -C "${repo_root}" worktree remove --force "${wt}" 2>/dev/null || rm -rf "${wt}"
+  if [ "${fail}" -eq 1 ]; then
+    echo "develop-deliver: --verify-upgrade FAILED (a host produced no AC-238 record — see per-host lines above)" >&2
+    return 1
+  fi
+  echo "develop-deliver: --verify-upgrade OK — GOAL-009-AC-238 record transported into ${local_carrier}"
+  return 0
+}
+
+if [ "${verify_upgrade}" -eq 1 ]; then
+  if ! build_develop_tgz; then
+    exit 1
+  fi
+  verify_upgrade_mode
+  exit $?
+fi
 
 if [ "${verify_coldstart}" -eq 1 ]; then
   if ! build_develop_tgz; then
