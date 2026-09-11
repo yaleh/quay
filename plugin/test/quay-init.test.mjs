@@ -21,6 +21,7 @@
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -261,5 +262,177 @@ test("AC3 — a mid-write failure lists the seven-item written/unwritten state",
       assert.match(combined, new RegExp(`unwritten:\\s*${p.replace(/\./g, "\\.")}`),
         `the report must mark ${p} unwritten`);
     }
+  } finally { cleanup(ws); }
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// UPGRADE PATH — the RETIRED project-local runtime (gap-upgrade-leaves-legacy-project-runtime-stale-
+// and-unmigrated). Every fixture below is a NON-EMPTY legacy target: it already carries a
+// `.quay/config.yml` AND a populated `.quay/runtime/**` (the state a real pre-2026-09 install left
+// behind). The pre-existing fixtures in this file are empty dirs, which is exactly why the defect
+// this section covers was structurally unreachable from the suite before.
+//
+// RULING under test (AC1, option c): the plugin is the single delivery surface for the runtime, so
+// the upgrade migrates the provider binding to THIS delivery's vendored bundle (an ABSOLUTE path
+// under $PLUGIN_ROOT) and retires the now-unreferenced stale project-local copy — which no product
+// path updated any more, so it silently looked like the runtime while nothing maintained it.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+// The bundles the plugin DELIVERS — what the migration must point the binding at.
+const DELIVERED_NATIVE = path.join(pluginDir, "vendor", "quay-native", "dist", "quay-native.js");
+const DELIVERED_CORE = path.join(pluginDir, "vendor", "quay", "dist", "quay.js");
+
+function sha256(p) { return crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex"); }
+
+// treeHashes — { relPath: sha256 } for every file under `root` ({} when root is absent). Used as the
+// AC3 "逐字节不变" instrument: a content-addressed snapshot of the whole subtree, not a file count.
+function treeHashes(root) {
+  const out = {};
+  if (!fs.existsSync(root)) return out;
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else out[path.relative(root, p)] = sha256(p);
+    }
+  };
+  walk(root);
+  return out;
+}
+
+// makeLegacyWs — a NON-EMPTY legacy target: populated `.quay/runtime/bin/*`, an EXISTING config
+// whose provider block is the caller's, and a `.gitignore` carrying the retired runtime entry.
+// `stale: true` perturbs the project-local bundles so they differ from what the plugin delivers
+// (the real-world case: a bundle vendored on an older date); `stale: false` copies them verbatim
+// (a byte-current copy — the AC3 input).
+function makeLegacyWs(ws, { config, stale }) {
+  const bin = path.join(ws, ".quay", "runtime", "bin");
+  fs.mkdirSync(bin, { recursive: true });
+  fs.mkdirSync(path.join(ws, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(ws, "goals"), { recursive: true });
+  fs.writeFileSync(path.join(ws, ".gitignore"), "# quay runtime (install-generated, not source)\n.quay/runtime/\n");
+  for (const [name, src] of [["quay-native.js", DELIVERED_NATIVE], ["quay.js", DELIVERED_CORE]]) {
+    assert.ok(fs.existsSync(src), `fixture precondition: the plugin must DELIVER ${src} (scripts/test.sh mirrors it via sync-vendor.sh --sync-dist)`);
+    fs.copyFileSync(src, path.join(bin, name));
+    if (stale) {
+      // A real stale bundle is not byte-identical to the delivery. Append a marker inside the
+      // bundle's own text so the difference is a genuine content difference (not an mtime).
+      fs.appendFileSync(path.join(bin, name), "\n// vendored 2026-08-20 (older than the current delivery)\n");
+    }
+  }
+  fs.writeFileSync(path.join(ws, ".quay", "config.yml"), config);
+}
+
+// migrateLines — the migration/retirement report lines from a run (the AC1 "可从产物上观察到"
+// surface). Returns them so a test asserts on the DEMONSTRATED behavior, not just the end state.
+function migrateLines(r) {
+  return (r.stdout + "\n" + r.stderr).split("\n").filter((l) => /migrated:|retired-orphan-runtime:|kept-/.test(l));
+}
+
+// resolvedMcpEntry — the `mcp_entry` list as written by the upgrade (the config is re-dumped in
+// block style by ensure_loop_config, so the two canonical shapes are `- node\n- <path>\n- mcp`).
+function resolvedMcpEntry(cfgText) {
+  const m = cfgText.match(/mcp_entry:\n((?:[ \t]*- .*\n)+)/);
+  assert.ok(m, `the upgraded config must carry an mcp_entry list:\n${cfgText}`);
+  return m[1].trimEnd().split("\n").map((l) => l.trim().replace(/^- /, ""));
+}
+
+test("AC1/AC2 — legacy bare-PATH project: upgrade migrates the binding to the delivered runtime and retires the stale .quay/runtime/", () => {
+  const ws = makeTmp();
+  try {
+    makeLegacyWs(ws, {
+      stale: true,
+      config: 'providers:\n  native:\n    enabled: true\n    path: "."\n    tasks_dir: "./tasks"\n    mcp_entry: ["quay-native", "mcp"]\n',
+    });
+    const rt = path.join(ws, ".quay", "runtime");
+    // PRECONDITION (AC4): the target must be NON-EMPTY. If a future edit "simplifies" this fixture
+    // to an empty dir, the test would silently stop exercising the branch — so assert the shape.
+    assert.ok(Object.keys(treeHashes(rt)).length > 0, "fixture precondition: the target must be NON-EMPTY (empty-dir fixtures cannot reach the upgrade branch)");
+
+    const r = runInit(ws, INIT_ARGS(ws));
+    assert.equal(r.status, 0, `the upgrade must exit 0:\n${r.stdout}${r.stderr}`);
+
+    // AC2 — the executed binding is no longer a PATH lookup: it is THIS delivery's absolute bundle,
+    // and it resolves to a real file whose bytes ARE the delivered bundle.
+    const cfg = fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8");
+    const entry = resolvedMcpEntry(cfg);
+    assert.deepEqual(entry.slice(0, 2), ["node", DELIVERED_NATIVE],
+      `the bare PATH form must be migrated to the delivered absolute runtime (got ${JSON.stringify(entry)})`);
+    assert.ok(fs.existsSync(entry[1]), `the migrated mcp_entry must resolve to an existing executable: ${entry[1]}`);
+    assert.equal(sha256(entry[1]), sha256(DELIVERED_NATIVE), "the migrated binding must be byte-identical to this delivery's bundle (traceable, not 'whatever $PATH holds')");
+
+    // AC1 — the retired project-local copy is gone from its old location, reversibly (backed up).
+    assert.ok(!fs.existsSync(rt), "the unreferenced stale project-local runtime must be retired");
+    const backups = fs.existsSync(path.join(ws, ".quay", "quay-init-backups"))
+      ? fs.readdirSync(path.join(ws, ".quay", "quay-init-backups")) : [];
+    assert.ok(backups.length > 0, "the retirement must be reversible — a backup dir must exist (never a silent delete)");
+    const backedUp = backups.some((ts) => fs.existsSync(path.join(ws, ".quay", "quay-init-backups", ts, "runtime", "bin", "quay-native.js")));
+    assert.ok(backedUp, `the retired runtime must have been MOVED to a backup, not deleted (backups: ${backups.join(", ")})`);
+
+    // The behavior is observable in the report, not only inferable from the end state.
+    const lines = migrateLines(r).join("\n");
+    assert.match(lines, /migrated: mcp_entry bare PATH reference/, `the report must name the bare-PATH migration:\n${lines}`);
+    assert.match(lines, /retired-orphan-runtime:/, `the report must name the retirement:\n${lines}`);
+  } finally { cleanup(ws); }
+});
+
+test("AC2 — an ABSOLUTE binding to a STALE project-local runtime is migrated too (the control that makes AC3 falsifiable)", () => {
+  // A project whose binding is ALREADY absolute can still be pinned to a copy this delivery
+  // superseded. This is the discriminating control for the AC3 test below: it proves the fixture
+  // CLASS is touchable, so AC3's "nothing changed" cannot be an artifact of the branch never firing.
+  const ws = makeTmp();
+  try {
+    makeLegacyWs(ws, {
+      stale: true,
+      config: `providers:\n  native:\n    enabled: true\n    path: "${ws}/.quay/runtime"\n    tasks_dir: "./tasks"\n    mcp_entry: ["node", "${ws}/.quay/runtime/bin/quay-native.js", "mcp"]\n`,
+    });
+    const rt = path.join(ws, ".quay", "runtime");
+    assert.ok(fs.existsSync(path.join(rt, "bin", "quay-native.js")), "fixture precondition: NON-EMPTY legacy target");
+
+    const r = runInit(ws, INIT_ARGS(ws));
+    assert.equal(r.status, 0, `the upgrade must exit 0:\n${r.stdout}${r.stderr}`);
+
+    const cfg = fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8");
+    const entry = resolvedMcpEntry(cfg);
+    assert.deepEqual(entry.slice(0, 2), ["node", DELIVERED_NATIVE],
+      `a STALE project-local binding must be migrated to the delivery (got ${JSON.stringify(entry)})`);
+    assert.ok(!fs.existsSync(rt), "the superseded project-local runtime must be retired");
+    assert.match(migrateLines(r).join("\n"), /stale retired project-local runtime/,
+      "the report must name WHY it was migrated (stale vs this delivery)");
+  } finally { cleanup(ws); }
+});
+
+test("AC3 — a byte-current .quay/runtime/ + an already-absolute mcp_entry: the upgrade is a byte-identical no-op", () => {
+  // NEGATIVE CONTROL (硬规则 4 / AC3「能取假」). Input: the project-local runtime is byte-identical
+  // to what the plugin delivers, and the binding is already an absolute path. Nothing needs fixing,
+  // so nothing may be rewritten or deleted. This assertion CAN turn red: (a) an implementation that
+  // always re-points the binding at the plugin runtime, or (b) one that always clears
+  // `.quay/runtime/` regardless of staleness, or (c) one that re-dumps the config unconditionally
+  // (the yaml re-serialization alone would mutate the provider block's textual form). The sibling
+  // AC2 test above shows the SAME fixture class IS touched when the copy is genuinely stale — so a
+  // green here is a real "no gratuitous change", not a branch that never runs.
+  const ws = makeTmp();
+  const wt = diskWorktreeRoot();
+  try {
+    makeLegacyWs(ws, {
+      stale: false,
+      config: `providers:\n  native:\n    enabled: true\n    path: "${ws}/.quay/runtime"\n    tasks_dir: "./tasks"\n    mcp_entry: ["node", "${ws}/.quay/runtime/bin/quay-native.js", "mcp"]\nloop:\n  repo_root: "${ws}"\n  test_command: node --test\n  tmux_session: proj-0:0.0\n  worktree_root: ${wt}\n`,
+    });
+    const rt = path.join(ws, ".quay", "runtime");
+    const cfgPath = path.join(ws, ".quay", "config.yml");
+    const beforeRt = treeHashes(rt);
+    assert.ok(Object.keys(beforeRt).length > 0, "fixture precondition: NON-EMPTY runtime dir");
+    // The fixture must genuinely BE current, else this control degenerates into the AC2 case.
+    assert.equal(beforeRt["bin/quay-native.js"], sha256(DELIVERED_NATIVE), "fixture precondition: the project-local bundle must be byte-identical to the delivery");
+    const beforeCfg = fs.readFileSync(cfgPath);
+
+    // The loop values are passed identically to what the fixture already carries, so the loop merge
+    // is a value-level no-op too — the only remaining way the file could change is a gratuitous write.
+    const r = runInit(ws, [...INIT_ARGS(ws), "--worktree-root", wt]);
+    assert.equal(r.status, 0, `the upgrade must exit 0:\n${r.stdout}${r.stderr}`);
+
+    assert.deepEqual(treeHashes(rt), beforeRt, "AC3: a byte-current .quay/runtime/ must survive the upgrade byte-for-byte");
+    assert.deepEqual(fs.readFileSync(cfgPath), beforeCfg, "AC3: the config — mcp_entry included — must survive the upgrade byte-for-byte");
+    assert.match(r.stdout, /kept-runtime-copy:/, "the report must state that the current copy was deliberately left alone");
   } finally { cleanup(ws); }
 });
