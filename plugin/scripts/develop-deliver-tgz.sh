@@ -64,6 +64,12 @@
 #                  lines into <repo>/.quay/productization-verification.jsonl (dedup on
 #                  (ts,ac,host,project_root)). A host that produces no evidence ⇒ NOT-EVALUATED +
 #                  exit 1 (硬规则 3b). Distinct from the deliver mode (no http/usage surface verify).
+#     --ac207-e2e     (with --verify-coldstart) additionally run the GOAL-009-AC-207 end-to-end step
+#                  on each host: scp the driving repo's .quay/profiles.yml (so the target project's
+#                  worker-default launcher/model/auth derive from the single source of truth), put
+#                  ~/.local/bin on the remote PATH, and pass --ac207-e2e + --driving-profiles to the
+#                  remote verify. Expensive: the worker-driver spawns a real worker (claude-fjdac -p)
+#                  that does a full implementation → fan-in → suite (up to AC207_POLL_SECS).
 #     --selfcheck-evidence [positive|negative|both]  hermetic controls of the evidence-transport
 #                  append/dedup function (offline, no build/scp/ssh) — the AC5 negative/positive
 #                  controls of gap-third-party-evidence-…, exit 0/1
@@ -86,6 +92,7 @@ check_only=0
 max_age=21600   # low-frequency hold: don't re-deliver within this many seconds of the last deliver (6h)
 selfcheck=0
 verify_coldstart=0
+ac207_e2e=0       # 1 = also run the GOAL-009-AC-207 end-to-end step on each host (expensive: worker-driver spawns a real worker)
 selfcheck_evidence=0
 selfcheck_evidence_scenario="both"
 selfcheck_evidence_completeness=0
@@ -98,6 +105,7 @@ while [ $# -gt 0 ]; do
     --max-age) max_age="$2"; shift 2 ;;
     --selfcheck) selfcheck=1; shift ;;
     --verify-coldstart) verify_coldstart=1; shift ;;
+    --ac207-e2e) ac207_e2e=1; shift ;;
     --selfcheck-evidence)
       selfcheck_evidence=1
       case "${2:-}" in positive|negative|both) selfcheck_evidence_scenario="$2"; shift 2 ;; *) shift ;; esac
@@ -615,7 +623,7 @@ build_develop_tgz() {
 # file (verify failed before writing / scp-back failed) is NOT-EVALUATED and the run exits non-zero
 # (硬规则 3b — never a silent exit 0 on "no evidence").
 verify_coldstart_mode() {
-  local build_date local_carrier fail partial hk target remote_script out remote_rc remote_evidence remote_lines evidence_local ck_rc
+  local build_date local_carrier fail partial hk target remote_script out remote_rc remote_evidence remote_lines evidence_local ck_rc ac207_extra ac207_path_export
   build_date="$(git -C "${repo_root}" log -1 --format=%cI refs/heads/develop 2>/dev/null || echo "")"
   local_carrier="${repo_root}/.quay/productization-verification.jsonl"
   echo "develop-deliver: --verify-coldstart develop=${develop_tip:0:12} build_date=${build_date} carrier=${local_carrier}"
@@ -652,7 +660,28 @@ verify_coldstart_mode() {
       fail=1
       continue
     fi
+    # --ac207-e2e: the target project's worker must actually spawn, which needs (a) the driving repo's
+    # .quay/profiles.yml on the remote so resolve_driving_profiles can derive worker-default
+    # launcher/model/auth (single source of truth, 硬规则 4c — ⛔ not a second hardcoded copy here), and
+    # (b) ~/.local/bin on PATH so the claude-fjdac/claude wrappers resolve (the ssh non-interactive PATH
+    # has neither). Built into the remote script below; both are literal-inserted (single-quoted value,
+    # so $HOME/$PATH stay literal and expand on the remote, not here).
+    ac207_extra=""
+    ac207_path_export=""
+    if [ "${ac207_e2e}" -eq 1 ]; then
+      if ! scp "${ssh_opts[@]}" "${repo_root}/.quay/profiles.yml" "${target}:~/quay-driving-profiles.yml" >/dev/null 2>&1; then
+        echo "develop-deliver: ${hk} (${target}) — driving-profiles scp FAILED (NOT-EVALUATED)"
+        fail=1
+        continue
+      fi
+      # AC207_POLL_SECS: the e2e task's first worker attempt can fail the fan-in suite cert (non-inert
+      # delta) and need a retry, pushing task-done past the verify script's 1800s default poll window
+      # (实测 2026-09-11: done@~30min, poll 1800s 过期 ~19s 早 → 记录未写)。3600s 给足双次尝试余量。
+      ac207_path_export='export PATH="$HOME/.local/bin:$PATH"; export AC207_POLL_SECS="${AC207_POLL_SECS:-3600}"'
+      ac207_extra=' --ac207-e2e --driving-profiles "$HOME/quay-driving-profiles.yml"'
+    fi
     remote_script=$(cat <<REMOTE
+${ac207_path_export}
 EV="\${HOME}/quay-verify-coldstart-evidence-${develop_tip:0:8}.jsonl"
 rm -f "\${EV}"
 bash "\${HOME}/verify-deliver-coldstart.sh" \
@@ -667,7 +696,7 @@ bash "\${HOME}/verify-deliver-coldstart.sh" \
   --project "quay-verify-coldstart-${develop_tip:0:8}" \
   --root "\${HOME}/quay-verify-coldstart-${develop_tip:0:8}-root" \
   --worktree-root "\${HOME}/quay-verify-coldstart-${develop_tip:0:8}-worktrees" \
-  --ac205-session
+  --ac205-session${ac207_extra}
 RC=\$?
 echo "VERIFY-RC \${RC}"
 if [ -f "\${EV}" ]; then
