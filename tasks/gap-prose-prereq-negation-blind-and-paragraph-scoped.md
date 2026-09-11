@@ -2,7 +2,7 @@
 id: gap-prose-prereq-negation-blind-and-paragraph-scoped
 title: prosePrereqGap 按整段判且对否定盲：一句「⛔ 不另立 depends_on 边」把同段 5 个查重回链 id 全判成未声明前置 ⇒
   任务静默卡 todo，而查重回链正是立案 skill 强制要求写的
-status: todo
+status: ready
 labels:
   - gap
   - defect
