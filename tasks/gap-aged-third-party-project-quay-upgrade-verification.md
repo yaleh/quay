@@ -74,6 +74,7 @@ orangevps 磁盘 94% 满、6 组孤儿 `ac207-*` driver 进程未清理的问题
 
 - `plugin/scripts/develop-deliver-tgz.sh`
 - `plugin/scripts/verify-deliver-coldstart.sh`
+- `tasks/gap-aged-third-party-project-quay-upgrade-verification.md`
 
 ## Plan
 
