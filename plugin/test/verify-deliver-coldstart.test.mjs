@@ -224,6 +224,15 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
     "positional judgment: a commit touching only tasks/ IS bookkeeping");
   assert.match(r.stdout, /ac207-is-bookkeeping\(marker-file\)=1/,
     "positional judgment: a commit touching e2e-marker.txt is NOT bookkeeping (same message text, different files — proves the judgment is positional)");
+  // AC3 — the read→judge→write single point (ac207_read_and_write) driven on a fixture third-party
+  // project, asserted by CARRIER LINE COUNT (not by a self-report): a bookkeeping-only history writes
+  // NOTHING (0 → 0) and leaves the distinguishable AC207-NO-IMPLEMENTATION-COMMIT trace; the same
+  // fixture plus one implementation commit writes exactly one record whose commit_files point outside
+  // the bookkeeping triplet. Same fixture, same product function ⇒ the negative isn't vacuously true.
+  assert.match(r.stdout, /ac207-e2e-write\(bookkeeping-only\) above=0 line=0 trace=1/,
+    "AC3 negative: a bookkeeping-only third-party project writes NO record (carrier lines 0→0) and leaves the AC207-NO-IMPLEMENTATION-COMMIT trace (⛔ not silent, ⛔ not a bookkeeping commit filling the slot)");
+  assert.match(r.stdout, /ac207-e2e-write\(with-impl-commit\) line=1 files=\["e2e-marker\.txt"\]/,
+    "AC3 positive counterpart: the same fixture + one implementation commit writes exactly one record with commit_files outside the bookkeeping triplet");
 });
 
 test("AC1 — --selfcheck is hermetic: it does not touch a real install and runs offline", () => {

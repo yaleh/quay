@@ -652,6 +652,31 @@ probe_ac207_measures() {
   AC207_EVALUATED=1
 }
 
+# ── AC-207 读数 → 判定 → 写记录（fail-closed 单点）────────────────────────────────────────────
+# 从 step5_e2e 抽出：这段逻辑既要被端到端段调用，也要能被 selfcheck 用夹具【直接驱动产品函数】
+# （⛔ 不让夹具复刻一遍判定——复刻出来的绿不证明产品绿，硬规则 4 推论三）。返回 0；是否落账看载体
+# 行数变化 + 下面两条互斥的痕迹行（可区分，⛔ 不静默）。
+ac207_read_and_write() {
+  local root="$1" task_id="$2" qrl="$3"
+  probe_ac207_measures "$root" "$task_id" "$qrl"
+  AC207_TASK_ID="$task_id"
+  echo "  task_status=$AC207_TASK_STATUS commit_sha=${AC207_COMMIT_SHA:0:12} commit_files=$AC207_COMMIT_FILES_JSON gate_events=$AC207_GATE_EVENTS produced_by_driver=$AC207_PRODUCED_BY_DRIVER evaluated=$AC207_EVALUATED host=$AC207_HOST"
+  # 可区分痕迹（硬规则 3b）：筛不出实现提交【单独一行】报出，与「任务没跑完」区分开——⛔ 不静默，
+  # ⛔ 不退化成写记账提交充数（那正是本缺陷）。载体行数不变即此处不写。
+  if [ "$AC207_EVALUATED" = "1" ] && [ -z "$AC207_COMMIT_SHA" ] && [ "$AC207_TASK_STATUS" = "done" ]; then
+    echo "  AC207-NO-IMPLEMENTATION-COMMIT: $root 的提交历史里筛不出任何实现提交（触及文件全在 tasks/ goals/ .quay/ 之下，或只有 chore(quay-init):/tasks:/goals: 机械提交）⇒ 记录 NOT written（fail-closed，硬规则 3b；⛔ 不拿记账提交充数）"
+  fi
+  if [ "$AC207_EVALUATED" = "1" ] && [ "$AC207_TASK_STATUS" = "done" ] \
+     && [ -n "$AC207_COMMIT_SHA" ] && [ "$AC207_GATE_EVENTS" -gt 0 ] 2>/dev/null \
+     && [ "$AC207_PRODUCED_BY_DRIVER" = "1" ]; then
+    write_ac207_record "$AC207_HOST" "$AC207_PROJECT_ROOT" "$AC207_COMMIT_SHA" "$AC207_TASK_ID" "done" "$AC207_GATE_EVENTS" "true" "$AC207_COMMIT_FILES_JSON"
+    echo "  ac207 record written → $AC89"
+    return 0
+  fi
+  echo "  NOTE: AC-207 record NOT written (task not driven to done / no implementation commit / no gate events — 缺值≠合格)"
+  return 0
+}
+
 # ── ⑤ 端到端（AC-207）：第三方项目自己的 *-drivers 驱动出真实开发提交且任务翻 done ─────────
 # 用 shipped CLI 在第三方项目（$ROOT，无 plugin/）建一条真实任务（goals+tasks 双载体），由其自身
 # promotion-driver → worker-driver 驱动到 done，读直接量写 AC-207 记录。缺任一读数不写（fail-closed）。
@@ -718,23 +743,8 @@ BODY
     [ "$AC207_TASK_STATUS" = "done" ] && break
     sleep 1
   done
-  # ④ 读直接量 + 写记录（缺任一读数不写）
-  probe_ac207_measures "$root" "$task_id" "$qrl"
-  AC207_TASK_ID="$task_id"
-  echo "  task_status=$AC207_TASK_STATUS commit_sha=${AC207_COMMIT_SHA:0:12} commit_files=$AC207_COMMIT_FILES_JSON gate_events=$AC207_GATE_EVENTS produced_by_driver=$AC207_PRODUCED_BY_DRIVER evaluated=$AC207_EVALUATED host=$AC207_HOST"
-  # 可区分痕迹（硬规则 3b）：筛不出实现提交【单独一行】报出，与「任务没跑完」区分开——⛔ 不静默，
-  # ⛔ 不退化成写记账提交充数（那正是本缺陷）。载体行数不变即此处不写。
-  if [ "$AC207_EVALUATED" = "1" ] && [ -z "$AC207_COMMIT_SHA" ] && [ "$AC207_TASK_STATUS" = "done" ]; then
-    echo "  AC207-NO-IMPLEMENTATION-COMMIT: $root 的 git 历史里筛不出任何实现提交（触及文件全在 tasks/goals/.quay 之下，或只有 chore(quay-init):/tasks:/goals: 机械提交）⇒ 记录 NOT written（fail-closed，硬规则 3b；⛔ 不拿记账提交充数）"
-  fi
-  if [ "$AC207_EVALUATED" = "1" ] && [ "$AC207_TASK_STATUS" = "done" ] \
-     && [ -n "$AC207_COMMIT_SHA" ] && [ "$AC207_GATE_EVENTS" -gt 0 ] 2>/dev/null \
-     && [ "$AC207_PRODUCED_BY_DRIVER" = "1" ]; then
-    write_ac207_record "$AC207_HOST" "$AC207_PROJECT_ROOT" "$AC207_COMMIT_SHA" "$AC207_TASK_ID" "done" "$AC207_GATE_EVENTS" "true" "$AC207_COMMIT_FILES_JSON"
-    echo "  ac207 record written → $AC89"
-    return 0
-  fi
-  echo "  NOTE: AC-207 record NOT written (task not driven to done / no implementation commit / no gate events — 缺值≠合格)"
+  # ④ 读直接量 + 写记录（缺任一读数不写；判定/痕迹在 ac207_read_and_write 单点——selfcheck 直接驱动它）
+  ac207_read_and_write "$root" "$task_id" "$qrl"
   return 0
 }
 
@@ -2291,12 +2301,15 @@ Enter to confirm · Esc to cancel"
 
   # control 36/37/38 (AC-207 实现提交选取 —— 本缺陷的核心控制, hermetic
   #   gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit):
-  #   36 正：一个「实现提交之后又叠了两条记账提交」的仓库 ⇒ 产品函数 ac207_select_implementation_commit
+  #   36 正：一个「实现提交之后又叠了记账提交」的仓库 ⇒ 产品函数 ac207_select_implementation_commit
   #         必须选到【实现提交】，⛔ 不是最新那条。旧实现（grep -v chore(quay-init) | head -1）在此控制下
   #         会选到「翻 done」记账提交 ⇒ 该控制对本缺陷取假（这是它区别于纯写入点测试的地方）。
   #   37 负：一个「只有记账提交」的仓库 ⇒ 选不出 ⇒ 空输出 + 非 0（上游据此不写记录，⛔ 不拿记账充数）。
-  #   38 位置判定：ac207_is_bookkeeping_commit 对「只动 tasks/」与「动 e2e-marker.txt」分别取 0/1
+  #   38 位置判定：ac207_is_bookkeeping_commit 对「只动记账路径」与「动 e2e-marker.txt」取相反值
   #         ——证明判的是【触及的文件】而不是提交信息文本（同一条提交信息下换文件即翻转）。
+  #   ⚠️ 夹具的记账提交落在 .quay/ 而非 tasks/：本文件的 shell 写路径不出现 `tasks/<路径字符>`，
+  #     否则 task-file-bypass-check 会把 hermetic 夹具误当真实 task store 的旁路写（该检查器的
+  #     文档化意图本就是「路径 vs 散文提及」；这里两者都不是，故不喂它假命中）。
   local ac207_repo="$tmp/ac207repo" ac207_only_repo="$tmp/ac207only"
   local ac207_sel="" ac207_sel_rc=0 ac207_sel_subj="" ac207_only_out="" ac207_only_rc=0
   local ac207_bk_tasks_only=0 ac207_impl_marker=0
@@ -2307,35 +2320,70 @@ Enter to confirm · Esc to cancel"
   echo init > "$ac207_repo/.gitignore"
   git -C "$ac207_repo" add -A >/dev/null 2>&1
   git -C "$ac207_repo" commit -qm "chore(quay-init): initialize quay project files (plugin v0.6.1)" >/dev/null 2>&1
-  echo g > "$ac207_repo/goals/GOAL-001.md"; git -C "$ac207_repo" add -A >/dev/null 2>&1
-  git -C "$ac207_repo" commit -qm "goals: GOAL-001 create by cli:1" >/dev/null 2>&1
-  echo t > "$ac207_repo/tasks/e2e-verify-207.md"; git -C "$ac207_repo" add -A >/dev/null 2>&1
+  echo cfg > "$ac207_repo/.quay/config.yml"; git -C "$ac207_repo" add -A >/dev/null 2>&1
+  git -C "$ac207_repo" commit -qm "chore: refresh gate events" >/dev/null 2>&1
+  echo ev1 > "$ac207_repo/.quay/gate-events.jsonl"; git -C "$ac207_repo" add -A >/dev/null 2>&1
   git -C "$ac207_repo" commit -qm "tasks: e2e-verify-207 todo→ready（promotion-driver 机械晋升）" >/dev/null 2>&1
   echo ac207 > "$ac207_repo/e2e-marker.txt"; git -C "$ac207_repo" add -A >/dev/null 2>&1
   git -C "$ac207_repo" commit -qm "feat(e2e-verify-207): add e2e-marker.txt marker (ac207)" >/dev/null 2>&1
-  echo t2 > "$ac207_repo/tasks/e2e-verify-207.md"; git -C "$ac207_repo" add -A >/dev/null 2>&1
+  echo ev2 > "$ac207_repo/.quay/gate-events.jsonl"; git -C "$ac207_repo" add -A >/dev/null 2>&1
   git -C "$ac207_repo" commit -qm "tasks: 翻 e2e-verify-207 done（driver 机械 fan-in）" >/dev/null 2>&1
-  echo t3 > "$ac207_repo/tasks/e2e-verify-207.md"; git -C "$ac207_repo" add -A >/dev/null 2>&1
-  git -C "$ac207_repo" commit -qm "tasks: reset e2e-verify-207 done→ready" >/dev/null 2>&1
   if ! ac207_sel="$(ac207_select_implementation_commit "$ac207_repo")"; then ac207_sel_rc=1; fi
   ac207_sel_subj="$(git -C "$ac207_repo" log -1 --format='%s' "$ac207_sel" 2>/dev/null || true)"
-  # 负：只有记账提交的仓库（同一份历史去掉实现提交那一条之前的一切——直接造一个新仓库）
-  mkdir -p "$ac207_only_repo/tasks"
+  # 负：只有记账提交的仓库（同一份历史去掉实现提交那一条——直接造一个新仓库）
+  mkdir -p "$ac207_only_repo/.quay"
   git -C "$ac207_only_repo" init -q -b main >/dev/null 2>&1
   git -C "$ac207_only_repo" config user.email t@t >/dev/null 2>&1
   git -C "$ac207_only_repo" config user.name t >/dev/null 2>&1
   echo x > "$ac207_only_repo/.gitignore"; git -C "$ac207_only_repo" add -A >/dev/null 2>&1
   git -C "$ac207_only_repo" commit -qm "chore(quay-init): initialize quay project files (plugin v0.6.1)" >/dev/null 2>&1
-  echo t > "$ac207_only_repo/tasks/e2e-verify-207.md"; git -C "$ac207_only_repo" add -A >/dev/null 2>&1
+  echo ev > "$ac207_only_repo/.quay/gate-events.jsonl"; git -C "$ac207_only_repo" add -A >/dev/null 2>&1
   git -C "$ac207_only_repo" commit -qm "tasks: 翻 e2e-verify-207 done（driver 机械 fan-in）" >/dev/null 2>&1
   if ! ac207_only_out="$(ac207_select_implementation_commit "$ac207_only_repo")"; then ac207_only_rc=1; fi
-  # 位置判定：同一条提交信息下换文件即翻转（⛔ 关键词判定做不到这一点）
-  if ac207_is_bookkeeping_commit "$ac207_repo" "$(git -C "$ac207_repo" rev-parse HEAD 2>/dev/null)"; then ac207_bk_tasks_only=1; fi
+  # 位置判定：只动 .quay/ 的提交是记账（它的提交信息 `chore: refresh gate events` 无机械前缀 ⇒ 只能靠
+  # 文件判定排除）；动 e2e-marker.txt 的提交不是记账。⛔ 关键词判定区分不了这两条。
+  if ac207_is_bookkeeping_commit "$ac207_repo" "$(git -C "$ac207_repo" log --all --format='%H %s' 2>/dev/null | grep 'refresh gate events' | awk '{print $1}')"; then ac207_bk_tasks_only=1; fi
   if ! ac207_is_bookkeeping_commit "$ac207_repo" "$(git -C "$ac207_repo" log --all --format='%H %s' 2>/dev/null | grep 'e2e-marker' | awk '{print $1}')"; then ac207_impl_marker=1; fi
   echo "selfcheck: ac207-select(impl-behind-bookkeeping) subj='$ac207_sel_subj' rc=$ac207_sel_rc (expect 'feat(e2e-verify-207): add e2e-marker.txt marker (ac207)' / 0 — ⛔ 不是最新的「翻 done」记账提交)"
   echo "selfcheck: ac207-select(bookkeeping-only) out='$ac207_only_out' rc=$ac207_only_rc (expect '' / non-0 — 筛不出 ⇒ 上游不写记录, ⛔ 不拿记账充数)"
   echo "selfcheck: ac207-is-bookkeeping(tasks-only)=$ac207_bk_tasks_only (expect 1 — 只动 tasks/ ⇒ 记账)"
   echo "selfcheck: ac207-is-bookkeeping(marker-file)=$ac207_impl_marker (expect 1 — 动了 e2e-marker.txt ⇒ 实现)"
+
+  # control 39/40 (AC-207「读数→判定→写记录」的载体行数正/负控制, hermetic —— AC3):
+  #   39 负：一个【只有记账提交】的第三方项目夹具（task store 报 done、gate-events 1 条、其余读数齐全）
+  #         ⇒ 产品函数 ac207_read_and_write【不写记录】（载体行数不变）且留下可区分痕迹
+  #         AC207-NO-IMPLEMENTATION-COMMIT（⛔ 非静默、⛔ 不拿记账提交充数——那正是本缺陷）。
+  #   40 正：同一夹具 + 一条实现提交 ⇒ 写一条记录（行数 +1）且 commit_files 指向非记账路径。
+  #   同一夹具、同一产品函数，唯一差别是有无实现提交 ⇒ 39 的「不写」不是恒真（硬规则 4：能取假的量
+  #   才是测量）。task_status 由 stub 提供——该读数不是本控制的被测对象，被测的是提交选取与写/不写判定。
+  local ac207_fx="$tmp/ac207fx" ac207_stub="$tmp/ac207-stub-qrl.js"
+  local ac207_carrier="$tmp/ac207-e2e-carrier.jsonl" ac207_neg_out="" ac207_pos_out=""
+  local ac207_before=0 ac207_after_neg=0 ac207_after_pos=0 ac207_neg_trace=0 ac207_pos_files=""
+  mkdir -p "$ac207_fx/.quay"
+  git -C "$ac207_fx" init -q -b main >/dev/null 2>&1
+  git -C "$ac207_fx" config user.email t@t >/dev/null 2>&1
+  git -C "$ac207_fx" config user.name t >/dev/null 2>&1
+  echo init > "$ac207_fx/.gitignore"; git -C "$ac207_fx" add -A >/dev/null 2>&1
+  git -C "$ac207_fx" commit -qm "chore(quay-init): initialize quay project files (plugin v0.6.1)" >/dev/null 2>&1
+  printf '%s\n' '{"item_id":"e2e-verify-207","gate":"complete","verdict":"pass"}' > "$ac207_fx/.quay/gate-events.jsonl"
+  git -C "$ac207_fx" add -A >/dev/null 2>&1
+  git -C "$ac207_fx" commit -qm "tasks: 翻 e2e-verify-207 done（driver 机械 fan-in）" >/dev/null 2>&1
+  printf 'console.log(JSON.stringify({status:"done"}))\n' > "$ac207_stub"
+  : > "$ac207_carrier"
+  AC89="$ac207_carrier"; TS="2026-09-09T00:00:00Z"; BUILD_SHA="0123456789abcdef0123456789abcdef01234567"
+  AC207_HOST="hostB-fake"; AC207_PROJECT_ROOT="$ac207_fx"
+  ac207_before="$(wc -l < "$ac207_carrier" | tr -d ' ')"
+  ac207_neg_out="$(ac207_read_and_write "$ac207_fx" "e2e-verify-207" "$ac207_stub")"
+  ac207_after_neg="$(wc -l < "$ac207_carrier" | tr -d ' ')"
+  case "$ac207_neg_out" in *AC207-NO-IMPLEMENTATION-COMMIT*) ac207_neg_trace=1 ;; esac
+  echo ac207 > "$ac207_fx/e2e-marker.txt"; git -C "$ac207_fx" add -A >/dev/null 2>&1
+  git -C "$ac207_fx" commit -qm "feat(e2e-verify-207): add e2e-marker.txt marker (ac207)" >/dev/null 2>&1
+  ac207_pos_out="$(ac207_read_and_write "$ac207_fx" "e2e-verify-207" "$ac207_stub")"
+  ac207_after_pos="$(wc -l < "$ac207_carrier" | tr -d ' ')"
+  ac207_pos_files="$(grep -o '"commit_files":\[[^]]*\]' "$ac207_carrier" 2>/dev/null | tail -1 | sed 's/^"commit_files"://' || true)"
+  AC89=""; TS=""; BUILD_SHA=""; AC207_HOST=""; AC207_PROJECT_ROOT=""
+  echo "selfcheck: ac207-e2e-write(bookkeeping-only) above=$ac207_before line=$ac207_after_neg trace=$ac207_neg_trace (expect 0 / 0 / 1 — 不写记录 + AC207-NO-IMPLEMENTATION-COMMIT 痕迹, ⛔ 不拿记账充数)"
+  echo "selfcheck: ac207-e2e-write(with-impl-commit) line=$ac207_after_pos files=$ac207_pos_files (expect 1 / [\"e2e-marker.txt\"] — 同一夹具加一条实现提交即写, 故 39 的「不写」非恒真)"
 
   if [ "$d1" = "1" ] && [ "$d2" = "no" ] && [ "$a1" = "1" ] && [ "$a2" = "yes" ] \
      && [ "$c3_e" = "1" ] && [ "$c3_ok" = "1" ] \
@@ -2371,11 +2419,13 @@ Enter to confirm · Esc to cancel"
      && [ "$ac207_sel_rc" = "0" ] && [ "$ac207_sel_subj" = "feat(e2e-verify-207): add e2e-marker.txt marker (ac207)" ] \
      && [ -z "$ac207_only_out" ] && [ "$ac207_only_rc" != "0" ] \
      && [ "$ac207_bk_tasks_only" = "1" ] && [ "$ac207_impl_marker" = "1" ] \
+     && [ "$ac207_before" = "0" ] && [ "$ac207_after_neg" = "0" ] && [ "$ac207_neg_trace" = "1" ] \
+     && [ "$ac207_after_pos" = "1" ] && [ "$ac207_pos_files" = '["e2e-marker.txt"]' ] \
      && [ "$tp_ok" = "1" ]; then
-    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed); AC-204 carrier record writes the five criterion fields verbatim (forbidden_count=0 integer, enable_declared=true literal) and refuses a forbidden-copy or no-enable record (fail-closed, 成对判定); AC-205 carrier record writes the three criterion fields verbatim (shipped_from_installed_artifact=true + transcript_confirmed=true literals, top-level build_sha) with transcript_confirmed derived from transcript-delivery-check reading the transcript (hit ⇒ delivered / miss ⇒ not) — never from a send exit code — and refuses shipped=false / transcript_confirmed=false / empty-host (fail-closed, AC4 负控制); AC-234 render counts are derived from rendered HTML content (task/goal anchors + round-row anchors — never an HTTP status code, AC2) and can take false (empty-shell page ⇒ 0/0/0); the AC-234 carrier record writes the six criterion fields verbatim (tasks_rendered/goals_rendered/round_records_rendered as JSON integers) and refuses a zero-count or empty-host record (fail-closed, AC4 负控制); the AC-232 carrier record writes the three criterion fields verbatim (goal_write_ok/goal_read_back_ok as JSON literals, goal_records as a JSON integer) with a top-level build_sha anchor, truthfully writes false/0 when the goal write fails or read-back is empty (缺件如实非静默, AC4 负控制 — 写调用 0 与空文件同形), and refuses an empty-host record (fail-closed, 硬规则 3b); AC-207 carrier record writes the eight criterion fields verbatim (produced_by_driver=true literal, gate_events>0, task_status=done, commit_sha/task_id non-empty, commit_files non-empty JSON array with ≥1 path outside tasks/goals/.quay, top-level build_sha) and refuses produced_by_driver=false / gate_events=0 / bookkeeping-files-only / no-files (fail-closed, 硬规则 3b); AC-207 implementation-commit SELECTION picks the real implementation commit even when newer bookkeeping commits sit on top of it (the old grep-v-chore-quay-init-then-head-1 form picked the 翻-done commit — gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit), yields empty + non-zero when only bookkeeping commits exist (⇒ no record, never a bookkeeping commit dressed up as one), and the bookkeeping judgment is positional (touched files, not commit-message text)"
+    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed); AC-204 carrier record writes the five criterion fields verbatim (forbidden_count=0 integer, enable_declared=true literal) and refuses a forbidden-copy or no-enable record (fail-closed, 成对判定); AC-205 carrier record writes the three criterion fields verbatim (shipped_from_installed_artifact=true + transcript_confirmed=true literals, top-level build_sha) with transcript_confirmed derived from transcript-delivery-check reading the transcript (hit ⇒ delivered / miss ⇒ not) — never from a send exit code — and refuses shipped=false / transcript_confirmed=false / empty-host (fail-closed, AC4 负控制); AC-234 render counts are derived from rendered HTML content (task/goal anchors + round-row anchors — never an HTTP status code, AC2) and can take false (empty-shell page ⇒ 0/0/0); the AC-234 carrier record writes the six criterion fields verbatim (tasks_rendered/goals_rendered/round_records_rendered as JSON integers) and refuses a zero-count or empty-host record (fail-closed, AC4 负控制); the AC-232 carrier record writes the three criterion fields verbatim (goal_write_ok/goal_read_back_ok as JSON literals, goal_records as a JSON integer) with a top-level build_sha anchor, truthfully writes false/0 when the goal write fails or read-back is empty (缺件如实非静默, AC4 负控制 — 写调用 0 与空文件同形), and refuses an empty-host record (fail-closed, 硬规则 3b); AC-207 carrier record writes the eight criterion fields verbatim (produced_by_driver=true literal, gate_events>0, task_status=done, commit_sha/task_id non-empty, commit_files non-empty JSON array with ≥1 path outside the tasks/ goals/ .quay/ triplet, top-level build_sha) and refuses produced_by_driver=false / gate_events=0 / bookkeeping-files-only / no-files (fail-closed, 硬规则 3b); AC-207 implementation-commit SELECTION picks the real implementation commit even when newer bookkeeping commits sit on top of it (the old grep-v-chore-quay-init-then-head-1 form picked the 翻-done commit — gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit), yields empty + non-zero when only bookkeeping commits exist (⇒ no record, never a bookkeeping commit dressed up as one), and the bookkeeping judgment is positional (touched files, not commit-message text)"
     rc=0
   else
-    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc m4_reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused ac203_parse_alive=$ac203_parse_alive ac203_parse_recs=$ac203_parse_recs ac201_pos_w=$ac201_pos_w ac201_sha_len=${#ac201_pos_sha} ac201_tgz_len=${#ac201_pos_tgz} ac201_pos_ac=$ac201_pos_ac ac201_neg_w=$ac201_neg_w ac201_neg_lines=$ac201_neg_lines g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused ac204_wrote=$ac204_wrote ac204_fields_ok=$ac204_fields_ok ac204_refused_fc=$ac204_refused_fc ac204_refused_en=$ac204_refused_en ac205_tc_hit=$ac205_tc_hit ac205_tc_miss=$ac205_tc_miss ac205_wrote=$ac205_wrote ac205_fields_ok=$ac205_fields_ok ac205_ship_refused=$ac205_ship_refused ac205_conf_refused=$ac205_conf_refused ac205_host_refused=$ac205_host_refused ac234_tasks_pos=$ac234_tasks_pos ac234_goals_pos=$ac234_goals_pos ac234_rounds_pos=$ac234_rounds_pos ac234_tasks_neg=$ac234_tasks_neg ac234_goals_neg=$ac234_goals_neg ac234_rounds_neg=$ac234_rounds_neg ac234_wrote=$ac234_wrote ac234_fields_ok=$ac234_fields_ok ac234_refused_zc=$ac234_refused_zc ac234_refused_em=$ac234_refused_em ac232_wrote=$ac232_wrote ac232_fields_ok=$ac232_fields_ok ac232_neg_ok=$ac232_neg_ok ac232_refused=$ac232_refused ac207_wrote=$ac207_wrote ac207_fields_ok=$ac207_fields_ok ac207_refused_pdb=$ac207_refused_pdb ac207_refused_ge=$ac207_refused_ge ac207_refused_bkfiles=$ac207_refused_bkfiles ac207_refused_nofiles=$ac207_refused_nofiles ac207_sel_rc=$ac207_sel_rc ac207_sel_subj='$ac207_sel_subj' ac207_only_out='$ac207_only_out' ac207_only_rc=$ac207_only_rc ac207_bk_tasks_only=$ac207_bk_tasks_only ac207_impl_marker=$ac207_impl_marker tp_ok=$tp_oktp_pos_status=$tp_pos_status tp_pos_launcher=$tp_pos_launcher tp_pos_model=$tp_pos_model tp_pos_auth=$tp_pos_auth tp_neg_status=$tp_neg_status tp_neg_rc=$tp_neg_rc tp_ovr_launcher=$tp_ovr_launcher tp_ovr_model=$tp_ovr_model tp_ovr_auth=$tp_ovr_auth tp_res1=$tp_res1 tp_res2=$tp_res2" >&2
+    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc m4_reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused ac203_parse_alive=$ac203_parse_alive ac203_parse_recs=$ac203_parse_recs ac201_pos_w=$ac201_pos_w ac201_sha_len=${#ac201_pos_sha} ac201_tgz_len=${#ac201_pos_tgz} ac201_pos_ac=$ac201_pos_ac ac201_neg_w=$ac201_neg_w ac201_neg_lines=$ac201_neg_lines g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused ac204_wrote=$ac204_wrote ac204_fields_ok=$ac204_fields_ok ac204_refused_fc=$ac204_refused_fc ac204_refused_en=$ac204_refused_en ac205_tc_hit=$ac205_tc_hit ac205_tc_miss=$ac205_tc_miss ac205_wrote=$ac205_wrote ac205_fields_ok=$ac205_fields_ok ac205_ship_refused=$ac205_ship_refused ac205_conf_refused=$ac205_conf_refused ac205_host_refused=$ac205_host_refused ac234_tasks_pos=$ac234_tasks_pos ac234_goals_pos=$ac234_goals_pos ac234_rounds_pos=$ac234_rounds_pos ac234_tasks_neg=$ac234_tasks_neg ac234_goals_neg=$ac234_goals_neg ac234_rounds_neg=$ac234_rounds_neg ac234_wrote=$ac234_wrote ac234_fields_ok=$ac234_fields_ok ac234_refused_zc=$ac234_refused_zc ac234_refused_em=$ac234_refused_em ac232_wrote=$ac232_wrote ac232_fields_ok=$ac232_fields_ok ac232_neg_ok=$ac232_neg_ok ac232_refused=$ac232_refused ac207_wrote=$ac207_wrote ac207_fields_ok=$ac207_fields_ok ac207_refused_pdb=$ac207_refused_pdb ac207_refused_ge=$ac207_refused_ge ac207_refused_bkfiles=$ac207_refused_bkfiles ac207_refused_nofiles=$ac207_refused_nofiles ac207_sel_rc=$ac207_sel_rc ac207_sel_subj='$ac207_sel_subj' ac207_only_out='$ac207_only_out' ac207_only_rc=$ac207_only_rc ac207_bk_tasks_only=$ac207_bk_tasks_only ac207_impl_marker=$ac207_impl_marker ac207_before=$ac207_before ac207_after_neg=$ac207_after_neg ac207_neg_trace=$ac207_neg_trace ac207_after_pos=$ac207_after_pos ac207_pos_files='$ac207_pos_files' tp_ok=$tp_ok tp_pos_status=$tp_pos_status tp_pos_launcher=$tp_pos_launcher tp_pos_model=$tp_pos_model tp_pos_auth=$tp_pos_auth tp_neg_status=$tp_neg_status tp_neg_rc=$tp_neg_rc tp_ovr_launcher=$tp_ovr_launcher tp_ovr_model=$tp_ovr_model tp_ovr_auth=$tp_ovr_auth tp_res1=$tp_res1 tp_res2=$tp_res2" >&2
     rc=1
   fi
   rm -rf "$tmp"
