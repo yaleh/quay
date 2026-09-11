@@ -151,12 +151,54 @@ ok 2 - AC4 (端到端负控制): after `quay init` establishes the baseline, the
   **不是**"worker 没实现"——那个 worker 真的实现了修复并提交（`d8598f7`，+217/-16，`go test` 绿），
   它倒的是落地路径对项目形态的假设。
 
+### 套件红归因（2026-09-11 续做轮）：与本条 delta 无关的【宿主负载相关】单测 —— 已修根因
+
+上一次 fan-in 的最后一步 `suite` 报 1 红（5616 中 1）：
+
+```
+✖ runPackagingHygiene drift ⇒ failed + gap-filing spawned (AC3)
+  AssertionError [ERR_ASSERTION]: drift must trigger gap-filing
+```
+
+**归因（可复现，非主张）**：`plugin/test/packaging-hygiene-check.test.mjs` 的该用例调
+`runPackagingHygiene` 时**未注入 `resourceGateArgv`** ⇒ 内部 `resourceGateCheck` 跑**真实**的
+`resource-gate.sh`。该闸自 `d640b8e1b`（2026-08-11）起带 load 判据（`load >= nproc × 2` ⇒ WAIT）；
+全量 suite 26 路并发下 load 越过阈值 ⇒ `go:false` ⇒ `gapFiled` **按设计**为 false ⇒ 断言恒红。
+（`gapFiled=false` 的其它两条路径都被排除：`drift.length > 0` 已由先通过的 `state === 'failed'` 断言确定；
+`halted` 本用例未传 ⇒ 只剩 `gate.go === false` 一条。）
+
+**区分性对照（硬规则 4 推论四——附一个若假说为假则结果会不同的对照）**：
+
+| 条件 | 修前 | 修后 |
+|---|---|---|
+| 宿主正常（load < nproc×2） | 9/9 绿 | 10/10 绿 |
+| **`RESOURCE_GATE_LOAD_OVER_FACTOR=0.01`（强制 WAIT 带）** | **红，断言原文与 suite 日志逐字相同** | 10/10 绿 |
+
+第二行就是那个对照：**把闸强制推进 WAIT 带，修前重放出的正是 suite 日志里那句
+`drift must trigger gap-filing`**。⇒ 不必停在一句"环境噪声"，成因是确定的这一条。
+
+**5b 产物（同一原则的其它适用点计数）**：用 `gapWorkerCmd` 的 **9 个**测试文件中，
+**8 个都注入 `resourceGateArgv`**（goal-driver 7、goal-triage 2、goal-triage-activate-executed 3、
+goal-posture 1、goal-sufficiency-{gate,not-evaluated,semantic-covered} 各 1、goal-triage-fresh-draft 1），
+**本文件是唯一例外**（2 处调用 / 0 处注入；其中 `halted:true` 那处按短路无需注入）。
+`goal-driver.test.mjs` 里剩下 3 处未配对的经逐行核对是 `halted:true` 与两条断言消息字符串，**不是调用**。
+⇒ 不是"偶尔红一条"，是**同族约定在这一个文件上漏了一处**。
+
+**改动**：AC3 用例注入 `resourceGateArgv: ['true']`（确定性 GO）；并补一条资源门负控制
+（`['bash','-c','exit 1']` ⇒ drift 仍报 `failed`、gap-filing 延后），与 `goal-driver.test.mjs:373`
+的同族用例同形。**⛔ 未改任何产品代码**——`runPackagingHygiene` 在 WAIT 下延后 spawn 是**设计**
+（fail-closed 推迟，不是静默 no-op），错的只是这条单测没注入已有的测试缝。
+
+**范围诚实**：本轮**未跑全量 suite**（worker 契约禁止；suite 由 driver 的 fan-in 跑）。上表是
+**该文件级**的定向复现 + 双向控制，不是全量 suite 的绿证。
+
 ### 改了哪些文件
 
 `packages/quay/src/branch-model.ts`(新) / `packages/quay/src/init.ts` / `packages/quay/src/cli/init.ts` /
 `plugin/scripts/anti-drift-touches-check.ts` / `packages/quay/test/branch-model.test.mjs`(新) /
 `packages/quay/test/init.test.mjs` / `plugin/test/worker-driver.test.mjs` /
-`experiments/quay-perpetual-stream/test/anti-drift-touches-check.test.mjs`。
+`experiments/quay-perpetual-stream/test/anti-drift-touches-check.test.mjs` /
+`plugin/test/packaging-hygiene-check.test.mjs`(续做轮，见上面的套件红归因——测试隔离修复，非产品代码)。
 `plugin/scripts/worker-driver.ts` 与 `fan-in-ts-typecheck-gate.ts` 在 Touches 里但**未改**——
 判定收在 anti-drift 一处（它才是把基线变成硬失败的那一步），⛔ 不复制第二份判定。
 **scoped 门**：`bash scripts/test.sh --for-task <id> --allow-thin` 绿（281 pass / 0 fail）。
@@ -252,3 +294,4 @@ master = 项目默认分支；develop = 任务板权威基线/worktree 分叉点
 - packages/quay/test/init.test.mjs
 - plugin/test/worker-driver.test.mjs
 - experiments/quay-perpetual-stream/test/anti-drift-touches-check.test.mjs
+- plugin/test/packaging-hygiene-check.test.mjs
