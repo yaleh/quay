@@ -13,7 +13,11 @@ import { ensureBranchModel, formatBranchModelReport, type BranchModelReport } fr
  * Result of an init operation.
  */
 export interface InitResult {
-  /** "written" | "dry-run" | "skipped" (existing, no --force) */
+  /**
+   * "written" | "dry-run" | "skipped" (existing, no --force) |
+   * "branch-model-blocked" (divergent landing baseline without adoption) |
+   * "branch-model-only" (the config-free branch-model entry — see `branchModelOnly`).
+   */
   outcome: string;
   /** Absolute path to the config file that was (or would be) written. */
   configPath: string;
@@ -61,6 +65,27 @@ export interface InitOptions {
    * Nothing is destroyed either way; the flag only decides whether init proceeds or stops.
    */
   adoptBranchModel?: boolean;
+  /**
+   * The CONFIG-FREE branch-model entry (`quay init --branch-model-only`) — establish the quay branch
+   * model in an ALREADY-initialized project and touch nothing else.
+   *
+   * WHY THIS EXISTS (gap-upgrade-entry-never-establishes-branch-model): the SHIPPED upgrade entry is
+   * `plugin/scripts/quay-init.sh` (SPEC §5 — what a real user runs, and what `/quay:init` runs), not
+   * this CLI. `ensureBranchModel` was reachable only through a full `quay init`, which REWRITES the
+   * whole config surface (`generateConfigContent`) — so on an existing project with its own `gates:`
+   * / `loop:` / `routines:` the one available remedy was also the one that destroys the user's
+   * config. That is exactly the write the shipped script's config-preserving branch exists to avoid.
+   * The result was a project whose `develop` is a foreign fork having NO path that both establishes
+   * the branch model and preserves its config — so it stayed un-landable forever, and the shell entry
+   * silently wrote `fork_baseline: develop` (`quay-init.sh:995/:2217`) without ever establishing it.
+   *
+   * ⇒ This flag runs `ensureBranchModel` (the SAME single implementation, ADR-004 — the shell does not
+   * re-implement `classifyBranch`) and returns immediately: no config write, no tasks/ mkdir, no
+   * profiles/launch-settings lay-down. The config-exists refusal that guards the full `quay init` does
+   * NOT apply here (an existing config is the NORMAL input — this entry exists for initialized
+   * projects).
+   */
+  branchModelOnly?: boolean;
 }
 
 // These strings contain characters that confuse Node 26's TypeScript parser
@@ -399,6 +424,30 @@ export function runInit(opts: InitOptions): InitResult {
   const launchSettingsContent = generateLaunchSettingsContent();
   const profilesPath = path.join(quayDir, "profiles.yml");
   const profilesContent = generateProfilesContent();
+
+  // ── The CONFIG-FREE branch-model entry (gap-upgrade-entry-never-establishes-branch-model) ──────
+  // FIRST, before the config-exists refusal: an existing `.quay/config.yml` is this entry's NORMAL
+  // input (the shipped upgrade entry runs on an already-initialized project), and nothing below this
+  // branch may run — the whole point is that the config surface is never touched. Same
+  // `ensureBranchModel` the full init uses: one judgment source, no second predicate (ADR-004).
+  if (opts.branchModelOnly === true) {
+    const branchModel = ensureBranchModel(root, {
+      adopt: opts.adoptBranchModel === true,
+      dryRun: opts.dryRun === true,
+    });
+    return {
+      outcome: "branch-model-only",
+      configPath,
+      tasksDir,
+      content: "",
+      launchSettingsPath,
+      launchSettingsContent: "",
+      profilesPath,
+      profilesContent: "",
+      branchModel,
+      branchModelReport: formatBranchModelReport(branchModel),
+    };
+  }
 
   // Check if config already exists.
   const configExists = fs.existsSync(configPath);

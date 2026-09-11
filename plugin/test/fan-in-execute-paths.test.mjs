@@ -631,11 +631,22 @@ test("④ AC 完成闸与承重点③ 行形检查并列 — 两检查都过才�
 
 // ── ⑤ anti-drift-touches 守卫（gap-anti-drift-touches-zero-coverage-fast-mode, REAL git + REAL prompt）──
 
-/** A real temp git repo replaying the fan-in workflow's step-1 post-merge state: develop holds a
- *  doc-only commit, the task worktree (`main`) holds the task file + the task's changed files, and
- *  develop has been MERGED in (so `git diff --name-only develop...HEAD` = exactly the files the
+/** A real temp git repo replaying the fan-in workflow's step-1 post-merge state: `develop` is the
+ *  landing baseline with a doc-only commit, the task branch (`task/<id>`) FORKS FROM `develop` and
+ *  holds the task file + the task's changed files, `develop` advances while the task runs, and it is
+ *  then MERGED into the task branch (so `git diff --name-only develop...HEAD` = exactly the files the
  *  fan-in would land — develop's own doc change excluded). The REAL `plugin/` tree is symlinked in
- *  AFTER the final commit/merge so it is never part of the git diff. */
+ *  AFTER the final commit/merge so it is never part of the git diff.
+ *
+ *  ⚠️ BRANCH MODEL (gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing): the
+ *  topology is part of what the check under test judges. `anti-drift-touches-check` classifies the
+ *  merge target against the project's default branch BEFORE computing the diff, and a target that is
+ *  NOT a continuation of it is reported as `BASELINE-MISMATCH` (exit 3 — a verdict about the REPO's
+ *  shape, deliberately never folded into "N violation(s)"). Committing the task's work on `main` and
+ *  merging `develop` INTO `main` builds exactly that divergent shape (main is then no longer an
+ *  ancestor of develop), so the anti-drift judgment these tests assert would never be reached. This
+ *  fixture must therefore model a quay-initialized repo: `main` stays an ancestor of `develop`, and
+ *  the work is committed on a branch forked from `develop`. */
 function makeAntiDriftRepo({ taskId, body, files }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-antidrift-"));
   const run = (args) => {
@@ -648,12 +659,12 @@ function makeAntiDriftRepo({ taskId, body, files }) {
   fs.writeFileSync(path.join(dir, "README.md"), "base\n");
   run(["add", "README.md"]);
   run(["commit", "-qm", "base"]);
-  run(["checkout", "-q", "-b", "develop"]);
+  run(["checkout", "-q", "-b", "develop"]); // develop forks from main ⇒ main is an ancestor of develop
   fs.mkdirSync(path.join(dir, "docs"), { recursive: true });
   fs.writeFileSync(path.join(dir, "docs", "note.md"), "dev\n");
   run(["add", "docs/note.md"]);
   run(["commit", "-qm", "develop-doc"]);
-  run(["checkout", "-q", "main"]);
+  run(["checkout", "-q", "-b", `task/${taskId}`, "develop"]); // the task branch forks from the baseline
   fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
   fs.writeFileSync(path.join(dir, "tasks", `${taskId}.md`), body, "utf8");
   for (const [p, content] of Object.entries(files)) {
@@ -663,6 +674,12 @@ function makeAntiDriftRepo({ taskId, body, files }) {
   }
   run(["add", "-A"]);
   run(["commit", "-qm", "task-changes"]);
+  // develop advances while the task runs — so the merge below is a REAL merge (the fan-in's own step 1).
+  run(["checkout", "-q", "develop"]);
+  fs.writeFileSync(path.join(dir, "docs", "dev-2.md"), "dev-2\n");
+  run(["add", "docs/dev-2.md"]);
+  run(["commit", "-qm", "develop-moves"]);
+  run(["checkout", "-q", `task/${taskId}`]);
   run(["merge", "-q", "develop", "-m", "merge-develop"]);
   return dir;
 }

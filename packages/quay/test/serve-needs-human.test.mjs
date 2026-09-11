@@ -18,7 +18,6 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import net from "node:net";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
 import { parsePromotionOutcomeRecords, readNeedsHumanLedger } from "../src/observation.ts";
@@ -30,15 +29,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
-function freePort() {
-  return new Promise((resolve) => {
-    const srv = net.createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address();
-      srv.close(() => resolve(port));
-    });
-  });
-}
+// gap-ac244-freshness-subject-set-mechanically-derived (2026-09-11): this file used to pick a
+// port with a `net.createServer().listen(0, "127.0.0.1")` probe and then hand it to
+// `startServer({ port })`, which binds **0.0.0.0**. The probe only proves the port is free on
+// loopback, so a port already held on another interface (measured here: tailscaled holds a
+// high port on the Tailscale interface) passes the probe and then fails the bind with
+// EADDRINUSE. `port: 0` + reading the bound port back is the construction that cannot collide
+// — the convention established by gap-serve-pid-derived-port-collision-family, which
+// converted the 12 pid-derived-port sites to it.
 
 function get(port, urlPath) {
   return new Promise((resolve, reject) => {
@@ -137,9 +135,9 @@ test("AC1 + AC2: /needs-human renders 当前待办 (status+reason) AND 升级台
       ].join("\n") + "\n",
     );
 
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
     const page = await get(port, "/needs-human");
     assert.equal(page.status, 200, "GET /needs-human returns 200");
 
@@ -180,9 +178,9 @@ test("degradation: no needs-human tasks and no ledger still renders 200 (never a
   const cwd0 = process.cwd();
   let server;
   try {
-    const port = await freePort();
     process.chdir(ws);
-    server = await startServer({ port });
+    server = await startServer({ port: 0 });
+    const port = server.address().port;
     const page = await get(port, "/needs-human");
     assert.equal(page.status, 200, "empty workspace still returns 200");
     assert.ok(page.body.includes("当前无 needs-human 任务"), "empty active table renders the none note");

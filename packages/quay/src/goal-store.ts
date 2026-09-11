@@ -348,6 +348,27 @@ export function stripEvidenceTimestamp(text: string): string {
 }
 
 /**
+ * AC-216 reverify scope of an ACHIEVED AC: in scope ⟺ (it is under an ACTIVE goal) OR (it explicitly
+ * declares `long-term: true`). A long-term AC is a STANDING guarantee — it stays under re-verification
+ * after its GOAL is achieved/closed; an undeclared one leaves with its GOAL (cost boundary, ⛔ not an
+ * indiscriminate widening).
+ *
+ * Defined HERE (Core) so that EVERY consumer reads ONE definition — I5's own enumeration, the goal
+ * driver's per-round GATE set, and the goal driver's gap-FILING set. A second copy in any consumer
+ * drifts and re-opens the hole this closes: the scope was declared here but wired only into I5, so the
+ * gate loop (which walked `activeGoals` only) froze the ledger tail of every out-of-active-goal
+ * long-term AC at its last pre-closure verdict, and `computeGoalGaps` (which counted active ACs only)
+ * never produced a work signal for one (gap-meta-computegoalgaps; hard rule 5b — "fixed in one place"
+ * is not "there is only one place").
+ */
+export function inAchievedReverifyScope(
+  ac: { goal?: unknown; longTerm?: unknown },
+  activeGoalIds: ReadonlySet<string>,
+): boolean {
+  return activeGoalIds.has(String(ac.goal ?? "")) || ac.longTerm === true;
+}
+
+/**
  * COMMIT-AFTER-WRITE (gap-meta-commitgoalfile; now unified by SPEC-store-commit-unification §4):
  * commit a goal file to git immediately after writeFileSync, via the shared primitive
  * `commitStoreWrite` — ⛔ no git plumbing here (the five store files' `git commit` has exactly one
@@ -607,7 +628,9 @@ export function createGoalStore(
       // AC-216 — in scope ⟺ (under an ACTIVE goal) OR (explicit `long-term: true`): a long-term
       // achieved AC stays in the reverify scope even after its GOAL is achieved/closed; an
       // undeclared one leaves with its GOAL (cost boundary — ⛔ not an indiscriminate widening).
-      if (!activeGoalIds.has(String(ac.goal)) && ac.longTerm !== true) continue;
+      // The predicate itself lives in `inAchievedReverifyScope` (single definition, shared with the
+      // goal driver's gate set and gap-filing set) — ⛔ not re-derived here.
+      if (!inAchievedReverifyScope(ac, activeGoalIds)) continue;
       const criterion = typeof ac.criterion === "string" ? ac.criterion : "";
       if (criterion.trim() === "") continue;
       inScope.push(ac);

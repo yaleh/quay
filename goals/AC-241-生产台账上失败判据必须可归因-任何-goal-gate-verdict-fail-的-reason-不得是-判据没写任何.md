@@ -1,7 +1,7 @@
 ---
 id: AC-241
 title: 生产台账上失败判据必须可归因：任何 goal-gate verdict=fail 的 reason 不得是「判据没写任何输出」的空因模板
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-009
 criterion: >-
@@ -31,7 +31,8 @@ criterion: >-
 
   # 自己的 reason）用子串测试会把「引用了模板」误判成「本身就是模板」，于是每轮把自己也列进 bad。
 
-  # 实测形态（gap-meta-withfailureoutput 立案时）：AC-241 的 reason 里 AC-239 与 AC-241 同时被点名。
+  # 实测形态（gap-meta-withfailureoutput 立案时）：AC-241 的 reason 里 AC-239 与 AC-241
+  同时被点名。
 
   # ⚠️ 与 runner 的模板措辞耦合：acceptance-runner 改这句文案，须同步改本判据，否则退化为恒绿。
 
@@ -81,6 +82,11 @@ statusLog:
     to: active
     actor: goal-driver
     reason: "triage: activate"
+  - at: 2026-09-11T13:55:25.575Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
