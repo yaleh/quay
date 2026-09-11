@@ -1,7 +1,7 @@
 ---
 id: gap-promotion-admission-reads-goal-layer-field
 title: 晋升准入闸读 goal 层字段（goalAcMissing）——与人裁定【丁：上移 goal 层】反向，且因缺生效线造成僵尸任务
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -52,10 +52,11 @@ extra:
 - [x] AC5 措辞修正：`ready-pool-check.ts` 与 `long-term-guarantee-goal-backed-check.ts` 中「立案时必填」字面命中 = 0（该措辞是落点错误的诱因）。
 - [x] AC6 新检查器已登记进 `capability-catalog.sh`，且 catalog 自报的 `summary: N scripts` 相应 +1（⛔ 读它自报，不硬记数字）。
 - [x] AC7 `scripts/test.sh` 全量绿。⚠️ worker 角色不自行跑全量套件（全量 suite 由 driver 的机械 fan-in 跑）。本任务可自证的是 **scoped 门 179 tests / 179 pass / 0 fail**（见 Evidence §AC7），已按当前 develop sha 记录 scoped-gate cache ⇒ fan-in 跳过这步冗余的 scoped 门、直接进入全量 suite。全量绿的最终裁决归 fan-in 的 suite 步。
+- [x] AC8 **本轮落地的伴生缺陷修复**（不属于 Proposal 的目标，是它落地路上的阻塞，如实登记）：`test/cold-start-oneliner-e2e.sh` 的 `--count-inputs` 是**纯读数**（只打印静态的 3 条人类输入），却在 mode 分派**之前**执行了 `cp -r "$PLUGIN_SRC" "$QUAY_DEV/plugin"`——整个 plugin 树的递归拷贝。套件并行泳道下该拷贝与 `plugin/test/workflow-replay.test.mjs`（在**已签入的** `plugin/fixtures/workflow-replay/` 里建/删临时目录 `_tmp-bad-schema` 等）相撞 ⇒ `cp: cannot stat …` ⇒ 非零退出 ⇒ AC1 假红。修法：把该 measure 的 mode 分派移到任何文件系统动作**之前**。**取假面（判别性对照，同机同文件）**：并发跑 workflow-replay 时 **2/400 失败**；修复后同条件 **0/400**；两臂单独跑均 0 失败。AC1 的 stdout 逐字节不变，单次耗时 229ms → 22ms。⚠️ 残留（未修，已另立案）：「有测试往已签入的 fixtures 目录里写」这个根因仍在；FULL 模式的 e2e 与该测试并发仍会撞。
 
 ## Definition of Done
 
-- [x] AC1–AC7 全绿。
+- [x] AC1–AC8 全绿。
 - [x] Evidence 里记下对**生产任务板**实测的「因 `goalAcMissing` 被排除的 todo 条数」删除前后读数。⚠️ 任务书原文写「当前该读数 = 0」，**该前提实测已假**：删除前实测 = 1（那条今天 08:20 立案、当时仍在被写的 delivery-critical 任务），删除后 = 0。已按实测记录，未照抄预期值。
 - [x] ⛔ **不得把 `ACTIVATION_LINE_ISO` 补到晋升闸作为替代修法**——那是在错误落点上加固，与人 2026-09-11 裁定反向。若执行中认为必须保留晋升侧的某种拦截，须先回到人处取裁定，不得自行改向。**（未补；晋升侧未保留任何 goal 拦截。）**
 - [x] 未来边界已写进代码注释或检查器文档（一条不变式）：**准入集合只由 task 自身的自足属性决定；goal 信息最多改变集合内的顺序，永不改变成员资格。** 理由是单调性——排序不减少可执行集合（最坏是次序不优），准入可把集合减到空（产生僵尸）。即便未来 goal 有优先级，它也只能进 sort key、缺值时退化为默认序，⛔ 不得出现"goal 优先级未设 ⇒ 不可派发"这一同形缺陷的新版本。
@@ -175,6 +176,96 @@ scoped-gate cache 已记录：
 
 ⇒ fan-in 跳过这步冗余的 scoped 门、直接进入全量 suite。全量绿的最终裁决归 fan-in 的 suite 步（⛔ 我未自行跑全量套件——worker 角色边界）。
 
+⚠️ 上表是**历史读数**（develop `f0d827ced`，当时 Touches 不含 `test/cold-start-oneliner-e2e.sh`）。本轮 develop 已前进到 `9fea109f6`，且 Touches 新增该文件 ⇒ 已在新 develop sha + 新 Touches 上**重跑**：
+
+    $ bash scripts/test.sh --for-task gap-promotion-admission-reads-goal-layer-field --allow-thin
+    ℹ tests 180        ← 179 + 1：新增的 Touches 条目把 plugin/test/cold-start-oneliner-e2e.test.mjs 纳入选择
+    ℹ pass  180
+    ℹ fail  0
+    exit=0
+
+缓存已按新 develop sha 重写（旧的那条已随 develop 前进失效）：
+
+    $ node --experimental-strip-types plugin/scripts/worker-driver.ts --write-scoped-gate-cache \
+        --task gap-promotion-admission-reads-goal-layer-field \
+        --develop-sha 0fc6d0dbd47db697729b38e3ea04b65ff7077055 --root /home/yale/work/quay
+    {"event":"scoped-gate-cache-written","task":"gap-promotion-admission-reads-goal-layer-field",
+     "developSha":"0fc6d0dbd47db697729b38e3ea04b65ff7077055","cacheFile":"/home/yale/work/quay/.quay/scoped-gate-cache.json"}
+    exit=0
+
+⚠️ **该 sha 是「退出时刻」的值，而 develop 在本轮内移动了两次（`9fea109f6` → `2b1aae74e` → `0fc6d0dbd`）**
+——缓存是按 develop sha 取键的，它天然追不上一个持续前进的 develop。若 fan-in 启动时 develop 已再次前进，
+缓存失配的后果只是**多跑一次 scoped 门**（已实测绿），不是失败。故此处只如实记下退出时刻的读数，不追。
+
+### AC8 — 伴生缺陷（e2e `--count-inputs` 竞态）：修复 + 判别性对照
+
+**症状**（来自本任务上一轮 fan-in 的真实 suite 日志，`# tests 4517 / # pass 4516 / # fail 1`，唯一的红）：
+
+    ✖ AC1 — the cold-start oneliner e2e reports input_commands <= 4 with each input recorded verbatim
+      AssertionError [ERR_ASSERTION]: --count-inputs must exit 0:
+      cp: cannot stat '<worktree>/plugin/fixtures/workflow-replay/_tmp-bad-schema': No such file or directory
+      1 !== 0
+
+**机制**（读两个文件即可确证，不是推断）：`_tmp-bad-schema` 这个目录名**全仓只有一个产生者**——
+`plugin/test/workflow-replay.test.mjs:181` 的 `fs.mkdirSync(path.join(FIXTURES_DIR, "_tmp-bad-schema"))`
+（同族还有 `_tmp-missing-field` / `_tmp-bad-class`），由 `fs.rmSync` 收尾；而它落在**已签入的**
+`plugin/fixtures/workflow-replay/` 内（`git check-ignore` 退 1 ⇒ 未被忽略、是仓库内容，会随检出一起分发）。
+`test/cold-start-oneliner-e2e.sh` 则在 mode 分派**之前**执行 `cp -r "$PLUGIN_SRC" "$QUAY_DEV/plugin"`
+（实测 126ms）：`cp` 对该目录 readdir 之后、stat 之前，条目被另一进程 rmSync 掉 ⇒ 上面的报错。
+两个文件同属默认泳道、可并发：`workflow-replay.test.mjs` 未声明 `@test-group` ⇒ 默认 `engine`；
+`cold-start-oneliner-e2e.test.mjs` 声明 `engine`。
+
+**判别性对照**（硬规则 4 推论四：一个能解释现象的说法不算结论，要附一个「若它为假则结果不同」的对照。
+若 H 为假——即这是环境噪声而非并发相撞——两臂应当**同样**失败）：
+
+    并发臂（e2e × 400 与 workflow-replay × 40 同时跑；修复前）：
+      失败 2/400 —— 报错逐字节等于 suite 日志里的那一条
+    单跑臂（e2e × 25，无 workflow-replay 并发；修复前）：
+      失败 0/25
+    ⇒ 两臂结论相反 ⇒ H 成立：失败**依赖「并发」这个自变量**，不是随机的环境噪声。
+
+    修复后，同一并发臂原样重跑：
+      失败 0/400
+
+**独立佐证**（不由我提出——是另一条任务的 worker 在同一形状上的记录，`.quay/worker-driver.log:48502`）：
+任务 `gap-goal-driver-gap-semantic-filing-ring` 的续做轮逐字记着同一失败与同一根因
+（「`cold-start-oneliner-e2e.sh --count-inputs` does `cp -r` … while `workflow-replay.test.mjs:191`
+concurrently creates/deletes temp dirs」），并注明「failing test passes 3/3 in isolation」。
+⇒ 该竞态**先于本任务存在**；本任务的 delta（`ready-pool-check.ts` / `eligible-no-goal-source-check.ts` /
+`long-term-guarantee-goal-backed-check.ts` / `capability-catalog.sh`）与它无交集——机械 delta-relatedness
+检查同样报 UNRELATED，但**我没有据此收工**：按硬规则，该提示不是结论，须实跑复现后才可采信。
+
+**修法**：把 AC1 那段 measure（`HUMAN_INPUTS` / `INPUT_COUNT` / `count_inputs()` 与
+`if [ "$MODE" = "count-inputs" ]` 分派）整体上移到**任何文件系统动作之前**（`BASE="$(mktemp -d)"` 之前）。
+理由不是「这样能绕开竞态」，而是：`--count-inputs` 只读一个静态数组，**本就不需要任何文件系统动作**；
+那次整树拷贝是别的 mode 才需要的准备步骤被提前执行了——**顺序放错才是缺陷本体**。
+⛔ 没有用「加一次重试」或「让 cp 忽略错误」——那会把一次真实的树变更静默吞掉（硬规则 3b：
+读不懂输入不得返回与合格同形的值）。⛔ 也没有改 `workflow-replay.test.mjs` 去迁就（见下「残留」）。
+
+修复后同命令（stdout 与修复前**逐字节相同**，只是少了那次拷贝）：
+
+    $ bash test/cold-start-oneliner-e2e.sh --count-inputs
+    == cold-start oneliner e2e ==
+    mode: count-inputs | plugin source: <worktree>/plugin | from-build: false
+    input_commands=3
+    --- verbatim human inputs (each is one line the human types):
+      [1] bash plugin/scripts/publish-dist-branch.sh --branch cold8-dist   # install: build the plugin artifact
+      [2] bash <dist>/plugin/scripts/quay-init.sh --all --loop --root <proj> --project <proj>   # init: lay down the mechanism (test command auto-detected)
+      [3] /quay:cold-start   # cold-start skill: mounts both monitors (Monitor tool), cron, drives inner, asserts telemetry
+    AC1: input_commands=3 <= 4
+    exit=0
+
+    $ node --test plugin/test/cold-start-oneliner-e2e.test.mjs
+    ✔ AC1 — the cold-start oneliner e2e reports input_commands <= 4 … (22.330518ms)
+    ℹ tests 1 / ℹ pass 1 / ℹ fail 0        exit=0
+    （修复前同一测试 229ms —— 差额≈那次无用的整树拷贝；`bash -n test/cold-start-oneliner-e2e.sh` 通过。）
+
+**残留（未修，已另立案，不静默）**：真正的根因是**有测试往已签入的 fixtures 目录里写**。本次修的是
+「不该做文件系统动作的 measure 做了文件系统动作」，把 fan-in 的 suite 路径堵死；但
+`workflow-replay.test.mjs` 往仓库树里建/删目录这个反模式仍在——任何**别的**做整树拷贝的调用者
+（FULL 模式的 e2e、`--plugin-src` / `--from-build`）与该测试并发时仍会撞。修它要动
+`runWorkflowReplay` 的路径解析（fixtures 根可能被它用于相对定位），超出本任务范围，故另立案而非夹带。
+
 ### DoD — 生产任务板读数（删除前/后；⚠️ 与任务书预期的「= 0」相反）
 
 口径：`ready-pool-check.ts --json` 的 `candidates[]`，取 `eligible === false` **且**唯一为假的合取项是 goal 层那一项（其它 gates 逐项为 true）的 todo 条数。同一仓库、同一条任务、只换闸的版本：
@@ -199,6 +290,8 @@ scoped-gate cache 已记录：
 - `ACTIVATION_LINE_ISO` 未被补进晋升闸（DoD ⛔ 项）；晋升侧未保留任何 goal 拦截。
 - `plugin/test/slot-refill.test.mjs` 的过时注释未改（不在 Touches；行为上仍通过）。
 - `tasks/gap-fan-in-merge-target-hardcoded-develop-blocks-third-party-landing.md` 未改（AC4 那条外部缺陷，已路由给属主，由其自行修复）。
+- `plugin/test/workflow-replay.test.mjs` 未改（AC8 的**根因**面：它往已签入的 fixtures 目录里建/删临时目录）。本任务只修了「不该做文件系统动作的 measure 做了文件系统动作」这一半，另一半已另立案。
+- 未给 AC8 的竞态加任何重试/忽略错误的兜底——那会静默吞掉真实的树变更（硬规则 3b）。
 
 ## Touches
 
@@ -208,3 +301,4 @@ scoped-gate cache 已记录：
 - plugin/scripts/long-term-guarantee-goal-backed-check.ts
 - plugin/scripts/capability-catalog.sh
 - tasks/gap-promotion-admission-reads-goal-layer-field.md
+- test/cold-start-oneliner-e2e.sh
