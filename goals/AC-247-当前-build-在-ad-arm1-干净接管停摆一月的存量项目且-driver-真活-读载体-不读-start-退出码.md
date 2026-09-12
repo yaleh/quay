@@ -58,3 +58,41 @@ statusLog:
     reason: "I2: criterion pass"
 ---
 **判据（能取假）**：2026-09-12 干跑 exit 1（载体存在、82 条记录、无本 AC 记录）。**负控制**：ad-arm1 的 user-scope quay 已于本日卸载 ⇒ `driver_alive` 今天结构上必为 0，任何声称满足本 AC 的记录都必须是真装真跑出来的。**⛔ 不读退出码**：`quay driver start` 打印 `started: supervisor pid=… exit=0` 而 status 全 0 的形态已由 GOAL-009 AC-203 实证；本 AC 沿用「读载体」的判法，复用 `start-drivers.ts:54` 的 `parseDriverStatus`（它已把「读不出」与「不活」分成两个取值）。**与 GOAL-009 AC-238 的分工**：AC-238 验「带旧 vendored runtime 的项目升级后存量不丢」；本 AC 验「**user-scope 安装已被移除、从零装当前 build** + **停摆一月的 loop 重新起来**」——`stale_days` 是这两者的区分量。**顺带的价值**：GOAL-009 已 achieved、其 AC 离开 `check --achieved-failing` 作用域（风险 5），本 AC 这一跑等于替 AC-201/202/203 路径复验一次。
+
+---
+
+**已知局限（人 2026-09-12 指出后补记，⛔ 不得让本 AC 的绿冒充「接管完成」）**
+
+**判据漏掉了 `quay-init` 这一步。** 本 AC 只验「装上当前 build + driver 真活 + 存量不丢」，
+**没有任何一条要求目标项目的【配置形状】被刷新到当前版本**。⇒ 2026-09-12 的接管把新包装上、新 driver 起来，
+却让 archguard 继续用 **2026-08-11 的 plugin 0.4.0 形状**（`quay-init-state.json` mtime 8-11 15:31，
+`pluginVersion: 0.4.0`；当前为 0.6.1，跨两个次版本）。
+
+**代价是五个可观测症状，全部同源**（当日实测）：
+① `goals/` 载体不存在 ⇒ `/goal` 页面恒空——`goals` 进闭集是 GOAL-009 的 AC-206（09-09）做的，0.4.0 时代
+`CLOSED_SET_DIRS = ["tasks"]`；② `providers.native.path` 与 `mcp_entry` 仍指 `.quay/runtime`（8-11 的
+vendored bundle），而 driver/serve 实际跑 takeover 包 ⇒ **双版本并存**，经 MCP 访问用的是 8 月的旧代码；
+③ `tmux_session` 残留（tmux 机制 2026-09-03 已退役）；④ `gates.testPass` 四个门零生产消费者；
+⑤ `QUAY_NATIVE_META_DIR` 未设 ⇒ meta 落在交付物内部而非项目内。
+
+**补跑 `quay-init`（v0.6.1）后的实测结果（2026-09-12，人追问「就全解决了？」后逐条复measure）——
+⛔ 只解决了一条，⛔ 不要把「跑了 quay-init」读成「五条已修」**：
+
+| 症状 | 补跑后实测 | 是否解决 |
+|---|---|---|
+| ① `goals/` 载体不存在 | 目录已建，但 `goals/*.md = 0`，`/goal` 页面仍 0 命中 | **✗ 症状未消除**——建了载体 ≠ 有内容 |
+| ② `path`/`mcp_entry` 指旧 runtime | 已迁至 `plugin/vendor/quay-native`，旧 runtime 退役进 `quay-init-backups/` | **✓ 真解决** |
+| ③ `tmux_session` 残留 | 仍在 config `:31` | **✗ 未解决，且是执行者显式传 `--tmux-session` 主动保住的** |
+| ④ `gates.testPass` 零消费者 | 四个门原样不动 | **✗** quay-init 不碰 `gates:` 段 |
+| ⑤ `QUAY_NATIVE_META_DIR` 未设 | env 仍只有 TASKS_DIR/ADR_DIR | **✗** meta 仍落在交付物内部 |
+
+另有一条与 quay-init 无关、同期发现的 `/tests` 未接入（`verification-round` 台账不产生），
+属代码层缺陷，已立案 `gap-verification-round-bound-to-quay-shaped-suite-entry`，⛔ quay-init 碰不到。
+
+⇒ **缺 `quay-init` 这一步是真的，但它只是必要条件、⛔ 不是充分条件**：
+配置指针类问题（②）它能修；**载体内容（①）、未被消费的配置段（④）、缺失的 env 键（⑤）、
+以及代码层缺陷（/tests）它都修不了**。**⛔ 不要把「机制跑过了」读成「问题解决了」。**
+
+**⇒ 本 AC 转绿只证明「新包装上了、driver 活着、存量没丢」，⛔ 不证明「目标项目已被完整接管」。**
+若要后者成为保证，应在下一个 goal 里立一条「接管后目标项目的配置形状 == 当前交付版本」的 AC
+（可取的直接量：`quay-init-state.json` 的 `pluginVersion` == 交付物 plugin 版本），⛔ 不要指望本 AC。
