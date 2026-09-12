@@ -39,9 +39,12 @@
 // Exit: 0 = 轮跑完（含 not-evaluated）; 1 = 轮失败（failed fact）; 2 = usage。
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+// `.quay/config.yml` 的读取复用既有依赖（同 goal-store.ts / goal-driver.ts 的 `yaml`，⛔ 不手搓 parser）。
+import { parse as YAML } from "yaml";
 import { launchArgv, runAsync, ts, aliveness, carrierStats, KNOWN_KINDS, type Fact, type RoutineSpec } from "./driver-runtime.ts";
 import { runResidentQualityGateLoop, computeRoundRecord } from "./quality-gate-driver.ts";
 import { readProbeSpec } from "./read-probe-spec.ts";
@@ -162,6 +165,9 @@ export interface MetaRoundReadings {
    *  恒不相等、变化检测闸失效，硬规则 4 推论一）；只有 crossed 位进（见 readingsDigest），
    *  与 drivers 只取 running 位、divergences 不取 repeatCount 同一条纪律。 */
   timeSeries: TimeSeriesSignal[];
+  /** 【第七类读数】动作记录（会话语料）失败聚合——本文件里**唯一不读状态载体**的一类
+   *  （GOAL-014 选项①）。三态见 `ActionFailureReading`；digest 只取越阈项的签名与三态 token。 */
+  actionRecordFailures: ActionFailureReading;
 }
 
 // ── 机械半 ────────────────────────────────────────────────────────────────────────────────────────
@@ -482,6 +488,426 @@ export function deriveGoalCarrierSignals(
   return out;
 }
 
+// ── 第七类读数：动作记录失败聚合（GOAL-014 选项①，gap-meta-driver-action-record-failure-aggregation-reading）──
+// 缺口（GOAL-014 实证 2026-09-10）：6 个互不相同的会话各自撞同一错误（`Unknown skill` 类）
+// 合计 12+ 次、各自现场回退，**没有任何机件把这 12 次汇总成一个信号**。前六类读数（criteria/
+// drivers/syncHealth/metaRecords/inertCheckers/focus）**全部读状态载体**；本类是第一类读
+// **动作记录**（会话语料）的读数。⛔ inertCheckers 管的是方向相反的东西（从不报红的惰性守卫）。
+//
+// 成本结构（2026-09-12 本机实测，写进本任务体作为阈值定值依据）：
+//   · 语料规模：`get_session_directory` = 5513 文件 / 3.93 GB（quay 项目，顶层 + subagent）。
+//   · 单次全量扫描 `query_session_signals type=errors` 实测 **≥15 分钟**（见任务体实测读数）。
+//   · ⚠️ `since` **不降低扫描成本**：meta-cc 的时间过滤在【全量载入之后】逐条判定
+//     （internal/mcp/executor/provider_query.go:`runProviderJQ`/`inTimeRange`），不是文件级预过滤
+//     ⇒ GOAL-014 成本约束里「读语料必须增量（since = 上轮时刻）」在机制上落不了地。
+//     **本读数的成本控制只能靠【缓存 + TTL】**，⛔ 不是靠缩小窗口。首版即按此实现。
+//
+// 形态（三条硬纪律）：
+//   ① 三态互不同形（硬规则 3b）：`crossed`（有越阈项）/ `none`（无越阈项）/ `not-evaluated`
+//      （语料读不到、或阈值未配置）。`aggregates` 为 **null ⇔ not-evaluated**——⛔ 绝不与
+//      `[]`（**查过**、本轮无命中）共用取值：前者是「没查成」，后者是「查成了、没有」。
+//   ② digest 只取【越阈项的签名】与三态 token，⛔ **原始计数一律不进**——计数每轮都可能变，
+//      进了摘要会让变化检测闸恒为真、每轮烧 LLM（硬规则 4 推论一；同 staleSecs/repeatCount 的纪律）。
+//   ③ 阈值 ⛔ **不写字面量**（硬规则 4 推论二）：从 `.quay/config.yml` 的 `action_record_failures:`
+//      段读；未配置 ⇒ 走 `not-evaluated` + 独立 reason，**不设「恰好合理」的默认值**。
+
+/** 动作记录扫描结果的载体（gitignored 运行时状态，与轮载体分开——它是【缓存】不是【记录】）。 */
+export const ACTION_RECORD_SCAN_REL = path.join(".quay", "action-record-scan.json");
+
+/** 一条动作记录失败（= meta-cc 查询结果里的一条 `tool_result` with `is_error`）。
+ *  `signature` 是归一化后的错误签名（同一错误的多次出现归到同一个键）；`sessionId` 是
+ *  【跨会话】这个维度的承载——聚合要数的是「命中几个不同会话」，⛔ 不是「总共几条」。 */
+export interface ActionFailureRecord {
+  sessionId: string;
+  signature: string;
+  /** 原始错误文本的截断样例（给人看「这是什么错」；⛔ 不进 digest）。 */
+  example: string;
+  ts: string | null;
+}
+
+/** 一个聚合项 = 一个错误签名 × 其跨会话命中面。⛔ 不是布尔。 */
+export interface ActionFailureAggregate {
+  signature: string;
+  /** 命中会话数（去重后的 sessionId 个数）。 */
+  sessions: number;
+  /** 总次数（含同一会话内重复）。 */
+  count: number;
+  /** 是否越过本轮阈值（阈值由调用侧给定，⛔ 本函数内无字面量）。
+   *  `null` = 阈值**尚未配置** ⇒ 不给越阈判定（⛔ 不与 `false`「查过、未越阈」同形，硬规则 3b）。 */
+  crossed: boolean | null;
+  /** 一条原始错误样例（截断）——SPEC §5.3：枚举对象、给指引，⛔ 不只给一个标量。 */
+  example: string;
+}
+
+/** 第七类读数。状态见文件段注释①。
+ *  ⚠️ `unthresholded` 是 AC3 三态之外的第四态，**必须存在**：本任务明令「⛔ 不定阈值数值——
+ *  实测出的扫描耗时与命中率写进任务体后阈值才有依据」。若没有这一态，唯一的选择就是要么
+ *  凭空定一个数（违反硬规则 4 推论一/二），要么把真实扫到的清单丢掉（AC7 落空）。
+ *  ⇒ 把【扫描】（成本旋钮）与【越阈判定】（判断旋钮）**解耦**：扫描照跑、清单照出，
+ *  只是 `crossed` 为 null——「我看见了什么」与「我判它越没越阈」是两件事。 */
+export interface ActionFailureReading {
+  state: "crossed" | "none" | "unthresholded" | "not-evaluated";
+  /** null ⇔ not-evaluated（⛔ 与「查过、无命中」的 [] 不同形）。 */
+  aggregates: ActionFailureAggregate[] | null;
+  /** not-evaluated 的成因（语料读不到 / 阈值未配置 / 扫描失败）——同一 state 下成因可区分。 */
+  reason: string | null;
+  scannedAt: string | null;
+  scanMs: number | null;
+  since: string | null;
+  recordsScanned: number | null;
+  /** 本轮生效的阈值；null = 未配置（不与任何数值同形）。 */
+  thresholdSessions: number | null;
+}
+
+/** `.quay/config.yml` 的 `action_record_failures:` 段。全部可缺省（⛔ 无字面量默认值，
+ *  硬规则 4 推论二）：缺 ⇒ null，调用侧据此走 not-evaluated 而不是拿一个「恰好合理」的数。 */
+export interface ActionRecordConfig {
+  minSessions: number | null;
+  windowMs: number | null;
+  scanTtlMs: number | null;
+  scanTimeoutMs: number | null;
+}
+
+/** 解析时长字面量（`30m`/`12h`/`7d`/裸数字=毫秒）。⛔ 只解析，不给默认值。 */
+export function parseDurationMs(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) return value;
+  if (typeof value === "string") {
+    const m = value.trim().match(/^(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)$/i);
+    if (m) {
+      const mult = { ms: 1, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }[m[2].toLowerCase() as "ms" | "s" | "m" | "h" | "d"];
+      return Number(m[1]) * mult;
+    }
+  }
+  return null;
+}
+
+/** 读 `.quay/config.yml` 的 `action_record_failures:` 段。读不到 / 段缺失 / 键缺失 ⇒ 对应字段 null
+ *  （⛔ 不抛、⛔ 不回退到任何数值默认——见硬规则 4 推论二）。 */
+export function readActionRecordConfig(root: string): ActionRecordConfig {
+  const out: ActionRecordConfig = { minSessions: null, windowMs: null, scanTtlMs: null, scanTimeoutMs: null };
+  let parsed: unknown;
+  try {
+    parsed = YAML(fs.readFileSync(path.join(root, ".quay", "config.yml"), "utf8"));
+  } catch { return out; }
+  const sec = parsed && typeof parsed === "object"
+    ? (parsed as Record<string, unknown>).action_record_failures
+    : undefined;
+  if (!sec || typeof sec !== "object") return out;
+  const s = sec as Record<string, unknown>;
+  const ms = s.min_sessions;
+  if (typeof ms === "number" && Number.isInteger(ms) && ms >= 1) out.minSessions = ms;
+  out.windowMs = parseDurationMs(s.window);
+  out.scanTtlMs = parseDurationMs(s.scan_ttl);
+  out.scanTimeoutMs = parseDurationMs(s.scan_timeout);
+  return out;
+}
+
+/** 归一化错误签名：把每次出现都不同、但**不改变错误身份**的部分抹掉
+ *  （commit sha / uuid / 数字 / 路径 / 引号内的一次性内容），保留错误本身的措辞。
+ *  ⛔ 这一步是「同错误」可聚合的前提——不归一化则每次报错都是新签名，清单恒为全 1。 */
+export function errorSignature(text: string): string {
+  let s = String(text ?? "");
+  s = s.replace(/\s+/g, " ").trim();
+  // commit sha / uuid 片段（先于纯数字，长跑优先）。要求命中里【含数字】——否则英文里
+  // 恰好由 a–f 组成的普通词（`defaced`/`acceded`）会被当成 sha 抹掉，把不同错误并成一个签名。
+  s = s.replace(/\b[0-9a-f]{7,40}\b/gi, (m) => (/\d/.test(m) ? "<hex>" : m));
+  s = s.replace(/\d+/g, "<n>");                       // 行号 / 计数 / 时间戳数字
+  s = s.replace(/(?:\/[\w.@+-]+){2,}/g, "<path>");    // 路径
+  s = s.replace(/["'`][^"'`]{24,}["'`]/g, "<quoted>"); // 一次性长引文
+  return s.slice(0, 200);
+}
+
+/** 从 meta-cc `query_session_signals type=errors` 的查询结果里抽动作记录。
+ *  ⛔ **返回 null 与返回 [] 不同义**（硬规则 3b）：null = 这坨结果我**读不懂**（形状不认识 /
+ *  没有可解析的载荷），[] = 读懂了、里面**没有**错误记录。调用侧据此分走 not-evaluated / none。 */
+export function extractActionFailureRecords(queryResult: unknown): ActionFailureRecord[] | null {
+  const records = mcpResultRecords(queryResult);
+  if (records === null) return null;
+  const out: ActionFailureRecord[] = [];
+  for (const rec of records) {
+    if (!rec || typeof rec !== "object") continue;
+    const r = rec as Record<string, unknown>;
+    const sessionId = String(r.sessionId ?? r.session_id ?? r.threadId ?? "");
+    const ts = typeof r.timestamp === "string" ? r.timestamp : null;
+    // 归一化后的记录形态各版本可能不同 ⇒ 逐条【枚举】候选承载点，⛔ 不赌单一键名。
+    for (const err of errorTextsFromRecord(r)) {
+      if (!sessionId) continue;
+      out.push({ sessionId, signature: errorSignature(err), example: err.replace(/\s+/g, " ").trim().slice(0, 300), ts });
+    }
+  }
+  return out;
+}
+
+/** 从一条会话记录里枚举全部错误文本（`message.content[]` 里 `is_error:true` 的 tool_result）。
+ *  读不出任何结构 ⇒ []（本条记录没贡献），⛔ 不抛。 */
+function errorTextsFromRecord(rec: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const msg = rec.message;
+  const content = msg && typeof msg === "object" ? (msg as Record<string, unknown>).content : undefined;
+  if (Array.isArray(content)) {
+    for (const c of content) {
+      if (!c || typeof c !== "object") continue;
+      const cc = c as Record<string, unknown>;
+      if (cc.is_error !== true) continue;
+      out.push(flattenContentText(cc.content));
+    }
+  }
+  // `error` 字段（部分 provider 的规范化形态）——⛔ 别赌单一键名，两条路都试。
+  if (out.length === 0 && typeof rec.error === "string" && rec.error.trim()) out.push(rec.error);
+  return out;
+}
+
+/** `content` 可能是字符串，或 `[{type:"text",text}]` 数组。压平成一段文本。 */
+function flattenContentText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((x) => (x && typeof x === "object" ? String((x as Record<string, unknown>).text ?? "") : String(x ?? "")))
+      .join(" ");
+  }
+  if (content && typeof content === "object") return String((content as Record<string, unknown>).text ?? "");
+  return "";
+}
+
+/** 从 MCP `tools/call` 的 result 信封里取出【记录数组】。⛔ 取不出 ⇒ null（读不懂，不是「没有」）。
+ *  meta-cc 的 `content[0].text` 是一段 JSON 字符串；不同工具分别返回数组或 `{records:[…]}` 形对象。 */
+function mcpResultRecords(queryResult: unknown): Array<Record<string, unknown>> | null {
+  let payload = queryResult;
+  // content[0].text → JSON 字符串
+  const content = payload && typeof payload === "object" ? (payload as Record<string, unknown>).content : undefined;
+  if (Array.isArray(content)) {
+    const texts = content
+      .map((c) => (c && typeof c === "object" ? (c as Record<string, unknown>).text : undefined))
+      .filter((t): t is string => typeof t === "string");
+    if (texts.length > 0) {
+      try { payload = JSON.parse(texts.join("")); } catch { return null; }
+    }
+  }
+  // 信封可能再包一层 structuredContent（⛔ 不赌单一形态）。
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    const sc = (payload as Record<string, unknown>).structuredContent;
+    if (sc !== undefined) payload = sc;
+  }
+  if (Array.isArray(payload)) return payload as Array<Record<string, unknown>>;
+  if (payload && typeof payload === "object") {
+    for (const k of ["records", "results", "data", "items"]) {
+      const v = (payload as Record<string, unknown>)[k];
+      if (Array.isArray(v)) return v as Array<Record<string, unknown>>;
+    }
+  }
+  return null;
+}
+
+/** 纯聚合：动作记录 → 按「同错误 × 跨会话」聚合的清单。⛔ 排序确定性（digest 稳定性靠它：
+ *  同一份语料 ⇒ 同一份清单 ⇒ 同一份签名序列）。`records === null`（读不懂）⇒ not-evaluated。 */
+export function aggregateActionFailures(
+  records: ActionFailureRecord[] | null,
+  opts: { minSessions: number | null; scannedAt?: string | null; scanMs?: number | null; since?: string | null; reason?: string | null },
+): ActionFailureReading {
+  const meta = {
+    scannedAt: opts.scannedAt ?? null,
+    scanMs: opts.scanMs ?? null,
+    since: opts.since ?? null,
+    thresholdSessions: opts.minSessions,
+  };
+  if (records === null) {
+    return { state: "not-evaluated", aggregates: null, reason: opts.reason ?? "corpus-unreadable", ...meta, thresholdSessions: null };
+  }
+  const bySig = new Map<string, { sessions: Set<string>; count: number; example: string }>();
+  for (const r of records) {
+    if (!r.signature) continue;
+    let e = bySig.get(r.signature);
+    if (!e) { e = { sessions: new Set<string>(), count: 0, example: r.example }; bySig.set(r.signature, e); }
+    e.sessions.add(r.sessionId);
+    e.count++;
+  }
+  const min = opts.minSessions;
+  const aggregates: ActionFailureAggregate[] = [...bySig.entries()]
+    .map(([signature, e]) => ({
+      signature, sessions: e.sessions.size, count: e.count,
+      crossed: min === null ? null : e.sessions.size >= min, example: e.example,
+    }))
+    // 确定性排序：越阈的在前，再按 会话数 desc / 次数 desc / 签名 asc——⛔ 不依赖 Map 插入序
+    // （digest 的稳定性靠它：同一份语料必须给出同一个签名序列）。
+    .sort((a, b) => (Number(b.crossed ?? false) - Number(a.crossed ?? false)) || (b.sessions - a.sessions) || (b.count - a.count) || (a.signature < b.signature ? -1 : a.signature > b.signature ? 1 : 0));
+  const state: ActionFailureReading["state"] = min === null
+    ? "unthresholded"
+    : aggregates.some((a) => a.crossed) ? "crossed" : "none";
+  return { state, aggregates, reason: null, ...meta, recordsScanned: records.length };
+}
+
+/** meta-cc MCP 可执行文件的定位（单一真相源）。优先级：`QUAY_META_CC_MCP` 显式覆盖 →
+ *  `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/bin/meta-cc-mcp`（取最高版本）→
+ *  `~/.local/bin/meta-cc-mcp`（meta-cc 自己的 `make install` 落点）。
+ *  ⛔ 找不到 ⇒ null（调用侧转 not-evaluated，⛔ 不是「没有重复失败」）。 */
+export function locateMetaCcMcp(env: Record<string, string | undefined> = process.env, home: string = os.homedir()): string | null {
+  const explicit = env.QUAY_META_CC_MCP;
+  if (explicit && fs.existsSync(explicit)) return explicit;
+  const found: string[] = [];
+  const cacheRoot = path.join(home, ".claude", "plugins", "cache");
+  try {
+    for (const mk of fs.readdirSync(cacheRoot)) {
+      for (const pl of fs.readdirSync(path.join(cacheRoot, mk))) {
+        const plDir = path.join(cacheRoot, mk, pl);
+        let versions: string[];
+        try { versions = fs.readdirSync(plDir); } catch { continue; }
+        for (const v of versions) {
+          const bin = path.join(plDir, v, "bin", "meta-cc-mcp");
+          if (pl.startsWith("meta-cc") && fs.existsSync(bin)) found.push(bin);
+        }
+      }
+    }
+  } catch { /* 无 cache 目录 ⇒ 继续走下一个候选 */ }
+  const local = path.join(home, ".local", "bin", "meta-cc-mcp");
+  if (fs.existsSync(local)) found.push(local);
+  if (found.length === 0) return null;
+  // 版本比较按【路径里的数字段】降序，取最高——⛔ 不按字典序（"3.10" < "3.9" 会选错）。
+  return found.sort((a, b) => versionKey(b) - versionKey(a))[0];
+}
+
+function versionKey(p: string): number {
+  const m = p.match(/(\d+)\.(\d+)\.(\d+)/);
+  return m ? Number(m[1]) * 1e6 + Number(m[2]) * 1e3 + Number(m[3]) : 0;
+}
+
+/** 经 MCP stdio 调 meta-cc 的一个工具，返回 `result` 信封（⛔ 不是 tools/list 那种协议层东西）。
+ *  失败/超时/协议错 ⇒ `{ok:false, reason}`——**独立取值**，⛔ 不返回 null 冒充空结果（硬规则 3b）。
+ *  `timeoutMs: null` = 不设超时（⛔ 不写有限默认值：成本结构未实测前不设阈值，硬规则 4 推论一）。 */
+export async function callMetaCcTool(opts: {
+  binary: string; tool: string; args: Record<string, unknown>; cwd: string; timeoutMs: number | null;
+}): Promise<{ ok: true; result: unknown } | { ok: false; reason: string }> {
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(opts.binary, [], { cwd: opts.cwd, stdio: ["pipe", "pipe", "pipe"] });
+    } catch (e) {
+      resolve({ ok: false, reason: `spawn failed: ${(e as Error).message}` });
+      return;
+    }
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const finish = (r: { ok: true; result: unknown } | { ok: false; reason: string }) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      try { child.kill("SIGKILL"); } catch { /* already gone */ }
+      resolve(r);
+    };
+    if (opts.timeoutMs !== null && Number.isFinite(opts.timeoutMs)) {
+      timer = setTimeout(() => finish({ ok: false, reason: `scan timeout after ${opts.timeoutMs}ms (SIGKILL)` }), opts.timeoutMs);
+    }
+    child.on("error", (e) => finish({ ok: false, reason: `spawn error: ${e.message}` }));
+    child.on("close", () => finish({ ok: false, reason: `server exited before responding (stderr: ${stderr.trim().slice(0, 200)})` }));
+    child.stdout?.on("data", (d) => {
+      stdout += String(d);
+      // meta-cc 的日志也走 stdout ⇒ 逐行找【带我们 id 的那一行】，⛔ 不解析整屏。
+      for (const line of stdout.split("\n")) {
+        const t = line.trim();
+        if (!t.startsWith("{")) continue;
+        let j: unknown;
+        try { j = JSON.parse(t); } catch { continue; }
+        const o = j as Record<string, unknown>;
+        if (o.id !== 2) continue;
+        if (o.error) { finish({ ok: false, reason: `tool error: ${JSON.stringify(o.error).slice(0, 300)}` }); return; }
+        finish({ ok: true, result: o.result });
+        return;
+      }
+    });
+    child.stderr?.on("data", (d) => { stderr += String(d); });
+    const write = (o: unknown) => { try { child.stdin?.write(JSON.stringify(o) + "\n"); } catch { /* 写失败由 close/timeout 兜底 */ } };
+    write({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "quay-meta-driver", version: "1" } } });
+    write({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: opts.tool, arguments: opts.args } });
+  });
+}
+
+/** 扫描结果载体：`{scannedAt, scanMs, since, records}`。读不到 / 解析不了 ⇒ null（⛔ 不是「空语料」）。 */
+export function readActionRecordScan(root: string): { scannedAt: string; scanMs: number | null; since: string | null; records: ActionFailureRecord[] } | null {
+  let j: unknown;
+  try { j = JSON.parse(fs.readFileSync(path.join(root, ACTION_RECORD_SCAN_REL), "utf8")); } catch { return null; }
+  if (!j || typeof j !== "object") return null;
+  const o = j as Record<string, unknown>;
+  if (typeof o.scannedAt !== "string" || !Array.isArray(o.records)) return null;
+  const records: ActionFailureRecord[] = [];
+  for (const r of o.records) {
+    if (!r || typeof r !== "object") continue;
+    const rr = r as Record<string, unknown>;
+    if (typeof rr.sessionId !== "string" || typeof rr.signature !== "string") continue;
+    records.push({ sessionId: rr.sessionId, signature: rr.signature, example: String(rr.example ?? ""), ts: typeof rr.ts === "string" ? rr.ts : null });
+  }
+  return { scannedAt: o.scannedAt, scanMs: typeof o.scanMs === "number" ? o.scanMs : null, since: typeof o.since === "string" ? o.since : null, records };
+}
+
+/** 跑一次真实语料扫描并落载体。返回扫描结果或失败原因（⛔ 失败不写半成品载体）。 */
+export async function scanActionRecords(
+  root: string,
+  cfg: ActionRecordConfig,
+  opts: { now?: number; binary?: string | null } = {},
+): Promise<{ ok: true; scan: { scannedAt: string; scanMs: number; since: string | null; records: ActionFailureRecord[] } } | { ok: false; reason: string }> {
+  const binary = opts.binary === undefined ? locateMetaCcMcp() : opts.binary;
+  if (!binary) return { ok: false, reason: "meta-cc-mcp not found (set QUAY_META_CC_MCP or install meta-cc)" };
+  const nowMs = opts.now ?? Date.now();
+  const since = cfg.windowMs === null ? null : new Date(nowMs - cfg.windowMs).toISOString();
+  const args: Record<string, unknown> = { type: "errors", working_dir: root };
+  if (since) args.since = since;
+  const t0 = Date.now();
+  const r = await callMetaCcTool({ binary, tool: "query_session_signals", args, cwd: root, timeoutMs: cfg.scanTimeoutMs });
+  const scanMs = Date.now() - t0;
+  if (!r.ok) return { ok: false, reason: r.reason };
+  const records = extractActionFailureRecords(r.result);
+  if (records === null) return { ok: false, reason: "corpus-unreadable: meta-cc result shape unrecognized" };
+  const scannedAt = new Date(nowMs).toISOString();
+  const scan = { scannedAt, scanMs, since, records };
+  try {
+    const file = path.join(root, ACTION_RECORD_SCAN_REL);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(scan), "utf8");
+  } catch (e) {
+    return { ok: false, reason: `scan carrier write failed: ${(e as Error).message}` };
+  }
+  return { ok: true, scan };
+}
+
+/** 采第七类读数。成本控制【只靠缓存 + TTL】（见文件段注释：`since` 不降低成本）：
+ *  载体新鲜（< `scan_ttl`）⇒ 直接聚合；过期/缺失且 `scan_ttl` 已配置 ⇒ 真扫一次再聚合。
+ *  `scan_ttl` **未配置 ⇒ 从不自动扫**（⛔ 不写字面量默认 TTL）——此时有载体就用载体、
+ *  没载体就 not-evaluated。这让「自动扫描」是一个**显式的运维选择**，而不是一个隐式开销。 */
+export async function collectActionRecordFailures(
+  root: string,
+  opts: { now?: number; cfg?: ActionRecordConfig; binary?: string | null; allowScan?: boolean } = {},
+): Promise<ActionFailureReading> {
+  const cfg = opts.cfg ?? readActionRecordConfig(root);
+  const nowMs = opts.now ?? Date.now();
+  let scan = readActionRecordScan(root);
+  const fresh = scan !== null && cfg.scanTtlMs !== null
+    && (nowMs - Date.parse(scan.scannedAt)) < cfg.scanTtlMs;
+  const allowScan = opts.allowScan !== false;
+  if (!fresh && allowScan && cfg.scanTtlMs !== null) {
+    const r = await scanActionRecords(root, cfg, { now: nowMs, binary: opts.binary });
+    if (r.ok) scan = r.scan;
+    else if (scan === null) {
+      return {
+        state: "not-evaluated", aggregates: null, reason: `scan-failed: ${r.reason}`,
+        scannedAt: null, scanMs: null, since: null, recordsScanned: null, thresholdSessions: null,
+      };
+    }
+    // 扫描失败但有旧载体 ⇒ 落到下面用旧载体（值仍来自**真实**扫描，只是旧；`scannedAt` 会暴露年龄）。
+  }
+  if (scan === null) {
+    return {
+      state: "not-evaluated", aggregates: null, reason: "corpus-unreadable: no scan carrier present",
+      scannedAt: null, scanMs: null, since: null, recordsScanned: null, thresholdSessions: null,
+    };
+  }
+  // ⛔ `minSessions` 可以是 null（阈值尚未由人定值）——这时**照出清单**、只是不给越阈判定
+  // （见 `ActionFailureReading` 的 `unthresholded` 注释）：扫描是成本旋钮、越阈是判断旋钮，
+  // 两者解耦。否则「不定阈值」就等于「不看语料」，AC7 会落空。
+  return aggregateActionFailures(scan.records, {
+    minSessions: cfg.minSessions, scannedAt: scan.scannedAt, scanMs: scan.scanMs, since: scan.since,
+  });
+}
+
 /** 采本轮读数：active goal → 其下全部 AC → 逐条真跑 criterion → 算 divergence。
  *  `cliFocus` 是 CLI `--focus`（一次性人工干跑）的显式方向，优先级高于文件；两者都缺时
  *  `readings.focus` = 每轮现读的 orchestration/meta-driver-focus.md 覆盖段内容（常驻场景的人给方向通道）。 */
@@ -524,6 +950,9 @@ export async function collectReadings(root: string, cliFocus: string | null): Pr
   // 时序派生层：读 goal-round 载体一次，对当前 criteria 里每个 AC 派生存续信号（⛔ 只读一次载体，
   // 每个 AC 重读一遍会线性放大 IO）。载体读不到 ⇒ 每条信号 evaluated:false（⛔ 不冒充「streak=0」）。
   const timeSeries = deriveGoalCarrierSignals(readRoundCarrier(root, GOAL_ROUND_CARRIER_REL), criteria.map((c) => c.id));
+  // 第七类读数：动作记录失败聚合。⚠️ 这是本函数里**唯一可能长时间阻塞**的一步（真扫语料
+  // 实测 ≥15 分钟）——所以它自己带 TTL 缓存，且 `scan_ttl` 未配置时从不自动扫（见该函数注释）。
+  const actionRecordFailures = await collectActionRecordFailures(root);
   return {
     goals, criteria, divergences, drivers,
     syncHealth: collectSyncHealth(root),
@@ -531,6 +960,7 @@ export async function collectReadings(root: string, cliFocus: string | null): Pr
     inertCheckers: collectInertCheckers(root),
     focus,
     timeSeries,
+    actionRecordFailures,
   };
 }
 
@@ -811,6 +1241,21 @@ export function collectInertCheckers(root: string): string[] {
 /** 语义半的触发状态（gitignored 运行时状态，与轮载体分开——它是【状态】不是【记录】）。 */
 export const STATE_REL = path.join(".quay", "meta-driver-state.json");
 
+/** 第七类读数对摘要的贡献：三态各一个**独立 token**，越阈项按签名逐条进（排序保证确定性）。
+ *  ⛔ 计数与时间一律不进。`crossed` 与非 crossed 项的区别正是「会改变判读结论」的那个位。 */
+export function readingsDigestPartsForActionFailures(r: ActionFailureReading): string[] {
+  // 结构性缺失（字段不在）⇒ 与「未评估」同 token。⛔ 绝不落到 "none"——把「没读到这一维」
+  // 当成「查过、无越阈项」正是硬规则 3b 禁的那种伪装（合格侧的伪装）。
+  if (!r || typeof r !== "object") return ["actfail-state:u"];
+  if (r.state === "not-evaluated") return ["actfail-state:u"];
+  if (r.state === "unthresholded") return ["actfail-state:unt"];
+  if (r.state === "none") return ["actfail-state:none"];
+  const crossed = (r.aggregates ?? []).filter((a) => a.crossed).map((a) => a.signature).sort();
+  // 构造上 crossed 非空（state==="crossed" 的定义）；仍加一个兜底 token，⛔ 不让「空数组」
+  // 与 "none" 同形（硬规则 3b：读不懂/构造意外不得伪装成合格）。
+  return crossed.length > 0 ? crossed.map((s) => `actfail-x:${s}`) : ["actfail-state:crossed-empty"];
+}
+
 /** 读数的稳定摘要：只含【会改变判读结论】的量（每条 AC 的 verdict/status + 偏离类别），
  *  ⛔ 不含时间戳/reason 文本（那些每轮都变，会让摘要恒不相等 ⇒ 变化检测恒为真 ⇒ 闸失效）。 */
 export function readingsDigest(readings: MetaRoundReadings): string {
@@ -838,6 +1283,12 @@ export function readingsDigest(readings: MetaRoundReadings): string {
     // 人工转向（覆盖段内容）：人编辑才变，进摘要 ⇒ 变了判读一次、不变不判读（「变了」而非「非空」）。
     // ⛔ 它恰是【人编辑才变】的量（与 staleSecs/记录数相反——那些每轮都变，进摘要会让变化检测恒为真）。
     `focus:${readings.focus ?? "none"}`,
+    // 第七类读数（动作记录失败聚合）：⛔ **只有越阈项的签名**与三态 token 进摘要。原始计数
+    // （sessions/count/recordsScanned/scannedAt）⛔ 一律不进——那些每轮都可能变，进了会让摘要
+    // 恒不相等、变化检测闸失效（硬规则 4 推论一；同 staleSecs/repeatCount 的纪律）。
+    // 三态 token 用独立前缀（`actfail-state:` / `actfail-x:`），⛔ 不让一个签名的字面值
+    // 与状态 token 撞形（硬规则 8：编号/命名不得复用——缺席被伪装成在场）。
+    ...readingsDigestPartsForActionFailures(readings.actionRecordFailures),
   ];
   return createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 16);
 }
@@ -1762,6 +2213,9 @@ async function runMetaRoundInner(opts: MetaRoundOptions): Promise<MetaRoundResul
     // 时序派生信号也进记录（DoD1：生产载体上可见——⛔ 不以单测绿充当完成）。count 进记录但⛔ 不进
     // digest（digest 只取 crossed 位），故「count 递增、未越阈」的轮摘要不变、不烧 LLM。
     timeSeries: readings.timeSeries,
+    // 第七类读数也进记录（DoD：生产载体上可见、且「无越阈项」与「语料读不到」在记录上可区分）：
+    // state 三态 + aggregates 全清单（含计数）。⛔ 计数进记录、不进 digest——digest 只取越阈签名。
+    actionRecordFailures: readings.actionRecordFailures,
     // 结算处置进读数：evidenceKept 非空 = 本轮真有 verdict 变化（有信息，待提交）；
     // 全 restored = 本轮只是刷新了时间戳（无信息）。这让「观测的副作用」自身可观测。
     evidenceRestored: settlement.restored.length,
@@ -1934,6 +2388,10 @@ const HELP = [
   "  --judge-floor <m> 语义半的定时器地板（分钟，缺省 1440=24h）——安全网非调优阈值：",
   "                    读数变了/给了 --focus 就会判读；地板只防「摘要恒不变 ⇒ 永不再判」",
   "  --json            输出 JSON（缺省人读摘要）",
+  "  --scan-action-records",
+  "                    只跑第七类读数的【语料扫描】并落缓存载体，不跑整轮（运维/定时刷新入口）。",
+  "                    ⚠️ 实测 ≥15 分钟（quay 语料 5513 文件 / 3.93 GB）；这是唯一会真扫语料的入口，",
+  "                    轮内自动扫描由 .quay/config.yml 的 action_record_failures.scan_ttl 决定。",
   "",
   "常驻（例程型，复用通用循环）:",
   "  --resident            常驻跑（**已是缺省**，保留仅为显式表达；一次性用 --once）",
@@ -1959,6 +2417,7 @@ export async function main(argv: string[]): Promise<number> {
   let runId = `meta-${Date.now()}`;
   let pidFile: string | undefined;
   let maxRounds: number | null = null;
+  let scanActionRecordsOnly = false;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -1976,11 +2435,33 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--run-id") { runId = args[++i]; }
     else if (a === "--pid-file") { pidFile = args[++i]; }
     else if (a === "--max-rounds") { maxRounds = Number(args[++i]); }
+    else if (a === "--scan-action-records") { scanActionRecordsOnly = true; }
     else if (a === "--help" || a === "-h") { process.stdout.write(HELP + "\n"); return 0; }
     else { process.stderr.write(`meta-driver: unknown argument: ${a}\n${HELP}\n`); return 2; }
   }
   if (!Number.isFinite(k) || k < 1) { process.stderr.write("meta-driver: --k must be a positive number\n"); return 2; }
   if (!Number.isFinite(judgeFloorMs) || judgeFloorMs < 0) { process.stderr.write("meta-driver: --judge-floor must be a non-negative number of minutes\n"); return 2; }
+
+  // 第七类读数的【语料扫描】单独入口：成本 ≥15 分钟，⛔ 不该藏在整轮里被隐式触发。
+  // 这是运维/定时的刷新路径；轮内自动扫描另由 config 的 scan_ttl 决定（见 collectActionRecordFailures）。
+  if (scanActionRecordsOnly) {
+    const cfg = readActionRecordConfig(root);
+    const binary = locateMetaCcMcp();
+    if (!binary) { process.stderr.write("meta-driver: meta-cc-mcp not found (set QUAY_META_CC_MCP)\n"); return 1; }
+    process.stderr.write(`meta-driver: scanning action records via ${binary} (root=${root}, window=${cfg.windowMs ?? "all"}ms)…\n`);
+    const r = await scanActionRecords(root, cfg, { binary });
+    if (!r.ok) { process.stderr.write(`meta-driver: action-record scan failed: ${r.reason}\n`); return 1; }
+    // 扫描面照出清单（成本旋钮）；`min_sessions` 未配置时 `crossed` 全为 null、state=unthresholded
+    // （判断旋钮）——⛔ 不在这里替人定一个数（硬规则 4 推论一/二）。
+    const agg = aggregateActionFailures(r.scan.records, { minSessions: cfg.minSessions, scannedAt: r.scan.scannedAt, scanMs: r.scan.scanMs, since: r.scan.since });
+    process.stdout.write(JSON.stringify({
+      ok: true, carrier: ACTION_RECORD_SCAN_REL, scannedAt: r.scan.scannedAt, scanMs: r.scan.scanMs,
+      since: r.scan.since, records: r.scan.records.length,
+      state: agg.state, thresholdSessions: agg.thresholdSessions,
+      aggregates: agg.aggregates,
+    }, null, 2) + "\n");
+    return 0;
+  }
 
   // 常驻是【缺省】，与兄弟例程型 kind 对齐（quality-gate-driver.ts main() 也是无条件进常驻循环）。
   //
