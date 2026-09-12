@@ -1,7 +1,7 @@
 ---
 id: gap-meta-inachievedreverifyscope
 title: AC-217 常设不变式被冻结在复验域外：GOAL-014 零 AC 激活而零信号——把 long-term 声明落到字段上
-status: ready
+status: done
 labels:
   - meta-driver
   - driver-candidate
