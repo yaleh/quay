@@ -23,6 +23,7 @@ import {
   readTaskFacts,
   checkStaleness,
   checkAchievedFailing,
+  sweepFrozenAcs,
   goalDriverRoutines,
   runGoalRound,
   runGapSpawnPass,
@@ -1012,4 +1013,29 @@ test('AC-216 复验域：standing-violated 的 prompt 改去重口径（done 不
   assert.ok(st.includes('IN FLIGHT'), '常设口径：只有在飞任务才算重复');
   assert.ok(!st.includes('ANY status'), '⛔ 常设口径不得沿用 gap 的 ANY-status 去重（否则每轮拒立案、缺口永无执行者）');
   assert.ok(st.includes('goal_ac: AC-185'), '两口径都必须要求顶层 goal_ac（下一轮独立复核的抓手）');
+});
+
+// ── AC-242 successor 的【动作】接线（gap-achieved-ac-rot-invisible-when-ledger-tail-is-stale-pass）
+// pass 1c 调 `goal-store check --stale-pass --sweep` 对冻结population 做一次有界轮转。这里跑**真
+// goal-store CLI**（⛔ 不注入 seam）：断言它确实轮转到那条冻结 AC 并把 verdict 透传出来；并断言
+// 读不懂输出 ⇒ null（⛔ 不与「轮转了且全过」同形，硬规则 3b）。
+test('AC-242 successor — sweepFrozenAcs 真跑有界轮转并透传 verdict；读不懂 ⇒ null', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-sweep-'));
+  fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+  fs.mkdirSync(path.join(tmp, '.quay'), { recursive: true });
+  // 冻结population：GOAL 非 active 且未声明 long-term，AC achieved 且有非空 criterion。
+  writeGoalFile(tmp, { id: 'GOAL-900', status: 'achieved', kind: 'goal' });
+  writeGoalFile(tmp, { id: 'AC-900', status: 'achieved', kind: 'criterion', goal: 'GOAL-900', criterion: 'exit 1' });
+  writeGoalFile(tmp, { id: 'AC-901', status: 'achieved', kind: 'criterion', goal: 'GOAL-900', criterion: 'exit 0' });
+
+  const r = await sweepFrozenAcs(repoRoot, tmp);
+  assert.ok(r, 'sweepFrozenAcs 应返回读数（非 null）');
+  assert.deepEqual(r.ran.map((x) => x.id).sort(), ['AC-900', 'AC-901'], '轮转覆盖了冻结population 的两条');
+  assert.equal(r.ran.find((x) => x.id === 'AC-900').verdict, 'fail', 'verdict 透传：当前为假的那条');
+  assert.equal(r.ran.find((x) => x.id === 'AC-901').verdict, 'pass', '双向：健康的那条');
+  assert.equal(r.stoppedBy, 'exhausted', '两条都在 budget 内跑完');
+
+  // 负控制：脚本根不存在 ⇒ 读不懂输出 ⇒ null（⛔ 不是 ran:[]）。
+  const bad = await sweepFrozenAcs(path.join(tmp, 'no-such-scripts'), tmp);
+  assert.equal(bad, null, '读不懂 ⇒ null，⛔ 不与「轮转了且全过」同形');
 });

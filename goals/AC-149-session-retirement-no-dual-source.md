@@ -1,7 +1,7 @@
 ---
 id: AC-149
 title: 会话真正退役 + 不留双真相源 + 产能不塌
-status: achieved
+status: superseded
 kind: criterion
 goal: GOAL-002
 criterion: |
@@ -14,6 +14,16 @@ origin: >
   AC149-1/-3 的
 
   一个具体子条件——枚举 outer 执行核引用的全部 checker，逐个确认留存调用面或显式退役。
+statusLog:
+  - at: 2026-09-12T01:46:29.129Z
+    from: achieved
+    to: superseded
+    actor: worker:gap-achieved-ac-rot-invisible-when-ledger-tail-is-stale-pass
+    reason: 判据引用的 plugin/scripts/session-retirement-check.ts 已由 gap-ac158（AC158
+      批次一：零调用死集归档，2026-09-07）git mv 进 archive/2026-09-07-zero-call-scripts/ ⇒
+      判据恒为 ERR_MODULE_NOT_FOUND、结构上不再可满足。其对象（outer/inner 会话退役 + 无双真相源）已由
+      2026-09-03/09-04 的退役裁定与 worker-driver 取代完成（见
+      orchestration/SPEC-tmux-retirement-2026-09-03.md）👉 显式处置为 superseded。
 ---
 
 **判据（能取假，三条缺一不可）**：

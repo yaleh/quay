@@ -280,6 +280,48 @@ export async function checkAchievedFailing(
   }
 }
 
+/** AC-242 successor 的【动作】半边（gap-achieved-ac-rot-invisible-when-ledger-tail-is-stale-pass）：
+ *  一次【有界轮转】—— 把「冻结population」（achieved ∧ criterion 非空 ∧ ⛔ 不在 `inAchievedReverifyScope`）
+ *  里最久未被轮转验证的至多 budget 条判据重跑一遍，每条 verdict 以 `actor=goal-sweep` 落进**同一本台账**。
+ *
+ *  为什么必须有这个动作：该population 里的一条 AC「在最后一次记录【之后】才失效」时，同时逃出 I5
+ *  （域外不跑）与 AC-242（尾事件仍是旧的 pass）—— 2026-09-12 实测 4 条（AC-147/AC-149/AC-172/AC-228）
+ *  尾事件全 pass、实跑全 exit≠0，对所有机制不可见。**判定无法凭台账得知判据当前真假——那需要跑**；
+ *  ⛔ 而「把全部冻结 AC 每轮无差别重跑」是 AC-216 已裁定的成本边界之外的放宽，故这里只做**有界轮转**。
+ *
+ *  ⛔ 本函数是【动作】不是【判定】：判定归 AC-242 的判据（`check --stale-pass`，纯读）。本函数只让
+ *  冻结的尾事件不再冻结，并**不**翻任何 status（同 I5：⛔ 不反向翻转 achieved→active）。
+ *  成本上界（goal-store 侧强制，⛔ 不在此处重算）：≤ budget 条 × 判据超时，且 ≤ wallMs 墙钟
+ *  —— 故本驱动的一轮最多被拖 wallMs。
+ *  读不懂输出 ⇒ null（⛔ 不与「轮转了且全过」同形，硬规则 3b）。退出码 1（存在当前为假的 AC）是
+ *  **正常结局**、不是错误：stdout 照样是合法 JSON，故只有 spawn 错误/解析失败才归 null。 */
+export async function sweepFrozenAcs(
+  scriptRoot: string,
+  dataRoot: string,
+): Promise<{ eligible: number; ran: Array<{ id: string; verdict: string }>; stoppedBy: string } | null> {
+  const r = await runAsync(
+    goalStoreArgv(scriptRoot, ["check", "--stale-pass", "--sweep"], dataRoot),
+    { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true },
+  );
+  if (r.error) return null;
+  try {
+    const j = JSON.parse(String(r.stdout ?? "").trim());
+    const s = (j && typeof j === "object" ? (j as Record<string, unknown>).sweep : null) as Record<string, unknown> | null;
+    if (!s || typeof s !== "object") return null;
+    const ranRaw = Array.isArray(s.ran) ? s.ran : [];
+    return {
+      eligible: typeof s.eligible === "number" ? s.eligible : -1,
+      ran: ranRaw.map((x) => {
+        const o = (x && typeof x === "object" ? x : {}) as Record<string, unknown>;
+        return { id: String(o.id ?? ""), verdict: String(o.verdict ?? "") };
+      }),
+      stoppedBy: String(s.stoppedBy ?? ""),
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** 读 tasks/*.md → 每条 { id, status, goalAc }。⛔ 读不到 tasks 目录（不存在 / 读失败）⇒ null，
  * 与「零任务」不同形（硬规则 3b：读不懂输入不得返回空数组冒充「没有任务」）。单文件读失败跳过该条
  *  （best-effort，不冒充「该任务无 goal_ac」，也不让一条坏文件拖垮整个缺口读数）。 */
@@ -1385,6 +1427,19 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     criteria.push({ id, goal: String(ac.goal ?? ""), status: String(ac.status ?? ""), verdict, reason });
   }
 
+  // pass 1c — AC-242 successor 的【动作】：对**冻结population**（achieved ∧ criterion 非空 ∧
+  // ⛔ 不在复验域：GOAL 非 active 且未声明 long-term）做一次**有界轮转**重跑。pass 1b 只覆盖
+  // 「域内」的常设不变式；域外那批此前**没有任何机制重跑**，其台账尾事件永久定格 ⇒ 一条在最后一次
+  // 记录之后才失效的 AC 对所有机制不可见（2026-09-12 实测 4 条）。
+  // ⛔ 放在 pass 2 的「刷新台账尾」**之前**：本轮轮转写下的 verdict 必须进入 pass 2 判关闭时读到的
+  // 尾事件，否则一条**此刻为假**的 AC 会被用来放行关闭（正是 gap-goal-closure-freezes-failing-ac-
+  // outside-reverify-scope 的形态，只是逃逸口从 long-term 换到冻结域）。
+  // ⛔ 判定不在这里：本函数只落账。判定归 AC-242 的判据（`check --stale-pass`，纯读）。
+  // ⛔ 轮转结果**不**推进 `criteria` 读数：`criteria` 的构造是「各 ACTIVE GOAL 名下全部 AC」
+  // （读它的判据按这个口径断言），塞入 goal="" 的冻结 AC 会污染那个口径。轮转的**产物是台账**
+  // ——判定与消费都从台账读，本轮的日志行只是可观测性。
+  const frozenSweep = await sweepFrozenAcs(scriptRoot, dataRoot);
+
   // pass 2 — 刷新台账尾 verdict，再逐条判关闭。
   //
   // ⚠️ 刷新的是【尾 verdict】而非整份 records：status 的权威快照就是本轮这条（I2 已就地改过 `records`
@@ -1539,7 +1594,9 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
         `fresh=${staleness.fresh.length} stale=${staleness.stale.length} notEvaluated=${staleness.notEvaluated.length} divergent=${staleness.divergent.length} ` +
         `achievedButFailing=${achievedFailing ? achievedFailing.achievedButFailing.length : "?"} ` +
         `closeBlocked=${closeBlocks.filter((b) => b.verdict === "blocked-failing-ac").length} ` +
-        `closeNotEvaluated=${closeBlocks.filter((b) => b.verdict === "not-evaluated").length}`,
+        `closeNotEvaluated=${closeBlocks.filter((b) => b.verdict === "not-evaluated").length} ` +
+        // 冻结域轮转（pass 1c）：`-` = 读不到；`0/0` = 本轮无合格对象（未到 minAge，正常）。
+        `frozenSweep=${frozenSweep === null ? "-" : `${frozenSweep.ran.length}/${frozenSweep.eligible}`}`,
     },
     sufficiencyFacts,
   };
