@@ -2,7 +2,7 @@
 id: gap-ac248-adr-check-differential-record-producer
 title: AC-248 没有生产者：载体里没有任何记录带 adr_check_before/after_detects —— archguard
   自身检查器的检出翻转无人搬运（⛔ 不读单次退出码）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
