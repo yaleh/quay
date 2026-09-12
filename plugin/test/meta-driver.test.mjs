@@ -74,6 +74,7 @@ import {
   aggregateActionFailures,
   errorSignature,
   extractActionFailureRecords,
+  describeResultShape,
   readingsDigestPartsForActionFailures,
   parseDurationMs,
   readActionRecordConfig,
@@ -1849,6 +1850,35 @@ test('parseDurationMs: 带单位的时长 / 裸数字（毫秒）/ 不可解析 
   assert.equal(parseDurationMs(1500), 1500);
   assert.equal(parseDurationMs('soon'), null);
   assert.equal(parseDurationMs(undefined), null);
+});
+
+// meta-cc hybrid output（internal/mcp/response/adapter.go）：结果超过 inline 阈值时走 file_ref
+// 模式——记录本体在 JSONL 临时文件里。实测 2026-09-12：不处理这一支时【全量】扫描永远解析不出，
+// 而它看起来像「语料读不到」（not-evaluated），不像「解析器少了一支」——正是硬规则 3b 的那类伪装。
+test('extractActionFailureRecords: file_ref 模式（记录在临时 JSONL 里）必须能读；缺 path ⇒ null', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-afr-fr-'));
+  try {
+    const jl = path.join(tmp, 'errors.jsonl');
+    fs.writeFileSync(jl, [
+      JSON.stringify(mkErrRow('s1', 'Unknown skill: quay-file-task')),
+      JSON.stringify(mkErrRow('s2', 'Unknown skill: quay-file-task')),
+      '',
+    ].join('\n'), 'utf8');
+    const env = { content: [{ type: 'text', text: JSON.stringify({ mode: 'file_ref', file_ref: { path: jl, line_count: 2 } }) }] };
+    const recs = extractActionFailureRecords(env);
+    assert.equal(recs.length, 2, 'file_ref 的记录必须被读出来');
+    assert.equal(recs[0].sessionId, 's1');
+    assert.equal(recs[0].signature, 'Unknown skill: quay-file-task');
+    // 指向不存在的文件 ⇒ null（读不懂），⛔ 不是 []（「读懂了、零命中」）。
+    const bad = { content: [{ type: 'text', text: JSON.stringify({ mode: 'file_ref', file_ref: { path: path.join(tmp, 'nope.jsonl') } }) }] };
+    assert.equal(extractActionFailureRecords(bad), null);
+    // 没有 file_ref / data ⇒ null，且 describeResultShape 给出可诊断的形状提示。
+    const weird = { content: [{ type: 'text', text: JSON.stringify({ mode: 'inline', warnings: ['x'] }) }] };
+    assert.equal(extractActionFailureRecords(weird), null);
+    assert.ok(describeResultShape(weird).includes('mode=inline'), describeResultShape(weird));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 // errorSignature：归一化是「同错误可聚合」的前提——同形异值必须归到同一个键，异形必须不同键。

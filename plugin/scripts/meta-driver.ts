@@ -638,6 +638,22 @@ export function extractActionFailureRecords(queryResult: unknown): ActionFailure
   return out;
 }
 
+/** 「读不懂」时的形状提示：把信封的顶层键与 mode 打出来，⛔ 不打印内容（可能很大 / 含隐私）。
+ *  用途是把「解析器少了一支」与「语料真的读不到」在**故障信息里**就分开——两者的处置完全不同。 */
+export function describeResultShape(queryResult: unknown): string {
+  try {
+    const content = (queryResult as Record<string, unknown>)?.content;
+    if (!Array.isArray(content)) return "no content[]";
+    const t = (content[0] as Record<string, unknown>)?.text;
+    if (typeof t !== "string") return "content[0].text not a string";
+    const j = JSON.parse(t) as Record<string, unknown>;
+    if (Array.isArray(j)) return `payload=array(len=${j.length})`;
+    return `payload keys=${Object.keys(j).join(",")} mode=${String(j.mode)}`;
+  } catch (e) {
+    return `shape probe failed: ${(e as Error).message}`;
+  }
+}
+
 /** 从一条会话记录里枚举全部错误文本（`message.content[]` 里 `is_error:true` 的 tool_result）。
  *  读不出任何结构 ⇒ []（本条记录没贡献），⛔ 不抛。 */
 function errorTextsFromRecord(rec: Record<string, unknown>): string[] {
@@ -690,8 +706,28 @@ function mcpResultRecords(queryResult: unknown): Array<Record<string, unknown>> 
   }
   if (Array.isArray(payload)) return payload as Array<Record<string, unknown>>;
   if (payload && typeof payload === "object") {
+    const o = payload as Record<string, unknown>;
+    // meta-cc 的 hybrid output（internal/mcp/response/adapter.go）：结果大到超过阈值时走
+    // `file_ref` 模式——信封里给 `file_ref.path`，**记录本体在那个 JSONL 临时文件里**。
+    // ⚠️ 实测（2026-09-12）：不处理这一支时，全量扫描（>inline 阈值）永远解析不出来，
+    // 本读数会恒报 corpus-unreadable——而它看起来像「语料读不到」，不像「解析器少了一支」。
+    // 读它 = 读 meta-cc 自己的交付形态（⛔ 不是手搓语料解析）。
+    const fr = o.file_ref;
+    if (fr && typeof fr === "object") {
+      const p = (fr as Record<string, unknown>).path;
+      if (typeof p !== "string" || !p) return null;
+      let text: string;
+      try { text = fs.readFileSync(p, "utf8"); } catch { return null; }
+      const rows: Array<Record<string, unknown>> = [];
+      for (const line of text.split("\n")) {
+        const t = line.trim();
+        if (!t) continue;
+        try { rows.push(JSON.parse(t) as Record<string, unknown>); } catch { return null; }
+      }
+      return rows;
+    }
     for (const k of ["records", "results", "data", "items"]) {
-      const v = (payload as Record<string, unknown>)[k];
+      const v = o[k];
       if (Array.isArray(v)) return v as Array<Record<string, unknown>>;
     }
   }
@@ -856,7 +892,7 @@ export async function scanActionRecords(
   const scanMs = Date.now() - t0;
   if (!r.ok) return { ok: false, reason: r.reason };
   const records = extractActionFailureRecords(r.result);
-  if (records === null) return { ok: false, reason: "corpus-unreadable: meta-cc result shape unrecognized" };
+  if (records === null) return { ok: false, reason: `corpus-unreadable: meta-cc result shape unrecognized (${describeResultShape(r.result)})` };
   const scannedAt = new Date(nowMs).toISOString();
   const scan = { scannedAt, scanMs, since, records };
   try {
