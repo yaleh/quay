@@ -70,17 +70,17 @@ node --no-warnings --experimental-strip-types plugin/scripts/criterion-failure-a
 
 ## Acceptance Criteria
 
-- [ ] **AC1 存证（改前读数，机械可复算）**：a) `.quay/gate-events.jsonl` 中 AC-247/248/249 各自的**最后一条** `gate=goal` 事件 `verdict=fail` 且 `payload.reason` 逐字 = `acceptance failed (exit 1) — criterion wrote no output to stderr/stdout`；b) AC-241 的判据（逐字取自 `goals/AC-241-*.md`，⛔ 不手写）对**生产台账**干跑 ⇒ `exit=1`，stderr 逐字点名 AC-247 / AC-248 / AC-249 三条。两条读数都留档。
+- [x] **AC1 存证（改前读数，机械可复算）**：a) `.quay/gate-events.jsonl` 中 AC-247/248/249 各自的**最后一条** `gate=goal` 事件 `verdict=fail` 且 `payload.reason` 逐字 = `acceptance failed (exit 1) — criterion wrote no output to stderr/stdout`；b) AC-241 的判据（逐字取自 `goals/AC-241-*.md`，⛔ 不手写）对**生产台账**干跑 ⇒ `exit=1`，stderr 逐字点名 AC-247 / AC-248 / AC-249 三条。两条读数都留档。
 
-- [ ] **AC2 三条判据写成因且判定语义不变（能取假）**：`goals/AC-247/248/249` 的每个失败出口（`exit 1` 与 `exit 3`）同行都有 stderr 写入，**且成因互不相同**（把 `grep -n "sys.exit"` 与 `grep -n "stderr"` 的行号集比对的输出贴进记录）。同一载体上逐条干跑，改前/改后的退出码**逐条相同**（0 / 1 / 3 三态语义不变）；`bash -n` 或等价语法检查通过。控制的取法：改前文本用 `git show develop:goals/AC-247-*.md` 抽出的 criterion，改后用本分支的。
+- [x] **AC2 三条判据写成因且判定语义不变（能取假）**：`goals/AC-247/248/249` 的每个失败出口（`exit 1` 与 `exit 3`）同行都有 stderr 写入，**且成因互不相同**（把 `grep -n "sys.exit"` 与 `grep -n "stderr"` 的行号集比对的输出贴进记录）。同一载体上逐条干跑，改前/改后的退出码**逐条相同**（0 / 1 / 3 三态语义不变）；`bash -n` 或等价语法检查通过。控制的取法：改前文本用 `git show develop:goals/AC-247-*.md` 抽出的 criterion，改后用本分支的。
 
-- [ ] **AC3 台账上真的可归因（⛔ 夹具/注入载体不算 —— 硬规则 4 推论三）**：在 **production root** 用真 goal-driver 跑一轮（`node --experimental-strip-types plugin/scripts/goal-driver.ts --root /home/yale/work/quay --once --spawn-cap 0`，criterion 经 `goal-store gate` 真跑、真写 GateEvent），把该轮读数逐字留档：AC-247/248/249 的**最后一条** goal 事件的 `payload.reason` 携带判据自己写出的成因（非空、非那条模板）；随后 AC-241 的判据对**生产台账**干跑 ⇒ `exit=0`。⚠️ 交付前置（读者须知）：常驻 goal-driver 读的是**主检出**（`--root /home/yale/work/quay`），⛔ 不是任务分支 ⇒ 判据文本必须先到主检出，`--once` 那轮才跑得到新版；若主检出落后 develop，按既有 `syncDevelopToDoc` / 语义兜底追平后再跑这一条。
+- [x] **AC3 台账上真的可归因（⛔ 夹具/注入载体不算 —— 硬规则 4 推论三）**：在 **production root** 用真 goal-driver 跑一轮（`node --experimental-strip-types plugin/scripts/goal-driver.ts --root /home/yale/work/quay --once --spawn-cap 0`，criterion 经 `goal-store gate` 真跑、真写 GateEvent），把该轮读数逐字留档：AC-247/248/249 的**最后一条** goal 事件的 `payload.reason` 携带判据自己写出的成因（非空、非那条模板）；随后 AC-241 的判据对**生产台账**干跑 ⇒ `exit=0`。⚠️ 交付前置（读者须知）：常驻 goal-driver 读的是**主检出**（`--root /home/yale/work/quay`），⛔ 不是任务分支 ⇒ 判据文本必须先到主检出，`--once` 那轮才跑得到新版；若主检出落后 develop，按既有 `syncDevelopToDoc` / 语义兜底追平后再跑这一条。
 
-- [ ] **AC4 写入面闸存在且能取假（本任务机制的主体）**：a) 用 goal-store 写入一条**新** AC，其 criterion 含裸失败退出（如 `python3 -c 'import sys; sys.exit(1)'`）⇒ 拒绝、`exit≠0`、stderr 点名**行号**；b) 同一条 AC 的 criterion 改成同行写 stderr ⇒ 通过；c) UPDATE：把某 AC 的 criterion 由 N 条裸失败退出改成 N+1 条 ⇒ 拒绝；改成 ≤N（含 0）⇒ 通过。至少三组读数（拒 / 过 / 拒）与退出码、stderr 原文都留档。
+- [x] **AC4 写入面闸存在且能取假（本任务机制的主体）**：a) 用 goal-store 写入一条**新** AC，其 criterion 含裸失败退出（如 `python3 -c 'import sys; sys.exit(1)'`）⇒ 拒绝、`exit≠0`、stderr 点名**行号**；b) 同一条 AC 的 criterion 改成同行写 stderr ⇒ 通过；c) UPDATE：把某 AC 的 criterion 由 N 条裸失败退出改成 N+1 条 ⇒ 拒绝；改成 ≤N（含 0）⇒ 通过。至少三组读数（拒 / 过 / 拒）与退出码、stderr 原文都留档。
 
-- [ ] **AC5 单一实现（⛔ 不是第二份正则）**：`grep` 证明失败退出的判定只有一份实现——`packages/quay/src/goal-store.ts` 导出它、`plugin/scripts/criterion-failure-attribution-check.ts` import 它；`plugin/scripts/` 与 `packages/quay/src/` 内不存在第二处 `exit\s*\(\s*1` / `exit 1` 的判定正则。**非零计数必须打印命中**（硬规则 2：引用一个计数前先打印它匹配到的前 3 条实际内容），把命中数与前 3 条一起贴进记录。负控制：把共用谓词改成恒 false（或对一个已归因的判据调用）⇒ 不误报。
+- [x] **AC5 单一实现（⛔ 不是第二份正则）**：`grep` 证明失败退出的判定只有一份实现——`packages/quay/src/goal-store.ts` 导出它、`plugin/scripts/criterion-failure-attribution-check.ts` import 它；`plugin/scripts/` 与 `packages/quay/src/` 内不存在第二处 `exit\s*\(\s*1` / `exit 1` 的判定正则。**非零计数必须打印命中**（硬规则 2：引用一个计数前先打印它匹配到的前 3 条实际内容），把命中数与前 3 条一起贴进记录。负控制：把共用谓词改成恒 false（或对一个已归因的判据调用）⇒ 不误报。
 
-- [ ] **AC6 三态可区分**：写入面遇到读不懂的输入（criterion 非字符串 / 空 / 无法解析）⇒ 报错文案与「合格放行」**不同形**且 `exit≠0`；棘轮自身仍是 0=pass / 1=fail / 3=NOT-EVALUATED 三态，且 `--json` 的 `bareAcs` 在修完三条后 ≤ 基线 32（收缩方向，棘轮绿）。
+- [x] **AC6 三态可区分**：写入面遇到读不懂的输入（criterion 非字符串 / 空 / 无法解析）⇒ 报错文案与「合格放行」**不同形**且 `exit≠0`；棘轮自身仍是 0=pass / 1=fail / 3=NOT-EVALUATED 三态，且 `--json` 的 `bareAcs` 在修完三条后 ≤ 基线 32（收缩方向，棘轮绿）。
 
 - [ ] **AC7 全量套件绿 —— 外层 verification-round 验证**（worker 结构上被禁跑全量 suite；本条的量的产生处是 fan-in / 外层的 suite 轮，⛔ 不是 worker 自己的读数；scoped 门绿不等于全量绿）
 
@@ -100,8 +100,50 @@ node --no-warnings --experimental-strip-types plugin/scripts/criterion-failure-a
 - goals/AC-247-当前-build-在-ad-arm1-干净接管停摆一月的存量项目且-driver-真活-读载体-不读-start-退出码.md
 - goals/AC-248-驱动出的修复被-archguard-自己的机械判据确认为正确-检出行为必须前后翻转-不读单次退出码.md
 - goals/AC-249-成套修改-代码修复与-adr-007-文档同步出自同一任务-单边不算.md
+- goals/AC-250-观察面-目标项目的-quay-web-server-绑在-ad-arm1-的-tailscale0-ip-上且真的反映进.md
 - packages/quay/src/goal-store.ts
+- packages/quay/test/goal-store.test.mjs
 - plugin/scripts/criterion-failure-attribution-check.ts
 - plugin/test/criterion-failure-attribution-check.test.mjs
 - plugin/test/goal-store-write-gate-criterion-attribution.test.mjs (new)
 - tasks/gap-criterion-attribution-write-gate-at-birth.md
+
+## Evidence
+
+**AC1（改前读数，2026-09-12T08:4xZ）**
+(a) 生产台账 `.quay/gate-events.jsonl` 中三条各自的最后一条 `gate=goal` 事件（`actor=goal-cli`，ts 08:45:17.924Z / 08:45:18.855Z / 08:45:19.731Z），`verdict=fail`，`payload.reason` 逐字均为 `acceptance failed (exit 1) — criterion wrote no output to stderr/stdout`。
+(b) AC-241 的判据（从 `goals/AC-241-*.md` 逐字抽出，python heredoc 真跑）对生产台账：`exit=1`，stderr 逐字 = `unattributable failing goal AC(s): AC-247: acceptance failed (exit 1) — criterion wrote no output to stderr/stdout; AC-248: …; AC-249: …`（三条全部点名）。
+
+**AC2**
+`grep -n sys.exit` 与 `grep -n stderr` 的行号集：AC-247 = {14, 34}（另有 `sys.exit(0)` 在 33，非失败出口），AC-248 = {14, 37}，AC-249 = {14, 32} —— 两个失败出口（`exit 3` 与 `exit 1`）**每一条都同时出现在两个集合里**，且成因逐条不同（"NOT-EVALUATED: carrier … absent" / "carrier holds no qualifying GOAL-016-AC-2NN record (need …)"）。
+退出码不变（同一载体三态对照，pre = `git show develop:goals/AC-2NN-*.md` 抽出的 criterion，post = 本分支的）：三条 × {载体缺失, 无合格记录, 有合格记录} 共 9 组，`pre == post == {3,1,0}` 逐组相同（脚本 `/tmp/ac2-control.mjs`）。语法：三条在三种载体上均真跑成功（无误退出码之外的失败）。
+注：`sys.exit(3)` 那一行在**原始文件**里原本被 `;` 断成两行，YAML folded 装载后合并 ⇒ 判据文本里本已同行；本次把**文件**里也并成一行，使文件级 grep 与判定口径一致。
+
+**AC3（生产，⛔ 非夹具）**
+1. 判据文本先到主检出：三条（+AC-250，见下）的修复字节与任务分支**逐字节相同**（`cmp` 三次 IDENTICAL），在主检出以 `git commit --only -- <paths>` 落 `9e8a5455a` / `1d9166985`（pathspec 限定，索引未动）。
+   ⛔ 未用 `goal-store write` 落地：其序列化器在 ~80 列重折块标量，会把 `stderr` 写与 `sys.exit(N)` 拆到不同**文件行**，破坏本次修复要建立的同行性质。
+2. 真 goal-driver 跑一轮：`node --experimental-strip-types plugin/scripts/goal-driver.ts --root /home/yale/work/quay --once --spawn-cap 0` ⇒ `DRIVER_RC=0`，台账 74880 → 74938 行。
+3. 该轮读到的最后一条 goal 事件（ts 09:19:20.520Z / 09:19:21.443Z / 09:19:22.487Z，`actor=goal-cli`，`verdict=fail`）`payload.reason` 均**携带判据自己写出的成因**（逐字见台账；非空、非模板 `criterion wrote no output to stderr/stdout`）。
+4. AC-241 判据对**生产台账**干跑 ⇒ **`exit=0`**（stdout/stderr 皆空）。
+
+**AC4（读写面闸，真 goal-store CLI）**
+a) CREATE `python3 -c "import sys; sys.exit(1)"` ⇒ `exit=2`，stderr：`AC-901: criterion carries 1 failure exit(s) that write no cause — refused at the write surface … Offending: line 1: python3 -c "import sys; sys.exit(1)"`，磁盘无文件。
+b) 同一行加 `sys.stderr.write('no qualifying record\n');` ⇒ `exit=0`，文件落地。
+c1) UPDATE 2 → 3 条裸退出 ⇒ `exit=2`，`would REGRESS … the new text carries 3 … the stored text carried 2`，点名 line 3/4/5。
+c2) UPDATE 2 → 2 ⇒ `exit=0`（= N，合法）。c3) UPDATE 2 → 0 ⇒ `exit=0`。
+c4) 存量 criterion 读不懂（无 criterion 字段）+ 新文本含裸退出 ⇒ `exit=2`，文案含 `NOT-EVALUATED`（与 `would REGRESS` **不同形**）；同一存量 + 干净新文本 ⇒ `exit=0`（修复路径不封死）。
+另有 `plugin/test/goal-store-write-gate-criterion-attribution.test.mjs` 11/11（含 A1/A3 负控制：已归因判据不误报）。
+
+**AC5**
+`grep -rnF 'exit\s*\(\s*1' plugin/scripts packages/quay/src --include=*.ts` ⇒ **2 处**：
+`plugin/scripts/test-isolation-check.ts:376: const re = /process\.exit\s*\(\s*1\s*\)/g;` 与
+`packages/quay/src/goal-store.ts:476: export const FAILURE_EXIT_RE = /(?:sys\.)?exit\s*\(\s*1(?![\d])|\bexit\s+1\b/;`。
+前者是对 `process.exit(1)`（Node API）在测试文件代码位的判定，域为测试源卫生，与「goal 判据的失败出口是否写成因」无关 ⇒ **判据侧只有一份实现**，在 goal-store.ts；`grep -rnF 'exit\s+1'` 与 `grep -rnF 'else\s*[1-9]'` 各命中 **1 个文件**（均为 goal-store.ts）。
+负控制（身份相等，⛔ 不是「行为一致」）：单测 C1 断言 `checker.isBareFailureExitLine === goalStore.isBareFailureExitLine`、`FAILURE_EXIT_RE === FAILURE_EXIT_RE`、`hasTrailingComputedFailureExit` / `implicitFailureExitLines` / `bareFailureExitsOfCriterion` 三对亦同一对象；C2 断言两面对同一判据给出同一 bare 列表。
+
+**AC6**
+读不懂的输入：`criterion` 非字符串 / 空 在写入面由非空契约以自有文案拒绝（`exit≠0`，与「合格放行」不同形）；存量读不懂走 `NOT-EVALUATED` 自有文案（见 AC4c4）。棘轮三态不变（0/1/3，mutation case `checker-mutation-cases/criterion-failure-attribution-check.sh` 退出 0 = behaved，含 D 相未评估≠红）。修完后读数：
+`{"inDomain":99,"bareAcs":31,"bareLines":54,"baseline":32,"delta":-1,"fixed":["AC-217"],"status":"pass","ok":true}` ⇒ 31 ≤ 32，收缩方向。
+
+**第 4 次复发（本任务在飞期间发生，非假设）**
+本任务实施途中 `goals/AC-250-…md`（建于 2026-09-12T09:12:29Z）以**同一形态**出生（裸 `sys.exit(1)`），生产目标台账随即再添一条不可归因 fail ⇒ AC-241 修完三条后**仍为 exit 1 并点名 AC-250**。故按同一条纪律一并修复（AC-250 的三个载体对照同样 `pre == post == {3,1,0}`），并已把 `goals/AC-250-…md` 写入 `## Touches`。这正是本条要堵的写入面的活证据。
