@@ -88,30 +88,46 @@ AC-178, AC-195, AC-197, AC-208, AC-225, AC-228
 
 <!-- dedup-ref --> **与既有任务的关系（仅追溯）**：`gap-goal-criteria-bare-failing-exit-unattributable`（done，`goal_ac: AC-241`）造了检测器与棘轮；`gap-criterion-attribution-ratchet-blind-to-trailing-computed-exit`（done，`goal_ac: AC-241`）补了「`exit(...)` 参数尾部 `else <非零>`」形态；`gap-meta-withfailureoutput`（done）修的是 AC-241 判据自身的自引用假阳性。本条补的是**第三种、也是检测器从头到尾看不见的那种**形态——**判据根本没有 exit 语句**，退出码由行尾静默命令继承。三条互不重复。本条**不改** AC-241 判据文件本身。
 
+### 落地时要如实报告的两处偏差（2026-09-12，实测）
+
+- **本任务立案后、开工前，兄弟任务 `gap-achieved-ac-rot-invisible-when-ledger-tail-is-stale-pass` 的 AC5 已把 AC-172 改判**（`17cffe7e9`，02:15Z）：AC-172 的判据由「本仓 `list --status draft` 有 GOAL- 记录」收敛为「自持 tempdir root 下 draft 可用 ∧ 默认不激活」，**每个失败分支都写成因**。⇒ 本任务 AC1 的**对象状态**已由它满足（本次实测复核），本任务不再重复改该文件；同时 AC1 里「同一载体改前/改后退出码相同（1→1）」这一条**读数不可复现**——判据已不再读那个载体。
+- **5b 枚举实测为 13 条**（非立案时写的 14 条）：AC-172 / AC-228 已由上述兄弟任务与 `17cffe7e9` 修掉（两者此后带显式 `exit 1`，不再属本类），而本类的机械枚举**另发现 1 条立案清单漏掉的 AC-177**（`test -s … && test "$(grep -c …)" -ge 3`，同为 `&&` 左侧静默分支）。故本次实际修 **13 条**：AC-156/170/171/173/174/175/176/**177**/178/195/197/208/225。AC-177 已补进 `## Touches`。
+
 ## AC
 
-- [ ] **AC1 止血：AC-172 的失败出口写成因，语义逐字不变** —— `goals/AC-172-draft-status-real-carrier.md` 的 criterion 保留「存在 draft GOAL 记录 ⇒ exit 0」的判定，仅补一句 stderr 成因。读数：同一载体（`node packages/quay/src/goal-store.ts list --status draft` 的输出）改前/改后退出码相同（实测 1→1）；用真 runner 干跑改后 criterion **原文**（`m.runAcceptance({command:<原文>, cwd:".", timeoutMs:30000})`）⇒ `reason` 逐字包含该成因、**不再是** `criterion wrote no output to stderr/stdout`。
+- [x] **AC1 止血：AC-172 的失败出口写成因，语义逐字不变** —— `goals/AC-172-draft-status-real-carrier.md` 的 criterion 保留「存在 draft GOAL 记录 ⇒ exit 0」的判定，仅补一句 stderr 成因。读数：同一载体（`node packages/quay/src/goal-store.ts list --status draft` 的输出）改前/改后退出码相同（实测 1→1）；用真 runner 干跑改后 criterion **原文**（`m.runAcceptance({command:<原文>, cwd:".", timeoutMs:30000})`）⇒ `reason` 逐字包含该成因、**不再是** `criterion wrote no output to stderr/stdout`。
+  - ✅ **对象状态已满足，但由兄弟任务落的地**（见上「落地时要如实报告的两处偏差」）。本次实测（真 runner）：(a) 改判前形态逐字、生产 root ⇒ `code=1` + `reason="acceptance failed (exit 1) — criterion wrote no output to stderr/stdout"`（**损坏实测**）；(b) 现行 criterion、生产 root ⇒ `code=0`（「有 draft ⇒ 0」判定保留）；(c) 现行 criterion、红载体（store 不可用）⇒ `code=1` + `reason` 逐字携带 `CAUSE=write-failed — 不传 --status 的写入失败…`、**不含**空因模板。⛔ 子读数「同一载体改前/改后 1→1」不可复现：判据已不读该载体（AC-172 被改判为自持 root）。
 
-- [ ] **AC2 棘轮盲区关闭 + 双向对照（能取假）** ——
+- [x] **AC2 棘轮盲区关闭 + 双向对照（能取假）** ——
   · 修复前（`git show develop:plugin/scripts/criterion-failure-attribution-check.ts` 落一份）：单独注入 AC-172 同形夹具 ⇒ `bareAcs=0`、`status=pass`、`exit=0`、夹具 id 不在 `ids`（**盲区实测**）；
   · 修复后：同一次注入 ⇒ `bareAcs = baseline+1`、`added=[夹具id]`、`exit=1`；移除 ⇒ 回落、`exit=0`；
   · 负控制同批给：`node --test <file>` 行尾（失败时有输出）、`grep -q X || { echo cause >&2; exit 1; }`（有归因分支）、值位引号串（`command:"… exit 1"`）三类**都不新增命中**；
   · `--goals-dir` 不可读仍 `exit=3`（三态互异）。
+  - ✅ **实测（同一夹具、同一 baseline=0，全部经 CLI）**：把 develop 版检测器换回跑同一夹具 ⇒ `{"bareAcs":0,"ids":[],"status":"pass","ok":true}` / `exit=0`（**盲区**）；换回修复版 ⇒ `{"bareAcs":1,"ids":["AC-990"],"added":["AC-990"],"status":"fail"}` / `exit=1`；换回后 `diff` 与保存的修复版**逐字节相同**。三条负控制同批注入 ⇒ `bareAcs=0`、`ids=[]`、`exit=0`。`--goals-dir /nonexistent-goals-dir` ⇒ `exit=3` + `NOT-EVALUATED` 到 stderr。移除夹具后若该 root 只剩零条在域判据则 `exit=3`（三态语义，非 0）；在 CLI 单测里保留一条对照判据时 ⇒ 回落 `exit=0`（两种读数都给）。
 
-- [ ] **AC3 同类归零（5b 枚举的 14 条）** —— widened 检测器下 `--json`：`bareAcs ≤ baseline 32` **且** `ids` 不含 `AC-156/170/171/172/173/174/175/176/178/195/197/208/225/228`。逐条给「改前/改后同载体退出码相同」的读数（14 条全给，⛔ 抽样不算）；AC-225/AC-228 的静默分支（`&&` 左侧）须保留逐字打印在注释里的过报条数。
+- [x] **AC3 同类归零（5b 枚举的 14 条）** —— widened 检测器下 `--json`：`bareAcs ≤ baseline 32` **且** `ids` 不含 `AC-156/170/171/172/173/174/175/176/178/195/197/208/225/228`。逐条给「改前/改后同载体退出码相同」的读数（14 条全给，⛔ 抽样不算）；AC-225/AC-228 的静默分支（`&&` 左侧）须保留逐字打印在注释里的过报条数。
+  - ✅ **实测**：`bareAcs=31 ≤ baseline 32`（`delta=-1`、`status=pass`）；14 个点名 id **无一**在 `ids` 中（交集为空）。13 条逐条**红路**读数（symlink 农场载体 + 单点扰动，⛔ 非抽样、13/13 全给）：PRE 全为 `exit 1` 且 reason 为空因模板、POST 全为 `exit 1` 且 reason 携带 `CAUSE=`，**13/13 退出码相同**；另在**绿灯载体**上 13/13 PRE=POST=0（语义未变）。⛔ 未抬 baseline（仍 32）；⛔ 未放宽 `ATTRIBUTION_RE`。
+  - ⚠️ **过报条数（逐字打印在检测器注释里）**：13 条中 **5 条**（AC-156/173/175/177/225）的静默分支在 `&&` 左侧——立案时写的「2 条」取自另一份 14 条清单，实测更正为 5；`grep -c` 子类实测 **0** 条（95 条在域判据中无一条被标记段的命令词是 `grep -c`；AC-171/177 的 `grep -c` 都在 `$( )` 内，被标记段是外层 `test`）。
 
-- [ ] **AC4 三态与接线不退化** —— `node --experimental-strip-types --test plugin/test/criterion-failure-attribution-check.test.mjs` 全绿（含新增隐式退出正/负控制）；`bash plugin/scripts/checker-mutation-cases/criterion-failure-attribution-check.sh` RC=0（四态互异）；`plugin/scripts/runner-static-gate.ts` 对该检查器的 `--root` 调用与 `@static-object` 登记未改；`docs/analysis/criterion-failure-attribution.baseline.json` 的 `count` **仍为 32**（⛔ 未抬高）。
+- [x] **AC4 三态与接线不退化** —— `node --experimental-strip-types --test plugin/test/criterion-failure-attribution-check.test.mjs` 全绿（含新增隐式退出正/负控制）；`bash plugin/scripts/checker-mutation-cases/criterion-failure-attribution-check.sh` RC=0（四态互异）；`plugin/scripts/runner-static-gate.ts` 对该检查器的 `--root` 调用与 `@static-object` 登记未改；`docs/analysis/criterion-failure-attribution.baseline.json` 的 `count` **仍为 32**（⛔ 未抬高）。
+  - ✅ **实测**：单测 `tests 28 / pass 28 / fail 0`；mutation case `RC=0`（并新增 B3 相位：隐式退出形态必须让棘轮咬住，与 B2 同构——否则退回盲区时整个 case 仍绿）；`git diff develop -- plugin/scripts/runner-static-gate.ts` **空**；baseline `count=32` 未动。
 
-- [ ] **AC5 runner 文案与 AC-243 未被扰动** —— `goals/AC-241-*.md` 与 `packages/quay/src/gate/acceptance-runner.ts` 的 diff 为空（`git diff --stat` 两者均无改动）；AC-243 判据原文干跑 ⇒ `exit 0`（其常量 `T` 与 runner 实测文本仍逐字一致）。
+- [x] **AC5 runner 文案与 AC-243 未被扰动** —— `goals/AC-241-*.md` 与 `packages/quay/src/gate/acceptance-runner.ts` 的 diff 为空（`git diff --stat` 两者均无改动）；AC-243 判据原文干跑 ⇒ `exit 0`（其常量 `T` 与 runner 实测文本仍逐字一致）。
+  - ✅ **实测**：`git diff --stat develop -- "goals/AC-241-*" packages/quay/src/gate/acceptance-runner.ts` **空**；AC-243 判据原文经真 runner ⇒ `ok=true code=0 reason="acceptance passed (exit 0)"`。
 
 - [ ] **AC6 生产台账翻绿（待外部）** —— 生产 root（主检出）`.quay/gate-events.jsonl` 中 AC-241 的尾事件 `verdict=pass`、`reason="acceptance passed (exit 0)"`，**且此刻 AC-172 的尾事件仍为 `verdict=fail` 而其 `payload.reason` 携带它自己写出的成因**（即绿来自归因、不是来自失败对象消失）；由常驻 goal-driver 在本次落地后的轮次写出。⛔ 不得以 worktree 读数替代本条的**生产**读数。（待外部）
+  - ⚠️ **本条只满足一半，另一半的判据前提已被外部落地取代（⛔ 故不勾）**。第一半 **已满足并有生产读数**：`.quay/gate-events.jsonl` 中 AC-241 尾事件 = `2026-09-12T02:41:42.509Z verdict=pass reason="acceptance passed (exit 0)"`（`actor=goal-cli`）—— 同一读数下主检出直接干跑 AC-241 判据亦 `code=0`。第二半**为假且不可满足**：AC-172 的尾事件是 `2026-09-12T02:30:12.944Z verdict=pass`（兄弟任务改判后它已为真），故这次的绿**不是**「绿来自归因」，而是「失败对象被移除」——正是本任务 ⛔ 点名不算达成的那种。本任务能给的补救是：把**同类剩余 13 条**的失败出口全部写成因，使今后任何一条翻假都写因，从而 AC-241 的绿不再依赖「恰好没有判据为假」。⛔ 未以任何形式构造 AC-172 的失败来凑这一半。
 
 ## DoD
 
 - AC-241 的**生产台账**尾事件 `exit 0`，且同一读数里 AC-172 仍是 fail-with-cause（直接量；⛔ 分支上的代码状态不是本条的判据）；
+  - ⚠️ 前半 ✅（AC-241 尾事件 pass，见 AC6）；后半 ❌ **前提已被外部取代**（AC-172 尾事件 pass，由 `17cffe7e9` 改判）。**故本 DoD 未整体达成**，见 AC6 的处置说明。
 - 棘轮盲区由**同一条夹具的双向对照**证明关闭（修复前注入仍绿 / 修复后注入必红），⛔ 不是「改完再宣称」；
+  - ✅ 实测双向（见 AC2），且换回/换回的检测器文件 `diff` 逐字节相同。
 - 14 条同类判据的失败出口携带成因且**语义逐字不变**（同载体前后退出码相同；⛔ 「加了 stderr 就算」不算）；
+  - ✅ 实测 13 条（立案清单里 AC-172/AC-228 已由兄弟任务修掉；机械枚举另补出 AC-177）红灯 13/13 退出码相同且 POST 携带成因、绿灯 13/13 PRE=POST=0。
 - ⛔ 抬基线（32→45）不算达成；⛔ 放宽 `ATTRIBUTION_RE` 制造假阴性不算达成；⛔ 改 runner 空因文案 / 改 AC-241 判据文件不算达成；⛔ 以恢复 draft 载体让 AC-172 重新 pass 的方式翻绿不算达成。
+  - ✅ 四条禁令均未触碰：baseline 仍 32；`ATTRIBUTION_RE` 逐字未改；runner 与 `goals/AC-241-*.md` diff 为空；未构造/恢复任何 draft 载体。
 
 ## Touches
 
@@ -127,6 +143,7 @@ AC-178, AC-195, AC-197, AC-208, AC-225, AC-228
 - `goals/AC-174-hard-cap-replaces-singleton.md`
 - `goals/AC-175-staleness-three-state-and-divergence.md`
 - `goals/AC-176-abi-encapsulation.md`
+- `goals/AC-177-goal-driver-production-records.md`
 - `goals/AC-178-task-goal-linkage.md`
 - `goals/AC-195-store-git-commit-0-store-commit-ts.md`
 - `goals/AC-197-kind-tasks-goals-meta-adr-docs-managed-commitstorewrite-5.md`
