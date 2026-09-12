@@ -1,0 +1,121 @@
+---
+id: GOAL-016
+title: 驱动质量自证 —— quay 驱动出的开发能否被靶子项目自己的机械判据确认为正确
+status: active
+kind: goal
+origin: 人 2026-09-12：以 archguard ADR-007 接口一致性为方向，验证用 quay 在 ad-arm1 驱动
+  archguard 的开发。接在 GOAL-009 自陈的边界上——AC-207 只判『有非记账提交』，从未判『改对了没有』。五项裁定：不推
+  origin；开发工作区为 ad-arm1 的 /home/yale/work/archguard；不纳入陈旧存量派发维度；直接激活（单次授权）；task
+  只写症状+复现入口+期望行为，不给根因与修法。
+activatedAt: 2026-09-12T08:43:27.098Z
+---
+## 背景
+
+GOAL-009 已 achieved，它证明的是**交付面闭环**：本仓库现 build 的产物，在非本机主机、非本仓库项目里
+安装，经会话点火后由该项目自己的 drivers 驱动，在其 git 历史里留下可核的开发提交、任务翻 done。
+
+**但 GOAL-009 自己写明了两条边界，本 GOAL 接在第二条上**：
+
+1. `produced_by_driver` 逐字承认「最强的可得直接量只到『提交出自 driver 建的任务 worktree ∧ gate
+   事件齐全 ∧ 时间线交错』，**这不能完全排除人在会话里手敲**；该半判据属人裁定的口证，不冒充测量」。
+2. **AC-207 全程没有判「改对了没有」**——它的最强断言是「`commit_files` 至少一条不在 tasks/ goals/
+   .quay/ 之下」，即「有一个触及非记账文件的提交」。一个**改错了的**提交同样满足它。
+
+⇒ 本 GOAL 的命题：**quay 驱动出来的开发，能否达到「被一个 quay 既不拥有也不产生的外部机械判据
+确认为正确」**，而不只是「产生了一个触及非记账文件的提交」。
+
+**为什么 archguard + ADR-007 是这个命题的靶子**（四条，缺一则命题退化）：
+
+- **靶子自带外部正确性判据**：`npm run check:adr`（`scripts/check-adr.ts`）是 archguard 自己的
+  机械检查器，quay 不拥有、不产生它。「修对了没有」由 archguard 自己的套件判，⛔ 不采信 driver 自述。
+- **该缺陷有独立于 quay 的能取假控制**：同一个输入形态下检查器行为必须**翻转**（修复前看不见该工具、
+  修复后看得见）。翻转与否由 archguard 自己判，quay 只搬运读数。
+- **缺陷是真实的、已被独立复现**（2026-09-12 本会话实测，最小复现见下），⛔ 不是为验证而编的练习题
+  ——避开硬规则 4 推论三「只能被 fixture/注入满足的判据不是测量」。
+- **异构方法学靶子**：archguard 有自己的 ADR 体系与 Stop hook 闸门，quay 驱动它时要尊重它自己的闸门。
+  GOAL-009 的靶子（meta-cc / 全新 quay-init 的一次性项目）不含这个维度。
+
+### 缺陷的根因分析（2026-09-12 实测，**仅供事后判读，⛔ 不得进 task 正文**）
+
+`scripts/check-adr.ts` 的 `extractMcpToolNames()` 用 `server\.tool\(\s*['"](\w+)['"]` 提取工具名，
+`\s*` 只容许纯空白。当豁免注释被写在 `server.tool(` **与工具名之间**（而非 `server.tool(` 之前）时，
+该正则**完全匹配不到**，工具名从不进入候选集 ⇒ 该工具对 ADR-007 检查**彻底隐形**。最小复现已验证：
+带注释的输入得到 `matched tool names: []`。当前 3 个真实工具（`get_metric_trend` /
+`get_package_metrics` / `get_evidence_pack`）正踩这个形态——它们碰巧都有合法豁免理由，所以**今天
+的绿是巧合而非保证**：若将来有工具用同样排版但确实违反对称要求，`check:adr` 会照样报 OK。
+这正是本仓库硬规则 3b「读不懂输入 ⇒ 伪装成合格」在 archguard 自己的检查脚本里的实例。
+
+**这段根因写在此处的唯一用途**：事后判读 worker 是否**自主定位**到了它。按人 2026-09-12 裁定，
+task 正文只给症状 + 复现入口 + 期望行为，⛔ 不给根因、不给正则所在行、不给修法。
+worker 在 ad-arm1 的 archguard 项目里跑，结构上读不到本仓库的 `goals/`，故无泄漏。
+
+### 靶子现状（2026-09-12 实测）
+
+- ad-arm1 的 `/home/yale/work/archguard` 是真 git repo，`master @ 14ea9e63`（2026-08-21），有
+  origin → github.com/yaleh/archguard。
+- 已有 `.quay/` 与 **61 个存量 task**（TASK-29..87、DIR-001/002），历史上被 quay 真实驱动过
+  （`loop-driver.jsonl`、`fan-in-blocked-20260805`、`pre-task8x-merge-untracked` 一路到 TASK-87）。
+- **停摆约一个月**：最后活动 2026-08-11/12。
+- 该主机的 user-scope quay 安装已于 2026-09-12 本会话卸载（含 npm 全局包、Claude Code 插件注册、
+  marketplace 与 cache/data）⇒ **本 GOAL 从一个干净起点开始装当前 build**。
+
+## 范围与非目标
+
+**范围（AC-247..AC-249）**：当前 build 在 ad-arm1 干净接管一个停摆的存量项目且 driver 真活（247）；
+驱动出的修复被 archguard 自己的机械判据确认为正确——前后翻转（248）；代码修复与文档同步出自同一任务（249）。
+
+**非目标（人 2026-09-12 逐条裁定，各自去向已记，⛔ 不是遗忘）**：
+
+- **⛔ 不推 origin**。提交留在 ad-arm1 本地。**其代价必须写明**：GOAL-009 AC-207 的「外部可核」
+  原本靠共享裸仓库镜像，本 GOAL 放弃该形态 ⇒ `commit_sha` 只在 ad-arm1 本地可核，判读侧必须经 ssh
+  取真实 git 读数，⛔ 绝不采信驱动方自述（硬规则 4b）。**这是一处真实弱化，照实承认，不假装等价。**
+- **⛔ 不在本机（boheidc）的 marketplace 副本上落地修复**。开发工作区是 ad-arm1 的
+  `/home/yale/work/archguard`（人裁定）。本机 `~/.claude/plugins/marketplaces/archguard` 是
+  安装物，⛔ 不是工作区——两边各改一份即漂移。
+- **「陈旧存量是否被错误派发」不纳入**（原 AC-d，人裁定）。61 个存量任务中若仍有 ready 态，driver
+  重启后是否会无差别捡起 8 月遗留任务——该风险已识别，本 GOAL 不设判据盯它。
+- **不解决 GOAL-009 风险 5「达成即停止复验」**：本 GOAL 同样会在三条全绿后被 I2 机械 flip 为
+  achieved 并离开 `check --achieved-failing` 作用域。已知，暂不处理，由 freshness 窗口 K 的后续裁定承接。
+- **`claude --bg` 是验证夹具、不是产品能力**（沿用 GOAL-009 风险 6）：产品文档与 skill 文案不得
+  因本 GOAL 而声称 quay 会启动会话。
+
+## 退出条件
+
+**散文版**：一次由本仓库现 build 的产物，装到 ad-arm1（非本机），接管 `/home/yale/work/archguard`
+这个**停摆一个月、带 61 个真实存量任务**的第三方项目；由该项目**自己的 drivers** 驱动，产出一个提交，
+该提交使 **archguard 自己的 ADR-007 检查器**对一个特定输入形态的行为从「看不见该工具」**翻转**为
+「看得见」，且同一任务内代码与 ADR-007 文档同步修正。机器判据在 AC-247..AC-249，**不在本节**。
+
+**三条方向性读数**（与 AC 并列，非替代）：① ad-arm1 上 `driver_alive`（当前 0）；② archguard 自身
+git 历史中由任务 worktree 产出的提交数（当前 0）；③ `check-adr.ts` 对「注释夹在 `server.tool(` 与
+工具名之间」这一形态的检出（当前：看不见，且该漏检表现为 `check:adr` 打印 OK 并 exit 0）。
+
+## 风险
+
+1. **顺序是硬的**：AC-247（装上且真活）→ AC-248（修对）→ AC-249（成套）。颠倒即在 driver 没活的
+   前提下讨论修得对不对。
+2. **AC-248 最容易被写成恒绿，且本缺陷使其尤其危险**：任何形如「跑了 `npm run check:adr` 且 exit 0」
+   的判据**今天就是绿的**——因为漏检本身就表现为 OK + exit 0。⇒ 判据必须要求 `before`/`after`
+   **翻转**（`before_detects is False` ∧ `after_detects is True`），⛔ 不读单次退出码。
+   **这是本 GOAL 全部判据里最容易搞错的一条**：这个 bug 的本质就是「检查器假绿」，用假绿去验对它的修复
+   等于用被测缺陷当量具。
+3. **任务描述粒度即命题**（人 2026-09-12 裁定）：task 只给症状 + 复现入口 + 期望行为。若写进根因或
+   修法，测到的是「quay 能驱动**施工**」而非「能驱动**开发**」。事后判读 worker 是否自主定位，依据是
+   本 GOAL 背景节记录的根因（worker 结构上不可见）。
+4. **不推 origin ⇒ 外部可核性弱化**（见「非目标」第一条）：判读侧必须经 ssh 从 ad-arm1 的 git 取
+   `commit_sha` 与 `commit_files`，⛔ 不采信载体里驱动方自己写的值而不做交叉核对。
+5. **证据搬运无机制兜底**（沿用 GOAL-009 AC-207 的执行说明）：产出侧在 ad-arm1、判读侧在本机，
+   载体 gitignored、不随 git 同步。⇒ 跑完必须显式把**真实跑出来的**记录搬回本机载体，
+   ⛔ 绝不手写/注入一条，⛔ 不搬出自坏构建的记录，搬完**必须复跑判据**以退出码为准。
+6. **自证风险**：三条 criterion 均已显式断言 `host ≠ 本机` ∧ `project_root ∉ 本仓库`；否则在本仓库
+   一跑就绿，那是结构上不可能报红的绿（gap-ac118 实证）。
+7. **profiles 前置**（沿用 GOAL-009 AC-207 的执行说明，机制未落地前仍是人工步骤）：必须把驱动方
+   `.quay/profiles.yml` 的 `launcher`/`model`/`auth` 显式写进 ad-arm1 目标项目的
+   `.quay/profiles.yml`，⛔ 不依赖宿主全局默认——否则 worker 秒死 → 退避上限 → 任务翻 needs-human
+   → 永远走不到 fan-in。
+
+## 与其他 goal 的关系
+
+承接 **GOAL-009 的质量维度**：GOAL-009 回答「收缩之后，它还驱动得起来吗」，本 GOAL 回答
+「**驱动出来的东西对不对**」。GOAL-009 的 AC-207 显式承认它没判「改对了没有」，本 GOAL 正是接在
+那条自陈的边界上——与 GOAL-009 承接 GOAL-003 风险 4 的方式同源。
