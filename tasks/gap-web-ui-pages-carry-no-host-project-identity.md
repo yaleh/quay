@@ -52,7 +52,7 @@ extra:
 - [x] AC1 能取假：**两个不同项目**的 `/dashboard` 的 `<title>` **必须不同**——打印两个实际取值做对照。今天两者均为 `Dashboard`，故本条**今天必红**。**验证（真实 HTTP 探测，⛔ 非渲染层自测）**：起真实 `startServer`（本任务 worktree 源码）分别以两个**真实项目根**为 cwd，两次真实 `GET /dashboard` ⇒ P1 `/home/yale/work/quay` = `<title>quay — Dashboard</title>`，P2 `/home/yale/.quay-verify-dryrun/proj`（quay-init 生成的真实工作区）= `<title>proj — Dashboard</title>`；差异落在**项目半边**（两侧都以同一 `Dashboard` 结尾，故不是「比了两个不同页面」）。可取假控制见 `packages/quay/test/serve.test.mjs`：两个不同根 ⇒ title 不同 ∧ 同根两次调用相等 ∧ 裸字面量 `<title>Dashboard</title>` 会被源级谓词判红。
 - [x] AC2 项目可定位：页面内容中出现该项目的 `projectRoot` **完整路径**（今天 0 命中）；打印命中行。**验证**：同一对真实探测里 `/dashboard` 正文命中各自完整根路径，原文 `<strong>项目根路径</strong>：<code class="identity-project-root">/home/yale/work/quay</code>` / `...>/home/yale/.quay-verify-dryrun/proj</code>`（改前两页均为 0 命中）。
 - [x] AC3 版本一致性可见：`quay-init-state.json` 的 `pluginVersion` 与交付物 plugin 版本**并排出现**在 dashboard，且两者不等时存在**可机械检出**的标记。**负控制现成**：archguard 于 2026-09-12 补跑 quay-init 前为 `0.4.0` vs `0.6.1`（不等态），补跑后应为相等态——两态的页面输出必须可区分。**验证**：P2（落盘 `0.4.0`，真实 quay-init 工作区）渲染 `<p … data-plugin-version-state="mismatch">` + `交付物 0.6.1 · 工作区落盘 0.4.0 · 不一致 — 该工作区落盘的 plugin 已过期`；P1（无 `quay-init-state.json`）渲染 `data-plugin-version-state="unknown"` + 「未评估（缺一侧读数）」。三态由纯函数 `pluginVersionState()` 单测取值区分，**`unknown` 是独立取值、绝不写成 match**（硬规则 3b）；match 态另由单测断言其 marker 与 mismatch 不同（两态可区分），并附「mismatch 页不得同时报 match」的负控制。
-- [x] AC4 单一真源：title/身份的拼装逻辑**只有一处**——给出 grep 计数**并打印命中内容**（⛔ 计数不打印内容不算，硬规则 2）。**验证**：`skills` 三件定义（`serveIdentity()` / `projectLabel()` / `pageTitle()` / `renderIdentityCard()`）全部只存在于 `packages/quay/src/serve-render.ts`；源级 grep `projectLabel(` / `.projectName` / `.projectRoot` / `.deliveredPluginVersion` / `.initPluginVersion` / `.landingBaseline` 在 16 个 `serve-*.ts` 中的命中**只在 `serve-render.ts`**（页模块 0 命中，命中内容即该文件内的定义与自用），且这条不变量由 `serve.test.mjs` 做成断言，附负控制（伪造一个页内自拼身份的片段必被判红 ⇒ 谓词不是恒真）。
+- [x] AC4 单一真源：title/身份的拼装逻辑**只有一处**——给出 grep 计数**并打印命中内容**（⛔ 计数不打印内容不算，硬规则 2）。**验证**：四处定义（`serveIdentity()` / `projectLabel()` / `pageTitle()` / `renderIdentityCard()`）全部只存在于 `packages/quay/src/serve-render.ts`；源级 grep `projectLabel(` / `.projectName` / `.projectRoot` / `.deliveredPluginVersion` / `.initPluginVersion` / `.landingBaseline` 在 16 个 `serve-*.ts` 中的命中**只在 `serve-render.ts`**（页模块 0 命中，命中内容即该文件内的定义与自用），且这条不变量由 `serve.test.mjs` 做成断言，附负控制（伪造一个页内自拼身份的片段必被判红 ⇒ 谓词不是恒真）。
 - [x] AC5 概览页全覆盖：Plan 第 1 步清单中的**每一个概览页** title 都带项目身份（逐页列出改前/改后取值）。**验证**：源级扫描 `serve-*.ts` 的 head `<title>` 共 23 处，其中 **16 处**（= Plan 第 1 步清单的全部概览页）经 `pageTitle()`；余 7 处为详情页，保留实体 id（理由见「实施说明 ③」）。逐页改前/改后取值与两次真实探测的完整 15 路由读数见下方两节。
 
 ## Definition of Done
@@ -132,8 +132,7 @@ P2 dashboard 身份卡片原文（真实工作区，两版本不等态）：
     · 工作区落盘 <code class="identity-init-version">0.4.0</code> · <span class="verdict-fail">不一致 — 该工作区落盘的 plugin 已过期</span>
   <strong>分支模型</strong>：default 未接入/无数据 · doc-branch main · landing-baseline integration
 
-P1 同卡片：data-plugin-version-state="unknown"（该工作区无 .quay/quay-init-state.json ⇒ 「未评估（缺一侧读数）」，
-⛔ 不是 match）；分支模型 default/doc-branch/landing-baseline 均取真实读数。
+P1 同卡片：data-plugin-version-state="unknown"（该工作区无 .quay/quay-init-state.json ⇒ 「未评估（缺一侧读数）」，⛔ 不是 match）；分支模型 default/doc-branch/landing-baseline 均取真实读数。
 ```
 
 **⑥ 探测机位说明（诚实标注，硬规则 5）**：P2 是**真实存在的第二个项目工作区**（quay-init 生成，自带 `.quay/quay-init-state.json` 与 provider runtime），但它与 P1 同在本机（`boheidc`）——本机不存在第二个「provider 绑定可用」的 quay 工作区（archguard 的 `.quay/config.yml` 正指向**已退役的本地 runtime**，server 起不来，这本身就是本任务要暴露的版本漂移症状）。`<title>` 是 `workspaceRoot` 的纯函数、`hostname` 是独立字段，故 `title 因项目而异` 这一条在单机上与跨机等价；跨机的可见区分由身份卡片的 `主机` 字段承担（渲染的 `os.hostname()`，读数为 `boheidc`）。以上口径如实标注，不冒充跨机。
