@@ -1949,7 +1949,7 @@ ac248_pre_rev() {
 # ── ⑨ AC-248 翻转读数（git 树 in → 三个直接量 out）─────────────────────────────────────────
 # 入参 $1 = 项目根、$2 = 实现提交 sha、$3 = 临时工作目录（调用方负责清理）。
 # 产出（全部由【目标项目自己的】检查器产生，⛔ 无一个字面量）：
-#   AC248_PRE_REV            = <sha>^（修复前修订 = 实现提交的 parent）
+#   AC248_PRE_REV            = 修复前修订（默认 = 修复序列之前那条【记账】边界；见 ac248_pre_rev）
 #   AC248_BEFORE_TOOLS_JSON / AC248_AFTER_TOOLS_JSON = 两个修订上的候选集原文（原始读数留档）
 #   AC248_BEFORE_CLI_RC / AC248_AFTER_CLI_RC / AC248_BEFORE_CLI / AC248_AFTER_CLI / AC248_CLI_SOURCE
 #                            = 两次检查器运行的退出码与 stdout+stderr 原文（「这两条布尔来自真实读数」的证据）
