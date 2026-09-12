@@ -11,8 +11,7 @@ criterion: >-
 
   p=".quay/productization-verification.jsonl"
 
-  if not os.path.exists(p): sys.stderr.write("NOT-EVALUATED: carrier absent\n");
-  sys.exit(3)
+  if not os.path.exists(p): sys.stderr.write("AC-248 NOT-EVALUATED: carrier .quay/productization-verification.jsonl absent — cannot read the adr-check before/after flip evidence\n"); sys.exit(3)
 
   me=socket.gethostname(); here=os.path.realpath(".")
 
@@ -35,7 +34,7 @@ criterion: >-
       if r.get("adr_check_after_detects") is not True: continue
       if not r.get("adr_check_probe_tool"): continue
       sys.exit(0)
-  sys.exit(1)
+  sys.stderr.write("AC-248: carrier holds no qualifying GOAL-016-AC-248 record (need host != local hostname, project_root outside this repo, non-empty commit_sha and task_id, task_status done, gate_events greater than zero, produced_by_driver exactly true, commit_files a non-empty list with at least one path outside tasks/ goals/ .quay/, adr_check_before_detects exactly false, adr_check_after_detects exactly true, non-empty adr_check_probe_tool)\n"); sys.exit(1)
 
   P
 expect: exit 0 = 载体中存在 ac=GOAL-016-AC-248 的记录，host≠本机 ∧ project_root ∉ 本仓库 ∧
