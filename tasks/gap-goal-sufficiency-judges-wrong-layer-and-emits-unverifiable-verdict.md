@@ -1,7 +1,7 @@
 ---
 id: gap-goal-sufficiency-judges-wrong-layer-and-emits-unverifiable-verdict
 title: sufficiency judge 判的是「AC ⊇ 退出条件」而非「退出条件 ⊨ 业务目标」，且输出是不可复核的判决
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
