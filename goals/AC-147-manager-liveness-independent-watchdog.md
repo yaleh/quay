@@ -1,7 +1,7 @@
 ---
 id: AC-147
 title: manager 自身活性由【不依赖 manager】的通道兜底
-status: achieved
+status: superseded
 kind: criterion
 goal: GOAL-002
 criterion: |
@@ -11,6 +11,17 @@ origin: |
   「看门人」缺口（manager 分析时主动指出，⛔ 不是人提出的）：今天是三层互看——outer 阻塞 3h17m
   期间，是 manager 发现、inner 执行。取消两层后只剩人看 manager。新架构下 manager 阻塞时 driver
   仍在跑（更好）；但语义工作停摆且无人察觉，直到人去看。本质是用【层间冗余】换【机制连续性】。
+statusLog:
+  - at: 2026-09-12T01:46:28.328Z
+    from: achieved
+    to: superseded
+    actor: worker:gap-achieved-ac-rot-invisible-when-ledger-tail-is-stale-pass
+    reason: 判据引用的 plugin/scripts/manager-liveness-independent-check.ts 已由
+      gap-ac158（AC158 批次一：零调用死集归档，2026-09-07）git mv 进
+      archive/2026-09-07-zero-call-scripts/ ⇒ 判据恒为
+      ERR_MODULE_NOT_FOUND、结构上不再可满足。该 AC 的诉求（manager 失能有不经 manager
+      的通道让人知道）由后续裁定改由 driver 承接，本条无继任判据 👉 显式处置为
+      superseded，而非改写判据去指向归档副本（归档件是死件，指过去只会让判据假装在测一个已退役的机制）。
 ---
 
 **判据（能取假）**：manager 会话失能（阻塞在交互提示 / 心跳停 / 进程死）超过阈值 T，**存在一个
