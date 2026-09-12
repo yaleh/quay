@@ -1,7 +1,7 @@
 ---
 id: gap-frozen-achieved-ac-no-owner-after-ledger-tail-mutation
 title: AC-242 的冻结集在 goal 关闭后仍可新增且无人拥有——扫掠写入的 fail 尾事件永久定格（四条），computeGoalGaps 无对应分支
-status: todo
+status: ready
 labels:
   - gap
   - defect
