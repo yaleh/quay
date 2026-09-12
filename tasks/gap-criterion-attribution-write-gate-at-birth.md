@@ -103,6 +103,8 @@ node --no-warnings --experimental-strip-types plugin/scripts/criterion-failure-a
 - goals/AC-250-观察面-目标项目的-quay-web-server-绑在-ad-arm1-的-tailscale0-ip-上且真的反映进.md
 - packages/quay/src/goal-store.ts
 - packages/quay/test/goal-store.test.mjs
+- packages/quay/test/gap-goal-record-completeness-undefined.test.mjs
+- packages/quay/test/goal-gate.test.mjs
 - plugin/scripts/criterion-failure-attribution-check.ts
 - plugin/test/criterion-failure-attribution-check.test.mjs
 - plugin/test/goal-store-write-gate-criterion-attribution.test.mjs (new)
@@ -147,3 +149,19 @@ c4) 存量 criterion 读不懂（无 criterion 字段）+ 新文本含裸退出 
 
 **第 4 次复发（本任务在飞期间发生，非假设）**
 本任务实施途中 `goals/AC-250-…md`（建于 2026-09-12T09:12:29Z）以**同一形态**出生（裸 `sys.exit(1)`），生产目标台账随即再添一条不可归因 fail ⇒ AC-241 修完三条后**仍为 exit 1 并点名 AC-250**。故按同一条纪律一并修复（AC-250 的三个载体对照同样 `pre == post == {3,1,0}`），并已把 `goals/AC-250-…md` 写入 `## Touches`。这正是本条要堵的写入面的活证据。
+
+**第 3 轮 suite 红（本任务在飞期间，⛔ 不是环境 flake）—— 写面收紧打红两处既有用例，按主体补齐，⛔ 未放宽闸**
+
+首轮 fan-in 的 suite 判词：`AssertionError [ERR_ASSERTION]: every production criterion must still pass`（`gap-goal-record-completeness-undefined.test.mjs` AC5）与 `goal gate executes via sh`（`goal-gate.test.mjs`）。两条都是**写面闸的必然连带**（收紧写面闸会红掉「顺手用了现在非法状态」的既有用例——这与本任务 Plan 第 4 条预写的前提一致），逐条定性：
+
+1. **`packages/quay/test/goal-gate.test.mjs`**（主体：`<(...)` 是 bash-only ⇒ `/bin/sh`（dash）下 Syntax error ⇒ exit 2；POSIX temp-file 版两 shell 同绿）：AC-020 / AC-021 两条夹具判据各带一个裸 `exit 1`。修法=**只给失败出口在同一行补 `echo … >&2`，判定条件一个字未动**：AC-020 的 `<(...)` 仍在 ⇒ 在 sh 下仍是 Syntax error ⇒ `assert.match(reason, /exit 2/)` 的语义不变；AC-021 的 `&&` 分支在通过路径上仍不可达 ⇒ 仍 exit 0。该文件 **6/6 绿**。
+
+2. **`packages/quay/test/gap-goal-record-completeness-undefined.test.mjs`** AC5（主体：completeness 合同的**阴性对照**——不得误伤生产判据）：它的夹具就是**生产数据本身**（把 `goals/` 每条 AC 用其自身字段重新 write 进一个临时 store），而写面闸现在在 **CREATE** 上**有意**拒绝带裸失败退出的判据（31 条基线判据是 **UPDATE 路径**上的存量豁免，⛔ 不是 CREATE）⇒「0 拒绝」这条断言的前提随本次收紧而改变。
+   **改的是判别器，⛔ 不是主体、⛔ 不是放宽**：用闸**自己的同一个共用谓词**（`evaluateCriterionAttribution`，由 `goal-store.ts` 导出——也正是 AC5「单一实现」要保的那一份）对被喂进去的判据再判一次，**只有谓词判为 clean（bare===0）或 NOT-EVALUATED 的记录被拒才算 misfire**（NOT-EVALUATED 同样不是本闸的拒绝）。另加 `passes > 0` 防空转（硬规则 4c：若全部被拒，这条对照就什么都没测到）。⛔ 不是消息匹配——判别器是**谓词**而不是文案。
+   **取假两方向，均已实跑并留档**（硬规则 4c：判据落笔当轮就要取一次真实读数）：
+   - 方向 A（completeness 误伤 clean 判据）：把 `goal-store.ts` CREATE 分支临时改成 `… || !frontmatter.criterion.includes("quay")` ⇒ AC5 **✖ 红**，判词逐字 `every rejection must be the attribution gate refusing a criterion that carries bare failure exits; misfires:`；
+   - 方向 B（两面漂移：闸拒了一条谓词判为 clean 的记录）：把 CREATE 分支的 `if (bare.length > 0)` 临时改成 `|| true` ⇒ AC5 **✖ 红**，判词逐字同上；
+   - 两次控制均以 `git checkout -- packages/quay/src/goal-store.ts` 还原，还原后 `git diff --stat` **为空**（逐字节回到提交版），随后两文件 **11/11 绿**（5+6）。
+
+3. 两个文件均已写入 `## Touches`（⛔ 否则 fan-in 的 delta / anti-drift 判会 HARD FAIL）。
+   接口边界保持不变：本任务仍然只有**一份**失败退出判定实现（`goal-store.ts`），本次未新增任何正则或第二份判定。
