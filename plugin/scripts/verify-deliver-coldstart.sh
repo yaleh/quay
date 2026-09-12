@@ -1916,6 +1916,10 @@ ac248_flip_is_forward() { [ "$1" = false ] && [ "$2" = true ]; }
 # 不存在硬编码默认值；字面量只允许出现在判定助手里（自检 `ac248-writer-literal-hits=0` 钉住这一点）。
 ac248_produced_by_driver_ok() { [ "$1" = true ]; }
 
+# 把 1/0 读数映射成 JSON 布尔字面量（调用点因此不必写死 `"true"`——AC2：写入路径上每个字段都是读数，
+# ⛔ 没有常量）。⛔ 单独成函数同上：字面量只在这一个映射点出现。
+ac248_produced_by_driver_json() { if [ "$1" = "1" ]; then printf '%s' true; else printf '%s' false; fi; }
+
 # ── ⑨ AC-248 修复前修订（落档 pre-head）─────────────────────────────────────────────────────
 # ⛔【不取 <impl>^】——实测 2026-09-12（ad-arm1 的 archguard TASK-88）：一次修复由【多个提交】组成时，
 #    `ac207_select_implementation_commit` 选中的是最新一条（`886f40f4`，只改了测试文件），而它的 parent
@@ -2172,7 +2176,7 @@ e = [("adr_check_pre_rev", os.environ["AC248_PRE"]),
 print("," + ",".join(json.dumps(k) + ":" + json.dumps(v) for k, v in e))
 ' 2>/dev/null || true)"
     if write_ac248_record "$AC248_HOST" "$AC248_PROJECT_ROOT" "$AC248_COMMIT_SHA" "$AC248_TASK_ID" \
-         "done" "$AC248_GATE_EVENTS" "true" "$AC248_COMMIT_FILES_JSON" \
+         "done" "$AC248_GATE_EVENTS" "$(ac248_produced_by_driver_json "$AC248_PRODUCED_BY_DRIVER")" "$AC248_COMMIT_FILES_JSON" \
          "$AC248_BEFORE_DETECTS" "$AC248_AFTER_DETECTS" "$AC248_PROBE_TOOL" "$extras"; then
       AC248_EVALUATED=1
       AC248_WRITTEN_THIS_RUN=1
@@ -4332,7 +4336,7 @@ AC247NEG
   #    且 AC-248 段落【不】含任何 ADR-007 判定实现（AC3：正确性判据不由 quay 拥有）——非注释行里
   #    `adr-ok` / `ADR-007` 命中数必须为 0，而调用目标项目检查器导出的那一处必须在位。
   local ac248_tmp ac248_w ac248_ok=0 ac248_neg_ok=1 ac248_neg_list="" ac248_probe="" ac248_bd="" ac248_ad=""
-  local ac248_noop_lines="" ac248_false_hits=0 ac248_adr007_hits=0 ac248_export_hits=0 ac248_step_calls=0
+  local ac248_noop_lines="" ac248_false_hits=0 ac248_adr007_hits=0 ac248_export_hits=0 ac248_step_calls=0 ac248_step_lits=0
   ac248_tmp="$(mktemp -d 2>/dev/null)" || ac248_tmp=""
   if [ -n "$ac248_tmp" ]; then
     local ac248_repo="$ac248_tmp/repo"
@@ -4445,6 +4449,8 @@ AC248NEG
     ac248_export_hits="$(printf '%s\n' "$ac248_seg" | grep -c 'extractMcpToolNames' || true)"
     # 生成侧（硬规则 ② 按位置）：⑨ 的函数体必须【调用】翻转读数函数——把读取点挪出函数体（或删掉）即取假
     ac248_step_calls="$(sed -n '/^step_ac248_adr_flip()/,/^}$/p' "$0" 2>/dev/null | sed 's/#.*//' | grep -c 'ac248_adr_flip_reading\|probe_ac248_measures' || true)"
+    # 54b 调用点也不许有常量：⑨ 的函数体里不得出现 `"true"`/`"false"` 字面量（每个字段都必须来自读数）。
+    ac248_step_lits="$(sed -n '/^step_ac248_adr_flip()/,/^}$/p' "$0" 2>/dev/null | sed 's/#.*//' | grep -cE '"(true|false)"' || true)"
     rm -rf "$ac248_tmp"
   else
     ac248_ok=0
@@ -4452,7 +4458,7 @@ AC248NEG
   echo "selfcheck: ac248-flip-reading(hermetic 2-commit checker) probe='${ac248_probe}' before='${ac248_bd}' after='${ac248_ad}' ok=$ac248_ok missing='${ac248_neg_list}' (expect tool_newly_seen/false/true/1/'' — 读数与写入都由产品函数产生)"
   echo "selfcheck: ac248-refusal(13 negative specs) negatives_all_refused=$ac248_neg_ok (expect 1 — 反转/0-1/字符串/缺件/记账提交/空探针 ⇒ 零记录)"
   echo "selfcheck: ac248-noop-fix(差集为空) carrier_lines=${ac248_noop_lines:-<n/a>} (expect 1 — 只有 51b 那一条; 无修复 ⇒ 无 probe ⇒ 不新增记录)"
-  echo "selfcheck: ac248-writer-literal-hits=$ac248_false_hits adr007-in-producer-hits=$ac248_adr007_hits checker-export-hits=$ac248_export_hits step-call-hits=$ac248_step_calls (expect 0/0/>=1/>=1 — 写入点无字面量默认值; quay 不拥有 ADR 判定; 调用与读取点都在函数体内)"
+  echo "selfcheck: ac248-writer-literal-hits=$ac248_false_hits adr007-in-producer-hits=$ac248_adr007_hits checker-export-hits=$ac248_export_hits step-call-hits=$ac248_step_calls step-literal-hits=$ac248_step_lits (expect 0/0/>=1/>=1/0 — 写入点无字面量默认值; quay 不拥有 ADR 判定; 调用与读取点都在函数体内)"
 
   if [ "$d1" = "1" ] && [ "$d2" = "no" ] && [ "$a1" = "1" ] && [ "$a2" = "yes" ] \
      && [ "$ac247_ok" = "1" ] && [ "$ac247_neg_ok" = "1" ] && [ "$ac247_cnt_ok" = "1" ] \
@@ -4462,6 +4468,7 @@ AC248NEG
      && [ "$ac248_ok" = "1" ] && [ "$ac248_neg_ok" = "1" ] \
      && [ "${ac248_false_hits:-1}" = "0" ] && [ "${ac248_adr007_hits:-1}" = "0" ] \
      && [ "${ac248_export_hits:-0}" -ge 1 ] 2>/dev/null && [ "${ac248_step_calls:-0}" -ge 1 ] 2>/dev/null \
+     && [ "${ac248_step_lits:-1}" = "0" ] \
      && [ "${ac248_noop_lines:-0}" = "1" ] \
      && [ "$bl_ok" = "1" ] && [ "$bmw_fail" = "0" ] \
      && [ "$c3_e" = "1" ] && [ "$c3_ok" = "1" ] \
