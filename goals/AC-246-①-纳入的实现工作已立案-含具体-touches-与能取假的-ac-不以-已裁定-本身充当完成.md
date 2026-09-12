@@ -1,7 +1,7 @@
 ---
 id: AC-246
 title: ① 纳入的实现工作已立案——含具体 Touches 与能取假的 AC，⛔ 不以「已裁定」本身充当完成
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-014
 criterion: >
@@ -57,4 +57,10 @@ origin: 2026-09-12 人裁定 GOAL-014 选【① 纳入：建通用聚合读数�
   exit 3（NOT-EVALUATED，不与合格同形）。取假控制已实测（同形判据在 AC-245 编号下跑过）：合格样本 exit 0；Touches
   退化为裸目录 ⇒ exit 1（touches-not-concrete）；任务标 superseded ⇒ exit 1（superseded）。
 activatedAt: 2026-09-12T01:19:43.695Z
+statusLog:
+  - at: 2026-09-12T01:26:23.705Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
