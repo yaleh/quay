@@ -149,16 +149,19 @@ test("⑥ shipped-set closure — the ENUMERATION is proven complete, not assert
     "a shipped sibling must be listed exactly once — a second inline copy defeats the closure check");
   assert.equal((src.match(/\$\{SCRIPT_DIR\}\/provider-binding-resolvability-check\.ts/g) || []).length, 1,
     "the checker must be listed exactly once — inline copies are how 2026-09-11 stayed invisible in BOTH modes");
-  assert.equal((src.match(/^\s*if ! ship_verify_closure /gm) || []).length, 3,
-    "ALL THREE scp sites (verify_coldstart_mode / verify_upgrade_mode / verify_takeover_mode) must ship through ship_verify_closure");
+  // 4 since gap-ac248-adr-check-differential-record-producer added --verify-adr-flip (the fourth
+  // verify mode); every mode must go through the ONE enumeration — a direct scp in any of them is
+  // exactly how the 2026-09-11 defect stayed invisible.
+  assert.equal((src.match(/^\s*if ! ship_verify_closure /gm) || []).length, 4,
+    "ALL FOUR scp sites (verify_coldstart_mode / verify_upgrade_mode / verify_takeover_mode / verify_adr_flip_mode) must ship through ship_verify_closure");
   // the SECOND, independent gap on the same transport surface (measured 2026-09-11): neither verify
   // mode put the host's Node ≥20 floor on PATH, so on C the run inherits /usr/bin/node v18.19.1 and
   // `node --experimental-strip-types` dies with "bad option" ⇒ binding_state() reads "unreadable" for
   // EVERY project there too. Same syndrome, different cause — so it needs its own wiring control.
   assert.equal((src.match(/^verify_node_export_for\(\) \{/gm) || []).length, 1,
     "verify_node_export_for must be defined exactly once (single source for ALL verify modes)");
-  assert.equal((src.match(/\$\(verify_node_export_for "\$\{hk\}"\)/g) || []).length, 3,
-    "ALL THREE verify modes' remote scripts must prepend the host's Node floor — the deliver mode always did");
+  assert.equal((src.match(/\$\(verify_node_export_for "\$\{hk\}"\)/g) || []).length, 4,
+    "ALL FOUR verify modes' remote scripts must prepend the host's Node floor — the deliver mode always did");
 });
 
 // ── AC-247 (GOAL-016) — the SAME transport, for a ≥14-day-stalled legacy project ─────────────────
@@ -208,4 +211,64 @@ test("AC-247 — the declared ac set is exactly GOAL-016-AC-247 (no second, sile
     "verify_takeover_mode must declare its own expected ac set (GOAL-016-AC-247) inside its body");
   assert.match(decl, /check_evidence_completeness "\$\{evidence_local\}" "\$\{expected_acs\}"/,
     "the completeness check must be fed THAT declaration, not a literal elsewhere");
+});
+
+// ── AC-248 (GOAL-016) — the SAME transport, for a project quay itself drove ──────────────────────
+// gap-ac248-adr-check-differential-record-producer: `--verify-adr-flip --target-root <abs> --task-id <id>`
+// switches the remote script to `--ac248-adr-flip` and transports ONLY the ac=GOAL-016-AC-248 record.
+// The property this pins is the one that decides whether the AC is real: **transport success ≠ production
+// success** — a run that shipped back a field-complete but WRONG-ac record must be NOT-EVALUATED, never a
+// silent ok (硬规则 3b 同族). This file also pins the JSON-BOOL SHAPE of the two flip readings, because
+// the criterion reads them with `is False` / `is True`: `0`/`1` and `"false"`/`"true"` must BOTH fail, or
+// the whole "flip" could be asserted with a number instead of a run.
+test("AC-248 — --selfcheck-adrflip-transport: AC-248 evidence is transported+COMPLETE, a different ac is NOT", () => {
+  const r = run(["--selfcheck-adrflip-transport"]);
+  assert.equal(r.status, 0, `--selfcheck-adrflip-transport must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /positive append → EVIDENCE-TRANSPORT appended=1/,
+    "an AC-248 evidence line must be transported (appended=1)");
+  assert.match(r.stdout, /positive completeness → COMPLETE \(exit 0\)/,
+    "the declared ac set [GOAL-016-AC-248] must be judged COMPLETE when present");
+  // negative: transport succeeding on a DIFFERENT ac must not read as production success
+  assert.match(r.stdout, /negative\(other-ac\) → NOT-EVALUATED/,
+    "a run that produced the WRONG record must be NOT-EVALUATED (transport success ≠ production success)");
+  // negative: absent / zero-line evidence is NOT-EVALUATED, never a silent exit 0
+  assert.match(r.stdout, /negative\(missing\/zero-lines\) → NOT-EVALUATED/,
+    "missing or zero-line evidence must be NOT-EVALUATED (硬规则 3b)");
+  // the AC-248-specific shape control: both impostor forms must fail the criterion's own predicate
+  assert.match(r.stdout, /json-bool-shape\(is-False\/is-True\) positive=1 impostors-refused=1/,
+    "`0`/`1` and `\"false\"`/`\"true\"` must BOTH be refused by an `is False`/`is True` predicate");
+  // wiring: the transport AND the completeness check must both sit inside verify_adr_flip_mode's body
+  assert.match(r.stdout, /write-points\(in-verify_adr_flip_mode\) hits=2/,
+    "both the transport and the completeness call must be positionally inside verify_adr_flip_mode");
+});
+
+test("AC-248 — --verify-adr-flip requires an ABSOLUTE --target-root AND an explicit --task-id", () => {
+  // ⛔ The root is resolved ON the remote host, so a relative path silently resolves against the remote
+  // ssh home — i.e. it would evidence a DIFFERENT project than the one the criterion will name.
+  const missingRoot = run(["--verify-adr-flip"]);
+  assert.equal(missingRoot.status, 2, `--verify-adr-flip without --target-root must exit 2 (usage), got ${missingRoot.status}`);
+  assert.match(missingRoot.stdout + missingRoot.stderr, /requires --target-root/);
+  const relative = run(["--verify-adr-flip", "--target-root", "archguard", "--task-id", "T-1"]);
+  assert.equal(relative.status, 2, `a relative --target-root must exit 2 (usage), got ${relative.status}`);
+  assert.match(relative.stdout + relative.stderr, /must be an ABSOLUTE path on the remote host/);
+  // ⛔ --task-id is required: "guess the newest task" is exactly the AC-207 defect (the newest commit is
+  // the bookkeeping flip), so the mode refuses to run without being told which task's product to read.
+  const missingTask = run(["--verify-adr-flip", "--target-root", "/home/other/archguard"]);
+  assert.equal(missingTask.status, 2, `--verify-adr-flip without --task-id must exit 2 (usage), got ${missingTask.status}`);
+  assert.match(missingTask.stdout + missingTask.stderr, /requires --task-id/);
+});
+
+test("AC-248 — the declared ac set is exactly GOAL-016-AC-248 (no second, silently-satisfying ac)", () => {
+  const src = readFileSync(SCRIPT, "utf8");
+  // positional: the declaration lives inside verify_adr_flip_mode's own body — moving it out (or
+  // inheriting another mode's set) would let the mode pass on records it never asked for.
+  const body = src.slice(src.indexOf("verify_adr_flip_mode() {"));
+  const decl = body.slice(0, body.indexOf("\n}"));
+  assert.match(decl, /local expected_acs="GOAL-016-AC-248"/,
+    "verify_adr_flip_mode must declare its own expected ac set (GOAL-016-AC-248) inside its body");
+  assert.match(decl, /check_evidence_completeness "\$\{evidence_local\}" "\$\{expected_acs\}"/,
+    "the completeness check must be fed THAT declaration, not a literal elsewhere");
+  // ⛔ this mode READS a product; it must never drive one — no driver/worktree machinery in its body.
+  assert.ok(!/driver\s+start|worktree\s+add/.test(decl.replace(/#.*/g, "")),
+    "verify_adr_flip_mode must never DRIVE anything: the evidenced fix was driven out by the project's own drivers");
 });

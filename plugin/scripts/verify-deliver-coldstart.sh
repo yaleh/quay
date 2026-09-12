@@ -65,7 +65,7 @@
 #       [--test-command <cmd>] [--tmux-session <sess>] \
 #       [--wait <s>] [--liveness-window <min>] \
 #       [--skip-cold-start-drive] [--cold-start-drive] [--verify-only] [--require-live] \
-#       [--evidence <path>] [--ac89 <path>] [--host <B|C>] [--spec <path>] [--channel npm-global|marketplace] [--ac205-session] [--ac207-e2e] [--ac239-e2e] [--ac247-takeover --takeover-root <dir>] [--selfcheck] [--help] \
+#       [--evidence <path>] [--ac89 <path>] [--host <B|C>] [--spec <path>] [--channel npm-global|marketplace] [--ac205-session] [--ac207-e2e] [--ac239-e2e] [--ac247-takeover --takeover-root <dir>] [--ac248-adr-flip --target-root <dir>] [--selfcheck] [--help] \
 #       [--target-launcher <l>] [--target-model <m>] [--target-auth <a>] [--driving-profiles <p>]
 #
 #   --build-root <repo> 该次验证【自己】从 <repo> 的 develop-tip 现 build quay+quay-native tgz
@@ -120,6 +120,15 @@
 #                    + 退出非 0（缺值≠合格；⛔ 不写 driver_alive=0 的记录）。liveness 一律读载体
 #                    （`quay driver status --json`），⛔ 不从 `driver start` 的退出码或 ps 进程表派生。
 #   --takeover-root <path>  被接管项目根（目标机上的绝对路径；须已存在 .quay/config.yml，⛔ 非本仓库）。
+#   --ac248-adr-flip  ⑨ AC-248（GOAL-016）：把【目标项目自己的】ADR 检查器在一个真实实现的
+#                    parent 修订与实现修订上的**检出行为**读成一对读数（before / after），
+#                    翻转方向必须是 false → true。⛔ 检查器的判定不由 quay 拥有：两个读数都由
+#                    【目标项目自己的】checker 产生（其命令原文 = 该项目 package.json 的 check:adr），
+#                    quay 只搬运读数（⛔ 不在 quay 侧写任何「等价」的 ADR 判定——那会变成自己给自己打分）。
+#                    两次运行只差【修复本身】：两个修订都用 `git archive` 物化到独立临时路径再跑，
+#                    ⛔ 不改活树、不靠 stash 往返。任一件读不出 ⇒ ⛔ 不写记录 + 可区分
+#                    NOT-EVALUATED + 退出非 0（未测量 ≠ 不合格；⛔ 不写 adr_check_after_detects=false）。
+#   --target-root <path>  被取证项目根（目标机上的绝对路径；须已存在 .quay/config.yml，⛔ 非本仓库）。
 #   --help           用法在前、退出 0、无副作用（gap-scripts-sprawl 约定）。
 
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
@@ -374,6 +383,45 @@ AC247_POLL_SECS="${AC247_POLL_SECS:-120}"    # 轮询 driver 写首条载体记�
 AC247_WRITTEN_THIS_RUN=0                     # 1 = 本次运行写出了 AC-247 记录
 AC247_WRITTEN_ROOT=""                        # 写出时的 project_root
 
+# ── ⑨ AC-248（GOAL-016）：目标项目自己的 ADR 检查器的检出行为必须前后翻转 ──────────────────────
+# ⚠️ 八个字段的来源（硬规则 4b：全部在【目标机】上读，且由【目标项目自己的】检查器产生）：
+#   · adr_check_before_detects / adr_check_after_detects ← 同一个检查器在【两个修订】上的两次真实运行：
+#       before 在【实现提交的 parent】上跑，after 在【实现提交自己】上跑。两个修订都用 `git archive`
+#       物化到独立临时路径（⛔ 不改活树、⛔ 不 stash 往返）⇒ 两次运行的输入形态只差【修复本身】。
+#       「检出」= 该工具名是否进入检查器的**候选集**（它自己 scan 出来的 MCP 工具名集合）——这正是
+#       缺陷的形态：漏检的工具名从不进候选集 ⇒ 检查器输出 ADR-007: OK 与合格同形（硬规则 3b）。
+#       ⛔ 不读单次退出码：那个量今天就已经是绿的，零信息。
+#   · adr_check_probe_tool ← **差分本身**推出的工具名：after 的候选集 ∖ before 的候选集 里取一个。
+#       读不出（差集为空 = 修复没有让任何工具新进入候选集）⇒ ⛔ 不写记录。
+#   · 其余八件（host / project_root / commit_sha / commit_files / task_id / task_status / gate_events /
+#       produced_by_driver）与 AC-207 同源同读法（复用 ac207_* 通用辅助与同一组直接量）。
+# ⛔ quay 侧【不】实现任何等价的 ADR 判定：候选集与运行输出都由目标项目自己的检查器产生。
+AC248_ADR_FLIP=0                             # 1 = --ac248-adr-flip 触发（opt-in）
+AC248_ROOT=""                                # --target-root：被取证项目根（目标机上，⛔ 非本仓库）
+AC248_HOST=""
+AC248_PROJECT_ROOT=""
+AC248_TASK_ID=""
+AC248_COMMIT_SHA=""
+AC248_COMMIT_FILES_JSON=""
+AC248_TASK_STATUS=""
+AC248_GATE_EVENTS=-1
+AC248_PRODUCED_BY_DRIVER=0
+AC248_PRE_REV=""                             # 修复前修订（实现提交的 parent；⛔ 非字面量）
+AC248_PROBE_TOOL=""                          # 差分推出的工具名（候选集之差）
+AC248_BEFORE_DETECTS=""                      # "false"/"true"/""（空 = 未读出）
+AC248_AFTER_DETECTS=""
+AC248_BEFORE_TOOLS_JSON=""                   # before 修订上的完整候选集（原始读数留档）
+AC248_AFTER_TOOLS_JSON=""                    # after 修订上的完整候选集
+AC248_BEFORE_CLI=""                          # before 修订上检查器 CLI 的 stdout+stderr 原文
+AC248_AFTER_CLI=""                           # after 修订上检查器 CLI 的 stdout+stderr 原文
+AC248_CLI_SOURCE=""                          # 上面两条读数用的命令形态（目标项目 package.json 的 check:adr 脚本体）
+AC248_BEFORE_CLI_RC=""                       # 两次检查器运行的退出码（⛔ 诊断留档量，不是判据字段）
+AC248_AFTER_CLI_RC=""
+AC248_TASK_ID_ARG=""                         # --task-id：被取证任务（⛔ 不猜、不取最新一条）
+AC248_EVALUATED=0                            # 1 = 全部读数成立并已写出记录
+AC248_WRITTEN_THIS_RUN=0                     # 1 = 本次运行写出了 AC-248 记录
+AC248_WRITTEN_ROOT=""
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --tgz) QUAY_TGZ="$2"; shift 2 ;;
@@ -409,6 +457,9 @@ while [ $# -gt 0 ]; do
     --upgrade-source) UPGRADE_SOURCE="$2"; shift 2 ;;
     --ac247-takeover) AC247_TAKEOVER=1; shift ;;
     --takeover-root) AC247_ROOT="$2"; shift 2 ;;
+    --ac248-adr-flip) AC248_ADR_FLIP=1; shift ;;
+    --target-root) AC248_ROOT="$2"; shift 2 ;;
+    --task-id) AC248_TASK_ID_ARG="$2"; shift 2 ;;
     --selfcheck) DO_SELFCHECK=1; shift ;;
     *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -1778,6 +1829,303 @@ step_ac247_takeover() {
   else
     echo "  [⑧f] AC247-NOT-EVALUATED: record NOT written (缺值≠合格):$why" >&2
     echo "        ⛔ 特别是没有写出 driver_alive=0 的记录：那会把「没查成」伪装成「查过且不合格」（硬规则 3b）" >&2
+  fi
+  return 0
+}
+
+# ── ⑨ AC-248 直接量读取（全部在【目标机】上读，硬规则 4b：外部可核，⛔ 不自报）──────────────────
+# 下面几个小函数各自【只做一件事】，且都被 step_ac248_adr_flip 与 --selfcheck 同时驱动——
+# ⛔ 不让夹具复刻一遍读数逻辑（硬规则 4 推论三：只能被夹具复刻满足的判据不算被测）。
+# ⛔ 更关键的一条：**quay 侧不拥有 ADR 判定**。候选集与检查器输出一律由【目标项目自己的】
+#    `scripts/check-adr.ts` 产生；quay 只做「取两个修订 → 调它的函数 → 求差集」这三件搬运工的事。
+#    任何形如「quay 自己写一段正则判这个工具合不合 ADR-007」的实现都会变成自己给自己打分（硬规则 4）。
+
+# 目标项目自己的检查器脚本（相对项目根）。⛔ 不硬编码绝对路径：路径随项目而定，这里是相对量。
+ac248_checker_relpath() { printf '%s\n' 'scripts/check-adr.ts'; }
+
+# 把某个修订物化到独立临时路径（Plan 逐字要求：`git worktree add` / `git archive` 物化，
+# ⛔ 不改活树、⛔ 不靠 `git stash` 往返——stash 往返会污染活树且失败面与判据无关）。
+# 物化后【必须】看到 checker 本体，否则算读不出（返回 1）：物化"成功"但缺输入 = 读不懂，
+# ⛔ 不得与「跑出了结果」同形（硬规则 3b）。
+ac248_materialize_rev() {
+  local root="$1" rev="$2" dest="$3" rel
+  [ -n "$root" ] && [ -n "$rev" ] && [ -n "$dest" ] || return 1
+  rm -rf "$dest"
+  mkdir -p "$dest" || return 1
+  git -C "$root" archive --format=tar "$rev" 2>/dev/null | tar -x -C "$dest" 2>/dev/null || return 1
+  rel="$(ac248_checker_relpath)"
+  [ -f "$dest/$rel" ] || return 1
+  return 0
+}
+
+# 目标项目自己的检查器 CLI 跑一次（该项目的 npm script `check:adr` 正文逐字就是这一条 node 命令）。
+# cwd = 物化树 ⇒ 读的是【该修订】的输入。运行输出落到 $2.stdout / $2.stderr，命令形态写到 $2.source。
+# ⛔ 不走 `npm run`：物化树里没有 node_modules，npm 的间接层只引入与该判据无关的失败面；
+#    脚本体本身即那一条命令，把它逐字记进 source 字段（读数因此可被独立复算）。
+# ⛔ 退出码在这里【只是留档的诊断量】，⛔ 不是判据字段——本 AC 的靶子缺陷正是「exit 0 与合格同形」。
+ac248_run_checker_cli() {
+  local tree="$1" outp="$2" rc=0
+  if ( cd "$tree" && "$VC_NODE" --no-warnings --experimental-strip-types scripts/check-adr.ts ) \
+       >"$outp.stdout" 2>"$outp.stderr"; then rc=0; else rc=$?; fi
+  printf '%s\n' 'node --experimental-strip-types scripts/check-adr.ts' > "$outp.source"
+  printf '%s\n' "$rc"
+}
+
+# 检查器【自己的】候选集 = 它 scan 出来的 MCP 工具名集合。
+# ⛔ quay 侧不重新实现 ADR-007 的扫描：直接调用目标项目检查器脚本里那个【决定候选集的导出函数】
+#    （`check-adr.ts` 的 `extractMcpToolNames`），读数即该函数的返回值——这就是「谁的判定谁拥有」。
+# 读不出（脚本缺 / 该导出不存在 / 模块加载失败 / 输出不是 JSON 数组）⇒ ⛔ 不打印、返回 1
+# （硬规则 3b：读不懂 ≠ 合格，也 ≠ 空集——空集会让差集算法安静地少算一个工具）。
+ac248_candidate_set() {
+  local tree="$1" rel out
+  rel="$(ac248_checker_relpath)"
+  [ -n "$tree" ] && [ -f "$tree/$rel" ] || return 1
+  out="$( AC248_CHECKER="$tree/$rel" "$VC_NODE" --no-warnings --experimental-strip-types \
+            --input-type=module -e '
+    const m = await import(process.env.AC248_CHECKER);
+    if (typeof m.extractMcpToolNames !== "function") process.exit(3);
+    process.stdout.write(JSON.stringify(m.extractMcpToolNames()));
+  ' 2>/dev/null )" || return 1
+  printf '%s' "$out" | "$VC_NODE" --no-warnings -e '
+    let s = "";
+    process.stdin.on("data", d => s += d).on("end", () => {
+      try { const j = JSON.parse(s);
+            if (!Array.isArray(j)) process.exit(1);
+            process.stdout.write(JSON.stringify(j)); process.exit(0); } catch {}
+      process.exit(1);
+    });' || return 1
+}
+
+# JSON 布尔字面量的【取值集合校验】（fail-closed）：criterion 用 `is False` / `is True`，
+# 故 0 / 1 / "false" / "true"（带引号的字符串）/ 空 / 缺字段 / null 全都取不到真 ⇒ 一律拒收。
+# ⛔ 本函数只【校验调用方传来的读数】，⛔ 不产生任何值、更不是「字段默认值」。
+ac248_json_bool_ok() { [ "$1" = true ] || [ "$1" = false ]; }
+
+# 翻转方向判据：只接受 false → true。⛔ 反向（true → false）不是「翻转」而是「修坏了」，
+# 必须拒收（Plan 负控制 a：反向 ⇒ 零记录）。字面量只出现在这两个判定助手里，
+# `write_ac248_record` 体内因此不含任何字面量默认值（AC2 的 grep 判据就钉在这里）。
+ac248_flip_is_forward() { [ "$1" = false ] && [ "$2" = true ]; }
+
+# produced_by_driver 的取值校验（契约同 AC-207/AC-239：只有 JSON 字面量 true 才算「出自 driver 的产出」）。
+# ⛔ 单独成函数是为了让 `write_ac248_record` 体内【不含任何 true/false 字面量】——AC2 要求写入路径上
+# 不存在硬编码默认值；字面量只允许出现在判定助手里（自检 `ac248-writer-literal-hits=0` 钉住这一点）。
+ac248_produced_by_driver_ok() { [ "$1" = true ]; }
+
+# ── ⑨ AC-248 翻转读数（git 树 in → 三个直接量 out）─────────────────────────────────────────
+# 入参 $1 = 项目根、$2 = 实现提交 sha、$3 = 临时工作目录（调用方负责清理）。
+# 产出（全部由【目标项目自己的】检查器产生，⛔ 无一个字面量）：
+#   AC248_PRE_REV            = <sha>^（修复前修订 = 实现提交的 parent）
+#   AC248_BEFORE_TOOLS_JSON / AC248_AFTER_TOOLS_JSON = 两个修订上的候选集原文（原始读数留档）
+#   AC248_BEFORE_CLI_RC / AC248_AFTER_CLI_RC / AC248_BEFORE_CLI / AC248_AFTER_CLI / AC248_CLI_SOURCE
+#                            = 两次检查器运行的退出码与 stdout+stderr 原文（「这两条布尔来自真实读数」的证据）
+#   AC248_PROBE_TOOL         = after 候选集 ∖ before 候选集 里取一个（排序后第一个 ⇒ 确定、可复算）
+#   AC248_BEFORE_DETECTS / AC248_AFTER_DETECTS = 探针【是否在各自候选集里】的两个读数
+# ⛔ 恒返回 0：读不出体现在取值为空，由调用方走 fail-closed 分支留下可区分痕迹
+#    （set -e 下中途 return 非 0 会让脚本静静死掉，那与「没跑」同形）。
+ac248_adr_flip_reading() {
+  local root="$1" sha="$2" tmp="$3" pre_t post_t
+  AC248_PRE_REV=""; AC248_BEFORE_TOOLS_JSON=""; AC248_AFTER_TOOLS_JSON=""
+  AC248_PROBE_TOOL=""; AC248_BEFORE_DETECTS=""; AC248_AFTER_DETECTS=""
+  AC248_BEFORE_CLI=""; AC248_AFTER_CLI=""; AC248_CLI_SOURCE=""
+  AC248_BEFORE_CLI_RC=""; AC248_AFTER_CLI_RC=""
+  [ -n "$root" ] && [ -n "$sha" ] && [ -n "$tmp" ] || return 0
+  pre_t="$tmp/pre"; post_t="$tmp/post"
+  AC248_PRE_REV="$(git -C "$root" rev-parse --verify --quiet "${sha}^" 2>/dev/null || true)"
+  [ -n "$AC248_PRE_REV" ] || return 0
+  mkdir -p "$tmp" || return 0
+  ac248_materialize_rev "$root" "$AC248_PRE_REV" "$pre_t" || return 0
+  ac248_materialize_rev "$root" "$sha" "$post_t" || return 0
+  AC248_BEFORE_TOOLS_JSON="$(ac248_candidate_set "$pre_t" || true)"
+  AC248_AFTER_TOOLS_JSON="$(ac248_candidate_set "$post_t" || true)"
+  AC248_BEFORE_CLI_RC="$(ac248_run_checker_cli "$pre_t" "$tmp/before" || true)"
+  AC248_AFTER_CLI_RC="$(ac248_run_checker_cli "$post_t" "$tmp/after" || true)"
+  AC248_CLI_SOURCE="$(cat "$tmp/before.source" 2>/dev/null || true)"
+  AC248_BEFORE_CLI="$(cat "$tmp/before.stdout" "$tmp/before.stderr" 2>/dev/null || true)"
+  AC248_AFTER_CLI="$(cat "$tmp/after.stdout" "$tmp/after.stderr" 2>/dev/null || true)"
+  [ -n "$AC248_BEFORE_TOOLS_JSON" ] && [ -n "$AC248_AFTER_TOOLS_JSON" ] || return 0
+  # 差分：新进入候选集的工具名（确定化：排序后取第一个）。
+  AC248_PROBE_TOOL="$(AC248_B="$AC248_BEFORE_TOOLS_JSON" AC248_A="$AC248_AFTER_TOOLS_JSON" python3 -c '
+import json, os
+b = set(json.loads(os.environ["AC248_B"])); a = set(json.loads(os.environ["AC248_A"]))
+new = sorted(a - b)
+print(new[0] if new else "")
+' 2>/dev/null || true)"
+  [ -n "$AC248_PROBE_TOOL" ] || return 0
+  AC248_BEFORE_DETECTS="$(AC248_S="$AC248_BEFORE_TOOLS_JSON" AC248_P="$AC248_PROBE_TOOL" python3 -c '
+import json, os
+print("true" if os.environ["AC248_P"] in set(json.loads(os.environ["AC248_S"])) else "false")
+' 2>/dev/null || true)"
+  AC248_AFTER_DETECTS="$(AC248_S="$AC248_AFTER_TOOLS_JSON" AC248_P="$AC248_PROBE_TOOL" python3 -c '
+import json, os
+print("true" if os.environ["AC248_P"] in set(json.loads(os.environ["AC248_S"])) else "false")
+' 2>/dev/null || true)"
+  return 0
+}
+
+# ── ⑨ AC-248 八件直接量读取（与 AC-207 同源同读法；复用【AC 编号无关的】通用辅助）──────────────
+# ⛔ 不复刻 ac207_select_implementation_commit / ac207_commit_files / ac207_files_to_json——复刻出来的绿
+#    不证明产品绿（硬规则 4 推论三）；⛔ 也不借用 AC207_* 变量，否则两条 AC 无法分别 pass/fail。
+probe_ac248_measures() {
+  local root="$1" task_id="$2" qrl="$3" status_json _ac248_files tmp
+  AC248_EVALUATED=0
+  AC248_COMMIT_SHA=""; AC248_COMMIT_FILES_JSON=""; AC248_TASK_STATUS=""
+  AC248_GATE_EVENTS=-1; AC248_PRODUCED_BY_DRIVER=0
+  AC248_PRE_REV=""; AC248_PROBE_TOOL=""; AC248_BEFORE_DETECTS=""; AC248_AFTER_DETECTS=""
+  [ -n "$root" ] || return 0
+  [ -n "$task_id" ] || return 0
+  # commit_sha / commit_files：与 AC-207 同一读法（按位置排除记账提交与机械前缀）。
+  AC248_COMMIT_SHA="$(ac207_select_implementation_commit "$root" || true)"
+  if [ -n "$AC248_COMMIT_SHA" ]; then
+    mapfile -t _ac248_files < <(ac207_commit_files "$root" "$AC248_COMMIT_SHA")
+    AC248_COMMIT_FILES_JSON="$(ac207_files_to_json "${_ac248_files[@]}")"
+  fi
+  status_json="$( (cd "$root" && node "$qrl" task view "$task_id" --json) 2>/dev/null || true)"
+  AC248_TASK_STATUS="$(printf '%s' "$status_json" | "$VC_NODE" --no-warnings -e '
+    let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{ try{ const j=JSON.parse(s); console.log(j && j.status ? String(j.status) : ""); }catch{ console.log(""); } });
+  ' 2>/dev/null)"
+  if [ -f "$root/.quay/gate-events.jsonl" ]; then
+    AC248_GATE_EVENTS="$(wc -l < "$root/.quay/gate-events.jsonl" 2>/dev/null | tr -d ' ' || echo 0)"
+  else
+    AC248_GATE_EVENTS=0
+  fi
+  if [ "$AC248_TASK_STATUS" = "done" ] && [ "$AC248_GATE_EVENTS" -gt 0 ] 2>/dev/null && [ -n "$AC248_COMMIT_SHA" ]; then
+    local ac248_branches ac248_subjects
+    ac248_branches="$(git -C "$root" branch --list "task/$task_id" 2>/dev/null || true)"
+    ac248_subjects="$(git -C "$root" log --all --format='%s' 2>/dev/null || true)"
+    case "$ac248_branches" in *"task/$task_id"*) AC248_PRODUCED_BY_DRIVER=1 ;; esac
+    case "$ac248_subjects" in *"$task_id"*) AC248_PRODUCED_BY_DRIVER=1 ;; esac
+  fi
+  tmp="$(mktemp -d 2>/dev/null || true)"
+  if [ -n "$tmp" ]; then
+    ac248_adr_flip_reading "$root" "$AC248_COMMIT_SHA" "$tmp"
+    rm -rf "$tmp"
+  fi
+  AC248_EVALUATED=1
+}
+
+# ── ⑨ AC-248 记录写（fail-closed，硬规则 3b）──────────────────────────────────────────────
+# 经 ac89_append_goal009 统一补 top-level build_sha/ts（AC-214 唯一补锚 choke point）——⛔ 本函数体内
+# 不出现 `build_sha` 字面量，也【不出现 adr_check_* 三个字段的字面量默认值】：两个布尔必须原样来自
+# ac248_adr_flip_reading 的两次真实读数（`$before` / `$after` 不加引号地写进 JSON ⇒ JSON 布尔），
+# probe tool 必须来自候选集差集。任一无效 ⇒ 不写、return 1（缺值≠合格，也≠静默跳过）。
+write_ac248_record() {
+  local host="$1" project_root="$2" commit_sha="$3" task_id="$4" task_status="$5" gate_events="$6"
+  local produced_by_driver="$7" commit_files_json="${8:-}" before="${9:-}" after="${10:-}"
+  local probe="${11:-}" extras_json="${12:-}"
+  [ -n "$host" ] || return 1
+  [ -n "$project_root" ] || return 1
+  [ -n "$commit_sha" ] || return 1
+  [ -n "$task_id" ] || return 1
+  [ "$task_status" = "done" ] || return 1
+  [ "$gate_events" -gt 0 ] 2>/dev/null || return 1
+  ac248_produced_by_driver_ok "$produced_by_driver" || return 1
+  [ -n "$commit_files_json" ] || return 1
+  ac248_json_bool_ok "$before" || return 1
+  ac248_json_bool_ok "$after" || return 1
+  ac248_flip_is_forward "$before" "$after" || return 1
+  [ -n "$probe" ] || return 1
+  # 记账自证（按位置，与 AC-207/AC-239 同一判定）：文件列表必须至少含一条【不在 tasks/goals/.quay
+  # 之下】的路径——否则「只翻了状态、没有实现」会被写成一次「能让外部判据翻转的修复」。
+  printf '%s' "$commit_files_json" | "$VC_NODE" --no-warnings -e '
+    let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
+      let f; try { f=JSON.parse(s); } catch { process.exit(1); }
+      if (!Array.isArray(f) || f.length===0) process.exit(1);
+      process.exit(f.some(p => !/^(tasks|goals|\.quay)\//.test(String(p))) ? 0 : 1);
+    });' || return 1
+  ac89_append_goal009 ",\"ac\":\"GOAL-016-AC-248\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"commit_sha\":\"$commit_sha\",\"commit_files\":$commit_files_json,\"task_id\":\"$task_id\",\"task_status\":\"$task_status\",\"gate_events\":$gate_events,\"produced_by_driver\":$produced_by_driver,\"adr_check_before_detects\":$before,\"adr_check_after_detects\":$after,\"adr_check_probe_tool\":\"$probe\"${extras_json}"
+}
+
+# ── ⑨ AC-248 步骤（GOAL-016-AC-248）──────────────────────────────────────────────────────
+# 顺序固定：① 读八件（与 AC-207 同源）→ ② 由实现提交推出 pre 修订 → ③ 两个修订各自物化到独立临时
+# 路径 → ④ 各跑一次目标项目自己的检查器（候选集 + CLI 原文）→ ⑤ 求差集得 probe tool → ⑥ 十一件
+# 全部有效才写记录；任缺 ⇒ ⛔ 不写 + 可区分 NOT-EVALUATED + 退出非 0。
+# ⛔ 不产生记录的那些形态各自留一行可区分的痕迹（尤其「差集为空」= 修复没有让任何工具新进入候选集
+#    ⇒ 无探针 ⇒ 无记录），⛔ 不退化成写一条 adr_check_after_detects=false 的记录充数。
+step_ac248_adr_flip() {
+  local root="$1" qrl extras ok=1 why=""
+  qrl="${STEP1_PREFIX}/bin/quay"
+  qrl="$(readlink -f "$qrl" 2>/dev/null || echo "$qrl")"
+  echo "== ⑨ AC-248 adr-check flip: the target project's OWN checker must newly see a tool it used to miss =="
+  if [ "$AC248_ADR_FLIP" != "1" ]; then
+    echo "  not-evaluated: --ac248-adr-flip 未传入（未尝试 ≠ 不合格）"
+    return 0
+  fi
+  if [ -z "$root" ] || [ ! -d "$root" ]; then
+    echo "  not-evaluated: --target-root 不是目录: ${root:-<empty>}" >&2
+    return 0
+  fi
+  if [ ! -f "$root/.quay/config.yml" ]; then
+    echo "  not-evaluated: $root 下没有 .quay/config.yml —— 本步骤测的是【被 quay 驱动的存量项目】，不是新装" >&2
+    return 0
+  fi
+  if [ -z "${AC248_TASK_ID_ARG:-}" ]; then
+    echo "  not-evaluated: --task-id 未传入 ⇒ 不知道该读哪条任务的产出（⛔ 不猜、不取最新一条）" >&2
+    return 0
+  fi
+  AC248_ROOT="$root"
+  AC248_HOST="$(hostname 2>/dev/null || echo '')"
+  AC248_PROJECT_ROOT="$(cd "$root" && pwd -P)"
+  AC248_TASK_ID="$AC248_TASK_ID_ARG"
+  echo "  [⑨] host=$AC248_HOST project_root=$AC248_PROJECT_ROOT task_id=$AC248_TASK_ID"
+  probe_ac248_measures "$root" "$AC248_TASK_ID" "$qrl"
+
+  echo "  [⑨a] 八件（与 AC-207 同源）: task_status=${AC248_TASK_STATUS:-<unreadable>} commit_sha=${AC248_COMMIT_SHA:0:12} gate_events=$AC248_GATE_EVENTS produced_by_driver=$AC248_PRODUCED_BY_DRIVER"
+  echo "  [⑨a] commit_files=$AC248_COMMIT_FILES_JSON"
+  echo "  [⑨b] 修复前修订 pre_rev=${AC248_PRE_REV:0:12} (= 实现提交的 parent)"
+  echo "  [⑨c] before 候选集（目标项目自己的检查器在 pre 修订上 scan 出的工具名，${#AC248_BEFORE_TOOLS_JSON} 字节）: $AC248_BEFORE_TOOLS_JSON"
+  echo "  [⑨c] after  候选集（同一检查器在实现提交上）                                            : $AC248_AFTER_TOOLS_JSON"
+  echo "  [⑨d] 检查器 CLI（${AC248_CLI_SOURCE:-<unreadable>}）: before rc=${AC248_BEFORE_CLI_RC:-<unreadable>} after rc=${AC248_AFTER_CLI_RC:-<unreadable>}"
+  echo "  [⑨d] before stdout+stderr 原文:"; printf '%s\n' "${AC248_BEFORE_CLI:-<unreadable>}" | sed 's/^/        | /'
+  echo "  [⑨d] after  stdout+stderr 原文:"; printf '%s\n' "${AC248_AFTER_CLI:-<unreadable>}" | sed 's/^/        | /'
+  echo "  [⑨e] probe_tool=${AC248_PROBE_TOOL:-<none>} before_detects=${AC248_BEFORE_DETECTS:-<unreadable>} after_detects=${AC248_AFTER_DETECTS:-<unreadable>}"
+
+  # ⑨f 判定 —— 十一件读数全部有效才写。每一项各自打印（⛔ 不静默跳过任何一项）。
+  [ -n "$AC248_HOST" ] || { ok=0; why="$why host-empty;"; }
+  [ -n "$AC248_PROJECT_ROOT" ] || { ok=0; why="$why project-root-empty;"; }
+  [ -n "$AC248_TASK_ID" ] || { ok=0; why="$why task-id-empty;"; }
+  [ "$AC248_TASK_STATUS" = "done" ] || { ok=0; why="$why task-not-done(${AC248_TASK_STATUS:-<unreadable>});"; }
+  [ "$AC248_GATE_EVENTS" -gt 0 ] 2>/dev/null || { ok=0; why="$why gate-events-not-positive($AC248_GATE_EVENTS);"; }
+  [ "$AC248_PRODUCED_BY_DRIVER" = "1" ] || { ok=0; why="$why not-produced-by-driver;"; }
+  [ -n "$AC248_COMMIT_SHA" ] || { ok=0; why="$why no-implementation-commit;"; }
+  [ -n "$AC248_PRE_REV" ] || { ok=0; why="$why pre-rev-unreadable;"; }
+  [ -n "$AC248_PROBE_TOOL" ] || { ok=0; why="$why no-probe-tool(候选集差集为空——修复没让任何工具新进入候选集，或某一侧候选集读不出);"; }
+  ac248_json_bool_ok "$AC248_BEFORE_DETECTS" || { ok=0; why="$why before-detects-unreadable;"; }
+  ac248_json_bool_ok "$AC248_AFTER_DETECTS" || { ok=0; why="$why after-detects-unreadable;"; }
+  ac248_flip_is_forward "$AC248_BEFORE_DETECTS" "$AC248_AFTER_DETECTS" \
+    || { ok=0; why="$why flip-not-forward(before=${AC248_BEFORE_DETECTS:-<unreadable>},after=${AC248_AFTER_DETECTS:-<unreadable>});"; }
+
+  if [ "$ok" = "1" ]; then
+    # 附加留档字段（⛔ 非判据）：两次候选集原文 / 两次检查器运行原文与退出码 / 命令形态 / pre 修订。
+    # 经 python3 组 JSON（⛔ 不拼字符串）：运行原文含换行与引号，手拼必产生非法 JSON。
+    extras="$(AC248_PRE="$AC248_PRE_REV" AC248_B="$AC248_BEFORE_TOOLS_JSON" AC248_A="$AC248_AFTER_TOOLS_JSON" \
+              AC248_SRC="$AC248_CLI_SOURCE" AC248_BRC="$AC248_BEFORE_CLI_RC" AC248_ARC="$AC248_AFTER_CLI_RC" \
+              AC248_BC="$AC248_BEFORE_CLI" AC248_AC="$AC248_AFTER_CLI" python3 -c '
+import json, os
+def cut(s, n=4000):
+    return s if len(s) <= n else s[:n] + "\n…[truncated]"
+e = [("adr_check_pre_rev", os.environ["AC248_PRE"]),
+     ("adr_check_before_tools", json.loads(os.environ["AC248_B"] or "[]")),
+     ("adr_check_after_tools", json.loads(os.environ["AC248_A"] or "[]")),
+     ("adr_check_checker_command", os.environ["AC248_SRC"]),
+     ("adr_check_before_cli_rc", os.environ["AC248_BRC"]),
+     ("adr_check_after_cli_rc", os.environ["AC248_ARC"]),
+     ("adr_check_before_cli", cut(os.environ["AC248_BC"])),
+     ("adr_check_after_cli", cut(os.environ["AC248_AC"]))]
+print("," + ",".join(json.dumps(k) + ":" + json.dumps(v) for k, v in e))
+' 2>/dev/null || true)"
+    if write_ac248_record "$AC248_HOST" "$AC248_PROJECT_ROOT" "$AC248_COMMIT_SHA" "$AC248_TASK_ID" \
+         "done" "$AC248_GATE_EVENTS" "true" "$AC248_COMMIT_FILES_JSON" \
+         "$AC248_BEFORE_DETECTS" "$AC248_AFTER_DETECTS" "$AC248_PROBE_TOOL" "$extras"; then
+      AC248_EVALUATED=1
+      AC248_WRITTEN_THIS_RUN=1
+      AC248_WRITTEN_ROOT="$AC248_PROJECT_ROOT"
+      echo "  [⑨f] ac248 record written → $AC89 ✓ (probe_tool=$AC248_PROBE_TOOL before=$AC248_BEFORE_DETECTS after=$AC248_AFTER_DETECTS pre_rev=${AC248_PRE_REV:0:12} commit_sha=${AC248_COMMIT_SHA:0:12})"
+    else
+      echo "  [⑨f] AC248-NOT-EVALUATED: record NOT written (fail-closed: BUILD_SHA missing/non-40-hex 或 AC89 路径空 或 记账提交/字段无效 —— 缺值≠合格)" >&2
+    fi
+  else
+    echo "  [⑨f] AC248-NOT-EVALUATED: record NOT written (缺值≠合格):$why" >&2
+    echo "        ⛔ 特别是没有写出 adr_check_after_detects=false 的记录：那会把「没查成」伪装成「查过且未翻转」（硬规则 3b）" >&2
   fi
   return 0
 }
@@ -3912,11 +4260,126 @@ AC247NEG
   echo "selfcheck: ac247-task-store-count(61 via real node stub) ok=$ac247_cnt_ok head/stale-unreadable-checks=$ac247_cnt_neg_ok (expect 1/0 — 同一读法读 JSON 数组长度; 非 JSON/空 ⇒ 不打印且非 0)"
   echo "selfcheck: ac247-liveness-source(from-AC203_DRIVER_ALIVE)=$ac247_alive_src status-read-hits=$ac247_status_hits bad-assign-hits=$ac247_bad_assign (expect 1/>=1/0 — ⛔ 不从 driver start 退出码派生, 且 status 读取点必须在函数体内)"
 
+  # control 51/52/53/54 (AC-248 翻转读数的正/负控制, GOAL-016 —— 本轮新增):
+  # ⛔ 全部直接驱动【产品函数】（ac248_adr_flip_reading / write_ac248_record），⛔ 不让夹具复刻一遍判定
+  #    逻辑（硬规则 4 推论三）。夹具只提供【一个真的 git 仓库 + 一个真的、会翻转的检查器脚本】——
+  #    这两样是「输入形态」，不是判定逻辑本身。
+  # 51 正控制：一个真的 git 仓库里，修复提交让检查器多看见一个工具（候选集 1 → 2）⇒
+  #    ac248_adr_flip_reading 必须读出 probe=<新工具名> / before=false / after=true，且 write_ac248_record
+  #    必须写出 1 条记录、三个 adr_check_* 字段逐字落行、两个布尔是【JSON 布尔】而不是字符串/数字。
+  # 52 负控制（能取假，逐项）：反转方向 / 0-1 / 字符串 "false"/"true" / 缺字段 / 记账提交 / 空 probe ⇒
+  #    零记录 + 返回值非 0（每一项各测一次）。
+  # 53 无修复 ⇒ 差集为空 ⇒ 无 probe ⇒ 零记录（「修复没让任何工具新进入候选集」不得被写成一条记录）。
+  # 54 结构性：write_ac248_record 体内不得出现 `true`/`false` 字面量（AC2：写入路径无硬编码默认值）；
+  #    且 AC-248 段落【不】含任何 ADR-007 判定实现（AC3：正确性判据不由 quay 拥有）——非注释行里
+  #    `adr-ok` / `ADR-007` 命中数必须为 0，而调用目标项目检查器导出的那一处必须在位。
+  local ac248_tmp ac248_w ac248_ok=0 ac248_neg_ok=1 ac248_neg_list="" ac248_probe="" ac248_bd="" ac248_ad=""
+  local ac248_noop_lines="" ac248_false_hits=0 ac248_adr007_hits=0 ac248_export_hits=0 ac248_step_calls=0
+  ac248_tmp="$(mktemp -d 2>/dev/null)" || ac248_tmp=""
+  if [ -n "$ac248_tmp" ]; then
+    local ac248_repo="$ac248_tmp/repo"
+    mkdir -p "$ac248_repo/scripts"
+    git -C "$ac248_repo" init -q -b main >/dev/null 2>&1
+    git -C "$ac248_repo" config user.email t@t >/dev/null 2>&1
+    git -C "$ac248_repo" config user.name t >/dev/null 2>&1
+    # 修复【前】：检查器看不见以注释开头的工具声明（这正是被复现的真实缺陷形态的最小化）。
+    cat > "$ac248_repo/scripts/check-adr.ts" <<'AC248CHK1'
+export function extractMcpToolNames(): string[] { return ["tool_seen"]; }
+AC248CHK1
+    git -C "$ac248_repo" add -A >/dev/null 2>&1
+    git -C "$ac248_repo" commit -qm "base" >/dev/null 2>&1
+    # 修复【后】：同一检查器多看见一个工具（候选集 1 → 2）。⛔ 夹具只造输入形态，不判定对错。
+    cat > "$ac248_repo/scripts/check-adr.ts" <<'AC248CHK2'
+export function extractMcpToolNames(): string[] { return ["tool_seen", "tool_newly_seen"]; }
+AC248CHK2
+    git -C "$ac248_repo" add -A >/dev/null 2>&1
+    git -C "$ac248_repo" commit -qm "fix: checker now sees the comment-prefixed tool declaration" >/dev/null 2>&1
+    local ac248_sha ac248_base
+    ac248_sha="$(git -C "$ac248_repo" rev-parse HEAD 2>/dev/null || true)"
+    ac248_base="$(git -C "$ac248_repo" rev-parse HEAD~1 2>/dev/null || true)"
+    ac248_adr_flip_reading "$ac248_repo" "$ac248_sha" "$ac248_tmp/rt"
+    ac248_probe="$AC248_PROBE_TOOL"; ac248_bd="$AC248_BEFORE_DETECTS"; ac248_ad="$AC248_AFTER_DETECTS"
+    [ "$ac248_probe" = "tool_newly_seen" ] && [ "$ac248_bd" = "false" ] && [ "$ac248_ad" = "true" ] && ac248_ok=1
+    # 51b 产品写入器：正控制 ⇒ 恰一条记录，三个字段逐字（两个布尔必须是 JSON 布尔裸值）
+    AC89="$ac248_tmp/carrier.jsonl"; BUILD_SHA="0123456789abcdef0123456789abcdef01234567"; TS="2026-09-12T00:00:00Z"
+    write_ac248_record "hostX-arm" "/home/other/archguard" "0123456789abcdef0123456789abcdef01234567" "TASK-88" "done" "3" "true" \
+      '["src/cli/mcp/tools/metric-trend-tools.ts"]' "$ac248_bd" "$ac248_ad" "$ac248_probe" >/dev/null 2>&1
+    ac248_w="$(grep -c 'GOAL-016-AC-248' "$ac248_tmp/carrier.jsonl" 2>/dev/null || true)"
+    for f in '"host":"hostX-arm"' '"project_root":"/home/other/archguard"' '"task_id":"TASK-88"' '"task_status":"done"' '"gate_events":3' '"produced_by_driver":true' '"adr_check_before_detects":false' '"adr_check_after_detects":true' '"adr_check_probe_tool":"tool_newly_seen"'; do
+      grep -qF -- "$f" "$ac248_tmp/carrier.jsonl" 2>/dev/null || ac248_neg_list="$ac248_neg_list $f"
+    done
+    # 反向控制（可证伪）：把读到的方向反过来 ⇒ 同一条记录必须写不出来
+    if write_ac248_record "hostX-arm" "/home/other/archguard" "0123456789abcdef0123456789abcdef01234567" "TASK-88" "done" "3" "true" \
+         '["src/a.ts"]' "$ac248_ad" "$ac248_bd" "$ac248_probe" >/dev/null 2>&1; then ac248_ok=0; fi
+    rm -f "$ac248_tmp/carrier.jsonl"
+    [ "$ac248_w" = "1" ] && [ -z "$ac248_neg_list" ] && write_ac248_record "hostX-arm" "/home/other/archguard" "0123456789abcdef0123456789abcdef01234567" "TASK-88" "done" "3" "true" '["src/a.ts"]' "$ac248_bd" "$ac248_ad" "$ac248_probe" >/dev/null 2>&1
+    ac248_after51b="$(grep -c 'GOAL-016-AC-248' "$ac248_tmp/carrier.jsonl" 2>/dev/null || true)"
+    [ "$ac248_after51b" = "1" ] || ac248_ok=0
+    # 52 负控制（逐项，here-doc 驱动【产品函数本身】）：任一件读不出/不合规 ⇒ 零记录。
+    while IFS='|' read -r n_host n_root n_sha n_tid n_st n_ge n_pbd n_cf n_before n_after n_probe; do
+      [ -n "${n_host}${n_root}${n_sha}${n_tid}${n_st}${n_ge}${n_pbd}${n_cf}${n_before}${n_after}${n_probe}" ] || continue
+      case "$n_host" in '@'*) n_host="" ;; esac
+      case "$n_root" in '@'*) n_root="" ;; esac
+      case "$n_sha" in '@'*) n_sha="" ;; esac
+      case "$n_tid" in '@'*) n_tid="" ;; esac
+      case "$n_cf" in '@'*) n_cf="" ;; esac
+      case "$n_before" in '@'*) n_before="" ;; esac
+      case "$n_after" in '@'*) n_after="" ;; esac
+      case "$n_probe" in '@'*) n_probe="" ;; esac
+      write_ac248_record "$n_host" "$n_root" "$n_sha" "$n_tid" "$n_st" "$n_ge" "$n_pbd" "$n_cf" \
+        "$n_before" "$n_after" "$n_probe" >/dev/null 2>&1 && ac248_neg_ok=0
+    done <<'AC248NEG'
+@|/p|0123456789abcdef0123456789abcdef01234567|T-1|done|3|true|["src/a.ts"]|false|true|tool_x
+hostX|@|0123456789abcdef0123456789abcdef01234567|T-1|done|3|true|["src/a.ts"]|false|true|tool_x
+hostX|/p|@|T-1|done|3|true|["src/a.ts"]|false|true|tool_x
+hostX|/p|0123456789abcdef0123456789abcdef01234567|@|done|3|true|["src/a.ts"]|false|true|tool_x
+hostX|/p|0123456789abcdef0123456789abcdef01234567|T-1|todo|3|true|["src/a.ts"]|false|true|tool_x
+hostX|/p|0123456789abcdef0123456789abcdef01234567|T-1|done|0|true|["src/a.ts"]|false|true|tool_x
+hostX|/p|0123456789abcdef0123456789abcdef01234567|T-1|done|3|false|["src/a.ts"]|false|true|tool_x
+hostX|/p|0123456789abcdef0123456789abcdef01234567|T-1|done|3|true|@|false|true|tool_x
+hostX|/p|0123456789abcdef0123456789abcdef01234567|T-1|done|3|true|["tasks/a.md","goals/b.md"]|false|true|tool_x
+hostX|/p|0123456789abcdef0123456789abcdef01234567|T-1|done|3|true|["src/a.ts"]|true|false|tool_x
+hostX|/p|0123456789abcdef0123456789abcdef01234567|T-1|done|3|true|["src/a.ts"]|0|1|tool_x
+hostX|/p|0123456789abcdef0123456789abcdef01234567|T-1|done|3|true|["src/a.ts"]|"false"|"true"|tool_x
+hostX|/p|0123456789abcdef0123456789abcdef01234567|T-1|done|3|true|["src/a.ts"]|false|true|@
+AC248NEG
+    # 53 无修复（差集为空）⇒ 无 probe ⇒ 零记录：把读取点指向 base 提交（两边输入相同）
+    ac248_adr_flip_reading "$ac248_repo" "$ac248_base" "$ac248_tmp/rt2"
+    ac248_noop_lines="$(wc -l < "$ac248_tmp/carrier.jsonl" 2>/dev/null | tr -d ' ' || echo 0)"
+    if [ -n "$AC248_PROBE_TOOL" ]; then ac248_neg_ok=0; fi
+    write_ac248_record "hostX-arm" "/home/other/archguard" "0123456789abcdef0123456789abcdef01234567" "TASK-88" "done" "3" "true" \
+      '["src/a.ts"]' "$AC248_BEFORE_DETECTS" "$AC248_AFTER_DETECTS" "$AC248_PROBE_TOOL" >/dev/null 2>&1 && ac248_neg_ok=0
+    ac248_after53="$(grep -c 'GOAL-016-AC-248' "$ac248_tmp/carrier.jsonl" 2>/dev/null || true)"
+    [ "$ac248_after53" = "1" ] || ac248_neg_ok=0
+    # 54 结构性
+    local ac248_body ac248_seg
+    ac248_body="$(sed -n '/^write_ac248_record()/,/^}$/p' "$0" 2>/dev/null | sed 's/#.*//')"
+    ac248_false_hits="$(printf '%s\n' "$ac248_body" | grep -cE '(^|[^_a-zA-Z])(true|false)([^_a-zA-Z]|$)' || true)"
+    # AC3：AC-248 段落（⑨ 的函数体）非注释行里不得出现任何 ADR-007 判定面（`adr-ok` 豁免词 / ADR-007 判定）；
+    # 而「调用目标项目检查器导出的枚举函数」那一处必须在位（可证伪：删掉它 ⇒ 命中 0）。
+    ac248_seg="$(sed -n '/^ac248_checker_relpath()/,/^# ── ① 安装/p' "$0" 2>/dev/null | sed 's/#.*//')"
+    ac248_adr007_hits="$(printf '%s\n' "$ac248_seg" | grep -cE 'adr-ok|ADR-007' || true)"
+    ac248_export_hits="$(printf '%s\n' "$ac248_seg" | grep -c 'extractMcpToolNames' || true)"
+    # 生成侧（硬规则 ② 按位置）：⑨ 的函数体必须【调用】翻转读数函数——把读取点挪出函数体（或删掉）即取假
+    ac248_step_calls="$(sed -n '/^step_ac248_adr_flip()/,/^}$/p' "$0" 2>/dev/null | sed 's/#.*//' | grep -c 'ac248_adr_flip_reading\|probe_ac248_measures' || true)"
+    rm -rf "$ac248_tmp"
+  else
+    ac248_ok=0
+  fi
+  echo "selfcheck: ac248-flip-reading(hermetic 2-commit checker) probe='${ac248_probe}' before='${ac248_bd}' after='${ac248_ad}' ok=$ac248_ok missing='${ac248_neg_list}' (expect tool_newly_seen/false/true/1/'' — 读数与写入都由产品函数产生)"
+  echo "selfcheck: ac248-refusal(13 negative specs) negatives_all_refused=$ac248_neg_ok (expect 1 — 反转/0-1/字符串/缺件/记账提交/空探针 ⇒ 零记录)"
+  echo "selfcheck: ac248-noop-fix(差集为空) carrier_lines=${ac248_noop_lines:-<n/a>} (expect 1 — 只有 51b 那一条; 无修复 ⇒ 无 probe ⇒ 不新增记录)"
+  echo "selfcheck: ac248-writer-literal-hits=$ac248_false_hits adr007-in-producer-hits=$ac248_adr007_hits checker-export-hits=$ac248_export_hits step-call-hits=$ac248_step_calls (expect 0/0/>=1/>=1 — 写入点无字面量默认值; quay 不拥有 ADR 判定; 调用与读取点都在函数体内)"
+
   if [ "$d1" = "1" ] && [ "$d2" = "no" ] && [ "$a1" = "1" ] && [ "$a2" = "yes" ] \
      && [ "$ac247_ok" = "1" ] && [ "$ac247_neg_ok" = "1" ] && [ "$ac247_cnt_ok" = "1" ] \
      && [ "$ac247_cnt_neg_ok" = "0" ] && [ "$ac247_alive_src" = "1" ] \
      && [ "${ac247_status_hits:-0}" -ge 1 ] 2>/dev/null && [ "${ac247_bad_assign:-0}" = "0" ] \
      && [ "${ac247_anchor_hits:-0}" = "0" ] \
+     && [ "$ac248_ok" = "1" ] && [ "$ac248_neg_ok" = "1" ] \
+     && [ "${ac248_false_hits:-1}" = "0" ] && [ "${ac248_adr007_hits:-1}" = "0" ] \
+     && [ "${ac248_export_hits:-0}" -ge 1 ] 2>/dev/null && [ "${ac248_step_calls:-0}" -ge 1 ] 2>/dev/null \
+     && [ "${ac248_noop_lines:-0}" = "1" ] \
      && [ "$bl_ok" = "1" ] && [ "$bmw_fail" = "0" ] \
      && [ "$c3_e" = "1" ] && [ "$c3_ok" = "1" ] \
      && [ "$c4_e" = "1" ] && [ "$c4_ok" = "0" ] \
@@ -3963,7 +4426,7 @@ AC247NEG
      && [ "$fn_v_neg" = "0" ] && [ "$fn_w_neg" = "0" ] \
      && [ "$bl_ok" = "1" ] \
      && [ "$tp_ok" = "1" ]; then
-    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed); AC-204 carrier record writes the five criterion fields verbatim (forbidden_count=0 integer, enable_declared=true literal) and refuses a forbidden-copy or no-enable record (fail-closed, 成对判定); AC-205 carrier record writes the three criterion fields verbatim (shipped_from_installed_artifact=true + transcript_confirmed=true literals, top-level build_sha) with transcript_confirmed derived from transcript-delivery-check reading the transcript (hit ⇒ delivered / miss ⇒ not) — never from a send exit code — and refuses shipped=false / transcript_confirmed=false / empty-host (fail-closed, AC4 负控制); AC-234 render counts are derived from rendered HTML content (task/goal anchors + round-row anchors — never an HTTP status code, AC2) and can take false (empty-shell page ⇒ 0/0/0); the AC-234 carrier record writes the six criterion fields verbatim (tasks_rendered/goals_rendered/round_records_rendered as JSON integers) and refuses a zero-count or empty-host record (fail-closed, AC4 负控制); the AC-232 carrier record writes the three criterion fields verbatim (goal_write_ok/goal_read_back_ok as JSON literals, goal_records as a JSON integer) with a top-level build_sha anchor, truthfully writes false/0 when the goal write fails or read-back is empty (缺件如实非静默, AC4 负控制 — 写调用 0 与空文件同形), and refuses an empty-host record (fail-closed, 硬规则 3b); AC-207 carrier record writes the eight criterion fields verbatim (produced_by_driver=true literal, gate_events>0, task_status=done, commit_sha/task_id non-empty, commit_files non-empty JSON array with ≥1 path outside the tasks/ goals/ .quay/ triplet, top-level build_sha) and refuses produced_by_driver=false / gate_events=0 / bookkeeping-files-only / no-files (fail-closed, 硬规则 3b); AC-207 implementation-commit SELECTION picks the real implementation commit even when newer bookkeeping commits sit on top of it (the old grep-v-chore-quay-init-then-head-1 form picked the 翻-done commit — gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit), yields empty + non-zero when only bookkeeping commits exist (⇒ no record, never a bookkeeping commit dressed up as one), and the bookkeeping judgment is positional (touched files, not commit-message text); AC-240 run-level closure self-evidence takes three DISTINGUISHABLE values (1 = AC-203 and AC-207 both written by THIS run for the SAME project_root; 0 = this run attempted the e2e but the closure is not self-evidenced, with a non-empty NOTE naming the sub-reason; not-evaluated = --ac207-e2e not passed — 未评估 ≠ 不合格, 硬规则 3b), where 0 also covers the origin defect's own shape (AC-207 written, AC-203 never probed in step⑤) and the both-written-but-different-roots case (the pairing is on the SAME project_root, not on both being non-empty), and the AC-203 generation-side probe/write call is POSITIONALLY inside step5_e2e's body (0 before this task — the same-run pairing existed only as an accident, never as a requirement); segment ① (step1_install, the delivery-install path) leaves the operator's real ~/.claude/settings.json BYTE-IDENTICAL (HOME isolated to \${PREFIX}.home + QUAY_SKIP_PLUGIN_CLI=1 — the CLI materialization that re-reddened AC-161), with the isolated HOME proven to have received the postinstall write (so the green is not a not-run vacuity), and that assertion can take FALSE (isolation target pointed back at the real HOME ⇒ signature changes); and the AC-239 landing-baseline pre-flight classifier takes every value (REUSED⇒compatible / ADOPTED⇒divergent / BLOCKED⇒divergent / CREATED⇒absent / no-line-or-rc≠0⇒unreadable) — so a target copy whose 'develop' is a foreign fork stops ⑦b with an attributable 5-second reading instead of an hour-long poll whose non-done end state is indistinguishable from a worker that failed to implement (gap-aged-project-post-upgrade-driver-e2e 本轮新增); and the AC-247 takeover producer writes its eight criterion fields verbatim (host / project_root / pre_task_count / post_task_count / stale_days / driver_alive / carrier_records, plus the top-level build_sha coming from the ONE anchor choke point — the writer's own body carries no second anchor literal) and refuses EVERY one of them when it cannot be read (including stale_days one thousandth below the 14-day boundary, while 14.000 itself is accepted — so the threshold is neither always-true nor always-false), takes its liveness reading from the SAME status carrier the AC-203 parser reads and never from \`driver start\`'s exit code (negative control: swapping the right-hand side to the start rc flips the predicate), counts the project's OWN task store through its own ABI with ONE implementation read at both moments (a non-JSON or empty CLI reply is NOT a zero — it prints nothing and returns non-zero), and derives stale_days from the HEAD commit time captured BEFORE the takeover action (GOAL-016 AC-247 本轮新增)"
+    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed); AC-204 carrier record writes the five criterion fields verbatim (forbidden_count=0 integer, enable_declared=true literal) and refuses a forbidden-copy or no-enable record (fail-closed, 成对判定); AC-205 carrier record writes the three criterion fields verbatim (shipped_from_installed_artifact=true + transcript_confirmed=true literals, top-level build_sha) with transcript_confirmed derived from transcript-delivery-check reading the transcript (hit ⇒ delivered / miss ⇒ not) — never from a send exit code — and refuses shipped=false / transcript_confirmed=false / empty-host (fail-closed, AC4 负控制); AC-234 render counts are derived from rendered HTML content (task/goal anchors + round-row anchors — never an HTTP status code, AC2) and can take false (empty-shell page ⇒ 0/0/0); the AC-234 carrier record writes the six criterion fields verbatim (tasks_rendered/goals_rendered/round_records_rendered as JSON integers) and refuses a zero-count or empty-host record (fail-closed, AC4 负控制); the AC-232 carrier record writes the three criterion fields verbatim (goal_write_ok/goal_read_back_ok as JSON literals, goal_records as a JSON integer) with a top-level build_sha anchor, truthfully writes false/0 when the goal write fails or read-back is empty (缺件如实非静默, AC4 负控制 — 写调用 0 与空文件同形), and refuses an empty-host record (fail-closed, 硬规则 3b); AC-207 carrier record writes the eight criterion fields verbatim (produced_by_driver=true literal, gate_events>0, task_status=done, commit_sha/task_id non-empty, commit_files non-empty JSON array with ≥1 path outside the tasks/ goals/ .quay/ triplet, top-level build_sha) and refuses produced_by_driver=false / gate_events=0 / bookkeeping-files-only / no-files (fail-closed, 硬规则 3b); AC-207 implementation-commit SELECTION picks the real implementation commit even when newer bookkeeping commits sit on top of it (the old grep-v-chore-quay-init-then-head-1 form picked the 翻-done commit — gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit), yields empty + non-zero when only bookkeeping commits exist (⇒ no record, never a bookkeeping commit dressed up as one), and the bookkeeping judgment is positional (touched files, not commit-message text); AC-240 run-level closure self-evidence takes three DISTINGUISHABLE values (1 = AC-203 and AC-207 both written by THIS run for the SAME project_root; 0 = this run attempted the e2e but the closure is not self-evidenced, with a non-empty NOTE naming the sub-reason; not-evaluated = --ac207-e2e not passed — 未评估 ≠ 不合格, 硬规则 3b), where 0 also covers the origin defect's own shape (AC-207 written, AC-203 never probed in step⑤) and the both-written-but-different-roots case (the pairing is on the SAME project_root, not on both being non-empty), and the AC-203 generation-side probe/write call is POSITIONALLY inside step5_e2e's body (0 before this task — the same-run pairing existed only as an accident, never as a requirement); segment ① (step1_install, the delivery-install path) leaves the operator's real ~/.claude/settings.json BYTE-IDENTICAL (HOME isolated to \${PREFIX}.home + QUAY_SKIP_PLUGIN_CLI=1 — the CLI materialization that re-reddened AC-161), with the isolated HOME proven to have received the postinstall write (so the green is not a not-run vacuity), and that assertion can take FALSE (isolation target pointed back at the real HOME ⇒ signature changes); and the AC-239 landing-baseline pre-flight classifier takes every value (REUSED⇒compatible / ADOPTED⇒divergent / BLOCKED⇒divergent / CREATED⇒absent / no-line-or-rc≠0⇒unreadable) — so a target copy whose 'develop' is a foreign fork stops ⑦b with an attributable 5-second reading instead of an hour-long poll whose non-done end state is indistinguishable from a worker that failed to implement (gap-aged-project-post-upgrade-driver-e2e 本轮新增); and the AC-247 takeover producer writes its eight criterion fields verbatim (host / project_root / pre_task_count / post_task_count / stale_days / driver_alive / carrier_records, plus the top-level build_sha coming from the ONE anchor choke point — the writer's own body carries no second anchor literal) and refuses EVERY one of them when it cannot be read (including stale_days one thousandth below the 14-day boundary, while 14.000 itself is accepted — so the threshold is neither always-true nor always-false), takes its liveness reading from the SAME status carrier the AC-203 parser reads and never from \`driver start\`'s exit code (negative control: swapping the right-hand side to the start rc flips the predicate), counts the project's OWN task store through its own ABI with ONE implementation read at both moments (a non-JSON or empty CLI reply is NOT a zero — it prints nothing and returns non-zero), and derives stale_days from the HEAD commit time captured BEFORE the takeover action (GOAL-016 AC-247 本轮新增); and the AC-248 adr-check producer reads a FLIP — the SAME reading (the target project's OWN checker's candidate set, taken by calling that checker's own exported enumerator, never a quay-side 「equivalent」 ADR-007 judgment) at the implementation commit's parent and at the implementation commit itself, both materialized with \`git archive\` into isolated paths so the two runs differ by the fix alone; it writes the record ONLY when the newly-entered tool name (the set difference — empty ⇒ no probe ⇒ no record) is strictly outside the before set and strictly inside the after set, refuses reversed direction / \`0\`-\`1\` / \`\"false\"\` strings / missing fields / bookkeeping-only commit_files / empty probe tool, and its writer body carries ZERO \`true\`/\`false\` literals (the booleans are the two run readings verbatim, emitted as JSON booleans; a single run's exit code is never a criterion field — that is exactly the value that is already green today and therefore carries no information) (GOAL-016 AC-248 本轮新增)"
     rc=0
   else
     echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused ac203_parse_alive=$ac203_parse_alive ac203_parse_recs=$ac203_parse_recs ac201_pos_w=$ac201_pos_w ac201_pos_ac=$ac201_pos_ac ac201_neg_w=$ac201_neg_w ac201_neg_lines=$ac201_neg_lines g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused ac204_wrote=$ac204_wrote ac204_fields_ok=$ac204_fields_ok ac204_refused_fc=$ac204_refused_fc ac204_refused_en=$ac204_refused_en ac205_tc_hit=$ac205_tc_hit ac205_tc_miss=$ac205_tc_miss ac205_wrote=$ac205_wrote ac205_fields_ok=$ac205_fields_ok ac205_ship_refused=$ac205_ship_refused ac205_conf_refused=$ac205_conf_refused ac205_host_refused=$ac205_host_refused ac234_tasks_pos=$ac234_tasks_pos ac234_goals_pos=$ac234_goals_pos ac234_rounds_pos=$ac234_rounds_pos ac234_tasks_neg=$ac234_tasks_neg ac234_goals_neg=$ac234_goals_neg ac234_rounds_neg=$ac234_rounds_neg ac234_wrote=$ac234_wrote ac234_fields_ok=$ac234_fields_ok ac234_refused_zc=$ac234_refused_zc ac234_refused_em=$ac234_refused_em ac232_wrote=$ac232_wrote ac232_fields_ok=$ac232_fields_ok ac232_neg_ok=$ac232_neg_ok ac232_refused=$ac232_refused ac207_wrote=$ac207_wrote ac207_fields_ok=$ac207_fields_ok ac207_refused_pdb=$ac207_refused_pdb ac207_refused_ge=$ac207_refused_ge ac207_refused_bkfiles=$ac207_refused_bkfiles ac207_refused_nofiles=$ac207_refused_nofiles ac207_sel_rc=$ac207_sel_rc ac207_only_rc=$ac207_only_rc ac207_bk_tasks_only=$ac207_bk_tasks_only ac207_impl_marker=$ac207_impl_marker ac207_before=$ac207_before ac207_after_neg=$ac207_after_neg ac207_neg_trace=$ac207_neg_trace ac207_after_pos=$ac207_after_pos ac207_pipe_grep=$ac207_pipe_grep ac240_v1=$ac240_v1 ac240_v0=$ac240_v0 ac240_vdiff=$ac240_vdiff ac240_vne=$ac240_vne ac240_step5_hits=$ac240_step5_hits fn_v_pos=$fn_v_pos fn_w_pos=$fn_w_pos fn_iso_written=$fn_iso_written fn_sent_same=$fn_sent_same fn_v_neg=$fn_v_neg fn_w_neg=$fn_w_neg tp_ok=$tp_ok tp_pos_status=$tp_pos_status tp_pos_launcher=$tp_pos_launcher tp_pos_model=$tp_pos_model tp_pos_auth=$tp_pos_auth tp_neg_status=$tp_neg_status tp_neg_rc=$tp_neg_rc tp_ovr_launcher=$tp_ovr_launcher tp_ovr_model=$tp_ovr_model tp_ovr_auth=$tp_ovr_auth tp_res1=$tp_res1 tp_res2=$tp_res2 bl_ok=$bl_ok bl_reused=$bl_reused bl_adopted=$bl_adopted bl_blocked=$bl_blocked bl_created=$bl_created bl_noline=$bl_noline bl_badrc=$bl_badrc"
@@ -4039,6 +4502,11 @@ else
     # 本质不同的路径：那条的 $ROOT 是一次性靶子，本条的被接管项目【本来就带着真实存量与旧历史】）。
     # 本分支只跑 ⑧（它自己在门口读 pre、起 driver、读 status、重读 post），⛔ 不跑冷启动/驱动活性段。
     step_ac247_takeover "$AC247_ROOT"
+  elif [ "$AC248_ADR_FLIP" = 1 ]; then
+    # ── AC-248（GOAL-016）：目标项目自己的 ADR 检查器的检出行为必须前后翻转。与 ⑧ 同形：只跑 ⑨
+    # （它自己读八件、物化两个修订、各跑一次检查器、求差集），⛔ 不跑冷启动/驱动活性段，也 ⛔ 不驱动
+    # 任何任务——被取证的那条任务是由【目标项目自己的 drivers】驱动出来的，本步骤只读它的产物。
+    step_ac248_adr_flip "$AC248_ROOT"
   elif [ "$CHANNEL" = "marketplace" ]; then
     # marketplace 通道 = step① 安装路径验证（register-plugin.mjs 注册）；②③ 是 loop 活性验证
     # （npm-global/AC88 的关切），marketplace 通道不跑 ②③ —— register 失败也能写出记录（AC5），
@@ -4093,6 +4561,14 @@ elif [ "$AC247_TAKEOVER" = 1 ]; then
   # 「任缺 ⇒ 不写 + 打印可区分的 NOT-EVALUATED + 退出非 0」，故非 ok 即 fail（⛔ 不降级成 not-live，
   # 那会让一个没产出的运行看起来与「产出但没达标」同形）。
   if [ "$STEP1_OK" = 1 ] && [ "$AC247_EVALUATED" = 1 ]; then
+    AC88_VERIFY=ok
+  else
+    AC88_VERIFY=fail
+  fi
+elif [ "$AC248_ADR_FLIP" = 1 ]; then
+  # AC-248 判定：与 ⑧ 同一条纪律——安装段成功 ∧ 十一件读数全成立并已写出记录。AC248_EVALUATED=0 是
+  # 「未评估」（缺值），但本条两者都【不是 ok】（Plan 逐字：任缺 ⇒ 不写 + 可区分 NOT-EVALUATED + 退出非 0）。
+  if [ "$STEP1_OK" = 1 ] && [ "$AC248_EVALUATED" = 1 ]; then
     AC88_VERIFY=ok
   else
     AC88_VERIFY=fail
@@ -4174,6 +4650,13 @@ echo "AC247_PS_STALE_PROCS=$AC247_PS_STALE_PROCS (⛔ 进程表代理量, 仅供
 echo "AC247_DRIVER_START_RC=${AC247_DRIVER_START_RC:-<none>} (⛔ 诊断量, 不是 liveness 读数)"
 echo "AC247_USER_INSTALL_PRE=$AC247_USER_INSTALL_PRE (absent|present|not-evaluated —— 接管前目标机 user-scope 安装读数, 三态)"
 echo "AC247_WRITTEN_THIS_RUN=$AC247_WRITTEN_THIS_RUN AC247_WRITTEN_ROOT=${AC247_WRITTEN_ROOT:-<none>}"
+# AC-248 留档（十一件读数与两个布尔；⛔ 两个布尔原样来自两次真实运行，不是本行的字面量）。
+echo "AC248_EVALUATED=$AC248_EVALUATED (1 = 十一件读数全成立并已写出 ac=GOAL-016-AC-248 记录；0 = 未评估 ≠ 不合格——硬规则 3b)"
+echo "AC248_HOST=${AC248_HOST:-<none>} AC248_PROJECT_ROOT=${AC248_PROJECT_ROOT:-<none>} AC248_TASK_ID=${AC248_TASK_ID:-<none>}"
+echo "AC248_COMMIT_SHA=${AC248_COMMIT_SHA:-<none>} AC248_PRE_REV=${AC248_PRE_REV:-<none>} (= 实现提交的 parent)"
+echo "AC248_PROBE_TOOL=${AC248_PROBE_TOOL:-<none>} AC248_BEFORE_DETECTS=${AC248_BEFORE_DETECTS:-<unreadable>} AC248_AFTER_DETECTS=${AC248_AFTER_DETECTS:-<unreadable>} (⛔ 来自目标项目自己的检查器两次真实运行，不是本脚本的判定)"
+echo "AC248_CLI_SOURCE=${AC248_CLI_SOURCE:-<unreadable>} AC248_BEFORE_CLI_RC=${AC248_BEFORE_CLI_RC:-<unreadable>} AC248_AFTER_CLI_RC=${AC248_AFTER_CLI_RC:-<unreadable>} (⛔ 退出码只是留档诊断量, 不是判据字段——本 AC 的靶子缺陷正是 exit 0 与合格同形)"
+echo "AC248_WRITTEN_THIS_RUN=$AC248_WRITTEN_THIS_RUN AC248_WRITTEN_ROOT=${AC248_WRITTEN_ROOT:-<none>}"
 echo "AC88_VERIFY=$AC88_VERIFY"
 echo "AC238_EVALUATED=$AC238_EVALUATED (1 = 四件读数全成立并已写记录；0 = 未评估 ≠ 不合格——硬规则 3b)"
 echo "AC238_PROJECT_ROOT=${AC238_PROJECT_ROOT:-<none>}"

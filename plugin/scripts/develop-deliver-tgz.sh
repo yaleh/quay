@@ -120,6 +120,22 @@
 #                  ac ⇒ NOT-EVALUATED (transport success ≠ production success); missing/zero-line
 #                  evidence ⇒ NOT-EVALUATED + carrier unchanged; plus a positional control that both
 #                  the transport and the completeness call sit inside verify_takeover_mode's body.
+#     --verify-adr-flip --target-root <abs-path-on-remote> --task-id <id>   GOAL-016-AC-248: the SAME
+#                  transport, but the remote script runs --ac248-adr-flip against a project that quay
+#                  ITSELF drove (a task in that project went to done through its own drivers). Only the
+#                  ac=GOAL-016-AC-248 record is transported + dedup-appended; a host that produces no
+#                  such record ⇒ NOT-EVALUATED + exit 1. ⛔ --target-root must be ABSOLUTE on the remote
+#                  (a relative path silently resolves against the remote $HOME ⇒ a DIFFERENT project).
+#                  ⛔ --task-id is required (guessing "the newest task" is exactly the AC-207 defect).
+#                  ⛔ this mode never DRIVES anything: the evidenced fix was driven out by that project's
+#                  own drivers; this mode only reads its product.
+#     --selfcheck-adrflip-transport  hermetic controls of that transport (offline, no build/scp/ssh):
+#                  AC-248 evidence ⇒ appended + COMPLETE (exit 0); evidence carrying only a DIFFERENT
+#                  ac ⇒ NOT-EVALUATED; missing/zero-line evidence ⇒ NOT-EVALUATED + carrier unchanged;
+#                  a JSON-BOOL SHAPE control (the two adr_check_*_detects fields must satisfy the
+#                  criterion's `is False` / `is True`; `0`/`1` and `"false"`/`"true"` impostors must
+#                  BOTH fail); plus a positional control that both the transport and the completeness
+#                  call sit inside verify_adr_flip_mode's body.
 #
 # Host table (B/C node paths verified 2026-08-11 by outer ssh probes):
 #   B = orangevps.wan.hwang.men   node: ~/.nvm/versions/node/v22.23.1/bin (also v25.2.0)
@@ -145,6 +161,9 @@ ac207_e2e=0       # 1 = also run the GOAL-009-AC-207 end-to-end step on each hos
 ac239_e2e=0       # 1 = with --verify-upgrade: ALSO drive a NEW real defect-fix task to done in the upgraded copy (GOAL-009-AC-239)
 verify_takeover=0 # 1 = GOAL-016-AC-247: take over a ≥14-day-STALLED legacy project ON the host and transport only its AC-247 record
 takeover_root=""  # --takeover-root: ABSOLUTE path (on the remote host) of the stalled project to take over
+verify_adr_flip=0 # 1 = GOAL-016-AC-248: read the target project's OWN adr-checker flip on the host and transport only its AC-248 record
+adr_flip_root=""  # --target-root: ABSOLUTE path (on the remote host) of the quay-driven project being evidenced
+adr_flip_task=""  # --task-id: the task IN THAT PROJECT whose driven-out fix the record is about
 selfcheck_evidence=0
 selfcheck_evidence_scenario="both"
 selfcheck_evidence_completeness=0
@@ -152,6 +171,7 @@ selfcheck_e2e_pairing=0   # 1 = hermetic controls of check_e2e_pairing (AC-240 �
 selfcheck_upgrade_pairing=0  # 1 = hermetic controls of check_upgrade_pairing (AC-239 传输侧同源判定)
 selfcheck_transport_closure_flag=0  # 1 = hermetic closure controls of the shipped set (AC1..AC4)
 selfcheck_takeover_transport_flag=0 # 1 = hermetic controls of the AC-247 transport (GOAL-016)
+selfcheck_adrflip_transport_flag=0  # 1 = hermetic controls of the AC-248 transport (GOAL-016)
 while [ $# -gt 0 ]; do
   case "$1" in
     --root) repo_root="$2"; shift 2 ;;
@@ -167,6 +187,9 @@ while [ $# -gt 0 ]; do
     --ac239-e2e) ac239_e2e=1; shift ;;
     --verify-takeover) verify_takeover=1; shift ;;
     --takeover-root) takeover_root="$2"; shift 2 ;;
+    --verify-adr-flip) verify_adr_flip=1; shift ;;
+    --target-root) adr_flip_root="$2"; shift 2 ;;
+    --task-id) adr_flip_task="$2"; shift 2 ;;
     --selfcheck-evidence)
       selfcheck_evidence=1
       case "${2:-}" in positive|negative|both) selfcheck_evidence_scenario="$2"; shift 2 ;; *) shift ;; esac
@@ -176,6 +199,7 @@ while [ $# -gt 0 ]; do
     --selfcheck-upgrade-pairing) selfcheck_upgrade_pairing=1; shift ;;
     --selfcheck-transport-closure) selfcheck_transport_closure_flag=1; shift ;;
     --selfcheck-takeover-transport) selfcheck_takeover_transport_flag=1; shift ;;
+    --selfcheck-adrflip-transport) selfcheck_adrflip_transport_flag=1; shift ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -1120,6 +1144,117 @@ if [ "${selfcheck_takeover_transport_flag}" -eq 1 ]; then
   exit $?
 fi
 
+# ── selfcheck_adrflip_transport — hermetic controls of the AC-248 transport of verify_adr_flip_mode ──
+# 与 selfcheck_takeover_transport 同形（同一条纪律、同一组原语），⛔ 不复刻一份判定逻辑：
+#   ① 正控制：evidence 里有 ac=GOAL-016-AC-248 ⇒ transport 追加进载体 + 声明集合 [GOAL-016-AC-248]
+#      ⇒ COMPLETE（exit 0），且载体里真的多了那一行。
+#   ② 负控制（★传输成功★ 不得被读成 ★产出成功★）：evidence 只有别的 ac ⇒ 声明集合求差 ⇒
+#      ALL-MISSING（exit 1 / NOT-EVALUATED）。
+#   ③ 负控制：evidence 缺失 / 零行 ⇒ transport 返回非 0 + NOT-EVALUATED，载体零变化。
+# 另含【结构性】控制（硬规则 ② 按位置）：verify_adr_flip_mode 的函数体里必须同时出现
+# transport_evidence_append 与 check_evidence_completeness 的调用——把任一个挪走（或删掉）此谓词即取假。
+# 再含一条 AC-248 专有的【形态】控制：运输的记录里两个 detects 字段必须是 JSON 布尔（`false`/`true`
+# 裸值），⛔ 不是 `0`/`1`、也不是 `"false"`/`"true"` 字符串——判据用 `is False`/`is True`，
+# 这两种冒充形态都取不到真；本控制【故意各造一条】证明它真的能取假（⛔ 不是只断言「好输入能过」）。
+selfcheck_adrflip_transport() {
+  local tmp rc=0 carrier ev out n hits bad_bad bad_str
+  tmp="$(mktemp -d 2>/dev/null)" || { echo "selfcheck-adrflip-transport: FAIL — cannot create temp dir" >&2; return 1; }
+  carrier="${tmp}/carrier.jsonl"
+
+  # ① 正控制
+  cat > "${tmp}/ev-ac248.jsonl" <<'EVID'
+{"build_sha":"0123456789abcdef0123456789abcdef01234567","ts":"2026-09-12T00:00:00Z","ac":"GOAL-016-AC-248","host":"instance-20221019-1509","project_root":"/home/yale/work/archguard","commit_sha":"1111111111111111111111111111111111111111","commit_files":["src/cli/mcp/tools/metric-trend-tools.ts"],"task_id":"TASK-88","task_status":"done","gate_events":3,"produced_by_driver":true,"adr_check_before_detects":false,"adr_check_after_detects":true,"adr_check_probe_tool":"archguard_get_metric_trend"}
+EVID
+  if ! out="$(transport_evidence_append "${carrier}" "${tmp}/ev-ac248.jsonl")"; then rc=1; fi
+  echo "selfcheck-adrflip-transport: positive append → ${out}"
+  printf '%s' "${out}" | grep -q 'appended=1' || rc=1
+  n="$(grep -c '.' "${carrier}" 2>/dev/null || true)"
+  [ -n "${n}" ] || n=0
+  [ "${n}" = "1" ] || { echo "selfcheck-adrflip-transport: positive carrier lines=${n} (expect 1)" >&2; rc=1; }
+  if check_evidence_completeness "${tmp}/ev-ac248.jsonl" "GOAL-016-AC-248"; then
+    echo "selfcheck-adrflip-transport: positive completeness → COMPLETE (exit 0)"
+  else
+    echo "selfcheck-adrflip-transport: positive completeness FAIL — declared ac set present but not judged COMPLETE" >&2; rc=1
+  fi
+
+  # ② 负控制：只有别的 ac ⇒ 传输会追加，但声明集合求差必须判 NOT-EVALUATED
+  cat > "${tmp}/ev-other.jsonl" <<'EVID'
+{"build_sha":"0123456789abcdef0123456789abcdef01234567","ts":"2026-09-12T00:00:01Z","ac":"GOAL-016-AC-247","host":"instance-20221019-1509","project_root":"/home/yale/work/archguard"}
+EVID
+  transport_evidence_append "${carrier}" "${tmp}/ev-other.jsonl" >/dev/null 2>&1 || true
+  if check_evidence_completeness "${tmp}/ev-other.jsonl" "GOAL-016-AC-248" >/dev/null 2>&1; then
+    echo "selfcheck-adrflip-transport: negative(other-ac) FAIL — a run that produced the WRONG record was judged complete" >&2; rc=1
+  else
+    echo "selfcheck-adrflip-transport: negative(other-ac) → NOT-EVALUATED (exit non-zero, as required — transport success ≠ production success)"
+  fi
+
+  # ③ 负控制：缺失 / 零行证据
+  if transport_evidence_append "${carrier}" "${tmp}/missing.jsonl" >/dev/null 2>&1; then
+    echo "selfcheck-adrflip-transport: negative(missing) FAIL — returned success" >&2; rc=1
+  fi
+  : > "${tmp}/empty.jsonl"
+  if transport_evidence_append "${carrier}" "${tmp}/empty.jsonl" >/dev/null 2>&1; then
+    echo "selfcheck-adrflip-transport: negative(zero-lines) FAIL — returned success" >&2; rc=1
+  fi
+  echo "selfcheck-adrflip-transport: negative(missing/zero-lines) → NOT-EVALUATED (exit non-zero, as required)"
+
+  # ④ AC-248 专有：两个 detects 字段的【JSON 布尔形态】。用 python 按判据的同一谓词读（`is False`/`is True`），
+  #    正样本必须过，两条冒充样本（0/1 与字符串）必须【各自】不过 ⇒ 这个谓词不是恒真的。
+  bad_bad="$(python3 - "${carrier}" <<'PY'
+import json, sys
+ok = False
+for line in open(sys.argv[1], encoding="utf-8"):
+    if not line.strip():
+        continue
+    r = json.loads(line)
+    if r.get("ac") != "GOAL-016-AC-248":
+        continue
+    ok = (r.get("adr_check_before_detects") is False and r.get("adr_check_after_detects") is True
+          and bool(r.get("adr_check_probe_tool")))
+print("1" if ok else "0")
+PY
+)"
+  bad_str="$(python3 - "${carrier}" <<'PY'
+import json, sys
+# 冒充形态：把两个字段换成 0/1 与字符串 —— 同一个谓词必须【两种都不过】。
+bad = [dict(), dict()]
+n = 0
+for line in open(sys.argv[1], encoding="utf-8"):
+    if not line.strip():
+        continue
+    r = json.loads(line)
+    if r.get("ac") != "GOAL-016-AC-248":
+        continue
+    a = dict(r); a["adr_check_before_detects"] = 0; a["adr_check_after_detects"] = 1
+    b = dict(r); b["adr_check_before_detects"] = "false"; b["adr_check_after_detects"] = "true"
+    bad = [a, b]
+    n = 1
+def passes(r):
+    return (r.get("adr_check_before_detects") is False and r.get("adr_check_after_detects") is True
+            and bool(r.get("adr_check_probe_tool")))
+print(("0" if any(passes(r) for r in bad) else "1") if n else "0")
+PY
+)"
+  echo "selfcheck-adrflip-transport: json-bool-shape(is-False/is-True) positive=${bad_bad} impostors-refused=${bad_str} (expect 1/1 — 0-1 与字符串两种冒充都必须取不到真)"
+  [ "${bad_bad}" = "1" ] || rc=1
+  [ "${bad_str}" = "1" ] || rc=1
+
+  # 结构性控制（位置）：传输 + 完整性核对两个调用点都必须在 verify_adr_flip_mode 函数体内。
+  hits="$(sed -n '/^verify_adr_flip_mode()/,/^}$/p' "$0" 2>/dev/null | sed 's/#.*//' \
+          | grep -c 'transport_evidence_append\|check_evidence_completeness' || true)"
+  echo "selfcheck-adrflip-transport: write-points(in-verify_adr_flip_mode) hits=${hits} (expect >=2)"
+  [ "${hits:-0}" -ge 2 ] 2>/dev/null || rc=1
+
+  rm -rf "${tmp}"
+  if [ "${rc}" -eq 0 ]; then echo "selfcheck-adrflip-transport: PASS"; else echo "selfcheck-adrflip-transport: FAIL" >&2; fi
+  return "${rc}"
+}
+
+if [ "${selfcheck_adrflip_transport_flag}" -eq 1 ]; then
+  selfcheck_adrflip_transport
+  exit $?
+fi
+
 # ── selfcheck_evidence_completeness — hermetic controls of check_evidence_completeness (AC7/AC8) ──
 # 两个方向：① 「预期 6 种、实际 2 种」⇒ PARTIAL（exit 2）且逐条列出 4 个缺失 ac；② 全产出 ⇒ COMPLETE
 # （exit 0）。另含全缺 ⇒ NOT-EVALUATED（exit 1）。offline：temp dir + python3，无 build/scp/ssh。
@@ -1754,6 +1889,144 @@ REMOTE
   return 0
 }
 
+# validate_adr_flip_args — the ONE place that decides whether --target-root / --task-id are usable.
+# 与 validate_takeover_args 同一条纪律、同样在 build 之前判（⛔ 一个坏参数不该花一次 develop-tip 构建）：
+#   · --target-root 必须是【目标机上的绝对路径】：它在远端解析，相对路径会静默落到远端 $HOME ⇒
+#     被取证的是【另一个项目】，而判据侧的 host/project_root 会如实记下那个错的项目。
+#   · --task-id 必填：被取证的是【那一条被驱动到 done 的任务】的产出；让脚本去猜（或取最新一条）
+#     正是 AC-207 已经踩过的坑（「最新一条提交」= 记账提交）。
+validate_adr_flip_args() {
+  if [ -z "${adr_flip_root}" ]; then
+    echo "develop-deliver: --verify-adr-flip requires --target-root <absolute path ON the remote host of the quay-driven project>" >&2
+    return 1
+  fi
+  case "${adr_flip_root}" in
+    /*) ;;
+    *) echo "develop-deliver: --verify-adr-flip --target-root must be an ABSOLUTE path on the remote host (got: ${adr_flip_root})" >&2; return 1 ;;
+  esac
+  if [ -z "${adr_flip_task}" ]; then
+    echo "develop-deliver: --verify-adr-flip requires --task-id <the task in THAT project whose driven-out fix the record is about>" >&2
+    return 1
+  fi
+  return 0
+}
+
+# ── verify_adr_flip_mode — GOAL-016-AC-248：目标项目自己的 ADR 检查器检出行为的前后翻转 ────────────
+# 与 verify_takeover_mode 的区别：那条测「当前 build 能不能干净接管一个停摆项目」，本条测「被 quay 的
+# driver 驱动出来的那条修复，能不能让【目标项目自己的】机械检查器从看不见变看见一个工具」——
+# 正确性判据由目标项目拥有，quay 只搬运读数（⛔ 不在 quay 侧实现任何等价的 ADR-007 判定）。
+# ⛔ 本模式【不驱动】任何任务：被取证的任务是由目标项目自己的 drivers 驱动到 done 的，本模式只读产物。
+# 传输面与另两个 verify 模式同形，用的是同一组原语：ship_verify_closure / transport_evidence_append
+# （按 (ts,ac,host,project_root) 去重）/ check_evidence_completeness（声明 ac 集合求差）。
+verify_adr_flip_mode() {
+  local build_date local_carrier fail hk target remote_script out remote_rc remote_log remote_evidence evidence_local ck_rc
+  build_date="$(git -C "${repo_root}" log -1 --format=%cI refs/heads/develop 2>/dev/null || echo "")"
+  local_carrier="${repo_root}/.quay/productization-verification.jsonl"
+  echo "develop-deliver: --verify-adr-flip develop=${develop_tip:0:12} build_date=${build_date} target_root=${adr_flip_root:-<unset>} task_id=${adr_flip_task:-<unset>} carrier=${local_carrier}"
+  validate_adr_flip_args || return 2
+  # 本次运行【声明要产出】的 ac 种类（⛔ 不硬编码数字，声明的是种类本身）：只有 AC-248 一种。
+  local expected_acs="GOAL-016-AC-248"
+  fail=0
+  for hk in ${hosts}; do
+    target="${host_target[$hk]:-}"
+    if [ -z "${target}" ]; then
+      echo "develop-deliver: ${hk} — unknown host key (NOT-EVALUATED)"
+      fail=1
+      continue
+    fi
+    echo "develop-deliver: ${hk} (${target}) — scp verify-deliver-coldstart.sh + its FULL closure (\$SCRIPT_DIR siblings + node_modules deps) + SPEC + both .tgz"
+    # ⛔ 闭集的单一真相源在 transport_flat_files / transport_node_modules_deps（由
+    # --selfcheck-transport-closure 证完整）；⛔ 不在此处再抄一份清单。
+    if ! ship_verify_closure "${target}" "${quay_tgz}" "${qn_tgz}"; then
+      echo "develop-deliver: ${hk} (${target}) — scp FAILED (NOT-EVALUATED)"
+      fail=1
+      continue
+    fi
+    remote_script=$(cat <<REMOTE
+$(verify_node_export_for "${hk}")
+EV="\${HOME}/quay-verify-adrflip-evidence-${develop_tip:0:8}.jsonl"
+rm -f "\${EV}"
+bash "\${HOME}/verify-deliver-coldstart.sh" \
+  --tgz "\${HOME}/$(basename "${quay_tgz}")" \
+  --tgz-native "\${HOME}/$(basename "${qn_tgz}")" \
+  --build-sha "${develop_tip}" \
+  --build-date "${build_date}" \
+  --host "${hk}" \
+  --ac89 "\${EV}" \
+  --spec "\${HOME}/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md" \
+  --prefix "\${HOME}/quay-verify-adrflip-${develop_tip:0:8}.npm" \
+  --project "quay-verify-adrflip-${develop_tip:0:8}" \
+  --root "\${HOME}/quay-verify-adrflip-${develop_tip:0:8}-root" \
+  --ac248-adr-flip \
+  --target-root "${adr_flip_root}" \
+  --task-id "${adr_flip_task}"
+RC=\$?
+echo "VERIFY-RC \${RC}"
+if [ -f "\${EV}" ]; then
+  echo "EVIDENCE-PATH \${EV}"
+  echo "EVIDENCE-LINES \$(wc -l < "\${EV}")"
+else
+  echo "EVIDENCE-ABSENT \${EV}"
+fi
+REMOTE
+)
+    set +e
+    out="$(ssh "${ssh_opts[@]}" "${target}" "bash -s" <<< "${remote_script}" 2>&1)"
+    remote_rc=$?
+    set -e
+    remote_log="${repo_root}/.quay/verify-adrflip-remote-${hk}-${develop_tip:0:8}.log"
+    mkdir -p "$(dirname "${remote_log}")"
+    printf '%s\n' "${out}" > "${remote_log}"
+    echo "develop-deliver: ${hk} (${target}) remote stdout persisted → ${remote_log} (rc=${remote_rc})"
+    remote_evidence="$(printf '%s\n' "${out}" | grep -oE 'EVIDENCE-PATH .*' | tail -1 | sed 's/^EVIDENCE-PATH //' || echo "")"
+    if [ -z "${remote_evidence}" ]; then
+      echo "develop-deliver: ${hk} (${target}) — NOT-EVALUATED (remote produced no evidence path)"
+      printf '%s\n' "${out}" | tail -12
+      fail=1
+      continue
+    fi
+    evidence_local="${repo_root}/.quay/verify-adrflip-evidence-${hk}-${develop_tip:0:8}.jsonl"
+    rm -f "${evidence_local}"
+    if ! scp "${ssh_opts[@]}" "${target}:${remote_evidence}" "${evidence_local}" >/dev/null 2>&1; then
+      echo "develop-deliver: ${hk} (${target}) — evidence scp-back FAILED (NOT-EVALUATED)"
+      fail=1
+      continue
+    fi
+    if ! transport_evidence_append "${local_carrier}" "${evidence_local}"; then
+      echo "develop-deliver: ${hk} (${target}) — evidence NOT-EVALUATED (no transport)"
+      rm -f "${evidence_local}"
+      fail=1
+      continue
+    fi
+    # 传输成功 ≠ 产出完整（硬规则 3b 同族：一个「回传了别的东西」的成功与「产出并回传」同形）。
+    check_evidence_completeness "${evidence_local}" "${expected_acs}"
+    ck_rc=$?
+    if [ "${ck_rc}" != "0" ]; then
+      echo "develop-deliver: ${hk} (${target}) — NOT-EVALUATED (declared ac set [${expected_acs}] not present in transported evidence: rc=${ck_rc})"
+      fail=1
+    else
+      echo "develop-deliver: ${hk} (${target}) — declared ac set [${expected_acs}] transported into ${local_carrier} ✓"
+    fi
+    rm -f "${evidence_local}"
+  done
+  if [ "${fail}" -eq 1 ]; then
+    echo "develop-deliver: --verify-adr-flip FAILED (a host produced no AC-248 record — see per-host lines above)" >&2
+    return 1
+  fi
+  echo "develop-deliver: --verify-adr-flip OK — GOAL-016-AC-248 record transported into ${local_carrier}"
+  return 0
+}
+
+if [ "${verify_adr_flip}" -eq 1 ]; then
+  # ⛔ 用法错误在 build 之前判（一个坏参数必须只花一次用法错误的代价，⛔ 不是一次 develop-tip 构建）。
+  validate_adr_flip_args || exit 2
+  if ! build_develop_tgz; then
+    exit 1
+  fi
+  verify_adr_flip_mode
+  exit $?
+fi
+
 if [ "${verify_takeover}" -eq 1 ]; then
   # ⛔ 用法错误在 build 之前判（一个坏参数必须只花一次用法错误的代价，⛔ 不是一次 develop-tip 构建）。
   validate_takeover_args || exit 2
@@ -1763,7 +2036,6 @@ if [ "${verify_takeover}" -eq 1 ]; then
   verify_takeover_mode
   exit $?
 fi
-
 if [ "${verify_coldstart}" -eq 1 ]; then
   if ! build_develop_tgz; then
     exit 1
