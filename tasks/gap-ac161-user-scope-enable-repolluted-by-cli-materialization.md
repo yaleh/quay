@@ -101,6 +101,27 @@ selfcheck: step1-real-settings-guard(falsifiable,pre-fix-semantics) STEP1_HOME_I
 
 换回修复后 `node --test plugin/test/help-contract-incompatible-behaviors.test.mjs` ⇒ **4/4 pass**（`AC1 … zero .quay mtime change` 20816ms 绿），且「业务文件仍可见」那一半断言未退化。
 
+**⑦ 2026-09-12 续做轮：上次 `exited-not-landed` 的 scoped-gate 红已定位，成因在 develop 侧且已闭合（本分支无需改代码）**
+
+上次判词把失败步记成 `test-isolation-check`——**那是误读**：该检查在同一次输出里是 `PASS: all 24 violation(s) are baselined …`（24 条全在基线内），它本身是绿的。scoped-gate 的 exit 1 来自同一段输出尾部的 `plugin/test/verify-deliver-coldstart.test.mjs` 的 **AC5**：
+
+```
+✖ AC5 — every AC-214 NEED ac's write point carries a freshness anchor
+  actual: [ 'GOAL-009-AC-239: no record-producing write point found in plugin/scripts/verify-deliver-coldstart.sh' ]
+  expected: [],
+```
+
+**真因（两点对照，非推断）**：`goals/AC-214-*.md` 的 NEED 里已含 `GOAL-009-AC-239`，而**当时 develop 上还没有该 AC 的写点**——写点由 `5e92c08b4` 引入，`git merge-base --is-ancestor 5e92c08b4 f484d4414` ⇒ **NO**（f484d4414 = 17:38 那次 fan-in merge 的 tip）：
+
+```
+f484d4414（17:41 scoped-gate 跑的那个 tip）  script-AC239=0  NEED-AC239=1  ⇒ 复现该断言
+baaff8070（本轮 merge develop 之后的 tip）   script-AC239=4  NEED-AC239=1  ⇒ 绿
+```
+
+⇒ develop 上存在一段「NEED 先于写点落地」的窗口，随 `5e92c08b4` 进 develop 而闭合。本分支从未改过该脚本的 AC-239 段，⛔ **不要**在分支上补写点（那会把 develop 侧的红搬成我们的红）。
+
+**本轮独立复验（代码改动为空；仅 merge develop + 逐条重跑读数）**：AC1 `RC=0`（用户级 `enabledPlugins` 只剩 meta-cc/archguard，无 quay 键）；AC2 `RC=0`（`quay.source.path=/home/yale/work/quay/plugin`，未被后续任何安装重新污染）；AC3 `BEFORE==AFTER=5e7bc46d1809c77fc5e663730dbae0266c751880865d8ea62743dd41641ce8fb`；AC4 取假对照仍转红（`STEP1_HOME_ISOLATED=0 STEP1_REAL_SETTINGS_UNCHANGED=0` + sentinel 签名改变）；AC5 `--selfcheck` ⇒ exit 0 / `selfcheck: PASS`；AC6 `node --test plugin/test/help-contract-incompatible-behaviors.test.mjs` ⇒ **4/4 pass**；scoped 门 `scripts/test.sh --for-task … --allow-thin` ⇒ **RC=0，26/26 pass**。
+
 ## DoD
 
 真实对象被操作过、判据能取假：`~/.claude/settings.json` 被**真实编辑过并回读**——AC-161 criterion 在生产上 exit 0（直接读数，不是断言）；交付/验证路径被**真实跑过一次**而该文件 `sha256sum` 未变（AC3）；**取假对照**在修复前形态下真的转红（AC4）——三条缺一不可。AC-161 由 goal-driver 下一轮复跑后 verdict 由 fail 翻 pass（读 `.quay/goal-round.jsonl` 该 AC 的 verdict / `achievedFailing.inScope` 不再含 AC-161）。⛔ 只改仓库脚本而 `~/.claude/settings.json` 仍含 `quay@quay` ⇒ 判据仍红 ⇒ 不算达成。⛔ 只恢复状态而不堵 `step1_install` 的真实-HOME 通道 ⇒ 下一次交付验证原地复发（`gap-ac161-user-level-marketplace-only` 已经这样失败过一次）⇒ 不算达成。⛔ 反序（先删用户级再确认安装/项目级就绪）会把本机锁在「哪里都没有 quay」——按 Plan 顺序执行。
@@ -136,3 +157,4 @@ TOUCHES-DIR-GLOB-HINT: 1 directory-level tasks/*.md glob(s) — enumerate concre
 - run_id：wk-prod-1789139008
 - session_id：c889c06e-434a-4b62-8329-35b5e258b0a0
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-ac161-user-scope-enable-repolluted-by-cli-materialization-wk-prod-1789139008.log
+- ⚠️ 2026-09-12 更正：上条判词里点名的 `test-isolation-check` 是**误读**（它输出的是 `PASS`）；真正的失败是同一段输出尾部的 AC5（AC-239 写点缺失），成因在 develop 侧、已随 `5e92c08b4` 闭合——取证与两点对照见 `## 结果` ⑦。
