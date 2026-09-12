@@ -1970,8 +1970,9 @@ export interface TargetHealthReading {
    *  `goal-driver-task-boundary-check.ts` 的 Detector 3）。本 fact 只报**被驱动系统自身**的
    *  结构量：它在不在跑、它的配置形状落不落后。 */
   signals: string[];
-  /** `signals` 为空且不是 not-evaluated ⇒ healthy；非空 ⇒ unhealthy。⛔ not-evaluated 时 signals 恒 null
-   *  （「没查成」与「查过且零信号」不同形，硬规则 3b）。 */
+  /** 逐条 verdict 输入当时的**可读性**快照（两条 verdict 输入：进程表、配置形状）。⛔ not-evaluated 时恒
+   *  null（与 `signals` 同步）。它与 `cause` 冗余但**独立可得**：消费方拿到的是一条 fact 的**自描述**
+   *  ——「这个 healthy 是在两条输入都读到的情况下给的」不必反查 cause 枚举就能确认。 */
   signalScope: { livenessReadable: boolean; initStateReadable: boolean } | null;
   /** AC4：目标项目配置形状版本（quay-init 写进 `.quay/quay-init-state.json` 的 pluginVersion）与
    *  **交付物** plugin 版本（本仓 `plugin/.claude-plugin/plugin.json`，即 quay-init 写入该字段的同源）
@@ -2147,7 +2148,8 @@ export function deriveTargetHealth(
     newestRel: r.roundRecords.length > 0 ? r.roundRecords[0].rel : null,
     newestAgeSec: r.roundRecords.length > 0 ? Math.max(0, Math.round((r.nowMs - r.roundRecords[0].mtimeMs) / 1000)) : null,
   };
-  // 未评估的三种成因，按「越根本越先」排序（⛔ 都是 not-evaluated，只是可区分——硬规则 3b / cause-carrier）。
+  // 未评估的成因按「越根本越先」排序（根不在 → 关键载体缺 → 进程表读不到 → 配置形状读不到）；
+  // ⛔ 全部是 not-evaluated，只是彼此可区分（硬规则 3b / cause-carrier：读不懂不得与合格同形）。
   const missing = carriers.filter((c) => c.required && c.present !== true).map((c) => c.rel);
   if (!r.rootPresent) {
     // 根不在 ⇒ 读数按「零条 / unknown / 全 false」如实给出（⛔ 不回落到 base 的空壳：那会让「根不在」
