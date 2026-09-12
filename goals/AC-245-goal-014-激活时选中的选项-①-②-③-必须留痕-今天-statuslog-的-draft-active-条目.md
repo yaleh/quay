@@ -2,7 +2,7 @@
 id: AC-245
 title: GOAL-014 激活时选中的选项（①/②/③）必须留痕——今天 statusLog 的 draft→active 条目 reason
   为空，其退出条件②③不可判定
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-014
 criterion: >-
@@ -32,6 +32,11 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-09-12T01:30:48.384Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: not-evaluated
   reason: no judge configured
