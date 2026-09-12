@@ -1002,6 +1002,42 @@ export function createGoalStore(
         console.error(`goal-store: activated ${id} — criterion ran in ${wallMs}ms (${gateRes.ok ? "pass" : "fail"})`);
       }
 
+      // P6-goal — the GOAL half of the SAME activation gate (gap-meta-goal-store-activation-gate):
+      // the two gates above are verbatim `!isGoalRecord` (they ask about a CRITERION: can it run, can
+      // it be false), so a GOAL transitioning INTO active was checked only for body length (create)
+      // and the active cap. Nothing required it to have an AC — and on 2026-09-12T00:33:10Z GOAL-014
+      // went draft→active with ZERO AC records naming it (readings.criteria empty, goals.GOAL-014
+      // status active), violating the declared invariant 「每个活跃 GOAL 至少有一条 AC」 (AC-217:
+      // 「活跃目标无退出条件不可判定达成」) while producing no signal at all — the divergence layer
+      // only iterates over ACs that EXIST, so a goal with none is structurally invisible to it.
+      //
+      // The predicate is deliberately the SAME one the reading uses (meta-driver collectReadings):
+      // any `AC-*` record whose `goal:` names this GOAL, REGARDLESS of that AC's own status (a draft
+      // AC is a written-down exit condition — it is what makes the goal decidable; it is the
+      // not-yet-activated ACs that need the goal live, not the other way round). One invariant, one
+      // predicate — ⛔ not a second, looser copy of the rule.
+      //
+      // fail-CLOSED ⛔ never fail-open: zero ACs is a definite verdict, not an "unable to evaluate".
+      // The rejection ENUMERATES the count and the naming ids (hard rule 3: "0 ACs name this goal" is
+      // the actionable fact; a bare boolean would hide which goal was bare).
+      // ⛔ `--force` is deliberately NOT honored here (unlike the two criterion gates above): P6c's
+      // `--force` means "I know this CRITERION is not evaluable" — an override over a judgment about
+      // a criterion I hold. The AC count is not a judgment, it is a mechanical count of this store's
+      // own carrier files; there is nothing in it to override, and an override here would land
+      // exactly the silent zero-AC active goal this gate exists to make impossible.
+      if (activating && isGoalRecord) {
+        const namingAcs = list().filter((r) => String(r.id ?? "").startsWith("AC-") && String(r.goal ?? "") === id);
+        if (namingAcs.length === 0) {
+          throw new Error(
+            `cannot activate ${id}: 0 AC records name it — an active GOAL must carry at least one AC ` +
+            `(a goal is judged by the conjunction of its ACs, so a goal with none has no exit condition ` +
+            `and its achievement is undecidable; ACs naming ${id}: none). Write one first: ` +
+            `goal-store write AC-NNN --goal ${id} --status draft --criterion '<runnable command>' ` +
+            `--expect '<expected outcome>' --origin '<empirical basis>'`
+          );
+        }
+      }
+
       // P6b — fidelity question (GOAL-013, gap-criterion-fidelity-gate-activation-blind-to-vacuous-
       // criteria): the evaluability gate above proves the criterion can RUN; this proves it can be
       // FALSE on the object its `expect` claims (hard rule 4 — a quantity structurally incapable of

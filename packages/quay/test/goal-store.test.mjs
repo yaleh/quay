@@ -807,6 +807,11 @@ test("AC6 (P9) — write --dry-run exit 0 ∧ goals/ 无新增变化 ∧ 记录�
   const { root, run } = gitRepo("ac6-dryrun");
   const n = (cmd) => runCli([...cmd, "--root", root]);
   n(["write", "GOAL-001", "--title", "p", "--status", "draft", "--origin", "o", "--body", GOAL_BODY]);
+  // gap-meta-goal-store-activation-gate: the activation gate now requires ≥1 AC naming the GOAL, so a
+  // zero-AC fixture would be rejected for THAT reason and this test would stop measuring P9. Give the
+  // goal its exit condition (a real AC record) so the dry-run below is a gate-PASSING activation —
+  // the subject here stays dry-run semantics (exit 0, nothing persisted), not activation legality.
+  n(["write", "AC-001", "--title", "a", "--status", "draft", "--goal", "GOAL-001", "--criterion", "true", "--origin", "o", "--expect", EXPECT]);
   const file = fs.readdirSync(path.join(root, "goals")).find((f) => f.startsWith("GOAL-001-"));
   const before = fs.readFileSync(path.join(root, "goals", file), "utf8");
   const dry = n(["write", "GOAL-001", "--status", "active", "--dry-run"]);
