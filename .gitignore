@@ -136,6 +136,10 @@ packages/quay/plugin/
 **/.quay/meta-control.json
 # meta-driver 的变化检测状态（语义半的触发闸输入：上次判读的读数摘要 + 时刻）。
 **/.quay/meta-driver-state.json
+# meta-driver 第七类读数（动作记录失败聚合）的【扫描缓存】——一次全量语料扫描实测 ≥20 分钟
+# （5513 文件 / 3.93 GB，2026-09-12），故结果落盘、按 scan_ttl 复用。运行态、never git-tracked，
+# 与上面同族（gap-meta-driver-action-record-failure-aggregation-reading）。
+**/.quay/action-record-scan.json
 # gap-goal-driver-mechanical-ring (2026-09-06, G6): the goal mechanical-ring driver's production
 # launch state — round heartbeat (unconditional per-loop record of criterion verdicts, AC1 carrier) +
 # supervisor state files + control state (halt/control plane goal-control.json). All runtime state,
