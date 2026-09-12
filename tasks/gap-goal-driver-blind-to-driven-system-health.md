@@ -156,3 +156,5 @@ roundRecords=3(newest .quay/promotion-round.jsonl 13s) pluginVersion MISMATCH 0.
 - plugin/scripts/drivers.yml
 - plugin/test/goal-driver.test.mjs
 - tasks/gap-goal-driver-blind-to-driven-system-health.md
+- plugin/scripts/goal-driver-task-boundary-check.ts
+- plugin/test/goal-driver-task-boundary-check.test.mjs
