@@ -2,7 +2,7 @@
 id: gap-criterion-attribution-write-gate-at-birth
 title: AC-241 台账回归：新 AC 在【写入面】就不许带裸失败退出 —— 棘轮是事后检测且对 goals/-only delta
   结构上不跑；今日新建的 AC-247/248/249 已把不可归因的 fail 写进生产台账
-status: todo
+status: ready
 labels:
   - gap
   - defect
