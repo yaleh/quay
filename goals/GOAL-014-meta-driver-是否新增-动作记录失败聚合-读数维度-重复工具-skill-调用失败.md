@@ -1,7 +1,7 @@
 ---
 id: GOAL-014
 title: meta-driver 是否新增「动作记录失败聚合」读数维度（重复工具/skill 调用失败）
-status: active
+status: draft
 kind: goal
 origin: >-
   【要裁定什么】META-005 三条线索中：①（跨部署健康）已由 GOAL-009 AC-203~207（在飞）+
@@ -35,6 +35,12 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-09-12T01:18:43.564Z
+    from: active
+    to: draft
+    actor: goal-cli
+    reason: 临时回退以补记裁定理由——原 draft→active 条目 reason 为空（AC-245 据此报红）；紧随其后的 active
+      条目载明所选选项。⛔ 非否决本 GOAL。
 ---
 ## 背景
 
