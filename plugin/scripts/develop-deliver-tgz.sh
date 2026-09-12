@@ -71,6 +71,20 @@
 #                  ac=GOAL-009-AC-238 record is transported + dedup-appended; a host that produces no
 #                  such record ⇒ NOT-EVALUATED + exit 1. ⛔ The source project is only cp -a'd (read),
 #                  never written — the live project's backlog is untouched.
+#     --ac239-e2e     (with --verify-upgrade) additionally run the GOAL-009-AC-239 step on each host:
+#                  after the upgrade has been judged successful ON THAT ROOT, a NEW real defect-fix task
+#                  is created in the upgraded copy and driven to done by THAT PROJECT'S OWN drivers, then
+#                  an ac=GOAL-009-AC-239 record is written on the SAME project_root as its AC-238 record.
+#                  Same two prerequisites as --ac207-e2e (driving .quay/profiles.yml on the remote +
+#                  ~/.local/bin on PATH) since a real worker must spawn.
+#                  The per-host check then judges SAME-SOURCE (check_upgrade_pairing): an AC-239 record
+#                  whose project_root is not one that AC-238 proved upgraded does NOT count — a brand-new
+#                  project running the same e2e would produce a field-complete AC-239 otherwise. Such a
+#                  host is PARTIAL with UPGRADE_PAIR_MISSING=1, never a silent ok.
+#     --selfcheck-upgrade-pairing  hermetic controls of check_upgrade_pairing (offline, no build/scp/ssh):
+#                  AC-238+AC-239 on one root ⇒ exit 0; AC-239-only ⇒ exit 2 + UPGRADE_PAIR_MISSING=1;
+#                  different project_roots ⇒ exit 2; produced_by_driver=false ⇒ exit 2; empty evidence ⇒
+#                  exit 1 (NOT-EVALUATED).
 #     --ac207-e2e     (with --verify-coldstart) additionally run the GOAL-009-AC-207 end-to-end step
 #                  on each host: scp the driving repo's .quay/profiles.yml (so the target project's
 #                  worker-default launcher/model/auth derive from the single source of truth), put
@@ -116,10 +130,12 @@ verify_coldstart=0
 verify_upgrade=0  # 1 = GOAL-009-AC-238: upgrade an ISOLATED COPY of an AGED third-party project (not a fresh quay-init)
 upgrade_source="" # --upgrade-source: path RELATIVE TO $HOME on the remote host of the aged project to copy (read-only)
 ac207_e2e=0       # 1 = also run the GOAL-009-AC-207 end-to-end step on each host (expensive: worker-driver spawns a real worker)
+ac239_e2e=0       # 1 = with --verify-upgrade: ALSO drive a NEW real defect-fix task to done in the upgraded copy (GOAL-009-AC-239)
 selfcheck_evidence=0
 selfcheck_evidence_scenario="both"
 selfcheck_evidence_completeness=0
 selfcheck_e2e_pairing=0   # 1 = hermetic controls of check_e2e_pairing (AC-240 传输侧配对判定)
+selfcheck_upgrade_pairing=0  # 1 = hermetic controls of check_upgrade_pairing (AC-239 传输侧同源判定)
 selfcheck_transport_closure_flag=0  # 1 = hermetic closure controls of the shipped set (AC1..AC4)
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -133,12 +149,14 @@ while [ $# -gt 0 ]; do
     --verify-upgrade) verify_upgrade=1; shift ;;
     --upgrade-source) upgrade_source="$2"; shift 2 ;;
     --ac207-e2e) ac207_e2e=1; shift ;;
+    --ac239-e2e) ac239_e2e=1; shift ;;
     --selfcheck-evidence)
       selfcheck_evidence=1
       case "${2:-}" in positive|negative|both) selfcheck_evidence_scenario="$2"; shift 2 ;; *) shift ;; esac
       ;;
     --selfcheck-evidence-completeness) selfcheck_evidence_completeness=1; shift ;;
     --selfcheck-e2e-pairing) selfcheck_e2e_pairing=1; shift ;;
+    --selfcheck-upgrade-pairing) selfcheck_upgrade_pairing=1; shift ;;
     --selfcheck-transport-closure) selfcheck_transport_closure_flag=1; shift ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
@@ -648,6 +666,148 @@ PY
   esac
 }
 
+# ── check_upgrade_pairing <evidence-file> — (host, project_root) 立项判定 (GOAL-009-AC-239) ────
+# AC-239 的判据里有一层 AC-238 做不到的事：AC-239 记录必须与 AC-238 的通过记录落在【同一个
+# project_root】上——「升级成功了」与「升级之后还能接着干」必须是同一个现场。少了这层，一个全新项目
+# 跑一遍 e2e 就能冒充「升级后」，而判据根本看不出来（那正是 criterion 注释里点名的绕过形态）。
+# 本函数是那条判据的【传输侧同判】：把远端回传的整份 evidence（= 同一次运行的全部记录）读一遍，
+# 看是否有 host 上同时存在【合格】的 AC-238 与 AC-239 且共享同一 project_root。
+# ⛔ 不额外放宽也不收紧——两个断言与 goals/AC-239-*.md 的 criterion 逐字同源（⛔ 不重复实现第二套
+#    「合格」定义：判据只有一处，这里是它的传输侧实例）。
+# 三个可区分取值（硬规则 3b：⛔ 不静默按 ok 退出）：
+#   OK (exit 0)            —— 至少一个 host 的合格 AC-238 与合格 AC-239 共享同一 project_root；
+#   PAIR-MISSING (exit 2)  —— 文件可读且有记录，但无一 host 配得上（⛔ 逐 host 印两侧 root 集，可核）；
+#   NOT-EVALUATED (exit 1) —— 文件缺/不可读/零行（缺值 ≠ 合格）。
+check_upgrade_pairing() {
+  local evidence="$1" result pyrc
+  if [ ! -f "${evidence}" ] || [ ! -r "${evidence}" ]; then
+    echo "NOT-EVALUATED evidence-file-missing-or-unreadable path=${evidence}"
+    return 1
+  fi
+  if [ "$(grep -c '.' "${evidence}" 2>/dev/null || true)" -eq 0 ]; then
+    echo "NOT-EVALUATED evidence-file-zero-lines path=${evidence}"
+    return 1
+  fi
+  result="$(python3 - "${evidence}" <<'PY'
+import json, sys
+evidence = sys.argv[1]
+a238, a239 = {}, {}
+with open(evidence, encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            r = json.loads(line)
+        except Exception:
+            continue
+        h = str(r.get("host") or "")
+        pr = str(r.get("project_root") or "")
+        if not h or not pr:
+            continue
+        # AC-238 合格 = 与 criterion 逐字同源的四件读数（存量不减 / 旧 runtime 有年龄 / 被换掉 / CLI 读得出）
+        if (r.get("ac") == "GOAL-009-AC-238"
+                and isinstance(r.get("pre_upgrade_task_count"), int) and r.get("pre_upgrade_task_count") > 0
+                and r.get("post_upgrade_task_count") == r.get("pre_upgrade_task_count")
+                and isinstance(r.get("pre_upgrade_runtime_age_days"), (int, float))
+                and r.get("pre_upgrade_runtime_age_days") >= 1
+                and r.get("runtime_replaced") is True
+                and r.get("task_list_ok") is True
+                and r.get("build_sha")):
+            a238.setdefault(h, set()).add(pr)
+        # AC-239 合格 = 端到端四件（commit_sha/task_id 非空 ∧ done ∧ gate>0 ∧ 出自 driver）
+        try:
+            gates = int(r.get("gate_events") or 0)
+        except Exception:
+            continue
+        if (r.get("ac") == "GOAL-009-AC-239" and r.get("task_status") == "done"
+                and gates > 0 and r.get("produced_by_driver") is True
+                and r.get("commit_sha") and r.get("task_id")):
+            a239.setdefault(h, set()).add(pr)
+hosts = sorted(set(a238) | set(a239))
+paired = [h for h in hosts if a238.get(h, set()) & a239.get(h, set())]
+if paired:
+    print("UPGRADE-PAIR OK host=%s roots=%s" % (",".join(paired),
+          ",".join(sorted(set().union(*[a238[h] & a239[h] for h in paired])))))
+    sys.exit(0)
+# ⛔ 不静默：把两侧的 root 集逐 host 印出来（可核，而不是只说「配不上」）
+detail = " ; ".join(
+    "host=%s AC238_roots=%s AC239_roots=%s" % (h, sorted(a238.get(h, set())), sorted(a239.get(h, set())))
+    for h in hosts) or "no AC-238/AC-239 records at all"
+print("PARTIAL UPGRADE_PAIR_MISSING=1 %s" % detail)
+sys.exit(2)
+PY
+)"
+  pyrc=$?
+  echo "develop-deliver: upgrade-pairing ${result}"
+  case "$pyrc" in
+    0) return 0 ;;
+    2) return 2 ;;
+    *) return 1 ;;
+  esac
+}
+
+# ── selfcheck_upgrade_pairing — hermetic controls of check_upgrade_pairing (AC-239 传输侧) ─────
+# 正控制：同一 host 上 AC-238 与 AC-239 共享同一 project_root ⇒ exit 0。
+# 负控制①：只有 AC-239（没有同 root 的 AC-238）⇒ exit 2 + UPGRADE_PAIR_MISSING=1
+#           —— 这正是「另起一个全新项目冒充升级后」在传输侧的形状。判据若只看 AC-239 的四件读数，
+#           这一份【会通过】；它必须 here 被挡住。
+# 负控制②：AC-238 与 AC-239 的 project_root 不同 ⇒ exit 2（判的是【同一 root】，⛔ 不是「都有记录」）。
+# 负控制③：AC-239 记录存在但任务不是 driver 产出的（produced_by_driver=false）⇒ exit 2（不放宽字段）。
+# 未评估：evidence 缺/空 ⇒ exit 1（缺值 ≠ 合格）。
+# ⛔ 负控制改的是【判定输入文件】（临时 evidence），⛔ 不往生产载体写记录——本自检不碰 .quay/。
+selfcheck_upgrade_pairing() {
+  local tmp rc=0 out rc_pos rc_neg_a238 rc_neg_root rc_neg_drv rc_missing
+  tmp="$(mktemp -d 2>/dev/null)" || { echo "selfcheck-upgrade-pairing: FAIL — cannot create temp dir" >&2; return 1; }
+  local ev_pos="${tmp}/up-pos.jsonl" ev_neg_a238="${tmp}/up-neg-a238.jsonl" \
+        ev_neg_root="${tmp}/up-neg-root.jsonl" ev_neg_drv="${tmp}/up-neg-drv.jsonl" \
+        ev_missing="${tmp}/up-missing.jsonl"
+  local a238='{"ts":"2026-09-11T00:00:00Z","ac":"GOAL-009-AC-238","host":"hostB","project_root":"/home/verify/up-root","pre_upgrade_task_count":102,"post_upgrade_task_count":102,"pre_upgrade_runtime_age_days":21.2,"runtime_replaced":true,"task_list_ok":true,"build_sha":"2222222222222222222222222222222222222222"}'
+  local a239='{"ts":"2026-09-11T00:00:00Z","ac":"GOAL-009-AC-239","host":"hostB","project_root":"/home/verify/up-root","commit_sha":"1111111111111111111111111111111111111111","commit_files":["internal/mcp/query/query.go"],"task_id":"ac239-subagent-session-id-scan","task_status":"done","gate_events":1,"produced_by_driver":true}'
+  printf '%s\n%s\n' "${a238}" "${a239}" > "${ev_pos}"
+  printf '%s\n' "${a239}" > "${ev_neg_a238}"
+  printf '%s\n%s\n' "${a238}" \
+    "$(printf '%s' "${a239}" | sed 's|/home/verify/up-root|/home/verify/other-root|')" > "${ev_neg_root}"
+  printf '%s\n%s\n' "${a238}" \
+    "$(printf '%s' "${a239}" | sed 's/"produced_by_driver":true/"produced_by_driver":false/')" > "${ev_neg_drv}"
+  : > "${ev_missing}"
+  set +e
+  out="$(check_upgrade_pairing "${ev_pos}" 2>&1)"; rc_pos=$?
+  echo "selfcheck-upgrade-pairing: positive → rc=${rc_pos} ${out}"
+  out="$(check_upgrade_pairing "${ev_neg_a238}" 2>&1)"; rc_neg_a238=$?
+  echo "selfcheck-upgrade-pairing: ac239-only (no same-root AC-238) → rc=${rc_neg_a238} ${out}"
+  out="$(check_upgrade_pairing "${ev_neg_root}" 2>&1)"; rc_neg_root=$?
+  echo "selfcheck-upgrade-pairing: different-roots → rc=${rc_neg_root} ${out}"
+  out="$(check_upgrade_pairing "${ev_neg_drv}" 2>&1)"; rc_neg_drv=$?
+  echo "selfcheck-upgrade-pairing: not-produced-by-driver → rc=${rc_neg_drv} ${out}"
+  out="$(check_upgrade_pairing "${ev_missing}" 2>&1)"; rc_missing=$?
+  echo "selfcheck-upgrade-pairing: empty-evidence → rc=${rc_missing} ${out}"
+  set -e
+  [ "${rc_pos}" = "0" ] || { echo "selfcheck-upgrade-pairing: FAIL — paired records must exit 0, got ${rc_pos}" >&2; rc=1; }
+  [ "${rc_neg_a238}" = "2" ] || { echo "selfcheck-upgrade-pairing: FAIL — AC-239 without a same-root AC-238 must exit 2, got ${rc_neg_a238}" >&2; rc=1; }
+  [ "${rc_neg_root}" = "2" ] || { echo "selfcheck-upgrade-pairing: FAIL — different roots must exit 2, got ${rc_neg_root}" >&2; rc=1; }
+  [ "${rc_neg_drv}" = "2" ] || { echo "selfcheck-upgrade-pairing: FAIL — produced_by_driver=false must exit 2, got ${rc_neg_drv}" >&2; rc=1; }
+  [ "${rc_missing}" = "1" ] || { echo "selfcheck-upgrade-pairing: FAIL — empty evidence must exit 1 (NOT-EVALUATED), got ${rc_missing}" >&2; rc=1; }
+  # 接线控制（同 selfcheck-e2e-pairing 的手法）：负控制须「该 host 记 PARTIAL」而不只是函数返回 2。
+  # 按位置断言 verify_upgrade_mode 函数体里【既调用 check_upgrade_pairing，又在它返回 2 时置 partial=1】，
+  # 且该块受 --ac239-e2e 门控（⛔ 不是无条件跑：非 ac239 模式没有 AC-239 可配，无条件跑会恒报 PARTIAL）。
+  # 删掉接线此控制即取假。
+  local vum_body vum_call=0 vum_partial=0 vum_gated=0
+  vum_body="$(sed -n '/^verify_upgrade_mode()/,/^}$/p' "$0" 2>/dev/null)"
+  case "$vum_body" in *'check_upgrade_pairing "${evidence_local}"'*) vum_call=1 ;; esac
+  case "$vum_body" in *'upair_rc}" = "2"'*'partial=1'*) vum_partial=1 ;; esac
+  case "$vum_body" in *'[ "${ac239_e2e}" -eq 1 ]'*'check_upgrade_pairing'*) vum_gated=1 ;; esac
+  if [ "${vum_call}" != "1" ] || [ "${vum_partial}" != "1" ] || [ "${vum_gated}" != "1" ]; then rc=1; fi
+  echo "selfcheck-upgrade-pairing: wiring(in-verify_upgrade_mode) call=${vum_call} partial=1_on_exit2=${vum_partial} gated_by_ac239_e2e=${vum_gated} (expect 1/1/1 — 否则函数返回 2 也没人记 PARTIAL)"
+  rm -rf "${tmp}"
+  if [ "${rc}" -eq 0 ]; then
+    echo "selfcheck-upgrade-pairing: PASS (paired ⇒ exit 0; AC-239-only ⇒ exit 2 + UPGRADE_PAIR_MISSING=1; different roots ⇒ exit 2; not-produced-by-driver ⇒ exit 2; empty evidence ⇒ exit 1; wiring present in verify_upgrade_mode)"
+  else
+    echo "selfcheck-upgrade-pairing: FAIL" >&2
+  fi
+  return "${rc}"
+}
+
 # ── selfcheck_e2e_pairing — hermetic controls of check_e2e_pairing (AC-240 传输侧, AC3) ────────
 # 正控制：同一 host 上 AC-203 与 AC-207 共享同一 project_root ⇒ exit 0（无 PARTIAL 标记、无 E2E_PAIR_MISSING）。
 # 负控制①：喂一份【只含 AC-207】的 evidence ⇒ exit 2 且打印 E2E_PAIR_MISSING=1（AC-240 origin 的本来形态）。
@@ -940,6 +1100,11 @@ if [ "${selfcheck_transport_closure_flag}" -eq 1 ]; then
   exit $?
 fi
 
+if [ "${selfcheck_upgrade_pairing}" -eq 1 ]; then
+  selfcheck_upgrade_pairing
+  exit $?
+fi
+
 # host_key -> (ssh_target, node_path)  — node_path uses $HOME, NOT ~ (tilde does not expand inside
 # double quotes in the remote `export PATH="...:..."`); both verified reachable BatchMode 2026-08-11.
 declare -A host_target host_node
@@ -1219,7 +1384,7 @@ REMOTE
 # 真实第三方项目做【隔离副本】升级，只取回 ac=GOAL-009-AC-238 那一条记录。
 # ⛔ upgrade_source 是【远端】路径（相对 $HOME），副本在该主机上创建；源目录只被 cp -a 读，从不写。
 verify_upgrade_mode() {
-  local build_date local_carrier fail hk target remote_script out remote_rc remote_log remote_evidence evidence_local ck_rc
+  local build_date local_carrier fail partial hk target remote_script out remote_rc remote_log remote_evidence evidence_local ck_rc upair_rc ac239_extra ac239_path_export ac239_expected
   build_date="$(git -C "${repo_root}" log -1 --format=%cI refs/heads/develop 2>/dev/null || echo "")"
   local_carrier="${repo_root}/.quay/productization-verification.jsonl"
   echo "develop-deliver: --verify-upgrade develop=${develop_tip:0:12} build_date=${build_date} source=\$HOME/${upgrade_source:-<unset>}"
@@ -1228,6 +1393,7 @@ verify_upgrade_mode() {
     return 2
   fi
   fail=0
+  partial=0
   for hk in ${hosts}; do
     target="${host_target[$hk]:-}"
     if [ -z "${target}" ]; then
@@ -1243,8 +1409,30 @@ verify_upgrade_mode() {
       fail=1
       continue
     fi
+    # --ac239-e2e: 升级【后】的动态闭环（GOAL-009-AC-239）。要能在【升级后的那个项目里】真起 worker，
+    # 两件与 --ac207-e2e 同源的前置缺一不可：(a) 驱动方仓库的 .quay/profiles.yml 到远端，让目标项目
+    # worker-default 的 launcher/model/auth 从单一真相源派生（硬规则 4c：⛔ 不在这里写第二份字面量）；
+    # (b) ~/.local/bin 进 PATH，否则 claude/claude-fjdac 解析不到（ssh 非交互 PATH 两样都没有）。
+    # 两者都以【单引号】字面插入远端脚本，使 $HOME/$PATH 在远端展开而不是在本机展开。
+    ac239_extra=""
+    ac239_path_export=""
+    ac239_expected="GOAL-009-AC-238"
+    if [ "${ac239_e2e}" -eq 1 ]; then
+      if ! scp "${ssh_opts[@]}" "${repo_root}/.quay/profiles.yml" "${target}:~/quay-driving-profiles.yml" >/dev/null 2>&1; then
+        echo "develop-deliver: ${hk} (${target}) — driving-profiles scp FAILED (NOT-EVALUATED)"
+        fail=1
+        continue
+      fi
+      # AC239_POLL_SECS: 本任务是一条【真实缺陷修复】（定位→改 Go 源码→跑测试→fan-in 全量 suite），
+      # 比 AC-207 的 marker 任务重得多；3600s 给足余量，超时即不写记录（fail-closed，⛔ 不无限等）。
+      ac239_path_export='export PATH="$HOME/.local/bin:$PATH"; export AC239_POLL_SECS="${AC239_POLL_SECS:-3600}"'
+      ac239_extra=' --ac239-e2e --driving-profiles "$HOME/quay-driving-profiles.yml"'
+      # 本次运行【声明要产出】的 ac 种类随之加一条：AC-239 缺席即 PARTIAL/NOT-EVALUATED，⛔ 不静默成 ok。
+      ac239_expected="GOAL-009-AC-238 GOAL-009-AC-239"
+    fi
     remote_script=$(cat <<REMOTE
 $(verify_node_export_for "${hk}")
+${ac239_path_export}
 EV="\${HOME}/quay-verify-upgrade-evidence-${develop_tip:0:8}.jsonl"
 rm -f "\${EV}"
 bash "\${HOME}/verify-deliver-coldstart.sh" \
@@ -1259,7 +1447,7 @@ bash "\${HOME}/verify-deliver-coldstart.sh" \
   --project "quay-verify-upgrade-${develop_tip:0:8}" \
   --root "\${HOME}/quay-verify-upgrade-${develop_tip:0:8}-root" \
   --upgrade-existing \
-  --upgrade-source "\${HOME}/${upgrade_source}"
+  --upgrade-source "\${HOME}/${upgrade_source}"${ac239_extra}
 RC=\$?
 echo "VERIFY-RC \${RC}"
 if [ -f "\${EV}" ]; then
@@ -1298,14 +1486,29 @@ REMOTE
       fail=1
       continue
     fi
-    # 传输成功 ≠ 产出完整：按 ac 种类核对取回的内容里确有 AC-238 那一条（硬规则 3b 同族）。
-    check_evidence_completeness "${evidence_local}" "GOAL-009-AC-238"
+    # 传输成功 ≠ 产出完整：按 ac 种类核对取回的内容里确有 AC-238（--ac239-e2e 时还须有 AC-239）
+    # 那一条（硬规则 3b 同族）。expected 集合是【本次运行声明要产出的种类】，不是硬编码的常数。
+    check_evidence_completeness "${evidence_local}" "${ac239_expected}"
     ck_rc=$?
     if [ "${ck_rc}" != "0" ]; then
-      echo "develop-deliver: ${hk} (${target}) — NOT-EVALUATED (ac=GOAL-009-AC-238 absent from transported evidence)"
+      echo "develop-deliver: ${hk} (${target}) — NOT-EVALUATED (declared ac set [${ac239_expected}] not fully present in transported evidence)"
       fail=1
     else
-      echo "develop-deliver: ${hk} (${target}) — ac=GOAL-009-AC-238 transported into ${local_carrier} ✓"
+      echo "develop-deliver: ${hk} (${target}) — declared ac set [${ac239_expected}] transported into ${local_carrier} ✓"
+    fi
+    # --ac239-e2e：种类齐 ≠ 同源。AC-239 的全部价值在于它的 project_root 是【AC-238 已证明升级成功的
+    # 那一个】——另起一个全新项目跑一遍 e2e 也会产出一条字段齐全的 AC-239。此判定必须在此处跑，
+    # ⛔ 不能只靠目标机上的判据（那是事后防线，这里是同一次运行的传输侧同判）。
+    if [ "${ac239_e2e}" -eq 1 ]; then
+      check_upgrade_pairing "${evidence_local}"
+      upair_rc=$?
+      if [ "${upair_rc}" = "2" ]; then
+        echo "develop-deliver: ${hk} (${target}) — PARTIAL (AC-238/AC-239 not on one project_root — UPGRADE_PAIR_MISSING=1)"
+        partial=1
+      elif [ "${upair_rc}" != "0" ]; then
+        echo "develop-deliver: ${hk} (${target}) — NOT-EVALUATED (upgrade-pairing could not be judged)"
+        fail=1
+      fi
     fi
     rm -f "${evidence_local}"
   done
@@ -1313,6 +1516,10 @@ REMOTE
   if [ "${fail}" -eq 1 ]; then
     echo "develop-deliver: --verify-upgrade FAILED (a host produced no AC-238 record — see per-host lines above)" >&2
     return 1
+  fi
+  if [ "${partial}" -eq 1 ]; then
+    echo "develop-deliver: --verify-upgrade PARTIAL (records transported, but AC-239 does not share AC-238's project_root — AC-239 判据不会翻绿；见 UPGRADE_PAIR_MISSING 行)" >&2
+    return 2
   fi
   echo "develop-deliver: --verify-upgrade OK — GOAL-009-AC-238 record transported into ${local_carrier}"
   return 0

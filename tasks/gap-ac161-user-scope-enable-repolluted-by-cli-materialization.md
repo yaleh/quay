@@ -2,7 +2,7 @@
 id: gap-ac161-user-scope-enable-repolluted-by-cli-materialization
 title: AC-161 回归：用户级 enabledPlugins 被交付安装路径的 CLI materialization 重新写回（AC-162
   只堵了直接写，没堵 shell 出去的那条）
-status: done
+status: ready
 labels:
   - gap
   - defect
@@ -112,3 +112,26 @@ selfcheck: step1-real-settings-guard(falsifiable,pre-fix-semantics) STEP1_HOME_I
 - `packages/quay/test/npm-pack-e2e.test.mjs`
 - `plugin/test/help-contract-incompatible-behaviors.test.mjs`
 - `tasks/gap-ac161-user-scope-enable-repolluted-by-cli-materialization.md`
+
+## Needs-Human
+
+**执行 2026-09-11T17:41:52.329Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 成因类：human-adjudication
+- 失败步/判词：step=scoped-gate: test-isolation-check — 615 glob file(s), 24 current violation(s) [fixed-path-write=12 shared-build-artifact-write=1 spawns-test-sh=5 process-exit-1=6 mkdtemp-no-cleanup=0 live-data-dir-write=0 shared-root-mkdtemp=0]
+  packages/quay-native/test/gate-checked-state.test.mjs:fixed-path-write  (line 26) const tasksDir = path.join(__dirname, ".tmp-gate-checked-state-test");
+PASS: all 24 violation(s) are baselined in plugin/test-isolation-violations.txt; the list can only get SHORTER (no additions, no growth, no stale entries).
+test-impl-census: checked 615 test files · clean 615 · impl-deleted 0
+TOUCHES-DIR-GLOB-HINT: 1 directory-level tasks/*.md glob(s) — enumerate concrete files or add（已知全局锁）(hint only, not a violation)
+  + plugin/test/checked-in-write-check.test.mjs
+✖ AC5 — every AC-214 NEED ac's write point carries a freshness anchor (mechanical enumeration) (24.850386ms)
+ℹ fail 1
+✖ failing tests:
+✖ AC5 — every AC-214 NEED ac's write point carries a freshness anchor (mechanical enumeration) (24.850386ms)
+  AssertionError [ERR_ASSERTION]: every AC-214 NEED ac's write point must carry a top-level build_sha (via ac89_append_goal009 or an explicit field) — otherwise that ac is structurally unsatisfiable in AC-214:
+    actual: [ 'GOAL-009-AC-239: no record-producing write point found in plugin/scripts/verify-deliver-coldstart.sh (cannot assert its anchor ⇒ NOT-EVALUATED, not a pass)' ],
+    expected: [],
+- run_id：wk-prod-1789139008
+- session_id：c889c06e-434a-4b62-8329-35b5e258b0a0
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-ac161-user-scope-enable-repolluted-by-cli-materialization-wk-prod-1789139008.log
