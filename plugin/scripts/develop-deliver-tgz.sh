@@ -592,7 +592,16 @@ check_evidence_completeness() {
     echo "NOT-EVALUATED evidence-file-zero-lines path=${evidence}"
     return 1
   fi
-  result="$(python3 - "${evidence}" "${expected}" <<'PY'
+  # ⚠️ 为什么用 if-形而不是裸赋值：赋值的退出码来自命令替换里的 python，而 python 在 PARTIAL/
+  #    ALL-MISSING 时【故意】非 0 ⇒ 本脚本是 `set -euo pipefail`，裸赋值会让脚本在这一行【静默中止】：
+  #    下面那行 `develop-deliver: evidence-completeness …` 与本函数返回的可区分取值都不会出现
+  #    （实测 2026-09-12：`--verify-adr-flip` 的负路径只打印到 transport 那一行为止）。⇒ 这不是
+  #    「非 0 就够」的场合：本条要求的是【可区分的 NOT-EVALUATED】，静默中止把「判为缺」与「脚本炸了」
+  #    又合成同一个形态（硬规则 3b）。
+  # ⛔ 也【不】在函数体内 set +e / set -e：试过，它会把调用方的 errexit 提前恢复，于是「函数返回非 0」
+  #    在调用方那一行就把调用方杀掉（实测：--selfcheck-evidence-completeness 停在第三条用例）。
+  #    if-形不动 errexit 状态，两个方向都安全。
+  if result="$(python3 - "${evidence}" "${expected}" <<'PY'
 import json, sys
 evidence, expected = sys.argv[1], sys.argv[2].split()
 present = set()
@@ -620,8 +629,11 @@ if missing:
 print("COMPLETE present=%d" % len(have))
 sys.exit(0)
 PY
-)"
-  pyrc=$?
+)"; then
+    pyrc=0
+  else
+    pyrc=$?
+  fi
   echo "develop-deliver: evidence-completeness ${result}"
   case "$pyrc" in
     0) return 0 ;;
@@ -1563,8 +1575,10 @@ REMOTE
       continue
     fi
     # Plan 5：按 ac 种类核对回传完整性（transport 成功 ≠ 完整——「部分产出与完全成功同形」是硬规则 3b 同族）。
-    check_evidence_completeness "${evidence_local}" "${expected_acs}"
-    ck_rc=$?
+    # ⚠️ if-形（⛔ 不是裸调用 + 下一行 `ck_rc=$?`）：本脚本 set -e，裸调用在非 0 时会让脚本在本行
+    #    静默中止 —— 后续那条「NOT-EVALUATED (declared ac set …) 」痕迹与本模式的最终 FAILED 摘要都不会
+    #    出现（实测 2026-09-12）。判「缺」必须留下可区分的痕迹，不能与「脚本炸了」同形（硬规则 3b）。
+    if check_evidence_completeness "${evidence_local}" "${expected_acs}"; then ck_rc=0; else ck_rc=$?; fi
     if [ "${ck_rc}" = "2" ]; then
       echo "develop-deliver: ${hk} (${target}) — PARTIAL (transport OK but some expected records missing)"
       partial=1
@@ -1716,8 +1730,9 @@ REMOTE
     fi
     # 传输成功 ≠ 产出完整：按 ac 种类核对取回的内容里确有 AC-238（--ac239-e2e 时还须有 AC-239）
     # 那一条（硬规则 3b 同族）。expected 集合是【本次运行声明要产出的种类】，不是硬编码的常数。
-    check_evidence_completeness "${evidence_local}" "${ac239_expected}"
-    ck_rc=$?
+    # ⚠️ if-形（⛔ 不是裸调用 + 下一行 `ck_rc=$?`）：理由同 verify_adr_flip_mode——set -e 下裸调用
+    #    非 0 会静默中止，判「缺」的可区分痕迹就没了。
+    if check_evidence_completeness "${evidence_local}" "${ac239_expected}"; then ck_rc=0; else ck_rc=$?; fi
     if [ "${ck_rc}" != "0" ]; then
       echo "develop-deliver: ${hk} (${target}) — NOT-EVALUATED (declared ac set [${ac239_expected}] not fully present in transported evidence)"
       fail=1
@@ -1870,8 +1885,10 @@ REMOTE
     # 传输成功 ≠ 产出完整（硬规则 3b 同族：一个「回传了别的东西」的成功与「产出并回传」同形）。
     # 本条只要一种记录，缺它即 NOT-EVALUATED（⛔ 没有 PARTIAL 这一档：种类集合只有一个元素，
     # 「部分齐」在本模式下不存在——那不是可区分的状态，是自欺）。
-    check_evidence_completeness "${evidence_local}" "${expected_acs}"
-    ck_rc=$?
+    # ⚠️ if-形（⛔ 不是裸调用 + 下一行 `ck_rc=$?`）：本脚本 set -e，裸调用在非 0 时会让脚本在本行
+    #    静默中止 —— 后续那条「NOT-EVALUATED (declared ac set …) 」痕迹与本模式的最终 FAILED 摘要都不会
+    #    出现（实测 2026-09-12）。判「缺」必须留下可区分的痕迹，不能与「脚本炸了」同形（硬规则 3b）。
+    if check_evidence_completeness "${evidence_local}" "${expected_acs}"; then ck_rc=0; else ck_rc=$?; fi
     if [ "${ck_rc}" != "0" ]; then
       echo "develop-deliver: ${hk} (${target}) — NOT-EVALUATED (declared ac set [${expected_acs}] not present in transported evidence: rc=${ck_rc})"
       fail=1
@@ -1999,8 +2016,10 @@ REMOTE
       continue
     fi
     # 传输成功 ≠ 产出完整（硬规则 3b 同族：一个「回传了别的东西」的成功与「产出并回传」同形）。
-    check_evidence_completeness "${evidence_local}" "${expected_acs}"
-    ck_rc=$?
+    # ⚠️ if-形（⛔ 不是裸调用 + 下一行 `ck_rc=$?`）：本脚本 set -e，裸调用在非 0 时会让脚本在本行
+    #    静默中止 —— 后续那条「NOT-EVALUATED (declared ac set …) 」痕迹与本模式的最终 FAILED 摘要都不会
+    #    出现（实测 2026-09-12）。判「缺」必须留下可区分的痕迹，不能与「脚本炸了」同形（硬规则 3b）。
+    if check_evidence_completeness "${evidence_local}" "${expected_acs}"; then ck_rc=0; else ck_rc=$?; fi
     if [ "${ck_rc}" != "0" ]; then
       echo "develop-deliver: ${hk} (${target}) — NOT-EVALUATED (declared ac set [${expected_acs}] not present in transported evidence: rc=${ck_rc})"
       fail=1

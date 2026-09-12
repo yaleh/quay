@@ -22,7 +22,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
@@ -271,4 +272,34 @@ test("AC-248 — the declared ac set is exactly GOAL-016-AC-248 (no second, sile
   // ⛔ this mode READS a product; it must never drive one — no driver/worktree machinery in its body.
   assert.ok(!/driver\s+start|worktree\s+add/.test(decl.replace(/#.*/g, "")),
     "verify_adr_flip_mode must never DRIVE anything: the evidenced fix was driven out by the project's own drivers");
+});
+
+test("AC-248 — a non-qualifying evidence file yields a DISTINGUISHABLE verdict, never a silent `set -e` abort", () => {
+  // Measured 2026-09-12: the first `--verify-adr-flip` dry run (a run that produced NO AC-248 record)
+  // printed only up to the transport line and stopped — `check_evidence_completeness`'s python exits
+  // non-zero ON PURPOSE for PARTIAL/ALL-MISSING, and a bare `result="$(…)"` under `set -e` kills the
+  // script before the verdict line and before the final FAILED summary. That collapses "judged absent"
+  // and "the script blew up" into the same shape — exactly what 硬规则 3b forbids for a NOT-EVALUATED.
+  // This drives the REAL product function from a `set -e` shell and asserts both the verdict AND that
+  // execution continued past it.
+  const src = readFileSync(SCRIPT, "utf8");
+  const start = src.indexOf("check_evidence_completeness() {");
+  assert.ok(start >= 0, "check_evidence_completeness must exist");
+  const fn = src.slice(start, src.indexOf("\n}", start) + 2);
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "ac248-nev-"));
+  try {
+    const evidence = path.join(tmp, "evidence.jsonl");
+    writeFileSync(evidence, '{"ts":"2026-09-12T00:00:00Z","ac":"AC88","ok":true}\n');
+    const driver = `set -euo pipefail\n${fn}\nif check_evidence_completeness "$EV" "GOAL-016-AC-248"; then echo "VERDICT=0"; else echo "VERDICT=$?"; fi\necho AFTER-VERDICT\n`;
+    const r = spawnSync("bash", ["-c", driver], { encoding: "utf8", env: { ...process.env, EV: evidence } });
+    assert.match(r.stdout, /ALL-MISSING/, "the verdict line must name the distinguishable reason");
+    assert.match(r.stdout, /VERDICT=1/, "a run that produced no expected record must be NOT-EVALUATED (exit 1)");
+    assert.match(r.stdout, /AFTER-VERDICT/, "execution must CONTINUE past the verdict (no silent set -e abort)");
+
+    // positional: every call site must use the if-form (a bare call + `ck_rc=$?` is the abort shape).
+    const bare = (src.match(/^\s*check_evidence_completeness "\$\{evidence_local\}"/gm) || []).length;
+    assert.equal(bare, 0, "no call site may invoke check_evidence_completeness bare under set -e — use the if-form");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
