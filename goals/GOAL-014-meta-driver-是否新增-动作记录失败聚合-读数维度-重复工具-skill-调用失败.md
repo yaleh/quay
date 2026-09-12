@@ -1,7 +1,7 @@
 ---
 id: GOAL-014
 title: meta-driver 是否新增「动作记录失败聚合」读数维度（重复工具/skill 调用失败）
-status: draft
+status: active
 kind: goal
 origin: >-
   【要裁定什么】META-005 三条线索中：①（跨部署健康）已由 GOAL-009 AC-203~207（在飞）+
@@ -28,6 +28,13 @@ origin: >-
   gap-meta-filedecisions-goal-write-omits-body）。其后 GOAL-013 于 10:06:18
   被另一会话用于「判据保真性」议题，故本条改用新编号（硬规则 8：编号不复用）。上面的 question/options/为什么不能机械决定 三段逐字复用
   meta-driver 的产出，人工只补了它没能传的 body 三段。
+activatedAt: 2026-09-12T00:33:10.605Z
+statusLog:
+  - at: 2026-09-12T00:33:10.606Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ""
 ---
 ## 背景
 
