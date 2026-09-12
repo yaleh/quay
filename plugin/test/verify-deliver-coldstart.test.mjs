@@ -581,3 +581,59 @@ test("AC-247 — --selfcheck exercises the takeover producer's eight-reading ref
   assert.match(r.stdout, /ac247-liveness-source\(from-AC203_DRIVER_ALIVE\)=1 status-read-hits=1 bad-assign-hits=0/,
     "driver_alive must come from the status carrier, ⛔ not from the driver start exit code");
 });
+
+// ── AC-249 (GOAL-016) — the complete-change producer's hermetic controls ──────────────────────────
+// gap-ac249-complete-change-code-doc-same-task-record: the AC reads a carrier record whose ONLY judging
+// field is `commit_files`, and it must be the UNION of every commit filed under that one task_id with
+// BOTH a code path (`src/`|`scripts/`) and an ADR-007 doc path — one side alone does not count.
+// The defect this producer exists for is that the PRE-EXISTING `ac207_select_implementation_commit`
+// returns a SINGLE "newest implementation commit": a task that split code and doc into two commits is
+// seen as half a change in BOTH directions, so a fully qualified task reads as a permanent red
+// (硬规则 4c). Asserting only "PASS" would let a green selfcheck hide exactly that, so the readings
+// pinned below are: the union writes one record; the SAME fixture under the single-commit selector
+// writes NONE (the guard — ⛔ without it a "newest commit only" implementation passes every positive
+// case); each one-sided union writes none; the `./src/…` path form writes none; an unreadable union
+// writes none and is reported as NOT-EVALUATED rather than as "incomplete".
+test("AC-249 — --selfcheck exercises the complete-change producer's union + both one-sided refusals", () => {
+  const r = run(["--selfcheck"]);
+  assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
+  // positive: the union (code commit first, doc commit last) carries BOTH sides and writes one record
+  assert.match(r.stdout, /ac249-union\(multi-commit same task\) files=\["quay-adr\/ADR-007\.md","scripts\/check-adr\.ts","tasks\/T-1\.md"\] wrote=1 lines=0->1/,
+    "the union of a two-commit complete change must carry both sides and write exactly one record");
+  // ⛔ THE GUARD: the same fully-qualified fixture, read through the single-commit selector, writes ZERO
+  assert.match(r.stdout, /ac249-single-commit-selector\(reference impl\) files=\["quay-adr\/ADR-007\.md"\] wrote=0/,
+    "the pre-existing single-commit selector must see only the newest (doc) commit and write NOTHING — that is the defect face");
+  // one side alone, both directions — zero records, carrier line count unchanged
+  assert.match(r.stdout, /ac249-negative\(code-only\) files=\["src\/a\.ts","tasks\/T-1\.md"\] wrote=0 lines=1->1/,
+    "a code-only union must be refused (单边不算)");
+  assert.match(r.stdout, /ac249-negative\(doc-only\) files=\["quay-adr\/ADR-007\.md","tasks\/T-1\.md"\] wrote=0 lines=1->1/,
+    "a doc-only union must be refused (单边不算)");
+  // the path form is a direct quantity: `./src/…` can never satisfy `startswith("src/")`
+  assert.match(r.stdout, /ac249-negative\(dot-slash-form\) pred_is_code=0 wrote=0 lines=1->1/,
+    "a `./`-prefixed path must fail the predicate — the criterion's startswith sees paths verbatim");
+  // unreadable union ⇒ NOT-EVALUATED, ⛔ never a `commit_files: []` record (未测量 ≠ 不合格)
+  assert.match(r.stdout, /ac249-negative\(missing-union\) files=\[\] wrote=0 lines=1->1/,
+    "an unreadable union must write nothing (未测量 ≠ 不合格, 硬规则 3b)");
+  // structural: the writer carries no second anchor, does not route through the single-commit selector,
+  // and the union excludes merge commits (whose `git show --name-only` is empty)
+  assert.match(r.stdout, /ac249-writer-anchor-hits=0 writer-single-selector-hits=0 union-no-merges-hits=\d+/,
+    "the writer must not carry a build_sha literal nor reach for the single-commit selector; the union must skip merges");
+});
+
+test("AC-249 — the step is wired into the opt-in chain and shares AC-248's --target-root/--task-id", () => {
+  const src = fs.readFileSync(SCRIPT, "utf8");
+  assert.match(src, /--ac249-complete-change\) AC249_COMPLETE_CHANGE=1; shift/,
+    "the opt-in flag must be parsed");
+  // positional: the AC-249 step call must sit in the SAME branch as AC-248's — the two ACs are two
+  // readings of ONE driven-out task, so a second invocation path (or a second task-id knob) would let
+  // them be produced from different drives, which the goal's criterion explicitly rules out.
+  const branchStart = src.indexOf('elif [ "$AC248_ADR_FLIP" = 1 ] || [ "$AC249_COMPLETE_CHANGE" = 1 ]; then');
+  assert.ok(branchStart >= 0, "AC-248/AC-249 must share one opt-in branch");
+  const branchBody = src.slice(branchStart, src.indexOf("\n  elif [", branchStart));
+  assert.match(branchBody, /step_ac248_adr_flip "\$AC248_ROOT"/, "AC-248's step must run in the shared branch");
+  assert.match(branchBody, /step_ac249_complete_change "\$AC248_ROOT"/, "AC-249's step must run in the shared branch");
+  // ⛔ exactly ONE --task-id knob: a second, AC-249-specific task-id flag would make "the same task"
+  // two knobs the caller can turn apart (硬规则 3b's family: looks covered, can differ).
+  assert.equal((src.match(/--task-id\)\s/g) || []).length, 1,
+    "--task-id must be the single shared knob (AC-248 and AC-249 read the same driven task)");
+});

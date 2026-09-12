@@ -150,19 +150,19 @@ test("⑥ shipped-set closure — the ENUMERATION is proven complete, not assert
     "a shipped sibling must be listed exactly once — a second inline copy defeats the closure check");
   assert.equal((src.match(/\$\{SCRIPT_DIR\}\/provider-binding-resolvability-check\.ts/g) || []).length, 1,
     "the checker must be listed exactly once — inline copies are how 2026-09-11 stayed invisible in BOTH modes");
-  // 4 since gap-ac248-adr-check-differential-record-producer added --verify-adr-flip (the fourth
-  // verify mode); every mode must go through the ONE enumeration — a direct scp in any of them is
+  // 5 since gap-ac249-complete-change-code-doc-same-task-record added --verify-complete-change (the
+  // fifth verify mode); every mode must go through the ONE enumeration — a direct scp in any of them is
   // exactly how the 2026-09-11 defect stayed invisible.
-  assert.equal((src.match(/^\s*if ! ship_verify_closure /gm) || []).length, 4,
-    "ALL FOUR scp sites (verify_coldstart_mode / verify_upgrade_mode / verify_takeover_mode / verify_adr_flip_mode) must ship through ship_verify_closure");
+  assert.equal((src.match(/^\s*if ! ship_verify_closure /gm) || []).length, 5,
+    "ALL FIVE scp sites (verify_coldstart_mode / verify_upgrade_mode / verify_takeover_mode / verify_adr_flip_mode / verify_complete_change_mode) must ship through ship_verify_closure");
   // the SECOND, independent gap on the same transport surface (measured 2026-09-11): neither verify
   // mode put the host's Node ≥20 floor on PATH, so on C the run inherits /usr/bin/node v18.19.1 and
   // `node --experimental-strip-types` dies with "bad option" ⇒ binding_state() reads "unreadable" for
   // EVERY project there too. Same syndrome, different cause — so it needs its own wiring control.
   assert.equal((src.match(/^verify_node_export_for\(\) \{/gm) || []).length, 1,
     "verify_node_export_for must be defined exactly once (single source for ALL verify modes)");
-  assert.equal((src.match(/\$\(verify_node_export_for "\$\{hk\}"\)/g) || []).length, 4,
-    "ALL FOUR verify modes' remote scripts must prepend the host's Node floor — the deliver mode always did");
+  assert.equal((src.match(/\$\(verify_node_export_for "\$\{hk\}"\)/g) || []).length, 5,
+    "ALL FIVE verify modes' remote scripts must prepend the host's Node floor — the deliver mode always did");
 });
 
 // ── AC-247 (GOAL-016) — the SAME transport, for a ≥14-day-stalled legacy project ─────────────────
@@ -302,4 +302,63 @@ test("AC-248 — a non-qualifying evidence file yields a DISTINGUISHABLE verdict
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// ── AC-249 (GOAL-016) — the complete-change transport ─────────────────────────────────────────────
+// gap-ac249-complete-change-code-doc-same-task-record: the SAME transport as AC-248, but the record it
+// carries must satisfy a field-level predicate the AC owns — `commit_files` is the UNION of every
+// commit filed under that one task_id and must carry BOTH a code path (`src/`|`scripts/`) and an
+// ADR-007 doc path. One side alone does not count, so the impostor controls below are the load-bearing
+// half: a "transport works" assertion would be satisfied by a producer that writes a one-sided record.
+test("AC-249 — --selfcheck-complete-change-transport: AC-249 evidence is transported+COMPLETE, a different ac is NOT", () => {
+  const r = run(["--selfcheck-complete-change-transport"]);
+  assert.equal(r.status, 0, `--selfcheck-complete-change-transport must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /positive append → EVIDENCE-TRANSPORT appended=1/,
+    "an AC-249 evidence line must be transported (appended=1)");
+  assert.match(r.stdout, /positive completeness → COMPLETE \(exit 0\)/,
+    "the declared ac set [GOAL-016-AC-249] must be judged COMPLETE when present");
+  // negative: transport succeeding on a DIFFERENT ac must not read as production success
+  assert.match(r.stdout, /negative\(other-ac\) → NOT-EVALUATED/,
+    "a run that produced the WRONG record must be NOT-EVALUATED (transport success ≠ production success)");
+  // negative: absent / zero-line evidence is NOT-EVALUATED, never a silent exit 0
+  assert.match(r.stdout, /negative\(missing\/zero-lines\) → NOT-EVALUATED/,
+    "missing or zero-line evidence must be NOT-EVALUATED (硬规则 3b)");
+  // the AC-249-specific field predicate: read with the SAME two `any(...)` branches as the goal's
+  // criterion, so a one-sided list (either side) and a `./`-prefixed path must ALL fail
+  assert.match(r.stdout, /commit-files-predicate positive=1 impostors-refused\(code=1,doc=1,dot-slash=1\)/,
+    "a code-only list, a doc-only list and a `./`-prefixed path must each be refused by the criterion's own predicates");
+  // wiring: the transport AND the completeness check must both sit inside verify_complete_change_mode
+  assert.match(r.stdout, /write-points\(in-verify_complete_change_mode\) hits=2/,
+    "both the transport and the completeness call must be positionally inside verify_complete_change_mode");
+});
+
+test("AC-249 — --verify-complete-change requires an ABSOLUTE --target-root AND an explicit --task-id", () => {
+  // ⛔ Same two rules as --verify-adr-flip, for the same two reasons: the root resolves ON the remote
+  // host (a relative path would evidence a DIFFERENT project than the criterion names), and guessing
+  // "the newest task" is exactly the AC-207 defect.
+  const missingRoot = run(["--verify-complete-change"]);
+  assert.equal(missingRoot.status, 2, `--verify-complete-change without --target-root must exit 2 (usage), got ${missingRoot.status}`);
+  assert.match(missingRoot.stdout + missingRoot.stderr, /requires --target-root/);
+  const relative = run(["--verify-complete-change", "--target-root", "archguard", "--task-id", "T-1"]);
+  assert.equal(relative.status, 2, `a relative --target-root must exit 2 (usage), got ${relative.status}`);
+  assert.match(relative.stdout + relative.stderr, /must be an ABSOLUTE path on the remote host/);
+  const missingTask = run(["--verify-complete-change", "--target-root", "/home/other/archguard"]);
+  assert.equal(missingTask.status, 2, `--verify-complete-change without --task-id must exit 2 (usage), got ${missingTask.status}`);
+  assert.match(missingTask.stdout + missingTask.stderr, /requires --task-id/);
+});
+
+test("AC-249 — the declared ac set is exactly GOAL-016-AC-249, and the remote run passes the AC-249 step", () => {
+  const src = readFileSync(SCRIPT, "utf8");
+  // positional: the declaration lives inside verify_complete_change_mode's own body — moving it out (or
+  // inheriting another mode's set) would let this mode pass on records it never asked for.
+  const start = src.indexOf("verify_complete_change_mode() {");
+  assert.ok(start >= 0, "verify_complete_change_mode must exist");
+  const body = src.slice(start, src.indexOf("\n}", start));
+  assert.match(body, /local expected_acs="GOAL-016-AC-249"/,
+    "the declared ac set must be exactly this AC's, inside its own mode body");
+  // the remote invocation must actually ask for the AC-249 step — a flag-less remote run would produce
+  // no record at all, and the completeness check would then (correctly) report NOT-EVALUATED forever.
+  assert.match(body, /--ac249-complete-change/, "the remote script must be invoked with the AC-249 step");
+  assert.ok(!/--ac248-adr-flip/.test(body),
+    "this mode must NOT also declare AC-248 — the two ACs are separate readings with separate transports (a combined run would fail whenever either one fails)");
 });

@@ -336,6 +336,64 @@ export function parseTestCounts(suiteLog) {
   return seen ? acc : null;
 }
 
+// ── gap-verification-round-bound-to-quay-shaped-suite-entry AC5 — 项目【声明】自己的输出约定 ──────────
+// 人 2026-09-12 裁定：写死入口（bash scripts/test.sh）是错的，但**只让入口可配而输出解析仍写死，是换了
+// 一个位置的同一个病** —— 换个项目照样产不出台账（判据会在「配置项存在」上变绿而实际无台账，硬规则 3b）。
+// ⇒ 目标项目在 `.quay/config.yml` 的 `loop.test_output` 里【声明】自己的输出约定，quay 依声明解析。
+//
+// 声明形状：{ <字段>: "<正则，恰好一个捕获组>" }，字段 ∈ pass / fail / cancelled / tests。例（vitest）：
+//   loop:
+//     test_command: npx vitest run
+//     test_output:
+//       pass: 'Tests\s+.*?(\d+) passed'
+//       fail: 'Tests\s+.*?(\d+) failed'
+// ⛔ 不是「框架名 → quay 内置表」：那样新框架仍要改 quay 代码，等于把写死挪了个地方。声明即权威。
+//
+// 三条纪律（都可取假，硬规则 3/3b）：
+//  ① 只在**声明了至少一个有效字段**时接管（无声明/空声明 ⇒ 返回 null，调用方走内建 node:test 解析——
+//     本仓库形态零回归）；
+//  ② 声明的正则在【去 ANSI 后的文本】上匹配（与内建解析同一归一化：FORCE_COLOR / 管道强制着色会让
+//     带色输出匹配不上，缺这一步声明会「读到了但解析不出」——正是 AC5 要排除的那种假绿）；
+//  ③ 解析不到 / 正则非法 ⇒ 该字段**缺席**（⛔ 不写 0：0 会把「声明没匹配上」伪装成「测得 0 个用例」）。
+export const DECLARED_COUNT_FIELDS = ["pass", "fail", "cancelled", "tests"];
+
+/** 应用项目声明的输出约定。返回 {字段: 数字}（可能为空对象 = 声明有效但一条都没匹配上）、或 null =
+ *  无有效声明（调用方退回内建解析）。suiteLog 是日志**路径**（与 parseTestCounts 同签名）。 */
+export function applyDeclaredTestOutput(suiteLog, declared) {
+  if (!declared || typeof declared !== "object" || Array.isArray(declared)) return null;
+  const fields = DECLARED_COUNT_FIELDS.filter(
+    (f) => typeof declared[f] === "string" && declared[f].trim() !== "",
+  );
+  if (fields.length === 0) return null;
+  if (!suiteLog) return {};
+  let text;
+  try {
+    text = fs.readFileSync(suiteLog, "utf8");
+  } catch {
+    return {}; // 日志不可读 ⇒ 声明有效但无可解析输入（字段全缺席，⛔ 不伪造）
+  }
+  const plain = text.replace(ANSI_CSI_RE, "");
+  const out = {};
+  for (const f of fields) {
+    let cap = null;
+    try {
+      const m = new RegExp(declared[f], "m").exec(plain);
+      cap = m ? m[1] : null;
+    } catch {
+      cap = null; // 非法正则 ⇒ 该字段缺席（fail-closed；⛔ 不抛——观测写不得断掉整轮 fan-in）
+    }
+    if (cap == null) continue;
+    const v = Number(String(cap).trim());
+    if (Number.isFinite(v)) out[f] = v;
+  }
+  // tests 口径与 full-suite-runner 一致（pass+fail+cancelled）——仅当声明没直接给 tests 且至少解析到
+  // 一个计数（否则 tests 也缺席，与「没声明」同形=不伪造）。
+  if (out.tests === undefined && (out.pass !== undefined || out.fail !== undefined || out.cancelled !== undefined)) {
+    out.tests = (out.pass ?? 0) + (out.fail ?? 0) + (out.cancelled ?? 0);
+  }
+  return out;
+}
+
 // gap-bucket-scoped-worktree-skips-perfile-reporter AC1 — the bucket-scoped worktree execution path
 // (fan-in-execute.js detached `bash scripts/test.sh --buckets <task>`) writes its round record via THIS
 // writer, NOT full-suite-runner.ts. The suite log carries measure-suite-reporter.mjs's per-file lines
@@ -745,18 +803,32 @@ export function buildPreVerifiedRoundRecord(o) {
     record.bucket_files = bucketMarker.files;
     record.bucket_duration_ms = durationMs;
   }
+  // gap-verification-round-bound-to-quay-shaped-suite-entry AC5 — 项目【声明】的输出约定优先：声明了
+  // 至少一个有效字段 ⇒ 用它（声明即权威，⛔ 不因内建形状解析不出就退回默认——那样「可配置」是装饰，
+  // 正是硬规则 3b 的假绿形态）。
+  const declaredCounts = applyDeclaredTestOutput(suiteLog, o.testOutput);
+  let appliedDeclared = null;
+  if (declaredCounts !== null) {
+    for (const f of DECLARED_COUNT_FIELDS) {
+      if (declaredCounts[f] !== undefined) record[f] = declaredCounts[f];
+    }
+    appliedDeclared = declaredCounts;
+  }
+  // 内建口径（无声明时的既有行为，逐字不变）：node:test spec-reporter 的 `ℹ pass|fail|cancelled` 行。
   // gap-suite-round-pass-fail-cancel-fields AC1/AC2 — the fan-in suite's node:test summary carries the
   // pass/fail/cancelled tallies (redirected into --suite-log). Write them so the /tests page + Dashboard
   // card render real counts instead of "—". `tests` = pass+fail+cancelled (the same 口径 full-suite-runner
   // writes — it never trusts the `ℹ tests` line for the field). A log without a summary block (a
   // pre-verified reuse whose caller recorded no log path) ⇒ the fields stay ABSENT (honest — a reader
   // renders null as "—"; never fabricate a 0).
-  const testCounts = parseTestCounts(suiteLog);
-  if (testCounts !== null) {
-    record.pass = testCounts.pass;
-    record.fail = testCounts.fail;
-    record.cancelled = testCounts.cancelled;
-    record.tests = testCounts.pass + testCounts.fail + testCounts.cancelled;
+  if (declaredCounts === null) {
+    const testCounts = parseTestCounts(suiteLog);
+    if (testCounts !== null) {
+      record.pass = testCounts.pass;
+      record.fail = testCounts.fail;
+      record.cancelled = testCounts.cancelled;
+      record.tests = testCounts.pass + testCounts.fail + testCounts.cancelled;
+    }
   }
   // gap-bucket-scoped-worktree-skips-perfile-reporter AC1 — the per-file + capped-file fields ride the
   // fan-in landing path (same absent-field contract as full-suite-runner:3340-3349): perFile present
@@ -780,7 +852,10 @@ export function buildPreVerifiedRoundRecord(o) {
   record.nproc = hostParallelism();
   record.concurrentSuiteSlots = slots;
   record.concurrentSuitesRunning = Math.min(1 + countHeldSuiteLocks(lockRoot), slots);
-  return { record };
+  // appliedDeclared — AC5 的可见性半边：项目声明了输出约定时回报【实际应用了什么】（空对象 = 声明有效
+  // 但一条都没匹配上）。调用方据此把「声明了但没匹配上」与「没声明」在 trace 上区分开（硬规则 3b：
+  // 读不懂/没匹配上不得与合格同形）。null = 无有效声明（走了内建解析）。
+  return { record, appliedDeclared };
 }
 
 /** Append one pre-verified round record to verification-round.jsonl (round = prior lines + 1). */
