@@ -262,9 +262,20 @@ async function main() {
     // open at once rendered identical tab labels. The project label is now the workspace root's
     // own basename, which is what makes the two distinguishable; the provider name still appears
     // in the page's <meta name="description"> and in the <h1>.
-    const projectLabel = path.basename(workspaceRoot);
-    assert(list.body.includes(`<title>${projectLabel} — Tasks</title>`),
-      `GET /tasks <title> is "<project> — Tasks" with the workspace root's basename (${projectLabel}) — got: ${/<title>[^<]*<\/title>/.exec(list.body)?.[0]}`);
+    // The assertion is written so it holds in BOTH label regimes: a basename at or under the
+    // 32-char budget renders verbatim, a longer one renders truncated-with-a-digest (this temp
+    // workspace's own name is 36 chars, so it takes the second path). What is pinned either way is
+    // the property that matters: the prefix is DERIVED FROM THIS WORKSPACE'S ROOT (a generic
+    // "Dashboard"/"Quay"/"quay-native" prefix fails the `base.startsWith(head)` check) and the
+    // page token survives intact at the end.
+    const pageTitleTag = /<title>([^<]*)<\/title>/.exec(list.body)?.[1] ?? "";
+    assert(pageTitleTag.endsWith(" — Tasks"),
+      `GET /tasks <title> ends with the page token " — Tasks" — got: ${pageTitleTag}`);
+    const base = path.basename(workspaceRoot);
+    const label = pageTitleTag.slice(0, pageTitleTag.lastIndexOf(" — Tasks"));
+    const head = label.includes("…") ? label.slice(0, label.indexOf("…")) : label;
+    assert(head.length > 0 && base.startsWith(head),
+      `GET /tasks <title>'s project label is derived from this workspace root (${base}) — label head: "${head}"`);
 
     // Heading: the <h1> tag confirms the "task list" label and provider id.
     assert(/<h1>[^<]*task list[^<]*<\/h1>/i.test(list.body),

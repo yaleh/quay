@@ -2214,6 +2214,16 @@ async function main() {
       assert(pageTitle("Dashboard", a) === pageTitle("Dashboard", a),
         "AC1 control: pageTitle is deterministic for one identity");
 
+      // Plan step 5 (negative control) — the project label may be TRUNCATED but never the page
+      // token, and truncation must not MERGE two roots into one label: a bare prefix-slice would
+      // make these two 60-char roots (identical for the first 22 chars) render the same tab.
+      const longA = ident(`/srv/projects/${"x".repeat(40)}-alpha`, null, null);
+      const longB = ident(`/srv/projects/${"x".repeat(40)}-beta`, null, null);
+      const lA = pageTitle("Dashboard", longA), lB = pageTitle("Dashboard", longB);
+      assert(lA.endsWith(" — Dashboard") && lB.endsWith(" — Dashboard"),
+        "Plan5: truncation never eats the page token (both long-label titles still end in the page name)");
+      assert(lA !== lB, `Plan5: two long-named roots do NOT collapse to one tab label ("${lA}" vs "${lB}")`);
+
       // AC2 — the FULL project root is on the page (the only quantity that tells two checkouts apart).
       const cardB = renderIdentityCard(b);
       assert(cardB.includes(rootB), `AC2: the dashboard identity card carries the full project root (${rootB})`);
