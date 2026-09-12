@@ -2,7 +2,7 @@
 id: gap-criterion-attribution-blind-to-silent-terminal-command
 title: AC-241 台账回归：归因棘轮对「判据没有 exit 语句、退出码由行尾静默命令继承」的形态结构上盲 ⇒ AC-172
   以裸失败进入在域集（同类共 14 条）
-status: todo
+status: ready
 labels:
   - gap
   - defect
