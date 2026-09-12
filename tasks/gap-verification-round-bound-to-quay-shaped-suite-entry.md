@@ -37,7 +37,7 @@ archguard .quay/config.yml               → loop.test_command: npx vitest run �
 quay full-suite-runner 的默认 suite 命令 → bash scripts/test.sh [--buckets <task>]
 ```
 
-⇒ **目标项目的 suite 由它自己的入口跑，不经 `full-suite-runner`；于是只有 `full-suite-state.json` 被 mirror 回主检出，而 `verification-round.jsonl` 这条趋势台账结构上不会产生。** web 的 /tests 卡片读的正是后者。
+⇒ **不是入口写死**：`worker-driver.ts:1185/:1205/:1211` 已实现第三方适配——读 `loop.test_command` 并以 `bash -c <cmd>` 全量跑（archguard 的 suite 能跑能绿正因如此）。**缺陷在 `worker-driver.ts:1174` 那个「退化」**：注释逐字写「suite 三步据此**退化为**「跳过 / 委托 `loop.test_command`」」——**委托路径下 suite 跑了，但三步中负责落台账的那一步被跳过**，于是只剩 `full-suite-state.json` 被 mirror 回主检出，`verification-round.jsonl` 结构上不产生。web 的 /tests 卡片读的正是后者。
 
 **影响面不是 archguard 特有**：**任何不长成 quay 自己形状（无 `scripts/test.sh`）的第三方项目都会这样**。质量门生效、可观测面失效 —— 这直接损害「quay 能驱动第三方项目开发」这一产品承诺中人可看见的那一半。
 
@@ -51,6 +51,7 @@ quay full-suite-runner 的默认 suite 命令 → bash scripts/test.sh [--bucket
 
 1. **先取直接量，再动代码**：在一个**无 `scripts/test.sh`** 的目标项目上跑一轮 fan-in，打印该轮产生与未产生的载体清单（⛔ 不要只报结论；引用计数前先打印匹配到的实际内容）。
 2. **定位解耦点**：`verification-round` 的写入当前依赖什么条件 —— 是 `full-suite-runner` 的内部分支，还是可由 `pre-verified-round-record` 在 runner 之外补写？用**最小输入**验证你的假设（改一个条件看载体产不产生，再改回来），⛔ 不要照抄本段的措辞当结论。
+   ⚠️ **起点已知，⛔ 不要从零找**：`worker-driver.ts:1174` 的「退化为跳过/委托」是缺陷所在，`:1185/:1205/:1211` 是**已正确工作**的入口适配（⛔ 不要动它）。问题是委托路径下**哪一步被跳过了、为什么台账写入在其中**。
 3. **实现解耦**：使目标项目用自己的 `test_command` 时台账同样产生；⛔ 不新造第三个写入者。
 4. **负控制（不得回归）**：在 quay 自己仓库（有 `scripts/test.sh`）上跑一轮，记录的字段集与形态**不变** —— 打印前后字段集与差集。
 5. **真实验证**：在 ad-arm1 的 archguard 上真跑一轮，从**另一台机器**取回 /tests 页面 HTML，确认不再是「未接入」。
