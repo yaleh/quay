@@ -129,6 +129,22 @@ console.log(`       wrote ${settingsPath}`);
 //    This is enhancement, not the fail-closed core: if `claude` is missing (the
 //    user has not installed Claude Code yet — /quay:init is moot for them) or a
 //    step errors, we keep the settings.json registration and say what to run.
+//
+//    ⚠️ RESIDUAL, KNOWN AND DELIBERATELY NOT FIXED HERE
+//    (gap-ac161-user-scope-enable-repolluted-by-cli-materialization, 2026-09-11):
+//    the `claude plugin install` below makes the CLI write a USER-level
+//    enabledPlugins entry — i.e. the contract stated at the top of this file
+//    ("It does NOT write a user-level enabledPlugins entry") is violated one
+//    level DOWNSTREAM, by the CLI this file calls. That is exactly how STANDING
+//    goal AC-161 got re-reddened on every real global install. This task closed
+//    the channel it was scoped to — the DELIVERY/VERIFICATION path
+//    (verify-deliver-coldstart.sh segment ① now runs under an isolated HOME with
+//    QUAY_SKIP_PLUGIN_CLI=1) — and did NOT change this file's materialization,
+//    because choosing which scope to materialize into is a product decision
+//    (AC-162 only closed the script's OWN direct write). ⇒ A plain
+//    `npm install -g quay-*.tgz` on this host still re-reddens AC-161. Until that
+//    is decided, run delivery/verification with HOME isolation or
+//    QUAY_SKIP_PLUGIN_CLI=1.
 function runCli(args) {
   try {
     return spawnSync("claude", args, {

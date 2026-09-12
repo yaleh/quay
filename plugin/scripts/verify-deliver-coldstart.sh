@@ -82,12 +82,17 @@
 #                      register-plugin.mjs（QUAY_SKIP_PLUGIN_CLI=1）并断言 ~/.claude/settings.json
 #                      落地 extraKnownMarketplaces.quay → 已安装路径、enabledPlugins 无用户级 quay 键
 #                      （AC-161/162 契约的跨主机版本，SPEC §6b 约束③ 两条安装路径都能解析到）。
+#                      两条通道的段① 都【对操作者真实 ~/.claude 零写入】：隔离 HOME（${PREFIX}.home）
+#                      + QUAY_SKIP_PLUGIN_CLI=1（postinstall 的 settings 直写与 CLI materialization 两条
+#                      写路径同时关掉）；读数 STEP1_HOME_ISOLATED / STEP1_REAL_SETTINGS_UNCHANGED
+#                      落在最终 summary。背景见下方 step1_guard_* 注释（gap-ac161-user-scope-enable-
+#                      repolluted-by-cli-materialization：此前只堵了脚本直接写，没堵脚本调用的 CLI）。
 #   --verify-only    只跑③（对已存在的 --root 重验冷启动活性；①②被调用方声明已验）。
 #   --ac205-session  ⑦ 会话投递（GOAL-009-AC-205）：用安装物 dist/send-to-session.js 给同址目标会话
 #                    发 probe，读目标 transcript（transcript-delivery-check.js --check）判 delivered
 #                    ⇒ 写 AC-205 记录（transcript_confirmed=true）。opt-in：需同址 live 目标会话。
 #   --require-live   ③ 若 COLDSTART_LIVE != yes 则 exit 1（严格验证——冷启动确认跑用）。
-#   --selfcheck      全 hermetically 自检（AC2 直接量正/负控制 + L1 闭集解析/未评估正负控制 + AC5 判据正/负控制 + 目标项目 profiles 配置正/负/覆盖控制），不碰真实安装。exit 0/1。
+#   --selfcheck      全 hermetically 自检（AC2 直接量正/负控制 + L1 闭集解析/未评估正负控制 + AC5 判据正/负控制 + 目标项目 profiles 配置正/负/覆盖控制 + AC161/AC3 段① 零写入正/取假控制），不碰真实安装。exit 0/1。
 #   --ac207-e2e      ⑤ 端到端（GOAL-009-AC-207）：第三方项目里用 shipped CLI 建真实任务、起 *-drivers
 #                    驱动到 done、读直接量写 AC-207 记录。昂贵（worker-driver spawn claude -p）——
 #                    opt-in；缺任一读数不写（fail-closed）。⛔ 产品文档/skill 文案不得声称 quay 会启动会话。
@@ -1510,12 +1515,96 @@ BODY
 STEP1_OK=0
 STEP1_PREFIX=""
 NPM_BIN_DISPATCH=0
+
+# ── 段① 对操作者真实 ~/.claude 的零写入判据（AC-161 回归；gap-ac161-user-scope-enable-repolluted-…）──
+# 背景（立案当轮实测，报红读数）：段① 的 `npm install -g` 会跑 package postinstall
+# （packages/quay/scripts/register-plugin.mjs），而它 (a) 经 os.homedir() 写 $HOME/.claude/settings.json，
+# 且 (b) 未设 QUAY_SKIP_PLUGIN_CLI 时会 shell 出去调 `claude plugin install`，【而 Claude Code 自己的
+# CLI 会写用户级 enabledPlugins】。⇒ 每跑一次交付验证，操作者的用户级 settings.json 就被重新污染一次，
+# STANDING goal AC-161 复红。取证（时间戳互校）：settings.json mtime `04:08:38.218764382` vs
+# `~/.claude/plugins/known_marketplaces.json` 的 `quay.lastUpdated` `04:08:38.214Z`（早 4ms ⇒ CLI 先写
+# known_marketplaces、再写 settings）；同一前缀下 register-plugin.mjs 逐行核对为 AC-162 修复版
+# （无任何 enabledPlugins 写入语句）⇒ 写键的不是 quay 的脚本，是它调用的 CLI。
+#
+# 修法（两条独立防线，都在段① 内 = 最小面）：
+#   ① 隔离 HOME：段① 的 install 与随后的 settings 断言整体跑在 ${PREFIX}.home 下 ⇒ postinstall 的两次
+#      写入（settings.json 直写 + CLI 写）都落到一次性目录，段末随 PREFIX 一起被 rm -rf。
+#   ② QUAY_SKIP_PLUGIN_CLI=1：交付验证不需要物化进操作者的 ~/.claude/plugins（那是安装者自己的事），
+#      故连 CLI 都不调；与 :1197 marketplace 分支的既有做法一致（同一条纪律，此前只落实在那里）。
+# 判据（能取假）：段① 前后对操作者真实 settings.json 取签名，必须逐字节相同。签名是 "sha256:<hex>"
+# 或 "ABSENT"——两态可区分（硬规则 3b：文件不存在 ≠ 读不出，也 ≠ 未变）。
+STEP1_REAL_HOME=""                    # 隔离【之前】的真实 HOME（guard 读数基准 + npm 缓存位置）
+STEP1_HOME=""                         # 段① 的隔离 HOME；== STEP1_REAL_HOME ⇒ 隔离未生效（可区分）
+STEP1_HOME_OVERRIDE=""                # 调用方显式指定隔离目标（空 = 推导 ${PREFIX}.home）；selfcheck 取其假
+STEP1_HOME_ISOLATED=0                 # 1 = 本次段① 确实跑在隔离 HOME 下
+# 段① 隔离 HOME 的【有效值】（隔离未生效时 = 真实 HOME）。既喂 npm（前缀赋值，⛔ 不 export HOME——
+# 本脚本后半段有步骤要读【操作者真实】~/.claude，如 AC-205 的 ~/.claude/sessions 枚举与 transcript
+# 路径：全局改 HOME 会让那些步骤静默看错目录），也喂段① 的 settings 断言。
+STEP1_SEGMENT_HOME=""
+STEP1_REAL_SETTINGS_PATH=""           # 操作者真实 ~/.claude/settings.json 路径
+STEP1_REAL_SETTINGS_SIG_BEFORE=""     # 段① 前签名（sha256:<hex> | ABSENT）
+STEP1_REAL_SETTINGS_SIG_AFTER=""      # 段① 后签名
+STEP1_REAL_SETTINGS_UNCHANGED=0       # 1 = 前后签名相同（AC3 直接量；AC4 取假对照证明它非恒真）
+STEP1_REAL_SETTINGS_EVALUATED=0       # 1 = 上述读数【真的取过】（guard_end 跑到了）；0 = 段① 早退没测到
+                                      # —— 与 UNCHANGED=0 分开，⛔ 不让「没测」伪装成「测了且变了」（硬规则 3b）
+
+# 路径 → 签名。不存在 ⇒ "ABSENT"（独立取值，⛔ 不与「读到了但为空」同形）。
+step1_settings_sig() {
+  local p="$1"
+  if [ -f "$p" ]; then printf 'sha256:%s' "$(sha256_file "$p")"; else printf 'ABSENT'; fi
+}
+
+# 段① 起点：捕获真实 HOME/路径 + 前签名，并把隔离 HOME 定下来。
+# 隔离目标 == 真实 HOME ⇒ 隔离【没有】生效：如实落 STEP1_HOME_ISOLATED=0，⛔ 不假装隔离了，
+# 也 ⛔ 不 rm -rf 调用者的 HOME（selfcheck 的取假对照正是走这条分支）。
+step1_guard_begin() {
+  local real_home="$1"
+  STEP1_REAL_HOME="$real_home"
+  STEP1_REAL_SETTINGS_PATH="${real_home}/.claude/settings.json"
+  STEP1_REAL_SETTINGS_SIG_BEFORE="$(step1_settings_sig "$STEP1_REAL_SETTINGS_PATH")"
+  STEP1_REAL_SETTINGS_SIG_AFTER=""; STEP1_REAL_SETTINGS_UNCHANGED=0
+  STEP1_REAL_SETTINGS_EVALUATED=0
+  STEP1_HOME="${STEP1_HOME_OVERRIDE:-${PREFIX}.home}"
+  if [ "$STEP1_HOME" = "$real_home" ]; then
+    STEP1_HOME_ISOLATED=0
+  else
+    rm -rf "$STEP1_HOME"; mkdir -p "$STEP1_HOME"; STEP1_HOME_ISOLATED=1
+  fi
+  STEP1_SEGMENT_HOME="$STEP1_HOME"
+}
+
+# 段① 终点：重取后签名并判「逐字节相同」。ABSENT→ABSENT 也算相同（真·未变）。
+# 没 begin 过（路径空）⇒ 早退且 ⛔ 不置 EVALUATED：该情况下 UNCHANGED 保持 0，
+# 调用方须靠 EVALUATED 区分「没测」与「测了且变了」——否则早退会被读成 AC-161 违反（假报警）。
+step1_guard_end() {
+  STEP1_REAL_SETTINGS_EVALUATED=0
+  [ -n "$STEP1_REAL_SETTINGS_PATH" ] || return 0
+  STEP1_REAL_SETTINGS_SIG_AFTER="$(step1_settings_sig "$STEP1_REAL_SETTINGS_PATH")"
+  STEP1_REAL_SETTINGS_EVALUATED=1
+  if [ "$STEP1_REAL_SETTINGS_SIG_BEFORE" = "$STEP1_REAL_SETTINGS_SIG_AFTER" ]; then
+    STEP1_REAL_SETTINGS_UNCHANGED=1
+  else
+    STEP1_REAL_SETTINGS_UNCHANGED=0
+  fi
+  return 0
+}
+
 step1_install() {
-  local qbin qnbin qinit qv qnv qrl
+  local qbin qnbin qinit qv qnv qrl real_home npm_cache
+  real_home="$HOME"                     # 隔离【之前】的真实 HOME
+  npm_cache="${npm_config_cache:-${real_home}/.npm}"   # 保缓存（性能）；它不是 ~/.claude，不在本判据面上
+  step1_guard_begin "$real_home"
+  # ⛔ 不 export HOME（只对 npm 做前缀赋值）：见 STEP1_SEGMENT_HOME 处的注释——全局改 HOME 会让
+  # 后半段读操作者真实 ~/.claude 的步骤静默看错目录。
   rm -rf "$PREFIX"
   mkdir -p "$PREFIX"
   echo "== ① fresh .tgz install into isolated prefix $PREFIX =="
-  if ! npm install -g --no-audit --no-fund --prefix "$PREFIX" "$QUAY_TGZ" "$QN_TGZ" >/dev/null 2>&1; then
+  echo "  HOME isolation: STEP1_HOME_ISOLATED=$STEP1_HOME_ISOLATED (isolated HOME=$STEP1_HOME; real HOME=$real_home)"
+  # QUAY_SKIP_PLUGIN_CLI=1：postinstall 不 shell 出去调 claude CLI（见上方 ② 条）；HOME 隔离是第二道防线。
+  if ! HOME="$STEP1_HOME" npm_config_cache="$npm_cache" QUAY_SKIP_PLUGIN_CLI=1 \
+       npm install -g --no-audit --no-fund --prefix "$PREFIX" "$QUAY_TGZ" "$QN_TGZ" >/dev/null 2>&1; then
+    # 如实收尾 guard：install 失败时 postinstall 可能已写了一半，读数照取（⛔ 不因失败就不测）。
+    step1_guard_end
     echo "  FAIL: npm install -g failed (see npm errors above)" >&2
     return 1
   fi
@@ -1543,6 +1632,15 @@ step1_install() {
     echo "  NOTE: npm-installed quay bin symlink does not dispatch (ESM main-module guard vs symlink)."
     echo "        The loop uses realpath (.quay/runtime/bin/quay.js) so ①②③ are unaffected; this is a"
     echo "        user-facing-CLI bug to route to the owning layer (packages/quay/bin/quay.ts)."
+  fi
+  # AC-161/AC3 读数：段① 结束（npm-global 通道到此为止；marketplace 通道由 step1_marketplace 再收一次尾）。
+  step1_guard_end
+  echo "  STEP1_HOME_ISOLATED=$STEP1_HOME_ISOLATED STEP1_REAL_SETTINGS_EVALUATED=$STEP1_REAL_SETTINGS_EVALUATED STEP1_REAL_SETTINGS_UNCHANGED=$STEP1_REAL_SETTINGS_UNCHANGED (real settings sig: '${STEP1_REAL_SETTINGS_SIG_BEFORE}' -> '${STEP1_REAL_SETTINGS_SIG_AFTER}')"
+  # ⚠️ 只在【真的测过】时报警：EVALUATED=0（段① 早退，如 bin 缺失）时 UNCHANGED 也是 0，
+  # 不加这个条件就会把「没测」报成「AC-161 被违反了」（硬规则 3b）。
+  if [ "$STEP1_REAL_SETTINGS_EVALUATED" = "1" ] && [ "$STEP1_REAL_SETTINGS_UNCHANGED" != "1" ]; then
+    echo "  WARNING: segment ① changed the operator's real ~/.claude/settings.json — AC-161 violated by this run." >&2
+    echo "           before=${STEP1_REAL_SETTINGS_SIG_BEFORE} after=${STEP1_REAL_SETTINGS_SIG_AFTER} path=${STEP1_REAL_SETTINGS_PATH}" >&2
   fi
   return 0
 }
@@ -1627,8 +1725,12 @@ step1_marketplace() {
   fi
   # npm_config_global=true：register-plugin.mjs 的 guard #2 只在全局安装语义下生效（postinstall 同形）。
   # QUAY_SKIP_PLUGIN_CLI=1：register-plugin.mjs:146 优雅降级——只写 settings.json，不调 claude CLI。
+  # HOME：段① 的隔离 HOME（STEP1_SEGMENT_HOME，由 step1_install 设定；selfcheck 夹具无 step1_install
+  # ⇒ 回落到 $HOME=夹具自己 export 的目录）——register-plugin.mjs 经 os.homedir() 写 $HOME/.claude/
+  # settings.json，⛔ 不隔离就会写操作者真实那份（AC-161）。set-if-present 语义保住夹具的既有用法。
   set +e
-  npm_config_global=true QUAY_SKIP_PLUGIN_CLI=1 "$VC_NODE" --no-warnings "$register" >"${STEP1_PREFIX}/register-plugin.out" 2>&1
+  HOME="${STEP1_SEGMENT_HOME:-$HOME}" npm_config_global=true QUAY_SKIP_PLUGIN_CLI=1 \
+    "$VC_NODE" --no-warnings "$register" >"${STEP1_PREFIX}/register-plugin.out" 2>&1
   rc=$?
   set -e
   MP_REGISTER_RC="$rc"
@@ -1639,8 +1741,9 @@ step1_marketplace() {
     MP_FAIL_REASON="register-plugin.mjs exited $rc: $(tail -n 3 "${STEP1_PREFIX}/register-plugin.out" 2>/dev/null | tr '\n' ' ' | head -c 300)"
     echo "  register-plugin.mjs exited $rc (reason structured into record, not swallowed — AC5)"
   fi
-  # 断言 settings.json（register-plugin.mjs 经 os.homedir() 写入 $HOME/.claude/settings.json）
-  mp_assert_settings "${HOME}/.claude/settings.json" "$plugin_dir"
+  # 断言 settings.json（register-plugin.mjs 经 os.homedir() 写入上一步那个 HOME 下的 .claude/settings.json
+  # ——读的必须是【同一个】HOME，否则断言与写入错位：段① 隔离生效时读的是隔离那份）。
+  mp_assert_settings "${STEP1_SEGMENT_HOME:-$HOME}/.claude/settings.json" "$plugin_dir"
   if [ "$MP_REGISTER_OK" = "1" ] && [ "$MP_ENABLED_LEAK" = "1" ]; then
     # register 成功但 enabledPlugins 有用户级 quay 键 ⇒ 预存在状态（register-plugin.mjs 不写
     # enabledPlugins——AC-162 已改；这是 AC-161 迁移未覆盖到本机的旧残留，如实落结构字段，不静默）。
@@ -2763,6 +2866,9 @@ Enter to confirm · Esc to cancel"
   #   control 12 (负向,AC2): 只「安装」（fake 包在位）不跑 register ⇒ settings.json 无 marketplace 条目 ⇒ MP_SETTINGS_OK=0
   #   control 13 (enabledPlugins 外溢,AC-161 违反): 源正确但 enabledPlugins 有 quay@quay ⇒ MP_ENABLED_LEAK=1 MP_SETTINGS_OK=0
   local mp_prefix mp_pkg mp_home m1_ev m1_reg m1_ok m1_leak m2_ok m3_ok m3_leak
+  # 下面几个 control 直接调 step1_marketplace（不经 step1_install）⇒ 必须清掉段① 隔离态，
+  # 让断言回落到夹具自己 export 的 HOME（否则会继承上一次调用的段① 路径——自包含纪律）。
+  STEP1_SEGMENT_HOME=""
   mp_prefix="$tmp/mp-prefix"
   mp_pkg="$mp_prefix/lib/node_modules/quay"
   mkdir -p "$mp_pkg/scripts" "$mp_pkg/plugin/.claude-plugin"
@@ -2817,6 +2923,92 @@ Enter to confirm · Esc to cancel"
   echo "selfcheck: marketplace-noregister(negative,AC2) MP_SETTINGS_OK=$m2_ok (expect 0 — 不跑 register 无条目)"
   echo "selfcheck: marketplace-enabled-leak(AC-161违反) MP_SETTINGS_OK=$m3_ok MP_ENABLED_LEAK=$m3_leak (expect 0/1)"
   echo "selfcheck: marketplace-register-fail(AC5) MP_REGISTER_OK=$m4_reg MP_REGISTER_RC=$m4_rc reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) (expect 0/nonempty/1 — 退出码不吞)"
+
+  # control 45/46 (AC-161/AC3 段① 零写入 + AC4 取假对照, hermetic —— gap-ac161-user-scope-enable-repolluted-…):
+  # 本任务核心回归控制。此前生产段①（step1_install 的 npm install -g）跑的是【污染操作者真实 ~/.claude】
+  # 的通道，而反外溢判据只存在于夹具里（硬规则 4 推论三：只被夹具满足的判据不是测量）。
+  # 夹具两点：① 假 npm（复刻 `install -g --prefix <P>` 对 postinstall 的调用——关键语义就是
+  # 「postinstall 继承调用方 env ⇒ HOME 决定它的写入目标」）；② fake 已安装包（真 register-plugin.mjs
+  # + 最小 manifests，与 control 11 同手法）。sentinel HOME 代表「操作者真实 HOME」（selfcheck 自身
+  # hermetic，⛔ 不碰操作者真 HOME）。
+  #   45 正向：step1_install 隔离 HOME ⇒ postinstall 的写入落在隔离目录 ⇒ sentinel 签名不变。
+  #            额外断言【隔离目录里的 settings.json 确实被写过】——否则「不变」可能是「postinstall 根本
+  #            没跑」的空转，那正是本任务要防的形态（判据恒真但什么也没验到，硬规则 4c）。
+  #   46 取假：同一产品函数、同一夹具，只把隔离目标 STEP1_HOME_OVERRIDE 指回 sentinel（== 真实 HOME
+  #            ⇒ 隔离未生效 = 修复前形态的语义）⇒ postinstall 写 sentinel ⇒ UNCHANGED=0。
+  #            这条证明 45 的断言能取假，⛔ 不是靠夹具复刻一遍判定逻辑（走的是 step1_install 本体）。
+  local fn_bin fn_reg fn_prefix fn_sent fn_iso fn_sent_before fn_sent_after fn_iso_written fn_guard_saved_home fn_guard_saved_path
+  local fn_v_pos fn_w_pos fn_v_neg fn_w_neg fn_prefix_neg fn_sent_neg fn_sent_neg_before fn_sent_neg_after fn_sent_same
+  fn_bin="$tmp/fakebin"; mkdir -p "$fn_bin"
+  fn_reg="$SCRIPT_DIR/../../packages/quay/scripts/register-plugin.mjs"
+  cat > "$fn_bin/npm" <<'FAKE_NPM'
+#!/usr/bin/env bash
+# selfcheck 夹具：只复刻段① 用到的两个 npm 调用形态。
+#   install -g --no-audit --no-fund --prefix <P> <tgz>...  → 铺开已安装包 + 以 npm_config_global=true 跑 postinstall
+#   root -g --prefix <P>                                    → <P>/lib/node_modules
+# 要测的那条真 npm 语义：postinstall 继承调用方 env ⇒ HOME 决定它的写入目标。
+set -euo pipefail
+cmd="${1:-}"; shift || true
+prefix=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --prefix) prefix="${2:-}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+case "$cmd" in
+  root) printf '%s\n' "$prefix/lib/node_modules" ;;
+  install)
+    pkg="$prefix/lib/node_modules/quay"
+    # 真 npm -g 的 bin 面：<PREFIX>/bin/<name>（step1_install 断言的就是这一层），包内另有副本。
+    mkdir -p "$prefix/bin" "$pkg/bin" "$pkg/scripts" "$pkg/plugin/scripts" "$pkg/plugin/.claude-plugin"
+    printf '#!/usr/bin/env node\nconsole.log("0.6.1-fake");\n' > "$pkg/bin/quay"; chmod +x "$pkg/bin/quay"
+    printf '#!/bin/sh\necho "quay-native 0.6.1-fake"\n' > "$pkg/bin/quay-native"; chmod +x "$pkg/bin/quay-native"
+    cp "$pkg/bin/quay" "$prefix/bin/quay"; chmod +x "$prefix/bin/quay"
+    cp "$pkg/bin/quay-native" "$prefix/bin/quay-native"; chmod +x "$prefix/bin/quay-native"
+    : > "$pkg/plugin/scripts/quay-init.sh"
+    printf '%s\n' '{"name":"quay","plugins":[{"name":"quay"}]}' > "$pkg/plugin/.claude-plugin/marketplace.json"
+    printf '%s\n' '{"name":"quay"}' > "$pkg/plugin/.claude-plugin/plugin.json"
+    cp "${FAKE_NPM_REGISTER_SRC:?}" "$pkg/scripts/register-plugin.mjs"
+    npm_config_global=true "${FAKE_NPM_NODE:-node}" --no-warnings "$pkg/scripts/register-plugin.mjs" || true
+    ;;
+  *) exit 0 ;;
+esac
+FAKE_NPM
+  chmod +x "$fn_bin/npm"
+  fn_guard_saved_home="$HOME"; fn_guard_saved_path="$PATH"
+  export PATH="$fn_bin:$PATH"
+  export FAKE_NPM_REGISTER_SRC="$fn_reg" FAKE_NPM_NODE="$VC_NODE"
+  QUAY_TGZ="$tmp2/quay-fake.tgz"; QN_TGZ="$tmp2/qn-fake.tgz"
+
+  # control 45 (正向): 隔离 HOME 生效 ⇒ 操作者真实 settings.json 零写入，且隔离目录里确实落了写入。
+  fn_prefix="$tmp/fn-pos-prefix"; fn_sent="$tmp/fn-pos-sentinel"
+  mkdir -p "$fn_sent/.claude"; printf '%s\n' '{}' > "$fn_sent/.claude/settings.json"
+  fn_sent_before="$(step1_settings_sig "$fn_sent/.claude/settings.json")"
+  STEP1_HOME_OVERRIDE=""; PREFIX="$fn_prefix"; STEP1_PREFIX=""
+  export HOME="$fn_sent"
+  step1_install >/dev/null 2>&1 || true
+  fn_v_pos="$STEP1_HOME_ISOLATED"; fn_w_pos="$STEP1_REAL_SETTINGS_UNCHANGED"; fn_iso="$STEP1_HOME"
+  fn_sent_after="$(step1_settings_sig "$fn_sent/.claude/settings.json")"
+  fn_iso_written=0; [ -f "$fn_iso/.claude/settings.json" ] && fn_iso_written=1
+
+  # control 46 (取假, 修复前形态的语义): 隔离目标 == 真实 HOME ⇒ 隔离未生效 ⇒ sentinel 签名改变。
+  fn_prefix_neg="$tmp/fn-neg-prefix"; fn_sent_neg="$tmp/fn-neg-sentinel"
+  mkdir -p "$fn_sent_neg/.claude"; printf '%s\n' '{}' > "$fn_sent_neg/.claude/settings.json"
+  fn_sent_neg_before="$(step1_settings_sig "$fn_sent_neg/.claude/settings.json")"
+  STEP1_HOME_OVERRIDE="$fn_sent_neg"; PREFIX="$fn_prefix_neg"; STEP1_PREFIX=""
+  export HOME="$fn_sent_neg"
+  step1_install >/dev/null 2>&1 || true
+  fn_v_neg="$STEP1_HOME_ISOLATED"; fn_w_neg="$STEP1_REAL_SETTINGS_UNCHANGED"
+  fn_sent_neg_after="$(step1_settings_sig "$fn_sent_neg/.claude/settings.json")"
+
+  STEP1_HOME_OVERRIDE=""; STEP1_SEGMENT_HOME=""; PREFIX=""; STEP1_PREFIX=""
+  export HOME="$fn_guard_saved_home"; export PATH="$fn_guard_saved_path"
+  # 独立第二读数：夹具自己比对 sentinel 前后签名（⛔ 不与产品 guard 共用同一个量——同形自证不算测量）。
+  fn_sent_same=0; [ "$fn_sent_before" = "$fn_sent_after" ] && fn_sent_same=1
+
+  echo "selfcheck: step1-real-settings-guard(positive) STEP1_HOME_ISOLATED=$fn_v_pos STEP1_REAL_SETTINGS_UNCHANGED=$fn_w_pos isolated_home_written=$fn_iso_written sentinel_sig_same=$fn_sent_same (expect 1/1/1/1 — 段① 零写入真实 settings, 且隔离目录确实被写过 ⇒ 非空转)"
+  echo "selfcheck: step1-real-settings-guard(falsifiable,pre-fix-semantics) STEP1_HOME_ISOLATED=$fn_v_neg STEP1_REAL_SETTINGS_UNCHANGED=$fn_w_neg sentinel_before=$fn_sent_neg_before sentinel_after=$fn_sent_neg_after (expect 0/0 — 隔离失效 ⇒ sentinel 签名改变, 证明上一条能取假)"
 
   # control 15 (AC-203 载体记录): write_ac203_record 写出的记录五字段逐字满足 criterion 过滤（
   # has_plugin_dir 是 JSON 字面 false、driver_alive/carrier_records 是整数）；driver_alive=0 ⇒ 拒写
@@ -3378,12 +3570,14 @@ Enter to confirm · Esc to cancel"
      && [ "$ac240_vdiff" = "0" ] && [ -n "$ac240_vdiff_note" ] \
      && [ "$ac240_vne" = "not-evaluated" ] && [ -n "$ac240_nne" ] \
      && [ "${ac240_step5_hits:-0}" -ge 1 ] 2>/dev/null \
+     && [ "$fn_v_pos" = "1" ] && [ "$fn_w_pos" = "1" ] && [ "$fn_iso_written" = "1" ] && [ "$fn_sent_same" = "1" ] \
+     && [ "$fn_v_neg" = "0" ] && [ "$fn_w_neg" = "0" ] \
      && [ "$bl_ok" = "1" ] \
      && [ "$tp_ok" = "1" ]; then
-    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed); AC-204 carrier record writes the five criterion fields verbatim (forbidden_count=0 integer, enable_declared=true literal) and refuses a forbidden-copy or no-enable record (fail-closed, 成对判定); AC-205 carrier record writes the three criterion fields verbatim (shipped_from_installed_artifact=true + transcript_confirmed=true literals, top-level build_sha) with transcript_confirmed derived from transcript-delivery-check reading the transcript (hit ⇒ delivered / miss ⇒ not) — never from a send exit code — and refuses shipped=false / transcript_confirmed=false / empty-host (fail-closed, AC4 负控制); AC-234 render counts are derived from rendered HTML content (task/goal anchors + round-row anchors — never an HTTP status code, AC2) and can take false (empty-shell page ⇒ 0/0/0); the AC-234 carrier record writes the six criterion fields verbatim (tasks_rendered/goals_rendered/round_records_rendered as JSON integers) and refuses a zero-count or empty-host record (fail-closed, AC4 负控制); the AC-232 carrier record writes the three criterion fields verbatim (goal_write_ok/goal_read_back_ok as JSON literals, goal_records as a JSON integer) with a top-level build_sha anchor, truthfully writes false/0 when the goal write fails or read-back is empty (缺件如实非静默, AC4 负控制 — 写调用 0 与空文件同形), and refuses an empty-host record (fail-closed, 硬规则 3b); AC-207 carrier record writes the eight criterion fields verbatim (produced_by_driver=true literal, gate_events>0, task_status=done, commit_sha/task_id non-empty, commit_files non-empty JSON array with ≥1 path outside the tasks/ goals/ .quay/ triplet, top-level build_sha) and refuses produced_by_driver=false / gate_events=0 / bookkeeping-files-only / no-files (fail-closed, 硬规则 3b); AC-207 implementation-commit SELECTION picks the real implementation commit even when newer bookkeeping commits sit on top of it (the old grep-v-chore-quay-init-then-head-1 form picked the 翻-done commit — gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit), yields empty + non-zero when only bookkeeping commits exist (⇒ no record, never a bookkeeping commit dressed up as one), and the bookkeeping judgment is positional (touched files, not commit-message text); AC-240 run-level closure self-evidence takes three DISTINGUISHABLE values (1 = AC-203 and AC-207 both written by THIS run for the SAME project_root; 0 = this run attempted the e2e but the closure is not self-evidenced, with a non-empty NOTE naming the sub-reason; not-evaluated = --ac207-e2e not passed — 未评估 ≠ 不合格, 硬规则 3b), where 0 also covers the origin defect's own shape (AC-207 written, AC-203 never probed in step⑤) and the both-written-but-different-roots case (the pairing is on the SAME project_root, not on both being non-empty), and the AC-203 generation-side probe/write call is POSITIONALLY inside step5_e2e's body (0 before this task — the same-run pairing existed only as an accident, never as a requirement); and the AC-239 landing-baseline pre-flight classifier takes every value (REUSED⇒compatible / ADOPTED⇒divergent / BLOCKED⇒divergent / CREATED⇒absent / no-line-or-rc≠0⇒unreadable) — so a target copy whose 'develop' is a foreign fork stops ⑦b with an attributable 5-second reading instead of an hour-long poll whose non-done end state is indistinguishable from a worker that failed to implement (gap-aged-project-post-upgrade-driver-e2e 本轮新增)"
+    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed); AC-204 carrier record writes the five criterion fields verbatim (forbidden_count=0 integer, enable_declared=true literal) and refuses a forbidden-copy or no-enable record (fail-closed, 成对判定); AC-205 carrier record writes the three criterion fields verbatim (shipped_from_installed_artifact=true + transcript_confirmed=true literals, top-level build_sha) with transcript_confirmed derived from transcript-delivery-check reading the transcript (hit ⇒ delivered / miss ⇒ not) — never from a send exit code — and refuses shipped=false / transcript_confirmed=false / empty-host (fail-closed, AC4 负控制); AC-234 render counts are derived from rendered HTML content (task/goal anchors + round-row anchors — never an HTTP status code, AC2) and can take false (empty-shell page ⇒ 0/0/0); the AC-234 carrier record writes the six criterion fields verbatim (tasks_rendered/goals_rendered/round_records_rendered as JSON integers) and refuses a zero-count or empty-host record (fail-closed, AC4 负控制); the AC-232 carrier record writes the three criterion fields verbatim (goal_write_ok/goal_read_back_ok as JSON literals, goal_records as a JSON integer) with a top-level build_sha anchor, truthfully writes false/0 when the goal write fails or read-back is empty (缺件如实非静默, AC4 负控制 — 写调用 0 与空文件同形), and refuses an empty-host record (fail-closed, 硬规则 3b); AC-207 carrier record writes the eight criterion fields verbatim (produced_by_driver=true literal, gate_events>0, task_status=done, commit_sha/task_id non-empty, commit_files non-empty JSON array with ≥1 path outside the tasks/ goals/ .quay/ triplet, top-level build_sha) and refuses produced_by_driver=false / gate_events=0 / bookkeeping-files-only / no-files (fail-closed, 硬规则 3b); AC-207 implementation-commit SELECTION picks the real implementation commit even when newer bookkeeping commits sit on top of it (the old grep-v-chore-quay-init-then-head-1 form picked the 翻-done commit — gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit), yields empty + non-zero when only bookkeeping commits exist (⇒ no record, never a bookkeeping commit dressed up as one), and the bookkeeping judgment is positional (touched files, not commit-message text); AC-240 run-level closure self-evidence takes three DISTINGUISHABLE values (1 = AC-203 and AC-207 both written by THIS run for the SAME project_root; 0 = this run attempted the e2e but the closure is not self-evidenced, with a non-empty NOTE naming the sub-reason; not-evaluated = --ac207-e2e not passed — 未评估 ≠ 不合格, 硬规则 3b), where 0 also covers the origin defect's own shape (AC-207 written, AC-203 never probed in step⑤) and the both-written-but-different-roots case (the pairing is on the SAME project_root, not on both being non-empty), and the AC-203 generation-side probe/write call is POSITIONALLY inside step5_e2e's body (0 before this task — the same-run pairing existed only as an accident, never as a requirement); segment ① (step1_install, the delivery-install path) leaves the operator's real ~/.claude/settings.json BYTE-IDENTICAL (HOME isolated to \${PREFIX}.home + QUAY_SKIP_PLUGIN_CLI=1 — the CLI materialization that re-reddened AC-161), with the isolated HOME proven to have received the postinstall write (so the green is not a not-run vacuity), and that assertion can take FALSE (isolation target pointed back at the real HOME ⇒ signature changes); and the AC-239 landing-baseline pre-flight classifier takes every value (REUSED⇒compatible / ADOPTED⇒divergent / BLOCKED⇒divergent / CREATED⇒absent / no-line-or-rc≠0⇒unreadable) — so a target copy whose 'develop' is a foreign fork stops ⑦b with an attributable 5-second reading instead of an hour-long poll whose non-done end state is indistinguishable from a worker that failed to implement (gap-aged-project-post-upgrade-driver-e2e 本轮新增)"
     rc=0
   else
-    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc m4_reason_present=$([ -n "$m4_reason" ] && echo 1 || echo 0) ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused ac203_parse_alive=$ac203_parse_alive ac203_parse_recs=$ac203_parse_recs ac201_pos_w=$ac201_pos_w ac201_sha_len=${#ac201_pos_sha} ac201_tgz_len=${#ac201_pos_tgz} ac201_pos_ac=$ac201_pos_ac ac201_neg_w=$ac201_neg_w ac201_neg_lines=$ac201_neg_lines g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused ac204_wrote=$ac204_wrote ac204_fields_ok=$ac204_fields_ok ac204_refused_fc=$ac204_refused_fc ac204_refused_en=$ac204_refused_en ac205_tc_hit=$ac205_tc_hit ac205_tc_miss=$ac205_tc_miss ac205_wrote=$ac205_wrote ac205_fields_ok=$ac205_fields_ok ac205_ship_refused=$ac205_ship_refused ac205_conf_refused=$ac205_conf_refused ac205_host_refused=$ac205_host_refused ac234_tasks_pos=$ac234_tasks_pos ac234_goals_pos=$ac234_goals_pos ac234_rounds_pos=$ac234_rounds_pos ac234_tasks_neg=$ac234_tasks_neg ac234_goals_neg=$ac234_goals_neg ac234_rounds_neg=$ac234_rounds_neg ac234_wrote=$ac234_wrote ac234_fields_ok=$ac234_fields_ok ac234_refused_zc=$ac234_refused_zc ac234_refused_em=$ac234_refused_em ac232_wrote=$ac232_wrote ac232_fields_ok=$ac232_fields_ok ac232_neg_ok=$ac232_neg_ok ac232_refused=$ac232_refused ac207_wrote=$ac207_wrote ac207_fields_ok=$ac207_fields_ok ac207_refused_pdb=$ac207_refused_pdb ac207_refused_ge=$ac207_refused_ge ac207_refused_bkfiles=$ac207_refused_bkfiles ac207_refused_nofiles=$ac207_refused_nofiles ac207_sel_rc=$ac207_sel_rc ac207_sel_subj='$ac207_sel_subj' ac207_only_out='$ac207_only_out' ac207_only_rc=$ac207_only_rc ac207_bk_tasks_only=$ac207_bk_tasks_only ac207_impl_marker=$ac207_impl_marker ac207_before=$ac207_before ac207_after_neg=$ac207_after_neg ac207_neg_trace=$ac207_neg_trace ac207_after_pos=$ac207_after_pos ac207_pos_files='$ac207_pos_files' ac207_pipe_grep=$ac207_pipe_grep ac240_v1=$ac240_v1 ac240_n1='$ac240_n1' ac240_v0=$ac240_v0 ac240_n0='$ac240_n0' ac240_vdiff=$ac240_vdiff ac240_vdiff_note='$ac240_vdiff_note' ac240_vne=$ac240_vne ac240_nne='$ac240_nne' ac240_step5_hits=$ac240_step5_hits tp_ok=$tp_ok tp_pos_status=$tp_pos_status tp_pos_launcher=$tp_pos_launcher tp_pos_model=$tp_pos_model tp_pos_auth=$tp_pos_auth tp_neg_status=$tp_neg_status tp_neg_rc=$tp_neg_rc tp_ovr_launcher=$tp_ovr_launcher tp_ovr_model=$tp_ovr_model tp_ovr_auth=$tp_ovr_auth tp_res1=$tp_res1 tp_res2=$tp_res2 bl_ok=$bl_ok bl_reused=$bl_reused bl_adopted=$bl_adopted bl_blocked=$bl_blocked bl_created=$bl_created bl_noline=$bl_noline bl_badrc=$bl_badrc" >&2
+    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused ac203_parse_alive=$ac203_parse_alive ac203_parse_recs=$ac203_parse_recs ac201_pos_w=$ac201_pos_w ac201_pos_ac=$ac201_pos_ac ac201_neg_w=$ac201_neg_w ac201_neg_lines=$ac201_neg_lines g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused ac204_wrote=$ac204_wrote ac204_fields_ok=$ac204_fields_ok ac204_refused_fc=$ac204_refused_fc ac204_refused_en=$ac204_refused_en ac205_tc_hit=$ac205_tc_hit ac205_tc_miss=$ac205_tc_miss ac205_wrote=$ac205_wrote ac205_fields_ok=$ac205_fields_ok ac205_ship_refused=$ac205_ship_refused ac205_conf_refused=$ac205_conf_refused ac205_host_refused=$ac205_host_refused ac234_tasks_pos=$ac234_tasks_pos ac234_goals_pos=$ac234_goals_pos ac234_rounds_pos=$ac234_rounds_pos ac234_tasks_neg=$ac234_tasks_neg ac234_goals_neg=$ac234_goals_neg ac234_rounds_neg=$ac234_rounds_neg ac234_wrote=$ac234_wrote ac234_fields_ok=$ac234_fields_ok ac234_refused_zc=$ac234_refused_zc ac234_refused_em=$ac234_refused_em ac232_wrote=$ac232_wrote ac232_fields_ok=$ac232_fields_ok ac232_neg_ok=$ac232_neg_ok ac232_refused=$ac232_refused ac207_wrote=$ac207_wrote ac207_fields_ok=$ac207_fields_ok ac207_refused_pdb=$ac207_refused_pdb ac207_refused_ge=$ac207_refused_ge ac207_refused_bkfiles=$ac207_refused_bkfiles ac207_refused_nofiles=$ac207_refused_nofiles ac207_sel_rc=$ac207_sel_rc ac207_only_rc=$ac207_only_rc ac207_bk_tasks_only=$ac207_bk_tasks_only ac207_impl_marker=$ac207_impl_marker ac207_before=$ac207_before ac207_after_neg=$ac207_after_neg ac207_neg_trace=$ac207_neg_trace ac207_after_pos=$ac207_after_pos ac207_pipe_grep=$ac207_pipe_grep ac240_v1=$ac240_v1 ac240_v0=$ac240_v0 ac240_vdiff=$ac240_vdiff ac240_vne=$ac240_vne ac240_step5_hits=$ac240_step5_hits fn_v_pos=$fn_v_pos fn_w_pos=$fn_w_pos fn_iso_written=$fn_iso_written fn_sent_same=$fn_sent_same fn_v_neg=$fn_v_neg fn_w_neg=$fn_w_neg tp_ok=$tp_ok tp_pos_status=$tp_pos_status tp_pos_launcher=$tp_pos_launcher tp_pos_model=$tp_pos_model tp_pos_auth=$tp_pos_auth tp_neg_status=$tp_neg_status tp_neg_rc=$tp_neg_rc tp_ovr_launcher=$tp_ovr_launcher tp_ovr_model=$tp_ovr_model tp_ovr_auth=$tp_ovr_auth tp_res1=$tp_res1 tp_res2=$tp_res2 bl_ok=$bl_ok bl_reused=$bl_reused bl_adopted=$bl_adopted bl_blocked=$bl_blocked bl_created=$bl_created bl_noline=$bl_noline bl_badrc=$bl_badrc"
     rc=1
   fi
   rm -rf "$tmp"
@@ -3456,6 +3650,10 @@ else
     # （npm-global/AC88 的关切），marketplace 通道不跑 ②③ —— register 失败也能写出记录（AC5），
     # 不被 ② quay-init 的失败吞掉 marketplace 结果。
     step1_marketplace
+    # AC-161/AC3：段① 的完整窗口 = install + marketplace 注册；在此收尾（install 内已收过一次，
+    # 此处把窗口延长到注册段结束）。两次都读同一文件，读数取更晚的一次。
+    step1_guard_end
+    echo "STEP1_REAL_SETTINGS_EVALUATED=$STEP1_REAL_SETTINGS_EVALUATED STEP1_REAL_SETTINGS_UNCHANGED=$STEP1_REAL_SETTINGS_UNCHANGED (AC-161/AC3: 段① 全程对操作者真实 ~/.claude/settings.json 零写入)"
   else
     if ! step2_init; then
       echo "AC88_VERIFY=fail (step ② quay-init failed)"
@@ -3533,6 +3731,13 @@ echo "MP_EVALUATED=$MP_EVALUATED (1 = marketplace branch ran; 0 = npm-global cha
 echo "MP_REGISTER_OK=$MP_REGISTER_OK MP_REGISTER_RC=${MP_REGISTER_RC:-} MP_FAIL_REASON=${MP_FAIL_REASON:-}"
 echo "MP_SETTINGS_OK=$MP_SETTINGS_OK (1 = marketplace 源已注册 + enabledPlugins 无用户级 quay 键)"
 echo "MP_ENTRY_PATH=${MP_ENTRY_PATH:-} MP_ENABLED_LEAK=$MP_ENABLED_LEAK"
+# AC-161/AC3 直接量：段① 前后操作者真实 ~/.claude/settings.json 的签名（逐字节相同 = 1）。
+echo "STEP1_HOME_ISOLATED=$STEP1_HOME_ISOLATED (1 = 段① 跑在隔离 HOME; 0 = 隔离未生效, 可区分)"
+# 三态可区分（硬规则 3b）：NOT-EVALUATED = 段① 早退没测到；0 = 测了且改了；1 = 测了且逐字节相同。
+echo "STEP1_REAL_SETTINGS_UNCHANGED=$([ "$STEP1_REAL_SETTINGS_EVALUATED" = 1 ] && echo "$STEP1_REAL_SETTINGS_UNCHANGED" || echo NOT-EVALUATED) (1 = 段① 前后签名相同 — AC-161/AC3)"
+echo "STEP1_REAL_SETTINGS_EVALUATED=$STEP1_REAL_SETTINGS_EVALUATED (0 = 段① 早退，上面的 NOT-EVALUATED 是真的没测, 不是合格)"
+echo "STEP1_REAL_SETTINGS_SIG_BEFORE=${STEP1_REAL_SETTINGS_SIG_BEFORE:-NOT-EVALUATED}"
+echo "STEP1_REAL_SETTINGS_SIG_AFTER=${STEP1_REAL_SETTINGS_SIG_AFTER:-NOT-EVALUATED}"
 echo "L1_NOT_EVALUATED=$L1_NOT_EVALUATED (1 = SPEC §6 闭集读不到，未评估 ≠ 合格——硬规则 3b)"
 echo "L1_CLOSED_SET=${L1_CLOSED_SET:-<none>}"
 echo "L1_CLOSED_SET_COUNT=$L1_CLOSED_SET_COUNT L1_CLOSED_SET_PRESENT=$L1_CLOSED_SET_PRESENT L1_CLOSED_SET_MISSING=${L1_CLOSED_SET_MISSING:-<none>}"
