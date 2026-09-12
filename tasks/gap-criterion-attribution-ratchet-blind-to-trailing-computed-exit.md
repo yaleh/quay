@@ -62,19 +62,19 @@ AC-210, AC-212, AC-216, AC-222, AC-223, AC-224, AC-226, AC-235, AC-236, AC-245
 
 ## AC
 
-- [ ] **AC1 止血：AC-245 的失败出口写成因，语义逐字不变** —— `goals/AC-245-*.md` 的 criterion 两条可区分失败形态（statusLog 无 `to=active` 条目 / 该条目 reason 为空）各写一句**互不相同**的 stderr 成因。读数：同一载体（`node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts get GOAL-014` 的输出）改前/改后退出码相同（实测 1→1）；用真 runner 干跑改后 criterion **原文**（`m.runAcceptance({command:<原文>, cwd:".", timeoutMs:60000})`）⇒ `reason` 逐字含该成因、**不再是** `criterion wrote no output to stderr/stdout`。
+- [x] **AC1 止血：AC-245 的失败出口写成因，语义逐字不变** —— `goals/AC-245-*.md` 的 criterion 两条可区分失败形态（statusLog 无 `to=active` 条目 / 该条目 reason 为空）各写一句**互不相同**的 stderr 成因。读数：同一载体（`node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts get GOAL-014` 的输出）改前/改后退出码相同（实测 1→1）；用真 runner 干跑改后 criterion **原文**（`m.runAcceptance({command:<原文>, cwd:".", timeoutMs:60000})`）⇒ `reason` 逐字含该成因、**不再是** `criterion wrote no output to stderr/stdout`。
 
-- [ ] **AC2 台账翻绿（真 goal-driver 跑出的 GateEvent，⛔ 不是分支状态）** —— 在 worktree 上跑 `node --experimental-strip-types plugin/scripts/goal-driver.ts --root <worktree> --once --spawn-cap 0` 一轮（criterion 经 `goal-store gate` 真跑、真写 GateEvent），贴两行原文：AC-245 的尾事件 reason 携带其成因；对该轮台账跑 AC-241 判据原文 ⇒ `exit 0`。⚠️ worktree 的 `.quay/` 会被 `scripts/test.sh` 的 refresh 覆盖，故须当场逐字留档。
+- [x] **AC2 台账翻绿（真 goal-driver 跑出的 GateEvent，⛔ 不是分支状态）** —— 在 worktree 上跑 `node --experimental-strip-types plugin/scripts/goal-driver.ts --root <worktree> --once --spawn-cap 0` 一轮（criterion 经 `goal-store gate` 真跑、真写 GateEvent），贴两行原文：AC-245 的尾事件 reason 携带其成因；对该轮台账跑 AC-241 判据原文 ⇒ `exit 0`。⚠️ worktree 的 `.quay/` 会被 `scripts/test.sh` 的 refresh 覆盖，故须当场逐字留档。
 
-- [ ] **AC3 棘轮盲区关闭 + 双向对照（能取假）** ——
+- [x] **AC3 棘轮盲区关闭 + 双向对照（能取假）** ——
   · 修复前（`git show develop:plugin/scripts/criterion-failure-attribution-check.ts` 落一份）：注入 AC-245 同形夹具 ⇒ `bareAcs` 不变、`status=pass`、夹具 id 不在 `ids`（**盲区实测**）；
   · 修复后：同一次注入 ⇒ `bareAcs = baseline+1`、`delta=+1`、`added=[夹具id]`、`exit=1`；移除 ⇒ 回落、`exit=0`；
   · 负控制同批给：`sys.exit(0 if ok else 0)`（恒 0）、同一行含 `stderr`/`>&2` 的、值位引号串（`command:"… else 1"`）三类**都不新增命中**；`--goals-dir` 不可读仍 `exit=3`（三态互异）；
   · AC-241 判据里的空因常量 `T` 与 runner 对零输出失败实际产出的文本仍逐字一致（AC-243 仍 `exit 0`）。
 
-- [ ] **AC4 同类归零（5b 枚举的 10 条）** —— widened 检测器下 `--json`：`bareAcs ≤ baseline 32` **且** `ids` 不含 `AC-210/212/216/222/223/224/226/235/236/245`。逐条给「改前/改后同载体退出码相同」的读数（10 条全给，⛔ 抽样不算）；对 AC-223/224/226/235/236 的改动 = 既有 stdout 打印改 `file=sys.stderr`，⛔ 不改任何判定分支。
+- [x] **AC4 同类归零（5b 枚举的 10 条）** —— widened 检测器下 `--json`：`bareAcs ≤ baseline 32` **且** `ids` 不含 `AC-210/212/216/222/223/224/226/235/236/245`。逐条给「改前/改后同载体退出码相同」的读数（10 条全给，⛔ 抽样不算）；对 AC-223/224/226/235/236 的改动 = 既有 stdout 打印改 `file=sys.stderr`，⛔ 不改任何判定分支。
 
-- [ ] **AC5 三态与接线不退化** —— `node --experimental-strip-types --test plugin/test/criterion-failure-attribution-check.test.mjs` 全绿（含新增 trailing-computed 正/负控制）；`bash plugin/scripts/checker-mutation-cases/criterion-failure-attribution-check.sh` RC=0（A 基线绿 / B 注入必红 / C 恢复绿 / D 不可读 exit 3 四态互异）；`plugin/scripts/runner-static-gate.ts` 对该检查器的 `--root` 调用与 `@static-object` 登记未改；`docs/analysis/criterion-failure-attribution.baseline.json` 的 `count` **仍为 32**（⛔ 未抬高）。
+- [x] **AC5 三态与接线不退化** —— `node --experimental-strip-types --test plugin/test/criterion-failure-attribution-check.test.mjs` 全绿（含新增 trailing-computed 正/负控制）；`bash plugin/scripts/checker-mutation-cases/criterion-failure-attribution-check.sh` RC=0（A 基线绿 / B 注入必红 / C 恢复绿 / D 不可读 exit 3 四态互异）；`plugin/scripts/runner-static-gate.ts` 对该检查器的 `--root` 调用与 `@static-object` 登记未改；`docs/analysis/criterion-failure-attribution.baseline.json` 的 `count` **仍为 32**（⛔ 未抬高）。
 
 - [ ] **AC6 生产台账翻绿（待外部）** —— 生产 root（主检出）`.quay/gate-events.jsonl` 中 AC-241 的尾事件 `verdict=pass`、`reason="acceptance passed (exit 0)"`（由常驻 goal-driver 在本次落地后的轮次写出）；⛔ 不得以 worktree 读数替代本条的**生产**读数。（待外部）
 
@@ -97,6 +97,8 @@ AC-210, AC-212, AC-216, AC-222, AC-223, AC-224, AC-226, AC-235, AC-236, AC-245
 - `goals/AC-226-b域身份字面量检查器-存在-枚举归零-被突变覆盖-三者缺一不可-goal-012-退出条件①⑤.md`
 - `goals/AC-235-交付的每个配置键都有消费者-零消费者的键已接线或已删-由机械枚举证明-退出条件③.md`
 - `goals/AC-236-本仓库自身行为不得因本-goal-的改动而回退-cli-动词集-web-路由集-有消费者的配置键集单调不缩-退出条件④.md`
+<!-- 5b 补：同类第 11 条，在本条立案【之后】进入在域集（develop 由此已红）；其成因写与本就在前一行 ⇒ 检测器按行判为 bare。⛔ 不修它则 widened 计数停 33 > baseline 32，AC4 结构上不可达。 -->
+- `goals/AC-246-①-纳入的实现工作已立案-含具体-touches-与能取假的-ac-不以-已裁定-本身充当完成.md`
 - `plugin/scripts/criterion-failure-attribution-check.ts`
 - `plugin/test/criterion-failure-attribution-check.test.mjs`
 - `plugin/scripts/checker-mutation-cases/criterion-failure-attribution-check.sh`
