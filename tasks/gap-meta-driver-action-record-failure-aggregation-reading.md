@@ -79,7 +79,7 @@ goal_ac: AC-246
 - [x] AC6（阈值不写死）：阈值取值路径读配置或宿主，`grep` 证明实现里无该阈值的数值字面量；并把实测的扫描耗时与命中率写进本任务体（阈值定值的依据）。
 - [x] AC7（生产读数非空）：接进 meta-driver 后，`.quay/meta-driver-round.jsonl` 的**实现落地之后**的轮次里出现该类读数字段，且至少一轮的值来自真实语料扫描（⛔ 非 fixture 注入——硬规则 4 推论三）。
 - [x] AC8（登记齐全）：新增 script 的登记按 `capability-catalog.sh` 头注释补齐，相关闸全绿。
-- [ ] AC9（全量绿）：`scripts/test.sh` 全量绿（待外部）——worker 按 SPEC-worker-driven-inner §5 不跑全量套件；全量绿由引擎的 fan-in/批次合边界给出。
+- [ ] AC9（全量绿）：`scripts/test.sh` 全量绿——worker 按 SPEC-worker-driven-inner §5 不跑全量套件；全量绿由引擎的 fan-in/批次合边界给出（待外部）
 
 ## DoD
 
