@@ -44,28 +44,38 @@ write_acNNN_record 函数数  9 → 11
 **仍未解决的第二条（一并纳入）：回收后不自动复跑判据。**
 记录被 scp 回来并追加进载体后，**没有任何逻辑复跑对应 AC 的 criterion 确认它真的翻绿**（grep「复跑/re-run criterion/rerun judge」零命中）。GOAL-009 AC-207 的执行说明逐字承认这一步「没有机制兜底，是执行者的显式义务」，并记载过实证损失：2026-09-09 orangevps 产出的 3 条记录滞留远端从未带回，本机载体里 GOAL-009 长期只有 AC-201 一条。**投送与回收已机制化之后，这一步成了链条上唯一仍靠人的环节。**
 
+**实施结论（本轮）**：
+
+- **单一真源 = `AC_RECORD_SCHEMA`**（脚本内的一份声明表，一行一条 AC）：选它而不是「从 criterion 反推产出侧字段」，理由三条——① criterion 是 shell 包 python heredoc，且一个程序常同时读【多个 AC】的记录（实测 AC-239 的 criterion 同时读 AC-238 与 AC-239，字段按 `r.get("ac")!=…` 守卫分段），反推会把判据里每一次 `r.get`（含探测性读）都升格成硬要求；② 脚本会被 scp 到目标机执行，目标机上没有本仓库的 `goals/` ⇒ 生产期校验不能依赖解析 criterion；③ **criterion 仍是 oracle**——声明与它的一致性由 `--ac-record-schema-report` 机械核对（三侧两向差集），所以是「criterion 是判据、声明是被判据校验的产物侧真源」，⛔ 不是两份并列的真源。
+- **落点**：`ac89_append_goal009`（9 个 writer 的既有 choke point）+ `ac_record_append_fragment`（3 个自补 ts 的 printf 形 writer 与 `append_ac201_record`）在落盘前按声明校验。⛔ writer 函数体一行未改（AC-247/248/249/250 逐字节对照见 AC5）。
+- **实测读数（`--ac-record-schema-report`）**：13 条 AC（12 个 `write_acNNN_record` + `append_ac201_record`；Proposal 里的「11」已过期）——**硬差集 0**（判据读/声明缺 0、判据读/writer 不写 0、声明有/writer 不写 0），**多余字段 1**：`GOAL-009-AC-239` 的 `commit_files`（writer 写、判据不读，记录在案，⛔ 不是硬缺陷）。
+- ⚠️ **报告第一版漏比了 criterion↔schema 这一对**，导致 AC1 的可失败控制在它上面取不到假（删掉一个判据在读的字段，报告仍打印 ok）。这是本任务自己的「一个恒绿的检查」实例，已在实现中修正并留了红控制。
+
 ## Plan
 
-1. **先取直接量**：打印当前 11 个 `write_acNNN_record` 的字段集，与其对应 AC 的 `criterion` 实际读取的字段集，**逐 AC 做两向差集**（⛔ 不只报数量；差集非空处即当前已存在的漂移）。
+1. **先取直接量**：打印当前 writer 的字段集，与其对应 AC 的 `criterion` 实际读取的字段集，**逐 AC 做两向差集**（⛔ 不只报数量；差集非空处即当前已存在的漂移）。
 2. **定 schema 的唯一真源**：由 AC 的 `criterion` 派生产出侧字段，还是另立一份被两侧共同消费的 schema 声明——**给出选择理由**，⛔ 不要两条都做。
 3. **迁移**：至少覆盖 GOAL-016 的四条 AC（247/248/249/250），证明新机制能承载**真实存在的**字段集。
 4. **回收后复跑判据**：证据追加进载体后自动复跑对应 criterion，并把「复跑结果」落进记录（⛔ 不以「我拷过了」为准——GOAL-009 AC-207 执行说明第 3 条逐字要求以判据退出码为准）。
 5. **负控制**：故意让产出侧少写一个判据要求的字段 ⇒ 新机制必须在**产出时**报错，⛔ 不是等到判据 exit 1 才发现（那正是当前形态）。
 
+**落实**：1 → `ac_record_schema_report`（criterion 侧 yaml.safe_load + AST，按 `r.get("ac")!=…` 守卫分段；writer 侧只取函数体内落盘那一行）；2 → `AC_RECORD_SCHEMA` 声明表（理由见 Proposal）；3 → 13 条 AC 全部登记，四条 GOAL-016 逐条贴出对照；4 → `ac_record_finalize` 在落盘后复跑并把退出码以 `<ac>#criterion-rerun` 落账；5 → `ac_record_schema_validate_fragment` 在写入通道上 fail-closed。
+
 ## Acceptance Criteria
 
-- [ ] AC1 漂移可检出：对 11 个现有 writer 逐一做「criterion 字段集 vs writer 字段集」两向差集，打印结果；**若存在差集非空者，逐条列出**（这是本任务价值的直接读数）。
-- [ ] AC2 单一真源生效：新增一条 AC 时，**无需新增产出侧手写函数**即可产出合格记录——用一条真实新 AC（或等价 fixture）走通并贴出记录原文。
-- [ ] AC3 产出时 fail-closed（能取假）：故意漏写一个判据要求的字段 ⇒ 产出侧**报错且不写记录**；补齐后写入成功。两态输出贴出。⛔ 「判据 exit 1」不算满足本条——那是现状。
-- [ ] AC4 回收后自动复跑：证据追加后自动复跑该 AC 的 criterion，结果（退出码）落进记录；构造一条「记录已追加但判据仍 exit 1」的情形 ⇒ 必须被报出，⛔ 不得静默视为成功。
-- [ ] AC5 覆盖真实字段集：GOAL-016 的 AC-247/248/249/250 四条的字段集均可由新机制承载（逐条贴出迁移前后的记录对照）。
+- [x] AC1 漂移可检出：对 13 个现有 writer（12 个 `write_acNNN_record` + `append_ac201_record`；Proposal 里的「11」已过期）逐一做「criterion 字段集 vs writer 字段集」两向差集，打印结果；**若存在差集非空者，逐条列出**。实测读数：`AC-RECORD-SCHEMA-REPORT: 13 AC registered, 13 producer(s) in script, missing(criterion-vs-schema)=0 missing(criterion-vs-writer)=0 missing(schema-vs-writer)=0 surplus=1 unregistered=0 not-evaluated=0`（exit 0）；唯一非空差集逐条列出：`GOAL-009-AC-239 [surplus] · 声明/实写有、判据不读（多余字段，记录在案，⛔ 不是硬缺陷）: ['commit_files']`。**可失败控制**（selfcheck ⑨c）：删掉一个判据在读的字段（AC-247 的 `carrier_records`）⇒ `rc=1 drift-line=1 names-field=1`；整行删掉 ⇒ `rc=1 unregistered=1`（按行驱动的报告否则会打印全绿）。⛔ 实现中实测过一次「恒绿」：报告第一版漏比 criterion↔schema 这一对，红控制取不到假，已修正。
+- [x] AC2 单一真源生效：新增一条 AC 时，**无需新增产出侧手写函数**即可产出合格记录。走通并贴出记录原文（等价 fixture，AC 逐字允许）：只加一行声明 `GOAL-016-AC-999 host:str project_root:str made_by:str` + 调通用 `write_ac_record`，产出 `{"build_sha":"0123456789abcdef0123456789abcdef01234567","ts":"2026-09-12T00:00:00Z","ac":"GOAL-016-AC-999","host":"hostB-fake","project_root":"/tmp/p","made_by":"write_ac_record"}`，**本组未新增任何 `write_acNNN_record` 函数**（selfcheck 行 `ac-record-schema(AC2 new-ac, no new writer fn) wrote=1`）。未登记的 AC 会被拒（`refused=1`）⇒ 「加一行声明」是新增 AC 的必经动作。
+- [x] AC3 产出时 fail-closed（能取假）：故意漏写一个判据要求的字段 ⇒ 产出侧**报错且不写记录**；补齐后写入成功。两态输出：`ac-record-schema(AC3 missing-field) refused=1 lines=0→0` / `ac-record-schema(AC3 complete) accepted=1 lines=0→1`；报错点名缺件：`AC-RECORD-SCHEMA: refusing GOAL-016-AC-249 record — host (MISSING) — nothing was written (fail-closed)`。⛔ 本条不是「判据 exit 1」——那是现状；本条发生在**产出时**且零新增行。
+- [x] AC4 回收后自动复跑：证据追加后自动复跑该 AC 的 criterion，结果（退出码）落进记录；构造一条「记录已追加但判据仍 exit 1」的情形 ⇒ 必须被报出，⛔ 不得静默视为成功。两态：`ac-record-rerun(after-append, criterion-green) wrote=1 rerun_rc=0 loud=0 rerun_records=1` / `ac-record-rerun(appended-but-criterion-red) wrote=1 rerun_rc=1 loud=1 rerun_records=1`，后者 stderr 落 `AC-RECORD-RERUN-FAILED: ac=… 的记录已追加，但复跑其 criterion 仍 exit 1`。退出码以 `<ac>#criterion-rerun` 为 ac 独立落账。⛔ rerun rc 不并入写入通道返回值（把「写了但判据不服」与「根本没写」压成同一种输出，正是本任务要消灭的形态）；判据方读 `AC_RECORD_RERUN_RC`（0/非 0/`not-evaluated` 三态可分）。
+- [x] AC5 覆盖真实字段集：GOAL-016 的 AC-247/248/249/250 四条的字段集均可由新机制承载。**迁移前后对照**：四条 writer 函数体**逐字节未改**（md5 对照：AC-247 `f41594ced08f` / AC-248 `2d57931049b4` / AC-249 `7f0cae27a4cd` / AC-250 `cda236f1551e` 前后相同）⇒ 落盘记录逐字节不变；三侧字段数逐条相符（`criterion=7 schema=7 writer=7` / `11/11/11` / `4/4/4` / `10/10/10`）；声明里**每个字段都在写入期被逐个强制**：`ac-record-schema(AC5 GOAL-016-AC-247) declared=7 accepted=1 omitted('host')_refused=yes`（248: 11 / 249: 4 / 250: 10，同形）。
 
 ## Definition of Done
 
-- 五条 AC 满足，AC1 的差集清单与 AC3/AC4 的两态输出有实际留档。
-- ⛔ 不得重造投送/回收（已存在，见 Proposal 首节）。
-- ⛔ 不得为满足 AC2 而把 11 个 writer 简单合并成一个巨型函数——字段集本就各不相同（相似度 14%），合并只会把差异藏进分支；要抽的是 schema 的真源，不是函数体。
-- 项目自身闸门（scoped 门 + 全量套件绿）。
+- 五条 AC 满足，AC1 的差集清单与 AC3/AC4 的两态输出有实际留档（落点：`--ac-record-schema-report` 输出 + `--selfcheck` 的 ⑨c 组读数，二者均被 `plugin/test/verify-deliver-coldstart.test.mjs` 逐行断言，可复现）。
+- ⛔ 不得重造投送/回收（已存在）——本轮未触碰 `verify-deliver-coldstart.sh` 的投送/回收段。
+- ⛔ 不得把 12 个 writer 简单合并成一个巨型函数——`write_acNNN_record` 12 个全部保留（`grep -c` 前后同为 12），只新增了声明表 + 通用产出通道 + 校验/复跑；要抽的 schema 真源已抽出。
+- 项目自身闸门（scoped 门 + 全量套件绿）：scoped 门已跑绿（22/22，`--for-task … --allow-thin`，exit 0）；全量套件由 driver 的机械 fan-in 跑。
+- 机制变更使两处既有检测器/夹具需同步（**都不是放宽判据**，各附红控制）：① selfcheck anchor 控制的两个合成片段补全为 schema 合法；② 测试里 AC-214 NEED 的「产出侧落盘点」检测器新增识别第三种产出形（`ac_record_append_fragment`）并在判 anchor 前反转义——已用「删掉 `build_sha` 即报红」证明它仍能取假。③ 新增代码用 `if F; then x=0; else x=$?; fi` 形而非短路赋值：后者会踩 `instrument-failure-check` FAMILY-3（该检查器把短路符号读作管道，实测 15→20 越基线），改回后 15=baseline（⛔ 未抬高 shrink-only 基线）。
 
 ## Touches
 

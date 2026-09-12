@@ -16,8 +16,8 @@ import { execFileSync } from "node:child_process";
 import { loadConfig, activeProvider } from "./config.ts";
 import { connectProvider, type ProviderClient } from "./provider-client.ts";
 import { resolveProviderEnv } from "./provider-env.ts";
-import { handleAllRoutes } from "./serve-handlers.ts";
-import { startDevelopRefBackgroundRefresh } from "./observation.ts";
+import { handleAllRoutes, serveIdentity, type ServePageCfg } from "./serve-handlers.ts";
+import { readBranchModel, startDevelopRefBackgroundRefresh } from "./observation.ts";
 
 // Re-export rendering helpers so external consumers (tests, etc.) can still
 // import them from serve.ts if needed. These now live in serve-handlers.ts.
@@ -246,6 +246,15 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
   // just the taskList() case) results in a clean 500 response instead of a
   // hung connection or an uncaught rejection that could take the whole
   // server down.
+  // gap-web-ui-pages-carry-no-host-project-identity: the page identity is ASSEMBLED ONCE, here,
+  // and handed to the route dispatcher — never re-derived per page. It is filled in AFTER the
+  // listen resolves because the authoritative port is the one the kernel actually bound (`--port
+  // 0` is the test convention for an ephemeral port, so the requested port is not a reading of
+  // anything). `identity` stays null only in the window before `listen` — no request can be
+  // dispatched then, and a page that ever did see null renders the explicit 「未接入项目身份」
+  // title instead of a silently anonymous one.
+  const routeCfg: ServePageCfg = { workspaceRoot: cfg.workspaceRoot, identity: null };
+
   const server = http.createServer(async (req, res) => {
     // gap-web-server-access-logging (AC1): every received request produces one
     // access-log line (timestamp + method + path) — written synchronously before
@@ -263,7 +272,7 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
         await handleHealth(res, cfg.workspaceRoot);
         return;
       }
-      await handleAllRoutes(req, res, client, manifest, cfg);
+      await handleAllRoutes(req, res, client, manifest, routeCfg);
     } catch (err) {
       console.error(`[quay serve] request handler error (${req.method} ${req.url}):`, (err as Error).stack || String(err));
       if (!res.headersSent) {
@@ -320,6 +329,19 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
   // addition (a new property on the returned object) — no existing caller's
   // behavior changes, since nothing previously read `server.client`.
   (server as Server & { client: ProviderClient }).client = client;
+
+  // gap-web-ui-pages-carry-no-host-project-identity: now that the bind succeeded, the identity's
+  // address half is a real reading (the kernel-assigned port for `--port 0`), so assemble it and
+  // hand it to every subsequent request. The git-derived branch names come from observation.ts
+  // (the serve path's only sanctioned git reader).
+  const addr = server.address();
+  routeCfg.identity = serveIdentity({
+    workspaceRoot: cfg.workspaceRoot,
+    host,
+    port: addr && typeof addr === "object" ? addr.port : port,
+    loop: (cfg.config as { loop?: Record<string, unknown> } | null)?.loop ?? null,
+    branchModel: readBranchModel(cfg.workspaceRoot),
+  });
 
   // gap-tasks-page-develop-ref-full-history-git-log-cost (AC1): mount a background refresh tick that
   // keeps the develop-ref read caches warm OFF the request path. The cold full build runs here (at

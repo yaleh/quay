@@ -4,7 +4,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFileSync, readdirSync, openSync, readSync, closeSync, statSync } from "node:fs";
 import path from "node:path";
 import { readTests, type TestsResult, type TestRunRecord } from "./observation.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2, obsNote, DEFAULT_PAGE_SIZE, tableWrap } from "./serve-render.ts";
+import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2, obsNote, DEFAULT_PAGE_SIZE, tableWrap, pageTitle } from "./serve-render.ts";
 import { renderTimelineBarSvg, DEFAULT_TIMELINE_HOURS, parseTimelineHours } from "./serve-dashboard.ts";
 
 // ── /tests load curve — server-rendered SVG of the suite-load timeseries (gap-test-detail-load-timeseries) ──
@@ -710,6 +711,7 @@ function renderTestsPage(
   roundRequested: number | null = null,
   opts: TestsPagingOpts = {},
   hours: number = DEFAULT_TIMELINE_HOURS,
+  identity: ServeIdentity | null = null,
 ): string {
   const latest = tests.runs[0] ?? null;
   // gap-webui-round-detail-page — `selected` is the round the page focuses on when /tests?round=N
@@ -857,7 +859,7 @@ function renderTestsPage(
         ${roundsTimelineBar}`
     : "";
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay tests — verification rounds">${modernistStyles()}${pageStyles()}<title>Tests — 验证轮记录</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay tests — verification rounds">${modernistStyles()}${pageStyles()}<title>${pageTitle("Tests — 验证轮记录", identity)}</title></head>
     <body>${renderMobileChrome("tests", "tests")}${renderSiteNav("tests")}<main id="main">
       <h1>Tests — 验证轮记录</h1>
       <p class="meta">数据源：<code>.quay/verification-round.jsonl</code>（每轮 suite 完成时追加，红绿皆入账）</p>
@@ -883,7 +885,7 @@ function renderTestsPage(
 export async function handleTests(
   req: IncomingMessage,
   res: ServerResponse,
-  cfg: { workspaceRoot: string },
+  cfg: ServePageCfg,
   url: URL,
 ): Promise<void> {
   let tests: TestsResult;
@@ -937,7 +939,7 @@ export async function handleTests(
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(renderTestsPage(tests, cfg.workspaceRoot, samples, selected, roundNum, {
     page, pageSize, pageSizeInvalid, perFilePage, perFilePageSize, perFilePageSizeInvalid, ganttPage, ganttPageSize, ganttPageSizeInvalid,
-  }, hours));
+  }, hours, cfg.identity));
 }
 
 // ── /tests/file — single-file cross-round detail page (gap-webui-test-file-detail-page) ──────────

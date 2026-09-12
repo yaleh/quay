@@ -2,11 +2,11 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
-import type { Manifest } from "./serve-render.ts";
+import type { Manifest, ServePageCfg } from "./serve-render.ts";
 import {
   html, escapeHtml, stripHeadings, pageStyles, modernistStyles, renderMarkdown,
   relativeTime, isSafeRelativeRedirect, DEFAULT_PAGE_SIZE, buildHref, isMissingIdTask,
-  renderSiteNav, renderMobileChrome,
+  renderSiteNav, renderMobileChrome, pageTitle,
 } from "./serve-render.ts";
 import {
   readWorkerOutcomeRecords, isValidSessionId, readLiveWorkerProcesses, liveSessionIdForPid,
@@ -22,7 +22,7 @@ export async function handleTaskList(
   url: URL,
   client: ProviderClient,
   manifest: Manifest,
-  cfg: { workspaceRoot: string },
+  cfg: ServePageCfg,
 ): Promise<void> {
   // gap-one-unparseable-task-takes-down-the-whole-board: the Provider's
   // task_list now returns PARTIAL success — the parseable tasks plus a
@@ -464,7 +464,7 @@ export async function handleTaskList(
     : "";
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay task list — ${escapeHtml(manifest.name)}">${modernistStyles()}${pageStyles()}<title>Quay — ${escapeHtml(manifest.name)}</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay task list — ${escapeHtml(manifest.name)}">${modernistStyles()}${pageStyles()}<title>${pageTitle("Tasks", cfg.identity)}</title></head>
     <body>${renderMobileChrome("tasks", "task list")}${renderSiteNav("tasks")}<main id="main">
       <!-- QX-015 orientation banner removed by DIR-007 (iteration 10): misleading
            needs-human placement + disproportionate layout cost. -->

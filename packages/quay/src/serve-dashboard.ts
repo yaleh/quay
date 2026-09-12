@@ -7,8 +7,8 @@ import YAML from "yaml";
 import type { ProviderClient } from "./provider-client.ts";
 import { readLive, readSystem, readManagerLight, readTests, readGitHistory, readCurrentSuiteRun, readWorkerOutcomeRecords, DEFAULT_DRIVER_CAP, type LiveResult, type SystemResult, type ManagerResult, type TestsResult, type GitHistoryResult, type CurrentSuiteRun, type WorkerOutcomeRecord, type DriverKindReading, type InFlightTask } from "./observation.ts";
 import { TASK_STATUS, type GoalRecord } from "./abi.ts";
-import type { Manifest } from "./serve-render.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime } from "./serve-render.ts";
+import type { Manifest, ServeIdentity, ServePageCfg } from "./serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, relativeTime, pageTitle, renderIdentityCard } from "./serve-render.ts";
 import { awaitingLandMs, formatAwaitingDuration, suiteSuffix } from "./serve-live.ts";
 import { renderFanInCell } from "./serve-task.ts";
 
@@ -1204,7 +1204,7 @@ export function renderDashboardPage(
     tasks: TaskSummary[];
     goals?: GoalRecord[];
   },
-  opts: { workspaceRoot?: string; hours?: number; nowMs?: number } = {},
+  opts: { workspaceRoot?: string; hours?: number; nowMs?: number; identity?: ServeIdentity | null } = {},
 ): string {
   const nowMs = opts.nowMs ?? Date.now();
   const hours = opts.hours ?? DEFAULT_TIMELINE_HOURS;
@@ -1242,11 +1242,12 @@ export function renderDashboardPage(
     .join(" · ");
 
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay dashboard — 循环脉搏、任务台账、系统资源与三层状态总览">${modernistStyles()}${pageStyles()}${dashboardGridStyles}<title>Dashboard</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay dashboard — 循环脉搏、任务台账、系统资源与三层状态总览">${modernistStyles()}${pageStyles()}${dashboardGridStyles}<title>${pageTitle("Dashboard", opts.identity)}</title></head>
     <body>${renderMobileChrome("dashboard", "dashboard")}${renderSiteNav("dashboard")}<main id="main">
       <h1>Dashboard</h1>
       <p class="meta">循环脉搏、任务台账、系统资源与三层调度状态的总览 — 每张卡片指向对应完整页面。</p>
       <p class="meta">时间轴窗口（以各自最近一次运行/fan-in 结束时刻为终点的过去 ${hours}h）：${hourLinks}</p>
+      ${opts.identity ? renderIdentityCard(opts.identity) : ""}
       ${renderTopRow(liveCard, sysCard, mgrCard)}
       <h2>工作进展</h2>
       ${renderWorkProgressRow(goalCard, taskCard, testsCard, fanInCard)}
@@ -1464,7 +1465,7 @@ export async function handleDashboard(
   res: ServerResponse,
   client: ProviderClient,
   manifest: Manifest,
-  cfg: { workspaceRoot: string },
+  cfg: ServePageCfg,
 ): Promise<void> {
   // gap-webui-dashboard-regressed-to-12-60s-past-two-done-tasks: the async probe group is started
   // FIRST — its shell-script subprocesses (resource-gate / process-budget / loop-driver-check) run in
@@ -1499,7 +1500,7 @@ export async function handleDashboard(
   const [sys, mgr, tasks, goals] = await asyncProbes;
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   const hours = timelineHoursFromRequest(req);
-  res.end(renderDashboardPage({ live, sys, mgr, tests, suiteRun, history, tasks, goals }, { workspaceRoot: cfg.workspaceRoot, hours }));
+  res.end(renderDashboardPage({ live, sys, mgr, tests, suiteRun, history, tasks, goals }, { workspaceRoot: cfg.workspaceRoot, hours, identity: cfg.identity }));
 }
 
 /** /dashboard/cards — the JSON data endpoint the dashboard auto-refresh script polls
