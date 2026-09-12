@@ -51,6 +51,20 @@ import {
   HEALTH_REQUIRED_CARRIERS,
   HEALTH_OBSERVED_CARRIERS,
   HEALTH_WINDOW_SEC_DEFAULT,
+  // 业务目标层（第二层提问：退出条件 ⊨ 业务目标 —— gap-goal-sufficiency-judges-wrong-layer-and-emits-unverifiable-verdict）
+  goalSufficiencyVerdict,
+  semanticSufficiencyVerdict,
+  collectObjectiveEvidence,
+  objectiveEvidenceProfile,
+  verifyObjectiveAssertion,
+  objectiveAssertionCommand,
+  objectiveCacheKey,
+  objectiveSufficiencyVerdict,
+  objectiveSufficiencyVerdictDetail,
+  resetObjectiveCacheForTest,
+  resetSufficiencyCacheForTest,
+  OBJECTIVE_EVIDENCE_CARRIERS,
+  OBJECTIVE_ASSERTION_FIELDS,
 } from '../scripts/goal-driver.ts';
 import { runResidentQualityGateLoop } from '../scripts/quality-gate-driver.ts';
 import { DRIVER_KINDS, KNOWN_KINDS } from '../scripts/driver-runtime.ts';
@@ -1637,4 +1651,362 @@ test('deriveTargetHealth 是纯函数三态：probe 失败 ⇒ 独立取值，�
   assert.equal(v.signals, null, '⛔ 不是 []');
   assert.equal(v.cause, 'probe-failed');
   assert.equal(v.liveness.state, 'unknown', '⛔ unknown ≠ idle');
+});
+
+
+// ── 业务目标层（第二层提问：退出条件 ⊨ 业务目标）──────────────────────────────────────────────
+//
+// 任务：gap-goal-sufficiency-judges-wrong-layer-and-emits-unverifiable-verdict。
+// 第一层判「AC 集 ⊇ 退出条件」，第二层判「退出条件（在实际取得的证据下）⊨ 业务目标」。GOAL-016 实测：
+// 第一层 covered 是对的，而业务目标层不充分（样本量 = 1：全部证据来自同一个 project_root）。
+// 四条 AC 的对应单测：AC1 两层可区分 / AC2 指认可复核 / AC3 ⛔ 不默认 covered / AC4 证据真的被消费。
+
+/** 判定器测试缝：把给定对象当 stdout 原样输出（prompt 作末参数追加、被忽略）。 */
+function judgeCmd(obj) {
+  return ['node', '-e', `process.stdout.write(${JSON.stringify(JSON.stringify(obj))})`];
+}
+
+/** 写一个证据载体 `.quay/productization-verification.jsonl`（行 = 记录）。 */
+function writeEvidenceCarrier(tmp, rows) {
+  fs.mkdirSync(path.join(tmp, '.quay'), { recursive: true });
+  fs.writeFileSync(
+    path.join(tmp, '.quay', 'productization-verification.jsonl'),
+    rows.map((r) => JSON.stringify(r)).join('\n') + '\n',
+    'utf8',
+  );
+}
+
+/** 一条证据记录。 */
+function evRecord(ac, { host = 'hostA', project_root = '/p/one', task_id = 'T-1' } = {}) {
+  return { ts: '2026-09-12T00:00:00Z', ac, host, project_root, task_id };
+}
+
+const OBJECTIVE_GOAL = {
+  id: 'GOAL-001',
+  title: 't',
+  body: '## 背景\nbg\n\n## 退出条件\n\n1. 条件一\n',
+};
+const OBJECTIVE_ACS = [
+  { id: 'AC-001', title: 't1', expect: 'e1', status: 'achieved' },
+  { id: 'AC-002', title: 't2', expect: 'e2', status: 'achieved' },
+];
+
+/** 每个用例开头隔离两层缓存的模块级状态（否则前一个用例的裁决会被后一个用例命中）。 */
+function resetObjectiveTestState() {
+  resetSufficiencyCacheForTest();
+  resetObjectiveCacheForTest();
+}
+
+// ── AC1 两层可区分 ────────────────────────────────────────────────────────────────────────
+
+test('AC1: 同一输入上两层给出可区分的结论（第一层 covered ∧ 第二层 unsubstantiated），⛔ 不合并', async () => {
+  resetObjectiveTestState();
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-objective-ac1-'));
+  try {
+    writeEvidenceCarrier(tmp, [evRecord('GOAL-001-AC-001'), evRecord('GOAL-001-AC-002')]);
+
+    // 第一层：机械部分判不出（有退出条件 + 有在域 AC）⇒ 语义判定（缝）判 covered。
+    assert.equal(goalSufficiencyVerdict(OBJECTIVE_GOAL, OBJECTIVE_ACS), 'not-evaluated', '前置：第一层机械部分判不出');
+    const l1 = await semanticSufficiencyVerdict(OBJECTIVE_GOAL, OBJECTIVE_ACS, tmp, {
+      sufficiencyCmd: judgeCmd({ verdict: 'covered' }),
+    });
+    assert.equal(l1, 'covered', '第一层 = covered（AC 集确实覆盖退出条件）');
+
+    // 第二层：同一输入，证据全部来自同一 project_root ⇒ 不充分（带指认）。
+    const evidence = collectObjectiveEvidence(tmp, ['AC-001', 'AC-002'], OBJECTIVE_EVIDENCE_CARRIERS);
+    const l2 = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, evidence, tmp, {
+      objectiveCmd: judgeCmd({ verdict: 'unsubstantiated', field: 'project_root', value: '/p/one' }),
+    });
+    assert.equal(l2.verdict, 'unsubstantiated', '第二层 = unsubstantiated');
+
+    // 两层结论【可区分】：取值不同，且第二层词表不落在第一层的两态里（⛔ 不是同一个词换了层）。
+    assert.notEqual(l1, l2.verdict, '两层结论必须不同形');
+    assert.ok(!['covered', 'insufficient'].includes(l2.verdict), 'unsubstantiated ⛔ 不在第一层词表内');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── AC2 指认可复核 ────────────────────────────────────────────────────────────────────────
+
+test('AC2: unsubstantiated 携带指认，且指认能被一条命令复核（命令真的跑出 matched=total）', async () => {
+  resetObjectiveTestState();
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-objective-ac2-'));
+  try {
+    writeEvidenceCarrier(tmp, [
+      evRecord('GOAL-001-AC-001'),
+      evRecord('GOAL-001-AC-002', { task_id: 'T-2' }),
+    ]);
+    const evidence = collectObjectiveEvidence(tmp, ['AC-001', 'AC-002'], OBJECTIVE_EVIDENCE_CARRIERS);
+    const detail = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, evidence, tmp, {
+      objectiveCmd: judgeCmd({ verdict: 'unsubstantiated', field: 'project_root', value: '/p/one' }),
+    });
+
+    const a = detail.assertion;
+    assert.ok(a !== null, 'unsubstantiated 必须带指认（⛔ 不可复核的判决不得冒充结论）');
+    assert.equal(a.kind, 'single-value-field');
+    assert.equal(a.field, 'project_root');
+    assert.equal(a.value, '/p/one');
+    assert.equal(a.matched, 2, 'matched 由产出侧机械算出（判定器不提供）');
+    assert.equal(a.total, 2, 'total 由产出侧机械算出（判定器不提供）');
+    assert.deepEqual(a.acs, ['GOAL-001-AC-001', 'GOAL-001-AC-002']);
+    assert.deepEqual(a.carriers, ['.quay/productization-verification.jsonl'], '载体是 repo-root-relative 路径（命令要能直接跑）');
+    assert.ok(a.command.includes('python3'), '指认携带一条可复核命令');
+
+    // 真的跑那条命令（在仓库根语义下：cwd = tmp，载体在 .quay/ 下）。
+    const ok = spawnSync('bash', ['-c', a.command], { cwd: tmp, encoding: 'utf8' });
+    assert.equal(ok.status, 0, `复核命令应 exit 0，实际 ${ok.status}：${ok.stderr}`);
+    assert.match(ok.stdout, /matched=2 total=2/, '命令输出与指认的 matched/total 一致');
+
+    // 负控制（同一条命令的能取假半边）：换一个值 ⇒ matched 归零、exit 1。
+    const bad = spawnSync('bash', ['-c', objectiveAssertionCommand(a.acs, a.field, '/p/NOT-THERE', a.carriers)], {
+      cwd: tmp, encoding: 'utf8',
+    });
+    assert.equal(bad.status, 1, '指认为假 ⇒ 命令 exit 1（⛔ 不是恒绿）');
+    assert.match(bad.stdout, /matched=0 total=2/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── AC3 ⛔ 不默认 covered ─────────────────────────────────────────────────────────────────
+
+test('AC3: 无指认的 unsubstantiated ⇒ not-evaluated（⛔ 不是 covered 也不是 unsubstantiated）', async () => {
+  resetObjectiveTestState();
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-objective-ac3a-'));
+  try {
+    writeEvidenceCarrier(tmp, [evRecord('GOAL-001-AC-001'), evRecord('GOAL-001-AC-002')]);
+    const evidence = collectObjectiveEvidence(tmp, ['AC-001', 'AC-002'], OBJECTIVE_EVIDENCE_CARRIERS);
+    const d = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, evidence, tmp, {
+      // 判定器说「不充分」但【不给指认】——这正是「能解释的说法 ≠ 被检验的结论」的形态。
+      objectiveCmd: judgeCmd({ verdict: 'unsubstantiated' }),
+    });
+    assert.equal(d.verdict, 'not-evaluated', '无指认 ⇒ not-evaluated');
+    assert.notEqual(d.verdict, 'substantiated', '⛔ 不默认 covered/substantiated');
+    assert.notEqual(d.verdict, 'unsubstantiated', '⛔ 也不接受这条不可复核的结论');
+    assert.equal(d.cause, 'assertion-missing', '成因可区分：指认缺失');
+    assert.equal(d.assertion, null, '⛔ 不携带一条未复核通过的指认');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('AC3: 指认复核不成立（值与记录不符 / 字段在词表外 / 断言本身为假）⇒ not-evaluated', async () => {
+  resetObjectiveTestState();
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-objective-ac3b-'));
+  try {
+    writeEvidenceCarrier(tmp, [evRecord('GOAL-001-AC-001'), evRecord('GOAL-001-AC-002')]);
+    const evidence = collectObjectiveEvidence(tmp, ['AC-001', 'AC-002'], OBJECTIVE_EVIDENCE_CARRIERS);
+
+    // (a) 值编错了 ⇒ 逐字比对失败。
+    const wrongValue = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, evidence, tmp, {
+      objectiveCmd: judgeCmd({ verdict: 'unsubstantiated', field: 'project_root', value: '/p/INVENTED' }),
+    });
+    assert.equal(wrongValue.verdict, 'not-evaluated');
+    assert.equal(wrongValue.cause, 'assertion-unverifiable');
+
+    // (b) 字段不在白名单（自由文本字段名 ⇒「一条命令复核」无从谈起）。
+    const badField = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, evidence, tmp, {
+      objectiveCmd: judgeCmd({ verdict: 'unsubstantiated', field: 'some_narrative_field', value: 'x' }),
+    });
+    assert.equal(badField.verdict, 'not-evaluated');
+    assert.equal(badField.cause, 'assertion-unverifiable');
+
+    // (c) 指认一个「并非取同一值」的字段：让 task_id 出现两个取值 ⇒ 全称断言不成立。
+    writeEvidenceCarrier(tmp, [
+      evRecord('GOAL-001-AC-001'),
+      evRecord('GOAL-001-AC-002', { task_id: 'T-2' }),
+    ]);
+    const multiEvidence = collectObjectiveEvidence(tmp, ['AC-001', 'AC-002'], OBJECTIVE_EVIDENCE_CARRIERS);
+    assert.equal(verifyObjectiveAssertion('task_id', 'T-1', multiEvidence).ok, false, '前置：task_id 非单一取值');
+    const multi = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, multiEvidence, tmp, {
+      objectiveCmd: judgeCmd({ verdict: 'unsubstantiated', field: 'task_id', value: 'T-1' }),
+    });
+    assert.equal(multi.verdict, 'not-evaluated');
+    assert.equal(multi.cause, 'assertion-unverifiable');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('AC3: 判定器不可用 / 读不懂 / 两次不一致 ⇒ not-evaluated，⛔ 绝不回落 substantiated', async () => {
+  resetObjectiveTestState();
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-objective-ac3c-'));
+  try {
+    writeEvidenceCarrier(tmp, [evRecord('GOAL-001-AC-001')]);
+    const evidence = collectObjectiveEvidence(tmp, ['AC-001'], OBJECTIVE_EVIDENCE_CARRIERS);
+
+    const empty = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, evidence, tmp, { objectiveCmd: [] });
+    assert.equal(empty.verdict, 'not-evaluated');
+    assert.equal(empty.cause, 'judge-unavailable');
+
+    const gone = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, evidence, tmp, {
+      objectiveCmd: ['/nonexistent/definitely-not-a-binary'],
+    });
+    assert.equal(gone.verdict, 'not-evaluated');
+    assert.equal(gone.cause, 'judge-unavailable');
+
+    const gibberish = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, evidence, tmp, {
+      objectiveCmd: ['node', '-e', 'process.stdout.write("I think it is probably fine")'],
+    });
+    assert.equal(gibberish.verdict, 'not-evaluated');
+    assert.equal(gibberish.cause, 'judge-unparseable');
+
+    // 两次取样不一致：第一个样本建计数器文件并答 unsubstantiated，第二个样本见到它改答 substantiated。
+    // ⛔ 不取多数票、⛔ 不回落 substantiated（硬规则：判不出有独立取值）。
+    const counter = path.join(tmp, 'judge-counter');
+    const flip = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, evidence, tmp, {
+      objectiveCmd: ['sh', '-c', `if [ -f ${counter} ]; then echo substantiated; else : > ${counter}; echo unsubstantiated; fi`],
+    });
+    assert.equal(flip.verdict, 'not-evaluated');
+    assert.equal(flip.cause, 'samples-disagree');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── AC4 证据来源真的被消费（⛔ 不是「参数被读到」）──────────────────────────────────────────
+
+test('AC4: 改变载体记录会改变结论（同一判定器输出、同一 goal）', async () => {
+  resetObjectiveTestState();
+  const sameJudge = { verdict: 'unsubstantiated', field: 'project_root', value: '/p/one' };
+  const dirA = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-objective-ac4a-'));
+  const dirB = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-objective-ac4b-'));
+  try {
+    // A：两条记录同源（同一 project_root）⇒ 指认成立 ⇒ unsubstantiated。
+    writeEvidenceCarrier(dirA, [evRecord('GOAL-001-AC-001'), evRecord('GOAL-001-AC-002')]);
+    // B：**只多了一条**来自另一个 project_root 的记录，其余一切相同。
+    writeEvidenceCarrier(dirB, [
+      evRecord('GOAL-001-AC-001'),
+      evRecord('GOAL-001-AC-002'),
+      evRecord('GOAL-001-AC-002', { project_root: '/p/two', task_id: 'T-3' }),
+    ]);
+    const evA = collectObjectiveEvidence(dirA, ['AC-001', 'AC-002'], OBJECTIVE_EVIDENCE_CARRIERS);
+    const evB = collectObjectiveEvidence(dirB, ['AC-001', 'AC-002'], OBJECTIVE_EVIDENCE_CARRIERS);
+
+    // 先证明输入真的不同（否则下面的「结论不同」是空转）。
+    assert.equal(objectiveEvidenceProfile(evA).distinctProjectRoots.length, 1);
+    assert.equal(objectiveEvidenceProfile(evB).distinctProjectRoots.length, 2);
+    assert.notEqual(
+      objectiveCacheKey(OBJECTIVE_GOAL, OBJECTIVE_ACS, evA),
+      objectiveCacheKey(OBJECTIVE_GOAL, OBJECTIVE_ACS, evB),
+      '载体记录进缓存 key ⇒ 记录一变必重判（⛔ 不拿旧证据下的裁决继续用）',
+    );
+
+    const dA = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, evA, dirA, { objectiveCmd: judgeCmd(sameJudge) });
+    const dB = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, evB, dirB, { objectiveCmd: judgeCmd(sameJudge) });
+
+    assert.equal(dA.verdict, 'unsubstantiated', 'A：证据同源 ⇒ 指认成立');
+    assert.equal(dB.verdict, 'not-evaluated', 'B：证据变成两个 project_root ⇒ 同一条指认不再成立');
+    assert.notEqual(dA.verdict, dB.verdict, '★ AC4：同一判定器输出下，结论随载体记录改变');
+    assert.equal(dB.cause, 'assertion-unverifiable', '成因说明是「指认被记录否证」，⛔ 不是判定器换了话');
+  } finally {
+    fs.rmSync(dirA, { recursive: true, force: true });
+    fs.rmSync(dirB, { recursive: true, force: true });
+  }
+});
+
+test('AC4: 零证据记录 ⇒ not-evaluated(no-evidence-records)，profile 是机械读出而非常量', async () => {
+  resetObjectiveTestState();
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-objective-ac4z-'));
+  try {
+    // 载体里有一条**不属于本 GOAL** 的记录 ⇒ 对 GOAL-001 而言证据为零（来源完备性：过滤按 AC 归属）。
+    writeEvidenceCarrier(tmp, [evRecord('GOAL-002-AC-009')]);
+    const none = collectObjectiveEvidence(tmp, ['AC-001', 'AC-002'], OBJECTIVE_EVIDENCE_CARRIERS);
+    assert.equal(none.length, 0, '不属本 GOAL 的记录不计入证据');
+    const d = await objectiveSufficiencyVerdictDetail(OBJECTIVE_GOAL, OBJECTIVE_ACS, none, tmp, {
+      // 判定器即使说「成立」，零证据也不得采信（⛔ 不是「判定器说了算」）。
+      objectiveCmd: judgeCmd({ verdict: 'substantiated' }),
+    });
+    assert.equal(d.verdict, 'not-evaluated', '零证据 ⇒ not-evaluated（⛔ 不默认 substantiated）');
+    assert.equal(d.cause, 'no-evidence-records');
+    assert.equal(d.profile.records, 0, 'profile 仍被产出（「查过且零条」与「没查」不同形）');
+    assert.deepEqual(d.profile.distinctProjectRoots, []);
+
+    // 同一条记录换成属于本 GOAL ⇒ 证据为 1 条（profile 是机械读出，不是一个恒常量）。
+    writeEvidenceCarrier(tmp, [evRecord('GOAL-001-AC-001')]);
+    const one = collectObjectiveEvidence(tmp, ['AC-001', 'AC-002'], OBJECTIVE_EVIDENCE_CARRIERS);
+    assert.equal(one.length, 1);
+    assert.deepEqual(objectiveEvidenceProfile(one).distinctProjectRoots, ['/p/one']);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('AC4: verifyObjectiveAssertion 的机械复核能取假（同源 ⇒ ok；一条不同源 ⇒ 不 ok）', () => {
+  resetObjectiveTestState();
+  const same = [evRecord('GOAL-001-AC-001'), evRecord('GOAL-001-AC-002')];
+  const mixed = [...same, evRecord('GOAL-001-AC-002', { project_root: '/p/two' })];
+  const strip = ({ ok, matched, total }) => ({ ok, matched, total });
+  assert.deepEqual(strip(verifyObjectiveAssertion('project_root', '/p/one', same)), { ok: true, matched: 2, total: 2 });
+  assert.deepEqual(strip(verifyObjectiveAssertion('project_root', '/p/one', mixed)), { ok: false, matched: 2, total: 3 });
+  // 空集上的全称命题恒真 → 本复核显式判不通过（硬规则 4：结构上不可能取假的量不是测量）。
+  assert.equal(verifyObjectiveAssertion('project_root', '/p/one', []).ok, false, '零记录不算通过');
+  assert.equal(verifyObjectiveAssertion('nope', '/p/one', same).ok, false, '字段在词表外 ⇒ 不通过');
+  assert.ok(OBJECTIVE_ASSERTION_FIELDS.includes('project_root'));
+});
+
+// ── DoD: 第一层判定不得因新增提问层而退化 ──────────────────────────────────────────────────
+
+test('DoD: 第一层三态与 goalFlipDecision 原样不变（新层是并列读数，⛔ 不接进关闸）', () => {
+  // 与 goal-sufficiency-gate.test.mjs 逐条同断言：新层不得让这三条结论漂移。
+  resetObjectiveTestState();
+  assert.equal(goalSufficiencyVerdict({ id: 'GOAL-001', body: '## body\nx' }, [{ id: 'AC-001' }]), 'insufficient');
+  assert.equal(goalSufficiencyVerdict({ id: 'GOAL-001', body: '## 退出条件\n\n1. 条件一\n' }, []), 'insufficient');
+  assert.equal(goalSufficiencyVerdict({ id: 'GOAL-001', body: '## 退出条件\n\n1. 条件一\n' }, [{ id: 'AC-001' }]), 'not-evaluated');
+  assert.equal(goalSufficiencyVerdict({ id: 'GOAL-001', body: '## 退出条件\n\n## 风险\n' }, [{ id: 'AC-001' }]), 'insufficient');
+  // 关闸判据只看第一层 verdict（第二层不进 goalFlipDecision）。
+  const records = [
+    { id: 'GOAL-001', status: 'active' },
+    { id: 'AC-001', goal: 'GOAL-001', status: 'achieved' },
+  ];
+  assert.equal(goalFlipDecision(records, 'GOAL-001', { verdict: 'covered' }), true);
+  assert.equal(goalFlipDecision(records, 'GOAL-001', { verdict: 'not-evaluated' }), false);
+});
+
+test('DoD: runGoalRound 同时产出两层 fact（goal-sufficiency 与 goal-objective 并列，⛔ 互不含对方的键）', async () => {
+  resetObjectiveTestState();
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-objective-round-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true });
+    writeGoalFile(tmp, {
+      id: 'GOAL-001', status: 'active', kind: 'goal',
+      body: '## 背景\nbg\n\n## 退出条件\n\n1. 条件一\n',
+    });
+    writeGoalFile(tmp, { id: 'AC-001', status: 'achieved', kind: 'criterion', goal: 'GOAL-001', criterion: 'true' });
+    writeGoalFile(tmp, { id: 'AC-002', status: 'achieved', kind: 'criterion', goal: 'GOAL-001', criterion: 'true' });
+    writeEvidenceCarrier(tmp, [evRecord('GOAL-001-AC-001'), evRecord('GOAL-001-AC-002')]);
+
+    const { sufficiencyFacts, objectiveFacts } = await runGoalRound(tmp, {
+      scriptRoot: repoRoot,
+      gapWorkerCmd: 'true',
+      resourceGateArgv: ['true'],
+      sufficiencyCmd: judgeCmd({ verdict: 'covered' }),
+      objectiveCmd: judgeCmd({ verdict: 'unsubstantiated', field: 'project_root', value: '/p/one' }),
+    });
+
+    assert.equal(sufficiencyFacts.length, 1, '一条 active GOAL ⇒ 一条 sufficiency fact');
+    assert.equal(objectiveFacts.length, 1, '一条 active GOAL ⇒ 一条 objective fact');
+    assert.equal(sufficiencyFacts[0].name, 'goal-sufficiency');
+    assert.equal(objectiveFacts[0].name, 'goal-objective');
+
+    // 第一层：原形不变（AC-212 判据读的正是 value.sufficiency）。
+    const s = sufficiencyFacts[0].value.sufficiency;
+    assert.equal(s.verdict, 'covered', '第一层结论不被新层改变（同输入 ⇒ 仍 covered）');
+
+    // 第二层：独立取值 + 指认 + 证据概况。
+    const o = objectiveFacts[0].value.objective;
+    assert.equal(o.goal, 'GOAL-001');
+    assert.equal(o.verdict, 'unsubstantiated');
+    assert.equal(o.assertion.field, 'project_root');
+    assert.equal(o.profile.records, 2);
+    assert.deepEqual(o.profile.distinctProjectRoots, ['/p/one']);
+
+    // ⛔ 不合并：两条 fact 各带自己的键，互不冒充对方。
+    assert.equal(o.sufficiency, undefined, 'objective fact ⛔ 不含 sufficiency 键');
+    assert.equal(s.objective, undefined, 'sufficiency fact ⛔ 不含 objective 键');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });

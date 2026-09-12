@@ -717,36 +717,19 @@ function ensureSufficiencyCacheLoaded(dir: string): void {
   if (sufficiencyCacheDir === dir) return;
   sufficiencyCache.clear();
   sufficiencyCacheDir = dir;
-  try {
-    const raw = fs.readFileSync(path.join(dir, SUFFICIENCY_CACHE_BASENAME), "utf8");
-    const parsed = JSON.parse(raw) as { entries?: unknown } | null;
-    const entries = parsed && typeof parsed === "object" ? parsed.entries : null;
-    if (entries && typeof entries === "object") {
-      for (const [k, v] of Object.entries(entries as Record<string, unknown>)) {
-        if (v && typeof v === "object") {
-          const verdict = (v as { verdict?: unknown }).verdict;
-          const ts = (v as { ts?: unknown }).ts;
-          if (verdict === "covered" || verdict === "insufficient") {
-            sufficiencyCache.set(k, { verdict, ts: typeof ts === "string" ? ts : "" });
-          }
-        }
-      }
-    }
-  } catch {
-    /* 无缓存文件 / 读不懂 ⇒ 空缓存开始（重新判，⛔ 不冒充命中） */
-  }
+  // 载体读写复用业务目标层的通用实现（readCacheMap/writeCacheMap，定义在下方业务目标层一节；
+  // 函数声明提升 ⇒ 此处调用合法）。⛔ 不为第二层抄一份同形代码——两份解析器漂移是下一个假命中源。
+  const loaded = readCacheMap<SufficiencyCacheEntry>(dir, SUFFICIENCY_CACHE_BASENAME, (v) => {
+    const verdict = v.verdict;
+    if (verdict !== "covered" && verdict !== "insufficient") return null;
+    return { verdict, ts: typeof v.ts === "string" ? v.ts : "" };
+  });
+  for (const [k, v] of loaded) sufficiencyCache.set(k, v);
 }
 
 /** 落盘缓存（整份覆盖写；写失败 ⇒ 内存缓存仍在，跨重启退化到重新判——观测性退化，⛔ 非正确性破坏）。 */
 function persistSufficiencyCache(dir: string): void {
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-    const entries: Record<string, SufficiencyCacheEntry> = {};
-    for (const [k, v] of sufficiencyCache) entries[k] = v;
-    fs.writeFileSync(path.join(dir, SUFFICIENCY_CACHE_BASENAME), JSON.stringify({ version: 1, entries }, null, 2) + "\n");
-  } catch {
-    /* 写失败 ⇒ 不抛（本轮裁决不受影响；跨重启存活退化为进程内持久） */
-  }
+  writeCacheMap(dir, SUFFICIENCY_CACHE_BASENAME, sufficiencyCache);
 }
 
 /** 清空充分性裁决缓存（测试缝：不同 test 隔离状态；⛔ 生产不调）。同时解绑落盘目录，使下一次按传入
@@ -856,6 +839,569 @@ export async function semanticSufficiencyVerdict(
   opts: SufficiencyVerdictOpts = {},
 ): Promise<SufficiencyVerdict> {
   return (await semanticSufficiencyVerdictDetail(goal, inScopeAcs, root, opts)).verdict;
+}
+
+// ── 业务目标层（第二层提问：退出条件 ⊨ 业务目标）────────────────────────────────────────────
+//
+// 缺陷（2026-09-12 实测，本任务立案依据）：上一节判的是 **`AC ⊇ 退出条件`**——GOAL-016 判 `covered`
+// 是对的（四条 AC 逐条覆盖了正文写下的退出条件）。但同日人工审计给出**相反结论**：该 AC 集对其
+// **业务目标**（quay 能否自主、可重复地驱动第三方项目开发）不充分——样本量 = 1、从未验证失败拦截、
+// 没有任何 AC 约束人介入次数。⇒ ⛔ 不是判错，是**没有任何机制在问上一层**。
+//
+// 本节的第二层只回答一个问题：**「退出条件本身 ⊨ 业务目标吗」**——注意这不是语义换皮：退出条件是
+// **手段**（「四条 AC 全绿」），业务目标是**目的**（「这个能力真的成立吗」）。GOAL-016 的实例里，
+// 四条 AC 全绿**完全成立**而目的**不成立**——两层必须能给出**相反**的结论，故⛔ **绝不合并成一个判决**。
+//
+// 症状二（同一任务）：第一层只吐 `covered`/`insufficient` 一个词，而**语义判断天然产出「能解释的
+// 说法」**（硬规则推论四：能解释 ≠ 被检验）⇒ 判决不可机械复核。⇒ 本层对 `unsubstantiated` 强制要求
+// 一条**指认**——「本 GOAL 已达成 AC 的**全部**证据记录，其 `<field>` 均为 `<value>`」——并**在产出侧
+// 机械复核**它（字段白名单 / 每条记录该字段非空 / 全部取同一值 / 值逐字相符）。指认缺失或不成立
+// ⇒ `not-evaluated`（cause=assertion-missing / assertion-unverifiable），⛔ 绝不默认 `covered`。
+//
+// ⛔ 输入里必须有**证据来源**（已达成 AC 的载体记录，`host`/`project_root`/`task_id`）：没有它，
+// 判定器**结构上看不见**「证据同质」——而这正是 GOAL-016 的例子被漏掉的那个维度（AC-234 的判据
+// 之所以后来被发现「绿不覆盖真实形态」，靠的就是「语义提出可疑处 → 机械验证模式匹配」；
+// 若当初的判决带这种指认，它本可以早被发现）。
+
+/** 业务目标层三态词表。⛔ 与 SufficiencyVerdict **取值不同形**：两层命题不同，共用词表会让两层判决
+ *  在轮记录里同形（硬规则 3b 同族：可区分的东西不得写成同一取值）。 */
+export type ObjectiveVerdict = "substantiated" | "unsubstantiated" | "not-evaluated";
+
+/** 业务目标层的 not-evaluated 成因（⛔ 六种成因都仍是 not-evaluated，只是【可区分】）：
+ *  no-evidence-records    该 GOAL 名下已达成 AC 的载体记录 = 0 ⇒ 结构上看不见业务目标层，判决无从谈起；
+ *  judge-unavailable      判定器不可用（空命令 / launchArgv 失败 / spawn 失败 / 超时 / 非零退出）；
+ *  judge-unparseable      判定器跑通（exit 0）但输出不可解析成明确 substantiated/unsubstantiated；
+ *  samples-disagree       两次取样不一致（一致性守卫正确工作）；
+ *  assertion-missing      判 `unsubstantiated` 却**没给指认** ⇒ 硬规则 3b：不可复核的判决不得冒充结论；
+ *  assertion-unverifiable 给了指认，但**机械复核不成立**（字段不在白名单 / 某条记录该字段为空 /
+ *                         取值不唯一 / 与所指认的值逐字不符）。 */
+export type ObjectiveNotEvaluatedCause =
+  | "no-evidence-records"
+  | "judge-unavailable"
+  | "judge-unparseable"
+  | "samples-disagree"
+  | "assertion-missing"
+  | "assertion-unverifiable";
+
+/** 指认可指认的字段白名单（**封闭集**）：只认载体记录上这三个可机械比对的标量字段。⛔ 不接受自由
+ *  文本字段名——一个指认若不能落到封闭字段集上，「一条命令复核」就无从谈起（可复核性正是本层的产物）。 */
+export const OBJECTIVE_ASSERTION_FIELDS = ["project_root", "host", "task_id"] as const;
+export type ObjectiveAssertionField = (typeof OBJECTIVE_ASSERTION_FIELDS)[number];
+
+/** 一条**可机械复核**的指认：断言「本 GOAL 已达成 AC 的**全部**证据记录，其 `<field>` 均为 `<value>`」。
+ *  `matched`/`total` 由产出侧机械算出（⛔ 判定器不提供，故不可被编造）；`command` 是复核它的**一条命令**。 */
+export interface ObjectiveAssertion {
+  kind: "single-value-field";
+  field: ObjectiveAssertionField;
+  value: string;
+  /** 被考察的 AC id（载体里 `ac` 字段的原始形态，如 `GOAL-016-AC-247`），已排序。 */
+  acs: string[];
+  /** 指认的证据来源（**repo-root-relative** 路径，如 `.quay/productization-verification.jsonl`），
+   *  已排序——⛔ 不是 basename：`command` 要在仓库根直接跑，故必须带 `.quay/` 前缀。 */
+  carriers: string[];
+  matched: number;
+  total: number;
+  /** 复核此指认的一条 shell 命令（在仓库根执行；打印 `matched=<n> total=<n>`，全中则 exit 0）。 */
+  command: string;
+}
+
+/** 一条证据记录（载体 jsonl 行）的规范化视图。缺字段 → 空串（⛔ 与「该字段为 null」不同形，
+ *  空串在复核里必然不匹配任何非空 value ⇒ fail-closed）。 */
+export interface ObjectiveEvidenceRecord {
+  ac: string;
+  host: string;
+  project_root: string;
+  task_id: string;
+  carrier: string;
+  line: number;
+}
+
+/** 证据概况（**机械可算**，进 prompt 也进轮记录）：判定器与审计者都靠它看「证据是否同质」。 */
+export interface ObjectiveEvidenceProfile {
+  records: number;
+  acs: string[];
+  distinctProjectRoots: string[];
+  distinctHosts: string[];
+  distinctTasks: string[];
+}
+
+/** 业务目标层判决明细。`assertion` 只在 `unsubstantiated` 时非 null（substantiated 无需指认；
+ *  not-evaluated 的指认不成立故不携带——⛔ 带一条未复核通过的指认会让它与「复核通过」同形）。 */
+export interface ObjectiveVerdictDetail {
+  verdict: ObjectiveVerdict;
+  cause: ObjectiveNotEvaluatedCause | null;
+  assertion: ObjectiveAssertion | null;
+  /** 判定器实际看到的证据概况；零记录时仍非 null（records=0）——「查过且零条」与「没查」不同形。 */
+  profile: ObjectiveEvidenceProfile;
+}
+
+/** 证据载体所在目录（相对仓库根）。 */
+export const OBJECTIVE_EVIDENCE_DIR_REL = ".quay";
+
+/** 证据载体缺省清单（`OBJECTIVE_EVIDENCE_DIR_REL` 下的 basename）。⛔ **有界**：⛔ 不扫 `.quay/*.jsonl`
+ *  （该目录下有 18MB 的 gate-events 与 57MB 的 meta-driver-round，逐轮全扫会把 driver 拖死）。 */
+export const OBJECTIVE_EVIDENCE_CARRIERS: readonly string[] = ["productization-verification.jsonl"];
+
+/** AC id 归一：剥掉 `GOAL-NNN-` 前缀，使 `GOAL-016-AC-247` 与 `AC-247` 同形可比
+ *  （载体记的是前者，`goals/` 里的 id 是后者——两处形态不同是本仓的既成事实）。 */
+function normalizeAcId(id: string): string {
+  return id.replace(/^GOAL-\d+-/, "");
+}
+
+/** 收集本 GOAL 已达成 AC 的证据记录（⛔ 只读、⛔ 不 spawn、⛔ 不改任何状态）。读不到载体/读不懂某行
+ *  ⇒ 跳过该行（fail-soft：**读不到**与**读到零条**在本层的处置相同——都是 `no-evidence-records`，
+ *  因为业务目标层需要的「证据」在两种情形下同样不可见；这与硬规则 3b 不冲突：本层不产出「合格」态）。 */
+export function collectObjectiveEvidence(
+  root: string,
+  acIds: string[],
+  carriers: readonly string[] = OBJECTIVE_EVIDENCE_CARRIERS,
+  carrierDirRel: string = OBJECTIVE_EVIDENCE_DIR_REL,
+): ObjectiveEvidenceRecord[] {
+  const want = new Set(acIds.map(normalizeAcId));
+  const out: ObjectiveEvidenceRecord[] = [];
+  for (const name of carriers) {
+    // 记录的 carrier 是 **repo-root-relative** 路径（`root` 之下的载体目录 + basename）——`command`
+    // 要在仓库根直接跑，⛔ 不是裸 basename（实测：裸 basename 在仓库根必然 FileNotFoundError）。
+    const rel = path.posix.join(carrierDirRel, name);
+    let raw: string;
+    try {
+      raw = fs.readFileSync(path.join(root, carrierDirRel, name), "utf8");
+    } catch {
+      continue; // 载体缺失 ⇒ 本载体零记录（其余载体照读）
+    }
+    const lines = raw.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line === "") continue;
+      let r: Record<string, unknown>;
+      try {
+        r = JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      if (r === null || typeof r !== "object") continue;
+      const ac = String(r.ac ?? "");
+      if (!want.has(normalizeAcId(ac))) continue;
+      out.push({
+        ac,
+        host: String(r.host ?? ""),
+        project_root: String(r.project_root ?? ""),
+        task_id: String(r.task_id ?? ""),
+        carrier: rel,
+        line: i + 1,
+      });
+    }
+  }
+  return out;
+}
+
+/** 证据概况（纯函数）。distinct* 均排序、去重，⛔ 不含空串（空值不是「一个取值」，它是「该字段没写」；
+ *  混进来会让「唯一取值」的判读被一条无值记录污染）。 */
+export function objectiveEvidenceProfile(evidence: ObjectiveEvidenceRecord[]): ObjectiveEvidenceProfile {
+  const uniq = (xs: string[]): string[] => [...new Set(xs.filter((s) => s !== ""))].sort();
+  return {
+    records: evidence.length,
+    acs: uniq(evidence.map((e) => e.ac)),
+    distinctProjectRoots: uniq(evidence.map((e) => e.project_root)),
+    distinctHosts: uniq(evidence.map((e) => e.host)),
+    distinctTasks: uniq(evidence.map((e) => e.task_id)),
+  };
+}
+
+/** 机械复核一条指认（纯函数，⛔ 不写盘、⛔ 不 spawn）：字段在白名单内，且**每一条**被考察记录该字段
+ *  非空、逐字等于所指认的值。返回 matched/total——`ok` 当且仅当 `total>0 ∧ matched===total`
+ *  （零记录不算通过：空集上的全称命题恒真，那是硬规则 4 的「结构上不可能取假的量」）。 */
+export function verifyObjectiveAssertion(
+  field: string,
+  value: string,
+  evidence: ObjectiveEvidenceRecord[],
+): { ok: boolean; matched: number; total: number; reason: string } {
+  const total = evidence.length;
+  if (!(OBJECTIVE_ASSERTION_FIELDS as readonly string[]).includes(field)) {
+    return { ok: false, matched: 0, total, reason: `field-not-in-vocabulary:${field}` };
+  }
+  if (value === "") return { ok: false, matched: 0, total, reason: "empty-value" };
+  const f = field as ObjectiveAssertionField;
+  const matched = evidence.filter((e) => e[f] === value).length;
+  if (total === 0) return { ok: false, matched, total, reason: "no-evidence-records" };
+  if (matched !== total) return { ok: false, matched, total, reason: `partial-match:${matched}/${total}` };
+  return { ok: true, matched, total, reason: "all-records-match" };
+}
+
+/** shell 单引号转义（`'` ⇒ `'\''`）。 */
+function shSingleQuote(s: string): string {
+  return `'${s.split("'").join(`'\\''`)}'`;
+}
+
+/** 指认的一条复核命令（纯字符串构造）：在仓库根执行，读**同一批载体**里**同一批 AC** 的记录，
+ *  打印 `matched=<n> total=<n>`，全中 exit 0、否则 exit 1。⛔ 这份命令与 `verifyObjectiveAssertion`
+ *  是同一个谓词的两种执行体（一个跑在 driver 进程内、一个可被人/别的会话独立复跑）——
+ *  「判决不可复核」这个症状的**产物**就是它。 */
+export function objectiveAssertionCommand(
+  acs: string[],
+  field: string,
+  value: string,
+  carriers: readonly string[] = OBJECTIVE_EVIDENCE_CARRIERS,
+): string {
+  const acsJson = JSON.stringify([...new Set(acs.map(normalizeAcId))].sort());
+  const carriersJson = JSON.stringify([...carriers].sort());
+  const py =
+    `import json,re;` +
+    `acs=set(${acsJson});carriers=${carriersJson};` +
+    `norm=lambda s: re.sub(r'^GOAL-\\d+-','',s);` +
+    `rs=[json.loads(l) for c in carriers for l in open(c) if l.strip()];` +
+    `rs=[r for r in rs if norm(str(r.get("ac") or "")) in acs];` +
+    `m=[r for r in rs if str(r.get(${JSON.stringify(field)}) or "")==${JSON.stringify(value)}];` +
+    `print("matched=%d total=%d" % (len(m),len(rs)));` +
+    `raise SystemExit(0 if len(rs)>0 and len(m)==len(rs) else 1)`;
+  return `python3 -c ${shSingleQuote(py)}`;
+}
+
+/** 业务目标的正文文本：body 的 `## 业务目标` 节；无该节 ⇒ ""（⛔ 不拿整篇 body 顶替——那是把「没写明」
+ *  伪装成「写明了」，硬规则 6）。无该节时 prompt 明确告知判定器「未显式写下，从标题与退出条件推断」，
+ *  使「目标未写明」本身成为一个可被判定器看见的事实，而不是一段空白。 */
+function businessObjectiveText(body: string): string {
+  const m = body.match(/##[ \t]+业务目标[ \t]*\r?\n([\s\S]*?)(?=\r?\n##[ \t]|$)/);
+  return m !== null ? m[1].trim() : "";
+}
+
+/** 业务目标层的 prompt：把**两层命题分别**摆明（第一层：AC 覆盖退出条件；第二层：退出条件在**实际
+ *  取得的证据**下是否 ⊨ 业务目标），并把证据概况与逐条证据**结构化**喂进去（⛔ 散文指令）。
+ *  输出契约（解析靠 parseObjectiveJudge）：只输出一行 JSON；判 unsubstantiated **必须**带
+ *  `field`/`value` 指认（值取自下面 `distinct_*` 列表——⛔ 不是让判定器去编一个值）。 */
+export function buildObjectivePrompt(
+  goal: Record<string, unknown>,
+  inScopeAcs: Array<Record<string, unknown>>,
+  evidence: ObjectiveEvidenceRecord[],
+  root: string,
+): string {
+  const gid = String(goal.id ?? "");
+  const title = String(goal.title ?? "");
+  const body = String(goal.body ?? "");
+  const objective = businessObjectiveText(body);
+  const exitText = exitConditionsText(body);
+  const profile = objectiveEvidenceProfile(evidence);
+  const acLines = inScopeAcs.length === 0
+    ? "(none)"
+    : inScopeAcs
+        .map((ac) => `- ${String(ac.id ?? "")}: ${String(ac.title ?? "")} | expect=${String(ac.expect ?? "")}`)
+        .join("\n");
+  const evLines = evidence.length === 0
+    ? "(none)"
+    : evidence
+        .map((e) => `- ${e.ac} host=${e.host} project_root=${e.project_root} task_id=${e.task_id}`)
+        .join("\n");
+  return [
+    "You are a goal-objective judge in the quay repo. A separate judge already answers a DIFFERENT question:",
+    "  (layer 1) does the in-scope AC set cover the goal's exit conditions?  <-- NOT your question.",
+    "Your question is (layer 2): do the exit conditions themselves substantiate the goal's BUSINESS OBJECTIVE —",
+    "the real-world outcome the goal exists to bring about? Exit conditions are a MEANS; the objective is the END.",
+    "A goal whose exit conditions are fully met can still fail to substantiate its objective (e.g. the evidence",
+    "shows a single instance where the objective claims a capability; or a failure path the objective depends on",
+    "was never exercised). Judge ONLY this layer; the two layers may and should disagree.",
+    `Repo root: ${root}.`,
+    `goal_id=${gid}`,
+    `goal_title=${title}`,
+    "## 业务目标 (business objective, verbatim from the goal body):",
+    objective === "" ? "(NOT WRITTEN DOWN in the goal body — infer it from the title and exit conditions below, and treat the absence itself as a weakness of substantiation.)" : objective,
+    "## 退出条件 (exit conditions):",
+    exitText,
+    "## In-scope ACs:",
+    acLines,
+    "## Evidence actually collected for the achieved ACs (normalized carrier records):",
+    evLines,
+    "## Evidence profile (mechanically computed):",
+    `records=${profile.records} distinct_project_roots=${JSON.stringify(profile.distinctProjectRoots)} ` +
+      `distinct_hosts=${JSON.stringify(profile.distinctHosts)} distinct_tasks=${JSON.stringify(profile.distinctTasks)}`,
+    "## Output contract (EXACTLY one line of JSON, nothing else):",
+    '{"verdict":"substantiated"} — the exit conditions, on this evidence, establish the business objective.',
+    '{"verdict":"unsubstantiated","field":"<f>","value":"<v>"} — they do not, AND you can point at a',
+    `mechanically checkable reason: every evidence record above has field <f> equal to <v>. <f> must be one of ${JSON.stringify([...OBJECTIVE_ASSERTION_FIELDS])}; <v> must be copied VERBATIM from the distinct values listed above (a value you invent will fail mechanical re-verification and your verdict will be discarded).`,
+    "If you cannot express such a checkable reason, still answer unsubstantiated WITHOUT the field/value keys —",
+    "the result will be recorded as not-evaluated rather than as a substantiated/unsupported claim.",
+  ].join("\n");
+}
+
+/** 判定器的解析结果：verdict + （仅 unsubstantiated 时可能有的）指认字段/值。⛔ 判定器**不提供**
+ *  matched/total——那两个数由产出侧机械算出，故判定器编不出来。 */
+export interface ObjectiveJudgeParse {
+  verdict: ObjectiveVerdict;
+  field: string | null;
+  value: string | null;
+}
+
+/** 业务目标层 stdout → 三态词表（fail-closed 核心，同 parseSemanticSufficiencyVerdict 的手法）：
+ *  只有【明确、可解析】的 `substantiated`/`unsubstantiated` 才返回；其余一切（非零退出、空输出、
+ *  读不懂、JSON 解析失败）⇒ not-evaluated。⛔ 绝不把「读不懂」回落成 substantiated。 */
+export function parseObjectiveJudge(stdout: string | null, exitCode: number | null): ObjectiveJudgeParse {
+  if (exitCode !== 0) return { verdict: "not-evaluated", field: null, value: null };
+  const text = (stdout ?? "").trim();
+  if (text === "substantiated" || text === "unsubstantiated") {
+    return { verdict: text, field: null, value: null };
+  }
+  const candidates = [text, ...text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean).reverse()];
+  for (const cand of candidates) {
+    try {
+      const obj = JSON.parse(cand) as Record<string, unknown> | null;
+      if (obj === null || typeof obj !== "object") continue;
+      if (obj.verdict !== "substantiated" && obj.verdict !== "unsubstantiated") continue;
+      const field = typeof obj.field === "string" ? obj.field : null;
+      const value = typeof obj.value === "string" ? obj.value : null;
+      return { verdict: obj.verdict as ObjectiveVerdict, field, value };
+    } catch {
+      /* 非 JSON 行，继续向上找 */
+    }
+  }
+  return { verdict: "not-evaluated", field: null, value: null };
+}
+
+/** 业务目标层的输入哈希（确定性缓存 key）：goal.id ‖ 退出条件 ‖ 在域 AC ‖ **证据概况 + 每条证据记录的
+ *  规范键**。⛔ 证据进 key 是本层的要害（AC4）：载体记录一变（多一条来自新 project_root 的记录、
+ *  或某条记录的 host 变了），key 必变 ⇒ 自动重判，⛔ 不会拿旧证据下的裁决继续用。 */
+export function objectiveCacheKey(
+  goal: Record<string, unknown>,
+  inScopeAcs: Array<Record<string, unknown>>,
+  evidence: ObjectiveEvidenceRecord[],
+): string {
+  const canonical = JSON.stringify({
+    goal: String(goal.id ?? ""),
+    exit: exitConditionsText(String(goal.body ?? "")),
+    objective: businessObjectiveText(String(goal.body ?? "")),
+    acs: inScopeAcs.map((ac) => [String(ac.id ?? ""), String(ac.title ?? ""), String(ac.expect ?? "")]),
+    evidence: evidence.map((e) => [e.carrier, e.line, e.ac, e.host, e.project_root, e.task_id]),
+  });
+  return createHash("sha256").update(canonical).digest("hex");
+}
+
+/** 业务目标层裁决的缓存条目。⛔ 与第一层一样只存**确定**裁决（substantiated / unsubstantiated），
+ *  not-evaluated 永不入缓存（硬规则 3b：缓存不得把「判不出」变成「合格」）。指认随裁决一并入缓存
+ *  ——它是裁决的一部分（「判决 + 指认」才是本层的输出形态），丢了指认会让缓存命中退化成「无指认的
+ *  unsubstantiated」，那正是本层禁止的形态。 */
+interface ObjectiveCacheEntry {
+  verdict: ObjectiveVerdict;
+  assertion: ObjectiveAssertion | null;
+  ts: string;
+}
+
+const objectiveCache = new Map<string, ObjectiveCacheEntry>();
+const OBJECTIVE_CACHE_BASENAME = "goal-objective-cache.json";
+let objectiveCacheDir: string | null = null;
+
+/** 缓存载体的通用读（JSON：`{version, entries:{k:{...}}}`）。`keep` 把一条原始条目映射成内部形态；
+ *  返回 null ⇒ 丢弃该条（⛔ 读不懂的单条不得冒充命中）。整份读不到/解析失败 ⇒ 空 Map（fail-closed）。 */
+function readCacheMap<T>(dir: string, basename: string, keep: (v: Record<string, unknown>) => T | null): Map<string, T> {
+  const out = new Map<string, T>();
+  let raw: string;
+  try {
+    raw = fs.readFileSync(path.join(dir, basename), "utf8");
+  } catch {
+    return out;
+  }
+  try {
+    const parsed = JSON.parse(raw) as { entries?: unknown } | null;
+    const entries = parsed && typeof parsed === "object" ? parsed.entries : null;
+    if (entries && typeof entries === "object") {
+      for (const [k, v] of Object.entries(entries as Record<string, unknown>)) {
+        if (v && typeof v === "object") {
+          const kept = keep(v as Record<string, unknown>);
+          if (kept !== null) out.set(k, kept);
+        }
+      }
+    }
+  } catch {
+    /* 读不懂 ⇒ 空缓存开始（重新判，⛔ 不冒充命中） */
+  }
+  return out;
+}
+
+/** 缓存载体的通用写（整份覆盖；写失败 ⇒ 静默退化到进程内持久，观测性退化而非正确性破坏）。 */
+function writeCacheMap<T>(dir: string, basename: string, entries: Map<string, T>): void {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const obj: Record<string, T> = {};
+    for (const [k, v] of entries) obj[k] = v;
+    fs.writeFileSync(path.join(dir, basename), JSON.stringify({ version: 1, entries: obj }, null, 2) + "\n");
+  } catch {
+    /* 写失败 ⇒ 不抛 */
+  }
+}
+
+function ensureObjectiveCacheLoaded(dir: string): void {
+  if (objectiveCacheDir === dir) return;
+  objectiveCache.clear();
+  objectiveCacheDir = dir;
+  const loaded = readCacheMap<ObjectiveCacheEntry>(dir, OBJECTIVE_CACHE_BASENAME, (v) => {
+    const verdict = v.verdict;
+    if (verdict !== "substantiated" && verdict !== "unsubstantiated") return null;
+    const a = v.assertion;
+    const assertion =
+      a && typeof a === "object" && typeof (a as ObjectiveAssertion).field === "string" &&
+      typeof (a as ObjectiveAssertion).value === "string"
+        ? (a as ObjectiveAssertion)
+        : null;
+    return { verdict, assertion, ts: typeof v.ts === "string" ? v.ts : "" };
+  });
+  for (const [k, v] of loaded) objectiveCache.set(k, v);
+}
+
+/** 清空业务目标层缓存（测试缝：模拟进程重启 / 隔离不同 test 的状态；⛔ 生产不调）。 */
+export function resetObjectiveCacheForTest(): void {
+  objectiveCache.clear();
+  objectiveCacheDir = null;
+}
+
+/** 业务目标层缓存的只读快照（测试断言「入缓存 / 不入缓存」用；⛔ 生产不调）。 */
+export function objectiveCacheSnapshot(): ReadonlyMap<string, ObjectiveCacheEntry> {
+  return objectiveCache;
+}
+
+/** 业务目标层的选项。 */
+export interface ObjectiveVerdictOpts {
+  /** 覆盖判定器命令前缀（测试缝；prompt 作末参数追加）。null/undefined ⇒ launchArgv("fix-worker") 真 LLM；
+   *  空数组 ⇒ not-evaluated（不可用）。 */
+  objectiveCmd?: string[] | null;
+  /** 覆盖 spawn 超时（缺省 = SUFFICIENCY_TIMEOUT_MS）。 */
+  objectiveTimeoutMs?: number;
+  /** 缓存落盘目录（.quay 类）；null/undefined ⇒ 只内存缓存（测试默认，不污染 repo .quay/）。 */
+  objectiveCacheDir?: string | null;
+  /** 证据载体清单覆盖（缺省 OBJECTIVE_EVIDENCE_CARRIERS）。 */
+  evidenceCarriers?: readonly string[];
+}
+
+/** 单次业务目标层采样（一次 LLM spawn）。⛔ 不可用 / 超时 / 读不懂 ⇒ not-evaluated，绝不回落
+ *  substantiated（parseObjectiveJudge 的 fail-closed）。同 sampleSemanticSufficiency 的形状。 */
+async function sampleObjectiveJudge(
+  goal: Record<string, unknown>,
+  inScopeAcs: Array<Record<string, unknown>>,
+  evidence: ObjectiveEvidenceRecord[],
+  root: string,
+  opts: ObjectiveVerdictOpts,
+): Promise<{ parsed: ObjectiveJudgeParse; cause: ObjectiveNotEvaluatedCause | null }> {
+  const prompt = buildObjectivePrompt(goal, inScopeAcs, evidence, root);
+  let argv: string[];
+  try {
+    if (opts.objectiveCmd != null) {
+      if (opts.objectiveCmd.length === 0) {
+        return { parsed: { verdict: "not-evaluated", field: null, value: null }, cause: "judge-unavailable" };
+      }
+      argv = [...opts.objectiveCmd, prompt];
+    } else {
+      argv = launchArgv("fix-worker", prompt, root);
+    }
+  } catch {
+    return { parsed: { verdict: "not-evaluated", field: null, value: null }, cause: "judge-unavailable" };
+  }
+  const r = await runAsync(argv, { timeoutMs: opts.objectiveTimeoutMs ?? SUFFICIENCY_TIMEOUT_MS });
+  if (r.error) return { parsed: { verdict: "not-evaluated", field: null, value: null }, cause: "judge-unavailable" };
+  if (r.status !== 0) return { parsed: { verdict: "not-evaluated", field: null, value: null }, cause: "judge-unavailable" };
+  const parsed = parseObjectiveJudge(r.stdout, r.status);
+  if (parsed.verdict === "not-evaluated") {
+    return { parsed, cause: "judge-unparseable" };
+  }
+  return { parsed, cause: null };
+}
+
+/** 把一次判定器的输出落成**可复核的**判决（纯函数，⛔ 不 spawn、⛔ 不写盘）——本层「输出不可复核」
+ *  这个症状的修法落点，四条分支**互不同形**：
+ *    substantiated                ⇒ 接受（无需指认：拿不出指认的是「不充分」这一侧）。
+ *    unsubstantiated + 指认       ⇒ **机械复核**；复核过 ⇒ 接受并带上 matched/total/command；
+ *                                    复核不过 ⇒ not-evaluated(cause=assertion-unverifiable)。
+ *    unsubstantiated 无指认       ⇒ not-evaluated(cause=assertion-missing)（AC3 负控制：⛔ 不默认 covered）。
+ *    not-evaluated                ⇒ 原样透传（cause 由调用侧给）。 */
+export function adjudicateObjectiveJudgment(
+  parsed: ObjectiveJudgeParse,
+  evidence: ObjectiveEvidenceRecord[],
+): ObjectiveVerdictDetail {
+  const profile = objectiveEvidenceProfile(evidence);
+  if (parsed.verdict === "not-evaluated") {
+    return { verdict: "not-evaluated", cause: "judge-unparseable", assertion: null, profile };
+  }
+  if (parsed.verdict === "substantiated") {
+    return { verdict: "substantiated", cause: null, assertion: null, profile };
+  }
+  // unsubstantiated：指认缺失 ⇒ 不可复核的判决不得冒充结论。
+  if (parsed.field === null || parsed.value === null) {
+    return { verdict: "not-evaluated", cause: "assertion-missing", assertion: null, profile };
+  }
+  const check = verifyObjectiveAssertion(parsed.field, parsed.value, evidence);
+  if (!check.ok) {
+    return { verdict: "not-evaluated", cause: "assertion-unverifiable", assertion: null, profile };
+  }
+  const acs = [...new Set(evidence.map((e) => e.ac))].sort();
+  const carriers = [...new Set(evidence.map((e) => e.carrier))].sort();
+  return {
+    verdict: "unsubstantiated",
+    cause: null,
+    assertion: {
+      kind: "single-value-field",
+      field: parsed.field as ObjectiveAssertionField,
+      value: parsed.value,
+      acs,
+      carriers,
+      matched: check.matched,
+      total: check.total,
+      command: objectiveAssertionCommand(acs, parsed.field, parsed.value, carriers),
+    },
+    profile,
+  };
+}
+
+/** 业务目标层判定（第二层提问 + 指认 + 机械复核 + 确定性缓存 + 成因拆分）。
+ *
+ *  输入：goal（标题/正文）、在域 AC、**证据记录**（已达成 AC 的载体记录，⛔ 缺了它判定器结构上看不见
+ *  「证据同质」）、以及 .quay 目录与 root。
+ *
+ *  确定性（同第一层的三条纪律）：
+ *  ① 命中缓存 ⇒ 直接返回（判决 + 指认一并返回，⛔ 不重问 LLM）；objectiveCacheDir 指定时落盘跨重启；
+ *  ② 未命中 ⇒ 2 次独立采样，2 次一致才入缓存；不一致 ⇒ not-evaluated(cause=samples-disagree)、
+ *     不入缓存、下轮再试（⛔ 不取多数票）；
+ *  ③ 零证据记录 ⇒ not-evaluated(cause=no-evidence-records)，⛔ 不问 LLM 也不入缓存（无可判之据）。
+ */
+export async function objectiveSufficiencyVerdictDetail(
+  goal: Record<string, unknown>,
+  inScopeAcs: Array<Record<string, unknown>>,
+  evidence: ObjectiveEvidenceRecord[],
+  root: string,
+  opts: ObjectiveVerdictOpts = {},
+): Promise<ObjectiveVerdictDetail> {
+  const key = objectiveCacheKey(goal, inScopeAcs, evidence);
+  if (opts.objectiveCacheDir) ensureObjectiveCacheLoaded(opts.objectiveCacheDir);
+  const cached = objectiveCache.get(key);
+  if (cached !== undefined) {
+    return { verdict: cached.verdict, cause: null, assertion: cached.assertion, profile: objectiveEvidenceProfile(evidence) };
+  }
+  if (evidence.length === 0) {
+    return { verdict: "not-evaluated", cause: "no-evidence-records", assertion: null, profile: objectiveEvidenceProfile(evidence) };
+  }
+  const s1 = await sampleObjectiveJudge(goal, inScopeAcs, evidence, root, opts);
+  if (s1.cause !== null) {
+    return { verdict: "not-evaluated", cause: s1.cause, assertion: null, profile: objectiveEvidenceProfile(evidence) };
+  }
+  const s2 = await sampleObjectiveJudge(goal, inScopeAcs, evidence, root, opts);
+  if (s2.cause !== null) {
+    return { verdict: "not-evaluated", cause: s2.cause, assertion: null, profile: objectiveEvidenceProfile(evidence) };
+  }
+  const sameJudgment =
+    s1.parsed.verdict === s2.parsed.verdict && s1.parsed.field === s2.parsed.field && s1.parsed.value === s2.parsed.value;
+  if (!sameJudgment) {
+    return { verdict: "not-evaluated", cause: "samples-disagree", assertion: null, profile: objectiveEvidenceProfile(evidence) };
+  }
+  const detail = adjudicateObjectiveJudgment(s1.parsed, evidence);
+  if (detail.verdict === "not-evaluated") return detail; // 指认缺失/不成立 ⇒ 不入缓存（下轮再判）
+  objectiveCache.set(key, { verdict: detail.verdict, assertion: detail.assertion, ts: new Date().toISOString() });
+  if (opts.objectiveCacheDir) writeCacheMap(opts.objectiveCacheDir, OBJECTIVE_CACHE_BASENAME, objectiveCache);
+  return detail;
+}
+
+/** 业务目标层的【仅裁决】视图（需要指认/成因/概况的路径用 objectiveSufficiencyVerdictDetail）。 */
+export async function objectiveSufficiencyVerdict(
+  goal: Record<string, unknown>,
+  inScopeAcs: Array<Record<string, unknown>>,
+  evidence: ObjectiveEvidenceRecord[],
+  root: string,
+  opts: ObjectiveVerdictOpts = {},
+): Promise<ObjectiveVerdict> {
+  return (await objectiveSufficiencyVerdictDetail(goal, inScopeAcs, evidence, root, opts)).verdict;
 }
 
 // ── 缺口五态（G7 + G9 stalled + done-unresolved，硬规则 3b：读不懂输入不得返回与「合格」同形——
@@ -1469,6 +2015,13 @@ export interface GoalRoundOptions {
   targetHost?: string | null;
   /** 被驱动系统（目标项目）根路径；缺省读 drivers.yml `kinds.goal.target_root`。 */
   targetRoot?: string | null;
+  /** 业务目标层判定命令前缀（测试缝；prompt 仍作末参数追加）。null/undefined ⇒ launchArgv("fix-worker")
+   *  真 LLM；空数组 ⇒ not-evaluated（不可用）。 */
+  objectiveCmd?: string[] | null;
+  /** 覆盖业务目标层 spawn 超时（缺省 = SUFFICIENCY_TIMEOUT_MS）。 */
+  objectiveTimeoutMs?: number;
+  /** 业务目标层证据载体清单覆盖（缺省 OBJECTIVE_EVIDENCE_CARRIERS）。 */
+  objectiveEvidenceCarriers?: readonly string[];
   /** 健康度探针的 argv **前缀**覆盖（测试缝；后接 `<root> <carrier...>`）。⛔ 换的是**传输层**，
    *  ⛔ 不是答案——读数仍由探针脚本从真实文件系统 / 进程表读出（硬规则 4 推论三）。 */
   healthProbePrefix?: string[] | null;
@@ -1485,6 +2038,11 @@ export interface GoalRoundResult {
    *  verdict ∈ 三态 covered/insufficient/not-evaluated）。AC-212 判据 grep 的正是 facts[].value.sufficiency。
    *  零 active GOAL ⇒ 空数组——字段仍在，「查过且零条」与「未跑判定」按字段存在性区分（硬规则 3b）。 */
   sufficiencyFacts: Array<Fact<Record<string, unknown>>>;
+  /** 每条 active GOAL 的**业务目标层**判定（独立 Fact，name="goal-objective"，value.objective=
+   *  {goal, verdict, cause?, assertion?, profile}；verdict ∈ substantiated/unsubstantiated/not-evaluated）。
+   *  ⛔ 与 sufficiencyFacts 是**两条并列的 fact、两个不同的命题**——合并会让「退出条件 ⊆ AC」的绿
+   *  遮住「退出条件 ⊭ 业务目标」的红（本任务立案的正是这个形态）。 */
+  objectiveFacts: Array<Fact<Record<string, unknown>>>;
 }
 
 /** 跑一轮 goal 机械环：枚举 active GOAL → 逐 AC 跑 criterion → 写 GateEvent（gate 自带；evidence
@@ -1501,6 +2059,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     return {
       fact: { name: "goal-ring", value: { phase: "list" }, state: "failed", reason: `list failed: ${(e as Error).message}` },
       sufficiencyFacts: [],
+      objectiveFacts: [],
     };
   }
 
@@ -1512,6 +2071,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   const flips: GoalRoundReadings["flips"] = [];
   const closeBlocks: GoalRoundReadings["closeBlocks"] = [];
   const sufficiencyFacts: Array<Fact<Record<string, unknown>>> = [];
+  const objectiveFacts: Array<Fact<Record<string, unknown>>> = [];
   // 关闭判定【延后到本轮全部 gate 落账之后】（pass 2，见下）。原因（硬规则 4c：判据点名的量必须穿过所有
   // 中间层还取得到）：`records` 是【轮开始时】读的快照，其 `evidence`（台账尾）比本轮晚一拍 —— 一条
   // 「上一轮 pass、本轮转红」的 achieved AC，若拿轮初快照判，尾 verdict 仍是 pass ⇒ 漏报并放行关闭，
@@ -1575,6 +2135,43 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
       state: "verified",
       reason: `sufficiency=${sufficiency}${sufficiencyCause !== null ? `（cause=${sufficiencyCause}）` : ""}（在域 AC ${inScope.length} 条）`,
     });
+
+    // 业务目标层（第二层提问，独立 fact，⛔ 不改上面第一层的任何取值/结论）：拿该 GOAL **已达成 AC** 的
+    // 载体记录当证据，问「退出条件本身 ⊨ 业务目标吗」。⛔ 证据从盘上读（collectObjectiveEvidence），
+    // 不采信任何自述；载体缺失/零记录 ⇒ not-evaluated(cause=no-evidence-records)，⛔ 不默认 substantiated。
+    // ⛔ 本层**不参与 goalFlipDecision**——它是一条并列读数（第一层的闸门语义原样保留：DoD 要求
+    // 「加了新提问层不得让原判定退化」，把第二层接进 flip 条件会改变既有闸门语义）。
+    const achievedIds = inScope.filter((ac) => ac.status === "achieved").map((ac) => String(ac.id ?? ""));
+    const evidence = collectObjectiveEvidence(
+      root,
+      achievedIds,
+      opts.objectiveEvidenceCarriers ?? OBJECTIVE_EVIDENCE_CARRIERS,
+    );
+    const objective = await objectiveSufficiencyVerdictDetail(goal, inScope, evidence, root, {
+      objectiveCmd: opts.objectiveCmd,
+      objectiveTimeoutMs: opts.objectiveTimeoutMs,
+      objectiveCacheDir: path.join(root, ".quay"),
+      evidenceCarriers: opts.objectiveEvidenceCarriers,
+    });
+    objectiveFacts.push({
+      name: "goal-objective",
+      value: {
+        objective: {
+          goal: gid,
+          verdict: objective.verdict,
+          ...(objective.cause !== null ? { cause: objective.cause } : {}),
+          ...(objective.assertion !== null ? { assertion: objective.assertion } : {}),
+          profile: objective.profile,
+        },
+      },
+      state: "verified",
+      reason:
+        `objective=${objective.verdict}${objective.cause !== null ? `（cause=${objective.cause}）` : ""}` +
+        `（已达成 AC ${achievedIds.length} 条 / 证据记录 ${objective.profile.records} 条` +
+        ` / distinct project_root ${objective.profile.distinctProjectRoots.length}）` +
+        (objective.assertion !== null ? ` 指认：全部证据记录 ${objective.assertion.field}=${objective.assertion.value}` : ""),
+    });
+
     // 关闭判定不在本 pass 做——见上方 pendingCloses 与下方 pass 2（本轮全部 gate 落账后才刷台账尾）。
     pendingCloses.push({ goal, gid, sufficiency });
   }
@@ -1754,6 +2351,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
         reason: `${criteria.length} criteria gated, ${flips.length} flip(s); staleness check unreadable`,
       },
       sufficiencyFacts,
+      objectiveFacts,
     };
   }
   return {
@@ -1771,6 +2369,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
         `frozenSweep=${frozenSweep === null ? "-" : `${frozenSweep.ran.length}/${frozenSweep.eligible}`}`,
     },
     sufficiencyFacts,
+    objectiveFacts,
   };
 }
 
@@ -2420,8 +3019,8 @@ export function goalDriverRoutines(root: string, opts: GoalRoundOptions = {}): R
     name: "goal-ring",
     schedule: EVERY_ROUND,
     run: async () => {
-      const { fact, sufficiencyFacts } = await runGoalRound(root, opts);
-      return [fact, ...sufficiencyFacts, targetHealthFact(root, opts)];
+      const { fact, sufficiencyFacts, objectiveFacts } = await runGoalRound(root, opts);
+      return [fact, ...sufficiencyFacts, ...objectiveFacts, targetHealthFact(root, opts)];
     },
   }];
 }
