@@ -418,6 +418,7 @@ AC248_CLI_SOURCE=""                          # 上面两条读数用的命令形
 AC248_BEFORE_CLI_RC=""                       # 两次检查器运行的退出码（⛔ 诊断留档量，不是判据字段）
 AC248_AFTER_CLI_RC=""
 AC248_TASK_ID_ARG=""                         # --task-id：被取证任务（⛔ 不猜、不取最新一条）
+AC248_PRE_REV_ARG=""                         # --pre-rev：落档的 pre-head（默认由记账边界推出，⛔ 不是 <impl>^）
 AC248_EVALUATED=0                            # 1 = 全部读数成立并已写出记录
 AC248_WRITTEN_THIS_RUN=0                     # 1 = 本次运行写出了 AC-248 记录
 AC248_WRITTEN_ROOT=""
@@ -460,6 +461,7 @@ while [ $# -gt 0 ]; do
     --ac248-adr-flip) AC248_ADR_FLIP=1; shift ;;
     --target-root) AC248_ROOT="$2"; shift 2 ;;
     --task-id) AC248_TASK_ID_ARG="$2"; shift 2 ;;
+    --pre-rev) AC248_PRE_REV_ARG="$2"; shift 2 ;;
     --selfcheck) DO_SELFCHECK=1; shift ;;
     *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -1914,6 +1916,36 @@ ac248_flip_is_forward() { [ "$1" = false ] && [ "$2" = true ]; }
 # 不存在硬编码默认值；字面量只允许出现在判定助手里（自检 `ac248-writer-literal-hits=0` 钉住这一点）。
 ac248_produced_by_driver_ok() { [ "$1" = true ]; }
 
+# ── ⑨ AC-248 修复前修订（落档 pre-head）─────────────────────────────────────────────────────
+# ⛔【不取 <impl>^】——实测 2026-09-12（ad-arm1 的 archguard TASK-88）：一次修复由【多个提交】组成时，
+#    `ac207_select_implementation_commit` 选中的是最新一条（`886f40f4`，只改了测试文件），而它的 parent
+#    `eeadae3a` 已经带着真正的修复 ⇒ 两个修订的候选集【逐字相同】⇒ 差集为空 ⇒ 无探针 ⇒ 无记录。
+#    fail-closed 的方向是对的，但它拒的是一个【真实完成且确实让检查器翻转】的修复 —— 判据把合格读成
+#    不合格（硬规则 4 的同族：读数在条件成立时取假）。
+# ⇒ pre 取【整段修复序列之前】那个修订：从实现提交沿第一父回溯，走过的都是【非记账】提交（与 AC-207
+#    同一套按位置判据），停在第一条【记账】提交上 —— 那条就是 pre（在 quay 驱动的项目里，driver 每轮
+#    都落记账提交，故修复段与历史之间必有这样一条边界）。
+# ⛔ 这是一条【事先声明】的确定性规则，不是「取那个能算出差集的」（那是挑答案，硬规则 4）。
+# ⛔ 上界 50 步：找不到记账边界 ⇒ 返回非 0，调用方退化成 `<impl>^` 并【如实记录来源】（可区分，不静默）。
+AC248_PRE_REV_SPAN=0                         # pre..impl 之间的提交数（留档：pre 是整段修复之前还是紧邻）
+AC248_PRE_REV_SOURCE=""                      # fix-series-boundary | recorded-pre-head | parent-fallback | not-an-ancestor
+ac248_pre_rev() {
+  local root="$1" sha="$2" cur prev span=0 limit=50
+  [ -n "$root" ] && [ -n "$sha" ] || return 1
+  cur="$sha"
+  while [ "$span" -lt "$limit" ]; do
+    prev="$(git -C "$root" rev-parse --verify --quiet "${cur}^" 2>/dev/null || true)"
+    [ -n "$prev" ] || return 1
+    if ac207_is_bookkeeping_commit "$root" "$prev"; then
+      printf '%s\n' "$prev"
+      return 0
+    fi
+    cur="$prev"
+    span=$((span + 1))
+  done
+  return 1
+}
+
 # ── ⑨ AC-248 翻转读数（git 树 in → 三个直接量 out）─────────────────────────────────────────
 # 入参 $1 = 项目根、$2 = 实现提交 sha、$3 = 临时工作目录（调用方负责清理）。
 # 产出（全部由【目标项目自己的】检查器产生，⛔ 无一个字面量）：
@@ -1926,15 +1958,35 @@ ac248_produced_by_driver_ok() { [ "$1" = true ]; }
 # ⛔ 恒返回 0：读不出体现在取值为空，由调用方走 fail-closed 分支留下可区分痕迹
 #    （set -e 下中途 return 非 0 会让脚本静静死掉，那与「没跑」同形）。
 ac248_adr_flip_reading() {
-  local root="$1" sha="$2" tmp="$3" pre_t post_t
+  local root="$1" sha="$2" tmp="$3" prerev_arg="${4:-}"
+  local pre_t post_t
   AC248_PRE_REV=""; AC248_BEFORE_TOOLS_JSON=""; AC248_AFTER_TOOLS_JSON=""
   AC248_PROBE_TOOL=""; AC248_BEFORE_DETECTS=""; AC248_AFTER_DETECTS=""
   AC248_BEFORE_CLI=""; AC248_AFTER_CLI=""; AC248_CLI_SOURCE=""
   AC248_BEFORE_CLI_RC=""; AC248_AFTER_CLI_RC=""
+  AC248_PRE_REV_SPAN=0; AC248_PRE_REV_SOURCE=""
   [ -n "$root" ] && [ -n "$sha" ] && [ -n "$tmp" ] || return 0
   pre_t="$tmp/pre"; post_t="$tmp/post"
-  AC248_PRE_REV="$(git -C "$root" rev-parse --verify --quiet "${sha}^" 2>/dev/null || true)"
+  # 修复前修订：⛔ 不取 <impl>^（见 ac248_pre_rev 的头注释），默认取【整段修复序列之前】的记账边界。
+  if [ -n "$prerev_arg" ]; then
+    AC248_PRE_REV="$prerev_arg"
+    AC248_PRE_REV_SOURCE="recorded-pre-head"
+  else
+    AC248_PRE_REV="$(ac248_pre_rev "$root" "$sha" || true)"
+    if [ -n "$AC248_PRE_REV" ]; then
+      AC248_PRE_REV_SOURCE="fix-series-boundary"
+    else
+      AC248_PRE_REV="$(git -C "$root" rev-parse --verify --quiet "${sha}^" 2>/dev/null || true)"
+      if [ -n "$AC248_PRE_REV" ]; then AC248_PRE_REV_SOURCE="parent-fallback"; fi
+    fi
+  fi
   [ -n "$AC248_PRE_REV" ] || return 0
+  # pre 必须是 impl 的祖先（⛔ 传入的 pre-head 不采信：不是祖先 ⇒ 视为读不出，不写记录）。
+  if ! git -C "$root" merge-base --is-ancestor "$AC248_PRE_REV" "$sha" 2>/dev/null; then
+    AC248_PRE_REV=""; AC248_PRE_REV_SOURCE="not-an-ancestor"; return 0
+  fi
+  AC248_PRE_REV_SPAN="$(git -C "$root" rev-list --count "${AC248_PRE_REV}..${sha}" 2>/dev/null || true)"
+  case "$AC248_PRE_REV_SPAN" in ''|*[!0-9]*) AC248_PRE_REV_SPAN=0 ;; esac
   mkdir -p "$tmp" || return 0
   ac248_materialize_rev "$root" "$AC248_PRE_REV" "$pre_t" || return 0
   ac248_materialize_rev "$root" "$sha" "$post_t" || return 0
@@ -2000,7 +2052,7 @@ probe_ac248_measures() {
   fi
   tmp="$(mktemp -d 2>/dev/null || true)"
   if [ -n "$tmp" ]; then
-    ac248_adr_flip_reading "$root" "$AC248_COMMIT_SHA" "$tmp"
+    ac248_adr_flip_reading "$root" "$AC248_COMMIT_SHA" "$tmp" "${AC248_PRE_REV_ARG:-}"
     rm -rf "$tmp"
   fi
   AC248_EVALUATED=1
@@ -2074,7 +2126,7 @@ step_ac248_adr_flip() {
 
   echo "  [⑨a] 八件（与 AC-207 同源）: task_status=${AC248_TASK_STATUS:-<unreadable>} commit_sha=${AC248_COMMIT_SHA:0:12} gate_events=$AC248_GATE_EVENTS produced_by_driver=$AC248_PRODUCED_BY_DRIVER"
   echo "  [⑨a] commit_files=$AC248_COMMIT_FILES_JSON"
-  echo "  [⑨b] 修复前修订 pre_rev=${AC248_PRE_REV:0:12} (= 实现提交的 parent)"
+  echo "  [⑨b] 修复前修订 pre_rev=${AC248_PRE_REV:0:12} source=${AC248_PRE_REV_SOURCE:-<unreadable>} span=${AC248_PRE_REV_SPAN} commit(s) （默认 = 实现提交之前那条【记账】边界，⛔ 不是 <impl>^：一次修复可由多个提交组成）"
   echo "  [⑨c] before 候选集（目标项目自己的检查器在 pre 修订上 scan 出的工具名，${#AC248_BEFORE_TOOLS_JSON} 字节）: $AC248_BEFORE_TOOLS_JSON"
   echo "  [⑨c] after  候选集（同一检查器在实现提交上）                                            : $AC248_AFTER_TOOLS_JSON"
   echo "  [⑨d] 检查器 CLI（${AC248_CLI_SOURCE:-<unreadable>}）: before rc=${AC248_BEFORE_CLI_RC:-<unreadable>} after rc=${AC248_AFTER_CLI_RC:-<unreadable>}"
@@ -2100,13 +2152,16 @@ step_ac248_adr_flip() {
   if [ "$ok" = "1" ]; then
     # 附加留档字段（⛔ 非判据）：两次候选集原文 / 两次检查器运行原文与退出码 / 命令形态 / pre 修订。
     # 经 python3 组 JSON（⛔ 不拼字符串）：运行原文含换行与引号，手拼必产生非法 JSON。
-    extras="$(AC248_PRE="$AC248_PRE_REV" AC248_B="$AC248_BEFORE_TOOLS_JSON" AC248_A="$AC248_AFTER_TOOLS_JSON" \
+    extras="$(AC248_PRE="$AC248_PRE_REV" AC248_SRCSRC="$AC248_PRE_REV_SOURCE" AC248_SPAN="$AC248_PRE_REV_SPAN" \
+              AC248_B="$AC248_BEFORE_TOOLS_JSON" AC248_A="$AC248_AFTER_TOOLS_JSON" \
               AC248_SRC="$AC248_CLI_SOURCE" AC248_BRC="$AC248_BEFORE_CLI_RC" AC248_ARC="$AC248_AFTER_CLI_RC" \
               AC248_BC="$AC248_BEFORE_CLI" AC248_AC="$AC248_AFTER_CLI" python3 -c '
 import json, os
 def cut(s, n=4000):
     return s if len(s) <= n else s[:n] + "\n…[truncated]"
 e = [("adr_check_pre_rev", os.environ["AC248_PRE"]),
+     ("adr_check_pre_rev_source", os.environ["AC248_SRCSRC"]),
+     ("adr_check_pre_rev_span", int(os.environ["AC248_SPAN"] or "0")),
      ("adr_check_before_tools", json.loads(os.environ["AC248_B"] or "[]")),
      ("adr_check_after_tools", json.loads(os.environ["AC248_A"] or "[]")),
      ("adr_check_checker_command", os.environ["AC248_SRC"]),
@@ -4281,14 +4336,13 @@ AC247NEG
   ac248_tmp="$(mktemp -d 2>/dev/null)" || ac248_tmp=""
   if [ -n "$ac248_tmp" ]; then
     local ac248_repo="$ac248_tmp/repo"
-    mkdir -p "$ac248_repo/scripts" "$ac248_repo/src"
+    mkdir -p "$ac248_repo/scripts" "$ac248_repo/src" "$ac248_repo/tasks" "$ac248_repo/tests"
     git -C "$ac248_repo" init -q -b main >/dev/null 2>&1
     git -C "$ac248_repo" config user.email t@t >/dev/null 2>&1
     git -C "$ac248_repo" config user.name t >/dev/null 2>&1
     # ⚠️ 夹具的检查器【按 cwd 相对路径读输入】（如真实检查器按 process.cwd() 定位要扫的目录）——
     #    这正是 2026-09-12 实测抓到的那个缺陷形态：候选集读取若不在物化树里跑，会安静地读到空集
     #    （退出码 0、没有报错）。夹具必须带这个形态，否则自检对那类缺陷恒绿。
-    # 修复【前】：候选集里只有一个工具（另一个声明检查器读不到）。
     cat > "$ac248_repo/scripts/check-adr.ts" <<'AC248CHK1'
 import fs from "node:fs";
 export function extractMcpToolNames(): string[] {
@@ -4296,18 +4350,39 @@ export function extractMcpToolNames(): string[] {
 }
 AC248CHK1
     printf 'tool_seen\n' > "$ac248_repo/src/tools.txt"
+    echo "seed" > "$ac248_repo/tasks/seed.md"
     git -C "$ac248_repo" add -A >/dev/null 2>&1
-    git -C "$ac248_repo" commit -qm "base" >/dev/null 2>&1
-    # 修复【后】：同一个检查器多看见一个工具（候选集 1 → 2）。⛔ 夹具只造输入形态，不判定对错。
+    git -C "$ac248_repo" commit -qm "seed: project baseline" >/dev/null 2>&1
+    # ⚠️【记账边界】——修复段与历史之间必须有一条只动 tasks/ 的记账提交（quay 驱动的项目里 driver
+    #    每轮都落一条）。夹具必须带它，否则 pre 的推导会退化成 <impl>^，而那个退化正是被修复的缺陷形态。
+    echo "T-1 ready" > "$ac248_repo/tasks/T-1.md"
+    git -C "$ac248_repo" add -A >/dev/null 2>&1
+    git -C "$ac248_repo" commit -qm "tasks: T-1 首次登记（机械落盘）" >/dev/null 2>&1
+    # ⚠️【一次修复 = 多个提交】——真实形态（实测 2026-09-12 ad-arm1 TASK-88：fix + test + lint fixup）：
+    #    最新一条只改了测试文件，它的 parent 已经带着修复。夹具必须带这个形态，否则「取 <impl>^」
+    #    那个缺陷在自检里恒绿（差集非空是巧合，不是判据在起作用）。
     printf 'tool_seen\ntool_newly_seen\n' > "$ac248_repo/src/tools.txt"
     git -C "$ac248_repo" add -A >/dev/null 2>&1
     git -C "$ac248_repo" commit -qm "fix: checker now sees the comment-prefixed tool declaration" >/dev/null 2>&1
+    echo "test" > "$ac248_repo/tests/check-adr.test.ts"
+    git -C "$ac248_repo" add -A >/dev/null 2>&1
+    git -C "$ac248_repo" commit -qm "test: assert the two extractors agree directly" >/dev/null 2>&1
     local ac248_sha ac248_base
     ac248_sha="$(git -C "$ac248_repo" rev-parse HEAD 2>/dev/null || true)"
-    ac248_base="$(git -C "$ac248_repo" rev-parse HEAD~1 2>/dev/null || true)"
+    ac248_base="$(git -C "$ac248_repo" rev-parse HEAD~2 2>/dev/null || true)"
     ac248_adr_flip_reading "$ac248_repo" "$ac248_sha" "$ac248_tmp/rt"
     ac248_probe="$AC248_PROBE_TOOL"; ac248_bd="$AC248_BEFORE_DETECTS"; ac248_ad="$AC248_AFTER_DETECTS"
     [ "$ac248_probe" = "tool_newly_seen" ] && [ "$ac248_bd" = "false" ] && [ "$ac248_ad" = "true" ] && ac248_ok=1
+    # 51c 修复前修订必须是【整段修复序列之前】那条记账边界，而不是 <impl>^（后者仍带着修复 ⇒ 差集为空）：
+    #     pre 的树里 tools.txt 只有 1 行（修复前），且 span = 2（fix + test 两条提交）。
+    [ "$AC248_PRE_REV_SOURCE" = "fix-series-boundary" ] && [ "$AC248_PRE_REV_SPAN" = "2" ] || ac248_ok=0
+    ac248_pretools="$(git -C "$ac248_repo" show "$AC248_PRE_REV:src/tools.txt" 2>/dev/null | tr -d ' ' || true)"
+    [ "$ac248_pretools" = "tool_seen" ] || ac248_ok=0
+    # ⛔ 反向对照：把规则换成 <impl>^ 必须【取不出 probe】（否则 51c 的断言是空转）——用同一个产品函数、
+    #    显式传入落档的 pre-head=<impl>^，差集必须为空。
+    ac248_adr_flip_reading "$ac248_repo" "$ac248_sha" "$ac248_tmp/rt-neg" "$(git -C "$ac248_repo" rev-parse HEAD~1 2>/dev/null || true)"
+    [ -z "$AC248_PROBE_TOOL" ] || ac248_ok=0
+    ac248_adr_flip_reading "$ac248_repo" "$ac248_sha" "$ac248_tmp/rt"
     # 51b 产品写入器：正控制 ⇒ 恰一条记录，三个字段逐字（两个布尔必须是 JSON 布尔裸值）
     AC89="$ac248_tmp/carrier.jsonl"; BUILD_SHA="0123456789abcdef0123456789abcdef01234567"; TS="2026-09-12T00:00:00Z"
     write_ac248_record "hostX-arm" "/home/other/archguard" "0123456789abcdef0123456789abcdef01234567" "TASK-88" "done" "3" "true" \

@@ -301,31 +301,51 @@ test("③ the flip reading measures a REAL checker in a REAL git repo — and ta
       'export function extractMcpToolNames(): string[] {\n' +
       '  return fs.readFileSync("src/tools.txt", "utf8").trim().split("\\n").filter(Boolean);\n' +
       '}\n');
-    // BEFORE the fix: the checker's candidate set holds only one tool — the comment-prefixed
-    // declaration never reaches it (the real defect's minimal shape).
     fs.writeFileSync(path.join(repo, "src", "tools.txt"), "tool_seen\n");
-    git("add", "-A"); git("commit", "-qm", "base");
-    // AFTER the fix: the same checker now sees one more tool.
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "tasks", "seed.md"), "seed\n");
+    git("add", "-A"); git("commit", "-qm", "seed: project baseline");
+    // The BOOKKEEPING BOUNDARY: a tasks/-only commit between the history and the fix series — what a
+    // quay driver lands every round. It is what makes the pre-revision derivable when the fix spans
+    // several commits (below).
+    fs.writeFileSync(path.join(repo, "tasks", "T-1.md"), "T-1 ready\n");
+    git("add", "-A"); git("commit", "-qm", "tasks: T-1 首次登记（机械落盘）");
+    // A real fix is SEVERAL commits (measured 2026-09-12 on ad-arm1 TASK-88: fix + test + lint fixup),
+    // and the NEWEST one only touches the test file — its parent already carries the fix. So the
+    // pre-revision must be derived from the fix-series boundary, not from `<impl>^`.
     fs.writeFileSync(path.join(repo, "src", "tools.txt"), "tool_seen\ntool_newly_seen\n");
     git("add", "-A"); git("commit", "-qm", "fix: checker sees the comment-prefixed declaration");
+    fs.mkdirSync(path.join(repo, "tests"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "tests", "check-adr.test.ts"), "test\n");
+    git("add", "-A"); git("commit", "-qm", "test: assert the two extractors agree directly");
     const sha = git("rev-parse", "HEAD").stdout.trim();
-    const base = git("rev-parse", "HEAD~1").stdout.trim();
+    // The pre-revision the producer must derive: the BOOKKEEPING boundary (HEAD~2), NOT the impl
+    // commit's parent (HEAD~1) — the latter already carries the fix.
+    const base = git("rev-parse", "HEAD~2").stdout.trim();
+    const implParent = git("rev-parse", "HEAD~1").stdout.trim();
 
     const driver = `
 set -uo pipefail
 VC_NODE="\${VC_NODE:-node}"
 SCRIPT="$SCRIPT"
 ${["ac248_checker_relpath", "ac248_materialize_rev", "ac248_run_checker_cli", "ac248_candidate_set",
-   "ac248_adr_flip_reading"].map((fn) => `eval "$(sed -n '/^${fn}()/,/^}$/p' "$SCRIPT")"`).join("\n")}
+   "ac248_pre_rev", "ac248_adr_flip_reading"].map((fn) => `eval "$(sed -n '/^${fn}()/,/^}$/p' "$SCRIPT")"`).join("\n")}
+eval "$(sed -n '/^ac207_commit_files()/,/^}$/p' "$SCRIPT")"
+eval "$(sed -n '/^ac207_is_bookkeeping_commit()/,/^}$/p' "$SCRIPT")"
 ac248_adr_flip_reading "$REPO" "$SHA" "$WORK"
 printf 'PROBE=%s\\nBEFORE=%s\\nAFTER=%s\\n' "$AC248_PROBE_TOOL" "$AC248_BEFORE_DETECTS" "$AC248_AFTER_DETECTS"
-printf 'PRE=%s\\nTOOLS_BEFORE=%s\\nTOOLS_AFTER=%s\\n' "$AC248_PRE_REV" "$AC248_BEFORE_TOOLS_JSON" "$AC248_AFTER_TOOLS_JSON"
+printf 'PRE=%s\\nSRC=%s\\nSPAN=%s\\nTOOLS_BEFORE=%s\\nTOOLS_AFTER=%s\\n' "$AC248_PRE_REV" "$AC248_PRE_REV_SOURCE" "$AC248_PRE_REV_SPAN" "$AC248_BEFORE_TOOLS_JSON" "$AC248_AFTER_TOOLS_JSON"
 ac248_adr_flip_reading "$REPO" "$BASE" "$WORK2"
 printf 'NOFIX_PROBE=<%s>\\n' "$AC248_PROBE_TOOL"
+# reverse control: an explicitly recorded pre-head of <impl>^ must yield NO probe (otherwise the
+# "derive the boundary" rule above would be indistinguishable from "pick whatever produces a diff").
+ac248_adr_flip_reading "$REPO" "$SHA" "$WORK3" "$IMPLPARENT"
+printf 'IMPLPARENT_PROBE=<%s>\\n' "$AC248_PROBE_TOOL"
 `;
     const r = spawnSync("bash", ["-c", driver], {
       encoding: "utf8",
-      env: { ...process.env, SCRIPT, REPO: repo, SHA: sha, BASE: base, WORK: path.join(tmp, "rt1"), WORK2: path.join(tmp, "rt2") },
+      env: { ...process.env, SCRIPT, REPO: repo, SHA: sha, BASE: base, IMPLPARENT: implParent,
+        WORK: path.join(tmp, "rt1"), WORK2: path.join(tmp, "rt2"), WORK3: path.join(tmp, "rt3") },
     });
 
     const out = r.stdout;
@@ -335,9 +355,17 @@ printf 'NOFIX_PROBE=<%s>\\n' "$AC248_PROBE_TOOL"
     assert.equal(get("PROBE"), "tool_newly_seen", `probe tool must come from the set difference\n${out}\n${r.stderr}`);
     assert.equal(get("BEFORE"), "false", "the tool must be OUTSIDE the before candidate set");
     assert.equal(get("AFTER"), "true", "the tool must be INSIDE the after candidate set");
-    assert.equal(get("PRE"), base, "the pre-revision must be the implementation commit's parent");
+    assert.equal(get("PRE"), base, "the pre-revision must be the fix-series BOUNDARY (a bookkeeping commit), not <impl>^");
+    assert.equal(get("SRC"), "fix-series-boundary", "the derivation rule must be recorded");
+    assert.equal(get("SPAN"), "2", "the span (fix + test) must be recorded — the pre is the state BEFORE the whole series");
     assert.equal(get("TOOLS_BEFORE"), '["tool_seen"]', "the before candidate set must be the checker's real reading");
     assert.equal(get("TOOLS_AFTER"), '["tool_seen","tool_newly_seen"]', "the after candidate set must be the checker's real reading");
+
+    // ③c the rule must not be "pick whatever produces a difference": an explicitly recorded pre-head of
+    // `<impl>^` (which already carries the fix) yields NO probe — i.e. the boundary derivation above is
+    // doing real work, and the flip is not assertable from any pairing of revisions.
+    assert.equal(get("IMPLPARENT_PROBE"), "<>",
+      "a recorded pre-head of <impl>^ must yield NO probe — the boundary derivation is what makes the reading real");
 
     // ③b the control that keeps ③a from being an echo: point the SAME reading at a commit where nothing
     // changed ⇒ the difference is EMPTY ⇒ no probe ⇒ the producer must refuse to write (硬规则 4: if
