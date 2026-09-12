@@ -43,3 +43,11 @@ kinds:
                          # 900000（900s）> 602.9s 留 ~1.5x 余量。promotion fix-worker 保持 180s
                          # （400 轮 266/266 零超时）——两角色工作量不同，不再同值。
                          # goal-driver.goalGapWorkerTimeoutMs 就地读此字段（照 goalSpawnCap 接法）。
+    # ── 被驱动系统（目标项目）绑定（gap-goal-driver-blind-to-driven-system-health）────────────
+    # 本 driver 每轮额外产出一条 `goal-target-health` 读数（外部视角）：目标项目的 driver 进程数 /
+    # round 心跳龄 / 窗口内 fan-in 成败分布 / 配置形状版本 / 关键载体存在性。
+    # ⛔ 纯读数、**不参与任何判定**（不阻塞 goal 达成）；目标不可达/载体缺失 ⇒ not-evaluated（⛔ 不是 0）。
+    # target_host 空/缺省 ⇒ 目标根在本机（直接本地读）；非空 ⇒ 经 ssh（BatchMode + ConnectTimeout）读。
+    # ⛔ 值改动只在重启 goal driver 后生效（与其它 driver 配置同）。
+    target_host: ad-arm1                       # 被驱动系统所在主机（ssh 目标；空 = 本机）
+    target_root: /home/yale/work/archguard     # 被驱动系统（GOAL-016 靶子项目）根路径

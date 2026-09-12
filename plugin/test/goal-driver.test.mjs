@@ -39,6 +39,18 @@ import {
   GOAL_ROUND_REL,
   goalCloseBlockFromRecords,
   probeLedger,
+  goalFlipDecision,
+  targetHealthFact,
+  deriveTargetHealth,
+  resolveTargetBinding,
+  declaredTargetBinding,
+  buildHealthProbeArgv,
+  parseHealthProbe,
+  readDeliveredPluginVersion,
+  TARGET_HEALTH_FACT_NAME,
+  HEALTH_WINDOW_SEC_DEFAULT,
+  HEALTH_REQUIRED_CARRIERS,
+  HEALTH_OBSERVED_CARRIERS,
 } from '../scripts/goal-driver.ts';
 import { runResidentQualityGateLoop } from '../scripts/quality-gate-driver.ts';
 import { DRIVER_KINDS, KNOWN_KINDS } from '../scripts/driver-runtime.ts';
@@ -48,12 +60,15 @@ import { KINDS } from '../../packages/quay/src/cli/driver.ts';
 // 脚本根（goal-store.ts 从这里取，经 goalStoreArgv）；数据根（goals/）在各测试里给临时目录。
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-/** 把一个 GOAL/AC 记录写成 goals/ 下的真实 frontmatter 文件（⛔ 不注入 seam，跑真 goal-store CLI）。 */
-function writeGoalFile(tmp, { id, status, kind, goal, criterion }) {
+/** 把一个 GOAL/AC 记录写成 goals/ 下的真实 frontmatter 文件（⛔ 不注入 seam，跑真 goal-store CLI）。
+ *  body 缺省无 `## 退出条件`（= 充分性机械判 insufficient）；需要语义判定接缝的用例显式给 body。 */
+function writeGoalFile(tmp, { id, status, kind, goal, criterion, body = '## body\nx' }) {
   const lines = ['---', `id: ${id}`, 'title: t', `status: ${status}`, `kind: ${kind}`];
   if (goal) lines.push(`goal: ${goal}`);
   if (criterion !== undefined) lines.push('criterion: |', `  ${criterion}`);
-  lines.push('origin: test fixture', '---', '', '## body', 'x', '');
+  lines.push('origin: test fixture', '---', '');
+  for (const line of body.split('\n')) lines.push(line);
+  lines.push('');
   fs.writeFileSync(path.join(tmp, 'goals', `${id}-t.md`), lines.join('\n'), 'utf8');
 }
 
@@ -1213,4 +1228,299 @@ test('冻结population 端到端：真 runGoalRound 把域外失败的 AC 枚举
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// ── 被驱动系统（目标项目）健康度 —— gap-goal-driver-blind-to-driven-system-health ────────────────
+//
+// 症状：本 driver 6 天 5308 轮只产出**内省**读数（goal-ring / goal-sufficiency），它驱动的目标项目
+// 两小时内 fan-in 失败 9 次（其中一轮 277 秒全量 suite 全绿、唯独 ff 因工作树不干净失败 ⇒ 白烧），
+// 而 driver 全程无感。本组测的就是补上的那条**外部视角**读数（fact name = goal-target-health）。
+//
+// 夹具是**真实文件系统**（探针脚本读的就是它，⛔ 不注入读数本身）。只有「传输失败」用 argv 前缀缝
+// 注入 —— 换的是**传输层**，⛔ 不是答案（硬规则 4 推论三）。
+
+/** 一条目标项目 `step-end` 行（epoch 相对 now；ageSec 为负 = 过去，窗口外更进一步往前推）。 */
+function stepEndLine({ step, task, ok, ageSec }) {
+  const epoch = Math.floor(Date.now() / 1000) + ageSec;
+  return JSON.stringify({ event: 'step-end', step, task, runId: 'r1', ts: new Date(epoch * 1000).toISOString(), epoch, ok });
+}
+
+/** 造一个「目标项目」夹具根（真实 .quay/ 载体 + 真实 fan-in-step-trace.jsonl 行）。 */
+function mkTargetRoot({
+  stepEnds = [], traceAbsent = false, missingCarriers = [], extraCarriers = [],
+  pluginVersion, initStateAbsent = false, roundRecords = [],
+} = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-target-'));
+  const q = path.join(dir, '.quay');
+  fs.mkdirSync(q, { recursive: true });
+  if (!traceAbsent) {
+    const lines = stepEnds.map(stepEndLine);
+    fs.writeFileSync(path.join(q, 'fan-in-step-trace.jsonl'), lines.length ? lines.join('\n') + '\n' : '', 'utf8');
+  }
+  for (const name of ['verification-round.jsonl', ...extraCarriers]) {
+    if (missingCarriers.includes(name)) continue;
+    fs.writeFileSync(path.join(q, name), '{}\n', 'utf8');
+  }
+  for (const name of roundRecords) fs.writeFileSync(path.join(q, name), '{}\n', 'utf8');
+  if (!initStateAbsent && pluginVersion !== undefined) {
+    fs.writeFileSync(path.join(q, 'quay-init-state.json'), JSON.stringify({ pluginVersion }), 'utf8');
+  }
+  return dir;
+}
+
+// ── AC1：能取假 —— 窗口内有 ok:false ⇒ failed>0；健康态 ⇒ 0（⛔ 不用恒真量）────────────────────
+
+test('AC1: goal-target-health 报出窗口内 fan-in 失败计数（不健康 >0 / 健康 =0），窗口是有效作用域', () => {
+  const bad = mkTargetRoot({
+    stepEnds: [
+      { step: 'ff', task: 'TASK-89', ok: false, ageSec: -300 },
+      { step: 'ff', task: 'TASK-89', ok: false, ageSec: -600 },
+      { step: 'scoped-gate', task: 'TASK-88', ok: false, ageSec: -900 },
+      { step: 'suite', task: 'TASK-89', ok: true, ageSec: -1000 },
+      // ⛔ 窗口外的失败不得计入（window=7200s，这条在 3 小时前）—— 否则「窗口」是装饰。
+      { step: 'merge-develop', task: 'TASK-7', ok: false, ageSec: -10800 },
+    ],
+    roundRecords: ['worker-round.jsonl', 'promotion-round.jsonl'],
+  });
+  const good = mkTargetRoot({
+    stepEnds: [{ step: 'ff', task: 'TASK-90', ok: true, ageSec: -300 }, { step: 'suite', task: 'TASK-90', ok: true, ageSec: -400 }],
+    roundRecords: ['worker-round.jsonl'],
+  });
+  try {
+    const badFact = targetHealthFact(repoRoot, { targetRoot: bad });
+    const goodFact = targetHealthFact(repoRoot, { targetRoot: good });
+
+    assert.equal(badFact.name, TARGET_HEALTH_FACT_NAME, 'fact 名字');
+    assert.equal(badFact.value.fanIn.failed, 3, '窗口内 3 条 ok:false 计入（窗口外那条不计）');
+    assert.equal(badFact.value.fanIn.steps, 4, '窗口内 step-end 行数 = 4');
+    assert.deepEqual(badFact.value.fanIn.failedByStep, { ff: 2, 'scoped-gate': 1 }, '失败按步骤分布（枚举，⛔ 不是布尔）');
+    assert.deepEqual(badFact.value.fanIn.failedTasks, ['TASK-88', 'TASK-89'], '失败任务清单（去重排序）');
+    assert.equal(badFact.value.fanIn.windowSec, HEALTH_WINDOW_SEC_DEFAULT, '窗口来自 HEALTH_WINDOW_SEC_DEFAULT');
+    assert.equal(badFact.value.verdict, 'unhealthy', '有失败 ⇒ unhealthy');
+    assert.equal(badFact.state, 'verified', '⛔ 取到读数就是 verified（unhealthy 不是「本轮失败」，AC2）');
+
+    assert.equal(goodFact.value.fanIn.failed, 0, '健康态失败计数 = 0（能取假的另一半）');
+    assert.equal(goodFact.value.fanIn.ok, 2, '健康态 ok 计数 = 2');
+    assert.equal(goodFact.value.verdict, 'healthy', '零失败 ⇒ healthy');
+
+    // AC1 要求「两态输出逐字贴出做对照」——这两行就是留档（断言在上的字段级读数之外的人读形态）。
+    console.log(`AC1[unhealthy] ${badFact.reason}`);
+    console.log(`AC1[healthy]   ${goodFact.reason}`);
+  } finally {
+    fs.rmSync(bad, { recursive: true, force: true });
+    fs.rmSync(good, { recursive: true, force: true });
+  }
+});
+
+test('AC1 负控制: 窗口外的失败不计入（窗口是有效作用域，⛔ 不是装饰）', () => {
+  const dir = mkTargetRoot({ stepEnds: [{ step: 'ff', task: 'TASK-1', ok: false, ageSec: -HEALTH_WINDOW_SEC_DEFAULT - 60 }] });
+  try {
+    const f = targetHealthFact(repoRoot, { targetRoot: dir });
+    assert.equal(f.value.fanIn.failed, 0, '窗口外失败 ⇒ 计数 0（对照：同一条行 ageSec:-60 时计数 1）');
+    assert.equal(f.value.fanIn.steps, 0, '窗口内零行');
+    assert.equal(f.value.verdict, 'healthy', '窗口内零失败 ⇒ healthy');
+    const f2 = targetHealthFact(repoRoot, { targetRoot: dir, healthWindowSec: HEALTH_WINDOW_SEC_DEFAULT + 300 });
+    assert.equal(f2.value.fanIn.failed, 1, '把窗口放大到覆盖它 ⇒ 计数 1（同一条行，只改作用域）');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── AC2：不阻塞 —— 健康度为红不进入达成判定（goalFlipDecision 输入/输出逐字一致）───────────────
+
+test('AC2: 健康度为红不阻塞 —— goalFlipDecision 输入/输出与改动前逐字一致，且端到端 GOAL 照样 flip', async () => {
+  // ① 纯函数层：逐字打印改前/改后的输入与输出（健康度**不在**输入里 —— 形参个数未变）。
+  const records = [
+    { id: 'GOAL-001', status: 'active', kind: 'goal' },
+    { id: 'AC-001', status: 'achieved', kind: 'criterion', goal: 'GOAL-001' },
+  ];
+  const decisionInput = { verdict: 'covered' };
+  const before = goalFlipDecision(records, 'GOAL-001', decisionInput);
+
+  const bad = mkTargetRoot({ stepEnds: [{ step: 'ff', task: 'TASK-89', ok: false, ageSec: -60 }] });
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-target-nonblock-'));
+  try {
+    const health = targetHealthFact(repoRoot, { targetRoot: bad });
+    assert.equal(health.value.verdict, 'unhealthy', '构造出的目标态确实是红');
+    const after = goalFlipDecision(records, 'GOAL-001', decisionInput);
+    console.log(`AC2 改前: goalFlipDecision(records=[GOAL-001/AC-001 achieved], GOAL-001, ${JSON.stringify(decisionInput)}) = ${before}`);
+    console.log(`AC2 改后: 同一输入 + 健康度=${health.value.verdict}（${health.value.fanIn.failed} 失败）⇒ goalFlipDecision = ${after}`);
+    assert.equal(after, before, '逐字一致（健康度为红不改变达成判定）');
+    assert.equal(after, true, '且该输入下判定为 true —— 不是「两边都 false」的空转对照');
+    assert.equal(goalFlipDecision.length, 3, 'goalFlipDecision 形参个数未变（健康度不是它的输入）');
+    assert.equal(health.state, 'verified', '健康度为红时 fact.state 仍是 verified（⛔ 不取 failed ⇒ 不把整轮标成失败）');
+
+    // ② 端到端：目标项目为红的那一轮里，GOAL 照样被机械 flip achieved（真 goal-store + 真轮记录）。
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true });
+    writeGoalFile(tmp, { id: 'GOAL-001', status: 'active', kind: 'goal', body: '## 背景\nbg\n\n## 退出条件\n\n1. 条件一\n' });
+    writeGoalFile(tmp, { id: 'AC-001', status: 'active', kind: 'criterion', goal: 'GOAL-001', criterion: 'true' });
+    const roundLog = path.join(tmp, GOAL_ROUND_REL);
+    const code = await runResidentQualityGateLoop({
+      root: tmp, intervalMs: 1, once: true, maxRounds: null, roundLogFile: roundLog, runId: 't', json: false,
+      routines: goalDriverRoutines(tmp, {
+        scriptRoot: repoRoot,
+        gapWorkerCmd: 'true',
+        resourceGateArgv: ['true'],
+        sufficiencyCmd: ['node', '-e', 'process.stdout.write(JSON.stringify({verdict:"covered"}))'],
+        targetRoot: bad, // 目标项目为红
+      }),
+    });
+    assert.equal(code, 0, '目标项目为红的那一轮仍正常退出（⛔ 不失败）');
+    assert.match(fs.readFileSync(path.join(tmp, 'goals', 'GOAL-001-t.md'), 'utf8'), /^status: achieved$/m, '端到端：GOAL 照样 flip achieved（健康度不构成前置）');
+    const rec = JSON.parse(fs.readFileSync(roundLog, 'utf8').trim().split('\n').pop());
+    const hf = rec.facts.find((f) => f.name === TARGET_HEALTH_FACT_NAME);
+    assert.ok(hf, '轮记录里健康度 fact 与 goal-ring / goal-sufficiency **并列**');
+    assert.equal(hf.value.verdict, 'unhealthy', '且它就是那条红读数');
+    assert.equal(rec.facts.filter((f) => f.state === 'failed').length, 0, '本轮无 failed fact（红色读数不改轮终态）');
+  } finally {
+    fs.rmSync(bad, { recursive: true, force: true });
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── AC3：未评估可区分 —— 不可达 / 载体缺失 / 读不懂 ⇒ 独立取值（⛔ 既非 0 也非「健康」）─────────
+
+test('AC3: 未评估四成因各出独立取值，且 fanIn 恒 null（⛔ 不与「零失败」同形）', () => {
+  const made = [];
+  const mk = (o) => { const d = mkTargetRoot(o); made.push(d); return d; };
+  const emptyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-target-none-'));
+  made.push(emptyRoot);
+  const dir = mk({ stepEnds: [{ step: 'suite', task: 'T', ok: true, ageSec: -60 }] });
+  try {
+    const broken = targetHealthFact(repoRoot, { targetRoot: dir, healthProbePrefix: ['bash', '-c', 'exit 255'] });
+    // 缝的命令必须**先吃干 stdin**（探针载荷走 stdin）：不读 stdin 的假传输会让写端 EPIPE ⇒ 那已经是
+    // 「载荷没送达 = probe-failed」，测不到 probe-unparseable 这一态。
+    const garbled = targetHealthFact(repoRoot, { targetRoot: dir, healthProbePrefix: ['bash', '-c', 'cat >/dev/null; echo not-the-probe-shape'] });
+    const absent = targetHealthFact(repoRoot, { targetRoot: path.join(emptyRoot, 'no-such-project') });
+    const noTarget = targetHealthFact(emptyRoot, {});
+    const noCarrier = targetHealthFact(repoRoot, { targetRoot: mk({ traceAbsent: true }) });
+    const noVround = targetHealthFact(repoRoot, { targetRoot: mk({ missingCarriers: ['verification-round.jsonl'] }) });
+    const cases = [
+      ['no-target-configured', noTarget, []],
+      ['probe-failed', broken, ['exit=255']],
+      ['probe-unparseable', garbled, []],
+      ['target-root-absent', absent, []],
+      ['carrier-missing', noCarrier, ['fan-in-step-trace.jsonl']],
+      ['carrier-missing', noVround, ['verification-round.jsonl']],
+    ];
+    for (const [cause, fact, detail] of cases) {
+      assert.equal(fact.name, TARGET_HEALTH_FACT_NAME, `${cause}: fact 名字`);
+      assert.equal(fact.state, 'not-evaluated', `${cause}: state=not-evaluated`);
+      assert.equal(fact.value.verdict, 'not-evaluated', `${cause}: verdict=not-evaluated`);
+      assert.equal(fact.value.cause, cause, `${cause}: cause 是枚举值`);
+      assert.equal(fact.value.fanIn, null, `${cause}: ⛔ fanIn 必须是 null —— 0 会与「窗口内零失败」同形（硬规则 3b）`);
+      assert.notEqual(fact.value.verdict, 'healthy', `${cause}: ⛔ 不与 healthy 同形`);
+      for (const d of detail) assert.ok(fact.value.causeDetail.includes(d), `${cause}: causeDetail 含 ${d}（实为 ${JSON.stringify(fact.value.causeDetail)}）`);
+    }
+    // 三态可区分（AC3 要求「贴出三态的实际输出」）：同一份 fixture 只有一处不同 ⇒ 三种 verdict。
+    const healthy = targetHealthFact(repoRoot, { targetRoot: mk({ stepEnds: [{ step: 'ff', task: 'T', ok: true, ageSec: -60 }] }) });
+    const unhealthy = targetHealthFact(repoRoot, { targetRoot: mk({ stepEnds: [{ step: 'ff', task: 'T', ok: false, ageSec: -60 }] }) });
+    console.log(`AC3[healthy]       ${healthy.reason}`);
+    console.log(`AC3[unhealthy]     ${unhealthy.reason}`);
+    console.log(`AC3[not-evaluated] ${broken.reason}`);
+    console.log(`AC3[no-carrier]    ${noCarrier.reason}`);
+    assert.deepEqual(
+      [healthy.value.verdict, unhealthy.value.verdict, broken.value.verdict].filter((v, i, a) => a.indexOf(v) === i).sort(),
+      ['healthy', 'not-evaluated', 'unhealthy'],
+      '三态互不相同（各自独立取值）',
+    );
+    // 活性是**独立**字段（categorical，⛔ 不压进 verdict）：夹具里没有目标项目的 driver 进程 ⇒ idle，
+    // 但 verdict 仍由 fan-in 失败计数决定 —— 两件事各自可读（硬规则 4b）。
+    assert.equal(healthy.value.liveness.state, 'idle', '夹具无进程 ⇒ liveness=idle（真读数，不是「未知」）');
+    assert.equal(healthy.value.liveness.count, 0, '进程数 0（⛔ 与 unknown/null 不同形）');
+    assert.equal(broken.value.liveness.state, 'unknown', '探针没跑成 ⇒ liveness=unknown（⛔ 不是 idle）');
+  } finally {
+    for (const d of made) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('AC3: 探针形态读不懂 ⇒ probe-unparseable（⛔ 不把半个对象当读数 —— 硬规则 3b）', () => {
+  assert.equal(parseHealthProbe(''), null, '空 stdout');
+  assert.equal(parseHealthProbe('not json'), null, '非 JSON');
+  assert.equal(parseHealthProbe('{"root":"/x"}'), null, '缺 rootPresent/nowMs ⇒ 形态不全即拒');
+  assert.equal(parseHealthProbe('{"root":"/x","rootPresent":true,"nowMs":1,"roundRecords":"nope","carriers":{}}'), null, 'roundRecords 非数组即拒');
+  const ok = parseHealthProbe('{"root":"/x","rootPresent":true,"nowMs":1,"roundRecords":[],"carriers":{},"fanInSteps":null}');
+  assert.ok(ok && ok.fanInSteps === null, '形态齐全才收（fanInSteps:null = 载体缺失，⛔ 与 [] 不同形）');
+});
+
+// ── AC4：版本一致性读数（目标项目配置形状 vs 交付物 plugin 版本，并排 + 可机械检出不等）───────────
+
+test('AC4: pluginVersion 与交付物 plugin 版本并排出现，不等可机械检出（含 equal:null 的第三态）', () => {
+  const delivered = readDeliveredPluginVersion(repoRoot);
+  assert.ok(typeof delivered === 'string' && delivered !== '', '交付物版本可读（本仓 plugin/.claude-plugin/plugin.json）');
+  const same = mkTargetRoot({ pluginVersion: delivered });
+  const stale = mkTargetRoot({ pluginVersion: '0.0.1-stale' });
+  const absent = mkTargetRoot({ initStateAbsent: true });
+  try {
+    const a = targetHealthFact(repoRoot, { targetRoot: same });
+    const b = targetHealthFact(repoRoot, { targetRoot: stale });
+    const c = targetHealthFact(repoRoot, { targetRoot: absent });
+    assert.equal(a.value.pluginVersion.target, delivered, '目标侧 pluginVersion 读出（quay-init-state.json）');
+    assert.equal(a.value.pluginVersion.delivered, delivered, '交付侧并排出现');
+    assert.equal(a.value.pluginVersion.equal, true, '相等态');
+    assert.equal(b.value.pluginVersion.equal, false, '不等态可机械检出（AC4 的核心）');
+    assert.equal(c.value.pluginVersion.equal, null, '一侧读不到 ⇒ null（⛔ 不与 true 同形，硬规则 3b）');
+    assert.equal(c.value.pluginVersion.initStatePresent, false, '连 state 文件在不在都要能区分');
+    // 版本读数**带陈旧度**：mismatch 时它区分「刚补跑过」与「一个月没更新」。
+    fs.writeFileSync(path.join(stale, '.quay', 'quay-init-state.json'), JSON.stringify({ pluginVersion: '0.0.1-stale', laidAt: Math.floor(Date.now() / 1000) - 3600 }), 'utf8');
+    const bAged = targetHealthFact(repoRoot, { targetRoot: stale });
+    // 龄 = 探针的 now - laidAt，探针在写盘之后跑 ⇒ 允许几秒漂移（⛔ 不钉死等值：那会把时钟漂移当缺陷）。
+    assert.ok(Math.abs(bAged.value.pluginVersion.targetAgeSec - 3600) <= 5, `目标配置形状的龄被读出（陈旧度），实为 ${bAged.value.pluginVersion.targetAgeSec}`);
+    assert.equal(c.value.pluginVersion.targetAgeSec, null, '无 state 文件 ⇒ 龄未知（⛔ 不是 0）');
+    console.log(`AC4[equal]   target=${a.value.pluginVersion.target} delivered=${a.value.pluginVersion.delivered} equal=${a.value.pluginVersion.equal}`);
+    console.log(`AC4[unequal] target=${b.value.pluginVersion.target} delivered=${b.value.pluginVersion.delivered} equal=${b.value.pluginVersion.equal}`);
+  } finally {
+    fs.rmSync(same, { recursive: true, force: true });
+    fs.rmSync(stale, { recursive: true, force: true });
+    fs.rmSync(absent, { recursive: true, force: true });
+  }
+});
+
+// ── 生产接线（硬规则 4 推论三：判据必须读生产载体，⛔ 不能只被 fixture 满足）─────────────────────
+
+test('接线: drivers.yml 声明被驱动系统绑定 ⇒ 生产路径解析出真绑定（⛔ 不是恒 not-evaluated 的空转）', () => {
+  const declared = declaredTargetBinding(repoRoot);
+  assert.ok(declared.root !== null, '生产 drivers.yml 声明了 target_root（否则该读数在生产上恒 not-evaluated = 空转）');
+  const argv = buildHealthProbeArgv(declared, {});
+  assert.ok(Array.isArray(argv) && argv.length > 0, '绑定 ⇒ 探针 argv 可构造');
+  if (declared.host !== null) {
+    assert.equal(argv[0], 'ssh', '声明了 host ⇒ 传输是 ssh（目标项目在别的机器上）');
+    assert.ok(argv.includes('-o'), '带 -o 选项（BatchMode=yes + ConnectTimeout）');
+    assert.ok(argv.some((a) => a.includes('ConnectTimeout=')), '⛔ 必须有连接超时：不可达要快速失败成 not-evaluated，⛔ 不能挂住整条例程');
+    assert.ok(argv.some((a) => a === declared.host), 'ssh 目标是声明的主机');
+    assert.ok(argv.some((a) => a.includes(declared.root)), '远端命令串里带目标根');
+  } else {
+    assert.ok(argv.includes(declared.root), '本机目标 ⇒ 直接本地读');
+  }
+  // 覆盖语义：显式 targetRoot 优先于 drivers.yml（否则「测 A 却探到 B」）。
+  assert.equal(resolveTargetBinding(repoRoot, { root: '/tmp/x' }).root, '/tmp/x', '显式覆盖优先');
+  assert.equal(resolveTargetBinding(repoRoot, {}).root, declared.root, '未覆盖 ⇒ 用声明值');
+  assert.equal(resolveTargetBinding(repoRoot, { root: '' }).root, null, '显式空串 = 本次运行不绑目标（⇒ not-evaluated）');
+});
+
+test('接线: drivers.yml 缺失/无 target_* ⇒ 未声明目标（⛔ 不起任何进程，也不报 0）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-target-nodecl-'));
+  try {
+    assert.deepEqual(declaredTargetBinding(tmp), { host: null, root: null }, '无 drivers.yml ⇒ 未声明');
+    assert.equal(buildHealthProbeArgv({ host: null, root: null }, {}), null, '未声明 ⇒ 无 argv（⛔ 不 spawn）');
+    // 夹具 drivers.yml：只声明 root（host 缺省 = 本机）。
+    fs.mkdirSync(path.join(tmp, 'plugin', 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'plugin', 'scripts', 'drivers.yml'), 'version: 1\nkinds:\n  goal:\n    target_root: /tmp/fake-target\n', 'utf8');
+    assert.deepEqual(declaredTargetBinding(tmp), { host: null, root: '/tmp/fake-target' }, '就地从 drivers.yml 读出绑定（生产同一实现）');
+    const f = targetHealthFact(tmp, {});
+    assert.equal(f.value.verdict, 'not-evaluated', '根不存在 ⇒ not-evaluated');
+    assert.equal(f.value.cause, 'target-root-absent', '成因是「根不存在」，⛔ 不是「未声明」');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('deriveTargetHealth 是纯函数三态：probe 失败 ⇒ 独立取值，⛔ 不与 healthy 同形', () => {
+  const binding = { host: null, root: '/tmp/x' };
+  const v = deriveTargetHealth(binding, { ok: false, cause: 'probe-failed', detail: ['exit=255'] }, { windowSec: 60, deliveredPluginVersion: null });
+  assert.equal(v.verdict, 'not-evaluated');
+  assert.equal(v.fanIn, null, '⛔ 不是 {failed:0}');
+  assert.equal(v.cause, 'probe-failed');
+  assert.equal(v.liveness.state, 'unknown', '⛔ unknown ≠ idle');
 });
