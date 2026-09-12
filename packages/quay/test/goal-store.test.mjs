@@ -58,6 +58,12 @@ function gitRepo(tag = "commit") {
 // and a criterion's content lives in criterion+expect — these keep every fixture write complete.
 const GOAL_BODY = "goal body: background, scope, non-goals and exit conditions — long enough to satisfy the 40-char minimum";
 const EXPECT = "the expected outcome this criterion proves";
+// A criterion that FLIPS deterministically on a flag file (absent → exit 1, present → exit 0), used
+// by the "gate never writes a file" tests. ⚠️ Written as an EXPLICIT, ATTRIBUTED failure exit: a bare
+// `test -f passflag` is an inherited silent non-zero, which the write surface now refuses
+// (gap-criterion-attribution-write-gate-at-birth). Same flip, same exit codes — only the cause is
+// written on the way out.
+const FLAG_CRITERION = "test -f passflag || { echo 'passflag absent' >&2; exit 1; }";
 
 // ── AC1: reuses frontmatter-store-base (read the import, never a copy) ────────────────────────────
 test("AC1 — goal-store imports parse/serialize/lock/filename from frontmatter-store-base", () => {
@@ -489,7 +495,7 @@ test("AC2 — verdict 真变化也不提交：fail→pass 后该文件提交数�
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
   // Criterion reads a flag file: absent → fail; present → pass. Deterministic flip.
-  n(["write", "AC-029", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "test -f passflag", "--origin", "o", "--expect", EXPECT]);
+  n(["write", "AC-029", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", FLAG_CRITERION, "--origin", "o", "--expect", EXPECT]);
   const before = acFileCommitCount(root, run, "AC-029");
   const g1 = n(["gate", "AC-029"]);
   assert.equal(g1.status, 1, "flag absent must fail");
@@ -519,7 +525,7 @@ test("AC4 — N 次 gate（含 1 次 verdict flip）⇒ 恰 0 个提交：gate �
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
-  n(["write", "AC-031", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "test -f passflag", "--origin", "o", "--expect", EXPECT]);
+  n(["write", "AC-031", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", FLAG_CRITERION, "--origin", "o", "--expect", EXPECT]);
   // Simulate the 42s cadence burst: one first fail gate + 3 no-change fail gates, then a flip.
   const g1 = n(["gate", "AC-031"]);
   assert.equal(g1.status, 1, "flag absent must fail");
@@ -605,7 +611,7 @@ test("AC4 (evidence-out-of-git) — gate 后两个消费者立刻反映新 verdi
   const args = (a) => ["--root", root, ...a];
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, ...args(cmd)], { encoding: "utf8" });
   n(["write", "GOAL-001", "--title", "p", "--status", "active", "--origin", "o", "--body", GOAL_BODY]);
-  n(["write", "AC-029", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", "test -f passflag", "--origin", "o", "--expect", EXPECT]);
+  n(["write", "AC-029", "--title", "a", "--status", "active", "--goal", "GOAL-001", "--criterion", FLAG_CRITERION, "--origin", "o", "--expect", EXPECT]);
   // fail → get 立刻反映 fail。
   const g1 = runCli(["gate", "AC-029", "--root", root]);
   assert.equal(g1.status, 1, "flag absent must fail");
@@ -1120,15 +1126,24 @@ function appendGoalEvent(root, id, verdict, { actor = "goal-cli", at = "2026-09-
 
 /** A CLOSED goal + achieved criteria: AC-900 is CURRENTLY false, AC-901 is healthy. Both ledger
  *  tails say `pass` (the frozen tail this task is about). */
-function stalePassFixture(tag, acs = [["AC-900", "exit 1"], ["AC-901", "exit 0"]]) {
+// ⚠️ The criteria below MUST stay attributable (a failure exit that writes its cause on the same
+// line): the write surface refuses a criterion whose failure exit writes nothing
+// (gap-criterion-attribution-write-gate-at-birth). `exit 1` therefore reads as `echo … >&2; exit 1`
+// — same exit code, same meaning for every assertion here, but it can no longer be written.
+// ⛔ And the fixture's own setup writes are ASSERTED: a silently-failed `write` (which is exactly
+// how a future收紧 shows up) would otherwise surface as a confusing downstream assertion instead of
+// naming itself (hard rule 3b — a fixture that cannot report its own failure is not a fixture).
+function stalePassFixture(tag, acs = [["AC-900", "echo 'AC-900: no qualifying record' >&2; exit 1"], ["AC-901", "exit 0"]]) {
   const root = tmpDir(tag);
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "goals"), { recursive: true });
   const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
   const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
-  n(["write", "GOAL-900", "--title", "closed goal", "--status", "achieved", "--origin", "o", "--body", GOAL_BODY]);
+  const planted = n(["write", "GOAL-900", "--title", "closed goal", "--status", "achieved", "--origin", "o", "--body", GOAL_BODY]);
+  assert.equal(planted.status, 0, "fixture setup: GOAL-900 must be written:\n" + planted.stderr);
   for (const [id, criterion] of acs) {
-    n(["write", id, "--title", id, "--status", "achieved", "--goal", "GOAL-900", "--criterion", criterion, "--origin", "o", "--expect", EXPECT]);
+    const w = n(["write", id, "--title", id, "--status", "achieved", "--goal", "GOAL-900", "--criterion", criterion, "--origin", "o", "--expect", EXPECT]);
+    assert.equal(w.status, 0, `fixture setup: ${id} must be written:\n` + w.stderr);
     appendGoalEvent(root, id, "pass");
   }
   return { root, n };
@@ -1252,7 +1267,7 @@ test("AC-242 successor — 判据自己声明 NOT-EVALUATED（exit 3）不得被
 });
 
 test("AC-242 successor — 已记录的 fail 更早被重新检查（⛔ 不抬高成本上界：只改资格顺序）", async () => {
-  const { root } = stalePassFixture("sp-failfirst", [["AC-900", "exit 1"], ["AC-901", "exit 0"]]);
+  const { root } = stalePassFixture("sp-failfirst", [["AC-900", "echo 'AC-900: no qualifying record' >&2; exit 1"], ["AC-901", "exit 0"]]);
   // 手写两条 30 分钟前的**轮转**事件：一条 fail、一条 pass。默认 minAge=1h、fail 阈值为 minAge/6=10min
   // ⇒ 只有 fail 那条够老到该被重查；pass 那条还不到期。
   const ago = new Date(Date.now() - 30 * 60 * 1000).toISOString();
