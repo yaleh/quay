@@ -1,7 +1,7 @@
 ---
 id: gap-meta-driver-action-record-failure-aggregation-reading
 title: meta-driver 增设第七类读数：动作记录中的跨会话重复失败聚合（GOAL-014 选项①的实现）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
