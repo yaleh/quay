@@ -84,12 +84,12 @@ ssh ad-arm1 ⇒ hostname=instance-20221019-1509, arch=aarch64
 
 ## Acceptance Criteria
 
-- [ ] **AC1 生产者存在且 fail-closed（能取假）**：目标侧新步骤 + 驱动侧传输 flag 就位；hermetic 自检打印正/负两组读数——**正控制**：八件读数齐备 ⇒ 写出一条 `ac=GOAL-016-AC-247` 记录；**负控制**：逐个把任一件置为读不出 ⇒ **零记录** + 可区分的 NOT-EVALUATED + 退出非 0。读数与输出原文留档。
-- [ ] **AC2 每个字段是直接量（⛔ 无字面量/默认值）**：`grep` 证明记录写入点的每个字段都来自运行时读数（pre/post 计数、HEAD 时刻、status JSON、tgz 源 commit），写入路径里不存在任何字段的硬编码默认值。**引用任一计数前先打印它匹配到的前 3 条实际内容**（硬规则 2），把命中数与前 3 条一起贴进记录。
-- [ ] **AC3 真跑真装（生产载体上的判据翻转）**：在 host≠本机、该项目 user-scope quay 安装**接管前实测为缺**、项目停摆 ≥14 天且 task 存量 >0 的目标上真跑一次（GOAL-016 origin 点名的候选 = ad-arm1 的 `/home/yale/work/archguard`）。留档：接管前的 pre 读数（install 缺 / driver 不活 / task 数 / HEAD 时刻）、接管后的 `driver status --json` 原文、传输输出（`EVIDENCE-TRANSPORT appended=N`）。随后在**生产 root** 下**逐字取 `goals/AC-247-*.md` 的判据干跑**：改前 exit 1、改后 exit 0，两条读数并列（翻转的成因是载体内容，⛔ 不是环境）。
-- [ ] **AC4 liveness 不是退出码、也不是进程表**：记录里的 `driver_alive` / `carrier_records` 来自 `quay driver status --json`；`grep` 证明新步骤**没有**从 `quay driver start` 的退出码派生该字段；留档目标机上 `ps` 读到的陈旧进程与 status 读数的**分歧**（证明两种读法确实不同，而记录用的是后者）。
-- [ ] **AC5 存量不丢不增（pre/post 同源读数）**：`pre_task_count>0` ∧ `post_task_count==pre_task_count`，两条读数的命令与输出原文留档；若差值非 0 ⇒ 记录**未**写出，且报告差值与方向（本条同时是「接管不许破坏存量」的判据）。
-- [ ] **AC6 记录落在生产 root 且判据三态可区分**：`/home/yale/work/quay/.quay/productization-verification.jsonl` 里存在该记录（打印该行原文 + 行数）；载体副本删记录 ⇒ exit 1、移走载体 ⇒ exit 3，与 exit 0 并列留档。
+- [x] **AC1 生产者存在且 fail-closed（能取假）**：目标侧新步骤 + 驱动侧传输 flag 就位；hermetic 自检打印正/负两组读数——**正控制**：八件读数齐备 ⇒ 写出一条 `ac=GOAL-016-AC-247` 记录；**负控制**：逐个把任一件置为读不出 ⇒ **零记录** + 可区分的 NOT-EVALUATED + 退出非 0。读数与输出原文留档。⇒ 见 `## Evidence` §AC1/AC2 与 §AC6（自检四组读数原文）。
+- [x] **AC2 每个字段是直接量（⛔ 无字面量/默认值）**：`grep` 证明记录写入点的每个字段都来自运行时读数（pre/post 计数、HEAD 时刻、status JSON、tgz 源 commit），写入路径里不存在任何字段的硬编码默认值。**引用任一计数前先打印它匹配到的前 3 条实际内容**（硬规则 2），把命中数与前 3 条一起贴进记录。⇒ 见 `## Evidence` §AC1/AC2 的逐字段命中原文（含 `write_ac247_record` 体内 `build_sha` 命中数 = 0）。
+- [x] **AC3 真跑真装（生产载体上的判据翻转）**：在 host≠本机、该项目 user-scope quay 安装**接管前实测为缺**、项目停摆 ≥14 天且 task 存量 >0 的目标上真跑一次（GOAL-016 origin 点名的候选 = ad-arm1 的 `/home/yale/work/archguard`）。留档：接管前的 pre 读数（install 缺 / driver 不活 / task 数 / HEAD 时刻）、接管后的 `driver status --json` 原文、传输输出（`EVIDENCE-TRANSPORT appended=N`）。随后在**生产 root** 下**逐字取 `goals/AC-247-*.md` 的判据干跑**：改前 exit 1、改后 exit 0，两条读数并列（翻转的成因是载体内容，⛔ 不是环境）。⇒ 见 `## Evidence` §AC3 与 §AC6（criterion 干跑 exit 1 → exit 0）。
+- [x] **AC4 liveness 不是退出码、也不是进程表**：记录里的 `driver_alive` / `carrier_records` 来自 `quay driver status --json`；`grep` 证明新步骤**没有**从 `quay driver start` 的退出码派生该字段；留档目标机上 `ps` 读到的陈旧进程与 status 读数的**分歧**（证明两种读法确实不同，而记录用的是后者）。⇒ 见 `## Evidence` §AC4（ps=7 vs status `driver_alive:0`）与自检 `ac247-liveness-source(from-AC203_DRIVER_ALIVE)=1 bad-assign-hits=0`。
+- [x] **AC5 存量不丢不增（pre/post 同源读数）**：`pre_task_count>0` ∧ `post_task_count==pre_task_count`，两条读数的命令与输出原文留档；若差值非 0 ⇒ 记录**未**写出，且报告差值与方向（本条同时是「接管不许破坏存量」的判据）。⇒ 见 `## Evidence` §AC5（61 → 61，同一函数同一命令）。
+- [x] **AC6 记录落在生产 root 且判据三态可区分**：`/home/yale/work/quay/.quay/productization-verification.jsonl` 里存在该记录（打印该行原文 + 行数）；载体副本删记录 ⇒ exit 1、移走载体 ⇒ exit 3，与 exit 0 并列留档。⇒ 见 `## Evidence` §AC6（85 行 + 记录原文 + exit 0/1/3 三条）。
 - [ ] **AC7 全量套件绿 —— 外层 verification-round 验证**（worker 结构上被禁跑全量 suite；本条的量的产生处是 fan-in / 外层的 suite 轮，⛔ 不是 worker 自己的读数；scoped 门绿不等于全量绿）
 
 ## Definition of Done
@@ -103,6 +103,124 @@ ssh ad-arm1 ⇒ hostname=instance-20221019-1509, arch=aarch64
 - 新起一个项目冒充「停摆一月的存量项目」（`stale_days` / `pre_task_count` 是区分量）；
 - 只在 worktree 的 `.quay/` 里自证，而生产 root 的载体上没有该记录；
 - 把「读不出」写成 `driver_alive=0` 的记录（「没查成」被伪装成「查过且不合格」）。
+
+## Evidence
+
+**实现落点**：目标侧 `plugin/scripts/verify-deliver-coldstart.sh` 段⑧（`--ac247-takeover --takeover-root <dir>` → `step_ac247_takeover`，读数助手 `ac247_task_store_count` / `ac247_head_epoch` / `ac247_stale_days` / `ac247_probe_user_install` / `ac247_ps_stale_procs` / `ac247_read_driver_status`，写入点 `write_ac247_record`）；驱动侧 `plugin/scripts/develop-deliver-tgz.sh` 的 `--verify-takeover` → `verify_takeover_mode` + `validate_takeover_args`。提交：`9f5d96968`（落在任务分支 `task/gap-ac247-stalled-project-clean-takeover-record`）。
+
+### AC3 —— ad-arm1 真跑（2026-09-12，C = ad-arm1.wan.hwang.men）
+
+远端 stdout 全文落档：`/home/yale/work/quay/.quay/verify-takeover-remote-C-1d916698.log`（本地）/ 证据文件副本 `/home/yale/work/quay/.quay/verify-takeover-evidence-C-1d916698.jsonl`。
+
+```
+== ⑧ AC-247 takeover: current build takes over a ≥14-day-stalled legacy project ==
+  [⑧a] PRE (taken BEFORE the takeover action) host=instance-20221019-1509 project_root=/home/yale/work/archguard
+  [⑧a] PRE user-scope quay install=absent (absent|present|not-evaluated —— 三态, ⛔ 非布尔)
+  [⑧a] PRE task_store_count=61 head_epoch=1787325178 stale_days=21.759 (at epoch 1789205195)
+  [⑧a] PRE driver_alive=0 carrier_records=1 last_record_ts=2026-09-12T09:07:57.127Z (source: quay driver status --kind promotion --json)
+  [⑧a] PRE ps-proxy quay_procs=7 (⛔ 代理量, 仅供与上面的 status 读数对照; 本步骤任何字段都不由它派生)
+  [⑧b] install segment done: delivered CLI = /home/yale/quay-verify-takeover-1d916698.npm/lib/node_modules/quay/dist/quay.js (isolated prefix /home/yale/quay-verify-takeover-1d916698.npm, 目标机 user-scope 未被写入)
+  [⑧c] takeover action: start the project's OWN promotion driver against /home/yale/work/archguard
+  [⑧c] driver start rc=0 (⛔ 诊断量, 不是 liveness 读数)
+  [⑧d] POST driver_alive=1 carrier_records=2 (pre=1) last_record_ts=2026-09-12T09:26:37.778Z (poll window 120s)
+  [⑧e] POST task_store_count=61 (pre=61)
+  [⑧f] ac247 record written → /home/yale/quay-verify-takeover-evidence-1d916698.jsonl ✓ (host=instance-20221019-1509 project_root=/home/yale/work/archguard pre=61 post=61 stale_days=21.759 driver_alive=1 carrier_records=2)
+AC247_EVALUATED=1 · AC247_DRIVER_ALIVE=1 · AC247_CARRIER_RECORDS=2 · AC247_DRIVER_START_RC=0
+VERIFY-RC 0
+EVIDENCE-PATH /home/yale/quay-verify-takeover-evidence-1d916698.jsonl
+EVIDENCE-LINES 3
+```
+
+驱动侧传输输出原文：
+```
+EVIDENCE-TRANSPORT appended=3 carrier=/home/yale/work/quay/.quay/productization-verification.jsonl evidence=/home/yale/work/quay/.quay/verify-takeover-evidence-C-1d916698.jsonl
+develop-deliver: evidence-completeness COMPLETE present=1
+develop-deliver: C (ad-arm1.wan.hwang.men) — declared ac set [GOAL-016-AC-247] transported into /home/yale/work/quay/.quay/productization-verification.jsonl ✓
+develop-deliver: --verify-takeover OK — GOAL-016-AC-247 record transported into /home/yale/work/quay/.quay/productization-verification.jsonl
+```
+
+接管后的 `driver status --json` 原文（另一台机器、另一时刻读的同一读法）：
+```
+{"kind":"promotion","supervisor_pid":3287662,"driver_pid":3287671,"supervisor_alive":1,"driver_alive":1,"alive":1,"running":1,"carrier_path":"/home/yale/work/archguard/.quay/promotion-outcome.jsonl","carrier_records":4,"last_record_ts":"2026-09-12T09:27:38.734Z","supervisor_started_at":1789205197136,"supervisor_stale":"fresh"}
+```
+连带证据：接管后目标机的 user-scope 安装**仍然为缺**（`command -v quay` ⇒ ABSENT；`npm root -g` ⇒ `/home/yale/.local/opt/node-v24.19.0/lib/node_modules`，其下无 quay）——本次安装只落进隔离前缀，⛔ 没碰 user-scope。
+
+### AC4 —— 进程表 vs status 载体（分歧留档）
+
+同一时刻、同一台机器上两条读法给出**不同**的结论：
+
+```
+$ ps -eo pid,args | grep -c '[q]uay'          ⇒ 7   （含 4 条 21–26 天的陈旧进程）
+  911812 26-18:09:38 bash -lc cd ~/quay-ac88-project/plugin/scripts; ...
+  916014 26-18:01:28 bash /home/yale/quay-ac88-project/plugin/scripts/session-liveness.sh
+1958965 21-18:19:04 node /home/yale/quay-verify-coldstart/verify-ac107-c-rerun.npm/lib/node_modules/quay/plugin//vendor/quay/dist/quay.js mcp
+1959016 21-18:18:50 node /home/yale/work/archguard/.quay/runtime/bin/quay-native.js mcp
+$ quay driver status --kind promotion --root /home/yale/work/archguard --json   ⇒ driver_alive:0（接管前）
+```
+⇒ 进程表说「有一堆 quay 在跑」，status 载体说「这个项目的 promotion driver 不活」——两者确实不同，记录用的是后者（`driver_alive` / `carrier_records` 全部来自 status JSON）。`write_ac247_record` 体内不含 `AC247_DRIVER_START_RC`；`driver start` 的退出码只以 `driver_start_rc` 这个诊断字段落档。自检的结构控制 `ac247-liveness-source(from-AC203_DRIVER_ALIVE)=1 bad-assign-hits=0` 把这条钉在位置上（负控制：把右端换成 start 退出码，谓词翻成 0）。
+
+### AC5 —— 存量不丢不增（同一实现读两次）
+
+```
+$ node <delivered quay> task list --root /home/yale/work/archguard --json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))'
+pre  → 61   （接管前，[⑧a]）
+post → 61   （driver 起来后，[⑧e]）
+$ git -C /home/yale/work/archguard log -1 --format='%H %ct %cI'
+14ea9e63d416a306fb4eac3d73151eae58687a56 1787325178 2026-08-21T15:12:58+00:00
+```
+接管动作**没有改动存量**（差值 0，既不丢也不增）。旁证——接管后该项目自己的 round 记录（`/home/yale/work/archguard/.quay/promotion-round.jsonl` 末行）：
+```
+{"ts":"2026-09-12T09:27:38.734Z","round":3,"run_id":"pm-prod-1789205197","pid":3287671,"action":"none","pool":0,"should_apply":false,"promoted_ids":[],"applied":[],"error":null,...,"halted":false,"gate":{"go":true,"reason":"=> GO: 资源充足，可以跑"},"liveness":{"checked":true,"deaths":null,"running":true}}
+```
+（`pool: 0` / `action: "none"` / `applied: []` ⇒ 这一轮没有翻任何任务状态，故 task 存量不变。）
+
+### AC6 —— 生产 root 载体 + 判据三态
+
+`/home/yale/work/quay/.quay/productization-verification.jsonl` 全载体 **85 行**，其中该记录**原文**：
+```
+{"build_sha":"1d9166985b3a78daf32af976884bd497ca14997d","ts":"2026-09-12T09:26:12Z","ac":"GOAL-016-AC-247","host":"instance-20221019-1509","project_root":"/home/yale/work/archguard","pre_task_count":61,"post_task_count":61,"stale_days":21.759,"driver_alive":1,"carrier_records":2,"carrier_records_pre":1,"stale_processes_ps":7,"driver_start_rc":0,"last_record_ts":"2026-09-12T09:26:37.778Z","user_install_pre":"absent","head_epoch":1787325178}
+```
+
+**逐字取 `goals/AC-247-*.md` 的 criterion 干跑**（脚本正文由该文件提取，⛔ 不手抄一份；三条并列留档，证明 exit 0 来自记录内容而非环境）：
+```
+exit 0 : cd /home/yale/work/quay && python3 <criterion>                    → exit=0（无输出）
+exit 1 : cd <tmp> && 载体副本 grep -v '"ac":"GOAL-016-AC-247"' 后跑同一条 → exit=1
+         stderr: AC-247: carrier holds no qualifying GOAL-016-AC-247 record (need host != local hostname,
+         project_root outside this repo, pre_task_count greater than zero, ... carrier_records greater than zero)
+exit 3 : cd <tmp> && rm -f .quay/productization-verification.jsonl 后跑同一条 → exit=3
+         stderr: AC-247 NOT-EVALUATED: carrier .quay/productization-verification.jsonl absent — cannot read driver-liveness evidence
+```
+
+### AC1 / AC2 —— 自检与逐字段来源
+
+```
+$ bash plugin/scripts/verify-deliver-coldstart.sh --selfcheck           ⇒ PASS
+  selfcheck: ac247-record(fields+anchor) ok=1 missing_fields='' anchor-literal-hits=0
+  selfcheck: ac247-refusal(9 negative specs + boundary-14.000-accepted) negatives_all_refused=1
+  selfcheck: ac247-task-store-count(61 via real node stub) ok=1 head/stale-unreadable-checks=0
+  selfcheck: ac247-liveness-source(from-AC203_DRIVER_ALIVE)=1 status-read-hits=1 bad-assign-hits=0
+$ bash plugin/scripts/develop-deliver-tgz.sh --selfcheck-takeover-transport ⇒ PASS
+  （正：AC-247 证据 → appended=1 + COMPLETE；负：别的 ac → NOT-EVALUATED；负：缺失/零行 → NOT-EVALUATED；
+    位置控制：transport + completeness 两个调用点都在 verify_takeover_mode 体内 hits=2）
+```
+三份测试全绿：`plugin/test/ac247-takeover-record.test.mjs`（4/4）、`plugin/test/verify-deliver-coldstart.test.mjs`（14/14）、`plugin/test/develop-deliver-tgz-evidence-transport.test.mjs`（8/8）。其中 `ac247-takeover-record.test.mjs` 从 `goals/AC-247-*.md` **提取** criterion 正文并跑它的三态（0 / 1（stale_days=13.999 边界）/ 3），另断言 criterion 读的每个字段都被生产者写出（含反控制）。
+
+**AC2 逐字段来源**（每个字段各打印前 3 条 `grep -n` 命中，证明是运行时读数而非字面量）：
+```
+--- host ---              1709: AC247_HOST="$(hostname 2>/dev/null || echo '')"
+--- project_root ---      1710: AC247_PROJECT_ROOT="$(cd "$root" && pwd -P)"
+--- pre_task_count ---    1715: pre_count="$(ac247_task_store_count "$root" "$qrl" || true)"  → 1717: AC247_PRE_TASK_COUNT="$pre_count"
+--- post_task_count ---   1749: AC247_POST_TASK_COUNT="$(ac247_task_store_count "$root" "$qrl" || true)"
+--- stale_days ---        1714: head_epoch="$(ac247_head_epoch "$root" || true)" → 1716: AC247_STALE_DAYS="$(ac247_stale_days ...)"
+                               源头 :1640 `git -C "$root" log -1 --format=%ct`；两个时刻里 AC247_PRE_TS_EPOCH="$(date +%s)"
+--- driver_alive ---      1695: AC247_DRIVER_ALIVE="$AC203_DRIVER_ALIVE"   ← 1694 probe_ac203_driver_status "$status_json"
+                               源头 :1692 `node "$qrl" driver status --kind promotion --root "$root" --json`
+--- carrier_records ---   1696: AC247_CARRIER_RECORDS="$AC203_CARRIER_RECORDS"（同一 status JSON）
+--- build_sha ---         由 ac89_append_goal009 统一补（BUILD_SHA ← 本次投递 tgz 的 develop tip）
+```
+`write_ac247_record` 体内 `grep -c build_sha` = **0** —— ⛔ 没有第二个补锚点（自检 `anchor-literal-hits=0` 钉住）。写入路径里不存在任何字段的硬编码默认值。
+
+**一处实现期实测（值得记）**：`ac247_task_store_count` 最初用 `console.log(j.length)`，在本仓库套件环境（`FORCE_COLOR` 置位）下 Node 会给**数字**加 ANSI 色 ⇒ 命令替换拿到的是 `\033[33m61\033[39m`，一切按字符串比较的判据当场恒假。改用 `process.stdout.write(String(...))`（⛔ 不走 console 的格式化层）。这是既有教训 `force-color-breaks-node-console-log-read-parsing` 的又一次现身。
 
 ## Touches
 
