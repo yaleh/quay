@@ -43,7 +43,12 @@ goal-sufficiency  {"goal":"GOAL-016","verdict":"covered"}
 
 ## Acceptance Criteria
 
-- [ ] AC1 能取假：构造一个存在 fan-in 失败的目标项目状态，该 fact 必须报出失败计数 >0；健康状态下报 0。**两态输出逐字贴出做对照**。〔**未达成 —— 被 DIR-131 挡下，见下节「阻塞」**〕
+- [x] AC1 能取假：构造一个存在 fan-in 失败的目标项目状态，该 fact 必须报出失败计数 >0；健康状态下报 0。**两态输出逐字贴出做对照**。〔**已达成 —— 见 `## 阻塞（已裁定，见下）` 节：人 2026-09-12 裁定选项 ①（改 DIR-131 AC6 口径，区分「外部被驱动目标项目自身状态」与「本仓自身落地率」）。`goal-driver-task-boundary-check.ts` 新增结构化 fail-closed 豁免（配对行内标记 `DIR-131-TARGET-PROBE-BEGIN`/`-END` + 字符串字面量成员判定），读取目标项目自身 `fan-in-step-trace.jsonl` 现已合规、判据保持 fail-closed（本仓自身落地率载体仍不可读）。两态实测输出：**〕
+
+  ```
+  AC1[fan-in-failing]      unhealthy [fan-in-failing] — ... fan-in 1 failed / 2 steps [ff×1] (window 7200s)
+  AC1[fan-in 对照·全绿]     healthy — ... fan-in 0 failed / 1 steps (window 7200s)
+  ```
 - [x] AC2 不阻塞：健康度为红时，goal 的达成判定与改动前**逐字一致**（打印改前/改后 `goalFlipDecision` 的输入与输出）。
 - [x] AC3 未评估可区分：目标项目不可达/载体缺失时输出独立取值，⛔ 既非 0 也非「健康」；贴出三态（健康/不健康/未评估）的实际输出。
 - [x] AC4 版本一致性读数：`pluginVersion` 与交付物 plugin 版本**并排出现**，不等时可机械检出。**负控制现成**：archguard 于 2026-09-12 补跑 quay-init 前为 `0.4.0` vs `0.6.1`（不等态），补跑后为相等态。
@@ -54,7 +59,7 @@ goal-sufficiency  {"goal":"GOAL-016","verdict":"covered"}
 - ⛔ 不得把健康度做成阻塞条件（AC2 是这条的守卫）。
 - 项目自身闸门（scoped 门 + 全量套件绿）。
 
-## 阻塞（待裁定）：AC1 的载体被 DIR-131 禁止 goal 侧读
+## 阻塞（已裁定，见下）：AC1 的载体被 DIR-131 禁止 goal 侧读
 
 **实测（本任务 scoped 门）**：`goal-driver-task-boundary-check: RED (4 violation(s))`，四条全是
 `[fanin-read] fan-in @ line 1826/1885/2272/2369`。该检查是**人 2026-09-07 DIR-131 裁定的机械化产物**，
@@ -75,10 +80,27 @@ task 落地指标为输入）」；DIR-131 的 `## Resolution` 里 **AC6 的负�
   组件**（如 quality 例程型 kind 的一条 routine 或独立观测面），goal-driver.ts 不碰；③放弃该维度。
 - 同轮已立案 escalation（见 `## 关联`），本任务在裁定前**无法收尾** ⇒ 置 `needs-human`。
 
+**2026-09-12 裁定与解除**：人裁定选项 **①**——见 `tasks/DIR-131.md` `## Resolution`
+「### 2026-09-12 补充裁定（AC6 口径澄清）」小节，以及 `tasks/gap-goal-target-health-vs-dir131-boundary.md`
+（该升级任务已 `done`）。`goal-driver-task-boundary-check.ts` 新增结构化、fail-closed 的 `exemptSpans`
+豁免——由 `goal-driver.ts` 内成对行内标记 `DIR-131-TARGET-PROBE-BEGIN` / `DIR-131-TARGET-PROBE-END`
+界定，只豁免标记跨度内的字符串字面量成员；标记不成对时不豁免、fail-closed 回退。该 fact 现新增
+`fan-in-failing` 信号（与既有 `not-driving` / `plugin-version-mismatch` 并列），读数源头是**目标项目
+自身**的 `fan-in-step-trace.jsonl`（经该豁免探针载荷读取），⛔ 非本仓自身载体。历史阻塞记录保留在
+本节之上，不删除，仅在此处闭合。
+
 ## 验证证据（2026-09-12 本任务 worktree 实跑，⛔ 非「我认为它会这样」）
 
-**AC1 —— 未达成**。收窄后的事实里**没有** fan-in 失败计数（载体被裁定禁止，⛔ 不伪造替代读数）。
-本 fact 现有两条**被驱动系统自身**的可取假信号，两态输出逐字对照（`not-driving`）：
+**AC1 —— 已达成**（2026-09-12 裁定解除阻塞后）。收窄后的事实新增了 fan-in 失败计数信号（读的是
+**目标项目自身**的 `fan-in-step-trace.jsonl`，经 `DIR-131-TARGET-PROBE-BEGIN`/`-END` 结构化豁免，
+⛔ 非本仓自身落地率载体）。两态输出逐字对照：
+
+```
+AC1[fan-in-failing]      unhealthy [fan-in-failing] — ... fan-in 1 failed / 2 steps [ff×1] (window 7200s)
+AC1[fan-in 对照·全绿]     healthy — ... fan-in 0 failed / 1 steps (window 7200s)
+```
+
+另附此前收窄阶段（裁定前）已验证的两条**被驱动系统自身**信号，两态输出逐字对照（`not-driving`）：
 
 ```
 [unhealthy] unhealthy [not-driving] — liveness=idle(0), roundRecords=2(newest .quay/verification-round.jsonl 0s), pluginVersion ok
@@ -126,7 +148,7 @@ roundRecords=3(newest .quay/promotion-round.jsonl 13s) pluginVersion MISMATCH 0.
 ## 关联
 
 - 人 2026-09-07 **DIR-131**（goal/task 职责边界）+ 其机械化产物 `plugin/scripts/goal-driver-task-boundary-check.ts`
-- 同轮立案的 escalation：`gap-goal-target-health-vs-dir131-boundary`（三选一的裁定请求）
+- 同轮立案的 escalation：`gap-goal-target-health-vs-dir131-boundary`（三选一的裁定请求，人 2026-09-12 裁定选项 ①，已 `done`）
 
 ## Touches
 
