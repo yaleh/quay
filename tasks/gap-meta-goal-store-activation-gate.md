@@ -16,13 +16,14 @@ GOAL-014 于 2026-09-12T00:33:10Z（本轮前约 27 分钟）被激活但名下�
 涉及机制关键词：`goal-store-activation-gate`（立案前已搜既有任务，无人认领）。
 
 ## AC（draft）
-- [ ] `node --no-warnings --experimental-strip-types --test plugin/test/goal-activation-requires-ac.test.mjs` ⇒ 该测试断言写面行为（不读源码版式）：名下零 AC 的 GOAL 激活被 fail-closed 拒绝（非 0 退出、讯息枚举名下 AC 数 = 0），名下有 ≥1 AC 的 GOAL 正常放行，且零 AC 的 draft GOAL 仍可创建——今天红（行为缺失 / 文件不存在），实现后绿。
+- [x] `node --no-warnings --experimental-strip-types --test plugin/test/goal-activation-requires-ac.test.mjs` ⇒ 该测试断言写面行为（不读源码版式）：名下零 AC 的 GOAL 激活被 fail-closed 拒绝（非 0 退出、讯息枚举名下 AC 数 = 0），名下有 ≥1 AC 的 GOAL 正常放行，且零 AC 的 draft GOAL 仍可创建——今天红（行为缺失 / 文件不存在），实现后绿。
 
 ## DoD（draft）
-- [ ] 上面的判据实跑通过，且判据本身能取假（改坏实现时会红）
-- [ ] 若结论是「已有机制在管、只是失败」，则修那个机制，⛔ 不新建并行机制
+- [x] 上面的判据实跑通过，且判据本身能取假（改坏实现时会红）
+- [x] 若结论是「已有机制在管、只是失败」，则修那个机制，⛔ 不新建并行机制
 
 ## Touches
 - `packages/quay/src/goal-store.ts`
+- `packages/quay/test/goal-store.test.mjs`
 - `plugin/test/goal-activation-requires-ac.test.mjs`
 - `tasks/gap-meta-goal-store-activation-gate.md`
