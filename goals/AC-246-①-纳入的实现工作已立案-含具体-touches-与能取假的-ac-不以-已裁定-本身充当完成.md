@@ -42,9 +42,7 @@ criterion: >
       sys.exit(0)
   sys.stderr.write("CAUSE=no-filed-implementation-task - goal_ac=AC-246 的候选任务 %d
   条，无一同时满足(非 superseded / ## Touches 含具体文件路径 / 至少一条 AC 复选框)；逐条被拒：%s\n" % (seen,
-  "; ".join(rej) if rej else "(一条候选都没有)"))
-
-  sys.exit(1)
+  "; ".join(rej) if rej else "(一条候选都没有)")) ; sys.exit(1)
 
   P
 expect: exit 0 = 存在一条 goal_ac=AC-246、非 superseded、## Touches 列出具体文件路径且带至少一条 AC
