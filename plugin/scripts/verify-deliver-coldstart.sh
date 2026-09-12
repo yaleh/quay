@@ -129,6 +129,24 @@
 #                    ⛔ 不改活树、不靠 stash 往返。任一件读不出 ⇒ ⛔ 不写记录 + 可区分
 #                    NOT-EVALUATED + 退出非 0（未测量 ≠ 不合格；⛔ 不写 adr_check_after_detects=false）。
 #   --target-root <path>  被取证项目根（目标机上的绝对路径；须已存在 .quay/config.yml，⛔ 非本仓库）。
+#   --ac250-web-observe  ⑩ AC-250（GOAL-016，观察面）：量「目标项目的 web 是否真反映进展」。三步读数，
+#                    缺一不可（GOAL-016 风险 3：「serve 起来 / 端口在听 / HTTP 200」与「有个 web 活着」同形）：
+#                    ① bind_host ← 目标机 `ss -ltnp` 上该端口的【真实监听地址】且 == 该机 tailscale0 的真实
+#                    地址（推导，⛔ 不硬编码）；② probe_from_host = 判读侧（本机）hostname，探测/解析/组装
+#                    全在判读侧完成 ⇒ 跨机可达是结构性质；③ 同一 observed_task_id 在两个时刻的页面渲染
+#                    状态【互不相等】且与直接读 store 的值一致（⛔ 不判单点渲染）。任一件读不出 ⇒ ⛔ 不写
+#                    记录 + 可区分 NOT-EVALUATED + 退出非 0；窗口内状态【未变化】是另一个取值 no-change
+#                    （⛔ 不与「没测成」同形，也⛔ 都不写成合格记录）。
+#                    ⚠️ 本模式【不跑 step①】：它观测的是【目标机上已安装的】产物，而 step① 装的是判读侧
+#                    的前缀 —— 与「目标机上那个 web 绑了什么地址」无关。产物身份经 quay_path/quay_sha256
+#                    留档（非判据字段），可独立复算。
+#   --ac250-ssh <dest>       目标机 ssh 目的地（BatchMode；须与判读侧是【两台机器】，否则 not-evaluated）
+#   --ac250-root <dir>       目标机上的目标项目根（cwd=它，使 serve 解析该项目的 .quay/config.yml）
+#   --ac250-task <id>        被观察的 task id（两点读数必须同一 id —— ⛔ 不取「最新一条」）
+#   --ac250-quay <path>      目标机上 quay CLI 入口（缺省 = <root>/.quay/runtime/bin/quay.js）
+#   --ac250-node <path>      目标机上 node 解释器（缺省 = 目标机 PATH 上的 node；须能跑起上面那份 quay）
+#   --ac250-port <p>         目标机上 serve 绑的端口（缺省 4173）
+#   --ac250-window <s>       观察窗口秒数（缺省 600；窗口内无变化 ⇒ no-change，⛔ 不写记录）
 #   --help           用法在前、退出 0、无副作用（gap-scripts-sprawl 约定）。
 
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
@@ -462,6 +480,14 @@ while [ $# -gt 0 ]; do
     --target-root) AC248_ROOT="$2"; shift 2 ;;
     --task-id) AC248_TASK_ID_ARG="$2"; shift 2 ;;
     --pre-rev) AC248_PRE_REV_ARG="$2"; shift 2 ;;
+    --ac250-web-observe) AC250_WEB_OBSERVE=1; shift ;;
+    --ac250-ssh) AC250_SSH="$2"; shift 2 ;;
+    --ac250-root) AC250_ROOT="$2"; shift 2 ;;
+    --ac250-task) AC250_TASK_ID_ARG="$2"; shift 2 ;;
+    --ac250-quay) AC250_QUAY_ARG="$2"; shift 2 ;;
+    --ac250-node) AC250_NODE_ARG="$2"; shift 2 ;;
+    --ac250-port) AC250_PORT="$2"; shift 2 ;;
+    --ac250-window) AC250_WINDOW="$2"; shift 2 ;;
     --selfcheck) DO_SELFCHECK=1; shift ;;
     *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -2189,6 +2215,497 @@ print("," + ",".join(json.dumps(k) + ":" + json.dumps(v) for k, v in e))
     echo "  [⑨f] AC248-NOT-EVALUATED: record NOT written (缺值≠合格):$why" >&2
     echo "        ⛔ 特别是没有写出 adr_check_after_detects=false 的记录：那会把「没查成」伪装成「查过且未翻转」（硬规则 3b）" >&2
   fi
+  return 0
+}
+
+# ── ⑩ AC-250（GOAL-016）：观察面 —— serve 真绑目标机 tailscale0、跨机探测、两点差分 ────────────
+# 判据（goals/AC-250-*.md；本文件 ⛔ 不改判据）：载体存在 ac="GOAL-016-AC-250" 记录，且
+#   host 非空 ≠ 本机 ∧ project_root ∉ 本仓库 ∧ bind_host 非空 == tailscale0_ip 且非 127./0.0.0.0/::/localhost
+#   ∧ probe_from_host 非空 ≠ host ∧ http_status == 200 ∧ observed_task_id 非空 ∧
+#   observed_status_before/after 均非空且【互不相等】 ∧ store_status_after == observed_status_after。
+# ⛔ 与最近的近亲 AC-234（write_ac234_record）【形态逐条相反】⇒ 不复用它、也不借它的变量/字段：
+#   AC-234 用 `--host 127.0.0.1`（bind_host 结构上不可能等于 tailscale0 IP——这同时是一条现成负控制）、
+#   只读一次页面（单点计数）、全程同机自探（无 probe_from_host）。判据正文「⛔ 不判单点渲染」正是把
+#   那种机制排除在外 ⇒ AC-234 的绿不携带本条的【任何】信息。
+# 三层各堵一类伪证（GOAL-016 风险 3：只证明「serve 起来 / 端口在听 / HTTP 200」与「有个 web 活着」同形）：
+#   ① 绑对地址：bind_host ← 目标机 `ss -ltnp` 上该端口的【真实监听地址】（⛔ 不是 --host 实参——
+#      实参是意图、监听地址是观测值，硬规则 4b），且必须 == 该机 `ip -4 addr show tailscale0`
+#      推出的地址（⛔ 不硬编码 100.100.148.48：判据逐字要求「推导而非复制副本」）。
+#   ② 跨机真可达：探测、页面解析、记录组装全部在【判读侧】（本机）完成，probe_from_host = 本机 hostname
+#      ⇒ probe_from_host≠host 是机制的结构性质，⛔ 不是靠自觉。
+#   ③ 反映进展：同一 observed_task_id 在两个时刻的【页面渲染状态】互不相等（⛔ 不同任务天然不同，
+#      故必须同一 id —— 这是对判据的【加强】，⛔ 不改判据文件），且 store_status_after（直接读目标
+#      store）与页面读数一致（堵「页面显示了一个静态快照 / 陈旧缓存」那一类）。
+# 三态可区分（硬规则 3b）：AC250_OUTCOME ∈ { ok, no-change, not-evaluated:<why> } ——
+#   「测了、状态未变」(no-change) 与「没测成」(not-evaluated:*) 是两种【不同】的失败，⛔ 都不得写成
+#   合格记录，也⛔ 不得共用同一个取值（否则「没测成」与「测了没变化」在输出上同形）。
+# ⛔ 本模式【不跑 step①】：它观测的是【目标机上已安装的】产物（--ac250-quay 指定 / 从目标机推导），
+#   而 step① 装的是【判读侧】的前缀——与「目标机上那个 web 绑了什么地址」无关。产物身份经
+#   quay_path/quay_sha256 两个【非判据】字段如实留档，可被独立复算。
+AC250_WEB_OBSERVE=0                          # 1 = --ac250-web-observe 触发（opt-in 模式）
+AC250_SSH=""                                 # --ac250-ssh：目标机 ssh 目的地
+AC250_ROOT=""                                # --ac250-root：目标机上的目标项目根
+AC250_TASK_ID_ARG=""                         # --ac250-task：被观察的 task id（两点读数必须同一 id）
+AC250_QUAY_ARG=""                            # --ac250-quay：目标机 quay CLI 入口（缺省 = 从目标机推导）
+AC250_NODE_ARG=""                            # --ac250-node：目标机 node 解释器（缺省 = 目标机 PATH 上的 node）
+AC250_PORT="${AC250_PORT_OVERRIDE:-4173}"    # --ac250-port
+AC250_WINDOW=600                             # --ac250-window：观察窗口秒数
+AC250_POLL_INTERVAL=5                        # 轮询间隔（秒）
+AC250_SSH_TIMEOUT=10                         # 单次 ssh 连接超时（秒）
+
+AC250_HOST=""                                # 目标机 hostname（经 ssh 读）
+AC250_TAILSCALE0_RAW=""                      # `ip -4 addr show tailscale0` 输出原文（直接量）
+AC250_TAILSCALE0_IP=""                       # 由上面原文【推导】出的地址（⛔ 不硬编码）
+AC250_SS_RAW=""                              # `ss -ltnp` 上该端口那几行的原文（直接量）
+AC250_BIND_HOST=""                           # 该端口的真实监听地址（⛔ 非 --host 实参）
+AC250_PROBE_FROM_HOST=""                     # 判读侧自己的 hostname（探测必须由非目标机发起）
+AC250_HTTP_STATUS=""                         # 时刻①的 HTTP 状态码（-1 = 读不出）
+AC250_HTTP_STATUS_T2=""                      # 时刻②（观测到变化那一次）的 HTTP 状态码
+AC250_OBSERVED_TASK_ID=""                    # 页面里被观察行的 id（= AC250_TASK_ID_ARG）
+AC250_BEFORE=""                              # 该 id 在时刻①的页面渲染状态
+AC250_AFTER=""                               # 该 id 在时刻②的页面渲染状态
+AC250_ROW_BEFORE_RAW=""                      # 时刻①该行 HTML 原文（两行合起来证明「同一 id」）
+AC250_ROW_AFTER_RAW=""                       # 时刻②该行 HTML 原文
+AC250_STORE_STATUS_AFTER=""                  # 直接读目标 store 得到的该 id 状态
+AC250_STORE_SOURCE=""                        # 上面那个量的来源（abi:task-view | file:tasks/<id>.md）
+AC250_QUAY_RESOLVED=""                       # 目标机上实际使用的 quay CLI 路径（推不出 = 空）
+AC250_NODE_RESOLVED=""                       # 目标机上实际使用的 node 解释器
+AC250_QUAY_SHA256=""                         # 上面那个 quay 文件的 sha256（非判据留档）
+AC250_SERVE_PID=""                           # 目标机上本步骤起的 serve 进程号（收尾用）
+AC250_PAGE_URL=""                            # 被探测的 URL（留档）
+AC250_T2_ELAPSED=""                          # 从时刻①到观测到变化的秒数
+AC250_ROW_STATUS=""                          # ac250_lookup_row 的当前命中状态（空 = 未命中该 id）
+AC250_ROW_RAW=""                             # ac250_lookup_row 的当前命中行原文
+AC250_T0=""                                  # 时刻①的 UTC 时刻（留档）
+AC250_OUTCOME="not-evaluated:not-run"        # ok | no-change | not-evaluated:<why>
+AC250_EVALUATED=0                            # 1 = 九件读数全部取到（⛔ 与 ok 不同形，硬规则 3b）
+AC250_WRITTEN_THIS_RUN=0                     # 1 = 本次真的写了一条记录
+AC250_WRITTEN_ROOT=""                        # 记录写到的目标项目根（留档）
+
+# shell 单引号转义：把任意字符串变成一个 ssh 远端可安全内插的词（⛔ 不拼裸路径）。
+ac250_shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+
+# 在目标机上跑一条命令（BatchMode：⛔ 不交互、⛔ 不挂在提示符上）。stdout 原样返回。
+ac250_target() {
+  [ -n "$AC250_SSH" ] || return 1
+  ssh -o BatchMode=yes -o ConnectTimeout="$AC250_SSH_TIMEOUT" "$AC250_SSH" "$1" 2>/dev/null
+}
+
+# 目标机身份 + tailscale0 真实地址。两者都是直接量；地址由 `ip -4 addr show` 的原文【推导】。
+# 读不出网卡 / 无 inet 行 ⇒ 地址留空（调用方 fail-closed），⛔ 不退回任何默认地址。
+ac250_read_target_identity() {
+  AC250_HOST=""; AC250_TAILSCALE0_RAW=""; AC250_TAILSCALE0_IP=""
+  [ -n "$AC250_SSH" ] || return 0
+  AC250_HOST="$(ac250_target 'hostname' | head -n1 | tr -d '\r' || true)"
+  AC250_TAILSCALE0_RAW="$(ac250_target 'ip -4 addr show tailscale0' || true)"
+  AC250_TAILSCALE0_IP="$(printf '%s\n' "$AC250_TAILSCALE0_RAW" \
+    | sed -n 's/^[[:space:]]*inet[[:space:]]\{1,\}\([0-9][0-9.]*\)\/.*/\1/p' | head -n1)"
+  return 0
+}
+
+# 目标机上 quay CLI 与 node 解释器的解析。缺省 quay = 目标项目自己的 runtime（quay-init 装进项目的那份，
+# 相对项目根推导，⛔ 不写死任何宿主专属绝对路径）；两者都必须在目标机上【真实存在】（node 还要可执行），
+# 否则视同读不出——⛔ 不拿一个不存在的路径去起进程（「路径拼对了」≠「文件在」）。
+ac250_resolve_target_tools() {
+  AC250_QUAY_RESOLVED=""; AC250_NODE_RESOLVED=""
+  [ -n "$AC250_SSH" ] || return 0
+  if [ -n "$AC250_NODE_ARG" ]; then
+    AC250_NODE_RESOLVED="$AC250_NODE_ARG"
+  else
+    AC250_NODE_RESOLVED="$(ac250_target 'command -v node' | head -n1 | tr -d '\r' || true)"
+  fi
+  if [ -n "$AC250_QUAY_ARG" ]; then
+    AC250_QUAY_RESOLVED="$AC250_QUAY_ARG"
+  elif [ -n "$AC250_ROOT" ]; then
+    local cand="$AC250_ROOT/.quay/runtime/bin/quay.js"
+    # `|| true`：set -e 下「测试为假」这一布尔结果不得杀死脚本（缺位是正常取值，由调用方 fail-closed）。
+    if [ -n "$(ac250_target "test -f $(ac250_shq "$cand") && echo yes" || true)" ]; then
+      AC250_QUAY_RESOLVED="$cand"
+    fi
+  fi
+  if [ -n "$AC250_NODE_RESOLVED" ]; then
+    [ -n "$(ac250_target "test -x $(ac250_shq "$AC250_NODE_RESOLVED") && echo yes" || true)" ] || AC250_NODE_RESOLVED=""
+  fi
+  if [ -n "$AC250_QUAY_RESOLVED" ]; then
+    [ -n "$(ac250_target "test -f $(ac250_shq "$AC250_QUAY_RESOLVED") && echo yes" || true)" ] || AC250_QUAY_RESOLVED=""
+  fi
+  return 0
+}
+
+# 从 `ss -ltnp` 原文里取【该端口】的真实监听地址（⛔ 不是 --host 实参：实参是意图，监听是观测值）。
+# 只认 LISTEN 行里以 `:<port>` 结尾的那个本地地址字段；读不出 ⇒ 空。
+ac250_listen_addr() {
+  printf '%s\n' "$1" | awk -v p=":$2" '
+    /^LISTEN/ {
+      for (i = 1; i <= NF; i++) {
+        if (length($i) > length(p) && substr($i, length($i) - length(p) + 1) == p) {
+          a = substr($i, 1, length($i) - length(p))
+          gsub(/^\[/, "", a); gsub(/\]$/, "", a)   # [::] → ::（同一地址的显示形态，⛔ 非改写取值）
+          print a; exit
+        }
+      }
+    }'
+}
+
+# 目标机上该端口的 LISTEN 行原文（直接量；留档用）。
+ac250_read_listen() {
+  ac250_target "ss -ltnp 2>/dev/null" | awk -v p=":$AC250_PORT" '
+    /^LISTEN/ { for (i = 1; i <= NF; i++) if (length($i) > length(p) && substr($i, length($i) - length(p) + 1) == p) { print; next } }'
+}
+
+# 在目标机上起 quay serve：绑【该机 tailscale0 的真实地址】、cwd = 目标项目根（使 serve 解析该项目的
+# .quay/config.yml）。pid 落 AC250_SERVE_PID（收尾 kill 用）。
+ac250_start_serve() {
+  local cmd
+  AC250_SERVE_PID=""
+  [ -n "$AC250_QUAY_RESOLVED" ] && [ -n "$AC250_NODE_RESOLVED" ] || return 0
+  [ -n "$AC250_TAILSCALE0_IP" ] && [ -n "$AC250_ROOT" ] || return 0
+  cmd="cd $(ac250_shq "$AC250_ROOT") && setsid nohup $(ac250_shq "$AC250_NODE_RESOLVED") $(ac250_shq "$AC250_QUAY_RESOLVED") serve --host $(ac250_shq "$AC250_TAILSCALE0_IP") --port $(ac250_shq "$AC250_PORT") >/dev/null 2>&1 </dev/null & echo \$!"
+  AC250_SERVE_PID="$(ac250_target "$cmd" | head -n1 | tr -d '\r' || true)"
+  case "$AC250_SERVE_PID" in ''|*[!0-9]*) AC250_SERVE_PID="" ;; esac
+  return 0
+}
+
+# 收尾：杀掉本步骤在目标机上起的 serve（⛔ 不留给下一轮；也⛔ 不杀别人的进程）。
+ac250_stop_serve() {
+  [ -n "$AC250_SERVE_PID" ] || return 0
+  ac250_target "kill $(ac250_shq "$AC250_SERVE_PID") 2>/dev/null; true" >/dev/null 2>&1 || true
+  AC250_SERVE_PID=""
+  return 0
+}
+
+# 判读侧对 `http://<tailscale0_ip>:<port>/tasks?pageSize=500` 发一次真实 HTTP 请求（⛔ 不由目标机 curl
+# 自己——那会让 probe_from_host==host 成为可能）。body 落 $2，状态码落 AC250_HTTP_STATUS。
+# 读不出 ⇒ -1（⛔ 不是 0、也⛔ 不是 200：缺值不该与任何一种真实状态同形）。
+ac250_fetch_page() {
+  AC250_HTTP_STATUS="$(curl -s -o "$2" -w '%{http_code}' --max-time 15 "$1" 2>/dev/null || echo -1)"
+  case "$AC250_HTTP_STATUS" in ''|*[!0-9]*) AC250_HTTP_STATUS=-1 ;; esac
+  return 0
+}
+
+# 从真实渲染 HTML 里解析 (id, status) 行 —— 状态码只证明「有个 web 活着」，反映的是【内容】。
+# 输出：每行 `<id>\t<status>`；无行 ⇒ 空（⛔ 不是「零个任务」这种正常态：空输出由调用方 fail-closed）。
+ac250_parse_rows() {
+  printf '%s' "$1" | "$VC_NODE" --no-warnings -e '
+    let s = "";
+    process.stdin.on("data", d => s += d).on("end", () => {
+      const re = /<a href="\/task\/([^"?]+)[^"]*"[^>]*>[^<]*<\/a><\/td>\s*<td>([^<]*)</g;
+      const out = [];
+      let m;
+      while ((m = re.exec(s)) !== null) {
+        let id = m[1];
+        try { id = decodeURIComponent(id); } catch (e) { /* 保留原文 */ }
+        out.push(id + "\t" + m[2].trim());
+      }
+      process.stdout.write(out.join("\n"));
+    });' 2>/dev/null || true
+}
+
+# 在某次页面读数里查某 id 那一行。命中 ⇒ AC250_ROW_STATUS / AC250_ROW_RAW 就位；未命中 ⇒ 两者空。
+ac250_lookup_row() {
+  local line
+  AC250_ROW_STATUS=""; AC250_ROW_RAW=""
+  line="$(printf '%s\n' "$1" | awk -F'\t' -v id="$2" '$1 == id { print; exit }')"
+  [ -n "$line" ] || return 0
+  AC250_ROW_RAW="$line"
+  AC250_ROW_STATUS="${line#*	}"
+  return 0
+}
+
+# 直接读【目标 store】得到的该任务状态（⛔ 不以页面缓存为准）。首选 Provider ABI（目标项目自己的
+# quay CLI：`task view <id> --json`），退回直读 `tasks/<id>.md` 的 `status:` 行；两者都读不出 ⇒ 空 +
+# source 如实留档（缺值 ≠ 合格）。
+ac250_read_store_status() {
+  local out src=""
+  AC250_STORE_STATUS_AFTER=""; AC250_STORE_SOURCE=""
+  [ -n "$1" ] && [ -n "$AC250_QUAY_RESOLVED" ] || return 0
+  out="$(ac250_target "cd $(ac250_shq "$AC250_ROOT") && $(ac250_shq "$AC250_NODE_RESOLVED") $(ac250_shq "$AC250_QUAY_RESOLVED") task view $(ac250_shq "$1") --json" || true)"
+  AC250_STORE_STATUS_AFTER="$(printf '%s' "$out" | "$VC_NODE" --no-warnings -e '
+    let s = "";
+    process.stdin.on("data", d => s += d).on("end", () => {
+      try { const j = JSON.parse(s); process.stdout.write(j && typeof j.status === "string" ? j.status : ""); }
+      catch (e) { process.stdout.write(""); }
+    });' 2>/dev/null || true)"
+  if [ -n "$AC250_STORE_STATUS_AFTER" ]; then
+    src="abi:task-view"
+  else
+    AC250_STORE_STATUS_AFTER="$(ac250_target "sed -n 's/^status:[[:space:]]*//p' $(ac250_shq "$AC250_ROOT/tasks/$1.md") 2>/dev/null | head -n1" | tr -d '\r' || true)"
+    if [ -n "$AC250_STORE_STATUS_AFTER" ]; then src="file:tasks/$1.md"; fi
+  fi
+  AC250_STORE_SOURCE="$src"
+  return 0
+}
+
+# 回环/通配地址判定（criterion 逐字排除 127./0.0.0.0/::/localhost）。⛔ 单独成函数：`write_ac250_record`
+# 体内因此不含任何【地址字面量默认值】（AC2 的 grep 判据钉在这里）。
+ac250_not_loopback() {
+  case "$1" in
+    127.*|0.0.0.0|::|localhost) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# http_status 取值校验（criterion 算 `int(r.get("http_status") or 0) != 200` ⇒ 只有 JSON 数字 200 取到真）。
+# ⛔ 先做【纯数字】校验再比 200：写成 `[ "$1" = "200" ]` 会被任何非数字的字面量字符串绕过（`http_200`），
+#    而字段在记录里以【不加引号】的形态写出 ⇒ 非数字值会产出非法 JSON（真跑一次才发现，2026-09-12）。
+# ⛔ 这是【校验】不是默认值：本函数不产生任何值，只拒收调用方传来的读数 —— 字面量只允许出现在这里。
+ac250_http_status_ok() {
+  case "$1" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$1" -eq 200 ]
+}
+
+# ── ⑩ AC-250 记录写（fail-closed，硬规则 3b）────────────────────────────────────────────────
+# 经 ac89_append_goal009 统一补 top-level build_sha/ts（AC-214 唯一补锚 choke point）——⛔ 本函数体内
+# 不出现 `build_sha` 字面量（多一个补锚点 = 下次改锚格式必漏一处）。
+# 七个判据字段与 goal 的 criterion 是【同一组谓词的两侧】（改动须同步）：
+#   host 非空 · project_root 非空 · bind_host 非空 == tailscale0_ip 且非回环 · probe_from_host 非空 ≠ host ·
+#   http_status == 200 · observed_task_id 非空 · before/after 非空且互不相等 · store_status_after == after。
+# ⛔ 任一条不成立 ⇒ 一条都不写、return 1。特别是：⛔ 不写一条「状态未变」的记录充数——那会把
+#    「测了没变化」与「合格」在载体上同形（硬规则 3b 的镜像半边，本 AC 的 Plan 逐字点名）。
+write_ac250_record() {
+  local host="$1" project_root="$2" bind_host="$3" ts_ip="$4" probe_from="$5"
+  local http_status="$6" task_id="$7" before="$8" after="$9" store_after="${10}" extras_json="${11:-}"
+  [ -n "$host" ] || return 1
+  [ -n "$project_root" ] || return 1
+  [ -n "$bind_host" ] || return 1
+  [ -n "$ts_ip" ] || return 1
+  [ "$bind_host" = "$ts_ip" ] || return 1
+  ac250_not_loopback "$bind_host" || return 1
+  [ -n "$probe_from" ] || return 1
+  [ "$probe_from" != "$host" ] || return 1
+  ac250_http_status_ok "$http_status" || return 1
+  [ -n "$task_id" ] || return 1
+  [ -n "$before" ] || return 1
+  [ -n "$after" ] || return 1
+  [ "$before" != "$after" ] || return 1
+  [ "$store_after" = "$after" ] || return 1
+  ac89_append_goal009 ",\"ac\":\"GOAL-016-AC-250\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"bind_host\":\"$bind_host\",\"tailscale0_ip\":\"$ts_ip\",\"probe_from_host\":\"$probe_from\",\"http_status\":$http_status,\"observed_task_id\":\"$task_id\",\"observed_status_before\":\"$before\",\"observed_status_after\":\"$after\",\"store_status_after\":\"$store_after\"${extras_json}"
+}
+
+# 非判据留档字段（两段原文 / URL / 两次读数行 / store 来源 / 产物身份 / 窗口）。经 python3 组 JSON
+# （⛔ 不拼字符串：原文含换行与引号，手拼必产生非法 JSON）。
+ac250_extras_json() {
+  AC250_T0="$AC250_T0" AC250_TSIP="$AC250_TAILSCALE0_IP" AC250_TSRAW="$AC250_TAILSCALE0_RAW" \
+  AC250_SSRAW="$AC250_SS_RAW" AC250_URL="$AC250_PAGE_URL" AC250_H1="$AC250_HTTP_STATUS" \
+  AC250_H2="$AC250_HTTP_STATUS_T2" AC250_R1="$AC250_ROW_BEFORE_RAW" AC250_R2="$AC250_ROW_AFTER_RAW" \
+  AC250_SSRC="$AC250_STORE_SOURCE" AC250_QP="$AC250_QUAY_RESOLVED" AC250_QH="$AC250_QUAY_SHA256" \
+  AC250_NP="$AC250_NODE_RESOLVED" AC250_WIN="$AC250_WINDOW" AC250_EL="$AC250_T2_ELAPSED" \
+  AC250_PF="$AC250_PROBE_FROM_HOST" python3 -c '
+import json, os
+def cut(s, n=4000):
+    s = s or ""
+    return s if len(s) <= n else s[:n] + "\n…[truncated]"
+def num(s, d=None):
+    try: return int(s)
+    except Exception: return d
+e = [("ac250_tailscale0_addr", os.environ["AC250_TSIP"]),
+     ("ac250_tailscale0_ip_addr_raw", cut(os.environ["AC250_TSRAW"])),
+     ("ac250_listen_raw", cut(os.environ["AC250_SSRAW"])),
+     ("ac250_page_url", os.environ["AC250_URL"]),
+     ("ac250_http_status_t1", num(os.environ["AC250_H1"])),
+     ("ac250_http_status_t2", num(os.environ["AC250_H2"])),
+     ("ac250_row_before", os.environ["AC250_R1"]),
+     ("ac250_row_after", os.environ["AC250_R2"]),
+     ("ac250_store_read_source", os.environ["AC250_SSRC"]),
+     ("ac250_quay_path", os.environ["AC250_QP"]),
+     ("ac250_quay_sha256", os.environ["AC250_QH"]),
+     ("ac250_node_path", os.environ["AC250_NP"]),
+     ("ac250_probe_host", os.environ["AC250_PF"]),
+     ("ac250_window_seconds", num(os.environ["AC250_WIN"], 0)),
+     ("ac250_seconds_to_change", num(os.environ["AC250_EL"]))]
+print("," + ",".join(json.dumps(k) + ":" + json.dumps(v) for k, v in e))
+' 2>/dev/null || true
+}
+
+# ── ⑩ AC-250 步骤（GOAL-016-AC-250）──────────────────────────────────────────────────────
+# 顺序固定（Plan 2）：(a) 目标机身份 + tailscale0 地址 → (b) 解析目标机 quay/node 并验它真能跑
+# → (c) 用【该机自己的 tailscale0 地址】起 serve（cwd=目标项目根）→ (d) 读 `ss -ltnp` 取真实监听地址
+# → (e) 判读侧取回真实 HTML、解析出被观察行的状态（时刻①）→ (f) 轮询【同一个 id】直到它的渲染状态
+# 变化（时刻②）→ (g) 直接读目标 store 交叉核对 → (h) 九件全部有效才写记录。
+# 任缺 ⇒ ⛔ 不写 + 可区分 NOT-EVALUATED + 退出非 0（由主流程的判定块落 exit 1）。
+step_ac250_web_observe() {
+  local tmp rows1 rows2 deadline now flipped=0 i why=""
+  echo "== ⑩ AC-250 web observe: target serve bound to ITS tailscale0, probed from THIS host, two readings of ONE task =="
+  AC250_OUTCOME="not-evaluated:not-run"; AC250_EVALUATED=0; AC250_WRITTEN_THIS_RUN=0
+  AC250_HOST=""; AC250_TAILSCALE0_RAW=""; AC250_TAILSCALE0_IP=""
+  AC250_SS_RAW=""; AC250_BIND_HOST=""; AC250_PROBE_FROM_HOST=""
+  AC250_HTTP_STATUS=""; AC250_HTTP_STATUS_T2=""
+  AC250_OBSERVED_TASK_ID=""; AC250_BEFORE=""; AC250_AFTER=""
+  AC250_ROW_BEFORE_RAW=""; AC250_ROW_AFTER_RAW=""
+  AC250_STORE_STATUS_AFTER=""; AC250_STORE_SOURCE=""
+  AC250_QUAY_RESOLVED=""; AC250_NODE_RESOLVED=""; AC250_QUAY_SHA256=""
+  AC250_SERVE_PID=""; AC250_PAGE_URL=""; AC250_T2_ELAPSED=""
+
+  if [ "$AC250_WEB_OBSERVE" != "1" ]; then
+    echo "  not-evaluated: --ac250-web-observe 未传入（未尝试 ≠ 不合格）"
+    return 0
+  fi
+  if [ -z "$AC250_SSH" ]; then
+    AC250_OUTCOME="not-evaluated:no-target-ssh"
+    echo "  AC250-NOT-EVALUATED: --ac250-ssh 未传入 ⇒ 不知道该在哪台机器上读 tailscale0 / 起 serve（⛔ 不默认本机：那会让 probe_from_host==host）" >&2
+    return 0
+  fi
+  if [ -z "$AC250_ROOT" ]; then
+    AC250_OUTCOME="not-evaluated:no-target-root"
+    echo "  AC250-NOT-EVALUATED: --ac250-root 未传入 ⇒ 不知道 web 指向哪个目标项目" >&2
+    return 0
+  fi
+  if [ -z "$AC250_TASK_ID_ARG" ]; then
+    AC250_OUTCOME="not-evaluated:no-observe-task"
+    echo "  AC250-NOT-EVALUATED: --ac250-task 未传入 ⇒ 两点读数会各取一行，拿【不同任务】天然不同冒充进展（⛔ 不取「最新一条」）" >&2
+    return 0
+  fi
+  tmp="$(mktemp -d 2>/dev/null || true)"
+  if [ -z "$tmp" ]; then
+    AC250_OUTCOME="not-evaluated:no-tmp"
+    echo "  AC250-NOT-EVALUATED: 无法创建临时目录" >&2
+    return 0
+  fi
+  AC250_PROBE_FROM_HOST="$(hostname 2>/dev/null || echo '')"
+  AC250_T0="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  # (a) 目标机身份 + tailscale0 真实地址
+  ac250_read_target_identity
+  echo "  [⑩a] target ssh=$AC250_SSH host=${AC250_HOST:-<unreadable>} root=$AC250_ROOT probe_from=${AC250_PROBE_FROM_HOST:-<unreadable>}"
+  echo "  [⑩a] ip -4 addr show tailscale0 原文:"; printf '%s\n' "${AC250_TAILSCALE0_RAW:-<unreadable>}" | sed 's/^/        | /'
+  echo "  [⑩a] tailscale0_ip=${AC250_TAILSCALE0_IP:-<unreadable>} （由上面原文推导，⛔ 非硬编码：判据要求「推导而非复制副本」）"
+  if [ -z "$AC250_HOST" ] || [ -z "$AC250_TAILSCALE0_IP" ]; then
+    AC250_OUTCOME="not-evaluated:target-identity-unreadable"
+    echo "  AC250-NOT-EVALUATED: 目标机 hostname 或 tailscale0 地址读不出（ssh 不通 / 该机无此网卡）—— 缺值 ≠ 合格（硬规则 3b）" >&2
+    rm -rf "$tmp"; return 0
+  fi
+  if [ "$AC250_PROBE_FROM_HOST" = "$AC250_HOST" ]; then
+    AC250_OUTCOME="not-evaluated:probe-side-is-target"
+    echo "  AC250-NOT-EVALUATED: 判读侧 hostname == 目标机 hostname ⇒ 本机就是目标机，跨机可达性【结构上】无法成立（Plan 2 两层判读结构）" >&2
+    rm -rf "$tmp"; return 0
+  fi
+
+  # (b) 目标机工具链：路径必须在目标机上真实存在，且必须真能出版本号（⛔ 不拿一个不存在的路径去起进程）
+  ac250_resolve_target_tools
+  echo "  [⑩b] target tools: node=${AC250_NODE_RESOLVED:-<unreadable>} quay=${AC250_QUAY_RESOLVED:-<unreadable>}"
+  if [ -z "$AC250_NODE_RESOLVED" ] || [ -z "$AC250_QUAY_RESOLVED" ]; then
+    AC250_OUTCOME="not-evaluated:target-quay-unresolved"
+    echo "  AC250-NOT-EVALUATED: 目标机上 quay CLI / node 解析不出（--ac250-quay 未给且项目 runtime 缺位）—— 缺值 ≠ 合格" >&2
+    rm -rf "$tmp"; return 0
+  fi
+  local ver
+  ver="$(ac250_target "$(ac250_shq "$AC250_NODE_RESOLVED") $(ac250_shq "$AC250_QUAY_RESOLVED") --version" | head -n1 | tr -d '\r' || true)"
+  AC250_QUAY_SHA256="$(ac250_target "sha256sum $(ac250_shq "$AC250_QUAY_RESOLVED") 2>/dev/null | cut -d' ' -f1" | head -n1 | tr -d '\r' || true)"
+  echo "  [⑩b] '$AC250_NODE_RESOLVED $AC250_QUAY_RESOLVED --version' → '${ver:-<no output>}' quay_sha256=${AC250_QUAY_SHA256:0:16}…"
+  if [ -z "$ver" ]; then
+    AC250_OUTCOME="not-evaluated:target-quay-unusable"
+    echo "  AC250-NOT-EVALUATED: 目标机上该 quay+node 组合跑不出 --version（⛔ 路径存在 ≠ 能跑）—— 缺值 ≠ 合格" >&2
+    rm -rf "$tmp"; return 0
+  fi
+
+  # (c) 起 serve：绑【该机 tailscale0 的真实地址】，cwd = 目标项目根
+  AC250_PAGE_URL="http://${AC250_TAILSCALE0_IP}:${AC250_PORT}/tasks?pageSize=500"
+  ac250_start_serve
+  echo "  [⑩c] started on target: pid=${AC250_SERVE_PID:-<none>} bind=${AC250_TAILSCALE0_IP}:${AC250_PORT} cwd=$AC250_ROOT"
+  # 等它真的在听（⛔ 不看 start 的退出码：后台进程的退出码不携带「在听」这个信息，硬规则 4b）
+  for i in $(seq 1 30); do
+    sleep 1
+    AC250_SS_RAW="$(ac250_read_listen || true)"
+    if [ -n "$AC250_SS_RAW" ]; then break; fi
+  done
+  AC250_BIND_HOST="$(ac250_listen_addr "$AC250_SS_RAW" "$AC250_PORT")"
+  echo "  [⑩c] ss -ltnp 该端口原文:"; printf '%s\n' "${AC250_SS_RAW:-<no listener>}" | sed 's/^/        | /'
+  echo "  [⑩c] bind_host=${AC250_BIND_HOST:-<unreadable>} （⛔ 非 --host 实参：实参是意图，这里是观测值）"
+  if [ -z "$AC250_BIND_HOST" ]; then
+    AC250_OUTCOME="not-evaluated:no-listener-on-port"
+    echo "  AC250-NOT-EVALUATED: 目标机 $AC250_PORT 上读不到监听行 ⇒ web 没起来（⛔ 不拿 --host 实参充数）" >&2
+    ac250_stop_serve; rm -rf "$tmp"; return 0
+  fi
+
+  # (d) 时刻①：判读侧真实 HTTP + 真实渲染 HTML 解析出的该 id 状态
+  ac250_fetch_page "$AC250_PAGE_URL" "$tmp/p1.html"
+  rows1="$(ac250_parse_rows "$(cat "$tmp/p1.html" 2>/dev/null || true)")"
+  ac250_lookup_row "$rows1" "$AC250_TASK_ID_ARG"
+  AC250_OBSERVED_TASK_ID="$AC250_TASK_ID_ARG"
+  AC250_BEFORE="$AC250_ROW_STATUS"
+  AC250_ROW_BEFORE_RAW="$AC250_ROW_RAW"
+  echo "  [⑩d] T1 from ${AC250_PROBE_FROM_HOST:-<unreadable>} GET $AC250_PAGE_URL → http=$AC250_HTTP_STATUS bytes=$(wc -c < "$tmp/p1.html" 2>/dev/null | tr -d ' ' || echo '?')"
+  echo "  [⑩d] T1 row 原文: ${AC250_ROW_BEFORE_RAW:-<页面里没有该 id 这一行>}"
+  if [ "$AC250_HTTP_STATUS" != "200" ] || [ -z "$AC250_BEFORE" ]; then
+    AC250_OUTCOME="not-evaluated:first-reading-unreadable"
+    echo "  AC250-NOT-EVALUATED: 时刻①读不出（http=$AC250_HTTP_STATUS, 该 id 行=${AC250_ROW_BEFORE_RAW:-<absent>}）—— 缺值 ≠ 合格" >&2
+    ac250_stop_serve; rm -rf "$tmp"; return 0
+  fi
+
+  # (e) 轮询【同一个 id】直到它的渲染状态变化（时刻②）。窗口内没有变化 ⇒ no-change（可区分），⛔ 不写记录。
+  deadline=$(( $(date +%s) + AC250_WINDOW ))
+  while :; do
+    sleep "$AC250_POLL_INTERVAL"
+    ac250_fetch_page "$AC250_PAGE_URL" "$tmp/p2.html"
+    rows2="$(ac250_parse_rows "$(cat "$tmp/p2.html" 2>/dev/null || true)")"
+    ac250_lookup_row "$rows2" "$AC250_TASK_ID_ARG"
+    if [ -n "$AC250_ROW_STATUS" ] && [ "$AC250_ROW_STATUS" != "$AC250_BEFORE" ]; then
+      AC250_AFTER="$AC250_ROW_STATUS"
+      AC250_ROW_AFTER_RAW="$AC250_ROW_RAW"
+      AC250_HTTP_STATUS_T2="$AC250_HTTP_STATUS"
+      flipped=1
+      break
+    fi
+    now="$(date +%s)"
+    [ "$now" -lt "$deadline" ] || break
+  done
+  AC250_T2_ELAPSED="$(( $(date +%s) - (deadline - AC250_WINDOW) ))"
+
+  # (f) 直接读目标 store 交叉核对（⛔ 不以页面缓存为准）
+  if [ "$flipped" = "1" ]; then
+    ac250_read_store_status "$AC250_TASK_ID_ARG"
+    echo "  [⑩f] T2 row 原文: ${AC250_ROW_AFTER_RAW:-<unreadable>}  （T1 行与它是【同一个 id】：${AC250_OBSERVED_TASK_ID:-<none>}）"
+    echo "  [⑩f] store_status_after=${AC250_STORE_STATUS_AFTER:-<unreadable>} source=${AC250_STORE_SOURCE:-<unreadable>} （直接读目标 store，⛔ 非页面缓存）"
+  else
+    echo "  [⑩e] 窗口 ${AC250_WINDOW}s 内 ${AC250_OBSERVED_TASK_ID} 的渲染状态【未变化】（仍为 '${AC250_BEFORE:-<unreadable>}'）"
+  fi
+
+  # (g) 收尾：杀 serve（⛔ 不留给下一轮）
+  ac250_stop_serve
+
+  # (h) 判定 —— 九件读数全部有效才写。每一项各自留痕（⛔ 不静默跳过任何一项）。
+  if [ "$flipped" != "1" ]; then
+    AC250_OUTCOME="no-change"
+    echo "  [⑩h] AC250-NO-CHANGE: 测到读数了，但窗口内该任务状态【没有变化】⇒ 不是「反映进展」（⛔ 不写记录）"
+    echo "        ⚠️ 这与「没测成」(not-evaluated:*) 是【两种不同的失败】，取值不同（硬规则 3b）"
+    rm -rf "$tmp"; return 0
+  fi
+  AC250_EVALUATED=1
+  [ -n "$AC250_HOST" ] || { AC250_EVALUATED=0; why="$why host-empty;"; }
+  [ -n "$AC250_ROOT" ] || { AC250_EVALUATED=0; why="$why project-root-empty;"; }
+  [ -n "$AC250_BIND_HOST" ] || { AC250_EVALUATED=0; why="$why bind-host-empty;"; }
+  [ -n "$AC250_TAILSCALE0_IP" ] || { AC250_EVALUATED=0; why="$why tailscale0-ip-empty;"; }
+  [ "$AC250_BIND_HOST" = "$AC250_TAILSCALE0_IP" ] || { AC250_EVALUATED=0; why="$why bind!=tailscale0(bind=${AC250_BIND_HOST:-<empty>},ts=${AC250_TAILSCALE0_IP:-<empty>});"; }
+  ac250_not_loopback "$AC250_BIND_HOST" || { AC250_EVALUATED=0; why="$why bind-is-loopback($AC250_BIND_HOST);"; }
+  [ -n "$AC250_PROBE_FROM_HOST" ] || { AC250_EVALUATED=0; why="$why probe-from-empty;"; }
+  [ "$AC250_PROBE_FROM_HOST" != "$AC250_HOST" ] || { AC250_EVALUATED=0; why="$why probe-from==host;"; }
+  ac250_http_status_ok "$AC250_HTTP_STATUS_T2" || { AC250_EVALUATED=0; why="$why http-status-not-200(${AC250_HTTP_STATUS_T2:-<unreadable>});"; }
+  [ -n "$AC250_OBSERVED_TASK_ID" ] || { AC250_EVALUATED=0; why="$why observed-task-id-empty;"; }
+  [ -n "$AC250_BEFORE" ] || { AC250_EVALUATED=0; why="$why before-empty;"; }
+  [ -n "$AC250_AFTER" ] || { AC250_EVALUATED=0; why="$why after-empty;"; }
+  [ "$AC250_BEFORE" != "$AC250_AFTER" ] || { AC250_EVALUATED=0; why="$why before==after($AC250_BEFORE);"; }
+  [ "$AC250_STORE_STATUS_AFTER" = "$AC250_AFTER" ] || { AC250_EVALUATED=0; why="$why store!=observed(store=${AC250_STORE_STATUS_AFTER:-<unreadable>},observed=$AC250_AFTER);"; }
+
+  if [ "$AC250_EVALUATED" = "1" ]; then
+    local extras
+    extras="$(ac250_extras_json)"
+    if write_ac250_record "$AC250_HOST" "$AC250_ROOT" "$AC250_BIND_HOST" "$AC250_TAILSCALE0_IP" \
+         "$AC250_PROBE_FROM_HOST" "$AC250_HTTP_STATUS_T2" "$AC250_OBSERVED_TASK_ID" \
+         "$AC250_BEFORE" "$AC250_AFTER" "$AC250_STORE_STATUS_AFTER" "$extras"; then
+      AC250_OUTCOME="ok"
+      AC250_WRITTEN_THIS_RUN=1
+      AC250_WRITTEN_ROOT="$AC250_ROOT"
+      echo "  [⑩h] ac250 record written → $AC89 ✓ (host=$AC250_HOST bind_host=$AC250_BIND_HOST task=$AC250_OBSERVED_TASK_ID ${AC250_BEFORE}→${AC250_AFTER} store=$AC250_STORE_STATUS_AFTER probe_from=$AC250_PROBE_FROM_HOST)"
+    else
+      AC250_OUTCOME="not-evaluated:writer-refused"
+      echo "  AC250-NOT-EVALUATED: record NOT written (fail-closed: BUILD_SHA 非 40-hex / AC89 路径空 / 或某字段无效 —— 缺值≠合格)" >&2
+    fi
+  else
+    AC250_OUTCOME="not-evaluated:${why:-unspecified}"
+    echo "  AC250-NOT-EVALUATED: record NOT written (缺值≠合格):$why" >&2
+    echo "        ⛔ 特别是没有写出一条「状态未变」或「绑了回环」的记录充数——那会把「没测成」伪装成「测过」（硬规则 3b）" >&2
+  fi
+  rm -rf "$tmp"
   return 0
 }
 
@@ -4460,6 +4977,91 @@ AC248NEG
   echo "selfcheck: ac248-noop-fix(差集为空) carrier_lines=${ac248_noop_lines:-<n/a>} (expect 1 — 只有 51b 那一条; 无修复 ⇒ 无 probe ⇒ 不新增记录)"
   echo "selfcheck: ac248-writer-literal-hits=$ac248_false_hits adr007-in-producer-hits=$ac248_adr007_hits checker-export-hits=$ac248_export_hits step-call-hits=$ac248_step_calls step-literal-hits=$ac248_step_lits (expect 0/0/>=1/>=1/0 — 写入点无字面量默认值; quay 不拥有 ADR 判定; 调用与读取点都在函数体内)"
 
+  # ── ⑩ AC-250（GOAL-016 观察面）：七件直接量的写入器正/负控制 ────────────────────────────────
+  # 正控制直接调【产品函数】write_ac250_record（⛔ 不让夹具复刻判定逻辑，硬规则 4 推论三）。
+  # 负控制逐件置为读不出 / 两点相等 / 回环绑定 / 自探 / 类型不符 ⇒ 每条都【零记录】。
+  # ⛔ 还要钉住两条最容易悄悄退化的性质：写入器体内无 `build_sha` 字面量（唯一补锚点是
+  # ac89_append_goal009）、且【不含任何 true/false 或阈值的字面量默认值】（AC2 的可执行形式）。
+  local ac250_tmp ac250_line ac250_pos_ok=1 ac250_neg_ok=1 ac250_neg_n=0 ac250_rej=0
+  ac250_tmp="$(mktemp -d 2>/dev/null || true)"
+  if [ -n "$ac250_tmp" ]; then
+    local ac250_carrier="$ac250_tmp/carrier.jsonl" ac250_save_sha="${BUILD_SHA:-}" ac250_save_ts="${TS:-}" ac250_save_ac89="${AC89:-}"
+    BUILD_SHA="0123456789abcdef0123456789abcdef01234567"
+    TS="2026-09-12T00:00:00Z"
+    AC89="$ac250_carrier"
+    # 正控制：七件齐备 ∧ before≠after ∧ store 一致 ⇒ 写出 1 条
+    if write_ac250_record "target-host-B" "/home/other/archguard" "100.100.148.48" "100.100.148.48" \
+         "probe-host-A" 200 "TASK-9" "todo" "ready" "ready" 2>/dev/null; then
+      ac250_line="$(grep -c 'GOAL-016-AC-250' "$ac250_carrier" 2>/dev/null || true)"
+      [ "$ac250_line" = "1" ] || ac250_pos_ok=0
+    else
+      ac250_pos_ok=0
+    fi
+    echo "selfcheck: ac250-record(positive,7-fields) wrote=$ac250_pos_ok (expect 1 — 七件齐备才写)"
+    echo "selfcheck: ac250-record(positive) line=$(head -n1 "$ac250_carrier" 2>/dev/null | head -c 400)"
+    # 负控制：逐件（here-doc 驱动【产品函数本身】）。`@` = 空。
+    while IFS='|' read -r n_host n_root n_bind n_ts n_pf n_http n_tid n_before n_after n_store; do
+      [ -n "${n_host}${n_root}${n_bind}${n_ts}${n_pf}${n_http}${n_tid}${n_before}${n_after}${n_store}" ] || continue
+      ac250_neg_n=$((ac250_neg_n + 1))
+      case "$n_host" in '@'*) n_host="" ;; esac
+      case "$n_root" in '@'*) n_root="" ;; esac
+      case "$n_bind" in '@'*) n_bind="" ;; esac
+      case "$n_ts" in '@'*) n_ts="" ;; esac
+      case "$n_pf" in '@'*) n_pf="" ;; esac
+      case "$n_http" in '@'*) n_http="" ;; esac
+      case "$n_tid" in '@'*) n_tid="" ;; esac
+      case "$n_before" in '@'*) n_before="" ;; esac
+      case "$n_after" in '@'*) n_after="" ;; esac
+      case "$n_store" in '@'*) n_store="" ;; esac
+      if write_ac250_record "$n_host" "$n_root" "$n_bind" "$n_ts" "$n_pf" "$n_http" "$n_tid" \
+           "$n_before" "$n_after" "$n_store" >/dev/null 2>&1; then
+        ac250_rej=$((ac250_rej + 1))
+      fi
+    done <<'AC250NEG'
+@|/p|100.100.148.48|100.100.148.48|probe-A|200|T-1|todo|ready|ready
+hostB|@|100.100.148.48|100.100.148.48|probe-A|200|T-1|todo|ready|ready
+hostB|/p|@|100.100.148.48|probe-A|200|T-1|todo|ready|ready
+hostB|/p|100.100.148.48|@|probe-A|200|T-1|todo|ready|ready
+hostB|/p|127.0.0.1|127.0.0.1|probe-A|200|T-1|todo|ready|ready
+hostB|/p|0.0.0.0|0.0.0.0|probe-A|200|T-1|todo|ready|ready
+hostB|/p|::|::|probe-A|200|T-1|todo|ready|ready
+hostB|/p|localhost|localhost|probe-A|200|T-1|todo|ready|ready
+hostB|/p|100.100.148.48|100.100.149.49|probe-A|200|T-1|todo|ready|ready
+hostB|/p|100.100.148.48|100.100.148.48|@|200|T-1|todo|ready|ready
+hostB|/p|100.100.148.48|100.100.148.48|hostB|200|T-1|todo|ready|ready
+hostB|/p|100.100.148.48|100.100.148.48|probe-A|@|T-1|todo|ready|ready
+hostB|/p|100.100.148.48|100.100.148.48|probe-A|404|T-1|todo|ready|ready
+hostB|/p|100.100.148.48|100.100.148.48|probe-A|http_200|T-1|todo|ready|ready
+hostB|/p|100.100.148.48|100.100.148.48|probe-A|200|@|todo|ready|ready
+hostB|/p|100.100.148.48|100.100.148.48|probe-A|200|T-1|@|ready|ready
+hostB|/p|100.100.148.48|100.100.148.48|probe-A|200|T-1|todo|@|ready
+hostB|/p|100.100.148.48|100.100.148.48|probe-A|200|T-1|todo|todo|todo
+hostB|/p|100.100.148.48|100.100.148.48|probe-A|200|T-1|todo|ready|done
+AC250NEG
+    ac250_after_neg="$(grep -c 'GOAL-016-AC-250' "$ac250_carrier" 2>/dev/null || true)"
+    [ "$ac250_rej" = "0" ] || ac250_neg_ok=0
+    [ "$ac250_after_neg" = "1" ] || ac250_neg_ok=0    # 负控制一条都不许写进去（正控制那 1 条照旧）
+    echo "selfcheck: ac250-refusal(${ac250_neg_n} negative specs) all_refused=$ac250_neg_ok accepted=$ac250_rej carrier_lines=$ac250_after_neg (expect 1/0/1 — 缺件/回环/自探/类型不符/两点相等/store 不一致 ⇒ 零记录)"
+    # 结构性：写入器体内不得出现 build_sha 字面量（唯一补锚点是 choke point），也不得有字段默认值
+    local ac250_body ac250_sha_hits ac250_anchor_hits ac250_choke_hits ac250_step_lit ac250_step_calls
+    ac250_body="$(sed -n '/^write_ac250_record()/,/^}$/p' "$0" 2>/dev/null | sed 's/#.*//')"
+    ac250_sha_hits="$(printf '%s\n' "$ac250_body" | grep -c 'build_sha' || true)"
+    ac250_anchor_hits="$(printf '%s\n' "$ac250_body" | grep -c '100\.100\.148\.48\|127\.0\.0\.1' || true)"
+    ac250_choke_hits="$(printf '%s\n' "$ac250_body" | grep -c 'ac89_append_goal009' || true)"
+    ac250_step_calls="$(sed -n '/^step_ac250_web_observe()/,/^}$/p' "$0" 2>/dev/null | sed 's/#.*//' | grep -c 'write_ac250_record\|ac250_read_target_identity\|ac250_fetch_page\|ac250_read_store_status' || true)"
+    ac250_step_lit="$(sed -n '/^step_ac250_web_observe()/,/^}$/p' "$0" 2>/dev/null | sed 's/#.*//' | grep -c '100\.100\.148\.48' || true)"
+    echo "selfcheck: ac250-writer build_sha-literal-hits=$ac250_sha_hits addr-literal-hits=$ac250_anchor_hits choke-point-hits=$ac250_choke_hits step-read-call-hits=$ac250_step_calls step-addr-literal-hits=$ac250_step_lit (expect 0/0/>=1/>=1/0 — 写入点无字面量默认值; 地址来自目标机读数)"
+    [ "${ac250_sha_hits:-1}" = "0" ] || ac250_neg_ok=0
+    [ "${ac250_anchor_hits:-1}" = "0" ] || ac250_neg_ok=0
+    [ "${ac250_choke_hits:-0}" -ge 1 ] 2>/dev/null || ac250_neg_ok=0
+    [ "${ac250_step_calls:-0}" -ge 1 ] 2>/dev/null || ac250_neg_ok=0
+    [ "${ac250_step_lit:-1}" = "0" ] || ac250_neg_ok=0
+    BUILD_SHA="$ac250_save_sha"; TS="$ac250_save_ts"; AC89="$ac250_save_ac89"
+    rm -rf "$ac250_tmp"
+  else
+    ac250_pos_ok=0; ac250_neg_ok=0
+  fi
+
   if [ "$d1" = "1" ] && [ "$d2" = "no" ] && [ "$a1" = "1" ] && [ "$a2" = "yes" ] \
      && [ "$ac247_ok" = "1" ] && [ "$ac247_neg_ok" = "1" ] && [ "$ac247_cnt_ok" = "1" ] \
      && [ "$ac247_cnt_neg_ok" = "0" ] && [ "$ac247_alive_src" = "1" ] \
@@ -4470,6 +5072,8 @@ AC248NEG
      && [ "${ac248_export_hits:-0}" -ge 1 ] 2>/dev/null && [ "${ac248_step_calls:-0}" -ge 1 ] 2>/dev/null \
      && [ "${ac248_step_lits:-1}" = "0" ] \
      && [ "${ac248_noop_lines:-0}" = "1" ] \
+     && [ "${ac250_pos_ok:-0}" = "1" ] && [ "${ac250_neg_ok:-0}" = "1" ] \
+     && [ "${ac250_neg_n:-0}" -ge 18 ] 2>/dev/null \
      && [ "$bl_ok" = "1" ] && [ "$bmw_fail" = "0" ] \
      && [ "$c3_e" = "1" ] && [ "$c3_ok" = "1" ] \
      && [ "$c4_e" = "1" ] && [ "$c4_ok" = "0" ] \
@@ -4529,6 +5133,37 @@ AC248NEG
 if [ "$DO_SELFCHECK" = 1 ]; then
   selfcheck
   exit $?
+fi
+
+# ── AC-250 观察面模式（GOAL-016）─────────────────────────────────────────────────────────
+# 独立于下面的主流程：本模式【不跑 step①】（它观测的是目标机上已安装的产物，而 step① 装的是判读侧的
+# 前缀 —— 与「目标机上那个 web 绑了什么地址」无关），也不跑冷启动/驱动活性段。它只做一件事：
+# 在目标机上起一个绑其 tailscale0 的 serve，由【本机】探测、读同一任务的两点渲染状态、直接读目标 store
+# 交叉核对，九件全有效才经 ac89_append_goal009 choke point 写一条 ac=GOAL-016-AC-250 记录。
+# 判定与 AC-247/AC-248 同一条纪律：任缺 ⇒ 不写 + 可区分 NOT-EVALUATED + 退出非 0（⛔ 不降级成 not-live，
+# 那会让一次「没产出」的运行与「产出但没达标」同形）。
+if [ "$AC250_WEB_OBSERVE" = 1 ]; then
+  TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if [ -z "$EVIDENCE" ]; then EVIDENCE="${CWD}/.quay/verify-deliver-evidence.json"; fi
+  if [ -z "$AC89" ]; then AC89="${CWD}/.quay/productization-verification.jsonl"; fi
+  echo "== verify-deliver-coldstart (AC-250 观察面模式) =="
+  echo "ts=$TS | ac89=$AC89 | ssh=$AC250_SSH | target-root=$AC250_ROOT | port=$AC250_PORT | window=${AC250_WINDOW}s"
+  step_ac250_web_observe
+  echo ""
+  echo "AC250_OUTCOME=$AC250_OUTCOME (ok | no-change | not-evaluated:<why> —— 后两者都不写记录，且取值不同)"
+  echo "AC250_EVALUATED=$AC250_EVALUATED (1 = 九件读数全取到；⛔ 与 ok 不同形)"
+  echo "AC250_HOST=${AC250_HOST:-<unreadable>}"
+  echo "AC250_PROBE_FROM_HOST=${AC250_PROBE_FROM_HOST:-<unreadable>} (⛔ 必须 ≠ AC250_HOST)"
+  echo "AC250_BIND_HOST=${AC250_BIND_HOST:-<unreadable>} == AC250_TAILSCALE0_IP=${AC250_TAILSCALE0_IP:-<unreadable>}"
+  echo "AC250_HTTP_STATUS_T2=${AC250_HTTP_STATUS_T2:-<unreadable>}"
+  echo "AC250_OBSERVED_TASK_ID=${AC250_OBSERVED_TASK_ID:-<unreadable>} ${AC250_BEFORE:-<none>}→${AC250_AFTER:-<none>} store=${AC250_STORE_STATUS_AFTER:-<unreadable>} (${AC250_STORE_SOURCE:-<unreadable>})"
+  echo "AC250_WRITTEN_THIS_RUN=$AC250_WRITTEN_THIS_RUN"
+  if [ "$AC250_OUTCOME" = "ok" ]; then
+    echo "verify-deliver-coldstart: done (AC250_OUTCOME=ok)"
+    exit 0
+  fi
+  echo "verify-deliver-coldstart: FAIL (AC250_OUTCOME=$AC250_OUTCOME — 未测量 ≠ 不合格，且两者都不写记录)" >&2
+  exit 1
 fi
 
 # ── 主流程 ─────────────────────────────────────────────────────────────────────────────
