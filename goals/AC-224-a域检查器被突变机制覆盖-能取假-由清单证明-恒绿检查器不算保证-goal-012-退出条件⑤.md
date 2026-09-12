@@ -9,8 +9,8 @@ criterion: node --no-warnings --experimental-strip-types --test
   plugin/scripts/checker-mutation-check.sh --list --json | python3 -c 'import
   json,sys; m=json.load(sys.stdin);
   ok=any(c.get("name")=="kernel-sibling-resolution-check" and c.get("covered")
-  for c in m.get("checkers",[])); print("registered:",ok); sys.exit(0 if ok else
-  1)'
+  for c in m.get("checkers",[])); print("registered:",ok,file=sys.stderr);
+  sys.exit(0 if ok else 1)'
 expect: |-
   双向，两个断言缺一不可：**①能取假（本条的重点）**——`plugin/test/kernel-sibling-resolution-check.test.mjs` 在**自建夹具**上跑通两个方向：干净树 ⇒ 检查器绿；注入一处 naive 锚点（`path.join(__dirname, "x.sh")` / `path.join(root, "plugin", "scripts", ...)` / 模板字符串形态**各一例**，⛔ 不止一种拼接形态——GOAL-012 风险 4）⇒ 检查器**必须红**。**②登记**——该检查器出现在 `checker-mutation-check.sh --list --json` 的 checkers 数组里且 `covered: true`，从而被本仓库既有的 `--check` fail-closed 闸长期看住。
 
