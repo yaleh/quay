@@ -66,6 +66,15 @@ quay full-suite-runner 的默认 suite 命令 → bash scripts/test.sh [--bucket
 - 负控制 AC2 有实际输出留档（⛔ 不是「我认为不会回归」）。
 - ⛔ 不通过「给 archguard 加一个 `scripts/test.sh`」来绕过 —— 那是把目标项目改成 quay 的形状，不是解耦；若最终判断该形态确实必要，必须在任务体写明理由并说明它对「任意第三方项目」的适用性。
 
+<!-- dedup-ref -->
+## 与既有任务的关系（仅追溯，⛔ 不构成依赖声明）
+
+- **`gap-fan-in-realsuite-bypasses-verification-round-ledger`（done）** —— **同一台账、不同机制**：它解决的是 quay **自己形状之内**「真跑 vs pre-verified」两条分支各自绕过台账的问题，其修法把两条分支**收敛到单一写入者 `pre-verified-round-record.ts`**。**它预设 `bash scripts/test.sh` 存在**；本任务处理的是**该入口根本不存在**的情形。⇒ 本任务 Plan 第 3 步「⛔ 不新造第三个写入者」与那次已落地的收敛设计**方向一致**，⛔ 不要推翻它。
+- **`gap-preverified-suite-bypasses-verification-round-ledger`（done）** —— 上一条的前身，同一收敛方向。
+- **`gap-execution-loop-p4-suite-entry-ts-ization`（done）** —— `scripts/test.sh` 的 TS 化，**机制无关**，列出仅为排除。
+
+⇒ 三条都不产出「目标项目用自己 `test_command` 时的台账」，本任务补的是这个缺口。
+
 ## Touches
 
 - plugin/scripts/full-suite-runner.ts
