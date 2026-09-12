@@ -2,13 +2,14 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readArchitecture, type ArchitectureResult } from "./observation.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote } from "./serve-render.ts";
+import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote, pageTitle } from "./serve-render.ts";
 
 // ── /architecture ──────────────────────────────────────────────────────────────────────────────────
 
 interface ArchNode { label: string; x: number; y: number; w: number; h: number; highlight: "dev" | "recent" | "plain" | "stale"; fill: string; stroke: string }
 
-function renderArchitecturePage(arch: ArchitectureResult): string {
+function renderArchitecturePage(arch: ArchitectureResult, identity: ServeIdentity | null = null): string {
   // Fixed diagram layout; node highlights derive from git facts (recent commits / open worktrees).
   const names = arch.components.map((c) => c.name);
   const nodeDefs: Array<{ name: string; x: number; y: number; w: number; h: number }> = [
@@ -68,7 +69,7 @@ function renderArchitecturePage(arch: ArchitectureResult): string {
     <span><span style="display:inline-block;width:10px;height:10px;background:var(--color-surface);border:2px solid var(--color-neutral-400)"></span> 稳定</span>
   </div>`;
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay architecture — system component map">${modernistStyles()}${pageStyles()}<title>Architecture — 系统组件图</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay architecture — system component map">${modernistStyles()}${pageStyles()}<title>${pageTitle("Architecture — 系统组件图", identity)}</title></head>
     <body>${renderMobileChrome("architecture", "architecture")}${renderSiteNav("architecture")}<main id="main">
       <h1>Architecture — 系统组件图</h1>
       <p class="meta">数据源：<code>packages/*</code>（git log 提交事实）· <code>git worktree list</code>（在飞开发）</p>
@@ -82,7 +83,7 @@ function renderArchitecturePage(arch: ArchitectureResult): string {
 export async function handleArchitecture(
   req: IncomingMessage,
   res: ServerResponse,
-  cfg: { workspaceRoot: string },
+  cfg: ServePageCfg,
 ): Promise<void> {
   let arch: ArchitectureResult;
   try {
@@ -91,5 +92,5 @@ export async function handleArchitecture(
     arch = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, components: [], inDevelopment: false };
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderArchitecturePage(arch));
+  res.end(renderArchitecturePage(arch, cfg.identity));
 }

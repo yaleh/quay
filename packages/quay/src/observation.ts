@@ -3898,3 +3898,47 @@ export function readArchitecture(root: string, { windowDays = ARCH_RECENT_WINDOW
   if (components.length === 0) return { status: "empty", reason: "packages/ 下无带 package.json 的组件", components, inDevelopment };
   return { status: "ok", reason: null, components, inDevelopment };
 }
+
+// ── Branch model (gap-web-ui-pages-carry-no-host-project-identity) ────────────────────────────
+//
+// The two GIT-derived halves of the identity card's branch row. They live HERE rather than in
+// serve-render.ts because this module is the serve path's only sanctioned git reader — the
+// renderer is handed resolved strings and never shells out. The config-derived third
+// (landing-baseline = `loop.merge_target`) is read straight from the loaded config by
+// serveIdentity(), so it needs no git at all.
+
+/** Git-derived branch names. Each field is null when git is unavailable / not a repo / the ref
+ *  does not exist — never a fabricated branch name (硬规则 3b: an invented `master` would read
+ *  exactly like a real, verified reading). */
+export interface BranchNames {
+  /** The remote's default branch, via `origin/HEAD` (e.g. "develop"), or null. */
+  default: string | null;
+  /** The branch the workspace checkout is currently on (quay's doc/author branch), or null. */
+  doc: string | null;
+}
+
+/**
+ * Read the two git-derived branch names for `root`. Bounded subprocess cost (two `git` calls,
+ * 5s timeouts) and total failure tolerance: every error path yields null, never a throw.
+ */
+export function readBranchModel(root: string): BranchNames {
+  const run = (args: string[]): string | null => {
+    try {
+      const out = execFileSync("git", ["-C", root, ...args], {
+        encoding: "utf8",
+        timeout: 5_000,
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+      return out.length > 0 ? out : null;
+    } catch {
+      return null;
+    }
+  };
+  // `origin/HEAD` is a symbolic ref (refs/remotes/origin/HEAD → refs/remotes/origin/<branch>);
+  // --short prints "origin/<branch>", so strip the remote prefix to leave the branch name.
+  const head = run(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
+  return {
+    default: head === null ? null : (head.includes("/") ? head.slice(head.indexOf("/") + 1) : head),
+    doc: run(["symbolic-ref", "--short", "HEAD"]),
+  };
+}

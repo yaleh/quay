@@ -3,13 +3,14 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import { createDocumentStore } from "./document-store.ts";
-import { html, escapeHtml, shellStyles, renderMarkdown, renderSiteNav, renderMobileChrome, renderBackLink } from "./serve-render.ts";
+import type { ServePageCfg } from "./serve-render.ts";
+import { html, escapeHtml, shellStyles, renderMarkdown, renderSiteNav, renderMobileChrome, renderBackLink, pageTitle } from "./serve-render.ts";
 
 export async function handleDocList(
   req: IncomingMessage,
   res: ServerResponse,
   url: URL,
-  cfg: { workspaceRoot: string },
+  cfg: ServePageCfg,
 ): Promise<void> {
   const statusFilter = url.searchParams.get("status");
   const docDir = path.join(cfg.workspaceRoot, "docs-managed");
@@ -32,7 +33,7 @@ export async function handleDocList(
   }).join("\n");
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${shellStyles()}<title>Docs</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${shellStyles()}<title>${pageTitle("Docs", cfg.identity)}</title></head>
     <body>${renderMobileChrome("doc", "docs")}${renderSiteNav("doc")}<main id="main">
       <h1>Managed documents (${docs.length})</h1>
       ${readError ? html`<div class="error-banner" role="alert"><strong>读失败:</strong> ${escapeHtml(readError)}</div>` : ""}

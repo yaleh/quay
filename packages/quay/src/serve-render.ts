@@ -4,7 +4,10 @@
 //
 // IMPORTANT: This file MUST NOT import from ./serve.ts (would create circular import).
 
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { resolvePluginRoot } from "./plugin-root.ts";
 import type { ProviderClient } from "./provider-client.ts";
 
 // live-state discriminator texts (gap-live-cannot-tell-a-dead-loop-from-an-unwired-one) — the
@@ -918,4 +921,249 @@ export function obsNote(status: string, reason: string | null): string {
   if (status === "ok") return "";
   if (status === "empty") return html`<p class="meta"><strong>未接入/无数据</strong> — ${escapeHtml(reason || "")}</p>`;
   return html`<p class="meta"><strong>读失败</strong> — ${escapeHtml(reason || "")}</p>`;
+}
+
+// ── Host / project identity — the SINGLE source of truth for every page <title> ──────────────
+//
+// gap-web-ui-pages-carry-no-host-project-identity. Every page used to hard-write its own
+// generic <title> ("Dashboard", "Docs", "ADRs", …). Two quay webs open at once — the NORMAL
+// multi-machine / multi-project shape — therefore rendered IDENTICAL tab labels, and the browser
+// tab is the only page identifier whenever the page is not the visible one. Detail pages were
+// fine (their <title> carries the entity id); the overview pages were not, because nothing on
+// them named the project.
+//
+// The fix is deliberately NOT "concatenate a project name at each of the 16 page sites" — that
+// is 16 copies of one policy and they drift (the task's DoD forbids exactly that shape). Instead:
+//
+//   • serveIdentity()  — the ONLY place the identity is ASSEMBLED (project root, machine, bind
+//                        address, the two plugin versions, the branch model);
+//   • pageTitle()      — the ONLY place the identity is FORMATTED into a title;
+//   • projectLabel()   — the ONLY place the project's display name is derived;
+//   • renderIdentityCard() — the ONLY place the identity fields are rendered as markup.
+//
+// The mechanical half of that claim is a source-level invariant test (serve.test.mjs, AC4): no
+// serve-*.ts file other than THIS one may reference an identity field, so the policy cannot be
+// re-implemented per page without turning that test red.
+
+/** The branch model, read from the workspace's config + git. Each field is `null` when
+ *  unresolvable — "could not read" is a DISTINCT value from "read, and there is none" (硬规则 3b). */
+export interface BranchModel {
+  /** The repo's default branch (`origin/HEAD`), or null. */
+  default: string | null;
+  /** The branch the workspace checkout is on (quay's doc/author branch), or null. */
+  doc: string | null;
+  /** The landing baseline (`loop.merge_target`, falling back to `loop.fork_baseline`), or null. */
+  landingBaseline: string | null;
+}
+
+/** Everything a page needs to say WHICH project/machine it is showing. */
+export interface ServeIdentity {
+  /** Human-facing project name — the basename of the workspace root (never a fabricated value). */
+  projectName: string;
+  /** The FULL workspace root path — the only quantity that distinguishes two copies of one project. */
+  projectRoot: string;
+  /** The bind host the server was started with (`--host`). */
+  host: string;
+  /** The ACTUAL listening port (resolved after `listen`, so `--port 0` reports the real one). */
+  port: number;
+  /** `os.hostname()` — the machine. */
+  hostname: string;
+  /** The delivered quay plugin's version. null = not resolvable — NOT "equal to the laid one". */
+  deliveredPluginVersion: string | null;
+  /** `.quay/quay-init-state.json`'s `pluginVersion`. null = absent — NOT "equal to the delivered one". */
+  initPluginVersion: string | null;
+  branches: BranchModel;
+}
+
+/** The `cfg` every page handler receives: the workspace root plus the resolved identity.
+ *  Handlers written before this addition keep working — `identity` is optional, and a page that
+ *  finds it absent renders the explicit 「未接入项目身份」 label rather than an anonymous title. */
+export interface ServePageCfg {
+  workspaceRoot: string;
+  identity?: ServeIdentity | null;
+}
+
+/** Longest project label the <title> will carry before the project name is the thing that gives. */
+export const PROJECT_LABEL_MAX = 32;
+
+/** Tiny deterministic digest (FNV-1a, 8 hex chars) — used ONLY to keep a TRUNCATED project label
+ *  distinct. Truncating to a shared prefix would otherwise make two long-named roots collide, and
+ *  collapsing two projects into one tab label is the exact defect this module exists to remove. */
+function shortDigest(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+
+/**
+ * The project's display label for a title. Derived from the workspace root's basename (zero
+ * config, always available), and — ONLY when that basename is too long for a tab — truncated
+ * WITH a digest of the full root appended, so truncation can never merge two projects into one
+ * label. The negative-control case (Plan step 5) is served by truncating the PROJECT and never
+ * the page name: with the project first in the title, a tab that must clip clips the qualifier,
+ * not the "which page am I on" token.
+ */
+export function projectLabel(id: Pick<ServeIdentity, "projectName" | "projectRoot">): string {
+  const name = id.projectName;
+  if (name.length <= PROJECT_LABEL_MAX) return name;
+  return `${name.slice(0, PROJECT_LABEL_MAX - 10)}…${shortDigest(id.projectRoot)}`;
+}
+
+/**
+ * THE single place a page <title> is composed. Every OVERVIEW page reaches its title through here.
+ *
+ * `pageName` is the page's own token — the page word the nav uses ("Dashboard", "Docs", "ADRs").
+ * The DETAIL pages (`/task/<id>`, `/goal/<id>`, `/adr/<id>`, `/doc/<id>`, `/session/<id>`,
+ * `/tests/file`, the send-result page) deliberately do NOT call this: their <title> IS the object
+ * locator and is pinned to the bare entity id by existing contract tests (`<title>WUI-1</title>`),
+ * a project prefix would push that id out of the tab's visible region (the Plan step 5 negative
+ * control), and the id is the token you need to read when several tabs are open. Their project
+ * context is carried by the nav/header plus the /dashboard identity card, and the AC4 invariant
+ * test enforces that identity fields are readable ONLY inside this module — so a page cannot
+ * re-introduce its own project string either.
+ *
+ * When `id` is null the title says so — it does NOT silently fall back to the bare page name,
+ * because that output would be indistinguishable from a resolved single-project identity
+ * (硬规则 3b: a judgment that cannot distinguish "checked and fine" from "never checked").
+ */
+export function pageTitle(pageName: string, id: ServeIdentity | null | undefined): string {
+  const safe = escapeHtml(pageName);
+  // A caller that never went through startServer (a direct render-function unit test, a future
+  // handler that forgot to thread `cfg`) leaves `id` absent or malformed — both are "no identity
+  // resolved", and both must render the same distinguishable label rather than an anonymous title
+  // (or a TypeError from reading a field off a foreign object).
+  if (!id || typeof id.projectName !== "string" || id.projectName.length === 0) {
+    return `未接入项目身份 — ${safe}`;
+  }
+  return `${escapeHtml(projectLabel(id))} — ${safe}`;
+}
+
+/** Version-comparison verdict. `unknown` is its OWN state: a missing reading on either side is
+ *  never reported as "consistent" (硬规则 3b — the failure this card exists to surface is
+ *  precisely "the workspace's laid-down plugin is stale", which a null-blind comparison hides). */
+export type PluginVersionState = "match" | "mismatch" | "unknown";
+
+/** Pure comparator behind the dashboard's version row. */
+export function pluginVersionState(delivered: string | null, laid: string | null): PluginVersionState {
+  if (delivered === null || laid === null) return "unknown";
+  return delivered === laid ? "match" : "mismatch";
+}
+
+/** The delivered quay plugin's version, discovered the same way the rest of Core discovers its
+ *  own plugin tree (resolvePluginRoot walks up from THIS module, relocating out of a linked
+ *  worktree). null when the plugin root or its plugin.json is unreadable. */
+export function readDeliveredPluginVersion(): string | null {
+  try {
+    const root = resolvePluginRoot();
+    if (!root) return null;
+    const p = path.join(root, ".claude-plugin", "plugin.json");
+    if (!existsSync(p)) return null;
+    const v = JSON.parse(readFileSync(p, "utf8"))?.version;
+    return typeof v === "string" && v.length > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The version quay-init LAID DOWN in this workspace (`.quay/quay-init-state.json`). null when
+ *  the file / key is absent — an un-initialised workspace, which is a real and common state and
+ *  must not be reported as a version match. */
+export function readInitStatePluginVersion(workspaceRoot: string): string | null {
+  try {
+    const p = path.join(workspaceRoot, ".quay", "quay-init-state.json");
+    if (!existsSync(p)) return null;
+    const v = JSON.parse(readFileSync(p, "utf8"))?.pluginVersion;
+    return typeof v === "string" && v.length > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The workspace's branch model. `branchModel` is supplied by observation.ts (the only serve-path
+ *  module allowed to know git); this function only assembles — it never shells out itself. */
+export interface ServeIdentityInput {
+  workspaceRoot: string;
+  host?: string;
+  port?: number;
+  /** The `.quay/config.yml` `loop:` section (branch model source), or null. */
+  loop?: { merge_target?: unknown; fork_baseline?: unknown } | null;
+  /** Git-derived branch names, from observation.ts's readBranchModel(). */
+  branchModel?: { default: string | null; doc: string | null } | null;
+  /** Test seams — production passes none of these. */
+  hostname?: string | null;
+  deliveredPluginVersion?: string | null;
+  initPluginVersion?: string | null;
+}
+
+/** THE one assembly point for the identity every page renders. Pure w.r.t. its inputs apart from
+ *  the two version reads and os.hostname(), each of which is individually guarded. */
+export function serveIdentity(input: ServeIdentityInput): ServeIdentity {
+  const root = input.workspaceRoot;
+  const loop = input.loop ?? null;
+  const cfgBranch = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+  let hostname = input.hostname;
+  if (hostname === undefined) {
+    // os.hostname() can throw on a host with no resolvable name — an unresolvable reading, not an
+    // empty machine name; the fallback is a LABEL that says so (硬规则 3b).
+    try { hostname = os.hostname(); } catch { hostname = null; }
+  }
+  return {
+    projectName: path.basename(root) || root,
+    projectRoot: root,
+    host: input.host ?? "0.0.0.0",
+    port: input.port ?? 0,
+    hostname: hostname || "unknown-host",
+    deliveredPluginVersion: input.deliveredPluginVersion !== undefined
+      ? input.deliveredPluginVersion
+      : readDeliveredPluginVersion(),
+    initPluginVersion: input.initPluginVersion !== undefined
+      ? input.initPluginVersion
+      : readInitStatePluginVersion(root),
+    branches: {
+      default: input.branchModel?.default ?? null,
+      doc: input.branchModel?.doc ?? null,
+      landingBaseline: cfgBranch(loop?.merge_target) ?? cfgBranch(loop?.fork_baseline) ?? null,
+    },
+  };
+}
+
+/** The dashboard identity card — project root, machine + bind address, the交付物-vs-laid plugin
+ *  version pair (with a MECHANICALLY DETECTABLE mismatch marker) and the branch model. Rendered
+ *  without an `id="…-card"` (so it never joins the auto-refresh registration contract: it is a
+ *  static page-chrome card, like the commits/git-history cards beside it). */
+export function renderIdentityCard(id: ServeIdentity): string {
+  const state = pluginVersionState(id.deliveredPluginVersion, id.initPluginVersion);
+  // The marker is the mechanical face of AC3: a single attribute whose value the mismatch state
+  // (and ONLY it) turns to "mismatch" — greppable from a saved page, no visual judgment needed.
+  const marker = `data-plugin-version-state="${state}"`;
+  const fmt = (v: string | null): string => (v === null ? "<span class=\"meta\">未接入/无数据</span>" : escapeHtml(v));
+  // The mismatch row is styled with the SAME verdict classes the rest of the UI uses, so a
+  // divergence reads as a verdict rather than as one more neutral metadata line.
+  const verdictCls = state === "mismatch" ? "verdict-fail" : state === "match" ? "verdict-pass" : "meta";
+  const stateText = state === "mismatch"
+    ? "不一致 — 该工作区落盘的 plugin 已过期"
+    : state === "match"
+      ? "一致"
+      : "未评估（缺一侧读数）";
+  const br = id.branches;
+  const branchVal = (v: string | null): string => (v === null ? "<span class=\"meta\">未接入/无数据</span>" : `<code>${escapeHtml(v)}</code>`);
+  return html`<div id="identity-panel" style="background:var(--color-surface);padding:1rem;display:flex;flex-direction:column;gap:8px">
+    <div style="font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-700)">项目身份</div>
+    <p style="margin:0;font-size:0.8rem;line-height:1.6">
+      <strong>项目根路径</strong>：<code class="identity-project-root">${escapeHtml(id.projectRoot)}</code><br>
+      <strong>主机</strong>：<code class="identity-host">${escapeHtml(id.hostname)}</code>
+      <strong>监听</strong>：<code class="identity-addr">${escapeHtml(id.host)}:${id.port}</code>
+    </p>
+    <p style="margin:0;font-size:0.8rem;line-height:1.6" ${marker}>
+      <strong>plugin 版本</strong>：交付物 <code class="identity-plugin-version">${fmt(id.deliveredPluginVersion)}</code>
+      · 工作区落盘 <code class="identity-init-version">${fmt(id.initPluginVersion)}</code>
+      · <span class="${verdictCls}">${escapeHtml(stateText)}</span>
+    </p>
+    <p style="margin:0;font-size:0.8rem;line-height:1.6">
+      <strong>分支模型</strong>：default ${branchVal(br.default)} · doc-branch ${branchVal(br.doc)} · landing-baseline ${branchVal(br.landingBaseline)}
+    </p>
+  </div>`;
 }
