@@ -286,18 +286,27 @@ test("③ the flip reading measures a REAL checker in a REAL git repo — and ta
   try {
     const repo = path.join(tmp, "repo");
     fs.mkdirSync(path.join(repo, "scripts"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "src"), { recursive: true });
     const git = (...args) => spawnSync("git", ["-C", repo, ...args], { encoding: "utf8" });
     git("init", "-q", "-b", "main");
     git("config", "user.email", "t@t");
     git("config", "user.name", "t");
-    // BEFORE the fix: the checker cannot see a comment-prefixed tool declaration (the real defect's
-    // minimal shape — the tool name never enters the candidate set).
+    // The fixture checker reads its input through a CWD-RELATIVE path, like the real one does (the real
+    // checker locates the directory it scans from `process.cwd()`). That shape is load-bearing: a
+    // candidate-set read that does NOT run inside the materialized revision silently reads an EMPTY set
+    // with exit code 0 — measured 2026-09-12 against archguard (0 tools read vs 32 in the worktree).
+    // ⛔ A fixture whose checker ignores cwd would be green against that defect.
     fs.writeFileSync(path.join(repo, "scripts", "check-adr.ts"),
-      'export function extractMcpToolNames(): string[] { return ["tool_seen"]; }\n');
+      'import fs from "node:fs";\n' +
+      'export function extractMcpToolNames(): string[] {\n' +
+      '  return fs.readFileSync("src/tools.txt", "utf8").trim().split("\\n").filter(Boolean);\n' +
+      '}\n');
+    // BEFORE the fix: the checker's candidate set holds only one tool — the comment-prefixed
+    // declaration never reaches it (the real defect's minimal shape).
+    fs.writeFileSync(path.join(repo, "src", "tools.txt"), "tool_seen\n");
     git("add", "-A"); git("commit", "-qm", "base");
     // AFTER the fix: the same checker now sees one more tool.
-    fs.writeFileSync(path.join(repo, "scripts", "check-adr.ts"),
-      'export function extractMcpToolNames(): string[] { return ["tool_seen", "tool_newly_seen"]; }\n');
+    fs.writeFileSync(path.join(repo, "src", "tools.txt"), "tool_seen\ntool_newly_seen\n");
     git("add", "-A"); git("commit", "-qm", "fix: checker sees the comment-prefixed declaration");
     const sha = git("rev-parse", "HEAD").stdout.trim();
     const base = git("rev-parse", "HEAD~1").stdout.trim();

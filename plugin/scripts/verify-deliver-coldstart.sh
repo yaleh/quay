@@ -1876,11 +1876,14 @@ ac248_run_checker_cli() {
 #    （`check-adr.ts` 的 `extractMcpToolNames`），读数即该函数的返回值——这就是「谁的判定谁拥有」。
 # 读不出（脚本缺 / 该导出不存在 / 模块加载失败 / 输出不是 JSON 数组）⇒ ⛔ 不打印、返回 1
 # （硬规则 3b：读不懂 ≠ 合格，也 ≠ 空集——空集会让差集算法安静地少算一个工具）。
+# ⚠️ 必须【在物化树里跑】（cd "$tree"）：真实检查器按 `process.cwd()` 定位它要扫的目录，在别处跑
+#    会安静地扫到【另一个项目】（或什么都扫不到）⇒ 空候选集与「该修订没有工具」同形。实测 2026-09-12：
+#    第一版漏了 cd，对 archguard 的真实检查器读到 0 个工具（而工作树里是 32 个），且退出码 0。
 ac248_candidate_set() {
   local tree="$1" rel out
   rel="$(ac248_checker_relpath)"
   [ -n "$tree" ] && [ -f "$tree/$rel" ] || return 1
-  out="$( AC248_CHECKER="$tree/$rel" "$VC_NODE" --no-warnings --experimental-strip-types \
+  out="$( cd "$tree" && AC248_CHECKER="$tree/$rel" "$VC_NODE" --no-warnings --experimental-strip-types \
             --input-type=module -e '
     const m = await import(process.env.AC248_CHECKER);
     if (typeof m.extractMcpToolNames !== "function") process.exit(3);
@@ -4278,20 +4281,25 @@ AC247NEG
   ac248_tmp="$(mktemp -d 2>/dev/null)" || ac248_tmp=""
   if [ -n "$ac248_tmp" ]; then
     local ac248_repo="$ac248_tmp/repo"
-    mkdir -p "$ac248_repo/scripts"
+    mkdir -p "$ac248_repo/scripts" "$ac248_repo/src"
     git -C "$ac248_repo" init -q -b main >/dev/null 2>&1
     git -C "$ac248_repo" config user.email t@t >/dev/null 2>&1
     git -C "$ac248_repo" config user.name t >/dev/null 2>&1
-    # 修复【前】：检查器看不见以注释开头的工具声明（这正是被复现的真实缺陷形态的最小化）。
+    # ⚠️ 夹具的检查器【按 cwd 相对路径读输入】（如真实检查器按 process.cwd() 定位要扫的目录）——
+    #    这正是 2026-09-12 实测抓到的那个缺陷形态：候选集读取若不在物化树里跑，会安静地读到空集
+    #    （退出码 0、没有报错）。夹具必须带这个形态，否则自检对那类缺陷恒绿。
+    # 修复【前】：候选集里只有一个工具（另一个声明检查器读不到）。
     cat > "$ac248_repo/scripts/check-adr.ts" <<'AC248CHK1'
-export function extractMcpToolNames(): string[] { return ["tool_seen"]; }
+import fs from "node:fs";
+export function extractMcpToolNames(): string[] {
+  return fs.readFileSync("src/tools.txt", "utf8").trim().split("\n").filter(Boolean);
+}
 AC248CHK1
+    printf 'tool_seen\n' > "$ac248_repo/src/tools.txt"
     git -C "$ac248_repo" add -A >/dev/null 2>&1
     git -C "$ac248_repo" commit -qm "base" >/dev/null 2>&1
-    # 修复【后】：同一检查器多看见一个工具（候选集 1 → 2）。⛔ 夹具只造输入形态，不判定对错。
-    cat > "$ac248_repo/scripts/check-adr.ts" <<'AC248CHK2'
-export function extractMcpToolNames(): string[] { return ["tool_seen", "tool_newly_seen"]; }
-AC248CHK2
+    # 修复【后】：同一个检查器多看见一个工具（候选集 1 → 2）。⛔ 夹具只造输入形态，不判定对错。
+    printf 'tool_seen\ntool_newly_seen\n' > "$ac248_repo/src/tools.txt"
     git -C "$ac248_repo" add -A >/dev/null 2>&1
     git -C "$ac248_repo" commit -qm "fix: checker now sees the comment-prefixed tool declaration" >/dev/null 2>&1
     local ac248_sha ac248_base
