@@ -52,6 +52,9 @@ extra:
 - plugin/scripts/architecture-review-cluster.ts
 - plugin/test/quality-gate-driver.test.mjs
 - plugin/test/architecture-review-cluster.test.mjs
+- plugin/test/helpers/worker-driver-harness.mjs
+- plugin/test/worker-driver-resident.test.mjs
+- plugin/test/worker-driver-fan-in.test.mjs
 - tasks/gap-arch-review-judge-verdicts-never-reach-the-existing-gap-filing-channel.md
 
 ## Evidence — AC1 · 探针最近 42 次运行的结论清单与各自处置（枚举，非布尔）
@@ -194,3 +197,43 @@ Fact 里单列 `actionabilityNotEvaluated=N`，reason 追加 `actionability unre
    症状级复现：`node --experimental-strip-types plugin/scripts/identity-replication-check.ts --root <repo> --json` ⇒ `ENOENT … exit 1`。
    **它是另一个缺陷**（检测器鲁棒性），本任务只接线 → 不在此处顺手修；建议后续单独立案（含：detector 对缺失输入应记 not-evaluated 而不是整条例程崩掉）。
 2. judge 输出有 7 次 `judge output not a JSON array` ⇒ 该轮零判词（同族：judge 输出契约的鲁棒性），亦不在本任务范围。
+
+## Evidence — 阻塞修复：worker-driver 常驻测试 after 钩子抛错 ⇒ 套件静默挂死（本轮实测并修复）
+
+**为什么写在这里**：本任务上一轮 fan-in 被判 `step=suite` 红，而那条红**不是本任务代码的缺陷** ——
+它是 develop 侧的系统性挂死，按「develop 侧红也计入本任务、要修 + 进 Touches」处理。⛔ 四条 AC 不变，
+本节只记这次阻塞修复。
+
+**实测（2026-09-12，直接读数，⛔ 不是推测）**：
+
+- fan-in trace：`step=suite-end exit=null ok=false reason="silence watchdog killed the suite
+  (no output ≥ silence timeout)"`（1229s，14:23:05→14:43:35）。
+- 该 suite 日志里 `plugin/test/worker-driver-resident.test.mjs` **既无 `__PERFILE__` 行、也无 `ℹ tests`
+  汇总** ⇒ 它就是静默的那个文件（`grep -c "worker-driver-resident"` = 1，只命中 lpt-order 行）。
+- 该文件的测试进程与其 spawn 的常驻驱动在 30 分钟后**仍活着**；泄漏的 root 仍在盘上，
+  `worker-round.jsonl` 仍在增长（6446 轮 / 3.4MB）。
+- 同形实例（2026-09-10，另一 worktree `gap-meta-readings-no-timeseries-derivation`）：文件进程与
+  驱动 **51 小时后仍活着** ⇒ 系统性，非本任务引入。
+
+**根因（三件事，每件都独立实测过）**：
+
+1. **node:test 的 after 钩子在前一个钩子抛错时会整体跳过其后的钩子** —— node 24 实测：
+   `t.after(() => { throw … })` 之后注册的钩子一条都不执行。
+2. 两个测试把清理钩（`fs.rmSync(root)`）注册在 `t.after(() => drv.stop())` **之前**
+   （其余 8 个常驻测试的顺序是对的 —— 这两个是后加的，纪律回归了）。
+3. **触发点**：清理与仍在写 `<root>/.quay/` 的常驻驱动赛跑 ⇒ 递归删除先删掉文件、再 rmdir 时目录
+   又被驱动重建 ⇒ ENOTEMPTY（`fs.rm` 默认 `maxRetries:0` 不重试）⇒ 抛错 ⇒ `drv.stop()` 被跳过 ⇒
+   驱动泄漏 ⇒ 泄漏驱动持着**本测试文件进程**的子进程句柄 ⇒ 文件进程永不退出 ⇒ 套件静默 ⇒
+   看门狗杀整个套件。盘上留下的泄漏 root（文件被删、目录还在，驱动仍在写）正是「删到一半抛掉」的痕迹。
+
+**负控制（能取假）**：同一测试体（spawn 常驻驱动后抛错）——`有文件级兜底` ⇒ 运行 1.9s 正常结束、
+驱动被杀；`去掉兜底` ⇒ 运行挂死到 120s 超时（`Promise resolution is still pending but the event
+loop has already resolved`）= 套件静默机制的复现。
+
+**修法**（三处，任一单独都能防住这一类）：① `rmSafe`（after 钩子里的删除永不抛；两个文件共 93 处转换）；
+② 共享 harness 注册表 + `stopAllResidentDrivers()`，两个文件各加一条**文件级** `after()` 兜底
+（文件级钩子在测试级钩子抛错后**仍会执行**，实测）；③ 两个测试的钩子顺序改为**先 stop 后删目录**
+（用 holder，因为 drv 在钩子注册之后才 spawn）。另加两条结构面判据（读本文件源码、两个针由片段拼出
+避免自匹配；窗口数 < 10 判为「没解析到」而非「都合格」）。
+
+**回归**：`worker-driver-resident.test.mjs` 43/43 绿（含新增判据）；fan-in 结构面判据绿。提交 `496c5594d`。
