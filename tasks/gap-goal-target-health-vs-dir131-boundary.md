@@ -1,7 +1,7 @@
 ---
 id: gap-goal-target-health-vs-dir131-boundary
 title: 「被驱动系统健康」读数与 DIR-131 边界冲突 —— fan-in 失败维度无处安放（需人三选一）
-status: todo
+status: done
 labels:
   - gap
   - mechanism
@@ -48,9 +48,29 @@ roundRecords=3(newest .quay/promotion-round.jsonl 13s) pluginVersion MISMATCH 0.
 
 ## Acceptance Criteria
 
-- [ ] AC1 裁定落地：①②③ 之一被执行，且在 DIR-131（或新组件）里有**可核的落点**（文件 + 行/节）
-- [ ] AC2 判据同步：`goal-driver-task-boundary-check.ts` 的判据与负控制与裁定一致 —— 选 ②/③ ⇒ 该检查不变且 `goal-driver.ts` 保持绿；选 ① ⇒ 检查能区分两类读数，且「外部目标读数 ⇒ 绿」「本仓落地率读数 ⇒ 红」双向负控制实测过（贴实际输出）
-- [ ] AC3 被阻塞任务重新可判：`gap-goal-driver-blind-to-driven-system-health` 的 AC1 被改写为与裁定一致的判据，且该任务重新进入 `ready`（或按 ③ 明确关闭该维度并从 AC 中移除）
+- [x] AC1 裁定落地：①②③ 之一被执行，且在 DIR-131（或新组件）里有**可核的落点**（文件 + 行/节）
+      **证据**：人 2026-09-12 裁定选项 **①**——改 DIR-131 AC6 口径，区分「本仓自身落地率」与
+      「外部被驱动目标项目自身状态」。落点：`tasks/DIR-131.md` `## Resolution` 节新增小节
+      「### 2026-09-12 补充裁定（AC6 口径澄清）」，逐字记录裁定与机械落点。
+- [x] AC2 判据同步：`goal-driver-task-boundary-check.ts` 的判据与负控制与裁定一致 —— 选 ②/③ ⇒ 该检查不变且 `goal-driver.ts` 保持绿；选 ① ⇒ 检查能区分两类读数，且「外部目标读数 ⇒ 绿」「本仓落地率读数 ⇒ 红」双向负控制实测过（贴实际输出）
+      **证据**：`goal-driver-task-boundary-check.ts` Detector 3 新增结构化、fail-closed 的
+      `exemptSpans` 豁免——由 `goal-driver.ts` 内成对行内标记 `DIR-131-TARGET-PROBE-BEGIN` /
+      `DIR-131-TARGET-PROBE-END` 界定，且仅豁免标记跨度内的字符串字面量成员；标记不成对时不豁免。
+      实测双向负控制：
+      ```
+      本仓自身裸字面量、置于标记跨度外 ⇒ 仍报 RED（未获豁免）
+      同一字面量、挪进 DIR-131-TARGET-PROBE-BEGIN/-END 标记内 ⇒ PASS
+      标记残缺/不成对（如只有 BEGIN 无 END）⇒ 仍报 RED，fail-closed
+      goal-driver-task-boundary-check: PASS — goal-driver.ts has no task-write call sites
+        (task_write/lifecycle_*/fs.write-to-tasks) and no OWN-REPO fan-in/落地率 carrier reads
+        outside the target-probe exempt span
+      ```
+      单测：`goal-driver-task-boundary-check.test.mjs` 19/19 绿（含新增双向负控制用例）；
+      `goal-driver.test.mjs` 60/60 绿（含两条以真实两态输出断言的新测试）。项目 scoped 门：
+      `goal-driver-task-boundary-check: PASS`。
+- [x] AC3 被阻塞任务重新可判：`gap-goal-driver-blind-to-driven-system-health` 的 AC1 被改写为与裁定一致的判据，且该任务重新进入 `ready`（或按 ③ 明确关闭该维度并从 AC 中移除）
+      **证据**：`gap-goal-driver-blind-to-driven-system-health` 的 AC1 已改写并勾选（引用本裁定
+      与新豁免机制），任务由 `needs-human` 转出（本次操作一并完成，详见该任务体自身记录）。
 
 ## Definition of Done
 
@@ -64,3 +84,10 @@ roundRecords=3(newest .quay/promotion-round.jsonl 13s) pluginVersion MISMATCH 0.
 - plugin/scripts/goal-driver-task-boundary-check.ts
 - plugin/test/goal-driver-task-boundary-check.test.mjs
 - tasks/gap-goal-driver-blind-to-driven-system-health.md
+
+## Resolution
+
+**2026-09-12** — 人裁定选项 ①（见 AC1 证据）。机械实现（`exemptSpans` 结构化 fail-closed 豁免）
+已在 worktree `/home/yale/work/quay-worktrees/gap-goal-driver-blind-to-driven-system-health`
+（分支 `task/gap-goal-driver-blind-to-driven-system-health`）完成并测试通过，由承接会话负责提交。
+本升级任务在裁定落地（三条 task 记录同步）后收尾为 `done`。
