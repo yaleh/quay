@@ -160,9 +160,27 @@ function sliceFn(name) {
   return src.slice(i, src.indexOf("\n}", i) + 2) + "\n";
 }
 
+/** Extract a top-level single-quoted declaration verbatim from the product script. */
+function bashDeclarationSource(src, name) {
+  const start = src.indexOf(`\n${name}='`);
+  assert.ok(start >= 0, `${name} must be a single-quoted top-level declaration in verify-deliver-coldstart.sh`);
+  const end = src.indexOf("'\n", start + name.length + 3);
+  assert.ok(end > start, `${name} must be a closed single-quoted scalar`);
+  return src.slice(start + 1, end + 2);
+}
+
 /** The AC-250 record as the producer writes it, built through the REAL writer (bash). */
 function writeRecordViaProduct(spec) {
-  const fnNames = ["ac89_append_goal009", "ac250_not_loopback", "ac250_http_status_ok", "write_ac250_record"];
+  // ⚠️ This list is a HAND-maintained model of `ac89_append_goal009`'s dependency graph, so it goes
+  // stale whenever that graph grows. Left stale, the extracted writer dies with
+  // `ac_record_schema_validate_fragment: command not found` / `AC_RECORD_SCHEMA: unbound variable`
+  // ⇒ non-zero ⇒ REFUSED for EVERY input. This fixture has NO positive control on this path (its one
+  // caller asserts REFUSED), so a stale closure here does not turn it red — it turns it VACUOUS, an
+  // assertion that passes for a reason that has nothing to do with the record's shape (硬规则 3b).
+  // Measured 2026-09-12: exactly that happened when the schema choke point landed.
+  const fnNames = ["ac89_append_goal009", "ac_record_schema_validate_fragment", "ac_record_fragment_ac",
+    "ac_record_carrier_root", "ac_record_finalize", "ac250_not_loopback", "ac250_http_status_ok",
+    "write_ac250_record"];
   const src = fs.readFileSync(SCRIPT, "utf8");
   let harness = 'set -uo pipefail\nVC_NODE="${VC_NODE:-node}"\n';
   for (const fn of fnNames) {
@@ -170,6 +188,7 @@ function writeRecordViaProduct(spec) {
     assert.ok(i >= 0, `${fn} must exist`);
     harness += src.slice(i, src.indexOf("\n}", i) + 2) + "\n";
   }
+  harness += bashDeclarationSource(src, "AC_RECORD_SCHEMA") + "\n";
   harness += `AC89="$AC89"; BUILD_SHA="$BUILD_SHA"; TS="2026-09-12T00:00:00Z"\n`;
   harness += `if write_ac250_record ${spec.map((a) => `'${String(a).replace(/'/g, "'\\''")}'`).join(" ")} 2>/dev/null; then echo WROTE; else echo REFUSED; fi\n`;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ac250-w-"));
@@ -331,6 +350,19 @@ test("③ the readings come from REAL rendered HTML / REAL `ss` text — the lis
     ["target-B", "/home/other/archguard", "127.0.0.1", "100.100.148.48", "probe-A", "200", "T-1", "todo", "ready", "ready", ""]
   ).verdict, "REFUSED",
     "a bind_host taken from the --host argument (127.0.0.1) while tailscale0 is elsewhere must be refused");
+
+  // …and the POSITIVE control for that very call, so the refusal above cannot be vacuous. Without it a
+  // stale harness — one dependency the list in writeRecordViaProduct does not model ⇒ command-not-found
+  // ⇒ non-zero ⇒ REFUSED for every input — leaves this test GREEN while it measures nothing. Measured
+  // 2026-09-12 when the AC_RECORD_SCHEMA choke point landed: this was the only one of the three
+  // record-writer fixtures that went vacuously green instead of red (硬规则 2: 零/恒一的配套动作是把
+  // 谓词对着一个【已知为真】的样本干跑一次).
+  const good = writeRecordViaProduct(
+    ["target-B", "/home/other/archguard", "100.100.148.48", "100.100.148.48", "probe-A", "200", "T-1", "todo", "ready", "ready", ""]
+  );
+  assert.equal(good.verdict, "WROTE",
+    "the same writer must ACCEPT the observed non-loopback listener — else every refusal above is vacuous");
+  assert.equal(good.lines.length, 1, "…writing exactly one record");
 
   // The page reading is parsed out of REAL rendered row HTML, and the status cell may carry the
   // develop/disk divergence marker the renderer adds — the id and status must still parse.

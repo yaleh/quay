@@ -145,9 +145,26 @@ function producerSegment() {
   return src.slice(start, end);
 }
 
+/** Extract a top-level single-quoted declaration verbatim from the product script. */
+function bashDeclarationSource(src, name) {
+  const start = src.indexOf(`\n${name}='`);
+  assert.ok(start >= 0, `${name} must be a single-quoted top-level declaration in verify-deliver-coldstart.sh`);
+  const end = src.indexOf("'\n", start + name.length + 3);
+  assert.ok(end > start, `${name} must be a closed single-quoted scalar`);
+  return src.slice(start + 1, end + 2);
+}
+
 /** The AC-248 record as the producer writes it, built through the real writer (bash) — see ③b. */
 function writeRecordViaProduct(spec) {
-  const fnNames = ["ac89_append_goal009", "ac248_json_bool_ok", "ac248_flip_is_forward",
+  // `ac_record_*` = the rest of `ac89_append_goal009`'s closure: since
+  // gap-ac-record-schema-duplicated-between-criterion-and-writer the ONE anchor choke point also
+  // enforces AC_RECORD_SCHEMA at production time. This list is a HAND-maintained model of the writer's
+  // dependency graph, so an unlisted dependency makes the extracted writer die with
+  // `ac_record_schema_validate_fragment: command not found` ⇒ non-zero ⇒ REFUSED for EVERY input —
+  // i.e. all of ③b's negatives stay vacuously green and only the positive control ("the positive spec
+  // must write exactly one record") goes red. Listed so the refusals below are the product's verdicts.
+  const fnNames = ["ac89_append_goal009", "ac_record_schema_validate_fragment", "ac_record_fragment_ac",
+    "ac_record_carrier_root", "ac_record_finalize", "ac248_json_bool_ok", "ac248_flip_is_forward",
     "ac248_produced_by_driver_ok", "write_ac248_record"];
   const src = fs.readFileSync(SCRIPT, "utf8");
   let harness = 'set -uo pipefail\nVC_NODE="${VC_NODE:-node}"\n';
@@ -156,6 +173,10 @@ function writeRecordViaProduct(spec) {
     assert.ok(i >= 0, `${fn} must exist`);
     harness += src.slice(i, src.indexOf("\n}", i) + 2) + "\n";
   }
+  // AC_RECORD_SCHEMA lives OUTSIDE every function body, so a harness built from bodies alone leaves it
+  // unset ⇒ the choke point dies under `set -u` ⇒ REFUSED for every input (see fnNames above). Read
+  // from the product script, ⛔ never re-pasted here: a second copy of the field list IS the defect.
+  harness += bashDeclarationSource(src, "AC_RECORD_SCHEMA") + "\n";
   harness += `AC89="$AC89"; BUILD_SHA="$BUILD_SHA"; TS="2026-09-12T00:00:00Z"\n`;
   harness += `if write_ac248_record ${spec.map((a) => `'${String(a).replace(/'/g, "'\\''")}'`).join(" ")} 2>/dev/null; then echo WROTE; else echo REFUSED; fi\n`;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ac248-w-"));

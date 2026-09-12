@@ -141,6 +141,18 @@ function bashFunctionSource(src, name) {
   return src.slice(i, src.indexOf("\n}", i) + 2);
 }
 
+/** Extract a top-level single-quoted declaration verbatim. The choke point now reads AC_RECORD_SCHEMA,
+ *  which lives OUTSIDE every function body, so a harness built from bodies alone leaves it unset and
+ *  dies under `set -u` — again reading REFUSED for every input. Read from the product script, ⛔ never
+ *  a copy pasted into the fixture: a second copy of the field list is the exact defect this pins. */
+function bashDeclarationSource(src, name) {
+  const start = src.indexOf(`\n${name}='`);
+  assert.ok(start >= 0, `${name} must be a single-quoted top-level declaration in verify-deliver-coldstart.sh`);
+  const end = src.indexOf("'\n", start + name.length + 3);
+  assert.ok(end > start, `${name} must be a closed single-quoted scalar`);
+  return src.slice(start + 1, end + 2);
+}
+
 function writerBody() {
   return bashFunctionSource(fs.readFileSync(SCRIPT, "utf8"), "write_ac249_record");
 }
@@ -155,6 +167,7 @@ function runBash(fnNames, body, env = {}) {
   const src = fs.readFileSync(SCRIPT, "utf8");
   let harness = 'set -uo pipefail\nVC_NODE="${VC_NODE:-node}"\n';
   for (const fn of fnNames) harness += bashFunctionSource(src, fn) + "\n";
+  harness += bashDeclarationSource(src, "AC_RECORD_SCHEMA") + "\n";
   harness += body + "\n";
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ac249-bash-"));
   try {
@@ -175,6 +188,20 @@ function runBash(fnNames, body, env = {}) {
 
 const UNION_FNS = ["ac207_commit_files", "ac207_select_implementation_commit", "ac207_is_bookkeeping_commit",
   "ac249_is_code_path", "ac249_is_adr_doc_path", "ac249_union_commit_shas", "ac249_union_files"];
+
+/** The REST of the write path's transitive closure, i.e. everything `ac89_append_goal009` reaches for.
+ *
+ *  ⚠️ `runBash` materializes a function list BY HAND, so it is a hand-maintained model of the writer's
+ *  dependency graph and goes stale the moment that graph grows: since
+ *  gap-ac-record-schema-duplicated-between-criterion-and-writer, `ac89_append_goal009` (the ONE anchor
+ *  choke point) also enforces `AC_RECORD_SCHEMA` at production time. Left unlisted, the extracted
+ *  writer dies with `ac_record_schema_validate_fragment: command not found` ⇒ non-zero ⇒ `|| return 1`
+ *  ⇒ the verdict reads REFUSED **for every input**. That failure mode is the dangerous direction: it
+ *  turns ③/④'s negative controls vacuously green (they assert REFUSED) while only the positive
+ *  controls — "the union must be accepted" — go red. Listed here so the refusal under test is the
+ *  product's real verdict, not a missing-symbol artifact. */
+const WRITE_PATH_FNS = ["ac_record_schema_validate_fragment", "ac_record_fragment_ac",
+  "ac_record_carrier_root", "ac_record_finalize"];
 
 // Every temp dir this file creates is registered here and removed by ONE `after()` hook — the
 // static isolation check (R6 mkdtemp-no-cleanup) traces mkdtemp results to a cleanup path, and a
@@ -333,7 +360,8 @@ test("③ the union is a UNION: two commits (code first, doc last) — the singl
       "…and therefore its file list has NO code side — a producer built on it would report a fully qualified task as incomplete");
 
     // And the writer really does refuse that half-list while accepting the union (two readings, side by side).
-    const WRITER_FNS = ["ac89_append_goal009", ...UNION_FNS.filter((f) => f !== "ac207_select_implementation_commit"),
+    const WRITER_FNS = ["ac89_append_goal009", ...WRITE_PATH_FNS,
+      ...UNION_FNS.filter((f) => f !== "ac207_select_implementation_commit"),
       "write_ac249_record"];
     const half = runBash(WRITER_FNS,
       `if write_ac249_record hostX-arm /home/other/proj T-1 '["quay-adr/ADR-007.md"]' 2>/dev/null; then echo WROTE; else echo REFUSED; fi`);
@@ -350,7 +378,8 @@ test("③ the union is a UNION: two commits (code first, doc last) — the singl
 });
 
 test("④ every one-sided union is refused by the writer, and an unreadable union writes NOTHING", () => {
-  const WRITER_FNS = ["ac89_append_goal009", "ac249_is_code_path", "ac249_is_adr_doc_path", "write_ac249_record"];
+  const WRITER_FNS = ["ac89_append_goal009", ...WRITE_PATH_FNS, "ac249_is_code_path", "ac249_is_adr_doc_path",
+    "write_ac249_record"];
   const cases = [
     ["code only", '["scripts/check-adr.ts","src/a.ts"]'],
     ["doc only", '["quay-adr/ADR-007.md","docs/adr/007.md"]'],
