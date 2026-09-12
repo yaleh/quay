@@ -1213,6 +1213,41 @@ function readLoopTestCommand(dir: string): string | null {
   return typeof cmd === "string" && cmd.trim() ? cmd.trim() : null;
 }
 
+/** gap-verification-round-bound-to-quay-shaped-suite-entry AC5 — 读 <dir>/.quay/config.yml 的
+ *  `loop.test_output`：目标项目【自己声明】的测试输出约定（{字段: 正则，恰好一个捕获组}，字段 ∈
+ *  pass/fail/cancelled/tests）。quay 依声明从 suite 日志解析计数并落台账，⛔ 不把输出格式写死成 quay
+ *  自己的 node:test/measure-reporter 形状（人 2026-09-12 裁定：「只让入口可配而输出解析仍写死，是换了
+ *  一个位置的同一个病」）。
+ *
+ *  读面只做形状校验（值为非空字符串的已知字段；未知字段/非法类型丢弃）——正则能否编译/匹配由 writer
+ *  侧 fail-closed 处理（不匹配 ⇒ 该字段缺席，⛔ 不伪造 0）。无有效声明 ⇒ null（调用方退回内建解析，
+ *  本仓库形态零回归）。与 readLoopTestCommand 同一 YAML 读法（⛔ 不依赖 packages/quay/src/config.ts）。 */
+export function readLoopTestOutput(dir: string): Record<string, string> | null {
+  const file = path.join(dir, ".quay", "config.yml");
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(text);
+  } catch {
+    return null;
+  }
+  const loop = (parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).loop : undefined) as
+    | Record<string, unknown>
+    | undefined;
+  const decl = loop && typeof loop === "object" ? (loop as Record<string, unknown>).test_output : undefined;
+  if (!decl || typeof decl !== "object" || Array.isArray(decl)) return null;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(decl as Record<string, unknown>)) {
+    if (typeof v === "string" && v.trim() !== "") out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
 /** scoped-gate 命令的解析结果（gap-driver-fanin-hardcoded-test-sh-third-party）：
  *  - run  argv  — 本仓库（有 scripts/test.sh）⇒ bash <argvDir>/scripts/test.sh --for-task <task>
  *                --allow-thin（与修改前逐字一致）；第三方（无 test.sh 但有 loop.test_command）⇒
@@ -3615,8 +3650,12 @@ export function appendDelegatedSuiteRound(o: {
   durationMs: number;
   state: "green" | "red";
   suiteLog: string;
-}): { ok: boolean; reason: string | null } {
+  /** 受测 checkout（读它的 .quay/config.yml 的 loop.test_output —— AC5：项目声明的输出约定）。 */
+  worktree: string;
+}): { ok: boolean; reason: string | null; applied: Record<string, number> | null } {
   try {
+    // AC5 — 项目自己声明的输出约定（缺声明 ⇒ null ⇒ writer 走内建解析，零回归）。
+    const testOutput = readLoopTestOutput(o.worktree);
     const built = buildPreVerifiedRoundRecord({
       taskId: o.task,
       runId: o.runId,
@@ -3634,13 +3673,14 @@ export function appendDelegatedSuiteRound(o: {
       // null 会被 builder 的 `!= null` 判成「没传」⇒ 字段整个缺席（cpu_source 却写着 not-wired，两半不自洽）。
       cpuTimeS: "null",
       cpuSource: "not-wired",
+      testOutput,
       root: o.root,
-    }) as { record?: unknown; error?: string };
-    if (built.error) return { ok: false, reason: built.error };
+    }) as { record?: unknown; error?: string; appliedDeclared?: Record<string, number> | null };
+    if (built.error) return { ok: false, reason: built.error, applied: null };
     appendPreVerifiedRound(path.join(o.root, ".quay", "verification-round.jsonl"), built.record);
-    return { ok: true, reason: null };
+    return { ok: true, reason: null, applied: built.appliedDeclared ?? null };
   } catch (e) {
-    return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+    return { ok: false, reason: e instanceof Error ? e.message : String(e), applied: null };
   }
 }
 
@@ -4040,11 +4080,20 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       const t0 = Date.now();
       const rd = appendDelegatedSuiteRound({
         task, runId: perSuiteRunId, root, commit: suiteHead,
-        startedAt, durationMs, state, suiteLog: suiteLogFile,
+        startedAt, durationMs, state, suiteLog: suiteLogFile, worktree,
       });
+      // AC5 的可见性：项目声明了输出约定时，把【实际应用到的派生字段】写进 trace —— 声明有效但一条都
+      // 没匹配上（applied={}）必须与「没声明」（applied=null）在记录上可分（硬规则 3b）。
+      let reason = "";
+      if (!rd.ok) reason = rd.reason ?? "append failed";
+      else if (rd.applied !== null) {
+        reason = Object.keys(rd.applied).length > 0
+          ? `test_output declared → ${Object.entries(rd.applied).map(([k, v]) => `${k}=${v}`).join(" ")}`
+          : "test_output declared but nothing matched (no count fields derived)";
+      }
       traceSuiteEvent("verification-round-record", {
         exit: rd.ok ? 0 : 1, wall_ms: Date.now() - t0, ok: rd.ok,
-        ...(rd.ok ? {} : { reason: rd.reason ?? "append failed" }),
+        ...(reason === "" ? {} : { reason }),
       });
     };
     if (needSuite) {

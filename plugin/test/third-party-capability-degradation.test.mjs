@@ -25,6 +25,8 @@ import {
   // 的 verification-round 入账判定 + 补写（复用 shared writer，⛔ 不新造第三个 writer）。
   suiteRunsOutsideRunner,
   appendDelegatedSuiteRound,
+  // AC5 — 项目声明的输出约定（loop.test_output）的读面。
+  readLoopTestOutput,
 } from "../scripts/worker-driver.ts";
 // /tests 页自己的读者（同一载体 verification-round.jsonl 的读面）——「web 面能看到这一轮」的机器判定面，
 // 与写面同源、⛔ 不在测试里另写一个 JSON.parse 假装读者（硬规则 5b：写面修了读面也要走同一实现的判据）。
@@ -160,9 +162,9 @@ test("正向 — appendDelegatedSuiteRound 追加真记录，且 /tests 的读�
   const r1 = appendDelegatedSuiteRound({
     task: "TASK-88", runId: "mfi-TASK-88-1789210598105-e1ddad", root, commit,
     startedAt: "2026-09-12T10:56:38.000Z", durationMs: 271332, state: "green",
-    suiteLog: "/nonexistent/suite.log",
+    suiteLog: "/nonexistent/suite.log", worktree: root, // 无 .quay/config.yml ⇒ 无声明（AC5 负控件同样覆盖）
   });
-  assert.deepEqual(r1, { ok: true, reason: null }, "追加成功");
+  assert.deepEqual(r1, { ok: true, reason: null, applied: null }, "追加成功（无声明 ⇒ applied=null）");
 
   const rec = JSON.parse(fs.readFileSync(ledger, "utf8").trim());
   assert.equal(rec.taskId, "TASK-88", "taskId = 本轮 fan-in 的任务");
@@ -187,7 +189,7 @@ test("正向 — appendDelegatedSuiteRound 追加真记录，且 /tests 的读�
   const r2 = appendDelegatedSuiteRound({
     task: "TASK-88", runId: "mfi-TASK-88-1789210999999-ffffff", root, commit,
     startedAt: "2026-09-12T11:00:00.000Z", durationMs: 1000, state: "red",
-    suiteLog: "/nonexistent/suite.log",
+    suiteLog: "/nonexistent/suite.log", worktree: root,
   });
   assert.equal(r2.ok, true, "红轮同样入账");
   const lines = fs.readFileSync(ledger, "utf8").trim().split("\n");
@@ -205,4 +207,90 @@ test("反向负控制 — 本仓库形态（有 scripts/test.sh）⇒ 新增写�
   // full-suite-runner（defaultMechanicalSuiteCommand 的分支次序）⇒ 台账由 runner 写，本层不得再写。
   writeFile(path.join(wt, ".quay", "config.yml"), "loop:\n  test_command: node --test\n");
   assert.equal(suiteRunsOutsideRunner(wt), false, "有 scripts/test.sh ⇒ 本层不补写（⛔ 不双写）");
+});
+
+// ── AC5（人 2026-09-12 裁定）：出口可配 + 项目【声明】的输出约定，quay 依声明解析 ──────────────────────
+// 「只让入口可配而输出解析仍写死，是换了一个位置的同一个病」⇒ 判据必须落在【由真实输出派生的字段】上。
+// 本组打印三者对照：配置声明 → 原始输出片段 → 落进记录的值。
+
+test("AC5 正向 — 声明的输出约定驱动台账字段（配置声明 + 原始输出 + 记录值三者一致）", (t) => {
+  const wt = fs.mkdtempSync(path.join(os.tmpdir(), "capdeg-out-third-party-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "capdeg-out-root-"));
+  t.after(() => { fs.rmSync(wt, { recursive: true, force: true }); fs.rmSync(root, { recursive: true, force: true }); });
+  const DECL = `
+loop:
+  test_command: npx vitest run
+  test_output:
+    pass: 'Tests\\s+.*?(\\d+) passed'
+    fail: 'Tests\\s+.*?(\\d+) failed'
+`;
+  writeFile(path.join(wt, ".quay", "config.yml"), DECL);
+  // 项目【自己的】输出形状（vitest），⛔ 不是 quay 自己的 node:test `ℹ pass N` 形状——带 ANSI 着色
+  // （真实管道输出常带色；归一化缺了它声明就会「读到了却解析不出」，正是 AC5 要挡的假绿）。
+  const ESC = String.fromCharCode(27);
+  const RAW = `${ESC}[32m      Tests${ESC}[39m  ${ESC}[31m2 failed${ESC}[39m | ${ESC}[32m345 passed${ESC}[39m (347)`;
+  const log = path.join(wt, "suite.log");
+  fs.writeFileSync(log, RAW + "\n", "utf8");
+
+  // ① 配置声明被读成什么
+  const declared = readLoopTestOutput(wt);
+  assert.deepEqual(
+    declared,
+    { pass: String.raw`Tests\s+.*?(\d+) passed`, fail: String.raw`Tests\s+.*?(\d+) failed` },
+    "loop.test_output 声明被读成字段→正则",
+  );
+  // ② + ③ 落进记录的值
+  const r = appendDelegatedSuiteRound({
+    task: "TASK-88", runId: "mfi-TASK-88-test-output", root, commit: "b".repeat(40),
+    startedAt: "2026-09-12T10:56:38.000Z", durationMs: 271332, state: "green",
+    suiteLog: log, worktree: wt,
+  });
+  assert.equal(r.ok, true, `append ok (${r.reason})`);
+  assert.deepEqual(r.applied, { pass: 345, fail: 2, tests: 347 }, "回报实际应用到的派生字段");
+  const rec = JSON.parse(fs.readFileSync(path.join(root, ".quay", "verification-round.jsonl"), "utf8").trim());
+  assert.equal(rec.pass, 345, "记录 pass = 原始输出里的 345 passed（由声明派生，⛔ 非默认值）");
+  assert.equal(rec.fail, 2, "记录 fail = 原始输出里的 2 failed");
+  assert.equal(rec.tests, 347, "记录 tests = pass+fail（与 full-suite-runner 同口径）");
+});
+
+test("AC5 负控制 — 无声明 ⇒ 内建形状解析（vitest 输出解析不出 ⇒ 字段缺席，⛔ 不写 0）；声明不匹配同样缺席", (t) => {
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), "capdeg-out-bare-"));
+  t.after(() => fs.rmSync(bare, { recursive: true, force: true }));
+  writeFile(path.join(bare, ".quay", "config.yml"), "loop:\n  test_command: npx vitest run\n");
+  assert.equal(readLoopTestOutput(bare), null, "未声明 ⇒ null（调用方退回内建解析）");
+  // 声明的形状校验：非字符串 / 空串 / 非对象 ⇒ 不算有效声明
+  writeFile(path.join(bare, ".quay", "config.yml"), "loop:\n  test_output:\n    pass: ''\n    fail: 3\n");
+  assert.equal(readLoopTestOutput(bare), null, "空串/非字符串值 ⇒ 无有效声明（⛔ 不当成「配了」）");
+  writeFile(path.join(bare, ".quay", "config.yml"), "loop:\n  test_output: vitest\n");
+  assert.equal(readLoopTestOutput(bare), null, "非对象声明 ⇒ null");
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "capdeg-out-root2-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const ESC = String.fromCharCode(27);
+  const log = path.join(bare, "suite.log");
+  fs.writeFileSync(log, `${ESC}[32m      Tests${ESC}[39m 2 failed | 345 passed (347)\n`, "utf8");
+
+  // 无声明：内建（node:test 形状）解析在 vitest 输出上解析不出 ⇒ 三个计数字段【缺席】（⛔ 不是 0）
+  const r1 = appendDelegatedSuiteRound({
+    task: "T1", runId: "r1", root, commit: "c".repeat(40), startedAt: "2026-09-12T10:00:00.000Z",
+    durationMs: 1000, state: "green", suiteLog: log, worktree: bare,
+  });
+  assert.equal(r1.ok, true);
+  assert.equal(r1.applied, null, "无声明 ⇒ applied=null（走内建解析，可区分于「声明了没匹配」）");
+  let rec = JSON.parse(fs.readFileSync(path.join(root, ".quay", "verification-round.jsonl"), "utf8").trim());
+  for (const f of ["pass", "fail", "tests"]) {
+    assert.equal(rec[f], undefined, `无声明时 ${f} 缺席（⛔ 不伪造 0——「没测到」与「测得 0」不可同形）`);
+  }
+  // 声明有效但一条都没匹配上：同样缺席，但 applied={} 让「声明了没匹配」与「没声明」在记录上可分
+  writeFile(path.join(bare, ".quay", "config.yml"), "loop:\n  test_output:\n    pass: 'NOTHING(\\\\d+)'\n");
+  const r2 = appendDelegatedSuiteRound({
+    task: "T1", runId: "r2", root, commit: "c".repeat(40), startedAt: "2026-09-12T10:05:00.000Z",
+    durationMs: 1000, state: "green", suiteLog: log, worktree: bare,
+  });
+  assert.equal(r2.ok, true);
+  assert.deepEqual(r2.applied, {}, "声明了但没匹配 ⇒ applied={}（与 null 可分，硬规则 3b）");
+  const lines = fs.readFileSync(path.join(root, ".quay", "verification-round.jsonl"), "utf8").trim().split("\n");
+  rec = JSON.parse(lines[1]);
+  assert.equal(rec.pass, undefined, "声明没匹配 ⇒ 字段仍缺席（⛔ 不退回伪造/默认值）");
+  assert.equal(rec.state, "green", "轮次本身照常入账（观测字段缺失不阻塞台账）");
 });

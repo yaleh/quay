@@ -1355,8 +1355,14 @@ function makeMechRepo(tag, taskId = "gap-mfh", opts = {}) {
     // 第三方形态：worktree 无 scripts/test.sh + 有自己的 suite 入口（.quay/config.yml 的
     // loop.test_command）⇒ suite 委托该命令、不经 full-suite-runner。该文件保持【未跟踪】（第三方
     // 工作区里它就是运行时配置；ff 的 clean-tree 判定对未跟踪的 .quay/ 产物是 BENIGN）。
+    // 同时带上 AC5 的输出约定声明（项目【自己】声明怎么从自己的测试输出里取计数——quay 依声明解析，
+    // ⛔ 不把输出格式写死成 quay 自己的 node:test 形状）。
     fs.mkdirSync(path.join(worktree, ".quay"), { recursive: true });
-    fs.writeFileSync(path.join(worktree, ".quay", "config.yml"), "loop:\n  test_command: node --test\n", "utf8");
+    fs.writeFileSync(
+      path.join(worktree, ".quay", "config.yml"),
+      "loop:\n  test_command: node --test\n  test_output:\n    pass: 'Tests\\s+.*?(\\d+) passed'\n    fail: 'Tests\\s+.*?(\\d+) failed'\n",
+      "utf8",
+    );
   }
   const slotBase = path.join(base, "full-suite.lock");
   const capture = path.join(base, "suite.env");
@@ -2181,7 +2187,12 @@ test("gap-verification-round-bound-to-quay-shaped-suite-entry — 第三方形�
   const ledger = path.join(m.repo, ".quay", "verification-round.jsonl");
   assert.equal(fs.existsSync(ledger), false, "前置：fan-in 前台账载体不存在（正是缺陷现场）");
 
-  const r = await runMechanicalFanIn(mechOpts(m, runId, { task: "gap-vr-tp", perSuiteRunId: runId }));
+  const r = await runMechanicalFanIn(mechOpts(m, runId, {
+    task: "gap-vr-tp", perSuiteRunId: runId,
+    // 项目自己的输出形状（vitest），⛔ 不是 quay 自己的 node:test `ℹ pass N` 形状 —— AC5 要求台账里
+    // 由【该输出】派生的字段拿到真实值。
+    suiteCommand: ["bash", "-c", "echo '      Tests  0 failed | 345 passed (345)'; exit 0"],
+  }));
   assert.equal(r.outcome, "landed", `must land (step=${r.step} reason=${r.reason})`);
 
   assert.ok(fs.existsSync(ledger), "第三方形态的绿轮必须产出台账行（⛔ 不再「未接入」）");
@@ -2194,6 +2205,11 @@ test("gap-verification-round-bound-to-quay-shaped-suite-entry — 第三方形�
   assert.equal(rec.preverified, false, "suite 在本轮 fan-in 内真跑（⛔ 非复用 capture）");
   assert.equal(rec.scope, "worktree", "scope=worktree");
   assert.match(String(rec.commit), /^[0-9a-f]{40}$/, "commit 是 suite_head（40-hex sha，非空/非伪造）");
+  // AC5 —— 由【项目声明的输出约定】从真实 suite 输出派生的字段（三者对照见 third-party-capability-
+  // degradation.test.mjs 的 AC5 正向测；这里是接线证据：声明在真 fan-in 轮上被消费）。
+  assert.equal(rec.pass, 345, "pass 由声明的正则从 suite 输出派生（345 passed）");
+  assert.equal(rec.fail, 0, "fail 由声明的正则派生（0 failed —— 声明匹配到的真 0，⛔ 非伪造）");
+  assert.equal(rec.tests, 345, "tests = pass+fail（同 full-suite-runner 口径）");
 
   // 负控制：本仓库形态（scripts/test.sh 在场）⇒ 本层不补写（台账由 full-suite-runner 写；此处 suite 是
   // 假命令缝，runner 没跑 ⇒ 台账应当【不存在】——若判据写反，这一行会是 1，正是双写）。
