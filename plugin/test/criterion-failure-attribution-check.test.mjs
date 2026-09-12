@@ -4,7 +4,10 @@
 //
 // Split by what it proves:
 //   · the pure predicate (isBareFailureExitLine / maskHashComments) — POSITION-based judgment, with the
-//     comment-mention and exit(10) negative controls (硬规则 2).
+//     comment-mention and exit(10) negative controls (硬规则 2), plus BOTH forms of failure exit: the
+//     direct `exit(1)` and the trailing computed `sys.exit(0 if ok else 1)` whose argument nests parens
+//     (gap-criterion-attribution-ratchet-blind-to-trailing-computed-exit — before the widening the
+//     latter read as CLEAN, which is how AC-245 reached the production ledger unattributed).
 //   · the pure ratchet (checkRatchet) — shrink-only: a fix is green, an addition is red.
 //   · the CLI three-state contract — 0 pass / 1 red / 3 NOT-EVALUATED, pairwise distinct (硬规则 3b),
 //     and the committed baseline artifact actually gates the REAL repo at 0.
@@ -19,6 +22,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   isBareFailureExitLine,
+  hasTrailingComputedFailureExit,
   maskHashComments,
   maskValueStrings,
   checkRatchet,
@@ -140,6 +144,39 @@ test("maskValueStrings is pure and blanks only the value-position literal", () =
   assert.equal(maskValueStrings('echo "exit 1"'), 'echo "exit 1"', "not in value position ⇒ untouched");
 });
 
+// ── the TRAILING COMPUTED form (AC-245's blind spot, 2026-09-12) ────────────────────────────────────
+// Before this widening, `sys.exit(0 if ok else 1)` read as CLEAN: the ratchet sat at 32 while AC-245
+// entered the in-domain set in exactly this form and wrote an unattributable `fail` into the production
+// ledger. "I cannot read this form" and "this criterion is clean" shared one output — hard rule 3b.
+
+const AC245_CRITERION_LINE = `  sys.exit(0 if log and str(log[-1].get("reason") or "").strip() else 1)`;
+
+test("isBareFailureExitLine — positive control: the TRAILING COMPUTED exit is a failure exit (AC-245)", () => {
+  assert.equal(isBareFailureExitLine(AC245_CRITERION_LINE), true, "AC-245's own criterion line, verbatim");
+  // The nested-paren requirement, stated as its own case: a pure regex cannot count to this `else`.
+  assert.equal(isBareFailureExitLine('  sys.exit(0 if f(g(x), h(y) or []) else 1)'), true);
+  assert.equal(isBareFailureExitLine("  sys.exit(0 if len(ok)>=1 else 1)"), true);
+  assert.equal(isBareFailureExitLine("  sys.exit(0 if a else 2)"), true, "any non-zero tail, not just 1");
+  assert.equal(hasTrailingComputedFailureExit(AC245_CRITERION_LINE.trim()), true, "the pure predicate agrees");
+});
+
+test("isBareFailureExitLine — negative control: the trailing-computed form's UNMATCHED tails", () => {
+  assert.equal(isBareFailureExitLine("  sys.exit(0 if ok else 0)"), false, "always-0 never fails ⇒ must NOT be bare");
+  assert.equal(isBareFailureExitLine("  sys.exit(0) if ok else 1"), false, "the `)` closes the call: `else 1` is NOT its argument");
+  assert.equal(isBareFailureExitLine('  r=m.runAcceptance({command:"x else 1",cwd:".",timeoutMs:60000})'), false, "value-position string is DATA");
+  assert.equal(isBareFailureExitLine('  cmd="sys.exit(0 if a else 1)"'), false, "same, via `=`");
+});
+
+test("isBareFailureExitLine — negative control: an attribution on the trailing-computed LINE clears it", () => {
+  assert.equal(isBareFailureExitLine('  if not ok: sys.stderr.write("CAUSE=x\\n"); sys.exit(0 if ok else 1)'), false);
+  assert.equal(isBareFailureExitLine("  [ -n \"$x\" ] || { echo why >&2; exit 1; }"), false, "`>&2` marks attribution");
+});
+
+test("isBareFailureExitLine — position control: the computed form in value position is still NOT masked out of a real exit", () => {
+  // The value mask must not swallow a command substitution — the same rule the direct forms obey.
+  assert.equal(isBareFailureExitLine('  x="$(sys.exit(0 if a else 1))"'), true);
+});
+
 // ── the ratchet (shrink-only) ──────────────────────────────────────────────────────────────────────
 
 test("checkRatchet: equal / shrunk is ok, grown is not (and names the added ACs)", () => {
@@ -170,6 +207,35 @@ test("CLI: baseline-consistent workspace ⇒ exit 0, one added bare criterion �
   assert.equal(JSON.parse(injected.stdout).bareAcs, 3);
 
   fs.rmSync(path.join(root, "goals/AC-999-fixture.md"));
+  assert.equal(runCli(["--root", root]).status, 0, "removing the injected criterion must restore GREEN");
+});
+
+test("CLI: a criterion in the TRAILING COMPUTED form makes the ratchet BITE (+1 / delta +1 / named), then release", () => {
+  // AC3's two-way control, mechanical: the same injection that the PRE-widening checker read as
+  // `bareAcs` unchanged / status=pass / id absent from `ids` (i.e. a silent pass) must now be RED.
+  const root = makeRoot(1);
+  fs.writeFileSync(
+    path.join(root, BASELINE_REL),
+    JSON.stringify(
+      { count: 1, inDomain: 1, entries: [{ id: "AC-900", file: "AC-900-fixture.md", bareLines: [4] }], generatedAt: "2026-09-11T00:00:00.000Z" },
+      null,
+      2,
+    ) + "\n",
+  );
+  assert.equal(runCli(["--root", root]).status, 0, "baseline-consistent fixture must start GREEN");
+
+  fs.writeFileSync(
+    path.join(root, "goals/AC-990-fixture.md"),
+    ["---", "id: AC-990", "status: active", "kind: criterion", "criterion: |", AC245_CRITERION_LINE, "---", ""].join("\n"),
+  );
+  const injected = runCli(["--root", root, "--json"]);
+  assert.equal(injected.status, 1, "the AC-245 form must turn the ratchet RED — the blind spot is closed");
+  const out = JSON.parse(injected.stdout);
+  assert.equal(out.bareAcs, 2, "baseline + 1");
+  assert.equal(out.delta, 1);
+  assert.deepEqual(out.added, ["AC-990"], "the injected id must be NAMED");
+
+  fs.rmSync(path.join(root, "goals/AC-990-fixture.md"));
   assert.equal(runCli(["--root", root]).status, 0, "removing the injected criterion must restore GREEN");
 });
 
