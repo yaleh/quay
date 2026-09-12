@@ -27,7 +27,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
-import { createGoalStore, VALID_GOAL_STATUSES, isGoalId, isCriterionId, GoalIntentConflictError, parseAdjudicationTable, GOAL_ACCEPTANCE_ACTIVE_ENV } from "../src/goal-store.ts";
+import { createGoalStore, VALID_GOAL_STATUSES, isGoalId, isCriterionId, GoalIntentConflictError, parseAdjudicationTable, GOAL_ACCEPTANCE_ACTIVE_ENV, SWEEP_ACTOR } from "../src/goal-store.ts";
 import { gateFactories, makeGoalGate } from "../src/gate/factories/index.ts";
 
 const _createdDirs = [];
@@ -1244,4 +1244,19 @@ test("AC-242 successor — 判据自己声明 NOT-EVALUATED（exit 3）不得被
   assert.deepEqual(j.notEvaluated, ["AC-910"], "它有自己的桶（枚举，⛔ 非布尔）");
   assert.deepEqual(j.verifiedFresh, ["AC-911"]);
   assert.equal(n(["check", "--stale-pass"]).status, 3, "存在未评估项 ⇒ 整体 exit 3（⛔ 不是 0）");
+});
+
+test("AC-242 successor — 已记录的 fail 更早被重新检查（⛔ 不抬高成本上界：只改资格顺序）", async () => {
+  const { root } = stalePassFixture("sp-failfirst", [["AC-900", "exit 1"], ["AC-901", "exit 0"]]);
+  // 手写两条 30 分钟前的**轮转**事件：一条 fail、一条 pass。默认 minAge=1h、fail 阈值为 minAge/6=10min
+  // ⇒ 只有 fail 那条够老到该被重查；pass 那条还不到期。
+  const ago = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  fs.rmSync(path.join(root, ".quay", "gate-events.jsonl"));
+  appendGoalEvent(root, "AC-900", "fail", { actor: SWEEP_ACTOR, at: ago, reason: "acceptance failed (exit 1)" });
+  appendGoalEvent(root, "AC-901", "pass", { actor: SWEEP_ACTOR, at: ago });
+  const s = createGoalStore(path.join(root, "goals"));
+  const r = await s.sweepFrozen({ budget: 5, wallMs: 60_000 });
+  assert.deepEqual(r.ran.map((x) => x.id), ["AC-900"], "只有 fail 的那条重新合格（pass 那条未到 minAge）");
+  assert.equal(r.ran[0].verdict, "fail", "重查仍然为假");
+  assert.equal(r.eligible, 1, "合格集合被枚举（⛔ 非布尔）");
 });

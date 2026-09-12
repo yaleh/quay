@@ -132,6 +132,17 @@ export const DEFAULT_SWEEP_MIN_AGE_MS = 60 * 60 * 1000;
 export const DEFAULT_SWEEP_BUDGET = 6;
 /** Wall-clock cap per invocation — the driver's round must not be stalled by a slow criterion. */
 export const DEFAULT_SWEEP_WALL_MS = 30_000;
+/** An AC whose last RECORDED verdict is `fail` becomes eligible again at `minAgeMs / this` — i.e. a
+ *  failure is re-checked sooner than a pass. Two reasons, both concrete:
+ *   · the state you want to watch is the FAILING one (the mechanism exists to catch rot; a fail is
+ *     the reading that can flip either way, a pass is the resting state), and
+ *   · it BOUNDS a transient: when a criterion is re-scoped/fixed, the rotation re-runs it within one
+ *     driver round instead of waiting out the full `minAgeMs`, so a fail recorded by the previous
+ *     criterion version stops being the ledger tail — and stops holding AC-241 red — promptly.
+ *  ⛔ This does NOT raise the cost bound: eligibility only ORDERS the candidates, and each invocation
+ *  still runs at most `budget` criteria / `wallMs` (a persistently failing set can at most crowd out
+ *  the same budget, never exceed it). */
+export const DEFAULT_FAIL_RECHECK_DIVISOR = 6;
 /** The JUDGMENT's freshness bound: a frozen AC whose last recorded verification is older than this
  *  has an UNKNOWN current truth and is reported in `staleUnverified` — ⛔ never silently counted as
  *  fine (hard rule 3b). Deliberately ≫ the rotation period: a tight bound would flap red/green as
@@ -1000,9 +1011,12 @@ export function createGoalStore(
       const t = Date.parse(sw.at);
       return Number.isFinite(t) ? nowMs - t : Infinity;
     };
+    // Eligibility threshold per AC: a recorded FAIL is re-checked sooner (see
+    // DEFAULT_FAIL_RECHECK_DIVISOR) — ⛔ ordering only, the per-invocation bound is unchanged.
+    const eligibleAt = (id: string): boolean => ageOf(id) > (lastSweep.get(id)?.verdict === "fail" ? minAgeMs / DEFAULT_FAIL_RECHECK_DIVISOR : minAgeMs);
     const eligible = frozen
       .map((ac) => String(ac.id))
-      .filter((id) => ageOf(id) > minAgeMs)
+      .filter(eligibleAt)
       .sort((a, b) => {
         const da = ageOf(a);
         const db = ageOf(b);
