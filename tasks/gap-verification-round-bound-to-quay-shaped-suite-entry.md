@@ -2,7 +2,7 @@
 id: gap-verification-round-bound-to-quay-shaped-suite-entry
 title: 第三方项目用自己的 suite 入口时 verification-round 台账结构性缺失 —— web 测试面恒「未接入」，且 AC-234
   的绿从未在此形态上验过
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
