@@ -5255,10 +5255,9 @@ ac249_span_state() {
 }
 
 ac249_union_commit_shas() {
-  local root="$1" task_id="$2" branch base m first_touch last_touch span verdict from
+  local root="$1" task_id="$2" branch base m first_touch last_touch span verdict from _span_n
   [ -n "$root" ] && [ -n "$task_id" ] || return 1
   branch="task/$task_id"
-  AC249_SPAN_SOURCE="unreadable"
   {
     # A) 任务分支上、不在 develop 里的提交（fan-in 前 / 分支尚未被回收）
     if git -C "$root" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1; then
@@ -5278,8 +5277,8 @@ ac249_union_commit_shas() {
     done < <(git -C "$root" log --merges --all --format='%H' -- "tasks/$task_id.md" 2>/dev/null || true)
     # D) 任务文件的存在区间（两端都以任务文件为锚）。区间怎么算【只有一处定义】：ac249_span_state。
     span="$(ac249_span_state "$root" "$task_id")"
-    set -- $span
-    verdict="$1"; from="$3"
+    # ⛔ 用 read 取三件读数（⛔ 不 `set --`：那会改写本函数的 $1/$2，是留给下一个改这段的人的雷）
+    read -r verdict _span_n from <<< "$span"
     if [ "$verdict" = "span" ]; then
       last_touch="$(git -C "$root" log --no-merges --all --format='%H' -- "tasks/$task_id.md" 2>/dev/null | head -1 || true)"
       if [ "$from" != "-" ]; then
@@ -5293,8 +5292,9 @@ ac249_union_commit_shas() {
   } | awk 'NF && !seen[$0]++'
 }
 
-# 并集（去重、保持首次出现顺序）：每个提交各自的 `git show --name-only`，⛔ 不排序成字母序——
-# 「首次出现」保留了「代码提交先、文档提交后」这个【先后】，AC2 的负控制要靠它留档两条读数。
+# 并集（按【来源顺序】去重，保持各来源内的既有顺序）：每个提交各自的 `git show --name-only`。
+# ⚠️ 这里【不】承诺「代码提交在前」这种先后 —— 来源 A 是 `git log` 的默认顺序（新→旧），所以
+#    并在最前的是【最新】那条提交的文件。顺序对判定不承重（判据只看集合），故不额外排序。
 ac249_union_files() {
   local root="$1" task_id="$2" sha
   [ -n "$root" ] && [ -n "$task_id" ] || return 1
