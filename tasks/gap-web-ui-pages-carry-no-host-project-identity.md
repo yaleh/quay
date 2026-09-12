@@ -1,7 +1,7 @@
 ---
 id: gap-web-ui-pages-carry-no-host-project-identity
 title: web 各概览页不带主机/项目身份 —— 多机多项目时浏览器标签页完全同形，无法分辨在看哪个项目
-status: ready
+status: done
 labels:
   - gap
   - webui
