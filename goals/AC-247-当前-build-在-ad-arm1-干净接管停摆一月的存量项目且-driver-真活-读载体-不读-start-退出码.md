@@ -75,9 +75,23 @@ vendored bundle），而 driver/serve 实际跑 takeover 包 ⇒ **双版本并�
 ③ `tmux_session` 残留（tmux 机制 2026-09-03 已退役）；④ `gates.testPass` 四个门零生产消费者；
 ⑤ `QUAY_NATIVE_META_DIR` 未设 ⇒ meta 落在交付物内部而非项目内。
 
-**补跑 `quay-init`（v0.6.1）后 ①②③ 的配置面即修复**（`path`/`mcp_entry` 迁到
-`plugin/vendor/quay-native`、旧 runtime 退役进 `quay-init-backups/`、`goals/` 建立、`loop` 段
-逐字保留），⇒ **缺的正是这一步，不是别的**。
+**补跑 `quay-init`（v0.6.1）后的实测结果（2026-09-12，人追问「就全解决了？」后逐条复measure）——
+⛔ 只解决了一条，⛔ 不要把「跑了 quay-init」读成「五条已修」**：
+
+| 症状 | 补跑后实测 | 是否解决 |
+|---|---|---|
+| ① `goals/` 载体不存在 | 目录已建，但 `goals/*.md = 0`，`/goal` 页面仍 0 命中 | **✗ 症状未消除**——建了载体 ≠ 有内容 |
+| ② `path`/`mcp_entry` 指旧 runtime | 已迁至 `plugin/vendor/quay-native`，旧 runtime 退役进 `quay-init-backups/` | **✓ 真解决** |
+| ③ `tmux_session` 残留 | 仍在 config `:31` | **✗ 未解决，且是执行者显式传 `--tmux-session` 主动保住的** |
+| ④ `gates.testPass` 零消费者 | 四个门原样不动 | **✗** quay-init 不碰 `gates:` 段 |
+| ⑤ `QUAY_NATIVE_META_DIR` 未设 | env 仍只有 TASKS_DIR/ADR_DIR | **✗** meta 仍落在交付物内部 |
+
+另有一条与 quay-init 无关、同期发现的 `/tests` 未接入（`verification-round` 台账不产生），
+属代码层缺陷，已立案 `gap-verification-round-bound-to-quay-shaped-suite-entry`，⛔ quay-init 碰不到。
+
+⇒ **缺 `quay-init` 这一步是真的，但它只是必要条件、⛔ 不是充分条件**：
+配置指针类问题（②）它能修；**载体内容（①）、未被消费的配置段（④）、缺失的 env 键（⑤）、
+以及代码层缺陷（/tests）它都修不了**。**⛔ 不要把「机制跑过了」读成「问题解决了」。**
 
 **⇒ 本 AC 转绿只证明「新包装上了、driver 活着、存量没丢」，⛔ 不证明「目标项目已被完整接管」。**
 若要后者成为保证，应在下一个 goal 里立一条「接管后目标项目的配置形状 == 当前交付版本」的 AC
