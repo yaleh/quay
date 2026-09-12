@@ -35,6 +35,19 @@ statusLog:
     to: active
     actor: goal-cli
     reason: ""
+  - at: 2026-09-12T01:18:43.564Z
+    from: active
+    to: draft
+    actor: goal-cli
+    reason: 临时回退以补记裁定理由——原 draft→active 条目 reason 为空（AC-245 据此报红）；紧随其后的 active
+      条目载明所选选项。⛔ 非否决本 GOAL。
+  - at: 2026-09-12T01:18:44.469Z
+    from: draft
+    to: active
+    actor: goal-cli
+    reason: ① 纳入：建通用聚合读数（人 2026-09-12 裁定，经会话中继写入）。形态按 origin 的成本约束：经 meta-cc 定期扫 24h
+      会话语料，按「同错误 × 跨会话重复次数」聚合，仅越过阈值才进 digest；机械形态须能取假、fail-closed、未评估取独立值。⛔
+      阈值数值不在本裁定内定——成本结构实测前不设数值阈值（硬规则 4 推论一）。
 ---
 ## 背景
 
