@@ -1,7 +1,7 @@
 ---
 id: gap-ac242-naive-frontmatter-split-hides-own-long-term-self-latching-false-positive
 title: AC-242 判据用朴素三横线切分取 frontmatter，看不见自己的 long-term ⇒ 自报为冻结、且红了不会自愈
-status: ready
+status: done
 labels:
   - gap
   - defect
