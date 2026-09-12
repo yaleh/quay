@@ -2,7 +2,7 @@
 id: gap-ac250-web-observe-tailscale-progress-record
 title: AC-250 没有生产者：载体里没有 ac=GOAL-016-AC-250 记录 —— serve 必须真绑目标机 tailscale0
   IP、由另一台机器发起探测、且两点观察的同一任务状态不相等（⛔ 不判单点渲染）
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
