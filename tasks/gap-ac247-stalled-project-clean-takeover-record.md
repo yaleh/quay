@@ -85,7 +85,7 @@ ssh ad-arm1 ⇒ hostname=instance-20221019-1509, arch=aarch64
 ## Acceptance Criteria
 
 - [x] **AC1 生产者存在且 fail-closed（能取假）**：目标侧新步骤 + 驱动侧传输 flag 就位；hermetic 自检打印正/负两组读数——**正控制**：八件读数齐备 ⇒ 写出一条 `ac=GOAL-016-AC-247` 记录；**负控制**：逐个把任一件置为读不出 ⇒ **零记录** + 可区分的 NOT-EVALUATED + 退出非 0。读数与输出原文留档。⇒ 见 `## Evidence` §AC1/AC2 与 §AC6（自检四组读数原文）。
-- [x] **AC2 每个字段是直接量（⛔ 无字面量/默认值）**：`grep` 证明记录写入点的每个字段都来自运行时读数（pre/post 计数、HEAD 时刻、status JSON、tgz 源 commit），写入路径里不存在任何字段的硬编码默认值。**引用任一计数前先打印它匹配到的前 3 条实际内容**（硬规则 2），把命中数与前 3 条一起贴进记录。⇒ 见 `## Evidence` §AC1/AC2 的逐字段命中原文（含 `write_ac247_record` 体内 `build_sha` 命中数 = 0）。
+- [x] **AC2 每个字段是直接量（⛔ 无字面量/默认值）**：`grep` 证明记录写入点的每个字段都来自运行时读数（pre/post 计数、HEAD 时刻、status JSON、tgz 源 commit），写入路径里不存在任何字段的硬编码默认值。**引用任一计数前先打印它匹配到的前 3 条实际内容**（硬规则 2），把命中数与前 3 条一起贴进记录。⇒ 见 `## Evidence` §AC1/AC2 的逐字段【grep 模式 + 命中原文】（含 `write_ac247_record` 体内 `build_sha` 命中数 = 0）。
 - [x] **AC3 真跑真装（生产载体上的判据翻转）**：在 host≠本机、该项目 user-scope quay 安装**接管前实测为缺**、项目停摆 ≥14 天且 task 存量 >0 的目标上真跑一次（GOAL-016 origin 点名的候选 = ad-arm1 的 `/home/yale/work/archguard`）。留档：接管前的 pre 读数（install 缺 / driver 不活 / task 数 / HEAD 时刻）、接管后的 `driver status --json` 原文、传输输出（`EVIDENCE-TRANSPORT appended=N`）。随后在**生产 root** 下**逐字取 `goals/AC-247-*.md` 的判据干跑**：改前 exit 1、改后 exit 0，两条读数并列（翻转的成因是载体内容，⛔ 不是环境）。⇒ 见 `## Evidence` §AC3 与 §AC6（criterion 干跑 exit 1 → exit 0）。
 - [x] **AC4 liveness 不是退出码、也不是进程表**：记录里的 `driver_alive` / `carrier_records` 来自 `quay driver status --json`；`grep` 证明新步骤**没有**从 `quay driver start` 的退出码派生该字段；留档目标机上 `ps` 读到的陈旧进程与 status 读数的**分歧**（证明两种读法确实不同，而记录用的是后者）。⇒ 见 `## Evidence` §AC4（ps=7 vs status `driver_alive:0`）与自检 `ac247-liveness-source(from-AC203_DRIVER_ALIVE)=1 bad-assign-hits=0`。
 - [x] **AC5 存量不丢不增（pre/post 同源读数）**：`pre_task_count>0` ∧ `post_task_count==pre_task_count`，两条读数的命令与输出原文留档；若差值非 0 ⇒ 记录**未**写出，且报告差值与方向（本条同时是「接管不许破坏存量」的判据）。⇒ 见 `## Evidence` §AC5（61 → 61，同一函数同一命令）。
@@ -106,11 +106,11 @@ ssh ad-arm1 ⇒ hostname=instance-20221019-1509, arch=aarch64
 
 ## Evidence
 
-**实现落点**：目标侧 `plugin/scripts/verify-deliver-coldstart.sh` 段⑧（`--ac247-takeover --takeover-root <dir>` → `step_ac247_takeover`，读数助手 `ac247_task_store_count` / `ac247_head_epoch` / `ac247_stale_days` / `ac247_probe_user_install` / `ac247_ps_stale_procs` / `ac247_read_driver_status`，写入点 `write_ac247_record`）；驱动侧 `plugin/scripts/develop-deliver-tgz.sh` 的 `--verify-takeover` → `verify_takeover_mode` + `validate_takeover_args`。提交：`9f5d96968`（落在任务分支 `task/gap-ac247-stalled-project-clean-takeover-record`）。
+**实现落点**：目标侧 `plugin/scripts/verify-deliver-coldstart.sh` 段⑧（`--ac247-takeover --takeover-root <dir>` → `step_ac247_takeover`，读数助手 `ac247_task_store_count` / `ac247_head_epoch` / `ac247_stale_days` / `ac247_probe_user_install` / `ac247_ps_stale_procs` / `ac247_read_driver_status`，写入点 `write_ac247_record`）；驱动侧 `plugin/scripts/develop-deliver-tgz.sh` 的 `--verify-takeover` → `verify_takeover_mode` + `validate_takeover_args`。提交：`9f5d96968`（实现）+ `8582ff8f1`（测试侧修复，见 §AC1/AC2 末段），落任务分支 `task/gap-ac247-stalled-project-clean-takeover-record`。
 
 ### AC3 —— ad-arm1 真跑（2026-09-12，C = ad-arm1.wan.hwang.men）
 
-远端 stdout 全文落档：`/home/yale/work/quay/.quay/verify-takeover-remote-C-1d916698.log`（本地）/ 证据文件副本 `/home/yale/work/quay/.quay/verify-takeover-evidence-C-1d916698.jsonl`。
+远端 stdout 全文落档：`/home/yale/work/quay/.quay/verify-takeover-remote-C-1d916698.log`；证据文件副本 `/home/yale/work/quay/.quay/verify-takeover-evidence-C-1d916698.jsonl`。
 
 ```
 == ⑧ AC-247 takeover: current build takes over a ≥14-day-stalled legacy project ==
@@ -139,7 +139,7 @@ develop-deliver: C (ad-arm1.wan.hwang.men) — declared ac set [GOAL-016-AC-247]
 develop-deliver: --verify-takeover OK — GOAL-016-AC-247 record transported into /home/yale/work/quay/.quay/productization-verification.jsonl
 ```
 
-接管后的 `driver status --json` 原文（另一台机器、另一时刻读的同一读法）：
+接管后的 `driver status --json` 原文（另一次读取）：
 ```
 {"kind":"promotion","supervisor_pid":3287662,"driver_pid":3287671,"supervisor_alive":1,"driver_alive":1,"alive":1,"running":1,"carrier_path":"/home/yale/work/archguard/.quay/promotion-outcome.jsonl","carrier_records":4,"last_record_ts":"2026-09-12T09:27:38.734Z","supervisor_started_at":1789205197136,"supervisor_stale":"fresh"}
 ```
@@ -157,7 +157,7 @@ $ ps -eo pid,args | grep -c '[q]uay'          ⇒ 7   （含 4 条 21–26 天�
 1959016 21-18:18:50 node /home/yale/work/archguard/.quay/runtime/bin/quay-native.js mcp
 $ quay driver status --kind promotion --root /home/yale/work/archguard --json   ⇒ driver_alive:0（接管前）
 ```
-⇒ 进程表说「有一堆 quay 在跑」，status 载体说「这个项目的 promotion driver 不活」——两者确实不同，记录用的是后者（`driver_alive` / `carrier_records` 全部来自 status JSON）。`write_ac247_record` 体内不含 `AC247_DRIVER_START_RC`；`driver start` 的退出码只以 `driver_start_rc` 这个诊断字段落档。自检的结构控制 `ac247-liveness-source(from-AC203_DRIVER_ALIVE)=1 bad-assign-hits=0` 把这条钉在位置上（负控制：把右端换成 start 退出码，谓词翻成 0）。
+⇒ 进程表说「有一堆 quay 在跑」，status 载体说「这个项目的 promotion driver 不活」——两者确实不同，记录用的是后者。`write_ac247_record` 体内不含 `AC247_DRIVER_START_RC`；`driver start` 的退出码只以 `driver_start_rc` 这个诊断字段落档。自检的结构控制 `ac247-liveness-source(from-AC203_DRIVER_ALIVE)=1 bad-assign-hits=0` 把这条钉在位置上（负控制：把右端换成 start 退出码，谓词翻成 0）。
 
 ### AC5 —— 存量不丢不增（同一实现读两次）
 
@@ -181,7 +181,7 @@ $ git -C /home/yale/work/archguard log -1 --format='%H %ct %cI'
 {"build_sha":"1d9166985b3a78daf32af976884bd497ca14997d","ts":"2026-09-12T09:26:12Z","ac":"GOAL-016-AC-247","host":"instance-20221019-1509","project_root":"/home/yale/work/archguard","pre_task_count":61,"post_task_count":61,"stale_days":21.759,"driver_alive":1,"carrier_records":2,"carrier_records_pre":1,"stale_processes_ps":7,"driver_start_rc":0,"last_record_ts":"2026-09-12T09:26:37.778Z","user_install_pre":"absent","head_epoch":1787325178}
 ```
 
-**逐字取 `goals/AC-247-*.md` 的 criterion 干跑**（脚本正文由该文件提取，⛔ 不手抄一份；三条并列留档，证明 exit 0 来自记录内容而非环境）：
+**逐字取 `goals/AC-247-*.md` 的 criterion 干跑**（payload 由该文件提取并折叠 YAML `>-` 块标量后喂 python，⛔ 不手抄一份；三条并列留档，证明 exit 0 来自记录内容而非环境）：
 ```
 exit 0 : cd /home/yale/work/quay && python3 <criterion>                    → exit=0（无输出）
 exit 1 : cd <tmp> && 载体副本 grep -v '"ac":"GOAL-016-AC-247"' 后跑同一条 → exit=1
@@ -205,22 +205,27 @@ $ bash plugin/scripts/develop-deliver-tgz.sh --selfcheck-takeover-transport ⇒ 
 ```
 三份测试全绿：`plugin/test/ac247-takeover-record.test.mjs`（4/4）、`plugin/test/verify-deliver-coldstart.test.mjs`（14/14）、`plugin/test/develop-deliver-tgz-evidence-transport.test.mjs`（8/8）。其中 `ac247-takeover-record.test.mjs` 从 `goals/AC-247-*.md` **提取** criterion 正文并跑它的三态（0 / 1（stale_days=13.999 边界）/ 3），另断言 criterion 读的每个字段都被生产者写出（含反控制）。
 
-**AC2 逐字段来源**（每个字段各打印前 3 条 `grep -n` 命中，证明是运行时读数而非字面量）：
+**AC2 逐字段来源**（每条贴 `grep` 的【模式 + 命中原文】；⛔ **不引用行号**——行号随实现编辑漂移，本轮就漂过一次，引用它等于把一个生命周期短于判据本身的对象写进证据）：
 ```
---- host ---              1709: AC247_HOST="$(hostname 2>/dev/null || echo '')"
---- project_root ---      1710: AC247_PROJECT_ROOT="$(cd "$root" && pwd -P)"
---- pre_task_count ---    1715: pre_count="$(ac247_task_store_count "$root" "$qrl" || true)"  → 1717: AC247_PRE_TASK_COUNT="$pre_count"
---- post_task_count ---   1749: AC247_POST_TASK_COUNT="$(ac247_task_store_count "$root" "$qrl" || true)"
---- stale_days ---        1714: head_epoch="$(ac247_head_epoch "$root" || true)" → 1716: AC247_STALE_DAYS="$(ac247_stale_days ...)"
-                               源头 :1640 `git -C "$root" log -1 --format=%ct`；两个时刻里 AC247_PRE_TS_EPOCH="$(date +%s)"
---- driver_alive ---      1695: AC247_DRIVER_ALIVE="$AC203_DRIVER_ALIVE"   ← 1694 probe_ac203_driver_status "$status_json"
-                               源头 :1692 `node "$qrl" driver status --kind promotion --root "$root" --json`
---- carrier_records ---   1696: AC247_CARRIER_RECORDS="$AC203_CARRIER_RECORDS"（同一 status JSON）
---- build_sha ---         由 ac89_append_goal009 统一补（BUILD_SHA ← 本次投递 tgz 的 develop tip）
+field=host             grep 'AC247_HOST="$(hostname'              → AC247_HOST="$(hostname 2>/dev/null || echo '')"
+field=project_root     grep 'AC247_PROJECT_ROOT="$(cd'            → AC247_PROJECT_ROOT="$(cd "$root" && pwd -P)"
+field=pre_task_count   grep 'pre_count="$(ac247_task_store_count' → pre_count="$(ac247_task_store_count "$root" "$qrl" || true)"
+                                                                  → AC247_PRE_TASK_COUNT="$pre_count"
+field=post_task_count  grep 'AC247_POST_TASK_COUNT="$(ac247_task_store_count' → AC247_POST_TASK_COUNT="$(ac247_task_store_count "$root" "$qrl" || true)"
+field=stale_days       grep 'AC247_STALE_DAYS="$(ac247_stale_days' → AC247_STALE_DAYS="$(ac247_stale_days "$head_epoch" "$AC247_PRE_TS_EPOCH" || true)"
+                       两个时刻 : AC247_PRE_TS_EPOCH="$(date +%s)"
+                       源头     : epoch="$(git -C "$root" log -1 --format=%ct 2>/dev/null || true)"
+field=driver_alive     grep 'AC247_DRIVER_ALIVE='                 → AC247_DRIVER_ALIVE="$AC203_DRIVER_ALIVE"   ← probe_ac203_driver_status "$status_json"
+field=carrier_records  grep 'AC247_CARRIER_RECORDS="\$AC203'      → AC247_CARRIER_RECORDS="$AC203_CARRIER_RECORDS"
+                       源头     : status_json="$( (cd "$root" && node "$qrl" driver status --kind promotion --root "$root" --json) 2>/dev/null || true)"
+field=build_sha        由 ac89_append_goal009 统一补（BUILD_SHA ← 本次投递 tgz 的 develop tip）
 ```
-`write_ac247_record` 体内 `grep -c build_sha` = **0** —— ⛔ 没有第二个补锚点（自检 `anchor-literal-hits=0` 钉住）。写入路径里不存在任何字段的硬编码默认值。
+逐项命中数：`build_sha` 在 `write_ac247_record` 体内 = **0**（⛔ 没有第二个补锚点，自检 `anchor-literal-hits=0` 钉住）；`AC247_DRIVER_ALIVE` 的赋值语句只有 1 条，其右端就是 `$AC203_DRIVER_ALIVE`（`bad-assign-hits=0`）。写入路径里不存在任何字段的硬编码默认值。
 
-**一处实现期实测（值得记）**：`ac247_task_store_count` 最初用 `console.log(j.length)`，在本仓库套件环境（`FORCE_COLOR` 置位）下 Node 会给**数字**加 ANSI 色 ⇒ 命令替换拿到的是 `\033[33m61\033[39m`，一切按字符串比较的判据当场恒假。改用 `process.stdout.write(String(...))`（⛔ 不走 console 的格式化层）。这是既有教训 `force-color-breaks-node-console-log-read-parsing` 的又一次现身。
+**两处实现期实测（都值得记）**：
+
+1. `ac247_task_store_count` 最初用 `console.log(j.length)`，在本仓库套件环境（`FORCE_COLOR` 置位）下 Node 会给**数字**加 ANSI 色 ⇒ 命令替换拿到的是 `\033[33m61\033[39m`，一切按字符串比较的判据当场恒假。改用 `process.stdout.write(String(...))`（⛔ 不走 console 的格式化层）。既有教训 `force-color-breaks-node-console-log-read-parsing` 的又一次现身。
+2. `goal 的 criterion 是 YAML **折叠**块标量（`>-`）`，不是「把行拼起来」。第一版测试直接 join，在 criterion 的长行被重新换行后把源码换行**带进了 `"…"` 字符串字面量** ⇒ python 语法错 ⇒ exit 1 —— 而 exit 1 恰好就是「跑过了、没有合格记录」的取值，测试把它读成了判据违例（**同形**，硬规则 3b）。修复（`8582ff8f1`）按 `>-` 的三条规则折叠（同缩进折成空格 / 空行变换行 / 更深缩进保留换行），并**先 `ast.parse` 断言 payload 是合法 python 再信它** ⇒ 以后的折叠 bug 会响，而不是冒充判据结论。这个缺陷是 scoped 门（步骤 2b）抓到的，不是本机自测抓到的——本机自测当时是绿的，因为那时 criterion 恰好没有被重新换行。
 
 ## Touches
 
