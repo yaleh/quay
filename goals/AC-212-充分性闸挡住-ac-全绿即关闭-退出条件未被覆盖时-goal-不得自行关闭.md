@@ -4,12 +4,19 @@ title: 充分性闸挡住「AC 全绿即关闭」——退出条件未被覆盖�
 status: achieved
 kind: criterion
 goal: GOAL-010
-criterion: python3 -c 'import json,sys; ok=[s for l in
-  open(".quay/goal-round.jsonl") for f in (json.loads(l).get("facts") or []) for
-  s in [(f.get("value") or {}).get("sufficiency")] if isinstance(s,dict) and
-  s.get("goal") and s.get("verdict") in
-  ("covered","insufficient","not-evaluated")]; sys.exit(0 if len(ok)>=1 else 1)'
-  && node --no-warnings --experimental-strip-types --test
+criterion: >-
+  python3 -c '
+
+  import json,sys
+
+  ok=[s for l in open(".quay/goal-round.jsonl") for f in
+  (json.loads(l).get("facts") or []) for s in [(f.get("value") or
+  {}).get("sufficiency")] if isinstance(s,dict) and s.get("goal") and
+  s.get("verdict") in ("covered","insufficient","not-evaluated")]
+
+  if len(ok)<1:
+      sys.stderr.write("CAUSE=goal-round-jsonl-has-no-sufficiency-fact-with-a-known-verdict\n"); sys.exit(1)
+  ' && node --no-warnings --experimental-strip-types --test
   plugin/test/goal-sufficiency-gate.test.mjs
 expect: 生产轮记录中存在 ≥1 条 sufficiency 判定（带 goal 与 covered/insufficient/not-evaluated
   三态之一），且负控制单测证明「在域 AC 全绿但充分性判 insufficient ⇒ 不 flip GOAL」——GOAL 的达成判定不再是纯语法合取。

@@ -10,7 +10,7 @@ criterion: node --no-warnings --experimental-strip-types --test
   'import json,sys; d=json.load(sys.stdin); n=sum(1 for r in d for e in
   (r.get("statusLog") or []) if str(e.get("to"))=="active" and
   str(e.get("actor","")).startswith("goal-driver"));
-  print("driver-activations:",n); sys.exit(0 if n>=1 else 1)'
+  print("driver-activations:",n,file=sys.stderr); sys.exit(0 if n>=1 else 1)'
 expect: >-
   两半都绿才算达成，缺一不可：
 
