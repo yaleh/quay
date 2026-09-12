@@ -2149,7 +2149,7 @@ export function parseHealthProbe(stdout: string): TargetProbeReading | null {
 /** 纯函数：探针读数 → verdict/字段（⛔ 不 spawn、⛔ 不读盘 ⇒ 可被单测穷举三态）。 */
 export function deriveTargetHealth(
   binding: TargetBinding,
-  probe: { ok: true; reading: TargetProbeReading } | { ok: false; cause: "probe-failed" | "probe-unparseable"; detail: string[] },
+  probe: { ok: true; reading: TargetProbeReading } | { ok: false; cause: TargetHealthCause; detail: string[] },
   opts: { windowSec: number; deliveredPluginVersion: string | null },
 ): TargetHealthReading {
   const target = { host: binding.host, root: binding.root };
