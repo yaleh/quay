@@ -211,3 +211,89 @@ test("AC3 — mergeClusterVerdicts skips unknown clusterIds and fills primitive/
   assert.equal(merged[0].round, 7);
   assert.equal(merged[0].judgedAt, judgedAt);
 });
+
+// ── 语义结论 → 立案（gap-arch-review-judge-verdicts-never-reach-the-existing-gap-filing-channel）──
+// 本文件的确定性一半：actionable 三态合并 / 结论键（节流身份）/ 够格选取 / 提交台账。
+
+import {
+  SUBMISSION_LEDGER_REL,
+  actionableConclusions,
+  appendSubmission,
+  conclusionKey,
+  mergeClusterVerdicts as mergeForFilings,
+  readSubmittedKeys,
+  submissionLedgerPath,
+  unsentConclusions,
+} from "../scripts/architecture-review-cluster.ts";
+
+const FILING_CLUSTERS = clusterDetectorOutputs({ identity: IDENTITY, lineage: LINEAGE, deletion: DELETION });
+
+function mergedWith(actionable) {
+  return mergeForFilings(
+    FILING_CLUSTERS,
+    FILING_CLUSTERS.map((c, i) => ({ clusterId: c.clusterId, verdict: "coincidental", reasoning: "r", suggestedAction: "a", actionable: actionable[i] })),
+    "2026-09-12T00:00:00.000Z",
+    7,
+  );
+}
+
+test("filings — actionable 三态：true/false 取值，缺失 ⇒ null（⛔ 不 default false，硬规则 3b）", () => {
+  const merged = mergeForFilings(
+    FILING_CLUSTERS,
+    [
+      { clusterId: FILING_CLUSTERS[0].clusterId, verdict: "abstract", reasoning: "r", suggestedAction: "a", actionable: true },
+      { clusterId: FILING_CLUSTERS[1].clusterId, verdict: "coincidental", reasoning: "r", suggestedAction: "a", actionable: false },
+      { clusterId: FILING_CLUSTERS[2].clusterId, verdict: "uncertain", reasoning: "r", suggestedAction: "a" },
+      { clusterId: FILING_CLUSTERS[3].clusterId, verdict: "coincidental", reasoning: "r", suggestedAction: "a", actionable: "yes" },
+    ],
+    "2026-09-12T00:00:00.000Z",
+    1,
+  );
+  assert.deepEqual(merged.map((v) => v.actionable), [true, false, null, null], "非布尔一律 null（未评估）");
+  const { filable, notEvaluated } = actionableConclusions(merged);
+  assert.deepEqual(filable.map((v) => v.clusterId), [FILING_CLUSTERS[0].clusterId], "只有 true 够格");
+  assert.deepEqual(notEvaluated, [FILING_CLUSTERS[2].clusterId, FILING_CLUSTERS[3].clusterId], "false 不混进未评估");
+  assert.equal(filable.length + notEvaluated.length, 3, "4 条判词里 false 那条两态都不进（判过且不立案）");
+  assert.ok(!notEvaluated.includes(FILING_CLUSTERS[1].clusterId), "actionable=false ⛔ 不得被当成未评估");
+});
+
+test("filings — conclusionKey 只含稳定身份：易变量（DC 计数/措辞）参与就会造出 42 个键", () => {
+  // 同一簇、同一 verdict，label / reasoning / suggestedAction 每轮都不同（生产 42 次运行的真实形态）。
+  const a = { clusterId: "P1-deletion-closure", verdict: "coincidental", label: "DC=3196", suggestedAction: "exclude .archguard/output" };
+  const b = { clusterId: "P1-deletion-closure", verdict: "coincidental", label: "DC=3566", suggestedAction: "keep as-is; re-run closure excluding worktree copies" };
+  assert.equal(conclusionKey(a), conclusionKey(b), "易变量不参与 ⇒ 同一结论一个键（节流生效）");
+  assert.equal(conclusionKey(a), "P1-deletion-closure|coincidental");
+  // 能取假：判定变了就是另一个结论。
+  assert.notEqual(conclusionKey(a), conclusionKey({ ...a, verdict: "abstract" }));
+  assert.notEqual(conclusionKey(a), conclusionKey({ ...a, clusterId: "P2-path-constants" }));
+});
+
+test("filings — unsentConclusions 去台账命中 + 本轮内重复（PURE，两态）", () => {
+  const merged = mergedWith([true, true, true, false]);
+  const filable = actionableConclusions(merged).filable;
+  assert.equal(filable.length, 3, "三个够格");
+  const none = unsentConclusions(filable, new Set());
+  assert.equal(none.length, 3, "台账空 ⇒ 全部待提交");
+  const some = unsentConclusions(filable, new Set([conclusionKey(filable[0])]));
+  assert.deepEqual(some.map((v) => v.clusterId), filable.slice(1).map((v) => v.clusterId), "已提交的不再入选");
+  const all = unsentConclusions(filable, new Set(filable.map(conclusionKey)));
+  assert.deepEqual(all, [], "全部已提交 ⇒ 零待提交（同一结论 25 次 ⇒ 只付一次费）");
+  // 本轮内重复的簇（judge 给同一 clusterId 两条判词）只提交一次。
+  const dup = unsentConclusions([filable[0], filable[0]], new Set());
+  assert.equal(dup.length, 1, "同一键本轮只提交一次");
+});
+
+test("filings — 提交台账：不存在 ⇒ 空集；追加后可读；坏行跳过而不丢其余键", (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "arch-led-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  assert.equal(SUBMISSION_LEDGER_REL, path.join(".quay", "architecture-review-submissions.jsonl"));
+  assert.equal(readSubmittedKeys(tmp).size, 0, "首轮无台账 ⇒ 空集（合法态，⛔ 不是读不懂）");
+  appendSubmission(tmp, { key: "k1", clusterId: "c1", verdict: "abstract", submittedAt: "2026-09-12T00:00:00.000Z", round: 1 });
+  appendSubmission(tmp, { key: "k2", clusterId: "c2", verdict: "coincidental", submittedAt: "2026-09-12T00:00:00.000Z", round: 1 });
+  assert.deepEqual([...readSubmittedKeys(tmp)].sort(), ["k1", "k2"]);
+  fs.appendFileSync(submissionLedgerPath(tmp), "{not json\n", "utf8");
+  assert.deepEqual([...readSubmittedKeys(tmp)].sort(), ["k1", "k2"], "坏行跳过，其余键照读（⛔ 不整台账作废）");
+  // 幂等：重复追加同一键不改变集合（读侧按集合语义）。
+  appendSubmission(tmp, { key: "k1", clusterId: "c1", verdict: "abstract", submittedAt: "2026-09-12T01:00:00.000Z", round: 2 });
+  assert.deepEqual([...readSubmittedKeys(tmp)].sort(), ["k1", "k2"]);
+});

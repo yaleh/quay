@@ -128,6 +128,11 @@ packages/quay/plugin/
 # routine (architecture review) verdict carrier — one line per judged/failed/not-triggered round.
 # Same gitignored runtime-state family as quality-round.jsonl (never git-tracked).
 **/.quay/architecture-review-round.jsonl
+# gap-arch-review-judge-verdicts-never-reach-the-existing-gap-filing-channel (2026-09-12): the
+# architecture-review routine's gap-filing SUBMISSION ledger — one line per conclusion handed to the
+# existing filing channel (quay-file-task), read back as the throttle key set so an identical
+# conclusion is paid for once, not hourly. Same gitignored runtime-state family (never git-tracked).
+**/.quay/architecture-review-submissions.jsonl
 **/.quay/quality-control.json
 # meta-driver v0（SPEC-capability-planes §12.2 提名管线第一片）：每轮一条记录——机械读数
 # （active goal 的 AC criterion 真跑 verdict）+ divergence + 语义半的提案处置。

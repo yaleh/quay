@@ -36,12 +36,14 @@ import {
   runJudgmentConsumerCheck,
   runPoolQualityJudge,
   runArchitectureReview,
+  buildArchGapWorkerPrompt,
+  buildPackagingGapWorkerPrompt,
   qualityGateRoutines,
   computeRoundRecord,
   runResidentQualityGateLoop,
 } from "../scripts/quality-gate-driver.ts";
 import { qualityRoundPath } from "../scripts/pool-quality-judge.ts";
-import { archReviewRoundPath } from "../scripts/architecture-review-cluster.ts";
+import { archReviewRoundPath, submissionLedgerPath } from "../scripts/architecture-review-cluster.ts";
 // gap-drain-on-routine-driver-empties-round-and-respawn-loops AC2 判据以 goal 为对象：goal 的例程
 // 与控制面（goalDriverRoutines / GOAL_CONTROL_STATE_REL / GOAL_ROUND_REL）——机械环跑 criterion 是
 // 零 LLM 的观测，halt 只挡缺口立案 spawn（runGapSpawnPass 的 halted 闸）。
@@ -118,8 +120,29 @@ function fakeArchJudgeScript(tmp) {
   return writeFixture(
     tmp,
     "fake-arch-judge.js",
-    `process.stdout.write(JSON.stringify([{clusterId:"P2-identity-session-liveness.sh",verdict:"abstract",reasoning:"dup naming",suggestedAction:"consolidate"},{clusterId:"P1-deletion-closure",verdict:"coincidental",reasoning:"narrative refs",suggestedAction:"keep"},{clusterId:"P2-judgment-rewrites",verdict:"abstract",reasoning:"same fingerprint 2x",suggestedAction:"merge"},{clusterId:"P4-suspicious-guards",verdict:"uncertain",reasoning:"preventive?",suggestedAction:"human"}]));`,
+    `process.stdout.write(JSON.stringify([{clusterId:"P2-identity-session-liveness.sh",verdict:"abstract",reasoning:"dup naming",suggestedAction:"consolidate",actionable:true},{clusterId:"P1-deletion-closure",verdict:"coincidental",reasoning:"narrative refs",suggestedAction:"keep",actionable:false},{clusterId:"P2-judgment-rewrites",verdict:"abstract",reasoning:"same fingerprint 2x",suggestedAction:"merge",actionable:true},{clusterId:"P4-suspicious-guards",verdict:"uncertain",reasoning:"preventive?",suggestedAction:"human",actionable:false}]));`,
   );
+}
+
+/** 任意逐簇判词数组 → fake judge 脚本（AC2/AC4 的两态输入构造面）。 */
+function fakeArchJudgeWith(tmp, name, verdicts) {
+  return writeFixture(tmp, name, `process.stdout.write(JSON.stringify(${JSON.stringify(verdicts)}));`);
+}
+
+/** gap-filing agent 测试缝：把每次 spawn 的 argv（prompt 是末参数）逐行 append 到 logPath。
+ *  ⛔ 不真立案、不真跑 LLM——测的是【接线】（driver 把哪些结论交出去、交了几次）。 */
+function fakeArchGapWorkerScript(tmp, logPath) {
+  return writeFixture(
+    tmp,
+    "fake-arch-gap-worker.js",
+    `const fs = require("node:fs"); fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify(process.argv.slice(2)) + "\\n");`,
+  );
+}
+
+/** 读 gap-filing 缝的调用日志：每条 = 一次 spawn 的 argv 数组，其【末元素】= 真实 prompt。 */
+function readGapLog(logPath) {
+  if (!fs.existsSync(logPath)) return [];
+  return fs.readFileSync(logPath, "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
 }
 
 // ── AC3 · B17：parse + argv + runJudgmentConsumerCheck ──────────────────────────────────────────
@@ -223,6 +246,7 @@ test("AC1 — qualityGateRoutines returns EXACTLY the four driverized routines (
     poolJudgeIntervalMinutes: 10, judgmentIntervalMinutes: 30, archReviewIntervalMinutes: 60,
     packagingCheckCmd: null, packagingGapWorkerCmd: null, packagingGapWorkerTimeoutMs: 900_000,
     packagingHygieneIntervalMinutes: 60,
+    archGapWorkerCmd: null, archGapWorkerTimeoutMs: 900_000,
   });
   assert.deepEqual(routines.map((r) => r.name), ["pool-quality-judge", "judgment-consumer-check", "architecture-review", "packaging-hygiene"]);
   assert.equal(routines.length, 4, "⛔ 不是 god-object——只此四条，B16-C/B18 归 AC145");
@@ -489,19 +513,26 @@ function archReviewCmd(tmp, { withEntity = true, withSuspicious = true } = {}) {
     deletionCmd: ["node", fakeDeletionScript(tmp)],
     judgeArgv: ["node", fakeArchJudgeScript(tmp)],
     gateArgv: ["node", fakeGateGoScript(tmp)],
+    // gap-filing 缝：⛔ 不传就会走 launchArgv ⇒ 真 spawn claude -p（生产行为，单测里不可接受）。
+    gapWorkerCmd: `node ${fakeArchGapWorkerScript(tmp, path.join(tmp, "arch-gap-log.jsonl"))}`,
   };
 }
 
 test("AC2/AC3 — runArchitectureReview fired ⇒ LLM judge ⇒ judged record + distribution", async (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-arch-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
-  const { identityCmd, lineageCmd, deletionCmd, judgeArgv, gateArgv } = archReviewCmd(tmp);
-  const fact = await runArchitectureReview(tmp, identityCmd, lineageCmd, deletionCmd, judgeArgv, gateArgv);
+  const { identityCmd, lineageCmd, deletionCmd, judgeArgv, gateArgv, gapWorkerCmd } = archReviewCmd(tmp);
+  const fact = await runArchitectureReview(tmp, identityCmd, lineageCmd, deletionCmd, judgeArgv, gateArgv, true, Infinity, false, gapWorkerCmd);
   assert.equal(fact.name, "architecture-review");
   assert.equal(fact.state, "verified");
   assert.equal(fact.value.fired, true);
   assert.equal(fact.value.judgedCount, 4);
   assert.deepEqual(fact.value.distribution, { abstract: 2, coincidental: 1, uncertain: 1 });
+  // 语义结论 → 立案（本任务 AC2）：2 个 abstract 标了 actionable ⇒ 2 个结论提交，1 次 spawn。
+  assert.equal(fact.value.actionableCount, 2, "actionable=true 的簇 = 2");
+  assert.deepEqual(fact.value.submittedKeys, ["P2-identity-session-liveness.sh|abstract", "P2-judgment-rewrites|abstract"]);
+  assert.equal(fact.value.actionabilityNotEvaluated, 0);
+  assert.equal(fact.value.gapFiled, true);
 
   const carrier = archReviewRoundPath(tmp);
   assert.ok(fs.existsSync(carrier), "carrier must exist after a fired judge");
@@ -515,6 +546,7 @@ test("AC2/AC3 — runArchitectureReview fired ⇒ LLM judge ⇒ judged record + 
       assert.ok(k in v, `cluster verdict must carry ${k}`);
     }
     assert.ok("suggestedAction" in v, "cluster verdict carries suggestedAction");
+    assert.ok("actionable" in v, "cluster verdict carries actionable (三态)");
   }
 });
 
@@ -551,16 +583,136 @@ test("AC3 — runArchitectureReview unreadable identity ⇒ not-evaluated (硬�
 test("AC6 — recordVerdicts=false ⇒ carrier does not grow; restore ⇒ grows (负控制, 能取假)", async (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-arch-nc-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
-  const { identityCmd, lineageCmd, deletionCmd, judgeArgv, gateArgv } = archReviewCmd(tmp);
+  const { identityCmd, lineageCmd, deletionCmd, judgeArgv, gateArgv, gapWorkerCmd } = archReviewCmd(tmp);
   const carrier = archReviewRoundPath(tmp);
   const count = () => (fs.existsSync(carrier) ? fs.readFileSync(carrier, "utf8").split("\n").filter((l) => l.trim()).length : 0);
-  const on = await runArchitectureReview(tmp, identityCmd, lineageCmd, deletionCmd, judgeArgv, gateArgv, true);
+  const on = await runArchitectureReview(tmp, identityCmd, lineageCmd, deletionCmd, judgeArgv, gateArgv, true, Infinity, false, gapWorkerCmd);
   assert.equal(on.state, "verified");
   assert.equal(count(), 1, "write on ⇒ carrier grows to 1");
-  const off = await runArchitectureReview(tmp, identityCmd, lineageCmd, deletionCmd, judgeArgv, gateArgv, false);
+  const off = await runArchitectureReview(tmp, identityCmd, lineageCmd, deletionCmd, judgeArgv, gateArgv, false, Infinity, false, gapWorkerCmd);
   assert.equal(off.state, "verified");
   assert.equal(count(), 1, "write off ⇒ carrier does NOT grow");
-  const on2 = await runArchitectureReview(tmp, identityCmd, lineageCmd, deletionCmd, judgeArgv, gateArgv, true);
+  const on2 = await runArchitectureReview(tmp, identityCmd, lineageCmd, deletionCmd, judgeArgv, gateArgv, true, Infinity, false, gapWorkerCmd);
   assert.equal(on2.state, "verified");
   assert.equal(count(), 2, "write restored ⇒ carrier grows to 2");
+});
+
+// ── 语义结论 → 既有立案通道（gap-arch-review-judge-verdicts-never-reach-the-existing-gap-filing-
+// channel）：AC2 接线可取假 / AC3 复用既有查重 / AC4 节流可取假 ─────────────────────────────────────
+// 判定面：driver 把 judge 标了 actionable=true 的结论交给【既有】通道（quay-file-task 技能 + 其机制
+// 查重），并靠结论键台账节流。测的是【接线】（谁被交出去、交了几次），⛔ 不真跑 LLM、不真立案。
+
+/** 四个簇的固定判词构造面——只改 actionable / verdict，其余保持恒定（两态输入的对照）。 */
+function archVerdicts({ p1Actionable = false, p1Verdict = "coincidental", p1Key = "P1-deletion-closure" } = {}) {
+  return [
+    { clusterId: p1Key, verdict: p1Verdict, reasoning: "closure inflated by generated dirs", suggestedAction: "exclude .archguard/output + .claude/worktrees", actionable: p1Actionable },
+    { clusterId: "P2-identity-session-liveness.sh", verdict: "coincidental", reasoning: "keep", suggestedAction: "keep", actionable: false },
+    { clusterId: "P2-judgment-rewrites", verdict: "coincidental", reasoning: "keep", suggestedAction: "keep", actionable: false },
+    { clusterId: "P4-suspicious-guards", verdict: "coincidental", reasoning: "keep", suggestedAction: "keep", actionable: false },
+  ];
+}
+
+async function runArchWith(tmp, verdicts, { gapWorkerCmd, dateTag = "" } = {}) {
+  const { identityCmd, lineageCmd, deletionCmd, gateArgv } = archReviewCmd(tmp);
+  const judgeArgv = ["node", fakeArchJudgeWith(tmp, `fake-judge-${dateTag || "x"}.js`, verdicts)];
+  return runArchitectureReview(tmp, identityCmd, lineageCmd, deletionCmd, judgeArgv, gateArgv,
+    true, Infinity, false, gapWorkerCmd ?? `node ${fakeArchGapWorkerScript(tmp, path.join(tmp, "arch-gap-log.jsonl"))}`);
+}
+
+test("AC2 — 两态①：judge 给出一个 actionable 结论 ⇒ 恰好一次提交（prompt 只含该结论）", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-arch-ac2a-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const log = path.join(tmp, "arch-gap-log.jsonl");
+  const fact = await runArchWith(tmp, archVerdicts({ p1Actionable: true }));
+  assert.equal(fact.state, "verified");
+  assert.equal(fact.value.actionableCount, 1, "只有 P1 簇够格");
+  assert.deepEqual(fact.value.submittedKeys, ["P1-deletion-closure|coincidental"], "结论键 = clusterId|verdict");
+  assert.equal(fact.value.gapFiled, true);
+
+  const calls = readGapLog(log);
+  assert.equal(calls.length, 1, "恰好一次 spawn（⛔ 不是每个簇一次）");
+  const prompt = calls[0][calls[0].length - 1];  // 每条日志 = 该次 spawn 的 argv；末元素 = 真实 prompt
+  assert.ok(prompt.includes("P1-deletion-closure"), "prompt 含够格的结论");
+  assert.ok(prompt.includes("exclude .archguard/output"), "prompt 带上 judge 的 suggestedAction（原文）");
+  assert.ok(!prompt.includes("P2-judgment-rewrites"), "⛔ prompt 不含不够格的结论");
+  assert.ok(!prompt.includes("P4-suspicious-guards"), "⛔ prompt 不含不够格的结论");
+  // 台账逐条落键（供下一轮节流）。
+  const led = fs.readFileSync(submissionLedgerPath(tmp), "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+  assert.deepEqual(led.map((r) => r.key), ["P1-deletion-closure|coincidental"]);
+});
+
+test("AC2 — 两态②：judge 不给 actionable 结论 ⇒ 零立案（零 spawn、无台账）", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-arch-ac2b-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const log = path.join(tmp, "arch-gap-log.jsonl");
+  const fact = await runArchWith(tmp, archVerdicts({ p1Actionable: false }));
+  assert.equal(fact.state, "verified", "judge 照常跑完 —— 判过且不立案 ≠ 未评估");
+  assert.equal(fact.value.actionableCount, 0);
+  assert.deepEqual(fact.value.submittedKeys, []);
+  assert.equal(fact.value.gapFiled, false, "⛔ 零立案");
+  assert.equal(readGapLog(log).length, 0, "⛔ 零 spawn");
+  assert.ok(!fs.existsSync(submissionLedgerPath(tmp)), "⛔ 不写台账");
+  assert.ok(!/gap-filing spawned/.test(fact.reason), `reason 不得声称立过案：${fact.reason}`);
+});
+
+test("AC4 — 节流：同一结论连续 N=4 轮只提交一次；verdict 变了才再提交（能取假）", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-arch-ac4-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const log = path.join(tmp, "arch-gap-log.jsonl");
+  const gapWorkerCmd = `node ${fakeArchGapWorkerScript(tmp, log)}`;
+  const same = archVerdicts({ p1Actionable: true });
+  // N 轮同一结论（模拟生产：每小时一次、25+ 次同一 P1 结论）。
+  const facts = [];
+  for (let i = 0; i < 4; i++) facts.push(await runArchWith(tmp, same, { gapWorkerCmd, dateTag: "same" }));
+  assert.equal(readGapLog(log).length, 1, "4 轮同一结论 ⇒ 恰好 1 次提交（⛔ 不是 4 次）");
+  assert.deepEqual(facts.map((f) => f.value.submittedKeys.filter(Boolean).length), [1, 0, 0, 0], "只有第 1 轮提交");
+  assert.deepEqual(facts.map((f) => f.value.gapFiled), [true, false, false, false], "后续轮 gapFiled=false");
+  const keys = fs.readFileSync(submissionLedgerPath(tmp), "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l).key);
+  assert.deepEqual(keys, ["P1-deletion-closure|coincidental"], "台账恰好一条");
+  // 负控制（能取假）：同一簇但判定变了 ⇒ 是【另一个结论】⇒ 必须再提交一次。
+  const changed = archVerdicts({ p1Actionable: true, p1Verdict: "abstract" });
+  const f5 = await runArchWith(tmp, changed, { gapWorkerCmd, dateTag: "changed" });
+  assert.equal(readGapLog(log).length, 2, "verdict 变 ⇒ 结论键变 ⇒ 再提交（⛔ 节流不是按 clusterId 永久封死）");
+  assert.deepEqual(f5.value.submittedKeys, ["P1-deletion-closure|abstract"]);
+});
+
+test("AC2/3b — judge 判词缺 actionable ⇒ 未评估（⛔ 与「判过且不立案」不同形）", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qg-arch-3b-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const log = path.join(tmp, "arch-gap-log.jsonl");
+  const missing = archVerdicts({ p1Actionable: true }).map(({ actionable, ...rest }) => rest);
+  const fact = await runArchWith(tmp, missing, { gapWorkerCmd: `node ${fakeArchGapWorkerScript(tmp, log)}` });
+  assert.equal(fact.value.actionableCount, 0, "读不出 ⇒ 不算够格");
+  assert.equal(fact.value.actionabilityNotEvaluated, 4, "⛔ 但必须**计为未评估**，不是 0 条「判过且不够格」");
+  assert.equal(readGapLog(log).length, 0, "未评估 ⇒ 不立案（不猜）");
+  assert.match(fact.reason, /actionability unreadable for 4 cluster\(s\)/, `reason 必须显式区分：${fact.reason}`);
+  // 载体里三态可见：actionable 为 null（⛔ 不是 false）。
+  const rec = JSON.parse(fs.readFileSync(archReviewRoundPath(tmp), "utf8").split("\n").filter((l) => l.trim()).pop());
+  assert.deepEqual([...new Set(rec.clusters.map((c) => c.actionable))], [null], "载体记录 actionable=null（未评估）");
+});
+
+test("AC3 — 立案路径经 quay-file-task 的机制查重；节流不读任务库（⛔ 无第二套查重）", () => {
+  const driver = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "quality-gate-driver.ts"), "utf8");
+  const cluster = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "architecture-review-cluster.ts"), "utf8");
+  // ① 立案路径委派给既有技能：两条 gap-filing prompt（packaging + 架构复核）都必须点名它。
+  //    ⛔ 按【位置】判定：计数落在两个 prompt 构造函数的**函数体内**，不是全文件 grep（头注释也提到
+  //    这个名字——裸计数会把注释算成「委派」，硬规则 2）。
+  const hits = driver.split("\n").map((l, i) => [i + 1, l]).filter(([, l]) => l.includes("quay-file-task"));
+  console.log(`AC3 grep — "quay-file-task" 全文件命中 ${hits.length} 行:`);
+  for (const [n, l] of hits.slice(0, 3)) console.log(`  :${n} ${l.trim().slice(0, 140)}`);
+  assert.ok(hits.length >= 2, "至少两条委派（packaging-hygiene + 架构复核）");
+  const packagingPrompt = buildPackagingGapWorkerPrompt("/repo", ["drift-x"]);
+  const archPrompt = buildArchGapWorkerPrompt("/repo", []);
+  for (const [name, p] of [["packaging", packagingPrompt], ["architecture-review", archPrompt]]) {
+    assert.ok(p.includes("quay-file-task"), `${name} 的 prompt 要求走该技能`);
+    assert.ok(/MECHANISM-BASED dedup/.test(p), `${name} 声明该技能自带机制查重（复用，不重造）`);
+  }
+  // 架构复核 prompt 还须把「⛔ 不许顺手修」写死（本任务 DoD：缺陷由立出来的任务去做）。
+  assert.ok(/Do NOT fix the defect here/.test(archPrompt), "⛔ prompt 禁止 agent 在本轮顺手修");
+  // ② 节流侧结构上做不到查重：它从不读任务库（无 tasks/ 读取、无 task_list）——只读自己的提交台账。
+  const dedupish = cluster.split("\n").map((l, i) => [i + 1, l])
+    .filter(([, l]) => /task_list|taskList|tasks_dir|readdirSync\(.*tasks|readdirSync\(.*"tasks"/.test(l));
+  console.log(`AC3 grep — 节流模块里的任务库读取命中 ${dedupish.length} 行（期望 0）`);
+  assert.equal(dedupish.length, 0, "⛔ 节流模块不得读任务库 ⇒ 结构上不可能是第二套查重");
+  assert.ok(cluster.includes("SUBMISSION_LEDGER_REL"), "节流状态只在自己的提交台账里");
 });

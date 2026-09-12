@@ -14,6 +14,9 @@
 //   B17 判据消费纪律       纯机械审计（judgment-consumer-check.ts）⇒ 本 driver 跑
 //   架构复核               机械聚类（identity-replication / deletion-closure / guard-lineage 三
 //                         检测器 --json）→ LLM judge → JS 合并 → 判词载体 ⇒ 本 driver 跑
+//                         ＋ **语义结论 → 立案**（gap-arch-review-judge-verdicts-never-reach-the-
+//                         existing-gap-filing-channel：judge 标 actionable=true 的簇 ⇒ 经
+//                         quay-file-task 的**机制查重**立 gap 任务；结论键台账节流，同一结论只付费一次）
 //   packaging-hygiene     机械两维度检查（config-key 消费者 + shipped-entry 可运行性）→ 漂移非空
 //                         ⇒ spawn gap-filing agent（quay-file-task）⇒ 本 driver 跑
 //   B16-C 冲突意图        要读两边意图 ⇒ ⛔ 不在本 driver，归 AC145 语义面 subagent
@@ -64,14 +67,19 @@ import {
 // 架构复核例程的确定性一半（机械聚类纯函数 + 判词载体单一真相源，gap-quality-driver-architecture-
 // review-routine）。⛔ 聚类不重新实现三个检测器——只读它们的 --json 输出（本文件负责 spawn）。
 import {
+  actionableConclusions,
   appendArchReviewRound,
+  appendSubmission,
   buildArchReviewRoundRecord,
   clusterDetectorOutputs,
   computeArchReviewTrigger,
+  conclusionKey,
   deletionClosureComponents,
   mergeClusterVerdicts,
-  type ArchReviewRoundRecord,
+  readSubmittedKeys,
+  unsentConclusions,
   type ArchReviewClusterVerdict,
+  type ArchReviewRoundRecord,
   type Cluster,
   type DeletionReportView,
   type IdentityReportView,
@@ -597,7 +605,10 @@ function parseDetectorJson<T>(stdout: string): T | null {
 
 /** 架构复核 judge prompt（单个 `claude -p` 判整批候选簇；机械聚类来自三个检测器，判定交给 LLM）。
  *  ⛔ 不按簇拆 schema agent（那是 Workflow 工具的形态，driver 进程没有）——本 driver 用单一批判
- *  `claude -p`，输出 JSON 数组，聚合仍走 architecture-review-cluster.ts 的单一 JS 算术。 */
+ *  `claude -p`，输出 JSON 数组，聚合仍走 architecture-review-cluster.ts 的单一 JS 算术。
+ *  `actionable` 是本任务（gap-arch-review-judge-verdicts-never-reach-the-existing-gap-filing-
+ *  channel）加的**结构化**立案判定：⛔ 不让下游解析 suggestedAction 的自由文本（那会把判定从 LLM
+ *  挪进正则）。语义定义写在 prompt 里，三态由 mergeClusterVerdicts 兜底（缺失 ⇒ 未评估，非 false）。 */
 function archReviewJudgePrompt(clusters: Cluster[], root: string): string {
   const summary = clusters
     .map((c) => `  ${c.clusterId} [${c.primitive}] files=${c.files.length} rawCount=${c.rawCount} — ${c.label} — ${c.files.slice(0, 12).join(", ")}${c.files.length > 12 ? ", …" : ""}`)
@@ -608,14 +619,54 @@ function archReviewJudgePrompt(clusters: Cluster[], root: string): string {
     `Repo root: ${root}. Candidate clusters:`,
     summary || "(none)",
     "For EACH cluster decide: does it warrant abstracting/merging (real identity replication / deletion-closure debt), or is it coincidental similarity to keep as-is?",
+    "Also set `actionable`: true iff this cluster names a defect that should be FIXED BY A TASK — either (a) real replication/deletion debt to merge, or (b) a defect in the detector/pipeline that produced this cluster (e.g. generated directories or worktree snapshots polluting the measured dependency graph, so the number is an artifact rather than a real signal).",
+    "Set `actionable` false when the cluster is coincidental similarity, or mere load-bearing centrality that is correct by design — no task should be filed for those.",
     "Reply with ONLY a JSON array, one object per cluster:",
-    '[{"clusterId":"<id>","verdict":"abstract|coincidental|uncertain","reasoning":"<one line>","suggestedAction":"<one line>"}]',
+    '[{"clusterId":"<id>","verdict":"abstract|coincidental|uncertain","reasoning":"<one line>","suggestedAction":"<one line>","actionable":true|false}]',
   ].join("\n");
 }
 
 /** 缺省架构复核 judge 命令（launchArgv role=pool-judge → 短命 claude -p，复用 B15 的 profile 机制）。 */
 export function defaultArchReviewJudgeArgv(clusters: Cluster[], root: string): string[] {
   return launchArgv("pool-judge", archReviewJudgePrompt(clusters, root), root);
+}
+
+/** 架构复核 gap-filing agent spawn 的 wall-clock 上限【缺省回退值】（毫秒）。同 PACKAGING_…_DEFAULT
+ *  ——**同一个 gap-filing 角色的同一次实测导出**（elapsed_s=602.9，900s 留 ~1.5x 余量），
+ *  ⛔ 不另起测量、不写第二个字面量（单一真相源；硬规则 4 推论）。 */
+export const ARCH_GAP_WORKER_TIMEOUT_MS_DEFAULT = PACKAGING_GAP_WORKER_TIMEOUT_MS_DEFAULT;
+
+/** 架构复核的 gap-filing prompt：把**够格立案**的语义结论交给短命 agent，经 quay-file-task 立案。
+ *  与 packaging-hygiene 的 buildPackagingGapWorkerPrompt **同构**（同一通道、同一查重、同一 spawn
+ *  原语），差别只在证据形状——故两段措辞不同而机制相同。⛔ 本 prompt 不得让 agent 顺手修缺陷：
+ *  「排除 .archguard/output 与 .claude/worktrees」那类结论该由**立出来的任务**去做（本任务 DoD）。 */
+export function buildArchGapWorkerPrompt(root: string, conclusions: ArchReviewClusterVerdict[]): string {
+  return [
+    "You are a gap-filing agent in the quay repo. The architecture-review routine judged some candidate clusters and marked them ACTIONABLE — each one names a defect that must be closed by a task (real replication/deletion debt to merge, or a defect in the detector/pipeline that produced the cluster). Nothing has been filed for them yet.",
+    `Repo root: ${root}.`,
+    "Actionable conclusions:",
+    ...conclusions.flatMap((c) => [
+      `  - cluster ${c.clusterId} [${c.primitive}] verdict=${c.verdict} (round ${c.round}): ${c.label}`,
+      `      judge reasoning: ${c.reasoning}`,
+      `      judge suggested action: ${c.suggestedAction}`,
+    ]),
+    "File exactly ONE gap task PER actionable conclusion above — do NOT merge two conclusions into one task, and do NOT file a task for anything not listed here.",
+    "Use the `quay-file-task` skill (Skill tool) to file each one; the task must carry runnable Acceptance Criteria and declare ## Touches.",
+    "The quay-file-task skill performs MECHANISM-BASED dedup: if a task already claims the same defect (ANY status), do NOT file a duplicate — report the existing task id instead.",
+    "⛔ Do NOT fix the defect here, and ⛔ do NOT touch the detector sources — filing the task is the whole deliverable.",
+  ].join("\n");
+}
+
+/** gap-filing agent argv = launchArgv("fix-worker", <prompt>)。archGapWorkerCmd 覆盖【前缀】时把 prompt
+ *  作为末参数追加（测试缝捕获真实 prompt，同 buildPackagingGapWorkerArgv）。 */
+export function buildArchGapWorkerArgv(root: string, conclusions: ArchReviewClusterVerdict[], cmd?: string | null): string[] {
+  const prompt = buildArchGapWorkerPrompt(root, conclusions);
+  if (cmd != null) {
+    const prefix = splitArgs(cmd);
+    if (prefix.length === 0) return launchArgv("fix-worker", prompt, root);
+    return [...prefix, prompt];
+  }
+  return launchArgv("fix-worker", prompt, root);
 }
 
 /** 架构复核读数的值面（写进 round record 的 fact.value）。fired=false ⇒ 候选簇为空，不 judge。 */
@@ -625,6 +676,15 @@ export interface ArchReviewFactValue {
   clusterCount: number;
   judgedCount: number;
   distribution: Record<string, number> | null;
+  /** 够格立案的结论数（judge 的 actionable===true）。 */
+  actionableCount: number;
+  /** 本轮**新**提交给立案通道的结论键（节流后）——空数组 = 全部已提交过或没有够格的。 */
+  submittedKeys: string[];
+  /** actionable 字段读不出的簇数（硬规则 3b：⛔ 与 actionable===false 不同形）。 */
+  actionabilityNotEvaluated: number;
+  gapFiled: boolean;
+  gapExitCode: number | null;
+  gapError: string | null;
 }
 
 /** 判词载体写失败不致命（运行时日志，⛔ 不因日志炸循环）。 */
@@ -648,6 +708,8 @@ export async function runArchitectureReview(
   recordVerdicts: boolean = true,
   judgeTimeoutMs: number = Infinity,
   halted: boolean = false,
+  gapWorkerCmd: string | null = null,
+  gapWorkerTimeoutMs: number = ARCH_GAP_WORKER_TIMEOUT_MS_DEFAULT,
 ): Promise<Fact<ArchReviewFactValue | null>> {
   // 1. P2 身份复制（必需——既产 P2 簇又推导 P1 候选构件）。
   const identityArgv = identityCmd ?? defaultIdentityReplicationArgv(root);
@@ -696,6 +758,12 @@ export async function runArchitectureReview(
     clusterCount: trigger.clusterCount,
     judgedCount: 0,
     distribution: null,
+    actionableCount: 0,
+    submittedKeys: [],
+    actionabilityNotEvaluated: 0,
+    gapFiled: false,
+    gapExitCode: null,
+    gapError: null,
   };
   const writeRecord = (record: ArchReviewRoundRecord): void => {
     if (recordVerdicts) appendArchReviewRoundSafe(root, record);
@@ -770,11 +838,62 @@ export async function runArchitectureReview(
   const distribution: Record<string, number> = {};
   for (const m of merged) distribution[m.verdict] = (distribution[m.verdict] ?? 0) + 1;
   writeRecord(buildArchReviewRoundRecord({ round, judgedAt, state: "judged", triggerReasons: trigger.reasons, clusters: merged }));
+
+  // 8. 语义结论 → 既有立案通道（gap-arch-review-judge-verdicts-never-reach-the-existing-gap-filing-
+  //    channel）。**接法选择 = 单开一条同构路径，⛔ 不并入 packaging 的 `report.drift`**，理由：
+  //    ① `report.drift` 是另一条例程（packaging-hygiene-check.ts）自己的机械检测输出，且 Layer 1b
+  //       的契约是「一条例程 → 一批 Facts」，routine 之间无共享可变状态——把语义结论倒进别人的
+  //       report 要么让本 routine 去调 packaging 的检测器（荒谬耦合），要么凭空造一个跨例程的
+  //       漂移累加器（破契约，且让每条 routine 的单元从「例程」变成 god-object）。
+  //    ② `report.drift` 的消费者（buildPackagingGapWorkerPrompt）逐字要求 agent「去读那个具名
+  //       机械检测以理解缺陷」——对语义簇判词这句是错的，会误导 agent 去读一个无关的脚本。
+  //    ③ 通道本身（quay-file-task 技能 + 其机制查重 + launchArgv spawn + halt/资源门）**完全复用**，
+  //       所以这只是同构的第二条入口，不是第二套机制。
+  //    节流：读提交台账（结论键）⇒ 已提交过的不再 spawn（同一结论 25 次 ⇒ 1 次付费、1 条任务）。
+  const { filable, notEvaluated } = actionableConclusions(merged);
+  const toSend = unsentConclusions(filable, readSubmittedKeys(root));
+  const value: ArchReviewFactValue = {
+    ...base,
+    judgedCount: merged.length,
+    distribution,
+    actionableCount: filable.length,
+    submittedKeys: toSend.map(conclusionKey),
+    actionabilityNotEvaluated: notEvaluated.length,
+  };
+  if (toSend.length > 0) {
+    const gapArgv = buildArchGapWorkerArgv(root, toSend, gapWorkerCmd);
+    const g = await runAsync(gapArgv, { timeoutMs: gapWorkerTimeoutMs, collectStderr: true });
+    value.gapFiled = true;
+    value.gapExitCode = g.status;
+    value.gapError = g.error
+      ? g.error.message
+      : g.status === 0
+        ? null
+        : (String(g.stderr ?? "").slice(0, 200) || null);
+    // 台账只记【已投递】（进程真的起来了），⛔ 不记 spawn 失败/超时——那些情形下通道根本没接手，
+    // 记下来会**永久静默**封掉这个结论（恒零收益，正是本任务要消灭的形态）。非零退出仍记（agent
+    // 起过、跑过，submit-once 语义，同 goal-driver G9「spawn 即达成，不信 agent 自述」）；exit code
+    // 与 stderr 留在 Fact 里供下一轮/外部复核消解，⛔ 本 driver 不复核 agent 的自述。
+    if (g.error === null) {
+      const at = new Date().toISOString();
+      for (const c of toSend) {
+        try {
+          appendSubmission(root, { key: conclusionKey(c), clusterId: c.clusterId, verdict: c.verdict, submittedAt: at, round });
+        } catch { /* 台账写失败不致命：下一轮至多重放一次（方向安全） */ }
+      }
+    }
+  }
+  const summary = Object.entries(distribution).map(([k, v]) => `${k}=${v}`).join(" ");
+  const filing = `; actionable=${filable.length} submitted=${toSend.length}${value.gapFiled ? ` gap-filing spawned (exit ${value.gapExitCode})` : ""}`;
+  // 硬规则 3b：把「判词没给 actionable」与「判过且不够格」在**读数上**分开（⛔ 不靠读者自觉）。
+  const unreadable = notEvaluated.length > 0
+    ? `; actionability unreadable for ${notEvaluated.length} cluster(s) — ⛔ NOT "judged not-actionable"`
+    : "";
   return {
     name: "architecture-review",
-    value: { ...base, judgedCount: merged.length, distribution },
+    value,
     state: "verified",
-    reason: `judged ${merged.length} cluster(s): ${Object.entries(distribution).map(([k, v]) => `${k}=${v}`).join(" ") || "none"}`,
+    reason: `judged ${merged.length} cluster(s): ${summary || "none"}${filing}${unreadable}`,
   };
 }
 
@@ -797,6 +916,9 @@ export interface QualityGateOptions {
   packagingGapWorkerCmd: string | null;
   packagingGapWorkerTimeoutMs: number;
   packagingHygieneIntervalMinutes: number;
+  /** 架构复核的 gap-filing agent 命令（测试缝；prompt 末参数追加）。缺省 null ⇒ 生产 launchArgv。 */
+  archGapWorkerCmd: string | null;
+  archGapWorkerTimeoutMs: number;
 }
 
 /** 四条例程（B15 pool-quality-judge + B17 judgment-consumer-check + 架构复核 + packaging-hygiene）。
@@ -821,7 +943,11 @@ export function qualityGateRoutines(root: string, opts: QualityGateOptions): Rou
       name: "architecture-review",
       schedule: { kind: "interval", minutes: opts.archReviewIntervalMinutes },
       // ctx.halted ⇒ 只挡 LLM judge spawn（机械聚类仍跑）——halt 是轮内闸，⛔ 不挡观测。
-      run: async (ctx) => [await runArchitectureReview(root, opts.identityCmd, opts.lineageCmd, opts.deletionCmd, opts.archJudgeArgv, opts.resourceGateArgv, true, Infinity, ctx?.halted === true)],
+      // halted ⇒ 早返回 ⇒ 到达不了「语义结论 → 立案」那一步（受闸动作一并被挡）。
+      run: async (ctx) => [await runArchitectureReview(
+        root, opts.identityCmd, opts.lineageCmd, opts.deletionCmd, opts.archJudgeArgv, opts.resourceGateArgv,
+        true, Infinity, ctx?.halted === true, opts.archGapWorkerCmd, opts.archGapWorkerTimeoutMs,
+      )],
     },
     {
       name: "packaging-hygiene",
@@ -983,6 +1109,8 @@ const HELP = [
   "  --packaging-check-cmd <argv> 覆盖 packaging-hygiene-check 命令（测试缝）",
   "  --packaging-gap-worker-cmd <argv> 覆盖 gap-filing agent 命令（测试缝；prompt 末参数追加）",
   "  --packaging-gap-worker-timeout <ms> gap-filing spawn 上限（毫秒，缺省 900000）",
+  "  --arch-gap-worker-cmd <argv> 覆盖架构复核的 gap-filing agent 命令（测试缝；prompt 末参数追加）",
+  "  --arch-gap-worker-timeout <ms> 架构复核 gap-filing spawn 上限（毫秒，缺省 900000，与 packaging 同源）",
   "  --round-log <path>        轮记录文件（缺省 <root>/.quay/quality-round.jsonl）",
   "  --pid-file <path>         把驱动自身 pid 写到该文件（外部观测 + kill 抓手）",
   "  --json                    每轮向 stdout 打一条 JSON 事件行",
@@ -1023,6 +1151,8 @@ export async function main(argv: string[]): Promise<number> {
   let packagingCheckCmd: string | undefined;
   let packagingGapWorkerCmd: string | undefined;
   let packagingGapWorkerTimeoutRaw: string | undefined;
+  let archGapWorkerCmd: string | undefined;
+  let archGapWorkerTimeoutRaw: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -1049,6 +1179,8 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--packaging-check-cmd") packagingCheckCmd = args[++i];
     else if (a === "--packaging-gap-worker-cmd") packagingGapWorkerCmd = args[++i];
     else if (a === "--packaging-gap-worker-timeout") packagingGapWorkerTimeoutRaw = args[++i];
+    else if (a === "--arch-gap-worker-cmd") archGapWorkerCmd = args[++i];
+    else if (a === "--arch-gap-worker-timeout") archGapWorkerTimeoutRaw = args[++i];
     else if (a === "--json") json = true;
     else if (a === "--help" || a === "-h") { console.log(HELP); return 0; }
     else { console.error(`quality-gate-driver: unknown argument: ${a}`); return 2; }
@@ -1070,6 +1202,8 @@ export async function main(argv: string[]): Promise<number> {
     ? Number(packagingHygieneIntervalRaw) : PACKAGING_HYGIENE_INTERVAL_MIN_DEFAULT;
   const packagingGapWorkerTimeoutMs = packagingGapWorkerTimeoutRaw !== undefined && isNonNegInt(packagingGapWorkerTimeoutRaw)
     ? Number(packagingGapWorkerTimeoutRaw) : PACKAGING_GAP_WORKER_TIMEOUT_MS_DEFAULT;
+  const archGapWorkerTimeoutMs = archGapWorkerTimeoutRaw !== undefined && isNonNegInt(archGapWorkerTimeoutRaw)
+    ? Number(archGapWorkerTimeoutRaw) : ARCH_GAP_WORKER_TIMEOUT_MS_DEFAULT;
   const routineWatchdogMs = routineWatchdogRaw !== undefined && isNonNegInt(routineWatchdogRaw)
     ? Number(routineWatchdogRaw) : ROUTINE_WATCHDOG_MS_DEFAULT;
 
@@ -1094,6 +1228,8 @@ export async function main(argv: string[]): Promise<number> {
     packagingGapWorkerCmd: packagingGapWorkerCmd ?? null,
     packagingGapWorkerTimeoutMs,
     packagingHygieneIntervalMinutes,
+    archGapWorkerCmd: archGapWorkerCmd ?? null,
+    archGapWorkerTimeoutMs,
   });
 
   return runResidentQualityGateLoop({ root: rootDir, intervalMs: interval, once, maxRounds, roundLogFile, runId: resolvedRunId, json, pidFile, routines, routineWatchdogMs });
