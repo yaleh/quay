@@ -10,30 +10,30 @@ criterion: |
   if ! node --no-warnings --experimental-strip-types "$GS" write AC-900 --goal GOAL-900 \
         --title t --criterion 'exit 0' --expect e --origin o --expect-absent --root "$T" \
         >"$T/w.out" 2>&1; then
-    echo "CAUSE=write-failed — 不传 --status 的写入失败（默认应落 draft）: $(cat "$T/w.out")" >&2
-    exit 1
+    echo "CAUSE=write-failed — 不传 --status 的写入失败（默认应落 draft）: $(cat "$T/w.out")" >&2; exit 1
   fi
   if ! d="$(node --no-warnings --experimental-strip-types "$GS" list --status draft --root "$T" 2>&1)"; then
-    echo "CAUSE=list-draft-failed — list --status draft 执行失败: $d" >&2
-    exit 1
+    echo "CAUSE=list-draft-failed — list --status draft 执行失败: $d" >&2; exit 1
   fi
   if ! printf '%s' "$d" | grep -q '"id": "AC-900"'; then
-    echo "CAUSE=write-not-draft — 不传 --status 时默认落的不是 draft（写入即激活，正是本条要堵的缺陷）: $d" >&2
-    exit 1
+    echo "CAUSE=write-not-draft — 不传 --status 时默认落的不是 draft（写入即激活，正是本条要堵的缺陷）: $d" >&2; exit 1
   fi
   if ! a="$(node --no-warnings --experimental-strip-types "$GS" list --status active --root "$T" 2>&1)"; then
-    echo "CAUSE=list-active-failed — list --status active 执行失败: $a" >&2
-    exit 1
+    echo "CAUSE=list-active-failed — list --status active 执行失败: $a" >&2; exit 1
   fi
   if printf '%s' "$a" | grep -q '"AC-900"'; then
-    echo "CAUSE=default-activated — 默认写入的 draft 记录出现在 active 列表里: $a" >&2
-    exit 1
+    echo "CAUSE=default-activated — 默认写入的 draft 记录出现在 active 列表里: $a" >&2; exit 1
   fi
   exit 0
 expect: >-
   exit 0 = 目标库的 draft 状态**可用且默认不激活**：不传 --status 的 write() 落成 draft（⛔ 不是
   active）、`list --status draft` 取得到它、`list --status active` 取不到它。失败时 exit 1 且 stderr
   携带 `CAUSE=…` 成因（AC-241 同一纪律，⛔ 不再是无输出的裸 exit 1）。
+  🔧 **`echo "CAUSE=…" >&2` 与 `exit 1` 必须写在【同一行】**（如 `… >&2; exit 1`，与 AC-243 的
+  `sys.stderr.write(…); sys.exit(1)` 同一写法）：`plugin/scripts/criterion-failure-attribution-check.ts`
+  是**逐行**判定——它问的是「这条**失败退出行自身**是否携带归属」，拆成两行会被判**裸退出**并打红棘轮
+  （2026-09-12 fan-in 实测：本判据被点名、`delta +1`、套件在 static-check 阶段即红）。语义不受影响
+  （runner 折叠的是整段 stderr），⛔ 但**改动此处时不要按普通风格把它折回两行**。
   ⚠️ **2026-09-12 改判（gap-achieved-ac-rot-invisible-when-ledger-tail-is-stale-pass 的 AC5 显式处置，
   ⛔ 不是「已知悉」）**：原判据是 `list --status draft` 在**本仓**至少返回一条 GOAL- 记录 —— 那是
   「draft 有真实载体」的**一次性见证**，载体 = GOAL-003；GOAL-003 早已被激活，而一个「只在下阶段撰稿时
