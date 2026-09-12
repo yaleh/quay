@@ -1,13 +1,19 @@
 ---
 id: GOAL-016
 title: 驱动质量自证 —— quay 驱动出的开发能否被靶子项目自己的机械判据确认为正确
-status: active
+status: achieved
 kind: goal
 origin: 人 2026-09-12：以 archguard ADR-007 接口一致性为方向，验证用 quay 在 ad-arm1 驱动
   archguard 的开发。接在 GOAL-009 自陈的边界上——AC-207 只判『有非记账提交』，从未判『改对了没有』。五项裁定：不推
   origin；开发工作区为 ad-arm1 的 /home/yale/work/archguard；不纳入陈旧存量派发维度；直接激活（单次授权）；task
   只写症状+复现入口+期望行为，不给根因与修法。
 activatedAt: 2026-09-12T08:43:27.098Z
+statusLog:
+  - at: 2026-09-12T13:41:10.555Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 ---
 ## 背景
 
