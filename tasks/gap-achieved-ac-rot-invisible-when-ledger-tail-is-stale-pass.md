@@ -1,7 +1,7 @@
 ---
 id: gap-achieved-ac-rot-invisible-when-ledger-tail-is-stale-pass
 title: achieved 判据在最后一次记录后失效时对所有机制不可见——AC-242 检「被记录的失败」而非「当前为假」，实测 4 条已红
-status: todo
+status: ready
 labels:
   - gap
   - defect
