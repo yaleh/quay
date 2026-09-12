@@ -78,6 +78,10 @@ quay full-suite-runner 的默认 suite 命令 → bash scripts/test.sh [--bucket
 
 ⇒ 三条都不产出「目标项目用自己 `test_command` 时的台账」，本任务补的是这个缺口。
 
+**⊢ 本裁定在本仓库已有成文纪律（2026-09-12 查证）**：`plugin/scripts/target-identity-literal-check.ts` 的头注释逐字规定——检查「把**逐项目不同的目标身份**（分支名 / `test_command` / `tasks_dir`）写成**无 override 通道的裸字面量**」的处所。⇒ 人 2026-09-12「写死 `scripts/test.sh` 是错的」并非新增偏好，而是**该既有纪律在 suite 入口/输出这一维度上的应用**。
+
+**⚠️ 顺带暴露的覆盖缺口（⛔ 不在本任务范围，仅记录）**：该检查器已在册、且 `test_command` 就在它点名的三类身份之列，**却没有抓到 `full-suite-runner` 里写死的 `bash scripts/test.sh`**。执行者若在实现中顺手看清「为什么它漏了」（是身份类别没覆盖 suite 命令、还是该字面量所在位置不在其扫描面），**请只把结论记进任务体或另立一条**，⛔ 不要在本任务里扩范围去修那个检查器——本任务的交付面是台账解耦，不是检查器覆盖面。
+
 ## Touches
 
 - plugin/scripts/full-suite-runner.ts
@@ -85,3 +89,5 @@ quay full-suite-runner 的默认 suite 命令 → bash scripts/test.sh [--bucket
 - plugin/scripts/mirror-full-suite-state.ts
 - plugin/test/full-suite-runner-phases.test.mjs
 - tasks/gap-verification-round-bound-to-quay-shaped-suite-entry.md
+- packages/quay/src/config.ts
+- packages/quay/src/config-validate.ts
