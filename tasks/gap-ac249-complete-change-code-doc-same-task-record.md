@@ -134,12 +134,12 @@ ad-arm1（hostname instance-20221019-1509）:/home/yale/work/archguard，master 
 
 ## Acceptance Criteria
 
-- [ ] **AC1 生产者存在且双向 fail-closed（能取假）**：`grep -c 'GOAL-016-AC-249' plugin/scripts/verify-deliver-coldstart.sh` ≥ 1；hermetic 自检打印三组读数原文——完整（代码+文档同任务）⇒ 写出 1 条；只代码 ⇒ **零记录**；只文档 ⇒ **零记录**（后两组各带可区分的 NOT-EVALUATED/INCOMPLETE-CHANGE 痕迹与退出码）。
-- [ ] **AC2 并集是并集，不是"最新一条提交"**：hermetic 负控制构造「代码提交在前、文档提交在后（最新 = 文档）」⇒ 产品实现**仍写出 1 条**，且同一夹具下用单条选择器（`ac207_select_implementation_commit`）跑 ⇒ **写不出**，两条读数并列留档；`grep` 证明写入路径不调用单条选择器来构造 `commit_files`（引用任一计数前先打印前 3 条实际内容，硬规则 2）。
-- [ ] **AC3 路径形态是直接量且穿过所有中间层**：留档证明 `commit_files` 里每条都是**仓库相对路径原样**（无 `./` 前缀、无绝对路径）；负控制：注入 `./src/x.ts` 形态的并集 ⇒ 零记录（证明 criterion 的 `startswith("src/")` 分支真在作用）。
-- [ ] **AC4 真跑真驱动（生产载体上的判据翻转）**：`/home/yale/work/quay/.quay/productization-verification.jsonl` 里存在 `ac=GOAL-016-AC-249` 的记录（打印该行原文 + 行数）；逐字段满足 criterion：host≠本机 ∧ project_root=ad-arm1 的 archguard ∧ task_id 非空 ∧ commit_files 非空 ∧ ≥1 条 `src/`|`scripts/` 前缀 ∧ ≥1 条含 `ADR-007`|`docs/adr` 前缀。随后在**生产 root** 下**逐字取 `goals/AC-249-*.md` 的判据干跑**：改前 exit 1、改后 exit 0，两条读数并列（翻转的成因是载体内容，⛔ 不是环境）。目标侧任务文本只给症状+复现入口+期望行为（附任务文本原文）。
-- [ ] **AC5 外部交叉核对（硬规则 4b）**：经 ssh 在 ad-arm1 上 `git -C /home/yale/work/archguard show --pretty=format: --name-only <该任务的全部提交>` 核验并集与记录里的 `commit_files` **逐条一致**；并核这两类路径确实分别在 `src/`（或 `scripts/`）与 `quay-adr/ADR-007.md`（或 `docs/adr/*`）下——命令与输出原文留档，⛔ 不采信载体自述（GOAL-016 非目标第一条：不推 origin ⇒ 只能经 ssh 取真读数）。
-- [ ] **AC6 未测量 ≠ 不合格，三态可区分**：并集读不出 ⇒ **零记录** + NOT-EVALUATED + 非 0（打印被拒的输入与返回码）；载体副本删记录 ⇒ exit 1、移走载体 ⇒ exit 3，与 exit 0 并列留档。
+- [x] **AC1 生产者存在且双向 fail-closed（能取假）**：`grep -c 'GOAL-016-AC-249' plugin/scripts/verify-deliver-coldstart.sh` ≥ 1；hermetic 自检打印三组读数原文——完整（代码+文档同任务）⇒ 写出 1 条；只代码 ⇒ **零记录**；只文档 ⇒ **零记录**（后两组各带可区分的 NOT-EVALUATED/INCOMPLETE-CHANGE 痕迹与退出码）。
+- [x] **AC2 并集是并集，不是"最新一条提交"**：hermetic 负控制构造「代码提交在前、文档提交在后（最新 = 文档）」⇒ 产品实现**仍写出 1 条**，且同一夹具下用单条选择器（`ac207_select_implementation_commit`）跑 ⇒ **写不出**，两条读数并列留档；`grep` 证明写入路径不调用单条选择器来构造 `commit_files`（引用任一计数前先打印前 3 条实际内容，硬规则 2）。
+- [x] **AC3 路径形态是直接量且穿过所有中间层**：留档证明 `commit_files` 里每条都是**仓库相对路径原样**（无 `./` 前缀、无绝对路径）；负控制：注入 `./src/x.ts` 形态的并集 ⇒ 零记录（证明 criterion 的 `startswith("src/")` 分支真在作用）。
+- [x] **AC4 真跑真驱动（生产载体上的判据翻转）**：`/home/yale/work/quay/.quay/productization-verification.jsonl` 里存在 `ac=GOAL-016-AC-249` 的记录（打印该行原文 + 行数）；逐字段满足 criterion：host≠本机 ∧ project_root=ad-arm1 的 archguard ∧ task_id 非空 ∧ commit_files 非空 ∧ ≥1 条 `src/`|`scripts/` 前缀 ∧ ≥1 条含 `ADR-007`|`docs/adr` 前缀。随后在**生产 root** 下**逐字取 `goals/AC-249-*.md` 的判据干跑**：改前 exit 1、改后 exit 0，两条读数并列（翻转的成因是载体内容，⛔ 不是环境）。目标侧任务文本只给症状+复现入口+期望行为（附任务文本原文）。
+- [x] **AC5 外部交叉核对（硬规则 4b）**：经 ssh 在 ad-arm1 上 `git -C /home/yale/work/archguard show --pretty=format: --name-only <该任务的全部提交>` 核验并集与记录里的 `commit_files` **逐条一致**；并核这两类路径确实分别在 `src/`（或 `scripts/`）与 `quay-adr/ADR-007.md`（或 `docs/adr/*`）下——命令与输出原文留档，⛔ 不采信载体自述（GOAL-016 非目标第一条：不推 origin ⇒ 只能经 ssh 取真读数）。
+- [x] **AC6 未测量 ≠ 不合格，三态可区分**：并集读不出 ⇒ **零记录** + NOT-EVALUATED + 非 0（打印被拒的输入与返回码）；载体副本删记录 ⇒ exit 1、移走载体 ⇒ exit 3，与 exit 0 并列留档。
 - [ ] **AC7 全量套件绿 —— 外层 verification-round 验证**（本条的量产生在 fan-in / 外层 suite 轮，⛔ 不是 worker 自己的读数；scoped 门绿不等于全量绿）
 
 ## Definition of Done
@@ -163,6 +163,7 @@ host 与 project_root 都指向外部项目。
 
 - plugin/scripts/verify-deliver-coldstart.sh
 - plugin/scripts/develop-deliver-tgz.sh
+- plugin/scripts/task-file-bypass-check.ts
 - plugin/test/verify-deliver-coldstart.test.mjs
 - plugin/test/develop-deliver-tgz-evidence-transport.test.mjs
 - plugin/test/ac249-complete-change-record.test.mjs (new)
