@@ -1260,3 +1260,54 @@ test("AC-242 successor — 已记录的 fail 更早被重新检查（⛔ 不抬�
   assert.equal(r.ran[0].verdict, "fail", "重查仍然为假");
   assert.equal(r.eligible, 1, "合格集合被枚举（⛔ 非布尔）");
 });
+
+// ── gap-ac242-naive-frontmatter-split-hides-own-long-term-self-latching-false-positive ───────────
+// 缺陷：判据用朴素三横线切分（`s.split("---",2)[1]`）取 frontmatter，会在**字段值内部**的 `---` 处
+// 截断 ⇒ 声明写在它**之后**的字段（`long-term`）系统性读不到。改前生产实测（本任务 ## Evidence）：
+// 朴素切分看得见 13/16 条已声明 `long-term: true` 的 AC，看不见的恰好是 AC-214 / AC-242 / AC-244
+// ——判据正文含 `---` 的那三条。后果是**自锁**：该判据把 AC-242 算进冻结population ⇒ 它红 ⇒ 它自己的
+// 尾事件变 fail ⇒ 它再把自己算进去（改前实测：把四条真问题的尾事件模拟为 pass 后，输出仍是 `AC-242`）。
+//
+// goal 记录唯一的解析器是 `frontmatter-store-base.parseFrontmatter`（行首锚定 + 真 YAML）。本测试钉住
+// 它的**边界**：`criterion` 块标量里含 `---` 时，其后声明的 `long-term` 必须仍被读到 ⇒ 该 AC 留在复验
+// 域内（AC-216）⇒ 不会因自己的 fail 尾事件自报。第 (d) 段是双向控制：同一份台账、同一个判据，去掉声明
+// 就**必须**报出它（⛔ 防止修假阳性时把检测能力一起去掉）。
+//
+// 第 (a) 段是**夹具的牙齿**：它断言朴素切分**确实**在这条记录上丢字段。若有人把判据正文改成不含 `---`，
+// 它会红——否则本测试会在「夹具不再触发该边界」时退化成恒真（硬规则 3b：一个恒绿的检查比没有检查更贵）。
+test("AC-242 —— `---` 落在 criterion 块标量内时，其后声明的 long-term 仍被读到（朴素切分会丢）", () => {
+  const root = tmpDir("ac242-delim");
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
+  const criterion = ["true", "# --- 这一行携带 frontmatter 分隔符（AC-214/AC-242/AC-244 的判据正文同形）", "false"].join("\n");
+  n(["write", "GOAL-900", "--title", "closed goal", "--status", "achieved", "--origin", "o", "--body", GOAL_BODY]);
+  const w = n(["write", "AC-900", "--title", "AC-900", "--status", "achieved", "--goal", "GOAL-900", "--criterion", criterion, "--origin", "o", "--expect", EXPECT, "--long-term", "true"]);
+  assert.equal(w.status, 0, `带多行 criterion 的写入必须 exit 0:\n${w.stdout}${w.stderr}`);
+
+  // (a) 夹具的牙齿：朴素切分**确实**在这条记录上丢字段。
+  const acFile = fs.readdirSync(path.join(root, "goals")).find((f) => f.startsWith("AC-900-"));
+  const raw = fs.readFileSync(path.join(root, "goals", acFile), "utf8");
+  const naiveKeys = raw.split("---", 2)[1].split("\n").map((l) => (l.match(/^([A-Za-z_-]+):/) ?? [])[1]).filter(Boolean);
+  assert.ok(naiveKeys.includes("criterion"), "朴素切分仍看得见 criterion（截断点在它之后）");
+  assert.equal(naiveKeys.includes("long-term"), false, "朴素切分必须丢掉 long-term —— 丢了才说明 `---` 真的在值内部（否则本测试没验到东西）");
+
+  // (b) 机件回读（⛔ 不采信文件字面）：声明在其后仍被解析到。
+  assert.equal(JSON.parse(n(["get", "AC-900"]).stdout).longTerm, true, "long-term 声明在含 `---` 的 criterion 之后仍被读到");
+
+  // (c) 后果：它因此留在复验域内 ⇒ 即使尾事件是 fail 也不自报（自锁不可能）。
+  appendGoalEvent(root, "AC-900", "fail");
+  const scoped = JSON.parse(n(["check", "--reverify-scope"]).stdout);
+  assert.ok(scoped.inScope.some((e) => e.id === "AC-900" && e.longTerm === true), "在复验域内（longTerm 分支）");
+  const j1 = JSON.parse(n(["check", "--stale-pass"]).stdout);
+  assert.equal(j1.frozenScope, 0, "不在冻结population ⇒ 无自锁");
+  assert.deepEqual(j1.failing, [], "⛔ 不因自己的 fail 尾事件自报");
+  assert.equal(n(["check", "--stale-pass"]).status, 0);
+
+  // (d) 双向控制：去掉 long-term 声明 ⇒ 同一份台账、同一个判据**必须**报出它（两次结果必须不同）。
+  assert.equal(n(["write", "AC-900", "--long-term", "false"]).status, 0);
+  const j2 = JSON.parse(n(["check", "--stale-pass"]).stdout);
+  assert.deepEqual(j2.failing, ["AC-900"], "域外 + 尾事件 fail ⇒ 必须报出（与 (c) 结果不同）");
+  assert.equal(n(["check", "--stale-pass"]).status, 1);
+});
