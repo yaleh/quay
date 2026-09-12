@@ -212,8 +212,15 @@ import { suiteLockBase } from "./suite-lock-slots.ts";
 // （复用 mirror-full-suite-state.ts 的 build/write/skip 单一实现，⛔ 不另写一份 state shape）。
 import { buildMirrorState, writeMirrorState, shouldSkipMirrorWrite, readCurrentState } from "./mirror-full-suite-state.ts";
 // D7：laneCount 取 full-suite-runner.ts 的 defaultLaneCount（nproc-derived 单一真相源，读宿主 + QUAY_MAX_*
-// 定义点，⛔ 不写字面量 1——concurrency-literal-check P4 会把 `laneCount: 1` 判为未声明并发字面量违规）。
-import { defaultLaneCount } from "./full-suite-runner.ts";
+// 定义点，⛔ 不写字面量 1——concurrency-literal-check P4 会把 `laneCount: 1` 判为未声明并发字面量违规）；
+// readLoadAvg 同源（/proc/loadavg 1min，verification-round 的 load 轴——与 full-suite-runner 同一读法）。
+import { defaultLaneCount, readLoadAvg } from "./full-suite-runner.ts";
+// gap-verification-round-bound-to-quay-shaped-suite-entry：第三方项目（无 scripts/test.sh，suite 由它自己的
+// loop.test_command 跑）不经 full-suite-runner ⇒ 那条唯一 writer 不在路径上 ⇒ /tests 的
+// verification-round.jsonl 结构性不产生（web 恒显示「未接入」）。本层补写【复用既有 shared writer】
+// pre-verified-round-record.ts 的 builder + appender（⛔ 不新造第三个 writer；该模块的 CLI main 由
+// isDirectEntry 守卫，import 不触发执行）。
+import { buildPreVerifiedRoundRecord, appendPreVerifiedRound } from "./pre-verified-round-record.ts";
 // gap-worker-ac-check-shortcircuit：finishAsync 在 spawn 机械 fan-in 前查 worktree 任务体 AC/DoD 全勾。
 // ⛔ 不新造计数函数——复用 flip 闸 fan-in-ac-completion-gate.ts 的 flipAcGateVerdict（与机械 fan-in
 // step 6.5 ac-precheck / step 8 ac-gate 同源，countCompletionCheckboxes / isLandedCodeComplete 单一真相源）。
@@ -1204,6 +1211,41 @@ function readLoopTestCommand(dir: string): string | null {
     | undefined;
   const cmd = loop && typeof loop === "object" ? (loop as Record<string, unknown>).test_command : undefined;
   return typeof cmd === "string" && cmd.trim() ? cmd.trim() : null;
+}
+
+/** gap-verification-round-bound-to-quay-shaped-suite-entry AC5 — 读 <dir>/.quay/config.yml 的
+ *  `loop.test_output`：目标项目【自己声明】的测试输出约定（{字段: 正则，恰好一个捕获组}，字段 ∈
+ *  pass/fail/cancelled/tests）。quay 依声明从 suite 日志解析计数并落台账，⛔ 不把输出格式写死成 quay
+ *  自己的 node:test/measure-reporter 形状（人 2026-09-12 裁定：「只让入口可配而输出解析仍写死，是换了
+ *  一个位置的同一个病」）。
+ *
+ *  读面只做形状校验（值为非空字符串的已知字段；未知字段/非法类型丢弃）——正则能否编译/匹配由 writer
+ *  侧 fail-closed 处理（不匹配 ⇒ 该字段缺席，⛔ 不伪造 0）。无有效声明 ⇒ null（调用方退回内建解析，
+ *  本仓库形态零回归）。与 readLoopTestCommand 同一 YAML 读法（⛔ 不依赖 packages/quay/src/config.ts）。 */
+export function readLoopTestOutput(dir: string): Record<string, string> | null {
+  const file = path.join(dir, ".quay", "config.yml");
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(text);
+  } catch {
+    return null;
+  }
+  const loop = (parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).loop : undefined) as
+    | Record<string, unknown>
+    | undefined;
+  const decl = loop && typeof loop === "object" ? (loop as Record<string, unknown>).test_output : undefined;
+  if (!decl || typeof decl !== "object" || Array.isArray(decl)) return null;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(decl as Record<string, unknown>)) {
+    if (typeof v === "string" && v.trim() !== "") out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? out : null;
 }
 
 /** scoped-gate 命令的解析结果（gap-driver-fanin-hardcoded-test-sh-third-party）：
@@ -3570,6 +3612,78 @@ export function defaultMechanicalSuiteCommand(opts: {
   return ["bash", "-c", `echo 'third-party-no-test-tooling: no scripts/test.sh and no loop.test_command' >&2; exit 2`];
 }
 
+/** gap-verification-round-bound-to-quay-shaped-suite-entry — 本 fan-in 的 suite 是否【不经
+ *  full-suite-runner.ts】：第三方项目（无 scripts/test.sh）用它自己的 loop.test_command 跑全量 ⇒
+ *  runner 这条 verification-round 唯一 writer 不在路径上 ⇒ 台账行须由本层补写（appendDelegatedSuiteRound）。
+ *
+ *  ⛔ 判据与 defaultMechanicalSuiteCommand / resolveScopedGateCommand 的分支【同源】（hasTestSh +
+ *  readLoopTestCommand），不新造第三种「算不算第三方」的判法——三处一旦各判各的，「suite 跑在谁手里」
+ *  与「谁负责入账」就会分叉（硬规则 5b：修一个别漏一簇）。
+ *  两者皆无（无 test.sh 也无 test_command）⇒ false：那种工作区根本没有 suite 可跑（命令是 fail-closed
+ *  exit 2 的「无测试能力」），没有「一轮 suite」可入账。 */
+export function suiteRunsOutsideRunner(dir: string): boolean {
+  return !hasTestSh(dir) && readLoopTestCommand(dir) !== null;
+}
+
+/** gap-verification-round-bound-to-quay-shaped-suite-entry — 第三方 fan-in 的 verification-round 入账：
+ *  suite 的执行入口是项目自己的（loop.test_command），但【台账写入与「suite 由谁跑」解耦】——本函数把
+ *  这一轮追加进 <root>/.quay/verification-round.jsonl（/tests 卡片读的正是这条载体）。
+ *
+ *  ⛔ 复用既有 shared writer（buildPreVerifiedRoundRecord + appendPreVerifiedRound）：runId/taskId/
+ *  startedAt/durationMs/commit 全取本轮 fan-in 的真实读数；state 由调用方按 suite 结果给（绿/红都入账，
+ *  与 full-suite-runner 的「红绿皆入账」契约一致——否则「跑了且红」与「没跑过」同形，硬规则 3b）。
+ *  preverified=false（suite 确在本轮 fan-in 内真跑了，⛔ 非复用 capture）。
+ *
+ *  cpu_time_s 显式 null + cpu_source='not-wired'：第三方路径没有 cgroup scope / gnu-time 包裹 ⇒ 未测得，
+ *  ⛔ 不写 0（0 会把「没测」伪装成「测得约 0」，硬规则 4）。laneCount 取 defaultLaneCount()——与同一轮
+ *  mirrorMechanicalFanInSuiteState 写进 full-suite-state.json 的值同源，两个载体对同一轮不各说各话。
+ *
+ *  best-effort（观测写不得阻塞主执行，同 writeSuiteCapture / mirrorMechanicalFanInSuiteState）：失败返回
+ *  {ok:false, reason}，由调用方 trace 进 .quay/fan-in-step-trace.jsonl —— 失败可见，但不伪装成通过
+ *  （硬规则 3b：观测写失败的取值必须与「写成功」可区分）。 */
+export function appendDelegatedSuiteRound(o: {
+  task: string;
+  runId: string;
+  root: string;
+  commit: string;
+  startedAt: string;
+  durationMs: number;
+  state: "green" | "red";
+  suiteLog: string;
+  /** 受测 checkout（读它的 .quay/config.yml 的 loop.test_output —— AC5：项目声明的输出约定）。 */
+  worktree: string;
+}): { ok: boolean; reason: string | null; applied: Record<string, number> | null } {
+  try {
+    // AC5 — 项目自己声明的输出约定（缺声明 ⇒ null ⇒ writer 走内建解析，零回归）。
+    const testOutput = readLoopTestOutput(o.worktree);
+    const built = buildPreVerifiedRoundRecord({
+      taskId: o.task,
+      runId: o.runId,
+      startedAt: o.startedAt,
+      durationMs: o.durationMs,
+      laneCount: defaultLaneCount(),
+      load: readLoadAvg(),
+      commit: o.commit,
+      preverified: false,
+      runner: "inner",
+      state: o.state,
+      suiteLog: o.suiteLog,
+      // ⚠️ 字面量 "null"（字符串）而不是 JS null：writer 的「考虑过但取不到」哨兵是 CLI 形态的
+      // `--cpu-time-s null`（builder 里 `raw === "null"` ⇒ 记录 cpu_time_s=null，硬规则 6/AC6），而 JS
+      // null 会被 builder 的 `!= null` 判成「没传」⇒ 字段整个缺席（cpu_source 却写着 not-wired，两半不自洽）。
+      cpuTimeS: "null",
+      cpuSource: "not-wired",
+      testOutput,
+      root: o.root,
+    }) as { record?: unknown; error?: string; appliedDeclared?: Record<string, number> | null };
+    if (built.error) return { ok: false, reason: built.error, applied: null };
+    appendPreVerifiedRound(path.join(o.root, ".quay", "verification-round.jsonl"), built.record);
+    return { ok: true, reason: null, applied: built.appliedDeclared ?? null };
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : String(e), applied: null };
+  }
+}
+
 /** fan-in 过程日志文件名（`.quay/fan-in-<task>-<runId>.log` 的 basename）。runId 唯一后缀 ⇒ 跨 relaunch
  *  不复用（同 gap-fan-in-suite-log-cross-relaunch-reuse 防护——旧轮内容不残留）；runId 先 sanitize 到
  *  `[A-Za-z0-9_.-]`（⛔ 不把未净化的 runId 当路径段）。 */
@@ -3957,6 +4071,31 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
 
     // 7. suite（driver 子进程 + 异步 poll，⛔ 不 detach——AC3）。suite_head 在 merge + 各闸之后取。
     const suiteHead = (await mechSh(["git", "-C", worktree, "rev-parse", "HEAD"], 30_000)).stdout.trim();
+    // gap-verification-round-bound-to-quay-shaped-suite-entry — 第三方路径（suite 由项目自己的
+    // loop.test_command 跑，不经 full-suite-runner）的 verification-round 入账。绿/红共用这一处
+    // （⛔ 不两条分支各写一份——那正是硬规则 5b 的成簇漏改形态）。本仓库形态（有 scripts/test.sh）⇒
+    // suiteRunsOutsideRunner=false 直接返回，runner 已写，行为逐字不变（AC2 负控制）。
+    const recordDelegatedRound = (state: "green" | "red", startedAt: string, durationMs: number): void => {
+      if (!suiteRunsOutsideRunner(worktree)) return;
+      const t0 = Date.now();
+      const rd = appendDelegatedSuiteRound({
+        task, runId: perSuiteRunId, root, commit: suiteHead,
+        startedAt, durationMs, state, suiteLog: suiteLogFile, worktree,
+      });
+      // AC5 的可见性：项目声明了输出约定时，把【实际应用到的派生字段】写进 trace —— 声明有效但一条都
+      // 没匹配上（applied={}）必须与「没声明」（applied=null）在记录上可分（硬规则 3b）。
+      let reason = "";
+      if (!rd.ok) reason = rd.reason ?? "append failed";
+      else if (rd.applied !== null) {
+        reason = Object.keys(rd.applied).length > 0
+          ? `test_output declared → ${Object.entries(rd.applied).map(([k, v]) => `${k}=${v}`).join(" ")}`
+          : "test_output declared but nothing matched (no count fields derived)";
+      }
+      traceSuiteEvent("verification-round-record", {
+        exit: rd.ok ? 0 : 1, wall_ms: Date.now() - t0, ok: rd.ok,
+        ...(reason === "" ? {} : { reason }),
+      });
+    };
     if (needSuite) {
       // 6.5 AC 全勾 fail-fast 预检（suite 前——未全勾直接拒翻跳过 suite，省注定无效的 9-11min/cycle；
       // gap-fan-in-ac-precheck-before-suite）。⛔ 用同源 ac-gate 脚本 --json 读结构化 verdict
@@ -4005,12 +4144,18 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
           suiteLogText = fs.readFileSync(suiteLogFile, "utf8");
         } catch { /* 日志缺失 ⇒ fallback 通用文案 */ }
         const firstFailure = extractFirstFailureLine(suiteLogText);
+        // gap-verification-round-bound-to-quay-shaped-suite-entry：第三方路径的红轮同样入账
+        // （「跑了且红」必须与「没跑过」可分，硬规则 3b；与 full-suite-runner 的红绿皆入账契约一致）。
+        recordDelegatedRound("red", sr.startedAt, sr.durationMs);
         return failSuite(firstFailure || `suite ${sr.outcome}${sr.error ? `: ${sr.error}` : ""}`, sr.exitCode);
       }
       writeSuiteCapture(suiteCapture, {
         full_suite_ran: "true", skip_reason: "", suite_exit: "0",
         suite_head: suiteHead, start_iso: sr.startedAt, end_iso: sr.finishedAt,
       });
+      // gap-verification-round-bound-to-quay-shaped-suite-entry：第三方路径的绿轮入账（红轮在 suite
+      // 退出分支，见 recordDelegatedRound 定义处的说明）。
+      recordDelegatedRound("green", sr.startedAt, sr.durationMs);
       // D7：把本轮 bucket suite 状态镜像到权威载体 full-suite-state.json（scope=worktree + taskId 区分
       // bucket-run 与 full-run，⛔ 不伪造 full-green；finishedAt 与 mfi.suiteFinishedEpoch 同源 ⇒ 不陈旧）。
       // ⛔ runId 用 perSuiteRunId（非过程 runId）——runner 已用 perSuiteRunId 写 full-suite-state，镜像
