@@ -136,6 +136,28 @@
 #                  criterion's `is False` / `is True`; `0`/`1` and `"false"`/`"true"` impostors must
 #                  BOTH fail); plus a positional control that both the transport and the completeness
 #                  call sit inside verify_adr_flip_mode's body.
+#     --verify-complete-change --target-root <abs-path-on-remote> --task-id <id>   GOAL-016-AC-249: the
+#                  SAME transport again, but the remote script runs --ac249-complete-change: the
+#                  evidenced task's `commit_files` (the UNION of every commit filed under that one
+#                  task_id, attributed BY POSITION — ⛔ never "the newest commit") must carry BOTH a
+#                  code path (`src/`|`scripts/`) AND an ADR-007 doc path (contains `ADR-007`|`docs/adr`).
+#                  One side alone is not a complete change ⇒ the remote writes NO record. Only the
+#                  ac=GOAL-016-AC-249 record is transported + dedup-appended; a host that produces no
+#                  such record ⇒ NOT-EVALUATED + exit 1. Same ⛔ rules as --verify-adr-flip:
+#                  --target-root ABSOLUTE on the remote; --task-id required (guessing "the newest task"
+#                  is exactly the AC-207 defect); this mode never DRIVES anything.
+#                  ⚠️ AC-248 and AC-249 share --target-root/--task-id: both are readings of the SAME
+#                  driven-out task (one drive, two independent readings). Running this mode against the
+#                  same task that --verify-adr-flip already evidenced = "同一次驱动产出", ⛔ not a second
+#                  task filed "for AC-249 to see".
+#     --selfcheck-complete-change-transport  hermetic controls of that transport (offline, no
+#                  build/scp/ssh): AC-249 evidence ⇒ appended + COMPLETE (exit 0); evidence carrying
+#                  only a DIFFERENT ac ⇒ NOT-EVALUATED; missing/zero-line evidence ⇒ NOT-EVALUATED +
+#                  carrier unchanged; a COMMIT_FILES-PREDICATE control (a code-only list and a doc-only
+#                  list must BOTH fail the criterion's two-path predicate — read with the same python
+#                  predicate as the goal criterion, so `one side alone does not count` is falsifiable);
+#                  plus a positional control that both the transport and the completeness call sit
+#                  inside verify_complete_change_mode's body.
 #
 # Host table (B/C node paths verified 2026-08-11 by outer ssh probes):
 #   B = orangevps.wan.hwang.men   node: ~/.nvm/versions/node/v22.23.1/bin (also v25.2.0)
@@ -164,6 +186,7 @@ takeover_root=""  # --takeover-root: ABSOLUTE path (on the remote host) of the s
 verify_adr_flip=0 # 1 = GOAL-016-AC-248: read the target project's OWN adr-checker flip on the host and transport only its AC-248 record
 adr_flip_root=""  # --target-root: ABSOLUTE path (on the remote host) of the quay-driven project being evidenced
 adr_flip_task=""  # --task-id: the task IN THAT PROJECT whose driven-out fix the record is about
+verify_complete_change=0 # 1 = GOAL-016-AC-249: read the SAME task's commit_files UNION (code side AND ADR-007 doc side) and transport only its AC-249 record
 selfcheck_evidence=0
 selfcheck_evidence_scenario="both"
 selfcheck_evidence_completeness=0
@@ -172,6 +195,7 @@ selfcheck_upgrade_pairing=0  # 1 = hermetic controls of check_upgrade_pairing (A
 selfcheck_transport_closure_flag=0  # 1 = hermetic closure controls of the shipped set (AC1..AC4)
 selfcheck_takeover_transport_flag=0 # 1 = hermetic controls of the AC-247 transport (GOAL-016)
 selfcheck_adrflip_transport_flag=0  # 1 = hermetic controls of the AC-248 transport (GOAL-016)
+selfcheck_complete_change_transport_flag=0 # 1 = hermetic controls of the AC-249 transport (GOAL-016)
 while [ $# -gt 0 ]; do
   case "$1" in
     --root) repo_root="$2"; shift 2 ;;
@@ -188,8 +212,10 @@ while [ $# -gt 0 ]; do
     --verify-takeover) verify_takeover=1; shift ;;
     --takeover-root) takeover_root="$2"; shift 2 ;;
     --verify-adr-flip) verify_adr_flip=1; shift ;;
+    # --target-root / --task-id 由 AC-248 与 AC-249 两条 verify 模式【共用】（同一条被驱动任务的两条读数）。
     --target-root) adr_flip_root="$2"; shift 2 ;;
     --task-id) adr_flip_task="$2"; shift 2 ;;
+    --verify-complete-change) verify_complete_change=1; shift ;;
     --selfcheck-evidence)
       selfcheck_evidence=1
       case "${2:-}" in positive|negative|both) selfcheck_evidence_scenario="$2"; shift 2 ;; *) shift ;; esac
@@ -200,6 +226,7 @@ while [ $# -gt 0 ]; do
     --selfcheck-transport-closure) selfcheck_transport_closure_flag=1; shift ;;
     --selfcheck-takeover-transport) selfcheck_takeover_transport_flag=1; shift ;;
     --selfcheck-adrflip-transport) selfcheck_adrflip_transport_flag=1; shift ;;
+    --selfcheck-complete-change-transport) selfcheck_complete_change_transport_flag=1; shift ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -1267,6 +1294,148 @@ if [ "${selfcheck_adrflip_transport_flag}" -eq 1 ]; then
   exit $?
 fi
 
+# ── selfcheck_complete_change_transport — hermetic controls of the AC-249 transport ─────────────
+# 与 selfcheck_adrflip_transport 同形（同一条纪律、同一组原语），⛔ 不复刻一份判定逻辑：
+#   ① 正控制：evidence 里有 ac=GOAL-016-AC-249 ⇒ transport 追加进载体 + 声明集合 [GOAL-016-AC-249]
+#      ⇒ COMPLETE（exit 0），且载体里真的多了那一行。
+#   ② 负控制（★传输成功★ 不得被读成 ★产出成功★）：evidence 只有别的 ac ⇒ 声明集合求差 ⇒
+#      NOT-EVALUATED（exit 1）。
+#   ③ 负控制：evidence 缺失 / 零行 ⇒ transport 返回非 0 + NOT-EVALUATED（⛔ 不静默 exit 0）。
+#   ④ AC-249 专有【字段谓词】控制：用**与 goal criterion 同一组谓词**（python，逐字同形）读运输回来的
+#      记录——正样本必须过；【只代码】与【只文档】两条冒充样本必须【各自】不过，`./src/...` 形态也必须
+#      不过 ⇒ 「单边不算」与「前缀必须原样」这两条真的能取假（⛔ 不是只断言「好输入能过」）。
+#   ⑤ 结构性（位置）：transport + completeness 两个调用点都必须在 verify_complete_change_mode 函数体内。
+selfcheck_complete_change_transport() {
+  local tmp rc=0 carrier ev out n hits cc_pos cc_code cc_doc cc_dot
+  tmp="$(mktemp -d 2>/dev/null)" || { echo "selfcheck-complete-change-transport: FAIL — cannot create temp dir" >&2; return 1; }
+  carrier="${tmp}/carrier.jsonl"
+
+  # ① 正控制：一条同时含代码面与文档面的并集
+  cat > "${tmp}/ev-ac249.jsonl" <<'EVID'
+{"build_sha":"0123456789abcdef0123456789abcdef01234567","ts":"2026-09-12T00:00:00Z","ac":"GOAL-016-AC-249","host":"instance-20221019-1509","project_root":"/home/yale/work/archguard","task_id":"TASK-89","commit_files":["scripts/check-adr.ts","tests/unit/scripts/check-adr.test.ts","quay-adr/ADR-007.md","tasks/TASK-89.md"]}
+EVID
+  if ! out="$(transport_evidence_append "${carrier}" "${tmp}/ev-ac249.jsonl")"; then rc=1; fi
+  echo "selfcheck-complete-change-transport: positive append → ${out}"
+  printf '%s' "${out}" | grep -q 'appended=1' || rc=1
+  n="$(grep -c '.' "${carrier}" 2>/dev/null || true)"
+  [ -n "${n}" ] || n=0
+  [ "${n}" = "1" ] || { echo "selfcheck-complete-change-transport: positive carrier lines=${n} (expect 1)" >&2; rc=1; }
+  if check_evidence_completeness "${tmp}/ev-ac249.jsonl" "GOAL-016-AC-249"; then
+    echo "selfcheck-complete-change-transport: positive completeness → COMPLETE (exit 0)"
+  else
+    echo "selfcheck-complete-change-transport: positive completeness FAIL — declared ac set present but not judged COMPLETE" >&2; rc=1
+  fi
+
+  # ② 负控制：只有别的 ac
+  cat > "${tmp}/ev-other.jsonl" <<'EVID'
+{"build_sha":"0123456789abcdef0123456789abcdef01234567","ts":"2026-09-12T00:00:01Z","ac":"GOAL-016-AC-248","host":"instance-20221019-1509","project_root":"/home/yale/work/archguard"}
+EVID
+  transport_evidence_append "${carrier}" "${tmp}/ev-other.jsonl" >/dev/null 2>&1 || true
+  if check_evidence_completeness "${tmp}/ev-other.jsonl" "GOAL-016-AC-249" >/dev/null 2>&1; then
+    echo "selfcheck-complete-change-transport: negative(other-ac) FAIL — a run that produced the WRONG record was judged complete" >&2; rc=1
+  else
+    echo "selfcheck-complete-change-transport: negative(other-ac) → NOT-EVALUATED (exit non-zero, as required — transport success ≠ production success)"
+  fi
+
+  # ③ 负控制：缺失 / 零行证据
+  if transport_evidence_append "${carrier}" "${tmp}/missing.jsonl" >/dev/null 2>&1; then
+    echo "selfcheck-complete-change-transport: negative(missing) FAIL — returned success" >&2; rc=1
+  fi
+  : > "${tmp}/empty.jsonl"
+  if transport_evidence_append "${carrier}" "${tmp}/empty.jsonl" >/dev/null 2>&1; then
+    echo "selfcheck-complete-change-transport: negative(zero-lines) FAIL — returned success" >&2; rc=1
+  fi
+  echo "selfcheck-complete-change-transport: negative(missing/zero-lines) → NOT-EVALUATED (exit non-zero, as required)"
+
+  # ④ 字段谓词控制：同一组谓词（逐字同形于 goal criterion 的那两行 any(...)）读运输回来的记录。
+  #    正样本 1 条；三段冒充（只代码 / 只文档 / `./src` 形态）必须【各自】取不到真。
+  cc_pos="$(python3 - "${carrier}" <<'PY'
+import json, sys
+ok = False
+for line in open(sys.argv[1], encoding="utf-8"):
+    if not line.strip():
+        continue
+    r = json.loads(line)
+    if r.get("ac") != "GOAL-016-AC-249":
+        continue
+    cf = r.get("commit_files")
+    ok = (isinstance(cf, list) and bool(cf)
+          and any(str(x).startswith(("src/", "scripts/")) for x in cf)
+          and any(("ADR-007" in str(x)) or str(x).startswith("docs/adr") for x in cf)
+          and bool(r.get("task_id")))
+print("1" if ok else "0")
+PY
+)"
+  cc_code="$(python3 - "${carrier}" <<'PY'
+import json, sys
+# 冒充形态一：并集只有代码面（一个完美但【不完整】的修复）
+ok = False
+for line in open(sys.argv[1], encoding="utf-8"):
+    if not line.strip():
+        continue
+    r = json.loads(line)
+    if r.get("ac") != "GOAL-016-AC-249":
+        continue
+    cf = ["scripts/check-adr.ts", "tests/unit/scripts/check-adr.test.ts"]
+    ok = (any(str(x).startswith(("src/", "scripts/")) for x in cf)
+          and any(("ADR-007" in str(x)) or str(x).startswith("docs/adr") for x in cf))
+print("0" if ok else "1")
+PY
+)"
+  cc_doc="$(python3 - "${carrier}" <<'PY'
+import json, sys
+# 冒充形态二：并集只有文档面（只同步文档、没改代码）
+ok = False
+for line in open(sys.argv[1], encoding="utf-8"):
+    if not line.strip():
+        continue
+    r = json.loads(line)
+    if r.get("ac") != "GOAL-016-AC-249":
+        continue
+    cf = ["quay-adr/ADR-007.md", "tasks/TASK-89.md"]
+    ok = (any(str(x).startswith(("src/", "scripts/")) for x in cf)
+          and any(("ADR-007" in str(x)) or str(x).startswith("docs/adr") for x in cf))
+print("0" if ok else "1")
+PY
+)"
+  cc_dot="$(python3 - "${carrier}" <<'PY'
+import json, sys
+# 冒充形态三：路径带 `./` 前缀 —— criterion 的 startswith("src/") 分支必须因此取假
+ok = False
+for line in open(sys.argv[1], encoding="utf-8"):
+    if not line.strip():
+        continue
+    r = json.loads(line)
+    if r.get("ac") != "GOAL-016-AC-249":
+        continue
+    cf = ["./scripts/check-adr.ts", "quay-adr/ADR-007.md"]
+    ok = (any(str(x).startswith(("src/", "scripts/")) for x in cf)
+          and any(("ADR-007" in str(x)) or str(x).startswith("docs/adr") for x in cf))
+print("0" if ok else "1")
+PY
+)"
+  echo "selfcheck-complete-change-transport: commit-files-predicate positive=${cc_pos} impostors-refused(code=${cc_code},doc=${cc_doc},dot-slash=${cc_dot}) (expect 1/1/1/1 — 单边不算 + 前缀必须原样，两种都能取假)"
+  [ "${cc_pos}" = "1" ] || rc=1
+  [ "${cc_code}" = "1" ] || rc=1
+  [ "${cc_doc}" = "1" ] || rc=1
+  [ "${cc_dot}" = "1" ] || rc=1
+
+  # 结构性控制（位置）：传输 + 完整性核对两个调用点都必须在 verify_complete_change_mode 函数体内。
+  hits="$(sed -n '/^verify_complete_change_mode()/,/^}$/p' "$0" 2>/dev/null | sed 's/#.*//' \
+          | grep -c 'transport_evidence_append\|check_evidence_completeness' || true)"
+  echo "selfcheck-complete-change-transport: write-points(in-verify_complete_change_mode) hits=${hits} (expect >=2)"
+  [ "${hits:-0}" -ge 2 ] 2>/dev/null || rc=1
+
+  rm -rf "${tmp}"
+  if [ "${rc}" -eq 0 ]; then echo "selfcheck-complete-change-transport: PASS"; else echo "selfcheck-complete-change-transport: FAIL" >&2; fi
+  return "${rc}"
+}
+
+if [ "${selfcheck_complete_change_transport_flag}" -eq 1 ]; then
+  selfcheck_complete_change_transport
+  exit $?
+fi
+
 # ── selfcheck_evidence_completeness — hermetic controls of check_evidence_completeness (AC7/AC8) ──
 # 两个方向：① 「预期 6 种、实际 2 种」⇒ PARTIAL（exit 2）且逐条列出 4 个缺失 ac；② 全产出 ⇒ COMPLETE
 # （exit 0）。另含全缺 ⇒ NOT-EVALUATED（exit 1）。offline：temp dir + python3，无 build/scp/ssh。
@@ -2035,6 +2204,139 @@ REMOTE
   echo "develop-deliver: --verify-adr-flip OK — GOAL-016-AC-248 record transported into ${local_carrier}"
   return 0
 }
+
+# validate_complete_change_args — 与 validate_adr_flip_args 同一条纪律（同两个共用旋钮，同一组理由）：
+#   · --target-root 必须是【目标机上的绝对路径】（相对路径会静默落到远端 $HOME ⇒ 被取证的是另一个项目）；
+#   · --task-id 必填（让脚本去猜 / 取最新一条，正是 AC-207 已经踩过的坑）。
+validate_complete_change_args() {
+  if [ -z "${adr_flip_root}" ]; then
+    echo "develop-deliver: --verify-complete-change requires --target-root <absolute path ON the remote host of the quay-driven project>" >&2
+    return 1
+  fi
+  case "${adr_flip_root}" in
+    /*) ;;
+    *) echo "develop-deliver: --verify-complete-change --target-root must be an ABSOLUTE path on the remote host (got: ${adr_flip_root})" >&2; return 1 ;;
+  esac
+  if [ -z "${adr_flip_task}" ]; then
+    echo "develop-deliver: --verify-complete-change requires --task-id <the task in THAT project whose driven-out complete change the record is about>" >&2
+    return 1
+  fi
+  return 0
+}
+
+# ── verify_complete_change_mode — GOAL-016-AC-249：同一任务的改动必须【成套】────────────────────
+# 与 verify_adr_flip_mode / verify_takeover_mode 的区别：本条量的是**同一个 task_id 名下全部提交的
+# 文件并集**是否**同时**含代码面（`src/`|`scripts/`）与 ADR-007 文档面（含 `ADR-007`|`docs/adr`）。
+# ⛔ 与 AC-248 的两条读数绑在【同一次驱动产出】上：两条读的是同一个被驱动任务，各自能独立 pass/fail，
+# 记录也各写各的（⛔ 不互相冒充——一个只改 `src/` 的完美修复满足 AC-248、不满足 AC-249）。
+# ⛔ 本模式【不驱动】任何任务：被取证的任务由目标项目自己的 drivers 驱动到 done，本模式只读产物。
+verify_complete_change_mode() {
+  local build_date local_carrier fail hk target remote_script out remote_rc remote_log remote_evidence evidence_local ck_rc
+  build_date="$(git -C "${repo_root}" log -1 --format=%cI refs/heads/develop 2>/dev/null || echo "")"
+  local_carrier="${repo_root}/.quay/productization-verification.jsonl"
+  echo "develop-deliver: --verify-complete-change develop=${develop_tip:0:12} build_date=${build_date} target_root=${adr_flip_root:-<unset>} task_id=${adr_flip_task:-<unset>} carrier=${local_carrier}"
+  validate_complete_change_args || return 2
+  # 本次运行【声明要产出】的 ac 种类（⛔ 不硬编码数字，声明的是种类本身）：只有 AC-249 一种。
+  local expected_acs="GOAL-016-AC-249"
+  fail=0
+  for hk in ${hosts}; do
+    target="${host_target[$hk]:-}"
+    if [ -z "${target}" ]; then
+      echo "develop-deliver: ${hk} — unknown host key (NOT-EVALUATED)"
+      fail=1
+      continue
+    fi
+    echo "develop-deliver: ${hk} (${target}) — scp verify-deliver-coldstart.sh + its FULL closure (\$SCRIPT_DIR siblings + node_modules deps) + SPEC + both .tgz"
+    if ! ship_verify_closure "${target}" "${quay_tgz}" "${qn_tgz}"; then
+      echo "develop-deliver: ${hk} (${target}) — scp FAILED (NOT-EVALUATED)"
+      fail=1
+      continue
+    fi
+    remote_script=$(cat <<REMOTE
+$(verify_node_export_for "${hk}")
+EV="\${HOME}/quay-verify-completechange-evidence-${develop_tip:0:8}.jsonl"
+rm -f "\${EV}"
+bash "\${HOME}/verify-deliver-coldstart.sh" \
+  --tgz "\${HOME}/$(basename "${quay_tgz}")" \
+  --tgz-native "\${HOME}/$(basename "${qn_tgz}")" \
+  --build-sha "${develop_tip}" \
+  --build-date "${build_date}" \
+  --host "${hk}" \
+  --ac89 "\${EV}" \
+  --spec "\${HOME}/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md" \
+  --prefix "\${HOME}/quay-verify-completechange-${develop_tip:0:8}.npm" \
+  --project "quay-verify-completechange-${develop_tip:0:8}" \
+  --root "\${HOME}/quay-verify-completechange-${develop_tip:0:8}-root" \
+  --ac249-complete-change \
+  --target-root "${adr_flip_root}" \
+  --task-id "${adr_flip_task}"
+RC=\$?
+echo "VERIFY-RC \${RC}"
+if [ -f "\${EV}" ]; then
+  echo "EVIDENCE-PATH \${EV}"
+  echo "EVIDENCE-LINES \$(wc -l < "\${EV}")"
+else
+  echo "EVIDENCE-ABSENT \${EV}"
+fi
+REMOTE
+)
+    set +e
+    out="$(ssh "${ssh_opts[@]}" "${target}" "bash -s" <<< "${remote_script}" 2>&1)"
+    remote_rc=$?
+    set -e
+    remote_log="${repo_root}/.quay/verify-completechange-remote-${hk}-${develop_tip:0:8}.log"
+    mkdir -p "$(dirname "${remote_log}")"
+    printf '%s\n' "${out}" > "${remote_log}"
+    echo "develop-deliver: ${hk} (${target}) remote stdout persisted → ${remote_log} (rc=${remote_rc})"
+    remote_evidence="$(printf '%s\n' "${out}" | grep -oE 'EVIDENCE-PATH .*' | tail -1 | sed 's/^EVIDENCE-PATH //' || echo "")"
+    if [ -z "${remote_evidence}" ]; then
+      echo "develop-deliver: ${hk} (${target}) — NOT-EVALUATED (remote produced no evidence path)"
+      printf '%s\n' "${out}" | tail -12
+      fail=1
+      continue
+    fi
+    evidence_local="${repo_root}/.quay/verify-completechange-evidence-${hk}-${develop_tip:0:8}.jsonl"
+    rm -f "${evidence_local}"
+    if ! scp "${ssh_opts[@]}" "${target}:${remote_evidence}" "${evidence_local}" >/dev/null 2>&1; then
+      echo "develop-deliver: ${hk} (${target}) — evidence scp-back FAILED (NOT-EVALUATED)"
+      fail=1
+      continue
+    fi
+    # ⚠️ 证据缺失/不可读/零行 ⇒ transport_evidence_append 自己返回非 0 + NOT-EVALUATED（⛔ 不静默 exit 0）。
+    if ! transport_evidence_append "${local_carrier}" "${evidence_local}"; then
+      echo "develop-deliver: ${hk} (${target}) — evidence NOT-EVALUATED (no transport)"
+      rm -f "${evidence_local}"
+      fail=1
+      continue
+    fi
+    # ⚠️ if-形（⛔ 不是裸调用 + 下一行 `ck_rc=$?`）：本脚本 set -e，裸调用在非 0 时会让脚本在本行静默
+    #    中止 —— 后续那条 NOT-EVALUATED 痕迹与本模式的最终 FAILED 摘要都不会出现（同 AC-248 实测）。
+    if check_evidence_completeness "${evidence_local}" "${expected_acs}"; then ck_rc=0; else ck_rc=$?; fi
+    if [ "${ck_rc}" != "0" ]; then
+      echo "develop-deliver: ${hk} (${target}) — NOT-EVALUATED (declared ac set [${expected_acs}] not present in transported evidence: rc=${ck_rc})"
+      fail=1
+    else
+      echo "develop-deliver: ${hk} (${target}) — declared ac set [${expected_acs}] transported into ${local_carrier} ✓"
+    fi
+    rm -f "${evidence_local}"
+  done
+  if [ "${fail}" -eq 1 ]; then
+    echo "develop-deliver: --verify-complete-change FAILED (a host produced no AC-249 record — see per-host lines above)" >&2
+    return 1
+  fi
+  echo "develop-deliver: --verify-complete-change OK — GOAL-016-AC-249 record transported into ${local_carrier}"
+  return 0
+}
+
+if [ "${verify_complete_change}" -eq 1 ]; then
+  # ⛔ 用法错误在 build 之前判（一个坏参数必须只花一次用法错误的代价，⛔ 不是一次 develop-tip 构建）。
+  validate_complete_change_args || exit 2
+  if ! build_develop_tgz; then
+    exit 1
+  fi
+  verify_complete_change_mode
+  exit $?
+fi
 
 if [ "${verify_adr_flip}" -eq 1 ]; then
   # ⛔ 用法错误在 build 之前判（一个坏参数必须只花一次用法错误的代价，⛔ 不是一次 develop-tip 构建）。
