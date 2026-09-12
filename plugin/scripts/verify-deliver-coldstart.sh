@@ -65,7 +65,7 @@
 #       [--test-command <cmd>] [--tmux-session <sess>] \
 #       [--wait <s>] [--liveness-window <min>] \
 #       [--skip-cold-start-drive] [--cold-start-drive] [--verify-only] [--require-live] \
-#       [--evidence <path>] [--ac89 <path>] [--host <B|C>] [--spec <path>] [--channel npm-global|marketplace] [--ac205-session] [--ac207-e2e] [--ac239-e2e] [--ac247-takeover --takeover-root <dir>] [--ac248-adr-flip --target-root <dir>] [--selfcheck] [--help] \
+#       [--evidence <path>] [--ac89 <path>] [--host <B|C>] [--spec <path>] [--channel npm-global|marketplace] [--ac205-session] [--ac207-e2e] [--ac239-e2e] [--ac247-takeover --takeover-root <dir>] [--ac248-adr-flip --target-root <dir>] [--ac249-complete-change --target-root <dir> --task-id <id>] [--selfcheck] [--help] \
 #       [--target-launcher <l>] [--target-model <m>] [--target-auth <a>] [--driving-profiles <p>]
 #
 #   --build-root <repo> 该次验证【自己】从 <repo> 的 develop-tip 现 build quay+quay-native tgz
@@ -128,7 +128,19 @@
 #                    两次运行只差【修复本身】：两个修订都用 `git archive` 物化到独立临时路径再跑，
 #                    ⛔ 不改活树、不靠 stash 往返。任一件读不出 ⇒ ⛔ 不写记录 + 可区分
 #                    NOT-EVALUATED + 退出非 0（未测量 ≠ 不合格；⛔ 不写 adr_check_after_detects=false）。
+#   --ac249-complete-change  ⑨b AC-249（GOAL-016）：量「被驱动的【那一个】任务有没有做【成套】修改」——
+#                    代码修复（`src/`|`scripts/`）与 ADR-007 文档同步（路径含 `ADR-007` 或以 `docs/adr`
+#                    开头）必须【同时】非空，单边不算。判据读的唯一字段是 `commit_files`，其值必须是
+#                    **同一 task_id 名下全部提交的文件并集**（按【位置】归属，⛔ 不按提交信息文本），
+#                    ⛔ 不是「最新一条实现提交」——既有 `ac207_select_implementation_commit` 返回单条，
+#                    一个把代码与文档拆成两个提交的【完全合格】任务在它下面必然只看到一半 ⇒ 两个方向
+#                    都恒假（硬规则 4c：判据点名的量到不了验收那一刻）。任一侧为空 ⇒ ⛔ 零记录 +
+#                    可区分 `AC249-INCOMPLETE-CHANGE` + 退出非 0；并集读不出 ⇒ ⛔ 零记录 + `NOT-EVALUATED`
+#                    （未测量 ≠ 不合格，硬规则 3b）。
+#                    与 AC-248 共用 `--target-root` / `--task-id`：两条绑在【同一次驱动产出】上，
+#                    是同一个被驱动任务的两条读数（各自能独立 pass/fail，⛔ 不互相冒充）。
 #   --target-root <path>  被取证项目根（目标机上的绝对路径；须已存在 .quay/config.yml，⛔ 非本仓库）。
+#                         AC-248 / AC-249 共用（两条量的是同一个被驱动任务）。
 #   --ac250-web-observe  ⑩ AC-250（GOAL-016，观察面）：量「目标项目的 web 是否真反映进展」。三步读数，
 #                    缺一不可（GOAL-016 风险 3：「serve 起来 / 端口在听 / HTTP 200」与「有个 web 活着」同形）：
 #                    ① bind_host ← 目标机 `ss -ltnp` 上该端口的【真实监听地址】且 == 该机 tailscale0 的真实
@@ -441,6 +453,27 @@ AC248_EVALUATED=0                            # 1 = 全部读数成立并已写�
 AC248_WRITTEN_THIS_RUN=0                     # 1 = 本次运行写出了 AC-248 记录
 AC248_WRITTEN_ROOT=""
 
+# ── ⑨b AC-249（GOAL-016）：同一任务的改动必须【成套】—— 代码面与 ADR-007 文档面同时非空 ──────────
+# ⚠️ 与 AC-248 的区别（两条不能互相冒充，各自的读数各写各的记录）：
+#   AC-248 判「修对了」（目标项目自己的检查器从看不见变看见一个工具）；AC-249 判「修全了」
+#   （同一 task 名下 commit_files 并集里，代码路径与 ADR-007 文档路径**同时**存在）。
+#   ⇒ 一个只改 `src/` 的完美修复满足 AC-248、⛔ 不满足 AC-249。
+# 唯一的判据字段是 `commit_files`（criterion 只读它），其值 = 同一 task_id 名下【全部提交的文件并集】。
+# ⛔ 不复用 AC248_* 变量，否则两条 AC 无法分别 pass/fail。
+AC249_COMPLETE_CHANGE=0                      # 1 = --ac249-complete-change 触发（opt-in）
+AC249_HOST=""
+AC249_PROJECT_ROOT=""
+AC249_TASK_ID=""
+AC249_COMMIT_FILES_JSON=""                   # 并集（JSON 数组，仓库相对路径原样）
+AC249_UNION_SHAS=""                          # 并集用到的提交（空格分隔；留档：可独立复算）
+AC249_CODE_HITS=""                           # 代码面命中（`src/`|`scripts/` 前缀）——判据的一侧
+AC249_DOC_HITS=""                            # 文档面命中（含 ADR-007 | `docs/adr` 前缀）——判据的另一侧
+AC249_OUTCOME=""                             # ok | incomplete-change:<side> | not-evaluated:<why>（三态可区分）
+AC249_EVALUATED=0                            # 1 = 并集读出且两侧谓词都成立并已写出记录
+AC249_WRITTEN_THIS_RUN=0                     # 1 = 本次运行写出了 AC-249 记录
+AC249_WRITTEN_ROOT=""
+AC249_SPAN_STATE=""                          # D 来源的区间状态（留档：span/too-long/not-an-ancestor/unreadable）
+
 # ── ⑩ AC-250（GOAL-016 观察面）：CLI 旋钮 ──────────────────────────────────────────────────
 # ⚠️ 这些【必须】在参数解析【之前】声明：解析循环上面写的是 `VAR=1`/`VAR="$2"`，而本文件的
 # 声明块若排在解析之后，就会把解析出来的值【覆盖回默认值】——2026-09-12 实测踩过一次：
@@ -494,9 +527,13 @@ while [ $# -gt 0 ]; do
     --ac247-takeover) AC247_TAKEOVER=1; shift ;;
     --takeover-root) AC247_ROOT="$2"; shift 2 ;;
     --ac248-adr-flip) AC248_ADR_FLIP=1; shift ;;
+    # --target-root / --task-id 是 AC-248 与 AC-249【共用】的两个入参：两条量的是同一个被驱动任务
+    # （AC-249 正文逐字：两条绑在同一次驱动产出上）。⛔ 不给 AC-249 再开一份同义旋钮——那会让「同一个
+    # task_id」变成调用方可以拧出分歧的两个旋钮（硬规则 3b 的同族：看起来覆盖了，实际可以不同）。
     --target-root) AC248_ROOT="$2"; shift 2 ;;
     --task-id) AC248_TASK_ID_ARG="$2"; shift 2 ;;
     --pre-rev) AC248_PRE_REV_ARG="$2"; shift 2 ;;
+    --ac249-complete-change) AC249_COMPLETE_CHANGE=1; shift ;;
     --ac250-web-observe) AC250_WEB_OBSERVE=1; shift ;;
     --ac250-ssh) AC250_SSH="$2"; shift 2 ;;
     --ac250-root) AC250_ROOT="$2"; shift 2 ;;
@@ -5078,7 +5115,11 @@ AC250NEG
     ac250_pos_ok=0; ac250_neg_ok=0
   fi
 
+  # ⑨b AC-249 的 hermetic 正/负控制独立成一个函数（同上：每条都驱动产品函数，⛔ 不复刻判定逻辑）。
+  selfcheck_ac249; ac249_self_ok=$?
+
   if [ "$d1" = "1" ] && [ "$d2" = "no" ] && [ "$a1" = "1" ] && [ "$a2" = "yes" ] \
+     && [ "${ac249_self_ok:-1}" = "0" ] \
      && [ "$ac247_ok" = "1" ] && [ "$ac247_neg_ok" = "1" ] && [ "$ac247_cnt_ok" = "1" ] \
      && [ "$ac247_cnt_neg_ok" = "0" ] && [ "$ac247_alive_src" = "1" ] \
      && [ "${ac247_status_hits:-0}" -ge 1 ] 2>/dev/null && [ "${ac247_bad_assign:-0}" = "0" ] \
@@ -5139,11 +5180,404 @@ AC250NEG
     echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed); AC-204 carrier record writes the five criterion fields verbatim (forbidden_count=0 integer, enable_declared=true literal) and refuses a forbidden-copy or no-enable record (fail-closed, 成对判定); AC-205 carrier record writes the three criterion fields verbatim (shipped_from_installed_artifact=true + transcript_confirmed=true literals, top-level build_sha) with transcript_confirmed derived from transcript-delivery-check reading the transcript (hit ⇒ delivered / miss ⇒ not) — never from a send exit code — and refuses shipped=false / transcript_confirmed=false / empty-host (fail-closed, AC4 负控制); AC-234 render counts are derived from rendered HTML content (task/goal anchors + round-row anchors — never an HTTP status code, AC2) and can take false (empty-shell page ⇒ 0/0/0); the AC-234 carrier record writes the six criterion fields verbatim (tasks_rendered/goals_rendered/round_records_rendered as JSON integers) and refuses a zero-count or empty-host record (fail-closed, AC4 负控制); the AC-232 carrier record writes the three criterion fields verbatim (goal_write_ok/goal_read_back_ok as JSON literals, goal_records as a JSON integer) with a top-level build_sha anchor, truthfully writes false/0 when the goal write fails or read-back is empty (缺件如实非静默, AC4 负控制 — 写调用 0 与空文件同形), and refuses an empty-host record (fail-closed, 硬规则 3b); AC-207 carrier record writes the eight criterion fields verbatim (produced_by_driver=true literal, gate_events>0, task_status=done, commit_sha/task_id non-empty, commit_files non-empty JSON array with ≥1 path outside the tasks/ goals/ .quay/ triplet, top-level build_sha) and refuses produced_by_driver=false / gate_events=0 / bookkeeping-files-only / no-files (fail-closed, 硬规则 3b); AC-207 implementation-commit SELECTION picks the real implementation commit even when newer bookkeeping commits sit on top of it (the old grep-v-chore-quay-init-then-head-1 form picked the 翻-done commit — gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit), yields empty + non-zero when only bookkeeping commits exist (⇒ no record, never a bookkeeping commit dressed up as one), and the bookkeeping judgment is positional (touched files, not commit-message text); AC-240 run-level closure self-evidence takes three DISTINGUISHABLE values (1 = AC-203 and AC-207 both written by THIS run for the SAME project_root; 0 = this run attempted the e2e but the closure is not self-evidenced, with a non-empty NOTE naming the sub-reason; not-evaluated = --ac207-e2e not passed — 未评估 ≠ 不合格, 硬规则 3b), where 0 also covers the origin defect's own shape (AC-207 written, AC-203 never probed in step⑤) and the both-written-but-different-roots case (the pairing is on the SAME project_root, not on both being non-empty), and the AC-203 generation-side probe/write call is POSITIONALLY inside step5_e2e's body (0 before this task — the same-run pairing existed only as an accident, never as a requirement); segment ① (step1_install, the delivery-install path) leaves the operator's real ~/.claude/settings.json BYTE-IDENTICAL (HOME isolated to \${PREFIX}.home + QUAY_SKIP_PLUGIN_CLI=1 — the CLI materialization that re-reddened AC-161), with the isolated HOME proven to have received the postinstall write (so the green is not a not-run vacuity), and that assertion can take FALSE (isolation target pointed back at the real HOME ⇒ signature changes); and the AC-239 landing-baseline pre-flight classifier takes every value (REUSED⇒compatible / ADOPTED⇒divergent / BLOCKED⇒divergent / CREATED⇒absent / no-line-or-rc≠0⇒unreadable) — so a target copy whose 'develop' is a foreign fork stops ⑦b with an attributable 5-second reading instead of an hour-long poll whose non-done end state is indistinguishable from a worker that failed to implement (gap-aged-project-post-upgrade-driver-e2e 本轮新增); and the AC-247 takeover producer writes its eight criterion fields verbatim (host / project_root / pre_task_count / post_task_count / stale_days / driver_alive / carrier_records, plus the top-level build_sha coming from the ONE anchor choke point — the writer's own body carries no second anchor literal) and refuses EVERY one of them when it cannot be read (including stale_days one thousandth below the 14-day boundary, while 14.000 itself is accepted — so the threshold is neither always-true nor always-false), takes its liveness reading from the SAME status carrier the AC-203 parser reads and never from \`driver start\`'s exit code (negative control: swapping the right-hand side to the start rc flips the predicate), counts the project's OWN task store through its own ABI with ONE implementation read at both moments (a non-JSON or empty CLI reply is NOT a zero — it prints nothing and returns non-zero), and derives stale_days from the HEAD commit time captured BEFORE the takeover action (GOAL-016 AC-247 本轮新增); and the AC-248 adr-check producer reads a FLIP — the SAME reading (the target project's OWN checker's candidate set, taken by calling that checker's own exported enumerator, never a quay-side 「equivalent」 ADR-007 judgment) at the implementation commit's parent and at the implementation commit itself, both materialized with \`git archive\` into isolated paths so the two runs differ by the fix alone; it writes the record ONLY when the newly-entered tool name (the set difference — empty ⇒ no probe ⇒ no record) is strictly outside the before set and strictly inside the after set, refuses reversed direction / \`0\`-\`1\` / \`\"false\"\` strings / missing fields / bookkeeping-only commit_files / empty probe tool, and its writer body carries ZERO \`true\`/\`false\` literals (the booleans are the two run readings verbatim, emitted as JSON booleans; a single run's exit code is never a criterion field — that is exactly the value that is already green today and therefore carries no information) (GOAL-016 AC-248 本轮新增)"
     rc=0
   else
-    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused ac203_parse_alive=$ac203_parse_alive ac203_parse_recs=$ac203_parse_recs ac201_pos_w=$ac201_pos_w ac201_pos_ac=$ac201_pos_ac ac201_neg_w=$ac201_neg_w ac201_neg_lines=$ac201_neg_lines g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused ac204_wrote=$ac204_wrote ac204_fields_ok=$ac204_fields_ok ac204_refused_fc=$ac204_refused_fc ac204_refused_en=$ac204_refused_en ac205_tc_hit=$ac205_tc_hit ac205_tc_miss=$ac205_tc_miss ac205_wrote=$ac205_wrote ac205_fields_ok=$ac205_fields_ok ac205_ship_refused=$ac205_ship_refused ac205_conf_refused=$ac205_conf_refused ac205_host_refused=$ac205_host_refused ac234_tasks_pos=$ac234_tasks_pos ac234_goals_pos=$ac234_goals_pos ac234_rounds_pos=$ac234_rounds_pos ac234_tasks_neg=$ac234_tasks_neg ac234_goals_neg=$ac234_goals_neg ac234_rounds_neg=$ac234_rounds_neg ac234_wrote=$ac234_wrote ac234_fields_ok=$ac234_fields_ok ac234_refused_zc=$ac234_refused_zc ac234_refused_em=$ac234_refused_em ac232_wrote=$ac232_wrote ac232_fields_ok=$ac232_fields_ok ac232_neg_ok=$ac232_neg_ok ac232_refused=$ac232_refused ac207_wrote=$ac207_wrote ac207_fields_ok=$ac207_fields_ok ac207_refused_pdb=$ac207_refused_pdb ac207_refused_ge=$ac207_refused_ge ac207_refused_bkfiles=$ac207_refused_bkfiles ac207_refused_nofiles=$ac207_refused_nofiles ac207_sel_rc=$ac207_sel_rc ac207_only_rc=$ac207_only_rc ac207_bk_tasks_only=$ac207_bk_tasks_only ac207_impl_marker=$ac207_impl_marker ac207_before=$ac207_before ac207_after_neg=$ac207_after_neg ac207_neg_trace=$ac207_neg_trace ac207_after_pos=$ac207_after_pos ac207_pipe_grep=$ac207_pipe_grep ac240_v1=$ac240_v1 ac240_v0=$ac240_v0 ac240_vdiff=$ac240_vdiff ac240_vne=$ac240_vne ac240_step5_hits=$ac240_step5_hits fn_v_pos=$fn_v_pos fn_w_pos=$fn_w_pos fn_iso_written=$fn_iso_written fn_sent_same=$fn_sent_same fn_v_neg=$fn_v_neg fn_w_neg=$fn_w_neg tp_ok=$tp_ok tp_pos_status=$tp_pos_status tp_pos_launcher=$tp_pos_launcher tp_pos_model=$tp_pos_model tp_pos_auth=$tp_pos_auth tp_neg_status=$tp_neg_status tp_neg_rc=$tp_neg_rc tp_ovr_launcher=$tp_ovr_launcher tp_ovr_model=$tp_ovr_model tp_ovr_auth=$tp_ovr_auth tp_res1=$tp_res1 tp_res2=$tp_res2 bl_ok=$bl_ok bl_reused=$bl_reused bl_adopted=$bl_adopted bl_blocked=$bl_blocked bl_created=$bl_created bl_noline=$bl_noline bl_badrc=$bl_badrc"
+    echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 ac249_self_ok=$ac249_self_ok p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused ac203_parse_alive=$ac203_parse_alive ac203_parse_recs=$ac203_parse_recs ac201_pos_w=$ac201_pos_w ac201_pos_ac=$ac201_pos_ac ac201_neg_w=$ac201_neg_w ac201_neg_lines=$ac201_neg_lines g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused ac204_wrote=$ac204_wrote ac204_fields_ok=$ac204_fields_ok ac204_refused_fc=$ac204_refused_fc ac204_refused_en=$ac204_refused_en ac205_tc_hit=$ac205_tc_hit ac205_tc_miss=$ac205_tc_miss ac205_wrote=$ac205_wrote ac205_fields_ok=$ac205_fields_ok ac205_ship_refused=$ac205_ship_refused ac205_conf_refused=$ac205_conf_refused ac205_host_refused=$ac205_host_refused ac234_tasks_pos=$ac234_tasks_pos ac234_goals_pos=$ac234_goals_pos ac234_rounds_pos=$ac234_rounds_pos ac234_tasks_neg=$ac234_tasks_neg ac234_goals_neg=$ac234_goals_neg ac234_rounds_neg=$ac234_rounds_neg ac234_wrote=$ac234_wrote ac234_fields_ok=$ac234_fields_ok ac234_refused_zc=$ac234_refused_zc ac234_refused_em=$ac234_refused_em ac232_wrote=$ac232_wrote ac232_fields_ok=$ac232_fields_ok ac232_neg_ok=$ac232_neg_ok ac232_refused=$ac232_refused ac207_wrote=$ac207_wrote ac207_fields_ok=$ac207_fields_ok ac207_refused_pdb=$ac207_refused_pdb ac207_refused_ge=$ac207_refused_ge ac207_refused_bkfiles=$ac207_refused_bkfiles ac207_refused_nofiles=$ac207_refused_nofiles ac207_sel_rc=$ac207_sel_rc ac207_only_rc=$ac207_only_rc ac207_bk_tasks_only=$ac207_bk_tasks_only ac207_impl_marker=$ac207_impl_marker ac207_before=$ac207_before ac207_after_neg=$ac207_after_neg ac207_neg_trace=$ac207_neg_trace ac207_after_pos=$ac207_after_pos ac207_pipe_grep=$ac207_pipe_grep ac240_v1=$ac240_v1 ac240_v0=$ac240_v0 ac240_vdiff=$ac240_vdiff ac240_vne=$ac240_vne ac240_step5_hits=$ac240_step5_hits fn_v_pos=$fn_v_pos fn_w_pos=$fn_w_pos fn_iso_written=$fn_iso_written fn_sent_same=$fn_sent_same fn_v_neg=$fn_v_neg fn_w_neg=$fn_w_neg tp_ok=$tp_ok tp_pos_status=$tp_pos_status tp_pos_launcher=$tp_pos_launcher tp_pos_model=$tp_pos_model tp_pos_auth=$tp_pos_auth tp_neg_status=$tp_neg_status tp_neg_rc=$tp_neg_rc tp_ovr_launcher=$tp_ovr_launcher tp_ovr_model=$tp_ovr_model tp_ovr_auth=$tp_ovr_auth tp_res1=$tp_res1 tp_res2=$tp_res2 bl_ok=$bl_ok bl_reused=$bl_reused bl_adopted=$bl_adopted bl_blocked=$bl_blocked bl_created=$bl_created bl_noline=$bl_noline bl_badrc=$bl_badrc"
     rc=1
   fi
   rm -rf "$tmp"
   return $rc
+}
+
+# ── ⑨b AC-249 生产者（GOAL-016）：位置说明（⛔ 不要把本段移回 ⑨ AC-248 附近）────────────────────
+# 本段【必须】留在文件靠后的位置：selfcheck 里 AC-248 的【结构】控制 `ac248_seg` 用
+#   sed -n '/^ac248_checker_relpath()/,/^# ── ① 安装/p'
+# 取「⑨ AC-248 生产者段」并断言其中 `adr-ok|ADR-007` 命中数 = 0（quay 侧不得实现任何等价的 ADR-007
+# 判定）。那个区间从 ac248_checker_relpath() 一直延伸到 ① 安装段 —— 【包含了本段原本所在的位置】。
+# AC-249 的判据正文逐字要求按路径匹配 `ADR-007`，故本段一旦落在该区间内，AC-248 的结构控制就会
+# 读到 9 条命中而取假（2026-09-12 实测：adr007-in-producer-hits 0→9，selfcheck 立刻 FAIL）。
+# ⇒ 把本段移到 AC-248 那个区间的【外面】（这里是函数定义区末尾、主流程之前；bash 里顺序无关，
+#   首次调用发生在 main 的 dispatch 处）。
+
+# ── ⑨b AC-249 路径谓词（判据正文的两侧，各自单独成函数）─────────────────────────────────────
+# criterion 逐字：`any(str(x).startswith(("src/","scripts/")))` ∧ `any(("ADR-007" in str(x)) or
+# str(x).startswith("docs/adr"))`。两条谓词在此各成一个函数，criterion 与它是同一组谓词的两侧。
+# ⛔ 前缀形态必须是【仓库相对路径原样】：criterion 用 `startswith`，一个 `./` 前缀即恒假
+#   （Plan 负控制 c 钉的正是这一条）。
+ac249_is_code_path() { case "$1" in src/*|scripts/*) return 0 ;; esac; return 1; }
+ac249_is_adr_doc_path() { case "$1" in *ADR-007*|docs/adr*) return 0 ;; esac; return 1; }
+
+# ── ⑨b AC-249 提交并集（同一 task_id 名下【全部】提交触及的文件）──────────────────────────────
+# 这是本任务的核心缺陷面：既有 `ac207_select_implementation_commit` 返回【单条】「最新实现提交」，
+# 而判据要的是【同一 task_id 下的并集】⇒ 一个把代码与文档拆成两个提交的【完全合格】任务在单条
+# 选择器下必然只看到一半（选中文档提交 ⇒ 代码谓词假；选中代码提交 ⇒ 文档谓词假），两个方向都判红
+# （硬规则 4c：量的产生处到读取处之间隔了一层「只取一条」的中间层）。
+# 归属按【位置】——三条来源，各自都是「提交触及了哪个文件」，⛔ 没有一条读提交信息文本：
+#   A) `task/<task_id>` 分支上、不在 develop 里的提交 —— 分支尚未被回收时的主来源；
+#   B) 触及 `tasks/<task_id>.md` 的提交 —— fan-in 后分支被删时的补齐（任务文件是【位置】锚）；
+#   C) 合并提交（它触及了 `tasks/<task_id>.md`）的右臂 `m^1..m^2` —— 分支被合并掉、merge 提交仍在的形态。
+#   D) **任务文件的【存在区间】**：从【首次触及该任务文件】的提交到【最后一次触及】的提交之间的提交。
+#      ⚠️ 这条不是锦上添花，是【生产常见形态的必需项】：fan-in 走 `merge --ff-only` 把任务分支落到
+#      develop 上（线性推进），随后 worktree/branch 会被 reaper 回收 ⇒ 那时 A) 读不到任何东西，而
+#      B) 只抓得到【触及任务文件】的提交 —— 而**实现提交本身不触及任务文件**（实测 TASK-88：两个实现
+#      提交 `eeadae3a`/`886f40f4` 都不动 `tasks/TASK-88.md`）⇒ 只剩 `tasks/<id>.md` 一条，判据恒红。
+#      区间两端都以任务文件为锚（位置），中间的提交正是该分支以 ff 落入 develop 的那一段。
+#      ⛔ 区间有上界（沿用本文件既有的 50 步先例）：超出 ⇒ 该来源【不贡献】并如实留档区间长度，
+#      而不是把整段历史吞进来（否则一个被远期提交顺手改过的任务文件会把上千提交算成「它的改动」，
+#      并集趋于恒真——那正是本任务要防的恒假的反面）。
+# ⛔ 一律 `--no-merges`：merge 提交上 `git show --name-only` 输出为空 ⇒ 会把「任务明明改了代码」
+#    读成空并集（硬规则 3b：读不懂输入 ⇒ 伪装成没改）——Plan 的「已知陷阱」第一条。
+AC249_SPAN_LIMIT=50                          # D) 区间上界（步数；沿用 AC248_PRE_REV_SPAN 的同一先例）
+# 区间状态（D 的来源分类）——【单独成函数】是为了让「区间怎么算」只有一处定义：并集函数与记录里
+# 的留档字段都调它（⛔ 不复刻一遍判定，硬规则 4 推论三）。打印 "<verdict> <span> <from>"，
+# 其中 <from> 是区间的下界（⛔ 不是 first_touch 自己 —— 区间要【含】它）：
+#   span <n> <rev> | too-long <n> <rev> | not-an-ancestor 0 - | unreadable 0 -
+# ⚠️ <rev> 用 `first_touch^`；first_touch 是【根提交】时它不存在（一个全新项目的首个任务就是这种
+#    形态）⇒ 下界记为 `-`，计数与并集都把 first_touch 自己单独补回来（⛔ 不能因为下界不存在就把
+#    整个区间读成空 —— 那正是硬规则 3b 的「读不懂输入 ⇒ 伪装成没有」）。
+ac249_span_state() {
+  local root="$1" task_id="$2" first_touch last_touch span from=""
+  [ -n "$root" ] && [ -n "$task_id" ] || { printf 'unreadable 0 -\n'; return 0; }
+  first_touch="$(git -C "$root" log --no-merges --all --reverse --format='%H' -- "tasks/$task_id.md" 2>/dev/null | head -1 || true)"
+  last_touch="$(git -C "$root" log --no-merges --all --format='%H' -- "tasks/$task_id.md" 2>/dev/null | head -1 || true)"
+  [ -n "$first_touch" ] && [ -n "$last_touch" ] || { printf 'unreadable 0 -\n'; return 0; }
+  if ! git -C "$root" merge-base --is-ancestor "$first_touch" "$last_touch" 2>/dev/null; then
+    printf 'not-an-ancestor 0 -\n'; return 0
+  fi
+  if git -C "$root" rev-parse --verify --quiet "${first_touch}^" >/dev/null 2>&1; then
+    from="${first_touch}^"
+    span="$(git -C "$root" rev-list --count --no-merges "${from}..${last_touch}" 2>/dev/null || true)"
+  else
+    span="$(git -C "$root" rev-list --count --no-merges "${first_touch}..${last_touch}" 2>/dev/null || true)"
+    case "$span" in ''|*[!0-9]*) span=0 ;; esac
+    span=$((span + 1))
+  fi
+  case "$span" in ''|*[!0-9]*) span=0 ;; esac
+  if [ "$span" -le "$AC249_SPAN_LIMIT" ]; then printf 'span %s %s\n' "$span" "${from:--}"; else printf 'too-long %s %s\n' "$span" "${from:--}"; fi
+}
+
+ac249_union_commit_shas() {
+  local root="$1" task_id="$2" branch base m first_touch last_touch span verdict from _span_n
+  [ -n "$root" ] && [ -n "$task_id" ] || return 1
+  branch="task/$task_id"
+  {
+    # A) 任务分支上、不在 develop 里的提交（fan-in 前 / 分支尚未被回收）
+    if git -C "$root" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1; then
+      base="$(git -C "$root" merge-base "$branch" develop 2>/dev/null || true)"
+      if [ -n "$base" ]; then
+        git -C "$root" log --no-merges --format='%H' "${base}..${branch}" 2>/dev/null || true
+      else
+        git -C "$root" log --no-merges --format='%H' "$branch" 2>/dev/null || true
+      fi
+    fi
+    # B) 触及该任务文件的提交（按位置：看它触及的文件，⛔ 不看提交信息）
+    git -C "$root" log --no-merges --all --format='%H' -- "tasks/$task_id.md" 2>/dev/null || true
+    # C) 合并掉该分支的 merge 提交（它同样以任务的【文件】为锚）的右臂
+    while IFS= read -r m; do
+      [ -n "$m" ] || continue
+      git -C "$root" log --no-merges --format='%H' "${m}^1..${m}^2" 2>/dev/null || true
+    done < <(git -C "$root" log --merges --all --format='%H' -- "tasks/$task_id.md" 2>/dev/null || true)
+    # D) 任务文件的存在区间（两端都以任务文件为锚）。区间怎么算【只有一处定义】：ac249_span_state。
+    span="$(ac249_span_state "$root" "$task_id")"
+    # ⛔ 用 read 取三件读数（⛔ 不 `set --`：那会改写本函数的 $1/$2，是留给下一个改这段的人的雷）
+    read -r verdict _span_n from <<< "$span"
+    if [ "$verdict" = "span" ]; then
+      last_touch="$(git -C "$root" log --no-merges --all --format='%H' -- "tasks/$task_id.md" 2>/dev/null | head -1 || true)"
+      if [ "$from" != "-" ]; then
+        git -C "$root" log --no-merges --format='%H' "${from}..${last_touch}" 2>/dev/null || true
+      else
+        first_touch="$(git -C "$root" log --no-merges --all --reverse --format='%H' -- "tasks/$task_id.md" 2>/dev/null | head -1 || true)"
+        [ -n "$first_touch" ] && printf '%s\n' "$first_touch"
+        git -C "$root" log --no-merges --format='%H' "${first_touch}..${last_touch}" 2>/dev/null || true
+      fi
+    fi
+  } | awk 'NF && !seen[$0]++'
+}
+
+# 并集（按【来源顺序】去重，保持各来源内的既有顺序）：每个提交各自的 `git show --name-only`。
+# ⚠️ 这里【不】承诺「代码提交在前」这种先后 —— 来源 A 是 `git log` 的默认顺序（新→旧），所以
+#    并在最前的是【最新】那条提交的文件。顺序对判定不承重（判据只看集合），故不额外排序。
+ac249_union_files() {
+  local root="$1" task_id="$2" sha
+  [ -n "$root" ] && [ -n "$task_id" ] || return 1
+  while IFS= read -r sha; do
+    [ -n "$sha" ] || continue
+    ac207_commit_files "$root" "$sha"
+  done < <(ac249_union_commit_shas "$root" "$task_id") \
+    | awk 'NF && !seen[$0]++'
+}
+
+# 读数：把并集拆成「代码面命中」「文档面命中」两份清单（都用【产品谓词】判，⛔ 不另写一套正则）。
+ac249_side_hits() {
+  local root="$1" task_id="$2" side="$3" f
+  [ -n "$root" ] && [ -n "$task_id" ] && [ -n "$side" ] || return 1
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if [ "$side" = "code" ]; then
+      ac249_is_code_path "$f" && printf '%s\n' "$f"
+    else
+      ac249_is_adr_doc_path "$f" && printf '%s\n' "$f"
+    fi
+  done < <(ac249_union_files "$root" "$task_id")
+}
+
+# ── ⑨b AC-249 记录写（fail-closed，硬规则 3b）──────────────────────────────────────────────
+# 经 ac89_append_goal009 统一补 top-level build_sha/ts（AC-214 唯一补锚 choke point）——⛔ 本函数体内
+# 不出现 `build_sha` 字面量：多一个补锚点 = 下次改锚格式必漏一处（该 choke point 的注释逐字禁止）。
+# 双向 fail-closed：`commit_files` 非空列表 ∧ ≥1 条 `src/`|`scripts/` 前缀 ∧ ≥1 条含 `ADR-007`|
+# `docs/adr` 前缀，三条全真才写。任一条为假 ⇒ return 1、⛔ 一条都不写（⛔ 不写「只改了一边」的记录
+# 充数——那正是判据要取假的方向）。判据正文与该 node 片段是同一组谓词的两侧，改动须同步。
+write_ac249_record() {
+  local host="$1" project_root="$2" task_id="$3" commit_files_json="$4" extras_json="${5:-}"
+  [ -n "$host" ] || return 1
+  [ -n "$project_root" ] || return 1
+  [ -n "$task_id" ] || return 1
+  [ -n "$commit_files_json" ] || return 1
+  printf '%s' "$commit_files_json" | "$VC_NODE" --no-warnings -e '
+    let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
+      let f; try { f=JSON.parse(s); } catch { process.exit(2); }
+      if (!Array.isArray(f) || f.length===0) process.exit(2);
+      const code=f.some(p=>{const x=String(p); return x.startsWith("src/")||x.startsWith("scripts/");});
+      const doc =f.some(p=>{const x=String(p); return x.includes("ADR-007")||x.startsWith("docs/adr");});
+      process.exit(code&&doc ? 0 : 1);
+    });' || return 1
+  ac89_append_goal009 ",\"ac\":\"GOAL-016-AC-249\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"task_id\":\"$task_id\",\"commit_files\":$commit_files_json${extras_json}"
+}
+
+# ── ⑨b AC-249 步骤（GOAL-016-AC-249）──────────────────────────────────────────────────────
+# 顺序固定：① 读同一 task_id 名下全部提交的文件并集 → ② 用产品谓词拆出代码面/文档面两份命中 →
+# ③ 两侧同时非空才写记录；任一侧为空 ⇒ ⛔ 零记录 + 可区分 `AC249-INCOMPLETE-CHANGE` + 退出非 0；
+#    并集读不出 ⇒ ⛔ 零记录 + `AC249-NOT-EVALUATED`（未测量 ≠ 不合格，也⛔ 不写 `commit_files: []`）。
+# 三态实测可区分：完整 ⇒ 1 条；只代码 ⇒ 0 条；只文档 ⇒ 0 条（Plan step 3）。
+step_ac249_complete_change() {
+  local root="$1" extras="" code_list="" doc_list=""
+  local -a _ac249_code=() _ac249_doc=()
+  echo "== ⑨b AC-249 complete change: the SAME task must touch code AND the ADR-007 doc (one side alone does not count) =="
+  if [ "$AC249_COMPLETE_CHANGE" != "1" ]; then
+    echo "  not-evaluated: --ac249-complete-change 未传入（未尝试 ≠ 不合格）"
+    return 0
+  fi
+  if [ -z "$root" ] || [ ! -d "$root" ]; then
+    AC249_OUTCOME="not-evaluated:target-root-not-a-dir"
+    echo "  AC249-NOT-EVALUATED: --target-root 不是目录: ${root:-<empty>}" >&2
+    return 0
+  fi
+  if [ ! -f "$root/.quay/config.yml" ]; then
+    AC249_OUTCOME="not-evaluated:target-root-not-a-quay-project"
+    echo "  AC249-NOT-EVALUATED: $root 下没有 .quay/config.yml —— 本步骤测的是【被 quay 驱动的存量项目】，不是新装" >&2
+    return 0
+  fi
+  if [ -z "${AC248_TASK_ID_ARG:-}" ]; then
+    AC249_OUTCOME="not-evaluated:task-id-absent"
+    echo "  AC249-NOT-EVALUATED: --task-id 未传入 ⇒ 不知道该读哪条任务的产出（⛔ 不猜、不取最新一条）" >&2
+    return 0
+  fi
+  AC249_ROOT="$root"
+  AC249_HOST="$(hostname 2>/dev/null || echo '')"
+  AC249_PROJECT_ROOT="$(cd "$root" && pwd -P)"
+  AC249_TASK_ID="$AC248_TASK_ID_ARG"
+  echo "  [⑨b] host=$AC249_HOST project_root=$AC249_PROJECT_ROOT task_id=$AC249_TASK_ID"
+  mapfile -t _ac249_shas < <(ac249_union_commit_shas "$root" "$AC249_TASK_ID")
+  AC249_UNION_SHAS=""
+  [ "${#_ac249_shas[@]}" -gt 0 ] && printf -v AC249_UNION_SHAS '%s\n' "${_ac249_shas[@]}"
+  mapfile -t _ac249_files < <(ac249_union_files "$root" "$AC249_TASK_ID")
+  mapfile -t _ac249_code < <(ac249_side_hits "$root" "$AC249_TASK_ID" code)
+  mapfile -t _ac249_doc < <(ac249_side_hits "$root" "$AC249_TASK_ID" doc)
+  code_list=""
+  doc_list=""
+  [ "${#_ac249_code[@]}" -gt 0 ] && printf -v code_list '%s\n' "${_ac249_code[@]}"
+  [ "${#_ac249_doc[@]}" -gt 0 ] && printf -v doc_list '%s\n' "${_ac249_doc[@]}"
+  AC249_CODE_HITS="$code_list"
+  AC249_DOC_HITS="$doc_list"
+  AC249_SPAN_STATE="$(ac249_span_state "$root" "$AC249_TASK_ID")"
+  echo "  [⑨b] 任务文件存在区间（来源 D，两端以任务文件为锚）: ${AC249_SPAN_STATE} (span | too-long:<n> | not-an-ancestor | unreadable；超出上界 ${AC249_SPAN_LIMIT} ⇒ 该来源不贡献，fail-CLOSED)"
+  echo "  [⑨b] 并集来源提交数=${#_ac249_shas[@]}（按位置：task/$AC249_TASK_ID 分支 ∪ 触及 tasks/$AC249_TASK_ID.md 的提交 ∪ 其 merge 右臂；⛔ 不是「最新一条提交」）"
+  echo "  [⑨b] 并集文件数=${#_ac249_files[@]}: $("$VC_NODE" --no-warnings -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' "${_ac249_files[@]}" 2>/dev/null || true)"
+  echo "  [⑨b] 代码面命中（src/|scripts/ 前缀）计入 ${#_ac249_code[@]} 条；前 3 条实际内容（引用计数前先打印命中原文，硬规则 2）:"
+  if [ "${#_ac249_code[@]}" -gt 0 ]; then printf '%s\n' "${_ac249_code[@]}" | head -3 | sed 's/^/        | /'; else echo "        | <none>"; fi
+  echo "  [⑨b] 文档面命中（含 ADR-007 | docs/adr 前缀）计入 ${#_ac249_doc[@]} 条；前 3 条实际内容:"
+  if [ "${#_ac249_doc[@]}" -gt 0 ]; then printf '%s\n' "${_ac249_doc[@]}" | head -3 | sed 's/^/        | /'; else echo "        | <none>"; fi
+
+  if [ "${#_ac249_shas[@]}" = "0" ] || [ "${#_ac249_files[@]}" = "0" ]; then
+    AC249_OUTCOME="not-evaluated:commit-union-unreadable"
+    echo "  [⑨b] AC249-NOT-EVALUATED: 并集读不出（该任务没有提交 / 两条归属路径都空 / git 读失败）⇒ ⛔ 不写记录（未测量 ≠ 不合格；⛔ 不写 commit_files: []）" >&2
+    return 0
+  fi
+  AC249_COMMIT_FILES_JSON="$("$VC_NODE" --no-warnings -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' "${_ac249_files[@]}" 2>/dev/null || true)"
+  if [ -z "$code_list" ] || [ -z "$doc_list" ]; then
+    local side="code-side-missing"
+    [ -n "$code_list" ] || side="code-side-missing"
+    [ -n "$doc_list" ] || side="doc-side-missing"
+    [ -z "$code_list" ] && [ -z "$doc_list" ] && side="both-sides-missing"
+    AC249_OUTCOME="incomplete-change:$side"
+    echo "  [⑨b] AC249-INCOMPLETE-CHANGE ($side): 代码面命中=${#_ac249_code[@]} 文档面命中=${#_ac249_doc[@]} ⇒ ⛔ 零记录" >&2
+    echo "        ⛔ 特别是没有写出一条「只改了一边」的记录：那正是判据要求取假的方向（单边不算）" >&2
+    return 0
+  fi
+  extras="$(AC249_S="$AC249_UNION_SHAS" AC249_C="$code_list" AC249_D="$doc_list" python3 -c '
+import json, os
+def lst(s):
+    return [x for x in (s or "").split("\n") if x.strip()]
+e = [("ac249_union_commit_shas", lst(os.environ["AC249_S"])),
+     ("ac249_code_paths", lst(os.environ["AC249_C"])),
+     ("ac249_doc_paths", lst(os.environ["AC249_D"]))]
+print("," + ",".join(json.dumps(k) + ":" + json.dumps(v) for k, v in e))
+' 2>/dev/null || true)"
+  if write_ac249_record "$AC249_HOST" "$AC249_PROJECT_ROOT" "$AC249_TASK_ID" "$AC249_COMMIT_FILES_JSON" "$extras"; then
+    AC249_EVALUATED=1
+    AC249_OUTCOME="ok"
+    AC249_WRITTEN_THIS_RUN=1
+    AC249_WRITTEN_ROOT="$AC249_PROJECT_ROOT"
+    echo "  [⑨b] ac249 record written → $AC89 ✓ (task_id=$AC249_TASK_ID 并集 ${#_ac249_files[@]} 条; 代码面 ${#_ac249_code[@]} 条 / 文档面 ${#_ac249_doc[@]} 条)"
+  else
+    AC249_OUTCOME="not-evaluated:write-refused"
+    echo "  [⑨b] AC249-NOT-EVALUATED: record NOT written (fail-closed: BUILD_SHA missing/non-40-hex 或 AC89 路径空 或 并集不满足双向谓词 —— 缺值≠合格)" >&2
+  fi
+  return 0
+}
+
+# ── selfcheck_ac249 — hermetic controls of the AC-249 complete-change producer ────────────────
+# 每条都直接驱动【产品函数】（write_ac249_record / ac249_union_files / ac249_is_*_path），⛔ 不让夹具
+# 复刻判定逻辑（硬规则 4 推论三：只能被夹具复刻满足的判据不算被测）。留档七组读数：
+#   ① 正（**本任务缺陷面的守门人**）：同一 task 名下【两个提交】，代码提交在前、文档提交在后
+#      （最新那条是文档）⇒ 产品【并集】写出 1 条；同一夹具下 ac207_select_implementation_commit
+#      （既有「只取一条」选择器）选中的是【文档提交】⇒ 用它的文件写【写不出】。两条读数并列留档。
+#      ⛔ 没有这一条，一个「只取最新一条提交」的实现会绿着通过全部正控制。
+#   ② 负（只代码）：并集只含 `scripts/`|`src/` ⇒ 零记录（载体行数不变）+ incomplete-change 痕迹。
+#   ③ 负（只文档）：并集只含 ADR-007 ⇒ 零记录 + incomplete-change 痕迹。
+#   ④ 负（路径形态）：`./src/x.ts` 形态 ⇒ 判定函数取假 ⇒ 零记录（证明 criterion 的 startswith 分支
+#      真的在作用，⛔ 不是「反正都会绿」）。
+#   ⑤ 负（缺值 ≠ 不合格）：并集读不出（无该任务的任何提交）⇒ 零记录 + NOT-EVALUATED 痕迹（可区分）。
+#   ⑥ 结构性（按位置）：写入器体内无 `build_sha` 字面量（唯一补锚点是 ac89_append_goal009）、
+#      且写入路径 ⛔ 不调用单条选择器来构造 commit_files；并集函数 ⛔ 不用 merge 提交的差分。
+selfcheck_ac249() {
+  local ac249_tmp ac249_fx ac249_code_fx ac249_doc_fx ac249_sel_sha ac249_carrier ac249_rc=0
+  local ac249_save_sha="${BUILD_SHA:-}" ac249_save_ts="${TS:-}" ac249_save_ac89="${AC89:-}"
+  local ac249_pos_w="" ac249_pos_sel_w="" ac249_pos_sel_files="" ac249_pos_before=0 ac249_pos_after=0
+  local ac249_code_w="" ac249_code_before=0 ac249_code_after=0 ac249_code_trace=0
+  local ac249_doc_w="" ac249_doc_before=0 ac249_doc_after=0 ac249_doc_trace=0
+  local ac249_form_w="" ac249_form_before=0 ac249_form_after=0 ac249_form_pred=""
+  local ac249_miss_w="" ac249_miss_before=0 ac249_miss_after=0 ac249_miss_trace=0 ac249_files_missing=""
+  local ac249_files_pos="" ac249_files_code="" ac249_files_doc=""
+  local ac249_writer_body="" ac249_union_body="" ac249_writer_anchor=0 ac249_writer_sel=0 ac249_union_nomerges=0
+  ac249_tmp="$(mktemp -d 2>/dev/null || true)"
+  if [ -z "$ac249_tmp" ]; then
+    echo "selfcheck: ac249-tmp-unavailable (⛔ 不静默跳过——夹具造不出时本组读数一律取假)"
+    return 1
+  fi
+  ac249_carrier="$ac249_tmp/carrier.jsonl"
+  : > "$ac249_carrier"
+  # 夹具：一个 develop 仓库 + 一条 task/T-1 分支（登记提交在 develop、代码与文档两个提交在分支上）
+  ac249_fx="$ac249_tmp/repo"
+  mkdir -p "$ac249_fx/tasks" "$ac249_fx/.quay"
+  git -C "$ac249_fx" init -q -b develop >/dev/null 2>&1
+  git -C "$ac249_fx" config user.email t@t >/dev/null 2>&1
+  git -C "$ac249_fx" config user.name t >/dev/null 2>&1
+  printf 'init\n' > "$ac249_fx/.gitignore"
+  git -C "$ac249_fx" add -A >/dev/null 2>&1
+  git -C "$ac249_fx" commit -qm "chore(quay-init): initialize quay project files" >/dev/null 2>&1
+  printf 'id: T-1\ntitle: t\nstatus: ready\n---\n## Proposal\nx\n' > "$ac249_fx/tasks/T-1.md"
+  git -C "$ac249_fx" add -A >/dev/null 2>&1
+  git -C "$ac249_fx" commit -qm "tasks: T-1 registration" >/dev/null 2>&1
+  git -C "$ac249_fx" checkout -q -b task/T-1 >/dev/null 2>&1
+  mkdir -p "$ac249_fx/scripts"
+  printf 'code\n' > "$ac249_fx/scripts/check-adr.ts"
+  git -C "$ac249_fx" add -A >/dev/null 2>&1
+  git -C "$ac249_fx" commit -qm "fix(adr): code side first" >/dev/null 2>&1
+  mkdir -p "$ac249_fx/quay-adr"
+  printf 'doc\n' > "$ac249_fx/quay-adr/ADR-007.md"
+  git -C "$ac249_fx" add -A >/dev/null 2>&1
+  git -C "$ac249_fx" commit -qm "docs(adr): doc side last" >/dev/null 2>&1
+  git -C "$ac249_fx" checkout -q develop >/dev/null 2>&1
+  mapfile -t _ac249_fx_files < <(ac249_union_files "$ac249_fx" T-1)
+  ac249_files_pos="$("$VC_NODE" --no-warnings -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' "${_ac249_fx_files[@]}" 2>/dev/null || true)"
+  BUILD_SHA="0123456789abcdef0123456789abcdef01234567"
+  TS="2026-09-12T00:00:00Z"
+  AC89="$ac249_carrier"
+  # ① 正：并集写出 1 条
+  ac249_pos_before="$(wc -l < "$ac249_carrier" | tr -d ' ')"
+  ac249_pos_w="$(write_ac249_record "hostX-arm" "/home/other/archguard" "T-1" "$ac249_files_pos" 2>/dev/null && echo 1 || echo 0)"
+  ac249_pos_after="$(wc -l < "$ac249_carrier" | tr -d ' ')"
+  # ①b 守门人：同一夹具下用【单条】选择器（最新那条 = 文档提交）⇒ 用它的文件写【写不出】
+  ac249_sel_sha="$(ac207_select_implementation_commit "$ac249_fx" || true)"
+  if [ -n "$ac249_sel_sha" ]; then
+    mapfile -t _ac249_sel_files < <(ac207_commit_files "$ac249_fx" "$ac249_sel_sha")
+    ac249_pos_sel_files="$("$VC_NODE" --no-warnings -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' "${_ac249_sel_files[@]}" 2>/dev/null || true)"
+    ac249_pos_sel_w="$(write_ac249_record "hostX-arm" "/home/other/archguard" "T-1" "$ac249_pos_sel_files" 2>/dev/null && echo 1 || echo 0)"
+  fi
+  # ② 负：只代码（夹具必须走【同一个归属机制】：登记提交落在 develop、改动提交落在 task/T-1 分支上）
+  ac249_code_fx="$ac249_tmp/codeonly"
+  mkdir -p "$ac249_code_fx/tasks" "$ac249_code_fx/.quay"
+  git -C "$ac249_code_fx" init -q -b develop >/dev/null 2>&1
+  git -C "$ac249_code_fx" config user.email t@t >/dev/null 2>&1
+  git -C "$ac249_code_fx" config user.name t >/dev/null 2>&1
+  printf 'id: T-1\n' > "$ac249_code_fx/tasks/T-1.md"
+  git -C "$ac249_code_fx" add -A >/dev/null 2>&1
+  git -C "$ac249_code_fx" commit -qm "tasks: T-1 registration" >/dev/null 2>&1
+  git -C "$ac249_code_fx" checkout -q -b task/T-1 >/dev/null 2>&1
+  mkdir -p "$ac249_code_fx/src"; printf 'x\n' > "$ac249_code_fx/src/a.ts"
+  git -C "$ac249_code_fx" add -A >/dev/null 2>&1
+  git -C "$ac249_code_fx" commit -qm "fix: code only" >/dev/null 2>&1
+  git -C "$ac249_code_fx" checkout -q develop >/dev/null 2>&1
+  mapfile -t _ac249_code_files < <(ac249_union_files "$ac249_code_fx" T-1)
+  ac249_files_code="$("$VC_NODE" --no-warnings -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' "${_ac249_code_files[@]}" 2>/dev/null || true)"
+  ac249_code_before="$(wc -l < "$ac249_carrier" | tr -d ' ')"
+  ac249_code_w="$(write_ac249_record "hostX-arm" "/home/other/archguard" "T-1" "$ac249_files_code" 2>/dev/null && echo 1 || echo 0)"
+  ac249_code_after="$(wc -l < "$ac249_carrier" | tr -d ' ')"
+  # ③ 负：只文档（同上：登记提交在 develop、文档提交在 task/T-1 分支上）
+  ac249_doc_fx="$ac249_tmp/doconly"
+  mkdir -p "$ac249_doc_fx/tasks" "$ac249_doc_fx/.quay"
+  git -C "$ac249_doc_fx" init -q -b develop >/dev/null 2>&1
+  git -C "$ac249_doc_fx" config user.email t@t >/dev/null 2>&1
+  git -C "$ac249_doc_fx" config user.name t >/dev/null 2>&1
+  printf 'id: T-1\n' > "$ac249_doc_fx/tasks/T-1.md"
+  git -C "$ac249_doc_fx" add -A >/dev/null 2>&1
+  git -C "$ac249_doc_fx" commit -qm "tasks: T-1 registration" >/dev/null 2>&1
+  git -C "$ac249_doc_fx" checkout -q -b task/T-1 >/dev/null 2>&1
+  mkdir -p "$ac249_doc_fx/quay-adr"; printf 'x\n' > "$ac249_doc_fx/quay-adr/ADR-007.md"
+  git -C "$ac249_doc_fx" add -A >/dev/null 2>&1
+  git -C "$ac249_doc_fx" commit -qm "docs: doc only" >/dev/null 2>&1
+  git -C "$ac249_doc_fx" checkout -q develop >/dev/null 2>&1
+  mapfile -t _ac249_doc_files < <(ac249_union_files "$ac249_doc_fx" T-1)
+  ac249_files_doc="$("$VC_NODE" --no-warnings -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' "${_ac249_doc_files[@]}" 2>/dev/null || true)"
+  ac249_doc_before="$(wc -l < "$ac249_carrier" | tr -d ' ')"
+  ac249_doc_w="$(write_ac249_record "hostX-arm" "/home/other/archguard" "T-1" "$ac249_files_doc" 2>/dev/null && echo 1 || echo 0)"
+  ac249_doc_after="$(wc -l < "$ac249_carrier" | tr -d ' ')"
+  # ④ 负：路径形态（`./src/...`）——判定函数取假 ⇒ 写不出（criterion 的 startswith 分支真在作用）
+  ac249_is_code_path "./src/a.ts" && ac249_form_pred=1 || ac249_form_pred=0
+  ac249_form_before="$(wc -l < "$ac249_carrier" | tr -d ' ')"
+  ac249_form_w="$(write_ac249_record "hostX-arm" "/home/other/archguard" "T-1" '["./src/a.ts","quay-adr/ADR-007.md"]' 2>/dev/null && echo 1 || echo 0)"
+  ac249_form_after="$(wc -l < "$ac249_carrier" | tr -d ' ')"
+  # ⑤ 负：缺值（无该任务的任何提交 ⇒ 并集读不出）
+  ac249_miss_before="$(wc -l < "$ac249_carrier" | tr -d ' ')"
+  mapfile -t _ac249_miss_files < <(ac249_union_files "$ac249_code_fx" NO-SUCH-TASK)
+  ac249_files_missing="$("$VC_NODE" --no-warnings -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' "${_ac249_miss_files[@]}" 2>/dev/null || true)"
+  ac249_miss_w="$(write_ac249_record "hostX-arm" "/home/other/archguard" "NO-SUCH-TASK" "$ac249_files_missing" 2>/dev/null && echo 1 || echo 0)"
+  ac249_miss_after="$(wc -l < "$ac249_carrier" | tr -d ' ')"
+  # ⑥ 结构性（按位置）
+  ac249_writer_body="$(sed -n '/^write_ac249_record()/,/^}$/p' "$0" 2>/dev/null | sed 's/#.*//')"
+  ac249_union_body="$(sed -n '/^ac249_union_commit_shas()/,/^}$/p' "$0" 2>/dev/null | sed 's/#.*//')"
+  ac249_writer_anchor="$(printf '%s\n' "$ac249_writer_body" | grep -c 'build_sha' || true)"
+  ac249_writer_sel="$(printf '%s\n' "$ac249_writer_body" | grep -c 'ac207_select_implementation_commit' || true)"
+  ac249_union_nomerges="$(printf '%s\n' "$ac249_union_body" | grep -c -- '--no-merges' || true)"
+  # 痕迹判定：三组负控制都必须【零新增】且各自的取值互不相同
+  [ "$ac249_pos_w" = "1" ] && [ "$ac249_pos_after" = "1" ] && [ "$ac249_pos_before" = "0" ] || ac249_rc=1
+  [ "$ac249_pos_sel_w" = "0" ] || ac249_rc=1
+  [ "$ac249_code_w" = "0" ] && [ "$ac249_code_after" = "$ac249_code_before" ] || { ac249_rc=1; ac249_code_trace=1; }
+  [ "$ac249_doc_w" = "0" ] && [ "$ac249_doc_after" = "$ac249_doc_before" ] || { ac249_rc=1; ac249_doc_trace=1; }
+  [ "$ac249_form_w" = "0" ] && [ "$ac249_form_after" = "$ac249_form_before" ] || ac249_rc=1
+  [ "$ac249_miss_w" = "0" ] && [ "$ac249_miss_after" = "$ac249_miss_before" ] || { ac249_rc=1; ac249_miss_trace=1; }
+  [ "$ac249_form_pred" = "0" ] || ac249_rc=1
+  [ "$ac249_writer_anchor" = "0" ] && [ "$ac249_writer_sel" = "0" ] || ac249_rc=1
+  [ "$ac249_union_nomerges" -ge 1 ] 2>/dev/null || ac249_rc=1
+  BUILD_SHA="$ac249_save_sha"; TS="$ac249_save_ts"; AC89="$ac249_save_ac89"
+  echo "selfcheck: ac249-union(multi-commit same task) files=$ac249_files_pos wrote=$ac249_pos_w lines=${ac249_pos_before}->${ac249_pos_after} (expect 3 files incl. scripts/check-adr.ts + quay-adr/ADR-007.md, 1, 0->1)"
+  echo "selfcheck: ac249-single-commit-selector(reference impl) files=$ac249_pos_sel_files wrote=$ac249_pos_sel_w (expect a DOC-ONLY file list and 0 — 「只取最新一条」的退化写法在完全合格的夹具上写不出；并集写法能写出 ⇒ 两条读数可区分)"
+  echo "selfcheck: ac249-negative(code-only) files=$ac249_files_code wrote=$ac249_code_w lines=${ac249_code_before}->${ac249_code_after} (expect a code-side file list and 0, lines unchanged — 单边不算)"
+  echo "selfcheck: ac249-negative(doc-only) files=$ac249_files_doc wrote=$ac249_doc_w lines=${ac249_doc_before}->${ac249_doc_after} (expect an ADR-007 file list and 0, lines unchanged — 单边不算)"
+  echo "selfcheck: ac249-negative(dot-slash-form) pred_is_code=$ac249_form_pred wrote=$ac249_form_w lines=${ac249_form_before}->${ac249_form_after} (expect 0/0/0->0 — startswith 分支真在作用)"
+  echo "selfcheck: ac249-negative(missing-union) files=$ac249_files_missing wrote=$ac249_miss_w lines=${ac249_miss_before}->${ac249_miss_after} (expect []/0/0->0 — 未测量 ≠ 不合格)"
+  echo "selfcheck: ac249-writer-anchor-hits=$ac249_writer_anchor writer-single-selector-hits=$ac249_writer_sel union-no-merges-hits=$ac249_union_nomerges (expect 0/0/>=1 — 唯一补锚点; 并集不走单条选择器; 并集排除 merge 差分)"
+  rm -rf "$ac249_tmp"
+  return $ac249_rc
 }
 
 if [ "$DO_SELFCHECK" = 1 ]; then
@@ -5243,11 +5677,21 @@ else
     # 本质不同的路径：那条的 $ROOT 是一次性靶子，本条的被接管项目【本来就带着真实存量与旧历史】）。
     # 本分支只跑 ⑧（它自己在门口读 pre、起 driver、读 status、重读 post），⛔ 不跑冷启动/驱动活性段。
     step_ac247_takeover "$AC247_ROOT"
-  elif [ "$AC248_ADR_FLIP" = 1 ]; then
-    # ── AC-248（GOAL-016）：目标项目自己的 ADR 检查器的检出行为必须前后翻转。与 ⑧ 同形：只跑 ⑨
-    # （它自己读八件、物化两个修订、各跑一次检查器、求差集），⛔ 不跑冷启动/驱动活性段，也 ⛔ 不驱动
-    # 任何任务——被取证的那条任务是由【目标项目自己的 drivers】驱动出来的，本步骤只读它的产物。
-    step_ac248_adr_flip "$AC248_ROOT"
+  elif [ "$AC248_ADR_FLIP" = 1 ] || [ "$AC249_COMPLETE_CHANGE" = 1 ]; then
+    # ── AC-248 / AC-249（GOAL-016）：同一趟里读【同一条被驱动任务】的两条独立读数。与 ⑧ 同形：只跑 ⑨/⑨b
+    # （各自读自己的直接量），⛔ 不跑冷启动/驱动活性段，也 ⛔ 不驱动任何任务——被取证的那条任务是由
+    # 【目标项目自己的 drivers】驱动出来的，本步骤只读它的产物。
+    #   · AC-248 判「修对了」（目标项目自己的检查器的检出行为前后翻转）；
+    #   · AC-249 判「修全了」（同一 task 名下 commit_files 并集里代码面与 ADR-007 文档面同时非空）。
+    # 两条各自能独立 pass/fail，⛔ 不互相冒充；任一为假只影响它自己的那条记录（各写各的）。
+    # ⛔ 顺序固定（先 ⑨ 后 ⑨b）：两条共用 --target-root/--task-id，先跑的那条不改任何共用状态
+    #    （AC-248 只写自己的 AC248_* 变量，AC-249 只写 AC249_*），顺序在此只是可读性，不是依赖。
+    if [ "$AC248_ADR_FLIP" = 1 ]; then
+      step_ac248_adr_flip "$AC248_ROOT"
+    fi
+    if [ "$AC249_COMPLETE_CHANGE" = 1 ]; then
+      step_ac249_complete_change "$AC248_ROOT"
+    fi
   elif [ "$CHANNEL" = "marketplace" ]; then
     # marketplace 通道 = step① 安装路径验证（register-plugin.mjs 注册）；②③ 是 loop 活性验证
     # （npm-global/AC88 的关切），marketplace 通道不跑 ②③ —— register 失败也能写出记录（AC5），
@@ -5398,6 +5842,12 @@ echo "AC248_COMMIT_SHA=${AC248_COMMIT_SHA:-<none>} AC248_PRE_REV=${AC248_PRE_REV
 echo "AC248_PROBE_TOOL=${AC248_PROBE_TOOL:-<none>} AC248_BEFORE_DETECTS=${AC248_BEFORE_DETECTS:-<unreadable>} AC248_AFTER_DETECTS=${AC248_AFTER_DETECTS:-<unreadable>} (⛔ 来自目标项目自己的检查器两次真实运行，不是本脚本的判定)"
 echo "AC248_CLI_SOURCE=${AC248_CLI_SOURCE:-<unreadable>} AC248_BEFORE_CLI_RC=${AC248_BEFORE_CLI_RC:-<unreadable>} AC248_AFTER_CLI_RC=${AC248_AFTER_CLI_RC:-<unreadable>} (⛔ 退出码只是留档诊断量, 不是判据字段——本 AC 的靶子缺陷正是 exit 0 与合格同形)"
 echo "AC248_WRITTEN_THIS_RUN=$AC248_WRITTEN_THIS_RUN AC248_WRITTEN_ROOT=${AC248_WRITTEN_ROOT:-<none>}"
+echo "AC249_OUTCOME=${AC249_OUTCOME:-<none>} (ok | incomplete-change:<side> | not-evaluated:<why> —— 后两者取值不同且都不写记录, 硬规则 3b)"
+echo "AC249_EVALUATED=$AC249_EVALUATED (1 = 并集读出且两侧谓词都成立并已写出 ac=GOAL-016-AC-249 记录；0 = 未评估 ≠ 不合格)"
+echo "AC249_HOST=${AC249_HOST:-<none>} AC249_PROJECT_ROOT=${AC249_PROJECT_ROOT:-<none>} AC249_TASK_ID=${AC249_TASK_ID:-<none>}"
+echo "AC249_UNION_SHAS=${AC249_UNION_SHAS:-<none>} (并集用到的提交——按位置归属，⛔ 不是「最新一条」)"
+echo "AC249_COMMIT_FILES=${AC249_COMMIT_FILES_JSON:-<none>}"
+echo "AC249_WRITTEN_THIS_RUN=$AC249_WRITTEN_THIS_RUN AC249_WRITTEN_ROOT=${AC249_WRITTEN_ROOT:-<none>}"
 echo "AC88_VERIFY=$AC88_VERIFY"
 echo "AC238_EVALUATED=$AC238_EVALUATED (1 = 四件读数全成立并已写记录；0 = 未评估 ≠ 不合格——硬规则 3b)"
 echo "AC238_PROJECT_ROOT=${AC238_PROJECT_ROOT:-<none>}"
