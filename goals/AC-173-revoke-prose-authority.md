@@ -5,9 +5,14 @@ status: achieved
 kind: criterion
 goal: GOAL-001
 criterion: |
-  grep -qE 'goals/|goal list|goal-store' orchestration/manager-tick-prompt.txt \
-    && head -14 orchestration/manager-phase-goal.md | grep -q 'goals/'
-expect: exit 0
+  if ! grep -qE 'goals/|goal list|goal-store' orchestration/manager-tick-prompt.txt; then
+    echo "CAUSE=prompt-not-pointing-at-store — orchestration/manager-tick-prompt.txt 未提及 goals/|goal list|goal-store" >&2; exit 1
+  fi
+  if ! head -14 orchestration/manager-phase-goal.md | grep -q 'goals/'; then
+    echo "CAUSE=phase-goal-head-not-archived — orchestration/manager-phase-goal.md 前 14 行未声明正本在 goals/" >&2; exit 1
+  fi
+  exit 0
+expect: exit 0。失败时 exit 1 且 stderr 携带 `CAUSE=…` 成因——⛔ `echo … >&2` 与 `exit 1` 必须写在【同一行】：`plugin/scripts/criterion-failure-attribution-check.ts` 逐行判定，拆两行会被判裸退出并打红棘轮（GOAL-009 AC-241 纪律；2026-09-12 gap-criterion-attribution-blind-to-silent-terminal-command）。
 origin: |
   规格 §7.1 与 GOAL-001 风险 1：上一次 goal-store 死于"散文继续是权威且编辑它零摩擦"。
   两个来源并存必然漂移——manager-phase-goal.md 自己就有实证：顶部横幅曾写死

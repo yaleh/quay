@@ -1,7 +1,7 @@
 ---
 id: GOAL-014
 title: meta-driver 是否新增「动作记录失败聚合」读数维度（重复工具/skill 调用失败）
-status: active
+status: achieved
 kind: goal
 origin: >-
   【要裁定什么】META-005 三条线索中：①（跨部署健康）已由 GOAL-009 AC-203~207（在飞）+
@@ -48,6 +48,11 @@ statusLog:
     reason: ① 纳入：建通用聚合读数（人 2026-09-12 裁定，经会话中继写入）。形态按 origin 的成本约束：经 meta-cc 定期扫 24h
       会话语料，按「同错误 × 跨会话重复次数」聚合，仅越过阈值才进 digest；机械形态须能取假、fail-closed、未评估取独立值。⛔
       阈值数值不在本裁定内定——成本结构实测前不设数值阈值（硬规则 4 推论一）。
+  - at: 2026-09-12T01:29:55.138Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 ---
 ## 背景
 

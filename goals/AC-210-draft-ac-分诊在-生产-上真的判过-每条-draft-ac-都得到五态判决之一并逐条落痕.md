@@ -4,11 +4,19 @@ title: draft AC 分诊在【生产】上真的判过——每条 draft AC 都得
 status: achieved
 kind: criterion
 goal: GOAL-010
-criterion: python3 -c 'import json,sys; ok=[t for l in
-  open(".quay/goal-round.jsonl") for f in (json.loads(l).get("facts") or []) for
-  t in ((f.get("value") or {}).get("triage") or []) if t.get("ac") and
-  t.get("decision") in ("activate","re-anchor","retire","needs-human","hold")];
-  sys.exit(0 if len(ok)>=1 else 1)'
+criterion: >-
+  python3 -c '
+
+  import json,sys
+
+  ok=[t for l in open(".quay/goal-round.jsonl") for f in
+  (json.loads(l).get("facts") or []) for t in ((f.get("value") or
+  {}).get("triage") or []) if t.get("ac") and t.get("decision") in
+  ("activate","re-anchor","retire","needs-human","hold")]
+
+  if len(ok)<1:
+      sys.stderr.write("CAUSE=goal-round-jsonl-has-no-triage-fact-with-a-known-decision\n"); sys.exit(1)
+  '
 expect: .quay/goal-round.jsonl 中存在 ≥1 条 triage 记录，逐条带 ac 与五态判决之一（activate /
   re-anchor / retire / needs-human / hold）——分诊在【生产】上真的对 draft AC
   做过判决并留了痕，而不只是在单测里「能产出」（硬规则 4 推论三）。

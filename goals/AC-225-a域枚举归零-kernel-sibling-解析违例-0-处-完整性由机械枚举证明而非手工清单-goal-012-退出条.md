@@ -4,14 +4,22 @@ title: A域枚举归零——kernel sibling 解析违例 0 处，完整性由机
 status: achieved
 kind: criterion
 goal: GOAL-012
-criterion: test -f plugin/scripts/kernel-sibling-resolution-check.ts && node
-  --no-warnings --experimental-strip-types
-  plugin/scripts/kernel-sibling-resolution-check.ts --root . --json
+criterion: |
+  if [ ! -f plugin/scripts/kernel-sibling-resolution-check.ts ]; then
+    echo "CAUSE=checker-missing — plugin/scripts/kernel-sibling-resolution-check.ts 不存在" >&2; exit 1
+  fi
+  if ! node --no-warnings --experimental-strip-types plugin/scripts/kernel-sibling-resolution-check.ts --root . --json; then
+    echo "CAUSE=kernel-sibling-violations — kernel-sibling-resolution-check 非零退出（其逐条诊断见上一行的 stdout）" >&2; exit 1
+  fi
+  exit 0
 expect: "`kernel-sibling-resolution-check.ts` 存在，且在本仓库当前树上跑 exit 0——即 KERNEL
   域违例（把自己的 sibling 脚本锚在 target root / worktree / naive `__dirname` 而非经
   `resolveKernelSibling`/`resolveKernelPluginRoot`）**枚举为 0 处**。立条时实测残量 **9 处**
   naive `__dirname` ⇒ 红。本条与 AC-224 构成双向：AC-224 证明该检查器会红（能取假），本条证明它此刻是绿（迁移已完成）。⛔
-  完整性由检查器的机械枚举给出，不是手工清单——人工枚举已做过 3 次、3 次都有遗漏。"
+  完整性由检查器的机械枚举给出，不是手工清单——人工枚举已做过 3 次、3 次都有遗漏。
+  失败时 exit 1 且 stderr 携带 `CAUSE=…` 成因——⛔ `echo … >&2` 与 `exit 1` 必须写在【同一行】：
+  `plugin/scripts/criterion-failure-attribution-check.ts` 逐行判定，拆两行会被判裸退出并打红棘轮
+  （GOAL-009 AC-241 纪律；2026-09-12 gap-criterion-attribution-blind-to-silent-terminal-command）。"
 origin: >-
   GOAL-012 的机器判据之一。立条依据见 GOAL-012 的 origin（人 2026-09-10 三条裁定后授权设立；8 个缺陷同属
   kernel↔target 边界三域归属缺口；§6b 已有契约但只覆盖一域且无强制力，人工枚举 3 次 3 漏）。

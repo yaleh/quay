@@ -27,7 +27,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
-import { createGoalStore, VALID_GOAL_STATUSES, isGoalId, isCriterionId, GoalIntentConflictError, parseAdjudicationTable } from "../src/goal-store.ts";
+import { createGoalStore, VALID_GOAL_STATUSES, isGoalId, isCriterionId, GoalIntentConflictError, parseAdjudicationTable, GOAL_ACCEPTANCE_ACTIVE_ENV, SWEEP_ACTOR } from "../src/goal-store.ts";
 import { gateFactories, makeGoalGate } from "../src/gate/factories/index.ts";
 
 const _createdDirs = [];
@@ -1094,4 +1094,225 @@ test("AC-reverify-5 — the CLI reports NOT-EVALUATED (exit 3) when the scope is
   assert.equal(r.status, 3, `空域必须 exit 3（NOT-EVALUATED）而不是 0:\n${r.stdout}${r.stderr}`);
   assert.equal(JSON.parse(r.stdout).scopeSize, 0);
   assert.equal(JSON.parse(r.stdout).evaluated, false);
+});
+
+// ── gap-achieved-ac-rot-invisible-when-ledger-tail-is-stale-pass ──────────────────────────────────
+// The FROZEN population (achieved ∧ criterion non-empty ∧ ⛔ NOT in `inAchievedReverifyScope`) is
+// re-run by a BOUNDED ROTATION, and AC-242's judgment reads what the rotation recorded. Why these
+// fixtures are necessary-but-not-sufficient (DIR-026 Reading A): the PRODUCTION reading is in the
+// task body — one rotation over the real M=80 population named exactly the four ACs the task filed
+// (AC-147/AC-149/AC-172/AC-228, all tail=pass, all live-exit!=0) and no others.
+//
+// These tests pin the MECHANISM, both directions of the control, the BOUND (⛔ not a full re-run),
+// and the 3b distinction (「近期看过且为真」 ≠ 「尾事件是 pass 但没人看过」).
+
+/** Append a gate:"goal" event the way the per-round loop does (actor=goal-cli). */
+function appendGoalEvent(root, id, verdict, { actor = "goal-cli", at = "2026-09-01T00:00:00.000Z", reason } = {}) {
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.appendFileSync(
+    path.join(root, ".quay", "gate-events.jsonl"),
+    JSON.stringify({
+      id: `${id}-${actor}-${at}`, item_id: id, pipeline_id: id, gate: "goal", actor, verdict, timestamp: at,
+      payload: { reason: reason ?? (verdict === "pass" ? "acceptance passed (exit 0)" : "acceptance failed (exit 1)") },
+    }) + "\n",
+  );
+}
+
+/** A CLOSED goal + achieved criteria: AC-900 is CURRENTLY false, AC-901 is healthy. Both ledger
+ *  tails say `pass` (the frozen tail this task is about). */
+function stalePassFixture(tag, acs = [["AC-900", "exit 1"], ["AC-901", "exit 0"]]) {
+  const root = tmpDir(tag);
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
+  n(["write", "GOAL-900", "--title", "closed goal", "--status", "achieved", "--origin", "o", "--body", GOAL_BODY]);
+  for (const [id, criterion] of acs) {
+    n(["write", id, "--title", id, "--status", "achieved", "--goal", "GOAL-900", "--criterion", criterion, "--origin", "o", "--expect", EXPECT]);
+    appendGoalEvent(root, id, "pass");
+  }
+  return { root, n };
+}
+
+test("AC-242 successor — 缺口复现：「尾事件 pass 而判据当前为假」对两个既有机制都不可见", () => {
+  const { root, n } = stalePassFixture("sp-gap");
+  // (a) I5 (`check --achieved-failing`) does not see it — the AC is outside the reverify scope.
+  const af = n(["check", "--achieved-failing"]);
+  assert.equal(JSON.parse(af.stdout).achievedButFailing.includes("AC-900"), false, "I5 看不见域外的冻结 AC");
+  // (b) the scope reading says WHY: it is in outOfScope ⇒ no mechanism re-runs it.
+  const sc = JSON.parse(n(["check", "--reverify-scope"]).stdout);
+  assert.ok(sc.outOfScope.some((e) => e.id === "AC-900"), "AC-900 在复验域之外");
+  assert.equal(sc.inScope.some((e) => e.id === "AC-900"), false);
+  // (c) the truth IS false — run the STORED criterion (not an assertion about it, 硬规则 4).
+  const rec = JSON.parse(n(["get", "AC-900"]).stdout);
+  const live = spawnSync("bash", ["-c", rec.criterion], { cwd: root, encoding: "utf8" });
+  assert.equal(live.status, 1, "判据实跑当前为假（真跑，⛔ 非推断）");
+  // (d) and the ledger still says pass ⇒ the pre-fix judgment is blind to it.
+  const j = JSON.parse(n(["check", "--stale-pass"]).stdout);
+  assert.deepEqual(j.failing, [], "改前判定看不见它（尾事件是 pass）");
+});
+
+test("AC-242 successor — 轮转后 exit 1 并点名该 AC；健康 AC 仍判通过（双向控制）；且不翻任何 status", () => {
+  const { root, n } = stalePassFixture("sp-judge");
+  // Before any rotation: NOT-EVALUATED (exit 3) — ⛔ never confounded with "looked and all fine".
+  const before = n(["check", "--stale-pass"]);
+  assert.equal(before.status, 3, "轮转从未跑过 ⇒ NOT-EVALUATED(3)，⛔ 不是 0:\n" + before.stdout + before.stderr);
+  const jb = JSON.parse(before.stdout);
+  assert.deepEqual(jb.failing, []);
+  assert.deepEqual(jb.staleUnverified, ["AC-900", "AC-901"], "尾事件 pass 但近期无人看过 ⇒ 「不知道」，与 verifiedFresh 分开（硬规则 3b）");
+  assert.equal(jb.rotation.sweptEver, 0);
+
+  // One bounded rotation step: an ACTION that records verdicts. Exits 1 the moment an AC is false.
+  const swept = n(["check", "--stale-pass", "--sweep"]);
+  assert.equal(swept.status, 1, "轮转后即刻判 exit 1:\n" + swept.stdout + swept.stderr);
+  const js = JSON.parse(swept.stdout);
+  assert.deepEqual(js.failing, ["AC-900"], "点名的正是那条当前为假的 AC（清单，⛔ 非布尔）");
+  assert.match(swept.stderr, /AC-900/, "stderr 逐条点名（可归因，与 AC-241 同一纪律）");
+  // The control direction: the healthy AC (tail pass ∧ live exit 0) is NOT dragged into the red.
+  assert.deepEqual(js.verifiedFresh, ["AC-901"], "尾事件 pass 且实跑 exit 0 的健康 AC 判通过");
+  // ⛔ The rotation flipped no status — the same ruling as I5 (achieved→active is a human call).
+  assert.equal(JSON.parse(n(["get", "AC-900"]).stdout).status, "achieved", "轮转只落账，不翻转");
+
+  // The PURE-READ judgment AC-242's criterion actually calls (⛔ it runs no criterion).
+  const after = n(["check", "--stale-pass"]);
+  assert.equal(after.status, 1);
+  assert.deepEqual(JSON.parse(after.stdout).failing, ["AC-900"]);
+});
+
+test("AC-242 successor — 轮转有界：budget 封顶、到期对象枚举、自续（无游标）、稳态零成本", () => {
+  const { root, n } = stalePassFixture("sp-bound", [["AC-901", "exit 0"], ["AC-902", "exit 0"], ["AC-903", "exit 0"]]);
+  const s1 = JSON.parse(n(["check", "--stale-pass", "--sweep", "--budget", "1"]).stdout).sweep;
+  assert.equal(s1.ran.length, 1, "⛔ 不许无差别全量重跑：一次调用只跑 budget 条");
+  assert.equal(s1.eligible, 3, "其余合格对象【枚举】出来（硬规则 3）");
+  assert.equal(s1.stoppedBy, "budget");
+  // Self-resuming from the LEDGER alone (⛔ no cursor file): the next call picks the next oldest.
+  const s2 = JSON.parse(n(["check", "--stale-pass", "--sweep", "--budget", "1"]).stdout).sweep;
+  assert.equal(s2.ran.length, 1);
+  assert.notEqual(s2.ran[0].id, s1.ran[0].id, "上次轮转过的那条不再被选中（最近轮转优先的反面）");
+  // Finishing the pass, then the default 1h min-age ⇒ nothing eligible ⇒ 0 criteria run.
+  n(["check", "--stale-pass", "--sweep", "--budget", "5"]);
+  const s4 = JSON.parse(n(["check", "--stale-pass", "--sweep"]).stdout).sweep;
+  assert.equal(s4.ran.length, 0, "稳态：上次轮转未到期 ⇒ 本次零判据（成本上界因此成立）");
+  // The written bound is pinned to ONE literal per knob (⛔ 两处各写一份即漂移).
+  const src = fs.readFileSync(new URL("../src/goal-store.ts", import.meta.url), "utf8");
+  assert.match(src, /SWEEP_CRITERION_TIMEOUT_MS = 60_000/, "判据超时与 runAcceptance 缺省同值——成本算式只在此一处成立");
+  assert.match(src, /DEFAULT_SWEEP_BUDGET = 6/);
+  assert.match(src, /DEFAULT_SWEEP_WALL_MS = 30_000/);
+});
+
+test("AC-242 successor — 「尾事件是 pass」本身不是「为真」：非轮转写的 pass 只算【不知道】（硬规则 3b）", () => {
+  const { root, n } = stalePassFixture("sp-tail");
+  // Make the per-round-loop pass look BRAND NEW — recency alone must not buy it the `verifiedFresh` bucket.
+  fs.rmSync(path.join(root, ".quay", "gate-events.jsonl"));
+  appendGoalEvent(root, "AC-900", "pass", { actor: "goal-cli", at: new Date().toISOString() });
+  appendGoalEvent(root, "AC-901", "pass", { actor: "goal-cli", at: new Date().toISOString() });
+  const j = JSON.parse(n(["check", "--stale-pass"]).stdout);
+  assert.deepEqual(j.verifiedFresh, [], "goal-cli 写的 pass（哪怕刚刚写的）不是「近期复核过」");
+  assert.deepEqual(j.staleUnverified, ["AC-900", "AC-901"], "⇒ 报「不知道」，⛔ 不是「好」——这正是本条要修的口径");
+  assert.equal(j.rotation.sweptEver, 0);
+});
+
+test("AC-242 successor — 重入闸：轮转在 QUAY_GOAL_ACCEPTANCE_ACTIVE=1 下【拒绝】，⛔ 不返回空结果", async () => {
+  const { root } = stalePassFixture("sp-guard");
+  const s = createGoalStore(path.join(root, "goals"));
+  const prev = process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
+  process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = "1";
+  try {
+    const r = await s.sweepFrozen();
+    assert.equal(r.refused, true, "拒绝是一个【独立取值】（硬规则 3b），⛔ 不是 ran:[] 冒充「跑了 0 条」");
+    assert.equal(r.evaluated, false);
+    assert.deepEqual(r.ran, []);
+  } finally {
+    if (prev === undefined) delete process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
+    else process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = prev;
+  }
+});
+
+test("check 的未知 flag 必须 fail-closed（⛔ 不得静默回落到另一个检查并 exit 0）", () => {
+  const { n } = stalePassFixture("sp-flag");
+  const bad = n(["check", "--stale-pass-typo"]);
+  assert.equal(bad.status, 2, "未知 flag ⇒ exit 2，⛔ 不是静默跑 checkWithinCap:\n" + bad.stdout + bad.stderr);
+  assert.match(bad.stderr, /unknown check flag/, "stderr 点名成因");
+  // 负控制（两侧）：同一个 fixture 上，真正存在的 flag 与无 flag 的 check 都必须照旧工作。
+  assert.notEqual(n(["check"]).status, 2, "无 flag 的 check 照旧（AC-174 依赖它）");
+  assert.notEqual(n(["check", "--staleness"]).status, 2, "--staleness 照旧");
+  assert.notEqual(n(["check", "--reverify-scope"]).status, 2, "--reverify-scope 照旧");
+});
+
+test("AC-242 successor — 判据自己声明 NOT-EVALUATED（exit 3）不得被记成「为假」（硬规则 3b）", () => {
+  const { n } = stalePassFixture("sp-ne", [
+    ["AC-910", "echo 'NOT-EVALUATED: carrier absent' >&2; exit 3"],
+    ["AC-911", "exit 0"],
+  ]);
+  const j = JSON.parse(n(["check", "--stale-pass", "--sweep"]).stdout);
+  assert.deepEqual(j.failing, [], "exit 3 ⇒ ⛔ 不是 fail：「此地无法评估」与「当前为假」不得同形");
+  assert.deepEqual(j.notEvaluated, ["AC-910"], "它有自己的桶（枚举，⛔ 非布尔）");
+  assert.deepEqual(j.verifiedFresh, ["AC-911"]);
+  assert.equal(n(["check", "--stale-pass"]).status, 3, "存在未评估项 ⇒ 整体 exit 3（⛔ 不是 0）");
+});
+
+test("AC-242 successor — 已记录的 fail 更早被重新检查（⛔ 不抬高成本上界：只改资格顺序）", async () => {
+  const { root } = stalePassFixture("sp-failfirst", [["AC-900", "exit 1"], ["AC-901", "exit 0"]]);
+  // 手写两条 30 分钟前的**轮转**事件：一条 fail、一条 pass。默认 minAge=1h、fail 阈值为 minAge/6=10min
+  // ⇒ 只有 fail 那条够老到该被重查；pass 那条还不到期。
+  const ago = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  fs.rmSync(path.join(root, ".quay", "gate-events.jsonl"));
+  appendGoalEvent(root, "AC-900", "fail", { actor: SWEEP_ACTOR, at: ago, reason: "acceptance failed (exit 1)" });
+  appendGoalEvent(root, "AC-901", "pass", { actor: SWEEP_ACTOR, at: ago });
+  const s = createGoalStore(path.join(root, "goals"));
+  const r = await s.sweepFrozen({ budget: 5, wallMs: 60_000 });
+  assert.deepEqual(r.ran.map((x) => x.id), ["AC-900"], "只有 fail 的那条重新合格（pass 那条未到 minAge）");
+  assert.equal(r.ran[0].verdict, "fail", "重查仍然为假");
+  assert.equal(r.eligible, 1, "合格集合被枚举（⛔ 非布尔）");
+});
+
+// ── gap-ac242-naive-frontmatter-split-hides-own-long-term-self-latching-false-positive ───────────
+// 缺陷：判据用朴素三横线切分（`s.split("---",2)[1]`）取 frontmatter，会在**字段值内部**的 `---` 处
+// 截断 ⇒ 声明写在它**之后**的字段（`long-term`）系统性读不到。改前生产实测（本任务 ## Evidence）：
+// 朴素切分看得见 13/16 条已声明 `long-term: true` 的 AC，看不见的恰好是 AC-214 / AC-242 / AC-244
+// ——判据正文含 `---` 的那三条。后果是**自锁**：该判据把 AC-242 算进冻结population ⇒ 它红 ⇒ 它自己的
+// 尾事件变 fail ⇒ 它再把自己算进去（改前实测：把四条真问题的尾事件模拟为 pass 后，输出仍是 `AC-242`）。
+//
+// goal 记录唯一的解析器是 `frontmatter-store-base.parseFrontmatter`（行首锚定 + 真 YAML）。本测试钉住
+// 它的**边界**：`criterion` 块标量里含 `---` 时，其后声明的 `long-term` 必须仍被读到 ⇒ 该 AC 留在复验
+// 域内（AC-216）⇒ 不会因自己的 fail 尾事件自报。第 (d) 段是双向控制：同一份台账、同一个判据，去掉声明
+// 就**必须**报出它（⛔ 防止修假阳性时把检测能力一起去掉）。
+//
+// 第 (a) 段是**夹具的牙齿**：它断言朴素切分**确实**在这条记录上丢字段。若有人把判据正文改成不含 `---`，
+// 它会红——否则本测试会在「夹具不再触发该边界」时退化成恒真（硬规则 3b：一个恒绿的检查比没有检查更贵）。
+test("AC-242 —— `---` 落在 criterion 块标量内时，其后声明的 long-term 仍被读到（朴素切分会丢）", () => {
+  const root = tmpDir("ac242-delim");
+  fs.mkdirSync(path.join(root, "goals"), { recursive: true });
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  const cli = new URL("../src/goal-store.ts", import.meta.url).pathname;
+  const n = (cmd) => spawnSync("node", ["--experimental-strip-types", cli, "--root", root, ...cmd], { encoding: "utf8" });
+  const criterion = ["true", "# --- 这一行携带 frontmatter 分隔符（AC-214/AC-242/AC-244 的判据正文同形）", "false"].join("\n");
+  n(["write", "GOAL-900", "--title", "closed goal", "--status", "achieved", "--origin", "o", "--body", GOAL_BODY]);
+  const w = n(["write", "AC-900", "--title", "AC-900", "--status", "achieved", "--goal", "GOAL-900", "--criterion", criterion, "--origin", "o", "--expect", EXPECT, "--long-term", "true"]);
+  assert.equal(w.status, 0, `带多行 criterion 的写入必须 exit 0:\n${w.stdout}${w.stderr}`);
+
+  // (a) 夹具的牙齿：朴素切分**确实**在这条记录上丢字段。
+  const acFile = fs.readdirSync(path.join(root, "goals")).find((f) => f.startsWith("AC-900-"));
+  const raw = fs.readFileSync(path.join(root, "goals", acFile), "utf8");
+  const naiveKeys = raw.split("---", 2)[1].split("\n").map((l) => (l.match(/^([A-Za-z_-]+):/) ?? [])[1]).filter(Boolean);
+  assert.ok(naiveKeys.includes("criterion"), "朴素切分仍看得见 criterion（截断点在它之后）");
+  assert.equal(naiveKeys.includes("long-term"), false, "朴素切分必须丢掉 long-term —— 丢了才说明 `---` 真的在值内部（否则本测试没验到东西）");
+
+  // (b) 机件回读（⛔ 不采信文件字面）：声明在其后仍被解析到。
+  assert.equal(JSON.parse(n(["get", "AC-900"]).stdout).longTerm, true, "long-term 声明在含 `---` 的 criterion 之后仍被读到");
+
+  // (c) 后果：它因此留在复验域内 ⇒ 即使尾事件是 fail 也不自报（自锁不可能）。
+  appendGoalEvent(root, "AC-900", "fail");
+  const scoped = JSON.parse(n(["check", "--reverify-scope"]).stdout);
+  assert.ok(scoped.inScope.some((e) => e.id === "AC-900" && e.longTerm === true), "在复验域内（longTerm 分支）");
+  const j1 = JSON.parse(n(["check", "--stale-pass"]).stdout);
+  assert.equal(j1.frozenScope, 0, "不在冻结population ⇒ 无自锁");
+  assert.deepEqual(j1.failing, [], "⛔ 不因自己的 fail 尾事件自报");
+  assert.equal(n(["check", "--stale-pass"]).status, 0);
+
+  // (d) 双向控制：去掉 long-term 声明 ⇒ 同一份台账、同一个判据**必须**报出它（两次结果必须不同）。
+  assert.equal(n(["write", "AC-900", "--long-term", "false"]).status, 0);
+  const j2 = JSON.parse(n(["check", "--stale-pass"]).stdout);
+  assert.deepEqual(j2.failing, ["AC-900"], "域外 + 尾事件 fail ⇒ 必须报出（与 (c) 结果不同）");
+  assert.equal(n(["check", "--stale-pass"]).status, 1);
 });

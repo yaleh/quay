@@ -71,6 +71,17 @@ import {
   GOAL_ROUND_CARRIER_REL,
   SPAWN_ZERO_OUTPUT_THRESHOLD,
   VERDICT_UNCHANGED_THRESHOLD,
+  aggregateActionFailures,
+  errorSignature,
+  extractActionFailureRecords,
+  describeResultShape,
+  readingsDigestPartsForActionFailures,
+  parseDurationMs,
+  readActionRecordConfig,
+  readActionRecordScan,
+  collectActionRecordFailures,
+  locateMetaCcMcp,
+  ACTION_RECORD_SCAN_REL,
 } from '../scripts/meta-driver.ts';
 import { createMetaStore } from '../../packages/quay/src/meta-store.ts';
 
@@ -347,6 +358,13 @@ test('负控制：未提交的 goals/*.md 被 git status --porcelain 检出（�
   }
 });
 
+// 第七类读数（动作记录失败聚合）的测试夹具：**未评估**态——⛔ 绝不把它当「无越阈项」的默认值，
+// 否则测试会在「这一维没读到」时静默走到合格侧（硬规则 3b）。
+const MK_AFR_NONE = {
+  state: 'not-evaluated', aggregates: null, reason: 'test-default',
+  scannedAt: null, scanMs: null, since: null, recordsScanned: null, thresholdSessions: null,
+};
+
 // ── 变化检测闸（事件触发 + 定时器地板）────────────────────────────────────────
 // noise 显式传入：⛔ 不用 Date.now() 制造差异——同一毫秒内两次调用会相等，前提就不成立了
 // （实测踩到：该前提断言当场报错，正是它存在的理由）。
@@ -361,6 +379,7 @@ const mkReadings = (verdict, noise = 'n1') => ({
   inertCheckers: [],
   focus: null,
   timeSeries: [],
+  actionRecordFailures: MK_AFR_NONE,
 });
 
 // 关键负控制：摘要不得随时间/文本噪声变化——否则「变化检测」恒为真，闸形同虚设
@@ -1108,6 +1127,7 @@ test('readingsDigest: inertCheckers 名字进摘要——某个 guard 从在→�
   const mk = (inert) => ({
     goals: [], criteria: [], divergences: [], metaRecords: [], inertCheckers: inert, focus: null,
     timeSeries: [],
+    actionRecordFailures: MK_AFR_NONE,
     drivers: [],
     syncHealth: { window: 200, ffSynced: 0, notFf: 0, ffError: 0, semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0, lastEvent: null, lastTs: null },
   });
@@ -1123,6 +1143,7 @@ test('readingsDigest: 不随 staleSecs/carrierRecords 变（否则变化检测�
   const mk = (stale, records) => ({
     goals: [], criteria: [], divergences: [], metaRecords: [], inertCheckers: [], focus: null,
     timeSeries: [],
+    actionRecordFailures: MK_AFR_NONE,
     drivers: [{ kind: 'promotion', running: true, supervisorAlive: true, driverAlive: true, carrierRecords: records, carrierLastTs: null, staleSecs: stale }],
     syncHealth: { window: 200, ffSynced: 1, notFf: 2, ffError: 0, semanticBegin: 0, semanticResolved: 0, semanticConflict: 0, semanticAlignFailed: 0, semanticFfFailed: 0, lastEvent: 'doc-develop-sync-not-ff', lastTs: null },
   });
@@ -1679,4 +1700,259 @@ test('goalRingValue: 读不出 facts/name 不符 ⇒ null（⛔ 不抛）', () =
   assert.equal(goalRingValue({ facts: [] }), null);
   assert.equal(goalRingValue({ facts: [{ name: 'meta-driver', value: {} }] }), null);
   assert.deepEqual(goalRingValue({ facts: [{ name: 'goal-ring', value: { criteria: [] } }] }), { criteria: [] });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// 第七类读数：动作记录失败聚合（GOAL-014 选项① / 本任务 AC2–AC6）
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+// 造一段 meta-cc `query_session_signals type=errors` 的**真实结果形状**（实测 2026-09-12：
+// result.content[0].text 是一段 JSON 字符串，形如 {"data":[{…sessionId…, message:{content:[
+// {type:"tool_result", is_error:true, content:"<tool_use_error>…"}]}}]}）。
+const mkMetaCcResult = (rows) => ({
+  content: [{ type: 'text', text: JSON.stringify({ data: rows }) }],
+});
+const mkErrRow = (sessionId, text, ts = '2026-09-12T00:00:00.000Z') => ({
+  sessionId, timestamp: ts, type: 'user',
+  message: { role: 'user', content: [{ type: 'tool_result', is_error: true, content: text, tool_use_id: 't1' }] },
+});
+
+// AC2：聚合器输出是【清单】（含签名 / 命中会话数 / 总次数），⛔ 不是布尔。
+test('AC2: 聚合器按「同错误 × 跨会话」出清单（签名 + 命中会话数 + 总次数）', () => {
+  const rows = [
+    mkErrRow('s1', 'Unknown skill: quay-file-task'),
+    mkErrRow('s2', 'Unknown skill: quay-file-task'),
+    mkErrRow('s1', 'Unknown skill: quay-file-task'), // 同一会话内第二次 ⇒ 计数 +1、会话数不变
+    mkErrRow('s3', 'Exit code 127'),
+  ];
+  const r = aggregateActionFailures(extractActionFailureRecords(mkMetaCcResult(rows)), { minSessions: 2 });
+  assert.equal(r.state, 'crossed');
+  assert.ok(Array.isArray(r.aggregates), '⛔ 必须是清单，不是布尔');
+  const top = r.aggregates[0];
+  assert.equal(top.signature, 'Unknown skill: quay-file-task');
+  assert.equal(top.sessions, 2, '命中【会话】数去重后为 2（⛔ 不是总次数 3）');
+  assert.equal(top.count, 3, '总次数含同会话内重复 = 3');
+  assert.equal(top.crossed, true);
+  assert.ok(top.example.includes('Unknown skill'), '清单项带原始样例（SPEC §5.3：枚举对象、给指引）');
+});
+
+// AC3：三态互不同形，且「读不到」不与「无越阈项」共用取值（硬规则 3b）。
+test('AC3: 三态互不同形——crossed / none / not-evaluated 各一条实跑读数', () => {
+  const corpus = (rows, min) => aggregateActionFailures(extractActionFailureRecords(mkMetaCcResult(rows)), { minSessions: min });
+  // ① 有越阈项
+  const crossed = corpus([mkErrRow('a', 'alpha failed'), mkErrRow('b', 'alpha failed')], 2);
+  // ② 无越阈项（查过了，没有跨会话重复）——两条文本必须真的不同形（⛔ 不能用只差数字的样例：
+  //    `errorSignature` 会故意把数字归一到 <n>，那正好会聚成一项、把本用例的前提弄假）。
+  const none = corpus([mkErrRow('a', 'alpha failed'), mkErrRow('b', 'beta failed')], 2);
+  // ③ 语料读不到（形状不认识）
+  const unreadable = aggregateActionFailures(extractActionFailureRecords({ nonsense: true }), { minSessions: 2 });
+  assert.equal(crossed.state, 'crossed');
+  assert.equal(none.state, 'none');
+  assert.equal(unreadable.state, 'not-evaluated');
+  // 「读不到」必须与「无越阈项」不同形：一个是 null，一个是 []。
+  assert.equal(unreadable.aggregates, null, '读不到 ⇒ aggregates 为 null');
+  assert.deepEqual(none.aggregates, [{ signature: 'alpha failed', sessions: 1, count: 1, crossed: false, example: 'alpha failed' },
+    { signature: 'beta failed', sessions: 1, count: 1, crossed: false, example: 'beta failed' }],
+    '查到了、无越阈 ⇒ 清单非 null（即使是空清单也必须是清单）');
+  assert.notEqual(unreadable.aggregates, none.aggregates);
+  // 空语料（查过、零错误）⇒ none + 空清单，⛔ 不是 not-evaluated。
+  const empty = corpus([], 2);
+  assert.equal(empty.state, 'none');
+  assert.deepEqual(empty.aggregates, [], '零错误 = 查过且无命中 ⇒ []（⛔ 不与「读不到」的 null 同形）');
+  // 第四态 unthresholded（未定阈值——见 ActionFailureReading 注释）也必须在四态里唯一。
+  const unthr = aggregateActionFailures(extractActionFailureRecords(mkMetaCcResult([mkErrRow('a', 'alpha failed'), mkErrRow('b', 'alpha failed')])), { minSessions: null });
+  assert.equal(unthr.state, 'unthresholded');
+  assert.equal(unthr.aggregates[0].crossed, null, '未定阈值 ⇒ crossed=null（⛔ 不与 false 同形）');
+  assert.equal(unthr.aggregates[0].sessions, 2, '清单照出（「看见了什么」与「判没判越阈」解耦）');
+  // digest 四态 token 两两不同。
+  const toks = [crossed, none, unreadable, unthr].map((r) => readingsDigestPartsForActionFailures(r)[0]);
+  assert.equal(new Set(toks).size, 4, `四态 token 必须两两不同，实得 ${JSON.stringify(toks)}`);
+});
+
+// 抽取出错 ≠ 没有错误：null（读不懂）与 []（读懂了、里面没有）必须可分。
+test('extractActionFailureRecords: 读不懂 ⇒ null（⛔ 不与「读懂了、零命中」的 [] 同形）', () => {
+  assert.equal(extractActionFailureRecords({ content: [{ type: 'text', text: 'not json at all' }] }), null);
+  assert.equal(extractActionFailureRecords({}), null);
+  assert.deepEqual(extractActionFailureRecords(mkMetaCcResult([])), [], '读懂了、零记录 ⇒ []');
+});
+
+// AC4：取假控制，**双向**。只跑一次「报出来了」不算——必须证明把量降到阈值以下结论会翻。
+test('AC4: 双向取假控制——跨会话重复 ⇒ 报出；降到阈值以下 ⇒ 不报（两次结果必须不同）', () => {
+  const rows = (n) => Array.from({ length: n }, (_, i) => mkErrRow(`s${i}`, 'Unknown skill: quay-file-task'));
+  const above = aggregateActionFailures(extractActionFailureRecords(mkMetaCcResult(rows(3))), { minSessions: 3 });
+  const below = aggregateActionFailures(extractActionFailureRecords(mkMetaCcResult(rows(2))), { minSessions: 3 });
+  assert.equal(above.state, 'crossed', '3 个会话 ≥ 阈值 3 ⇒ 报出');
+  assert.equal(below.state, 'none', '2 个会话 < 阈值 3 ⇒ 不报');
+  assert.notEqual(above.state, below.state, '两次结果必须不同（否则不构成取假）');
+  // 反向对照：同一份语料，只把【阈值】改掉，结论也翻 ⇒ 证明结论确实由阈值驱动，而非别的因素。
+  const sameCorpus = extractActionFailureRecords(mkMetaCcResult(rows(2)));
+  assert.equal(aggregateActionFailures(sameCorpus, { minSessions: 3 }).state, 'none');
+  assert.equal(aggregateActionFailures(sameCorpus, { minSessions: 2 }).state, 'crossed');
+});
+
+// AC5：digest 稳定性——同一份语料连续两轮逐字节相同；新增一条越阈项后必须改变。
+// ⛔ 这正是不让原始计数进 digest 的那条纪律要挡住的：计数从 3→4 不得改变摘要。
+test('AC5: 同一语料两轮 digest 逐字节相同；计数变不变、新增越阈项才变', () => {
+  const mk = (afr) => ({ ...mkReadings('pass', 'n1'), actionRecordFailures: afr });
+  const base = [
+    mkErrRow('s1', 'Unknown skill: quay-file-task'), mkErrRow('s2', 'Unknown skill: quay-file-task'),
+    mkErrRow('s3', 'Exit code 127'),
+  ];
+  const round1 = aggregateActionFailures(extractActionFailureRecords(mkMetaCcResult(base)), { minSessions: 2, scannedAt: '2026-09-12T00:00:00Z', scanMs: 100, since: null });
+  // 第二轮：同一份错误、但 (a) 时间戳/耗时/扫描时刻都变了 (b) 某签名又多命中一次（3→4，仍越阈）。
+  const round2raw = [...base, mkErrRow('s3', 'Unknown skill: quay-file-task')];
+  const round2 = aggregateActionFailures(extractActionFailureRecords(mkMetaCcResult(round2raw)), { minSessions: 2, scannedAt: '2026-09-12T01:00:00Z', scanMs: 999, since: null });
+  assert.equal(round1.aggregates[0].count, 2, '前提：首轮该签名计 2 次');
+  assert.equal(round2.aggregates[0].count, 3, '前提：计数确实从 2 变成了 3（同一错误集、仍越阈）');
+  assert.notEqual(round1.scanMs, round2.scanMs, '前提：scanMs 确实不同');
+  assert.equal(readingsDigest(mk(round1)), readingsDigest(mk(round2)),
+    '同一份错误集 + 计数变化 ⇒ digest 必须逐字节相同（原始计数 ⛔ 不进摘要）');
+  // 新增一条【越阈】项（一个新签名、跨 2 个会话）⇒ digest 必须变。
+  // ⚠️ 前提要说清：给**已越阈**的那一项再多记几次【不会】改变摘要（上面 round1→round2 已证），
+  //    这里加的是**新的**越阈签名。
+  const withNew = aggregateActionFailures(
+    extractActionFailureRecords(mkMetaCcResult([...base, mkErrRow('s9', 'gamma exploded'), mkErrRow('s10', 'gamma exploded')])),
+    { minSessions: 2 });
+  assert.notEqual(readingsDigest(mk(round1)), readingsDigest(mk(withNew)), '新增越阈项必须改变摘要');
+  // 反向：只多了一条【未越阈】的孤例 ⇒ 清单变了但摘要不变（否则每来一个新错就烧一轮 LLM）。
+  const withSolo = aggregateActionFailures(
+    extractActionFailureRecords(mkMetaCcResult([...base, mkErrRow('s9', 'brand new one-off error')])),
+    { minSessions: 2 });
+  assert.equal(readingsDigest(mk(round1)), readingsDigest(mk(withSolo)),
+    '未越阈的孤例不得改变摘要（否则摘要每轮都变、变化检测闸失效）');
+});
+
+// AC6：阈值不写死——配置读取在未配置时返回 null（⛔ 不落回任何数值默认）。
+test('AC6: readActionRecordConfig 未配置 ⇒ 全 null（⛔ 不写字面量默认值）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-afr-cfg-'));
+  try {
+    // 没有 config.yml
+    assert.deepEqual(readActionRecordConfig(tmp), { minSessions: null, windowMs: null, scanTtlMs: null, scanTimeoutMs: null });
+    // 有 config.yml 但没有该段
+    fs.mkdirSync(path.join(tmp, '.quay'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, '.quay', 'config.yml'), 'providers:\n  native:\n    enabled: true\n', 'utf8');
+    assert.deepEqual(readActionRecordConfig(tmp), { minSessions: null, windowMs: null, scanTtlMs: null, scanTimeoutMs: null },
+      '段缺失 ⇒ null（⛔ 不是某个「恰好合理」的默认值）');
+    // 段存在、键取配置值
+    fs.writeFileSync(path.join(tmp, '.quay', 'config.yml'),
+      'action_record_failures:\n  min_sessions: 4\n  window: 24h\n  scan_ttl: 30m\n  scan_timeout: 10m\n', 'utf8');
+    assert.deepEqual(readActionRecordConfig(tmp), { minSessions: 4, windowMs: 86400000, scanTtlMs: 1800000, scanTimeoutMs: 600000 });
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('parseDurationMs: 带单位的时长 / 裸数字（毫秒）/ 不可解析 ⇒ null', () => {
+  assert.equal(parseDurationMs('24h'), 86400000);
+  assert.equal(parseDurationMs('30m'), 1800000);
+  assert.equal(parseDurationMs('90s'), 90000);
+  assert.equal(parseDurationMs('7d'), 604800000);
+  assert.equal(parseDurationMs(1500), 1500);
+  assert.equal(parseDurationMs('soon'), null);
+  assert.equal(parseDurationMs(undefined), null);
+});
+
+// meta-cc hybrid output（internal/mcp/response/adapter.go）：结果超过 inline 阈值时走 file_ref
+// 模式——记录本体在 JSONL 临时文件里。实测 2026-09-12：不处理这一支时【全量】扫描永远解析不出，
+// 而它看起来像「语料读不到」（not-evaluated），不像「解析器少了一支」——正是硬规则 3b 的那类伪装。
+test('extractActionFailureRecords: file_ref 模式（记录在临时 JSONL 里）必须能读；缺 path ⇒ null', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-afr-fr-'));
+  try {
+    const jl = path.join(tmp, 'errors.jsonl');
+    fs.writeFileSync(jl, [
+      JSON.stringify(mkErrRow('s1', 'Unknown skill: quay-file-task')),
+      JSON.stringify(mkErrRow('s2', 'Unknown skill: quay-file-task')),
+      '',
+    ].join('\n'), 'utf8');
+    const env = { content: [{ type: 'text', text: JSON.stringify({ mode: 'file_ref', file_ref: { path: jl, line_count: 2 } }) }] };
+    const recs = extractActionFailureRecords(env);
+    assert.equal(recs.length, 2, 'file_ref 的记录必须被读出来');
+    assert.equal(recs[0].sessionId, 's1');
+    assert.equal(recs[0].signature, 'Unknown skill: quay-file-task');
+    // 指向不存在的文件 ⇒ null（读不懂），⛔ 不是 []（「读懂了、零命中」）。
+    const bad = { content: [{ type: 'text', text: JSON.stringify({ mode: 'file_ref', file_ref: { path: path.join(tmp, 'nope.jsonl') } }) }] };
+    assert.equal(extractActionFailureRecords(bad), null);
+    // 没有 file_ref / data ⇒ null，且 describeResultShape 给出可诊断的形状提示。
+    const weird = { content: [{ type: 'text', text: JSON.stringify({ mode: 'inline', warnings: ['x'] }) }] };
+    assert.equal(extractActionFailureRecords(weird), null);
+    assert.ok(describeResultShape(weird).includes('mode=inline'), describeResultShape(weird));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// errorSignature：归一化是「同错误可聚合」的前提——同形异值必须归到同一个键，异形必须不同键。
+test('errorSignature: 抹掉一次性的数字/路径/sha；不同错误不得并成一个签名', () => {
+  assert.equal(
+    errorSignature('ENOENT: no such file, open /home/yale/work/quay/a.ts line 42'),
+    errorSignature('ENOENT: no such file, open /tmp/b.ts line 99'),
+    '同形异值（路径/行号）必须归一到同一个签名');
+  assert.notEqual(errorSignature('Unknown skill: quay-file-task'), errorSignature('Exit code 127'));
+  // 反向对照：不归一化就会各自成键 ⇒ 聚合面恒为「每个错误 1 个会话」，本读数就没意义。
+  const rows = [
+    mkErrRow('s1', 'ENOENT: open /p/a.ts line 1'), mkErrRow('s2', 'ENOENT: open /p/b.ts line 2'),
+  ];
+  const r = aggregateActionFailures(extractActionFailureRecords(mkMetaCcResult(rows)), { minSessions: 2 });
+  assert.equal(r.state, 'crossed', '归一化后两条应聚成一项、命中 2 个会话');
+  // 「a–f 组成的普通英文词」不得被当成 sha 抹掉（否则不同错误会被并成一个签名）。
+  assert.ok(errorSignature('the process defaced its output').includes('defaced'));
+});
+
+// collectActionRecordFailures：扫描（成本旋钮）与越阈判定（判断旋钮）解耦——
+// 「不定阈值」不得等于「不看语料」（否则 AC7 落空），也⛔不得等于「替人定一个数」。
+test('collectActionRecordFailures: 未定阈值 ⇒ unthresholded（清单照出、crossed 为 null，不触扫描）', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-afr-col-'));
+  try {
+    fs.mkdirSync(path.join(tmp, '.quay'), { recursive: true });
+    // ① 未配置 min_sessions **且无载体** ⇒ not-evaluated（语料读不到）。
+    const r0 = await collectActionRecordFailures(tmp, { now: Date.parse('2026-09-12T02:00:00Z'), binary: null });
+    assert.equal(r0.state, 'not-evaluated');
+    assert.equal(r0.aggregates, null, '读不到 ⇒ null，⛔ 不是 []');
+    // ② 未配置 min_sessions 但【有真实载体】⇒ unthresholded：清单照出、crossed 全为 null。
+    fs.writeFileSync(path.join(tmp, ACTION_RECORD_SCAN_REL), JSON.stringify({
+      scannedAt: '2026-09-12T01:59:00Z', scanMs: 1234, since: null,
+      records: [
+        { sessionId: 's1', signature: 'Unknown skill: quay-file-task', example: 'x', ts: null },
+        { sessionId: 's2', signature: 'Unknown skill: quay-file-task', example: 'x', ts: null },
+      ],
+    }), 'utf8');
+    const r1 = await collectActionRecordFailures(tmp, { now: Date.parse('2026-09-12T02:00:00Z'), binary: null });
+    assert.equal(r1.state, 'unthresholded', '未定阈值 ⇒ 独立取值（⛔ 不与 none/crossed 同形）');
+    assert.equal(r1.aggregates.length, 1, '清单照出——「我看见了什么」不因「还没定阈值」而丢掉');
+    assert.equal(r1.aggregates[0].crossed, null, 'crossed=null（⛔ 不与 false 同形）');
+    assert.equal(r1.aggregates[0].sessions, 2);
+    assert.equal(r1.thresholdSessions, null);
+    assert.equal(r1.scanMs, 1234, '走向载体、不重扫（scanMs 来自载体）');
+    assert.equal(readActionRecordScan(tmp).records.length, 2);
+    // ③ 配好阈值 + `scan_ttl` 未配置 ⇒ 仍然【从不自动扫】（⛔ 不写字面量 TTL），走同一份载体。
+    fs.writeFileSync(path.join(tmp, '.quay', 'config.yml'), 'action_record_failures:\n  min_sessions: 2\n', 'utf8');
+    const r2 = await collectActionRecordFailures(tmp, { now: Date.parse('2026-09-12T02:00:00Z'), binary: null });
+    assert.equal(r2.state, 'crossed', '阈值 2 + 两会话 ⇒ 越阈');
+    assert.equal(r2.scanMs, 1234, 'scan_ttl 未配置 ⇒ 不重扫');
+    assert.equal(r2.thresholdSessions, 2);
+    // ④ 配了 scan_ttl 且载体过期、binary:null（无 meta-cc）⇒ 扫描失败但有旧载体 ⇒ 落回旧载体
+    //    （值仍来自**真实**扫描，age 由 scannedAt 暴露），⛔ 不能冒充「无越阈项」。
+    fs.writeFileSync(path.join(tmp, '.quay', 'config.yml'), 'action_record_failures:\n  min_sessions: 2\n  scan_ttl: 1h\n', 'utf8');
+    const r3 = await collectActionRecordFailures(tmp, { now: Date.parse('2026-09-12T05:00:00Z'), binary: null });
+    assert.equal(r3.state, 'crossed');
+    assert.equal(r3.scannedAt, '2026-09-12T01:59:00Z', '旧载体的时刻暴露年龄');
+    // ⑤ 无载体 + 扫描失败 ⇒ not-evaluated（⛔ 不是 none、⛔ 不是 unthresholded）。
+    fs.rmSync(path.join(tmp, ACTION_RECORD_SCAN_REL));
+    const r4 = await collectActionRecordFailures(tmp, { now: Date.parse('2026-09-12T05:00:00Z'), binary: null });
+    assert.equal(r4.state, 'not-evaluated');
+    assert.ok(r4.reason.startsWith('scan-failed') || r4.reason.startsWith('corpus-unreadable'), r4.reason);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// 否定用例：扫描器定位不到 meta-cc ⇒ null（⛔ 不是「这台机器没有重复失败」）。
+test('locateMetaCcMcp: 无候选 ⇒ null；QUAY_META_CC_MCP 指向不存在 ⇒ 不采信', () => {
+  assert.equal(locateMetaCcMcp({ QUAY_META_CC_MCP: '/nonexistent/meta-cc-mcp' }, '/nonexistent-home'), null);
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-afr-home-'));
+  try {
+    assert.equal(locateMetaCcMcp({}, fakeHome), null, '没有 cache 也没有 ~/.local/bin ⇒ null，⛔ 不抛');
+  } finally {
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  }
 });

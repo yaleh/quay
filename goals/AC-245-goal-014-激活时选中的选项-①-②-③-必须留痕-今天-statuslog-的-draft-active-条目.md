@@ -5,11 +5,21 @@ title: GOAL-014 激活时选中的选项（①/②/③）必须留痕——今�
 status: achieved
 kind: criterion
 goal: GOAL-014
-criterion: node --no-warnings --experimental-strip-types
-  packages/quay/src/goal-store.ts get GOAL-014 | python3 -c 'import json,sys;
-  r=json.load(sys.stdin); log=[e for e in (r.get("statusLog") or []) if
-  str(e.get("to"))=="active"]; sys.exit(0 if log and str(log[-1].get("reason")
-  or "").strip() else 1)'
+criterion: >-
+  node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts
+  get GOAL-014 | python3 -c '
+
+  import json,sys
+
+  r=json.load(sys.stdin)
+
+  log=[e for e in (r.get("statusLog") or []) if str(e.get("to"))=="active"]
+
+  if not log:
+      sys.stderr.write("CAUSE=goal-014-statusLog-has-no-to-active-entry\n"); sys.exit(1)
+  if not str(log[-1].get("reason") or "").strip():
+      sys.stderr.write("CAUSE=goal-014-to-active-entry-reason-empty\n"); sys.exit(1)
+  '
 expect: GOAL-014 的 statusLog 中 to=active 那条带非空 reason（写明选中①/②/③ 与一句理由）⇒
   退出条件②③可判定；今天该条 reason 为空 ⇒ 判据红（本轮已实跑确认 exit 1，且 statusLog 键存在，不是「缺值」）。
 origin: readings.goals 列 GOAL-014 为 active 而 readings.criteria 为空（名下零 AC，已由本轮实跑

@@ -4,10 +4,11 @@ title: G2 迁移——当前阶段与下一阶段的 AC 全部成为 store 记�
 status: achieved
 kind: criterion
 goal: GOAL-001
-criterion: >
-  test "$(node packages/quay/src/goal-store.ts list | grep -c '"id":
-  "AC-1[4-6][0-9]"')" -ge 27
-expect: exit 0（≥27 条：当前阶段 AC143–155 共 13 条 + 下一阶段 AC156–169 共 14 条）
+criterion: |-
+  n="$(node packages/quay/src/goal-store.ts list | grep -c '"id": "AC-1[4-6][0-9]"')"
+  test "$n" -ge 27 || { echo "CAUSE=too-few-migrated-acs — goal-store list 中 AC-14x…AC-169 区间记录数 n=$n < 27" >&2; exit 1; }
+  exit 0
+expect: exit 0（≥27 条：当前阶段 AC143–155 共 13 条 + 下一阶段 AC156–169 共 14 条）。失败时 exit 1 且 stderr 携带 `CAUSE=…` 成因——⛔ `echo … >&2` 与 `exit 1` 必须写在【同一行】：`plugin/scripts/criterion-failure-attribution-check.ts` 逐行判定，拆两行会被判裸退出并打红棘轮（GOAL-009 AC-241 纪律；2026-09-12 gap-criterion-attribution-blind-to-silent-terminal-command）。
 origin: |
   规格 §7.1：上一次的死因是"建好了没人迁"——goal-store 落地 28 天，goals/ 从未存在。
   ⇒ 迁移排在 ABI 与 driver 之前，让 store 先有真实数据再加功能。

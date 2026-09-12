@@ -96,6 +96,141 @@ const AC_ID_RE = /^AC-\d{3,}$/;
 // can `env -u` it to prove the observation measures real behavior.
 export const GOAL_ACCEPTANCE_ACTIVE_ENV = "QUAY_GOAL_ACCEPTANCE_ACTIVE";
 
+// ── AC-242 successor: the FROZEN population and its bounded rotation re-verification ──────────────
+// gap-achieved-ac-rot-invisible-when-ledger-tail-is-stale-pass. An AC `status: achieved` whose GOAL
+// is no longer `active` and which does NOT declare `long-term: true` leaves BOTH mechanisms at once:
+//   · I5 (`checkAchievedFailing`) never runs it — `inAchievedReverifyScope` is false;
+//   · the driver's per-round gate set (`standingReverifyAcs`) never runs it — same predicate.
+// Its ledger tail therefore FREEZES at whatever the last verdict was. AC-242's original predicate
+// ("tail verdict === fail") can only see a failure that was RECORDED — so an AC that goes false
+// AFTER its last recording is tail-`pass` and is structurally invisible to every mechanism
+// (hard rule 4: a reading that cannot turn false is not a measurement; measured 2026-09-12: 4 such
+// ACs — AC-147/AC-149/AC-172/AC-228 — all tail=pass, all live-exit!=0).
+//
+// The fix is NOT a wider predicate (a predicate cannot know a criterion's current truth without
+// running it — that IS the cost) and NOT an indiscriminate widening of the reverify scope (AC-216's
+// cost boundary, stated in `inAchievedReverifyScope`'s comment). It is a BOUNDED ROTATION:
+// re-run the least-recently-verified frozen ACs, a few per invocation, and RECORD the verdict in the
+// same ledger the judgment already reads — so the tail stops being frozen and starts meaning
+// "the last time we actually looked", with a bounded and therefore known freshness.
+//
+// Measured cost basis (2026-09-12, this repo, frozen population M = 81, single-threaded):
+//   avg 1.31s/criterion over a 21-AC sample; two outliers at 7.4s and 10.6s.
+//   ⇒ one full rotation ≈ M × ~1.3s ≈ 106s ≈ 1.8 min of CPU, amortized over the rotation period.
+// With `DEFAULT_SWEEP_MIN_AGE_MS` = 1h the steady-state cost is therefore ≈ M × 1.3s / 1h ≈ 106s
+// per hour (≈3% of one core), and the per-invocation bound is
+//   ≤ min(DEFAULT_SWEEP_BUDGET × criterion-timeout, DEFAULT_SWEEP_WALL_MS)
+// = ≤ min(6 × 60s, 30s) = ≤ 30s — an invocation that exceeds the wall budget stops early and the
+// remaining ACs are picked up by the next invocation (the rotation is resumable from the ledger
+// ALONE: eligibility is "oldest recorded verification first", so there is no cursor to drift).
+export const SWEEP_ACTOR = "goal-sweep";
+/** Rotation cadence: an AC is eligible for re-verification once its last RECORDED verification is
+ *  older than this. ⛔ Not a verdict threshold — eligibility, i.e. "when is looking again worth the
+ *  cost" — and it is what bounds the steady-state cost (see the block comment above). */
+export const DEFAULT_SWEEP_MIN_AGE_MS = 60 * 60 * 1000;
+/** Criteria per invocation (the hard cap; the wall budget below can stop it earlier). */
+export const DEFAULT_SWEEP_BUDGET = 6;
+/** Wall-clock cap per invocation — the driver's round must not be stalled by a slow criterion. */
+export const DEFAULT_SWEEP_WALL_MS = 30_000;
+/** An AC whose last RECORDED verdict is `fail` becomes eligible again at `minAgeMs / this` — i.e. a
+ *  failure is re-checked sooner than a pass. Two reasons, both concrete:
+ *   · the state you want to watch is the FAILING one (the mechanism exists to catch rot; a fail is
+ *     the reading that can flip either way, a pass is the resting state), and
+ *   · it BOUNDS a transient: when a criterion is re-scoped/fixed, the rotation re-runs it within one
+ *     driver round instead of waiting out the full `minAgeMs`, so a fail recorded by the previous
+ *     criterion version stops being the ledger tail — and stops holding AC-241 red — promptly.
+ *  ⛔ This does NOT raise the cost bound: eligibility only ORDERS the candidates, and each invocation
+ *  still runs at most `budget` criteria / `wallMs` (a persistently failing set can at most crowd out
+ *  the same budget, never exceed it). */
+export const DEFAULT_FAIL_RECHECK_DIVISOR = 6;
+/** The JUDGMENT's freshness bound: a frozen AC whose last recorded verification is older than this
+ *  has an UNKNOWN current truth and is reported in `staleUnverified` — ⛔ never silently counted as
+ *  fine (hard rule 3b). Deliberately ≫ the rotation period: a tight bound would flap red/green as
+ *  the rotation sweeps; 4× the period leaves room for a rotation that is merely behind, while still
+ *  being finite. */
+export const DEFAULT_STALE_PASS_MAX_AGE_MS = 4 * 60 * 60 * 1000;
+/** Per-criterion deadline. ⛔ The SAME value `runAcceptance` defaults to — the budget arithmetic
+ *  above is only true if these two agree, so it is one literal, not two. */
+export const SWEEP_CRITERION_TIMEOUT_MS = 60_000;
+
+/** One `gate:"goal"` ledger row, reduced to the fields a rotation judgment needs. */
+type GateTail = { at: string; verdict: string; actor: string; reason: string };
+
+/**
+ * Per-record ledger TAILS in ONE pass: `last` = the most recent `gate:"goal"` event for the id;
+ * `lastSweep` = the most recent one written by the ROTATION (`actor === SWEEP_ACTOR`). Two maps
+ * because they answer two different questions — "what does the ledger say" vs "has the rotation
+ * actually looked at this recently" — and collapsing them would make a rotation-written verdict
+ * indistinguishable from a per-round-loop one (hard rule 4b: the tail is read as a proxy for
+ * current truth, so who wrote it and when is part of the reading, not decoration).
+ */
+function gateTails(goalDir: string): { last: Map<string, GateTail>; lastSweep: Map<string, GateTail> } {
+  const last = new Map<string, GateTail>();
+  const lastSweep = new Map<string, GateTail>();
+  const logPath = path.join(path.dirname(goalDir), ".quay", "gate-events.jsonl");
+  let events;
+  try {
+    events = queryGateEvents(logPath, { gate: "goal" });
+  } catch {
+    return { last, lastSweep }; // unreadable/missing ledger ⇒ no tails (never crash a read)
+  }
+  for (const ev of events) {
+    const id = String(ev.pipeline_id ?? ev.item_id ?? "");
+    if (!id) continue;
+    const payload = (ev.payload ?? {}) as Record<string, unknown>;
+    const row: GateTail = {
+      at: String(ev.timestamp ?? ""),
+      verdict: String(ev.verdict ?? ""),
+      actor: String(ev.actor ?? ""),
+      reason: typeof payload.reason === "string" ? payload.reason : "",
+    };
+    last.set(id, row); // append order = on-disk order ⇒ the LAST matching event wins
+    if (row.actor === SWEEP_ACTOR) lastSweep.set(id, row);
+  }
+  return { last, lastSweep };
+}
+
+/**
+ * The judgment `check --stale-pass` returns. Enumerated, never booleanized (hard rule 3):
+ * `failing` and `staleUnverified` are the two DIFFERENT answers to "is this AC still true" —
+ * the first is "verified false", the second is "we have not looked recently enough to say".
+ * Collapsing them would make "no longer true" and "unknown" share an output shape, which is exactly
+ * the confusion this task exists to remove (hard rule 3b).
+ */
+export interface StalePassReading {
+  /** Achieved ∧ criterion non-empty ∧ NOT in `inAchievedReverifyScope` — the population that
+   *  no other mechanism re-runs. */
+  frozenScope: number;
+  evaluated: boolean;
+  /** Verified CURRENT truth is false: either the rotation recorded a fail within `maxAgeMs`, or the
+   *  last recorded verdict (by anyone) is a fail. ⛔ This is the bucket that must never be silent. */
+  failing: string[];
+  /** Last recorded verdict is a pass, but no ROTATION verdict within `maxAgeMs` — current truth
+   *  UNKNOWN. Reported so the coverage gap is visible; ⛔ not a pass (hard rule 3b). */
+  staleUnverified: string[];
+  /** The rotation ran and the criterion itself declared NOT-EVALUATED (exit 3 — this repo's
+   *  convention, e.g. 「NOT-EVALUATED: carrier absent」). ⛔ NOT a failure: "I cannot evaluate this
+   *  HERE" must not share an output shape with "this is false" — recording it as `fail` would be
+   *  this file's own original sin (conflating what was recorded with what is true) in a new place.
+   *  ⚠️ Consequence worth knowing: several frozen criteria read gitignored runtime carriers under
+   *  `.quay/`, so they legitimately report NOT-EVALUATED in a transient worktree and PASS in the
+   *  workspace that owns those carriers ⇒ the rotation is WORKSPACE-LOCAL and is driven from the
+   *  workspace the goal ring drives (the production checkout), never from a worktree copy. */
+  notEvaluated: string[];
+  /** Rotation verified within `maxAgeMs` and it passed. */
+  verifiedFresh: string[];
+  /** No `gate:"goal"` event at all — never evaluated by anything. */
+  neverGated: string[];
+  rotation: {
+    /** How many frozen ACs have EVER been touched by the rotation. 0 ⇒ the mechanism does not
+     *  exist in this workspace, which is a NOT-EVALUATED state, ⛔ not "all fine". */
+    sweptEver: number;
+    lastSweepAt: string | null;
+    minAgeMs: number;
+    maxAgeMs: number;
+  };
+}
+
 // Frontmatter keys the view-model owns explicitly; everything else in the frontmatter
 // (any future field) is preserved verbatim — the same discipline as adr-store/document-store.
 const OWNED_KEYS = new Set([
@@ -767,6 +902,172 @@ export function createGoalStore(
     };
   }
 
+  // ── AC-242 successor: the FROZEN population, its bounded rotation, and the reading ────────────
+  // (gap-achieved-ac-rot-invisible-when-ledger-tail-is-stale-pass — rationale and measured cost
+  //  basis are on `DEFAULT_SWEEP_MIN_AGE_MS`'s block comment at the top of this file.)
+
+  /** The population no other mechanism re-runs: achieved ∧ criterion non-empty ∧ ⛔ NOT in
+   *  `inAchievedReverifyScope`. Shares the ONE scope predicate with I5, the driver's gate set and
+   *  the driver's gap-filing set (hard rule 5b: ⛔ never a second derivation of the same boundary). */
+  function frozenAchievedAcs(): GoalViewModel[] {
+    const activeGoalIds = new Set(activeGoals().map((g) => String(g.id)));
+    return list().filter(
+      (ac) =>
+        isCriterionId(String(ac.id)) &&
+        ac.status === "achieved" &&
+        !inAchievedReverifyScope(ac, activeGoalIds) &&
+        String(ac.criterion ?? "").trim() !== "",
+    );
+  }
+
+  /** PURE-READ judgment (⛔ runs no criterion — this is what AC-242's criterion calls every round,
+   *  so it must cost a ledger parse, not a criterion sweep). `evaluated`/`frozenScope` keep "empty
+   *  population" distinguishable from "looked at N and all fine" (hard rule 3b). */
+  function checkStalePass(nowMs: number = Date.now()): StalePassReading {
+    const maxAgeMs = DEFAULT_STALE_PASS_MAX_AGE_MS;
+    const frozen = frozenAchievedAcs();
+    const { last, lastSweep } = gateTails(goalDir);
+    const failing: string[] = [];
+    const staleUnverified: string[] = [];
+    const notEvaluated: string[] = [];
+    const verifiedFresh: string[] = [];
+    const neverGated: string[] = [];
+    let sweptEver = 0;
+    let lastSweepAt: string | null = null;
+    for (const ac of frozen) {
+      const id = String(ac.id);
+      const tail = last.get(id);
+      const sw = lastSweep.get(id);
+      if (sw) {
+        sweptEver++;
+        if (lastSweepAt === null || sw.at > lastSweepAt) lastSweepAt = sw.at;
+      }
+      if (!tail) {
+        neverGated.push(id);
+        continue;
+      }
+      // Order matters: a rotation verdict WITHIN the freshness bound is the current truth (either
+      // direction); outside it, fall back to the last recorded verdict by anyone — and when that is
+      // a pass, the answer is "unknown", ⛔ not "fine".
+      const swAgeMs = sw ? nowMs - Date.parse(sw.at) : Infinity;
+      if (sw && Number.isFinite(swAgeMs) && swAgeMs <= maxAgeMs) {
+        if (sw.verdict === "fail") failing.push(id);
+        else if (sw.verdict === "pass") verifiedFresh.push(id);
+        else notEvaluated.push(id); // "not-evaluated" — 判据自己声明【此地无法评估】，⛔ 不是假
+      } else if (tail.verdict === "fail") {
+        failing.push(id);
+      } else {
+        staleUnverified.push(id);
+      }
+    }
+    const sortIds = (a: string[]) => a.sort();
+    return {
+      frozenScope: frozen.length,
+      evaluated: frozen.length > 0,
+      failing: sortIds(failing),
+      staleUnverified: sortIds(staleUnverified),
+      notEvaluated: sortIds(notEvaluated),
+      verifiedFresh: sortIds(verifiedFresh),
+      neverGated: sortIds(neverGated),
+      rotation: { sweptEver, lastSweepAt, minAgeMs: DEFAULT_SWEEP_MIN_AGE_MS, maxAgeMs },
+    };
+  }
+
+  /**
+   * One bounded ROTATION step: re-run the eligible frozen ACs' criteria and RECORD each verdict as
+   * a `gate:"goal"` event with `actor: SWEEP_ACTOR` — the same carrier the judgment reads, so the
+   * frozen tail stops being frozen (⛔ no second state file, and therefore no cursor to drift: the
+   * next invocation's eligibility is derived from these very events).
+   *
+   * Eligibility = "last ROTATION verdict older than `minAgeMs`", ordered oldest-first (never-touched
+   * first) ⇒ least-recently-verified-first, self-resuming, and bounded: at most `budget` criteria and
+   * at most `wallMs` of wall clock per invocation, with a hard per-criterion deadline of
+   * `SWEEP_CRITERION_TIMEOUT_MS`. ⛔ The rotation NEVER flips a record's status — the same ruling as
+   * I5 ("⛔ 不反向翻转 achieved→active，激活归人"): it records what it observed and nothing else.
+   */
+  async function sweepFrozen(
+    o: { budget?: number; minAgeMs?: number; wallMs?: number; nowMs?: number } = {},
+  ): Promise<{
+    evaluated: boolean;
+    refused: boolean;
+    eligible: number;
+    ran: Array<{ id: string; verdict: "pass" | "fail" | "not-evaluated"; reason: string; ms: number }>;
+    stoppedBy: "exhausted" | "budget" | "wall";
+  }> {
+    const budget = o.budget ?? DEFAULT_SWEEP_BUDGET;
+    const minAgeMs = o.minAgeMs ?? DEFAULT_SWEEP_MIN_AGE_MS;
+    const wallMs = o.wallMs ?? DEFAULT_SWEEP_WALL_MS;
+    const nowMs = o.nowMs ?? Date.now();
+    const frozen = frozenAchievedAcs();
+    // Re-entrancy guard (same var as I5's): a criterion that itself calls back into a criterion
+    // runner must not recurse. Refusing here is a REFUSAL, not an empty result (hard rule 3b).
+    if (process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] === "1") {
+      return { evaluated: false, refused: true, eligible: 0, ran: [], stoppedBy: "exhausted" };
+    }
+    const { lastSweep } = gateTails(goalDir);
+    const ageOf = (id: string): number => {
+      const sw = lastSweep.get(id);
+      if (!sw) return Infinity;
+      const t = Date.parse(sw.at);
+      return Number.isFinite(t) ? nowMs - t : Infinity;
+    };
+    // Eligibility threshold per AC: a recorded FAIL is re-checked sooner (see
+    // DEFAULT_FAIL_RECHECK_DIVISOR) — ⛔ ordering only, the per-invocation bound is unchanged.
+    const eligibleAt = (id: string): boolean => ageOf(id) > (lastSweep.get(id)?.verdict === "fail" ? minAgeMs / DEFAULT_FAIL_RECHECK_DIVISOR : minAgeMs);
+    const eligible = frozen
+      .map((ac) => String(ac.id))
+      .filter(eligibleAt)
+      .sort((a, b) => {
+        const da = ageOf(a);
+        const db = ageOf(b);
+        if (da !== db) return db - da; // oldest (Infinity first) wins — least-recently-verified-first
+        return a.localeCompare(b);
+      });
+    const picked = eligible.slice(0, budget);
+    if (picked.length === 0) {
+      return { evaluated: frozen.length > 0, refused: false, eligible: eligible.length, ran: [], stoppedBy: "exhausted" };
+    }
+    const byId = new Map(frozen.map((ac) => [String(ac.id), ac]));
+    const { appendGateEvent } = await import("./gate/gate-event-store.ts");
+    const logPath = path.join(path.dirname(goalDir), ".quay", "gate-events.jsonl");
+    const root = resolveGitRoot(goalDir) ?? path.dirname(goalDir);
+    const startedAt = Date.now();
+    const ran: Array<{ id: string; verdict: "pass" | "fail" | "not-evaluated"; reason: string; ms: number }> = [];
+    const prev = process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
+    process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = "1";
+    let stoppedBy: "exhausted" | "budget" | "wall" = picked.length < eligible.length ? "budget" : "exhausted";
+    try {
+      for (const id of picked) {
+        if (Date.now() - startedAt > wallMs) {
+          stoppedBy = "wall";
+          break;
+        }
+        const criterion = String(byId.get(id)?.criterion ?? "");
+        const t0 = Date.now();
+        const res = runAcceptance({ command: criterion, cwd: root, timeoutMs: SWEEP_CRITERION_TIMEOUT_MS });
+        // ⛔ exit 3 = the criterion itself declared NOT-EVALUATED (this repo's convention). It is
+        // recorded AS SUCH: writing `fail` would assert "this is false" about a criterion that said
+        // "I cannot evaluate this here" — hard rule 3b, and the very conflation this task is about.
+        const verdict: "pass" | "fail" | "not-evaluated" = res.ok ? "pass" : res.code === 3 ? "not-evaluated" : "fail";
+        ran.push({ id, verdict, reason: res.reason.slice(0, 500), ms: Date.now() - t0 });
+        appendGateEvent(logPath, {
+          id: randomUUID(),
+          item_id: id,
+          pipeline_id: id,
+          gate: "goal",
+          actor: SWEEP_ACTOR,
+          verdict,
+          timestamp: new Date().toISOString(),
+          payload: { reason: res.reason },
+        });
+      }
+    } finally {
+      if (prev === undefined) delete process.env[GOAL_ACCEPTANCE_ACTIVE_ENV];
+      else process.env[GOAL_ACCEPTANCE_ACTIVE_ENV] = prev;
+    }
+    return { evaluated: frozen.length > 0, refused: false, eligible: eligible.length, ran, stoppedBy };
+  }
+
   /** Direct read-modify-write of the old goal's file (inside the NEW goal's write lock). */
   function flipGoal(oldId: string, patch: { status: string; supersededBy?: string[] }) {
     const file = fileNameForId(goalDir, oldId);
@@ -1234,7 +1535,7 @@ export function createGoalStore(
     return results;
   }
 
-  return { list, get, write, writeBatch, activeGoals, listActiveCriteria, isGoalAchieved, checkWithinCap, checkStaleness, checkAchievedFailing, checkReverifyScope };
+  return { list, get, write, writeBatch, activeGoals, listActiveCriteria, isGoalAchieved, checkWithinCap, checkStaleness, checkAchievedFailing, checkReverifyScope, frozenAchievedAcs, checkStalePass, sweepFrozen };
 }
 
 // ── Direct-invocation entry (Contract invoke: `node packages/quay/src/goal-store.ts`) ──────────────
@@ -1266,6 +1567,15 @@ export function createGoalStore(
 //                               --adjudication <task.md> it cross-checks the AC2 ruling table: exit 1
 //                               names every 「常设不变式」 ruling that did NOT land as a `long-term`
 //                               field, plus the reverse error and unrecognized rulings.
+//   check --stale-pass [--sweep] [--budget N] [--min-age-ms N] [--wall-ms N] — the AC-242 successor
+//                               (gap-achieved-ac-rot-invisible-when-ledger-tail-is-stale-pass). The
+//                               FROZEN population (achieved ∧ criterion non-empty ∧ NOT in the
+//                               reverify scope) is re-verified by a BOUNDED ROTATION; plain form is
+//                               PURE-READ (exit 1 = an AC is verified CURRENTLY false, named on
+//                               stderr; exit 3 = frozen population exists but the rotation has never
+//                               run ⇒ NOT-EVALUATED; exit 0 otherwise). --sweep performs one bounded
+//                               rotation step first (≤budget criteria, ≤wall-ms, verdicts recorded
+//                               as actor=goal-sweep ledger events).
 import { fileURLToPath } from "node:url";
 
 /** 保真性判定器 spawnSync 的 wall-clock 上限（毫秒）。单次一锤 LLM 判定（criterion + expect 已内嵌，
@@ -1639,6 +1949,22 @@ async function main(argv: string[]) {
       return verdict === "pass" ? 0 : 1;
     }
     case "check": {
+      // ⛔ FAIL-CLOSED on an unknown flag (hard rule 3b). `check` dispatches on flag presence, and
+      // the fall-through is `checkWithinCap` — so before this guard, a NEW flag against an OLDER
+      // goal-store (the activation window: a criterion lands in goals/ while the code it names is
+      // still the pre-change one on the main checkout / before fan-in) silently ran a DIFFERENT
+      // check and exited 0. That is "could not read the input" wearing the same output shape as
+      // "evaluated and fine" — the exact class this task exists to close, so the guard is not
+      // decoration. Every flag `check` understands must be listed here.
+      const KNOWN_CHECK_FLAGS = new Set([
+        "--reverify-scope", "--adjudication", "--achieved-failing", "--staleness",
+        "--stale-pass", "--sweep", "--budget", "--min-age-ms", "--wall-ms",
+      ]);
+      const unknownFlags = rest.filter((a) => a.startsWith("--") && !KNOWN_CHECK_FLAGS.has(a));
+      if (unknownFlags.length > 0) {
+        console.error(`goal-store: unknown check flag(s): ${unknownFlags.join(", ")} — refusing to fall through to a different check (fail-closed)`);
+        return 2;
+      }
       // `check --reverify-scope [--adjudication <task.md>]` — AC1's reading command: the annotated
       // enumeration of the I5 reverify scope. With `--adjudication`, it additionally CROSS-CHECKS the
       // AC2 ruling table against the store: every AC ruled 「常设不变式」 must actually BE in scope
@@ -1681,6 +2007,49 @@ async function main(argv: string[]) {
         }
         // NOT-EVALUATED (⛔ never confounded with "in scope and all fine"): nothing to enumerate.
         return r.scopeSize > 0 ? 0 : 3;
+      }
+      if (rest.includes("--stale-pass")) {
+        // `check --stale-pass [--sweep] [--budget N] [--min-age-ms N] [--wall-ms N]`
+        // (gap-achieved-ac-rot-invisible-when-ledger-tail-is-stale-pass). TWO modes, one shape of
+        // answer — the difference is only whether the bounded rotation runs first:
+        //   · plain            — PURE-READ judgment (⛔ runs no criterion). This is what AC-242's
+        //                        criterion invokes on every goal-driver round, so it must not cost a
+        //                        criterion sweep; it reads what the rotation has already recorded.
+        //   · --sweep          — one bounded rotation step (≤ --budget criteria, ≤ --wall-ms wall),
+        //                        each verdict RECORDED as a ledger event, then the same judgment.
+        const numArg = (flag: string, dflt: number): number => {
+          const i = rest.indexOf(flag);
+          if (i < 0) return dflt;
+          const n = Number(rest[i + 1]);
+          return Number.isFinite(n) && n >= 0 ? n : dflt;
+        };
+        let sweep: Awaited<ReturnType<typeof store.sweepFrozen>> | null = null;
+        if (rest.includes("--sweep")) {
+          sweep = await store.sweepFrozen({
+            budget: numArg("--budget", DEFAULT_SWEEP_BUDGET),
+            minAgeMs: numArg("--min-age-ms", DEFAULT_SWEEP_MIN_AGE_MS),
+            wallMs: numArg("--wall-ms", DEFAULT_SWEEP_WALL_MS),
+          });
+        }
+        const r = store.checkStalePass();
+        process.stdout.write(JSON.stringify(sweep ? { ...r, sweep } : r, null, 2) + "\n");
+        if (r.failing.length > 0) {
+          // ⛔ stderr carries the ids and the fact that they are CURRENTLY false — attributable, so
+          // AC-241's discipline holds for the event this criterion's own failure produces.
+          console.error(`stale-pass: frozen achieved AC(s) whose criterion is CURRENTLY false: ${r.failing.join(", ")}`);
+          return 1;
+        }
+        // NOT-EVALUATED, ⛔ never confounded with "looked and all fine" (hard rule 3b): either a
+        // frozen population exists but NOTHING has ever rotated through it (the mechanism that could
+        // tell us is absent), or the rotation ran and some criteria declared「此地无法评估」.
+        if (r.frozenScope > 0 && (r.rotation.sweptEver === 0 || r.notEvaluated.length > 0)) {
+          const why = r.rotation.sweptEver === 0
+            ? `the rotation has never run (no actor=${SWEEP_ACTOR} event in the ledger)`
+            : `the rotation ran and ${r.notEvaluated.length} criterion(a) declared NOT-EVALUATED here: ${r.notEvaluated.join(", ")}`;
+          console.error(`stale-pass: NOT-EVALUATED — ${r.frozenScope} frozen achieved AC(s) but ${why}`);
+          return 3;
+        }
+        return 0;
       }
       if (rest.includes("--achieved-failing")) {
         const r = store.checkAchievedFailing();

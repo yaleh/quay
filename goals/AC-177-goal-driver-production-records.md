@@ -5,9 +5,13 @@ status: achieved
 kind: criterion
 goal: GOAL-001
 criterion: |
-  test -s .quay/goal-round.jsonl \
-    && test "$(grep -c '"verdict"' .quay/goal-round.jsonl)" -ge 3
-expect: exit 0（≥3 条含真实 criterion verdict 的轮次记录）
+  if [ ! -s .quay/goal-round.jsonl ]; then
+    echo "CAUSE=goal-round-carrier-empty — .quay/goal-round.jsonl 不存在或为空（goal-driver 未在生产载体留痕）" >&2; exit 1
+  fi
+  n="$(grep -c '"verdict"' .quay/goal-round.jsonl)"
+  test "$n" -ge 3 || { echo "CAUSE=too-few-verdict-records — .quay/goal-round.jsonl 含 verdict 的记录数 n=$n < 3" >&2; exit 1; }
+  exit 0
+expect: exit 0（≥3 条含真实 criterion verdict 的轮次记录）。失败时 exit 1 且 stderr 携带 `CAUSE=…` 成因——⛔ `echo … >&2` 与 `exit 1` 必须写在【同一行】：`plugin/scripts/criterion-failure-attribution-check.ts` 逐行判定，拆两行会被判裸退出并打红棘轮（GOAL-009 AC-241 纪律；2026-09-12 gap-criterion-attribution-blind-to-silent-terminal-command）。
 origin: |
   硬规则 4 推论三（2026-08-14 实证，代价：一个仪器"完成"了 21 小时而真实数据为 0）：
   一个只能被 fixture / 注入数据满足的判据不是测量。

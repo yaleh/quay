@@ -4,11 +4,11 @@ title: 五 kind 齐备：tasks/goals/meta/adr/docs-managed 全部接线 commitSt
 status: achieved
 kind: criterion
 goal: GOAL-008
-criterion: test "$(grep -l commitStoreWrite packages/quay/src/goal-store.ts
-  packages/quay/src/meta-store.ts packages/quay/src/adr-store.ts
-  packages/quay/src/document-store.ts packages/quay-native/src/store.ts
-  2>/dev/null | wc -l)" -eq 5
-expect: 今天读数 0 ⇒ 红。落地后 5（adr 与 docs-managed 是本 AC 新增的两个，人 2026-09-08 裁定 2）。
+criterion: |
+  n="$(grep -l commitStoreWrite packages/quay/src/goal-store.ts packages/quay/src/meta-store.ts packages/quay/src/adr-store.ts packages/quay/src/document-store.ts packages/quay-native/src/store.ts 2>/dev/null | wc -l)"
+  test "$n" -eq 5 || { echo "CAUSE=commitStoreWrite-not-in-all-5 — 经 commitStoreWrite 提交的 store 文件数 n=$n ≠ 5（五种 kind：tasks/goals/meta/adr/docs-managed）" >&2; exit 1; }
+  exit 0
+expect: 今天读数 0 ⇒ 红。落地后 5（adr 与 docs-managed 是本 AC 新增的两个，人 2026-09-08 裁定 2）。失败时 exit 1 且 stderr 携带 `CAUSE=…` 成因——⛔ `echo … >&2` 与 `exit 1` 必须写在【同一行】：`plugin/scripts/criterion-failure-attribution-check.ts` 逐行判定，拆两行会被判裸退出并打红棘轮（GOAL-009 AC-241 纪律；2026-09-12 gap-criterion-attribution-blind-to-silent-terminal-command）。
 origin: SPEC §4 声明表 + 人 2026-09-08 裁定「adr / docs-managed 也要有
   commit-after-write」。今天 adr-store.ts 与 document-store.ts 完全没有提交路径（grep commit =
   0），是五个 kind 里唯二写盘不提交的。

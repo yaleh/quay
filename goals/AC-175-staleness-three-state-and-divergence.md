@@ -5,11 +5,18 @@ status: achieved
 kind: criterion
 goal: GOAL-001
 criterion: |
-  out="$(node packages/quay/src/goal-store.ts check --staleness)" \
-    && printf '%s' "$out" | grep -q '"fresh"' \
-    && printf '%s' "$out" | grep -q '"stale"' \
-    && printf '%s' "$out" | grep -q '"notEvaluated"'
-expect: exit 0（三个桶作为结构性键恒存在，允许为空数组）
+  out="$(node packages/quay/src/goal-store.ts check --staleness)"
+  if ! printf '%s' "$out" | grep -q '"fresh"'; then
+    echo "CAUSE=staleness-bucket-fresh-missing — check --staleness 输出缺 \"fresh\" 桶" >&2; exit 1
+  fi
+  if ! printf '%s' "$out" | grep -q '"stale"'; then
+    echo "CAUSE=staleness-bucket-stale-missing — check --staleness 输出缺 \"stale\" 桶" >&2; exit 1
+  fi
+  if ! printf '%s' "$out" | grep -q '"notEvaluated"'; then
+    echo "CAUSE=staleness-bucket-notEvaluated-missing — check --staleness 输出缺 \"notEvaluated\" 桶（硬规则 3b 的第三态）" >&2; exit 1
+  fi
+  exit 0
+expect: exit 0（三个桶作为结构性键恒存在，允许为空数组）。失败时 exit 1 且 stderr 携带 `CAUSE=…` 成因——⛔ `echo … >&2` 与 `exit 1` 必须写在【同一行】：`plugin/scripts/criterion-failure-attribution-check.ts` 逐行判定，拆两行会被判裸退出并打红棘轮（GOAL-009 AC-241 纪律；2026-09-12 gap-criterion-attribution-blind-to-silent-terminal-command）。
 origin: |
   人 2026-09-06 裁定「接受硬上限 + 强制关闭机制」，stale=7 天。
   三态要求来自硬规则 3b：判定机件在读不懂输入时不得返回与"合格"同形的值。

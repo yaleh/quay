@@ -6,8 +6,14 @@ kind: criterion
 goal: GOAL-003
 criterion: |-
   f=orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md
-  grep -qE '^- 扫描前死集: [0-9]+$' "$f" && grep -qE '^- 扫描后死集: [0-9]+$' "$f"
-expect: "exit 0（SPEC §12e 同时含机读行 `- 扫描前死集: N` 与 `- 扫描后死集: M`；只有散文叙述不算——两个数字缺一即假）"
+  if ! grep -qE '^- 扫描前死集: [0-9]+$' "$f"; then
+    echo "CAUSE=missing-before-deadset-line — $f 缺「- 扫描前死集: N」机读行（只有散文叙述不算）" >&2; exit 1
+  fi
+  if ! grep -qE '^- 扫描后死集: [0-9]+$' "$f"; then
+    echo "CAUSE=missing-after-deadset-line — $f 缺「- 扫描后死集: M」机读行（只有散文叙述不算）" >&2; exit 1
+  fi
+  exit 0
+expect: "exit 0（SPEC §12e 同时含机读行 `- 扫描前死集: N` 与 `- 扫描后死集: M`；只有散文叙述不算——两个数字缺一即假）。失败时 exit 1 且 stderr 携带 `CAUSE=…` 成因——⛔ `echo … >&2` 与 `exit 1` 必须写在【同一行】：`plugin/scripts/criterion-failure-attribution-check.ts` 逐行判定，拆两行会被判裸退出并打红棘轮（GOAL-009 AC-241 纪律；2026-09-12 gap-criterion-attribution-blind-to-silent-terminal-command）。"
 origin: |
   人 2026-09-02 裁定④「对零调用的工具，先退役（archive），后续发现需要了再恢复」。
   正本 orchestration/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md §12f。

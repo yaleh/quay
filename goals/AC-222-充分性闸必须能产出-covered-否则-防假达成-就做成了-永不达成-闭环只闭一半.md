@@ -4,12 +4,19 @@ title: 充分性闸必须能产出 covered——否则「防假达成」就做�
 status: achieved
 kind: criterion
 goal: GOAL-010
-criterion: node --no-warnings --experimental-strip-types --test
-  plugin/test/goal-sufficiency-semantic-covered.test.mjs && python3 -c 'import
-  json,sys; ok=[s for l in open(".quay/goal-round.jsonl") for f in
+criterion: >-
+  node --no-warnings --experimental-strip-types --test
+  plugin/test/goal-sufficiency-semantic-covered.test.mjs && python3 -c '
+
+  import json,sys
+
+  ok=[s for l in open(".quay/goal-round.jsonl") for f in
   (json.loads(l).get("facts") or []) for s in [(f.get("value") or
-  {}).get("sufficiency")] if isinstance(s,dict) and
-  s.get("verdict")=="covered"]; sys.exit(0 if len(ok)>=1 else 1)'
+  {}).get("sufficiency")] if isinstance(s,dict) and s.get("verdict")=="covered"]
+
+  if len(ok)<1:
+      sys.stderr.write("CAUSE=goal-round-jsonl-has-no-sufficiency-fact-with-verdict-covered\n"); sys.exit(1)
+  '
 expect: 充分性闸能产出 `covered`，且不是靠放水：①负控制单测证明语义判定路径存在且三态可分——判「覆盖」⇒ covered（flip
   可发生）、判「不覆盖」⇒ insufficient、**LLM 不可用/超时/读不懂 ⇒ not-evaluated（⛔ 不得回落
   covered）**；②生产轮记录里出现过 ≥1 条 `sufficiency.verdict == "covered"`。⇒ GOAL

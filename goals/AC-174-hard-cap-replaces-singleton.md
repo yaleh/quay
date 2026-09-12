@@ -5,8 +5,11 @@ status: achieved
 kind: criterion
 goal: GOAL-001
 criterion: |
-  node packages/quay/src/goal-store.ts check | grep -q '"withinCap": true'
-expect: exit 0
+  if ! node packages/quay/src/goal-store.ts check | grep -q '"withinCap": true'; then
+    echo "CAUSE=withinCap-not-true — goal-store.ts check 未报 \"withinCap\": true（active 数超硬上限 cap=3）" >&2; exit 1
+  fi
+  exit 0
+expect: exit 0。失败时 exit 1 且 stderr 携带 `CAUSE=…` 成因——⛔ `echo … >&2` 与 `exit 1` 必须写在【同一行】：`plugin/scripts/criterion-failure-attribution-check.ts` 逐行判定，拆两行会被判裸退出并打红棘轮（GOAL-009 AC-241 纪律；2026-09-12 gap-criterion-attribution-blind-to-silent-terminal-command）。
 origin: |
   人 2026-09-06 裁定「接受硬上限 + 强制关闭机制」，cap=3。
   推翻的是 SPEC-0809 §2b 人已同意的 I1「同一时刻只能有一条 active PHASE」——

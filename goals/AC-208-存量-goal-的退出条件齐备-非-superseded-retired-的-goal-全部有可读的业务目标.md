@@ -4,13 +4,15 @@ title: 存量 GOAL 的退出条件齐备——非 superseded/retired 的 GOAL �
 status: achieved
 kind: criterion
 goal: GOAL-010
-criterion: test "$(node --no-warnings --experimental-strip-types
-  packages/quay/src/goal-store.ts list | python3 -c 'import json,sys;
-  d=json.load(sys.stdin); print(sum(1 for r in d if
-  str(r.get("id","")).startswith("GOAL-") and str(r.get("status")) not in
-  ("superseded","retired") and len((r.get("body") or "").strip())<40))')" -eq 0
+criterion: |
+  n="$(node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts list | python3 -c 'import json,sys; d=json.load(sys.stdin); print(sum(1 for r in d if str(r.get("id","")).startswith("GOAL-") and str(r.get("status")) not in ("superseded","retired") and len((r.get("body") or "").strip())<40))')"
+  test "$n" -eq 0 || { echo "CAUSE=goal-without-readable-objective — 仍在流通（非 superseded/retired）却 body<40 非空白字符的 GOAL 数 n=$n ≠ 0" >&2; exit 1; }
+  exit 0
 expect: 非 superseded/retired 的 GOAL 中 body<40 非空白字符的条数 == 0——每条仍在流通的 GOAL
   的业务目标（背景 / 范围与非目标 / 退出条件）在记录里可读，充分性闸（AC-212）因此有输入。
+  失败时 exit 1 且 stderr 携带 `CAUSE=…` 成因——⛔ `echo … >&2` 与 `exit 1` 必须写在【同一行】：
+  `plugin/scripts/criterion-failure-attribution-check.ts` 逐行判定，拆两行会被判裸退出并打红棘轮
+  （GOAL-009 AC-241 纪律；2026-09-12 gap-criterion-attribution-blind-to-silent-terminal-command）。
 origin: >-
   9 条 GOAL 中 5 条 body 为空（GOAL-004/005/006/007/008），其中 GOAL-005/007/008 已
   achieved 且非 superseded ⇒ 业务目标从未被写下就判达成，「是否达成业务目标」结构上无从判断。body
