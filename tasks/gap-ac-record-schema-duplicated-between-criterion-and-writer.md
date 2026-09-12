@@ -75,10 +75,13 @@ write_acNNN_record 函数数  9 → 11
 - ⛔ 不得重造投送/回收（已存在）——本轮未触碰 `verify-deliver-coldstart.sh` 的投送/回收段。
 - ⛔ 不得把 12 个 writer 简单合并成一个巨型函数——`write_acNNN_record` 12 个全部保留（`grep -c` 前后同为 12），只新增了声明表 + 通用产出通道 + 校验/复跑；要抽的 schema 真源已抽出。
 - 项目自身闸门（scoped 门 + 全量套件绿）：scoped 门已跑绿（22/22，`--for-task … --allow-thin`，exit 0）；全量套件由 driver 的机械 fan-in 跑。
-- 机制变更使两处既有检测器/夹具需同步（**都不是放宽判据**，各附红控制）：① selfcheck anchor 控制的两个合成片段补全为 schema 合法；② 测试里 AC-214 NEED 的「产出侧落盘点」检测器新增识别第三种产出形（`ac_record_append_fragment`）并在判 anchor 前反转义——已用「删掉 `build_sha` 即报红」证明它仍能取假。③ 新增代码用 `if F; then x=0; else x=$?; fi` 形而非短路赋值：后者会踩 `instrument-failure-check` FAMILY-3（该检查器把短路符号读作管道，实测 15→20 越基线），改回后 15=baseline（⛔ 未抬高 shrink-only 基线）。
+- 机制变更使**多处**既有检测器/夹具需同步（**都不是放宽判据**，各附红控制）：① selfcheck anchor 控制的两个合成片段补全为 schema 合法；② 测试里 AC-214 NEED 的「产出侧落盘点」检测器新增识别第三种产出形（`ac_record_append_fragment`）并在判 anchor 前反转义——已用「删掉 `build_sha` 即报红」证明它仍能取假。③ 新增代码用 `if F; then x=0; else x=$?; fi` 形而非短路赋值：后者会踩 `instrument-failure-check` FAMILY-3（该检查器把短路符号读作管道，实测 15→20 越基线），改回后 15=baseline（⛔ 未抬高 shrink-only 基线）。④ **三个记录 writer 夹具**（`ac248-adr-check-flip-record` / `ac249-complete-change-record` / `ac250-web-observe-progress-record`）的 `writeRecordViaProduct` 是**手工维护**的闭包模型，此前只从函数体切片；而 `ac89_append_goal009` 本轮**首次**开始调用其它 shell 函数（`ac_record_schema_validate_fragment` / `ac_record_fragment_ac` / `ac_record_finalize` / `ac_record_carrier_root`）并读 top-level 声明 `AC_RECORD_SCHEMA` ⇒ 闭包过期，函数名缺失 ⇒ command not found、声明缺席 ⇒ `set -u` unbound variable ⇒ **写入侧对任何输入都返回 REFUSED**。实测（2026-09-12 本分支 suite 日志）：ac248/ac249 有正向控制 ⇒ 报红（`'REFUSED' !== 'WROTE'`，即这两个失败的真因）；**ac250 在该路径上唯一的断言是负向的 ⇒ 静默变空转**——测试仍绿而什么也没测到，与硬规则 3b 同形（读不懂输入的判定器返回了与「合格」同形的值）。修法三条：闭包补全；`AC_RECORD_SCHEMA` 经新增的 `bashDeclarationSource()` 从**产品脚本原文**提取进 harness（⛔ 不在夹具里再抄一份字段清单——那正是本任务要消灭的重复真源）；给 ac250 补**正向控制**（同一次调用换成观测到的非回环监听地址必须 WROTE），使三处此后闭包过期一律**报红而非静默通过**。可失败控制（已跑）：把 ac250 的闭包改回旧表重跑 ⇒ 新正向控制报红（`the same writer must ACCEPT the observed non-loopback listener`），证明它取得到假；三文件全绿（ac248 6/6、ac249 8/8、ac250 5/5）。
 
 ## Touches
 
 - plugin/scripts/verify-deliver-coldstart.sh
 - plugin/test/verify-deliver-coldstart.test.mjs
+- plugin/test/ac248-adr-check-flip-record.test.mjs
+- plugin/test/ac249-complete-change-record.test.mjs
+- plugin/test/ac250-web-observe-progress-record.test.mjs
 - tasks/gap-ac-record-schema-duplicated-between-criterion-and-writer.md
