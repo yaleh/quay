@@ -1,7 +1,7 @@
 ---
 id: gap-meta-goal-store-activation-gate
 title: GOAL 激活写面缺「名下至少一条 AC」前置——P6/P6b 逐字 `!isGoalRecord`，零 AC 的 GOAL 可被激活且无检测
-status: todo
+status: ready
 labels:
   - meta-driver
   - driver-candidate
