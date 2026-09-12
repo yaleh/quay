@@ -6,14 +6,15 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readSessions, readSession, readTranscript, sessionTranscriptPath, isValidSessionId, SESSION_LAYERS, SESSION_VIEW_INITIAL_TURNS, SESSION_VIEW_EARLIER_CHUNK, type SessionsResult, type SessionDetail, type SessionViewResult, type TranscriptBlock, type TranscriptTurn } from "./observation.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote } from "./serve-render.ts";
+import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote, pageTitle } from "./serve-render.ts";
 import { runDriver } from "./cli/driver.ts";
 import { renderSendForm } from "./serve-send.ts";
 import { resolvePluginScript } from "./plugin-root.ts";
 
 // ── /sessions ──────────────────────────────────────────────────────────────────────────────────────
 
-export function renderSessionsPage(sessions: SessionsResult): string {
+export function renderSessionsPage(sessions: SessionsResult, identity: ServeIdentity | null = null): string {
   // AC1 (gap-sessions-page-slow-unclickable-flat-render): the card is an <a href="/session/<id>"> —
   // the detail page already exists, the list just never linked to it. sessionId is a strict UUID
   // ([0-9a-f-]), so the href is a lookup key, never a path-traversal vector.
@@ -67,7 +68,7 @@ export function renderSessionsPage(sessions: SessionsResult): string {
     </section>`;
   }).join("");
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay sessions — 运行中 + 已结束会话">${modernistStyles()}${pageStyles()}<title>Sessions — 会话观测</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay sessions — 运行中 + 已结束会话">${modernistStyles()}${pageStyles()}<title>${pageTitle("Sessions — 会话观测", identity)}</title></head>
     <body>${renderMobileChrome("sessions", "sessions")}${renderSiteNav("sessions")}<main id="main">
       <h1>Sessions — 会话观测（运行中 + 已结束）</h1>
       <p class="meta">数据源：<code>claude agents --json</code>（运行中 · 交互式 + <code>-p</code>）+ transcript 目录扫描（已结束）+ 会话 transcript 尾部</p>
@@ -80,7 +81,7 @@ export function renderSessionsPage(sessions: SessionsResult): string {
 export async function handleSessions(
   req: IncomingMessage,
   res: ServerResponse,
-  cfg: { workspaceRoot: string },
+  cfg: ServePageCfg,
 ): Promise<void> {
   let sessions: SessionsResult;
   try {
@@ -89,7 +90,7 @@ export async function handleSessions(
     sessions = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, sessions: [] };
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderSessionsPage(sessions));
+  res.end(renderSessionsPage(sessions, cfg.identity));
 }
 
 // ── /session/<sessionId> ──────────────────────────────────────────────────────────────────────────

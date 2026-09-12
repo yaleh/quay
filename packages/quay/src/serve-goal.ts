@@ -2,7 +2,8 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
-import { html, escapeHtml, shellStyles, renderMarkdown, renderSiteNav, renderMobileChrome, renderBackLink, relativeTime, tableWrap } from "./serve-render.ts";
+import type { ServePageCfg } from "./serve-render.ts";
+import { html, escapeHtml, shellStyles, renderMarkdown, renderSiteNav, renderMobileChrome, renderBackLink, relativeTime, tableWrap, pageTitle } from "./serve-render.ts";
 import { readTaskSummary, type TaskSummary } from "./serve-dashboard.ts";
 
 // ── /goal — the third sibling kind (goal store), now PROVIDER-BACKED
@@ -296,8 +297,9 @@ export async function handleGoalList(
   res: ServerResponse,
   url: URL,
   client: ProviderClient,
-  workspaceRoot: string,
+  cfg: ServePageCfg,
 ): Promise<void> {
+  const workspaceRoot = cfg.workspaceRoot;
   const statusFilter = url.searchParams.get("status");
   const kindFilter = url.searchParams.get("kind");
   const goalFilter = url.searchParams.get("goal");
@@ -380,7 +382,7 @@ export async function handleGoalList(
 
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${shellStyles()}${goalTableStyles()}<title>Goals</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${shellStyles()}${goalTableStyles()}<title>${pageTitle("Goals", cfg.identity)}</title></head>
     <body>${renderMobileChrome("goal", "goals")}${renderSiteNav("goal")}<main id="main">
       <h1>Goals — ${tab === "goal" ? "阶段目标" : "AC / criterion"} (${rows.length})</h1>
       ${readError ? html`<div class="error-banner" role="alert"><strong>读失败:</strong> ${escapeHtml(readError)}</div>` : ""}

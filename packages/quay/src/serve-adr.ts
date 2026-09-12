@@ -2,13 +2,15 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
-import { html, escapeHtml, shellStyles, renderMarkdown, renderSiteNav, renderMobileChrome, renderBackLink } from "./serve-render.ts";
+import type { ServePageCfg } from "./serve-render.ts";
+import { html, escapeHtml, shellStyles, renderMarkdown, renderSiteNav, renderMobileChrome, renderBackLink, pageTitle } from "./serve-render.ts";
 
 export async function handleAdrList(
   req: IncomingMessage,
   res: ServerResponse,
   url: URL,
   client: ProviderClient,
+  cfg: ServePageCfg,
 ): Promise<void> {
   const statusFilter = url.searchParams.get("status");
   const adrs = await client.adrList(statusFilter ? { status: statusFilter } : {});
@@ -20,7 +22,7 @@ export async function handleAdrList(
   </tr>`).join("\n");
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${shellStyles()}<title>ADRs</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${shellStyles()}<title>${pageTitle("ADRs", cfg.identity)}</title></head>
     <body>${renderMobileChrome("adr", "adrs")}${renderSiteNav("adr")}<main id="main">
       <h1>ADRs (${adrs.length})</h1>
       ${adrs.length === 0 ? html`<p class="meta">No ADRs.</p>` : html`<table>

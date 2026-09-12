@@ -37,6 +37,7 @@ import { startServer, computeStaleStatus, isStale, processStartMs } from "../src
 import { composePayload } from "../src/action.ts";
 import { readLive, readJournal } from "../src/observation.ts";
 import { renderLivePage } from "../src/serve-live.ts";
+import { serveIdentity, pageTitle, pluginVersionState, renderIdentityCard } from "../src/serve-render.ts";
 import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
 // gap-web-cannot-show-what-the-loop-is-doing-now (AC2): /live's in-flight list must match
@@ -2174,6 +2175,120 @@ async function main() {
       process.chdir(alOrigCwd);
       fs.rmSync(alTasksDir, { recursive: true, force: true });
       fs.rmSync(alWorkspaceRoot, { recursive: true, force: true });
+    }
+  }
+
+  // ── gap-web-ui-pages-carry-no-host-project-identity: page identity + single-source titles ──────
+  //
+  // The behaviour these tests pin: two quay webs open at once must NOT render the same tab label,
+  // and the project label/version pair must be composed in exactly ONE place. Every assertion here
+  // is paired with a control that can FAIL — an identity that changed nothing, or a predicate that
+  // matches everything, would pass a naive version of these checks (hard rules 3b/4).
+  {
+    const ident = (root, initV, deliveredV) => serveIdentity({
+      workspaceRoot: root,
+      host: "127.0.0.1",
+      port: 4173,
+      hostname: "probe-host",
+      deliveredPluginVersion: deliveredV,
+      initPluginVersion: initV,
+      branchModel: { default: "master", doc: "author" },
+      loop: { merge_target: "develop" },
+    });
+    const rootA = fs.mkdtempSync(path.join(os.tmpdir(), "quay-ident-alpha-"));
+    const rootB = fs.mkdtempSync(path.join(os.tmpdir(), "quay-ident-beta-"));
+    try {
+      const a = ident(rootA, null, "0.6.1");
+      const b = ident(rootB, "0.4.0", "0.6.1");
+
+      // AC1 — the drill the defect is named after: the /dashboard <title> of two projects.
+      const tA = pageTitle("Dashboard", a);
+      const tB = pageTitle("Dashboard", b);
+      assert(tA !== tB, `AC1: two different project roots give different /dashboard titles ("${tA}" vs "${tB}")`);
+      // Control ①: the two titles differ only in the PROJECT half — same page token on both sides,
+      // so the inequality above cannot be an artefact of two different pages being compared.
+      assert(tA.endsWith("Dashboard") && tB.endsWith("Dashboard"),
+        "AC1 control: both titles end in the same page token (the difference IS the project)");
+      // Control ②: the pre-fix shape — a bare page word — is what made the two tabs identical.
+      // (A regression to `<title>Dashboard</title>` fails the AC5 source invariant below.)
+      assert(pageTitle("Dashboard", a) === pageTitle("Dashboard", a),
+        "AC1 control: pageTitle is deterministic for one identity");
+
+      // AC2 — the FULL project root is on the page (the only quantity that tells two checkouts apart).
+      const cardB = renderIdentityCard(b);
+      assert(cardB.includes(rootB), `AC2: the dashboard identity card carries the full project root (${rootB})`);
+      assert(cardB.includes(path.basename(rootB)), "AC2: ...and the project's display name");
+
+      // AC3 — the two plugin versions side by side + a mechanically detectable mismatch marker.
+      assert(pluginVersionState("0.6.1", "0.4.0") === "mismatch", "AC3: unequal versions ⇒ mismatch");
+      assert(pluginVersionState("0.6.1", "0.6.1") === "match", "AC3: equal versions ⇒ match");
+      assert(pluginVersionState("0.6.1", null) === "unknown",
+        "AC3: a MISSING reading ⇒ unknown, never match (硬规则 3b — 'not read' ≠ 'consistent')");
+      assert(pluginVersionState(null, "0.4.0") === "unknown", "AC3: missing on the other side ⇒ unknown too");
+      assert(/data-plugin-version-state="mismatch"/.test(cardB), "AC3: mismatch carries the mechanical marker");
+      assert(cardB.includes("0.6.1") && cardB.includes("0.4.0"), "AC3: both versions are rendered side by side");
+      // Control: the mismatch page must NOT also claim a match — a marker that is always present
+      // would be a恒真 reading (hard rule 4).
+      assert(!/data-plugin-version-state="match"/.test(cardB), "AC3 control: mismatch page does not also report match");
+      assert(/data-plugin-version-state="match"/.test(renderIdentityCard(ident(rootA, "0.6.1", "0.6.1"))),
+        "AC3: the equal-version state renders a DIFFERENT marker (the two states are distinguishable)");
+
+      // AC4/AC5 source invariants.
+      const srcDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
+      const srcFiles = fs.readdirSync(srcDir).filter((f) => /^serve-.*\.ts$/.test(f));
+      assert(srcFiles.length >= 15, `AC4 setup: the serve-* page modules are present (${srcFiles.length} files)`);
+
+      // AC4 — the identity policy lives in serve-render.ts and NOWHERE else. An identity field
+      // referenced from a page module is a second composition point, which is precisely the drift
+      // this task forbids (16 hand-rolled copies of one policy).
+      const IDENTITY_TOKENS = ["projectLabel(", ".projectName", ".projectRoot", ".deliveredPluginVersion", ".initPluginVersion", ".landingBaseline"];
+      const offenders = [];
+      for (const f of srcFiles) {
+        if (f === "serve-render.ts") continue; // the one legal home
+        const src = fs.readFileSync(path.join(srcDir, f), "utf8");
+        for (const tok of IDENTITY_TOKENS) if (src.includes(tok)) offenders.push(`${f}: ${tok}`);
+      }
+      assert(offenders.length === 0,
+        `AC4: identity fields/title composition appear ONLY in serve-render.ts (offenders: ${offenders.join(", ") || "none"})`);
+      // Control: the same predicate over a page module that DOES compose identity must flag it —
+      // otherwise "0 offenders" could just mean the predicate never matches anything.
+      const synthetic = 'return html`<title>${escapeHtml(id.projectName)} — Dashboard</title></head>`;';
+      const syntheticHits = IDENTITY_TOKENS.filter((tok) => synthetic.includes(tok));
+      assert(syntheticHits.length > 0,
+        `AC4 control: the offender predicate DOES fire on a page that composes identity itself (${syntheticHits.join(", ")})`);
+
+      // AC5 — every page <title> is either the single-source composer or an entity-id interpolation;
+      // NO page title may be a bare literal (a bare literal is the pre-fix shape, and it is exactly
+      // what makes two projects' tabs identical). The 16 overview titles must route through pageTitle.
+      // `[^<]*` (not `[\s\S]*?`): the SVG chart marks carry their own `<title>` children, and a
+      // greedy-across-`<` scrape would start at one of those and swallow the real head title into a
+      // single match — silently reporting it as "neither" (exactly how this check first counted 14
+      // instead of 16). A head title's content never contains `<`.
+      const headTitles = (src) => Array.from(src.matchAll(/<title>([^<]*)<\/title><\/head>/g), (m) => m[1].trim());
+      let sites = 0, viaPageTitle = 0;
+      const bare = [];
+      const overviewSites = [];
+      for (const f of srcFiles) {
+        const src = fs.readFileSync(path.join(srcDir, f), "utf8");
+        for (const t of headTitles(src)) {
+          sites++;
+          if (t.startsWith("${pageTitle(")) { viaPageTitle++; overviewSites.push(`${f}: ${t}`); }
+          else if (!t.includes("${")) bare.push(`${f}: <title>${t}</title>`);
+        }
+      }
+      assert(bare.length === 0, `AC5: no page <title> is a bare literal (offenders: ${bare.join(" | ") || "none"})`);
+      assert(viaPageTitle >= 16,
+        `AC5: at least the 16 overview-page titles route through the single-source pageTitle() (got ${viaPageTitle} of ${sites} head titles)`);
+      assert(sites > viaPageTitle,
+        "AC5 control: the detail pages still keep their own (entity-id) titles — so viaPageTitle < sites is expected, not a collapsed count");
+      // Control: the bare-literal predicate fires on the pre-fix title, so "0 bare" is a measurement.
+      assert(headTitles("<title>Dashboard</title></head>").filter((t) => !t.includes("${")).length === 1,
+        "AC5 control: the bare-literal predicate fires on the pre-fix `<title>Dashboard</title>` shape");
+      console.log(`  [identity] ${viaPageTitle}/${sites} head titles route through pageTitle(); overview sites:`);
+      for (const s of overviewSites) console.log(`    ${s}`);
+    } finally {
+      fs.rmSync(rootA, { recursive: true, force: true });
+      fs.rmSync(rootB, { recursive: true, force: true });
     }
   }
 

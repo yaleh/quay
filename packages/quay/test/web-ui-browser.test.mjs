@@ -255,10 +255,16 @@ async function main() {
     const list = await get(port, "/tasks");
     assert(list.status === 200, `GET /tasks returns 200 (got ${list.status})`);
 
-    // Page title: the <title> tag contains "Quay — " prefix and the
-    // provider's manifest.name — confirms browser-rendered title matches.
-    assert(/<title>Quay\s*[—–-]\s*[^<]+<\/title>/i.test(list.body),
-      "GET /tasks <title> tag contains Quay em-dash prefix and provider name");
+    // Page title: the <title> tag carries the PROJECT IDENTITY (the workspace root's basename) —
+    // gap-web-ui-pages-carry-no-host-project-identity changed this contract. It used to be
+    // "Quay — <manifest.name>", i.e. the product brand plus the PROVIDER's name ("quay-native"),
+    // which is the same string in every workspace using the native provider — so two quay webs
+    // open at once rendered identical tab labels. The project label is now the workspace root's
+    // own basename, which is what makes the two distinguishable; the provider name still appears
+    // in the page's <meta name="description"> and in the <h1>.
+    const projectLabel = path.basename(workspaceRoot);
+    assert(list.body.includes(`<title>${projectLabel} — Tasks</title>`),
+      `GET /tasks <title> is "<project> — Tasks" with the workspace root's basename (${projectLabel}) — got: ${/<title>[^<]*<\/title>/.exec(list.body)?.[0]}`);
 
     // Heading: the <h1> tag confirms the "task list" label and provider id.
     assert(/<h1>[^<]*task list[^<]*<\/h1>/i.test(list.body),

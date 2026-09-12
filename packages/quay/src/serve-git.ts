@@ -20,7 +20,8 @@ import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { readGitHistory, readGitRemotes, type GitHistoryCommit, type GitHistoryResult, GIT_HISTORY_LIMIT } from "./observation.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2 } from "./serve-render.ts";
+import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, pad2, pageTitle } from "./serve-render.ts";
 
 // ── Graph-track geometry ────────────────────────────────────────────────────────────────────────────
 // One fixed text column on the right; the graph track on the left (the git log --graph / gitk model).
@@ -896,7 +897,12 @@ function renderTaskGroupsHtml(history: GitHistoryResult): string {
  * the client can tell a remote-tracking ref from a slash-containing LOCAL branch (gap-git-graph-
  * decoration-labels-as-colored-chips AC1); defaults to [] for pure-history callers.
  */
-export function renderGitHistoryPage(history: GitHistoryResult, view: GitGraphView = "git", remotes: string[] = []): string {
+export function renderGitHistoryPage(
+  history: GitHistoryResult,
+  view: GitGraphView = "git",
+  remotes: string[] = [],
+  identity: ServeIdentity | null = null,
+): string {
   if (view === "task") {
     const statusNote = history.status === "error"
       ? html`<p class="meta"><strong>读失败</strong> — ${escapeHtml(history.reason || "")}</p>`
@@ -910,7 +916,7 @@ export function renderGitHistoryPage(history: GitHistoryResult, view: GitGraphVi
     const groupsHtml = renderTaskGroupsHtml(history);
     const guide = html`<p class="meta"><strong>任务分组 = 按 commit subject 里的 task id 聚合（项目特定启发式，非 git 语义）。</strong> 一组 = 一个任务从立案、晋升、实现到 fan-in 的完整轨迹；无法归属任何 task id 的提交计入「未归属」组（<strong>${unattributedCount}</strong> 条）。当前窗口：最近 ${nCommits} 条提交、${mergeCount} 个合并。默认视图仍是 git 拓扑，切换回来不会丢任何信息。</p>`;
     return html`<!doctype html>
-      <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — task-id grouping (project-specific heuristic)">${modernistStyles()}${pageStyles()}<title>Git history — 任务分组</title></head>
+      <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — task-id grouping (project-specific heuristic)">${modernistStyles()}${pageStyles()}<title>${pageTitle("Git history — 任务分组", identity)}</title></head>
       <body>${renderMobileChrome("git", "git history")}${renderSiteNav("git")}<main id="main">
         <h1>Git History — 任务分组时间轴</h1>
         ${gitHistoryViewToggle(view)}
@@ -954,7 +960,7 @@ export function renderGitHistoryPage(history: GitHistoryResult, view: GitGraphVi
   const laneTokenStyle = layout ? html`<style>${gitGraphLaneTokenCss()}</style>` : "";
 
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — vertical commit timeline (client-rendered, git log --graph aligned)">${modernistStyles()}${pageStyles()}${gitHistoryPageStyle()}${laneTokenStyle}<title>Git history — vertical commit timeline</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay git history — vertical commit timeline (client-rendered, git log --graph aligned)">${modernistStyles()}${pageStyles()}${gitHistoryPageStyle()}${laneTokenStyle}<title>${pageTitle("Git history — vertical commit timeline", identity)}</title></head>
     <body>${renderMobileChrome("git", "git history")}${renderSiteNav("git")}<main id="main">
       <h1>Git History — 提交纵向时间轴</h1>
       ${gitHistoryViewToggle(view)}
@@ -970,7 +976,7 @@ export function renderGitHistoryPage(history: GitHistoryResult, view: GitGraphVi
 export async function handleGitHistory(
   req: IncomingMessage,
   res: ServerResponse,
-  cfg: { workspaceRoot: string },
+  cfg: ServePageCfg,
   url: URL,
 ): Promise<void> {
   let history: GitHistoryResult;
@@ -981,7 +987,7 @@ export async function handleGitHistory(
   }
   const remotes = readGitRemotes(cfg.workspaceRoot);
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderGitHistoryPage(history, gitHistoryViewOf(url), remotes));
+  res.end(renderGitHistoryPage(history, gitHistoryViewOf(url), remotes, cfg.identity));
 }
 
 function writeJson(res: ServerResponse, status: number, obj: unknown): void {

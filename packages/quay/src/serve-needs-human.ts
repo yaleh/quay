@@ -24,8 +24,8 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
-import type { Manifest } from "./serve-render.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, relativeTime, renderSiteNav, renderMobileChrome, tableWrap } from "./serve-render.ts";
+import type { Manifest, ServePageCfg, ServeIdentity } from "./serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, relativeTime, renderSiteNav, renderMobileChrome, tableWrap, pageTitle } from "./serve-render.ts";
 import { readNeedsHumanLedger } from "./observation.ts";
 import { TASK_STATUS } from "./abi.ts";
 
@@ -55,7 +55,12 @@ interface LedgerRow {
   ts: string | null;
 }
 
-export function renderNeedsHumanPage(active: ActiveRow[], ledger: LedgerRow[], manifest: Manifest): string {
+export function renderNeedsHumanPage(
+  active: ActiveRow[],
+  ledger: LedgerRow[],
+  manifest: Manifest,
+  identity: ServeIdentity | null = null,
+): string {
   const activeRows = active.length === 0
     ? html`<tr><td colspan="3">当前无 needs-human 任务（升级台账见下）。</td></tr>`
     : active.map((r) => html`<tr>
@@ -73,7 +78,7 @@ export function renderNeedsHumanPage(active: ActiveRow[], ledger: LedgerRow[], m
       </tr>`).join("\n");
 
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay needs-human — 显式人机承接界面">${modernistStyles()}${pageStyles()}<title>Needs Human — ${escapeHtml(manifest.name)}</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay needs-human — 显式人机承接界面">${modernistStyles()}${pageStyles()}<title>${pageTitle("Needs Human", identity)}</title></head>
     <body>${renderMobileChrome("needs-human", "needs human")}${renderSiteNav("needs-human")}<main id="main">
       <h1>Needs Human — 待人类决定</h1>
       <p class="meta">人机接口的显式承接者：一条 <code>needs-human</code> 产生后，无需读任何 transcript，在此页即可看到。上面是「当前待办」，下面是「升级台账」（含状态已流转的历史样本）。</p>
@@ -97,7 +102,7 @@ export async function handleNeedsHuman(
   res: ServerResponse,
   client: ProviderClient,
   manifest: Manifest,
-  cfg: { workspaceRoot: string },
+  cfg: ServePageCfg,
 ): Promise<void> {
   // ① 当前待办 — the provider store, status-filtered (default includeBody=true so the reason can be
   //    extracted from the `## Needs-Human` body section). The needs-human pool is small, so the full
@@ -126,5 +131,5 @@ export async function handleNeedsHuman(
     .map((r) => ({ taskId: r.task_id as string, detail: r.detail, ts: r.ts }));
 
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderNeedsHumanPage(active, ledger, manifest));
+  res.end(renderNeedsHumanPage(active, ledger, manifest, cfg.identity));
 }
