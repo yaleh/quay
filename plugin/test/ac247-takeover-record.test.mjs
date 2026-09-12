@@ -46,7 +46,31 @@ function goalFilePath() {
   return path.join(dir, hit);
 }
 
-/** Extract the embedded `python3 - <<'P' … P` payload of the criterion block (the REAL judge). */
+/** Extract the embedded `python3 - <<'P' … P` payload of the criterion block (the REAL judge).
+ *
+ *  ⚠️ The block is a YAML `>-` FOLDED scalar, so its semantics are NOT "join the lines": consecutive
+ *  lines at the block's own indentation fold into ONE line separated by a space, blank lines become
+ *  newlines, and MORE-indented lines keep their line breaks. Extracting with a plain join reproduces
+ *  the source line breaks inside a `"…"` literal and yields a PYTHON SYNTAX ERROR — which exits 1 and
+ *  therefore looks exactly like "the criterion ran and found no qualifying record" (measured
+ *  2026-09-12: this test was green until a merge re-wrapped the criterion's long lines, then reported
+ *  `carrier absent ⇒ exit 3, got 1`). The folding is done here so the payload is what a YAML parser
+ *  would hand to python. */
+function foldBlockScalar(lines) {
+  let out = "";
+  let prev = ""; // "" | "blank" | "more" | "normal"
+  for (const line of lines) {
+    if (line.trim() === "") { out += "\n"; prev = "blank"; continue; }
+    const moreIndented = /^[ \t]/.test(line);
+    if (out === "") out += line;
+    else if (prev === "blank") out += line;              // the blank line already broke it
+    else if (moreIndented || prev === "more") out += "\n" + line;
+    else out += " " + line;
+    prev = moreIndented ? "more" : "normal";
+  }
+  return out.replace(/^\n+/, "");
+}
+
 function criterionPython() {
   const lines = fs.readFileSync(goalFilePath(), "utf8").split("\n");
   const start = lines.findIndex((l) => /^criterion:\s*>-\s*$/.test(l));
@@ -56,14 +80,19 @@ function criterionPython() {
     if (/^[A-Za-z_][A-Za-z0-9_]*:/.test(lines[i])) { end = i; break; }
   }
   const block = lines.slice(start + 1, end).map((l) => (l.startsWith("  ") ? l.slice(2) : l));
-  const hStart = block.findIndex((l) => l.includes("python3 - <<"));
+  const folded = foldBlockScalar(block).split("\n");
+  const hStart = folded.findIndex((l) => l.includes("python3 - <<"));
   assert.ok(hStart >= 0, "the criterion must embed `python3 - <<'P'`");
-  let hEnd = block.length;
-  for (let i = hStart + 1; i < block.length; i++) {
-    if (/^P\s*$/.test(block[i])) { hEnd = i; break; }
+  let hEnd = folded.length;
+  for (let i = hStart + 1; i < folded.length; i++) {
+    if (/^P\s*$/.test(folded[i])) { hEnd = i; break; }
   }
-  const py = block.slice(hStart + 1, hEnd).join("\n");
+  const py = folded.slice(hStart + 1, hEnd).join("\n");
   assert.ok(py.includes("GOAL-016-AC-247"), "the extracted criterion must be the AC-247 one");
+  // A syntax error would make every assertion below meaningless (it exits non-zero for a reason that
+  // has nothing to do with the record), so fail loudly instead of mis-reading it as a verdict.
+  const chk = spawnSync("python3", ["-c", "import ast,sys; ast.parse(sys.stdin.read())"], { input: py, encoding: "utf8" });
+  assert.equal(chk.status, 0, `the extracted criterion must be valid python (folding bug?):\n${chk.stderr}\n---\n${py}`);
   return py;
 }
 
