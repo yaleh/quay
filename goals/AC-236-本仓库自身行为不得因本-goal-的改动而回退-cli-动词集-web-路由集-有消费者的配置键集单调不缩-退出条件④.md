@@ -10,7 +10,8 @@ criterion: test -f plugin/scripts/host-repo-surface-ratchet.ts && node
   plugin/scripts/checker-mutation-check.sh --list --json | python3 -c 'import
   json,sys; m=json.load(sys.stdin);
   ok=any(c.get("name")=="host-repo-surface-ratchet" and c.get("covered") for c
-  in m.get("checkers",[])); print("registered:",ok); sys.exit(0 if ok else 1)'
+  in m.get("checkers",[])); print("registered:",ok,file=sys.stderr); sys.exit(0
+  if ok else 1)'
 expect: >-
   三个断言缺一不可：
 

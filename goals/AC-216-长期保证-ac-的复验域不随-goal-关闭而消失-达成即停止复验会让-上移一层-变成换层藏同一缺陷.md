@@ -4,16 +4,16 @@ title: 长期保证 AC 的复验域不随 GOAL 关闭而消失——⛔ 达成�
 status: achieved
 kind: criterion
 goal: GOAL-010
-criterion: node --no-warnings --experimental-strip-types --test
-  plugin/test/goal-standing-ac-reverify-scope.test.mjs && python3 -c 'import
-  json,subprocess,sys;
-  r=json.loads(subprocess.run(["node","--no-warnings","--experimental-strip-types","packages/quay/src/goal-store.ts","list"],capture_output=True,text=True).stdout);
-  gs={str(x["id"]):str(x.get("status")) for x in r if
-  str(x["id"]).startswith("GOAL-")}; go={str(x["id"]):str(x.get("goal") or "")
-  for x in r}; hits=[a for l in open(".quay/goal-round.jsonl") for f in
-  (json.loads(l).get("facts") or []) for a in (((f.get("value") or
-  {}).get("achievedFailing") or {}).get("inScope") or []) if
-  gs.get(go.get(str(a),""))=="achieved"]; sys.exit(0 if hits else 1)'
+criterion: |-
+  node --no-warnings --experimental-strip-types --test plugin/test/goal-standing-ac-reverify-scope.test.mjs && python3 -c '
+  import json,subprocess,sys
+  r=json.loads(subprocess.run(["node","--no-warnings","--experimental-strip-types","packages/quay/src/goal-store.ts","list"],capture_output=True,text=True).stdout)
+  gs={str(x["id"]):str(x.get("status")) for x in r if str(x["id"]).startswith("GOAL-")}
+  go={str(x["id"]):str(x.get("goal") or "") for x in r}
+  hits=[a for l in open(".quay/goal-round.jsonl") for f in (json.loads(l).get("facts") or []) for a in (((f.get("value") or {}).get("achievedFailing") or {}).get("inScope") or []) if gs.get(go.get(str(a),""))=="achieved"]
+  if not hits:
+      sys.stderr.write("CAUSE=goal-round-jsonl-has-no-achieved-failing-ac-under-an-achieved-goal\n"); sys.exit(1)
+  '
 expect: 声明为「长期保证」的 achieved AC，其复验（I5 checkAchievedFailing）作用域不随其 GOAL
   关闭而消失；未声明的仍按现状随 GOAL 关闭离开作用域（控成本）。双向负控制单测覆盖两方向；且 achievedFailing
   读数枚举在域集合（inScope 数组，硬规则 3：枚举不布尔），生产轮记录中存在 ≥1 条其 inScope 含某条【其 GOAL 已

@@ -11,7 +11,8 @@ criterion: node --no-warnings --experimental-strip-types --test
   --root . --json && bash plugin/scripts/checker-mutation-check.sh --list --json
   | python3 -c 'import json,sys; m=json.load(sys.stdin);
   ok=any(c.get("name")=="target-identity-literal-check" and c.get("covered") for
-  c in m.get("checkers",[])); print("registered:",ok); sys.exit(0 if ok else 1)'
+  c in m.get("checkers",[])); print("registered:",ok,file=sys.stderr);
+  sys.exit(0 if ok else 1)'
 expect: >-
   三个断言缺一不可：**①能取假**——`plugin/test/target-identity-literal-check.test.mjs`
   在自建夹具上双向跑通：注入一处「kernel 代码里把逐项目不同的身份写成无 override

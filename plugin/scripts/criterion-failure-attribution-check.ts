@@ -18,14 +18,25 @@
 //   goals/AC-*.md whose frontmatter `status` ∈ {active, achieved} (the I5 re-verification domain —
 //   an achieved AC that turns red writes to the same ledger) AND whose `criterion` is a non-empty
 //   string. For each such criterion, LINE BY LINE:
-//     · a FAILURE-EXIT line   = matches /(?:sys\.)?exit\s*\(\s*1\s*\)/ or /\bexit\s+1\b/
-//       (python `sys.exit(1)` / `exit(1)`; shell `exit 1` in any position, incl. `|| exit 1`)
+//     · a FAILURE-EXIT line   = matches /(?:sys\.)?exit\s*\(\s*1\s*\)/ or /\bexit\s+1\b/, OR is an
+//       exit CALL whose argument ends with `else <nonzero>` (`sys.exit(0 if ok else 1)` — the trailing
+//       computed form; see hasTrailingComputedFailureExit for why that half is a depth scan, not a regex)
 //     · an ATTRIBUTED line    = also matches /stderr|>&2|console\.error/
 //       (sys.stderr.write / print(..., file=sys.stderr) / shell `>&2` / console.error)
 //   BARE = failure-exit ∧ ¬attributed. Comments and strings are not masked: a criterion is a SHELL
 //   SCRIPT, so `#` is a comment but also a valid token inside a string — masking by position would be
 //   a proxy for the real question. The real question is exactly "does this failure exit line carry a
 //   write to a stream the runner captures", and that is what the two regexes answer.
+//
+// THE TRAILING COMPUTED FORM (gap-criterion-attribution-ratchet-blind-to-trailing-computed-exit): the
+// previous revision matched only a LITERAL `exit(1)` / `exit 1`, so `sys.exit(0 if ok else 1)` — which
+// on its red branch writes nothing, exactly like `exit(1)` — read as CLEAN. The gap was even written
+// into this file as a "documented limitation", which is the hard-rule-3b shape: for a ratchet, "I cannot
+// read this form" and "this criterion is clean" produced the SAME output (count unchanged, status=pass,
+// exit 0). Measured cost (2026-09-12): AC-245 entered the in-domain set in that form, wrote an
+// unattributable `fail` into the production ledger, and turned GOAL-009's AC-241 red while the ratchet
+// read 32 → 32, not moving one step. The opening/argument split is deliberate: the DIRECT forms are
+// still regexes, and only the argument-tail question (which needs paren counting) is scanned.
 //
 // THREE-STATE OUTPUT (hard rule 3b — 读不懂输入 ≠ 合格):
 //   0 = PASS (bare-AC count ≤ committed baseline; the ratchet is shrink-only, see below)
@@ -62,11 +73,71 @@ export const BASELINE_FILE_REL = "docs/analysis/criterion-failure-attribution.ba
 /** The in-domain statuses: the I5 re-verification domain (AC-216 — an achieved AC still gates). */
 export const IN_DOMAIN_STATUSES: readonly string[] = ["active", "achieved"];
 
-/** A failure exit: python `sys.exit(1)` / `exit(1)` (also the computed form `sys.exit(1 if bare else 0)`
- *  — it fails with no cause on its red branch), or shell `exit 1` in any position (incl. `|| exit 1`).
- *  `(?![\d])` keeps `exit(10)` / `exit(123)` out; `\b` keeps shell `exit 10` out. ⛔ A *trailing* computed
- *  1 (`sys.exit(0 if ok else 1)`) is NOT matched — documented limitation, not a silent pass. */
+/** A failure exit, DIRECT forms: python `sys.exit(1)` / `exit(1)` (incl. the computed form
+ *  `sys.exit(1 if bare else 0)` — it fails with no cause on its red branch), or shell `exit 1` in any
+ *  position (incl. `|| exit 1`). `(?![\d])` keeps `exit(10)` / `exit(123)` out; `\b` keeps shell `exit 10`
+ *  out.
+ *
+ *  ⚠️ This regex deliberately does NOT carry the *trailing* computed form (`sys.exit(0 if ok else 1)`,
+ *  AC-245's shape) even though the task that closed that blind spot was phrased as "FAILURE_EXIT_RE
+ *  增加该形态". The reason is mechanical, not stylistic: the argument of such an exit contains `)`
+ *  characters of its own — AC-245's is `0 if log and str(log[-1].get("reason") or "").strip() else 1` —
+ *  so telling "the `)` that closes `exit(`" from "a `)` inside its argument" requires COUNTING nesting,
+ *  which a JS regex cannot do. A nesting-capped regex would re-open exactly the hole this closes for any
+ *  deeper argument: a criterion one paren deeper would again read as "I can't parse this" ⇒ "clean", the
+ *  hard-rule-3b shape. The trailing form is therefore matched by `hasTrailingComputedFailureExit` below,
+ *  which scans the argument with a depth counter and applies a regex to the argument's TAIL. */
 const FAILURE_EXIT_RE = /(?:sys\.)?exit\s*\(\s*1(?![\d])|\bexit\s+1\b/;
+
+/** The opener of an exit CALL whose argument can be inspected — `sys.exit(` / `exit(`. */
+const EXIT_CALL_SRC = "(?:sys\\.)?exit\\s*\\(";
+
+/** The *trailing* computed non-zero: the exit call's ARGUMENT ends with `else <nonzero-int>`. `[1-9]\d*`
+ *  keeps the always-zero control `sys.exit(0 if ok else 0)` out; the `$`-anchored tail keeps
+ *  `sys.exit(0) if x else 1` (where `else 1` is NOT an argument of the exit) out, because in that line
+ *  the `)` after `0` closes the call and the scanned argument is just `0`. */
+const TRAILING_ELSE_NONZERO_RE = /\belse\s*[1-9]\d*\s*$/;
+
+/** True iff `code` contains an exit CALL whose argument ends with `else <nonzero>` — the trailing
+ *  computed failure exit. Depth-counting (not regex) for the reason given on `FAILURE_EXIT_RE`:
+ *  AC-245's own argument nests `str(` around `log[-1].get(...)`.
+ *
+ *  ⛔ EVERY failure exit is examined, not just the last: a line legitimately carries more than one.
+ *  ⛔ An exit call whose parentheses never balance (`exit(` with no matching `)`) yields NO verdict —
+ *  it cannot be read, and the direct-form regex above still judges it on its own terms; this scanner
+ *  never *clears* a line, only adds matches. */
+export function hasTrailingComputedFailureExit(code: string): boolean {
+  // A FRESH regex per call: a module-level `/g` regex carries `lastIndex` across calls, so this
+  // function's own state would leak into the next line's judgment (a proxy量 whose failure mode is
+  // silent — hard rule 4b). The scan is per-line and the regex is cheap.
+  const opener = new RegExp(EXIT_CALL_SRC, "g");
+  let m: RegExpExecArray | null;
+  while ((m = opener.exec(code)) !== null) {
+    let depth = 1;
+    let i = m.index + m[0].length;
+    let quote: string | null = null;
+    for (; i < code.length; i++) {
+      const c = code[i];
+      if (quote !== null) {
+        if (c === "\\" && quote !== "'") { i++; continue; }
+        if (c === quote) quote = null;
+        continue;
+      }
+      if (c === "'" || c === '"') { quote = c; continue; }
+      if (c === "(") depth++;
+      else if (c === ")") { depth--; if (depth === 0) break; }
+    }
+    if (depth !== 0) continue; // unreadable call — never conflated with "no trailing computed exit"
+    if (TRAILING_ELSE_NONZERO_RE.test(code.slice(m.index + m[0].length, i))) return true;
+  }
+  return false;
+}
+
+/** A failure exit in EITHER form — the widened predicate. Direct forms via `FAILURE_EXIT_RE`, the
+ *  trailing computed form via `hasTrailingComputedFailureExit`. */
+export function hasFailureExit(code: string): boolean {
+  return FAILURE_EXIT_RE.test(code) || hasTrailingComputedFailureExit(code);
+}
 
 /** An attribution: something the acceptance-runner captures (stderr) or the shell redirects to it.
  *
@@ -208,7 +279,7 @@ export function splitFrontmatter(src: string): { fm: string } | null {
  *  and a quoted value (`command:"exit 1"`) is data, not one either (see maskValueStrings). */
 export function isBareFailureExitLine(line: string): boolean {
   const code = maskValueStrings(maskHashComments(line));
-  return FAILURE_EXIT_RE.test(code) && !ATTRIBUTION_RE.test(code);
+  return hasFailureExit(code) && !ATTRIBUTION_RE.test(code);
 }
 
 /** Parse one goal file's frontmatter. Returns null when it is not parseable as a goal record. */
