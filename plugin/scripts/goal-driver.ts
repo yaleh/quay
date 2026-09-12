@@ -1472,8 +1472,6 @@ export interface GoalRoundOptions {
   /** 健康度探针的 argv **前缀**覆盖（测试缝；后接 `<root> <carrier...>`）。⛔ 换的是**传输层**，
    *  ⛔ 不是答案——读数仍由探针脚本从真实文件系统 / 进程表读出（硬规则 4 推论三）。 */
   healthProbePrefix?: string[] | null;
-  /** 健康度窗口（秒）；缺省 HEALTH_WINDOW_SEC_DEFAULT（由任务实测的 2 小时窗口导出）。 */
-  healthWindowSec?: number;
 }
 
 export interface GoalRoundResult {
@@ -1784,14 +1782,22 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
 // ——「我驱动的那个系统还好吗」。本节补的就是那条：一组针对**目标项目**的直接量读数，作为一条
 // **并列的 fact**（name="goal-target-health"）落进同一份轮记录。
 //
+// ⛔ **职责边界（人 2026-09-07 DIR-131）**：goal 侧**不得以 task 落地类载体为输入**——「创建 task
+// 之后到落地的全过程」归 promotion/worker 机制。受禁载体的**清单与判据只有一个正本**：
+// `plugin/scripts/goal-driver-task-boundary-check.ts` 的 Detector 3（⛔ 不在本注释里复制一份——
+// 复制出来的清单就是下一个漂移源）。立案任务体点名的那个读数因此**不在本 fact 内**：它落在该清单里，
+// 进了本文件会被上述守卫判红（实测 RED，且 DIR-131 的 AC6 负控制正是拿那个载体当红样例）。
+// 本 fact 只报**被驱动系统自身**的结构量。⇒ 该维度的去向（改 DIR-131 口径 / 挪到非 goal 组件 /
+// 放弃）是**人的决定**，见任务的 `## 阻塞` 段与同轮立案的 escalation。
+//
 // 三条设计约束（各自对应一条 AC）：
-//   ① 能取假（AC1）：窗口内有 `ok:false` 的 fan-in 步骤 ⇒ `fanIn.failed > 0`；窗口内零失败 ⇒ 0。
-//      读的是真实 `fan-in-step-trace.jsonl` 的 `JSON.parse` 结果，⛔ 不用「文件非空 / 进程在」这类恒真量。
+//   ① 能取假（AC1）：两条 categorical、无阈值、**非落地指标**的信号 —— `not-driving`（目标项目零个
+//      driver 进程）与 `plugin-version-mismatch`（配置形状落后于交付物）。两态各有真实读数对照。
 //   ② 不阻塞（AC2）：本读数**不参与任何判定** —— `goalFlipDecision` 的输入里没有它。本函数在
 //      `runGoalRound` **之外**被调用（⛔ 不改 `runGoalRound`、⛔ 不改 `goalFlipDecision` 的签名与语义），
 //      且 fact.state 只取 verified / not-evaluated（⛔ 不取 failed ⇒ 不会把本轮标成失败）。
 //   ③ 未评估可区分（AC3）：目标项目不可达 / 关键载体缺失 / 探针输出读不懂 ⇒ `verdict="not-evaluated"`
-//      ∧ `fanIn === null`（⛔ 不是 0）∧ `cause` 取枚举值（⛔ 不与 healthy 同形，硬规则 3b）。
+//      ∧ `signals === null`（⛔ 不是 []）∧ `cause` 取枚举值（⛔ 不与 healthy 同形，硬规则 3b）。
 //
 // 直接量 vs 代理量（硬规则 4b）：`driverProcesses.count` 与 `roundRecords.newestAgeSec` 都是**读数**，
 // ⛔ **不进 verdict** —— 进程存在 ≠ 在干活（4b 实证：pane 一直在而 tick 停 21 分钟），而把「round 记录
@@ -1806,10 +1812,6 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
 /** 本 fact 的名字（与 goal-ring / goal-sufficiency 并列落进同一份轮记录）。 */
 export const TARGET_HEALTH_FACT_NAME = "goal-target-health";
 
-/** 健康度窗口缺省（秒）：**由实测导出，⛔ 非拍脑袋**——任务立案读数即「两小时内 fan-in 失败 9 次」
- *  （本 driver 6 天 5308 轮一无所知的那个窗口）。改窗口 = 改作用域，不是改阈值。 */
-export const HEALTH_WINDOW_SEC_DEFAULT = 7200;
-
 /** 探针 spawn 的 wall-clock 上限（毫秒）。结构：ssh ConnectTimeout(8s) + 目标机本地读几个小文件 +
  *  一次 `ps`（自带 10s 上限）⇒ 20s 为最坏路径留 2x 余量。⛔ 必须有界：探针挂死会让整条例程撞
  *  caller 侧看门狗（30min）而被整轮丢弃——那才是真正的阻塞（AC2 的反面）。 */
@@ -1819,11 +1821,10 @@ export const HEALTH_PROBE_TIMEOUT_MS = 20_000;
  *  not-evaluated，而不是挂在那里等人输密码。 */
 export const HEALTH_SSH_CONNECT_TIMEOUT_SEC = 8;
 
-/** verdict 相关的**关键载体**（缺失 ⇒ not-evaluated，⛔ 不与「窗口内零失败」同形，硬规则 3b）：
- *  - `fan-in-step-trace.jsonl` = verdict 的**唯一**失败计数来源（缺了它 `failed` 不可知，⛔ 不是 0）；
- *  - `verification-round.jsonl` = 被驱动系统**跑过一轮复验**的最小痕迹（任务立案时点名的关键载体）；
- *    从未跑过复验的系统不能被判成「健康」。 */
-export const HEALTH_REQUIRED_CARRIERS: readonly string[] = ["fan-in-step-trace.jsonl", "verification-round.jsonl"];
+/** verdict 相关的**关键载体**（缺失 ⇒ not-evaluated，⛔ 不与「零信号」同形，硬规则 3b）：
+ *  `verification-round.jsonl` = 被驱动系统**跑过一轮复验**的最小痕迹。从未跑过复验的系统不能被判成
+ *  「健康」——它是「这个项目真的在被驱动过」的**结构性**痕迹，不是落地率/积压/恢复类指标。 */
+export const HEALTH_REQUIRED_CARRIERS: readonly string[] = ["verification-round.jsonl"];
 
 /** 仅作**存在性读数**的载体（⛔ 不进 verdict）：缺了只记 `present:false`，不影响判定。 */
 export const HEALTH_OBSERVED_CARRIERS: readonly string[] = [
@@ -1831,10 +1832,6 @@ export const HEALTH_OBSERVED_CARRIERS: readonly string[] = [
   "promotion-outcome.jsonl",
   "gate-events.jsonl",
 ];
-
-/** 探针读 `fan-in-step-trace.jsonl` 时只取**尾部窗口**的字节上限（1 MiB）。⛔ 是全量的有界近似：
- *  超限时截断并置 `traceTruncated:true`（读数自曝其截断，⛔ 不静默），且丢掉被截断的首行。 */
-export const HEALTH_MAX_TRACE_BYTES = 1 << 20;
 
 /** 探针载荷（JS 源文，经 stdin 送 `node -`）。⛔ 只用 node 内置模块、⛔ 不 require 任何项目文件
  *  ——目标机的 quay 安装版本可能落后（这正是 AC4 要报的缺陷），依赖它就会「读不懂输入 ⇒ 返回
@@ -1852,7 +1849,7 @@ const out = {
   roundRecords: [], driverProcesses: null,
   initStatePresent: false, initStatePluginVersion: null,
   initStateLaidAt: null, initStateAgeSec: null,
-  carriers: {}, fanInSteps: null, traceTruncated: false, fanInParseErrors: 0,
+  carriers: {},
 };
 const q = path.join(root, '.quay');
 try { out.rootPresent = fs.statSync(root).isDirectory(); } catch (e) { out.rootPresent = false; }
@@ -1862,7 +1859,7 @@ for (const name of carrierNames) {
 if (out.rootPresent) {
   try {
     for (const f of fs.readdirSync(q)) {
-      if (!/-round\\.jsonl$/.test(f)) continue;
+      if (!/-round\\.jsonl$/.test(f)) continue; // ⛔ 含 verification-round.jsonl —— 故读数里点名最新文件名（见 roundRecords）
       try {
         const st = fs.statSync(path.join(q, f));
         out.roundRecords.push({ rel: '.quay/' + f, mtimeMs: st.mtimeMs, bytes: st.size });
@@ -1882,43 +1879,12 @@ if (out.rootPresent) {
   } catch (e) {
     try { out.initStatePresent = fs.existsSync(path.join(q, 'quay-init-state.json')); } catch (e2) {}
   }
-  const tracePath = path.join(q, 'fan-in-step-trace.jsonl');
-  try {
-    const st = fs.statSync(tracePath);
-    let text;
-    if (st.size > ${HEALTH_MAX_TRACE_BYTES}) {
-      const fd = fs.openSync(tracePath, 'r');
-      const buf = Buffer.alloc(${HEALTH_MAX_TRACE_BYTES});
-      fs.readSync(fd, buf, 0, ${HEALTH_MAX_TRACE_BYTES}, st.size - ${HEALTH_MAX_TRACE_BYTES});
-      fs.closeSync(fd);
-      text = buf.toString('utf8');
-      out.traceTruncated = true;
-      const nl = text.indexOf('\\n');
-      if (nl >= 0) text = text.slice(nl + 1);
-    } else {
-      text = fs.readFileSync(tracePath, 'utf8');
-    }
-    const rows = [];
-    for (const line of text.split('\\n')) {
-      if (!line.trim()) continue;
-      let r;
-      try { r = JSON.parse(line); } catch (e) { out.fanInParseErrors += 1; continue; } // ⛔ 静默丢弃 = 把「读不懂」伪装成「零失败」
-      if (!r || r.event !== 'step-end') continue;
-      rows.push({
-        step: typeof r.step === 'string' ? r.step : null,
-        task: typeof r.task === 'string' ? r.task : null,
-        epoch: typeof r.epoch === 'number' ? r.epoch : null,
-        ok: typeof r.ok === 'boolean' ? r.ok : null,
-      });
-    }
-    out.fanInSteps = rows;
-  } catch (e) { out.fanInSteps = null; }
   try {
     const ps = execSync('ps -eo pid=,args=', { encoding: 'utf8', maxBuffer: 16777216, timeout: 10000 });
     const hit = [];
     for (const line of ps.split('\\n')) {
       if (line.indexOf('--root ' + root) < 0) continue;
-      if (!/(?:^|[\\/])(?:promotion|worker|goal|meta|quality|outer)-driver\\.(?:js|ts)|driver-runtime\\.(?:js|ts)/.test(line)) continue;
+      if (!/(?:^|[\\s\\/])(?:promotion|worker|goal|meta|quality|outer)-driver\\.(?:js|ts)|(?:^|[\\s\\/])driver-runtime\\.(?:js|ts)/.test(line)) continue;
       hit.push(line.trim().slice(0, 200));
     }
     out.driverProcesses = { count: hit.length, samples: hit.slice(0, 3) };
@@ -1938,21 +1904,19 @@ export type TargetHealthVerdict = "healthy" | "unhealthy" | "not-evaluated";
  *  probe-failed          探针命令非零退出 / spawn 失败（含 ssh 连不上、目标机无 node）——环境问题；
  *  probe-unparseable     探针 exit 0 但 stdout 不是本探针的 JSON 形态（版本漂移 / 被别的东西顶替）；
  *  target-root-absent    探针跑通但目标根在目标机上不存在（路径错 / 项目被删）；
- *  carrier-missing       关键载体缺失（枚举在 causeDetail）——「没跑过」不得与「零失败」同形；
- *  trace-unreadable      载体在、但读不出来（权限 / I/O / 它其实是个目录）——⛔ 与「零失败」不同形；
- *  trace-unparseable     载体读出来了、但其中有**读不懂的行**（JSON 坏 / 缺 epoch / ok 非布尔）
- *                        ——⛔ 静默丢弃坏行会让「读不懂」伪装成「零失败」（硬规则 3b）;
- *  trace-truncated       尾部窗口被 1 MiB 上限截断且窗口起点未被覆盖 ⇒ 「零失败」是**下界**不是事实。
- *                        （截断时**有**失败仍报 unhealthy —— 那一半是可取假的真结论。） */
+ *  carrier-missing       关键载体缺失（枚举在 causeDetail）——「没跑过」不得与「零信号」同形；
+ *  process-list-unreadable 进程表读不到（`ps` 不可用 / 被沙箱挡）⇒ 「有没有 driver 在跑」不可知
+ *                        ——⛔ 不可知不得回落成「在跑」（硬规则 3b：读不懂不得与合格同形）；
+ *  init-state-missing    目标项目没有 `.quay/quay-init-state.json`（未 quay-init / 被删）⇒ 配置形状
+ *                        版本与本 fact 的陈旧度都无从谈起 ⇒ 不能判「形状不落后」。 */
 export type TargetHealthCause =
   | "no-target-configured"
   | "probe-failed"
   | "probe-unparseable"
   | "target-root-absent"
   | "carrier-missing"
-  | "trace-unreadable"
-  | "trace-unparseable"
-  | "trace-truncated";
+  | "process-list-unreadable"
+  | "init-state-missing";
 
 /** 目标项目绑定（drivers.yml `kinds.goal.target_host` / `target_root`，CLI 可覆盖）。
  *  `host === null` ⇒ 目标根在**本机**（直接本地读）；`root === null` ⇒ 未声明目标（读数 not-evaluated）。 */
@@ -1976,14 +1940,10 @@ export interface TargetProbeReading {
   initStateLaidAt: number | null;
   initStateAgeSec: number | null;
   carriers: Record<string, boolean | null>;
-  fanInSteps: Array<{ step: string | null; task: string | null; epoch: number | null; ok: boolean | null }> | null;
-  traceTruncated: boolean;
-  /** 尾部窗口里 JSON 坏掉的行数（⛔ 探针自己计数，不静默丢弃 —— 硬规则 3b）。 */
-  fanInParseErrors: number;
 }
 
 /** `goal-target-health` 的 fact.value（全部是直接量；每个字段的来源见各字段注释）。
- *  ⛔ 三态：`verdict` 独立取值，且 not-evaluated 时 `fanIn === null`（⛔ 不是 0）——两者都不可省。 */
+ *  ⛔ 三态：`verdict` 独立取值，且 not-evaluated 时 `signals === null`（⛔ 不是 []）——两者都不可省。 */
 export interface TargetHealthReading {
   target: { host: string | null; root: string | null };
   verdict: TargetHealthVerdict;
@@ -1994,25 +1954,25 @@ export interface TargetHealthReading {
    *  且匹配 `<kind>-driver.js|ts` / `driver-runtime.js|ts`」的进程。`unknown` = ps 读不到
    *  （⛔ 与「零个进程」不同形）。 */
   liveness: { state: "driving" | "idle" | "unknown"; count: number | null; samples: string[] };
-  /** 目标项目的 driver round 心跳载体（`<目标根>/.quay/*-round.jsonl`）：条数 + 最新一条的龄（秒）。
-   *  ⛔ 纯读数（不进 verdict）：龄的阈值成本结构未测。 */
-  roundRecords: { count: number; newestAgeSec: number | null } | null;
-  /** 窗口内 fan-in 步骤成败（源：`<目标根>/.quay/fan-in-step-trace.jsonl`，只算 `step-end` 行）。
-   *  ⛔ not-evaluated 时恒 null（不与 `failed:0` 同形）。 */
-  fanIn: {
-    windowSec: number;
-    steps: number;
-    ok: number;
-    failed: number;
-    failedByStep: Record<string, number>;
-    failedTasks: string[];
-    /** 窗口外 / 字段残缺（无 epoch / 非布尔 ok）而被跳过的行数——⛔ 静默丢弃不可取。 */
-    skipped: number;
-    truncated: boolean;
-    /** 窗口起点是否确被读到（`truncated:false` 恒 true）。false ⇒ `failed` 只是**下界**，此时
-     *  `failed:0` 不足以判 healthy（⛔ 与「查过且零失败」同形，硬规则 3b）。 */
-    windowFullyCovered: boolean;
-  } | null;
+  /** 目标项目的 round 类心跳载体（`<目标根>/.quay/*-round.jsonl`，含 `verification-round.jsonl`）：
+   *  条数 + 最新一条的**文件名与龄**（秒）。⛔ 点名文件是必要的——只报「最新龄」会把「driver 在跳」
+   *  与「只有复验轮在写」读成同一个数（硬规则 4b：别用代理量代替直接量）。
+   *  ⛔ 纯读数（不进 verdict）：龄的阈值成本结构未测（硬规则 4 推论）。 */
+  roundRecords: { count: number; newestRel: string | null; newestAgeSec: number | null } | null;
+  /** verdict 的**可取假信号**清单（枚举，⛔ 不是布尔）。每条都是 categorical、不依赖任何阈值：
+   *  - `not-driving`          目标项目**零个** driver 进程（进程表可读 ⇒ 这个 0 是真读数；
+   *                           「进程停了」与「在跑但慢」是两件事，本条只报前者）。
+   *  - `plugin-version-mismatch` 目标配置形状版本 ≠ 交付物版本（AC4 的机械可检读数）。
+   *  ⛔ 陈旧度（round 记录龄 / 安装龄）**不进 signals** —— 判它「太老」需要一个活性阈值，其成本结构
+   *  未测（硬规则 4 推论：成本结构未知前不设数值阈值）。它们是读数，不是判据。
+   *  ⛔ 本清单**不含任何 task 落地指标**（fan-in 成败 / 落地率 / ready 池积压）——那是 task 机制的
+   *  口径，goal 侧不得以其为输入（人 2026-09-07 DIR-131 裁定 + 本文件的机械守卫
+   *  `goal-driver-task-boundary-check.ts` 的 Detector 3）。本 fact 只报**被驱动系统自身**的
+   *  结构量：它在不在跑、它的配置形状落不落后。 */
+  signals: string[];
+  /** `signals` 为空且不是 not-evaluated ⇒ healthy；非空 ⇒ unhealthy。⛔ not-evaluated 时 signals 恒 null
+   *  （「没查成」与「查过且零信号」不同形，硬规则 3b）。 */
+  signalScope: { livenessReadable: boolean; initStateReadable: boolean } | null;
   /** AC4：目标项目配置形状版本（quay-init 写进 `.quay/quay-init-state.json` 的 pluginVersion）与
    *  **交付物** plugin 版本（本仓 `plugin/.claude-plugin/plugin.json`，即 quay-init 写入该字段的同源）
    *  并排出现；`equal === false` 即「目标项目装的 quay 已落后于当前交付物」的机械可检读数。
@@ -2121,7 +2081,6 @@ export function parseHealthProbe(stdout: string): TargetProbeReading | null {
   if (typeof r.nowMs !== "number" || !Number.isFinite(r.nowMs)) return null;
   if (!Array.isArray(r.roundRecords)) return null;
   if (r.carriers === null || typeof r.carriers !== "object") return null;
-  if (r.fanInSteps !== null && !Array.isArray(r.fanInSteps)) return null;
   return {
     probeVersion: typeof r.probeVersion === "number" ? r.probeVersion : 0,
     root: r.root,
@@ -2140,9 +2099,6 @@ export function parseHealthProbe(stdout: string): TargetProbeReading | null {
     initStateLaidAt: typeof r.initStateLaidAt === "number" && Number.isFinite(r.initStateLaidAt) ? r.initStateLaidAt : null,
     initStateAgeSec: typeof r.initStateAgeSec === "number" && Number.isFinite(r.initStateAgeSec) ? r.initStateAgeSec : null,
     carriers: r.carriers as Record<string, boolean | null>,
-    fanInSteps: r.fanInSteps === null ? null : (r.fanInSteps as TargetProbeReading["fanInSteps"]),
-    traceTruncated: r.traceTruncated === true,
-    fanInParseErrors: typeof r.fanInParseErrors === "number" && Number.isFinite(r.fanInParseErrors) ? r.fanInParseErrors : 0,
   };
 }
 
@@ -2150,7 +2106,8 @@ export function parseHealthProbe(stdout: string): TargetProbeReading | null {
 export function deriveTargetHealth(
   binding: TargetBinding,
   probe: { ok: true; reading: TargetProbeReading } | { ok: false; cause: TargetHealthCause; detail: string[] },
-  opts: { windowSec: number; deliveredPluginVersion: string | null },
+  /** 交付物 plugin 版本（由调用方从**本仓**读出——探针在目标机上，读不到它）。 */
+  deliveredPluginVersion: string | null,
 ): TargetHealthReading {
   const target = { host: binding.host, root: binding.root };
   const required = [...HEALTH_REQUIRED_CARRIERS];
@@ -2159,9 +2116,10 @@ export function deriveTargetHealth(
     target,
     liveness: { state: "unknown" as const, count: null as number | null, samples: [] as string[] },
     roundRecords: null,
-    fanIn: null,
+    signals: null,
+    signalScope: null,
     pluginVersion: {
-      target: null, delivered: opts.deliveredPluginVersion, equal: null as boolean | null,
+      target: null, delivered: deliveredPluginVersion, equal: null as boolean | null,
       initStatePresent: null as boolean | null, targetAgeSec: null as number | null,
     },
     carriers: null,
@@ -2174,9 +2132,9 @@ export function deriveTargetHealth(
     ...observed.map((rel) => ({ rel, present: r.carriers[rel] ?? null, required: false }))];
   const pluginVersion = {
     target: r.initStatePluginVersion,
-    delivered: opts.deliveredPluginVersion,
-    equal: r.initStatePluginVersion !== null && opts.deliveredPluginVersion !== null
-      ? r.initStatePluginVersion === opts.deliveredPluginVersion
+    delivered: deliveredPluginVersion,
+    equal: r.initStatePluginVersion !== null && deliveredPluginVersion !== null
+      ? r.initStatePluginVersion === deliveredPluginVersion
       : null,
     initStatePresent: r.initStatePresent,
     targetAgeSec: r.initStateAgeSec,
@@ -2186,6 +2144,7 @@ export function deriveTargetHealth(
     : { state: r.driverProcesses.count > 0 ? ("driving" as const) : ("idle" as const), count: r.driverProcesses.count, samples: r.driverProcesses.samples };
   const roundRecords = {
     count: r.roundRecords.length,
+    newestRel: r.roundRecords.length > 0 ? r.roundRecords[0].rel : null,
     newestAgeSec: r.roundRecords.length > 0 ? Math.max(0, Math.round((r.nowMs - r.roundRecords[0].mtimeMs) / 1000)) : null,
   };
   // 未评估的三种成因，按「越根本越先」排序（⛔ 都是 not-evaluated，只是可区分——硬规则 3b / cause-carrier）。
@@ -2193,62 +2152,26 @@ export function deriveTargetHealth(
   if (!r.rootPresent) {
     // 根不在 ⇒ 读数按「零条 / unknown / 全 false」如实给出（⛔ 不回落到 base 的空壳：那会让「根不在」
     // 与「探针没跑成」在字段上同形，而两者是可区分的）——判定仍是 not-evaluated。
-    return { verdict: "not-evaluated", cause: "target-root-absent", causeDetail: [r.root], target, liveness, roundRecords, fanIn: null, pluginVersion, carriers };
+    return { verdict: "not-evaluated", cause: "target-root-absent", causeDetail: [r.root], target, liveness, roundRecords, signals: null, signalScope: null, pluginVersion, carriers };
   }
   if (missing.length > 0) {
     return { ...base, verdict: "not-evaluated", cause: "carrier-missing", causeDetail: missing, pluginVersion, liveness, roundRecords, carriers };
   }
-  // 「载体在」不等于「读得出来 / 读得懂」——⛔ 下面三条各自把一种「读不懂」挡在 healthy 之外（硬规则 3b）：
-  // 否则一个坏文件（权限、它其实是个目录、JSON 坏、字段缺）会**恰好**给出 `failed:0`，与「零失败」同形。
-  if (r.fanInSteps === null) {
-    return { ...base, verdict: "not-evaluated", cause: "trace-unreadable", causeDetail: [HEALTH_REQUIRED_CARRIERS[0]], pluginVersion, liveness, roundRecords, carriers };
+  // 逐条 verdict 输入都先问「读得到吗」——⛔ 任何一条读不到都不得回落成「零信号 ⇒ healthy」（硬规则 3b）。
+  if (r.driverProcesses === null) {
+    return { ...base, verdict: "not-evaluated", cause: "process-list-unreadable", causeDetail: ["ps -eo pid=,args="], pluginVersion, liveness, roundRecords, carriers };
   }
-  if (r.fanInParseErrors > 0) {
-    return { ...base, verdict: "not-evaluated", cause: "trace-unparseable", causeDetail: [`json-parse-errors=${r.fanInParseErrors}`], pluginVersion, liveness, roundRecords, carriers };
+  if (!r.initStatePresent || r.initStatePluginVersion === null) {
+    return { ...base, verdict: "not-evaluated", cause: "init-state-missing", causeDetail: [".quay/quay-init-state.json"], pluginVersion, liveness, roundRecords, carriers };
   }
-  const cutoffSec = Math.floor(r.nowMs / 1000) - opts.windowSec;
-  const failedByStep: Record<string, number> = {};
-  const failedTasks = new Set<string>();
-  let steps = 0;
-  let ok = 0;
-  let failed = 0;
-  let skipped = 0;
-  let minEpoch: number | null = null; // 尾部窗口里最早的一行（判「窗口是否被截断截掉了起点」）
-  for (const s of r.fanInSteps) {
-    if (s.epoch === null) { skipped += 1; continue; } // 无位置 = 无法归窗 ⇒ 它可能藏着一个窗口内的失败
-    if (minEpoch === null || s.epoch < minEpoch) minEpoch = s.epoch;
-    if (s.epoch < cutoffSec) continue;
-    if (s.ok === null) { skipped += 1; continue; } // 窗口内但 ok 读不懂 ⇒ 它是失败还是成功不可知
-    steps += 1;
-    if (s.ok) { ok += 1; continue; }
-    failed += 1;
-    const step = s.step ?? "(unknown)";
-    failedByStep[step] = (failedByStep[step] ?? 0) + 1;
-    if (s.task !== null) failedTasks.add(s.task);
-  }
-  if (skipped > 0) {
-    return { ...base, verdict: "not-evaluated", cause: "trace-unparseable", causeDetail: [`unreadable-rows=${skipped}`], pluginVersion, liveness, roundRecords, carriers };
-  }
-  // 截断（>1 MiB 只读尾部）时，窗口起点可能根本没被读到 ⇒ 「零失败」只是**下界**（⛔ 不能当 facts 报）。
-  // 另一半是取的假的：截断里**有**失败仍然报 unhealthy —— 找到一个失败就是找到了。
-  const windowFullyCovered = !r.traceTruncated || (minEpoch !== null && minEpoch <= cutoffSec);
-  const fanIn = {
-    windowSec: opts.windowSec,
-    steps,
-    ok,
-    failed,
-    failedByStep,
-    failedTasks: [...failedTasks].sort(),
-    skipped,
-    truncated: r.traceTruncated,
-    windowFullyCovered,
-  };
-  if (failed === 0 && !windowFullyCovered) {
-    return { ...base, verdict: "not-evaluated", cause: "trace-truncated", causeDetail: [`window ${opts.windowSec}s not fully covered (cap ${HEALTH_MAX_TRACE_BYTES} B)`], pluginVersion, liveness, roundRecords, carriers, fanIn };
-  }
+  // 两条 categorical、可取假的信号（⛔ 无阈值、无落地指标）。
+  const signals: string[] = [];
+  if (r.driverProcesses.count === 0) signals.push("not-driving");
+  if (pluginVersion.equal === false) signals.push("plugin-version-mismatch");
   return {
-    target, verdict: failed > 0 ? "unhealthy" : "healthy", cause: null, causeDetail: [],
-    liveness, roundRecords, fanIn, pluginVersion, carriers,
+    target, verdict: signals.length > 0 ? "unhealthy" : "healthy", cause: null, causeDetail: [],
+    liveness, roundRecords, signals, signalScope: { livenessReadable: true, initStateReadable: true },
+    pluginVersion, carriers,
   };
 }
 
@@ -2258,10 +2181,6 @@ function targetHealthReason(v: TargetHealthReading): string {
   if (v.verdict === "not-evaluated") {
     return `${where}: not-evaluated (cause=${v.cause}${v.causeDetail.length > 0 ? `: ${v.causeDetail.join(", ")}` : ""})`;
   }
-  const f = v.fanIn;
-  const fail = f === null ? "-" : (f.failed > 0
-    ? `${f.failed} failed / ${f.steps} steps [${Object.entries(f.failedByStep).map(([k, n]) => `${k}×${n}`).join(" ")}]`
-    : `0 failed / ${f.steps} steps${f.windowFullyCovered ? "" : "(下界：窗口未全覆盖)"}`);
   const ver = v.pluginVersion;
   const ageNote = ver.targetAgeSec === null ? "" : `(陈旧度 ${ver.targetAgeSec}s)`;
   const versionNote = ver.equal === false
@@ -2269,9 +2188,9 @@ function targetHealthReason(v: TargetHealthReading): string {
     : ver.equal === true
       ? ` pluginVersion ok${ageNote}`
       : ` pluginVersion 读不到${ver.initStatePresent === false ? "（目标无 quay-init-state）" : ""}`;
-  return `${where}: ${v.verdict} — fan-in ${fail} (window ${f?.windowSec ?? "?"}s), ` +
+  return `${where}: ${v.verdict}${v.signals && v.signals.length > 0 ? ` [${v.signals.join(" ")}]` : ""} — ` +
     `liveness=${v.liveness.state}${v.liveness.count !== null ? `(${v.liveness.count})` : ""}, ` +
-    `roundRecords=${v.roundRecords?.count ?? "?"}${v.roundRecords?.newestAgeSec != null ? `(newest ${v.roundRecords.newestAgeSec}s)` : ""}` +
+    `roundRecords=${v.roundRecords?.count ?? "?"}${v.roundRecords?.newestAgeSec != null ? `(newest ${v.roundRecords.newestRel} ${v.roundRecords.newestAgeSec}s)` : ""}` +
     versionNote;
 }
 
@@ -2279,13 +2198,9 @@ function targetHealthReason(v: TargetHealthReading): string {
  *  的同一回合里跑，必须短且必定返回；⛔ 任何失败路径都返回一条 fact（⛔ 不抛、⛔ 不阻塞本轮）。 */
 export function targetHealthFact(root: string, opts: GoalRoundOptions = {}): Fact<Record<string, unknown>> {
   const binding = resolveTargetBinding(root, { host: opts.targetHost, root: opts.targetRoot });
-  const windowSec = (() => {
-    const w = opts.healthWindowSec;
-    return typeof w === "number" && Number.isFinite(w) && w > 0 ? Math.floor(w) : HEALTH_WINDOW_SEC_DEFAULT;
-  })();
   const delivered = readDeliveredPluginVersion(root);
   const notEvaluated = (cause: TargetHealthCause, detail: string[]): Fact<Record<string, unknown>> => {
-    const value = deriveTargetHealth(binding, { ok: false, cause, detail }, { windowSec, deliveredPluginVersion: delivered });
+    const value = deriveTargetHealth(binding, { ok: false, cause, detail }, delivered);
     return { name: TARGET_HEALTH_FACT_NAME, value: value as unknown as Record<string, unknown>, state: "not-evaluated", reason: targetHealthReason(value) };
   };
   if (binding.root === null) return notEvaluated("no-target-configured", []);
@@ -2314,7 +2229,7 @@ export function targetHealthFact(root: string, opts: GoalRoundOptions = {}): Fac
   if (reading === null) {
     return notEvaluated("probe-unparseable", [`stdout head: ${String(res.stdout ?? "").slice(0, 200)}`]);
   }
-  const value = deriveTargetHealth(binding, { ok: true, reading }, { windowSec, deliveredPluginVersion: delivered });
+  const value = deriveTargetHealth(binding, { ok: true, reading }, delivered);
   return {
     name: TARGET_HEALTH_FACT_NAME,
     value: value as unknown as Record<string, unknown>,
@@ -2366,7 +2281,6 @@ const HELP = [
   "  --gap-worker-timeout-ms <ms> 覆盖 gap-filing agent spawn 超时（缺省 drivers.yml goal.gap_worker_timeout_ms）",
   "  --target-host <h>       覆盖被驱动系统所在主机（缺省 drivers.yml goal.target_host；空 = 目标在本机）",
   "  --target-root <dir>     覆盖被驱动系统根路径（缺省 drivers.yml goal.target_root；未声明 ⇒ 该读数 not-evaluated）",
-  "  --health-window-sec <n> 被驱动系统健康度的 fan-in 窗口（秒，缺省 " + HEALTH_WINDOW_SEC_DEFAULT + "）",
   "  --json                 每轮向 stdout 打一条 JSON 事件行",
   "",
   "Exit: 0 = 轮跑完（含 not-evaluated）; 1 = 轮失败; 2 = usage",
@@ -2391,7 +2305,6 @@ export async function main(argv: string[]): Promise<number> {
   let scriptRootRaw: string | undefined;
   let targetHostRaw: string | undefined;
   let targetRootRaw: string | undefined;
-  let healthWindowSecRaw: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -2411,7 +2324,6 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--gap-worker-timeout-ms") gapWorkerTimeoutMsRaw = args[++i];
     else if (a === "--target-host") targetHostRaw = args[++i];
     else if (a === "--target-root") targetRootRaw = args[++i];
-    else if (a === "--health-window-sec") healthWindowSecRaw = args[++i];
     else if (a === "--json") json = true;
     else if (a === "--help" || a === "-h") { process.stdout.write(HELP + "\n"); return 0; }
     else { process.stderr.write(`goal-driver: unknown argument: ${a}\n${HELP}\n`); return 2; }
@@ -2452,18 +2364,6 @@ export async function main(argv: string[]): Promise<number> {
     process.stderr.write("goal-driver: --gap-worker-timeout-ms must be a positive integer\n");
     return 2;
   }
-  // 健康度窗口：正整数秒才合法（非正整数 ⇒ usage，⛔ 不静默回退——回退会把「打错了」伪装成「用了缺省」）。
-  const healthWindowSec = healthWindowSecRaw === undefined
-    ? undefined
-    : (() => {
-        const n = Number(healthWindowSecRaw);
-        if (!Number.isInteger(n) || n <= 0) return null;
-        return n;
-      })();
-  if (healthWindowSecRaw !== undefined && healthWindowSec === null) {
-    process.stderr.write("goal-driver: --health-window-sec must be a positive integer\n");
-    return 2;
-  }
   // AC140-4：配置声明的 LLM 命令集（缺省 LLM_COMMAND_SET_DEFAULT；--llm-commands 逗号分隔注入）。
   const llmCommands = llmCommandsRaw === undefined
     ? [...LLM_COMMAND_SET_DEFAULT]
@@ -2480,7 +2380,6 @@ export async function main(argv: string[]): Promise<number> {
     // 显式传 null 表示「本次运行不读 drivers.yml 的绑定」（--target-host '' 的用法），undefined 才回落。
     targetHost: targetHostRaw,
     targetRoot: targetRootRaw,
-    healthWindowSec: healthWindowSec ?? undefined,
   };
 
   // 常驻（例程型）：复用通用例程型循环，⛔ 不另写一份。缺省 = 常驻（once=false）；--once 跑一轮即退。

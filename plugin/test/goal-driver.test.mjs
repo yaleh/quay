@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
 
 import {
   goalAchievedFromRecords,
@@ -48,7 +48,6 @@ import {
   parseHealthProbe,
   readDeliveredPluginVersion,
   TARGET_HEALTH_FACT_NAME,
-  HEALTH_WINDOW_SEC_DEFAULT,
   HEALTH_REQUIRED_CARRIERS,
   HEALTH_OBSERVED_CARRIERS,
 } from '../scripts/goal-driver.ts';
@@ -1229,35 +1228,28 @@ test('冻结population 端到端：真 runGoalRound 把域外失败的 AC 枚举
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
-
 // ── 被驱动系统（目标项目）健康度 —— gap-goal-driver-blind-to-driven-system-health ────────────────
 //
 // 症状：本 driver 6 天 5308 轮只产出**内省**读数（goal-ring / goal-sufficiency），它驱动的目标项目
-// 两小时内 fan-in 失败 9 次（其中一轮 277 秒全量 suite 全绿、唯独 ff 因工作树不干净失败 ⇒ 白烧），
-// 而 driver 全程无感。本组测的就是补上的那条**外部视角**读数（fact name = goal-target-health）。
+// 两小时内 fan-in 失败 9 次（其中一轮 277 秒全量 suite 全绿、唯独最后一步失败 ⇒ 白烧），而 driver
+// 全程无感。本组测的就是补上的那条**外部视角**读数（fact name = goal-target-health）。
 //
-// 夹具是**真实文件系统**（探针脚本读的就是它，⛔ 不注入读数本身）。只有「传输失败」用 argv 前缀缝
-// 注入 —— 换的是**传输层**，⛔ 不是答案（硬规则 4 推论三）。
+// ⛔ **口径边界（人 2026-09-07 DIR-131 + `goal-driver-task-boundary-check.ts` Detector 3）**：本 fact
+// **不读 task 落地指标**（fan-in 成败 / 落地率 / ready 池积压 / full-suite-state）——那归 task 机制。
+// 立案任务体点名的「fan-in 失败步骤分布」因此不在本 fact 内（该维度的去向是人裁，见任务 `## 阻塞`）。
+// 本组测的两条信号都是**被驱动系统自身的结构量**：它在不在跑、它的配置形状落不落后。
+//
+// 夹具是**真实文件系统**（探针脚本读的就是它，⛔ 不注入读数本身）。只有「传输失败」与「进程表读不到」
+// 用 argv 前缀缝注入 —— 换的是**传输层**，⛔ 不是答案（硬规则 4 推论三）。
 
-/** 一条目标项目 `step-end` 行（epoch 相对 now；ageSec 为负 = 过去，窗口外更进一步往前推）。 */
-function stepEndLine({ step, task, ok, ageSec }) {
-  const epoch = Math.floor(Date.now() / 1000) + ageSec;
-  return JSON.stringify({ event: 'step-end', step, task, runId: 'r1', ts: new Date(epoch * 1000).toISOString(), epoch, ok });
-}
-
-/** 造一个「目标项目」夹具根（真实 .quay/ 载体 + 真实 fan-in-step-trace.jsonl 行）。 */
+/** 造一个「目标项目」夹具根（真实 .quay/ 载体）。 */
 function mkTargetRoot({
-  stepEnds = [], traceAbsent = false, missingCarriers = [], extraCarriers = [],
-  pluginVersion, initStateAbsent = false, roundRecords = [],
+  missingCarriers = [], pluginVersion, initStateAbsent = false, roundRecords = [],
 } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-target-'));
   const q = path.join(dir, '.quay');
   fs.mkdirSync(q, { recursive: true });
-  if (!traceAbsent) {
-    const lines = stepEnds.map(stepEndLine);
-    fs.writeFileSync(path.join(q, 'fan-in-step-trace.jsonl'), lines.length ? lines.join('\n') + '\n' : '', 'utf8');
-  }
-  for (const name of ['verification-round.jsonl', ...extraCarriers]) {
+  for (const name of [...HEALTH_REQUIRED_CARRIERS, ...HEALTH_OBSERVED_CARRIERS]) {
     if (missingCarriers.includes(name)) continue;
     fs.writeFileSync(path.join(q, name), '{}\n', 'utf8');
   }
@@ -1268,59 +1260,92 @@ function mkTargetRoot({
   return dir;
 }
 
-// ── AC1：能取假 —— 窗口内有 ok:false ⇒ failed>0；健康态 ⇒ 0（⛔ 不用恒真量）────────────────────
+/** 交付物 plugin 版本（本仓 plugin/.claude-plugin/plugin.json）——夹具「配置形状一致」态用它。 */
+const DELIVERED_VERSION = readDeliveredPluginVersion(repoRoot);
 
-test('AC1: goal-target-health 报出窗口内 fan-in 失败计数（不健康 >0 / 健康 =0），窗口是有效作用域', () => {
-  const bad = mkTargetRoot({
-    stepEnds: [
-      { step: 'ff', task: 'TASK-89', ok: false, ageSec: -300 },
-      { step: 'ff', task: 'TASK-89', ok: false, ageSec: -600 },
-      { step: 'scoped-gate', task: 'TASK-88', ok: false, ageSec: -900 },
-      { step: 'suite', task: 'TASK-89', ok: true, ageSec: -1000 },
-      // ⛔ 窗口外的失败不得计入（window=7200s，这条在 3 小时前）—— 否则「窗口」是装饰。
-      { step: 'merge-develop', task: 'TASK-7', ok: false, ageSec: -10800 },
-    ],
-    roundRecords: ['worker-round.jsonl', 'promotion-round.jsonl'],
-  });
-  const good = mkTargetRoot({
-    stepEnds: [{ step: 'ff', task: 'TASK-90', ok: true, ageSec: -300 }, { step: 'suite', task: 'TASK-90', ok: true, ageSec: -400 }],
-    roundRecords: ['worker-round.jsonl'],
-  });
+/** 起一个**真在跑**的「目标项目 driver 进程」夹具：cmdline 带 `worker-driver.js --root <目标根>`
+ *  ⇒ 探针的 `ps` 扫描能真读到它（⛔ 不是注入答案：读的还是真进程表、真 cmdline，夹具只造环境）。
+ *  ⚠️ 必须 spawn（异步）：探针要在它活着的时候跑；调用方负责 kill。 */
+function spawnTargetDriverFixture(targetRoot) {
+  return spawn(process.execPath, ['-e', 'setTimeout(()=>{}, 30000)', 'worker-driver.js', '--root', targetRoot], { stdio: 'ignore' });
+}
+
+/** 等夹具进程的 cmdline 真的出现在进程表里（spawn 是异步的：立刻探针会读到「还没起来」= 假红）。
+ *  判据是**进程表**（探针读的同一来源），⛔ 不是子进程自述 —— 与探针同一直接量。 */
+function waitForProcessVisible(pid, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const r = spawnSync('ps', ['-o', 'args=', '-p', String(pid)], { encoding: 'utf8' });
+    if (r.status === 0 && String(r.stdout).includes('worker-driver.js')) return true;
+    spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},120)']); // 有界小睡（不引入额外依赖）
+  }
+  return false;
+}
+
+/** 「进程表读不到」夹具：transport 缝换成「先吃干 stdin、再打一份 driverProcesses:null 的探针输出」。
+ *  ⛔ 这不是注入答案——它造的是**环境**（ps 不可用/被沙箱挡时探针就是这个形态），verdict 仍由
+ *  被测代码从这份读数推出（本组其余用例正是它的对照）。 */
+function cannedProbePrefix(tmp, reading) {
+  const f = path.join(tmp, 'canned-probe.js');
+  fs.writeFileSync(f, `process.stdin.resume();process.stdin.on('end',()=>process.stdout.write(JSON.stringify(${JSON.stringify(reading)})+String.fromCharCode(10)));`, 'utf8');
+  return ['bash', '-c', `cat >/dev/null; node ${f}`];
+}
+
+// ── AC1：能取假 —— 两条被驱动系统自身的 categorical 信号（⛔ 无阈值、无落地指标）──────────────
+
+test('AC1: not-driving 信号能取假 —— 目标零 driver 进程 ⇒ unhealthy[not-driving]；有 ⇒ 该信号消失', async () => {
+  const idle = mkTargetRoot({ pluginVersion: DELIVERED_VERSION, roundRecords: ['worker-round.jsonl'] });
+  const running = mkTargetRoot({ pluginVersion: DELIVERED_VERSION, roundRecords: ['worker-round.jsonl'] });
+  const proc = spawnTargetDriverFixture(running);
   try {
-    const badFact = targetHealthFact(repoRoot, { targetRoot: bad });
-    const goodFact = targetHealthFact(repoRoot, { targetRoot: good });
-
-    assert.equal(badFact.name, TARGET_HEALTH_FACT_NAME, 'fact 名字');
-    assert.equal(badFact.value.fanIn.failed, 3, '窗口内 3 条 ok:false 计入（窗口外那条不计）');
-    assert.equal(badFact.value.fanIn.steps, 4, '窗口内 step-end 行数 = 4');
-    assert.deepEqual(badFact.value.fanIn.failedByStep, { ff: 2, 'scoped-gate': 1 }, '失败按步骤分布（枚举，⛔ 不是布尔）');
-    assert.deepEqual(badFact.value.fanIn.failedTasks, ['TASK-88', 'TASK-89'], '失败任务清单（去重排序）');
-    assert.equal(badFact.value.fanIn.windowSec, HEALTH_WINDOW_SEC_DEFAULT, '窗口来自 HEALTH_WINDOW_SEC_DEFAULT');
-    assert.equal(badFact.value.verdict, 'unhealthy', '有失败 ⇒ unhealthy');
-    assert.equal(badFact.state, 'verified', '⛔ 取到读数就是 verified（unhealthy 不是「本轮失败」，AC2）');
-
-    assert.equal(goodFact.value.fanIn.failed, 0, '健康态失败计数 = 0（能取假的另一半）');
-    assert.equal(goodFact.value.fanIn.ok, 2, '健康态 ok 计数 = 2');
-    assert.equal(goodFact.value.verdict, 'healthy', '零失败 ⇒ healthy');
-
-    // AC1 要求「两态输出逐字贴出做对照」——这两行就是留档（断言在上的字段级读数之外的人读形态）。
-    console.log(`AC1[unhealthy] ${badFact.reason}`);
-    console.log(`AC1[healthy]   ${goodFact.reason}`);
+    assert.ok(waitForProcessVisible(proc.pid), '夹具进程已上进程表（否则下面的对照是假红）');
+    const fIdle = targetHealthFact(repoRoot, { targetRoot: idle });
+    const fRun = targetHealthFact(repoRoot, { targetRoot: running });
+    assert.equal(fIdle.value.liveness.count, 0, '夹具无目标进程 ⇒ 进程计数 0（真读数）');
+    assert.deepEqual(fIdle.value.signals, ['not-driving'], '零进程 ⇒ 信号 not-driving');
+    assert.equal(fIdle.value.verdict, 'unhealthy', '有信号 ⇒ unhealthy');
+    assert.ok(fRun.value.liveness.count >= 1, `目标 driver 进程被真读到（实为 ${fRun.value.liveness.count}）`);
+    assert.ok(!fRun.value.signals.includes('not-driving'), '有进程 ⇒ not-driving 消失（信号能取假）');
+    // 两态输出逐字贴出做对照（AC1 的留档要求）。
+    console.log(`AC1[unhealthy] ${fIdle.reason}`);
+    console.log(`AC1[对照·有进程] ${fRun.reason}`);
+    assert.equal(fIdle.state, 'verified', '⛔ 取到读数就是 verified（unhealthy 不是「本轮失败」，AC2）');
   } finally {
-    fs.rmSync(bad, { recursive: true, force: true });
-    fs.rmSync(good, { recursive: true, force: true });
+    proc.kill('SIGKILL');
+    fs.rmSync(idle, { recursive: true, force: true });
+    fs.rmSync(running, { recursive: true, force: true });
   }
 });
 
-test('AC1 负控制: 窗口外的失败不计入（窗口是有效作用域，⛔ 不是装饰）', () => {
-  const dir = mkTargetRoot({ stepEnds: [{ step: 'ff', task: 'TASK-1', ok: false, ageSec: -HEALTH_WINDOW_SEC_DEFAULT - 60 }] });
+test('AC1: plugin-version-mismatch 信号能取假 —— 落后 ⇒ unhealthy[plugin-version-mismatch]；一致 ⇒ 该信号消失', () => {
+  const stale = mkTargetRoot({ pluginVersion: '0.0.1-stale' });
+  const same = mkTargetRoot({ pluginVersion: DELIVERED_VERSION });
+  try {
+    const fStale = targetHealthFact(repoRoot, { targetRoot: stale });
+    const fSame = targetHealthFact(repoRoot, { targetRoot: same });
+    // 两者都无目标 driver 进程 ⇒ 都带 not-driving；差异必须在版本信号上，且**只有**它变化。
+    assert.ok(fStale.value.signals.includes('plugin-version-mismatch'), '落后 ⇒ 该信号在');
+    assert.ok(!fSame.value.signals.includes('plugin-version-mismatch'), '一致 ⇒ 该信号不在（能取假）');
+    assert.equal(fStale.value.pluginVersion.equal, false, '并排读数：不等');
+    assert.equal(fSame.value.pluginVersion.equal, true, '并排读数：相等');
+    console.log(`AC1[stale] ${fStale.reason}`);
+    console.log(`AC1[一致] ${fSame.reason}`);
+  } finally {
+    fs.rmSync(stale, { recursive: true, force: true });
+    fs.rmSync(same, { recursive: true, force: true });
+  }
+});
+
+test('AC1 负控制: 两条信号之外的一切都是**读数**不是判据（陈旧度/条数不进 signals）', () => {
+  const dir = mkTargetRoot({ pluginVersion: DELIVERED_VERSION, roundRecords: [] });
   try {
     const f = targetHealthFact(repoRoot, { targetRoot: dir });
-    assert.equal(f.value.fanIn.failed, 0, '窗口外失败 ⇒ 计数 0（对照：同一条行 ageSec:-60 时计数 1）');
-    assert.equal(f.value.fanIn.steps, 0, '窗口内零行');
-    assert.equal(f.value.verdict, 'healthy', '窗口内零失败 ⇒ healthy');
-    const f2 = targetHealthFact(repoRoot, { targetRoot: dir, healthWindowSec: HEALTH_WINDOW_SEC_DEFAULT + 300 });
-    assert.equal(f2.value.fanIn.failed, 1, '把窗口放大到覆盖它 ⇒ 计数 1（同一条行，只改作用域）');
+    assert.deepEqual(f.value.signals, ['not-driving'], '只有 not-driving（round 类载体的条数/龄都不产生信号）');
+    // `verification-round.jsonl` **也是** `*-round.jsonl` ⇒ 计入 roundRecords，且读数点名它（否则
+    // 「driver 在跳」与「只有复验轮在写」会被读成同一个数——硬规则 4b 的代理量陷阱）。
+    assert.equal(f.value.roundRecords.count, 1, 're 里只有 verification-round.jsonl 一条（mkTargetRoot 不写 driver round 载体）');
+    assert.equal(f.value.roundRecords.newestRel, '.quay/verification-round.jsonl', '点名最新那条是谁');
+    assert.ok(f.value.roundRecords.newestAgeSec <= 5, '龄可读（刚写）');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -1337,14 +1362,14 @@ test('AC2: 健康度为红不阻塞 —— goalFlipDecision 输入/输出与改�
   const decisionInput = { verdict: 'covered' };
   const before = goalFlipDecision(records, 'GOAL-001', decisionInput);
 
-  const bad = mkTargetRoot({ stepEnds: [{ step: 'ff', task: 'TASK-89', ok: false, ageSec: -60 }] });
+  const bad = mkTargetRoot({ pluginVersion: '0.0.1-stale' });
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-target-nonblock-'));
   try {
     const health = targetHealthFact(repoRoot, { targetRoot: bad });
     assert.equal(health.value.verdict, 'unhealthy', '构造出的目标态确实是红');
     const after = goalFlipDecision(records, 'GOAL-001', decisionInput);
     console.log(`AC2 改前: goalFlipDecision(records=[GOAL-001/AC-001 achieved], GOAL-001, ${JSON.stringify(decisionInput)}) = ${before}`);
-    console.log(`AC2 改后: 同一输入 + 健康度=${health.value.verdict}（${health.value.fanIn.failed} 失败）⇒ goalFlipDecision = ${after}`);
+    console.log(`AC2 改后: 同一输入 + 健康度=${health.value.verdict}（${JSON.stringify(health.value.signals)}）⇒ goalFlipDecision = ${after}`);
     assert.equal(after, before, '逐字一致（健康度为红不改变达成判定）');
     assert.equal(after, true, '且该输入下判定为 true —— 不是「两边都 false」的空转对照');
     assert.equal(goalFlipDecision.length, 3, 'goalFlipDecision 形参个数未变（健康度不是它的输入）');
@@ -1379,91 +1404,74 @@ test('AC2: 健康度为红不阻塞 —— goalFlipDecision 输入/输出与改�
   }
 });
 
-// ── AC3：未评估可区分 —— 不可达 / 载体缺失 / 读不懂 ⇒ 独立取值（⛔ 既非 0 也非「健康」）─────────
+// ── AC3：未评估可区分 —— 不可达 / 载体缺失 / 读不到 ⇒ 独立取值（⛔ 既非读数也不是「健康」）─────────
 
-test('AC3: 未评估四成因各出独立取值，且 fanIn 恒 null（⛔ 不与「零失败」同形）', () => {
+test('AC3: 六种未评估成因各出独立取值，且 signals 恒 null（⛔ 不与「零信号」同形）', () => {
   const made = [];
   const mk = (o) => { const d = mkTargetRoot(o); made.push(d); return d; };
   const emptyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-target-none-'));
   made.push(emptyRoot);
-  const dir = mk({ stepEnds: [{ step: 'suite', task: 'T', ok: true, ageSec: -60 }] });
+  const ok = mk({ pluginVersion: DELIVERED_VERSION });
   try {
-    const broken = targetHealthFact(repoRoot, { targetRoot: dir, healthProbePrefix: ['bash', '-c', 'exit 255'] });
-    // 缝的命令必须**先吃干 stdin**（探针载荷走 stdin）：不读 stdin 的假传输会让写端 EPIPE ⇒ 那已经是
+    const probeFail = targetHealthFact(repoRoot, { targetRoot: ok, healthProbePrefix: ['bash', '-c', 'exit 255'] });
+    // 缝的命令必须**先吃干 stdin**（探针载荷走 stdin）：不读 stdin 的假传输会让写端 EPIPE ⇒ 那已是
     // 「载荷没送达 = probe-failed」，测不到 probe-unparseable 这一态。
-    const garbled = targetHealthFact(repoRoot, { targetRoot: dir, healthProbePrefix: ['bash', '-c', 'cat >/dev/null; echo not-the-probe-shape'] });
+    const garbled = targetHealthFact(repoRoot, { targetRoot: ok, healthProbePrefix: ['bash', '-c', 'cat >/dev/null; echo not-the-probe-shape'] });
     const absent = targetHealthFact(repoRoot, { targetRoot: path.join(emptyRoot, 'no-such-project') });
     const noTarget = targetHealthFact(emptyRoot, {});
-    const noCarrier = targetHealthFact(repoRoot, { targetRoot: mk({ traceAbsent: true }) });
-    const noVround = targetHealthFact(repoRoot, { targetRoot: mk({ missingCarriers: ['verification-round.jsonl'] }) });
+    const noCarrier = targetHealthFact(repoRoot, { targetRoot: mk({ pluginVersion: DELIVERED_VERSION, missingCarriers: [HEALTH_REQUIRED_CARRIERS[0]] }) });
+    const noInitState = targetHealthFact(repoRoot, { targetRoot: mk({ initStateAbsent: true }) });
+    const noPs = targetHealthFact(repoRoot, {
+      targetRoot: ok,
+      healthProbePrefix: cannedProbePrefix(emptyRoot, {
+        probeVersion: 1, root: ok, rootPresent: true, nowMs: Date.now(), roundRecords: [],
+        driverProcesses: null, initStatePresent: true, initStatePluginVersion: DELIVERED_VERSION,
+        initStateLaidAt: null, initStateAgeSec: null,
+        carriers: Object.fromEntries([...HEALTH_REQUIRED_CARRIERS, ...HEALTH_OBSERVED_CARRIERS].map((c) => [c, true])),
+      }),
+    });
     const cases = [
       ['no-target-configured', noTarget, []],
-      ['probe-failed', broken, ['exit=255']],
+      ['probe-failed', probeFail, ['exit=255']],
       ['probe-unparseable', garbled, []],
       ['target-root-absent', absent, []],
-      ['carrier-missing', noCarrier, ['fan-in-step-trace.jsonl']],
-      ['carrier-missing', noVround, ['verification-round.jsonl']],
+      ['carrier-missing', noCarrier, [HEALTH_REQUIRED_CARRIERS[0]]],
+      ['init-state-missing', noInitState, ['.quay/quay-init-state.json']],
+      ['process-list-unreadable', noPs, ['ps -eo pid=,args=']],
     ];
     for (const [cause, fact, detail] of cases) {
       assert.equal(fact.name, TARGET_HEALTH_FACT_NAME, `${cause}: fact 名字`);
       assert.equal(fact.state, 'not-evaluated', `${cause}: state=not-evaluated`);
       assert.equal(fact.value.verdict, 'not-evaluated', `${cause}: verdict=not-evaluated`);
-      assert.equal(fact.value.cause, cause, `${cause}: cause 是枚举值`);
-      assert.equal(fact.value.fanIn, null, `${cause}: ⛔ fanIn 必须是 null —— 0 会与「窗口内零失败」同形（硬规则 3b）`);
+      assert.equal(fact.value.cause, cause, `${cause}: cause 是枚举值（实为 ${fact.value.cause}）`);
+      assert.equal(fact.value.signals, null, `${cause}: ⛔ signals 必须是 null —— [] 会与「查过且零信号」同形（硬规则 3b）`);
       assert.notEqual(fact.value.verdict, 'healthy', `${cause}: ⛔ 不与 healthy 同形`);
       for (const d of detail) assert.ok(fact.value.causeDetail.includes(d), `${cause}: causeDetail 含 ${d}（实为 ${JSON.stringify(fact.value.causeDetail)}）`);
     }
-    // 三态可区分（AC3 要求「贴出三态的实际输出」）：同一份 fixture 只有一处不同 ⇒ 三种 verdict。
-    const healthy = targetHealthFact(repoRoot, { targetRoot: mk({ stepEnds: [{ step: 'ff', task: 'T', ok: true, ageSec: -60 }] }) });
-    const unhealthy = targetHealthFact(repoRoot, { targetRoot: mk({ stepEnds: [{ step: 'ff', task: 'T', ok: false, ageSec: -60 }] }) });
+    // 三态可区分（AC3 要求「贴出三态的实际输出」）：三种 verdict 各一例。
+    // 「healthy」态必须有一个**真在跑**的目标 driver 进程：零进程夹具本身就是 unhealthy[not-driving]
+    // （这正是本 fact 的首要信号），拿它当 healthy 对照会把两态压成一态。
+    const healthyDir = mk({ pluginVersion: DELIVERED_VERSION });
+    const proc = spawnTargetDriverFixture(healthyDir);
+    assert.ok(waitForProcessVisible(proc.pid), '夹具进程已上进程表');
+    const healthy = targetHealthFact(repoRoot, { targetRoot: healthyDir });
+    const unhealthy = targetHealthFact(repoRoot, { targetRoot: mk({ pluginVersion: '0.0.1-stale' }) });
     console.log(`AC3[healthy]       ${healthy.reason}`);
     console.log(`AC3[unhealthy]     ${unhealthy.reason}`);
-    console.log(`AC3[not-evaluated] ${broken.reason}`);
-    console.log(`AC3[no-carrier]    ${noCarrier.reason}`);
+    console.log(`AC3[not-evaluated] ${probeFail.reason}`);
+    console.log(`AC3[载体缺失]      ${noCarrier.reason}`);
     assert.deepEqual(
-      [healthy.value.verdict, unhealthy.value.verdict, broken.value.verdict].filter((v, i, a) => a.indexOf(v) === i).sort(),
+      [healthy.value.verdict, unhealthy.value.verdict, probeFail.value.verdict].filter((v, i, a) => a.indexOf(v) === i).sort(),
       ['healthy', 'not-evaluated', 'unhealthy'],
       '三态互不相同（各自独立取值）',
     );
-    // 活性是**独立**字段（categorical，⛔ 不压进 verdict）：夹具里没有目标项目的 driver 进程 ⇒ idle，
-    // 但 verdict 仍由 fan-in 失败计数决定 —— 两件事各自可读（硬规则 4b）。
-    assert.equal(healthy.value.liveness.state, 'idle', '夹具无进程 ⇒ liveness=idle（真读数，不是「未知」）');
-    assert.equal(healthy.value.liveness.count, 0, '进程数 0（⛔ 与 unknown/null 不同形）');
-    assert.equal(broken.value.liveness.state, 'unknown', '探针没跑成 ⇒ liveness=unknown（⛔ 不是 idle）');
-  } finally {
-    for (const d of made) fs.rmSync(d, { recursive: true, force: true });
-  }
-});
-
-test('AC3: 载体「在」但读不懂 ⇒ 独立 not-evaluated（⛔ 不许恰好给出 failed:0 冒充 healthy，硬规则 3b）', () => {
-  const made = [];
-  const mk = (o) => { const d = mkTargetRoot(o); made.push(d); return d; };
-  try {
-    // ① JSON 坏行（探针计数 → trace-unparseable）；② ok 非布尔（字段读不懂 → trace-unparseable）；
-    // ③ 无 epoch（位置不可知 → trace-unparseable）；④ 载体存在但读不出（目录冒充文件 → trace-unreadable）。
-    const badJson = mk({ stepEnds: [{ step: 'ff', task: 'T', ok: true, ageSec: -60 }] });
-    fs.appendFileSync(path.join(badJson, '.quay', 'fan-in-step-trace.jsonl'), '{not json\n', 'utf8');
-    const badField = mk({ stepEnds: [{ step: 'ff', task: 'T', ok: null, ageSec: -60 }] });
-    const noEpoch = mk({ stepEnds: [{ step: 'ff', task: 'T', ok: true, ageSec: -60 }] });
-    const lines = fs.readFileSync(path.join(noEpoch, '.quay', 'fan-in-step-trace.jsonl'), 'utf8').trim().split('\n');
-    fs.writeFileSync(path.join(noEpoch, '.quay', 'fan-in-step-trace.jsonl'), JSON.stringify({ event: 'step-end', step: 'ff', task: 'T', ok: true }) + '\n', 'utf8');
-    assert.ok(lines.length === 1, '夹具自检');
-    const unreadable = mkTargetRoot({ traceAbsent: true });
-    fs.mkdirSync(path.join(unreadable, '.quay', 'fan-in-step-trace.jsonl')); // 同名目录 ⇒ existsSync 真、readFileSync 抛
-    made.push(unreadable);
-    for (const [name, dir, cause, detailKey] of [
-      ['json 坏行', badJson, 'trace-unparseable', 'json-parse-errors=1'],
-      ['ok 非布尔', badField, 'trace-unparseable', 'unreadable-rows=1'],
-      ['无 epoch', noEpoch, 'trace-unparseable', 'unreadable-rows=1'],
-      ['载体是目录', unreadable, 'trace-unreadable', 'fan-in-step-trace.jsonl'],
-    ]) {
-      const f = targetHealthFact(repoRoot, { targetRoot: dir });
-      assert.equal(f.value.verdict, 'not-evaluated', `${name}: ⛔ 不许冒充 healthy`);
-      assert.equal(f.value.cause, cause, `${name}: 成因 ${cause}`);
-      assert.equal(f.value.fanIn, null, `${name}: fanIn 恒 null（0 会与「零失败」同形）`);
-      const d = JSON.stringify(f.value.causeDetail);
-      assert.ok(d.includes(detailKey), `${name}: causeDetail 含 ${detailKey}（实为 ${d}）`);
-    }
+    // 活性是**独立**字段（categorical，⛔ 不压进 verdict）：探针没跑成 ⇒ unknown（⛔ 不是 idle）。
+    assert.equal(probeFail.value.liveness.state, 'unknown', '探针没跑成 ⇒ liveness=unknown（⛔ 不是 idle）');
+    assert.ok(healthy.value.liveness.count >= 1 && healthy.value.liveness.state === 'driving', '有真进程 ⇒ driving；⛔ 与 unknown 不同形');
+    assert.equal(noCarrier.value.liveness.count, 0, '无进程夹具 ⇒ 计数 0（⛔ 与 unknown 不同形）');
+    assert.equal(noCarrier.value.liveness.state, 'idle', '无进程但进程表可读 ⇒ idle（真读数，不是 unknown）');
+    assert.deepEqual(healthy.value.signals, [], 'healthy = 零信号（有进程 ∧ 形状一致）');
+    proc.kill('SIGKILL');
   } finally {
     for (const d of made) fs.rmSync(d, { recursive: true, force: true });
   }
@@ -1474,24 +1482,24 @@ test('AC3: 探针形态读不懂 ⇒ probe-unparseable（⛔ 不把半个对象�
   assert.equal(parseHealthProbe('not json'), null, '非 JSON');
   assert.equal(parseHealthProbe('{"root":"/x"}'), null, '缺 rootPresent/nowMs ⇒ 形态不全即拒');
   assert.equal(parseHealthProbe('{"root":"/x","rootPresent":true,"nowMs":1,"roundRecords":"nope","carriers":{}}'), null, 'roundRecords 非数组即拒');
-  const ok = parseHealthProbe('{"root":"/x","rootPresent":true,"nowMs":1,"roundRecords":[],"carriers":{},"fanInSteps":null}');
-  assert.ok(ok && ok.fanInSteps === null, '形态齐全才收（fanInSteps:null = 载体缺失，⛔ 与 [] 不同形）');
+  assert.equal(parseHealthProbe('{"root":"/x","rootPresent":true,"nowMs":1,"roundRecords":[],"carriers":null}'), null, 'carriers 非对象即拒');
+  const ok = parseHealthProbe('{"root":"/x","rootPresent":true,"nowMs":1,"roundRecords":[],"carriers":{}}');
+  assert.ok(ok && ok.driverProcesses === null, '形态齐全才收；driverProcesses:null 与「零个进程」不同形（后者是 {count:0}）');
 });
 
 // ── AC4：版本一致性读数（目标项目配置形状 vs 交付物 plugin 版本，并排 + 可机械检出不等）───────────
 
 test('AC4: pluginVersion 与交付物 plugin 版本并排出现，不等可机械检出（含 equal:null 的第三态）', () => {
-  const delivered = readDeliveredPluginVersion(repoRoot);
-  assert.ok(typeof delivered === 'string' && delivered !== '', '交付物版本可读（本仓 plugin/.claude-plugin/plugin.json）');
-  const same = mkTargetRoot({ pluginVersion: delivered });
+  assert.ok(typeof DELIVERED_VERSION === 'string' && DELIVERED_VERSION !== '', '交付物版本可读（本仓 plugin/.claude-plugin/plugin.json）');
+  const same = mkTargetRoot({ pluginVersion: DELIVERED_VERSION });
   const stale = mkTargetRoot({ pluginVersion: '0.0.1-stale' });
   const absent = mkTargetRoot({ initStateAbsent: true });
   try {
     const a = targetHealthFact(repoRoot, { targetRoot: same });
     const b = targetHealthFact(repoRoot, { targetRoot: stale });
     const c = targetHealthFact(repoRoot, { targetRoot: absent });
-    assert.equal(a.value.pluginVersion.target, delivered, '目标侧 pluginVersion 读出（quay-init-state.json）');
-    assert.equal(a.value.pluginVersion.delivered, delivered, '交付侧并排出现');
+    assert.equal(a.value.pluginVersion.target, DELIVERED_VERSION, '目标侧 pluginVersion 读出（quay-init-state.json）');
+    assert.equal(a.value.pluginVersion.delivered, DELIVERED_VERSION, '交付侧并排出现');
     assert.equal(a.value.pluginVersion.equal, true, '相等态');
     assert.equal(b.value.pluginVersion.equal, false, '不等态可机械检出（AC4 的核心）');
     assert.equal(c.value.pluginVersion.equal, null, '一侧读不到 ⇒ null（⛔ 不与 true 同形，硬规则 3b）');
@@ -1527,13 +1535,14 @@ test('接线: drivers.yml 声明被驱动系统绑定 ⇒ 生产路径解析出�
   } else {
     assert.ok(argv.includes(declared.root), '本机目标 ⇒ 直接本地读');
   }
-  // 覆盖语义：显式 targetRoot 优先于 drivers.yml（否则「测 A 却探到 B」）。
-  assert.equal(resolveTargetBinding(repoRoot, { root: '/tmp/x' }).root, '/tmp/x', '显式覆盖优先');
+  // 覆盖语义：显式覆盖是**整体性**的（⛔ 不与 drivers.yml 逐键混搭 —— 那会让「只指定本地夹具 root」
+  // 变成「拿声明的 host 去 ssh 生产机」，测试缝静默打到真机）。
+  assert.deepEqual(resolveTargetBinding(repoRoot, { root: '/tmp/x' }), { host: null, root: '/tmp/x' }, '只覆盖 root ⇒ host 归零（本机）');
   assert.equal(resolveTargetBinding(repoRoot, {}).root, declared.root, '未覆盖 ⇒ 用声明值');
   assert.equal(resolveTargetBinding(repoRoot, { root: '' }).root, null, '显式空串 = 本次运行不绑目标（⇒ not-evaluated）');
 });
 
-test('接线: drivers.yml 缺失/无 target_* ⇒ 未声明目标（⛔ 不起任何进程，也不报 0）', () => {
+test('接线: drivers.yml 缺失/无 target_* ⇒ 未声明目标（⛔ 不起任何进程，也不报「健康」）', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-target-nodecl-'));
   try {
     assert.deepEqual(declaredTargetBinding(tmp), { host: null, root: null }, '无 drivers.yml ⇒ 未声明');
@@ -1552,9 +1561,9 @@ test('接线: drivers.yml 缺失/无 target_* ⇒ 未声明目标（⛔ 不起�
 
 test('deriveTargetHealth 是纯函数三态：probe 失败 ⇒ 独立取值，⛔ 不与 healthy 同形', () => {
   const binding = { host: null, root: '/tmp/x' };
-  const v = deriveTargetHealth(binding, { ok: false, cause: 'probe-failed', detail: ['exit=255'] }, { windowSec: 60, deliveredPluginVersion: null });
+  const v = deriveTargetHealth(binding, { ok: false, cause: 'probe-failed', detail: ['exit=255'] }, null);
   assert.equal(v.verdict, 'not-evaluated');
-  assert.equal(v.fanIn, null, '⛔ 不是 {failed:0}');
+  assert.equal(v.signals, null, '⛔ 不是 []');
   assert.equal(v.cause, 'probe-failed');
   assert.equal(v.liveness.state, 'unknown', '⛔ unknown ≠ idle');
 });
