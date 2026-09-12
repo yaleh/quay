@@ -21,7 +21,14 @@ import {
   docCheckCommandFor,
   resolveScopedGateCommand,
   defaultMechanicalSuiteCommand,
+  // gap-verification-round-bound-to-quay-shaped-suite-entry：第三方路径（suite 委托 loop.test_command）
+  // 的 verification-round 入账判定 + 补写（复用 shared writer，⛔ 不新造第三个 writer）。
+  suiteRunsOutsideRunner,
+  appendDelegatedSuiteRound,
 } from "../scripts/worker-driver.ts";
+// /tests 页自己的读者（同一载体 verification-round.jsonl 的读面）——「web 面能看到这一轮」的机器判定面，
+// 与写面同源、⛔ 不在测试里另写一个 JSON.parse 假装读者（硬规则 5b：写面修了读面也要走同一实现的判据）。
+import { readTests } from "../../packages/quay/src/observation.ts";
 
 /** 写文件（mkdir -p 父目录）。 */
 function writeFile(p, content) {
@@ -119,4 +126,83 @@ test("反向负控制 — 本仓库面三步与迁移前逐字一致（真跑，
   assert.ok(suiteCmd.includes("--log-file") && suiteCmd.includes("/tmp/fan-in-suite-gap-cap-deg.log"), "suite 带 --log-file <suiteLogFile>");
   assert.ok(suiteCmd.includes("--run-id") && suiteCmd.includes("mfi-gap-cap-deg-1788022868-abc123"), "suite 带 --run-id <runId>");
   assert.ok(!suiteCmd.some((a) => a.includes("scripts/test.sh")), "⛔ 不得平行跑 scripts/test.sh harness");
+});
+
+// ── gap-verification-round-bound-to-quay-shaped-suite-entry ──────────────────────────────────────────
+// 台账写入与「suite 由谁跑」解耦：第三方项目（suite 由自己的 loop.test_command 跑 ⇒ 不经
+// full-suite-runner）也必须产生 verification-round 行，否则 /tests 卡片恒显示「未接入」（质量门生效、
+// 可观测面失效）。判据与写面【同源】：suiteRunsOutsideRunner（hasTestSh + readLoopTestCommand，与
+// defaultMechanicalSuiteCommand / resolveScopedGateCommand 同一对谓词）。
+
+test("正向 — 第三方路径判据：suite 不经 full-suite-runner ⇒ 台账须由本层补写（半初始化形态可区分）", (t) => {
+  const wt = fs.mkdtempSync(path.join(os.tmpdir(), "capdeg-vr-third-party-"));
+  t.after(() => fs.rmSync(wt, { recursive: true, force: true }));
+  writeFile(path.join(wt, ".quay", "config.yml"), "loop:\n  test_command: node --test\n");
+  assert.equal(suiteRunsOutsideRunner(wt), true, "无 scripts/test.sh + 有 loop.test_command ⇒ 本层负责入账");
+
+  // 半初始化（两者皆无）：没有 suite 可跑（命令是 fail-closed 的「无测试能力」exit 2）⇒ 没有「一轮
+  // suite」可入账（⛔ 不与「第三方路径」同形，硬规则 3b 三态可分）。
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), "capdeg-vr-bare-"));
+  t.after(() => fs.rmSync(bare, { recursive: true, force: true }));
+  assert.equal(suiteRunsOutsideRunner(bare), false, "两者皆无 ⇒ 无 suite 可跑，无轮可入账");
+});
+
+test("正向 — appendDelegatedSuiteRound 追加真记录，且 /tests 的读者能看见它（⛔ 不以文件存在为证据）", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "capdeg-vr-root-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const ledger = path.join(root, ".quay", "verification-round.jsonl");
+  // 前置 = 【缺陷现场】：载体不存在 ⇒ 读者报「未接入」。⚠️ 读面 readTests 有 30s TTL 缓存（per root，
+  // 见 observation.ts VERIFICATION_ROUND_CACHE_TTL_MS）——所以「读前」不先调它（先调会把 empty 缓存住，
+  // 追加后仍读回 empty，测出来的是缓存不是判据）；只断言载体不存在，读面在追加后调用一次。
+  assert.equal(fs.existsSync(ledger), false, "前置：载体尚不存在（正是缺陷现场）");
+
+  const commit = "a".repeat(40);
+  const r1 = appendDelegatedSuiteRound({
+    task: "TASK-88", runId: "mfi-TASK-88-1789210598105-e1ddad", root, commit,
+    startedAt: "2026-09-12T10:56:38.000Z", durationMs: 271332, state: "green",
+    suiteLog: "/nonexistent/suite.log",
+  });
+  assert.deepEqual(r1, { ok: true, reason: null }, "追加成功");
+
+  const rec = JSON.parse(fs.readFileSync(ledger, "utf8").trim());
+  assert.equal(rec.taskId, "TASK-88", "taskId = 本轮 fan-in 的任务");
+  assert.equal(rec.runId, "mfi-TASK-88-1789210598105-e1ddad", "runId = 本轮 fan-in 的 per-suite runId");
+  assert.equal(rec.commit, commit, "commit = suite_head");
+  assert.equal(rec.state, "green", "state 由调用方按 suite 结果给");
+  assert.equal(rec.preverified, false, "preverified=false：suite 确在本轮 fan-in 内真跑（⛔ 非复用 capture）");
+  assert.equal(rec.runner, "inner", "runner=inner（与同轮 full-suite-state 镜像同源）");
+  assert.equal(rec.scope, "worktree", "scope=worktree");
+  assert.equal(rec.cpu_time_s, null, "cpu_time_s 显式 null（第三方路径未测 CPU，⛔ 不写 0 冒充测得）");
+  assert.equal(rec.cpu_source, "not-wired", "cpu_source 带出处");
+  assert.equal(rec.round, 1, "round 从 1 起");
+
+  // 读面：/tests 的读者（serve-tests.ts 用的同一个 readTests）不再报「未接入」，且拿到这一轮。
+  const tests = readTests(root);
+  assert.equal(tests.status, "ok", "读者状态 = ok（⛔ 不再 empty/未接入）");
+  assert.equal(tests.runs.length, 1, "读者看到 1 轮");
+  assert.equal(tests.runs[0].runId, "mfi-TASK-88-1789210598105-e1ddad", "读者看到的是这一轮的 runId");
+  assert.equal(tests.runs[0].state, "green", "读者看到绿轮");
+
+  // append-only + 红轮同样入账（「跑了且红」必须与「没跑过」可分）。
+  const r2 = appendDelegatedSuiteRound({
+    task: "TASK-88", runId: "mfi-TASK-88-1789210999999-ffffff", root, commit,
+    startedAt: "2026-09-12T11:00:00.000Z", durationMs: 1000, state: "red",
+    suiteLog: "/nonexistent/suite.log",
+  });
+  assert.equal(r2.ok, true, "红轮同样入账");
+  const lines = fs.readFileSync(ledger, "utf8").trim().split("\n");
+  assert.equal(lines.length, 2, "append-only：两轮两行（⛔ 不覆盖）");
+  assert.equal(JSON.parse(lines[1]).round, 2, "第二轮 round=2");
+  assert.equal(JSON.parse(lines[1]).state, "red", "第二轮 state=red");
+});
+
+test("反向负控制 — 本仓库形态（有 scripts/test.sh）⇒ 新增写入者不在该路径上（runner 是唯一 writer）", (t) => {
+  const wt = fs.mkdtempSync(path.join(os.tmpdir(), "capdeg-vr-quay-"));
+  t.after(() => fs.rmSync(wt, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(wt, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(wt, "scripts", "test.sh"), "#!/usr/bin/env bash\nexit 0\n", "utf8");
+  // 即使 .quay/config.yml 同时带 test_command（本仓库并不带），有 scripts/test.sh ⇒ suite 仍走
+  // full-suite-runner（defaultMechanicalSuiteCommand 的分支次序）⇒ 台账由 runner 写，本层不得再写。
+  writeFile(path.join(wt, ".quay", "config.yml"), "loop:\n  test_command: node --test\n");
+  assert.equal(suiteRunsOutsideRunner(wt), false, "有 scripts/test.sh ⇒ 本层不补写（⛔ 不双写）");
 });
