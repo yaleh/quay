@@ -1312,7 +1312,7 @@ selfcheck_complete_change_transport() {
 
   # ① 正控制：一条同时含代码面与文档面的并集
   cat > "${tmp}/ev-ac249.jsonl" <<'EVID'
-{"build_sha":"0123456789abcdef0123456789abcdef01234567","ts":"2026-09-12T00:00:00Z","ac":"GOAL-016-AC-249","host":"instance-20221019-1509","project_root":"/home/yale/work/archguard","task_id":"TASK-89","commit_files":["scripts/check-adr.ts","tests/unit/scripts/check-adr.test.ts","quay-adr/ADR-007.md","tasks/TASK-89.md"]}
+{"build_sha":"0123456789abcdef0123456789abcdef01234567","ts":"2026-09-12T00:00:00Z","ac":"GOAL-016-AC-249","host":"instance-20221019-1509","project_root":"/home/yale/work/archguard","task_id":"TASK-89","commit_files":["scripts/check-adr.ts","tests/unit/scripts/check-adr.test.ts","quay-adr/ADR-007.md"]}
 EVID
   if ! out="$(transport_evidence_append "${carrier}" "${tmp}/ev-ac249.jsonl")"; then rc=1; fi
   echo "selfcheck-complete-change-transport: positive append → ${out}"
@@ -1392,7 +1392,7 @@ for line in open(sys.argv[1], encoding="utf-8"):
     r = json.loads(line)
     if r.get("ac") != "GOAL-016-AC-249":
         continue
-    cf = ["quay-adr/ADR-007.md", "tasks/TASK-89.md"]
+    cf = ["quay-adr/ADR-007.md", "docs/notes.md"]
     ok = (any(str(x).startswith(("src/", "scripts/")) for x in cf)
           and any(("ADR-007" in str(x)) or str(x).startswith("docs/adr") for x in cf))
 print("0" if ok else "1")

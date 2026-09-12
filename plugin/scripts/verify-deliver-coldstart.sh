@@ -472,6 +472,7 @@ AC249_OUTCOME=""                             # ok | incomplete-change:<side> | n
 AC249_EVALUATED=0                            # 1 = 并集读出且两侧谓词都成立并已写出记录
 AC249_WRITTEN_THIS_RUN=0                     # 1 = 本次运行写出了 AC-249 记录
 AC249_WRITTEN_ROOT=""
+AC249_SPAN_STATE=""                          # D 来源的区间状态（留档：span/too-long/not-an-ancestor/unreadable）
 
 # ── ⑩ AC-250（GOAL-016 观察面）：CLI 旋钮 ──────────────────────────────────────────────────
 # ⚠️ 这些【必须】在参数解析【之前】声明：解析循环上面写的是 `VAR=1`/`VAR="$2"`，而本文件的
@@ -5213,12 +5214,51 @@ ac249_is_adr_doc_path() { case "$1" in *ADR-007*|docs/adr*) return 0 ;; esac; re
 #   A) `task/<task_id>` 分支上、不在 develop 里的提交 —— 分支尚未被回收时的主来源；
 #   B) 触及 `tasks/<task_id>.md` 的提交 —— fan-in 后分支被删时的补齐（任务文件是【位置】锚）；
 #   C) 合并提交（它触及了 `tasks/<task_id>.md`）的右臂 `m^1..m^2` —— 分支被合并掉、merge 提交仍在的形态。
+#   D) **任务文件的【存在区间】**：从【首次触及该任务文件】的提交到【最后一次触及】的提交之间的提交。
+#      ⚠️ 这条不是锦上添花，是【生产常见形态的必需项】：fan-in 走 `merge --ff-only` 把任务分支落到
+#      develop 上（线性推进），随后 worktree/branch 会被 reaper 回收 ⇒ 那时 A) 读不到任何东西，而
+#      B) 只抓得到【触及任务文件】的提交 —— 而**实现提交本身不触及任务文件**（实测 TASK-88：两个实现
+#      提交 `eeadae3a`/`886f40f4` 都不动 `tasks/TASK-88.md`）⇒ 只剩 `tasks/<id>.md` 一条，判据恒红。
+#      区间两端都以任务文件为锚（位置），中间的提交正是该分支以 ff 落入 develop 的那一段。
+#      ⛔ 区间有上界（沿用本文件既有的 50 步先例）：超出 ⇒ 该来源【不贡献】并如实留档区间长度，
+#      而不是把整段历史吞进来（否则一个被远期提交顺手改过的任务文件会把上千提交算成「它的改动」，
+#      并集趋于恒真——那正是本任务要防的恒假的反面）。
 # ⛔ 一律 `--no-merges`：merge 提交上 `git show --name-only` 输出为空 ⇒ 会把「任务明明改了代码」
 #    读成空并集（硬规则 3b：读不懂输入 ⇒ 伪装成没改）——Plan 的「已知陷阱」第一条。
+AC249_SPAN_LIMIT=50                          # D) 区间上界（步数；沿用 AC248_PRE_REV_SPAN 的同一先例）
+# 区间状态（D 的来源分类）——【单独成函数】是为了让「区间怎么算」只有一处定义：并集函数与记录里
+# 的留档字段都调它（⛔ 不复刻一遍判定，硬规则 4 推论三）。打印 "<verdict> <span> <from>"，
+# 其中 <from> 是区间的下界（⛔ 不是 first_touch 自己 —— 区间要【含】它）：
+#   span <n> <rev> | too-long <n> <rev> | not-an-ancestor 0 - | unreadable 0 -
+# ⚠️ <rev> 用 `first_touch^`；first_touch 是【根提交】时它不存在（一个全新项目的首个任务就是这种
+#    形态）⇒ 下界记为 `-`，计数与并集都把 first_touch 自己单独补回来（⛔ 不能因为下界不存在就把
+#    整个区间读成空 —— 那正是硬规则 3b 的「读不懂输入 ⇒ 伪装成没有」）。
+ac249_span_state() {
+  local root="$1" task_id="$2" first_touch last_touch span from=""
+  [ -n "$root" ] && [ -n "$task_id" ] || { printf 'unreadable 0 -\n'; return 0; }
+  first_touch="$(git -C "$root" log --no-merges --all --reverse --format='%H' -- "tasks/$task_id.md" 2>/dev/null | head -1 || true)"
+  last_touch="$(git -C "$root" log --no-merges --all --format='%H' -- "tasks/$task_id.md" 2>/dev/null | head -1 || true)"
+  [ -n "$first_touch" ] && [ -n "$last_touch" ] || { printf 'unreadable 0 -\n'; return 0; }
+  if ! git -C "$root" merge-base --is-ancestor "$first_touch" "$last_touch" 2>/dev/null; then
+    printf 'not-an-ancestor 0 -\n'; return 0
+  fi
+  if git -C "$root" rev-parse --verify --quiet "${first_touch}^" >/dev/null 2>&1; then
+    from="${first_touch}^"
+    span="$(git -C "$root" rev-list --count --no-merges "${from}..${last_touch}" 2>/dev/null || true)"
+  else
+    span="$(git -C "$root" rev-list --count --no-merges "${first_touch}..${last_touch}" 2>/dev/null || true)"
+    case "$span" in ''|*[!0-9]*) span=0 ;; esac
+    span=$((span + 1))
+  fi
+  case "$span" in ''|*[!0-9]*) span=0 ;; esac
+  if [ "$span" -le "$AC249_SPAN_LIMIT" ]; then printf 'span %s %s\n' "$span" "${from:--}"; else printf 'too-long %s %s\n' "$span" "${from:--}"; fi
+}
+
 ac249_union_commit_shas() {
-  local root="$1" task_id="$2" branch base m
+  local root="$1" task_id="$2" branch base m first_touch last_touch span verdict from
   [ -n "$root" ] && [ -n "$task_id" ] || return 1
   branch="task/$task_id"
+  AC249_SPAN_SOURCE="unreadable"
   {
     # A) 任务分支上、不在 develop 里的提交（fan-in 前 / 分支尚未被回收）
     if git -C "$root" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1; then
@@ -5236,6 +5276,20 @@ ac249_union_commit_shas() {
       [ -n "$m" ] || continue
       git -C "$root" log --no-merges --format='%H' "${m}^1..${m}^2" 2>/dev/null || true
     done < <(git -C "$root" log --merges --all --format='%H' -- "tasks/$task_id.md" 2>/dev/null || true)
+    # D) 任务文件的存在区间（两端都以任务文件为锚）。区间怎么算【只有一处定义】：ac249_span_state。
+    span="$(ac249_span_state "$root" "$task_id")"
+    set -- $span
+    verdict="$1"; from="$3"
+    if [ "$verdict" = "span" ]; then
+      last_touch="$(git -C "$root" log --no-merges --all --format='%H' -- "tasks/$task_id.md" 2>/dev/null | head -1 || true)"
+      if [ "$from" != "-" ]; then
+        git -C "$root" log --no-merges --format='%H' "${from}..${last_touch}" 2>/dev/null || true
+      else
+        first_touch="$(git -C "$root" log --no-merges --all --reverse --format='%H' -- "tasks/$task_id.md" 2>/dev/null | head -1 || true)"
+        [ -n "$first_touch" ] && printf '%s\n' "$first_touch"
+        git -C "$root" log --no-merges --format='%H' "${first_touch}..${last_touch}" 2>/dev/null || true
+      fi
+    fi
   } | awk 'NF && !seen[$0]++'
 }
 
@@ -5333,6 +5387,8 @@ step_ac249_complete_change() {
   [ "${#_ac249_doc[@]}" -gt 0 ] && printf -v doc_list '%s\n' "${_ac249_doc[@]}"
   AC249_CODE_HITS="$code_list"
   AC249_DOC_HITS="$doc_list"
+  AC249_SPAN_STATE="$(ac249_span_state "$root" "$AC249_TASK_ID")"
+  echo "  [⑨b] 任务文件存在区间（来源 D，两端以任务文件为锚）: ${AC249_SPAN_STATE} (span | too-long:<n> | not-an-ancestor | unreadable；超出上界 ${AC249_SPAN_LIMIT} ⇒ 该来源不贡献，fail-CLOSED)"
   echo "  [⑨b] 并集来源提交数=${#_ac249_shas[@]}（按位置：task/$AC249_TASK_ID 分支 ∪ 触及 tasks/$AC249_TASK_ID.md 的提交 ∪ 其 merge 右臂；⛔ 不是「最新一条提交」）"
   echo "  [⑨b] 并集文件数=${#_ac249_files[@]}: $("$VC_NODE" --no-warnings -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' "${_ac249_files[@]}" 2>/dev/null || true)"
   echo "  [⑨b] 代码面命中（src/|scripts/ 前缀）计入 ${#_ac249_code[@]} 条；前 3 条实际内容（引用计数前先打印命中原文，硬规则 2）:"

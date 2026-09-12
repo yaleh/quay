@@ -35,7 +35,7 @@
 // Run:
 //   node --test plugin/test/ac249-complete-change-record.test.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -176,10 +176,18 @@ function runBash(fnNames, body, env = {}) {
 const UNION_FNS = ["ac207_commit_files", "ac207_select_implementation_commit", "ac207_is_bookkeeping_commit",
   "ac249_is_code_path", "ac249_is_adr_doc_path", "ac249_union_commit_shas", "ac249_union_files"];
 
+// Every temp dir this file creates is registered here and removed by ONE `after()` hook — the
+// static isolation check (R6 mkdtemp-no-cleanup) traces mkdtemp results to a cleanup path, and a
+// value RETURNED inside an object literal is not traceable; the documented carrier-array pattern
+// (`_createdDirs` + `after(() => … rmSync)`) is.
+const TMP_DIRS = [];
+after(() => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); });
+
 /** A real temp git repo: registration on develop, then a code commit FIRST and a doc commit LAST on
  *  `task/T-1` (the shape that makes a "newest commit only" selector see HALF a complete change). */
 function makeRepo({ code = true, doc = true, dotSlash = false } = {}) {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), "ac249-repo-"));
+  TMP_DIRS.push(d);
   const git = (...a) => {
     const r = spawnSync("git", ["-C", d, ...a], { encoding: "utf8" });
     assert.equal(r.status, 0, `git ${a.join(" ")} failed: ${r.stderr}`);
@@ -202,7 +210,24 @@ function makeRepo({ code = true, doc = true, dotSlash = false } = {}) {
     git("add", "-A"); git("commit", "-qm", "docs: doc side last");
   }
   git("checkout", "-q", "develop");
-  return { dir: d, dotSlash };
+  return { dir: d, git: (...a) => git(...a) };
+}
+
+/** The POST-FAN-IN shape: `merge --ff-only` the task branch into develop, then delete the branch —
+ *  exactly what the reaper leaves behind. The implementation commits are still in develop's history,
+ *  but they do NOT touch `tasks/T-1.md`, so the task-file-only anchors cannot see them; only the
+ *  task-file EXISTENCE SPAN (registration → the driver's 翻-done bookkeeping commit) recovers them. */
+function reapBranch(repo) {
+  repo.git("checkout", "-q", "develop");
+  repo.git("merge", "-q", "--ff-only", "task/T-1");
+  repo.git("branch", "-D", "task/T-1");
+}
+
+/** The driver's landing bookkeeping commit — it TOUCHES the task file, so it is the span's right end. */
+function finalize(repo, taskFile = "tasks/T-1.md") {
+  fs.appendFileSync(path.join(repo.dir, taskFile), "\ndone\n");
+  repo.git("add", "-A");
+  repo.git("commit", "-qm", "tasks: 翻 T-1 done（driver 机械 fan-in）");
 }
 
 test("① the goal's criterion fields are ALL emitted by write_ac249_record (parity + negative control)", () => {
@@ -362,4 +387,47 @@ test("④b the STEP is positioned on the union and never uses the single-commit 
   const unionBody = bashFunctionSource(fs.readFileSync(SCRIPT, "utf8"), "ac249_union_commit_shas");
   assert.ok(unionBody.includes("--no-merges"),
     "the union must exclude merge commits — a merge commit's `git show --name-only` is empty");
+});
+
+test("③b the SPAN source recovers the union AFTER the task branch is reaped (the post-fan-in shape)", () => {
+  // ⚠️ This is the shape the AC is actually measured in: fan-in ff-merges the task branch into
+  // develop and the reaper deletes the branch. At that moment the branch source (A) yields NOTHING,
+  // and the task-file source (B) yields only `tasks/T-1.md` — because the implementation commits do
+  // NOT touch the task file. Without the span source the union would collapse to a one-file list and
+  // the AC would read a fully qualified task as INCOMPLETE forever (硬规则 4c: the quantity the
+  // criterion names cannot be reached through a layer that drops it).
+  const repo = makeRepo();
+  reapBranch(repo);
+  finalize(repo);
+  const union = runBash(UNION_FNS,
+    `mapfile -t F < <(ac249_union_files '${repo.dir}' T-1); printf '%s\\n' "\${F[@]}"`);
+  const files = union.stdout.trim().split("\n").filter(Boolean).sort();
+  assert.deepEqual(files, ["quay-adr/ADR-007.md", "src/a.ts", "tasks/T-1.md"].sort(),
+    "after the branch is reaped the union must STILL carry both sides (via the task-file existence span)");
+  const span = runBash(UNION_FNS, `ac249_span_state '${repo.dir}' T-1`);
+  assert.match(span.stdout.trim(), /^span [45] (-|[0-9a-f]{40})$/,
+    "the span source must be the one that fired (registration → 翻-done), and it must be within the bound");
+});
+
+test("③c the span source FAILS CLOSED past its bound instead of swallowing history", () => {
+  // A task file touched once at creation and again many commits later would otherwise pull an
+  // arbitrary slice of history into "this task's changes" — a union that makes the criterion
+  // near-unfalsifiable. Past the bound the span source contributes NOTHING (it does not error the
+  // whole step: A/B/C still stand).
+  const repo = makeRepo();
+  reapBranch(repo);
+  for (let i = 0; i < 55; i++) {
+    fs.writeFileSync(path.join(repo.dir, `noise-${i}.txt`), `${i}\n`);
+    repo.git("add", "-A");
+    repo.git("commit", "-qm", `chore: noise ${i}`);
+  }
+  finalize(repo);
+  const span = runBash(UNION_FNS, `ac249_span_state '${repo.dir}' T-1`);
+  assert.match(span.stdout.trim(), /^too-long \d+ (-|[0-9a-f]{40})$/,
+    "past the bound the span source must report too-long and contribute nothing");
+  const union = runBash(UNION_FNS,
+    `mapfile -t F < <(ac249_union_files '${repo.dir}' T-1); printf '%s\\n' "\${F[@]}"`);
+  const files = union.stdout.trim().split("\n").filter(Boolean);
+  assert.deepEqual(files, ["tasks/T-1.md"],
+    "…so the union falls back to the task-file anchor alone (a fail-CLOSED reading, never a false green)");
 });
