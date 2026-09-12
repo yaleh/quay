@@ -29,6 +29,24 @@
 //   AC3 — an unreadable SPEC ⇒ L1_NOT_EVALUATED=1 and L1_OK≠1 (未评估 ≠ 合格, 硬规则 3b).
 //   This file uses node:test and declares // @test-group lowconc (AC5 of the mechanism task).
 //
+//   gap-ac-record-schema-duplicated-between-criterion-and-writer (2026-09-12) — the carrier-record
+//   field list becomes a SINGLE declarative source (AC_RECORD_SCHEMA) enforced at the one write
+//   choke point; the criterion side stays the oracle:
+//   AC1 — `--ac-record-schema-report` prints the per-AC three-way diff (criterion / declared schema
+//         / writer-emitted, all extracted POSITIONALLY — the criterion via yaml+AST scoped by its
+//         `r.get("ac")!=…` guard, which is what keeps AC-239's AC-238 branch from being attributed
+//         to AC-239) and exits non-zero on a hard diff; and it can take FALSE both ways (a dropped
+//         field ⇒ DRIFT naming it; a dropped whole row ⇒ caught by the producer-side unregistered
+//         reverse lookup, without which a row-driven report prints all-green).
+//   AC2 — a brand-new AC yields a valid record from ONE declaration row + the generic
+//         write_ac_record, with NO new write_acNNN_record function.
+//   AC3 — the omission is caught AT PRODUCTION TIME (⛔ not "the criterion exits 1" — that is the
+//         status quo): refused, nothing written, the missing field named; completed ⇒ one record.
+//   AC4 — after the record lands the criterion is re-run automatically, its exit code recorded, and
+//         "appended but still red" loudly reported (⛔ never silently treated as success).
+//   AC5 — GOAL-016 AC-247/248/249/250 keep their real field sets, each declared field individually
+//         enforced at write time (omitting any one is refused).
+//
 // Run:
 //   scripts/test.sh plugin/test/verify-deliver-coldstart.test.mjs
 //   node --test plugin/test/verify-deliver-coldstart.test.mjs
@@ -529,11 +547,19 @@ test("AC5 — every AC-214 NEED ac's write point carries a freshness anchor (mec
   // A record PRODUCER appends to the carrier: either the shared anchor helper, or a printf redirected
   // into the AC89 carrier. A selfcheck assertion (`grep -q '"ac":"…"'`) matches the ac field but is
   // not a producer, so it is excluded by position — not by a keyword.
+  // Three producer forms: the shared anchor helper (a), a printf redirected into the carrier (b), and
+  // the write choke point ac_record_append_fragment (c — gap-ac-record-schema-duplicated-between-
+  // criterion-and-writer rerouted the printf-style writers through it so the field list is validated
+  // at production time). (c) does NOT inject an anchor by itself, so it must still spell `build_sha`
+  // in its fragment — that is what isAnchored below checks.
   const isProducer = (s) =>
-    s.includes("ac89_append_goal009") || />>\s*"\$\{?[Aa][Cc]89\}?"/.test(s);
-  // The anchor is a TOP-LEVEL build_sha on the produced record: the helper adds it (form a), or the
-  // printf spells it (form b).
-  const isAnchored = (s) => s.includes("ac89_append_goal009") || /"build_sha"\s*:/.test(s);
+    s.includes("ac89_append_goal009") || s.includes("ac_record_append_fragment") ||
+    />>\s*"\$\{?[Aa][Cc]89\}?"/.test(s);
+  // The anchor is a TOP-LEVEL build_sha on the produced record: the helper adds it, or the record
+  // fragment spells it. The fragment is passed as an escaped shell string (`\"build_sha\":`), so
+  // unescape before matching — otherwise form (b)/(c) would read as unanchored (a false failure).
+  const isAnchored = (s) =>
+    s.includes("ac89_append_goal009") || /"build_sha"\s*:/.test(s.replace(/\\/g, ""));
 
   const problems = [];
   for (const id of need.ids) {
@@ -618,6 +644,79 @@ test("AC-249 — --selfcheck exercises the complete-change producer's union + bo
   // and the union excludes merge commits (whose `git show --name-only` is empty)
   assert.match(r.stdout, /ac249-writer-anchor-hits=0 writer-single-selector-hits=0 union-no-merges-hits=\d+/,
     "the writer must not carry a build_sha literal nor reach for the single-commit selector; the union must skip merges");
+});
+
+// ── AC 载体记录 schema：单一真源 + 产出时 fail-closed + 落账后复跑（gap-ac-record-schema-…）──────
+// AC1 — the drift report: criterion(判读侧) vs AC_RECORD_SCHEMA(声明) vs writer(实写), all three
+//        positional extractions, printed per AC; a hard diff exits non-zero.
+test("AC1 — --ac-record-schema-report prints the per-AC three-way diff and exits 0 when clean", () => {
+  const r = run(["--ac-record-schema-report"]);
+  assert.equal(r.status, 0, `the report must exit 0 when there is no hard diff:\n${r.stdout}\n${r.stderr}`);
+  // the four GOAL-016 ACs this task migrates must all read clean on all three sides
+  for (const n of [247, 248, 249, 250]) {
+    assert.match(r.stdout, new RegExp(`GOAL-016-AC-${n}\\s+\\[ok\\] criterion=\\d+ schema=\\d+ writer=\\d+`),
+      `AC-${n} must be ok on criterion/schema/writer (the mechanism must carry its real field set)`);
+  }
+  // AC-239's commit_files is a written-but-unread field: reported as surplus (recorded), not a hard diff
+  assert.match(r.stdout, /GOAL-009-AC-239\s+\[surplus\][\s\S]{0,200}多余字段/,
+    "a field that is written but never read must be recorded as surplus, not silently dropped nor failed");
+  // the summary separates the three hard diffs from the benign one — and says what was NOT evaluated
+  assert.match(r.stdout, /missing\(criterion-vs-schema\)=0 missing\(criterion-vs-writer\)=0 missing\(schema-vs-writer\)=0 surplus=\d+ unregistered=0 not-evaluated=0/,
+    "the summary must separate hard diffs from surplus and must expose a not-evaluated count (硬规则 3b)");
+});
+
+// AC2 — single source: a new AC needs ONE declaration row + the generic producer, NOT a new function.
+test("AC2 — a brand-new AC produces a valid record via one declaration row and no new writer function", () => {
+  const r = run(["--selfcheck"]);
+  assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /ac-record-schema\(AC2 new-ac, no new writer fn\) wrote=1 line=\{"build_sha":"[0-9a-f]{40}","ts":"[^"]+","ac":"GOAL-016-AC-999","host":"hostB-fake","project_root":"\/tmp\/p","made_by":"write_ac_record"\}/,
+    "the generic write_ac_record must emit a complete, anchored record for an AC that has ONLY a declaration row");
+});
+
+// AC3 — fail-closed AT PRODUCTION TIME (⛔ not "the criterion exits 1", which is the status quo).
+test("AC3 — a record missing a declared field is refused and writes NOTHING; completed it writes", () => {
+  const r = run(["--selfcheck"]);
+  assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /ac-record-schema\(AC3 missing-field\) refused=1 lines=0→0 \(expect 1\/0→0/,
+    "omitting a declared field must be refused with ZERO lines written — the failure happens at write time");
+  assert.match(r.stdout, /ac-record-schema\(AC3 complete\) accepted=1 lines=0→1 \(expect 1\/0→1/,
+    "the same call with the field present must write exactly one record (so the refusal above is not vacuous)");
+  assert.match(r.stdout, /ac-record-schema\(AC3 message\) 'AC-RECORD-SCHEMA: refusing GOAL-016-AC-249 record — host \(MISSING\)/,
+    "the refusal must NAME the missing field — otherwise the operator is back to debugging a red criterion");
+  assert.match(r.stdout, /ac-record-schema\(AC3 unregistered-ac\) refused=1 lines=1→1/,
+    "an ac with no declaration row must be refused — that is what makes 'one declaration row' the price of a new AC");
+});
+
+// AC4 — after a record lands, the criterion is re-run automatically; its exit code is recorded, and a
+// red criterion is REPORTED (⛔ never silently treated as success).
+test("AC4 — the criterion is re-run after the append, and 'appended but still red' is reported", () => {
+  const r = run(["--selfcheck"]);
+  assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /ac-record-rerun\(after-append, criterion-green\) wrote=1 rerun_rc=0 loud=0 rerun_records=1/,
+    "a green criterion must be re-run automatically and its rc=0 recorded, with no false alarm");
+  assert.match(r.stdout, /ac-record-rerun\(appended-but-criterion-red\) wrote=1 rerun_rc=1 loud=1 rerun_records=1/,
+    "an appended record whose criterion still exits 1 must record rc=1 AND be reported loudly (⛔ 不静默当成功)");
+});
+
+// AC5 — the four GOAL-016 field sets are carried: every declared field is enforced individually.
+test("AC5 — every declared field of AC-247/248/249/250 is enforced at write time", () => {
+  const r = run(["--selfcheck"]);
+  assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
+  const declared = { 247: 7, 248: 11, 249: 4, 250: 10 };
+  for (const [n, w] of Object.entries(declared)) {
+    assert.match(r.stdout, new RegExp(`ac-record-schema\\(AC5 GOAL-016-AC-${n}\\) declared=${w} accepted=1 omitted\\('host'\\)_refused=yes`),
+      `AC-${n}'s declared field set (${w} fields) must be individually enforced — omitting one is refused`);
+  }
+});
+
+// AC1 falsifiability — the report must be able to take FALSE, in both of its blind spots.
+test("AC1 — the drift report can take false (dropped field ⇒ DRIFT; dropped row ⇒ unregistered)", () => {
+  const r = run(["--selfcheck"]);
+  assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /ac-record-schema\(AC1 drop-a-criterion-field\) rc=1 drift-line=1 names-field=1/,
+    "dropping a criterion-read field from the declaration must flip the report to DRIFT and name the field");
+  assert.match(r.stdout, /ac-record-schema\(AC1 whole-row-removed\) rc=1 unregistered=1/,
+    "removing a whole declaration row makes the AC vanish from a row-driven report — the producer-side reverse lookup must catch it");
 });
 
 test("AC-249 — the step is wired into the opt-in chain and shares AC-248's --target-root/--task-id", () => {

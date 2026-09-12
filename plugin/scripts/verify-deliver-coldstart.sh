@@ -65,7 +65,7 @@
 #       [--test-command <cmd>] [--tmux-session <sess>] \
 #       [--wait <s>] [--liveness-window <min>] \
 #       [--skip-cold-start-drive] [--cold-start-drive] [--verify-only] [--require-live] \
-#       [--evidence <path>] [--ac89 <path>] [--host <B|C>] [--spec <path>] [--channel npm-global|marketplace] [--ac205-session] [--ac207-e2e] [--ac239-e2e] [--ac247-takeover --takeover-root <dir>] [--ac248-adr-flip --target-root <dir>] [--ac249-complete-change --target-root <dir> --task-id <id>] [--selfcheck] [--help] \
+#       [--evidence <path>] [--ac89 <path>] [--host <B|C>] [--spec <path>] [--channel npm-global|marketplace] [--ac205-session] [--ac207-e2e] [--ac239-e2e] [--ac247-takeover --takeover-root <dir>] [--ac248-adr-flip --target-root <dir>] [--ac249-complete-change --target-root <dir> --task-id <id>] [--ac-record-schema-report] [--selfcheck] [--help] \
 #       [--target-launcher <l>] [--target-model <m>] [--target-auth <a>] [--driving-profiles <p>]
 #
 #   --build-root <repo> 该次验证【自己】从 <repo> 的 develop-tip 现 build quay+quay-native tgz
@@ -92,7 +92,13 @@
 #                    发 probe，读目标 transcript（transcript-delivery-check.js --check）判 delivered
 #                    ⇒ 写 AC-205 记录（transcript_confirmed=true）。opt-in：需同址 live 目标会话。
 #   --require-live   ③ 若 COLDSTART_LIVE != yes 则 exit 1（严格验证——冷启动确认跑用）。
-#   --selfcheck      全 hermetically 自检（AC2 直接量正/负控制 + L1 闭集解析/未评估正负控制 + AC5 判据正/负控制 + 目标项目 profiles 配置正/负/覆盖控制 + AC161/AC3 段① 零写入正/取假控制 + AC-247 八件读数正/负控制），不碰真实安装。exit 0/1。
+#   --selfcheck      全 hermetically 自检（AC2 直接量正/负控制 + L1 闭集解析/未评估正负控制 + AC5 判据正/负控制 + 目标项目 profiles 配置正/负/覆盖控制 + AC161/AC3 段① 零写入正/取假控制 + AC-247 八件读数正/负控制 + AC 记录 schema 机制的正/负控制），不碰真实安装。exit 0/1。
+#   --ac-record-schema-report
+#                    只打印判读侧 criterion / 产出侧声明 AC_RECORD_SCHEMA / 产出侧实写 writer 三侧的
+#                    两向差集（都按位置机械提取，⛔ 不是 grep 关键词），逐 AC 一行。exit 0=无硬差集；
+#                    1=有硬差集（判据读而声明缺 / 判据读而 writer 不写 / 声明有而 writer 不写）或产出
+#                    侧存在未登记的 AC；3=读不成（缺 goals/、缺 pyyaml、criterion 解析失败）——
+#                    「未评估」是独立取值，⛔ 不与「已核对且无差集」同形（硬规则 3b）。
 #   --ac207-e2e      ⑤ 端到端（GOAL-009-AC-207）：第三方项目里用 shipped CLI 建真实任务、起 *-drivers
 #                    驱动到 done、读直接量写 AC-207 记录。昂贵（worker-driver spawn claude -p）——
 #                    opt-in；缺任一读数不写（fail-closed）。⛔ 产品文档/skill 文案不得声称 quay 会启动会话。
@@ -187,6 +193,8 @@ COLD_START_DRIVE=0          # 默认不驱动（冷启动是 agent 驱动的 ski
 REQUIRE_LIVE=0
 VERIFY_ONLY=0
 DO_SELFCHECK=0
+AC_RECORD_SCHEMA_REPORT=0   # --ac-record-schema-report：只打印「criterion 字段集 vs 产出侧 schema」两向差集，不跑任何验证段
+AC_RECORD_RERUN_RC="not-evaluated"   # 最近一次 ac_record_finalize 的 criterion 复跑退出码（"not-evaluated" = 未复跑，⛔ 不与 0 同形）
 EVIDENCE=""
 AC89=""
 HOST=""                      # AC89 记录的主机字段（B|C，跨主机验证时由驱动方传入）
@@ -542,6 +550,7 @@ while [ $# -gt 0 ]; do
     --ac250-node) AC250_NODE_ARG="$2"; shift 2 ;;
     --ac250-port) AC250_PORT="$2"; shift 2 ;;
     --ac250-window) AC250_WINDOW="$2"; shift 2 ;;
+    --ac-record-schema-report) AC_RECORD_SCHEMA_REPORT=1; shift ;;
     --selfcheck) DO_SELFCHECK=1; shift ;;
     *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -786,9 +795,7 @@ append_ac201_record() {
   AC201_WRITTEN=0
   [ -n "${AC89:-}" ] || return 0
   [ -n "${BUILD_SHA:-}" ] && [ -n "${SHA256_QUAY:-}" ] || return 0
-  mkdir -p "$(dirname "$AC89")"
-  printf '{"ts":"%s","ac":"GOAL-009-AC-201","build_sha":"%s","tgz_sha256":"%s"}\n' \
-    "${TS:-}" "$BUILD_SHA" "$SHA256_QUAY" >> "$AC89"
+  ac_record_append_fragment ",\"ts\":\"${TS:-}\",\"ac\":\"GOAL-009-AC-201\",\"build_sha\":\"$BUILD_SHA\",\"tgz_sha256\":\"$SHA256_QUAY\"" "$AC89" || return 1
   AC201_WRITTEN=1
   return 0
 }
@@ -805,14 +812,22 @@ append_ac201_record() {
 # fail-closed（硬规则 3b）：BUILD_SHA 非 40-hex ⇒ 不写该记录且 return 非 0（缺值≠合格，也≠静默跳过）；
 #   AC89 路径空 ⇒ 不写且 return 非 0。⛔ 不引用已归档零调用的 productization-verification-record.ts/-check.ts。
 ac89_append_goal009() {
-  local fragment="$1"
+  local fragment="$1" ac=""
+  # schema 校验（AC3）：本函数是【所有】GOAL-009/015/016 载体记录的写入 choke point ⇒ 在这里按
+  # AC_RECORD_SCHEMA 查一次，覆盖全部经此落盘的 writer（它们体内不必再各自复述字段清单）。
+  # 缺字段/类型不符/未登记 AC ⇒ 拒写且非 0（硬规则 3b：缺值≠合格，也≠静默跳过）。
+  ac_record_schema_validate_fragment "$fragment" || return 1
   if ! printf '%s' "${BUILD_SHA:-}" | grep -Eq '^[0-9a-f]{40}$'; then
     echo "ac89_append_goal009: BUILD_SHA not 40-hex (got '${BUILD_SHA:-}') — GOAL-009 record NOT written (fail-closed)" >&2
     return 1
   fi
   [ -n "${AC89:-}" ] || { echo "ac89_append_goal009: AC89 path empty — GOAL-009 record NOT written (fail-closed)" >&2; return 1; }
+  ac="$(ac_record_fragment_ac "$fragment" 2>/dev/null)" || ac=""
   mkdir -p "$(dirname "$AC89")"
   printf '{"build_sha":"%s","ts":"%s"%s}\n' "$BUILD_SHA" "${TS:-}" "$fragment" >> "$AC89"
+  # AC4：记录落盘后自动复跑该 AC 的 criterion，退出码落账（⛔ 不以「我拷过了」为准）。
+  ac_record_finalize "$ac" "$AC89"
+  return 0
 }
 
 # ── AC-207 记账提交判定（硬规则 ② 按位置：看【触及的文件】，⛔ 不看提交信息文本）──────────────
@@ -3380,9 +3395,9 @@ write_ac206_record() {
   [ "$tdc" = "1" ] && b_tdc=true
   [ "$gsr" = "1" ] && b_gsr=true
   [ "$tsr" = "1" ] && b_tsr=true
-  mkdir -p "$(dirname "$ac89")"
-  printf '{"ts":"%s","ac":"GOAL-009-AC-206","host":"%s","project_root":"%s","goals_dir_created":%s,"tasks_dir_created":%s,"goal_store_readable":%s,"task_store_readable":%s}\n' \
-    "$ts" "$host" "$project_root" "$b_gdc" "$b_tdc" "$b_gsr" "$b_tsr" >> "$ac89"
+  # 落盘走写入通道的同一 choke point（先按 AC_RECORD_SCHEMA 校验再写）。本函数自补 ts（不经
+  # ac89_append_goal009 的补锚），故走无补锚形；字段清单只在 AC_RECORD_SCHEMA 里声明一份。
+  ac_record_append_fragment ",\"ts\":\"$ts\",\"ac\":\"GOAL-009-AC-206\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"goals_dir_created\":$b_gdc,\"tasks_dir_created\":$b_tdc,\"goal_store_readable\":$b_gsr,\"task_store_readable\":$b_tsr" "$ac89" || return 1
   return 0
 }
 
@@ -3531,9 +3546,7 @@ write_ac204_record() {
   [ -n "$project_root" ] || return 1
   [ "$forbidden_count" = "0" ] || return 1
   [ "$enable_declared" = "1" ] || return 1
-  mkdir -p "$(dirname "$ac89")"
-  printf '{"ts":"%s","ac":"GOAL-009-AC-204","host":"%s","project_root":"%s","forbidden_count":0,"enable_declared":true}\n' \
-    "$ts" "$host" "$project_root" >> "$ac89"
+  ac_record_append_fragment ",\"ts\":\"$ts\",\"ac\":\"GOAL-009-AC-204\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"forbidden_count\":0,\"enable_declared\":true" "$ac89" || return 1
   return 0
 }
 
@@ -3708,9 +3721,7 @@ write_ac234_record() {
   [ "$tasks" -gt 0 ] 2>/dev/null || return 1
   [ "$goals" -gt 0 ] 2>/dev/null || return 1
   [ "$rounds" -gt 0 ] 2>/dev/null || return 1
-  mkdir -p "$(dirname "$ac89")"
-  printf '{"ts":"%s","ac":"GOAL-015-AC-234","host":"%s","project_root":"%s","tasks_rendered":%s,"goals_rendered":%s,"round_records_rendered":%s}\n' \
-    "$ts" "$host" "$project_root" "$tasks" "$goals" "$rounds" >> "$ac89"
+  ac_record_append_fragment ",\"ts\":\"$ts\",\"ac\":\"GOAL-015-AC-234\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"tasks_rendered\":$tasks,\"goals_rendered\":$goals,\"round_records_rendered\":$rounds" "$ac89" || return 1
   return 0
 }
 
@@ -4333,14 +4344,16 @@ FAKE_NPM
   AC89="$g009_file"
   TS="2026-09-09T00:00:00Z"
   BUILD_SHA="0123456789abcdef0123456789abcdef01234567"
-  ac89_append_goal009 ',"ac":"GOAL-009-AC-203","host":"B"'; g15_rc=$?
+  # ⚠️ 片段按 AC_RECORD_SCHEMA 的 AC-203 行【写全】：写入通道现在会先按声明校验（AC3），
+  # 只带 host 的片段今天会被 schema 拒（那是「漏字段」的负控制，另有专门用例），此处要测的是补锚。
+  ac89_append_goal009 ',"ac":"GOAL-009-AC-203","host":"B","project_root":"/tmp/third-party-fake","has_plugin_dir":false,"driver_alive":1,"carrier_records":5'; g15_rc=$?
   g15_pos="$(grep -c '"ac":"GOAL-009-AC-203"' "$g009_file" 2>/dev/null || echo 0)"
   g15_build="$(grep -c '"build_sha":"0123456789abcdef0123456789abcdef01234567"' "$g009_file" 2>/dev/null || echo 0)"
   BUILD_SHA=""
   g16_before="$(wc -l < "$g009_file" 2>/dev/null || echo 0)"
   g16_rc=0
   set +e
-  ac89_append_goal009 ',"ac":"GOAL-009-AC-205","host":"B"'
+  ac89_append_goal009 ',"ac":"GOAL-009-AC-205","host":"B","shipped_from_installed_artifact":true,"transcript_confirmed":true'
   g16_rc=$?
   set -e
   g16_after="$(wc -l < "$g009_file" 2>/dev/null || echo 0)"
@@ -5117,9 +5130,19 @@ AC250NEG
 
   # ⑨b AC-249 的 hermetic 正/负控制独立成一个函数（同上：每条都驱动产品函数，⛔ 不复刻判定逻辑）。
   selfcheck_ac249; ac249_self_ok=$?
+  # ⑨c AC 记录 schema 机制（AC1 可检出 / AC2 单一真源 / AC3 产出时拒 / AC4 落账后复跑 / AC5 承载
+  # GOAL-016 四条）的正/负控制，同样独立成函数、同样只驱动产品函数。
+  # ⚠️ 必须写成 `if F; then x=0; else x=$?; fi` 形，⛔ 不能把函数调用与「短路赋值」写在同一行：
+  # 本脚本是 `set -e`，裸调用一个返回非 0 的函数会【当场结束脚本】⇒ 连下面那行 FAIL 汇总都打印
+  # 不出来（实测：selfcheck 输出停在最后一组读数、exit 1 而无声）。if 形同时不会踩
+  # instrument-failure-check FAMILY-3（那台检查器把短路符号读成管道，见 memory
+  # shell-or-rc-capture-fires-instrument-family3 —— 连注释里出现该符号都会计入）。
+  ac_record_schema_self_ok=0
+  if selfcheck_ac_record_schema; then :; else ac_record_schema_self_ok=$?; fi
 
   if [ "$d1" = "1" ] && [ "$d2" = "no" ] && [ "$a1" = "1" ] && [ "$a2" = "yes" ] \
      && [ "${ac249_self_ok:-1}" = "0" ] \
+     && [ "${ac_record_schema_self_ok:-1}" = "0" ] \
      && [ "$ac247_ok" = "1" ] && [ "$ac247_neg_ok" = "1" ] && [ "$ac247_cnt_ok" = "1" ] \
      && [ "$ac247_cnt_neg_ok" = "0" ] && [ "$ac247_alive_src" = "1" ] \
      && [ "${ac247_status_hits:-0}" -ge 1 ] 2>/dev/null && [ "${ac247_bad_assign:-0}" = "0" ] \
@@ -5177,7 +5200,7 @@ AC250NEG
      && [ "$fn_v_neg" = "0" ] && [ "$fn_w_neg" = "0" ] \
      && [ "$bl_ok" = "1" ] \
      && [ "$tp_ok" = "1" ]; then
-    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed); AC-204 carrier record writes the five criterion fields verbatim (forbidden_count=0 integer, enable_declared=true literal) and refuses a forbidden-copy or no-enable record (fail-closed, 成对判定); AC-205 carrier record writes the three criterion fields verbatim (shipped_from_installed_artifact=true + transcript_confirmed=true literals, top-level build_sha) with transcript_confirmed derived from transcript-delivery-check reading the transcript (hit ⇒ delivered / miss ⇒ not) — never from a send exit code — and refuses shipped=false / transcript_confirmed=false / empty-host (fail-closed, AC4 负控制); AC-234 render counts are derived from rendered HTML content (task/goal anchors + round-row anchors — never an HTTP status code, AC2) and can take false (empty-shell page ⇒ 0/0/0); the AC-234 carrier record writes the six criterion fields verbatim (tasks_rendered/goals_rendered/round_records_rendered as JSON integers) and refuses a zero-count or empty-host record (fail-closed, AC4 负控制); the AC-232 carrier record writes the three criterion fields verbatim (goal_write_ok/goal_read_back_ok as JSON literals, goal_records as a JSON integer) with a top-level build_sha anchor, truthfully writes false/0 when the goal write fails or read-back is empty (缺件如实非静默, AC4 负控制 — 写调用 0 与空文件同形), and refuses an empty-host record (fail-closed, 硬规则 3b); AC-207 carrier record writes the eight criterion fields verbatim (produced_by_driver=true literal, gate_events>0, task_status=done, commit_sha/task_id non-empty, commit_files non-empty JSON array with ≥1 path outside the tasks/ goals/ .quay/ triplet, top-level build_sha) and refuses produced_by_driver=false / gate_events=0 / bookkeeping-files-only / no-files (fail-closed, 硬规则 3b); AC-207 implementation-commit SELECTION picks the real implementation commit even when newer bookkeeping commits sit on top of it (the old grep-v-chore-quay-init-then-head-1 form picked the 翻-done commit — gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit), yields empty + non-zero when only bookkeeping commits exist (⇒ no record, never a bookkeeping commit dressed up as one), and the bookkeeping judgment is positional (touched files, not commit-message text); AC-240 run-level closure self-evidence takes three DISTINGUISHABLE values (1 = AC-203 and AC-207 both written by THIS run for the SAME project_root; 0 = this run attempted the e2e but the closure is not self-evidenced, with a non-empty NOTE naming the sub-reason; not-evaluated = --ac207-e2e not passed — 未评估 ≠ 不合格, 硬规则 3b), where 0 also covers the origin defect's own shape (AC-207 written, AC-203 never probed in step⑤) and the both-written-but-different-roots case (the pairing is on the SAME project_root, not on both being non-empty), and the AC-203 generation-side probe/write call is POSITIONALLY inside step5_e2e's body (0 before this task — the same-run pairing existed only as an accident, never as a requirement); segment ① (step1_install, the delivery-install path) leaves the operator's real ~/.claude/settings.json BYTE-IDENTICAL (HOME isolated to \${PREFIX}.home + QUAY_SKIP_PLUGIN_CLI=1 — the CLI materialization that re-reddened AC-161), with the isolated HOME proven to have received the postinstall write (so the green is not a not-run vacuity), and that assertion can take FALSE (isolation target pointed back at the real HOME ⇒ signature changes); and the AC-239 landing-baseline pre-flight classifier takes every value (REUSED⇒compatible / ADOPTED⇒divergent / BLOCKED⇒divergent / CREATED⇒absent / no-line-or-rc≠0⇒unreadable) — so a target copy whose 'develop' is a foreign fork stops ⑦b with an attributable 5-second reading instead of an hour-long poll whose non-done end state is indistinguishable from a worker that failed to implement (gap-aged-project-post-upgrade-driver-e2e 本轮新增); and the AC-247 takeover producer writes its eight criterion fields verbatim (host / project_root / pre_task_count / post_task_count / stale_days / driver_alive / carrier_records, plus the top-level build_sha coming from the ONE anchor choke point — the writer's own body carries no second anchor literal) and refuses EVERY one of them when it cannot be read (including stale_days one thousandth below the 14-day boundary, while 14.000 itself is accepted — so the threshold is neither always-true nor always-false), takes its liveness reading from the SAME status carrier the AC-203 parser reads and never from \`driver start\`'s exit code (negative control: swapping the right-hand side to the start rc flips the predicate), counts the project's OWN task store through its own ABI with ONE implementation read at both moments (a non-JSON or empty CLI reply is NOT a zero — it prints nothing and returns non-zero), and derives stale_days from the HEAD commit time captured BEFORE the takeover action (GOAL-016 AC-247 本轮新增); and the AC-248 adr-check producer reads a FLIP — the SAME reading (the target project's OWN checker's candidate set, taken by calling that checker's own exported enumerator, never a quay-side 「equivalent」 ADR-007 judgment) at the implementation commit's parent and at the implementation commit itself, both materialized with \`git archive\` into isolated paths so the two runs differ by the fix alone; it writes the record ONLY when the newly-entered tool name (the set difference — empty ⇒ no probe ⇒ no record) is strictly outside the before set and strictly inside the after set, refuses reversed direction / \`0\`-\`1\` / \`\"false\"\` strings / missing fields / bookkeeping-only commit_files / empty probe tool, and its writer body carries ZERO \`true\`/\`false\` literals (the booleans are the two run readings verbatim, emitted as JSON booleans; a single run's exit code is never a criterion field — that is exactly the value that is already green today and therefore carries no information) (GOAL-016 AC-248 本轮新增)"
+    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed); AC-204 carrier record writes the five criterion fields verbatim (forbidden_count=0 integer, enable_declared=true literal) and refuses a forbidden-copy or no-enable record (fail-closed, 成对判定); AC-205 carrier record writes the three criterion fields verbatim (shipped_from_installed_artifact=true + transcript_confirmed=true literals, top-level build_sha) with transcript_confirmed derived from transcript-delivery-check reading the transcript (hit ⇒ delivered / miss ⇒ not) — never from a send exit code — and refuses shipped=false / transcript_confirmed=false / empty-host (fail-closed, AC4 负控制); AC-234 render counts are derived from rendered HTML content (task/goal anchors + round-row anchors — never an HTTP status code, AC2) and can take false (empty-shell page ⇒ 0/0/0); the AC-234 carrier record writes the six criterion fields verbatim (tasks_rendered/goals_rendered/round_records_rendered as JSON integers) and refuses a zero-count or empty-host record (fail-closed, AC4 负控制); the AC-232 carrier record writes the three criterion fields verbatim (goal_write_ok/goal_read_back_ok as JSON literals, goal_records as a JSON integer) with a top-level build_sha anchor, truthfully writes false/0 when the goal write fails or read-back is empty (缺件如实非静默, AC4 负控制 — 写调用 0 与空文件同形), and refuses an empty-host record (fail-closed, 硬规则 3b); AC-207 carrier record writes the eight criterion fields verbatim (produced_by_driver=true literal, gate_events>0, task_status=done, commit_sha/task_id non-empty, commit_files non-empty JSON array with ≥1 path outside the tasks/ goals/ .quay/ triplet, top-level build_sha) and refuses produced_by_driver=false / gate_events=0 / bookkeeping-files-only / no-files (fail-closed, 硬规则 3b); AC-207 implementation-commit SELECTION picks the real implementation commit even when newer bookkeeping commits sit on top of it (the old grep-v-chore-quay-init-then-head-1 form picked the 翻-done commit — gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit), yields empty + non-zero when only bookkeeping commits exist (⇒ no record, never a bookkeeping commit dressed up as one), and the bookkeeping judgment is positional (touched files, not commit-message text); AC-240 run-level closure self-evidence takes three DISTINGUISHABLE values (1 = AC-203 and AC-207 both written by THIS run for the SAME project_root; 0 = this run attempted the e2e but the closure is not self-evidenced, with a non-empty NOTE naming the sub-reason; not-evaluated = --ac207-e2e not passed — 未评估 ≠ 不合格, 硬规则 3b), where 0 also covers the origin defect's own shape (AC-207 written, AC-203 never probed in step⑤) and the both-written-but-different-roots case (the pairing is on the SAME project_root, not on both being non-empty), and the AC-203 generation-side probe/write call is POSITIONALLY inside step5_e2e's body (0 before this task — the same-run pairing existed only as an accident, never as a requirement); segment ① (step1_install, the delivery-install path) leaves the operator's real ~/.claude/settings.json BYTE-IDENTICAL (HOME isolated to \${PREFIX}.home + QUAY_SKIP_PLUGIN_CLI=1 — the CLI materialization that re-reddened AC-161), with the isolated HOME proven to have received the postinstall write (so the green is not a not-run vacuity), and that assertion can take FALSE (isolation target pointed back at the real HOME ⇒ signature changes); and the AC-239 landing-baseline pre-flight classifier takes every value (REUSED⇒compatible / ADOPTED⇒divergent / BLOCKED⇒divergent / CREATED⇒absent / no-line-or-rc≠0⇒unreadable) — so a target copy whose 'develop' is a foreign fork stops ⑦b with an attributable 5-second reading instead of an hour-long poll whose non-done end state is indistinguishable from a worker that failed to implement (gap-aged-project-post-upgrade-driver-e2e 本轮新增); and the AC-247 takeover producer writes its eight criterion fields verbatim (host / project_root / pre_task_count / post_task_count / stale_days / driver_alive / carrier_records, plus the top-level build_sha coming from the ONE anchor choke point — the writer's own body carries no second anchor literal) and refuses EVERY one of them when it cannot be read (including stale_days one thousandth below the 14-day boundary, while 14.000 itself is accepted — so the threshold is neither always-true nor always-false), takes its liveness reading from the SAME status carrier the AC-203 parser reads and never from \`driver start\`'s exit code (negative control: swapping the right-hand side to the start rc flips the predicate), counts the project's OWN task store through its own ABI with ONE implementation read at both moments (a non-JSON or empty CLI reply is NOT a zero — it prints nothing and returns non-zero), and derives stale_days from the HEAD commit time captured BEFORE the takeover action (GOAL-016 AC-247 本轮新增); and the AC-248 adr-check producer reads a FLIP — the SAME reading (the target project's OWN checker's candidate set, taken by calling that checker's own exported enumerator, never a quay-side 「equivalent」 ADR-007 judgment) at the implementation commit's parent and at the implementation commit itself, both materialized with \`git archive\` into isolated paths so the two runs differ by the fix alone; it writes the record ONLY when the newly-entered tool name (the set difference — empty ⇒ no probe ⇒ no record) is strictly outside the before set and strictly inside the after set, refuses reversed direction / \`0\`-\`1\` / \`\"false\"\` strings / missing fields / bookkeeping-only commit_files / empty probe tool, and its writer body carries ZERO \`true\`/\`false\` literals (the booleans are the two run readings verbatim, emitted as JSON booleans; a single run's exit code is never a criterion field — that is exactly the value that is already green today and therefore carries no information) (GOAL-016 AC-248 本轮新增); and the AC-record schema mechanism (gap-ac-record-schema-duplicated-between-criterion-and-writer) makes the field list a SINGLE declarative source (AC_RECORD_SCHEMA) enforced at the ONE write choke point: a record missing a declared field (or carrying the wrong JSON type, or belonging to an unregistered ac) is REFUSED at production time with the field named and NOTHING written — the failing write writes zero lines, the completed one writes exactly one, and an unregistered ac is refused too (so adding an AC means adding a declaration row, not a new hand-written writer); a brand-new AC produces a valid record by adding ONE schema row and calling the generic write_ac_record with NO new write_acNNN_record function; every declared field of GOAL-016 AC-247/248/249/250 is individually enforced at write time (omitting any one of them is refused); and after a record lands the corresponding criterion is AUTOMATICALLY re-run with its exit code recorded (a green criterion records rerun_rc=0 silently, while an appended record whose criterion still exits 1 is recorded rerun_rc=1 AND loudly reported as AC-RECORD-RERUN-FAILED — never silently treated as success); and the drift report can take FALSE (dropping a criterion-read field from the declaration flips it to DRIFT naming that field, and removing a whole declaration row is caught by the producer-side unregistered check — 硬规则 4/5: 一个永远打印 ok 的检查不是测量, 而「少一行」会让按行驱动的报告打印全绿)"
     rc=0
   else
     echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 ac249_self_ok=$ac249_self_ok p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused ac203_parse_alive=$ac203_parse_alive ac203_parse_recs=$ac203_parse_recs ac201_pos_w=$ac201_pos_w ac201_pos_ac=$ac201_pos_ac ac201_neg_w=$ac201_neg_w ac201_neg_lines=$ac201_neg_lines g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused ac204_wrote=$ac204_wrote ac204_fields_ok=$ac204_fields_ok ac204_refused_fc=$ac204_refused_fc ac204_refused_en=$ac204_refused_en ac205_tc_hit=$ac205_tc_hit ac205_tc_miss=$ac205_tc_miss ac205_wrote=$ac205_wrote ac205_fields_ok=$ac205_fields_ok ac205_ship_refused=$ac205_ship_refused ac205_conf_refused=$ac205_conf_refused ac205_host_refused=$ac205_host_refused ac234_tasks_pos=$ac234_tasks_pos ac234_goals_pos=$ac234_goals_pos ac234_rounds_pos=$ac234_rounds_pos ac234_tasks_neg=$ac234_tasks_neg ac234_goals_neg=$ac234_goals_neg ac234_rounds_neg=$ac234_rounds_neg ac234_wrote=$ac234_wrote ac234_fields_ok=$ac234_fields_ok ac234_refused_zc=$ac234_refused_zc ac234_refused_em=$ac234_refused_em ac232_wrote=$ac232_wrote ac232_fields_ok=$ac232_fields_ok ac232_neg_ok=$ac232_neg_ok ac232_refused=$ac232_refused ac207_wrote=$ac207_wrote ac207_fields_ok=$ac207_fields_ok ac207_refused_pdb=$ac207_refused_pdb ac207_refused_ge=$ac207_refused_ge ac207_refused_bkfiles=$ac207_refused_bkfiles ac207_refused_nofiles=$ac207_refused_nofiles ac207_sel_rc=$ac207_sel_rc ac207_only_rc=$ac207_only_rc ac207_bk_tasks_only=$ac207_bk_tasks_only ac207_impl_marker=$ac207_impl_marker ac207_before=$ac207_before ac207_after_neg=$ac207_after_neg ac207_neg_trace=$ac207_neg_trace ac207_after_pos=$ac207_after_pos ac207_pipe_grep=$ac207_pipe_grep ac240_v1=$ac240_v1 ac240_v0=$ac240_v0 ac240_vdiff=$ac240_vdiff ac240_vne=$ac240_vne ac240_step5_hits=$ac240_step5_hits fn_v_pos=$fn_v_pos fn_w_pos=$fn_w_pos fn_iso_written=$fn_iso_written fn_sent_same=$fn_sent_same fn_v_neg=$fn_v_neg fn_w_neg=$fn_w_neg tp_ok=$tp_ok tp_pos_status=$tp_pos_status tp_pos_launcher=$tp_pos_launcher tp_pos_model=$tp_pos_model tp_pos_auth=$tp_pos_auth tp_neg_status=$tp_neg_status tp_neg_rc=$tp_neg_rc tp_ovr_launcher=$tp_ovr_launcher tp_ovr_model=$tp_ovr_model tp_ovr_auth=$tp_ovr_auth tp_res1=$tp_res1 tp_res2=$tp_res2 bl_ok=$bl_ok bl_reused=$bl_reused bl_adopted=$bl_adopted bl_blocked=$bl_blocked bl_created=$bl_created bl_noline=$bl_noline bl_badrc=$bl_badrc"
@@ -5579,6 +5602,657 @@ selfcheck_ac249() {
   rm -rf "$ac249_tmp"
   return $ac249_rc
 }
+
+# ══ AC 载体记录 schema：字段清单的唯一真源 ════════════════════════════════════════════════════
+# gap-ac-record-schema-duplicated-between-criterion-and-writer（2026-09-12）
+#
+# 缺陷形态：每个 AC 的字段清单在【判读侧】（goals/AC-NNN-*.md 的 criterion 读哪些字段）与
+# 【产出侧】（write_acNNN_record 写哪些字段）各存一份。两处漂移 ⇒ 产出侧写 driver_alive 而判据读
+# driverAlive ⇒ 判据恒 exit 1，且与「这次根本没有产出过记录」完全同形（硬规则 3b：读不懂/缺值不得
+# 与「合格」共用一种输出）。本表把产出侧的字段清单收成【一份声明】，并在写入通道的 choke point 上
+# 按它 fail-closed（缺字段/类型不符/未登记 AC ⇒ 拒写且非 0，⛔ 不是等到判据 exit 1 才发现）。
+#
+# ⛔ 该抽象的是 schema，不是 write_record 本身（早先判错过，已被数据推翻）：11+ 个 writer 各 6–25 行，
+#   write_ac207_record vs write_ac247_record 行级相似度仅 14%——字段集本就该各不相同，它们不是复制
+#   粘贴。真正的问题是【同一份字段清单被写了两遍】，不是 writer 之间彼此重复。
+#
+# 为什么是「声明表 + 机制校验」而不是「从 criterion 反推产出侧字段」：
+#   ① criterion 是 shell 程序包 python heredoc，且一个程序常读【多个 AC】的记录（实测 AC-239 的
+#      criterion 同时读 AC-238 与 AC-239，字段按 `r.get("ac")!=…` 守卫分段）⇒ 反推机械上可行，但会把
+#      判据里每一次 r.get（含探测性/可选读）都升格成硬要求；
+#   ② 本脚本会被 scp 到目标机执行，目标机上没有【本仓库】的 goals/ ⇒ 生产期校验不能依赖解析 criterion；
+#   ③ criterion 仍是 oracle——本表与它的一致性由 `--ac-record-schema-report` 机械核对（两向差集，
+#      实现落点 ac_record_schema_report），所以正源关系是「criterion 是判据、本表是被判据校验的
+#      产物侧声明」，⛔ 不是两份并列的真源。
+#
+# 结构字段 ac / build_sha / ts 不列入本表（由写入通道统一注入）；本表只列 AC 专属字段。
+# kind ∈ str | int | num | bool | jsonarr | hex40 | hex64；str 要求非空串（空串 = 缺值，≠合格）。
+# 本表只声明「字段在不在 + JSON 类型对不对」；更深的值语义（stale_days≥14、commit_files 非记账、
+# 地址非回环、driver_alive=1、任务状态翻 done…）仍留在各自 writer 体内——那里有上下文，本表不重复它。
+AC_RECORD_SCHEMA='
+GOAL-009-AC-201 build_sha:hex40 tgz_sha256:str
+GOAL-009-AC-203 host:str project_root:str has_plugin_dir:bool driver_alive:int carrier_records:int
+GOAL-009-AC-204 host:str project_root:str forbidden_count:int enable_declared:bool
+GOAL-009-AC-205 host:str shipped_from_installed_artifact:bool transcript_confirmed:bool
+GOAL-009-AC-206 host:str project_root:str goals_dir_created:bool tasks_dir_created:bool goal_store_readable:bool task_store_readable:bool
+GOAL-009-AC-207 host:str project_root:str commit_sha:str commit_files:jsonarr task_id:str task_status:str gate_events:int produced_by_driver:bool
+GOAL-009-AC-232 host:str project_root:str goal_write_ok:bool goal_read_back_ok:bool goal_records:int
+GOAL-009-AC-239 host:str project_root:str commit_sha:str commit_files:jsonarr task_id:str task_status:str gate_events:int produced_by_driver:bool
+GOAL-015-AC-234 host:str project_root:str tasks_rendered:int goals_rendered:int round_records_rendered:int
+GOAL-016-AC-247 host:str project_root:str pre_task_count:int post_task_count:int stale_days:num driver_alive:int carrier_records:int
+GOAL-016-AC-248 host:str project_root:str commit_sha:str commit_files:jsonarr task_id:str task_status:str gate_events:int produced_by_driver:bool adr_check_before_detects:bool adr_check_after_detects:bool adr_check_probe_tool:str
+GOAL-016-AC-249 host:str project_root:str task_id:str commit_files:jsonarr
+GOAL-016-AC-250 host:str project_root:str bind_host:str tailscale0_ip:str probe_from_host:str http_status:int observed_task_id:str observed_status_before:str observed_status_after:str store_status_after:str
+'
+
+# 取某 AC 的 schema 行（去掉 ac 前缀后的 `field:kind …`）。未登记 ⇒ 非 0（调用方 fail-closed）。
+ac_record_schema_row() {
+  local ac="$1" line
+  while IFS= read -r line; do
+    line="${line#"${line%%[![:space:]]*}"}"          # ltrim
+    [ -n "$line" ] || continue
+    case "$line" in '#'*) continue ;; esac
+    case "$line" in "$ac "*) printf '%s\n' "${line#"$ac"}" | sed 's/^[[:space:]]*//'; return 0 ;; esac
+  done <<EOF
+$AC_RECORD_SCHEMA
+EOF
+  return 1
+}
+
+# 某 AC 声明的字段名（空格分隔）。未登记 ⇒ 非 0。
+ac_record_schema_field_names() {
+  local spec f out=""
+  spec="$(ac_record_schema_row "$1")" || return 1
+  for f in $spec; do out="$out ${f%%:*}"; done
+  printf '%s\n' "${out# }"
+}
+
+# 从记录片段（`,"k":v,…` 形）取 ac。取不出 ⇒ 非 0。
+ac_record_fragment_ac() {
+  printf '%s' "$1" | "$VC_NODE" --no-warnings -e '
+    let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
+      let r; try { r=JSON.parse("{\"__probe\":0"+s+"}"); } catch(e){ process.exit(1); }
+      if (typeof r.ac !== "string" || !r.ac) process.exit(1);
+      process.stdout.write(r.ac);
+    });'
+}
+
+# ── 写入通道的 schema 校验（AC3：产出时 fail-closed，⛔ 不是等判据 exit 1）────────────────────
+# 输入 = 记录片段（`,"k":v,…`）。判定：
+#   ① 片段必须是合法 JSON（读不懂 ⇒ 拒，⛔ 不与「校验通过」同形）；
+#   ② 必须带非空 `ac`（否则不知道用哪一行 schema ⇒ 拒）；
+#   ③ 该 ac 必须在 AC_RECORD_SCHEMA 登记（未登记 ⇒ 拒——新增 AC 的正规动作是【加一行声明】，
+#      ⛔ 不是新写一个 writer 函数后再靠人记得同步判据）；
+#   ④ 声明里的每个字段必须存在且类型相符（str 还要求非空）。
+# 额外字段（extras_json / 未来的加字段）不拒——本校验管的是【漏】，不是【多】。
+ac_record_schema_validate_fragment() {
+  local frag="$1"
+  [ -n "$frag" ] || { echo "AC-RECORD-SCHEMA: empty record fragment — refused (fail-closed)" >&2; return 1; }
+  printf '%s' "$frag" | "$VC_NODE" --no-warnings -e '
+    const schemaText = process.argv[1];
+    const KIND = {
+      str:  v => typeof v === "string" && v.length > 0,
+      int:  v => typeof v === "number" && Number.isInteger(v),
+      num:  v => typeof v === "number" && Number.isFinite(v),
+      bool: v => typeof v === "boolean",
+      jsonarr: v => Array.isArray(v),
+      hex40: v => typeof v === "string" && /^[0-9a-f]{40}$/.test(v),
+      hex64: v => typeof v === "string" && /^[0-9a-f]{64}$/.test(v)
+    };
+    let s = "";
+    process.stdin.on("data", d => s += d).on("end", () => {
+      let r;
+      try { r = JSON.parse("{\"__probe\":0" + s + "}"); }
+      catch (e) { console.error("AC-RECORD-SCHEMA: record fragment is not valid JSON: " + e.message + " — refused (fail-closed)"); process.exit(1); }
+      const ac = r.ac;
+      if (typeof ac !== "string" || !ac) {
+        console.error("AC-RECORD-SCHEMA: record fragment carries no non-empty \"ac\" — which schema row applies is unknowable — refused (fail-closed)");
+        process.exit(1);
+      }
+      const rows = schemaText.split("\n").map(l => l.trim()).filter(l => l && l.charAt(0) !== "#");
+      let spec = null;
+      for (const l of rows) { const p = l.split(/\s+/); if (p[0] === ac) { spec = p.slice(1); break; } }
+      if (spec === null) {
+        console.error("AC-RECORD-SCHEMA: no schema row for ac=" + ac + " — add one to AC_RECORD_SCHEMA (the single source) before writing — refused (fail-closed)");
+        process.exit(1);
+      }
+      const bad = [];
+      for (const one of spec) {
+        const i = one.lastIndexOf(":");
+        const name = one.slice(0, i), kind = one.slice(i + 1);
+        const v = r[name];
+        if (v === undefined) { bad.push(name + " (MISSING)"); continue; }
+        const chk = KIND[kind];
+        if (!chk) { bad.push(name + " (schema declares unknown kind " + kind + ")"); continue; }
+        if (!chk(v)) { bad.push(name + " (expected " + kind + ", got " + JSON.stringify(v) + ")"); }
+      }
+      if (bad.length) {
+        console.error("AC-RECORD-SCHEMA: refusing " + ac + " record — " + bad.join("; ") + " — nothing was written (fail-closed)");
+        process.exit(1);
+      }
+      process.exit(0);
+    });' "$AC_RECORD_SCHEMA"
+}
+
+# 按某 AC 的声明行生成一条【类型合法】的字段片段（`"k":v,…`，不含 ac/ts/build_sha）。
+# $2（可选）= 要【故意漏掉】的字段名（逗号分隔）——AC3/AC5 的「漏一个判据要求的字段」负控制用它。
+# 用途：证明「声明里的每个字段都在写入期被逐个强制」，而不是只测了被报出来的那一个（硬规则 5b）。
+ac_record_sample_body() {
+  local ac="$1" omit="${2:-}" spec
+  spec="$(ac_record_schema_row "$ac")" || return 1
+  "$VC_NODE" --no-warnings -e '
+    const spec = process.argv[1].split(/\s+/).filter(Boolean);
+    const omit = (process.argv[2] || "").split(",").filter(Boolean);
+    const SAMPLE = {
+      str: () => "sample", int: () => 1, num: () => 1.5, bool: () => true,
+      jsonarr: () => ["src/x.ts"], hex40: () => "0".repeat(40), hex64: () => "0".repeat(64)
+    };
+    const out = [];
+    for (const one of spec) {
+      const i = one.lastIndexOf(":");
+      const name = one.slice(0, i), kind = one.slice(i + 1);
+      if (omit.indexOf(name) >= 0) continue;
+      const f = SAMPLE[kind];
+      out.push(JSON.stringify(name) + ":" + JSON.stringify(f ? f() : null));
+    }
+    process.stdout.write(out.join(","));' "$spec" "$omit"
+}
+
+# ── 载体所在的【仓库根】：仅当载体是 <root>/.quay/productization-verification.jsonl 且 <root>/goals
+#    存在时才认（criterion 逐字读 `.quay/productization-verification.jsonl` 这个相对路径 ⇒ 只有这种
+#    布局下「复跑」才是真的复跑同一个判据，⛔ 不是拿一个别的 jsonl 冒充）。取不出 ⇒ 非 0。
+ac_record_carrier_root() {
+  local carrier="$1" root
+  case "$carrier" in
+    */.quay/productization-verification.jsonl) root="${carrier%/.quay/productization-verification.jsonl}" ;;
+    *) return 1 ;;
+  esac
+  if [ -n "$root" ] && [ -d "$root/goals" ]; then printf '%s\n' "$root"; return 0; fi
+  return 1
+}
+
+# ── 落账后自动复跑判据（AC4）───────────────────────────────────────────────────────────────
+# 为什么必须复跑：投送与回收机制化之后，「记录真的让判据翻绿了吗」成了链条上唯一仍靠人的环节——
+# GOAL-009 AC-207 的执行说明逐字承认这一步「没有机制兜底，是执行者的显式义务」，并记载过实证损失
+# （2026-09-11 orangevps 产出的 3 条记录滞留远端从未带回）。⇒ 以【判据退出码】为准，⛔ 不以「我拷过了」为准。
+#
+# 落账形态：以 "<ac>#criterion-rerun" 为 ac 写一条【独立】记录（⛔ 不复用原 ac：一条只带 rerun 字段的
+# 记录若与原 ac 同名，会被别的判据——如 AC-214 读 build_sha+ac——误当成一条合格记录，那正是硬规则 3b）。
+# rc≠0 ⇒ stderr 大声报出 + 退出码落账（⛔ 不静默当成功）。
+# ⚠️ 本函数【不】把 rc 变成写入通道的返回值：记录确实已落盘，让 rc 反映「判据仍红」会把
+#    「写了但判据不服」与「根本没写」压成同一种输出——那正是本任务要消灭的形态。判据方读取
+#    AC_RECORD_RERUN_RC（0 / 非 0 / "not-evaluated" 三态可分）。
+ac_record_finalize() {
+  local ac="$1" carrier="$2" root="" num gfile="" crit="" rc=0 saved_ifs
+  AC_RECORD_RERUN_RC="not-evaluated"
+  [ -n "$ac" ] || return 0
+  [ -n "$carrier" ] || return 0
+  root="$(ac_record_carrier_root "$carrier" 2>/dev/null)" || root=""
+  [ -n "$root" ] || return 0
+  num="${ac##*-}"
+  for gfile in "$root"/goals/AC-"$num"-*.md; do
+    [ -r "$gfile" ] || continue
+    break
+  done
+  [ -n "$gfile" ] && [ -r "$gfile" ] || return 0
+  crit="$(AC_RECORD_GOAL_FILE="$gfile" python3 -c '
+import os,re,sys
+try:
+    import yaml
+except Exception:
+    sys.exit(1)
+try:
+    txt=open(os.environ["AC_RECORD_GOAL_FILE"],encoding="utf-8").read()
+except OSError:
+    sys.exit(1)
+m=re.match(r"^---\n(.*?)\n---\n", txt, re.S)
+if not m: sys.exit(1)
+try:
+    fm=yaml.safe_load(m.group(1)) or {}
+except Exception:
+    sys.exit(1)
+c=fm.get("criterion") or ""
+if not str(c).strip(): sys.exit(1)
+sys.stdout.write(str(c))
+' 2>/dev/null)" || crit=""
+  [ -n "$crit" ] || return 0
+  rc=0
+  if ( cd "$root" && bash -c "$crit" ) >/dev/null 2>&1; then rc=0; else rc=$?; fi
+  AC_RECORD_RERUN_RC="$rc"
+  printf '{"ts":"%s","ac":"%s#criterion-rerun","criterion_rerun_rc":%s,"rerun_carrier":"%s"}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$ac" "$rc" "$(basename "$carrier")" >> "$carrier"
+  if [ "$rc" != "0" ]; then
+    echo "AC-RECORD-RERUN-FAILED: ac=$ac 的记录已追加，但复跑其 criterion 仍 exit $rc —— 证据没有让判据翻绿（⛔ 不静默当成功；rerun rc 已落账）" >&2
+  fi
+  return 0
+}
+
+# ── 写入通道（无补锚形）：校验后【原样】落盘，用于自己补 ts/build_sha 的产出侧（printf 形 writer）。──
+# $1 = 记录片段（`,"k":v,…`）；$2 = 载体路径（缺省 $AC89）。
+ac_record_append_fragment() {
+  local frag="$1" carrier="${2:-${AC89:-}}" ac=""
+  ac_record_schema_validate_fragment "$frag" || return 1
+  [ -n "$carrier" ] || { echo "ac_record_append_fragment: carrier path empty — record NOT written (fail-closed)" >&2; return 1; }
+  ac="$(ac_record_fragment_ac "$frag" 2>/dev/null)" || ac=""
+  mkdir -p "$(dirname "$carrier")"
+  printf '{%s}\n' "${frag#,}" >> "$carrier"
+  ac_record_finalize "$ac" "$carrier"
+  return 0
+}
+
+# ── 新增 AC 的通用产出通道（AC2）──────────────────────────────────────────────────────────
+# 新增一条 AC 时，产出侧的动作 = 在 AC_RECORD_SCHEMA 加【一行声明】+ 调本函数，
+# ⛔ 不需要新写一个 write_acNNN_record 手写函数（那正是字段清单被写第二遍的来源）。
+# $1 = ac id；$2 = AC 专属字段的 JSON 片段（`"k":v,…`，不含 ac/ts/build_sha）。
+write_ac_record() {
+  local ac="$1" body="$2"
+  [ -n "$ac" ] || return 1
+  ac89_append_goal009 ",\"ac\":\"$ac\",$body"
+}
+
+# ── AC1：criterion 字段集 vs 产出侧 schema 声明的【两向差集】──────────────────────────────────
+# criterion 侧由 AST 机械提取（⛔ 不是 grep 关键词）：先按 yaml.safe_load 取回折叠块标量的原文
+# （`>-` 会把长行折行 ⇒ 朴素按行剥缩进会改程序，见 memory criterion-folded-yaml-line-strip-changes-program），
+# 再取 python heredoc 体，再按 `r.get("ac")!=…` 守卫【分段】把字段归给对应的 AC
+# （一个 criterion 程序常同时读多个 AC；不分段会把 AC-238 的字段算到 AC-239 头上——实测过）。
+ac_record_schema_report() {
+  local repo_root
+  repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
+  python3 - "$AC_RECORD_SCHEMA" "$repo_root" "$0" <<'PY'
+import ast, glob, os, re, sys
+
+schema_text, repo_root, script_path = sys.argv[1], sys.argv[2], sys.argv[3]
+src = open(script_path, encoding="utf-8").read()
+try:
+    import yaml
+except Exception:
+    print("AC-RECORD-SCHEMA-REPORT: NOT-EVALUATED — pyyaml unavailable, cannot read goals/*.md criterion")
+    sys.exit(3)
+
+if not os.path.isdir(os.path.join(repo_root, "goals")):
+    print("AC-RECORD-SCHEMA-REPORT: NOT-EVALUATED — no goals/ under %s" % repo_root)
+    sys.exit(3)
+
+STRUCTURAL = {"ac", "build_sha", "ts"}
+GUARD_RE = re.compile(r"^(?:GOAL-\d+-)?AC-\d+$")
+
+
+def extract_python(crit):
+    """criterion 是 shell 包 python heredoc（python3 - <<'P' … P）⇒ 取出 python 程序原文。"""
+    m = re.search(r"<<'?(\w+)'?\n(.*?)\n\1\s*$", crit, re.S | re.M)
+    return m.group(2) if m else crit
+
+
+def _is_ac_read(node):
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "get":
+        return bool(node.args) and isinstance(node.args[0], ast.Constant) and node.args[0].value == "ac"
+    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id == "r":
+        return isinstance(node.slice, ast.Constant) and node.slice.value == "ac"
+    return False
+
+
+def _guard_of(test):
+    """`r.get("ac")!="GOAL-…"` / `… or not external(r)` ⇒ 取出该段归属的 AC（按位置，⛔ 不按关键词）。"""
+    if isinstance(test, ast.BoolOp):
+        for v in test.values:
+            g = _guard_of(v)
+            if g:
+                return g
+        return None
+    if isinstance(test, ast.UnaryOp):
+        return _guard_of(test.operand)
+    if isinstance(test, ast.Compare) and len(test.comparators) == 1:
+        if _is_ac_read(test.left) and isinstance(test.comparators[0], ast.Constant):
+            v = test.comparators[0].value
+            if isinstance(v, str) and GUARD_RE.match(v):
+                return v
+    return None
+
+
+def _field_read(node):
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "get":
+        if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
+            if node.args[0].value != "ac":
+                return node.args[0].value
+    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id == "r":
+        if isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
+            return node.slice.value
+    return None
+
+
+def writer_fields(ac):
+    """产出侧【实写】的字段集：从 write_acNNN_record 函数体的【落盘那一行】取 JSON 键。
+
+    ⛔ 不是对全文 grep 关键词（硬规则 2 按位置判定）：只认函数体内含落盘调用的那一行，
+    这样 node 内联程序里的 `p => …`、注释里的字段名都不会被误计。AC-201 的产出侧函数名不同
+    （append_ac201_record），单独按同一个位置谓词处理。
+    """
+    num = ac.rsplit("-", 1)[1]
+    m = re.search(r"^write_ac%s_record\(\)\s*\{(.*?)^\}" % num, src, re.S | re.M)
+    if not m:
+        m = re.search(r"^append_ac(%s)_record\(\)\s*\{(.*?)^\}" % num, src, re.S | re.M)
+        if not m:
+            return None
+        body = m.group(2)
+    else:
+        body = m.group(1)
+    keys, seen = [], set()
+    for line in body.split("\n"):
+        if "ac89_append_goal009 \"" not in line and "ac_record_append_fragment \"" not in line:
+            continue
+        for mm in re.finditer(r'\\"([A-Za-z_][A-Za-z0-9_]*)\\"\s*:', line):
+            k = mm.group(1)
+            if k not in seen:
+                seen.add(k)
+                keys.append(k)
+    return keys
+
+
+def _pos(n):
+    return (n.lineno, n.col_offset)
+
+
+def scoped_fields(crit):
+    """按【位置】把字段读归给守卫它的那个 `r.get("ac")==…` 段。
+
+    ⛔ 守卫不按 `ast.If` 找：criterion 里同一个过滤也可能写成列表推导的 if 子句
+    （AC-201 逐字是 `rs=[r for r in rs if r.get("ac")=="GOAL-009-AC-201" and r.get("build_sha") …]`），
+    只认 ast.If 会把它整条读成「没有守卫段」⇒ AC-201 恒 NOT-EVALUATED。
+    ⇒ 改成对【任意上下文里的 Compare】取位置锚，读按 (lineno, col) 归给最近的前置锚。
+    """
+    tree = ast.parse(extract_python(crit))
+    guards, reads = [], []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Compare):
+            g = _guard_of(node)
+            if g:
+                guards.append((_pos(node), g))
+        f = _field_read(node)
+        if f:
+            reads.append((_pos(node), f))
+    guards.sort()
+    per_ac, shared = {}, []
+    for p, f in sorted(reads):
+        ac = None
+        for gp, ga in guards:
+            if gp <= p:
+                ac = ga
+            else:
+                break
+        if ac is None:
+            if f not in shared:
+                shared.append(f)
+        else:
+            per_ac.setdefault(ac, [])
+            if f not in per_ac[ac]:
+                per_ac[ac].append(f)
+    return per_ac, shared
+
+
+rows = []
+for line in schema_text.split("\n"):
+    line = line.strip()
+    if not line or line.startswith("#"):
+        continue
+    parts = line.split()
+    rows.append((parts[0], [p.split(":")[0] for p in parts[1:]]))
+registered = {r[0] for r in rows}
+
+# 完备性半边（硬规则 5：在某个来源搜不到，只有当该来源完备时才等于「不存在」）：
+# 本报告按【声明行】驱动，所以一条 AC 只要整行从声明里消失，它就同时从报告里消失——
+# 一个「少了一行」的声明会打印出全绿的报告。⇒ 另从【产出侧】反推：脚本里每个产出函数的
+# 落盘行都写着它产出的 ac，凡产出侧存在而声明里没有的 ac ⇒ 报 UNREGISTERED（硬缺陷）。
+producers = {}
+for pm in re.finditer(r"^(?:write_ac\d+|append_ac\d+)_record\(\)\s*\{(.*?)^\}", src, re.S | re.M):
+    for line in pm.group(1).split("\n"):
+        if "ac89_append_goal009 \"" not in line and "ac_record_append_fragment \"" not in line:
+            continue
+        am = re.search(r'\\"ac\\":\\"([^"\\]+)\\"', line)
+        if am:
+            producers[am.group(1)] = True
+            break
+unregistered = sorted(a for a in producers if a not in registered)
+
+print("AC-RECORD-SCHEMA-REPORT — criterion（判读侧真源）vs AC_RECORD_SCHEMA（产出侧声明）vs writer（产出侧实写）")
+print("  criterion 侧：goals/AC-<n>-*.md 的 criterion，AST 取 r.get()/r[] 的读字段，按 `r.get(\"ac\")!=…` 守卫分段")
+print("  writer  侧：write_acNNN_record 函数体内【落盘那一行】的 JSON 键（按位置取，⛔ 不是全文 grep 关键词）")
+print("  结构字段（每条记录都有，由写入通道注入）：ac build_sha ts")
+missing_d = 0    # 判据读、声明缺 ⇒ 写入期闸有洞（AC3 的守卫漏了该字段）——硬缺陷
+missing_c = 0    # 判据读、writer 不写 ⇒ 记录看着完整而判据恒 exit 1（本任务要消灭的形态）——硬缺陷
+missing_s = 0    # 声明有、writer 不写 ⇒ 写入期会被 ac_record_schema_validate_fragment 拒（AC3）——硬缺陷
+surplus = 0      # 声明有、判据不读 ⇒ 多余字段，记录在案，⛔ 不是硬缺陷
+unevaluated = 0  # 读不成 ⇒ 独立取值，⛔ 不与「已核对且无差集」同形（硬规则 3b）
+
+for ac, sfields in rows:
+    num = ac.rsplit("-", 1)[1]
+    # 声明行里的结构字段（如 AC-201 的 build_sha——它由 append_ac201_record 自己补，不经补锚点）
+    # 在【写入期】由 ac_record_schema_validate_fragment 照常强制；两向差集只比 AC 专属字段，
+    # 否则每一条结构字段都会以「声明有、判据不读」的形态出现在每一行里，把真读数埋掉。
+    sfields_ac = [f for f in sfields if f not in STRUCTURAL]
+    gs = glob.glob(os.path.join(repo_root, "goals", "AC-%s-*.md" % num))
+    if not gs:
+        print("  %-18s [NOT-EVALUATED] no goals/AC-%s-*.md — schema=%d" % (ac, num, len(sfields_ac)))
+        unevaluated += 1
+        continue
+    try:
+        fm = yaml.safe_load(re.match(r"^---\n(.*?)\n---\n", open(gs[0], encoding="utf-8").read(), re.S).group(1)) or {}
+    except Exception as e:
+        print("  %-18s [NOT-EVALUATED] frontmatter unreadable: %s" % (ac, e))
+        unevaluated += 1
+        continue
+    try:
+        per_ac, shared = scoped_fields(fm.get("criterion") or "")
+    except SyntaxError as e:
+        print("  %-18s [NOT-EVALUATED] criterion program unparseable: %s" % (ac, e))
+        unevaluated += 1
+        continue
+    own = per_ac.get(ac)
+    if own is None:
+        print("  %-18s [NOT-EVALUATED] criterion has no `ac == %s` guard segment" % (ac, ac))
+        unevaluated += 1
+        continue
+    cset = [f for f in (own + shared) if f not in STRUCTURAL]
+    wset = writer_fields(ac)
+    if wset is None:
+        print("  %-18s [NOT-EVALUATED] no write_ac%s_record() body in %s" % (ac, num, os.path.basename(script_path)))
+        unevaluated += 1
+        continue
+    wset_ac = [f for f in wset if f not in STRUCTURAL]
+    # 三侧 {criterion, schema(声明), writer(实写)} 的差集。三侧都要比：只比 criterion↔writer 会漏掉
+    # 「判据读、声明缺」这一种——那时 writer 今天恰好还在写，记录看着没问题，但【写入期的闸（AC3）
+    # 已经漏了该字段】，下一次改动就能静默放行一条判据永远读不懂的记录（实测：本报告第一版正是
+    # 只比了两对，AC1 的可失败控制在它上面取不到假）。
+    crit_not_declared = [f for f in cset if f not in sfields_ac]     # 判据读、声明缺 —— 写入期闸有洞
+    crit_not_written = [f for f in cset if f not in wset_ac]         # 判据读、writer 不写 —— 恒 exit 1
+    decl_not_written = [f for f in sfields_ac if f not in wset_ac]   # 声明有、writer 不写 —— 写入期拒
+    surplus_fields = [f for f in dict.fromkeys(sfields_ac + wset_ac) if f not in cset]  # 不读 —— 多余
+    hard = bool(crit_not_declared or crit_not_written or decl_not_written)
+    tag = "DRIFT" if hard else ("surplus" if surplus_fields else "ok")
+    print("  %-18s [%s] criterion=%d schema=%d writer=%d%s"
+          % (ac, tag, len(cset), len(sfields_ac), len(wset_ac),
+             "" if not shared else "  (含 %d 个判据共享字段)" % len(shared)))
+    if crit_not_declared:
+        missing_d += 1
+        print("      ⚠ 判据读、声明缺（写入期的闸漏了该字段 ⇒ 下次改动可静默放行）: %s" % crit_not_declared)
+    if crit_not_written:
+        missing_c += 1
+        print("      ⚠ 判据读、writer 不写（记录看着完整而判据恒 exit 1）: %s" % crit_not_written)
+    if decl_not_written:
+        missing_s += 1
+        print("      ⚠ 声明有、writer 不写（写入期即被拒，AC3 fail-closed）: %s" % decl_not_written)
+    if surplus_fields:
+        surplus += 1
+        print("      · 声明/实写有、判据不读（多余字段，记录在案，⛔ 不是硬缺陷）: %s" % surplus_fields)
+for a in unregistered:
+    print("  %-18s [UNREGISTERED] 产出侧存在而 AC_RECORD_SCHEMA 里没有这一行 ⇒ 写入期必被拒（AC3），且本条在报告里会整行消失" % a)
+print("AC-RECORD-SCHEMA-REPORT: %d AC registered, %d producer(s) in script, missing(criterion-vs-schema)=%d missing(criterion-vs-writer)=%d missing(schema-vs-writer)=%d surplus=%d unregistered=%d not-evaluated=%d"
+      % (len(rows), len(producers), missing_d, missing_c, missing_s, surplus, len(unregistered), unevaluated))
+if missing_d or missing_c or missing_s or unregistered:
+    sys.exit(1)
+sys.exit(3 if unevaluated else 0)
+PY
+}
+
+# ── selfcheck_ac_record_schema — AC 记录 schema 机制的 hermetic 正/负控制 ─────────────────────
+# 本任务五条 AC 各自的正/负控制，全部驱动【产品函数】（⛔ 不在此复刻判定逻辑——硬规则 4 推论三）：
+#   AC1 可检出    : criterion/schema/writer 三侧两向差集（真读数由 --ac-record-schema-report 打印；
+#                   本组另核「漏一个声明字段 ⇒ 报告取 DRIFT」可复现，见 ⑨c 之后的负控制）
+#   AC2 单一真源  : 只加【一行】schema 声明 + 调通用 write_ac_record ⇒ 出合格记录，⛔ 不新写 writer 函数
+#   AC3 产出时拒  : 漏一个判据要求的字段 ⇒ 拒绝且零新增行；补齐 ⇒ 写入成功（两态都打印）
+#   AC4 落账后复跑: 退出码 0 与「记录已落账而判据仍 exit 1」两态都要能取到（后者必须大声报出，⛔ 不静默）
+#   AC5 承载四条  : GOAL-016 AC-247/248/249/250 的声明字段【逐个】在写入期被强制（漏任一 ⇒ 拒）
+selfcheck_ac_record_schema() {
+  local rc=0 t
+  t="$(mktemp -d 2>/dev/null)" || { echo "selfcheck: ac-record-schema tmp-unavailable (⛔ 不静默跳过——夹具造不出时本组读数一律取假)"; return 1; }
+  local save_schema="$AC_RECORD_SCHEMA" save_ac89="$AC89" save_ts="$TS" save_sha="$BUILD_SHA"
+  local SHA40="0123456789abcdef0123456789abcdef01234567"
+  TS="2026-09-12T00:00:00Z"; BUILD_SHA="$SHA40"
+
+  # ── AC3：产出时 fail-closed（能取假）────────────────────────────────────────────
+  local f3="$t/ac3.jsonl" n0 n1 n2 rc_miss=0 rc_ok=0 rc_unknown=0 msg_miss=""
+  AC89="$f3"; : > "$f3"; n0=0
+  msg_miss="$(write_ac_record "GOAL-016-AC-249" '"project_root":"/tmp/p","task_id":"t1","commit_files":["src/x.ts"]' 2>&1 >/dev/null)" || rc_miss=1
+  n1="$(wc -l < "$f3" 2>/dev/null || echo 0)"
+  if write_ac_record "GOAL-016-AC-249" '"host":"hostB-fake","project_root":"/tmp/p","task_id":"t1","commit_files":["src/x.ts"]' >/dev/null 2>&1; then rc_ok=1; fi
+  n2="$(wc -l < "$f3" 2>/dev/null || echo 0)"
+  write_ac_record "GOAL-999-AC-001" '"host":"h"' >/dev/null 2>&1 || rc_unknown=1
+  local n3; n3="$(wc -l < "$f3" 2>/dev/null || echo 0)"
+  echo "selfcheck: ac-record-schema(AC3 missing-field) refused=$rc_miss lines=$n0→$n1 (expect 1/0→0 — 产出时报错且不写记录)"
+  echo "selfcheck: ac-record-schema(AC3 complete) accepted=$rc_ok lines=$n1→$n2 (expect 1/0→1 — 补齐后写入成功)"
+  echo "selfcheck: ac-record-schema(AC3 message) '${msg_miss:0:150}' (expect 点名 MISSING 字段 — 报错要说清漏了哪个)"
+  echo "selfcheck: ac-record-schema(AC3 unregistered-ac) refused=$rc_unknown lines=$n2→$n3 (expect 1/1→1 — 未登记的 AC 拒写 ⇒ 新增 AC 的正规动作是加一行声明)"
+  local fail=""
+  [ "$rc_miss" = "1" ] || fail="$fail AC3-missing-field-accepted"
+  [ "$n1" = "$n0" ] || fail="$fail AC3-missing-field-wrote-a-line"
+  [ "$rc_ok" = "1" ] || fail="$fail AC3-complete-rejected"
+  [ "$n2" = "1" ] || fail="$fail AC3-complete-wrote-no-line"
+  [ "$rc_unknown" = "1" ] || fail="$fail AC3-unregistered-ac-accepted"
+  [ "$n3" = "$n2" ] || fail="$fail AC3-unregistered-ac-wrote-a-line"
+  case "$msg_miss" in *MISSING*) ;; *) fail="$fail AC3-message-does-not-name-field" ;; esac
+
+  # ── AC2：新增 AC 无需新增产出侧函数（只加一行声明 + 调通用产出通道）──────────────────
+  local f2="$t/ac2.jsonl" ac2_ok=0 ac2_line=""
+  AC_RECORD_SCHEMA="$save_schema
+GOAL-016-AC-999 host:str project_root:str made_by:str"
+  AC89="$f2"
+  if write_ac_record "GOAL-016-AC-999" '"host":"hostB-fake","project_root":"/tmp/p","made_by":"write_ac_record"' >/dev/null 2>&1; then ac2_ok=1; fi
+  ac2_line="$(head -n1 "$f2" 2>/dev/null || true)"
+  echo "selfcheck: ac-record-schema(AC2 new-ac, no new writer fn) wrote=$ac2_ok line=$ac2_line (expect 1 + 一条含 ac=GOAL-016-AC-999 与 top-level build_sha 的记录——本组未新增任何 write_acNNN_record)"
+  [ "$ac2_ok" = "1" ] || fail="$fail AC2-generic-writer-refused"
+  case "$ac2_line" in *'"ac":"GOAL-016-AC-999"'*) ;; *) fail="$fail AC2-record-lacks-ac" ;; esac
+  case "$ac2_line" in *'"build_sha":"'*) ;; *) fail="$fail AC2-record-lacks-top-level-anchor" ;; esac
+
+  # ── AC4：落账后自动复跑判据（两态都要能取到）──────────────────────────────────────
+  # 造两个 temp 仓库根（<root>/.quay/ 载体 + <root>/goals/ 判据）⇒ 产品函数按载体路径推出根、自动复跑。
+  # 同一份 criterion，只让载体内容不同：matched=1 ⇒ 复跑绿；matched=0 ⇒ 记录已落账而判据仍 exit 1。
+  local r4a="$t/ac4a" r4b="$t/ac4b" i
+  for i in "$r4a" "$r4b"; do
+    mkdir -p "$i/.quay" "$i/goals"
+    cat > "$i/goals/AC-998-ac4-fixture.md" <<'GOAL'
+---
+id: AC-998
+title: ac-record-schema selfcheck fixture（记录复跑控制用）
+status: active
+kind: criterion
+goal: GOAL-016
+criterion: |
+  python3 - <<'P'
+  import json,sys
+  ok=False
+  try:
+      fh=open(".quay/productization-verification.jsonl",encoding="utf-8")
+  except OSError:
+      sys.exit(3)
+  for l in fh:
+      if not l.strip(): continue
+      try: r=json.loads(l)
+      except Exception: continue
+      if r.get("ac")!="GOAL-016-AC-998": continue
+      if int(r.get("matched") or 0)==1: ok=True
+  sys.exit(0 if ok else 1)
+  P
+expect: exit 0 = 载体里有一条 ac=GOAL-016-AC-998 且 matched=1 的记录；exit 3 = 载体缺失；exit 1 = 无合格记录
+---
+GOAL
+  done
+  AC_RECORD_SCHEMA="$save_schema
+GOAL-016-AC-998 host:str project_root:str matched:int"
+  local rr_a="none" rr_b="none" loud_a=0 loud_b=0 wa=0 wb=0 recs_a=0 recs_b=0
+  AC89="$r4a/.quay/productization-verification.jsonl"
+  if write_ac_record "GOAL-016-AC-998" '"host":"hostB-fake","project_root":"/tmp/p","matched":1' >/dev/null 2>"$t/a.err"; then wa=1; fi
+  rr_a="$AC_RECORD_RERUN_RC"; loud_a="$(grep -c 'AC-RECORD-RERUN-FAILED' "$t/a.err" 2>/dev/null || true)"
+  recs_a="$(grep -c 'criterion-rerun' "$r4a/.quay/productization-verification.jsonl" 2>/dev/null || true)"
+  AC89="$r4b/.quay/productization-verification.jsonl"
+  if write_ac_record "GOAL-016-AC-998" '"host":"hostB-fake","project_root":"/tmp/p","matched":0' >/dev/null 2>"$t/b.err"; then wb=1; fi
+  rr_b="$AC_RECORD_RERUN_RC"; loud_b="$(grep -c 'AC-RECORD-RERUN-FAILED' "$t/b.err" 2>/dev/null || true)"
+  recs_b="$(grep -c 'criterion-rerun' "$r4b/.quay/productization-verification.jsonl" 2>/dev/null || true)"
+  echo "selfcheck: ac-record-rerun(after-append, criterion-green) wrote=$wa rerun_rc=$rr_a loud=$loud_a rerun_records=$recs_a (expect 1/0/0/1 — 落账后自动复跑, 退出码落账)"
+  echo "selfcheck: ac-record-rerun(appended-but-criterion-red) wrote=$wb rerun_rc=$rr_b loud=$loud_b rerun_records=$recs_b (expect 1/1/1/1 — ⛔ 不静默当成功)"
+  [ "$wa" = "1" ] || fail="$fail AC4-green-not-written"
+  [ "$rr_a" = "0" ] || fail="$fail AC4-green-rerun-rc-not-0"
+  [ "$loud_a" = "0" ] || fail="$fail AC4-green-falsely-reported-as-failure"
+  [ "$recs_a" = "1" ] || fail="$fail AC4-green-no-rerun-record"
+  [ "$wb" = "1" ] || fail="$fail AC4-red-not-written"
+  [ "$rr_b" = "1" ] || fail="$fail AC4-red-rerun-rc-not-1"
+  [ "$loud_b" = "1" ] || fail="$fail AC4-red-not-reported-silently-treated-as-success"
+  [ "$recs_b" = "1" ] || fail="$fail AC4-red-no-rerun-record"
+
+  # ── AC5：GOAL-016 四条的声明字段【逐个】在写入期被强制 ──────────────────────────────
+  local ac5_ok=1 ac ac_fields ac_first body_ok body_miss cnt_before cnt_ok cnt_miss
+  for ac in GOAL-016-AC-247 GOAL-016-AC-248 GOAL-016-AC-249 GOAL-016-AC-250; do
+    ac_fields="$(ac_record_schema_field_names "$ac" 2>/dev/null || true)"
+    ac_first="${ac_fields%% *}"
+    AC89="$t/ac5-$ac.jsonl"
+    cnt_before=0
+    body_ok="$(ac_record_sample_body "$ac" "")"
+    if write_ac_record "$ac" "$body_ok" >/dev/null 2>&1; then :; else ac5_ok=0; fi
+    cnt_ok="$(wc -l < "$t/ac5-$ac.jsonl" 2>/dev/null || echo 0)"
+    body_miss="$(ac_record_sample_body "$ac" "$ac_first")"
+    if write_ac_record "$ac" "$body_miss" >/dev/null 2>&1; then ac5_ok=0; fi
+    cnt_miss="$(wc -l < "$t/ac5-$ac.jsonl" 2>/dev/null || echo 0)"
+    [ "$cnt_ok" = "1" ] && [ "$cnt_miss" = "1" ] || ac5_ok=0
+    echo "selfcheck: ac-record-schema(AC5 $ac) declared=$(printf '%s' "$ac_fields" | wc -w) accepted=$cnt_ok omitted('$ac_first')_refused=$([ "$cnt_miss" = "1" ] && echo yes || echo no) (expect 1 / yes — 声明逐字段在写入期被强制)"
+  done
+  [ "$ac5_ok" = "1" ] || fail="$fail AC5-declared-field-not-enforced-at-write-time"
+
+  # ── AC1：两向差集【可检出】（能取假）─────────────────────────────────────────────
+  # 把内存里的声明删掉一个【判据确实在读】的字段（AC-247 的 carrier_records）⇒ 报告必须取 DRIFT
+  # 且点名该字段 + 退出非 0。⛔ 这是 AC1 的可失败控制：一个永远打印 ok 的检查不是测量（硬规则 4），
+  # 而「不产生新红」正是一个结构上不可能报红的检查会给出的结果。
+  # ⚠️ 必须【只删字段、保留整行】：整行删掉的话该 AC 会从报告的作用域里整个消失（报告按声明行驱动）
+  # —— 那正是下面 unregistered 完备性检查要挡的另一半，二者不可互相代替。
+  local ac1_out="" ac1_rc=0 ac1_hdr=0 ac1_field=0
+  AC_RECORD_SCHEMA="$(printf '%s\n' "$save_schema" | sed 's/^GOAL-016-AC-247 host:str project_root:str pre_task_count:int post_task_count:int stale_days:num driver_alive:int carrier_records:int$/GOAL-016-AC-247 host:str project_root:str pre_task_count:int post_task_count:int stale_days:num driver_alive:int/')"
+  if ac1_out="$(ac_record_schema_report 2>&1)"; then ac1_rc=0; else ac1_rc=$?; fi
+  case "$ac1_out" in *'GOAL-016-AC-247    [DRIFT]'*) ac1_hdr=1 ;; esac
+  case "$ac1_out" in *'判据读、声明缺'*"'carrier_records'"*) ac1_field=1 ;; esac
+  echo "selfcheck: ac-record-schema(AC1 drop-a-criterion-field) rc=$ac1_rc drift-line=$ac1_hdr names-field=$ac1_field (expect non-0/1/1 — 声明漏一个判据在读的字段必须被差集检出并点名)"
+  [ "$ac1_rc" != "0" ] || fail="$fail AC1-negative-control-did-not-flip"
+  [ "$ac1_hdr" = "1" ] || fail="$fail AC1-drift-line-missing"
+  [ "$ac1_field" = "1" ] || fail="$fail AC1-drift-not-named"
+
+  # AC1 的完备性半边：整行删掉 ⇒ 该 AC 从报告作用域消失，但必须被 unregistered 反查抓住。
+  local ac1b_out="" ac1b_rc=0 ac1b_hit=0
+  AC_RECORD_SCHEMA="$(printf '%s\n' "$save_schema" | grep -v '^GOAL-016-AC-247 ')"
+  if ac1b_out="$(ac_record_schema_report 2>&1)"; then ac1b_rc=0; else ac1b_rc=$?; fi
+  case "$ac1b_out" in *'GOAL-016-AC-247'*'[UNREGISTERED]'*) ac1b_hit=1 ;; esac
+  echo "selfcheck: ac-record-schema(AC1 whole-row-removed) rc=$ac1b_rc unregistered=$ac1b_hit (expect non-0/1 — 少一行声明会打印全绿报告, 故须由【产出侧反查】兜住)"
+  [ "$ac1b_rc" != "0" ] || fail="$fail AC1b-whole-row-removal-not-detected"
+  [ "$ac1b_hit" = "1" ] || fail="$fail AC1b-unregistered-not-named"
+
+  if [ -n "$fail" ]; then
+    echo "selfcheck: ac-record-schema FAIL —$fail"
+    rc=1
+  fi
+  AC_RECORD_SCHEMA="$save_schema"; AC89="$save_ac89"; TS="$save_ts"; BUILD_SHA="$save_sha"
+  rm -rf "$t"
+  return $rc
+}
+
+if [ "$AC_RECORD_SCHEMA_REPORT" = 1 ]; then
+  ac_record_schema_report
+  exit $?
+fi
 
 if [ "$DO_SELFCHECK" = 1 ]; then
   selfcheck
