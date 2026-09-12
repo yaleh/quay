@@ -441,6 +441,23 @@ AC248_EVALUATED=0                            # 1 = 全部读数成立并已写�
 AC248_WRITTEN_THIS_RUN=0                     # 1 = 本次运行写出了 AC-248 记录
 AC248_WRITTEN_ROOT=""
 
+# ── ⑩ AC-250（GOAL-016 观察面）：CLI 旋钮 ──────────────────────────────────────────────────
+# ⚠️ 这些【必须】在参数解析【之前】声明：解析循环上面写的是 `VAR=1`/`VAR="$2"`，而本文件的
+# 声明块若排在解析之后，就会把解析出来的值【覆盖回默认值】——2026-09-12 实测踩过一次：
+# `--ac250-web-observe` 被解析成 1，随后被后面的 `AC250_WEB_OBSERVE=0` 覆盖回 0 ⇒ 脚本静默落进
+# 主流程、报了一句与本模式无关的 `--tgz required` 并以 exit 2 结束（「参数不生效」与「参数没传」
+# 在输出上同形）。AC247_*/AC248_* 都在这一区，本条同规矩。
+AC250_WEB_OBSERVE=0                          # 1 = --ac250-web-observe 触发（opt-in 模式）
+AC250_SSH=""                                 # --ac250-ssh：目标机 ssh 目的地
+AC250_ROOT=""                                # --ac250-root：目标机上的目标项目根
+AC250_TASK_ID_ARG=""                         # --ac250-task：被观察的 task id（两点读数必须同一 id）
+AC250_QUAY_ARG=""                            # --ac250-quay：目标机 quay CLI 入口（缺省 = 从目标机推导）
+AC250_NODE_ARG=""                            # --ac250-node：目标机 node 解释器（缺省 = 目标机 PATH 上的 node）
+AC250_PORT="${AC250_PORT_OVERRIDE:-4173}"    # --ac250-port
+AC250_WINDOW=600                             # --ac250-window：观察窗口秒数
+AC250_POLL_INTERVAL=5                        # 轮询间隔（秒）
+AC250_SSH_TIMEOUT=10                         # 单次 ssh 连接超时（秒）
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --tgz) QUAY_TGZ="$2"; shift 2 ;;
@@ -2242,17 +2259,10 @@ print("," + ",".join(json.dumps(k) + ":" + json.dumps(v) for k, v in e))
 # ⛔ 本模式【不跑 step①】：它观测的是【目标机上已安装的】产物（--ac250-quay 指定 / 从目标机推导），
 #   而 step① 装的是【判读侧】的前缀——与「目标机上那个 web 绑了什么地址」无关。产物身份经
 #   quay_path/quay_sha256 两个【非判据】字段如实留档，可被独立复算。
-AC250_WEB_OBSERVE=0                          # 1 = --ac250-web-observe 触发（opt-in 模式）
-AC250_SSH=""                                 # --ac250-ssh：目标机 ssh 目的地
-AC250_ROOT=""                                # --ac250-root：目标机上的目标项目根
-AC250_TASK_ID_ARG=""                         # --ac250-task：被观察的 task id（两点读数必须同一 id）
-AC250_QUAY_ARG=""                            # --ac250-quay：目标机 quay CLI 入口（缺省 = 从目标机推导）
-AC250_NODE_ARG=""                            # --ac250-node：目标机 node 解释器（缺省 = 目标机 PATH 上的 node）
-AC250_PORT="${AC250_PORT_OVERRIDE:-4173}"    # --ac250-port
-AC250_WINDOW=600                             # --ac250-window：观察窗口秒数
-AC250_POLL_INTERVAL=5                        # 轮询间隔（秒）
-AC250_SSH_TIMEOUT=10                         # 单次 ssh 连接超时（秒）
-
+# ⚠️ CLI 旋钮（AC250_WEB_OBSERVE / AC250_SSH / AC250_ROOT / AC250_TASK_ID_ARG / AC250_QUAY_ARG /
+#    AC250_NODE_ARG / AC250_PORT / AC250_WINDOW / AC250_POLL_INTERVAL / AC250_SSH_TIMEOUT）在参数解析
+#    【之前】声明（本文件上半部分，紧邻 AC248_*）——⛔ 不要在这里再写一遍：那会把解析出来的值覆盖回
+#    默认值（2026-09-12 实测的静默失效）。下面是【运行期读数】变量，只在函数里被赋值/读取。
 AC250_HOST=""                                # 目标机 hostname（经 ssh 读）
 AC250_TAILSCALE0_RAW=""                      # `ip -4 addr show tailscale0` 输出原文（直接量）
 AC250_TAILSCALE0_IP=""                       # 由上面原文【推导】出的地址（⛔ 不硬编码）
@@ -2286,9 +2296,13 @@ AC250_WRITTEN_ROOT=""                        # 记录写到的目标项目根（
 ac250_shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 
 # 在目标机上跑一条命令（BatchMode：⛔ 不交互、⛔ 不挂在提示符上）。stdout 原样返回。
+# `timeout` 是【防线】不是装饰：任何一次 ssh 卡住都会让整个验证静静停在某一层，而「卡住」与
+# 「在跑」在输出上同形（本文件的 stdout 是唯一的进度面）。实测 2026-09-12：起 serve 的那次 ssh
+# 因远端后台进程继承了 ssh 的 stdout 管道而不返回 ⇒ 脚本停在 ⑩b 之后、日志不再增长。
 ac250_target() {
   [ -n "$AC250_SSH" ] || return 1
-  ssh -o BatchMode=yes -o ConnectTimeout="$AC250_SSH_TIMEOUT" "$AC250_SSH" "$1" 2>/dev/null
+  timeout "${AC250_SSH_CMD_TIMEOUT:-30}" \
+    ssh -o BatchMode=yes -o ConnectTimeout="$AC250_SSH_TIMEOUT" "$AC250_SSH" "$1" 2>/dev/null
 }
 
 # 目标机身份 + tailscale0 真实地址。两者都是直接量；地址由 `ip -4 addr show` 的原文【推导】。
@@ -2360,7 +2374,12 @@ ac250_start_serve() {
   AC250_SERVE_PID=""
   [ -n "$AC250_QUAY_RESOLVED" ] && [ -n "$AC250_NODE_RESOLVED" ] || return 0
   [ -n "$AC250_TAILSCALE0_IP" ] && [ -n "$AC250_ROOT" ] || return 0
-  cmd="cd $(ac250_shq "$AC250_ROOT") && setsid nohup $(ac250_shq "$AC250_NODE_RESOLVED") $(ac250_shq "$AC250_QUAY_RESOLVED") serve --host $(ac250_shq "$AC250_TAILSCALE0_IP") --port $(ac250_shq "$AC250_PORT") >/dev/null 2>&1 </dev/null & echo \$!"
+  # ⚠️ 三个 fd 的重定向必须挂在【子 shell 分组】上（`( … ) >/dev/null 2>&1 </dev/null &`），
+  # ⛔ 不能只挂在分组内的那条命令上：把 `&` 直接跟在 `… serve … >/dev/null 2>&1 </dev/null` 后面时，
+  # 子 shell 自身仍持有 ssh 的 stdout 管道 ⇒ 长命的 serve 让 ssh 【永不返回】（实测 2026-09-12：
+  # 脚本停在 ⑩b 之后、日志不再增长，而目标机上 serve 确实已经绑好地址在听——「卡住」与「在跑」同形）。
+  # 分组形态实测 RETURN，且 `$!` 仍是那个长命进程的 pid（收尾 kill 用它）。
+  cmd="( cd $(ac250_shq "$AC250_ROOT") && setsid nohup $(ac250_shq "$AC250_NODE_RESOLVED") $(ac250_shq "$AC250_QUAY_RESOLVED") serve --host $(ac250_shq "$AC250_TAILSCALE0_IP") --port $(ac250_shq "$AC250_PORT") ) >/dev/null 2>&1 </dev/null & echo \$!"
   AC250_SERVE_PID="$(ac250_target "$cmd" | head -n1 | tr -d '\r' || true)"
   case "$AC250_SERVE_PID" in ''|*[!0-9]*) AC250_SERVE_PID="" ;; esac
   return 0
