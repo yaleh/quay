@@ -50,6 +50,7 @@ import {
   TARGET_HEALTH_FACT_NAME,
   HEALTH_REQUIRED_CARRIERS,
   HEALTH_OBSERVED_CARRIERS,
+  HEALTH_WINDOW_SEC_DEFAULT,
 } from '../scripts/goal-driver.ts';
 import { runResidentQualityGateLoop } from '../scripts/quality-gate-driver.ts';
 import { DRIVER_KINDS, KNOWN_KINDS } from '../scripts/driver-runtime.ts';
@@ -1351,6 +1352,65 @@ test('AC1 负控制: 两条信号之外的一切都是**读数**不是判据（�
   }
 });
 
+test('AC1: fan-in-failing 信号能取假 —— 目标项目自己的 fan-in-step-trace.jsonl 窗口内有 ok:false ⇒ unhealthy[fan-in-failing]；全 ok:true ⇒ 该信号消失（人 2026-09-12 DIR-131 AC6 口径补充裁定）', () => {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const writeTrace = (dir, lines) => fs.writeFileSync(path.join(dir, '.quay', 'fan-in-step-trace.jsonl'), lines.map((l) => JSON.stringify(l)).join('\n') + '\n', 'utf8');
+
+  const failing = mkTargetRoot({ pluginVersion: DELIVERED_VERSION, roundRecords: ['worker-round.jsonl'] });
+  const proc = spawnTargetDriverFixture(failing);
+  const passing = mkTargetRoot({ pluginVersion: DELIVERED_VERSION, roundRecords: ['worker-round.jsonl'] });
+  const proc2 = spawnTargetDriverFixture(passing);
+  try {
+    assert.ok(waitForProcessVisible(proc.pid) && waitForProcessVisible(proc2.pid), '两个夹具都已上进程表（否则下面的对照被 not-driving 污染）');
+    writeTrace(failing, [
+      { event: 'step-end', step: 'ff', task: 'TASK-89', epoch: nowSec - 60, ok: false },
+      { event: 'step-end', step: 'merge-develop', task: 'TASK-90', epoch: nowSec - 30, ok: true },
+      { event: 'other', step: 'ignored', epoch: nowSec - 10, ok: false }, // 非 step-end ⇒ 不计
+    ]);
+    writeTrace(passing, [
+      { event: 'step-end', step: 'ff', task: 'TASK-91', epoch: nowSec - 30, ok: true },
+    ]);
+    const fFail = targetHealthFact(repoRoot, { targetRoot: failing });
+    const fPass = targetHealthFact(repoRoot, { targetRoot: passing });
+    assert.deepEqual(fFail.value.signals, ['fan-in-failing'], '窗口内 1 个 ok:false ⇒ 信号 fan-in-failing（⛔ not-driving 不在，因为进程真在跑）');
+    assert.equal(fFail.value.verdict, 'unhealthy', '有信号 ⇒ unhealthy');
+    assert.equal(fFail.value.fanIn.failed, 1, '失败步骤数');
+    assert.deepEqual(fFail.value.fanIn.failedByStep, { ff: 1 }, '按步骤名归类');
+    assert.deepEqual(fFail.value.fanIn.failedTasks, ['TASK-89'], '点名失败任务');
+    assert.equal(fFail.value.fanIn.steps, 2, '窗口内 step-end 计 2 条（非 step-end 的第三行不计入）');
+    assert.ok(!fPass.value.signals.includes('fan-in-failing'), '全 ok:true ⇒ 该信号消失（能取假）');
+    assert.equal(fPass.value.fanIn.failed, 0, '零失败');
+    assert.equal(fPass.value.verdict, 'healthy', '零信号 ⇒ healthy');
+    console.log(`AC1[fan-in-failing] ${fFail.reason}`);
+    console.log(`AC1[fan-in 对照·全绿] ${fPass.reason}`);
+  } finally {
+    proc.kill('SIGKILL');
+    proc2.kill('SIGKILL');
+    fs.rmSync(failing, { recursive: true, force: true });
+    fs.rmSync(passing, { recursive: true, force: true });
+  }
+});
+
+test('AC1: fan-in-failing 读不懂时不与「零失败」同形（trace-unreadable / trace-unparseable，硬规则 3b）', () => {
+  const badJson = mkTargetRoot({ pluginVersion: DELIVERED_VERSION });
+  const dirTrace = mkTargetRoot({ pluginVersion: DELIVERED_VERSION });
+  try {
+    fs.writeFileSync(path.join(badJson, '.quay', 'fan-in-step-trace.jsonl'), 'not json at all\n', 'utf8');
+    const fBad = targetHealthFact(repoRoot, { targetRoot: badJson });
+    assert.equal(fBad.value.verdict, 'not-evaluated', 'JSON 坏行 ⇒ not-evaluated（⛔ 不是 healthy/0 failed）');
+    assert.equal(fBad.value.cause, 'trace-unparseable', '成因点名是解析问题');
+
+    fs.rmSync(path.join(dirTrace, '.quay', 'fan-in-step-trace.jsonl'));
+    fs.mkdirSync(path.join(dirTrace, '.quay', 'fan-in-step-trace.jsonl')); // 载体其实是个目录 ⇒ 读不出来
+    const fDirAsFile = targetHealthFact(repoRoot, { targetRoot: dirTrace });
+    assert.equal(fDirAsFile.value.verdict, 'not-evaluated', '载体读不出来 ⇒ not-evaluated（⛔ 不是 0 failed）');
+    assert.equal(fDirAsFile.value.cause, 'trace-unreadable', '成因点名是「在但读不出来」，⛔ 与 carrier-missing 不同形');
+  } finally {
+    fs.rmSync(badJson, { recursive: true, force: true });
+    fs.rmSync(dirTrace, { recursive: true, force: true });
+  }
+});
+
 // ── AC2：不阻塞 —— 健康度为红不进入达成判定（goalFlipDecision 输入/输出逐字一致）───────────────
 
 test('AC2: 健康度为红不阻塞 —— goalFlipDecision 输入/输出与改动前逐字一致，且端到端 GOAL 照样 flip', async () => {
@@ -1428,6 +1488,7 @@ test('AC3: 六种未评估成因各出独立取值，且 signals 恒 null（⛔ 
         driverProcesses: null, initStatePresent: true, initStatePluginVersion: DELIVERED_VERSION,
         initStateLaidAt: null, initStateAgeSec: null,
         carriers: Object.fromEntries([...HEALTH_REQUIRED_CARRIERS, ...HEALTH_OBSERVED_CARRIERS].map((c) => [c, true])),
+        fanInSteps: [], traceTruncated: false, fanInParseErrors: 0,
       }),
     });
     const cases = [
@@ -1483,8 +1544,14 @@ test('AC3: 探针形态读不懂 ⇒ probe-unparseable（⛔ 不把半个对象�
   assert.equal(parseHealthProbe('{"root":"/x"}'), null, '缺 rootPresent/nowMs ⇒ 形态不全即拒');
   assert.equal(parseHealthProbe('{"root":"/x","rootPresent":true,"nowMs":1,"roundRecords":"nope","carriers":{}}'), null, 'roundRecords 非数组即拒');
   assert.equal(parseHealthProbe('{"root":"/x","rootPresent":true,"nowMs":1,"roundRecords":[],"carriers":null}'), null, 'carriers 非对象即拒');
-  const ok = parseHealthProbe('{"root":"/x","rootPresent":true,"nowMs":1,"roundRecords":[],"carriers":{}}');
+  assert.equal(
+    parseHealthProbe('{"root":"/x","rootPresent":true,"nowMs":1,"roundRecords":[],"carriers":{},"fanInSteps":"nope"}'),
+    null,
+    'fanInSteps 非 null 且非数组 ⇒ 拒（同一类形态校验，覆盖 fan-in 载体维度）',
+  );
+  const ok = parseHealthProbe('{"root":"/x","rootPresent":true,"nowMs":1,"roundRecords":[],"carriers":{},"fanInSteps":null}');
   assert.ok(ok && ok.driverProcesses === null, '形态齐全才收；driverProcesses:null 与「零个进程」不同形（后者是 {count:0}）');
+  assert.equal(ok.fanInSteps, null, 'fanInSteps 缺省态透传为 null（⛔ 不是 []）');
 });
 
 // ── AC4：版本一致性读数（目标项目配置形状 vs 交付物 plugin 版本，并排 + 可机械检出不等）───────────
@@ -1561,7 +1628,11 @@ test('接线: drivers.yml 缺失/无 target_* ⇒ 未声明目标（⛔ 不起�
 
 test('deriveTargetHealth 是纯函数三态：probe 失败 ⇒ 独立取值，⛔ 不与 healthy 同形', () => {
   const binding = { host: null, root: '/tmp/x' };
-  const v = deriveTargetHealth(binding, { ok: false, cause: 'probe-failed', detail: ['exit=255'] }, null);
+  const v = deriveTargetHealth(
+    binding,
+    { ok: false, cause: 'probe-failed', detail: ['exit=255'] },
+    { deliveredPluginVersion: null, windowSec: HEALTH_WINDOW_SEC_DEFAULT },
+  );
   assert.equal(v.verdict, 'not-evaluated');
   assert.equal(v.signals, null, '⛔ 不是 []');
   assert.equal(v.cause, 'probe-failed');

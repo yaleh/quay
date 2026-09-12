@@ -7,20 +7,27 @@
 // 回答的问题（@instrument）：「goal-driver.ts 是否在【代码位置】（排除注释与字符串字面量）出现
 //   task 写路径调用点——task_write / lifecycle_promote / lifecycle_retreat / lifecycle_complete
 //   这些 task 机制动词，或以 tasks/ 为目标的 fs.write* / writeFileSync——即 goal 机制越界替 task
-//   机制落地任务状态？以及（DIR-131 AC6）是否在【非注释位置】引用 fan-in / 落地率类载体
-//   （fan-in / full-suite-state / 落地率）——即 goal 机制以 task 落地指标为输入（错误归因反例）。」
+//   机制落地任务状态？以及（DIR-131 AC6）是否在【非注释位置】引用**本仓自身**的 fan-in / 落地率类
+//   载体（fan-in / full-suite-state / 落地率）——即 goal 机制以本仓 task 落地指标为输入（错误归因
+//   反例）。」
+//
+// **2026-09-12 补充裁定（AC6 口径澄清，人三选一之①）**：「读外部被驱动系统」与「读本仓自身落地率」
+// 是两件事——前者不构成 AC6 的反例形态（它不驱动/佐证本仓任何 task 的判定）。据此新增一个**结构性**
+// 豁免（`exemptSpans`）：仅当 fan-in/落地率 token 同时落在源码里精确配对的
+// `DIR-131-TARGET-PROBE-BEGIN`/`-END` 标记之间**且**落在字符串/模板字面量内部时豁免——标记不配对
+// （缺失/多于一对/顺序颠倒）⇒ 不豁免任何位置（fail-closed，回退到澄清前的行为）。
 //
 // 判定（能取假，硬规则 3/4）：
 //   - task 机制动词（task_write / lifecycle_*）在代码位置出现 ⇒ RED（goal 机制越界写 task 状态）。
 //   - 写家族调用（fs.write* / writeFileSync / appendFile* / createWriteStream）在代码位置出现且其
 //     语句窗口内引用 tasks/ 路径 ⇒ RED（goal 机制直接写 tasks/*.md）。
-//   - fan-in / full-suite-state / 落地率 在非注释位置（含字符串字面量——读载体必写路径）出现 ⇒ RED
-//     （goal 机制读 task 落地指标）。
+//   - fan-in / full-suite-state / 落地率 在非注释位置（含字符串字面量——读载体必写路径）出现，且不在
+//     上述目标探针豁免区内 ⇒ RED（goal 机制读**本仓自身**落地指标）。
 //   - 头注释 / DIR-131 正文里逐字出现这些词不算（屏蔽注释与字符串字面量——硬规则 2，裸 grep 假阳性）。
 //
 // 退出码（checker-mechanical-spine-check.ts 词表 {0,1,2,3}）：
-//   0 = PASS（goal-driver.ts 无 task 写路径调用点，也不读 fan-in / 落地率类载体）
-//   1 = RED（≥1 个 task 写路径调用点 / fan-in 载体引用）
+//   0 = PASS（goal-driver.ts 无 task 写路径调用点，也不在豁免区外读 fan-in / 落地率类载体）
+//   1 = RED（≥1 个 task 写路径调用点 / 豁免区外的 fan-in 载体引用）
 //   2 = usage/env error（非法参数）
 //   3 = NOT-EVALUATED（目标文件缺失 / 不可读——读不到输入 ≠ 无违规，硬规则 3b）
 //
@@ -49,10 +56,42 @@ export const WRITE_FAMILY_RE =
 /** tasks 路径引用：`tasks` 后紧跟引号 / 斜杠 / 反斜杠（`"tasks"`、`tasks/`、`` `tasks/${id}.md` ``）。 */
 export const TASKS_PATH_RE = /tasks(?=["'`/\\])/;
 
-/** fan-in / 落地率类载体 token（DIR-131 AC6 归因反例机械化）：goal 侧不以 task 落地指标为输入。
- *  与「Human verification」第 4 点的 grep 词表一致——fan-in / full-suite-state / 落地率 应无非注释命中。
+/** fan-in / 落地率类载体 token（DIR-131 AC6 归因反例机械化）：goal 侧不以**本仓自身**的 task 落地
+ *  指标为输入。与「Human verification」第 4 点的 grep 词表一致——fan-in / full-suite-state / 落地率
+ *  应无非注释命中，**除非**落在 `exemptSpans` 认定的目标探针豁免区（见下）。
  *  读载体文件必然把路径写成字符串，故检测范围 = 非注释位置（含字符串字面量），不含 bash `#`。 */
 export const FANIN_CARRIER_RE = /(fan-in|full-suite-state|落地率)/g;
+
+/** 目标探针豁免区标记（人 2026-09-12 DIR-131 AC6 口径补充裁定，三选一之①）：「读外部被驱动系统」
+ *  与「读本仓自身落地率」是两件事——前者不构成 AC6 的反例形态（它不驱动/佐证本仓任何 task 的判定），
+ *  故给它一个**结构性**豁免，而不是放宽/删除 Detector 3 本身（后者会重新打开真正的反例形态）。 */
+export const TARGET_PROBE_EXEMPT_BEGIN = "DIR-131-TARGET-PROBE-BEGIN";
+export const TARGET_PROBE_EXEMPT_END = "DIR-131-TARGET-PROBE-END";
+
+/** 标记必须是【独占一行】的 `//` 行注释（锚定整行，⛔ 不是子串搜索）——散文里提及这两个词
+ *  （本文件、goal-driver.ts 的头注释都会提及）因此不会被误认成标记，无需额外转义/回避。 */
+const TARGET_PROBE_BEGIN_RE = new RegExp(`^[ \\t]*//[ \\t]*${TARGET_PROBE_EXEMPT_BEGIN}[ \\t]*$`, "gm");
+const TARGET_PROBE_END_RE = new RegExp(`^[ \\t]*//[ \\t]*${TARGET_PROBE_EXEMPT_END}[ \\t]*$`, "gm");
+
+/** 求豁免区间（字符位置，闭区间）。⛔ fail-closed：必须**恰好一对**、且 BEGIN 在 END 之前，
+ *  否则（未标记 / 标记数不对 / 顺序颠倒）返回空——不豁免任何位置，退回 Detector 3 的原始行为。 */
+export function exemptSpans(src: string): Array<[number, number]> {
+  const begins: number[] = [];
+  const ends: number[] = [];
+  let m: RegExpExecArray | null;
+  TARGET_PROBE_BEGIN_RE.lastIndex = 0;
+  while ((m = TARGET_PROBE_BEGIN_RE.exec(src)) !== null) begins.push(m.index);
+  TARGET_PROBE_END_RE.lastIndex = 0;
+  while ((m = TARGET_PROBE_END_RE.exec(src)) !== null) ends.push(m.index);
+  if (begins.length !== 1 || ends.length !== 1) return [];
+  if (!(begins[0] < ends[0])) return [];
+  return [[begins[0], ends[0]]];
+}
+
+function inAnySpan(i: number, spans: Array<[number, number]>): boolean {
+  for (const [s, e] of spans) if (i >= s && i <= e) return true;
+  return false;
+}
 
 export interface BoundaryViolation {
   /** task-verb = task 机制动词；task-write = 写家族调用指向 tasks/；fanin-read = 非注释位置引用 fan-in / 落地率类载体。 */
@@ -209,11 +248,15 @@ export function checkGoalDriverBoundary(src: string): BoundaryViolation[] {
     }
   }
 
-  // Detector 3 — fan-in / 落地率类载体（DIR-131 AC6 归因反例机械化）：goal 侧不以 task 落地指标为输入。
-  // 在「仅屏蔽注释」的文本上匹配（字符串保留——读载体文件必然把路径写成字符串），非注释位置引用即越界。
-  // 与 Human verification 第 4 点的 grep 词表一致：fan-in / full-suite-state / 落地率 应无非注释命中。
+  // Detector 3 — fan-in / 落地率类载体（DIR-131 AC6 归因反例机械化）：goal 侧不以**本仓自身**的
+  // task 落地指标为输入。在「仅屏蔽注释」的文本上匹配（字符串保留——读载体文件必然把路径写成字符串），
+  // 非注释位置引用即越界；⛔ 除非同时落在 `exemptSpans` 认定的目标探针豁免区**且**在字符串字面量内部
+  // （人 2026-09-12 DIR-131 AC6 口径补充裁定：「读外部被驱动系统」≠「读本仓自身落地率」，前者不是
+  // AC6 的反例形态）——两个条件缺一都仍判红，标记不配对时豁免区为空集，行为与澄清前完全一致。
+  const exempt = exemptSpans(src);
   FANIN_CARRIER_RE.lastIndex = 0;
   while ((m = FANIN_CARRIER_RE.exec(commentMaskedText)) !== null) {
+    if (str[m.index] === 1 && inAnySpan(m.index, exempt)) continue; // 目标探针载荷字符串内 ⇒ 豁免
     violations.push({
       kind: "fanin-read",
       token: m[1],
@@ -263,7 +306,7 @@ usage: node --no-warnings --experimental-strip-types plugin/scripts/goal-driver-
     process.stderr.write(`goal-driver-task-boundary-check: NOT-EVALUATED — target file missing or unreadable: ${res.target}\n`);
   } else if (res.ok) {
     process.stdout.write(
-      "goal-driver-task-boundary-check: PASS — goal-driver.ts has no task-write call sites (task_write/lifecycle_*/fs.write-to-tasks) and no fan-in/落地率 carrier reads\n",
+      "goal-driver-task-boundary-check: PASS — goal-driver.ts has no task-write call sites (task_write/lifecycle_*/fs.write-to-tasks) and no OWN-REPO fan-in/落地率 carrier reads outside the target-probe exempt span\n",
     );
   } else {
     process.stderr.write(`goal-driver-task-boundary-check: RED (${res.violations.length} violation(s))\n`);

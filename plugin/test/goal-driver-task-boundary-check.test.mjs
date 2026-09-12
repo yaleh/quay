@@ -12,6 +12,8 @@
 //   - 真实动词调用 ⇒ 违规 kind=task-verb + 点名 token + 行号
 //   - 真实写调用指向 tasks/ ⇒ 违规 kind=task-write + 点名行号（AC2 逐字例）
 //   - 写调用指向非 tasks/ ⇒ 0 违规（目标特异性）
+//   - 目标探针豁免区（人 2026-09-12 DIR-131 AC6 口径补充裁定）：标记内+字符串内 ⇒ 豁免；
+//     同一份文本里标记外仍红；标记不配对 ⇒ fail-closed（不豁免任何位置）
 //   - 行号精确性 + 目标文件缺失 ⇒ NOT-EVALUATED（读不到 ≠ 无违规，硬规则 3b）
 //
 // Run:
@@ -146,6 +148,57 @@ test("落地率 载体负控制：字符串里的 落地率 ⇒ kind=fanin-read"
   assert.equal(v.length, 1, `expected 1 violation, got: ${JSON.stringify(v)}`);
   assert.equal(v[0].kind, "fanin-read");
   assert.equal(v[0].token, "落地率");
+});
+
+// ── 目标探针豁免区（人 2026-09-12 DIR-131 AC6 口径补充裁定，三选一之①）双向负控制 ─────────────────
+// 「读外部被驱动系统」≠「读本仓自身落地率」：标记内 + 字符串内 ⇒ 豁免；标记外（同一份文本里）
+// 仍然是 DIR-131 原裁定要挡的形态 ⇒ 不豁免（负控制两态同文件对照，逐字贴出）。
+
+test("目标探针豁免·标记外仍红：同一份源码里，标记外的 fan-in 字面量不受豁免影响", () => {
+  const src = [
+    'const outside = ".quay/fan-in-step-trace.jsonl";', // 标记外——本仓自身载体，仍应判红
+    "// DIR-131-TARGET-PROBE-BEGIN",
+    'const inside = "fan-in-step-trace.jsonl";', // 标记内 + 字符串内——豁免
+    "// DIR-131-TARGET-PROBE-END",
+  ].join("\n");
+  const v = checkGoalDriverBoundary(src);
+  assert.equal(v.length, 1, `expected exactly 1 violation (the outside one), got: ${JSON.stringify(v)}`);
+  assert.equal(v[0].kind, "fanin-read");
+  assert.equal(v[0].line, 1, "只有标记外那一行应被判红");
+});
+
+test("目标探针豁免·标记配对且在字符串内 ⇒ 豁免（0 违规）", () => {
+  const src = [
+    "// DIR-131-TARGET-PROBE-BEGIN",
+    'const c = ".quay/fan-in-step-trace.jsonl";',
+    "// DIR-131-TARGET-PROBE-END",
+  ].join("\n");
+  assert.deepEqual(checkGoalDriverBoundary(src), [], "标记精确配对 + 字面量在字符串内部 ⇒ 应豁免为 0 违规");
+});
+
+test("目标探针豁免·标记不配对 ⇒ fail-closed（仍判红，不豁免任何位置）", () => {
+  const missingEnd = ["// DIR-131-TARGET-PROBE-BEGIN", 'const c = ".quay/fan-in-step-trace.jsonl";'].join("\n");
+  const v1 = checkGoalDriverBoundary(missingEnd);
+  assert.equal(v1.length, 1, `缺 END 标记时不得豁免，got: ${JSON.stringify(v1)}`);
+
+  const twoBegins = [
+    "// DIR-131-TARGET-PROBE-BEGIN",
+    "// DIR-131-TARGET-PROBE-BEGIN",
+    'const c = ".quay/fan-in-step-trace.jsonl";',
+    "// DIR-131-TARGET-PROBE-END",
+  ].join("\n");
+  const v2 = checkGoalDriverBoundary(twoBegins);
+  assert.equal(v2.length, 1, `标记数目不对（2 BEGIN/1 END）时不得豁免，got: ${JSON.stringify(v2)}`);
+});
+
+test("真实仓库正面例：goal-driver.ts 的 fan-in-failing 信号已落地且门仍绿（PASS，非仅『无违规』）", () => {
+  const target = path.join(REPO_ROOT, "plugin", "scripts", "goal-driver.ts");
+  const res = runCheck(target);
+  assert.equal(res.notEvaluated, false);
+  assert.equal(res.ok, true, `expected PASS, got violations: ${JSON.stringify(res.violations)}`);
+  // 反向对照：goal-driver.ts 确实读了目标项目自己的 fan-in-step-trace.jsonl（不是零覆盖的豁免）。
+  const src = fs.readFileSync(target, "utf8");
+  assert.match(src, /fan-in-step-trace\.jsonl/, "goal-driver.ts 应仍然引用该载体（豁免不是删掉这条读数）");
 });
 
 // ── 行号精确性：违规在源码第 N 行 ⇒ line === N ─────────────────────────────────────────────────
