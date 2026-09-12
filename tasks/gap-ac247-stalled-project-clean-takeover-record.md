@@ -2,7 +2,7 @@
 id: gap-ac247-stalled-project-clean-takeover-record
 title: AC-247 没有生产者：当前 build 在停摆 ≥14 天的存量项目上从零安装并接管后，载体里产不出 ac=GOAL-016-AC-247
   记录（driver 真活读载体，⛔ 不读 start 退出码）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
