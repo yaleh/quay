@@ -2,7 +2,7 @@
 id: gap-ff-cert-gate-deadlock-zero-landings-since-dist-kernel-activation
 title: P0 全 loop 停摆：dist-kernel 激活后 ff 证书闸的分类器不可解析 ⇒ 自 15:03
   起【零任务落地】，且该缺陷的修复自身也落不了地（需人工激活）
-status: needs-human
+status: superseded
 labels:
   - gap
   - defect
@@ -83,3 +83,13 @@ RC=1   （stdout 空）
 - 生产 driver 进程：`/home/yale/work/quay/packages/quay/plugin/scripts/dist/worker-driver.js --root /home/yale/work/quay --run-id wk-prod-1789139008`
 - 失败轨迹：`.quay/fan-in-step-trace.jsonl`（ac161 `step-end ff ok:false` @15:54:38；aged-project @17:20:43）
 - 我的复验现场与读数：`/tmp/ac161-ac3-1789147801/`（AC3 真实交付运行 + sha256 前后一致）、`/tmp/ac161-scoped-gate.log`（scoped 门唯一一条红）
+
+## Resolution（2026-09-12，人裁定关闭）
+
+本 Finding 描述的缺陷**已由另一条任务修复并落地**：`gap-ff-merge-suite-cert-classifier-unshipped-and-misreported`（2026-09-11 18:14 翻 done）。修法落在 `packages/quay/src/fan-in/ff-merge.ts`：证书闸改用 `siblingScriptArgv` 解析分类器——`.ts` 不存在时回落到 `dist/<name>.js`，两者都取不到时返回**可区分**的 `classifier not resolvable under …`，不再与「delta 非惰性」同形（硬规则 ③b）。
+
+关闭时的实测读数（⛔ 非推断）：
+
+- 落地恢复：`git log develop --since=2026-09-11T15:00:00 | grep -c '翻 .* done'` ⇒ **5**（其中 18:20、18:27 两条在修复落地之后穿过 ff 步）
+- 生产 worker driver 仍是同一个 dist 进程（`dist/worker-driver.js`，15:03 起未重启）⇒ 修复是在**触发本缺陷的同一布局下**被验证的，不是靠换回 `.ts` 规避
+- 本 Finding 自身 AC 0/0、无实现面，其内容已被上述任务完全覆盖 ⇒ 记 `superseded` 而非 `done`
