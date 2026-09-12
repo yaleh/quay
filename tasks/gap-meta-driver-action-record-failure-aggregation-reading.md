@@ -177,6 +177,31 @@ value.actionRecordFailures = {"state":"unthresholded","reason":null,
 
 **AC9 的前置步（worker 2b(ii)，⛔ 不是全量绿本身）**：`bash scripts/test.sh --for-task gap-meta-driver-action-record-failure-aggregation-reading --allow-thin` → **RC=0**，137/137 测试通过、0 失败、无 FAIL 检查器；scoped-gate 缓存已写（`key = <task>\t3792cf14afdc856df32045aeea2718f1ac3cbb2a`，`ok:true`）。
 
+**AC9（未勾；声明为（待外部）——注记位置修正 + 判定读数）**
+
+AC9 的语义就是「全量绿由引擎的 fan-in/批次合边界给出」，worker 按 SPEC-worker-driven-inner §5 不跑全量套件 ⇒ 它只能由外部事件关闭。原文本把注记写在**行中**（`…全量绿（待外部）——worker 按…`），而 pool 的单源谓词是**位置判定**——`ready-pool-check.ts:879` 的 `isExternalVerificationItem` = `/（待外部）\s*$/`，注记必须在**行尾**：原文本结构上不被识别 ⇒ 判 `fail` ⇒ flip 被拒 ⇒ 上一轮 exited-not-landed（原因「AC 未全勾（checked 0/9）」，读的是 worktree 副本，当时连 AC1–8 的勾也还不在那份副本里）。
+
+本轮只把 `（待外部）` 移到 AC9 行尾，**逐字其余不动**（行数不变）。落笔前的双向对照（同一份文件、同一个谓词，直调 `flipAcGateVerdict`）：
+
+```
+$ node --experimental-strip-types /tmp/ac9-control.mjs   # 读 worktree 任务文件，只替换 AC9 一行
+OLD occurrences: 1
+BEFORE: {"ok":false,"status":"fail","total":9,"checked":8,"unchecked":1}
+AFTER : {"ok":true,"status":"pass-external","total":9,"checked":8,"unchecked":1}
+added line count delta: 0
+```
+
+改后实跑 fan-in step 6.5 的同一条闸——`--worktree` 指向本 worktree，与机械 fan-in `worker-driver.ts:3967`（step 6.5）及 `:4031`（step 8 flip 闸）逐字同形：
+
+```
+$ node --experimental-strip-types plugin/scripts/fan-in-ac-completion-gate.ts \
+    --task gap-meta-driver-action-record-failure-aggregation-reading --worktree <wt> --json
+{"ok":true,"status":"pass-external","total":9,"checked":8,"unchecked":1,
+ "message":"剩余未勾 1 项均为（待外部）/外层验证——可翻 done"}      RC=0
+```
+
+⚠️ **写入面为什么是 `quay-native task edit` 而不是 MCP `task_write`**：fan-in 的两处 AC 闸（`worker-driver.ts:3967`、`:4031`）都传 `--worktree <wt>`，读的是**任务分支的副本**（`worker-driver.ts:2659` 的并集判定也读它）；而 MCP `task_write` 的实例 root 是主检出（author），其 self-only 变更**不** ff 到 develop（`store.ts:1268-1273`）⇒ 注记到不了 fan-in 实际读的那一份。（MCP `task_check` 因而仍报 `8/9 ok:false`——它读的是同步前的主检出副本，随 fan-in 落地后的 develop→doc 同步收敛。）CLAUDE.md 明示 body 写可用「native provider 自己的 `quay-native task edit`」，它走同一条 `store.write` → `commitTaskWrite` 分支感知提交路径——本次提交信息即 `tasks: <id> task_write by cli:2919304`，与历史 task_write 提交同形。
+
 ## Touches
 
 - plugin/scripts/meta-driver.ts
