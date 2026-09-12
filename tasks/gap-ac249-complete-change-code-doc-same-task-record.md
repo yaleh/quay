@@ -2,7 +2,7 @@
 id: gap-ac249-complete-change-code-doc-same-task-record
 title: AC-249 没有生产者：载体里没有 ac=GOAL-016-AC-249 的记录 —— 同一任务的 commit_files
   必须代码面（src/|scripts/）与 ADR-007 文档面同时非空，单边不算
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
