@@ -1435,6 +1435,40 @@ test('AC3: 未评估四成因各出独立取值，且 fanIn 恒 null（⛔ 不�
   }
 });
 
+test('AC3: 载体「在」但读不懂 ⇒ 独立 not-evaluated（⛔ 不许恰好给出 failed:0 冒充 healthy，硬规则 3b）', () => {
+  const made = [];
+  const mk = (o) => { const d = mkTargetRoot(o); made.push(d); return d; };
+  try {
+    // ① JSON 坏行（探针计数 → trace-unparseable）；② ok 非布尔（字段读不懂 → trace-unparseable）；
+    // ③ 无 epoch（位置不可知 → trace-unparseable）；④ 载体存在但读不出（目录冒充文件 → trace-unreadable）。
+    const badJson = mk({ stepEnds: [{ step: 'ff', task: 'T', ok: true, ageSec: -60 }] });
+    fs.appendFileSync(path.join(badJson, '.quay', 'fan-in-step-trace.jsonl'), '{not json\n', 'utf8');
+    const badField = mk({ stepEnds: [{ step: 'ff', task: 'T', ok: null, ageSec: -60 }] });
+    const noEpoch = mk({ stepEnds: [{ step: 'ff', task: 'T', ok: true, ageSec: -60 }] });
+    const lines = fs.readFileSync(path.join(noEpoch, '.quay', 'fan-in-step-trace.jsonl'), 'utf8').trim().split('\n');
+    fs.writeFileSync(path.join(noEpoch, '.quay', 'fan-in-step-trace.jsonl'), JSON.stringify({ event: 'step-end', step: 'ff', task: 'T', ok: true }) + '\n', 'utf8');
+    assert.ok(lines.length === 1, '夹具自检');
+    const unreadable = mkTargetRoot({ traceAbsent: true });
+    fs.mkdirSync(path.join(unreadable, '.quay', 'fan-in-step-trace.jsonl')); // 同名目录 ⇒ existsSync 真、readFileSync 抛
+    made.push(unreadable);
+    for (const [name, dir, cause, detailKey] of [
+      ['json 坏行', badJson, 'trace-unparseable', 'json-parse-errors=1'],
+      ['ok 非布尔', badField, 'trace-unparseable', 'unreadable-rows=1'],
+      ['无 epoch', noEpoch, 'trace-unparseable', 'unreadable-rows=1'],
+      ['载体是目录', unreadable, 'trace-unreadable', 'fan-in-step-trace.jsonl'],
+    ]) {
+      const f = targetHealthFact(repoRoot, { targetRoot: dir });
+      assert.equal(f.value.verdict, 'not-evaluated', `${name}: ⛔ 不许冒充 healthy`);
+      assert.equal(f.value.cause, cause, `${name}: 成因 ${cause}`);
+      assert.equal(f.value.fanIn, null, `${name}: fanIn 恒 null（0 会与「零失败」同形）`);
+      const d = JSON.stringify(f.value.causeDetail);
+      assert.ok(d.includes(detailKey), `${name}: causeDetail 含 ${detailKey}（实为 ${d}）`);
+    }
+  } finally {
+    for (const d of made) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
 test('AC3: 探针形态读不懂 ⇒ probe-unparseable（⛔ 不把半个对象当读数 —— 硬规则 3b）', () => {
   assert.equal(parseHealthProbe(''), null, '空 stdout');
   assert.equal(parseHealthProbe('not json'), null, '非 JSON');

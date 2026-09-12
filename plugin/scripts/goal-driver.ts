@@ -1852,7 +1852,7 @@ const out = {
   roundRecords: [], driverProcesses: null,
   initStatePresent: false, initStatePluginVersion: null,
   initStateLaidAt: null, initStateAgeSec: null,
-  carriers: {}, fanInSteps: null, traceTruncated: false,
+  carriers: {}, fanInSteps: null, traceTruncated: false, fanInParseErrors: 0,
 };
 const q = path.join(root, '.quay');
 try { out.rootPresent = fs.statSync(root).isDirectory(); } catch (e) { out.rootPresent = false; }
@@ -1902,7 +1902,7 @@ if (out.rootPresent) {
     for (const line of text.split('\\n')) {
       if (!line.trim()) continue;
       let r;
-      try { r = JSON.parse(line); } catch (e) { continue; }
+      try { r = JSON.parse(line); } catch (e) { out.fanInParseErrors += 1; continue; } // ⛔ 静默丢弃 = 把「读不懂」伪装成「零失败」
       if (!r || r.event !== 'step-end') continue;
       rows.push({
         step: typeof r.step === 'string' ? r.step : null,
@@ -1938,13 +1938,21 @@ export type TargetHealthVerdict = "healthy" | "unhealthy" | "not-evaluated";
  *  probe-failed          探针命令非零退出 / spawn 失败（含 ssh 连不上、目标机无 node）——环境问题；
  *  probe-unparseable     探针 exit 0 但 stdout 不是本探针的 JSON 形态（版本漂移 / 被别的东西顶替）；
  *  target-root-absent    探针跑通但目标根在目标机上不存在（路径错 / 项目被删）；
- *  carrier-missing       关键载体缺失（枚举在 causeDetail）——「没跑过」不得与「零失败」同形。 */
+ *  carrier-missing       关键载体缺失（枚举在 causeDetail）——「没跑过」不得与「零失败」同形；
+ *  trace-unreadable      载体在、但读不出来（权限 / I/O / 它其实是个目录）——⛔ 与「零失败」不同形；
+ *  trace-unparseable     载体读出来了、但其中有**读不懂的行**（JSON 坏 / 缺 epoch / ok 非布尔）
+ *                        ——⛔ 静默丢弃坏行会让「读不懂」伪装成「零失败」（硬规则 3b）;
+ *  trace-truncated       尾部窗口被 1 MiB 上限截断且窗口起点未被覆盖 ⇒ 「零失败」是**下界**不是事实。
+ *                        （截断时**有**失败仍报 unhealthy —— 那一半是可取假的真结论。） */
 export type TargetHealthCause =
   | "no-target-configured"
   | "probe-failed"
   | "probe-unparseable"
   | "target-root-absent"
-  | "carrier-missing";
+  | "carrier-missing"
+  | "trace-unreadable"
+  | "trace-unparseable"
+  | "trace-truncated";
 
 /** 目标项目绑定（drivers.yml `kinds.goal.target_host` / `target_root`，CLI 可覆盖）。
  *  `host === null` ⇒ 目标根在**本机**（直接本地读）；`root === null` ⇒ 未声明目标（读数 not-evaluated）。 */
@@ -1970,6 +1978,8 @@ export interface TargetProbeReading {
   carriers: Record<string, boolean | null>;
   fanInSteps: Array<{ step: string | null; task: string | null; epoch: number | null; ok: boolean | null }> | null;
   traceTruncated: boolean;
+  /** 尾部窗口里 JSON 坏掉的行数（⛔ 探针自己计数，不静默丢弃 —— 硬规则 3b）。 */
+  fanInParseErrors: number;
 }
 
 /** `goal-target-health` 的 fact.value（全部是直接量；每个字段的来源见各字段注释）。
@@ -1999,6 +2009,9 @@ export interface TargetHealthReading {
     /** 窗口外 / 字段残缺（无 epoch / 非布尔 ok）而被跳过的行数——⛔ 静默丢弃不可取。 */
     skipped: number;
     truncated: boolean;
+    /** 窗口起点是否确被读到（`truncated:false` 恒 true）。false ⇒ `failed` 只是**下界**，此时
+     *  `failed:0` 不足以判 healthy（⛔ 与「查过且零失败」同形，硬规则 3b）。 */
+    windowFullyCovered: boolean;
   } | null;
   /** AC4：目标项目配置形状版本（quay-init 写进 `.quay/quay-init-state.json` 的 pluginVersion）与
    *  **交付物** plugin 版本（本仓 `plugin/.claude-plugin/plugin.json`，即 quay-init 写入该字段的同源）
@@ -2129,6 +2142,7 @@ export function parseHealthProbe(stdout: string): TargetProbeReading | null {
     carriers: r.carriers as Record<string, boolean | null>,
     fanInSteps: r.fanInSteps === null ? null : (r.fanInSteps as TargetProbeReading["fanInSteps"]),
     traceTruncated: r.traceTruncated === true,
+    fanInParseErrors: typeof r.fanInParseErrors === "number" && Number.isFinite(r.fanInParseErrors) ? r.fanInParseErrors : 0,
   };
 }
 
@@ -2184,7 +2198,14 @@ export function deriveTargetHealth(
   if (missing.length > 0) {
     return { ...base, verdict: "not-evaluated", cause: "carrier-missing", causeDetail: missing, pluginVersion, liveness, roundRecords, carriers };
   }
-  // 到这里：根在、关键载体齐、探针输出可解析 ⇒ 窗口内失败计数是**可得**的（⛔ 不会是 null）。
+  // 「载体在」不等于「读得出来 / 读得懂」——⛔ 下面三条各自把一种「读不懂」挡在 healthy 之外（硬规则 3b）：
+  // 否则一个坏文件（权限、它其实是个目录、JSON 坏、字段缺）会**恰好**给出 `failed:0`，与「零失败」同形。
+  if (r.fanInSteps === null) {
+    return { ...base, verdict: "not-evaluated", cause: "trace-unreadable", causeDetail: [HEALTH_REQUIRED_CARRIERS[0]], pluginVersion, liveness, roundRecords, carriers };
+  }
+  if (r.fanInParseErrors > 0) {
+    return { ...base, verdict: "not-evaluated", cause: "trace-unparseable", causeDetail: [`json-parse-errors=${r.fanInParseErrors}`], pluginVersion, liveness, roundRecords, carriers };
+  }
   const cutoffSec = Math.floor(r.nowMs / 1000) - opts.windowSec;
   const failedByStep: Record<string, number> = {};
   const failedTasks = new Set<string>();
@@ -2192,9 +2213,12 @@ export function deriveTargetHealth(
   let ok = 0;
   let failed = 0;
   let skipped = 0;
-  for (const s of r.fanInSteps ?? []) {
-    if (s.epoch === null || s.ok === null) { skipped += 1; continue; }
+  let minEpoch: number | null = null; // 尾部窗口里最早的一行（判「窗口是否被截断截掉了起点」）
+  for (const s of r.fanInSteps) {
+    if (s.epoch === null) { skipped += 1; continue; } // 无位置 = 无法归窗 ⇒ 它可能藏着一个窗口内的失败
+    if (minEpoch === null || s.epoch < minEpoch) minEpoch = s.epoch;
     if (s.epoch < cutoffSec) continue;
+    if (s.ok === null) { skipped += 1; continue; } // 窗口内但 ok 读不懂 ⇒ 它是失败还是成功不可知
     steps += 1;
     if (s.ok) { ok += 1; continue; }
     failed += 1;
@@ -2202,6 +2226,12 @@ export function deriveTargetHealth(
     failedByStep[step] = (failedByStep[step] ?? 0) + 1;
     if (s.task !== null) failedTasks.add(s.task);
   }
+  if (skipped > 0) {
+    return { ...base, verdict: "not-evaluated", cause: "trace-unparseable", causeDetail: [`unreadable-rows=${skipped}`], pluginVersion, liveness, roundRecords, carriers };
+  }
+  // 截断（>1 MiB 只读尾部）时，窗口起点可能根本没被读到 ⇒ 「零失败」只是**下界**（⛔ 不能当 facts 报）。
+  // 另一半是取的假的：截断里**有**失败仍然报 unhealthy —— 找到一个失败就是找到了。
+  const windowFullyCovered = !r.traceTruncated || (minEpoch !== null && minEpoch <= cutoffSec);
   const fanIn = {
     windowSec: opts.windowSec,
     steps,
@@ -2211,7 +2241,11 @@ export function deriveTargetHealth(
     failedTasks: [...failedTasks].sort(),
     skipped,
     truncated: r.traceTruncated,
+    windowFullyCovered,
   };
+  if (failed === 0 && !windowFullyCovered) {
+    return { ...base, verdict: "not-evaluated", cause: "trace-truncated", causeDetail: [`window ${opts.windowSec}s not fully covered (cap ${HEALTH_MAX_TRACE_BYTES} B)`], pluginVersion, liveness, roundRecords, carriers, fanIn };
+  }
   return {
     target, verdict: failed > 0 ? "unhealthy" : "healthy", cause: null, causeDetail: [],
     liveness, roundRecords, fanIn, pluginVersion, carriers,
@@ -2227,7 +2261,7 @@ function targetHealthReason(v: TargetHealthReading): string {
   const f = v.fanIn;
   const fail = f === null ? "-" : (f.failed > 0
     ? `${f.failed} failed / ${f.steps} steps [${Object.entries(f.failedByStep).map(([k, n]) => `${k}×${n}`).join(" ")}]`
-    : `0 failed / ${f.steps} steps`);
+    : `0 failed / ${f.steps} steps${f.windowFullyCovered ? "" : "(下界：窗口未全覆盖)"}`);
   const ver = v.pluginVersion;
   const ageNote = ver.targetAgeSec === null ? "" : `(陈旧度 ${ver.targetAgeSec}s)`;
   const versionNote = ver.equal === false
