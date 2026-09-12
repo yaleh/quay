@@ -5,8 +5,11 @@ status: achieved
 kind: criterion
 goal: GOAL-001
 criterion: |
-  node packages/quay/src/goal-store.ts get GOAL-001 >/dev/null 2>&1
-expect: exit 0
+  if ! node packages/quay/src/goal-store.ts get GOAL-001 >/dev/null 2>&1; then
+    echo "CAUSE=get-GOAL-001-failed — goal-store.ts get GOAL-001 非零退出（旧词表下 PHASE_ID_RE 不匹配 GOAL-001，记录被静默跳过）" >&2; exit 1
+  fi
+  exit 0
+expect: exit 0。失败时 exit 1 且 stderr 携带 `CAUSE=…` 成因——⛔ `echo … >&2` 与 `exit 1` 必须写在【同一行】：`plugin/scripts/criterion-failure-attribution-check.ts` 逐行判定，拆两行会被判裸退出并打红棘轮（GOAL-009 AC-241 纪律；2026-09-12 gap-criterion-attribution-blind-to-silent-terminal-command）。
 origin: |
   人 2026-09-06 裁定「PHASE-NNN → GOAL-NNN 照做」。
   立条依据：goal-store.ts:48 PHASE_ID_RE 不匹配 GOAL-001，list() (:168) 只收

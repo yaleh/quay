@@ -17,6 +17,11 @@
 #                PRE-widening checker read as `bareAcs` unchanged / still GREEN. Without this phase a
 #                regression to the blind spot would leave the whole case green (a checker that cannot
 #                read a form and a checker that finds nothing share one output, 硬规则 3b).
+#   B3 inject:   same, but the injected criterion carries NO exit statement at all — the IMPLICIT-EXIT
+#                form (AC-172's original shape, `… list --status draft | grep -q '"id": "GOAL-'`). The
+#                checker read this as GREEN on develop on 2026-09-12 while AC-241 was red in the
+#                production ledger: both earlier revisions ask a question ABOUT an exit statement, so a
+#                criterion with none matched nothing on every line and was never enumerated.
 #   C  restore:  1 bare AC == baseline 1       → exit 0 again (ALWAYS-RED detector)
 #   D  tri-state: goals/ removed → MUST be exit 3 NOT-EVALUATED, distinct from BOTH 0 and 1
 #     (hard rule 3b: a checker that cannot read its input must not render as "no bare failure exits")
@@ -72,6 +77,12 @@ injected_trailing_computed_criterion() {
   printf '  python3 -c '"'"'import json,sys; log=[]; sys.exit(0 if log and str(log[-1].get("reason") or "").strip() else 1)'"'"'\n'
 }
 
+# The IMPLICIT-EXIT form verbatim: AC-172's criterion BEFORE its 2026-09-12 rewrite. It contains no
+# `exit` statement — the trailing `grep -q` IS the failure exit (exit 1, and `-q` writes nothing).
+injected_implicit_exit_criterion() {
+  printf '  node packages/quay/src/goal-store.ts list --status draft | grep -q '"'"'"id": "GOAL-'"'"'\n'
+}
+
 # ── A: baseline GREEN ────────────────────────────────────────────────────────────────────────────
 write_fixture AC-900 "$(bare_criterion)"
 write_baseline 1
@@ -100,6 +111,19 @@ if checker_cmd "${workdir}"; then
   exit 3
 fi
 rm -f "${workdir}/goals/AC-902-fixture.md"
+
+# ── B3: INJECT the IMPLICIT-EXIT form ⇒ the ratchet MUST bite (the 2026-09-12 blind spot) ─────────
+# Same shape as B2 and for the same reason: on develop this phase STAYED GREEN (the criterion has no
+# exit statement, so `hasFailureExit` was false on every line and the criterion never entered the
+# enumeration at all — `bareAcs` unchanged, `status=pass`, id absent from `ids`). The negative control
+# that must stay clean sits in the node test file, not here: a phase that only ever expects RED could
+# not tell "the widened checker works" from "the checker reports everything".
+write_fixture AC-903 "$(injected_implicit_exit_criterion)"
+if checker_cmd "${workdir}"; then
+  echo "STAYED-GREEN: checker exited 0 on the IMPLICIT-EXIT form (bareAcs=2 > baseline 1) — a criterion with NO exit statement is invisible again" >&2
+  exit 3
+fi
+rm -f "${workdir}/goals/AC-903-fixture.md"
 
 # ── C: RESTORE ⇒ GREEN again ─────────────────────────────────────────────────────────────────────
 if checker_cmd "${workdir}"; then :; else

@@ -23,6 +23,10 @@ import { fileURLToPath } from "node:url";
 import {
   isBareFailureExitLine,
   hasTrailingComputedFailureExit,
+  implicitFailureExitLines,
+  isSilentOnFailureSegment,
+  splitTopLevelSegments,
+  statusBearingStatement,
   maskHashComments,
   maskValueStrings,
   checkRatchet,
@@ -177,6 +181,92 @@ test("isBareFailureExitLine — position control: the computed form in value pos
   assert.equal(isBareFailureExitLine('  x="$(sys.exit(0 if a else 1))"'), true);
 });
 
+// ── the IMPLICIT-EXIT class (2026-09-12, gap-criterion-attribution-blind-to-silent-terminal-command) ─
+// The third form, and the one BOTH earlier revisions could not see: a criterion with NO exit statement
+// at all, whose non-zero status is inherited from a trailing command. Every rule above asks a question
+// ABOUT an exit statement ("does this exit line carry a cause?"), so this form matched nothing on every
+// line ⇒ never enumerated ⇒ never baselined ⇒ the ratchet read 31 ≤ 32 / status=pass / exit 0 while the
+// AC it guards (AC-241) was red in the production ledger. Measured on develop 2026-09-12: 13 in-domain
+// criteria, each exiting 1 with ZERO bytes on both streams when false.
+
+/** AC-172's criterion VERBATIM, before the 2026-09-12 rewrite: no `exit` anywhere; the trailing
+ *  `grep -q` IS the failure exit (exit 1, and `-q` guarantees it writes nothing). */
+const AC172_ORIGINAL_CRITERION = `node packages/quay/src/goal-store.ts list --status draft | grep -q '"id": "GOAL-'`;
+
+test("implicitFailureExitLines — positive control: AC-172's ORIGINAL form is a failure exit (the blind spot)", () => {
+  const hits = implicitFailureExitLines(AC172_ORIGINAL_CRITERION);
+  assert.equal(hits.length, 1, `the trailing silent `+"`grep -q`"+` is the failure exit: ${JSON.stringify(hits)}`);
+  assert.equal(hits[0].implicit, true);
+  assert.equal(hits[0].line, 1);
+});
+
+test("implicitFailureExitLines — positive control: every shape the 2026-09-12 enumeration found", () => {
+  const shapes = {
+    "trailing grep -q through a pipe": "node x.ts | grep -q 'GOAL-001'",
+    "trailing test": `test "$(node x.ts list | grep -c '"id": "AC-1[4-6][0-9]"')" -ge 27`,
+    "trailing [": `[ "$(grep -l '^goal_ac:' tasks/*.md | wc -l)" -ge 3 ]`,
+    "&& left of a NON-silent right branch": "test -f plugin/scripts/checker.ts && node plugin/scripts/checker.ts --json",
+    "test -s && test": `test -s .quay/r.jsonl && test "$(grep -c v .quay/r.jsonl)" -ge 3`,
+    "whole command to /dev/null": "node packages/quay/src/goal-store.ts get GOAL-001 >/dev/null 2>&1",
+    "&> /dev/null": "node x.ts get GOAL-001 &>/dev/null",
+    "an && chain of greps": "grep -qE 'a' f && grep -qE 'b' f",
+  };
+  for (const [name, criterion] of Object.entries(shapes)) {
+    assert.ok(implicitFailureExitLines(criterion).length >= 1, `expected an implicit failure exit: ${name}`);
+  }
+});
+
+test("implicitFailureExitLines — negative control: forms whose failure DOES write, or that cannot fail", () => {
+  // A trailing command that writes on failure: its own error text is the cause ⇒ attributable.
+  assert.deepEqual(implicitFailureExitLines("node --test plugin/test/x.test.mjs"), []);
+  // `||` REMEDIATES: the silent predicate's failure is handled by the branch that writes the cause.
+  assert.deepEqual(implicitFailureExitLines("grep -q X f || { echo CAUSE=missing >&2; exit 1; }"), []);
+  // a value-position string is DATA (masked out by maskValueStrings), and it is not a shell command
+  assert.deepEqual(implicitFailureExitLines('const r=m.runAcceptance({command:"exit 1",cwd:".",timeoutMs:1});'), []);
+  // a bare trailing `exit 0` determines the status explicitly — nothing is inherited
+  assert.deepEqual(implicitFailureExitLines("grep -q X f\nexit 0"), []);
+  // a trailing assignment/comparison in a language runtime writes nothing on ITS failure path either,
+  // but it is not in the silent-command class — over-reporting here is not free, so it is out
+  assert.deepEqual(implicitFailureExitLines("python3 -c 'raise SystemExit(1)'"), []);
+});
+
+test("implicitFailureExitLines — the class is DISJOINT from the explicit forms (no double count)", () => {
+  // An explicit (even attributed) failure exit anywhere ⇒ the inherited-status question is not asked.
+  assert.deepEqual(implicitFailureExitLines('grep -q X f\necho CAUSE=x >&2\nexit 1'), []);
+  assert.deepEqual(implicitFailureExitLines("sys.exit(1)"), []);
+  assert.deepEqual(implicitFailureExitLines(AC245_CRITERION_LINE), []);
+});
+
+test("isSilentOnFailureSegment — the silencers, and the segment that must NOT be one", () => {
+  assert.equal(isSilentOnFailureSegment("grep -q 'x' f"), true);
+  assert.equal(isSilentOnFailureSegment("test -f x"), true);
+  assert.equal(isSilentOnFailureSegment('[ -n "$x" ]'), true);
+  assert.equal(isSilentOnFailureSegment("node x.ts get GOAL-001 >/dev/null 2>&1"), true);
+  assert.equal(isSilentOnFailureSegment("node x.ts get GOAL-001 &>/dev/null"), true);
+  assert.equal(isSilentOnFailureSegment("node --test x.mjs"), false, "node --test writes its failures");
+  assert.equal(isSilentOnFailureSegment("node x.ts list"), false);
+  // ⛔ `2>&1` alone is NOT silence: stderr still reaches the stream the runner captures.
+  assert.equal(isSilentOnFailureSegment("node x.ts list 2>&1"), false);
+});
+
+test("splitTopLevelSegments — opaque to `$( )`, so a `|` inside a substitution is not a pipe", () => {
+  const segs = splitTopLevelSegments(`test "$(node x.ts list | grep -c 'y')" -ge 3`);
+  assert.equal(segs.length, 1, "the whole thing is ONE segment: the substitution absorbs grep's status");
+  assert.equal(segs[0].text.startsWith("test "), true);
+  assert.deepEqual(
+    splitTopLevelSegments("a && b | c ; d").map((s) => [s.text, s.nextOp]),
+    [["a", "&&"], ["b", "|"], ["c", ";"], ["d", null]],
+  );
+});
+
+test("statusBearingStatement — the LAST statement, with backslash continuations joined", () => {
+  const two = statusBearingStatement("echo one\ngrep -qE 'a' f \\\n  && grep -qE 'b' f");
+  assert.equal(two.text, "grep -qE 'a' f && grep -qE 'b' f");
+  assert.equal(two.lineOf[0], 2, "the first character maps back to source line 2");
+  // ⛔ not the whole script: an EARLIER statement's silence cannot become the script's status
+  assert.deepEqual(implicitFailureExitLines("grep -q X f\nnode --test x.mjs"), []);
+});
+
 // ── the ratchet (shrink-only) ──────────────────────────────────────────────────────────────────────
 
 test("checkRatchet: equal / shrunk is ok, grown is not (and names the added ACs)", () => {
@@ -237,6 +327,61 @@ test("CLI: a criterion in the TRAILING COMPUTED form makes the ratchet BITE (+1 
 
   fs.rmSync(path.join(root, "goals/AC-990-fixture.md"));
   assert.equal(runCli(["--root", root]).status, 0, "removing the injected criterion must restore GREEN");
+});
+
+test("CLI: AC-172's ORIGINAL implicit-exit form makes the ratchet BITE (+1 / delta +1 / named), then release", () => {
+  // AC2's two-way control, mechanical and against a baseline of 0. Before this revision the SAME
+  // injection read `bareAcs=0`, status=pass, exit=0 and the id was absent from `ids` — a silent pass,
+  // while AC-172's unattributable fail went into the production ledger and turned AC-241 red.
+  const root = makeRoot(0);
+  fs.writeFileSync(
+    path.join(root, BASELINE_REL),
+    JSON.stringify({ count: 0, inDomain: 0, entries: [], generatedAt: "2026-09-11T00:00:00.000Z" }, null, 2) + "\n",
+  );
+  // baseline 0 with a zero-criterion goals/ is NOT-EVALUATED — put one attributable criterion in so the
+  // fixture is readable, and keep the ratchet anchored at 0.
+  fs.writeFileSync(
+    path.join(root, "goals/AC-900-fixture.md"),
+    ["---", "id: AC-900", "status: active", "kind: criterion", "criterion: |", "  exit 0", "---", ""].join("\n"),
+  );
+  assert.equal(runCli(["--root", root]).status, 0, "baseline-consistent fixture must start GREEN");
+
+  fs.writeFileSync(
+    path.join(root, "goals/AC-990-fixture.md"),
+    ["---", "id: AC-990", "status: active", "kind: criterion", "criterion: |", `  ${AC172_ORIGINAL_CRITERION}`, "---", ""].join("\n"),
+  );
+  const injected = runCli(["--root", root, "--json"]);
+  assert.equal(injected.status, 1, `the implicit-exit form must turn the ratchet RED: ${injected.stdout}${injected.stderr}`);
+  const out = JSON.parse(injected.stdout);
+  assert.equal(out.bareAcs, 1, "baseline 0 + 1");
+  assert.equal(out.delta, 1);
+  assert.deepEqual(out.added, ["AC-990"], "the injected id must be NAMED");
+
+  fs.rmSync(path.join(root, "goals/AC-990-fixture.md"));
+  assert.equal(runCli(["--root", root]).status, 0, "removing the injected criterion must restore GREEN");
+});
+
+test("CLI: the implicit-exit class's three NEGATIVE controls add no hit (bareAcs unchanged)", () => {
+  const root = makeRoot(0);
+  fs.writeFileSync(
+    path.join(root, "goals/AC-900-fixture.md"),
+    ["---", "id: AC-900", "status: active", "kind: criterion", "criterion: |", "  exit 0", "---", ""].join("\n"),
+  );
+  const negatives = {
+    "AC-980": "  node --test plugin/test/x.test.mjs", // writes its failures
+    "AC-981": "  grep -q X f || { echo CAUSE=missing >&2; exit 1; }", // `||` remediates + attributes
+    "AC-982": '  node x.ts get GOAL-001 2>&1', // `2>&1` alone is not silence
+  };
+  for (const [id, line] of Object.entries(negatives)) {
+    fs.writeFileSync(
+      path.join(root, `goals/${id}-fixture.md`),
+      ["---", `id: ${id}`, "status: active", "kind: criterion", "criterion: |", line, "---", ""].join("\n"),
+    );
+  }
+  const r = runCli(["--root", root, "--json"]);
+  assert.equal(r.status, 0, `none of the three may be flagged: ${r.stdout}${r.stderr}`);
+  assert.equal(JSON.parse(r.stdout).bareAcs, 0);
+  assert.deepEqual(JSON.parse(r.stdout).ids, []);
 });
 
 test("CLI 硬规则 3b: an unreadable goals/ ⇒ exit 3 NOT-EVALUATED, distinct from BOTH pass and red", () => {

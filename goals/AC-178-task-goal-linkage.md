@@ -5,8 +5,10 @@ status: achieved
 kind: criterion
 goal: GOAL-001
 criterion: |
-  test "$(grep -l '^goal_ac:' tasks/*.md | wc -l)" -ge 3
-expect: exit 0（≥3 个真实任务声明了所属 AC）
+  n="$(grep -l '^goal_ac:' tasks/*.md | wc -l)"
+  test "$n" -ge 3 || { echo "CAUSE=too-few-goal-linked-tasks — tasks/*.md 顶层声明 goal_ac: 的文件数 n=$n < 3" >&2; exit 1; }
+  exit 0
+expect: exit 0（≥3 个真实任务声明了所属 AC）。失败时 exit 1 且 stderr 携带 `CAUSE=…` 成因——⛔ `echo … >&2` 与 `exit 1` 必须写在【同一行】：`plugin/scripts/criterion-failure-attribution-check.ts` 逐行判定，拆两行会被判裸退出并打红棘轮（GOAL-009 AC-241 纪律；2026-09-12 gap-criterion-attribution-blind-to-silent-terminal-command）。
 origin: |
   没有关联，"哪条 AC 没有任何任务在推进"只能靠 LLM 语义匹配；
   有了它就是纯机械计数，driver 的缺口环才可能是机械的。
