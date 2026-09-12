@@ -18,6 +18,16 @@
 // judged 记录（同 gap-pool-quality-verdicts-never-persisted AC1 的纪律）。
 //
 // 本文件不 auto-file 任务、不改任何任务 status（AC4 硬边界）——只产出读数。
+//
+// ── gap-arch-review-judge-verdicts-never-reach-the-existing-gap-filing-channel ──────────────────
+// 本文件新增【语义结论 → 立案】的确定性一半（判定仍归 LLM，算术/选取归 JS，同 ADR-033）：
+//   1. `actionable`（judge 自己的结构化判定，三态 true/false/null）——见 ArchReviewClusterVerdict。
+//   2. `actionableConclusions()` —— 从逐簇判词里取出**够格立案**的那些（PURE）。
+//   3. `conclusionKey()` —— 结论的**稳定身份**（节流键）。⛔ 见其注释：易变量（DC 计数、
+//      suggestedAction 措辞）不得参与，否则同一结论 42 次运行会得到 42 个键 ⇒ 42 条任务。
+//   4. 提交台账（.quay/architecture-review-submissions.jsonl）——**节流**用，⛔ 不是第二套查重：
+//      台账只回答「我们是否已经把这个结论交给过立案通道」，从不去读任务库判「是否已有任务认领它」
+//      ——后者是 quay-file-task 技能的机制查重（单一实现，本文件不复制）。
 
 import fs from "node:fs";
 import path from "node:path";
@@ -237,6 +247,11 @@ export interface ArchReviewClusterVerdict {
   verdict: string;
   reasoning: string;
   suggestedAction: string;
+  /** judge 对【该簇是否够格立案】的结构化判定（gap-arch-review-judge-verdicts-never-reach-…）。
+   *  **三态**（硬规则 3b）：true = 够格立案；false = 判过且不够格（coincidental / 承重中心性）；
+   *  null = **判词里读不出这个字段 ⇒ 未评估**——⛔ 不得与 false 同形（「读不懂装合格」的镜像：
+   *  读不懂装成「判过且不立案」，会让接线后的收益恒为零而记录上什么都看不出来）。 */
+  actionable: boolean | null;
   judgedAt: string;
   round: number;
 }
@@ -273,16 +288,18 @@ export function buildArchReviewRoundRecord(args: {
   return rec;
 }
 
-/** judge 输出的逐簇判词（schema：{clusterId, verdict, reasoning, suggestedAction}）。 */
+/** judge 输出的逐簇判词（schema：{clusterId, verdict, reasoning, suggestedAction, actionable}）。 */
 export interface JudgeClusterVerdict {
   clusterId: string;
   verdict: string;
   reasoning: string;
   suggestedAction: string;
+  /** 够格立案的判定（见 ArchReviewClusterVerdict.actionable 的三态说明）。缺失/非布尔 ⇒ 未评估。 */
+  actionable?: unknown;
 }
 
-/** 把 judge 判词合并回簇（补齐 primitive/files/label/judgedAt/round）。judge 没判到的簇不写
- *  （判词为空不写空记录——AC1 纪律）。PURE。 */
+/** 把 judge 判词合并回簇（补齐 primitive/files/label/judgedAt/round + actionable 三态）。judge 没判到的
+ *  簇不写（判词为空不写空记录——AC1 纪律）。PURE。 */
 export function mergeClusterVerdicts(
   clusters: Cluster[],
   verdicts: JudgeClusterVerdict[],
@@ -302,11 +319,104 @@ export function mergeClusterVerdicts(
       verdict: v.verdict,
       reasoning: v.reasoning,
       suggestedAction: v.suggestedAction,
+      // 三态（硬规则 3b）：只有 judge 明确给出布尔才取值，其余一律 null（未评估）——⛔ 不 default false。
+      actionable: typeof v.actionable === "boolean" ? v.actionable : null,
       judgedAt,
       round,
     });
   }
   return out;
+}
+
+// ── 语义结论 → 立案（gap-arch-review-judge-verdicts-never-reach-the-existing-gap-filing-channel）──
+// 为什么在这里、为什么是这些函数：判定是 LLM 的（ADR-033「判定用 agent」），而**选取/去重/节流**
+// 是确定性的算术，必须与判定分离且单一实现（「聚合用 JS 算术」）。driver 只负责 spawn 与传参。
+
+/** 结论的稳定身份（节流键）：`<clusterId>|<verdict>`。PURE。
+ *  ⛔ **易变量不得参与**——DC 计数（3196…3570）、`label` 里的 R=…、`suggestedAction` 的措辞每轮都变；
+ *  若键包含它们，同一结论 42 次运行会得到 42 个不同的键 ⇒ 42 次立案，正是本任务要消灭的噪声。
+ *  ✓ `verdict` **参与**：判定变了就是另一个结论（例：同一 P1 簇由 coincidental 变 abstract ⇒ 应立新案）
+ *  ——这是节流「能取假」的那半边（见 architecture-review-cluster.test.mjs 的对照用例）。PURE。 */
+export function conclusionKey(c: { clusterId: string; verdict: string }): string {
+  return `${c.clusterId}|${c.verdict}`;
+}
+
+/** 从逐簇判词里取出**够格立案**的结论 + 未评估计数（硬规则 3b：两种「不立案」必须可区分）。PURE。
+ *  - filable：actionable === true 的簇（每个一条结论，节流键去重后仍可能多条）。
+ *  - notEvaluated：actionable === null 的 clusterId——判词没给这个字段，⛔ 不算「判过且不立案」。 */
+export function actionableConclusions(merged: ArchReviewClusterVerdict[]): {
+  filable: ArchReviewClusterVerdict[];
+  notEvaluated: string[];
+} {
+  const filable: ArchReviewClusterVerdict[] = [];
+  const notEvaluated: string[] = [];
+  for (const v of merged) {
+    if (v.actionable === true) filable.push(v);
+    else if (v.actionable === null) notEvaluated.push(v.clusterId);
+  }
+  return { filable, notEvaluated };
+}
+
+/** 过滤掉已经提交过的结论（节流）。PURE——读台账是 IO，在这里只做集合运算（便于单测两态）。 */
+export function unsentConclusions(
+  filable: ArchReviewClusterVerdict[],
+  submitted: ReadonlySet<string>,
+): ArchReviewClusterVerdict[] {
+  const seen = new Set<string>();
+  const out: ArchReviewClusterVerdict[] = [];
+  for (const v of filable) {
+    const k = conclusionKey(v);
+    if (submitted.has(k) || seen.has(k)) continue;  // 台账命中 or 本轮内重复
+    seen.add(k);
+    out.push(v);
+  }
+  return out;
+}
+
+// ── 提交台账（.quay/architecture-review-submissions.jsonl — 节流用，⛔ 不是第二套查重）──────────────
+// **职责边界（本任务的 AC3 靠它取假）**：台账记录的是「我们是否已经把这个结论交给过立案通道」，
+// 是**成本/噪声**层——防止同一结论每小时重新 spawn 一次 LLM agent（25+ 次同结论 = 25+ 次付费）。
+// 它**从不**去读任务库、判「是否已有任务认领这个缺陷」——那是 `quay-file-task` 技能的**机制查重**
+// （单一实现）。两层正交：查重保证「不重复立案」，节流保证「不为已知结论重复付费」。
+
+export const SUBMISSION_LEDGER_REL = path.join(".quay", "architecture-review-submissions.jsonl");
+
+/** 台账文件路径。gitignored 运行时态（与 architecture-review-round.jsonl 同族）。 */
+export function submissionLedgerPath(root: string): string {
+  return path.join(root, SUBMISSION_LEDGER_REL);
+}
+
+/** 台账一条：一个结论被交给立案通道一次。 */
+export interface SubmissionRecord {
+  key: string;
+  clusterId: string;
+  verdict: string;
+  submittedAt: string;
+  round: number;
+}
+
+/** 读台账的已提交键集。文件不存在 ⇒ 空集：**不存在是合法的首轮态**，⛔ 与「文件在但读不懂」不同形
+ *  ——后者（坏行）被跳过；跳过只会让键少一个 ⇒ 至多多 spawn 一次，方向是 fail-open（⛔ 不会漏立案）。 */
+export function readSubmittedKeys(root: string): Set<string> {
+  const p = submissionLedgerPath(root);
+  const keys = new Set<string>();
+  if (!fs.existsSync(p)) return keys;
+  for (const line of fs.readFileSync(p, "utf8").split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const rec = JSON.parse(line);
+      if (rec && typeof rec.key === "string" && rec.key.length > 0) keys.add(rec.key);
+    } catch { /* 坏行跳过：节流键少一个 ⇒ 至多多 spawn 一次，不会漏立案（fail-open 方向安全） */ }
+  }
+  return keys;
+}
+
+/** 追加写提交台账（mkdir -p + append，一行一 JSON，⛔ 不截断）。 */
+export function appendSubmission(root: string, record: SubmissionRecord): string {
+  const p = submissionLedgerPath(root);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.appendFileSync(p, JSON.stringify(record) + "\n", "utf8");
+  return p;
 }
 
 /** 追加写一条载体记录（mkdir -p + append，一行一 JSON，⛔ 不截断）。state=judged 且判词为空时拒写。 */

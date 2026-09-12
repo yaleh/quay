@@ -2,7 +2,8 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readLive, readJournal, DEFAULT_DRIVER_CAP, type LiveResult, type JournalResult, type JournalSection, type InFlightPhase, type SuiteStateView } from "./observation.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, renderMarkdown, relativeTime, renderSiteNav, renderMobileChrome, tableWrap, LIVE_STATE_RUNNING_UNWIRED_LABEL, LIVE_STATE_NOT_RUNNING_LABEL } from "./serve-render.ts";
+import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, renderMarkdown, relativeTime, renderSiteNav, renderMobileChrome, tableWrap, pageTitle, LIVE_STATE_RUNNING_UNWIRED_LABEL, LIVE_STATE_NOT_RUNNING_LABEL } from "./serve-render.ts";
 
 // ── Loop-observation routes (gap-web-cannot-show-what-the-loop-is-doing-now) ────────────────
 // /live + /journal render the loop's live state from workspace observation files. The data
@@ -66,7 +67,7 @@ export function suiteSuffix(suite: SuiteStateView | null): string {
   return ` · suite ${suite.state}`;
 }
 
-export function renderLivePage(live: LiveResult): string {
+export function renderLivePage(live: LiveResult, identity: ServeIdentity | null = null): string {
   // gap-webui-cross-task-blocking-visibility: render the cross-task blocking relation (Touches
   // intersection + depends_on chain) computed by observation.computeInFlightBlocking. A task-id list
   // renders as comma-joined links; an empty list renders the 「无」 placeholder so "no relation" is
@@ -146,7 +147,7 @@ export function renderLivePage(live: LiveResult): string {
     : html`<p class="meta">无跨任务阻塞关系。</p>`;
 
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay live — what the loop is doing right now">${modernistStyles()}${pageStyles()}<title>Live — loop activity</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay live — what the loop is doing right now">${modernistStyles()}${pageStyles()}<title>${pageTitle("Live — loop activity", identity)}</title></head>
     <body>${renderMobileChrome("live", "live")}${renderSiteNav("live")}<main id="main">
       <h1>Live — 循环此刻在做什么</h1>
       ${statusNote}
@@ -156,9 +157,9 @@ export function renderLivePage(live: LiveResult): string {
     </main></body></html>`;
 }
 
-function renderJournalPage(journal: JournalResult): string {
+function renderJournalPage(journal: JournalResult, identity: ServeIdentity | null = null): string {
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay journal — recent loop record">${modernistStyles()}${pageStyles()}<title>Journal — recent loop record</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay journal — recent loop record">${modernistStyles()}${pageStyles()}<title>${pageTitle("Journal — recent loop record", identity)}</title></head>
     <body>${renderMobileChrome("journal", "journal")}${renderSiteNav("journal")}<main id="main">
       <h1>Journal — 循环最近记录</h1>
       ${renderSectionBlock(journal.escalations, "升级项 (escalations.md)")}
@@ -170,7 +171,7 @@ function renderJournalPage(journal: JournalResult): string {
 export async function handleLive(
   req: IncomingMessage,
   res: ServerResponse,
-  cfg: { workspaceRoot: string },
+  cfg: ServePageCfg,
 ): Promise<void> {
   let live: LiveResult;
   try {
@@ -188,13 +189,13 @@ export async function handleLive(
     };
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderLivePage(live));
+  res.end(renderLivePage(live, cfg.identity));
 }
 
 export async function handleJournal(
   req: IncomingMessage,
   res: ServerResponse,
-  cfg: { workspaceRoot: string },
+  cfg: ServePageCfg,
 ): Promise<void> {
   let journal: JournalResult;
   try {
@@ -208,5 +209,5 @@ export async function handleJournal(
     journal = { escalations: degraded, tickLog: degraded, commits: degraded };
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderJournalPage(journal));
+  res.end(renderJournalPage(journal, cfg.identity));
 }

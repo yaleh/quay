@@ -2,7 +2,8 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readSystem, readManager, type SystemResult, type ManagerResult, type ResourceGateReading } from "./observation.ts";
-import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote } from "./serve-render.ts";
+import type { ServePageCfg, ServeIdentity } from "./serve-render.ts";
+import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome, obsNote, pageTitle } from "./serve-render.ts";
 
 // ── /system ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -51,7 +52,7 @@ export function renderBar(label: string, val: number | null, numericLimit: numbe
   </div>${pct != null ? html`<div style="height:8px;background:var(--color-neutral-300)"><div style="height:100%;width:${pct.toFixed(1)}%;background:var(--color-text)"></div></div>` : ""}</div>`;
 }
 
-function renderSystemPage(sys: SystemResult): string {
+function renderSystemPage(sys: SystemResult, identity: ServeIdentity | null = null): string {
   const rg = sys.resourceGate;
   const pb = sys.processBudget;
   const bothOk = rg.status === "ok" && pb.status === "ok";
@@ -60,7 +61,7 @@ function renderSystemPage(sys: SystemResult): string {
     ? html`<div class="${goVerdict ? "success-banner" : "error-banner"}" role="status"><strong>⇒ ${goVerdict ? "GO" : "WAIT"}</strong>：${goVerdict ? "资源充足，可以跑" : "资源受限，等待"}</div>`
     : "";
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay system — resource gate and process budget">${modernistStyles()}${pageStyles()}<title>System — 系统状态</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay system — resource gate and process budget">${modernistStyles()}${pageStyles()}<title>${pageTitle("System — 系统状态", identity)}</title></head>
     <body>${renderMobileChrome("system", "system")}${renderSiteNav("system")}<main id="main">
       <h1>System — 系统状态</h1>
       <p class="meta">数据源：<code>resource-gate.sh --json</code> · <code>process-budget.sh --json</code>（稳定机读 JSON 输出）</p>
@@ -88,7 +89,7 @@ function renderSystemPage(sys: SystemResult): string {
 export async function handleSystem(
   req: IncomingMessage,
   res: ServerResponse,
-  cfg: { workspaceRoot: string },
+  cfg: ServePageCfg,
 ): Promise<void> {
   let sys: SystemResult;
   try {
@@ -102,12 +103,12 @@ export async function handleSystem(
     };
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderSystemPage(sys));
+  res.end(renderSystemPage(sys, cfg.identity));
 }
 
 // ── /manager ───────────────────────────────────────────────────────────────────────────────────────
 
-function renderManagerPage(mgr: ManagerResult): string {
+function renderManagerPage(mgr: ManagerResult, identity: ServeIdentity | null = null): string {
   const loopCards = (label: string, statusText: string, note: string): string => html`<div style="background:var(--color-surface);padding:1rem">
     <div style="font-size:0.85rem;color:var(--color-neutral-700);margin-bottom:4px">${escapeHtml(label)}</div>
     <div style="font-weight:700">${statusText}</div>
@@ -144,7 +145,7 @@ function renderManagerPage(mgr: ManagerResult): string {
     : obsNote(pool.status, pool.reason);
 
   return html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay manager — Manager/Outer/Inner 三层状态">${modernistStyles()}${pageStyles()}<title>Manager / Outer / Inner</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay manager — Manager/Outer/Inner 三层状态">${modernistStyles()}${pageStyles()}<title>${pageTitle("Manager / Outer / Inner", identity)}</title></head>
     <body>${renderMobileChrome("manager", "manager")}${renderSiteNav("manager")}<main id="main">
       <h1>Manager / Outer / Inner — 三层状态</h1>
       <p class="meta">三层自适应探测：多信号加权判定，缺失信号诚实标注「未检测到」，不静默假设。</p>
@@ -170,7 +171,7 @@ function renderManagerPage(mgr: ManagerResult): string {
 export async function handleManager(
   req: IncomingMessage,
   res: ServerResponse,
-  cfg: { workspaceRoot: string },
+  cfg: ServePageCfg,
 ): Promise<void> {
   let mgr: ManagerResult;
   try {
@@ -188,5 +189,5 @@ export async function handleManager(
     };
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderManagerPage(mgr));
+  res.end(renderManagerPage(mgr, cfg.identity));
 }

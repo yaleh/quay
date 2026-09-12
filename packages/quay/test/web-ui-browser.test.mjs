@@ -255,10 +255,27 @@ async function main() {
     const list = await get(port, "/tasks");
     assert(list.status === 200, `GET /tasks returns 200 (got ${list.status})`);
 
-    // Page title: the <title> tag contains "Quay — " prefix and the
-    // provider's manifest.name — confirms browser-rendered title matches.
-    assert(/<title>Quay\s*[—–-]\s*[^<]+<\/title>/i.test(list.body),
-      "GET /tasks <title> tag contains Quay em-dash prefix and provider name");
+    // Page title: the <title> tag carries the PROJECT IDENTITY (the workspace root's basename) —
+    // gap-web-ui-pages-carry-no-host-project-identity changed this contract. It used to be
+    // "Quay — <manifest.name>", i.e. the product brand plus the PROVIDER's name ("quay-native"),
+    // which is the same string in every workspace using the native provider — so two quay webs
+    // open at once rendered identical tab labels. The project label is now the workspace root's
+    // own basename, which is what makes the two distinguishable; the provider name still appears
+    // in the page's <meta name="description"> and in the <h1>.
+    // The assertion is written so it holds in BOTH label regimes: a basename at or under the
+    // 32-char budget renders verbatim, a longer one renders truncated-with-a-digest (this temp
+    // workspace's own name is 36 chars, so it takes the second path). What is pinned either way is
+    // the property that matters: the prefix is DERIVED FROM THIS WORKSPACE'S ROOT (a generic
+    // "Dashboard"/"Quay"/"quay-native" prefix fails the `base.startsWith(head)` check) and the
+    // page token survives intact at the end.
+    const pageTitleTag = /<title>([^<]*)<\/title>/.exec(list.body)?.[1] ?? "";
+    assert(pageTitleTag.endsWith(" — Tasks"),
+      `GET /tasks <title> ends with the page token " — Tasks" — got: ${pageTitleTag}`);
+    const base = path.basename(workspaceRoot);
+    const label = pageTitleTag.slice(0, pageTitleTag.lastIndexOf(" — Tasks"));
+    const head = label.includes("…") ? label.slice(0, label.indexOf("…")) : label;
+    assert(head.length > 0 && base.startsWith(head),
+      `GET /tasks <title>'s project label is derived from this workspace root (${base}) — label head: "${head}"`);
 
     // Heading: the <h1> tag confirms the "task list" label and provider id.
     assert(/<h1>[^<]*task list[^<]*<\/h1>/i.test(list.body),

@@ -117,7 +117,35 @@ export function spawnResident(root, args) {
     });
     return stopPromise;
   };
+  // 注册表（见 stopAllResidentDrivers）：驱动退出即摘除，所以集合里剩下的就是【活着的】。
+  liveResidentStops.add(stop);
+  child.once("exit", () => liveResidentStops.delete(stop));
   return { child, events, stop, pid: child.pid };
+}
+
+// 本文件（以及每个 import 它的测试文件）spawn 过的、仍然活着的常驻驱动的 stop() 集合。
+// 用途见 stopAllResidentDrivers —— 它是「after 钩子抛错会跳过后面的钩子」的兜底。
+const liveResidentStops = new Set();
+
+/** 杀掉本进程 spawn 出且仍存活的全部常驻驱动（幂等；stop() 自身幂等且 2s 上限）。 */
+export async function stopAllResidentDrivers() {
+  await Promise.all([...liveResidentStops].map((stop) => {
+    try { return stop(); } catch { return undefined; }
+  }));
+}
+
+// 尽力而为的递归删除 —— 【永不抛】。node:test 的 after 钩子里一律用它，⛔ 不直接调 fs.rmSync：
+// node 在某个 after 钩子抛错时会【跳过该测试剩余的所有 after 钩子】（本仓库 node 24 实测，
+// `t.after(() => { throw … })` 之后的钩子全不执行）。于是一次清理竞态抛错会静默跳过随后的
+// `drv.stop()` ⇒ 常驻驱动泄漏 ⇒ 泄漏的驱动持着【本测试文件进程】的 stdout pipe / 子进程句柄 ⇒
+// 文件进程永不退出 ⇒ 套件在这一文件上【静默】（无 __PERFILE__、无 `ℹ tests` 汇总）⇒ 静默看门狗
+// 杀掉整个套件 ⇒ 每个任务的 fan-in 全红（2026-09-12 实测 1229s 后被 kill；2026-09-10 另一次实例
+// 的文件进程与驱动至今仍活着）。触发点：fs.rmSync 与活着的驱动往 <root>/.quay/ 下重建条目赛跑
+// （递归删除先删文件、再 rmdir 时目录又非空 ⇒ ENOTEMPTY，node 的 fs.rm 默认 maxRetries:0 不重试）。
+export function rmSafe(...paths) {
+  for (const p of paths) {
+    try { fs.rmSync(p, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
 }
 
 // 轮询谓词直到真值或超时（返回最后一次谓词值）。断言写在 waitFor 之后，超时 ⇒ 断言取假 ⇒ 测试干净失败。

@@ -9,7 +9,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
-import type { Manifest } from "./serve-render.ts";
+import type { Manifest, ServePageCfg } from "./serve-render.ts";
 
 import { handleTaskList, handleTaskDetail } from "./serve-task.ts";
 import { handleAdrList, handleAdrDetail } from "./serve-adr.ts";
@@ -51,7 +51,7 @@ export async function handleAllRoutes(
   res: ServerResponse,
   client: ProviderClient,
   manifest: Manifest,
-  cfg: { workspaceRoot: string },
+  cfg: ServePageCfg,
 ): Promise<void> {
   const url = new URL(req.url as string, `http://${req.headers.host}`);
 
@@ -236,7 +236,7 @@ export async function handleAllRoutes(
   }
 
   if (url.pathname === "/adr") {
-    await handleAdrList(req, res, url, client);
+    await handleAdrList(req, res, url, client, cfg);
     return;
   }
 
@@ -251,7 +251,7 @@ export async function handleAllRoutes(
   // (which had NO route — grep -c document = 0), both following the /adr shape. The
   // goal page shows target / criterion / status / recent verdict+time / origin.
   if (url.pathname === "/goal") {
-    await handleGoalList(req, res, url, client, cfg.workspaceRoot);
+    await handleGoalList(req, res, url, client, cfg);
     return;
   }
 

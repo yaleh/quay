@@ -1,7 +1,7 @@
 ---
 id: gap-web-ui-pages-carry-no-host-project-identity
 title: web 各概览页不带主机/项目身份 —— 多机多项目时浏览器标签页完全同形，无法分辨在看哪个项目
-status: ready
+status: done
 labels:
   - gap
   - webui
@@ -137,6 +137,13 @@ P1 同卡片：data-plugin-version-state="unknown"（该工作区无 .quay/quay-
 
 **⑥ 探测机位说明（诚实标注，硬规则 5）**：P2 是**真实存在的第二个项目工作区**（quay-init 生成，自带 `.quay/quay-init-state.json` 与 provider runtime），但它与 P1 同在本机（`boheidc`）——本机不存在第二个「provider 绑定可用」的 quay 工作区（archguard 的 `.quay/config.yml` 正指向**已退役的本地 runtime**，server 起不来，这本身就是本任务要暴露的版本漂移症状）。`<title>` 是 `workspaceRoot` 的纯函数、`hostname` 是独立字段，故 `title 因项目而异` 这一条在单机上与跨机等价；跨机的可见区分由身份卡片的 `主机` 字段承担（渲染的 `os.hostname()`，读数为 `boheidc`）。以上口径如实标注，不冒充跨机。
 
+
+**⑦ 本轮补修（suite 红 → 绿）**：机械 fan-in 的**全量 suite** 报 4 红，**全部由本任务的 delta 引起**（非环境性；本地重跑 4/4 复现）：
+
+- **3 处 = `handleGoalList` 第 5 参数由 `workspaceRoot: string` 改为 `ServePageCfg` 时**，函数体开始**无条件**读 `cfg.workspaceRoot`。直调单测有两种旧形态：传 `"ws"` 字符串、或传 4 个参数省略该位——**省略形态在旧签名下是被容忍的**（读到的就是 `undefined`，而 `readTaskSummary` 的缓存键本就接受它）。字符串形态下 `workspaceRoot` 静默变成 `undefined` ⇒ 共享 `taskSummaryCache` 键错 ⇒ `taskList` 被调 2 次（AC3b `2 !== 1`）；省略形态下直接抛 TypeError（AC7、AC2/AC3）。修法=在**唯一入口**归一：字符串 ⇒ `{workspaceRoot}`，缺失 ⇒ 仍缺失（=旧行为），两者都不带 identity ⇒ `pageTitle` 渲染显式的「未接入项目身份」，⛔ 不退化成改造前那个匿名标题（硬规则 3b）。
+- **1 处 = `gap-webui-tests-page-unpaginated-tables.test.mjs` AC4 把 `serve-adr.ts:26` / `serve-architecture.ts:55` / `serve-board.ts:168` 三个**绝对行号**钉死**：本任务的身份改造把 serve-adr 的表格点从 `:26` 移到 `:28`（一次与表格无关的编辑）即判红。该文件的**文件多重集**断言本就**拒绝比行号**（其注释明写「行号会因无关编辑漂移，不得打红本任务」）——首 3 条断言是**漏改的兄弟**（硬规则 5b）⇒ 改为按**文件 + `<table` 内容**钉，排序与条数仍由「计数断言 + 排序后文件多重集」覆盖。
+
+⇒ 该改动使 `packages/quay/test/gap-webui-tests-page-unpaginated-tables.test.mjs` 进入本任务 delta，故列入下方 `## Touches`。
 ## Touches
 
 - packages/quay/src/serve-render.ts
@@ -156,6 +163,7 @@ P1 同卡片：data-plugin-version-state="unknown"（该工作区无 .quay/quay-
 - packages/quay/src/serve-tests.ts
 - packages/quay/src/serve-sessions.ts
 - packages/quay/src/serve-needs-human.ts
+- packages/quay/test/gap-webui-tests-page-unpaginated-tables.test.mjs
 - packages/quay/test/serve-dashboard.test.mjs
 - packages/quay/test/serve.test.mjs
 - packages/quay/test/web-ui-browser.test.mjs

@@ -239,10 +239,22 @@ test("AC4: enumerate every <table> in serve-*.ts and annotate it — no unannota
   // Hit count matches the inventory — every <table> site is annotated, none unannotated.
   assert.equal(grepOut.length, inventory.length, `AC4: grep hits (${grepOut.length}) == annotated inventory (${inventory.length})`);
 
-  // First 3 actual lines pinned verbatim (the AC's 「前 3 条实际内容」, sorted for determinism).
-  assert.ok(grepOut[0].startsWith("packages/quay/src/serve-adr.ts:26:"), `AC4: first hit is serve-adr.ts:26 (got ${grepOut[0]})`);
-  assert.ok(grepOut[1].startsWith("packages/quay/src/serve-architecture.ts:55:"), `AC4: second hit is serve-architecture.ts:55 (got ${grepOut[1]})`);
-  assert.ok(grepOut[2].startsWith("packages/quay/src/serve-board.ts:168:"), `AC4: third hit is serve-board.ts:168 (got ${grepOut[2]})`);
+  // First 3 actual lines, pinned by FILE + "<table" CONTENT, over the same sorted order (the AC's
+  // 「前 3 条实际内容」). ⛔ The absolute LINE NUMBER is deliberately NOT pinned: it is not an
+  // invariant of anything this AC is about, and it drifts on any edit above the site — including
+  // edits with nothing to do with tables (gap-web-ui-pages-carry-no-host-project-identity's identity
+  // work moved serve-adr.ts's site from :26 to :28 on its own, and the check went red for it). That
+  // is the very reason the file-multiset assertion below compares FILES and not lines — 硬规则 5b:
+  // that fix was applied there and missed here, its sibling. Order is still pinned (the multiset
+  // walks this same sorted list), and the content assertion keeps each pinned hit a real <table>
+  // site rather than just a filename that happens to sort first.
+  const firstThree = [[0, "serve-adr.ts"], [1, "serve-architecture.ts"], [2, "serve-board.ts"]];
+  for (const [i, file] of firstThree) {
+    assert.ok(new RegExp(`^packages/quay/src/${file}:\\d+:`).test(grepOut[i]),
+      `AC4: hit #${i + 1} is ${file} (got ${grepOut[i]})`);
+    assert.ok(grepOut[i].includes("<table"),
+      `AC4: hit #${i + 1} really is a <table> site (got ${grepOut[i]})`);
+  }
 
   // Every annotated SITE is present, and no <table>-bearing file is unannotated: compare the FILE
   // multiset (not the line numbers — a line number drifts on any unrelated edit to the file, which
