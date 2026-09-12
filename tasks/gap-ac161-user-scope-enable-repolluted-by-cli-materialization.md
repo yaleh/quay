@@ -143,7 +143,7 @@ baaff8070（本轮 merge develop 之后的 tip）   script-AC239=4  NEED-AC239=1
 - 成因类：human-adjudication
 - 失败步/判词：step=scoped-gate: test-isolation-check — 615 glob file(s), 24 current violation(s) [fixed-path-write=12 shared-build-artifact-write=1 spawns-test-sh=5 process-exit-1=6 mkdtemp-no-cleanup=0 live-data-dir-write=0 shared-root-mkdtemp=0]
   packages/quay-native/test/gate-checked-state.test.mjs:fixed-path-write  (line 26) const tasksDir = path.join(__dirname, ".tmp-gate-checked-state-test");
-PASS: all 24 violation(s) are baselined in plugin/test/isolation-violations.txt; the list can only get SHORTER (no additions, no growth, no stale entries).
+PASS: all 24 violation(s) are baselined in plugin/test-isolation-violations.txt; the list can only get SHORTER (no additions, no growth, no stale entries).
 test-impl-census: checked 615 test files · clean 615 · impl-deleted 0
 TOUCHES-DIR-GLOB-HINT: 1 directory-level tasks/*.md glob(s) — enumerate concrete files or add（已知全局锁）(hint only, not a violation)
   + plugin/test/checked-in-write-check.test.mjs
