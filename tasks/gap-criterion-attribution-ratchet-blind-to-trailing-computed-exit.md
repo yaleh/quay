@@ -1,7 +1,7 @@
 ---
 id: gap-criterion-attribution-ratchet-blind-to-trailing-computed-exit
 title: AC-241 台账回归：失败归因棘轮对「行末 computed 非零」的 exit 结构上盲 ⇒ AC-245 以裸失败进入在域集（同类共 10 条）
-status: todo
+status: ready
 labels:
   - gap
   - defect
