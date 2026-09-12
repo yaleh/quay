@@ -33,6 +33,7 @@ goal_ac: AC-246
 - **四态**（硬规则 3b，互不同形）：`crossed` / `none` / `unthresholded` / `not-evaluated`；`not-evaluated` 时 `aggregates` 为 **null**，⛔ 绝不与「查过、无命中」的 `[]` 共用取值。
 - **`unthresholded` 为何存在**：本任务明令「⛔ 不定阈值数值」。若没有这一态，唯一的选择就是要么凭空定一个数（违反硬规则 4 推论一/二），要么把真实扫到的清单丢掉（AC7 落空）。⇒ 把【扫描】（成本旋钮）与【越阈判定】（判断旋钮）**解耦**：扫描照跑、清单照出，只是 `crossed: null`——「我看见了什么」与「我判它越没越阈」是两件事。
 - **成本控制只靠缓存 + TTL**（见下：`since` 不降低成本）；`scan_ttl` 未配置 ⇒ **从不自动扫**（⛔ 不写字面量默认 TTL），运维入口 `--scan-action-records`。
+- **⛔ 未新增 shipped script**：本实现全部落在 `meta-driver.ts` 内（Touches 因此不增脚本，只把该文件的 question 扩写进 catalog）。扫描的独立入口是同一文件的 `--scan-action-records` 子命令，⛔ 不是第二个脚本。
 
 ## 实测读数（2026-09-12，本机，quay 项目语料 — AC6 要的「阈值定值依据」）
 
@@ -170,7 +171,11 @@ value.actionRecordFailures = {"state":"unthresholded","reason":null,
 ```
 该值来自**真实语料扫描**（`scanMs`/`recordsScanned` 与扫描命令自报逐字一致），⛔ 非 fixture 注入。
 
-**AC8**：`bash plugin/scripts/capability-catalog.sh --summary` → `308 scripts | 308 declared | 0 unclassified | 303 ship`（rc=0）；`--entry-surface --summary` → `AC3 gate: … PASS`（rc=0）。meta-driver.ts 的 question 已扩写为本能力（含动作记录读数）。
+⚠️ **时间序上的诚实交代**：这一轮是 **worker 在任务 worktree 内、对生产 root 跑的**（`--once --no-llm`），发生在 fan-in 把本分支合进 `develop` **之前**——即它的代码来自任务分支而非落地后的 develop。写在这里以免读者以为它是「落地后常驻驱动自己产出的一轮」。**它满足的是 AC7 的实质判据（值由真实生产语料扫描产生、⛔ 非 fixture 注入）**；「落地之后由常驻驱动产出」那一形态，由下列事实承接：扫描载体 `.quay/action-record-scan.json` 已留在生产 root，常驻 meta-driver 在加载到新代码后的下一轮就会读到同一份真实清单（`scan_ttl` 未配置 ⇒ 它只读不扫，不额外付 4.75 分钟）。
+
+**AC8**：`bash plugin/scripts/capability-catalog.sh --summary` → `308 scripts | 308 declared | 0 unclassified | 303 ship`（rc=0）；`--entry-surface --summary` → `AC3 gate: … PASS`（rc=0）。meta-driver.ts 的 question 已扩写为本能力（含动作记录读数）。⛔ 未新增脚本（见「实现形态」末条），故无新登记项；相关闸全绿。
+
+**AC9 的前置步（worker 2b(ii)，⛔ 不是全量绿本身）**：`bash scripts/test.sh --for-task gap-meta-driver-action-record-failure-aggregation-reading --allow-thin` → **RC=0**，137/137 测试通过、0 失败、无 FAIL 检查器；scoped-gate 缓存已写（`key = <task>\t3792cf14afdc856df32045aeea2718f1ac3cbb2a`，`ok:true`）。
 
 ## Touches
 
