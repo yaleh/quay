@@ -3,6 +3,7 @@ id: gap-ac161-user-scope-enable-repolluted-by-cli-materialization
 title: AC-161 回归：用户级 enabledPlugins 被交付安装路径的 CLI materialization 重新写回（AC-162
   只堵了直接写，没堵 shell 出去的那条）
 status: ready
+needs_human_cause: human-adjudication
 labels:
   - gap
   - defect
