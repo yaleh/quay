@@ -1,7 +1,7 @@
 ---
 id: gap-ac-record-schema-duplicated-between-criterion-and-writer
 title: 每条 AC 手写一个 write_acNNN_record —— 字段清单在 criterion 与产出侧各存一份，漂移即静默失败
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
