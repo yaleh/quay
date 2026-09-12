@@ -43,7 +43,7 @@ goal-sufficiency  {"goal":"GOAL-016","verdict":"covered"}
 
 ## Acceptance Criteria
 
-- [x] AC1 能取假：构造一个存在 fan-in 失败的目标项目状态，该 fact 必须报出失败计数 >0；健康状态下报 0。**两态输出逐字贴出做对照**。
+- [ ] AC1 能取假：构造一个存在 fan-in 失败的目标项目状态，该 fact 必须报出失败计数 >0；健康状态下报 0。**两态输出逐字贴出做对照**。〔**未达成 —— 被 DIR-131 挡下，见下节「阻塞」**〕
 - [x] AC2 不阻塞：健康度为红时，goal 的达成判定与改动前**逐字一致**（打印改前/改后 `goalFlipDecision` 的输入与输出）。
 - [x] AC3 未评估可区分：目标项目不可达/载体缺失时输出独立取值，⛔ 既非 0 也非「健康」；贴出三态（健康/不健康/未评估）的实际输出。
 - [x] AC4 版本一致性读数：`pluginVersion` 与交付物 plugin 版本**并排出现**，不等时可机械检出。**负控制现成**：archguard 于 2026-09-12 补跑 quay-init 前为 `0.4.0` vs `0.6.1`（不等态），补跑后为相等态。
@@ -54,18 +54,37 @@ goal-sufficiency  {"goal":"GOAL-016","verdict":"covered"}
 - ⛔ 不得把健康度做成阻塞条件（AC2 是这条的守卫）。
 - 项目自身闸门（scoped 门 + 全量套件绿）。
 
+## 阻塞（待裁定）：AC1 的载体被 DIR-131 禁止 goal 侧读
+
+**实测（本任务 scoped 门）**：`goal-driver-task-boundary-check: RED (4 violation(s))`，四条全是
+`[fanin-read] fan-in @ line 1826/1885/2272/2369`。该检查是**人 2026-09-07 DIR-131 裁定的机械化产物**，
+其 AC6 原文：「断言 `goal-driver.ts` 非注释位置不引用 fan-in / full-suite-state / 落地率（goal 侧不以
+task 落地指标为输入）」；DIR-131 的 `## Resolution` 里 **AC6 的负控制正是拿
+`const c = ".quay/fan-in-step-trace.jsonl";` 当红样例**（实测输出 `[fanin-read] fan-in @ line 862`、exit 1）。
+
+⇒ **本任务体「Plan / AC1」点名的「fan-in 失败步骤分布」正是那条裁定禁止 goal 侧读的载体。**
+这是 AC 与现行人裁的**实质冲突**，不是形式冲突：换一个语义相同的载体（`worker-outcome` 等）也能数出
+「落地失败」，但那正是绕过守卫，已排除（那会造出一个「结构上不可能报红的检查」的反面——检查绿而
+被禁行为照旧，硬规则 3b/4 的同一形态）。
+
+**本轮的处理（不越权、不静默）**：
+- 把 fact 收窄到**被驱动系统自身**的结构量，⛔ 无任何 task 落地指标 ⇒ 边界检查绿、棘轮未放宽；
+- **AC1 如实留未勾**（它没被满足），不以「换了个载体」充当达成；
+- 该维度的去向 **三选一，需人裁定**：①改 DIR-131 AC6 口径（把「关于外部被驱动系统的读数」与
+  「关于本仓自身落地率的读数」分开——前者不构成 DIR-131 的反例形态）；②把这条观察挪到**非 goal
+  组件**（如 quality 例程型 kind 的一条 routine 或独立观测面），goal-driver.ts 不碰；③放弃该维度。
+- 同轮已立案 escalation（见 `## 关联`），本任务在裁定前**无法收尾** ⇒ 置 `needs-human`。
+
 ## 验证证据（2026-09-12 本任务 worktree 实跑，⛔ 非「我认为它会这样」）
 
-**AC1 两态对照**（真实夹具 + 真实探针进程，窗口 7200s）：
+**AC1 —— 未达成**。收窄后的事实里**没有** fan-in 失败计数（载体被裁定禁止，⛔ 不伪造替代读数）。
+本 fact 现有两条**被驱动系统自身**的可取假信号，两态输出逐字对照（`not-driving`）：
 
 ```
-[不健康] unhealthy — fan-in 2 failed / 2 steps [ff×1 scoped-gate×1] (window 7200s)
-         fanIn={"windowSec":7200,"steps":2,"ok":0,"failed":2,"failedByStep":{"ff":1,"scoped-gate":1},"failedTasks":["TASK-89"],"skipped":0,"truncated":false}
-[健  康] healthy — fan-in 0 failed / 1 steps (window 7200s)
-         fanIn={"windowSec":7200,"steps":1,"ok":1,"failed":0,"failedByStep":{},"failedTasks":[],"skipped":0,"truncated":false}
-负控制：窗口外 3 小时前那条 merge-develop 不进 failedByStep（窗口是有效作用域，⛔ 不是装饰）；
-       把窗口放大到覆盖它 ⇒ 计数变 1（同一条行，只改作用域）
+[unhealthy] unhealthy [not-driving] — liveness=idle(0), roundRecords=2(newest .quay/verification-round.jsonl 0s), pluginVersion ok
+[对照·有进程] healthy — liveness=driving(1), roundRecords=2(newest .quay/worker-round.jsonl 0s), pluginVersion ok
 ```
+（对照用真进程夹具：cmdline 带 `worker-driver.js --root <目标根>`，探针从**真进程表**读到它。）
 
 **AC2 不阻塞**（`goalFlipDecision` 逐字未改：`diff <(git show develop:plugin/scripts/goal-driver.ts) <(HEAD)` 该函数段为空 diff）：
 
@@ -77,23 +96,22 @@ goal-sufficiency  {"goal":"GOAL-016","verdict":"covered"}
 端到端：目标为红的那一轮里 GOAL-001 照样被机械 flip achieved，且该轮 failed fact 数 = 0
 ```
 
-**AC3 三态 + 五成因**（⛔ not-evaluated 时 fanIn 恒 null —— 0 会与「窗口内零失败」同形）：
+**AC3 三态 + 七成因**（⛔ not-evaluated 时 `signals === null` —— `[]` 会与「查过且零信号」同形）：
 
 ```
-[healthy]       healthy — fan-in 0 failed / 1 steps (window 7200s)
-[unhealthy]     unhealthy — fan-in 2 failed / 2 steps [ff×1 scoped-gate×1]
-[not-evaluated/probe-failed]          causeDetail=["exit=255"]                 fanIn=null
-[not-evaluated/probe-unparseable]     causeDetail=["stdout head: garbage"]     fanIn=null
-[not-evaluated/target-root-absent]    causeDetail=["/tmp/no-such-proj-xyz"]    fanIn=null
-[not-evaluated/no-target-configured]  causeDetail=[]                           fanIn=null
-[not-evaluated/carrier-missing]       causeDetail=["fan-in-step-trace.jsonl"]  fanIn=null
-活性是独立字段（⛔ 不压进 verdict）：夹具无进程 ⇒ liveness=idle(0)；探针没跑成 ⇒ unknown（⛔ 不是 idle）
+[healthy]       healthy — liveness=driving(1), ... pluginVersion ok
+[unhealthy]     unhealthy [not-driving plugin-version-mismatch] — liveness=idle(0), ... pluginVersion MISMATCH 0.0.1-stale≠0.6.1
+[not-evaluated] not-evaluated (cause=probe-failed: exit=255)
+[载体缺失]      not-evaluated (cause=carrier-missing: verification-round.jsonl)
+成因清单（各自独立取值）：no-target-configured / probe-failed / probe-unparseable / target-root-absent /
+carrier-missing / process-list-unreadable / init-state-missing —— 七条各有一个夹具，signals 恒 null
+活性是独立字段（⛔ 不压进 verdict）：零进程但进程表可读 ⇒ idle(0)；探针没跑成 ⇒ unknown（⛔ 不是 idle）
 ```
 
 **AC4 版本并排**（不等态取真机 = 负控制现成的那个不相等；相等态取夹具——真机本轮未被补跑 quay-init，仍 0.4.0）：
 
 ```
-[不等态·真机 ad-arm1:/home/yale/work/archguard] {"target":"0.4.0","delivered":"0.6.1","equal":false,"initStatePresent":true,"targetAgeSec":2760612}
+[不等态·真机 ad-arm1:/home/yale/work/archguard] {"target":"0.4.0","delivered":"0.6.1","equal":false,"initStatePresent":true,"targetAgeSec":2761660}
 [相等态·夹具]                                   {"target":"0.6.1","delivered":"0.6.1","equal":true,"initStatePresent":true,"targetAgeSec":120}
 [读不到·夹具]                                   {"target":null,"delivered":"0.6.1","equal":null,"initStatePresent":false,"targetAgeSec":null}
 ```
@@ -101,9 +119,14 @@ goal-sufficiency  {"goal":"GOAL-016","verdict":"covered"}
 **生产路径**（drivers.yml 绑定 `kinds.goal.target_host/target_root`，无 CLI 覆盖）：
 
 ```
-ad-arm1:/home/yale/work/archguard: unhealthy — fan-in 6 failed / 91 steps [ff×4 scoped-gate×2] (window 7200s),
-liveness=driving(4), roundRecords=3(newest 5s) pluginVersion MISMATCH 0.4.0≠0.6.1(陈旧度 2760616s)
+ad-arm1:/home/yale/work/archguard: unhealthy [plugin-version-mismatch] — liveness=driving(4),
+roundRecords=3(newest .quay/promotion-round.jsonl 13s) pluginVersion MISMATCH 0.4.0≠0.6.1(陈旧度 2761660s)
 ```
+
+## 关联
+
+- 人 2026-09-07 **DIR-131**（goal/task 职责边界）+ 其机械化产物 `plugin/scripts/goal-driver-task-boundary-check.ts`
+- 同轮立案的 escalation：`gap-goal-target-health-vs-dir131-boundary`（三选一的裁定请求）
 
 ## Touches
 
