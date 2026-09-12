@@ -92,3 +92,5 @@ quay full-suite-runner 的默认 suite 命令 → bash scripts/test.sh [--bucket
 - tasks/gap-verification-round-bound-to-quay-shaped-suite-entry.md
 - packages/quay/src/config.ts
 - packages/quay/src/config-validate.ts
+- plugin/scripts/worker-driver.ts
+- plugin/test/worker-driver.test.mjs
