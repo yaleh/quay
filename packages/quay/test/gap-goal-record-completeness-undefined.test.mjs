@@ -16,7 +16,7 @@ import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
-import { createGoalStore, MIN_GOAL_BODY_CHARS } from "../src/goal-store.ts";
+import { createGoalStore, MIN_GOAL_BODY_CHARS, evaluateCriterionAttribution } from "../src/goal-store.ts";
 
 const nativeBin = QUAY_NATIVE_CLI;
 
@@ -116,15 +116,26 @@ test("AC3 — MCP goal_write and the store write() return the SAME accept/reject
   }
 });
 
-// ── AC5: negative control — every existing production criterion still passes ────────────────────
-test("AC5 — re-running the new validation over all production criteria rejects none (empty-body ones included)", () => {
+// ── AC5: negative control — the completeness rule misfires on no production criterion ───────────
+test("AC5 — re-running the new validation over all production criteria misfires on none (empty-body ones included)", () => {
   const goalsDir = new URL("../../../goals", import.meta.url).pathname;
   const prod = createGoalStore(goalsDir);
   const criteria = prod.list().filter((r) => String(r.id).startsWith("AC-"));
   assert.ok(criteria.length > 0, "production goals/ must contain criterion records");
 
   // Re-issue each criterion through the store's write() with its OWN fields (criterion+expect+goal
-  // +origin+body) into a temp dir — a rejected record means the rule misfires on real data.
+  // +origin+body) into a temp dir — a rejected record means a rule misfires on real data.
+  //
+  // gap-criterion-attribution-write-gate-at-birth: "rejected" is no longer one thing. The write
+  // surface now ALSO refuses, at CREATE, a criterion whose failure exits write no cause — a
+  // different contract from the completeness rule this test pins, and an intentional one (the
+  // 31 baselined production ACs are grandfathered on the UPDATE path, not on CREATE). So the
+  // discriminator cannot be the message and cannot be "rejected at all": it is the SAME shared
+  // predicate the gate itself uses, applied to the criterion this test just fed in. A rejection of
+  // a criterion that predicate calls CLEAN is a misfire — the 2026-09-08 bug class (a blanket
+  // body-required rule rejecting bodyless criteria) this negative control exists to catch.
+  // ⛔ This is falsifiable in both directions: mis-judge the predicate and the gate's real
+  // refusals stop matching it; regress the completeness rule and clean records get rejected.
   const store = createGoalStore(tmpDir("ac5"));
   let passes = 0;
   const rejected = [];
@@ -132,6 +143,7 @@ test("AC5 — re-running the new validation over all production criteria rejects
   for (const c of criteria) {
     const body = typeof c.body === "string" ? c.body : "";
     if (body.trim() === "") emptyBodyIds.push(String(c.id));
+    const attr = evaluateCriterionAttribution(String(c.criterion ?? ""));
     try {
       store.write(String(c.id), {
         title: String(c.title ?? c.id),
@@ -144,12 +156,18 @@ test("AC5 — re-running the new validation over all production criteria rejects
       });
       passes += 1;
     } catch (err) {
-      rejected.push({ id: c.id, reason: String(err.message) });
+      rejected.push({ id: c.id, bare: attr.evaluated ? attr.bare.length : null, reason: String(err.message) });
     }
   }
 
-  assert.deepEqual(rejected, [], `every production criterion must still pass; rejected:\n${JSON.stringify(rejected, null, 2)}`);
-  assert.equal(passes, criteria.length, "pass count == criterion count (all pass)");
+  // Every rejection must be the attribution gate refusing a criterion that really does carry bare
+  // failure exits (bare > 0). bare === 0 ⇒ clean, rejected ⇒ the completeness rule misfired;
+  // bare === null ⇒ NOT-EVALUATED — likewise not this gate's doing, so likewise a misfire here.
+  const misfires = rejected.filter((r) => r.bare === 0 || r.bare === null);
+  assert.deepEqual(misfires, [], `every rejection must be the attribution gate refusing a criterion that carries bare failure exits; misfires:\n${JSON.stringify(misfires, null, 2)}`);
+  // The control is not vacuous: the completeness rule must have actually admitted real production
+  // criteria (bare-exit ACs are a minority of the corpus — if this ever hits 0, nothing was tested).
+  assert.ok(passes > 0, `the completeness rule must accept production criteria (empty-body ones included) — 0 passes means this negative control tested nothing; rejected:\n${JSON.stringify(rejected, null, 2)}`);
   // goals/ is a LIVE, growing store, so a frozen `== N` here rots: on 2026-09-08 AC-200 landed
   // 2m26s before this task's fan-in, turning 57 into 58 and 19 into 20 — the gate went red on a
   // stale literal, not on a rule defect. Ratchet instead. Both assertions still take-false: the

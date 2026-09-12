@@ -99,7 +99,11 @@ test("goal gate executes via sh: bash process-substitution criterion fails (exit
     title: "bash-process-substitution",
     status: "active",
     goal: "GOAL-001",
-    criterion: `comm -23 <(echo a) <(echo a) | grep -q . && exit 1
+    // gap-criterion-attribution-write-gate-at-birth: the failure exit carries its cause on the SAME
+    // line (`>&2`) — the write surface now refuses a criterion whose failing exit says nothing. The
+    // subject above is untouched: `<(...)` is still bash-only, so this is still a sh Syntax error
+    // (exit 2) and the `&&` branch is unreachable in exactly the case this test measures.
+    criterion: `comm -23 <(echo a) <(echo a) | grep -q . && { echo "unexpected common lines" >&2; exit 1; }
 exit 0`,
     expect: EXPECT,
     origin: "o",
@@ -118,7 +122,7 @@ f2=$(mktemp)
 echo a > "$f1"
 echo a > "$f2"
 echo b >> "$f2"
-comm -23 "$f1" "$f2" | grep -q . && { rm -f "$f1" "$f2"; exit 1; }
+comm -23 "$f1" "$f2" | grep -q . && { echo "unexpected common lines" >&2; rm -f "$f1" "$f2"; exit 1; }
 rm -f "$f1" "$f2"
 exit 0`,
     expect: EXPECT,
