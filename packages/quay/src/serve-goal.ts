@@ -297,9 +297,19 @@ export async function handleGoalList(
   res: ServerResponse,
   url: URL,
   client: ProviderClient,
-  cfg: ServePageCfg,
+  cfg: ServePageCfg | string,
 ): Promise<void> {
-  const workspaceRoot = cfg.workspaceRoot;
+  // Two call shapes reach this handler, and BOTH must keep working. Production arrives through the
+  // route dispatcher, which passes the full ServePageCfg (workspace root + resolved identity).
+  // Direct unit tests written before the identity work pass the bare workspace root as a string, or
+  // omit the argument entirely — and the omitted shape was TOLERATED by the previous signature (a
+  // missing 5th argument simply read `undefined`, which `readTaskSummary`'s cache key accepts).
+  // Reading `cfg.workspaceRoot` unconditionally turns that tolerated shape into a TypeError, so the
+  // normalisation lives here, at the one boundary. Neither legacy shape carries an identity, and an
+  // identity-less cfg renders through `pageTitle` as the explicit 「未接入项目身份」 label — never as
+  // the anonymous pre-task title (硬规则 3b: "not read" must not look like "read, and fine").
+  const pageCfg: ServePageCfg | undefined = typeof cfg === "string" ? { workspaceRoot: cfg } : cfg;
+  const workspaceRoot = pageCfg?.workspaceRoot;
   const statusFilter = url.searchParams.get("status");
   const kindFilter = url.searchParams.get("kind");
   const goalFilter = url.searchParams.get("goal");
@@ -382,7 +392,7 @@ export async function handleGoalList(
 
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html`<!doctype html>
-    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${shellStyles()}${goalTableStyles()}<title>${pageTitle("Goals", cfg.identity)}</title></head>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${shellStyles()}${goalTableStyles()}<title>${pageTitle("Goals", pageCfg?.identity)}</title></head>
     <body>${renderMobileChrome("goal", "goals")}${renderSiteNav("goal")}<main id="main">
       <h1>Goals — ${tab === "goal" ? "阶段目标" : "AC / criterion"} (${rows.length})</h1>
       ${readError ? html`<div class="error-banner" role="alert"><strong>读失败:</strong> ${escapeHtml(readError)}</div>` : ""}
