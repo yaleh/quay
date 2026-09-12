@@ -1,7 +1,7 @@
 ---
 id: gap-goal-driver-blind-to-driven-system-health
 title: goal-driver 只有内省视角 —— 被驱动系统两小时内 fan-in 失败 9 次，而它 5308 轮一无所知
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
