@@ -149,14 +149,63 @@ test("⑥ shipped-set closure — the ENUMERATION is proven complete, not assert
     "a shipped sibling must be listed exactly once — a second inline copy defeats the closure check");
   assert.equal((src.match(/\$\{SCRIPT_DIR\}\/provider-binding-resolvability-check\.ts/g) || []).length, 1,
     "the checker must be listed exactly once — inline copies are how 2026-09-11 stayed invisible in BOTH modes");
-  assert.equal((src.match(/^\s*if ! ship_verify_closure /gm) || []).length, 2,
-    "BOTH scp sites (verify_coldstart_mode / verify_upgrade_mode) must ship through ship_verify_closure");
+  assert.equal((src.match(/^\s*if ! ship_verify_closure /gm) || []).length, 3,
+    "ALL THREE scp sites (verify_coldstart_mode / verify_upgrade_mode / verify_takeover_mode) must ship through ship_verify_closure");
   // the SECOND, independent gap on the same transport surface (measured 2026-09-11): neither verify
   // mode put the host's Node ≥20 floor on PATH, so on C the run inherits /usr/bin/node v18.19.1 and
   // `node --experimental-strip-types` dies with "bad option" ⇒ binding_state() reads "unreadable" for
   // EVERY project there too. Same syndrome, different cause — so it needs its own wiring control.
   assert.equal((src.match(/^verify_node_export_for\(\) \{/gm) || []).length, 1,
-    "verify_node_export_for must be defined exactly once (single source for BOTH modes)");
-  assert.equal((src.match(/\$\(verify_node_export_for "\$\{hk\}"\)/g) || []).length, 2,
-    "BOTH verify modes' remote scripts must prepend the host's Node floor — the deliver mode always did");
+    "verify_node_export_for must be defined exactly once (single source for ALL verify modes)");
+  assert.equal((src.match(/\$\(verify_node_export_for "\$\{hk\}"\)/g) || []).length, 3,
+    "ALL THREE verify modes' remote scripts must prepend the host's Node floor — the deliver mode always did");
+});
+
+// ── AC-247 (GOAL-016) — the SAME transport, for a ≥14-day-stalled legacy project ─────────────────
+// gap-ac247-stalled-project-clean-takeover-record: `--verify-takeover --takeover-root <abs>` switches the
+// remote script to `--ac247-takeover` and transports ONLY the ac=GOAL-016-AC-247 record. The property this
+// pins is the one that decides whether the AC is real: **transport success ≠ production success** — a run
+// that shipped back a field-complete but WRONG-ac record must be NOT-EVALUATED, never a silent ok
+// (硬规则 3b 同族; the same shape as AC-240's "kinds complete but not paired").
+test("AC-247 — --selfcheck-takeover-transport: AC-247 evidence is transported+COMPLETE, a different ac is NOT", () => {
+  const r = run(["--selfcheck-takeover-transport"]);
+  assert.equal(r.status, 0, `--selfcheck-takeover-transport must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /selfcheck-takeover-transport: PASS/);
+  // ① positive: the record lands in the carrier and the declared ac set is judged COMPLETE
+  assert.match(r.stdout, /positive append → EVIDENCE-TRANSPORT appended=1/,
+    "an AC-247 evidence line must be transported (appended=1)");
+  assert.match(r.stdout, /positive completeness → COMPLETE \(exit 0\)/,
+    "the declared ac set [GOAL-016-AC-247] must be judged COMPLETE when present");
+  // ② negative: transport succeeding on a DIFFERENT ac must not read as production success
+  assert.match(r.stdout, /negative\(other-ac\) → NOT-EVALUATED/,
+    "a run that produced the WRONG record must be NOT-EVALUATED (transport success ≠ production success)");
+  // ③ negative: absent / zero-line evidence is NOT-EVALUATED, never a silent exit 0
+  assert.match(r.stdout, /negative\(missing\/zero-lines\) → NOT-EVALUATED/,
+    "missing or zero-line evidence must be NOT-EVALUATED (硬规则 3b)");
+  // wiring: the transport AND the completeness check must both sit inside verify_takeover_mode's body
+  assert.match(r.stdout, /write-points\(in-verify_takeover_mode\) hits=2/,
+    "both the transport and the completeness call must be positionally inside verify_takeover_mode");
+});
+
+test("AC-247 — --verify-takeover requires an ABSOLUTE --takeover-root (a relative path is a usage error)", () => {
+  // ⛔ The root is resolved ON the remote host, so a relative path silently resolves against the remote
+  // ssh home — i.e. it would take over some other project than the one the criterion will name.
+  const missing = run(["--verify-takeover"]);
+  assert.equal(missing.status, 2, `--verify-takeover without --takeover-root must exit 2 (usage), got ${missing.status}`);
+  assert.match(missing.stdout + missing.stderr, /requires --takeover-root/);
+  const relative = run(["--verify-takeover", "--takeover-root", "archguard"]);
+  assert.equal(relative.status, 2, `a relative --takeover-root must exit 2 (usage), got ${relative.status}`);
+  assert.match(relative.stdout + relative.stderr, /must be an ABSOLUTE path on the remote host/);
+});
+
+test("AC-247 — the declared ac set is exactly GOAL-016-AC-247 (no second, silently-satisfying ac)", () => {
+  const src = readFileSync(SCRIPT, "utf8");
+  // positional: the declaration lives inside verify_takeover_mode's own body — moving it out (or
+  // inheriting another mode's set) would let the mode pass on records it never asked for.
+  const body = src.slice(src.indexOf("verify_takeover_mode() {"));
+  const decl = body.slice(0, body.indexOf("\n}"));
+  assert.match(decl, /local expected_acs="GOAL-016-AC-247"/,
+    "verify_takeover_mode must declare its own expected ac set (GOAL-016-AC-247) inside its body");
+  assert.match(decl, /check_evidence_completeness "\$\{evidence_local\}" "\$\{expected_acs\}"/,
+    "the completeness check must be fed THAT declaration, not a literal elsewhere");
 });

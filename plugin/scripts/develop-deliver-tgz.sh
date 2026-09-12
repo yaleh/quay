@@ -108,6 +108,18 @@
 #                  drop node_modules/yaml ⇒ BARE-UNSHIPPED; drop gate-script-base.ts ⇒
 #                  IMPORT-UNSHIPPED. Prints the per-file import face (AC4 产物). This is what makes
 #                  the "explicit enumeration" promise mechanical instead of aspirational.
+#     --verify-takeover --takeover-root <abs-path-on-remote>   GOAL-016-AC-247: the SAME transport,
+#                  but the remote script runs --ac247-takeover against a ≥14-day-STALLED legacy quay
+#                  project that ALREADY carries real backlog + old history (⛔ not a fresh quay-init
+#                  target). Only the ac=GOAL-016-AC-247 record is transported + dedup-appended; a host
+#                  that produces no such record ⇒ NOT-EVALUATED + exit 1. ⛔ --takeover-root must be an
+#                  ABSOLUTE path on the remote host; ⛔ this mode never CREATES the project (the
+#                  criterion's own stale_days≥14 / pre_task_count>0 are the "not freshly built" guards).
+#     --selfcheck-takeover-transport  hermetic controls of that transport (offline, no build/scp/ssh):
+#                  AC-247 evidence ⇒ appended + COMPLETE (exit 0); evidence carrying only a DIFFERENT
+#                  ac ⇒ NOT-EVALUATED (transport success ≠ production success); missing/zero-line
+#                  evidence ⇒ NOT-EVALUATED + carrier unchanged; plus a positional control that both
+#                  the transport and the completeness call sit inside verify_takeover_mode's body.
 #
 # Host table (B/C node paths verified 2026-08-11 by outer ssh probes):
 #   B = orangevps.wan.hwang.men   node: ~/.nvm/versions/node/v22.23.1/bin (also v25.2.0)
@@ -131,12 +143,15 @@ verify_upgrade=0  # 1 = GOAL-009-AC-238: upgrade an ISOLATED COPY of an AGED thi
 upgrade_source="" # --upgrade-source: path RELATIVE TO $HOME on the remote host of the aged project to copy (read-only)
 ac207_e2e=0       # 1 = also run the GOAL-009-AC-207 end-to-end step on each host (expensive: worker-driver spawns a real worker)
 ac239_e2e=0       # 1 = with --verify-upgrade: ALSO drive a NEW real defect-fix task to done in the upgraded copy (GOAL-009-AC-239)
+verify_takeover=0 # 1 = GOAL-016-AC-247: take over a ≥14-day-STALLED legacy project ON the host and transport only its AC-247 record
+takeover_root=""  # --takeover-root: ABSOLUTE path (on the remote host) of the stalled project to take over
 selfcheck_evidence=0
 selfcheck_evidence_scenario="both"
 selfcheck_evidence_completeness=0
 selfcheck_e2e_pairing=0   # 1 = hermetic controls of check_e2e_pairing (AC-240 传输侧配对判定)
 selfcheck_upgrade_pairing=0  # 1 = hermetic controls of check_upgrade_pairing (AC-239 传输侧同源判定)
 selfcheck_transport_closure_flag=0  # 1 = hermetic closure controls of the shipped set (AC1..AC4)
+selfcheck_takeover_transport_flag=0 # 1 = hermetic controls of the AC-247 transport (GOAL-016)
 while [ $# -gt 0 ]; do
   case "$1" in
     --root) repo_root="$2"; shift 2 ;;
@@ -150,6 +165,8 @@ while [ $# -gt 0 ]; do
     --upgrade-source) upgrade_source="$2"; shift 2 ;;
     --ac207-e2e) ac207_e2e=1; shift ;;
     --ac239-e2e) ac239_e2e=1; shift ;;
+    --verify-takeover) verify_takeover=1; shift ;;
+    --takeover-root) takeover_root="$2"; shift 2 ;;
     --selfcheck-evidence)
       selfcheck_evidence=1
       case "${2:-}" in positive|negative|both) selfcheck_evidence_scenario="$2"; shift 2 ;; *) shift ;; esac
@@ -158,6 +175,7 @@ while [ $# -gt 0 ]; do
     --selfcheck-e2e-pairing) selfcheck_e2e_pairing=1; shift ;;
     --selfcheck-upgrade-pairing) selfcheck_upgrade_pairing=1; shift ;;
     --selfcheck-transport-closure) selfcheck_transport_closure_flag=1; shift ;;
+    --selfcheck-takeover-transport) selfcheck_takeover_transport_flag=1; shift ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -1027,6 +1045,81 @@ if [ "${selfcheck_evidence}" -eq 1 ]; then
   exit $?
 fi
 
+# ── selfcheck_takeover_transport — hermetic controls of the AC-247 transport of verify_takeover_mode ──
+# 三个可区分取值，逐一钉住（offline：temp dir + python3，无 build/scp/ssh）：
+#   ① 正控制：evidence 里有 ac=GOAL-016-AC-247 ⇒ transport 追加进载体 + check_evidence_completeness
+#      声明集合 [GOAL-016-AC-247] ⇒ COMPLETE（exit 0），且载体里真的多了那一行。
+#   ② 负控制（「回传了别的东西」与「产出并回传」必须不同形）：evidence 只有别的 ac ⇒
+#      transport 仍会追加（它只按行搬运），而声明集合求差 ⇒ ALL-MISSING（exit 1 / NOT-EVALUATED）。
+#      ⛔ 这一条是本模式最容易退化成的形态：★传输成功★ 被读成 ★产出成功★（硬规则 3b 同族）。
+#   ③ 负控制：evidence 缺失 / 零行 ⇒ transport 返回非 0 + NOT-EVALUATED，载体零变化。
+# 另含一条【结构性】控制（硬规则 ② 按位置）：verify_takeover_mode 的函数体里必须同时出现
+# transport_evidence_append 与 check_evidence_completeness 的调用——把任一个挪走（或删掉）此谓词即取假，
+# 否则「传输 + 完整性核对」只是恰好从没缺过，而不是被要求过（同 AC-240 的生成侧控制）。
+selfcheck_takeover_transport() {
+  local tmp rc=0 carrier ev out n hits
+  tmp="$(mktemp -d 2>/dev/null)" || { echo "selfcheck-takeover-transport: FAIL — cannot create temp dir" >&2; return 1; }
+  carrier="${tmp}/carrier.jsonl"
+
+  # ① 正控制
+  cat > "${tmp}/ev-ac247.jsonl" <<'EVID'
+{"build_sha":"0123456789abcdef0123456789abcdef01234567","ts":"2026-09-12T00:00:00Z","ac":"GOAL-016-AC-247","host":"instance-20221019-1509","project_root":"/home/yale/work/archguard","pre_task_count":61,"post_task_count":61,"stale_days":22.5,"driver_alive":1,"carrier_records":7}
+EVID
+  if ! out="$(transport_evidence_append "${carrier}" "${tmp}/ev-ac247.jsonl")"; then rc=1; fi
+  echo "selfcheck-takeover-transport: positive append → ${out}"
+  printf '%s' "${out}" | grep -q 'appended=1' || rc=1
+  n="$(grep -c '.' "${carrier}" 2>/dev/null || true)"
+  [ -n "${n}" ] || n=0
+  [ "${n}" = "1" ] || { echo "selfcheck-takeover-transport: positive carrier lines=${n} (expect 1)" >&2; rc=1; }
+  if check_evidence_completeness "${tmp}/ev-ac247.jsonl" "GOAL-016-AC-247"; then
+    echo "selfcheck-takeover-transport: positive completeness → COMPLETE (exit 0)"
+  else
+    echo "selfcheck-takeover-transport: positive completeness FAIL — declared ac set present but not judged COMPLETE" >&2; rc=1
+  fi
+
+  # ② 负控制：只有别的 ac ⇒ 传输会追加，但声明集合求差必须判 NOT-EVALUATED
+  cat > "${tmp}/ev-other.jsonl" <<'EVID'
+{"build_sha":"0123456789abcdef0123456789abcdef01234567","ts":"2026-09-12T00:00:01Z","ac":"GOAL-009-AC-238","host":"instance-20221019-1509","project_root":"/home/yale/work/archguard"}
+EVID
+  transport_evidence_append "${carrier}" "${tmp}/ev-other.jsonl" >/dev/null 2>&1 || true
+  if check_evidence_completeness "${tmp}/ev-other.jsonl" "GOAL-016-AC-247" >/dev/null 2>&1; then
+    echo "selfcheck-takeover-transport: negative(other-ac) FAIL — a run that produced the WRONG record was judged complete" >&2; rc=1
+  else
+    echo "selfcheck-takeover-transport: negative(other-ac) → NOT-EVALUATED (exit non-zero, as required — transport success ≠ production success)"
+  fi
+  # 空声明集合必须跳过（⛔ 不是判 NOT-EVALUATED：没有声明就无从求差，那是「未要求」不是「缺」）
+  if check_evidence_completeness "${carrier}" "" >/dev/null 2>&1; then
+    echo "selfcheck-takeover-transport: empty-declared-set → skipped (exit 0)"
+  else
+    echo "selfcheck-takeover-transport: empty-declared-set FAIL — no declared set must skip, not fail" >&2; rc=1
+  fi
+
+  # ③ 负控制：缺失 / 零行证据
+  if transport_evidence_append "${carrier}" "${tmp}/missing.jsonl" >/dev/null 2>&1; then
+    echo "selfcheck-takeover-transport: negative(missing) FAIL — returned success" >&2; rc=1
+  fi
+  : > "${tmp}/empty.jsonl"
+  if transport_evidence_append "${carrier}" "${tmp}/empty.jsonl" >/dev/null 2>&1; then
+    echo "selfcheck-takeover-transport: negative(zero-lines) FAIL — returned success" >&2; rc=1
+  fi
+  echo "selfcheck-takeover-transport: negative(missing/zero-lines) → NOT-EVALUATED (exit non-zero, as required)"
+
+  # 结构性控制（位置）：传输 + 完整性核对两个调用点都必须在 verify_takeover_mode 函数体内。
+  hits="$(sed -n '/^verify_takeover_mode()/,/^}$/p' "$0" 2>/dev/null | sed 's/#.*//' \
+          | grep -c 'transport_evidence_append\|check_evidence_completeness' || true)"
+  echo "selfcheck-takeover-transport: write-points(in-verify_takeover_mode) hits=${hits} (expect >=2)"
+  [ "${hits:-0}" -ge 2 ] 2>/dev/null || rc=1
+
+  rm -rf "${tmp}"
+  if [ "${rc}" -eq 0 ]; then echo "selfcheck-takeover-transport: PASS"; else echo "selfcheck-takeover-transport: FAIL" >&2; fi
+  return "${rc}"
+}
+
+if [ "${selfcheck_takeover_transport_flag}" -eq 1 ]; then
+  selfcheck_takeover_transport
+  exit $?
+fi
+
 # ── selfcheck_evidence_completeness — hermetic controls of check_evidence_completeness (AC7/AC8) ──
 # 两个方向：① 「预期 6 种、实际 2 种」⇒ PARTIAL（exit 2）且逐条列出 4 个缺失 ac；② 全产出 ⇒ COMPLETE
 # （exit 0）。另含全缺 ⇒ NOT-EVALUATED（exit 1）。offline：temp dir + python3，无 build/scp/ssh。
@@ -1530,6 +1623,144 @@ if [ "${verify_upgrade}" -eq 1 ]; then
     exit 1
   fi
   verify_upgrade_mode
+  exit $?
+fi
+
+# validate_takeover_args — the ONE place that decides whether --takeover-root is usable. Returns 0/1 and
+# prints a distinguishable reason on refusal. ⛔ Both the dispatch and verify_takeover_mode call THIS
+# (the dispatch needs it BEFORE build_develop_tgz: a usage error must cost a usage error, not a full
+# develop-tip build — measured 2026-09-12: the check used to live only in the mode, so a bad flag spent
+# 26s building first).
+# ⛔ ABSOLUTE path required: the root is resolved ON the remote host, so a relative path silently resolves
+# against the remote ssh $HOME ⇒ the run would take over / verify a DIFFERENT project than the one the
+# criterion will name (and the criterion would then be reading a record about something else entirely).
+validate_takeover_args() {
+  if [ -z "${takeover_root}" ]; then
+    echo "develop-deliver: --verify-takeover requires --takeover-root <absolute path ON the remote host of the ≥14-day-stalled project>" >&2
+    return 1
+  fi
+  case "${takeover_root}" in
+    /*) return 0 ;;
+    *) echo "develop-deliver: --verify-takeover --takeover-root must be an ABSOLUTE path on the remote host (got: ${takeover_root})" >&2; return 1 ;;
+  esac
+}
+
+# ── verify_takeover_mode — GOAL-016-AC-247：接管【停摆 ≥14 天】的存量项目取证 ────────────────────
+# 与 verify_coldstart_mode 的区别是本质的：那条的远端 ② 是「rm -rf $ROOT 后全新 quay-init」的一次性
+# 靶子（GOAL-009 的九条证据全出自该形态）；本模式把远端脚本切到 --ac247-takeover，对一个【本来就带着
+# 真实存量与旧历史、且已停摆 ≥14 天】的项目做真安装 + 真接管，只取回 ac=GOAL-016-AC-247 那一条记录。
+# ⛔ takeover_root 是【目标机上的绝对路径】，指向存量项目本体（⛔ 不是本模式新造的项目——判据侧的
+# stale_days≥14 与 pre_task_count>0 就是「非当天现造」的区分量，本模式一格都不代填）。
+# 传输面与另两个 verify 模式同形，用的是同一组原语：ship_verify_closure / transport_evidence_append
+# （按 (ts,ac,host,project_root) 去重）/ check_evidence_completeness（声明 ac 集合求差）。
+verify_takeover_mode() {
+  local build_date local_carrier fail hk target remote_script out remote_rc remote_log remote_evidence evidence_local ck_rc
+  build_date="$(git -C "${repo_root}" log -1 --format=%cI refs/heads/develop 2>/dev/null || echo "")"
+  local_carrier="${repo_root}/.quay/productization-verification.jsonl"
+  echo "develop-deliver: --verify-takeover develop=${develop_tip:0:12} build_date=${build_date} takeover_root=${takeover_root:-<unset>} carrier=${local_carrier}"
+  validate_takeover_args || return 2
+  # 本次运行【声明要产出】的 ac 种类（⛔ 不硬编码数字，声明的是种类本身）：只有 AC-247 一种。
+  local expected_acs="GOAL-016-AC-247"
+  fail=0
+  for hk in ${hosts}; do
+    target="${host_target[$hk]:-}"
+    if [ -z "${target}" ]; then
+      echo "develop-deliver: ${hk} — unknown host key (NOT-EVALUATED)"
+      fail=1
+      continue
+    fi
+    echo "develop-deliver: ${hk} (${target}) — scp verify-deliver-coldstart.sh + its FULL closure (\$SCRIPT_DIR siblings + node_modules deps) + SPEC + both .tgz"
+    # ⛔ 闭集的单一真相源在 transport_flat_files / transport_node_modules_deps（由
+    # --selfcheck-transport-closure 证完整）；⛔ 不在此处再抄一份清单。
+    if ! ship_verify_closure "${target}" "${quay_tgz}" "${qn_tgz}"; then
+      echo "develop-deliver: ${hk} (${target}) — scp FAILED (NOT-EVALUATED)"
+      fail=1
+      continue
+    fi
+    remote_script=$(cat <<REMOTE
+$(verify_node_export_for "${hk}")
+EV="\${HOME}/quay-verify-takeover-evidence-${develop_tip:0:8}.jsonl"
+rm -f "\${EV}"
+bash "\${HOME}/verify-deliver-coldstart.sh" \
+  --tgz "\${HOME}/$(basename "${quay_tgz}")" \
+  --tgz-native "\${HOME}/$(basename "${qn_tgz}")" \
+  --build-sha "${develop_tip}" \
+  --build-date "${build_date}" \
+  --host "${hk}" \
+  --ac89 "\${EV}" \
+  --spec "\${HOME}/SPEC-plugin-lifecycle-single-bundle-2026-09-02.md" \
+  --prefix "\${HOME}/quay-verify-takeover-${develop_tip:0:8}.npm" \
+  --project "quay-verify-takeover-${develop_tip:0:8}" \
+  --root "\${HOME}/quay-verify-takeover-${develop_tip:0:8}-root" \
+  --ac247-takeover \
+  --takeover-root "${takeover_root}"
+RC=\$?
+echo "VERIFY-RC \${RC}"
+if [ -f "\${EV}" ]; then
+  echo "EVIDENCE-PATH \${EV}"
+  echo "EVIDENCE-LINES \$(wc -l < "\${EV}")"
+else
+  echo "EVIDENCE-ABSENT \${EV}"
+fi
+REMOTE
+)
+    set +e
+    out="$(ssh "${ssh_opts[@]}" "${target}" "bash -s" <<< "${remote_script}" 2>&1)"
+    remote_rc=$?
+    set -e
+    remote_log="${repo_root}/.quay/verify-takeover-remote-${hk}-${develop_tip:0:8}.log"
+    mkdir -p "$(dirname "${remote_log}")"
+    printf '%s\n' "${out}" > "${remote_log}"
+    echo "develop-deliver: ${hk} (${target}) remote stdout persisted → ${remote_log} (rc=${remote_rc})"
+    remote_evidence="$(printf '%s\n' "${out}" | grep -oE 'EVIDENCE-PATH .*' | tail -1 | sed 's/^EVIDENCE-PATH //' || echo "")"
+    if [ -z "${remote_evidence}" ]; then
+      echo "develop-deliver: ${hk} (${target}) — NOT-EVALUATED (remote produced no evidence path)"
+      printf '%s\n' "${out}" | tail -12
+      fail=1
+      continue
+    fi
+    evidence_local="${repo_root}/.quay/verify-takeover-evidence-${hk}-${develop_tip:0:8}.jsonl"
+    rm -f "${evidence_local}"
+    if ! scp "${ssh_opts[@]}" "${target}:${remote_evidence}" "${evidence_local}" >/dev/null 2>&1; then
+      echo "develop-deliver: ${hk} (${target}) — evidence scp-back FAILED (NOT-EVALUATED)"
+      fail=1
+      continue
+    fi
+    if ! transport_evidence_append "${local_carrier}" "${evidence_local}"; then
+      echo "develop-deliver: ${hk} (${target}) — evidence NOT-EVALUATED (no transport)"
+      rm -f "${evidence_local}"
+      fail=1
+      continue
+    fi
+    # 传输成功 ≠ 产出完整（硬规则 3b 同族：一个「回传了别的东西」的成功与「产出并回传」同形）。
+    # 本条只要一种记录，缺它即 NOT-EVALUATED（⛔ 没有 PARTIAL 这一档：种类集合只有一个元素，
+    # 「部分齐」在本模式下不存在——那不是可区分的状态，是自欺）。
+    check_evidence_completeness "${evidence_local}" "${expected_acs}"
+    ck_rc=$?
+    if [ "${ck_rc}" != "0" ]; then
+      echo "develop-deliver: ${hk} (${target}) — NOT-EVALUATED (declared ac set [${expected_acs}] not present in transported evidence: rc=${ck_rc})"
+      fail=1
+    else
+      echo "develop-deliver: ${hk} (${target}) — declared ac set [${expected_acs}] transported into ${local_carrier} ✓"
+    fi
+    rm -f "${evidence_local}"
+  done
+  git -C "${repo_root}" worktree remove --force "${wt}" 2>/dev/null || rm -rf "${wt}"
+  if [ "${fail}" -eq 1 ]; then
+    echo "develop-deliver: --verify-takeover FAILED (a host produced no AC-247 record — see per-host lines above)" >&2
+    return 1
+  fi
+  echo "develop-deliver: --verify-takeover OK — GOAL-016-AC-247 record transported into ${local_carrier}"
+  return 0
+}
+
+if [ "${verify_takeover}" -eq 1 ]; then
+  # ⛔ 用法错误在 build 之前判（一个坏参数必须只花一次用法错误的代价，⛔ 不是一次 develop-tip 构建）。
+  validate_takeover_args || exit 2
+  if ! build_develop_tgz; then
+    exit 1
+  fi
+  verify_takeover_mode
   exit $?
 fi
 

@@ -556,3 +556,28 @@ test("AC5 — every AC-214 NEED ac's write point carries a freshness anchor (mec
     "every AC-214 NEED ac's write point must carry a top-level build_sha (via ac89_append_goal009 or an " +
     `explicit field) — otherwise that ac is structurally unsatisfiable in AC-214:\n  ${problems.join("\n  ")}`);
 });
+
+// ── AC-247 (GOAL-016) — the takeover producer's hermetic controls ────────────────────────────────
+// gap-ac247-stalled-project-clean-takeover-record: the AC reads a carrier record that this script now
+// produces (segment ⑧, --ac247-takeover). Its hermetic half lives in --selfcheck, and its two
+// load-bearing properties are BOTH negative controls — so asserting only "PASS" would let a green
+// selfcheck hide exactly the defect the AC is about:
+//   · every one of the eight criterion readings, when unreadable, must produce ZERO records
+//     (⛔ never a `driver_alive:0` record — "could not read" must not be dressed as "read it, it's
+//     not alive"; 硬规则 3b's mirror half), with stale_days 13.999 refused and 14.000 accepted so the
+//     14-day floor is a real filter rather than a constant;
+//   · driver_alive must come from the status carrier (the same parser AC-203 uses) and ⛔ never from
+//     `quay driver start`'s exit code — the AC names that explicitly, because start already exits 0
+//     while the system is dead (GOAL-009 AC-203).
+test("AC-247 — --selfcheck exercises the takeover producer's eight-reading refusal + liveness-source controls", () => {
+  const r = run(["--selfcheck"]);
+  assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /ac247-record\(fields\+anchor\) ok=1 missing_fields='' anchor-literal-hits=0/,
+    "the eight fields must land verbatim on the record line, through the shared anchor choke point only");
+  assert.match(r.stdout, /ac247-refusal\(9 negative specs \+ boundary-14\.000-accepted\) negatives_all_refused=1/,
+    "every unreadable/out-of-range reading must yield ZERO records — including the 13.999 boundary below the 14-day floor");
+  assert.match(r.stdout, /ac247-task-store-count\(61 via real node stub\) ok=1 head\/stale-unreadable-checks=0/,
+    "the task-store count must read the project's own store through its ABI, and a non-JSON/empty reply must NOT read as 0");
+  assert.match(r.stdout, /ac247-liveness-source\(from-AC203_DRIVER_ALIVE\)=1 status-read-hits=1 bad-assign-hits=0/,
+    "driver_alive must come from the status carrier, ⛔ not from the driver start exit code");
+});

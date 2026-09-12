@@ -65,7 +65,7 @@
 #       [--test-command <cmd>] [--tmux-session <sess>] \
 #       [--wait <s>] [--liveness-window <min>] \
 #       [--skip-cold-start-drive] [--cold-start-drive] [--verify-only] [--require-live] \
-#       [--evidence <path>] [--ac89 <path>] [--host <B|C>] [--spec <path>] [--channel npm-global|marketplace] [--ac205-session] [--ac207-e2e] [--ac239-e2e] [--selfcheck] [--help] \
+#       [--evidence <path>] [--ac89 <path>] [--host <B|C>] [--spec <path>] [--channel npm-global|marketplace] [--ac205-session] [--ac207-e2e] [--ac239-e2e] [--ac247-takeover --takeover-root <dir>] [--selfcheck] [--help] \
 #       [--target-launcher <l>] [--target-model <m>] [--target-auth <a>] [--driving-profiles <p>]
 #
 #   --build-root <repo> 该次验证【自己】从 <repo> 的 develop-tip 现 build quay+quay-native tgz
@@ -92,7 +92,7 @@
 #                    发 probe，读目标 transcript（transcript-delivery-check.js --check）判 delivered
 #                    ⇒ 写 AC-205 记录（transcript_confirmed=true）。opt-in：需同址 live 目标会话。
 #   --require-live   ③ 若 COLDSTART_LIVE != yes 则 exit 1（严格验证——冷启动确认跑用）。
-#   --selfcheck      全 hermetically 自检（AC2 直接量正/负控制 + L1 闭集解析/未评估正负控制 + AC5 判据正/负控制 + 目标项目 profiles 配置正/负/覆盖控制 + AC161/AC3 段① 零写入正/取假控制），不碰真实安装。exit 0/1。
+#   --selfcheck      全 hermetically 自检（AC2 直接量正/负控制 + L1 闭集解析/未评估正负控制 + AC5 判据正/负控制 + 目标项目 profiles 配置正/负/覆盖控制 + AC161/AC3 段① 零写入正/取假控制 + AC-247 八件读数正/负控制），不碰真实安装。exit 0/1。
 #   --ac207-e2e      ⑤ 端到端（GOAL-009-AC-207）：第三方项目里用 shipped CLI 建真实任务、起 *-drivers
 #                    驱动到 done、读直接量写 AC-207 记录。昂贵（worker-driver spawn claude -p）——
 #                    opt-in；缺任一读数不写（fail-closed）。⛔ 产品文档/skill 文案不得声称 quay 会启动会话。
@@ -112,6 +112,14 @@
 #                    .quay/profiles.yml 的 worker-default 派生（单一真相源，⛔ 不写第二份字面量）；
 #                    --driving-profiles <p> 显式指定该来源。launcher/model 任一缺 ⇒
 #                    target-profiles: not-configured（可区分取值，⛔ 不静默跳过，硬规则 3b）。
+#   --ac247-takeover  ⑧ AC-247（GOAL-016）：当前 build 干净接管一个【停摆 ≥14 天】的存量 quay 项目。
+#                    与 ② 的「rm -rf 后全新 quay-init」是两条本质不同的路径。顺序固定：读 pre 三件
+#                    （task 数 / HEAD 时刻 / status 载体）→ 段① 的隔离前缀安装已完成 → 用目标项目自己的
+#                    root 起 promotion driver → 读 `driver status --json` → 重读 task 数 → 八件读数
+#                    全部有效才写 ac=GOAL-016-AC-247 记录。任缺 ⇒ ⛔ 不写记录 + 可区分 NOT-EVALUATED
+#                    + 退出非 0（缺值≠合格；⛔ 不写 driver_alive=0 的记录）。liveness 一律读载体
+#                    （`quay driver status --json`），⛔ 不从 `driver start` 的退出码或 ps 进程表派生。
+#   --takeover-root <path>  被接管项目根（目标机上的绝对路径；须已存在 .quay/config.yml，⛔ 非本仓库）。
 #   --help           用法在前、退出 0、无副作用（gap-scripts-sprawl 约定）。
 
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
@@ -320,6 +328,52 @@ AC239_BASELINE_STATUS="not-attempted"        # ⑦b 的前置读数：compatible
                                              # 是独立取值，既不算合格也不算不合格（硬规则 3b）。成因与
                                              # 后果见 ⑦b 的 ⓪c。
 
+# ── ⑧ AC-247（GOAL-016）：当前 build 干净接管【停摆 ≥14 天】的存量项目，且 driver 真活 ─────────────
+# 判据（goals/AC-247-*.md，⛔ 本步骤不改判据文件）读载体 .quay/productization-verification.jsonl 里
+# `ac=GOAL-016-AC-247` 的一条记录，要求 host≠本机 ∧ project_root realpath ∉ 驱动方仓库 ∧
+# pre_task_count>0 ∧ post_task_count==pre ∧ stale_days≥14 ∧ build_sha 非空 ∧ driver_alive==1 ∧
+# carrier_records>0。缺任一 ⇒ 不写记录（缺值 ≠ 合格，硬规则 3b/6）。
+#
+# 与 GOAL-009 四条近亲步骤（AC-203/207/238/239）的分工是【字段】层面的：那四条各自产出的字段集都
+# 不含 stale_days / pre_task_count / post_task_count 三个量（实测：这三个字段名在整个 carrier 的历史
+# 记录里一次都没出现过），也没有一条针对「停摆 ≥14 天的存量项目做从零安装 + 接管」。
+#
+# ⚠️ 三个量各自的【直接量】来源（硬规则 4b：⛔ 不用被测对象自报的量、⛔ 不用代理量）：
+#   · stale_days      ← 目标项目 HEAD 的 git 提交时刻（git 对象，外部可核），到【接管动作之前】那一刻
+#                       为止的天数。⛔ 必须在起 driver 之前取：任何接管动作都会让「距今」变成 ~0。
+#                       这也正是「⛔ 非当天现造」能取假的地方——当天 quay-init 出来的项目结构上过不了。
+#   · pre/post_task_count ← 目标项目【自己的 task store】条目数，同一实现读两次（接管前 / driver 起来后）。
+#                       读数走交付物 CLI 的 `task list --json`（经项目自己的 config/provider），数 JSON
+#                       数组长度——⛔ 不数 `<root>/tasks/*.md`：那是【路径猜测】，而 tasks_dir 是项目
+#                       config 里的可配置项（ad-arm1 的 archguard 实测就把它写成一条绝对路径）。
+#                       读不出 ⇒ 空 + 非 0，调用方据此走 NOT-EVALUATED（⛔ 不写 0 —— 那会把
+#                       「没查成」伪装成「查过且不合格」，硬规则 3b 的镜像半边）。
+#   · driver_alive / carrier_records ← `quay driver status --kind promotion --root <root> --json`，
+#                       经既有唯一解析器 probe_ac203_driver_status（⛔ 不从 `driver start` 的退出码派生：
+#                       GOAL-009 AC-203 已实证 start 今天就会打印 exit=0 而系统是死的）。
+# pstale/ps 读数（AC247_PS_STALE_PROCS）是【诊断量】：它存在的唯一理由是留档「进程表读数」与
+# 「status 读数」在同一时刻的【分歧】（AC4），⛔ 任何判据字段都不得由它派生（硬规则 4b 的反面教材）。
+AC247_TAKEOVER=0                             # 1 = --ac247-takeover 触发（opt-in）
+AC247_ROOT=""                                # --takeover-root：被接管项目根（目标机上，⛔ 非本仓库）
+AC247_HOST=""                                # 目标机 hostname（目标机读，⛔ 不由驱动方传入）
+AC247_PROJECT_ROOT=""                        # 被接管项目根的 realpath（目标机读）
+AC247_PRE_TASK_COUNT=""                      # 接管【前】的 task store 条目数（空 = 未读成）
+AC247_POST_TASK_COUNT=""                     # driver 起来后重读（同一实现）
+AC247_STALE_DAYS=""                          # HEAD 提交时刻 → 接管前那一刻，天数（3 位小数）
+AC247_HEAD_EPOCH=""                          # HEAD 提交时刻（epoch，上面那个量的产生处，一并留档）
+AC247_PRE_TS_EPOCH=""                        # 「接管前那一刻」（epoch）
+AC247_DRIVER_ALIVE=0                         # ← probe_ac203_driver_status，⛔ 非 start 退出码
+AC247_CARRIER_RECORDS=-1                     # ← 同一 status JSON；-1 = 未读（缺值 ≠ 合格）
+AC247_CARRIER_RECORDS_PRE=-1                 # 接管前的同一读数（差值 = 本次 driver 真的写了载体）
+AC247_LAST_RECORD_TS=""                      # status JSON 的 last_record_ts（留档：⛔ 只报计数分不清「在长」与「停更」）
+AC247_PS_STALE_PROCS=-1                      # ps 代理量（⛔ 诊断用，不参与任何判定）
+AC247_DRIVER_START_RC=""                     # `driver start` 退出码（⛔ 诊断用，只用于决定轮询窗宽）
+AC247_USER_INSTALL_PRE="not-evaluated"       # 接管前目标机的 user-scope 安装读数：absent|present|not-evaluated
+AC247_EVALUATED=0                            # 1 = 八件读数全成立并已写出记录
+AC247_POLL_SECS="${AC247_POLL_SECS:-120}"    # 轮询 driver 写首条载体记录的窗宽（秒）
+AC247_WRITTEN_THIS_RUN=0                     # 1 = 本次运行写出了 AC-247 记录
+AC247_WRITTEN_ROOT=""                        # 写出时的 project_root
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --tgz) QUAY_TGZ="$2"; shift 2 ;;
@@ -353,6 +407,8 @@ while [ $# -gt 0 ]; do
     --driving-profiles) DRIVING_PROFILES="$2"; shift 2 ;;
     --upgrade-existing) UPGRADE_EXISTING=1; shift ;;
     --upgrade-source) UPGRADE_SOURCE="$2"; shift 2 ;;
+    --ac247-takeover) AC247_TAKEOVER=1; shift ;;
+    --takeover-root) AC247_ROOT="$2"; shift 2 ;;
     --selfcheck) DO_SELFCHECK=1; shift ;;
     *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -1500,6 +1556,228 @@ BODY
     fi
   else
     echo "  [⑦b] NOTE: AC-239 record NOT written (task not driven to done / no implementation commit / no gate events — 缺值≠合格)" >&2
+  fi
+  return 0
+}
+
+# ── ⑧ AC-247 直接量读取（全部在【目标机】上读，硬规则 4b：外部可核，⛔ 不自报）──────────────────
+# 下面四个小函数各自【只做一件事】，且都被 step_ac247_takeover 与 --selfcheck 同时驱动——
+# ⛔ 不让夹具复刻一遍读数逻辑（硬规则 4 推论三：只能被夹具复刻满足的判据不算被测）。
+
+# 目标项目自己的 task store 条目数。**同一实现读 pre 与 post 两次**（Plan 6 的判据要的是
+# 「同一读法在两个时刻的两个值」，两次用不同读法得来的「相等」什么也不能证明）。
+# 读数路径 = 交付物 CLI 的 `task list --json`（经项目自己的 config/provider 解析 store）⇒ 数 JSON
+# 数组长度。⇒ 打印条目数、返回 0；读不出（CLI 报错 / 输出不是 JSON 数组 / 空）⇒ 不打印、返回 1
+# ——⛔ 不返回 0（「没查成」与「查了是 0 条」必须不同形，硬规则 3b）。
+ac247_task_store_count() {
+  local root="$1" qrl="$2" out
+  out="$( (cd "$root" && node "$qrl" task list --root "$root" --json) 2>/dev/null || true)"
+  [ -n "$out" ] || return 1
+  # ⛔ 用 process.stdout.write 而【不是】console.log：本仓库的套件环境里 FORCE_COLOR 已置位，而
+  # console.log 会对【数字】加 ANSI 颜色（实测本机 `console.log(61)` ⇒ "\033[33m61\033[39m"）⇒
+  # 命令替换拿到的不是 "61"，一切按字符串比较的判据当场恒假（既有教训：force-color-breaks-node-
+  # console-log-read-parsing）。write 不走那一层格式化。
+  printf '%s' "$out" | "$VC_NODE" --no-warnings -e '
+    let s = "";
+    process.stdin.on("data", d => s += d).on("end", () => {
+      try { const j = JSON.parse(s); if (Array.isArray(j)) { process.stdout.write(String(j.length) + "\n"); process.exit(0); } } catch { /* not JSON */ }
+      process.exit(1);
+    });'
+}
+
+# 项目 HEAD 的提交时刻（epoch）。这是 stale_days 的【产生处】——因为下游只看得见天数，
+# 把原始 epoch 一并带回留档，事后可复算（⛔ 不可复算的读数无法被独立核对）。
+# 非 git 仓库 / 无提交 ⇒ 不打印、返回 1。
+ac247_head_epoch() {
+  local root="$1" epoch
+  epoch="$(git -C "$root" log -1 --format=%ct 2>/dev/null || true)"
+  case "$epoch" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s\n' "$epoch"
+}
+
+# stale_days = (接管前时刻 - HEAD 提交时刻) / 86400，3 位小数。任一侧读不出 / 非数字 ⇒ 不打印、返回 1。
+# ⛔ 用 awk（POSIX）而不是 python3：本步骤要在目标机上跑，python3 不是每个宿主都有，而 awk 是。
+ac247_stale_days() {
+  local head_epoch="$1" now_epoch="$2" out
+  case "$head_epoch" in ''|*[!0-9]*) return 1 ;; esac
+  case "$now_epoch" in ''|*[!0-9]*) return 1 ;; esac
+  out="$(awk -v h="$head_epoch" -v n="$now_epoch" 'BEGIN{ printf "%.3f", (n - h)/86400.0 }' 2>/dev/null || true)"
+  case "$out" in ''|*[!0-9.]*) return 1 ;; esac
+  printf '%s\n' "$out"
+}
+
+# 接管【前】目标机的 user-scope quay 安装读数（三态，⛔ 不是布尔——硬规则 3）：
+#   present       两个独立读法里有一个说「装了」；
+#   absent        两个独立读法【都】说「没装」（`command -v quay` 无 ∧ npm 全局 root 下无 quay/）；
+#   not-evaluated 连 npm 都问不到 ⇒ 读不懂 ⇒ 独立取值，不冒充 absent（硬规则 3b）。
+# ⚠️ 它【不是】判据字段（AC-247 的判据不读它）——它存在的理由是让「接管前安装为缺」这条**负控制**
+#   留下可核痕迹（AC3 要求留档「install 缺」），否则「我们装了一个本来就在的东西」无从分辨。
+ac247_probe_user_install() {
+  local npmroot
+  if command -v quay >/dev/null 2>&1; then printf 'present\n'; return 0; fi
+  npmroot="$(npm root -g 2>/dev/null || true)"
+  if [ -n "$npmroot" ] && [ -d "$npmroot/quay" ]; then printf 'present\n'; return 0; fi
+  if [ -n "$npmroot" ]; then printf 'absent\n'; return 0; fi
+  printf 'not-evaluated\n'
+}
+
+# ps 代理量读数：全机 `quay` 命中的进程数。⛔ 只作 AC4 的【分歧留档】——它证明「进程表」与
+# 「status 载体」是两种确实不同的读法（目标机实测：ps=4 条 21–26 天的陈旧进程，而同刻 status 报
+# driver_alive=0）。⛔ 任何判据字段都不得由它派生（同 AC-203/AC-234 的教训，硬规则 4b）。
+# 读不出 ⇒ 打印 -1（⛔ 不打印 0 —— 0 是「读了，没有」，-1 是「没读成」）。
+ac247_ps_stale_procs() {
+  local n
+  n="$(ps -eo pid,args 2>/dev/null | grep -c '[q]uay' || true)"
+  case "$n" in ''|*[!0-9]*) printf -- '-1\n' ;; *) printf '%s\n' "$n" ;; esac
+}
+
+# 读 status 载体（复用既有唯一解析器）→ 复制进 AC247_* 并【原样保留】AC203_* 的取值。
+# ⛔ 不新造第二套 status 解析（本项目已因「同一个载体面两套读法」吃过一次亏）；⛔ 也不把
+# AC203_* 留给调用方当输出用——那会把「⑧ 的读数」与「④ 的读数」混成同一个变量。
+ac247_read_driver_status() {
+  local root="$1" qrl="$2" status_json
+  status_json="$( (cd "$root" && node "$qrl" driver status --kind promotion --root "$root" --json) 2>/dev/null || true)"
+  AC247_LAST_RECORD_TS="$(printf '%s' "$status_json" | "$VC_NODE" --no-warnings -e '
+    let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+      try { const j = JSON.parse(s); console.log(typeof j.last_record_ts === "string" ? j.last_record_ts : ""); } catch { console.log(""); }
+    });' 2>/dev/null || true)"
+  probe_ac203_driver_status "$status_json"
+  AC247_DRIVER_ALIVE="$AC203_DRIVER_ALIVE"
+  AC247_CARRIER_RECORDS="$AC203_CARRIER_RECORDS"
+}
+
+# ── AC-247 记录写（fail-closed，硬规则 3b）──────────────────────────────────────────────────
+# 经 ac89_append_goal009 统一补 top-level build_sha/ts（AC-214 唯一补锚 choke point）——⛔ 本函数体内
+# 不出现 `build_sha` 字面量：多一个补锚点 = 下次改锚格式必漏一处（该 choke point 的注释逐字禁止）。
+# 八件读数逐字满足 criterion 过滤（goal 的 criterion 与本函数是同一组谓词的两侧，改动须同步）：
+#   host 非空（≠本机由 criterion 判）· project_root 非空（∉本仓库由 criterion 判）·
+#   pre 正整数 · post == pre · stale ≥ 14 · driver_alive == 1 · carrier_records > 0。
+# ⛔ 缺任一条 ⇒ return 1、一条都不写——包括「读不出就写 0」这个形态：它会把「没查成」伪装成
+#    「查过且不合格」，比不写更贵（硬规则 3b 的镜像半边）。
+# ⚠️ `14` 是 criterion 里的阈值（stale_days≥14），此处与判据文件是同一组常数的两侧，不是「字段默认值」。
+write_ac247_record() {
+  local host="$1" project_root="$2" pre="$3" post="$4" stale="$5" alive="$6" recs="$7"
+  local extra="${8:-}"
+  [ -n "$host" ] || return 1
+  [ -n "$project_root" ] || return 1
+  [ "$pre" -gt 0 ] 2>/dev/null || return 1
+  [ "$post" = "$pre" ] || return 1
+  case "$stale" in ''|*[!0-9.]*) return 1 ;; esac
+  awk -v s="$stale" 'BEGIN{ exit !(s >= 14) }' 2>/dev/null || return 1
+  [ "$alive" = "1" ] || return 1
+  [ "$recs" -gt 0 ] 2>/dev/null || return 1
+  ac89_append_goal009 ",\"ac\":\"GOAL-016-AC-247\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"pre_task_count\":$pre,\"post_task_count\":$post,\"stale_days\":$stale,\"driver_alive\":$alive,\"carrier_records\":$recs${extra}"
+}
+
+# ── ⑧ 接管（GOAL-016-AC-247）──────────────────────────────────────────────────────────────
+# 顺序固定（Plan 2）：(a) 读 pre 三件并原样打印 → (b) 既有的从零安装段已完成（step① 的隔离前缀）
+# → (c) 用【目标项目自己的】runtime 起 promotion driver → (d) 读 `driver status --json`
+# → (e) 重读 task 数 → (f) 八件读数全部有效才写记录；任缺 ⇒ 不写 + 可区分的 NOT-EVALUATED + 退出非 0。
+# ⛔ (a) 必须在 (c) 之前：stale_days 的第二个时刻是「接管前那一刻」——起 driver 之后再算，
+#    「距今」会变成 ~0，判据当场恒假（Plan 的已知陷阱 ③）。
+# ⛔ 前置缺一即 not-evaluated（return 0 由调用方按取值报，⛔ 不 crash、也不写记录）。
+step_ac247_takeover() {
+  local root="$1" qrl pre_count head_epoch i
+  qrl="${STEP1_PREFIX}/bin/quay"
+  qrl="$(readlink -f "$qrl" 2>/dev/null || echo "$qrl")"
+  echo "== ⑧ AC-247 takeover: current build takes over a ≥14-day-stalled legacy project =="
+  if [ "$AC247_TAKEOVER" != "1" ]; then
+    echo "  not-evaluated: --ac247-takeover 未传入（未尝试 ≠ 不合格）"
+    return 0
+  fi
+  if [ -z "$root" ] || [ ! -d "$root" ]; then
+    echo "  not-evaluated: --takeover-root 不是目录: ${root:-<empty>}" >&2
+    return 0
+  fi
+  if [ ! -f "$root/.quay/config.yml" ]; then
+    echo "  not-evaluated: $root 下没有 .quay/config.yml —— 本步骤测的是【接管存量 quay 项目】，不是新装" >&2
+    return 0
+  fi
+  if [ ! -x "$qrl" ] && [ ! -f "$qrl" ]; then
+    echo "  not-evaluated: 交付物 CLI 不在 $qrl ⇒ 无接管入口（段① 未完成？）" >&2
+    return 0
+  fi
+
+  AC247_ROOT="$root"
+  AC247_HOST="$(hostname 2>/dev/null || echo '')"
+  AC247_PROJECT_ROOT="$(cd "$root" && pwd -P)"
+  AC247_PRE_TS_EPOCH="$(date +%s)"
+  AC247_USER_INSTALL_PRE="$(ac247_probe_user_install)"
+  AC247_PS_STALE_PROCS="$(ac247_ps_stale_procs)"
+
+  # (a) pre 三件 —— 原样打印（可核），且【此刻】就把 stale_days 的两个时刻之一固定下来。
+  # `|| true` 的理由：读不出时函数不打印且返回非 0，set -e 不得因此中断整个脚本——缺值要走到
+  # 下面的 fail-closed 分支留下可区分痕迹，而不是让脚本静静死掉（那与「没跑」同形）。
+  pre_count="$(ac247_task_store_count "$root" "$qrl" || true)"
+  head_epoch="$(ac247_head_epoch "$root" || true)"
+  AC247_HEAD_EPOCH="$head_epoch"
+  AC247_STALE_DAYS="$(ac247_stale_days "$head_epoch" "$AC247_PRE_TS_EPOCH" || true)"
+  AC247_PRE_TASK_COUNT="$pre_count"
+  ac247_read_driver_status "$root" "$qrl"
+  AC247_CARRIER_RECORDS_PRE="$AC247_CARRIER_RECORDS"
+  echo "  [⑧a] PRE (taken BEFORE the takeover action) host=$AC247_HOST project_root=$AC247_PROJECT_ROOT"
+  echo "  [⑧a] PRE user-scope quay install=$AC247_USER_INSTALL_PRE (absent|present|not-evaluated —— 三态, ⛔ 非布尔)"
+  echo "  [⑧a] PRE task_store_count=${pre_count:-<unreadable>} head_epoch=${head_epoch:-<unreadable>} stale_days=${AC247_STALE_DAYS:-<unreadable>} (at epoch $AC247_PRE_TS_EPOCH)"
+  echo "  [⑧a] PRE driver_alive=$AC247_DRIVER_ALIVE carrier_records=$AC247_CARRIER_RECORDS last_record_ts=${AC247_LAST_RECORD_TS:-<none>} (source: quay driver status --kind promotion --json)"
+  # AC-247 AC4 的分歧留档：同刻的【进程表】读数 vs 【status 载体】读数。⛔ 记录用的是后者。
+  echo "  [⑧a] PRE ps-proxy quay_procs=$AC247_PS_STALE_PROCS (⛔ 代理量, 仅供与上面的 status 读数对照; 本步骤任何字段都不由它派生)"
+
+  # (b) 从零安装段（step①）已完成 —— 安装落在隔离前缀里，⛔ 不碰目标机的 user-scope。
+  echo "  [⑧b] install segment done: delivered CLI = $qrl (isolated prefix ${STEP1_PREFIX:-<none>}, 目标机 user-scope 未被写入)"
+
+  # (c) 接管动作：用【目标项目自己的 root】起 promotion driver。
+  # ⛔ rc 只作诊断/轮询窗宽，⛔ 不作为 driver_alive 的来源（GOAL-009 AC-203 已实证 start 会
+  #    打印 exit=0 而系统是死的；反向也同形——已常驻时 restart 报非 0 而 driver 是活的）。
+  # ⛔ 刻意不写「命令 … 或运算 赋给 rc」的一行形（instrument-failure-check 的 FAMILY-3 是行扫描器，
+  #    会把那种写法读成「管道后读退出码」并往 shrink-only 的那一族新增一条实例）；用本文件既有的
+  #    set +e / 取 rc / set -e 形（同 :973/:1454 与 step_upgrade_existing 的落地基线处）。
+  echo "  [⑧c] takeover action: start the project's OWN promotion driver against $root"
+  set +e
+  (cd "$root" && node "$qrl" driver start --kind promotion --root "$root") >/dev/null 2>&1
+  AC247_DRIVER_START_RC=$?
+  set -e
+  echo "  [⑧c] driver start rc=$AC247_DRIVER_START_RC (⛔ 诊断量, 不是 liveness 读数)"
+
+  # (d) 读 status 载体，轮询到 driver_alive=1 ∧ carrier_records>0（首个 round 心跳落盘需要几秒）。
+  # ⛔ 不放宽到无限：「等不到」必须留下可核痕迹，而不是一个永不返回的步骤（同 ⑦b 的轮询纪律）。
+  for i in $(seq 1 "$AC247_POLL_SECS"); do
+    ac247_read_driver_status "$root" "$qrl"
+    if [ "$AC247_DRIVER_ALIVE" = "1" ] && [ "$AC247_CARRIER_RECORDS" -gt 0 ] 2>/dev/null; then break; fi
+    sleep 1
+  done
+  echo "  [⑧d] POST driver_alive=$AC247_DRIVER_ALIVE carrier_records=$AC247_CARRIER_RECORDS (pre=$AC247_CARRIER_RECORDS_PRE) last_record_ts=${AC247_LAST_RECORD_TS:-<none>} (poll window ${AC247_POLL_SECS}s)"
+
+  # (e) 重读 task 数（同一实现）——接管动作不许破坏存量：post == pre。
+  AC247_POST_TASK_COUNT="$(ac247_task_store_count "$root" "$qrl" || true)"
+  echo "  [⑧e] POST task_store_count=${AC247_POST_TASK_COUNT:-<unreadable>} (pre=${pre_count:-<unreadable>})"
+
+  # (f) 判定 —— 八件读数全部有效才写。每一项各自打印（⛔ 不静默跳过任何一项）。
+  local ok=1 why=""
+  [ -n "$AC247_HOST" ] || { ok=0; why="$why host-empty;"; }
+  [ -n "$AC247_PROJECT_ROOT" ] || { ok=0; why="$why project-root-empty;"; }
+  case "$pre_count" in ''|*[!0-9]*) ok=0; why="$why pre-task-count-unreadable;"; ;;
+    *) [ "$pre_count" -gt 0 ] 2>/dev/null || { ok=0; why="$why pre-task-count-not-positive($pre_count);"; } ;; esac
+  [ "$AC247_POST_TASK_COUNT" = "$pre_count" ] 2>/dev/null && [ -n "$pre_count" ] \
+    || { ok=0; why="$why post-task-count-differs(pre=${pre_count:-<unreadable>},post=${AC247_POST_TASK_COUNT:-<unreadable>});"; }
+  case "$AC247_STALE_DAYS" in ''|*[!0-9.]*) ok=0; why="$why stale-days-unreadable;"; ;;
+    *) awk -v s="$AC247_STALE_DAYS" 'BEGIN{ exit !(s >= 14) }' 2>/dev/null || { ok=0; why="$why stale-days-below-14($AC247_STALE_DAYS);"; } ;; esac
+  [ "$AC247_DRIVER_ALIVE" = "1" ] || { ok=0; why="$why driver-not-alive($AC247_DRIVER_ALIVE);"; }
+  [ "$AC247_CARRIER_RECORDS" -gt 0 ] 2>/dev/null || { ok=0; why="$why carrier-records-not-positive($AC247_CARRIER_RECORDS);"; }
+
+  if [ "$ok" = "1" ]; then
+    if write_ac247_record "$AC247_HOST" "$AC247_PROJECT_ROOT" "$pre_count" "$AC247_POST_TASK_COUNT" \
+        "$AC247_STALE_DAYS" "$AC247_DRIVER_ALIVE" "$AC247_CARRIER_RECORDS" \
+        ",\"carrier_records_pre\":$AC247_CARRIER_RECORDS_PRE,\"stale_processes_ps\":$AC247_PS_STALE_PROCS,\"driver_start_rc\":$AC247_DRIVER_START_RC,\"last_record_ts\":\"${AC247_LAST_RECORD_TS}\",\"user_install_pre\":\"$AC247_USER_INSTALL_PRE\",\"head_epoch\":$AC247_HEAD_EPOCH"; then
+      AC247_EVALUATED=1
+      AC247_WRITTEN_THIS_RUN=1
+      AC247_WRITTEN_ROOT="$AC247_PROJECT_ROOT"
+      echo "  [⑧f] ac247 record written → $AC89 ✓ (host=$AC247_HOST project_root=$AC247_PROJECT_ROOT pre=$pre_count post=$AC247_POST_TASK_COUNT stale_days=$AC247_STALE_DAYS driver_alive=$AC247_DRIVER_ALIVE carrier_records=$AC247_CARRIER_RECORDS)"
+    else
+      echo "  [⑧f] AC247-NOT-EVALUATED: record NOT written (fail-closed: BUILD_SHA missing/non-40-hex or AC89 path empty —— 缺值≠合格)" >&2
+    fi
+  else
+    echo "  [⑧f] AC247-NOT-EVALUATED: record NOT written (缺值≠合格):$why" >&2
+    echo "        ⛔ 特别是没有写出 driver_alive=0 的记录：那会把「没查成」伪装成「查过且不合格」（硬规则 3b）" >&2
   fi
   return 0
 }
@@ -3527,7 +3805,118 @@ FAKE_NPM
   echo "selfcheck: ac239-adopt-decision(in-step_upgrade_existing) hits=$bmw_hits negative-control(stripped)=$bmw_ok (expect >=1/0 — 升级动作必须携带采纳决定, 且该谓词删掉旗标即取假)"
   if [ "$bmw_hits" -lt 1 ] || [ "$bmw_ok" != "0" ]; then bmw_fail=1; fi
 
+  # control 47/48/49/50 (AC-247 八件读数的正/负控制, GOAL-016 —— 本轮新增):
+  # ⛔ 全部直接驱动【产品函数】（write_ac247_record / ac247_task_store_count / ac247_head_epoch /
+  # ac247_stale_days），⛔ 不让夹具复刻一遍判定逻辑——复刻出来的绿不证明产品绿（硬规则 4 推论三：
+  # 一个只能被夹具复刻满足的判据不是测量）。
+  # 47 正控制：八件读数齐备 ⇒ 写出一条 ac=GOAL-016-AC-247 记录，且九个字段逐字落在该行里
+  #    （八件 criterion 字段 + top-level build_sha 锚）。⚠️ 同时断言写入点【没有】自己的 build_sha
+  #    字面量（AC-214 唯一补锚 choke point；可证伪：往函数体里加一行补锚即取假）。
+  # 48 负控制（能取假，逐项）：把【任一件】置成读不出 ⇒ 零记录 + 返回值非 0。逐项各测一次——
+  #    特别是 stale_days 的【边界】：13.999 必须拒写、14 必须写（一个只会拒写或只会写的阈值
+  #    是恒假/恒真量，不是测量）。
+  # 49 存量的同一读法正/负控制：ac247_task_store_count 经一个【真的 node 桩】读 JSON 数组长度——
+  #    正控制拿到 61、负控制（桩输出非 JSON / 空）必须【不打印且非 0】（⛔ 不是打印 0：那会把
+  #    「没查成」伪装成「查了是 0 条」，硬规则 3b）。
+  # 50 结构性（AC4「⛔ 不从 start 退出码派生」）：step_ac247_takeover 的函数体里 driver_alive 的
+  #    赋值必须全部来自 AC203_DRIVER_ALIVE（既有唯一 status 解析器的输出），且函数体里必须出现
+  #    对 `driver status` 的读取。可证伪：把赋值右端换成 $AC247_DRIVER_START_RC 即取假。
+  local ac247_tmp ac247_w ac247_body ac247_ok=0 ac247_neg_ok=1 ac247_neg_list="" ac247_boundary_lines=""
+  local ac247_cnt_ok=0 ac247_cnt_neg_ok=0 ac247_anchor_hits=0 ac247_alive_src=1 ac247_status_hits=0
+  ac247_tmp="$(mktemp -d 2>/dev/null)" || ac247_tmp=""
+  if [ -n "$ac247_tmp" ]; then
+    # 47 正控制
+    AC89="$ac247_tmp/carrier.jsonl"; BUILD_SHA="0123456789abcdef0123456789abcdef01234567"; TS="2026-09-12T00:00:00Z"
+    write_ac247_record "hostX-arm" "/home/other/stalled-project" "61" "61" "22.500" "1" "7" >/dev/null 2>&1
+    ac247_w="$(grep -c 'GOAL-016-AC-247' "$ac247_tmp/carrier.jsonl" 2>/dev/null || true)"
+    for f in '"host":"hostX-arm"' '"project_root":"/home/other/stalled-project"' '"pre_task_count":61' '"post_task_count":61' '"stale_days":22.500' '"driver_alive":1' '"carrier_records":7' '"build_sha":"0123456789abcdef0123456789abcdef01234567"'; do
+      grep -qF -- "$f" "$ac247_tmp/carrier.jsonl" 2>/dev/null || ac247_neg_list="$ac247_neg_list $f"
+    done
+    [ -z "$ac247_neg_list" ] && [ "$ac247_w" = "1" ] && ac247_ok=1
+    # 47b 补锚 choke point：写入点体内不得出现 build_sha 字面量
+    ac247_body="$(sed -n '/^write_ac247_record()/,/^}$/p' "$0" 2>/dev/null | sed 's/#.*//')"
+    ac247_anchor_hits="$(printf '%s\n' "$ac247_body" | grep -c 'build_sha' || true)"
+    # 48 负控制（逐项，显式调用，⛔ 不用 IFS 拆串那种读不准的写法）：任一件读不出/不合规 ⇒ 零记录。
+    # 用 here-doc + `read` 逐条驱动【产品函数本身】（⛔ 不把判定逻辑复刻进夹具）。
+    ac247_neg_ok=1
+    while IFS='|' read -r n_host n_root n_pre n_post n_stale n_alive n_recs; do
+      [ -n "${n_host}${n_root}${n_pre}${n_post}${n_stale}${n_alive}${n_recs}" ] || continue
+      case "$n_host" in '@'*) n_host="" ;; esac
+      case "$n_root" in '@'*) n_root="" ;; esac
+      case "$n_stale" in '@'*) n_stale="" ;; esac
+      write_ac247_record "$n_host" "$n_root" "$n_pre" "$n_post" "$n_stale" "$n_alive" "$n_recs" >/dev/null 2>&1 && ac247_neg_ok=0
+    done <<'AC247NEG'
+@|/p|61|61|22.5|1|7
+hostX|@|61|61|22.5|1|7
+hostX|/p|0|0|22.5|1|7
+hostX|/p|abc|abc|22.5|1|7
+hostX|/p|61|60|22.5|1|7
+hostX|/p|61|61|13.999|1|7
+hostX|/p|61|61|@|1|7
+hostX|/p|61|61|22.5|0|7
+hostX|/p|61|61|22.5|1|0
+AC247NEG
+    # 48b 上界一侧：14.000 必须写出（stale_days ≥ 14 的「≥」在边界上真的成立）
+    rm -f "$ac247_tmp/carrier.jsonl"
+    write_ac247_record "hostX" "/p" "61" "61" "14.000" "1" "1" >/dev/null 2>&1
+    ac247_boundary_lines="$(grep -c 'GOAL-016-AC-247' "$ac247_tmp/carrier.jsonl" 2>/dev/null || true)"
+    [ "$ac247_boundary_lines" = "1" ] || ac247_neg_ok=0
+    # 49 存量计数的同一读法：真 node 桩
+    printf '#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify(new Array(61).fill(0).map((_,i)=>({id:"T-"+i}))));\n' > "$ac247_tmp/stub-ok.js"
+    printf '#!/usr/bin/env node\nprocess.stdout.write("not json at all");\n' > "$ac247_tmp/stub-bad.js"
+    printf '#!/usr/bin/env node\nprocess.stdout.write("");\n' > "$ac247_tmp/stub-empty.js"
+    [ "$(ac247_task_store_count "$ac247_tmp" "$ac247_tmp/stub-ok.js" 2>/dev/null)" = "61" ] && ac247_cnt_ok=1
+    if ac247_task_store_count "$ac247_tmp" "$ac247_tmp/stub-bad.js" >/dev/null 2>&1; then ac247_cnt_neg_ok=1; fi
+    if ac247_task_store_count "$ac247_tmp" "$ac247_tmp/stub-empty.js" >/dev/null 2>&1; then ac247_cnt_neg_ok=1; fi
+    # 49b HEAD 时刻 / stale_days 直接量：真 git 仓库 + 已知时刻的提交 ⇒ 天数可复算。
+    # 2026-08-01T00:00:00Z = 1785542400；+22 天 = 1787443200 ⇒ stale 必须恰为 22.000。
+    mkdir -p "$ac247_tmp/repo"
+    git -C "$ac247_tmp/repo" init -q -b main >/dev/null 2>&1
+    git -C "$ac247_tmp/repo" config user.email t@t >/dev/null 2>&1
+    git -C "$ac247_tmp/repo" config user.name t >/dev/null 2>&1
+    echo x > "$ac247_tmp/repo/a.txt"
+    git -C "$ac247_tmp/repo" add -A >/dev/null 2>&1
+    GIT_AUTHOR_DATE="2026-08-01T00:00:00Z" GIT_COMMITTER_DATE="2026-08-01T00:00:00Z" \
+      git -C "$ac247_tmp/repo" commit -qm "old" >/dev/null 2>&1
+    local ac247_he ac247_sd
+    ac247_he="$(ac247_head_epoch "$ac247_tmp/repo" 2>/dev/null || true)"
+    ac247_sd="$(ac247_stale_days "$ac247_he" 1787443200 2>/dev/null || true)"
+    if [ "$ac247_he" != "1785542400" ] || [ "$ac247_sd" != "22.000" ]; then ac247_cnt_neg_ok=1; fi
+    # 49c 非 git 目录 / 空入参 ⇒ 读不出（返非 0 且不打印）——与「=0」不同形
+    if ac247_head_epoch "$ac247_tmp" >/dev/null 2>&1; then ac247_cnt_neg_ok=1; fi
+    if ac247_stale_days "" "" >/dev/null 2>&1; then ac247_cnt_neg_ok=1; fi
+    # 50 结构性（AC4「⛔ 不从 start 退出码派生」）：driver_alive 的赋值必须来自 AC203_DRIVER_ALIVE
+    #    （既有唯一 status 解析器的输出），且【真正读 status 的调用】必须落在读取函数体内。
+    #    ⚠️ 谓词按【位置+参数形态】判，⛔ 不按关键词：`driver status --kind promotion` 这串字面量在
+    #    step_ac247_takeover 的一行 echo 文案里也出现（本控制第一版就是这么被自己骗过的——命中 1，
+    #    而那条命中是【字符串】，不是调用）。真调用的形态带 `--root`，文案里没有。
+    local ac247_read_body ac247_step_body2 ac247_bad_assign ac247_stripped_body ac247_step_calls
+    ac247_read_body="$(sed -n '/^ac247_read_driver_status()/,/^}$/p' "$0" 2>/dev/null | sed 's/#.*//')"
+    ac247_status_hits="$(printf '%s\n' "$ac247_read_body" | grep -c 'driver status --kind promotion --root' || true)"
+    ac247_bad_assign="$(printf '%s\n' "$ac247_read_body" | grep -E '^[[:space:]]*AC247_DRIVER_ALIVE=' | grep -vc 'AC203_DRIVER_ALIVE' || true)"
+    printf '%s\n' "$ac247_read_body" | grep -qE 'AC247_DRIVER_ALIVE="\$AC203_DRIVER_ALIVE"' || ac247_alive_src=0
+    # 负控制（可证伪）：把右端换成 start 退出码 ⇒ 谓词必须翻成 0。
+    ac247_stripped_body="${ac247_read_body//AC247_DRIVER_ALIVE=\"\$AC203_DRIVER_ALIVE\"/AC247_DRIVER_ALIVE=\"\$AC247_DRIVER_START_RC\"}"
+    if printf '%s\n' "$ac247_stripped_body" | grep -qE 'AC247_DRIVER_ALIVE="\$AC203_DRIVER_ALIVE"'; then ac247_alive_src=0; fi
+    # 生成侧（硬规则 ② 按位置）：⑧ 的函数体必须【调用】那个读取函数——把读取点挪出函数体（或删掉）
+    # 此断言即取假；否则「pre/post 都读了」只是恰好发生，而不是被要求过（同 AC-240 的 step5 控制）。
+    ac247_step_body2="$(sed -n '/^step_ac247_takeover()/,/^}$/p' "$0" 2>/dev/null | sed 's/#.*//')"
+    ac247_step_calls="$(printf '%s\n' "$ac247_step_body2" | grep -c 'ac247_read_driver_status "' || true)"
+    if [ "${ac247_step_calls:-0}" -lt 2 ] 2>/dev/null; then ac247_alive_src=0; fi
+    rm -rf "$ac247_tmp"
+  else
+    ac247_ok=0
+  fi
+  echo "selfcheck: ac247-record(fields+anchor) ok=$ac247_ok missing_fields='${ac247_neg_list}' anchor-literal-hits=$ac247_anchor_hits (expect 1/''/0 — 八件字段逐字落行, 且写入点无第二个 build_sha 补锚)"
+  echo "selfcheck: ac247-refusal(9 negative specs + boundary-14.000-accepted) negatives_all_refused=$ac247_neg_ok (expect 1 — 任一件读不出/不合规 ⇒ 零记录; 14.000 必须写)"
+  echo "selfcheck: ac247-task-store-count(61 via real node stub) ok=$ac247_cnt_ok head/stale-unreadable-checks=$ac247_cnt_neg_ok (expect 1/0 — 同一读法读 JSON 数组长度; 非 JSON/空 ⇒ 不打印且非 0)"
+  echo "selfcheck: ac247-liveness-source(from-AC203_DRIVER_ALIVE)=$ac247_alive_src status-read-hits=$ac247_status_hits bad-assign-hits=$ac247_bad_assign (expect 1/>=1/0 — ⛔ 不从 driver start 退出码派生, 且 status 读取点必须在函数体内)"
+
   if [ "$d1" = "1" ] && [ "$d2" = "no" ] && [ "$a1" = "1" ] && [ "$a2" = "yes" ] \
+     && [ "$ac247_ok" = "1" ] && [ "$ac247_neg_ok" = "1" ] && [ "$ac247_cnt_ok" = "1" ] \
+     && [ "$ac247_cnt_neg_ok" = "0" ] && [ "$ac247_alive_src" = "1" ] \
+     && [ "${ac247_status_hits:-0}" -ge 1 ] 2>/dev/null && [ "${ac247_bad_assign:-0}" = "0" ] \
+     && [ "${ac247_anchor_hits:-0}" = "0" ] \
      && [ "$bl_ok" = "1" ] && [ "$bmw_fail" = "0" ] \
      && [ "$c3_e" = "1" ] && [ "$c3_ok" = "1" ] \
      && [ "$c4_e" = "1" ] && [ "$c4_ok" = "0" ] \
@@ -3574,7 +3963,7 @@ FAKE_NPM
      && [ "$fn_v_neg" = "0" ] && [ "$fn_w_neg" = "0" ] \
      && [ "$bl_ok" = "1" ] \
      && [ "$tp_ok" = "1" ]; then
-    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed); AC-204 carrier record writes the five criterion fields verbatim (forbidden_count=0 integer, enable_declared=true literal) and refuses a forbidden-copy or no-enable record (fail-closed, 成对判定); AC-205 carrier record writes the three criterion fields verbatim (shipped_from_installed_artifact=true + transcript_confirmed=true literals, top-level build_sha) with transcript_confirmed derived from transcript-delivery-check reading the transcript (hit ⇒ delivered / miss ⇒ not) — never from a send exit code — and refuses shipped=false / transcript_confirmed=false / empty-host (fail-closed, AC4 负控制); AC-234 render counts are derived from rendered HTML content (task/goal anchors + round-row anchors — never an HTTP status code, AC2) and can take false (empty-shell page ⇒ 0/0/0); the AC-234 carrier record writes the six criterion fields verbatim (tasks_rendered/goals_rendered/round_records_rendered as JSON integers) and refuses a zero-count or empty-host record (fail-closed, AC4 负控制); the AC-232 carrier record writes the three criterion fields verbatim (goal_write_ok/goal_read_back_ok as JSON literals, goal_records as a JSON integer) with a top-level build_sha anchor, truthfully writes false/0 when the goal write fails or read-back is empty (缺件如实非静默, AC4 负控制 — 写调用 0 与空文件同形), and refuses an empty-host record (fail-closed, 硬规则 3b); AC-207 carrier record writes the eight criterion fields verbatim (produced_by_driver=true literal, gate_events>0, task_status=done, commit_sha/task_id non-empty, commit_files non-empty JSON array with ≥1 path outside the tasks/ goals/ .quay/ triplet, top-level build_sha) and refuses produced_by_driver=false / gate_events=0 / bookkeeping-files-only / no-files (fail-closed, 硬规则 3b); AC-207 implementation-commit SELECTION picks the real implementation commit even when newer bookkeeping commits sit on top of it (the old grep-v-chore-quay-init-then-head-1 form picked the 翻-done commit — gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit), yields empty + non-zero when only bookkeeping commits exist (⇒ no record, never a bookkeeping commit dressed up as one), and the bookkeeping judgment is positional (touched files, not commit-message text); AC-240 run-level closure self-evidence takes three DISTINGUISHABLE values (1 = AC-203 and AC-207 both written by THIS run for the SAME project_root; 0 = this run attempted the e2e but the closure is not self-evidenced, with a non-empty NOTE naming the sub-reason; not-evaluated = --ac207-e2e not passed — 未评估 ≠ 不合格, 硬规则 3b), where 0 also covers the origin defect's own shape (AC-207 written, AC-203 never probed in step⑤) and the both-written-but-different-roots case (the pairing is on the SAME project_root, not on both being non-empty), and the AC-203 generation-side probe/write call is POSITIONALLY inside step5_e2e's body (0 before this task — the same-run pairing existed only as an accident, never as a requirement); segment ① (step1_install, the delivery-install path) leaves the operator's real ~/.claude/settings.json BYTE-IDENTICAL (HOME isolated to \${PREFIX}.home + QUAY_SKIP_PLUGIN_CLI=1 — the CLI materialization that re-reddened AC-161), with the isolated HOME proven to have received the postinstall write (so the green is not a not-run vacuity), and that assertion can take FALSE (isolation target pointed back at the real HOME ⇒ signature changes); and the AC-239 landing-baseline pre-flight classifier takes every value (REUSED⇒compatible / ADOPTED⇒divergent / BLOCKED⇒divergent / CREATED⇒absent / no-line-or-rc≠0⇒unreadable) — so a target copy whose 'develop' is a foreign fork stops ⑦b with an attributable 5-second reading instead of an hour-long poll whose non-done end state is indistinguishable from a worker that failed to implement (gap-aged-project-post-upgrade-driver-e2e 本轮新增)"
+    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed); AC-204 carrier record writes the five criterion fields verbatim (forbidden_count=0 integer, enable_declared=true literal) and refuses a forbidden-copy or no-enable record (fail-closed, 成对判定); AC-205 carrier record writes the three criterion fields verbatim (shipped_from_installed_artifact=true + transcript_confirmed=true literals, top-level build_sha) with transcript_confirmed derived from transcript-delivery-check reading the transcript (hit ⇒ delivered / miss ⇒ not) — never from a send exit code — and refuses shipped=false / transcript_confirmed=false / empty-host (fail-closed, AC4 负控制); AC-234 render counts are derived from rendered HTML content (task/goal anchors + round-row anchors — never an HTTP status code, AC2) and can take false (empty-shell page ⇒ 0/0/0); the AC-234 carrier record writes the six criterion fields verbatim (tasks_rendered/goals_rendered/round_records_rendered as JSON integers) and refuses a zero-count or empty-host record (fail-closed, AC4 负控制); the AC-232 carrier record writes the three criterion fields verbatim (goal_write_ok/goal_read_back_ok as JSON literals, goal_records as a JSON integer) with a top-level build_sha anchor, truthfully writes false/0 when the goal write fails or read-back is empty (缺件如实非静默, AC4 负控制 — 写调用 0 与空文件同形), and refuses an empty-host record (fail-closed, 硬规则 3b); AC-207 carrier record writes the eight criterion fields verbatim (produced_by_driver=true literal, gate_events>0, task_status=done, commit_sha/task_id non-empty, commit_files non-empty JSON array with ≥1 path outside the tasks/ goals/ .quay/ triplet, top-level build_sha) and refuses produced_by_driver=false / gate_events=0 / bookkeeping-files-only / no-files (fail-closed, 硬规则 3b); AC-207 implementation-commit SELECTION picks the real implementation commit even when newer bookkeeping commits sit on top of it (the old grep-v-chore-quay-init-then-head-1 form picked the 翻-done commit — gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit), yields empty + non-zero when only bookkeeping commits exist (⇒ no record, never a bookkeeping commit dressed up as one), and the bookkeeping judgment is positional (touched files, not commit-message text); AC-240 run-level closure self-evidence takes three DISTINGUISHABLE values (1 = AC-203 and AC-207 both written by THIS run for the SAME project_root; 0 = this run attempted the e2e but the closure is not self-evidenced, with a non-empty NOTE naming the sub-reason; not-evaluated = --ac207-e2e not passed — 未评估 ≠ 不合格, 硬规则 3b), where 0 also covers the origin defect's own shape (AC-207 written, AC-203 never probed in step⑤) and the both-written-but-different-roots case (the pairing is on the SAME project_root, not on both being non-empty), and the AC-203 generation-side probe/write call is POSITIONALLY inside step5_e2e's body (0 before this task — the same-run pairing existed only as an accident, never as a requirement); segment ① (step1_install, the delivery-install path) leaves the operator's real ~/.claude/settings.json BYTE-IDENTICAL (HOME isolated to \${PREFIX}.home + QUAY_SKIP_PLUGIN_CLI=1 — the CLI materialization that re-reddened AC-161), with the isolated HOME proven to have received the postinstall write (so the green is not a not-run vacuity), and that assertion can take FALSE (isolation target pointed back at the real HOME ⇒ signature changes); and the AC-239 landing-baseline pre-flight classifier takes every value (REUSED⇒compatible / ADOPTED⇒divergent / BLOCKED⇒divergent / CREATED⇒absent / no-line-or-rc≠0⇒unreadable) — so a target copy whose 'develop' is a foreign fork stops ⑦b with an attributable 5-second reading instead of an hour-long poll whose non-done end state is indistinguishable from a worker that failed to implement (gap-aged-project-post-upgrade-driver-e2e 本轮新增); and the AC-247 takeover producer writes its eight criterion fields verbatim (host / project_root / pre_task_count / post_task_count / stale_days / driver_alive / carrier_records, plus the top-level build_sha coming from the ONE anchor choke point — the writer's own body carries no second anchor literal) and refuses EVERY one of them when it cannot be read (including stale_days one thousandth below the 14-day boundary, while 14.000 itself is accepted — so the threshold is neither always-true nor always-false), takes its liveness reading from the SAME status carrier the AC-203 parser reads and never from \`driver start\`'s exit code (negative control: swapping the right-hand side to the start rc flips the predicate), counts the project's OWN task store through its own ABI with ONE implementation read at both moments (a non-JSON or empty CLI reply is NOT a zero — it prints nothing and returns non-zero), and derives stale_days from the HEAD commit time captured BEFORE the takeover action (GOAL-016 AC-247 本轮新增)"
     rc=0
   else
     echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused ac203_parse_alive=$ac203_parse_alive ac203_parse_recs=$ac203_parse_recs ac201_pos_w=$ac201_pos_w ac201_pos_ac=$ac201_pos_ac ac201_neg_w=$ac201_neg_w ac201_neg_lines=$ac201_neg_lines g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused ac204_wrote=$ac204_wrote ac204_fields_ok=$ac204_fields_ok ac204_refused_fc=$ac204_refused_fc ac204_refused_en=$ac204_refused_en ac205_tc_hit=$ac205_tc_hit ac205_tc_miss=$ac205_tc_miss ac205_wrote=$ac205_wrote ac205_fields_ok=$ac205_fields_ok ac205_ship_refused=$ac205_ship_refused ac205_conf_refused=$ac205_conf_refused ac205_host_refused=$ac205_host_refused ac234_tasks_pos=$ac234_tasks_pos ac234_goals_pos=$ac234_goals_pos ac234_rounds_pos=$ac234_rounds_pos ac234_tasks_neg=$ac234_tasks_neg ac234_goals_neg=$ac234_goals_neg ac234_rounds_neg=$ac234_rounds_neg ac234_wrote=$ac234_wrote ac234_fields_ok=$ac234_fields_ok ac234_refused_zc=$ac234_refused_zc ac234_refused_em=$ac234_refused_em ac232_wrote=$ac232_wrote ac232_fields_ok=$ac232_fields_ok ac232_neg_ok=$ac232_neg_ok ac232_refused=$ac232_refused ac207_wrote=$ac207_wrote ac207_fields_ok=$ac207_fields_ok ac207_refused_pdb=$ac207_refused_pdb ac207_refused_ge=$ac207_refused_ge ac207_refused_bkfiles=$ac207_refused_bkfiles ac207_refused_nofiles=$ac207_refused_nofiles ac207_sel_rc=$ac207_sel_rc ac207_only_rc=$ac207_only_rc ac207_bk_tasks_only=$ac207_bk_tasks_only ac207_impl_marker=$ac207_impl_marker ac207_before=$ac207_before ac207_after_neg=$ac207_after_neg ac207_neg_trace=$ac207_neg_trace ac207_after_pos=$ac207_after_pos ac207_pipe_grep=$ac207_pipe_grep ac240_v1=$ac240_v1 ac240_v0=$ac240_v0 ac240_vdiff=$ac240_vdiff ac240_vne=$ac240_vne ac240_step5_hits=$ac240_step5_hits fn_v_pos=$fn_v_pos fn_w_pos=$fn_w_pos fn_iso_written=$fn_iso_written fn_sent_same=$fn_sent_same fn_v_neg=$fn_v_neg fn_w_neg=$fn_w_neg tp_ok=$tp_ok tp_pos_status=$tp_pos_status tp_pos_launcher=$tp_pos_launcher tp_pos_model=$tp_pos_model tp_pos_auth=$tp_pos_auth tp_neg_status=$tp_neg_status tp_neg_rc=$tp_neg_rc tp_ovr_launcher=$tp_ovr_launcher tp_ovr_model=$tp_ovr_model tp_ovr_auth=$tp_ovr_auth tp_res1=$tp_res1 tp_res2=$tp_res2 bl_ok=$bl_ok bl_reused=$bl_reused bl_adopted=$bl_adopted bl_blocked=$bl_blocked bl_created=$bl_created bl_noline=$bl_noline bl_badrc=$bl_badrc"
@@ -3645,6 +4034,11 @@ else
     if [ "$AC239_E2E" = "1" ]; then
       step_upgrade_drive_continue "$ROOT"
     fi
+  elif [ "$AC247_TAKEOVER" = 1 ]; then
+    # ── AC-247（GOAL-016）：接管停摆 ≥14 天的存量项目（⛔ 与 ② 的「rm -rf 后全新 quay-init」是两条
+    # 本质不同的路径：那条的 $ROOT 是一次性靶子，本条的被接管项目【本来就带着真实存量与旧历史】）。
+    # 本分支只跑 ⑧（它自己在门口读 pre、起 driver、读 status、重读 post），⛔ 不跑冷启动/驱动活性段。
+    step_ac247_takeover "$AC247_ROOT"
   elif [ "$CHANNEL" = "marketplace" ]; then
     # marketplace 通道 = step① 安装路径验证（register-plugin.mjs 注册）；②③ 是 loop 活性验证
     # （npm-global/AC88 的关切），marketplace 通道不跑 ②③ —— register 失败也能写出记录（AC5），
@@ -3690,6 +4084,16 @@ if [ "$UPGRADE_EXISTING" = 1 ]; then
     AC88_VERIFY=ok
   elif [ "$STEP1_OK" = 1 ]; then
     AC88_VERIFY=not-live
+  else
+    AC88_VERIFY=fail
+  fi
+elif [ "$AC247_TAKEOVER" = 1 ]; then
+  # AC-247 判定：安装段成功 ∧ 八件读数全成立并已写出记录。AC247_EVALUATED=0 是「未评估」（缺值），
+  # 与「评估了且不合格」区分开（硬规则 3b）——但本条的两者都【不是 ok】：AC-247 的 Plan 逐字要求
+  # 「任缺 ⇒ 不写 + 打印可区分的 NOT-EVALUATED + 退出非 0」，故非 ok 即 fail（⛔ 不降级成 not-live，
+  # 那会让一个没产出的运行看起来与「产出但没达标」同形）。
+  if [ "$STEP1_OK" = 1 ] && [ "$AC247_EVALUATED" = 1 ]; then
+    AC88_VERIFY=ok
   else
     AC88_VERIFY=fail
   fi
@@ -3761,6 +4165,15 @@ echo "AC234_TASKS_RENDERED=$AC234_TASKS_RENDERED AC234_GOALS_RENDERED=$AC234_GOA
 echo "AC234_HOST=${AC234_HOST:-} AC234_PROJECT_ROOT=${AC234_PROJECT_ROOT:-}"
 echo "AC232_GOAL_WRITE_OK=$AC232_GOAL_WRITE_OK AC232_GOAL_READ_BACK_OK=$AC232_GOAL_READ_BACK_OK AC232_GOAL_RECORDS=$AC232_GOAL_RECORDS (三字段取真实 goal write+show+list 内容，⛔ 非 HTTP 探活；-1 = 未评估)"
 echo "AC232_HOST=${AC232_HOST:-} AC232_PROJECT_ROOT=${AC232_PROJECT_ROOT:-}"
+echo "AC247_EVALUATED=$AC247_EVALUATED (1 = 八件读数全成立并已写出 ac=GOAL-016-AC-247 记录；0 = 未评估 ≠ 不合格——硬规则 3b)"
+echo "AC247_HOST=${AC247_HOST:-<none>} AC247_PROJECT_ROOT=${AC247_PROJECT_ROOT:-<none>}"
+echo "AC247_PRE_TASK_COUNT=${AC247_PRE_TASK_COUNT:-<unreadable>} AC247_POST_TASK_COUNT=${AC247_POST_TASK_COUNT:-<unreadable>} (同一实现读两次；post==pre 是「接管不许破坏存量」)"
+echo "AC247_STALE_DAYS=${AC247_STALE_DAYS:-<unreadable>} AC247_HEAD_EPOCH=${AC247_HEAD_EPOCH:-<unreadable>} AC247_PRE_TS_EPOCH=${AC247_PRE_TS_EPOCH:-<unreadable>} (stale_days 取 HEAD 提交时刻 → 接管【前】那一刻；⛔ 不是接管后)"
+echo "AC247_DRIVER_ALIVE=$AC247_DRIVER_ALIVE AC247_CARRIER_RECORDS=$AC247_CARRIER_RECORDS AC247_CARRIER_RECORDS_PRE=$AC247_CARRIER_RECORDS_PRE (⛔ 来自 quay driver status --json, 不是 driver start 的退出码)"
+echo "AC247_PS_STALE_PROCS=$AC247_PS_STALE_PROCS (⛔ 进程表代理量, 仅供与上面的 status 读数对照留档; 任何判据字段都不由它派生)"
+echo "AC247_DRIVER_START_RC=${AC247_DRIVER_START_RC:-<none>} (⛔ 诊断量, 不是 liveness 读数)"
+echo "AC247_USER_INSTALL_PRE=$AC247_USER_INSTALL_PRE (absent|present|not-evaluated —— 接管前目标机 user-scope 安装读数, 三态)"
+echo "AC247_WRITTEN_THIS_RUN=$AC247_WRITTEN_THIS_RUN AC247_WRITTEN_ROOT=${AC247_WRITTEN_ROOT:-<none>}"
 echo "AC88_VERIFY=$AC88_VERIFY"
 echo "AC238_EVALUATED=$AC238_EVALUATED (1 = 四件读数全成立并已写记录；0 = 未评估 ≠ 不合格——硬规则 3b)"
 echo "AC238_PROJECT_ROOT=${AC238_PROJECT_ROOT:-<none>}"
