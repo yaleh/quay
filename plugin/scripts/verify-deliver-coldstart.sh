@@ -2431,11 +2431,14 @@ ac250_lookup_row() {
   return 0
 }
 
-# 直接读【目标 store】得到的该任务状态（⛔ 不以页面缓存为准）。首选 Provider ABI（目标项目自己的
-# quay CLI：`task view <id> --json`），退回直读 `tasks/<id>.md` 的 `status:` 行；两者都读不出 ⇒ 空 +
-# source 如实留档（缺值 ≠ 合格）。
+# 直接读【目标 store】得到的该任务状态（⛔ 不以页面缓存为准）。
+# 读法 = 目标项目【自己的 Provider ABI】（`task view <id> --json`，经它自己的 config/provider）。
+# ⛔ 不退回「猜 tasks/<id>.md 路径」：tasks_dir 是项目 config 里的可配置项（ad-arm1 的 archguard
+# 实测就把它写成一条绝对路径），按文件路径猜既是错的、也是 task-file-bypass-check 判定的 ABI 绕过
+# （2026-09-12 由本任务的 scoped 门当场抓到：`new bypass site`）。读不出 ⇒ 空（缺值 ≠ 合格，
+# 调用方 fail-closed 走 NOT-EVALUATED）。
 ac250_read_store_status() {
-  local out src=""
+  local out
   AC250_STORE_STATUS_AFTER=""; AC250_STORE_SOURCE=""
   [ -n "$1" ] && [ -n "$AC250_QUAY_RESOLVED" ] || return 0
   out="$(ac250_target "cd $(ac250_shq "$AC250_ROOT") && $(ac250_shq "$AC250_NODE_RESOLVED") $(ac250_shq "$AC250_QUAY_RESOLVED") task view $(ac250_shq "$1") --json" || true)"
@@ -2445,13 +2448,7 @@ ac250_read_store_status() {
       try { const j = JSON.parse(s); process.stdout.write(j && typeof j.status === "string" ? j.status : ""); }
       catch (e) { process.stdout.write(""); }
     });' 2>/dev/null || true)"
-  if [ -n "$AC250_STORE_STATUS_AFTER" ]; then
-    src="abi:task-view"
-  else
-    AC250_STORE_STATUS_AFTER="$(ac250_target "sed -n 's/^status:[[:space:]]*//p' $(ac250_shq "$AC250_ROOT/tasks/$1.md") 2>/dev/null | head -n1" | tr -d '\r' || true)"
-    if [ -n "$AC250_STORE_STATUS_AFTER" ]; then src="file:tasks/$1.md"; fi
-  fi
-  AC250_STORE_SOURCE="$src"
+  if [ -n "$AC250_STORE_STATUS_AFTER" ]; then AC250_STORE_SOURCE="abi:task-view"; fi
   return 0
 }
 
