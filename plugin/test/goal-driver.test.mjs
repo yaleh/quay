@@ -23,6 +23,9 @@ import {
   readTaskFacts,
   checkStaleness,
   checkAchievedFailing,
+  readFrozenFailing,
+  parseFrozenFailingReading,
+  isFilingGapState,
   sweepFrozenAcs,
   goalDriverRoutines,
   runGoalRound,
@@ -944,7 +947,7 @@ test('AC-216 复验域：域内 achieved AC 逐轮进 criteria，违反者进 ga
     // 域内对照：同域但判据此刻成立 ⇒ 也必须进两读数（复验域是集合，⛔ 不是只跑红的）。
     writeStandingGoalFile(tmp, { id: 'AC-002', status: 'achieved', kind: 'criterion', goal: 'GOAL-001', criterion: 'exit 0', longTerm: true });
     // 域外对照：achieved 但【未声明 long-term】且 GOAL 已 achieved ⇒ 随 GOAL 离开复验域（成本边界，
-    // ⛔ 不是无差别放宽）——两读数都不含它。
+    // ⛔ 不是无差别放宽）——**gate 集合**（criteria）不含它。
     writeStandingGoalFile(tmp, { id: 'AC-003', status: 'achieved', kind: 'criterion', goal: 'GOAL-001', criterion: 'exit 1' });
 
     const { fact } = await runGoalRound(tmp, { scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'] });
@@ -959,8 +962,14 @@ test('AC-216 复验域：域内 achieved AC 逐轮进 criteria，违反者进 ga
     assert.ok(gated.has('AC-002'), 'gate 写侧：域内成立的那条也必须被 gate');
     assert.equal(gapByAc.get('AC-002'), 'standing-ok', '成立 ⇒ standing-ok（⛔ 与 standing-violated 同形即假绿，硬规则 3b）');
 
-    assert.ok(!gated.has('AC-003'), '域外：未声明 long-term 的 achieved AC 随 GOAL 关闭离开复验域');
-    assert.ok(!gapByAc.has('AC-003'), '域外：同上，不进缺口立案集合');
+    assert.ok(!gated.has('AC-003'), '域外：未声明 long-term 的 achieved AC 随 GOAL 关闭离开复验域（⛔ 不进每轮 gate 集合）');
+    // ⚠️ 2026-09-12 改判（gap-frozen-achieved-ac-no-owner-after-ledger-tail-mutation）：域外**不等于无主**。
+    // 旧断言是 `!gapByAc.has('AC-003')`（域外 ⇒ 不进缺口读数）——那正是本任务要修的形态：一条离开复验域
+    // 却仍被判为假的 AC **检测得到（AC-242 每轮红）却无消费者**。现在它进**第三个** population，取值
+    // `frozen-violated`（⛔ 与 standing-violated 不同形：域外/域内的成因不同、处置不同），且**可立案**。
+    assert.equal(gapByAc.get('AC-003'), 'frozen-violated', '域外且台账尾说此刻为假且无在飞任务 ⇒ frozen-violated（可立案的独立取值）');
+    assert.ok(isFilingGapState('frozen-violated'), 'frozen-violated 在 spawn 选取面内（否则「被枚举」仍等于「无主」）');
+    assert.notEqual(gapByAc.get('AC-003'), gapByAc.get('AC-001'), '两个 population 的取值必须不同形（硬规则 3b：合并即把「离开域后没人管」重新藏起来）');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -1038,4 +1047,170 @@ test('AC-242 successor — sweepFrozenAcs 真跑有界轮转并透传 verdict；
   // 负控制：脚本根不存在 ⇒ 读不懂输出 ⇒ null（⛔ 不是 ran:[]）。
   const bad = await sweepFrozenAcs(path.join(tmp, 'no-such-scripts'), tmp);
   assert.equal(bad, null, '读不懂 ⇒ null，⛔ 不与「轮转了且全过」同形');
+});
+
+// ── ③ 冻结population 的所有权（gap-frozen-achieved-ac-no-owner-after-ledger-tail-mutation）─────
+// 缺陷：一条 `achieved ∧ 已离开复验域（GOAL 非 active ∧ 未声明 long-term）` 的 AC，其台账尾 verdict
+// 被**任何一次一次性判据运行**改写成 fail 后，`computeGoalGaps` 此前**一个分支都不给它**——不 active
+// 故不进 ①、不在域内故不进 ② ⇒ 检测得到（AC-242 每轮红）却没有消费者。这里钉住第三个 population。
+
+test('冻结population：读数三态解析（退出码 0/1/3/其它）——⛔ 三态不同形，且「读不到」不与「零条」同形', () => {
+  const j = (o) => JSON.stringify(o);
+  const clean = parseFrozenFailingReading(j({ failing: [], frozenScope: 78, rotation: { sweptEver: 78 } }), 0);
+  assert.equal(clean.judgment, 'clean');
+  assert.equal(clean.cause, null);
+  assert.deepEqual(clean.failing, []);
+
+  const violated = parseFrozenFailingReading(j({ failing: ['AC-147', 'AC-149'], frozenScope: 78 }), 1);
+  assert.equal(violated.judgment, 'violated');
+  assert.deepEqual(violated.failing, ['AC-147', 'AC-149'], '违反是【枚举】不是布尔（硬规则 3）');
+
+  // exit 3 = 判据自己的「机制不在 / 此处无法评估」态：⛔ 必须与 clean 不同形（硬规则 3b）。
+  const noRot = parseFrozenFailingReading(j({ failing: [], frozenScope: 78, rotation: { sweptEver: 0 } }), 3);
+  assert.equal(noRot.judgment, 'not-evaluated');
+  assert.equal(noRot.cause, 'no-rotation', '成因可区分：轮转从未跑过（机制不在）');
+  const neCrit = parseFrozenFailingReading(j({ failing: [], frozenScope: 78, rotation: { sweptEver: 12 }, notEvaluated: ['AC-X'] }), 3);
+  assert.equal(neCrit.judgment, 'not-evaluated');
+  assert.equal(neCrit.cause, 'criterion-not-evaluated', '成因可区分：判据声明此地无法评估');
+
+  // 台账/命令读不到 ⇒ 第三个成因，⛔ 绝不回落 clean。
+  const unreadable = parseFrozenFailingReading('not json at all', null);
+  assert.equal(unreadable.judgment, 'not-evaluated');
+  assert.equal(unreadable.cause, 'unreadable');
+  assert.equal(unreadable.frozenScope, -1, 'frozenScope 读不到 ⇒ -1（⛔ 不与 0 同形）');
+  assert.notEqual(unreadable.judgment, clean.judgment, '读不到 ≠ 查过且全好');
+});
+
+test('冻结population ⇒ frozen-violated（独立取值）；long-term / GOAL active 两条逃生口同时成立', () => {
+  const mk = (extra) => [
+    { id: 'GOAL-001', status: 'achieved' },
+    { id: 'AC-001', status: 'achieved', goal: 'GOAL-001', criterion: 'exit 1', ...extra },
+  ];
+  const frozen = { failing: ['AC-001'], judgment: 'violated', cause: null, frozenScope: 1 };
+  // 正：域外 ∧ achieved ∧ 此刻为假 ∧ 无在飞任务 ⇒ frozen-violated（可立案）。
+  const g = computeGoalGaps(mk({}), [], null, null, frozen).find((x) => x.ac === 'AC-001');
+  assert.equal(g.state, 'frozen-violated');
+  assert.equal(g.taskCount, 0);
+  assert.ok(isFilingGapState('frozen-violated'), 'frozen-violated 在 spawn 选取面内（被枚举 ≠ 有主）');
+  assert.notEqual(g.state, 'standing-violated', '⛔ 与 standing-violated 不同形：两个 population 的成因与处置不同');
+
+  // 逃生口①：声明 long-term ⇒ 进 AC-216 复验域 ⇒ **改由 ② 判**（不再落 frozen-violated）。
+  // ⚠️ 不是「消失」：它换了 population，读数由 ② 给（此处 standings=null ⇒ not-evaluated；给读数则是
+  // standing-violated / standing-ok）。两个 population 的成员集**互斥**，⛔ 一条 AC 不得同时出现在两边。
+  const lt = computeGoalGaps(mk({ longTerm: true }), [], null, null, frozen).find((x) => x.ac === 'AC-001');
+  assert.notEqual(lt.state, 'frozen-violated', 'long-term ⇒ 离开冻结population（由 ② 管）');
+  assert.equal(computeGoalGaps(mk({ longTerm: true }), [], null, { achievedButFailing: ['AC-001'], evaluated: true }, frozen)
+    .find((x) => x.ac === 'AC-001').state, 'standing-violated', 'long-term + 此刻为假 ⇒ ② 的 standing-violated（⛔ 不是冻结population 的取值）');
+
+  // 逃生口②：GOAL 置 active ⇒ 进 `inAchievedReverifyScope` 的 active 分支 ⇒ 不再是冻结population。
+  // ⚠️ 它此后**没有**缺口读数——那是既有分工：active GOAL 名下的 achieved AC 由 I5（`achievedButFailing`）
+  // + GOAL 关闭闸（`blocked-failing-ac`）管，⛔ 不由本 population 管（gap-goal-achieved-but-failing-no-handler）。
+  const activeRecs = [{ id: 'GOAL-001', status: 'active' }, { id: 'AC-001', status: 'achieved', goal: 'GOAL-001', criterion: 'exit 1' }];
+  const act = computeGoalGaps(activeRecs, [], null, { achievedButFailing: ['AC-001'], evaluated: true }, frozen)
+    .find((x) => x.ac === 'AC-001');
+  assert.notEqual(act?.state, 'frozen-violated', 'GOAL active ⇒ 离开冻结population（改由 I5 + 关闭闸管）');
+
+  // 压下：有一条在飞任务 ⇒ 不再是 frozen-violated（⛔ 不每轮重复 spawn）。
+  const inFlight = computeGoalGaps(mk({}), [{ id: 't', status: 'ready', goalAc: 'AC-001' }],
+    { eligibleTodoIds: new Set(), excludedReadyIds: new Set() }, null, frozen).find((x) => x.ac === 'AC-001');
+  assert.equal(inFlight.state, 'in-progress', '在飞 ⇒ 不重复立案');
+  // 但 done 的关联任务**不**压下（它不覆盖「此刻仍为假」）——与 standing-violated 同一口径。
+  assert.equal(computeGoalGaps(mk({}), [{ id: 't', status: 'done', goalAc: 'AC-001' }], null, null, frozen)
+    .find((x) => x.ac === 'AC-001').state, 'frozen-violated', 'done 的关联任务不覆盖「此刻仍为假」');
+});
+
+test('冻结population：查过且全好 ⇒ 零读数；查不成 ⇒ 逐条 not-evaluated（⛔ 两者不同形，硬规则 3b）', () => {
+  const recs = [
+    { id: 'GOAL-001', status: 'achieved' },
+    { id: 'AC-001', status: 'achieved', goal: 'GOAL-001', criterion: 'exit 1' },
+  ];
+  const clean = { failing: [], judgment: 'clean', cause: null, frozenScope: 1 };
+  assert.equal(computeGoalGaps(recs, [], null, null, clean).length, 0, '查过且此刻为真 ⇒ 无工作可立（population 78 条，无事不产生读数）');
+
+  const ne = { failing: [], judgment: 'not-evaluated', cause: 'unreadable', frozenScope: -1 };
+  const g = computeGoalGaps(recs, [], null, null, ne);
+  assert.equal(g.length, 1, '查不成 ⇒ **必须**产生读数（⛔ 静默读成「全好」）');
+  assert.equal(g[0].state, 'not-evaluated');
+  assert.equal(g[0].taskCount, null, 'not-evaluated 时 taskCount=null（⛔ 不与 0 同形）');
+
+  // 负控制：本文件未传读数（默认 null）⇒ 同样落 not-evaluated，⛔ 不回落成「无读数」。
+  assert.equal(computeGoalGaps(recs, [], null, null).find((x) => x.ac === 'AC-001').state, 'not-evaluated',
+    '未传读数 ⇒ not-evaluated（fail-visible：调用方漏传不得与「查过且全好」同形）');
+});
+
+test('冻结population：frozen-violated 进 spawn 选取面；prompt 带三条合法终态', () => {
+  const records = [
+    { id: 'GOAL-001', status: 'achieved' },
+    { id: 'AC-001', status: 'achieved', goal: 'GOAL-001', criterion: 'exit 1' },
+  ];
+  const gaps = [
+    { goal: 'GOAL-001', ac: 'AC-001', state: 'frozen-violated', taskCount: 0 },
+    { goal: 'GOAL-001', ac: 'AC-002', state: 'standing-ok', taskCount: 0 },
+    { goal: 'GOAL-001', ac: 'AC-003', state: 'not-evaluated', taskCount: null },
+  ];
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-frozen-spawn-'));
+  try {
+    const r = runGapSpawnPass(gaps, records, tmp, { gapWorkerCmd: 'true', resourceGateArgv: ['true'], spawnCap: 3 });
+    assert.deepEqual(r.outcomes.map((o) => o.ac), ['AC-001'], '只有 frozen-violated 消耗 spawn 名额（standing-ok / not-evaluated ⛔ 不）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+  const p = buildGapWorkerPrompt({ goal: 'GOAL-001', ac: 'AC-001', state: 'frozen-violated', taskCount: 0 }, 'g', 'a', 'e', '/repo');
+  assert.ok(p.includes('LEFT the reverify scope'), '口径：说明这条 AC 已离开复验域（⛔ 不是常设不变式回归）');
+  assert.ok(p.includes('IN FLIGHT'), '去重：只有在飞任务才算重复');
+  assert.ok(!p.includes('ANY status'), '⛔ 不得沿用 gap 的 ANY-status 去重（否则每轮拒立案、缺口永无执行者）');
+  assert.ok(p.includes('make the criterion TRUE again') && p.includes('superseded') && p.includes('long-term: true'),
+    'prompt 必须列出三条合法终态（重跑转绿 / superseded 写明理由 / 声明 long-term 回域）');
+  assert.ok(!p.includes('regressed'), '⛔ 冻结population 不得复用常设口径的措辞（两个 population 不同形）');
+});
+
+test('冻结population：readFrozenFailing 跑真 goal-store —— 违反被枚举，缺 GOAL 的判据落 not-evaluated', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-frozen-read-'));
+  fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+  fs.mkdirSync(path.join(tmp, '.quay'), { recursive: true });
+  writeGoalFile(tmp, { id: 'GOAL-900', status: 'achieved', kind: 'goal' });
+  writeGoalFile(tmp, { id: 'AC-900', status: 'achieved', kind: 'criterion', goal: 'GOAL-900', criterion: 'exit 1' });
+  writeGoalFile(tmp, { id: 'AC-901', status: 'achieved', kind: 'criterion', goal: 'GOAL-900', criterion: 'exit 0' });
+
+  // 轮转从未跑过 ⇒ 机制不在 ⇒ 独立第三态（⛔ 不是 clean）。
+  const before = await readFrozenFailing(repoRoot, tmp);
+  assert.equal(before.judgment, 'not-evaluated', '轮转从未跑过 ⇒ not-evaluated（机制不在，⛔ 不与「零条」同形）');
+  assert.equal(before.cause, 'no-rotation');
+
+  // 跑一次轮转 ⇒ 读数可用：AC-900 此刻为假、AC-901 为真。
+  await sweepFrozenAcs(repoRoot, tmp);
+  const after = await readFrozenFailing(repoRoot, tmp);
+  assert.equal(after.judgment, 'violated');
+  assert.deepEqual(after.failing, ['AC-900'], '只枚举此刻为假的那条（AC-901 为真 ⇒ 不在枚举里）');
+  assert.equal(after.frozenScope, 2, 'population 规模透传');
+
+  // 台账/命令读不到（脚本根不存在）⇒ unreadable，⛔ 绝不与 clean 同形。
+  const broken = await readFrozenFailing(path.join(tmp, 'no-such-scripts'), tmp);
+  assert.equal(broken.judgment, 'not-evaluated');
+  assert.equal(broken.cause, 'unreadable');
+});
+
+test('冻结population 端到端：真 runGoalRound 把域外失败的 AC 枚举为 frozen-violated 并**立案**', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-driver-frozen-e2e-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'goals'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, 'tasks'), { recursive: true }); // 空 tasks ⇒ taskFacts=[]（⛔ 不是 null）
+    // GOAL 已 achieved（非 active），AC 已 achieved、**未声明 long-term**、判据此刻为假 ⇒ 冻结population。
+    writeStandingGoalFile(tmp, { id: 'GOAL-001', status: 'achieved', kind: 'goal' });
+    writeStandingGoalFile(tmp, { id: 'AC-001', status: 'achieved', kind: 'criterion', goal: 'GOAL-001', criterion: 'exit 1' });
+    // 对照：同域外但判据此刻为真 ⇒ 查过且全好，⛔ 不产生读数、不消耗 spawn 名额。
+    writeStandingGoalFile(tmp, { id: 'AC-002', status: 'achieved', kind: 'criterion', goal: 'GOAL-001', criterion: 'exit 0' });
+
+    const { fact } = await runGoalRound(tmp, { scriptRoot: repoRoot, gapWorkerCmd: 'true', resourceGateArgv: ['true'] });
+    const v = fact.value;
+    const gapByAc = new Map(v.gaps.map((g) => [g.ac, g.state]));
+
+    assert.equal(v.frozenFailing.judgment, 'violated', '轮记录带三态读数（judgment=violated）');
+    assert.deepEqual(v.frozenFailing.failing, ['AC-001'], '读数枚举此刻为假的那条（⛔ 不布尔化）');
+    assert.equal(gapByAc.get('AC-001'), 'frozen-violated', '端到端：域外且此刻为假 ⇒ 进缺口读数（本任务修的就是「一条读数都不产生」）');
+    assert.equal(gapByAc.get('AC-002'), undefined, '对照：域外但此刻为真 ⇒ 无读数（「查过且全好」与「此刻为假」不同形）');
+    assert.deepEqual(v.gap_spawns.map((s) => s.ac), ['AC-001'], '端到端：它进了 spawn 立案路径（被枚举 ≠ 有主，立案才算有主）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });

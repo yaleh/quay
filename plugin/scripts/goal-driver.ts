@@ -280,6 +280,81 @@ export async function checkAchievedFailing(
   }
 }
 
+// ── 冻结population 的「此刻为假」读数（第三个 population 的输入面）────────────────────────────
+//
+// 为什么需要这第三个 population（gap-frozen-achieved-ac-no-owner-after-ledger-tail-mutation）：
+// `computeGoalGaps` 此前恰好有两个 population —— ① `status: active` 的 AC；② AC-216 复验域
+// （achieved ∧ long-term ∧ GOAL 非 active）。一条 `achieved ∧ 已离开复验域` 的 AC 两者都不属，
+// **一条缺口读数都不会产生**。而它的台账尾 verdict 却可被**任何一次一次性判据运行**（扫掠 / 探针 /
+// 调查）改写成 `fail` —— 这个过程里**没有任何关闭动作发生**，故 goal-closure-freezes-failing-ac-
+// outside-reverify-scope 那条关闭闸结构上看不见它（实际日期：四条 GOAL 于 09-06..09-10 关闭，
+// 而四条 fail 尾事件是 09-12T01:43:51–01:45:34Z 一次性连写的，晚于关闭闸落地）。
+// ⇒ 禁态可以不经过关闭而被造出来，且此后**检测得到（AC-242 每轮红）却无消费者**——没有立案分支。
+//
+// ⛔ 判据来源：**不在此处重推**「尾事件 + 新鲜度」这套口径 —— 它归 goal-store 的 `check --stale-pass`
+// （AC-242 判据的【同一实现】）。本文件只消费它的**退出码三态 + JSON**，⛔ 不重算谓词优先级
+// （硬规则 5b：判据在 Core 定义一次，消费方读它，不自算第二份）。
+
+/** 冻结population 的判定三态读数（⛔ 不是布尔——硬规则 3b：「查过且此刻为真」与「查不成」必须不同形）。
+ *  三态的权威来源 = `check --stale-pass` 的**退出码**（goal-store 单一实现）：
+ *    0 ⇒ `clean`（查过，population 中无此刻为假的）  1 ⇒ `violated`（查过，failing 非空）
+ *    3 ⇒ `not-evaluated`（查不成：轮转从未跑过，或有判据自己声明「此地无法评估」）
+ *  其余（spawn 错误 / 读不懂 stdout）⇒ 本文件判 `unreadable`（**台账读不到**），同样落 `not-evaluated`
+ *  ——⛔ 绝不与 `clean` 同形：那是「零条」冒充「查过且全好」的经典形态。 */
+export interface FrozenFailingReading {
+  /** 此刻为假的 AC id（**枚举**，硬规则 3——⛔ 不布尔化）。`judgment !== "violated"` 时恒空。 */
+  failing: string[];
+  /** 三态：查过且无违反 / 查过且有违反 / 查不成。 */
+  judgment: "clean" | "violated" | "not-evaluated";
+  /** `judgment === "not-evaluated"` 的成因（枚举，⛔ 不布尔）；其余态恒 null。
+   *  `unreadable` 与另外两者**不同形**（前者是「台账/命令读不到」，后者是「读到了但读数不可用」）。 */
+  cause: "no-rotation" | "criterion-not-evaluated" | "unreadable" | null;
+  /** 读数时的 population 规模（语境量；⛔ 不是枚举本身）。读不到 ⇒ -1（⛔ 不与 0 同形）。 */
+  frozenScope: number;
+}
+
+/** `check --stale-pass` 的 stdout + 退出码 ⇒ `FrozenFailingReading`（**纯函数**：无 spawn / 无 exec /
+ *  ⛔ 不跑任何 criterion —— AC-242 判据的成本上界就是「一个台账解析」，本函数与它同量级）。
+ *  ⛔ 三态判定**只读退出码**，不在此处重算 goal-store 的优先级（failing 优先于 not-evaluated 那套
+ *  规则连同它的 stderr 归因都归 CLI 一处）。 */
+export function parseFrozenFailingReading(stdout: unknown, exitStatus: number | null): FrozenFailingReading {
+  let j: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(String(stdout ?? "").trim());
+    if (!parsed || typeof parsed !== "object") throw new Error("not an object");
+    j = parsed as Record<string, unknown>;
+  } catch {
+    return { failing: [], judgment: "not-evaluated", cause: "unreadable", frozenScope: -1 };
+  }
+  const arr = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : []);
+  const frozenScope = typeof j.frozenScope === "number" ? j.frozenScope : -1;
+  if (exitStatus === 1) return { failing: arr(j.failing), judgment: "violated", cause: null, frozenScope };
+  if (exitStatus === 0) return { failing: [], judgment: "clean", cause: null, frozenScope };
+  if (exitStatus === 3) {
+    // 两个成因**可区分**（透传 goal-store 的读数，⛔ 不重算它的优先级）：轮转从未跑过 = 机制不在；
+    // 否则是某条判据自己声明「此地无法评估」（例如它的载体在临时 worktree 里不存在）。
+    const rot = (j.rotation ?? {}) as Record<string, unknown>;
+    const sweptEver = typeof rot.sweptEver === "number" ? rot.sweptEver : -1;
+    return {
+      failing: [],
+      judgment: "not-evaluated",
+      cause: sweptEver === 0 ? "no-rotation" : "criterion-not-evaluated",
+      frozenScope,
+    };
+  }
+  // 其余退出码（含 spawn 失败传 null）⇒ 台账/命令读不到。
+  return { failing: [], judgment: "not-evaluated", cause: "unreadable", frozenScope: -1 };
+}
+
+/** 读冻结population 的「此刻为假」读数：跑 `check --stale-pass` 的**纯读**模式（⛔ 不传 `--sweep`
+ *  ——那才执行判据；本函数零 criterion 执行，与 AC-242 判据同一条命令、同一成本类）。
+ *  一条命令/一个台账解析，独立于每轮的轮转（`sweepFrozenAcs` 是【动作】半边，本函数是【判定】输入面）。 */
+export async function readFrozenFailing(scriptRoot: string, dataRoot: string): Promise<FrozenFailingReading> {
+  const r = await runAsync(goalStoreArgv(scriptRoot, ["check", "--stale-pass"], dataRoot), { timeoutMs: CRITERION_TIMEOUT_MS, collectStderr: true });
+  // ⛔ spawn 错误不是「零条」：parseFrozenFailingReading 收 null 退出码 ⇒ 落 unreadable。
+  return parseFrozenFailingReading(r.error ? null : r.stdout, r.error ? null : r.status);
+}
+
 /** AC-242 successor 的【动作】半边（gap-achieved-ac-rot-invisible-when-ledger-tail-is-stale-pass）：
  *  一次【有界轮转】—— 把「冻结population」（achieved ∧ criterion 非空 ∧ ⛔ 不在 `inAchievedReverifyScope`）
  *  里最久未被轮转验证的至多 budget 条判据重跑一遍，每条 verdict 以 `actor=goal-sweep` 落进**同一本台账**。
@@ -801,8 +876,14 @@ export async function semanticSufficiencyVerdict(
  *                    （那正是「回归后再无人立案」的成因），只有 todo/ready/needs-human 才算有人接手
  *                    （gap-meta-computegoalgaps；硬规则 3 同族——同一容器两类 population，
  *                    用只覆盖一类的工具判空会把「无人处理」读成「已解决」）。
+ *  frozen-violated   **冻结population 专有**：AC 已 `achieved`、**已经离开复验域**（GOAL 非 active 且未声明
+ *                    `long-term`），而台账尾读数说它**此刻为假**，且**没有任何在飞任务**在处理它 ⇒ 该 spawn
+ *                    立案。⛔ 与 standing-violated 是**两个** population（域内/域外），故取值必须不同形——
+ *                    合并会把「离开域后就没人管」这条正好要修的形态重新藏起来（硬规则 3b）。
+ *                    ⛔ 与 done-unresolved 不同形：曾经 done 的关联任务**不覆盖**「此刻仍为假」，
+ *                    只有 todo/ready/needs-human 才算有人接手。
  */
-export type GapState = "in-progress" | "gap" | "done-unresolved" | "stalled" | "not-evaluated" | "standing-ok" | "standing-violated";
+export type GapState = "in-progress" | "gap" | "done-unresolved" | "stalled" | "not-evaluated" | "standing-ok" | "standing-violated" | "frozen-violated";
 
 /** 一条 AC 的缺口读数。taskCount 只在 not-evaluated 时为 null（⛔ 与 0 不同形）。 */
 export interface GoalGap {
@@ -890,25 +971,81 @@ export function standingReverifyAcs(
  *  立案；⛔ done 的关联任务不压下——它不覆盖回归）/ not-evaluated（读不到 taskFacts 或读不到 I5 读数）。
  *  违反但已有在飞任务 ⇒ 复用 ① 的 in-progress / stalled。⛔ 此前这个域只被 I5 跑、不进本读数：
  *  achievedButFailing 只落轮读数与一行日志，「违规」既无写入者也无执行者
- *  （gap-meta-computegoalgaps）。 */
+ *  （gap-meta-computegoalgaps）。
+ *
+ *  ③ **冻结population**（achieved ∧ criterion 非空 ∧ ⛔ 不在 `inAchievedReverifyScope`）—— 问
+ *  「此刻为假吗」（`frozen` = `check --stale-pass` 的读数，goal-store 单一实现、纯读、零 criterion
+ *  执行）。也就是「已离开复验域、却仍被记录为假」这一禁态。⛔ 它在 ①/② 里**都没有分支**：不 active
+ *  故不进 ①、不在域内故不进 ② ⇒ 此前一条读数都不产生，检测得到（AC-242 每轮红）却**没有消费者**。
+ *  四态：frozen-violated（此刻为假 且【没有在飞任务】⇒ 该 spawn 立案；⛔ done/superseded 的关联任务
+ *  **不**压下——它不覆盖「此刻仍为假」）/ 违反但已有在飞任务 ⇒ 复用 ① 的 in-progress / stalled /
+ *  not-evaluated（读不到读数 ⇒ 逐条 not-evaluated，⛔ 绝不与「查过且零违反」同形，硬规则 3b）/
+ *  其余（查过且此刻为真）⇒ **不产生读数**（population 78 条，无事可立；⛔ 但「查不成」必须产生，
+ *  否则读不到被静默读成「全好」）。
+ *  ⛔ 成本上界与 AC-242 判据同量级（纯读台账 + frontmatter，零 criterion 执行）——⛔ 不是把 78 条
+ *  域外 AC 无差别纳入每轮复跑（那是 AC-216 已裁定的成本边界之外的放宽；重跑归**有界轮转**
+ *  `sweepFrozenAcs`，它每轮至多 budget 条）。 */
 export function computeGoalGaps(
   records: Array<Record<string, unknown>>,
   taskFacts: Array<{ id: string; status: string | null; goalAc: string | null }> | null,
   judgment: ReadyPoolJudgment | null = null,
   standings: { achievedButFailing: string[]; evaluated: boolean } | null = null,
+  frozen: FrozenFailingReading | null = null,
 ): Array<GoalGap> {
   const activeGoalIds = activeGoalIdsOf(records);
-  // 两类 population 落在同一个 gaps 读数里（⚠️ 但判据不同——见上）：
+  // 三类 population 落在同一个 gaps 读数里（⚠️ 但判据不同——见上）：
   //   ① active AC：牵引四态（G7/G9）。
   //   ② AC-216 复验域的常设不变式：按 I5 复验读数判「此刻成立 / 此刻违反 / 读不到」。
-  // 集合取自 standingReverifyAcs（与每轮 gate 集合同一处枚举，⛔ 不各自重推一遍）。
+  //   ③ 冻结population：按 `check --stale-pass` 的读数判「此刻为假 / 查不成」。
+  // 集合取自 standingReverifyAcs / frozenAchievedAcs（与每轮 gate 集合、轮转集合同一处判据
+  // `inAchievedReverifyScope`，⛔ 不各自重推一遍口径——硬规则 5b）。
   const standingIds = new Set(standingReverifyAcs(records, activeGoalIds).map((r) => String(r.id ?? "")));
   const standingFailing = standings === null ? null : new Set(standings.achievedButFailing);
+  // ③ 的成员 = 域外（未声明 long-term 且 GOAL 非 active）∧ achieved ∧ criterion 非空。与 goal-store 的
+  // `frozenAchievedAcs()` **同谓词**（同一处 `inAchievedReverifyScope` + 同一条 criterion 非空规则）。
+  const frozenIds = new Set(
+    records
+      .filter(
+        (r) =>
+          String(r.id ?? "").startsWith("AC-") &&
+          String(r.status ?? "") === "achieved" &&
+          !inAchievedReverifyScope(r, activeGoalIds) &&
+          String(r.criterion ?? "").trim() !== "",
+      )
+      .map((r) => String(r.id ?? "")),
+  );
+  const frozenReading = frozen;
   const out: Array<GoalGap> = [];
   for (const r of records) {
     const id = String(r.id ?? "");
     if (!id.startsWith("AC-")) continue;
     const goal = String(r.goal ?? "");
+    // ③ 冻结population：问句是「此刻为假吗」，⛔ 不是「有没有任务」。先于 ① 判定（③ 的成员在 ① 里
+    // 本就被 `status !== "active"` 排除，顺序不影响结果；放在前面只为让「谁在管这条 AC」一目了然）。
+    if (frozenIds.has(id)) {
+      if (frozenReading === null || frozenReading.judgment === "not-evaluated") {
+        // 读不到（本文件未传读数 / spawn 失败 / 台账读不到 / 轮转从未跑过 / 判据声明无法评估）⇒
+        // 独立取值 not-evaluated（taskCount null）。⛔ 绝不与「查过且零违反」同形（硬规则 3b）。
+        out.push({ goal, ac: id, state: "not-evaluated", taskCount: null });
+        continue;
+      }
+      if (frozenReading.judgment === "clean") continue; // 查过且此刻为真 ⇒ 无工作可立（⛔ 不产生读数）
+      if (!frozenReading.failing.includes(id)) continue; // 查过且有违反，但不是这一条
+      // 此刻为假 ⇒ 要有人做。只有「在飞任务」压下立案（同 ②：done/superseded ⛔ 不压下）。
+      const inFlight = taskFacts === null ? null : taskFacts.filter((t) => t.goalAc === id && isTractionStatus(t.status));
+      if (inFlight === null) {
+        out.push({ goal, ac: id, state: "not-evaluated", taskCount: null });
+      } else if (inFlight.length === 0) {
+        out.push({ goal, ac: id, state: "frozen-violated", taskCount: 0 });
+      } else if (inFlight.every((t) => t.status === "needs-human")) {
+        out.push({ goal, ac: id, state: "stalled", taskCount: inFlight.length });
+      } else if (judgment !== null && inFlight.every((t) => isTaskStuck(t, judgment))) {
+        out.push({ goal, ac: id, state: "stalled", taskCount: inFlight.length });
+      } else {
+        out.push({ goal, ac: id, state: "in-progress", taskCount: inFlight.length });
+      }
+      continue;
+    }
     const isStanding = standingIds.has(id);
     if (isStanding) {
       // 常设不变式：问句是「此刻成立吗」，⛔ 不是「有没有任务」。读不到（无 tasks 输入 / I5 未评估）
@@ -1089,23 +1226,34 @@ export function triageDraftAc(
  *  readTaskFacts 独立复核（⛔ 不信 agent 自述）。
  *
  *  去重规则**按成因分叉**（`gap.state`）：`gap` 是「从未有人处理」（任何状态的既有认领都算重复）；
- *  `standing-violated` 是「常设不变式回归」（done 的既有认领恰恰是**回归的证据**，⛔ 不是重复——
- *  按 `gap` 的口径去重会让 agent 每轮都拒绝立案，该缺口就永远没有执行者）。 */
+ *  `standing-violated` / `frozen-violated` 是「判据此刻为假」（done 的既有认领恰恰是**回归的证据**，
+ *  ⛔ 不是重复——按 `gap` 的口径去重会让 agent 每轮都拒绝立案，该缺口就永远没有执行者）。 */
 export function buildGapWorkerPrompt(gap: GoalGap, goalTitle: string, acTitle: string, acExpect: string, root: string): string {
   const standing = gap.state === "standing-violated";
+  const frozen = gap.state === "frozen-violated";
+  const regressed = standing || frozen;
   return [
-    standing
-      ? "You are a gap-filing agent in the quay repo. A STANDING goal criterion (AC) — declared `long-term: true`, already achieved — now FAILS again: the guarantee it asserts has regressed."
-      : "You are a gap-filing agent in the quay repo. A goal criterion (AC) has a structural gap: no todo/ready/needs-human task advances it.",
+    frozen
+      ? "You are a gap-filing agent in the quay repo. An achieved goal criterion (AC) that has LEFT the reverify scope — its GOAL is no longer active and it is NOT declared `long-term: true` — is recorded as CURRENTLY FALSE in the gate ledger. No other mechanism re-runs it, so without a task it stays false forever."
+      : standing
+        ? "You are a gap-filing agent in the quay repo. A STANDING goal criterion (AC) — declared `long-term: true`, already achieved — now FAILS again: the guarantee it asserts has regressed."
+        : "You are a gap-filing agent in the quay repo. A goal criterion (AC) has a structural gap: no todo/ready/needs-human task advances it.",
     `Repo root: ${root}.`,
     `goal_id=${gap.goal} goal_title=${goalTitle}`,
     `ac_id=${gap.ac} ac_title=${acTitle}`,
     `ac_expect=${acExpect}`,
     "Read the AC record (goal_get MCP) to understand the work it demands, then file ONE child task that closes this gap via the `quay-file-task` skill (Skill tool).",
-    ...(standing
+    ...(regressed
       ? [
           "The quay-file-task skill performs MECHANISM-BASED dedup: if a task claiming this AC via a top-level `goal_ac:` field is still IN FLIGHT (todo/ready/needs-human), do NOT file a duplicate — report the existing task id instead.",
-          "⚠️ A `done`/`superseded` task claiming this AC is NOT a duplicate here — it is evidence the earlier fix did not hold. The standing invariant must hold NOW, so file a NEW task that re-establishes it (and say in the task body why the earlier fix regressed).",
+          "⚠️ A `done`/`superseded` task claiming this AC is NOT a duplicate here — it is evidence the earlier fix did not hold. The criterion must be TRUE NOW, so file a NEW task that makes it true again (and say in the task body why the earlier fix did not hold).",
+          // frozen-violated 的三条终态（DoD）：⛔ 声明 long-term 是【搬进复验域】而不是消解——它让
+          // 「无主红」变成「每轮被重跑的红」，只在「这条保证今天仍必须为真」时才成立。
+          ...(frozen
+            ? [
+                "Legal terminal states for this AC (the driver re-files you every round until one holds): (a) make the criterion TRUE again, so the ledger tail flips to pass; (b) `superseded` the AC record with a WRITTEN reason that the guarantee it asserted is no longer the repo's intent; (c) declare `long-term: true` ONLY IF the guarantee must stay in re-verification — that moves it into the AC-216 reverify scope (re-run every round), it does NOT resolve it.",
+              ]
+            : []),
         ]
       : [
           "The quay-file-task skill performs MECHANISM-BASED dedup: if a task already claims this AC via a top-level `goal_ac:` field (ANY status, including needs-human), do NOT file a duplicate — report the existing task id instead.",
@@ -1195,11 +1343,13 @@ export interface GapSpawnPassResult {
 }
 
 /** spawn 选取面：哪些缺口态该立案（**单一真相源**——`runGapSpawnPass` 与判据都读它，⛔ 不各写一份谓词）。
- *  两态该立案，且成因不同：`gap`（active AC 零关联任务）+ `standing-violated`（AC-216 复验域内常设不变式
- *  此刻违反且无在飞任务）。其余态⛔ 不消耗 spawn 名额：stalled/in-progress 已有人在处理，
+ *  三态该立案，且成因不同：`gap`（active AC 零关联任务）+ `standing-violated`（AC-216 复验域内常设不变式
+ *  此刻违反且无在飞任务）+ `frozen-violated`（**冻结population**：已离开复验域、台账尾读数说此刻为假、
+ *  且无在飞任务——⛔ 与 standing-violated 是两个 population（域外/域内），合并即把「离开域后没人管」
+ *  这条正好要修的形态重新藏起来）。其余态⛔ 不消耗 spawn 名额：stalled/in-progress 已有人在处理，
  *  done-unresolved/standing-ok 无工作要立，not-evaluated 是读不到而不是缺口（硬规则 3b）。 */
 export function isFilingGapState(state: GapState): boolean {
-  return state === "gap" || state === "standing-violated";
+  return state === "gap" || state === "standing-violated" || state === "frozen-violated";
 }
 
 /** G9 缺口语义环的 spawn pass：可立案缺口（isFilingGapState）非空 ⇒ 过 halt + 资源门 + 每轮上限，
@@ -1276,6 +1426,11 @@ export interface GoalRoundReadings {
    *  inScope = 该作用域 AC id 枚举（AC-216：含其 GOAL 已 achieved 的 long-term AC）。evaluated =
    *  scopeSize > 0。空作用域与「查过且全过」按字段区分（⛔ 同形，硬规则 3b）。 */
   achievedFailing: { achievedButFailing: string[]; evaluated: boolean; scopeSize: number; inScope: string[] } | null;
+  /** 冻结population（achieved ∧ 已离开复验域 ∧ criterion 非空）的「此刻为假」读数（③ 的输入面）。
+   *  judgment 三态，⛔ 不是布尔（硬规则 3b）：clean（查过且无此刻为假的）/ violated（查过且有，枚举
+   *  在 failing 里）/ not-evaluated（查不成，成因在 cause）。⛔ 恒非 null —— 「没跑这条读数」不得与
+   *  「查过且全好」同形：读不到时它自己落 not-evaluated。 */
+  frozenFailing: FrozenFailingReading;
   /** ⑤ 缺口读数（G7 + G9 stalled）：每条 active AC 的四态；taskFacts==null ⇒ 逐条 not-evaluated。 */
   gaps: Array<GoalGap>;
   /** ⑥ G9 语义环：本轮实际 spawn 的 gap-filing agent 数（过 halt/资源门/上限后；0 = 未 spawn）。 */
@@ -1496,15 +1651,20 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
   const staleness = await checkStaleness(scriptRoot, dataRoot);
   // I5 查 achieved-but-failing：复用 goal-store 的单一真相源（独立子命令，跑判据）。
   const achievedFailing = await checkAchievedFailing(scriptRoot, dataRoot);
+  // ③ 冻结population 的「此刻为假」读数（**纯读**：`check --stale-pass` 不传 `--sweep` ⇒ 零 criterion
+  // 执行，与 AC-242 判据同一条命令、同一成本类）。⛔ 它【不是】`sweepFrozenAcs` 的结果——那个是【动作】
+  // 半边（重跑并落账），这个是【判定】输入面。两者分开：动作失败仍要能读到判定，反之亦然。
+  const frozenFailing = await readFrozenFailing(scriptRoot, dataRoot);
 
-  // ⑤ 算缺口（G7 + G9 stalled + AC-216 复验域）：读 tasks/*.md 的 goal_ac → 对每条 active AC 给四态，
-  // 对每条 AC-216 复验域 AC 给「此刻成立 / 违反 / 读不到」。taskFacts==null ⇒ 逐条 not-evaluated。
+  // ⑤ 算缺口（G7 + G9 stalled + AC-216 复验域 + 冻结population）：读 tasks/*.md 的 goal_ac → 对每条
+  // active AC 给四态，对每条 AC-216 复验域 AC 给「此刻成立 / 违反 / 读不到」，对每条冻结population 的
+  // AC 给「此刻为假 / 查不成 / 无读数（此刻为真）」。taskFacts==null ⇒ 逐条 not-evaluated。
   // stalled 的结构量来自 ready-pool-check（只在存在 goal_ac 关联任务时才跑，避免每轮无谓地起一次昂贵的
   // 全池判定）。`achievedFailing`（③④ 刚读的 I5 读数）直接传进去——复验域的态由它判，⛔ 不重跑一遍判据。
   const taskFacts = await readTaskFacts(dataRoot);
   const hasGoalAcTasks = taskFacts !== null && taskFacts.some((t) => t.goalAc !== null);
   const judgment = hasGoalAcTasks ? await readReadyPoolJudgment(root, opts.readyPoolCmd) : null;
-  const gaps = computeGoalGaps(records, taskFacts, judgment, achievedFailing);
+  const gaps = computeGoalGaps(records, taskFacts, judgment, achievedFailing, frozenFailing);
 
   // ⑦ draft AC 分诊（GOAL-010 范围② / AC-210）：对 active GOAL 名下每条 draft AC 出四态判决并逐条
   // 落痕。分诊循环只【产出判决】，⛔ 不 flip 任何 AC status——判决的消费在 ⑧（仅 activate 一态被
@@ -1567,6 +1727,7 @@ export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): P
     closeBlocks,
     staleness,
     achievedFailing,
+    frozenFailing,
     gaps,
     triage,
     spawned: spawnPass.spawned,
