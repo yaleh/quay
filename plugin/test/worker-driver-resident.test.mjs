@@ -1,6 +1,6 @@
 // @test-group lowconc
 // worker-driver-resident.test.mjs — resident driver loop (selector/heartbeat/liveness/wrapper) + continue/fan-in-merge mechanics. Split from gap-suite-file-split-two-longest.
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -129,6 +129,8 @@ import {
   readOutcomeLines,
   readRoundLines,
   spawnResident,
+  rmSafe,
+  stopAllResidentDrivers,
   waitFor,
   writeTaskFile,
   writeTouchedTask,
@@ -136,6 +138,35 @@ import {
 } from "./helpers/worker-driver-harness.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const SELF_FILE = path.join(__dirname, "worker-driver-resident.test.mjs");
+
+// ── 文件级兜底（fan-in 静默挂死）：常驻驱动是 detached 子进程，node 不会因测试结束而回收它 ——
+// 它持着【本文件进程】的 stdout pipe + 子进程句柄，文件进程就永不退出 ⇒ 套件在本文件上静默
+// （无 __PERFILE__、无 `ℹ tests`）⇒ 静默看门狗杀掉整个套件（2026-09-12 实测 1229s；2026-09-10
+// 那次的文件进程与驱动 51 小时后仍活着）。测试级 after 钩子【在某个钩子抛错时会被整体跳过】，所以
+// 单靠每个测试自己 `t.after(() => drv.stop())` 不足；文件级 after 钩子在测试级钩子抛错后【仍会执行】
+// （node 24 实测），因此它是最后一道保证：无论哪个测试怎么炸，本文件绝不留下活驱动。
+after(async () => { await stopAllResidentDrivers(); });
+
+// 结构面（能取假）：本文件所有 after 钩子里的删除必须走 rmSafe（⛔ 裸 fs.rmSync）。理由同上——一次
+// 抛错会跳过该测试剩余的全部 after 钩子（含 drv.stop()）。判据读【本文件源码】并按钩子切窗；
+// 窗口内出现裸 fs.rmSync 即红。窗口数不足视为【没解析到】而非【都合格】（硬规则 3b：不得让
+// "读不懂"与"合格"同形）。两个针都由片段拼出，避免判据匹配到它自己（硬规则 2 自匹配）。
+test("结构面（能取假）— after 钩子里的删除一律走 rmSafe（裸 fs.rmSync 抛错会跳过后续 drv.stop()）", () => {
+  const HOOK = "t." + "after(";
+  const RAW_RM = "fs." + "rmSync(";
+  const src = fs.readFileSync(SELF_FILE, "utf8");
+  const hooks = src.split(HOOK).slice(1);
+  const offenders = [];
+  hooks.forEach((h, i) => {
+    const end = h.includes("\n  });") ? h.indexOf("\n  });") + 7 : h.indexOf("\n") + 1;
+    const win = h.slice(0, end > 0 ? end : h.length);
+    if (win.includes(RAW_RM)) offenders.push(`hook#${i + 1}`);
+  });
+  assert.ok(hooks.length >= 10, `解析到 ${hooks.length} 个 after 钩子 —— 少于 10 说明判据没看到它们（空转，⛔ 不是"都合格"）`);
+  assert.deepEqual(offenders, [], `after 钩子仍用裸 fs.rmSync（改用 rmSafe）：${offenders.join(", ")}`);
+});
 
 // ── 阶段 4（AC129）常驻驱动 + 自主选任务：选择环 / selector worker / 判停 ─────────────────────────
 // (counterNodeE shared helper lives in ./helpers/worker-driver-harness.mjs — used by this file AND
@@ -203,7 +234,7 @@ test("AC3 (gap-launch-script-worker-cap-broken) — resident loop never dispatch
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSafe(root));
   // 5000 → 15000：两次完整派发（ready-pool/selector/worker 各 spawn 一个 node 子进程 + 每次派发后
   // 等在飞 worker 落地含 git landing 读）在满载 16 核 full-suite 并发下可 >5s（suite 轮实测 5000 超时
   // flake、picks=1，与同文件 AC1「第二次派发」10000ms 约定同源——gap-worker-driver-resident-loop-intermittent-hang；
@@ -251,7 +282,7 @@ test("AC2 — no --task ⇒ selection loop runs and selector_reason lands the se
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSafe(root));
   // 5000 → 15000：一次完整派发（ready-pool/selector/worker 各 spawn 一个 node 子进程 + worker 落地含
   // git landing 读）在满载 16 核 full-suite 并发下可 >5s（suite 轮实测 5000 超时 flake、outcomes=0，与同文件
   // AC1 10000ms 约定同源——gap-worker-driver-resident-loop-intermittent-hang；
@@ -290,7 +321,7 @@ test("AC1 — resident loop does not exit after one worker; keeps dispatching wh
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSafe(root));
   // 5000 → 10000：两次完整派发+落地循环（ready-pool/selector/worker 各 spawn 一个 node 子进程 + landing
   // 读 git）在满载 16 核 full-suite 并发下可 >5s（suite 轮实测 5000 超时 flake、picks=1）；与同文件
   // 「第二次派发」的既有约定（gap-b 等 10000ms）一致。
@@ -316,7 +347,7 @@ test("AC3 — resource-gate WAIT ⇒ resident loop stops starting workers (zero 
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSafe(root));
   await waitFor(() => readRoundLines(root).length >= 1, 15000);
   assert.equal(drv.events().some((e) => e.event === "worker-spawned"), false, "AC3: no worker spawned while resource-gate reports WAIT");
   assert.equal(readOutcomeLines(root).length, 0, "zero outcome records — nothing was dispatched");
@@ -328,7 +359,7 @@ test("AC3 — resource-gate WAIT ⇒ resident loop stops starting workers (zero 
 
 test("AC3 — MCP halt mid-run stops NEW dispatch only; the in-flight worker completes (never killed)", async (t) => {
   const root = makeGitRoot("ac3-halt");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSafe(root));
   writeTaskFile(root, "gap-slow", "done");
   writeTaskFile(root, "gap-fast", "done");
   writeControlState(root, defaultControlState());
@@ -404,7 +435,7 @@ test("AC138-3 — pool-empty round still writes a round heartbeat (⛔ outcome s
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSafe(root));
   await waitFor(() => readRoundLines(root).length >= 1, 15000);
   const rounds = readRoundLines(root);
   assert.ok(rounds.length >= 1, "at least one round record written even when the pool is empty");
@@ -478,7 +509,7 @@ test("liveness wiring — resident loop calls the liveness checker each round (F
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSafe(root));
   await waitFor(() => readRoundLines(root).length >= 1 && readOutcomeLines(root).length >= 2, 30000);
   const rounds = readRoundLines(root);
   const livenessCount = fs.existsSync(livenessCnt) ? Number(fs.readFileSync(livenessCnt, "utf8")) : 0;
@@ -512,7 +543,7 @@ test("AC6 (superseded-reclaim wiring) — reconcile step actually calls reclaimS
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSafe(root));
   await waitFor(() => readRoundLines(root).length >= 1, 15000);
   const rounds = readRoundLines(root);
   assert.ok(rounds.length >= 1, "at least one round ran");
@@ -528,22 +559,27 @@ test("AC6 end-to-end (superseded-reclaim) — a real superseded worktree is recl
   writeTaskFile(root, "gap-sup-wire", "superseded");
   runGit(root, ["branch", "develop"]); // readTaskStatus 读 develop ref；develop 指到含 superseded 任务文件的 commit
   const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  // ⚠️ 顺序是【承重】的：after 钩子按注册序执行，驱动必须先死、目录后删。反过来（先删目录）会与
+  // 仍在写 <root>/.quay/ 的驱动赛跑 —— 递归删除先删文件、再 rmdir 时目录又被驱动重建 ⇒ ENOTEMPTY
+  // 抛出 ⇒ 该测试剩余 after 钩子（含 drv.stop()）被整体跳过 ⇒ 驱动泄漏 ⇒ 本文件进程永不退出 ⇒
+  // 套件静默到被看门狗杀掉。故用 holder 把 stop 注册在清理【之前】（drv 此时还没 spawn）。
+  let drv = null;
+  t.after(async () => { if (drv) await drv.stop(); });
   t.after(() => {
     try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
-    fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(wtPath, { recursive: true, force: true });
+    rmSafe(root);
+    rmSafe(wtPath);
   });
   runGit(root, ["worktree", "add", "-q", "-b", "task/gap-sup-wire", wtPath]);
   assert.equal(worktreePresentForTask(root, "gap-sup-wire"), true, "precondition: superseded worktree present");
 
-  const drv = spawnResident(root, [
+  drv = spawnResident(root, [
     "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:[],pool:0}))",
     "--selector-cmd", "node -e console.log('gap-a\\x20pick')",
     "--resource-gate-cmd", "node -e process.exit(0)",
     "--worker-cmd-exact", "node -e process.exit(0)",
     "--interval", "20",
   ]);
-  t.after(() => drv.stop());
   await waitFor(() => {
     const r = readRoundLines(root).find((rec) => rec.superseded_reclaim && rec.superseded_reclaim.reclaimed.includes("gap-sup-wire"));
     return r != null;
@@ -569,10 +605,14 @@ test("AC5/AC6 (superseded-mid-flight wiring + production carrier) — a live wor
   writeTaskFile(root, taskId, "superseded");
   runGit(root, ["branch", "develop"]); // readTaskStatus 读 develop ref；develop 指到含 superseded 任务文件的 commit
   const wtPath = path.join(root, "..", `wt-${path.basename(root)}`);
+  // ⚠️ 顺序承重，同 AC6 end-to-end：驱动先死、目录后删（理由是那里的注释；本条 2026-09-12 实测
+  // 因顺序反了而泄漏驱动 ⇒ 整个套件被静默看门狗杀掉）。holder 让 stop 注册在清理之前。
+  let drv = null;
+  t.after(async () => { if (drv) await drv.stop(); });
   t.after(() => {
     try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
-    fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(wtPath, { recursive: true, force: true });
+    rmSafe(root);
+    rmSafe(wtPath);
   });
   runGit(root, ["worktree", "add", "-q", "-b", `task/${taskId}`, wtPath]);
   assert.equal(worktreePresentForTask(root, taskId), true, "precondition: superseded worktree present");
@@ -583,14 +623,13 @@ test("AC5/AC6 (superseded-mid-flight wiring + production carrier) — a live wor
   const fakeExited = new Promise((resolve) => fake.once("exit", (code, signal) => resolve(signal)));
   await new Promise((r) => setTimeout(r, 100)); // 让 /proc/<pid>/cmdline 可读
 
-  const drv = spawnResident(root, [
+  drv = spawnResident(root, [
     "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:[],pool:0}))",
     "--selector-cmd", "node -e console.log('gap-a\\x20pick')",
     "--resource-gate-cmd", "node -e process.exit(0)",
     "--worker-cmd-exact", "node -e process.exit(0)",
     "--interval", "20",
   ]);
-  t.after(() => drv.stop());
 
   await waitFor(() =>
     readRoundLines(root).some((rec) =>
@@ -628,7 +667,7 @@ test("negative control — drv.stop kills the whole process group: a long-lived 
     "--interval", "20",
   ]);
   t.after(() => drv.stop());
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSafe(root));
   await waitFor(() => drv.events().some((e) => e.event === "worker-spawned"), 15000);
   const closed = new Promise((resolve) => drv.child.stdout.on("close", resolve));
   drv.stop();
@@ -684,7 +723,7 @@ test("AC140-1 — single constructor: launchArgv resolves kind → profile via p
 
 test("AC140-1b — L3 由 policy 解析（能取假）：合成 profile 的 launcher/model 流进 argv（⛔ 非硬编码）", (t) => {
   const root = makeRoot("profile");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSafe(root));
   // 合成 profiles.yml：launcher=claude（⛔ 非 claude-fjdac）+ model=synth-model——若 launchArgv 硬编码
   // claude-fjdac/deepseek-v4-pro 或绕过 policy，这些字段不会照合成值流进 argv ⇒ 取假。
   fs.writeFileSync(path.join(root, ".quay", "profiles.yml"),
@@ -771,8 +810,8 @@ test("AC1 (能取假) — workerPromptForTask / continueStateForTask: preserved 
   t.after(() => {
     try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
     try { runGit(root, ["branch", "-D", "task/gap-cr"]); } catch { /* best-effort */ }
-    fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(wtPath, { recursive: true, force: true });
+    rmSafe(root);
+    rmSafe(wtPath);
   });
   writeTaskFile(root, "gap-cr", "ready");
 
@@ -880,8 +919,8 @@ test("AC2 — continueStateForTask gathers real state (own branch commits / AC c
   t.after(() => {
     try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
     try { runGit(root, ["branch", "-D", "task/gap-cs2"]); } catch { /* best-effort */ }
-    fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(wtPath, { recursive: true, force: true });
+    rmSafe(root);
+    rmSafe(wtPath);
   });
 
   // task file with an AC section: 2 checked / 3 total.
@@ -969,10 +1008,10 @@ test("AC1 (integration, 复现) — re-dispatch of an exited-not-landed task pas
   t.after(() => {
     try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
     try { runGit(root, ["branch", "-D", "task/gap-ce"]); } catch { /* best-effort */ }
-    fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(wtPath, { recursive: true, force: true });
-    fs.rmSync(capOut, { force: true });
-    fs.rmSync(capScript, { force: true });
+    rmSafe(root);
+    rmSafe(wtPath);
+    rmSafe(capOut);
+    rmSafe(capScript);
   });
 
   // task file with an AC section (1 checked / 2 total).
@@ -1219,7 +1258,7 @@ test("B (能取假) — buildContinueWorkerPrompt 带前 N 次 (ts,step,reason) 
 
 test("negative control — torn trailing JSONL line is treated as not-yet-written, then read once completed", (t) => {
   const root = makeRoot("nc-torn-jsonl");
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSafe(root));
   const line1 = JSON.stringify({ action: "stop", stop_reason: "pool-empty", in_flight: 0, ts: "2026-09-06T00:00:00Z" });
   const line2 = JSON.stringify({ action: "dispatch", task: "gap-a", in_flight: 1, ts: "2026-09-06T00:00:01Z" });
   const roundFile = path.join(root, WORKER_ROUND_REL);
