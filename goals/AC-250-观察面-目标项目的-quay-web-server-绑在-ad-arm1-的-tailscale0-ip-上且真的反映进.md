@@ -11,8 +11,7 @@ criterion: >-
 
   p=".quay/productization-verification.jsonl"
 
-  if not os.path.exists(p): sys.stderr.write("NOT-EVALUATED: carrier absent\n");
-  sys.exit(3)
+  if not os.path.exists(p): sys.stderr.write("AC-250 NOT-EVALUATED: carrier .quay/productization-verification.jsonl absent — cannot read the web-observability evidence\n"); sys.exit(3)
 
   me=socket.gethostname(); here=os.path.realpath(".")
 
@@ -35,7 +34,7 @@ criterion: >-
       if not sb or not sa or sb==sa: continue
       if r.get("store_status_after")!=sa: continue
       sys.exit(0)
-  sys.exit(1)
+  sys.stderr.write("AC-250: carrier holds no qualifying GOAL-016-AC-250 record (need host != local hostname, project_root outside this repo, bind_host equal to tailscale0_ip and neither empty nor loopback, non-empty probe_from_host different from the target host, http_status 200, non-empty observed_task_id, non-empty and differing observed_status_before/observed_status_after, store_status_after equal to observed_status_after)\n"); sys.exit(1)
 
   P
 expect: exit 0 = 载体中存在 ac=GOAL-016-AC-250 的记录，host≠本机 ∧ project_root ∉ 本仓库 ∧
