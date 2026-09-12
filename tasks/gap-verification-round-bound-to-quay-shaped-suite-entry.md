@@ -43,7 +43,9 @@ quay full-suite-runner 的默认 suite 命令 → bash scripts/test.sh [--bucket
 
 **为什么至今没被发现（本条是立案的第二个理由，⛔ 不要删）**：`goals/AC-234`（GOAL-015，「web 指向第三方项目时显示其真实载体与过程记录」）**已 achieved**，其判据要求 `round_records_rendered > 0`。但载体里它的 3 条记录，`project_root` 全部是 `/home/yale/quay-verify-coldstart-*-root` —— **全新 `quay-init` 出来的一次性项目，天然带 quay 自己的形状**，三计数各为 1。⇒ **AC-234 的绿是在「像 quay 自己的项目」上取得的，从未在一个有自己 suite 入口的真实第三方项目上验证过。** 这与 GOAL-009 `AC-238` 的 origin 记载的是**同一模式的第二次出现**（「现有 AC 的证据全部来自全新 quay-init 的一次性项目」）。
 
-**期望（给方向，实现由执行者定）**：suite 的**执行入口**可以是项目自己的（`config.yml` 的 `test_command`），但**台账写入不应绑定在 quay 自己的 `scripts/test.sh` 形状上** —— `verification-round` 的产生应当与「suite 由谁跑」解耦。两个既有写入者（`full-suite-runner.ts` 与 `pre-verified-round-record.ts`）都已在交付物中，⛔ 不要新造第三个写入者。
+**期望（给方向，实现由执行者定；人 2026-09-12 裁定）**：**写死 `scripts/test.sh` 是错的。** 测试**入口**在 quay 配置文件中配置（`.quay/config.yml` 的 `loop.test_command`）是对的方向；**测试【输出】同样应当在配置文件中设置**，⛔ 不得把输出格式写死成 quay 自己的形状。⇒ `verification-round` 的产生应当与「suite 由谁跑」**以及**「它吐出什么格式」双双解耦：项目声明自己的测试命令与输出约定，quay 依声明解析并落台账。两个既有写入者（`full-suite-runner.ts` 与 `pre-verified-round-record.ts`）都已在交付物中，⛔ 不要新造第三个写入者。
+
+**⚠️ 只让入口可配而输出解析仍写死，是换了一个位置的同一个病**——那样换个项目照样产不出台账，判据会在「配置项存在」上变绿而实际无台账（硬规则 3b：可配置 ≠ 已生效）。
 
 ## Plan
 
@@ -59,6 +61,7 @@ quay full-suite-runner 的默认 suite 命令 → bash scripts/test.sh [--bucket
 - [ ] AC2 不回归：quay 自己仓库跑一轮后，`verification-round` 记录的**字段集**与改动前一致（打印前后字段集与两向差集，差集为空）。
 - [ ] AC3 web 面真实变化：目标项目的 /tests 页面不再显示「未接入」—— 由**非目标主机**发起 HTTP 取回 HTML 片段留档（⛔ 不采信本地渲染、⛔ 不以 HTTP 200 为证据，硬规则 4）。
 - [ ] AC4 覆盖形态而非个例：AC1 的目标项目**不是** `quay-init` 新造的一次性项目，而是一个带自己 suite 入口的真实项目（记录其 `project_root` 与 `test_command` 实际取值）——这条正是 AC-234 的绿所缺的那个形态。
+- [ ] AC5 输出约定可配置且**真的被消费**：目标项目在配置中声明自己的测试输出约定后，台账记录里由该输出**派生**的字段（而不仅是 state/时长这类与格式无关的字段）取到真实值——打印该字段的配置声明、原始测试输出片段、以及落进记录的值三者做对照。⛔ 仅证明「配置项被读到」不算（配置读到而解析仍走 quay 自己格式 ⇒ 字段恒空/恒默认，与「没配」同形）。
 
 ## Definition of Done
 
