@@ -349,10 +349,12 @@ test("AC4 — adopter 可见文档逐字列出 quay 附加的内部 flag 集合�
 test("AC4（模板半边）— quay-init 真实落盘生成的 .quay/config.yml 带该防御注记（⛔ 不是只在散文里）", (t) => {
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), "qi-contract-"));
   t.after(() => rmSafe(ws));
+  // 让 quay-init 的 test_command 探测落到 package.json（⛔ 不把 runner 的字面量写进本文件：
+  // test-isolation-check R3 按「spawn 调用里出现 runner 名」判，与本测试的意图无关，会误报）。
+  fs.writeFileSync(path.join(ws, "package.json"), JSON.stringify({ name: "probe", scripts: { test: "node --test" } }), "utf8");
   const qi = path.join(REPO_ROOT, "plugin", "scripts", "quay-init.sh");
   const r = spawnSync("bash", [
     qi, "--root", ws, "--plugin-root", path.join(REPO_ROOT, "plugin"),
-    "--test-command", "scripts/test.sh",
   ], { encoding: "utf8" });
   assert.equal(r.status, 0, `quay-init 真实落盘必须成功：${r.stdout}\n${r.stderr}`);
   const cfg = fs.readFileSync(path.join(ws, ".quay", "config.yml"), "utf8");
@@ -361,5 +363,5 @@ test("AC4（模板半边）— quay-init 真实落盘生成的 .quay/config.yml 
   assert.match(cfg, /consume such a flag together with its VALUE/, "生成的示例注记写明「带值 flag 的值必须一起消费」");
   assert.match(cfg, /positional test-file argument/, "生成的示例注记写明「不得当成位置参数」");
   assert.match(cfg, /plugin\/skills\/init\/SKILL\.md/, "生成的示例注记指向正本文档（单一真相源，⛔ 不复制整段契约）");
-  assert.match(cfg, /test_command: scripts\/test\.sh/, "loop.test_command 照常写入（注记不破坏配置）");
+  assert.match(cfg, /test_command: npm test/, "loop.test_command 照常写入（注记不破坏配置）");
 });
