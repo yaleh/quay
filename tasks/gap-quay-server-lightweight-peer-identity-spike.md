@@ -2,7 +2,7 @@
 id: gap-quay-server-lightweight-peer-identity-spike
 title: 验证「轻量 peer 身份」可行性——quay server 以非 LLM 进程身份被 SendMessage 直接投递（统一
   server「收」方向的前置 spike）
-status: todo
+status: ready
 labels:
   - gap
   - spike
