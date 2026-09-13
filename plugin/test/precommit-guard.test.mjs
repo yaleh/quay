@@ -312,9 +312,42 @@ test("AC63 — ff-only merge fires ZERO guard hooks (no pre-commit, no pre-merge
 
 /** Copy the guard + its Touches-parser deps into a scratch repo so --install-hook's shim resolves. */
 function copyGuardScripts(root) {
-  for (const f of ["precommit-guard.ts", "touches-one-entry-one-path-check.ts", "touches-parser.ts", "gate-script-base.ts", "repo-root.ts"]) {
+  for (const f of [
+    "precommit-guard.ts",
+    "touches-one-entry-one-path-check.ts",
+    "touches-parser.ts",
+    "gate-script-base.ts",
+    "repo-root.ts",
+    // gap-ac190-goal-ac-rule-not-enforced-at-filing: the guard's ③ goal_ac judgment imports the
+    // AC-190 detector's pure functions + the shared frontmatter projections (task-schema.ts, which
+    // pulls wiring-coverage-check.ts / touches-orthogonality-check.ts).
+    "long-term-guarantee-goal-backed-check.ts",
+    "task-schema.ts",
+    "wiring-coverage-check.ts",
+    "touches-orthogonality-check.ts",
+  ]) {
     fs.copyFileSync(path.join(REPO_ROOT, "plugin", "scripts", f), path.join(root, "plugin", "scripts", f));
   }
+  // task-schema.ts imports the external `yaml` package — the same node_modules symlink
+  // dispatch-worktree-setup.sh / driver-cli.test.mjs lay down, so the bare specifier resolves from
+  // the scratch root upward.
+  const nm = path.join(root, "node_modules");
+  try { fs.symlinkSync(path.join(REPO_ROOT, "node_modules"), nm, "dir"); } catch (_) { /* exists */ }
+}
+
+/**
+ * Install the hook from the SCRATCH COPY of the guard — NOT from REPO_ROOT's.
+ * `--install-hook` bakes the guard path into the shim via `mainCheckoutRoot(own dir)`: invoked from a
+ * linked worktree that resolves to the MAIN checkout's copy (a deliberate AC139-4 redirection), so a
+ * `node <REPO_ROOT>/precommit-guard.ts --install-hook` in a scratch repo installs a hook pointing at
+ * the main checkout — which is NOT the code under test (a green there proves the main checkout's code,
+ * 硬规则 4b). Invoking the scratch copy instead makes `mainCheckoutRoot` resolve to the scratch root,
+ * so the shim runs exactly the files `copyGuardScripts` just laid down.
+ */
+function installHookFromScratch(root) {
+  const scratchGuard = path.join(root, "plugin", "scripts", "precommit-guard.ts");
+  assert.ok(fs.existsSync(scratchGuard), "copyGuardScripts must run before installing the hook");
+  return run("node", ["--no-warnings", "--experimental-strip-types", scratchGuard, "--root", root, "--install-hook"], root);
 }
 
 test("AC1 — a staged task with a multi-path Touches bullet is rejected (reason touches-multi-path-bullet)", () => {
@@ -393,7 +426,7 @@ test("AC1 e2e — a real `git commit` of a multi-path Touches task is REJECTED b
   const root = makeGitRepo();
   try {
     copyGuardScripts(root);
-    const install = run("node", ["--no-warnings", "--experimental-strip-types", GUARD, "--root", root, "--install-hook"], root);
+    const install = installHookFromScratch(root);
     assert.equal(install.status, 0, `install-hook: ${install.stderr}`);
     assert.ok(fs.existsSync(path.join(root, ".git", "hooks", "pre-commit")), "hook installed");
 
@@ -428,6 +461,191 @@ test("AC3 — resolveHooksDir matches `git rev-parse --git-path hooks` (worktree
     );
     assert.equal(resolve.status, 0, `resolveHooksDir must not crash: ${resolve.stderr}`);
     assert.equal(resolve.stdout.trim(), path.resolve(root, gitHooks), "resolveHooksDir must match git's own hooks-path resolution (the dir git actually reads — the shared common dir in a worktree)");
+  } finally {
+    cleanup(root);
+  }
+});
+
+// ── ③ goal_ac 写入面判定 (gap-ac190-goal-ac-rule-not-enforced-at-filing) ──────────────────────────────
+// AC-190's rule (goals/AC-190-task-ac.md) lived ONLY in the goal layer as a per-round, POST-HOC report:
+// it can SEE a violation but has no power to stop one — the 1st delivery-critical task filed after the
+// activation line went in through this repo's own filing path + mechanical promotion with no step ever
+// asking for goal_ac. This judgment runs the SAME rule at the commit moment, on the STAGED
+// tasks/*.md, rejecting (delivery-critical ∧ post-activation-line ∧ no goal_ac) where it is written.
+//
+// The judgment functions, the activation line and the grandfather semantics are the detector's own
+// exports (see the AC6 test in long-term-guarantee-goal-backed-check.test.mjs) — one judgment, two
+// moments. Every case below drives BOTH values of its own axis (硬规则④): the violation is rejected
+// AND the same file with the field filled in is allowed; the pre-cutoff stock is allowed BY THE
+// JUDGMENT (in scope, judged, grandfathered) — not by being filtered out of scope.
+
+/** A minimal task body carrying `delivery-critical` (+ the label set a real filing has). */
+function dcTaskBody(id, { goalAc = null, nested = false } = {}) {
+  const fm = [`id: ${id}`, "title: t", "status: todo"];
+  if (goalAc && !nested) fm.push(`goal_ac: ${goalAc}`);
+  fm.push("labels:", "  - gap", "  - delivery-critical");
+  if (goalAc && nested) fm.push("extra:", `  goal_ac: ${goalAc}`);
+  return `---\n${fm.join("\n")}\n---\n\n## Proposal\n\ntext\n`;
+}
+
+function commitBackdated(root, rel, content, iso) {
+  const abs = path.join(root, rel);
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  fs.writeFileSync(abs, content, "utf8");
+  const add = run("git", ["add", rel], root);
+  assert.equal(add.status, 0, `git add ${rel}`);
+  const commit = run("git", ["commit", "-q", "-m", `backdated ${rel}`], root, {
+    GIT_COMMITTER_DATE: iso,
+    GIT_AUTHOR_DATE: iso,
+  });
+  assert.equal(commit.status, 0, `backdated commit: ${commit.stderr}`);
+}
+
+test("AC4 negative — a staged NEW delivery-critical task without goal_ac is REJECTED (reason delivery-critical-without-goal-ac)", () => {
+  const root = makeGitRepo(); // no scripts/test.sh → doc check passes; only the ②/③ detectors judge
+  try {
+    stage(root, "tasks/gap-new-dc.md", dcTaskBody("gap-new-dc"));
+    const res = runGuard(root);
+    assert.equal(res.status, 1, `delivery-critical without goal_ac must reject, got ${res.status}: ${res.stdout} ${res.stderr}`);
+    const out = JSON.parse(res.stdout);
+    assert.equal(out.verdict, "reject");
+    assert.equal(out.reason, "delivery-critical-without-goal-ac");
+    assert.ok(
+      out.goalAcCheckOutput && out.goalAcCheckOutput.includes("tasks/gap-new-dc.md"),
+      `goalAcCheckOutput names the remediation path (= file), got ${out.goalAcCheckOutput}`,
+    );
+    assert.ok(out.message.includes("goal_ac"), "message says what to add");
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC4 reverse control — the SAME task with a top-level goal_ac is ALLOWED (the judgment can take the value false)", () => {
+  const root = makeGitRepo();
+  try {
+    stage(root, "tasks/gap-new-dc.md", dcTaskBody("gap-new-dc", { goalAc: "AC-232" }));
+    const res = runGuard(root);
+    assert.equal(res.status, 0, `with goal_ac must allow, got ${res.status}: ${res.stdout}`);
+    const out = JSON.parse(res.stdout);
+    assert.equal(out.verdict, "allow");
+    assert.equal(out.goalAcCheckOutput, null, "no goal_ac output on the allow path");
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC4 — goal_ac NESTED under extra does NOT satisfy the rule (the field is top-level by design)", () => {
+  // AC-178 / frontmatterGoalAc: `goal_ac` is a TOP-LEVEL scalar; the extra-nested form is the
+  // depends_on legacy home and must not be read as a declaration (same judgment as the detector's).
+  const root = makeGitRepo();
+  try {
+    stage(root, "tasks/gap-new-dc.md", dcTaskBody("gap-new-dc", { goalAc: "AC-232", nested: true }));
+    const res = runGuard(root);
+    assert.equal(res.status, 1, `extra-nested goal_ac must NOT satisfy the rule, got ${res.status}: ${res.stdout}`);
+    assert.equal(JSON.parse(res.stdout).reason, "delivery-critical-without-goal-ac");
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC5 — a PRE-activation-line delivery-critical task without goal_ac is ALLOWED through the same judgment (grandfathered, NOT out of scope)", () => {
+  // The 115-task pre-cutoff stock must not be turned red by this judgment (that would block every
+  // writer — the zombie lesson). The allow must come from the judgment's grandfather branch, so the
+  // file IS in scope and IS judged: a within-test negative control proves the judgment was live.
+  const root = makeGitRepo();
+  try {
+    commitBackdated(root, "tasks/gap-old-dc.md", dcTaskBody("gap-old-dc"), "2026-08-01T00:00:00Z");
+    // modify + stage it: the file is now a staged tasks/*.md candidate (in scope)
+    fs.appendFileSync(path.join(root, "tasks", "gap-old-dc.md"), "\n<!-- touched -->\n", "utf8");
+    const add = run("git", ["add", "tasks/gap-old-dc.md"], root);
+    assert.equal(add.status, 0, `git add old: ${add.stderr}`);
+    const res = runGuard(root);
+    assert.equal(res.status, 0, `pre-cutoff stock must be grandfathered, got ${res.status}: ${res.stdout}`);
+
+    // ── negative control INSIDE the test: the same shape filed NOW is rejected. Without it, the
+    //    allow above could equally have come from a dead judgment (硬规则 4b).
+    stage(root, "tasks/gap-new-dc.md", dcTaskBody("gap-new-dc"));
+    const res2 = runGuard(root);
+    assert.equal(res2.status, 1, "the same shape filed now must be rejected — else the allow above proved nothing");
+    assert.equal(JSON.parse(res2.stdout).reason, "delivery-critical-without-goal-ac");
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC5 — a staged NEW task WITHOUT the label is allowed; a non-tasks path never triggers", () => {
+  const root = makeGitRepo();
+  try {
+    stage(root, "tasks/gap-plain.md", "---\nid: gap-plain\nstatus: todo\nlabels:\n  - gap\n---\n\n## Proposal\n\ntext\n");
+    let res = runGuard(root);
+    assert.equal(res.status, 0, `unlabelled task must allow, got ${res.status}: ${res.stdout}`);
+
+    stage(root, "docs/notes.md", "no frontmatter\n");
+    stage(root, "README.md", "changed\n");
+    res = runGuard(root);
+    assert.equal(res.status, 0, `non-tasks paths must not trigger, got ${res.status}: ${res.stdout}`);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC5 — a staged task file with NO frontmatter is not reported as a violation (out of this judgment's population)", () => {
+  // 硬规则 3b's mirror: an unreadable frontmatter cannot carry the label, so it must not be reported
+  // either as a violation or as a pass of the goal_ac rule — it is simply not in the population
+  // (task-contract-check / the task-file-violation-ledger judge that shape).
+  const root = makeGitRepo();
+  try {
+    stage(root, "tasks/gap-no-frontmatter.md", "just a body\n");
+    const res = runGuard(root);
+    assert.equal(res.status, 0, `no-frontmatter task must not be goal_ac-rejected, got ${res.status}: ${res.stdout}`);
+    assert.equal(JSON.parse(res.stdout).reason, "doc-checks-pass");
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC5 — a staged DELETION of a delivery-critical task without goal_ac does not trigger (deletes are not filings)", () => {
+  const root = makeGitRepo();
+  try {
+    // a post-cutoff delivery-critical task WITHOUT goal_ac (the violating shape) — then DELETE it.
+    stage(root, "tasks/gap-doomed-dc.md", dcTaskBody("gap-doomed-dc"));
+    let res = runGuard(root);
+    assert.equal(res.status, 1, "precondition: the file itself is the violating shape");
+    const commit = run("git", ["commit", "-q", "-m", "add doomed"], root);
+    assert.equal(commit.status, 0, `precondition commit: ${commit.stderr}`);
+    fs.rmSync(path.join(root, "tasks", "gap-doomed-dc.md"));
+    const rm = run("git", ["add", "-A", "tasks/gap-doomed-dc.md"], root);
+    assert.equal(rm.status, 0, `git add -A: ${rm.stderr}`);
+    res = runGuard(root);
+    assert.equal(res.status, 0, `a deletion must not trigger, got ${res.status}: ${res.stdout}`);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC4 e2e — a real `git commit` of a delivery-critical task without goal_ac is REJECTED by the installed pre-commit hook; the goal_ac control commits", () => {
+  const root = makeGitRepo();
+  try {
+    copyGuardScripts(root);
+    const install = installHookFromScratch(root);
+    assert.equal(install.status, 0, `install-hook: ${install.stderr}`);
+
+    // the violation must never reach the repository
+    stage(root, "tasks/gap-bad-dc.md", dcTaskBody("gap-bad-dc"));
+    const badCommit = run("git", ["commit", "-m", "dc without goal_ac"], root);
+    assert.notEqual(badCommit.status, 0, `commit must be REJECTED, got ${badCommit.status}`);
+    assert.match(
+      badCommit.stdout + badCommit.stderr,
+      /goal_ac|delivery-critical-without-goal-ac/,
+      "rejection output names the goal_ac violation",
+    );
+    assert.equal(run("git", ["log", "--oneline"], root).stdout.trim().split("\n").length, 1, "bad commit was NOT created");
+
+    // control: the same task WITH goal_ac commits (the hook is not simply rejecting everything)
+    run("git", ["reset", "-q", "--", "tasks/gap-bad-dc.md"], root);
+    stage(root, "tasks/gap-good-dc.md", dcTaskBody("gap-good-dc", { goalAc: "AC-232" }));
+    const goodCommit = run("git", ["commit", "-m", "dc with goal_ac"], root);
+    assert.equal(goodCommit.status, 0, `control commit must succeed, got ${goodCommit.status}: ${goodCommit.stdout} ${goodCommit.stderr}`);
   } finally {
     cleanup(root);
   }
