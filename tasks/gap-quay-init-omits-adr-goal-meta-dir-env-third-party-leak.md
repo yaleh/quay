@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-omits-adr-goal-meta-dir-env-third-party-leak
 title: 第三方项目的 adr/goal/meta store 串到 quay 仓库——quay-init 只 pin 了 tasks_dir
-status: ready
+status: done
 labels:
   - gap
   - defect
