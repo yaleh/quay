@@ -18,6 +18,14 @@ import { connectProvider, type ProviderClient } from "./provider-client.ts";
 import { resolveProviderEnv } from "./provider-env.ts";
 import { handleAllRoutes, serveIdentity, type ServePageCfg } from "./serve-handlers.ts";
 import { readBranchModel, startDevelopRefBackgroundRefresh } from "./observation.ts";
+// GOAL-017 / AC-251 (SPEC-unified-quay-server-2026-09-13 §7 stage A2): the MCP control plane is
+// hosted by THIS process. `serveControlPlane` is imported from plugin/scripts/driver-shared.ts
+// rather than reimplemented here — the control plane has exactly ONE implementation (AC150-3), and
+// stage A2 is a MERGE of two existing implementations into one process, not a second copy. The
+// product-side import of a plugin script is the sanctioned pattern
+// (packages/quay-native/src/store.ts imports plugin/scripts/shape-sections.ts the same way).
+import { serveControlPlane, type ControlPlaneHandle } from "../../../plugin/scripts/driver-shared.ts";
+import { writeServerState, removeServerState, CONTROL_PLANE_NAME } from "./server-state.ts";
 
 // Re-export rendering helpers so external consumers (tests, etc.) can still
 // import them from serve.ts if needed. These now live in serve-handlers.ts.
@@ -253,6 +261,37 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
   // anything). `identity` stays null only in the window before `listen` — no request can be
   // dispatched then, and a page that ever did see null renders the explicit 「未接入项目身份」
   // title instead of a silently anonymous one.
+  // ── MCP control plane, IN THIS PROCESS (GOAL-017/AC-251, SPEC §7 stage A2) ────────────────────
+  // Stage A2 = "web (serve) + control 合入一个进程". Before this, `serveControlPlane` had exactly one
+  // caller (worker-driver's `--serve` path); here the SAME implementation is mounted by the serve
+  // process, so the Web UI and the MCP control plane answer under one pid — which is what makes the
+  // `server status` reading (web.pid === control.pid) meaningful rather than self-reported.
+  //
+  // Port: `0` by default (the kernel picks an ephemeral port, read back from the handle) because a
+  // fixed control port would be a second hardcoded surface colliding across worktrees; the env
+  // override exists for a deployment that must pin it. The control plane stays loopback-bound by
+  // default (its only gate is the caller-identity check, driver-shared.ts CONTROL_HEADER) — the
+  // web leg keeps binding 0.0.0.0 as before, so NO existing route's reachability changes.
+  //
+  // ⛔ This is deliberately NOT a new `quay serve` flag: SPEC §8 criterion 9 forbids stage A from
+  // introducing a new user-visible capability, and env is not CLI surface.
+  const controlHost = process.env.QUAY_CONTROL_HOST || "127.0.0.1";
+  const controlPortRaw = Number(process.env.QUAY_CONTROL_PORT ?? "0");
+  const controlPort = Number.isInteger(controlPortRaw) && controlPortRaw >= 0 ? controlPortRaw : 0;
+  let control: ControlPlaneHandle;
+  try {
+    control = await serveControlPlane({
+      root: cfg.workspaceRoot,
+      host: controlHost,
+      port: controlPort,
+      name: CONTROL_PLANE_NAME,
+    });
+  } catch (err) {
+    // Same ownership rule as the provider client (see closeSetupFailure): a failure after
+    // connectProvider must not leave the provider child running with no handle to close it.
+    return await closeSetupFailure(client, err);
+  }
+
   const routeCfg: ServePageCfg = { workspaceRoot: cfg.workspaceRoot, identity: null };
 
   const server = http.createServer(async (req, res) => {
@@ -318,8 +357,17 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
     });
   } catch (err) {
     // A bind failure (EADDRINUSE when the caller probed the port on loopback only while we
-    // bind 0.0.0.0, or any other listen error) must leave no provider child behind — the
-    // caller has no server to close it from. See closeSetupFailure.
+    // bind 0.0.0.0, or any other listen error) must leave neither a provider child NOR the
+    // control-plane socket behind — the caller has no server handle to close either from.
+    // A leaked listening socket is not cosmetic: it keeps the event loop alive forever, which in a
+    // `node --test` file means the file never exits (the closeSetupFailure comment above records
+    // that exact 23.5-minute suite stall).
+    await control.close().catch((closeErr) => {
+      console.error(
+        `[quay serve] control-plane close failed after a bind failure (the bind failure below is the reported one):`,
+        (closeErr as Error).stack || String(closeErr),
+      );
+    });
     return await closeSetupFailure(client, err);
   }
 
@@ -335,12 +383,45 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
   // hand it to every subsequent request. The git-derived branch names come from observation.ts
   // (the serve path's only sanctioned git reader).
   const addr = server.address();
+  const webPort = addr && typeof addr === "object" ? addr.port : port;
   routeCfg.identity = serveIdentity({
     workspaceRoot: cfg.workspaceRoot,
     host,
-    port: addr && typeof addr === "object" ? addr.port : port,
+    port: webPort,
     loop: (cfg.config as { loop?: Record<string, unknown> } | null)?.loop ?? null,
     branchModel: readBranchModel(cfg.workspaceRoot),
+  });
+
+  // ── Publish the state carrier (GOAL-017/AC-251, SPEC §6.5/§6.10) ───────────────────────────────
+  // Both services carry THIS process's pid — that identity is not decoration, it is the reading
+  // stage A2's criterion is defined on (`web.pid === control.pid`). `startedAt` is reconstructed
+  // from process.uptime() (the same source /health uses) rather than Date.now(), so a carrier is
+  // never published claiming a start instant earlier than the process it describes.
+  //
+  // Written AFTER the bind succeeded: the ports in the carrier are the ports the kernel actually
+  // bound (web) and the control handle reported (control), never the requested values — a carrier
+  // naming an unbound port would be a reading of nothing.
+  writeServerState(cfg.workspaceRoot, {
+    pid: process.pid,
+    startedAt: new Date(processStartMs()).toISOString(),
+    services: [
+      { name: "web", pid: process.pid, host, port: webPort },
+      { name: "control", pid: process.pid, host: controlHost, port: control.port },
+    ],
+  });
+  console.log(`quay serve: control plane (MCP) listening on ${control.url} — same pid ${process.pid} (SPEC stage A2)`);
+
+  // A graceful close (`server.close()`, SIGINT under a supervisor, `--watch` restart) retires the
+  // carrier so `quay server status` reports NOT-RUNNING instead of reading a leftover file lying
+  // about a stopped server. The body deliberately does NOT depend on this firing: an ungraceful
+  // exit (SIGKILL) leaves the file, and the reader catches that via the pid-liveness check
+  // (server-state.ts readServerState + pidAlive) — the two together are what make "killed" and
+  // "never started" both读作 not-running without either one being trusted alone.
+  server.on("close", () => {
+    removeServerState(cfg.workspaceRoot);
+    void control.close().catch((err) => {
+      console.error(`[quay serve] control-plane close failed:`, (err as Error).stack || String(err));
+    });
   });
 
   // gap-tasks-page-develop-ref-full-history-git-log-cost (AC1): mount a background refresh tick that
@@ -349,5 +430,10 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
   // unref'd — it never keeps the process alive; a non-git workspace fails the refresh silently.
   startDevelopRefBackgroundRefresh(cfg.workspaceRoot, "develop");
 
-  return server as Server & { client: ProviderClient };
+  // Expose the control-plane handle the same way QN-031 exposed `client`: a caller (notably a test)
+  // can retire BOTH hosted services deterministically instead of orphaning the control socket.
+  const owned = server as Server & { client: ProviderClient; control: ControlPlaneHandle };
+  owned.control = control;
+
+  return owned;
 }

@@ -55,6 +55,7 @@ Usage:
   quay migrate --from <providerId> --to <providerId> [--json]
   quay config validate [--json|--format json] [--check-files] [--root <path>]
   quay serve [--port <port>] [--host <host>]
+  quay server status [--json] [--root <path>]
   quay mcp
   quay manager start [--dry-run] [--json]
   quay manager arm [--dry-run] [--json] [--verify]
@@ -355,6 +356,34 @@ Usage:
 
 Starting from a git worktree (quay-worktrees/…) is REJECTED — the resident supervisor must be
 carried from the workspace root (main checkout), not a short-lived worktree.
+`);
+  } else if (sub === "server") {
+    process.stdout.write(`quay server — inspect the unified server process (web + MCP control plane, SPEC stage A2)
+
+Usage:
+  quay server status [--json] [--root <path>]
+
+  status   Read the workspace's \`.quay/server.json\` carrier and report, PER SERVICE, whether it is
+           actually answering. The carrier is published by the \`quay serve\` process and records
+           one entry per hosted service (name, pid, bind host, bound port); because stage A2 merged
+           the Web UI and the MCP control plane into ONE process, a landed merge reports
+           \`web.pid === control.pid\` (both = the serve process's own pid).
+
+           Liveness is a DIRECT quantity per service, never "the process is alive, so its services
+           must be" (\`web\` is probed via HTTP GET /health, \`control\` via a JSON-RPC \`initialize\`
+           POST). A probe that could not be interpreted reports \`not-evaluated\`, which is NOT the
+           same value as "down".
+
+           Exit codes (the verdict is the exit code; --json always emits parseable JSON):
+             0  running        both services carry the host pid and both probes answered
+             1  not-running    no carrier, the carrier names a dead pid, or a service is not
+                               answering (the \`degraded\` status — process alive, service stalled)
+             3  not-evaluated  the carrier exists but could not be read/parsed
+
+  --json   Machine-readable output.
+  --root   Workspace root (default: discovered via .quay/config.yml from cwd).
+
+⛔ \`start\` / \`add\` / \`stop\` are SPEC §6.9 stage B verbs and are not implemented yet.
 `);
   } else {
     // QX-007: stub for subcommands not yet documented in detail (serve, action, mcp, …).
