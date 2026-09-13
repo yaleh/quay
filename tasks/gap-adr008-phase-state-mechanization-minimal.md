@@ -1,7 +1,7 @@
 ---
 id: gap-adr008-phase-state-mechanization-minimal
 title: ADR-008 两阶段呼吸的最小机制化——记录 phase 字段,不做自动阈值触发
-status: todo
+status: ready
 labels:
   - gap
   - finding
