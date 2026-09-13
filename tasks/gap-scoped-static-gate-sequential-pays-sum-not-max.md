@@ -2,7 +2,7 @@
 id: gap-scoped-static-gate-sequential-pays-sum-not-max
 title: scoped 静态门逐次执行付出「和」而全量路径付出「最大值」——先证明 scoped 不属于 run_doc_checks 明文规避的
   fail-open 形态，再并行化并前后实测
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -74,7 +74,7 @@ extra:
 
 ### AC1 — 前后实测
 
-样本 = 三个真实任务（Touches 条数 1 / 2 / 5），scoped 选中 5 / 19 / 24 本；改前（逐次执行）与改后（并行）各 3 次，逐次 append 到 `.quay/scoped-static-parallel-evidence.jsonl`（该文件 20 行 = before 9 + after 11；每行带 `taskId` `developSha` `checkerCount` `wallMs` `parallel`，另附 `load`）。
+样本 = 三个真实任务（Touches 条数 1 / 2 / 5），scoped 选中 5 / 19 / 24 本；改前（逐次执行）与改后（并行）各 3 次，逐次 append 到 `.quay/scoped-static-parallel-evidence.jsonl`——**写本段时该文件 21 行（before 9 + after 12）**；此后每跑一次 scoped 门还会继续 append（文件只增不减）。每行带 `taskId` `developSha` `checkerCount` `wallMs` `parallel`，另附 `load`。
 
 | 任务 | checker 本数 | before wallMs（3 次） | before 中位 | after wallMs（3 次采集） | after 中位 | 倍数 |
 |---|---|---|---|---|---|---|
@@ -83,7 +83,7 @@ extra:
 | `gap-a15-ruling5-counter-missing` | 24 | 36660, 36034, 35095 | 36034 | 7426, 7316, 8751 | 7426 | 4.9× |
 
 **判据**：after 中位（1376 / 7166 / 7426 ms）全部 **<** before 中位（4191 / 33149 / 36034 ms）⇒ 本任务前提在真实负载下成立。
-（after 的 11 行中 9 行是上表三轮采集；另 2 行：06:30Z 的并行化后首次 smoke（B，7970ms）与 06:34Z 的 AC2 干跑（B，7796ms，load 27.98）——都在文件里，未删。）
+（上表 after 只取三轮**配对采集**；同文件里 after 另有 3 行，逐条列出、未删：06:30Z 并行化后首次 smoke（本任务，7970ms）、06:34Z AC2 干跑（本任务，7796ms，load 27.98）、06:56Z 合并 develop 后的 pre-merge scoped 门（本任务，9349ms，load 24.32；该次 `EXIT = 0`，0 条 `STATIC_CHECK_FAILED`）。）
 
 **结构性读数（「付和 vs 付最大」的直接量）：把**同一次运行**的 wall 与该次逐本 ms 的 Σ / max 对照，不依赖跨轮负载差异。**
 
@@ -129,7 +129,7 @@ checker-cost-lib: run_checker_parallel_wait — static checks FAILED (fail-close
 - 19 本任务：before=19 after=19，**对称差 = []**；[19, 19, 19, 19, 19]；逐本 verdict 差异 = **NONE (0)**
 - 24 本任务：before=24 after=24，**对称差 = []**；[24, 24, 24]；逐本 verdict 差异 = **NONE (0)**
 
-**差异数 = 0**（三类任务、48 个 checker×轮 比对点，全部 `pass`，0 个 `not-evaluated`，0 个 `fail`）⇒ 无共享状态竞争；没有任何一本需要「重跑才绿」。（另：本任务改后跑 scoped 门共 5 次，选择器输出的本数恒为 19。）
+**差异数 = 0**（三类任务、48 个 checker×轮 比对点，全部 `pass`，0 个 `not-evaluated`，0 个 `fail`）⇒ 无共享状态竞争；没有任何一本需要「重跑才绿」。（另：本任务改后跑 scoped 门共 6 次，选择器输出的本数恒为 19，退出码恒为 0。）
 
 ### AC4 — 并发上界读宿主（⛔ 非字面量）
 
@@ -183,3 +183,10 @@ scoped 路径（452 / 453 / 465）只设**布尔标志** `RUN_CHECKER_PARALLEL=1
 - **公式行逐字**（`plugin/scripts/select-static-checks-for-touches.ts:584`）：`  scoped = { tier=always } ∪ { tier=change whose object ∩ touches } − { tier=full }`
 - **选中集合完全相同**：`--names` 行数 = 5 / 19 / 24，与改前**实际执行**的本数逐一相等；checker 名集合 before/after 对称差 = []（AC3 表）。
 - ⚠️ **一处观察（非本次引入；选择器逐字未变 ⇒ 前后定义上一致）**：`--names` 打印的是解析出的 `name`（脚本名派生），而对 `capability-catalog.sh --superseded-check`、`test-file-snapshot.sh … check`、`quay-init-closure-ratchet.ts` 三处，`--commands` 里 `run_checker` 用的名字分别是 `superseded-capability-check` / `test-file-snapshot-check` / `quay-init-closure-ratchet-stale`。**比对采用「实际执行名」（cost 文件），两次采集完全一致**（5/19/24，差异 0）。
+
+### Worker 侧预交付（供 fan-in 使用）
+
+- `git -C <worktree> merge --no-edit develop` 已做，无冲突；本任务 delta vs develop = 2 文件（`scripts/test.sh` +67、`plugin/test/scoped-static-checks.test.mjs` +160），`anti-drift-touches-check.ts` = **OK（2 actual file(s), all within declared Touches）**。
+- `bash scripts/test.sh --for-task gap-scoped-static-gate-sequential-pays-sum-not-max --allow-thin` → **EXIT = 0**，0 条 `STATIC_CHECK_FAILED`；测试 14 pass / 0 fail（含本任务新增的 2 条控制）。
+- AC 记录走 Provider ABI（`task_write`，commit `1d4d7ccd2`，落在 develop == author 同步面）；**worktree 侧由 `git merge develop` 带入该 tick**（实测 merge 后 `tasks/<id>.md` 的 `- [x]` 计数 = 6），fan-in 的 step 1 同形。
+- scoped 门缓存已写（`--write-scoped-gate-cache`，`developSha=1d4d7ccd2`）。
