@@ -1,7 +1,7 @@
 ---
 id: gap-start-drivers-cli-resolve-blind-to-vendor-layout-and-swallows-enoent
 title: start-drivers 在第三方项目上静默失败——CLI 解析不认 vendor 布局，且 ENOENT 被吞
-status: todo
+status: ready
 labels:
   - gap
   - defect
