@@ -209,3 +209,42 @@ delta 含**注册表源**（`runner-static-gate.ts` / `scripts/test.sh` / `.gith
 - session_id：3973f4bc-03fd-4b6e-94be-5d3e76392e7d
 - suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-checker-mutation-check-has-no-change-tier-companion~wk-prod-1789139008~1789284439473-404e8f.log
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-checker-mutation-check-has-no-change-tier-companion-wk-prod-1789139008.log
+
+
+## 续做轮③（2026-09-13：末次 suite-red 的真因 + develop 合并后复核）
+
+**本节只补归因与落地前复核读数。⛔ 不改任何 AC 判据、不动实现、不改 Touches。**
+
+### （一）末次 exited-not-landed（08:03:35，`step=suite: suite red`）的真因 = suite 被拒，⛔ 不是本任务的代码缺陷
+
+**结构性证据**：该轮 suite 日志 `…~wk-prod-1789139008~1789284439473-404e8f.log` = **0 字节**。0 字节有确定含义——`full-suite-runner.ts` 以 `flags:"w"` 打开日志，而该开流点位于**所有「未跑就返回」分支之后** ⇒ 0 字节 == runner 在开流点之前就返回了。
+
+**分支**：spawn 层单飞拒绝。`isRunnerInFlight` 读的是 `<root>/.quay/full-suite-state.json` 的 `state:"running"` + pid 存活（**代理量**），而调用方当时**已持有直接量**（单飞槽 flock）。与提交内容无关。
+
+**触发条件（现场事实，⛔ 不是本条的修法）**：同宿主 `/tmp/gds-ac3-rounds.sh`（detached, ppid 1）为任务 `gap-driver-start-false-confirms-unsettled-driver` 连跑 3 轮**全量** suite，其 `--state-dir` 指向**同一个** `/home/yale/work/quay/.quay`，而 `.git/full-suite.lock.concurrency` = 1（全仓单槽）。
+
+⇒ **该缺陷已独立立案并落地**：`gap-fan-in-suite-refusal-reports-as-suite-red`（**done**，`bb0c15ac6` + `441eec2ae`）——producer 侧每条「未跑就返回」分支写 `SUITE-NOT-RUN branch=… reason=…` 标记行，consumer 侧 `extractSuiteNotRunLine` + **先判「跑没跑」再判「为什么红」** ⇒ 被拒轮 `reason` 变为 `suite NOT run (refused) — …` ∧ 不写第三方 path 的 red 轮次，⛔ 不再与「真跑且真红」同形。
+
+⇒ **对本任务的含义**：该轮**零代码可改**，重派即可；⛔ 不得按 `suite red` 去改实现。
+
+### （二）develop 合并 + 落地前复核（本轮实测）
+
+- **合并**：`git merge --no-edit develop` 两次（`61c6fb5eb` → `1c311411d`；第二次为把 merge 提交的 `^2` 抬到当时 develop tip）。**两次均 0 冲突**；`git status` 干净（唯一未跟踪项 = 本任务 DoD 指定的 `.quay/mutation-check-companion-evidence.jsonl`，6 行）。
+- **AC1 正控制（在合并后的树上重跑；探针 worktree = detach 在 `HEAD`，跑完 `git worktree remove --force` 清除）**：
+  - base（干净 delta）：`bash plugin/scripts/checker-mutation-check.sh --check-changed --repo-root <probe>` ⇒ **exit 0**、`checkers_executed: 1`、`delta base develop; 1 checker carrier(s) in THIS delta … checker-mutation-check`、`RESULT: PASS`。
+  - sabotage（`plugin/scripts/provider-binding-resolvability-check.ts:199` `row.state = "bare-path-name"` → `"path-resolved"`）：同一条命令 ⇒ **exit 1**、`checkers_executed: 2`、`2 checker carrier(s) … checker-mutation-check provider-binding-resolvability-check`、`always-red … provider-binding-resolvability-check`、`RESULT: FAIL`。
+  - ⇒ 双向可取假：红可归因于**被改的那一本**（还原即绿），⛔ 不是恒绿。⚠️ 诚实标注方向：本轮落在 **always-red** 方向；首轮 `## 读数段` 记的是 **stayed-green** 方向，两者都是「门非零 ∧ 点名」，但**不是同一个方向**。
+- **scoped 门**（合并后跑两次）：`bash scripts/test.sh --for-task gap-checker-mutation-check-has-no-change-tier-companion --allow-thin` ⇒ **两次均 exit 0、47 tests / 0 fail**；伴生自身在日志中执行：`manifest source changed in this delta — all 71 registered checkers have a mutation case (uncovered = 0)` ∧ `1 checker carrier(s) in THIS delta: checker-mutation-check`。
+- **anti-drift**：`ANTI-DRIFT OK: task gap-checker-mutation-check-has-no-change-tier-companion — 4 actual file(s), all within declared Touches (5 glob(s))`。
+- **ac-precheck（driver 同款命令）**：`fan-in-ac-completion-gate.ts --task <id> --worktree <wt> --json` ⇒ `ok:true`、`status:"pass-external"`、`total 6 / checked 5 / unchecked 1`、**exit 0**（AC5 末尾的 `——外层 verification-round 验证` 被识别为外部验证项 ⇒ ⛔ 不是漏勾、不会拒翻）。
+- **scoped-gate 缓存**：`--develop-sha` 取 **merge 提交的 `^2`** = `1c311411db5d07fa9f957e90cc7a6e47c70f8565`（= 门**实际合并并评估过的**那个 develop tip），⛔ **不是**写缓存那一刻的 `git rev-parse develop`（当时已前进到 `b486a325a`）——driver 的跳过判据是**精确相等**，记「写缓存那一刻的 tip」等于把它**从未评估过**的那棵树记成「评估过」（硬规则 3b / 4）。方向安全：记真实 gated tip 时，develop 只要不是它 ⇒ 门重跑（宁可白跑，不可跳过未评估的树）。
+
+### （三）三次退出的完整归因（⛔ 便于人工裁决，非新缺陷）
+
+| # | 时刻 | step | 归因 | 状态 |
+|---|---|---|---|---|
+| ① | 2026-09-13T06:14:07Z | anti-drift | 本任务 Touches 漏声明 `plugin/scripts/checker-mutation-check.sh` | **已修**（补进 `## Touches`，续做轮①：4 files within 5 globs） |
+| ② | 2026-09-13T07:09:29Z | suite | 2 个失败：`plugin/test/scoped-static-checks.test.mjs` AC3（**本任务 delta 造成**，注册表同名 `byName` last-wins）＋ `plugin/test/driver-runtime.test.mjs` AC4 gap-ac203（**非本任务**，已立案 `gap-driver-start-false-confirms-unsettled-driver`，`confirmed_ms≈1044` ⇒ 生产缺陷形态） | 前者**已修**（续做轮②：改按 `commandLine` 判定），后者**非本条** |
+| ③ | 2026-09-13T08:03:35Z | suite | **suite 被拒**（0 字节日志，见本节（一））——⛔ 非本任务缺陷 | 机制**已在 develop 落地**（`gap-fan-in-suite-refusal-reports-as-suite-red` done） |
+
+⇒ **本任务自身待落地者已全部就绪**（实现 + 4 文件 delta + scoped 门绿 + 缓存 + AC 态），三次未被阻的档均**非本任务的可改项**。
