@@ -2,7 +2,7 @@
 id: gap-ac203-record-schema-has-no-kind-dimension
 title: AC-203「driver 在第三方项目真活」的记录 schema 没有 kind 维度 —— 三条证据无法区分验的是哪个 driver
   kind，而 goal/quality/meta 当场复现了它声称已排除的形态
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
