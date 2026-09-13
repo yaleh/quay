@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-no-doc-branch-bootstrap-leaves-main-checkout-on-develop
 title: quay-init 从不建立 doc 工作分支——主检出留在 develop 上时,人类编辑和 driver 提交共享同一条分支、同一个 git 索引
-status: todo
+status: ready
 labels:
   - gap
 parent: null
