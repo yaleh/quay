@@ -46,6 +46,8 @@ dist/worker-driver.js      --help -> worker-driver — SPEC §5…   （正确�
 5. **⛔ 未改 promotion/worker** → 两个 bundle 的入口守卫清单 before/after **签名逐字相同**（AC3），源码零改动。
 6. **镜像对** → `gate-script-base.ts` 有 `experiments/quay-perpetual-stream/scripts/` 的逐字节镜像对（`mirror-pair-drift-check` 强制），改动已同步到镜像侧（首次 scoped 门因此报 RED，已修）。
 
+7. **续做补记（同轮修的第二处，也是本任务自己引入的回归）** → 上一轮 fan-in 在 `step=suite` 报 `# fail 3`，但根因不在套件：`expectedBase` 改必填时**迁移扫漏了 `plugin/scripts/enum-surface-parity-check.ts:842`**（它由 ADR-036 同日落地、带裸守卫，也不在 `## Touches` 里）。裸调用在新签名下**恒假** ⇒ 该检查器 `main()` 永不执行、`exit 0`、零输出 ⇒ **一个静默空转的检查器，每个表层都读作绿**（硬规则 3b），只有它自己的 mutation case 报出 `STAYED-GREEN` 才暴露。两处修复：① 该调用点改具名形式；② **补全这一类的检测面**——`findEntryGuardHijacks` 只走「bundle 入口的 import 闭包」，**独立脚本（如本检查器）不在任何 bundle 里，结构上照不到**；新增 `findUnnamedEntryGuards`（扫全 `plugin/scripts/**`，跳过 dist/checker-mutation-cases/test 等夹具），`buildPluginDist` 里同款 fail-closed，配真树零命中断言 + 正/负控制单测。**枚举结果（硬规则 5b 产物）**：`plugin/scripts/**` 中共享 helper 的裸/两参调用**共 1 处**（即上述那处）；其余 130+ 处已是三参形；另有 2 处自研 `isDirectEntry`（`workflow-event-schema.mjs` / `precommit-guard.ts`）按自身定义判语义，不属本类。**双向控制实测**：改前 ⇒ 闸报 `1` 处且 mutation case `STAYED-GREEN`（exit 3）；改后 ⇒ 闸报 `0` 处且 mutation case exit 0（基线绿→注入红→恢复绿）。
+
 ## Acceptance Criteria
 
 - [x] AC1 能取假：把某个例程型 kind 的 `interval_ms` 从 30000 改成 90000 ⇒ 实际轮次间隔**随之改变**。**实测对照（本任务留档）**：
@@ -65,6 +67,7 @@ dist/worker-driver.js      --help -> worker-driver — SPEC §5…   （正确�
 - 四条 AC 满足，AC1/AC3 的时间戳对照有实际留档（见上）。
 - ⛔ 不得通过删除 `drivers.yml` 里的 `interval_ms` 声明来「消除不一致」——那是把单一真相源变成没有源。**未删**（`drivers.yml` 本任务零改动）。
 - 交付面的回归闸：`findEntryGuardHijacks` 在**构建期** fail-closed（有劫持即 `throw`、拒绝打包），并有正向控制（合成 inlined 裸守卫被捕获）+ 负向控制（具名形式/自研守卫不被误报）+ 产品面行为测试（6 个 driver bundle 各跑自己的 main）。
+- 交付面的回归闸（同轮补全，覆盖「不被打包的独立脚本」这一类）：`findUnnamedEntryGuards`（扫 `plugin/scripts/**`）同在**构建期** fail-closed，带正/负控制与真树零命中断言。
 - 项目自身闸门（scoped 门 + 全量套件绿）。
 
 ## Touches
@@ -103,6 +106,7 @@ dist/worker-driver.js      --help -> worker-driver — SPEC §5…   （正确�
 - plugin/scripts/supervisor-preempt-candidates.ts
 - plugin/scripts/threshold-scope-check.ts
 - plugin/scripts/tick-core-static-check.ts
+- plugin/scripts/enum-surface-parity-check.ts
 - packages/quay/scripts/build-plugin-dist.mjs
 - packages/quay/test/build-plugin-dist.test.mjs
 - plugin/test/driver-config.test.mjs
