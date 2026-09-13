@@ -71,6 +71,7 @@ dist/worker-driver.js      --help -> worker-driver — SPEC §5…   （正确�
 
 - plugin/scripts/gate-script-base.ts
 - experiments/quay-perpetual-stream/scripts/gate-script-base.ts
+- experiments/quay-perpetual-stream/test/gate-script-base.test.mjs
 - plugin/scripts/driver-runtime.ts
 - plugin/scripts/meta-driver.ts
 - plugin/scripts/pool-quality-judge.ts
