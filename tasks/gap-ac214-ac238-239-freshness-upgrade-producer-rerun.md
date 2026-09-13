@@ -3,7 +3,7 @@ id: gap-ac214-ac238-239-freshness-upgrade-producer-rerun
 title: AC-214 第二次因【陈旧】转红：升级面证据 AC-238/239 停在 2026-09-11（206 > K=200）——同一天内第二次，因为
   09-13 那次刷新只重跑了冷启动面产出者（--ac207-e2e），而 AC-238/239 由【另一条】产出路径（--verify-upgrade
   --ac239-e2e）写出
-status: todo
+status: ready
 labels:
   - gap
   - delivery-critical
