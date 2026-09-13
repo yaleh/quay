@@ -360,54 +360,96 @@ export function generateLaunchSettingsContent(): string {
   );
 }
 
-/**
- * Generate the `.quay/profiles.yml` content laid down by `quay init` (AC154).
- *
- * The profile carrier for the launcher (plugin/scripts/quay-launch.sh reads it via
- * python3+yaml). Generic default: launcher=claude / model=null — a consumer edits
- * them to their stack. Kept structurally identical to the checked-in dev-tree
- * `.quay/profiles.yml` (worker-default / manager-local profiles + 3 roles), only
- * differing in launcher/model values (dev-tree uses claude-fjdac + deepseek-v4-pro-anthropic).
- */
-export function generateProfilesContent(): string {
-  return [
-    "# .quay/profiles.yml — Claude Code profile 承载（quay init 默认模板，AC154 profile 抽层）。",
-    "# launcher/model/--bare/-n/unset + flag-only 参数在此；launch.settings.json 只留 Claude Code 键。",
-    "# 通用默认 launcher=claude / model=null —— 消费者按自己的栈编辑。",
-    "version: 1",
-    "",
-    "excludeDynamicSystemPromptSections: true",
-    "promptSuggestions: false",
-    "",
-    "profiles:",
-    "  worker-default:",
-    "    launcher: claude",
-    "    model: null",
-    "    bare: false",
-    "    auth: key",
-    "  manager-local:",
-    "    launcher: claude",
-    "    model: null",
-    "    bare: false",
-    "    auth: key",
-    "    unset:",
-    "      - CLAUDE_CODE_MAX_CONTEXT_TOKENS",
-    "      - CLAUDE_CODE_AUTO_COMPACT_WINDOW",
-    "      - CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
-    "",
-    "roles:",
-    "  manager:",
-    "    profile: manager-local",
-    "    name: quay-manager",
-    "  outer:",
-    "    profile: worker-default",
-    "    name: quay-outer",
-    "  inner:",
-    "    profile: worker-default",
-    "    name: quay-inner",
-    "",
-  ].join("\n");
+/** Build the `<project>-<role>` session-name prefix. Mirrored (same rule, same output) by
+ * `quay-init.sh`'s `profiles_name_prefix()`; a divergence is caught by the byte-equality test in
+ * `plugin/test/profiles-role-coverage-check.test.mjs`. */
+export function profilesNamePrefix(projectName: string): string {
+  const cleaned = projectName.replace(/[^A-Za-z0-9._-]/g, "-");
+  return cleaned === "" ? "quay" : cleaned;
 }
+
+/**
+ * The SHIPPED `.quay/profiles.yml` template — the ONE authored copy of the profile carrier.
+ * Byte-identical to the checked-in `plugin/.quay/profiles.yml` (the file `quay-init.sh` copies
+ * into a target workspace and `quay-launch.sh` falls back to), with the role session names
+ * parameterised on the project.
+ *
+ * ⛔ Why the template is duplicated here instead of read from disk (packaging, not preference):
+ * this function must work from `src/init.ts` AND from the bundled `dist/quay.js` in every layout
+ * the package ships in — repo source tree, the `quay` npm package, the plugin's vendored mirror
+ * (`plugin/vendor/quay/dist/`). The shipped file's path relative to this module differs across
+ * all three, so no single path is correct in all of them. The duplication is therefore bound by
+ * an EXECUTABLE invariant rather than by discipline: `packages/quay/test/init.test.mjs` asserts
+ * `generateProfilesContent("quay") === readFileSync(plugin/.quay/profiles.yml)` byte-for-byte, so
+ * a one-sided edit cannot land (hard rule 9 — give the rule a product, not a reminder).
+ *
+ * ⛔ Role session names are `<project>-<role>`, NOT a hardcoded `quay-` prefix. A third-party
+ * project that copied quay's literal names collided with quay's OWN sessions, and cross-session
+ * delivery addresses peers BY NAME ⇒ misrouting (`sendmessage-shared-worker-name-misroutes`).
+ */
+export function generateProfilesContent(projectName: string = "quay"): string {
+  return SHIPPED_PROFILES_TEMPLATE.replace(/^(\s*name:\s*)quay-/gm, `$1${profilesNamePrefix(projectName)}-`);
+}
+
+const SHIPPED_PROFILES_TEMPLATE = [
+  "# plugin/.quay/profiles.yml — shipped fallback profile carrier (AC154 profile 抽层）。",
+  "# 裸机 / 未迁移目标没有 dev-tree 根 .quay/profiles.yml 时，quay-launch.sh 回退到本文件（同 settings 的",
+  "# plugin/.claude/launch.settings.json 回退手法，见 gap-manager-layer-no-verified-install-vector）。",
+  "# 通用默认：launcher=claude、model=null——消费者按自己的栈编辑（dev-tree 用 claude-fjdac +",
+  "# deepseek-v4-pro-anthropic，见根 .quay/profiles.yml；两份 profiles 结构一致，只差 launcher/model 取值）。",
+  "version: 1",
+  "",
+  "# flag-only 启动参数（对全部 role 生效；与 dev-tree 根 profiles.yml 一致）。",
+  "excludeDynamicSystemPromptSections: true",
+  "promptSuggestions: false",
+  "",
+  "profiles:",
+  "  worker-default:",
+  "    launcher: claude",
+  "    model: null",
+  "    bare: false",
+  "    auth: key              # 原生 claude 读 ANTHROPIC_API_KEY",
+  "  manager-local:",
+  "    launcher: claude",
+  "    model: null",
+  "    bare: false",
+  "    auth: key",
+  "    # 无 unset：出厂 settings（plugin/.claude/launch.settings.json）的 env 本就没有 917k 三件套",
+  "    # （裸机通用模板），manager 直接继承文件逐字。dev-tree 根的 manager-local 才需要 unset 917k",
+  "    # （dev settings env 含 917k）。",
+  "",
+  "roles:",
+  "  manager:",
+  "    profile: manager-local",
+  "    name: quay-manager",
+  "  outer:",
+  "    profile: worker-default",
+  "    name: quay-outer",
+  "  # 三个 worker role + pool-judge/meta-driver 与 dev-tree 根 profiles.yml 同构：共享 worker-default，",
+  "  # 只声明 name 差异（launcher/model 从 profile 继承）。role 键集一致是 DoD——worker-driver 派发",
+  "  # `launchArgv(\"task-worker\", …)` 经 profile-policy.ts resolveRole，缺失 role 抛 `role not found`",
+  "  # （fail-closed，无回退）⇒ 第三方项目永不派发（gap-shipped-profiles-missing-worker-roles）。",
+  "  task-worker:",
+  "    profile: worker-default",
+  "    name: quay-task-worker",
+  "    env:",
+  "      CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: \"0\"    # 驱动的外部超时是唯一兜底（无此键 claude -p 有 600s end_turn 后台任务宽限）",
+  "  selector:",
+  "    profile: worker-default",
+  "    name: quay-selector",
+  "  fix-worker:",
+  "    profile: worker-default",
+  "    name: quay-fix-worker",
+  "    env:",
+  "      CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: \"0\"    # 同 task-worker",
+  "  pool-judge:",
+  "    profile: worker-default",
+  "    name: quay-pool-judge",
+  "  meta-driver:",
+  "    profile: worker-default",
+  "    name: quay-meta-driver",
+  "",
+].join("\n");
 
 /**
  * Run the init operation.
@@ -423,7 +465,10 @@ export function runInit(opts: InitOptions): InitResult {
   const launchSettingsPath = path.join(root, ".claude", "launch.settings.json");
   const launchSettingsContent = generateLaunchSettingsContent();
   const profilesPath = path.join(quayDir, "profiles.yml");
-  const profilesContent = generateProfilesContent();
+  // The role session names are derived from THIS project (AC4): a third-party project must not
+  // copy quay's literal `quay-*` names, or its sessions collide with quay's own and name-addressed
+  // cross-session delivery misroutes. `quay-init.sh` applies the same rule to the file it copies.
+  const profilesContent = generateProfilesContent(path.basename(root));
 
   // ── The CONFIG-FREE branch-model entry (gap-upgrade-entry-never-establishes-branch-model) ──────
   // FIRST, before the config-exists refusal: an existing `.quay/config.yml` is this entry's NORMAL

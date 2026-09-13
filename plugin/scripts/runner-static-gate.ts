@@ -310,6 +310,15 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/ packages/quay/src/ plugin/scripts/target-identity-literal-check.ts plugin/test/target-identity-literal-check.test.mjs
   run_checker "target-identity-literal-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/target-identity-literal-check.ts" --root "${repo_root}"
+  echo "== worktree-namespace literal check (gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root, AC3) =="
+  # 工作区命名空间字面量不得重生：读侧只能经单一入口 packages/quay/src/worktree-namespace.ts
+  # （DEFAULT_WORKTREE_NAMESPACE_NAME 的回落分支），第二处双引号字面量 = 又一次「写用 config、读用硬编码」。
+  # 谓词即 AC 自己的 grep（对两个扫描根数双引号命中数 ≤1，且唯一命中必须落在该声明处）；
+  # 非引号出现（path 正则 / 注释 / 散文）只报 advisory 计数、永不判红（硬规则 5b 兄弟可见性）。
+  # 本例检查器自身【不含】该字面量（搜的是 JSON.stringify(常量)），故不会把自己算成第二处。
+  # @static-tier change
+  # @static-object packages/quay/src/ plugin/scripts/ plugin/scripts/worktree-namespace-literal-check.ts plugin/test/worktree-namespace-literal-check.test.mjs
+  run_checker "worktree-namespace-literal-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/worktree-namespace-literal-check.ts" --root "${repo_root}"
   echo "== task-file-bypass check (gap-adr013-gate-blind-spots-and-task-bypass-ratchet, AC4/AC5) =="
   # Fail-closed ratchet on direct `tasks/*.md` access outside the Provider ABI: a `tasks/` path literal
   # used as the argument of a file-operation (fs.* / readFileSync / writeFileSync / execFileSync /
@@ -690,6 +699,18 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/ plugin/workflows/ plugin/agents/ plugin/probes/ plugin/loop/ plugin/.claude/ orchestration/
   run_checker "quay-init-closure-ratchet-stale" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/quay-init-closure-ratchet.ts" --check-stale --root "${repo_root}"
+  echo "== profiles role coverage check (gap-quay-init-profiles-template-omits-every-role-the-drivers-request) =="
+  # Every profile role a driver asks for must exist in the carrier a REAL init produces. The
+  # assertion object is init's OUTPUT (a temp workspace initialized by the Core CLI), never a
+  # template file: the defect this closes was a "fixed" carrier that the init path never used, and
+  # its acceptance was green the whole time. The shipped carrier is compared against that output so
+  # a one-sided edit to either template goes RED, and a retired role (inner) is a FAIL rather than
+  # a remark. No init artifact obtainable ⇒ exit 3 (NOT-EVALUATED), never a green it did not earn.
+  # Pinned by plugin/test/profiles-role-coverage-check.test.mjs +
+  # plugin/scripts/checker-mutation-cases/profiles-role-coverage-check.sh (four red controls).
+  # @static-tier change
+  # @static-object plugin/scripts/quay-init.sh plugin/.quay/profiles.yml packages/quay/src/init.ts
+  run_checker "profiles-role-coverage-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/profiles-role-coverage-check.ts" --check --root "${repo_root}"
   echo "== goal-driver task-boundary check (DIR-131, gap-goal-driver-task-boundary-check) =="
   # goal/task 职责边界防回归（DIR-131）：goal-driver.ts 不得出现 task 写路径调用点——task_write /
   # lifecycle_promote / lifecycle_retreat / lifecycle_complete 或指向 tasks/ 的 fs.write*/writeFileSync。
