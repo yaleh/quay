@@ -2,7 +2,7 @@
 id: gap-ac214-ac207-freshness-evidence-producer-run
 title: AC-214 首次因【陈旧】转红：AC-207 的交付证据停在 2026-09-11（距 develop-tip 203 个交付面提交 >
   K=200），而同一批运行把其余五个主体都刷成了 fresh——`--ac207-e2e` 是 opt-in 且昂贵，没人跑它
-status: ready
+status: done
 labels:
   - gap
   - delivery-critical
