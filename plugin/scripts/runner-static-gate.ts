@@ -250,6 +250,15 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/ packages/quay/src/ plugin/scripts/target-identity-literal-check.ts plugin/test/target-identity-literal-check.test.mjs
   run_checker "target-identity-literal-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/target-identity-literal-check.ts" --root "${repo_root}"
+  echo "== worktree-namespace literal check (gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root, AC3) =="
+  # 工作区命名空间字面量不得重生：读侧只能经单一入口 packages/quay/src/worktree-namespace.ts
+  # （DEFAULT_WORKTREE_NAMESPACE_NAME 的回落分支），第二处双引号字面量 = 又一次「写用 config、读用硬编码」。
+  # 谓词即 AC 自己的 grep（对两个扫描根数双引号命中数 ≤1，且唯一命中必须落在该声明处）；
+  # 非引号出现（path 正则 / 注释 / 散文）只报 advisory 计数、永不判红（硬规则 5b 兄弟可见性）。
+  # 本例检查器自身【不含】该字面量（搜的是 JSON.stringify(常量)），故不会把自己算成第二处。
+  # @static-tier change
+  # @static-object packages/quay/src/ plugin/scripts/ plugin/scripts/worktree-namespace-literal-check.ts plugin/test/worktree-namespace-literal-check.test.mjs
+  run_checker "worktree-namespace-literal-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/worktree-namespace-literal-check.ts" --root "${repo_root}"
   echo "== task-file-bypass check (gap-adr013-gate-blind-spots-and-task-bypass-ratchet, AC4/AC5) =="
   # Fail-closed ratchet on direct `tasks/*.md` access outside the Provider ABI: a `tasks/` path literal
   # used as the argument of a file-operation (fs.* / readFileSync / writeFileSync / execFileSync /

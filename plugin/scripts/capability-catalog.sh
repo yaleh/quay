@@ -1718,7 +1718,7 @@ declare -A MATCHING=(
 # Non-按需 mechanisms wired into the suite/execution cores need no CONSUMER row — their wiring IS
 # the consumer. The rhythm-consumer-check.ts reads this table; see its 判据1/2/3.
 declare -A CONSUMER=(
-  [worktree-namespace-literal-check.ts]="谁按：plugin/test/worktree-namespace-literal-check.test.mjs 在全量套件里每轮按（真仓 GREEN + 三条 RED fixture 双控：第二处字面量 / plugin 侧字面量 / 唯一命中不在 resolver 声明处）；条件=要判「工作区命名空间字面量是否只剩单一入口的回落分支」（tasks/gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root AC3）"
+  [worktree-namespace-literal-check.ts]="谁按：scripts/test.sh 的 run_static_checks 每轮按（登记在 plugin/scripts/runner-static-gate.ts，@static-tier change / @static-object packages/quay/src/ plugin/scripts/；另由 plugin/test/worktree-namespace-literal-check.test.mjs 双控：真仓 GREEN + 三条 RED fixture；mutation case 见 plugin/scripts/checker-mutation-cases/worktree-namespace-literal-check.sh）；条件=要判「工作区命名空间字面量是否只剩单一入口的回落分支」（tasks/gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root AC3）"
   [psi-failure-correlation-check.ts]="谁按：任务实现者在 gap-psi-shadow-admission-controller 的 Phase 0 go/no-go 判定时按（node --experimental-strip-types plugin/scripts/psi-failure-correlation-check.ts --source active|passive|both --root <主检出>）；条件=要用主动诱发 + 被动历史两条独立数据源判定 PSI 对失败是否有超出并发数的增量预测力"
   [psi-window-join.ts]="谁按：任务实现者在需要回答「这个测试这一次跑的时候机器多忙」的诊断可见性问题时按（node --experimental-strip-types plugin/scripts/psi-window-join.ts --run-id <runId> --file <relpath> [--root <主检出>]）；条件=要查某测试单次运行的 PSI 时间窗采样序列"
   [archguard-runner.ts]="谁按：scripts/test.sh run_selected 全量 suite 路径按（run_static_checks 之后，code-class gate）；条件=每次全量验证轮跑 archguard analyze + 读产物判依赖环，fail-closed（archguard 缺失/analyze 失败/有环 ⇒ exit 1）"
