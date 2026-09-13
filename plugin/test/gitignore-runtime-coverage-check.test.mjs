@@ -28,7 +28,7 @@
 //   scripts/test.sh plugin/test/gitignore-runtime-coverage-check.test.mjs
 //   node --test plugin/test/gitignore-runtime-coverage-check.test.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -56,8 +56,15 @@ function runChecker(root, extra = []) {
 }
 
 /** A hermetic root: `.gitignore` + manifest, both written from the caller's strings. */
+const createdRoots = [];
+after(() => {
+  // tmp-leak-pairing-check / test-isolation-check: every mkdtemp result must be paired with a cleanup.
+  for (const d of createdRoots) fs.rmSync(d, { recursive: true, force: true });
+});
+
 function makeRoot({ gitignore, manifest }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gitignore-runtime-coverage-"));
+  createdRoots.push(dir);
   fs.mkdirSync(path.join(dir, path.dirname(MANIFEST_REL)), { recursive: true });
   if (gitignore !== null) fs.writeFileSync(path.join(dir, ".gitignore"), gitignore);
   if (manifest !== null) fs.writeFileSync(path.join(dir, MANIFEST_REL), manifest);
