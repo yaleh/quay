@@ -1,7 +1,7 @@
 ---
 id: AC-255
 title: 进程收敛且能力不丢 —— driver pid 文件 ≤2 且六个 kind 的 round 心跳都新鲜（SPEC 阶段 C + §6.10）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-017
 criterion: |-
@@ -46,4 +46,10 @@ expect: exit 0 = **真实存活**的 driver 进程 ≤2（读 pid 文件内容�
 origin: SPEC §7 阶段 C + §6.10。实测当前 12 个 driver pid 文件。⛔ 判据不只数进程：合并后若某 kind
   悄悄不转，`ps` 只剩一行看不出来——这正是合并【引入的】新风险，故要求六个 kind 的 round 心跳同时新鲜。
 activatedAt: 2026-09-13T14:40:12.909Z
+statusLog:
+  - at: 2026-09-13T19:53:15.631Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
