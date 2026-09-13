@@ -1100,6 +1100,10 @@ ac207_read_and_write() {
 # 允许 claude -p 作验证手段，但产品文档与 skill 文案不得声称 quay 会启动会话（SPEC-tmux-retirement）。
 step5_e2e() {
   local root="$1" qrl task_id goal_id bodyfile i status_json
+  # 本步探测/记录的 driver kind（gap-ac203-record-schema-has-no-kind-dimension AC1）：写成【一个】变量并被
+  # 下面三处同时消费（start / status 探测 / AC-203 记录里的 kind），⛔ 不是三处各写一个字面量——
+  # 「记录里的 kind 必须就是真正 start 过的那个 kind」这层绑定要由【代码】保证，⛔ 不是由注释保证。
+  local ac240_probe_kind="promotion"
   qrl="${STEP1_PREFIX}/bin/quay"; qrl="$(readlink -f "$qrl" 2>/dev/null || echo "$qrl")"
   AC207_HOST="$(hostname 2>/dev/null || echo '')"
   AC207_PROJECT_ROOT="$root"
@@ -1147,7 +1151,7 @@ BODY
   fi
   rm -f "$bodyfile"
   # ② 起 *-drivers（promotion 晋升 todo→ready；worker 派发 claude -p worker 实现）
-  node "$qrl" driver start --kind promotion --root "$root" >/dev/null 2>&1 || true
+  node "$qrl" driver start --kind "$ac240_probe_kind" --root "$root" >/dev/null 2>&1 || true
   node "$qrl" driver start --kind worker --root "$root" >/dev/null 2>&1 || true
   # ③ 轮询 done（至多 AC207_POLL_SECS，缺省 1800s=30min——worker 完整实现（worktree→开发→fan-in→suite）
   # 需较长时间；fail-closed 不无限等，超时即不写记录）
@@ -1165,18 +1169,19 @@ BODY
        && [ $(( (i - 1) % ac240_probe_every )) -eq 0 ]; then
       # 当场 probe（⛔ 非字面量）：driver_alive / carrier_records 由 probe_ac203_driver_status 解析
       # status 载体 JSON 得出；has_plugin_dir 由上面 stat $root/plugin 得出。
-      ac240_status="$(node "$qrl" driver status --kind promotion --root "$root" --json 2>/dev/null || true)"
+      ac240_status="$(node "$qrl" driver status --kind "$ac240_probe_kind" --root "$root" --json 2>/dev/null || true)"
       probe_ac203_driver_status "$ac240_status"
       echo "  [⑤ e2e] AC-203 probe (same run, same root): driver_alive=$AC203_DRIVER_ALIVE carrier_records=$AC203_CARRIER_RECORDS has_plugin_dir=$ac240_hpd evaluated=$AC203_EVALUATED"
       if [ "$AC203_EVALUATED" = "1" ] && [ "$AC203_DRIVER_ALIVE" = "1" ] && [ "$AC203_CARRIER_RECORDS" -gt 0 ] 2>/dev/null; then
         # 入参来源（⛔ 非字面量）：$AC203_DRIVER_ALIVE / $AC203_CARRIER_RECORDS ← probe_ac203_driver_status
         # 当场解析的 status 载体；$ac240_hpd ← 当场 stat 的 $root/plugin。复用唯一写入点
         # write_ac203_record（它经 ac_record_append 统一补 top-level build_sha）——⛔ 不新造第二个写入者。
-        # kind 的值来源 = 上面真正 start 过的那个 kind（`--kind promotion`），⛔ 不是凭记忆复述。
-        if write_ac203_record "$AC203_HOST" "$root" "$ac240_hpd" "$AC203_DRIVER_ALIVE" "$AC203_CARRIER_RECORDS" "promotion"; then
+        # kind 的值来源 = `$ac240_probe_kind` —— 与上面 start/status 消费的是【同一个变量】（⛔ 不是
+        # 凭记忆复述的字面量）：记录里的 kind 必须就是真正被 start 过的那个 kind。
+        if write_ac203_record "$AC203_HOST" "$root" "$ac240_hpd" "$AC203_DRIVER_ALIVE" "$AC203_CARRIER_RECORDS" "$ac240_probe_kind"; then
           AC203_WRITTEN_THIS_RUN=1
           AC203_WRITTEN_ROOT="$root"
-          echo "  [⑤ e2e] ac203 record written (same run, same root=$root, kind=promotion) → $AC89"
+          echo "  [⑤ e2e] ac203 record written (same run, same root=$root, kind=$ac240_probe_kind) → $AC89"
         else
           echo "  [⑤ e2e] NOTE: AC-203 record NOT written (fail-closed: BUILD_SHA missing/non-40-hex or AC89 path empty — 缺值≠合格)"
         fi
