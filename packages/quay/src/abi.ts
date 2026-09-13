@@ -76,8 +76,14 @@ export interface GoalRecord {
   updatedAt?: number;
 }
 
-/** All valid goal-status values (draft → active → achieved / superseded / retired). */
-export const GOAL_STATUSES: readonly string[] = ['draft', 'active', 'achieved', 'superseded', 'retired'];
+/** All valid goal-status values (draft → active → achieved / superseded / retired, plus the human
+ *  channel `needs-human`). ⛔ `needs-human` is a REAL goal status, not a task-only one: the store
+ *  accepts it and it is the most-frequent reopen source (goal-store's transition table records
+ *  `needs-human→active` as 3 of 5 observed reopen paths — a human re-arms a record after a ruling).
+ *  It was missing here until 2026-09-13, i.e. the ABI **under-declared** the vocabulary: a consumer
+ *  validating against this list would reject a status the store produces. This constant is the
+ *  single source (ADR-036); goal-store's VALID_GOAL_STATUSES derives from it. */
+export const GOAL_STATUSES: readonly string[] = ['draft', 'active', 'achieved', 'superseded', 'retired', 'needs-human'];
 
 // ── Meta view-model (gap-meta-records-should-be-a-first-class-store-kind-not-a-task-label): the
 //    meta store is PROVIDER-BACKED like the goal store — Core keeps only this view-model + the
