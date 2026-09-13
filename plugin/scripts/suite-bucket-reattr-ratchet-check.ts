@@ -1,5 +1,5 @@
 // suite-bucket-reattr-ratchet-check.ts — the reattribution-coverage ratchet for
-// gap-suite-bucket-dynamic-truth-drift-detector (phase C, ③-AC6 / ③-AC7).
+// gap-suite-bucket-dynamic-truth-drift-detector (phase C, ③-AC6 / ③-AC7 / ③-AC8).
 //
 // THE DEFECT THIS CLOSES (the silent half of AC121): AC121 re-attributed 230 "test.sh-as-shell"
 // tests to a singleton S|M judgment (`.quay/suite-bucket-reattribution.jsonl`), but the coverage
@@ -9,7 +9,7 @@
 // reopens the AC121 mis-attribution risk SILENTLY: it would be bucketed S and skipped on an M change
 // while its true subject is an M mechanism. This checker makes that漏测 loud.
 //
-// TWO LAYERS (a judgment, not a single boolean):
+// THREE LAYERS (a judgment, not a single boolean):
 //   1. (BLOCKING, ③-AC6) — a suite test file OUTSIDE `packages/*/test/` whose static bucket set is
 //      EXACTLY {S} (pure S) but which has NO reattribution entry ⇒ RED (exit 1). Baseline = 0: a
 //      pure-S test's S attribution comes solely from a scripts/test.sh mention, so its true subject
@@ -19,6 +19,22 @@
 //      block. These are over-selection (the SAFE direction — the test is selected for M/P changes
 //      anyway, so the un-rejudged S signal cannot skip it), so they are留痕 for补判, not a forced
 //      rework. Currently 14 (9 predate AC121's "重扫=0" claim and expose its incompleteness).
+//   3. (BLOCKING, ③-AC8) — a reattribution ENTRY whose file is no longer a suite test ⇒ RED (exit 1).
+//      The entry is a ZOMBIE: it points at a path outside listSuiteFiles, so it can never select
+//      anything again while still reading as "this file is judged". Zombies are created by whichever
+//      change deletes/archives a suite test file WITHOUT dropping its entry from the record.
+//
+// WHY LAYER 3 IS IN THE CHECKER AND NOT ONLY IN ITS UNIT TEST (gap-suite-bucket-zombie-check-bills-the-
+// next-unrelated-task): the zombie condition used to be judged ONLY by ③-AC8 in
+// plugin/test/suite-bucket-reattr-ratchet-check.test.mjs — i.e. only inside a FULL-SUITE run. The
+// deletion that creates the zombie therefore got no signal at its own change time; the task learned
+// hours later, after burning a whole suite round, and paid a separate follow-up commit to clear the
+// entries (the production record shows exactly this: 651 perFile runs / 10 fails across 8 distinct
+// tasks, each red followed by a "drop the zombie entries" commit). Moving the judgment into the
+// checker puts it on the checker's OWN surface — the `change`-tier static gate, which scripts/test.sh
+// selects for the scoped run of any change touching its @static-object (plugin/test/,
+// experiments/*/test/, packages/*/test/, the record itself). The deleting change is thus reddened at
+// its own scoped gate in seconds, instead of at an unrelated full-suite round.
 //
 // NOT-EVALUATED (exit 3, hard rule 3b): with NO reattribution FILE the ratchet cannot distinguish
 // "genuinely unattributed" from "no reattribution data exists yet" — it reports NOT-EVALUATED (exit
@@ -26,9 +42,11 @@
 // ⇒ every pure-S test is unattributed ⇒ RED) — the file presence is the fail-closed boundary.
 //
 // MODES:
-//   --gate [--root <dir>] [--json]   gate mode (wired into run_static_checks). Exit 1 iff any layer-1
-//                                    (pure-S unattributed) test is RED.
-// Exit codes: 0 PASS · 1 gate FAIL (>=1 layer-1) · 2 usage/env error · 3 NOT-EVALUATED (no reattribution file).
+//   --gate [--root <dir>] [--json]   gate mode (wired into run_static_checks, @static-tier change).
+//                                    Exit 1 iff any layer-1 (pure-S unattributed) test is RED OR any
+//                                    layer-3 zombie entry exists.
+// Exit codes: 0 PASS · 1 gate FAIL (>=1 layer-1 or >=1 zombie) · 2 usage/env error · 3 NOT-EVALUATED
+// (no reattribution file).
 
 import fs from "node:fs";
 import path from "node:path";
@@ -52,23 +70,32 @@ export interface ReattrRatchetReport {
   layer1: string[];
   /** layer 2 (report, non-blocking): S-signal-multi (S+M/P+S/P+S+M) tests with no reattribution entry. */
   layer2: string[];
+  /** layer 3 (blocking, ③-AC8): reattribution entries whose file is no longer a suite test. */
+  zombies: string[];
 }
 
 /**
  * The reattribution-coverage ratchet over every suite test file (excluding the packages test tree). A
  * test already in the reattribution record is judged (skip); an un-judged test is classified by its
  * STATIC bucket set — pure S ⇒ layer 1 (漏测, blocking), contains-S-with-others ⇒ layer 2 (over-
- * selection, report). `evaluated` is false when the reattribution FILE is absent (NOT-EVALUATED).
+ * selection, report). Independently, every ENTRY is checked against the live suite file set: an entry
+ * pointing at a path that is no longer a suite test ⇒ layer 3 (zombie, blocking) — the shape a
+ * deletion/archival leaves behind when it drops the file but not its record entry. `evaluated` is
+ * false when the reattribution FILE is absent (NOT-EVALUATED — layers AND zombies stay empty, never a
+ * green "0": an absent input is not a clean bill of health).
  */
 export function checkReattrRatchet(root: string): ReattrRatchetReport {
   const reattrFile = path.join(root, REATTRIBUTION_PATH);
   if (!fs.existsSync(reattrFile)) {
-    return { evaluated: false, layer1: [], layer2: [] };
+    return { evaluated: false, layer1: [], layer2: [], zombies: [] };
   }
   const reattr = loadReattribution(root);
   const layer1: string[] = [];
   const layer2: string[] = [];
-  for (const rel of listSuiteFiles(root)) {
+  const suite = new Set(listSuiteFiles(root));
+  // layer 3 — an entry whose target is no longer a suite test is a zombie (judged, but un-selectable).
+  const zombies = [...reattr.keys()].filter((f) => !suite.has(f));
+  for (const rel of suite) {
     if (P_TEST_DIR.test(rel)) continue; // product tests are P-by-home, never S/M-shell mis-attributed
     if (reattr.has(rel)) continue; // already re-attributed (judged)
     const staticSet = bucketSetOf(rel, root);
@@ -76,14 +103,15 @@ export function checkReattrRatchet(root: string): ReattrRatchetReport {
     if (staticSet.size === 1 && staticSet.has("S")) layer1.push(rel); // pure S — the AC121 mis-attribution shape
     else if (staticSet.has("S")) layer2.push(rel); // S + (M|P) — over-selection, safe direction
   }
-  return { evaluated: true, layer1, layer2 };
+  return { evaluated: true, layer1, layer2, zombies };
 }
 
 const usage = `suite-bucket-reattr-ratchet-check.ts — reattribution-coverage ratchet (gap-suite-bucket-dynamic-truth-drift-detector)
 
 Usage:
   node --experimental-strip-types suite-bucket-reattr-ratchet-check.ts --gate [--root <dir>] [--json]
-      gate mode — exit 1 iff any pure-S (layer-1) test has no reattribution entry.`;
+      gate mode — exit 1 iff any pure-S (layer-1) test has no reattribution entry, OR any
+      reattribution entry names a file that is no longer a suite test (layer 3, zombie).`;
 
 function getArgValue(args: string[], name: string): string | undefined {
   const idx = args.indexOf(name);
@@ -110,17 +138,23 @@ export function main(argv: string[]): number {
     console.log(JSON.stringify(rep, null, 2));
   } else if (!rep.evaluated) {
     console.log(`suite-bucket-reattr-ratchet-check: NOT-EVALUATED — no reattribution file (${REATTRIBUTION_PATH}); the ratchet cannot judge unattributed tests without its input (never conflated with '0 uncovered')`);
-  } else if (rep.layer1.length === 0) {
-    console.log(`PASS — reattribution ratchet: 0 pure-S un-attributed test(s) (layer 1, blocking); ${rep.layer2.length} S-signal-multi un-attributed (layer 2, report-only)`);
+  } else if (rep.layer1.length === 0 && rep.zombies.length === 0) {
+    console.log(`PASS — reattribution ratchet: 0 pure-S un-attributed test(s) (layer 1, blocking); 0 zombie entr(y|ies) (layer 3, blocking); ${rep.layer2.length} S-signal-multi un-attributed (layer 2, report-only)`);
   } else {
-    console.log(`FAIL — ${rep.layer1.length} pure-S suite test(s) with no reattribution entry (layer 1, blocking — the AC121 mis-attribution shape):`);
-    for (const f of rep.layer1) console.log(`  - ${f}`);
+    if (rep.layer1.length > 0) {
+      console.log(`FAIL — ${rep.layer1.length} pure-S suite test(s) with no reattribution entry (layer 1, blocking — the AC121 mis-attribution shape):`);
+      for (const f of rep.layer1) console.log(`  - ${f}`);
+    }
+    if (rep.zombies.length > 0) {
+      console.log(`FAIL — ${rep.zombies.length} zombie reattribution entr(y|ies) (layer 3, blocking — the entry's file is no longer a suite test; drop the entry in the same change that deletes/archives the file):`);
+      for (const f of rep.zombies) console.log(`  - ${f}`);
+    }
     console.log(`  (layer 2 report-only: ${rep.layer2.length} S-signal-multi un-attributed)`);
   }
 
   if (scan) return 0;
   if (!rep.evaluated) return 3; // NOT-EVALUATED (run_checker third state)
-  return rep.layer1.length > 0 ? 1 : 0;
+  return rep.layer1.length > 0 || rep.zombies.length > 0 ? 1 : 0;
 }
 
 if (isDirectEntry(import.meta, undefined, "suite-bucket-reattr-ratchet-check")) {
