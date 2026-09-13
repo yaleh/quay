@@ -184,6 +184,7 @@ env: {CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"}}`。
 - plugin/scripts/runner-static-gate.ts
 - plugin/scripts/checker-mutation-cases/profiles-role-coverage-check.sh
 - plugin/test/profiles-role-coverage-check.test.mjs
+- docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-quay-init-profiles-template-omits-every-role-the-drivers-request.md
 
 ## 执行者注记（⛔ 非立案原始内容，落地时追加）
@@ -202,6 +203,9 @@ env: {CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"}}`。
 ⛔ 本任务**不**顺手改 `sync-vendor.sh --check`（它把镜像与**已过期的** `packages/quay/dist` 比，
 两份都旧 ⇒ 报 CLEAN，因此结构上抓不到 source↔dist 漂移）——那超出本任务 Touches，
 且需要自己的 AC；此处只记读数与对照，不据它行动。
+**一条观察项（⛔ 非阻塞）**：主检出的 vendored bundle 之所以能停在那里，是因为
+`scripts/test.sh` 只在**它自己所在的检出**里 rebuild（worktree 各建各的），主检出自 09-11 起
+大概没跑过全量套件。是否要为此加一条 source↔dist 漂移检测 ⇒ 留给后续任务判定。
 
 **B. 检查器断言面的一处刻意取舍（说清楚，避免被读成「覆盖了两条路径」）。**
 `profiles-role-coverage-check.ts` 运行的是 **Core CLI 的 `quay init`**（源码内联、无 git 依赖、
@@ -212,6 +216,16 @@ Core 产出由检查器逐条断言（AC2/AC3），shell 产出由 `plugin/test/
 每次 scoped 门加上 git/bundle 两个环境依赖，而 mutation case 的 fixture 将被迫复制整棵 plugin——
 **代价与收益不成比例**。两份模板之间的漂移由检查器的
 `init 产出 roles == shipped 载体 roles` 一条断言同时兜住（AC2 的第三个控制）。
+
+**C. scoped 门与 ratchet 的实测读数。**
+改 `plugin/scripts/quay-init.sh` 会如预期把 `quay-init-closure-ratchet` 判 stale
+（它是被 fingerprint 的 source 之一）⇒ 按既有纪律**把 `--reanchor` 放在最后一步**执行：
+`3 files / 568 bytes` → `3 files / 481 bytes`（**未增长**，shrink-only 仍成立），
+`--gate` PASS。落点 `docs/analysis/quay-init-closure-ratchet.baseline.json` 已列入 Touches。
+其后 `bash scripts/test.sh --for-task <id> --allow-thin` **exit 0，154/154 绿**。
+**⚠️ scoped-gate 缓存以我实际验证过的那个 develop tip 为准**（即本 worktree merge 进来的 tip），
+⛔ 不写「当时 `rev-parse develop` 恰好指向、但我没验证过」的 sha
+（那会把「没评估」记成「评估过」）；develop 若已前进则缓存不命中、driver 照跑 scoped 门，fail-closed。
 
 ## 立案备注（quay-task 立案/改写时追加，⛔ 非报告原文）
 
