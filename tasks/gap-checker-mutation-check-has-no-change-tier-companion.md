@@ -3,6 +3,7 @@ id: gap-checker-mutation-check-has-no-change-tier-companion
 title: checker-mutation-check 是 full-tier 且末次静态闸失败就在今天——按本仓库既定解法（change-tier
   伴生检查）让改 checker 的那个任务在自己的 scoped 门被抓到
 status: ready
+needs_human_cause: human-adjudication
 labels:
   - gap
 parent: null
@@ -71,6 +72,7 @@ fan-in 的 `step=suite` 红分两类——**(A) 静态检查/全仓枚举不变�
 - tasks/gap-checker-mutation-check-has-no-change-tier-companion.md
 - plugin/scripts/runner-static-gate.ts
 - plugin/test/select-static-checks-for-touches.test.mjs
+- plugin/test/scoped-static-checks.test.mjs
 - plugin/scripts/checker-mutation-check.sh
 
 ## 读数段
@@ -95,7 +97,7 @@ STATIC_CHECK_FAILED: checker-mutation-check-changed exit=1
 **反向控制**：`git checkout -- plugin/scripts/provider-binding-resolvability-check.ts` 还原后，**同一条命令、同一 worktree** ⇒ **退出码 = 0**（唯一载体是本任务自己的 `checker-mutation-check`，pass）⇒ 红可归因于被改的那个文件，而不是 delta 整体（硬规则 4 推论四：附一个「若 Y 为假则结果会不同」的对照）。
 
 ### AC2 负控制（不误伤）
-⚠️ **读数已更正（续做轮实测）**：原表用 `--names` 输出匹配 `^checker-mutation-check$`。**实测 `--names` 打印的不是门真正执行的那个名字**——同一次运行里 `--names` 打印 `checker-mutation-check`（full-tier 的派生名），而 `.commands[]` 打印 `run_checker "checker-mutation-check-changed" … --check-changed`；`quay-init-closure-ratchet` 与其伴生 `-stale` 同形（`--names` 出 full 名、`commands` 出伴生名）。⇒ 旧表的 3 个「1」命中的是 **full-tier 名**，**并未证明伴生被选中**；四个「0」结论仍然对，但该谓词不具区分力。**权威读法是 `.commands` / `--commands`。**
+⚠️ **读数已更正（续做轮实测）**：原表用 `--names` 输出匹配 `^checker-mutation-check$`。**实测 `--names` 打印的不是门真正执行的那个名字**——同一次运行里 `--names` 打印 `checker-mutation-check`，而 `.commands[]` 打印 `run_checker "checker-mutation-check-changed" … --check-changed`；`quay-init-closure-ratchet` 与其伴生 `-stale` 同形。⚠️ **2026-09-13 续做轮②再更正其【根因】**：`--names` 打印的**不是「full-tier 的派生名」**，而是 `parseStaticCheckRegistry` 从 **`${repo_root}/plugin/scripts/<name>.(sh|ts)` 路径**派生的名字（**不是** `run_checker` 的 label，`select-static-checks-for-touches.ts:426` `CHECKER_RE`）——伴生与 full-tier **调用同一个脚本 ⇒ 派生名逐字相同**，`--names`/`--list` 对两条登记各打一次同名行；所以它不是「只出 full 名」，而是**两条登记同名**。（反例就在本仓库：`capability-catalog` 那条 `--names` 出 `capability-catalog` 而命令是 `run_checker "superseded-capability-check" … capability-catalog.sh`——那里根本没有 full-tier 兄弟，照样「错位」，⇒ 说明差异来自**取名口径**，不是「出的是另一条登记的」。）结论不变（权威读法是 `.commands` / `--commands`），但「同名」本身是可复核的性质，它在本轮真的咬到了人（见下节）。
 更正后的读数（真实 CLI `select-static-checks-for-touches.ts --touches <path> --commands` 输出中 `checker-mutation-check-changed` 的行数）：
 | delta 路径 | 伴生被选中 |
 |---|---|
@@ -120,7 +122,7 @@ STATIC_CHECK_FAILED: checker-mutation-check-changed exit=1
 
 ### AC4 full-tier 兜底逐字未动
 `git diff -U3 -- plugin/scripts/runner-static-gate.ts`：该 hunk **只有 `+` 行、无任何 `-` 行**；`# @static-tier full  (the ~13s meta-check on the checkers THEMSELVES — deferred to the full-suite gate)` 与其后 `run_checker "checker-mutation-check" … --check` 两行以**未变化的上下文**出现。
-另有测试钉住（`plugin/test/select-static-checks-for-touches.test.mjs`）：断言这两行**逐字连续存在** ∧ 解析出的 full 条目 `commandLine` 与原文**逐字节相等**（删掉或降级 full-tier 块 ⇒ 该测试红）。
+另有测试钉住（`plugin/test/select-static-checks-for-touches.test.mjs`）：断言这两行**逐字连续存在** ∧ 解析出的 full 条目 `commandLine` 与原文**逐字节相等**（删掉或降级 full-tier 块 ⇒ 该测试红）。**续做轮②又加了一处独立钉法**（`plugin/test/scoped-static-checks.test.mjs`，见下节），且两处都有可咬控制。
 
 ### AC5 生产载体验证 —— ⚠️ **not-evaluated**（本 AC 保持未勾 + `外层 verification-round 验证` 标记）
 1. **实现落地时刻**：本任务实现提交 `f6912e986880bbf7667f765fc8d4c2571d02370c`，`2026-09-13T05:50:49+00:00`（worktree 内）。ff 到 develop 由 fan-in 完成 ⇒ **本读数写入时尚未落地 develop**。
@@ -152,7 +154,7 @@ STATIC_CHECK_FAILED: checker-mutation-check-changed exit=1
 ### 附带交付：full-tier 变更时的覆盖度前置
 delta 含**注册表源**（`runner-static-gate.ts` / `scripts/test.sh` / `.github/workflows/`）时，伴生额外做一次**全 manifest 覆盖度复验**（uncovered = 0，`--list` 级、不跑 case）——即 `checker-mutation-check.sh` 注释里的 AC1b 维度（「新 checker 无 mutation case 不得静默溜过」）也在**加它的那个任务**的 scoped 门被前置。实测（本次 AC1 运行）：`manifest source changed in this delta — all 71 registered checkers have a mutation case (uncovered = 0).`
 
-### 续做轮复核（Touches 修复后实测，2026-09-13）
+### 续做轮①复核（Touches 修复后实测，2026-09-13）
 本任务首轮**因 anti-drift HARD FAIL 退出未落地**：`out-of-declared: task wrote plugin/scripts/checker-mutation-check.sh (matches no declared Touches glob)`。按本任务 `## Definition of Done` 的「⚠️ Touches 补充义务」把该实现文件补进 `## Touches` 后，`node --experimental-strip-types plugin/scripts/anti-drift-touches-check.ts --task gap-checker-mutation-check-has-no-change-tier-companion --worktree <wt> --merge-target develop` ⇒ **`ANTI-DRIFT OK: task … — 3 actual file(s), all within declared Touches (4 glob(s))`**。
 复核读数（探针 worktree `/tmp/ac208-probe` = detach 在本分支 tip；跑完即 `git worktree remove --force` 清除，现已不在 `git worktree list` 中）：
 - **AC1 再验（可咬 + 反向控制）**：把 `plugin/scripts/provider-binding-resolvability-check.ts:199` 的 `row.state = "bare-path-name"` 改为 `"path-resolved"` 后，
@@ -163,3 +165,47 @@ delta 含**注册表源**（`runner-static-gate.ts` / `scripts/test.sh` / `.gith
 - **AC3 再验（成本按 delta 收窄）**：同上两次墙钟 **794 ms（2 载体）** 与 **555 ms（1 载体）**，对 full-tier 全量 **78.9 s** ⇒ ≈ **1/100**，显著小于；同两次 `checkers_total: 71` 而 `checkers_executed: 1–2`。
 - **AC4 再验（逐字）**：`git diff develop...HEAD -U0 -- plugin/scripts/runner-static-gate.ts | grep -c '^-[^-]'` ⇒ **0**（该 hunk 无任何删除行）；`# @static-tier full  (the ~13s meta-check on the checkers THEMSELVES — deferred to the full-suite gate)` 与 `run_checker "checker-mutation-check" bash "${repo_root}/plugin/scripts/checker-mutation-check.sh" --check` 在 `-U3` 输出中以**未变化的上下文行**（前导空格）出现。
 - **scoped 门复核**：`bash scripts/test.sh --for-task gap-checker-mutation-check-has-no-change-tier-companion --allow-thin` ⇒ **退出码 0**（33 tests / 0 fail），且日志中伴生确实执行（见 AC2 末段引的两行）。
+
+### 续做轮②（fan-in suite 红：注册表同名冲突，2026-09-13）
+
+**本轮起因**：续做轮①的 fan-in 在 `step=suite` 退出未落地（`# tests 7690 / pass 7688 / fail 2`，日志 `.quay/fan-in-suite-gap-checker-mutation-check-has-no-change-tier-companion~wk-prod-1789139008~1789281013502-53a322.log`）。两个失败文件，**逐一归因**（⛔ 不按 delta-relatedness 提示直接采信）：
+
+**（一）`plugin/test/scoped-static-checks.test.mjs` —— 本条 delta 造成，已修（这是本轮的实际工作）**
+失败行：`AC3 — registry is parsed from scripts/test.sh, tier annotations land on the right checkers`，`AssertionError: 'change' !== 'full'`（`scoped-static-checks.test.mjs:115`）。
+**根因（一条命令可复核）**：`TEST_SH` 指的就是 `plugin/scripts/runner-static-gate.ts`（该测试文件 `:25`），而 `parseStaticCheckRegistry` 的 `CHECKER_RE = /\$\{repo_root\}\/plugin\/scripts\/([A-Za-z0-9_.-]+)\.(sh|ts)/`（`select-static-checks-for-touches.ts:426`）**从【脚本路径】取名，不看 `run_checker` 的 label**；伴生与 full-tier **调用同一个 `checker-mutation-check.sh`** ⇒ 注册表里出现**两条同名条目**，而该断言用的 `byName` 是 `new Map(...)`（**last-wins**）⇒ 后压入的伴生（tier `change`）覆盖了 full 条目。
+⇒ **不是环境噪声，也不是「提示说无关所以无关」**：`delta-relatedness = UNRELATED` 的机械判定这次漏了它，因为它走的是**两条跳的数据依赖**（delta 改 `runner-static-gate.ts` → 被 `select-static-checks-for-touches.ts` 运行时解析 → 才影响 `scoped-static-checks.test.mjs`），而该判定的 one-hop import 检查只覆盖「测试文件直接 import 的东西」。**这条正是硬规则 5b 的形状：一个缺陷是成簇的。**
+
+**修法（⛔ 不是把断言改软）**：把该文件里**两处**按 `name` 判定的断言改成**按 `commandLine`/tier 判定**（`name` 是脚本身份、两条登记共用；`commandLine` 是唯一区分量）——
+1. `:114-115` 原 `assert.equal(byName.get("checker-mutation-check")?.tier, "full")` ⇒ 改为**同时钉住两条登记**：`mutations.length === 2` ∧ `tier==="full"` 的恰好 1 条且其 `commandLine` 以 `--check` 结尾（whole-store）∧ `tier==="change"` 的恰好 1 条且其 `commandLine` 含 `--check-changed`（伴生）。**严格强于原断言**：原断言只能证明「名字对上那一本的 tier」，新断言同时证明伴生的存在与两本各自的模式。
+2. `:186-191` 的 AC2 partition 是**同一根的同簇实例**（原来 `names.includes(c.name)` 判 selected）⇒ 改为**按 `commandLine` 匹配 selected 侧**，并把「full-tier 条目**永不得**出现在 scoped selected 里」单列一条断言。⚠️ **诚实标注一处削弱**：原断言 `inSel !== inDef`（二者恰一）在【同名两条登记】下**不可表达**（`deferred` 只带名字，被选中的伴生与它的 whole-store 兄弟同名 ⇒ 该名字必然同时在两表里）；新断言保留「nothing is dropped」（`inSel || inDef`）并额外钉住「full 永不被选中」这个真正要守的方向。（`quay-init-closure-ratchet` / `-stale` 这对更早的同名登记有同样的性质，此前无人钉过。）
+
+**两处都跑了双向可咬控制**（`plugin/scripts/runner-static-gate.ts` 临时改 → 跑 → `git checkout` 还原，还原后 `git diff --quiet` 确认干净）：
+- **(a) 删掉伴生的 `run_checker "checker-mutation-check-changed" …` 行** ⇒ 红：`AssertionError: whole-store registration + its change-tier companion: ["run_checker \"checker-mutation-check\" … --check"]`。
+- **(b) 把 full 块的 `# @static-tier full …` 改成 `change`** ⇒ 红：`AssertionError: exactly ONE registration of checker-mutation-check must be \`full\` (deferred ≠ dropped)`。
+⇒ 新断言**可咬两个方向**（伴生消失、兜底降级），不是恒绿。
+
+**本轮 scoped 门复核（改完后）**：`bash scripts/test.sh --for-task gap-checker-mutation-check-has-no-change-tier-companion --allow-thin` ⇒ **退出码 0、45 tests / 0 fail**（`AC3 — registry is parsed from scripts/test.sh…` ✔ 在列；伴生自身执行于日志 `:126` 并报 `manifest source changed in this delta — all 71 … (uncovered = 0)` ∧ `1 checker carrier(s) in THIS delta: checker-mutation-check`），随后已写 scoped-gate cache。
+
+**（二）`plugin/test/driver-runtime.test.mjs`（AC4 gap-ac203）—— ⛔ 不是本条造成，未改；⚠️ 本轮把它的【分型】更正了**
+失败行：step ① `:732` `assert.notEqual(short.status, 0, …)`，实测 `status=0` 且 stdout 打印 `started: … confirmed_ms=1025`（`--confirm-timeout 1` 却报启动成功）。
+归因证据（三条，方向一致）：
+1. **同一 worktree、同一提交、单跑该文件 ⇒ 通过**：`node --test plugin/test/driver-runtime.test.mjs` ⇒ AC4 **✔ 5654 ms**（本轮实测）。⇒ 与提交内容无关（并发/时序形态）。
+2. delta 与它无交集：本条 delta 只有 `runner-static-gate.ts` / `checker-mutation-check.sh` / 两个 `plugin/test/*.test.mjs`，**不含** `driver-runtime.ts` / `driver-runtime.test.mjs`，也不含它 spawn 的任何路径；两者唯一共享资源是**机器负载**。
+3. ⚠️ **更正（本轮原先把它记成「负载敏感的测试自身缺陷」，那是错的）**：AC4 的红有**两个可区分形态**，`confirmed_ms` 是天然分型量——**≈1044（本轮实测 1025）＝【生产缺陷】**：`driver-runtime.ts:1080` 的 **supervisor 在 spawn 后立刻替 driver 写 pid 文件** ⇒ `aliveness().driverAlive`（`:1143-1147`）实际含义是「那个子进程此刻存在」（**含**「刚 spawn、还在初始化、马上 exit」），而 `awaitDriverConfirmation`（`:1261-1292`）唯一的稳定守卫是**定值** `CONFIRM_POLL_MS = 250`（`:1233`/`:1272`）⇒ 驱动 boot 延迟一超 250ms（套件级并发必然造成）就报 `started:` 并 exit 0 —— **正是该功能要消灭的「报成功但实际死亡」**（硬规则 4 推论二：字面量的合理性依赖宿主 ⇒ 静默失效）；**≈530 才是测试自身墙钟依赖**（红在 step ② `:746`）。**本轮这次落的是形态 (a)【生产缺陷】**（红在 step ① `:732`）。
+   ⇒ **已实际立案，⛔ 不是「未立案」**：`gap-driver-start-false-confirms-unsettled-driver`（title 逐字：「driver start 在驱动未就绪时误报 started:（存活确认守卫是定值 250ms，宿主启动延迟一超即失效）—— 套件 3/3 …」）。形态 (b) 亦有归属（`driver-runtime-ac4` 的既有分析）。
+   ⇒ **⛔ 不得用「注 seam / 放宽断言 / 加 retry / 加 sleep / 挪 `@test-group` / 加 `@load-sensitive`」把它变绿**——它是 **true positive**，放宽只会让真缺陷隐身（`gap-load-sensitive-tests-read-live-host-class-level-seam` 的 Plan 2/3 已逐条禁止这四种；`@load-sensitive` 无效的机制证据：`full-suite-runner.ts:138` 的 `scanFamily`/`kindForFile` 只在红时写分区供 triage，`scripts/test.sh` **不消费** `known-load-sensitive.ts`）。
+   **⇒ 对本条的含义**：它是一本**既有的、已立案的、与本任务 delta 无关的生产缺陷**，会在下轮 fan-in 里以一定概率复现；若再以这个文件红退出，**先按 `confirmed_ms` 分型**（≈1044 ⇒ 形态 (a)）再去判，⛔ 不要当成新发现重新归因，也⛔ 不要在本条里顺手修它。
+
+**本轮 Touches 扩展**：`plugin/test/scoped-static-checks.test.mjs` 追加进 `## Touches`（修改它才能让 suite 绿；不追加即 anti-drift HARD FAIL，正是续做轮①的退出原因）。改后 `anti-drift-touches-check.ts` ⇒ **`ANTI-DRIFT OK: … 4 actual file(s), all within declared Touches (5 glob(s))`**。
+
+## Needs-Human
+
+**执行 2026-09-13T08:03:36.960Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: suite red
+- run_id：wk-prod-1789139008
+- session_id：3973f4bc-03fd-4b6e-94be-5d3e76392e7d
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-checker-mutation-check-has-no-change-tier-companion~wk-prod-1789139008~1789284439473-404e8f.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-checker-mutation-check-has-no-change-tier-companion-wk-prod-1789139008.log

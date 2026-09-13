@@ -63,6 +63,7 @@ statusLog:
     to: achieved
     actor: goal-driver
     reason: "I2: criterion pass"
+long-term: true
 ---
 **判据（能取假）**：2026-09-12 干跑 exit 1。**今天的结构性取假**：ad-arm1 上 `ss -ltnp` 对 4173 无监听、无任何 `quay serve` 进程（该主机原有一个绑 100.100.148.48:4173 的 serve，随本日 user-scope quay 卸载一并停掉）⇒ 本 AC 今天不可能为真。**为什么不能只判「起得来」**：`quay serve` 进程存在、端口在听、HTTP 200——这三样加起来仍**只证明有一个 web 服务活着**，不证明它反映的是**目标项目**、更不证明它跟随**进展**更新。⇒ 判据分三层，逐层堵死：①**绑对地址**（`bind_host==tailscale0_ip` 且非回环——绑 127.0.0.1 时人在别的机器上根本看不到，直接违背「便于观察」这个目的）；②**跨机真可达**（`probe_from_host≠host`，探测由判读侧发起，⛔ 不采信目标机自己 curl 自己）；③**反映进展**（`observed_status_before≠observed_status_after` 且 `store_status_after` 与之一致）。**第③层是本 AC 的灵魂**：一个只在首次渲染时读一次 store 的页面、或一个缓存过期的页面，都能满足①②而在③上失败——**「显示了一个页面」与「反映了进展」的区分量就是这个差分**，同 AC-248 只认翻转不认单点的理由。**与 AC-247 的分工**：AC-247 判 driver 真活（后台执行面），本 AC 判 web 真反映（观察面）；driver 活着而 web 显示不动、或 web 好看而 driver 没活，两条各自独立取假。**人 2026-09-12 追加**：本 AC 的目的之一是让人能在验证过程中实时观察目标项目进展，⛔ 不是补一个事后截图。
 

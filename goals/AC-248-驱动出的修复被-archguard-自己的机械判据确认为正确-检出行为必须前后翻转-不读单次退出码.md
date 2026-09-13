@@ -63,5 +63,6 @@ statusLog:
     to: achieved
     actor: goal-driver
     reason: "I2: criterion pass"
+long-term: true
 ---
 **判据（能取假）**：2026-09-12 干跑 exit 1（从未发生过）。**为什么必须是「翻转」而不是「跑通」**：本缺陷的表现形式正是 `npm run check:adr` 打印 `ADR-007: OK` 并 exit 0——**漏检与合格同形**（硬规则 3b）。任何形如「跑了 check:adr 且 exit 0」的判据今天就已经是绿的 ⇒ 零信息。⇒ 只有「同一输入形态下，修复前 detects=false、修复后 detects=true」这个**差分**才携带信息。**取假的两个方向都堵死**：①若 worker 交出一个改了但没修对的提交 ⇒ after 仍 false ⇒ 红；②若有人把 before 直接写成 true 想凑翻转 ⇒ `before is False` 失败 ⇒ 红。**正确性判据不由 quay 拥有**：detects 的取值由 archguard 自己的 `scripts/check-adr.ts` / 其单测跑出，quay 只搬运读数，⛔ 不自行实现一个「等价」的判定（那会变成 quay 给自己打分）。**与 GOAL-009 AC-207 的本质差别**：AC-207 判「有一个触及非记账文件的提交」，本 AC 判「**这个提交让一个外部的、独立的机械判据从假变真**」。**照实说明的边界**：本 AC 同样**不能排除人在会话里手敲**（沿用 AC-207 对 `produced_by_driver` 的自陈），它只把门槛从「敲出一个提交」提高到「敲出一个能让外部判据翻转的正确修复」；⛔ 不冒充解决了 AC-207 没解决的那半个问题。**外部可核**：commit_sha 与 commit_files 必须经 ssh 从 ad-arm1 的 archguard git 历史交叉核对（人 2026-09-12 裁定不推 origin ⇒ 无裸仓库镜像可用），⛔ 不采信载体自述（硬规则 4b）。

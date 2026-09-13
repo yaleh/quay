@@ -68,10 +68,23 @@ const KERNEL_DEPS = [
   "write-json-atomic.ts",
 ];
 
-// A fake driver for both kinds: idles forever (the supervisor writes the driver's own pid via the
-// spawn `$!` equivalent; the real worker driver writes in-flight worker pids to --pid-file, but the
-// fake need not).
+// 两个 kind 的夹具【不同】，因为 --pid-file 的语义按 registry 的 pidSelf 分叉（DRIVER_KINDS[*].pidSelf）：
+//   · pidSelf=true（promotion/outer/quality/meta/goal）：--pid-file = **驱动自己**的 pid 文件，写者 =
+//     驱动，写在【进入常驻循环之后】。它同时是 driver-runtime 存活确认的**就绪判据**
+//     （gap-driver-start-false-confirms-unsettled-driver）⇒ 代表这类 kind 的夹具必须自写，否则该 kind
+//     永远不就绪（start 恒 start-pending）。
+//     旧版一个只 idle 的夹具同时代表两种 kind——那只是因为 supervisor 在 spawn 时替驱动【预写】了这个
+//     文件；而那个预写正是本缺陷的根因（「文件在」退化成「spawn 过」），已被移除。
+//   · pidSelf=false（worker）：--pid-file = in-flight 文件（真实驱动逐 worker 追加、自己管），driver pid
+//     文件仍由 supervisor 写 ⇒ 只 idle 的夹具足够。
 const FAKE_DRIVER = "setInterval(() => {}, 1000);\n";
+const FAKE_SELF_PID_DRIVER = [
+  "const fs = require('node:fs');",
+  "const argv = process.argv.slice(2);",
+  "const i = argv.indexOf('--pid-file');",
+  "if (i >= 0 && argv[i + 1]) fs.writeFileSync(argv[i + 1], String(process.pid));",
+  "setInterval(() => {}, 1000);",
+].join("\n");
 
 /** Copy the kernel + its transitive deps into the temp root's plugin/scripts, then overwrite the two
  *  driver entry files with fakes so `start` spawns an idling child instead of a real driver loop. */
@@ -84,7 +97,7 @@ function copyKernel(scripts) {
   // dispatch-worktree-setup.sh 的手法），让裸说明符 `import "yaml"` 从 temp root 向上可解析。
   const root = path.resolve(scripts, "..", "..");
   fs.symlinkSync(path.join(REPO_ROOT, "node_modules"), path.join(root, "node_modules"), "dir");
-  fs.writeFileSync(path.join(scripts, "promotion-driver.ts"), FAKE_DRIVER, "utf8");
+  fs.writeFileSync(path.join(scripts, "promotion-driver.ts"), FAKE_SELF_PID_DRIVER, "utf8");
   fs.writeFileSync(path.join(scripts, "worker-driver.ts"), FAKE_DRIVER, "utf8");
 }
 

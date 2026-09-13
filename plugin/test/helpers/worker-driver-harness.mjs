@@ -13,8 +13,16 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { WORKER_OUTCOME_REL, WORKER_ROUND_REL } from "../../scripts/worker-driver.ts";
+import { hostScaledMs } from "./host-budget.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// waitFor 的缺省【不被抢占】上限：一次常驻驱动等待要吸收的活 ≈ 驱动冷启动 + ≥2 次完整派发
+// （ready-pool → selector → worker，各一个 node 子进程，外加落地时的 git 读）。这个数表达的是
+// 【操作】的性质，⛔ 不是「本机很快」的断言——宿主当下的产能由 waitFor 在调用时读
+// hostContentionFactor()（/proc/loadavg ÷ nproc）乘上去（见本文件 waitFor 的注释与
+// plugin/test/helpers/host-budget.mjs 的模块头）。等待更重的操作时按倍数传（见调用点的注释）。
+export const WAIT_BASE_MS = 15000;
 export const DRIVER = path.resolve(__dirname, "..", "..", "scripts", "worker-driver.ts");
 export const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 
@@ -149,9 +157,16 @@ export function rmSafe(...paths) {
 }
 
 // 轮询谓词直到真值或超时（返回最后一次谓词值）。断言写在 waitFor 之后，超时 ⇒ 断言取假 ⇒ 测试干净失败。
-// timeoutMs 留足驱动冷启动余量（node --experimental-strip-types 起步 + /proc 冷启动枚举在满载 16 核机上可 >1s）。
-export async function waitFor(fn, timeoutMs = 10000, stepMs = 20) {
-  const deadline = Date.now() + timeoutMs;
+//
+// 这个上限是【防挂死的网】，不是断言本身——断言是调用方轮询的那个谓词。因此它只需长过操作在本机
+// 【实际】可能耗费的时间，而那个时间随宿主被抢占程度变化：旧的字面量（10000/15000/30000）只在
+// 「本机是空闲 16 核」时成立，满载时静默变成真限制，把账算在一个无关任务头上
+// （gap-suite-wallclock-budgets-literals-depend-on-host-capacity；实测同文件 17 次失败）。
+// ⇒ base 只表达【不被抢占时】该操作需要多久（操作的性质），宿主产能由 hostContentionFactor()
+// 在【每次调用时】读 /proc/loadavg ÷ nproc 得出。宿主变忙 ⇒ 网变长；换小机器 ⇒ 判定不再翻转。
+export async function waitFor(fn, baseMs = WAIT_BASE_MS, stepMs = 20) {
+  const budgetMs = hostScaledMs(baseMs);
+  const deadline = Date.now() + budgetMs;
   let v;
   while (Date.now() < deadline) {
     v = fn();
