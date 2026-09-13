@@ -52,10 +52,12 @@ exit=1
 - `packages/quay/bin/quay.ts`（`server` 动词派发 + usage 行）
 - `packages/quay/src/cli/server.ts` (new)（`status [--json]`）
 - `packages/quay/src/server-state.ts` (new)（载体契约的单一所有者：路径 + 形状 + 原子写 + pid 活性 + 每服务直接量探针；`serve.ts` 与 `cli/server.ts` 都 import 它 ⇒ 载体契约不会裂成两份）
-- `packages/quay/src/cli/help.ts`（帮助条目）
+- `packages/quay/src/cli/help.ts`（帮助条目 + `quay server` 帮助块）
 - `packages/quay/src/serve.ts`（`startServer()` 起控制面 + 发布状态载体 + graceful close 撤载体）
 - `plugin/scripts/driver-shared.ts`（`serveControlPlane` 的接口面 = 控制面宿主的单一实现，产品侧 import 复用；**实际改动**：3 处 `!res.ok` → `res.ok === false` —— 本任务把该文件首次拉进 tsc program（root tsconfig 只 include `packages/**/{src,bin}`），暴露出 `strict:false` 下判别联合不收窄的既有类型错误）
 - `plugin/scripts/start-drivers.ts`（常驻 serve 的既有拉起路径：**核过，无改动** —— 合并后多绑的是内核分配的临时控制面端口，`probeUrl` 判据与拉起方式不变，未新增第二条拉起路径）
+- `delivery-manifest.json`（把 `server` 登记为 `cli-command` 能力：加一行派发即新增一个交付能力，能力清单是**双向**枚举（源码有而未登记 / 登记了而源码没有，都红））
+- `packages/quay/test/cli.test.mjs`（两条**从派发表机械派生**的守卫要跟着走：block14 的 `--help` 同义集等值（硬编码 `dispatchVerbs`）与 block28 的 fallback usage 行（列出「子命令在 handler 内」的 config/manager —— `server status` 属同一形态））
 - `packages/quay/test/server-status-web-control-same-pid.test.mjs` (new)（正面 + 负控制 + 双活面 + 三态互异）
 - `plugin/test/start-drivers.test.mjs`（**核过，无改动**）
 - `tasks/gap-ac251-unified-server-web-control-same-process.md`（自身文件：勾 AC + 贴实跑证据）
@@ -77,7 +79,7 @@ exit=1
 
 ## Result
 
-**实现（3 个 commit，`f4d993a68` / `6ff044c3f` / `4ce30db71`）**：`serve.ts` 的 `startServer()` 在 web bind 之前起**已有**的 `serveControlPlane`（单一实现，未改写、未复制），bind 成功后把 `{schemaVersion:1,pid,startedAt,services[]}` 原子写入 `<workspaceRoot>/.quay/server.json`，两个服务都带**宿主进程自己的 pid**；graceful close 撤载体 + 关控制面，bind 失败路径同时关控制面（复用既有 `closeSetupFailure` 的所有权纪律 —— 泄漏一个 listening socket 会让 `node --test` 文件永不退出，正是 `serve-bind-failure-no-leak` 要防的那一类）。新增 `packages/quay/src/server-state.ts` 作为载体契约与探针的**单一所有者**，`cli/server.ts` 只做 argv/输出/退出码。
+**实现（4 个 commit，`f4d993a68` / `6ff044c3f` / `4ce30db71` / `70bf4db4e`）**：`serve.ts` 的 `startServer()` 在 web bind 之前起**已有**的 `serveControlPlane`（单一实现，未改写、未复制），bind 成功后把 `{schemaVersion:1,pid,startedAt,services[]}` 原子写入 `<workspaceRoot>/.quay/server.json`，两个服务都带**宿主进程自己的 pid**；graceful close 撤载体 + 关控制面，bind 失败路径同时关控制面（复用既有 `closeSetupFailure` 的所有权纪律 —— 泄漏一个 listening socket 会让 `node --test` 文件永不退出，正是 `serve-bind-failure-no-leak` 要防的那一类）。新增 `packages/quay/src/server-state.ts` 作为载体契约与探针的**单一所有者**，`cli/server.ts` 只做 argv/输出/退出码。
 
 ### AC1 —— criterion 逐字 exit 0
 
@@ -150,7 +152,7 @@ $ git -C /home/yale/work/quay ls-files .quay/server.json
 （空）
 ```
 
-落地提交不含该路径（三个 commit 的 `git diff --name-only` 均无 `.quay/server.json`）。
+落地提交不含该路径（四个 commit 的 `git diff --name-only` 均无 `.quay/server.json`）。
 
 ### AC4 —— 零回退
 
@@ -158,11 +160,16 @@ $ git -C /home/yale/work/quay ls-files .quay/server.json
 node --test packages/quay/test/serve-*.test.mjs      → tests 183 / pass 182 / fail 0 / skipped 1
 node --test plugin/test/start-drivers.test.mjs       → tests 10 / pass 10 / fail 0
 node --test plugin/test/driver-cli.test.mjs          → tests 9 / pass 9 / fail 0
+node --test packages/quay/test/cli.test.mjs          → pass (CLI 派发/帮助/usage 三套守卫全绿)
 npx tsc --noEmit -p packages/{quay,quay-native,quay-github} → 全绿
 node --test packages/quay/test/server-status-web-control-same-pid.test.mjs → tests 9 / pass 9 / fail 0
 ```
 
 `skipped 1` 是既有的 live-GitHub 回归（文件自带头注释说明「opt in with `QUAY_TEST_LIVE_GITHUB=1`」），非本任务引入。⛔ 全程未跑 `quay driver stop`。
+
+### 两条「新动词必须登记」的机械守卫（scoped 门第一轮红 ⇒ 已修）
+
+第一轮 scoped 门红在 `capability-manifest-check`：`[cli-command] DRIFT: source=20 manifest=19 / UNREGISTERED: server`。**加一行派发 = 新增一个交付能力** ⇒ `delivery-manifest.json` 的 `capabilities[]` 必须登记（该检查是**双向**枚举：源码有而未登记、登记了而源码没有，都红）。同时 `packages/quay/test/cli.test.mjs` 里两条**从派发表机械派生**的守卫也要跟着走：block14 的 `--help` 同义集等值（硬编码 `dispatchVerbs`）与 block28 的 fallback usage 行（它列出「子命令在 handler 内」的 config/manager —— `server status` 属同一形态，按它自己注释写明的约定加入）。两处修完各自绿；这是「新动词的三处登记」这一类义务，不是本任务特有的坑。
 
 ### AC6 —— 生产载体真跑过（读数晚于实现落地）
 
