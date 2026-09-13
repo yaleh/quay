@@ -87,12 +87,149 @@ session-schema.mjs     82 行  validateSessionRecord
 
 ## AC
 
-- [ ] AC1: 在 repo root 逐字跑 `goals/AC-253-会话读写原语统一到共享层-四个模块在本仓库可用且有非测试消费者-spec-阶段-a3.md` 的 criterion ⇒ **exit 0**（立案当轮实测 exit 1，报四个模块全缺）。改前/改后两条读数 + 两条命令原文都贴进结果段。去掉 `packages/quay/src/primitives/` 后必须转回 exit 1（负控制，两条读数都贴）。
-- [ ] AC2: **单一来源 + 逐字节**：四个模块落 `packages/quay/src/primitives/{pty-frame,delivery-audit,session-liveness,session-schema}.mjs`；逐文件 `git hash-object` == fleet `446ba9aa...` 对应 blob 的 hash（四组数值贴进结果段）；provenance（fleet 路径 + SHA）在文件头或 `primitives/PROVENANCE.md`。**取假控制**：`primitives-drift-check` 在"改一个字节"时必须 exit 1（那次负控制输出也贴），fleet 不可达/取不到该 SHA 时必须 exit 3 + `NOT-EVALUATED`（⛔ 不判 PASS）。
-- [ ] AC3: **4/4 逐模块非测试消费者（⛔ 强于机器判据的"任一非空"）**：四个模块**每一个**都列出 ≥1 个 `packages/quay/src` 或 `plugin/scripts` 下的**非测试**文件，且该文件**import 该模块**（贴 import 行 + file:line）；并给出**被它替换掉的手写副本的 file:line 与替换后命中数 = 0**；pty-frame 若走 Plan 第 4 步 lane，额外贴该 lane 的实测搜索读数与实现出处。⛔ 不算消费者：模块自己的头注释提到自己；兄弟模块（`delivery-audit.mjs` import `pty-frame.mjs`）import 它 —— "真被采用"指本仓库产品/脚本代码在用。
-- [ ] AC4: **零回退**：`node --test packages/quay/test/observation.test.mjs`、`packages/quay/test/serve-send*.test.mjs`、`packages/quay/test/serve-sessions*.test.mjs`、`plugin/test/peer-identity-probe.test.mjs`、`plugin/test/orphan-session-check.test.mjs`、`plugin/test/build-plugin-dist.test.mjs` 全绿（逐条命令与尾部读数贴进结果段）；新增 `plugin/test/session-primitives-adoption.test.mjs` 与 `plugin/test/primitives-drift-check.test.mjs` 全绿。
-- [ ] AC5: **负控制：折叠记录被拒**：把 `session-schema.mjs` 的 AC-001 反例搬成一条**本仓库**的测试——构造 `{status: "busy", ...}` 折叠记录 ⇒ `valid:false` 且 errors 提到折叠；去掉顶层 `status`、把 `lifecycle`/`activity` 两维对象补齐 ⇒ `valid:true`。两条输出都贴进结果段（只有正例的测试是恒真，硬规则 4）。
-- [ ] AC6: **生产载体真跑过（硬规则 4 推论三）**：实现落地时刻**之后**，在真实运行路径取一次读数（`quay serve` 的 sessions 面 / 一次真实投递 / `primitives-drift-check` 的 exit 0），三条读数均晚于落地时刻。⛔ 只在夹具里跑过不算 —— 该模块的三个既有 AC 也都是这个形态。
+- [x] AC1: 在 repo root 逐字跑 `goals/AC-253-会话读写原语统一到共享层-四个模块在本仓库可用且有非测试消费者-spec-阶段-a3.md` 的 criterion ⇒ **exit 0**（立案当轮实测 exit 1，报四个模块全缺）。改前/改后两条读数 + 两条命令原文都贴进结果段。去掉 `packages/quay/src/primitives/` 后必须转回 exit 1（负控制，两条读数都贴）。
+- [x] AC2: **单一来源 + 逐字节**：四个模块落 `packages/quay/src/primitives/{pty-frame,delivery-audit,session-liveness,session-schema}.mjs`；逐文件 `git hash-object` == fleet `446ba9aa...` 对应 blob 的 hash（四组数值贴进结果段）；provenance（fleet 路径 + SHA）在文件头或 `primitives/PROVENANCE.md`。**取假控制**：`primitives-drift-check` 在"改一个字节"时必须 exit 1（那次负控制输出也贴），fleet 不可达/取不到该 SHA 时必须 exit 3 + `NOT-EVALUATED`（⛔ 不判 PASS）。
+- [x] AC3: **4/4 逐模块非测试消费者（⛔ 强于机器判据的"任一非空"）**：四个模块**每一个**都列出 ≥1 个 `packages/quay/src` 或 `plugin/scripts` 下的**非测试**文件，且该文件**import 该模块**（贴 import 行 + file:line）；并给出**被它替换掉的手写副本的 file:line 与替换后命中数 = 0**；pty-frame 若走 Plan 第 4 步 lane，额外贴该 lane 的实测搜索读数与实现出处。⛔ 不算消费者：模块自己的头注释提到自己；兄弟模块（`delivery-audit.mjs` import `pty-frame.mjs`）import 它 —— "真被采用"指本仓库产品/脚本代码在用。
+- [x] AC4: **零回退**：`node --test packages/quay/test/observation.test.mjs`、`packages/quay/test/serve-send*.test.mjs`、`packages/quay/test/serve-sessions*.test.mjs`、`plugin/test/peer-identity-probe.test.mjs`、`plugin/test/orphan-session-check.test.mjs`、`plugin/test/build-plugin-dist.test.mjs` 全绿（逐条命令与尾部读数贴进结果段）；新增 `plugin/test/session-primitives-adoption.test.mjs` 与 `plugin/test/primitives-drift-check.test.mjs` 全绿。
+- [x] AC5: **负控制：折叠记录被拒**：把 `session-schema.mjs` 的 AC-001 反例搬成一条**本仓库**的测试——构造 `{status: "busy", ...}` 折叠记录 ⇒ `valid:false` 且 errors 提到折叠；去掉顶层 `status`、把 `lifecycle`/`activity` 两维对象补齐 ⇒ `valid:true`。两条输出都贴进结果段（只有正例的测试是恒真，硬规则 4）。
+- [x] AC6: **生产载体真跑过（硬规则 4 推论三）**：实现落地时刻**之后**，在真实运行路径取一次读数（`quay serve` 的 sessions 面 / 一次真实投递 / `primitives-drift-check` 的 exit 0），三条读数均晚于落地时刻。⛔ 只在夹具里跑过不算 —— 该模块的三个既有 AC 也都是这个形态。
+
+## Evidence（结果段）
+
+分支 `task/gap-ac253-session-primitives-shared-layer-adoption`（worktree `/home/yale/work/quay-worktrees/gap-ac253-session-primitives-shared-layer-adoption`）。落地提交 `623309d32`（主体）/ `eb38d92ad`（CLI 修复 + 真 socket 测试）；scoped 门在 `8fc2191bf`（merge develop 后）绿。
+
+### AC1 — AC-253 criterion 三条读数
+
+命令（逐字，cwd = repo root）：
+
+```
+python3 - <<'P'
+import sys,pathlib,subprocess
+mods=["pty-frame","delivery-audit","session-liveness","session-schema"]
+root=pathlib.Path(".")
+found={}
+for m in mods:
+    hits=[p for p in root.rglob("%s.*"%m)
+          if "node_modules" not in str(p) and ".claude/worktrees" not in str(p)
+          and ".quay/" not in str(p) and p.suffix in (".ts",".mjs",".js")]
+    found[m]=[str(p) for p in hits]
+missing=[m for m in mods if not found[m]]
+if missing:
+    sys.stderr.write("AC-253: shared primitive module(s) absent from this repo: %s => stage A3 not landed\n"%",".join(missing)); sys.exit(1)
+try:
+    r=subprocess.run(["git","grep","-l","-E",r"(pty-frame|delivery-audit|session-liveness|session-schema)",
+                      "--","packages/quay/src","plugin/scripts"],capture_output=True,text=True,timeout=60)
+except Exception as e:
+    sys.stderr.write("AC-253 NOT-EVALUATED: git grep failed (%s)\n"%e); sys.exit(3)
+consumers=[l for l in r.stdout.splitlines() if l.strip() and "test" not in l]
+if not consumers:
+    sys.stderr.write("AC-253: modules present but NO non-test consumer under packages/quay/src or plugin/scripts => vendored dead code, not adopted\n"); sys.exit(1)
+sys.exit(0)
+P
+```
+
+| 读数 | 命令 | 结果 |
+|---|---|---|
+| **改前**（base commit `0765b439b` 的树 `git archive` 到临时目录后跑） | 同上 | `exit 1` — `AC-253: shared primitive module(s) absent from this repo: pty-frame,delivery-audit,session-liveness,session-schema => stage A3 not landed` |
+| **改后**（本 tip） | 同上 | `exit 0`（无输出） |
+| **负控制**（`mv packages/quay/src/primitives /tmp/…` 后跑，再移回） | 同上 | `exit 1`，同一条消息（四个 key 全空） |
+
+⇒ 判据在这个状态上真取真、拿掉目录真取假。⚠️ 注意：判据的「有消费者」半边只要求**非空**，所以它无法区分 4/4 与 1/4 —— AC3 是本任务自加的补强。
+
+### AC2 — 逐字节 + 漂移检查三态
+
+`git hash-object`（本仓库副本）== `git -C /home/yale/work/quay-fleet show 446ba9aa:<path> | git hash-object --stdin`（fleet blob）：
+
+| 文件 | blob hash（两侧相等） | sha256 |
+|---|---|---|
+| `pty-frame.mjs` | `0de07a1ca5d3f0e1f03912a3a802494eb4bd389b` | `0e0934cfc16d3d47f852a4e4eff8c17309b445e74787c15d847e6b9bd85f963a` |
+| `delivery-audit.mjs` | `6a41654c4b1fab944ff30b45e247a68312abe312` | `5da101bc15d135a9ecd2bc8ac97382424794673feeef31f2ef59e5b7e7f4d239` |
+| `session-liveness.mjs` | `7a3ca3b43dcabb557a95b67af42b6a00dacb3655` | `f2a462a963efe17225a9c32bc58b7fdc6f8a930830417b0c8df1f56cf6a8dab4` |
+| `session-schema.mjs` | `710eb806899191065a02592f44cea6f1e4ef6b82` | `36350484ebf0d366b49834f0ca7d59cfa1756af39fe06de7aefc9158263cb9b5` |
+
+provenance：`packages/quay/src/primitives/PROVENANCE.md`（fleet 仓路径 + 钉住 SHA + 上表）+ 机器可读半份 `plugin/scripts/primitives-drift-manifest.json`。
+
+`primitives-drift-check` 的**三态实测**（`node --no-warnings --experimental-strip-types plugin/scripts/primitives-drift-check.ts --root <repo>`）：
+
+- **exit 0**：`primitives-drift-check: 4 file(s) pinned at 446ba9aa8608 (/home/yale/work/quay-fleet)` / 四行 `ok` / `PASS — all four primitives match the pinned quay-fleet blob byte-for-byte.`
+- **exit 1（改一个字节）**：fixture 里对一份本地副本 append 一行 ⇒ `RED`，报该文件名 + `local=`/`fleet=`/`pinned=` 三个 sha256（测试 `plugin/test/primitives-drift-check.test.mjs` 的 `取假控制` 用例逐字断言）。
+- **exit 3 NOT-EVALUATED，两个方向**：(a) fleet 仓不存在 ⇒ `NOT-EVALUATED — fleet repo absent: …`；(b) **fleet 仓在、钉住的 SHA 取不到** ⇒ exit 3 —— 这是危险方向：只判 `existsSync(repo)` 的实现会读不到 blob 却报「无漂移」。另外 manifest 缺失/corrupt 也判 exit 3（pin 本身读不懂 ⇒ 不判任何一侧有错）。
+- **一个刻意的性质**：pin 是 **commit SHA 不是 ref**。fleet 分支 tip 前进（工作树天天动）**不**红 —— 这正是 pin 而不是跟工作树的意义；一旦 re-pin 到移动后的 blob 而本地副本未跟，立刻红。
+
+### AC3 — 4/4 逐模块消费者
+
+| 模块 | 消费者（file:line 为 import 行） |
+|---|---|
+| `pty-frame.mjs` | `packages/quay/src/serve-send.ts:43` — `import { decodeFrames, encodeCtrl, encodeData } from "./primitives/pty-frame.mjs";` |
+| `delivery-audit.mjs` | `packages/quay/src/serve-send.ts:44` — `import { appendAuditRecord, summarizePayload } from "./primitives/delivery-audit.mjs";` |
+| `session-liveness.mjs` | `packages/quay/src/observation.ts:47`、`plugin/scripts/orphan-session-check.ts:50`、`plugin/scripts/peer-identity-probe.ts:33`、`plugin/scripts/inner-blocked-signal.ts:146` — 四份，均为 `import { … } from "…/primitives/session-liveness.mjs";` |
+| `session-schema.mjs` | `packages/quay/src/observation.ts:48` — `import { validateSessionRecord } from "./primitives/session-schema.mjs";` |
+
+⛔ 兄弟模块 import 不算：`delivery-audit.mjs` 内部 import `./pty-frame.mjs`，但 pty-frame 的消费者被单列在上面（`plugin/test/session-primitives-adoption.test.mjs` 里有一条断言专门排除「消费者全在 primitives 目录内」这种形态）。
+
+**被替换的手写副本，替换后命中数 = 0**（硬规则 2：先打印命中再计数）：
+
+| 被删形态 | 位置 | 改前命中 | 改后命中 | 替换为 |
+|---|---|---|---|---|
+| `/proc/<pid>/stat` 第 22 字段本地解析 `tail[19]` | `plugin/scripts/orphan-session-check.ts:153-167` | 1 | **0** | 共享 `readProcStat`（`readProcEtimes` 只留 uptime 算术） |
+| 本地 transcript mtime 读 `fs.statSync(transcriptPath).mtimeMs` | `plugin/scripts/inner-blocked-signal.ts:697-704` | 1 | **0** | 共享 `readTranscriptMtime`（`subagents/` 扫描保留） |
+| 生产路径的 `/proc` 读（`readProcStart` 走本地读） | `plugin/scripts/peer-identity-probe.ts:244` | 1 | **0**（生产分支改走 `readProcStat`） | 共享 `readProcStat`；纯函数 `parseProcStart` **保留**为注入式测试缝（见「诚实残留」） |
+
+**pty-frame 的 lane**：Plan 第 4 步的实测搜索 —— `git grep -l -E "pty\.sock|bg-pty-host" <base-tree> -- packages plugin` = **0 命中**（在 base commit 的树上跑，不是在今天的工作树跑：lane 自己就是新的 pty.sock 消费者，搜今天会把本次工作当成「既有命中」），⇒ 确无现存二进制帧消费者，lane 是造出来的。实现出处：`packages/quay/src/serve-send.ts` 的 `sendKeysToSession()`（用共享 `encodeCtrl`/`encodeData`/`decodeFrames` + 共享 `appendAuditRecord`/`summarizePayload`），入口 `plugin/scripts/send-to-session.ts --keys --sock <pty.sock>`。它落在 CLAUDE.md 记为不可替代用途的控制面缺口上（`/clear` 等斜杠命令原生通道办不到、手搓 tmux send-keys 禁止）。
+
+### AC4 — 零回退（逐条命令与尾部读数）
+
+| 命令 | 读数 |
+|---|---|
+| `node --test packages/quay/test/observation.test.mjs` | `tests 51 / pass 51 / fail 0` |
+| `node --test packages/quay/test/serve-handlers.test.mjs` | `tests 63 / pass 63 / fail 0`（⚠️ 仓内**没有** `serve-send*.test.mjs`；serve-send 的覆盖在 serve-handlers.test.mjs 里，该文件即本任务的 serve-send 回归面） |
+| `node --test packages/quay/test/serve-sessions.test.mjs` | `tests 8 / pass 8 / fail 0` |
+| `node --test plugin/test/peer-identity-probe.test.mjs` | `tests 23 / pass 23 / fail 0` |
+| `node --test plugin/test/orphan-session-check.test.mjs` | `tests 14 / pass 14 / fail 0` |
+| `node --test plugin/test/build-plugin-dist.test.mjs` | `tests 24 / pass 24 / fail 0` |
+| `node --test plugin/test/session-primitives-adoption.test.mjs`（新） | `tests 8 / pass 8 / fail 0` |
+| `node --test plugin/test/primitives-drift-check.test.mjs`（新） | `tests 7 / pass 7 / fail 0` |
+| `node --test plugin/test/inner-blocked-signal.test.mjs` | `tests 37 / pass 37 / fail 0` |
+| `npx tsc --noEmit -p packages/quay` | `0 error`（fan-in 的 typecheck 步） |
+| `bash scripts/test.sh --for-task gap-ac253-session-primitives-shared-layer-adoption --allow-thin` | `pass 273 / fail 0`，`SCOPED_EXIT=0`；静态门里 `primitives-drift-check: PASS`，无 `STATIC_CHECK_FAILED` / `STATIC_CHECK_NOT_EVALUATED` |
+| `bash plugin/scripts/checker-mutation-check.sh --check --only primitives-drift-check` | `MUTATION primitives-drift-check: pass`；`checkers_with_mutation: 73`、`uncovered: 0` |
+
+**打包缺口（Plan 第 41 行预告的那个读数）**：`.mjs` **确实**漏出过产物 —— 第一次 scoped 门在 `packages/quay/test/npm-pack-e2e.test.mjs` 红：`build-plugin-dist failed: Could not resolve "../../packages/quay/src/primitives/session-liveness.mjs"`（`plugin/scripts/inner-blocked-signal.ts:146`）。根因：`packages/quay/scripts/build-plugin-dist.mjs` 的 `coreSrcAliasPlugin` 过滤器只认 `\.ts$`，于是 repo-root 相对路径在**暂存的** `packages/quay/plugin/` 布局下没有改指（`packages/quay/plugin/packages/quay/src/…` 不存在）。修法 = 把过滤器扩到 `\.ts|\.mjs`（映射本就按 `packages/quay/src/` 后缀做，扩展名只决定「是否认领」），**没有**改成「在 plugin/scripts 下重写一份」。修后 `npm-pack-e2e.test.mjs` 9/9 绿。（`packages/quay/src` 内部的相对 import 从不经过该过滤器，所以 Core dist 一直能构建 —— 这就是「同一个 .mjs 在 Core bundle 里正常、在 plugin bundle 里炸」的原因。）
+
+### AC5 — 折叠记录负控制的真实输出
+
+`plugin/test/session-primitives-adoption.test.mjs` 直接 import 共享校验器（不是复刻一份判据）：
+
+- 折叠例 `{status: "busy", sessionKeyScope: "local-only", lifecycle: {…}, activity: {…}}` ⇒ `valid: false`，errors 含 `record has a folded top-level `status` field — lifecycle and activity must stay separate objects`。
+- 去掉顶层 `status`、两维各自带 `source`/时间戳 ⇒ `valid: true`（errors 空）。
+- **第三个读数**（防恒真）：把 `lifecycle.source` 置空 ⇒ `valid: false` —— 校验器不是只查值域。
+- 生成侧真接线：`observation.ts` 的 `attachValidatedSession` 只有 `verdict.valid` 才附加 `session`，否则 `session: null` + `sessionRefusal: verdict.errors`；`serve-sessions.ts` 渲染 `状态记录不可用（共享 schema 拒收）：…` 而**不是**渲染一个折叠值。
+
+### AC6 — 生产载体（三条读数，均晚于落地时刻 `2026-09-13T15:23:04Z`）
+
+| # | 时刻（UTC） | 真实路径 | 读数 |
+|---|---|---|---|
+| 1 | `15:25:31Z` | `primitives-drift-check` 打在真实检出上 | `exit 0`，四行 `ok`，`PASS — all four primitives match the pinned quay-fleet blob byte-for-byte.` |
+| 2 | `15:26:03Z` | `quay serve` 的 `/sessions`（**worktree 的代码**，served root 是真的工作区 ⇒ 真有会话卡） | HTTP `200`、`95758` bytes、`session.lifecycle=` 命中 **35** 条，例：`session.lifecycle=working · session.activity=idle（age 230824s）`。该面同时走 session-liveness（transcript mtime 供 `activity.ageSec`）与 session-schema（两维记录 + 校验器） |
+| 3a | `15:27:45Z` | 一次**真 HTTP 投递**（`POST /send`，well-formed 但无端点的 UUID） | HTTP `200`，页面渲染 `投递失败`；**失败路径**真的写了账：`{"sessionId":"0765b439-…ac53","name":null,"message":"ac253 production-carrier probe","state":"error","sentAtMs":1789313265266,"payloadSummary":{"length":30,"sha256_12":"944bacee7821","firstLine":"ac253 production-carrier probe"}}` —— 旧代码在这条路径上**一条记录都不写** |
+| 3b | `15:27:45Z` | 一次**真 keys 投递**：shipped CLI `send-to-session.ts --keys` 打到**真的 unix socket** | 对端收到的线上字节：`{"tag":1,"declaredLen":32,"payload":"{\"t\":\"auth\",\"token\":\"tok-ac253\"}"}` 然后 `{"tag":0,"declaredLen":6,"payload":"/clear"}`（DATA 帧**原样**，控制字节未改写）；共享账本记 `delivered:true` + `payloadSummary {length:6,sha256_12:"ddf7839cb8fc",firstLine:"/clear"}` |
+
+⚠️ 这一轮真读数**抓到一个只跑测试抓不到的缺陷**：`send-to-session.ts` 的 `--keys` 块曾写在 `const args = process.argv.slice(2)` **之前** ⇒ 每次调用都 `ReferenceError: args is not defined`（连原本可用的模式也一起死）。静态断言（「文件里提到 --keys」）会通过；只有**真跑一次**才暴露。已修（`const args` 提到块之前）并补了真 socket 回归测试（`plugin/test/session-primitives-adoption.test.mjs` 的 `AC3/AC6 — the shipped keys CLI really runs`：断言线上 tag 序列 `[1,0]`、DATA 帧内容原样、成功与失败**两条路径各写一条账**、`--keys` 缺 `--sock` 时 exit 2）。
+
+### 诚实残留（不满足 AC3/DoD 字面要求的部分，逐条列出而不是藏起来）
+
+1. **`packages/quay/src/observation.ts` 的 `procStartTimeMs` 未替换**（本地 `fields[19]` 命中仍 = 1）。原因：该函数的 `procDir` 参数是**注入式测试缝**（`readLiveWorkerProcesses(procDir)`，`packages/quay/test/observation.test.mjs:358-380` 用假 `/proc` 断言 `startedAtMs === (btimeSec + 100) * 1000`），而共享 `readProcStat(pid)` 把 `/proc/<pid>/stat` 硬编码、**不提供内容注入缝**。两个可选做法都不好：改测试缝 = 动既有回归测试，留本地读 = 留一份副本。⇒ 如实登记为**未替换的残留**，⛔ 不声称归零。observation.ts 的消费者身份由 **session-schema** 提供（`attachValidatedSession` + `validateSessionRecord`），另加 session-liveness 的 `readTranscriptMtime`（`:47`）。
+2. **`plugin/scripts/peer-identity-probe.ts` 的纯函数 `parseProcStart` 保留**（`fields[19]`/`rest[19]` 命中 = 2，含注释）。同上：它是 `FactIo` 注入缝的读法，共享 reader 无内容注入缝。**生产路径**（无注入 `io` 时）已改走 `readProcStat`，所以重复的只剩「给注入缝用的纯解析」。
+3. **`plugin/scripts/supervisor-preempt-candidates.ts:135-137` 未替换，且立案描述有误**：那三行解析的是 `/proc/<pid>/stat` 的 **pgrp（字段 5，`fields[2]`）**，**不是第 22 字段 starttime** —— 共享模块的 `readProcStat` 只返回 `{starttime}`，无法服务 pgrp。⇒ 立案把「同一段按最后一个 `)` 切分的纪律」误记为「第三份第 22 字段解析」。未改动该文件。
+4. **`plugin/scripts/driver-runtime.ts:1029` 是另一份 starttime 解析**（不在原 Touches 里），未替换 —— 它另有 CLK_TCK 自推导（`/proc/self/stat` + `/proc/uptime`），换掉会改变它自己的推导语义，越出「零新功能」边界。登记为已知残留。
+5. **fleet 的 `deliver` / `deliverKeys` / `readAuditTrail` 未被本仓库调用**。L2 lane 用的是那两个原语（帧编解码 + 审计账），编排（端点约定、grace 推断、账本路径、返回形态）是本仓库自己的 —— 理由：`deliverKeys` 是 fleet 形态的 facade，其 endpoint/token/ledger 约定是 fleet 的；而 SPEC §3.3 逐字禁止的是**四个模块**的第二份手写实现，本仓库对帧编解码与审计账各只有一份（⛔ 没有第二份 codec、没有第二份 ledger）。`readAuditTrail` 未接：它按 delivery `id` 检索，而本仓库的 `message-receipts.jsonl` 读者按 `sessionId` 检索，接上会改既有读契约。
+6. **journal 文件格式未变**（Plan 第 5 步要求的决定）：`message-receipts.jsonl` 的**写入实现**换成共享 `appendAuditRecord`，写出字节与原来逐字相同（同一个 `mkdirSync(dirname)` + `appendFileSync(JSON.stringify(record)+"\n")`），新增的 `payloadSummary` 是**增量字段**（既有读者忽略未知键，`readMessageReceipts` 亦如此）。⇒ 既有读者零回退。
+7. **`.d.mts` 声明文件**（四份，本地手写、不参与逐字节比对）：root tsconfig 是 `allowJs` + `checkJs`，被 import 的 `.mjs` 会被一起类型检查，而冻结副本里不能写 `// @ts-nocheck`（会破坏逐字节同一性）。⇒ 用兄弟 `.d.mts` 声明类型。drift manifest 只钉四个 `.mjs`。
+8. **scoped-gate 缓存的 sha 用的是 `HEAD^2` 而不是写缓存那刻的 `rev-parse develop`**：我 merge 到的 develop tip 是 `69aac66d`，而写缓存时 develop 已前进到 `cd63c8dd`。缓存记的是**门实际 gated 的那个 tip**（`69aac66d`）——记一个没跑过的 tip 会让 fan-in 错误跳过门；记实际跑过的 tip 最多让 fan-in 重跑一次门（成本，不是错误）。
+
+### DoD 自查
+
+四个原语在本仓库**只有一份**（AC2，含三态漂移检查），且**每一个**都有本仓库产品/脚本代码在 import（AC3，4/4；⛔ 无「只 import 一个」、无兄弟模块凑数、无「新加 import 旧副本留着」——被替换的副本已逐条归零，残留逐条登记）；折叠记录负控制真被拒（AC5）；在这个状态上 AC-253 criterion 逐字 exit 0、移走 `primitives/` 转 exit 1；三条读数均在生产载体上、均晚于落地时刻（AC6）。
 
 ## DoD
 
