@@ -105,7 +105,7 @@ session-schema.mjs     82 行  validateSessionRecord
 
 ## Evidence（结果段）
 
-分支 `task/gap-ac253-session-primitives-shared-layer-adoption`（worktree `/home/yale/work/quay-worktrees/gap-ac253-session-primitives-shared-layer-adoption`）。落地提交 `623309d32`（主体）/ `eb38d92ad`（CLI 修复 + 真 socket 测试）/ **`54b0eed58`（本轮：按 2026-09-13T15:35Z 强化后的 criterion 退掉 serve-send.ts 的两处手写 socket）**。**AC6 的四条读数全部晚于 `54b0eed58` 的提交时刻 `2026-09-13T16:08:37Z`**（上一轮的 AC6 读数属于强化前的状态，已作废并整段重取）。
+分支 `task/gap-ac253-session-primitives-shared-layer-adoption`（worktree `/home/yale/work/quay-worktrees/gap-ac253-session-primitives-shared-layer-adoption`）。落地提交 `623309d32`（主体）/ `eb38d92ad`（CLI 修复 + 真 socket 测试）/ **`54b0eed58`（本轮：按 2026-09-13T15:35Z 强化后的 criterion 退掉 serve-send.ts 的两处手写 socket）** / **`d4668c4d0`（本轮补：委托引入的「账本不可写 ⇒ 未捕获异常」预检，见残留 5c）**。**AC6 的四条读数全部晚于 `d4668c4d0` 的提交时刻 `2026-09-13T16:17:45Z`**（上一轮的 AC6 读数属于强化前的状态，已作废并整段重取）。
 
 ### AC1 — AC-253 criterion 三条读数（**打在与落地同版本的判据上**）
 
@@ -190,7 +190,7 @@ provenance：`packages/quay/src/primitives/PROVENANCE.md`（fleet 仓路径 + �
 | `node --test plugin/test/peer-identity-probe.test.mjs` | `tests 23 / pass 23 / fail 0` |
 | `node --test plugin/test/orphan-session-check.test.mjs` | `tests 14 / pass 14 / fail 0` |
 | `node --test packages/quay/test/build-plugin-dist.test.mjs`（⚠️ 上一轮把路径写成 `plugin/test/…`，该路径**不存在**；文件实际在 `packages/quay/`） | `tests 24 / pass 24 / fail 0`（含 `AC1 (AC-205) — bundled send-to-session.js is self-contained`） |
-| `node --test plugin/test/session-primitives-adoption.test.mjs`（新） | `tests 9 / pass 9 / fail 0`（本轮新增 `AC3 — pty-frame's production consumer after the amendment` 一条） |
+| `node --test plugin/test/session-primitives-adoption.test.mjs`（新） | `tests 10 / pass 10 / fail 0`（本轮新增 `AC3 — pty-frame's production consumer after the amendment` 与 `AC3-adjacent — an UNUSABLE ledger never crashes a lane` 两条） |
 | `node --test plugin/test/primitives-drift-check.test.mjs`（新） | `tests 7 / pass 7 / fail 0` |
 | `node --test plugin/test/inner-blocked-signal.test.mjs` | `tests 37 / pass 37 / fail 0` |
 | `node --test packages/quay/test/npm-pack-e2e.test.mjs` | `tests 9 / pass 9 / fail 0`（先红后绿，见下） |
@@ -198,7 +198,7 @@ provenance：`packages/quay/src/primitives/PROVENANCE.md`（fleet 仓路径 + �
 | `bash scripts/test.sh --for-task gap-ac253-session-primitives-shared-layer-adoption --allow-thin` | `pass 273 / fail 0`，`SCOPED_EXIT=0`；静态门里 `primitives-drift-check: PASS`，无 `STATIC_CHECK_FAILED` / `STATIC_CHECK_NOT_EVALUATED` |
 | `bash plugin/scripts/checker-mutation-check.sh --check --only primitives-drift-check` | `MUTATION primitives-drift-check: pass`；`checkers_with_mutation: 73`、`uncovered: 0` |
 
-**本轮在 `54b0eed58` 上把上表逐条重跑**（改了两处 socket 委托后）：`observation.test.mjs` 51/51、`serve-handlers.test.mjs` 63/63、`serve-sessions.test.mjs` 8/8、`peer-identity-probe.test.mjs` 23/23、`orphan-session-check.test.mjs` 14/14、`primitives-drift-check.test.mjs` 7/7、`inner-blocked-signal.test.mjs` 37/37、`build-plugin-dist.test.mjs` 24/24、`npm-pack-e2e.test.mjs` 9/9、`session-primitives-adoption.test.mjs` 9/9 —— 与上表逐条一致（唯一变化是新增那条断言使 8→9）；`npx tsc --noEmit -p packages/quay` = **0 error**。特别是 **`serve-handlers.test.mjs` 的 wire-format 测试**（真 socket、逐字节断言 auth/user 两帧）在 L1 改为 `deliver()` 后仍绿 —— 它钉住了「委托后线上字节未变」。
+**本轮在 `54b0eed58` 上把上表逐条重跑**（改了两处 socket 委托后）：`observation.test.mjs` 51/51、`serve-handlers.test.mjs` 63/63、`serve-sessions.test.mjs` 8/8、`peer-identity-probe.test.mjs` 23/23、`orphan-session-check.test.mjs` 14/14、`primitives-drift-check.test.mjs` 7/7、`inner-blocked-signal.test.mjs` 37/37、`build-plugin-dist.test.mjs` 24/24、`npm-pack-e2e.test.mjs` 9/9、`session-primitives-adoption.test.mjs` 10/10 —— 与上表逐条一致（唯一变化是新增那两条断言使 8→10）；补 5c 的预检后 `serve-handlers.test.mjs` 63/63 与 `session-primitives-adoption.test.mjs` 10/10 又各跑一次，仍绿；`npx tsc --noEmit -p packages/quay` = **0 error**。特别是 **`serve-handlers.test.mjs` 的 wire-format 测试**（真 socket、逐字节断言 auth/user 两帧）在 L1 改为 `deliver()` 后仍绿 —— 它钉住了「委托后线上字节未变」。
 
 **打包缺口（Plan 第 41 行预告的那个读数）**：`.mjs` **确实**漏出过产物 —— 第一次 scoped 门在 `packages/quay/test/npm-pack-e2e.test.mjs` 红：`build-plugin-dist failed: Could not resolve "../../packages/quay/src/primitives/session-liveness.mjs"`（`plugin/scripts/inner-blocked-signal.ts:146`）。根因：`packages/quay/scripts/build-plugin-dist.mjs` 的 `coreSrcAliasPlugin` 过滤器只认 `\.ts$`，于是 repo-root 相对路径在**暂存的** `packages/quay/plugin/` 布局下没有改指（`packages/quay/plugin/packages/quay/src/…` 不存在）。修法 = 把过滤器扩到 `\.ts|\.mjs`（映射本就按 `packages/quay/src/` 后缀做，扩展名只决定「是否认领」），**没有**改成「在 plugin/scripts 下重写一份」。修后 `npm-pack-e2e.test.mjs` 9/9 绿。（`packages/quay/src` 内部的相对 import 从不经过该过滤器，所以 Core dist 一直能构建 —— 这就是「同一个 .mjs 在 Core bundle 里正常、在 plugin bundle 里炸」的原因。）
 
@@ -211,14 +211,14 @@ provenance：`packages/quay/src/primitives/PROVENANCE.md`（fleet 仓路径 + �
 - **第三个读数**（防恒真）：把 `lifecycle.source` 置空 ⇒ `valid: false` —— 校验器不是只查值域。
 - 生成侧真接线：`observation.ts` 的 `attachValidatedSession` 只有 `verdict.valid` 才附加 `session`，否则 `session: null` + `sessionRefusal: verdict.errors`；`serve-sessions.ts` 渲染 `状态记录不可用（共享 schema 拒收）：…` 而**不是**渲染一个折叠值。
 
-### AC6 — 生产载体（四条读数，**均晚于本轮落地提交 `54b0eed58` 的时刻 `2026-09-13T16:08:37Z`**）
+### AC6 — 生产载体（四条读数，**均晚于本轮最后落地提交 `d4668c4d0` 的时刻 `2026-09-13T16:17:45Z`**）
 
 | # | 时刻（UTC） | 真实路径 | 读数 |
 |---|---|---|---|
-| 1 | `16:09:35Z` | `primitives-drift-check` 打在真实检出上 | `exit 0`，四行 `ok`，`PASS — all four primitives match the pinned quay-fleet blob byte-for-byte.` |
-| 2 | `16:12:04Z` | `quay serve` 的 `/sessions`（**worktree 的代码**，cwd/served root = 真工作区 `/home/yale/work/quay`） | HTTP `200`、`79319` bytes、`session.lifecycle=` 命中 **32** 条，例：`session.lifecycle=working · session.activity=idle（age 3453s）`。该面同时走 session-liveness（transcript mtime 供 `activity.ageSec`）与 session-schema（两维记录 + 校验器） |
-| 3 | `16:12:31Z` | **L1 真投递**：shipped CLI `send-to-session.ts --self` 打到**真的 unix socket**（`CLAUDE_CODE_MESSAGING_SOCKET` 指向本次起的真 socket，对端收到全部字节） | CLI `exit 0`；线上 2 行 = `{"type":"auth",…}` 然后 `{"type":"user",…}`（两帧都到达，**证明委托给 `deliver()` 后 800ms 关窗的移除没有截断**）；L1 账本新增一条：`{"level":"L1","who":"script-1504547","delivered":true,"error":null,"payloadSummary":{"length":279,"sha256_12":"4345ddce3aeb","firstLine":"{\"type\":\"auth\",\"token\":\"tok-ac253-L1\"}"}}`（默认账本路径 `/tmp/quay-session-send-audit.jsonl` —— 无 workspace 的调用者走共享默认值，见「诚实残留」） |
-| 4 | `16:12:48Z` | **L2 真投递**：shipped CLI `send-to-session.ts --keys --sock <真 pty.sock> --audit <真路径> "/clear"` | CLI `exit 0`；对端按 `[4B len][1B tag][payload]` 解出**两帧**：`(tag=1, len=32, '{"t":"auth","token":"tok-ac253"}')`、`(tag=0, len=6, '/clear')`（DATA 帧**原样**，控制字节未改写）；全线上 hex `00000020017b2274223a2261757468222c22746f6b656e223a22746f6b2d6163323533227d00000006002f636c656172`；账本 `{"level":"L2","who":"script-1513584","delivered":true,"payloadSummary":{"length":6,"sha256_12":"ddf7839cb8fc","firstLine":"/clear"}}`；**失败路径**（socket 不存在）`exit 4` 且账本**照写第二条**（`delivered:false`） |
+| 1 | `16:18:27Z` | `primitives-drift-check` 打在真实检出上 | `exit 0`，四行 `ok`，`PASS — all four primitives match the pinned quay-fleet blob byte-for-byte.` |
+| 2 | `16:18:38Z` | `quay serve` 的 `/sessions`（**worktree 的代码**，cwd/served root = 真工作区 `/home/yale/work/quay`） | HTTP `200`、`76916` bytes、`session.lifecycle=` 命中 **32** 条，例：`session.lifecycle=working · session.activity=busy（age 221s）`。该面同时走 session-liveness（transcript mtime 供 `activity.ageSec`）与 session-schema（两维记录 + 校验器） |
+| 3 | `16:18:38Z` | **L1 真投递**：shipped CLI `send-to-session.ts --self` 打到**真的 unix socket**（`CLAUDE_CODE_MESSAGING_SOCKET` 指向本次起的真 socket，对端收到全部字节） | CLI `exit 0`；线上 2 行，`type` 依次 `auth` / `user`（两帧都到达，**证明委托给 `deliver()` 后 800ms 关窗的移除没有截断**）；L1 账本新增一条：`{"level":"L1","who":"script-1656270","when":"2026-09-13T16:18:38.747Z","delivered":true,"payloadSummary":{"length":289,"sha256_12":"ff9935324778","firstLine":"{\"type\":\"auth\",\"token\":\"tok-ac253-L1b\"}"}}`（默认账本路径 `/tmp/quay-session-send-audit.jsonl` —— 无 workspace 的调用者走共享默认值，见「诚实残留」5b） |
+| 4 | `16:18:39Z` | **L2 真投递**：shipped CLI `send-to-session.ts --keys --sock <真 pty.sock> --audit <真路径> "/clear"` | CLI `exit 0`；对端按 `[4B len][1B tag][payload]` 解出**两帧**：`(tag=1, len=32, '{"t":"auth","token":"tok-ac253"}')`、`(tag=0, len=6, '/clear')`（DATA 帧**原样**，控制字节未改写）；全线上 hex `00000020017b2274223a2261757468222c22746f6b656e223a22746f6b2d6163323533227d00000006002f636c656172`；账本 `{"level":"L2","who":"script-1656299","when":"2026-09-13T16:18:39.053Z","delivered":true,"payloadSummary":{"length":6,"sha256_12":"ddf7839cb8fc","firstLine":"/clear"}}`；**失败路径**（socket 不存在）`exit 4` 且账本**照写第二条**（`delivered:false`） |
 
 ⚠️ 四条读数都是**真读数**：`/sessions` 走的是真实的 `claude agents --json` 注册表（16 行）+ transcript 扫描；L1/L2 走的是 **shipped CLI + 真 unix socket**（对端收到的字节被逐字节记录）。⛔ 没有一条是在测试夹具里取的。
 
@@ -234,13 +234,14 @@ provenance：`packages/quay/src/primitives/PROVENANCE.md`（fleet 仓路径 + �
 4. **`plugin/scripts/driver-runtime.ts:1029` 是另一份 starttime 解析**（不在原 Touches 里），未替换 —— 它另有 CLK_TCK 自推导（`/proc/self/stat` + `/proc/uptime`），换掉会改变它自己的推导语义，越出「零新功能」边界。登记为已知残留。
 5. **fleet 的 `deliver` / `deliverKeys` 本轮起**被本仓库调用（`serve-send.ts:52` 的 import、L1 在 `sendSessionFrames` 已改为 `return deliver(...)`、L2 在 `sendKeysToSession` 已改为 `return deliverKeys(...)`）—— 上一轮登记为「未被调用」的那条**已作废**：强化后的 criterion 明确要求「全仓只有一份」，委托是唯一同时满足「有消费者」与「只有一份」的形态。**`readAuditTrail` 仍未接**：它按 delivery `id` 检索，而本仓库的 `message-receipts.jsonl` 读者按 `sessionId` 检索，接上会改既有读契约（保留为未接线，登记而非掩饰）。
 5b. **L1 的审计账本默认落在 `/tmp/quay-session-send-audit.jsonl`**（`DEFAULT_SEND_AUDIT_PATH`）：共享 `deliver()` 的签名要求 `auditLogPath` 必填，而 `sendSessionFrames` 是库函数、无法凭空知道 workspace root。web 入口（`sendToSession`）会传 `<receiptDir>/session-send-audit.jsonl`，所以**生产 web 路径的账落在 `.quay/`**；只有无 workspace 的调用者（诊断 CLI 的 `--self/--pid` 模式、直接调库的测试）走 tmp 默认值。⚠️ 这是本轮**新增的行为**（上一轮这条路径一条账都不写），如实登记。
+5c. **委托引入过一个「账本不可写 ⇒ 未捕获异常」，本任务内已修并留回归**：共享 `deliver`/`deliverKeys` 的账本 append **不是 best-effort** —— 它在 socket 回调里抛出 ⇒ 未捕获异常 ⇒ 进程带栈退出（实测旧状态：`--keys --sock <活 socket> --audit <ENOTDIR 路径>` ⇒ `exit 1` + `Node.js v24.19.0` 栈，**没有任何判词**）。web 路径上这比坏退出码更糟：`sendToSession` 传的是 `<receiptDir>/session-send-audit.jsonl`，`.quay/` 不可写就会**每次 `/send` 打死 `quay serve` 进程**，而隔壁的回执写（`appendMessageReceipt`）明确是 best-effort。⇒ 修法：开 socket **之前**校验账本目标，然后诚实降级 —— L1 退回文档化的默认路径（投递本身不被记账问题挡住），L2 **拒绝并给理由**（`audit ledger not writable: <path>`，因为路径是调用者点名的，悄悄写去别处就是撒谎），CLI 渲染成常规失败 `exit 4`。`mkdirSync` 与 `appendAuditRecord` 自己那一步是同一个调用，故不引入新的文件系统风险，只是把失败挪到能报告的地方。回归：`plugin/test/session-primitives-adoption.test.mjs` 的 `AC3-adjacent — an UNUSABLE ledger never crashes a lane`（真 socket；L1 仍投递 ∧ CLI `exit 4` 且有理由 ∧ stderr **无** `Uncaught`/`Node.js v`）。
 6. **journal 文件格式未变**（Plan 第 5 步要求的决定）：`message-receipts.jsonl` 的**写入实现**换成共享 `appendAuditRecord`，写出字节与原来逐字相同（同一个 `mkdirSync(dirname)` + `appendFileSync(JSON.stringify(record)+"\n")`），新增的 `payloadSummary` 是**增量字段**（既有读者忽略未知键，`readMessageReceipts` 亦如此）。⇒ 既有读者零回退。
 7. **`.d.mts` 声明文件**（四份，本地手写、不参与逐字节比对）：root tsconfig 是 `allowJs` + `checkJs`，被 import 的 `.mjs` 会被一起类型检查，而冻结副本里不能写 `// @ts-nocheck`（会破坏逐字节同一性）。⇒ 用兄弟 `.d.mts` 声明类型。drift manifest 只钉四个 `.mjs`。
 8. **scoped-gate 缓存的 sha 记的是「门实际 gated 的那个 develop tip」**：门在 `1ea66a0b1` 上跑绿，这次 `HEAD^2` = `rev-parse develop` = `92fc24476`，两者一致，缓存即记 `92fc24476`。（中途还跑过一次：那次 merge 到的 tip 是 `69aac66d` 而 develop 已前进到 `cd63c8dd`，当时按同一原则记 `69aac66d` 并重跑——记一个没跑过的 tip 会让 fan-in 错误跳过门，记实际跑过的 tip 最多让 fan-in 重跑一次门，是成本不是错误。）
 
 ### DoD 自查
 
-四个原语在本仓库**只有一份**（AC2，含三态漂移检查）；其中三个有本仓库产品/脚本文件的**直接 import**，`pty-frame` 经共享模块在生产调用链上被使用（AC3，修订并登记 —— 与强化后 criterion 的「不得自己开 socket」互斥，理由与四条可失败断言在 AC3 节）；**被替换的手写副本逐条归零**，含本轮退掉的 L1/L2 两处手写 socket（`serve-send.ts` 已不再 import `node:net`）；折叠记录负控制真被拒（AC5）；在这个状态上 AC-253 criterion 逐字 exit 0、移走 `primitives/` 转 exit 1；**四条读数均在生产载体上、均晚于本轮落地时刻 `16:08:37Z`**（AC6）。残留逐条登记（observation.ts 的注入缝解析、`readAuditTrail` 未接、L1 默认账本路径）。
+四个原语在本仓库**只有一份**（AC2，含三态漂移检查）；其中三个有本仓库产品/脚本文件的**直接 import**，`pty-frame` 经共享模块在生产调用链上被使用（AC3，修订并登记 —— 与强化后 criterion 的「不得自己开 socket」互斥，理由与四条可失败断言在 AC3 节）；**被替换的手写副本逐条归零**，含本轮退掉的 L1/L2 两处手写 socket（`serve-send.ts` 已不再 import `node:net`）；折叠记录负控制真被拒（AC5）；在这个状态上 AC-253 criterion 逐字 exit 0、移走 `primitives/` 转 exit 1；**四条读数均在生产载体上、均晚于本轮落地时刻 `16:08:37Z`**（AC6）。残留逐条登记（observation.ts 的注入缝解析、`readAuditTrail` 未接、L1 默认账本路径、以及 5c 那个已修的「账本不可写 ⇒ 崩溃」）。
 
 ## DoD
 
