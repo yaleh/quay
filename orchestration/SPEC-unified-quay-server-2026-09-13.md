@@ -289,7 +289,43 @@ MCP over HTTP（拉）  状态变更：halt / forceDispatch / task 写入 / life
 5. **`claude -p --resume <id>` 能否向【运行中】的会话注入输入**？`--bg --resume` 的帮助写着
    「…**or starts a copy and says so when the session is already running**」⇒ 疑似起副本而非注入。
    **这决定了运行中会话的输入通道到底有几条**，需实测确认。
+
+   > **✅ 结论（实测，2026-09-13，Claude Code 2.1.270）**：**不能。该通道【不向运行中会话注入输入】。**
+   > 读数引用：`docs/analysis/resume-injection-and-sdk-visibility-2026-09-13.md` §1。
+   > - `claude -p --resume <运行中 id>`：exit 0，**⛔ 无任何「已在运行/起副本」提示**，
+   >   **⛔ 不产生新 session-id / 新 transcript**，那一轮被写进**同一个 session-id 的同一个
+   >   transcript 文件**，但由 resume 进程自己执行（该轮 `entrypoint:"sdk-cli"`，目标会话自己的
+   >   各轮是 `entrypoint:"cli"`）。**运行中会话的活上下文从不接收它**（问它收到了哪些 user
+   >   消息 → 注入的那条不在其中；两个 nonce 直接问 → 「No — for both」）。
+   >   ⇒ 两个进程**静默双写同一份 transcript**，**文件与活上下文分叉**。
+   > - 文档里那句「starts a copy and says so」**只对 `--bg --resume` 成立且被实测证实**：
+   >   `note: session 0e20eed2 is open in another Claude Code process, so this started a copy as
+   >   becb979c. The original conversation is unchanged.` + 新 session-id + 新 transcript。
+   >   ⇒ **`-p --resume` 的同一冲突检测【缺席】**——这是文档化契约的一个缺口。
+   > - ⚠️ **方法论**：AC 原定的三项读数（提示原文 / nonce 是否进原 transcript / 是否新 id）**全是
+   >   文件代理量**，而该文件此时**有两个写者** ⇒ 三条合起来会把「起了副本」**判成「注入原会话」**。
+   >   判定「输入是否到达运行中会话」的唯一直接量是**那个会话自己看得见什么**（硬规则 4b）。
+   >
+   > **⇒ 对 §4.2 降级链的影响（本问题原本要回答的架构判断）**：§4.1 通道清单里
+   > 「向**运行中**会话送入内容」**确实一条文档化通道都没有**——
+   > `claude -p --resume <id> --output-format json` 虽被官方推荐为「从脚本访问会话数据」，
+   > 但其契约**未覆盖「目标正在运行」这一情形**（静默双写、输入不到达）。
+   > ⇒ §4.2「未文档化能力必须配文档化后备」对这一项**结构上无法满足**，应改写为
+   > **「该能力无后备，只能降级为『必须有人 attach』」**（messaging socket 直投与 pty.sock
+   > 按键注入仍是仅有的两条可用通道，且两条都未文档化）。
 6. **Agent SDK 创建的会话是否出现在 `claude agents --json`**？官方文档未提及，需实测。
+
+   > **✅ 结论（实测，2026-09-13，Claude Code 2.1.270 + `@anthropic-ai/claude-agent-sdk` 0.3.270）**：
+   > **【出现在】。§4.1/§6.7 以 `agents --json` 为会话发现正源【没有】SDK 盲区。**
+   > 读数引用：`docs/analysis/resume-injection-and-sdk-visibility-2026-09-13.md` §2。
+   > - `claude agents --json` 含该会话：
+   >   `{"pid":1659404,"kind":"interactive","sessionId":"1a77f89e-2238-4729-bb89-a1712852c869","status":"idle",…}`
+   > - `~/.claude/sessions/1659404.json` 同样存在（19 键，含 `entrypoint:"sdk-cli"`、
+   >   `messagingSocketPath`、`peerFeatures`）。
+   > - **⚠️ 限定（必须写进设计）**：`agents --json` 把它报成 **`kind:"interactive"`** ——
+   >   **与交互式会话同形，`kind` 区分不出 SDK 会话**。唯一可区分的字段是 **`entrypoint`**
+   >   （SDK=`sdk-cli` / 交互式=`cli`），而它**只在 `~/.claude/sessions/<pid>.json` 里，
+   >   `agents --json` 不暴露**。⇒ 需要「这条会话是谁起的」时，**必须读那个文件的 `entrypoint`**。
 
 ---
 
