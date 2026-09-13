@@ -60,8 +60,11 @@ async function loadSendSessionFrames(): Promise<
 // This is the mode the cross-session MESSAGING socket cannot serve: a slash command such as `/clear`
 // has no native cross-session form, and hand-rolled `tmux send-keys` is forbidden in this repo. The
 // bytes go out as a pty.sock DATA frame, unmodified (control bytes included). The delivery + audit
-// implementation lives in packages/quay/src/serve-send.ts's `sendKeysToSession` (one copy of the
-// frame codec + audit ledger for the whole repo) — this script only parses argv and resolves paths.
+// implementation lives in packages/quay/src/primitives/delivery-audit.mjs's `deliverKeys` (the repo's
+// ONE L2 socket lane — gap-ac253-session-primitives-shared-layer-adoption retired the hand-written
+// copy that used to sit in serve-send.ts's `sendKeysToSession`, which is now a thin mapping of
+// deliverKeys' audit record onto this CLI's exit codes) — this script only parses argv and resolves
+// paths.
 //
 // ⛔ The socket path is REQUIRED and never guessed: this repo has no verified pty.sock discovery
 // convention, and inventing one would fabricate a fact (硬规则 6).

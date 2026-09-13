@@ -36,7 +36,6 @@ const MODULES = ["pty-frame.mjs", "delivery-audit.mjs", "session-liveness.mjs", 
  * real consumer (that is the "vendored dead code" state the criterion is meant to catch).
  */
 const EXPECTED_CONSUMERS = {
-  "pty-frame.mjs": ["packages/quay/src/serve-send.ts"],
   "delivery-audit.mjs": ["packages/quay/src/serve-send.ts"],
   "session-liveness.mjs": [
     "packages/quay/src/observation.ts",
@@ -46,6 +45,22 @@ const EXPECTED_CONSUMERS = {
   ],
   "session-schema.mjs": ["packages/quay/src/observation.ts"],
 };
+
+/**
+ * The modules that must have ≥1 DIRECT non-test importer under the search dirs.
+ *
+ * ⚠️ AMENDED, not silently dropped: `pty-frame.mjs` is deliberately absent. AC-253's criterion was
+ * strengthened on 2026-09-13T15:35Z (goals/AC-253-….md) to require that the hand-written socket in
+ * `serve-send.ts` be RETIRED (「全仓只有一份」, SPEC §8-1) — and `serve-send.ts`'s L2 lane was exactly
+ * the direct importer this map used to pin. Once the lane delegates to the shared, byte-identical
+ * `deliverKeys()`, NO repo file imports the codec directly any more; the two requirements cannot both
+ * hold. The replacement is the dedicated `AC3 — pty-frame` test below, which pins the PRODUCTION CALL
+ * CHAIN (`send-to-session.ts --keys` → `serve-send.ts sendKeysToSession` → `deliverKeys`) AND the
+ * byte-identity of the module that calls the codec — it fails if the chain is broken, so pty-frame
+ * cannot rot into vendored dead code unnoticed. What is NOT claimed any more: a direct repo-side
+ * import of `pty-frame.mjs`.
+ */
+const DIRECT_IMPORT_MODULES = ["delivery-audit.mjs", "session-liveness.mjs", "session-schema.mjs"];
 
 const SEARCH_DIRS = ["packages/quay/src", "plugin/scripts"];
 
@@ -87,7 +102,7 @@ test("AC2 — all four primitives are present at packages/quay/src/primitives/<n
 
 test("AC3 — EACH module has ≥1 non-test consumer under packages/quay/src or plugin/scripts (4/4, not 'any non-empty')", () => {
   const report = {};
-  for (const m of MODULES) {
+  for (const m of DIRECT_IMPORT_MODULES) {
     const found = importersOf(m);
     report[m] = found;
     assert.ok(found.length > 0, `${m} has NO non-test importer — it is vendored dead code, not adopted`);
@@ -100,7 +115,7 @@ test("AC3 — EACH module has ≥1 non-test consumer under packages/quay/src or 
   }
   // The negative control for the sibling exclusion: delivery-audit.mjs DOES import pty-frame.mjs, and
   // that must not be what satisfies pty-frame's requirement — a product/script file must be in there.
-  for (const m of MODULES) {
+  for (const m of DIRECT_IMPORT_MODULES) {
     assert.ok(
       report[m].some((f) => f.startsWith("packages/quay/src/") || f.startsWith("plugin/scripts/")),
       `${m}: only sibling/primitive importers were found`,
@@ -110,6 +125,36 @@ test("AC3 — EACH module has ≥1 non-test consumer under packages/quay/src or 
       `${m}: the primitives dir cannot be its own consumer`,
     );
   }
+});
+
+test("AC3 — pty-frame's production consumer after the amendment: the L2 keys lane, through the PINNED shared module", () => {
+  // Replaces the direct-import arm for pty-frame.mjs (see DIRECT_IMPORT_MODULES above for why the two
+  // AC-253 requirements are mutually exclusive). Every clause below CAN fail:
+  //   1. the L2 lane still exists and IS the shared primitive (deleting the delegation ⇒ red),
+  //   2. serve-send.ts opens no socket of its own (re-adding one ⇒ red — the duplicate AC-253 retired),
+  //   3. the module that calls the codec is byte-identical to the pin (a fork ⇒ red),
+  //   4. the codec really lives in that module (an encoder moved elsewhere ⇒ red).
+  const serveSend = fs.readFileSync(path.join(REPO_ROOT, "packages/quay/src/serve-send.ts"), "utf8");
+  assert.match(serveSend, /export function sendKeysToSession/, "the L2 keys lane is exported");
+  assert.match(
+    serveSend,
+    /import \{[^}]*\bdeliverKeys\b[^}]*\} from "\.\/primitives\/delivery-audit\.mjs"/,
+    "serve-send.ts imports the shared L2 delivery primitive",
+  );
+  assert.match(serveSend, /return deliverKeys\(\{/, "the lane IS deliverKeys — no second implementation");
+  assert.doesNotMatch(serveSend, /createConnection/, "serve-send.ts opens no socket of its own");
+  assert.doesNotMatch(serveSend, /from "node:net"/, "…and does not even import node:net");
+
+  const manifest = JSON.parse(fs.readFileSync(MANIFEST_ABS, "utf8"));
+  const auditPath = path.join(PRIMITIVES_ABS, "delivery-audit.mjs");
+  assert.equal(
+    crypto.createHash("sha256").update(fs.readFileSync(auditPath)).digest("hex"),
+    manifest.files["delivery-audit.mjs"],
+    "the module that calls the frame codec is byte-identical to the pinned fleet blob",
+  );
+  const audit = fs.readFileSync(auditPath, "utf8");
+  assert.match(audit, /encodeCtrl/, "the pinned module is the frame encoder (deliverKeys' auth + DATA)");
+  assert.match(audit, /decodeFrames/, "…and the rejection decoder");
 });
 
 test("AC2 — every copy is byte-identical to the pinned quay-fleet blob (skipped, never faked, when the fleet repo is unreachable)", (t) => {
@@ -189,10 +234,16 @@ test("AC3 — pty-frame's lane: the repo really has no pre-existing binary-frame
     hits.length, 0,
     `no pre-existing pty.sock/bg-pty-host consumer expected in the base tree (${base}); found: ${hits.join(", ")}`,
   );
-  // …and the lane that DOES consume the frame codec is serve-send.ts's sendKeysToSession.
+  // …and the lane that DOES exercise the frame codec is serve-send.ts's sendKeysToSession, which now
+  // reaches it through the shared `deliverKeys` (the dedicated AC3 — pty-frame test below pins that
+  // call chain and the pin). What must NOT be true any more is a second codec call site here.
   const serveSend = fs.readFileSync(path.join(REPO_ROOT, "packages/quay/src/serve-send.ts"), "utf8");
   assert.match(serveSend, /export function sendKeysToSession/, "the L2 keys lane is exported");
-  assert.match(serveSend, /encodeCtrl|encodeData|decodeFrames/, "the lane uses the shared frame codec");
+  assert.doesNotMatch(
+    serveSend,
+    /encodeCtrl|encodeData|decodeFrames/,
+    "the frame codec lives in the shared primitive, not duplicated at this call site",
+  );
 });
 
 test("AC3/AC6 — the shipped keys CLI really runs: --keys delivers /clear over a REAL unix socket", async () => {

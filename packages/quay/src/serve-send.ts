@@ -1,9 +1,12 @@
 // serve-send.ts — /send handler + the shared cross-session message-delivery protocol.
 //
-// gap-webui-message-delivery-entry. The socket protocol (auth frame + user frame over the Claude
-// Code unix-socket messaging endpoint) is extracted from plugin/scripts/send-to-session.ts into
-// sendSessionFrames here — ONE implementation that the diagnostic script reuses (AC1: 两份实现 ⇒ 假),
-// not a copy pasted into the web layer. The web send entry reports a REAL delivery state (AC2),
+// gap-webui-message-delivery-entry. The socket WIRE FORMAT (auth frame + user frame over the Claude
+// Code unix-socket messaging endpoint) is composed in sendSessionFrames here and delivered by the
+// shared `deliver()` primitive — ONE implementation that the diagnostic script reuses (AC1: 两份实现
+// ⇒ 假), not a copy pasted into the web layer. gap-ac253-session-primitives-shared-layer-adoption
+// moved the socket itself (connect / write / rejection detection / ledger) into
+// packages/quay/src/primitives/delivery-audit.mjs, so this module no longer opens one. The web send
+// entry reports a REAL delivery state (AC2),
 // because `success:true` on a fire-and-forget socket write ≠ delivered (SPEC-web-session-observability
 // §7.3: the real state machine is 已发送 → held(待批准) → expired(到期未批准,丢弃) | 已批准 → 送达).
 //
@@ -27,8 +30,6 @@
 // ——本模块把回执落盘（`message-receipts.jsonl`），响应据此显示 held→expired 的完整路径（SPEC §7.3）。
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import net from "node:net";
-import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -37,11 +38,18 @@ import { promisify } from "node:util";
 import { isValidSessionId, sessionTranscriptPath } from "./observation.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome } from "./serve-render.ts";
 import { resolvePluginScriptExec } from "./plugin-root.ts";
-// Shared session read/write primitives — the frame codec and the input-face audit ledger each exist
-// exactly ONCE in this repo, byte-identical to the pinned quay-fleet blob
-// (packages/quay/src/primitives/PROVENANCE.md; re-checked by plugin/scripts/primitives-drift-check.ts).
-import { decodeFrames, encodeCtrl, encodeData } from "./primitives/pty-frame.mjs";
-import { appendAuditRecord, summarizePayload } from "./primitives/delivery-audit.mjs";
+// Shared session read/write primitives — the socket delivery lanes (L1 message / L2 keys) and the
+// input-face audit ledger each exist exactly ONCE in this repo, byte-identical to the pinned
+// quay-fleet blob (packages/quay/src/primitives/PROVENANCE.md; re-checked by
+// plugin/scripts/primitives-drift-check.ts).
+//
+// ⛔ This module NEVER opens a socket of its own — no `node:net` import survives here at all
+// (AC-253's strengthened criterion retires the hand-written duplicate in serve-send.ts /
+// observation.ts as a SPEC §8-1 「只有一份实现」violation). The connect / write / rejection-detection
+// / ledger mechanics are `deliver` (L1) and `deliverKeys` (L2); what stays here is only THIS repo's
+// orchestration — which frames to compose, where the ledger goes, and how an outcome maps onto the
+// delivery vocabulary.
+import { appendAuditRecord, deliver, deliverKeys, summarizePayload } from "./primitives/delivery-audit.mjs";
 
 const execFileP = promisify(execFile);
 
@@ -77,55 +85,57 @@ export const MESSAGE_RECEIPTS_FILENAME = "message-receipts.jsonl";
  *  injected (SPEC §7.3 安全注记: 如实显示「由 quay web 注入」，不冒充平台验证过的身份). */
 export const WEB_SEND_FROM_NAME = "quay-web";
 
-// ── Shared socket protocol (extracted from plugin/scripts/send-to-session.ts) ──────────────────────
+// ── Shared socket protocol (composed here, delivered by the shared L1 lane) ────────────────────────
+
+/** Default L1 delivery ledger for callers with no workspace to put one in. This module is a library
+ *  and cannot invent a workspace root — a caller that HAS one (sendToSession passes
+ *  `<receiptDir>/session-send-audit.jsonl`) should always supply it, so the delivery record lands
+ *  next to the receipts it corroborates instead of in the OS temp dir. */
+const DEFAULT_SEND_AUDIT_PATH = path.join(os.tmpdir(), "quay-session-send-audit.jsonl");
 
 /**
- * Deliver one message over the Claude Code cross-session socket: connect → write the auth frame
+ * Deliver one message over the Claude Code cross-session socket: the auth frame
  * ({"type":"auth","token":…}) then the user frame (a <cross-session-message …> wrapper). This is the
  * SAME wire format plugin/scripts/send-to-session.ts writes (auth frame first, then the user frame),
- * shared so the diagnostic script and the web entry can never drift (AC1). The socket is fire-and-
- * forget (returns 0 bytes, no ack) — resolving `ok:true` means connect+write succeeded, NOT that the
- * message was consumed; delivery is VERIFIED by the target transcript (see verifyTranscriptDelivery),
- * never by this return.
+ * shared so the diagnostic script and the web entry can never drift (AC1).
+ *
+ * The connect/write/ledger mechanics are NOT here — they are `deliver()` in the shared
+ * `primitives/delivery-audit.mjs`, the repo's ONE socket-delivery implementation (AC-253 / SPEC §8-1).
+ * The socket is fire-and-forget (returns 0 bytes, no ack) — resolving `ok:true` means connect+write
+ * succeeded, NOT that the message was consumed; delivery is VERIFIED by the target transcript (see
+ * verifyTranscriptDelivery), never by this return.
  */
 export function sendSessionFrames(opts: {
   sockPath: string;
   token: string;
   text: string;
   fromName: string;
+  /** L1 ledger path (see DEFAULT_SEND_AUDIT_PATH). Records BOTH success and failure — the shared
+   *  `deliver` contract, because "only recording successes" is not an audit trail. */
+  auditLogPath?: string;
 }): Promise<{ ok: boolean; reason: string | null }> {
-  return new Promise((resolve) => {
-    const { sockPath, token, text, fromName } = opts;
-    let settled = false;
-    const finish = (ok: boolean, reason: string | null): void => {
-      if (settled) return;
-      settled = true;
-      resolve({ ok, reason });
-    };
-
-    const s = net.createConnection(sockPath);
-    s.on("connect", () => {
-      // ① auth 帧（文档明写：第一行）
-      s.write(JSON.stringify({ type: "auth", token }) + "\n");
-      // ② 消息帧（2026-08-15 实测到达的格式；from 沿用脚本的 `uds:${sockPath}` 线格式）
-      const frame = {
-        type: "user",
-        message: {
-          role: "user",
-          content: `<cross-session-message from="uds:${sockPath}" from-name="${fromName}" from-mode="bypass">\n${text}\n</cross-session-message>`,
-        },
-      };
-      s.write(JSON.stringify(frame) + "\n");
-      // socket 无 ack（实测返回 0 字节）；给对端一个读窗口再关（与脚本同值，保持协议行为一致）
-      setTimeout(() => {
-        s.end();
-        finish(true, null);
-      }, 800);
-    });
-    s.on("error", (e) => {
-      finish(false, e.message);
-    });
+  // ① auth 帧（文档明写：第一行）② 消息帧（2026-08-15 实测到达的格式；from 沿用脚本的
+  // `uds:${sockPath}` 线格式）。Two newline-terminated JSON frames in ONE payload — the same bytes
+  // the previous hand-written two-write version put on the wire (serve-handlers.test.mjs pins them).
+  const authFrame = JSON.stringify({ type: "auth", token: opts.token });
+  const userFrame = JSON.stringify({
+    type: "user",
+    message: {
+      role: "user",
+      content: `<cross-session-message from="uds:${opts.sockPath}" from-name="${opts.fromName}" from-mode="bypass">\n${opts.text}\n</cross-session-message>`,
+    },
   });
+  return deliver({
+    level: "L1",
+    who: opts.fromName,
+    target: opts.sockPath,
+    socketPath: opts.sockPath,
+    payload: `${authFrame}\n${userFrame}\n`,
+    auditLogPath: opts.auditLogPath ?? DEFAULT_SEND_AUDIT_PATH,
+  }).then((record) => ({
+    ok: record["delivered"] === true,
+    reason: typeof record["error"] === "string" ? record["error"] : null,
+  }));
 }
 
 // ── Delivery-state determination (VERIFIED via the single judgment source) ─────────────────────────
@@ -398,6 +408,12 @@ export async function sendToSession(opts: SendToSessionOpts): Promise<SendOutcom
     token: endpoint.token,
     text: message,
     fromName: WEB_SEND_FROM_NAME,
+    // The L1 delivery ledger lands beside the receipts it corroborates (both are this send's record);
+    // no workspace ⇒ the shared default (OS temp dir). The record is written on FAILURE too — the
+    // shared `deliver` contract this module adopted.
+    auditLogPath: opts.receiptDir == null
+      ? undefined
+      : path.join(opts.receiptDir, "session-send-audit.jsonl"),
   });
   if (!sent.ok) {
     persist("error", endpoint.name);
@@ -444,13 +460,15 @@ export interface KeysDeliveryOutcome {
  * forbids hand-rolled `tmux send-keys`. Bytes pass through UNMODIFIED — `0x03` (SIGINT) and every
  * other control byte are injected exactly as typed, never stripped or re-encoded.
  *
- * The frame codec comes from `primitives/pty-frame.mjs` (`encodeCtrl` / `encodeData` /
- * `decodeFrames`) and the audit ledger from `primitives/delivery-audit.mjs` (`appendAuditRecord` /
- * `summarizePayload`) — ⛔ neither is re-implemented here. What this function owns is the repo's
- * own orchestration: endpoint/auth conventions, the grace-window inference, and the audit path,
- * which are this repo's, not the fleet facade's. An audit record is appended on EVERY exit path —
- * success, connection error, explicit auth rejection, and timeout — matching the shared module's
- * contract that a delivery failure can never simply skip the ledger.
+ * The WHOLE L2 protocol — pty.sock connect, the CTRL auth frame, the grace-window inference of "auth
+ * accepted by absence", the DATA frame, the frame-codec decode of a rejection — lives in the shared
+ * `deliverKeys()` (`primitives/delivery-audit.mjs`, the repo's ONE implementation, byte-identical to
+ * the pinned quay-fleet blob). ⛔ This function opens NO socket of its own: AC-253's strengthened
+ * criterion retires the hand-written duplicate (any own socket open here ⇒ SPEC §8-1 violated,
+ * 「全仓只有一份」). What stays here is the repo's own mapping of `deliverKeys`' audit record onto
+ * this module's `KeysDeliveryOutcome` vocabulary. `deliverKeys` appends a ledger record on EVERY
+ * exit path — success, connection error, explicit auth rejection, and timeout — so a delivery
+ * failure can never simply skip the ledger.
  */
 export function sendKeysToSession(opts: {
   sockPath: string;
@@ -463,78 +481,24 @@ export function sendKeysToSession(opts: {
   /** How long to wait after the auth frame for an explicit rejection before sending DATA. */
   authGraceMs?: number;
 }): Promise<KeysDeliveryOutcome> {
-  const dataBuffer = Buffer.isBuffer(opts.bytes) ? opts.bytes : Buffer.from(opts.bytes);
-  const timeoutMs = opts.timeoutMs ?? 2000;
-  const authGraceMs = opts.authGraceMs ?? 50;
-  const id = crypto.randomUUID();
-
-  return new Promise((resolve) => {
-    let settled = false;
-    let recvBuf: Buffer<ArrayBufferLike> = Buffer.alloc(0);
-    let graceTimer: ReturnType<typeof setTimeout> | null = null;
-    let rejectedAs: string | null = null;
-
-    const finish = (delivered: boolean, error: string | null): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (graceTimer) clearTimeout(graceTimer);
-      try { socket.destroy(); } catch { /* already gone */ }
-      // Same write path on every exit — the shared ledger helper, never a bespoke append.
-      try {
-        appendAuditRecord(opts.auditLogPath, {
-          id,
-          level: "L2",
-          who: opts.who ?? "quay-serve",
-          when: new Date().toISOString(),
-          target: opts.target ?? opts.sockPath,
-          payloadSummary: summarizePayload(dataBuffer),
-          delivered,
-          error: error ?? null,
-          firstStatusChangeAt: null,
-        });
-      } catch {
-        // ledger persistence is best-effort — the delivery already happened or already failed
-      }
-      resolve({ delivered, error, rejectedAs });
-    };
-
-    const timer = setTimeout(() => finish(false, "timeout"), timeoutMs);
-    const socket = net.createConnection(opts.sockPath);
-
-    socket.on("data", (chunk: Buffer) => {
-      recvBuf = Buffer.concat([recvBuf, chunk]);
-      const { frames, rest } = decodeFrames(recvBuf);
-      recvBuf = rest; // a partial tail is kept, never thrown away — the codec's whole point
-      for (const frame of frames) {
-        if (frame.tag !== 1) continue; // only CTRL frames carry auth outcomes
-        let ctrl: { t?: string; message?: string } | null = null;
-        try { ctrl = JSON.parse(frame.payload.toString("utf8")); } catch { continue; }
-        if (ctrl?.t === "auth-required" || ctrl?.t === "error") {
-          rejectedAs = ctrl.t;
-          finish(false, `auth rejected: ${ctrl.t}${ctrl.message ? ` (${ctrl.message})` : ""}`);
-          return;
-        }
-      }
-    });
-
-    socket.on("error", (err: Error) => finish(false, err?.message ?? String(err)));
-
-    socket.on("connect", () => {
-      socket.write(encodeCtrl({ t: "auth", token: opts.authToken }), (err?: Error | null) => {
-        if (err) { finish(false, err.message); return; }
-        if (settled) return; // a rejection already arrived synchronously
-        // No documented server->client "auth accepted" message exists, so acceptance is inferred
-        // by ABSENCE: if no rejection shows up inside the grace window, the DATA frame goes out.
-        graceTimer = setTimeout(() => {
-          if (settled) return;
-          socket.write(encodeData(dataBuffer), (err2?: Error | null) => {
-            if (err2) finish(false, err2.message);
-            else finish(true, null);
-          });
-        }, authGraceMs);
-      });
-    });
+  return deliverKeys({
+    who: opts.who ?? "quay-serve",
+    target: opts.target ?? opts.sockPath,
+    socketPath: opts.sockPath,
+    authToken: opts.authToken,
+    bytes: opts.bytes,
+    auditLogPath: opts.auditLogPath,
+    timeoutMs: opts.timeoutMs ?? 2000,
+    authGraceMs: opts.authGraceMs ?? 50,
+  }).then((record) => {
+    const error = typeof record["error"] === "string" ? record["error"] : null;
+    // `deliverKeys` reports an explicit auth rejection as `auth rejected: <tag>[(<message>)]`; the
+    // tag is recovered here so the diagnostic CLI keeps printing `rejectedAs=` (its pre-delegation
+    // shape). ⛔ Recovered from the shared record, never re-derived by a second socket read.
+    const rejectedAs = error !== null && error.startsWith("auth rejected: ")
+      ? (error.slice("auth rejected: ".length).split(/[\s(]/)[0] || null)
+      : null;
+    return { delivered: record["delivered"] === true, error, rejectedAs };
   });
 }
 
