@@ -1,22 +1,4 @@
-// @test-group lowconc
-// @load-sensitive child-spawn
-//
-// ⚠️ 2026-09-13 @test-group-downgrade engine → lowconc（并登记 KNOWN-LOAD-SENSITIVE 族）。
-//   为什么降级：AC3/AC4 两条用例的判决随【宿主负载】翻转，而不随代码变。实测能取假的对照
-//   （同一份代码、同一夹具，唯一变量 = 宿主负载）：
-//     空闲：0/6 红；24 个 CPU 占用进程下：2/20 红（两处不同断言各中一次）。
-//   套件内（fan-in 全量、296 文件 / 并发 28）实测一次红 —— 即本条：
-//     `AC4 (gap-ac203)`「未确认存活 ⇒ 非零退出」失败，`started: … confirmed_ms=1045`。
-//     机制：1s 确认窗口内 driver 仍在其 node 启动过程中，进程存在被连续两次 250ms 轮询读到
-//     ⇒ 对一个「起来即退」的崩溃-重拉循环 driver 误判为已确认。
-//   本文件的两条负载敏感用例测的是【真实子进程 + 真实墙钟窗口】（3s 慢启动 / 1s 确认窗口 /
-//   1s 重拉间隔），与 worker-driver.test.mjs（同为 driver fixture，已在 lowconc）同类；
-//   降级只换泳道（该泳道仍在套件的相位里跑，⛔ 不是移出运行集），
-//   ⛔ 不改任何断言、不 skip、不放宽任何阈值。
-//   正本先例：tasks/gap-load-sensitive-tests-undeclared-run-in-main-lane-block-fan-in.md。
-//   ⛔ 归因的另一半（实现侧 awaitDriverConfirmation 的 settle=250ms 是「存活代理」而非
-//   「就绪判据」）【不在本文件修】——留给退出报告的发现项。
-//
+// @test-group engine
 // driver-runtime.test.mjs — AC151 (tasks/gap-ac151-two-level-driver-layer-landing): the two-level
 // layering (Layer 0 driver-runtime + Layer 1a task-processing / Layer 1b routine) + the supervisor
 // ported from promotion-driver-launch.sh (bash) into TS.
