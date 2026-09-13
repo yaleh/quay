@@ -2,7 +2,7 @@
 id: gap-driver-start-false-confirms-unsettled-driver
 title: driver start 在驱动未就绪时误报 started:（存活确认守卫是定值 250ms，宿主启动延迟一超即失效）—— 套件 3/3
   轮红，已挡两个互不相关任务着地
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
