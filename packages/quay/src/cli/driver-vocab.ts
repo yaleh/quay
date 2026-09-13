@@ -21,3 +21,23 @@ export const VERBS = ["start", "stop", "drain", "resume", "status", "restart"];
 // 的 kind 真源。⚠️ 它是 kernel 那张表的【已机械比对过的镜像】，⛔ 不是新的事实来源
 // （enum-surface-parity-check 的 authority `driver-kind` 指向 driver-runtime.ts:DRIVER_KINDS）。
 export const KINDS = ["promotion", "worker", "outer", "quality", "meta", "goal"];
+
+// ── GOAL-017/AC-254（SPEC §6.9 阶段 B）：服务清单也住在这里，理由与上面完全相同 ────────────────────
+//
+// 服务名要在**三处用户可见的帮助文本**里出现（`quay --help` 的用法行、`quay server --help` 的
+// 用法行与 services 行），而 `cli/serve` 那条路径的传递闭包带 config/provider/serve-handlers ——
+// 把清单留在 serve.ts 会让 `quay --help` 每次调用付那份加载成本（driver-vocab.ts 的头注释记着
+// 同一个实测：0.25s → 0.67s）。本模块零 import ⇒ 成为**单一实现 + 零加载成本**的那个落点。
+//
+// ⛔ 这里是**唯一**的服务清单：`packages/quay/src/serve.ts`（宿主）与 `packages/quay/src/cli/server.ts`
+// （四个动词）都从这里 import，⛔ 不各写一份（SPEC §6.8 单一实现；两份 = 假）。
+//
+// `DRIVER_SERVICE_KINDS` 与上面的 `KINDS` 是同一集合 —— 服务名 `driver:<kind>` 的 kind 段由它构造。
+// `peer` 是 SPEC §6.9 清单里唯一的**尚不存在**的服务（阶段 D），故刻意不在此列：把它写进来会让
+// `--only peer` 通过解析然后在没有任何实现的地方静默假成功。
+export const HOSTED_SERVICE_NAMES = ["web", "control"];
+export const DRIVER_SERVICE_KINDS = KINDS.slice();
+export const ALL_SERVICE_NAMES = [
+  ...HOSTED_SERVICE_NAMES,
+  ...DRIVER_SERVICE_KINDS.map((k) => `driver:${k}`),
+];

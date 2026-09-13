@@ -425,6 +425,7 @@ declare -A QUESTION=(
   [guard-lineage-check.ts]="How many of the repo's guards declare the object/invariant they protect — the P4 guard-lineage detector (docs/proposals/archguard-generation-era-primitives.md §3): guards enumerated across plugin/scripts + experiments/quay-perpetual-stream/scripts + plugin/gate-scripts (deduped per directory), reporting the declared-guard-object ratio (AC1, 0% before this task), the window-fired ratio read from checker-cost.jsonl's verdict field (AC2, NOT-EVALUATED when verdict absent), per-guard object presence (AC3, file:path existence vs invariant: not-mechanically-checkable), and a preventive-vs-suspicious disposition that weighs BOTH last-fired and mutation-verified so a preventive guard like checker-mutation-check is never flagged suspicious just for never having fired (AC4 reverse criterion)?"
   [peer-identity-probe.ts]="Can a NON-Claude process be delivered to by other Claude Code sessions on this machine — does registering an HONEST peer identity (real pid/procStart/pidDomain/socket path, agent:'quay', explicitly NOT impersonating a Claude session) into ~/.claude/sessions/<pid>.json make it addressable by the platform SendMessage tool, and which record fields are actually load-bearing for that reachability (agent/pid/procStart/messagingSocketPath/spare/parkedJobId...) — the 方案 C feasibility spike (tasks/gap-quay-server-lightweight-peer-identity-spike)?"
   [channel-probe-server.ts]="Can a quay-side process be pushed INTO a running Claude Code session through the OFFICIAL Channels contract — a plain MCP server declaring capabilities.experimental['claude/channel'] and emitting notifications/claude/channel — and what does attaching a CUSTOM channel to an already-running session actually cost (which interactive gates must be passed, does --mcp-config satisfy server:<name> resolution, is managed settings required, does a third-party-provider session receive) — the 方案 C vs Channels 对照 spike (tasks/gap-quay-server-lightweight-peer-identity-spike)?"
+  [server-partial-stop-verify.ts]="Does the unified server let each service be started and stopped ON ITS OWN (SPEC-unified-quay-server-2026-09-13 §6.9 stage B) — after 'quay server stop --only web' on the UNIFIED form (web + control under one host pid), is the WEB face really unreachable while the HOST process is unchanged and its control face still answers, and did ALL SIX drivers' round heartbeats each advance within ONE run_id — writing ZERO record plus a distinguishable verdict whenever any reading cannot be obtained (carrier .quay/unified-server-verification.jsonl, GOAL-017/AC-254)?"
 )
 
 # ── GUARD_OBJECT (P4 守卫谱系声明块, tasks/gap-archguard-p4-guard-lineage-declaration-and-registry) ──
@@ -758,6 +759,7 @@ declare -A CADENCE=(
   [deletion-closure-check.ts]="按需"
   [peer-identity-probe.ts]="按需"
   [channel-probe-server.ts]="按需"
+  [server-partial-stop-verify.ts]="按需"
 )
 
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
@@ -1078,6 +1080,7 @@ declare -A INVALIDATION=(
   [deletion-closure-check.ts]="失效前提：本仓库仍以字符串字面量路径/basename、跨语言 shell-out（bash/exec/source/spawn）、Touches 段声明为实现构件耦合的发生面（import 图不可见）；若迁移到单一 import 图可见的打包产物，闭包边归零或语义变更，需同步"
   [peer-identity-probe.ts]="失效前提：平台仍以 ~/.claude/sessions/<pid>.json 注册表 + 记录内 procStart 与【文件名 pid】的 /proc starttime 一致性判可达；若平台改为原生 API 投递、或改掉该判定（本任务实测 2.1.270 的判定与静态推断不同：记录里 pid 字段不参与、.key 文件完全不被读），本条退休"
   [channel-probe-server.ts]="失效前提：官方 Channels 仍以 MCP server 的 capabilities.experimental['claude/channel'] + notifications/claude/channel 注入；官方标 research preview 并明说 --channels 语法与协议可能变，契约一变本条需同步"
+  [server-partial-stop-verify.ts]="失效前提：① 统一 server 形态仍是 web+control 同宿主进程（若阶段 A2 被回退成两进程，停 web 在结构上不可能影响 driver ⇒ 本生产者的读数不再能取假）；② 六个 kind 的 round 载体仍是 .quay/<kind>-round.jsonl，且 kernel DRIVER_KINDS[*].carriers 里恰好一个以 -round.jsonl 结尾（kind 增删或载体改名 ⇒ 本生产者与判据的六个集合会分叉）；③ .quay/server.json 仍是宿主自发布的状态载体、.quay/server-services.json 仍是期望态载体"
 )
 
 # ── LAST_REAFFIRMED (last-reaffirmed stamp (③) — the date someone last looked at this mechanism and stamped it; 超 N 天未被任何调用/检查/复核触及 → 待重新确认 (只看一眼盖章, 不判断对错)) ──
@@ -1398,6 +1401,7 @@ declare -A LAST_REAFFIRMED=(
   [deletion-closure-check.ts]="2026-09-04"
   [peer-identity-probe.ts]="2026-09-13"
   [channel-probe-server.ts]="2026-09-13"
+  [server-partial-stop-verify.ts]="2026-09-13"
 )
 
 # ── MATCHING (matching-method declaration (④) — how this checker judges: position (按位置不按关键词) | keyword | enumerative (枚举式存在性) | n/a (non-judgment lib/data). New checkers MUST declare which matching they use) ──
@@ -1717,6 +1721,7 @@ declare -A MATCHING=(
   [deletion-closure-check.ts]="position"
   [peer-identity-probe.ts]="n/a"
   [channel-probe-server.ts]="n/a"
+  [server-partial-stop-verify.ts]="n/a"
 )
 # ── CONSUMER (rhythm-column consumer contract, gap-ac73-catalog-rhythm-consumer-check) ──
 # A mechanism's RHYTHM is only a claim until someone presses it. This table makes the consumer
@@ -1847,6 +1852,7 @@ declare -A CONSUMER=(
   [packaging-hygiene-check.ts]="谁按：quality-gate-driver.ts 的 packaging-hygiene 例程按（interval 60min，runResidentQualityGateLoop 评估 due 后跑，⛔ 非 loop.routines——后者已死）；条件=两维度打包卫生检查要跑一轮（config-key 消费者枚举 + shipped-entry 可运行性），漂移非空时 spawn gap-filing agent 经 ABI（quay-file-task）立案"
   [peer-identity-probe.ts]="谁按：方案 C 路的验证者 / 后续接线者在需要核证「一个非 Claude 进程能否被平台 SendMessage 投递」时按（node --experimental-strip-types plugin/scripts/peer-identity-probe.ts serve|patch|shutdown|cleanup）；条件=要复测 peer 登记的可达性、逐字段必要性（patch 改自己记录的一个字段后立刻投递），或按 AC13 结论做接线前的对照复测"
   [channel-probe-server.ts]="谁按：Channels 路的验证者 / 后续接线者在需要把外部事件推入一个运行中的 Claude Code 会话时按（node --experimental-strip-types plugin/scripts/channel-probe-server.ts --evidence <path> --http-port 8799，由 Claude Code 以 MCP server 起；--selfcheck 可独立自检 capability 声明）；条件=要核证官方 Channels 契约（experimental['claude/channel'] + notifications/claude/channel）在本机是否可达，或按 AC13 结论做接线前的对照复测"
+  [server-partial-stop-verify.ts]="谁按：GOAL-017/AC-254 的判据消费它写的载体（.quay/unified-server-verification.jsonl）；条件=要在统一 server 形态上真跑一次部分停止并把六 kind 同 run 的 round 推进写成合格记录（⛔ 它是生产者不是静态检查器，故刻意不登记进 runner-static-gate.ts 的 run_static_checks —— 登记会让 AC 未达成期间全量套件每轮变红）"
 )
 # ── superseded capability table (gap-retired-script-still-callable, human ruling 2026-08-10) ──
 # One capability = ONE implementation. A superseded implementation must NOT exist in the

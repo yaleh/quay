@@ -26,6 +26,117 @@ import { readBranchModel, startDevelopRefBackgroundRefresh } from "./observation
 // (packages/quay-native/src/store.ts imports plugin/scripts/shape-sections.ts the same way).
 import { serveControlPlane, type ControlPlaneHandle } from "../../../plugin/scripts/driver-shared.ts";
 import { writeServerState, removeServerState, CONTROL_PLANE_NAME } from "./server-state.ts";
+import { writeJsonAtomic } from "../../../plugin/scripts/write-json-atomic.ts";
+// The service inventory is a ZERO-IMPORT leaf module (cli/driver-vocab.ts) because the same names
+// appear in `quay --help`'s statically-imported help text — this file's graph must not be pulled in
+// just to print them. One list, two consumers.
+import { ALL_SERVICE_NAMES, HOSTED_SERVICE_NAMES } from "./cli/driver-vocab.ts";
+
+// ══ 服务清单 + 期望态载体（GOAL-017 / AC-254, SPEC §6.9 阶段 B）══════════════════════════════════
+//
+// §6.9 的一句话：**服务是可独立起停的单元，进程只是宿主**。这一节实现它的一半 —— 宿主侧：
+// 一个进程同时是 `web` / `control` 两个服务的宿主，每个服务可以在**不杀宿主进程**的前提下
+// 单独关闭与重新打开（`stop --only web` ⇒ 释放 HTTP listener，host pid 不变，同进程的
+// `control` 继续可达）。另一半（四个 CLI 动词）在 `cli/server.ts`，它通过本文件导出的
+// **期望态载体** 与在跑的宿主通信。
+//
+// ⛔ 为什么用「期望态 + 宿主 reconcile」而不是「CLI 直接操作宿主」：
+//   - 宿主是唯一能打开/关闭自己 listener 的进程；CLI 是**另一个进程**，它只能表达意图。
+//   - 「写了意图」与「意图实现了」必须分开 —— CLI 写完会**轮询实测**（直接量：真探 web 端口），
+//     只有观测到效果才 exit 0。⛔ 不是 fire-and-forget（那会让 exit code 与事实无关）。
+//   - 这与仓库既有的控制态 idiom 同形（`worker-control.json` 之与 worker-driver），
+//     ⛔ 不是第二份 MCP 控制面实现。
+//
+// ⛔ 为什么 `web`/`control` 的停开**不杀宿主**：若 `stop --only web` 等同杀宿主进程，同进程的
+// `control` 一并死掉 —— 那正是 §6.9 不变式 2（«部分操作不波及其余»）排除的形态，且「独立起停」
+// 与「整体重启」在记录上不再可区分。
+
+/** 期望态载体的 workspace-relative 路径。运行时状态 —— 从不提交（untracked `.quay/`）。 */
+export const SERVICE_STATE_REL = ".quay/server-services.json";
+export const SERVICE_STATE_SCHEMA_VERSION = 1;
+
+/** 宿主 reconcile 周期。短到 CLI 的「写完 + 轮询」在一次人眼可接受的等待内收敛，长到不空转。 */
+export const RECONCILE_INTERVAL_MS = 150;
+
+export interface ServiceState {
+  schemaVersion: number;
+  /** 这份期望态是**给哪个宿主**的：pid 不匹配 ⇒ 过期文件，宿主忽略（否则上一个宿主的愿望会
+   *  落到新宿主头上 —— 那是「旧意图改新进程」）。 */
+  pid: number;
+  services: Record<string, boolean>;
+  updatedAt: string;
+}
+
+export function serviceStatePath(workspaceRoot: string): string {
+  return path.join(workspaceRoot, SERVICE_STATE_REL);
+}
+
+/** 写期望态（原子 —— 与 server.json 同一份 writeJsonAtomic 单一实现）。 */
+export function writeServiceState(
+  workspaceRoot: string,
+  pid: number,
+  services: Record<string, boolean>,
+): string {
+  const p = serviceStatePath(workspaceRoot);
+  const state: ServiceState = {
+    schemaVersion: SERVICE_STATE_SCHEMA_VERSION,
+    pid,
+    services,
+    updatedAt: new Date().toISOString(),
+  };
+  writeJsonAtomic(p, state);
+  return p;
+}
+
+/** 读期望态。三分法（硬规则 3b）：absent ≠ unreadable ≠ present。 */
+export function readServiceState(
+  workspaceRoot: string,
+): { kind: "absent" | "unreadable" | "present"; state?: ServiceState; reason: string } {
+  const p = serviceStatePath(workspaceRoot);
+  let raw: string;
+  try {
+    raw = fs.readFileSync(p, "utf8");
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | undefined)?.code;
+    if (code === "ENOENT") return { kind: "absent", reason: `no ${SERVICE_STATE_REL} in ${workspaceRoot}` };
+    return { kind: "unreadable", reason: `cannot read ${p}: ${String(code ?? (err as Error)?.message ?? err)}` };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    return { kind: "unreadable", reason: `cannot parse ${p}: ${(err as Error).message}` };
+  }
+  const v = parsed as Record<string, unknown> | null;
+  if (
+    !v ||
+    typeof v !== "object" ||
+    v.schemaVersion !== SERVICE_STATE_SCHEMA_VERSION ||
+    typeof v.pid !== "number" ||
+    !Number.isInteger(v.pid) ||
+    !v.services ||
+    typeof v.services !== "object" ||
+    Array.isArray(v.services)
+  ) {
+    return { kind: "unreadable", reason: `${p} does not match the schemaVersion ${SERVICE_STATE_SCHEMA_VERSION} desired-state shape` };
+  }
+  return { kind: "present", state: parsed as ServiceState, reason: "ok" };
+}
+
+/** `--only a,b` / `--without a,b` / `add a,b` 的取值解析 —— 单一实现，四个动词共用。
+ *  未知服务名 fail-closed（⛔ 不静默忽略：那会让一个拼错的服务名表现为「已经满足了」）。 */
+export function parseServiceList(
+  raw: string | string[] | undefined,
+): { ok: true; names: string[] } | { ok: false; error: string } {
+  if (raw === undefined) return { ok: true, names: [] };
+  const flat = (Array.isArray(raw) ? raw : [raw]).flatMap((s) => String(s).split(","));
+  const names = flat.map((s) => s.trim()).filter((s) => s.length > 0);
+  const unknown = names.filter((n) => !ALL_SERVICE_NAMES.includes(n));
+  if (unknown.length > 0) {
+    return { ok: false, error: `unknown service name(s): ${unknown.join(", ")} — known: ${ALL_SERVICE_NAMES.join(", ")}` };
+  }
+  return { ok: true, names: [...new Set(names)] };
+}
 
 // Re-export rendering helpers so external consumers (tests, etc.) can still
 // import them from serve.ts if needed. These now live in serve-handlers.ts.
@@ -294,7 +405,12 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
 
   const routeCfg: ServePageCfg = { workspaceRoot: cfg.workspaceRoot, identity: null };
 
-  const server = http.createServer(async (req, res) => {
+  // The request handler is a VALUE, not a closure baked into one http.Server (AC-254, SPEC §6.9):
+  // `stop --only web` closes the listener and `start --only web` must open a NEW one, and a closed
+  // http.Server cannot be re-listened (Node throws ERR_SERVER_NOT_RUNNING). One handler, N listeners
+  // — the alternative (a fresh copy of the routing logic per open) would be a second implementation
+  // of the web face.
+  const requestHandler = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
     // gap-web-server-access-logging (AC1): every received request produces one
     // access-log line (timestamp + method + path) — written synchronously before
     // the handler runs so the record is durable regardless of the handler's
@@ -321,7 +437,19 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
         res.end();
       }
     }
-  });
+  };
+
+  const makeWebServer = (): http.Server => {
+    const s = http.createServer(requestHandler);
+    // The persistent 'error' handler (see the port-collision note below) must be on EVERY web face,
+    // not only the first — a re-listen after `start --only web` gets the same treatment.
+    s.on("error", (err) => {
+      console.error(`[quay serve] server error:`, (err as Error).stack || String(err));
+    });
+    return s;
+  };
+
+  const server = makeWebServer();
 
   // QX-038 (experiment 4, iteration 11): DIR-005 item 5 — bind explicitly to 0.0.0.0
   // (all interfaces) instead of relying on Node's implicit default, and update the log
@@ -342,19 +470,24 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
   // failures into logged rejections. An explicit, user-supplied `port` is still
   // honored exactly — `port: 0` is only the internal/test convention for asking the
   // kernel to pick an ephemeral port.
-  server.on("error", (err) => {
-    console.error(`[quay serve] server error:`, (err as Error).stack || String(err));
-  });
-  try {
+  /** Bind ONE web face and resolve with the port the KERNEL actually bound. */
+  async function listenWeb(s: http.Server, requestedPort: number): Promise<number> {
     await new Promise<void>((resolve, reject) => {
-      server.once("listening", resolve);
-      server.once("error", reject);
-      server.listen(port, host, () => {
-        const addr = server.address();
-        const actualPort = addr && typeof addr === "object" ? addr.port : port;
+      s.once("listening", resolve);
+      s.once("error", reject);
+      s.listen(requestedPort, host, () => {
+        const a = s.address();
+        const actualPort = a && typeof a === "object" ? a.port : requestedPort;
         console.log(`quay serve: listening on http://${host}:${actualPort}`);
       });
     });
+    const a = s.address();
+    return a && typeof a === "object" ? a.port : requestedPort;
+  }
+
+  let webPort = port;
+  try {
+    webPort = await listenWeb(server, port);
   } catch (err) {
     // A bind failure (EADDRINUSE when the caller probed the port on loopback only while we
     // bind 0.0.0.0, or any other listen error) must leave neither a provider child NOR the
@@ -382,8 +515,6 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
   // address half is a real reading (the kernel-assigned port for `--port 0`), so assemble it and
   // hand it to every subsequent request. The git-derived branch names come from observation.ts
   // (the serve path's only sanctioned git reader).
-  const addr = server.address();
-  const webPort = addr && typeof addr === "object" ? addr.port : port;
   routeCfg.identity = serveIdentity({
     workspaceRoot: cfg.workspaceRoot,
     host,
@@ -392,7 +523,127 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
     branchModel: readBranchModel(cfg.workspaceRoot),
   });
 
-  // ── Publish the state carrier (GOAL-017/AC-251, SPEC §6.5/§6.10) ───────────────────────────────
+  // ── The live service manager (GOAL-017/AC-254, SPEC §6.9) ──────────────────────────────────────
+  //
+  // This process is the HOST of `web` + `control`. Each face can be closed and re-opened WITHOUT
+  // killing the host — that is what makes `stop --only web` different from `kill <host pid>`, and
+  // the difference is observable (§6.9 不变式 2: the control face stays reachable, the host pid does
+  // not change). Everything below is the host's half of the desired-state protocol; the CLI's half
+  // is cli/server.ts.
+  let webServer: http.Server | null = server;
+  let webBoundPort = webPort;
+  let controlHandle: ControlPlaneHandle | null = control;
+  let controlBoundPort = control.port;
+  let shuttingDown = false;
+
+  /** Publish §6.5's carrier from the LIVE service set. A service that is down keeps its last bound
+   *  port (so a reader can still probe it and read "down" instead of "unknown") and gains
+   *  `up:false` — the extra key is ignored by server-state.ts's shape check, and its presence is
+   *  what keeps 「停了的服务」 from being indistinguishable from 「从没有过的服务」. */
+  function publishCarrier(): void {
+    const services: Array<{ name: string; pid: number; host: string; port: number; up: boolean }> = [
+      { name: "web", pid: process.pid, host, port: webBoundPort, up: webServer !== null },
+      { name: "control", pid: process.pid, host: controlHost, port: controlBoundPort, up: controlHandle !== null },
+    ];
+    writeServerState(cfg.workspaceRoot, {
+      pid: process.pid,
+      startedAt: new Date(processStartMs()).toISOString(),
+      services,
+    });
+  }
+
+  async function stopWebFace(): Promise<void> {
+    const s = webServer;
+    if (s === null) return;
+    webServer = null; // cleared FIRST: the reconcile loop must not see a half-closed face as "up"
+    if (typeof (s as http.Server & { closeAllConnections?: () => void }).closeAllConnections === "function") {
+      (s as http.Server & { closeAllConnections: () => void }).closeAllConnections();
+    }
+    await new Promise<void>((resolve) => s.close(() => resolve()));
+  }
+
+  async function startWebFace(): Promise<void> {
+    if (webServer !== null) return;
+    const s = makeWebServer();
+    webBoundPort = await listenWeb(s, webBoundPort);
+    webServer = s;
+  }
+
+  async function stopControlFace(): Promise<void> {
+    const c = controlHandle;
+    if (c === null) return;
+    controlHandle = null;
+    await c.close().catch((err) => {
+      console.error(`[quay serve] control-plane close failed (partial stop):`, (err as Error).stack || String(err));
+    });
+  }
+
+  async function startControlFace(): Promise<void> {
+    if (controlHandle !== null) return;
+    controlHandle = await serveControlPlane({
+      root: cfg.workspaceRoot,
+      host: controlHost,
+      port: controlBoundPort,
+      name: CONTROL_PLANE_NAME,
+    });
+    controlBoundPort = controlHandle.port;
+  }
+
+  /**
+   * Apply the desired-state carrier to the live faces. Idempotent by construction: every branch is
+   * "already in the wanted state ⇒ return".
+   *
+   * ⛔ PID GATE: a desired-state file naming another pid is STALE (left by a previous host) and is
+   * ignored — without it, a wish recorded against a dead host would be applied to whatever host
+   * starts next (an old intent silently steering a new process).
+   */
+  async function reconcile(): Promise<void> {
+    if (shuttingDown) return;
+    const read = readServiceState(cfg.workspaceRoot);
+    if (read.kind !== "present") return; // absent/unreadable ⇒ change nothing (⛔ never guess a wish)
+    const st = read.state as ServiceState;
+    if (st.pid !== process.pid) return; // stale wish, another host's
+    try {
+      if (st.services.web === true) await startWebFace();
+      else if (st.services.web === false) await stopWebFace();
+      if (st.services.control === true) await startControlFace();
+      else if (st.services.control === false) await stopControlFace();
+    } catch (err) {
+      // A failed face transition must be REPORTED, never swallowed: silently keeping the old state
+      // while the desired state says otherwise is exactly how "the CLI said it stopped it" and
+      // "the port is still accepting" diverge.
+      console.error(`[quay serve] service reconcile failed:`, (err as Error).stack || String(err));
+    }
+    publishCarrier();
+  }
+
+  const reconcileTimer = setInterval(() => {
+    void reconcile();
+  }, RECONCILE_INTERVAL_MS);
+  // unref'd: the reconcile tick must never be the reason the process stays alive.
+  reconcileTimer.unref();
+
+  /**
+   * The host's own shutdown: close every hosted face, retire the carrier, stop reconciling.
+   *
+   * ⛔ NOT tied to `server.on("close")` any more (AC-254): closing the web face is now a NORMAL,
+   * partial operation that leaves the host alive, so retiring the carrier on it would report a
+   * running host as NOT-RUNNING. Retirement belongs to the host's own end.
+   */
+  async function shutdownHost(): Promise<void> {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    clearInterval(reconcileTimer);
+    const root = cfg.workspaceRoot;
+    try {
+      await stopWebFace();
+      await stopControlFace();
+    } finally {
+      removeServerState(root);
+    }
+  }
+
+  // ── Publish the carrier, then apply the launch-time service set (GOAL-017/AC-251 & AC-254) ─────
   // Both services carry THIS process's pid — that identity is not decoration, it is the reading
   // stage A2's criterion is defined on (`web.pid === control.pid`). `startedAt` is reconstructed
   // from process.uptime() (the same source /health uses) rather than Date.now(), so a carrier is
@@ -401,28 +652,26 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
   // Written AFTER the bind succeeded: the ports in the carrier are the ports the kernel actually
   // bound (web) and the control handle reported (control), never the requested values — a carrier
   // naming an unbound port would be a reading of nothing.
-  writeServerState(cfg.workspaceRoot, {
-    pid: process.pid,
-    startedAt: new Date(processStartMs()).toISOString(),
-    services: [
-      { name: "web", pid: process.pid, host, port: webPort },
-      { name: "control", pid: process.pid, host: controlHost, port: control.port },
-    ],
-  });
+  publishCarrier();
   console.log(`quay serve: control plane (MCP) listening on ${control.url} — same pid ${process.pid} (SPEC stage A2)`);
 
-  // A graceful close (`server.close()`, SIGINT under a supervisor, `--watch` restart) retires the
-  // carrier so `quay server status` reports NOT-RUNNING instead of reading a leftover file lying
-  // about a stopped server. The body deliberately does NOT depend on this firing: an ungraceful
-  // exit (SIGKILL) leaves the file, and the reader catches that via the pid-liveness check
-  // (server-state.ts readServerState + pidAlive) — the two together are what make "killed" and
-  // "never started" both读作 not-running without either one being trusted alone.
-  server.on("close", () => {
-    removeServerState(cfg.workspaceRoot);
-    void control.close().catch((err) => {
-      console.error(`[quay serve] control-plane close failed:`, (err as Error).stack || String(err));
+  // `QUAY_SERVER_SERVICES` is the LAUNCH-TIME service set (a subset of `web`/`control`). Unset ⇒
+  // both, i.e. every existing caller's behaviour is byte-identical. When set, the desired-state
+  // carrier is seeded and the reconciler closes whatever was not asked for — one code path, so
+  // "started without control" and "control stopped later" cannot drift apart.
+  const launchSet = process.env.QUAY_SERVER_SERVICES;
+  if (launchSet !== undefined) {
+    const want = new Set(
+      launchSet
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0),
+    );
+    writeServiceState(cfg.workspaceRoot, process.pid, {
+      web: want.has("web"),
+      control: want.has("control"),
     });
-  });
+  }
 
   // gap-tasks-page-develop-ref-full-history-git-log-cost (AC1): mount a background refresh tick that
   // keeps the develop-ref read caches warm OFF the request path. The cold full build runs here (at
@@ -432,8 +681,44 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
 
   // Expose the control-plane handle the same way QN-031 exposed `client`: a caller (notably a test)
   // can retire BOTH hosted services deterministically instead of orphaning the control socket.
-  const owned = server as Server & { client: ProviderClient; control: ControlPlaneHandle };
+  const owned = server as Server & {
+    client: ProviderClient;
+    control: ControlPlaneHandle;
+    hostedServices: HostedServiceManager;
+  };
   owned.control = control;
+  owned.hostedServices = {
+    isUp: (name: "web" | "control") => (name === "web" ? webServer !== null : controlHandle !== null),
+    portOf: (name: "web" | "control") => (name === "web" ? webBoundPort : controlBoundPort),
+    reconcile,
+    shutdownHost,
+  };
 
   return owned;
+}
+
+/**
+ * The live per-service view of a running host (AC-254). `isUp`/`portOf` are DIRECT readings of this
+ * process's own listeners — the CLI cannot see those, which is why the host itself exposes them to
+ * in-process callers (tests) while out-of-process callers go through the carrier + live probes.
+ */
+export interface HostedServiceManager {
+  isUp(name: "web" | "control"): boolean;
+  portOf(name: "web" | "control"): number;
+  reconcile(): Promise<void>;
+  shutdownHost(): Promise<void>;
+}
+
+/**
+ * Shut a host down from outside `startServer` (used by the tests and by any in-process caller that
+ * owns the object `startServer` returned). Kept as a free function so the ownership rule is stated
+ * once: **closing the web face is not shutting the host down**.
+ */
+export async function shutdownHost(server: Server & { hostedServices?: HostedServiceManager; client?: ProviderClient }): Promise<void> {
+  if (server.hostedServices) {
+    await server.hostedServices.shutdownHost();
+  } else {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+  if (server.client) await server.client.close().catch(() => undefined);
 }
