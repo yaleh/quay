@@ -1,0 +1,34 @@
+{
+  "phase": "convergence",
+  "declaredAt": "2026-09-13T20:35:47.187Z",
+  "reason": "首次记录 ADR-008 phase：近 50 提交 L_D 读数 docLines=7073 codeLines=20717 ratio=0.341（非 prose-heavy），且近期落地多为退役/收口（zero-call 脚本归档、session-liveness/halt-file/outer-tmux 退役），人判定当前处于收缩相",
+  "reading": {
+    "rule": "L_D code:doc line-delta ratio (archived git-lens-l-d-code-doc-ratio rule: doc=/.(md|txt)$/i, ratio=docLines/codeLines, flagged = ratio > 3.0 AND docLines > 20)",
+    "range": "HEAD~50..HEAD",
+    "head": "9d2662b19019c3ac3c47707db56fc87600829257",
+    "commitCount": 21099,
+    "docLines": 7073,
+    "codeLines": 20717,
+    "ratio": 0.34141043587391995,
+    "verdict": "PASS",
+    "flagged": false
+  },
+  "history": [
+    {
+      "phase": "convergence",
+      "declaredAt": "2026-09-13T20:35:47.187Z",
+      "reason": "首次记录 ADR-008 phase：近 50 提交 L_D 读数 docLines=7073 codeLines=20717 ratio=0.341（非 prose-heavy），且近期落地多为退役/收口（zero-call 脚本归档、session-liveness/halt-file/outer-tmux 退役），人判定当前处于收缩相",
+      "reading": {
+        "rule": "L_D code:doc line-delta ratio (archived git-lens-l-d-code-doc-ratio rule: doc=/.(md|txt)$/i, ratio=docLines/codeLines, flagged = ratio > 3.0 AND docLines > 20)",
+        "range": "HEAD~50..HEAD",
+        "head": "9d2662b19019c3ac3c47707db56fc87600829257",
+        "commitCount": 21099,
+        "docLines": 7073,
+        "codeLines": 20717,
+        "ratio": 0.34141043587391995,
+        "verdict": "PASS",
+        "flagged": false
+      }
+    }
+  ]
+}
