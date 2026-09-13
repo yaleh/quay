@@ -45,6 +45,7 @@ import {
   activeFileIdentityGuards,
   staticImportClosure,
   findEntryGuardHijacks,
+  findUnnamedEntryGuards,
   REQUIRE_BANNER,
 } from "../scripts/build-plugin-dist.mjs";
 
@@ -417,6 +418,43 @@ test("AC1 — negative control: the hijack gate TAKES FALSE (a synthetic inlined
     const hijacks = findEntryGuardHijacks(dir);
     assert.equal(hijacks.length, 1, "the gate must flag the synthetic inlined bare guard (it is not vacuous)");
     assert.equal(hijacks[0].module, "scripts/helper.ts");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — the shipped scripts surface carries ZERO unnamed (dead) entry guards", () => {
+  const dead = findUnnamedEntryGuards(PLUGIN_ROOT);
+  assert.deepEqual(dead, [],
+    `expectedBase is REQUIRED, so these top-level blocks can never fire (main() never runs; the ` +
+    `process exits 0 with no output — a silent no-op that reads exactly like a pass):\n` +
+    dead.map((d) => `  ${d.module} :: ${d.condition}`).join("\n"));
+});
+
+test("AC1 — negative control: the unnamed-guard gate TAKES FALSE (bare form flagged, named + local-def not)", () => {
+  const dir = tmp();
+  try {
+    fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+    const write = (name, body) => fs.writeFileSync(path.join(dir, "scripts", name), body);
+
+    // POSITIVE: imports the SHARED helper and calls it with 1 argument — dead after the signature change.
+    write("bare.ts", 'import { isDirectEntry } from "./gate-script-base.ts";\nif (isDirectEntry(import.meta)) {\n  main();\n}\n');
+    // POSITIVE: the 2-argument form is just as dead (it omits expectedBase too).
+    write("twoarg.ts", 'import { isDirectEntry } from "./gate-script-base.ts";\nif (isDirectEntry(import.meta, process.argv[1])) {\n  main();\n}\n');
+    // NEGATIVE: the named form.
+    write("named.ts", 'import { isDirectEntry } from "./gate-script-base.ts";\nif (isDirectEntry(import.meta, undefined, "named")) {\n  main();\n}\n');
+    // NEGATIVE: a module that DEFINES its own isDirectEntry decides its own arity.
+    write("local.ts", 'function isDirectEntry(argv1) { return basename(argv1 || process.argv[1]) === "local"; }\nif (isDirectEntry()) {\n  main();\n}\n');
+    // NEGATIVE: does not import the shared helper at all.
+    write("plain.ts", 'if (isDirectEntry(import.meta)) {\n  main();\n}\n');
+    // NEGATIVE: fixture dirs are out of scope — checker-mutation-cases embeds the anti-pattern on purpose.
+    fs.mkdirSync(path.join(dir, "scripts", "checker-mutation-cases"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "scripts", "checker-mutation-cases", "x.ts"),
+      'import { isDirectEntry } from "./gate-script-base.ts";\nif (isDirectEntry(import.meta)) {\n  main();\n}\n');
+
+    const dead = findUnnamedEntryGuards(dir);
+    assert.deepEqual(dead.map((d) => d.module).sort(), ["scripts/bare.ts", "scripts/twoarg.ts"],
+      "only the shared-helper calls with fewer than 3 arguments are dead guards");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

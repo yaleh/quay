@@ -839,7 +839,11 @@ export function checkAndEmit(argv: string[], registryOverride?: Registry): numbe
   return emitVerdict({ status: res.status, message }, {});
 }
 
-if (isDirectEntry(import.meta)) {
+// ⛔ `expectedBase` is REQUIRED (gap-drivers-yml-interval-not-honored-for-routine-kinds): the bare
+// `isDirectEntry(import.meta)` form this file used to carry is now always false, which would have
+// made this checker a silent no-op — main() never runs, exit 0, no output, i.e. it reports exactly
+// like a pass. Guarded class-wide by build-plugin-dist.mjs's `findUnnamedEntryGuards`.
+if (isDirectEntry(import.meta, undefined, "enum-surface-parity-check")) {
   const code = checkAndEmit(process.argv);
   process.exit(code);
 }

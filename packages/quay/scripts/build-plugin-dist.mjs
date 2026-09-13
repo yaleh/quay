@@ -512,6 +512,16 @@ function isDirectEntryArity(cond) {
 }
 
 /**
+ * Does this module import the SHARED `isDirectEntry` from gate-script-base? The arity rule binds the
+ * shared helper only: a module that DEFINES its own isDirectEntry decides its own semantics (two do —
+ * workflow-event-schema.mjs and precommit-guard.ts — and both are name-based/inert; flagging them by
+ * arity alone would be a false positive).
+ */
+export function importsSharedEntryHelper(text) {
+  return /import\s*\{[^}]*\bisDirectEntry\b[^}]*\}\s*from\s*["'][^"']*gate-script-base\.ts["']/.test(text);
+}
+
+/**
  * The ACTIVE (hijacking) entry guards a module carries: top-level `if` conditions that resolve "am I
  * the entry?" from FILE identity. Two spellings, BOTH measured on the real tree (2026-09-13):
  *   1. an explicit file-identity comparison (`import.meta.url` / `__filename` vs `process.argv[1]`);
@@ -524,10 +534,7 @@ function isDirectEntryArity(cond) {
  */
 export function activeFileIdentityGuards(file) {
   const text = fs.readFileSync(file, "utf8");
-  // The arity rule binds the SHARED helper only. A module that DEFINES its own isDirectEntry decides
-  // its own semantics (two do — workflow-event-schema.mjs and precommit-guard.ts — and both are
-  // name-based/inert; flagging them by arity alone would be a false positive).
-  const usesSharedHelper = /import\s*\{[^}]*\bisDirectEntry\b[^}]*\}\s*from\s*["'][^"']*gate-script-base\.ts["']/.test(text);
+  const usesSharedHelper = importsSharedEntryHelper(text);
   const active = [];
   for (const cond of topLevelIfConditions(text)) {
     const explicitFileIdentity =
@@ -590,6 +597,59 @@ export function findEntryGuardHijacks(pluginRoot = DEFAULT_PLUGIN_ROOT) {
   return hijacks;
 }
 
+/** Directories under plugin/scripts that are NOT shipped source: build output, deps, fixtures that
+ *  deliberately embed the anti-pattern (checker-mutation-cases), and vendored copies. */
+const SURFACE_SKIP_DIRS = new Set(["dist", "node_modules", "test", "tests", "vendor", "archive", "checker-mutation-cases"]);
+const SURFACE_SKIP_FILES = /\.test\./;
+
+/**
+ * The DEAD entry guards of the shipped scripts surface: any module that imports the SHARED helper and
+ * calls it with fewer than 3 arguments. `expectedBase` became REQUIRED on 2026-09-13
+ * (gap-drivers-yml-interval-not-honored-for-routine-kinds), so such a call can never be true: the
+ * module's top-level main() never runs and the process exits 0 with NO output.
+ *
+ * This is the STANDALONE sibling of the inlined hijack above, and the more dangerous of the two: the
+ * hijack at least makes a bundle run SOME main; an unnamed guard in a module that is never bundled
+ * makes it run NO main at all, and a silent no-op is indistinguishable from a pass at every surface
+ * (硬規則 3b). Measured 2026-09-13: `plugin/scripts/enum-surface-parity-check.ts` still carried the
+ * bare form after the migration sweep — the checker was dead in the static gate while its own row
+ * read green, and only its mutation case noticed (STAYED-GREEN).
+ *
+ * `findEntryGuardHijacks` structurally cannot see this: it walks each bundle entry's import closure,
+ * and a standalone checker is not in any bundle's closure. Hence a whole-surface scan.
+ * @param {string} pluginRoot
+ * @returns {{module: string, condition: string}[]} empty = every guard on the shared helper is named
+ */
+export function findUnnamedEntryGuards(pluginRoot = DEFAULT_PLUGIN_ROOT) {
+  const scriptsDir = path.join(pluginRoot, "scripts");
+  const dead = [];
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const abs = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (!SURFACE_SKIP_DIRS.has(e.name)) walk(abs);
+        continue;
+      }
+      if (!/\.(?:ts|mjs|js)$/.test(e.name) || SURFACE_SKIP_FILES.test(e.name)) continue;
+      const text = fs.readFileSync(abs, "utf8");
+      if (!importsSharedEntryHelper(text)) continue;
+      for (const cond of topLevelIfConditions(text)) {
+        const arity = isDirectEntryArity(cond);
+        if (arity === null || arity >= 3) continue;
+        dead.push({ module: path.relative(pluginRoot, abs), condition: cond.replace(/\s+/g, " ").trim().slice(0, 120) });
+      }
+    }
+  };
+  walk(scriptsDir);
+  return dead;
+}
+
 /** Build the plugin dist bundles for a plugin root. Returns the entry count. */
 export async function buildPluginDist(pluginRoot = DEFAULT_PLUGIN_ROOT) {
   const { scripts, gateScripts } = deriveEntries(pluginRoot);
@@ -603,6 +663,16 @@ export async function buildPluginDist(pluginRoot = DEFAULT_PLUGIN_ROOT) {
       `or add a basename()=== literal clause):`);
     for (const h of hijacks) console.error(`  ${h.entry}  <-  ${h.module}  ::  ${h.condition}`);
     throw new Error("inlined entry-guard hijack: refusing to build a bundle that runs the wrong main");
+  }
+  // Same fail-closed posture for the standalone sibling: an unnamed guard is dead code, and a dead
+  // checker/gate reports exactly like a passing one.
+  const unnamed = findUnnamedEntryGuards(pluginRoot);
+  if (unnamed.length) {
+    console.error(`build-plugin-dist: ${unnamed.length} unnamed entry guard(s) — expectedBase is REQUIRED, ` +
+      `so these top-level blocks are DEAD (main() never runs; the process exits 0 with no output):`);
+    for (const u of unnamed) console.error(`  ${u.module}  ::  ${u.condition}`);
+    throw new Error('unnamed entry guard: refusing to build a surface whose guards can never fire ' +
+      '(use isDirectEntry(import.meta, undefined, "<name>"))');
   }
   const built = await bundleEntries(pluginRoot, all);
   console.log(
