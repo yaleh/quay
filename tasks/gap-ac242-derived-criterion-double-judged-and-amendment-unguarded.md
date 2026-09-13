@@ -65,7 +65,7 @@ stdout：`frozenScope:82, evaluated:true, failing:["AC-203"], staleUnverified:[]
 - [x] AC4 修订入闸 + 负控制：对一条 achieved AC 改 `criterion` ⇒ 其既有 pass 不再计入 `verifiedFresh`（对照：同一 fixture 不改 criterion ⇒ 仍计入，证明断言能取假），且落一条针对新 criterion 的 verdict（actor 独立、可区分）。 → 见 Result「AC4」：改/不改两向对照 + 空白重排不算修订 + 遗留无指纹事件独立取值，全部实跑（`plugin/test/goal-invariants-standing.test.mjs` 新增 3 条）。
 - [x] AC5 判据真转绿（⛔ 生产读数）：`check --stale-pass` 干跑 **exit 0** + 贴 AC-203 转真的生产载体记录；⛔ 不是夹具、⛔ 不是放宽 AC-242 的 expect、⛔ 不是把 AC-203 搬出冻结population。 → 见 Result「AC5」：exit 0 ✓、生产载体 13 条含 ≥2 个不同 kind ✓。⚠️ **须披露的混淆量**：AC-203 另于 `2026-09-13T07:46:03Z`（提交 `e4333ee28`，actor `cli:3026764`）被补上 `long-term: true` —— 即 Proposal 明列的排除走法之一。已附**区分性对照**证明本条绿**不依赖**该搬动。
 - [x] AC6 不再自递归立案：fix 后一轮 driver 干跑，`gaps` 中不出现 `ac=AC-242` 的 standing-violated 条目（贴原文）。 → 见 Result「AC6」：贴 `AC-242 entries` 原文（`standing-ok`）。⚠️ 生产当前 ③ 判 `clean` ⇒ 该条现值本身也是「无事可立」，故另附**同一输入的改前/改后两向控制**作为可区分证据。
-- [ ] AC7 全量绿：`scripts/test.sh` 全量绿；`git diff --name-only <base>..HEAD` 不越 ## Touches。（待外部 —— 全量套件由 fan-in 的 verification-round 跑；本任务只跑了 scoped 门 + 相关面 785 条，见 Result「AC7」）
+- [ ] AC7 全量绿：`scripts/test.sh` 全量绿；`git diff --name-only <base>..HEAD` 不越 ## Touches。 → 见 Result「AC7」：Touches 边界已实测（恰好 4 文件、全在内），scoped 门 247/0 绿、相关面 785 条 0 fail；**全量套件由 fan-in 的 verification-round 跑**（worker 约束不自行跑全量）⇒ 该半条待外部。（待外部）
 
 ## Result
 
@@ -91,6 +91,7 @@ stdout：`frozenScope:82, evaluated:true, failing:["AC-203"], staleUnverified:[]
 ③ EXIT=1
    stderr: GOAL-009-AC-203: 合格记录覆盖的 kind=[] （需要 >=2 个不同的 driver kind）
    ⇒ 与 Proposal ③ 逐字相同。历史 AC-203 记录：`long-term: false` ✓（立案时确在冻结population 内）。
+```
 
 ### AC2 — 两判官同真相 + verdict 滞后一轮（生产台账原文）
 
