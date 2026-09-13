@@ -2446,16 +2446,35 @@ export function clearGitHistoryCache(): void {
   gitHistoryCache.clear();
 }
 
-export function readGitHistory(root: string, { limit = GIT_HISTORY_LIMIT, before = null, skip = null, nowMs = Date.now() }: { limit?: number; before?: number | null; skip?: number | null; nowMs?: number } = {}): GitHistoryResult {
+/**
+ * The host-read seam (gap-load-sensitive-tests-read-live-host-class-level-seam): the ONE place this
+ * reader shells out to git. Same shape as the recorded `resourceGateArgv` seam in
+ * `plugin/scripts/quality-gate-driver.ts` — an optional injectable handle whose default is the real
+ * one — so a test can hand the reader a frozen snapshot of the host instead of racing the live repo
+ * (measured 2026-09-13: two independent live reads of the same window is what made this reader's
+ * consumers' verdicts a function of whatever the loop committed mid-test).
+ * ⛔ A seam, not a behavior switch: the default is the previous inline `execFileSync` verbatim.
+ */
+export type GitExec = (args: string[], opts?: { timeout?: number }) => string;
+
+/** The real git runner — `readGitHistory`'s default `exec`. */
+export const realGitExec: GitExec = (args, opts = {}) =>
+  execFileSync("git", args, { encoding: "utf8", timeout: opts.timeout ?? 15_000, stdio: ["ignore", "pipe", "pipe"] }) as string;
+
+export function readGitHistory(root: string, { limit = GIT_HISTORY_LIMIT, before = null, skip = null, nowMs = Date.now(), exec = realGitExec }: { limit?: number; before?: number | null; skip?: number | null; nowMs?: number; exec?: GitExec } = {}): GitHistoryResult {
+  // An injected `exec` is a test seam over a frozen/constructed window, NEVER production data:
+  // memoizing it under the production key would make a fixture indistinguishable from a real
+  // reading (硬规则 3b — 读不懂/不是真读数 ⇒ 不得与合格同形). The default path is unchanged.
+  if (exec !== realGitExec) return readGitHistoryUncached(root, { limit, before, skip, nowMs, exec });
   const key = `${root}\n${limit}\n${before ?? ""}\n${skip ?? ""}`;
   const hit = gitHistoryCache.get(key);
   if (hit && Date.now() - hit.at < GIT_HISTORY_CACHE_TTL_MS) return hit.result;
-  const result = readGitHistoryUncached(root, { limit, before, skip, nowMs });
+  const result = readGitHistoryUncached(root, { limit, before, skip, nowMs, exec });
   gitHistoryCache.set(key, { at: Date.now(), result });
   return result;
 }
 
-function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, before = null, skip = null, nowMs = Date.now() }: { limit?: number; before?: number | null; skip?: number | null; nowMs?: number } = {}): GitHistoryResult {
+function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, before = null, skip = null, nowMs = Date.now(), exec = realGitExec }: { limit?: number; before?: number | null; skip?: number | null; nowMs?: number; exec?: GitExec } = {}): GitHistoryResult {
   try {
     const args = ["-C", root, "log", "--all", "--topo-order", `-n ${limit}`];
     // gap-git-graph-pagination-appends-page-relative-col-and-torow: `skip` is the EMISSION-ORDER cursor
@@ -2466,7 +2485,7 @@ function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, befor
     if (skip !== null && Number.isFinite(skip) && skip > 0) args.push(`--skip=${skip}`);
     else if (before !== null && Number.isFinite(before)) args.push(`--before=${before}`);
     args.push("--pretty=format:%H%x1f%P%x1f%D%x1f%ct%x1f%s");
-    const out = execFileSync("git", args, { encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "pipe"] });
+    const out = exec(args, { timeout: 15_000 });
 
     const commits: GitHistoryCommit[] = [];
     for (const line of out.split(/\r?\n/)) {
@@ -2490,9 +2509,7 @@ function readGitHistoryUncached(root: string, { limit = GIT_HISTORY_LIMIT, befor
     }
     let head: string | null = null;
     try {
-      const headOut = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], {
-        encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"],
-      });
+      const headOut = exec(["-C", root, "rev-parse", "HEAD"], { timeout: 10_000 });
       head = headOut.trim().split(/\r?\n/)[0] || null;
     } catch {
       head = null; // unborn HEAD / detached — `%D` still marks HEAD via `HEAD -> <ref>`.
