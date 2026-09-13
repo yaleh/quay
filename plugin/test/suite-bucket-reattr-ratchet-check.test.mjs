@@ -10,7 +10,11 @@
 //           negative control: the same pure-S test WITH a reattribution entry ⇒ no layer 1.
 //   ③-AC7  a statically S-signal-multi (S+M) test with no entry ⇒ layer 2 (report, non-blocking) — a
 //           count, never a RED (over-selection is the safe direction).
-//   ③-AC8  the real reattribution file carries NO zombie entries (every file still a suite test).
+//   ③-AC8  the real reattribution file carries NO zombie entries (every file still a suite test) —
+//           judged by the CHECKER's layer 3, not by a re-derivation in this test
+//           (gap-suite-bucket-zombie-check-bills-the-next-unrelated-task: the condition used to live
+//           ONLY here, i.e. only in a full-suite run; it now lives on the checker's own surface, so
+//           the `change`-tier static gate reddens the deleting change at its own scoped run).
 //   hard rule 3b — no reattribution file ⇒ NOT-EVALUATED (evaluated=false), never a green "0".
 //
 // Run:
@@ -57,6 +61,9 @@ const PURE_S_TEST = [
 test("③-AC6 — a statically pure-S test with no reattribution entry is layer-1 RED (blocking)", () => {
   const root = makeFixture({
     "plugin/test/pure-s.test.mjs": PURE_S_TEST,
+    // the attributed file must EXIST as a suite test, else the fixture carries a layer-3 zombie and
+    // this test would pass for a reason other than layer 1.
+    "plugin/test/other.test.mjs": PURE_S_TEST,
     ".quay/suite-bucket-reattribution.jsonl": `{"file":"plugin/test/other.test.mjs","judgment":"M","mechanism":"S","signal":[]}\n`,
   });
   try {
@@ -75,6 +82,7 @@ test("③-AC6 negative control — the same pure-S test WITH a reattribution ent
   try {
     const rep = checkReattrRatchet(root);
     assert.equal(rep.evaluated, true);
+    assert.deepEqual(rep.zombies, [], "the entry names the fixture's own live file ⇒ no layer-3 zombie here");
     assert.equal(rep.layer1.length, 0, `a re-attributed pure-S test must not be layer-1, got ${JSON.stringify(rep.layer1)}`);
   } finally { cleanup(root); }
 });
@@ -90,6 +98,8 @@ test("③-AC7 — a statically S+M test with no entry is layer-2 (report) only, 
       `import { classifyPath } from "../scripts/suite-bucket-attribution.ts";`,
       `test("s+m", () => { spawnSync("bash", ["scripts/test.sh", "--help"]); classifyPath("plugin/scripts/x"); });`,
     ].join("\n"),
+    // live, attributed ⇒ contributes neither layer 1 nor layer 3 (isolation for the layer-2 assertion).
+    "plugin/test/other.test.mjs": PURE_S_TEST,
     ".quay/suite-bucket-reattribution.jsonl": `{"file":"plugin/test/other.test.mjs","judgment":"M","mechanism":"S","signal":[]}\n`,
   });
   try {
@@ -110,15 +120,73 @@ test("hard rule 3b — NO reattribution file ⇒ NOT-EVALUATED (evaluated=false)
     assert.equal(rep.evaluated, false, "no reattribution file ⇒ evaluated=false");
     assert.equal(rep.layer1.length, 0);
     assert.equal(rep.layer2.length, 0);
+    assert.equal(rep.zombies.length, 0, "NOT-EVALUATED reports no zombies — an absent input is not a clean bill of health");
   } finally { cleanup(root); }
 });
 
-// ── ③-AC8 — the real reattribution file carries no zombie entries ────────────────────────────────────
+// ── ③-AC8 — an entry whose file is no longer a suite test is a ZOMBIE (layer 3, blocking) ────────────
+//
+// AC8(a): the FALSIFIABLE direction — deleting a suite test file WITHOUT dropping its entry must be
+// layer-3 RED. Every fixture below is the same shape the production incident had (a test file present
+// + a record entry for it, then the file removed), so a checker that reports no zombies here is a
+// checker that cannot fail (hard rule 3b) and the assertion says so.
 
-test("③-AC8 — the real reattribution file has NO zombie entries (every file is still a suite test)", () => {
-  const reattr = loadReattribution(REPO_ROOT);
-  assert.ok(reattr.size > 0, "the reattribution file must be present and non-empty");
-  const suite = new Set(listSuiteFiles(REPO_ROOT));
-  const zombies = [...reattr.keys()].filter((f) => !suite.has(f));
-  assert.deepEqual(zombies, [], `a reattribution entry must point to an existing suite test (zombies would be re-added), got ${JSON.stringify(zombies)}`);
+test("③-AC8 — a reattribution entry pointing at a NON-suite file is layer-3 (blocking) RED", () => {
+  const root = makeFixture({
+    "plugin/test/kept.test.mjs": PURE_S_TEST,
+    ".quay/suite-bucket-reattribution.jsonl": [
+      `{"file":"plugin/test/kept.test.mjs","judgment":"M","mechanism":"S","signal":[]}`,
+      // the deleted file: an entry survives the file it names — the zombie shape.
+      `{"file":"plugin/test/deleted.test.mjs","judgment":"M","mechanism":"S","signal":[]}`,
+    ].join("\n") + "\n",
+  });
+  try {
+    const rep = checkReattrRatchet(root);
+    assert.equal(rep.evaluated, true, "with a reattribution file the check must be evaluated");
+    assert.deepEqual(rep.zombies, ["plugin/test/deleted.test.mjs"],
+      `the entry whose file is gone must be layer-3, got ${JSON.stringify(rep.zombies)}`);
+    assert.equal(rep.layer1.length, 0, "the surviving entry keeps the pure-S test attributed — layer 1 must stay clean");
+  } finally { cleanup(root); }
+});
+
+test("③-AC8 negative control — an entry whose file IS a suite test yields no zombie", () => {
+  const root = makeFixture({
+    "plugin/test/kept.test.mjs": PURE_S_TEST,
+    ".quay/suite-bucket-reattribution.jsonl": `{"file":"plugin/test/kept.test.mjs","judgment":"M","mechanism":"S","signal":[]}\n`,
+  });
+  try {
+    const rep = checkReattrRatchet(root);
+    assert.equal(rep.evaluated, true);
+    assert.deepEqual(rep.zombies, [], `a live entry must not be layer-3, got ${JSON.stringify(rep.zombies)}`);
+    assert.equal(rep.layer1.length, 0);
+  } finally { cleanup(root); }
+});
+
+test("③-AC8 — DELETING the file a judged entry names flips layer 3 from clean to RED (the incident shape)", () => {
+  const root = makeFixture({
+    "plugin/test/kept.test.mjs": PURE_S_TEST,
+    ".quay/suite-bucket-reattribution.jsonl": [
+      `{"file":"plugin/test/kept.test.mjs","judgment":"M","mechanism":"S","signal":[]}`,
+      `{"file":"plugin/test/doomed.test.mjs","judgment":"M","mechanism":"S","signal":[]}`,
+    ].join("\n") + "\n",
+  });
+  try {
+    // the doomed test exists as a suite file ⇒ both entries are live ⇒ no zombie.
+    fs.writeFileSync(path.join(root, "plugin/test/doomed.test.mjs"), PURE_S_TEST, "utf8");
+    assert.deepEqual(checkReattrRatchet(root).zombies, [], "precondition: both entries live ⇒ no zombie");
+    // the deletion happens, the record is NOT updated — exactly what the 10 production reds were.
+    fs.rmSync(path.join(root, "plugin/test/doomed.test.mjs"));
+    const rep = checkReattrRatchet(root);
+    assert.deepEqual(rep.zombies, ["plugin/test/doomed.test.mjs"],
+      `deleting the file without dropping its entry must be layer-3 RED, got ${JSON.stringify(rep.zombies)}`);
+  } finally { cleanup(root); }
+});
+
+test("③-AC8 — the REAL reattribution file has NO zombie entries (every file is still a suite test)", () => {
+  const rep = checkReattrRatchet(REPO_ROOT);
+  assert.equal(rep.evaluated, true, "the real reattribution file must be present (else NOT-EVALUATED, not a pass)");
+  assert.ok(loadReattribution(REPO_ROOT).size > 0, "the reattribution file must be non-empty");
+  assert.deepEqual(rep.zombies, [], `a reattribution entry must point to an existing suite test, got ${JSON.stringify(rep.zombies)}`);
+  // the live suite is non-empty too — a "no zombies" read off an empty suite set would be vacuous.
+  assert.ok(new Set(listSuiteFiles(REPO_ROOT)).size > 0, "the suite file set must be non-empty for the zombie judgment to mean anything");
 });
