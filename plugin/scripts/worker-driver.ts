@@ -200,6 +200,8 @@ import {
   resolveKernelSibling,
   resolveKernelScriptsDir,
   resolveKernelPluginRoot,
+  resolveKernelShellSibling,
+  resolveQuaySrcModule,
   type LivenessResult,
 } from "./driver-runtime.ts";
 // 机械 fan-in（gap-fan-in-driver-mechanical-orchestration / SPEC-fan-in-driver-mechanical-
@@ -215,6 +217,10 @@ import { buildMirrorState, writeMirrorState, shouldSkipMirrorWrite, readCurrentS
 // 定义点，⛔ 不写字面量 1——concurrency-literal-check P4 会把 `laneCount: 1` 判为未声明并发字面量违规）；
 // readLoadAvg 同源（/proc/loadavg 1min，verification-round 的 load 轴——与 full-suite-runner 同一读法）。
 import { defaultLaneCount, readLoadAvg } from "./full-suite-runner.ts";
+// gap-fan-in-suite-refusal-reports-as-suite-red AC1/AC2：suite log 里「本轮没跑（拒绝）」的标记前缀。
+// ⛔ 前缀的唯一真相源在 full-suite-runner.ts（writer 侧）——本层是 reader，import 同一常量而不是自己
+// 写一份字面量（两份前缀 = 漂移，硬规则 5b：改了 writer 忘了 reader 时判据静默恒假）。
+import { SUITE_LOG_NOT_RUN_PREFIX, SUITE_LOG_RUN_START_PREFIX } from "./full-suite-runner.ts";
 // gap-verification-round-bound-to-quay-shaped-suite-entry：第三方项目（无 scripts/test.sh，suite 由它自己的
 // loop.test_command 跑）不经 full-suite-runner ⇒ 那条唯一 writer 不在路径上 ⇒ /tests 的
 // verification-round.jsonl 结构性不产生（web 恒显示「未接入」）。本层补写【复用既有 shared writer】
@@ -1293,15 +1299,10 @@ export function docCheckCommandFor(worktree: string): string[] | null {
   return hasTestSh(worktree) ? ["bash", testSh, "--static-checks-doc"] : null;
 }
 
-/** 解析本 kernel 的一个 shell sibling（.sh）到 kernel plugin root 的 scripts/<name>（⛔ 非 root ——
+/** 解析本 kernel 的一个 shell sibling（.sh）—— 实现已上收 `driver-runtime.resolveKernelShellSibling`
+ *  （单一入口，⛔ 不各写一份 basename==="dist" 上跳逻辑）。本文件经 import 消费，⛔ 不再本地复制一份。
  *  gap-promotion-driver-ready-pool-check-path-third-party：第三方项目无 plugin/scripts/，.sh 以 loose
- *  形态随包住在 scripts/ 而非 dist/）。缺 ⇒ null（调用方 fail-closed）。与 driver-shared.ts
- *  resolveResourceGateScript 同法，但经 resolveKernelPluginRoot 单一真相源（⛔ 不各写一份
- *  basename==="dist" 上跳逻辑）。 */
-function resolveKernelShellSibling(name: string): string | null {
-  const script = path.join(resolveKernelPluginRoot(), "scripts", name);
-  return fs.existsSync(script) ? script : null;
-}
+ *  形态随包住在 scripts/ 而非 dist/。缺 ⇒ null（调用方 fail-closed）。 */
 
 /** 解析一个 kernel sibling 脚本到运行 argv 前缀（不含 "node" 可执行名）：原始 .ts ⇒
  *  ["--experimental-strip-types", <path>]；bundled dist/*.js ⇒ [<path>]（不带 flag）。两者都不在 ⇒
@@ -3192,8 +3193,24 @@ function isNoiseLine(l: string): boolean {
     // 「Could not resolve」等词，会撞 isFailureSignalLine 的松散正则 ⇒ 把标题/通过测试当失败摘要（归因
     // 错位到 split-or-commit 标题）。⛔ 两者都整体当噪声（不进 meaningful 回退、不进 signals）。
     /^== .* ==$/.test(t) ||
-    /^\s*✔/.test(l)
+    /^\s*✔/.test(l) ||
+    // gap-fan-in-suite-refusal-reports-as-suite-red：runner 的【溯源标记】不是一条测试失败——它是
+    // 「本轮跑没跑」的结构性事实（AC3）。⛔ 不得被 extractFirstFailureLine 当失败摘要（那会让一条
+    // SUITE-RUN-START 变成 reason），refused 轮由 extractSuiteNotRunLine 显式取证。
+    l.includes(SUITE_LOG_NOT_RUN_PREFIX) ||
+    l.includes(SUITE_LOG_RUN_START_PREFIX)
   );
+}
+
+/** AC2 — 从 suite log 里取【第一条】「本轮没跑（拒绝）」标记行（runner 写、本层读，前缀同源）。
+ *  ⛔ 与 extractFirstFailureLine 分开：拒绝【不是】一次测试失败，两者混用会把「没跑」记成「跑了且失败」
+ *  （正是本条要修的病）。无标记 ⇒ null（调用方保持原有真失败摘要路径，⛔ 不伪造）。 */
+export function extractSuiteNotRunLine(combined: string): string | null {
+  const hit = String(combined ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.startsWith(SUITE_LOG_NOT_RUN_PREFIX));
+  return hit ?? null;
 }
 
 /** 失败信号行（node:test 的 not ok / ✖ / # fail、断言 expected/actual、anti-drift HARD FAIL、esbuild 的
@@ -3511,9 +3528,12 @@ async function flipTaskDone(
  *  保留为布局解析单一真相源 + 测试锚点（AC4「双向不变」）；生产已无调用点。
  */
 export function resolveKernelSrcModule(base: string, rel: string): string {
-  const sourcePath = path.join(base, "packages", "quay", "src", rel);
-  if (fs.existsSync(sourcePath)) return sourcePath;
-  return path.join(path.dirname(resolveKernelPluginRoot()), "src", rel);
+  // 布局判定已上收 driver-runtime.resolveQuaySrcModule（单一入口，⛔ 不再就地拼 `packages/quay/src`）：
+  // 源树形（base 是 quay 源树 ⇒ 命中）与 shipped 打平形都在那一个入口里；两形皆无 ⇒ 旧契约的
+  // shipped 形路径（以 **kernel 包根**为基准退回，⛔ 不是 base——base 是消费方/第三方 worktree，
+  // 它没有 <base>/src），由调用方的 best-effort catch 兜。本函数已无生产调用点，仅测试锚点。
+  return resolveQuaySrcModule(rel, base)
+    ?? path.join(path.dirname(resolveKernelPluginRoot()), "src", rel);
 }
 
 /** gap-mechanical-fan-in-writes-no-complete-gateevent — 机械 fan-in 翻 done 后经既有 gate-event-store
@@ -4130,7 +4150,28 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       suiteOutcome = sr.outcome;
       suiteFinishedEpoch = Math.floor(new Date(sr.finishedAt).getTime() / 1000);
       suitePid = sr.pid;
-      traceSuiteEvent("suite-end", { exit: sr.exitCode, wall_ms: sr.durationMs, ok: sr.outcome === "done", ...(sr.outcome === "done" ? {} : { reason: sr.error ?? `suite ${sr.outcome}` }) });
+      // gap-fan-in-suite-refusal-reports-as-suite-red AC2 — 【先判「跑没跑」再判「为什么红」】。
+      // 生产者（full-suite-runner.ts）的每条「未跑就返回」分支都在 suite log 里留了一行
+      // SUITE-NOT-RUN 标记（含分支名与原因）⇒ 被拒轮在【两处】都不得呈现为裸 `suite red`（Finding
+      // 实证的形态正是 `suite-end` 的 `reason:"suite red"` 与 `mechanical_fan_in.reason` 的裸
+      // 「suite red」，二者与「真跑且真红」措辞不可分 —— 硬规则 3b）。⛔ 顺序不可颠倒：拒绝行对
+      // isFailureSignalLine 是噪声（它不是一条测试失败），只有下面的拒绝分支能认出它。
+      let suiteLogText = "";
+      let refusalLine: string | null = null;
+      if (sr.outcome !== "done") {
+        try {
+          suiteLogText = fs.readFileSync(suiteLogFile, "utf8");
+        } catch { /* 日志缺失 ⇒ fallback 通用文案 */ }
+        refusalLine = extractSuiteNotRunLine(suiteLogText);
+      }
+      traceSuiteEvent("suite-end", {
+        exit: sr.exitCode, wall_ms: sr.durationMs, ok: sr.outcome === "done",
+        ...(sr.outcome === "done"
+          ? {}
+          : refusalLine !== null
+            ? { reason: `suite not run (refused): ${refusalLine}`, refused: true }
+            : { reason: sr.error ?? `suite ${sr.outcome}` }),
+      });
       if (sr.outcome !== "done") {
         // 红 suite 记录由 full-suite-runner.ts --buckets 在 suite 退出时写入（gap-fan-in-red-bucket-run-
         // not-recorded：runner 是 verification-round.jsonl 的唯一 writer，green+red 都入账，静态闸红亦由
@@ -4139,10 +4180,11 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
         // gap-needs-human-note-missing-real-error-line：suite 红 needs-human 的「失败步/判词」不再恒为
         // 「suite red」——把 suite 日志（stdout 落进 suiteLogFile）摘要出第一条真实断言/报错行塞进 reason。
         // 无信号 / 日志缺失 ⇒ 回退通用文案（硬规则 3b 三态可分，⛔ 不伪造/截断出误导内容）。
-        let suiteLogText = "";
-        try {
-          suiteLogText = fs.readFileSync(suiteLogFile, "utf8");
-        } catch { /* 日志缺失 ⇒ fallback 通用文案 */ }
+        if (refusalLine !== null) {
+          // 拒绝轮【没有跑过测试】：不写第三方 path 的 red 轮次（那会记成「跑了且红」，正是本条要消灭的
+          // 同形——全量套件从未执行，一条 SUITE-RED 也没有）。reason 指名「未运行（拒绝）+ 哪条分支」。
+          return failSuite(`suite NOT run (refused) — ${refusalLine}`, sr.exitCode);
+        }
         const firstFailure = extractFirstFailureLine(suiteLogText);
         // gap-verification-round-bound-to-quay-shaped-suite-entry：第三方路径的红轮同样入账
         // （「跑了且红」必须与「没跑过」可分，硬规则 3b；与 full-suite-runner 的红绿皆入账契约一致）。

@@ -275,13 +275,21 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/ scripts/ plugin/scripts/suite-slot-ssot-check.ts plugin/scripts/suite-lock-slots.ts plugin/scripts/suite-slot-lib.sh plugin/test/suite-slot-ssot-check.test.mjs
   run_checker "suite-slot-ssot-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-slot-ssot-check.ts" --gate --root "${repo_root}"
-  echo "== suite-bucket reattribution ratchet (gap-suite-bucket-dynamic-truth-drift-detector, ③-AC6/③-AC7) =="
+  echo "== suite-bucket reattribution ratchet (gap-suite-bucket-dynamic-truth-drift-detector, ③-AC6/③-AC7/③-AC8) =="
   # AC121 把 230 个调 test.sh 的测试逐条重归属为 S|M（.quay/suite-bucket-reattribution.jsonl），但覆盖保证是
   # 一次性人工声称（"重扫=0"），非机械 ratchet。本检查让「漏判」变响：新增一个静态纯 S（bucketSetOf={S}，
   # 仅 scripts/test.sh 提及为 subject）且未入重归因的测试 ⇒ RED（第 1 层，阻断——AC121 误归 S 的漏测形态，
   # 基线=0）；含 S 信号但非纯 S（S+M/P+S/P+S+M）未入重归因 ⇒ 只报计数不阻断（第 2 层，留痕——过度选择是
   # 安全方向，现状 14）。重归因文件缺失 ⇒ NOT-EVALUATED（exit 3，硬规则 3b——永不与「0 漏判」同形）。
-  # mutation case: 纯 S 已重归属 → 绿；移除归属 → 红；恢复 → 绿。
+  # 第 3 层（阻断，③-AC8，gap-suite-bucket-zombie-check-bills-the-next-unrelated-task）：重归因【条目】所指的是
+  # 已不存在的 suite 测试文件 ⇒ ZOMBIE ⇒ RED。该条件原先只由本文件的单测 ③-AC8 判定（= 只在全量套件的某一轮里判），
+  # 于是「删/归档了某个 suite 测试文件却没同步删条目」的那个变更在【自己那一刻】拿不到任何信号，要等数小时后自己那轮
+  # 全量套件才知道，并额外付一次「清僵尸条目」的补提交（生产记录：651 perFile runs / 10 fails，横跨 8 个任务，每次红后
+  # 都跟着一条清条目提交）。判定移进 checker 后它落在本 checker 自己的面上——@static-tier change，scripts/test.sh 在
+  # scoped 轮里按 @static-object 选中它 ⇒ 制造僵尸的那个变更在自己的 scoped 门就被判红（秒级），而不是等自己那轮全量。
+  # ⚠️ 立案时的前提「红落在下一个【无关】任务身上」**已被实测证否**（10/10 红的成因提交就是记账任务自己的）——
+  # 形态是【迟到】不是【错位】；本条注释与 checker 头注释都以实测为准，不要再复述那个前提。
+  # mutation case: 纯 S 已重归属 → 绿；移除归属 → 红（第 1 层）；删掉条目所指的文件而保留条目 → 红（第 3 层）；恢复 → 绿。
   # @static-tier change
   # @static-object .quay/suite-bucket-reattribution.jsonl plugin/scripts/suite-bucket-reattr-ratchet-check.ts plugin/test/suite-bucket-reattr-ratchet-check.test.mjs plugin/test/ experiments/*/test/ packages/*/test/
   run_checker "suite-bucket-reattr-ratchet-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-bucket-reattr-ratchet-check.ts" --gate --root "${repo_root}"

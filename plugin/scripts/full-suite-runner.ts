@@ -1723,6 +1723,44 @@ export function recordSystemdRunEvidence(stateDir: string, scopeUnit: string, li
   }
 }
 
+// ── suite log 溯源标记（gap-fan-in-suite-refusal-reports-as-suite-red AC1/AC3）──────────────────────
+// 病：fan-in 的 suite log（`--log-file`）此前【只】capture 子进程 stdout，而生产 runner 的一切诊断
+// 都走 stderr（suite-driver.ts 只 tee stdout）⇒ 一条「未跑就返回」的拒绝分支留下 0 字节日志。0 字节
+// 与「跑了且真红但输出恰好为空」在【体积】上同形，且下游 reason 回退成裸 `suite red`（硬规则 3b：
+// 读不懂/没跑 ⇒ 与「跑了且失败」同形；硬规则 4b：日志体积是代理量）。
+// 两个标记把「本轮到底跑没跑」变成日志里的结构化事实（⛔ 不靠推断、不靠 stderr 的措辞）：
+//   SUITE-RUN-START  在 log 流建立后【立刻】写入 ⇒ 本轮确实进了 suite 执行段（:2556 之后）。
+//   SUITE-NOT-RUN    每条「未跑就返回」的分支写一行（含 branch 名与原因）⇒ 本轮【明知】没跑。
+// ⇒ 0 字节从此有确定含义：「runner 连这两个写入点都没到」（进程没起来 / 启动即死），⛔ 不再是「拒绝」
+//   的代理量（AC3：结构量替代代理量）。两个标记的唯一真相源在此；worker-driver.ts 的归因 import 同一
+//   批常量（⛔ 不各写一份前缀 = 漂移，硬规则 5b）。
+export const SUITE_LOG_NOT_RUN_PREFIX = "[full-suite-runner] SUITE-NOT-RUN";
+export const SUITE_LOG_RUN_START_PREFIX = "[full-suite-runner] SUITE-RUN-START";
+
+/** 向 suite log 追加一行溯源标记（append，⛔ 不截断调用方已写的内容）。best-effort：日志是证据面，
+ *  ⛔ 不是判据面——写失败不得改变退出码（观测不得改变被观测行为）。 */
+export function appendSuiteLogMarker(logFile: string, line: string): void {
+  try {
+    fs.mkdirSync(path.dirname(logFile), { recursive: true });
+    fs.appendFileSync(logFile, `${line}\n`, "utf8");
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** AC1：runner 在 suite 启动前返回时，向 suite log 写一行【可读、含分支名与原因】的标记。
+ *  `branch` 是稳定的机器可读名（worker-driver 的归因据此指名「未运行（拒绝）+ 哪条分支」，AC2）。
+ *  ⛔ 措辞不得含 FAIL/AssertionError/exit=<n> 等失败信号词：它是溯源标记，不是一条测试失败。 */
+export function recordSuiteNotRun(logFile: string, branch: string, detail: string): void {
+  // 一行、可读、有界：detail 可能是一整块多行诊断（资源闸的完整输出 ~30 行）——压平 + 截断，⛔ 不让
+  // 一个「标记行」变成 4KB 的单行（可读性正是这条标记存在的理由）。
+  const flat = String(detail ?? "").replace(/\s+/g, " ").trim().slice(0, 300);
+  appendSuiteLogMarker(
+    logFile,
+    `${SUITE_LOG_NOT_RUN_PREFIX} branch=${branch} ts=${new Date().toISOString()} reason=${JSON.stringify(flat)} — no test was executed by this round`,
+  );
+}
+
 // ── run ─────────────────────────────────────────────────────────────────────────────────────────────
 
 export async function run(argv: string[]): Promise<number> {
@@ -1741,6 +1779,28 @@ export async function run(argv: string[]): Promise<number> {
   // root === REPO_ROOT condition).
   let root = path.resolve(parseArg(argv, "--root") ?? REPO_ROOT);
   const mainRoot = root; // the main repo: fork source + state/log write target when one-shot
+  // gap-suite-state-split-across-worktree-and-gate: the STATE/LOG write location is decoupled from
+  // --root (the TESTED CHECKOUT). --state-dir is the .quay state directory the gate reads; when a
+  // worktree full-suite run passes `--root <worktree> --state-dir <main-repo>/.quay`, the runner
+  // writes full-suite-state.json + full-suite.log + verification-round.jsonl into the MAIN repo, so
+  // the inner stop conditions + suite-state-trigger (which read only the main repo's relative
+  // .quay/full-suite-state.json) see the SAME result the runner produced. Default <root>/.quay is
+  // the historical single-location behavior (fully backward compatible).
+  // gap-verification-round-in-one-shot-worktree AC1 — when the round runs in a one-shot worktree,
+  // the state/log default is <main>/.quay (the GATE location — the worktree is torn down at the end,
+  // so writing state into it would throw the signal away). An explicit --state-dir is honored verbatim.
+  // AC1/AC3 — RESOLVED HERE (ahead of every pre-suite return): each "returned without running the
+  // suite" branch below must leave a line in THIS suite log. Resolving it after those branches left
+  // exactly the branches that matter unable to write. Depends only on mainRoot + argv (⛔ not on the
+  // later one-shot `root` reassignment), so hoisting it is a pure move.
+  const stateDir = path.resolve(parseArg(argv, "--state-dir") ?? path.join(mainRoot, ".quay"));
+  const stateFile = path.resolve(parseArg(argv, "--state-file") ?? path.join(stateDir, "full-suite-state.json"));
+  const logFile = path.resolve(parseArg(argv, "--log-file") ?? path.join(stateDir, "full-suite.log"));
+  // AC3 — true once the suite log stream is open (== the runner entered the execution section). The
+  // signal-abort / crash handlers below write a SUITE-NOT-RUN line ONLY while this is still false:
+  // "no test was executed" must stay literally true, and after the stream opens a suite may have
+  // already run part of its tests.
+  let suiteLogOpened = false;
   // gap-suite-knobs-config-file-priority: config < env < CLI. Read the suite: section (the LOWEST-
   // priority default) and promote each present value into process.env ONLY where env is unset/empty
   // (env wins over config; empty-string counts as unset — the bash :- convention). CLI flags stay
@@ -1762,6 +1822,7 @@ export async function run(argv: string[]): Promise<number> {
   const laneCount = laneCountArg !== undefined ? Number(laneCountArg) : defaultLaneCount();
   if (!Number.isFinite(laneCount) || laneCount < 1) {
     process.stderr.write(`full-suite-runner: invalid --lane-count '${laneCountArg}' (must be a positive integer)\n`);
+    recordSuiteNotRun(logFile, "invalid-args", `invalid --lane-count '${laneCountArg}' (must be a positive integer)`);
     return 1;
   }
 
@@ -1778,10 +1839,12 @@ export async function run(argv: string[]): Promise<number> {
   const lowconcConcurrencyArg = parsePositiveIntArg(argv, "--lowconc-concurrency");
   if (serialConcurrencyArg === null && parseArg(argv, "--serial-concurrency") !== undefined) {
     process.stderr.write(`full-suite-runner: invalid --serial-concurrency (must be a positive integer)\n`);
+    recordSuiteNotRun(logFile, "invalid-args", "invalid --serial-concurrency (must be a positive integer)");
     return 1;
   }
   if (lowconcConcurrencyArg === null && parseArg(argv, "--lowconc-concurrency") !== undefined) {
     process.stderr.write(`full-suite-runner: invalid --lowconc-concurrency (must be a positive integer)\n`);
+    recordSuiteNotRun(logFile, "invalid-args", "invalid --lowconc-concurrency (must be a positive integer)");
     return 1;
   }
   // gap-suite-knobs-config-file-priority: config < env < CLI. The config value (if any) was promoted
@@ -1813,20 +1876,6 @@ export async function run(argv: string[]): Promise<number> {
       ? spliceConcurrency(baseCommand, laneCount)
       : baseCommand;
 
-  // gap-suite-state-split-across-worktree-and-gate: the STATE/LOG write location is decoupled from
-  // --root (the TESTED CHECKOUT). --state-dir is the .quay state directory the gate reads; when a
-  // worktree full-suite run passes `--root <worktree> --state-dir <main-repo>/.quay`, the runner
-  // writes full-suite-state.json + full-suite.log + verification-round.jsonl into the MAIN repo, so
-  // the inner stop conditions + suite-state-trigger (which read only the main repo's relative
-  // .quay/full-suite-state.json) see the SAME result the runner produced. Default <root>/.quay is
-  // the historical single-location behavior (fully backward compatible).
-  // gap-verification-round-in-one-shot-worktree AC1 — when the round runs in a one-shot worktree,
-  // the state/log default is <main>/.quay (the GATE location — the worktree is torn down at the end,
-  // so writing state into it would throw the signal away). An explicit --state-dir is honored verbatim.
-  const stateDir = path.resolve(parseArg(argv, "--state-dir") ?? path.join(mainRoot, ".quay"));
-  const stateFile = path.resolve(parseArg(argv, "--state-file") ?? path.join(stateDir, "full-suite-state.json"));
-  const logFile = path.resolve(parseArg(argv, "--log-file") ?? path.join(stateDir, "full-suite.log"));
-
   // gap-runner-spawn-single-flight AC1 — SPAWN-LAYER single-flight: refuse to start when a runner is
   // already in flight (state=running + live pid). The resource gate below checks only LOAD (PSI/
   // loadavg) — it does not know "another suite is already running". Two concurrent runners both pass
@@ -1846,6 +1895,14 @@ export async function run(argv: string[]): Promise<number> {
       process.stderr.write(
         `full-suite-runner: another runner is already in flight (state=${cur.state}, pid=${cur.pid}) — refusing to start (single-flight; round 131/132 storm). Re-run after it finishes.\n`
       );
+      // AC1 — the REFUSAL must be readable in the suite log itself, not only on a stderr that
+      // suite-driver.ts discards. Without this the round's log is 0 bytes and downstream cannot tell
+      // "did not run (refused)" from "ran and failed" (bare `suite red`).
+      recordSuiteNotRun(
+        logFile,
+        "single-flight-refusal",
+        `another runner is already in flight (state=${cur.state}, pid=${cur.pid}); re-run after it finishes`,
+      );
       return 1;
     }
   }
@@ -1864,6 +1921,11 @@ export async function run(argv: string[]): Promise<number> {
       process.stderr.write(
         `full-suite-runner: resource gate says WAIT — NOT starting (state untouched; re-tick when the gate reports GO)\n${gate.output}\n`
       );
+      // AC1 — same as the single-flight refusal above: the WAIT branch returns before the suite log
+      // stream opens, so without this line the round's log is 0 bytes (indistinguishable from a red run).
+      // 取 gate 的判词行（输出的最后一条非空行 = `=> WAIT: <成因>`），⛔ 不把整块诊断压进一行。
+      const gateVerdict = gate.output.split("\n").map((l) => l.trim()).filter(Boolean).pop() ?? "resource gate says WAIT";
+      recordSuiteNotRun(logFile, "resource-gate-wait", `resource gate says WAIT — ${gateVerdict}`);
       return 1;
     }
     process.stderr.write("full-suite-runner: resource gate says GO — starting\n");
@@ -1886,6 +1948,7 @@ export async function run(argv: string[]): Promise<number> {
       process.stderr.write(
         `full-suite-runner: invalid --runner '${runnerArg}' (must be 'outer' or 'inner')\n`,
       );
+      recordSuiteNotRun(logFile, "invalid-args", `invalid --runner '${runnerArg}' (must be 'outer' or 'inner')`);
       return 1;
     }
     runner = runnerArg;
@@ -2024,6 +2087,7 @@ export async function run(argv: string[]): Promise<number> {
       process.stderr.write(
         `full-suite-runner: one-shot worktree provisioning FAILED -> state=red reason=aborted (environment problem)\n  ${e instanceof Error ? e.message : String(e)}\n`,
       );
+      recordSuiteNotRun(logFile, "one-shot-provisioning-failed", e instanceof Error ? e.message : String(e));
       return 1;
     }
     process.stderr.write(`full-suite-runner: running suite in one-shot worktree ${oneShotWorktreePath}\n`);
@@ -2234,6 +2298,10 @@ export async function run(argv: string[]): Promise<number> {
     process.stderr.write(
       `full-suite-runner: uncaught ${err instanceof Error ? err.message : String(err)} -> state=red reason=crashed (runner died mid-run)\n`,
     );
+    // AC1/AC3 — a crash BEFORE the suite log stream opens leaves a 0-byte log exactly like a refusal.
+    // Guarded on `!suiteLogOpened`: after the stream opens a suite may have already executed tests, so
+    // "no test was executed by this round" would be a false claim.
+    if (!suiteLogOpened) recordSuiteNotRun(logFile, "crash", `uncaught ${err instanceof Error ? err.message : String(err)}`);
     const crashedPhases = phaseAccount ? phaseAccount.records : [];
     try {
       writeSuiteState({
@@ -2520,6 +2588,9 @@ export async function run(argv: string[]): Promise<number> {
   const onSignal = (sig: string) => {
     if (runDone || redDetected) return;
     const at = new Date().toISOString();
+    // AC1/AC3 — a signal arriving BEFORE the suite log stream opens leaves a 0-byte log exactly like a
+    // refusal. Guarded on `!suiteLogOpened` (after it opens, tests may have already run).
+    if (!suiteLogOpened) recordSuiteNotRun(logFile, "signal-abort", `${sig} received before the suite started`);
     writeSuiteState({
       state: "red",
       reason: "aborted",
@@ -2554,6 +2625,14 @@ export async function run(argv: string[]): Promise<number> {
     }
   }
   const logStream = fs.createWriteStream(logFile, { flags: "w" });
+  // AC3 — the run-start marker: from here on this round's log is non-empty BY CONSTRUCTION, so
+  // "0 bytes" stops being a proxy for "refused" and becomes the narrower, decidable claim "the runner
+  // never reached the execution section" (process never started / died before its first write).
+  // Written into the stream (⛔ not appended before the truncation above) so it survives the "w" open.
+  suiteLogOpened = true;
+  logStream.write(
+    `${SUITE_LOG_RUN_START_PREFIX} ts=${new Date().toISOString()} runId=${runId} scope=${scope} pid=${process.pid} log=${logFile}\n`,
+  );
 
   // AC6 (gap-no-criterion-records-its-own-cost-checker-cost-jsonl) — per-run pass/fail/cancelled
   // tallies from the TAP summary lines (`# pass N` / `# fail N` / `# cancelled N`), carried into the

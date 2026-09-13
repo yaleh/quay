@@ -70,7 +70,19 @@ import {
   // gap-precommit-guard-blocks-commits-not-working-tree-edits — the red-attribution check (a
   // TESTED-tree assertion-surface file edited mid-round ⇒ MIXED-STATE FALSE-POSITIVE candidate)
   isAssertionSurfaceEditedFalsePositiveCandidate,
+  // gap-crash-watchdog-round-ledger-not-written — the crash-watchdog's round-LEDGER row (the state
+  // carrier already said reason=crashed; this is the SECOND carrier that used to stay silent)
+  RUNNER_DIED_REASON,
+  taskIdFromRunId,
+  buildRunnerDiedRoundRow,
+  runnerDiedRoundRecorded,
+  recordRunnerDiedRound,
 } from "../scripts/suite-state-trigger.ts";
+
+// gap-crash-watchdog-round-ledger-not-written — the SHARED round-ledger builder, used ONLY here to
+// produce the two COMPARANDA rows (a green round and a red round) so the runner-died row's shape is
+// asserted against what an evaluated round actually looks like, not against a hand-written guess.
+import { buildPreVerifiedRoundRecord, appendPreVerifiedRound } from "../scripts/pre-verified-round-record.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
@@ -692,7 +704,17 @@ test("AC4 — the retrigger reuses the runner's resource gate: WAIT blocks the r
     assert.ok(s, "the state file still exists");
     assert.equal(s.state, "green", "state stays terminal (untouched) on WAIT — the retrigger does not start into a busy machine");
     assert.equal(s.finishedAt, terminal.finishedAt, "the terminal state is byte-untouched (same round)");
-    assert.ok(!fs.existsSync(path.join(root, ".quay", "full-suite.log")), "the suite was NEVER spawned on WAIT");
+    // gap-fan-in-suite-refusal-reports-as-suite-red: log-file EXISTENCE stopped being a valid proxy for
+    // "was the suite spawned" — the runner now appends a SUITE-NOT-RUN provenance line to the suite log
+    // on EVERY pre-suite return (the refusal must be visible in the log, not only on the stderr that the
+    // caller discards; that 0-byte log + bare `suite red` is the defect this replaced). 硬规则 4b：把代理量
+    // 换成直接量——「suite 到底跑没跑」= the suite command's OWN output must never reach the log.
+    const waitLogPath = path.join(root, ".quay", "full-suite.log");
+    const waitLog = fs.existsSync(waitLogPath) ? fs.readFileSync(waitLogPath, "utf8") : "";
+    assert.ok(
+      !waitLog.includes("fake suite — must not run on WAIT"),
+      "the suite was NEVER spawned on WAIT (its own output never reached the log)",
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -1283,4 +1305,251 @@ test("resolveVerifyTarget — --verify-target CLI wins over QUAY_SUITE_VERIFY_TA
     delete process.env.QUAY_SUITE_VERIFY_TARGET;
   }
   assert.equal(resolveVerifyTarget([]), null, "no target ⇒ null (caller defaults to integration head / no gate)");
+});
+
+// ── gap-crash-watchdog-round-ledger-not-written: the NOT-EVALUATED round-ledger row ───────────────
+//
+// 族：「轮未完整跑完 ⇒ verification-round.jsonl 不落记录」的第四个成员。runner 被【不可捕获地】杀死
+// （外部 SIGKILL / OOM-killer）时，runner 自己的 uncaughtException handler 跑不到，它的唯一 writer
+// 与被测套件一起死 ⇒ 这一轮一行都不写，而本模块的 crash-watchdog 已经把终态补进了 STATE 载体
+// （reason=crashed）⇒ 同一轮上两个载体各说各话。本组断言补写的这一行：
+//   (a) 【发生】——一轮恰一行，且是 NOT-EVALUATED 形状（evaluated:false + reason=runner-died）；
+//   (b) 【幂等】——第二轮不新增行（两轮各扫一次，round 号不得虚增）；
+//   (c) 【与合格不同形】——与真 builder 产出的绿轮、红轮三条原文并排，取值两两可分；
+//   (d) 【不可评估 ≠ 合格】——无 runId / 非 crashed 状态一律拒写，且拒写理由与「已写」不同形。
+
+/** 一个 crash-watchdog 会判死的 running state（死 pid + mfi- runId），与真实 runner 写出的载体同形。 */
+function crashedRunningState(over = {}) {
+  return state({
+    state: "running",
+    pid: deadPid(),
+    runId: "mfi-gap-crash-watchdog-round-ledger-not-written-1789293000000-a1b2c3",
+    scope: "worktree",
+    verifiedCommit: "0bce0eebd7c93cda527475416244d7d1bb9514fe",
+    ...over,
+  });
+}
+
+function ledgerLines(root) {
+  const p = path.join(root, ".quay", "verification-round.jsonl");
+  if (!fs.existsSync(p)) return [];
+  return fs
+    .readFileSync(p, "utf8")
+    .split("\n")
+    .filter((l) => l.trim())
+    .map((l) => JSON.parse(l));
+}
+
+test("AC1 — crash-watchdog 补写 round 台账：一轮恰一行；同一 runId 再被观测到仍不新增（幂等·两个方向都可取假）", () => {
+  const root = tmpRoot();
+  try {
+    const st = crashedRunningState();
+    writeSuiteState(root, st);
+
+    const first = runOnce(root);
+    assert.equal(first.status, "red", "runOnce still reports the crashed state as red (控制流未变)");
+    let rows = ledgerLines(root);
+    // 方向一：把写入去掉 ⇒ 这里是 0 行 ⇒ 红（这一行【必须发生】）
+    assert.equal(rows.length, 1, "the killed round lands EXACTLY ONE round-ledger row");
+    const row = rows[0];
+    assert.equal(row.evaluated, false, "the row says NOT-EVALUATED (evaluated:false)");
+    assert.equal(row.reason, RUNNER_DIED_REASON, "reason is the independent token runner-died");
+    assert.equal(row.reason, "runner-died");
+    assert.equal(row.state, "red", "an unevaluated round is never green");
+    assert.ok(!("failures" in row), "no failures[] — a kill produced no failure signal to parse");
+    assert.equal(row.round, 1, "the SHARED appender numbers the round (prior lines + 1)");
+    assert.equal(row.taskId, "gap-crash-watchdog-round-ledger-not-written", "taskId derived from the mfi- runId");
+    // Plan 3 — 两个载体的身份必须同源（否则同一轮在两个载体上对不上，是新的各说各话）
+    const onDisk = JSON.parse(fs.readFileSync(path.join(root, ".quay", "full-suite-state.json"), "utf8"));
+    assert.equal(row.runId, onDisk.runId, "ledger runId === state-carrier runId (same round, same identity)");
+    assert.equal(row.startedAt, onDisk.startedAt, "ledger startedAt === state-carrier startedAt (same source)");
+    assert.equal(onDisk.reason, "crashed", "the STATE carrier says crashed — the two carriers now agree");
+
+    // 方向二：把幂等判据去掉 ⇒ 这里是 2 行 ⇒ 红。
+    // ⚠️ 为什么必须【重新注入同一个 runId 的 running+死 pid】：写完终态后 state 载体已是 red，
+    // detectCrashedRunner 只在 state==="running" 时开火 ⇒ 直接再扫一轮根本走不到补写处，那条断言
+    // 会是一个【结构上不可能取假】的量（实测：把幂等判据整条删掉，那种写法仍 59/59 全绿）。
+    // 重注入模拟的是真实的重入来源：并发的第二个 watcher 在第一个写终态【之前】读到的陈旧快照，
+    // 或同一 runId 的 running 被重发布 ——「每轮补写一次 = round 号虚增」正是 Plan 2 要挡的形态。
+    writeSuiteState(root, st);
+    const second = runOnce(root);
+    assert.equal(second.status, "red");
+    rows = ledgerLines(root);
+    assert.equal(rows.length, 1, "the SAME runId detected a second time adds NO row (idempotent by runId)");
+
+    // 自然稳态（另一条不变量，⛔ 不承担幂等判据的取假）：终态上再扫一轮连补写分支都不进
+    const third = runOnce(root);
+    assert.equal(third.status, "red");
+    assert.deepEqual(third.events, [], "crashed → crashed is a same-state no-transition");
+    assert.equal(ledgerLines(root).length, 1, "steady state keeps the single row");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC1 unit — 幂等判据本身就是那个装置：同一 crashed state 连调两次 recordRunnerDiedRound 只落一行", () => {
+  const root = tmpRoot();
+  try {
+    const st = {
+      state: "red",
+      reason: "crashed",
+      runId: "mfi-gap-x-1789293000000-abcdef",
+      startedAt: "2026-09-13T06:00:00.000Z",
+      durationMs: 5,
+      laneCount: 4,
+    };
+    const a = recordRunnerDiedRound(root, st);
+    const b = recordRunnerDiedRound(root, st);
+    assert.equal(a.written, true, "the first call writes");
+    assert.equal(b.written, false, "the second call refuses — removing the runId predicate turns this into 2 rows");
+    assert.equal(b.reason, "already-recorded", "and says WHY (a distinct token, not silently 'written')");
+    assert.equal(ledgerLines(root).length, 1, "exactly one row after two calls");
+    assert.equal(ledgerLines(root)[0].round, 1, "and the round number did NOT inflate");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC1 negative control — 活 pid 的 running 轮【不】入账（补写只由『被判定死亡』驱动，不是『每一轮』）", () => {
+  const root = tmpRoot();
+  try {
+    writeSuiteState(root, crashedRunningState({ pid: process.pid }));
+    runOnce(root);
+    assert.equal(ledgerLines(root).length, 0, "a genuinely running round writes NO ledger row (no false death)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — 与合格不同形：runner-died 行 vs 真 builder 产出的绿轮 / 红轮，三条原文两两可分", () => {
+  const root = tmpRoot();
+  try {
+    const ledger = path.join(root, ".quay", "verification-round.jsonl");
+    const base = {
+      taskId: "gap-crash-watchdog-round-ledger-not-written",
+      runId: "mfi-comparanda-1789293000000-abcdef",
+      startedAt: "2026-09-13T06:00:00.000Z",
+      durationMs: 1000,
+      laneCount: 16,
+      load: 1.5,
+      commit: "0bce0eebd7c93cda527475416244d7d1bb9514fe",
+      root,
+      recordFile: ledger,
+    };
+    // 对照物由【共享 builder】产出（⛔ 不手搓形状——那样对照的是我的猜测，不是合格轮的真实形态）
+    const green = buildPreVerifiedRoundRecord({ ...base, state: "green" });
+    assert.equal(green.error, undefined);
+    appendPreVerifiedRound(ledger, { ...green.record, taskId: "green-round" });
+    const red = buildPreVerifiedRoundRecord({ ...base, state: "red" });
+    assert.equal(red.error, undefined);
+    appendPreVerifiedRound(ledger, { ...red.record, taskId: "red-round" });
+
+    writeSuiteState(root, crashedRunningState());
+    runOnce(root);
+
+    const rows = ledgerLines(root);
+    assert.equal(rows.length, 3, "green + red + runner-died");
+    const [g, r, died] = rows;
+    // AC2 核心：runner-died 行【显式】evaluated:false；两个合格对照物【不】是 false
+    // （当前 builder 不写这个轴 ⇒ 缺席 = 未知；兄弟条 gap-watchdog-killed… 落地后它们会是显式 true
+    //  —— 两种取值都与 false 可分，所以判据写成 `!== false` 而不是 `=== true`，两个世界都成立）。
+    assert.equal(died.evaluated, false, "the runner-died row carries an EXPLICIT evaluated:false");
+    assert.notEqual(g.evaluated, false, "a green round is not marked NOT-EVALUATED");
+    assert.notEqual(r.evaluated, false, "a red round is not marked NOT-EVALUATED");
+    assert.equal(g.state, "green");
+    assert.equal(r.state, "red");
+    assert.equal(r.reason, "failed", "a real red round's reason is failed (the comparandum)");
+    assert.equal(died.state, "red");
+    assert.equal(died.reason, "runner-died");
+    assert.ok(!("failures" in died), "runner-died carries no failures[] (unlike a real red round)");
+    assert.ok(Array.isArray(r.failures) || !("failures" in r), "a real red round's failures[] is a real (possibly empty) list");
+    for (const forbidden of ["failed", "gate-failed", "watchdog-killed"]) {
+      assert.notEqual(died.reason, forbidden, `runner-died shares no value with ${forbidden}`);
+    }
+    // 与红轮的区分不止靠 state（两者都是 red）——靠 evaluated + reason 两个轴
+    assert.notEqual(died.evaluated, r.evaluated, "runner-died vs a real red: evaluated differs");
+    assert.notEqual(died.reason, r.reason, "runner-died vs a real red: reason differs");
+    assert.notEqual(died.evaluated, g.evaluated, "runner-died vs a green round: evaluated differs");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 unit — evaluated 缺席 ≠ true（硬规则 6）：另一 writer 的行不被读成『已评估』也不被读成『未评估』", () => {
+  // runnerDiedRoundRecorded 的幂等判据只认【显式 evaluated===false】：
+  //   - 同 runId 的绿轮/红轮（无这个轴）⇒ 不算已入账（否则会吞掉本该补写的未评估行）；
+  //   - 同 runId 的未评估行 ⇒ 算已入账。
+  const root = tmpRoot();
+  try {
+    const ledger = path.join(root, ".quay", "verification-round.jsonl");
+    fs.mkdirSync(path.dirname(ledger), { recursive: true });
+    const runId = "mfi-idem-1789293000000-abcdef";
+    fs.writeFileSync(ledger, JSON.stringify({ round: 1, runId, state: "green" }) + "\n");
+    assert.equal(
+      runnerDiedRoundRecorded(ledger, runId),
+      false,
+      "an EVALUATED row for the same runId is not 'already recorded as unevaluated' (缺 evaluated ⇒ 未知)",
+    );
+    fs.appendFileSync(ledger, JSON.stringify({ round: 2, runId, state: "red", evaluated: false }) + "\n");
+    assert.equal(runnerDiedRoundRecorded(ledger, runId), true, "the explicit evaluated:false row IS the marker");
+    assert.equal(runnerDiedRoundRecorded(ledger, "mfi-other-1-abc"), false, "a different runId is not a match");
+    assert.equal(runnerDiedRoundRecorded(path.join(root, ".quay", "missing.jsonl"), runId), false, "a missing ledger is not a match");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC1 unit — 拒写路径：非 crashed 状态 / 无 runId 一律不写，且理由与『已写』不同形（硬规则 3b）", () => {
+  const root = tmpRoot();
+  try {
+    const file = path.join(root, ".quay", "verification-round.jsonl");
+    const cases = [
+      [null, "not-a-crashed-state"],
+      [{ state: "running", pid: 1 }, "not-a-crashed-state"],
+      [{ state: "red", reason: "failed" }, "not-a-crashed-state"],
+      [{ state: "red", reason: "crashed" }, "no-run-id"],
+    ];
+    for (const [st, expected] of cases) {
+      const res = recordRunnerDiedRound(root, st);
+      assert.equal(res.written, false, `${JSON.stringify(st)} must not be written`);
+      assert.equal(res.reason, expected, `${JSON.stringify(st)} ⇒ reason token ${expected}`);
+      assert.notEqual(res.reason, null, "an unwritten row NEVER reports reason:null (that value means written)");
+    }
+    assert.equal(fs.existsSync(file), false, "none of the refused cases appended anything");
+
+    // 正控制：可写的那一种确实写（否则上面的『全拒写』是一个恒真量）
+    const ok = recordRunnerDiedRound(root, {
+      state: "red",
+      reason: "crashed",
+      runId: "mfi-ok-1789293000000-abcdef",
+      startedAt: "2026-09-13T06:00:00.000Z",
+      durationMs: 5,
+      laneCount: 4,
+    });
+    assert.equal(ok.written, true, "the writable case IS written (negative control on the refusal set)");
+    assert.equal(ok.reason, null);
+    assert.equal(ledgerLines(root).length, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC1 unit — 无 commit / 无 laneCount 时字段【缺席】而不是填 0（硬规则 6：缺值 = 未查）", () => {
+  const { row, error } = buildRunnerDiedRoundRow({
+    state: "red",
+    reason: "crashed",
+    runId: "081f8335-a46c-494e-b918-0619f8d59d55", // 生产实例：UUID（main scope）⇒ 派生不出 taskId
+    startedAt: "2026-08-12T06:42:39.440Z",
+    durationMs: 265643,
+  });
+  assert.equal(error, null);
+  assert.equal(row.taskId, undefined, "no fabricated taskId for a UUID runId (it has none)");
+  assert.equal(row.commit, undefined, "no commit on the state ⇒ the field is ABSENT, not a fake sha");
+  assert.equal(row.laneCount, null, "laneCount absent on the state ⇒ explicit null (considered + unavailable)");
+  assert.ok(!("load" in row), "no end-of-suite load exists for a killed round ⇒ the field is absent, never 0");
+  assert.equal(row.evaluated, false);
+  assert.equal(row.reason, "runner-died");
+  assert.equal(row.scope, undefined, "scope absent on the state ⇒ absent on the row");
+  assert.equal(taskIdFromRunId("081f8335-a46c-494e-b918-0619f8d59d55"), null);
+  assert.equal(taskIdFromRunId("mfi-gap-x-1789293000000-abcdef"), "gap-x", "mfi- runIds derive their task");
 });

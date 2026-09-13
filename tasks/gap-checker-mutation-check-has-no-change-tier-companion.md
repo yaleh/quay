@@ -3,6 +3,7 @@ id: gap-checker-mutation-check-has-no-change-tier-companion
 title: checker-mutation-check 是 full-tier 且末次静态闸失败就在今天——按本仓库既定解法（change-tier
   伴生检查）让改 checker 的那个任务在自己的 scoped 门被抓到
 status: ready
+needs_human_cause: human-adjudication
 labels:
   - gap
 parent: null
@@ -196,3 +197,15 @@ delta 含**注册表源**（`runner-static-gate.ts` / `scripts/test.sh` / `.gith
    **⇒ 对本条的含义**：它是一本**既有的、已立案的、与本任务 delta 无关的生产缺陷**，会在下轮 fan-in 里以一定概率复现；若再以这个文件红退出，**先按 `confirmed_ms` 分型**（≈1044 ⇒ 形态 (a)）再去判，⛔ 不要当成新发现重新归因，也⛔ 不要在本条里顺手修它。
 
 **本轮 Touches 扩展**：`plugin/test/scoped-static-checks.test.mjs` 追加进 `## Touches`（修改它才能让 suite 绿；不追加即 anti-drift HARD FAIL，正是续做轮①的退出原因）。改后 `anti-drift-touches-check.ts` ⇒ **`ANTI-DRIFT OK: … 4 actual file(s), all within declared Touches (5 glob(s))`**。
+
+## Needs-Human
+
+**执行 2026-09-13T08:03:36.960Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: suite red
+- run_id：wk-prod-1789139008
+- session_id：3973f4bc-03fd-4b6e-94be-5d3e76392e7d
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-checker-mutation-check-has-no-change-tier-companion~wk-prod-1789139008~1789284439473-404e8f.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-checker-mutation-check-has-no-change-tier-companion-wk-prod-1789139008.log

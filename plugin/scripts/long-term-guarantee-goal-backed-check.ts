@@ -21,6 +21,13 @@
 // 执行器：本脚本由 goal-driver 每轮对 AC-190（kind=criterion, goal=GOAL-007, status=active）跑
 // gateCriterion 调起（criterion 正文 = goals/AC-190-task-ac.md），无需接入 scripts/test.sh。
 //
+// ⚠️ 写入面的同一条规则（gap-ac190-goal-ac-rule-not-enforced-at-filing, 2026-09-13）：本文件是
+// 【事后】报告——它看得见违反，却没有任何权力阻止违反发生。生效线之后第一条 delivery-critical 任务
+// 经本仓自己的立案路径写入、机械晋升到 ready，全程没有任何一步问过 goal_ac（硬规则⑨：产物造在了
+// 违反发生之后 ⇒ 等于靠意志）。同一条规则在【提交那一刻】的判定落在 precommit-guard.ts 的 ③
+// （staged tasks/*.md 的 delivery-critical ∧ 生效线之后 ∧ 无 goal_ac ⇒ 拒），判定函数由本文件导出、
+// 单源复用（isDeliveryCritical / hasGoalAc / filedAfterCutoff / activationLineMs），⛔ 不留第二份实现。
+//
 // Run:
 //   node --no-warnings --experimental-strip-types plugin/scripts/long-term-guarantee-goal-backed-check.ts
 //   node --no-warnings --experimental-strip-types plugin/scripts/long-term-guarantee-goal-backed-check.ts --inject-unbacked-fixture
