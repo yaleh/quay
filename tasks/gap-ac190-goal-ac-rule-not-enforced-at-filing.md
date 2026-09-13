@@ -1,7 +1,7 @@
 ---
 id: gap-ac190-goal-ac-rule-not-enforced-at-filing
 title: AC-190 判据复发：规则只在事后检测、立案/写入面零约束——生效线后第一条 delivery-critical 任务即无 goal_ac
-status: done
+status: ready
 labels:
   - gap
   - defect
