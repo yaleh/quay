@@ -44,6 +44,7 @@ dist/worker-driver.js      --help -> worker-driver — SPEC §5…   （正确�
 3. **决定正确形态** → **(b) driver 自身常驻、按 interval 循环**。理由：既有设计本就是 (b)（`runResidentQualityGateLoop`），且前驱任务 `gap-drain-on-routine-driver-empties-round-and-respawn-loops` 已把「例程型 driver 常驻、halt 是**轮内闸**不是退出条件」定为设计意图；(a)（supervisor 按 interval 定时重启单轮进程）会让「重启」同时承担节奏与恢复两种语义，把崩溃退避压成轮询，且一旦 driver 真崩溃就无法与正常节奏区分。**⛔ 未实现 (a)，⛔ 两种都实现。**
 4. **接线** → ①消除 inlined 入口守卫劫持：25 处无第三参数的 `isDirectEntry(import.meta)` → 具名形式，4 处手搓文件身份守卫 → 走共享机制；②`gate-script-base.isDirectEntry` 的 `expectedBase` 改为**必填**（裸守卫从此是类型错误——机制而非提醒）；③`build-plugin-dist.mjs` 加**构建期 fail-closed 闸** `findEntryGuardHijacks`（有劫持即拒绝打包，带正向/负向控制测试）；④meta 的硬编码缺省改读 `drivers.yml`。
 5. **⛔ 未改 promotion/worker** → 两个 bundle 的入口守卫清单 before/after **签名逐字相同**（AC3），源码零改动。
+6. **镜像对** → `gate-script-base.ts` 有 `experiments/quay-perpetual-stream/scripts/` 的逐字节镜像对（`mirror-pair-drift-check` 强制），改动已同步到镜像侧（首次 scoped 门因此报 RED，已修）。
 
 ## Acceptance Criteria
 
@@ -69,6 +70,7 @@ dist/worker-driver.js      --help -> worker-driver — SPEC §5…   （正确�
 ## Touches
 
 - plugin/scripts/gate-script-base.ts
+- experiments/quay-perpetual-stream/scripts/gate-script-base.ts
 - plugin/scripts/driver-runtime.ts
 - plugin/scripts/meta-driver.ts
 - plugin/scripts/pool-quality-judge.ts
