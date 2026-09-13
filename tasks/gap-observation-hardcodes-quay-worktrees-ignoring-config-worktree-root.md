@@ -68,16 +68,50 @@ never a positive 'released' signal from a source that could not be observed」�
 3. 加静态检查：`packages/quay/src` 与 `plugin/scripts` 下不得再出现字面量 `"quay-worktrees"`
    （除该单一入口内部的回落分支）。
 
+## 根因更正（实现时实测；硬规则 4 推论四：一个能解释现象的说法不等于被检验的结论）
+
+立案时的因果链（`taskWorktreeOpen` → 在飞显示指向别的项目）**经测量被证否**：
+`taskWorktreeOpen` 只做**移除**（`readLive` 里 `filter(... !== false)`，幽灵清理），
+结构上不可能**新增**外来任务；quay-fleet 既无 `.workflow-events/`、其
+`worker-round.jsonl` 的 `in_flight_tasks` 又是 `[]`，故它对一个空列表做过滤。
+
+**区分性对照（一条命令）**：`readLive(root)` 对两个 root 返回**完全相同**的五条任务
+（`/home/yale/work/quay` 与 `/home/yale/work/quay-fleet` 逐条一致），而 `taskWorktreeOpen`
+在 quay-fleet 上作用于空集 ⇒ 症状与它无关。
+
+**真实机制**：`readLive` 的 **/proc worker 扫描是 HOST-GLOBAL 的**，唯一闸门是
+`workerDriverActive(root)`——它说的是「本工作区**有**driver」，**不是**「这些进程**属于**本工作区」。
+quay-fleet 的 driver 在跑 ⇒ 扫描照跑 ⇒ 把 quay 的 5 个 worker 当成自己的「在飞」。
+⇒ 同族、同载体、方向相反的一半（硬规则 5b）。**已一并修**：
+
+* `readLiveWorkerProcesses(procDir, { root })`：按 worker **自己声明的** `Repo root: <path>`
+  （worker-driver.ts 机器生成的 dispatch prompt）直接量归属；无可归属标记者**排除**（fail-closed
+  向「不是我的」），且进程信号本就只是 driver 自己 carrier（round `in_flight_tasks` / outcome）的
+  补充，降级为 carrier 视图而非凭空消失。
+* 两处调用点均收口：`observation.ts readLive` 与 `serve-task.ts taskRunsBlock`（同形兄弟点）。
+
 ## Acceptance Criteria
 
-- [ ] AC1（负控制，改前必须红）：构造两个相邻项目 A、B 共父目录，A 的 worktree 命名空间非空、
+- [x] AC1（负控制，改前必须红）：构造两个相邻项目 A、B 共父目录，A 的 worktree 命名空间非空、
       B 的 config `loop.worktree_root` 指向自己的空目录；改前 `taskWorktreeOpen(B, <A的任务id>)`
       返回 `true`（用 A 的目录回答 B），改后返回 `false`。
-- [ ] AC2：B 的 config 缺 `loop.worktree_root` 时回落，且回落这一事实可被观测（stderr 或返回的
+      实测：`packages/quay/test/observation-worktree-namespace.test.mjs` 第一条用例**逐字断言了
+      「改前红」**（`fs.existsSync(<parent-of-B>/quay-worktrees/TASK-A) === true`）再断言改后 `false`，
+      且带非空转对照（A 读自己的 namespace 仍 `true`）。
+- [x] AC2：B 的 config 缺 `loop.worktree_root` 时回落，且回落这一事实可被观测（stderr 或返回的
       诊断字段），不得静默。
-- [ ] AC3：`grep -rn '"quay-worktrees"' packages/quay/src plugin/scripts` 的命中数 ≤ 1
+      实测：`resolveWorktreeNamespace` 返回 `source:"fallback"` + `diagnostic`；`taskWorktreeOpen`
+      另把该诊断写 stderr（**每 namespace 每进程一次**，避免每次渲染刷屏），
+      「config 文件缺失」与「有 config 但缺键」两种成因诊断文本不同。
+- [x] AC3：`grep -rn '"quay-worktrees"' packages/quay/src plugin/scripts` 的命中数 ≤ 1
       （只剩单一入口内的回落分支）——静态检查器 + 双向控制（把一处改回字面量必须红）。
-- [ ] AC4：全量 `scripts/test.sh` 绿。
+      实测：命中数 = 1（`packages/quay/src/worktree-namespace.ts:46` 的
+      `DEFAULT_WORKTREE_NAMESPACE_NAME` 声明）；新检查器
+      `plugin/scripts/worktree-namespace-literal-check.ts` 的测试含**三条 RED fixture**
+      （第二处字面量红 / plugin 侧字面量红 / 唯一命中不在 resolver 声明处红），证明它会咬。
+      ⚠️ 检查器自身**不含**该字面量（它搜 `JSON.stringify(DEFAULT_WORKTREE_NAMESPACE_NAME)`），
+      否则它会把自己算成第二处。
+- [ ] AC4：全量 `scripts/test.sh` 绿（待外部）
 
 ## Definition of Done
 
@@ -85,10 +119,47 @@ never a positive 'released' signal from a source that could not be observed」�
 的「在飞」计数为 0（该项目确无派发），且页面上不出现任何 quay 自己的任务 id。
 fixture 满足不算数（硬规则 4 推论三）。
 
+**已实测（2026-09-13，本任务 worktree 的实现 + 真实项目为输入，非 fixture）**：
+用**真实 handler**（`renderLivePage` / `renderLiveCard`）渲染真实项目：
+
+```
+/home/yale/work/quay-fleet
+   namespace: /home/yale/work/quay-fleet-worktrees   source: config
+   /live      : 「在飞: 0 / 上限: 5」   页面含 quay 任务 id? false
+   /dashboard : 「在飞 0 / 上限 5」     卡片含 quay 任务 id? false
+/home/yale/work/quay（对照：拥有者项目不被修坏）
+   namespace: /home/yale/work/quay-worktrees        source: config
+   /live      : 「在飞: 5 / 上限: 5」   页面含其自身任务 id? true
+```
+
+## Evidence
+
+* **改前红（AC1 负控制）**：fixture 把 A 的 namespace 造成历史名 `<parent>/quay-worktrees`，
+  于是旧推导 `dirname(B)/quay-worktrees` 正落在 A 的 namespace 内 —— 测试**显式断言该前提为真**
+  （改前必红），再断言改后 `false`。
+* **typecheck**：`for d in packages/*/; do npx tsc --noEmit -p "$d"; done` 全绿。
+* **受影响既有测试**：`packages/quay/test/observation.test.mjs`、`packages/quay/test/serve.test.mjs`、
+  `plugin/test/fast-mode-telemetry.test.mjs`、`plugin/test/measure-trend-check.test.mjs`、
+  `plugin/test/suite-lpt-order.test.mjs` —— 全绿（89 + 94 条）。
+  含 `gap-serve-board-test-workspace-couples-to-shared-tmp-quay-worktrees` 的两个取假控制仍绿。
+* **兄弟硬编码点清单（硬规则 5b：报出，非全改）**：检查器每次运行打印 advisory 命中数
+  （当前 38 条，含注释）。其中**仍是真假设**的完整枚举：
+  `plugin/scripts/suite-lpt-order.ts:34`（`repoRelKey`，与 `normalizePerFileKey` 同口径；
+  **未改**，以免把爆炸半径伸进套件自身调度路径）、
+  `packages/quay/src/cli/driver.ts:54` + `cli/help.ts:356`（`driver start` 从 worktree 启动的**拒绝**判定，
+  是有意的约定快速路径，其后有通用 linked-worktree 兜底）、
+  `plugin/scripts/resource-gate.sh:264`（`ps | grep` 负载量）、
+  `plugin/scripts/loop-shipping-exclusion-data.mjs:80`（文档注释）。
+* **本任务未做**：全量 suite（fan-in 机械步骤；AC4 已按 `（待外部）` 标记，走外层验收）。
+
 ## Touches
 
+- packages/quay/src/worktree-namespace.ts
 - packages/quay/src/observation.ts
+- packages/quay/src/serve-task.ts
 - plugin/scripts/fast-mode-telemetry.ts
 - plugin/scripts/measure-trend-check.ts
+- plugin/scripts/worktree-namespace-literal-check.ts
 - packages/quay/test/observation-worktree-namespace.test.mjs
+- plugin/test/worktree-namespace-literal-check.test.mjs
 - tasks/gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root.md（自身）
