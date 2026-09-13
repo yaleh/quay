@@ -1,7 +1,7 @@
 ---
 id: gap-quay-server-lightweight-peer-identity-spike
-title: 验证「轻量 peer 身份」可行性——quay server 以非 LLM 进程身份被 SendMessage 直接投递（统一
-  server「收」方向的前置 spike）
+title: 验证「轻量 peer 身份」与「官方 Channels」双路对照——quay server 以非 LLM 进程与运行中 Claude Code
+  会话双向通信的可行路径（统一 server「收」方向前置 spike）
 status: ready
 labels:
   - gap
@@ -83,6 +83,21 @@ Refusing to send: connected endpoint is a different process with the expected pi
 Channels 独有：官方契约 + policy 闸 + 跨机；但 quay server 不是 peer，会话须在启动时 --channels 声明
 ```
 
+### 范围调整：C 与 Channels 双路对照（人 2026-09-13 第二次裁定）
+
+人在看到上节 ④⑤ 两条线索（官方存在文档化的 Channels 通道；方案 C 依赖未文档化内部契约）后**第二次裁定**：范围由「验证方案 C」扩为「**C 与 Channels 双路对照**」。
+
+**⊢ 为什么必须在同一个任务里对照，而不是拆成两个任务**：对照结论的价值全部来自**两条路面对同一组能力问题**。拆开 ⇒ 两份各自成立的报告 + 无人负责的第三方比较，正是本仓库反复出现的「各修各的、没人看全局」形态。**AC13 是本任务真正的交付物，AC1–AC12 都是它的输入。**
+
+**⊢ 执行顺序建议（⛔ 不是判据）**：先跑 Channels 那一路（AC8–AC12，成本低、契约稳），再跑 C 那一路（AC1–AC7）。**⛔ 顺序不构成豁免**——即便 Channels 全部可达，AC1–AC7 仍必须实测，否则 AC13 的对照表会有一整列是推断（硬规则 4：一个结构上不可能取假的量不是测量）。
+
+**⊢ 两条路的能力差异（立案时的理解，AC13 要用实测确认或推翻）**：
+```
+仅 C 可能具备：quay server 出现在别的会话的 ListAgents 里 ⇒ 任何会话【无需预先配置】即可寻址它
+仅 Channels 具备：官方文档化契约 + org policy 闸 + 明确的 sender 身份标注
+两者都须回答：已在运行的会话能否接入 / 第三方 provider 会话可用性 / 双向是否都通
+```
+
 ## Plan
 
 1. **读协议**：以 `packages/quay/src/serve-send.ts`（`sendSessionFrames` / `resolveSessionEndpoint`）与 `plugin/scripts/send-to-session.ts` 为发送侧的已知形态，推导接收侧最小实现：unix socket server → 读第一行 auth 帧（`{"type":"auth","token":…}`）校验 token → 读后续 user 帧（`{"type":"user","message":{"role":"user","content":"<cross-session-message …>…"}}`）。
@@ -92,6 +107,11 @@ Channels 独有：官方契约 + policy 闸 + 跨机；但 quay server 不是 pe
 5. **字段必要性枚举**：逐字段剥离/改值，产出「必需 / 可选 / 未评估」表。
 6. **稳健性读数**：探针重启（pid 变）后旧记录的命运；探针被 kill 后陈旧记录在发送侧的表现。
 7. **报告与结论**：三选一（可行 / 有条件可行 / 不可行），附实测依据。⛔ 本任务不接线进生产。
+8. **Channels 最小探针** `plugin/scripts/channel-probe-server.ts`：最小 MCP server（纯 Node、**⛔ 无 LLM 循环、⛔ 不 spawn claude**），capabilities 声明 `experimental: { 'claude/channel': {} }`，暴露一个 reply/ingest tool，把收到的每次调用落盘 `.quay/channel-probe-evidence.jsonl`。
+9. **Channels 正向**：`claude --channels <spec>` 起一个目标会话，由外部进程推一条含唯一 nonce 的事件，到目标会话 transcript 核证 `<channel source="...">` 到达。
+10. **Channels 反向**：目标会话调用探针暴露的 tool，探针侧落盘核证。
+11. **Channels 约束实测**：已运行会话能否事后接入 / 第三方 provider 会话 / 本机默认配置是否需要 managed settings。
+12. **对照**：两路共用同一组能力问题，产出对照表与推荐。
 
 ## Acceptance Criteria
 
@@ -102,18 +122,26 @@ Channels 独有：官方契约 + policy 闸 + 跨机；但 quay server 不是 pe
 - [ ] AC5（诚实性结论闸）：报告显式回答——「在 `agent`/`name`/`version` **不冒充** Claude Code 会话（如实标注 quay-server、不自称 agent=claude）的前提下，投递是否仍可达」。若实测为「**必须**冒充才可达」⇒ 结论必须写 **不可行（受诚实性约束）**，并附该判断的实测依据（AC3 的 (a) 行与 (c) 行读数对照）。⛔ 不得以"反正能通"为由把冒充形态记为可行结论。
 - [ ] AC6（共享状态安全，可取假）：`~/.claude/sessions/` 是**全机共享的运行时状态**（本机此刻有 8 条真实会话记录 + 正在运行的 loop 依赖它）。探针只允许创建/删除**自己 pid** 的记录与 key 文件。判据：任务结束后该目录中无探针遗留文件 ∧ 任务执行前后对该目录做的两次快照（文件名 + mtime + 内容 sha256）显示**其他会话的记录未被本任务修改**，两次快照落盘进证据文件。⛔ 取假形态：任一他人记录的 sha256 变化 ⇒ 不达成。
 - [ ] AC7（稳健性读数）：落盘三项读数——①探针重启（pid 变）后：旧记录是否仍在、是否被平台清理、新记录是否立即可投递；②探针被 `kill -9` 后：陈旧记录在发送侧 `SendMessage` 的**错误形态**（报什么错 / 是否静默失败）；③同一 `name` 与某个真实会话重名时的表现。读不到 ⇒ 记 not-evaluated。
+- [ ] AC8（Channels 正向·核心，可取假）：`plugin/scripts/channel-probe-server.ts`（纯 Node、⛔ 无 LLM 循环、⛔ 不 spawn claude）以 `experimental: { 'claude/channel': {} }` capability 注册为 channel；用 `claude --channels <spec>` 起一个目标会话；由**外部进程**（⛔ 不是该会话自己）推一条含唯一 nonce `<nonce8>` 的事件。判据：该目标会话 transcript 中出现含 `<nonce8>` 的 `<channel source="...">` 记录，**实际到达的包裹属性原文**抄进报告。定位 transcript **先用 `meta-cc`**（CLAUDE.md 硬规则 1），覆盖不到再 `grep -rl` 文件系统定位后 grep 内容。⛔ 取假：transcript 无该 nonce ⇒ 未达成。无法起会话/无法定位 transcript ⇒ **not-evaluated**。
+- [ ] AC9（Channels 反向·会话→server）：目标会话调用探针暴露的 tool（reply 或普通 MCP tool），探针侧 `.quay/channel-probe-evidence.jsonl` 落盘该次调用及其参数。判据：证据文件含该调用的唯一标识。⇒ AC8+AC9 合起来才构成「双向」；只有其一 ⇒ AC13 对照表里如实记为**单向**。
+- [ ] AC10（预配置约束，⛔ Channels 能否替代 C 的决定性判据）：实测回答「**已经在运行、启动时未带 `--channels` 的会话，能否事后接入一个 channel**」。至少试两条路径（运行中的动态添加入口、配置文件+重启），各记一次实测读数。若不可事后接入 ⇒ 量化代价：以本机此刻 `ListAgents` 的 peer 数为分母，给出「要收 quay 事件就必须重启/改造」的会话数。读不到 ⇒ not-evaluated。
+- [ ] AC11（第三方 provider 实测，本项目硬约束）：本项目 worker 由 `.claude/launch.settings.json` 的 `_launchSpec.roles` 起在 `claude-fjdac` + 非 Anthropic 模型上。实测一个**第三方 provider 会话**能否收到 channel 事件，落盘实际表现（收到 / 报 `Channels are not available on third-party providers` / 静默丢弃）。⛔ **不得以「二进制里存在该错误字符串」为由跳过实测**——字符串存在 ≠ 该分支在本配置下被触发（硬规则 4）。
+- [ ] AC12（启用闸实测）：在本机**当前**配置（`channelsEnabled` / `allowedChannelPlugins` 均未设）下 AC8 是否可达。若不可达，记录使其可达的**最小**配置改动，并明确回答：是否需要 managed settings（是否需要机器管理员权限、是否影响本机其它项目/会话）。
+- [ ] AC13（对照结论·本任务真正的交付物）：产出一张**两路共用同一组能力问题**的对照表，**至少 6 行 × 3 列**（能力问题 / 方案 C 实测结果 / Channels 实测结果），行至少覆盖：①会话无需预先配置即可被寻址（发现式寻址）②已在运行的会话能否接入 ③第三方 provider 会话可用性 ④契约稳定性（文档化与否，附来源）⑤外→会话 与 会话→外 两个方向是否都通 ⑥落进 quay 现有架构的位置与改动量。**⛔ 每一行的两列都必须是实测读数或显式 `not-evaluated`；⛔ 不接受一路实测、另一路按文档/代码推断**（那正是本表要消除的东西）。结论段给出**推荐哪条路 + 依据**；允许「两条都要（各覆盖不同能力）」或「都不采用」——⛔ 不允许「看情况」这类不可执行的结论。
 
 ## Definition of Done
 
-- 报告 `docs/analysis/peer-identity-lightweight-registration-2026-09-13.md` 落地，含 AC3 / AC4 / AC7 三张读数表、AC1 实际到达的 `from-*` 属性原文、AC2 两条负控制读数，以及 **AC5 的三选一结论**（可行 / 有条件可行 / 不可行（受诚实性约束）），每条结论附实测依据。
-- 探针 `plugin/scripts/peer-identity-probe.ts` 落地，可独立运行（`--serve` 起探针 / `--cleanup` 清理），纯函数部分（注册记录组装、auth 帧校验、帧解析）有单测 `plugin/test/peer-identity-probe.test.mjs`。
-- 证据文件 `.quay/peer-identity-probe-evidence.jsonl` 含 AC1 的真实投递记录（或 AC1 记 not-evaluated 时的明确说明）。
-- ⛔ **本任务不接线进生产**：不改 `packages/quay/src/serve*.ts`、不改 `plugin/scripts/driver-runtime.ts`、不改 `start-drivers.ts`。接线由后续任务按本任务结论决定形态。
-- **结论为「不可行」同样算完成** —— 本任务交付的是一个**有依据的可行性判断**，不是方案 C 的实现；一个证否的结论直接改变统一 server 设计的走向（退回方案 A 或 B），与证成同等有价值。
+- 报告 `docs/analysis/session-inbound-two-paths-2026-09-13.md` 落地，含：**AC13 的对照表（本任务交付物）**、C 路的 AC3/AC4/AC7 三张读数表、AC1 与 AC8 实际到达的包裹属性原文、AC2 两条负控制读数、AC10–AC12 的 Channels 约束读数，以及 AC5 的诚实性结论。
+- 两个探针落地并可独立运行：`plugin/scripts/peer-identity-probe.ts`（C 路，`--serve`/`--cleanup`）与 `plugin/scripts/channel-probe-server.ts`（Channels 路），纯函数部分各有单测。
+- 证据文件 `.quay/peer-identity-probe-evidence.jsonl` 与 `.quay/channel-probe-evidence.jsonl` 各含真实投递记录（或明确的 not-evaluated 说明）。
+- ⛔ **本任务不接线进生产**：不改 `packages/quay/src/serve*.ts`、不改 `plugin/scripts/driver-runtime.ts`、不改 `start-drivers.ts`。接线由后续任务按 AC13 的结论决定形态。
+- **任一路或两路结论为「不可行」同样算完成** —— 本任务交付的是一个有依据的**路径选择**，不是某条路的实现。
 
 ## Touches
 
 - tasks/gap-quay-server-lightweight-peer-identity-spike.md
 - plugin/scripts/peer-identity-probe.ts (new)
+- plugin/scripts/channel-probe-server.ts (new)
 - plugin/test/peer-identity-probe.test.mjs (new)
-- docs/analysis/peer-identity-lightweight-registration-2026-09-13.md (new)
+- plugin/test/channel-probe-server.test.mjs (new)
+- docs/analysis/session-inbound-two-paths-2026-09-13.md (new)
