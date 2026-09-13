@@ -2373,7 +2373,7 @@ export function resetWorktreeFallbackWarnings(): void {
  *
  * THE NAMESPACE IS PER-WORKSPACE (gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-
  * root): it is `loop.worktree_root` from THIS workspace's `.quay/config.yml` — the same key the WRITE
- * side (dispatch / `git worktree add`) obeys — resolved by `resolveWorktreeNamespace`. It used to be
+ * side (dispatch / the worktree-creation step) obeys — resolved by `resolveWorktreeNamespace`. It used to be
  * derived in place as `<parent-of-main>/quay-worktrees`, which silently answered with ANOTHER
  * project's namespace whenever two projects share a parent directory (measured 2026-09-13:
  * /home/yale/work/quay-fleet resolved to /home/yale/work/quay-worktrees). `resolveWorktreeNamespace`
