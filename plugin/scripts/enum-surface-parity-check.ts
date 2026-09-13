@@ -16,6 +16,10 @@
 //                        `enum-surface-exempt: <surface-id> — <理由 ≥12 字>`。
 //                        无豁免注释的收窄是「沉默地少列几个」⇒ RED。
 //                        extra（表层出现了权威里没有的值）**永远 RED** —— 那从来不是合法子集。
+//   - derivesFrom     —— 规范 2 的【运行时派生】形态（比字面量副本更强）：该面在运行时把源符号
+//                        **渲染**进枚举槽位，因而【没有字面量可比】。声明不构成豁免：三条规则逐条
+//                        机械证伪（拼写在場／跨文件有 import／被消费符号与权威逐一相等），任一不成立
+//                        ⇒ NOT-EVALUATED，断链（③）⇒ RED。详见 SurfaceSpec.derivesFrom 的注释。
 //
 // ⛔ 豁免识别【不依赖注释与被检测构造的相对位置】（AC4 / archguard TASK-88 的实证坑：豁免注释写在被检测
 // 构造【内部】时，那里的提取正则整个匹配失败、该项彻底隐形于检查 —— 三个工具因此漏检）。本实现把
@@ -82,6 +86,31 @@ export interface SurfaceSpec {
    *  changed occurrence count is itself reported (a new/removed copy must not be silent). */
   indices?: number[];
   policy: "exact" | "subset";
+  /**
+   * 规范 2 的【运行时派生】形态 —— 本面在运行时把 `symbol` **渲染**进它的枚举槽位，而不是携带一份
+   * 手抄副本。声明它是因为作者必须【逐条举证】，而不是声明即豁免（每条都在下面被机械证伪）：
+   *
+   *   ① `spelling` 必须在文件原文里命中 —— 即"该符号被插值进该槽位"的形态确实在场。⛔ 这条是
+   *      "把帮助文本整段删掉也算派生"的挡板：只查"文件里引用了该符号"时，一个删空了的面会
+   *      （0 字面量 + 引用了符号）判绿 —— 硬规则 3b 的「读不懂 ⇒ 假装通过」。
+   *      ⚠️ 残留局限（说清没查什么）：本仓库 buildNonCodeMask 把模板字面量整段视为非代码（含 `${}`），
+   *      故【无法】要求该拼写位于代码位置；把它写进注释仍会被认作派生。此残留与既有
+   *      authorityDerivation 的 import 识别同一强度（同为原文正则），⛔ 未新开更大的口子。
+   *   ② 跨文件时必须在场一条 `import …symbol… from "<file basename>"`（同文件 = 本地声明，免）。
+   *   ③ **断链不得洗白**：`file:symbol` 自身必须与 `authority` 逐一相等；差值非空 ⇒ RED（不是容忍）。
+   *   任一条不成立 ⇒ NOT-EVALUATED（⛔ 不是一致）。
+   *
+   *   ⛔ 反向也不放行：声明了 `derivesFrom` 却仍提取到字面量副本 ⇒ RED（`derives-from-but-carries-
+   *   literals`）。刻意不是"字面量恰好同步就静默放行"——那会让「声称派生、实为手抄」通过。
+   *
+   * ⛔ 为什么需要这个形态（gap-driver-cli-help-hides-four-of-six-kinds）：driver 帮助文本的 kind 真源
+   * 在 plugin/scripts/driver-runtime.ts，而 packages/quay/src 维持「零 plugin/ 静态 import」边界
+   * （见 observation.ts 的静态 import 禁令：tsc 会把 kernel 闭包拖进 Core 类型图并撞既有类型错误）。
+   * ⇒ 权威派生（authorityDerivation）在这里结构上不可达，而 text 面的「0 次命中」又不等于「提取到
+   * 0 个值」，会掉进 !ex.ok 的 NOT-EVALUATED 分支 —— 两个设计缺口叠加的净效应是：把帮助文本改成
+   * 真派生（更强的形态）反而让检查器【失去】这个面。本字段就是补这两个缺口。
+   */
+  derivesFrom?: { file: string; symbol: string; extract: ExtractKind; spelling: string };
 }
 
 /** A recorded, currently-known drift for one surface (or one occurrence of it). */
@@ -112,7 +141,10 @@ const AUTHORITIES: AuthoritySpec[] = [
   // 白名单副本），而是 kernel 的那张数据表 —— respawn 循环、pid/控制态、carrier、per-kind 动词全部由
   // `DRIVER_KINDS` 驱动，新增一个 kind 的第一处永远是它（driver-runtime.ts 的头注释逐字如此规定）。
   { id: "driver-kind", file: "plugin/scripts/driver-runtime.ts", symbol: "DRIVER_KINDS", extract: "ts-object-keys" },
-  { id: "driver-verb", file: "packages/quay/src/cli/driver.ts", symbol: "VERBS", extract: "ts-array" },
+  // CLI 的 verb 词表已移入零依赖叶模块 cli/driver-vocab.ts（gap-driver-cli-help-hides-four-of-six-kinds）
+  // —— help.ts 被 bin/quay.ts 静态 import，把词表留在 cli/driver.ts 会让每次 CLI 调用多付 0.4s
+  // （该文件的传递闭包带 config.ts/plugin-root.ts）。权威位置随词表移动，⛔ 不是新增一个来源。
+  { id: "driver-verb", file: "packages/quay/src/cli/driver-vocab.ts", symbol: "VERBS", extract: "ts-array" },
   { id: "goal-status", file: "packages/quay/src/abi.ts", symbol: "GOAL_STATUSES", extract: "ts-array" },
   { id: "meta-status", file: "packages/quay/src/abi.ts", symbol: "META_STATUSES", extract: "ts-array" },
   { id: "task-status", file: "packages/quay/src/abi.ts", symbol: "TASK_STATUSES", extract: "ts-array" },
@@ -122,19 +154,26 @@ const AUTHORITIES: AuthoritySpec[] = [
 
 const SURFACES: SurfaceSpec[] = [
   // ── driver kind（6 值）──────────────────────────────────────────────────────────────────────────
-  { id: "cli-driver-kinds", authority: "driver-kind", file: "packages/quay/src/cli/driver.ts", extract: "ts-array", symbol: "KINDS", policy: "exact" },
+  { id: "cli-driver-kinds", authority: "driver-kind", file: "packages/quay/src/cli/driver-vocab.ts", extract: "ts-array", symbol: "KINDS", policy: "exact" },
   { id: "driver-config-union", authority: "driver-kind", file: "plugin/scripts/driver-config.ts", extract: "ts-string-union", anchor: "kind:\\s*", policy: "exact" },
   { id: "web-driver-kinds", authority: "driver-kind", file: "packages/quay/src/serve-sessions.ts", extract: "ts-array", symbol: "WEB_DRIVER_KINDS", policy: "subset" },
   { id: "start-drivers-kinds", authority: "driver-kind", file: "plugin/scripts/start-drivers.ts", extract: "ts-array", symbol: "DRIVER_KINDS", policy: "exact" },
-  { id: "cli-driver-help-kind", authority: "driver-kind", file: "packages/quay/src/cli/driver.ts", extract: "text", anchor: "--kind <([a-z-]+\\|[a-z|-]+)>", policy: "exact" },
-  { id: "cli-help-kind", authority: "driver-kind", file: "packages/quay/src/cli/help.ts", extract: "text", anchor: "--kind <([a-z-]+\\|[a-z|-]+)>", policy: "exact" },
+  // cli/driver.ts 与 cli/help.ts 的 kind 帮助文本：**运行时派生**自 cli/driver-vocab.ts:KINDS
+  // （Core ⛔ 不能静态 import plugin/ 的 kernel —— 见 SurfaceSpec.derivesFrom 的注释）。
+  { id: "cli-driver-help-kind", authority: "driver-kind", file: "packages/quay/src/cli/driver.ts", extract: "text", anchor: "--kind <([a-z-]+\\|[a-z|-]+)>", policy: "exact",
+    derivesFrom: { file: "packages/quay/src/cli/driver-vocab.ts", symbol: "KINDS", extract: "ts-array", spelling: "--kind <\\$\\{[^}]*\\bKINDS\\b[^}]*\\}>" } },
+  { id: "cli-help-kind", authority: "driver-kind", file: "packages/quay/src/cli/help.ts", extract: "text", anchor: "--kind <([a-z-]+\\|[a-z|-]+)>", policy: "exact",
+    derivesFrom: { file: "packages/quay/src/cli/driver-vocab.ts", symbol: "KINDS", extract: "ts-array", spelling: "--kind <\\$\\{[^}]*\\bKINDS\\b[^}]*\\}>" } },
   { id: "driver-runtime-help-kind", authority: "driver-kind", file: "plugin/scripts/driver-runtime.ts", extract: "text", anchor: "--kind <([a-z-]+\\|[a-z|-]+)>", policy: "exact" },
   { id: "claude-md-driver-kind", authority: "driver-kind", file: "CLAUDE.md", extract: "text", anchor: "--kind <([a-z-]+\\|[a-z|-]+)>", policy: "exact" },
   { id: "drivers-skill-kind", authority: "driver-kind", file: "plugin/skills/drivers/SKILL.md", extract: "text", anchor: "--kind ([a-z-]+\\|[a-z|-]+)", policy: "exact" },
   // ── driver verb（6 值）──────────────────────────────────────────────────────────────────────────
   { id: "web-driver-verbs", authority: "driver-verb", file: "packages/quay/src/serve-sessions.ts", extract: "ts-array", symbol: "WEB_DRIVER_VERBS", policy: "subset" },
-  { id: "cli-help-driver-usage-verbs", authority: "driver-verb", file: "packages/quay/src/cli/help.ts", extract: "text", anchor: "quay driver <([a-z|]+)>", policy: "exact" },
-  { id: "cli-driver-usage-verbs", authority: "driver-verb", file: "packages/quay/src/cli/driver.ts", extract: "text", anchor: "quay driver <([a-z|]+)>", policy: "exact" },
+  // 同上：verb 帮助文本运行时派生自 cli/driver-vocab.ts:VERBS。
+  { id: "cli-help-driver-usage-verbs", authority: "driver-verb", file: "packages/quay/src/cli/help.ts", extract: "text", anchor: "quay driver <([a-z|]+)>", policy: "exact",
+    derivesFrom: { file: "packages/quay/src/cli/driver-vocab.ts", symbol: "VERBS", extract: "ts-array", spelling: "quay driver <\\$\\{[^}]*\\bVERBS\\b[^}]*\\}>" } },
+  { id: "cli-driver-usage-verbs", authority: "driver-verb", file: "packages/quay/src/cli/driver.ts", extract: "text", anchor: "quay driver <([a-z|]+)>", policy: "exact",
+    derivesFrom: { file: "packages/quay/src/cli/driver-vocab.ts", symbol: "VERBS", extract: "ts-array", spelling: "quay driver <\\$\\{[^}]*\\bVERBS\\b[^}]*\\}>" } },
   // ── goal status ────────────────────────────────────────────────────────────────────────────────
   { id: "goal-store-valid-statuses", authority: "goal-status", file: "packages/quay/src/goal-store.ts", extract: "ts-array", symbol: "VALID_GOAL_STATUSES", policy: "exact" },
   { id: "native-goal-write-desc", authority: "goal-status", file: "packages/quay-native/src/mcp-server.ts", extract: "text", anchor: "one goal record[^\\n]*?status ∈ ([a-z|-]+)", policy: "exact" },
@@ -164,25 +203,6 @@ const KNOWN_DRIFT: KnownDriftEntry[] = [
     reason: "plugin/scripts/start-drivers.ts 只拉起 4 个 kind；归位（是否补齐 6 个）待另行立案——本任务的范围是机制，不是该脚本的语义决策。",
   },
   {
-    surface: "cli-driver-help-kind",
-    index: 0,
-    extra: [],
-    missing: ["outer", "quality", "meta", "goal"],
-    reason: "cli/driver.ts 头注释里的 `--kind <…>` 只列 2 个 kind；同文件的用法行（#1/#2）见下一条。归位由 gap-driver-cli-help-hides-four-of-six-kinds 承接。",
-  },
-  {
-    surface: "cli-driver-help-kind",
-    extra: [],
-    missing: ["meta", "goal"],
-    reason: "cli/driver.ts 的用法行 + `--kind` 旗标说明只列 4 个 kind（缺 meta/goal）；归位由 gap-driver-cli-help-hides-four-of-six-kinds 承接。",
-  },
-  {
-    surface: "cli-help-kind",
-    extra: [],
-    missing: ["outer", "quality", "meta", "goal"],
-    reason: "归位由 gap-driver-cli-help-hides-four-of-six-kinds 承接。",
-  },
-  {
     surface: "claude-md-driver-kind",
     extra: [],
     missing: ["outer", "quality", "meta", "goal"],
@@ -193,20 +213,6 @@ const KNOWN_DRIFT: KnownDriftEntry[] = [
     extra: [],
     missing: ["outer", "quality", "meta", "goal"],
     reason: "文档面（plugin/skills/drivers/SKILL.md）存量归位不在本任务内；本任务只负责报出。",
-  },
-  {
-    surface: "cli-help-driver-usage-verbs",
-    index: 0,
-    extra: [],
-    missing: ["resume"],
-    reason: "顶层 `quay --help` 的 driver 用法行漏列 resume（同一行的 kind 也漏列，见 cli-help-kind）；归位由 gap-driver-cli-help-hides-four-of-six-kinds 承接。",
-  },
-  {
-    surface: "cli-driver-usage-verbs",
-    index: 0,
-    extra: [],
-    missing: ["resume"],
-    reason: "cli/driver.ts 头注释里的用法行漏列 resume；归位由 gap-driver-cli-help-hides-four-of-six-kinds 承接。",
   },
   {
     surface: "native-goal-write-desc",
@@ -505,6 +511,84 @@ export function authorityDerivation(
   return null;
 }
 
+/** Escape a literal for embedding into a RegExp source (symbol/file names are plain identifiers). */
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Flat verdict of a declared runtime derivation — see `SurfaceSpec.derivesFrom` for the three rules. */
+export interface DerivationVerdict {
+  /** "derived" = 举证成立；"violation" = 断链（③），必须 RED；"not-evaluated" = 举证不成立。 */
+  state: "derived" | "violation" | "not-evaluated";
+  note: string;
+  extra: string[];
+  missing: string[];
+}
+
+/**
+ * Verify a surface's declared `derivesFrom` claim — ⛔ 声明本身不构成豁免，三条规则逐条证伪
+ * （见 SurfaceSpec.derivesFrom 的注释）。`authority` 是本面的权威取值（已在上游读出）。
+ */
+export function verifyDeclaredDerivation(
+  root: string,
+  read: ReadResult,
+  spec: SurfaceSpec,
+  authority: string[],
+  declaredSurfaceFile: string,
+): DerivationVerdict {
+  const d = spec.derivesFrom as NonNullable<SurfaceSpec["derivesFrom"]>;
+  const bad = (note: string): DerivationVerdict => ({ state: "not-evaluated", note, extra: [], missing: [] });
+
+  // ① 派生拼写在场（把符号渲染进枚举槽位），⛔ 不是"文件里出现过该符号"。
+  let spellingRe: RegExp;
+  try {
+    spellingRe = new RegExp(d.spelling);
+  } catch (e) {
+    return bad(`derivesFrom.spelling is not a valid regex: ${(e as Error).message}`);
+  }
+  if (!spellingRe.test(read.text)) {
+    return bad(
+      `declared derivation from ${d.file}:${d.symbol} but the derived spelling /${d.spelling}/ is absent ` +
+        `(帮助文本被删或被手抄回字面量)`,
+    );
+  }
+
+  // ② 跨文件必须在场一条 import（同文件 = 本地声明，免）。
+  if (path.basename(declaredSurfaceFile) !== path.basename(d.file)) {
+    const base = path.basename(d.file).replace(/\.(ts|js|mjs)$/, "");
+    const importRe = new RegExp(
+      `^\\s*(?:import|export)[^;\\n]*\\b${escapeRe(d.symbol)}\\b[^;\\n]*from\\s*["'][^"']*\\b${escapeRe(base)}(?:\\.(?:ts|js|mjs))?["']`,
+      "m",
+    );
+    if (!importRe.test(read.text)) {
+      return bad(
+        `declared derivation from ${d.file}:${d.symbol} but ${declaredSurfaceFile} has no ` +
+          `\`import …${d.symbol}… from "…${base}"\` (派生源未接线)`,
+      );
+    }
+  }
+
+  // ③ 断链不得洗白：被消费的符号自身必须与权威逐一相等（差值非空 ⇒ RED，⛔ 不是"未评估"）。
+  const src = readText(root, d.file);
+  if (!src.ok) return bad(`derivesFrom source ${d.file}: ${src.reason}`);
+  const srcEx = extract(src.text, d.extract, { symbol: d.symbol });
+  if (!srcEx.ok) return bad(`derivesFrom source ${d.file}:${d.symbol}: ${srcEx.reason}`);
+  const srcValues = srcEx.groups[0]?.values ?? [];
+  if (srcValues.length === 0) {
+    return bad(`derivesFrom source ${d.file}:${d.symbol} extracted 0 values`);
+  }
+  const dd = diff(srcValues, authority);
+  if (dd.extra.length > 0 || dd.missing.length > 0) {
+    return {
+      state: "violation",
+      note: `派生源 ${d.file}:${d.symbol} 与权威不一致（断链）`,
+      extra: dd.extra,
+      missing: dd.missing,
+    };
+  }
+  return { state: "derived", note: `派生自 ${d.file}:${d.symbol}（已与权威逐一比对）`, extra: [], missing: [] };
+}
+
 export function runCheck(opts: { root: string; registry: Registry }): CheckResult {
   const { root, registry } = opts;
   const authorities: CheckResult["authorities"] = [];
@@ -552,6 +636,60 @@ export function runCheck(opts: { root: string; registry: Registry }): CheckResul
       continue;
     }
     const ex = extract(read.text, s.extract, { symbol: s.symbol, anchor: s.anchor, indices: s.indices });
+    // 规范 2 的【运行时派生】形态必须先于 !ex.ok 判定（见 SurfaceSpec.derivesFrom 的注释）：text 面的
+    // "anchor 命中 0 次"是 ok:false（⛔ 不是"提取到 0 个值"），若先判 !ex.ok，真派生会被读成未评估。
+    const zeroLiterals =
+      (ex.ok && !ex.groups.some((g) => g.values.length > 0)) ||
+      (!ex.ok && /matched 0 times/.test(ex.reason ?? ""));
+    if (s.derivesFrom && zeroLiterals) {      const authorityNow = authorityValues.get(s.authority) ?? null;
+      const v = verifyDeclaredDerivation(root, read, s, authorityNow ?? [], s.file);
+      if (v.state === "derived") {
+        surfaces.push({
+          surface: s.id,
+          authority: s.authority,
+          file: s.file,
+          state: "derived",
+          occurrences: [{ index: 0, state: "derived", values: [], extra: [], missing: [], note: v.note }],
+        });
+        continue;
+      }
+      if (v.state === "violation") {
+        violations.push({
+          surface: s.id,
+          index: 0,
+          kind: "derivation-broken",
+          detail: `extra=[${v.extra.join(",")}] missing=[${v.missing.join(",")}]`,
+        });
+        surfaces.push({
+          surface: s.id,
+          authority: s.authority,
+          file: s.file,
+          state: "violation",
+          occurrences: [{ index: 0, state: "violation", values: [], extra: v.extra, missing: v.missing, note: v.note }],
+        });
+        continue;
+      }
+      notEvaluated.push({ surface: s.id, reason: v.note });
+      surfaces.push({ surface: s.id, authority: s.authority, file: s.file, state: "not-evaluated", occurrences: [] });
+      continue;
+    }
+    // 声明了运行时派生、却仍带字面量副本 ⇒ 声明本身不成立。⛔ 刻意【不是】"字面量恰好与权威同步就放行"
+    // ——那会让「声称派生、实为手抄」静默通过，正是本字段要堵的形态（硬规则 3b：读不懂⇒假装通过）。
+    if (s.derivesFrom && ex.ok) {
+      const rowsHere = ex.groups.map((g) => {
+        const dd = diff(g.values, authorityValues.get(s.authority) ?? []);
+        return { index: g.index, state: "violation", values: g.values, extra: dd.extra, missing: dd.missing,
+          note: `声明为运行时派生（derivesFrom ${s.derivesFrom!.file}:${s.derivesFrom!.symbol}），却仍带字面量副本` };
+      });
+      violations.push({
+        surface: s.id,
+        index: 0,
+        kind: "derives-from-but-carries-literals",
+        detail: `declared derivesFrom ${s.derivesFrom.file}:${s.derivesFrom.symbol} but ${rowsHere.length} literal occurrence(s) remain`,
+      });
+      surfaces.push({ surface: s.id, authority: s.authority, file: s.file, state: "violation", occurrences: rowsHere });
+      continue;
+    }
     if (!ex.ok) {
       notEvaluated.push({ surface: s.id, reason: ex.reason });
       surfaces.push({ surface: s.id, authority: s.authority, file: s.file, state: "not-evaluated", occurrences: [] });

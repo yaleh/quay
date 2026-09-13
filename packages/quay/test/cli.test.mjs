@@ -151,6 +151,9 @@ import {
   stripHeadings,
 } from "../bin/quay.ts";
 import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
+// gap-driver-cli-help-hides-four-of-six-kinds: 帮助文本的 kind/verb 单一真源（零依赖叶模块——⛔ 不要
+// 从 ../src/cli/driver.ts 取，那条路径把 config.ts/plugin-root.ts 拖进来，正是本任务要避免的成本）。
+import { KINDS as DRIVER_KINDS_VOCAB, VERBS as DRIVER_VERBS_VOCAB } from "../src/cli/driver-vocab.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // gap-tests-spawn-cli-from-ts-source: route CLI spawns through the prebuilt
@@ -1051,6 +1054,7 @@ async function main() {
   await block26(spawnOpts);
   await block27();
   await block28();
+  await block29();
 
   fs.rmSync(tasksDir, { recursive: true, force: true });
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
@@ -2092,5 +2096,53 @@ function block28() {
   // AC1: the four gaps this task closes are literally present in the line.
   for (const needle of ["adr", "manager arm", "action run", "config check"]) {
     assert(usageMatch[1].includes(needle), `usage fallback line includes '${needle}' (gap-quay-usage-line-fallback-drift AC1)`);
+  }
+}
+
+// ── 29. gap-driver-cli-help-hides-four-of-six-kinds: driver 帮助文本的 verb/kind 词表 ─────────────
+//   AC3 的机械形态：`quay --help` / `quay driver --help` / `quay driver -h` 实际打印出来的
+//   `--kind <…>` 槽位与 `quay driver <…>` verb 槽位，必须【逐值、按序】等于单一真源
+//   cli/driver-vocab.ts 的 KINDS/VERBS。⛔ 只断言"包含 6 个 kind"不够——两份手抄副本恰好都同步
+//   也能满足它，而那正是本任务要禁的形态（修前 5 处副本取值 2/4/5/6 四种，用户唯一看得到的那份
+//   只列 2 个 ⇒ outer/quality/meta/goal 四个已实现的 kind 在产品表层等于不存在）。
+//   AC2 的机械形态：driver.ts / help.ts 里不得再出现任何手抄的 kind/verb 联合字面量。
+//   ⛔ 不在此处复刻 AC1 的"临时往 KINDS 塞假 kind"负控制：那要就地改产品源码，已作为一次性
+//   两态实验留档在任务记录里；这里守的是"派生链没断 + 字面量副本没回来"这两条长期不变式。
+async function block29() {
+  const assert = makeAssert("driver-help-vocab");
+
+  for (const args of [["--help"], ["driver", "--help"], ["driver", "-h"]]) {
+    const label = `quay ${args.join(" ")}`;
+    const r = await runImport(args, {});
+    assert(r.status === 0, `${label} exits 0 (got ${r.status})`);
+
+    // ⛔ 必须锚在 **driver 那一行**上：顶层帮助里还有 `quay goal list … [--kind <kind>]`，
+    // 裸匹配第一个 `--kind <…>` 会拿到 goal 的槽位（实测：got "kind"）。
+    const usage = r.stdout.match(/quay driver <([^>]+)> --kind <([^>]+)>/);
+    assert(usage !== null, `${label} prints the driver usage line`);
+    assert(
+      JSON.stringify(usage[1].split("|")) === JSON.stringify([...DRIVER_VERBS_VOCAB]),
+      `${label} verb slot == driver-vocab VERBS (got ${usage[1]} / want ${DRIVER_VERBS_VOCAB.join("|")})`
+    );
+    assert(
+      JSON.stringify(usage[2].split("|")) === JSON.stringify([...DRIVER_KINDS_VOCAB]),
+      `${label} --kind slot == driver-vocab KINDS (got ${usage[2]} / want ${DRIVER_KINDS_VOCAB.join("|")})`
+    );
+
+    // driver 块自己的帮助里每一处 `--kind <…>`（用法行 + 旗标说明）都必须等于 KINDS。
+    if (args[0] === "driver") {
+      for (const m of r.stdout.matchAll(/--kind <([^>]+)>/g)) {
+        assert(
+          JSON.stringify(m[1].split("|")) === JSON.stringify([...DRIVER_KINDS_VOCAB]),
+          `${label} every --kind slot == driver-vocab KINDS (got ${m[1]})`
+        );
+      }
+    }
+  }
+
+  for (const f of ["../src/cli/driver.ts", "../src/cli/help.ts"]) {
+    const src = fs.readFileSync(path.join(__dirname, f), "utf8");
+    const hits = [...(src.match(/--kind <[a-z-]+\|[a-z|-]+>/g) ?? []), ...(src.match(/quay driver <[a-z|]+>/g) ?? [])];
+    assert(hits.length === 0, `${f} carries no hand-copied driver kind/verb union (found: ${hits.join(" ; ") || "none"})`);
   }
 }
