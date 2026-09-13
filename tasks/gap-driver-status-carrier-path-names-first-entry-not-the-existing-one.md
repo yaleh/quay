@@ -1,7 +1,7 @@
 ---
 id: gap-driver-status-carrier-path-names-first-entry-not-the-existing-one
 title: driver status 报了一个不存在文件的 carrier_path，而 carrier_records 却是真实数字
-status: todo
+status: ready
 labels:
   - gap
   - defect
