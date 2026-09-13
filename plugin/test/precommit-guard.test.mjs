@@ -310,23 +310,56 @@ test("AC63 — ff-only merge fires ZERO guard hooks (no pre-commit, no pre-merge
 // moment, so a new task's Touches error reds where it is written. Judgment reuses
 // checkTaskOneEntryOnePath + the shrink-only grandfather baseline — no second Touches parser.
 
-/** Copy the guard + its Touches-parser deps into a scratch repo so --install-hook's shim resolves. */
+const GUARD_REL = path.join("plugin", "scripts", "precommit-guard.ts");
+const REL_IMPORT_RE = /(?:from\s*|import\s*\(\s*)(["'])(\.{1,2}\/[^"']+)\1/g;
+
+/**
+ * The guard's transitive RELATIVE-import closure, derived from the source rather than hand-listed.
+ *
+ * 硬规则 5b: a hand-listed closure is a SECOND copy of a set the imports already define, so it
+ * drifts the moment a new dep is added — and it drifts INVISIBLY, because a short closure still
+ * installs a hook; it only dies later, at HOOK-EXECUTION time, as a bare
+ * `ERR_MODULE_NOT_FOUND … node:internal/modules/esm/resolve` inside the commit under test.
+ * tasks/gap-quay-init-gitignore-misses-quay-runtime-artifacts-outside-dot-quay hit exactly that:
+ * wiring-coverage-check.ts → touches-orthogonality-check.ts gained an import of
+ * `packages/quay/src/runtime-artifacts.ts` (a path OUTSIDE plugin/scripts/, which the old list could
+ * not express even in principle) and both AC1/AC4 e2e reds read `install-hook: …esm/resolve:271`.
+ *
+ * An unresolvable relative import THROWS instead of being skipped (硬规则 3b): a silently-short
+ * closure is indistinguishable from a complete one until the hook runs.
+ */
+function guardClosure() {
+  const seen = new Set();
+  const queue = [GUARD_REL];
+  while (queue.length > 0) {
+    const rel = path.normalize(queue.shift());
+    if (seen.has(rel)) continue;
+    seen.add(rel);
+    const abs = path.join(REPO_ROOT, rel);
+    const src = fs.readFileSync(abs, "utf8"); // a listed dep that does not exist is a hard error
+    for (const m of src.matchAll(REL_IMPORT_RE)) {
+      let dep = path.normalize(path.join(path.dirname(rel), m[2]));
+      if (!fs.existsSync(path.join(REPO_ROOT, dep))) {
+        if (fs.existsSync(path.join(REPO_ROOT, dep + ".ts"))) dep += ".ts";
+        else if (fs.existsSync(path.join(REPO_ROOT, dep, "index.ts"))) dep = path.join(dep, "index.ts");
+        else throw new Error(`${rel} imports "${m[2]}" which does not resolve under ${REPO_ROOT}`);
+      }
+      queue.push(dep);
+    }
+  }
+  return [...seen];
+}
+
+/** Copy the guard + its transitive deps into a scratch repo so --install-hook's shim resolves. */
 function copyGuardScripts(root) {
-  for (const f of [
-    "precommit-guard.ts",
-    "touches-one-entry-one-path-check.ts",
-    "touches-parser.ts",
-    "gate-script-base.ts",
-    "repo-root.ts",
-    // gap-ac190-goal-ac-rule-not-enforced-at-filing: the guard's ③ goal_ac judgment imports the
-    // AC-190 detector's pure functions + the shared frontmatter projections (task-schema.ts, which
-    // pulls wiring-coverage-check.ts / touches-orthogonality-check.ts).
-    "long-term-guarantee-goal-backed-check.ts",
-    "task-schema.ts",
-    "wiring-coverage-check.ts",
-    "touches-orthogonality-check.ts",
-  ]) {
-    fs.copyFileSync(path.join(REPO_ROOT, "plugin", "scripts", f), path.join(root, "plugin", "scripts", f));
+  const files = guardClosure();
+  // A closure of size 1 means the walker itself broke (not that the guard lost its deps) — the same
+  // 仪器故障 shape as a zero-count reading (硬规则 4 推论二).
+  assert.ok(files.length > 1, `guard closure walker found ${files.length} file(s) — walker is broken`);
+  for (const rel of files) {
+    const dst = path.join(root, rel);
+    fs.mkdirSync(path.dirname(dst), { recursive: true }); // deps may live outside plugin/scripts/
+    fs.copyFileSync(path.join(REPO_ROOT, rel), dst);
   }
   // task-schema.ts imports the external `yaml` package — the same node_modules symlink
   // dispatch-worktree-setup.sh / driver-cli.test.mjs lay down, so the bare specifier resolves from
