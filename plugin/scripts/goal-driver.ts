@@ -47,13 +47,13 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // Layer 0（driver-runtime 单一实现）：DRIVER_KINDS（controlFile/carriers 单源）、runAsync（非阻塞
 // spawn）、launchArgv（LLM 调用配置单一构造点）、splitArgs（测试缝覆盖命令切分）、Fact / RoutineSpec
 // （Layer 1b 例程契约）。
-import { DRIVER_KINDS, runAsync, launchArgv, splitArgs, type Fact, type RoutineSpec } from "./driver-runtime.ts";
+import { DRIVER_KINDS, runAsync, launchArgv, splitArgs, kernelSiblingArgv, kernelConfigPath, resolveQuayCodeRoot, type Fact, type RoutineSpec } from "./driver-runtime.ts";
 // Layer 1b 常驻循环（quality-gate-driver 的通用例程型循环 + 统一轮记录信封，同 meta-driver 的接法）。
 import { runResidentQualityGateLoop } from "./quality-gate-driver.ts";
 // goal-store CLI 的 argv 单一构造点（所有 goal 读写都经这里，⛔ 不在别处拼路径——同 meta-driver）。
 import { goalStoreArgv } from "./meta-driver.ts";
 // AC155：轮询间隔的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量）。
-import { defaultDriverConfig, loadDriverConfig } from "./driver-config.ts";
+import { defaultDriverConfig, loadDriverConfig, DRIVERS_CONFIG_REL } from "./driver-config.ts";
 // G7（缺口计算）：task→AC 关联字段 goal_ac 的单一读取路径（parseFrontmatterCompletely +
 // frontmatterStatus / frontmatterGoalAc 投影，⛔ 不在本文件另写一份 frontmatter 解析）。
 import { parseFrontmatterCompletely, frontmatterStatus, frontmatterGoalAc } from "./task-schema.ts";
@@ -70,7 +70,7 @@ import { parse as parseYaml } from "yaml";
 // 在本地重推一遍「achieved ∧ long-term ∧ goal 非 active」——存量缺口正是「声明在 Core、只有 I5 接了线，
 // 每轮 gate 集合与缺口立案集合各自另算」：重推一份即第二处定义，正是 gap-meta-computegoalgaps 要关的
 // 那个口（硬规则 5b）。goal-store.ts 的 argv 构造仍走 meta-driver 的 goalStoreArgv（⛔ 不绕过 store）。
-import { inAchievedReverifyScope } from "../../packages/quay/src/goal-store.ts";
+import { inAchievedReverifyScope, readsFrozenPopulation } from "../../packages/quay/src/goal-store.ts";
 
 // ── 常量（由 DRIVER_KINDS registry 派生，⛔ 不另写一份路径字面量）──────────────────────────
 const GOAL_SPEC = DRIVER_KINDS.goal;
@@ -125,7 +125,13 @@ export const EVERY_ROUND = { kind: "interval" as const, minutes: 0 };
 export function goalSpawnCap(root: string, explicit?: number): number {
   if (explicit != null && Number.isInteger(explicit) && explicit >= 0) return explicit;
   try {
-    const text = fs.readFileSync(path.join(root, "plugin", "scripts", "drivers.yml"), "utf8");
+    // ⚠️ 路径经 driver-config 的 DRIVERS_CONFIG_REL（单一真相源，与 loadDriverConfig 读同一个文件），
+    // ⛔ 不在此处另拼一份 `plugin/scripts/drivers.yml` 字面量：那正是本任务要消灭的第二处布局知识
+    // （gap-drivers-resolve-quay-scripts-under-project-root-not-plugin-root AC3）。
+    // ⚠️ 基准仍是 **workspace root**（不是 kernel 安装位置）：spawn 上限 / 超时是【被驱动项目】的声明，
+    //    与「交付物版本」那条（读 kernel 自身随包出厂的清单文件）不同族；第三方项目未声明 ⇒ 落缺省，
+    //    与 driver-config.loadDriverConfig 的语义一致（避免两个 reader 各读一个文件）。
+    const text = fs.readFileSync(path.join(root, DRIVERS_CONFIG_REL), "utf8");
     const parsed = parseYaml(text) as { kinds?: { goal?: { spawn_cap?: unknown } } } | null;
     const v = parsed?.kinds?.goal?.spawn_cap;
     if (typeof v === "number" && Number.isFinite(v) && v >= 0) return v;
@@ -143,7 +149,8 @@ export function goalSpawnCap(root: string, explicit?: number): number {
 export function goalGapWorkerTimeoutMs(root: string, explicit?: number): number {
   if (explicit != null && Number.isInteger(explicit) && explicit > 0) return explicit;
   try {
-    const text = fs.readFileSync(path.join(root, "plugin", "scripts", "drivers.yml"), "utf8");
+    // 同 goalSpawnCap：经 DRIVERS_CONFIG_REL 单一真相源、基准是 workspace root。
+    const text = fs.readFileSync(path.join(root, DRIVERS_CONFIG_REL), "utf8");
     const parsed = parseYaml(text) as { kinds?: { goal?: { gap_worker_timeout_ms?: unknown } } } | null;
     const v = parsed?.kinds?.goal?.gap_worker_timeout_ms;
     if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
@@ -1428,8 +1435,20 @@ export async function objectiveSufficiencyVerdict(
  *                    合并会把「离开域后就没人管」这条正好要修的形态重新藏起来（硬规则 3b）。
  *                    ⛔ 与 done-unresolved 不同形：曾经 done 的关联任务**不覆盖**「此刻仍为假」，
  *                    只有 todo/ready/needs-human 才算有人接手。
+ *  derived-routed    **AC-216 复验域内【真值派生自 ③ 主体population】的判据专有**（本任务缺陷①）：该常设
+ *                    判据此刻**违反**，但它的 criterion 读的就是 ③ 的输入面（`check --stale-pass`，
+ *                    见 `readsFrozenPopulation`）⇒ 它的真值 =「冻结population 中存在此刻为假的 AC」
+ *                    这一命题，而 **③ 才是那个命题的唯一判据、且已在本轮为那条为假的 AC 产出路由**
+ *                    （`frozen-violated` / in-progress / stalled）。⇒ ② **不得**再为它独立立案。
+ *                    ⛔ 不是 standing-ok：它**此刻确实为假**（说它成立即硬规则 3b 的假绿）。
+ *                    ⛔ 不是 not-evaluated：读数在、违反也在，只是成因已由另一个判官接管。
+ *                    ⇒ 独立取值。判据 AC-242 本身**不动**（它保持诚实：有此刻为假的冻结 AC 就红）；
+ *                    本态只回答「这条红该由谁来消」——归 ③ 的主体 AC，不归这条元判据
+ *                    （为它立案会造出 DoD 结构上只能由**别的 AC 的 owner** 关闭的任务，每轮一条）。
+ *                    ⚠️ 退路（⛔ 闸不恒开）：若 ③ 本轮读不到 / 未评估 / 并未判 violated，则派生条件
+ *                    不成立 ⇒ 回落 `standing-violated` 照旧立案（成因不明时仍要有人看）。
  */
-export type GapState = "in-progress" | "gap" | "done-unresolved" | "stalled" | "not-evaluated" | "standing-ok" | "standing-violated" | "frozen-violated";
+export type GapState = "in-progress" | "gap" | "done-unresolved" | "stalled" | "not-evaluated" | "standing-ok" | "standing-violated" | "frozen-violated" | "derived-routed";
 
 /** 一条 AC 的缺口读数。taskCount 只在 not-evaluated 时为 null（⛔ 与 0 不同形）。 */
 export interface GoalGap {
@@ -1515,6 +1534,9 @@ export function standingReverifyAcs(
  *  （`standings` = I5 `check --achieved-failing` 的读数，goal-store 单一实现）。三态：standing-ok
  *  （域内且此刻成立 ⇒ 无工作可立）/ standing-violated（域内且此刻违反 且【没有在飞任务】⇒ 该 spawn
  *  立案；⛔ done 的关联任务不压下——它不覆盖回归）/ not-evaluated（读不到 taskFacts 或读不到 I5 读数）。
+ *  ⚠️ 第四态 `derived-routed`：违反的是**真值派生自 ③ 主体population** 的判据（criterion 读 ③ 的输入面
+ *  `check --stale-pass`）且 ③ 本轮已判 `violated` ⇒ ② 让位，不独立立案（见 GapState 的该条注释与
+ *  `readsFrozenPopulation`）。
  *  违反但已有在飞任务 ⇒ 复用 ① 的 in-progress / stalled。⛔ 此前这个域只被 I5 跑、不进本读数：
  *  achievedButFailing 只落轮读数与一行日志，「违规」既无写入者也无执行者
  *  （gap-meta-computegoalgaps）。
@@ -1604,6 +1626,20 @@ export function computeGoalGaps(
         out.push({ goal, ac: id, state: "standing-ok", taskCount: 0 });
         continue;
       }
+      // 派生判据（本任务缺陷①）：这条常设判据读的就是 ③ 的输入面 ⇒ 它的真值是「冻结population 中
+      // 存在此刻为假的 AC」这一命题的派生量，而那个命题的**唯一判据与执行者都是 ③**。③ 已在本轮为
+      // 那条为假的 AC 产出了路由（frozen-violated / in-progress / stalled，见上面的 ③ 分支）⇒ ②
+      // **不再**为这条元判据独立立案：为它立案会造出 DoD 结构上只能由【别的 AC 的 owner】关闭的任务
+      // （AC-242 的复绿条件不在它自己的域内），每轮一条、永远关不掉。
+      // ⛔ 复用 ③ 已算出的态（⛔ 不在此处新写一份「有没有主」的判定——那是硬规则 5b）：本分支只读
+      // `frozenReading.judgment`，即 ③ 的读数本身。
+      // ⛔ 闸不恒开：③ 读不到 / 未评估 / 并未判 violated ⇒ 派生条件不成立 ⇒ 回落 standing-violated
+      // 照旧立案（成因不明时仍要有人看，硬规则 6：缺值 = 未查 ≠ 为假）。
+      // 返回 `taskCount: null`：本态回答的不是「有几条任务是它的」（⛔ 与 0 不同形）。
+      if (readsFrozenPopulation(String(r.criterion ?? "")) && frozenReading !== null && frozenReading.judgment === "violated") {
+        out.push({ goal, ac: id, state: "derived-routed", taskCount: null });
+        continue;
+      }
       // 此刻违反 ⇒ 要有人做。**只有「在飞任务」才压下新一轮立案**：done/superseded 的关联任务
       // ⛔ 不压下（它不覆盖回归——那正是「回归后再无人立案」的成因，⛔ 不与 ① 的 done-unresolved
       // 同判）。有一条在飞任务被立案后即由下面的牵引态接手，故不会每轮重复 spawn。
@@ -1667,11 +1703,9 @@ function acExpectOf(records: Array<Record<string, unknown>>, id: string): string
  *  readyPoolCmd = 测试缝。读不懂/非零退出 ⇒ null（⛔ 与「零 stuck」不同形——judgment=null 时
  *  computeGoalGaps 不判 stalled，回到 in-progress）。 */
 export async function readReadyPoolJudgment(root: string, readyPoolCmd: string[] | null = null): Promise<ReadyPoolJudgment | null> {
-  const argv = readyPoolCmd ?? [
-    "node", "--experimental-strip-types",
-    path.join(root, "plugin", "scripts", "ready-pool-check.ts"),  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
-    "--root", root, "--json",
-  ];
+  const argv = readyPoolCmd ?? kernelSiblingArgv("ready-pool-check.ts", ["--root", root, "--json"]);
+  // 机件解析不出 ⇒ null（⛔ 与「零 stuck」不同形——判据面缺失必须可区分；硬规则 3b）。
+  if (argv === null) return null;
   const r = await runAsync(argv, { timeoutMs: CRITERION_TIMEOUT_MS });
   if (r.error || r.status !== 0) return null;
   let j: unknown;
@@ -1893,7 +1927,9 @@ export interface GapSpawnPassResult {
  *  此刻违反且无在飞任务）+ `frozen-violated`（**冻结population**：已离开复验域、台账尾读数说此刻为假、
  *  且无在飞任务——⛔ 与 standing-violated 是两个 population（域外/域内），合并即把「离开域后没人管」
  *  这条正好要修的形态重新藏起来）。其余态⛔ 不消耗 spawn 名额：stalled/in-progress 已有人在处理，
- *  done-unresolved/standing-ok 无工作要立，not-evaluated 是读不到而不是缺口（硬规则 3b）。 */
+ *  done-unresolved/standing-ok 无工作要立，not-evaluated 是读不到而不是缺口（硬规则 3b），
+ *  `derived-routed` 的红归 ③ 的主体 AC、⛔ 不归这条元判据（为它立案会每轮造一条关不掉的任务——
+ *  它的复绿条件在别的 AC 的域内，见 GapState 的该条注释）。 */
 export function isFilingGapState(state: GapState): boolean {
   return state === "gap" || state === "standing-violated" || state === "frozen-violated";
 }
@@ -1992,7 +2028,10 @@ export interface GoalRoundReadings {
 }
 
 export interface GoalRoundOptions {
-  /** goal-store.ts 脚本根（缺省 = dataRoot；测试缝传 repo 根，使 goals/ 与脚本根分离）。 */
+  /** goal-store.ts 所在的 quay 代码根（缺省 = `resolveQuayCodeRoot()`——从【本 kernel 自身安装
+   *  位置】反推，⛔ 不是 dataRoot/workspaceRoot：第三方项目 root 下没有 packages/，按 root 拼会得到
+   *  `Cannot find module '<project>/packages/quay/src/goal-store.ts'`）。测试缝可显式传，
+   *  使 goals/ 与脚本根分离。 */
   scriptRoot?: string;
   /** 覆盖 resource-gate 命令（测试缝；缺省 = 与 worker/promotion 同一 resourceGateCheck 缺省）。 */
   resourceGateArgv?: string[] | null;
@@ -2049,8 +2088,27 @@ export interface GoalRoundResult {
  *  是账本派生的，不回写文件）→ I2 flip → I3/I4（check --staleness）。返回一条 Fact（明细全在
  *  fact.value 里，统一信封 = computeRoundRecord）。 */
 export async function runGoalRound(root: string, opts: GoalRoundOptions = {}): Promise<GoalRoundResult> {
-  const scriptRoot = opts.scriptRoot ?? root;
+  // scriptRoot = quay 自身代码所在地（经 kernel 安装位置反推），⛔ 不是 root（workspaceRoot）——
+  // 两者在开发检出里恰好重合，在第三方项目里分离：按 root 拼会去 <project>/packages/quay/src/
+  // 找 goal-store.ts 并报 `Cannot find module`（2026-09-13 /home/yale/work/quay-fleet 实测，
+  // 四个 driver 进程 alive=1、载体在写，而 goal-ring state=failed）。
+  const scriptRoot = opts.scriptRoot ?? resolveQuayCodeRoot();
   const dataRoot = root;
+
+  if (scriptRoot === null) {
+    // fail-closed 且**可诊断**：报「quay 代码根解析不出」而不是让下游 spawn 一个不存在的路径
+    // （后者会把「配置/安装布局不对」伪装成 `Cannot find module` 这种像代码缺陷的读数）。
+    return {
+      fact: {
+        name: "goal-ring",
+        value: { phase: "list" },
+        state: "failed",
+        reason: "quay code root unresolved (neither <pluginRoot>/../packages/quay/src nor <pluginRoot>/../src)",
+      },
+      sufficiencyFacts: [],
+      objectiveFacts: [],
+    };
+  }
 
   let records: Array<Record<string, unknown>>;
   try {
@@ -2697,7 +2755,11 @@ export interface TargetHealthReading {
  *  本任务 Touches 不含 driver-config.ts）。缺省/空串 ⇒ null（= 未声明目标 / 目标在本机）。 */
 export function declaredTargetBinding(root: string): TargetBinding {
   try {
-    const text = fs.readFileSync(path.join(root, "plugin", "scripts", "drivers.yml"), "utf8");
+    // ⚠️ 基准是 **workspace root**（经 DRIVERS_CONFIG_REL 单一真相源）：被驱动系统的绑定是【该项目】
+    // 的声明，⛔ 不是 kernel 出厂配置——若锚到 kernel，每个第三方项目都会拿 quay 自己的
+    // target_host（如 ad-arm1）去 ssh，即「测试缝/第三方静默打到另一个生产目标上」（下方 resolveTargetBinding
+    // 的整体性覆盖注释讲的正是这个形态）。第三方项目未声明 ⇒ {null,null} = 未声明目标（诚实读数）。
+    const text = fs.readFileSync(path.join(root, DRIVERS_CONFIG_REL), "utf8");
     const parsed = parseYaml(text) as { kinds?: { goal?: { target_host?: unknown; target_root?: unknown } } } | null;
     const g = parsed?.kinds?.goal;
     const str = (v: unknown): string | null => (typeof v === "string" && v.trim() !== "" ? v.trim() : null);
@@ -2760,7 +2822,9 @@ export function buildHealthProbeArgv(
  *  （TargetProbeReading.initStateAgeSec）。任一侧读不到 ⇒ null（⛔ 不与相等同形）。 */
 export function readDeliveredPluginVersion(root: string): string | null {
   try {
-    const raw = fs.readFileSync(path.join(root, "plugin", ".claude-plugin", "plugin.json"), "utf8");
+    // 交付物版本 = 【本 kernel 所在 plugin】的 version（⛔ 非 <root>/plugin/…：第三方项目 root 下没有
+    // plugin/，按 root 读恒 null ⇒ 该读数在第三方恒 not-evaluated = 空转）。`root` 保留为 API 兼容。
+    const raw = fs.readFileSync(kernelConfigPath(path.join(".claude-plugin", "plugin.json")), "utf8");
     const j = JSON.parse(raw) as { version?: unknown };
     return typeof j?.version === "string" ? j.version : null;
   } catch {
@@ -3032,7 +3096,7 @@ const HELP = [
   "",
   "Usage: node --experimental-strip-types plugin/scripts/goal-driver.ts [options]",
   "  --root <dir>           仓库根（缺省 cwd；goals/ 与 .quay/ 都在其下）",
-  "  --script-root <dir>    goal-store.ts 脚本根（缺省 = root；测试缝/负控制把 goals/ 与脚本根分离）",
+  "  --script-root <dir>    goal-store.ts 所在的 quay 代码根（缺省 = 从本 kernel 安装位置反推；测试缝/负控制把 goals/ 与脚本根分离）",
   "  --interval <ms>        循环滴答间隔（缺省 " + INTERVAL_MS_DEFAULT + "，来自 drivers.yml goal.interval_ms）",
   "  --once                 跑一轮即退出（手动单发 / 测试）",
   "  --max-rounds <n>       跑满 N 轮退出（测试缝）",

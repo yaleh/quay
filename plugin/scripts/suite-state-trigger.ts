@@ -78,6 +78,9 @@ import { fileURLToPath } from "node:url";
 import { matchGlob, parseTouches } from "./touches-orthogonality-check.ts";
 import { writeJsonAtomic } from "./write-json-atomic.ts";
 import { resolveKernelSibling, resolveKernelPluginRoot } from "./driver-runtime.ts";
+// gap-crash-watchdog-round-ledger-not-written — the SHARED round-ledger appender (round numbering +
+// the ledger file contract live in one place; ⛔ 不在本层另写一个 appender).
+import { appendPreVerifiedRound } from "./pre-verified-round-record.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -180,6 +183,24 @@ export interface SuiteState {
    * landed in the shared tree while the suite ran on it). Absent on legacy / non-git states.
    */
   terminalCommit?: string;
+  /**
+   * gap-crash-watchdog-round-ledger-not-written — 这一轮的【身份】(the runner writes it on every
+   * state; the round-ledger row carries the SAME value). Required by the crash-watchdog's ledger
+   * write: it is the row's ONLY idempotency key (同一 runId 只写一行), and it is the one field that
+   * makes the two carriers (full-suite-state.json / verification-round.jsonl) agree on WHICH round
+   * died — reading them from different sources would be a new 各说各话 (Plan 3).
+   */
+  runId?: string;
+  /**
+   * 被测 checkout：`main`（共享主检出）或 `worktree`（任务工作树）。Runner-written；与台账行同源
+   * 抄写（builder 那条 fan-in 行形状硬编码 "worktree"，而 crash 这一族的生产实例是 main）。
+   */
+  scope?: string;
+  /**
+   * 起跑时被测 checkout 的 HEAD（terminalCommit 的同族：起跑 vs 终态）。被杀的一轮通常只有这一个
+   * （终态从未写出）⇒ crash-watchdog 的台账行以 `terminalCommit ?? verifiedCommit` 取 commit。
+   */
+  verifiedCommit?: string;
   /**
    * gap-concurrent-write-mutable-tree-false-positive-red — true when the runner detected the tree was
    * MUTATED MID-ROUND (start HEAD ≠ terminal HEAD — concurrent writers committed to the shared tree
@@ -496,6 +517,132 @@ function memoPath(root: string): string {
 }
 function roundsPath(root: string): string {
   return path.join(root, ".quay", "verification-round.jsonl");
+}
+
+// ── gap-crash-watchdog-round-ledger-not-written — the NOT-EVALUATED round-ledger row ──────────────
+//
+// 族：「轮未完整跑完 ⇒ verification-round.jsonl 不落记录」。本模块的 crash-watchdog 是第四个成员，
+// 机制与前三者都不同：runner 被【不可捕获地】杀掉（外部 SIGKILL / OOM-killer）时，runner 自己的
+// uncaughtException / unhandledRejection handler 跑不到（full-suite-runner.ts 的注释自己写明 SIGKILL
+// 抓不到），于是它【唯一的 writer】与被测套件一起死，这一轮一行都不写。本模块活着（它就是发现这件事
+// 的那一层），已经把终态补进 state 载体（writeCrashState ⇒ reason=crashed）；现在必须同时也补进
+// round 台账 —— 否则同一轮上两个载体各说各话：state 说「runner 死在中途」，台账一行都没有
+// ⇒ 任何以台账为输入的判定器把「没评估」读成「没问题」（硬规则 3b 的镜像半边）。
+//
+// ⛔ 为什么这一行【不】走 buildPreVerifiedRoundRecord（那条 fan-in 行形状）：形状的【必需】字段，
+// 被杀的一轮结构上取不到，而伪造它们是硬规则 4/6 禁止的 ——
+//   taskId — 只有 `mfi-<task>-…` 形态才派生得出；生产实例的 runId 是 UUID
+//            （.quay/suite-state-events.jsonl 里唯一那次 reason=crashed 转移：runId=081f8335-…,
+//             scope=main, runner=outer）⇒ 结构上无任务号可填；
+//   load   — 「suite 结束时的 /proc/loadavg 1min」；这一轮没有「结束」⇒ 这个读数不存在
+//            （写 0 会读成「跑完了且机器空载」，正是硬规则 6 禁止的「缺值当为假」）；
+//   commit — terminalCommit 只在终态写，被杀的一轮可能只有 verifiedCommit，也可能两个都没有；
+//   scope  — builder 硬编码 "worktree"，而上面那次生产转移是 scope=main。
+// ⇒ 复用【共享的 appender + 台账路径 + 轮次编号】（appendPreVerifiedRound / roundsPath），
+//   并让「这一种轮」的行形状只在【一个取用点】定义（下面的 buildRunnerDiedRoundRow），⛔ 不散落。
+//
+// 形状（与绿轮、红轮、看门狗轮都可区分，硬规则 3b 要的「独立取值」）：
+//   evaluated:false + reason:"runner-died" + state:"red" + ⛔ 无 failures[]
+//   —— 读作「这一轮没有被评估」，⛔ 绝不与 `failed` / `gate-failed` / `watchdog-killed` 共用取值
+//   （那三者各自是别的机制；共用会让「runner 死了」与「测试红了」在台账上同形）。
+//   `evaluated` 字段【缺席】≠ true（硬规则 6）：另一个 writer（full-suite-runner 的
+//   appendVerificationRound）目前不写这个轴 ⇒ 缺席 = 未知，只有显式 `false` 授权「未评估」读法。
+
+/** 该轮的 reason token：runner 被不可捕获地杀死（外部 SIGKILL / OOM），本轮无任何结论。 */
+export const RUNNER_DIED_REASON = "runner-died";
+
+/** `mfi-<task>-<epoch-ms>-<rand>` ⇒ <task>（worker-driver.ts 的 newMechanicalSuiteRunId 形态）。
+ *  派生不出（UUID / wk-prod- / man- 等）⇒ null —— ⛔ 不编一个任务号（硬规则 6）。 */
+export function taskIdFromRunId(runId: unknown): string | null {
+  const m = /^mfi-(.+)-(\d{10,})-([0-9a-f]{4,})$/.exec(String(runId ?? "").trim());
+  return m ? m[1] : null;
+}
+
+/** 由【已死的】terminal crashed state 构造 NOT-EVALUATED 台账行（纯函数，无 I/O）。
+ *  返回 {row:null, error} 表示「这一状态不该/不能入账」——error 是机器 token，⛔ 不是散文。
+ *  ⛔ 字段只从【同一个 state 载体】取（Plan 3：两个载体的 runId/startedAt 必须同源，否则同一轮
+ *  在两个载体上对不上，是新的各说各话）。取不到的字段【缺席】，⛔ 不填 0 / null 冒充读数。 */
+export function buildRunnerDiedRoundRow(
+  crashed: SuiteState | null | undefined,
+): { row: Record<string, unknown> | null; error: string | null } {
+  if (!crashed || crashed.state !== "red" || crashed.reason !== "crashed") {
+    return { row: null, error: "not-a-crashed-state" };
+  }
+  const runId = typeof crashed.runId === "string" ? crashed.runId.trim() : "";
+  // ⛔ 无 runId 就【拒写】：runId 是这一行唯一的幂等键（见下），没有它就无法保证「同一轮只一行」，
+  // 而每轮补写一次 = round 号虚增 —— 那比缺一行更贵（它会污染以 round 号为轴的一切分析）。
+  if (!runId) return { row: null, error: "no-run-id" };
+  const row: Record<string, unknown> = {
+    startedAt: typeof crashed.startedAt === "string" ? crashed.startedAt : null,
+    durationMs: typeof crashed.durationMs === "number" ? crashed.durationMs : null,
+    laneCount: typeof crashed.laneCount === "number" ? crashed.laneCount : null,
+    state: "red",
+    evaluated: false,
+    reason: RUNNER_DIED_REASON,
+    runId,
+  };
+  if (crashed.runner) row.runner = crashed.runner;
+  if (crashed.scope) row.scope = crashed.scope;
+  const commit = crashed.terminalCommit ?? crashed.verifiedCommit;
+  if (typeof commit === "string" && /^[0-9a-f]{40}$/i.test(commit)) row.commit = commit;
+  const taskId = taskIdFromRunId(runId);
+  if (taskId) row.taskId = taskId;
+  return { row, error: null };
+}
+
+/** 台账里是否【已经有】这一轮的 NOT-EVALUATED 行？幂等判据（可取假）：
+ *  同一 runId ∧ 显式 `evaluated === false`。⛔ 不用「同 runId 的任意一行」——那会把
+ *  「这一轮已经评估过（绿/红）」也当成已入账，从而吞掉本该补写的未评估行。
+ *  读不懂/读不到文件 ⇒ false（fail-open 朝【写】：漏写是本条要修的缺陷，重复写由 runId 唯一性兜底）。 */
+export function runnerDiedRoundRecorded(roundsFile: string, runId: string): boolean {
+  try {
+    const text = fs.readFileSync(roundsFile, "utf8");
+    // 台账是【单行一行】的 append-only 文件，生产实测 66 MB / 1626 行（每行含 perFile 大数组）
+    // ⇒ 两次廉价门：① runId 一次子串扫（未命中即返回，不 split、不 parse）；② 只解析【含 runId 的
+    // 那一行】。⛔ 不做 1626 次 JSON.parse，也不把 66 MB 切成 1626 个字符串（这一层由 runMonitor 的
+    // 轮询路径调用；实测代价见任务体读数段：未命中 ≈0.75 s、命中 ≈1.9 s，每次崩溃检测至多一次）。
+    for (let idx = text.indexOf(runId); idx !== -1; idx = text.indexOf(runId, idx + 1)) {
+      const lineStart = text.lastIndexOf("\n", idx) + 1;
+      const nl = text.indexOf("\n", idx);
+      const lineEnd = nl === -1 ? text.length : nl;
+      let rec: { runId?: unknown; evaluated?: unknown };
+      try {
+        rec = JSON.parse(text.slice(lineStart, lineEnd));
+      } catch {
+        continue; // 坏行不是「已写过」的证据
+      }
+      if (rec.runId === runId && rec.evaluated === false) return true;
+    }
+  } catch {
+    // 台账不存在/读不到 ⇒ 这一轮还没入账
+  }
+  return false;
+}
+
+export interface RunnerDiedRoundResult {
+  /** true = 本次调用真的往台账追加了一行。 */
+  written: boolean;
+  /** 未写时的机器 token（written=true 时为 null）：not-a-crashed-state / no-run-id /
+   *  already-recorded / append-failed:…。⛔ 不与「已写」同形（硬规则 3b）。 */
+  reason: string | null;
+  file: string;
+  record: Record<string, unknown> | null;
+}
+
+/** crash-watchdog 的终态补写落进 round 台账（⛔ 只追加一条记录，不改控制流、不改判定）。
+ *  fail-open：台账的写入失败绝不 crash 触发者（同 writeCrashState：watchdog 是通知者不是闸）。 */
+export function recordRunnerDiedRound(root: string, crashed: SuiteState | null | undefined): RunnerDiedRoundResult {
+  const file = roundsPath(root);
+  const built = buildRunnerDiedRoundRow(crashed);
+  if (built.error || !built.row) return { written: false, reason: built.error, file, record: null };
+  const runId = String(built.row.runId);
+  if (runnerDiedRoundRecorded(file, runId)) return { written: false, reason: "already-recorded", file, record: built.row };
+  try {
+    appendPreVerifiedRound(file, built.row);
+  } catch (e) {
+    return { written: false, reason: `append-failed: ${e instanceof Error ? e.message : String(e)}`, file, record: built.row };
+  }
+  return { written: true, reason: null, file, record: built.row };
 }
 
 function readJson<T>(p: string): T | null {
@@ -1098,6 +1245,14 @@ export function runOnce(root: string, opts?: RunOnceOpts): RunOnceResult {
       // Re-read so the authoritative on-disk state drives the transition below (a guarded write that
       // a newer generation refused leaves the file untouched — `cur` stays the live running state).
       cur = readSuiteState(root) ?? crashed;
+      // gap-crash-watchdog-round-ledger-not-written — 终态补写的【第二半】：runner 不可捕获地死掉时，
+      // 它的唯一 writer（full-suite-runner）与被测套件一起死，round 台账一行都不写 ⇒ 两个载体各说各话。
+      // 本层活着，且刚刚写出了 state 载体的终态，所以由本层把同一行补进 round 台账。
+      // ⛔ 只追加一条台账记录：判定（detectCrashedRunner）与控制流（是否写 state / 是否停派）逐字不变。
+      // 传入【重读后的 cur】而不是 crashed：writeCrashState 被新一代挡下（或写失败）时 cur 仍是那个
+      // running 状态 ⇒ recordRunnerDiedRound 判 not-a-crashed-state 而【拒写】——两个载体继续一致地
+      // 说 running，下一轮再试；⛔ 绝不会出现「state 说 running、台账说死了」的反向各说各话。
+      recordRunnerDiedRound(root, cur);
     }
   }
   const status: SuiteStateValue | "absent" = cur?.state ?? "absent";

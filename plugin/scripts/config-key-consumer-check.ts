@@ -94,13 +94,23 @@ export const EXEMPTIONS: Exemption[] = [
 
 /** Extract the delivery config keys quay-init writes, from BOTH writer forms:
  *  (a) the fresh-install heredoc — a `loop:` line at column 0 followed by `  <key>:` lines;
- *  (b) the config-preserving-upgrade python writer — `loop["<key>"] = …` assignments. */
+ *  (b) the config-preserving-upgrade python writer — `loop["<key>"] = …` assignments.
+ *
+ *  An INDENTED YAML comment inside the block (`  # …`, e.g. the `loop.test_command` contract note
+ *  written next to `test_command`) is SKIPPED, not a terminator — a comment is not a key and does not
+ *  end the mapping. Treating it as a terminator silently truncated the key set: a key written after
+ *  such a note was never enumerated, hence never consumer-checked, and `--capture` baked the
+ *  truncated set into the committed baseline — so the missing key could never show up as a shrink
+ *  either (fail-silent in both directions). The block still ends at a blank line, EOF, or a
+ *  non-two-space line; a COLUMN-0 comment keeps terminating it, because skipping those would let the
+ *  scan run on into the next top-level block and enumerate that block's indented keys as loop keys. */
 export function extractWriterKeys(src: string): string[] {
   const keys = new Set<string>();
   const lines = src.split("\n");
   for (let i = 0; i < lines.length; i++) {
     if (/^loop:\s*$/.test(lines[i])) {
       for (let j = i + 1; j < lines.length; j++) {
+        if (/^[ \t]+#/.test(lines[j])) continue; // an indented comment is not a key, does not end the block
         const m = /^  ([a-z_][a-z0-9_]*):/.exec(lines[j]);
         if (!m) break; // blank line / EOF / a non-two-space key terminates the loop: block
         keys.add(m[1]);

@@ -916,9 +916,25 @@ export function pad2(n: number): string {
   return n < 10 ? `0${n}` : String(n);
 }
 
-/** Observation-state note — "未接入/无数据" for empty, "读失败" for error, "" for ok. */
+/** Observation-state note — "未接入/无数据" for empty, "读失败" for error, "" for ok.
+ *
+ *  gap-verification-round-empty-state-lumps-three-distinct-causes: an empty source is not always the
+ *  same FACT. Two causes are recognized and rendered with DIFFERENT labels, because the reader's next
+ *  action differs:
+ *    - `empty-no-writer`           — nothing in this workspace can write the source. The label must
+ *                                    NOT imply 「等一轮就有了」 (no number of rounds will help); the
+ *                                    `reason` names the wiring entry instead.
+ *    - `empty-writer-zero-records` — a writer is wired and has simply produced nothing yet. This is
+ *                                    the ONLY one of the two where 「等一轮」 is true.
+ *  `error` (present-but-unreadable ⇒ 「读失败」) is unchanged and stays distinguishable from both —
+ *  the DEGRADATION CONTRACT in observation.ts's header is not relaxed.
+ *
+ *  The legacy catch-all `empty` is kept for the other observation sources (whose absence has a single
+ *  cause); it renders as before so no other page's copy moves. */
 export function obsNote(status: string, reason: string | null): string {
   if (status === "ok") return "";
+  if (status === "empty-no-writer") return html`<p class="meta"><strong>未接入/无数据</strong> — ${escapeHtml(reason || "")}</p>`;
+  if (status === "empty-writer-zero-records") return html`<p class="meta"><strong>已接入/暂无记录</strong> — ${escapeHtml(reason || "")}</p>`;
   if (status === "empty") return html`<p class="meta"><strong>未接入/无数据</strong> — ${escapeHtml(reason || "")}</p>`;
   return html`<p class="meta"><strong>读失败</strong> — ${escapeHtml(reason || "")}</p>`;
 }

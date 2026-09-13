@@ -90,6 +90,35 @@ run_static_checks() {
   echo "== split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) =="
   # @static-tier full  (whole-store ratchet — deferred to the full-suite gate in scoped mode)
   run_checker "it0-split-or-commit-check" bash "${repo_root}/plugin/scripts/it0-split-or-commit-check.sh" "${repo_root}"
+  echo "== split-or-commit delta-scoped companion (gap-it0-split-or-commit-check-needs-change-tier-companion) =="
+  # A change-tier companion to the FULL-tier whole-store ratchet directly above (which is left
+  # byte-unchanged — deferred, never dropped): the SAME script in `--changed` mode, which derives
+  # THE DELTA's task files from git (never from ## Touches) and judges ONLY those plus their 1-hop
+  # neighbour closure (children / parent / depends_on). The full-tier pass judges the whole task
+  # tree, so a relation broken by one task reddens an UNRELATED task's fan-in while the task that
+  # broke it ships scoped-green — measured 17 such fan-in reds in .quay/verification-round.jsonl
+  # (first 2026-08-13T14:24:11Z, last 2026-09-04T08:16:12Z; 17/17 rounds tests==0 ∧ fail==0, i.e.
+  # pure static red). This is the repo's既定解法 for exactly this defect class, not a new invention:
+  # `quay-init-closure-ratchet-stale` (:571-573 above) is the same shape and drove that checker's
+  # fan-in reds 35 → 0 after 2026-09-06. Cost is ∝ the delta's fan-out (measured 0.06–0.09 s for a
+  # 1-task delta), NOT the whole-store pass (measured 0.49 s for 2090 tasks) — which is why the
+  # full-tier pass is NOT simply moved forward (that would add its whole-store cost to every task).
+  # Attribution: the full tier was deferred precisely because its red is NOT guaranteed to come from
+  # this delta (whole-store); a delta-narrowed run's red IS attributable by construction (a violation
+  # is reported only when one of the tasks IT NAMES is a delta task), which is what绕开s the
+  # attribution problem instead of ignoring it.
+  # ⛔ NOT-EVALUATED is an explicit line + exit 0, never exit 3: the scoped runner evals raw commands
+  # under `set -euo pipefail`, so exit 3 would ABORT an innocent task whose delta carries no task
+  # file. Same scoped-safe convention as suite-bucket-drift-check.
+  # ⚠️ `@static-object tasks/` means this is selected for every task-file delta (the selector always
+  # appends `tasks/<id>.md` in --task mode, select-static-checks-for-touches.ts:834) — the store IS
+  # this checker's carrier, and `landing-target-check` (:307) carries the identical object at the
+  # same tier. It is NOT `always` tier: a delta with no task file (any --touches file-list outside
+  # `tasks/`) selects nothing here. What keeps the per-task cost affordable is the delta-scoped
+  # loading (① above), not a narrower trigger.
+  # @static-tier change
+  # @static-object tasks/ plugin/scripts/runner-static-gate.ts plugin/scripts/it0-split-or-commit-check.ts plugin/scripts/it0-split-or-commit-check.sh plugin/scripts/checker-mutation-cases/it0-split-or-commit-check.sh
+  run_checker "it0-split-or-commit-check-changed" bash "${repo_root}/plugin/scripts/it0-split-or-commit-check.sh" --changed "${repo_root}"
   echo "== checker mechanical-spine check (gap-b1-mechanical-spine-doc-checker, AC1/AC2/AC3) =="
   # Mechanical spine (B1, SPEC-checker-mechanical-spine-contract-2026-08-28.md): every checker's
   # exit-code vocabulary must be within {0,1,2,3} (0=PASS, 1=FAIL, 2=usage/env-error,
@@ -142,6 +171,28 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/test/ packages/*/test/ experiments/*/test/
   run_checker "test-impl-census-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/test-impl-census-check.ts" --root "${repo_root}"
+  echo "== checked-in-tree write check (gap-suite-glob-universe-fixture-write-toctou) =="
+  # THE INVARIANT: 测试不得在已签入路径下创建或删除条目；一切临时产物落在进程私有临时目录.
+  # Its judge (checked-in-write-check.ts) was built by gap-fixture-dir-write-races-whole-tree-copy
+  # and then NEVER WIRED: `grep -n 'checked-in-write' runner-static-gate.ts` was 0 hits, so the
+  # invariant had no executor in the suite and its SECOND instance survived — a fixture created and
+  # deleted at `plugin/test/__no-group-fixture__.test.mjs`, i.e. INSIDE the SUITE_GLOBS universe
+  # (`plugin/test/*.test.mjs`), so a concurrent enumerator (listSuiteFiles → readFileSync per path in
+  # suite-bucket-reattr-ratchet-check.ts) hit ENOENT and the whole fan-in suite reddened on an
+  # UNRELATED landing task (round 1637, 2026-09-13T11:05:03Z, commit dab664bc4). Registering it here
+  # is what turns the invariant from prose into an executor.
+  # --changed (DELTA-SCOPED), NOT a full sweep: this judge RUNS each input (that is what makes it a
+  # position-based runtime judge rather than the discarded 605-false-positive source scanner), so its
+  # cost is ~1s–60s PER FILE and the corpus is 336 files under plugin/test alone — sweeping it here
+  # would cost more than the suite it guards. Delta is the repo's既定 answer for this shape (the same
+  # `--changed` / `--check-changed` companion convention as it0-split-or-commit-check and
+  # checker-mutation-check): a new or edited test file is judged at its OWN landing. An empty delta
+  # reports NOT-EVALUATED (never PASS) and exits 0 — scoped-safe, because the scoped runner evals raw
+  # commands under `set -euo pipefail` and exit 3 would abort an innocent task whose delta carries no
+  # test file. The full sweep stays available manually: `--dir plugin/test`.
+  # @static-tier change
+  # @static-object plugin/test/ packages/*/test/ experiments/*/test/
+  run_checker "checked-in-write-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/checked-in-write-check.ts" --changed --root "${repo_root}"
   echo "== ## Contract consumer check (gap-dispatch-gate-has-no-checklist-and-no-trace, AC6) =="
   # gap-contract-ratchet-has-no-runner-and-grew-tenfold-unnoticed: this checker had NO runner — its
   # shrink-only ratchet list (docs/analysis/contract-violations.md) grew 1 -> 12 unnoticed because
@@ -275,13 +326,21 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/ scripts/ plugin/scripts/suite-slot-ssot-check.ts plugin/scripts/suite-lock-slots.ts plugin/scripts/suite-slot-lib.sh plugin/test/suite-slot-ssot-check.test.mjs
   run_checker "suite-slot-ssot-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-slot-ssot-check.ts" --gate --root "${repo_root}"
-  echo "== suite-bucket reattribution ratchet (gap-suite-bucket-dynamic-truth-drift-detector, ③-AC6/③-AC7) =="
+  echo "== suite-bucket reattribution ratchet (gap-suite-bucket-dynamic-truth-drift-detector, ③-AC6/③-AC7/③-AC8) =="
   # AC121 把 230 个调 test.sh 的测试逐条重归属为 S|M（.quay/suite-bucket-reattribution.jsonl），但覆盖保证是
   # 一次性人工声称（"重扫=0"），非机械 ratchet。本检查让「漏判」变响：新增一个静态纯 S（bucketSetOf={S}，
   # 仅 scripts/test.sh 提及为 subject）且未入重归因的测试 ⇒ RED（第 1 层，阻断——AC121 误归 S 的漏测形态，
   # 基线=0）；含 S 信号但非纯 S（S+M/P+S/P+S+M）未入重归因 ⇒ 只报计数不阻断（第 2 层，留痕——过度选择是
   # 安全方向，现状 14）。重归因文件缺失 ⇒ NOT-EVALUATED（exit 3，硬规则 3b——永不与「0 漏判」同形）。
-  # mutation case: 纯 S 已重归属 → 绿；移除归属 → 红；恢复 → 绿。
+  # 第 3 层（阻断，③-AC8，gap-suite-bucket-zombie-check-bills-the-next-unrelated-task）：重归因【条目】所指的是
+  # 已不存在的 suite 测试文件 ⇒ ZOMBIE ⇒ RED。该条件原先只由本文件的单测 ③-AC8 判定（= 只在全量套件的某一轮里判），
+  # 于是「删/归档了某个 suite 测试文件却没同步删条目」的那个变更在【自己那一刻】拿不到任何信号，要等数小时后自己那轮
+  # 全量套件才知道，并额外付一次「清僵尸条目」的补提交（生产记录：651 perFile runs / 10 fails，横跨 8 个任务，每次红后
+  # 都跟着一条清条目提交）。判定移进 checker 后它落在本 checker 自己的面上——@static-tier change，scripts/test.sh 在
+  # scoped 轮里按 @static-object 选中它 ⇒ 制造僵尸的那个变更在自己的 scoped 门就被判红（秒级），而不是等自己那轮全量。
+  # ⚠️ 立案时的前提「红落在下一个【无关】任务身上」**已被实测证否**（10/10 红的成因提交就是记账任务自己的）——
+  # 形态是【迟到】不是【错位】；本条注释与 checker 头注释都以实测为准，不要再复述那个前提。
+  # mutation case: 纯 S 已重归属 → 绿；移除归属 → 红（第 1 层）；删掉条目所指的文件而保留条目 → 红（第 3 层）；恢复 → 绿。
   # @static-tier change
   # @static-object .quay/suite-bucket-reattribution.jsonl plugin/scripts/suite-bucket-reattr-ratchet-check.ts plugin/test/suite-bucket-reattr-ratchet-check.test.mjs plugin/test/ experiments/*/test/ packages/*/test/
   run_checker "suite-bucket-reattr-ratchet-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/suite-bucket-reattr-ratchet-check.ts" --gate --root "${repo_root}"
@@ -376,6 +435,32 @@ run_static_checks() {
   # must be 0 (AC3), and the mechanism also mutates itself (AC4, --selftest).
   # @static-tier full  (the ~13s meta-check on the checkers THEMSELVES — deferred to the full-suite gate)
   run_checker "checker-mutation-check" bash "${repo_root}/plugin/scripts/checker-mutation-check.sh" --check
+  echo "== checker-mutation change-tier companion (gap-checker-mutation-check-has-no-change-tier-companion) =="
+  # A change-tier companion to the FULL-tier whole-store mutation check directly above (which is left
+  # byte-unchanged — deferred, never dropped): the same script in `--check-changed` mode, which derives
+  # the checker carriers of THIS delta from git and runs ONLY their mutation cases. The full-tier check
+  # measured 55.6s (median of the last 7 `.quay/checker-cost.jsonl` rows) and runs in the full suite
+  # only, so a mutation case broken by a task reddened an UNRELATED task's fan-in while the task that
+  # broke it shipped scoped-green — measured 8 such fan-in reds, the last at 2026-09-13T04:41:32Z
+  # (`STATIC_CHECK_FAILED: checker-mutation-check` in .quay/verification-round.jsonl). This is the
+  # repo's既定解法 for exactly this defect class, not a new invention: `quay-init-closure-ratchet-stale`
+  # (:571-573 above) is the same shape and drove that checker's fan-in reds 35 → 0 after 2026-09-06.
+  # Cost is ∝ the delta's carriers (measured 0.5s for 1 carrier), NOT the 55.6s whole-store pass —
+  # which is why the full-tier check is NOT simply moved forward (that would add 55.6s to every task).
+  # Attribution: the full tier was deferred precisely because its red is NOT guaranteed to come from
+  # this delta (whole-store / meta-check); a delta-narrowed run's red IS attributable by construction.
+  # The @static-object is the checker carriers + the manifest source: an edited checker script, an
+  # edited mutation case, or the registry itself (runner-static-gate.ts / scripts/test.sh / CI, whose
+  # change can add a NEW checker — the companion then also re-verifies manifest-wide coverage, so
+  # "a new checker with no mutation case" reds at ITS OWN task instead of at a stranger's fan-in).
+  # ⛔ NOT-EVALUATED is an explicit line + exit 0, not exit 3: the scoped runner evals raw commands
+  # under `set -euo pipefail`, so exit 3 would ABORT an innocent task whose Touches name a checker but
+  # whose git delta does not contain one (Touches ⊋ delta is normal). Same scoped-safe convention as
+  # suite-bucket-drift-check. Pinned by plugin/test/select-static-checks-for-touches.test.mjs
+  # (tier/object parse vs --list, with an injected-inconsistency red control).
+  # @static-tier change
+  # @static-object plugin/scripts/runner-static-gate.ts scripts/test.sh plugin/scripts/checker-mutation-check.sh plugin/scripts/checker-mutation-cases/ .github/workflows/
+  run_checker "checker-mutation-check-changed" bash "${repo_root}/plugin/scripts/checker-mutation-check.sh" --check-changed --repo-root "${repo_root}"
   echo "== check-set-after-change check (gap-check-set-after-change-diff-nameonly-intersect-judged-objects, A0b③) =="
   # After editing a file, which tests run is computed mechanically as git diff --name-only ∩ the
   # test/checker's SELF-DECLARED judged objects (`@judges <glob>…` in the file header — no central

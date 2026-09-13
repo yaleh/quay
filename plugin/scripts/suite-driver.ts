@@ -59,6 +59,14 @@ export interface SuiteRunResult {
   signalCode: string | null;
   /** true = 静默看门狗判挂死并杀了它（⛔ 与「红」区分的关键位）。 */
   hungByWatchdog: boolean;
+  /**
+   * true = suite 子进程【从未起来】（spawn 本身抛错：bash/holder 不可执行、EAGAIN 等）——这一轮没有
+   * 任何结论，⛔ 与「跑了且红」不是一件事。可选：只有 spawn catch 那一处会置 true，其余站点缺席即
+   * 「不是 spawn 失败」（唯一置位点 = spawnSuiteAndWait 的 catch）。
+   * gap-watchdog-killed-round-writes-no-verification-round-record：与 hungByWatchdog 同族——两者的
+   * 共同形态是「预定的 round 台账 writer（full-suite-runner）不在路径上」，故入账形状同为 NOT-EVALUATED。
+   */
+  spawnFailed?: boolean;
   startedAt: string;
   finishedAt: string;
   durationMs: number;
@@ -174,6 +182,9 @@ export async function spawnSuiteAndWait(args: {
     } catch (e) {
       resolve({
         outcome: "red", exitCode: null, signalCode: null, hungByWatchdog: false,
+        // gap-watchdog-killed-round-writes-no-verification-round-record —— 唯一置位点：suite 从未起来，
+        // 这一轮没有结论（调用方据此走 NOT-EVALUATED 入账，⛔ 不记成 reason=failed）。
+        spawnFailed: true,
         startedAt, finishedAt: new Date().toISOString(), durationMs: Date.now() - startedMs,
         error: `spawn failed: ${(e as Error).message}`, pid: null,
       });

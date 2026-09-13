@@ -105,6 +105,7 @@ import {
   pruneTaskSuiteLogs,
   extractFailureSummary,
   extractFirstFailureLine,
+  extractSuiteNotRunLine,
   combinedOutput,
   mirrorMechanicalFanInSuiteState,
   mechSh,
@@ -120,7 +121,7 @@ import {
   judgeRetryExemption,
   RETRY_EXEMPTION_WINDOW_MS_DEFAULT,
 } from "../scripts/worker-driver.ts";
-import { defaultLaneCount } from "../scripts/full-suite-runner.ts";
+import { defaultLaneCount, SUITE_LOG_NOT_RUN_PREFIX } from "../scripts/full-suite-runner.ts";
 import { spawnSuiteAndWait } from "../scripts/suite-driver.ts";
 import { suiteLockBase, suiteLockSlotPaths } from "../scripts/suite-lock-slots.ts";
 // gap-worker-driver-retry-cap-not-wired：retryExhausted 集合的生产函数单一真相源（driver-filters.ts），
@@ -2387,4 +2388,136 @@ test("gap-verification-round-bound-to-quay-shaped-suite-entry — 第三方形�
   assert.equal(redRec.runId, "mfi-vr-tp-red-1", "红轮行 runId = 本轮 per-suite runId");
   assert.equal(redRec.reason, "failed", "红轮带 reason（读者可分「跑了且红」与「没跑过」）",
   );
+});
+
+// ── gap-watchdog-killed-round-writes-no-verification-round-record ──────────────────────────────────
+// 病根（AC2 的真实设计判据）：静默看门狗 SIGKILL 的是【整个进程组】——而「预定的 round 台账 writer」
+// 恰在那一组里（quay 形态的 suite 走 full-suite-runner.ts，它是 verification-round.jsonl 的唯一 writer）
+// ⇒ runner 与它的 suite 一起死 ⇒ 这一轮【一行都不写】⇒ 任何以该载体为输入的判定器把「没评估」读成
+// 「没问题」。既有 recordDelegatedRound 的 `if (!suiteRunsOutsideRunner(worktree)) return` 提前返回正是
+// 没能覆盖本子类的根因：它把「谁预定写」当成了「谁写得到」。
+// 本测试的两面控制（同一夹具、只换 suite 命令）：
+//   ① 绿轮（quay 形态）⇒ 台账必须【不存在】—— runner 是它的 writer，本层补写就是双写（既有负控制）；
+//   ② 看门狗杀（quay 形态）⇒ 台账必须【存在】—— 预定 writer 已死，活着的写者只剩 driver 进程。
+// ⛔ 可失败控制：把 hung 分支的那次写入去掉 ⇒ ② 立刻红（台账不存在）；把 force 去掉 ⇒ 同样红。
+//    把写入改成无条件（去掉 force 的判据）⇒ ① 红。两个方向都被这一条测钉住。
+test("AC1/AC2 (gap-watchdog-killed-round-writes-no-verification-round-record) — 看门狗 SIGKILL【整组】后台账仍出现 NOT-EVALUATED 记录；绿轮（quay 形态）仍不补写（双向控制）", async (t) => {
+  // ① 负控制：quay 形态的绿轮 —— 预定 writer（runner）在路径上，台账不该由本层补写。
+  const mGreen = makeMechRepo("wdk-green", "gap-wdk-green");
+  t.after(() => rmSafe(mGreen.base));
+  const greenLedger = path.join(mGreen.repo, ".quay", "verification-round.jsonl");
+  const rg = await runMechanicalFanIn(mechOpts(mGreen, "mfi-wdk-green-1", {
+    task: "gap-wdk-green", perSuiteRunId: "mfi-wdk-green-1",
+    suiteCommand: ["bash", "-c", "echo suite-running; exit 0"],
+  }));
+  assert.equal(rg.outcome, "landed", `绿轮必须落地 (step=${rg.step} reason=${rg.reason})`);
+  assert.equal(fs.existsSync(greenLedger), false, "⛔ 绿轮不该由本层补写（runner 才是它的 writer；写了就是双写）");
+
+  // ② 真实证据：quay 形态 + 看门狗 SIGKILL 整组 ⇒ 台账必须出现，且形状是 NOT-EVALUATED。
+  const m = makeMechRepo("wdk-hung", "gap-wdk-hung");
+  t.after(() => rmSafe(m.base));
+  const ledger = path.join(m.repo, ".quay", "verification-round.jsonl");
+  assert.equal(fs.existsSync(ledger), false, "前置：fan-in 前台账载体不存在（正是缺陷现场）");
+  // suite 命令：起一个【孙进程】并落它的 pid（证「整组被杀」而非只杀直接子进程），随后静默不输出。
+  // ⚠️ 经脚本文件而不是内联 `bash -c '<含 $! 的脚本>'`：suiteCommand 的每个元素会被 slotHolderArgv 用
+  // JSON.stringify 包成【双引号】串拼进外层 bash，`$!` 会在外层的双引号里先被展开成空 ⇒ 内层收到
+  // `echo  > file`（写个空行）——症状是「pid 文件存在但内容不是 pid」，与「孙进程没起来」同形。
+  const gpFile = path.join(m.base, "grandchild.pid");
+  const probeScript = path.join(m.base, "suite-probe.sh");
+  fs.writeFileSync(probeScript, 'sleep 100 &\necho $! > "$1"\necho started\nwait\n', "utf8");
+  const suiteCmd = ["bash", probeScript, gpFile];
+  const t0 = Date.now();
+  const r = await runMechanicalFanIn(mechOpts(m, "mfi-wdk-hung-1", {
+    task: "gap-wdk-hung", perSuiteRunId: "mfi-wdk-hung-1",
+    suiteCommand: suiteCmd, silenceMs: 400,
+  }));
+  assert.ok(Date.now() - t0 < 30_000, `watchdog 必须有限时间返回（⛔ 15min 挂死）took ${Date.now() - t0}ms`);
+  assert.equal(r.outcome, "red", `看门狗杀 ⇒ fan-in red（不是落地）`);
+  assert.equal(r.step, "suite", "失败步 = suite");
+
+  // 台账存在（AC2 的核心：被杀的 writer 写不成，记录仍出现 ⇒ 写入点在活着的一侧）。
+  assert.ok(fs.existsSync(ledger), "看门狗杀死的这一轮【必须】留下台账行（⛔ 一行都不写 = 本任务的病根）");
+  const lines = fs.readFileSync(ledger, "utf8").trim().split("\n").filter(Boolean);
+  assert.equal(lines.length, 1, "一轮一行（⛔ 不双写：runner 已被杀，不可能也写一条）");
+  const rec = JSON.parse(lines[0]);
+  assert.equal(rec.evaluated, false, "NOT-EVALUATED：⛔ 不与「合格」同形（硬规则 3b）");
+  assert.equal(rec.reason, "watchdog-killed", "reason 取独立值");
+  assert.notEqual(rec.reason, "failed", "⛔ 「被杀」不是「跑了且红」的结论");
+  assert.equal(rec.state, "red", "不是通过");
+  assert.equal(rec.failures, undefined, "无失败信号可解析 ⇒ ⛔ 不写空 failures[]");
+  assert.equal(rec.taskId, "gap-wdk-hung", "归属本轮任务");
+  assert.equal(rec.runId, "mfi-wdk-hung-1", "runId = 本轮 per-suite runId");
+  assert.match(String(rec.commit), /^[0-9a-f]{40}$/, "commit = 本轮 suite_head（40-hex）");
+
+  // 「整组杀」这一前提的取证：孙进程必须也死了（⛔ 只杀直接子进程会留孙进程持管道/泄漏）。
+  const gp = Number(fs.readFileSync(gpFile, "utf8").trim());
+  assert.ok(Number.isInteger(gp) && gp > 0, "孙进程 pid 已落盘");
+  await waitFor(() => { try { process.kill(gp, 0); return false; } catch { return true; } }, 15000);
+  assert.ok(true, "孙进程被组 kill 收掉 ⇒ 被杀的是整组，而台账仍由【组外】的 driver 写下");
+});
+
+// ── gap-fan-in-suite-refusal-reports-as-suite-red（AC2 三态可分：被拒轮 ⛔ 不再与真红同形）─────────
+// 病：拒绝轮的 reason 由 extractFirstFailureLine("") 回退成裸 "suite red"，与「真跑且真红」措辞不可分。
+// 修法：runner 在 suite log 写 SUITE-NOT-RUN 标记行 ⇒ 本层【先判「跑没跑」再判「为什么红」】。
+
+test("extractSuiteNotRunLine — 只认 SUITE-NOT-RUN 标记行；真失败日志 ⇒ null（⛔ 不把真红读成「没跑」）", () => {
+  const marker = `${SUITE_LOG_NOT_RUN_PREFIX} branch=single-flight-refusal ts=2026-09-13T08:15:00.000Z reason="another runner is already in flight" — no test was executed by this round`;
+  assert.equal(extractSuiteNotRunLine(""), null, "空日志 ⇒ null（缺值 = 未查，⛔ 不伪造成「拒绝了」）");
+  assert.equal(extractSuiteNotRunLine(marker), marker, "标记行原样返回（供 reason 携带）");
+  assert.equal(
+    extractSuiteNotRunLine(`benign\n${marker}\nmore`),
+    marker,
+    "多行日志里能定位到标记行",
+  );
+  // 负控制：真失败日志（无标记）⇒ null ⇒ 调用方保持「真失败摘要」路径。
+  const realRed = "✖ AC1 — probe failed\n  AssertionError [ERR_ASSERTION]: expected 1 got 2";
+  assert.equal(extractSuiteNotRunLine(realRed), null, "真跑且真红 ⇒ 没有拒绝标记");
+});
+
+test("AC2 (能取假) — suite 被拒 ⇒ reason 指名「未运行（拒绝）+ 哪条分支」，⛔ 不再是裸 `suite red`", async (t) => {
+  const m = makeMechRepo("refused");
+  const runId = "mf-run-refused";
+  t.after(() => rmSafe(m.base));
+  // 忠实模拟生产拒绝：runner 在 suite log 写标记行后 exit 1，【一条测试都没跑】。
+  const suiteLog = path.join(m.base, "suite.log");
+  const script = path.join(m.base, "refusing-suite.sh");
+  fs.writeFileSync(
+    script,
+    `#!/usr/bin/env bash\nprintf '%s\\n' '${SUITE_LOG_NOT_RUN_PREFIX} branch=single-flight-refusal ts=2026-09-13T08:15:00.000Z reason="another runner is already in flight" — no test was executed by this round' >> '${suiteLog}'\nexit 1\n`,
+    { mode: 0o755 },
+  );
+  const r = await runMechanicalFanIn(mechOpts(m, runId, { suiteCommand: ["bash", script] }));
+  assert.equal(r.outcome, "red");
+  assert.equal(r.step, "suite");
+  assert.notEqual(r.reason, "suite red", "⛔ 裸 `suite red` 与被拒轮不可分（本条要修的病）");
+  assert.match(r.reason, /suite NOT run \(refused\)/, `reason 必须自报「未运行（拒绝）」:\n${r.reason}`);
+  assert.match(r.reason, /branch=single-flight-refusal/, "reason 指名【哪条分支】（可归因到拒绝来源）");
+  assert.match(r.verdict.summary, /suite NOT run \(refused\)/, "verdict.summary 与 reason 同源（⛔ 两处各说各话）");
+
+  // 过程日志（A1）同一轮也必须自报拒绝，⛔ 不得留下裸 "suite red"（Finding 实证的形态就是 suite-end）。
+  const perRun = fs.readFileSync(path.join(m.repo, ".quay", fanInLogFileName("gap-mfh", runId)), "utf8")
+    .trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const suiteEnd = perRun.find((l) => l.step === "suite-end");
+  assert.ok(suiteEnd, "suite-end 步骤行存在");
+  assert.notEqual(suiteEnd.reason, "suite red", "⛔ suite-end 的 reason 不得再是裸 `suite red`");
+  assert.match(suiteEnd.reason, /suite not run \(refused\)/, `suite-end 自报拒绝:\n${suiteEnd.reason}`);
+  assert.equal(suiteEnd.refused, true, "结构化 refused 位（机器可读，⛔ 只靠措辞）");
+});
+
+test("AC2 负控制 — 真跑且真红（无拒绝标记）⇒ reason 仍是真失败摘要，⛔ 不冒称「未运行」", async (t) => {
+  const m = makeMechRepo("realred");
+  const runId = "mf-run-realred";
+  t.after(() => rmSafe(m.base));
+  const suiteLog = path.join(m.base, "suite.log");
+  const script = path.join(m.base, "real-red-suite.sh");
+  fs.writeFileSync(
+    script,
+    `#!/usr/bin/env bash\nprintf '%s\\n' '✖ AC1 — probe failed' '  AssertionError [ERR_ASSERTION]: expected 1 got 2' >> '${suiteLog}'\nexit 1\n`,
+    { mode: 0o755 },
+  );
+  const r = await runMechanicalFanIn(mechOpts(m, runId, { suiteCommand: ["bash", script] }));
+  assert.equal(r.outcome, "red");
+  assert.equal(r.step, "suite");
+  assert.doesNotMatch(r.reason, /NOT run \(refused\)/, "真红 ⛔ 不得被标成「未运行」（反向同形）");
+  assert.match(r.reason, /AssertionError/, "真红的 reason 仍是真实失败摘要");
 });

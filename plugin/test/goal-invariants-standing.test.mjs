@@ -30,7 +30,8 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
 import { collectSyncHealth } from "../scripts/meta-driver.ts";
-import { createGoalStore } from "../../packages/quay/src/goal-store.ts";
+import { createGoalStore, criterionFingerprint, AMEND_ACTOR, SWEEP_ACTOR } from "../../packages/quay/src/goal-store.ts";
+import { queryGateEvents } from "../../packages/quay/src/gate/gate-event-store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -258,4 +259,109 @@ test("AC3 常设 — update 清空 criterion 被拒；status-only 放行（机�
   // status-only 写入不碰内容字段 ⇒ 不校验内容，机械 flip 放行。
   s.write("AC-001", { status: "achieved" });
   assert.equal(s.get("AC-001").status, "achieved");
+});
+
+// ── 修订入闸：「对一条已 achieved 的 AC 修订 criterion」── gap-ac242-…-amendment-unguarded 缺陷② ──
+// 缺陷（生产时间线，本仓库可核）：`8bff44425` @ 2026-09-13T03:22:31Z 把 AC-203 的 criterion 收紧
+// （加 kind 维度），**当时该 AC 已是 achieved**（2026-09-11T00:20:42Z）；03:52:16Z 它的 goal-sweep
+// verdict = pass（读的是**旧文本**）；04:28:39Z 修订后的 criterion 才落到工作树；04:54:50Z 下一次轮转
+// 到它 ⇒ fail。⇒ 一张对【已提交的新 criterion 已经为假】的 AC 的 pass 被判定计进 `verifiedFresh`
+// （实测 81 条之一），禁态因此在**检测之前**存在了约 1.5 小时。发生率不是一次性：`git log --since=
+// 2026-09-01 -- goals/` 中修改已 achieved AC 的 criterion/expect 行的提交实测 12 处。
+//
+// 修法：轮转写的 verdict 是**针对某一版判据文本**的 ⇒ 落账时把该文本的内容指纹写进事件
+// （`payload.criterionHash`），判定时逐条比对。指纹不匹配（含遗留事件无指纹）⇒ 独立取值
+// `amendedUnverified`：既不是「查过且全好」（verifiedFresh），也不是「此刻为假」（failing）——
+// 后两者都是对一条**没人跑过**的判据下断言（硬规则 3b）。
+// ⛔ 指纹不是 mtime/时钟：那是依赖宿主的量（硬规则 4 推论二），且 write 会重排整份 frontmatter。
+
+/** 一条 achieved AC + 已关闭 GOAL 的夹具（冻结population：GOAL 非 active 且未声明 long-term）。 */
+function amendmentFixture(tag, criterion = "exit 0") {
+  const dir = tmpDir(tag);
+  const s = createGoalStore(path.join(dir, "goals"));
+  const body = "goal body: background, scope, non-goals and exit conditions — long enough to satisfy the 40-char minimum";
+  s.write("GOAL-900", { title: "closed goal", status: "achieved", origin: "o", body });
+  s.write("AC-900", { title: "a", status: "achieved", goal: "GOAL-900", criterion, expect: "e", origin: "o" });
+  return { dir, s, ledger: path.join(dir, ".quay", "gate-events.jsonl") };
+}
+
+test("AC4 修订入闸 — 改 criterion ⇒ 既有 pass 不再计入 verifiedFresh（对照：同一夹具不改 ⇒ 仍计入）", async () => {
+  const { s, ledger } = amendmentFixture("gi-ac4-");
+  // 轮转跑一次 ⇒ 真跑判据 `exit 0` ⇒ pass，并以指纹落账。
+  const r1 = await s.sweepFrozen({ budget: 5, wallMs: 60_000 });
+  assert.deepEqual(r1.ran.map((x) => x.id), ["AC-900"], "夹具前提：这条在冻结population 内且被轮转覆盖");
+  assert.equal(r1.ran[0].verdict, "pass");
+
+  // ── 对照腿（同一夹具、**不**改 criterion）：仍计入 verifiedFresh ⇒ 下面的断言能取假 ──────────
+  const before = s.checkStalePass();
+  assert.deepEqual(before.verifiedFresh, ["AC-900"], "对照：判据未改 ⇒ 计入 verifiedFresh");
+  assert.deepEqual(before.amendedUnverified, [], "对照：未改 ⇒ 不进修订桶");
+
+  // ── 处理腿：对这条已 achieved 的 AC 修订 criterion ────────────────────────────────────────
+  const amended = "echo 'AC-900: no qualifying record' >&2; exit 1";
+  s.write("AC-900", { criterion: amended });
+  const after = s.checkStalePass();
+  assert.deepEqual(after.verifiedFresh, [], "旧 pass ⛔ 不再计入「查过且全好」——它查的不是这一版判据");
+  assert.deepEqual(after.amendedUnverified, ["AC-900"], "独立取值：既有 verdict 所针对的判据文本已不是当前这条");
+  assert.deepEqual(after.failing, [], "⛔ 也不是 failing——那是对一条【没人跑过】的判据断言其为假（硬规则 3b）");
+  assert.notEqual(after.amendedUnverified.length === 0, after.verifiedFresh.length === 0 || after.failing.length === 0,
+    "三桶互不同形（枚举独立态，硬规则 3）");
+
+  // ── 空跑 + 独立 actor 落账（本轮对新 criterion 跑一次）────────────────────────────────────
+  // ⛔ 判据刚被轮转过（秒级之前）⇒ 年龄闸会说「不该再看」；修订优先级必须压过它，否则「立刻空跑」
+  // 就不会发生，新判据要等满 minAge 才第一次被执行。
+  const r2 = await s.sweepFrozen({ budget: 5, wallMs: 60_000 });
+  assert.deepEqual(r2.ran.map((x) => x.id), ["AC-900"], "修订 ⇒ 同一轮立刻重跑（⛔ 不受 minAge 年龄闸限制）");
+  assert.equal(r2.ran[0].verdict, "fail", "新判据实跑为假（真跑，⛔ 非推断）");
+  const ev = queryGateEvents(ledger, { pipeline_id: "AC-900" });
+  assert.equal(ev.at(-1).actor, AMEND_ACTOR, "actor 独立、可区分于轮转（⛔ 不用同一个字符串记两种成因）");
+  assert.notEqual(AMEND_ACTOR, SWEEP_ACTOR);
+  assert.equal(ev.at(-1).payload.criterionHash, criterionFingerprint(amended), "落账带上【新】判据的指纹");
+
+  // ── 空跑非 pass ⇒ 该 AC 的 achieved 声明不原样留在「查过且全好」──────────────────────────
+  const after2 = s.checkStalePass();
+  assert.deepEqual(after2.verifiedFresh, [], "空跑非 pass ⇒ 绝不回到 verifiedFresh");
+  assert.deepEqual(after2.failing, ["AC-900"], "它是「此刻为假」（新判据的实测结论），不是「查不成」");
+  assert.deepEqual(after2.amendedUnverified, [], "空跑之后已有可用 verdict（写者仍是轮转，故判定面读得到它）");
+  assert.equal(ev.at(-1).verdict, "fail", "载体上留痕的 verdict 与判定面一致");
+});
+
+test("AC4 对照 — 纯空白重排⛔ 不算修订（write 重排 frontmatter 不得触发空跑）", async () => {
+  const { s } = amendmentFixture("gi-ac4-ws-", "exit 0");
+  await s.sweepFrozen({ budget: 5, wallMs: 60_000 });
+  assert.deepEqual(s.checkStalePass().verifiedFresh, ["AC-900"]);
+  // 只改空白（语义相同）：指纹规范化后不变 ⇒ 不得被判成「判据被改过」而空跑一轮（成本）。
+  s.write("AC-900", { criterion: "exit    0" });
+  const after = s.checkStalePass();
+  assert.deepEqual(after.verifiedFresh, ["AC-900"], "空白重排 ⇒ 仍是同一版判据 ⇒ 仍计入");
+  assert.deepEqual(after.amendedUnverified, [], "⛔ 不得把排版变化读成语义变化");
+  const r = await s.sweepFrozen({ budget: 5, wallMs: 60_000 });
+  assert.deepEqual(r.ran, [], "稳态：没有被误判的修订 ⇒ 零判据重跑（成本上界不被破坏）");
+
+  // 双向控制：语义变化（非空白）**必须**被捕获 ⇒ 证明上一条不是「指纹恒等于自己」的恒真断言。
+  s.write("AC-900", { criterion: "echo 'AC-900: nope' >&2; exit 1" });
+  assert.deepEqual(s.checkStalePass().amendedUnverified, ["AC-900"], "语义变化必须被捕获");
+  assert.deepEqual(s.checkStalePass().verifiedFresh, []);
+});
+
+test("AC4 遗留事件（无指纹）⇒ 独立取值而非「必定匹配当前判据」（硬规则 3b），且⛔ 不被优先重跑", async () => {
+  const { s, ledger } = amendmentFixture("gi-ac4-legacy-", "exit 0");
+  // 手写一条**没有** criterionHash 的轮转事件（改前版本写下的那类）：它没有对「验的是哪一版」做出任何声明。
+  fs.mkdirSync(path.dirname(ledger), { recursive: true });
+  fs.appendFileSync(ledger, JSON.stringify({
+    id: "legacy-1", item_id: "AC-900", pipeline_id: "AC-900", gate: "goal", actor: SWEEP_ACTOR,
+    verdict: "pass", timestamp: new Date().toISOString(), payload: { reason: "acceptance passed (exit 0)" },
+  }) + "\n");
+  const j = s.checkStalePass();
+  assert.deepEqual(j.verifiedFresh, [], "⛔ 「没声明验的是哪一版」不得被读成「就是当前这一版」（读不懂输入不得伪装成合格）");
+  assert.deepEqual(j.amendedUnverified, ["AC-900"], "⇒ 独立取值：不知道（⛔ 也不是 false）");
+  assert.deepEqual(j.failing, []);
+  // ⛔ 不被优先重跑：优先只给【有正向不符声明】的那些；否则落地当轮会把整个冻结population 重跑一遍
+  // （本例 77 条），远超年龄轮转被 sizing 的成本上界。遗留事件随正常年龄轮转收敛（并把指纹补上）。
+  const r = await s.sweepFrozen({ budget: 5, wallMs: 60_000 });
+  assert.deepEqual(r.ran, [], "遗留（无指纹）不触发优先重跑——它没有「与当前文本不符」的正向证据");
+  // 收敛：年龄闸到期后正常轮转重跑它，此后指纹齐备 ⇒ 回到可用 verdict。
+  const r2 = await s.sweepFrozen({ budget: 5, wallMs: 60_000, minAgeMs: 0 });
+  assert.deepEqual(r2.ran.map((x) => x.id), ["AC-900"], "年龄到期 ⇒ 正常轮转覆盖它，并补上指纹");
+  assert.deepEqual(s.checkStalePass().verifiedFresh, ["AC-900"], "收敛后回到 verifiedFresh（不再是「不知道」）");
 });
