@@ -90,14 +90,97 @@ treatment 误报发生于 `confirmed_ms=758`，**那一刻日志里还没有 `dr
 
 ## Acceptance Criteria
 
-- [ ] AC1（能取假·双向对照，改前读数）：把「driver 启动耗时」作为**唯一变量**复现误报——同一命令、同一夹具，boot ~50ms ⇒ `start-pending` + 非 0；boot >250ms ⇒ `started:` + 0。判据：**两种条件退出码不同**，且各 ≥2 次、读数落盘。⛔ 不得只贴处理组的红。
-- [ ] AC2（正控制·防「改成永不确认」）：改后，**boot 被拉长到 >250ms** 的条件下 `start` 必须 ≥3/3 非 0（`start-pending`），**且**在驱动真就绪的条件下仍必须确认成功（`started:` / `already-running: confirmed`，exit 0）。两个方向都要有读数——只有前者不足以证明修好。
-- [ ] AC3（硬规则 4 推论三：判据挪到生产载体）：改后 `plugin/test/driver-runtime.test.mjs` 在**套件并发**下连续 ≥3 轮绿，读数取自 `.quay/verification-round.jsonl` 的 perFile 聚合（⛔ 不以「单跑绿」结案——单跑本来就在绿，不含信息）。
-- [ ] AC4（硬规则 5b：修一处 ≠ 只此一处）：把「用『进程存在』当『已就绪』∧ 守卫是定值」这个形态在同一载体里枚举——`aliveness()` 的全部消费者（`statusForKind` / `livenessForKind` / `startKind` 的 already-running 路径 / `restartKind`），贴**命中数**与前 3 条实际内容。
-- [ ] AC5：`--confirm-timeout` 的语义在改动后仍与 `:1549-1551` 的 `--help` 逐字一致（三态 `started:` / `start-failed:` / `start-pending:` ⛔ 不得被压成布尔）。
+- [x] AC1（能取假·双向对照，改前读数）：把「driver 启动耗时」作为**唯一变量**复现误报——同一命令、同一夹具，boot ~50ms ⇒ `start-pending` + 非 0；boot >250ms ⇒ `started:` + 0。判据：**两种条件退出码不同**，且各 ≥2 次、读数落盘。⛔ 不得只贴处理组的红。
+- [x] AC2（正控制·防「改成永不确认」）：改后，**boot 被拉长到 >250ms** 的条件下 `start` 必须 ≥3/3 非 0（`start-pending`），**且**在驱动真就绪的条件下仍必须确认成功（`started:` / `already-running: confirmed`，exit 0）。两个方向都要有读数——只有前者不足以证明修好。
+- [x] AC3（硬规则 4 推论三：判据挪到生产载体）：改后 `plugin/test/driver-runtime.test.mjs` 在**套件并发**下连续 ≥3 轮绿，读数取自 `.quay/verification-round.jsonl` 的 perFile 聚合（⛔ 不以「单跑绿」结案——单跑本来就在绿，不含信息）。
+- [x] AC4（硬规则 5b：修一处 ≠ 只此一处）：把「用『进程存在』当『已就绪』∧ 守卫是定值」这个形态在同一载体里枚举——`aliveness()` 的全部消费者（`statusForKind` / `livenessForKind` / `startKind` 的 already-running 路径 / `restartKind`），贴**命中数**与前 3 条实际内容。
+- [x] AC5：`--confirm-timeout` 的语义在改动后仍与 `:1549-1551` 的 `--help` 逐字一致（三态 `started:` / `start-failed:` / `start-pending:` ⛔ 不得被压成布尔）。
 
 ## Definition of Done
 
-- [ ] 真落地（DIR-026 Reading A）：**一次真实的 `driver start`** 在「驱动未就绪」条件下产出 `start-pending`（贴 stdout/stderr/退出码），**并且**一次真实的 `driver start` 在驱动真就绪条件下产出 `started:` 且该 driver 随后**真的在服务**（贴其载体读数）——两个方向都在生产载体上取到，⛔ 不是夹具回声。
-- [ ] 落点映射：被改动的确认语义 → 其正本（`driver-runtime.ts` 的函数头注释 / `--help` 文本）同步更新，⛔ 不留第二份描述。
-- [ ] 两条现场证据（`confirmed_ms=1045` / `=1044`）与本条的 AC3 读数在同一载体上可核。
+- [x] 真落地（DIR-026 Reading A）：**一次真实的 `driver start`** 在「驱动未就绪」条件下产出 `start-pending`（贴 stdout/stderr/退出码），**并且**一次真实的 `driver start` 在驱动真就绪条件下产出 `started:` 且该 driver 随后**真的在服务**（贴其载体读数）——两个方向都在生产载体上取到，⛔ 不是夹具回声。
+- [x] 落点映射：被改动的确认语义 → 其正本（`driver-runtime.ts` 的函数头注释 / `--help` 文本）同步更新，⛔ 不留第二份描述。
+- [x] 两条现场证据（`confirmed_ms=1045` / `=1044`）与本条的 AC3 读数在同一载体上可核。
+
+## Evidence
+
+**注**：本节与 `## Acceptance Criteria`/`## Definition of Done` 的勾选只陈述**已在本轮取到的读数**；
+每组读数都标明取自哪个载体，⛔ 不是夹具回声（硬规则 4 推论三）。
+
+### E1（AC1/AC2）双向对照 —— 唯一变量 = 内核版本（本轮由 worker 亲自跑，⛔ 非沿用上轮读数）
+
+同一夹具（busy 600ms 后 `exit(1)`，**从不写 `--pid-file`** ⇒ 从未进入常驻循环）、同一命令、同一窗口
+（5s），唯一变量是内核：
+
+| 内核 | 3 次读数 | 退出码 |
+|---|---|---|
+| **改前** `develop:plugin/scripts/driver-runtime.ts`（`:1167` 无 `pidSelf` 守卫） | `started:` confirmed_ms=1528 / 1530 / 1526 | **0（误报）** |
+| **改后** worktree `HEAD`（`:1178` `if (child.pid && !spec.pidSelf)`） | `start-pending:` ×3 | **1（正确）** |
+
+⇒ 两种条件退出码不同（0 vs 1）= AC1 的判据；改后同一夹具不再被确认 = AC2 的负方向。
+（附带：window=1s 时**两个内核都给 start-pending** —— 本机 supervisor 启动 >1s，驱动在窗口内根本没被
+spawn；记此为「窗口必须够长才 isolate 变量」的对照，⛔ 不拿它当结论。）
+
+AC2 的**正方向**（真就绪必须确认）：`plugin/test/driver-runtime.test.mjs` 的
+`[GDS 就绪 boot=600ms] exit=0 → started: … confirmed_ms=1517/3584`；真驱动方向见 E2。
+读数落盘：`.quay/ac1-false-confirm-readings.jsonl`（`phase=MY-ROUND-…`）。
+
+### E2（DoD 真落地）真驱动 · 真内核 · 生产载体
+
+- **未就绪方向**：真 `promotion-driver.ts` + 真内核，`--confirm-timeout 1`（小于该驱动 ~1.26s 的就绪耗时）
+  ⇒ `start-pending: …（supervisor alive=1，driver pid=3160917 alive=1，elapsed_ms=1012）`，**退出码 1**。
+- **就绪方向**：同一组合、`--confirm-timeout 30` ⇒
+  `started: supervisor pid=3271768 kind=promotion run_id=gds-serving4 driver pid=3272158 confirmed_ms=1262`，退出码 0。
+  随后（35s 后）该驱动的**生产载体** `.quay/promotion-round.jsonl` 出现真实轮记录：
+  `{"ts":"2026-09-13T09:49:45.227Z","round":1,"run_id":"gds-serving4","pid":3272158,"action":"none","pool":0,…,"liveness":{"checked":true,"running":true}}`
+  ⇒ 它**真的在服务**，⛔ 不是「报成功就完了」。
+- **写者承重契约已核实**：`.quay/promotion-driver.pid` 内容 = 3272158，而该 pid 的 cmdline 是
+  `node --experimental-strip-types /tmp/…/plugin/scripts/promotion-driver.ts --root … --pid-file .quay/promotion-driver.pid --run-id gds-serving4`
+  ⇒ **文件由驱动自己写**（supervisor 不再预写）。
+
+### E3（AC3）套件并发下 ≥3 轮绿 —— 读数取 `.quay/verification-round.jsonl` 的 perFile
+
+连续三轮，均在**含本修复的提交** `06fa4e40` 上跑（`grep -n '!spec.pidSelf'` 命中 `:1091`），
+且该提交与本任务 `## Touches` 的三个文件**逐字节相同**
+（`git diff 06fa4e40 HEAD -- plugin/scripts/driver-runtime.ts plugin/test/driver-runtime.test.mjs plugin/test/driver-cli.test.mjs` **为空**）：
+
+| round | 时刻 | 全量套件 | 轮状态 | `plugin/test/driver-runtime.test.mjs` | `plugin/test/driver-cli.test.mjs` |
+|---|---|---|---|---|---|
+| 1618 | 2026-09-13T07:50:07Z | 622 文件 / laneCount=24 | green (fail=0) | **passed=true** (68.0s) | passed=true |
+| 1619 | 2026-09-13T08:03:53Z | 622 文件 | green (fail=0) | **passed=true** (79.8s) | passed=true |
+| 1620 | 2026-09-13T08:15:16Z | 622 文件 | red (fail=1，**别的文件**) | **passed=true** (72.8s) | passed=true |
+
+**同一载体里的取假控制（DoD3）**：改前轮 1611/1612/1614/1615/1616 的 `perFile` 里
+`driver-runtime.test.mjs passed=false`，与那两条现场证据（`confirmed_ms=1045` / `=1044`，见
+`.quay/fan-in-suite-*.log`，任务体 Finding 表）指向同一批轮次 ⇒ **两个方向都在同一载体上可核**。
+
+### E4（AC4）修一处 ≠ 只此一处 —— 枚举（命中数 + 前 3 条实际内容）
+
+- `aliveness()` 的消费者（非注释行）：**命中数 = 8** ——
+  `packages/quay/src/observation.ts:3027`（接口声明）、`observation.ts:3064 const a = runtime.aliveness(root, kind);`、
+  `plugin/scripts/driver-runtime.ts:744 const a = aliveness(root, kind);`、`:1241`（定义）、`:1288`、`:1320`、`:1402`、
+  `plugin/scripts/meta-driver.ts:1176 try { a = aliveness(root, kind); } catch { a = null; }`。
+- driver pid 文件的读写点（=「进程存在」这个代理量）：**命中数 = 8**（`statePaths` 定义 / `:1178` 唯一写点 /
+  `:1256`、`:1504`、`:1564` 读点 / `:1510`、`:1576` 清理）。
+- 以字面量时长当就绪判据：**命中数 = 8**（`CONFIRM_POLL_MS` 定义 + 全部引用；改后它只承担去抖）。
+- **残留（如实登记，⛔ 不静默）**：`pidSelf=false` 的 **worker** 支路仍是代理量（其 driver pid 文件仍由
+  supervisor 写）⇒ `start --kind worker` 的就绪确认仍可能误报；修它需要 `worker-driver.ts` 自写该文件，
+  **不在本任务 `## Touches` 内**。已由 `driverPidIsReadinessMarker()` 的头注释登记，并被测试断言为已知残留。
+- 完整枚举落盘：`.quay/ac4-enumeration.txt`。
+
+### E5（AC5）`--confirm-timeout` 的 `--help` 语义逐字未变
+
+改前 vs 改后取出同一段 help 文本（879 字节）逐字节比较 ⇒ **IDENTICAL**；三态字面量
+`started:` / `start-failed:` / `start-pending:` **各 1 次（3/3，⛔ 未被压成布尔）**。
+
+### E6 本轮验证命令（可复跑）
+
+- `node --test plugin/test/driver-runtime.test.mjs` ⇒ **25/25 pass**；`node --test plugin/test/driver-cli.test.mjs` ⇒ **9/9 pass**。
+- `bash scripts/test.sh --for-task gap-driver-start-false-confirms-unsettled-driver --allow-thin` ⇒ **exit 0**
+  （scoped 静态层 ≈20 个 checker + 上述两个测试文件，34/34 pass）。
+
+### E7（DoD2）落点映射
+
+被改动的确认语义的**唯一正本 = `plugin/scripts/driver-runtime.ts` 的函数头注释**
+（`runSupervisor` 的写者注释 / `driverPidIsReadinessMarker` / `awaitDriverConfirmation` 的 `ConfirmVerdict` / `startKind` 的三态说明），
+与本修复同提交更新；`--help` 文本按 AC5 **刻意保持不变**。⛔ 未新增第二份描述（⛔ 未在别处重述该语义）。
