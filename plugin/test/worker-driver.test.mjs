@@ -2565,6 +2565,44 @@ test("AC1/AC3 (存活闸) — finalizeOrphanDispatch 对【仍是本任务活 wo
   assert.equal(readDispatchStore(dispatchStoreFile(root))[taskId], undefined, "对照：记录被清（任务不再被孤儿记录永久占位）");
 });
 
+test("AC1/AC3 (存活闸, 名字解析失败形态) — worker 名解析错（quay-fleet 形）时闸仍拦住：⛔ 不写假终态、⛔ 不删在飞 worker 的 worktree", async (t) => {
+  // 这是【生产事故的逐字形态】：载体把 task-worker 命名成 quay-test-worker，而 worker 进程实际带着
+  // 别的名字跑（改名 / 解析失败）⇒ classifyOrphanDispatch 认不出它 ⇒ 判 finalize。
+  // ⛔ 此时若闸依赖 classifyOrphanDispatch（也要名字），它就是空的；闸必须用【名字无关】的 /proc 存在性。
+  const root = makeGitRoot("orphan-refuse-namemiss");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}-namemiss`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeProfileCarrier(root); // 解析出的 worker 名 = quay-test-worker
+  assert.equal(resolveWorkerProcessName(root), "quay-test-worker", "precondition: 名字来自载体");
+  const taskId = "gap-orphan-refuse-namemiss";
+  writeTaskFile(root, taskId, "ready");
+  runGit(root, ["branch", "develop"]);
+  runGit(root, ["worktree", "add", "-q", "-b", `task/${taskId}`, wtPath]);
+
+  // 活 worker，但 cmdline 带的是【另一个】名字 ⇒ 名字相关的探测认不出它（正是本缺陷的成因）。
+  const live = spawn(process.execPath, ["-e", "setTimeout(()=>{},60000)", WORKER_PROCESS_NAME, taskId], { stdio: "ignore" });
+  t.after(() => { try { live.kill("SIGKILL"); } catch { /* gone */ } });
+  await new Promise((r) => setTimeout(r, 100));
+  const record = {
+    taskId, runId: "fm-namemiss", workerPid: live.pid, selectorReason: "s",
+    startedAtMs: Date.now() - 1000, timeoutDeadlineMs: 0, cmdlineFingerprint: "x",
+  };
+  // 前置：名字相关的分类确实认不出它 ⇒ 走的正是 finalize 分支（因此闸是唯一防线）。
+  assert.equal(classifyOrphanDispatch(record, "/proc", resolveWorkerProcessName(root)), "finalize",
+    "precondition: 名字解析错 ⇒ 分类判 finalize（本缺陷的入口）");
+
+  const outcomeFile = path.join(root, WORKER_OUTCOME_REL);
+  const res = finalizeOrphanDispatch({ root, outcomeFile, record });
+  assert.equal(res.refusedLiveWorker, true, "AC1/AC3: 名字无关的 /proc 存活闸仍然拦住（⛔ 依赖名字的闸在这里是空的）");
+  assert.equal(res.outcome.orphan_pid_liveness, "alive", "the refusal carries the measured value");
+  assert.equal(fs.existsSync(outcomeFile) ? readOutcomeLines(root).length : 0, 0, "⛔ 不写假终态（本缺陷写的就是这条）");
+  assert.equal(worktreePresentForTask(root, taskId), true, "⛔ 不删在飞 worker 正在写的 worktree");
+});
+
 test("AC3 (名字解析, 承重对照) — worker 名解析自 .quay/profiles.yml：同一 argv 只改角色名，存活探测给出相反取值", async (t) => {
   // 这是本缺陷在第三方项目上的【根因】：探测此前写死 `quay-task-worker`，而 quay-fleet 的 roles.
   // task-worker 名叫 `fleet-task-worker` ⇒ hasLiveWorkerForTask 对【每一个真实 worker】恒 false，
@@ -2592,6 +2630,10 @@ test("AC3 (名字解析, 承重对照) — worker 名解析自 .quay/profiles.ym
   // 三处探测统一消费解析出的名字（⛔ 不是只修一处：硬规则 5b）。
   const cold = enumerateColdStartInflight(root, { worktreeTasks: [taskId], workerCmdlines: [cmdline] });
   assert.deepEqual([...cold], [taskId], "cold-start in-flight exclusion honors the resolved name (⛔ empty set ⇒ double dispatch)");
+  // AC3 的另一臂（派发计数 = 1 的那一臂）：存活 worker 不在 ⇒ 排除集为空 ⇒ 该任务可派。
+  // （「派发计数 = 0 / = 1」的端到端两臂由 worker-driver-fan-in 的 cold-start AC1 + 其对照承担。）
+  assert.deepEqual([...enumerateColdStartInflight(root, { worktreeTasks: [taskId], workerCmdlines: [] })], [],
+    "AC3 对照臂: 无存活 worker ⇒ 排除集为空 ⇒ 该任务进入可派集");
 });
 
 test("④ (记录缺失不越权) — orphanDispatchCandidates：无记录 ⇒ 不纳入（手工起的 worker 不被接管）；running 中的在飞 ⇒ 跳过", () => {

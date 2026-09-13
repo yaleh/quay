@@ -2849,12 +2849,15 @@ export function computeAdoptedOutcome(opts: {
  *  no-record-on-abnormal-death 的 orphan worktree 清理（cleanupOrphanWorktree）+ 清 dispatch 记录。同步、
  *  幂等。返回 outcome 供观测（resident loop 打 json 事件）。
  *
- *  🛑 存活闸（Plan 第 4 步「判为仍存活时不得 finalize」）：若该 pid 仍是**本任务的活 worker**
- *  （classifyOrphanDispatch === "adopt"，即 /proc 实测存活 ∧ cmdline 仍含本 workspace 的 worker 名 +
- *  task id），则**拒绝**：⛔ 不写假终态、⛔ 不清 worktree、⛔ 不清 dispatch 记录——原样留着让下一轮
- *  adopt。这是本缺陷的第二道闸：即使 workerName 解析失败导致冷启动排除集漏掉它，这里也不会把它判死。
- *  ⚠️ 判据用的是 classifyOrphanDispatch（含 cmdline 复核）而不是裸 probePidLiveness：pid 复用后
- *  「活着但不是我们的 worker」必须仍能 finalize（否则旧记录永不释放 ⇒ 任务被它永久占位）。 */
+ *  🛑 存活闸（Plan 第 4 步「判为仍存活时不得 finalize」）：只要 /proc 实测该 pid **仍存活**就拒绝，
+ *  ⛔ 不写假终态、⛔ 不清 worktree、⛔ 不清 dispatch 记录——原样留着让下一轮 adopt。
+ *  ⚠️ 判据刻意是【与 worker 名无关的】probePidLiveness，不是 classifyOrphanDispatch：
+ *  classifyOrphanDispatch 要先知道「本 workspace 的 worker 叫什么」，而名字解析失败正是本缺陷在第三方
+ * 项目的成因（quay-fleet 改名 ⇒ 恒判 finalize）。用一个需要名字的判据去兜「名字可能解析错」的底，
+ *  是空的——所以这里用名字无关的直接量（/proc 存在性），它不依赖任何配置即可取假。
+ *  代价（已知并接受）：pid 被复用成一个长命进程时，这条记录会一直留着不 finalize（不破坏任何东西，
+ *  只是残留）；等到该 pid 消失即自愈。取舍方向是「宁可留残留，⛔ 不判死活 worker」——反向的代价是
+ *  删掉在飞 worker 正在写的 worktree + 清掉记录 ⇒ 同任务双派（正是本缺陷）。 */
 export function finalizeOrphanDispatch(opts: {
   root: string;
   outcomeFile: string;
@@ -2876,11 +2879,15 @@ export function finalizeOrphanDispatch(opts: {
     endedAtMs: Date.now(),
     procDir,
   });
-  if (classifyOrphanDispatch(record, procDir, workerName) === "adopt") {
+  if (base.orphan_pid_liveness === "alive") {
     // 活着 ⇒ 不 finalize。⛔ 不 appendOutcome（那是假记录）/ 不清 worktree / 不清记录。
     return { outcome: base, cleanup: null, refusedLiveWorker: true };
   }
-  const cleanup = cleanupOrphanWorktree(root, record.taskId, null, { finalState: "failed", exitCode: null }, workerName);
+  // "unknown"（/proc 读不到）：留一条**不声称死亡**的记录释放掉 in-flight 影子（⛔ 不黑洞），
+  // 但⛔ 不动 worktree——读不到进程表时无法证明没人在里面写（清理闸同样读不到，会误清）。
+  const cleanup = base.orphan_pid_liveness === "unknown"
+    ? null
+    : cleanupOrphanWorktree(root, record.taskId, null, { finalState: "failed", exitCode: null }, workerName);
   const outcome = cleanup
     ? {
         ...base,
@@ -5043,8 +5050,8 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       if (cls === "finalize") {
         const res = finalizeOrphanDispatch({ root: rootDir, outcomeFile, record, workerName });
         if (res.refusedLiveWorker) {
-          // 双闸兜底（⛔ workerName 解析失败时这里仍拦住）：pid 仍是本任务的活 worker ⇒ 不判死、
-          // 不写终态、不清 worktree/记录；从 coldInflight 剔除改由下一轮 adopt 分支接管。
+          // 存活闸兜底（⛔ workerName 解析失败时这里仍拦住——闸用名字无关的 /proc 存在性）：pid 仍存活
+          // ⇒ 不判死、不写终态、不清 worktree/记录；下一轮照常重试（进程真退出后即自愈）。
           if (json) process.stdout.write(`${JSON.stringify({ event: "orphan-finalize-refused-live", task: taskId, worker_pid: record.workerPid })}\n`);
           continue;
         }
