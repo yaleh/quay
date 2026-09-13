@@ -55,6 +55,8 @@ import {
   yieldedSuiteSlotCount,
   spliceConcurrency,
   stripConcurrencyFlags,
+  SUITE_LOG_NOT_RUN_PREFIX,
+  SUITE_LOG_RUN_START_PREFIX,
 } from "../scripts/full-suite-runner.ts";
 import { runOnce, classifyFailure, routeRed, shouldStopDispatch, shouldDispatchOnRed } from "../scripts/suite-state-trigger.ts";
 
@@ -2389,4 +2391,129 @@ test("gap-suite-load-sampler-early-red-truncates-load-curve AC2/AC3 — the samp
     try { process.kill(host.pid, "SIGKILL"); } catch { /* already gone */ }
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ── gap-fan-in-suite-refusal-reports-as-suite-red（AC1 可观测性 / AC3 结构量替代代理量）─────────────
+// 病（2026-09-13 08:14:57Z 实测）：fan-in suite log 0 字节 + `suite-end reason:"suite red"` —— runner
+// 的「未跑就返回」分支只写 stderr，而 suite-driver 只 tee stdout ⇒ 「没跑」与「跑了且失败」同形。
+// 修法：每条未跑就返回的分支在 suite log 写一行 SUITE-NOT-RUN（含 branch 名与原因）；进了执行段则写
+// SUITE-RUN-START（AC3）⇒ 0 字节从此只表示「runner 连写入点都没到」。
+// ⛔ 本组测试只走【真实的 runner 进程】（runCli/runRunner 真 spawn），断言发生在【盘上的 suite log】上。
+
+// 前缀 import 自 writer 模块（⛔ 测试里不另写一份字面量 = 第二个真相源，硬规则 5b）：reader
+// （worker-driver.ts）import 的是【同一个】常量，因此「writer 写什么 / reader 认什么」由构造保证一致。
+const SUITE_NOT_RUN = SUITE_LOG_NOT_RUN_PREFIX;
+const SUITE_RUN_START = SUITE_LOG_RUN_START_PREFIX;
+
+test("AC1 — 单飞拒绝在 suite log 留【非空、含分支名与原因】的一行（⛔ 0 字节日志 = 与「跑了且红」同形）", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac1-notrun-"));
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  // 在飞 runner：live pid（本测试进程自身）+ 非 terminal state。suite log 走 fan-in 的真实命名形状。
+  fs.writeFileSync(
+    statePath(root),
+    JSON.stringify({ state: "running", pid: process.pid, finishedAt: null, runId: "inflight" }, null, 2),
+  );
+  const logFile = path.join(root, ".quay", "fan-in-suite-probe~run~1.log");
+  try {
+    const res = await runCli(RUNNER, ["--root", root, "--state-dir", path.join(root, ".quay"), "--log-file", logFile]);
+    assert.notEqual(res.code, 0, "拒绝 ⇒ 非零退出（本轮没跑）");
+    const log = fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "";
+    assert.notEqual(log.trim(), "", "suite log 非空（⛔ 0 字节 ⇒ 与「跑了且失败」同形，硬规则 3b）");
+    assert.ok(log.includes(SUITE_NOT_RUN), `suite log 含 SUITE-NOT-RUN 标记行:\n${log}`);
+    assert.match(log, /branch=single-flight-refusal/, "标记行指名【哪条分支】（可归因，⛔ 不是「不知道」）");
+    assert.match(log, /reason=/, "标记行携带原因");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — 资源闸 WAIT 同样留标记（第二条「未跑就返回」分支），且标记行有界（⛔ 不是 4KB 单行）", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac1-gatewait-"));
+  const { argsLog } = fakeTestShRecordingArgs(root);
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    statePath(root),
+    JSON.stringify({ state: "green", pid: 999999999, finishedAt: Date.now(), runId: "old" }, null, 2) + "\n",
+    "utf8",
+  );
+  try {
+    const child = runRunner({
+      root,
+      env: {
+        QUAY_TEST_SKIP_RESOURCE_GATE: "0",
+        RESOURCE_GATE_TEST_CPU_AVG10: "84.77", // WAIT（cpu 饥饿）
+        RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
+        RESOURCE_GATE_TEST_LOAD_OVERRIDE: "1",
+      },
+    });
+    const { code } = await waitExit(child);
+    assert.notEqual(code, 0, "WAIT ⇒ 本轮没跑");
+    assert.ok(!fs.existsSync(argsLog), "suite 从未被 spawn");
+    const log = fs.readFileSync(path.join(root, ".quay", "full-suite.log"), "utf8");
+    const line = log.split("\n").find((l) => l.includes(SUITE_NOT_RUN));
+    assert.ok(line, `WAIT ⇒ suite log 有 SUITE-NOT-RUN 行:\n${log}`);
+    assert.match(line, /branch=resource-gate-wait/, "WAIT 分支名可辨（⛔ 与单飞拒绝同形）");
+    assert.ok(line.length <= 500, `标记行有界（实测 ${line.length} 字符）——可读性正是这条标记的存在理由`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC1 负控制 — 闸 GO 且无在飞 runner ⇒ suite log 里【没有】SUITE-NOT-RUN（标记可取假）", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac1-neg-"));
+  const { argsLog } = fakeTestShRecordingArgs(root);
+  try {
+    const child = runRunner({
+      root,
+      env: {
+        QUAY_TEST_SKIP_RESOURCE_GATE: "0",
+        RESOURCE_GATE_TEST_CPU_AVG10: "10", // GO
+        RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
+        RESOURCE_GATE_TEST_LOAD_OVERRIDE: "1",
+      },
+    });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "GO ⇒ 真跑");
+    assert.ok(fs.existsSync(argsLog), "suite 被 spawn（负控制的前提：这一轮是真的跑了）");
+    const log = fs.readFileSync(path.join(root, ".quay", "full-suite.log"), "utf8");
+    assert.ok(!log.includes(SUITE_NOT_RUN), `跑了的那一轮 ⛔ 不得出现拒绝标记:\n${log}`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC3 — 两个标记在两态间可取假：非拒绝轮有 RUN-START 无 NOT-RUN，拒绝轮反之", async () => {
+  // 非拒绝轮（真跑）。
+  const goRoot = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac3-go-"));
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  let goLog = "";
+  try {
+    const child = runRunner({ root: goRoot, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "非拒绝轮退出 0");
+    goLog = fs.readFileSync(path.join(goRoot, ".quay", "full-suite.log"), "utf8");
+  } finally {
+    fs.rmSync(goRoot, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  assert.ok(goLog.includes(SUITE_RUN_START), "非拒绝轮：suite log 有 RUN-START（本轮确实进了执行段）");
+  assert.ok(!goLog.includes(SUITE_NOT_RUN), "非拒绝轮：⛔ 无 NOT-RUN");
+
+  // 拒绝轮。
+  const rejRoot = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac3-rej-"));
+  fs.mkdirSync(path.join(rejRoot, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    statePath(rejRoot),
+    JSON.stringify({ state: "running", pid: process.pid, finishedAt: null, runId: "inflight" }, null, 2),
+  );
+  let rejLog = "";
+  try {
+    const res = await runCli(RUNNER, ["--root", rejRoot, "--state-dir", path.join(rejRoot, ".quay")]);
+    assert.notEqual(res.code, 0, "拒绝轮退出非零");
+    rejLog = fs.readFileSync(path.join(rejRoot, ".quay", "full-suite.log"), "utf8");
+  } finally {
+    fs.rmSync(rejRoot, { recursive: true, force: true });
+  }
+  assert.ok(rejLog.includes(SUITE_NOT_RUN), "拒绝轮：有 NOT-RUN");
+  assert.ok(!rejLog.includes(SUITE_RUN_START), "拒绝轮：⛔ 无 RUN-START（它没进执行段——这正是 0 字节的旧歧义所在）");
 });
