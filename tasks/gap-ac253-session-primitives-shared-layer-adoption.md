@@ -96,7 +96,7 @@ session-schema.mjs     82 行  validateSessionRecord
 
 ## Evidence（结果段）
 
-分支 `task/gap-ac253-session-primitives-shared-layer-adoption`（worktree `/home/yale/work/quay-worktrees/gap-ac253-session-primitives-shared-layer-adoption`）。落地提交 `623309d32`（主体）/ `eb38d92ad`（CLI 修复 + 真 socket 测试）；scoped 门在 `8fc2191bf`（merge develop 后）绿。
+分支 `task/gap-ac253-session-primitives-shared-layer-adoption`（worktree `/home/yale/work/quay-worktrees/gap-ac253-session-primitives-shared-layer-adoption`）。落地提交 `623309d32`（主体）/ `eb38d92ad`（CLI 修复 + 真 socket 测试）；scoped 门在 `1ea66a0b1`（最后一次 merge develop 后）绿。
 
 ### AC1 — AC-253 criterion 三条读数
 
@@ -154,7 +154,7 @@ provenance：`packages/quay/src/primitives/PROVENANCE.md`（fleet 仓路径 + �
 - **exit 0**：`primitives-drift-check: 4 file(s) pinned at 446ba9aa8608 (/home/yale/work/quay-fleet)` / 四行 `ok` / `PASS — all four primitives match the pinned quay-fleet blob byte-for-byte.`
 - **exit 1（改一个字节）**：fixture 里对一份本地副本 append 一行 ⇒ `RED`，报该文件名 + `local=`/`fleet=`/`pinned=` 三个 sha256（测试 `plugin/test/primitives-drift-check.test.mjs` 的 `取假控制` 用例逐字断言）。
 - **exit 3 NOT-EVALUATED，两个方向**：(a) fleet 仓不存在 ⇒ `NOT-EVALUATED — fleet repo absent: …`；(b) **fleet 仓在、钉住的 SHA 取不到** ⇒ exit 3 —— 这是危险方向：只判 `existsSync(repo)` 的实现会读不到 blob 却报「无漂移」。另外 manifest 缺失/corrupt 也判 exit 3（pin 本身读不懂 ⇒ 不判任何一侧有错）。
-- **一个刻意的性质**：pin 是 **commit SHA 不是 ref**。fleet 分支 tip 前进（工作树天天动）**不**红 —— 这正是 pin 而不是跟工作树的意义；一旦 re-pin 到移动后的 blob 而本地副本未跟，立刻红。
+- **一个刻意的性质**：pin 是 **commit SHA 不是 ref**。fleet 分支 tip 前进（工作树天天动）**不**红 —— 这正是 pin 而不是跟工作树的意义；一旦 re-pin 到移动后的 blob 而本地副本未跟，立刻红。测试里有一条专门钉这个性质。
 
 ### AC3 — 4/4 逐模块消费者
 
@@ -190,6 +190,7 @@ provenance：`packages/quay/src/primitives/PROVENANCE.md`（fleet 仓路径 + �
 | `node --test plugin/test/session-primitives-adoption.test.mjs`（新） | `tests 8 / pass 8 / fail 0` |
 | `node --test plugin/test/primitives-drift-check.test.mjs`（新） | `tests 7 / pass 7 / fail 0` |
 | `node --test plugin/test/inner-blocked-signal.test.mjs` | `tests 37 / pass 37 / fail 0` |
+| `node --test packages/quay/test/npm-pack-e2e.test.mjs` | `tests 9 / pass 9 / fail 0`（先红后绿，见下） |
 | `npx tsc --noEmit -p packages/quay` | `0 error`（fan-in 的 typecheck 步） |
 | `bash scripts/test.sh --for-task gap-ac253-session-primitives-shared-layer-adoption --allow-thin` | `pass 273 / fail 0`，`SCOPED_EXIT=0`；静态门里 `primitives-drift-check: PASS`，无 `STATIC_CHECK_FAILED` / `STATIC_CHECK_NOT_EVALUATED` |
 | `bash plugin/scripts/checker-mutation-check.sh --check --only primitives-drift-check` | `MUTATION primitives-drift-check: pass`；`checkers_with_mutation: 73`、`uncovered: 0` |
@@ -225,7 +226,7 @@ provenance：`packages/quay/src/primitives/PROVENANCE.md`（fleet 仓路径 + �
 5. **fleet 的 `deliver` / `deliverKeys` / `readAuditTrail` 未被本仓库调用**。L2 lane 用的是那两个原语（帧编解码 + 审计账），编排（端点约定、grace 推断、账本路径、返回形态）是本仓库自己的 —— 理由：`deliverKeys` 是 fleet 形态的 facade，其 endpoint/token/ledger 约定是 fleet 的；而 SPEC §3.3 逐字禁止的是**四个模块**的第二份手写实现，本仓库对帧编解码与审计账各只有一份（⛔ 没有第二份 codec、没有第二份 ledger）。`readAuditTrail` 未接：它按 delivery `id` 检索，而本仓库的 `message-receipts.jsonl` 读者按 `sessionId` 检索，接上会改既有读契约。
 6. **journal 文件格式未变**（Plan 第 5 步要求的决定）：`message-receipts.jsonl` 的**写入实现**换成共享 `appendAuditRecord`，写出字节与原来逐字相同（同一个 `mkdirSync(dirname)` + `appendFileSync(JSON.stringify(record)+"\n")`），新增的 `payloadSummary` 是**增量字段**（既有读者忽略未知键，`readMessageReceipts` 亦如此）。⇒ 既有读者零回退。
 7. **`.d.mts` 声明文件**（四份，本地手写、不参与逐字节比对）：root tsconfig 是 `allowJs` + `checkJs`，被 import 的 `.mjs` 会被一起类型检查，而冻结副本里不能写 `// @ts-nocheck`（会破坏逐字节同一性）。⇒ 用兄弟 `.d.mts` 声明类型。drift manifest 只钉四个 `.mjs`。
-8. **scoped-gate 缓存的 sha 用的是 `HEAD^2` 而不是写缓存那刻的 `rev-parse develop`**：我 merge 到的 develop tip 是 `69aac66d`，而写缓存时 develop 已前进到 `cd63c8dd`。缓存记的是**门实际 gated 的那个 tip**（`69aac66d`）——记一个没跑过的 tip 会让 fan-in 错误跳过门；记实际跑过的 tip 最多让 fan-in 重跑一次门（成本，不是错误）。
+8. **scoped-gate 缓存的 sha 记的是「门实际 gated 的那个 develop tip」**：门在 `1ea66a0b1` 上跑绿，这次 `HEAD^2` = `rev-parse develop` = `92fc24476`，两者一致，缓存即记 `92fc24476`。（中途还跑过一次：那次 merge 到的 tip 是 `69aac66d` 而 develop 已前进到 `cd63c8dd`，当时按同一原则记 `69aac66d` 并重跑——记一个没跑过的 tip 会让 fan-in 错误跳过门，记实际跑过的 tip 最多让 fan-in 重跑一次门，是成本不是错误。）
 
 ### DoD 自查
 
