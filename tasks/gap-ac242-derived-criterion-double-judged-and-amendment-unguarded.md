@@ -59,13 +59,98 @@ stdout：`frozenScope:82, evaluated:true, failing:["AC-203"], staleUnverified:[]
 
 ## Acceptance Criteria
 
-- [ ] AC1 改前读数（能取假）：贴 Proposal ①②③ 三条命令的 stdout/stderr/**退出码**（① exit 1 且 stderr 逐字 `CURRENTLY false: AC-203`；② exit 1 且 `achievedButFailing:["AC-242"]`；③ exit 1 且 `qualifying kinds=[]`）。本轮已实测，实现者复跑确认。
-- [ ] AC2 两判官同真相（直接量）：同轮贴出 ② 的 `achievedButFailing:["AC-242"]` 与 ③ 的 `failing:["AC-203"]`，并贴 AC-242 台账尾 `04:54:43.306Z pass` 与其后 7 秒的 AC-203 `04:54:50.911Z fail` 两条原文 ⇒ 证明 AC-242 的红是派生量、且其 verdict 滞后输入一轮。
-- [ ] AC3 单一判官 + **两向负控制**：(a) fixture 无 AC-203 owner ⇒ ③ 必须产 `frozen-violated` 且 ② **不**产 `goal_ac: AC-242` 立案；(b) fixture 有 owner（现状）⇒ ③ 产 `in-progress` 且 ② **不**产立案；(c) 负控制：把「已离开复验域却为假且无主」的 fixture 喂给 ②，必须**仍**能产出立案（证明闸不是恒不开）。三向全贴，缺一不算。
-- [ ] AC4 修订入闸 + 负控制：对一条 achieved AC 改 `criterion` ⇒ 其既有 pass 不再计入 `verifiedFresh`（对照：同一 fixture 不改 criterion ⇒ 仍计入，证明断言能取假），且落一条针对新 criterion 的 verdict（actor 独立、可区分）。
-- [ ] AC5 判据真转绿（⛔ 生产读数）：`check --stale-pass` 干跑 **exit 0** + 贴 AC-203 转真的生产载体记录；⛔ 不是夹具、⛔ 不是放宽 AC-242 的 expect、⛔ 不是把 AC-203 搬出冻结population。
-- [ ] AC6 不再自递归立案：fix 后一轮 driver 干跑，`gaps` 中不出现 `ac=AC-242` 的 standing-violated 条目（贴原文）。
-- [ ] AC7 全量绿：`scripts/test.sh` 全量绿；`git diff --name-only <base>..HEAD` 不越 ## Touches。
+- [x] AC1 改前读数（能取假）：贴 Proposal ①②③ 三条命令的 stdout/stderr/**退出码**（① exit 1 且 stderr 逐字 `CURRENTLY false: AC-203`；② exit 1 且 `achievedButFailing:["AC-242"]`；③ exit 1 且 `qualifying kinds=[]`）。本轮已实测，实现者复跑确认。 → 见 Result「AC1」：三条**逐字复现**（沙箱重放：历史 `goals/` @`8bff44425` + 台账/载体截至 `04:54:51Z`，零生产写入）。⚠️ 生产**当前**读数已变（AC-203 已转真），三条的现值与本条立案时不同，成因已在 Result 写明。
+- [x] AC2 两判官同真相（直接量）：同轮贴出 ② 的 `achievedButFailing:["AC-242"]` 与 ③ 的 `failing:["AC-203"]`，并贴 AC-242 台账尾 `04:54:43.306Z pass` 与其后 7 秒的 AC-203 `04:54:50.911Z fail` 两条原文 ⇒ 证明 AC-242 的红是派生量、且其 verdict 滞后输入一轮。 → 见 Result「AC2」：两条事件在**生产台账**中逐字仍在（`04:54:43.306Z` / `04:54:50.911Z`，相隔 7.605s）；并贴同一轮 pass 1b 写下的 17 条 `goal-cli pass` 全序列，证明「滞后一轮」的成因（pass 1b 在 pass 1c 之前）。
+- [x] AC3 单一判官 + **两向负控制**：(a) fixture 无 AC-203 owner ⇒ ③ 必须产 `frozen-violated` 且 ② **不**产 `goal_ac: AC-242` 立案；(b) fixture 有 owner（现状）⇒ ③ 产 `in-progress` 且 ② **不**产立案；(c) 负控制：把「已离开复验域却为假且无主」的 fixture 喂给 ②，必须**仍**能产出立案（证明闸不是恒不开）。三向全贴，缺一不算。 → 见 Result「AC3」：三向全绿（`plugin/test/goal-driver.test.mjs` 新增 4 条，scoped 门内实跑）。
+- [x] AC4 修订入闸 + 负控制：对一条 achieved AC 改 `criterion` ⇒ 其既有 pass 不再计入 `verifiedFresh`（对照：同一 fixture 不改 criterion ⇒ 仍计入，证明断言能取假），且落一条针对新 criterion 的 verdict（actor 独立、可区分）。 → 见 Result「AC4」：改/不改两向对照 + 空白重排不算修订 + 遗留无指纹事件独立取值，全部实跑（`plugin/test/goal-invariants-standing.test.mjs` 新增 3 条）。
+- [x] AC5 判据真转绿（⛔ 生产读数）：`check --stale-pass` 干跑 **exit 0** + 贴 AC-203 转真的生产载体记录；⛔ 不是夹具、⛔ 不是放宽 AC-242 的 expect、⛔ 不是把 AC-203 搬出冻结population。 → 见 Result「AC5」：exit 0 ✓、生产载体 13 条含 ≥2 个不同 kind ✓。⚠️ **须披露的混淆量**：AC-203 另于 `2026-09-13T07:46:03Z`（提交 `e4333ee28`，actor `cli:3026764`）被补上 `long-term: true` —— 即 Proposal 明列的排除走法之一。已附**区分性对照**证明本条绿**不依赖**该搬动。
+- [x] AC6 不再自递归立案：fix 后一轮 driver 干跑，`gaps` 中不出现 `ac=AC-242` 的 standing-violated 条目（贴原文）。 → 见 Result「AC6」：贴 `AC-242 entries` 原文（`standing-ok`）。⚠️ 生产当前 ③ 判 `clean` ⇒ 该条现值本身也是「无事可立」，故另附**同一输入的改前/改后两向控制**作为可区分证据。
+- [ ] AC7 全量绿：`scripts/test.sh` 全量绿；`git diff --name-only <base>..HEAD` 不越 ## Touches。（待外部 —— 全量套件由 fan-in 的 verification-round 跑；本任务只跑了 scoped 门 + 相关面 785 条，见 Result「AC7」）
+
+## Result
+
+落地提交：`6ad71cb6e`（本 worktree，已 merge develop）。改动 4 个文件，全部在 ## Touches 内。
+
+### AC1 — 改前读数：三条逐字复现（沙箱重放，零生产写入）
+
+生产状态已移动（AC-203 已被其 owner 任务修好 ⇒ 见 AC5），故三条**现值**不同；为「复跑确认」，用**忠实重放**取回立案时那一刻的读数：历史 `goals/` = `git archive 8bff44425 goals`，台账与载体 = 生产副本截至 `2026-09-13T04:54:51.045Z`，改前代码，`checkStalePass` 的 `nowMs` 钉在 `04:54:51.045Z`（它的唯一外生变量；不钉会得到 7 小时后的读数）。
+
+```
+① EXIT=1
+   stderr: stale-pass: frozen achieved AC(s) whose criterion is CURRENTLY false: AC-203
+   stdout: frozenScope:82, evaluated:true, failing:["AC-203"], staleUnverified:[], notEvaluated:[],
+           neverGated:[], verifiedFresh:81, rotation:{sweptEver:82,
+           lastSweepAt:"2026-09-13T04:54:51.045Z", minAgeMs:3600000, maxAgeMs:14400000}
+   ⇒ 与 Proposal ① 逐字相同。
+② scopeSize=17 ✓（与 Proposal 逐字相同）；inScope = AC-161,188,189,190,202,204,206,214,217,233,
+   235,236,237,241,242,243,244 ✓（含 AC-242）。
+   `achievedButFailing` 的历史值 `["AC-242"]`：沙箱缺仓库文件会额外判红 13 条（环境产物，已由
+   「同 17 条判据改 cwd 到真仓库根 ⇒ 17/17 pass」分离），而 AC-242 那一条由**实测**给出 ——
+   `check --stale-pass`（= AC-242 的 criterion 本身）在历史台账上 exit 1 且 stderr 点名 AC-203
+   （即 ①）。⇒ 那一刻 AC-242 判据为假、其余 16 条为真 ⇒ `achievedButFailing:["AC-242"]`。
+③ EXIT=1
+   stderr: GOAL-009-AC-203: 合格记录覆盖的 kind=[] （需要 >=2 个不同的 driver kind）
+   ⇒ 与 Proposal ③ 逐字相同。历史 AC-203 记录：`long-term: false` ✓（立案时确在冻结population 内）。
+
+### AC2 — 两判官同真相 + verdict 滞后一轮（生产台账原文）
+
+```
+{"pipeline_id": "AC-242", "gate": "goal", "actor": "goal-cli",   "verdict": "pass", "timestamp": "2026-09-13T04:54:43.306Z"}
+{"pipeline_id": "AC-203", "gate": "goal", "actor": "goal-sweep", "verdict": "fail", "timestamp": "2026-09-13T04:54:50.911Z"}
+```
+相隔 **7.605 秒**，与 Proposal 逐字一致。成因（直接量）：同一轮 pass 1b 把 17 条复验域判据**全部**记为 `pass`（`AC-161@04:54:04.878Z … AC-242@04:54:43.306Z … AC-244@04:54:45.571Z`，含 AC-203 自己 `04:54:16.222Z pass`），而后 pass 1c 的轮转才写下 AC-203 的 `fail` ⇒ AC-242 记录为 pass 的那一轮正是它应为红的那一轮。
+
+### AC3 — 单一判官 + 两向/三向负控制（实跑）
+
+`plugin/test/goal-driver.test.mjs` 新增 4 条，scoped 门内实跑全绿：`派生判据 (a)`（无 owner ⇒ ③ `frozen-violated` ∧ ② `derived-routed`，**不**产 `goal_ac: AC-242` 立案；spawn 选取面只剩 AC-203）、`派生判据 (b)`（有 owner ⇒ ③ `in-progress` ∧ ② 不立案，spawn 面为空）、`派生判据 (c) 负控制`（③ 未评估 / 判 clean ⇒ 回落 `standing-violated` 仍立案；非派生的常设违反仍立案；③ 主体仍产可立案态）、识别式（成词判定，⛔ 子串不算）。
+新态 `derived-routed` 与 `standing-ok`/`not-evaluated` 三者互不同形（⛔ 说它成立即假绿；⛔ 说它读不到即误导）。
+
+### AC4 — 修订入闸（实跑）
+
+落账带 `payload.criterionHash`（判据文本的规范化内容指纹），判定逐条比对。新增 3 条测试全绿：改 criterion ⇒ 旧 pass 离开 `verifiedFresh` 进入 `amendedUnverified`（且 **不**进 `failing`——那是对一条没人跑过的判据断言为假），同一轮由 `sweepFrozen` 优先重跑（⛔ 不受 `minAgeMs` 限制）并以独立 actor `goal-amend` 落账；对照腿（不改）仍在 `verifiedFresh`；空白重排不算修订；遗留无指纹事件进 `amendedUnverified` 但⛔ 不触发优先重跑（避免落地当轮重跑整个 population）。
+生产读数（**只读**，打补丁后的代码 vs 生产台账）：`verifiedFresh 77 → 0`、`amendedUnverified 0 → 77`、`failing` 仍 `[]`、exit 仍 0 —— 生产轮转事件是改前版本写的、无指纹，故全部落到「不知道」；这是**一次性的**收敛过程，由正常年龄轮转逐条补上指纹（沙箱已验证收敛后回到 `verifiedFresh`）。
+
+### AC5 — 判据转绿（生产读数）+ 混淆量披露
+
+```
+$ node … goal-store.ts check --stale-pass --root /home/yale/work/quay   ⇒ EXIT 0
+  frozenScope=77, failing=[], amendedUnverified=[77], verifiedFresh=[], notEvaluated=[]
+```
+AC-203 的生产载体（`.quay/productization-verification.jsonl`）：`GOAL-009-AC-203` 共 **13** 条，kind 取值 `{promotion, goal}` = **2 个不同**（前 3 条无 kind，为收紧前写的）；AC-203 criterion 直接真跑 **exit 0 / acceptance passed**。⛔ 未放宽 AC-242 的 expect（`goals/AC-242-*.md` 未被本任务改动，`git diff` 不含 `goals/`）。
+
+⚠️ **须披露**：AC-203 另于 `2026-09-13T07:46:03Z`（提交 `e4333ee28`，actor `cli:3026764`）被补上 `long-term: true`，即 Proposal 明列的排除走法「把 AC-203 移出冻结population」。⇒ 本条的绿**被两个因素共同决定**，不能只归因于「AC-203 转真」。**区分性对照**（沙箱，`goals/` 副本 + 台账副本，把 AC-203 的 `long-term` 去掉以还原立案时形态 ⇒ 它回到冻结population，`frozenScope=78`）：
+
+```
+leg=pass   落一条对【当前】判据、verdict=pass 的轮转记录 ⇒ verifiedFresh=1(AC-203), failing=[]  ⇒ EXIT 0
+leg=fail   同一夹具，verdict=fail                        ⇒ failing=['AC-203']                  ⇒ EXIT 1
+leg=none   无该指纹的记录                                 ⇒ amendedUnverified(不知道)            ⇒ EXIT 0
+```
+`leg=fail` 是闸能取假的控制 ⇒ `leg=pass` 的 exit 0 非空转；而 `leg=pass` 用的 verdict 不是编造的，是**生产实测**（AC-203 判据 exit 0）。⇒ **即使不搬动 AC-203，判据仍转绿**；该搬动不构成本条绿的支撑。
+
+### AC6 — 不再自递归立案
+
+打补丁后的代码、读生产台账与生产 `tasks/`（只读组合 driver 的 pass ⑤ 输入；⛔ 未跑 `runGoalRound`、未写任何落痕）：
+
+```
+I5 standings: {"achievedButFailing":[],"evaluated":true,"scopeSize":22}
+③ frozen:     {"judgment":"clean","failing":[],"cause":null,"frozenScope":77}
+AC-242 entries: [{"goal":"GOAL-009","ac":"AC-242","state":"standing-ok","taskCount":0}]
+filing states: []
+```
+⚠️ 该读数本身与修复无关地也成立（③ 判 clean ⇒ 结构上无 `standing-violated`）。可区分证据是**同一组输入的两向控制**（输入 = Proposal 立案时那轮的逐字读数：I5 `["AC-242"]`、③ `failing:["AC-203"]`、AC-203 有在飞 owner、AC-242 两条关联任务均 done）：
+
+```
+改前（主检出）: ③ AC-203 = in-progress (filing=false) | ② AC-242 = standing-violated (filing=true)
+改后（worktree）: ③ AC-203 = in-progress (filing=false) | ② AC-242 = derived-routed  (filing=false)
+```
+⇒ 缺陷被复现，修复恰好改变那一条，③ 不受影响。
+
+### AC7 — 全量绿（待外部）
+
+`git diff --name-only 472da075b..HEAD` = 恰好 4 个文件，**全部**在 ## Touches 内（`packages/quay/src/goal-store.ts`、`plugin/scripts/goal-driver.ts`、`plugin/test/goal-driver.test.mjs`、`plugin/test/goal-invariants-standing.test.mjs`）。
+scoped 门（`scripts/test.sh --for-task … --allow-thin`）：**247 tests / 0 fail / exit 0**，含本任务新增的 7 条。
+相关面加固（45 个 import goal-store/goal-driver 的测试文件）：**785 tests / 784 pass / 0 fail / 1 skipped**。
+⛔ **未跑全量套件**（worker 约束：由 fan-in 的 verification-round 跑）⇒ 该半条记为待外部。
 
 ## Definition of Done
 
