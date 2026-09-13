@@ -31,6 +31,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
@@ -105,15 +106,20 @@ test("AC2/AC3 — the --buckets branch routes load-sensitive files to their own 
   );
 });
 
-/** Classify a repo-relative test file via the TS classifier (runner-grouping.ts --classify — the SAME
+/** Classify a test file via the TS classifier (runner-grouping.ts --classify — the SAME
  *  classification suite-scheduler.ts runs over its raw list), returning the group name. This pins the
  *  ACTUAL mechanism, not a re-implemented regex — the regression AC5 guards against is "classification
- *  is referenced but undefined/empty", which silently folds every file into the main phase. */
-function classifyGroup(fileRel) {
+ *  is referenced but undefined/empty", which silently folds every file into the main phase.
+ *
+ *  Accepts an ABSOLUTE path as well as a repo-relative one: classification reads the file it is
+ *  handed (classifyFile → readFileSync), so it is location-independent — which is exactly what lets
+ *  the take-false fixture below live in a temp dir instead of under a checked-in path. */
+function classifyGroup(filePath) {
+  const abs = path.isAbsolute(filePath) ? filePath : path.join(REPO_ROOT, filePath);
   const out = execFileSync(
     process.execPath,
     ["--no-warnings", "--experimental-strip-types", path.join(REPO_ROOT, "plugin", "scripts", "runner-grouping.ts"), "--classify"],
-    { input: `${path.join(REPO_ROOT, fileRel)}\n`, encoding: "utf8" },
+    { input: `${abs}\n`, encoding: "utf8" },
   ).trim();
   return out.split("\t")[1];
 }
@@ -131,12 +137,31 @@ test("AC5 — the TS classifier returns the correct @test-group for engine/lowco
   // empty string — an empty group is what the Discovered Issue #1 misdiagnosed as "undefined".
   // (The fixture text must NOT contain the literal "@test-group <word>" — classification FAIL-CLOSES on
   // an unrecognized group, which is itself the guarantee AC5 pins.)
-  const tmp = path.join(REPO_ROOT, "plugin", "test", "__no-group-fixture__.test.mjs");
-  fs.writeFileSync(tmp, "// no grouping annotation in this fixture\n");
+  //
+  // ⛔ The fixture lives in a PROCESS-PRIVATE TEMP DIR, never under a checked-in path
+  // (gap-suite-glob-universe-fixture-write-toctou). The pre-fix version created and deleted
+  // `plugin/test/__no-group-fixture__.test.mjs` — and `plugin/test/*.test.mjs` is INSIDE SUITE_GLOBS
+  // (suite-bucket-select.ts:59-63), i.e. the fixture mutated the SUITE-FILE UNIVERSE ITSELF, not just
+  // one directory a tree-copier walks. A concurrent enumerator (listSuiteFiles: readdirSync +
+  // statSync, then readFileSync per collected path in suite-bucket-reattr-ratchet-check.ts) collected
+  // the path while the fixture existed and read it after the `finally` unlink ⇒ ENOENT ⇒ the checker
+  // crashed and the WHOLE fan-in suite reddened on an UNRELATED landing task (measured: round 1637,
+  // 2026-09-13T11:05:03Z, commit dab664bc4). Two independent reasons the landing is a temp dir and not
+  // a deeper `plugin/test/fixtures/`: (a) it leaves SUITE_GLOBS (the shallow `plugin/test/*.test.mjs`
+  // glob does not descend), and (b) it leaves the CHECKED-IN TREE — the invariant's runtime judge
+  // (plugin/scripts/checked-in-write-check.ts) rules on the RESOLVED LANDING PATH and its boundary is
+  // "inside the repo root, outside os.tmpdir()", so an in-tree fixtures/ dir would still be judged red.
+  // The invariant's own remedy is literally "every temporary artifact belongs in a process-private
+  // temp dir". The `.test.mjs` suffix is kept on purpose: classification is by CONTENT via a
+  // per-path read, so the suffix pins that a suite-shaped NAME in a non-suite LOCATION is still
+  // classified — which is what the take-false arm is about.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-no-group-fixture-"));
   try {
-    assert.equal(classifyGroup("plugin/test/__no-group-fixture__.test.mjs"), "engine");
+    const tmp = path.join(dir, "__no-group-fixture__.test.mjs");
+    fs.writeFileSync(tmp, "// no grouping annotation in this fixture\n");
+    assert.equal(classifyGroup(tmp), "engine");
   } finally {
-    fs.rmSync(tmp, { force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

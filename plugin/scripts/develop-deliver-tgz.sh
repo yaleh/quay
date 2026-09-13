@@ -537,9 +537,23 @@ STUB
 }
 
 # ── transport_evidence_append <local-carrier> <evidence-file> ───────────────────────────────
-# Append the non-empty JSON lines of <evidence-file> into <local-carrier>, deduped on the
-# (ts, ac, host, project_root) signature so re-transporting the SAME evidence file is idempotent
+# Append the non-empty JSON lines of <evidence-file> into <local-carrier>, deduped on the RECORD'S
+# OWN content (its full field set) so re-transporting the SAME evidence file is idempotent
 # (Plan step 3: repeated transport must not inflate a single record into many — AC-214 freshness).
+#
+# ⛔ 身份取【记录的全部字段】，⛔ 不是一个人为挑出来的键元组 (ts, ac, host, project_root)。
+# 2026-09-13 实测（gap-ac203-two-distinct-kinds-no-production-run）：那个键元组**漏掉 `kind`** ⇒
+# 同一次远端运行里 ts/ac/host/project_root 完全相同、【仅 kind 不同】的两条 AC-203 记录签名相同 ⇒
+# 第二条被静默丢弃（远端 evidence 文件里两条都在，落到驱动方载体只剩一条）。下游后果是判据级的：
+# AC-203 要求「合格记录覆盖 ≥2 个不同的 driver kind」，而**运输层**把第二个 kind 吃掉了 ⇒ 产出侧
+# 再怎么补齐、判据再怎么写，载体里也永远只有一种 kind（硬规则 3b 的「读不懂/丢掉 ⇒ 与合格同形」）。
+# 按全字段取身份 ⇒ 判据将来再加任何区分维度都自动进入身份，**不需要维护第二份「哪些字段算身份」的
+# 清单**——那份清单正是本缺陷的形态（判据加了 kind，运输层的键没跟上，硬规则 5b「缺陷是成簇的」）。
+# 幂等性不受影响：同一文件重运 ⇒ 每行逐字段相同 ⇒ 签名相同 ⇒ 仍 appended=0。
+# 实证的其它适用点（硬规则 5b 要求的 grep 读数，2026-09-13 在 B 机 10 个 evidence 文件上跑）：
+# 仅 1 个文件出现同键碰撞，且 differing_fields 恰为 ['kind']；其余 9 个文件 0 碰撞 ⇒ 今天只有这一处。
+
+
 # Returns 0 + prints `EVIDENCE-TRANSPORT appended=N`; returns 1 + prints `NOT-EVALUATED` when
 # <evidence-file> is missing / unreadable / has zero non-empty lines (硬规则 3b: 缺值 ≠ 合格,
 # and never silent exit 0 on "no evidence").
@@ -558,7 +572,8 @@ transport_evidence_append() {
 import json, sys
 carrier, evidence = sys.argv[1], sys.argv[2]
 def sig(r):
-    return json.dumps([r.get("ts",""), r.get("ac",""), r.get("host",""), r.get("project_root","")], sort_keys=True)
+    # 记录身份 = 全部字段（见上方注释：键元组漏 kind 会把第二条 AC-203 记录静默吃掉）。
+    return json.dumps(r, sort_keys=True)
 existing = set()
 try:
     with open(carrier, encoding="utf-8") as f:
@@ -1073,7 +1088,30 @@ EVID
     n="$(grep -c '.' "${carrier}" 2>/dev/null || true)"
     [ -n "${n}" ] || n=0
     [ "${n}" = "2" ] || { echo "selfcheck-evidence: carrier lines=${n} (expect 2 — repeat must not duplicate)" >&2; rc=1; }
-    [ "${rc}" -eq 0 ] && echo "selfcheck-evidence: positive PASS (2 lines appended; repeat idempotent)"
+    # 正控制②（gap-ac203-two-distinct-kinds-no-production-run AC1）：记录身份必须包含判据用来区分
+    # 记录的**每一个**维度。实测反例：同一次远端运行写出的两条 AC-203 记录 ts/ac/host/project_root
+    # 逐字相同、【仅 kind 不同】——旧 sig 只取那四个键 ⇒ 第二条被静默丢弃 ⇒ 生产载体里永远只有一种
+    # kind ⇒ AC-203 的「≥2 个不同 kind」在【运输层】被抵消（硬规则 4c：判据点名的量必须穿过所有
+    # 中间层还取得到）。此控制取假条件：把 sig 改回四键元组 ⇒ appended=1 ⇒ rc=1。
+    # ⛔ 少了这条，上一条「repeat-append → 0」的绿可以来自「把去重做得更狠」而不是「身份取得对」——
+    # 那正是硬规则 3b 的「一个恒绿的检查」形态。反向控制紧随其后（身份正确 ≠ 取消去重）。
+    carrier="${tmp}/carrier-kind.jsonl"
+    ev="${tmp}/evidence-kind.jsonl"
+    cat > "${ev}" <<'EVID'
+{"ts":"2026-09-13T00:00:00Z","ac":"GOAL-009-AC-203","host":"orangevps","project_root":"/home/verify/quay-verify-coldstart-root","has_plugin_dir":false,"driver_alive":1,"carrier_records":1,"kind":"promotion"}
+{"ts":"2026-09-13T00:00:00Z","ac":"GOAL-009-AC-203","host":"orangevps","project_root":"/home/verify/quay-verify-coldstart-root","has_plugin_dir":false,"driver_alive":1,"carrier_records":1,"kind":"goal"}
+EVID
+    after="$(transport_evidence_append "${carrier}" "${ev}")" || rc=1
+    echo "selfcheck-evidence: kind-dimension (same ts/ac/host/project_root, differing only in kind) → ${after}"
+    printf '%s' "${after}" | grep -q 'appended=2' || { echo "selfcheck-evidence: FAIL — two AC-203 records differing only in kind collapsed (expect appended=2)" >&2; rc=1; }
+    n="$(grep -c '.' "${carrier}" 2>/dev/null || true)"
+    [ -n "${n}" ] || n=0
+    echo "selfcheck-evidence: kind-dimension carrier lines=${n}"
+    [ "${n}" = "2" ] || { echo "selfcheck-evidence: kind-dimension carrier lines=${n} (expect 2 — both kinds must reach the carrier)" >&2; rc=1; }
+    after="$(transport_evidence_append "${carrier}" "${ev}")" || rc=1
+    echo "selfcheck-evidence: kind-dimension repeat-append → ${after}"
+    printf '%s' "${after}" | grep -q 'appended=0' || { echo "selfcheck-evidence: FAIL — kind-dimension re-transport not idempotent (identity too loose)" >&2; rc=1; }
+    [ "${rc}" -eq 0 ] && echo "selfcheck-evidence: positive PASS (2 lines appended; repeat idempotent; kind dimension preserved — 两条仅 kind 不同的 AC-203 记录各自落盘)"
   fi
   if [ "${scenario}" = "negative" ] || [ "${scenario}" = "both" ]; then
     carrier="${tmp}/carrier-neg.jsonl"

@@ -1250,3 +1250,86 @@ test("CLI — --state red writes a red static-check record (reason=gate-failed g
   assert.equal(rec.gate, "static-check");
   assert.match(rec.failures[0].line, /spec-declaration-point-check/);
 });
+
+// ── gap-watchdog-killed-round-writes-no-verification-round-record ────────────────────────────────────
+// 病根：静默看门狗 SIGKILL 的是【整个 runner 进程组】⇒ 预定的 round 台账 writer（full-suite-runner）
+// 与它的 suite 一起死，这一轮【一行都不写】⇒ 任何以该载体为输入的判定器把「没评估」读成「没问题」
+// （硬规则 3b 的镜像半边；本仓库已有 task-status-drift-check / slot-refill / outer-tick-log-check 三个同形前例）。
+// 修法的两半：①让【活着的】写者写（driver 侧，集成证据见 worker-driver-fan-in.test.mjs）；
+// ②硬规则 3b 的修法：给「无法评估」一个【独立取值】，不与「合格」共用输出 ⇒ evaluated:false。
+// 本节是②的纯函数面：NOT-EVALUATED 形状与绿轮/红轮在读面上必须结构可分。
+
+test("AC1 (gap-watchdog-killed-round-writes-no-verification-round-record) — --not-evaluated 产出 NOT-EVALUATED 形状，且与一次正常绿轮【结构上可区分】（evaluated false vs true）", () => {
+  const green = buildPreVerifiedRoundRecord({ ...BASE, suiteLog: null });
+  assert.equal(green.error, undefined, green.error);
+  const killed = buildPreVerifiedRoundRecord({ ...BASE, notEvaluated: "watchdog-killed" });
+  assert.equal(killed.error, undefined, `build must succeed: ${killed.error}`);
+
+  // 判据（AC1 逐字）：两条记录的 evaluated 取值不同，且被杀轮的 reason = watchdog-killed。
+  assert.equal(green.record.evaluated, true, "绿轮 = 被评估过（evaluated:true）");
+  assert.equal(killed.record.evaluated, false, "看门狗杀 = NOT-EVALUATED（evaluated:false）");
+  assert.notEqual(green.record.evaluated, killed.record.evaluated, "两者必须取值不同（⛔ 同形 = 未达成）");
+  assert.equal(killed.record.reason, "watchdog-killed", "reason 取独立值");
+  // ⛔ 不与红轮的取值共用（「被杀」不是「跑了且红」的结论——共用取值正是硬规则 3b 禁的形态）。
+  assert.notEqual(killed.record.reason, "failed");
+  assert.notEqual(killed.record.reason, "gate-failed");
+  assert.equal(killed.record.gate, undefined, "NOT-EVALUATED 轮不带 gate 结论");
+  assert.equal(killed.record.failures, undefined, "⛔ 空 failures[] 会读成「跑了、什么都没失败」——被杀轮没有失败信号可解析");
+  // state 仍是 red（不是通过），但 evaluated:false 才是「无结论」的载体（同 full-suite-state 的
+  // state=red + reason=crashed/hung 口径：red = 不通过，reason 说明成因）。
+  assert.equal(killed.record.state, "red", "不是通过（⛔ 也不伪装成绿）");
+  assert.equal(green.record.state, "green");
+  // 结构与既有行兼容：身份/提交字段照常在场（读者按 taskId/runId 归属、按 commit 定位被测树）。
+  assert.equal(killed.record.taskId, BASE.taskId);
+  assert.equal(killed.record.runId, BASE.runId);
+  assert.equal(killed.record.commit, BASE.commit);
+  assert.equal(killed.record.scope, "worktree");
+});
+
+test("AC1 负控制 (gap-watchdog-killed-round-writes-no-verification-round-record) — 正常红轮仍是 evaluated:true + reason 由套件日志解析（⛔ 不被 NOT-EVALUATED 形状吞掉）", () => {
+  const log = writeSuiteLog(null, ["not ok 1 - some.test.mjs", "AssertionError [ERR_ASSERTION]: probe"]);
+  const red = buildPreVerifiedRoundRecord({ ...BASE, state: "red", suiteLog: log });
+  assert.equal(red.error, undefined, red.error);
+  assert.equal(red.record.state, "red");
+  assert.equal(red.record.reason, "failed", "跑了且红 ⇒ reason=failed（⛔ 不是 watchdog-killed）");
+  assert.equal(red.record.evaluated, true, "红轮【是】被评估过的一轮（结论=失败）——⛔ 与 NOT-EVALUATED 同形就分不出「没评估」与「评估了、失败」");
+});
+
+test("AC1 fail-closed (gap-watchdog-killed-round-writes-no-verification-round-record) — --not-evaluated 与 --state green 同给（自相矛盾）/ token 非法 ⇒ 报错且一行不写", () => {
+  const contradictory = buildPreVerifiedRoundRecord({ ...BASE, state: "green", notEvaluated: "watchdog-killed" });
+  assert.match(String(contradictory.error), /contradicts --state green/, "未评估的一轮不可能是一次通过 ⇒ fail-closed");
+  assert.equal(contradictory.record, undefined, "矛盾输入不产出记录");
+
+  const freedorm = buildPreVerifiedRoundRecord({ ...BASE, notEvaluated: "Watchdog Killed!!" });
+  assert.match(String(freedorm.error), /machine token/, "reason 轴是机器 token（读者按值匹配），⛔ 不收自由散文");
+  assert.equal(freedorm.record, undefined);
+});
+
+test("AC1 CLI (gap-watchdog-killed-round-writes-no-verification-round-record) — --not-evaluated 经 CLI 落到载体上（round 编号沿用既有口径），且 evaluated:false 在盘上可读", () => {
+  const file = tmpFile("pvr-not-eval-");
+  const args = [
+    "--task-id", BASE.taskId,
+    "--run-id", BASE.runId,
+    "--started-at", BASE.startedAt,
+    "--duration-ms", BASE.durationMs,
+    "--lane-count", BASE.laneCount,
+    "--load", BASE.load,
+    "--commit", BASE.commit,
+    "--preverified", "0",
+    "--not-evaluated", "watchdog-killed",
+    "--record-file", file,
+    "--json",
+  ];
+  const r = spawnSync("node", ["--experimental-strip-types", WRITER, ...args], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.equal(out.record.evaluated, false);
+  assert.equal(out.record.reason, "watchdog-killed");
+  const lines = fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean);
+  assert.equal(lines.length, 1, "one line appended");
+  const rec = JSON.parse(lines[0]);
+  assert.equal(rec.evaluated, false, "载体上 evaluated:false（读者据它判 NOT-EVALUATED，⛔ 不靠字段缺席）");
+  assert.equal(rec.reason, "watchdog-killed");
+  assert.equal(rec.round, 1, "round 编号沿用「前行数+1」口径");
+});

@@ -1,7 +1,7 @@
 ---
 id: gap-watchdog-killed-round-writes-no-verification-round-record
 title: 静默看门狗杀死的轮在 verification-round.jsonl 一行都不写（实证 9 次 / 6 天）——已宣告「轮次不落记录」族的第三个子类
-status: ready
+status: done
 labels:
   - gap
 parent: null

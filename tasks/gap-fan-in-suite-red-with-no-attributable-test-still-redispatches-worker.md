@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-suite-red-with-no-attributable-test-still-redispatches-worker
 title: suite 红但归因不出任何测试文件时 driver 仍照常重派 worker —— 把契约/基建问题伪装成实现问题，每次烧一轮会话
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -96,19 +96,28 @@ adopter 项目，同样的三轮空烧会重演**——因为 driver 的分类�
 
 ## Acceptance Criteria
 
-- [ ] AC1（负控制，改前必须红）：构造一个 suite 日志，其内容无法归因到任何测试文件
+- [x] AC1（负控制，改前必须红）：构造一个 suite 日志，其内容无法归因到任何测试文件
       （例如只含 `Could not find '<something>'` 与 `# suite red failed`）。改前：driver 判
       `verdict="insufficient-data-fallback"` **且仍然重派**；改后：同一输入下**不重派**，
       任务进入需人判/基建疑似终态，载体记录该判定与理由。
-- [ ] AC2：连续两轮 suite 日志内容哈希相同 ⇒ 第三轮不得发生。断言：给定两份相同日志的历史，
+      〔实测：pre-fix 驱动换入同一夹具 = 3 次派发 / 理由「重试上限」；post-fix = 2 次 / 理由「基建·契约疑似」；
+      另见 DoD 实测段（真实第三方项目上 1 次派发即停）。用例：`worker-driver-retry-classification.test.mjs`〕
+- [x] AC2：连续两轮 suite 日志内容哈希相同 ⇒ 第三轮不得发生。断言：给定两份相同日志的历史，
       重派计数停在 2。双向控制：两份日志不同时，允许继续（不得因本改动把正常重试也掐死）。
-- [ ] AC3：`insufficient-data-fallback` 与「已归因到具体失败文件」两种 verdict 在**后续动作**上
+      〔实测：哈希判据用例发火且理由点名 sha256；双向控制证「内容不同 ⇒ 该判据不发火」；
+      另有负控制证「已归因的实现缺陷即便日志逐字节相同也照常计数重派」；集成用例派发数停在 2〕
+- [x] AC3：`insufficient-data-fallback` 与「已归因到具体失败文件」两种 verdict 在**后续动作**上
       可区分——静态或运行时断言两者不共用同一条重派分支。
-- [ ] AC4：`loop.test_command` 的契约（quay 附加的内部 flag 清单 + adopter 的容忍义务）出现在
+      〔实测：`decideExitedNotLandedAction` 返回 `kind ∈ {count-and-retry, stop-terminal}`；
+      同一份历史下换 verdict 得不同 kind；调用点按 kind 分叉（源码断言）〕
+- [x] AC4：`loop.test_command` 的契约（quay 附加的内部 flag 清单 + adopter 的容忍义务）出现在
       adopter 可见的文档中，且 `quay-init` 生成的示例/模板体现该防御。断言该文档段落存在且
       逐字列出当前实际附加的 flag 集合（与 `worker-driver.ts` 的 suite 步骤保持一致，
       建议由一条静态检查钉住两者一致，否则又是一处会漂移的双副本）。
-- [ ] AC5：全量 `scripts/test.sh` 绿。
+      〔实测：`plugin/skills/init/SKILL.md` 的 `## loop.test_command contract` 段逐字列出六个 flag；
+      判据从 `defaultMechanicalSuiteCommand()` 的真实 argv 派生该集合（⛔ 不写第二份副本），
+      少写一个 flag 即红；`quay-init` 真实落盘生成的 `.quay/config.yml` 带同一条义务的注记（同一用例断言）〕
+- [ ] AC5：全量 `scripts/test.sh` 绿（待外部：全量套件绿由 fan-in 的 suite 步验证；本层按派发约定不跑全量套件）
 
 ## Definition of Done
 
@@ -116,12 +125,73 @@ adopter 项目，同样的三轮空烧会重演**——因为 driver 的分类�
 观察到：**worker 被派发的次数 ≤ 2**，且任务进入一个明确的、人能看懂的终态
 （而不是继续重派直到重试上限）。fixture 满足不算数（硬规则 4 推论三）。
 
+## DoD 实测（真实第三方项目，⛔ 非 fixture）
+
+**项目**：`quay-fleet`（真实第三方 adopter，非本仓库）。实验在其**副本**上做——原地跑会与该项目
+自己的常驻 driver 抢同一份仓库与 worktree；副本 = 真实代码 + 真实 `.quay/` 生产载体（含该缺陷的
+**真实事故记录**：两轮 suite-red outcome + 两份逐字节相同的 suite 日志）。
+**基线**：副本 develop 固定在 `bb7d71d` —— 事故第一轮（09:59:12Z）那一刻的真实 develop tip；
+其 `scripts/test.sh` 尚未加固（`grep -c buckets = 0`），正是事故的成因版本（加固提交是事后
+`fe2260d`/`8fc7496`）。
+
+**观测（重放真实事故）**：把事故任务 `fleet-agent-sessions-transcript-endpoint` 置回 `ready` 并派发。
+机械 fan-in 真的跑到底并在 **`step=suite`** 红，日志与事故日志 payload 逐字同形：
+
+```
+== quay-fleet test: 1 file(s) ==
+Could not find 'fleet-agent-sessions-transcript-endpoint'
+# tests 0 / # pass 0 / # fail 1 / # cancelled 0
+# suite red failed
+```
+
+（副本新日志 sha256 `b18b32ebbe0e…`（= round 记录里 `suiteLogHash` 的取值）；事故日志 sha256
+`c4deb91183bb…`；两者仅差 quay 后加的 `SUITE-RUN-START` 前导行，payload 逐字节相同。）
+
+**读数**：`dispatches = 1`（≤2 ✓）；`decisions[0].kind = stop-terminal`、`verdict = insufficient-data-fallback`；
+任务终态 `needs-human`（`committed: true`），注记可读并带真因指针：
+
+```
+## Needs-Human
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，
+  ⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file …
+- 失败步/判词：step=suite: # fail 1
+- suite 日志：<绝对路径>
+```
+
+**对照（改前）**：同一夹具换回 pre-fix `worker-driver.ts` 实测派发 **3 次**、注记退化为
+「连续 3 次 exited-not-landed（重试上限）」、无 `exited_not_landed_stops` 载体。
+
+**机制旁证**：宿主过载时 quay 的 runner 会 `SUITE-NOT-RUN`（resource-gate 拒跑）——该日志同样不点名
+任何失败测试文件，本改动把它判为 `stop-terminal` 而非重派，与缺陷陈述的范围（「runner 环境问题」
+亦属「非测试失败的红」）一致。
+
+**⛔ 未被本观测覆盖**：adopter 加固（`fe2260d`）**之后**的项目不再自然复现该 suite 红 ⇒ 「已加固项目」
+这一支由单元/集成用例与负控制（own-defect 路径不受影响）覆盖，不由本实测覆盖。
+
 ## Touches
 
 - plugin/scripts/worker-driver.ts
+- plugin/scripts/quay-init.sh
 - plugin/test/worker-driver-retry-classification.test.mjs
+- plugin/skills/init/SKILL.md
+- docs/analysis/quay-init-closure-ratchet.baseline.json
+- plugin/scripts/config-key-consumer-check.ts
+- plugin/test/config-key-consumer-check.test.mjs
 - tasks/gap-fan-in-suite-red-with-no-attributable-test-still-redispatches-worker.md
 
 ⚠️ `plugin/test/worker-driver-retry-classification.test.mjs` 是**新文件**——同族既有用例都在
 `plugin/test/worker-driver-fan-in.test.mjs`。**若实现者选择把用例并入既有文件，必须同步改上面的 Touches**，
 否则 `--for-task` scoped 门取不到它（声明与实际改动漂移）。
+
+⚠️ AC4 的实现面（`quay-init.sh` 的 config 模板 + `SKILL.md`）与随之必须 re-anchor 的
+`quay-init-closure-ratchet.baseline.json` 亦已登记（`--reanchor` 后 footprint 未涨：3 files / 568 bytes）。
+
+⚠️ `config-key-consumer-check.ts` + 其用例是**连带根因面**（fan-in 首次 suite-red 的真因，⛔ 非测试失败）：
+AC4 的配置注记写在 heredoc `loop:` 块内、`test_command` 上方，而该 checker 的 `extractWriterKeys()`
+把「块内任何非 `  key:` 行」当作块终止 ⇒ 注记**静默截断**了机械派生的键集，
+块内最后一个键 `fork_baseline` 从枚举里消失 ⇒ `host-repo-surface-ratchet` 报
+`FAIL: host-repo surface shrank: {"config_keys_with_consumer":["fork_baseline"]}`（suite 在 static 段红）。
+修法选在**根因处**而非搬走注记：缩进注释不是键、也不结束映射，跳过即可（列 0 注释仍终止，否则扫描会
+越过块尾把下一个顶层块的键也当成 loop 键）；不修则下一个往块内写注记的人会踩同一坑，
+且 `--capture` 会把截断后的集合烘进 baseline ⇒ 两个方向都静默。双向控制见
+`plugin/test/config-key-consumer-check.test.mjs`（缩进注释不截断 + 列 0 注释仍终止 + 空行仍终止）。

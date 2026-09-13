@@ -128,7 +128,9 @@ export interface KindSpec {
   pidSelf: boolean;
   /** run-id 前缀（缺省 run_id = <prefix>-<epoch>）。 */
   runPrefix: string;
-  /** 载体文件（相对 .quay/；首个 = 主载体，作 status 的 carrier_path）。 */
+  /** 载体文件（相对 .quay/）。⛔ 顺序【不是】主载体优先级——status 的 carrier_path 取
+   *  「实际存在的第一个」（见 carrierStats 的 primaryPath）：registry 表把 outcome 排在 round 前，
+   *  但只有同时写两个名字的 workspace 才两个都有；只写新名字的项目取首个会报一个不存在的路径。 */
   carriers: readonly string[];
   /** 载体记录的时间戳键（缺省 ts；quality 的判词载体用 judgedAt——gap-meta-carrierstats）。 */
   tsKey?: string;
@@ -421,11 +423,26 @@ export function resolveMainRoot(root: string): string {
 // tsKey 读（缺省 ts；quality 判词载体用 judgedAt——gap-meta-carrierstats：键不匹配会把停摆伪装成
 // 未查）。quality 载体混两种键（心跳 ts + 判词 judgedAt），读两者较新者——见 gap-meta-round-log-rel。
 
+/** 一个载体的存在性 + 行数分解（Plan 2：让「新旧载体名并存」在读数上可见，⛔ 靠读代码才知道）。 */
+export interface CarrierFileStat {
+  /** 载体 basename（相对 .quay/；registry 表里的名字）。 */
+  name: string;
+  /** 该名字在 .quay/ 下是否存在（fs.existsSync）。 */
+  exists: boolean;
+  /** 该载体自身的行数（wc -l 语义；不存在 ⇒ 0）。 */
+  records: number;
+}
+
 /** 一个 kind 的载体观测结果。 */
 export interface CarrierStats {
   records: number;
   lastTs: string | null;
-  primaryPath: string;
+  /** 首个【实际存在】的载体绝对路径；一个都不存在 ⇒ null。
+   *  ⛔ 不报一个不存在的路径——路径与 records 必须同源同态（硬规则 3b：「读不到」不得与
+   *  「正常读数」同形：有路径 + 有计数 + 有时间戳看起来一切正常，实际谁都没读到）。 */
+  primaryPath: string | null;
+  /** 逐载体分解（哪个存在、哪个没有、各自多少行）。 */
+  files: CarrierFileStat[];
 }
 
 /** 读一个 kind 的全部载体：行数之和 + 末条 ts 最大。读失败/缺失 ⇒ 该载体记 0 条（⛔ 不抛）。 */
@@ -438,19 +455,32 @@ export function carrierStats(root: string, kind: DriverKind): CarrierStats {
   const tsKeys = tsKey === "ts" ? ["ts"] : [tsKey, "ts"];
   let records = 0;
   let lastTs: string | null = null;
-  let primaryPath = "";
-  for (let i = 0; i < spec.carriers.length; i++) {
-    const file = path.join(root, ".quay", spec.carriers[i]);
-    if (i === 0) primaryPath = file;
+  // 主载体 = carriers 中【首个实际存在】的那个，⛔ 不是列表首个（registry 表把 outcome 排在 round 前，
+  // 但这只对「两个名字都写」的 quay 开发检出成立；只用新名字的干净 workspace —— 如第三方项目
+  // quay-fleet —— 只有 <kind>-round.jsonl ⇒ 取首个会报一个不存在的路径，而 records 汇总的是真文件
+  // ⇒ 一个诊断字段谎报自己的来源。见 gap-driver-status-carrier-path-names-first-entry-not-the-existing-one；
+  // 同一现象独立复现于 gap-cross-host-evidence-run-incomplete-and-step-order-makes-ac234-unsatisfiable:73-75）。
+  let primaryPath: string | null = null;
+  const files: CarrierFileStat[] = [];
+  for (const name of spec.carriers) {
+    const file = path.join(root, ".quay", name);
+    const exists = fs.existsSync(file);
+    if (exists && primaryPath === null) primaryPath = file;
     let text: string;
     try {
       text = fs.readFileSync(file, "utf8");
     } catch {
+      files.push({ name, exists, records: 0 });
       continue;
     }
-    if (text === "") continue;
+    if (text === "") {
+      files.push({ name, exists, records: 0 });
+      continue;
+    }
     // wc -l 语义：数换行符（⛔ split("\n").length 会把无尾换行的文件多算 1）。
-    records += (text.match(/\n/g) ?? []).length;
+    const n = (text.match(/\n/g) ?? []).length;
+    records += n;
+    files.push({ name, exists, records: n });
     for (const line of text.split("\n")) {
       if (!line.trim()) continue;
       try {
@@ -465,7 +495,7 @@ export function carrierStats(root: string, kind: DriverKind): CarrierStats {
       }
     }
   }
-  return { records, lastTs, primaryPath };
+  return { records, lastTs, primaryPath, files };
 }
 
 /** 派生状态文件的绝对路径（supervisor 共享的一份路径规则，⛔ kind 差异由 registry 表承载）。 */
@@ -1282,7 +1312,9 @@ export function aliveness(root: string, kind: DriverKind): {
 }
 
 /** status 输出（JSON 与人类可读两态）。alive 与 running 同值（alive 是 AC139-3 字段名，running 保留
- *  backward compat）。 */
+ *  backward compat）。carrier_path / carrier_records / last_record_ts 三者同源（同一个 carrierStats 读数），
+ *  carrier_path 为 null ⇔ 无任何载体存在 ⇔ records=0（⛔ 不报一个不存在的路径——AC1/AC2）。
+ *  carrier_files 是逐载体分解（哪个存在/哪个没有/各多少行）：让「新旧载体名并存」在读数上可见。 */
 export function statusForKind(root: string, kind: DriverKind, json: boolean, out: (s: string) => void): number {
   const spec = DRIVER_KINDS[kind];
   const a = aliveness(root, kind);
@@ -1299,15 +1331,19 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
       carrier_path: stats.primaryPath,
       carrier_records: stats.records,
       last_record_ts: stats.lastTs,
+      carrier_files: stats.files,
       supervisor_started_at: a.supervisorStartedAt,
       supervisor_stale: a.supervisorStale === true ? "stale" : a.supervisorStale === false ? "fresh" : "not-evaluated",
-    }));
+    }) + "\n");
   } else {
     out(
       `${spec.prefix}: kind=${kind} · supervisor pid=${a.supervisorPid ?? "none"} alive=${a.supervisorAlive ? 1 : 0} · ` +
       `driver pid=${a.driverPid ?? "none"} alive=${a.driverAlive ? 1 : 0} · running=${a.running ? 1 : 0} · ` +
       `supervisor_stale=${a.supervisorStale === true ? "stale" : a.supervisorStale === false ? "fresh" : "not-evaluated"} · ` +
-      `carrier_path=${stats.primaryPath} · carrier_records=${stats.records} · last_record_ts=${stats.lastTs ?? "null"}`,
+      // ⛔ 不打印空串：显式 "null"（= 无载体存在），与 last_record_ts 的 null 表达同形（硬规则 3b）。
+      `carrier_path=${stats.primaryPath ?? "null"} · carrier_records=${stats.records} · ` +
+      `last_record_ts=${stats.lastTs ?? "null"} · ` +
+      `carrier_files=${stats.files.map((f) => `${f.name}:${f.exists ? f.records : "missing"}`).join(",")}\n`,
     );
   }
   return 0;
@@ -1328,11 +1364,11 @@ export function livenessForKind(root: string, kind: DriverKind, json: boolean, o
       driver_alive: a.driverAlive ? 1 : 0,
       running: a.running ? 1 : 0,
       deaths,
-    }));
+    }) + "\n");
   } else {
     out(
       `${spec.prefix}-liveness: kind=${kind} · supervisor_alive=${a.supervisorAlive ? 1 : 0} · ` +
-      `driver_alive=${a.driverAlive ? 1 : 0} · running=${a.running ? 1 : 0} · deaths=${deaths}`,
+      `driver_alive=${a.driverAlive ? 1 : 0} · running=${a.running ? 1 : 0} · deaths=${deaths}\n`,
     );
   }
   writeLivenessLog(root, kind, a.deaths, a.supervisorPid, a.driverPid);

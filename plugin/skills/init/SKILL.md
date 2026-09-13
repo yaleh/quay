@@ -68,6 +68,62 @@ Then accept the trust dialog the first time you enter the directory, and restart
 compatibility and now all converge to the same six-file closed set (they no longer select copy
 categories). `--check-drift` / `--check-dependency-closure` are retired (no copy surface to report).
 
+## `loop.test_command` contract (what quay appends to your test entrypoint)
+
+**Read this before writing `scripts/test.sh`.** quay's mechanical fan-in runs the project's suite
+inside the task worktree, and when the project ships its own `scripts/test.sh` quay invokes it with
+its **own value-taking flags appended**:
+
+```
+bash scripts/test.sh --buckets <task-id> --root <worktree> --state-dir <root>/.quay \
+                     --runner inner --log-file <suite-log> --run-id <suite-run-id> \
+                     --test-concurrency=<N>
+```
+
+The flag set above is the real one passed to quay's suite runner (`--buckets` / `--root` /
+`--state-dir` / `--runner` / `--log-file` / `--run-id`), plus `--test-concurrency=<N>` which the
+runner splices into the command it hands to `test.sh`. A project **without** `scripts/test.sh` is
+run as `bash -c "cd <worktree> && <loop.test_command>"` — `loop.test_command` itself never receives
+these flags; only a project-supplied `scripts/test.sh` does.
+
+**Your tolerance obligations** (a violation is not harmless — it burns whole worker sessions):
+
+1. **Consume a value-taking flag together with its value.** `case "$1" in --buckets|--root|…) shift 2 ;;`
+   — shifting only the flag leaves the value behind, it falls through to your positional handling,
+   and it is then read as a *test file name*: `--buckets <task-id>` produced
+   `Could not find '<task-id>'` on every fan-in round in a real adopter project (quay-fleet,
+   2026-09-13, three consecutive rounds with byte-identical logs).
+2. **Never treat a flag's value as a positional test-file argument.** Anything you do not recognize
+   as a flag must not be consumed as a path.
+3. **A positional path that does not exist is an ERROR, not a skip.** Skipping it empties your file
+   list, falls back to the full glob, and makes any criterion naming a missing file pass
+   unconditionally — a green that cannot go red is not a measurement.
+
+A defensive `scripts/test.sh` head (drop-in; `quay-init` writes the same note into the generated
+`.quay/config.yml` next to `loop.test_command`):
+
+```bash
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --for-task) SCOPED="${2:-}"; shift 2 ;;
+    # quay's fan-in passes value-taking flags; drop flag AND value.
+    --buckets|--root|--state-dir|--runner|--log-file|--run-id) shift 2 ;;
+    --test-concurrency=*) shift ;;
+    --allow-thin) shift ;;
+    -*) shift ;;                       # ignore other unknown flags rather than failing the gate
+    *) [ -e "$1" ] || { echo "error: test file not found: $1" >&2; exit 1; }
+       FILES+=("$1"); shift ;;
+  esac
+done
+```
+
+**Why the driver stops instead of retrying**: a suite log that names *no* failing test file cannot
+be fixed by a worker (there is nothing in it to fix — the cause is this contract, not the tested
+code). quay therefore bounds unattributable suite-red retries to **one**, and stops earlier still
+when two consecutive rounds produce byte-identical logs (a retry provably cannot change the
+result), leaving the task in a human-readable `needs-human` terminal state. Keeping the obligations
+above costs one `shift 2`; violating them costs a full agent session per round.
+
 ## Steps
 
 ### 1. Resolve the plugin root
