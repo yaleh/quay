@@ -171,6 +171,28 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/test/ packages/*/test/ experiments/*/test/
   run_checker "test-impl-census-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/test-impl-census-check.ts" --root "${repo_root}"
+  echo "== checked-in-tree write check (gap-suite-glob-universe-fixture-write-toctou) =="
+  # THE INVARIANT: 测试不得在已签入路径下创建或删除条目；一切临时产物落在进程私有临时目录.
+  # Its judge (checked-in-write-check.ts) was built by gap-fixture-dir-write-races-whole-tree-copy
+  # and then NEVER WIRED: `grep -n 'checked-in-write' runner-static-gate.ts` was 0 hits, so the
+  # invariant had no executor in the suite and its SECOND instance survived — a fixture created and
+  # deleted at `plugin/test/__no-group-fixture__.test.mjs`, i.e. INSIDE the SUITE_GLOBS universe
+  # (`plugin/test/*.test.mjs`), so a concurrent enumerator (listSuiteFiles → readFileSync per path in
+  # suite-bucket-reattr-ratchet-check.ts) hit ENOENT and the whole fan-in suite reddened on an
+  # UNRELATED landing task (round 1637, 2026-09-13T11:05:03Z, commit dab664bc4). Registering it here
+  # is what turns the invariant from prose into an executor.
+  # --changed (DELTA-SCOPED), NOT a full sweep: this judge RUNS each input (that is what makes it a
+  # position-based runtime judge rather than the discarded 605-false-positive source scanner), so its
+  # cost is ~1s–60s PER FILE and the corpus is 336 files under plugin/test alone — sweeping it here
+  # would cost more than the suite it guards. Delta is the repo's既定 answer for this shape (the same
+  # `--changed` / `--check-changed` companion convention as it0-split-or-commit-check and
+  # checker-mutation-check): a new or edited test file is judged at its OWN landing. An empty delta
+  # reports NOT-EVALUATED (never PASS) and exits 0 — scoped-safe, because the scoped runner evals raw
+  # commands under `set -euo pipefail` and exit 3 would abort an innocent task whose delta carries no
+  # test file. The full sweep stays available manually: `--dir plugin/test`.
+  # @static-tier change
+  # @static-object plugin/test/ packages/*/test/ experiments/*/test/
+  run_checker "checked-in-write-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/checked-in-write-check.ts" --changed --root "${repo_root}"
   echo "== ## Contract consumer check (gap-dispatch-gate-has-no-checklist-and-no-trace, AC6) =="
   # gap-contract-ratchet-has-no-runner-and-grew-tenfold-unnoticed: this checker had NO runner — its
   # shrink-only ratchet list (docs/analysis/contract-violations.md) grew 1 -> 12 unnoticed because

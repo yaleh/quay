@@ -167,3 +167,67 @@ describe("checked-in-write-check", () => {
     assert.match(r.stdout, /PASS: no checked-in-tree writes/);
   });
 });
+
+// ── the DELTA-SCOPED mode (gap-suite-glob-universe-fixture-write-toctou) ──────────────────────────
+// The three-state arms above pin the JUDGE. These pin the EXECUTOR wiring's input selection, because
+// the defect this mode closes was "the invariant has no executor": the judge was correct and unwired.
+// The property that matters most here is the one 硬规则 3b names — an EMPTY delta must not print PASS
+// (a check that cannot fail is more expensive than no check), and because the scoped runner evals
+// these commands under `set -euo pipefail`, that NOT-EVALUATED must still exit 0.
+describe("checked-in-write-check --changed (delta-scoped)", () => {
+  /** A throwable-away git repo that looks enough like the judged root for `--changed` to select from. */
+  function mkGitRoot(t) {
+    const root = mkFakeRoot(t);
+    fs.mkdirSync(path.join(root, "plugin", "test"), { recursive: true });
+    const g = (...args) => {
+      const r = spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+      assert.equal(r.status, 0, `git ${args.join(" ")} failed: ${r.stderr}`);
+    };
+    g("init", "-q", "-b", "master");
+    g("-c", "user.email=ciw@local", "-c", "user.name=ciw", "add", "-A");
+    g("-c", "user.email=ciw@local", "-c", "user.name=ciw", "commit", "-q", "-m", "base");
+    return root;
+  }
+
+  it("--changed NOT-EVALUATED + exit 0: a delta with no test file is never PASS", (t) => {
+    const root = mkGitRoot(t);
+    fs.writeFileSync(path.join(root, "NOTE.md"), "x\n");
+    const r = runChecker(["--root", root, "--changed"]);
+    assert.equal(r.status, 0, `scoped-safe exit 0 expected, got ${r.status}\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stderr, /^NOT-EVALUATED: /m, `an empty delta must say NOT-EVALUATED, not PASS:\n${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /nothing was judged/);
+    assert.doesNotMatch(r.stdout, /^PASS/m, "an empty delta must never print PASS");
+  });
+
+  it("--changed GREEN: the delta's only test file writes outside the tree", (t) => {
+    const root = mkGitRoot(t);
+    fs.writeFileSync(
+      path.join(root, "plugin", "test", "delta-clean.test.mjs"),
+      `import fs from "node:fs";\nimport os from "node:os";\nimport path from "node:path";\nconst d = fs.mkdtempSync(path.join(os.tmpdir(), "ciw-d-"))\nfs.writeFileSync(path.join(d, "e"), "x")\nfs.rmSync(d, { recursive: true, force: true })\n`,
+    );
+    const r = runChecker(["--root", root, "--changed"]);
+    assert.equal(r.status, 0, `expected exit 0, got ${r.status}\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stdout, /PASS: no checked-in-tree writes/);
+    assert.match(r.stdout, /delta against master/, "the resolved base is reported");
+  });
+
+  it("--changed RED: the delta carries a fixture created+deleted under the judged tree", (t) => {
+    const root = mkGitRoot(t);
+    const rel = "plugin/test/__no-group-fixture__.test.mjs";
+    fs.writeFileSync(
+      path.join(root, rel),
+      `import fs from "node:fs";\nfs.writeFileSync(${JSON.stringify(rel)}, "// fixture\\n")\nfs.rmSync(${JSON.stringify(rel)}, { force: true })\n`,
+    );
+    const r = runChecker(["--root", root, "--changed"]);
+    assert.equal(r.status, 1, `expected exit 1, got ${r.status}\n${r.stdout}\n${r.stderr}`);
+    assert.ok(r.stderr.includes(rel), `the landing path is named:\n${r.stderr}`);
+    assert.equal(fs.existsSync(path.join(root, rel)), false, "the judged input cleaned up after itself");
+  });
+
+  it("--changed refuses --files/--dir (it selects its own inputs)", (t) => {
+    const root = mkGitRoot(t);
+    const r = runChecker(["--root", root, "--changed", "--files", path.join(root, "plugin", "test", "delta-clean.test.mjs")]);
+    assert.equal(r.status, 2, `expected exit 2, got ${r.status}\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stderr, /cannot be combined with --files\/--dir/);
+  });
+});

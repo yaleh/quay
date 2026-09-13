@@ -2,7 +2,7 @@
 id: gap-suite-glob-universe-fixture-write-toctou
 title: 已宣告的「测试不得写入已签入路径」不变式没有执行者：第二个实例活在 suite glob 宇宙里（judge 判红但未登记），并发枚举者被
   TOCTOU 判成 suite 红
-status: ready
+status: done
 labels:
   - gap
 parent: null
