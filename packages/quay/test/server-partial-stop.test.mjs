@@ -294,3 +294,76 @@ test("§6.9-3 — `driver:<kind>` services are recognised and delegate; a stoppe
   assert.equal(bogus.code, 1);
   assert.match(bogus.stderr, /unknown service name/);
 });
+
+// ── the OTHER direction: a plain `server.close()` still ends the whole host ───────────────────────
+//
+// §6.9-2 above pins「部分停止不波及其余」. The mirror half is just as load-bearing and is what the
+// pre-AC-254 contract (packages/quay/test/serve.test.mjs, 12 call sites; the `--watch`/SIGINT path)
+// depends on: an IN-PROCESS caller that closes the server `startServer` returned is ending the HOST,
+// so the carrier is retired and the control face is closed with it.
+//
+// ⛔ These two directions close the SAME `http.Server`, so an implementation that satisfies one by
+// construction breaks the other — measured 2026-09-13, both ways:
+//   · retire on every close  ⇒ a partial stop kills control (that is §6.9-2 going red);
+//   · retire on no close     ⇒ the control socket is never released and `serve.test.mjs` prints
+//                              "All QN-031 serve/action regression tests passed." and then hangs
+//                              forever (measured 4 286 177 ms before the suite's watchdog fired).
+// `serve.test.mjs` can only see the second shape as a HANG, which is why this test asserts the
+// positive reading directly: the child process must actually EXIT.
+test("§6.9-1 mirror — a plain `server.close()` ends the host (the process exits; control is retired)", async (t) => {
+  const ws = makeWorkspace("ac254-plain-close");
+  t.after(() => fs.rmSync(ws, { recursive: true, force: true }));
+
+  // An in-process owner script: start the real unified host, print its carrier, then close it the
+  // way every pre-existing caller does and STOP holding the loop open. It runs as its own process so
+  // "the event loop drained" is observable as `exit` rather than inferred.
+  const script = [
+    `const { once } = await import("node:events");`,
+    `const { startServer } = await import(${JSON.stringify(path.join(__dirname, "..", "..", "quay", "src", "serve.ts"))});`,
+    `const src = await startServer({ port: 0, host: "127.0.0.1" });`,
+    `const st = JSON.parse(await import("node:fs").then((fs) => fs.readFileSync(".quay/server.json", "utf8")));`,
+    `console.log("READY " + JSON.stringify({ pid: st.pid, control: st.services.find((s) => s.name === "control").port }));`,
+    // Handshake: close only when the PARENT says so. Without it the owner races ahead and has
+    // already retired the host by the time the parent's first probe lands — the probe then reads
+    // "refused" and the failure looks like a broken control face instead of a test that never
+    // observed the up state (measured 2026-09-13: stdout showed READY and CLOSED already both out).
+    `process.stdin.resume();`, // a paused stdin never emits 'end'; resume() is what lets the handshake land
+    `await once(process.stdin, "end");`,
+    // The pre-AC-254 teardown, verbatim: close the server, close the provider client, hold nothing.
+    `await new Promise((r) => src.close(r));`,
+    `if (src.client) await src.client.close();`,
+    `console.log("CLOSED");`,
+  ].join("\n");
+  const owner = spawn(process.execPath, ["--no-warnings", "--experimental-strip-types", "-e", script], {
+    cwd: ws,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  t.after(() => owner.kill("SIGKILL"));
+  let out = "";
+  let err = "";
+  owner.stdout.on("data", (c) => (out += c));
+  owner.stderr.on("data", (c) => (err += c));
+  let ready = null;
+  for (const deadline = Date.now() + START_TIMEOUT_MS; Date.now() < deadline && ready === null; ) {
+    ready = /READY (\{.*\})/.exec(out);
+    if (ready === null) await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.ok(ready, `the in-process host started and published its carrier (stderr: ${err})`);
+  const { pid, control } = JSON.parse(ready[1]);
+  assert.equal(pid, owner.pid, "the carrier names the owner process");
+  assert.equal(await controlAnswers("127.0.0.1", control), true, `control answers while the host is up (port ${control}; stdout: ${JSON.stringify(out.slice(-300))}; stderr: ${JSON.stringify(err.slice(-300))})`);
+
+  // Tell the owner to run its teardown, then read the outcome: the owner EXITS on its own — i.e. the
+  // event loop drained, so nothing (control's listening socket above all) was left holding it. A
+  // timeout here is the regression, and it is a failure rather than a hang because the assertion
+  // owns the deadline.
+  owner.stdin.end();
+  const exited = await Promise.race([
+    new Promise((r) => owner.once("exit", (code) => r(code))),
+    new Promise((r) => setTimeout(() => r("TIMEOUT"), 30000)),
+  ]);
+  assert.notEqual(exited, "TIMEOUT", `the owner exited after a plain server.close() (still alive; stdout tail: ${JSON.stringify(out.slice(-200))})`);
+  assert.equal(exited, 0, "and it exited cleanly");
+  assert.match(out, /CLOSED/, "it reached the end of its own teardown");
+  assert.equal(await controlAnswers("127.0.0.1", control), false, "control's socket really was released with the host");
+})

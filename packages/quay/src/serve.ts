@@ -535,6 +535,27 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
   let controlHandle: ControlPlaneHandle | null = control;
   let controlBoundPort = control.port;
   let shuttingDown = false;
+  /**
+   * True only for the synchronously-scoped `close()` that `stopWebFace` issues on a PARTIAL stop.
+   *
+   * This flag is what keeps §6.9 不变式 2 (partial stop leaves the host — and therefore its carrier
+   * and control face — alive) from colliding with the pre-AC-254 contract every existing in-process
+   * caller still relies on (`server.close()` ends the whole host, so `quay serve` exits). Both close
+   * the SAME `http.Server`, so the act alone cannot be told apart; the caller's intent must be said
+   * explicitly, and this says it.
+   *
+   * ⛔ Dropping one of the two halves is not a style choice — measured 2026-09-13, each direction
+   * fails a different, real check:
+   *   · retire on EVERY close ⇒ a partial stop retires the carrier of a live host (a running host
+   *     reported NOT-RUNNING) and kills the control face — 「波及其他服务」, the exact failure §6.9
+   *     excludes, and AC-254's own record would be meaningless;
+   *   · retire on NO close ⇒ the control-plane listening socket is never released at the end of a
+   *     plain `server.close()`, so the event loop never drains: `packages/quay/test/serve.test.mjs`
+   *     printed "All QN-031 serve/action regression tests passed." and then hung forever under
+   *     `node --test` (measured: 4 286 177 ms, "Promise resolution is still pending but the event
+   *     loop has already resolved" — the 71-minute scoped-gate stall).
+   */
+  let partialWebClose = false;
 
   /** Publish §6.5's carrier from the LIVE service set. A service that is down keeps its last bound
    *  port (so a reader can still probe it and read "down" instead of "unknown") and gains
@@ -559,7 +580,17 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
     if (typeof (s as http.Server & { closeAllConnections?: () => void }).closeAllConnections === "function") {
       (s as http.Server & { closeAllConnections: () => void }).closeAllConnections();
     }
-    await new Promise<void>((resolve) => s.close(() => resolve()));
+    // Marked as PARTIAL for exactly the span of this close. `s.close(cb)` registers `cb` as a
+    // `once("close")` listener, so the host's handler (registered in `startServer`, long before this
+    // call) runs FIRST and sees the mark; `cb` then clears it. See `partialWebClose` for why the two
+    // directions are both load-bearing.
+    partialWebClose = true;
+    await new Promise<void>((resolve) =>
+      s.close(() => {
+        partialWebClose = false;
+        resolve();
+      }),
+    );
   }
 
   async function startWebFace(): Promise<void> {
@@ -626,9 +657,10 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
   /**
    * The host's own shutdown: close every hosted face, retire the carrier, stop reconciling.
    *
-   * ⛔ NOT tied to `server.on("close")` any more (AC-254): closing the web face is now a NORMAL,
-   * partial operation that leaves the host alive, so retiring the carrier on it would report a
-   * running host as NOT-RUNNING. Retirement belongs to the host's own end.
+   * ⛔ NOT tied to EVERY `server.on("close")` (AC-254): closing the web face is now a NORMAL, partial
+   * operation that leaves the host alive, so retiring the carrier on it would report a running host
+   * as NOT-RUNNING. Retirement belongs to the host's own end — which the close handler below
+   * distinguishes from a partial stop via `partialWebClose`.
    */
   async function shutdownHost(): Promise<void> {
     if (shuttingDown) return;
@@ -642,6 +674,21 @@ export async function startServer({ port = 4173, host = "0.0.0.0", accessLogPath
       removeServerState(root);
     }
   }
+
+  // An UNMARKED close of the server this function returns is the WHOLE host ending — retire the
+  // carrier and the control face with it, so `quay serve` exits and `quay server status` reports
+  // NOT-RUNNING instead of reading a leftover file lying about a stopped server. This is the
+  // pre-AC-254 contract every existing in-process caller still depends on: `packages/quay/test/
+  // serve.test.mjs` (12 call sites) and the `--watch`/supervisor SIGINT path both use it, and
+  // without it the control-plane socket keeps the event loop alive forever.
+  //
+  // A MARKED close (`stopWebFace` on a partial stop) returns here without retiring anything: the
+  // host — and its control face — is exactly what §6.9 不变式 2 says must survive `stop --only web`.
+  // See `partialWebClose` for the measured failure on each side.
+  server.on("close", () => {
+    if (partialWebClose) return;
+    void shutdownHost();
+  });
 
   // ── Publish the carrier, then apply the launch-time service set (GOAL-017/AC-251 & AC-254) ─────
   // Both services carry THIS process's pid — that identity is not decoration, it is the reading
