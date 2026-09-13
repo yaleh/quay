@@ -82,7 +82,7 @@ session-schema.mjs     82 行  validateSessionRecord
 - `plugin/scripts/primitives-drift-check.ts` (new) + 其 capability-catalog 声明 + outline/runner-static-gate 注册 + laydown 表三处登记
 - `plugin/test/session-primitives-adoption.test.mjs` (new)（逐模块消费者 + 手写副本归零 + fleet SHA 比对 + 折叠记录负控制）
 - `plugin/test/primitives-drift-check.test.mjs` (new)（三态，含 exit 3 NOT-EVALUATED）
-- `plugin/vendor/quay/dist/`（若构建产物字节变化则一并声明与提交；具体文件以构建输出清单为准）
+- `plugin/vendor/quay/dist/quay.js`（若构建产物字节变化则一并声明与提交；`dist/` 下仅此一个产物文件，以构建输出清单为准）
 - `tasks/gap-ac253-session-primitives-shared-layer-adoption.md`（自身文件：勾 AC + 贴实跑证据）
 
 ## AC
