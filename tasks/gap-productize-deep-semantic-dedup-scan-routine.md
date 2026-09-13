@@ -35,6 +35,8 @@ extra:
 | `.quay/config.yml`（gitignored，工作区本地） | 声明 `semantic-dedup-scan` = `trigger: interval:1440m` + `probe: semantic-dedup-scan`；写明四条 legacy `every(N)` 为何不由本轨道承接。⚠️ 该文件**不进 git**，且 `refresh-worktree-quay.sh` 会用主检出那份覆盖 worktree 那份 ⇒ 已同时写入主检出那份（生产 driver 读的是它） |
 | `plugin/skills/routines/SKILL.md` | 开篇指明两层 driver 架构下的**机械通道**（本任务落的），本文件的手工通道保留给没有该 driver 的用法；两通道不得同时驱动同一 routine |
 
+**第二轮补（2026-09-13 晚 —— 上一轮 fan-in 停在 scoped-gate 的唯一原因）**：`rhythm-consumer-check` 判据2 报 `probe-routine.ts: 按需 without a CONSUMER row — 「按需」=「无人」` 与 `probe-write-guard.ts:` 同款 ⇒ 两个新脚本的 catalog 声明只补了 5 张表，**漏了第六张 `CONSUMER`**（`QUESTION`/`CADENCE`/`INVALIDATION`/`LAST_REAFFIRMED`/`MATCHING` 都在，`--entry-surface` 也不报红，所以上一轮自己没发现）。**修法是声明真实按者，不是改 cadence 标签**——把它们标成「每轮」是把标签改得好看而不是把接线说清楚：`probe-routine.ts` 的按者是 `quality-gate-driver.ts` 的 Layer-1b 例程环（每趟 pass 用 `driver-runtime.scheduleIsDue` 对 `interval:<N>m` 判 due，due 才 spawn），`probe-write-guard.ts` 的按者是 `meta-driver.ts`（原地 re-export）与 `probe-routine.ts` 的 FILE-ONLY 守卫。改后判据2 = `97 judged, 0 violation(s)`，判据1/3 不变，整个 `rhythm-consumer-check: OK`（exit 0）。
+
 ## Acceptance Criteria
 
 - [x] AC1: 新增或扩展一个 routine 条目(沿用/替换 `.quay/config.yml` `loop.routines:` 里已有的 `architecture-analysis`,或新增一个如 `semantic-dedup-scan`),触发方式用 `plugin/scripts/routine-scheduler.ts` 已有的 `interval:<N>m` 两层时间量机制(不是热路径闸)。命令验证:`node --experimental-strip-types plugin/scripts/routine-scheduler.ts --now <未来时刻的 epoch-ms> --last-run <空或陈旧 last-run.json>` 的输出里出现该 routine 名与 `probe <name>` 派发行。
@@ -57,7 +59,7 @@ extra:
 
 - [x] AC3(负控制,呼应 `gap-fan-in-remove-archguard-gate` 的教训): 该 routine 不得挂进 fan-in/scoped-gate 等每任务必经的关键路径——验证:`grep -rn "semantic-dedup-scan\|SemanticDedupScan"` 在 `plugin/scripts/worker-driver.ts` 及 fan-in 编排相关文件里命中数必须为 0。
       **证据（逐文件计数，全部 0）**：`plugin/scripts/worker-driver.ts` 0 · `plugin/scripts/full-suite-runner.ts` 0 · `plugin/scripts/suite-driver.ts` 0 · `scripts/test.sh` 0 · `packages/quay/src/fan-in/ff-merge.ts` 0 · `grep -rn <pattern> packages/quay/src/fan-in/ scripts/` ⇒ 0。
-      全仓 `semantic-dedup-scan` 的**唯一**代码命中是 `plugin/scripts/probe-routine.ts`（模块自身的注释指向探针文件）加两个测试文件；承载它的 `quality-gate-driver.ts` 里**没有**这个名字（它按声明通用装配）⇒ 结构性证据：唯一消费者是例程型 driver 的例程表，该表与 fan-in/scoped-gate 无任何调用关系。证据文件：`.quay/ac3-negative-control.txt`。
+      全仓 `semantic-dedup-scan` 的代码命中只有三类，**没有一类是接线**：`plugin/scripts/probe-routine.ts`（模块自身注释指向探针文件）；`plugin/scripts/capability-catalog.sh` 2 行 catalog 元数据（QUESTION 行的任务 id、INVALIDATION 行的探针文件名）；两个测试文件（`plugin/test/probe-routine.test.mjs`、`plugin/test/quality-gate-driver.test.mjs`）。承载它的 `quality-gate-driver.ts` 里**没有**这个名字（它按声明通用装配）⇒ 结构性证据：唯一消费者是例程型 driver 的例程表，该表与 fan-in/scoped-gate 无任何调用关系。（2026-09-13 第二轮更正：首轮此句写的是「唯一代码命中是 probe-routine.ts 加两个测试文件」，那时 catalog 的 2 行元数据确实还不存在；合并 develop 后重跑逐文件计数仍全 0。）证据文件：`.quay/ac3-negative-control.txt`。
 
 - [x] AC4(生产载体读数): 该 routine 落地并接入一个当前确实存在生产调用点的触发路径(AC1 已核实/修复的那个)后,实际发生过至少一轮真实调度(非测试 fixture 注入),产出至少 1 条结构化 finding 记录在某可查载体(建议 `.quay/routine-findings.jsonl` 或等效追加文件),且该记录的时间戳/commit 晚于本任务实现落地的 commit——验证:比较载体记录与 `git log -1 --format=%H -- <实现文件>`。若把该 routine 的生产调用点摘掉后同一条 AC4 记录仍然存在(说明记录只是测试跑出来的,不是生产真跑的),本 AC 判假。
       **生产调用点**：`quality-gate-driver.ts` 的 Layer-1b 例程表（常驻例程型 driver，生产 run_id `qg-prod-*`，本机实测在主检出常驻运行）。入口/命令：`node --experimental-strip-types plugin/scripts/quality-gate-driver.ts --root <worktree> --once --run-id <id> --json`。
@@ -85,7 +87,7 @@ extra:
 - plugin/scripts/probe-write-guard.ts（新：FILE-ONLY 守卫，从 meta-driver 提出）
 - plugin/scripts/meta-driver.ts（守卫改 re-export，实现搬到上面那份）
 - plugin/scripts/quality-gate-driver.ts（例程表装配声明式 probe 例程 + 两个测试/运维缝）
-- plugin/scripts/capability-catalog.sh（两个新脚本的 5 张表声明；该 catalog 自己的 AC1c 门先报红）
+- plugin/scripts/capability-catalog.sh（两个新脚本的 6 张表声明，**含 CONSUMER**——首轮只补了 5 张，漏 CONSUMER ⇒ `rhythm-consumer-check` 判据2 RED，即上一轮 fan-in scoped-gate exit 1 的唯一原因；本轮补上）
 - plugin/skills/routines/SKILL.md（指明机械通道 vs 手工通道）
 - plugin/test/probe-routine.test.mjs（新：11 例，含 no-drift 与四个负控制）
 - plugin/test/quality-gate-driver.test.mjs（`--once` 用例改空工作区 root + mkdtemp 配对）
