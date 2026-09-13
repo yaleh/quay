@@ -2,7 +2,7 @@
 id: gap-crash-watchdog-round-ledger-not-written
 title: 不可捕获地死掉的 runner（外部 SIGKILL / OOM）在 verification-round.jsonl 零行，而
   full-suite-state.json 已诚实写 reason=crashed —— 同族第四条路径
-status: todo
+status: ready
 labels:
   - gap
 parent: null
