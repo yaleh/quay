@@ -623,6 +623,18 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/capability-catalog.sh plugin/scripts/rhythm-consumer-check.ts plugin/test/rhythm-consumer-check.test.mjs scripts/test.sh orchestration/*-tick-core.md plugin/loop/*-tick-core.md
   run_checker "rhythm-consumer-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/rhythm-consumer-check.ts" --check --root "${repo_root}"
+  echo "== gitignore runtime-artifact coverage check (gap-quay-init-gitignore-misses-quay-runtime-artifacts-outside-dot-quay) =="
+  # The anti-drift binding for the SINGLE SOURCE of quay's runtime-artifact ignore list: the patterns
+  # quay MARKS in its own .gitignore (a comment line carrying "@quay-runtime-artifact" directly above
+  # the pattern) must equal the patterns of plugin/scripts/quay-runtime-artifacts.txt — the manifest
+  # quay-init writes into a consumer project's .gitignore and the fan-in ff reads for its clean-tree
+  # judgment. Drift REDs in either direction: marked-but-unabsent ⇒ quay-init would not ignore it in a
+  # consumer project (the measured quay-fleet defect: a 55/55-green task whose ff could never land);
+  # present-but-unmarked ⇒ an unreferenced rule nobody can trace. An unreadable manifest is
+  # NOT-EVALUATED (exit 3) — never conflated with "no drift" (硬规则 3b).
+  # @static-tier change
+  # @static-object .gitignore plugin/scripts/quay-runtime-artifacts.txt plugin/scripts/gitignore-runtime-coverage-check.ts plugin/test/gitignore-runtime-coverage-check.test.mjs
+  run_checker "gitignore-runtime-coverage-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/gitignore-runtime-coverage-check.ts" --root "${repo_root}"
   echo "== test-file-snapshot relative-baseline check (gap-test-file-snapshot-no-production-caller, AC1) =="
   # The 「删测试文件必红」 relative-baseline criterion — a COMMITTED repo-relative baseline
   # (docs/analysis/test-file-baseline.txt) records the canonical test-file set

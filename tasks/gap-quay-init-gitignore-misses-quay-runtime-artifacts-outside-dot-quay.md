@@ -2,7 +2,7 @@
 id: gap-quay-init-gitignore-misses-quay-runtime-artifacts-outside-dot-quay
 title: quay-init 的 .gitignore 只覆盖 .quay/，遗漏 quay 自己写到别处的运行时产物 —— 污染工作树后 fan-in 的
   ff 永久失败
-status: ready
+status: done
 labels:
   - gap
   - defect
