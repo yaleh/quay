@@ -197,5 +197,6 @@ The init skill is a SPEC declaration point (`spec-declaration-point-check`): eve
 <!-- reference-doc: orchestration/SPEC-tmux-retirement-2026-09-03.md -->
 <!-- reference-doc: orchestration/SPEC-typed-axes-and-standing-dynamics.md -->
 <!-- reference-doc: orchestration/SPEC-unified-driver-architecture-2026-08-23.md -->
+<!-- reference-doc: orchestration/SPEC-unified-quay-server-2026-09-13.md -->
 <!-- reference-doc: orchestration/SPEC-web-session-observability-and-control-2026-08-24.md -->
 <!-- reference-doc: orchestration/SPEC-worker-driven-inner-2026-08-16.md -->
