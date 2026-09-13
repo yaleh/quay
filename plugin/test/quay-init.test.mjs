@@ -516,7 +516,16 @@ test("AC3 — a byte-current .quay/runtime/ + an already-absolute mcp_entry: the
   try {
     makeLegacyWs(ws, {
       stale: false,
-      config: `providers:\n  native:\n    enabled: true\n    path: "${ws}/.quay/runtime"\n    tasks_dir: "./tasks"\n    mcp_entry: ["node", "${ws}/.quay/runtime/bin/quay-native.js", "mcp"]\nloop:\n  repo_root: "${ws}"\n  test_command: node --test\n  tmux_session: proj-0:0.0\n  worktree_root: ${wt}\n`,
+      // The fixture must be CURRENT IN BOTH RESPECTS for "nothing needs fixing" to be true, so the
+      // byte-identity assertion below keeps its power instead of measuring a fixture that is merely
+      // out of date: (1) the runtime copy is byte-identical to the delivery and the binding is
+      // already absolute (the AC3 premise), and (2) the four carrier-dir pins are present. Gap
+      // gap-quay-init-omits-adr-goal-meta-dir-env-third-party-leak added the carrier pins to the
+      // upgrade path (`ensure_provider_carrier_env`), so a config missing them is now a project that
+      // DOES need something — asserting byte-identity over it would be asserting that the backfill
+      // never happens. That backfill's own contract (idempotent, minimal, no gratuitous rewrite) is
+      // pinned in plugin/test/quay-init-config-env-keys.test.mjs.
+      config: `providers:\n  native:\n    enabled: true\n    path: "${ws}/.quay/runtime"\n    tasks_dir: "./tasks"\n    mcp_entry: ["node", "${ws}/.quay/runtime/bin/quay-native.js", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "./tasks"\n      QUAY_NATIVE_ADR_DIR: "./adr"\n      QUAY_NATIVE_GOAL_DIR: "./goals"\n      QUAY_NATIVE_META_DIR: "./meta"\nloop:\n  repo_root: "${ws}"\n  test_command: node --test\n  tmux_session: proj-0:0.0\n  worktree_root: ${wt}\n`,
     });
     const rt = path.join(ws, ".quay", "runtime");
     const cfgPath = path.join(ws, ".quay", "config.yml");
