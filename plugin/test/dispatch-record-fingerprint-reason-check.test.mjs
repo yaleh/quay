@@ -225,3 +225,97 @@ test("writer appends to the exact runtime log path and can be read back", () => 
   assert.equal(lines.length, 1);
   assert.equal(JSON.parse(lines[0]).taskId, "gap-append");
 });
+
+// ── PROMOTION REGRESSION (tasks/gap-correctness-checkers-opt-in-not-default-suite-member) ───────────
+//
+// This checker used to live in run_operational_checks() — the OPT-IN tier whose only invocation was a
+// human typing `scripts/test.sh --static-checks-operational`. Measured 2026-09-13: ZERO automatic
+// callers anywhere in the repo. And this checker is the ONLY post-hoc detector for the one shape the
+// writer deliberately does NOT block — dispatch-record.ts:157 fails closed on a missing/thin REASON
+// but only WARNS on an uncomputable FINGERPRINT (:164-168), so an empty-fingerprint record CAN land
+// on disk. "The checker exists" and "the checker runs" had drifted apart.
+//
+// It is now registered in run_static_checks() — the default full-suite gate (⇒ every fan-in), reading
+// the MAIN checkout's carrier via --root main_root so the worktree/fan-in path is not vacuous.
+//
+// These tests pin the registration AND that the REGISTERED argv — read out of the live gate file,
+// never restated here — still goes RED on a record whose fingerprint was stripped. A check that is
+// wired but never evaluates is the same defect class one layer up (硬规则 3b).
+
+const GATE_FILE = path.join(repoRoot, "plugin", "scripts", "runner-static-gate.ts");
+
+/** The flag list of the gate's registered `run_checker "<name>"` line inside `fnName`'s body.
+ *  SINGLE SOURCE: the test never restates the flags — it reads what the gate actually runs, so a
+ *  future edit to the wiring (e.g. dropping --root main_root) is what this test judges. */
+function registeredCheckerFlags(name, fnName) {
+  const text = fs.readFileSync(GATE_FILE, "utf8");
+  const start = text.indexOf(`${fnName}() {`);
+  assert.ok(start >= 0, `${fnName}() must exist in runner-static-gate.ts`);
+  const body = text.slice(start, text.indexOf("\n}\n", start));
+  const line = body.split("\n").find((l) => l.includes(`run_checker "${name}"`));
+  assert.ok(line, `${name} must be registered in ${fnName}()`);
+  const flags = line.replace(/^.*?\.ts"\s*/, "");
+  assert.notEqual(flags, line.trim(), "the registered line must name a .ts script");
+  return flags.trim();
+}
+
+/** Run the checker with the gate's own registered flags, but with the root redirected to `dir`
+ *  (the gate's root variables are shell paths; a test cannot satisfy them, so only the ROOT is
+ *  substituted — every other flag is verbatim from the gate). */
+function runRegisteredFlags(name, fnName, dir) {
+  const flags = registeredCheckerFlags(name, fnName)
+    .replaceAll('"${main_root}"', JSON.stringify(dir))
+    .replaceAll('"${repo_root}"', JSON.stringify(dir))
+    .replaceAll("${main_root}", dir)
+    .replaceAll("${repo_root}", dir);
+  const argv = flags.match(/"[^"]*"|\S+/g).map((s) => s.replace(/^"|"$/g, ""));
+  return spawnSync("node", ["--no-warnings", "--experimental-strip-types", CHECKER_CLI, ...argv], { encoding: "utf8" });
+}
+
+test("PROMOTED: the checker is registered in run_static_checks() (default gate) and NOT in the opt-in operational tier", () => {
+  const text = fs.readFileSync(GATE_FILE, "utf8");
+  const bodyOf = (fn) => {
+    const start = text.indexOf(`${fn}() {`);
+    assert.ok(start >= 0, `${fn}() must exist`);
+    return text.slice(start, text.indexOf("\n}\n", start));
+  };
+  assert.ok(
+    bodyOf("run_static_checks").includes('run_checker "dispatch-record-fingerprint-reason-check"'),
+    "the fingerprint checker must be registered in run_static_checks (the default full-suite gate)",
+  );
+  assert.ok(
+    !bodyOf("run_operational_checks").includes('run_checker "dispatch-record-fingerprint-reason-check"'),
+    "it must NOT also sit in run_operational_checks — the opt-in tier has no automatic caller",
+  );
+  assert.match(
+    registeredCheckerFlags("dispatch-record-fingerprint-reason-check", "run_static_checks"),
+    /--root\s+"?\$\{main_root\}/,
+    "the registered --root must be main_root: orchestration/dispatch-record.jsonl is MAIN-checkout " +
+      "gitignored runtime state, absent from the one-shot verify worktree — with repo_root the check " +
+      "would be vacuous in exactly the fan-in path that matters",
+  );
+});
+
+test("NEGATIVE CONTROL on the REGISTERED argv: a real record whose fingerprint was stripped still goes RED", () => {
+  const dir = makeWorkspace("promoted-red");
+  const added = runWriter([
+    "--add", "--task-id", "gap-promoted-needle", "--reason",
+    "覆盖段本阶段 AC55 优先——与阶段目标直接相关", "--root", dir,
+  ]);
+  assert.equal(added.status, 0, `writer must produce a real record:\n${added.stdout}${added.stderr}`);
+  const file = path.join(dir, RECORD_FILE_REL);
+  assert.equal(runRegisteredFlags("dispatch-record-fingerprint-reason-check", "run_static_checks", dir).status, 0,
+    "GREEN baseline: the registered argv must pass on a well-formed real record");
+
+  // INJECT the exact shape the writer lets through (it only WARNS on an uncomputable fingerprint).
+  const before = fs.readFileSync(file, "utf8");
+  const stripped = before.replace(/,"preferenceFingerprint":"[0-9a-f]{40}"/, "");
+  assert.notEqual(stripped, before, "the fixture must actually lose its fingerprint field");
+  fs.writeFileSync(file, stripped, "utf8");
+
+  const red = runRegisteredFlags("dispatch-record-fingerprint-reason-check", "run_static_checks", dir);
+  assert.equal(red.status, 1,
+    `the REGISTERED argv must RED on an empty-fingerprint record (a wired-but-never-evaluating check ` +
+      `is the defect this promotion cures):\n${red.stdout}${red.stderr}`);
+  assert.match(red.stdout + red.stderr, /fingerprint/i, "the RED output must name the missing fingerprint");
+});
