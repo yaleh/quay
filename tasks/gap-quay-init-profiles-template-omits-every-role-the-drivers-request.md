@@ -156,9 +156,13 @@ env: {CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"}}`。
 ## Touches
 
 - packages/quay/src/init.ts
+- packages/quay/test/init.test.mjs
 - plugin/.quay/profiles.yml
 - plugin/scripts/quay-init.sh
 - plugin/scripts/profiles-role-coverage-check.ts
+- plugin/scripts/capability-catalog.sh
+- plugin/scripts/runner-static-gate.ts
+- plugin/scripts/checker-mutation-cases/profiles-role-coverage-check.sh
 - plugin/test/profiles-role-coverage-check.test.mjs
 - tasks/gap-quay-init-profiles-template-omits-every-role-the-drivers-request.md
 
