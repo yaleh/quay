@@ -37,7 +37,7 @@ web    curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4173/health ⇒ 2
        meta round=489 run_id=mt-prod-1788972492 ts=15:02:51Z（六 kind 全新鲜）
 ```
 
-⇒ 三层缺口叠加：**① 载体的 wender 不存在**（`.quay/unified-server-verification.jsonl` 从未被创建，该 AC 自诞生起未跑过）；**② 生产者不存在**（全仓 `grep -rn 'unified-server-verification' plugin/ packages/` ⇒ 0 命中）；**③ CLI 面不存在**（SPEC §6.9 的四个动词里 `status` 属阶段 A2/AC-251，`start`/`add`/`stop` 属本阶段 B，今天一个都没有）。三者都不满足 ⇒ 判据结构上必然取假。
+⇒ 三层缺口叠加：**① 载体不存在**（`.quay/unified-server-verification.jsonl` 从未被创建，该 AC 自诞生起未跑过）；**② 生产者不存在**（全仓 `grep -rn 'unified-server-verification' plugin/ packages/` ⇒ 0 命中）；**③ CLI 面不存在**（SPEC §6.9 的四个动词里 `status` 属阶段 A2/AC-251，`start`/`add`/`stop` 属本阶段 B，今天一个都没有）。三者都不满足 ⇒ 判据结构上必然取假。
 
 **为什么这是 SPEC 阶段 B、不是新功能**：`orchestration/SPEC-unified-quay-server-2026-09-13.md` §7 阶段 B 逐字：「CLI 先行（§6.8）：实现 §6.9 的四个动词 + 服务清单」，其判据是「① 每个服务可独立起停（逐个负控制）；② 停 `web` 时 driver 的 round 心跳不中断；③ 合并后的独立起停能力 ≥ 合并前」。AC-254 是②的机器判据。§6.9 的三条不变式各自可取假：幂等（start 一个已在跑的服务 = no-op，⛔ 不是静默重启）、部分操作不波及其余（停 web ⇒ driver 心跳不中断）、⛔ 不得只能整体重启。
 
