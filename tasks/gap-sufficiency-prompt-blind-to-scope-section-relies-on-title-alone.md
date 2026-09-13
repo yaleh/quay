@@ -1,7 +1,7 @@
 ---
 id: gap-sufficiency-prompt-blind-to-scope-section-relies-on-title-alone
 title: 充分性判官的第一层 prompt 只读标题+退出条件文本，看不到 `## 范围`——GOAL 可能在拆解完成前被机械翻 achieved
-status: todo
+status: ready
 labels:
   - gap
 parent: null
