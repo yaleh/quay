@@ -144,8 +144,9 @@ fixture 满足不算数（硬规则 4 推论三）。
 红由单测（judged-2「标记多于 manifest」/ judged-3「manifest 多于标记」）与 mutation case
 (`checker-mutation-cases/gitignore-runtime-coverage-check.sh`，两向注入 + 复原) 各取一次。
 
-**AC4 的结构性说明** —— scoped 门（`scripts/test.sh --for-task … --allow-thin`）已对最终树绿
-（118 tests / 0 fail / 0 STATIC_CHECK_FAILED）；**全量** suite 由 fan-in 跑，故本项标注（待外部），
+**AC4 的结构性说明** —— scoped 门（`scripts/test.sh --for-task … --allow-thin`）两次全绿：
+merge develop **前** 118 tests / 0 fail，merge develop **后的最终树** 331 tests / 0 fail，
+两次皆 0 STATIC_CHECK_FAILED；**全量** suite 由 fan-in 跑，故本项标注（待外部），
 落地前 ff 的 suite 证书闸强制它。
 
 **footprint（shrink-only ratchet 的正当增长记账）** —— `--reanchor` 后 `3 files / 568 → 1022 bytes`
