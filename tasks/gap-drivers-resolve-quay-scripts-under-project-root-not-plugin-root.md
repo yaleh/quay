@@ -100,8 +100,14 @@ fixture 满足不算数（硬规则 4 推论三：只能被 fixture 满足的判
 - plugin/scripts/worker-driver.ts
 - plugin/scripts/ready-pool-check.ts
 - plugin/scripts/slot-refill.ts
-- test/driver-resolves-code-root-separate-from-workspace.test.mjs
+- plugin/test/driver-resolves-code-root-separate-from-workspace.test.mjs
 - tasks/gap-drivers-resolve-quay-scripts-under-project-root-not-plugin-root.md
+
+**测试落点更正（coordinator 2026-09-13，立案当轮）**：原给定的 Touches 写的是裸 `test/…`，
+而 `scripts/test.sh` 头注释（唯一正本）里套件发现的 glob 只有 `packages/*/test/`、`plugin/test/`、
+`experiments/quay-perpetual-stream/test/` —— **没有裸 `test/`** ⇒ 落在那里的测试套件永远不会执行，
+AC3 的静态检查随之空转（**与「验过了」同形**，硬规则 3b / 4c）。
+已改为 `plugin/test/…`，与本任务其余 Touches 全在 `plugin/scripts/` 下的惯例对应。
 
 ## 相关任务（同一根因族的三个实例；立案时按机制查重的记录，非上文证据的一部分）
 
@@ -109,7 +115,7 @@ fixture 满足不算数（硬规则 4 推论三：只能被 fixture 满足的判
 在 quay 自己的开发检出里两者恰好重合 ⇒ 全部自测绿；upgrade-channel（vendor）安装下两者分离 ⇒ 该面失效，
 且失效形态静默（进程活着 / 读到别人的数据 / 零字节诊断，都不是报错）。
 
-三个实例，各在**不同的面**，⛔ 互不覆盖：
+三个实例，各在**不同的面**，⛔ 互不覆盖（另两条的 id 与 `status: ready` 已由 coordinator 用文件系统核实）：
 
 1. `gap-quay-init-omits-adr-goal-meta-dir-env-third-party-leak`（status: ready）
    —— **provider 载体解析面**：`packages/quay-native/bin/quay-native.ts:66` `resolveSiblingDir`
@@ -145,3 +151,13 @@ fixture 满足不算数（硬规则 4 推论三：只能被 fixture 满足的判
 
 ⊢ 实现本条时应先核对该 done 任务留下的解析手法（driver-runtime 已改为从自身安装位置解析），
 **优先把它推广成 Plan 2 的单一入口**，而不是再造第二套解析——否则该族会出现第四个实例。
+
+## 立案当轮的状态读数（直接量，不给成因结论）
+
+本任务以 `status: todo` 写入（`task_write` 返回体逐字 `"status":"todo"`，`updatedAt` 1789288681257）。
+紧接着的一次 Touches 修正写入（`expectedStatus: todo`）撞到 CAS conflict，报文逐字：
+`expected status "todo" but actual current status is "ready" — another writer changed it first`。
+⇒ **本任务在立案后数十秒内被另一写者翻成 `ready`**，本轮正文修正改用 `expectedStatus: ready` 完成。
+形态与同族任务 `gap-quay-init-omits-adr-goal-meta-dir-env-third-party-leak` 立案当轮记录的读数一致
+（该条也在约 49 秒内被翻 ready）。**写这段的会话无 Bash/git 工具，未能核实翻转者身份**——
+形态符合 promotion-driver 的机械晋升，但未验证（硬规则 4 推论四：能解释现象的说法不是被检验的结论）。
