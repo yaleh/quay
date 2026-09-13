@@ -801,8 +801,6 @@ else:
             last = i
     insert_at = last + 1
     base_ind = env_ind + 2
-    if env_i == last:  # `env:` with a brace-less empty body — keys go on their own lines
-        insert_at = env_i + 1
     added = [f'{" " * base_ind}{k}: "{value_for(kind)}"' for k, kind in missing]
 
 new_lines[insert_at:insert_at] = added
