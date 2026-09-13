@@ -56,6 +56,8 @@ exit=1
 - `packages/quay/src/serve.ts`（`startServer()` 起控制面 + 发布状态载体 + graceful close 撤载体）
 - `plugin/scripts/driver-shared.ts`（`serveControlPlane` 的接口面 = 控制面宿主的单一实现，产品侧 import 复用；**实际改动**：3 处 `!res.ok` → `res.ok === false` —— 本任务把该文件首次拉进 tsc program（root tsconfig 只 include `packages/**/{src,bin}`），暴露出 `strict:false` 下判别联合不收窄的既有类型错误）
 - `plugin/scripts/start-drivers.ts`（常驻 serve 的既有拉起路径：**核过，无改动** —— 合并后多绑的是内核分配的临时控制面端口，`probeUrl` 判据与拉起方式不变，未新增第二条拉起路径）
+- `packages/quay/scripts/build-dist.mjs`（**实际改动**：`nodePaths: bundleNodePaths()` —— 自包含 bundle 的裸说明符必须按 **bundle 自己的包**解析，而不是按被内联进来的那个源文件所在目录）
+- `packages/quay/scripts/esbuild-sea.mjs`（同上，SEA bundle 同样内联了 `driver-shared.ts`）
 - `delivery-manifest.json`（把 `server` 登记为 `cli-command` 能力：加一行派发即新增一个交付能力，能力清单是**双向**枚举（源码有而未登记 / 登记了而源码没有，都红））
 - `packages/quay/test/cli.test.mjs`（两条**从派发表机械派生**的守卫要跟着走：block14 的 `--help` 同义集等值（硬编码 `dispatchVerbs`）与 block28 的 fallback usage 行（列出「子命令在 handler 内」的 config/manager —— `server status` 属同一形态））
 - `packages/quay/test/server-status-web-control-same-pid.test.mjs` (new)（正面 + 负控制 + 双活面 + 三态互异）
@@ -79,7 +81,7 @@ exit=1
 
 ## Result
 
-**实现（4 个 commit，`f4d993a68` / `6ff044c3f` / `4ce30db71` / `70bf4db4e`）**：`serve.ts` 的 `startServer()` 在 web bind 之前起**已有**的 `serveControlPlane`（单一实现，未改写、未复制），bind 成功后把 `{schemaVersion:1,pid,startedAt,services[]}` 原子写入 `<workspaceRoot>/.quay/server.json`，两个服务都带**宿主进程自己的 pid**；graceful close 撤载体 + 关控制面，bind 失败路径同时关控制面（复用既有 `closeSetupFailure` 的所有权纪律 —— 泄漏一个 listening socket 会让 `node --test` 文件永不退出，正是 `serve-bind-failure-no-leak` 要防的那一类）。新增 `packages/quay/src/server-state.ts` 作为载体契约与探针的**单一所有者**，`cli/server.ts` 只做 argv/输出/退出码。
+**实现（5 个 commit，`f4d993a68` / `6ff044c3f` / `4ce30db71` / `70bf4db4e` / `d56643e8e`）**：`serve.ts` 的 `startServer()` 在 web bind 之前起**已有**的 `serveControlPlane`（单一实现，未改写、未复制），bind 成功后把 `{schemaVersion:1,pid,startedAt,services[]}` 原子写入 `<workspaceRoot>/.quay/server.json`，两个服务都带**宿主进程自己的 pid**；graceful close 撤载体 + 关控制面，bind 失败路径同时关控制面（复用既有 `closeSetupFailure` 的所有权纪律 —— 泄漏一个 listening socket 会让 `node --test` 文件永不退出，正是 `serve-bind-failure-no-leak` 要防的那一类）。新增 `packages/quay/src/server-state.ts` 作为载体契约与探针的**单一所有者**，`cli/server.ts` 只做 argv/输出/退出码。
 
 ### AC1 —— criterion 逐字 exit 0
 
@@ -152,7 +154,7 @@ $ git -C /home/yale/work/quay ls-files .quay/server.json
 （空）
 ```
 
-落地提交不含该路径（四个 commit 的 `git diff --name-only` 均无 `.quay/server.json`）。
+落地提交不含该路径（五个 commit 的 `git diff --name-only` 均无 `.quay/server.json`）。
 
 ### AC4 —— 零回退
 
@@ -161,15 +163,29 @@ node --test packages/quay/test/serve-*.test.mjs      → tests 183 / pass 182 / 
 node --test plugin/test/start-drivers.test.mjs       → tests 10 / pass 10 / fail 0
 node --test plugin/test/driver-cli.test.mjs          → tests 9 / pass 9 / fail 0
 node --test packages/quay/test/cli.test.mjs          → pass (CLI 派发/帮助/usage 三套守卫全绿)
+node --test packages/quay/test/npm-pack-e2e.test.mjs → tests 9 / pass 9 / fail 0
 npx tsc --noEmit -p packages/{quay,quay-native,quay-github} → 全绿
 node --test packages/quay/test/server-status-web-control-same-pid.test.mjs → tests 9 / pass 9 / fail 0
 ```
 
 `skipped 1` 是既有的 live-GitHub 回归（文件自带头注释说明「opt in with `QUAY_TEST_LIVE_GITHUB=1`」），非本任务引入。⛔ 全程未跑 `quay driver stop`。
 
-### 两条「新动词必须登记」的机械守卫（scoped 门第一轮红 ⇒ 已修）
+### 新动词的三处登记（scoped 门第一轮红 ⇒ 已修）
 
-第一轮 scoped 门红在 `capability-manifest-check`：`[cli-command] DRIFT: source=20 manifest=19 / UNREGISTERED: server`。**加一行派发 = 新增一个交付能力** ⇒ `delivery-manifest.json` 的 `capabilities[]` 必须登记（该检查是**双向**枚举：源码有而未登记、登记了而源码没有，都红）。同时 `packages/quay/test/cli.test.mjs` 里两条**从派发表机械派生**的守卫也要跟着走：block14 的 `--help` 同义集等值（硬编码 `dispatchVerbs`）与 block28 的 fallback usage 行（它列出「子命令在 handler 内」的 config/manager —— `server status` 属同一形态，按它自己注释写明的约定加入）。两处修完各自绿；这是「新动词的三处登记」这一类义务，不是本任务特有的坑。
+第一轮 scoped 门红在 `capability-manifest-check`：`[cli-command] DRIFT: source=20 manifest=19 / UNREGISTERED: server`。**加一行派发 = 新增一个交付能力** ⇒ `delivery-manifest.json` 的 `capabilities[]` 必须登记（该检查是**双向**枚举：源码有而未登记、登记了而源码没有，都红）。同时 `packages/quay/test/cli.test.mjs` 里两条**从派发表机械派生**的守卫也要跟着走：block14 的 `--help` 同义集等值（硬编码 `dispatchVerbs`）与 block28 的 fallback usage 行（它列出「子命令在 handler 内」的 config/manager —— `server status` 属同一形态，按它自己注释写明的约定加入）。三处修完各自绿；这是「新动词的登记」这一类义务，不是本任务特有的坑。
+
+### 打包 e2e 红：自包含 bundle 的裸说明符必须按【bundle 自己的包】解析（已修）
+
+第二轮 scoped 门红在 `npm-pack-e2e`（9 个用例全红，单一根因：`before()` 钩子里的 `package.sh` 构建失败）：
+
+```
+✘ [ERROR] Could not resolve "@modelcontextprotocol/sdk/server/mcp.js"
+    ../../plugin/scripts/driver-shared.ts:298:11
+```
+
+**根因**：`src/serve.ts` 现在**内联**了插件层的 `driver-shared.ts`，而 esbuild 解析「被内联文件的裸说明符」用的是**那个文件自己的目录**；`plugin/scripts/` 之上在打包副本里没有 node_modules（`npm-pack-e2e` 只把依赖给到 `<copy>/packages/quay/node_modules`，它不是 `<copy>/plugin/scripts/` 的祖先）。真实 checkout 只是**碰巧**能用 —— npm 把依赖提升到 `<repo>/node_modules`，而它是 `plugin/scripts/` 的祖先。⇒ 布局一换就静默失效。
+
+**修法（改根，⛔ 不改测试夹具）**：一个**自包含** bundle 的裸说明符，应当按 **bundle 自己的包**解析 —— 那才是它交付时所依赖的对象（`@modelcontextprotocol/sdk` / `zod` 本就是 `packages/quay/package.json` 的依赖）。两个 quay 打包器（`build-dist.mjs`、`esbuild-sea.mjs`）都显式声明该解析根（esbuild 的 `nodePaths`）。**加法式**：esbuild 仍先走每个 importer 自己的目录，原先能解析的不会改变解析结果。修后 `npm-pack-e2e` 9/9 绿，`esbuild-sea.mjs` 单独跑也产出 bundle（exit 0）。
 
 ### AC6 —— 生产载体真跑过（读数晚于实现落地）
 
