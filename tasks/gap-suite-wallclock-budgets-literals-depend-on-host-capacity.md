@@ -2,7 +2,7 @@
 id: gap-suite-wallclock-budgets-literals-depend-on-host-capacity
 title: 负载敏感测试钉死墙钟预算——字面阈值只在「当前机器产能」下成立，满载必红（3 本：observation AC1 /
   worker-driver-resident AC1·AC3 / ts-typecheck-gate 接线）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
@@ -49,3 +49,10 @@ extra:
 - `.quay/wallclock-budget-evidence.jsonl` 含 AC2 的真实双向读数；AC4 的干跑读数在案。
 - ⛔ 本条**不新增**比现状更松的阈值（第三次数值放宽＝未达成）。
 - ⛔ 本条**不动**泳道机制（`gap-load-sensitive-tests-undeclared-run-in-main-lane-block-fan-in` / `gap-serial-lowconc-reclassify-post-waterline-cap` 的范围）。
+
+## Touches
+
+- tasks/gap-suite-wallclock-budgets-literals-depend-on-host-capacity.md
+- packages/quay/test/observation.test.mjs
+- plugin/test/worker-driver-resident.test.mjs
+- packages/quay/test/ts-typecheck-gate-config-wiring.test.mjs
