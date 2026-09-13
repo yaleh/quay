@@ -2,7 +2,7 @@
 id: gap-it0-split-or-commit-check-needs-change-tier-companion
 title: it0-split-or-commit-check 是 full-tier 且 17 次在无关任务的 fan-in
   变红——按本仓库既定解法（change-tier 伴生检查）让改它的那个任务在自己的 scoped 门被抓到
-status: ready
+status: done
 labels:
   - gap
 parent: null
