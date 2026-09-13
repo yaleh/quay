@@ -202,3 +202,15 @@ Touches 增补 `packages/quay/src/init.ts`、**标题改写**，均由协调方 
 ⛔ 未改动：现象段、两个后果的实证、`quay-` 撞名、AC4/AC5、DoD。
 **状态说明**：本任务建时为 `todo`（按要求），随后由生产 promotion-driver 自行晋升为 `ready`
 （第二次写曾因此撞 CAS 冲突、被拒且盘上零改动，读回确认后才改用 `expectedStatus: ready` 重发）。
+
+**⑦ 观察项（⛔ 非阻塞、⛔ 非本任务 AC；协调方 2026-09-13 裁定）**：
+`gap-shipped-profiles-missing-worker-roles`（done，goal_ac=AC-207）的验收是对着
+`plugin/.quay/profiles.yml`（② 号、init 路径不使用的那份）做的。
+**AC-207 自己的 criterion 读 `.quay/productization-verification.jsonl`，不碰 profiles，
+因此 I5（achieved-but-failing）复跑不会自动证否它**——criterion 查的是别的对象，
+「让机制自己发现」这条路在这里不通。
+这意味着 AC-207 的**前置阻塞解除判定用的是错对象**，**但不等于 AC-207 的结论为假**
+——它当时在 archguard / ad-arm1 上真跑过，那里的 profiles 来源未查（也不该在本任务里查）。
+**⇒ 本任务落地后**，若第三方项目的 e2e 派发能力发生实质变化，才值得回头复核 AC-207；
+在此之前**不动它**（硬规则 12：给不出「AC-207 结论为假」的发生率 ⇒ 前置降为观察项，不作阻塞）。
+⛔ 执行者不得因本段去修改 AC-207 或那两条 done 任务。
