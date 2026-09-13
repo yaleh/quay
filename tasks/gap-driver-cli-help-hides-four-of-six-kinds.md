@@ -1,7 +1,7 @@
 ---
 id: gap-driver-cli-help-hides-four-of-six-kinds
 title: driver CLI 的帮助文本只暴露 2 个 kind 而实际支持 6 个 —— 三处说法互不一致，四个 kind 在产品表层等于不存在
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
