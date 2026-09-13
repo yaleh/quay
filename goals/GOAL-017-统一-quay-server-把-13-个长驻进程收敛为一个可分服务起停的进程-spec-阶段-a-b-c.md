@@ -1,12 +1,19 @@
 ---
 id: GOAL-017
 title: 统一 quay server —— 把 13 个长驻进程收敛为一个可分服务起停的进程（SPEC 阶段 A/B/C）
-status: draft
+status: active
 kind: goal
 origin: 人 2026-09-13：「按照该 SPEC，创建一个 GOAL，并激活（单次授权）」。SPEC =
   orchestration/SPEC-unified-quay-server-2026-09-13.md（同日经五轮裁定成文并合入 develop）。本
   GOAL 取该 SPEC 的阶段 A/B/C；阶段 D（peer endpoint）按 SPEC §7 的排序理由与本 GOAL 的「非目标」节留给后续
   GOAL——两种风险性质不混装。激活为人的单次授权。
+activatedAt: 2026-09-13T14:40:31.726Z
+statusLog:
+  - at: 2026-09-13T14:40:31.726Z
+    from: draft
+    to: active
+    actor: manager
+    reason: 人 2026-09-13 单次授权：按 SPEC-unified-quay-server 建 GOAL 并激活
 ---
 ## 背景
 
