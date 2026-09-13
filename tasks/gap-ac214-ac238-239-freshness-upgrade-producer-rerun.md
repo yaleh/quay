@@ -81,7 +81,7 @@ bash plugin/scripts/develop-deliver-tgz.sh --verify-upgrade --upgrade-source wor
    `node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts list --root . | python3 -c 'import json,sys;print([r for r in json.load(sys.stdin) if r["id"]=="AC-214"][0]["criterion"])' > /tmp/ac214-criterion.sh && bash /tmp/ac214-criterion.sh; echo "EXIT=$?"`
 2. **产出者前置核（跑之前取，让失败可归因）**：`ssh -o BatchMode=yes -o ConnectTimeout=8 orangevps 'df -h $HOME | tail -1; ls -d $HOME/work/meta-cc; ls $HOME/.local/bin | head'`；本仓库 `.quay/profiles.yml` 存在性。贴全部输出。
 3. **跑产出者**（唯一产出 AC-238/239 记录的动作）：`bash plugin/scripts/develop-deliver-tgz.sh --verify-upgrade --upgrade-source work/meta-cc --ac239-e2e --hosts B --force --root /home/yale/work/quay`。贴退出码 + **全部** `develop-deliver:` 行。**退出码 2（PARTIAL）不自动等于失败**：它表示「记录运输成功，但 AC-239 与 AC-238 不同 `project_root`」⇒ 必须先读出 `UPGRADE_PAIR_MISSING` 行再判（⛔ 不以退出码冒充成功，也不因它掩盖读数）。退出 1（FAILED）表示该主机**没产出 AC-238 记录** ⇒ 贴 fail-closed 原文。
-4. **读本次运行自己的 stdout / 日志（⛔ 不采信「我跑过了」）**：读 `.quay/verify-upgrade-remote-B-<tip8>.log` 的 `⑦ upgrade-existing` 与 `⑦b post-upgrade continuation (AC-239)` 两段，逐字贴 `ac238 record written` 与 `ac239 record written … (same root as AC-238: …) ✓` 行，以及 `AC239_TASK_ID=` / `AC239_DRIVERS_STARTED=` 行。**若一行都没有** ⇒ 贴 fail-closed 原文并**就此停下**（硬规则 3b：缺值 ≠ 合格）。
+4. **读本次运行自己的 stdout / 日志（⛔ 不采信「我跑过了」）**：读 `.quay/verify-upgrade-remote-B-<tip8>.log` 的 `⑦ upgrade-existing` 与 `⑦b post-upgrade continuation (AC-239)` 两段，逐字贴 `ac238 record written` 与 `ac239 record written … (same root as AC-238: …) ✓` 行，以及 `AC239_TASK_ID=` / `AC239_DRIVERS_STARTED=` 行。**若一行都没有** ⇒ 贴 fail-closed 原文并**就此停下**（硬规则 3b：缺值 ≠ 合格）。⭐ 该 log 与取回的 `.quay/verify-upgrade-evidence-B-<tip8>.jsonl` 都是**未跟踪**的运行时产物（不进 `git diff --name-only`），故 ⛔ 不在 `## Touches` 里声明（声明它们会被 `isOverbroadDeclaration` 判 overbroad ⇒ 反而 HARD FAIL）；它们只是读数来源。
 5. **确认记录真的落到【主检出】的生产载体（按位置，⛔ 不是按自述）**：在 `/home/yale/work/quay/.quay/productization-verification.jsonl` 里取出 `ts` 晚于本次运行开始时刻的 `ac="GOAL-009-AC-238"` 与 `ac="GOAL-009-AC-239"` 记录，各贴**全文**，核两条 `project_root` **逐字相同**、`build_sha` 为 40-hex；并在 worktree 的 `.quay/productization-verification.jsonl` 上确认**没有**本次新增。
 6. **判据转绿（干跑 criterion 本体，⛔ 不是「我看它绿了」）**：AC-214 criterion ⇒ 贴 **exit 0** + 七行 freshness（每条 `margin > 0`）+ `.quay/goal-freshness-margin.json` 全文；再跑 `goal-store gate AC-214 --root .` ⇒ exit 0。
 7. **负控制（判据仍能取假，⛔ 双向）**：① `QUAY_GOAL009_FRESHNESS_K=1` 重跑 AC-214 criterion ⇒ **exit 1** 且 stderr **逐条指名**主体（预期至少含仍停在 65 的冷启动面五个）；② 判据文本**逐字节未变**：`git diff --exit-code -- goals/` 为空 ⇒ 转绿不可能来自放宽判据；③ 载体是**只读**读取的：`md5sum .quay/productization-verification.jsonl` 在负控制前后相同。三条全部贴出。
@@ -106,7 +106,5 @@ bash plugin/scripts/develop-deliver-tgz.sh --verify-upgrade --upgrade-source wor
 
 ## Touches
 
-- `.quay/productization-verification.jsonl`（本 AC 的载体：本次运行 append 的 AC-238 / AC-239 记录。⚠️ anti-drift-touches-check 把写在 `.quay/` 下的证据文件计入「任务写了什么」，⛔ 不声明 = fan-in HARD FAIL）
-- `.quay/verify-upgrade-remote-B-*.log`（产出者按 develop tip 前缀命名的远端运行日志，本次新写）
-- `.quay/verify-upgrade-evidence-B-*.jsonl`（产出者取回的本次远端证据文件；其行由 `transport_evidence_append` 追加进载体后保留）
+- `.quay/productization-verification.jsonl`（本 AC 的载体：本次运行 append 的 AC-238 / AC-239 记录 ⚠️ anti-drift-touches-check 只比对 `git diff --name-only <merge-target>...HEAD`（**已跟踪**文件）；该载体被 `.gitignore:330` 忽略 ⇒ 它不进那个集合，声明它是为了表明「本任务的产出落在这里」，⛔ 不是可提交物）
 - `tasks/gap-ac214-ac238-239-freshness-upgrade-producer-rerun.md`（自身文件：勾 AC + 贴实跑证据）
