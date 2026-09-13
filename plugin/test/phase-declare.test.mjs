@@ -35,7 +35,7 @@
 //
 // Run: node --no-warnings --experimental-strip-types --test plugin/test/phase-declare.test.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -61,9 +61,18 @@ function lines(n, prefix = "line") {
   return Array.from({ length: n }, (_, i) => `${prefix} ${i}`).join("\n") + "\n";
 }
 
+// Every temp dir this file creates is registered here and removed by ONE `after()` hook — the
+// documented carrier-array pattern (`_createdDirs` + `after(() => … rmSync)`) that the static
+// isolation checks (tmp-leak-pairing-check / test-isolation-check R6) trace as a real cleanup.
+const TMP_DIRS = [];
+after(() => {
+  for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true });
+});
+
 /** A throwaway git repo containing `files` (relative path → contents), all in one commit. */
 function makeRepo(files) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "phase-declare-"));
+  TMP_DIRS.push(dir);
   run("git", ["init", "-q"], dir);
   run("git", ["config", "user.email", "phase-declare-test@example.invalid"], dir);
   run("git", ["config", "user.name", "phase-declare-test"], dir);
