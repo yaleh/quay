@@ -56,3 +56,9 @@ extra:
 - packages/quay/test/observation.test.mjs
 - plugin/test/worker-driver-resident.test.mjs
 - packages/quay/test/ts-typecheck-gate-config-wiring.test.mjs
+- packages/quay/src/observation.ts
+- plugin/test/helpers/host-budget.mjs
+- plugin/test/helpers/worker-driver-harness.mjs
+- packages/quay/test/ts-typecheck-gate-helpers.mjs
+- packages/quay/test/ts-typecheck-gate-pass.test.mjs
+- packages/quay/test/ts-typecheck-gate-cli-event.test.mjs
