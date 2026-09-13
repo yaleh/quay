@@ -315,6 +315,93 @@ export function resolveKernelSibling(name: string): { path: string; stripTypes: 
   return null;
 }
 
+/** 解析本 kernel 的一个 shell sibling（.sh）到 `<pluginRoot>/scripts/<name>`。shipped 下 .sh 以
+ *  loose 形态住在 `scripts/`（⛔ 不在 `scripts/dist/`），故 `resolveKernelSibling` 的 .ts→dist 回退
+ *  覆盖不到；这是它的 .sh 半边（单一入口，⛔ 各 spawn 点不各自重写 basename==="dist" 上跳逻辑）。
+ *  缺 ⇒ null（调用方 fail-closed）。 */
+export function resolveKernelShellSibling(name: string): string | null {
+  const script = path.join(resolveKernelPluginRoot(), "scripts", name);
+  return fs.existsSync(script) ? script : null;
+}
+
+/** 解析一个 kernel sibling 脚本到【可直接 spawn 的完整 argv】（含解释器）。源树 ⇒
+ *  `node --no-warnings --experimental-strip-types <dir>/<name>.ts`；installed 产物 ⇒
+ *  `node --no-warnings <dist>/<name>.js`；`.sh` ⇒ `bash <pluginRoot>/scripts/<name>.sh`。
+ *  找不到 ⇒ **null**（调用方 fail-closed 记 not-evaluated）。
+ *
+ *  ⛔ 返回 null 而不是回退到 `path.join(<workspaceRoot>, "plugin", "scripts", <name>)`：后者在 quay
+ *  自己的开发检出里恰好正确（root 就是 repo 根），在第三方项目里指向一个不存在的文件——而
+ *  spawn 不存在的文件只会得到 ENOENT/非零退出，被例程读成「跑过了、没数据」。
+ *  硬规则 3b：读不到输入必须与「读到了、值是 X」不同形；硬规则 4：在开发检出里跑的测试结构上
+ *  无法暴露这条差异（2026-09-13 gap-drivers-resolve-quay-scripts-under-project-root-not-plugin-root
+ *  在真实第三方项目上的实测）。 */
+export function kernelSiblingArgv(name: string, extra: readonly string[] = []): string[] | null {
+  if (name.endsWith(".sh")) {
+    const sh = resolveKernelShellSibling(name);
+    return sh ? ["bash", sh, ...extra] : null;
+  }
+  const sib = resolveKernelSibling(name);
+  if (!sib) return null;
+  return sib.stripTypes
+    ? ["node", "--no-warnings", "--experimental-strip-types", sib.path, ...extra]
+    : ["node", "--no-warnings", sib.path, ...extra];
+}
+
+// ── Layer 0 · quay 自身代码根（resolveQuayCodeRoot，Plan 2 的单一解析入口）────────────────────────
+// gap-drivers-resolve-quay-scripts-under-project-root-not-plugin-root：driver 运行时此前把
+// 「工作区 root」与「quay 代码所在地」当成同一个目录，按 `<workspaceRoot>/packages|plugin/…` 拼
+// quay 自己的模块路径。在 quay 自己的检出里两者恰好重合（root 就是 repo 根）⇒ 全部自测绿；
+// upgrade-channel/vendor 安装下两者分离 ⇒ goal-store 调用报 `Cannot find module
+// '<project>/packages/quay/src/goal-store.ts'`、outer 的 5 条 fact 因 unreadable/unparseable 取不到值，
+// 而进程 alive=1、载体持续在写（静默失效）。⇒ 解析基准改为【本 kernel 自身的安装位置】，与
+// workspaceRoot 彻底分离；⛔ 各处不再各拼一次（本函数 + resolveQuaySrcModule 是唯一入口）。
+
+/** quay 自身代码（`packages/quay/src/**` 或 shipped 打平的 `<pkg>/src/**`）所在的根，从【本 kernel
+ *  自身的安装位置】反推（⛔ 不用 opts.root —— AC-203：quay-init 后的第三方项目没有 packages/）。
+ *
+ *  两种出厂布局（按存在性判定，⛔ 非按包名/VERSION 判定）：
+ *    源树     `<repo>/plugin/scripts/*.ts`   + `<repo>/packages/quay/src/**`  ⇒ 返回 `<repo>`
+ *    shipped  `<pkg>/plugin/scripts|dist/*.js` + `<pkg>/src/**`                ⇒ 返回 `<pkg>`
+ *  两者都不在 ⇒ null（调用方 fail-closed 并报出可诊断的原因，⛔ **不回退 workspace root**——
+ *  那正是本缺陷的形态）。 */
+export function resolveQuayCodeRoot(): string | null {
+  const parent = path.dirname(resolveKernelPluginRoot());
+  if (fs.existsSync(path.join(parent, "packages", "quay", "src"))) return parent;
+  if (fs.existsSync(path.join(parent, "src"))) return parent;
+  return null;
+}
+
+/** 解析不出时返回的【源树形】路径（该路径不存在）—— 单一入口的「miss 半边」，让调用方保留原有契约：
+ *  「本函数给出 argv，跑不动由调用方按『读不懂』记 not-evaluated / unreadable」（硬规则 3b）。
+ *  ⛔ 解析层不抛：把 miss 升级成异常会改掉**调用方的语义**（读不懂 → 崩溃），而不是修了路径解析
+ *  （goal-driver.test.mjs 的 `scriptRoot 不存在 ⇒ unreadable` 负控制正是钉这条契约）。 */
+export function quaySrcModuleLegacyShape(codeRoot: string, rel: string): string {
+  return path.join(codeRoot, "packages", "quay", "src", rel);
+}
+
+/** quay 自身【随包出厂】的配置文件绝对路径（`scripts/drivers.yml` / `.claude-plugin/plugin.json`…），
+ *  基准 = 本 kernel 的 plugin root（⛔ 非 `<workspaceRoot>/plugin/…`）。
+ *
+ *  drivers.yml 是 quay 自己的声明式配置（并发 cap / 轮间隔 / goal 段），随 plugin 出厂；第三方项目
+ *  的 root 下没有 `plugin/` ⇒ 按 workspace root 读会**静默读不到**并回退到缺省值——配置失效而没有任何
+ *  读数报出来（硬规则 3b 的「读不懂 ⇒ 伪装成合格」形态）。2026-09-13 第三方项目实测：四个 driver
+ *  在 `/home/yale/work/quay-fleet` 上跑，全部 drivers.yml 读取都落到缺省分支。 */
+export function kernelConfigPath(rel: string): string {
+  return path.join(resolveKernelPluginRoot(), rel);
+}
+
+/** 在 quay 代码根下解析一个 `packages/quay/src/<rel>` 模块到实际路径（布局感知，单一入口）。
+ *  源树 ⇒ `<codeRoot>/packages/quay/src/<rel>`；shipped 打平 ⇒ `<codeRoot>/src/<rel>`。
+ *  两形皆无 ⇒ null（调用方 fail-closed）。`codeRoot` 缺省取 `resolveQuayCodeRoot()`。 */
+export function resolveQuaySrcModule(rel: string, codeRoot: string | null = resolveQuayCodeRoot()): string | null {
+  if (!codeRoot) return null;
+  const srcTree = path.join(codeRoot, "packages", "quay", "src", rel);
+  if (fs.existsSync(srcTree)) return srcTree;
+  const shipped = path.join(codeRoot, "src", rel);
+  if (fs.existsSync(shipped)) return shipped;
+  return null;
+}
+
 // ── Layer 0 · 稳定承载（resolveMainRoot，gap-resident-driver-stable-carrier-liveness AC1）──────────
 // 常驻 supervisor 不得由生命周期短于它的对象（worktree）承载：若 --root 落在 git worktree 内，把 root
 // 规范化到 primary worktree（主检出）。git 不可用 / 非 git 仓库 / 解析失败 ⇒ 原样返回 root。

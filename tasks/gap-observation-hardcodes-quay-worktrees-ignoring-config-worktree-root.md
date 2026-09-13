@@ -138,12 +138,25 @@ fixture 满足不算数（硬规则 4 推论三）。
   于是旧推导 `dirname(B)/quay-worktrees` 正落在 A 的 namespace 内 —— 测试**显式断言该前提为真**
   （改前必红），再断言改后 `false`。
 * **typecheck**：`for d in packages/*/; do npx tsc --noEmit -p "$d"; done` 全绿。
+* **scoped gate**（`scripts/test.sh --for-task <id> --allow-thin`）：**绿，264/264，0 fail**
+  （含 `packages/quay/test/npm-pack-e2e.test.mjs` 9/9）。
 * **受影响既有测试**：`packages/quay/test/observation.test.mjs`、`packages/quay/test/serve.test.mjs`、
-  `plugin/test/fast-mode-telemetry.test.mjs`、`plugin/test/measure-trend-check.test.mjs`、
-  `plugin/test/suite-lpt-order.test.mjs` —— 全绿（89 + 94 条）。
+  `packages/quay/test/serve-task.test.mjs`、`plugin/test/fast-mode-telemetry.test.mjs`、
+  `plugin/test/measure-trend-check.test.mjs`、`plugin/test/suite-lpt-order.test.mjs` —— 全绿。
   含 `gap-serve-board-test-workspace-couples-to-shared-tmp-quay-worktrees` 的两个取假控制仍绿。
+* **scoped gate 首轮红 → 两处真因（都已修，非放宽判据）**：
+  1. `serve-task.test.mjs:121` 断言 `observation.ts` 不含 `git worktree add`（develop 读必须
+     只读 object store）。我在 `taskWorktreeOpen` 的 docblock 里**用散文写出了那条命令**⇒ 命中。
+     改掉措辞（该 guard 是关键词扫描，散文也必须避开命令写法）。
+  2. `npm-pack-e2e` 8/9 红：新 `plugin/scripts/*.ts` 未在 `capability-catalog.sh` 声明
+     **它回答什么问题**（AC1c）+ 结晶四字段 ⇒ `capability-catalog.sh --entry-surface` 退出 1
+     （**打印 PASS 却退出 1** —— 该模式下 FAIL 文案在 `MODE=table` 分支里，静默失败；
+     这是我**先用 `| tail` 读到 rc=0 的假读数**才发现的一次教训，`rc=$?` 取的是 `tail` 的）。
+     已按入口闸补齐 QUESTION / CADENCE / INVALIDATION / LAST_REAFFIRMED / MATCHING / CONSUMER 六行；
+     MATCHING 诚实填 **keyword**（它确是字面量扫描 = AC 自身谓词；假阳性面——非引号正则/注释/散文
+     用法——被单独放进 advisory 桶，永不导致失败）。
 * **兄弟硬编码点清单（硬规则 5b：报出，非全改）**：检查器每次运行打印 advisory 命中数
-  （当前 38 条，含注释）。其中**仍是真假设**的完整枚举：
+  （当前 38+ 条，含注释）。其中**仍是真假设**的完整枚举：
   `plugin/scripts/suite-lpt-order.ts:34`（`repoRelKey`，与 `normalizePerFileKey` 同口径；
   **未改**，以免把爆炸半径伸进套件自身调度路径）、
   `packages/quay/src/cli/driver.ts:54` + `cli/help.ts:356`（`driver start` 从 worktree 启动的**拒绝**判定，
@@ -160,6 +173,7 @@ fixture 满足不算数（硬规则 4 推论三）。
 - plugin/scripts/fast-mode-telemetry.ts
 - plugin/scripts/measure-trend-check.ts
 - plugin/scripts/worktree-namespace-literal-check.ts
+- plugin/scripts/capability-catalog.sh
 - packages/quay/test/observation-worktree-namespace.test.mjs
 - plugin/test/worktree-namespace-literal-check.test.mjs
 - tasks/gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root.md（自身）

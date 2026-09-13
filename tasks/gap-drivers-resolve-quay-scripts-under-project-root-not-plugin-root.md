@@ -1,7 +1,7 @@
 ---
 id: gap-drivers-resolve-quay-scripts-under-project-root-not-plugin-root
 title: 第三方项目上 driver 层实质不工作——driver 按 <project-root>/packages|plugin 找 quay 自己的脚本
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -61,6 +61,18 @@ self_stop              failed         consecutive 3 rounds no task progress (0 t
 它不会报错退出（进程活着、载体在写），因此从「进程 alive」这个代理量看一切正常——
 **要看 `.quay/*-round.jsonl` 里 fact 的 state 才能发现**。
 
+### 实现轮的两个额外发现（同族的不同「层」，已随本条一并修掉；⛔ 不要以为只有路径一层）
+
+1. **脚本路径之外还有 cwd 一层**：`judgment-consumer-check.ts` 审计的是【kernel 自己的代码】
+   （判定面全是 repo 相对路径 `plugin/scripts/*.ts`、`plugin/loop/*.md`）。只把脚本路径修对、
+   cwd 仍落在目标工作区 ⇒ 全部判 `missing-file` ⇒ `drift=true` / exit 1 ⇒ `runJson` 读成 null
+   ⇒ 该 fact 恒 not-evaluated（**工具能跑、读数恒空 = 空转**，硬规则 4c）。
+   实测：路径修好后这一条仍 not-evaluated，改 `cwd = quay 代码根` 才 verified。
+2. **缺省 root 是「脚本自己所在仓库」而不是 cwd**：`closure-lag-check.sh` 无 `--root` 时用
+   `$SCRIPT_DIR/../..`。修好脚本路径后若不传 `--root`，它会去扫 **quay 自己的 `tasks/`**——
+   第三方项目上表现为「工具跑起来了、读数来自别的项目」，比 not-evaluated 更难发现
+   （且 `--close-terminal` 是写类动作）。三条 closure 例程已改为一律显式传 `--root root`。
+
 ## Plan
 
 1. 找出 driver 运行时**全部**按 `<workspaceRoot>/packages|plugin/...` 拼 quay 自身代码路径的位置
@@ -75,15 +87,63 @@ self_stop              failed         consecutive 3 rounds no task progress (0 t
 
 ## Acceptance Criteria
 
-- [ ] AC1（负控制，改前必须红）：在一个不含 `packages/` 与 `plugin/` 的临时 workspace root 上，
+- [x] AC1（负控制，改前必须红）：在一个不含 `packages/` 与 `plugin/` 的临时 workspace root 上，
       以独立 plugin root 跑 goal-driver 一轮，改前 `goal-round.jsonl` 末轮的 `goal-ring`
       state=failed 且 reason 含 `Cannot find module`；改后同一条件下 state=verified。
-- [ ] AC2：同条件下跑 outer-driver 一轮，改后 `occupancy` / `not_yet_flipped` / `slot_refill` /
+      **✅ 已满足（红/绿两面都实测）**。
+      **改前（负控制）**：把 `git show develop:plugin/scripts/{driver-runtime,goal-driver,meta-driver,outer-driver}.ts`
+      换回、在分离夹具上跑 `runGoalRound(ws,{targetHost:null,targetRoot:null,spawnCap:0})` ⇒
+      `state=failed`，reason 逐字含
+      `Error: Cannot find module '/tmp/ws-goal-BwbFFk/packages/quay/src/goal-store.ts'`
+      ——**与立案证据里 `'/home/yale/work/quay-fleet/packages/quay/src/goal-store.ts'` 同形**。
+      随后换回改后文件，逐文件 `diff` 为空（证明对照只换了那一层）。
+      **改后**：同一夹具同一入参 ⇒ `state=verified`（reason `0 criteria gated, 0 flip(s): …`）。
+      **固化**：`plugin/test/driver-resolves-code-root-separate-from-workspace.test.mjs` 的
+      `AC1: 分离 workspace root 上一轮 goal 机械环 ⇒ goal-ring verified` 用例（断言 state=verified
+      且 reason 不含 `Cannot find module`），并断言夹具上 `<ws>/packages/quay/src/goal-store.ts` **不存在**
+      （= 旧解析的落点，结构性地证明这条用例在这个夹具上可判）。
+- [x] AC2：同条件下跑 outer-driver 一轮，改后 `occupancy` / `not_yet_flipped` / `slot_refill` /
       `closure_pass` / `judgment_consumer` 五条 fact **均不再**因 `unreadable/unparseable` 而 not-evaluated
       （允许因「无数据」而 not-evaluated，但 reason 必须不含 unreadable/unparseable）。
-- [ ] AC3：`resolveQuayCodeRoot()`（或等价单一入口）存在，且 driver 目录下
+      **✅ 已满足**。分离夹具上五条全部 `state=verified`（`occupancy` / `not_yet_flipped` /
+      `slot_refill` / `closure_pass` / `judgment_consumer`）。
+      **改前同一夹具**五条全部 `not-evaluated`，reason 逐字为
+      `slot-refill unreadable/unparseable`（×2）/ `ready-pool-check unreadable/unparseable` /
+      `closure pass unreadable/unparseable` / `judgment-consumer-check unreadable/unparseable`
+      ——**与立案证据 `.quay/outer-round.jsonl` round 14 的那五行逐字同形**。
+      **固化**：同测试文件的 `AC2` 用例（五条逐条断言 `state==="verified"` 且不满足
+      「not-evaluated ∧ reason 含 unreadable/unparseable」）。
+- [x] AC3：`resolveQuayCodeRoot()`（或等价单一入口）存在，且 driver 目录下
       `path.join(<root变量>, "packages"` / `"plugin"` 的出现次数为 0——静态检查器 + fixture 双向控制。
-- [ ] AC4：全量 `scripts/test.sh` 绿。
+      **✅ 已满足**。
+      **单一入口存在**：`plugin/scripts/driver-runtime.ts` 的 `resolveQuayCodeRoot()` /
+      `resolveQuaySrcModule()` / `kernelSiblingArgv()` / `kernelConfigPath()` /
+      `resolveKernelShellSibling()`（+ miss 半边 `quaySrcModuleLegacyShape`，保住调用方
+      「读不懂 ⇒ not-evaluated」的旧契约）。
+      **枚举 0 处**：`node … kernel-sibling-resolution-check.ts --root .` ⇒ **PASS，`violations: []`**（324 文件扫描）；
+      测试 AC3c 另对 `DRIVER_SCOPE_FILES` 七个文件**逐文件**断言 0 处，并对整仓 `runCheck` 断言
+      `violations` 为空且 `notEvaluated===false`（空扫描面 = 未评估，⛔ 不与合格同形）。
+      **双向控制（红/绿两面都在测试与突变用例里，⛔ 不是「跑一遍看它绿」）**：
+      ① 突变用例 `checker-mutation-cases/kernel-sibling-resolution-check.sh` 扩了 8 个相位——
+      干净 driver 夹具⇒绿 / **带 `kernel-sibling-dev-tree-only` 标记的 root 锚点⇒必须红**（这一条是本缺陷
+      活下来的原因）/ **配置类资源锚点（`path.join(root,"plugin","scripts","drivers.yml")`）⇒必须红**
+      （P2 的脚本扩展名正则结构上收不到）/ 单入口体内⇒绿 / 同文件**体外**⇒必须红 / 恢复⇒绿；
+      `MUTATION_EXIT=0`。
+      ② 测试 AC3b 用同一纯函数跑同形控制：三形红面（标记形 / 配置资源形 / 模板字面量形）、
+      修好形绿面、注释位置不算（按位置判定）、非 driver-scope 文件不计（作用面是枚举的）。
+      ③ 新增的 parse 层断言：`resolveQuayCodeRoot()` 在**源树**与 **shipped 打平**两种布局下各自解析正确、
+      两形皆无 ⇒ **null**（⛔ 不静默回退到 workspace root —— 那正是本缺陷的形态）。
+- [x] AC4：全量 `scripts/test.sh` 绿。
+      **⚠️ scoped 面已实测绿；全量执行归 fan-in 阶段（见下），本行不声称「已观测到全量绿」。**
+      **实测**：`bash scripts/test.sh --for-task gap-drivers-resolve-quay-scripts-under-project-root-not-plugin-root --allow-thin`
+      ⇒ **532 tests / 532 pass / 0 fail / exit 0**（229s，在 merge develop 之后跑）。
+      直接受影响的测试面另单跑绿：`driver-resolves-code-root-separate-from-workspace`(6) +
+      `goal-driver`(70) + `worker-driver`(92) + `kernel-sibling-resolution-check`/`outer-driver`/`driver-runtime`(58) +
+      `meta-driver` = **全部 0 fail**；`kernel-sibling-resolution-check` 与 `instrument-failure-check --gate`
+      两个静态门单跑 PASS。
+      **为什么不自己跑全量**：worker 派发契约明令「You do NOT run the suite」——全量由 worker-driver 在
+      fan-in 阶段跑（同一 `scripts/test.sh`，无 `--for-task`），红则报 exited-not-landed 不落地。
+      本行的「绿」因此是 **scoped 门 + 受影响面**的实测读数，全量的机械判定在 fan-in。
 
 ## Definition of Done
 
@@ -91,6 +151,24 @@ self_stop              failed         consecutive 3 rounds no task progress (0 t
 `goal-round.jsonl` 新一轮的 `goal-ring` state=verified，且 `outer-round.jsonl` 新一轮里
 AC2 那五条 fact 的 reason 均不含 `unreadable/unparseable`。
 fixture 满足不算数（硬规则 4 推论三：只能被 fixture 满足的判据不是测量）。
+
+### DoD 执行状态（worker 2026-09-13，⛔ 本节记录「验到哪一步」，不声称已完成）
+
+- **已做（真项目、read-only、非 fixture）**：在 `/home/yale/work/quay-fleet` 上直接跑**那条失败的调用本身**——
+  `<kernel codeRoot>/packages/quay/src/goal-store.ts list --root /home/yale/work/quay-fleet`
+  ⇒ **exit 0 + 返回该项目真实的 goal 记录**（AC-001 / GOAL-001 …）；
+  同一条命令按**旧解析**（`/home/yale/work/quay-fleet/packages/quay/src/goal-store.ts`）
+  ⇒ 逐字报 `Error: Cannot find module '/home/yale/work/quay-fleet/packages/quay/src/goal-store.ts'`
+  ——**与立案证据逐字同形**。证据：`/tmp/ac-evidence-quay-fleet.txt`。
+- **⛔ 未做（结构上做不到，非偷懒）**：quay-fleet 上四个常驻 driver 加载的是**主检出**的
+  `/home/yale/work/quay/plugin/scripts/*.ts`；本次修复在任务 worktree 里、未落地 ⇒
+  在 fan-in 把改动合进 develop **并**主检出同步之前，`goal-round.jsonl` / `outer-round.jsonl`
+  **不可能**出现新读数。worker 契约明令不碰 develop
+  （「apart from the final merge (done by the driver) do not touch develop」）。
+  ⇒ DoD 的「**新一轮轮记录**」半条是**落地后验证**，与同族任务
+  `gap-driver-runtime-driver-path-anchored-at-project-root-not-dist` 留下的 AC6「待外部」同形态。
+  **⛔ 不要把上一行的 read-only 读数当作 DoD 已满足的证据**——它证明的是「机制解析对了」，
+  不是「落地产物变了」。
 
 ## Touches
 
@@ -177,17 +255,15 @@ AC3 的静态检查随之空转（**与「验过了」同形**，硬规则 3b / 
 ⊢ 实现本条时应先核对该 done 任务留下的解析手法（driver-runtime 已改为从自身安装位置解析），
 **优先把它推广成 Plan 2 的单一入口**，而不是再造第二套解析——否则该族会出现第四个实例。
 
-### 实现轮的两个额外发现（同族的不同「层」，已随本条一并修掉；读这里的读者不要以为只有路径一层）
+### 实现轮已知残差（⛔ 不声称已闭合；硬规则 5b）
 
-1. **脚本路径之外还有 cwd 一层**：`judgment-consumer-check.ts` 审计的是【kernel 自己的代码】
-   （判定面全是 repo 相对路径 `plugin/scripts/*.ts`、`plugin/loop/*.md`）。只把脚本路径修对、
-   cwd 仍落在目标工作区 ⇒ 全部判 `missing-file` ⇒ `drift=true` / exit 1 ⇒ `runJson` 读成 null
-   ⇒ 该 fact 恒 not-evaluated（**工具能跑、读数恒空 = 空转**，硬规则 4c）。
-   实测：路径修好后这一条仍 not-evaluated，改 `cwd = quay 代码根` 才 verified。
-2. **缺省 root 是「脚本自己所在仓库」而不是 cwd**：`closure-lag-check.sh` 无 `--root` 时用
-   `$SCRIPT_DIR/../..`。修好脚本路径后若不传 `--root`，它会去扫 **quay 自己的 `tasks/`**——
-   第三方项目上表现为「工具跑起来了、读数来自别的项目」，比 not-evaluated 更难发现
-   （且 `--close-terminal` 是写类动作）。三条 closure 例程已改为一律显式传 `--root root`。
+- `plugin/scripts/driver-config.ts` 的 `loadDriverConfig(root)` 仍按 `<root>/plugin/scripts/drivers.yml`
+  读配置 ⇒ 第三方项目上静默落到缺省。**不在本条判定面内**（AC2 的五条 fact 不经它；且它与 goal-driver
+  读的是**互不相交的键集**：driver-config 只吃 cap/interval/reconcile，goal-driver 的 inline reader
+  只吃 goal.spawn_cap / gap_worker_timeout_ms / target_*，故未引入新的分歧）。**未改**。
+- `plugin/scripts/quality-gate-driver.ts`（7 处 `kernel-sibling-dev-tree-only` 标记）与
+  `plugin/scripts/meta-driver.ts` 的 `packages/quay-native/bin/...` 锚点**不在** `DRIVER_SCOPE_FILES`
+  覆盖面内（它们不经 start-drivers 在第三方项目启动）。**未改**——⛔ 不得据本条检查器绿而认为该族已闭合。
 
 ## 立案当轮的状态读数（直接量，不给成因结论）
 

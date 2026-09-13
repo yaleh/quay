@@ -45,7 +45,7 @@ import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 // `.quay/config.yml` 的读取复用既有依赖（同 goal-store.ts / goal-driver.ts 的 `yaml`，⛔ 不手搓 parser）。
 import { parse as YAML } from "yaml";
-import { launchArgv, runAsync, ts, aliveness, carrierStats, KNOWN_KINDS, type Fact, type RoutineSpec } from "./driver-runtime.ts";
+import { launchArgv, runAsync, ts, aliveness, carrierStats, KNOWN_KINDS, resolveQuaySrcModule, quaySrcModuleLegacyShape, type Fact, type RoutineSpec } from "./driver-runtime.ts";
 import { runResidentQualityGateLoop, computeRoundRecord } from "./quality-gate-driver.ts";
 import { readProbeSpec } from "./read-probe-spec.ts";
 import { gateFinding, findingKey, DEFAULT_RATE } from "./routine-file-gate.ts";
@@ -180,14 +180,19 @@ export interface MetaRoundReadings {
  *  **总是显式传 `--root`**：goal-store 的缺省是从 cwd 向上找根，driver 从别的 cwd 跑时会找错
  *  （隐式 cwd 依赖，硬规则 4b：别让判定量经过一层未经验证的中间推导）。 */
 export function goalStoreArgv(scriptRoot: string, sub: string[], dataRoot: string = scriptRoot): string[] {
-  return [
-    "node", "--no-warnings", "--experimental-strip-types",
-    // kernel-sibling-dev-tree-only: meta-driver 是 dev-tree-only 观测例程（本文件头部「源树直跑、
-    // 不经 bundle」，且经相对 import ../../packages/quay/src 只吃源树），scriptRoot 恒为含 packages/
-    // 的源树根 ⇒ 锚 packages/quay/src 是正确行为，⛔ 非第三方 shipped 解析。
-    path.join(scriptRoot, "packages", "quay", "src", "goal-store.ts"),
-    ...sub, "--root", dataRoot,
-  ];
+  // 布局感知（单一入口 resolveQuaySrcModule）：源树 ⇒ <codeRoot>/packages/quay/src/goal-store.ts；
+  // shipped 打平 ⇒ <codeRoot>/src/goal-store.ts。⛔ 不再就地拼 `packages/quay/src`——goal-driver 是
+  // 第三方生产 driver，它的 scriptRoot 现在来自 resolveQuayCodeRoot()（那两个布局都可能），
+  // 就地拼死其中一个会让 shipped 形态静默 MODULE_NOT_FOUND。
+  // gap-drivers-resolve-quay-scripts-under-project-root-not-plugin-root.
+  //
+  // ⚠️ 解析不出时【返回旧形路径而不是抛】：本函数的契约是「给出一组 argv，跑不动由调用方按
+  // 『读不懂』处理」（硬规则 3b：读不到输入 ⇒ not-evaluated，⛔ 不与合格同形）——把它升级成异常
+  // 会让所有 `scriptRoot 不存在 ⇒ unreadable` 的负控制（goal-driver.test.mjs 的 AC-242 successor /
+  // 冻结population 两例）从「读不懂」变成「崩溃」，即**改掉了调用方的语义**而不是修了路径解析。
+  const mod = resolveQuaySrcModule("goal-store.ts", scriptRoot)
+    ?? quaySrcModuleLegacyShape(scriptRoot, "goal-store.ts");
+  return ["node", "--no-warnings", "--experimental-strip-types", mod, ...sub, "--root", dataRoot];
 }
 
 /** 读全部 goal 记录。解析不了 ⇒ 抛（fail-closed：读不到输入不得继续，⛔ 不返回空数组冒充"没有"）。 */

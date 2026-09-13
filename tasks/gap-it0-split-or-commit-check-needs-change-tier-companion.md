@@ -56,10 +56,11 @@ extra:
 - plugin/test/scoped-static-checks.test.mjs
 - experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.ts
 - experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.sh
+- .quay/it0-split-or-commit-companion-evidence.jsonl
 
 ## 读数段
 
-机件读数另存 `.quay/it0-split-or-commit-companion-evidence.jsonl`（7 行 JSON：AC1 红/反向控制、AC2 负控表、AC3 成本、AC4 逐字+可咬控制、AC6 审计表）。
+机件读数另存 `.quay/it0-split-or-commit-companion-evidence.jsonl`（7 行 JSON：AC1 红/反向控制、AC2 负控表、AC3 成本、AC4 逐字+可咬控制、AC6 审计表）。⚠️ 该文件不在 git 索引里（`.quay/` 是 gitignored），但 `anti-drift-touches-check` 会把它算作「本任务写过的文件」⇒ 必须列进 `## Touches`（首轮实测 HARD FAIL 就是这么报的：`out-of-declared: task wrote .quay/it0-split-or-commit-companion-evidence.jsonl`）。
 
 ### Plan 1 可行性（**可收窄**，实证而非断言）
 
@@ -152,7 +153,7 @@ checker-cost-lib: run_checker_parallel_wait — static checks FAILED (fail-close
 2. **落地前该失败的末次时刻**：`STATIC_CHECK_FAILED: it0-split-or-commit-check` 末次 = **2026-09-04T08:16:12.373Z**（`.quay/verification-round.jsonl` 全史 1625 轮 / 2026-08-12T03:28:00Z…2026-09-13T09:14:56Z，共 **17** 次；与本条立案时的 17 次一致，立案后未新增）。
 3. **落地后窗口长度**：**0**（无任何轮次在本实现落地之后跑过 fan-in）。
 4. **落地后该失败数**：**0**，但窗口为 0 ⇒ **不是证据**。
-⇒ 硬规则 4 推论三：本 AC 记 **not-evaluated**，⛔ 不记为通过；保持未勾并以 `——外层 verification-round 验证` 结尾（本仓库既有的「只差外层验证」形态，机械可区分：`fan-in-ac-completion-gate.ts` 判 `pass-external` 而非 `pass`）。
+⇒ 硬规则 4 推论三：本 AC 记 **not-evaluated**，⛔ 不记为通过；保持未勾并以 `——外层 verification-round 验证` 结尾（本仓库既有的「只差外层验证」形态，机械可区分：`fan-in-ac-completion-gate.ts` 判 `pass-external` 而非 `pass`；本条已实测该 gate 输出 `剩余未勾 1 项均为（待外部）/外层验证——可翻 done` / `PASS (exit 0) — flip allowed`）。
 ⚠️ **并附一条可证伪性说明**：本伴生**覆盖不到**「状态翻转族」——`PARENT-DONE-IFF-CHILDREN` / `DEP-DONE-IFF-DEPS` 是由 **driver 在 fan-in 的 ff 段**把任务翻 `done` 造成的，而 scoped 门在**翻之前**跑（`worker-driver.ts` 步序：typecheck → doc-check → scoped-gate → suite → ff）。⇒ 伴生能抓的是**创作期**违规（`SELECT-SPLIT` / `CHILD-LINK-SYMMETRY` / `DEP-DANGLING`，以及「在已 done 的父下新建子」这类由 delta 侧引入的 `PARENT-DONE`）；**纯由翻转造成的**那部分仍由 full-tier 延迟发现。这是如实的能力边界，不是已达成。
 
 ### AC6 硬规则 5b：full-tier 10 本逐本
