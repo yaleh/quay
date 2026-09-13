@@ -1065,6 +1065,9 @@ test("AC5 (生产载体, 双臂) — 常驻环 reconcile：确已退出的孤儿
     "--resource-gate-cmd", "node -e process.exit(0)",
     "--worker-cmd-exact", "node -e process.exit(0)",
     "--interval", "20",
+    // 臂② adopt 了一个长跑孤儿 ⇒ 退出边沿事件不来，循环只在【协调地板】上醒；缺省 300s 会让臂①
+    // 等不到下一趟 reconcile（实测：25s 等待超时，唯一的失败就是这个）。地板压到 1s。
+    "--reconcile-interval", "1",
   ]);
   // ⚠️ waitFor 超时【不抛】而是返回 falsy ⇒ 必须显式断言，⛔ 不能只 await（那是恒真的空转判据）。
   const adopted = await waitFor(() => drv.events().some((e) => e.event === "orphan-adopted" && e.task === taskId), 20000);
