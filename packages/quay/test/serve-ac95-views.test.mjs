@@ -280,7 +280,10 @@ test("AC3: readTests reports empty when verification-round.jsonl is absent", () 
   const ws = makeWorkspace("ac95-empty-");
   try {
     const t = readTests(ws);
-    assert.equal(t.status, "empty");
+    // This workspace declares no suite entry and has no scripts/test.sh ⇒ the absence is a WIRING fact,
+    // so the enumerated value is `empty-no-writer` (gap-verification-round-empty-state-lumps-three-
+    // distinct-causes split the former catch-all `empty`; 「无数据」 is still what is rendered).
+    assert.equal(t.status, "empty-no-writer");
     assert.equal(t.runs.length, 0);
     assert.match(t.reason, /未接入/);
   } finally {
