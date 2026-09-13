@@ -5,7 +5,6 @@ status: ready
 labels:
   - gap
   - defect
-  - delivery-critical
   - mechanism
 parent: null
 children: []
@@ -81,8 +80,44 @@ extra:
 - packages/quay-native/bin/quay-native.ts
 - plugin/scripts/quay-init.sh
 - packages/quay-native/test/resolve-sibling-dir.test.mjs
-- test/quay-init-config-env-keys.test.mjs
+- plugin/test/quay-init-config-env-keys.test.mjs
 - tasks/gap-quay-init-omits-adr-goal-meta-dir-env-third-party-leak.md
+
+## 实现提示：测试落点与分组（2026-09-13 直读 `scripts/test.sh` 头注释核实，非转述）
+
+**① 落点**：套件发现的 glob 是 `packages/*/test/`、`plugin/test/`、
+`experiments/quay-perpetual-stream/test/`（`scripts/test.sh:80-85` 与 `:107-109`），**没有裸 `test/`**。
+本任务 Touches 里的 quay-init 测试因此定在 **`plugin/test/`**（与既有 `plugin/test/quay-init.test.mjs` 同处）——
+初稿曾写成 `test/quay-init-config-env-keys.test.mjs`，那个位置**套件永远跑不到** ⇒ AC3/AC4 会静默空转
+（硬规则 3b：一个不可能报红的检查与「检查通过」同形）。已改正。
+`packages/quay-native/test/resolve-sibling-dir.test.mjs` 命中 `packages/*/test/`，无需改。
+
+**② 分组**：AC3/AC4 要跑**真实 quay-init**，属于 `scripts/test.sh:86-98` 点名的
+**REAL-INSTALL install/quay-init family**——该族已于 round 162 整体收进 **`serial`** 组
+（concurrency 1 独立相），理由是它在全套件负载下逐轮轮换 flake
+（`gap-install-family-tests-rotate-flakes-under-full-suite`）。
+⇒ 新测试文件首行应声明 **`// @test-group serial`**；漏声明会默认落到 `engine`（`:75-78`）
+并回到那个已知会 flake 的负载相里。另注：新文件必须 `import { test } from "node:test"`
+（`:16-20` 的 test-framework policy，豁免名单只减不增）。
+
+## 共同形态（本条是同一根因族的第一个实例）
+
+**quay 运行时把「工作区 root」与「quay 代码所在地」当成同一个目录**。在 quay 自己的检出里这两者
+恰好重合 ⇒ 全部自测绿；**upgrade-channel（vendor）安装下两者分离 ⇒ 整层失效**，且失效形态是
+静默的（读到的是 quay 自己的数据，而不是报错）。本条是该族在 **provider 载体解析**面的实例
+（`findRepoRoot(process.cwd())` 把 quay 仓库当成第三方项目的 root）。
+
+同族的另两个实例（**2026-09-13 由 coordinator 用文件系统直读核实，非 MCP 读**）：
+
+- `gap-start-drivers-cli-resolve-blind-to-vendor-layout-and-swallows-enoent`
+  —— **已落盘，status `ready`**。start-drivers 的 CLI 解析只认 dev 源码树与 PATH。
+- `gap-drivers-resolve-quay-scripts-under-project-root-not-plugin-root`
+  —— **⚠️ 尚未落盘，仍在立案中**（此 id 为预告，引用前先确认其已存在）。
+  driver 运行时按 `<project-root>/packages/...` 找 quay 自己的脚本；实测第三方项目上
+  goal-ring failed、outer 六条 fact unreadable。
+
+⇒ 三条应按**同一根因族**一起看：修完本条的载体面，另两条的**代码定位面**仍会独立失效；
+反之亦然。⛔ 不要把其中任一条的修复当作该族已闭合的证据（硬规则 5b：在某处修好 X ≠ X 只在那一处）。
 
 ## 相关任务（立案时按机制查重的记录，非上文证据的一部分）
 
@@ -101,3 +136,24 @@ extra:
   `plugin/scripts/quay-init.sh:989-990` 生成的 `env:` 块**只有 `QUAY_NATIVE_TASKS_DIR` 一个键**——
   即前一条任务 AC2/AC3 声称的「四个 `QUAY_NATIVE_*_DIR` 键」**在当前生产脚本里不存在**。
   本条的 AC3/AC4 因此是对该配置面的重新落实，实现时应先核对这段历史（是从未落地、落在了另一个副本、还是被回退）。
+
+## 标签裁定记录（2026-09-13）
+
+立案时曾打 `delivery-critical`，随后由 coordinator 裁定**去掉**。裁定时给了两条理由，**事后只有第一条成立**：
+
+- ✅ 成立：quay 当前 goal store 里没有一条 active 的 AC 适合承接「第三方项目安装面」这个方向
+  （AC-174/AC-245 已 achieved，AC-180..187 已 retired），而**为了让任务能晋升去新建 goal AC，
+  是把 goal 当晋升通行证用，方向反了**。
+- ❌ 不成立（已被同轮实测证否，见下）：「`delivery-critical` + `goal_ac: null` ⇒ 结构上永不晋升
+  ⇒ 保留标签等于白立案」。
+
+⇒ 标签保持去掉（凭第一条理由），现为 `gap`/`defect`/`mechanism`，`goal_ac` 留空，走正常晋升路径。
+
+**证否那条说法的直接读数**：本任务以 `todo` + `delivery-critical` + `goal_ac: null` 建立后，
+**约 49 秒内就被翻成 `ready`**（`updatedAt` 1789287438222 → 1789287487646；标签编辑的 CAS
+撞到 conflict 才暴露出来）。翻转者身份**已由直接量坐实**（coordinator 核 `git log`）：
+提交 `980988b56 tasks: … todo→ready（promotion-driver 机械晋升）`——即机械晋升，不再是假说。
+⇒ 在 **author→ready 这条边**上，该组合**没有**阻止晋升。
+⛔ 但不要把它推广成「那条说法整个是错的」：那条记述原本点名的是 `ready-pool-check` 的
+`candidates[].goalAcMissing`，那是**派发面**，与 author→ready 面是两条不同的边；
+引用时不分边，才是它被误用的原因（硬规则 4c：判据点名的量必须穿过它实际所在的那一层）。
