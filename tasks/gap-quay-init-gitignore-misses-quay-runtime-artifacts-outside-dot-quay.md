@@ -51,6 +51,15 @@ quay 自己的 .gitignore 另有（且带解释性注释，说明 quay 明知它
 init 模板是它的一份人工同步副本，而副本落后了。同工作区已知同形：
 「修了一个副本、生产用的是另一个」。
 
+<!-- dedup-ref -->
+**同一后果已在两个互不相关的第三方项目上各发生一次（发生率 = 2，非孤例）**：
+`gap-ac248-adr-check-differential-record-producer`（done）的「过程发现 4」记录了 **archguard** 上的同形故障——
+旧 loop 残留的未跟踪目录（`milestones/`、`plugin/.quay/`）使 ff 的 clean-tree 前提永不成立
+（实测 `working tree not clean`），当时的处置是**把目录移出仓外**（手工绕过）。
+**为什么不是重复**：那条把它当**环境障碍**绕过，机制归因停在「ff 的 benign 白名单只认 `?? .quay/…`」，
+没有追到 **init 模板**这个生成侧真相源，也从未提及 `.quay-parse-cache.json`。
+本条立的是**生成侧单一真相源 + 防漂移检查**；两者同一后果、不同机制层。
+
 ## Plan
 
 1. **让 init 的忽略清单从 quay 自己的 `.gitignore` 派生，而不是人工重列**：
@@ -59,9 +68,17 @@ init 模板是它的一份人工同步副本，而副本落后了。同工作区
 2. 至少立即覆盖已知的两条：`**/.quay-parse-cache.json`、`milestones/fast-mode-telemetry/*.json`。
 3. **加一条防漂移静态检查**：quay 自己 `.gitignore` 中标记为运行时产物的条目集合，
    必须被 init 写出的忽略清单覆盖；新增一条而 init 未跟进 ⇒ 红。
-4. **顺带收紧错误信息**（可选但高价值）：`fan-in-ff-merge` 报「working tree not clean」时，
-   若脏文件命中 quay 自己的运行时产物清单，应在 reason 里点明「这是 quay 运行时写的，
-   应加入 .gitignore」，而不是让排查者去怀疑自己的改动。
+4. **收紧错误信息（必做，⛔ 原记为「可选但高价值」已作废）**：`fan-in-ff-merge` 报
+   「working tree not clean」时，若脏文件命中 quay 自己的运行时产物清单，应在 reason 里点明
+   「这是 quay 运行时写的，应加入 .gitignore」，而不是让排查者去怀疑自己的改动。
+   **为什么必做（实测读数）**：**ff 的 benign 白名单只认 `?? .quay/…` 前缀** ⇒ 即便 init 把这两条
+   写进第三方项目的 `.gitignore`，**任何已经存在的未跟踪残留**（`milestones/`、别的 loop 遗留物）
+   **仍然会挡住 ff** —— **光修 `.gitignore` 不够：新项目从此干净，存量项目不会自愈。**
+   这条 reason 是那个白名单口径**唯一的可见性来源**：否则排查者只看到「working tree not clean」，
+   既不知道这些文件是 quay 自己写的，也不知道白名单只认某个前缀。
+5. **评估 ff 的 benign 白名单口径本身是否过窄**：它只认 `?? .quay/…`，而 quay 的运行时产物明明
+   还写到 `tasksDir`（`.quay-parse-cache.json`）与 `milestones/` 下。白名单应当与「quay 运行时产物
+   清单」同源——也就是第 1 条要建的那个单一真相源；⛔ 不要再手工列第三份。
 
 ## Acceptance Criteria
 
@@ -74,6 +91,9 @@ init 模板是它的一份人工同步副本，而副本落后了。同工作区
       与「init 写出的忽略清单」，前者未被后者覆盖即红。双向控制：给 quay 的 `.gitignore`
       加一条新的运行时条目而 init 未跟进 ⇒ 必须红；两边一致 ⇒ 绿。
 - [ ] AC4：全量 `scripts/test.sh` 绿。
+- [ ] AC5（存量项目，能取假）：在一个**已经含有** quay 运行时残留（如 `milestones/`）的第三方项目上
+      跑 fan-in 的 `ff` 步骤，改前 reason 为裸 `working tree not clean`；改后 reason 必须点名
+      「这些文件由 quay 运行时写出」并指出处置方式。⛔ 不得只在新项目上验——那会漏掉存量项目这一整类。
 
 ## Definition of Done
 
@@ -84,6 +104,7 @@ fixture 满足不算数（硬规则 4 推论三）。
 ## Touches
 
 - plugin/scripts/quay-init.sh
+- plugin/scripts/worker-driver.ts
 - plugin/scripts/gitignore-runtime-coverage-check.ts
 - plugin/test/gitignore-runtime-coverage-check.test.mjs
 - tasks/gap-quay-init-gitignore-misses-quay-runtime-artifacts-outside-dot-quay.md
