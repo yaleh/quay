@@ -22,7 +22,7 @@
 // Run:
 //   scripts/test.sh plugin/test/probe-routine.test.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -45,10 +45,24 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const DRIVER = path.join(REPO_ROOT, "plugin", "scripts", "quality-gate-driver.ts");
 
+/** 本文件建过的所有临时目录（tmp-leak-pairing 的 carrier-array 形态：数组在 after() 清理区里被
+ *  引用 ⇒ 每条 push 进它的 mkdtemp 都算「有配对清理」，⛔ 不是每个用例各写一遍 rmSync）。 */
+const CREATED_DIRS = [];
+after(() => {
+  for (const d of CREATED_DIRS) fs.rmSync(d, { recursive: true, force: true });
+});
+
+/** mkdtemp + 登记到 CREATED_DIRS（统一由文件级 after() 清理）——⛔ 调用点不再直接 mkdtempSync。 */
+function makeTmpDir(prefix) {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  CREATED_DIRS.push(d);
+  return d;
+}
+
 /** 一个最小工作区：`.quay/config.yml`（可选）+ `plugin/probes/<name>.md` + git repo（FILE-ONLY 快照
  *  要求 git；⛔ 非 git 目录 ⇒ 守卫读不出 ⇒ 例程正确地拒记，见 readLastRunMap 的兄弟用例）。 */
 function makeWorkspace({ config, probeName = "semantic-dedup-scan", probeBody = "INVENTORY the repo.\n" } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "probe-routine-"));
+  const root = makeTmpDir("probe-routine-");
   fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
   fs.mkdirSync(path.join(root, "plugin", "probes"), { recursive: true });
   if (config !== undefined) fs.writeFileSync(path.join(root, ".quay", "config.yml"), config, "utf8");
@@ -95,9 +109,9 @@ function readCarrier(root, stateDir) {
 // ── (a) config reader + no-drift against the canonical reader ───────────────────────────────────
 
 test("readRoutinesConfig — absent file/section ⇒ [] (optional section, same contract as suite-params)", () => {
-  const bare = fs.mkdtempSync(path.join(os.tmpdir(), "probe-cfg-bare-"));
+  const bare = makeTmpDir("probe-cfg-bare-");
   assert.deepEqual(readRoutinesConfig(bare), []);
-  const noSection = fs.mkdtempSync(path.join(os.tmpdir(), "probe-cfg-nosection-"));
+  const noSection = makeTmpDir("probe-cfg-nosection-");
   fs.mkdirSync(path.join(noSection, ".quay"), { recursive: true });
   fs.writeFileSync(path.join(noSection, ".quay", "config.yml"), "providers: {}\n", "utf8");
   assert.deepEqual(readRoutinesConfig(noSection), []);
@@ -113,7 +127,7 @@ test("readRoutinesConfig — fail-closed on malformed YAML / wrong shape / bad t
     ["loop:\n  routines:\n    - name: x\n      trigger: interval:10m\n", /needs 'probe'/],
   ];
   for (const [cfg, re] of cases) {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "probe-cfg-bad-"));
+    const root = makeTmpDir("probe-cfg-bad-");
     fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
     fs.writeFileSync(path.join(root, ".quay", "config.yml"), cfg, "utf8");
     assert.throws(() => readRoutinesConfig(root), re, `must reject: ${JSON.stringify(cfg)}`);
@@ -133,7 +147,7 @@ test("NO-DRIFT — readRoutinesConfig agrees with the canonical reader readLoopP
     ["loop:\n  routines: nope\n", false],
   ];
   for (const [cfg, ok] of fixtures) {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "probe-nodrift-"));
+    const root = makeTmpDir("probe-nodrift-");
     fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
     fs.writeFileSync(path.join(root, ".quay", "config.yml"), cfg, "utf8");
     let mine = null;
@@ -312,7 +326,7 @@ test("llmProbeRoutine — halted / missing probe spec / unparseable output each 
   assert.equal(readCarrier(root).length, 0, "⛔ a boolean answer is not a finding");
 
   // non-git workspace ⇒ the FILE-ONLY guard cannot read the tree ⇒ not-evaluated (⛔ not "clean")
-  const nogit = fs.mkdtempSync(path.join(os.tmpdir(), "probe-nogit-"));
+  const nogit = makeTmpDir("probe-nogit-");
   fs.mkdirSync(path.join(nogit, "plugin", "probes"), { recursive: true });
   fs.writeFileSync(path.join(nogit, "plugin", "probes", "semantic-dedup-scan.md"), "---\ninstrument: none\n---\nbody\n", "utf8");
   const guarded = await llmProbeRoutine(decl, { ...base, root: nogit, pluginRoot: path.join(nogit, "plugin"), probeArgv: () => fakeProbeArgv({ findings: [FINDING] }) }).run({ halted: false });
@@ -325,7 +339,7 @@ test("llmProbeRoutine — halted / missing probe spec / unparseable output each 
 
 test("quality-gate-driver --once runs the config-declared probe routine and appends to the carrier", (t) => {
   const root = makeWorkspace({ config: CONFIG_WITH_ROUTINE });
-  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "probe-state-"));
+  const stateDir = makeTmpDir("probe-state-");
   const roundLog = path.join(root, ".quay", "quality-round.jsonl");
   const probeScript = path.join(stateDir, "fake-probe.mjs");
   fs.writeFileSync(probeScript, `process.stdout.write(${JSON.stringify(JSON.stringify({ findings: [{ id: "dup1", kind: "same-symbol-multi-file", symbols: ["findRepoRoot"], files: ["plugin/scripts/a.ts:1", "plugin/scripts/b.ts:2"], verdict: "real-duplication", rationale: "same body", suggestedAction: "extract" }], shards: 5, inventory: { plugin_scripts: 3, package_src: 2, candidate_clusters: 1 } }))});`, "utf8");

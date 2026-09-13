@@ -292,8 +292,7 @@ test("resident loop --once writes a round record with facts (spawn real process)
   // ⚠️ root 是**空工作区**（不是 REPO_ROOT）：driver 现在把 `.quay/config.yml` `loop.routines:` 里
   // 声明的 probe 例程装进例程表（gap-productize-deep-semantic-dedup-scan-routine），若 root=主检出，
   // 这条 `--once` 用例的 facts 集合就会随该工作区 gitignored 的 config 内容漂移，且会真的 spawn 一个
-  // 探针 agent。空 root ⇒ 无声明 ⇒ 例程表恰为四条（本用例测的就是常驻环本身）。
-  const wsRoot = fs.mkdtempSync(path.join(tmp, "ws-"));
+  // 探针 agent。空 root（= 本用例自己的 tmp，由 t.after 清理）⇒ 无声明 ⇒ 例程表恰为四条。
   const planCmd = path.join(tmp, "fake-plan.js");
   const judgmentCmd = path.join(tmp, "fake-judgment.js");
   const packagingCmd = path.join(tmp, "fake-packaging.js");
@@ -306,7 +305,7 @@ test("resident loop --once writes a round record with facts (spawn real process)
   const r = spawnSync(
     process.execPath,
     ["--experimental-strip-types", path.join(REPO_ROOT, "plugin", "scripts", "quality-gate-driver.ts"),
-     "--root", wsRoot, "--once", "--round-log", roundLog,
+     "--root", tmp, "--once", "--round-log", roundLog,
      "--plan-cmd", `node ${planCmd}`, "--judgment-cmd", `node ${judgmentCmd}`,
      "--packaging-check-cmd", `node ${packagingCmd}`,
      "--identity-cmd", `node ${identityCmd}`, "--lineage-cmd", `node ${lineageCmd}`],
