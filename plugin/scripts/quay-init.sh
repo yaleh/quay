@@ -1145,6 +1145,13 @@ providers:
 # docs read these at runtime instead of having them baked in at install (AC3).
 loop:
   repo_root: ${REPO_ROOT}
+  # quay's mechanical fan-in runs this project's test entrypoint with its own value-taking flags
+  # (--buckets / --root / --state-dir / --runner / --log-file / --run-id, plus --test-concurrency=N).
+  # If you ship scripts/test.sh, it MUST consume such a flag together with its VALUE (shift 2) and
+  # MUST NOT read a flag's value as a positional test-file argument — otherwise every fan-in round
+  # reds with "Could not find '<value>'" and burns a whole worker session.
+  # Full contract + a drop-in case block: plugin/skills/init/SKILL.md, section "loop.test_command
+  # contract".
   test_command: ${TEST_COMMAND}
   tmux_session: ${TMUX_SESSION:-null}
   worktree_root: ${WORKTREE_ROOT}
@@ -2372,6 +2379,13 @@ providers:
       QUAY_NATIVE_META_DIR: "${WORKSPACE_ROOT}/meta"
 loop:
   repo_root: ${REPO_ROOT}
+  # quay's mechanical fan-in runs this project's test entrypoint with its own value-taking flags
+  # (--buckets / --root / --state-dir / --runner / --log-file / --run-id, plus --test-concurrency=N).
+  # If you ship scripts/test.sh, it MUST consume such a flag together with its VALUE (shift 2) and
+  # MUST NOT read a flag's value as a positional test-file argument — otherwise every fan-in round
+  # reds with "Could not find '<value>'" and burns a whole worker session.
+  # Full contract + a drop-in case block: plugin/skills/init/SKILL.md, section "loop.test_command
+  # contract".
   test_command: ${TEST_COMMAND}
   tmux_session: ${TMUX_SESSION:-null}
   worktree_root: ${WORKTREE_ROOT}
