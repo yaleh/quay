@@ -175,6 +175,8 @@ Could not find 'fleet-agent-sessions-transcript-endpoint'
 - plugin/test/worker-driver-retry-classification.test.mjs
 - plugin/skills/init/SKILL.md
 - docs/analysis/quay-init-closure-ratchet.baseline.json
+- plugin/scripts/config-key-consumer-check.ts
+- plugin/test/config-key-consumer-check.test.mjs
 - tasks/gap-fan-in-suite-red-with-no-attributable-test-still-redispatches-worker.md
 
 ⚠️ `plugin/test/worker-driver-retry-classification.test.mjs` 是**新文件**——同族既有用例都在
@@ -183,3 +185,13 @@ Could not find 'fleet-agent-sessions-transcript-endpoint'
 
 ⚠️ AC4 的实现面（`quay-init.sh` 的 config 模板 + `SKILL.md`）与随之必须 re-anchor 的
 `quay-init-closure-ratchet.baseline.json` 亦已登记（`--reanchor` 后 footprint 未涨：3 files / 568 bytes）。
+
+⚠️ `config-key-consumer-check.ts` + 其用例是**连带根因面**（fan-in 首次 suite-red 的真因，⛔ 非测试失败）：
+AC4 的配置注记写在 heredoc `loop:` 块内、`test_command` 上方，而该 checker 的 `extractWriterKeys()`
+把「块内任何非 `  key:` 行」当作块终止 ⇒ 注记**静默截断**了机械派生的键集，
+块内最后一个键 `fork_baseline` 从枚举里消失 ⇒ `host-repo-surface-ratchet` 报
+`FAIL: host-repo surface shrank: {"config_keys_with_consumer":["fork_baseline"]}`（suite 在 static 段红）。
+修法选在**根因处**而非搬走注记：缩进注释不是键、也不结束映射，跳过即可（列 0 注释仍终止，否则扫描会
+越过块尾把下一个顶层块的键也当成 loop 键）；不修则下一个往块内写注记的人会踩同一坑，
+且 `--capture` 会把截断后的集合烘进 baseline ⇒ 两个方向都静默。双向控制见
+`plugin/test/config-key-consumer-check.test.mjs`（缩进注释不截断 + 列 0 注释仍终止 + 空行仍终止）。
