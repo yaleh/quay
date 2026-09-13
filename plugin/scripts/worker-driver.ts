@@ -89,9 +89,9 @@
 //   - forceDispatch(task)  ⇒ append forced[]（强制派发记录，驻留驱动的 selector 环消费；本阶段驱动仍用
 //     显式 --task，forceDispatch 落盘记录即可观测）
 //
-// Run（MCP 控制面）:
-//   node --experimental-strip-types plugin/scripts/worker-driver.ts --serve \
-//     --root <repo> [--host 127.0.0.1] [--port <n>] [--json]
+// Run（MCP 控制面）—— ⛔ 本文件没有控制面入口：控制面由每个 kind 的 supervisor 起（Layer 0，
+// `driver-runtime.ts` 的 runSupervisor → serveKindControlPlane）。逐 kind 的 URL/端口回读面 =
+// `<root>/.quay/<prefix>-control-plane.json`（`statePaths().controlPlaneFile`）。见 GOAL-017/AC-252。
 //
 // 阶段 4 新增（AC129，SPEC §5 阶段 4——常驻驱动 + 自主选任务，把「谁决定现在跑哪个任务」从 inner 的
 // LLM tick 会话移到本常驻进程）：
@@ -136,7 +136,6 @@ import { parseLoadSensitiveAnnotation } from "./known-load-sensitive.ts";
 // （函数级复用，⛔ 非复制粘贴）。本文件仍 re-export 保持旧 import 面（worker-driver.test.mjs 等）。
 import {
   resourceGateCheck,
-  serveControlPlane,
   isHalted,
 } from "./driver-shared.ts";
 export {
@@ -5265,9 +5264,6 @@ export async function main(argv: string[]): Promise<number> {
   let outcomePath: string | undefined;
   let runId: string | undefined;
   let json = false;
-  let serve = false;
-  let host: string | undefined;
-  let port: number | undefined;
   let mechanicalFanIn = false;
   let mechWorktree: string | undefined;
   let mechMergeTarget: string | undefined;
@@ -5298,9 +5294,6 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--outcome") outcomePath = args[++i];
     else if (a === "--run-id") runId = args[++i];
     else if (a === "--json") json = true;
-    else if (a === "--serve") serve = true;
-    else if (a === "--host") host = args[++i];
-    else if (a === "--port") port = Number(args[++i]);
     else if (a === "--mechanical-fan-in") mechanicalFanIn = true;
     else if (a === "--worktree") mechWorktree = args[++i];
     else if (a === "--merge-target") mechMergeTarget = args[++i];
@@ -5322,7 +5315,8 @@ export async function main(argv: string[]): Promise<number> {
           "  [--backoff-max-ms <ms>]  退避等待上限 ms（指数增长封顶，缺省 300000）\n" +
           "  --mechanical-fan-in --task <id> --worktree <path>  每任务新进程入口：加载当前代码跑机械 fan-in，stdout 单行 JSON result（exit 0=landed / 2=red）\n" +
           "  --write-scoped-gate-cache --task <id> --develop-sha <sha>  写 scoped-gate 缓存（worker 退出前跑绿后调用；stdout 单行 JSON）\n" +
-          "  --serve [--host <ip>] [--port <n>]  起 MCP 控制面（halt / setPreference / forceDispatch，身份 header 或 caller 参数）",
+          "  ⛔ 无 --serve：MCP 控制面（halt / setPreference / forceDispatch）已上收进 Layer 0——由每个 kind 的\n" +
+          "     supervisor（driver-runtime.ts runSupervisor）起，逐 kind 写 <prefix>-control-plane.json 回读面",
       );
       return 0;
     } else {
@@ -5370,16 +5364,10 @@ export async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
-  // --serve：起 MCP 控制面（常驻）。listening socket 保持事件循环存活 ⇒ 进程不退出，直到 SIGINT/SIGTERM。
-  if (serve) {
-    const handle = await serveControlPlane({ root: rootDir, host, port, name: "worker-driver-control" });
-    if (json) process.stdout.write(`${JSON.stringify({ event: "control-plane-serving", url: handle.url, port: handle.port })}\n`);
-    else console.log(`worker-driver control plane serving at ${handle.url}`);
-    const stop = () => { void handle.close(); };
-    process.on("SIGINT", stop);
-    process.on("SIGTERM", stop);
-    return 0;
-  }
+  // ⛔ 本文件【不再】自带 serveControlPlane 调用点（GOAL-017/AC-252，SPEC §7 阶段 A1）：控制面已上收进
+  // Layer 0——每个 kind 的 supervisor（driver-runtime.ts runSupervisor）起一个，六个 kind 全部从共享骨架
+  // 获得入站控制面（⛔ 不是六个 kind 各自直调）。旧 `--serve` flag 一并删除，⛔ 不留「解析了但没人消费」
+  // 的死 flag（硬规则 3b）；控制面入口在 Layer 0，不在本 kind 的 argv 面。
 
   const outcomeFile = outcomePath ? path.resolve(outcomePath) : path.join(rootDir, WORKER_OUTCOME_REL);
   const timeoutMs = parseTimeoutMs(timeoutRaw);

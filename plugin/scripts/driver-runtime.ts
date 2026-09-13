@@ -73,6 +73,7 @@ import {
   serveControlPlane,
   CONTROL_STATE_REL,
   PROMOTION_CONTROL_STATE_REL,
+  type ControlPlaneHandle,
 } from "./driver-shared.ts";
 // Layer 1b · schedule（routine-scheduler 判定函数，⛔ 不新造定时器）。
 import { isDue } from "./routine-scheduler.ts";
@@ -511,6 +512,10 @@ export function statePaths(root: string, kind: DriverKind) {
     stopSentinel: path.join(q, `${spec.prefix}.stop`),
     inflightPidFile: path.join(q, `${spec.prefix}-inflight.pid`),
     controlFile: path.join(q, spec.controlFile),
+    // 控制面宿主（AC-252）启动后写的**运行时回读面**：{kind, url, port, pid, at}。supervisor 日志里
+    // 也有人读的一行，但日志是 append-only 文本、逐 kind 回读要解析；本文件是结构化字段（同 statePaths
+    // 家族），供 AC2/AC6 逐 kind 回读「控制面真的起了、实际端口是多少」。
+    controlPlaneFile: path.join(q, `${spec.prefix}-control-plane.json`),
   };
 }
 
@@ -535,6 +540,38 @@ export function driverArgvForKind(
   if (spec.hasReconcile && opts.reconcileInterval) args.push("--reconcile-interval", opts.reconcileInterval);
   args.push("--pid-file", opts.pidFile, "--run-id", opts.runId);
   return args;
+}
+
+// ── Layer 0 · 控制面宿主（SPEC-unified-quay-server §7 阶段 A1：控制面上收进 Layer 0）──────────────
+// GOAL-017/AC-252：`serveControlPlane` 的实现早在 driver-shared.ts 一份（AC150-3），但**调用点**只有
+// worker-driver 一处 ⇒ 另外五个 kind 结构上拿不到入站控制面。本函数把调用点上收成【仓库里唯一的一个】，
+// 且挂在 Layer 0：六个 kind 全部经 runSupervisor（registry 表驱动）获得控制面 ⇒ 新增一个 kind 只要在
+// DRIVER_KINDS 加一行，⛔ 不需要改任何 kind 文件（硬规则 9：结构保证，而不是「记得加一行」）。
+//
+// ⚠️ `rel` 恒为【该 kind 自己的】控制态文件（`DRIVER_KINDS[kind].controlFile`），⛔ 绝不回落
+// serveControlPlane 的缺省 `rel`——缺省是 worker 的（driver-shared.ts:294），回落会让 halting kind X
+// 写进 worker 的控制态文件，即「控制面看起来通了、实际停错了 kind」的恒假读数（硬规则 3b；meta-driver.ts
+// 的同族注释：「控制态文件（与 quality 分开——⛔ 共用会让一个 kind 的 halt 误停另一个）」）。
+export async function serveKindControlPlane(
+  kind: DriverKind,
+  root: string,
+  opts: { host?: string; port?: number; env?: NodeJS.ProcessEnv; name?: string } = {},
+): Promise<ControlPlaneHandle> {
+  const spec = DRIVER_KINDS[kind];
+  // 读不懂入参（未知 kind）⇒ 抛，⛔ 不返回一个与「合格」同形的句柄（硬规则 3b：不得让「无法评估」
+  // 与「已评估且合格」共用一种输出）。
+  if (!spec) throw new Error(`serveKindControlPlane: unknown driver kind "${kind}" (not in DRIVER_KINDS)`);
+  const handle = await serveControlPlane({
+    root,
+    host: opts.host,
+    // port 缺省 0 = 内核分配：六个 kind 各起一个控制面也不会互撞（⛔ 不写死端口——写死必然六 kind 互撞，
+    // 且「恰好没撞」会依赖启动顺序这种宿主事实）。调用方经 handle.port 回读实际端口。
+    port: opts.port ?? 0,
+    env: opts.env,
+    rel: path.posix.join(".quay", spec.controlFile),
+    name: opts.name ?? `${spec.prefix}-control`,
+  });
+  return handle;
 }
 
 // ── Layer 0 · 判停（stopCondition，SPEC §2.1 共同不变式：halt ∧ resourceGate）──────────────────────
@@ -1158,6 +1195,45 @@ export async function runSupervisor(opts: SupervisorOptions): Promise<number> {
   }
   fs.mkdirSync(path.join(opts.root, ".quay"), { recursive: true });
 
+  // ── Layer 0 · 控制面（SPEC §7 阶段 A1 / AC-252）：六个 kind 全部从本共享骨架获得入站控制面 ────────
+  // 宿主 = supervisor 进程本身（Layer 0；本文件头注释的 Layer 0 清单第 7 项「controlPlane MCP」）。
+  // 端口由内核分配（serveKindControlPlane 缺省 port:0）⇒ 六个 kind 各起一个也不互撞；**实际端口**回写
+  // supervisor 日志（可观测面，便于逐 kind 回读 URL/端口）。
+  // 生命周期随宿主进程：SIGTERM/SIGINT / stop sentinel 退出即释放 listener，⛔ 不留孤儿 listener。
+  // 起不来（SDK 缺失 / 端口耗尽）⇒ 如实记一条 error 行，⛔ 不静默——「控制面缺席」必须与「在跑」可区分
+  // （硬规则 3b；这也让 AC2/AC6 的读数能取假）。
+  let controlPlane: ControlPlaneHandle | null = null;
+  const controlPlaneRel = path.posix.join(".quay", spec.controlFile);
+  try {
+    controlPlane = await serveKindControlPlane(opts.kind, opts.root);
+    // 结构化运行时回读面（statePaths().controlPlaneFile）+ 人读日志一行。两者都写：日志是时间线，
+    // JSON 是逐 kind 回读的机器面（AC2/AC6）。
+    try {
+      fs.writeFileSync(
+        st.controlPlaneFile,
+        JSON.stringify({ kind: opts.kind, url: controlPlane.url, port: controlPlane.port, pid: process.pid, rel: controlPlaneRel, at: ts() }) + "\n",
+        "utf8",
+      );
+    } catch { /* 回读面写失败不致命；上面的日志行仍在 */ }
+    appendLog(
+      st.supervisorLog,
+      `${ts()} supervisor: control plane kind=${opts.kind} listening at ${controlPlane.url} (port=${controlPlane.port}, rel=${controlPlaneRel})`,
+    );
+  } catch (e) {
+    appendLog(
+      st.supervisorLog,
+      `${ts()} supervisor: control plane start FAILED for kind=${opts.kind} (rel=${controlPlaneRel}): ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+  const closeControlPlane = (): void => {
+    if (!controlPlane) return;
+    const h = controlPlane;
+    controlPlane = null;
+    // 退出即摘掉回读面：留下的 JSON 会让「控制面在跑」与「已经停了」同形（硬规则 3b）。
+    try { fs.rmSync(st.controlPlaneFile, { force: true }); } catch { /* ignore */ }
+    try { void h.close(); } catch { /* 进程即将退出，listener 随 fd 释放 */ }
+  };
+
   // AC155：worker 并发缺省不再经 env 注入 QUAY_MAX_TASK_SUBAGENTS="5"（旧第三份并发真相源）——
   // 驱动自己经 driver-config 读 drivers.yml（resolveConcurrency → driverCap 单一真相源）。supervisor
   // 只透传显式 --cap/--concurrency（若有），⛔ 不再替驱动决定缺省并发。
@@ -1180,10 +1256,12 @@ export async function runSupervisor(opts: SupervisorOptions): Promise<number> {
   process.on("SIGHUP", () => { /* ignore */ });
   process.on("SIGTERM", () => {
     stopping = true;
+    closeControlPlane();
     if (child) { try { child.kill("SIGTERM"); } catch { /* gone */ } }
   });
   process.on("SIGINT", () => {
     stopping = true;
+    closeControlPlane();
     if (child) { try { child.kill("SIGINT"); } catch { /* gone */ } }
   });
 
