@@ -144,6 +144,7 @@ Channels 独有：官方契约 + policy 闸 + 跨机；但 quay server 不是 pe
 - plugin/scripts/channel-probe-server.ts (new)
 - plugin/test/peer-identity-probe.test.mjs (new)
 - plugin/test/channel-probe-server.test.mjs (new)
+- plugin/scripts/capability-catalog.sh
 - docs/analysis/session-inbound-two-paths-2026-09-13.md (new)
 
 ## 执行读数（worker 落地记录 —— ⛔ 与上面的 AC 文本分开写，逐条说明**实际结果**）
@@ -170,4 +171,5 @@ Channels 独有：官方契约 + policy 闸 + 跨机；但 quay server 不是 pe
 **残留与已完成的清理**：
 - 两枚 `kill -9` 留下的孤儿 socket（`1695152.sock`、`1753464.sock`）已在收尾时手工删除；`~/.claude/sessions/` 中探针遗留记录 = 0。
 - 实验期间为让 `server:` 解析成功而在 worktree 里临时写入的 `.mcp.json` **已还原为 `{"mcpServers":{}}`**（`git diff` 为空）。
+- `plugin/scripts/capability-catalog.sh`：两个新探针按仓库既有契约补了 5 张声明表的条目（QUESTION / CADENCE / INVALIDATION / LAST_REAFFIRMED / MATCHING），否则 catalog 的 AC1c 入口闸（未分类即 exit 1）会红。
 - 未评估项（⛔ 不以推断填充）：AC4 的 `startedAt`/`nameSince`/`updatedAt`/`statusUpdatedAt` 四字段；AC13 ⑤ 的「server→会话」方向（既有实现 `serve-send.ts` 存在，本次未复测）；AC13 ⑧ 跨机；AC11 的 provider 归因。
