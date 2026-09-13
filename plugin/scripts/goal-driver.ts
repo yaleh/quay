@@ -70,7 +70,7 @@ import { parse as parseYaml } from "yaml";
 // 在本地重推一遍「achieved ∧ long-term ∧ goal 非 active」——存量缺口正是「声明在 Core、只有 I5 接了线，
 // 每轮 gate 集合与缺口立案集合各自另算」：重推一份即第二处定义，正是 gap-meta-computegoalgaps 要关的
 // 那个口（硬规则 5b）。goal-store.ts 的 argv 构造仍走 meta-driver 的 goalStoreArgv（⛔ 不绕过 store）。
-import { inAchievedReverifyScope } from "../../packages/quay/src/goal-store.ts";
+import { inAchievedReverifyScope, readsFrozenPopulation } from "../../packages/quay/src/goal-store.ts";
 
 // ── 常量（由 DRIVER_KINDS registry 派生，⛔ 不另写一份路径字面量）──────────────────────────
 const GOAL_SPEC = DRIVER_KINDS.goal;
@@ -1435,8 +1435,20 @@ export async function objectiveSufficiencyVerdict(
  *                    合并会把「离开域后就没人管」这条正好要修的形态重新藏起来（硬规则 3b）。
  *                    ⛔ 与 done-unresolved 不同形：曾经 done 的关联任务**不覆盖**「此刻仍为假」，
  *                    只有 todo/ready/needs-human 才算有人接手。
+ *  derived-routed    **AC-216 复验域内【真值派生自 ③ 主体population】的判据专有**（本任务缺陷①）：该常设
+ *                    判据此刻**违反**，但它的 criterion 读的就是 ③ 的输入面（`check --stale-pass`，
+ *                    见 `readsFrozenPopulation`）⇒ 它的真值 =「冻结population 中存在此刻为假的 AC」
+ *                    这一命题，而 **③ 才是那个命题的唯一判据、且已在本轮为那条为假的 AC 产出路由**
+ *                    （`frozen-violated` / in-progress / stalled）。⇒ ② **不得**再为它独立立案。
+ *                    ⛔ 不是 standing-ok：它**此刻确实为假**（说它成立即硬规则 3b 的假绿）。
+ *                    ⛔ 不是 not-evaluated：读数在、违反也在，只是成因已由另一个判官接管。
+ *                    ⇒ 独立取值。判据 AC-242 本身**不动**（它保持诚实：有此刻为假的冻结 AC 就红）；
+ *                    本态只回答「这条红该由谁来消」——归 ③ 的主体 AC，不归这条元判据
+ *                    （为它立案会造出 DoD 结构上只能由**别的 AC 的 owner** 关闭的任务，每轮一条）。
+ *                    ⚠️ 退路（⛔ 闸不恒开）：若 ③ 本轮读不到 / 未评估 / 并未判 violated，则派生条件
+ *                    不成立 ⇒ 回落 `standing-violated` 照旧立案（成因不明时仍要有人看）。
  */
-export type GapState = "in-progress" | "gap" | "done-unresolved" | "stalled" | "not-evaluated" | "standing-ok" | "standing-violated" | "frozen-violated";
+export type GapState = "in-progress" | "gap" | "done-unresolved" | "stalled" | "not-evaluated" | "standing-ok" | "standing-violated" | "frozen-violated" | "derived-routed";
 
 /** 一条 AC 的缺口读数。taskCount 只在 not-evaluated 时为 null（⛔ 与 0 不同形）。 */
 export interface GoalGap {
@@ -1522,6 +1534,9 @@ export function standingReverifyAcs(
  *  （`standings` = I5 `check --achieved-failing` 的读数，goal-store 单一实现）。三态：standing-ok
  *  （域内且此刻成立 ⇒ 无工作可立）/ standing-violated（域内且此刻违反 且【没有在飞任务】⇒ 该 spawn
  *  立案；⛔ done 的关联任务不压下——它不覆盖回归）/ not-evaluated（读不到 taskFacts 或读不到 I5 读数）。
+ *  ⚠️ 第四态 `derived-routed`：违反的是**真值派生自 ③ 主体population** 的判据（criterion 读 ③ 的输入面
+ *  `check --stale-pass`）且 ③ 本轮已判 `violated` ⇒ ② 让位，不独立立案（见 GapState 的该条注释与
+ *  `readsFrozenPopulation`）。
  *  违反但已有在飞任务 ⇒ 复用 ① 的 in-progress / stalled。⛔ 此前这个域只被 I5 跑、不进本读数：
  *  achievedButFailing 只落轮读数与一行日志，「违规」既无写入者也无执行者
  *  （gap-meta-computegoalgaps）。
@@ -1609,6 +1624,20 @@ export function computeGoalGaps(
       }
       if (!standingFailing.has(id)) {
         out.push({ goal, ac: id, state: "standing-ok", taskCount: 0 });
+        continue;
+      }
+      // 派生判据（本任务缺陷①）：这条常设判据读的就是 ③ 的输入面 ⇒ 它的真值是「冻结population 中
+      // 存在此刻为假的 AC」这一命题的派生量，而那个命题的**唯一判据与执行者都是 ③**。③ 已在本轮为
+      // 那条为假的 AC 产出了路由（frozen-violated / in-progress / stalled，见上面的 ③ 分支）⇒ ②
+      // **不再**为这条元判据独立立案：为它立案会造出 DoD 结构上只能由【别的 AC 的 owner】关闭的任务
+      // （AC-242 的复绿条件不在它自己的域内），每轮一条、永远关不掉。
+      // ⛔ 复用 ③ 已算出的态（⛔ 不在此处新写一份「有没有主」的判定——那是硬规则 5b）：本分支只读
+      // `frozenReading.judgment`，即 ③ 的读数本身。
+      // ⛔ 闸不恒开：③ 读不到 / 未评估 / 并未判 violated ⇒ 派生条件不成立 ⇒ 回落 standing-violated
+      // 照旧立案（成因不明时仍要有人看，硬规则 6：缺值 = 未查 ≠ 为假）。
+      // 返回 `taskCount: null`：本态回答的不是「有几条任务是它的」（⛔ 与 0 不同形）。
+      if (readsFrozenPopulation(String(r.criterion ?? "")) && frozenReading !== null && frozenReading.judgment === "violated") {
+        out.push({ goal, ac: id, state: "derived-routed", taskCount: null });
         continue;
       }
       // 此刻违反 ⇒ 要有人做。**只有「在飞任务」才压下新一轮立案**：done/superseded 的关联任务
@@ -1898,7 +1927,9 @@ export interface GapSpawnPassResult {
  *  此刻违反且无在飞任务）+ `frozen-violated`（**冻结population**：已离开复验域、台账尾读数说此刻为假、
  *  且无在飞任务——⛔ 与 standing-violated 是两个 population（域外/域内），合并即把「离开域后没人管」
  *  这条正好要修的形态重新藏起来）。其余态⛔ 不消耗 spawn 名额：stalled/in-progress 已有人在处理，
- *  done-unresolved/standing-ok 无工作要立，not-evaluated 是读不到而不是缺口（硬规则 3b）。 */
+ *  done-unresolved/standing-ok 无工作要立，not-evaluated 是读不到而不是缺口（硬规则 3b），
+ *  `derived-routed` 的红归 ③ 的主体 AC、⛔ 不归这条元判据（为它立案会每轮造一条关不掉的任务——
+ *  它的复绿条件在别的 AC 的域内，见 GapState 的该条注释）。 */
 export function isFilingGapState(state: GapState): boolean {
   return state === "gap" || state === "standing-violated" || state === "frozen-violated";
 }

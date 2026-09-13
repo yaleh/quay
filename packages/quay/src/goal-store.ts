@@ -58,7 +58,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import YAML from "yaml";
 import {
@@ -130,6 +130,54 @@ export const GOAL_ACCEPTANCE_ACTIVE_ENV = "QUAY_GOAL_ACCEPTANCE_ACTIVE";
 // remaining ACs are picked up by the next invocation (the rotation is resumable from the ledger
 // ALONE: eligibility is "oldest recorded verification first", so there is no cursor to drift).
 export const SWEEP_ACTOR = "goal-sweep";
+/** The AMENDMENT dry-run's actor — deliberately a DIFFERENT string from `SWEEP_ACTOR`
+ *  (gap-ac242-derived-criterion-double-judged-and-amendment-unguarded, defect ②):
+ *  「对一条已 achieved 的 AC 修订 criterion」时，本轮对**新**判据的空跑以本 actor 落账，读台账的人
+ *  能区分「轮转按年龄轮到了它」与「判据文本变了，所以立刻重跑了一次」——两者是不同的**成因**，
+ *  用同一个 actor 记就不可归因（硬规则 3：枚举态而非布尔态；这里的第二态就是「为什么这次跑了它」）。
+ *  ⛔ 它与 `SWEEP_ACTOR` 一样是**轮转写者**：`gateTails` 把两者的尾部都读进 `lastSweep`（见下），
+ *  否则这条空跑写下的 verdict 不会被判定面读到，机制就等于没接。 */
+export const AMEND_ACTOR = "goal-amend";
+/** ③ 的**输入面**：`check --stale-pass`（本文件 CLI 的旗标，全文唯一）。一条 AC 的 criterion 若读的是
+ *  这个读数，它的真值就是【冻结population 此刻有没有为假的 AC】这一命题的派生量 —— 而那个命题的
+ *  主体population 与唯一执行者都是 ③（`computeGoalGaps` 的第三个分支读到本函数的消费者）。
+ *  见 `readsFrozenPopulation`。 */
+export const FROZEN_POPULATION_FLAG = "--stale-pass";
+/** 一条 criterion 是否**读的就是 ③ 的输入面**（`check --stale-pass`）。
+ *
+ *  为什么需要这个谓词（gap-ac242-derived-criterion-double-judged-and-amendment-unguarded 缺陷①）：
+ *  同一句真相——「冻结population 中有一条 AC 此刻为假」——被**两个判官**判成两个主体：③ 正确地把它
+ *  路由给那条**为假的 AC**（AC-203，已有 owner ⇒ in-progress），而 ② 常设不变式分支读到 AC-242
+ *  自己的判据为红 ⇒ 为 **AC-242 立案**。AC-242 的复绿条件不在它自己的域内（它唯一的出口是把那条
+ *  冻结 AC 变真），故 ② 为它立的每一条任务，其 DoD 都结构上只能由**另一条 AC 的 owner** 关闭 ——
+ *  每轮一条永远关不掉的任务。⇒ 真值**派生自 ③ 主体population** 的常设判据，不得被 ② 独立立案。
+ *
+ *  判定**按位置**（硬规则 2）：输入不是散文，是【可执行的判据文本】本身 —— 旗标出现在判据里就是
+ *  「这条判据会去读那个读数」，不是「某处提到过」。要求**成词**出现（前后是空白/引号/行界），
+ *  故 `echo --stale-pass-notes` 这类子串不算。
+ *
+ *  ⛔ 误判的代价是**有界的**：它只会让 ② 把立案让给 ③ ——而 ③ 正是那个读数的拥有者；且 ② 只在
+ *  ③ **本轮的读数为 `violated`**（即派生条件确实成立）时才让（见 goal-driver 的 `derived-routed`），
+ *  读不到 / 未评估时**照旧立案**，因此闸不会恒不开。 */
+export function readsFrozenPopulation(criterion: unknown): boolean {
+  const s = typeof criterion === "string" ? criterion : "";
+  return s.split(/[\s"'`;|&()]+/).includes(FROZEN_POPULATION_FLAG);
+}
+/** 一条 criterion 的**内容指纹**（规范化空白后 sha256 的前 16 个十六进制位）。
+ *
+ *  用途（同一任务缺陷②）：「对一条已 achieved 的 AC 修订 criterion」后，那条 AC 既有的轮转 verdict
+ *  说的**不再是当前这条判据**。判定面因此不能把它计进 `verifiedFresh`（那是「查过且全好」，而这里
+ *  「查过的不是这一版」），也不能计进 `failing`（那是对当前判据下断言）⇒ 独立取值
+ *  `amendedUnverified`。落账端（`sweepFrozen`）把本指纹写进事件的 `payload.criterionHash`，
+ *  判定端（`checkStalePass`）逐条比对。
+ *
+ *  ⛔ 规范化空白（把连续空白压成单个空格再 trim）：`goal-store write` 会重排整份 frontmatter，
+ *  故纯排版变化不得被读成「判据被改过」——那会让每条 AC 每次写入都被判修订、空跑一轮（成本）。
+ *  而**语义**变化（增删维度、换判据）必然改变非空白文本 ⇒ 仍被捕获。 */
+export function criterionFingerprint(criterion: unknown): string {
+  const s = typeof criterion === "string" ? criterion : "";
+  return createHash("sha256").update(s.replace(/\s+/g, " ").trim(), "utf8").digest("hex").slice(0, 16);
+}
 /** Rotation cadence: an AC is eligible for re-verification once its last RECORDED verification is
  *  older than this. ⛔ Not a verdict threshold — eligibility, i.e. "when is looking again worth the
  *  cost" — and it is what bounds the steady-state cost (see the block comment above). */
@@ -159,16 +207,24 @@ export const DEFAULT_STALE_PASS_MAX_AGE_MS = 4 * 60 * 60 * 1000;
  *  above is only true if these two agree, so it is one literal, not two. */
 export const SWEEP_CRITERION_TIMEOUT_MS = 60_000;
 
-/** One `gate:"goal"` ledger row, reduced to the fields a rotation judgment needs. */
-type GateTail = { at: string; verdict: string; actor: string; reason: string };
+/** One `gate:"goal"` ledger row, reduced to the fields a rotation judgment needs.
+ *  `criterionHash` = the criterion fingerprint the writer verified (`payload.criterionHash`),
+ *  empty string when the event predates the amendment gate or carries none — see
+ *  `checkStalePass`, where "no fingerprint" is read as「不知道这条 verdict 针对哪一版判据」,
+ *  ⛔ never as "it matches the current one" (hard rule 3b: 读不懂输入不得伪装成合格). */
+type GateTail = { at: string; verdict: string; actor: string; reason: string; criterionHash: string };
 
 /**
  * Per-record ledger TAILS in ONE pass: `last` = the most recent `gate:"goal"` event for the id;
- * `lastSweep` = the most recent one written by the ROTATION (`actor === SWEEP_ACTOR`). Two maps
- * because they answer two different questions — "what does the ledger say" vs "has the rotation
- * actually looked at this recently" — and collapsing them would make a rotation-written verdict
- * indistinguishable from a per-round-loop one (hard rule 4b: the tail is read as a proxy for
+ * `lastSweep` = the most recent one written by the ROTATION (`actor` ∈ {`SWEEP_ACTOR`, `AMEND_ACTOR`}).
+ * Two maps because they answer two different questions — "what does the ledger say" vs "has the
+ * rotation actually looked at this recently" — and collapsing them would make a rotation-written
+ * verdict indistinguishable from a per-round-loop one (hard rule 4b: the tail is read as a proxy for
  * current truth, so who wrote it and when is part of the reading, not decoration).
+ *
+ * ⚠️ `AMEND_ACTOR` counts as a rotation writer ON PURPOSE: the amendment dry-run IS a re-verification
+ * (it runs the criterion and records the verdict) — the only difference is WHY this one was picked.
+ * Excluding it would make an amendment-triggered verdict invisible to the judgment it exists to feed.
  */
 function gateTails(goalDir: string): { last: Map<string, GateTail>; lastSweep: Map<string, GateTail> } {
   const last = new Map<string, GateTail>();
@@ -189,9 +245,10 @@ function gateTails(goalDir: string): { last: Map<string, GateTail>; lastSweep: M
       verdict: String(ev.verdict ?? ""),
       actor: String(ev.actor ?? ""),
       reason: typeof payload.reason === "string" ? payload.reason : "",
+      criterionHash: typeof payload.criterionHash === "string" ? payload.criterionHash : "",
     };
     last.set(id, row); // append order = on-disk order ⇒ the LAST matching event wins
-    if (row.actor === SWEEP_ACTOR) lastSweep.set(id, row);
+    if (row.actor === SWEEP_ACTOR || row.actor === AMEND_ACTOR) lastSweep.set(id, row);
   }
   return { last, lastSweep };
 }
@@ -225,6 +282,22 @@ export interface StalePassReading {
   notEvaluated: string[];
   /** Rotation verified within `maxAgeMs` and it passed. */
   verifiedFresh: string[];
+  /** The last ROTATION verdict for this AC cannot be tied to the criterion text on disk now
+   *  (`payload.criterionHash` ≠ the current fingerprint, including the legacy case of an event
+   *  carrying no fingerprint at all) ⇒ that verdict says nothing about the CURRENT criterion.
+   *  A **third** answer, ⛔ sharing an output shape with neither `verifiedFresh` ("verified true") nor
+   *  `failing` ("verified false") — both would be an assertion about a criterion nobody has run
+   *  (hard rule 3b). Concretely this is the state
+   *  gap-ac242-derived-criterion-double-judged-and-amendment-unguarded found AC-203 frozen in: its
+   *  criterion was tightened while it was already `achieved`, its old `pass` kept counting as fresh,
+   *  and the forbidden state therefore existed for ~1.5h BEFORE anything could detect it.
+   *  ⛔ The tail fallback is deliberately SKIPPED for these (see `checkStalePass`): the recorded
+   *  history — including a `fail` — is about the superseded text.
+   *  ⚠️ Two causes, one bucket, and they resolve differently: a POSITIVE mismatch (the recorded
+   *  fingerprint differs from the current one) makes `sweepFrozen` give the AC top eligibility
+   *  (bypassing the age gate) and re-record it under `AMEND_ACTOR` in the same driver round; a legacy
+   *  event with NO fingerprint rides the normal age rotation instead. */
+  amendedUnverified: string[];
   /** No `gate:"goal"` event at all — never evaluated by anything. */
   neverGated: string[];
   rotation: {
@@ -1370,6 +1443,7 @@ export function createGoalStore(
     const staleUnverified: string[] = [];
     const notEvaluated: string[] = [];
     const verifiedFresh: string[] = [];
+    const amendedUnverified: string[] = [];
     const neverGated: string[] = [];
     let sweptEver = 0;
     let lastSweepAt: string | null = null;
@@ -1383,6 +1457,25 @@ export function createGoalStore(
       }
       if (!tail) {
         neverGated.push(id);
+        continue;
+      }
+      // AMENDMENT GATE — BEFORE the freshness branches, because it changes what they MEAN. A rotation
+      // verdict is a verdict about a PARTICULAR criterion text; when the text has changed since, the
+      // verdict is about something that is no longer on disk. Neither reading is available:
+      //   · not `verifiedFresh` — that asserts "verified true", about the OLD text;
+      //   · not `failing`       — that asserts "verified false", about the OLD text too.
+      // ⇒ its own bucket. The `tail` fallback below is skipped for the same reason: the tail may BE
+      // this very event (the rotation's verdict is the tail whenever it is the last thing recorded),
+      // so falling through would re-assert the superseded verdict through the back door — exactly the
+      // 2026-09-13 AC-203 shape (`8bff44425` tightened the criterion at 03:22Z, the old `pass` kept
+      // counting as fresh, and the forbidden state existed ~1.5h before anything could see it).
+      // An event with NO fingerprint (legacy, pre-gate) lands here too: "we cannot tell which text it
+      // verified" is unknown, ⛔ not "it must have been this one" (hard rule 3b). One-time migration:
+      // such ACs converge with the normal age rotation, which re-records each WITH a fingerprint —
+      // ⛔ they are not prioritized (see `sweepFrozen`), because re-running the whole population on
+      // the round this lands is a spike the rotation was never sized for.
+      if (sw && sw.criterionHash !== criterionFingerprint(ac.criterion)) {
+        amendedUnverified.push(id);
         continue;
       }
       // Order matters: a rotation verdict WITHIN the freshness bound is the current truth (either
@@ -1407,6 +1500,7 @@ export function createGoalStore(
       staleUnverified: sortIds(staleUnverified),
       notEvaluated: sortIds(notEvaluated),
       verifiedFresh: sortIds(verifiedFresh),
+      amendedUnverified: sortIds(amendedUnverified),
       neverGated: sortIds(neverGated),
       rotation: { sweptEver, lastSweepAt, minAgeMs: DEFAULT_SWEEP_MIN_AGE_MS, maxAgeMs },
     };
@@ -1414,7 +1508,8 @@ export function createGoalStore(
 
   /**
    * One bounded ROTATION step: re-run the eligible frozen ACs' criteria and RECORD each verdict as
-   * a `gate:"goal"` event with `actor: SWEEP_ACTOR` — the same carrier the judgment reads, so the
+   * a `gate:"goal"` event with `actor: SWEEP_ACTOR` (`AMEND_ACTOR` when the pick was driven by a
+   * criterion amendment rather than by age) — the same carrier the judgment reads, so the
    * frozen tail stops being frozen (⛔ no second state file, and therefore no cursor to drift: the
    * next invocation's eligibility is derived from these very events).
    *
@@ -1450,13 +1545,45 @@ export function createGoalStore(
       const t = Date.parse(sw.at);
       return Number.isFinite(t) ? nowMs - t : Infinity;
     };
+    // AMENDMENT PRIORITY (gap-ac242-…-amendment-unguarded, defect ②): a rotation verdict that
+    // POSITIVELY describes a different criterion text than the one on disk now (`criterionHash`
+    // present AND different) has no usable verdict — the judgment puts it in `amendedUnverified` —
+    // ⇒ it does not wait out `minAgeMs`. The age gate answers "how long before looking again is worth
+    // the cost"; the question here is different — "the thing we looked at is not this thing" — so age
+    // is not the right predicate at all. This is exactly the AC-203 shape: a criterion tightened at
+    // 03:22Z and a `pass` recorded for the OLD text that kept counting as fresh.
+    //
+    // ⚠️ A LEGACY event carrying NO fingerprint is deliberately NOT prioritized, although the judgment
+    // also reports it as `amendedUnverified` (see `checkStalePass`): it makes no claim at all about
+    // which text it verified, so there is no evidence of an amendment — only an unrecorded provenance.
+    // Prioritizing those would re-run the ENTIRE population (77 ACs here) on the round this code
+    // lands — a one-shot spike far outside the bound the age rotation was sized for
+    // (`DEFAULT_SWEEP_MIN_AGE_MS`'s cost comment). They converge with the normal age rotation, which
+    // re-records each with a fingerprint. Two causes, one bucket, two different eligibilities —
+    // and the distinction between them is exactly "is there a positive claim of a mismatch".
+    // ⛔ Still inside the SAME bound: these are candidates in the one eligible list, and `budget`/
+    // `wallMs` cap the invocation exactly as before (⛔ no second budget).
+    const byId = new Map(frozen.map((ac) => [String(ac.id), ac]));
+    const amendedIds = new Set(
+      frozen
+        .map((ac) => String(ac.id))
+        .filter((id) => {
+          const sw = lastSweep.get(id);
+          if (!sw || sw.criterionHash === "") return false;
+          return sw.criterionHash !== criterionFingerprint(byId.get(id)?.criterion);
+        }),
+    );
     // Eligibility threshold per AC: a recorded FAIL is re-checked sooner (see
     // DEFAULT_FAIL_RECHECK_DIVISOR) — ⛔ ordering only, the per-invocation bound is unchanged.
     const eligibleAt = (id: string): boolean => ageOf(id) > (lastSweep.get(id)?.verdict === "fail" ? minAgeMs / DEFAULT_FAIL_RECHECK_DIVISOR : minAgeMs);
     const eligible = frozen
       .map((ac) => String(ac.id))
-      .filter(eligibleAt)
+      .filter((id) => amendedIds.has(id) || eligibleAt(id))
       .sort((a, b) => {
+        // Amendments first (they are the ones with no usable verdict), then oldest-first.
+        const aa = amendedIds.has(a);
+        const ab = amendedIds.has(b);
+        if (aa !== ab) return aa ? -1 : 1;
         const da = ageOf(a);
         const db = ageOf(b);
         if (da !== db) return db - da; // oldest (Infinity first) wins — least-recently-verified-first
@@ -1466,7 +1593,6 @@ export function createGoalStore(
     if (picked.length === 0) {
       return { evaluated: frozen.length > 0, refused: false, eligible: eligible.length, ran: [], stoppedBy: "exhausted" };
     }
-    const byId = new Map(frozen.map((ac) => [String(ac.id), ac]));
     const { appendGateEvent } = await import("./gate/gate-event-store.ts");
     const logPath = path.join(path.dirname(goalDir), ".quay", "gate-events.jsonl");
     const root = resolveGitRoot(goalDir) ?? path.dirname(goalDir);
@@ -1494,10 +1620,17 @@ export function createGoalStore(
           item_id: id,
           pipeline_id: id,
           gate: "goal",
-          actor: SWEEP_ACTOR,
+          // ⛔ The actor is the DRY-RUN's cause, and the two causes are distinguishable
+          // (AMEND_ACTOR vs SWEEP_ACTOR) — so a reader can tell "the age rotation reached it" from
+          // "its criterion text changed, so this round ran it immediately". Both count as rotation
+          // writes (see `gateTails`), because both are re-verifications.
+          actor: amendedIds.has(id) ? AMEND_ACTOR : SWEEP_ACTOR,
           verdict,
           timestamp: new Date().toISOString(),
-          payload: { reason: res.reason },
+          // The fingerprint pins WHICH criterion text this verdict is about — the whole point of the
+          // amendment gate. ⛔ Recorded, not inferred later from mtime/clock (hard rule 4 corollary
+          // 2: a value that depends on the host is not a measurement).
+          payload: { reason: res.reason, criterionHash: criterionFingerprint(criterion) },
         });
       }
     } finally {
@@ -2539,6 +2672,19 @@ async function main(argv: string[]) {
         }
         const r = store.checkStalePass();
         process.stdout.write(JSON.stringify(sweep ? { ...r, sweep } : r, null, 2) + "\n");
+        // ⛔ `amendedUnverified` deliberately does NOT drive the exit code (unlike `notEvaluated`, which
+        // is exit 3). Two reasons, both required:
+        //   · AC-242's expect is the contract this command's exit codes answer to, and it enumerates
+        //     exactly three: 0 = no frozen AC is currently false (+ the rotation has run), 1 = one is,
+        //     3 = not-evaluated.「有一条判据被改过、新版还没跑」is none of those — it is UNKNOWN, not
+        //     false and not "the mechanism is absent"; widening the exit code would silently rewrite a
+        //     criterion this task is explicitly forbidden to touch (⛔ 判据 AC-242 本身不动).
+        //   · it is transient and self-resolving within ONE driver round: `sweepFrozen` gives these ACs
+        //     top eligibility and re-records them with the current fingerprint, so the very next read
+        //     has a usable verdict either way. A red here would be a one-round flap, not a state.
+        // It is still a DISTINCT word in the JSON `r` above — the reading can tell "unknown because the
+        // criterion changed" from every other bucket (hard rule 3b: 「不知道」不得与「查过且全好」同形;
+        // ⛔ 也不同形于 failing, which would be an assertion about a criterion nobody has run).
         if (r.failing.length > 0) {
           // ⛔ stderr carries the ids and the fact that they are CURRENTLY false — attributable, so
           // AC-241's discipline holds for the event this criterion's own failure produces.
