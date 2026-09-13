@@ -1,7 +1,7 @@
 ---
 id: GOAL-009
 title: 交付面端到端自证 —— 从 build 到「driver 驱动第三方项目开发」的闭环
-status: active
+status: achieved
 kind: goal
 origin: 人 2026-09-11：orangevps meta-cc 副本升级路径验证需要一条挂在本 goal 下的新
   AC（AC-238）才能进入持续复验范围；GOAL-009 已第二次被 goal-driver 机械 flip 回
@@ -50,6 +50,11 @@ statusLog:
     reason: 人 2026-09-13 裁定：因 AC-203 当前为假（合格 kind 仅 {promotion}，需 >=2 种 driver
       kind），本目标退出达成态、重新激活，让其 AC 回到复验域并由机制重新驱动补齐证据。⛔ 这不是回归：AC-203 是 09-13
       被刻意收紧的判据，此前「driver 在第三方项目里真活」只有一半证据（结构上分不清验的是哪种 driver）。
+  - at: 2026-09-13T05:40:57.189Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: all ACs achieved + sufficiency covered"
 ---
 ## 背景
 
