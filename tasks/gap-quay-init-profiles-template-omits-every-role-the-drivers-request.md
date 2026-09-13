@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-profiles-template-omits-every-role-the-drivers-request
 title: quay-init 的 profiles 模板缺少生产 driver 请求的全部五个角色 —— 第三方项目 GOAL 永不闭环、worker 永远派不出
-status: todo
+status: ready
 labels:
   - gap
   - defect
