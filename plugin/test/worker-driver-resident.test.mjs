@@ -132,6 +132,7 @@ import {
   rmSafe,
   stopAllResidentDrivers,
   waitFor,
+  WAIT_BASE_MS,
   writeTaskFile,
   writeTouchedTask,
   counterNodeE,
@@ -235,11 +236,10 @@ test("AC3 (gap-launch-script-worker-cap-broken) — resident loop never dispatch
   ]);
   t.after(() => drv.stop());
   t.after(() => rmSafe(root));
-  // 5000 → 15000：两次完整派发（ready-pool/selector/worker 各 spawn 一个 node 子进程 + 每次派发后
-  // 等在飞 worker 落地含 git landing 读）在满载 16 核 full-suite 并发下可 >5s（suite 轮实测 5000 超时
-  // flake、picks=1，与同文件 AC1「第二次派发」10000ms 约定同源——gap-worker-driver-resident-loop-intermittent-hang；
-  // 补充处置 A 类在 develop 10000 基础上再放宽至 15000）。
-  await waitFor(() => drv.events().filter((e) => e.event === "selector-picked").length >= 2, 15000);
+  // 等待上限不再是裸字面量（⛔ 10000/15000/30000 那种「本机是空闲 16 核」的数字）：waitFor 的缺省
+  // 网 = WAIT_BASE_MS × 本机当下的抢占因子（/proc/loadavg ÷ nproc，每次调用读一次）。实测本用例
+  // 空载 1.5s，满载 suite 下曾 >5s 而超时（gap-worker-driver-resident-loop-intermittent-hang）。
+  await waitFor(() => drv.events().filter((e) => e.event === "selector-picked").length >= 2);
   const picks = drv.events().filter((e) => e.event === "selector-picked");
   // gap-a picked first (touches foo.ts); while it is in-flight, gap-b (also foo.ts) must be filtered
   // out of the selector's candidate set — the selector asked for gap-b on its 2nd call but was only
@@ -283,11 +283,10 @@ test("AC2 — no --task ⇒ selection loop runs and selector_reason lands the se
   ]);
   t.after(() => drv.stop());
   t.after(() => rmSafe(root));
-  // 5000 → 15000：一次完整派发（ready-pool/selector/worker 各 spawn 一个 node 子进程 + worker 落地含
-  // git landing 读）在满载 16 核 full-suite 并发下可 >5s（suite 轮实测 5000 超时 flake、outcomes=0，与同文件
-  // AC1 10000ms 约定同源——gap-worker-driver-resident-loop-intermittent-hang；
-  // 补充处置 A 类在 develop 10000 基础上再放宽至 15000）。
-  await waitFor(() => readOutcomeLines(root).length >= 1, 15000);
+  // 一次完整派发（ready-pool/selector/worker 各 spawn 一个 node 子进程 + worker 落地含 git landing
+  // 读）：上限走 waitFor 的宿主推导网（WAIT_BASE_MS × 当前抢占因子），⛔ 不再写死 ms
+  // （gap-suite-wallclock-budgets-literals-depend-on-host-capacity）。
+  await waitFor(() => readOutcomeLines(root).length >= 1);
   const picked = drv.events().find((e) => e.event === "selector-picked");
   assert.ok(picked, "the selection loop emitted a selector-picked event (AC2 chain is wired)");
   assert.equal(picked.task, "gap-a");
@@ -322,10 +321,9 @@ test("AC1 — resident loop does not exit after one worker; keeps dispatching wh
   ]);
   t.after(() => drv.stop());
   t.after(() => rmSafe(root));
-  // 5000 → 10000：两次完整派发+落地循环（ready-pool/selector/worker 各 spawn 一个 node 子进程 + landing
-  // 读 git）在满载 16 核 full-suite 并发下可 >5s（suite 轮实测 5000 超时 flake、picks=1）；与同文件
-  // 「第二次派发」的既有约定（gap-b 等 10000ms）一致。
-  await waitFor(() => readOutcomeLines(root).length >= 2, 10000);
+  // 两次完整派发+落地循环：上限走 waitFor 的宿主推导网（⛔ 不再写死 10000/15000 ——
+  // gap-suite-wallclock-budgets-literals-depend-on-host-capacity）。
+  await waitFor(() => readOutcomeLines(root).length >= 2);
   const picks = drv.events().filter((e) => e.event === "selector-picked");
   assert.equal(picks.length, 2, "AC1: two sequential selections — the resident loop kept going after the first");
   assert.deepEqual(picks.map((p) => p.task), ["gap-a", "gap-b"], "in-memory subtraction: second fill skipped the in-flight gap-a");
@@ -348,7 +346,7 @@ test("AC3 — resource-gate WAIT ⇒ resident loop stops starting workers (zero 
   ]);
   t.after(() => drv.stop());
   t.after(() => rmSafe(root));
-  await waitFor(() => readRoundLines(root).length >= 1, 15000);
+  await waitFor(() => readRoundLines(root).length >= 1);
   assert.equal(drv.events().some((e) => e.event === "worker-spawned"), false, "AC3: no worker spawned while resource-gate reports WAIT");
   assert.equal(readOutcomeLines(root).length, 0, "zero outcome records — nothing was dispatched");
   const stop = readRoundLines(root).find((r) => r.action === "stop");
@@ -436,7 +434,7 @@ test("AC138-3 — pool-empty round still writes a round heartbeat (⛔ outcome s
   ]);
   t.after(() => drv.stop());
   t.after(() => rmSafe(root));
-  await waitFor(() => readRoundLines(root).length >= 1, 15000);
+  await waitFor(() => readRoundLines(root).length >= 1);
   const rounds = readRoundLines(root);
   assert.ok(rounds.length >= 1, "at least one round record written even when the pool is empty");
   const last = rounds[rounds.length - 1];
@@ -510,7 +508,9 @@ test("liveness wiring — resident loop calls the liveness checker each round (F
   ]);
   t.after(() => drv.stop());
   t.after(() => rmSafe(root));
-  await waitFor(() => readRoundLines(root).length >= 1 && readOutcomeLines(root).length >= 2, 30000);
+  // 这一步等的是 2 次 worker 落地（每次含一个真 liveness 子进程 spawn + 落地 git 读）——实测空载即
+  // ~30s，故取 2×基网：上限 = WAIT_BASE_MS × 2 × 本机当下的抢占因子（⛔ 不再是裸 30000）。
+  await waitFor(() => readRoundLines(root).length >= 1 && readOutcomeLines(root).length >= 2, WAIT_BASE_MS * 2);
   const rounds = readRoundLines(root);
   const livenessCount = fs.existsSync(livenessCnt) ? Number(fs.readFileSync(livenessCnt, "utf8")) : 0;
   // liveness 在每轮【开头】跑（writeRound 之前），结果写进每轮 round 记录。接线证明取两个直接量：
@@ -544,7 +544,7 @@ test("AC6 (superseded-reclaim wiring) — reconcile step actually calls reclaimS
   ]);
   t.after(() => drv.stop());
   t.after(() => rmSafe(root));
-  await waitFor(() => readRoundLines(root).length >= 1, 15000);
+  await waitFor(() => readRoundLines(root).length >= 1);
   const rounds = readRoundLines(root);
   assert.ok(rounds.length >= 1, "at least one round ran");
   for (const rec of rounds) {
@@ -668,7 +668,7 @@ test("negative control — drv.stop kills the whole process group: a long-lived 
   ]);
   t.after(() => drv.stop());
   t.after(() => rmSafe(root));
-  await waitFor(() => drv.events().some((e) => e.event === "worker-spawned"), 15000);
+  await waitFor(() => drv.events().some((e) => e.event === "worker-spawned"));
   const closed = new Promise((resolve) => drv.child.stdout.on("close", resolve));
   drv.stop();
   await Promise.race([
