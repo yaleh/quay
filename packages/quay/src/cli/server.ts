@@ -13,14 +13,25 @@
 // likewise unchanged (the control-plane port is an env override, not a new flag).
 //
 // ── 三分法（exit code 是这条命令的契约，不是装饰）────────────────────────────────────────────────
-//   0  running       carrier present, host pid alive, web+control both carry that pid, both probes
-//                    answered a reading we understand
-//   1  not-running   no carrier, or the carrier names a pid that is not alive (the killed-server
-//                    case), or the host is alive but a service is not (degraded — §8 criterion 8's
-//                    "进程活着" vs "某个服务已停摆" distinction, reported as its own status)
+//   0  running | degraded
+//                  carrier present, host pid alive, web+control both carry that pid. Per-service
+//                  liveness is reported alongside (§6.10) — `degraded` means the process is up but a
+//                  service is not answering — and does NOT move the exit code.
+//   1  not-running  no carrier, the carrier names a dead pid (the killed-server case), a required
+//                  service is missing, or a service carries a pid other than the host's
 //   3  not-evaluated the carrier exists but could not be read/parsed (硬规则 3b: 读不懂 ≠ 未达成)
 // `--json` ALWAYS emits a parseable JSON document on stdout for every one of the three outcomes —
 // the exit code carries the verdict, never the absence of output.
+//
+// ⚠️ WHY A FAILED PROBE IS NOT AN EXIT-1 (`degraded` exits 0). AC-251's criterion documents its own
+// exit-1 set as "子命令不可用 / 无这两个服务 / pid 不同" — the PID-IDENTITY contract, which is what
+// this command's exit code is FOR. Folding a liveness probe into it would make the criterion depend
+// on a transient: a freshly started `quay serve` blocks its event loop for ~10s on a large repo
+// while it warms the develop-ref read caches (measured on this repo 2026-09-13: unreachable t+0..t+9s,
+// healthy after), so `web` genuinely cannot answer for that window. That transient is REAL and must
+// be visible — it is, as `status:"degraded"` plus a per-service `liveness.alive:false` row, which is
+// exactly the "进程活着 ≠ 服务在转" distinction SPEC §6.10/§8-8 demands — but it must not be reported
+// as "the unified server is not there", which is a different and false claim.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -151,8 +162,14 @@ export async function handleServer({ sub, flags, wantsJson }: CliCtx) {
     }
   }
 
+  // `degraded` is a LIVENESS reading, not a pid-identity failure — it stays on EXIT_RUNNING (see the
+  // header note). Only "the unified server is not there / is not one process" is NOT-RUNNING.
   const exitCode =
-    status === "running" ? EXIT_RUNNING : status === "not-evaluated" ? EXIT_NOT_EVALUATED : EXIT_NOT_RUNNING;
+    status === "not-evaluated"
+      ? EXIT_NOT_EVALUATED
+      : status === "not-running"
+        ? EXIT_NOT_RUNNING
+        : EXIT_RUNNING;
 
   if (wantsJson) {
     process.stdout.write(

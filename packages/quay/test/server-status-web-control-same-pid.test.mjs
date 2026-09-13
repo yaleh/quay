@@ -25,6 +25,7 @@ import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import { startServer } from "../src/serve.ts";
 import { readServerState, pidAlive, SERVER_STATE_REL, CONTROL_PLANE_NAME } from "../src/server-state.ts";
@@ -357,6 +358,55 @@ test("硬规则 3b — a corrupt / wrong-schema carrier is NOT-EVALUATED (exit 3
   fs.writeFileSync(carrierPath, JSON.stringify({ schemaVersion: 1, pid: process.pid, startedAt: "x", services: [{ name: "web", pid: process.pid }] }));
   const missingPort = await cli(["server", "status", "--json"], ws);
   assert.equal(missingPort.code, 3, "a service entry without a port is not the carrier's shape");
+});
+
+// ── §6.10 / §8-8: "进程活着" 与 "某个服务已停摆" must be DIFFERENT readings ─────────────────────────
+
+test("SPEC §6.10/§8-8 — a live host whose services do not answer reads `degraded`, not `running` (and not `not-running`)", async (t) => {
+  const ws = makeWorkspace("ac251-degraded");
+  const empty = makeWorkspace("ac251-degraded-empty");
+  t.after(() => {
+    fs.rmSync(ws, { recursive: true, force: true });
+    fs.rmSync(empty, { recursive: true, force: true });
+  });
+
+  // A port with nothing on it: bind then release, so the kernel-assigned port is genuinely free.
+  const probeFree = await new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.listen(0, "127.0.0.1", () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
+  });
+
+  // A well-formed carrier naming a LIVE pid (this test process) whose two services answer nothing.
+  fs.writeFileSync(
+    path.join(ws, SERVER_STATE_REL),
+    JSON.stringify({
+      schemaVersion: 1,
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      services: [
+        { name: "web", pid: process.pid, host: "127.0.0.1", port: probeFree },
+        { name: "control", pid: process.pid, host: "127.0.0.1", port: probeFree },
+      ],
+    }),
+  );
+
+  const res = await cli(["server", "status", "--json"], ws);
+  assert.equal(res.json.status, "degraded", "process alive + services not answering ⇒ degraded");
+  assert.equal(res.code, 0, "degraded is a LIVENESS reading — the pid-identity contract still holds ⇒ exit 0");
+  assert.equal(criterionViolation(res.json), null, "AC-251's pid contract is met, so its criterion passes");
+  for (const s of res.json.services) {
+    assert.equal(s.pid, process.pid, `${s.name}: the host pid is reported (the process IS there)`);
+    assert.equal(s.liveness.evaluated, true, `${s.name}: the probe ran and got a reading`);
+    assert.equal(s.liveness.alive, false, `${s.name}: …and the reading is "not answering"`);
+  }
+
+  // The three statuses must be pairwise distinct — a single boolean could not express this.
+  const absent = await cli(["server", "status", "--json"], empty);
+  assert.notEqual(absent.json.status, res.json.status, "降级 ≠ 未运行");
+  assert.equal(absent.code, 1);
 });
 
 // ── The help surface stays in sync with the verb table (one line, machine-checkable) ─────────────

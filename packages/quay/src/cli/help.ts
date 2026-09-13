@@ -375,9 +375,15 @@ Usage:
            same value as "down".
 
            Exit codes (the verdict is the exit code; --json always emits parseable JSON):
-             0  running        both services carry the host pid and both probes answered
-             1  not-running    no carrier, the carrier names a dead pid, or a service is not
-                               answering (the \`degraded\` status — process alive, service stalled)
+             0  running | degraded
+                              the unified server IS there — the carrier's web and control entries
+                              both carry the live host pid. \`degraded\` additionally means a service
+                              is not answering (process alive, service stalled): a LIVENESS reading,
+                              reported per service, which does NOT change the exit code. A
+                              just-started \`quay serve\` reads \`degraded\` for its first seconds
+                              while it warms its caches — a real reading, not a failure.
+             1  not-running    no carrier, the carrier names a dead pid, or web/control is absent
+                               or carries a pid other than the host's
              3  not-evaluated  the carrier exists but could not be read/parsed
 
   --json   Machine-readable output.
