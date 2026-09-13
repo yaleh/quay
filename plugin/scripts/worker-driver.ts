@@ -4091,7 +4091,8 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       // 静默看门狗 SIGKILL 的是【整个进程组】——runner 与它的 suite 一起死，它【结构上】写不成
       // （这正是既有 `recordDelegatedRound` 提前返回没能覆盖本子类的根因）。此时活着的写者只剩 driver
       // 进程自己（spawnSuiteAndWait 的调用方），记录必须由它补写。⛔ 只在「runner 不可能再写」的
-      // 情形下 force（见调用点：仅 hungByWatchdog 分支），否则就是同一轮双写、round 号虚增。
+      // 情形下 force（调用点只有两个，且都在同一行：hungByWatchdog / spawnFailed——前者 runner 被
+      // 整组杀掉、后者 runner 根本没被 spawn），否则就是同一轮双写、round 号虚增。
       if (!o?.force && !suiteRunsOutsideRunner(worktree)) return;
       const t0 = Date.now();
       const rd = appendDelegatedSuiteRound({
