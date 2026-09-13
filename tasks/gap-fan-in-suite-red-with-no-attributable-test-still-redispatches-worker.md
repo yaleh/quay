@@ -1,7 +1,7 @@
 ---
 id: gap-fan-in-suite-red-with-no-attributable-test-still-redispatches-worker
 title: suite 红但归因不出任何测试文件时 driver 仍照常重派 worker —— 把契约/基建问题伪装成实现问题，每次烧一轮会话
-status: todo
+status: ready
 labels:
   - gap
   - defect
