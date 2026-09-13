@@ -579,6 +579,18 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/ plugin/workflows/ plugin/agents/ plugin/probes/ plugin/loop/ plugin/.claude/ orchestration/
   run_checker "quay-init-closure-ratchet-stale" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/quay-init-closure-ratchet.ts" --check-stale --root "${repo_root}"
+  echo "== profiles role coverage check (gap-quay-init-profiles-template-omits-every-role-the-drivers-request) =="
+  # Every profile role a driver asks for must exist in the carrier a REAL init produces. The
+  # assertion object is init's OUTPUT (a temp workspace initialized by the Core CLI), never a
+  # template file: the defect this closes was a "fixed" carrier that the init path never used, and
+  # its acceptance was green the whole time. The shipped carrier is compared against that output so
+  # a one-sided edit to either template goes RED, and a retired role (inner) is a FAIL rather than
+  # a remark. No init artifact obtainable ⇒ exit 3 (NOT-EVALUATED), never a green it did not earn.
+  # Pinned by plugin/test/profiles-role-coverage-check.test.mjs +
+  # plugin/scripts/checker-mutation-cases/profiles-role-coverage-check.sh (four red controls).
+  # @static-tier change
+  # @static-object plugin/scripts/quay-init.sh plugin/.quay/profiles.yml packages/quay/src/init.ts
+  run_checker "profiles-role-coverage-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/profiles-role-coverage-check.ts" --check --root "${repo_root}"
   echo "== goal-driver task-boundary check (DIR-131, gap-goal-driver-task-boundary-check) =="
   # goal/task 职责边界防回归（DIR-131）：goal-driver.ts 不得出现 task 写路径调用点——task_write /
   # lifecycle_promote / lifecycle_retreat / lifecycle_complete 或指向 tasks/ 的 fs.write*/writeFileSync。

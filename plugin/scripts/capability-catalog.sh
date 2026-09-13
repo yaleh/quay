@@ -281,6 +281,7 @@ declare -A QUESTION=(
   [precommit-guard.ts]="At commit/merge time: do the DOC-CLASS checks pass (AC51 断言面拆分 — doc consistency checks moved out of the full suite into pre-commit: bash scripts/test.sh --static-checks-doc, seconds-level feedback instead of an 8-minute round, and editing docs no longer makes a running round red)? — the pre-commit AND pre-merge-commit hook that runs ① on every commit and on --no-ff merges (git merge --no-ff does NOT fire pre-commit, so --install-hook also wires pre-merge-commit with --merge, gap-precommit-guard-merge-bypass; AC62 ff-only fan-in fires NO hook, so the A6 无锁段 step 3 runs the doc check explicitly, AC63). ② rejecting commits/merges while a suite round is running was RETIRED under AC64 (2026-08-14): the danger it protected disappeared with AC42 — per-task suites run in their own worktree reading worktree file copies, so edits to the shared checkout's develop cannot affect a running worktree suite; the three 立条教训 (convention has no artifact / even post-hoc hard to distinguish / participant list unmaintainable — inner was never in it) are archived at orchestration/archive/AC58-retired-clauses.md#R27, and the merge lock must be a shared mechanism (hook/file lock), not a 'each layer remembers to call' convention. The assertion-surface resolver (resolveAssertionSurface) is retained for full-suite-runner.ts's mid-round-edit detection."
   [prefriction-count.sh]="How many newly-filed tasks had no triggering failure/alarm/contradiction at filing (the falsifiable pre-friction count)?"
   [preparation-feedback.ts]="What feedback should the preparation phase return to the proposer?"
+  [profiles-role-coverage-check.ts]="Does the profile carrier a REAL init produces define every profile ROLE the drivers request — asserted on init's actual OUTPUT (a temp workspace initialized by the Core CLI) and never on a template file, with the OTHER template (plugin/.quay/profiles.yml, the one quay-init.sh copies into a project) compared against it so a one-sided edit to EITHER goes RED, a retired profile role (inner, SPEC-tmux-retirement-2026-09-03) reported as shipped-to-every-new-project, and no-obtainable-init-artifact ⇒ NOT-EVALUATED rather than a green it did not earn (gap-quay-init-profiles-template-omits-every-role-the-drivers-request)?"
   [prepare-admission-check.ts]="Is it safe for this milestone to acquire the single-flight admission lease?"
   [pool-quality-judge.ts]="Should the pool 任务质量语义闸 run — the mechanical triggers (pool>25 / 最久未复核>48h / 每 10 轮) + pool enumeration + per-task mechanical AC input + verdict aggregation (ready/needs-work/should-remove/uncertain, should-remove → 撤出/重定范围) — the deterministic half of the ADR-033 pool-quality-judge workflow (gap-pool-quality-semantic-gate)?"
   [quality-gate-driver.ts]="Does the quality-gate driver run the three driverized quality-gate routines as a routine-type resident driver (Layer 0 + 1b) — B15 pool-quality-judge (mechanical trigger --plan + LLM judge pool-judge + JS aggregate), B17 judgment-consumer-check (mechanical 判据→消费 audit), and architecture-review (mechanical cluster of the P1/P2/P4 detectors' --json → LLM judge → JS merge → verdict carrier), with B16-C/B18 routed to AC145 semantic face (⛔ not a god-object)?"
@@ -603,6 +604,7 @@ declare -A CADENCE=(
   [precommit-guard.ts]="每轮"
   [prefriction-count.sh]="每轮"
   [preparation-feedback.ts]="每里程碑"
+  [profiles-role-coverage-check.ts]="每轮"
   [prepare-admission-check.ts]="每里程碑"
   [pool-quality-judge.ts]="按需"
   [quality-gate-driver.ts]="按需"
@@ -920,6 +922,7 @@ declare -A INVALIDATION=(
   [precommit-guard.ts]="失效前提：提交路径仍经 git commit 与 .git/hooks/pre-commit（git 仍是唯一提交载体）；若提交面改为非 git 传输，或 pre-commit 钩子被全局禁用（core.hooksPath 重定向 / --no-verify 成常规绕过），本条退休"
   [prefriction-count.sh]="无可测前提，靠周期复核"
   [preparation-feedback.ts]="无可测前提，靠周期复核"
+  [profiles-role-coverage-check.ts]="失效前提：profile 承载仍由 init 落地到目标项目的 .quay/profiles.yml，且它仍是 launchArgv 经 profile-policy.ts resolveRole 解析角色的唯一来源面；若角色定义迁出 profiles.yml（role 内建进代码、resolveRole 不再读文件）或 init 不再产出该文件，本条失去断言对象，退休"
   [prepare-admission-check.ts]="无可测前提，靠周期复核"
   [pool-quality-judge.ts]="失效前提：pool 质量仍由 schema'd agent 判定（ADR-033，判定在 .claude/workflows/pool-quality-judge.js）；若质量判定改为纯机械或取消 pool 语义闸，本条退休"
   [quality-gate-driver.ts]="失效前提：质量把关仍按形状分开驱动（B15/B17 + 架构复核落本 driver，B16-C/B18 归 AC145 语义面）；若 B15/B17 改回 outer tick 手动跑、或四形状并入同一 driver kind（god-object），本条退休"
@@ -1237,6 +1240,7 @@ declare -A LAST_REAFFIRMED=(
   [precommit-guard.ts]="2026-08-14"
   [prefriction-count.sh]="2026-08-10"
   [preparation-feedback.ts]="2026-08-10"
+  [profiles-role-coverage-check.ts]="2026-09-13"
   [prepare-admission-check.ts]="2026-08-10"
   [pool-quality-judge.ts]="2026-08-10"
   [quality-gate-driver.ts]="2026-08-26"
@@ -1554,6 +1558,7 @@ declare -A MATCHING=(
   [precommit-guard.ts]="enumerative"
   [prefriction-count.sh]="keyword"
   [preparation-feedback.ts]="keyword"
+  [profiles-role-coverage-check.ts]="position"
   [prepare-admission-check.ts]="keyword"
   [pool-quality-judge.ts]="enumerative"
   [quality-gate-driver.ts]="n/a"
@@ -1713,6 +1718,7 @@ declare -A MATCHING=(
 # Non-按需 mechanisms wired into the suite/execution cores need no CONSUMER row — their wiring IS
 # the consumer. The rhythm-consumer-check.ts reads this table; see its 判据1/2/3.
 declare -A CONSUMER=(
+  [profiles-role-coverage-check.ts]="谁按：scripts/test.sh 的 run_static_checks（@static-tier change，@static-object plugin/scripts/quay-init.sh plugin/.quay/profiles.yml packages/quay/src/init.ts）+ plugin/scripts/checker-mutation-cases/profiles-role-coverage-check.sh 双向控制；条件=派发路径或 profile 承载模板被改动"
   [psi-failure-correlation-check.ts]="谁按：任务实现者在 gap-psi-shadow-admission-controller 的 Phase 0 go/no-go 判定时按（node --experimental-strip-types plugin/scripts/psi-failure-correlation-check.ts --source active|passive|both --root <主检出>）；条件=要用主动诱发 + 被动历史两条独立数据源判定 PSI 对失败是否有超出并发数的增量预测力"
   [psi-window-join.ts]="谁按：任务实现者在需要回答「这个测试这一次跑的时候机器多忙」的诊断可见性问题时按（node --experimental-strip-types plugin/scripts/psi-window-join.ts --run-id <runId> --file <relpath> [--root <主检出>]）；条件=要查某测试单次运行的 PSI 时间窗采样序列"
   [archguard-runner.ts]="谁按：scripts/test.sh run_selected 全量 suite 路径按（run_static_checks 之后，code-class gate）；条件=每次全量验证轮跑 archguard analyze + 读产物判依赖环，fail-closed（archguard 缺失/analyze 失败/有环 ⇒ exit 1）"
