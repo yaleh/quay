@@ -43,7 +43,8 @@ extra:
 - **按位置不按关键词**(硬规则 2):~51 个任务体已有 L_G/L_D **散文**提及。负控制实测:`L_G (ADR-007) 未测`、`L_G 记录于 2026-09-13 12:30 尚未测量`、`本任务未记录 L_G: cycles=0`、`L_G 是最暗的轴（见 ADR-007 §5）` **全部 MISSING**;而真实探针输出 `L_D code:doc — docLines=812 codeLines=6500 ratio=1:8 verdict=PROSE_HEAVY` → RECORDED `[812,6500,1,8]`。
 - **AC2 实测**(在声明 ADR-007 的临时工作区跑真 CLI):`quay complete T-norecord` → `FAIL — dark-axis …: MISSING`,exit 1,`status: ready` 未变,`.quay/gate-events.jsonl` 追加一条 `dark-axis fail`。
 - **AC3 实测**(同一任务):补显式声明 → `PASS — status=done`(exit 0);另一任务补真实读数(`- [x] L_G structural-drift … cycles found: 0 god-modules found: 0`,复选框前缀的 DoD 条目形态)→ 同样 `PASS — status=done`。事件序列 `dark-axis fail → dark-axis pass → acceptance pass → complete pass`。
-- **本任务自己的暗轴读数**(活仪器 `plugin/scripts/archguard-runner.ts`,本次实测):`packages/quay/src` sccCount=0 entities=633 relations=1229 maxInDegree=200 maxOutDegree=67;`plugin/scripts` sccCount=0 entities=2842 relations=2670 maxInDegree=122 maxOutDegree=84;`quay-native-src`/`quay-github-src`/`quay-backlog-src`/`experiments-scripts` 全 sccCount=0 ⇒ verdict **PASS(无依赖环)**。即 ADR-007 问的 L_D/L_G「无新环」这一条,在本改动上为真。
+- **本任务自己的暗轴读数**(活仪器 `plugin/scripts/archguard-runner.ts`,本次实测;按本判据要求的可解析形态写成行首轴标签 + 数值,使本任务自身也过它新加的门——它的散文形态曾被门判为 MISSING,这正是本条要消灭的形态):
+  L_D/L_G: sccCount=0 entities=633 relations=1229 maxInDegree=200 maxOutDegree=67 (packages/quay/src);plugin/scripts sccCount=0 entities=2842 relations=2670 maxInDegree=122 maxOutDegree=84;quay-native-src / quay-github-src / quay-backlog-src / experiments-scripts 全 sccCount=0 ⇒ verdict PASS(无依赖环)。
 - **已知不覆盖(明写而非含糊)**:机械 fan-in 的翻 done 由 `worker-driver.ts` 自己改 frontmatter、不走 lifecycle 动词 ⇒ 它仍可让一个没记录任何暗轴内容的任务落地。这是 driver 侧的改动,属另一个任务范围;已写进 ADR 注释。
 - **新增前置的发生率读数**(硬规则 12):落地当时池报告 `dark_axis` = recorded 0 / disclaimed 0 / **missing 6**(6 个 ready 任务),即该前置目前会让 6 个在飞任务在 `quay complete` 上被拒;它们各自补一行声明即可通过(设计如此:ADR 原文的「or an explicit 'axis still dark' note」)。
 
