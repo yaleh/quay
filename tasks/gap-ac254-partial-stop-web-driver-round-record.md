@@ -97,13 +97,13 @@ web    curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4173/health ⇒ 2
 
 ## Acceptance Criteria
 
-- [ ] **AC1 载体上判据翻转**：逐字跑 `goals/AC-254-服务可独立起停-停-web-后-driver-的-round-心跳仍在推进-spec-阶段-b-6-9-不变式-2.md` 的 criterion ⇒ **exit 0**（立案当轮实测 exit 1：载体不存在）。贴出该命令的 exit code、载体 `.quay/unified-server-verification.jsonl` 的行数、以及那条 `ac="GOAL-017-AC-254"` 记录的原文。
-- [ ] **AC2 阶段 B 的 CLI 面在位且幂等**：`quay server start|add|stop|status` 四个动词都在动词表与帮助里（打印实际 `--help` 输出前 3 条命中，⛔ 不凭印象）；`start` 一个**已在跑**的服务 ⇒ exit 0 且该服务 pid **不变**（两读数并列，证明是 no-op 而非静默重启）；`stop` 一个**不在跑**的服务 ⇒ 取值与「刚停掉」可区分（贴两读数）；`add` 追加启动时已在跑的服务的 pid 与 round 心跳不受影响。
-- [ ] **AC3 部分停机不波及其余（不变式 2，本任务的加强形式）**：`quay server stop --only web` 前 `curl /health` = 200（`web_reachable_before=true`）∧ 停后 web 端口不可达 ∧ **host pid 不变**（`kill -0` 实测）∧ `control` 端口仍能拿到 JSON-RPC 形态响应 ⇒ 四读数并列贴出。⛔ 缺 `before=true` 则 `after=false` 是空转，不算达成。
-- [ ] **AC4 round 推进是同一 run 的直接量**：记录里 `driver_round_before`/`driver_round_after` 取自**同一 `run_id`** 的 `.quay/<kind>-round.jsonl` 末行，且 `after > before`；贴出两点读数的**行原文**（含 `run_id`/`round`/`ts`）。**负控制**：窗口内 round 未前进（或 after 取自另一 `run_id`）⇒ **零记录** + 与「没测成」可区分的取值。⚠️ 载体里 `round` 是字符串 ⇒ 写入前必须转换，且贴出「字符串直写 ⇒ 判据判不合格」的对照读数。
-- [ ] **AC5 读数不自报（硬规则 4b）**：`web_reachable_before/after` 由**独立 HTTP 探针**（对 `<web port>` 真发请求）得到，⛔ 不采信 `quay server status` 的自报；`driver_kinds_alive_after` 由 round 心跳新鲜度（直接量）得到，⛔ 不用 pid 文件存在性。**结构控制**：整体杀掉 host 进程（而非 `stop --only web`）⇒ 生产者**拒写**记录（control 不可达 / host pid 变了）⇒ 证明「部分停止」与「整体重启」可区分，两读数并列。
-- [ ] **AC6 零回退且不越界**：`node --test packages/quay/test/serve-*.test.mjs`、`plugin/test/start-drivers.test.mjs`、`plugin/test/driver-cli.test.mjs` ⇒ 全绿（贴各文件 `# pass`/`# fail` 计数）；`quay driver stop --kind X` 不杀在飞 worker 子进程的语义保持（由既有测试覆盖，⛔ 期间不得对生产 driver 实跑 `quay driver stop`）。
-- [ ] **AC7 生产载体真跑过（硬规则 4 推论三）**：记录写在生产 root `/home/yale/work/quay/.quay/unified-server-verification.jsonl`（⛔ 不是 worktree、⛔ 不是夹具进程），其 `ts` 晚于本任务实现落地时刻，且是在**统一 server 形态**（web 与 control 同 host pid，由 `quay server status --json` 的整数 pid 相等证实）上跑出来的。同时留档**web 已恢复**：`curl /health` = 200（⛔ 不把生产观察面留在停机态）。
+- [x] **AC1 载体上判据翻转**：逐字跑 `goals/AC-254-服务可独立起停-停-web-后-driver-的-round-心跳仍在推进-spec-阶段-b-6-9-不变式-2.md` 的 criterion ⇒ **exit 0**（立案当轮实测 exit 1：载体不存在）。贴出该命令的 exit code、载体 `.quay/unified-server-verification.jsonl` 的行数、以及那条 `ac="GOAL-017-AC-254"` 记录的原文。
+- [x] **AC2 阶段 B 的 CLI 面在位且幂等**：`quay server start|add|stop|status` 四个动词都在动词表与帮助里（打印实际 `--help` 输出前 3 条命中，⛔ 不凭印象）；`start` 一个**已在跑**的服务 ⇒ exit 0 且该服务 pid **不变**（两读数并列，证明是 no-op 而非静默重启）；`stop` 一个**不在跑**的服务 ⇒ 取值与「刚停掉」可区分（贴两读数）；`add` 追加启动时已在跑的服务的 pid 与 round 心跳不受影响。
+- [x] **AC3 部分停机不波及其余（不变式 2，本任务的加强形式）**：`quay server stop --only web` 前 `curl /health` = 200（`web_reachable_before=true`）∧ 停后 web 端口不可达 ∧ **host pid 不变**（`kill -0` 实测）∧ `control` 端口仍能拿到 JSON-RPC 形态响应 ⇒ 四读数并列贴出。⛔ 缺 `before=true` 则 `after=false` 是空转，不算达成。
+- [x] **AC4 round 推进是同一 run 的直接量**：记录里 `driver_round_before`/`driver_round_after` 取自**同一 `run_id`** 的 `.quay/<kind>-round.jsonl` 末行，且 `after > before`；贴出两点读数的**行原文**（含 `run_id`/`round`/`ts`）。**负控制**：窗口内 round 未前进（或 after 取自另一 `run_id`）⇒ **零记录** + 与「没测成」可区分的取值。⚠️ 载体里 `round` 是字符串 ⇒ 写入前必须转换，且贴出「字符串直写 ⇒ 判据判不合格」的对照读数。
+- [x] **AC5 读数不自报（硬规则 4b）**：`web_reachable_before/after` 由**独立 HTTP 探针**（对 `<web port>` 真发请求）得到，⛔ 不采信 `quay server status` 的自报；`driver_kinds_alive_after` 由 round 心跳新鲜度（直接量）得到，⛔ 不用 pid 文件存在性。**结构控制**：整体杀掉 host 进程（而非 `stop --only web`）⇒ 生产者**拒写**记录（control 不可达 / host pid 变了）⇒ 证明「部分停止」与「整体重启」可区分，两读数并列。
+- [x] **AC6 零回退且不越界**：`node --test packages/quay/test/serve-*.test.mjs`、`plugin/test/start-drivers.test.mjs`、`plugin/test/driver-cli.test.mjs` ⇒ 全绿（贴各文件 `# pass`/`# fail` 计数）；`quay driver stop --kind X` 不杀在飞 worker 子进程的语义保持（由既有测试覆盖，⛔ 期间不得对生产 driver 实跑 `quay driver stop`）。
+- [x] **AC7 生产载体真跑过（硬规则 4 推论三）**：记录写在生产 root `/home/yale/work/quay/.quay/unified-server-verification.jsonl`（⛔ 不是 worktree、⛔ 不是夹具进程），其 `ts` 晚于本任务实现落地时刻，且是在**统一 server 形态**（web 与 control 同 host pid，由 `quay server status --json` 的整数 pid 相等证实）上跑出来的。同时留档**web 已恢复**：`curl /health` = 200（⛔ 不把生产观察面留在停机态）。
 - [ ] **AC8 全量套件绿 —— 外层 verification-round 验证**（本条的量产生在 fan-in / 外层 suite 轮，⛔ 不是 worker 自己的读数；scoped 门绿不等于全量绿）。
 
 ## Definition of Done
@@ -122,3 +122,112 @@ web    curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4173/health ⇒ 2
 - 用宽松 glob（`.quay/*-driver*.pid`，实测 136）数进程/进记录；
 - 只实现 `stop` 而把 `start`/`add` 留空（§6.9 的四个动词是同一能力的四个面），或把 `start` 一个已在跑的服务实现成静默重启（会打断在飞 worker）；
 - 生产 web 留在停机态。
+
+## Evidence
+
+**AC1 — 载体上判据翻转**：逐字跑 `goals/AC-254-…md` 的 `criterion` 块（从该文件 frontmatter 原样解出 `python3 - <<'P' … P`，交 bash 执行，`cwd=/home/yale/work/quay`）⇒ **exit 0**（立案当轮实测 exit 1：载体不存在）。载体 `.quay/unified-server-verification.jsonl` **行数 = 3**。最新那条（本轮在**修复后**的代码上真跑，`at=2026-09-13T18:52:28.659Z` / `ts=2026-09-13T18:55:47.683Z`，宿主 pid 1323037）原文（节选关键字段，全文即载体末行）：
+
+```json
+{"ac":"GOAL-017-AC-254","stopped_service":"web","web_reachable_after":false,
+ "at":"2026-09-13T18:52:28.659Z",
+ "driver_round_before_by_kind":{"promotion":23,"worker":2554,"outer":2663,"quality":27,"meta":36,"goal":7},
+ "driver_round_after_by_kind":{"promotion":28,"worker":2555,"outer":2665,"quality":33,"meta":42,"goal":9},
+ "web_reachable_before":true,
+ "driver_run_id_by_kind":{"promotion":"pm-prod-1788972469","worker":"wk-prod-1789139008","outer":"ot-prod-1789060079","quality":"qg-prod-1788972493","meta":"mt-prod-1788972492","goal":"gl-prod-1788972477"},
+ "host_pid_before":1323037,"host_pid_after":1323037,"control_reachable_after":true,
+ "stopped_exit":0,"stopped_stdout":"{\"action\":\"stop\",…\"outcome\":\"stopped\",\"detail\":\"face closed; host process untouched\"}",
+ "ts":"2026-09-13T18:55:47.683Z","web_restored":true}
+```
+
+**AC2 — 阶段 B 的 CLI 面在位且幂等**（生产 root 实测，修复后宿主 pid 1323037）：
+
+```
+$ quay server --help | grep -E 'quay server (start|add|stop|status)'      # 前 4 条命中
+  quay server start [--only <svc,...>] [--without <svc,...>] [--port <port>] [--host <host>] [--json] [--root <path>]
+  quay server add   <svc,...> [--json] [--root <path>]
+  quay server stop  --only <svc,...> [--json] [--root <path>]
+  quay server status [--json] [--root <path>]
+  服务清单：web, control, driver:promotion|worker|outer|quality|meta|goal
+
+start --only web,control（两个都已在跑）⇒ exit 0, changed=false,
+  web already-running pid=1323037 / control already-running pid=1323037   ← ⛔ pid 不变 = no-op，不是静默重启
+add control（已在跑）          ⇒ changed=false, control already-running pid=1323037
+stop --only web（第 1 次）     ⇒ changed=true,  web stopped         pid=1323037
+stop --only web（第 2 次）     ⇒ changed=false, web already-stopped pid=1323037   ← 与「刚停掉」可区分（硬规则 3b）
+```
+
+**AC3 — 部分停机不波及其余（四读数并列）**：
+
+```
+① before  web_reachable_before=true   curl http://127.0.0.1:46353/health ⇒ 200
+② 执行    quay server stop --only web  ⇒ changed=true, outcome=stopped, detail="face closed; host process untouched"
+③ after   curl http://127.0.0.1:46353/health ⇒ 000（不可达——listener 真释放）
+          kill -0 1323037 ⇒ ALIVE；carrier pid ⇒ 1323037（宿主 pid 前后不变）
+④         control http://127.0.0.1:44191/ POST initialize ⇒ JSON-RPC 200
+          {"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{"listChanged":true}},
+           "serverInfo":{"name":"quay-server-control","version":"0.6.1"}},"jsonrpc":"2.0","id":1}
+恢复      quay server start --only web ⇒ started；/health ⇒ 200
+```
+
+四条缺一不可：没有 ①，②的「不可达」是空转；没有「host pid 不变 + control 仍可达」，「部分停止」与「整体重启」在记录上无法区分。
+
+**AC4 — round 推进是同一 run 的直接量**：六 kind 的 `driver_run_id_by_kind` 前后逐 kind 相同（记录内已列出），**且**与此刻盘上 `.quay/<kind>-round.jsonl` 末行的 `run_id` 逐字相符（同一 driver 寿命，不是「重启后 round 从 1 重数」）：
+
+```
+promotion  .quay/promotion-round.jsonl    run_id=pm-prod-1788972469  before=23 → after=28
+worker     .quay/worker-round.jsonl       run_id=wk-prod-1789139008  before=2554 → after=2555
+outer      .quay/outer-round.jsonl        run_id=ot-prod-1789060079  before=2663 → after=2665
+quality    .quay/quality-round.jsonl      run_id=qg-prod-1788972493  before=27 → after=33
+meta       .quay/meta-driver-round.jsonl  run_id=mt-prod-1788972492  before=36 → after=42
+goal       .quay/goal-round.jsonl         run_id=gl-prod-1788972477  before=7  → after=9
+（六条 after>before 全部成立；六值在记录里都是 JSON 整数，不是载体里的字符串）
+```
+
+**类型对照（可取假）**：把**同一份**生产记录复制成 `driver_round_after_by_kind` 全部写成字符串的副本，逐字跑同一 criterion ⇒ **exit 1**（`AC-254: no qualifying record (…)`）——证明「字符串直写」结构上必不合格，写入前的转换是承重的。
+
+**AC5 — 读数不自报（硬规则 4b）**：`web_reachable_before/after` 由生产者自己的 `fetch` 对**端口**真发 `GET /health` 得到（⛔ 不读 `quay server status` 的自报；上面 AC3 的四读数也是同一朴素 `curl`）；`driver_kinds_alive_after` 由六个 round 载体的末行心跳（直接量）得到，⛔ 不是 pid 文件存在性。
+
+**结构控制（部分停止 vs 整体停机 可区分）**——`--control kill-host`（在**临时** workspace 上跑，⛔ 不碰生产宿主）：
+
+```
+scratch host pid=2166027 web=38535 reachable_before=200
+producer --control kill-host ⇒ exit=1  verdict=CONTROL-DOWN
+  reason="the control face of the SAME host is not reachable after the partial stop —
+          the stop took other services with it (§6.9 不变式 2)"
+  record_written=false   carrier_lines_after=0（零记录）
+  readings: host_pid_before=2166027 host_pid_after=2166027 web_reachable_after=false
+            control_reachable_after=false
+对照：scratch web reachable_after_kill=0（整个宿主没了）
+⇒ 「stop --only web」（宿主 pid 不变、control 仍答、写出记录）与「杀宿主进程」（control 不可达、拒写）
+   在记录上可分。
+```
+
+**AC6 — 零回退**（各文件实测计数）：
+
+```
+node --test packages/quay/test/serve-*.test.mjs   ⇒ tests 183  pass 182  fail 0  skipped 1   exit 0  (18.6s)
+plugin/test/start-drivers.test.mjs + plugin/test/driver-cli.test.mjs ⇒ tests 19  pass 19  fail 0
+packages/quay/test/server-partial-stop.test.mjs（新，6 条）+
+packages/quay/test/server-status-web-control-same-pid.test.mjs +
+plugin/test/server-partial-stop-verify.test.mjs（新，8 条）+
+packages/quay/test/cli.test.mjs ⇒ tests 43  pass 43  fail 0
+scoped 门 bash scripts/test.sh --for-task gap-ac254-… --allow-thin ⇒ 静态检查全 PASS
+（无 STATIC_CHECK_FAILED）；suite tests 113  pass 113  fail 0；**exit 0**
+```
+
+`quay driver stop --kind X` 不杀在飞 worker 子进程的语义未改（`plugin/scripts/driver-runtime.ts` / `driver-shared.ts` 不在本任务 Touches，未被改动）；实现与验证期间**未对生产 driver 实跑过 `quay driver stop`**（只对 `web` 这一个服务做过停/起）。
+
+**AC7 — 生产载体真跑过（硬规则 4 推论三）**：记录写在生产 root `/home/yale/work/quay/.quay/unified-server-verification.jsonl`（⛔ 不是 worktree、⛔ 不是夹具进程），`ts=2026-09-13T18:55:47.683Z` **晚于**本任务实现落地的全部提交（`db3a8c4f6` 16:30:13、`acc8e82a4` 16:34:07、`493051961` 修复 18:5x）。统一 server 形态由 `quay server status --json` 证实：`pid=1323037`，`web.pid == control.pid == 1323037`（两服务同宿主进程），且两条 liveness 都是**独立探针**读数（`http:GET /health`、`jsonrpc:initialize`）。**web 已恢复**：`curl http://127.0.0.1:46353/health ⇒ 200`；人观察面 `http://127.0.0.1:4173/health ⇒ 200` 全程未动。
+
+**AC8** 留给外层 verification-round（本条的量产生在 fan-in / 全量 suite 轮，⛔ 不是 worker 自己的 scoped 读数；scoped 门 113/113 绿不等于全量绿）。
+
+### 本轮发现并修复的缺陷（AC6 的 `serve-*.test.mjs` 咬出来的）
+
+阶段 B 的服务宿主把「web 面 close」与「宿主自己的终结」之间**唯一那根绳**剪断了（AC-254 要的就是这个：`stop --only web` 不得波及其他服务）。但**两个方向关的是同一个 `http.Server`**，只满足一边就必然破坏另一边：
+
+- **每次 close 都终结** ⇒ 部分停止会退役一个活宿主的 carrier 并打死同进程的 `control` —— 那正是 §6.9 不变式 2 排除的形态；
+- **任何 close 都不终结** ⇒ control 的 listening socket 永不释放，事件循环不排空。实测：`packages/quay/test/serve.test.mjs`（**本分支未改动**，12 个 `server.close()` 调用点）把所有断言跑完、打印 `All QN-031 serve/action regression tests passed.`，然后**永久挂住** —— `node --test` 下 4 286 177 ms，`'Promise resolution is still pending but the event loop has already resolved'`。这正是本轮 scoped 门**卡死 71 分钟**的原因（对照：主检出跑 develop 的 `serve.ts`，同一文件 exit 0）。
+
+修法：把「调用者的意图」说出来，而不是从动作里猜 —— `stopWebFace` 只在自己那次 close 的同步作用域内打标（`partialWebClose`），宿主的 `server.on("close")` 只对**未打标**的 close 退役 carrier + control。那正是 AC-254 之前 `--watch`/SIGINT/全部既有 in-process caller 依赖的契约。
+
+**红对照**（把 `serve.ts` 换回修复前的提交版、同一命令重跑新测试）：31s 超时、stdout 已有 `CLOSED` 而进程仍活 ⇒ 测试红；装回修复 ⇒ 同测 exit 0（≈1s）。见提交 `493051961`。
