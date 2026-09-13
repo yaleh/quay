@@ -38,6 +38,11 @@
 //   laneCount    = the suite's lane_count
 //   load         = the suite's load (the /proc/loadavg 1min at the suite's end)
 //   state        = "green" (both fan-in branches only write after suite_exit=0)
+//   evaluated    = true (this writer's default: a verdict was reached) | false (a NOT-EVALUATED round
+//                  — killed before any verdict; written ONLY via --not-evaluated, e.g. reason
+//                  'watchdog-killed'). gap-watchdog-killed-round-writes-no-verification-round-record.
+//                  ⛔ ABSENCE of this field is not `true`: rows from the other writer
+//                  (full-suite-runner's appendVerificationRound) do not carry it ⇒ absent = UNKNOWN.
 //   runner       = layer identity (default "inner" — the fan-in suite is an inner-layer run; the SAME
 //                  default mirror-full-suite-state.ts writes, so the state + verification-round carriers
 //                  agree. Explicit --runner overrides.)
@@ -165,6 +170,12 @@ import { parsePerFileLines } from "./measure-trend-check.ts";
 import { isFailureLine } from "./runner-red-parse.ts";
 
 const COMMIT_RE = /^[0-9a-f]{40}$/i;
+
+// gap-watchdog-killed-round-writes-no-verification-round-record — the not-evaluated reason token.
+// A machine token (no free prose): 'watchdog-killed' today; the shape admits future no-verdict
+// mechanisms (e.g. a runner that died uncatchably) without letting a caller smuggle a sentence into
+// the ledger's `reason` axis, which readers match on.
+const NOT_EVALUATED_TOKEN_RE = /^[a-z][a-z0-9-]*$/;
 
 // ── phase + concurrency 口径 (gap-fan-in-verification-round-thin-schema-phase-gap) ───────────────────
 // The fan-in verification-round row must carry the SAME phase / concurrency axes full-suite-runner's
@@ -685,11 +696,36 @@ export function buildPreVerifiedRoundRecord(o) {
   // "ran and failed" (state=red + reason) and attribute it to a task (taskId). --state red is the new
   // entry; green (the default) keeps the existing shape byte-for-byte (backward compat, AC4).
   let state = "green";
+  let stateExplicit = false;
   if (o.state != null) {
     const st = String(o.state).trim().toLowerCase();
     if (st === "green") state = "green";
     else if (st === "red") state = "red";
     else return { error: `--state must be green|red (got ${JSON.stringify(o.state)})` };
+    stateExplicit = true;
+  }
+  // gap-watchdog-killed-round-writes-no-verification-round-record — the NOT-EVALUATED axis (硬规则 3b).
+  // 背景：静默看门狗 SIGKILL 整个 runner 进程组 ⇒ 「唯一 writer」（full-suite-runner）与被测套件一起死，
+  // 这一轮【一行都不写】⇒ 任何以本载体为输入的判定器把「没评估」读成「没问题」（本仓库已三个同形前例）。
+  // 修法的半边是「让活着的写者写」，另半边是硬规则 3b：「读不懂/评估不了」不得与「合格」同形 ⇒ 这一轮
+  // 必须有一个【独立取值】，不与绿、也不与红共用输出：
+  //   evaluated:false + reason=<token>       ← 这一轮没有被评估（无结论）
+  //   evaluated:true  + (green | red+reason) ← 被评估过的一轮（红轮结论由 --suite-log 解析而来）
+  // `--not-evaluated <token>` 是产出该形状的【单一原子输入】：它同时强制 state=red（不是通过）+ evaluated
+  // =false + reason=<token>，调用方无法只应用一半。`--state green` 与本参数同给 ⇒ 自相矛盾，fail-closed。
+  const notEvaluatedRaw = o.notEvaluated == null ? null : String(o.notEvaluated).trim();
+  let evaluated = true;
+  let notEvaluated = null;
+  if (notEvaluatedRaw !== null) {
+    if (!NOT_EVALUATED_TOKEN_RE.test(notEvaluatedRaw)) {
+      return { error: `--not-evaluated must be a lowercase machine token [a-z][a-z0-9-]* (got ${JSON.stringify(o.notEvaluated)})` };
+    }
+    if (stateExplicit && state === "green") {
+      return { error: "--not-evaluated contradicts --state green (an unevaluated round is never a pass); omit --state" };
+    }
+    notEvaluated = notEvaluatedRaw;
+    evaluated = false;
+    state = "red";
   }
   const record = {
     round: 0, // computed from prior line count in the appender
@@ -698,6 +734,13 @@ export function buildPreVerifiedRoundRecord(o) {
     laneCount,
     load,
     state, // green (default) or red (gap-verification-round-static-fail-no-record: a red fan-in round)
+    // gap-watchdog-killed-round-writes-no-verification-round-record — ALWAYS present on this writer's
+    // rows: true = a verdict was reached (green, or red with a parsed reason); false = NOT evaluated
+    // (killed before any verdict — see --not-evaluated). ⛔ A reader must NOT read the field's ABSENCE
+    // as true: rows written by the OTHER writer (full-suite-runner's appendVerificationRound) do not
+    // carry this axis yet, so absent = UNKNOWN (硬规则 6: 缺值 = 未查, not 为真) — only an explicit
+    // `evaluated:false` licenses the NOT-EVALUATED reading.
+    evaluated,
     runner,
     scope: "worktree", // the fan-in suite ran against the task worktree's HEAD
     commit,
@@ -735,15 +778,24 @@ export function buildPreVerifiedRoundRecord(o) {
   // NO parseable failure signal still records reason=failed (fail-closed — a red run IS a failure even
   // when the log's signal shape was unparseable; failures[] is simply absent).
   if (state === "red") {
-    const red = parseRedFailures(suiteLog);
-    if (red.staticCheck) {
-      record.reason = "gate-failed";
-      record.gate = "static-check";
-      record.failures = red.failClosed.map((c) => ({ line: c.line, staticCheck: true }));
+    if (notEvaluated !== null) {
+      // gap-watchdog-killed-round-writes-no-verification-round-record — a NOT-EVALUATED round carries
+      // its MECHANISM as the reason ('watchdog-killed'), ⛔ never 'failed'/'gate-failed' (verdicts this
+      // round never reached — sharing their value would make "killed by the watchdog" and "the tests
+      // failed" the same shape, the very conflation 硬规则 3b forbids), and ⛔ no failures[] — the kill
+      // produced no failure signal to parse; an empty failures[] would read as "ran, nothing failed".
+      record.reason = notEvaluated;
     } else {
-      record.reason = "failed";
-      if (red.failureLines.length > 0) {
-        record.failures = red.failureLines.map((line) => ({ line }));
+      const red = parseRedFailures(suiteLog);
+      if (red.staticCheck) {
+        record.reason = "gate-failed";
+        record.gate = "static-check";
+        record.failures = red.failClosed.map((c) => ({ line: c.line, staticCheck: true }));
+      } else {
+        record.reason = "failed";
+        if (red.failureLines.length > 0) {
+          record.failures = red.failureLines.map((line) => ({ line }));
+        }
       }
     }
   }
@@ -887,6 +939,7 @@ Usage:
       [--preverified <0|1|true|false>] [--cpu-time-s <n|null>] [--cpu-source <name>]
       [--cpu-user-s <n|null>] [--cpu-sys-s <n|null>]
       [--suite-log <path>] [--runner <name>] [--root <dir>] [--record-file <file>]
+      [--not-evaluated <token>]
       [--json] [--help]
 
   --task-id         the fan-in task whose suite landed (required)
@@ -901,6 +954,12 @@ Usage:
   --state           green (default) or red — a RED round writes state=red + reason (+gate/failures)
                     parsed from --suite-log (gap-verification-round-static-fail-no-record: a red fan-in
                     round must land a record, not only the green path).
+  --not-evaluated   a lowercase machine token (e.g. watchdog-killed) marking this round as KILLED
+                    BEFORE ANY VERDICT — the silence watchdog SIGKILLed the whole runner process group,
+                    so the runner-side writer (full-suite-runner) died with its suite and never wrote.
+                    Produces the NOT-EVALUATED shape in ONE atomic input: state=red + evaluated=false +
+                    reason=<token> (⛔ never 'failed'/'gate-failed', ⛔ no failures[]). Combining it with
+                    --state green fails closed (an unevaluated round is never a pass).
   --cpu-time-s      the suite's CPU seconds — a real number, or the literal null when the source was
                     considered and UNAVAILABLE (AC6; 0 normalizes to null)
   --cpu-source      WHERE the cpu_time_s came from ('gnu-time' / 'not-wired'; optional)
@@ -962,6 +1021,7 @@ export function main(argv) {
     runner: getArgValue(args, "--runner"),
     suiteLog: getArgValue(args, "--suite-log"),
     state: getArgValue(args, "--state"),
+    notEvaluated: getArgValue(args, "--not-evaluated"),
     root,
   });
   if (built.error) return fail(built.error);
