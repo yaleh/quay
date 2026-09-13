@@ -455,6 +455,13 @@ test("AC1 — negative control: the unnamed-guard gate TAKES FALSE (bare form fl
     const dead = findUnnamedEntryGuards(dir);
     assert.deepEqual(dead.map((d) => d.module).sort(), ["scripts/bare.ts", "scripts/twoarg.ts"],
       "only the shared-helper calls with fewer than 3 arguments are dead guards");
+
+    // An UNREADABLE module must be reported, not skipped: "nothing was examined" and "every guard is
+    // named" both come back as an empty list, and only one of them is a pass (硬規則 3b).
+    fs.symlinkSync(path.join(dir, "does-not-exist.ts"), path.join(dir, "scripts", "dangling.ts"));
+    const withDangling = findUnnamedEntryGuards(dir);
+    assert.deepEqual(withDangling.map((d) => d.module).sort(), ["scripts/bare.ts", "scripts/dangling.ts", "scripts/twoarg.ts"]);
+    assert.match(withDangling.find((d) => d.module === "scripts/dangling.ts").condition, /NOT-EVALUATED/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

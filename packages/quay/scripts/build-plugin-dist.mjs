@@ -623,11 +623,20 @@ const SURFACE_SKIP_FILES = /\.test\./;
 export function findUnnamedEntryGuards(pluginRoot = DEFAULT_PLUGIN_ROOT) {
   const scriptsDir = path.join(pluginRoot, "scripts");
   const dead = [];
+  // A MISSING directory is legitimately empty (synthetic roots in the tests have no scripts/ at all).
+  // Any OTHER read failure means modules went unexamined — that is reported as NOT-EVALUATED, never
+  // returned as an empty list, because an empty list is exactly what "every guard is named" looks
+  // like: swallowing the error would trade a crash (fail-closed) for a silent pass (硬規則 3b).
+  const unreadable = (target, e) => {
+    if (e.code === "ENOENT" && target === scriptsDir) return; // no scripts/ at all — nothing to scan
+    dead.push({ module: path.relative(pluginRoot, target), condition: `UNREADABLE (${e.code ?? "error"}) — NOT-EVALUATED` });
+  };
   const walk = (dir) => {
     let entries;
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
+    } catch (e) {
+      unreadable(dir, e);
       return;
     }
     for (const e of entries) {
@@ -637,7 +646,13 @@ export function findUnnamedEntryGuards(pluginRoot = DEFAULT_PLUGIN_ROOT) {
         continue;
       }
       if (!/\.(?:ts|mjs|js)$/.test(e.name) || SURFACE_SKIP_FILES.test(e.name)) continue;
-      const text = fs.readFileSync(abs, "utf8");
+      let text;
+      try {
+        text = fs.readFileSync(abs, "utf8"); // a dangling symlink lands here — report, never skip
+      } catch (e) {
+        unreadable(abs, e);
+        continue;
+      }
       if (!importsSharedEntryHelper(text)) continue;
       for (const cond of topLevelIfConditions(text)) {
         const arity = isDirectEntryArity(cond);
