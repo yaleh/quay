@@ -1,0 +1,103 @@
+---
+id: gap-quay-init-omits-adr-goal-meta-dir-env-third-party-leak
+title: 第三方项目的 adr/goal/meta store 串到 quay 仓库——quay-init 只 pin 了 tasks_dir
+status: todo
+labels:
+  - gap
+  - defect
+  - delivery-critical
+  - mechanism
+parent: null
+children: []
+extra:
+  schema: execution
+---
+## Proposal
+
+**现象（2026-09-13 在全新项目 /home/yale/work/quay-fleet 实测）**：跑完 `quay-init.sh` 后，
+从该项目执行 `quay goal list` 返回的是 **quay 自己的 goals（AC-143 … AC-153）**，
+`quay adr list` 返回 quay 自己的 **ADR-001 … ADR-011**，`meta list` 同理返回 quay 的 META-001…。
+只有 `task list` 正确隔离（返回 `No tasks found.`）。**读会串，写同样会串**——
+在该项目创建 goal 会写进 `/home/yale/work/quay/goals/`，污染 quay 自己的 goal store。
+
+**根因（已定位到行）**：
+- `packages/quay-native/bin/quay-native.ts:66` `resolveSiblingDir(envName, kind)`：
+  env 未设时走 `findRepoRoot(process.cwd())`，即**从 MCP 进程 cwd 向上找第一个 `.quay/config.yml`**。
+- `resolveAdrDir`(:78) / `resolveGoalDir`(:96) / `resolveMetaDir`(:104) 三者全部走这条路径。
+- MCP 进程的 cwd 是 provider.path，而 `quay-init.sh` 的 **upgrade-channel runtime migration**
+  会把 provider.path 从项目本地的 `./node_modules/quay-native` 改写为
+  `/home/yale/work/quay/plugin/vendor/quay-native`（init 输出原文：
+  `migrated: path './node_modules/quay-native' -> /home/yale/work/quay/plugin/vendor/quay-native`）。
+  自该目录向上，第一个带 `.quay/config.yml` 的目录就是 **quay 仓库本身**。
+- `tasks` 之所以幸免，仅仅因为 `quay-init` 在 config 的 `env:` 里显式写了 `QUAY_NATIVE_TASKS_DIR`，
+  而 adr/goal/meta **没有对应的 env**。
+
+**设计意图已被违背**：`packages/quay-native/src/mcp-server.ts:35-36` 的注释明写
+「default to `<parent-of-tasksDir>/adr` when adrDir is not supplied」，
+即 sibling 目录本应**跟着已解析的 tasksDir 走**；而 bin 层的 `resolveSiblingDir` 却重新从 cwd 找 repo root，
+两层不一致。src 层的默认是对的，bin 层传进来的值覆盖了它。
+
+**影响面**：任何经 upgrade-channel（vendor）安装 quay 的第三方项目，其 adr / goal / meta
+三个 store 全部与 quay 仓库共享，且静默——`quay-init` 的输出里没有任何警告，
+只有 MCP server 启动时那行 `serving tasks from … ADRs from … meta from …` 里能看出来，
+而它混在 stderr 噪声里。
+
+## Plan
+
+两处都改，缺一不可：
+
+1. **根因修**：`packages/quay-native/bin/quay-native.ts` 的 `resolveSiblingDir` 改为
+   **从已解析的 tasksDir 推导** —— `path.join(path.dirname(resolveTasksDir()), kind)`，
+   与 `src/mcp-server.ts:36` 文档化的意图一致；env override 仍然最高优先级。
+   这样即使 provider.path 在 quay 仓库内，只要 tasksDir 正确，三个 sibling store 就跟着正确。
+2. **配置面修**：`plugin/scripts/quay-init.sh` 生成 config 时，
+   与 `QUAY_NATIVE_TASKS_DIR` 并列写出 `QUAY_NATIVE_ADR_DIR: ./adr`、
+   `QUAY_NATIVE_GOAL_DIR: ./goals`、`QUAY_NATIVE_META_DIR: ./meta`（对已有 config 幂等增补）。
+   即便根因修好，显式 pin 也是对的——它让隔离在 config 里可见可审。
+
+## Acceptance Criteria
+
+- [ ] AC1（负控制，改前必须红）：在一个 provider.path 位于 quay 仓库内、且 config 的 `env:`
+      **不含** `QUAY_NATIVE_GOAL_DIR` 的临时 workspace 上，`goal list` 返回的条目数 > 0
+      （即复现串库）；应用本任务改动后，同一 workspace 同一命令返回 `(no goals)`。
+- [ ] AC2：`resolveSiblingDir` 的解析不再调用 `findRepoRoot(process.cwd())`；
+      单测断言：给定 `QUAY_NATIVE_TASKS_DIR=<tmp>/tasks` 且 cwd 位于另一个带 `.quay/config.yml`
+      的目录时，`resolveAdrDir()/resolveGoalDir()/resolveMetaDir()` 全部返回 `<tmp>/{adr,goals,meta}`。
+- [ ] AC3：`quay-init.sh` 对一个全新目录生成的 `.quay/config.yml`，其 `providers.native.env`
+      同时包含 `QUAY_NATIVE_TASKS_DIR`/`QUAY_NATIVE_ADR_DIR`/`QUAY_NATIVE_GOAL_DIR`/`QUAY_NATIVE_META_DIR` 四个键。
+- [ ] AC4：`quay-init.sh` 对一个**已存在且缺这三个键**的 config 幂等增补（不覆盖用户已设的值，
+      不重排其余键）；对已有四键的 config 再跑一次不产生 diff。
+- [ ] AC5：全量 `scripts/test.sh` 绿。
+
+## Definition of Done
+
+在一个**真实的第三方项目**（非 fixture、非临时目录）上跑通：该项目 `goal list` / `adr list` /
+`meta list` 三者都只返回该项目自己的记录，且在其中**真实创建**一条 goal 后，
+`/home/yale/work/quay/goals/` 下**没有**新增任何文件。fixture 满足不算数
+（硬规则 4 推论三：只能被 fixture 满足的判据不是测量）。
+
+## Touches
+
+- packages/quay-native/bin/quay-native.ts
+- plugin/scripts/quay-init.sh
+- packages/quay-native/test/resolve-sibling-dir.test.mjs
+- test/quay-init-config-env-keys.test.mjs
+- tasks/gap-quay-init-omits-adr-goal-meta-dir-env-third-party-leak.md
+
+## 相关任务（立案时按机制查重的记录，非上文证据的一部分）
+
+`gap-quay-init-env-only-tasks-dir-goals-adr-meta-land-inside-npm-package`（**status: done**，2026-09-10）
+命中同一个函数，但**是另一条分支、另一种落点**，故不视为重复：
+
+- 那一条管 `findRepoRoot` **落空**的分支（vendored 包目录向上没有 `.quay/config.yml`）⇒ 退到
+  `path.resolve(process.cwd(), kind)` ⇒ 载体落进**安装的 npm 包内**。其修法逐字保留了这个 fallback
+  （`bin/quay-native.ts:63-65` 注释：「We keep the fallback (fail-open …) but PRINT where it resolved to」），
+  只加了一行 stderr。
+- 本条管 `findRepoRoot` **命中了错误的 repo** 的分支（`:69-70`）：provider.path 被 upgrade-channel 迁到
+  `$PLUGIN_ROOT/vendor/quay-native` 后，向上第一个 `.quay/config.yml` 就是 **quay 仓库自己** ⇒ 直接
+  `return path.resolve(repoRoot, kind)`，**连那行 stderr 都不会打印**（它只在 fallback 分支里）。
+  ⇒ 前一条的修法在结构上覆盖不到本条。
+- **立案时的位置读数（改前基线，2026-09-13 读当前盘上代码）**：
+  `plugin/scripts/quay-init.sh:989-990` 生成的 `env:` 块**只有 `QUAY_NATIVE_TASKS_DIR` 一个键**——
+  即前一条任务 AC2/AC3 声称的「四个 `QUAY_NATIVE_*_DIR` 键」**在当前生产脚本里不存在**。
+  本条的 AC3/AC4 因此是对该配置面的重新落实，实现时应先核对这段历史（是从未落地、落在了另一个副本、还是被回退）。
