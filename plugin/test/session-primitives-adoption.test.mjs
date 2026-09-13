@@ -338,6 +338,53 @@ test("AC5 负控制 — a FOLDED session record is rejected; the two-dimension r
   assert.equal(validateSessionRecord(noSource).valid, false, "a dimension without a source is invalid");
 });
 
+test("AC3-adjacent — an UNUSABLE ledger never crashes a lane: L1 falls back, L2 refuses with a reason", async () => {
+  // The shared lanes append a ledger record on EVERY exit path (their contract) and that append is
+  // NOT best-effort — it throws from inside a socket callback, i.e. an UNCAUGHT exception. Since the
+  // L1/L2 lanes delegate to them, an unusable ledger could otherwise kill `quay serve` (or a CLI) with
+  // a stack and no verdict. These two assertions pin the pre-flight check that prevents it: this is a
+  // regression guard for the delegation THIS task introduced, and both halves can fail.
+  const net = await import("node:net");
+  const { spawn } = await import("node:child_process");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ac253-ledger-"));
+  const blocker = path.join(dir, "not-a-dir");
+  fs.writeFileSync(blocker, "x"); // ENOTDIR parent ⇒ the ledger file cannot be created or written
+  const badLedger = path.join(blocker, "audit.jsonl");
+
+  // ── L1: real socket + unusable caller ledger ⇒ the DELIVERY still happens (job #1 wins over
+  //        bookkeeping; the record degrades to the documented default). ──────────────────────────
+  const { sendSessionFrames } = await import(path.join(REPO_ROOT, "packages/quay/src/serve-send.ts"));
+  const sockPath = path.join(dir, "messaging.sock");
+  const got = [];
+  const srv = net.createServer((c) => c.on("data", (b) => got.push(b)));
+  await new Promise((r) => srv.listen(sockPath, r));
+  const res = await sendSessionFrames({
+    sockPath, token: "t", text: "hi", fromName: "probe", auditLogPath: badLedger,
+  });
+  await new Promise((r) => setTimeout(r, 50));
+  await new Promise((r) => srv.close(r));
+  assert.equal(res.ok, true, "an unusable ledger must not block the delivery (L1 falls back)");
+  assert.ok(
+    Buffer.concat(got).toString("utf8").includes('"type":"auth"'),
+    "and the frames really went out over the socket",
+  );
+
+  // ── L2: the shipped CLI with an unusable --audit ⇒ an ordinary failure exit that SAYS WHY,
+  //        never exit 1 with a Node stack. ───────────────────────────────────────────────────────
+  const cli = path.join(REPO_ROOT, "plugin", "scripts", "send-to-session.ts");
+  const run = await new Promise((resolve) => {
+    const p = spawn("node", ["--no-warnings", "--experimental-strip-types", cli, "--keys",
+      "--sock", sockPath, "--audit", badLedger, "/clear"], { stdio: ["ignore", "ignore", "pipe"] });
+    let err = "";
+    p.stderr.on("data", (d) => { err += d.toString(); });
+    p.on("exit", (code) => resolve({ code, err }));
+  });
+  assert.equal(run.code, 4, `an unusable ledger is an ordinary delivery failure (exit 4), got ${run.code}`);
+  assert.match(run.err, /audit ledger not writable/, "and it names the reason");
+  assert.doesNotMatch(run.err, /Uncaught|Node\.js v/, "⛔ no uncaught-exception crash");
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test("AC5 — observation.ts runs the validator at its output boundary and refuses to render a folded record", () => {
   const src = fs.readFileSync(path.join(REPO_ROOT, "packages/quay/src/observation.ts"), "utf8");
   // The consumer is a real gate, not an import kept for show: the validator's verdict decides

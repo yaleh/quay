@@ -94,6 +94,29 @@ export const WEB_SEND_FROM_NAME = "quay-web";
 const DEFAULT_SEND_AUDIT_PATH = path.join(os.tmpdir(), "quay-session-send-audit.jsonl");
 
 /**
+ * The shared delivery lanes append a ledger record on EVERY exit path — that is their contract — and
+ * their append is NOT best-effort: it throws from inside a socket callback, i.e. as an UNCAUGHT
+ * exception that kills the process with no verdict. This module's own receipt write is best-effort
+ * (`appendMessageReceipt`), so a bookkeeping failure must never be able to take `quay serve` down.
+ * ⇒ The ledger TARGET is validated before any socket is opened; the two lanes then degrade honestly
+ * (L1: fall back to the documented default; L2: refuse with a reason) instead of crashing.
+ *
+ * `mkdirSync` is the same call `appendAuditRecord` makes, one step earlier (and the same call it will
+ * still make), so this check adds no new filesystem hazard — it only moves the failure to where it
+ * can be reported.
+ */
+function ledgerUsable(auditLogPath: string): boolean {
+  try {
+    const dir = path.dirname(auditLogPath);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.accessSync(fs.existsSync(auditLogPath) ? auditLogPath : dir, fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Deliver one message over the Claude Code cross-session socket: the auth frame
  * ({"type":"auth","token":…}) then the user frame (a <cross-session-message …> wrapper). This is the
  * SAME wire format plugin/scripts/send-to-session.ts writes (auth frame first, then the user frame),
@@ -111,9 +134,14 @@ export function sendSessionFrames(opts: {
   text: string;
   fromName: string;
   /** L1 ledger path (see DEFAULT_SEND_AUDIT_PATH). Records BOTH success and failure — the shared
-   *  `deliver` contract, because "only recording successes" is not an audit trail. */
+   *  `deliver` contract, because "only recording successes" is not an audit trail. An UNUSABLE path
+   *  degrades to the default rather than crashing the caller (see ledgerUsable) — the delivery
+   *  itself, which is this function's job, is never blocked by a bookkeeping problem. */
   auditLogPath?: string;
 }): Promise<{ ok: boolean; reason: string | null }> {
+  const ledger = opts.auditLogPath != null && ledgerUsable(opts.auditLogPath)
+    ? opts.auditLogPath
+    : DEFAULT_SEND_AUDIT_PATH;
   // ① auth 帧（文档明写：第一行）② 消息帧（2026-08-15 实测到达的格式；from 沿用脚本的
   // `uds:${sockPath}` 线格式）。Two newline-terminated JSON frames in ONE payload — the same bytes
   // the previous hand-written two-write version put on the wire (serve-handlers.test.mjs pins them).
@@ -131,7 +159,7 @@ export function sendSessionFrames(opts: {
     target: opts.sockPath,
     socketPath: opts.sockPath,
     payload: `${authFrame}\n${userFrame}\n`,
-    auditLogPath: opts.auditLogPath ?? DEFAULT_SEND_AUDIT_PATH,
+    auditLogPath: ledger,
   }).then((record) => ({
     ok: record["delivered"] === true,
     reason: typeof record["error"] === "string" ? record["error"] : null,
@@ -481,6 +509,16 @@ export function sendKeysToSession(opts: {
   /** How long to wait after the auth frame for an explicit rejection before sending DATA. */
   authGraceMs?: number;
 }): Promise<KeysDeliveryOutcome> {
+  // This lane's audit path is NAMED by the caller (`--audit`), so an unusable one must not silently
+  // move the record elsewhere (the L1 lane's fallback) — and it must not crash either. Refuse BEFORE
+  // opening the socket, with a reason the CLI renders as its ordinary failure exit.
+  if (!ledgerUsable(opts.auditLogPath)) {
+    return Promise.resolve({
+      delivered: false,
+      error: `audit ledger not writable: ${opts.auditLogPath}`,
+      rejectedAs: null,
+    });
+  }
   return deliverKeys({
     who: opts.who ?? "quay-serve",
     target: opts.target ?? opts.sockPath,
