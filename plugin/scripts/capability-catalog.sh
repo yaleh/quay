@@ -162,6 +162,7 @@ declare -A QUESTION=(
   [check-set-after-change-check.ts]="After editing which files does which test/checker run — git diff --name-only intersect the test/checker's SELF-DECLARED judged objects (the @judges header glob, no central table), so 'run the test that covers this change' is mechanical not the author's memory (A0b③: changing plugin/loop/manager-tick-core.md MUST select laydown-set-check.sh, never tick-core-static-check)?"
   [checked-in-write-check.ts]="Is any EXECUTED test input creating or deleting entries under a CHECKED-IN path — judged positionally at the RESOLVED target path by interposing on the write verbs of node:fs / node:fs.promises in the child (guard), with a second independent reading of whether each input's module evaluation completed, so a file that never loaded reports NOT-EVALUATED instead of reading as clean (tasks/gap-fixture-dir-write-races-whole-tree-copy)?"
 
+  [checker-count-drift-check.ts]="Is each registry's declared checker count equal to the run_checker entries its function body actually holds — the header's own claim (35 while the body held 58) having been unverifiable by any machine (tasks/gap-checker-claim-vs-actual-cadence-and-count-drift)?"
   [checker-cost-lib.sh]="Does a bash static-check invocation record its criterion's wall-clock cost (append-only, zero-judgment)?"
   [checker-cost.ts]="Did the checker record its own criterion cost to the checker-cost JSONL (pure-append, zero-judgment)?"
   [checker-mutation-check.sh]="Would each checker actually fail when its subject is mutated (the L_S instrument)?"
@@ -476,6 +477,7 @@ declare -A CADENCE=(
   [capability-manifest-check.ts]="每轮"
   [check-set-after-change-check.ts]="每轮"
    [checked-in-write-check.ts]="每轮"
+  [checker-count-drift-check.ts]="每轮"
   [checker-cost-lib.sh]="每红窗"
   [checker-cost.ts]="每红窗"
   [checker-lib.ts]="按需"
@@ -708,7 +710,7 @@ declare -A CADENCE=(
   [task-schema-check.sh]="每里程碑"
   [task-schema-check.ts]="每里程碑"
   [task-schema.ts]="每里程碑"
-  [task-status-drift-check.ts]="每轮"
+  [task-status-drift-check.ts]="按需"
   [task-status.ts]="每里程碑"
   [test-file-baseline.ts]="每红窗"
   [test-file-snapshot.sh]="每轮"
@@ -800,6 +802,7 @@ declare -A INVALIDATION=(
   [capability-manifest-check.ts]="失效前提：仍以 delivery-manifest.json 为交付物能力清单正本，且三类能力的源码仍在 driver-runtime.ts DRIVER_KINDS / quay.ts dispatch / packages/*/src/mcp-server.ts；若能力清单迁出 manifest 或源码位置迁移，本条读取面失效"
   [check-set-after-change-check.ts]="失效前提：仍以文件头 @judges 声明为判定对象来源（mutation case 证明删除/改错声明即红）；若改为集中表或执行面不再有自声明文件，本条按 ④ 失效"
    [checked-in-write-check.ts]="失效前提：node:fs 的写动词仍可被 --require 预载在 ESM facade 实例化之前打补丁（若 Node 冻结内建导出、或 facade 在预载前已快照，判定面须改为 loader hook）；且被判定树本身不在 os.tmpdir() 之内——根先于临时目录判定；--changed 模式另需一个可解析的 delta base（develop/origin/develop/master/origin/master）与至少一个仍存在于工作树的 delta 测试文件，两者缺一即报 NOT-EVALUATED（exit 0，scoped-safe），⛔ 不得读成「干净」"
+  [checker-count-drift-check.ts]="失效前提：run_static_checks / run_operational_checks 仍以 runner-static-gate.ts 为唯一载体、run_doc_checks 仍在 scripts/test.sh，且「注册表条目」仍以命令位置的 run_checker 调用为形态；若注册表迁出这些文件、或声明形式改为集中表（函数上不再挂 @checker-count 注解），本条读取面失效"
   [checker-cost-lib.sh]="无可测前提，靠周期复核"
   [checker-cost.ts]="无可测前提，靠周期复核"
   [checker-lib.ts]="失效前提：仍有检查器需要位置判定/枚举式存在性原语；若无任何 import 者，本条按 ④ 失效"
@@ -1124,6 +1127,7 @@ declare -A LAST_REAFFIRMED=(
   [capability-manifest-check.ts]="2026-09-10"
   [check-set-after-change-check.ts]="2026-08-13"
    [checked-in-write-check.ts]="2026-09-13"
+  [checker-count-drift-check.ts]="2026-09-13"
   [checker-cost-lib.sh]="2026-08-10"
   [checker-cost.ts]="2026-08-10"
   [checker-lib.ts]="2026-08-10"
@@ -1448,6 +1452,7 @@ declare -A MATCHING=(
   [capability-manifest-check.ts]="enumerative"
   [check-set-after-change-check.ts]="position"
    [checked-in-write-check.ts]="position"
+  [checker-count-drift-check.ts]="position"
   [checker-cost-lib.sh]="n/a"
   [checker-cost.ts]="keyword"
   [checker-lib.ts]="position"
@@ -1870,6 +1875,8 @@ declare -A CONSUMER=(
   [peer-identity-probe.ts]="谁按：方案 C 路的验证者 / 后续接线者在需要核证「一个非 Claude 进程能否被平台 SendMessage 投递」时按（node --experimental-strip-types plugin/scripts/peer-identity-probe.ts serve|patch|shutdown|cleanup）；条件=要复测 peer 登记的可达性、逐字段必要性（patch 改自己记录的一个字段后立刻投递），或按 AC13 结论做接线前的对照复测"
   [channel-probe-server.ts]="谁按：Channels 路的验证者 / 后续接线者在需要把外部事件推入一个运行中的 Claude Code 会话时按（node --experimental-strip-types plugin/scripts/channel-probe-server.ts --evidence <path> --http-port 8799，由 Claude Code 以 MCP server 起；--selfcheck 可独立自检 capability 声明）；条件=要核证官方 Channels 契约（experimental['claude/channel'] + notifications/claude/channel）在本机是否可达，或按 AC13 结论做接线前的对照复测"
   [server-partial-stop-verify.ts]="谁按：GOAL-017/AC-254 的判据消费它写的载体（.quay/unified-server-verification.jsonl）；条件=要在统一 server 形态上真跑一次部分停止并把六 kind 同 run 的 round 推进写成合格记录（⛔ 它是生产者不是静态检查器，故刻意不登记进 runner-static-gate.ts 的 run_static_checks —— 登记会让 AC 未达成期间全量套件每轮变红）"
+  [task-status-drift-check.ts]="谁按：①packages/quay/src/observation.ts 的 readBoardLanding（web /board 每次页面请求 spawn 本脚本 --json，30s 短 TTL 缓存 + 秒级硬顶，gap-webui-board-load-120s）——机器按，最常走的路径；②experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh 的 --stranded 段（quay driver resume 前的人工 go/no-go，判 stranded worktree 分支）；③plugin/skills/cold-start/SKILL.md 的冷启动读数；④orchestration/goals-and-ac.md 的「任务 status 与证据是否漂移」判据配方（人按）。条件=①要判某任务落地标记可信否（board 的落地列）；②③要判有没有任务/worktree 悬空；④要复核某条 AC 的状态与证据是否一致。⛔ 原声明「每轮」为假：没有每轮的调用点——manager/fast-mode 两个执行核与 worker-driver/ready-pool-check/slot-refill 的派发路径里 0 次整体调用，routine-scheduler 的文法（every(N)/interval:Nm/on(event)）也表达不出「每轮」（every(N) 依赖的迭代计数器随 ADR-022 退役，两层模式恒不 due）；且它读的是全库 git-log 面（本仓实测 >150s），2026-09-02 passive-machine ruling 正是把读运行态的检查器搬出默认套件。所以本条按【按需】声明并与实际相符，而不是把一个重扫塞进每轮路径（tasks/gap-checker-claim-vs-actual-cadence-and-count-drift AC1 选项二）"
+  [checker-count-drift-check.ts]="谁按：scripts/test.sh 的 run_static_checks 每次全量 suite 按（登记在 plugin/scripts/runner-static-gate.ts，@static-tier change，@static-object plugin/scripts/runner-static-gate.ts scripts/test.sh 本检查自身及其 mutation case/测试）；scoped 门在 delta 命中上述对象时同样选中它；条件=要判「每个注册表函数上挂的 @checker-count 声明数是否等于该函数体实测的 run_checker 条数」（声明≠实测即红；函数/注解读不到报 NOT-EVALUATED exit 3，⛔ 不与 PASS 同形）"
 )
 # ── superseded capability table (gap-retired-script-still-callable, human ruling 2026-08-10) ──
 # One capability = ONE implementation. A superseded implementation must NOT exist in the
