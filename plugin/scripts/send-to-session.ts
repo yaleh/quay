@@ -65,6 +65,7 @@ async function loadSendSessionFrames(): Promise<
 //
 // ⛔ The socket path is REQUIRED and never guessed: this repo has no verified pty.sock discovery
 // convention, and inventing one would fabricate a fact (硬规则 6).
+const args = process.argv.slice(2);
 if (args.includes("--keys")) {
   const one = (name: string): string | undefined => {
     const i = args.indexOf(name);
@@ -148,7 +149,8 @@ if (self) {
   console.error(`  target = ${reg.name} (pid=${pid}, sessionId=${reg.sessionId})`);
 } else {
   console.error(
-    '用法：--self "msg"  或  --pid <pid> [--token <childToken>] "msg"',
+    '用法：--self "msg"  或  --pid <pid> [--token <childToken>] "msg"\n' +
+    '  或（L2 控制面，pty.sock 原始字节）：--keys --sock <pty.sock> [--token <authToken>] [--audit <path>] "/clear"',
   );
   process.exit(1);
 }

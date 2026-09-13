@@ -16,6 +16,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -192,6 +193,68 @@ test("AC3 — pty-frame's lane: the repo really has no pre-existing binary-frame
   const serveSend = fs.readFileSync(path.join(REPO_ROOT, "packages/quay/src/serve-send.ts"), "utf8");
   assert.match(serveSend, /export function sendKeysToSession/, "the L2 keys lane is exported");
   assert.match(serveSend, /encodeCtrl|encodeData|decodeFrames/, "the lane uses the shared frame codec");
+});
+
+test("AC3/AC6 — the shipped keys CLI really runs: --keys delivers /clear over a REAL unix socket", async () => {
+  // This test exists because the production-carrier reading caught a bug no other test did: the
+  // `--keys` block had been inserted ABOVE `const args = process.argv.slice(2)`, so the script died
+  // with `ReferenceError: args is not defined` before reaching any of its own logic. A static
+  // "the file mentions --keys" assertion would have passed. Only RUNNING it can tell.
+  const net = await import("node:net");
+  const { spawn, execFileSync } = await import("node:child_process");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ac253-keys-"));
+  const sockPath = path.join(dir, "pty.sock");
+  const frames = path.join(dir, "frames.jsonl");
+  const audit = path.join(dir, "audit.jsonl");
+
+  const received = [];
+  const server = net.createServer((c) => {
+    c.on("data", (b) => {
+      const tag = b.readUInt8(4);
+      received.push({ tag, payload: b.subarray(5).toString("utf8") });
+      fs.appendFileSync(frames, JSON.stringify(received[received.length - 1]) + "\n");
+      if (tag === 0) { c.end(); server.close(); }
+    });
+  });
+  await new Promise((r) => server.listen(sockPath, r));
+
+  const cli = path.join(REPO_ROOT, "plugin", "scripts", "send-to-session.ts");
+  const rc = await new Promise((resolve) => {
+    const p = spawn("node", ["--no-warnings", "--experimental-strip-types", cli, "--keys",
+      "--sock", sockPath, "--token", "tok-test", "--audit", audit, "/clear"], { stdio: "ignore" });
+    p.on("exit", (code) => resolve(code));
+  });
+  assert.equal(rc, 0, "the keys CLI exits 0 when the DATA frame is flushed with no rejection");
+  assert.deepEqual(
+    received.map((f) => f.tag), [1, 0],
+    "a CTRL auth frame goes out first, then the DATA frame",
+  );
+  assert.equal(JSON.parse(received[0].payload).t, "auth", "the CTRL frame is the auth handshake");
+  assert.equal(received[1].payload, "/clear", "the DATA frame carries the bytes UNMODIFIED");
+  const record = JSON.parse(fs.readFileSync(audit, "utf8").trim());
+  assert.equal(record.delivered, true, "the shared ledger records the successful delivery");
+  assert.deepEqual(record.payloadSummary, { length: 6, sha256_12: record.payloadSummary.sha256_12, firstLine: "/clear" },
+    "the ledger stores a payload SUMMARY (length + hash + first line), never the raw payload as the audit");
+
+  // …and the failure path leaves a record too: an unreachable socket must NOT silently skip the ledger.
+  const rc2 = await new Promise((resolve) => {
+    const p = spawn("node", ["--no-warnings", "--experimental-strip-types", cli, "--keys",
+      "--sock", path.join(dir, "no-such.sock"), "--audit", audit, "x"], { stdio: "ignore" });
+    p.on("exit", (code) => resolve(code));
+  });
+  assert.equal(rc2, 4, "an unreachable socket is a delivery failure (exit 4), not a silent success");
+  const lines = fs.readFileSync(audit, "utf8").trim().split("\n");
+  assert.equal(lines.length, 2, "the FAILURE attempt also appended a ledger record — same write path");
+  assert.equal(JSON.parse(lines[1]).delivered, false, "and it is truthfully recorded as not delivered");
+
+  // The arg block is reachable and honest about its missing required input (the TDZ bug's own shape).
+  const noSock = spawn("node", ["--no-warnings", "--experimental-strip-types", cli, "--keys"], { stdio: ["ignore", "ignore", "pipe"] });
+  let err = "";
+  noSock.stderr.on("data", (d) => { err += d.toString(); });
+  const rc3 = await new Promise((resolve) => noSock.on("exit", (code) => resolve(code)));
+  assert.equal(rc3, 2, "--keys without --sock is a usage error (exit 2)");
+  assert.match(err, /--sock/, "and it says which argument is missing");
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test("AC5 负控制 — a FOLDED session record is rejected; the two-dimension record is accepted", async () => {
