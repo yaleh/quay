@@ -3,7 +3,7 @@ id: gap-ac254-partial-stop-web-driver-round-record
 title: GOAL-017/AC-254：服务可独立起停 —— `quay server stop --only web` 后 driver round
   心跳仍推进，且 `.quay/unified-server-verification.jsonl` 有合格记录（SPEC 阶段 B / §6.9 不变式
   2）
-status: todo
+status: ready
 labels:
   - gap
 parent: null

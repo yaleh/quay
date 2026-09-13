@@ -61,6 +61,7 @@
     { "name": "retreat", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
     { "name": "run", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
     { "name": "serve", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
+    { "name": "server", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/server-status-web-control-same-pid.test.mjs" },
     { "name": "task", "kind": "cli-command", "sourceRef": "packages/quay/bin/quay.ts:dispatch", "verifiedBy": "packages/quay/test/cli.test.mjs" },
     { "name": "quay", "kind": "mcp-server", "sourceRef": "packages/quay/src/mcp-server.ts", "verifiedBy": "packages/quay/test/mcp-server.test.mjs" },
     { "name": "quay-native", "kind": "mcp-server", "sourceRef": "packages/quay-native/src/mcp-server.ts", "verifiedBy": "packages/quay-native/test/abi-symmetry.mjs" },
