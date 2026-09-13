@@ -93,6 +93,7 @@ session-schema.mjs     82 行  validateSessionRecord
 - `plugin/test/primitives-drift-check.test.mjs` (new)（三态，含 exit 3 NOT-EVALUATED）
 - `plugin/vendor/quay/dist/quay.js`（若构建产物字节变化则一并声明与提交；`dist/` 下仅此一个产物文件，以构建输出清单为准）
 - `tasks/gap-ac253-session-primitives-shared-layer-adoption.md`（自身文件：勾 AC + 贴实跑证据）
+- `docs/analysis/dead-set-recomputed.json`（§12f 死集快照重算：本任务新增的 test-pin 让 `send-to-session.ts` 成为「被引用的脚本」，而它仍在 2026-09-08 的快照死集里 ⇒ 全量套件静态门 `registry-bare-filename-scan --check` 报红；按 §12d/§12e/§12f 在当前树上重算后提交，闸转绿 —— 真因与三条读数见结果段末节）
 
 ## AC
 
@@ -238,6 +239,54 @@ provenance：`packages/quay/src/primitives/PROVENANCE.md`（fleet 仓路径 + �
 6. **journal 文件格式未变**（Plan 第 5 步要求的决定）：`message-receipts.jsonl` 的**写入实现**换成共享 `appendAuditRecord`，写出字节与原来逐字相同（同一个 `mkdirSync(dirname)` + `appendFileSync(JSON.stringify(record)+"\n")`），新增的 `payloadSummary` 是**增量字段**（既有读者忽略未知键，`readMessageReceipts` 亦如此）。⇒ 既有读者零回退。
 7. **`.d.mts` 声明文件**（四份，本地手写、不参与逐字节比对）：root tsconfig 是 `allowJs` + `checkJs`，被 import 的 `.mjs` 会被一起类型检查，而冻结副本里不能写 `// @ts-nocheck`（会破坏逐字节同一性）。⇒ 用兄弟 `.d.mts` 声明类型。drift manifest 只钉四个 `.mjs`。
 8. **scoped-gate 缓存的 sha 记的是「门实际 gated 的那个 develop tip」**：门在 `1ea66a0b1` 上跑绿，这次 `HEAD^2` = `rev-parse develop` = `92fc24476`，两者一致，缓存即记 `92fc24476`。（中途还跑过一次：那次 merge 到的 tip 是 `69aac66d` 而 develop 已前进到 `cd63c8dd`，当时按同一原则记 `69aac66d` 并重跑——记一个没跑过的 tip 会让 fan-in 错误跳过门，记实际跑过的 tip 最多让 fan-in 重跑一次门，是成本不是错误。）
+
+### 本轮补：suite 静态门 `registry-bare-filename-scan` 红的真因与修法（不是「重跑碰运气」）
+
+上一轮 exit-not-landed 的 `# fail 5` / `# suite red static-check` 只有**一条**真因（套件日志尾部逐字，`# tests 0` ⇒ 套件在静态闸就中止，一个测试都没跑）：
+
+```
+STATIC_CHECK_FAILED: registry-bare-filename-scan exit=1
+RED: referenced script(s) still in dead set: send-to-session.ts
+```
+
+**真因（一条命令取到，不是猜）**：本任务新增的 `plugin/test/session-primitives-adoption.test.mjs:272`（及 `:374`）以裸文件名钉住 shipped CLI ——
+`path.join(REPO_ROOT, "plugin", "scripts", "send-to-session.ts")` —— 这正是该扫描器的 `test-pin` 引用类（§12e 四类引用之一）。
+于是 `send-to-session.ts` 进入 `allReferencedScripts`，而该闸的判据是 `allReferencedScripts ∩ after.dead = ∅`：
+被引用的脚本仍在 `docs/analysis/dead-set-recomputed.json` 的**快照**死集里 ⇒ 红。按位置（不是按关键词）取到的命中：
+
+```
+{"script":"send-to-session.ts",
+ "carrier":{"file":"plugin/test/session-primitives-adoption.test.mjs","line":272,
+            "snippet":"const cli = path.join(REPO_ROOT, \"plugin\", \"scripts\", \"send-to-session.ts\");"},
+ "kind":"test-pin"}
+```
+
+**两条「让它变绿」的路都不取**：① 让检查器忽略 `test-pin` —— 把一条真引用判成不存在，而 §12f 存在的理由恰恰是「闭包会漏引用形式」；
+② 把测试里的路径改写成检查器认不出的形态 —— 主动选用被漏掉的那种写法来绕闸，方向与 §12f 相反。两条都是删掉判据而不是修它。
+⇒ 正确动作是**刷新快照**：SPEC §12e 自述该名单是「带测量日期的快照，不是活文档」，且「执行 archive 前须按 §12d 重算一次，以重算结果为准」；
+`send-to-session.ts` 本来就被本仓库产品面在用（`send-to-session.ts --keys` 是本轮落地的入口），它**不该**在死集里。
+
+**修法**：跑该机件自己的重算入口（同一条 §12d 规则 + §12e 四类引用 + §12f 裸文件名边），把产物写回 `docs/analysis/dead-set-recomputed.json`：
+
+```
+node --no-warnings --experimental-strip-types plugin/scripts/registry-bare-filename-scan.ts --dead-set --root <worktree>
+```
+
+| 读数 | 值 |
+|---|---|
+| 改前 `after.deadCount`（2026-09-08 的已提交快照） | 31（`send-to-session.ts` **在其中**） |
+| 改后 `after.deadCount`（本次重算，默认窗口 = 72h 到 now） | **15**（`send-to-session.ts` **不在**其中） |
+| 闸（改后，同一棵树） | `--check` ⇒ `PASS: bare-filename scan found 9 referenced script(s) + 532 extra-kind ref(s); … none in dead set (after=15)`，**exit 0** |
+
+**31→15 的差不是本任务造成的（三段对照，不是自洽的解释）**：同一重算换用 2026-09-08 那一刻的普查窗口（`--since/--until`）**仍得 18**，
+差集恰是 `channel-probe-server.ts` / `peer-identity-probe.ts` / `preparation-feedback.ts` 三个（这三个在新窗口里被执行过 ⇒ 活着）。
+⇒ 31→18 由**这五天树上的引用面变化**造成，18→15 由**普查窗口**造成；两个方向都指向同一结论：**快照陈旧**，不是本任务新引入的缺陷。
+本任务取**默认窗口**的读数 —— 它与任何人重跑一次默认命令的结果一致（可复现）；挑一个旧窗口能让 diff 更小，但会让产物与机件的自然输出不一致，属于「让读数迁就叙事」。
+
+⚠️ 顺带登记（**不是**本任务修、但同形）：死集除「被引用的脚本」外还有一类会随**普查窗口**移动的条目 ——
+`peer-identity-probe.ts` / `channel-probe-server.ts` / `preparation-feedback.ts` 在 09-08 窗口下判死、在今天的 72h 窗口下（被执行过）已活着。
+本任务只负责让**被引用的脚本**离开死集（这正是该闸的判据），不替其余名字做 archive 决策
+（那是 AC158 的范围，且 SPEC §12e 逐字要求执行前先重算）。
 
 ### DoD 自查
 
