@@ -1,7 +1,7 @@
 ---
 id: gap-productize-deep-semantic-dedup-scan-routine
 title: 把深度语义重复扫描(08-25 多 agent 判重模式)产品化为周期 routine,而非常驻热路径闸
-status: todo
+status: ready
 labels:
   - gap
   - finding
