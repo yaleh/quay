@@ -1542,13 +1542,14 @@ test("AC6 — dev/build layout: the registry is at the MERGE ROOT (unreachable b
 // READ from the single-source manifest `plugin/scripts/quay-runtime-artifacts.txt` (the same list
 // quay-init writes into a consumer `.gitignore`), and a refusal that DOES involve such a path says so.
 //
-// ⛔ The pre-fix control is a real second control, not a paraphrase: `PRE_FIX_MERGE_SCRIPT` (when the
-// sibling pre-fix worktree exists) is the SAME ff-merge module from BEFORE this change, driven with the
-// SAME fixture — the assertion that its reason is the bare `working tree not clean` is what proves the
-// attribution lines are new behavior rather than always-present text.
-
-const PRE_FIX_MERGE_SCRIPT = process.env.FANIN_FF_PREFIX_MODULE
-  ?? path.resolve(REPO_ROOT, "..", "negctl-old-init", "packages", "quay", "src", "fan-in", "ff-merge.ts");
+// ⛔ The pre-fix control is REPRODUCIBLE, not a scratch-path dependency:
+// `checkBenignRuntimeDirty`/`cleanTreeCheck` keep their HISTORICAL `.quay/`-only extent whenever the
+// manifest cannot be resolved (fail-closed), and that is EXACTLY the pre-fix behavior — the pre-fix
+// module had no manifest concept at all. So the control runs the SAME fixture twice: with the manifest
+// (attribution present) and with `--scripts-dir <an empty dir>` (bare refusal, no attribution). The
+// difference between the two reasons is the measured delta; the real-project pre-fix run against
+// `develop`'s module is recorded in the task body (AC5 evidence), where a third-party project's own
+// residue is the input.
 
 function runMergeModule(modulePath, args) {
   return spawnSync("node", ["--experimental-strip-types", modulePath, ...args, "--token", "test-token"], { encoding: "utf8" });
@@ -1630,14 +1631,19 @@ test("runtime-artifacts AC5 — a dirty path in a directory quay writes under (c
     assert.match(r.stderr, /disposition — quay-init writes these patterns/, "the reason must state the disposition");
     assert.ok(!fs.existsSync(retries), "an environment guard, not an ff failure — no retry record");
 
-    // THE PRE-FIX CONTROL (same fixture, the pre-change module): the reason is the BARE refusal. This is
-    // what makes the attribution lines above a measured delta rather than a constant string.
-    if (fs.existsSync(PRE_FIX_MERGE_SCRIPT)) {
-      const r0 = runMergeModule(PRE_FIX_MERGE_SCRIPT, ["--task", "rt-t", "--root", dir, "--scripts-dir", REAL_SCRIPTS_DIR]);
-      assert.equal(r0.status, 2, `pre-fix control must also refuse: ${r0.stdout}${r0.stderr}`);
+    // THE PRE-FIX CONTROL (the SAME fixture, the SAME module, the manifest made unresolvable): the
+    // reason is the BARE refusal — which is exactly the pre-fix behavior, since the pre-fix module had
+    // no manifest concept and both judges kept their `.quay/`-only extent. This is what makes the
+    // attribution lines above a measured delta rather than a constant string.
+    const noManifestScriptsDir = makeTmp("rtnomanifest");
+    try {
+      const r0 = runMergeModule(MERGE_SCRIPT, ["--task", "rt-t", "--root", dir, "--scripts-dir", noManifestScriptsDir]);
+      assert.equal(r0.status, 2, `the manifest-less control must also refuse: ${r0.stdout}${r0.stderr}`);
       assert.match(r0.stderr, /not clean/);
-      assert.doesNotMatch(r0.stderr, /QUAY RUNTIME ARTIFACT/, `pre-fix reason is bare — no attribution:\n${r0.stderr}`);
-      assert.doesNotMatch(r0.stderr, /disposition/, "pre-fix reason states no disposition");
+      assert.doesNotMatch(r0.stderr, /QUAY RUNTIME ARTIFACT/, `without a manifest the reason is bare — no attribution:\n${r0.stderr}`);
+      assert.doesNotMatch(r0.stderr, /disposition/, "without a manifest the reason states no disposition");
+    } finally {
+      cleanup(noManifestScriptsDir);
     }
   } finally {
     cleanup(dir); cleanup(st);
