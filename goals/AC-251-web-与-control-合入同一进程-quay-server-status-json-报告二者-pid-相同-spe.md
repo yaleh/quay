@@ -1,7 +1,7 @@
 ---
 id: AC-251
 title: web 与 control 合入同一进程 —— `quay server status --json` 报告二者 pid 相同（SPEC 阶段 A2）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-017
 criterion: >-
@@ -72,4 +72,10 @@ expect: exit 0 = `quay server status --json` 报 web 与 control 且二者 pid �
 origin: SPEC §7 阶段 A2。当前 quay 无 `server` 子命令、web 与控制面是两个进程 ⇒ 本 AC 今天结构上必然取假。本 AC
   同时把 `status --json` 的最小契约钉死（services[] 含 name + 整数 pid），⛔ 使实现不能用一个自由格式敷衍。
 activatedAt: 2026-09-13T14:40:08.438Z
+statusLog:
+  - at: 2026-09-13T16:31:35.188Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
