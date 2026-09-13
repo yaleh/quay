@@ -14,6 +14,24 @@ import { resolvePluginScript } from "./plugin-root.ts";
 
 // ── /sessions ──────────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The two-dimension session state line (SPEC §6.7 / gap-ac253-session-primitives-shared-layer-adoption
+ * Plan step 6): `session.lifecycle` and `session.activity` rendered as TWO layer-prefixed axes, never
+ * collapsed into one status word. The record is validated by the shared `session-schema` primitive in
+ * observation.ts BEFORE it gets here; a refused record renders the refusal — ⛔ the folded value is
+ * never displayed. A fixture that predates the field renders nothing (honest absence, not a fabricated
+ * axis — 硬规则 6: 缺值 = 未查).
+ */
+function sessionStateLine(s: SessionDetail): string {
+  if (s.session) {
+    return html`<div style="font-size:0.7rem;color:var(--color-neutral-700)">session.lifecycle=${s.session.lifecycle.value} · session.activity=${s.session.activity.value}（age ${s.session.activity.ageSec}s）</div>`;
+  }
+  if (s.sessionRefusal && s.sessionRefusal.length > 0) {
+    return html`<div style="font-size:0.7rem;color:var(--color-danger-700,#b91c1c)">状态记录不可用（共享 schema 拒收）：${escapeHtml(s.sessionRefusal.join("; "))}</div>`;
+  }
+  return "";
+}
+
 export function renderSessionsPage(sessions: SessionsResult, identity: ServeIdentity | null = null): string {
   // AC1 (gap-sessions-page-slow-unclickable-flat-render): the card is an <a href="/session/<id>"> —
   // the detail page already exists, the list just never linked to it. sessionId is a strict UUID
@@ -34,6 +52,7 @@ export function renderSessionsPage(sessions: SessionsResult, identity: ServeIden
         <span style="font-size:0.75rem;font-weight:700;color:${s.alive ? "var(--color-positive-700)" : "var(--color-accent-800)"}">${s.alive ? "LIVE" : "GONE"}</span>
       </div>
       <div style="font-size:0.75rem;color:var(--color-neutral-700)">${s.halted ? "halted" : s.pid != null ? `pid ${s.pid}` : "—"}</div>
+      ${sessionStateLine(s)}
       ${msgHtml}
     </a>`;
   };
