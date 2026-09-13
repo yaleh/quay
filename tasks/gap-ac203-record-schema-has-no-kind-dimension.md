@@ -175,3 +175,4 @@ already-running: confirmed driver pid=469455 confirmed_ms=2780
 - plugin/test/verify-deliver-coldstart.test.mjs
 - plugin/test/driver-runtime.test.mjs
 - tasks/gap-ac203-record-schema-has-no-kind-dimension.md
+- packages/quay/src/cli/help.ts
