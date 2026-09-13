@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-profiles-template-omits-every-role-the-drivers-request
 title: quay-init 的 profiles 落地走内联陈旧模板，shipped 模板被 skip —— 第三方项目缺全部五个 worker role
-status: needs-human
+status: ready
 needs_human_cause: human-adjudication
 labels:
   - gap
@@ -48,7 +48,7 @@ I2 的 flip 条件是「全部在域 AC achieved **且** 充分性判定为 `cov
 **近因（定位到行）**：充分性判定是一次真 LLM spawn，生产路径是
 `goal-driver.ts:775` `argv = launchArgv("fix-worker", prompt, root)`，
 而 `driver-runtime.ts:639 launchArgv()` 会 `resolveRole(config, role)`，**解析不到角色就抛错**
-（`role "..." resolves an empty launcher/name`）。goal-driver 的 catch 把它记成
+（`role "...' resolves an empty launcher/name`）。goal-driver 的 catch 把它记成
 `judge-unavailable`（注释原文：「launchArgv 失败（profiles 缺失）… ⛔ 不回落 covered」——
 **fail-closed 是对的，问题在配置侧**）。
 
@@ -178,6 +178,7 @@ env: {CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"}}`。
 
 - packages/quay/src/init.ts
 - packages/quay/test/init.test.mjs
+- packages/quay/test/install-config-driven-e2e.test.mjs
 - plugin/.quay/profiles.yml
 - plugin/skills/init/SKILL.md
 - plugin/skills/manager/SKILL.md
@@ -363,3 +364,31 @@ Touches 增补 `packages/quay/src/init.ts`、**标题改写**，均由协调方 
 - session_id：b76a0528-2745-4c0d-9674-5eb47e41a9bf
 - suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-quay-init-profiles-template-omits-every-role-the-drivers-request~wk-prod-1789139008~1789305506637-35b788.log
 - fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-quay-init-profiles-template-omits-every-role-the-drivers-request-wk-prod-1789139008.log
+
+## 协调方复核后处置（2026-09-13，非 worker 落地，⛔ 非报告原文）
+
+**诊断（只读子代理，见前序对话）**：本任务此前 3 次 exited-not-landed 中，前两次是撞了与本任务
+delta 无关的 develop 侧全局红（`spec-declaration-point-check`，已在 develop 修复），第三次
+（`step=suite: install-config-driven-e2e.test.mjs`）是本任务自身改动引入的真实回归——已定位并修复。
+
+**真因**：本任务把 profiles 的 `name:` 字段改为按目标工作区名派生后，`.quay/profiles.yml`
+从此变成按工作区不同的内容，但 `install-config-driven-e2e.test.mjs` 的 `CONFIG_CLASS` 排除集
+（该文件本来就是防"跨工作区必须字节相同"误报用的白名单）没有把它收进去，导致 A1 测试的
+`crossWorkspaceDiffs()` 把它判定为跨工作区差异，随后 debug 分支对它调用
+`fs.readFileSync(productSource(rel))`——而 `productSource()` 对它正确返回 `null`（它本就不是
+product artifact）——于是崩成 `TypeError [ERR_INVALID_ARG_TYPE]`，而不是一条清晰的断言失败。
+
+**改前红（已复现）**：在该任务 worktree（`/home/yale/work/quay-worktrees/gap-quay-init-profiles-template-omits-every-role-the-drivers-request`）单跑
+`node --experimental-strip-types --test packages/quay/test/install-config-driven-e2e.test.mjs`，
+改前稳定复现上述 TypeError。
+
+**已修（提交 `d58349bbc`，在该任务 worktree 内）**：
+1. 把 `.quay/profiles.yml` 加入 `CONFIG_CLASS`（附中文注释说明原因，指回本任务 id）。
+2. A1 的 debug 诊断分支加固：`productSource(rel) === null` 时打印一条可读诊断
+   （"no productSource() mapping ... likely belongs in CONFIG_CLASS instead"），不再崩溃。
+3. `quay-init-closure-ratchet` 重锚（`3 files / 1022 bytes`，与 develop 已落地值逐字节相同，
+   本次改动不增长 footprint）。
+
+**验证**：单跑该测试文件 3/3 绿；`bash scripts/test.sh --for-task gap-quay-init-profiles-template-omits-every-role-the-drivers-request --allow-thin` exit=0，154/154 绿、0 fail。
+
+**处置**：worktree 已 merge 最新 develop 并把修复提交在同一分支（`task/gap-quay-init-profiles-template-omits-every-role-the-drivers-request`），未销毁、未新建。任务体已补 Touches。status 现改回 ready，交回常驻 worker-driver 走正常的续做+机械 fan-in 路径（merge develop → delta 判定 → typecheck → scoped 门 → 全量 suite → ff-merge），不手工触发 fan-in。
