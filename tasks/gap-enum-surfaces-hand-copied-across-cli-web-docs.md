@@ -2,7 +2,7 @@
 id: gap-enum-surfaces-hand-copied-across-cli-web-docs
 title: 枚举事实在实现/帮助/Web/文档各存一份手抄副本 —— driver kind 七处四值，GOAL_STATUSES
   两份取值已不同（ADR-036 的实现载体）
-status: ready
+status: done
 labels:
   - gap
   - mechanism
