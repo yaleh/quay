@@ -443,9 +443,18 @@ export async function handleFanInLogDownload(
 // 显式权限模式；重启 = `--resume <sessionId>`（SPEC §10.3：上下文保留）。交互式 manager/outer/inner
 // 的停/重启【不暴露】（AC3：无鉴权前提下任何人可杀正在工作的 manager，风险不对等）。
 
+// ADR-036 (枚举事实的单一真源与表层派生) 的表层豁免（规范 5）：Web 控制面**有意**只暴露一个子集，
+// 理由写在代码处（⛔ 不接受沉默地少列几个）。两条豁免由 plugin/scripts/enum-surface-parity-check.ts
+// 机械识别（按 surface-id，与注释相对被检测构造的位置无关）。
 /** The web surface's allowed driver verbs — lifecycle only (status/drain stay CLI-only). */
+// enum-surface-exempt: web-driver-verbs — Web 控制面无鉴权（AC3），只暴露三个生命周期动作。
+//   drain/resume 改变驱动的判停语义、status 是只读诊断，均留在 CLI（`quay driver …`）。
 export const WEB_DRIVER_VERBS = ["start", "stop", "restart"] as const;
 /** The web surface's allowed driver kinds — headless mechanical drivers ONLY (⛔ interactive manager/outer/inner). */
+// enum-surface-exempt: web-driver-kinds — Web 控制面只暴露任务处理型 kind（promotion/worker）。
+//   它们是「一次会话里真正要控的生命周期」；另外四个是例程型 kind（outer/quality/meta/goal），
+//   启停属项目级配置决策。在无鉴权控制面上扩大暴露面只会增加误停例程驱动的风险；要控全部
+//   kind 用 CLI（quay driver 支持全部 6 个）。
 export const WEB_DRIVER_KINDS = ["promotion", "worker"] as const;
 
 export interface DriverActionSpec {
@@ -672,7 +681,7 @@ function renderLifecycleSection(): string {
     <p class="meta">driver 复用 <code>quay driver</code>；新建 = <code>-p --input-format stream-json</code>；重启 = <code>--resume</code>。⛔ 交互式 manager/outer/inner 不在此暴露。提交结果为 JSON。</p>
     <form method="POST" action="/sessions/driver" style="${form}">
       <select name="verb" style="${field}"><option value="start">start</option><option value="stop">stop</option><option value="restart">restart</option></select>
-      <select name="kind" style="${field}"><option value="promotion">promotion</option><option value="worker">worker</option></select>
+      <select name="kind" style="${field}">${WEB_DRIVER_KINDS.map((k) => html`<option value="${k}">${k}</option>`)}</select>
       <button type="submit" style="${btn}">driver 操作</button>
     </form>
     <form method="POST" action="/sessions/new" style="${form}">
