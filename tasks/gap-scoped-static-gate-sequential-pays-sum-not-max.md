@@ -2,7 +2,7 @@
 id: gap-scoped-static-gate-sequential-pays-sum-not-max
 title: scoped 静态门逐次执行付出「和」而全量路径付出「最大值」——先证明 scoped 不属于 run_doc_checks 明文规避的
   fail-open 形态，再并行化并前后实测
-status: todo
+status: ready
 labels:
   - gap
 parent: null
