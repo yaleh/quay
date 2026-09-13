@@ -234,6 +234,14 @@ from-mode = "bypass"
 | 3 | **交互**（tmux）+ 回答 dev flag 确认闸 | 启动横幅出现：**`Channels (experimental) messages from server:quay-channel-probe inject directly in this session`** ⇒ **channel 注册成功**；**但紧随一行**：`server:quay-channel-probe · no MCP server configured with that name` ⇒ `--mcp-config` 里的 server **不能**被 `server:` 解析到 |
 | 4 | 交互 + dev flag 确认 + server 放进**项目** `.mcp.json` | **警告消失** ⇒ 名字解析问题解决（横幅只剩注册成功那三行）。**但 server 进程始终未启动**（探针证据无新 `mcp_connected`、8799 端口无监听）⇒ 卡在**项目 MCP server 的批准闸**上：该 prompt 的**默认选项是拒绝**（`❯ Continue without using this MCP server`），实测用方向键选中第一项后仍未能使其启动 |
 
+**⚠️ 关于 DoD 要求的「AC8 实际到达的包裹属性原文」**：**不存在**——AC8 的事件从未到达任何会话，
+因此没有任何 `<channel source="…">` 包裹属性可抄。这正是 `not-evaluated` 的含义（⛔ 不是「抄不出来所以省略」）。
+本报告能给出的、与 AC8 包裹属性最接近的实测原文，是**探针侧**记录到的那条通知本身（它被平台静默丢弃）：
+```json
+{"method":"notifications/claude/channel","params":{"content":"AC8 EVENT nonce=…",
+ "meta":{"nonce":"…","origin":"external-curl"}}}
+```
+
 ⇒ **AC8/AC9 记 `not-evaluated`**：本环境里，要把一个**自研 channel** 接进一个会话，需要**连续通过三道交互闸**
 （目录信任 → 项目 MCP server 批准 → dev-channels 确认），其中**项目 MCP 批准闸的默认值是「不使用」**。
 这不是 channel 契约的问题（契约本身已被 real MCP 握手独立核验，且第 3 轮的注册横幅证明**契约正确、能注册**），
