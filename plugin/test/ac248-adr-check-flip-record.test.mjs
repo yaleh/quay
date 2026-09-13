@@ -21,7 +21,7 @@
 //      them to stay in sync — a rename on one side would silently make the criterion unsatisfiable.
 //   ①b NO LITERAL DEFAULTS ON THE WRITE PATH (AC2): the writer's own body carries no `true`/`false`
 //      literal and no second `build_sha` anchor — the two booleans come from the run readings, the
-//      anchor comes from the ONE choke point `ac89_append_goal009`.
+//      anchor comes from the ONE choke point `ac_record_append`.
 //   ② THE CRITERION TAKES ALL THREE OF ITS VALUES, against the REAL extracted payload: exit 0 (a
 //      qualifying record), exit 1 (a record present but failing ONE filter — every filter, including
 //      the two strict-bool ones, is exercised with an impostor), exit 3 (carrier absent).
@@ -156,14 +156,14 @@ function bashDeclarationSource(src, name) {
 
 /** The AC-248 record as the producer writes it, built through the real writer (bash) — see ③b. */
 function writeRecordViaProduct(spec) {
-  // `ac_record_*` = the rest of `ac89_append_goal009`'s closure: since
+  // `ac_record_*` = the rest of `ac_record_append`'s closure: since
   // gap-ac-record-schema-duplicated-between-criterion-and-writer the ONE anchor choke point also
   // enforces AC_RECORD_SCHEMA at production time. This list is a HAND-maintained model of the writer's
   // dependency graph, so an unlisted dependency makes the extracted writer die with
   // `ac_record_schema_validate_fragment: command not found` ⇒ non-zero ⇒ REFUSED for EVERY input —
   // i.e. all of ③b's negatives stay vacuously green and only the positive control ("the positive spec
   // must write exactly one record") goes red. Listed so the refusals below are the product's verdicts.
-  const fnNames = ["ac89_append_goal009", "ac_record_schema_validate_fragment", "ac_record_fragment_ac",
+  const fnNames = ["ac_record_append", "ac_record_schema_validate_fragment", "ac_record_fragment_ac",
     "ac_record_carrier_root", "ac_record_finalize", "ac248_json_bool_ok", "ac248_flip_is_forward",
     "ac248_produced_by_driver_ok", "write_ac248_record"];
   const src = fs.readFileSync(SCRIPT, "utf8");
@@ -224,8 +224,8 @@ test("① the goal's criterion fields are ALL emitted by write_ac248_record (par
 test("①b the write path carries NO literal default: zero true/false, and build_sha only from the choke point", () => {
   const body = writerBody();
   assert.ok(!body.includes("build_sha"),
-    "write_ac248_record must NOT write its own build_sha literal — ac89_append_goal009 is the single anchor choke point");
-  assert.ok(/ac89_append_goal009\s+"/.test(body), "the record must be appended through ac89_append_goal009");
+    "write_ac248_record must NOT write its own build_sha literal — ac_record_append is the single anchor choke point");
+  assert.ok(/ac_record_append\s+"/.test(body), "the record must be appended through ac_record_append");
   // AC2: the two booleans must be the READINGS. A literal `true`/`false` on the write path would be a
   // hardcoded default that makes the flip assertable without ever running a checker (硬规则 4).
   const literalHits = (body.replace(/#.*/g, "").match(/(^|[^_a-zA-Z])(true|false)([^_a-zA-Z]|$)/g) || []).length;

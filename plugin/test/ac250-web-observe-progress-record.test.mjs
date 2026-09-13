@@ -24,7 +24,7 @@
 //      unsatisfiable.
 //   ①b NO LITERAL DEFAULTS ON THE WRITE PATH (AC2): the writer's own body carries no `build_sha`
 //      anchor literal and no address literal — the anchor comes from the ONE choke point
-//      `ac89_append_goal009`, and every field comes from a run reading.
+//      `ac_record_append`, and every field comes from a run reading.
 //   ② THE CRITERION TAKES ALL THREE OF ITS VALUES, against the REAL extracted payload: exit 0, exit 1
 //      (every filter exercised with an impostor, including the loopback/listen-address one and the
 //      same-task-differential one), exit 3 (carrier absent).
@@ -171,14 +171,14 @@ function bashDeclarationSource(src, name) {
 
 /** The AC-250 record as the producer writes it, built through the REAL writer (bash). */
 function writeRecordViaProduct(spec) {
-  // ⚠️ This list is a HAND-maintained model of `ac89_append_goal009`'s dependency graph, so it goes
+  // ⚠️ This list is a HAND-maintained model of `ac_record_append`'s dependency graph, so it goes
   // stale whenever that graph grows. Left stale, the extracted writer dies with
   // `ac_record_schema_validate_fragment: command not found` / `AC_RECORD_SCHEMA: unbound variable`
   // ⇒ non-zero ⇒ REFUSED for EVERY input. This fixture has NO positive control on this path (its one
   // caller asserts REFUSED), so a stale closure here does not turn it red — it turns it VACUOUS, an
   // assertion that passes for a reason that has nothing to do with the record's shape (硬规则 3b).
   // Measured 2026-09-12: exactly that happened when the schema choke point landed.
-  const fnNames = ["ac89_append_goal009", "ac_record_schema_validate_fragment", "ac_record_fragment_ac",
+  const fnNames = ["ac_record_append", "ac_record_schema_validate_fragment", "ac_record_fragment_ac",
     "ac_record_carrier_root", "ac_record_finalize", "ac250_not_loopback", "ac250_http_status_ok",
     "write_ac250_record"];
   const src = fs.readFileSync(SCRIPT, "utf8");
@@ -251,8 +251,8 @@ test("① the goal's criterion fields are ALL emitted by write_ac250_record (par
 test("①b the write path carries NO literal default: no build_sha anchor, no address literal", () => {
   const body = fnBody("write_ac250_record");
   assert.ok(!body.includes("build_sha"),
-    "write_ac250_record must NOT write its own build_sha literal — ac89_append_goal009 is the single anchor choke point");
-  assert.ok(/ac89_append_goal009\s+"/.test(body), "the record must be appended through ac89_append_goal009");
+    "write_ac250_record must NOT write its own build_sha literal — ac_record_append is the single anchor choke point");
+  assert.ok(/ac_record_append\s+"/.test(body), "the record must be appended through ac_record_append");
   // AC2: no address may be hardcoded anywhere on the write path (the criterion demands
   // `bind_host == tailscale0_ip`, i.e. DERIVED, not copied). Note the loopback/wildcard literals live
   // in the `ac250_not_loopback` predicate — the only place they may live.

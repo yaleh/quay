@@ -21,7 +21,7 @@
 //   ① CRITERION ↔ PRODUCER FIELD PARITY + NO LITERAL DEFAULTS: the goal's criterion filters carrier
 //      lines on a fixed set of top-level fields and the producer is `write_ac249_record`; nothing
 //      forces the two to stay in sync. The writer's body must carry no `build_sha` literal (the ONE
-//      anchor choke point is `ac89_append_goal009`) and must not reach for the single-commit selector.
+//      anchor choke point is `ac_record_append`) and must not reach for the single-commit selector.
 //   ② THE CRITERION TAKES ALL THREE OF ITS VALUES against the REAL extracted payload: exit 0 (a
 //      qualifying record), exit 1 (a record failing ANY ONE filter — including both "one side alone"
 //      shapes and the `./src/…` path form), exit 3 (carrier absent).
@@ -189,11 +189,11 @@ function runBash(fnNames, body, env = {}) {
 const UNION_FNS = ["ac207_commit_files", "ac207_select_implementation_commit", "ac207_is_bookkeeping_commit",
   "ac249_is_code_path", "ac249_is_adr_doc_path", "ac249_union_commit_shas", "ac249_union_files"];
 
-/** The REST of the write path's transitive closure, i.e. everything `ac89_append_goal009` reaches for.
+/** The REST of the write path's transitive closure, i.e. everything `ac_record_append` reaches for.
  *
  *  ⚠️ `runBash` materializes a function list BY HAND, so it is a hand-maintained model of the writer's
  *  dependency graph and goes stale the moment that graph grows: since
- *  gap-ac-record-schema-duplicated-between-criterion-and-writer, `ac89_append_goal009` (the ONE anchor
+ *  gap-ac-record-schema-duplicated-between-criterion-and-writer, `ac_record_append` (the ONE anchor
  *  choke point) also enforces `AC_RECORD_SCHEMA` at production time. Left unlisted, the extracted
  *  writer dies with `ac_record_schema_validate_fragment: command not found` ⇒ non-zero ⇒ `|| return 1`
  *  ⇒ the verdict reads REFUSED **for every input**. That failure mode is the dangerous direction: it
@@ -285,8 +285,8 @@ test("① the goal's criterion fields are ALL emitted by write_ac249_record (par
 test("①b the write path carries NO literal default and never reaches for the single-commit selector", () => {
   const body = writerBody();
   assert.ok(!body.includes("build_sha"),
-    "write_ac249_record must NOT write its own build_sha literal — ac89_append_goal009 is the single anchor choke point");
-  assert.ok(/ac89_append_goal009\s+"/.test(body), "the record must be appended through ac89_append_goal009");
+    "write_ac249_record must NOT write its own build_sha literal — ac_record_append is the single anchor choke point");
+  assert.ok(/ac_record_append\s+"/.test(body), "the record must be appended through ac_record_append");
   assert.ok(!/ac207_select_implementation_commit/.test(body),
     "the write path must not build commit_files through the SINGLE-commit selector — that is this task's defect face");
   // The two path predicates must be the criterion's own two: a `./src/…` form has to be able to fail,
@@ -360,7 +360,7 @@ test("③ the union is a UNION: two commits (code first, doc last) — the singl
       "…and therefore its file list has NO code side — a producer built on it would report a fully qualified task as incomplete");
 
     // And the writer really does refuse that half-list while accepting the union (two readings, side by side).
-    const WRITER_FNS = ["ac89_append_goal009", ...WRITE_PATH_FNS,
+    const WRITER_FNS = ["ac_record_append", ...WRITE_PATH_FNS,
       ...UNION_FNS.filter((f) => f !== "ac207_select_implementation_commit"),
       "write_ac249_record"];
     const half = runBash(WRITER_FNS,
@@ -378,7 +378,7 @@ test("③ the union is a UNION: two commits (code first, doc last) — the singl
 });
 
 test("④ every one-sided union is refused by the writer, and an unreadable union writes NOTHING", () => {
-  const WRITER_FNS = ["ac89_append_goal009", ...WRITE_PATH_FNS, "ac249_is_code_path", "ac249_is_adr_doc_path",
+  const WRITER_FNS = ["ac_record_append", ...WRITE_PATH_FNS, "ac249_is_code_path", "ac249_is_adr_doc_path",
     "write_ac249_record"];
   const cases = [
     ["code only", '["scripts/check-adr.ts","src/a.ts"]'],

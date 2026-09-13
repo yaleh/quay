@@ -795,38 +795,61 @@ append_ac201_record() {
   AC201_WRITTEN=0
   [ -n "${AC89:-}" ] || return 0
   [ -n "${BUILD_SHA:-}" ] && [ -n "${SHA256_QUAY:-}" ] || return 0
-  ac_record_append_fragment ",\"ts\":\"${TS:-}\",\"ac\":\"GOAL-009-AC-201\",\"build_sha\":\"$BUILD_SHA\",\"tgz_sha256\":\"$SHA256_QUAY\"" "$AC89" || return 1
+  ac_record_append ",\"ts\":\"${TS:-}\",\"ac\":\"GOAL-009-AC-201\",\"build_sha\":\"$BUILD_SHA\",\"tgz_sha256\":\"$SHA256_QUAY\"" "$AC89" || return 1
   AC201_WRITTEN=1
   return 0
 }
 
-# ── GOAL-009 载体型证据记录共享锚（gap-ac214-freshness-anchor-build-sha-missing-on-203-205-207）──
-# AC-214 新鲜度元判据（goals/AC-214-*.md）对 AC-201/203/205/207 四条载体记录读 top-level `build_sha`
-# （= 本仓库 BUILD_SHA，build 时刻 develop-tip，天然 develop 祖先），只认 `build_sha`/`commit` 两个字段名。
-# 此前只有 AC-201 带 top-level `build_sha`；AC-203/205 落账字段契约不含它、AC-207 只有异仓库 `commit_sha`
-# （且 `git rev-list <异仓库 sha>..develop` 会 fatal）⇒ 三条各自达成并落账后，AC-214 对它们 `sha` 恒取不到
-# ⇒ 恒 exit 1（与它要防的「一旦转绿即永久绿」相反的同形）。本函数是唯一 choke point：每条 GOAL-009-AC-*
-# 记录统一由它补 top-level `build_sha` + `ts`，sibling tasks（AC-201/203/205/207）各自保留 AC 专属字段
-# （host/driver_alive/commit_sha 等），锚字段经本函数统一。
-# 入参 $1 = 该条记录除 build_sha/ts 外的 JSON 片段（以 "," 开头，如 `,"ac":"GOAL-009-AC-203","host":"B"`）。
-# fail-closed（硬规则 3b）：BUILD_SHA 非 40-hex ⇒ 不写该记录且 return 非 0（缺值≠合格，也≠静默跳过）；
-#   AC89 路径空 ⇒ 不写且 return 非 0。⛔ 不引用已归档零调用的 productization-verification-record.ts/-check.ts。
-ac89_append_goal009() {
-  local fragment="$1" ac=""
+# ══ AC 载体记录的【唯一】写入 choke point ══════════════════════════════════════════════════
+# gap-ac-record-choke-point-naming-dedup-ac238-bypass（2026-09-13）：本函数此前是两个函数——
+# 旧名 `ac89_*`（9 条 AC 走它：强校验 BUILD_SHA 40-hex + 自动补 top-level `build_sha`/`ts` 锚）
+# 与 `ac_record_append_fragment`（4 条 AC-201/204/206/234 走它：调用方自带 `ts`、不补锚、载体路径显式传）。
+# 两者执行的五步（schema 校验 → 核对载体路径 → 反推 ac → mkdir → 写一行 JSON → 复跑判据）逐字相同，
+# 唯一差异就是上面那三点 ⇒ 合并为一套实现、差异用 $3 的【模式参数】表达，并把历史命名
+# （来自更早的 gap-ac89-productization-verification-record，与它今天跨
+# GOAL-009/015/016 的实际作用域不符）并入既有的 `ac_record_*` 命名家族。
+# ⚠️ 旧名在全文件（含注释）已按 AC2 清零——⛔ 连注释里都不再出现该名字符串（含本行）。
+#
+# 入参：
+#   $1 = 记录片段（以 "," 开头，自带 `ac` 与 AC 专属字段；如 `,"ac":"GOAL-009-AC-203","host":"B"`）
+#   $2 = 载体路径（缺省 `$AC89`）
+#   $3 = 模式，缺省 `anchored`：
+#        anchored — 强校验 BUILD_SHA 为 40-hex，并统一补 top-level `build_sha` + `ts`（AC-214 新鲜度锚：
+#                   goals/AC-214 对 AC-201/203/205/207/232/238/239 读 top-level `build_sha`，只认该字段名）。
+#        plain    — 不校验 BUILD_SHA、不补锚，片段自带 `ts`（乃至于自带 `build_sha`），原样落盘。
+# fail-closed（硬规则 3b）：schema 拒 / 模式不认 / 载体路径空 /（anchored 下）BUILD_SHA 非 40-hex
+#   ⇒ 不写且 return 非 0（缺值≠合格，也≠静默跳过）。⛔ 不引用已归档零调用的
+#   productization-verification-record.ts/-check.ts。
+ac_record_append() {
+  local fragment="$1" carrier="${2:-${AC89:-}}" mode="${3:-anchored}" ac=""
   # schema 校验（AC3）：本函数是【所有】GOAL-009/015/016 载体记录的写入 choke point ⇒ 在这里按
   # AC_RECORD_SCHEMA 查一次，覆盖全部经此落盘的 writer（它们体内不必再各自复述字段清单）。
   # 缺字段/类型不符/未登记 AC ⇒ 拒写且非 0（硬规则 3b：缺值≠合格，也≠静默跳过）。
   ac_record_schema_validate_fragment "$fragment" || return 1
-  if ! printf '%s' "${BUILD_SHA:-}" | grep -Eq '^[0-9a-f]{40}$'; then
-    echo "ac89_append_goal009: BUILD_SHA not 40-hex (got '${BUILD_SHA:-}') — GOAL-009 record NOT written (fail-closed)" >&2
-    return 1
-  fi
-  [ -n "${AC89:-}" ] || { echo "ac89_append_goal009: AC89 path empty — GOAL-009 record NOT written (fail-closed)" >&2; return 1; }
+  [ -n "$carrier" ] || { echo "ac_record_append: carrier path empty — record NOT written (fail-closed)" >&2; return 1; }
+  case "$mode" in
+    anchored)
+      # AC-214 新鲜度元判据只认 top-level 40-hex `build_sha` ⇒ 补锚模式必须真能取到它。
+      # ⛔ 用 if 形而不用短路赋值：后者会踩 instrument-failure-check FAMILY-3。
+      if ! printf '%s' "${BUILD_SHA:-}" | grep -Eq '^[0-9a-f]{40}$'; then
+        echo "ac_record_append: BUILD_SHA not 40-hex (got '${BUILD_SHA:-}') — record NOT written (fail-closed)" >&2
+        return 1
+      fi
+      ;;
+    plain) ;;   # 调用方自带 ts（AC-201/204/206/234 的既有形态）
+    *)
+      echo "ac_record_append: unknown mode '$mode' (expected 'anchored' or 'plain') — record NOT written (fail-closed)" >&2
+      return 1
+      ;;
+  esac
   ac="$(ac_record_fragment_ac "$fragment" 2>/dev/null)" || ac=""
-  mkdir -p "$(dirname "$AC89")"
-  printf '{"build_sha":"%s","ts":"%s"%s}\n' "$BUILD_SHA" "${TS:-}" "$fragment" >> "$AC89"
+  mkdir -p "$(dirname "$carrier")"
+  case "$mode" in
+    anchored) printf '{"build_sha":"%s","ts":"%s"%s}\n' "$BUILD_SHA" "${TS:-}" "$fragment" >> "$carrier" ;;
+    plain)    printf '{%s}\n' "${fragment#,}" >> "$carrier" ;;
+  esac
   # AC4：记录落盘后自动复跑该 AC 的 criterion，退出码落账（⛔ 不以「我拷过了」为准）。
-  ac_record_finalize "$ac" "$AC89"
+  ac_record_finalize "$ac" "$carrier"
   return 0
 }
 
@@ -891,7 +914,7 @@ ac207_select_implementation_commit() {
 }
 
 # ── AC-207 记录写（fail-closed，硬规则 3b）────────────────────────────────────────────────
-# 写 GOAL-009-AC-207 记录（经 ac89_append_goal009 统一补 top-level build_sha/ts——AC-214 新鲜度锚）。
+# 写 GOAL-009-AC-207 记录（经 ac_record_append 统一补 top-level build_sha/ts——AC-214 新鲜度锚）。
 # 缺任一有效读数 ⇒ 不写 return 1（缺值≠合格，也≠静默跳过）。字段逐字满足 criterion 过滤：
 #   host 非空（≠本机由 criterion 判）、project_root 非空（∉本仓库由 criterion 判）、
 #   commit_sha 非空（异仓库【实现】提交 sha，⛔ 非新鲜度锚——AC-214 只认 top-level build_sha）、
@@ -915,11 +938,11 @@ write_ac207_record() {
       if (!Array.isArray(f) || f.length===0) process.exit(1);
       process.exit(f.some(p => !/^(tasks|goals|\.quay)\//.test(String(p))) ? 0 : 1);
     });' || return 1
-  ac89_append_goal009 ",\"ac\":\"GOAL-009-AC-207\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"commit_sha\":\"$commit_sha\",\"commit_files\":$commit_files_json,\"task_id\":\"$task_id\",\"task_status\":\"$task_status\",\"gate_events\":$gate_events,\"produced_by_driver\":$produced_by_driver"
+  ac_record_append ",\"ac\":\"GOAL-009-AC-207\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"commit_sha\":\"$commit_sha\",\"commit_files\":$commit_files_json,\"task_id\":\"$task_id\",\"task_status\":\"$task_status\",\"gate_events\":$gate_events,\"produced_by_driver\":$produced_by_driver"
 }
 
 # ── AC-239 记录写（fail-closed，硬规则 3b）─────────────────────────────────────────────────
-# 写 GOAL-009-AC-239 记录（经 ac89_append_goal009 统一补 top-level build_sha/ts——AC-214 新鲜度锚）。
+# 写 GOAL-009-AC-239 记录（经 ac_record_append 统一补 top-level build_sha/ts——AC-214 新鲜度锚）。
 # 字段逐字满足 criterion 过滤（goal 的 criterion 与本函数是同一组谓词的两侧，改动须同步）：
 #   host 非空、project_root 非空、commit_sha 非空（异仓库【实现】提交）、task_id 非空、
 #   task_status="done"、gate_events>0（整数）、produced_by_driver=true（JSON 字面 true）。
@@ -944,7 +967,7 @@ write_ac239_record() {
       if (!Array.isArray(f) || f.length===0) process.exit(1);
       process.exit(f.some(p => !/^(tasks|goals|\.quay)\//.test(String(p))) ? 0 : 1);
     });' || return 1
-  ac89_append_goal009 ",\"ac\":\"GOAL-009-AC-239\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"commit_sha\":\"$commit_sha\",\"commit_files\":$commit_files_json,\"task_id\":\"$task_id\",\"task_status\":\"$task_status\",\"gate_events\":$gate_events,\"produced_by_driver\":$produced_by_driver"
+  ac_record_append ",\"ac\":\"GOAL-009-AC-239\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"commit_sha\":\"$commit_sha\",\"commit_files\":$commit_files_json,\"task_id\":\"$task_id\",\"task_status\":\"$task_status\",\"gate_events\":$gate_events,\"produced_by_driver\":$produced_by_driver"
 }
 
 # ── AC-239 直接量读取（硬规则 4b：全部外部可核，⛔ 不采信驱动方自述）──────────────────────
@@ -1148,7 +1171,7 @@ BODY
       if [ "$AC203_EVALUATED" = "1" ] && [ "$AC203_DRIVER_ALIVE" = "1" ] && [ "$AC203_CARRIER_RECORDS" -gt 0 ] 2>/dev/null; then
         # 入参来源（⛔ 非字面量）：$AC203_DRIVER_ALIVE / $AC203_CARRIER_RECORDS ← probe_ac203_driver_status
         # 当场解析的 status 载体；$ac240_hpd ← 当场 stat 的 $root/plugin。复用唯一写入点
-        # write_ac203_record（它经 ac89_append_goal009 统一补 top-level build_sha）——⛔ 不新造第二个写入者。
+        # write_ac203_record（它经 ac_record_append 统一补 top-level build_sha）——⛔ 不新造第二个写入者。
         if write_ac203_record "$AC203_HOST" "$root" "$ac240_hpd" "$AC203_DRIVER_ALIVE" "$AC203_CARRIER_RECORDS"; then
           AC203_WRITTEN_THIS_RUN=1
           AC203_WRITTEN_ROOT="$root"
@@ -1423,7 +1446,6 @@ d=json.load(sys.stdin); print(len(d))' 2>/dev/null || echo "")"
     AC238_EVALUATED=1
   fi
   if [ "$AC238_EVALUATED" = "1" ]; then
-    mkdir -p "$(dirname "$AC89")"
     # ⛔ `binding`/`retired_runtime_backup`/`retired_backup_matches_pre` 三个字段存在的唯一理由：
     # runtime_replaced=true 在今天有【两代语义】（旧：cp 覆盖 project-local runtime；新：退休它并把
     # config 绑定到交付物）。字段名相同时代不同 ⇒ 读者分不清这个 true 指的是哪一种替换
@@ -1432,16 +1454,31 @@ d=json.load(sys.stdin); print(len(d))' 2>/dev/null || echo "")"
     # 不可分）：`binding`/`retired_runtime_backup`/`retired_backup_matches_pre` 是【退休式】替换
     # （新语义：旧 runtime 退休到备份 + config 绑定到交付物）；`pre_binding`/`post_binding` 是
     # 【绑定形态】的前后读数（bare-path-name ⇒ 升级没把绑定迁到项目自己控制的路径上）。
-    printf '{"ts":"%s","ac":"GOAL-009-AC-238","host":"%s","project_root":"%s","pre_upgrade_task_count":%s,"post_upgrade_task_count":%s,"pre_upgrade_runtime_age_days":%s,"runtime_replaced":true,"task_list_ok":true,"build_sha":"%s","upgrade_source":"%s","upgrade_init_rc":%s,"isolated_copy":%s,"taskset_stable":true,"sample_task":"%s","fresh_runtime_sha256":"%s","pre_binding":"%s","post_binding":"%s","host_key":"%s","binding":"delivered-vendor","retired_runtime_backup":"%s","retired_backup_matches_pre":true,"bound_mcp_entry":"%s","adopt_decision":%s}\n' \
-      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(hostname 2>/dev/null || echo '')" "$AC238_PROJECT_ROOT" \
-      "$AC238_PRE_TASK_COUNT" "$AC238_POST_TASK_COUNT" "$AC238_RUNTIME_AGE_DAYS" \
-      "$BUILD_SHA" "${UPGRADE_SOURCE:-none}" "$init_rc" \
-      "$([ -n "$UPGRADE_SOURCE" ] && [ "$UPGRADE_SOURCE" != "$root" ] && echo true || echo false)" \
-      "$AC238_SAMPLE_TASK" "$AC238_FRESH_RUNTIME_SHA" "${AC238_PRE_BINDING:-unreadable}" \
-      "${AC238_POST_BINDING:-unreadable}" "${HOST:-}" \
-      "$AC238_RETIRED_DIR" "$AC238_BOUND_ENTRY" \
-      "$([ "$AC238_ADOPT_DECISION" = "1" ] && echo true || echo false)" >> "$AC89"
-    echo "  ac238 record written → $AC89"
+    #
+    # gap-ac-record-choke-point-naming-dedup-ac238-bypass：本行此前是裸 `printf >> "$AC89"`，
+    # 完全绕开写入 choke point（不进 AC_RECORD_SCHEMA、`--ac-record-schema-report` 看不见它、
+    # 落盘后也不触发 ac_record_finalize 复跑判据）⇒ 现改走 `ac_record_append`（anchored 模式：
+    # BUILD_SHA 的 40-hex 强校验与 top-level `build_sha`/`ts` 补锚由它统一做，本行不再自带锚字段——
+    # 与其它 8 条 GOAL-009/016 记录同形，唯一补锚点不变）。
+    #
+    # ⚠️ 字段【分层】而非全都列进 AC_RECORD_SCHEMA，这不是遗漏，是两个要求的冲突下的唯一可行解，
+    # 逐字记在这里以免下一个人「补全」它：
+    #   · AC3 要求 `--ac-record-schema-report` 对本行打 `[ok]`。该报告的 surplus 判据是
+    #     `声明 ∖ criterion 读集`，而 AC-238 的 criterion（goals/AC-238-*.md，status: achieved，
+    #     ⛔ 不可改）只读 7 个字段 ⇒ 任何【多于此 7 个】的声明都会让该行变成 `[surplus]` 而不是 `[ok]`。
+    #   · Plan 要求「照抄 printf 字段清单，⛔ 不要精简掉任何一个」（那 14 个诊断字段各有存在理由，
+    #     见上）。
+    #   ⇒ 两者在 criterion 读集固定的前提下数学上不可同时满足。解法：**7 个判据读的字段留在写入行上
+    #     （⇒ 声明 = 写入 = 判据 = 7 ⇒ `[ok]`），另外 14 个诊断字段经下面这个变量作为「额外字段」尾
+    #     传入**——写入通道对额外字段不拒（schema 校验只管【漏】，不管【多】），记录里一个字段都没少，
+    #     只是那 14 个不经写入期声明闸（它们无判据消费者，⛔ 不是判据依赖面）。
+    local ac238_extras
+    ac238_extras=",\"upgrade_source\":\"${UPGRADE_SOURCE:-none}\",\"upgrade_init_rc\":$init_rc,\"isolated_copy\":$([ -n "$UPGRADE_SOURCE" ] && [ "$UPGRADE_SOURCE" != "$root" ] && echo true || echo false),\"taskset_stable\":true,\"sample_task\":\"$AC238_SAMPLE_TASK\",\"fresh_runtime_sha256\":\"$AC238_FRESH_RUNTIME_SHA\",\"pre_binding\":\"${AC238_PRE_BINDING:-unreadable}\",\"post_binding\":\"${AC238_POST_BINDING:-unreadable}\",\"host_key\":\"${HOST:-}\",\"binding\":\"delivered-vendor\",\"retired_runtime_backup\":\"$AC238_RETIRED_DIR\",\"retired_backup_matches_pre\":true,\"bound_mcp_entry\":\"$AC238_BOUND_ENTRY\",\"adopt_decision\":$([ "$AC238_ADOPT_DECISION" = "1" ] && echo true || echo false)"
+    if ac_record_append ",\"ac\":\"GOAL-009-AC-238\",\"host\":\"$(hostname 2>/dev/null || echo '')\",\"project_root\":\"$AC238_PROJECT_ROOT\",\"pre_upgrade_task_count\":$AC238_PRE_TASK_COUNT,\"post_upgrade_task_count\":$AC238_POST_TASK_COUNT,\"pre_upgrade_runtime_age_days\":$AC238_RUNTIME_AGE_DAYS,\"runtime_replaced\":true,\"task_list_ok\":true${ac238_extras}" "$AC89" anchored; then
+      echo "  ac238 record written → $AC89 (via the ac_record_append choke point)"
+    else
+      echo "  AC-238 record NOT written — the ac_record_append choke point refused it (see stderr above)" >&2
+    fi
   else
     echo "  AC-238 record NOT written — 缺值≠合格 (pre_count=$AC238_PRE_TASK_COUNT post_count=$AC238_POST_TASK_COUNT age_days=${AC238_RUNTIME_AGE_DAYS:-<unread>} replaced=$AC238_RUNTIME_REPLACED task_list_ok=$AC238_TASK_LIST_OK post_binding=${AC238_POST_BINDING:-<unread>} build_sha=${BUILD_SHA:-<empty>} upgrade_init_rc=$init_rc)" >&2
   fi
@@ -1795,7 +1832,7 @@ ac247_read_driver_status() {
 }
 
 # ── AC-247 记录写（fail-closed，硬规则 3b）──────────────────────────────────────────────────
-# 经 ac89_append_goal009 统一补 top-level build_sha/ts（AC-214 唯一补锚 choke point）——⛔ 本函数体内
+# 经 ac_record_append 统一补 top-level build_sha/ts（AC-214 唯一补锚 choke point）——⛔ 本函数体内
 # 不出现 `build_sha` 字面量：多一个补锚点 = 下次改锚格式必漏一处（该 choke point 的注释逐字禁止）。
 # 八件读数逐字满足 criterion 过滤（goal 的 criterion 与本函数是同一组谓词的两侧，改动须同步）：
 #   host 非空（≠本机由 criterion 判）· project_root 非空（∉本仓库由 criterion 判）·
@@ -1814,7 +1851,7 @@ write_ac247_record() {
   awk -v s="$stale" 'BEGIN{ exit !(s >= 14) }' 2>/dev/null || return 1
   [ "$alive" = "1" ] || return 1
   [ "$recs" -gt 0 ] 2>/dev/null || return 1
-  ac89_append_goal009 ",\"ac\":\"GOAL-016-AC-247\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"pre_task_count\":$pre,\"post_task_count\":$post,\"stale_days\":$stale,\"driver_alive\":$alive,\"carrier_records\":$recs${extra}"
+  ac_record_append ",\"ac\":\"GOAL-016-AC-247\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"pre_task_count\":$pre,\"post_task_count\":$post,\"stale_days\":$stale,\"driver_alive\":$alive,\"carrier_records\":$recs${extra}"
 }
 
 # ── ⑧ 接管（GOAL-016-AC-247）──────────────────────────────────────────────────────────────
@@ -2158,7 +2195,7 @@ probe_ac248_measures() {
 }
 
 # ── ⑨ AC-248 记录写（fail-closed，硬规则 3b）──────────────────────────────────────────────
-# 经 ac89_append_goal009 统一补 top-level build_sha/ts（AC-214 唯一补锚 choke point）——⛔ 本函数体内
+# 经 ac_record_append 统一补 top-level build_sha/ts（AC-214 唯一补锚 choke point）——⛔ 本函数体内
 # 不出现 `build_sha` 字面量，也【不出现 adr_check_* 三个字段的字面量默认值】：两个布尔必须原样来自
 # ac248_adr_flip_reading 的两次真实读数（`$before` / `$after` 不加引号地写进 JSON ⇒ JSON 布尔），
 # probe tool 必须来自候选集差集。任一无效 ⇒ 不写、return 1（缺值≠合格，也≠静默跳过）。
@@ -2186,7 +2223,7 @@ write_ac248_record() {
       if (!Array.isArray(f) || f.length===0) process.exit(1);
       process.exit(f.some(p => !/^(tasks|goals|\.quay)\//.test(String(p))) ? 0 : 1);
     });' || return 1
-  ac89_append_goal009 ",\"ac\":\"GOAL-016-AC-248\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"commit_sha\":\"$commit_sha\",\"commit_files\":$commit_files_json,\"task_id\":\"$task_id\",\"task_status\":\"$task_status\",\"gate_events\":$gate_events,\"produced_by_driver\":$produced_by_driver,\"adr_check_before_detects\":$before,\"adr_check_after_detects\":$after,\"adr_check_probe_tool\":\"$probe\"${extras_json}"
+  ac_record_append ",\"ac\":\"GOAL-016-AC-248\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"commit_sha\":\"$commit_sha\",\"commit_files\":$commit_files_json,\"task_id\":\"$task_id\",\"task_status\":\"$task_status\",\"gate_events\":$gate_events,\"produced_by_driver\":$produced_by_driver,\"adr_check_before_detects\":$before,\"adr_check_after_detects\":$after,\"adr_check_probe_tool\":\"$probe\"${extras_json}"
 }
 
 # ── ⑨ AC-248 步骤（GOAL-016-AC-248）──────────────────────────────────────────────────────
@@ -2523,7 +2560,7 @@ ac250_http_status_ok() {
 }
 
 # ── ⑩ AC-250 记录写（fail-closed，硬规则 3b）────────────────────────────────────────────────
-# 经 ac89_append_goal009 统一补 top-level build_sha/ts（AC-214 唯一补锚 choke point）——⛔ 本函数体内
+# 经 ac_record_append 统一补 top-level build_sha/ts（AC-214 唯一补锚 choke point）——⛔ 本函数体内
 # 不出现 `build_sha` 字面量（多一个补锚点 = 下次改锚格式必漏一处）。
 # 七个判据字段与 goal 的 criterion 是【同一组谓词的两侧】（改动须同步）：
 #   host 非空 · project_root 非空 · bind_host 非空 == tailscale0_ip 且非回环 · probe_from_host 非空 ≠ host ·
@@ -2547,7 +2584,7 @@ write_ac250_record() {
   [ -n "$after" ] || return 1
   [ "$before" != "$after" ] || return 1
   [ "$store_after" = "$after" ] || return 1
-  ac89_append_goal009 ",\"ac\":\"GOAL-016-AC-250\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"bind_host\":\"$bind_host\",\"tailscale0_ip\":\"$ts_ip\",\"probe_from_host\":\"$probe_from\",\"http_status\":$http_status,\"observed_task_id\":\"$task_id\",\"observed_status_before\":\"$before\",\"observed_status_after\":\"$after\",\"store_status_after\":\"$store_after\"${extras_json}"
+  ac_record_append ",\"ac\":\"GOAL-016-AC-250\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"bind_host\":\"$bind_host\",\"tailscale0_ip\":\"$ts_ip\",\"probe_from_host\":\"$probe_from\",\"http_status\":$http_status,\"observed_task_id\":\"$task_id\",\"observed_status_before\":\"$before\",\"observed_status_after\":\"$after\",\"store_status_after\":\"$store_after\"${extras_json}"
 }
 
 # 非判据留档字段（两段原文 / URL / 两次读数行 / store 来源 / 产物身份 / 窗口）。经 python3 组 JSON
@@ -3320,7 +3357,7 @@ probe_ac203_driver_status() {
   AC203_EVALUATED=1
 }
 
-# 写 GOAL-009-AC-203 记录（经 ac89_append_goal009 统一补 top-level build_sha/ts——AC-214 新鲜度锚）。
+# 写 GOAL-009-AC-203 记录（经 ac_record_append 统一补 top-level build_sha/ts——AC-214 新鲜度锚）。
 # 缺任一有效读数（host/project_root 空、driver_alive≠1、carrier_records 非正、has_plugin_dir≠0）
 # ⇒ 不写 return 1（硬规则 3b：缺值 ≠ 合格）。五字段逐字满足 criterion 过滤：
 # has_plugin_dir 必须是 JSON 字面 false（criterion 用 `is not False` 判）、driver_alive/carrier_records 是整数。
@@ -3338,7 +3375,7 @@ write_ac203_record() {
   [ "$has_plugin_dir" = "0" ] || return 1
   [ "$driver_alive" = "1" ] || return 1
   [ "$carrier_records" -gt 0 ] 2>/dev/null || return 1
-  ac89_append_goal009 ",\"ac\":\"GOAL-009-AC-203\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"has_plugin_dir\":false,\"driver_alive\":$driver_alive,\"carrier_records\":$carrier_records"
+  ac_record_append ",\"ac\":\"GOAL-009-AC-203\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"has_plugin_dir\":false,\"driver_alive\":$driver_alive,\"carrier_records\":$carrier_records"
 }
 
 # ── 运行级「闭环由本次运行自证」取值（GOAL-009-AC-240）──────────────────────────────────────
@@ -3396,8 +3433,8 @@ write_ac206_record() {
   [ "$gsr" = "1" ] && b_gsr=true
   [ "$tsr" = "1" ] && b_tsr=true
   # 落盘走写入通道的同一 choke point（先按 AC_RECORD_SCHEMA 校验再写）。本函数自补 ts（不经
-  # ac89_append_goal009 的补锚），故走无补锚形；字段清单只在 AC_RECORD_SCHEMA 里声明一份。
-  ac_record_append_fragment ",\"ts\":\"$ts\",\"ac\":\"GOAL-009-AC-206\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"goals_dir_created\":$b_gdc,\"tasks_dir_created\":$b_tdc,\"goal_store_readable\":$b_gsr,\"task_store_readable\":$b_tsr" "$ac89" || return 1
+  # ac_record_append 的补锚），故走无补锚形；字段清单只在 AC_RECORD_SCHEMA 里声明一份。
+  ac_record_append ",\"ts\":\"$ts\",\"ac\":\"GOAL-009-AC-206\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"goals_dir_created\":$b_gdc,\"tasks_dir_created\":$b_tdc,\"goal_store_readable\":$b_gsr,\"task_store_readable\":$b_tsr" "$ac89" plain || return 1
   return 0
 }
 
@@ -3546,7 +3583,7 @@ write_ac204_record() {
   [ -n "$project_root" ] || return 1
   [ "$forbidden_count" = "0" ] || return 1
   [ "$enable_declared" = "1" ] || return 1
-  ac_record_append_fragment ",\"ts\":\"$ts\",\"ac\":\"GOAL-009-AC-204\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"forbidden_count\":0,\"enable_declared\":true" "$ac89" || return 1
+  ac_record_append ",\"ts\":\"$ts\",\"ac\":\"GOAL-009-AC-204\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"forbidden_count\":0,\"enable_declared\":true" "$ac89" plain || return 1
   return 0
 }
 
@@ -3576,7 +3613,7 @@ step_ac204_forbidden_surface() {
 # 非 dev 树」这一事实。目标会话发现：枚举 ~/.claude/sessions/<pid>.json（同 send-to-session.ts
 # --pid 的注册源），取第一个【messagingSocketPath 存在 + 有 peerToken .key + sessionId 合法】的 live 会话。
 
-# 写 GOAL-009-AC-205 记录（经 ac89_append_goal009 统一补 top-level build_sha/ts——AC-214 新鲜度锚）。
+# 写 GOAL-009-AC-205 记录（经 ac_record_append 统一补 top-level build_sha/ts——AC-214 新鲜度锚）。
 # 缺任一成功读数（host 空、shipped_from_installed_artifact≠true、transcript_confirmed≠true）⇒ 不写
 # return 1（fail-closed，缺值/缺成功 ≠ 合格）。三字段逐字满足 criterion 过滤：
 # shipped_from_installed_artifact / transcript_confirmed 是 JSON 字面 true。
@@ -3585,7 +3622,7 @@ write_ac205_record() {
   [ -n "$host" ] || return 1
   [ "$shipped" = "true" ] || return 1
   [ "$transcript_confirmed" = "true" ] || return 1
-  ac89_append_goal009 ",\"ac\":\"GOAL-009-AC-205\",\"host\":\"$host\",\"shipped_from_installed_artifact\":$shipped,\"transcript_confirmed\":$transcript_confirmed"
+  ac_record_append ",\"ac\":\"GOAL-009-AC-205\",\"host\":\"$host\",\"shipped_from_installed_artifact\":$shipped,\"transcript_confirmed\":$transcript_confirmed"
 }
 
 # 找目标会话（~/.claude/sessions/<pid>.json）：输出 "pid\nsessionId\nsocket\ncwd"（4 行），无则空。
@@ -3721,7 +3758,7 @@ write_ac234_record() {
   [ "$tasks" -gt 0 ] 2>/dev/null || return 1
   [ "$goals" -gt 0 ] 2>/dev/null || return 1
   [ "$rounds" -gt 0 ] 2>/dev/null || return 1
-  ac_record_append_fragment ",\"ts\":\"$ts\",\"ac\":\"GOAL-015-AC-234\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"tasks_rendered\":$tasks,\"goals_rendered\":$goals,\"round_records_rendered\":$rounds" "$ac89" || return 1
+  ac_record_append ",\"ts\":\"$ts\",\"ac\":\"GOAL-015-AC-234\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"tasks_rendered\":$tasks,\"goals_rendered\":$goals,\"round_records_rendered\":$rounds" "$ac89" plain || return 1
   return 0
 }
 
@@ -3840,7 +3877,7 @@ probe_ac232_goal_write_readback() {
   return 0
 }
 
-# 写 GOAL-009-AC-232 记录（经 ac89_append_goal009 统一补 top-level build_sha/ts——AC-214 新鲜度锚）。
+# 写 GOAL-009-AC-232 记录（经 ac_record_append 统一补 top-level build_sha/ts——AC-214 新鲜度锚）。
 # 缺 host/project_root ⇒ 不写 return 1（fail-closed，缺值≠合格）；三字段是【数据】（布尔/整数如实写，
 # false/0 也是有效读数——AC4 负控制据此注入能取假的记录，criterion 读 false/0 仍 exit 1）。
 write_ac232_record() {
@@ -3853,7 +3890,7 @@ write_ac232_record() {
   local b_gwo=false b_grbo=false
   [ "$gwo" = "1" ] && b_gwo=true
   [ "$grbo" = "1" ] && b_grbo=true
-  ac89_append_goal009 ",\"ac\":\"GOAL-009-AC-232\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"goal_write_ok\":$b_gwo,\"goal_read_back_ok\":$b_grbo,\"goal_records\":$grec"
+  ac_record_append ",\"ac\":\"GOAL-009-AC-232\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"goal_write_ok\":$b_gwo,\"goal_read_back_ok\":$b_grbo,\"goal_records\":$grec"
 }
 
 # step ⑨：下游 goal 载体写+读回（AC-232）——经 Provider ABI 对第三方项目（$ROOT）写一条 GOAL 记录再读回
@@ -4283,7 +4320,7 @@ FAKE_NPM
   # has_plugin_dir 是 JSON 字面 false、driver_alive/carrier_records 是整数）；driver_alive=0 ⇒ 拒写
   # （fail-closed，缺值≠合格）。host/project_root 用「非本机/非本仓库」的假值，证明 criterion 能取真。
   # gap-ac203-record-lacks-build-sha-makes-ac214-permanently-unsatisfiable（AC3/AC4）：写入点改走
-  # ac89_append_goal009 后，记录必须带 top-level 40-hex build_sha（AC-214 唯一认的锚字段——缺它该 ac
+  # ac_record_append 后，记录必须带 top-level 40-hex build_sha（AC-214 唯一认的锚字段——缺它该 ac
   # 落进 missing ⇒ AC-214 恒 exit 1）；⛔ 锚字段不靠读代码断言——断言读的是【载体上真写下的那一行】。
   # 且 helper 的 fail-closed 未被降级：读数全有效但 BUILD_SHA 空 ⇒ 拒写【且载体行数不变】
   # （⛔ 不降级成「至少写点什么」的无锚记录，硬规则 3b）。载体路径经全局 AC89 传（helper 的 choke
@@ -4335,7 +4372,7 @@ FAKE_NPM
 
   # control 16/17 (AC-214 新鲜度锚 helper 正/负控制，hermetic —— gap-ac214-freshness-anchor-build-sha-
   # missing-on-203-205-207):
-  #   control 16 (正向): 注入 40-hex BUILD_SHA ⇒ ac89_append_goal009 写一条含 top-level build_sha 的
+  #   control 16 (正向): 注入 40-hex BUILD_SHA ⇒ ac_record_append 写一条含 top-level build_sha 的
   #     GOAL-009 记录（AC-214 criterion 只认这个锚字段，缺它恒 exit 1）。
   #   control 17 (负向, fail-closed): BUILD_SHA 空 ⇒ 不写且 return 非 0（缺值≠合格，硬规则 3b——
   #     一个读不懂/缺输入的写入 helper 不得与「成功」同形，也不得静默跳过）。
@@ -4346,14 +4383,14 @@ FAKE_NPM
   BUILD_SHA="0123456789abcdef0123456789abcdef01234567"
   # ⚠️ 片段按 AC_RECORD_SCHEMA 的 AC-203 行【写全】：写入通道现在会先按声明校验（AC3），
   # 只带 host 的片段今天会被 schema 拒（那是「漏字段」的负控制，另有专门用例），此处要测的是补锚。
-  ac89_append_goal009 ',"ac":"GOAL-009-AC-203","host":"B","project_root":"/tmp/third-party-fake","has_plugin_dir":false,"driver_alive":1,"carrier_records":5'; g15_rc=$?
+  ac_record_append ',"ac":"GOAL-009-AC-203","host":"B","project_root":"/tmp/third-party-fake","has_plugin_dir":false,"driver_alive":1,"carrier_records":5'; g15_rc=$?
   g15_pos="$(grep -c '"ac":"GOAL-009-AC-203"' "$g009_file" 2>/dev/null || echo 0)"
   g15_build="$(grep -c '"build_sha":"0123456789abcdef0123456789abcdef01234567"' "$g009_file" 2>/dev/null || echo 0)"
   BUILD_SHA=""
   g16_before="$(wc -l < "$g009_file" 2>/dev/null || echo 0)"
   g16_rc=0
   set +e
-  ac89_append_goal009 ',"ac":"GOAL-009-AC-205","host":"B","shipped_from_installed_artifact":true,"transcript_confirmed":true'
+  ac_record_append ',"ac":"GOAL-009-AC-205","host":"B","shipped_from_installed_artifact":true,"transcript_confirmed":true'
   g16_rc=$?
   set -e
   g16_after="$(wc -l < "$g009_file" 2>/dev/null || echo 0)"
@@ -4587,7 +4624,7 @@ FAKE_NPM
   echo "selfcheck: ac232-record(empty-host) refused=$ac232_refused (expect 1 — 缺 host 拒写, 缺值≠合格)"
   # control 17/18 (AC-207 载体记录正/负控制，hermetic): write_ac207_record 写出的记录七字段逐字满足
   # criterion 过滤（produced_by_driver=true 字面、gate_events>0、task_status=done、commit_sha/task_id 非空，
-  # 经 ac89_append_goal009 带 top-level build_sha）；produced_by_driver=false 或 gate_events=0 ⇒ 拒写
+  # 经 ac_record_append 带 top-level build_sha）；produced_by_driver=false 或 gate_events=0 ⇒ 拒写
   # （fail-closed，硬规则 3b——缺值/假值≠合格）。host/project_root 用「非本机/非本仓库」假值。
   local ac207_file="$tmp/ac207.jsonl" ac207_wrote=0 ac207_fields_ok=0 ac207_refused_pdb=0 ac207_refused_ge=0
   local ac207_refused_bkfiles=0 ac207_refused_nofiles=0
@@ -5047,7 +5084,7 @@ AC248NEG
   # 正控制直接调【产品函数】write_ac250_record（⛔ 不让夹具复刻判定逻辑，硬规则 4 推论三）。
   # 负控制逐件置为读不出 / 两点相等 / 回环绑定 / 自探 / 类型不符 ⇒ 每条都【零记录】。
   # ⛔ 还要钉住两条最容易悄悄退化的性质：写入器体内无 `build_sha` 字面量（唯一补锚点是
-  # ac89_append_goal009）、且【不含任何 true/false 或阈值的字面量默认值】（AC2 的可执行形式）。
+  # ac_record_append）、且【不含任何 true/false 或阈值的字面量默认值】（AC2 的可执行形式）。
   local ac250_tmp ac250_line ac250_pos_ok=1 ac250_neg_ok=1 ac250_neg_n=0 ac250_rej=0
   ac250_tmp="$(mktemp -d 2>/dev/null || true)"
   if [ -n "$ac250_tmp" ]; then
@@ -5113,7 +5150,7 @@ AC250NEG
     ac250_body="$(sed -n '/^write_ac250_record()/,/^}$/p' "$0" 2>/dev/null | sed 's/#.*//')"
     ac250_sha_hits="$(printf '%s\n' "$ac250_body" | grep -c 'build_sha' || true)"
     ac250_anchor_hits="$(printf '%s\n' "$ac250_body" | grep -c '100\.100\.148\.48\|127\.0\.0\.1' || true)"
-    ac250_choke_hits="$(printf '%s\n' "$ac250_body" | grep -c 'ac89_append_goal009' || true)"
+    ac250_choke_hits="$(printf '%s\n' "$ac250_body" | grep -c 'ac_record_append' || true)"
     ac250_step_calls="$(sed -n '/^step_ac250_web_observe()/,/^}$/p' "$0" 2>/dev/null | sed 's/#.*//' | grep -c 'write_ac250_record\|ac250_read_target_identity\|ac250_fetch_page\|ac250_read_store_status' || true)"
     ac250_step_lit="$(sed -n '/^step_ac250_web_observe()/,/^}$/p' "$0" 2>/dev/null | sed 's/#.*//' | grep -c '100\.100\.148\.48' || true)"
     echo "selfcheck: ac250-writer build_sha-literal-hits=$ac250_sha_hits addr-literal-hits=$ac250_anchor_hits choke-point-hits=$ac250_choke_hits step-read-call-hits=$ac250_step_calls step-addr-literal-hits=$ac250_step_lit (expect 0/0/>=1/>=1/0 — 写入点无字面量默认值; 地址来自目标机读数)"
@@ -5343,7 +5380,7 @@ ac249_side_hits() {
 }
 
 # ── ⑨b AC-249 记录写（fail-closed，硬规则 3b）──────────────────────────────────────────────
-# 经 ac89_append_goal009 统一补 top-level build_sha/ts（AC-214 唯一补锚 choke point）——⛔ 本函数体内
+# 经 ac_record_append 统一补 top-level build_sha/ts（AC-214 唯一补锚 choke point）——⛔ 本函数体内
 # 不出现 `build_sha` 字面量：多一个补锚点 = 下次改锚格式必漏一处（该 choke point 的注释逐字禁止）。
 # 双向 fail-closed：`commit_files` 非空列表 ∧ ≥1 条 `src/`|`scripts/` 前缀 ∧ ≥1 条含 `ADR-007`|
 # `docs/adr` 前缀，三条全真才写。任一条为假 ⇒ return 1、⛔ 一条都不写（⛔ 不写「只改了一边」的记录
@@ -5362,7 +5399,7 @@ write_ac249_record() {
       const doc =f.some(p=>{const x=String(p); return x.includes("ADR-007")||x.startsWith("docs/adr");});
       process.exit(code&&doc ? 0 : 1);
     });' || return 1
-  ac89_append_goal009 ",\"ac\":\"GOAL-016-AC-249\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"task_id\":\"$task_id\",\"commit_files\":$commit_files_json${extras_json}"
+  ac_record_append ",\"ac\":\"GOAL-016-AC-249\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"task_id\":\"$task_id\",\"commit_files\":$commit_files_json${extras_json}"
 }
 
 # ── ⑨b AC-249 步骤（GOAL-016-AC-249）──────────────────────────────────────────────────────
@@ -5469,7 +5506,7 @@ print("," + ",".join(json.dumps(k) + ":" + json.dumps(v) for k, v in e))
 #   ④ 负（路径形态）：`./src/x.ts` 形态 ⇒ 判定函数取假 ⇒ 零记录（证明 criterion 的 startswith 分支
 #      真的在作用，⛔ 不是「反正都会绿」）。
 #   ⑤ 负（缺值 ≠ 不合格）：并集读不出（无该任务的任何提交）⇒ 零记录 + NOT-EVALUATED 痕迹（可区分）。
-#   ⑥ 结构性（按位置）：写入器体内无 `build_sha` 字面量（唯一补锚点是 ac89_append_goal009）、
+#   ⑥ 结构性（按位置）：写入器体内无 `build_sha` 字面量（唯一补锚点是 ac_record_append）、
 #      且写入路径 ⛔ 不调用单条选择器来构造 commit_files；并集函数 ⛔ 不用 merge 提交的差分。
 selfcheck_ac249() {
   local ac249_tmp ac249_fx ac249_code_fx ac249_doc_fx ac249_sel_sha ac249_carrier ac249_rc=0
@@ -5637,6 +5674,16 @@ GOAL-009-AC-205 host:str shipped_from_installed_artifact:bool transcript_confirm
 GOAL-009-AC-206 host:str project_root:str goals_dir_created:bool tasks_dir_created:bool goal_store_readable:bool task_store_readable:bool
 GOAL-009-AC-207 host:str project_root:str commit_sha:str commit_files:jsonarr task_id:str task_status:str gate_events:int produced_by_driver:bool
 GOAL-009-AC-232 host:str project_root:str goal_write_ok:bool goal_read_back_ok:bool goal_records:int
+# AC-238（gap-ac-record-choke-point-naming-dedup-ac238-bypass 本轮接入）：本行只声明其 criterion
+# （goals/AC-238-*.md）真正读的 7 个字段 —— `--ac-record-schema-report` 的 surplus 判据是
+# 「声明 ∖ 判据读集」，而那条 criterion 是 achieved 的判据、⛔ 不可改，因此凡多声明一个字段，
+# 本行就会从 `[ok]` 变成 `[surplus]`（两个要求不可同时满足，取舍理由逐字写在写入点上方注释里）。
+# ⚠️ 记录本身携带全部 21 个 AC 专属字段——另外 14 个（upgrade_source / upgrade_init_rc /
+# isolated_copy / taskset_stable / sample_task / fresh_runtime_sha256 / pre_binding / post_binding /
+# host_key / binding / retired_runtime_backup / retired_backup_matches_pre / bound_mcp_entry /
+# adopt_decision）经变量尾作为【额外字段】写入（写入通道对额外字段不拒），⛔ 一个都没删；
+# 它们无判据消费者，故不进写入期声明闸。
+GOAL-009-AC-238 host:str project_root:str pre_upgrade_task_count:int post_upgrade_task_count:int pre_upgrade_runtime_age_days:num runtime_replaced:bool task_list_ok:bool
 GOAL-009-AC-239 host:str project_root:str commit_sha:str commit_files:jsonarr task_id:str task_status:str gate_events:int produced_by_driver:bool
 GOAL-015-AC-234 host:str project_root:str tasks_rendered:int goals_rendered:int round_records_rendered:int
 GOAL-016-AC-247 host:str project_root:str pre_task_count:int post_task_count:int stale_days:num driver_alive:int carrier_records:int
@@ -5827,18 +5874,9 @@ sys.stdout.write(str(c))
   return 0
 }
 
-# ── 写入通道（无补锚形）：校验后【原样】落盘，用于自己补 ts/build_sha 的产出侧（printf 形 writer）。──
-# $1 = 记录片段（`,"k":v,…`）；$2 = 载体路径（缺省 $AC89）。
-ac_record_append_fragment() {
-  local frag="$1" carrier="${2:-${AC89:-}}" ac=""
-  ac_record_schema_validate_fragment "$frag" || return 1
-  [ -n "$carrier" ] || { echo "ac_record_append_fragment: carrier path empty — record NOT written (fail-closed)" >&2; return 1; }
-  ac="$(ac_record_fragment_ac "$frag" 2>/dev/null)" || ac=""
-  mkdir -p "$(dirname "$carrier")"
-  printf '{%s}\n' "${frag#,}" >> "$carrier"
-  ac_record_finalize "$ac" "$carrier"
-  return 0
-}
+# ── 写入通道的 plain 模式说明已并入上面【唯一】choke point `ac_record_append` 的头注释 ──────────
+# （原 `ac_record_append_fragment` 的定义已删：它与补锚形逐字重复，差异只有 BUILD_SHA 校验 / 是否补锚 /
+#   载体路径是否显式传三点 ⇒ 现为 `ac_record_append <fragment> [carrier] plain`。）
 
 # ── 新增 AC 的通用产出通道（AC2）──────────────────────────────────────────────────────────
 # 新增一条 AC 时，产出侧的动作 = 在 AC_RECORD_SCHEMA 加【一行声明】+ 调本函数，
@@ -5847,7 +5885,7 @@ ac_record_append_fragment() {
 write_ac_record() {
   local ac="$1" body="$2"
   [ -n "$ac" ] || return 1
-  ac89_append_goal009 ",\"ac\":\"$ac\",$body"
+  ac_record_append ",\"ac\":\"$ac\",$body"
 }
 
 # ── AC1：criterion 字段集 vs 产出侧 schema 声明的【两向差集】──────────────────────────────────
@@ -5920,25 +5958,11 @@ def _field_read(node):
     return None
 
 
-def writer_fields(ac):
-    """产出侧【实写】的字段集：从 write_acNNN_record 函数体的【落盘那一行】取 JSON 键。
-
-    ⛔ 不是对全文 grep 关键词（硬规则 2 按位置判定）：只认函数体内含落盘调用的那一行，
-    这样 node 内联程序里的 `p => …`、注释里的字段名都不会被误计。AC-201 的产出侧函数名不同
-    （append_ac201_record），单独按同一个位置谓词处理。
-    """
-    num = ac.rsplit("-", 1)[1]
-    m = re.search(r"^write_ac%s_record\(\)\s*\{(.*?)^\}" % num, src, re.S | re.M)
-    if not m:
-        m = re.search(r"^append_ac(%s)_record\(\)\s*\{(.*?)^\}" % num, src, re.S | re.M)
-        if not m:
-            return None
-        body = m.group(2)
-    else:
-        body = m.group(1)
+def _keys_on_write_lines(lines):
+    """从若干行里取【写入 choke point 调用行】上的字面 JSON 键（按位置，⛔ 不是全文关键词）。"""
     keys, seen = [], set()
-    for line in body.split("\n"):
-        if "ac89_append_goal009 \"" not in line and "ac_record_append_fragment \"" not in line:
+    for line in lines:
+        if "ac_record_append \"" not in line:
             continue
         for mm in re.finditer(r'\\"([A-Za-z_][A-Za-z0-9_]*)\\"\s*:', line):
             k = mm.group(1)
@@ -5946,6 +5970,40 @@ def writer_fields(ac):
                 seen.add(k)
                 keys.append(k)
     return keys
+
+
+def writer_fields_inline(ac):
+    """AC-238 形：记录构造【内联】在调用它的步骤函数里，没有同名的 write_acNNN_record 函数。
+
+    ⛔ 仍按位置判定（硬规则 2）：只在【带写入调用 ∧ 带该 ac 字面量】的行上取键，不是对全文 grep
+    字段名——node 内联程序与注释里的字段名都不会被误计。取不到任何一行 ⇒ None（独立取值，
+    ⛔ 不与「取到 0 个字段」同形）。
+    """
+    tok = '\\"ac\\":\\"%s\\"' % ac
+    lines = [l for l in src.split("\n") if tok in l]
+    if not lines:
+        return None
+    return _keys_on_write_lines(lines)
+
+
+def writer_fields(ac):
+    """产出侧【实写】的字段集：从 write_acNNN_record 函数体的【落盘那一行】取 JSON 键。
+
+    ⛔ 不是对全文 grep 关键词（硬规则 2 按位置判定）：只认函数体内含落盘调用的那一行，
+    这样 node 内联程序里的 `p => …`、注释里的字段名都不会被误计。AC-201 的产出侧函数名不同
+    （append_ac201_record），单独按同一个位置谓词处理。AC-238 没有同名函数（构造内联在
+    step_upgrade_existing() 里）⇒ 走 writer_fields_inline 的同形位置谓词。
+    """
+    num = ac.rsplit("-", 1)[1]
+    m = re.search(r"^write_ac%s_record\(\)\s*\{(.*?)^\}" % num, src, re.S | re.M)
+    if not m:
+        m = re.search(r"^append_ac(%s)_record\(\)\s*\{(.*?)^\}" % num, src, re.S | re.M)
+        if not m:
+            return writer_fields_inline(ac)
+        body = m.group(2)
+    else:
+        body = m.group(1)
+    return _keys_on_write_lines(body.split("\n"))
 
 
 def _pos(n):
@@ -6002,20 +6060,25 @@ registered = {r[0] for r in rows}
 # 本报告按【声明行】驱动，所以一条 AC 只要整行从声明里消失，它就同时从报告里消失——
 # 一个「少了一行」的声明会打印出全绿的报告。⇒ 另从【产出侧】反推：脚本里每个产出函数的
 # 落盘行都写着它产出的 ac，凡产出侧存在而声明里没有的 ac ⇒ 报 UNREGISTERED（硬缺陷）。
+# gap-ac-record-choke-point-naming-dedup-ac238-bypass：改用【全文件的位置谓词】而不是只扫
+# write_acNNN_record 函数体——AC-238 的记录构造内联在 step_upgrade_existing() 里，没有同名函数，
+# 只扫函数体它会被整条漏掉（在报告里静默消失，硬规则 3b）。判据仍是「带写入 choke point 调用
+# ∧ 带该 ac 字面量的那一行」，⛔ 不是全文 grep 字段名。
+# ⛔ 只收 AC id 形态的字面量：通用通道 write_ac_record 的落盘行写的是 `\"ac\":\"$ac\"`（占位符，
+# 不是某个 AC），把它当 ac 会报一条恒假的 UNREGISTERED（实测：那次输出里多出 `$ac` 一行）。
+PRODUCER_AC_RE = re.compile(r"^GOAL-\d+-AC-\d+$")
 producers = {}
-for pm in re.finditer(r"^(?:write_ac\d+|append_ac\d+)_record\(\)\s*\{(.*?)^\}", src, re.S | re.M):
-    for line in pm.group(1).split("\n"):
-        if "ac89_append_goal009 \"" not in line and "ac_record_append_fragment \"" not in line:
-            continue
-        am = re.search(r'\\"ac\\":\\"([^"\\]+)\\"', line)
-        if am:
+for _line in src.split("\n"):
+    if "ac_record_append \"" not in _line:
+        continue
+    for am in re.finditer(r'\\"ac\\":\\"([^"\\]+)\\"', _line):
+        if PRODUCER_AC_RE.match(am.group(1)):
             producers[am.group(1)] = True
-            break
 unregistered = sorted(a for a in producers if a not in registered)
 
 print("AC-RECORD-SCHEMA-REPORT — criterion（判读侧真源）vs AC_RECORD_SCHEMA（产出侧声明）vs writer（产出侧实写）")
 print("  criterion 侧：goals/AC-<n>-*.md 的 criterion，AST 取 r.get()/r[] 的读字段，按 `r.get(\"ac\")!=…` 守卫分段")
-print("  writer  侧：write_acNNN_record 函数体内【落盘那一行】的 JSON 键（按位置取，⛔ 不是全文 grep 关键词）")
+print("  writer  侧：写入 choke point 调用行上的 JSON 键（按位置取：函数体内落盘那一行，或记录构造内联的步骤函数；⛔ 不是全文 grep 关键词）")
 print("  结构字段（每条记录都有，由写入通道注入）：ac build_sha ts")
 missing_d = 0    # 判据读、声明缺 ⇒ 写入期闸有洞（AC3 的守卫漏了该字段）——硬缺陷
 missing_c = 0    # 判据读、writer 不写 ⇒ 记录看着完整而判据恒 exit 1（本任务要消灭的形态）——硬缺陷
@@ -6054,7 +6117,7 @@ for ac, sfields in rows:
     cset = [f for f in (own + shared) if f not in STRUCTURAL]
     wset = writer_fields(ac)
     if wset is None:
-        print("  %-18s [NOT-EVALUATED] no write_ac%s_record() body in %s" % (ac, num, os.path.basename(script_path)))
+        print("  %-18s [NOT-EVALUATED] no writer call carrying ac=%s in %s (neither a write_ac%s_record/append_ac%s_record body nor an inline write line)" % (ac, ac, os.path.basename(script_path), num, num))
         unevaluated += 1
         continue
     wset_ac = [f for f in wset if f not in STRUCTURAL]
@@ -6215,6 +6278,52 @@ GOAL-016-AC-998 host:str project_root:str matched:int"
   done
   [ "$ac5_ok" = "1" ] || fail="$fail AC5-declared-field-not-enforced-at-write-time"
 
+  # ── AC238：AC-238 接入 choke point 之后，其声明字段在写入期【逐个】被强制（能取假）────────────
+  # gap-ac-record-choke-point-naming-dedup-ac238-bypass：AC-238 的记录构造内联在 step_upgrade_existing()
+  # 里（没有同名 write_acNNN_record 函数），此前是裸 `printf >> "$AC89"`，完全绕开写入 choke point。
+  # 本组证明接进去之后它真的受闸：漏任一【声明】字段 ⇒ 拒写且零新增行；补齐 ⇒ 写入成功。
+  # ⛔ 片段由产品函数 ac_record_sample_body 从 AC_RECORD_SCHEMA 的 AC-238 行生成（⛔ 不在此复刻字段
+  # 清单——第二份字段清单正是本任务要消灭的形态），且走【同一个】产品入口 ac_record_append。
+  local ac238_fields ac238_first ac238_two_state_ok=0 ac238_msg="" ac238_n_miss=0 ac238_miss_w=0
+  local f238="$t/ac238.jsonl" ac238_ok_w=0 ac238_lines_after=0 ac238_lines_final=0
+  ac238_fields="$(ac_record_schema_field_names "GOAL-009-AC-238" 2>/dev/null || true)"
+  ac238_first="${ac238_fields%% *}"
+  AC89="$f238"; : > "$f238"
+  # 两态（AC4 的主证据）：漏第一个声明字段 ⇒ 拒写 + 零新增行 + stderr 点名缺件；补齐 ⇒ 写入成功。
+  ac238_msg="$(ac_record_append ",\"ac\":\"GOAL-009-AC-238\",$(ac_record_sample_body "GOAL-009-AC-238" "$ac238_first")" "$f238" anchored 2>&1 >/dev/null)" || ac238_miss_w=1
+  ac238_lines_after="$(wc -l < "$f238" 2>/dev/null || echo 0)"
+  if ac_record_append ",\"ac\":\"GOAL-009-AC-238\",$(ac_record_sample_body "GOAL-009-AC-238" "")" "$f238" anchored >/dev/null 2>&1; then ac238_ok_w=1; fi
+  ac238_lines_final="$(wc -l < "$f238" 2>/dev/null || echo 0)"
+  if [ "$ac238_miss_w" = "1" ] && [ "$ac238_lines_after" = "0" ] && [ "$ac238_ok_w" = "1" ] && [ "$ac238_lines_final" = "1" ]; then ac238_two_state_ok=1; fi
+  case "$ac238_msg" in *"$ac238_first (MISSING)"*) ;; *) ac238_two_state_ok=0 ;; esac
+  echo "selfcheck: ac-record-schema(AC238 refused-when-declared-field-omitted) refused=$ac238_miss_w lines=0→$ac238_lines_after msg='${ac238_msg:0:120}' (expect 1/0→0/点名 MISSING 字段 — 拒写且不落盘)"
+  echo "selfcheck: ac-record-schema(AC238 accepted-when-complete) wrote=$ac238_ok_w lines=$ac238_lines_after→$ac238_lines_final (expect 1/0→1 — 补齐后写入成功)"
+  [ "$ac238_two_state_ok" = "1" ] || fail="$fail AC238-fail-closed-not-falsifiable"
+  # 声明里的【每一个】字段都单独强制（⛔ 不只测被报出来的那一个——硬规则 5b：缺陷是成簇的）。
+  local ac238_f ac238_declared_n=0
+  for ac238_f in $ac238_fields; do
+    if ac_record_append ",\"ac\":\"GOAL-009-AC-238\",$(ac_record_sample_body "GOAL-009-AC-238" "$ac238_f")" "$f238" anchored >/dev/null 2>&1; then :; else ac238_n_miss=$((ac238_n_miss + 1)); fi
+  done
+  ac238_declared_n="$(printf '%s' "$ac238_fields" | wc -w)"
+  echo "selfcheck: ac-record-schema(AC238 every-declared-field-enforced) declared=$ac238_declared_n each_omitted_refused=$ac238_n_miss (expect 7/7 — 声明逐字段在写入期被强制)"
+  if [ "$ac238_declared_n" = "$ac238_n_miss" ] && [ "$ac238_n_miss" != "0" ]; then :; else fail="$fail AC238-declared-field-not-enforced-at-write-time"; fi
+  # 结构性（按位置）：升级步骤体内 ⛔ 不再有裸 `printf … >> "$AC89"`；AC-238 的写入行确实走
+  # ac_record_append 的 anchored 模式（⇒ top-level build_sha/ts 由唯一补锚点统一补，⛔ 写入行内
+  # 不得自带 build_sha 字面量——同 AC-250 写入器的结构性判据）。
+  # ⚠️ build_sha 只对【写入行】判，不对整个 step_upgrade_existing() 体判：该函数体里还有一处
+  # 「缺值≠合格」的 else 分支诊断打印（`build_sha=${BUILD_SHA:-<empty>}`），那是给人看的读数，
+  # ⛔ 不是写入行上的锚字面量（判整个函数体会把它误计成 1）。
+  local ac238_step_body ac238_bare_printf ac238_choke_hits ac238_anchor_hits ac238_write_line
+  ac238_step_body="$(sed -n '/^step_upgrade_existing()/,/^}$/p' "$0" 2>/dev/null | sed 's/#.*//')"
+  ac238_bare_printf="$(printf '%s\n' "$ac238_step_body" | grep -c '>> *"$AC89"' || true)"
+  ac238_write_line="$(printf '%s\n' "$ac238_step_body" | grep 'ac_record_append ",\\"ac\\":\\"GOAL-009-AC-238\\"' || true)"
+  if [ -n "$ac238_write_line" ]; then ac238_choke_hits=1; else ac238_choke_hits=0; fi
+  ac238_anchor_hits="$(printf '%s\n' "$ac238_write_line" | grep -c 'build_sha' || true)"
+  echo "selfcheck: ac238-writer bare-printf-to-AC89-hits=$ac238_bare_printf choke-point-hits=$ac238_choke_hits build_sha-literal-hits=$ac238_anchor_hits (expect 0/1/0 — 裸落盘已消灭; 走 choke point; 写入行不自带锚字段)"
+  [ "${ac238_bare_printf:-1}" = "0" ] || fail="$fail AC238-bare-printf-still-present"
+  [ "${ac238_choke_hits:-0}" = "1" ] || fail="$fail AC238-write-does-not-go-through-choke-point"
+  [ "${ac238_anchor_hits:-1}" = "0" ] || fail="$fail AC238-write-carries-its-own-anchor-literal"
+
   # ── AC1：两向差集【可检出】（能取假）─────────────────────────────────────────────
   # 把内存里的声明删掉一个【判据确实在读】的字段（AC-247 的 carrier_records）⇒ 报告必须取 DRIFT
   # 且点名该字段 + 退出非 0。⛔ 这是 AC1 的可失败控制：一个永远打印 ok 的检查不是测量（硬规则 4），
@@ -6263,7 +6372,7 @@ fi
 # 独立于下面的主流程：本模式【不跑 step①】（它观测的是目标机上已安装的产物，而 step① 装的是判读侧的
 # 前缀 —— 与「目标机上那个 web 绑了什么地址」无关），也不跑冷启动/驱动活性段。它只做一件事：
 # 在目标机上起一个绑其 tailscale0 的 serve，由【本机】探测、读同一任务的两点渲染状态、直接读目标 store
-# 交叉核对，九件全有效才经 ac89_append_goal009 choke point 写一条 ac=GOAL-016-AC-250 记录。
+# 交叉核对，九件全有效才经 ac_record_append choke point 写一条 ac=GOAL-016-AC-250 记录。
 # 判定与 AC-247/AC-248 同一条纪律：任缺 ⇒ 不写 + 可区分 NOT-EVALUATED + 退出非 0（⛔ 不降级成 not-live，
 # 那会让一次「没产出」的运行与「产出但没达标」同形）。
 if [ "$AC250_WEB_OBSERVE" = 1 ]; then

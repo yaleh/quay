@@ -141,7 +141,7 @@ test("① the goal's criterion fields are ALL emitted by write_ac247_record (par
   // `ac` is matched against a literal in BOTH places (the criterion's `!= "GOAL-016-AC-247"` and the
   // writer's fragment); every other field must be readable from the writer's fragment key set —
   // EXCEPT `build_sha`, which the criterion reads but the writer deliberately does NOT emit: it is added
-  // by the shared anchor choke point `ac89_append_goal009` (test ①b pins that, and pins that no second
+  // by the shared anchor choke point `ac_record_append` (test ①b pins that, and pins that no second
   // `build_sha` literal exists in the writer). ⛔ Exempting it here is not a loophole: the choke point is
   // exactly the single-source rule, and ①b is what keeps the exemption honest.
   for (const f of fields) {
@@ -150,7 +150,7 @@ test("① the goal's criterion fields are ALL emitted by write_ac247_record (par
       `the producer must emit top-level "${f}" — the criterion reads it, so a producer without it makes the AC unsatisfiable`);
   }
   assert.ok(!/"build_sha"/.test(body),
-    "the writer must NOT carry its own build_sha literal — that field comes from ac89_append_goal009 (see ①b)");
+    "the writer must NOT carry its own build_sha literal — that field comes from ac_record_append (see ①b)");
 
   // Negative control (硬规则 4: a量 that cannot take false is not a measurement): drop one field from the
   // fragment and the SAME predicate must flip. Without this, a producer that emitted nothing would still
@@ -164,9 +164,9 @@ test("①b the producer anchors build_sha through the SHARED choke point, not a 
   const src = fs.readFileSync(SCRIPT, "utf8");
   const body = src.slice(src.indexOf("write_ac247_record() {"), src.indexOf("\n}", src.indexOf("write_ac247_record() {")));
   assert.ok(!body.includes("build_sha"),
-    "write_ac247_record must NOT write its own build_sha literal — ac89_append_goal009 is the single anchor choke point");
-  assert.ok(/ac89_append_goal009\s+"/.test(body),
-    "the record must be appended through ac89_append_goal009 (the single choke point that adds build_sha/ts)");
+    "write_ac247_record must NOT write its own build_sha literal — ac_record_append is the single anchor choke point");
+  assert.ok(/ac_record_append\s+"/.test(body),
+    "the record must be appended through ac_record_append (the single choke point that adds build_sha/ts)");
 });
 
 test("② the REAL criterion takes all three values: 0 (qualifying), 1 (fails a filter), 3 (carrier absent)", () => {
@@ -230,6 +230,6 @@ test("③ --ac247-takeover is a documented flag AND the step reads liveness from
   // ⛔ AC4: the recorded driver_alive must come from the status carrier. The start rc may be recorded
   // as a diagnostic, but it must never be the value written into the record's driver_alive field.
   const writer = src.slice(src.indexOf("write_ac247_record() {"), src.indexOf("\n}", src.indexOf("write_ac247_record() {")));
-  assert.ok(!/DRIVER_START_RC/.test(writer.replace(/^.*ac89_append_goal009.*$/m, "")),
+  assert.ok(!/DRIVER_START_RC/.test(writer.replace(/^.*ac_record_append.*$/m, "")),
     "the record's driver_alive must not be derived from the driver start exit code");
 });

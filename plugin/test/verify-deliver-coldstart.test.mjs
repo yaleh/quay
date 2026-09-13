@@ -466,9 +466,10 @@ test("AC4 — --verify-only (no build, no tgz sha256) does NOT append an AC-201 
 // a selfcheck `grep -q '"ac":"…"'` assertion is not a producer) and each must carry the anchor.
 //
 // The two anchor forms accepted are exactly the two that exist in this file:
-//   (a) the shared helper `ac89_append_goal009` — injects top-level build_sha/ts (the single choke
-//       point; AC-203/205/207/232 go through it), or
-//   (b) an explicit top-level `"build_sha":` field in the record-producing printf (AC-201).
+//   (a) a call to the single write choke point `ac_record_append` in its DEFAULT (anchored) mode — it
+//       injects the top-level build_sha/ts anchor itself (AC-203/205/207/232/238 go through it), or
+//   (b) an explicit top-level `"build_sha":` field in the record fragment — required for the `plain`
+//       mode callers (AC-201/204/206/234: the choke point does NOT anchor those).
 // ⛔ Adding a third, unanchored write point for any NEED ac turns this test red — which is the point.
 
 // AC-240 AC1 — the generation-side AC-203 write point is POSITIONALLY inside step5_e2e's body, and
@@ -544,22 +545,26 @@ test("AC5 — every AC-214 NEED ac's write point carries a freshness anchor (mec
     `NEED must enumerate the carrier acs (parsed ${need.ids.length}: ${need.ids.join(",")})`);
 
   const stmts = logicalStatements(fs.readFileSync(SCRIPT, "utf8"));
-  // A record PRODUCER appends to the carrier: either the shared anchor helper, or a printf redirected
-  // into the AC89 carrier. A selfcheck assertion (`grep -q '"ac":"…"'`) matches the ac field but is
-  // not a producer, so it is excluded by position — not by a keyword.
-  // Three producer forms: the shared anchor helper (a), a printf redirected into the carrier (b), and
-  // the write choke point ac_record_append_fragment (c — gap-ac-record-schema-duplicated-between-
-  // criterion-and-writer rerouted the printf-style writers through it so the field list is validated
-  // at production time). (c) does NOT inject an anchor by itself, so it must still spell `build_sha`
-  // in its fragment — that is what isAnchored below checks.
+  // A record PRODUCER appends to the carrier: either a call to the write choke point, or a printf
+  // redirected into the AC89 carrier. A selfcheck assertion (`grep -q '"ac":"…"'`) matches the ac
+  // field but is not a producer, so it is excluded by position — not by a keyword.
+  // Two producer forms: the write choke point `ac_record_append` (a — gap-ac-record-schema-
+  // duplicated-between-criterion-and-writer rerouted every writer through it so the field list is
+  // validated at production time; gap-ac-record-choke-point-naming-dedup-ac238-bypass merged the two
+  // entry functions into it and rerouted AC-238's bare printf through it too), and a printf
+  // redirected into the carrier (b).
   const isProducer = (s) =>
-    s.includes("ac89_append_goal009") || s.includes("ac_record_append_fragment") ||
-    />>\s*"\$\{?[Aa][Cc]89\}?"/.test(s);
-  // The anchor is a TOP-LEVEL build_sha on the produced record: the helper adds it, or the record
-  // fragment spells it. The fragment is passed as an escaped shell string (`\"build_sha\":`), so
-  // unescape before matching — otherwise form (b)/(c) would read as unanchored (a false failure).
+    s.includes("ac_record_append ") || />>\s*"\$\{?[Aa][Cc]89\}?"/.test(s);
+  // The anchor is a TOP-LEVEL build_sha on the produced record: the choke point adds it in its
+  // DEFAULT (anchored) mode, or the record fragment spells it itself.
+  // ⚠️ `plain` mode is the discriminator, and it must be read as the call's MODE argument — matching
+  // the bare word anywhere would be both a false-positive (a fragment value containing "plain") and,
+  // worse, would make this predicate TRUE for the plain-mode callers too, i.e. a量 that cannot take
+  // false (硬规则 4). The mode argument is written as `"<carrier>" plain` / `"<carrier>" anchored`.
+  const isPlainModeCall = (s) => /["']\s+plain\b/.test(s);
   const isAnchored = (s) =>
-    s.includes("ac89_append_goal009") || /"build_sha"\s*:/.test(s.replace(/\\/g, ""));
+    (s.includes("ac_record_append ") && !isPlainModeCall(s)) ||
+    /"build_sha"\s*:/.test(s.replace(/\\/g, ""));
 
   const problems = [];
   for (const id of need.ids) {
@@ -579,8 +584,8 @@ test("AC5 — every AC-214 NEED ac's write point carries a freshness anchor (mec
     }
   }
   assert.deepEqual(problems, [],
-    "every AC-214 NEED ac's write point must carry a top-level build_sha (via ac89_append_goal009 or an " +
-    `explicit field) — otherwise that ac is structurally unsatisfiable in AC-214:\n  ${problems.join("\n  ")}`);
+    "every AC-214 NEED ac's write point must carry a top-level build_sha (via the anchored-mode " +
+    `choke point ac_record_append or an explicit field) — otherwise that ac is structurally unsatisfiable in AC-214:\n  ${problems.join("\n  ")}`);
 });
 
 // ── AC-247 (GOAL-016) — the takeover producer's hermetic controls ────────────────────────────────
@@ -717,6 +722,48 @@ test("AC1 — the drift report can take false (dropped field ⇒ DRIFT; dropped 
     "dropping a criterion-read field from the declaration must flip the report to DRIFT and name the field");
   assert.match(r.stdout, /ac-record-schema\(AC1 whole-row-removed\) rc=1 unregistered=1/,
     "removing a whole declaration row makes the AC vanish from a row-driven report — the producer-side reverse lookup must catch it");
+});
+
+// ── AC-238 接入写入 choke point（gap-ac-record-choke-point-naming-dedup-ac238-bypass）───────────
+// AC3 — the report must now SEE AC-238 (before this task its bare `printf >> "$AC89"` was invisible to
+// a report that is driven by the schema rows), on all three sides, clean.
+test("AC-238 — the drift report sees it and reads ok on all three sides (was: invisible)", () => {
+  const r = run(["--ac-record-schema-report"]);
+  assert.equal(r.status, 0, `the report must exit 0 when there is no hard diff:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /GOAL-009-AC-238\s+\[ok\] criterion=7 schema=7 writer=7/,
+    "AC-238 must be registered, written and read — and the three counts must agree (else it is DRIFT/surplus)");
+  assert.match(r.stdout, /14 AC registered/,
+    "the declaration table must have grown by exactly the new AC-238 row (13 → 14)");
+});
+
+// AC4 — the new write point is fail-closed and the failure is falsifiable: every declared AC-238 field
+// is individually enforced, and the refusal writes NOTHING (未测量 ≠ 不合格).
+test("AC-238 — every declared field is enforced at write time, and the refusal writes zero lines", () => {
+  const r = run(["--selfcheck"]);
+  assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout,
+    /ac-record-schema\(AC238 refused-when-declared-field-omitted\) refused=1 lines=0→0 msg='AC-RECORD-SCHEMA: refusing GOAL-009-AC-238 record — host \(MISSING\)/,
+    "omitting a declared AC-238 field must be refused with the field NAMED and nothing written");
+  assert.match(r.stdout, /ac-record-schema\(AC238 accepted-when-complete\) wrote=1 lines=0→1/,
+    "…and the completed fragment must write exactly one record (otherwise the refusal above is vacuous)");
+  assert.match(r.stdout, /ac-record-schema\(AC238 every-declared-field-enforced\) declared=7 each_omitted_refused=7/,
+    "every declared field — not just the one the message happens to name — must be individually enforced");
+  // 结构性（按位置）：AC-238's write used to be a bare `printf … >> "$AC89"`; it must now go through
+  // the choke point, and must NOT carry its own anchor literal (the anchored mode injects build_sha/ts).
+  assert.match(r.stdout, /ac238-writer bare-printf-to-AC89-hits=0 choke-point-hits=1 build_sha-literal-hits=0/,
+    "the bare printf must be gone, the write must go through ac_record_append, and the anchor must come from the choke point alone");
+});
+
+// AC2 — the rename is complete: the historical name is gone from the WHOLE script, comments included,
+// and the entry point sits in the `ac_record_*` family like its collaborators.
+test("AC2 — the historical entry-function name is gone and the entry point joins the ac_record_* family", () => {
+  const src = fs.readFileSync(SCRIPT, "utf8");
+  assert.equal(src.includes("ac89_append_goal009"), false,
+    "the historical name must not survive anywhere in the script — comments included (AC2)");
+  assert.match(src, /^ac_record_append\(\) \{$/m,
+    "the merged single entry point must be defined under the ac_record_* prefix");
+  assert.match(src, /\$3 = 模式，缺省 `anchored`/,
+    "the two former behaviours must be expressed as a MODE parameter, not as two function bodies (AC1)");
 });
 
 test("AC-249 — the step is wired into the opt-in chain and shares AC-248's --target-root/--task-id", () => {
