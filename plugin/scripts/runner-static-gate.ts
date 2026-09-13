@@ -809,6 +809,16 @@ run_static_checks() {
   # Leaving both opt-in made them "existing but never run" — the mirror of 硬规则 3b (a checker that
   # never executes is, in the record, indistinguishable from one that always passes).
   #
+  # CORROBORATION — the capability catalog already declared this home. capability-catalog.sh's 谁按
+  # table said of direct-to-develop-bypass-check.ts: "谁按：run_static_checks 每轮自动按（code-class
+  # gate）", and the cadence table declared BOTH checkers "每轮". Those claims were FALSE for as long as
+  # the two sat in the opt-in tier — the declared consumer and the actual registration disagreed, and
+  # nothing checked it (the drift class tasks/gap-checker-claim-vs-actual-cadence-and-count-drift
+  # owns). This move repairs the drift by making the wiring match the declaration, rather than by
+  # weakening the declaration to match a checker nobody ran. It also fixes the catalog's other reading:
+  # capability-catalog.sh's 消费方 note for direct-to-develop-bypass-check.ts described consumers
+  # reading a run_static_checks output that never existed.
+  #
   # 硬规则 4 (an unrun check is not a measurement): the two mutation cases already existed and already
   # ran here (checker-mutation-check, --check + --check-changed above) — but a mutation case exercises
   # the checker against a FIXTURE, so it only ever proved the LOGIC can go red. It never once ran the
