@@ -79,7 +79,16 @@ session-schema.mjs     82 行  validateSessionRecord
 - `plugin/scripts/inner-blocked-signal.ts`（transcript mtime + `subagents/` 解析改共享模块）
 - `plugin/scripts/transcript-delivery-check.ts`（delivery-audit 判词面）
 - `plugin/scripts/send-to-session.ts`（pty-frame / deliverKeys lane 的另一候选入口）
-- `plugin/scripts/primitives-drift-check.ts` (new) + 其 capability-catalog 声明 + outline/runner-static-gate 注册 + laydown 表三处登记
+- `plugin/scripts/primitives-drift-check.ts` (new)
+- `plugin/scripts/primitives-drift-manifest.json` (new)
+- `plugin/scripts/capability-catalog.sh`（新机件的 capability 声明）
+- `plugin/scripts/runner-static-gate.ts`（注册新静态检查）
+- `plugin/scripts/checker-mutation-cases/primitives-drift-check.sh` (new)（mutation 用例）
+- `packages/quay/src/primitives/pty-frame.d.mts` (new)
+- `packages/quay/src/primitives/delivery-audit.d.mts` (new)
+- `packages/quay/src/primitives/session-liveness.d.mts` (new)
+- `packages/quay/src/primitives/session-schema.d.mts` (new)
+- `packages/quay/scripts/build-plugin-dist.mjs`（`coreSrcAliasPlugin` 过滤器由 `\.ts$` 扩到 `\.ts|\.mjs`）
 - `plugin/test/session-primitives-adoption.test.mjs` (new)（逐模块消费者 + 手写副本归零 + fleet SHA 比对 + 折叠记录负控制）
 - `plugin/test/primitives-drift-check.test.mjs` (new)（三态，含 exit 3 NOT-EVALUATED）
 - `plugin/vendor/quay/dist/quay.js`（若构建产物字节变化则一并声明与提交；`dist/` 下仅此一个产物文件，以构建输出清单为准）
