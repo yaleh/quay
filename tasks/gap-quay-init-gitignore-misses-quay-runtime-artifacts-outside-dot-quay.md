@@ -103,8 +103,19 @@ fixture 满足不算数（硬规则 4 推论三）。
 
 ## Touches
 
-- plugin/scripts/quay-init.sh
-- plugin/scripts/worker-driver.ts
+- .gitignore
+- docs/analysis/quay-init-closure-ratchet.baseline.json
+- packages/quay/src/fan-in/ff-merge.ts
+- packages/quay/src/runtime-artifacts.ts
+- plugin/scripts/capability-catalog.sh
+- plugin/scripts/checker-mutation-cases/gitignore-runtime-coverage-check.sh
 - plugin/scripts/gitignore-runtime-coverage-check.ts
+- plugin/scripts/quay-init.sh
+- plugin/scripts/quay-runtime-artifacts.txt
+- plugin/scripts/runner-static-gate.ts
+- plugin/scripts/touches-orthogonality-check.ts
+- plugin/scripts/worker-driver.ts
+- plugin/test/driver-cli.test.mjs
+- plugin/test/fan-in-ff-merge.test.mjs
 - plugin/test/gitignore-runtime-coverage-check.test.mjs
 - tasks/gap-quay-init-gitignore-misses-quay-runtime-artifacts-outside-dot-quay.md
