@@ -40,6 +40,30 @@ const DEFAULT_OUTFILE = path.resolve(pkgDir, "dist/quay.js");
 export const REQUIRE_BANNER =
   'import { createRequire } from "node:module"; const require = createRequire(import.meta.url);';
 
+/**
+ * Extra node_modules roots for the bundle's bare specifiers, in addition to esbuild's normal
+ * walk-up from each file's own directory.
+ *
+ * WHY (GOAL-017/AC-251): the Core bundle now INLINES sources that live outside the product package
+ * — `src/serve.ts` imports `serveControlPlane` from `plugin/scripts/driver-shared.ts`, which in turn
+ * dynamic-imports `@modelcontextprotocol/sdk/*` and `zod`. esbuild resolves a bundled file's bare
+ * specifiers relative to THAT FILE's directory, but a plugin-layer source has no node_modules
+ * between it and the filesystem root: in a real checkout it happens to work (npm hoists to
+ * `<repo>/node_modules`, an ancestor of `plugin/scripts/`), while in a *packaging copy* that gives
+ * the deps only to the package (`<copy>/packages/quay/node_modules` — the layout
+ * `npm-pack-e2e.test.mjs` builds) the resolution fails and `package.sh` dies with
+ * `Could not resolve "@modelcontextprotocol/sdk/server/mcp.js"`.
+ *
+ * The right statement is that a SELF-CONTAINED bundle's bare specifiers must resolve against the
+ * BUNDLE'S package — those are the dependencies it ships against (`@modelcontextprotocol/sdk` and
+ * `zod` are declared deps of `packages/quay/package.json`). Declaring them here makes that explicit
+ * and independent of where an inlined source file happens to sit. Additive: esbuild still tries each
+ * importer's own directory first, so nothing that resolved before resolves differently.
+ */
+export function bundleNodePaths(pkgRoot = pkgDir) {
+  return [path.join(pkgRoot, "node_modules")];
+}
+
 // gap-webui-modernist-css-missing-in-tgz: the dist bundle must be SELF-CONTAINED
 // for the Web UI stylesheet. serve-handlers.ts reads the Modernist token sheet
 // (webui-modernist.css) relative to its own location — from src/ the file sits
@@ -111,6 +135,7 @@ export async function buildDist(opts = {}) {
       // dist/quay.js is truly self-contained (runs standalone with no package.json beside it).
       loader: { ".json": "json" },
       banner: { js: buildBanner() },
+      nodePaths: bundleNodePaths(),
       logLevel,
     });
   } catch (err) {
