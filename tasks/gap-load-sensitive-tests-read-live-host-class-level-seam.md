@@ -56,13 +56,13 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（判定独立于宿主扰动·双向对照，可取假·核心）：目标测试在两种条件下各跑 ≥3 次并落盘 `.quay/lowconc-deflake-evidence.jsonl`——①人为制造该测试所敏感的扰动（对 git-graph 那本 = 在其取快照窗口内并发产生提交；若改做别本则为高并发/高负载）；②近空载/无扰动。判据：两种条件下**判定一致**（全绿一致或全红一致），每次读数带 `condition` `passed` `durationMs`。⛔ 取假形态：两种条件下判定不同 ⇒ 未达成；⛔ 不得以「重跑绿了」结案。
-- [ ] AC2（改前红控制，可取假·⚠️ 允许 not-evaluated）：用**改前版本**在①扰动条件下复现该 flake ≥1 次并落盘（手法：`git show <pre-fix-ref>:<path>` 把旧版换回来跑；⚠️ 跑完换回后必须 `git diff` 验证还原干净——已知陷阱：`git checkout -- <file>` 还原到 HEAD 会把**同文件上未提交的正式改动一起静默抹掉**，故应先提交或先备份）。判据：证据文件含 pre-fix 版本在扰动下的一条 red 读数。⚠️ 若无法复现 ⇒ 记 **not-evaluated** 并写明尝试过的条件，⛔ 不得记为通过——否则无法区分「修好了」与「它本来就偶发、这次恰好没犯」。
-- [ ] AC3（seam 是注入而非放宽，可取假·防空转）：注入一个**违反断言**的假宿主值时该测试必须**红**。判据：干跑一次该注入，退出码非 0，命令与输出尾部贴进读数段。⛔ 取假形态：注入错值仍绿 ⇒ seam 把测试改成了空转——**比没有测试更贵**（硬规则 3b：一个恒绿的检查是假的保证，而「没有检查」只是已知的空白）。
-- [ ] AC4（硬规则 5b 的兄弟实例枚举，⛔ 非布尔）：在提交信息或读数段贴出「同载体内同形态（读活仓库/活宿主/活进程）的测试」**命中数 + 前 3 条实际内容**。判据：该数字与清单存在。⛔ 写不出这个数 ⇒ 视为只修了被报出来的那一本。⚠️ **若命中数为 0，必须把该谓词对着目标测试自己干跑一次**证明谓词确实命中它（硬规则 2 的零计数配套动作：非零查「命中的是不是我要的」，零查「谓词对真样本命不命中」）。
-- [ ] AC5（五本的处置枚举，⛔ 不得留空）：产出 **5 行**表（文件 / 实测失败率 / 妨害任务数 / 同 seam 可否套用 / 处置∈{本任务已修, 已另立案（附任务 id）, 不需要（附理由）}）。判据：表恰好 5 行，每行五列均有取值。
-- [ ] AC6（⛔ 不得靠改归组或移出套件回避，可取假）：判据：`git diff` 中 `@test-group` 声明行**零变更**，且目标测试仍在套件的 glob 覆盖内（`scripts/test.sh --list-groups` 的输出仍含该文件）。⛔ 取假形态：把它挪组、加 skip、或移出 glob ⇒ 未达成。（同族既有教训：某测试头注释声称已路由 serial 而 `@test-group` 实为 product ⇒ 判组要读**声明**不读注释。）
-- [ ] AC7（生产载体验证·读产物，⚠️ 允许 not-evaluated）：落地后该文件的 `perFile` 失败率应下降。判据：读数段给出四个量——落地时刻、落地前的 runs/fails（117/10）、落地后窗口内的 runs/fails、以及落地后窗口长度。⚠️ 若落地后窗口内 runs 过少（< 20）⇒ 记 **not-evaluated** 并写明 runs 数，⛔ 不得用一个小样本的「0 次失败」宣告修好（8.55% 的事件在 10 次运行里不出现是常态）。
+- [x] AC1（判定独立于宿主扰动·双向对照，可取假·核心）：目标测试在两种条件下各跑 ≥3 次并落盘 `.quay/lowconc-deflake-evidence.jsonl`——①人为制造该测试所敏感的扰动（对 git-graph 那本 = 在其取快照窗口内并发产生提交）；②近空载/无扰动。判据：两种条件下**判定一致**（全绿一致或全红一致），每次读数带 `condition` `passed` `durationMs`。✅ **6 条读数全绿一致**：近空载 ×3（540/562/657ms）、扰动 ×3（538/562/588ms；扰动 = 后台提交者每 0.4–0.5s 落一条 `tasks: 翻 gap-frozen-achieved-ac-no-owner done（driver 机械 fan-in）`，跑测期间实测落 1–2 条）。⛔ 未以「重跑绿了」结案——扰动是与 AC2 同一条件、只是被测文件换成改后字节。
+- [x] AC2（改前红控制，可取假·⚠️ 允许 not-evaluated）：用**改前版本**在①扰动条件下复现该 flake ≥1 次并落盘。✅ **改前字节（`testSha 466b193ac7…`，与改后同一份克隆、唯一差异是被测文件本身）在同一扰动下 3/3 红**：失败尾部 `group count (6) == subject-mention count (11)` / `(8)/(13)` / `(10)/(15)`；同一克隆近空载 ×3 绿 ⇒ 构成**双向对照**。⚠️ 还原用 `git checkout <pre-fix-sha> -- <file>` 落成一个提交（⛔ 不是 `git checkout -- <file>`，那会抹掉同文件上未提交的改动）；克隆与工作树无任何共享可写状态，工作树 `git status` 全程只有本条自己的两处改动。
+- [x] AC3（seam 是注入而非放宽，可取假·防空转）：注入一个**违反断言**的假宿主值时该测试必须**红**。✅ 干跑 `QUAY_DEFLAKE_POISON=unattributed node --experimental-strip-types --test packages/quay/test/gap-git-graph-task-view-aggregate-commits-by-task-id.test.mjs` ⇒ **EXIT=1**，`✖ AC3: a real task id spans ≥2 git columns but is exactly one task group` / `AssertionError: some real task id spans ≥2 git columns in this window`（injection = seam 供给一个「所有 subject 都归属不到任何 id」的宿主）。⇒ 判定确实**穿过** seam，不是空转。命令与输出尾部见证据文件 `kind=AC3`。
+- [x] AC4（硬规则 5b 的兄弟实例枚举，⛔ 非布尔）：✅ 载体 = 套件 glob 的 **632** 个 `*.test.mjs`。谓词 = 同一文件里既 `readGitHistory(` 又直接 `("git", ["-C", REPO_ROOT, "log"`（即**两次独立读同一宿主窗口并互相对账**）：**命中 7**（6 个兄弟 + 本文件）。前 3 条实际内容：①`gap-git-graph-adopt-git-column-algorithm-and-decorate-labels.test.mjs:38: const out = execFileSync("git", ["-C", REPO_ROOT, "log", "--graph", "--all", "-n", String(n), "--pretty=format:%x01%H"],` ②同文件 `:56: … "log", "--all", "--topo-order", "-n", String(n), "--pretty=format:%H%x1f%P" …` ③同文件 `:72: const history = readGitHistory(REPO_ROOT, { limit: LIMIT });`。零计数配套动作照做：谓词对**已知为真**的目标文件干跑命中（`:48` 与 `:83`）。
+- [x] AC5（五本的处置枚举，⛔ 不得留空）：✅ 5 行见下方「落地读数」的 AC5 表；标「已另立案」的两本**已实际存在**：`gap-suite-wallclock-budgets-literals-depend-on-host-capacity`、`gap-suite-bucket-zombie-check-bills-the-next-unrelated-task`。
+- [x] AC6（⛔ 不得靠改归组或移出套件回避，可取假）：✅ `git diff` 中 `@test-group` 声明行**零变更**（文件头仍是 `// @test-group product`）；目标测试仍在覆盖内——`bash scripts/test.sh --group product --list-files` 命中该文件，`bash scripts/test.sh --list-groups` 首行 `test-group-downgrade-check … PASS: no test file was moved out of the default {product,engine} set without a commit-message reason`（baseline 622 glob files），`scripts/test.sh:796` 的 glob 字面量未动。
+- [x] AC7（生产载体验证·读产物，⚠️ 允许 not-evaluated）：⚠️ **not-evaluated（落地后窗口 runs=0 < 20）**。落地前 117/10（8.55%，末次 2026-09-11T12:52:28Z）；本记录写于 fan-in 之前（ff 在本 worker 退出后才发生）⇒ 落地后窗口长度 0、runs=0。⛔ 不用「0 次失败」宣告修好。复评法：落地后从 `.quay/verification-round.jsonl` 取该文件 `perFile` 行、窗口限定在落地提交时刻之后，runs ≥ 20 再判。
 
 ## Definition of Done
 
@@ -72,7 +72,34 @@ extra:
 - ⛔ 本条**不动**泳道机制（`gap-load-sensitive-tests-undeclared-run-in-main-lane-block-fan-in` / `gap-serial-lowconc-reclassify-post-waterline-cap` / `gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive` 的范围）、⛔ 不再走「放宽阈值」那条路（`gap-observation-ac1-perf-threshold-relax` 已试过且未按住）。
 - ⚠️ **Touches 补充义务**：Plan 1 定位出的被测生产文件若超出下列清单，worker 必须先把它追加进本任务 `## Touches` 再提交——fan-in 的 anti-drift 是 HARD-FAIL 步，读 worktree 内任务文件且只算已提交 delta，提交了未声明的文件即红。
 
+## 落地读数（AC1–AC7；原始读数 19 条在 `.quay/lowconc-deflake-evidence.jsonl`）
+
+**改了什么**：① 生产侧 seam —— `packages/quay/src/observation.ts` 的 `readGitHistory(root, { exec })`，默认 `realGitExec` 与原先的内联 `execFileSync` 逐字等价（两处调用点 `exec(args, {timeout})`），**注入时绕过 30s 缓存**（fixture 不得顶着生产键留在缓存里，硬规则 3b）；② 目标测试对活仓库的三次独立读改为**一次冻结快照**（`snapshotExec`，fail-closed：不认识的调用直接 throw）；③ AC6 的计数对账从**活窗口**挪到**受控窗**（每条 subject 声明其应得归属，含两种发散形态作显式负例）。
+
+**⚠️ 根因与任务书所载不同（附对照，非解释）**：任务书写的是「读活仓库 2–3 次快照，提交落在 ~2s 窗口内必红」。实测**否证**：
+- ① 10 次记录在案的失败，该轮文件运行的 −180s..+60s 内**可达提交数为 0（10/10）**；
+- ② 失败**成簇**（1404/1405/1406、1438/1439、1445/1446、1542/1543）——瞬态竞态不会连续三轮同形；
+- ③ 失败轮 `load` 均值 **21.3 < 通过轮 25.4**（n=10/107）——与「负载敏感」相反。
+- **真根因**：AC6 的独立读数用 `subject.includes(id)`，而**子串 ≠ 归属**——生产窗口里 **4/45** 个分组发散（3 个前缀相撞 `gap-ac242` ⊂ `gap-ac242-derived-…`，1 个散文提及 `… 三选一之① DIR-131 AC6 口径澄清`）。
+- **决定性对照**：静态仓库、零并发、运行窗内零提交，只落一条 `tasks: 翻 gap-frozen-achieved-ac-no-owner done` ⇒ AC6 红（`group count (2) == subject-mention count (7)`）；换个非前缀相撞的 id ⇒ 绿。
+- ⇒ 活窗口上的「条数相等」不是**代码**的性质而是**数据**的性质；任何 count 要么重实现抽取规则（成为被测代码的回声，硬规则 4），要么在数据上发散。故修法随之改变：seam 仍落地（把宿主读取变成可控），但**计数对账挪到受控窗**；活窗口保留结构判据（AC3/AC4）。
+
+**AC5 五本处置（5 行，每行五列）**
+
+| 文件 | 实测失败率 | 妨害任务数 | 同 seam 可否套用 | 处置 |
+|---|---|---|---|---|
+| `packages/quay/test/gap-git-graph-task-view-aggregate-commits-by-task-id.test.mjs` | 8.55%（117/10） | 7 | ✅ 可（本任务已落地） | **本任务已修** |
+| `packages/quay/test/observation.test.mjs` | 3.57%（701/25） | 15 | ❌ 量是**经过的墙钟时间**（AC1 冷 <3s / 预热 <500ms；红时实测 32.4s–65.2s），注入时钟＝把性能断言变空转 | **已另立案** `gap-suite-wallclock-budgets-literals-depend-on-host-capacity` |
+| `plugin/test/worker-driver-resident.test.mjs` | 2.78%（611/17） | 13 | ❌ 同上；断言体是 `waitFor(…, 10000)` 的裸字面上限（已从 5000 抬到 10000，仍红） | **已另立案** `gap-suite-wallclock-budgets-literals-depend-on-host-capacity` |
+| `plugin/test/suite-bucket-reattr-ratchet-check.test.mjs` | 1.55%（646/10） | 8 | ❌ 对账两端是【已提交 reattr 表】vs【活盘套件文件集】，注入任一端＝取消该检查本身；真问题是归因错位（删除者不承担，下一个跑套件的任务承担） | **已另立案** `gap-suite-bucket-zombie-check-bills-the-next-unrelated-task` |
+| `packages/quay/test/ts-typecheck-gate-config-wiring.test.mjs` | 0.94%（532/5） | 5 | ❌ 跑真 `npx tsc --noEmit` 的**真接线检查本身**；`.quay/config.yml:95-98` 的 `timeoutMs` 已从 60000 抬到 120000（注释自述「~25s 隔离 / >60s 满载」）仍被击穿 | **已另立案** `gap-suite-wallclock-budgets-literals-depend-on-host-capacity` |
+
+（妨害任务数 = `.quay/verification-round.jsonl` 中该文件 `perFile.passed=false` 的**不同 `taskId` 数**，2026-09-13 逐条复算；任务书表列 `≥8 / 8 / 5` 系另一口径，此处取复算值。）
+
+**scoped 门**：`bash scripts/test.sh --for-task gap-load-sensitive-tests-read-live-host-class-level-seam --allow-thin` ⇒ **exit 0**，140 tests / 0 fail（含目标文件 7/7 绿）。回归侧另核：`gap-dashboard-parallelize.test.mjs`（`readGitHistory` 的 30s 缓存回归）13/13 绿 ⇒ 默认路径未变。
+
 ## Touches
 
 - tasks/gap-load-sensitive-tests-read-live-host-class-level-seam.md
 - packages/quay/test/gap-git-graph-task-view-aggregate-commits-by-task-id.test.mjs
+- packages/quay/src/observation.ts
