@@ -178,6 +178,8 @@ env: {CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"}}`。
 - packages/quay/src/init.ts
 - packages/quay/test/init.test.mjs
 - plugin/.quay/profiles.yml
+- plugin/skills/init/SKILL.md
+- plugin/skills/manager/SKILL.md
 - plugin/scripts/quay-init.sh
 - plugin/scripts/profiles-role-coverage-check.ts
 - plugin/scripts/capability-catalog.sh
@@ -251,6 +253,50 @@ bundle 的新旧**（`plugin/vendor/quay/dist/quay.js`，gitignored 构建产物
 （`16ce182d9`，`bytes` 与 develop 逐字节相同）并记账该依赖。
 **A 段那条观察项据此升级为实测读数**：主检出 vendored bundle 陈旧**不只是**「安装物落后」——
 它还会改变 ratchet 的**测量结果**，而 ratchet 抓不到。
+
+**E.（第三轮，2026-09-13 13:1xZ）本轮 suite 红的真因【不在】本任务 delta —— 是 develop 侧
+「新增 SPEC 未补声明点」的全局红；已就地补齐并记账。**
+
+第三轮 fan-in suite 的唯一红是 `spec-declaration-point-check`（`exit=1`）。
+`# fail 5` / `# tests 0` 是**静态检查 fail-closed 早退**的形态
+（`checker-cost-lib: run_checker_parallel_wait — static checks FAILED (fail-closed)`），
+⛔ 不是测试失败：本轮 73 个 checker 的 mutation 全绿（`mutations_that_stayed_green=0`），
+一条测试都没跑。
+
+**读数**：`orchestration/SPEC-unified-quay-server-2026-09-13.md` 于 develop `1ba2d8e5f`（12:56Z）
+落地、`a9d91bebf`（13:05Z）补充，**但两个声明点都没有声明它**——
+`plugin/skills/init/SKILL.md` 的 `<!-- reference-doc -->` 块与 `plugin/skills/manager/SKILL.md`
+的 SPEC 索引**各缺 1 条**（检查器原文：`FAIL: 2 missing SPEC declaration(s) across 2 declaration
+points`）。这正是该 checker 头注释描述的形态：漏一个声明点 ⇒ 全 store 红 ⇒ 烧掉 worker 的墙钟。
+
+**它不属于本 delta（对照 —— 硬规则 4 推论四：若「是本任务引入」为真，下列读数会不同）**：
+① 本轮 delta 的 checker carrier 只有 `capability-catalog` 与 `profiles-role-coverage-check` 两个
+（`checker-mutation-check [--check-changed]` 自报），`git diff develop...HEAD` 的 9 个文件里
+**无一处涉及 `plugin/skills/`**；
+② 改前 worktree `git status` **为空**（本轮初始读数）⇒ 那两个文件当时与 develop 逐字节相同
+⇒ 该红在 develop 的既有内容上就已成立，与本任务改动无关；
+③ `git merge-base --is-ancestor 1ba2d8e5f HEAD` = 真 ⇒ 该 SPEC 是**经 merge develop 继承进来的**，
+不是本分支写的。
+
+**处置**：就地补齐两个声明点（各 1 行，纯注释/索引，无逻辑改动）。改后
+`node --experimental-strip-types plugin/scripts/spec-declaration-point-check.ts --root .`
+⇒ `PASS: all 42 orchestration/SPEC-*.md declared at each of 2 declaration points`（`exit 0`）。
+
+**5b 同类扫描（硬规则 5b：修好一个要问还有没有别的）**：全仓
+`grep -rl 'orchestration/SPEC-' plugin/` 命中 19 个文件；其中落在检查器的声明点派生面
+`SKILLS_DIR_REL`（`plugin/skills/`）内的**恰为上列 2 个** ⇒ 无第三个漏网声明点。
+该 checker 自己枚举 **42 个 SPEC × 2 个声明点**，转绿即全量证明（⛔ 非抽查）。
+
+**⚠️ Touches 因此增补 2 行**：`anti-drift-touches-check.ts` 是**非豁免**闸
+（`worker-driver.ts:4172` 与 `:4413`，fan-in 与 land 各跑一次），它把**原子实际写出的文件**
+（`git diff --numstat <base>..<branch>`）与声明的 `## Touches` 比对，越界即 HARD FAIL
+⇒ 补了声明点却不补 Touches 会让 fan-in 死在 anti-drift。
+（改前实测：**未提交**状态下该闸报 `ANTI-DRIFT OK — 9 actual file(s), all within declared
+Touches (11 glob(s))` —— 因为它读的是**已提交**的 diff；这两处改动提交后即进入 actual 集。）
+
+**⛔ AC5 保持未勾**：`（待外部）` 是它「由外部（fan-in 全量 suite）验证」的**表达方式**，不是遗漏；
+本轮我没有跑全量 suite（worker 不跑 suite，由 driver 的 fan-in 跑），故不勾 ——
+勾一条我没验过的 AC 属于硬规则 4 的形态。
 
 ## 立案备注（quay-task 立案/改写时追加，⛔ 非报告原文）
 
