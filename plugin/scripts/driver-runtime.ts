@@ -128,7 +128,9 @@ export interface KindSpec {
   pidSelf: boolean;
   /** run-id 前缀（缺省 run_id = <prefix>-<epoch>）。 */
   runPrefix: string;
-  /** 载体文件（相对 .quay/；首个 = 主载体，作 status 的 carrier_path）。 */
+  /** 载体文件（相对 .quay/）。⛔ 顺序【不是】主载体优先级——status 的 carrier_path 取
+   *  「实际存在的第一个」（见 carrierStats 的 primaryPath）：registry 表把 outcome 排在 round 前，
+   *  但只有同时写两个名字的 workspace 才两个都有；只写新名字的项目取首个会报一个不存在的路径。 */
   carriers: readonly string[];
   /** 载体记录的时间戳键（缺省 ts；quality 的判词载体用 judgedAt——gap-meta-carrierstats）。 */
   tsKey?: string;
@@ -421,11 +423,26 @@ export function resolveMainRoot(root: string): string {
 // tsKey 读（缺省 ts；quality 判词载体用 judgedAt——gap-meta-carrierstats：键不匹配会把停摆伪装成
 // 未查）。quality 载体混两种键（心跳 ts + 判词 judgedAt），读两者较新者——见 gap-meta-round-log-rel。
 
+/** 一个载体的存在性 + 行数分解（Plan 2：让「新旧载体名并存」在读数上可见，⛔ 靠读代码才知道）。 */
+export interface CarrierFileStat {
+  /** 载体 basename（相对 .quay/；registry 表里的名字）。 */
+  name: string;
+  /** 该名字在 .quay/ 下是否存在（fs.existsSync）。 */
+  exists: boolean;
+  /** 该载体自身的行数（wc -l 语义；不存在 ⇒ 0）。 */
+  records: number;
+}
+
 /** 一个 kind 的载体观测结果。 */
 export interface CarrierStats {
   records: number;
   lastTs: string | null;
-  primaryPath: string;
+  /** 首个【实际存在】的载体绝对路径；一个都不存在 ⇒ null。
+   *  ⛔ 不报一个不存在的路径——路径与 records 必须同源同态（硬规则 3b：「读不到」不得与
+   *  「正常读数」同形：有路径 + 有计数 + 有时间戳看起来一切正常，实际谁都没读到）。 */
+  primaryPath: string | null;
+  /** 逐载体分解（哪个存在、哪个没有、各自多少行）。 */
+  files: CarrierFileStat[];
 }
 
 /** 读一个 kind 的全部载体：行数之和 + 末条 ts 最大。读失败/缺失 ⇒ 该载体记 0 条（⛔ 不抛）。 */
@@ -438,19 +455,32 @@ export function carrierStats(root: string, kind: DriverKind): CarrierStats {
   const tsKeys = tsKey === "ts" ? ["ts"] : [tsKey, "ts"];
   let records = 0;
   let lastTs: string | null = null;
-  let primaryPath = "";
-  for (let i = 0; i < spec.carriers.length; i++) {
-    const file = path.join(root, ".quay", spec.carriers[i]);
-    if (i === 0) primaryPath = file;
+  // 主载体 = carriers 中【首个实际存在】的那个，⛔ 不是列表首个（registry 表把 outcome 排在 round 前，
+  // 但这只对「两个名字都写」的 quay 开发检出成立；只用新名字的干净 workspace —— 如第三方项目
+  // quay-fleet —— 只有 <kind>-round.jsonl ⇒ 取首个会报一个不存在的路径，而 records 汇总的是真文件
+  // ⇒ 一个诊断字段谎报自己的来源。见 gap-driver-status-carrier-path-names-first-entry-not-the-existing-one；
+  // 同一现象独立复现于 gap-cross-host-evidence-run-incomplete-and-step-order-makes-ac234-unsatisfiable:73-75）。
+  let primaryPath: string | null = null;
+  const files: CarrierFileStat[] = [];
+  for (const name of spec.carriers) {
+    const file = path.join(root, ".quay", name);
+    const exists = fs.existsSync(file);
+    if (exists && primaryPath === null) primaryPath = file;
     let text: string;
     try {
       text = fs.readFileSync(file, "utf8");
     } catch {
+      files.push({ name, exists, records: 0 });
       continue;
     }
-    if (text === "") continue;
+    if (text === "") {
+      files.push({ name, exists, records: 0 });
+      continue;
+    }
     // wc -l 语义：数换行符（⛔ split("\n").length 会把无尾换行的文件多算 1）。
-    records += (text.match(/\n/g) ?? []).length;
+    const n = (text.match(/\n/g) ?? []).length;
+    records += n;
+    files.push({ name, exists, records: n });
     for (const line of text.split("\n")) {
       if (!line.trim()) continue;
       try {
@@ -465,7 +495,7 @@ export function carrierStats(root: string, kind: DriverKind): CarrierStats {
       }
     }
   }
-  return { records, lastTs, primaryPath };
+  return { records, lastTs, primaryPath, files };
 }
 
 /** 派生状态文件的绝对路径（supervisor 共享的一份路径规则，⛔ kind 差异由 registry 表承载）。 */
@@ -1111,8 +1141,13 @@ export interface SupervisorOptions {
   runId: string;
 }
 
-/** respawn 循环（run_supervisor 港进）：spawn driver → 权威写 driver pid → wait → stop sentinel 则退出，
- *  否则 sleep restartDelaySecs 后重拉。每次重拉写一条 supervisor 事件。 */
+/** respawn 循环（run_supervisor 港进）：spawn driver →（⛔ 只替【不自写】的 kind 写 driver pid）→ wait →
+ *  stop sentinel 则退出，否则 sleep restartDelaySecs 后重拉。每次重拉写一条 supervisor 事件。
+ *
+ *  ⚠️ driver pid 文件的**写者**决定了它读数的含义（见 aliveness 与 startKind 的头注释）：
+ *  `pidSelf=true` 的 kind，写者是【驱动自己】（进入常驻循环后写 --pid-file）⇒ 该文件是「已就绪」；
+ *  supervisor 在 spawn 时抢先写同一个文件会把「刚 spawn 出来」伪装成「已就绪」
+ *  （gap-driver-start-false-confirms-unsettled-driver 的根因）。 */
 export async function runSupervisor(opts: SupervisorOptions): Promise<number> {
   const spec = DRIVER_KINDS[opts.kind];
   const st = statePaths(opts.root, opts.kind);
@@ -1164,7 +1199,13 @@ export async function runSupervisor(opts: SupervisorOptions): Promise<number> {
       env,
     });
     driverStartedAt = Date.now();
-    if (child.pid) writePidFile(st.driverPidFile, child.pid);
+    // ⛔ 只替【不自写 pid】的 kind 写（pidSelf=false = worker，它的 --pid-file 是 in-flight 文件）。
+    // 自写 kind（promotion/outer/quality/meta/goal）的 driver pid 文件由【驱动自己】在进入常驻循环后写
+    // （pidArgFile → statePaths().driverPidFile，见 DRIVER_KINDS[*].pidSelf）。这里若替它预写，文件就
+    // 不再区分「走到了自己的循环」与「刚 spawn、还在 import、马上要 exit(1)」——start 的存活确认会
+    // 退化成「进程存在 ≥250ms」，对「活 600ms 后退出」的驱动误报 `started:`（硬规则 4b：用代理量
+    // 「进程存在」冒充直接量「走到常驻循环」）。
+    if (child.pid && !spec.pidSelf) writePidFile(st.driverPidFile, child.pid);
     appendLog(st.supervisorLog, `${ts()} supervisor: started driver pid=${child.pid ?? "?"}`);
     child.on("exit", (code) => {
       appendLog(st.supervisorLog, `${ts()} supervisor: driver exited code=${code ?? "null"}`);
@@ -1211,7 +1252,22 @@ export async function runSupervisor(opts: SupervisorOptions): Promise<number> {
   return new Promise<number>(() => {});
 }
 
-/** 派生一个 kind 的 { supervisor_alive, driver_alive, running, deaths }（status 与 liveness 共用）。 */
+/** driver pid 文件读数的**含义**由写者决定（唯一正本；⛔ 别在别处再描述一遍）。
+ *  `true`  ⇒ 该 kind 的 driver 在【进入常驻循环后】自写自己的 pid（DRIVER_KINDS[*].pidSelf，
+ *            写者 = 驱动）⇒ `aliveness().driverAlive` 读的是「驱动走到了自己的循环」= 直接量。
+ *  `false` ⇒ 驱动不自写（worker 的 --pid-file 是 in-flight 文件，由 appendWorkerPid 逐 worker 追加），
+ *            driver pid 文件仍由 supervisor 在 spawn 时写 ⇒ `driverAlive` 读的是「子进程此刻存在」
+ *            = 代理量（含「刚 spawn、还没起来」与「马上要退」）。
+ *  ⚠️ 已知残留（gap-driver-start-false-confirms-unsettled-driver AC4 枚举项）：`false` 这一支仍是
+ *  代理量 ⇒ `start --kind worker` 的存活确认仍可能对「未就绪」的 worker 驱动误报 `started:`。
+ *  修它需要 worker-driver.ts 自写 driver pid 文件（本任务的 ## Touches 只含 driver-runtime.ts /
+ *  其测试 / 任务体 ⇒ 不在本次改动面内，如实登记为残留而非静默）。 */
+export function driverPidIsReadinessMarker(kind: DriverKind): boolean {
+  return DRIVER_KINDS[kind].pidSelf;
+}
+
+/** 派生一个 kind 的 { supervisor_alive, driver_alive, running, deaths }（status 与 liveness 共用）。
+ *  `driverAlive` 的含义取决于写者，见 driverPidIsReadinessMarker 的注释（⛔ 直接量 vs 代理量）。 */
 export function aliveness(root: string, kind: DriverKind): {
   supervisorPid: number | null;
   driverPid: number | null;
@@ -1256,7 +1312,9 @@ export function aliveness(root: string, kind: DriverKind): {
 }
 
 /** status 输出（JSON 与人类可读两态）。alive 与 running 同值（alive 是 AC139-3 字段名，running 保留
- *  backward compat）。 */
+ *  backward compat）。carrier_path / carrier_records / last_record_ts 三者同源（同一个 carrierStats 读数），
+ *  carrier_path 为 null ⇔ 无任何载体存在 ⇔ records=0（⛔ 不报一个不存在的路径——AC1/AC2）。
+ *  carrier_files 是逐载体分解（哪个存在/哪个没有/各多少行）：让「新旧载体名并存」在读数上可见。 */
 export function statusForKind(root: string, kind: DriverKind, json: boolean, out: (s: string) => void): number {
   const spec = DRIVER_KINDS[kind];
   const a = aliveness(root, kind);
@@ -1273,15 +1331,19 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
       carrier_path: stats.primaryPath,
       carrier_records: stats.records,
       last_record_ts: stats.lastTs,
+      carrier_files: stats.files,
       supervisor_started_at: a.supervisorStartedAt,
       supervisor_stale: a.supervisorStale === true ? "stale" : a.supervisorStale === false ? "fresh" : "not-evaluated",
-    }));
+    }) + "\n");
   } else {
     out(
       `${spec.prefix}: kind=${kind} · supervisor pid=${a.supervisorPid ?? "none"} alive=${a.supervisorAlive ? 1 : 0} · ` +
       `driver pid=${a.driverPid ?? "none"} alive=${a.driverAlive ? 1 : 0} · running=${a.running ? 1 : 0} · ` +
       `supervisor_stale=${a.supervisorStale === true ? "stale" : a.supervisorStale === false ? "fresh" : "not-evaluated"} · ` +
-      `carrier_path=${stats.primaryPath} · carrier_records=${stats.records} · last_record_ts=${stats.lastTs ?? "null"}`,
+      // ⛔ 不打印空串：显式 "null"（= 无载体存在），与 last_record_ts 的 null 表达同形（硬规则 3b）。
+      `carrier_path=${stats.primaryPath ?? "null"} · carrier_records=${stats.records} · ` +
+      `last_record_ts=${stats.lastTs ?? "null"} · ` +
+      `carrier_files=${stats.files.map((f) => `${f.name}:${f.exists ? f.records : "missing"}`).join(",")}\n`,
     );
   }
   return 0;
@@ -1302,11 +1364,11 @@ export function livenessForKind(root: string, kind: DriverKind, json: boolean, o
       driver_alive: a.driverAlive ? 1 : 0,
       running: a.running ? 1 : 0,
       deaths,
-    }));
+    }) + "\n");
   } else {
     out(
       `${spec.prefix}-liveness: kind=${kind} · supervisor_alive=${a.supervisorAlive ? 1 : 0} · ` +
-      `driver_alive=${a.driverAlive ? 1 : 0} · running=${a.running ? 1 : 0} · deaths=${deaths}`,
+      `driver_alive=${a.driverAlive ? 1 : 0} · running=${a.running ? 1 : 0} · deaths=${deaths}\n`,
     );
   }
   writeLivenessLog(root, kind, a.deaths, a.supervisorPid, a.driverPid);
@@ -1329,8 +1391,17 @@ function fileTailLines(file: string, n = 8): string {
 }
 
 /** 存活确认的判决（⛔ 三态不是布尔——硬规则 3b：「查过且起来了」与「查不成/还没起来」必须不同形）。
- *  `confirmed` = supervisor ∧ driver 双活且【连续两次】轮询都读到；`dead` = 决断信号（supervisor 已
- *  退出且无 driver）；`pending` = 窗口用尽而 supervisor 仍活（慢启动 / 崩溃-重拉循环）。 */
+ *  `confirmed` = supervisor 活 ∧ **driver 已就绪**（见下）且该读数被【连续两次】轮询都读到；
+ *  `dead` = 决断信号（supervisor 已退出且无 driver）；`pending` = 窗口用尽而 supervisor 仍活
+ *  （慢启动 / 崩溃-重拉循环）。
+ *
+ *  ⚠️「driver 已就绪」的定义是这条判据的**全部要害**（gap-driver-start-false-confirms-unsettled-driver）：
+ *  pidSelf 类 kind 的就绪标记由**驱动自己在进入常驻循环后写**（driverPidIsReadinessMarker）⇒ 与宿主
+ *  负载无关。⛔ 曾经的定义是「driver pid 文件在 ∧ 该进程存在 ≥250ms」——而 supervisor 在 spawn 时替
+ *  驱动预写了那个文件 ⇒ 「文件在」只等于「spawn 过」。`CONFIRM_POLL_MS` 是个**定值**，其合理性依赖
+ *  「进程从 spawn 到就绪的延迟 < 250ms」这个**宿主性质**（硬规则 4 推论二）⇒ 套件级并发把 node 启动
+ *  推到 >250ms 后，守卫不再区分「起来了」与「刚 spawn 出来、活 600ms 就 exit(1)」，回到「报成功但
+ *  实际死亡」。实测：boot ~50ms ⇒ `start-pending`+rc1（5/5）；boot ~600ms ⇒ `started:`+rc0（误报）。 */
 export type ConfirmVerdict = "confirmed" | "dead" | "pending";
 
 export interface ConfirmResult {
@@ -1352,10 +1423,15 @@ async function awaitDriverConfirmation(
 ): Promise<ConfirmResult> {
   const confirmStartedAt = Date.now();
   const deadline = confirmStartedAt + Math.max(0, opts.confirmSecs) * 1000;
-  // 稳定判据：双活必须被【连续两次】轮询都读到（`firstAliveAt` 起算 ≥ 一个轮询间隔）。为什么不是
-  // 「读到一次就确认」：`pidAlive` 对「刚 spawn 出来、尚未 import 完就自己退了」的进程会读到一次
-  // true（进程表里确实存在过）——一次采样分不开「起来了」与「短暂存在过」（硬规则 4b）。⛔ 这只推迟
-  // 确认，不产生假死（慢启动照样在窗口内确认）。
+  // 就绪判据 = `aliveness()` 的双活读数。它的**含义**由 driver pid 文件的写者决定，见
+  // driverPidIsReadinessMarker：pidSelf 类是驱动自写的就绪标记（直接量，与负载无关）；worker 仍是
+  // 「子进程存在」（代理量，残留见该函数的注释）。⛔ 本函数不再自己承担「分开起来了与刚 spawn 出来」
+  // 这件事 —— 那件事的可靠实现是【让驱动自己写】，「等一个定值时长」做不到（硬规则 4 推论二）。
+  //
+  // 稳定判据：就绪读数必须被【连续两次】轮询都读到（`firstAliveAt` 起算 ≥ 一个轮询间隔）。⚠️ 它现在
+  // 只承担**去抖**（挡住「写完就绪标记的同一瞬间就死了」这种单次采样噪声），⛔ 不再承担就绪判别 ——
+  // 所以 `CONFIRM_POLL_MS` 的取值（250ms）不再影响正确性，只影响确认耗时；把它调大调小都不会让
+  // 「未就绪」变成「已就绪」。⛔ 它也只推迟确认、不产生假死（慢启动照样在窗口内确认）。
   const settleMs = CONFIRM_POLL_MS;
   let firstAliveAt = 0;
   for (;;) {
@@ -1404,8 +1480,12 @@ function reportUnconfirmed(root: string, kind: DriverKind, v: ConfirmResult, con
  *  kind-dimension.md 的 Proposal（2026-09-13 三个 kind 全中，真实死因只写在目标项目内部日志里）。
  *
  *  修法：把两个信号【分开取值】，⛔ 不用「等 N 秒看有没有 pid」当死亡判据（那是把【慢】读成【死】）：
- *    · `started:`       supervisor 活 ∧ driver pid 文件在 ∧ driver 进程活，且该读数被**连续两次**轮询
- *                       读到（一次采样分不开「起来了」与「刚 spawn 出来就退了」）—— 窗口内确认即成功。
+ *    · `started:`       supervisor 活 ∧ **driver 已就绪**（pidSelf 类 kind 的就绪标记由驱动自己在进入
+ *                       常驻循环后写——见 driverPidIsReadinessMarker），且该读数被**连续两次**轮询读到
+ *                       （去抖；就绪判别本身不再依赖轮询次数/间隔）—— 窗口内确认即成功。
+ *                       ⛔ 「driver pid 文件在」只有在写者是驱动时才等于「已就绪」：supervisor 若在
+ *                       spawn 时替它预写，该文件只证明「spawn 过」，确认会退化成「进程存在 ≥250ms」
+ *                       （gap-driver-start-false-confirms-unsettled-driver；见 runSupervisor 的写者注释）。
  *    · `start-failed:`  我们 spawn 的那个 supervisor 进程**已退出** ∧ driver 不活 ⇒ 再也没有谁会拉起
  *                       driver。这是【决断信号】，与窗口大小无关（缺 driver 脚本、解释器不接受启动参数
  *                       等都在此列），并贴出 supervisor 日志尾作为死因。

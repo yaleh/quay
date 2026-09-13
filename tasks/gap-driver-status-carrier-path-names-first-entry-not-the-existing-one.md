@@ -1,7 +1,7 @@
 ---
 id: gap-driver-status-carrier-path-names-first-entry-not-the-existing-one
 title: driver status 报了一个不存在文件的 carrier_path，而 carrier_records 却是真实数字
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -69,14 +69,14 @@ carriers: ["worker-outcome.jsonl",    "worker-round.jsonl"],               // :1
 
 ## Acceptance Criteria
 
-- [ ] AC1（负控制，改前必须红）：构造一个 `.quay/` 下只有 `<kind>-round.jsonl`、
+- [x] AC1（负控制，改前必须红）：构造一个 `.quay/` 下只有 `<kind>-round.jsonl`、
       无 `<kind>-outcome.jsonl` 的 workspace，改前 `driver status --kind worker --json` 的
       `carrier_path` 指向不存在的文件而 `carrier_records > 0`；改后 `carrier_path` 指向
       实际存在的那个文件，且 `fs.existsSync(carrier_path)` 为真。
-- [ ] AC2：一个 carrier 都不存在时，`carrier_path` 为 null/显式「无」，且 `carrier_records`
+- [x] AC2：一个 carrier 都不存在时，`carrier_path` 为 null/显式「无」，且 `carrier_records`
       不是一个正数——两字段不得一真一假。
-- [ ] AC3：`driver status`（非 --json）输出以 `\n` 结尾——断言最后一个字节是换行。
-- [ ] AC4：全量 `scripts/test.sh` 绿。
+- [x] AC3：`driver status`（非 --json）输出以 `\n` 结尾——断言最后一个字节是换行。
+- [ ] AC4：全量 `scripts/test.sh` 绿。（待外部）
 
 ## Definition of Done
 

@@ -1,7 +1,7 @@
 ---
 id: gap-ac190-goal-ac-rule-not-enforced-at-filing
 title: AC-190 判据复发：规则只在事后检测、立案/写入面零约束——生效线后第一条 delivery-critical 任务即无 goal_ac
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -214,3 +214,30 @@ reason 串，且 `--help` 打的仍是 guard 自己的用法（未被内联模�
   ⇒ AC8 未勾时 `ok` 恒 false。⇒ 本条与 AC8 同链，**只能由外部的全量套件轮兑现** ⇒ 保持未勾 + `（待外部）`。
   ⛔ 不把「`missing` 不存在」含糊过去；⛔ 也不为了让 `ok:true` 出现而勾掉 AC8（那是拿一个没跑的全量套件
   当已跑）。两条腿的任一条都会把「未评估」伪装成「合格」。
+
+
+## Evidence 补（同一轮，AC5 的【生产载体】读数——⛔ 不只 fixture）
+
+AC5 的「不误伤」在 Evidence 正文里只拿了测试（fixture）作证据。按硬规则 4 推论三（**一个只能被
+fixture / 注入数据满足的判据不是测量**），本轮另取一次**真仓库全量任务存量**的读数：
+用被测代码本身（`judgeStagedDeliveryCritical`，`plugin/scripts/precommit-guard.ts` 导出）对
+`/home/yale/work/quay/tasks/` 下**全部 2093 个任务文件**跑判定，每条用**它自己的 git first-add
+时刻**（`git log --diff-filter=A`，与守卫同源语义）作立案时刻：
+
+    task files: 2093 | with add-commit: 2087
+    delivery-critical (frontmatter): 156 | of those with no add-commit: 0
+    OFFENDERS: []
+    => no false positive over the REAL repo's whole task population: true
+
+⇒ 生效线之前的 delivery-critical 存量（115 条无 `goal_ac`）**全部由 grandfather 分支放行**，
+2093 条里**零**误报；这与 AC-190 检测器同轮的 `violating: []` 互为印证（判据同源、两个时刻）。
+
+**顺带的机制读数（不属本条范围，只留痕）**：pre-merge scoped-gate 缓存键 = `(task, developSha)`
+**精确相等**才命中，而本仓是活的多写者检出——本轮写完缓存后 **develop 在几分钟内即前进**
+（`7d49160c7` → `a4c4d803d`）⇒ 该键**结构性几乎不可能命中**，fan-in 实际仍会跑一次 scoped 门。
+
+**缓存记的是哪个 sha（避免读者按「= 我验证过的状态」误读）**：按指令记的是**当时的 develop tip
+`7d49160c7`**；而 scoped 门实际跑在 **`b83439e6e`**（我的 worktree 合并进来的那个 develop 状态，
+比 `7d49160c7` 早一个提交）。两者的差经 `git diff --name-only b83439e6e develop` **实测为
+`tasks/*.md` 两条路径、零非 tasks 路径** ⇒ 对 scoped 门判定的代码/测试面**无差异**——这是实测，
+不是推断（若差里有代码路径，本条应改记 `b83439e6e`）。
