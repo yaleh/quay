@@ -129,7 +129,26 @@ t("AC3 — registry is parsed from scripts/test.sh, tier annotations land on the
   assert.equal(mutationCompanion.length, 1, "exactly one registration must be the change-tier companion (else the changers' own scoped gate never runs it)");
   assert.match(mutationCompanion[0].commandLine, /--check-changed/, "the companion must be the DELTA-NARROWED mode (--check-changed)");
   // split-or-commit + ac-carryover whole-store ratchets are `full` (deferred).
-  assert.equal(byName.get("it0-split-or-commit-check")?.tier, "full");
+  //
+  // ⚠️ `it0-split-or-commit-check` is asserted by commandLine, NOT by name
+  // (gap-it0-split-or-commit-check-needs-change-tier-companion). `parseStaticCheckRegistry` derives
+  // `name` from the SCRIPT PATH (CHECKER_RE, select-static-checks-for-touches.ts), NOT from the
+  // `run_checker` label — so since that checker gained a change-tier companion that reuses the SAME
+  // script (`…-check.sh --changed`), the registry holds TWO entries with the identical name and the
+  // `byName` Map is last-wins: the old assertion silently read the COMPANION's tier and failed with
+  // 'change' !== 'full'. `name` is the script's identity (shared); `commandLine` is the only field
+  // that tells the two registrations apart. The replacement is STRICTLY STRONGER than the old
+  // assertion: it pins that BOTH registrations exist and that each carries the mode it must — the
+  // whole-store `full` one (no `--changed`) AND the delta-scoped `change` companion (`--changed`).
+  const it0 = registry.filter((c) => c.name === "it0-split-or-commit-check");
+  assert.equal(it0.length, 2, "whole-store registration + its change-tier companion");
+  const it0Full = it0.filter((c) => c.tier === "full");
+  const it0Companion = it0.filter((c) => c.tier === "change");
+  assert.equal(it0Full.length, 1, "exactly ONE registration of it0-split-or-commit-check must be `full` (deferred ≠ dropped)");
+  assert.ok(!it0Full[0].commandLine.includes("--changed"), `the full registration must be the whole-store pass: ${it0Full[0].commandLine}`);
+  assert.equal(it0Companion.length, 1, "exactly ONE change-tier companion for it0-split-or-commit-check");
+  assert.ok(it0Companion[0].commandLine.includes("--changed"), `the companion must be the delta-scoped mode: ${it0Companion[0].commandLine}`);
+  assert.ok(it0Companion[0].objects.includes("tasks/"), `the companion's object must be the task store it judges: ${it0Companion[0].objects}`);
   assert.equal(byName.get("task-ac-carryover-check")?.tier, "full");
   // test-framework-policy / test-isolation are `change` with the test globs as objects.
   for (const n of ["test-framework-policy-check", "test-isolation-check"]) {
@@ -202,10 +221,10 @@ t("AC1 — a test-file touch selects the test ratchets + contract consumer, defe
   // ⚠️ The SELECTED side is matched by `commandLine`, not by `name`: `name` is the script identity
   // (path-derived, see the AC3 registry test above), so the two registrations of a checker that
   // collide on it (`checker-mutation-check` / `--check-changed`, `quay-init-closure-ratchet` /
-  // `-stale`) are indistinguishable by name. `deferred` carries names only, so "selected XOR
-  // deferred" is NOT assertable per entry once a selected companion shares its whole-store
-  // sibling's name — the direction that actually matters is asserted explicitly instead: a
-  // full-tier entry must never appear as a selected command.
+  // `-stale`, `it0-split-or-commit-check` / `--changed`) are indistinguishable by name. `deferred`
+  // carries names only, so "selected XOR deferred" is NOT assertable per entry once a selected
+  // companion shares its whole-store sibling's name — the direction that actually matters is
+  // asserted explicitly instead: a full-tier entry must never appear as a selected command.
   const selectedCmds = new Set(selected.map((s) => s.commandLine));
   for (const c of registry) {
     const inSel = selectedCmds.has(c.commandLine);
@@ -213,6 +232,9 @@ t("AC1 — a test-file touch selects the test ratchets + contract consumer, defe
     assert.ok(inSel || inDef, `checker ${c.name} (${c.commandLine}) must be selected or deferred — nothing is dropped`);
     if (c.tier === "full") {
       assert.ok(!inSel, `full-tier ${c.name} must NEVER be selected in scoped mode: ${c.commandLine}`);
+      // The other direction of "deferred ≠ dropped" (kept from the branch side of the merge): a
+      // full-tier registration must be DEFERRED, never silently absent from both tables.
+      assert.ok(inDef, `full-tier registration must be deferred (deferred ≠ dropped): ${c.name} (${c.commandLine})`);
     }
   }
 });
