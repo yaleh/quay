@@ -100,6 +100,11 @@ fixture 满足不算数（硬规则 4 推论三：只能被 fixture 满足的判
 - plugin/scripts/worker-driver.ts
 - plugin/scripts/ready-pool-check.ts
 - plugin/scripts/slot-refill.ts
+- plugin/scripts/outer-driver.ts
+- plugin/scripts/meta-driver.ts
+- plugin/scripts/kernel-sibling-resolution-check.ts
+- plugin/scripts/checker-mutation-cases/kernel-sibling-resolution-check.sh
+- plugin/scripts/capability-catalog.sh
 - plugin/test/driver-resolves-code-root-separate-from-workspace.test.mjs
 - tasks/gap-drivers-resolve-quay-scripts-under-project-root-not-plugin-root.md
 
@@ -108,6 +113,26 @@ fixture 满足不算数（硬规则 4 推论三：只能被 fixture 满足的判
 `experiments/quay-perpetual-stream/test/` —— **没有裸 `test/`** ⇒ 落在那里的测试套件永远不会执行，
 AC3 的静态检查随之空转（**与「验过了」同形**，硬规则 3b / 4c）。
 已改为 `plugin/test/…`，与本任务其余 Touches 全在 `plugin/scripts/` 下的惯例对应。
+
+**实现轮 Touches 增补（worker 2026-09-13，实现后按实际改动补齐——⛔ 不改完就退出会让 fan-in 的 delta
+判定把改动文件判成「与任务无关」）**：立案清单之外实际改了 5 个文件，各附「为什么清单没预见」：
+
+- `plugin/scripts/outer-driver.ts` —— **AC2 逐字点名的那个 driver**（五条 fact 的 argv 全在本文件里），
+  立案清单却漏列它；AC2 与 Touches 不一致时按 AC 执行，并把缺口记在这里。
+- `plugin/scripts/meta-driver.ts` —— `goalStoreArgv` 是 goal-store 脚本路径的**唯一构造点**
+  （goal-driver 经它消费）；只改 goal-driver 的 `scriptRoot` 等于把单一入口做了一半。
+- `plugin/scripts/kernel-sibling-resolution-check.ts` 与
+  `plugin/scripts/checker-mutation-cases/kernel-sibling-resolution-check.sh` —— AC3 要的静态检查器。
+  **复用而非新建**：本仓已有该检查器，但它对 `kernel-sibling-dev-tree-only` 标记的豁免**正是本缺陷
+  活下来的原因**（AC-225 的残差：生产 driver 被误标 dev-tree-only ⇒ 检查器恒绿 ⇒ 记录上看起来这条
+  义务正在被执行）。故在其上加 DRIVER-SCOPE 规则（该范围**不认**豁免 + 收 P2 正则结构上覆盖不到的
+  资源形，如 `drivers.yml`/`.claude-plugin`），并补突变用例把红/绿两面都钉住。
+- `plugin/scripts/capability-catalog.sh` —— 该检查器声明的 QUESTION 是本仓「机件回答什么问题」的
+  唯一正本；判定面扩了半个，QUESTION 必须同步，否则 catalog 与实现漂移。
+
+⚠️ `driver-filters.ts` / `ready-pool-check.ts` / `slot-refill.ts` 三个立案清单条目**零改动**：
+按位置检索（`path.join(<root>, "packages"|"plugin"`）在这三个文件里命中 **0** 处
+（它们是**被解析方**而非解析方）——保留在清单里，作为「计划看过、确认无需改」的记录。
 
 ## 相关任务（同一根因族的三个实例；立案时按机制查重的记录，非上文证据的一部分）
 
@@ -151,6 +176,18 @@ AC3 的静态检查随之空转（**与「验过了」同形**，硬规则 3b / 
 
 ⊢ 实现本条时应先核对该 done 任务留下的解析手法（driver-runtime 已改为从自身安装位置解析），
 **优先把它推广成 Plan 2 的单一入口**，而不是再造第二套解析——否则该族会出现第四个实例。
+
+### 实现轮的两个额外发现（同族的不同「层」，已随本条一并修掉；读这里的读者不要以为只有路径一层）
+
+1. **脚本路径之外还有 cwd 一层**：`judgment-consumer-check.ts` 审计的是【kernel 自己的代码】
+   （判定面全是 repo 相对路径 `plugin/scripts/*.ts`、`plugin/loop/*.md`）。只把脚本路径修对、
+   cwd 仍落在目标工作区 ⇒ 全部判 `missing-file` ⇒ `drift=true` / exit 1 ⇒ `runJson` 读成 null
+   ⇒ 该 fact 恒 not-evaluated（**工具能跑、读数恒空 = 空转**，硬规则 4c）。
+   实测：路径修好后这一条仍 not-evaluated，改 `cwd = quay 代码根` 才 verified。
+2. **缺省 root 是「脚本自己所在仓库」而不是 cwd**：`closure-lag-check.sh` 无 `--root` 时用
+   `$SCRIPT_DIR/../..`。修好脚本路径后若不传 `--root`，它会去扫 **quay 自己的 `tasks/`**——
+   第三方项目上表现为「工具跑起来了、读数来自别的项目」，比 not-evaluated 更难发现
+   （且 `--close-terminal` 是写类动作）。三条 closure 例程已改为一律显式传 `--root root`。
 
 ## 立案当轮的状态读数（直接量，不给成因结论）
 
