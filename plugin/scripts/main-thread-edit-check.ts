@@ -319,6 +319,6 @@ export function main(argv = process.argv) {
 }
 
 // 直接运行入口（import 时不执行）。
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "main-thread-edit-check")) {
   process.exitCode = main();
 }

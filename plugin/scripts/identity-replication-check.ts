@@ -23,7 +23,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { isDirectEntry } from "./gate-script-base.ts";
 import { repoRoot } from "./repo-root.ts";
 
 // ── 位置掩码 (comment-only: 只标注释为非代码, 字符串/模板字面量保持代码) ─────────────────────
@@ -526,6 +526,9 @@ export function main(argv: string[]): number {
   return 0;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+// Bundler-safe entry guard — see gate-script-base.isDirectEntry
+// (gap-drivers-yml-interval-not-honored-for-routine-kinds): a hand-rolled file-identity comparison is
+// true for EVERY inlined module of a dist bundle, so it hijacks any bundle that inlines this module.
+if (isDirectEntry(import.meta, undefined, "identity-replication-check")) {
   process.exitCode = main(process.argv);
 }

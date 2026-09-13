@@ -445,6 +445,6 @@ async function main(argv: string[]): Promise<number> {
   usage();
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "external-dogfooding-check")) {
   main(process.argv).then((code) => process.exit(code));
 }

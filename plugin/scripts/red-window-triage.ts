@@ -263,6 +263,6 @@ export function main(argv) {
   return 2;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "red-window-triage")) {
   process.exitCode = main(process.argv);
 }

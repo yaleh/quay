@@ -43,7 +43,6 @@
 import fs from "node:fs";
 import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   parseTask,
   extractSectionFenceAware,
@@ -60,7 +59,7 @@ import { TASK_STATUS } from "./task-status.ts";
 // probe). Reuses wiring-coverage-check.ts's backtick-identifier extraction + the (calibrated)
 // `N 条`+verb declaration heuristic — NOT a second, independently-buggy parser.
 import { checkWiringClaimAcProbe } from "./wiring-coverage-check.ts";
-import { helpExit } from "./gate-script-base.ts";
+import { helpExit, isDirectEntry } from "./gate-script-base.ts";
 
 
 // ── Consumer checks (read content, match by declared position) ───────────────────────────────────────
@@ -706,6 +705,9 @@ function finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, bas
 }
 
 // Entry point when run directly (not imported).
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+// Bundler-safe guard — see gate-script-base.isDirectEntry
+// (gap-drivers-yml-interval-not-honored-for-routine-kinds): a hand-rolled file-identity comparison is
+// true for EVERY inlined module of a dist bundle, so it hijacks any bundle that inlines this module.
+if (isDirectEntry(import.meta, undefined, "task-contract-check")) {
   runCli(process.argv.slice(2));
 }

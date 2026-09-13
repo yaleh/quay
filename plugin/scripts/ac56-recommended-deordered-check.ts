@@ -182,6 +182,6 @@ function main(argv) {
   return r.ok ? 0 : 1;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "ac56-recommended-deordered-check")) {
   process.exitCode = main(process.argv);
 }

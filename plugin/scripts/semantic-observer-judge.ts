@@ -302,7 +302,7 @@ export function main(argv: string[]): number {
   return redOnOmission ? 1 : 0;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "semantic-observer-judge")) {
   const code = main(process.argv);
   process.exit(code);
 }

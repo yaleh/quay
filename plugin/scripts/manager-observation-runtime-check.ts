@@ -449,6 +449,6 @@ export function run(argv: string[]): void {
   process.exitCode = violations.length > 0 ? 1 : 0;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "manager-observation-runtime-check")) {
   run(process.argv.slice(2));
 }

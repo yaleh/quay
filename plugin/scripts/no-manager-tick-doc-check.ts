@@ -115,7 +115,7 @@ export function run({ root, json = false, judge }) {
   process.exitCode = allViolations.length > 0 ? 1 : 0;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "no-manager-tick-doc-check")) {
   const args = process.argv.slice(2);
   let root = ".";
   let json = false;

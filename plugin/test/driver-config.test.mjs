@@ -8,6 +8,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 import {
   DRIVERS_CONFIG_REL,
@@ -103,6 +105,57 @@ test("driverCap — 显式 > drivers.yml > 缺省（单一并发解析，AC1）"
   const b = tmpdir();
   assert.equal(driverCap(b, "worker"), DEFAULT_DRIVER_CAP, "no config ⇒ default");
   assert.equal(driverCap(b, "promotion", 4), 4);
+});
+
+// ── gap-drivers-yml-interval-not-honored-for-routine-kinds ─────────────────────────────────────────
+// AC2: every routine kind's driver must CONSUME its declared `interval_ms` — a config field with no
+// reader is indistinguishable from a config field that does nothing, and a reader that never runs is
+// indistinguishable from a reader that isn't there. Both halves were real on 2026-09-13:
+//   • `meta-driver.ts` hardcoded `let intervalMs = 30_000` — `drivers.yml meta.interval_ms` had zero
+//     consumers (goal/quality already read theirs);
+//   • the shipped `dist/{goal,quality-gate,meta}-driver.js` bundles ran `pool-quality-judge`'s main
+//     and exited in <1s, so nothing reached the resident loop that reads the config at all. That half
+//     is pinned in packages/quay/test/build-plugin-dist.test.mjs ("each driver bundle runs its OWN
+//     main") because it is a BUNDLING property, not a config one.
+// This test is behavioural and fail-able: the temp root declares `interval_ms: 1`, so a driver that
+// really reads it finishes `--max-rounds 3` in ~1s. A hardcoded 30_000 fallback needs >=60s, which
+// the 25s budget rejects (it is killed ⇒ non-zero/absent status ⇒ RED).
+const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+// Stubs so the quality driver's due routines never reach an LLM (the seam, not the interval, is what
+// the test is not about): the resource gate refuses and every judge command is `true`.
+const QUALITY_STUBS = [
+  "--resource-gate-cmd", "false",
+  "--judge-cmd", "true", "--arch-judge-cmd", "true", "--judgment-cmd", "true",
+  "--identity-cmd", "true", "--lineage-cmd", "true", "--deletion-cmd", "true",
+  "--packaging-check-cmd", "true", "--packaging-gap-worker-cmd", "true", "--plan-cmd", "true",
+];
+
+test("AC2 — the three routine kinds CONSUME drivers.yml <kind>.interval_ms (declared 1ms ⇒ 3 rounds in ~1s)", () => {
+  const cases = [
+    { kind: "goal", file: "goal-driver.ts", carrier: ".quay/goal-round.jsonl", extra: [] },
+    { kind: "quality", file: "quality-gate-driver.ts", carrier: ".quay/quality-round.jsonl", extra: QUALITY_STUBS },
+    { kind: "meta", file: "meta-driver.ts", carrier: ".quay/meta-driver-round.jsonl", extra: ["--no-llm"] },
+  ];
+  for (const c of cases) {
+    const dir = tmpdir();
+    writeDriversYml(dir, `version: 1\nkinds:\n  ${c.kind}:\n    interval_ms: 1\n`);
+    const started = Date.now();
+    const r = spawnSync(process.execPath, [
+      "--experimental-strip-types", path.join(PLUGIN_ROOT, "scripts", c.file),
+      "--root", dir, "--max-rounds", "3", ...c.extra,
+    ], { encoding: "utf8", timeout: 25_000 });
+    const elapsedMs = Date.now() - started;
+    assert.equal(r.status, 0,
+      `${c.file} must exit 0 (declared interval_ms=1 must not be replaced by a 30s literal); stderr tail: ${(r.stderr ?? "").slice(-300)}`);
+    const carrier = path.join(dir, c.carrier);
+    const rounds = fs.existsSync(carrier)
+      ? fs.readFileSync(carrier, "utf8").split("\n").filter((l) => l.trim()).length
+      : 0;
+    assert.equal(rounds, 3, `${c.file} must write 3 round records to ${c.carrier}`);
+    assert.ok(elapsedMs < 20_000,
+      `${c.file} must pace at the DECLARED interval — took ${elapsedMs}ms for 3 rounds at interval_ms=1`);
+  }
 });
 
 after(() => {

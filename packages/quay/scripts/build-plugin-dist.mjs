@@ -447,10 +447,163 @@ export function rewriteInvokers(pluginRoot) {
   return filesTouched;
 }
 
+// ── inlined entry-guard hijack: the hazard this bundler must not ship ──────────────────────────────
+// gap-drivers-yml-interval-not-honored-for-routine-kinds. A module's "am I the process entry?" guard
+// written as FILE identity (`realpath(argv[1]) === import.meta.url`, `fileURLToPath(import.meta.url)
+// === process.argv[1]`, `` import.meta.url === `file://${process.argv[1]}` ``, …) is correct in the
+// SOURCE layout but becomes TRUE FOR EVERY INLINED MODULE of a bundle — they all share the bundle's
+// `import.meta.url`. esbuild emits imports BEFORE their importers, so the first such inlined guard
+// wins and the bundle runs the WRONG tool's main.
+//
+// Measured 2026-09-13 on the shipped dist: `plugin/scripts/dist/{goal-driver,quality-gate-driver,
+// meta-driver}.js` all executed `pool-quality-judge`'s main (an inlined library carrying a bare
+// `isDirectEntry(import.meta)`), printing the pool judge's JSON and exiting 0 in <1s. The supervisor
+// therefore respawned each routine driver every `--restart-delay` (5s) instead of letting its
+// resident loop pace at `drivers.yml <kind>.interval_ms` — the declared interval had no effect on
+// the observed cadence. The declared value was read correctly the whole time; the process that
+// reads it never ran.
+//
+// The SAFE form is name identity: the guard compares the executed file's basename to a literal
+// (`isDirectEntry(import.meta, undefined, "<name>")` or an explicit `basename(...) === "<name>"`
+// clause), which holds for the entry alone in BOTH layouts. This scan is the gate that keeps the
+// class from recurring: nothing that still hijacks can be packaged.
+const GUARD_IDENTITY_RE = /import\.meta\.url|__filename/;
+const GUARD_ARGV_RE = /process\.argv|__filename/;
+const GUARD_SAFE_RE = /basename\(/; // + a literal comparison, checked below
+
+/** Every top-level `if (<cond>)` condition in a module's SOURCE (top-level = column 0, balanced args). */
+export function topLevelIfConditions(text) {
+  const out = [];
+  const re = /^if\s*\(/gm;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const start = text.indexOf("(", m.index);
+    let depth = 0;
+    let i = start;
+    for (; i < text.length; i++) {
+      const c = text[i];
+      if (c === "(") depth++;
+      else if (c === ")") {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+    out.push(text.slice(start + 1, i));
+  }
+  return out;
+}
+
+/** Argument count of the FIRST `isDirectEntry(...)` call in a condition text; null when absent.
+ *  A call with fewer than 3 arguments omits `expectedBase` — the file-identity fallback that made the
+ *  guard true for every inlined module (the spelling is not visible in the condition text, which is
+ *  exactly why the arity has to be measured rather than pattern-matched). */
+function isDirectEntryArity(cond) {
+  const m = /isDirectEntry\s*\(/.exec(cond);
+  if (!m) return null;
+  let depth = 0;
+  let commas = 0;
+  for (let j = cond.indexOf("(", m.index); j < cond.length; j++) {
+    const c = cond[j];
+    if (c === "(") depth++;
+    else if (c === ")") { depth--; if (depth === 0) break; }
+    else if (c === "," && depth === 1) commas++;
+  }
+  return commas + 1;
+}
+
+/**
+ * The ACTIVE (hijacking) entry guards a module carries: top-level `if` conditions that resolve "am I
+ * the entry?" from FILE identity. Two spellings, BOTH measured on the real tree (2026-09-13):
+ *   1. an explicit file-identity comparison (`import.meta.url` / `__filename` vs `process.argv[1]`);
+ *   2. `isDirectEntry(import.meta)` with fewer than 3 arguments — its URL fallback lives INSIDE the
+ *      helper, so the hazard is invisible in the call text and only the arity reveals it.
+ * A condition that ALSO compares a basename to a literal is inert under bundling (belt-and-braces
+ * form several checkers already use), and the 3-argument named form is inert by construction.
+ * @param {string} file absolute path
+ * @returns {{condition: string}[]}
+ */
+export function activeFileIdentityGuards(file) {
+  const text = fs.readFileSync(file, "utf8");
+  // The arity rule binds the SHARED helper only. A module that DEFINES its own isDirectEntry decides
+  // its own semantics (two do — workflow-event-schema.mjs and precommit-guard.ts — and both are
+  // name-based/inert; flagging them by arity alone would be a false positive).
+  const usesSharedHelper = /import\s*\{[^}]*\bisDirectEntry\b[^}]*\}\s*from\s*["'][^"']*gate-script-base\.ts["']/.test(text);
+  const active = [];
+  for (const cond of topLevelIfConditions(text)) {
+    const explicitFileIdentity =
+      GUARD_IDENTITY_RE.test(cond) && GUARD_ARGV_RE.test(cond) &&
+      !(GUARD_SAFE_RE.test(cond) && /===\s*["'][^"']*["']/.test(cond));
+    const unNamedHelper = usesSharedHelper && isDirectEntryArity(cond) !== null && isDirectEntryArity(cond) < 3;
+    if (!explicitFileIdentity && !unNamedHelper) continue;
+    active.push({ condition: cond.replace(/\s+/g, " ").trim().slice(0, 120) });
+  }
+  return active;
+}
+
+const STATIC_IMPORT_RE = /(?:from|import)\s*\(?\s*["']([^"']+\.(?:ts|mjs|js))["']/g;
+
+/** Resolve a static import specifier to a real file (relative, or Core `packages/quay/src/…`). */
+function resolveStaticImport(spec, importer) {
+  const pkgSrc = path.resolve(pkgDir, "src");
+  const cands = [path.resolve(path.dirname(importer), spec)];
+  const idx = spec.indexOf("packages/quay/src/");
+  if (idx >= 0) cands.push(path.join(pkgSrc, spec.slice(idx + "packages/quay/src/".length)));
+  return cands.find((c) => fs.existsSync(c)) ?? null;
+}
+
+/** Depth-first STATIC import closure of an entry (dynamic `import("…")` included by the same regex —
+ *  conservative: a lazily-initialised inlined module still runs its top-level body on first access). */
+export function staticImportClosure(entryAbs) {
+  const seen = new Set();
+  const order = [];
+  const walk = (f) => {
+    if (seen.has(f)) return;
+    seen.add(f);
+    order.push(f);
+    for (const m of fs.readFileSync(f, "utf8").matchAll(STATIC_IMPORT_RE)) {
+      const r = resolveStaticImport(m[1], f);
+      if (r) walk(r);
+    }
+  };
+  walk(entryAbs);
+  return order;
+}
+
+/**
+ * The hijack gate: entries whose bundle would run an INLINED module's main instead of their own.
+ * @param {string} pluginRoot
+ * @returns {{entry: string, module: string, condition: string}[]} empty = the shipped surface is safe
+ */
+export function findEntryGuardHijacks(pluginRoot = DEFAULT_PLUGIN_ROOT) {
+  const { scripts, gateScripts } = deriveEntries(pluginRoot);
+  const hijacks = [];
+  for (const rel of [...scripts, ...gateScripts]) {
+    const entry = path.resolve(pluginRoot, rel);
+    if (!fs.existsSync(entry)) continue;
+    for (const mod of staticImportClosure(entry)) {
+      if (mod === entry) continue;
+      for (const g of activeFileIdentityGuards(mod)) {
+        hijacks.push({ entry: rel, module: path.relative(pluginRoot, mod), condition: g.condition });
+      }
+    }
+  }
+  return hijacks;
+}
+
 /** Build the plugin dist bundles for a plugin root. Returns the entry count. */
 export async function buildPluginDist(pluginRoot = DEFAULT_PLUGIN_ROOT) {
   const { scripts, gateScripts } = deriveEntries(pluginRoot);
   const all = [...scripts, ...gateScripts];
+  // FAIL-CLOSED before any bundling: a single active inlined guard silently redirects a bundle's
+  // main to the wrong tool (see findEntryGuardHijacks) — that must never reach an artifact.
+  const hijacks = findEntryGuardHijacks(pluginRoot);
+  if (hijacks.length) {
+    console.error(`build-plugin-dist: ${hijacks.length} inlined entry-guard hijack(s) — these modules ` +
+      `would run their main() in a bundle that inlines them (use isDirectEntry(import.meta, undefined, "<name>") ` +
+      `or add a basename()=== literal clause):`);
+    for (const h of hijacks) console.error(`  ${h.entry}  <-  ${h.module}  ::  ${h.condition}`);
+    throw new Error("inlined entry-guard hijack: refusing to build a bundle that runs the wrong main");
+  }
   const built = await bundleEntries(pluginRoot, all);
   console.log(
     `build-plugin-dist: ${built.length} bundled entrypoints → ${path.join(pluginRoot, "scripts", "dist")} (+ gate-scripts/dist)`

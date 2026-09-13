@@ -50,6 +50,9 @@ import { runResidentQualityGateLoop, computeRoundRecord } from "./quality-gate-d
 import { readProbeSpec } from "./read-probe-spec.ts";
 import { gateFinding, findingKey, DEFAULT_RATE } from "./routine-file-gate.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
+// AC155（gap-drivers-yml-interval-not-honored-for-routine-kinds）：轮询间隔的单一真相源——
+// drivers.yml 经 driver-config 加载，⛔ 不在本文件另写一份字面量（goal/quality/outer 同款接法）。
+import { defaultDriverConfig, loadDriverConfig } from "./driver-config.ts";
 // stripEvidenceTimestamp 的单一真相源在 Core（goal-store.ts）——本文件与 goal-store 的提交决策
 // 必须用同一判据「什么算实质变化」（gap-goal-gate-timestamp-commit-flood），⛔ 不各写一份。
 import { stripEvidenceTimestamp } from "../../packages/quay/src/goal-store.ts";
@@ -2431,7 +2434,7 @@ const HELP = [
   "",
   "常驻（例程型，复用通用循环）:",
   "  --resident            常驻跑（**已是缺省**，保留仅为显式表达；一次性用 --once）",
-  "  --interval <ms>       循环滴答间隔（缺省 30000）",
+  "  --interval <ms>       循环滴答间隔（缺省 " + defaultDriverConfig().meta.intervalMs + "，来自 drivers.yml meta.interval_ms）",
   "  --review-interval <m> meta 复核的例程间隔（分钟，缺省 20）",
   "  --run-id <id> / --pid-file <p> / --max-rounds <n>",
   "",
@@ -2448,7 +2451,9 @@ export async function main(argv: string[]): Promise<number> {
   let k = DEFAULT_RATE;
   let judgeFloorMs = JUDGE_FLOOR_MS_DEFAULT;
   let once = false;
-  let intervalMs = 30_000;
+  // ⛔ 不写字面量缺省（硬规则 4 推论二）：缺省在本函数尾部经 loadDriverConfig 现读 drivers.yml，
+  // 与 goal/quality 同款——本字段此前是硬编码 30_000，drivers.yml 的 meta.interval_ms 零消费者。
+  let intervalRaw: string | undefined;
   let reviewIntervalMinutes = 20;
   let runId = `meta-${Date.now()}`;
   let pidFile: string | undefined;
@@ -2466,7 +2471,7 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--json") { json = true; }
     else if (a === "--once") { once = true; }
     else if (a === "--resident") { /* 常驻已是缺省（见下），保留旗标以便显式表达与向后兼容 */ }
-    else if (a === "--interval") { intervalMs = Number(args[++i]); }
+    else if (a === "--interval") { intervalRaw = args[++i]; }
     else if (a === "--review-interval") { reviewIntervalMinutes = Number(args[++i]); }
     else if (a === "--run-id") { runId = args[++i]; }
     else if (a === "--pid-file") { pidFile = args[++i]; }
@@ -2477,6 +2482,11 @@ export async function main(argv: string[]): Promise<number> {
   }
   if (!Number.isFinite(k) || k < 1) { process.stderr.write("meta-driver: --k must be a positive number\n"); return 2; }
   if (!Number.isFinite(judgeFloorMs) || judgeFloorMs < 0) { process.stderr.write("meta-driver: --judge-floor must be a non-negative number of minutes\n"); return 2; }
+  // 循环滴答间隔：显式 --interval 优先，否则现读 drivers.yml meta.interval_ms（AC155 单一真相源；
+  // 与 goal-driver / quality-gate-driver 的解析形状逐字对齐）。
+  const intervalMs = intervalRaw !== undefined && /^\d+$/.test(intervalRaw)
+    ? Number(intervalRaw)
+    : loadDriverConfig(root).meta.intervalMs;
 
   // 第七类读数的【语料扫描】单独入口：成本 ≥15 分钟，⛔ 不该藏在整轮里被隐式触发。
   // 这是运维/定时的刷新路径；轮内自动扫描另由 config 的 scan_ttl 决定（见 collectActionRecordFailures）。

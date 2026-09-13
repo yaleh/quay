@@ -378,7 +378,7 @@ export function main(argv) {
   return 0;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "inner-wakeup-heartbeat")) {
   const code = main(process.argv);
   process.exit(code);
 }

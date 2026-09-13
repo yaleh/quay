@@ -326,6 +326,6 @@ export async function main(argv) {
   return 2;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "supervisor-preempt-candidates")) {
   main(process.argv).then((code) => process.exit(code));
 }

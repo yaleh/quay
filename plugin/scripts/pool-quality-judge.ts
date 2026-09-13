@@ -559,7 +559,7 @@ export function main(argv: string[]): number {
   return 0;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "pool-quality-judge")) {
   const code = main(process.argv);
   process.exit(code);
 }

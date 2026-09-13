@@ -27,6 +27,6 @@ export const has = entry.has;
 export const run = entry.run;
 export const runCli = entry.runCli;
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "quay-session")) {
   process.exitCode = runCli(process.argv, import.meta.url);
 }

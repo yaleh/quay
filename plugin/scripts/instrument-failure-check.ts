@@ -465,6 +465,6 @@ export function main(argv: string[]): number {
   return 2;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "instrument-failure-check")) {
   process.exitCode = main(process.argv);
 }

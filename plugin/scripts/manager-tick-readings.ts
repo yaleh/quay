@@ -320,6 +320,6 @@ export function main(argv: string[], opts?: { env?: NodeJS.ProcessEnv }): number
   return 0;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "manager-tick-readings")) {
   process.exitCode = main(process.argv);
 }

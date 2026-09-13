@@ -1015,6 +1015,11 @@ export interface SupervisorOptions {
   cap?: string;
   interval?: string;
   reconcileInterval?: string;
+  /** 崩溃退避（秒）——driver 进程【非正常终止】后的重启间隔，⛔ 不是轮询节奏。
+   *  正常节奏由 driver 自身常驻循环按 `drivers.yml <kind>.interval_ms`（或 `--interval`）决定，
+   *  例程型（goal/quality/meta/outer）与任务型（promotion/worker）是同一分工。两者混淆会产出
+   *  「drivers.yml 声明 30s、实际每 5s 一轮」的读数
+   *  （gap-drivers-yml-interval-not-honored-for-routine-kinds）。 */
   restartDelaySecs: number;
   runId: string;
 }
@@ -1083,6 +1088,12 @@ export async function runSupervisor(opts: SupervisorOptions): Promise<number> {
         try { fs.rmSync(st.stopSentinel, { force: true }); } catch { /* ignore */ }
         process.exit(0);
       }
+      // ⛔ 本行是【崩溃退避】，不是轮询节奏（gap-drivers-yml-interval-not-honored-for-routine-kinds）：
+      // 一个正常工作的 driver 是【常驻】的——它在自身循环里 sleep `<kind>.interval_ms` 后继续跑下一轮，
+      // 进程不退出，本行因此永不执行。本行只在该 driver 进程意外终止之后生效（崩溃 / 被下面的源码自刷新
+      // SIGTERM / 退出码非 0），作用是避免热重启风暴。
+      // ⇒ 诊断口诀：supervisor 日志里【重启间隔恒等于 restartDelaySecs】时，先怀疑「driver 没有进入
+      //   常驻循环」（它的 --interval / drivers.yml 值因此从未参与节奏），而不是「interval_ms 没生效」。
       appendLog(st.supervisorLog, `${ts()} supervisor: respawning driver in ${opts.restartDelaySecs}s`);
       setTimeout(startDriver, opts.restartDelaySecs * 1000);
     });
