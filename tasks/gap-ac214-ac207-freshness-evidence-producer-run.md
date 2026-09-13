@@ -63,12 +63,12 @@ stale evidence: GOAL-009-AC-207:203/200 (margin -3)
 
 ## Acceptance Criteria
 
-- [ ] AC1 改前读数（能取假）：本仓库根干跑 AC-214 criterion ⇒ **exit 1**，stderr 逐字含 `stale evidence: GOAL-009-AC-207:203/200 (margin -3)`；并贴载体里 `ac="GOAL-009-AC-207"` 全部记录的 `ts`/`build_sha`，证明最新一条停在 2026-09-11（`4a9654a1…`）。⛔ 引述不算，须实现者复跑。
-- [ ] AC2 产出运行的**真**读数（⛔ 不是 `--selfcheck`、⛔ 不是夹具）：贴 `develop-deliver-tgz.sh --verify-coldstart --ac207-e2e --hosts "B"` 的退出码 + 全部 `develop-deliver:` 行；贴 `.quay/verify-coldstart-remote-B-<tip8>.log` 的 step⑤ 段（`ac207 record written` 行，或失败时的 fail-closed 原文）与 `E2E_CLOSURE_SELF_EVIDENCED=` 取值。
-- [ ] AC3 生产载体上的新读数（硬规则 4 推论三：判据必须读**生产载体**且只计**运行之后**的时间窗）：`.quay/productization-verification.jsonl` 中新增 ≥1 条 `ac="GOAL-009-AC-207"` 记录，`ts` 晚于本次运行开始时刻、`build_sha` 为 40-hex，且 `git rev-list --count <该 build_sha>..develop -- <交付面 paths>` ≤ 200。贴记录全文 + 该 rev-list 读数。⛔ 手写记录 / 搬运旧记录 / `--selfcheck` 注入的记录一律不算。
-- [ ] AC4 判据真转绿：AC-207 criterion 干跑 **exit 0**；AC-214 criterion 干跑 **exit 0**，贴七行 freshness（每条 `margin > 0`）与 `.quay/goal-freshness-margin.json` 全文（`subjects` 七项 margin 全正）。⛔ 通过放宽 criterion 达成不算（判据文件 `goals/AC-214-*.md` / `goals/AC-207-*.md` 不得出现在本任务的 diff 里）。
-- [ ] AC5 负控制（判据仍能取假）：`QUAY_GOAL009_FRESHNESS_K=1` 下 AC-214 criterion ⇒ **exit 1** 且 stderr 逐条指名陈旧主体；贴该输出 + 负控制前后载体 md5 相同。
-- [ ] AC6 零代码改动（本任务不改产品代码 ⇒ 着地路径最轻）：`git diff --name-only <base>..HEAD -- plugin/ packages/ goals/` 为空；贴 scoped 门读数（`--for-task <本任务 id>`）与着地归属说明（全量套件归机械 fan-in 的一步，本 worker 不持该共享锁）。
+- [x] AC1 改前读数（能取假）：本仓库根干跑 AC-214 criterion ⇒ **exit 1**，stderr 逐字含 `stale evidence: GOAL-009-AC-207:203/200 (margin -3)`；并贴载体里 `ac="GOAL-009-AC-207"` 全部记录的 `ts`/`build_sha`，证明最新一条停在 2026-09-11（`4a9654a1…`）。⛔ 引述不算，须实现者复跑。
+- [x] AC2 产出运行的**真**读数（⛔ 不是 `--selfcheck`、⛔ 不是夹具）：贴 `develop-deliver-tgz.sh --verify-coldstart --ac207-e2e --hosts "B"` 的退出码 + 全部 `develop-deliver:` 行；贴 `.quay/verify-coldstart-remote-B-<tip8>.log` 的 step⑤ 段（`ac207 record written` 行，或失败时的 fail-closed 原文）与 `E2E_CLOSURE_SELF_EVIDENCED=` 取值。
+- [x] AC3 生产载体上的新读数（硬规则 4 推论三：判据必须读**生产载体**且只计**运行之后**的时间窗）：`.quay/productization-verification.jsonl` 中新增 ≥1 条 `ac="GOAL-009-AC-207"` 记录，`ts` 晚于本次运行开始时刻、`build_sha` 为 40-hex，且 `git rev-list --count <该 build_sha>..develop -- <交付面 paths>` ≤ 200。贴记录全文 + 该 rev-list 读数。⛔ 手写记录 / 搬运旧记录 / `--selfcheck` 注入的记录一律不算。
+- [x] AC4 判据真转绿：AC-207 criterion 干跑 **exit 0**；AC-214 criterion 干跑 **exit 0**，贴七行 freshness（每条 `margin > 0`）与 `.quay/goal-freshness-margin.json` 全文（`subjects` 七项 margin 全正）。⛔ 通过放宽 criterion 达成不算（判据文件 `goals/AC-214-*.md` / `goals/AC-207-*.md` 不得出现在本任务的 diff 里）。
+- [x] AC5 负控制（判据仍能取假）：`QUAY_GOAL009_FRESHNESS_K=1` 下 AC-214 criterion ⇒ **exit 1** 且 stderr 逐条指名陈旧主体；贴该输出 + 负控制前后载体 md5 相同。
+- [x] AC6 零代码改动（本任务不改产品代码 ⇒ 着地路径最轻）：`git diff --name-only <base>..HEAD -- plugin/ packages/ goals/` 为空；贴 scoped 门读数（`--for-task <本任务 id>`）与着地归属说明（全量套件归机械 fan-in 的一步，本 worker 不持该共享锁）。
 
 ## Definition of Done
 
