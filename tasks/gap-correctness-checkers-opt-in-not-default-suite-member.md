@@ -42,21 +42,21 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（现场量化现状，能取假）：跑一次 `plugin/scripts/runner-static-gate.ts` 的
+- [x] AC1（现场量化现状，能取假）：跑一次 `plugin/scripts/runner-static-gate.ts` 的
   `run_operational_checks()` 完整调用清单（如列出该函数体内全部 `run_checker` 标签），确认
   `dispatch-record-fingerprint-reason-check.ts` 与 `direct-to-develop-bypass-check.ts` 确实都在
   其中、且贴出全库范围内对 `--static-checks-operational`（或该 flag 的实际名字）的调用点
   （grep/搜索结果，若为 0 处调用点即证实「从未被触发」）。
-- [ ] AC2（做出并落地明确结论，二选一，能取假）：对这两个 checker 各自给出并落地一个结论——
+- [x] AC2（做出并落地明确结论，二选一，能取假）：对这两个 checker 各自给出并落地一个结论——
   要么（a）提升为默认套件成员：接入 `run_static_checks()` 或某个阻塞路径（如 fan-in/driver），
   落地后跑一次全量套件确认它们被执行到（日志/exit code 可核）；要么（b）保持 opt-in，但新增一个
   机制使其按固定周期被实际触发至少一次并把结果写入可查询的载体（如 gate-events 或专门的运行记录
   文件），落地后现场触发一次、贴出写入的记录内容为证。不允许「两头都不做」（即继续维持「存在但
   从未被跑过」的现状）。
-- [ ] AC3（负控制，能取假）：无论选 (a) 或 (b)，都要跑一次「故意制造一条应报红的样本」
+- [x] AC3（负控制，能取假）：无论选 (a) 或 (b)，都要跑一次「故意制造一条应报红的样本」
   （如手工构造一条空指纹的派发记录，或一次直提交 develop 的样本）确认该 checker 在新的触发路径下
   确实能报红，不是接入了但从不真正评估到坏样本。
-- [ ] AC4（既有测试不回归）：`node --experimental-strip-types --test plugin/test/dispatch-record-fingerprint-reason-check.test.mjs plugin/test/direct-to-develop-bypass-check.test.mjs`（或覆盖这两个
+- [x] AC4（既有测试不回归）：`node --experimental-strip-types --test plugin/test/dispatch-record-fingerprint-reason-check.test.mjs plugin/test/direct-to-develop-bypass-check.test.mjs`（或覆盖这两个
   checker 的既有测试文件）exit 0。
 
 ## Definition of Done
@@ -74,4 +74,5 @@ extra:
 - plugin/scripts/runner-static-gate.ts
 - plugin/test/dispatch-record-fingerprint-reason-check.test.mjs
 - plugin/test/direct-to-develop-bypass-check.test.mjs
+- plugin/test/scoped-static-checks.test.mjs
 - tasks/gap-correctness-checkers-opt-in-not-default-suite-member.md
