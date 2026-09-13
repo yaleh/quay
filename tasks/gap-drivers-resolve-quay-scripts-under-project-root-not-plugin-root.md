@@ -1,7 +1,7 @@
 ---
 id: gap-drivers-resolve-quay-scripts-under-project-root-not-plugin-root
 title: 第三方项目上 driver 层实质不工作——driver 按 <project-root>/packages|plugin 找 quay 自己的脚本
-status: ready
+status: done
 labels:
   - gap
   - defect
