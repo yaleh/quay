@@ -2260,6 +2260,78 @@ write_template() {
   fi
 }
 
+# profiles_name_prefix — the `<project>-<role>` session-name prefix, derived from the workspace
+# directory name. MIRRORED by profilesNamePrefix() in packages/quay/src/init.ts (same rule, same
+# output); a divergence is caught by the byte-equality test in
+# plugin/test/profiles-role-coverage-check.test.mjs. A hardcoded `quay-` prefix made every
+# third-party project copy quay's OWN session names, and cross-session delivery addresses peers BY
+# NAME ⇒ misrouting (sendmessage-shared-worker-name-misroutes).
+profiles_name_prefix() {
+  local base="${WORKSPACE_ROOT%/}"
+  base="${base##*/}"
+  base="$(printf '%s' "$base" | tr -c 'A-Za-z0-9._-' '-')"
+  [ -n "$base" ] || base="quay"
+  printf '%s' "$base"
+}
+
+# write_profiles_template — lay down the shipped profile carrier, then derive the role session names
+# from THIS project.
+#
+# ⛔ Deliberately NOT routed through write_template(). write_template has ONE value — `skipped
+# (exists)` — for two different states: "the user already had this file, leave it alone" and "THIS
+# RUN created it one step ago as its own intermediate product". A single value covering both is how
+# this defect stayed silent (hard rule 3b). `ensure_target_branch_model` above invokes `quay init
+# --branch-model-only` through the plugin's vendored bundle; when that bundle predates the flag the
+# CLI runs the FULL init and lays down its own .quay/profiles.yml from the inline TS template —
+# after which a plain write_template skipped the shipped one, forever. With a fresh bundle the CLI
+# returns early and none of this fires, so the ordering is invisible exactly when it is harmless and
+# load-bearing exactly when it is not. PROFILES_PRE_EXISTED is captured BEFORE this run writes
+# anything, which is what makes "user's file" distinguishable from "our own intermediate".
+write_profiles_template() {
+  local src="$PLUGIN_ROOT/.quay/profiles.yml" dst="$WORKSPACE_ROOT/.quay/profiles.yml"
+  if [ ! -f "$src" ]; then
+    echo "  WARN: template missing from plugin: $src" >&2
+    return
+  fi
+  # User-owned: the file was here BEFORE this run and --force was not given ⇒ never touch it.
+  if [ "$PROFILES_PRE_EXISTED" = true ] && [ -f "$dst" ] && [ "$FORCE" != true ]; then
+    if [ "$DRY_RUN" = true ]; then
+      echo "  would-skip (exists): $dst"
+    else
+      echo "  skipped (exists): $dst"
+    fi
+    return
+  fi
+  if [ "$DRY_RUN" = true ]; then
+    echo "  would-write: $dst (profile carrier (template), role names prefixed '$(profiles_name_prefix)')"
+    return
+  fi
+  local replaced_own=false
+  if [ -f "$dst" ]; then
+    if [ "$FORCE" = true ]; then
+      cp "$dst" "$dst.bak.$(date +%s)"
+      echo "  overwritten (backed up): $dst"
+    else
+      replaced_own=true
+    fi
+  fi
+  mkdir -p "$(dirname "$dst")"
+  cp "$src" "$dst"
+  # Derive the role session names (`name: quay-<role>` → `name: <project>-<role>`) — the SAME rule
+  # packages/quay/src/init.ts applies. Anchored on `name:` lines only, so the `quay-launch.sh`
+  # reference in the header comment is left alone.
+  local prefix
+  prefix="$(profiles_name_prefix)"
+  if [ "$prefix" != "quay" ]; then
+    sed -i -E "s/^([[:space:]]*name:[[:space:]]*)quay-/\1${prefix}-/" "$dst"
+  fi
+  if [ "$replaced_own" = true ]; then
+    echo "  wrote: $dst (profile carrier (template); replaced this run's own intermediate write)"
+  else
+    echo "  wrote: $dst (profile carrier (template))"
+  fi
+}
+
 # ensure_gitignore — append the quay runtime-state ignore (idempotent, non-destructive; .quay/config.yml
 # + .quay/profiles.yml stay tracked).
 ensure_gitignore() {
@@ -2542,12 +2614,18 @@ ensure_target_branch_model() {
   return 1
 }
 
+# Captured BEFORE this run writes anything (see write_profiles_template): the ONLY way to tell a
+# user's pre-existing profile carrier apart from one this run created as its own intermediate.
+# ⛔ `[ -f … ] && VAR=true` is NOT usable here: under `set -e` a false test would kill the script.
+PROFILES_PRE_EXISTED=false
+if [ -f "$WORKSPACE_ROOT/.quay/profiles.yml" ]; then PROFILES_PRE_EXISTED=true; fi
+
 ensure_target_branch_model
 
 # ── main dispatch: the SEVEN-item closed set ────────────────────────────────────────────────────────────
 if [ "$DRY_RUN" = true ]; then
   write_config
-  write_template "$PLUGIN_ROOT/.quay/profiles.yml" "$WORKSPACE_ROOT/.quay/profiles.yml" "profile carrier (template)"
+  write_profiles_template
   echo "  would-create: tasks/"
   echo "  would-create: goals/"
   ensure_gitignore
@@ -2560,7 +2638,7 @@ if [ "$DRY_RUN" = true ]; then
 fi
 
 write_config
-write_template "$PLUGIN_ROOT/.quay/profiles.yml" "$WORKSPACE_ROOT/.quay/profiles.yml" "profile carrier (template)"
+write_profiles_template
 mkdir -p "$WORKSPACE_ROOT/tasks"
 echo "  created: tasks/"
 mkdir -p "$WORKSPACE_ROOT/goals"
