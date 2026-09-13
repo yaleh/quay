@@ -1,6 +1,6 @@
 ---
 id: gap-verify-deliver-coldstart-ac4-rerun-serializes-spawn
-status: todo
+status: ready
 labels:
   - gap
   - defect
