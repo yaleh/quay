@@ -1,7 +1,8 @@
 ---
 id: gap-quay-init-profiles-template-omits-every-role-the-drivers-request
 title: quay-init 的 profiles 落地走内联陈旧模板，shipped 模板被 skip —— 第三方项目缺全部五个 worker role
-status: ready
+status: needs-human
+needs_human_cause: human-adjudication
 labels:
   - gap
   - defect
@@ -350,3 +351,15 @@ Touches 增补 `packages/quay/src/init.ts`、**标题改写**，均由协调方 
 **⇒ 本任务落地后**，若第三方项目的 e2e 派发能力发生实质变化，才值得回头复核 AC-207；
 在此之前**不动它**（硬规则 12：给不出「AC-207 结论为假」的发生率 ⇒ 前置降为观察项，不作阻塞）。
 ⛔ 执行者不得因本段去修改 AC-207 或那两条 done 任务。
+
+## Needs-Human
+
+**执行 2026-09-13T13:26:54.195Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: __PERFILE__ duration_ms=9124 /home/yale/work/quay-worktrees/gap-quay-init-profiles-template-omits-every-role-the-drivers-request/packages/quay/test/install-config-driven-e2e.test.mjs passed=false end_ms=1789305955274 cpu_ms=4870.595
+- run_id：wk-prod-1789139008
+- session_id：b76a0528-2745-4c0d-9674-5eb47e41a9bf
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-quay-init-profiles-template-omits-every-role-the-drivers-request~wk-prod-1789139008~1789305506637-35b788.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-quay-init-profiles-template-omits-every-role-the-drivers-request-wk-prod-1789139008.log
