@@ -171,7 +171,37 @@ export interface ParsedProbeOutput {
   notes: string | null;
 }
 
-/** 从**任意**探针 stdout 里取出那一个 JSON 对象。读不出 ⇒ null（调用方记 failed，⛔ 不猜）。 */
+/** 字符串感知的「平衡花括号切片」扫描：返回文本里所有**顶层** `{…}` 片段（按出现顺序）。
+ *  用于 agent 在 JSON 前后夹了散文、或一次打了多个对象的情形——只做**选取**（挑 agent 自己打出来的
+ *  那一个），⛔ 不合成、不修补、不猜字段。 */
+export function balancedObjectSlices(text: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = -1;
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inStr) {
+      if (esc) { esc = false; continue; }
+      if (c === "\\") { esc = true; continue; }
+      if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') { inStr = true; continue; }
+    if (c === "{") { if (depth === 0) start = i; depth += 1; continue; }
+    if (c === "}") {
+      depth -= 1;
+      if (depth === 0 && start >= 0) { out.push(text.slice(start, i + 1)); start = -1; }
+      if (depth < 0) depth = 0;
+    }
+  }
+  return out;
+}
+
+/** 从**任意**探针 stdout 里取出那一个 JSON 对象。读不出 ⇒ null（调用方记 failed，⛔ 不猜）。
+ *  依次尝试：围栏块 → 整段 → 第一个 `{` 到最后一个 `}` → 每个顶层平衡 `{…}` 切片（按序）。
+ *  多个候选都能解析时，**优先带 `findings` 键的那个**（探针契约的主字段），否则取第一个。 */
 function extractJsonObject(stdout: string): unknown | null {
   const text = String(stdout ?? "").trim();
   if (!text) return null;
@@ -179,18 +209,20 @@ function extractJsonObject(stdout: string): unknown | null {
   const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence) candidates.push(fence[1].trim());
   candidates.push(text);
-  // 最外层 {...}：从第一个 '{' 到最后一个 '}'（agent 常在 JSON 前后带一句散文）。
   const first = text.indexOf("{");
   const last = text.lastIndexOf("}");
   if (first >= 0 && last > first) candidates.push(text.slice(first, last + 1));
+  candidates.push(...balancedObjectSlices(text));
+  const parsed: unknown[] = [];
   for (const c of candidates) {
     try {
       const j = JSON.parse(c);
-      if (j && typeof j === "object" && !Array.isArray(j)) return j;
-      if (Array.isArray(j)) return { findings: j }; // 只给数组的探针也认（宽容但形状明确）
+      if (j && typeof j === "object" && !Array.isArray(j)) parsed.push(j);
+      else if (Array.isArray(j)) parsed.push({ findings: j }); // 只给数组的探针也认（宽容但形状明确）
     } catch { /* 试下一个候选 */ }
   }
-  return null;
+  if (parsed.length === 0) return null;
+  return parsed.find((p) => Array.isArray((p as Record<string, unknown>).findings)) ?? parsed[0];
 }
 
 const strArray = (v: unknown): string[] =>
@@ -383,7 +415,17 @@ export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): R
       // ⑥ 结构化产出 → 载体。读不懂 ⇒ failed（⛔ 不猜、不落半条）。
       const parsed = parseProbeFindings(r.stdout ?? "");
       if (!parsed) {
-        return fact("failed", base, `unparseable probe output (exit ${r.status}) — expected one JSON object per the probe's output contract`);
+        // 诊断落盘：「读不懂」若不留原件，就只剩一句无法追查的话（硬规则 3b 的代价形态——
+        // 第一次真跑 310s 的输出因此不可查）。原文写到 stateDir，路径进 Fact。
+        const rawPath = path.join(stateDir, `routine-probe-failed-${started}.out`);
+        let rawRel: string | null = null;
+        try {
+          fs.mkdirSync(path.dirname(rawPath), { recursive: true });
+          fs.writeFileSync(rawPath, String(r.stdout ?? ""), "utf8");
+          rawRel = path.relative(opts.root, rawPath);
+        } catch { /* 诊断落盘失败不致命 */ }
+        return fact("failed", { ...base, ...(rawRel ? { rawProbeOutput: rawRel } : {}) },
+          `unparseable probe output (exit ${r.status})${rawRel ? ` — raw stdout saved to ${rawRel}` : ""} — expected one JSON object per the probe's output contract`);
       }
       const runId = `${decl.name}-${started}`;
       const records: Record<string, unknown>[] = [{

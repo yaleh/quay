@@ -189,6 +189,12 @@ test("parseProbeFindings — a boolean / prose / garbage is NOT usable; malforme
   assert.equal(parseProbeFindings("yes, there is duplication"), null);
   assert.equal(parseProbeFindings(""), null);
   assert.equal(parseProbeFindings("duplication: true"), null);
+  // 散文夹带多个对象/文本里有裸花括号 ⇒ 仍要取出契约那一个（真实探针的常见形态，2026-09-13 实测:
+  // 第一次真跑就是「exit 0 但读不出」而当时没有诊断落盘）
+  const wrapped = parseProbeFindings(`Scan complete.\n` + JSON.stringify({ findings: [FINDING], shards: 2 }) + `\n(see {the} report)`);
+  assert.ok(wrapped, "prose + a trailing brace must still yield the contract object");
+  assert.equal(wrapped.findings.length, 1);
+  assert.equal(wrapped.shards, 2);
   const parsed = parseProbeFindings(JSON.stringify({
     findings: [
       FINDING,
