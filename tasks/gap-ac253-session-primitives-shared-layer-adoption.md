@@ -288,6 +288,19 @@ node --no-warnings --experimental-strip-types plugin/scripts/registry-bare-filen
 本任务只负责让**被引用的脚本**离开死集（这正是该闸的判据），不替其余名字做 archive 决策
 （那是 AC158 的范围，且 SPEC §12e 逐字要求执行前先重算）。
 
+**本轮收尾的验证读数**（都在最终状态上取，⛔ 不复用上一轮的读数）：
+
+| 检查 | 命令 | 读数 |
+|---|---|---|
+| §12f 闸（就是全量套件静态门红的那一条） | `node --no-warnings --experimental-strip-types plugin/scripts/registry-bare-filename-scan.ts --check --root <worktree>` | `PASS: … none in dead set (after=15)`，**exit 0** |
+| anti-drift（fan-in 第 3 步） | `anti-drift-touches-check.ts --task … --worktree … --merge-target develop` | `ANTI-DRIFT OK — 26 actual file(s), all within declared Touches (29 glob(s))` |
+| scoped 门（fan-in 第 6 步） | `bash scripts/test.sh --for-task gap-ac253-session-primitives-shared-layer-adoption --allow-thin` | `tests 315 / pass 315 / fail 0`，`SCOPED_EXIT=0`，无 `STATIC_CHECK_FAILED` |
+| 任务文件三查 | `task-contract-check --no-block` / `malformed-task-check` / `touches-one-entry-one-path-check`（各带 `--strict-subset <task>`） | 三条 exit 0 |
+
+⚠️ scoped-gate 缓存按「记**实际跑过的那个 develop tip**」写入（本次 = `cefba40d4`，即最后一次 merge 的 `HEAD^2`，**不是**写缓存那刻的 `rev-parse develop`）：
+develop 在本轮期间又前进过（`8abcf5b48` → `cefba40d4` → `bbe593c7d`…）。记一个**没跑过**的 tip 会让 fan-in **错误跳过**门；
+记**实际跑过**的 tip 最多让它**多跑一次** —— 是成本，不是错误。
+
 ### DoD 自查
 
 四个原语在本仓库**只有一份**（AC2，含三态漂移检查）；其中三个有本仓库产品/脚本文件的**直接 import**，`pty-frame` 经共享模块在生产调用链上被使用（AC3，修订并登记 —— 与强化后 criterion 的「不得自己开 socket」互斥，理由与四条可失败断言在 AC3 节）；**被替换的手写副本逐条归零**，含本轮退掉的 L1/L2 两处手写 socket（`serve-send.ts` 已不再 import `node:net`）；折叠记录负控制真被拒（AC5）；在这个状态上 AC-253 criterion 逐字 exit 0、移走 `primitives/` 转 exit 1；**四条读数均在生产载体上、均晚于本轮落地时刻 `16:08:37Z`**（AC6）。残留逐条登记（observation.ts 的注入缝解析、`readAuditTrail` 未接、L1 默认账本路径、以及 5c 那个已修的「账本不可写 ⇒ 崩溃」）。
