@@ -119,7 +119,7 @@ quay-fleet node-agent 的第一纪律：「只做薄包装，不做判断」，�
 
 | 能力 | 通道 | 定性 | 来源 |
 |---|---|---|---|
-| 会话状态 | `claude agents --json`（idle/working/needs-input/completed/failed/stopped） | **稳定契约** | 【官方文档】agent-view.md |
+| 会话状态 | `claude agents --json`（idle/working/needs-input/completed/failed/stopped）⚠️ **只列【运行中】会话** | **稳定契约** | 【官方文档】agent-view.md；「只列运行中」由本仓库已 done 的 `gap-webui-session-discovery-claude-agents-json` 确立 |
 | 最近屏幕输出 | `claude logs <id>` —— 只给**最近终端输出**，非完整历史 | **稳定契约** | 【官方文档】agent-view.md |
 | 脚本取结构化结果 | `claude -p --resume <id> --output-format json` | **稳定契约**，官方推荐给脚本 | 【官方文档】sessions.md |
 | 生命周期 | `claude attach / stop / rm`（+ fleet 用到 `respawn`） | **稳定契约** | 【官方文档】agent-view.md |
@@ -153,6 +153,7 @@ quay-fleet node-agent 的第一纪律：「只做薄包装，不做判断」，�
 | `statusUpdatedAt` 可陈旧 **3.3 天**而仍报 `status=idle` | **活性只信直接量**；判定函数的**签名就不接受** `status`/`statusUpdatedAt`（结构上无法回退到自报） | 【fleet 实测】 |
 | 短 id 有**两套互不相干的命名空间**（`agents --json` 取 sessionId 前 8 位；messaging 层另一套） | 跨接口 join **只用完整 sessionId 或 pid** | 【fleet 实测】 |
 | `claude logs <bogus-id>` 把人类可读错误写 **stdout 且 exit 0** | 存在性检查**必须**先用结构化的 `agents --json`，⛔ 绝不嗅探日志字节 | 【fleet 实测】 |
+| `claude agents --json` **只列运行中会话** | 会话发现**不能只靠它**：已结束会话须扫 transcript 目录补齐。⛔ 「不在 `agents --json` 里」≠「该会话不存在」（硬规则 5 来源完备性的一个实例） | 【本仓库】`gap-webui-session-discovery-claude-agents-json`（done） |
 | pty 协议**没有「auth 成功」消息** | 用宽限窗以**缺席推断接受**（fleet 用 50ms）；拒绝帧到达必须**在 DATA 写出之前**中止 | 【fleet 实测】 |
 | composer **会回显**你输入的 prompt ⇒ 「提交后 402ms 就看到答案」的假阳性 | 判据落 transcript 的**记录类型**（`type:"user"` / `type:"assistant"`），⛔ 不看屏幕内容 | 【fleet 实测】 |
 | `ListAgents` 枚举**会删除**被判死的记录（`.json` + `.key` 一起删），socket 文件成孤儿 | peer endpoint 必须**周期自检自己的记录还在不在**，不在就重注册；并自行清理孤儿 socket | 【spike 实测】 |
