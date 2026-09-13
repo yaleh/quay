@@ -13,6 +13,27 @@ extra:
 ---
 ## Proposal
 
+**术语澄清（先读这段，否则下面的清单会被误读）**：本任务说的 `fix-worker` / `task-worker` /
+`pool-judge` / `selector` / `meta-driver` 是 **`.quay/profiles.yml` 里的 role 名**——
+`launchArgv(role, prompt, root)` 用它经 `resolveRole()` 解析出 launcher / model / 会话名 (`-n`)。
+**它们不是 driver。** quay 的 driver 是 **promotion-driver / worker-driver / outer-driver / goal-driver**
+（`DRIVER_KINDS`），是常驻进程；role 是那些 driver **spawn 子会话时用的配置条目**。
+
+⚠️ 尤其注意 **`meta-driver` 既是一个 driver 名、又是一个 role 名**，两者不是一回事：
+`plugin/scripts/meta-driver.ts` 是 driver，它内部调 `launchArgv("meta-driver", ...)` 取的是 role。
+
+对应关系（实测自 `grep -rn 'launchArgv("' plugin/scripts/*.ts`）：
+
+```
+driver（常驻进程）              它请求的 role（profiles.yml 条目）
+goal-driver.ts            ->  fix-worker        12 处
+worker-driver.ts          ->  task-worker        9 处
+quality-gate-driver.ts    ->  fix-worker 6 处 / pool-judge 2 处
+promotion-driver.ts       ->  fix-worker         3 处
+meta-driver.ts            ->  meta-driver        1 处
+driver-runtime.ts         ->  selector           1 处
+```
+
 **现象（实测）**：第三方项目 quay-fleet 的 GOAL-001 六条 AC 全部 achieved、`goal-ring` 已 verified，
 **但 GOAL 始终停在 `active` 翻不过去**。goal-round 载体给出成因：
 
@@ -30,7 +51,7 @@ I2 的 flip 条件是「全部在域 AC achieved **且** 充分性判定为 `cov
 `judge-unavailable`（注释原文：「launchArgv 失败（profiles 缺失）… ⛔ 不回落 covered」——
 **fail-closed 是对的，问题在配置侧**）。
 
-**模板缺的不止一个角色，是全部五个。** 统计生产代码实际请求的角色：
+**模板缺的不止一个角色，是全部五个。** 统计生产代码实际请求的 profile role：
 
 ```
 launchArgv("fix-worker"   21 处
@@ -69,15 +90,15 @@ env: {CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"}}`。
 
 ## Plan
 
-1. `plugin/.quay/profiles.yml` 模板补齐五个角色（照 quay 自己的定义，`profile: worker-default`；
+1. `plugin/.quay/profiles.yml` 模板补齐五个 profile role（照 quay 自己的定义，`profile: worker-default`；
    `fix-worker`/`task-worker` 需带 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"`——
    缺该键会导致 spawn 超时，见 `gap-fix-worker-spawn-timeout-persists-post-fix`）。
 2. 删除已退役的 `inner` 角色。
 3. `name` 不再硬编码 `quay-` 前缀：改为 quay-init 按目标项目名生成（或模板用占位符由 init 替换），
    使两个项目的会话名不相撞。
-4. **加一条结构性静态检查防止再漂移**：模板声明的角色集合必须 ⊇
-   生产代码中 `launchArgv("<role>"` 出现的角色集合。这条是本缺陷的根治——
-   否则下次新增一个 driver 角色，模板又会静默落后。
+4. **加一条结构性静态检查防止再漂移**：模板声明的 profile role 集合必须 ⊇
+   driver 通过 `launchArgv` 请求的 **profile role** 集合（即生产代码中 `launchArgv("<role>"` 出现的
+   role 名集合）。这条是本缺陷的根治——否则下次新增一个 driver 角色，模板又会静默落后。
 
 ## Acceptance Criteria
 
@@ -85,10 +106,11 @@ env: {CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"}}`。
       改前 `launchArgv("fix-worker","",<ws>)` 抛错；改后返回一个 argv 且 `-n` 后的名字非空。
       对 `task-worker` 同样断言。
 - [ ] AC2（结构性，防漂移）：静态检查器比对「`plugin/.quay/profiles.yml` 的 roles 键集」与
-      「`plugin/scripts/**` 中 `launchArgv("<role>"` 的角色名集合」，前者未覆盖后者即红。
-      双向控制：从模板删一个角色必须红；给代码加一个新角色名而模板未跟进也必须红。
-- [ ] AC3：模板不再含 `inner`（已退役角色），且该断言由 AC2 的同一检查器覆盖
-      （代码从不请求 `inner` ⇒ 模板含它属于反向冗余，检查器应能报出）。
+      「driver 通过 `launchArgv` 请求的 **profile role** 名集合」（即 `plugin/scripts/**` 中
+      `launchArgv("<role>"` 的 role 名集合），前者未覆盖后者即红。
+      双向控制：从模板删一个 profile role 必须红；给代码加一个新 profile role 名而模板未跟进也必须红。
+- [ ] AC3：模板不再含 `inner`（已退役的 profile role），且该断言由 AC2 的同一检查器覆盖
+      （没有任何 driver 通过 `launchArgv` 请求 `inner` ⇒ 模板含它属于反向冗余，检查器应能报出）。
 - [ ] AC4：两个不同项目各自 `quay-init` 后，其 profiles 的 `name` 值互不相同
       （断言不含硬编码的 `quay-` 字面前缀，或按项目名派生）。
 - [ ] AC5：全量 `scripts/test.sh` 绿。
@@ -109,9 +131,10 @@ env: {CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"}}`。
 
 ## 立案备注（quay-task 立案时追加，⛔ 非报告原文，⛔ 不改上文任何一字）
 
-**① 查重结果（按机制，不按症状）**：机制「init 模板的角色集与生产代码请求的角色集不匹配 ⇒
-`resolveRole` 抛错」**已有一条既有任务**：`gap-shipped-profiles-missing-worker-roles`（**status: done**，
-goal_ac=AC-207，2026-09-09）。它的 Proposal 逐字描述同一条链：「roles 只有 manager/outer，缺 task-worker
+**① 查重结果（按机制，不按症状）**：机制「init 模板的 profile role 集与 driver 通过 `launchArgv`
+请求的 profile role 集不匹配 ⇒ `resolveRole` 抛错」**已有一条既有任务**：
+`gap-shipped-profiles-missing-worker-roles`（**status: done**，goal_ac=AC-207，2026-09-09）。
+它的 Proposal 逐字描述同一条链：「roles 只有 manager/outer，缺 task-worker
 （及 selector/fix-worker/pool-judge/meta-driver）；worker-driver 派发走 `launchArgv("task-worker", …)`
 → `profile-policy.ts:140` `resolveRole` 对缺失 role 抛 `role not found`」。它的 AC1/AC2 已勾，
 **AC3（全量 suite 绿）仍未勾，标「待外部」**。
@@ -120,12 +143,12 @@ goal_ac=AC-207，2026-09-09）。它的 Proposal 逐字描述同一条链：「r
 
 **② ⚠️ 与当前源码的事实冲突（立案者当场读盘核实，⛔ 不是推测）**：上文 Proposal 断言
 「`plugin/.quay/profiles.yml` 只给出 manager / outer / inner 三个角色」，而**本仓库当前该文件
-（`/home/yale/work/quay/plugin/.quay/profiles.yml`，2026-09-13 读盘）实际声明七个角色**：
+（`/home/yale/work/quay/plugin/.quay/profiles.yml`，2026-09-13 读盘）实际声明七个 profile role**：
 `manager`(:28) `outer`(:31) `task-worker`(:38) `selector`(:43) `fix-worker`(:46) `pool-judge`(:51)
 `meta-driver`(:54)，**且不含 `inner`**；`task-worker`(:42) 与 `fix-worker`(:50) 均已带
 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"`。`quay-init.sh:2550/2563` 的 `write_template` 逐字复制
 的就是这个文件（无内联第二份模板）。
-⇒ **「模板缺五个角色」在当前源码上不复现**。quay-fleet 观测到的形态与**修复前**的模板一致，
+⇒ **「模板缺五个 profile role」在当前源码上不复现**。quay-fleet 观测到的形态与**修复前**的模板一致，
 最可能的成因是**该项目装的是 `gap-shipped-profiles-missing-worker-roles` 落地之前的安装物**
 （同族先例：AC-207 第 10 轮的「缺陷 B——安装物陈旧」）。
 **⊢ 执行者第一步必须做的对照**（硬规则 4b：别用代理量，读直接量）：在 quay-fleet 上读
@@ -138,10 +161,17 @@ goal_ac=AC-207，2026-09-09）。它的 Proposal 逐字描述同一条链：「r
   （零计数已按硬规则 2 校准：同形谓词对已知为真的串 `quay-init-closure-ratchet` 返回 61 条 ⇒ 谓词有效），
   且 `plugin/scripts/profiles-role-coverage-check.ts` 在盘上**不存在**（Read ⇒ File does not exist）。
   **这条正是既有任务只修了被报出来的那一个实例、没造防漂移产物的缺口**（硬规则 5b）。
-- **AC4 的 `name` 硬编码 `quay-` 前缀确实仍在**（上述七个角色的 name 逐个为 `quay-*`），
+- **AC4 的 `name` 硬编码 `quay-` 前缀确实仍在**（上述七个 profile role 的 name 逐个为 `quay-*`），
   既有任务从未处理撞名问题。
 - **AC3 的 `inner` 反向冗余**：当前模板已无 `inner`，该断言在本仓库上会直接绿；
   其价值在于由 AC2 的检查器**持续**钉住（⛔ 若只当一次性断言写死，就是一个恒真量，非测量——硬规则 4）。
 
 **④ 未打 `delivery-critical`**（按要求）。**未设 `goal_ac`**——注意
 `delivery-critical-without-goal-ac-never-promotes` 的反面：本条不带该标签，故无此结构性阻塞。
+
+**⑤ 术语澄清段的来源**：Proposal 开头的「术语澄清」由协调方 2026-09-13 逐字追加（人指出原措辞
+把 role 名说得像 driver 名）。本次 CAS 追加同时把 Plan 4 / AC2 / AC3 中「driver 请求的角色」
+统一改写为「driver 通过 `launchArgv` 请求的 **profile role**」，⛔ 现象/根因/两个后果/`inner` 退役/
+`quay-` 前缀撞名/AC1–AC5 判据内容/DoD/Touches 逐字未变。
+**⚠️ 标题仍写作「生产 driver 请求的全部五个角色」**——协调方本次只授权改正文，标题未在授权范围内，
+故保留；读标题时按本段术语理解为「driver 通过 `launchArgv` 请求的 profile role」。
