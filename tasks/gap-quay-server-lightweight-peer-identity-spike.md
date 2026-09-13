@@ -39,7 +39,7 @@ extra:
 **本任务与那条裁定管的不是同一件事，必须在报告里写清区分**：
 - 那条管**发送侧冒充**（一个脚本自称是某个 bypass 会话发的）——**继续禁止**。
 - 本任务管**接收侧登记**（一个真实进程如实登记自己的 pid/socket，声明「我可以收消息」）——这是**被投递方**，不伪造发送者身份。
-**但**：若实测表明「只有把 `agent` 填成 `claude`（即冒充自己是一个 Claude Code 会话）才能被投递」，那就落回了自报身份的形态 ⇒ **本任务的结论必须是「不可行（受诚实性约束）」，⛔ 不得因为「反正能通」而把冒充形态记为可行**。这一条是 AC5。
+**⊕ 人 2026-09-13 第三次裁定（推翻本段原先的否决条款）**：若实测表明「只有把 `agent` 填成 `claude` 才能被投递」，**该填法可以接受**——理由：这是本机自有进程在**用户自己的** `~/.claude/sessions/`（600 权限）里登记自己，消息的**发送方身份仍由平台如实标注**（平台在投递时加 `from-*` 属性，不受本进程注册字段影响），不存在对第三方的伪装，也不绕过任何认证。⇒ **`agent` 取值不再是否决条件，⛔ 不得据此判「不可行」**；但它带来的**运行时代价**必须被量出来并给出缓解，改由 AC5 承载。⛔ 仍然禁止的是**发送侧冒充**（`plugin/scripts/send-to-session.ts:31-41` 那条既存裁定不变）——本任务不碰发送侧。
 
 **为什么必须是 spike 而不是直接实现**：上述三个未知（枚举过滤规则 / 投递校验规则 / 诚实标注下的可达性）任何一个取假，方案 C 的形态就完全不同（从「几十行注册+socket server」变成「必须常驻真会话」= 退回方案 A）。先量再改（硬规则 4 推论）。
 
@@ -119,7 +119,7 @@ Channels 独有：官方契约 + policy 闸 + 跨机；但 quay server 不是 pe
 - [ ] AC2（负控制，双向）：同一条 SendMessage 路径，在两种扰动下各重试一次并落盘读数——①探针的 `~/.claude/sessions/<pid>.json` 被删除；②`<pid>.*.key` 里的 `peerToken` 与探针实际校验的值不一致。判据：两次扰动下证据文件**均无**该轮新 `<nonce>`。⛔ 取假形态：任一扰动下仍到达 ⇒ AC1 的到达不是由「注册记录 + auth 帧校验」造成，可行性结论失效，必须在报告中写明真实到达路径。
 - [ ] AC3（可见性枚举，⛔ 非布尔）：在至少三种自述字段取值下各测一轮，产出三行读数表落进报告，每行三列：`agent`/`kind` 取值 → 是否出现在发送侧 `ListAgents` 输出 → 是否可被 `SendMessage` 投递。三种取值至少含：(a) 如实值（如 `agent:"quay"`，`name` 明确含 `quay-server`）、(b) 该字段缺省/空、(c) `agent:"claude"`。任一行读不到 ⇒ 该行记 **not-evaluated**，⛔ 不记 false。
 - [ ] AC4（协议最小集）：对注册记录逐字段做剥离/改值实测，产出「必需 / 可选 / 未评估」表落进报告，**至少覆盖 10 个字段**：`pid` `procStart` `pidDomain` `messagingSocketPath` `peerProtocol` `peerFeatures` `version` `sessionId` `name` `cwd` `kind` `status`。每行必须带**一次实测投递结果**（⛔ 不接受"按代码推断"）。
-- [ ] AC5（诚实性结论闸）：报告显式回答——「在 `agent`/`name`/`version` **不冒充** Claude Code 会话（如实标注 quay-server、不自称 agent=claude）的前提下，投递是否仍可达」。若实测为「**必须**冒充才可达」⇒ 结论必须写 **不可行（受诚实性约束）**，并附该判断的实测依据（AC3 的 (a) 行与 (c) 行读数对照）。⛔ 不得以"反正能通"为由把冒充形态记为可行结论。
+- [ ] AC5（身份字段取值的运行时代价 + 缓解；⛔ 不再是否决条件）：**人 2026-09-13 第三次裁定：`agent:"claude"` 填法可接受，⛔ 不得据此判「不可行」**。本条改为**量代价**：①承接 AC3 的三行表，写明**实际采用**哪种取值及理由；②若采用的填法会让 quay server 在 peer 列表里**形似一个 Claude 会话**，报告必须含一段**运行时风险 + 缓解**——该条目会出现在所有会话的 `ListAgents` 里，人或自动化（manager/outer 等）可能把它当成一个可派活的会话发去指令，而它**没有模型循环、永远不会回应**（消息进了一个不会思考的进程 = 指令静默丢失，与「发出去了但对方在忙」同形）。缓解至少覆盖两问，**各带一次实测读数**：(a) `name` 用什么规则使它对人与机械都可识别——按该规则登记后，从**另一个会话**跑 `ListAgents`，把它的**实际显示行原文**抄进报告；(b) 它收到一条「派活」消息时的行为是什么（丢弃 / 回一条说明 / 仅落盘）——把探针的实际行为跑一次并落盘。判据：报告含该风险段 ∧ (a)(b) 各有实测读数。读不到 ⇒ not-evaluated。
 - [ ] AC6（共享状态安全，可取假）：`~/.claude/sessions/` 是**全机共享的运行时状态**（本机此刻有 8 条真实会话记录 + 正在运行的 loop 依赖它）。探针只允许创建/删除**自己 pid** 的记录与 key 文件。判据：任务结束后该目录中无探针遗留文件 ∧ 任务执行前后对该目录做的两次快照（文件名 + mtime + 内容 sha256）显示**其他会话的记录未被本任务修改**，两次快照落盘进证据文件。⛔ 取假形态：任一他人记录的 sha256 变化 ⇒ 不达成。
 - [ ] AC7（稳健性读数）：落盘三项读数——①探针重启（pid 变）后：旧记录是否仍在、是否被平台清理、新记录是否立即可投递；②探针被 `kill -9` 后：陈旧记录在发送侧 `SendMessage` 的**错误形态**（报什么错 / 是否静默失败）；③同一 `name` 与某个真实会话重名时的表现。读不到 ⇒ 记 not-evaluated。
 - [ ] AC8（Channels 正向·核心，可取假）：`plugin/scripts/channel-probe-server.ts`（纯 Node、⛔ 无 LLM 循环、⛔ 不 spawn claude）以 `experimental: { 'claude/channel': {} }` capability 注册为 channel；用 `claude --channels <spec>` 起一个目标会话；由**外部进程**（⛔ 不是该会话自己）推一条含唯一 nonce `<nonce8>` 的事件。判据：该目标会话 transcript 中出现含 `<nonce8>` 的 `<channel source="...">` 记录，**实际到达的包裹属性原文**抄进报告。定位 transcript **先用 `meta-cc`**（CLAUDE.md 硬规则 1），覆盖不到再 `grep -rl` 文件系统定位后 grep 内容。⛔ 取假：transcript 无该 nonce ⇒ 未达成。无法起会话/无法定位 transcript ⇒ **not-evaluated**。
@@ -131,7 +131,7 @@ Channels 独有：官方契约 + policy 闸 + 跨机；但 quay server 不是 pe
 
 ## Definition of Done
 
-- 报告 `docs/analysis/session-inbound-two-paths-2026-09-13.md` 落地，含：**AC13 的对照表（本任务交付物）**、C 路的 AC3/AC4/AC7 三张读数表、AC1 与 AC8 实际到达的包裹属性原文、AC2 两条负控制读数、AC10–AC12 的 Channels 约束读数，以及 AC5 的诚实性结论。
+- 报告 `docs/analysis/session-inbound-two-paths-2026-09-13.md` 落地，含：**AC13 的对照表（本任务交付物）**、C 路的 AC3/AC4/AC7 三张读数表、AC1 与 AC8 实际到达的包裹属性原文、AC2 两条负控制读数、AC10–AC12 的 Channels 约束读数，以及 AC5 的身份取值决定与运行时缓解读数。
 - 两个探针落地并可独立运行：`plugin/scripts/peer-identity-probe.ts`（C 路，`--serve`/`--cleanup`）与 `plugin/scripts/channel-probe-server.ts`（Channels 路），纯函数部分各有单测。
 - 证据文件 `.quay/peer-identity-probe-evidence.jsonl` 与 `.quay/channel-probe-evidence.jsonl` 各含真实投递记录（或明确的 not-evaluated 说明）。
 - ⛔ **本任务不接线进生产**：不改 `packages/quay/src/serve*.ts`、不改 `plugin/scripts/driver-runtime.ts`、不改 `start-drivers.ts`。接线由后续任务按 AC13 的结论决定形态。
