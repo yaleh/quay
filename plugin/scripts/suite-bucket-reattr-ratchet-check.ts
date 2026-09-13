@@ -27,14 +27,19 @@
 // WHY LAYER 3 IS IN THE CHECKER AND NOT ONLY IN ITS UNIT TEST (gap-suite-bucket-zombie-check-bills-the-
 // next-unrelated-task): the zombie condition used to be judged ONLY by ③-AC8 in
 // plugin/test/suite-bucket-reattr-ratchet-check.test.mjs — i.e. only inside a FULL-SUITE run. The
-// deletion that creates the zombie therefore got no signal at its own change time; the task learned
-// hours later, after burning a whole suite round, and paid a separate follow-up commit to clear the
-// entries (the production record shows exactly this: 651 perFile runs / 10 fails across 8 distinct
-// tasks, each red followed by a "drop the zombie entries" commit). Moving the judgment into the
+// deletion that creates the zombie therefore got no signal at its own change time: the deleting task
+// learned of it hours later, when its own fan-in suite round came around, and paid a separate
+// follow-up commit to clear the entries — 10 reds across 8 tasks in the production record (651
+// perFile runs / 10 fails), each red followed by a "drop the zombie entries" commit.
+//
+// ⚠️ THE FILING'S PREMISE WAS MEASURED AND FALSIFIED — do not restate it: the red did NOT land on
+// "the next UNRELATED task". In 10/10 reds the culprit commit is the RECORD-KEEPING TASK'S OWN
+// (the zombie lives only on the deleting branch; develop never has it, so only the deleter's own
+// suite round can see it). The defect is LATENESS, not mis-attribution. Moving the judgment into the
 // checker puts it on the checker's OWN surface — the `change`-tier static gate, which scripts/test.sh
 // selects for the scoped run of any change touching its @static-object (plugin/test/,
 // experiments/*/test/, packages/*/test/, the record itself). The deleting change is thus reddened at
-// its own scoped gate in seconds, instead of at an unrelated full-suite round.
+// its own scoped gate in seconds, instead of at its own full-suite round hours later.
 //
 // NOT-EVALUATED (exit 3, hard rule 3b): with NO reattribution FILE the ratchet cannot distinguish
 // "genuinely unattributed" from "no reattribution data exists yet" — it reports NOT-EVALUATED (exit

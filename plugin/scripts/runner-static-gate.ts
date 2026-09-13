@@ -283,10 +283,12 @@ run_static_checks() {
   # 安全方向，现状 14）。重归因文件缺失 ⇒ NOT-EVALUATED（exit 3，硬规则 3b——永不与「0 漏判」同形）。
   # 第 3 层（阻断，③-AC8，gap-suite-bucket-zombie-check-bills-the-next-unrelated-task）：重归因【条目】所指的是
   # 已不存在的 suite 测试文件 ⇒ ZOMBIE ⇒ RED。该条件原先只由本文件的单测 ③-AC8 判定（= 只在全量套件的某一轮里判），
-  # 于是「删/归档了某个 suite 测试文件却没同步删条目」的那个变更在【自己那一刻】拿不到任何信号，要等数小时后烧掉一整轮
-  # 才知道，并额外付一次「清僵尸条目」的补提交（生产记录：651 perFile runs / 10 fails，横跨 8 个任务，每次红后都跟着
-  # 一条清条目提交）。判定移进 checker 后它落在本 checker 自己的面上——@static-tier change，scripts/test.sh 在
-  # scoped 轮里按 @static-object 选中它 ⇒ 制造僵尸的那个变更在自己的 scoped 门就被判红（秒级），不再摊到无关轮。
+  # 于是「删/归档了某个 suite 测试文件却没同步删条目」的那个变更在【自己那一刻】拿不到任何信号，要等数小时后自己那轮
+  # 全量套件才知道，并额外付一次「清僵尸条目」的补提交（生产记录：651 perFile runs / 10 fails，横跨 8 个任务，每次红后
+  # 都跟着一条清条目提交）。判定移进 checker 后它落在本 checker 自己的面上——@static-tier change，scripts/test.sh 在
+  # scoped 轮里按 @static-object 选中它 ⇒ 制造僵尸的那个变更在自己的 scoped 门就被判红（秒级），而不是等自己那轮全量。
+  # ⚠️ 立案时的前提「红落在下一个【无关】任务身上」**已被实测证否**（10/10 红的成因提交就是记账任务自己的）——
+  # 形态是【迟到】不是【错位】；本条注释与 checker 头注释都以实测为准，不要再复述那个前提。
   # mutation case: 纯 S 已重归属 → 绿；移除归属 → 红（第 1 层）；删掉条目所指的文件而保留条目 → 红（第 3 层）；恢复 → 绿。
   # @static-tier change
   # @static-object .quay/suite-bucket-reattribution.jsonl plugin/scripts/suite-bucket-reattr-ratchet-check.ts plugin/test/suite-bucket-reattr-ratchet-check.test.mjs plugin/test/ experiments/*/test/ packages/*/test/
