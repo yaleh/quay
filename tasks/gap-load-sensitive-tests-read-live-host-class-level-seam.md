@@ -76,3 +76,4 @@ extra:
 
 - tasks/gap-load-sensitive-tests-read-live-host-class-level-seam.md
 - packages/quay/test/gap-git-graph-task-view-aggregate-commits-by-task-id.test.mjs
+- packages/quay/src/observation.ts
