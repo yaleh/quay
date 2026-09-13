@@ -29,6 +29,23 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import { resolvePluginRoot } from "../plugin-root.ts";
+import {
+  classifyRuntimeArtifactDirty,
+  isRuntimeArtifactPath,
+  loadRuntimeArtifactPatterns,
+  runtimeArtifactManifestPath,
+} from "../runtime-artifacts.ts";
+
+// Re-exported for the ff's own tests (and any consumer that already imports them from this module).
+export {
+  classifyRuntimeArtifactDirty,
+  isRuntimeArtifactPath,
+  loadRuntimeArtifactPatterns,
+  runtimeArtifactManifestPath,
+  runtimeArtifactPatternRe,
+  runtimeArtifactAreaPattern,
+} from "../runtime-artifacts.ts";
+export type { RuntimeArtifactDirty } from "../runtime-artifacts.ts";
 
 // ── types ────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -152,6 +169,18 @@ function agentIdGate(args: FfMergeArgs, root: string): FfMergeResult | null {
   };
 }
 
+// ── the runtime-artifact manifest (clean-tree whitelist's SINGLE SOURCE) ─────────────────────────────
+// tasks/gap-quay-init-gitignore-misses-quay-runtime-artifacts-outside-dot-quay. The manifest reader and
+// the ONE path matcher live in Core (`../runtime-artifacts.ts`) because the `--runtime-dirty` judge this
+// section calls (touches-orthogonality-check.ts's checkBenignRuntimeDirty) needs the SAME rules — a
+// second copy here would be the very drift this task closed (硬规则 5b: the `.quay/`-only rule existed
+// twice, once per judge, and only one of them was reachable from the other). Re-exported below so the
+// ff module stays the single import surface for its own tests.
+//
+// `patterns === null` ⇒ the manifest is unreadable/absent ⇒ the whitelist keeps its HISTORICAL extent
+// (`.quay/`-only) and nothing may be attributed to quay (硬规则 3b: a check that cannot read its input
+// must not answer like one that could).
+
 // ── clean-tree handling (merge mode only) ────────────────────────────────────────────────────────────
 // ported from the bash: auto-converge (status-only promotion flip) + benign runtime dirty (untracked
 // .quay/ outside the task's ## Touches) pass-through, then the real clean-tree refusal.
@@ -159,6 +188,10 @@ function agentIdGate(args: FfMergeArgs, root: string): FfMergeResult | null {
 function cleanTreeCheck(args: FfMergeArgs, root: string): { ok: boolean; stderrLines: string[] } {
   const stderrLines: string[] = [];
   let porcelain = git(root, "status", "--porcelain").stdout;
+  // The runtime-artifact manifest (may be null = unreadable ⇒ whitelist stays .quay/-only).
+  const rtPatterns = loadRuntimeArtifactPatterns(scriptsDirOf(args));
+  const rtManifestPath = runtimeArtifactManifestPath(scriptsDirOf(args));
+  const rtManifestLabel = rtManifestPath ?? "(runtime-artifact manifest not resolvable)";
 
   // auto-converge (gap-fan-in-clean-tree-auto-converge-promotion-status): porcelain ALL ` M tasks/*.md`
   // ∧ per-file diff hits ONLY the `status:` line ⇒ stage+commit (pathspec-limited), then re-read.
@@ -192,7 +225,10 @@ function cleanTreeCheck(args: FfMergeArgs, root: string): { ok: boolean; stderrL
   }
 
   // benign runtime dirty (gap-fan-in-ff-merge-benign-runtime-dirty-no-fast-path): porcelain ALL
-  // `?? .quay/…` ∧ none in the task's ## Touches ⇒ pass through (NOT committed, NOT gitignored).
+  // `?? .quay/…` ∨ `?? <a pattern of the runtime-artifact manifest>` ∧ none in the task's ## Touches
+  // ⇒ pass through (NOT committed, NOT gitignored). The manifest half is what keeps a consumer project
+  // whose `.gitignore` predates the manifest (or was never re-inited) from refusing every ff on files
+  // quay itself wrote — `tasks/.quay-parse-cache.json`, `milestones/fast-mode-telemetry/*.json`, …
   if (porcelain.trim() !== "") {
     let benignOk = true;
     const benignPaths: string[] = [];
@@ -201,7 +237,8 @@ function cleanTreeCheck(args: FfMergeArgs, root: string): { ok: boolean; stderrL
       const pstatus = line.slice(0, 2);
       const ppath = line.slice(3);
       if (pstatus !== "??") { benignOk = false; break; }
-      if (!/^\.quay($|\/)/.test(ppath)) { benignOk = false; break; }
+      const underDotQuay = /^\.quay($|\/)/.test(ppath);
+      if (!underDotQuay && !(rtPatterns !== null && isRuntimeArtifactPath(ppath, rtPatterns))) { benignOk = false; break; }
       benignPaths.push(ppath);
     }
     if (benignOk && benignPaths.length > 0) {
@@ -214,7 +251,13 @@ function cleanTreeCheck(args: FfMergeArgs, root: string): { ok: boolean; stderrL
         : null;
       if (!verdict || verdict.status !== 0 || !verdict.stdout.trim().startsWith("BENIGN")) benignOk = false;
       else {
-        stderrLines.push(`fan-in-ff-merge: passed through a benign runtime-dirty tree (untracked .quay/ runtime files outside the task's ## Touches) — ${benignPaths.join(" ")}`);
+        const quayWritten = rtPatterns === null ? [] : benignPaths.filter((p) => isRuntimeArtifactPath(p, rtPatterns));
+        stderrLines.push(
+          `fan-in-ff-merge: passed through a benign runtime-dirty tree (untracked .quay/ runtime files outside the task's ## Touches) — ${benignPaths.join(" ")}` +
+            (quayWritten.length > 0
+              ? ` [quay's own runtime artifacts per ${rtManifestLabel}: ${quayWritten.join(" ")}]`
+              : ""),
+        );
         porcelain = "";
       }
     }
@@ -224,6 +267,29 @@ function cleanTreeCheck(args: FfMergeArgs, root: string): { ok: boolean; stderrL
     stderrLines.push(`fan-in-ff-merge: working tree not clean in ${root} — the merge-mode ff must run on a clean checkout (found uncommitted changes):`);
     for (const line of porcelain.split("\n")) {
       if (line) stderrLines.push(`fan-in-ff-merge:   ${line}`);
+    }
+    // Quay-authorship attribution (tasks/gap-quay-init-gitignore-misses-quay-runtime-artifacts-outside-
+    // dot-quay, Plan item 4): a dirty path that IS a quay runtime artifact — or lies in a directory quay
+    // writes runtime state under — is NOT this task's change, and the bare "working tree not clean"
+    // reason sends the reader hunting through their own diff instead. Name the author and the
+    // disposition. (The task's own dirty paths are unaffected — this ADDS lines, it never suppresses
+    // the refusal.)
+    const dirtyPaths = porcelain.split("\n").filter(Boolean).map((l) => l.slice(3));
+    const hits = classifyRuntimeArtifactDirty(dirtyPaths, rtPatterns);
+    if (hits.length > 0) {
+      stderrLines.push(
+        `fan-in-ff-merge: ${hits.length} of the path(s) above ${hits.length === 1 ? "is" : "are"} written by QUAY ITSELF, not by this task (the CLI / loop / drivers write runtime state) — manifest: ${rtManifestLabel}`,
+      );
+      for (const h of hits) {
+        stderrLines.push(
+          h.pattern
+            ? `fan-in-ff-merge:   QUAY RUNTIME ARTIFACT: ${h.path} (matches "${h.pattern}" in the manifest)`
+            : `fan-in-ff-merge:   QUAY RUNTIME ARTIFACT AREA: ${h.path} — quay writes runtime state under this directory ("${h.area}"); if this residue came from a quay loop, it is quay's, not this task's`,
+        );
+      }
+      stderrLines.push(
+        `fan-in-ff-merge: disposition — quay-init writes these patterns into a NEW project's .gitignore; for an EXISTING project add the manifest's patterns to .gitignore (or re-run quay-init), or move the residue out of the repository. ⛔ A task-side cause is the wrong place to look for these paths.`,
+      );
     }
     return { ok: false, stderrLines };
   }

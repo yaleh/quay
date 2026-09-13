@@ -459,15 +459,22 @@ t("AC2 — every run_static_checks checker checker-mutation-check sees is in the
     "suite-bucket-drift-check",
     "obligation-ledger-check",
     "fan-in-workflow-retirement-check",
-    "dispatch-record-fingerprint-reason-check",
     "per-task-suite-record-check",
     "fan-in-ff-protocol-check",
     "fan-in-materialize-check",
-    "direct-to-develop-bypass-check",
     "suite-duration-exceed-check",
     "instrument-decay-check",
     "release-freshness-check",
   ]);
+  // ⛔ TWO MEMBERS LEFT THIS SET 2026-09-13 (tasks/gap-correctness-checkers-opt-in-not-default-suite-
+  // member): "dispatch-record-fingerprint-reason-check" and "direct-to-develop-bypass-check" are back
+  // in run_static_checks() and therefore ARE expected in the tier registry — listing them here would
+  // now assert the OPPOSITE of what the wiring does. Why the 2026-09-02 ruling did not cover them:
+  // its rationale is "a passive checkout must go green on code alone", a property of the CARRIER a
+  // checker reads; both of these are vacuous-safe on an absent runtime state BY THEIR OWN DESIGN
+  // (measured against a bare repo: exit 0, and exit 3 which run_checker treats as a third,
+  // never-fail-closed state). Leaving them opt-in made them "existing but never run" — their only
+  // production reachability was gone. See the promotion block at the end of run_static_checks().
   // checker-mutation-check.sh's own manifest parser (list_run_static_checks_checkers) extracts the
   // same invocation set from run_static_checks + run_operational_checks + run_doc_checks — the tier
   // registry must cover the CODE-class subset, and must EXCLUDE the doc-class (pre-commit) and

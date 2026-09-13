@@ -1254,8 +1254,8 @@ async function block14(workspaceRoot) {
     );
     // The dispatch command set from packages/quay/bin/quay.ts (every `if (cmd === "…")` route).
     const dispatchVerbs = [
-      "adr", "goal", "meta", "task", "action", "serve", "mcp", "init", "config", "gate", "gate-log",
-      "complete", "adjudicate", "promote", "retreat", "run", "migrate", "manager", "driver",
+      "adr", "goal", "meta", "task", "action", "serve", "server", "mcp", "init", "config", "gate",
+      "gate-log", "complete", "adjudicate", "promote", "retreat", "run", "migrate", "manager", "driver",
     ];
     const missing = dispatchVerbs.filter((v) => !synopsisVerbs.includes(v));
     const extra = synopsisVerbs.filter((v) => !dispatchVerbs.includes(v));
@@ -2056,7 +2056,22 @@ function block28() {
   // config/manager route their subcommands inside their handlers (src/cli/config.ts
   // / src/cli/manager.ts), not via `cmd && sub` routes in quay.ts — so enumerate
   // them here, the same list the fallback line is expected to carry.
-  const handlerSubs = ["config validate", "config check", "manager start", "manager arm"];
+  // `server <verb>` joins them: its subcommands live inside src/cli/server.ts (the handler dispatches
+  // on `sub` and reports the usage line Served's verb set for anything else), exactly like
+  // config/manager — not via `cmd && sub` routes in quay.ts.
+  // ⚠️ AC-254 added the three stage-B verbs. They MUST be listed here or this gate reports them as
+  // `extra` (present in the usage line, absent from the expected set) — which is the correct
+  // behaviour: a verb nobody declared is drift, whether it was added by accident or on purpose.
+  const handlerSubs = [
+    "config validate",
+    "config check",
+    "manager start",
+    "manager arm",
+    "server start",
+    "server add",
+    "server stop",
+    "server status",
+  ];
   const expected = new Set([...new Set(dispatchTopLevel), ...dispatchSubs, ...handlerSubs]);
 
   // Actual command set, parsed out of the fallback usage line's <…> payload.

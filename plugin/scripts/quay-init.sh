@@ -2449,6 +2449,55 @@ ensure_gitignore() {
   echo "  appended: $entry (+ negation for config.yml/profiles.yml) to .gitignore"
 }
 
+# ensure_runtime_artifacts_gitignore — tasks/gap-quay-init-gitignore-misses-quay-runtime-artifacts-
+# outside-dot-quay. quay writes runtime state OUTSIDE `.quay/`: the native store's parse cache lands
+# at `<tasksDir>/.quay-parse-cache.json`, fast-mode telemetry under `milestones/`, the tick ledgers
+# under `orchestration/`, per-run event logs under `.workflow-events/`. `.quay/*` above cannot reach
+# ANY of those, and the writers run on the READ path (`task_list` / `task_get`, plus the fan-in's own
+# `ac-precheck` / `anti-drift` steps) ⇒ merely listing tasks leaves the project dirty, and the
+# mechanical fan-in's `ff` then refuses with "working tree not clean" for EVERY task, forever.
+# Measured on a real third-party project (quay-fleet, 2026-09-13): a task with a 55/55-green suite
+# could not land; the repair at the time was two hand-added lines in THAT project — which leaves the
+# generator (this template) drifting for the next consumer.
+#
+# ⛔ The pattern list is NOT written here. It is READ from the single-source manifest
+# `${SCRIPT_DIR}/quay-runtime-artifacts.txt` — the same file the fan-in's clean-tree judgment reads
+# and the same set `gitignore-runtime-coverage-check.ts` binds to quay's own `.gitignore`. Re-listing
+# the patterns here would re-create exactly the copy-that-drifted defect (硬规则 5b).
+# Idempotent (the block header is the marker) + append-only (never rewrites, reorders or clobbers
+# the consumer's other gitignore content); a pattern already present verbatim is not duplicated.
+# A missing manifest is REPORTED (never silent) and degrades to "no runtime ignore rules written".
+RUNTIME_ARTIFACTS_BLOCK_HEADER='# quay runtime artifacts outside .quay/ (written by quay itself; list = plugin/scripts/quay-runtime-artifacts.txt — do NOT hand-edit, add to that manifest)'
+ensure_runtime_artifacts_gitignore() {
+  local gi="$WORKSPACE_ROOT/.gitignore"
+  local manifest="${PLUGIN_ROOT}/scripts/quay-runtime-artifacts.txt"
+  if [ ! -f "$manifest" ]; then
+    echo "  WARNING: runtime-artifact manifest not found at $manifest — no quay runtime ignore rules written (a consumer project will go dirty on any task-store read)" >&2
+    return
+  fi
+  if [ -f "$gi" ] && grep -qxF "$RUNTIME_ARTIFACTS_BLOCK_HEADER" "$gi"; then
+    [ "$DRY_RUN" = true ] || echo "  skipped: .gitignore already carries the quay runtime-artifact block"
+    return
+  fi
+  local patterns=()
+  while IFS= read -r line; do
+    case "$line" in ''|'#'*) continue ;; esac
+    patterns+=("$line")
+  done < "$manifest"
+  if [ "$DRY_RUN" = true ]; then
+    echo "  would-append: quay runtime-artifact block (${#patterns[@]} pattern(s) from $manifest)"
+    return
+  fi
+  {
+    printf '%s\n' "$RUNTIME_ARTIFACTS_BLOCK_HEADER"
+    for p in "${patterns[@]}"; do
+      if [ -f "$gi" ] && grep -qxF "$p" "$gi"; then continue; fi
+      printf '%s\n' "$p"
+    done
+  } >> "$gi"
+  echo "  appended: quay runtime-artifact block (${#patterns[@]} pattern(s) from $manifest)"
+}
+
 # write_claude_settings — generate .claude/settings.json (project-level enable + MCP pre-approval).
 write_claude_settings() {
   local dst="$WORKSPACE_ROOT/.claude/settings.json"
@@ -2719,6 +2768,7 @@ if [ "$DRY_RUN" = true ]; then
   echo "  would-create: tasks/"
   echo "  would-create: goals/"
   ensure_gitignore
+  ensure_runtime_artifacts_gitignore
   write_template "$PLUGIN_ROOT/.claude/launch.settings.json" "$WORKSPACE_ROOT/.claude/launch.settings.json" "launch template"
   write_claude_settings
   echo "  auto-commit: SKIP (--dry-run — nothing was written)"
@@ -2734,6 +2784,7 @@ echo "  created: tasks/"
 mkdir -p "$WORKSPACE_ROOT/goals"
 echo "  created: goals/"
 ensure_gitignore
+ensure_runtime_artifacts_gitignore
 write_template "$PLUGIN_ROOT/.claude/launch.settings.json" "$WORKSPACE_ROOT/.claude/launch.settings.json" "launch template"
 write_claude_settings
 

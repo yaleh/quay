@@ -62,6 +62,10 @@ import {
   enumerateLiveWorkerCmdlines,
   hasLiveWorkerForTask,
   WORKER_PROCESS_NAME,
+  resolveWorkerProcessName,
+  upsertDispatchRecord,
+  dispatchStoreFile,
+  readDispatchStore,
   parseIntervalMs,
   RESIDENT_INTERVAL_MS_DEFAULT,
   parseReconcileIntervalSecs,
@@ -117,6 +121,7 @@ import {
   appendCompleteGateEvent,
   failingTestFilesFromSuiteLog,
   assertionSignaturesFromSuiteLog,
+  normalizeAssertionSignature,
   judgeRetryExemption,
   RETRY_EXEMPTION_WINDOW_MS_DEFAULT,
 } from "../scripts/worker-driver.ts";
@@ -913,6 +918,127 @@ test("RETRY_EXEMPTION_WINDOW_MS_DEFAULT — 48h 窗口缺省（与提案 48h 复
   assert.equal(RETRY_EXEMPTION_WINDOW_MS_DEFAULT, 48 * 3600 * 1000, "48h default window");
 });
 
+// ── gap-retry-exemption-signature-keeps-volatile-values：签名归一化必须折易变量 ⛔ 不折身份 ──────────
+// 根因：归一化只折叠空白 ⇒ pid / 毫秒 / 路径 / 哈希留在签名里 ⇒ 同一缺陷每次运行给出**新**签名 ⇒
+// 「≥2 个不同任务命中同一签名」结构上永不成立 ⇒ 专为「不相关 flaky 不压垮受害任务」而造的豁免恒空。
+// 本段是**双向控制**：①同一缺陷（易变量各异）跨 2 任务 ⇒ 必须豁免；②两个**不同**缺陷（易变量各异）
+// ⇒ 必须仍计数。②是①的取假器——把归一化写过头的实现（例如抹掉整个签名）会让②立刻翻红。
+
+test("AC3 (反向控制) — 两个【不同】缺陷（易变量各异）跨 2 任务 ⇒ 仍 own-defect-counted（⛔ 归一化过头即红）", (t) => {
+  const root = makeRoot("exempt-volatile-ac3");
+  t.after(() => rmSafe(root));
+  writeExemptionTask(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]);
+  writeFailingTest(root, EXEMPT_TEST);
+  const nowMs = Date.parse("2026-09-03T00:00:00.000Z");
+  // 缺陷 A 与缺陷 B：措辞不同（缺陷身份不同），但**都**带 pid/路径易变量——若归一化把量抹成恒等占位
+  // 甚至抹掉整条签名，两条会并成同一签名 ⇒ 本条从 own-defect-counted 翻成 unrelated-flaky-exempt ⇒ 红。
+  const defectA = "probe must be alive: pid=1234 at /home/yale/work/quay-worktrees/gap-a/plugin/test/obs.test.mjs";
+  const defectB = "queue depth exceeded: pid=9999 at /home/yale/work/quay-worktrees/gap-b/plugin/test/obs.test.mjs";
+  writeSuiteRedLog(root, "fan-in-suite-gap-a.log", EXEMPT_TEST, defectA);
+  writeSuiteRedLog(root, "fan-in-suite-gap-b.log", EXEMPT_TEST, defectB);
+  appendOtherSuiteRed(root, "gap-b", new Date(nowMs - 3600_000).toISOString(), "fan-in-suite-gap-b.log");
+
+  assert.notEqual(
+    normalizeAssertionSignature(defectA), normalizeAssertionSignature(defectB),
+    "AC3 取假器：两个不同缺陷归一化后必须仍不同（相同 ⇒ 归一化把「不同」变成了「同一」）",
+  );
+  const j = judgeRetryExemption(root, "gap-a", { mechanical_fan_in: { step: "suite", suiteLog: "fan-in-suite-gap-a.log" } }, { nowMs });
+  assert.equal(j.verdict, "own-defect-counted", "different defect ⇒ NOT exempt (count normally)");
+  assert.deepEqual(j.recurredTasks, [], "no other task recurred this defect's signature");
+});
+
+test("AC2 (正控制) — 同一缺陷的易变量（pid/ms/路径）各异跨 2 任务 ⇒ unrelated-flaky-exempt（⛔ 改前 own-defect-counted）", (t) => {
+  const root = makeRoot("exempt-volatile-ac2");
+  t.after(() => rmSafe(root));
+  writeExemptionTask(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]);
+  writeFailingTest(root, EXEMPT_TEST);
+  const nowMs = Date.parse("2026-09-03T00:00:00.000Z");
+  // 同一缺陷（driver-runtime AC4「未确认存活」）的两次运行：pid / 耗时 / 工作树路径全不同。
+  // 这两条逐字取自 2026-09-13 现场 suite 日志（见任务体 AC1 读数），此处只换 worktree 路径段。
+  const run1 = "未确认存活 ⇒ 非零退出：started: supervisor pid=955396 kind=promotion run_id=dr-ac4-short driver pid=955909 confirmed_ms=1044";
+  const run2 = "未确认存活 ⇒ 非零退出：started: supervisor pid=2765126 kind=promotion run_id=dr-ac4-short driver pid=2765880 confirmed_ms=1045";
+  writeSuiteRedLog(root, "fan-in-suite-gap-a.log", EXEMPT_TEST, run1);
+  writeSuiteRedLog(root, "fan-in-suite-gap-b.log", EXEMPT_TEST, run2);
+  appendOtherSuiteRed(root, "gap-b", new Date(nowMs - 3600_000).toISOString(), "fan-in-suite-gap-b.log");
+
+  // 生产缺陷（driver-runtime AC4）在两次运行里逐字不同 ⇒ 改前这两条签名不相等（AC1 能取假读数）。
+  assert.notEqual(run1, run2, "AC1 取假：同一缺陷的两次运行逐字不同");
+  assert.equal(
+    normalizeAssertionSignature(run1), normalizeAssertionSignature(run2),
+    "AC2：同一缺陷的易变量折叠后必须相等",
+  );
+  const j = judgeRetryExemption(root, "gap-a", { mechanical_fan_in: { step: "suite", suiteLog: "fan-in-suite-gap-a.log" } }, { nowMs });
+  assert.equal(j.verdict, "unrelated-flaky-exempt", "same defect (volatile values differ) across ≥2 tasks ⇒ exempt");
+  assert.deepEqual(j.recurredTasks, ["gap-b"], "the other task that recurred the signature is named");
+});
+
+test("normalizeAssertionSignature — 折易变量（数字/哈希/绝对路径）∧ ⛔ 不折词内数字与措辞", () => {
+  // 折：pid / 毫秒 / 端口 / 计数（数字 token）、sha、绝对路径。单位文本保留 ⇒ 数量变、签名不变。
+  assert.equal(
+    normalizeAssertionSignature("pid=955396 confirmed_ms=1044 at /home/yale/work/quay-worktrees/gap-x/plugin/test/obs.test.mjs"),
+    "pid=<n> confirmed_ms=<n> at <path>",
+  );
+  assert.equal(normalizeAssertionSignature("probe 530ms port 34567"), "probe <n>ms port <n>");
+  assert.equal(
+    normalizeAssertionSignature("head 4f2a9c1b3d5e6f70819a2b3c4d5e6f708192a3b4"),
+    "head <hex>",
+  );
+  // ⛔ 不折词内数字：`dr-ac4-short` 是**稳定**标识符，折掉它会把 ac4 与 ac7 两个不同用例并成同一签名。
+  assert.equal(normalizeAssertionSignature("run_id=dr-ac4-short"), "run_id=dr-ac4-short");
+  assert.notEqual(normalizeAssertionSignature("run_id=dr-ac4-short"), normalizeAssertionSignature("run_id=dr-ac7-short"));
+  // ⛔ 不折普通英文词里恰好由 a–f 组成的字母（`defaced` 不是哈希）。
+  assert.equal(normalizeAssertionSignature("defaced artifact"), "defaced artifact");
+  // ⛔ 不折措辞：`AC1/AC2/AC3` 的斜杠不在词首，不当作路径。
+  assert.equal(normalizeAssertionSignature("AC1/AC2/AC3 covered"), "AC1/AC2/AC3 covered");
+});
+
+test("DoD (落点映射·机械) — 签名归一化只有一个正本点：提取点/归一化点各一处，⛔ 不留第二份易变量清单", () => {
+  // 把「唯一正本点」做成可执行判据（⛔ 不是散文承诺）：源码里出现第二处签名提取或第二处空白归一化
+  // ⇒ 立刻红。这样「后来有人又在别处拼一份签名逻辑」是机械可见的，不靠记得。
+  const src = fs.readFileSync(new URL("../scripts/worker-driver.ts", import.meta.url), "utf8");
+  const count = (re) => (src.match(re) || []).length;
+  assert.equal(count(/AssertionError\(\?:/g), 1, "断言签名的提取点只许有一处");
+  assert.equal(count(/export function normalizeAssertionSignature\(/g), 1, "归一化函数只许定义一次");
+  assert.equal(count(/\\s\+\/g/g), 1, "空白归一化只许在唯一正本点里做（第二处 = 第二份清单）");
+  // 消费者：两个（跨任务复发扫描 + 判定入口），都经 assertionSignaturesFromSuiteLog 拿到已归一化签名。
+  assert.equal(count(/assertionSignaturesFromSuiteLog\(/g), 3, "1 处定义 + 2 处消费者，全部经同一提取点");
+});
+
+test("AC4 (硬规则 3b) — 判不出（退化签名 / 无断言行 / suite log 读不到）⇒ insufficient-data-fallback，⛔ 不与豁免同形", (t) => {
+  const root = makeRoot("exempt-volatile-ac4");
+  t.after(() => rmSafe(root));
+  writeExemptionTask(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]);
+  writeFailingTest(root, EXEMPT_TEST);
+
+  // ① 退化签名：折叠后连一个字母都不剩（`1 !== 2`）⇒ 在不同缺陷间恒等 ⇒ 不得当作身份 ⇒ 判不出。
+  writeSuiteRedLog(root, "fan-in-suite-gap-degenerate.log", EXEMPT_TEST, "1 !== 2");
+  const degenerate = judgeRetryExemption(root, "gap-a", { mechanical_fan_in: { step: "suite", suiteLog: "fan-in-suite-gap-degenerate.log" } });
+  assert.equal(degenerate.verdict, "insufficient-data-fallback", "degenerate signature ⇒ insufficient-data-fallback");
+  assert.notEqual(degenerate.verdict, "unrelated-flaky-exempt", "判不出 ≠ 判为无关（硬规则 3b）");
+
+  // ② suite 日志里一条 AssertionError 都没有 ⇒ 判不出（⛔ 不伪造成「无复发」）。
+  const p = path.join(root, ".quay", "fan-in-suite-gap-noassert.log");
+  fs.writeFileSync(p, `__PERFILE__ duration_ms=10 ${EXEMPT_TEST} passed=false end_ms=1\n`, "utf8");
+  const noAssert = judgeRetryExemption(root, "gap-a", { mechanical_fan_in: { step: "suite", suiteLog: "fan-in-suite-gap-noassert.log" } });
+  assert.equal(noAssert.verdict, "insufficient-data-fallback", "no assertion line ⇒ insufficient-data-fallback");
+  assert.notEqual(noAssert.verdict, "unrelated-flaky-exempt", "读不懂 ≠ 豁免");
+
+  // ③ suite log 读不到 / outcome 缺字段 ⇒ 判不出。
+  assert.equal(
+    judgeRetryExemption(root, "gap-a", { mechanical_fan_in: { step: "suite", suiteLog: "no-such-log.log" } }).verdict,
+    "insufficient-data-fallback", "unreadable suite log ⇒ insufficient-data-fallback");
+  assert.equal(
+    judgeRetryExemption(root, "gap-a", { final_state: "exited-not-landed" }).verdict,
+    "insufficient-data-fallback", "outcome with no mechanical_fan_in ⇒ insufficient-data-fallback");
+
+  // ④ 退化签名与好签名并存 ⇒ 好签名仍起作用（退化只被丢弃，不污染整条日志）。
+  const mixedPath = path.join(root, ".quay", "fan-in-suite-gap-mixed.log");
+  fs.writeFileSync(mixedPath,
+    `__PERFILE__ duration_ms=10 ${EXEMPT_TEST} passed=false end_ms=1\n  AssertionError [ERR_ASSERTION]: 1 !== 2\n  AssertionError [ERR_ASSERTION]: probe must be alive\n`, "utf8");
+  assert.deepEqual(assertionSignaturesFromSuiteLog(fs.readFileSync(mixedPath, "utf8")), ["probe must be alive"],
+    "degenerate signature dropped, non-degenerate one kept");
+});
+
 // ── gap-worker-driver-selector-api-error-no-backoff：selector API 错误/快速死亡无退避 ───────────────
 // 根因：worker-driver 对 selector API 错误 / fallback 失败的【快速死亡】（<60s 墙钟）无退避——17:22–17:56
 // 两任务 54 次「worker exited with code 1」全部 <60s 快速重派，纯烧派发预算（subagent spawn 预算 / 会话累计）。
@@ -971,8 +1097,140 @@ test("AC1+AC3 pure — recordQuickDeathBackoff: 退避按 task、间隔随次数
   assert.equal(s2.backoffUntil.get("gap-b"), undefined, "backoff cleared on non-quick-death");
 });
 
-test("AC1 pure — 按 task 隔离：一个 task 退避不影响另一个 task 的退避状态", () => {
-  const state = newQuickDeathBackoffState();
+// ── gap-reconcile-finalizes-live-worker-as-exited-and-double-dispatches-same-task（AC4）────────────
+// 孤儿 finalize 的 outcome 带 orphan_pid_liveness（/proc 实测取值）。⛔ 一个【没测量出来的】死亡不得
+// 烧重试预算：unknown（/proc 读不到）与 alive（其实还活着）都不算快速死亡，也不打断已测量的连续序列。
+
+test("AC4 (三值分流) — isQuickDeath/recordQuickDeathBackoff：只有实测 'exited' 才算死亡；'unknown'/'alive' 不计入连续计数", () => {
+  const cfg = { quickDeathMs: 60_000, backoffThreshold: 1, baseBackoffMs: 1000, maxBackoffMs: 5000 };
+
+  // ① 纯函数面：同一 (finalState, wallClock) 下三个取值给出不同判定。
+  assert.equal(isQuickDeath("failed", 5000, cfg, "exited"), true, "measured exit ⇒ quick death (既有语义不变)");
+  assert.equal(isQuickDeath("failed", 5000, cfg, "unknown"), false, "⛔ 没测成的死亡不是死亡");
+  assert.equal(isQuickDeath("failed", 5000, cfg, "alive"), false, "⛔ 还活着当然不是死亡");
+  assert.equal(isQuickDeath("failed", 5000, cfg, undefined), true, "缺字段（普通 worker 终态）⇒ 既有语义不变");
+
+  // ② AC4 左臂：N 次「无法判定」（N > backoffMaxRetries）⇒ 永远不 needs-human，且状态【不动】。
+  const unknownState = newQuickDeathBackoffState();
+  for (let i = 0; i < 5; i++) {
+    const r = recordQuickDeathBackoff(unknownState, "gap-unk", "failed", 5000, 100_000 + i, 3, cfg, "unknown");
+    assert.equal(r.quickDeath, false, `AC4: unknown #${i + 1} is not a quick death`);
+    assert.equal(r.newlyNeedsHuman, false, `AC4: unknown #${i + 1} never parks the task needs-human`);
+  }
+  assert.equal(unknownState.counts.get("gap-unk"), undefined, "AC4: unknown 不计数（⛔ 不烧重试预算）");
+  assert.equal(unknownState.backoffUntil.get("gap-unk"), undefined, "AC4: unknown 也不产生退避（没有死亡可退避）");
+
+  // ③ AC4 右臂（同构对照）：同样 N 次，换成「确认已退出」⇒ 到上限即 needs-human。
+  const exitedState = newQuickDeathBackoffState();
+  let parked = false;
+  for (let i = 0; i < 5; i++) {
+    parked = recordQuickDeathBackoff(exitedState, "gap-exi", "failed", 5000, 100_000 + i, 3, cfg, "exited").newlyNeedsHuman || parked;
+  }
+  assert.equal(parked, true, "AC4 对照：5 次【实测】快速死亡 ⇒ 到 maxRetries 标 needs-human");
+  assert.ok(exitedState.counts.get("gap-exi") >= 3, "AC4 对照：连续计数已达 maxRetries=3");
+  assert.notEqual(unknownState.counts.get("gap-unk"), exitedState.counts.get("gap-exi"),
+    "AC4 承重：同一构造下 unknown 与 exited 必须给出【不同】计数结果（否则这条判据什么也没测）");
+
+  // ④ unknown 不打断【已测量】的连续死亡序列（⛔ 与「非快速死亡 ⇒ 复位」刻意不同形，硬规则 3）。
+  const mixed = newQuickDeathBackoffState();
+  recordQuickDeathBackoff(mixed, "gap-mix", "failed", 5000, 100_000, 3, cfg, "exited");
+  assert.equal(mixed.counts.get("gap-mix"), 1, "one measured quick death");
+  recordQuickDeathBackoff(mixed, "gap-mix", "failed", 5000, 100_001, 3, cfg, "unknown");
+  assert.equal(mixed.counts.get("gap-mix"), 1, "unknown 后计数保持 1（⛔ 不复位——否则交错注入 unknown 可洗白真实 streak）");
+  const third = recordQuickDeathBackoff(mixed, "gap-mix", "failed", 5000, 100_002, 3, cfg, "exited");
+  assert.equal(mixed.counts.get("gap-mix"), 2, "the measured streak continues past an unknown");
+  assert.equal(third.newlyNeedsHuman, false, "2 < maxRetries ⇒ not yet parked");
+});
+
+// ── AC5 (读生产载体) — 真解析 + 真 /proc + 真 .quay/worker-outcome.jsonl，经常驻环的 reconcile 步 ──
+// ⚠️ 这是【临时 root 的真实驱动跑】而不是 quay 的自然生产样本：实现落地时点之后，主仓/第三方仓的
+// 自然样本数为 0（窗口还开着，见任务体的 AC5 记述）。本条证明的是【字段真的经常驻环落进载体】——
+// 硬规则 4 推论三点名的失败形态正是「实现了、单测绿了、生产载体一次都没写过」。
+// 臂① 孤儿 pid【确已退出】⇒ reconcile 写出一条带 orphan_pid_liveness="exited" 的记录。
+// 臂② 孤儿 pid【仍是本任务活 worker】⇒ ⛔ 一条孤儿 finalize 记录都不落（这正是本缺陷写过的那条假记录）。
+test("AC5 (生产载体, 双臂) — 常驻环 reconcile：确已退出的孤儿 ⇒ 载体落一条带 liveness 的假阳性可检验记录；活 worker ⇒ ⛔ 不落", async (t) => {
+  const root = makeGitRoot("orphan-carrier-ac5");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}-ac5`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    rmSafe(root);
+    rmSafe(wtPath);
+  });
+  writeProfileCarrier(root); // worker 名 = quay-test-worker（⛔ 不是 quay-task-worker）⇒ 顺带压住名字解析
+  const workerName = resolveWorkerProcessName(root);
+  assert.equal(workerName, "quay-test-worker", "precondition: 名字解析自载体，不是写死的字面量");
+  const taskId = "gap-orphan-carrier-ac5";
+  const taskDead = "gap-orphan-carrier-ac5-dead";
+  writeTaskFile(root, taskId, "ready");
+  writeTaskFile(root, taskDead, "ready");
+  runGit(root, ["worktree", "add", "-q", "-b", `task/${taskId}`, wtPath]);
+  const outcomeFile = path.join(root, WORKER_OUTCOME_REL);
+  const dispatchFile = dispatchStoreFile(root);
+  const orphanRecords = () => (fs.existsSync(outcomeFile) ? readOutcomeLines(root) : [])
+    .filter((o) => /orphaned worker finalized by reconcile/.test(o.failure_reason ?? ""));
+
+  // 臂②：一个【仍是本任务活 worker】的孤儿（cmdline 含解析出的 worker 名 + task id）。
+  const live = spawn(process.execPath, ["-e", "setTimeout(()=>{},60000)", workerName, taskId], { stdio: "ignore" });
+  t.after(() => { try { live.kill("SIGKILL"); } catch { /* gone */ } });
+  await new Promise((r) => setTimeout(r, 100));
+  upsertDispatchRecord(dispatchFile, {
+    taskId, runId: "fm-ac5-live", workerPid: live.pid, selectorReason: "ac5 live arm",
+    startedAtMs: Date.now() - 1000, timeoutDeadlineMs: 0,
+    cmdlineFingerprint: `claude -n ${workerName} -p '... Task: ${taskId} ...'`,
+  });
+
+  let drv = null;
+  t.after(async () => { if (drv) await drv.stop(); });
+  drv = spawnResident(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ready:[],pool:0}))",
+    "--selector-cmd", "node -e console.log('gap-x\\x20pick')",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--worker-cmd-exact", "node -e process.exit(0)",
+    "--interval", "20",
+    // 臂② adopt 了一个长跑孤儿 ⇒ 退出边沿事件不来，循环只在【协调地板】上醒；缺省 300s 会让臂①
+    // 等不到下一趟 reconcile（实测：25s 等待超时，唯一的失败就是这个）。地板压到 1s。
+    "--reconcile-interval", "1",
+  ]);
+  // ⚠️ waitFor 超时【不抛】而是返回 falsy ⇒ 必须显式断言，⛔ 不能只 await（那是恒真的空转判据）。
+  const adopted = await waitFor(() => drv.events().some((e) => e.event === "orphan-adopted" && e.task === taskId), 20000);
+  assert.ok(adopted, "AC5 臂②: 活 worker 被 adopt（⛔ 不是被判死）——这是 reconcile 的正确归宿");
+  assert.equal(orphanRecords().length, 0, "AC5 臂②: 活 worker 期间载体里【零】孤儿 finalize 记录（⛔ 这正是本缺陷写过的那条假记录）");
+  assert.ok(readDispatchStore(dispatchFile)[taskId], "AC5 臂②: 记录仍在（adopt 中，⛔ 不被判死清掉）");
+  // AC3 的派发计数侧（配置名 ≠ 写死名的形态）：存活 worker 在飞 ⇒ 同任务派发计数 = 0。
+  assert.equal(drv.events().some((e) => e.event === "worker-spawned" && e.task === taskId), false,
+    "AC3: 同一 taskId 已有存活 worker ⇒ ⛔ 不再派第二个（派发计数 = 0）");
+
+  // 臂①：另起一个【确已退出】的孤儿（真 spawn、真等退出、真等 /proc 条目消失）。
+  const dead = spawn(process.execPath, ["-e", "process.exit(0)"], { stdio: "ignore" });
+  await new Promise((r) => dead.once("exit", r));
+  const deadPid = dead.pid;
+  await waitFor(() => { try { return !fs.existsSync(`/proc/${deadPid}`); } catch { return true; } }, 15000);
+  assert.equal(fs.existsSync(`/proc/${deadPid}`), false, "precondition: 「确已退出」本身也是测量出来的（/proc 条目已消失）");
+  upsertDispatchRecord(dispatchFile, {
+    taskId: taskDead, runId: "fm-ac5-dead", workerPid: deadPid, selectorReason: "ac5 dead arm",
+    startedAtMs: Date.now() - 1000, timeoutDeadlineMs: 0,
+    cmdlineFingerprint: `claude -n ${workerName} -p '... Task: ${taskDead} ...'`,
+  });
+
+  const landed = await waitFor(() => orphanRecords().some((o) => o.task === taskDead), 25000);
+  assert.ok(landed, "AC5 臂①: reconcile 真的往生产载体写了一条孤儿 finalize 记录（⛔ 不是只写进单测的返回值）");
+  const rec5 = orphanRecords().find((o) => o.task === taskDead);
+  assert.equal(rec5.final_state, "failed", "AC5 臂①: 非 completed 终态");
+  assert.equal(rec5.orphan_pid_liveness, "exited",
+    "AC5 承重: 载体记录带【实测】liveness ⇒ 断言从此可被读者取假（⛔ 此前载体里没有这个字段，声称无法被检验）");
+  assert.match(rec5.failure_reason, /already exited/, "AC5 臂①: 实测已退出 ⇒ 保留原措辞");
+  assert.equal(readDispatchStore(dispatchFile)[taskDead], undefined, "AC5 臂①: 记录被清（孤儿有归宿）");
+
+  // AC5 的判据形式：该载体里此类记录数 ≥1 且【假阳性 = 0】（假阳性 = 声称已退出但实测不是已退出）。
+  const all = orphanRecords();
+  const falsePositives = all.filter((o) => o.orphan_pid_liveness !== "exited");
+  assert.ok(all.length >= 1, `AC5: 该类记录数 ≥1（实测 ${all.length}）`);
+  assert.equal(falsePositives.length, 0,
+    `AC5: 假阳性 = 0（实测 ${falsePositives.length}；每条都带 orphan_pid_liveness ⇒ 该计数不是自证而是可复核的）`);
+  drv.stop();
+});
+
+test("AC1 pure — 按 task 隔离：一个 task 退避不影响另一个 task 的退避状态", () => {  const state = newQuickDeathBackoffState();
   const cfg = { quickDeathMs: 60_000, backoffThreshold: 1, baseBackoffMs: 1000, maxBackoffMs: 5000 };
   recordQuickDeathBackoff(state, "gap-a", "failed", 5000, 100_000, 3, cfg);
   assert.equal(isBackedOff(state, "gap-a", 100_000), true, "gap-a backed off");

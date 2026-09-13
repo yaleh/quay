@@ -89,9 +89,9 @@
 //   - forceDispatch(task)  ⇒ append forced[]（强制派发记录，驻留驱动的 selector 环消费；本阶段驱动仍用
 //     显式 --task，forceDispatch 落盘记录即可观测）
 //
-// Run（MCP 控制面）:
-//   node --experimental-strip-types plugin/scripts/worker-driver.ts --serve \
-//     --root <repo> [--host 127.0.0.1] [--port <n>] [--json]
+// Run（MCP 控制面）—— ⛔ 本文件没有控制面入口：控制面由每个 kind 的 supervisor 起（Layer 0，
+// `driver-runtime.ts` 的 runSupervisor → serveKindControlPlane）。逐 kind 的 URL/端口回读面 =
+// `<root>/.quay/<prefix>-control-plane.json`（`statePaths().controlPlaneFile`）。见 GOAL-017/AC-252。
 //
 // 阶段 4 新增（AC129，SPEC §5 阶段 4——常驻驱动 + 自主选任务，把「谁决定现在跑哪个任务」从 inner 的
 // LLM tick 会话移到本常驻进程）：
@@ -136,7 +136,6 @@ import { parseLoadSensitiveAnnotation } from "./known-load-sensitive.ts";
 // （函数级复用，⛔ 非复制粘贴）。本文件仍 re-export 保持旧 import 面（worker-driver.test.mjs 等）。
 import {
   resourceGateCheck,
-  serveControlPlane,
   isHalted,
 } from "./driver-shared.ts";
 export {
@@ -204,6 +203,10 @@ import {
   resolveQuaySrcModule,
   type LivenessResult,
 } from "./driver-runtime.ts";
+// gap-reconcile-finalizes-live-worker-as-exited-and-double-dispatches-same-task：worker 进程名是
+// 【配置】而非常量（`.quay/profiles.yml` roles["task-worker"].name）⇒ 存活探测必须先解析它，
+// ⛔ 不沿用写死的 `quay-task-worker`（第三方项目改名后探测恒不命中，见 resolveWorkerProcessName）。
+import { loadProfiles, resolveRole } from "./profile-policy.ts";
 // 机械 fan-in（gap-fan-in-driver-mechanical-orchestration / SPEC-fan-in-driver-mechanical-
 // orchestration-2026-08-27）：suite 不再 detach（setsid+&+disown 孤儿）——改由 driver 直接 spawn 并 wait
 // （进程级父子，ppid 指向 driver，AC3）。复用 suite-driver.ts 的 spawnSuiteAndWait（同一单飞槽语义 +
@@ -278,7 +281,33 @@ export const MAX_TASK_SUBAGENTS_ENV = "QUAY_MAX_TASK_SUBAGENTS";
  *  AC150-3：控制态常量（CONTROL_STATE_REL/CONTROL_CALLERS_ENV/DEFAULT_CALLERS/CONTROL_HEADER/
  *  CONTROL_HEADER_NAME）已随控制面抽到 driver-shared.ts 并在本文件 re-export；本常量是 worker
  *  独有（进程名识别），保留在本文件。 */
+/** ⚠️ 这是【缺省值】，不是「本 workspace 的 worker 名」。真实名由 `.quay/profiles.yml` 的
+ *  `roles["task-worker"].name` 承载 ⇒ 一律经 resolveWorkerProcessName(root) 取（见下）。
+ *  字面常量只作解析失败时的历史缺省（quay 自己的 profiles.yml 恰好就是这个名字）。 */
 export const WORKER_PROCESS_NAME = "quay-task-worker";
+
+/** 本 workspace 的 worker 进程名（`-n <name>`）：读 `.quay/profiles.yml` 的 roles["task-worker"].name。
+ *
+ *  🔴 为什么必须解析而不能用上面的字面常量（gap-reconcile-finalizes-live-worker-as-exited-and-double-
+ *  dispatches-same-task，2026-09-13 第一手对照）：字面量 `quay-task-worker` 是【quay 自己】的命名；
+ *  第三方项目按 quay-init 的注释自行改名（quay-fleet: `fleet-task-worker`）。此前所有存活探测
+ *  （enumerateLiveWorkerCmdlines / hasLiveWorkerForTask / findLiveWorkerPid）都写死该字面量 ⇒
+ *  在 quay-fleet 上**恒不命中任何真实 worker**（硬规则 4b：一个依赖宿主的字面量，换项目就静默失效）。
+ *  后果是 reconcile 把【在飞】worker 判为「已退出」（假失败记录）并清掉冷启动排除集 ⇒ 同任务双派、
+ *  两个 worker 共用一个 worktree。对照：同一份 argv 只改角色名，hasLiveWorkerForTask 给出相反取值。
+ *
+ *  解析失败（无 profiles.yml / 无该角色 / yaml 读不懂）⇒ 回落到 WORKER_PROCESS_NAME（历史行为），
+ *  ⛔ 不抛——探测是观测，观测不得让驱动停摆；且回落方向的残余危害由 finalizeOrphanDispatch 的
+ *  /proc 存活实测兜底（见该函数）。 */
+export function resolveWorkerProcessName(root: string | null | undefined): string {
+  if (!root) return WORKER_PROCESS_NAME;
+  try {
+    const name = resolveRole(loadProfiles(root), "task-worker").name;
+    return name && name.length > 0 ? name : WORKER_PROCESS_NAME;
+  } catch {
+    return WORKER_PROCESS_NAME;
+  }
+}
 
 /** 常驻循环【无在飞 worker 且瞬时 WAIT】时的轮询间隔（ms，测试缝经 --interval 传小值）。与
  *  promotion-driver 的 INTERVAL_MS_DEFAULT 同语义：resource-gate-wait / pool-empty 是瞬时态
@@ -537,7 +566,7 @@ export function enumerateTaskWorktreeTasks(root: string): string[] {
  *  procDir 是测试缝（缺省 /proc）。读不到 /proc（非 Linux / 权限）⇒ []（硬规则 3b：读不懂 ≠ 无存活，
  *  由调用方 fail-closed——enumerateColdStartInflight 交集为空即不排除，方向是「少排除 ⇒ 可能重派」，
  *  比「误判全部存活」安全）。 */
-export function enumerateLiveWorkerCmdlines(procDir: string = "/proc"): string[] {
+export function enumerateLiveWorkerCmdlines(procDir: string = "/proc", workerName: string = WORKER_PROCESS_NAME): string[] {
   let entries: string[];
   try {
     entries = fs.readdirSync(procDir);
@@ -554,7 +583,7 @@ export function enumerateLiveWorkerCmdlines(procDir: string = "/proc"): string[]
       continue; // 进程已退 / 无权限 ⇒ 跳过
     }
     const cmdline = buf.toString("utf8").replace(/\0/g, " ").trim();
-    if (cmdline.includes(WORKER_PROCESS_NAME)) out.push(cmdline);
+    if (cmdline.includes(workerName)) out.push(cmdline);
   }
   return out;
 }
@@ -565,15 +594,15 @@ export function enumerateLiveWorkerCmdlines(procDir: string = "/proc"): string[]
  *  `gap-todo-…` 的存活 worker cmdline（2026-08-24 实测：测试 task `gap-t` 误命中生产 worker
  *  `gap-test-fixture-pollutes-bash-history` ⇒ cleanupOrphanWorktree 假跳过）。边界字符类 = 字母/数字/
  *  下划线/连字符（task id 全由它们组成 ⇒ `gap-t` 后跟 `e` 或 `-` 都不算命中，后跟 `.`/空格/行尾才算）。 */
-export function hasLiveWorkerForTask(taskId: string, workerCmdlines: string[]): boolean {
+export function hasLiveWorkerForTask(taskId: string, workerCmdlines: string[], workerName: string = WORKER_PROCESS_NAME): boolean {
   const re = new RegExp(`(^|[^a-zA-Z0-9_-])${escapeRegExp(taskId)}(?![a-zA-Z0-9_-])`);
-  return workerCmdlines.some((cmd) => cmd.includes(WORKER_PROCESS_NAME) && re.test(cmd));
+  return workerCmdlines.some((cmd) => cmd.includes(workerName) && re.test(cmd));
 }
 
 /** 解出该 task 存活 worker 的 pid：重扫 /proc，返回第一个其 cmdline（空格 join）命中
  *  hasLiveWorkerForTask 的 pid；无命中 ⇒ null（读不到 /proc 也 null——硬规则 3b：读不懂 ≠ 无存活，
  *  由调用方决定是否信号）。procDir 是测试缝（与 enumerateLiveWorkerCmdlines 同款）。 */
-function findLiveWorkerPid(taskId: string, procDir: string = "/proc"): number | null {
+function findLiveWorkerPid(taskId: string, procDir: string = "/proc", workerName: string = WORKER_PROCESS_NAME): number | null {
   let entries: string[];
   try {
     entries = fs.readdirSync(procDir);
@@ -589,9 +618,41 @@ function findLiveWorkerPid(taskId: string, procDir: string = "/proc"): number | 
       continue; // 进程已退 / 无权限 ⇒ 跳过
     }
     const cmdline = buf.toString("utf8").replace(/\0/g, " ").trim();
-    if (hasLiveWorkerForTask(taskId, [cmdline])) return Number(e);
+    if (hasLiveWorkerForTask(taskId, [cmdline], workerName)) return Number(e);
   }
   return null;
+}
+
+/** 某 pid 的存活【三值】读数（硬规则 3：三个取值互不同形，⛔ 缺「未评估」态就会把「没查成」读成“已退出”）。
+ *   - "alive"   : procDir 可读 ∧ pid 条目在 ∧ 其 cmdline 可读且非空（真活进程）。
+ *   - "exited"  : procDir 可读且**看得到进程表**（≥1 个 pid 条目）∧ pid 不在其中 ⇒ 测到的「不存在」；
+ *                 或 pid 条目在但 cmdline 为空（僵尸/已退未收尸：读到了，它就是空的 ⇒ 也是测量）。
+ *   - "unknown" : 读不到 procDir（非 Linux / 权限）∧ 或读到的是**没有任何 pid 条目的目录**
+ *                 ⇒ 拿不到进程表 ⇒ 没查成，⛔ 不与 "exited" 同形（硬规则 3b）。
+ *
+ *  ⚠️ 判据选择：`≥1 个 pid 条目`而非「存在某个 procfs 特征文件」——本机 /proc 的 pid 条目数恒 ≥1
+ *  （至少 pid 1），无需假设文件名；同时使「注入一个空目录」可被明确读成“没查成”而不是“进程都没了”。
+ *  本函数只测【这个 pid 是否存在】，不测【它是不是本任务的 worker】（后者是 classifyOrphanDispatch
+ *  的 hasLiveWorkerForTask 复核——两件事分开，⛔ 不合并成一个布尔）。 */
+export type PidLiveness = "alive" | "exited" | "unknown";
+
+export function probePidLiveness(pid: number, procDir: string = "/proc"): PidLiveness {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(procDir);
+  } catch {
+    return "unknown";
+  }
+  const pids = entries.filter((e) => /^\d+$/.test(e));
+  if (pids.length === 0) return "unknown"; // 看不到进程表 ⇒ 没查成（⛔ 不是「进程不存在」）
+  if (!pids.includes(String(pid))) return "exited";
+  let buf: Buffer;
+  try {
+    buf = fs.readFileSync(path.join(procDir, String(pid), "cmdline"));
+  } catch {
+    return "unknown"; // 条目在但读不到（权限 / 竞态）⇒ 没查成
+  }
+  return buf.toString("utf8").replace(/\0/g, " ").trim().length === 0 ? "exited" : "alive";
 }
 
 /** 冷启动「已在飞」排除集：task id 同时满足 ① 有 task/<id> worktree、② 有存活 worker 进程。二者缺一
@@ -599,14 +660,15 @@ function findLiveWorkerPid(taskId: string, procDir: string = "/proc"): number | 
  *  running 覆盖）。opts.worktreeTasks / opts.workerCmdlines 是测试缝（null ⇒ 用真实 git / /proc）。 */
 export function enumerateColdStartInflight(
   root: string,
-  opts: { worktreeTasks?: string[] | null; workerCmdlines?: string[] | null } = {},
+  opts: { worktreeTasks?: string[] | null; workerCmdlines?: string[] | null; workerName?: string } = {},
 ): Set<string> {
   const worktreeTasks = opts.worktreeTasks ?? enumerateTaskWorktreeTasks(root);
   if (worktreeTasks.length === 0) return new Set(); // 无 task worktree ⇒ 无冷启动在飞（⛔ 不白扫 /proc）
-  const workerCmdlines = opts.workerCmdlines ?? enumerateLiveWorkerCmdlines();
+  const workerName = opts.workerName ?? resolveWorkerProcessName(root);
+  const workerCmdlines = opts.workerCmdlines ?? enumerateLiveWorkerCmdlines("/proc", workerName);
   const out = new Set<string>();
   for (const taskId of worktreeTasks) {
-    if (hasLiveWorkerForTask(taskId, workerCmdlines)) out.add(taskId);
+    if (hasLiveWorkerForTask(taskId, workerCmdlines, workerName)) out.add(taskId);
   }
   return out;
 }
@@ -643,14 +705,15 @@ async function enumerateTaskWorktreeTasksAsync(root: string): Promise<string[]> 
  *  同步 fs（廉价、无 spawnSync 阻塞——task 4 只点名 git，不点名 /proc）。opts 测试缝同同步版。 */
 export async function enumerateColdStartInflightAsync(
   root: string,
-  opts: { worktreeTasks?: string[] | null; workerCmdlines?: string[] | null } = {},
+  opts: { worktreeTasks?: string[] | null; workerCmdlines?: string[] | null; workerName?: string } = {},
 ): Promise<Set<string>> {
   const worktreeTasks = opts.worktreeTasks ?? await enumerateTaskWorktreeTasksAsync(root);
   if (worktreeTasks.length === 0) return new Set(); // 无 task worktree ⇒ 无冷启动在飞（⛔ 不白扫 /proc）
-  const workerCmdlines = opts.workerCmdlines ?? enumerateLiveWorkerCmdlines();
+  const workerName = opts.workerName ?? resolveWorkerProcessName(root);
+  const workerCmdlines = opts.workerCmdlines ?? enumerateLiveWorkerCmdlines("/proc", workerName);
   const out = new Set<string>();
   for (const taskId of worktreeTasks) {
-    if (hasLiveWorkerForTask(taskId, workerCmdlines)) out.add(taskId);
+    if (hasLiveWorkerForTask(taskId, workerCmdlines, workerName)) out.add(taskId);
   }
   return out;
 }
@@ -720,6 +783,7 @@ export function cleanupOrphanWorktree(
   taskId: string,
   workerCmdlines: string[] | null = null,
   outcome: { finalState?: string | null; exitCode?: number | null } | null = null,
+  workerName: string = WORKER_PROCESS_NAME,
 ): OrphanCleanupResult {
   const paths = worktreePathsForTask(root, taskId);
   if (paths.length === 0) {
@@ -728,8 +792,8 @@ export function cleanupOrphanWorktree(
       hasCommits: null, preservedForCommits: false, sigtermExternal: false,
     };
   }
-  const live = workerCmdlines ?? enumerateLiveWorkerCmdlines();
-  if (hasLiveWorkerForTask(taskId, live)) {
+  const live = workerCmdlines ?? enumerateLiveWorkerCmdlines("/proc", workerName);
+  if (hasLiveWorkerForTask(taskId, live, workerName)) {
     return {
       removed: false, worktreePath: paths[0] ?? null, branchDeleted: false, error: null, skippedLiveWorker: true,
       hasCommits: null, preservedForCommits: false, sigtermExternal: false,
@@ -838,6 +902,10 @@ export interface SupersededReclaimOpts {
   /** 信号发送器（null ⇒ process.kill）。入参 pid + 信号名（"SIGTERM"）。默认 process.kill 可抛
    *  （进程已退/无权限）——调用方 best-effort 捕获，失败 ⇒ liveWorkerSignaled=false。 */
   sendSignal?: ((pid: number, signal: string) => void) | null;
+  /** 本 workspace 的 worker `-n` 名（null ⇒ 解析自 root 的 .quay/profiles.yml）。⛔ 缺省不可回落到
+   *  写死的 `quay-task-worker`——第三方项目改名后门①恒不命中 ⇒ 会回收（并 SIGTERM）在飞 worker 的
+   *  worktree（与 orphan-finalize 同一缺陷面，见 resolveWorkerProcessName）。 */
+  workerName?: string | null;
 }
 
 /**
@@ -882,7 +950,8 @@ export async function reclaimSupersededWorktrees(
   }
 
   // 双闸共享扫 /proc（仅在有候选时；无候选不白扫——同 enumerateColdStartInflight 的 short-circuit）。
-  const workerCmdlines = candidates.length > 0 ? (opts.workerCmdlines ?? enumerateLiveWorkerCmdlines()) : [];
+  const workerName = opts.workerName ?? resolveWorkerProcessName(root);
+  const workerCmdlines = candidates.length > 0 ? (opts.workerCmdlines ?? enumerateLiveWorkerCmdlines("/proc", workerName)) : [];
   const procs = candidates.length > 0 ? (opts.procs ?? enumerateProcs()) : [];
   const reclaimed: string[] = [];
   const skipped: string[] = [];
@@ -901,14 +970,14 @@ export async function reclaimSupersededWorktrees(
       continue;
     }
     // 门①：存活 worker（同 cleanupOrphanWorktree）。
-    if (hasLiveWorkerForTask(taskId, workerCmdlines)) {
+    if (hasLiveWorkerForTask(taskId, workerCmdlines, workerName)) {
       skipped.push(taskId);
       // 仅 status=superseded 才发 SIGTERM（⛔ 不含 needs-human——该状态活 worker 可能正合法收尾，语义不如
       // superseded 干净）。此分支只在候选（superseded）内到达，status 恒为 superseded；显式判 status 是
       // 防御性自证（若候选集将来扩到 needs-human，仍不会误信号）。
       let liveWorkerSignaled = false;
       if (status === TASK_STATUS.SUPERSEDED) {
-        const resolvePid = opts.pidOf ?? ((taskId) => findLiveWorkerPid(taskId));
+        const resolvePid = opts.pidOf ?? ((taskId) => findLiveWorkerPid(taskId, "/proc", workerName));
         const send = opts.sendSignal ?? ((pid, signal) => process.kill(pid, signal));
         const pid = resolvePid(taskId);
         if (pid != null) {
@@ -1862,16 +1931,55 @@ export interface RetryExemptionJudgment {
  *  flaky 复发语义一致（两周前的 flaky 不算「已知反复出现」）；测试缝可覆盖。 */
 export const RETRY_EXEMPTION_WINDOW_MS_DEFAULT = 48 * 3600 * 1000;
 
+/** 断言签名的【唯一】归一化点（gap-retry-exemption-signature-keeps-volatile-values）。
+ *
+ *  WHY：签名是「同一缺陷是否复发」的**身份**。签名里只要留下每次运行都变的量（pid / 毫秒 / 端口 /
+ *  绝对路径 / 哈希），同一缺陷在**每个任务**上都会得到一个**新**签名 ⇒ 「≥2 个不同任务命中同一签名」
+ *  结构上永不成立 ⇒ 这个专为「不相关 flaky 不该压垮受害任务」而造的豁免，对最需要它的那一半失败恒空
+ *  （硬规则 4：一个结构上不可能取真的判据不是测量）。实证：同一生产缺陷（`driver-runtime.test.mjs`
+ *  AC4）在 3 个任务的 suite log 里给出 3 条互不相同的签名，只因 pid/confirmed_ms 不同。
+ *
+ *  三分类的取舍：把「每次都会变、且不改变缺陷身份」的**量**折成占位；把**措辞**逐字保留——措辞才是
+ *  缺陷身份。⛔ 不折词、不截断、不折长引文：`'change' !== 'full'` 里的引文正是区分「两种不同缺陷」
+ *  的内容，折掉它就把「不同」变成「同一」（硬规则 3b 的镜像面：不得把「读不懂」变成「合格」，这里
+ *  是不得把「不同缺陷」变成「同一缺陷」）。故本函数**不**复用 `meta-driver.ts:errorSignature`——那个
+ *  正本面向「错误聚合」，会截断到 200 字符并折掉长引文，两者是**不同**的身份语义（AC5 已枚举该兄弟点）。
+ *
+ *  退化的归一化结果（折叠后除占位符外一个字母都不剩，如 `1 !== 2` ⇒ `<n> !== <n>`）**丢掉**，不当作
+ *  签名：它在不同缺陷间恒等 ⇒ 留下它等于制造假豁免。全丢掉 ⇒ 调用侧落
+ *  `insufficient-data-fallback`（照常计数），fail-closed。 */
+export function normalizeAssertionSignature(text: string): string {
+  let s = String(text ?? "").replace(/\s+/g, " ").trim();
+  // ① 哈希/uuid/sha/commit（先于数字：32 位 sha 会被 ② 拆成一堆 <n>，拆完丢掉「这是个哈希」这一形）。
+  //    要求命中里**同时含 a–f 与数字**：纯数字串是量不是哈希，交给 ②；只由 a–f 组成的英文词
+  //    （`defaced`/`acceded`）不得被当成哈希抹掉，否则把不同缺陷并成一个签名。
+  s = s.replace(/\b[0-9a-f]{7,40}\b/gi, (m) => (/[a-f]/i.test(m) && /\d/.test(m) ? "<hex>" : m));
+  // ② 绝对路径（≥2 段）。⚠️ 前导 `/` 必须不在词中间：`AC1/AC2/AC3` 的前导 `/` 前面是 `1`（词字符）
+  //    ⇒ 不匹配；路径在文本里总是空格/括号/冒号/= 之后 ⇒ 匹配。段字符类含 `-`（worktree 名 / 任务 id）。
+  s = s.replace(/(?<![\w])(?:\/[\w.@+-]+){2,}\/?/g, "<path>");
+  // ③ 数字字面量（pid / confirmed_ms / 端口 / 计数 / 行号）。⚠️ 只折【数字 token】——词内数字
+  //    （`dr-ac4-short` 的 `4`）**不折**：那是**稳定**标识符的一部分，折掉它会把 `ac4` 与 `ac7` 两个
+  //    不同的用例并成同一签名（正是本函数开头禁的「把不同缺陷变成同一缺陷」）。判据 = 数字串前面
+  //    不是词字符；`530ms` 这类「数字+单位」仍折（单位文本保留）⇒ 数量变、单位不变 ⇒ 签名不变。
+  s = s.replace(/(?<!\w)\d+(?:\.\d+)?/g, "<n>");
+  return s.trim();
+}
+
 /** 从 suite 日志提取归一化断言签名（`AssertionError [ERR_ASSERTION]: msg` / `AssertionError: msg`）。
- *  归一化 = trim + 折叠内部空白（同一断言换行/缩进差异折叠成同一签名）。读不出 ⇒ []（不伪造；动态
- *  路径断言每次不同 ⇒ 归一化后仍不同 ⇒ 不匹配，fail-closed 朝「不复返、照常计数」，硬规则 3b）。 */
+ *  归一化 = trim + 折叠内部空白 + **易变量折占位**（唯一正本点 `normalizeAssertionSignature`——所有
+ *  消费者都经由本函数拿到**已归一化**的签名，⛔ 不存在第二份「哪些字符算易变量」的清单）。
+ *  读不出 ⇒ []（不伪造），fail-closed 朝「不复返、照常计数」，硬规则 3b。 */
 export function assertionSignaturesFromSuiteLog(logText: string): string[] {
   const out: string[] = [];
   for (const raw of String(logText ?? "").split("\n")) {
     const m = /AssertionError(?:\s*\[[^\]]*\])?:\s*(.+)$/.exec(raw);
     if (!m) continue;
-    const sig = m[1].trim().replace(/\s+/g, " ");
-    if (sig && !out.includes(sig)) out.push(sig);
+    const sig = normalizeAssertionSignature(m[1]);
+    // 退化签名（折叠后**除占位符外**一个字母都不剩，如 `1 !== 2` ⇒ `<n> !== <n>`）不当作身份：它在
+    // 不同缺陷间恒等 ⇒ 留下它等于制造假豁免。⚠️ 判据必须先把占位符形态**泛型**剥掉再找字母——
+    // `<n>` 自己含字母 `n`，不剥就会把退化签名误判成合格（本轮实测踩到过）。
+    if (!sig || !/\p{L}/u.test(sig.replace(/<[a-z]+>/g, ""))) continue;
+    if (!out.includes(sig)) out.push(sig);
   }
   return out;
 }
@@ -2332,12 +2440,18 @@ export const QUICK_DEATH_BACKOFF_DEFAULT: QuickDeathBackoffConfig = {
  *  （自有语义），两者都不算「快速死亡」——⛔ 与既有机制重叠计数（同一条失败路径进两个桶）。 */
 const QUICK_DEATH_FINAL_STATES: ReadonlySet<string> = new Set(["failed", "spawn-failed", "killed"]);
 
-/** 是否「快速死亡」：终态属快速死亡类 ∧ 墙钟 < quickDeathMs。 */
+/** 是否「快速死亡」：终态属快速死亡类 ∧ 墙钟 < quickDeathMs。
+ *  liveness（可选）：孤儿 finalize 的 /proc 存活实测取值。⛔ 只有【测到已退出】("exited") 才算死亡；
+ *  "unknown"（没测成）与 "alive"（worker 还活着）都不是测量出来的死亡 ⇒ ⛔ 不烧重试预算
+ *  （硬规则 4：一个没测量出来的死亡不是测量；硬规则 3：三个取值不得两两同形）。
+ *  缺省 undefined = 无该字段（普通 worker 终态）⇒ 沿用原有语义，⛔ 行为不变。 */
 export function isQuickDeath(
   finalState: string,
   wallClockMs: number,
   cfg: QuickDeathBackoffConfig = QUICK_DEATH_BACKOFF_DEFAULT,
+  liveness: OrphanPidLiveness | null | undefined = undefined,
 ): boolean {
+  if (liveness === "unknown" || liveness === "alive") return false;
   return QUICK_DEATH_FINAL_STATES.has(finalState) && wallClockMs < cfg.quickDeathMs;
 }
 
@@ -2374,7 +2488,11 @@ export function isBackedOff(state: QuickDeathBackoffState, taskId: string, nowMs
  *   （「连续」断链，⛔ 不把慢速失败算进快速死亡序列）。
  *   快速死亡 ⇒ 连续计数 +1；≥backoffMaxRetries ⇒ newlyNeedsHuman（⛔ 不设 backoffUntil——转 needs-human
  *   由 notNeedsHuman/retryExhausted 过滤负责停止重派，不再退避）；否则 ≥backoffThreshold ⇒ 设 backoffUntil。
- *  @returns { quickDeath, backedOff, newlyNeedsHuman } */
+ *  @returns { quickDeath, backedOff, newlyNeedsHuman }
+ *  liveness（可选）：孤儿 finalize 的 /proc 存活实测取值，语义同 isQuickDeath。实测为
+ *  "unknown"/"alive" 时**不动状态**（既不 +1 也不复位）：unknown 对计数是零信息，既不该算一次死亡
+ *  （那会烧预算），也不该打断一次**已测量**的连续死亡序列（那会让交错注入 unknown 洗白真实streak）。
+ *  ⛔ 与「非快速死亡 ⇒ 复位」那条分支刻意不同形——硬规则 3：第三个取值不得与前两者任一同形。 */
 export function recordQuickDeathBackoff(
   state: QuickDeathBackoffState,
   taskId: string,
@@ -2383,8 +2501,12 @@ export function recordQuickDeathBackoff(
   nowMs: number,
   backoffMaxRetries: number,
   cfg: QuickDeathBackoffConfig = QUICK_DEATH_BACKOFF_DEFAULT,
+  liveness: OrphanPidLiveness | null | undefined = undefined,
 ): { quickDeath: boolean; backedOff: boolean; newlyNeedsHuman: boolean } {
-  if (!isQuickDeath(finalState, wallClockMs, cfg)) {
+  if (liveness === "unknown" || liveness === "alive") {
+    return { quickDeath: false, backedOff: false, newlyNeedsHuman: false };
+  }
+  if (!isQuickDeath(finalState, wallClockMs, cfg, liveness)) {
     state.counts.delete(taskId);
     state.backoffUntil.delete(taskId);
     return { quickDeath: false, backedOff: false, newlyNeedsHuman: false };
@@ -2631,12 +2753,18 @@ export function readPidCmdline(pid: number, procDir: string = "/proc"): string |
 
 /** 孤儿 dispatch 分类（纯函数）：adopt（pid 存活且 cmdline 仍是本任务的 worker）/ finalize（pid 已死 /
  *  被复用）。复核用 hasLiveWorkerForTask 的词边界 cmdline 匹配（同 cold-start-inflight 交叉核对），⛔ 不
- *  裸信 pid 数字——pid 复用后指向别的进程，cmdline 不再含 quay-task-worker + task id ⇒ 判 finalize。
- *  空 cmdline（僵尸已退未收尸）与读不到（null）同判「已死」。 */
-export function classifyOrphanDispatch(record: DispatchRecord, procDir: string = "/proc"): "adopt" | "finalize" {
+ *  裸信 pid 数字——pid 复用后指向别的进程，cmdline 不再含 <worker 名> + task id ⇒ 判 finalize。
+ *  空 cmdline（僵尸已退未收尸）与读不到（null）同判「已死」。
+ *  workerName：本 workspace 的 worker `-n` 名（resolveWorkerProcessName(root)），⛔ 不用写死的
+ *  `quay-task-worker`——第三方项目改名后本函数会对【在飞】worker 恒判 finalize（2026-09-13 quay-fleet 实证）。 */
+export function classifyOrphanDispatch(
+  record: DispatchRecord,
+  procDir: string = "/proc",
+  workerName: string = WORKER_PROCESS_NAME,
+): "adopt" | "finalize" {
   const cmdline = readPidCmdline(record.workerPid, procDir);
   if (!cmdline) return "finalize";
-  return hasLiveWorkerForTask(record.taskId, [cmdline]) ? "adopt" : "finalize";
+  return hasLiveWorkerForTask(record.taskId, [cmdline], workerName) ? "adopt" : "finalize";
 }
 
 /** reconcile 该处理的孤儿 dispatch 清单：store 里、但不在本驱动内存 running 的条目。⛔ 记录缺失（driver
@@ -2654,10 +2782,24 @@ export function orphanDispatchCandidates(
   return out;
 }
 
-/** 孤儿 finalize 终态 outcome（pid 已死 / 被复用）。final_state=failed（非 completed），failure_reason
- *  点名「driver 重启期间孤儿化、reconcile 发现已退出」——与存活 driver 亲眼观察到的异常死亡
+/** 孤儿 finalize 终态 outcome（pid 已死 / 被复用 / 无法判定 / 仍在飞）。final_state=failed（非 completed），
+ *  failure_reason 点名「driver 重启期间孤儿化、reconcile 发现已退出」——与存活 driver 亲眼观察到的异常死亡
  *  （"worker exited with code N" / "worker killed by SIGx"）在 reason 上可区分（AC2）。exit_code 诚实
- *  记 null（读不懂，⛔ 不伪造）。 */
+ *  记 null（读不懂，⛔ 不伪造）。
+ *
+ *  🔴 2026-09-13 修复（gap-reconcile-finalizes-live-worker-as-exited-and-double-dispatches-same-task）：
+ *  本函数此前**无条件**写「already exited」——那是一句【断言】，不是【测量】（硬规则 4：结构上不可能取假
+ *  的量不是测量）。实测代价：quay-fleet 上它把仍在飞（/proc 可读、etime 163s、CPU 23s）的 pid 3653433
+ *  写成「already exited」，随后同任务被派了第二个 worker，两个 worker 共用一份 git 检出。现在先实测
+ *  /proc（probePidLiveness），三个取值产出三条**互不同形**的 reason，并把取值落进
+ *  `orphan_pid_liveness` 字段（机器可读；⛔ 不让下游去正则抠中文/英文措辞）。
+ *   - "exited" ：pid 确已不在 ⇒ 保留原措辞（下游/既有断言按它判读，⛔ 不改）。
+ *   - "alive"  ：pid 仍在 ⇒ ⛔ 不得声称已退出；这是「finalize 本不该发生」的自证（应改走 adopt）。
+ *   - "unknown"：/proc 读不到 ⇒ ⛔ 不得与上两者任一同形，明写「未测量」。
+ *  另：「存活但已不是本任务的 worker」（pid 复用）仍归 "alive" 的措辞面——它确实活着，只是不是我们的；
+ *  出于 AC1 的双向对照要求，任何 alive 取值都不得含 "already exited"。 */
+export type OrphanPidLiveness = PidLiveness;
+
 export function computeOrphanFinalizedOutcome(opts: {
   task: string;
   selectorReason: string;
@@ -2665,7 +2807,16 @@ export function computeOrphanFinalizedOutcome(opts: {
   workerPid: number;
   startedAtMs: number;
   endedAtMs: number;
-}): ReturnType<typeof computeOutcome> {
+  /** /proc 存活探测的测试缝（缺省 /proc）。 */
+  procDir?: string;
+}): ReturnType<typeof computeOutcome> & { orphan_pid_liveness: OrphanPidLiveness } {
+  const liveness = probePidLiveness(opts.workerPid, opts.procDir ?? "/proc");
+  const failureReason =
+    liveness === "exited"
+      ? `orphaned worker finalized by reconcile: driver restarted mid-flight and worker pid ${opts.workerPid} already exited (or was recycled) before a new instance could adopt it`
+      : liveness === "alive"
+        ? `orphaned worker finalized by reconcile: driver restarted mid-flight and worker pid ${opts.workerPid} was STILL ALIVE at the reconcile probe — its death was NOT measured; a live worker must be adopted, not finalized`
+        : `orphaned worker finalized by reconcile: driver restarted mid-flight and worker pid ${opts.workerPid} liveness UNKNOWN — /proc was not readable, so its death was NOT measured and is NOT claimed`;
   return {
     ts: new Date(opts.endedAtMs).toISOString(),
     task: opts.task,
@@ -2674,7 +2825,7 @@ export function computeOrphanFinalizedOutcome(opts: {
     signal: null,
     wall_clock_ms: opts.endedAtMs - opts.startedAtMs,
     final_state: "failed",
-    failure_reason: `orphaned worker finalized by reconcile: driver restarted mid-flight and worker pid ${opts.workerPid} already exited (or was recycled) before a new instance could adopt it`,
+    failure_reason: failureReason,
     started_at: new Date(opts.startedAtMs).toISOString(),
     ended_at: new Date(opts.endedAtMs).toISOString(),
     worker_pid: opts.workerPid,
@@ -2682,6 +2833,7 @@ export function computeOrphanFinalizedOutcome(opts: {
     in_flight_count: 0,
     timed_out: false,
     session_id: null,
+    orphan_pid_liveness: liveness,
   };
 }
 
@@ -2731,15 +2883,31 @@ export function computeAdoptedOutcome(opts: {
   };
 }
 
-/** 孤儿 finalize（pid 已死 / 被复用）：立刻补一条可区分的非 completed 终态 + 复用 no-record-on-abnormal-
- *  death 的 orphan worktree 清理（cleanupOrphanWorktree）+ 清 dispatch 记录。同步、幂等。返回 outcome 供
- *  观测（resident loop 打 json 事件）。 */
+/** 孤儿 finalize（pid 已死 / 被复用 / 无法判定）：立刻补一条可区分的非 completed 终态 + 复用
+ *  no-record-on-abnormal-death 的 orphan worktree 清理（cleanupOrphanWorktree）+ 清 dispatch 记录。同步、
+ *  幂等。返回 outcome 供观测（resident loop 打 json 事件）。
+ *
+ *  🛑 存活闸（Plan 第 4 步「判为仍存活时不得 finalize」）：只要 /proc 实测该 pid **仍存活**就拒绝，
+ *  ⛔ 不写假终态、⛔ 不清 worktree、⛔ 不清 dispatch 记录——原样留着让下一轮 adopt。
+ *  ⚠️ 判据刻意是【与 worker 名无关的】probePidLiveness，不是 classifyOrphanDispatch：
+ *  classifyOrphanDispatch 要先知道「本 workspace 的 worker 叫什么」，而名字解析失败正是本缺陷在第三方
+ * 项目的成因（quay-fleet 改名 ⇒ 恒判 finalize）。用一个需要名字的判据去兜「名字可能解析错」的底，
+ *  是空的——所以这里用名字无关的直接量（/proc 存在性），它不依赖任何配置即可取假。
+ *  代价（已知并接受）：pid 被复用成一个长命进程时，这条记录会一直留着不 finalize（不破坏任何东西，
+ *  只是残留）；等到该 pid 消失即自愈。取舍方向是「宁可留残留，⛔ 不判死活 worker」——反向的代价是
+ *  删掉在飞 worker 正在写的 worktree + 清掉记录 ⇒ 同任务双派（正是本缺陷）。 */
 export function finalizeOrphanDispatch(opts: {
   root: string;
   outcomeFile: string;
   record: DispatchRecord;
-}): { outcome: ReturnType<typeof computeOutcome>; cleanup: OrphanCleanupResult | null } {
+  /** 测试缝（缺省 /proc）。 */
+  procDir?: string;
+  /** 本 workspace 的 worker `-n` 名（缺省解析自 root 的 .quay/profiles.yml）。 */
+  workerName?: string;
+}): { outcome: ReturnType<typeof computeOutcome> & { orphan_pid_liveness: OrphanPidLiveness }; cleanup: OrphanCleanupResult | null; refusedLiveWorker: boolean } {
   const { root, outcomeFile, record } = opts;
+  const procDir = opts.procDir ?? "/proc";
+  const workerName = opts.workerName ?? resolveWorkerProcessName(root);
   const base = computeOrphanFinalizedOutcome({
     task: record.taskId,
     selectorReason: record.selectorReason,
@@ -2747,8 +2915,17 @@ export function finalizeOrphanDispatch(opts: {
     workerPid: record.workerPid,
     startedAtMs: record.startedAtMs,
     endedAtMs: Date.now(),
+    procDir,
   });
-  const cleanup = cleanupOrphanWorktree(root, record.taskId, null, { finalState: "failed", exitCode: null });
+  if (base.orphan_pid_liveness === "alive") {
+    // 活着 ⇒ 不 finalize。⛔ 不 appendOutcome（那是假记录）/ 不清 worktree / 不清记录。
+    return { outcome: base, cleanup: null, refusedLiveWorker: true };
+  }
+  // "unknown"（/proc 读不到）：留一条**不声称死亡**的记录释放掉 in-flight 影子（⛔ 不黑洞），
+  // 但⛔ 不动 worktree——读不到进程表时无法证明没人在里面写（清理闸同样读不到，会误清）。
+  const cleanup = base.orphan_pid_liveness === "unknown"
+    ? null
+    : cleanupOrphanWorktree(root, record.taskId, null, { finalState: "failed", exitCode: null }, workerName);
   const outcome = cleanup
     ? {
         ...base,
@@ -2762,7 +2939,7 @@ export function finalizeOrphanDispatch(opts: {
     : base;
   appendOutcomeToFile(outcomeFile, outcome);
   removeDispatchRecord(dispatchStoreFile(root), record.taskId);
-  return { outcome, cleanup };
+  return { outcome, cleanup, refusedLiveWorker: false };
 }
 
 /** adopt 一个孤儿 worker（pid 存活且 cmdline 吻合）：纳入超时监管——轮询 pid 存活性（代替 child_process
@@ -4828,8 +5005,11 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
     // ⇒ 对该 task 退避（backoffUntil，⛔ 不立即重派）；退避到上限（maxRetries）⇒ markNeedsHuman（复用
     // 现有重试上限机制，⛔ 不无限退避）。needsHuman 集合与 markNeedsHuman 的 status 翻转双保险——
     // 即使磁盘写失败，内存过滤（retryCapNotExhausted/notNeedsHuman）也挡重派。
+    // 孤儿 finalize 的 outcome 带 orphan_pid_liveness（/proc 实测取值）时一并传：⛔ 没测出来的死亡
+    // 不烧重试预算（AC4）。普通 worker 终态无该字段 ⇒ undefined ⇒ 行为不变。
     const backoff = recordQuickDeathBackoff(
       backoffState, r.taskId, r.outcome.final_state, r.outcome.wall_clock_ms, Date.now(), maxRetries, backoffCfg,
+      (r.outcome as { orphan_pid_liveness?: OrphanPidLiveness | null }).orphan_pid_liveness ?? undefined,
     );
     if (backoff.newlyNeedsHuman) {
       retryState.needsHuman.add(r.taskId);
@@ -4898,12 +5078,21 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
   //     重置——防「每次重启续命」无限占位）；adopt 后从 coldInflight 剔除（⛔ 双计在飞）。
   //   - pid 已死 / 被复用 ⇒ finalizeOrphanDispatch 立刻补终态 + 清 orphan worktree + 清记录。
   //   - 记录缺失（driver 从未见过，如手工起的 worker）⇒ 不越权接管，维持现状（只靠 coldInflight 排除）。
+  // ⚠️ 本 workspace 的 worker 名从 root 的 .quay/profiles.yml 解析（⛔ 不用写死的 `quay-task-worker`）：
+  // 第三方项目改名后，写死名会让这两条分支都判错——finalize 假记录 + coldInflight 漏排除 ⇒ 同任务双派。
   const reconcileOrphanDispatches = (): void => {
     const store = readDispatchStore(dispatchStoreFile(rootDir));
+    const workerName = resolveWorkerProcessName(rootDir);
     for (const { taskId, record } of orphanDispatchCandidates(store, running.map((r) => r.task))) {
-      const cls = classifyOrphanDispatch(record);
+      const cls = classifyOrphanDispatch(record, "/proc", workerName);
       if (cls === "finalize") {
-        const res = finalizeOrphanDispatch({ root: rootDir, outcomeFile, record });
+        const res = finalizeOrphanDispatch({ root: rootDir, outcomeFile, record, workerName });
+        if (res.refusedLiveWorker) {
+          // 存活闸兜底（⛔ workerName 解析失败时这里仍拦住——闸用名字无关的 /proc 存在性）：pid 仍存活
+          // ⇒ 不判死、不写终态、不清 worktree/记录；下一轮照常重试（进程真退出后即自愈）。
+          if (json) process.stdout.write(`${JSON.stringify({ event: "orphan-finalize-refused-live", task: taskId, worker_pid: record.workerPid })}\n`);
+          continue;
+        }
         coldInflight.delete(taskId);
         if (json) process.stdout.write(`${JSON.stringify({ event: "orphan-finalized", task: taskId, ...res.outcome })}\n`);
       } else {
@@ -4944,6 +5133,8 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // 每轮重扫 task worktree + /proc 存活 worker 交叉核对；该结果同时写进本轮 round 记录（生产载体）。
       // 异步版（gap-worker-driver-async-selector-readypool）：git worktree list 不再 spawnSync 阻塞地板。
       step = "cold-start-inflight";
+      // workerName 解析自 .quay/profiles.yml（每趟一次，⛔ 不用写死的 `quay-task-worker`——第三方项目
+      // 改名后写死名会让本排除集恒为空 ⇒ 同任务双派，与 reconcile 的假 finalize 同源）。
       coldInflight = await enumerateColdStartInflightAsync(rootDir);
       if (json && coldInflight.size > 0) {
         process.stdout.write(
@@ -5112,9 +5303,6 @@ export async function main(argv: string[]): Promise<number> {
   let outcomePath: string | undefined;
   let runId: string | undefined;
   let json = false;
-  let serve = false;
-  let host: string | undefined;
-  let port: number | undefined;
   let mechanicalFanIn = false;
   let mechWorktree: string | undefined;
   let mechMergeTarget: string | undefined;
@@ -5145,9 +5333,6 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--outcome") outcomePath = args[++i];
     else if (a === "--run-id") runId = args[++i];
     else if (a === "--json") json = true;
-    else if (a === "--serve") serve = true;
-    else if (a === "--host") host = args[++i];
-    else if (a === "--port") port = Number(args[++i]);
     else if (a === "--mechanical-fan-in") mechanicalFanIn = true;
     else if (a === "--worktree") mechWorktree = args[++i];
     else if (a === "--merge-target") mechMergeTarget = args[++i];
@@ -5169,7 +5354,8 @@ export async function main(argv: string[]): Promise<number> {
           "  [--backoff-max-ms <ms>]  退避等待上限 ms（指数增长封顶，缺省 300000）\n" +
           "  --mechanical-fan-in --task <id> --worktree <path>  每任务新进程入口：加载当前代码跑机械 fan-in，stdout 单行 JSON result（exit 0=landed / 2=red）\n" +
           "  --write-scoped-gate-cache --task <id> --develop-sha <sha>  写 scoped-gate 缓存（worker 退出前跑绿后调用；stdout 单行 JSON）\n" +
-          "  --serve [--host <ip>] [--port <n>]  起 MCP 控制面（halt / setPreference / forceDispatch，身份 header 或 caller 参数）",
+          "  ⛔ 无 --serve：MCP 控制面（halt / setPreference / forceDispatch）已上收进 Layer 0——由每个 kind 的\n" +
+          "     supervisor（driver-runtime.ts runSupervisor）起，逐 kind 写 <prefix>-control-plane.json 回读面",
       );
       return 0;
     } else {
@@ -5217,16 +5403,10 @@ export async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
-  // --serve：起 MCP 控制面（常驻）。listening socket 保持事件循环存活 ⇒ 进程不退出，直到 SIGINT/SIGTERM。
-  if (serve) {
-    const handle = await serveControlPlane({ root: rootDir, host, port, name: "worker-driver-control" });
-    if (json) process.stdout.write(`${JSON.stringify({ event: "control-plane-serving", url: handle.url, port: handle.port })}\n`);
-    else console.log(`worker-driver control plane serving at ${handle.url}`);
-    const stop = () => { void handle.close(); };
-    process.on("SIGINT", stop);
-    process.on("SIGTERM", stop);
-    return 0;
-  }
+  // ⛔ 本文件【不再】自带 serveControlPlane 调用点（GOAL-017/AC-252，SPEC §7 阶段 A1）：控制面已上收进
+  // Layer 0——每个 kind 的 supervisor（driver-runtime.ts runSupervisor）起一个，六个 kind 全部从共享骨架
+  // 获得入站控制面（⛔ 不是六个 kind 各自直调）。旧 `--serve` flag 一并删除，⛔ 不留「解析了但没人消费」
+  // 的死 flag（硬规则 3b）；控制面入口在 Layer 0，不在本 kind 的 argv 面。
 
   const outcomeFile = outcomePath ? path.resolve(outcomePath) : path.join(rootDir, WORKER_OUTCOME_REL);
   const timeoutMs = parseTimeoutMs(timeoutRaw);

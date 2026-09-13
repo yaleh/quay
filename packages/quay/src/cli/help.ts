@@ -16,7 +16,7 @@
 // 里那份同名内联文本），修前它只列 2 个 kind 而真源有 6 个 ⇒ outer/quality/meta/goal 四个已实现的
 // kind 在产品表层等于不存在。
 
-import { KINDS, VERBS } from "./driver-vocab.ts";
+import { ALL_SERVICE_NAMES, KINDS, VERBS } from "./driver-vocab.ts";
 
 export function printHelp(sub) {
   if (!sub || sub === "task") {
@@ -55,6 +55,10 @@ Usage:
   quay migrate --from <providerId> --to <providerId> [--json]
   quay config validate [--json|--format json] [--check-files] [--root <path>]
   quay serve [--port <port>] [--host <host>]
+  quay server start [--only <svc,...>] [--without <svc,...>] [--port <port>] [--host <host>] [--json] [--root <path>]
+  quay server add <svc,...> [--json] [--root <path>]
+  quay server stop --only <svc,...> [--json] [--root <path>]
+  quay server status [--json] [--root <path>]
   quay mcp
   quay manager start [--dry-run] [--json]
   quay manager arm [--dry-run] [--json] [--verify]
@@ -355,6 +359,58 @@ Usage:
 
 Starting from a git worktree (quay-worktrees/…) is REJECTED — the resident supervisor must be
 carried from the workspace root (main checkout), not a short-lived worktree.
+`);
+  } else if (sub === "server") {
+    process.stdout.write(`quay server — start / stop / inspect the unified server's services, one at a time
+(SPEC-unified-quay-server-2026-09-13 §6.9: 服务是可独立起停的单元，进程只是宿主)
+
+Usage:
+  quay server start [--only <svc,...>] [--without <svc,...>] [--port <port>] [--host <host>] [--json] [--root <path>]
+  quay server add   <svc,...> [--json] [--root <path>]
+  quay server stop  --only <svc,...> [--json] [--root <path>]
+  quay server status [--json] [--root <path>]
+
+  services: ${ALL_SERVICE_NAMES.join(", ")}
+
+  start    Bring services up. Unset \`--only\` means every service. \`--without a,b\` subtracts.
+           ⛔ IDEMPOTENT: a service that is already running is a NO-OP (reported \`already-running\`)
+           — never a restart, because restarting a driver interrupts its in-flight worker children
+           (§6.9 不变式 1). \`web\`/\`control\` are opened INSIDE the existing host process; the six
+           \`driver:<kind>\` services delegate to the existing \`quay driver start --kind <kind>\`.
+  add      Start ONLY the named services, leaving every already-running service's process and
+           heartbeat untouched (§6.9: 追加启动，⛔ 不影响已在跑的).
+  stop     Stop ONLY the named services (\`--only\` is required). \`stop --only web\` releases the
+           Web HTTP listener WITHOUT killing the host process: the host pid is unchanged and the
+           same process's \`control\` face stays reachable — that is what distinguishes a partial
+           stop from a whole-process restart (§6.9 不变式 2). \`driver:<kind>\` delegates to the
+           existing \`quay driver stop --kind <kind>\`, which does NOT kill in-flight workers.
+  status   Read the workspace's \`.quay/server.json\` carrier and report, PER SERVICE, whether it is
+           actually answering. The carrier is published by the \`quay serve\` process and records
+           one entry per hosted service (name, pid, bind host, bound port); because stage A2 merged
+           the Web UI and the MCP control plane into ONE process, a landed merge reports
+           \`web.pid === control.pid\` (both = the serve process's own pid).
+
+           Liveness is a DIRECT quantity per service, never "the process is alive, so its services
+           must be" (\`web\` is probed via HTTP GET /health, \`control\` via a JSON-RPC \`initialize\`
+           POST). A probe that could not be interpreted reports \`not-evaluated\`, which is NOT the
+           same value as "down".
+
+           Exit codes (the verdict is the exit code; --json always emits parseable JSON):
+             0  running | degraded
+                              the unified server IS there — the carrier's web and control entries
+                              both carry the live host pid. \`degraded\` additionally means a service
+                              is not answering (process alive, service stalled): a LIVENESS reading,
+                              reported per service, which does NOT change the exit code. A
+                              just-started \`quay serve\` reads \`degraded\` for its first seconds
+                              while it warms its caches — a real reading, not a failure.
+             1  not-running    no carrier, the carrier names a dead pid, or web/control is absent
+                               or carries a pid other than the host's
+             3  not-evaluated  the carrier exists but could not be read/parsed
+
+  --json   Machine-readable output (start/add/stop: one \`outcome\` per service —
+           started | already-running | stopped | already-stopped | not-evaluated; the last one is
+           NOT conflated with the others, 硬规则 3b).
+  --root   Workspace root (default: discovered via .quay/config.yml from cwd).
 `);
   } else {
     // QX-007: stub for subcommands not yet documented in detail (serve, action, mcp, …).

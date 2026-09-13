@@ -40,6 +40,12 @@ import { QUAY_VERSION } from "./version.ts";
 import { parseFrontmatter } from "./frontmatter-store-base.ts";
 import { TASK_STATUS, isTaskStatus, type TaskStatus } from "./abi.ts";
 import { resolvePluginScript, resolvePluginScriptExec } from "./plugin-root.ts";
+// Shared session read/write primitives — ONE copy of each, byte-identical to the pinned quay-fleet
+// blob (packages/quay/src/primitives/PROVENANCE.md; re-checked by plugin/scripts/primitives-drift-check.ts).
+// ⛔ Do not re-implement either of these here: SPEC §3.3's only unacceptable outcome is a second
+// hand-written implementation of a session primitive.
+import { readTranscriptMtime } from "./primitives/session-liveness.mjs";
+import { validateSessionRecord } from "./primitives/session-schema.mjs";
 import { resolveWorktreeNamespace } from "./worktree-namespace.ts";
 import YAML from "yaml";
 
@@ -3618,6 +3624,91 @@ export interface SessionDetail {
   transcriptStatus: ObservationStatus;
   transcriptReason: string | null;
   messages: SessionMessage[] | null;
+  /**
+   * The session's two-dimension state under layer prefixes (SPEC §6.7), or `null` when the record
+   * was REFUSED by the shared validator. `null` is the honest outcome for a record that folded the
+   * two dimensions into one top-level `status`: the page renders an explicit 「状态记录不可用」
+   * rather than a folded value (gap-ac253-session-primitives-shared-layer-adoption Plan step 6).
+   */
+  session: SessionLayeredState | null;
+  /** Why `session` is null (the validator's own errors). Empty when `session` is present. */
+  sessionRefusal: string[];
+}
+
+/** The lifecycle dimension's value set — mirrors primitives/session-schema.mjs's closed set. */
+export type SessionLifecycleValue = "working" | "blocked" | "done" | "not-applicable" | "unknown";
+/** The activity dimension's value set — mirrors primitives/session-schema.mjs's closed set. */
+export type SessionActivityValue = "busy" | "idle" | "shell" | "unknown";
+
+/**
+ * A session record as the SHARED schema sees it (SPEC §6.7): two state dimensions that must stay
+ * separate objects, each carrying its own source and its own timestamp — `claude agents --json`
+ * folds the registry's `shell` into `busy` and loses a value the registry actually has, and the
+ * schema validator is what refuses to let this repo repeat that fold at its own output boundary.
+ *
+ * ⛔ `status` is deliberately NOT a field here. Adding one is exactly the fold the validator rejects.
+ */
+export interface SessionLayeredState {
+  lifecycle: { value: SessionLifecycleValue; source: string; observedAt: number };
+  activity: { value: SessionActivityValue; source: string; ageSec: number };
+  /** This workspace keys sessions by bare sessionId with no machine scoping ⇒ "local-only". */
+  sessionKeyScope: "global" | "local-only";
+}
+
+/** A transcript write inside this window reads as `busy`; older reads as `idle`. */
+export const SESSION_ACTIVITY_WINDOW_MS = 5 * 60 * 1000;
+
+/** `null`-able reading → seconds, or the schema's "unknown" sentinel (-1) when there is no reading. */
+function ageSecOrUnknown(ms: number | null, nowMs: number): number {
+  if (ms == null) return -1;
+  return Math.max(0, Math.round((nowMs - ms) / 1000));
+}
+
+/**
+ * Build the two-dimension record from DIRECT readings only — the registry row's existence for
+ * `lifecycle`, and the transcript file's OWN mtime (via the shared `readTranscriptMtime`) for
+ * `activity`. Neither dimension is taken from a self-reported `status`/`statusUpdatedAt` field:
+ * a real session was observed reading `status=idle` with a 3.3-day-stale `statusUpdatedAt`, which
+ * is the same shape as "everything is fine".
+ */
+export function buildSessionLayeredState(opts: {
+  alive: boolean;
+  lifecycleSource: string;
+  transcriptPath: string | null;
+  observedAt: number;
+}): SessionLayeredState {
+  const mtimeMs = opts.transcriptPath == null ? null : readTranscriptMtime(opts.transcriptPath);
+  const ageSec = ageSecOrUnknown(mtimeMs, opts.observedAt);
+  return {
+    lifecycle: {
+      value: opts.alive ? "working" : "done",
+      source: opts.lifecycleSource,
+      observedAt: opts.observedAt,
+    },
+    activity: {
+      value: mtimeMs == null
+        ? "unknown"
+        : (opts.observedAt - mtimeMs <= SESSION_ACTIVITY_WINDOW_MS ? "busy" : "idle"),
+      source: mtimeMs == null ? "no transcript mtime reading" : "transcript mtime",
+      ageSec,
+    },
+    sessionKeyScope: "local-only",
+  };
+}
+
+/**
+ * Attach a record to a `SessionDetail` ONLY if the shared schema accepts it. A refused record
+ * yields `session: null` + the validator's reasons — the caller then renders the refusal, never
+ * a folded value (硬规则 3b: 读不懂输入时不得返回与「合格」同形的值).
+ */
+export function attachValidatedSession(
+  detail: Omit<SessionDetail, "session" | "sessionRefusal">,
+  record: SessionLayeredState,
+): SessionDetail {
+  const verdict = validateSessionRecord(record);
+  return verdict.valid
+    ? { ...detail, session: record, sessionRefusal: [] }
+    : { ...detail, session: null, sessionRefusal: verdict.errors };
 }
 
 /**
@@ -3821,8 +3912,9 @@ export async function readSessions(root: string): Promise<SessionsResult> {
     const sessionId = row.sessionId as string;
     runningIds.add(sessionId);
     const name = row.name ?? sessionId;
-    const transcript = transcriptTailFor(sessionTranscriptPath(root, sessionId));
-    sessions.push({
+    const transcriptPath = sessionTranscriptPath(root, sessionId);
+    const transcript = transcriptTailFor(transcriptPath);
+    sessions.push(attachValidatedSession({
       name,
       sessionId,
       layer: classifySessionLayer(name),
@@ -3832,7 +3924,12 @@ export async function readSessions(root: string): Promise<SessionsResult> {
       transcriptStatus: transcript.status,
       transcriptReason: transcript.reason,
       messages: transcript.messages,
-    });
+    }, buildSessionLayeredState({
+      alive: true,
+      lifecycleSource: "claude agents --json registry row",
+      transcriptPath,
+      observedAt: Date.now(),
+    })));
   }
 
   // Ended sessions: transcripts in this workspace's project dir that the running registry does not
@@ -3841,7 +3938,7 @@ export async function readSessions(root: string): Promise<SessionsResult> {
   // list page and shows only name + a link to /session/<id>; the tail read is deferred to the detail
   // page (gap-sessions-page-slow-unclickable-flat-render AC2: 首屏不再同步读全部 GONE 的 tail).
   for (const { sessionId } of scanEndedSessions(root, runningIds)) {
-    sessions.push({
+    sessions.push(attachValidatedSession({
       name: sessionId,
       sessionId,
       layer: classifySessionLayer(sessionId),
@@ -3851,7 +3948,12 @@ export async function readSessions(root: string): Promise<SessionsResult> {
       transcriptStatus: "empty",
       transcriptReason: "GONE — transcript 在详情页按需读取",
       messages: null,
-    });
+    }, buildSessionLayeredState({
+      alive: false,
+      lifecycleSource: "transcript scan (not in the running registry)",
+      transcriptPath: sessionTranscriptPath(root, sessionId),
+      observedAt: Date.now(),
+    })));
   }
 
   return { status: "ok", reason: null, sessions };
