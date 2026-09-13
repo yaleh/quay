@@ -50,6 +50,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { DRIVER_KINDS } from "./driver-runtime.ts";
+import { isDirectEntry } from "./gate-script-base.ts";
 
 /** AC-254's own id, verbatim — the criterion matches this string exactly. */
 export const AC_ID = "GOAL-017-AC-254";
@@ -669,7 +670,11 @@ async function main(argv: string[]): Promise<number> {
   return 0;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+// Direct-entry guard — the repo's name-based convention (gate-script-base.ts's isDirectEntry is
+// REQUIRED to be name-based: under bundling every inlined module shares one `import.meta.url`, so a
+// URL comparison fires for libraries too — the 2026-09-13 incident where three bundled drivers all
+// executed the first inlined library's main).
+if (isDirectEntry(import.meta, undefined, "server-partial-stop-verify")) {
   main(process.argv).then((code) => {
     process.exitCode = code;
   });
