@@ -1309,6 +1309,24 @@ let singleTaskGitSpawnCount = 0;
 export function resetSingleTaskGitSpawnCount(): void { singleTaskGitSpawnCount = 0; }
 export function getSingleTaskGitSpawnCount(): number { return singleTaskGitSpawnCount; }
 
+/** Test seam (AC1/AC4 of gap-suite-wallclock-budgets-literals-depend-on-host-capacity): how many
+ *  `git log` walks the commit-time reader spawned, split by COST CLASS —
+ *  `full` = the unbounded `git log <ref> -- tasks/` walk over the ref's whole history;
+ *  `bounded` = the incremental `oldHead..newHead` diff (O(new commits)).
+ *  A COUNT, not a wall-clock proxy: the /tasks request path reads CACHE-ONLY (`serve-task.ts`
+ *  `readTaskCommitTimesAtRef(..., {cacheOnly:true})`) so a request must spawn ZERO full walks no
+ *  matter how slow the host is; the full walk belongs to the background refresh, off the request
+ *  path. A loaded host makes a walk SLOWER, not more frequent — which is exactly why the property
+ *  has to be measured as a count (硬规则 4b: 优先观测直接量，不要用代理量). */
+let developRefFullWalkCount = 0;
+let developRefBoundedWalkCount = 0;
+export function resetDevelopRefWalkCounts(): void {
+  developRefFullWalkCount = 0;
+  developRefBoundedWalkCount = 0;
+}
+export function getDevelopRefFullWalkCount(): number { return developRefFullWalkCount; }
+export function getDevelopRefBoundedWalkCount(): number { return developRefBoundedWalkCount; }
+
 /** Clear the batched develop-ref caches (test seam — a fixture that rewrites the develop ref
  *  mid-test must not read a cached prior read). Clears status + title + commit-time together: the
  *  three develop-ref read faces share one source of truth and one TTL clock. */
@@ -1479,6 +1497,7 @@ export function readTaskCommitTimesAtRef(
 
   const head = resolveRefHead(root, ref);
   const fullBuild = (): Map<string, number> => {
+    developRefFullWalkCount++;
     try {
       const out = execFileSync("git", ["-C", root, "log", "--format=%cI", "--name-only", ref, "--", "tasks/"], {
         encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "pipe"],
@@ -1499,6 +1518,7 @@ export function readTaskCommitTimesAtRef(
     // range gets its newer time; one untouched keeps its prior time. The `isAncestor` guard keeps a
     // non-fast-forward rewrite from producing a silently-wrong partial map.
     map = new Map(hit.map);
+    developRefBoundedWalkCount++;
     try {
       const out = execFileSync("git", ["-C", root, "log", "--format=%cI", "--name-only", `${hit.head}..${head}`, "--", "tasks/"], {
         encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "pipe"],
