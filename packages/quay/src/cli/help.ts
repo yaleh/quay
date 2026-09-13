@@ -58,6 +58,7 @@ Usage:
   quay server start [--only <svc,...>] [--without <svc,...>] [--port <port>] [--host <host>] [--json] [--root <path>]
   quay server add <svc,...> [--json] [--root <path>]
   quay server stop --only <svc,...> [--json] [--root <path>]
+  quay server restart --only <svc,...> [--json] [--root <path>]
   quay server status [--json] [--root <path>]
   quay mcp
   quay manager start [--dry-run] [--json]
@@ -368,6 +369,7 @@ Usage:
   quay server start [--only <svc,...>] [--without <svc,...>] [--port <port>] [--host <host>] [--json] [--root <path>]
   quay server add   <svc,...> [--json] [--root <path>]
   quay server stop  --only <svc,...> [--json] [--root <path>]
+  quay server restart --only <svc,...> [--json] [--root <path>]
   quay server status [--json] [--root <path>]
 
   services: ${ALL_SERVICE_NAMES.join(", ")}
@@ -384,6 +386,14 @@ Usage:
            same process's \`control\` face stays reachable — that is what distinguishes a partial
            stop from a whole-process restart (§6.9 不变式 2). \`driver:<kind>\` delegates to the
            existing \`quay driver stop --kind <kind>\`, which does NOT kill in-flight workers.
+  restart  RESTART ONLY the named services (\`--only\` is required), leaving the other five
+           \`driver:<kind>\` services and the host process untouched. \`restart\` is its OWN verb:
+           \`start\` stays a no-op on a running service and ⛔ is never a silent restart (§6.9 不变式 1),
+           so the REQUESTED restart needs its own name. \`driver:<kind>\` delegates to the existing
+           \`quay driver restart --kind <kind>\` (= stop then start), which kills the supervisor and the
+           driver itself but ⛔ does NOT scan in-flight worker children — they orphan and finish
+           (§6.9 不变式 3). The reported outcome is \`restarted\` iff a NEW live driver pid is observed;
+           a restart that left the old pid in place reports \`not-evaluated\`, never \`restarted\`.
   status   Read the workspace's \`.quay/server.json\` carrier and report, PER SERVICE, whether it is
            actually answering. The carrier is published by the \`quay serve\` process and records
            one entry per hosted service (name, pid, bind host, bound port); because stage A2 merged
@@ -407,9 +417,11 @@ Usage:
                                or carries a pid other than the host's
              3  not-evaluated  the carrier exists but could not be read/parsed
 
-  --json   Machine-readable output (start/add/stop: one \`outcome\` per service —
-           started | already-running | stopped | already-stopped | not-evaluated; the last one is
-           NOT conflated with the others, 硬规则 3b).
+  --json   Machine-readable output (start/add/stop/restart: one \`outcome\` per service —
+           started | already-running | restarted | stopped | already-stopped | not-evaluated; the
+           last one is NOT conflated with the others, 硬规则 3b. \`restarted\` is distinct from
+           \`started\` because "brought up a service that was down" and "swapped a running service
+           for a new process" are different facts).
   --root   Workspace root (default: discovered via .quay/config.yml from cwd).
 `);
   } else {
