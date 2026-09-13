@@ -37,3 +37,9 @@ extra:
 - AC1 的错位列表在案（成因任务 ≠ 记账任务）。
 - 新机制落地且 AC3 的干跑读数在案。
 - ⛔ 不接受「把僵尸条目删掉」作为修法。
+
+## Touches
+
+- tasks/gap-suite-bucket-zombie-check-bills-the-next-unrelated-task.md
+- plugin/test/suite-bucket-reattr-ratchet-check.test.mjs
+- .quay/suite-bucket-reattribution.jsonl
