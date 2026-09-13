@@ -172,6 +172,11 @@ export { SHAPE_SECTIONS };
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { parseTask, extractSection, readDependsOn, readTaskStatusAtRef } from "./task-schema.ts";
+// ADR-007 per-milestone predicate (tasks/gap-adr007-per-milestone-dark-axis-enforcement-gate) — the
+// pool report answers "would this ready task survive the ready→done dark-axis gate?" BEFORE it is
+// dispatched. The classification is Core's (packages/quay/src/gate/dark-axis-record.ts), reached
+// through the plugin's CLI entry so this file shares one implementation with the CLI and the gate.
+import { classifyDarkAxisRecord } from "./dark-axis-record-check.ts";
 // gap-task-ops-consolidate-driver-frontmatter-writers：frontmatter parse/patch + commit 单一真相源
 // 上收到 task-ops.ts（setTaskStatus / retreatReadyToTodo / commitTaskStatus 共用，⛔ 不再本文件手搓
 // fence 切分 + status/labels 行正则）。ensureDeliveryCriticalLabel re-export 保持旧 import 面。
@@ -2628,6 +2633,24 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     ? { ...buildTargetedPromotion(targetedId, allTasks.get(targetedId), root, allTasks, develop), pool, floor, cap }
     : null;
 
+  // ── ADR-007 per-milestone dark-axis record (gap-adr007-per-milestone-dark-axis-enforcement-gate) ─
+  // The ready→done path REFUSES a task whose body records no L_D/L_G reading and carries no explicit
+  // `该轴仍暗,理由:<...>` declaration, whenever the workspace declares ADR-007 in its gate config
+  // (packages/quay/src/gate/lifecycle.ts runComplete → the `dark-axis` gate). This block names which
+  // READY tasks that refusal would hit, so the pool answers "can this one actually land?" at DISPATCH
+  // time rather than at the gate — the ADR's per-milestone question asked where it can still change a
+  // decision. REPORTED, NOT GATING: the pool's own dispatch rules are untouched (the refusal itself
+  // belongs to the lifecycle path and is enforced there); hard rule 3 keeps the three states
+  // enumerated rather than folded into one boolean, so "not recorded" is a list, not a flag.
+  const darkAxis = { recorded: [], disclaimed: [], missing: [] };
+  for (const id of ready) {
+    const t = allTasks.get(id);
+    const state = classifyDarkAxisRecord(t ? t.body : undefined).state;
+    if (state === "RECORDED") darkAxis.recorded.push(id);
+    else if (state === "DISCLAIMED") darkAxis.disclaimed.push(id);
+    else darkAxis.missing.push(state === "MISSING" ? id : { id, state });
+  }
+
   return {
     pool,
     floor,
@@ -2683,6 +2706,9 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     ready_relevance: readyRelevance,
     closed_but_live: (closedButLive || []).map((t) => t.id),
     targeted_promotion,
+    // ADR-007 per-milestone predicate — see the `darkAxis` block above. 甲/乙-style enumerated
+    // populations (recorded / disclaimed / missing), read by the operator before dispatch.
+    dark_axis: darkAxis,
   };
 }
 
