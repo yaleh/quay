@@ -152,6 +152,46 @@ merge develop **前** 118 tests / 0 fail，merge develop **后的最终树** 331
 **footprint（shrink-only ratchet 的正当增长记账）** —— `--reanchor` 后 `3 files / 568 → 1022 bytes`
 (+454 = 新 `.gitignore` 块一行头 + 9 条 pattern)；`--gate` 复测同值 ⇒ 记录的是真实 laydown，非洗白。
 
+**delta 自带的第二个「双副本漂移」（本轮修复；硬规则 5b 的成簇形态）** —— 本 delta 让
+`plugin/scripts/touches-orthogonality-check.ts` 多了一条跨树 import
+（`../../packages/quay/src/runtime-artifacts.ts`），把这条路径带进了 precommit-guard 的执行闭包。
+`plugin/test/precommit-guard.test.mjs` 的 `copyGuardScripts` 把闭包**手工列成 9 个名字**——
+一份与 import 图同源的第二副本 ⇒ 它落后了，且**落后是静默的**：钩子照装不误，只在
+【钩子执行时】以 `ERR_MODULE_NOT_FOUND … esm/resolve:271` 死在被测的那次 commit 里。
+实测（fan-in 全量 suite，`# fail 2`，两条都是它）：
+
+```
+✖ AC1 e2e — a real `git commit` of a multi-path Touches task is REJECTED … (1563ms)
+✖ AC4 e2e — a real `git commit` of a delivery-critical task without goal_ac is REJECTED … (1972ms)
+  AssertionError [ERR_ASSERTION]: install-hook: node:internal/modules/esm/resolve:271
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find module '<scratch>/packages/quay/src/runtime-artifacts.ts'
+    imported from <scratch>/plugin/scripts/touches-orthogonality-check.ts
+```
+
+修法 = 把闭包**从 import 图派生**（不再手列第二份），并按 repo 相对路径拷贝（旧清单
+只有 `plugin/scripts/` 一个形状，**结构上无法表达** `packages/…` 这个依赖）；无法解析的
+相对 import **抛错而非跳过**（硬规则 3b——静默变短的闭包与完整闭包同形）。
+派生结果非空且**恰好等于**原手列 9 条 + 新增那 1 条（10 条，逐条比对）：
+
+```
+$ node <walker>   # entry = plugin/scripts/precommit-guard.ts
+n=10
+  packages/quay/src/runtime-artifacts.ts      ← 原手列清单缺的那条
+  plugin/scripts/gate-script-base.ts          ┐
+  plugin/scripts/long-term-guarantee-goal-backed-check.ts
+  plugin/scripts/precommit-guard.ts           │ 原有的 9 条
+  plugin/scripts/repo-root.ts                 │
+  plugin/scripts/task-schema.ts               │
+  plugin/scripts/touches-one-entry-one-path-check.ts
+  plugin/scripts/touches-orthogonality-check.ts
+  plugin/scripts/touches-parser.ts            │
+  plugin/scripts/wiring-coverage-check.ts     ┘
+```
+
+红/绿控制 —— 同一条命令（`node --test plugin/test/precommit-guard.test.mjs`）：
+改前由 fan-in 全量 suite 记录为 **2 fail**（上面那段原文）；改后 **25 tests / 25 pass / 0 fail**
+（含 AC1/AC4 两条 e2e）。⛔ 不是「新测试变绿」，是**原红的那两条**转绿。
+
 ## Touches
 
 - .gitignore
@@ -169,4 +209,5 @@ merge develop **前** 118 tests / 0 fail，merge develop **后的最终树** 331
 - plugin/test/driver-cli.test.mjs
 - plugin/test/fan-in-ff-merge.test.mjs
 - plugin/test/gitignore-runtime-coverage-check.test.mjs
+- plugin/test/precommit-guard.test.mjs
 - tasks/gap-quay-init-gitignore-misses-quay-runtime-artifacts-outside-dot-quay.md
