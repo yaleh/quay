@@ -96,7 +96,7 @@ STATIC_CHECK_FAILED: checker-mutation-check-changed exit=1
 **反向控制**：`git checkout -- plugin/scripts/provider-binding-resolvability-check.ts` 还原后，**同一条命令、同一 worktree** ⇒ **退出码 = 0**（唯一载体是本任务自己的 `checker-mutation-check`，pass）⇒ 红可归因于被改的那个文件，而不是 delta 整体（硬规则 4 推论四：附一个「若 Y 为假则结果会不同」的对照）。
 
 ### AC2 负控制（不误伤）
-⚠️ **读数已更正（续做轮实测）**：原表用 `--names` 输出匹配 `^checker-mutation-check$`。**实测 `--names` 打印的不是门真正执行的那个名字**——同一次运行里 `--names` 打印 `checker-mutation-check`，而 `.commands[]` 打印 `run_checker "checker-mutation-check-changed" … --check-changed`；`quay-init-closure-ratchet` 与其伴生 `-stale` 同形。⚠️ **2026-09-13 续做轮②再更正其【根因】**：`--names` 打印的**不是「full-tier 的派生名」**，而是 `parseStaticCheckRegistry` 从 **`${repo_root}/plugin/scripts/<name>.(sh|ts)` 路径**派生的名字（**不是** `run_checker` 的 label，`select-static-checks-for-touches.ts:426` `CHECKER_RE`）——伴生与 full-tier **调用同一个脚本 ⇒ 派生名逐字相同**，`--names`/`--list` 对两条登记各打一次同名行；所以它不是「只出 full 名」，而是**两条登记同名**。结论不变（权威读法是 `.commands` / `--commands`），但「同名」本身是可复核的性质，它在本轮真的咬到了人（见下节）。
+⚠️ **读数已更正（续做轮实测）**：原表用 `--names` 输出匹配 `^checker-mutation-check$`。**实测 `--names` 打印的不是门真正执行的那个名字**——同一次运行里 `--names` 打印 `checker-mutation-check`，而 `.commands[]` 打印 `run_checker "checker-mutation-check-changed" … --check-changed`；`quay-init-closure-ratchet` 与其伴生 `-stale` 同形。⚠️ **2026-09-13 续做轮②再更正其【根因】**：`--names` 打印的**不是「full-tier 的派生名」**，而是 `parseStaticCheckRegistry` 从 **`${repo_root}/plugin/scripts/<name>.(sh|ts)` 路径**派生的名字（**不是** `run_checker` 的 label，`select-static-checks-for-touches.ts:426` `CHECKER_RE`）——伴生与 full-tier **调用同一个脚本 ⇒ 派生名逐字相同**，`--names`/`--list` 对两条登记各打一次同名行；所以它不是「只出 full 名」，而是**两条登记同名**。（反例就在本仓库：`capability-catalog` 那条 `--names` 出 `capability-catalog` 而命令是 `run_checker "superseded-capability-check" … capability-catalog.sh`——那里根本没有 full-tier 兄弟，照样「错位」，⇒ 说明差异来自**取名口径**，不是「出的是另一条登记的」。）结论不变（权威读法是 `.commands` / `--commands`），但「同名」本身是可复核的性质，它在本轮真的咬到了人（见下节）。
 更正后的读数（真实 CLI `select-static-checks-for-touches.ts --touches <path> --commands` 输出中 `checker-mutation-check-changed` 的行数）：
 | delta 路径 | 伴生被选中 |
 |---|---|
@@ -183,12 +183,16 @@ delta 含**注册表源**（`runner-static-gate.ts` / `scripts/test.sh` / `.gith
 - **(b) 把 full 块的 `# @static-tier full …` 改成 `change`** ⇒ 红：`AssertionError: exactly ONE registration of checker-mutation-check must be \`full\` (deferred ≠ dropped)`。
 ⇒ 新断言**可咬两个方向**（伴生消失、兜底降级），不是恒绿。
 
-**（二）`plugin/test/driver-runtime.test.mjs`（AC4 gap-ac203）—— ⛔ 不是本条造成，未改**
-失败行：`:732` `assert.notEqual(short.status, 0, …)`，实测 `status=0`（`--confirm-timeout 1` 却报 `started: … confirmed_ms=1025`）。
-归因证据（三条，方向一致）：
-1. **同一 worktree、同一提交、单跑该文件 ⇒ 通过**：`node --test plugin/test/driver-runtime.test.mjs` ⇒ AC4 **✔ 5654 ms**（本轮实测）。⇒ 它是**并发/负载**形态，不是提交内容形态。
-2. delta 与它无交集：本条 delta 只有 `runner-static-gate.ts` / `checker-mutation-check.sh` / 两个 `plugin/test/*.test.mjs`，**不含** `driver-runtime.ts` / `driver-runtime.test.mjs`，也不含它 spawn 的任何路径；两者唯一共享资源是**机器负载**。
-3. 该形态已在本仓库留档：`driver-runtime-ac4-confirmed-ms-asserts-step1-walltime`（AC4 的窗口/耗时断言测的是「夹具步骤①跑得多快」，24 并发下贴边翻转；⛔ 在别人的任务里顺手改，且加 `@load-sensitive` 无效因为 worker-driver 未接 isolate-rerun）。
-⇒ 本轮**不动它**（不在本条 Touches 内，且改它属于另一条缺陷）。**但它会在下轮 fan-in 里以同样概率复现**——若再以这个文件红退出，请按上面第 1 条先单跑取对照，⛔ 不要当成新发现重新归因。**记为本条的一个观察项**（非阻塞）：它是一本**已留档但未立案**的负载敏感缺陷。
+**本轮 scoped 门复核（改完后）**：`bash scripts/test.sh --for-task gap-checker-mutation-check-has-no-change-tier-companion --allow-thin` ⇒ **退出码 0、45 tests / 0 fail**（`AC3 — registry is parsed from scripts/test.sh…` ✔ 在列；伴生自身执行于日志 `:126` 并报 `manifest source changed in this delta — all 71 … (uncovered = 0)` ∧ `1 checker carrier(s) in THIS delta: checker-mutation-check`），随后已写 scoped-gate cache。
 
-**本轮 Touches 扩展**：`plugin/test/scoped-static-checks.test.mjs` 追加进 `## Touches`（修改它才能让 suite 绿；不追加即 anti-drift HARD FAIL，正是续做轮①的退出原因）。
+**（二）`plugin/test/driver-runtime.test.mjs`（AC4 gap-ac203）—— ⛔ 不是本条造成，未改；⚠️ 本轮把它的【分型】更正了**
+失败行：step ① `:732` `assert.notEqual(short.status, 0, …)`，实测 `status=0` 且 stdout 打印 `started: … confirmed_ms=1025`（`--confirm-timeout 1` 却报启动成功）。
+归因证据（三条，方向一致）：
+1. **同一 worktree、同一提交、单跑该文件 ⇒ 通过**：`node --test plugin/test/driver-runtime.test.mjs` ⇒ AC4 **✔ 5654 ms**（本轮实测）。⇒ 与提交内容无关（并发/时序形态）。
+2. delta 与它无交集：本条 delta 只有 `runner-static-gate.ts` / `checker-mutation-check.sh` / 两个 `plugin/test/*.test.mjs`，**不含** `driver-runtime.ts` / `driver-runtime.test.mjs`，也不含它 spawn 的任何路径；两者唯一共享资源是**机器负载**。
+3. ⚠️ **更正（本轮原先把它记成「负载敏感的测试自身缺陷」，那是错的）**：AC4 的红有**两个可区分形态**，`confirmed_ms` 是天然分型量——**≈1044（本轮实测 1025）＝【生产缺陷】**：`driver-runtime.ts:1080` 的 **supervisor 在 spawn 后立刻替 driver 写 pid 文件** ⇒ `aliveness().driverAlive`（`:1143-1147`）实际含义是「那个子进程此刻存在」（**含**「刚 spawn、还在初始化、马上 exit」），而 `awaitDriverConfirmation`（`:1261-1292`）唯一的稳定守卫是**定值** `CONFIRM_POLL_MS = 250`（`:1233`/`:1272`）⇒ 驱动 boot 延迟一超 250ms（套件级并发必然造成）就报 `started:` 并 exit 0 —— **正是该功能要消灭的「报成功但实际死亡」**（硬规则 4 推论二：字面量的合理性依赖宿主 ⇒ 静默失效）；**≈530 才是测试自身墙钟依赖**（红在 step ② `:746`）。**本轮这次落的是形态 (a)【生产缺陷】**（红在 step ① `:732`）。
+   ⇒ **已实际立案，⛔ 不是「未立案」**：`gap-driver-start-false-confirms-unsettled-driver`（title 逐字：「driver start 在驱动未就绪时误报 started:（存活确认守卫是定值 250ms，宿主启动延迟一超即失效）—— 套件 3/3 …」）。形态 (b) 亦有归属（`driver-runtime-ac4` 的既有分析）。
+   ⇒ **⛔ 不得用「注 seam / 放宽断言 / 加 retry / 加 sleep / 挪 `@test-group` / 加 `@load-sensitive`」把它变绿**——它是 **true positive**，放宽只会让真缺陷隐身（`gap-load-sensitive-tests-read-live-host-class-level-seam` 的 Plan 2/3 已逐条禁止这四种；`@load-sensitive` 无效的机制证据：`full-suite-runner.ts:138` 的 `scanFamily`/`kindForFile` 只在红时写分区供 triage，`scripts/test.sh` **不消费** `known-load-sensitive.ts`）。
+   **⇒ 对本条的含义**：它是一本**既有的、已立案的、与本任务 delta 无关的生产缺陷**，会在下轮 fan-in 里以一定概率复现；若再以这个文件红退出，**先按 `confirmed_ms` 分型**（≈1044 ⇒ 形态 (a)）再去判，⛔ 不要当成新发现重新归因，也⛔ 不要在本条里顺手修它。
+
+**本轮 Touches 扩展**：`plugin/test/scoped-static-checks.test.mjs` 追加进 `## Touches`（修改它才能让 suite 绿；不追加即 anti-drift HARD FAIL，正是续做轮①的退出原因）。改后 `anti-drift-touches-check.ts` ⇒ **`ANTI-DRIFT OK: … 4 actual file(s), all within declared Touches (5 glob(s))`**。
