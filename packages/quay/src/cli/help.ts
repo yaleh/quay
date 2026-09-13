@@ -11,10 +11,10 @@
 // get at least minimal guidance.
 //
 // gap-driver-cli-help-hides-four-of-six-kinds: the `driver` block below DERIVES its verb/kind
-// spellings from cli/driver.ts's VERBS/KINDS (`${…join("|")}`) — ⛔ 不再手抄。这是用户与 agent
-// 唯一看得到的那份驱动帮助（`quay driver --help` 由 bin/quay.ts 路由到这里，⛔ 不是 driver.ts
-// 里那份同名内联文本），修前它只列 2 个 kind 而 driver.ts 的 KINDS 有 6 个 ⇒ outer/quality/meta/goal
-// 四个已实现的 kind 在产品表层等于不存在。
+// spellings from cli/driver-vocab.ts's VERBS/KINDS (`${…join("|")}`) — ⛔ 不再手抄。这是用户与 agent
+// 唯一看得到的那份驱动帮助（`quay driver --help` 由 bin/quay.ts 路由到这里，⛔ 不是 cli/driver.ts
+// 里那份同名内联文本），修前它只列 2 个 kind 而真源有 6 个 ⇒ outer/quality/meta/goal 四个已实现的
+// kind 在产品表层等于不存在。
 
 import { KINDS, VERBS } from "./driver-vocab.ts";
 
