@@ -13,7 +13,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
-import { generateConfigContent, mcpEntryForProvider } from "../src/init.ts";
+import { generateConfigContent, mcpEntryForProvider, generateProfilesContent } from "../src/init.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = QUAY_CLI;
@@ -468,7 +468,43 @@ test("gap-launch-settings: quay init lays down .claude/launch.settings.json (byp
   const rawP = fs.readFileSync(profilesPath, "utf8");
   assert.match(rawP, /excludeDynamicSystemPromptSections: true/, "profiles.yml must carry excludeDynamicSystemPromptSections: true");
   assert.match(rawP, /promptSuggestions: false/, "profiles.yml must carry promptSuggestions: false");
-  assert.match(rawP, /quay-manager/, "profiles.yml must carry the manager role name (quay-manager)");
+  // AC4 (gap-quay-init-profiles-template-omits-every-role-the-drivers-request): the role session
+  // names are DERIVED from the project, never quay's literal `quay-` prefix — a third-party project
+  // that copied quay's names collided with quay's OWN sessions, and cross-session delivery addresses
+  // peers by name ⇒ misrouting. The temp dir is `<...>/quay-init-launchsettings-XXXX`, so the
+  // derived manager name is that basename + `-manager`.
+  const derived = path.basename(dir);
+  assert.match(rawP, new RegExp(`name: ${derived}-manager`), `profiles.yml must derive the manager session name from the project (${derived}-manager)`);
+  // ⛔ Not `!startsWith("quay-")`: the temp dir itself is named `quay-init-…`, so a correct derived
+  // name may legitimately begin with `quay-`. The defect is the LITERAL shipped name, so assert on
+  // that exact shape — the shipped template's own `quay-<role>` values, which must not survive.
+  for (const role of ["manager", "outer", "task-worker", "selector", "fix-worker", "pool-judge", "meta-driver"]) {
+    assert.ok(!new RegExp(`^\\s*name: quay-${role}\\s*$`, "m").test(rawP), `role "${role}" must not keep the shipped literal session name quay-${role}`);
+  }
+  assert.ok(!/^\s*inner:\s*$/m.test(rawP), "the retired `inner` role must not be laid down (SPEC-tmux-retirement-2026-09-03)");
+  for (const role of ["task-worker", "selector", "fix-worker", "pool-judge", "meta-driver"]) {
+    assert.match(rawP, new RegExp(`^\\s+${role}:\\s*$`, "m"), `profiles.yml must define the ${role} role the drivers request`);
+  }
+});
+
+// gap-quay-init-profiles-template-omits-every-role-the-drivers-request, Plan item 1: the inline
+// template in src/init.ts and the checked-in plugin/.quay/profiles.yml (what quay-init.sh copies
+// into a project, and what quay-launch.sh falls back to on a bare machine) used to be two
+// hand-maintained copies that silently diverged — the shipped 7-role carrier was "fixed" once while
+// the init path kept laying down the 3-role inline one. They are bound here by an executable
+// invariant instead of by discipline: ONE byte-for-byte assertion, so a one-sided edit cannot land.
+test("profiles carrier: the inline template IS the shipped carrier byte-for-byte (single source + invariant)", () => {
+  const shipped = fs.readFileSync(path.resolve(__dirname, "..", "..", "..", "plugin", ".quay", "profiles.yml"), "utf8");
+  assert.equal(
+    generateProfilesContent("quay"),
+    shipped,
+    "src/init.ts's template must reproduce plugin/.quay/profiles.yml byte-for-byte for project `quay` — edit BOTH or neither"
+  );
+  assert.notEqual(
+    generateProfilesContent("some-other-project"),
+    shipped,
+    "the template must be parameterised: a different project may not reuse quay's session names"
+  );
 });
 
 test("gap-launch-settings: quay-native init lays down the same launch.settings.json + profiles.yml", () => {

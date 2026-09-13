@@ -1,7 +1,7 @@
 ---
 id: AC-252
 title: 控制面上收进 Layer 0 —— 六个 kind 全部从共享骨架获得入站控制（SPEC 阶段 A1）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-017
 criterion: >-
@@ -50,4 +50,10 @@ expect: 'exit 0 = `serveControlPlane` 的**调用点**在 Layer 0（`driver-runt
 origin: SPEC §7 阶段 A1 + §2.3。实测：`serveControlPlane` 早在 driver-shared.ts:283
   实现，但只有 worker-driver.ts:4955 一处调用 ⇒ 另外五个 kind 无入站控制。这是【合并已有实现】不是新建（裁定⑤原则①）。
 activatedAt: 2026-09-13T14:40:09.757Z
+statusLog:
+  - at: 2026-09-13T18:34:38.891Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---

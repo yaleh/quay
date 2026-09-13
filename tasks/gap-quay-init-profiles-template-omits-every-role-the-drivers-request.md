@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-profiles-template-omits-every-role-the-drivers-request
 title: quay-init 的 profiles 落地走内联陈旧模板，shipped 模板被 skip —— 第三方项目缺全部五个 worker role
-status: ready
+status: done
 needs_human_cause: human-adjudication
 labels:
   - gap

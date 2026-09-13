@@ -191,10 +191,12 @@ export async function run(argv, ctx = {}) {
   if (cmd === "action" && sub === "list") return (await import("../src/cli/action.ts")).handleActionList(ctx);
   if (cmd === "action" && sub === "run") return (await import("../src/cli/action.ts")).handleActionRun(ctx);
   if (cmd === "serve") return (await import("../src/cli/serve.ts")).handleServe(ctx);
-  // GOAL-017 / AC-251 (SPEC-unified-quay-server-2026-09-13 §6.8 CLI-first): `quay server status
-  // [--json]` — the unified server's state carrier readback (web + MCP control plane in one pid).
-  // ⛔ Only `status`: SPEC §7 stage B's `start`/`add`/`stop` verbs are AC-254's scope, and adding
-  // them here would make stage A introduce a new user-visible capability (§8 criterion 9).
+  // GOAL-017 (SPEC-unified-quay-server-2026-09-13): the unified server's service surface.
+  //   AC-251 (§6.8 stage A2, CLI-first): `quay server status [--json]` — the state carrier readback
+  //     (web + MCP control plane in one pid).
+  //   AC-254 (§6.9 stage B): `start` / `add` / `stop` — the services are independently startable and
+  //     stoppable units (§6.9's four verbs are the four faces of ONE capability).
+  // One entry point for all four: the verb set lives in src/cli/server.ts's SERVER_VERBS.
   if (cmd === "server") return (await import("../src/cli/server.ts")).handleServer(ctx);
   if (cmd === "mcp") return (await import("../src/cli/mcp.ts")).handleMcp(ctx);
   if (cmd === "init") return (await import("../src/cli/init.ts")).handleInit(ctx);
@@ -218,7 +220,7 @@ export async function run(argv, ctx = {}) {
   if (cmd === "driver") return (await import("../src/cli/driver.ts")).handleDriver(ctx);
 
   // QX-005: updated fallback with --help hint (UQ-001/UQ-002).
-  console.error("usage: quay <adr|goal|meta|init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|config validate|config check|action list|action run|serve|server status|mcp|manager start|manager arm|driver> ...\nRun `quay --help` for full usage documentation.");
+  console.error("usage: quay <adr|goal|meta|init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|config validate|config check|action list|action run|serve|server start|server add|server stop|server status|mcp|manager start|manager arm|driver> ...\nRun `quay --help` for full usage documentation.");
   process.exitCode = 1;
     }
 }

@@ -17,8 +17,8 @@
 # annotations. run_checker / run_checker_parallel_wait resolve from checker-cost-lib.sh (sourced by
 # test.sh before this file); repo_root / main_root resolve from test.sh's globals at call time.
 
-# run_static_checks — the repo-wide CODE-CLASS invariants (35 checkers — machine-independent, valid
-# in ANY checkout) that run on EVERY FULL-SUITE-mode test-running invocation (the default, --group,
+# run_static_checks — the repo-wide CODE-CLASS invariants (machine-independent, valid in ANY
+# checkout) that run on EVERY FULL-SUITE-mode test-running invocation (the default, --group,
 # flags-only, explicit files) AND on `--static-checks`, independent of which test files were
 # requested (fast; the metadata modes --list-groups/--list-files skip them). CI inherits them
 # because its only test step is `bash scripts/test.sh`.
@@ -51,8 +51,11 @@
 # state by their own design (measured against a bare repo: exit 0 / exit 3-never-fatal). Their default
 # reachability had been ZERO, which made the writer's only fingerprint detector and the only
 # direct-develop-bypass detector unreachable in production. Full argument at their new home.
-# The member COUNT in this header is deliberately not restated — read it off the function bodies
-# (tasks/gap-checker-claim-vs-actual-cadence-and-count-drift owns the measured-value correction).
+# MEMBER COUNT (tasks/gap-checker-claim-vs-actual-cadence-and-count-drift): each registry's count
+# is declared by a `# @checker-count <N>` annotation sitting on the function it describes, and is
+# machine-checked against the function body's run_checker entries by
+# plugin/scripts/checker-count-drift-check.ts (a mismatch is RED). Prose must NOT restate the number
+# — this header used to claim 35 while the body held 58, and nothing could tell.
 #
 # SCOPED TIER (gap-scoped-runs-pay-full-static-check-overhead, AC1/AC2/AC6): TASK-scoped runs
 # (`--for-task <id>` / `--scoped <id>`) do NOT pay this full set every time — they run the
@@ -65,6 +68,9 @@
 # annotation (and an optional `# @static-class <doc|operational>` class marker) that
 # select-static-checks-for-touches.ts parses (the SAME single source checker-mutation-check.sh
 # parses — never a hand-maintained list, AC3).
+# @checker-count 59 — the number of run_checker entries in the FUNCTION BELOW (counted by
+# plugin/scripts/checker-count-drift-check.ts). Adding/removing a checker means updating this line,
+# and the check is what tells you; do not restate the number in prose.
 run_static_checks() {
   # QUAY_TEST_NESTED — set by mark_nested() right before the outer suite's node --test. A nested
   # invocation (a test that spawns scripts/test.sh) inherits it and skips the whole-store checks
@@ -85,9 +91,10 @@ run_static_checks() {
     return 0
   fi
   # Parallel execution (gap-run-static-checks-zero-concurrency-can-parallelize): the CODE-class
-  # checkers below (35; the 11 OPERATIONAL-class checkers moved to run_operational_checks under the
-  # 2026-09-02 passive-machine ruling; the 7 DOC-class moved to run_doc_checks under AC51 —
-  # gap-ac51-assertion-surface-split) are independent, read-only, and share no state — the
+  # checkers below (count declared by this function's own `# @checker-count` annotation — as are the
+  # OPERATIONAL-class count on run_operational_checks and the DOC-class count on run_doc_checks in
+  # scripts/test.sh, both machine-checked by plugin/scripts/checker-count-drift-check.ts) are
+  # independent, read-only, and share no state — the
   # sequential run was structural zero-concurrency. RUN_CHECKER_PARALLEL=1 makes run_checker launch
   # each checker in the BACKGROUND,
   # bounded to STATIC_CHECK_CONCURRENCY (default nproc — "读 nproc"; set the env var for a fixed N).
@@ -310,6 +317,15 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/ packages/quay/src/ plugin/scripts/target-identity-literal-check.ts plugin/test/target-identity-literal-check.test.mjs
   run_checker "target-identity-literal-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/target-identity-literal-check.ts" --root "${repo_root}"
+  echo "== worktree-namespace literal check (gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root, AC3) =="
+  # 工作区命名空间字面量不得重生：读侧只能经单一入口 packages/quay/src/worktree-namespace.ts
+  # （DEFAULT_WORKTREE_NAMESPACE_NAME 的回落分支），第二处双引号字面量 = 又一次「写用 config、读用硬编码」。
+  # 谓词即 AC 自己的 grep（对两个扫描根数双引号命中数 ≤1，且唯一命中必须落在该声明处）；
+  # 非引号出现（path 正则 / 注释 / 散文）只报 advisory 计数、永不判红（硬规则 5b 兄弟可见性）。
+  # 本例检查器自身【不含】该字面量（搜的是 JSON.stringify(常量)），故不会把自己算成第二处。
+  # @static-tier change
+  # @static-object packages/quay/src/ plugin/scripts/ plugin/scripts/worktree-namespace-literal-check.ts plugin/test/worktree-namespace-literal-check.test.mjs
+  run_checker "worktree-namespace-literal-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/worktree-namespace-literal-check.ts" --root "${repo_root}"
   echo "== task-file-bypass check (gap-adr013-gate-blind-spots-and-task-bypass-ratchet, AC4/AC5) =="
   # Fail-closed ratchet on direct `tasks/*.md` access outside the Provider ABI: a `tasks/` path literal
   # used as the argument of a file-operation (fs.* / readFileSync / writeFileSync / execFileSync /
@@ -690,6 +706,18 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/ plugin/workflows/ plugin/agents/ plugin/probes/ plugin/loop/ plugin/.claude/ orchestration/
   run_checker "quay-init-closure-ratchet-stale" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/quay-init-closure-ratchet.ts" --check-stale --root "${repo_root}"
+  echo "== profiles role coverage check (gap-quay-init-profiles-template-omits-every-role-the-drivers-request) =="
+  # Every profile role a driver asks for must exist in the carrier a REAL init produces. The
+  # assertion object is init's OUTPUT (a temp workspace initialized by the Core CLI), never a
+  # template file: the defect this closes was a "fixed" carrier that the init path never used, and
+  # its acceptance was green the whole time. The shipped carrier is compared against that output so
+  # a one-sided edit to either template goes RED, and a retired role (inner) is a FAIL rather than
+  # a remark. No init artifact obtainable ⇒ exit 3 (NOT-EVALUATED), never a green it did not earn.
+  # Pinned by plugin/test/profiles-role-coverage-check.test.mjs +
+  # plugin/scripts/checker-mutation-cases/profiles-role-coverage-check.sh (four red controls).
+  # @static-tier change
+  # @static-object plugin/scripts/quay-init.sh plugin/.quay/profiles.yml packages/quay/src/init.ts
+  run_checker "profiles-role-coverage-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/profiles-role-coverage-check.ts" --check --root "${repo_root}"
   echo "== goal-driver task-boundary check (DIR-131, gap-goal-driver-task-boundary-check) =="
   # goal/task 职责边界防回归（DIR-131）：goal-driver.ts 不得出现 task 写路径调用点——task_write /
   # lifecycle_promote / lifecycle_retreat / lifecycle_complete 或指向 tasks/ 的 fs.write*/writeFileSync。
@@ -853,6 +881,15 @@ run_static_checks() {
   # guarantee measures. A fixed sha is a literal whose validity depends on how far develop has run
   # since — 硬规则 4 推论二 (read the host, don't freeze a value that silently expires).
   run_checker "direct-to-develop-bypass-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/direct-to-develop-bypass-check.ts" --root "${main_root}" --baseline develop~100 --json
+  echo "== checker-count-drift-check — each registry's declared count vs its measured run_checker entries =="
+  # @static-tier change
+  # @static-object plugin/scripts/runner-static-gate.ts scripts/test.sh plugin/scripts/checker-count-drift-check.ts plugin/scripts/checker-mutation-cases/checker-count-drift-check.sh plugin/test/checker-count-drift-check.test.mjs
+  # This checker is the one that would have caught THIS file's own header claiming 35 checkers while
+  # the body held 58 (tasks/gap-checker-claim-vs-actual-cadence-and-count-drift). It reads the
+  # `# @checker-count <N>` annotation on each registry function and counts that function body's
+  # run_checker entries — declared≠measured ⇒ exit 1; annotation/function unreadable ⇒ exit 3
+  # (NOT-EVALUATED, never silently PASS; 硬规则 3b).
+  run_checker "checker-count-drift-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/checker-count-drift-check.ts" --root "${repo_root}"
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait
@@ -875,6 +912,8 @@ run_static_checks() {
   # parses BOTH functions, so their mutation cases were never in question) — what the move restores is
   # PRODUCTION reachability, which is the one thing this tier could not provide: an opt-in tier with no
   # automatic caller is "existing but never run", indistinguishable in the record from always-passing.
+# @checker-count 11 — the number of run_checker entries in the FUNCTION BELOW (counted by
+# plugin/scripts/checker-count-drift-check.ts; same contract as the annotation on run_static_checks).
 run_operational_checks() {
   RUN_CHECKER_PARALLEL=1
   echo "== operational-class static checks (explicit opt-in — scripts/test.sh --static-checks-operational; NOT part of the full-suite gate) =="

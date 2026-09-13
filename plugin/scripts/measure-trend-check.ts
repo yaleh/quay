@@ -39,6 +39,10 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import {
+  resolveWorktreeNamespace,
+  DEFAULT_WORKTREE_NAMESPACE_NAME,
+} from "../../packages/quay/src/worktree-namespace.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -97,7 +101,7 @@ export interface LandResult {
 /**
  * Normalize a `__PERFILE__` path to a stable identity across verify-round worktree roots
  * (gap-phase-overlap-two-phase-parallel-exploration constraint 6 — `__PERFILE__` 按 basename 归一).
- * A full suite runs inside a per-task worktree (`<root>/quay-worktrees/gap-<task>-<hash>/...`), so the
+ * A full suite runs inside a per-task worktree (`<worktree-root>/gap-<task>-<hash>/...`), so the
  * SAME physical test file carries a DIFFERENT full path every round. Keying measure-history on the
  * full path over-counts files (1179 "files" vs ~360 real) and breaks round-to-round comparison
  * (`compareLastTwoRounds` can't match a file whose path changed between rounds). Stripping the
@@ -105,9 +109,21 @@ export interface LandResult {
  * package context — unlike a bare basename, which would collide (measure-suite-reporter.mjs:156
  * deliberately emits full paths because `cli.test.mjs` exists in multiple packages). Paths already
  * outside any worktree (dev runs on a shared checkout) are returned unchanged.
+ *
+ * WHICH prefix (gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root): the
+ * worktree root is per-workspace (`loop.worktree_root`). A caller holding a workspace root passes
+ * `worktreeDir` (the resolved namespace); a root-free caller — this is a PURE path transform, and
+ * `parsePerFileLines`'s other call sites carry no root — strips the convention's default segment
+ * NAME, which is single-sourced from the shared resolver module. Either way this file no longer
+ * spells the literal itself.
+ *
+ * @param {string} file — a `__PERFILE__` path (absolute).
+ * @param {string|null} [worktreeDir] — the workspace's resolved worktree namespace, when known.
  */
-export function normalizePerFileKey(file: string): string {
-  const m = file.match(/^.*\/quay-worktrees\/[^/]+\/(.+)$/);
+export function normalizePerFileKey(file: string, worktreeDir?: string | null): string {
+  const segment = path.basename(worktreeDir && worktreeDir.length > 0 ? worktreeDir : DEFAULT_WORKTREE_NAMESPACE_NAME);
+  const escaped = segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = file.match(new RegExp(`^.*/${escaped}/[^/]+/(.+)$`));
   return m ? m[1] : file;
 }
 
@@ -134,7 +150,7 @@ function lastSuiteStartOffset(text: string): number {
  *  gap-fan-in-suite-log-cross-relaunch-reuse: fan-in relaunch 轮转日志并打 `__FANIN_SUITE_START__`
  * 起始标记——按最后一个标记切片，只解析当前轮（最后一个 `__FANIN_SUITE_START__` 之后）的内容，不整份
  * 线性读旧轮。无标记（full-suite-runner 直写 / 测试手写日志 / 旧版 fan-in）⇒ 整份读取（向后兼容）。 */
-export function parsePerFileLines(text: string): PerFileRecord[] {
+export function parsePerFileLines(text: string, worktreeDir?: string | null): PerFileRecord[] {
   const out: PerFileRecord[] = [];
   const mk = lastSuiteStartOffset(text);
   const body = mk === -1 ? text : text.slice(mk);
@@ -143,7 +159,7 @@ export function parsePerFileLines(text: string): PerFileRecord[] {
     if (m) {
       const dur = parseFloat(m[1]);
       if (Number.isFinite(dur) && dur > 0) {
-        const rec: PerFileRecord = { file: normalizePerFileKey(m[2]), durationMs: dur, passed: m[3] === "true" };
+        const rec: PerFileRecord = { file: normalizePerFileKey(m[2], worktreeDir), durationMs: dur, passed: m[3] === "true" };
         if (m[4] != null) {
           const endedAtMs = Number(m[4]);
           if (Number.isFinite(endedAtMs)) {
@@ -226,7 +242,9 @@ export function landMeasureHistory(opts: {
   const historyFile = opts.historyFile ?? path.join(repoRoot, ".quay", "measure-history.jsonl");
   const logFile = opts.logFile ?? path.join(repoRoot, ".quay", "full-suite.log");
   if (!fs.existsSync(logFile)) return { landed: false, round: lastRound(historyFile), files: 0, reason: "no-log" };
-  const records = parsePerFileLines(fs.readFileSync(logFile, "utf8"));
+  // The workspace's own worktree namespace (loop.worktree_root), so a third-party project whose
+  // namespace is <project>-worktrees — not the default name — still keys files repo-relative.
+  const records = parsePerFileLines(fs.readFileSync(logFile, "utf8"), resolveWorktreeNamespace(repoRoot).dir);
   if (records.length === 0) return { landed: false, round: lastRound(historyFile), files: 0, reason: "no-perfile-lines" };
 
   const digest = computeLogDigest(records);

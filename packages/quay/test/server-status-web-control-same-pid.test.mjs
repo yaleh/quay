@@ -27,7 +27,7 @@ import path from "node:path";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
-import { startServer } from "../src/serve.ts";
+import { startServer, shutdownHost } from "../src/serve.ts";
 import { readServerState, pidAlive, SERVER_STATE_REL, CONTROL_PLANE_NAME } from "../src/server-state.ts";
 import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
@@ -222,10 +222,13 @@ test("AC2 — graceful stop retires the carrier ⇒ exit 1 (≠0, ≠3); a SIGKI
   const server = await startServer({ port: 0, host: "127.0.0.1" });
   assert.equal((await cli(["server", "status", "--json"], ws)).code, 0, "green while running");
 
-  // (a) GRACEFUL close: the carrier is retired, so the reading is "absent" — not "unreadable".
-  await server.control.close();
-  await new Promise((resolve) => server.close(resolve));
-  await server.client.close();
+  // (a) GRACEFUL stop: the carrier is retired, so the reading is "absent" — not "unreadable".
+  //
+  // ⚠️ AC-254 (SPEC §6.9) moved carrier retirement OFF `server.close()`. `server` IS the web face,
+  // and closing the web face is now a NORMAL PARTIAL operation (`quay server stop --only web`) that
+  // deliberately leaves the host running — so retiring the carrier on it would report a live host as
+  // NOT-RUNNING. Retiring the carrier is the HOST's own end, i.e. `shutdownHost()`.
+  await shutdownHost(server);
 
   const afterClose = await cli(["server", "status", "--json"], ws);
   assert.notEqual(afterClose.code, 0, "a stopped server must not read green");
@@ -415,7 +418,9 @@ test("`quay server status` is reachable and documented — top-level usage, help
   // Bare `quay server` is a usage error, not a silent no-op.
   const bare = await cli(["server"], REPO_ROOT);
   assert.equal(bare.code, 1);
-  assert.match(bare.stderr, /usage: quay server status/);
+  // The usage line enumerates the verb set; since AC-254 it is the FOUR verbs of SPEC §6.9 — the
+  // assertion is on the PREFIX (the verb set itself is asserted, by value, in the stage-B test).
+  assert.match(bare.stderr, /usage: quay server <start\|add\|stop\|status>/);
 
   // `quay server --help` documents the three exit codes (the contract of the command).
   const help = await cli(["server", "--help"], REPO_ROOT);
@@ -431,17 +436,40 @@ test("`quay server status` is reachable and documented — top-level usage, help
   assert.match(unknown.stderr, /server status/);
 });
 
-// ── §8 criterion 9: stage A adds NO capability beyond `status` — no start/add/stop verbs ──────────
+// ── §8 criterion 9 / §6.9 stage B: the verb set, and stage A's own boundary ───────────────────────
+//
+// ⚠️ This test REPLACES the stage-A-era "start/add/stop are NOT reachable" gate. That assertion was
+// correct while stage B was unlanded (SPEC §8 criterion 9: stage A must not add a capability), and
+// it is now FALSE BY DESIGN — stage B (`gap-ac254-partial-stop-web-driver-round-record`) lands the
+// three verbs. Keeping the old assertion would make the test defend the ABSENCE of the feature this
+// repo just built. What survives from it is the part that was never about stage B:
+// `quay serve`'s own flag surface must not grow (the control-plane port is an env override).
 
-test("SPEC §8-9 — stage A adds only `status`; the stage-B verbs start/add/stop are NOT reachable", async () => {
+test("SPEC §6.9/§8-9 — the stage-B verbs are reachable AND the stage-A `serve` flag surface did not grow", async () => {
+  // Every verb of the SPEC §6.9 CLI form reaches a REAL handler: a usage error is exit 1 with the
+  // four-verb usage line; a stage-B verb that is merely *recognised* but not implemented would exit
+  // 1 too — so the discriminator is that the handler's own error is about the ACTION, not the verb.
+  const startNoSvc = await cli(["server", "stop"], REPO_ROOT);
+  assert.equal(startNoSvc.code, 1);
+  assert.match(startNoSvc.stderr, /requires --only/, "`stop` reaches the stage-B handler (its own precondition error)");
+  assert.doesNotMatch(startNoSvc.stderr, /unknown subcommand|not implemented/);
+
+  const help = await cli(["server", "--help"], REPO_ROOT);
   for (const verb of ["start", "add", "stop"]) {
-    const res = await cli(["server", verb], REPO_ROOT);
-    assert.equal(res.code, 1, `\`quay server ${verb}\` is not implemented`);
-    assert.match(res.stderr, /usage: quay server status/, `\`quay server ${verb}\` reports the stage-A usage, not a stage-B action`);
+    assert.match(help.stdout, new RegExp(`quay server ${verb}`), `\`quay server --help\` documents \`${verb}\``);
+  }
+  // The service inventory is user-visible and complete (web + control + the six driver kinds).
+  for (const svc of ["web", "control", "driver:promotion", "driver:worker", "driver:outer", "driver:goal", "driver:quality", "driver:meta"]) {
+    assert.match(help.stdout, new RegExp(svc.replace(":", ":")), `the help lists the ${svc} service`);
+  }
+  // Top-level help lists the four verbs in the usage block.
+  const top = await cli(["--help"], REPO_ROOT);
+  for (const verb of ["start", "add", "stop"]) {
+    assert.match(top.stdout, new RegExp(`quay server ${verb}`), `\`quay --help\` lists \`server ${verb}\``);
   }
   // And the Web UI's own flag surface did not grow a control-plane knob (env-only override).
-  const help = await cli(["serve", "--help"], REPO_ROOT);
-  assert.doesNotMatch(help.stdout, /--control-port/, "no new user-visible serve flag (SPEC §8 criterion 9)");
+  const serveHelp = await cli(["serve", "--help"], REPO_ROOT);
+  assert.doesNotMatch(serveHelp.stdout, /--control-port/, "no new user-visible serve flag (SPEC §8 criterion 9)");
 });
 
 // ── AC4 (partial, in-repo): the dist bundle carries the same behaviour as the source tree ─────────

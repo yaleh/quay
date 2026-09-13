@@ -88,6 +88,11 @@ const CONFIG_CLASS = new Set([
   // (gap-the-runtime-has-nowhere-safe-to-land AC10); it is install-generated config, not a
   // product artifact. Deterministic content across workspaces, so A1's byte-identity holds.
   ".gitignore",
+  // .quay/profiles.yml — gap-quay-init-profiles-template-omits-every-role-the-drivers-request:
+  // role `name:` fields are now derived from the target workspace's own basename (fixes
+  // cross-session SendMessage misrouting on the old hardcoded `quay-<role>` names), so this file
+  // is legitimately per-workspace content, not a byte-identical product artifact.
+  ".quay/profiles.yml",
 ]);
 
 const substantive = (label) =>
@@ -372,8 +377,18 @@ test("A1 — two workspaces with genuinely different derived test commands lay d
           break;
         }
       }
-      dbg.push(`  ws1 identical to plugin source: ${fs.readFileSync(productSource(rel)).equals(b1)}`);
-      dbg.push(`  ws2 identical to plugin source: ${fs.readFileSync(productSource(rel)).equals(b2)}`);
+      // gap-quay-init-profiles-template-omits-every-role-the-drivers-request: a diffing rel with
+      // no productSource() mapping (e.g. a file that should have been added to CONFIG_CLASS
+      // instead) must report cleanly here, not crash fs.readFileSync(null) — a crashing debug
+      // branch is worse than a plain assertion failure (硬规则 3b: reads-as-crash ≠ read-as-pass,
+      // but a debug helper that throws still obscures the real diff being reported).
+      const src = productSource(rel);
+      if (src === null) {
+        dbg.push(`  (no productSource() mapping for ${rel} — likely belongs in CONFIG_CLASS instead)`);
+      } else {
+        dbg.push(`  ws1 identical to plugin source: ${fs.readFileSync(src).equals(b1)}`);
+        dbg.push(`  ws2 identical to plugin source: ${fs.readFileSync(src).equals(b2)}`);
+      }
     }
     assert.deepEqual(diffs, [],
       `A1: laid-down files must be byte-identical across the two workspaces (only the config file may differ); differing=${JSON.stringify(diffs)}\n  ${dbg.join("\n  ")}`);

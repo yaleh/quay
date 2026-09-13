@@ -1,7 +1,7 @@
 ---
 id: gap-checker-claim-vs-actual-cadence-and-count-drift
 title: 两处 checker 自述与实际脱节：cadence 声明未被调度消费 + 头注释数量与实测不符
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -35,29 +35,147 @@ extra:
    会发现这种漂移（`capability-manifest-check.ts` 一类的一致性检查器覆盖的是别的载体，不覆盖
    `runner-static-gate.ts` 自己的头注释）。
 
+### 实测更正（2026-09-13，worker 在本任务 worktree 重测）
+
+上面 finding 里的 54/51/13 是立案时点的读数；本任务落地时在同一棵树上按「命令位置的 run_checker
+调用」重测（命令与输出见 ## Evidence）：`run_static_checks` = **58**（去重后仍是 58，本文件没有
+同脚本多标签的情形）、`run_operational_checks` = **11**、`scripts/test.sh` 的 `run_doc_checks` =
+**8**（头注释散文写「the 7 DOC-class」——第三处同形漂移，本次一并修）。⇒ 声明与实际不符的是
+**两个方向都有**：静态面 35→58（少报 23），文档面 7→8（少报 1）；运行态面 11 恰好是对的，但它同样
+是一个「没人比对过」的数字，故一并用同一机制管起来。
+
 ## Acceptance Criteria
 
-- [ ] AC1（cadence 归宿二选一，能取假）：要么把 `task-status-drift-check.ts` 真正接入
-  `routine-scheduler.ts` 使其按 `capability-catalog.sh:706` 声明的 cadence（每轮）被实际调度
-  ——落地后需现场证明「跑一轮 routine-scheduler，该 checker 确实被调用」（如打印/日志/exit code
-  可核）；要么修正 `capability-catalog.sh:706` 的 cadence 声明为与实际相符的值（如标注为
-  「未接入调度，仅供人工/其它路径按需调用」）。二选一必须落地一个，不能两者都不做——落地后
-  贴出改动前后的 catalog 声明原文对比。
-- [ ] AC2（头注释数量修正，能取假）：修正 `plugin/scripts/runner-static-gate.ts` 头注释的
-  checker 数量为实测值。修正后跑一遍统计命令核对头注释数字与统计结果一致（如对
-  `run_static_checks()`/`run_operational_checks()` 函数体逐行统计 `run_checker` 调用次数），
-  贴出统计命令与输出、以及修正后的头注释原文。
-- [ ] AC3（防再漂移，能取假）：新增或扩展一个机械检查（可挂在既有静态检查框架内），断言
-  `runner-static-gate.ts` 头注释声明的 checker 数量与函数体内实际 `run_checker` 调用次数一致，
-  不一致则该检查报红。跑一次「故意改错头注释数字」的负控制，确认检查器真的会报红（不是恒绿）。
-- [ ] AC4（既有测试不回归）：`node --experimental-strip-types --test plugin/test/runner-static-gate*.test.mjs`
-  （或覆盖 runner-static-gate 的既有测试文件）exit 0；新增检查器若有对应测试文件，一并跑绿。
+- [x] AC1（cadence 归宿二选一，能取假）：把 `capability-catalog.sh` 的 cadence 声明修正为与实际
+  相符的值 —— 「每轮」→「按需」，并在新增的 CONSUMER 行里逐条列出真实按的人与条件（web `/board`
+  经 `packages/quay/src/observation.ts` 的 `readBoardLanding` spawn 本脚本、`restart-readiness-check.sh`
+  的 `--stranded` 段、cold-start skill、`goals-and-ac.md` 的判据配方）。选项一（接进
+  `routine-scheduler`）未被采用，理由落地在 CONSUMER 行内：routine-scheduler 的文法
+  （`every(N)`/`interval:<N>m`/`on(<event>)`）表达不出「每轮」，`every(N)` 依赖的迭代计数器随
+  ADR-022 退役，且该脚本读全库 git-log 面（本仓实测 >150s），2026-09-02 passive-machine ruling
+  正是把读运行态的检查器搬出默认套件。落地后现场验证：每轮调用点实测 0 处（命令见 ## Evidence），
+  `rhythm-consumer-check.ts --check` OK（判据2 judged 96→97，0 violation），
+  `capability-catalog.sh --entry-surface` exit 0。改动前后 catalog 声明原文对比见 ## Evidence。
+- [x] AC2（头注释数量修正，能取假）：`runner-static-gate.ts` 的计数不再写在散文里，改为每个注册表
+  函数上挂一条 `# @checker-count <N>` 注解（`run_static_checks` 59、`run_operational_checks` 11），
+  `scripts/test.sh` 的 `run_doc_checks` 同挂 8；散文改为指向注解。修正后跑统计命令核对：三处
+  声明数 == 实测 `run_checker` 条数（59/59、11/11、8/8）。统计命令与输出、以及修正后的头注释原文
+  见 ## Evidence。
+- [x] AC3（防再漂移，能取假）：新增机械检查 `plugin/scripts/checker-count-drift-check.ts`（挂在既有
+  静态检查框架内：登记进 `run_static_checks`，带 `@static-tier change` + `@static-object`，六张
+  catalog 表各一行，配 mutation case 与单测）。它断言每个注册表函数的 `# @checker-count` 声明数
+  等于该函数体命令位置的 `run_checker` 条数：不等 ⇒ exit 1；载体/函数/注解读不到 ⇒ exit 3
+  NOT-EVALUATED（⛔ 不与 PASS 同形，硬规则 3b）。负控制已跑：故意把声明数改成 57（另一方向改成 1、
+  以及文档面改成 7）⇒ 真报红 exit 1；移走载体 ⇒ exit 3。mutation case（5 个注入方向）exit 0；
+  全量 manifest `checker-mutation-check.sh --check` PASS（77/77，stayed_green=0）。
+- [x] AC4（既有测试不回归）：覆盖 `runner-static-gate.ts` 的既有测试全绿 ——
+  `select-static-checks-for-touches.test.mjs` + `scoped-static-checks.test.mjs` +
+  `capability-catalog.test.mjs` + `rhythm-consumer-check.test.mjs` 共 68 tests / 68 pass / 0 fail
+  （exit 0）；新增检查器的测试 `plugin/test/checker-count-drift-check.test.mjs` 7 tests / 7 pass
+  / 0 fail。⚠️ AC 点名的 `plugin/test/runner-static-gate*.test.mjs` **不存在**（`ls` 无匹配），
+  故按 AC 的「或覆盖 runner-static-gate 的既有测试文件」执行上述四份——它们都直接解析/断言
+  `runner-static-gate.ts`（注解选择器、scoped 分层、两个注册表的 mutation manifest）。
 
 ## Definition of Done
 
-`task-status-drift-check.ts` 的 cadence 归宿（接入调度 或 声明改实）已落地且可现场验证；
-`runner-static-gate.ts` 头注释数量与实测值一致；新增的一致性检查器落地并通过负控制验证
-（故意制造漂移能报红）；相关既有测试全绿。不是「看代码逻辑上应该修好」，要有真实命令输出为证。
+`task-status-drift-check.ts` 的 cadence 声明已改实（「按需」+ CONSUMER 行逐条列出真实按的人与条件）
+且可现场验证（`rhythm-consumer-check --check` 绿、catalog 入口闸绿）；`runner-static-gate.ts` 与
+`scripts/test.sh` 的注册表计数以 `# @checker-count` 注解单点声明，实测值一致（59/11/8）；
+新增一致性检查器落地并通过负控制验证（故意制造漂移真报红，改错方向两个都验）；相关既有测试全绿。
+不是「看代码逻辑上应该修好」，命令与输出为证（见 ## Evidence）。
+
+## Evidence
+
+（2026-09-13，worker 在 worktree `/home/yale/work/quay-worktrees/gap-checker-claim-vs-actual-cadence-and-count-drift` 实测）
+
+**AC1 —— 选「声明改实」，catalog diff 原文**（`git diff plugin/scripts/capability-catalog.sh`）：
+
+```
+-  [task-status-drift-check.ts]="每轮"
++  [task-status-drift-check.ts]="按需"
++  [task-status-drift-check.ts]="谁按：①packages/quay/src/observation.ts 的 readBoardLanding（web /board
++   每次页面请求 spawn 本脚本 --json，30s 短 TTL 缓存 + 秒级硬顶）——机器按，最常走的路径；②…restart-
++   readiness-check.sh 的 --stranded 段…；③plugin/skills/cold-start/SKILL.md…；④orchestration/goals-and-ac.md…
++   ⛔ 原声明「每轮」为假：没有每轮的调用点…（全文见 catalog CONSUMER 行）"
+```
+
+「每轮调用点实测 0 处」（position 计数，非关键词）：
+
+```
+$ grep -c 'task-status-drift-check' orchestration/manager-tick-core.md orchestration/fast-mode-tick-core.md \
+    plugin/loop/manager-tick-core.md plugin/loop/fast-mode-tick-core.md plugin/scripts/worker-driver.ts
+orchestration/manager-tick-core.md:0
+orchestration/fast-mode-tick-core.md:0
+plugin/loop/manager-tick-core.md:0
+plugin/loop/fast-mode-tick-core.md:0
+plugin/scripts/worker-driver.ts:0
+```
+
+闸：
+
+```
+$ node --experimental-strip-types plugin/scripts/rhythm-consumer-check.ts --check
+rhythm-consumer-check: OK — rhythm-consumer-check-pass
+  [判据2-按需-consumer] ok — 97 judged, 0 violation(s)      ← 立案前为 96 judged（本行新增 1）
+$ bash plugin/scripts/capability-catalog.sh --entry-surface ; echo $?
+0
+```
+
+**AC2 —— 声明 == 实测**（同一命令三条，逐函数统计命令位置 `run_checker` 条数并与注解比对）：
+
+```
+$ for pair in plugin/scripts/runner-static-gate.ts:run_static_checks \
+              plugin/scripts/runner-static-gate.ts:run_operational_checks \
+              scripts/test.sh:run_doc_checks; do f=${pair%%:*}; fn=${pair##*:}; \
+    ann=$(grep -B200 "^${fn}() {" "$f" | grep -E '^#[[:space:]]*@checker-count' | tail -1); \
+    s=$(grep -n "^${fn}() {" "$f" | head -1 | cut -d: -f1); e=$(awk -v s=$s 'NR>s && /^}$/{print NR; exit}' "$f"); \
+    n=$(awk -v s=$s -v e=$e 'NR>s && NR<e' "$f" | grep -cE '^[ \t]*run_checker[ \t]+"'); \
+    echo "$f:$fn  $ann  measured=$n"; done
+
+plugin/scripts/runner-static-gate.ts:run_static_checks    # @checker-count 59 ...  measured=59
+plugin/scripts/runner-static-gate.ts:run_operational_checks  # @checker-count 11 ...  measured=11
+scripts/test.sh:run_doc_checks                            # @checker-count 8 ...   measured=8
+```
+
+修正后的头注释原文（节选）：`# @checker-count 59 — the number of run_checker entries in the FUNCTION
+BELOW (counted by plugin/scripts/checker-count-drift-check.ts). Adding/removing a checker means updating
+this line, and the check is what tells you; do not restate the number in prose.`；散文处改为
+「(count declared by this function's own `# @checker-count` annotation … machine-checked by
+plugin/scripts/checker-count-drift-check.ts)」，并删除了原 "35 checkers" / "the 7 DOC-class" / 
+"the 11 OPERATIONAL-class" 三处散文复述。
+
+**AC3 —— 负控制（故意改错声明数 ⇒ 真报红；不是恒绿）**（temp root 上的副本，真树不动）：
+
+```
+$ sed -i 's/@checker-count 59 /@checker-count 57 /' $TMP/plugin/scripts/runner-static-gate.ts
+$ node --experimental-strip-types plugin/scripts/checker-count-drift-check.ts --root $TMP
+  [MISMATCH] plugin/scripts/runner-static-gate.ts:run_static_checks — declared 57, measured 59
+FAIL — 1 declared count(s) disagree with the function body: … set the annotation … to 59
+EXIT=1
+$ sed -i 's/@checker-count 8 /@checker-count 7 /' $TMP/scripts/test.sh     # 第三个载体、另一方向
+  [MISMATCH] scripts/test.sh:run_doc_checks — declared 7, measured 8       EXIT=1
+$ rm $TMP/scripts/test.sh                                                  # 载体读不到
+NOT-EVALUATED — 1 registry dimension(s) could not be read …               EXIT=3
+```
+
+框架内验证：`bash plugin/scripts/checker-mutation-cases/checker-count-drift-check.sh <tmp>` → exit 0；
+`bash plugin/scripts/checker-mutation-check.sh --check` → `checkers_total: 77 / checkers_with_mutation:
+77 / mutations_that_stayed_green: 0 / uncovered: 0 / RESULT: PASS`；
+`node --experimental-strip-types plugin/scripts/checker-mechanical-spine-check.ts --root .` → 125
+checker(s), 0 violation(s)。
+
+**AC4 —— 既有测试不回归**：
+
+```
+$ node --experimental-strip-types --test plugin/test/select-static-checks-for-touches.test.mjs \
+    plugin/test/scoped-static-checks.test.mjs plugin/test/capability-catalog.test.mjs \
+    plugin/test/rhythm-consumer-check.test.mjs
+ℹ tests 68   ℹ pass 68   ℹ fail 0        EXIT=0
+$ node --experimental-strip-types --test plugin/test/checker-count-drift-check.test.mjs
+ℹ tests 7    ℹ pass 7    ℹ fail 0        EXIT=0
+$ ls plugin/test/runner-static-gate* 
+ls: cannot access 'plugin/test/runner-static-gate*': No such file or directory
+```
 
 ## Touches
 
@@ -65,5 +183,9 @@ extra:
 - plugin/scripts/routine-scheduler.ts
 - plugin/scripts/task-status-drift-check.ts
 - plugin/scripts/runner-static-gate.ts
+- plugin/scripts/checker-count-drift-check.ts
+- plugin/scripts/checker-mutation-cases/checker-count-drift-check.sh
 - plugin/test/runner-static-gate.test.mjs
+- plugin/test/checker-count-drift-check.test.mjs
+- scripts/test.sh
 - tasks/gap-checker-claim-vs-actual-cadence-and-count-drift.md

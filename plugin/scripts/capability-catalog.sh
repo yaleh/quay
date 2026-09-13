@@ -99,6 +99,7 @@ unset _cs_violations
 # as a specific QUESTION, never the generic "checks correctness" (AC5 negative control:
 # a catalog where every entry says "checks correctness" is indistinguishable from none).
 declare -A QUESTION=(
+  [worktree-namespace-literal-check.ts]="Does the product/plugin source spell the worktree-namespace directory literal (the double-quoted 'quay-worktrees') in more than the ONE place that is allowed to — i.e. is a grep -rn of that literal over packages/quay/src + plugin/scripts at most 1 hit, and is that hit the DEFAULT_WORKTREE_NAMESPACE_NAME declaration in packages/quay/src/worktree-namespace.ts (the single resolver's fallback branch)? An unquoted occurrence (path regex / comment / prose) is reported as an advisory count, never a hard failure (tasks/gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root AC3)?"
   [gitignore-runtime-coverage-check.ts]="Do the runtime-artifact patterns quay MARKS in its own .gitignore equal the patterns of the single-source manifest (plugin/scripts/quay-runtime-artifacts.txt) that quay-init writes into a consumer project — either direction of divergence RED (marked-but-absent ⇒ quay-init would not ignore it; present-but-unmarked ⇒ an unreferenced rule); unreadable manifest ⇒ NOT-EVALUATED never conflated with 'no drift' (tasks/gap-quay-init-gitignore-misses-quay-runtime-artifacts-outside-dot-quay)?"
   [psi-failure-correlation-check.ts]="Does PSI (cpu_stall) have incremental predictive power for test FAILURE beyond the concurrent-file count — via TWO SPLIT data sources (never merged): (a) ACTIVE induction of failures by running serial/lowconc + verified-clean historical-failure candidates (excluding plugin/test-isolation-violations.txt hits) under controlled busy-wait CPU oversubscription while sampling /proc/pressure/cpu, adjudicating each induced failure against isolation-conflict signatures before it counts; and (b) PASSIVE historical join of .quay/verification-round.jsonl perFile {file, startedAtMs, endedAtMs, passed} with .quay/suite-load-<runId>.jsonl {t, cpu_stall}, comparing failing vs passing files WITHIN each concurrency bin, with a MIN_N floor below which a bin reports 「样本不足」 not a direction (the Phase 0 go/no-go that decides whether to build a PSI feedback admission controller, gap-psi-shadow-admission-controller)?"
   [psi-window-join.ts]="What is the system-level PSI (cpu_stall) sample series for ONE test file's ONE run — the .quay/verification-round.jsonl perFile {file, startedAtMs, endedAtMs} window joined against the .quay/suite-load-<runId>.jsonl system-level periodic samples {t, cpu_stall} (approximate time-window join, honestly labeled, never an exclusive per-file value), fail-closed on missing carriers / missing perFile record (tasks/gap-perfile-psi-window-join)?"
@@ -161,6 +162,7 @@ declare -A QUESTION=(
   [check-set-after-change-check.ts]="After editing which files does which test/checker run — git diff --name-only intersect the test/checker's SELF-DECLARED judged objects (the @judges header glob, no central table), so 'run the test that covers this change' is mechanical not the author's memory (A0b③: changing plugin/loop/manager-tick-core.md MUST select laydown-set-check.sh, never tick-core-static-check)?"
   [checked-in-write-check.ts]="Is any EXECUTED test input creating or deleting entries under a CHECKED-IN path — judged positionally at the RESOLVED target path by interposing on the write verbs of node:fs / node:fs.promises in the child (guard), with a second independent reading of whether each input's module evaluation completed, so a file that never loaded reports NOT-EVALUATED instead of reading as clean (tasks/gap-fixture-dir-write-races-whole-tree-copy)?"
 
+  [checker-count-drift-check.ts]="Is each registry's declared checker count equal to the run_checker entries its function body actually holds — the header's own claim (35 while the body held 58) having been unverifiable by any machine (tasks/gap-checker-claim-vs-actual-cadence-and-count-drift)?"
   [checker-cost-lib.sh]="Does a bash static-check invocation record its criterion's wall-clock cost (append-only, zero-judgment)?"
   [checker-cost.ts]="Did the checker record its own criterion cost to the checker-cost JSONL (pure-append, zero-judgment)?"
   [checker-mutation-check.sh]="Would each checker actually fail when its subject is mutated (the L_S instrument)?"
@@ -198,6 +200,7 @@ declare -A QUESTION=(
   [dispatch-worktree-setup.sh]="Has a freshly-created dispatched task worktree been made self-verifying — node_modules present (symlink to the main checkout, or npm install when the main has none) + config.yml via worktree-include.sh — so scripts/test.sh in the worktree never depends on the agent remembering to create the symlink?"
   [doc-check-cache.ts]="Has the doc-class static-check input changed since the last GREEN run — a docs-face blob-hash key (@static-object judgment objects + the plugin/scripts checker/instrument surface + scripts/test.sh + .gitignore + the whole-tree file structure) so worker-driver's fan-in doc-check step reuses the cached green verdict (~0s) instead of re-paying 11.6s × 165/week, green-only caching + fail-closed null key (tasks/gap-fan-in-doc-check-cache)?"
   [dispatch-preference-check.ts]="Is the dispatch-preference file (orchestration/dispatch-preference.md) three-section complete — 默认段 (default, manager absent) / 覆盖段 (override, manager present) / 维护者字段 (who updates) — such that deleting ANY one section turns the checker RED (AC54 判据1/判据2, tasks/gap-ac54-dispatch-preference-file)?"
+  [dark-axis-record-check.ts]="Does a given task PROVE it consulted ADR-007's dark axes — does its body carry a parseable L_D/L_G reading (a NAMED axis anchored at a LINE START plus a concrete numeric quantity, so a prose mention or an ADR-number citation cannot pass) or the explicit declaration 该轴仍暗,理由:..., and which of the three states RECORDED / DISCLAIMED / MISSING is it (plus NOT-EVALUATED when the body is unreadable — its own value, never folded into MISSING or RECORDED, 硬规则 3b)? The same judgment is the built-in dark-axis gate the ready→done path runs when the workspace declares ADR-007, so the ADR's per-milestone half is enforced rather than documented (tasks/gap-adr007-per-milestone-dark-axis-enforcement-gate)."
   [dispatch-record.ts]="Did inner record a dispatch with the dispatch-preference file's content fingerprint (git blob hash, answering '用的是哪一版') + a one-sentence '为什么选它' (answering '按倾向选还是随便选'), and does it FAIL CLOSED on a missing/thin reason (AC55 产物·承重条款 writer, tasks/gap-ac55-dispatch-record-fingerprint-reason)?"
   [dispatch-record-fingerprint-reason-check.ts]="Does EVERY dispatch record in orchestration/dispatch-record.jsonl carry the preference-file content fingerprint (40-hex git blob hash) AND a substantive one-sentence reason — such that a REAL dispatch record missing fingerprint OR reason goes RED (AC55 判据1/判据3, tasks/gap-ac55-dispatch-record-fingerprint-reason)?"
   [ac56-recommended-deordered-check.ts]="Is the dispatch-facing slot-refill recommended array de-ordered — a lexicographic (dictionary) order with an explicit 'order meaningless' annotation, NOT a meaningful priority/1-cost order (blocking_suite/delivery-critical first) — such that an output STILL priority-sorted (判据2, falsifiable) OR missing the annotation (判据1 明确标注) goes RED, read from the OUTPUT itself not a comment (判据3, tasks/gap-ac56-recommended-deordered)?"
@@ -279,10 +282,12 @@ declare -A QUESTION=(
   [pane-state-classify.ts]="What state is a Claude Code pane in (busy/idle/blocked)?"
   [periodic-push-backup.sh]="Can this repo's current branch be periodically pushed to the shared bare backup repo (non-force, idempotent)?"
   [pipe-exit-code-check.sh]="Does a pipeline propagate its last command's exit code correctly?"
+  [phase-declare.ts]="Which two-phase-breathing phase (expansion|convergence) does ADR-008 currently stand in — the phase recorded in .quay/two-phase-state.json by an EXPLICIT human declaration (--to plus --reason), with a real L_D code:doc snapshot taken at declaration time, and NO threshold-triggered auto-switch anywhere (gap-adr008-phase-state-mechanization-minimal)?"
   [portfolio-choice.ts]="Which non-overlapping milestone portfolio should the next cycle pursue?"
   [precommit-guard.ts]="At commit/merge time: do the DOC-CLASS checks pass (AC51 断言面拆分 — doc consistency checks moved out of the full suite into pre-commit: bash scripts/test.sh --static-checks-doc, seconds-level feedback instead of an 8-minute round, and editing docs no longer makes a running round red)? — the pre-commit AND pre-merge-commit hook that runs ① on every commit and on --no-ff merges (git merge --no-ff does NOT fire pre-commit, so --install-hook also wires pre-merge-commit with --merge, gap-precommit-guard-merge-bypass; AC62 ff-only fan-in fires NO hook, so the A6 无锁段 step 3 runs the doc check explicitly, AC63). ② rejecting commits/merges while a suite round is running was RETIRED under AC64 (2026-08-14): the danger it protected disappeared with AC42 — per-task suites run in their own worktree reading worktree file copies, so edits to the shared checkout's develop cannot affect a running worktree suite; the three 立条教训 (convention has no artifact / even post-hoc hard to distinguish / participant list unmaintainable — inner was never in it) are archived at orchestration/archive/AC58-retired-clauses.md#R27, and the merge lock must be a shared mechanism (hook/file lock), not a 'each layer remembers to call' convention. The assertion-surface resolver (resolveAssertionSurface) is retained for full-suite-runner.ts's mid-round-edit detection."
   [prefriction-count.sh]="How many newly-filed tasks had no triggering failure/alarm/contradiction at filing (the falsifiable pre-friction count)?"
   [preparation-feedback.ts]="What feedback should the preparation phase return to the proposer?"
+  [profiles-role-coverage-check.ts]="Does the profile carrier a REAL init produces define every profile ROLE the drivers request — asserted on init's actual OUTPUT (a temp workspace initialized by the Core CLI) and never on a template file, with the OTHER template (plugin/.quay/profiles.yml, the one quay-init.sh copies into a project) compared against it so a one-sided edit to EITHER goes RED, a retired profile role (inner, SPEC-tmux-retirement-2026-09-03) reported as shipped-to-every-new-project, and no-obtainable-init-artifact ⇒ NOT-EVALUATED rather than a green it did not earn (gap-quay-init-profiles-template-omits-every-role-the-drivers-request)?"
   [prepare-admission-check.ts]="Is it safe for this milestone to acquire the single-flight admission lease?"
   [pool-quality-judge.ts]="Should the pool 任务质量语义闸 run — the mechanical triggers (pool>25 / 最久未复核>48h / 每 10 轮) + pool enumeration + per-task mechanical AC input + verdict aggregation (ready/needs-work/should-remove/uncertain, should-remove → 撤出/重定范围) — the deterministic half of the ADR-033 pool-quality-judge workflow (gap-pool-quality-semantic-gate)?"
   [quality-gate-driver.ts]="Does the quality-gate driver run the three driverized quality-gate routines as a routine-type resident driver (Layer 0 + 1b) — B15 pool-quality-judge (mechanical trigger --plan + LLM judge pool-judge + JS aggregate), B17 judgment-consumer-check (mechanical 判据→消费 audit), and architecture-review (mechanical cluster of the P1/P2/P4 detectors' --json → LLM judge → JS merge → verdict carrier), with B16-C/B18 routed to AC145 semantic face (⛔ not a god-object)?"
@@ -428,6 +433,7 @@ declare -A QUESTION=(
   [guard-lineage-check.ts]="How many of the repo's guards declare the object/invariant they protect — the P4 guard-lineage detector (docs/proposals/archguard-generation-era-primitives.md §3): guards enumerated across plugin/scripts + experiments/quay-perpetual-stream/scripts + plugin/gate-scripts (deduped per directory), reporting the declared-guard-object ratio (AC1, 0% before this task), the window-fired ratio read from checker-cost.jsonl's verdict field (AC2, NOT-EVALUATED when verdict absent), per-guard object presence (AC3, file:path existence vs invariant: not-mechanically-checkable), and a preventive-vs-suspicious disposition that weighs BOTH last-fired and mutation-verified so a preventive guard like checker-mutation-check is never flagged suspicious just for never having fired (AC4 reverse criterion)?"
   [peer-identity-probe.ts]="Can a NON-Claude process be delivered to by other Claude Code sessions on this machine — does registering an HONEST peer identity (real pid/procStart/pidDomain/socket path, agent:'quay', explicitly NOT impersonating a Claude session) into ~/.claude/sessions/<pid>.json make it addressable by the platform SendMessage tool, and which record fields are actually load-bearing for that reachability (agent/pid/procStart/messagingSocketPath/spare/parkedJobId...) — the 方案 C feasibility spike (tasks/gap-quay-server-lightweight-peer-identity-spike)?"
   [channel-probe-server.ts]="Can a quay-side process be pushed INTO a running Claude Code session through the OFFICIAL Channels contract — a plain MCP server declaring capabilities.experimental['claude/channel'] and emitting notifications/claude/channel — and what does attaching a CUSTOM channel to an already-running session actually cost (which interactive gates must be passed, does --mcp-config satisfy server:<name> resolution, is managed settings required, does a third-party-provider session receive) — the 方案 C vs Channels 对照 spike (tasks/gap-quay-server-lightweight-peer-identity-spike)?"
+  [server-partial-stop-verify.ts]="Does the unified server let each service be started and stopped ON ITS OWN (SPEC-unified-quay-server-2026-09-13 §6.9 stage B) — after 'quay server stop --only web' on the UNIFIED form (web + control under one host pid), is the WEB face really unreachable while the HOST process is unchanged and its control face still answers, and did ALL SIX drivers' round heartbeats each advance within ONE run_id — writing ZERO record plus a distinguishable verdict whenever any reading cannot be obtained (carrier .quay/unified-server-verification.jsonl, GOAL-017/AC-254)?"
 )
 
 # ── GUARD_OBJECT (P4 守卫谱系声明块, tasks/gap-archguard-p4-guard-lineage-declaration-and-registry) ──
@@ -445,6 +451,7 @@ declare -A GUARD_OBJECT=(
 
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
 declare -A CADENCE=(
+  [worktree-namespace-literal-check.ts]="每轮"
   [gitignore-runtime-coverage-check.ts]="每轮"
   [psi-failure-correlation-check.ts]="按需"
   [psi-window-join.ts]="按需"
@@ -474,6 +481,7 @@ declare -A CADENCE=(
   [capability-manifest-check.ts]="每轮"
   [check-set-after-change-check.ts]="每轮"
    [checked-in-write-check.ts]="每轮"
+  [checker-count-drift-check.ts]="每轮"
   [checker-cost-lib.sh]="每红窗"
   [checker-cost.ts]="每红窗"
   [checker-lib.ts]="按需"
@@ -514,6 +522,7 @@ declare -A CADENCE=(
   [dispatch-worktree-setup.sh]="按需"
   [doc-check-cache.ts]="按需"
   [dispatch-preference-check.ts]="每轮"
+  [dark-axis-record-check.ts]="每里程碑"
   [dispatch-record.ts]="每轮"
   [dispatch-record-fingerprint-reason-check.ts]="每轮"
   [ac56-recommended-deordered-check.ts]="每轮"
@@ -606,11 +615,13 @@ declare -A CADENCE=(
   [pane-state-classify.ts]="每轮"
   [periodic-push-backup.sh]="每轮"
   [pipe-exit-code-check.sh]="按需"
+  [phase-declare.ts]="按需"
   [portfolio-choice.ts]="每里程碑"
   [prod-data-audit.ts]="按需"
   [precommit-guard.ts]="每轮"
   [prefriction-count.sh]="每轮"
   [preparation-feedback.ts]="每里程碑"
+  [profiles-role-coverage-check.ts]="每轮"
   [prepare-admission-check.ts]="每里程碑"
   [pool-quality-judge.ts]="按需"
   [quality-gate-driver.ts]="按需"
@@ -707,7 +718,7 @@ declare -A CADENCE=(
   [task-schema-check.sh]="每里程碑"
   [task-schema-check.ts]="每里程碑"
   [task-schema.ts]="每里程碑"
-  [task-status-drift-check.ts]="每轮"
+  [task-status-drift-check.ts]="按需"
   [task-status.ts]="每里程碑"
   [test-file-baseline.ts]="每红窗"
   [test-file-snapshot.sh]="每轮"
@@ -764,10 +775,12 @@ declare -A CADENCE=(
   [deletion-closure-check.ts]="按需"
   [peer-identity-probe.ts]="按需"
   [channel-probe-server.ts]="按需"
+  [server-partial-stop-verify.ts]="按需"
 )
 
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
 declare -A INVALIDATION=(
+  [worktree-namespace-literal-check.ts]="失效前提：worktree 命名空间仍由单一入口 packages/quay/src/worktree-namespace.ts 的 DEFAULT_WORKTREE_NAMESPACE_NAME 回落分支持字面量、其余读侧仍只经该入口取命名空间；若命名空间约定整体退休（不再有 per-task worktree）或字面量改由配置/环境注入（字面量消失），本条随之失效"
   [gitignore-runtime-coverage-check.ts]="失效前提：① 绑定仍是【quay 自己 .gitignore 的标记行 ⇔ manifest】两表示（标记约定 = 紧邻上一行含 @quay-runtime-artifact 的注释）；若标记约定改名、或该检查改读第三份列表（那正是它要防的漂移），本条需同步；② manifest 仍是 quay-init / fan-in ff / --runtime-dirty 判定三者的唯一来源；③ .quay/* 仍覆盖 .quay/ 内运行时状态（故它们刻意不入选 manifest）"
   [psi-failure-correlation-check.ts]="失效前提：被动源依赖 .quay/verification-round.jsonl 的 perFile 字段（file/startedAtMs/endedAtMs/passed）与 .quay/suite-load-<runId>.jsonl 的 {t, cpu_stall} 字段口径、以及 round.runId ↔ suite-load 文件名 <runId> 的对应关系不变；主动源依赖 plugin/test-isolation-violations.txt 的 file:type 行格式与 serial/lowconc 的 @test-group 分类口径不变；若任一载体字段语义变化或隔离违规名单格式变化，本条需同步"
   [psi-window-join.ts]="失效前提：依赖 .quay/verification-round.jsonl 的 perFile 字段（file/startedAtMs/endedAtMs）与 .quay/suite-load-<runId>.jsonl 的 {t, cpu_stall} 字段口径、以及 round.runId ↔ suite-load 文件名 <runId> 的对应关系不变；若任一载体字段语义变化，本条需同步"
@@ -797,6 +810,7 @@ declare -A INVALIDATION=(
   [capability-manifest-check.ts]="失效前提：仍以 delivery-manifest.json 为交付物能力清单正本，且三类能力的源码仍在 driver-runtime.ts DRIVER_KINDS / quay.ts dispatch / packages/*/src/mcp-server.ts；若能力清单迁出 manifest 或源码位置迁移，本条读取面失效"
   [check-set-after-change-check.ts]="失效前提：仍以文件头 @judges 声明为判定对象来源（mutation case 证明删除/改错声明即红）；若改为集中表或执行面不再有自声明文件，本条按 ④ 失效"
    [checked-in-write-check.ts]="失效前提：node:fs 的写动词仍可被 --require 预载在 ESM facade 实例化之前打补丁（若 Node 冻结内建导出、或 facade 在预载前已快照，判定面须改为 loader hook）；且被判定树本身不在 os.tmpdir() 之内——根先于临时目录判定；--changed 模式另需一个可解析的 delta base（develop/origin/develop/master/origin/master）与至少一个仍存在于工作树的 delta 测试文件，两者缺一即报 NOT-EVALUATED（exit 0，scoped-safe），⛔ 不得读成「干净」"
+  [checker-count-drift-check.ts]="失效前提：run_static_checks / run_operational_checks 仍以 runner-static-gate.ts 为唯一载体、run_doc_checks 仍在 scripts/test.sh，且「注册表条目」仍以命令位置的 run_checker 调用为形态；若注册表迁出这些文件、或声明形式改为集中表（函数上不再挂 @checker-count 注解），本条读取面失效"
   [checker-cost-lib.sh]="无可测前提，靠周期复核"
   [checker-cost.ts]="无可测前提，靠周期复核"
   [checker-lib.ts]="失效前提：仍有检查器需要位置判定/枚举式存在性原语；若无任何 import 者，本条按 ④ 失效"
@@ -837,6 +851,7 @@ declare -A INVALIDATION=(
   [dispatch-worktree-setup.sh]="失效前提：test.sh 的构建阶段仍需要 node_modules（esbuild）且 .quay/config.yml 仍是 workspace 根解析的必要件；若 test.sh 不再构建/不再需要 config.yml，本条退休"
   [doc-check-cache.ts]="失效前提：worker-driver.ts 的 fan-in 仍以 scripts/test.sh --static-checks-doc 为 doc 检查步、且 doc-class checkers（run_doc_checks）仍以 # @static-object 标注判定对象 + instrument-failure-check --gate 仍扫 plugin/scripts/*.{ts,sh}；若 doc-check 步迁移、run_doc_checks 拆出 scripts/test.sh 这一单一源、或 doc 面定义改动，本条随迁"
   [dispatch-preference-check.ts]="失效前提：inner 仍按本倾向文件选择「先派谁」；若派发选择移回机制（不再有语义倾向文件），本条退休"
+  [dark-axis-record-check.ts]="失效前提：ADR-007 的 per-milestone 承诺仍以「任务体自证」为判据载体（读数/声明写在任务体里、由任务体携带），且 ADR-007 仍在本工作区 .quay/config.yml 的 gates.adr 声明中被接受（那是 ready→done 强制它的开关）。若判据载体迁出任务体（暗轴读数改由 gate-events / 结构化遥测承载，任务体不再携带），或工作区不再声明 ADR-007（per-milestone 条款整体退役），本条口径需同步，否则会把「新载体里的读数」误判为 MISSING"
   [dispatch-record.ts]="失效前提：SPEC §4.3 的三分设计仍生效（正本=倾向文件 / 通知=SendMessage / 产物=带指纹+理由的派发记录）；若产物机制废除（不再要求派发记录带指纹与理由），本条退休"
   [dispatch-record-fingerprint-reason-check.ts]="失效前提：同 dispatch-record.ts——SPEC §4.3 产物仍要求派发记录带指纹+理由；若产物废除（排序权交还机制/不再核'读了没读'），本条退休"
   [ac56-recommended-deordered-check.ts]="失效前提：slot-refill 的 recommended 语义恢复为有意义的序（SPEC §5 锚定问题被重新接受）时本条退休；若 recommended 字段被移除/改形状（如改成对象），判据失去读面"
@@ -929,11 +944,13 @@ declare -A INVALIDATION=(
   [pane-state-classify.ts]="失效前提：仍用 tmux capture-pane 观测 pane；若观测面迁移出 TUI，本条退休"
   [periodic-push-backup.sh]="无可测前提，靠周期复核"
   [pipe-exit-code-check.sh]="无可测前提，靠周期复核"
+  [phase-declare.ts]="失效前提：ADR-008 仍是 proposed，且当前 phase 仍由人显式声明、载体仍是 .quay/two-phase-state.json；若 phase 改由机制自动切换（本任务明确排除的方向），或该状态迁回 dashboard.md 等别的载体，本条需同步或退休"
   [portfolio-choice.ts]="无可测前提，靠周期复核"
   [prod-data-audit.ts]="失效前提：done 任务 AC 仍按生产载体引用数据（若任务体不再按载体引用、或生产载体形态被整体迁移/退役，本条失去审计对象，退休）"
   [precommit-guard.ts]="失效前提：提交路径仍经 git commit 与 .git/hooks/pre-commit（git 仍是唯一提交载体）；若提交面改为非 git 传输，或 pre-commit 钩子被全局禁用（core.hooksPath 重定向 / --no-verify 成常规绕过），本条退休"
   [prefriction-count.sh]="无可测前提，靠周期复核"
   [preparation-feedback.ts]="无可测前提，靠周期复核"
+  [profiles-role-coverage-check.ts]="失效前提：profile 承载仍由 init 落地到目标项目的 .quay/profiles.yml，且它仍是 launchArgv 经 profile-policy.ts resolveRole 解析角色的唯一来源面；若角色定义迁出 profiles.yml（role 内建进代码、resolveRole 不再读文件）或 init 不再产出该文件，本条失去断言对象，退休"
   [prepare-admission-check.ts]="无可测前提，靠周期复核"
   [pool-quality-judge.ts]="失效前提：pool 质量仍由 schema'd agent 判定（ADR-033，判定在 .claude/workflows/pool-quality-judge.js）；若质量判定改为纯机械或取消 pool 语义闸，本条退休"
   [quality-gate-driver.ts]="失效前提：质量把关仍按形状分开驱动（B15/B17 + 架构复核落本 driver，B16-C/B18 归 AC145 语义面）；若 B15/B17 改回 outer tick 手动跑、或四形状并入同一 driver kind（god-object），本条退休"
@@ -1087,10 +1104,12 @@ declare -A INVALIDATION=(
   [deletion-closure-check.ts]="失效前提：本仓库仍以字符串字面量路径/basename、跨语言 shell-out（bash/exec/source/spawn）、Touches 段声明为实现构件耦合的发生面（import 图不可见）；若迁移到单一 import 图可见的打包产物，闭包边归零或语义变更，需同步"
   [peer-identity-probe.ts]="失效前提：平台仍以 ~/.claude/sessions/<pid>.json 注册表 + 记录内 procStart 与【文件名 pid】的 /proc starttime 一致性判可达；若平台改为原生 API 投递、或改掉该判定（本任务实测 2.1.270 的判定与静态推断不同：记录里 pid 字段不参与、.key 文件完全不被读），本条退休"
   [channel-probe-server.ts]="失效前提：官方 Channels 仍以 MCP server 的 capabilities.experimental['claude/channel'] + notifications/claude/channel 注入；官方标 research preview 并明说 --channels 语法与协议可能变，契约一变本条需同步"
+  [server-partial-stop-verify.ts]="失效前提：① 统一 server 形态仍是 web+control 同宿主进程（若阶段 A2 被回退成两进程，停 web 在结构上不可能影响 driver ⇒ 本生产者的读数不再能取假）；② 六个 kind 的 round 载体仍是 .quay/<kind>-round.jsonl，且 kernel DRIVER_KINDS[*].carriers 里恰好一个以 -round.jsonl 结尾（kind 增删或载体改名 ⇒ 本生产者与判据的六个集合会分叉）；③ .quay/server.json 仍是宿主自发布的状态载体、.quay/server-services.json 仍是期望态载体"
 )
 
 # ── LAST_REAFFIRMED (last-reaffirmed stamp (③) — the date someone last looked at this mechanism and stamped it; 超 N 天未被任何调用/检查/复核触及 → 待重新确认 (只看一眼盖章, 不判断对错)) ──
 declare -A LAST_REAFFIRMED=(
+  [worktree-namespace-literal-check.ts]="2026-09-13"
   [gitignore-runtime-coverage-check.ts]="2026-09-13"
   [psi-failure-correlation-check.ts]="2026-09-05"
   [psi-window-join.ts]="2026-09-07"
@@ -1120,6 +1139,7 @@ declare -A LAST_REAFFIRMED=(
   [capability-manifest-check.ts]="2026-09-10"
   [check-set-after-change-check.ts]="2026-08-13"
    [checked-in-write-check.ts]="2026-09-13"
+  [checker-count-drift-check.ts]="2026-09-13"
   [checker-cost-lib.sh]="2026-08-10"
   [checker-cost.ts]="2026-08-10"
   [checker-lib.ts]="2026-08-10"
@@ -1160,6 +1180,7 @@ declare -A LAST_REAFFIRMED=(
   [dispatch-worktree-setup.sh]="2026-08-13"
   [doc-check-cache.ts]="2026-09-01"
   [dispatch-preference-check.ts]="2026-08-14"
+  [dark-axis-record-check.ts]="2026-09-13"
   [dispatch-record.ts]="2026-08-14"
   [dispatch-record-fingerprint-reason-check.ts]="2026-08-14"
   [ac56-recommended-deordered-check.ts]="2026-08-14"
@@ -1252,11 +1273,13 @@ declare -A LAST_REAFFIRMED=(
   [pane-state-classify.ts]="2026-08-10"
   [periodic-push-backup.sh]="2026-08-10"
   [pipe-exit-code-check.sh]="2026-08-10"
+  [phase-declare.ts]="2026-09-13"
   [portfolio-choice.ts]="2026-08-10"
   [prod-data-audit.ts]="2026-08-14"
   [precommit-guard.ts]="2026-08-14"
   [prefriction-count.sh]="2026-08-10"
   [preparation-feedback.ts]="2026-08-10"
+  [profiles-role-coverage-check.ts]="2026-09-13"
   [prepare-admission-check.ts]="2026-08-10"
   [pool-quality-judge.ts]="2026-08-10"
   [quality-gate-driver.ts]="2026-08-26"
@@ -1410,10 +1433,12 @@ declare -A LAST_REAFFIRMED=(
   [deletion-closure-check.ts]="2026-09-04"
   [peer-identity-probe.ts]="2026-09-13"
   [channel-probe-server.ts]="2026-09-13"
+  [server-partial-stop-verify.ts]="2026-09-13"
 )
 
 # ── MATCHING (matching-method declaration (④) — how this checker judges: position (按位置不按关键词) | keyword | enumerative (枚举式存在性) | n/a (non-judgment lib/data). New checkers MUST declare which matching they use) ──
 declare -A MATCHING=(
+  [worktree-namespace-literal-check.ts]="keyword"
   [gitignore-runtime-coverage-check.ts]="position"
   [psi-failure-correlation-check.ts]="n/a"
   [psi-window-join.ts]="n/a"
@@ -1443,6 +1468,7 @@ declare -A MATCHING=(
   [capability-manifest-check.ts]="enumerative"
   [check-set-after-change-check.ts]="position"
    [checked-in-write-check.ts]="position"
+  [checker-count-drift-check.ts]="position"
   [checker-cost-lib.sh]="n/a"
   [checker-cost.ts]="keyword"
   [checker-lib.ts]="position"
@@ -1483,6 +1509,7 @@ declare -A MATCHING=(
   [dispatch-worktree-setup.sh]="enumerative"
   [doc-check-cache.ts]="n/a"
   [dispatch-preference-check.ts]="position"
+  [dark-axis-record-check.ts]="position"
   [dispatch-record.ts]="enumerative"
   [dispatch-record-fingerprint-reason-check.ts]="position"
   [ac56-recommended-deordered-check.ts]="position"
@@ -1575,11 +1602,13 @@ declare -A MATCHING=(
   [pane-state-classify.ts]="keyword"
   [periodic-push-backup.sh]="keyword"
   [pipe-exit-code-check.sh]="keyword"
+  [phase-declare.ts]="keyword"
   [portfolio-choice.ts]="keyword"
   [prod-data-audit.ts]="position"
   [precommit-guard.ts]="enumerative"
   [prefriction-count.sh]="keyword"
   [preparation-feedback.ts]="keyword"
+  [profiles-role-coverage-check.ts]="position"
   [prepare-admission-check.ts]="keyword"
   [pool-quality-judge.ts]="enumerative"
   [quality-gate-driver.ts]="n/a"
@@ -1732,6 +1761,7 @@ declare -A MATCHING=(
   [deletion-closure-check.ts]="position"
   [peer-identity-probe.ts]="n/a"
   [channel-probe-server.ts]="n/a"
+  [server-partial-stop-verify.ts]="n/a"
 )
 # ── CONSUMER (rhythm-column consumer contract, gap-ac73-catalog-rhythm-consumer-check) ──
 # A mechanism's RHYTHM is only a claim until someone presses it. This table makes the consumer
@@ -1743,6 +1773,8 @@ declare -A MATCHING=(
 # Non-按需 mechanisms wired into the suite/execution cores need no CONSUMER row — their wiring IS
 # the consumer. The rhythm-consumer-check.ts reads this table; see its 判据1/2/3.
 declare -A CONSUMER=(
+  [profiles-role-coverage-check.ts]="谁按：scripts/test.sh 的 run_static_checks（@static-tier change，@static-object plugin/scripts/quay-init.sh plugin/.quay/profiles.yml packages/quay/src/init.ts）+ plugin/scripts/checker-mutation-cases/profiles-role-coverage-check.sh 双向控制；条件=派发路径或 profile 承载模板被改动"
+  [worktree-namespace-literal-check.ts]="谁按：scripts/test.sh 的 run_static_checks 每轮按（登记在 plugin/scripts/runner-static-gate.ts，@static-tier change / @static-object packages/quay/src/ plugin/scripts/；另由 plugin/test/worktree-namespace-literal-check.test.mjs 双控：真仓 GREEN + 三条 RED fixture；mutation case 见 plugin/scripts/checker-mutation-cases/worktree-namespace-literal-check.sh）；条件=要判「工作区命名空间字面量是否只剩单一入口的回落分支」（tasks/gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root AC3）"
   [gitignore-runtime-coverage-check.ts]="谁按：run_static_checks（scripts/test.sh 静态检查链，change tier，@static-object 命中 .gitignore / plugin/scripts/quay-runtime-artifacts.txt / 本检查自身时）；条件=要判 quay 自己 .gitignore 里标为运行时产物的条目集与 quay-init 写出的 manifest 是否仍然一致（漂移即红，manifest 读不到 NOT-EVALUATED）"
   [psi-failure-correlation-check.ts]="谁按：任务实现者在 gap-psi-shadow-admission-controller 的 Phase 0 go/no-go 判定时按（node --experimental-strip-types plugin/scripts/psi-failure-correlation-check.ts --source active|passive|both --root <主检出>）；条件=要用主动诱发 + 被动历史两条独立数据源判定 PSI 对失败是否有超出并发数的增量预测力"
   [psi-window-join.ts]="谁按：任务实现者在需要回答「这个测试这一次跑的时候机器多忙」的诊断可见性问题时按（node --experimental-strip-types plugin/scripts/psi-window-join.ts --run-id <runId> --file <relpath> [--root <主检出>]）；条件=要查某测试单次运行的 PSI 时间窗采样序列"
@@ -1750,6 +1782,7 @@ declare -A CONSUMER=(
   [ac61-staleness-disposition-check.ts]="谁按：manager 在 AC61 清单处置表态时按；条件=清单项要做 A-1..B-4 的处置判定"
   [anti-drift-touches-check.ts]="谁按：任务 subagent 在落地后核验 Touches 一致性时按；条件=任务落地要验证 touches 精确命中"
   [axis-generator.ts]="谁按：判据作者在定义新判据的测量轴时按；条件=要量化判据的时间/范围轴"
+  [dark-axis-record-check.ts]="谁按：Core 的 ready→done 落地路径每里程碑自动按（packages/quay/src/gate/lifecycle.ts 的 runComplete/runCompleteLoop 在 workspace 声明 ADR-007 时经内置 dark-axis 门跑同一判定，packages/quay/src/gate/dark-axis-record.ts 是唯一实现）+ plugin/scripts/ready-pool-check.ts 在池报告里对每个 ready 任务 import 同一判定（dark_axis 三态清单，派发前可见）+ 人工/agent 按任务 id 直查（node --experimental-strip-types plugin/scripts/dark-axis-record-check.ts <task-id>）；条件=要判定某任务体是否记录了 L_D/L_G 读数或显式『该轴仍暗,理由:…』声明（ADR-007 per-milestone 条款）"
    [checked-in-write-check.ts]="谁按：run_static_checks（plugin/scripts/runner-static-gate.ts，@static-tier change，对象 plugin/test/ 等）每次全量套件调用按 --changed 判定本次 delta 的测试文件；scoped 门在 delta 命中 plugin/test/** 时同样选中它（gap-suite-glob-universe-fixture-write-toctou 接线，接线前它零调用点=不变式无执行者）。维护者也可手动全表面扫：node --experimental-strip-types plugin/scripts/checked-in-write-check.ts --dir plugin/test；条件=要判定某个【已执行】的测试文件是否在已签入路径下建/删条目（--changed 只看 delta，未改动的测试文件不在其判定面内，这是已知的覆盖边界，空 delta 报 NOT-EVALUATED 而非 PASS）"
   [checker-lib.ts]="谁按：新检查器作者在实现按位置/枚举判定时 import；条件=要复用 matchAtCommandPosition / enumerativeExistence"
   [checker-io.ts]="谁按：已迁移到 DriverResult 的 checker（outer-anchor-check / load-sensitive-release-check / dead-code-after-return-check / adr016-screen-use-check）在判定函数返回 DriverResult 后经 driverResultToExit 映射退出码；条件=一个 checker 的判定结果要收敛到 DriverResult 词表（gap-b4-checker-reuse-driver-result）"
@@ -1813,6 +1846,7 @@ declare -A CONSUMER=(
   [guard-lineage-check.ts]="谁按：架构复核者/人在做 P4 守卫谱系体检（docs/proposals/archguard-generation-era-primitives.md §3，与里程碑 done 前 L_D/L_G 检查同族）时按；条件=要判定「已声明守卫对象比例」「窗口内曾变红比例」「某守卫对象是否仍存在」或「某从未变红守卫是预防性还是可疑」"
   [suite-lpt-order.ts]="谁按：scripts/test.sh --buckets 生成 M bucket 文件列表后按；条件=要按已知耗时降序（LPT）重排文件列表以最小化 makespan（长测试先抢 lane 与短测试并行）"
   [suite-lpt-runner.mjs]="谁按：scripts/test.sh --buckets 生成 LPT 排序后的 M bucket 文件列表后按；条件=要把该列表按 run({files}) 保序交给 node:test（node --test CLI 会按字母序重排位置参数，丢掉 LPT 顺序）"
+  [phase-declare.ts]="谁按：人（或执行任务的 agent）在需要显式声明两阶段呼吸的 phase 切换时按；条件=要记录/更新当前 phase 并留下触发原因与当时的 L_D 读数（⛔ 方向由人给，机器只测量与记录——本命令不含任何「数值超阈值即自动写 phase」的代码路径；载体 .quay/two-phase-state.json 为唯一写入口）"
   [pipe-exit-code-check.sh]="谁按：shell 作者在写管道时按；条件=要验管道传播最后命令退出码"
   [pool-quality-judge.ts]="谁按：pool-quality 语义闸调度器按；条件=机械触发（pool>25 / 最久未复核>48h / 每 10 轮）"
   [quality-gate-driver.ts]="谁按：生产部署启动命令按（常驻例程进程，quality-gate-driver.ts 头注释「生产部署由启动命令传 --interval 覆盖」——接线为 AC144 后续/独立任务，本任务只做例程驱动）；条件=生产部署启动常驻进程"
@@ -1864,6 +1898,9 @@ declare -A CONSUMER=(
   [packaging-hygiene-check.ts]="谁按：quality-gate-driver.ts 的 packaging-hygiene 例程按（interval 60min，runResidentQualityGateLoop 评估 due 后跑，⛔ 非 loop.routines——后者已死）；条件=两维度打包卫生检查要跑一轮（config-key 消费者枚举 + shipped-entry 可运行性），漂移非空时 spawn gap-filing agent 经 ABI（quay-file-task）立案"
   [peer-identity-probe.ts]="谁按：方案 C 路的验证者 / 后续接线者在需要核证「一个非 Claude 进程能否被平台 SendMessage 投递」时按（node --experimental-strip-types plugin/scripts/peer-identity-probe.ts serve|patch|shutdown|cleanup）；条件=要复测 peer 登记的可达性、逐字段必要性（patch 改自己记录的一个字段后立刻投递），或按 AC13 结论做接线前的对照复测"
   [channel-probe-server.ts]="谁按：Channels 路的验证者 / 后续接线者在需要把外部事件推入一个运行中的 Claude Code 会话时按（node --experimental-strip-types plugin/scripts/channel-probe-server.ts --evidence <path> --http-port 8799，由 Claude Code 以 MCP server 起；--selfcheck 可独立自检 capability 声明）；条件=要核证官方 Channels 契约（experimental['claude/channel'] + notifications/claude/channel）在本机是否可达，或按 AC13 结论做接线前的对照复测"
+  [server-partial-stop-verify.ts]="谁按：GOAL-017/AC-254 的判据消费它写的载体（.quay/unified-server-verification.jsonl）；条件=要在统一 server 形态上真跑一次部分停止并把六 kind 同 run 的 round 推进写成合格记录（⛔ 它是生产者不是静态检查器，故刻意不登记进 runner-static-gate.ts 的 run_static_checks —— 登记会让 AC 未达成期间全量套件每轮变红）"
+  [task-status-drift-check.ts]="谁按：①packages/quay/src/observation.ts 的 readBoardLanding（web /board 每次页面请求 spawn 本脚本 --json，30s 短 TTL 缓存 + 秒级硬顶，gap-webui-board-load-120s）——机器按，最常走的路径；②experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh 的 --stranded 段（quay driver resume 前的人工 go/no-go，判 stranded worktree 分支）；③plugin/skills/cold-start/SKILL.md 的冷启动读数；④orchestration/goals-and-ac.md 的「任务 status 与证据是否漂移」判据配方（人按）。条件=①要判某任务落地标记可信否（board 的落地列）；②③要判有没有任务/worktree 悬空；④要复核某条 AC 的状态与证据是否一致。⛔ 原声明「每轮」为假：没有每轮的调用点——manager/fast-mode 两个执行核与 worker-driver/ready-pool-check/slot-refill 的派发路径里 0 次整体调用，routine-scheduler 的文法（every(N)/interval:Nm/on(event)）也表达不出「每轮」（every(N) 依赖的迭代计数器随 ADR-022 退役，两层模式恒不 due）；且它读的是全库 git-log 面（本仓实测 >150s），2026-09-02 passive-machine ruling 正是把读运行态的检查器搬出默认套件。所以本条按【按需】声明并与实际相符，而不是把一个重扫塞进每轮路径（tasks/gap-checker-claim-vs-actual-cadence-and-count-drift AC1 选项二）"
+  [checker-count-drift-check.ts]="谁按：scripts/test.sh 的 run_static_checks 每次全量 suite 按（登记在 plugin/scripts/runner-static-gate.ts，@static-tier change，@static-object plugin/scripts/runner-static-gate.ts scripts/test.sh 本检查自身及其 mutation case/测试）；scoped 门在 delta 命中上述对象时同样选中它；条件=要判「每个注册表函数上挂的 @checker-count 声明数是否等于该函数体实测的 run_checker 条数」（声明≠实测即红；函数/注解读不到报 NOT-EVALUATED exit 3，⛔ 不与 PASS 同形）"
 )
 # ── superseded capability table (gap-retired-script-still-callable, human ruling 2026-08-10) ──
 # One capability = ONE implementation. A superseded implementation must NOT exist in the
