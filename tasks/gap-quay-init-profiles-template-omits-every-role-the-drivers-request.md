@@ -219,13 +219,38 @@ Core 产出由检查器逐条断言（AC2/AC3），shell 产出由 `plugin/test/
 
 **C. scoped 门与 ratchet 的实测读数。**
 改 `plugin/scripts/quay-init.sh` 会如预期把 `quay-init-closure-ratchet` 判 stale
-（它是被 fingerprint 的 source 之一）⇒ 按既有纪律**把 `--reanchor` 放在最后一步**执行：
-`3 files / 568 bytes` → `3 files / 481 bytes`（**未增长**，shrink-only 仍成立），
-`--gate` PASS。落点 `docs/analysis/quay-init-closure-ratchet.baseline.json` 已列入 Touches。
-其后 `bash scripts/test.sh --for-task <id> --allow-thin` **exit 0，154/154 绿**。
+（它是被 fingerprint 的 source 之一）⇒ 按既有纪律**把 `--reanchor` 放在最后一步**执行。
+**⚠️ 本段原文声称的「568 → 481（未增长，shrink-only 仍成立）」已于 2026-09-13 第二轮
+证否并更正 —— 见下方 D 段。481 是【陈旧 vendored bundle】造成的测量伪影，不是本次改动
+带来的收缩。** 更正后的真值 = `3 files / 568 bytes`，与 develop 的 committed baseline
+**逐字节相同** ⇒ 本次改动**不增长** footprint（重锚提交 `16ce182d9`；`--gate` + `--check-stale`
+均 PASS）。落点 `docs/analysis/quay-init-closure-ratchet.baseline.json` 已列入 Touches。
+重跑 `bash scripts/test.sh --for-task <id> --allow-thin` ⇒ **exit 0，154/154 绿、0 red**。
+
 **⚠️ scoped-gate 缓存以我实际验证过的那个 develop tip 为准**（即本 worktree merge 进来的 tip），
 ⛔ 不写「当时 `rev-parse develop` 恰好指向、但我没验证过」的 sha
 （那会把「没评估」记成「评估过」）；develop 若已前进则缓存不命中、driver 照跑 scoped 门，fail-closed。
+
+**D. ratchet 基线 481 的真因（第二轮实测，含【可区分】对照 —— 硬规则 4 推论四）。**
+第一轮 reanchor（`fd332fd8f`，2026-09-13T10:27Z）记下 481，而**在同一份 quay-init.sh
+（sha256 `35b9ba34…`，其后未再改动）上今天重测恒为 568**，且 `--check-stale` 报 fresh
+⇒ 差异**不**来自被 fingerprint 的那四个 source。
+**可区分的对照（复现 481，不是解释 481）**：在 scratch target 上先跑一次**全量** TS init
+（即陈旧 bundle 逼迫 quay-init.sh 走的那条路径），再跑 `quay-init.sh` ⇒ 精确得到
+`3 files / 481 bytes`：TS 侧写下自己的内联 `launch.settings.json`（**205 B**），随后 shell 的
+`write_template` 见该文件已存在 ⇒ skip 掉 plugin 的 **292 B** 模板
+⇒ `205 + 146(.gitignore) + 130(settings.json) = 481`，且 `292 − 205 = 87` = 观测差值。
+**fresh bundle 下这条路径不触发**（`--branch-model-only` 被识别 ⇒ 该步早退，TS init 根本不跑）
+⇒ plugin 的 292 B 模板落地 ⇒ `292 + 146 + 130 = 568`；对 **git target 与非 git target 两种目标
+各实测一次，均为 568**（⇒ 与目标是否是 git 仓无关）。
+⇒ **结论：ratchet 的读数依赖一件【不在其 fingerprint source set 里】的输入 —— vendored CLI
+bundle 的新旧**（`plugin/vendor/quay/dist/quay.js`，gitignored 构建产物）。481 是 10:45/11:08
+重建 bundle **之前**的读数；`--check-stale` 结构上看不见它（只哈希四个 source）。
+⛔ 本任务 Touches 不含 `plugin/scripts/quay-init-closure-ratchet.ts`，故**未**动它
+（把 bundle 纳入 fingerprint 是它自己的事、需自己的 AC）；此处只把基线重锚到可复现的真值
+（`16ce182d9`，`bytes` 与 develop 逐字节相同）并记账该依赖。
+**A 段那条观察项据此升级为实测读数**：主检出 vendored bundle 陈旧**不只是**「安装物落后」——
+它还会改变 ratchet 的**测量结果**，而 ratchet 抓不到。
 
 ## 立案备注（quay-task 立案/改写时追加，⛔ 非报告原文）
 
