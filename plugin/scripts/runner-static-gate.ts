@@ -33,9 +33,9 @@
 # here is the CODE-class gate only.
 #
 # OPERATIONAL-CLASS SPLIT (2026-09-02 passive-machine ruling — 执行 suite 测试不应依赖本项目运行态,
-# manager/outer/inner/driver 全算): the 11 runtime-state checkers (outer-tick-log / worktree-node-modules /
-# suite-bucket-drift / obligation-ledger / fan-in-workflow-retirement / dispatch-record-fingerprint-reason /
-# per-task-suite-record / fan-in-ff-protocol / fan-in-materialize / direct-to-develop-bypass /
+# manager/outer/inner/driver 全算): the runtime-state checkers (outer-tick-log / worktree-node-modules /
+# suite-bucket-drift / obligation-ledger / fan-in-workflow-retirement /
+# per-task-suite-record / fan-in-ff-protocol / fan-in-materialize /
 # suite-duration-exceed) read the loop's LIVE runtime state (tick telemetry, runtime ledgers, live
 # task worktrees, develop reflog, SDK-materialized workflow records). They have MOVED OUT of this
 # function into run_operational_checks() below — home is the explicit opt-in
@@ -44,6 +44,15 @@
 # of these checks accepted). They REMAIN in the mutation manifest (checker-mutation-check.sh parses
 # run_operational_checks) so the L_S instrument is not weakened — same shape as the DOC-class split
 # above. Each operational block carries `# @static-class operational`.
+# ⛔ TWO MEMBERS LEFT THIS LIST 2026-09-13 (tasks/gap-correctness-checkers-opt-in-not-default-suite-
+# member): dispatch-record-fingerprint-reason-check and direct-to-develop-bypass-check are BACK in
+# run_static_checks() — the ruling's rationale (a passive checkout must go green on code alone) is a
+# property of the CARRIER each checker reads, and both of these are VACUOUS-SAFE on an absent runtime
+# state by their own design (measured against a bare repo: exit 0 / exit 3-never-fatal). Their default
+# reachability had been ZERO, which made the writer's only fingerprint detector and the only
+# direct-develop-bypass detector unreachable in production. Full argument at their new home.
+# The member COUNT in this header is deliberately not restated — read it off the function bodies
+# (tasks/gap-checker-claim-vs-actual-cadence-and-count-drift owns the measured-value correction).
 #
 # SCOPED TIER (gap-scoped-runs-pay-full-static-check-overhead, AC1/AC2/AC6): TASK-scoped runs
 # (`--for-task <id>` / `--scoped <id>`) do NOT pay this full set every time — they run the
@@ -777,6 +786,63 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/enum-surface-parity-check.ts plugin/scripts/checker-mutation-cases/enum-surface-parity-check.sh plugin/test/enum-surface-parity-check.test.mjs plugin/scripts/driver-runtime.ts plugin/scripts/driver-config.ts plugin/scripts/start-drivers.ts plugin/scripts/task-status.ts packages/quay/src/abi.ts packages/quay/src/goal-store.ts packages/quay/src/serve-sessions.ts packages/quay/src/cli/driver.ts packages/quay/src/cli/help.ts packages/quay/src/serve-goal.ts packages/quay/src/adr-store.ts packages/quay/src/document-store.ts packages/quay/src/mcp-handlers.ts packages/quay-native/src/mcp-server.ts
   run_checker "enum-surface-parity-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/enum-surface-parity-check.ts" --root "${repo_root}"
+  # ── PROMOTED BACK FROM THE OPERATIONAL TIER: the two CORRECTNESS checkers whose default
+  # reachability was ZERO (tasks/gap-correctness-checkers-opt-in-not-default-suite-member) ─────────
+  #
+  # WHY THESE TWO ARE NOT IN run_operational_checks ANY MORE (the promotion's whole argument): the
+  # 2026-09-02 passive-machine ruling MOVED the runtime-state checkers out of this function so a
+  # passive checkout (CI / dev / replica / fresh worktree) goes green on CODE ALONE. That rationale
+  # is a property of the CARRIER each checker reads, and it does NOT hold for these two — both are
+  # VACUOUS-SAFE on an absent runtime state BY THEIR OWN DESIGN, so adding them back cannot redden a
+  # passive machine (MEASURED, not asserted — both were run against a bare empty git repo):
+  #   · dispatch-record-fingerprint-reason-check → absent orchestration/dispatch-record.jsonl =
+  #     "no dispatches recorded, nothing to verify" ⇒ EXIT 0 (a green, not a NOT-EVALUATED).
+  #   · direct-to-develop-bypass-check → no `develop` ref / no reflog ⇒ rev-list-unreadable ⇒ EXIT 3
+  #     NOT-EVALUATED, and run_checker/run_checker_parallel_wait both treat exit 3 as a THIRD state
+  #     (STATIC_CHECK_NOT_EVALUATED line, never fail-closed) — so it cannot red a passive machine.
+  # Meanwhile the SAME two checkers are exactly the ones whose absence let real defects through:
+  #   · dispatch-record.ts is fail-closed on a missing/thin REASON but only WARNS on an uncomputable
+  #     FINGERPRINT (:157/:164-168) ⇒ an empty-fingerprint record CAN land on disk; this checker is
+  #     the ONLY post-hoc detector for that shape.
+  #   · direct-to-develop-bypass-check is the ONLY detector for a direct develop commit that bypasses
+  #     fan-in's ff-lock / anti-drift-touches / AC-completion gates (11b / C17 write-ownership).
+  # Leaving both opt-in made them "existing but never run" — the mirror of 硬规则 3b (a checker that
+  # never executes is, in the record, indistinguishable from one that always passes).
+  #
+  # 硬规则 4 (an unrun check is not a measurement): the two mutation cases already existed and already
+  # ran here (checker-mutation-check, --check + --check-changed above) — but a mutation case exercises
+  # the checker against a FIXTURE, so it only ever proved the LOGIC can go red. It never once ran the
+  # checkers against PRODUCTION state. This wiring is the missing half: the same checkers now judge
+  # the REAL carriers on every full-suite invocation (⇒ every fan-in), not a temp repo.
+  echo "== dispatch-record fingerprint+reason check — PRODUCTION carrier (AC55 判据1/判据3) =="
+  # @static-tier change
+  # @static-object orchestration/dispatch-record.jsonl orchestration/dispatch-preference.md plugin/scripts/dispatch-record.ts plugin/scripts/dispatch-record-fingerprint-reason-check.ts plugin/test/dispatch-record-fingerprint-reason-check.test.mjs
+  # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): orchestration/dispatch-record.jsonl
+  # is MAIN-checkout gitignored runtime state, absent from the one-shot verify worktree. Pointing --root at
+  # the main checkout makes a worktree round read the SAME carrier a main run reads ⇒ the check is NOT
+  # vacuous exactly in the fan-in path that matters (verdicts identical; on a main run main_root ==
+  # repo_root ⇒ unchanged). Same pattern as the other runtime-carrier readers below.
+  run_checker "dispatch-record-fingerprint-reason-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/dispatch-record-fingerprint-reason-check.ts" --root "${main_root}"
+  echo "== direct-to-develop-bypass-check — PRODUCTION develop (11b/C17 越权直改面) =="
+  # @static-tier change
+  # @static-object plugin/scripts/direct-to-develop-bypass-check.ts plugin/test/direct-to-develop-bypass-check.test.mjs
+  # --root main_root: develop reflog + lock events are MAIN-checkout state, absent from the one-shot
+  # verify worktree (same reason as above).
+  # ⛔ --baseline MUST STAY INSIDE THE DEVELOP REFLOG HORIZON. This was the wiring's real defect when
+  # this promotion was made: it passed a FIXED enforcement-boundary sha (b11ce720…) that develop had
+  # since run 5147 first-parent commits past, while the develop reflog only reaches back 4692 — so 455
+  # spine commits fell outside any reflog bracket, `unclassifiable-commits-in-range` fired
+  # UNCONDITIONALLY, and the checker answered exit 3 NOT-EVALUATED on the ACTIVE host FOREVER (measured
+  # 2026-09-13). That is why the promotion alone was not enough: wiring a permanently-NOT-EVALUATED
+  # checker is the same defect class this task exists to cure (a line in every suite log that looks
+  # like a verdict and never is one). `develop~100` is the window this checker's own design and the
+  # GOAL AC-194 validation use (header: "develop~100 窗 unclassifiable 归零、AC-194 expect: exit 0
+  # 可达"; goals/AC-194-no-direct-to-develop-bypass.md gates with --baseline develop~100 ⇒ verdict
+  # pass). Before this fix the GATE and the GUARANTEE read the SAME invariant through two different
+  # windows and disagreed: AC-194 = pass, gate = NOT-EVALUATED. The gate now measures what the
+  # guarantee measures. A fixed sha is a literal whose validity depends on how far develop has run
+  # since — 硬规则 4 推论二 (read the host, don't freeze a value that silently expires).
+  run_checker "direct-to-develop-bypass-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/direct-to-develop-bypass-check.ts" --root "${main_root}" --baseline develop~100 --json
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait
@@ -792,6 +858,13 @@ run_static_checks() {
 # accepted). They REMAIN in the mutation manifest (checker-mutation-check.sh parses
 # run_operational_checks) so the L_S instrument is not weakened — same shape as the DOC-class split
 # under AC51.
+  # ⛔ PROMOTED OUT (2026-09-13, tasks/gap-correctness-checkers-opt-in-not-default-suite-member):
+  # dispatch-record-fingerprint-reason-check and direct-to-develop-bypass-check used to live here and
+  # have MOVED INTO run_static_checks() (see the promotion block at the end of that function for the
+  # full argument). They satisfy the L_S instrument just as well from there (checker-mutation-check.sh
+  # parses BOTH functions, so their mutation cases were never in question) — what the move restores is
+  # PRODUCTION reachability, which is the one thing this tier could not provide: an opt-in tier with no
+  # automatic caller is "existing but never run", indistinguishable in the record from always-passing.
 run_operational_checks() {
   RUN_CHECKER_PARALLEL=1
   echo "== operational-class static checks (explicit opt-in — scripts/test.sh --static-checks-operational; NOT part of the full-suite gate) =="
@@ -848,20 +921,11 @@ run_operational_checks() {
   # @static-tier full
   # @static-class operational
   run_checker "fan-in-workflow-retirement-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-workflow-retirement-check.ts" --root "${repo_root}"
-  echo "== dispatch-record fingerprint+reason check (tasks/gap-ac55-dispatch-record-fingerprint-reason, AC55 判据1/判据3) =="
-  # AC55 判据1: EVERY dispatch record must carry ① the dispatch-preference file's content fingerprint
-  # (git blob hash — "用的是哪一版") AND ② a one-sentence "为什么选它" ("按倾向选还是随便选") — the
-  # SPEC §4.3 产物, the 承重 part (C17): without it "读了没读" is indistinguishable in records and the
-  # design relies on willpower (SPEC §4.2 empirical: manager's `A0b⑤(b)` skipped 4 rounds). AC55
-  # 判据3 (falsifiable): a REAL dispatch record missing fingerprint OR missing reason MUST go RED —
-  # pinned by plugin/test/dispatch-record-fingerprint-reason-check.test.mjs (real-record negative
-  # controls) + the mutation case. The writer (dispatch-record.ts) is fail-closed on a missing/thin
-  # reason; this checker independently judges every record in the runtime log
-  # (orchestration/dispatch-record.jsonl, gitignored). Absent file = nothing dispatched = PASS.
-  # @static-tier change
-  # @static-class operational
-  # @static-object orchestration/dispatch-record.jsonl orchestration/dispatch-preference.md plugin/scripts/dispatch-record.ts plugin/scripts/dispatch-record-fingerprint-reason-check.ts plugin/test/dispatch-record-fingerprint-reason-check.test.mjs
-  run_checker "dispatch-record-fingerprint-reason-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/dispatch-record-fingerprint-reason-check.ts" --root "${repo_root}"
+  # ⛔ MOVED to run_static_checks() (2026-09-13, tasks/gap-correctness-checkers-opt-in-not-default-
+  # suite-member): "dispatch-record fingerprint+reason check" now runs on the default full-suite gate.
+  # The AC55 判据1/判据3 rationale (a REAL record missing fingerprint OR reason MUST go RED; the writer
+  # is fail-closed on a thin reason but only WARNS on an uncomputable fingerprint) is preserved VERBATIM
+  # at its new home — read it there, not here (single source; a copy here would drift).
   echo "== per-task-suite-record check (tasks/gap-ac72-cert-mechanism-retire, AC72 判据2/判据3) =="
   # AC72 判据2: every per-task FULL-suite run must land ONE third-party-readable record
   # (taskId/runId/state/laneCount/durationMs/failed-files/起止时刻) in the SHARED checkout's
@@ -914,24 +978,11 @@ run_operational_checks() {
   # one-shot verify worktree. Pointing --root at the main checkout makes the worktree round read the
   # SAME data as a main run ⇒ verdicts identical; on a main run main_root == repo_root ⇒ unchanged.
   run_checker "fan-in-materialize-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/fan-in-materialize-check.ts" --root "${main_root}" --json
-  echo "== direct-to-develop-bypass-check (gap-direct-to-develop-bypasses-fan-in-gates — 直接提交 develop 绕过 fan-in 机件) =="
-  # 直接提交 develop（reflog action = commit，区别于 fan-in 的 merge … Fast-forward）∧ 触及代码/断言面
-  # ∧ 不在 ff-lock 时间窗内 ⇒ RED（11b/C17 写所有权/越权直改面）。排除集（denominator 谓词）与
-  # 25 vs 30 的差异记录在任务体 + 检测器头注释：设计内 = 记账/转向/遥测面 + manager 独占（.claude/、
-  # CLAUDE.md）+ 基础设施（.gitignore/.github/）+ 热修 fan-in 机件本身（plugin/scripts|test/fan-in-*）；
-  # 代码面含 plugin/skills/**/*.md（SKILL.md 是产品交付面，7e64a86b 因此报红）。基线 = b11ce720
-  # （AC65 声明形态落地点，enforcement 落点 develop HEAD）——pre-form 历史欠账（含 9f57e336/102cbf31/
-  # 02b2b2fc 的 outer 直提，当时一条命令验证过）已文档化不重扫，只扫基线后的新直接提交；form 后提交
-  # 必须带 `AC65:` + `AC65-Verified:`（同 fan-in-ff-protocol-check --baseline cd4f49b4 模式）。锁事件
-  # 缺失 = 可读空（full-suite worktree 无 .quay/ 运行时态），malformed/unpaired = NOT-EVALUATED（硬规则 3b）。
-  # @static-tier change
-  # @static-class operational
-  # @static-object plugin/scripts/direct-to-develop-bypass-check.ts plugin/test/direct-to-develop-bypass-check.test.mjs
-  # --root main_root (gap-gitignored-carriers-absent-in-verify-worktree): develop reflog + lock events
-  # are MAIN-checkout state, absent from the one-shot verify worktree. Pointing --root at the main
-  # checkout gives the worktree round the SAME reflog + lock-events as a main run ⇒ verdicts identical
-  # (AC3); on a main run main_root == repo_root ⇒ unchanged (AC2).
-  run_checker "direct-to-develop-bypass-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/direct-to-develop-bypass-check.ts" --root "${main_root}" --baseline b11ce7202b46406d5d5bc82ef7b4c030c4aed05b --json
+  # ⛔ MOVED to run_static_checks() (2026-09-13, tasks/gap-correctness-checkers-opt-in-not-default-
+  # suite-member): "direct-to-develop-bypass-check" now runs on the default full-suite gate, with the
+  # baseline corrected from the aged fixed sha to the `develop~100` window AC-194 itself measures. The
+  # full rationale (why the passive-machine split did not apply to it, why a frozen baseline silently
+  # expires, and what the two-window disagreement looked like) is preserved VERBATIM at its new home.
   echo "== suite-duration-exceed check (gap-suite-duration-exceed-check-not-wired, AC4 independent signal) =="
   # AC101's 600s target had two de-facto sentinels (the 10min foreground cap + the duration ledger)
   # that the pre-verified-suite path bypassed — round227 ran 936.5s with NO alert. This checker reads
