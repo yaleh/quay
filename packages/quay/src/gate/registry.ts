@@ -3,6 +3,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runAcceptance } from "./acceptance-runner.ts";
+import { darkAxisGateCheck } from "./dark-axis-record.ts";
 import { makeDocumentContractGate } from "./factories/document-contract.ts";
 import { makeGoalGate } from "./factories/goal.ts";
 import { resolveRunnerOptions } from "./config/utils.ts";
@@ -52,6 +53,17 @@ export var gateRegistry = {
     var opts = resolveRunnerOptions();
     var result = runAcceptance({ command: command, cwd: opts.cwd, timeoutMs: opts.timeoutMs, envFile: opts.envFile });
     return { ok: result.ok, reason: result.reason };
+  },
+  // ADR-007's PER-MILESTONE half (net-new; tasks/gap-adr007-per-milestone-dark-axis-enforcement-gate).
+  // The ADR forbids judging a milestone on L_T alone, and has recorded since 2026-07-20 that the
+  // per-milestone predicate — "does the task record an L_D/L_G reading, or state explicitly that the
+  // axis is still dark" — was STILL FUTURE WORK. Registered here as a real named gate (so
+  // `quay gate <id> --gate dark-axis` / `gate_run{gate:"dark-axis"}` can assert it directly), and
+  // required on the ready→done path by lifecycle.ts's runComplete/runCompleteLoop whenever the
+  // workspace declares ADR-007. The judgment itself is dark-axis-record.ts — one implementation,
+  // shared with the plugin CLI `plugin/scripts/dark-axis-record-check.ts`.
+  "dark-axis": async function(task) {
+    return darkAxisGateCheck(task);
   },
 };
 

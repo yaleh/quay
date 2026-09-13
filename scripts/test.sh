@@ -288,6 +288,10 @@ source "${repo_root}/plugin/scripts/runner-static-gate.ts"
 # The scoped static-check selector (select-static-checks-for-touches.ts) parses run_static_checks
 # only, so doc-class checkers are absent from the scoped tier by construction — a task-scoped run
 # does NOT re-pay them (pre-commit is their home).
+# @checker-count 8 — the number of run_checker entries in the FUNCTION BELOW, machine-checked by
+# plugin/scripts/checker-count-drift-check.ts (same contract as the annotations on the two
+# registries in plugin/scripts/runner-static-gate.ts). Prose must not restate it: the sibling
+# header claimed "the 7 DOC-class" while this body held 8.
 run_doc_checks() {
   echo "== doc-class static checks (AC51 — pre-commit only; NOT part of the full-suite gate) =="
   local _doc_rc=0
@@ -1495,7 +1499,9 @@ elif [ "${1:-}" = "--static-checks-doc" ]; then
   exit 0
 elif [ "${1:-}" = "--static-checks-operational" ]; then
   # OPERATIONAL-class (runtime-state) static checks only (2026-09-02 passive-machine ruling — 执行
-  # suite 测试不应依赖本项目运行态): run the 11 runtime-state checkers (run_operational_checks) with NO
+  # suite 测试不应依赖本项目运行态): run the runtime-state checkers (run_operational_checks — its
+  # count is declared by that function's own @checker-count annotation and machine-checked by
+  # plugin/scripts/checker-count-drift-check.ts; restating it here is the drift this task closed) with NO
   # test run. Home = this explicit opt-in on the ACTIVE host, NOT the full-suite gate (the default
   # suite must be machine-independent — a passive checkout goes green on code alone). NOT wired into
   # any automatic cadence (outer retiring; drift accepted). They REMAIN in the mutation manifest
