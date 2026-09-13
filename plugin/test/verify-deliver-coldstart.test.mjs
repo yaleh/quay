@@ -47,6 +47,11 @@
 //   AC5 — GOAL-016 AC-247/248/249/250 keep their real field sets, each declared field individually
 //         enforced at write time (omitting any one is refused).
 //
+//   gap-verify-deliver-coldstart-ac4-rerun-serializes-spawn (2026-09-13) — this file stopped being
+//   bucket M's LPT long tail by paying for the hermetic `--selfcheck` ONCE instead of ten times.
+//   Assertions are unchanged; see the block above `selfcheck()` and the structural guard test at the
+//   end of the file.
+//
 // Run:
 //   scripts/test.sh plugin/test/verify-deliver-coldstart.test.mjs
 //   node --test plugin/test/verify-deliver-coldstart.test.mjs
@@ -68,8 +73,40 @@ function run(args) {
   return spawnSync("bash", [SCRIPT, ...args], { encoding: "utf8" });
 }
 
+// ── the hermetic --selfcheck runs ONCE and every assertion shares that one run ───────────────────
+// gap-verify-deliver-coldstart-ac4-rerun-serializes-spawn (2026-09-13).
+//
+// MEASURED DEFECT (production carrier `.quay/verification-round.jsonl`, perFile[].durationMs — the
+// direct quantity, not a proxy): this file's durationMs median was 65-105s on 09-08..09-11 and
+// 460-700s on 09-13 (n=13). Cause, measured not guessed: the commit
+// 3daf9d34 ("…字段清单收成单一真源 + 产出时 fail-closed + 落账后复跑判据") took this file from FOUR
+// `run(["--selfcheck"])` call sites to NINE (835c4f49 then made it ten). Each one spawns a full
+// hermetic run of a ~6.9k-line bash script — timed directly at 35-62s each, ~380s of this file's
+// 423s. The run count is the whole regression; bucket M's wall clock follows it because LPT makes the
+// suite's wall ≈ its slowest single file (bucket M median 197-245s on 09-08..09-11 ⇒ 545s on 09-13).
+//
+// THE FIX is to stop paying for the same run ten times — NOT to weaken any assertion, and NOT to
+// touch the production script. Every one of the assertions below still runs against REAL `--selfcheck`
+// output; only the number of times that identical output is produced changes.
+//
+// Why caching the FIRST run is an honest reading of the later ones (each claim checked, hard rule 4c):
+//   · the run is hermetic BY CONTRACT, and the file asserts it (test "AC1 — --selfcheck is hermetic");
+//   · it writes nothing into the repo — every fixture root is a fresh fs.mkdtempSync under os.tmpdir();
+//   · no test in this file mutates SCRIPT or the SPEC before/among the selfcheck assertions (the
+//     SPEC-mutating tests build their own temp SPEC and pass it with --spec), so run #1's output is
+//     exactly what run #N would print;
+//   · determinism checked directly: two consecutive runs differ ONLY in their mktemp paths and in one
+//     sentinel signature derived from those paths — and NO assertion in this file matches either
+//     (grep for tmp paths / raw 64-hex digests over the assertion set: zero hits).
+// The structural guard test at the bottom keeps this from rotting back: one spawn, one shared run.
+let _selfcheck = null;
+function selfcheck() {
+  if (_selfcheck === null) _selfcheck = run(["--selfcheck"]);
+  return _selfcheck;
+}
+
 test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-measure and AC5 controls", () => {
-  const r = run(["--selfcheck"]);
+  const r = selfcheck();
   assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
   assert.match(r.stdout, /selfcheck: PASS/, "selfcheck must report PASS");
   // AC2 controls (direct measures take false/true)
@@ -321,7 +358,7 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
 test("AC1 — --selfcheck is hermetic: it does not touch a real install and runs offline", () => {
   // The selfcheck builds its own temp git repos under os.tmpdir() and never calls npm install /
   // quay-init on a real project. Prove it runs without any real .tgz / npm / network.
-  const r = run(["--selfcheck"]);
+  const r = selfcheck();
   assert.equal(r.status, 0, `--selfcheck must be hermetic:\n${r.stderr}`);
   assert.ok(!/npm install/.test(r.stdout), "selfcheck must not run a real npm install");
 });
@@ -621,7 +658,7 @@ test("AC5 — every AC-214 NEED ac's write point carries a freshness anchor (mec
 //     `quay driver start`'s exit code — the AC names that explicitly, because start already exits 0
 //     while the system is dead (GOAL-009 AC-203).
 test("AC-247 — --selfcheck exercises the takeover producer's eight-reading refusal + liveness-source controls", () => {
-  const r = run(["--selfcheck"]);
+  const r = selfcheck();
   assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
   assert.match(r.stdout, /ac247-record\(fields\+anchor\) ok=1 missing_fields='' anchor-literal-hits=0/,
     "the eight fields must land verbatim on the record line, through the shared anchor choke point only");
@@ -646,7 +683,7 @@ test("AC-247 — --selfcheck exercises the takeover producer's eight-reading ref
 // case); each one-sided union writes none; the `./src/…` path form writes none; an unreadable union
 // writes none and is reported as NOT-EVALUATED rather than as "incomplete".
 test("AC-249 — --selfcheck exercises the complete-change producer's union + both one-sided refusals", () => {
-  const r = run(["--selfcheck"]);
+  const r = selfcheck();
   assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
   // positive: the union (code commit first, doc commit last) carries BOTH sides and writes one record
   assert.match(r.stdout, /ac249-union\(multi-commit same task\) files=\["quay-adr\/ADR-007\.md","scripts\/check-adr\.ts","tasks\/T-1\.md"\] wrote=1 lines=0->1/,
@@ -692,7 +729,7 @@ test("AC1 — --ac-record-schema-report prints the per-AC three-way diff and exi
 
 // AC2 — single source: a new AC needs ONE declaration row + the generic producer, NOT a new function.
 test("AC2 — a brand-new AC produces a valid record via one declaration row and no new writer function", () => {
-  const r = run(["--selfcheck"]);
+  const r = selfcheck();
   assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
   assert.match(r.stdout, /ac-record-schema\(AC2 new-ac, no new writer fn\) wrote=1 line=\{"build_sha":"[0-9a-f]{40}","ts":"[^"]+","ac":"GOAL-016-AC-999","host":"hostB-fake","project_root":"\/tmp\/p","made_by":"write_ac_record"\}/,
     "the generic write_ac_record must emit a complete, anchored record for an AC that has ONLY a declaration row");
@@ -700,7 +737,7 @@ test("AC2 — a brand-new AC produces a valid record via one declaration row and
 
 // AC3 — fail-closed AT PRODUCTION TIME (⛔ not "the criterion exits 1", which is the status quo).
 test("AC3 — a record missing a declared field is refused and writes NOTHING; completed it writes", () => {
-  const r = run(["--selfcheck"]);
+  const r = selfcheck();
   assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
   assert.match(r.stdout, /ac-record-schema\(AC3 missing-field\) refused=1 lines=0→0 \(expect 1\/0→0/,
     "omitting a declared field must be refused with ZERO lines written — the failure happens at write time");
@@ -715,7 +752,7 @@ test("AC3 — a record missing a declared field is refused and writes NOTHING; c
 // AC4 — after a record lands, the criterion is re-run automatically; its exit code is recorded, and a
 // red criterion is REPORTED (⛔ never silently treated as success).
 test("AC4 — the criterion is re-run after the append, and 'appended but still red' is reported", () => {
-  const r = run(["--selfcheck"]);
+  const r = selfcheck();
   assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
   assert.match(r.stdout, /ac-record-rerun\(after-append, criterion-green\) wrote=1 rerun_rc=0 loud=0 rerun_records=1/,
     "a green criterion must be re-run automatically and its rc=0 recorded, with no false alarm");
@@ -725,7 +762,7 @@ test("AC4 — the criterion is re-run after the append, and 'appended but still 
 
 // AC5 — the four GOAL-016 field sets are carried: every declared field is enforced individually.
 test("AC5 — every declared field of AC-247/248/249/250 is enforced at write time", () => {
-  const r = run(["--selfcheck"]);
+  const r = selfcheck();
   assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
   const declared = { 247: 7, 248: 11, 249: 4, 250: 10 };
   for (const [n, w] of Object.entries(declared)) {
@@ -736,7 +773,7 @@ test("AC5 — every declared field of AC-247/248/249/250 is enforced at write ti
 
 // AC1 falsifiability — the report must be able to take FALSE, in both of its blind spots.
 test("AC1 — the drift report can take false (dropped field ⇒ DRIFT; dropped row ⇒ unregistered)", () => {
-  const r = run(["--selfcheck"]);
+  const r = selfcheck();
   assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
   assert.match(r.stdout, /ac-record-schema\(AC1 drop-a-criterion-field\) rc=1 drift-line=1 names-field=1/,
     "dropping a criterion-read field from the declaration must flip the report to DRIFT and name the field");
@@ -759,7 +796,7 @@ test("AC-238 — the drift report sees it and reads ok on all three sides (was: 
 // AC4 — the new write point is fail-closed and the failure is falsifiable: every declared AC-238 field
 // is individually enforced, and the refusal writes NOTHING (未测量 ≠ 不合格).
 test("AC-238 — every declared field is enforced at write time, and the refusal writes zero lines", () => {
-  const r = run(["--selfcheck"]);
+  const r = selfcheck();
   assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
   assert.match(r.stdout,
     /ac-record-schema\(AC238 refused-when-declared-field-omitted\) refused=1 lines=0→0 msg='AC-RECORD-SCHEMA: refusing GOAL-009-AC-238 record — host \(MISSING\)/,
@@ -802,4 +839,38 @@ test("AC-249 — the step is wired into the opt-in chain and shares AC-248's --t
   // two knobs the caller can turn apart (硬规则 3b's family: looks covered, can differ).
   assert.equal((src.match(/--task-id\)\s/g) || []).length, 1,
     "--task-id must be the single shared knob (AC-248 and AC-249 read the same driven task)");
+});
+
+// ── Structural guard: the shared self-check run must not be re-spawned ───────────────────────────
+// 硬规则 9 (a rule that has no product is mere willpower) + 硬规则 2 (judge by POSITION, not by
+// keyword — the comment above NAMES this call, so a whole-file keyword count would be wrong).
+// The regression this pins is not hypothetical: it is what happened between 3daf9d34 and 835c4f49,
+// and nothing in the suite noticed — bucket M simply got 2-3x slower for three days.
+test("structural — the --selfcheck assertions share ONE hermetic run (no re-spawn)", () => {
+  const raw = fs.readFileSync(fileURLToPath(import.meta.url), "utf8");
+  // Positional (硬规则 2): only CODE lines count — `//` lines quote the call in prose, and the guard
+  // itself quotes it in its own diagnostics, so both would otherwise inflate the count.
+  const codeSrc = raw.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+  // The needle is ASSEMBLED, not written out: a literal here would be counted by its own scan
+  // (a self-referential measurement — the classic way a量 stops being a measurement, 硬规则 4).
+  const SPAWN = "run(" + JSON.stringify(["--selfcheck"]) + ")";
+  const spawns = codeSrc.split(SPAWN).length - 1;
+  assert.equal(spawns, 1,
+    `exactly ONE code-level ${SPAWN} may exist (the one inside the memoized selfcheck()); ` +
+    `found ${spawns}. Each extra spawn re-pays a full hermetic run of a ~6.9k-line bash ` +
+    `script (timed at 35-62s each) — ten of them were ~380s of this file's 423s and made it bucket ` +
+    `M's LPT long tail (bucket M wall median 197-245s on 09-08..09-11 ⇒ 545s on 09-13). Call ` +
+    `selfcheck() instead of spawning your own run.`);
+  // …and that one spawn must sit inside the helper, so it is paid at most once per process.
+  const start = codeSrc.indexOf("function selfcheck() {");
+  assert.ok(start >= 0, "the memoized selfcheck() helper must exist");
+  const body = codeSrc.slice(start, codeSrc.indexOf("\n}", start) + 2);
+  assert.ok(body.includes(SPAWN),
+    "the single spawn must live inside selfcheck() — otherwise the count above is satisfiable by a spawn elsewhere");
+  assert.ok(body.includes("_selfcheck === null"),
+    "selfcheck() must MEMOIZE (a helper that re-spawns every call keeps the cost, just spelled differently)");
+  // Non-brittle lower bound (⛔ not an equality — a new assertion may legitimately add an 11th site).
+  const uses = codeSrc.split("= " + "selfcheck();").length - 1;
+  assert.ok(uses >= 10,
+    `every --selfcheck assertion must read the shared run (found ${uses} selfcheck() call sites)`);
 });

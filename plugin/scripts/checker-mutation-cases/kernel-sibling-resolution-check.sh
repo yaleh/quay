@@ -201,4 +201,102 @@ if checker_cmd; then :; else
   exit 4
 fi
 
+# ── DRIVER-SCOPE 规则（gap-drivers-resolve-quay-scripts-under-project-root-not-plugin-root）─────────
+# 上面那段【故意】断言 dev-tree-only 标记能让 root 锚点绿；本段断言相反的一半：同样的标记放在
+# 【第三方工作区常驻 driver】文件里 **不再豁免**——那正是 2026-09-13 第三方项目实测缺陷活下来的原因
+# （AC-225 的残差：生产 driver 被误标 dev-tree-only ⇒ 检查器恒绿 ⇒ 而 driver 层实质不工作）。
+# 单入口放行：driver-runtime.ts 的 resolveQuayCodeRoot / resolveQuaySrcModule 体内合法，体外仍红。
+
+write_driver_clean() {
+  cat > plugin/scripts/goal-driver.ts <<'EOF'
+import { kernelSiblingArgv } from "./driver-runtime.ts";
+// 正确的形态：脚本经 kernel 安装位置解析（⛔ 不锚 <workspaceRoot>/plugin/…）。
+export function read(root: string) {
+  return kernelSiblingArgv("ready-pool-check.ts", ["--root", root, "--json"]);
+}
+EOF
+}
+
+# DRIVER baseline: a clean driver-scope file → GREEN.
+write_driver_clean
+if checker_cmd; then :; else
+  echo "DRIVER baseline RED on a clean driver-scope fixture" >&2
+  exit 4
+fi
+
+# INJECT (driver-scope + DEV-TREE-ONLY marker): marker must NOT exempt in a third-party-resident driver → MUST go RED.
+cat > plugin/scripts/goal-driver.ts <<'EOF'
+import path from "node:path";
+export function run(root: string) {
+  // kernel-sibling-dev-tree-only: 误标——goal-driver 在第三方项目里跑，--root 是别人的项目。
+  return path.join(root, "plugin", "scripts", "ready-pool-check.ts");
+}
+EOF
+if checker_cmd; then
+  echo "STAYED-GREEN — a DEV-TREE-ONLY-marked root anchor in a third-party-resident driver did not redden the checker (豁免被误用的漏洞未关闭)" >&2
+  exit 3
+fi
+
+# RESTORE → GREEN.
+write_driver_clean
+if checker_cmd; then :; else
+  echo "ALWAYS-RED — restoring the clean driver file after the driver-scope inject still reddens the checker" >&2
+  exit 4
+fi
+
+# INJECT (config-resource anchor): `drivers.yml` 这类非脚本资源，P2 的正则结构上匹配不到 → 本条规则必须收到。
+cat > plugin/scripts/goal-driver.ts <<'EOF'
+import fs from "node:fs";
+import path from "node:path";
+export function cfg(root: string) {
+  return JSON.parse(fs.readFileSync(path.join(root, "plugin", "scripts", "drivers.yml"), "utf8"));
+}
+EOF
+if checker_cmd; then
+  echo "STAYED-GREEN — path.join(root, \"plugin\", …, \"drivers.yml\") did not redden the checker (config-resource anchor slips through P2's script-extension regex)" >&2
+  exit 3
+fi
+
+# RESTORE → GREEN.
+write_driver_clean
+if checker_cmd; then :; else
+  echo "ALWAYS-RED — restoring the clean driver file after the config-anchor inject still reddens the checker" >&2
+  exit 4
+fi
+
+# SINGLE-ENTRY allowance: the anchor INSIDE resolveQuayCodeRoot is the one legal site → GREEN.
+cat > plugin/scripts/driver-runtime.ts <<'EOF'
+import fs from "node:fs";
+import path from "node:path";
+export function resolveQuayCodeRoot(): string | null {
+  const parent = path.dirname("/x/plugin");
+  if (fs.existsSync(path.join(parent, "packages", "quay", "src"))) return parent;
+  return null;
+}
+EOF
+if checker_cmd; then :; else
+  echo "FALSE-RED — the single entry's own layout probe reddened the checker (单入口放行未生效)" >&2
+  exit 4
+fi
+
+# SINGLE-ENTRY boundary: the same join OUTSIDE those two functions → MUST go RED (放行不是整文件豁免).
+cat > plugin/scripts/driver-runtime.ts <<'EOF'
+import path from "node:path";
+export function resolveQuayCodeRootHelper(root: string): string {
+  return path.join(root, "packages", "quay", "src", "goal-store.ts");
+}
+EOF
+if checker_cmd; then
+  echo "STAYED-GREEN — a root anchor outside the single-entry functions did not redden the checker (放行退化成整文件豁免)" >&2
+  exit 3
+fi
+
+# RESTORE: clean again → GREEN (final).
+rm -f plugin/scripts/driver-runtime.ts
+write_driver_clean
+if checker_cmd; then :; else
+  echo "ALWAYS-RED — restoring the clean driver file after the single-entry boundary inject still reddens the checker" >&2
+  exit 4
+fi
+
 exit 0
