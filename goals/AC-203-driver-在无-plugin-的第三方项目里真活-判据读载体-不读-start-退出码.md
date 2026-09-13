@@ -72,6 +72,7 @@ statusLog:
     to: achieved
     actor: goal-driver
     reason: "I2: criterion pass"
+long-term: true
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"

@@ -64,10 +64,28 @@ AC4 判据于 `8bff44425`（2026-09-13T03:22:31Z）落 develop。**此后一共�
 2. **改 pid 文件的写者**：由 **driver 自己**在进入常驻循环后写 pid 文件，而不是 supervisor 在 spawn 时替它写（`:1080`）⇒ `driverAlive` 的含义变成「driver 走到了自己的循环」。⚠️ 与 `:1027` 注释声明的「权威写 driver pid」语义冲突，需一并裁定。
 3. **测试侧（仅在被保留的断言确有必要时）**：step ② 的 `confirmed_ms >= 1000`（`:746`）断言的是**测试自己的墙钟**（①② 共用一个 3s stamp），不是生产的性质 ⇒ 该断言若要留，必须相对化（例如 ② 前删掉 stamp，使下一次 respawn 重建一个完整窗口），否则它测的是宿主。
 
+### 实施（worker 落地，2026-09-13）
+
+**采用候选 2**，并**只经 registry 既有的 `pidSelf` 旗标**表达（⛔ 不新造机制）：`runSupervisor` 不再替
+`pidSelf=true` 的 kind 预写 driver pid 文件（worker 保留 supervisor 写）。于是该文件对 5 个 kind 变成
+**驱动产出的就绪标记**（与负载无关的直接量），`CONFIRM_POLL_MS` 降级为纯去抖。候选 1 被否：本轮实测
+treatment 误报发生于 `confirmed_ms=758`，**那一刻日志里还没有 `driver exited` 行**（驱动 600ms 才退），
+⇒ 「没有 exit 行」不能替代「已就绪」，它只是「还没死」。
+
+**⚠️ Touches 扩了一条（硬规则 5b：修一处 ≠ 只此一处，命中数 = 2）**：这个修法把 `pidSelf` 从**注释性
+约定**变成**承重契约**（说「写者是驱动」就必须真由驱动写）。按此契约枚举全部替身夹具后，**唯一不符的
+是 `plugin/test/driver-cli.test.mjs:87`**（给 promotion 用了一个只 idle、不自写 `--pid-file` 的假驱动
+—— 它之所以够用，恰因 supervisor 的预写掩盖了这一点）。**若不改它，该文件 9 条测试会红**（`alive=1`
+断言）。⇒ 如实登记并加入 Touches，⛔ 不静默。
+
+**生产侧已核（5/5 真驱动自写并确认）**：promotion / outer / quality / meta / goal 逐个用真 kernel +
+真 driver 起（`--confirm-timeout 30`）⇒ 全部 `started:` + rc0，且 `.quay/<prefix>.pid` 由驱动自己写。
+
 ## Touches
 
 - plugin/scripts/driver-runtime.ts
 - plugin/test/driver-runtime.test.mjs
+- plugin/test/driver-cli.test.mjs
 - tasks/gap-driver-start-false-confirms-unsettled-driver.md
 
 ## Acceptance Criteria

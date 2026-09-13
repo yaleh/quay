@@ -56,6 +56,7 @@ statusLog:
     to: achieved
     actor: goal-driver
     reason: "I2: criterion pass"
+long-term: true
 ---
 **判据（能取假）**：2026-09-12 干跑 exit 1（载体存在、82 条记录、无本 AC 记录）。**负控制**：ad-arm1 的 user-scope quay 已于本日卸载 ⇒ `driver_alive` 今天结构上必为 0，任何声称满足本 AC 的记录都必须是真装真跑出来的。**⛔ 不读退出码**：`quay driver start` 打印 `started: supervisor pid=… exit=0` 而 status 全 0 的形态已由 GOAL-009 AC-203 实证；本 AC 沿用「读载体」的判法，复用 `start-drivers.ts:54` 的 `parseDriverStatus`（它已把「读不出」与「不活」分成两个取值）。**与 GOAL-009 AC-238 的分工**：AC-238 验「带旧 vendored runtime 的项目升级后存量不丢」；本 AC 验「**user-scope 安装已被移除、从零装当前 build** + **停摆一月的 loop 重新起来**」——`stale_days` 是这两者的区分量。**顺带的价值**：GOAL-009 已 achieved、其 AC 离开 `check --achieved-failing` 作用域（风险 5），本 AC 这一跑等于替 AC-201/202/203 路径复验一次。
 
