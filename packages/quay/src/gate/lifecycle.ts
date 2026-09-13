@@ -16,6 +16,7 @@
 
 import { randomUUID } from "node:crypto";
 import { runGate } from "./engine.ts";
+import { readGatesConfig } from "./registry.ts";
 import { appendGateEvent, type GateEvent } from "./gate-event-store.ts";
 import { TASK_STATUS, type Task } from "../abi.ts";
 
@@ -103,6 +104,53 @@ export interface RetreatArgs extends LifecycleArgs {
   reason: string;
 }
 
+/**
+ * Does THIS workspace require the ADR-007 per-milestone dark-axis record on its ready→done path?
+ * (gap-adr007-per-milestone-dark-axis-enforcement-gate)
+ *
+ * The switch is the workspace's own gate config: the same `adr:` list that already wires ADR-007's
+ * INSTRUMENT-INTEGRITY gate (`adr-007` → git-lens-selfcheck.sh). Declaring an ADR in that list means
+ * accepting that ADR's enforcement, and ADR-007's enforcement has two halves; `dark-axis` is the
+ * second. There is deliberately no second config surface to keep in sync — one declaration, both
+ * halves.
+ *
+ * Who this turns on for, concretely: this repo's own `.quay/config.yml` declares `ADR-007`, so the
+ * predicate is LIVE here, which is the point (the ADR has been unenforced since 2026-07-20). The
+ * disposable workspaces the test suite builds (~`makeTmpWorkspace`, a providers-only config with no
+ * `gates:` section) declare no ADR at all, so the suite's lifecycle cases are unaffected.
+ *
+ * KNOWN LIMITATION (stated rather than papered over): `readGatesConfig` reports a malformed
+ * `gates:` YAML as "no config" (loader.ts's documented fail-quiet contract), so a *syntax error*
+ * inside a config that DID declare ADR-007 reads as "not declared" — enforcement silently off. The
+ * distinction is not recoverable through that reader; fixing it belongs to the loader, not here.
+ */
+export function workspaceEnforcesDarkAxis(workspaceRoot?: string): boolean {
+  if (!workspaceRoot) return false;
+  try {
+    const adrIds = readGatesConfig(workspaceRoot)?.adr ?? [];
+    return adrIds.some((a) => /^ADR-007$/i.test(String(a).trim()));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Run the `dark-axis` gate when the workspace requires it, as a FAIL-CLOSED precondition of the
+ * ready→done landing (AC2/AC3). Returns the verdict to return, or null when the workspace does not
+ * declare ADR-007 (or the gate passed — a pass still appends its own GateEvent via runGate, so the
+ * "was this task judged on the dark axes?" question has a ledger answer, not just a status).
+ */
+async function enforceDarkAxis({ client, id, logPath, actor, workspaceRoot }: LifecycleArgs): Promise<LifecycleResult | null> {
+  if (!workspaceEnforcesDarkAxis(workspaceRoot)) return null;
+  const { ok, reason } = await runGate({ client, id, gate: "dark-axis", logPath, actor, workspaceRoot });
+  if (ok) return null;
+  console.log(`FAIL — ${reason}`);
+  // @deprecated — process.exitCode set for CLI backward-compat; MCP callers should
+  // read the returned exitCode field and reset process.exitCode after the call.
+  process.exitCode = 1;
+  return { ok: false, reason, exitCode: 1 };
+}
+
 export interface LifecycleResult {
   ok: boolean;
   reason: string;
@@ -141,6 +189,13 @@ export async function runComplete({ client, id, logPath, actor = "quay-cli", wor
     return { ok: false, reason, exitCode: 1 };
   }
 
+  // ADR-007 per-milestone predicate — the dark-axis record is a PRECONDITION of landing, checked
+  // before the acceptance meter: a task that has not consulted the dark axes must not reach the
+  // point of being judged on L_T alone (the ADR's own forbidden outcome). No-op unless the
+  // workspace declares ADR-007 — see workspaceEnforcesDarkAxis.
+  const darkAxisFail = await enforceDarkAxis({ client, id, logPath, actor, workspaceRoot });
+  if (darkAxisFail) return darkAxisFail;
+
   const { ok, reason } = await runGate({ client, id, gate: "acceptance", logPath, actor, workspaceRoot });
   if (!ok) {
     console.log(`FAIL — ${reason}`);
@@ -149,7 +204,6 @@ export async function runComplete({ client, id, logPath, actor = "quay-cli", wor
     process.exitCode = 1;
     return { ok: false, reason, exitCode: 1 };
   }
-
   await client.taskWrite({ id, status: TASK_STATUS.DONE, expectedStatus: TASK_STATUS.READY });
   appendGateEvent(
     logPath,
@@ -195,6 +249,13 @@ export async function runCompleteLoop({ client, id, logPath, actor = "quay-loop"
     process.exitCode = 1;
     return { ok: false, reason, exitCode: 1 };
   }
+
+  // ADR-007 per-milestone predicate — same precondition as runComplete: the loop's completion path
+  // must not be a way AROUND the dark-axis requirement (it exists so the loop's ready→done flip
+  // records a GateEvent instead of writing status directly; a flip that skipped this check would be
+  // exactly the L_T-only judgment ADR-007 forbids). No-op unless the workspace declares ADR-007.
+  const darkAxisFail = await enforceDarkAxis({ client, id, logPath, actor, workspaceRoot });
+  if (darkAxisFail) return darkAxisFail;
 
   const meter = (task.extra as Record<string, unknown>)?.acceptance;
   const hasMeter = typeof meter === "string" && meter.trim() !== "";
