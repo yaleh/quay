@@ -29,8 +29,8 @@
 // key). Reverting `ensure_provider_carrier_env`'s call site in write_config makes AC4's tests fail
 // with the missing keys listed — verified 2026-09-14 by deleting the call and re-running.
 //
-// Run: scripts/test.sh plugin/test/quay-init-carrier-env-pins.test.mjs
-//      node --test plugin/test/quay-init-carrier-env-pins.test.mjs
+// Run: scripts/test.sh plugin/test/quay-init-config-env-keys.test.mjs
+//      node --test plugin/test/quay-init-config-env-keys.test.mjs
 
 import { test, describe, after } from "node:test";
 import assert from "node:assert/strict";
