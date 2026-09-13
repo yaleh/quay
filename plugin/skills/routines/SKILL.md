@@ -22,6 +22,19 @@ their findings through the routine-file-gate, and verify the FILE-ONLY invariant
 
 ## Pipeline
 
+> ⚠️ **两个通道，先读这条再照下面做**（gap-productize-deep-semantic-dedup-scan-routine，2026-09-13）：
+> 本文件描述的是**手工/agent 通道**——由一段 LLM 执行的散文把 last-run 写回、由它调
+> `routine-file-gate` 立案。它可用的前提是**调用者本身是一个会话**（inner tick / 手工驱动）。
+>
+> **两层 driver 架构下的机械通道**（`SPEC-capability-planes-and-mechanism-lifecycle` §5.2）把同一
+> 轨道收进了常驻 driver：`plugin/scripts/probe-routine.ts` 把 `.quay/config.yml` `loop.routines:`
+> 里**带 `probe:` 且 trigger 为 `interval:<N>m`** 的声明装进 quality driver 的 Layer-1b 例程表，
+> 由 driver 自己跑 readProbeSpec → 派 fresh-context 探针 → FILE-ONLY 守卫 → 结构化 finding 落
+> `<root>/.quay/routine-findings.jsonl`，**last-run 由 driver 持久化写回**（不再靠 agent 记得写）。
+> ⛔ 那条通道**不是** fan-in/scoped-gate 的一部分（热路径反例见 `gap-fan-in-remove-archguard-gate`）。
+> 本文件下面的步骤保留给没有该 driver 的用法（generic loop-driver skill / 手工一次性驱动）；
+> **两条通道不要同时驱动同一条 routine**（会双跑），跑之前先看 quality driver 是否已在跑。
+
 ### Phase 1 — Schedule
 
 1. Read `routines:` from `.quay/config.yml` `loop:` section (legacy fallback: `.quay/loop.yml`).
