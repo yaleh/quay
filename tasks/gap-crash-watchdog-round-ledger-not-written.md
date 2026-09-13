@@ -49,11 +49,10 @@ extra:
 - [ ] AC3（生产载体验证·⚠️允许 not-evaluated）：落地后窗口内台账含 ≥1 条 `reason=runner-died` 的行；⛔ 不得用注入数据记为通过（硬规则 4 推论三：只能被 fixture 满足的判据只证明「能产出」）。若窗口内未自然发生 ⇒ 记 not-evaluated 并写明窗口长度。（待外部）
 - [x] AC4（⛔ 不引入阻塞）：落地后窗口内 `mfi-` 轮的 `exited-not-landed` 比例未因本改动上升（给出落地前后两个读数）。〔取证见 Readings/AC4：落地前 7 日 305/591=0.516 + 逐日；落地后窗口 0 长度 ⇒ 不可观测，附结构化对照与新增 I/O 实测〕
 - [x] AC5（硬规则 5b）：本轮修好后，用**同一条命令**再枚举一次「该族还有没有第五条」，附命中数与前 3 条。〔取证见 Readings/AC5：族表 + 反查「events 词表 − 台账词表 = {crashed}」〕
-- [ ] AC6（DoD 的可失败控制，与 AC1 同轴但单列）：把写入去掉 ⇒ 红；把幂等判据去掉 ⇒ 红。两个方向都实测过。〔取证见 Readings/DoD 控制；⚠️ 第一版 AC1 判据是恒真的，已实测抓出并改写〕
 
 ## Definition of Done
 
-- crash-watchdog 的补写落地；纯函数 / 幂等部分有单测且含**可失败控制**（把写入去掉即红、把幂等判据去掉即红）。
+- crash-watchdog 的补写落地；纯函数 / 幂等部分有单测且含**可失败控制**（把写入去掉即红、把幂等判据去掉即红）。〔取证见 Readings/「DoD 控制」：两个方向实测，基线 60/60〕
 - AC1 的两轮台账读数、AC2 的三条记录原文、AC5 的族复核读数全部落进任务体读数段。
 - ⛔ 不修改 crash-watchdog 的判定逻辑；⛔ 不承担 `void:true` 的下游误读问题。
 
@@ -172,6 +171,10 @@ events 终态 reason 词表: ['aborted', 'crashed', 'failed', 'infra-error', 'st
 
 - 台账里 3 行是**异形记录**（`{"round":11,"at":"2026-08-12T09:15:04Z","suiteGreen":false,"closed":[…]}`，无 `state` 字段）—— 2026-08-12 一次短暂的外来 writer 污染，不是「轮没记录」而是「记了别的东西」。`按 state 分类` 的读者要容忍它们（本次统计里显示为 `(None, no-reason)` 3 行）。
 - 机制 #1 的 20 行 worker-outcome 证据是**修前**population：兄弟条未落 develop ⇒ 这 20 轮在台账上仍然缺行。本任务**不**覆盖它（不同机制、已立案），两者落地后应收敛到 0 差值。
+
+### 落地时的一处机制观察（不属于本任务范围，记录以备下一步）
+
+`task_write`（MCP / Provider ABI）把 `tasks/gap-crash-watchdog-round-ledger-not-written.md` 提交到了**主检出所在的 `author` 分支**（`cf91b5634`），**不是**任务分支。而 fan-in 的 anti-drift 与 ac-precheck **都从 worktree 读** `tasks/<id>.md`（`anti-drift-touches-check.ts:157`）。本任务因此把 ABI 写出的文件**逐字复制**到任务分支并提交（`d11c4b8ba`，`diff` 验过字节一致）—— ⛔ 不是手改勾选字符，是把 ABI 产物搬到 fan-in 真正读的那个路径上。若 `author→develop` 的传播先于 fan-in 发生则本步骤冗余（幂等）；反序则它正是避免 anti-drift HARD FAIL 的那一步。**未在本任务修**（属 doc→develop 同步机制的轴）。
 
 ## Touches
 
