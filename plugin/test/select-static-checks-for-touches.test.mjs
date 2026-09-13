@@ -473,6 +473,169 @@ t("AC4b — a NEW file under plugin/scripts/checker-mutation-cases/ is a FIXTURE
   }
 });
 
+// ── gap-checker-mutation-check-has-no-change-tier-companion ────────────────────────────────────────
+// The full-tier `checker-mutation-check` (the whole-store meta-check on the checkers THEMSELVES) is
+// DEFERRED out of scoped runs, so a task that edits a checker and breaks its mutation case shipped
+// scoped-green while an UNRELATED task's fan-in went red — 8 measured fan-in static-gate failures
+// (`.quay/verification-round.jsonl`, `STATIC_CHECK_FAILED: checker-mutation-check`), the last at
+// 2026-09-13T04:41:32Z. The fix registers a CHANGE-TIER companion — the SAME script in
+// `--check-changed` mode — whose judgment domain is THIS delta's checker carriers. These tests pin
+// the SELECTION half against the REAL registry, and every assertion has an injected inconsistency
+// that flips it red (the DoD's "注入不一致即红" control). The RUNNER half (does a broken mutation case
+// actually go red?) is pinned by checker-mutation-cases/checker-mutation-check.sh and by the live
+// readings recorded in the task body's readings section.
+
+const COMPANION_NAME = "checker-mutation-check";
+const COMPANION_FLAG = "--check-changed";
+// The manifest sources whose change can add a NEW registered checker (⇒ the companion re-verifies
+// manifest-wide coverage there too).
+const COMPANION_CARRIERS = [
+  "plugin/scripts/checker-mutation-check.sh",
+  "plugin/scripts/checker-mutation-cases/provider-binding-resolvability-check.sh",
+  "plugin/scripts/runner-static-gate.ts",
+  "scripts/test.sh",
+];
+const COMPANION_NON_CARRIERS = [
+  "plugin/scripts/repo-root.ts",
+  "docs/proposals/x.md",
+  "packages/quay/src/serve.ts",
+];
+
+/**
+ * The selection invariant the companion must satisfy, as a re-runnable predicate over ANY parsed
+ * registry — so the same function that asserts the real registry can be fed an injected-inconsistency
+ * variant and must report NOT ok (a criterion that cannot be fed a failing input is not a test).
+ * @returns {{ok:boolean, reasons:string[]}}
+ */
+function companionInvariant(mod, registry) {
+  const reasons = [];
+  const comp = registry.filter((c) => c.name === COMPANION_NAME && c.commandLine.includes(COMPANION_FLAG));
+  const full = registry.filter((c) => c.name === COMPANION_NAME && !c.commandLine.includes(COMPANION_FLAG));
+  if (comp.length !== 1) reasons.push(`expected exactly 1 ${COMPANION_FLAG} entry for ${COMPANION_NAME}, got ${comp.length}`);
+  if (full.length !== 1) reasons.push(`expected exactly 1 whole-store entry for ${COMPANION_NAME}, got ${full.length}`);
+  if (comp.length === 1) {
+    if (comp[0].tier !== "change") reasons.push(`companion tier must be "change" (else it is deferred again), got "${comp[0].tier}"`);
+    for (const p of COMPANION_CARRIERS) {
+      if (!comp[0].objects.some((o) => mod.matchesObject(o, p))) reasons.push(`companion @static-object must cover the carrier ${p}`);
+    }
+    for (const p of COMPANION_NON_CARRIERS) {
+      if (comp[0].objects.some((o) => mod.matchesObject(o, p))) reasons.push(`companion @static-object must NOT cover the non-carrier ${p} (it would become an always-tier check)`);
+    }
+  }
+  if (full.length === 1 && full[0].tier !== "full") {
+    reasons.push(`the whole-store entry must stay tier "full" (deferred ≠ dropped), got "${full[0].tier}"`);
+  }
+  return { ok: reasons.length === 0, reasons };
+}
+
+/** Apply one injected inconsistency to the REAL registry source (anchored, so the mutant is the
+ *  intended one and not a mis-aimed replace). Returns the mutated source. */
+function injectCompanionInconsistency(src, kind) {
+  const objLine = "  # @static-object plugin/scripts/runner-static-gate.ts scripts/test.sh plugin/scripts/checker-mutation-check.sh plugin/scripts/checker-mutation-cases/ .github/workflows/";
+  const tierLine = "  # @static-tier change\n" + objLine;
+  assert.ok(src.includes(tierLine), "the companion's annotation block must be found verbatim (the injection anchor)");
+  if (kind === "tier-full") {
+    // The 8th-recurrence defect restored: the companion is deferred again, so the changer's own gate
+    // never runs it.
+    return src.replace(tierLine, "  # @static-tier full\n" + objLine);
+  }
+  if (kind === "object-widened") {
+    // The other failure mode: the object widened until the companion fires for every task — it would
+    // silently become an always-tier check and put the 55.6s whole-store pass on every task.
+    return src.replace(objLine, "  # @static-object plugin/scripts/");
+  }
+  if (kind === "full-tier-removed") {
+    // SACRIFICE the whole-store兜底 — the deferred-not-dropped design forbids it.
+    return src.replace(
+      '  run_checker "checker-mutation-check" bash "${repo_root}/plugin/scripts/checker-mutation-check.sh" --check\n',
+      "",
+    );
+  }
+  throw new Error(`unknown injection kind ${kind}`);
+}
+
+t("companion — the real registry satisfies the change-tier companion invariant", async () => {
+  const mod = await importMod();
+  const registry = mod.parseStaticCheckRegistry(fs.readFileSync(TEST_SH, "utf8"));
+  const inv = companionInvariant(mod, registry);
+  assert.ok(inv.ok, `companion invariant violated: ${inv.reasons.join("; ")}`);
+});
+
+t("companion — the FULL-tier registration and its @static-tier full comment are byte-unchanged (AC4)", async () => {
+  const src = fs.readFileSync(TEST_SH, "utf8");
+  // The full-tier block is deferred, never dropped: its tier comment AND its command line must be
+  // present verbatim and contiguous. Deleting or downgrading either one reds this test.
+  const block = "  # @static-tier full  (the ~13s meta-check on the checkers THEMSELVES — deferred to the full-suite gate)\n"
+    + '  run_checker "checker-mutation-check" bash "${repo_root}/plugin/scripts/checker-mutation-check.sh" --check\n';
+  assert.ok(src.includes(block), "the full-tier checker-mutation-check block (tier comment + runner line) must be byte-unchanged");
+  const mod = await importMod();
+  const registry = mod.parseStaticCheckRegistry(src);
+  const full = registry.filter((c) => c.name === COMPANION_NAME && !c.commandLine.includes(COMPANION_FLAG));
+  assert.equal(full.length, 1, "exactly one whole-store entry must remain registered");
+  assert.equal(full[0].tier, "full", "the whole-store entry must stay tier=full");
+  assert.equal(
+    full[0].commandLine,
+    'run_checker "checker-mutation-check" bash "${repo_root}/plugin/scripts/checker-mutation-check.sh" --check',
+    "the whole-store entry's command line must be byte-unchanged",
+  );
+});
+
+t("companion — injected inconsistencies each red the invariant (falsifiability control)", async () => {
+  const mod = await importMod();
+  const src = fs.readFileSync(TEST_SH, "utf8");
+  for (const kind of ["tier-full", "object-widened", "full-tier-removed"]) {
+    const mutated = injectCompanionInconsistency(src, kind);
+    assert.notEqual(mutated, src, `injection ${kind} must actually change the source`);
+    const inv = companionInvariant(mod, mod.parseStaticCheckRegistry(mutated));
+    assert.equal(inv.ok, false, `injection ${kind} must red the invariant, but it stayed green`);
+  }
+});
+
+t("companion — scoped selection: fires on a checker carrier, silent on a non-carrier", async () => {
+  const mod = await importMod();
+  const registry = mod.parseStaticCheckRegistry(fs.readFileSync(TEST_SH, "utf8"));
+  const hasCompanion = (r) => r.selected.some((s) => s.name === COMPANION_NAME && s.commandLine.includes(COMPANION_FLAG));
+  const compOf = (r) => r.selected.find((s) => s.name === COMPANION_NAME && s.commandLine.includes(COMPANION_FLAG));
+
+  // POSITIVE: a delta that edits a checker (or its mutation case, or the registry) selects it.
+  for (const touch of COMPANION_CARRIERS) {
+    const r = mod.selectStaticChecksForTouches(["tasks/x.md", touch], registry);
+    assert.ok(hasCompanion(r), `a delta touching ${touch} must select the companion: ${r.selected.map((s) => s.name)}`);
+    assert.match(compOf(r).commandLine, /--check-changed/, "the selected command must be the narrowed mode");
+  }
+  // NEGATIVE (AC2): a delta that carries no checker carrier selects NOTHING of the sort — the
+  // companion must not become an always-tier check paying the whole-store cost on every task.
+  for (const touch of COMPANION_NON_CARRIERS) {
+    const r = mod.selectStaticChecksForTouches(["tasks/x.md", touch], registry);
+    assert.ok(!hasCompanion(r), `a delta touching ${touch} must NOT select the companion: ${r.selected.map((s) => s.name)}`);
+  }
+  // The whole-store entry is DEFERRED in every scoped set (it never appears as a selected command).
+  const r = mod.selectStaticChecksForTouches(["tasks/x.md", COMPANION_CARRIERS[0]], registry);
+  assert.ok(!r.selected.some((s) => s.commandLine.includes("--check-changed") && !s.commandLine.includes("--repo-root")), "no accidentally-renamed entry");
+  assert.ok(r.deferred.includes(COMPANION_NAME), `the whole-store entry must be deferred in scoped mode: ${r.deferred}`);
+});
+
+t("companion — the CLI's --list tier/object parse agrees with the pure parse (DoD control)", async () => {
+  const mod = await importMod();
+  const registry = mod.parseStaticCheckRegistry(fs.readFileSync(TEST_SH, "utf8"));
+  const comp = registry.find((c) => c.name === COMPANION_NAME && c.commandLine.includes(COMPANION_FLAG));
+  const rows = runSelCli(REPO_ROOT, "--list").stdout.split("\n")
+    .filter((l) => l.startsWith("change\t") || l.startsWith("full\t"))
+    .map((l) => l.split("\t"))
+    .map(([tier, rest]) => [tier, (rest ?? "").replace(/\s*\[.*$/, "").replace(/\s*\(.*\)$/, ""), rest ?? ""])
+    .filter(([, n]) => n === COMPANION_NAME);
+  assert.equal(rows.length, 2, `the CLI --list must show BOTH registrations of ${COMPANION_NAME}: ${JSON.stringify(rows)}`);
+  const changeRow = rows.find((r) => r[0] === "change");
+  assert.ok(changeRow, `one --list row must be change-tier: ${JSON.stringify(rows)}`);
+  // Same objects, same order, as the pure parse (the CLI and the library read ONE source).
+  const listedObjects = (changeRow[2].match(/\[(.*)\]\s*$/) ?? [, ""])[1].split(", ").filter(Boolean);
+  assert.deepEqual(listedObjects, comp.objects, "the --list object list must agree with the parsed registry");
+  // Parity with the emitted command, not just the name.
+  const cmd = runSelCli(REPO_ROOT, "--touches", "plugin/scripts/checker-mutation-check.sh", "--commands");
+  assert.equal(cmd.status, 0, cmd.stderr);
+  assert.equal((cmd.stdout.match(/--check-changed/g) ?? []).length, 1, `exactly one --check-changed command must be emitted: ${cmd.stdout}`);
+});
+
 // ── AC5: this file is node:test + @test-group engine (self-evident) ──────────────────────────────
 
 t("AC5 — this test file is node:test with an engine @test-group", () => {
