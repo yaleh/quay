@@ -97,11 +97,11 @@ export async function handleServer({ sub, flags, wantsJson }: CliCtx) {
   let startedAt: string | null = null;
   let services: ServiceReport[] = [];
 
-  if (!read.evaluated && !read.absent) {
+  if (read.kind === "unreadable") {
     // Carrier present but unreadable / wrong shape — NOT-EVALUATED (硬规则 3b).
     status = "not-evaluated";
     reason = read.reason;
-  } else if (read.absent) {
+  } else if (read.kind === "absent") {
     status = "not-running";
     reason = read.reason;
   } else {
@@ -163,7 +163,7 @@ export async function handleServer({ sub, flags, wantsJson }: CliCtx) {
           reason,
           workspaceRoot,
           carrierPath,
-          carrier: read.absent ? "absent" : read.evaluated ? "present" : "unreadable",
+          carrier: read.kind,
           pid: hostPid,
           startedAt,
           services,

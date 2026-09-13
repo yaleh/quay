@@ -330,7 +330,11 @@ export async function serveControlPlane(opts: {
       async (args: { halted?: boolean; caller?: string }, extra: any) => {
         const header = headerValue(extra?.requestInfo?.headers, CONTROL_HEADER);
         const res = resolveCaller({ toolArg: args.caller, header, env });
-        if (!res.ok) return reject(res.reason);
+        // 显式字面量比较（⛔ 不是 `!res.ok`）：本仓库 tsconfig 是 `strict:false`（无 strictNullChecks），
+        // 该设置下【取反不触发判别联合收窄】⇒ `res.reason` 编不过。此前本文件从不在 tsc program 里
+        // （root tsconfig 只 include packages/**/{src,bin}），AC-251 让产品层 import serveControlPlane
+        // ⇒ 本文件首次进入 program ⇒ 三处同形一并改为 `=== false`（行为等价，只是让类型收窄成立）。
+        if (res.ok === false) return reject(res.reason);
         const state = readControlState(root, env, rel).state;
         const next = applyHalt(state, res.caller, args.halted ?? true);
         writeControlState(root, next, rel);
@@ -359,7 +363,7 @@ export async function serveControlPlane(opts: {
       async (args: { key: string; value: string; caller?: string }, extra: any) => {
         const header = headerValue(extra?.requestInfo?.headers, CONTROL_HEADER);
         const res = resolveCaller({ toolArg: args.caller, header, env });
-        if (!res.ok) return reject(res.reason);
+        if (res.ok === false) return reject(res.reason);
         const state = readControlState(root, env, rel).state;
         const next = applyPreference(state, args.key, args.value);
         writeControlState(root, next, rel);
@@ -383,7 +387,7 @@ export async function serveControlPlane(opts: {
       async (args: { task: string; reason?: string; caller?: string }, extra: any) => {
         const header = headerValue(extra?.requestInfo?.headers, CONTROL_HEADER);
         const res = resolveCaller({ toolArg: args.caller, header, env });
-        if (!res.ok) return reject(res.reason);
+        if (res.ok === false) return reject(res.reason);
         const state = readControlState(root, env, rel).state;
         const next = applyForceDispatch(state, args.task, args.reason ?? null, res.caller);
         writeControlState(root, next, rel);

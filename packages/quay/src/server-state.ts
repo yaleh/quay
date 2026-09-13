@@ -68,11 +68,20 @@ export interface ServerState {
   services: ServerServiceEntry[];
 }
 
-/** Discriminated read result — see the three-way contract in the header. */
+/**
+ * Discriminated read result — the three-way contract in the header.
+ *
+ * ⚠️ The discriminant is a STRING, not a boolean pair. This repo's root tsconfig is `strict: false`
+ * (no strictNullChecks), under which TypeScript does NOT narrow a discriminated union through
+ * `if (!x.flag)` / truthiness — `x` stays the whole union and member access fails to compile
+ * (measured: `packages/quay/src/cli/server.ts` + `plugin/scripts/driver-shared.ts`, 2026-09-13).
+ * A string-literal discriminant narrows correctly under both strictness settings, so the three
+ * outcomes stay distinguishable at the type level too — not merely in the doc comment.
+ */
 export type ServerStateRead =
-  | { evaluated: true; absent: false; path: string; state: ServerState }
-  | { evaluated: false; absent: true; path: string; reason: string }
-  | { evaluated: false; absent: false; path: string; reason: string };
+  | { kind: "present"; path: string; state: ServerState }
+  | { kind: "absent"; path: string; reason: string }
+  | { kind: "unreadable"; path: string; reason: string };
 
 /** The carrier path for a workspace root. */
 export function serverStatePath(workspaceRoot: string): string {
@@ -125,9 +134,9 @@ function isServerState(value: unknown): value is ServerState {
 
 /**
  * Read the carrier. Never throws — every failure is an explicit outcome:
- *   absent file            → { evaluated:false, absent:true,  reason:"…" }
- *   unreadable / bad shape → { evaluated:false, absent:false, reason:"…" }   ← NOT-EVALUATED
- *   well-formed            → { evaluated:true,  absent:false, state }
+ *   absent file            → { kind:"absent",     reason:"…" }   ← NOT-RUNNING
+ *   unreadable / bad shape → { kind:"unreadable", reason:"…" }   ← NOT-EVALUATED (硬规则 3b)
+ *   well-formed            → { kind:"present",    state }
  */
 export function readServerState(workspaceRoot: string): ServerStateRead {
   const p = serverStatePath(workspaceRoot);
@@ -137,25 +146,24 @@ export function readServerState(workspaceRoot: string): ServerStateRead {
   } catch (err) {
     const code = (err as NodeJS.ErrnoException | undefined)?.code;
     if (code === "ENOENT") {
-      return { evaluated: false, absent: true, path: p, reason: `no ${SERVER_STATE_REL} in ${workspaceRoot}` };
+      return { kind: "absent", path: p, reason: `no ${SERVER_STATE_REL} in ${workspaceRoot}` };
     }
-    return { evaluated: false, absent: false, path: p, reason: `cannot read ${p}: ${String(code ?? (err as Error)?.message ?? err)}` };
+    return { kind: "unreadable", path: p, reason: `cannot read ${p}: ${String(code ?? (err as Error)?.message ?? err)}` };
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    return { evaluated: false, absent: false, path: p, reason: `cannot parse ${p}: ${(err as Error).message}` };
+    return { kind: "unreadable", path: p, reason: `cannot parse ${p}: ${(err as Error).message}` };
   }
   if (!isServerState(parsed)) {
     return {
-      evaluated: false,
-      absent: false,
+      kind: "unreadable",
       path: p,
       reason: `${p} does not match the schemaVersion ${SERVER_STATE_SCHEMA_VERSION} carrier shape`,
     };
   }
-  return { evaluated: true, absent: false, path: p, state: parsed };
+  return { kind: "present", path: p, state: parsed };
 }
 
 /** Direct quantity: is this pid a live process? `kill(pid, 0)` probes existence without signalling —

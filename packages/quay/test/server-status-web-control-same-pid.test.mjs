@@ -158,7 +158,7 @@ test("AC1/AC3 — the unified server reports web+control under ONE live pid, con
 
   // The carrier itself: both services carry THIS process's pid (that equality is stage A2).
   const carrier = readServerState(ws);
-  assert.equal(carrier.evaluated, true, "the carrier is published and readable");
+  assert.equal(carrier.kind, "present", "the carrier is published and readable");
   assert.deepEqual(
     carrier.state.services.map((s) => s.name).sort(),
     ["control", "web"],
