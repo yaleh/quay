@@ -463,3 +463,163 @@ t("AC2 — every run_static_checks checker checker-mutation-check sees is in the
     }
   }
 });
+// ── gap-scoped-static-gate-sequential-pays-sum-not-max ───────────────────────────────────────────
+// The scoped tier evals its selected checkers one after another (wall = Σ of the selected set),
+// while the full gate pays max(...) — the parallel mode was deliberately left UNSET for the scoped
+// path (runner-static-gate.ts: "The scoped tier leaves this unset."). These two controls pin the
+// change that turns the scoped loop parallel AND the fail-open question it had to answer first:
+// run_doc_checks FORCES RUN_CHECKER_PARALLEL=0 because a backgrounded run_checker returns 0
+// immediately, so a caller that reads `$?` right after it would turn a failure into a pass.
+//
+// ⛔ These controls do NOT re-implement the scoped loop. `scripts/test.sh --for-task` cannot be
+// driven from inside the suite (the suite exports QUAY_TEST_NESTED=1 and the scoped function
+// returns early on it), so they EXECUTE THE REAL TEXT: the two function bodies are extracted from
+// the live scripts/test.sh at test time and sourced into a bash harness that also sources the real
+// plugin/scripts/checker-cost-lib.sh (run_checker / run_checker_parallel_wait). Only the
+// touch→checker SELECTOR is stubbed (its formula is AC6-pinned and is not what is under test) and
+// only the checker BODIES are fixtures — a copy of the loop would measure the copy (hard rule 4);
+// extracted text cannot drift from the file it is read out of.
+
+const SUITE_TEST_SH = path.join(REPO_ROOT, "scripts", "test.sh");
+const COST_LIB = path.join(REPO_ROOT, "plugin", "scripts", "checker-cost-lib.sh");
+
+function extractBashFunction(src, name) {
+  const m = src.match(new RegExp(`^${name}\\(\\) \\{[\\s\\S]*?^\\}\\n`, "m"));
+  assert.ok(m, `could not extract ${name}() from scripts/test.sh`);
+  return m[0];
+}
+
+// A checker body recording `<name> start|end <epochNs>` around a sleep. The start/end pairs make
+// "were two checkers in flight at the same time" a DIRECT measurement (interval overlap), never a
+// proxy such as "the mode flag said parallel" (hard rule 4b: a self-reported flag is not evidence
+// that the thing it names happened).
+const MARKER_CHECKER = `#!/usr/bin/env bash
+name="$1"
+printf '%s start %s\\n' "$name" "$(date +%s%N)" >> "$MARK_FILE"
+sleep "\${MARK_SLEEP:-1}"
+printf '%s end %s\\n' "$name" "$(date +%s%N)" >> "$MARK_FILE"
+`;
+
+function buildScopedHarness({ dir, markerCheckers = [], extraLines = [] }) {
+  const fixture = path.join(dir, "fixture");
+  fs.mkdirSync(path.join(fixture, "plugin", "scripts"), { recursive: true });
+  fs.mkdirSync(path.join(fixture, "bin"), { recursive: true });
+  const marker = path.join(fixture, "bin", "marker.sh");
+  fs.writeFileSync(marker, MARKER_CHECKER, "utf8");
+  // The ONLY stub: the touch→checker selector (AC6 pins its formula unchanged; it is not under test).
+  const checkerLines = [
+    ...markerCheckers.map((n) => `run_checker "fake-${n}" bash ${JSON.stringify(marker)} ${n}`),
+    ...extraLines,
+  ];
+  fs.writeFileSync(
+    path.join(fixture, "plugin", "scripts", "select-static-checks-for-touches.ts"),
+    `process.stdout.write(${JSON.stringify(checkerLines.join("\n") + "\n")});\n`,
+    "utf8",
+  );
+  const src = fs.readFileSync(SUITE_TEST_SH, "utf8");
+  const harness = path.join(dir, "harness.sh");
+  const mark = path.join(dir, "mark.txt");
+  const out = path.join(dir, "out.txt");
+  const err = path.join(dir, "err.txt");
+  fs.writeFileSync(harness, [
+    "set -euo pipefail",
+    `repo_root=${JSON.stringify(fixture)}`,
+    `export CHECKER_COST_FILE=${JSON.stringify(path.join(dir, "checker-cost.jsonl"))}`,
+    `export MARK_FILE=${JSON.stringify(mark)}`,
+    "export MARK_SLEEP=1",
+    "unset QUAY_TEST_NESTED QUAY_TEST_NESTED_ROOT QUAY_TEST_SKIP_STATIC_CHECKS",
+    `source ${JSON.stringify(COST_LIB)}`,
+    extractBashFunction(src, "record_scoped_static_evidence"),
+    extractBashFunction(src, "run_scoped_static_checks_sel"),
+    // The tier is called BARE, inside a subshell where errexit is ON — exactly how scripts/test.sh
+    // calls it (`run_scoped_static_checks "${task_id}"`, no `||`, under `set -euo pipefail`).
+    // ⛔ `run_scoped_static_checks_sel ... || rc=$?` would be a WRONG harness: a command on the left
+    // of `||` disables errexit for the whole call, so a sequential-mode failure would no longer
+    // abort and the captured rc would be whatever the trailing wait returned (measured: RC=0 with
+    // the machine line on stderr — a harness artifact, not the product's behavior).
+    "set +e",
+    `( set -e; run_scoped_static_checks_sel --touches plugin/test/fake.test.mjs >${JSON.stringify(out)} 2>${JSON.stringify(err)} )`,
+    "rc=$?",
+    'printf "RC=%s\\n" "$rc"',
+  ].join("\n") + "\n", "utf8");
+  return { harness, mark, out, err };
+}
+
+function runScopedHarness(h) {
+  const env = { ...process.env };
+  delete env.QUAY_TEST_NESTED;
+  delete env.QUAY_TEST_NESTED_ROOT;
+  delete env.QUAY_TEST_SKIP_STATIC_CHECKS;
+  delete env.QUAY_SCOPED_STATIC_EVIDENCE;
+  const res = spawnSync("bash", [h.harness], { encoding: "utf8", env });
+  return { status: res.status, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
+}
+
+/** name → {start, end} epoch-ns, read from the marker checker's append-only file. */
+function readMarkerIntervals(mark) {
+  const byName = new Map();
+  for (const row of fs.readFileSync(mark, "utf8").split("\n")) {
+    if (!row) continue;
+    const [name, kind, ns] = row.split(/\s+/);
+    byName.set(name, { ...(byName.get(name) ?? {}), [kind]: Number(ns) });
+  }
+  return byName;
+}
+
+t("parallel — the scoped tier runs its selected checkers CONCURRENTLY (paid max, not sum)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "scoped-par-"));
+  try {
+    const h = buildScopedHarness({ dir, markerCheckers: ["alpha", "beta", "gamma"] });
+    const r = runScopedHarness(h);
+    assert.match(r.stdout, /^RC=0$/m, `all-green scoped run must return 0: ${r.stdout}\n${r.stderr}`);
+    const iv = readMarkerIntervals(h.mark);
+    for (const n of ["alpha", "beta", "gamma"]) {
+      assert.ok(iv.get(n)?.start && iv.get(n)?.end, `${n} must have run to completion: ${JSON.stringify([...iv])}`);
+    }
+    // DIRECT concurrency measurement: two checkers were in flight at the same time iff their
+    // [start,end) intervals overlap. Sequential execution cannot produce an overlap (checker N+1
+    // starts only after checker N has exited). ⛔ Inverting the production change (removing the
+    // scoped tier's RUN_CHECKER_PARALLEL=1) makes every interval disjoint ⇒ this test goes red.
+    const entries = [...iv.entries()];
+    const overlapped = entries.some(([, a]) => entries.some(([, b]) => a !== b && a.start < b.end && b.start < a.end));
+    assert.ok(
+      overlapped,
+      `no two scoped checkers were in flight simultaneously ⇒ the scoped tier is running sequentially: ${JSON.stringify(entries)}`,
+    );
+  } finally {
+    cleanup(dir);
+  }
+});
+
+t("parallel — a failing checker still fails the scoped tier CLOSED (exit code + machine line, siblings not masked)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "scoped-par-fail-"));
+  try {
+    // fake-boom is FIRST: a sequential abort would stop before the markers even start, so their
+    // completion below is itself a discriminator for "all checkers were launched, then awaited".
+    const h = buildScopedHarness({
+      dir,
+      markerCheckers: ["alpha", "beta", "gamma"],
+      extraLines: [`run_checker "fake-boom" bash -c ${JSON.stringify("exit 7")}`],
+    });
+    const r = runScopedHarness(h);
+    const rc = Number((/^RC=(\d+)$/m.exec(r.stdout) ?? [])[1]);
+    // The tier's own stderr was redirected into err.txt by the harness (so it cannot interleave
+    // with the spawn's), which is why the machine line is read from the FILE, not from r.stderr.
+    const tierErr = fs.readFileSync(h.err, "utf8");
+    // This is the run_doc_checks fail-open question, answered as a live control: the failing
+    // checker's OWN exit code must travel out of the scoped tier, not be swallowed by the
+    // backgrounding that parallel mode introduces.
+    assert.equal(rc, 7, `the failing checker's exit code must be the scoped tier's exit code: ${r.stdout}\n${tierErr}`);
+    assert.match(
+      tierErr,
+      /STATIC_CHECK_FAILED: fake-boom exit=7/,
+      `the fail-closed machine line must name the failing checker: ${tierErr}`,
+    );
+    const iv = readMarkerIntervals(h.mark);
+    for (const n of ["alpha", "beta", "gamma"]) {
+      assert.ok(iv.get(n)?.end, `${n} must still have run — a failing sibling must not mask the others: ${JSON.stringify([...iv])}`);
+    }
+  } finally {
+    cleanup(dir);
+  }
+});
