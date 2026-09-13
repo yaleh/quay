@@ -2,7 +2,7 @@
 id: gap-fan-in-suite-refusal-reports-as-suite-red
 title: fan-in suite 拒绝启动被报成「suite red」——runner 诊断全走 stderr 而 suite log 只 tee
   stdout ⇒ 0 字节日志 + 裸「suite red」，「没跑」与「跑了且失败」同形
-status: ready
+status: done
 labels:
   - gap
   - defect
