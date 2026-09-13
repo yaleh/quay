@@ -376,11 +376,14 @@ test("AC3 — MCP halt mid-run stops NEW dispatch only; the in-flight worker com
 
   let buf = "";
   driver.stdout.on("data", (d) => { buf += d; });
-  let workerPid = null;
-  for (let i = 0; i < 1000 && workerPid === null; i++) {
-    if (fs.existsSync(pidFile)) workerPid = Number(fs.readFileSync(pidFile, "utf8").trim().split("\n")[0]);
-    else await new Promise((r) => setTimeout(r, 20));
-  }
+  // 等 worker 把 pid 落盘：上限走 waitFor 的宿主推导网。⛔ 旧写法是 `for (i < 1000)` + 每次 sleep 20ms
+  // = 固定 20s 墙钟——同一类「只在空闲 16 核上成立」的预算，满载时静默变成真限制（硬规则 5b：
+  // 缺陷成簇，兄弟实例就在同一文件里；gap-suite-wallclock-budgets-literals-depend-on-host-capacity）。
+  const workerPid = await waitFor(() => {
+    if (!fs.existsSync(pidFile)) return null;
+    const n = Number(fs.readFileSync(pidFile, "utf8").trim().split("\n")[0]);
+    return Number.isFinite(n) && n > 0 ? n : null; // 文件已建但内容还没写完 ⇒ 仍算「还没落盘」，继续轮询
+  });
   assert.ok(workerPid, "the in-flight worker spawned and wrote its pid");
 
   // flip halt while gap-slow (sleep 2) is in-flight
