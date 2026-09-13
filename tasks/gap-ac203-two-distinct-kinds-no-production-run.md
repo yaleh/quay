@@ -59,7 +59,7 @@ GOAL-009-AC-203: 合格记录覆盖的 kind=[] （需要 >=2 个不同的 driver
 
 1. **先跑，再看（⛔ 不要先改码）**：确认 develop tip 上有 `AC203_KINDS` 缺省两 kind（本轮已核实 ✓）后，跑 `bash plugin/scripts/develop-deliver-tgz.sh --verify-coldstart --hosts "B C"`（建 develop tip 的两个 `.tgz` → scp 到两端 → 远端跑 `verify-deliver-coldstart.sh` → 证据文件 scp 回 → append 进本地载体）。⛔ 本步不需要 `--ac207-e2e`（AC-240 配对是另一条判据，且它要 target 侧 `profiles.yml` + 真 worker，代价高）。
 2. **先落这次运行自己的 stdout 读数**：读 `<repo>/.quay/verify-coldstart-remote-<host>-<tip8>.log`，贴 `== ④ driver liveness (AC-203)` 段的逐 kind 行（`kind=… driver_alive=… carrier_records=… evaluated=…`）与 `ac203 record written (kind=…)` / `NOTE: AC-203 record NOT written …` 行。**这一步的读数决定下一步做什么。**
-3. **若 step④ 两个 kind 都没写记录**：按 stdout 给出的死因定位（读日志，⛔ 不要照着一个未检验的假设改别处）；若死因确在 `verif y-deliver-coldstart.sh` / `develop-deliver-tgz.sh` 内，就地修并**重跑第 1 步**——⛔ 不是「单测绿了就宣布修好」，那正是本任务要修的那个形态。若死因落在 `driver-runtime.ts` 的 supervisor spawn 解释器（本轮已实测该路径不触发），那是另一条机制、该文件另有在飞任务持锁，应另案处理并如实记入 AC4。
+3. **若 step④ 两个 kind 都没写记录**：按 stdout 给出的死因定位（读日志，⛔ 不要照着一个未检验的假设改别处）；若死因确在 `verify-deliver-coldstart.sh` / `develop-deliver-tgz.sh` 内，就地修并**重跑第 1 步**——⛔ 不是「单测绿了就宣布修好」，那正是本任务要修的那个形态。若死因落在 `driver-runtime.ts` 的 supervisor spawn 解释器（本轮已实测该路径不触发），那是另一条机制、该文件另有在飞任务持锁，应另案处理并如实记入 AC4。
 4. **确认回传真的落地**：读本地 `.quay/productization-verification.jsonl`，确认新增 ≥2 条 `ac="GOAL-009-AC-203"` 且 `kind` 取值不同、`host` ≠ 本机、`project_root` 在本仓库之外的记录。
 5. **干跑判据**：在本仓库根跑 AC-203 criterion，贴 **exit 0**（stdout + stderr + 退出码）。
 
