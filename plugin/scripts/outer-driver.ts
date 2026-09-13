@@ -42,7 +42,7 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // Layer 0 + 1b（driver-runtime.ts）：splitArgs / ts / appendHeartbeatLine（心跳单一落点）/ Fact /
 // RoutineSpec / scheduleIsDue / collectFacts。⛔ 不 import Layer 1a 的 source/select/verify——
 // 本 kind 是例程型（1b），结构上不被迫实现任务处理三段（AC151 取假①）。
-import { splitArgs, ts, appendHeartbeatLine, scheduleIsDue, collectFacts, type Fact, type RoutineSpec } from "./driver-runtime.ts";
+import { splitArgs, ts, appendHeartbeatLine, scheduleIsDue, collectFacts, kernelSiblingArgv, resolveQuayCodeRoot, type Fact, type RoutineSpec } from "./driver-runtime.ts";
 // Layer 0 · controlPlane（driver-shared.ts）：运行期 halt = 读控制态单一真相源（与 promotion/worker 同族）。
 import { isHalted } from "./driver-shared.ts";
 // AC155：轮询间隔的单一真相源（drivers.yml 经 driver-config 加载，⛔ 不各写一份字面量）。
@@ -189,8 +189,11 @@ function factOf<T>(name: string, value: T | null, notEvaluatedReason: string): F
 /** A6 · 占用率：`slot-refill --cap 5 --json` → in_flight / occupied_slots / effective_cap。 */
 export function occupancyRoutine(root: string, cmd: string[] | null): () => Fact[] {
   return () => {
-    const argv = cmd ?? ["node", "--no-warnings", "--experimental-strip-types",
-      path.join(root, "plugin", "scripts", "slot-refill.ts"), "--root", root, "--cap", "5", "--json"];  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+    // 脚本经 kernel 安装位置解析（⛔ 非 <root>/plugin/scripts —— 第三方项目 root 下没有 plugin/）：
+    // 解析不出 ⇒ 直接 not-evaluated 且 reason 点明「找不到机件」，⛔ 不退化成 spawn 一个不存在的路径
+    // （那会把「读不到输入」伪装成「跑过了、没数据」）。
+    const argv = cmd ?? kernelSiblingArgv("slot-refill.ts", ["--root", root, "--cap", "5", "--json"]);
+    if (argv === null) return [factOf<unknown>("occupancy", null, "slot-refill not resolvable from kernel install")];
     const parsed = runJson(argv, root);
     const v = parsed && typeof parsed === "object" ? parseSlotRefill(JSON.stringify(parsed)) : null;
     const value = v === null ? null : { in_flight: v.inFlight, occupied_slots: v.occupiedSlots, cap: v.effectiveCap };
@@ -201,8 +204,8 @@ export function occupancyRoutine(root: string, cmd: string[] | null): () => Fact
 /** A9 · not-yet-flipped：`ready-pool-check --cap 5 --json` → excluded[] not-yet-flipped 计数。 */
 export function notYetFlippedRoutine(root: string, cmd: string[] | null): () => Fact[] {
   return () => {
-    const argv = cmd ?? ["node", "--no-warnings", "--experimental-strip-types",
-      path.join(root, "plugin", "scripts", "ready-pool-check.ts"), "--root", root, "--cap", "5", "--json"];  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+    const argv = cmd ?? kernelSiblingArgv("ready-pool-check.ts", ["--root", root, "--cap", "5", "--json"]);
+    if (argv === null) return [factOf<unknown>("not_yet_flipped", null, "ready-pool-check not resolvable from kernel install")];
     const parsed = runJson(argv, root);
     const v = parsed && typeof parsed === "object" ? parseNotYetFlipped(JSON.stringify(parsed)) : null;
     return [factOf("not_yet_flipped", v, "ready-pool-check unreadable/unparseable")];
@@ -212,7 +215,11 @@ export function notYetFlippedRoutine(root: string, cmd: string[] | null): () => 
 /** A10 · closure-lag 信号：`closure-lag-check.sh`（无参信号检查），退出非 0 ⇒ 报出。 */
 export function closureLagRoutine(root: string, cmd: string[] | null): () => Fact[] {
   return () => {
-    const argv = cmd ?? ["bash", path.join(root, "plugin", "scripts", "closure-lag-check.sh")];  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+    // ⚠️ 必须显式传 `--root <workspace>`：closure-lag-check.sh 的缺省 root 是【它自己所在仓库】
+    // （`$SCRIPT_DIR/../..`），不是 cwd ⇒ 不传就会去扫 quay 自己的 tasks/ 而不是被驱动的工作区
+    // （第三方项目上表现为「工具跑起来了、读数来自别的项目」——静默且更难发现）。
+    const argv = cmd ?? kernelSiblingArgv("closure-lag-check.sh", ["--root", root]);
+    if (argv === null) return [{ name: "closure_lag", value: null, state: "not-evaluated", reason: "closure-lag-check not resolvable from kernel install" }];
     const r = runExit(argv, root);
     if (!r.ok) return [{ name: "closure_lag", value: null, state: "not-evaluated", reason: "closure-lag-check unreadable" }];
     // exit 0 = 正常（无信号）；非 0 = 信号触发（报出，但这是读数不是门控——判断归 manager）。
@@ -223,8 +230,8 @@ export function closureLagRoutine(root: string, cmd: string[] | null): () => Fac
 /** A18 · slot-refill 空槽读数：`slot-refill --cap 5 --json` → should_refill/recommended/slots_free。 */
 export function slotRefillRoutine(root: string, cmd: string[] | null): () => Fact[] {
   return () => {
-    const argv = cmd ?? ["node", "--no-warnings", "--experimental-strip-types",
-      path.join(root, "plugin", "scripts", "slot-refill.ts"), "--root", root, "--cap", "5", "--json"];  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+    const argv = cmd ?? kernelSiblingArgv("slot-refill.ts", ["--root", root, "--cap", "5", "--json"]);
+    if (argv === null) return [factOf<unknown>("slot_refill", null, "slot-refill not resolvable from kernel install")];
     const parsed = runJson(argv, root);
     const v = parsed && typeof parsed === "object" ? parseSlotRefill(JSON.stringify(parsed)) : null;
     const value = v === null ? null : {
@@ -274,7 +281,8 @@ export function livenessDirectRoutine(root: string): () => Fact[] {
 /** B1 · 收尾 pass：`closure-lag-check.sh --close-terminal --json`（机械闭合终态括号）→ { scanned, closed }。 */
 export function closurePassRoutine(root: string, cmd: string[] | null): () => Fact[] {
   return () => {
-    const argv = cmd ?? ["bash", path.join(root, "plugin", "scripts", "closure-lag-check.sh"), "--close-terminal", "--json"];  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+    const argv = cmd ?? kernelSiblingArgv("closure-lag-check.sh", ["--root", root, "--close-terminal", "--json"]);
+    if (argv === null) return [factOf<unknown>("closure_pass", null, "closure pass not resolvable from kernel install")];
     const parsed = runJson(argv, root);
     const v = parsed && typeof parsed === "object" ? parseClosureTerminal(JSON.stringify(parsed)) : null;
     return [factOf("closure_pass", v, "closure pass unreadable/unparseable")];
@@ -284,7 +292,8 @@ export function closurePassRoutine(root: string, cmd: string[] | null): () => Fa
 /** B2 · 留痕：`closure-lag-check.sh --record --flipped <N>`（零收尾也写 0）。 */
 export function closureRecordRoutine(root: string, flipped: number, cmd: string[] | null): () => Fact[] {
   return () => {
-    const argv = cmd ?? ["bash", path.join(root, "plugin", "scripts", "closure-lag-check.sh"), "--record", "--flipped", String(flipped)];  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+    const argv = cmd ?? kernelSiblingArgv("closure-lag-check.sh", ["--root", root, "--record", "--flipped", String(flipped)]);
+    if (argv === null) return [{ name: "closure_record", value: null, state: "not-evaluated", reason: "closure record not resolvable from kernel install" }];
     const r = runExit(argv, root);
     if (!r.ok) return [{ name: "closure_record", value: null, state: "not-evaluated", reason: "closure record unreadable" }];
     return [{ name: "closure_record", value: { exit: r.exit, flipped }, state: "verified", reason: null }];
@@ -294,8 +303,8 @@ export function closureRecordRoutine(root: string, flipped: number, cmd: string[
 /** B6 · 落盘聚合：`fast-mode-telemetry.ts --snapshot`。 */
 export function telemetrySnapshotRoutine(root: string, cmd: string[] | null): () => Fact[] {
   return () => {
-    const argv = cmd ?? ["node", "--no-warnings", "--experimental-strip-types",
-      path.join(root, "plugin", "scripts", "fast-mode-telemetry.ts"), "--snapshot", "--root", root];  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
+    const argv = cmd ?? kernelSiblingArgv("fast-mode-telemetry.ts", ["--snapshot", "--root", root]);
+    if (argv === null) return [{ name: "telemetry_snapshot", value: null, state: "not-evaluated", reason: "telemetry snapshot not resolvable from kernel install" }];
     const r = runExit(argv, root);
     if (!r.ok) return [{ name: "telemetry_snapshot", value: null, state: "not-evaluated", reason: "telemetry snapshot unreadable" }];
     return [{ name: "telemetry_snapshot", value: { exit: r.exit }, state: "verified", reason: null }];
@@ -305,9 +314,14 @@ export function telemetrySnapshotRoutine(root: string, cmd: string[] | null): ()
 /** B17 · 判据消费审计：`judgment-consumer-check.ts --json` → wired/unfinished/drift。 */
 export function judgmentConsumerRoutine(root: string, cmd: string[] | null): () => Fact[] {
   return () => {
-    const argv = cmd ?? ["node", "--no-warnings", "--experimental-strip-types",
-      path.join(root, "plugin", "scripts", "judgment-consumer-check.ts"), "--json"];  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
-    const parsed = runJson(argv, root);
+    const argv = cmd ?? kernelSiblingArgv("judgment-consumer-check.ts", ["--json"]);
+    if (argv === null) return [factOf<unknown>("judgment_consumer", null, "judgment-consumer-check not resolvable from kernel install")];
+    // ⚠️ 这条例程的 cwd 必须是【quay 自己的代码根】，⛔ 不是 target workspace：B17 审计的是
+    // 「kernel 的每条判据有没有接线消费者」，判定面全是 repo 相对路径（plugin/scripts/*.ts、
+    // plugin/loop/*.md）。cwd 落在第三方项目上 ⇒ 全部判 missing-file ⇒ drift=true / exit 1 ⇒
+    // runJson 读成 null ⇒ 该 fact 恒 not-evaluated（工具能跑、读数恒空 = 空转，硬规则 4c）。
+    // 机件路径与 cwd 是【两层】，只修路径不够（2026-09-13 实测：路径修好后这一条仍 not-evaluated）。
+    const parsed = runJson(argv, resolveQuayCodeRoot() ?? root);
     const v = parsed && typeof parsed === "object" ? parseJudgmentConsumer(JSON.stringify(parsed)) : null;
     return [factOf("judgment_consumer", v, "judgment-consumer-check unreadable/unparseable")];
   };

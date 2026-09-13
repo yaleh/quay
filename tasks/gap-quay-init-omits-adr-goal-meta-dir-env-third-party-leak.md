@@ -10,6 +10,7 @@ parent: null
 children: []
 extra:
   schema: execution
+goal_ac: AC-232
 ---
 ## Proposal
 
@@ -247,3 +248,67 @@ env **只** pin `QUAY_NATIVE_TASKS_DIR` —— 即 **pre-pin 项目的真实形�
 ⛔ 但不要把它推广成「那条说法整个是错的」：那条记述原本点名的是 `ready-pool-check` 的
 `candidates[].goalAcMissing`，那是**派发面**，与 author→ready 面是两条不同的边；
 引用时不分边，才是它被误用的原因（硬规则 4c：判据点名的量必须穿过它实际所在的那一层）。
+
+
+## goal_ac 背书（2026-09-13，由 `gap-ac190-goal-ac-rule-not-enforced-at-filing` 补）
+
+**本任务 top-level `goal_ac: AC-232`**（`goals/AC-232-下游-goal-载体必须能写-能读回-ac-206-只断言目录建了与可读-写入失败被注为-不阻塞-从未追查.md`，goal=GOAL-009）。
+
+### 为什么是这条 AC（AC3 要求写明的理由）
+
+1. **主题命中——AC-232 的判据点名的正是被本条弄坏的那一面**：本条的实质是「第三方项目的
+   goal/adr/meta 载体**不指向该项目自己**」：读串（`quay goal list` 返回 quay 自己的 124 条
+   AC-143…）、写也串（在该项目创建 goal 会写进 `/home/yale/work/quay/goals/`，污染 quay 自己的
+   goal store）。AC-232 的判据要求的正是**下游 goal 载体能写、能读回**（`goal_write_ok` /
+   `goal_read_back_ok` / `goal_records > 0` 三问，其 origin 逐字说明三者缺一不可）。而在串库状态下，
+   这三问会被**错误的 store** 满足——写进 quay 自己的 goals 也算「写成功」、从 quay 自己的 store
+   读回也算「读回成功」⇒ **本条是 AC-232 那条判据在载体解析层的反例来源**（硬规则 4：一个能被
+   说谎字段满足的判据不是测量）。
+   ⚠️ 立案时点名的候选是 **AC-206**，读其 criterion 后**改选**：AC-206 的主题是**载体的创建**
+   （quay-init 与 `CLOSED_SET_DIRS` 一起创建 `goals/` 目录、判据读 `goals_dir_created` /
+   `goal_store_readable`），而本条**不碰创建面**（目录本来就有，问题在解析），只碰**解析面**
+   ⇒ 用 AC-206 承接会把「建了没有」和「用的是不是它」两层判据混成一条。
+2. **同族单源**：同一个函数的**姊妹实例**
+   `gap-quay-init-env-only-tasks-dir-goals-adr-meta-land-inside-npm-package`
+   （`findRepoRoot` **落空**那条分支 ⇒ goal/adr/meta 落进安装的 npm 包内）已用 `goal_ac: AC-232`。
+   同族的两个实例挂在同一条 AC 上，「这一族何时算闭合」才可判（硬规则 5b：在某处修好 X ≠ X 只在那一处）。
+3. **「没有 active 的 AC 可承接」这条前提，按其取假面实测为假**：全仓枚举（2026-09-13）——
+   带 `delivery-critical` 标签且 `goal_ac` 非空的任务 **41 条**，其 `goal_ac` 去重后 **22 条，
+   status 全部是 `achieved`，0 条 active**（读法：`frontmatterLabels`/`frontmatterGoalAc` 单源解析
+   `tasks/*.md`，再读各 `goals/AC-*.md` 的 `status:`）。⇒ 仓库的既有约定是「`goal_ac` 指向**领域覆盖**
+   本任务的那条 AC」，**与 AC 的 status 无关**；「必须 active」不是该字段的语义，用它作过滤器得到的
+   「无 AC 可承接」是**谓词取错面**（硬规则 2 / 4c：判据点名的量必须穿过它实际所在的那一层）。
+
+### 同时遵守原裁定里成立的那半边
+
+- ⛔ **不新建 goal AC**：为了让任务能晋升而新建 AC = 把 goal 当晋升通行证用，方向反了
+  （原裁定理由①的实质部分成立）；本次只补**背书声明**，不为晋升造 AC。
+- ⛔ **不恢复 `delivery-critical` 标签**：标签的取舍是 coordinator 的裁定，本次不动标签。
+  若后续判定本条确实需要长期保证，再单独立 AC 并重新上标签，而不是先上标签再补 AC。
+- 该 `goal_ac` **不改变任何派发/晋升判定**：准入合取不得读 goal 源（人 2026-09-11 裁定，机械守卫
+  `plugin/scripts/eligible-no-goal-source-check.ts`，本轮实测 exit 0）；AC-190 的判据只对带
+  `delivery-critical` 标签的任务生效，本条无该标签 ⇒ 检测器读数不变（实测 compliant 36 / violating 0）。
+
+> **为什么由本条补**：`gap-ac190-goal-ac-rule-not-enforced-at-filing` 的 AC3/DoD 要求反例被**真实背书**
+> 而不是被删掉标签消掉；同时那条任务自己的 DoD 逐字要求「⛔ 只补这一条任务的 `goal_ac` 而不接写入面
+> ⇒ 不算完成」。两半合起来才是「规则在违反发生的那一刻起作用，且现存的违反真的被清掉」。
+
+
+## ⚠️ 下游读到的实测（2026-09-13，由 `gap-ac190-goal-ac-rule-not-enforced-at-filing` 的 worker 留痕；⛔ 未改动本任务的任何 AC）
+
+**本任务若按现状走机械 fan-in，翻 done 的闸会拒**：`flipAcGateVerdict`（`plugin/scripts/fan-in-ac-completion-gate.ts`，
+worker-driver 机械 fan-in 用的就是它）判 `fail`：
+
+    {"ok":false,"status":"fail","total":5,"checked":4,"unchecked":1,
+     "message":"AC 未全勾（checked 4/5，剩余未勾 1 含非待外部项）——未翻 done"}
+    isLandedCodeComplete=false
+
+**根因（不是闸错，是注解形态不对）**：AC5 的正文「全量 `scripts/test.sh` 绿。」**不匹配**两条被判为
+「外部验证」的形态——① 行尾注解 `（待外部）`（`isExternalVerificationItem` 的正则要求它出现在条末）；
+② 内容形态 `/(?:全量套件绿|外层(?:全量)?验证|外层\s*verification-round)/`。本条的「全量 `scripts/test.sh` 绿」
+两个都不是（不是连续的「全量套件绿」、也没有行尾注解）⇒ 该未勾项被判为 `（待本任务）`（fail-closed 默认），
+闸拒翻。本任务体「实现记录」末段写的「该条文本自带 `全量套件绿` 标记，按既有约定走 pass-external」
+**与直接读数不符**（读数见上）。
+
+**修法（留给下一个接手者，二选一）**：给 AC5 条末补 `（待外部）`；或改写成含 `全量套件绿` 的措辞。
+⛔ 不要勾掉 AC5（那等于宣称全量套件已绿——它由 fan-in 跑，worker 侧没有该读数）。
