@@ -115,9 +115,71 @@ export const P4_TEMPLATE_CROSS_PACKAGE_RE = new RegExp(
 /** DEV-TREE-ONLY 豁免标记（命中行或紧邻注释块携带即豁免，⛔ 带理由）。 */
 export const DEV_TREE_ONLY_MARKER = "kernel-sibling-dev-tree-only";
 
+// ── DRIVER-SCOPE 规则（gap-drivers-resolve-quay-scripts-under-project-root-not-plugin-root）─────────
+// 为什么需要【第二条】规则，而不是把上面 P1–P4 的豁免收紧：P1–P4 判的是「naive sibling 解析」，
+// 而 2026-09-13 在真实第三方项目 /home/yale/work/quay-fleet 上暴露的缺陷，是 driver 运行时把
+// 【quay 自己的资源】（脚本 + 随包出厂的配置）锚在 `<workspaceRoot>/plugin|packages/…`——
+// 其中 `plugin/scripts/drivers.yml`、`plugin/.claude-plugin/plugin.json` 这类**非脚本扩展名**的资源
+// P2 的正则（要求末段是 `.<sh|ts|js|mjs|cjs>`）**结构上匹配不到**。
+//
+// 更要紧的是【豁免标记被误用】这一步（AC-225 的残差）：上面 P2/P4 允许 `kernel-sibling-dev-tree-only`
+// 豁免，其前提是「本仓库自检工具读自己的 plugin/ 树」——**对第三方工作区常驻的 driver 不成立**
+// （它们的 `--root` 是别人的项目）。于是一批生产 driver 的锚点被标记豁免，检查器恒绿，
+// 而第三方项目上 driver 层实质不工作、且失效形态静默（进程 alive=1、载体持续在写）。
+// ⇒ 本规则：DRIVER_SCOPE_FILES 内 **豁免标记无效**（⛔ 不是无理由收紧——是那个标记的成立前提在这些
+//   文件上为假），且命中面扩到 P2 覆盖不到的配置类资源。
+//
+// 唯一合法落点 = 单一入口（driver-runtime.ts 的 resolveQuayCodeRoot / resolveQuaySrcModule）：
+// 那里必须按布局拼出 `packages/quay/src` 或 `src`，否则就没有「一个地方知道布局」可言。
+
+/** 第三方工作区【常驻 driver】及其共享 kernel 模块（`start-drivers.ts` 的 DRIVER_KINDS =
+ *  promotion/worker/outer/goal——这些在 `quay-init` 后的第三方项目里跑，`--root` 是别人的项目）。
+ *  ⛔ 不含 quality-gate-driver.ts / meta-driver.ts：它们不经 start-drivers 在第三方项目启动，
+ *  且 meta-driver 头部自述 dev-tree-only（源树直跑、不经 bundle）。**它们是同族的已知残差，
+ *  不在本规则覆盖面内——⛔ 不得据本规则为绿而认为该族已闭合**（硬规则 5b）。 */
+export const DRIVER_SCOPE_FILES: readonly string[] = [
+  "plugin/scripts/promotion-driver.ts",
+  "plugin/scripts/worker-driver.ts",
+  "plugin/scripts/outer-driver.ts",
+  "plugin/scripts/goal-driver.ts",
+  "plugin/scripts/driver-runtime.ts",
+  "plugin/scripts/driver-filters.ts",
+  "plugin/scripts/driver-shared.ts",
+];
+
+/** 单一入口所在的文件与函数名（⛔ 只有这几个函数体内允许出现 root 锚点拼法——布局知识必须存在于
+ *  一个地方，而不是散在各个 driver 里）。`quaySrcModuleLegacyShape` 是同一个入口的 miss 半边
+ *  （保证调用方的「读不懂 ⇒ not-evaluated」契约不变）。 */
+export const DRIVER_ANCHOR_SINGLE_ENTRY = {
+  file: "plugin/scripts/driver-runtime.ts",
+  fns: ["resolveQuayCodeRoot", "resolveQuaySrcModule", "quaySrcModuleLegacyShape"],
+} as const;
+
+/** 检测面：`path.(join|resolve)(<rootExpr>, "plugin"|"packages", …)` —— 第一参是标识符或单层调用。
+ *  收的是**任意**后续段（⛔ 不限脚本扩展名）：`drivers.yml` / `.claude-plugin` 这类随包出厂资源
+ *  正是 P2 漏掉的那一半。 */
+export const DRIVER_ROOT_ANCHOR_JOIN_RE = new RegExp(
+  `path\\.(join|resolve)\\(\\s*[A-Za-z_$][A-Za-z0-9_$]*(?:\\s*\\([^)]*\\))?\\s*,\\s*["'](plugin|packages)["']`,
+  "g",
+);
+
+/** 检测面（模板字面量半边）：`` `${<rootExpr>}/plugin/` `` / `` `${<rootExpr>}/packages/` ``。 */
+export const DRIVER_ROOT_ANCHOR_TEMPLATE_RE = /\$\{[A-Za-z_$][A-Za-z0-9_$]*\}\/(?:plugin|packages)\//;
+
+/** 取第 index 个字符【所在的最内层顶层函数名】（最近一个列 0 的 `export function X` / `function X`）。
+ *  单一入口放行靠它（⛔ 不靠行号白名单——行号会随无关编辑漂移）。 */
+export function enclosingFunctionName(src: string, index: number): string | null {
+  const head = src.slice(0, index);
+  const re = /^(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)/gm;
+  let name: string | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(head)) !== null) name = m[1];
+  return name;
+}
+
 export interface SiblingViolation {
-  /** 拼接形态：naive-__dirname / target-root / template-string / cross-package。 */
-  form: "naive-__dirname" | "target-root" | "template-string" | "cross-package";
+  /** 拼接形态：naive-__dirname / target-root / template-string / cross-package / driver-root-anchor。 */
+  form: "naive-__dirname" | "target-root" | "template-string" | "cross-package" | "driver-root-anchor";
   /** 命中的脚本文件名。 */
   script: string;
   /** 1-based 行号。 */
@@ -324,6 +386,45 @@ export function scanText(src: string): SiblingViolation[] {
   return violations.sort((a, b) => a.line - b.line);
 }
 
+/**
+ * 纯判定（DRIVER-SCOPE）：给定【第三方常驻 driver 文件】的源文本，返回把 quay 自己的资源锚在
+ * target root 上的违例。与 scanText 的三点差异（都写在头注释的 DRIVER-SCOPE 段）：
+ *   ① 收任意后续段（含 drivers.yml / .claude-plugin 这类 P2 匹配不到的资源）；
+ *   ② **不认 `kernel-sibling-dev-tree-only` 豁免**（该标记的成立前提在这些文件上为假）；
+ *   ③ 唯一合法落点 = driver-runtime.ts 的 resolveQuayCodeRoot / resolveQuaySrcModule 函数体内。
+ * 按位置判定（硬规则 2）：只屏蔽注释，⛔ 不屏蔽字符串。
+ */
+export function scanDriverRootAnchors(src: string, rel: string): SiblingViolation[] {
+  const comment = maskComments(src);
+  const allowed =
+    rel === DRIVER_ANCHOR_SINGLE_ENTRY.file
+      ? (index: number) => {
+          const fn = enclosingFunctionName(src, index);
+          return fn !== null && (DRIVER_ANCHOR_SINGLE_ENTRY.fns as readonly string[]).includes(fn);
+        }
+      : () => false;
+
+  const out: SiblingViolation[] = [];
+  const push = (index: number, snippet: string) => {
+    if (comment[index] === 1) return;
+    if (allowed(index)) return;
+    out.push({ form: "driver-root-anchor", script: "(root anchor)", line: lineOf(src, index), snippet: snippetOf(src, index) });
+  };
+
+  let m: RegExpExecArray | null;
+  DRIVER_ROOT_ANCHOR_JOIN_RE.lastIndex = 0;
+  while ((m = DRIVER_ROOT_ANCHOR_JOIN_RE.exec(src)) !== null) push(m.index, m[0]);
+  for (const { start, body } of templateLiteralBodies(src)) {
+    if (DRIVER_ROOT_ANCHOR_TEMPLATE_RE.test(body)) push(start, body.trim().slice(0, 160));
+  }
+  return out.sort((a, b) => a.line - b.line);
+}
+
+/** rel 是否在 DRIVER-SCOPE 覆盖面内。 */
+export function isDriverScopeFile(rel: string): boolean {
+  return DRIVER_SCOPE_FILES.includes(rel);
+}
+
 /** 扫描面（可 grep 的枚举清单，非一个 glob 糊过去）：shipped kernel 代码 =
  *  plugin/scripts 顶层 *.ts/*.mjs/*.js（非递归——dist/、test/、checker-mutation-cases/ 子目录不含
  *  手写 shipped 脚本）+ packages/quay/src 递归 *.ts。 */
@@ -369,6 +470,12 @@ export function runCheck(root: string): SiblingCheckResult {
     }
     for (const v of scanText(src)) {
       violations.push({ ...v, snippet: `${rel}:${v.line} ${v.snippet}` });
+    }
+    // DRIVER-SCOPE：P2/P4 之外的第二条规则（收配置类资源 + 不认 dev-tree-only 豁免）。
+    if (isDriverScopeFile(rel)) {
+      for (const v of scanDriverRootAnchors(src, rel)) {
+        violations.push({ ...v, snippet: `${rel}:${v.line} ${v.snippet}` });
+      }
     }
   }
   return { ok: violations.length === 0, notEvaluated: false, surface, violations };
