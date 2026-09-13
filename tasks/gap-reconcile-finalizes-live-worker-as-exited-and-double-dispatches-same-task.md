@@ -1,7 +1,7 @@
 ---
 id: gap-reconcile-finalizes-live-worker-as-exited-and-double-dispatches-same-task
 title: reconcile 不核实 /proc 就把在飞 worker 判为已退出 —— 写假失败记录 + 同任务双派，两个 worker 共用一个 git 检出
-status: ready
+status: done
 labels:
   - gap
 parent: null
