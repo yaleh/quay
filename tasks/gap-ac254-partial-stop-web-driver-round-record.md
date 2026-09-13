@@ -87,11 +87,14 @@ web    curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4173/health ⇒ 2
 
 - `packages/quay/src/cli/server.ts`（阶段 B 的 `start`/`add`/`stop`；`status` 由 AC-251 交付）
 - `packages/quay/bin/quay.ts`（`server` 子动词派发 + usage 行）
+- `packages/quay/src/cli/driver-vocab.ts`（服务清单的**单一实现**：`web`/`control` + 六个 `driver:<kind>`；四个动词与 `serve.ts` 都从这里 import，⛔ 不各写一份 —— SPEC §6.8 单一实现纪律。它零 import ⇒ `quay --help` 取清单不必付 `cli/serve` 那份加载成本）
 - `packages/quay/src/cli/help.ts`（`server start/add/stop` 帮助条目）
 - `packages/quay/src/serve.ts`（服务生命周期宿主：web 面的独立关停，⛔ 不杀 host 进程）
 - `plugin/scripts/server-partial-stop-verify.ts` (new)（生产者：停 web + 差分 + fail-closed 组装 + 恢复 web）
 - `plugin/scripts/capability-catalog.sh`（新脚本的六张表各一行声明）
 - `packages/quay/test/server-partial-stop.test.mjs` (new)（四动词 + 幂等 + 部分停机语义 + 负控制）
+- `packages/quay/test/cli.test.mjs`（**既有 verb-table 闸**：把阶段 B 的三个动词登记进它枚举的 `handlerSubs` —— 不登记则该闸正确地把它们判为 `extra` 漂移，全量套件变红）
+- `packages/quay/test/server-status-web-control-same-pid.test.mjs`（AC-251 的兄弟测试：随 AC-254 的语义变更改写 —— carrier 退役从 `server.close()` 移到 `shutdownHost()`（web 面 close 现在是**正常的部分操作**，不再是宿主的终结），usage 断言随四动词更新；stage-A 那条「start/add/stop 不可达」的断言按 §8 判据 9 被替换）
 - `plugin/test/server-partial-stop-verify.test.mjs` (new)（生产者的类型/fail-closed 正负控制）
 - `tasks/gap-ac254-partial-stop-web-driver-round-record.md`（自身文件：勾 AC + 贴实跑证据）
 
@@ -231,3 +234,23 @@ scoped 门 bash scripts/test.sh --for-task gap-ac254-… --allow-thin ⇒ 静态
 修法：把「调用者的意图」说出来，而不是从动作里猜 —— `stopWebFace` 只在自己那次 close 的同步作用域内打标（`partialWebClose`），宿主的 `server.on("close")` 只对**未打标**的 close 退役 carrier + control。那正是 AC-254 之前 `--watch`/SIGINT/全部既有 in-process caller 依赖的契约。
 
 **红对照**（把 `serve.ts` 换回修复前的提交版、同一命令重跑新测试）：31s 超时、stdout 已有 `CLOSED` 而进程仍活 ⇒ 测试红；装回修复 ⇒ 同测 exit 0（≈1s）。见提交 `493051961`。
+
+### 续做轮（本轮）：anti-drift HARD FAIL 的收敛
+
+上一轮 exited-not-landed 在 `step=anti-drift`：`ANTI-DRIFT HARD FAIL — 3 violation(s)`。三条全部是
+**申报过窄**（`anti-drift-touches-check.ts` 的判词正是 "declaration was too narrow / dishonest"），
+不是越界写入 —— 三个文件都是本任务为达成 AC2/AC6 所必需、且在 develop 上尚无对应改动（已核
+`git show develop:<f>` 三者皆无本任务标记 ⇒ `git merge develop` 治不了，⛔ 不是救火改动）：
+
+| 越界文件 | 为什么必需 |
+|---|---|
+| `packages/quay/src/cli/driver-vocab.ts` | 服务清单的**单一实现**（SPEC §6.8）。放在 `cli/server.ts` 会让 `quay --help` 付 `cli/serve` 的加载成本；放在这里零 import |
+| `packages/quay/test/cli.test.mjs` | 既有 verb-table 闸把阶段 B 的三个动词判为 `extra` 漂移 ⇒ 必须登记，否则全量套件红 |
+| `packages/quay/test/server-status-web-control-same-pid.test.mjs` | AC-251 的兄弟测试断言「carrier 随 `server.close()` 退役」与「usage 只有 status」——两者都被 AC-254 的语义**按设计**改变（§8 判据 9 明言 stage A 不得新增能力，stage B 落地后该断言必假） |
+
+修法是**把 `## Touches` 扩到与事实相符**（追加上述三行），而不是回退必需的改动。⛔ 未改任何 AC 勾选状态
+（仍 7/8；AC8 由 `fan-in-ac-completion-gate.ts` 判为 `pass-external`：全量套件绿的量产生在外层 verification-round）。
+
+⚠️ 过程读数（承重，按 `worker-task-write-lands-on-main-not-worktree`）：`## Touches` 由 **fan-in 从 worktree 读**
+（`anti-drift-touches-check.ts:157`），而 MCP `task_write` 落在主检出；`maskSelfOnlyBody` 只遮蔽 checkbox 与
+`## Evidence` ⇒ **Touches 改动是 `must-propagate` ⇒ 写后 ff 进 develop ⇒ `git merge develop` 才把它带进 worktree**。
