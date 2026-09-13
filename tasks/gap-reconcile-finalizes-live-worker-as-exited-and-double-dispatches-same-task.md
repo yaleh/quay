@@ -131,10 +131,24 @@ quay-fleet/.quay/profiles.yml  roles.task-worker.name → fleet-task-worker
 **验证**
 - 新增 6 条断言（`worker-driver.test.mjs` 4 条 + `worker-driver-fan-in.test.mjs` 2 条），逐条对 AC。
 - 红控制（`prefix-code-swap` 手法）：把 pre-fix 源码换回、保留新测试 ⇒ AC4 断言 `AssertionError: ⛔ 没测成的死亡不是死亡（actual true / expected false）`；pre-fix `computeOrphanFinalizedOutcome` 对刚 spawn 的活 pid 仍写 `already exited` ⇒ AC1/AC2 的承重断言逐字复现缺陷。换回后 `git diff --stat` = 183 insertions / 37 deletions。
-- 三个 touched 测试文件全绿：`worker-driver.test.mjs` 96/96、`worker-driver-fan-in.test.mjs`（含新 AC4/AC5）全绿、`worker-driver-resident.test.mjs` 43/43。
+- 三个 touched 测试文件全绿：`worker-driver.test.mjs` 97/97、`worker-driver-fan-in.test.mjs` 90/90（含新 AC4/AC5）、`worker-driver-resident.test.mjs` 43/43。
+- **scoped 门**（`scripts/test.sh --for-task <id> --allow-thin`，先 `git merge develop` 无冲突）：**187/187 pass、0 fail、exit 0**；静态检查全 PASS。门已写 scoped-gate 缓存（key = `<task>\t71c2bea77ba5c88353df1e6dcb4b4551f558cb8a`，`ok:true`；该 sha 与合并时 `HEAD^2` 逐字相等 ⇒ 不存在「门评的不是这个 tip」的缺口）。
 - `worker-driver.ts` 直接 typecheck（`plugin/scripts/**` 不在 root tsconfig 的 include 内，故单建临时 tsconfig）零**新增**错误：6 条错误与基线逐条同址（改动前 3664/3672/3679/4525，改动后对应行号平移）。
+- 一条**与本条无关的既有 WARN**（记录在案、非阻塞）：`task-file-bypass-check` 报 `allowlisted plugin/scripts/worker-driver.ts: expected 3 hit(s), got 4`。实测 4 条命中都在 `:1531/:1737/:3021/:3026` 的既存 `tasks/` 读取上，**改动前后同址同数**（develop 那份同样命中）⇒ allowlist 漂移是既有的，不是本次引入；该检查对计数漂移只 WARN（exit 0）。
 
 **已知取舍（本条主动记下，⛔ 不藏）**：pid 被复用成一个长命进程时，存活闸会让该孤儿记录一直不被 finalize（残留、不破坏任何东西，等该 pid 消失即自愈）。取舍方向是「宁可留残留，⛔ 不判死活 worker」——反向代价是删掉在飞 worker 正在写的 worktree + 清掉记录 ⇒ 同任务双派（正是本缺陷）。
+另一条实现期自查修正：AC5 双臂 e2e 最初把协调地板留在缺省 300s，而臂② adopt 的长跑孤儿不产生退出边沿 ⇒ 臂① 等不到下一趟 reconcile（唯一失败原因）。压 `--reconcile-interval 1` 后整条从 60s 降到 1.9s，且不再依赖宿主快慢。
+
+## 硬规则 5b 扫描（同一原则的其它适用点，⛔ 不只修被报出来的那一处）
+
+修完 worker-driver 那一处后，在同一载体里 grep 该原则的其它适用点：
+`grep -rn '"quay-task-worker"' --include=*.ts --include=*.mjs --include=*.js --include=*.sh`（排除 node_modules / plugin/vendor）
+⇒ **命中 11 条，其中非测试载体 2 条**：
+1. `plugin/scripts/worker-driver.ts:288` —— 本条修的那一处；现在它只是【回落缺省】，真实名一律经 `resolveWorkerProcessName(root)` 解析。
+2. `packages/quay/src/observation.ts:645` —— ⛔ **同类实例，本条【未修】**。理由：不在本条 Touches 内，且该处注释逐字写着「Core cannot import plugin/, so the name is mirrored here」⇒ 要修得先把名字解析下沉/复制到 Core 面（属独立任务，需要动 `packages/quay/src/` + `packages/quay/test/observation.test.mjs`）。
+   消费链：`WORKER_PROCESS_NAME` → `workerTaskIdFromCmdline`（`:837`）→ `readLiveWorkerProcesses`（`:866`）→ `observation.ts:1749` + `serve-task.ts:556`（Web UI 活 worker 面板）。两个消费点手里都有 `root`（`workerDriverActive(root)`）⇒ 技术上可修。
+   **影响与本条同形**：第三方项目（worker 名 `fleet-task-worker`）里 `readLiveWorkerProcesses` 恒 `[]`、`workerTaskIdFromCmdline` 恒 `null` ⇒ Web UI 的「首个已派发 worker 尚无 outcome 记录、其活进程是唯一 in-flight 载体」（方向二）那一路**结构性失明**——恰好就是本条缺陷发生的地方，即双派在 UI 上同样看不见。
+其余 **9 条是测试/fixture 载体**（`instrument-decay-check.test.mjs`、`worker-driver.test.mjs`、`worker-driver-resident.test.mjs`、`peer-identity-probe.test.mjs`、`profile-policy.test.mjs`、`observation.test.mjs`）——它们覆盖「quay 自己就叫 quay-task-worker」这一形态，⛔ 不改（改了反而丢掉该形态的覆盖）。
 
 ## Touches
 
@@ -147,4 +161,4 @@ quay-fleet/.quay/profiles.yml  roles.task-worker.name → fleet-task-worker
 
 **⚠️ 实现方落笔前必须再 grep 一次（本条只测了退避符号，没测 orphan-finalize 符号）**：`grep -rn "computeOrphanFinalizedOutcome" plugin/test/` —— 若 orphan-finalize 的既有断言落在另一份文件，把那一份一并加进 Touches（⛔ 不要照抄本清单而让它成为未声明改动 ⇒ anti-drift 红）。共享 harness `plugin/test/helpers/worker-driver-harness.mjs` 若被改动须一并声明。
 
-**实测结论（已按上述要求 grep）**：`computeOrphanFinalizedOutcome` / `classifyOrphanDispatch` / `orphanDispatchCandidates` / `finalizeOrphanDispatch` / `adoptOrphanWorker` / `readPidCmdline` 的既有断言落在 **`plugin/test/worker-driver.test.mjs`**（`:120-124` import、`:2401/:2433/:2450+` 断言），⛔ 不在 fan-in 那一份 ⇒ **已把 `plugin/test/worker-driver.test.mjs` 加进 Touches**（本清单原缺，照抄即 anti-drift 红）。共享 harness 未改动（新测试只消费其既有导出）。
+**实测结论（已按上述要求 grep）**：`computeOrphanFinalizedOutcome` / `classifyOrphanDispatch` / `orphanDispatchCandidates` / `finalizeOrphanDispatch` / `adoptOrphanWorker` / `readPidCmdline` 的既有断言落在 **`plugin/test/worker-driver.test.mjs`**（`:120-124` import、`:2401/:2433/:2450+` 断言），⛔ 不在 fan-in 那一份 ⇒ **已把 `plugin/test/worker-driver.test.mjs` 加进 Touches**（本清单原缺，照抄即 anti-drift 红）。共享 harness 未改动（新测试只消费其既有导出）。镜像义务已核：`plugin/scripts/` ↔ `experiments/quay-perpetual-stream/scripts/` 的 mirror-pair 里**没有** worker-driver 的任何副本（该对按 basename 自动发现；`worker-driver.ts` 与三个 touched 测试文件在 experiments 侧均不存在）⇒ 无镜像改动义务。
