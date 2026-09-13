@@ -1,7 +1,7 @@
 {
   "files": 3,
   "bytes": 1022,
-  "fingerprint": "772951fd49e43b2e4501e7e6750924bf5adb1d13ebb174b40ea2bb6274a99986",
+  "fingerprint": "b3a59443c7801759d0c89856c375e6a40f6f916a87fa661da9349956702c9e70",
   "sources": [
     {
       "rel": "plugin/.claude-plugin/plugin.json",
@@ -17,7 +17,7 @@
     },
     {
       "rel": "plugin/scripts/quay-init.sh",
-      "sha": "94bc615e644b030f2a1c72847d744b532d1e12cdd41ee2967d73e28d5b72ff6a"
+      "sha": "8137b87035ae3a90edda8d4b77be1e12633d2328c319ca9e2da9aefe5efaeb38"
     }
   ]
 }
