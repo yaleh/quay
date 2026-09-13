@@ -45,10 +45,10 @@ messaging socket 直投（`cc-socks/<pid>.sock`）与 pty.sock 按键注入。�
 
 ## Acceptance Criteria
 
-- [ ] AC1（`-p --resume` 对【运行中】会话，可取假）：在目标会话**确实仍在运行**（先用 `claude agents --json` 取一次它的状态作为前置读数，⛔ 不假设）的前提下，执行 `claude -p --resume <目标id>` 发送含唯一串 `<nonce8>` 的 prompt。判据：落盘三项——(a) 该命令 stdout/stderr 原文（若出现「已在运行/副本」类提示，抄原文）；(b) **原会话** transcript 是否出现 `<nonce8>`；(c) 是否产生**新的 session-id / 新 transcript 文件**，若有则抄其路径。结论必须明确二选一：**注入原会话** 或 **起了副本**。⛔ 三项缺任一 ⇒ 不得下结论，记 not-evaluated。
-- [ ] AC2（对照：已停止的会话）：对一个**已停止**的会话重复 AC1 的操作，并列记录同样三项读数。判据：两组读数落盘且可对比。**若两者行为相同** ⇒ 说明帮助文档里「when the session is already running」这个条件从句**在实测中不产生差别**，必须如实写明（这本身是一个有价值的结论，⛔ 不得因为「与文档不符」就判为测错）。
-- [ ] AC3（SDK 会话可见性）：用 Agent SDK 创建一个会话，在它存活期间跑 `claude agents --json`，并扫 `~/.claude/sessions/*.json`。判据：落盘三项——(a) `agents --json` 输出里是否含该会话（含则抄该条记录）；(b) `~/.claude/sessions/` 里是否有对应注册文件（含则抄其字段键集）；(c) 若两处都没有，说明它以什么形态存在（transcript 是否落盘、落在哪）。⛔ 「没找到」必须区分「确实不可见」与「我没找对地方」——后者记 not-evaluated。⚠️ 若本机无法安装/运行 Agent SDK，整条记 **not-evaluated** 并写明原因，⛔ 不得用文档推断替代。
-- [ ] AC4（写回 SPEC，本任务的落点）：把 AC1–AC3 的结论写回 `orchestration/SPEC-unified-quay-server-2026-09-13.md` §9，将开放问题 **5** 与 **6** 各改写为一条**带实测依据与日期/版本号**的结论（保留问题编号与原问题陈述，在其下补结论）。判据：该文件中这两条不再以「需实测确认」结尾，且各含一个可追溯的读数引用。**若某条实测结果是 not-evaluated，SPEC 里也必须如实写成 not-evaluated 而不是删掉该问题。**
+- [x] AC1（`-p --resume` 对【运行中】会话，可取假）：在目标会话**确实仍在运行**（先用 `claude agents --json` 取一次它的状态作为前置读数，⛔ 不假设）的前提下，执行 `claude -p --resume <目标id>` 发送含唯一串 `<nonce8>` 的 prompt。判据：落盘三项——(a) 该命令 stdout/stderr 原文（若出现「已在运行/副本」类提示，抄原文）；(b) **原会话** transcript 是否出现 `<nonce8>`；(c) 是否产生**新的 session-id / 新 transcript 文件**，若有则抄其路径。结论必须明确二选一：**注入原会话** 或 **起了副本**。⛔ 三项缺任一 ⇒ 不得下结论，记 not-evaluated。
+- [x] AC2（对照：已停止的会话）：对一个**已停止**的会话重复 AC1 的操作，并列记录同样三项读数。判据：两组读数落盘且可对比。**若两者行为相同** ⇒ 说明帮助文档里「when the session is already running」这个条件从句**在实测中不产生差别**，必须如实写明（这本身是一个有价值的结论，⛔ 不得因为「与文档不符」就判为测错）。
+- [x] AC3（SDK 会话可见性）：用 Agent SDK 创建一个会话，在它存活期间跑 `claude agents --json`，并扫 `~/.claude/sessions/*.json`。判据：落盘三项——(a) `agents --json` 输出里是否含该会话（含则抄该条记录）；(b) `~/.claude/sessions/` 里是否有对应注册文件（含则抄其字段键集）；(c) 若两处都没有，说明它以什么形态存在（transcript 是否落盘、落在哪）。⛔ 「没找到」必须区分「确实不可见」与「我没找对地方」——后者记 not-evaluated。⚠️ 若本机无法安装/运行 Agent SDK，整条记 **not-evaluated** 并写明原因，⛔ 不得用文档推断替代。
+- [x] AC4（写回 SPEC，本任务的落点）：把 AC1–AC3 的结论写回 `orchestration/SPEC-unified-quay-server-2026-09-13.md` §9，将开放问题 **5** 与 **6** 各改写为一条**带实测依据与日期/版本号**的结论（保留问题编号与原问题陈述，在其下补结论）。判据：该文件中这两条不再以「需实测确认」结尾，且各含一个可追溯的读数引用。**若某条实测结果是 not-evaluated，SPEC 里也必须如实写成 not-evaluated 而不是删掉该问题。**
 
 ## Definition of Done
 
