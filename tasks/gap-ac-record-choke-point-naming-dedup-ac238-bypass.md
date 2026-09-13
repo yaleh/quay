@@ -46,23 +46,30 @@ extra:
 5. 负控制：故意让 AC-238 少写一个 schema 声明要求的字段 ⇒ 新入口必须 fail-closed 拒写（复用现有 `ac_record_schema_validate_fragment` 的既有能力，不必新写校验逻辑）。
 6. 项目自身闸门（scoped 门 + 全量套件绿）。
 
+**落实（本轮）**：1 → 单一函数 `ac_record_append <fragment> [carrier] [mode]`（`mode ∈ anchored|plain`，缺省 anchored），旧的两个函数体删掉一个、另一个成为它的一种模式；2 → 全文件 16 处入口调用行改名（含注释），`write_ac_record` 体内只改转调目标名；3 → AC-238 写入点改走 `ac_record_append "$fragment" "$AC89" anchored`（裸 `printf >> "$AC89"` 消失）+ `AC_RECORD_SCHEMA` 新增一行；4 → 报告现输出 `GOAL-009-AC-238 [ok] criterion=7 schema=7 writer=7`；5 → selfcheck 新增 AC238 三读数（含逐字段负控制）；6 → scoped 门与全量套件由 fan-in 跑（本任务未在 worker 内跑全量套件）。
+
 ## Acceptance Criteria
 
-- [ ] AC1 入口去重：`ac89_append_goal009` 与 `ac_record_append_fragment` 的重叠控制流（校验/核对载体/反推 ac/mkdir/写入/复跑五步）合并为一套实现，两种模式（强校验 BUILD_SHA+自动锚点 vs 不强校验+调用方自带字段）用参数表达，⛔ 不是两个函数体。改动前后：全部 13 条既有 AC 的落盘记录逐字节不变（md5 对照，仿照前一任务 AC5 的做法）。
-- [ ] AC2 命名统一：全文件不再存在 `ac89_append_goal009` 这个名字（`grep -c ac89_append_goal009 plugin/scripts/verify-deliver-coldstart.sh` = 0，含注释），新入口函数名以 `ac_record_` 前缀命名。
-- [ ] AC3 AC-238 接入 choke point：`AC_RECORD_SCHEMA` 新增 `GOAL-009-AC-238` 一行（字段数与现有 printf 字段一一对应）；`step_upgrade_existing()` 内的写入改走新入口函数，⛔ 不再有裸 `printf >> "$AC89"`；`--ac-record-schema-report` 输出包含 `GOAL-009-AC-238`，显示 `criterion=N schema=N writer=N` 且 `[ok]`（N 为实测字段数，不预先断言具体值）。
-- [ ] AC4 AC-238 fail-closed 可取假：故意在新入口调用点漏传一个 schema 声明要求的字段 ⇒ 拒写且不落盘（exit 非 0，报出缺哪个字段）；补齐后写入成功。两态输出留档。
-- [ ] AC5 既有 13 条 AC 不受影响：合并/改名之后重跑 `--ac-record-schema-report`，14 条 AC（13+新增的 238）全部 `[ok]`（或既有的那 1 条 `[surplus]` 维持原样，不新增硬差集）。
+- [x] AC1 入口去重：`ac89_append_goal009` 与 `ac_record_append_fragment` 的重叠控制流（校验/核对载体/反推 ac/mkdir/写入/复跑五步）合并为一套实现，两种模式（强校验 BUILD_SHA+自动锚点 vs 不强校验+调用方自带字段）用参数表达，⛔ 不是两个函数体。**改动前后 13 条既有 AC 的落盘记录逐字节不变**（仿前一任务 AC5 的做法，实测 md5）：同一 fragment + 同一载体 + 同一 `BUILD_SHA`/`TS` 下，旧入口与新入口产出的行 13/13 **IDENTICAL** —— AC-201 `c5bd80f424a0eafd6106e6ea9aefca70` / AC-203 `4b5ec6879641f7e73ef9a94e8ddaf8ee` / AC-204 `e815971753dcc2ed9dcdc4c564c60bd0` / AC-205 `00289ff0b1289a2b96fbfb5bf2225616` / AC-206 `0dc4fa9d3953b7822a199ae0403c6873` / AC-207 `8c6df99410e793959d4e12626f8ea6ce` / AC-232 `7bdd8a3e5b784963b32671e8f699a5a9` / AC-239 `5297af2a79166e1cb67f6b7b7c8638f3` / AC-234 `fb40d58750e606fa00ef4acf491636d7` / AC-247 `5eeab0a26551d7f2f67710162d7eb024` / AC-248 `c493484e9aeb24bd35238dd5fd01d534` / AC-249 `43489860c96fe5c4d2d81e94f9e1d78d` / AC-250 `7fd60d0aa2becf78444e5777f454af2d`（old 与新两侧同 md5）。配套第二读数：改动前后**入口调用行在函数名归一化后逐字节相同**（16 行 old vs 16 行 new，`old-normalized absent from new = 0` ∧ `new-normalized absent from old = 0`）⇒ 13 个调用点的入参一个字节都没变，只有落盘函数换了名字（4 个 plain 调用点另加显式的 `plain` 模式实参）。
+- [x] AC2 命名统一：全文件不再存在 `ac89_append_goal009` 这个名字（`grep -c ac89_append_goal009 plugin/scripts/verify-deliver-coldstart.sh` = **0**，含注释），新入口函数名以 `ac_record_` 前缀命名。⚠️ 实测过程中该计数曾被我自己新写的解释性注释打到 **1**（注释里引用了旧名），已改成不含该字符串的表述——这正是「含注释」那半句话在起作用。`grep -n '^ac_record_'` 现为九个同前缀成员：`ac_record_append` / `_schema_row` / `_schema_field_names` / `_fragment_ac` / `_schema_validate_fragment` / `_sample_body` / `_carrier_root` / `_finalize` / `_schema_report`。
+- [x] AC3 AC-238 接入 choke point：`AC_RECORD_SCHEMA` 新增 `GOAL-009-AC-238 host:str project_root:str pre_upgrade_task_count:int post_upgrade_task_count:int pre_upgrade_runtime_age_days:num runtime_replaced:bool task_list_ok:bool`；`step_upgrade_existing()` 内的写入改走新入口函数，⛔ 不再有裸 `printf >> "$AC89"`（selfcheck 结构性读数：`ac238-writer bare-printf-to-AC89-hits=0 choke-point-hits=1 build_sha-literal-hits=0`，按位置取自 `step_upgrade_existing()` 体内、注释先剥掉）；`--ac-record-schema-report` 现输出 `GOAL-009-AC-238 [ok] criterion=7 schema=7 writer=7`（改动前该报告里连 238 这一行都没有，`grep -c 238` = 0）。⚠️ **声明只列 7 个字段、而不是 printf 的全部 21 个**——这不是"精简"，是两条要求冲突下唯一可行的解，逐字记在写入点上方与 `AC_RECORD_SCHEMA` 该行下方注释里：报告的 surplus 判据是「声明 ∖ 判据读集」，而 AC-238 的 criterion（`goals/AC-238-*.md`，status: achieved，⛔ 不可改）只读 7 个字段 ⇒ **多声明任何一个字段，本行都会从 `[ok]` 变成 `[surplus]`**，与 AC3 逐字要求的 `[ok]` 数学上不可同时满足。取舍：判据读的 7 个进写入期声明闸（⇒ 声明=写入=判据=7 ⇒ `[ok]`），另外 14 个诊断字段（`upgrade_source`/`upgrade_init_rc`/`isolated_copy`/`taskset_stable`/`sample_task`/`fresh_runtime_sha256`/`pre_binding`/`post_binding`/`host_key`/`binding`/`retired_runtime_backup`/`retired_backup_matches_pre`/`bound_mcp_entry`/`adopt_decision`）经一个变量尾作为**额外字段**原样写入（写入通道对额外字段不拒）——**⛔ 记录里一个字段都没少**。实测：真跑生产片段（从源码切出 `step_upgrade_existing()` 的写入块 + 打桩变量）产出的记录是**合法 JSON、24 键**（21 个 AC 专属字段 + `ac` + `ts` + top-level 40-hex `build_sha`），双语义字段 5 个（`binding`/`retired_runtime_backup`/`retired_backup_matches_pre`/`pre_binding`/`post_binding`）全部在场。两处有意且已记的差异：① `ts` 由写入时刻的 `date -u` 改为 `${TS}`（与另外 8 条 GOAL-009/016 记录同形，无判据消费者）；② `build_sha` 现在要求 40-hex（比原来的「非空」更严，fail-closed）。
+- [x] AC4 AC-238 fail-closed 可取假：selfcheck 三读数（`--selfcheck` 实际打印、`plugin/test/verify-deliver-coldstart.test.mjs` 逐行断言）：`ac-record-schema(AC238 refused-when-declared-field-omitted) refused=1 lines=0→0 msg='AC-RECORD-SCHEMA: refusing GOAL-009-AC-238 record — host (MISSING) — nothing was written (fail-closed)'` / `ac-record-schema(AC238 accepted-when-complete) wrote=1 lines=0→1` / `ac-record-schema(AC238 every-declared-field-enforced) declared=7 each_omitted_refused=7`（⛔ 不只测被报出来的那一个：声明里 7 个字段逐个漏一次，7 次都拒）。片段由产品函数 `ac_record_sample_body` 从 `AC_RECORD_SCHEMA` 的 AC-238 行生成（⛔ 不在夹具里复刻字段清单），并走**同一个**产品入口 `ac_record_append`。
+- [x] AC5 既有 13 条 AC 不受影响：合并/改名后重跑 `--ac-record-schema-report` ⇒ `14 AC registered, 14 producer(s) in script, missing(criterion-vs-schema)=0 missing(criterion-vs-writer)=0 missing(schema-vs-writer)=0 surplus=1 unregistered=0 not-evaluated=0`（exit 0），**⛔ 未新增硬差集**；14 条里 13 条 `[ok]`，唯一 `[surplus]` 是既有的 `GOAL-009-AC-239`（`commit_files`，改动前后一字未变）；13 条既有 AC 的 `criterion=N schema=N writer=N` 三个数与改动前**逐字相同**（AC-201 1/1/1、AC-203 5/5/5、AC-204 4/4/4、AC-205 3/3/3、AC-206 6/6/6、AC-207 8/8/8、AC-232 5/5/5、AC-239 8/8/8、AC-234 5/5/5、AC-247 7/7/7、AC-248 11/11/11、AC-249 4/4/4、AC-250 10/10/10）。
 
 ## Definition of Done
 
 - 五条 AC 满足，且 AC1 的逐字节对照、AC4 的两态输出有实际留档。
-- ⛔ 不得触碰 12 个 `write_acNNN_record` 手写函数本身（那不是本任务范围，已被前一任务证伪重复）。
-- ⛔ 不得改变现有 13 条 AC 的记录字段/语义，只改它们经由哪个函数落盘。
-- 项目自身闸门（scoped 门 + 全量套件绿）。
+- ⛔ 不得触碰 12 个 `write_acNNN_record` 手写函数本身（那不是本任务范围，已被前一任务证伪重复）——本轮 12 个函数体只改了【转调的函数名】，字段片段一字未动（AC1 的调用行归一化读数即其证据）。
+- ⛔ 不得改变现有 13 条 AC 的记录字段/语义，只改它们经由哪个函数落盘（AC1 的 13/13 md5 相同 + AC5 的三数逐字相同）。
+- 项目自身闸门（scoped 门 + 全量套件绿）：scoped 门与全量套件由 driver 的机械 fan-in 跑（worker 内不跑全套）。
+- 机制变更的**外溢**（本轮实测发现，⛔ 都不是放宽判据，各自有红控制）：4 个记录 writer 夹具（`ac247-takeover-record` / `ac248-adr-check-flip-record` / `ac249-complete-change-record` / `ac250-web-observe-progress-record`）与主测试文件里，`ac89_append_goal009` 是**手工维护的依赖闭包**里的一员（`fnNames`/`WRITER_FNS`/`RUNBASH` 列表）并被 `/ac89_append_goal009\s+"/` 逐字断言 ⇒ 改名后必须同步，否则闭包过期、写入侧对任何输入都 REFUSED（前一任务已实测过这个失败形态）。**同轮还发现第二处必须改的判据**：`verify-deliver-coldstart.test.mjs` 里 AC-214 NEED 的「每条产出语句都带锚」检测器原以 `s.includes("ac89_append_goal009")` 作为「已补锚」的凭据——合并后 `plain` 模式也走同一个函数名，**照搬会把该谓词变成恒真**（结构上不可能取假的量，硬规则 4）：已改为按**模式实参**区分（anchored = choke point 补锚；plain = 必须自带 `"build_sha":`），保持可失败。四个夹具文件已加进 `## Touches`（fan-in 的 delta 判定要求改过的文件都声明）。
 
 ## Touches
 
 - plugin/scripts/verify-deliver-coldstart.sh
 - plugin/test/verify-deliver-coldstart.test.mjs
+- plugin/test/ac247-takeover-record.test.mjs
+- plugin/test/ac248-adr-check-flip-record.test.mjs
+- plugin/test/ac249-complete-change-record.test.mjs
+- plugin/test/ac250-web-observe-progress-record.test.mjs
 - tasks/gap-ac-record-choke-point-naming-dedup-ac238-bypass.md
