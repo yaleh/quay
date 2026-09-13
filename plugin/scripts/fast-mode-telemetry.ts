@@ -105,6 +105,11 @@
 
 import fs from "node:fs";
 import { repoRoot } from "./repo-root.ts";
+// The SINGLE resolver of "where do THIS workspace's task worktrees live" (loop.worktree_root from
+// .quay/config.yml, falling back to the <parent-of-root>/quay-worktrees convention). Shared with the
+// Core serve path — packages/quay/src/observation.ts — so the read side can never drift from the
+// write side again (gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root).
+import { resolveWorktreeNamespace } from "../../packages/quay/src/worktree-namespace.ts";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -284,7 +289,20 @@ export function subagentTranscriptAlive(root, taskId, { projectsDir = null, nowM
     return false; // no project dir — no positive signal
   }
   const needleFile = `tasks/${taskId}.md`;
-  const needleWorktree = `quay-worktrees/${taskId}`;
+  // The task's worktree path, from THIS workspace's resolved namespace (gap-observation-hardcodes-quay-
+  // worktrees-ignoring-config-worktree-root). Matched in EITHER form — the absolute path as the
+  // dispatch prompt / tool calls spell it, and the `<namespace-segment>/<taskId>` suffix the historical
+  // needle used — so the match is a strict SUPERSET of the old behavior (a transcript that named the
+  // worktree under the old literal keeps being recognized; a sibling project's identically-named
+  // namespace no longer is).
+  const needleWorktrees = [];
+  try {
+    const namespaceDir = resolveWorktreeNamespace(root).dir;
+    needleWorktrees.push(`${namespaceDir}/${taskId}`);
+    needleWorktrees.push(`${path.basename(namespaceDir)}/${taskId}`);
+  } catch (_) {
+    // resolution is total by contract; if it ever threw, the task-file needle alone still applies
+  }
   const cutoff = nowMs - windowMs;
   for (const sess of sessions) {
     if (!sess || !sess.isDirectory()) continue;
@@ -305,7 +323,7 @@ export function subagentTranscriptAlive(root, taskId, { projectsDir = null, nowM
         continue;
       }
       if (!Number.isFinite(mtimeMs) || mtimeMs < cutoff) continue;
-      if (transcriptReferencesTask(fp, needleFile, needleWorktree)) return true;
+      if (transcriptReferencesTask(fp, needleFile, needleWorktrees)) return true;
     }
   }
   return false;
@@ -317,10 +335,11 @@ export function subagentTranscriptAlive(root, taskId, { projectsDir = null, nowM
  * so 64 KiB is ample. Any read error ⇒ false.
  * @param {string} fp
  * @param {string} needleFile — `tasks/<taskId>.md`
- * @param {string} needleWorktree — `quay-worktrees/<taskId>`
+ * @param {string[]} needleWorktrees — the task's worktree path(s): the absolute form under THIS
+ *   workspace's resolved namespace, and its `<namespace-segment>/<taskId>` suffix.
  * @returns {boolean}
  */
-function transcriptReferencesTask(fp, needleFile, needleWorktree) {
+function transcriptReferencesTask(fp, needleFile, needleWorktrees) {
   let text;
   try {
     const fd = fs.openSync(fp, "r");
@@ -334,7 +353,7 @@ function transcriptReferencesTask(fp, needleFile, needleWorktree) {
   } catch (_) {
     return false;
   }
-  return text.includes(needleFile) || text.includes(needleWorktree);
+  return text.includes(needleFile) || needleWorktrees.some((n) => text.includes(n));
 }
 
 /**
@@ -502,10 +521,17 @@ export function taskIdFromWorktree(worktree, taskIdSet) {
 }
 
 /**
- * Whether a worktree path follows the fast-mode task-worktree convention:
- * `<parent-of-main>/quay-worktrees/<task-id>` (CLAUDE.md 正本 inner-brief:104). The MAIN checkout
- * itself (path === root) and any test fixture outside `quay-worktrees/` (e.g. /tmp) are NOT task
- * worktrees — they never occupy a fast-mode concurrency slot.
+ * Whether a worktree path is a task worktree OF THIS WORKSPACE:
+ * `<loop.worktree_root>/<task-id>` — the namespace resolved from THIS workspace's
+ * `.quay/config.yml` by `resolveWorktreeNamespace` (falling back to the historical
+ * `<parent-of-main>/quay-worktrees` convention, reported not silent). The MAIN checkout itself
+ * (path === root) and any test fixture outside the namespace (e.g. /tmp) are NOT task worktrees —
+ * they never occupy a fast-mode concurrency slot.
+ *
+ * gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root: the namespace used to be
+ * derived in place as `<parent-of-main>/quay-worktrees`, which for a project sharing a parent
+ * directory with another project (quay-fleet vs quay under /home/yale/work) resolved to the OTHER
+ * project's namespace — so a sibling project's worktrees were counted as this workspace's slots.
  * @param {string} worktreePath
  * @param {string} root — the workspace root (main checkout)
  * @returns {boolean}
@@ -515,8 +541,13 @@ export function isQuayWorktreePath(worktreePath, root) {
   const mainRoot = path.resolve(root);
   const wt = path.resolve(worktreePath);
   if (wt === mainRoot) return false;
-  const quayWorktreesDir = path.join(path.dirname(mainRoot), "quay-worktrees");
-  return wt.startsWith(quayWorktreesDir + path.sep);
+  let namespace;
+  try {
+    namespace = resolveWorktreeNamespace(mainRoot).dir;
+  } catch (_) {
+    return false; // resolution is total by contract; belt-and-suspenders → not a task worktree
+  }
+  return wt.startsWith(namespace + path.sep);
 }
 
 /**
