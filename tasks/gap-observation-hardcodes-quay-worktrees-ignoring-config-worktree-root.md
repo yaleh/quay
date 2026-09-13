@@ -1,7 +1,7 @@
 ---
 id: gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root
 title: 第三方项目 dashboard 的「在飞」显示的是别的项目的任务——observation 硬编码 quay-worktrees
-status: ready
+status: done
 needs_human_cause: human-adjudication
 labels:
   - gap
