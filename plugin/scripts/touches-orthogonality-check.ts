@@ -16,7 +16,13 @@
 import fs from "node:fs";
 import { repoRoot } from "./repo-root.ts";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { helpExit, isDirectEntry } from "./gate-script-base.ts";
+// The ONE "is this path a quay runtime artifact?" implementation + the manifest reader (Core, shared
+// with fan-in/ff-merge.ts's clean-tree check). tasks/gap-quay-init-gitignore-misses-quay-runtime-
+// artifacts-outside-dot-quay: the `.quay/`-only口径 used to live in BOTH judges; only the ff's half was
+// reachable from the other, so widening one silently left the other refusing.
+import { isRuntimeArtifactPath, loadRuntimeArtifactPatterns } from "../../packages/quay/src/runtime-artifacts.ts";
 // SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority): the ONE Touches bullet parser.
 import { parseTouchEntries, parseTouchEntriesWithTags, extractTouchesSection } from "./touches-parser.ts";
 
@@ -247,16 +253,26 @@ export function checkDispatchEligibility(parsedA, parsedB, outerInflightFiles, e
 // ── benign runtime dirty (gap-fan-in-ff-merge-benign-runtime-dirty-no-fast-path) ─────────────────
 // A pre-flight dirty-tree classification COMPLEMENTING checkTouchesPair. The fan-in ff's clean-tree
 // pre-flight must distinguish a REAL dirty tree (task code edits, or a file within the task's ##
-// Touches) from a BENIGN one: an UNTRACKED runtime file under .quay/ (serve-send message-receipts,
-// worker/promotion round logs — the gitignore-missed runtime-state family). A benign file is never
-// overwritten by the ff (it is not in the tree) and is unrelated to the task's declared write
-// surface, so the ff passes through WITHOUT disposing it (仅放行不处置 — a NEW runtime file may
+// Touches) from a BENIGN one: an UNTRACKED runtime file quay itself wrote and that is unrelated to
+// the task's declared write surface (serve-send message-receipts, worker/promotion round logs — the
+// gitignore-missed runtime-state family). A benign file is never overwritten by the ff (it is not in
+// the tree), so the ff passes through WITHOUT disposing it (仅放行不处置 — a NEW runtime file may
 // appear at any time, so committing/gitignoring ONE file is not the fix). CONSERVATIVE by
 // construction (fail-closed to "not benign"): an absent/empty ## Touches, an overbroad glob, or a
 // dirty path that MATCHES a Touches glob ⇒ NOT benign. Reuses parseTouches + matchGlob (the
 // checkTouchesPair machinery) — no new path matcher. `dirtyPaths` are repo-relative untracked
 // (porcelain `??`) paths.
-export function checkBenignRuntimeDirty(taskBody, dirtyPaths) {
+//
+// THE "QUAY WROTE IT" SET IS TWO-SOURCED, NOT `.quay/`-ONLY (tasks/gap-quay-init-gitignore-misses-
+// quay-runtime-artifacts-outside-dot-quay): `rtPatterns` carries the patterns of the SINGLE-SOURCE
+// manifest `plugin/scripts/quay-runtime-artifacts.txt` — the same list quay-init writes into a
+// consumer `.gitignore` and `ff-merge.ts` reads for its own whitelist. Before this, THIS function was
+// a SECOND hand-written copy of the `.quay/`-only口径: quay's runtime state written outside `.quay/`
+// (`<tasksDir>/.quay-parse-cache.json`, `milestones/fast-mode-telemetry/*.json`, …) was "not benign"
+// here even after the ff's own check had been taught otherwise — the sibling-site miss (硬规则 5b).
+// ⛔ A caller that supplies no patterns keeps the historical `.quay/`-only extent (fail-closed: an
+// unavailable list must not WIDEN what is certified benign, 硬规则 3b).
+export function checkBenignRuntimeDirty(taskBody, dirtyPaths, rtPatterns = []) {
   if (!dirtyPaths || dirtyPaths.length === 0) {
     return { benign: false, reason: "no dirty paths to classify", violations: [] };
   }
@@ -268,20 +284,23 @@ export function checkBenignRuntimeDirty(taskBody, dirtyPaths) {
   if (overbroad) {
     return { benign: false, reason: `conservative: overbroad glob "${overbroad}" → cannot prove disjoint`, violations: [] };
   }
+  const patterns = Array.isArray(rtPatterns) ? rtPatterns : [];
   const violations = [];
   for (const raw of dirtyPaths) {
     const p = normalizePath(raw);
-    if (p !== ".quay" && !p.startsWith(".quay/")) {
-      violations.push({ path: raw, why: "not under .quay/" });
+    const underDotQuay = p === ".quay" || p.startsWith(".quay/");
+    const isQuayRuntimeArtifact = !underDotQuay && patterns.length > 0 && isRuntimeArtifactPath(p, patterns);
+    if (!underDotQuay && !isQuayRuntimeArtifact) {
+      violations.push({ path: raw, why: patterns.length === 0 ? "not under .quay/" : "not under .quay/ and matches no pattern of the runtime-artifact manifest" });
       continue;
     }
     const hit = globs.find((g) => matchGlob(g, p));
     if (hit) violations.push({ path: raw, why: `matches task ## Touches glob "${hit}"` });
   }
   if (violations.length > 0) {
-    return { benign: false, reason: "dirty paths are not all untracked .quay/ runtime files outside the task's ## Touches", violations };
+    return { benign: false, reason: "dirty paths are not all untracked quay runtime files (`.quay/` or a runtime-artifact-manifest pattern) outside the task's ## Touches", violations };
   }
-  return { benign: true, reason: "all dirty paths are untracked .quay/ runtime files outside the task's ## Touches", violations: [] };
+  return { benign: true, reason: "all dirty paths are untracked quay runtime files (`.quay/` or a runtime-artifact-manifest pattern) outside the task's ## Touches", violations: [] };
 }
 
 // ── touchExists / checkTouchesResolve ────────────────────────────────────────────────────────────
@@ -610,7 +629,12 @@ function mainRuntimeDirty(args) {
   const rootDir = root ? path.resolve(root) : repoRoot(process.cwd());
   const taskFile = path.join(rootDir, "tasks", `${taskId}.md`);
   if (!fs.existsSync(taskFile)) { process.stderr.write(`touches-orthogonality-check: task file not found: ${taskFile}\n`); return 2; }
-  const r = checkBenignRuntimeDirty(fs.readFileSync(taskFile, "utf8"), paths);
+  // The runtime-artifact manifest is a SIBLING of this script (shipped raw, `scripts/` — the bundle
+  // lives in `scripts/dist/`, which the reader probes the parent of). null ⇒ unreadable ⇒ the judge
+  // keeps its historical `.quay/`-only extent (⛔ never widened on an unreadable list, 硬规则 3b).
+  const selfDir = path.dirname(fileURLToPath(import.meta.url));
+  const rtPatterns = loadRuntimeArtifactPatterns(selfDir) ?? [];
+  const r = checkBenignRuntimeDirty(fs.readFileSync(taskFile, "utf8"), paths, rtPatterns);
   if (r.benign) {
     process.stdout.write(`BENIGN (${r.reason})\n`);
     return 0;
