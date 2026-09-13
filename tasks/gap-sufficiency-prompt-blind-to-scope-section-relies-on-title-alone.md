@@ -57,6 +57,22 @@ I2 推导）是「全部在域 AC achieved **且** 充分性判定为 covered」
 3. `sufficiencyCacheKey`（`:681` 附近）的输入哈希也要纳入 `## 范围` 节文本——否则「范围节被编辑」不会
    触发重判（与「AC 集合变化触发重判」同一条纪律）。
 
+## 实现记录（worker，2026-09-13）
+
+- 抽出通用 `extractSections(body, heading, {allowHeadingSuffix})`，`exitConditionsText` 改为调用它
+  （逐字标题，行为逐字节不变——既有 74 条 goal-driver 测试为负控制）。
+- 范围节**按前缀匹配**（带后缀的标题也算）：真实 GOAL 的节标题都带后缀——quay-fleet 的
+  `## 范围（docs/design/quay-fleet-design.md §2/§3.1/§7 阶段2）`、本仓的 `## 范围与非目标`——
+  只按逐字标题匹配会在**生产形态上恒不命中**，即本任务要修的缺陷原样重现（同
+  `task-status-drift-check.ts` 的 `## Acceptance Criteria (runnable — …)` 实例）。单列一条测试钉住。
+- prompt 里范围节单独成节（含标题逐字，可追溯），不与退出条件合并；缺失时**显式写出缺席**
+  （`NOT WRITTEN DOWN …`，零代价、判定权仍在判官手里），⛔ 不 fail-closed 成 `insufficient`——
+  那等于给「必须写范围节」加硬性前置，历史 GOAL 会被结构性判死（Plan 第 2 条 / DoD 排除）。
+- `sufficiencyCacheKey` 纳入范围节文本；并补上原先漏掉的 `title`（同为 prompt 的语义输入、
+  同一函数同一纪律——只修被报出来的那一个是硬规则 5b 记过的形态）。两者各有一条测试。
+- **红控制（能取假）**：把 `goal-driver.ts` 换回 develop 版重跑 ⇒ 6 条新测试全红、既有测试全绿；
+  换回后与修复版逐字节相同。
+
 ## Acceptance Criteria
 
 - [ ] AC1 给定一个 body 里 `## 范围` 列了 3 个子项、`## 退出条件` 只写通用句式、且只有 1 条已 achieved
@@ -84,4 +100,6 @@ I2 推导）是「全部在域 AC achieved **且** 充分性判定为 covered」
 
 ## Touches
 - plugin/scripts/goal-driver.ts
+- plugin/test/goal-sufficiency-semantic-covered.test.mjs
+- plugin/test/goal-sufficiency-determinism.test.mjs
 - tasks/gap-sufficiency-prompt-blind-to-scope-section-relies-on-title-alone.md
