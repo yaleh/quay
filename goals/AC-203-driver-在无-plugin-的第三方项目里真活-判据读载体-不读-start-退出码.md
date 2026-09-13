@@ -1,7 +1,7 @@
 ---
 id: AC-203
 title: driver 在无 plugin/ 的第三方项目里真活——判据读载体，⛔ 不读 start 退出码
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-009
 criterion: >-
@@ -67,6 +67,11 @@ statusLog:
       03:22（gap-ac203-record-schema-has-no-kind-dimension）加入 kind 维度后收紧为「证据须覆盖
       >=2 个不同 driver kind」，实测当前载体中 AC-203 记录的合格 kind 仅 {promotion}（另 3 条旧记录无
       kind 字段，按「缺值≠合格」不计），判据当前为假。⛔ 不降低标准：缺的是 worker 类 driver 的存活证据，需真做而非改判据。
+  - at: 2026-09-13T05:34:26.942Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 fidelity:
   verdict: faithful
   reason: "fidelity judge: faithful"
