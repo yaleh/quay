@@ -2,7 +2,7 @@
 id: gap-suite-wallclock-budgets-literals-depend-on-host-capacity
 title: 负载敏感测试钉死墙钟预算——字面阈值只在「当前机器产能」下成立，满载必红（3 本：observation AC1 /
   worker-driver-resident AC1·AC3 / ts-typecheck-gate 接线）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
