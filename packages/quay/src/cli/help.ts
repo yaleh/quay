@@ -9,6 +9,14 @@
 // `quay action --help` previously exited 0 with no output (UQ-010). Fixed by
 // adding a fallback stub for unrecognised subcommand names so callers always
 // get at least minimal guidance.
+//
+// gap-driver-cli-help-hides-four-of-six-kinds: the `driver` block below DERIVES its verb/kind
+// spellings from cli/driver-vocab.ts's VERBS/KINDS (`${…join("|")}`) — ⛔ 不再手抄。这是用户与 agent
+// 唯一看得到的那份驱动帮助（`quay driver --help` 由 bin/quay.ts 路由到这里，⛔ 不是 cli/driver.ts
+// 里那份同名内联文本），修前它只列 2 个 kind 而真源有 6 个 ⇒ outer/quality/meta/goal 四个已实现的
+// kind 在产品表层等于不存在。
+
+import { KINDS, VERBS } from "./driver-vocab.ts";
 
 export function printHelp(sub) {
   if (!sub || sub === "task") {
@@ -50,7 +58,7 @@ Usage:
   quay mcp
   quay manager start [--dry-run] [--json]
   quay manager arm [--dry-run] [--json] [--verify]
-  quay driver <start|stop|drain|status|restart> --kind <promotion|worker> [--root <path>]
+  quay driver <${VERBS.join("|")}> --kind <${KINDS.join("|")}> [--root <path>]
 
 Options for task list:
   --status <status>   Filter by status (todo, ready, done, needs-human, superseded)
@@ -318,10 +326,10 @@ Environment contract — when the default 'acceptance' gate spawns a command:
                     never clobbered).
 `);
   } else if (sub === "driver") {
-    process.stdout.write(`quay driver — start/stop/drain/resume/status/restart the promotion & worker drivers (AC139)
+    process.stdout.write(`quay driver — start/stop/drain/resume/status/restart the resident quay drivers (AC139)
 
 Usage:
-  quay driver <start|stop|drain|resume|status|restart> --kind <promotion|worker> [--root <path>] [flags]
+  quay driver <${VERBS.join("|")}> --kind <${KINDS.join("|")}> [--root <path>] [flags]
 
   start      Start the resident driver under the single supervisor (respawn on exit/kill/crash).
              ⛔ Refuses (exit non-zero) if the driver is halted — clear the halt with \`resume\` first.
@@ -336,7 +344,7 @@ Usage:
              record count, which cannot distinguish "growing" from "stalled").
   restart    stop then start.
 
-  --kind <promotion|worker>   Required. Which driver the command targets.
+  --kind <${KINDS.join("|")}>   Required. Which driver the command targets.
   --root <path>               Workspace root (default: discovered via .quay/config.yml from cwd).
   --confirm-timeout <s>       (start/restart) Liveness-confirmation window (default 30). \`start\` reports
                               success ONLY after supervisor+driver are both confirmed alive; a supervisor

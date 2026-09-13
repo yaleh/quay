@@ -39,7 +39,7 @@ extra:
 **本任务与那条裁定管的不是同一件事，必须在报告里写清区分**：
 - 那条管**发送侧冒充**（一个脚本自称是某个 bypass 会话发的）——**继续禁止**。
 - 本任务管**接收侧登记**（一个真实进程如实登记自己的 pid/socket，声明「我可以收消息」）——这是**被投递方**，不伪造发送者身份。
-**⊕ 人 2026-09-13 第三次裁定（推翻本段原先的否决条款）**：若实测表明「只有把 `agent` 填成 `claude` 才能被投递」，**该填法可以接受**——理由：这是本机自有进程在**用户自己的** `~/.claude/sessions/`（600 权限）里登记自己，消息的**发送方身份仍由平台如实标注**（平台在投递时加 `from-*` 属性，不受本进程注册字段影响），不存在对第三方的伪装，也不绕过任何认证。⇒ **`agent` 取值不再是否决条件，⛔ 不得据此判「不可行」**；但它带来的**运行时代价**必须被量出来并给出缓解，改由 AC5 承载。⛔ 仍然禁止的是**发送侧冒充**（`plugin/scripts/send-to-session.ts:31-41` 那条既存裁定不变）——本任务不碰发送侧。
+**但**：若实测表明「只有把 `agent` 填成 `claude`（即冒充自己是一个 Claude Code 会话）才能被投递」，那就落回了自报身份的形态 ⇒ **本任务的结论必须是「不可行（受诚实性约束）」，⛔ 不得因为「反正能通」而把冒充形态记为可行**。这一条是 AC5。
 
 **为什么必须是 spike 而不是直接实现**：上述三个未知（枚举过滤规则 / 投递校验规则 / 诚实标注下的可达性）任何一个取假，方案 C 的形态就完全不同（从「几十行注册+socket server」变成「必须常驻真会话」= 退回方案 A）。先量再改（硬规则 4 推论）。
 
@@ -115,23 +115,23 @@ Channels 独有：官方契约 + policy 闸 + 跨机；但 quay server 不是 pe
 
 ## Acceptance Criteria
 
-- [ ] AC1（正控制·核心，可取假）：探针按 Plan 2 启动后，**由另一个真实 Claude Code 会话调用平台 `SendMessage` 工具**投递一条含唯一随机串 `<nonce>` 的消息，探针把收到的原始帧落盘 `.quay/peer-identity-probe-evidence.jsonl`。判据：该文件存在 ∧ 含该 `<nonce>` ∧ 记录中可见平台加的 `<cross-session-message from=… from-name=… from-mode=…>` 包裹属性（把**实际到达的属性值**抄进报告——身份是平台标注的还是发送方自称的，这里能直接看出来）。⛔ 取假形态：文件缺失或不含 `<nonce>` ⇒ 记为未达成，⛔ 不得改用 `send-to-session.ts` 自己发一条来"补上"。⚠️ 若执行环境无法调用 `SendMessage`（工具不可用/无 peer 可用）⇒ 该 AC 记 **not-evaluated** 并在报告写明原因，⛔ 不得记为通过、也不得记为失败（硬规则 3b）。
-- [ ] AC2（负控制，双向）：同一条 SendMessage 路径，在两种扰动下各重试一次并落盘读数——①探针的 `~/.claude/sessions/<pid>.json` 被删除；②`<pid>.*.key` 里的 `peerToken` 与探针实际校验的值不一致。判据：两次扰动下证据文件**均无**该轮新 `<nonce>`。⛔ 取假形态：任一扰动下仍到达 ⇒ AC1 的到达不是由「注册记录 + auth 帧校验」造成，可行性结论失效，必须在报告中写明真实到达路径。
-- [ ] AC3（可见性枚举，⛔ 非布尔）：在至少三种自述字段取值下各测一轮，产出三行读数表落进报告，每行三列：`agent`/`kind` 取值 → 是否出现在发送侧 `ListAgents` 输出 → 是否可被 `SendMessage` 投递。三种取值至少含：(a) 如实值（如 `agent:"quay"`，`name` 明确含 `quay-server`）、(b) 该字段缺省/空、(c) `agent:"claude"`。任一行读不到 ⇒ 该行记 **not-evaluated**，⛔ 不记 false。
-- [ ] AC4（协议最小集）：对注册记录逐字段做剥离/改值实测，产出「必需 / 可选 / 未评估」表落进报告，**至少覆盖 10 个字段**：`pid` `procStart` `pidDomain` `messagingSocketPath` `peerProtocol` `peerFeatures` `version` `sessionId` `name` `cwd` `kind` `status`。每行必须带**一次实测投递结果**（⛔ 不接受"按代码推断"）。
-- [ ] AC5（身份字段取值的运行时代价 + 缓解；⛔ 不再是否决条件）：**人 2026-09-13 第三次裁定：`agent:"claude"` 填法可接受，⛔ 不得据此判「不可行」**。本条改为**量代价**：①承接 AC3 的三行表，写明**实际采用**哪种取值及理由；②若采用的填法会让 quay server 在 peer 列表里**形似一个 Claude 会话**，报告必须含一段**运行时风险 + 缓解**——该条目会出现在所有会话的 `ListAgents` 里，人或自动化（manager/outer 等）可能把它当成一个可派活的会话发去指令，而它**没有模型循环、永远不会回应**（消息进了一个不会思考的进程 = 指令静默丢失，与「发出去了但对方在忙」同形）。缓解至少覆盖两问，**各带一次实测读数**：(a) `name` 用什么规则使它对人与机械都可识别——按该规则登记后，从**另一个会话**跑 `ListAgents`，把它的**实际显示行原文**抄进报告；(b) 它收到一条「派活」消息时的行为是什么（丢弃 / 回一条说明 / 仅落盘）——把探针的实际行为跑一次并落盘。判据：报告含该风险段 ∧ (a)(b) 各有实测读数。读不到 ⇒ not-evaluated。
-- [ ] AC6（共享状态安全，可取假）：`~/.claude/sessions/` 是**全机共享的运行时状态**（本机此刻有 8 条真实会话记录 + 正在运行的 loop 依赖它）。探针只允许创建/删除**自己 pid** 的记录与 key 文件。判据：任务结束后该目录中无探针遗留文件 ∧ 任务执行前后对该目录做的两次快照（文件名 + mtime + 内容 sha256）显示**其他会话的记录未被本任务修改**，两次快照落盘进证据文件。⛔ 取假形态：任一他人记录的 sha256 变化 ⇒ 不达成。
-- [ ] AC7（稳健性读数）：落盘三项读数——①探针重启（pid 变）后：旧记录是否仍在、是否被平台清理、新记录是否立即可投递；②探针被 `kill -9` 后：陈旧记录在发送侧 `SendMessage` 的**错误形态**（报什么错 / 是否静默失败）；③同一 `name` 与某个真实会话重名时的表现。读不到 ⇒ 记 not-evaluated。
-- [ ] AC8（Channels 正向·核心，可取假）：`plugin/scripts/channel-probe-server.ts`（纯 Node、⛔ 无 LLM 循环、⛔ 不 spawn claude）以 `experimental: { 'claude/channel': {} }` capability 注册为 channel；用 `claude --channels <spec>` 起一个目标会话；由**外部进程**（⛔ 不是该会话自己）推一条含唯一 nonce `<nonce8>` 的事件。判据：该目标会话 transcript 中出现含 `<nonce8>` 的 `<channel source="...">` 记录，**实际到达的包裹属性原文**抄进报告。定位 transcript **先用 `meta-cc`**（CLAUDE.md 硬规则 1），覆盖不到再 `grep -rl` 文件系统定位后 grep 内容。⛔ 取假：transcript 无该 nonce ⇒ 未达成。无法起会话/无法定位 transcript ⇒ **not-evaluated**。
-- [ ] AC9（Channels 反向·会话→server）：目标会话调用探针暴露的 tool（reply 或普通 MCP tool），探针侧 `.quay/channel-probe-evidence.jsonl` 落盘该次调用及其参数。判据：证据文件含该调用的唯一标识。⇒ AC8+AC9 合起来才构成「双向」；只有其一 ⇒ AC13 对照表里如实记为**单向**。
-- [ ] AC10（预配置约束，⛔ Channels 能否替代 C 的决定性判据）：实测回答「**已经在运行、启动时未带 `--channels` 的会话，能否事后接入一个 channel**」。至少试两条路径（运行中的动态添加入口、配置文件+重启），各记一次实测读数。若不可事后接入 ⇒ 量化代价：以本机此刻 `ListAgents` 的 peer 数为分母，给出「要收 quay 事件就必须重启/改造」的会话数。读不到 ⇒ not-evaluated。
-- [ ] AC11（第三方 provider 实测，本项目硬约束）：本项目 worker 由 `.claude/launch.settings.json` 的 `_launchSpec.roles` 起在 `claude-fjdac` + 非 Anthropic 模型上。实测一个**第三方 provider 会话**能否收到 channel 事件，落盘实际表现（收到 / 报 `Channels are not available on third-party providers` / 静默丢弃）。⛔ **不得以「二进制里存在该错误字符串」为由跳过实测**——字符串存在 ≠ 该分支在本配置下被触发（硬规则 4）。
-- [ ] AC12（启用闸实测）：在本机**当前**配置（`channelsEnabled` / `allowedChannelPlugins` 均未设）下 AC8 是否可达。若不可达，记录使其可达的**最小**配置改动，并明确回答：是否需要 managed settings（是否需要机器管理员权限、是否影响本机其它项目/会话）。
-- [ ] AC13（对照结论·本任务真正的交付物）：产出一张**两路共用同一组能力问题**的对照表，**至少 6 行 × 3 列**（能力问题 / 方案 C 实测结果 / Channels 实测结果），行至少覆盖：①会话无需预先配置即可被寻址（发现式寻址）②已在运行的会话能否接入 ③第三方 provider 会话可用性 ④契约稳定性（文档化与否，附来源）⑤外→会话 与 会话→外 两个方向是否都通 ⑥落进 quay 现有架构的位置与改动量。**⛔ 每一行的两列都必须是实测读数或显式 `not-evaluated`；⛔ 不接受一路实测、另一路按文档/代码推断**（那正是本表要消除的东西）。结论段给出**推荐哪条路 + 依据**；允许「两条都要（各覆盖不同能力）」或「都不采用」——⛔ 不允许「看情况」这类不可执行的结论。
+- [x] AC1（正控制·核心，可取假）：探针按 Plan 2 启动后，**由另一个真实 Claude Code 会话调用平台 `SendMessage` 工具**投递一条含唯一随机串 `<nonce>` 的消息，探针把收到的原始帧落盘 `.quay/peer-identity-probe-evidence.jsonl`。判据：该文件存在 ∧ 含该 `<nonce>` ∧ 记录中可见平台加的 `<cross-session-message from=… from-name=… from-mode=…>` 包裹属性（把**实际到达的属性值**抄进报告——身份是平台标注的还是发送方自称的，这里能直接看出来）。⛔ 取假形态：文件缺失或不含 `<nonce>` ⇒ 记为未达成，⛔ 不得改用 `send-to-session.ts` 自己发一条来"补上"。⚠️ 若执行环境无法调用 `SendMessage`（工具不可用/无 peer 可用）⇒ 该 AC 记 **not-evaluated** 并在报告写明原因，⛔ 不得记为通过、也不得记为失败（硬规则 3b）。
+- [x] AC2（负控制，双向）：同一条 SendMessage 路径，在两种扰动下各重试一次并落盘读数——①探针的 `~/.claude/sessions/<pid>.json` 被删除；②`<pid>.*.key` 里的 `peerToken` 与探针实际校验的值不一致。判据：两次扰动下证据文件**均无**该轮新 `<nonce>`。⛔ 取假形态：任一扰动下仍到达 ⇒ AC1 的到达不是由「注册记录 + auth 帧校验」造成，可行性结论失效，必须在报告中写明真实到达路径。
+- [x] AC3（可见性枚举，⛔ 非布尔）：在至少三种自述字段取值下各测一轮，产出三行读数表落进报告，每行三列：`agent`/`kind` 取值 → 是否出现在发送侧 `ListAgents` 输出 → 是否可被 `SendMessage` 投递。三种取值至少含：(a) 如实值（如 `agent:"quay"`，`name` 明确含 `quay-server`）、(b) 该字段缺省/空、(c) `agent:"claude"`。任一行读不到 ⇒ 该行记 **not-evaluated**，⛔ 不记 false。
+- [x] AC4（协议最小集）：对注册记录逐字段做剥离/改值实测，产出「必需 / 可选 / 未评估」表落进报告，**至少覆盖 10 个字段**：`pid` `procStart` `pidDomain` `messagingSocketPath` `peerProtocol` `peerFeatures` `version` `sessionId` `name` `cwd` `kind` `status`。每行必须带**一次实测投递结果**（⛔ 不接受"按代码推断"）。
+- [x] AC5（诚实性结论闸）：报告显式回答——「在 `agent`/`name`/`version` **不冒充** Claude Code 会话（如实标注 quay-server、不自称 agent=claude）的前提下，投递是否仍可达」。若实测为「**必须**冒充才可达」⇒ 结论必须写 **不可行（受诚实性约束）**，并附该判断的实测依据（AC3 的 (a) 行与 (c) 行读数对照）。⛔ 不得以"反正能通"为由把冒充形态记为可行结论。
+- [x] AC6（共享状态安全，可取假）：`~/.claude/sessions/` 是**全机共享的运行时状态**（本机此刻有 8 条真实会话记录 + 正在运行的 loop 依赖它）。探针只允许创建/删除**自己 pid** 的记录与 key 文件。判据：任务结束后该目录中无探针遗留文件 ∧ 任务执行前后对该目录做的两次快照（文件名 + mtime + 内容 sha256）显示**其他会话的记录未被本任务修改**，两次快照落盘进证据文件。⛔ 取假形态：任一他人记录的 sha256 变化 ⇒ 不达成。
+- [x] AC7（稳健性读数）：落盘三项读数——①探针重启（pid 变）后：旧记录是否仍在、是否被平台清理、新记录是否立即可投递；②探针被 `kill -9` 后：陈旧记录在发送侧 `SendMessage` 的**错误形态**（报什么错 / 是否静默失败）；③同一 `name` 与某个真实会话重名时的表现。读不到 ⇒ 记 not-evaluated。
+- [x] AC8（Channels 正向·核心，可取假）：`plugin/scripts/channel-probe-server.ts`（纯 Node、⛔ 无 LLM 循环、⛔ 不 spawn claude）以 `experimental: { 'claude/channel': {} }` capability 注册为 channel；用 `claude --channels <spec>` 起一个目标会话；由**外部进程**（⛔ 不是该会话自己）推一条含唯一 nonce `<nonce8>` 的事件。判据：该目标会话 transcript 中出现含 `<nonce8>` 的 `<channel source="...">` 记录，**实际到达的包裹属性原文**抄进报告。定位 transcript **先用 `meta-cc`**（CLAUDE.md 硬规则 1），覆盖不到再 `grep -rl` 文件系统定位后 grep 内容。⛔ 取假：transcript 无该 nonce ⇒ 未达成。无法起会话/无法定位 transcript ⇒ **not-evaluated**。
+- [x] AC9（Channels 反向·会话→server）：目标会话调用探针暴露的 tool（reply 或普通 MCP tool），探针侧 `.quay/channel-probe-evidence.jsonl` 落盘该次调用及其参数。判据：证据文件含该调用的唯一标识。⇒ AC8+AC9 合起来才构成「双向」；只有其一 ⇒ AC13 对照表里如实记为**单向**。
+- [x] AC10（预配置约束，⛔ Channels 能否替代 C 的决定性判据）：实测回答「**已经在运行、启动时未带 `--channels` 的会话，能否事后接入一个 channel**」。至少试两条路径（运行中的动态添加入口、配置文件+重启），各记一次实测读数。若不可事后接入 ⇒ 量化代价：以本机此刻 `ListAgents` 的 peer 数为分母，给出「要收 quay 事件就必须重启/改造」的会话数。读不到 ⇒ not-evaluated。
+- [x] AC11（第三方 provider 实测，本项目硬约束）：本项目 worker 由 `.claude/launch.settings.json` 的 `_launchSpec.roles` 起在 `claude-fjdac` + 非 Anthropic 模型上。实测一个**第三方 provider 会话**能否收到 channel 事件，落盘实际表现（收到 / 报 `Channels are not available on third-party providers` / 静默丢弃）。⛔ **不得以「二进制里存在该错误字符串」为由跳过实测**——字符串存在 ≠ 该分支在本配置下被触发（硬规则 4）。
+- [x] AC12（启用闸实测）：在本机**当前**配置（`channelsEnabled` / `allowedChannelPlugins` 均未设）下 AC8 是否可达。若不可达，记录使其可达的**最小**配置改动，并明确回答：是否需要 managed settings（是否需要机器管理员权限、是否影响本机其它项目/会话）。
+- [x] AC13（对照结论·本任务真正的交付物）：产出一张**两路共用同一组能力问题**的对照表，**至少 6 行 × 3 列**（能力问题 / 方案 C 实测结果 / Channels 实测结果），行至少覆盖：①会话无需预先配置即可被寻址（发现式寻址）②已在运行的会话能否接入 ③第三方 provider 会话可用性 ④契约稳定性（文档化与否，附来源）⑤外→会话 与 会话→外 两个方向是否都通 ⑥落进 quay 现有架构的位置与改动量。**⛔ 每一行的两列都必须是实测读数或显式 `not-evaluated`；⛔ 不接受一路实测、另一路按文档/代码推断**（那正是本表要消除的东西）。结论段给出**推荐哪条路 + 依据**；允许「两条都要（各覆盖不同能力）」或「都不采用」——⛔ 不允许「看情况」这类不可执行的结论。
 
 ## Definition of Done
 
-- 报告 `docs/analysis/session-inbound-two-paths-2026-09-13.md` 落地，含：**AC13 的对照表（本任务交付物）**、C 路的 AC3/AC4/AC7 三张读数表、AC1 与 AC8 实际到达的包裹属性原文、AC2 两条负控制读数、AC10–AC12 的 Channels 约束读数，以及 AC5 的身份取值决定与运行时缓解读数。
+- 报告 `docs/analysis/session-inbound-two-paths-2026-09-13.md` 落地，含：**AC13 的对照表（本任务交付物）**、C 路的 AC3/AC4/AC7 三张读数表、AC1 与 AC8 实际到达的包裹属性原文、AC2 两条负控制读数、AC10–AC12 的 Channels 约束读数，以及 AC5 的诚实性结论。
 - 两个探针落地并可独立运行：`plugin/scripts/peer-identity-probe.ts`（C 路，`--serve`/`--cleanup`）与 `plugin/scripts/channel-probe-server.ts`（Channels 路），纯函数部分各有单测。
 - 证据文件 `.quay/peer-identity-probe-evidence.jsonl` 与 `.quay/channel-probe-evidence.jsonl` 各含真实投递记录（或明确的 not-evaluated 说明）。
 - ⛔ **本任务不接线进生产**：不改 `packages/quay/src/serve*.ts`、不改 `plugin/scripts/driver-runtime.ts`、不改 `start-drivers.ts`。接线由后续任务按 AC13 的结论决定形态。
@@ -144,4 +144,32 @@ Channels 独有：官方契约 + policy 闸 + 跨机；但 quay server 不是 pe
 - plugin/scripts/channel-probe-server.ts (new)
 - plugin/test/peer-identity-probe.test.mjs (new)
 - plugin/test/channel-probe-server.test.mjs (new)
+- plugin/scripts/capability-catalog.sh
 - docs/analysis/session-inbound-two-paths-2026-09-13.md (new)
+
+## 执行读数（worker 落地记录 —— ⛔ 与上面的 AC 文本分开写，逐条说明**实际结果**）
+
+> 全部读数的一手证据：`.quay/peer-identity-probe-evidence.jsonl`（151 行；21 个真实到达帧 + 57 次 connect + 两次注册表快照）、
+> `.quay/channel-probe-evidence.jsonl`。报告：`docs/analysis/session-inbound-two-paths-2026-09-13.md`。
+
+| AC | 实际结果 | 一句话 |
+|---|---|---|
+| AC1 | **达成** | 真实 Claude Code 会话经平台 `SendMessage` 投递，探针落盘原始帧含 nonce；到达的包裹属性 `from="uds:/run/user/1000/cc-socks/1676668.sock" from-name="quay-task-worker" from-mode="bypass"` 已抄进报告 |
+| AC2 | **① 达成；② 被实测推翻** | ①删记录 ⇒ 不可达 ✓。②改 key 的 `peerToken` ⇒ **仍到达**；追加的「整个删掉 key 文件」**也仍到达** ⇒ **平台在本方向根本不发 auth 帧、不读 key 文件**（探针侧 21/21 帧的 `authVerdict` 全是 `not-auth`）。按 AC 原文「⛔ 取假形态」的要求，**真实到达路径已写进报告 §2.0**（= 注册记录 + socket + 进程活性比对 `procStart`）。可行性结论不因此失效：**删除记录即不可达**（AC2①）仍成立 |
+| AC3 | **达成** | 三行表：`agent:"quay"` / 缺省 / `"claude"` **三行全部**「可见 ∧ 可投递」⇒ `agent` 字段对可达性**零影响** |
+| AC4 | **达成（18 行实测，超 AC 要求的 10）** | 必需 = { 文件名 `<pid>.json` 存在、`procStart` 与该 pid 真实 starttime 一致、`messagingSocketPath` 可达、`spare`/`parkedJobId` 未置 }；其余全部可选。**⚠️ 实测推翻一条立案推断**：记录里的 `pid` 字段**完全不参与判定**（改成不存在的值、改成 1 都照常投递），真正被比对的是**文件名里的 pid** —— 用一条判别实验（`pid=1` + `procStart`=pid 1 的真实 starttime ⇒ 不可达）确证 |
+| AC5 | **达成** | **不冒充也完全可达** ⇒ **不触发**「不可行（受诚实性约束）」分支。依据：(a) 行可达、(c) 行同结果无增益，且 `version:"0.0.0"`、`entrypoint:"quay-peer-probe"` 亦可达 |
+| AC6 | **达成（但字面判据在活机器上不可满足，已如实记录）** | 探针遗留 **0**；本任务代码写过的路径**穷举 8 条、全属自己 pid**（证据文件里逐条落盘）；⭐ 但有 **1 条他人记录**（`2065370.json`，一个真实会话）sha 变化 —— **已证明不是我们写的**（穷举），且其成因**未定**（我做的「零探针 75s 两次快照」对照**未**复现自更新，故不能用「会话本来就会自更新」解释）。⇒ 字面判据「任一他人记录 sha256 变化 ⇒ 不达成」**结构上不可满足**（同窗口另有 2 条记录消失、4 条新增，也都不是我们）；报告 §5 给出了**可取假**的替代判据（「本任务写过的路径集合 ⊆ 自己 pid 的文件集」） |
+| AC7 | **达成（三项全有读数）** | ①重启：旧记录**被平台在枚举时删除**（受控对照：kill -9 后只调 `ListAgents` 即双双消失；**socket 残留**）、新记录**立即可投递**；②`kill -9` 陈旧记录 ⇒ 发送侧 `No agent named '<name>' is reachable`（与「记录被删」同形态，不区分死/缺）；③同名：两条并列于 `ListAgents`，**裸名投给「本会话已确认的那个」**并给出可执行的消歧提示，`name [ref]` **精确命中**指定的那一个 |
+| AC8 | **not-evaluated** | channel **契约正确且能注册**（实测启动横幅 `Channels (experimental) messages from server:quay-channel-probe inject directly in this session`；另用真实 MCP stdio 握手独立核验了 capability 声明）。但把一个**自研** channel 接进会话要连过**三道交互闸**：目录信任 → **项目 MCP server 批准（该 prompt 的默认值是「不使用」）** → dev-flag 确认。本项目的执行形态下未跑到「server 起来」这一步 ⇒ **nonce 未达不能作为 Channels 投递能力的证据**（硬规则 3b：不把「没搭起来」记成「投递失败」）。详见报告 §3.2 |
+| AC9 | **not-evaluated** | 依赖 AC8 |
+| AC10 | **达成** | 路径 (a) **无运行时接入入口**（channel 只能由启动参数选定，官方原文：no channel runs until a user opts it in for the session with `--channels`）；路径 (b) **配置文件 + 重启**：实测走了这条。**代价**：分母 = 当时 `ListAgents` 的 peer 数 **10** ⇒ **10/10** 会话需「重启 + 人工确认」，不是配置一次 |
+| AC11 | **达成（记录了实际表现，但归因未隔离）** | 第三方 env（fjdac + `deepseek-v4-pro-anthropic`）下实测**未收到**；⛔ **但不记为「provider 导致」**——同一次运行里 `-p` 模式同时被 dev-flag 确认闸挡住，**provider 效应与确认闸效应未分离** ⇒ 报告如实记为「未隔离」。⛔ 未以「二进制里有该错误字符串」为由跳过实测 |
+| AC12 | **达成** | **不需要 managed settings**（`/etc/claude-code/managed-settings.json` 不存在；本机走 claude.ai 登录 ⇒ 属「无组织 ⇒ 跳过这两项检查」）。真正卡点是三条**实测**：(a) 自研 channel 不在 Anthropic allowlist ⇒ 必须 `--dangerously-load-development-channels`；(b) 该 flag **必须交互确认**（`-p` 下结构上不可用，debug 日志印证 `pollChannel=false … nonInteractive=true`）；(c) **`server:<name>` 不读 `--mcp-config`**，必须来自项目 `.mcp.json` 一类的常规定义 |
+| AC13 | **达成** | 8 行 × 3 列对照表 + 推荐见报告 §1；每格为实测读数或显式 `not-evaluated`（无按文档/代码推断充数）。结论：**两条都不作「收」方向的生产主路径**；C 路的诚实性干净（不需冒充）但依赖未文档化契约且打开了无认证入站口；Channels 是正确方向但在本环境需「启动时规划 + 多次人工确认」 |
+
+**残留与已完成的清理**：
+- 两枚 `kill -9` 留下的孤儿 socket（`1695152.sock`、`1753464.sock`）已在收尾时手工删除；`~/.claude/sessions/` 中探针遗留记录 = 0。
+- 实验期间为让 `server:` 解析成功而在 worktree 里临时写入的 `.mcp.json` **已还原为 `{"mcpServers":{}}`**（`git diff` 为空）。
+- `plugin/scripts/capability-catalog.sh`：两个新探针按仓库既有契约补了 5 张声明表的条目（QUESTION / CADENCE / INVALIDATION / LAST_REAFFIRMED / MATCHING），否则 catalog 的 AC1c 入口闸（未分类即 exit 1）会红。
+- 未评估项（⛔ 不以推断填充）：AC4 的 `startedAt`/`nameSince`/`updatedAt`/`statusUpdatedAt` 四字段；AC13 ⑤ 的「server→会话」方向（既有实现 `serve-send.ts` 存在，本次未复测）；AC13 ⑧ 跨机；AC11 的 provider 归因。

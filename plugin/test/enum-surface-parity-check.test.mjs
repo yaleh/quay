@@ -181,6 +181,95 @@ test("a surface that imports the authority (no literal) is reported as derived, 
   assert.match(r.stdout, /\[derived\] derived-surface .*派生自 auth\/enum\.ts:COLORS/);
 });
 
+// ── 规范 2 的【运行时派生】形态（SurfaceSpec.derivesFrom）────────────────────────────────────────────
+// 为什么需要它：driver 帮助文本的权威在 plugin/scripts/*，而 packages/quay/src 维持「零 plugin/ 静态
+// import」边界（observation.ts 的静态 import 禁令）⇒ authorityDerivation 结构上不可达；且 text 面的
+// 「anchor 命中 0 次」是 ok:false，不是「提取到 0 个值」，会先掉进 !ex.ok 的 NOT-EVALUATED 分支。
+// 两个缺口叠加 ⇒ 把帮助文本改成真派生（更强的形态）反而让检查器【失去】这个面。
+// 下面 5 个用例：1 正 + 4 反，逐条证明声明的每条规则都能取假。
+
+/** 一个"运行时派生"的面：help.ts 把 vocab.ts 的 VOCAB 插值进 --kind 槽位（⛔ 无字面量副本）。 */
+const DERIVED_HELP = (body) =>
+  body ?? `import { VOCAB } from "./vocab.ts";\nexport const HELP = \`usage: --kind <\${VOCAB.join("|")}> [flags]\`;\n`;
+const DERIVED_VOCAB = `export const VOCAB = ["red", "green", "blue"];\n`;
+
+function buildDerivedFixture(helpBody, vocabBody) {
+  const root = mkFixture();
+  fs.mkdirSync(path.join(root, "auth"), { recursive: true });
+  fs.mkdirSync(path.join(root, "surf"), { recursive: true });
+  fs.writeFileSync(path.join(root, "auth", "enum.ts"), AUTHORITY);
+  fs.writeFileSync(path.join(root, "surf", "vocab.ts"), vocabBody ?? DERIVED_VOCAB);
+  fs.writeFileSync(path.join(root, "surf", "help.ts"), DERIVED_HELP(helpBody));
+  const registry = {
+    authorities: [{ id: "color", file: "auth/enum.ts", symbol: "COLORS", extract: "ts-array" }],
+    surfaces: [
+      {
+        id: "derived-text-surface",
+        authority: "color",
+        file: "surf/help.ts",
+        extract: "text",
+        anchor: "--kind <([a-z-]+\\|[a-z|-]+)>",
+        policy: "exact",
+        derivesFrom: {
+          file: "surf/vocab.ts",
+          symbol: "VOCAB",
+          extract: "ts-array",
+          spelling: "--kind <\\$\\{[^}]*\\bVOCAB\\b[^}]*\\}>",
+        },
+      },
+    ],
+    knownDrift: [],
+  };
+  const registryPath = path.join(root, "registry.json");
+  fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2));
+  return { root, registryPath };
+}
+
+test("derivesFrom positive — a surface interpolating a verified symbol is [derived] and green", () => {
+  const { root, registryPath } = buildDerivedFixture();
+  const r = run(root, registryPath);
+  assert.equal(r.code, 0, `must be green\n${r.stdout}${r.stderr}`);
+  assert.match(r.stdout, /\[derived\] derived-text-surface .*派生自 surf\/vocab\.ts:VOCAB（已与权威逐一比对）/);
+  assert.equal(r.stdout.includes("NOT-EVALUATED"), false);
+});
+
+test("derivesFrom negative ① — the derived spelling is absent (help text deleted / slot renders another symbol) ⇒ NOT-EVALUATED, ⛔ not PASS", () => {
+  const { root, registryPath } = buildDerivedFixture(
+    `import { VOCAB } from "./vocab.ts";\nimport { OTHER } from "./other.ts";\nexport const HELP = \`usage: --kind <\${OTHER.join("|")}> [flags]\`;\n`,
+  );
+  const r = run(root, registryPath);
+  assert.equal(r.code, 3, `unverifiable declaration must be NOT-EVALUATED\n${r.stdout}${r.stderr}`);
+  assert.match(r.stdout, /NOT-EVALUATED/);
+  assert.match(r.stdout, /derived spelling/);
+});
+
+test("derivesFrom negative ② — cross-file without the import ⇒ NOT-EVALUATED (派生源未接线)", () => {
+  const { root, registryPath } = buildDerivedFixture(
+    `export const HELP = \`usage: --kind <\${VOCAB.join("|")}> [flags]\`;\n`,
+  );
+  const r = run(root, registryPath);
+  assert.equal(r.code, 3, `missing import must be NOT-EVALUATED\n${r.stdout}${r.stderr}`);
+  assert.match(r.stdout, /no `import/);
+});
+
+test("derivesFrom negative ③ — the consumed symbol diverges from the authority ⇒ RED (断链不洗白)", () => {
+  // vocab.ts 少了 blue：被消费的符号自己就与权威不一致 ⇒ 必须是 violation，⛔ 不是 not-evaluated。
+  const { root, registryPath } = buildDerivedFixture(undefined, `export const VOCAB = ["red", "green"];\n`);
+  const r = run(root, registryPath);
+  assert.equal(r.code, 1, `broken chain must be RED\n${r.stdout}${r.stderr}`);
+  assert.match(r.stdout, /\[violation\]/);
+  assert.match(r.stdout, /断链/);
+});
+
+test("derivesFrom negative ④ — declared derived but still carrying a literal copy ⇒ RED", () => {
+  // 手抄回字面量（即便取值恰好与权威相同）⇒ 声明不成立。⛔ 不是"同步就放行"。
+  const { root, registryPath } = buildDerivedFixture(`export const HELP = \`usage: --kind <red|green|blue> [flags]\`;\n`);
+  const r = run(root, registryPath);
+  assert.equal(r.code, 1, `a hand copy under a derivation claim must be RED\n${r.stdout}${r.stderr}`);
+  assert.match(r.stdout, /\[violation\]/);
+  assert.match(r.stdout, /却仍带字面量副本/);
+});
+
 // ── known-drift ledger: shrink-only ────────────────────────────────────────────────────────────────
 
 test("KNOWN_DRIFT — recorded drift is reported but not blocking; growth reddens; shrinkage is tolerated", () => {
