@@ -13,7 +13,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readTranscriptTail, readSession, parseClaudeAgentsJson, readTaskStatusAtRef, readTaskAtRefMeta, readTaskTitleMapAtRef, readTaskCommitTimesAtRef, readTaskCommitTimeAtRef, readTaskStatusMapAtRef, refreshDevelopRefCaches, clearTaskStatusRefCache } from "../src/observation.ts";
+import { parseVerificationRound, readLive, taskWorktreeOpen, readJournal, parseWorkerOutcomeRecords, workerInFlightTasks, workerDriverOnlineMs, workerTaskIdFromCmdline, readLiveWorkerProcesses, WORKER_PROCESS_NAME, WORKER_OUTCOME_REL, WORKER_ROUND_REL, isValidSessionId, sessionTranscriptPath, projectSlug, transcriptContentBlocks, parseTranscript, readTranscript, readTranscriptTail, readSession, parseClaudeAgentsJson, readTaskStatusAtRef, readTaskAtRefMeta, readTaskTitleMapAtRef, readTaskCommitTimesAtRef, readTaskCommitTimeAtRef, readTaskStatusMapAtRef, refreshDevelopRefCaches, clearTaskStatusRefCache, resetDevelopRefWalkCounts, getDevelopRefFullWalkCount, getDevelopRefBoundedWalkCount } from "../src/observation.ts";
 import { renderSessionPage } from "../src/serve-handlers.ts";
 import { taskRunsBlock, handleTaskList } from "../src/serve-task.ts";
 
@@ -1214,7 +1214,7 @@ function appendCommits(root, list) {
   execFileSync("git", ["fast-import", "--quiet"], { cwd: root, input: out.join("\n") + "\n" });
 }
 
-test("AC1 — /tasks cold first request < 3s and warmed request < 500ms on a ≥1500-task/≥10000-commit fixture", async () => {
+test("AC1 — a COLD /tasks request spawns ZERO full tasks/ history walks; a WARM one reads a populated cache (structural count, ⛔ not a wall-clock proxy)", async () => {
   const { root } = buildLargeRepo("large-ac1-", { tasks: 1500, commits: 10000 });
   try {
     const ids = Array.from({ length: 1500 }, (_, i) => `t-${i}`);
@@ -1226,59 +1226,79 @@ test("AC1 — /tasks cold first request < 3s and warmed request < 500ms on a ≥
       await handleTaskList({}, res, new URL("http://localhost/tasks"), client, { name: "test", id: "native" }, { workspaceRoot: root });
       return body;
     };
-    // Cold: no warmup — the request computes the cheap status/title faces and reads commit-times
-    // cache-only (empty). It must NOT pay the full history walk (~4s on this fixture).
-    //
-    // Threshold rationale (gap-observation-ac1-perf-threshold-relax): the original 1.5s cold / 200ms
-    // warm bounds are load-sensitive — under concurrent fan-in + machine-load swings the git
-    // subprocesses behind those cheap faces slow down and the cold request drifts past 1.5s even
-    // though the optimization is intact (a dashboard-taskcard pure-render change tripped it 3×).
-    // Relaxed to 3s cold / 500ms warm: the two stay distinct magnitudes (sub-second warm vs
-    // multi-second cold), and the 3s cold bound stays BELOW the full-history-walk cost (~4s on this
-    // fixture, ~8.8s production), so a reverted optimization (full traversal on the request path)
-    // still exceeds it — the threshold is falsifiable, not vacuous (hard rule 4).
+    // ⛔ Was `coldMs < 3000` / `warmMs < 500` — a claim about THIS host's spare capacity, not about the
+    // code. It was relaxed once (1.5s/200ms → 3s/500ms, gap-observation-ac1-perf-threshold-relax) and
+    // stayed red 25× across 15 unrelated tasks, because a loaded host slows the walk down instead of
+    // changing WHICH work the request does. The property the bound was proxying is structural and
+    // load-independent: the request path reads the commit-time cache ONLY
+    // (serve-task.ts `readTaskCommitTimesAtRef(..., { cacheOnly: true })`), so no request may ever
+    // spawn the unbounded `git log <ref> -- tasks/` walk — the walk belongs to the background refresh.
+    // A count is the direct quantity; a duration was the proxy (硬规则 4b).
     clearTaskStatusRefCache();
-    const t0 = process.hrtime.bigint();
-    await render();
-    const coldMs = Number(process.hrtime.bigint() - t0) / 1e6;
-    assert.ok(coldMs < 3000, `AC1: cold request ${coldMs.toFixed(0)}ms < 3000ms (⛔ ≥3s ⇒ 假)`);
+    resetDevelopRefWalkCounts();
+    const html = await render();
+    assert.equal(getDevelopRefFullWalkCount(), 0,
+      `AC1: a COLD request spawned ${getDevelopRefFullWalkCount()} full tasks/ history walk(s) — the request path must read cache-only however slow the host is (⛔ ≥1 ⇒ the optimization is gone)`);
+    assert.equal(getDevelopRefBoundedWalkCount(), 0, "AC1: a cold request spawns no bounded walk either (it does no commit-time git work at all)");
 
-    // Warm: the background refresh has run ≥1 round (the full history walk happens here, off the
-    // request path), then the request reads cache only.
+    // Non-vacuity: "zero walks" must not be "the request did nothing". The cheap faces still run —
+    // ls-tree + cat-file --batch over the whole tree — and their product is a populated 1500-entry map.
+    assert.equal(readTaskStatusMapAtRef(root, "develop").size, 1500,
+      "AC1: the cold request built the CHEAP develop-status face (1500 tasks) — so 'zero full walks' means the expensive face was skipped, not that the request was a no-op");
+
+    // Cold/warm distinction WITHOUT a clock: a cold request-path read has nothing to serve (the cache
+    // is empty and `cacheOnly` never builds), so the list falls back to disk mtimes.
+    assert.equal(readTaskCommitTimesAtRef(root, "develop", { cacheOnly: true }).size, 0,
+      "AC1: a cold request-path commit-time read is empty (the build lives off the request path)");
+
+    // Warm: the background refresh performs the ONE full walk, off the request path; the request then
+    // reads the populated cache.
     refreshDevelopRefCaches(root, "develop");
-    const t1 = process.hrtime.bigint();
+    assert.ok(getDevelopRefFullWalkCount() >= 1,
+      `the refresh tick is where the full walk lives (got ${getDevelopRefFullWalkCount()}) — 0 here would make the cold assertion above vacuous`);
+    assert.equal(readTaskCommitTimesAtRef(root, "develop", { cacheOnly: true }).size, 1500,
+      "AC1 warm: the request-path cache read is POPULATED — the refresh filled it, the request did not");
+
+    resetDevelopRefWalkCounts();
     await render();
-    const warmMs = Number(process.hrtime.bigint() - t1) / 1e6;
-    assert.ok(warmMs < 500, `AC1: warmed request ${warmMs.toFixed(0)}ms < 500ms (⛔ ≥500ms ⇒ 假)`);
+    assert.equal(getDevelopRefFullWalkCount(), 0,
+      "AC1: a WARM request spawns zero full walks too (a populated cache does not change the read path)");
+    assert.ok(html.length > 0, "the request rendered a body");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("AC2 — the commit-time refresh is incremental (O(new commits), not O(total history))", () => {
+test("AC2 — the commit-time refresh is incremental (a BOUNDED walk, not a re-walk of the full history)", () => {
   const { root } = buildLargeRepo("large-ac2-", { tasks: 1500, commits: 10000 });
   try {
-    // Cold full build (the whole 10000-commit history).
+    // Cold full build (the whole 10000-commit history) — counted, not timed.
     clearTaskStatusRefCache();
-    const t0 = process.hrtime.bigint();
+    resetDevelopRefWalkCounts();
     const before = readTaskCommitTimesAtRef(root, "develop");
-    const fullMs = Number(process.hrtime.bigint() - t0) / 1e6;
     assert.equal(before.size, 1500, "full build returns all 1500 task commit times");
+    assert.equal(getDevelopRefFullWalkCount(), 1, "the cold build is exactly ONE full history walk");
+    assert.equal(getDevelopRefBoundedWalkCount(), 0, "the cold build takes the full path — no bounded walk");
 
     // N=5 new commits, then an incremental refresh.
     appendCommits(root, [1, 2, 3, 4, 5].map((c) => ({ ts: 2000000000 + c, msg: `new${c}`, id: `t-${c}` })));
-    const t1 = process.hrtime.bigint();
     const after = readTaskCommitTimesAtRef(root, "develop", { force: true });
-    const incrMs = Number(process.hrtime.bigint() - t1) / 1e6;
 
     // Correctness of the merge: the touched tasks move to their new times; an untouched task keeps its prior time.
     assert.equal(after.get("t-1"), 2000000001 * 1000, "incremental merge moves t-1 to its new commit time");
     assert.equal(after.get("t-5"), 2000000005 * 1000, "incremental merge moves t-5 to its new commit time");
     assert.equal(after.get("t-6"), before.get("t-6"), "an untouched task keeps its prior time");
 
-    // The contrast (AC2): incremental (5 commits) is far cheaper than the full history walk — if the
-    // implementation still replayed all 10000 commits, incrMs ≈ fullMs and `incrMs * 5 < fullMs` fails.
-    assert.ok(incrMs * 5 < fullMs, `AC2: incremental ${incrMs.toFixed(1)}ms is O(5), not the full ${fullMs.toFixed(0)}ms history (⛔ ${incrMs.toFixed(1)}ms×5 ≥ ${fullMs.toFixed(0)}ms ⇒ 全量重放)`);
+    // The contrast (AC2), as the COST CLASS of the walk that actually ran. ⛔ Was `incrMs * 5 < fullMs`
+    // — a timing ratio that a loaded host can flip (observed: the incremental refresh itself ran
+    // 129s under load 23.9 and the ratio broke). The property is structural: after 5 new commits the
+    // refresh diffs `oldHead..newHead` (O(new commits)) and NEVER re-walks the 10000-commit history.
+    // Still falsifiable: if the implementation replayed the full history, the full-walk count would
+    // be 2 (not 1) and the bounded count 0 (not 1).
+    assert.equal(getDevelopRefFullWalkCount(), 1,
+      `AC2: the refresh added NO full walk (still ${getDevelopRefFullWalkCount()} from the cold build) — the history was not re-walked`);
+    assert.equal(getDevelopRefBoundedWalkCount(), 1,
+      "AC2: the refresh took the bounded path (oldHead..newHead) exactly once");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

@@ -1,10 +1,12 @@
 // @test-group product
 // ts-typecheck-gate-cli-event.test.mjs — split out of ts-typecheck-gate.test.mjs
 // (gap-suite-split-long-multi-test-files): M63 C1 — `quay gate <task> --gate ts-typecheck` PASSes
-// for real against this repo and appends a real GateEvent. The test body is byte-identical to the
-// original; only its file placement changed so node:test's file-level concurrency can parallelize
-// it. SPLIT CONCURRENCY SAFETY: the GateEvent log lives in a per-file mkdtemp path, so no sibling
-// file can collide.
+// for real against this repo and appends a real GateEvent. Split out so node:test's file-level
+// concurrency can parallelize it. SPLIT CONCURRENCY SAFETY: the GateEvent log lives in a per-file
+// mkdtemp path, so no sibling file can collide.
+// (gap-suite-wallclock-budgets-literals-depend-on-host-capacity: the body is no longer
+// byte-identical to the original split — its `{ timeout: 120000 }` literal became a host-derived
+// deadline, pinned into the child CLI's env.)
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -12,9 +14,12 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
-import { runQuay, REPO_ROOT } from "./ts-typecheck-gate-helpers.mjs";
+import { runQuay, REPO_ROOT, TS_TYPECHECK_DEADLINE_MS, pinHostAcceptanceDeadline } from "./ts-typecheck-gate-helpers.mjs";
 
 test("M63 C1: `quay gate <task> --gate ts-typecheck` PASSes for real against this repo and appends a real GateEvent", () => {
+  // The CLI runs the gate in a CHILD process, so the host-scaled deadline is pinned through the
+  // environment (runQuay forwards process.env) — ⛔ no bare ms literal (see the helper).
+  pinHostAcceptanceDeadline();
   const logFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "quay-ts-typecheck-gate-")), "g.jsonl");
   try {
     const r = runQuay(
@@ -33,4 +38,4 @@ test("M63 C1: `quay gate <task> --gate ts-typecheck` PASSes for real against thi
   } finally {
     fs.rmSync(path.dirname(logFile), { recursive: true, force: true });
   }
-}, { timeout: 120000 });
+}, { timeout: TS_TYPECHECK_DEADLINE_MS });
