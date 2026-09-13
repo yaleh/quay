@@ -90,8 +90,7 @@ init 模板是它的一份人工同步副本，而副本落后了。同工作区
 - [x] AC3（防漂移，结构性）：静态检查比对「quay 自己 `.gitignore` 中标为运行时产物的条目集」
       与「init 写出的忽略清单」，前者未被后者覆盖即红。双向控制：给 quay 的 `.gitignore`
       加一条新的运行时条目而 init 未跟进 ⇒ 必须红；两边一致 ⇒ 绿。
-- [ ] AC4：全量 `scripts/test.sh` 绿（本任务 delta 的 scoped 门已绿；**全量**由 fan-in 的全量 suite 判定——
-      worker 结构上不跑套件，落地前 ff 的 suite 证书闸就是它的判据）（待外部）
+- [ ] AC4：全量 `scripts/test.sh` 绿（本任务 delta 的 scoped 门已绿；**全量**由 fan-in 的全量 suite 判定；worker 结构上不跑套件，落地前 ff 的 suite 证书闸就是它的判据）（待外部）
 - [x] AC5（存量项目，能取假）：在一个**已经含有** quay 运行时残留（如 `milestones/`）的第三方项目上
       跑 fan-in 的 `ff` 步骤，改前 reason 为裸 `working tree not clean`；改后 reason 必须点名
       「这些文件由 quay 运行时写出」并指出处置方式。⛔ 不得只在新项目上验——那会漏掉存量项目这一整类。
