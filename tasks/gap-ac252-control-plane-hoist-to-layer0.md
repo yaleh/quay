@@ -2,7 +2,7 @@
 id: gap-ac252-control-plane-hoist-to-layer0
 title: GOAL-017/AC-252：控制面上收进 Layer 0 —— serveControlPlane 调用点由 worker-driver 移入
   driver-runtime，六个 kind 全部从共享骨架获得入站控制面（SPEC 阶段 A1）
-status: ready
+status: done
 labels:
   - gap
 parent: null
