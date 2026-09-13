@@ -1,6 +1,6 @@
 // @test-group serial
 // @load-sensitive real-install
-// @load-sensitive-entry 2026-09-14 carrier-env pins (quay-init --loop install); install family
+// @load-sensitive-entry 2026-09-13 carrier-env pins (quay-init --loop install); install family
 // gap-quay-init-omits-adr-goal-meta-dir-env-third-party-leak — AC3 / AC4 regression pins.
 //
 // WHAT THIS PINS. A quay-init'd project must carry an EXPLICIT pin for every provider CARRIER dir
@@ -27,7 +27,7 @@
 //
 // RED CONTROL: the backfill assertions run against a config shaped like a pre-pin install (one env
 // key). Reverting `ensure_provider_carrier_env`'s call site in write_config makes AC4's tests fail
-// with the missing keys listed — verified 2026-09-14 by deleting the call and re-running.
+// with the missing keys listed — verified 2026-09-13 by deleting the call and re-running.
 //
 // Run: scripts/test.sh plugin/test/quay-init-config-env-keys.test.mjs
 //      node --test plugin/test/quay-init-config-env-keys.test.mjs
