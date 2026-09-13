@@ -1,7 +1,7 @@
 ---
 id: gap-drivers-yml-interval-not-honored-for-routine-kinds
 title: drivers.yml 声明的 interval_ms 对例程型 kind 未生效 —— 声明 30 秒，实际是 supervisor 每 5 秒重启一次
-status: ready
+status: done
 labels:
   - gap
   - mechanism
