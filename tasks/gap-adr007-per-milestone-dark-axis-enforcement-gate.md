@@ -1,7 +1,7 @@
 ---
 id: gap-adr007-per-milestone-dark-axis-enforcement-gate
 title: 兑现 ADR-007 的 per-milestone 暗轴记录承诺——todo→ready/ready→done 门加机械检查
-status: ready
+status: done
 labels:
   - gap
   - finding

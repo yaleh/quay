@@ -1,7 +1,7 @@
 ---
 id: gap-checker-claim-vs-actual-cadence-and-count-drift
 title: 两处 checker 自述与实际脱节：cadence 声明未被调度消费 + 头注释数量与实测不符
-status: ready
+status: done
 labels:
   - gap
 parent: null
