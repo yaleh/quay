@@ -56,15 +56,15 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1（负控制，改前必须红）：在一个 provider.path 位于 quay 仓库内、且 config 的 `env:`
+- [x] AC1（负控制，改前必须红）：在一个 provider.path 位于 quay 仓库内、且 config 的 `env:`
       **不含** `QUAY_NATIVE_GOAL_DIR` 的临时 workspace 上，`goal list` 返回的条目数 > 0
       （即复现串库）；应用本任务改动后，同一 workspace 同一命令返回 `(no goals)`。
-- [ ] AC2：`resolveSiblingDir` 的解析不再调用 `findRepoRoot(process.cwd())`；
+- [x] AC2：`resolveSiblingDir` 的解析不再调用 `findRepoRoot(process.cwd())`；
       单测断言：给定 `QUAY_NATIVE_TASKS_DIR=<tmp>/tasks` 且 cwd 位于另一个带 `.quay/config.yml`
       的目录时，`resolveAdrDir()/resolveGoalDir()/resolveMetaDir()` 全部返回 `<tmp>/{adr,goals,meta}`。
-- [ ] AC3：`quay-init.sh` 对一个全新目录生成的 `.quay/config.yml`，其 `providers.native.env`
+- [x] AC3：`quay-init.sh` 对一个全新目录生成的 `.quay/config.yml`，其 `providers.native.env`
       同时包含 `QUAY_NATIVE_TASKS_DIR`/`QUAY_NATIVE_ADR_DIR`/`QUAY_NATIVE_GOAL_DIR`/`QUAY_NATIVE_META_DIR` 四个键。
-- [ ] AC4：`quay-init.sh` 对一个**已存在且缺这三个键**的 config 幂等增补（不覆盖用户已设的值，
+- [x] AC4：`quay-init.sh` 对一个**已存在且缺这三个键**的 config 幂等增补（不覆盖用户已设的值，
       不重排其余键）；对已有四键的 config 再跑一次不产生 diff。
 - [ ] AC5：全量 `scripts/test.sh` 绿。
 
@@ -75,12 +75,84 @@ extra:
 `/home/yale/work/quay/goals/` 下**没有**新增任何文件。fixture 满足不算数
 （硬规则 4 推论三：只能被 fixture 满足的判据不是测量）。
 
+## 实现记录（2026-09-13，worker 直读代码 + 实测；含对立案基线的更正）
+
+**⚠️ 立案基线有一处误读，先更正**：Proposal 与「相关任务」里引的
+`plugin/scripts/quay-init.sh:989-990` 那个只有 `QUAY_NATIVE_TASKS_DIR` 一个键的 `env:` 块，
+**属于 `write_provider_config`（:1097）——一个从未被任何路径调用的死函数**。活着的生成器是
+`write_config`（:2187，调用点 :2549 / :2562），**它在全新安装路径上早已写出全部四个键**（:2214-2218）。
+⇒ **AC3 在活路径上本来就是满足的**；本条实测到的价值是把它**钉住**（此前无测试）+ 补上 **AC4**
+（升级路径确实缺三个键）+ 修**根因**。这也是「两副本」的一次实例：我在 `write_provider_config`
+定义处加了 `⛔ DEAD CODE — NEVER CALLED` 标记并写明「立案基线就是被它误导的」（同族死函数还有
+`backup_config`/`rollback_config_on_exit`）。**删除留作后续**，不在本条 Touches 内。
+
+**实际改动（三处）**：
+1. `packages/quay-native/src/carrier-dirs.ts`（新）——五个解析器从 `bin/quay-native.ts` 抽出。
+   抽出理由是**可测性**：bin 在 import 时无条件执行 `main()`，测试**够不到**这些函数，而它们决定的
+   正是「读/写哪个工作区的 adr/goal/meta」。sibling 现由**已解析的 tasksDir** 推导
+   （`path.dirname(resolveTasksDir())`），与 `src/mcp-server.ts` 自己的默认值同形；env override 仍最高；
+   cwd-relative fail-open 兜底原样保留、仍只在同一条件下打印落点。
+   ⛔ 硬规则 5b：`resolveDocsDir` 是**同一文件里的兄弟实例**（自带一份同样的 cwd walk），
+   一并走同一 helper —— 不是只修被报出来的那三个。
+2. `packages/quay-native/bin/quay-native.ts`——删本地五个函数，改为 import。
+3. `plugin/scripts/quay-init.sh`——新增 `ensure_provider_carrier_env`，挂在**已有 config 的升级路径**
+   （`write_config` 的 existing 分支）。**行级插入**而非 yaml round-trip：`yaml.safe_dump` 会重排整个
+   文档并吞注释（`ensure_loop_config` 自己的注释就点名过这个副作用）。值的形式**镜像已有
+   `QUAY_NATIVE_TASKS_DIR` 的形式**（`./tasks` ⇒ `./adr`；绝对 ⇒ 绝对），env 块不混形。
+
+**AC2 的字面与实质（避免读者按字面误判）**：`resolveSiblingDir` 函数体内**已无**
+`findRepoRoot(process.cwd())`；它走 `resolveTasksDirWithSource()`，后者在 env pin 存在时
+**根本不碰** `findRepoRoot`（env 分支先返回）。只有在 tasksDir 自己也得靠 cwd 兜底时才用——
+那正是 Plan 要的形态，且 tasks 面的既有契约未改。
+
+**取假控制（两个方向都做了，不是只做单向）**：
+- 单测 12 个（`packages/quay-native/test/resolve-sibling-dir.test.mjs`）：每个隔离测试都把 cwd 放在
+  **另一个真实 workspace** 里，使改前解析有**确定的错值**可返；端到端那个经 Core 同款 stdio seam
+  拉起 provider MCP，并在「另一个 workspace」里放一条 **SENTINEL goal**。换回改前实现 ⇒ **5 红**。
+- 配置面 8 个（`plugin/test/quay-init-config-env-keys.test.mjs`）：跑**真 quay-init.sh** 并读它写出的
+  文件（不是单测那个函数——函数单测绿而函数从未被调用正是「实现但未接线」）；删掉调用点 ⇒
+  **AC4 的 5 个红而 AC3 保持绿**（失败归因正确）。
+
+**DoD（真实第三方项目 `/home/yale/work/quay-fleet`，非 fixture、非临时目录）**：
+provider MCP 按 Core 的姿势拉起（`cwd=/home/yale/work/quay/plugin/vendor/quay-native`，
+env **只** pin `QUAY_NATIVE_TASKS_DIR` —— 即 **pre-pin 项目的真实形状**），**同一项目、同一目录**，
+改前/改后对照：
+
+| 读数 | 改前（develop 的 bin，未改） | 改后（本任务 bin） |
+|---|---|---|
+| `goal_list` | **124**（AC-143…） | **5**（AC-001..004 + GOAL-001 = 该项目自己的） |
+| `adr_list` | **36**（ADR-001…） | **0** |
+| `meta_list` | **5**（META-001…） | **0** |
+
+（该项目自有：goals 5 / adr 0 / meta 0。）改后**真实创建**一条 goal（AC-9901）⇒ 落在
+`/home/yale/work/quay-fleet/goals/`，`/home/yale/work/quay/goals/` 计数 **124 → 124（无新增）**。
+⇒ 读面、写面、DoD 三问同时满足。
+
+**⚠️ 诚实记号（副作用未藏）**：那次 `goal_write` 还触发了 quay-fleet **自己的**
+`goals: AC-9901 create by cli:…` 提交（该项目的 goal 写入带 git 包装）。已用
+`git reset --mixed HEAD~1` + 删文件**原样还原**（HEAD 回到 `4aad8a9`，`git status` 干净，
+`goals/` 回到 5 个文件）。**DoD 的写入探针在真实项目上不是零副作用的**，不留痕就等于谎报。
+
+**顺带（都是被 scoped gate 逼出来的，非主动扩范围）**：
+- `plugin/test/quay-init.test.mjs` 的「byte-identical no-op」fixture 补上四个 pin。它断言
+  「无需改动的项目不得被改写」，而该 fixture 原本**一个 env 键都没有** ⇒ 在本条之后它已不是
+  「无需改动」的项目（补 pin 是正确行为）。**恢复其前提，而不是放宽断言**，负控制力度不变。
+- `docs/analysis/quay-init-closure-ratchet.baseline.json` 重新锚定：footprint **不变**
+  （3 files / 568 bytes），只有 source sha 与 fingerprint 动 ⇒ 收缩棘轮未被削弱。
+- 该 config 形状（真实项目 config 逐字拷贝、env 块内含注释、loop 值全等）实测**逐字节不变**。
+
+**AC5 留未勾（`全量 scripts/test.sh 绿`）**：全量套件由 fan-in 跑，worker 不跑全量；该条文本自带
+`全量套件绿` 标记，按既有约定走 pass-external。
+
 ## Touches
 
 - packages/quay-native/bin/quay-native.ts
+- packages/quay-native/src/carrier-dirs.ts
 - plugin/scripts/quay-init.sh
 - packages/quay-native/test/resolve-sibling-dir.test.mjs
 - plugin/test/quay-init-config-env-keys.test.mjs
+- plugin/test/quay-init.test.mjs
+- docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-quay-init-omits-adr-goal-meta-dir-env-third-party-leak.md
 
 ## 实现提示：测试落点与分组（2026-09-13 直读 `scripts/test.sh` 头注释核实，非转述）
@@ -91,6 +163,8 @@ extra:
 初稿曾写成 `test/quay-init-config-env-keys.test.mjs`，那个位置**套件永远跑不到** ⇒ AC3/AC4 会静默空转
 （硬规则 3b：一个不可能报红的检查与「检查通过」同形）。已改正。
 `packages/quay-native/test/resolve-sibling-dir.test.mjs` 命中 `packages/*/test/`，无需改。
+**✅ worker 侧已核实**：落地文件名与 Touches 逐字一致（初稿曾写成 `quay-init-carrier-env-pins.test.mjs`，
+已 `git mv` 到 Touches 声明的名字，不留第二个副本）。
 
 **② 分组**：AC3/AC4 要跑**真实 quay-init**，属于 `scripts/test.sh:86-98` 点名的
 **REAL-INSTALL install/quay-init family**——该族已于 round 162 整体收进 **`serial`** 组
@@ -99,6 +173,18 @@ extra:
 ⇒ 新测试文件首行应声明 **`// @test-group serial`**；漏声明会默认落到 `engine`（`:75-78`）
 并回到那个已知会 flake 的负载相里。另注：新文件必须 `import { test } from "node:test"`
 （`:16-20` 的 test-framework policy，豁免名单只减不增）。
+**✅ worker 侧已核实**：落地文件首行是 `// @test-group serial` + `// @load-sensitive real-install`，
+且 `import { test, describe, after } from "node:test"`。
+
+**③ 额外发现（同一条纪律的第三个实例，留给下游）**：`scripts/worktree-include.sh:47-48` 的
+`PRIMARY=$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')` 在 `set -o pipefail`
+下会因 awk 提前 `exit` 触发 git 的 SIGPIPE ⇒ 赋值语句拿到 **141** ⇒ `set -e` **静默终止整个脚本**
+（无任何输出）。后果：`dispatch-worktree-setup.sh` 的 provision 步报 `worktree-include.sh failed`，
+**worktree 里没有 `.quay/config.yml`**。本次 worker 实测命中一次（退出码 141、零输出），
+绕法 = 手工补 `.quay/config.yml` + `plugin/vendor/*/dist/*.js`（即声明清单的内容）。
+与 `gap-...-worker-worktree-provision` 同族但**根因不同**（那条是 grep -q 的 SIGPIPE），
+本条是 **awk … exit** 的 SIGPIPE（本机复现率非 100%，故为间歇）。⛔ 本条**不改**
+（不在 Touches 内），只留痕。
 
 ## 共同形态（本条是同一根因族的第一个实例）
 
@@ -120,6 +206,10 @@ extra:
 反之亦然。⛔ 不要把其中任一条的修复当作该族已闭合的证据（硬规则 5b：在某处修好 X ≠ X 只在那一处）。
 
 ## 相关任务（立案时按机制查重的记录，非上文证据的一部分）
+
+> **⚠️ 更正（2026-09-13 worker 实测，先读这条再读下面）**：本节的「立案时的位置读数」引的是
+> **死函数** `write_provider_config`；活路径 `write_config` 早已写四键。详见上面「实现记录」首段。
+> 保留原文不改写，因为**误读本身是证据**（这条误读正是死副本造成的）。
 
 `gap-quay-init-env-only-tasks-dir-goals-adr-meta-land-inside-npm-package`（**status: done**，2026-09-10）
 命中同一个函数，但**是另一条分支、另一种落点**，故不视为重复：
