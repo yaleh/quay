@@ -111,8 +111,23 @@ t("AC3 — registry is parsed from scripts/test.sh, tier annotations land on the
   assert.ok(contract, "task-contract-check must be in the registry");
   assert.equal(contract.tier, "always");
   assert.equal(contract.scopedMode, "subset-touched");
-  // checker-mutation-check (the ~13s meta-check) must be `full` — never in scoped.
-  assert.equal(byName.get("checker-mutation-check")?.tier, "full");
+  // checker-mutation-check (the whole-store meta-check) must stay `full` — never in scoped.
+  // ⚠️ `name` is the SCRIPT identity (parseStaticCheckRegistry derives it from the
+  // `${repo_root}/plugin/scripts/<name>.(sh|ts)` path, NOT from the `run_checker "<label>"`), so a
+  // change-tier companion that invokes the SAME script carries the SAME name — and a name→tier Map
+  // is last-wins, so it reads whichever registration happens to come last. There are two such
+  // colliding pairs: `checker-mutation-check` / its `--check-changed` companion added by
+  // gap-checker-mutation-check-has-no-change-tier-companion, and the older precedent
+  // `quay-init-closure-ratchet` / `-stale` (runner-static-gate.ts). Both registrations are pinned
+  // here by their command line (the only discriminator) instead of by the shared name.
+  const mutations = registry.filter((c) => c.name === "checker-mutation-check");
+  assert.equal(mutations.length, 2, `whole-store registration + its change-tier companion: ${JSON.stringify(mutations.map((c) => c.commandLine))}`);
+  const mutationFull = mutations.filter((c) => c.tier === "full");
+  assert.equal(mutationFull.length, 1, "exactly ONE registration of checker-mutation-check must be `full` (deferred ≠ dropped)");
+  assert.match(mutationFull[0].commandLine, /--check$/, "the full registration must be the WHOLE-STORE mode (--check)");
+  const mutationCompanion = mutations.filter((c) => c.tier === "change");
+  assert.equal(mutationCompanion.length, 1, "exactly one registration must be the change-tier companion (else the changers' own scoped gate never runs it)");
+  assert.match(mutationCompanion[0].commandLine, /--check-changed/, "the companion must be the DELTA-NARROWED mode (--check-changed)");
   // split-or-commit + ac-carryover whole-store ratchets are `full` (deferred).
   assert.equal(byName.get("it0-split-or-commit-check")?.tier, "full");
   assert.equal(byName.get("task-ac-carryover-check")?.tier, "full");
@@ -183,11 +198,22 @@ t("AC1 — a test-file touch selects the test ratchets + contract consumer, defe
   // neither selected nor deferred — they are absent from the scoped surface by construction.
   assert.ok(!regNames.includes("strategic-doc-staleness-check"), "strategic-doc moved to pre-commit (run_doc_checks), not in scoped registry");
   assert.ok(!regNames.includes("drive-contract-check"), "drive-contract moved to pre-commit (run_doc_checks), not in scoped registry");
-  // AC2 partition: every checker is either selected or deferred — nothing is dropped.
+  // AC2 partition: nothing is dropped — every registry ENTRY is either selected or deferred.
+  // ⚠️ The SELECTED side is matched by `commandLine`, not by `name`: `name` is the script identity
+  // (path-derived, see the AC3 registry test above), so the two registrations of a checker that
+  // collide on it (`checker-mutation-check` / `--check-changed`, `quay-init-closure-ratchet` /
+  // `-stale`) are indistinguishable by name. `deferred` carries names only, so "selected XOR
+  // deferred" is NOT assertable per entry once a selected companion shares its whole-store
+  // sibling's name — the direction that actually matters is asserted explicitly instead: a
+  // full-tier entry must never appear as a selected command.
+  const selectedCmds = new Set(selected.map((s) => s.commandLine));
   for (const c of registry) {
-    const inSel = names.includes(c.name);
+    const inSel = selectedCmds.has(c.commandLine);
     const inDef = deferred.includes(c.name);
-    assert.ok(inSel !== inDef, `checker ${c.name} must be in exactly one of selected/deferred`);
+    assert.ok(inSel || inDef, `checker ${c.name} (${c.commandLine}) must be selected or deferred — nothing is dropped`);
+    if (c.tier === "full") {
+      assert.ok(!inSel, `full-tier ${c.name} must NEVER be selected in scoped mode: ${c.commandLine}`);
+    }
   }
 });
 
