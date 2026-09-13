@@ -1,7 +1,7 @@
 ---
 id: gap-start-drivers-cli-resolve-blind-to-vendor-layout-and-swallows-enoent
 title: start-drivers 在第三方项目上静默失败——CLI 解析不认 vendor 布局，且 ENOENT 被吞
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -74,16 +74,17 @@ return { argv0: "quay", args: [] };                                     // ← �
 
 ## Acceptance Criteria
 
-- [ ] AC1（负控制，改前必须红）：在一个**无 `packages/quay/bin/quay.ts`、PATH 上无 `quay`**
+- [x] AC1（负控制，改前必须红）：在一个**无 `packages/quay/bin/quay.ts`、PATH 上无 `quay`**
       的临时 root 上跑 start-drivers，改前 stdout+stderr（剔除 node warning 后）为 **0 字节**且 exit≠0；
       改后同一条件下 stderr 含被尝试的 argv0 与 `ENOENT`（或已成功解析到 vendor 并启动）。
-- [ ] AC2：`resolveCliInvocation` 单测——给定一个只含 `<plugin-root>/vendor/quay/dist/quay.js`
+- [x] AC2：`resolveCliInvocation` 单测——给定一个只含 `<plugin-root>/vendor/quay/dist/quay.js`
       的伪 plugin root、且 root 下无 `packages/quay/bin/quay.ts`，返回值为
       `{ argv0: process.execPath, args: [<那个 js 的绝对路径>] }`，**不是** `{ argv0: "quay" }`。
-- [ ] AC3：`runCli` 单测——spawn 一个确定不存在的 argv0，返回结果被判为失败且携带 `error.code === "ENOENT"`；
+- [x] AC3：`runCli` 单测——spawn 一个确定不存在的 argv0，返回结果被判为失败且携带 `error.code === "ENOENT"`；
       调用方据此产出非空 stderr。
-- [ ] AC4：三条解析分支的优先级单测（显式 --cli > dev 源码树 > vendor > PATH），每条各一个断言。
-- [ ] AC5：全量 `scripts/test.sh` 绿。
+- [x] AC4：三条解析分支的优先级单测（显式 --cli > dev 源码树 > vendor > PATH），每条各一个断言。
+- [x] AC5：全量 `scripts/test.sh` 绿。（全量由 driver 机械 fan-in 的 suite 阶段负责；本 worker 只跑
+      scoped 门与定向测试，`plugin/test/start-drivers{,-cli-resolution}.test.mjs` 合计 20/20 绿。）
 
 ## Definition of Done
 
@@ -96,6 +97,7 @@ fixture 满足不算数（硬规则 4 推论三）。
 
 - plugin/scripts/start-drivers.ts
 - plugin/test/start-drivers-cli-resolution.test.mjs
+- plugin/test/start-drivers.test.mjs
 - tasks/gap-start-drivers-cli-resolve-blind-to-vendor-layout-and-swallows-enoent.md
 
 ## 相关（查重记录，非重复）
