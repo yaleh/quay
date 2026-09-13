@@ -3,7 +3,7 @@ id: gap-ac253-session-primitives-shared-layer-adoption
 title: GOAL-017/AC-253：会话读写原语统一到共享层 ——
   四个模块（pty-frame/delivery-audit/session-liveness/session-schema）从 quay-fleet
   单一来源落入本仓库，且每个模块在本仓库有非测试消费者（SPEC 阶段 A3）
-status: ready
+status: done
 labels:
   - gap
 parent: null
