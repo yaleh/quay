@@ -2,7 +2,7 @@
 id: gap-correctness-checkers-opt-in-not-default-suite-member
 title: 两个已修正逻辑但仍非默认套件成员的正确性相关 checker（dispatch-record 空指纹 /
   direct-to-develop-bypass-check）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
