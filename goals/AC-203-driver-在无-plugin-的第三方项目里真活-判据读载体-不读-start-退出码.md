@@ -1,7 +1,7 @@
 ---
 id: AC-203
 title: driver 在无 plugin/ 的第三方项目里真活——判据读载体，⛔ 不读 start 退出码
-status: achieved
+status: active
 kind: criterion
 goal: GOAL-009
 criterion: >-
@@ -34,14 +34,13 @@ criterion: >-
 
   if len(kinds)>=2: sys.exit(0)
 
-  sys.stderr.write("GOAL-009-AC-203: 合格记录覆盖的 kind=%s （需要 >=2 个不同的 driver kind）\n" % sorted(kinds));
-  sys.exit(1)
+  sys.stderr.write("GOAL-009-AC-203: 合格记录覆盖的 kind=%s （需要 >=2 个不同的 driver
+  kind）\n" % sorted(kinds)); sys.exit(1)
 
   P
 expect: exit 0 = 载体中存在 ac=GOAL-009-AC-203 的记录，其 host≠本机 ∧ project_root 不在本仓库内 ∧
   has_plugin_dir=false ∧ driver_alive=1 ∧ carrier_records>0，且这些记录携带的 kind 取值
-  【至少两个不同】。exit 1 = 无（含「只有一种 kind」——缺 kind 的记录不计入）。exit
-  3 = 载体缺失。
+  【至少两个不同】。exit 1 = 无（含「只有一种 kind」——缺 kind 的记录不计入）。exit 3 = 载体缺失。
 origin: "2026-09-09 B 机实测：quay driver start --kind promotion 打印 started:
   supervisor pid=2598590 且 exit=0，而 status 为 {supervisor_alive:0,
   driver_alive:0, alive:0, carrier_records:0}；真实死因只在目标项目内部日志：driver-runtime:
@@ -60,6 +59,18 @@ statusLog:
     to: achieved
     actor: goal-driver
     reason: "I2: criterion pass"
+  - at: 2026-09-13T05:24:11.551Z
+    from: achieved
+    to: active
+    actor: goal-cli
+    reason: 人 2026-09-13 裁定：退回 active 并重开 GOAL-009。理由——本判据于 2026-09-13
+      03:22（gap-ac203-record-schema-has-no-kind-dimension）加入 kind 维度后收紧为「证据须覆盖
+      >=2 个不同 driver kind」，实测当前载体中 AC-203 记录的合格 kind 仅 {promotion}（另 3 条旧记录无
+      kind 字段，按「缺值≠合格」不计），判据当前为假。⛔ 不降低标准：缺的是 worker 类 driver 的存活证据，需真做而非改判据。
+fidelity:
+  verdict: faithful
+  reason: "fidelity judge: faithful"
+  at: 2026-09-13T05:24:11.550Z
 ---
 **判据（能取假）**：2026-09-09 干跑 exit 1。**为什么不能读退出码**：今天 start 的退出码就是 0 而系统是死的 ⇒ 任何形如 exit 0 的判据恒绿且零信息（硬规则 3b：起不来与合格同形）。**复用而非新造**：start-drivers.ts:54 的 parseDriverStatus 已把「读不出」与「不活」分成两个取值，实现时复用它。**结构性反自证**：判据显式要求 host≠本机 ∧ project_root ∉ 本仓库——否则在本仓库上一跑就绿（gap-ac118 实证：自测是结构上不可能报红的绿）。
 
