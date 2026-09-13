@@ -32,7 +32,7 @@ node --experimental-strip-types plugin/scripts/start-drivers.ts --root <third-pa
 底层 `quay driver start --kind promotion --root <third-party>` 单独跑是 **EXIT=0 正常启动**的，
 所以故障完全在 start-drivers 这一层。
 
-**根因（已定位到行）**：`plugin/scripts/start-drivers.ts:83` `resolveCliInvocation`：
+**根因（已定位到函数）**：`plugin/scripts/start-drivers.ts` 的 `resolveCliInvocation`：
 
 ```ts
 const srcTs = path.join(root, "packages", "quay", "bin", "quay.ts");   // quay 开发检出布局
@@ -51,7 +51,8 @@ return { argv0: "quay", args: [] };                                     // ← �
 
 2. **spawn ENOENT 被吞，违背本文件自己的文档化承诺。** `argv0: "quay"` 不存在时
    `spawnSync` 返回的是 `status: null` + `error: ENOENT`（**不是**非零 status），
-   诊断因此丢失。而 `start-drivers.ts` 头注释第 21-24 行逐字写着：
+   诊断因此丢失。而 `start-drivers.ts` 头注释中承诺
+   `Failure paths are RELAYED, never swallowed` 的那一段逐字写着：
 
    > Failure paths are RELAYED, never swallowed: `quay driver start` exiting non-zero … has its
    > stderr forwarded verbatim and this script exits non-zero with the same reason.
@@ -94,7 +95,7 @@ fixture 满足不算数（硬规则 4 推论三）。
 ## Touches
 
 - plugin/scripts/start-drivers.ts
-- test/start-drivers-cli-resolution.test.mjs
+- plugin/test/start-drivers-cli-resolution.test.mjs
 - tasks/gap-start-drivers-cli-resolve-blind-to-vendor-layout-and-swallows-enoent.md
 
 ## 相关（查重记录，非重复）
