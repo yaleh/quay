@@ -36,10 +36,14 @@ extra:
 
 **待查明（Plan 第 1 步的产出，⛔ 不要在此处预设结论）**：是 supervisor 起 driver 时未传 `--interval`（导致 driver 走单轮模式）、还是该字段对例程型 kind 根本没有消费者、抑或 5 秒是另一处独立的重启退避常量。`goal-driver.ts:38-39` 的用法注释显示它**同时支持** `--once` 与 `--interval <ms>` 两种模式，两条路都存在。
 
+**顺带撞到的不对称（2026-09-13 核实前提时发现，⛔ 不是本任务主体但影响它的形态判断）**：例程型三个 kind **没有独立的控制态文件**——`goal-control.json` / `quality-control.json` / `meta-control.json` 均不存在，而 `promotion-control.json` / `worker-control.json` 存在。⇒ 这三个 kind 可能**无法被 halt / drain / resume**（`driver-shared.ts` 的 `isHalted` 只认后两者的载体）。这与「所有 driver 都应作为产品化的一部分分发并实际运行」（人 2026-09-13 裁定）直接相关：**一个起得来却停不下来的 driver，产品化是不完整的**。本任务只记录该读数，⛔ 不在本任务内实现控制态——若确认为缺口应另立。
+
 ## Plan
 
 1. **先定位消费者**：grep `interval_ms` 的读取点，打印命中内容；确认 `goal`/`quality`/`meta` 三个 kind 的值**是否被任何代码读过**（零命中须配正控制——用 `promotion`/`worker` 的同字段验证谓词有效）。
 2. **定位那个 5 秒**：它是硬编码常量还是另一个配置项？打印其定义位置与取值。
+
+   ⚠️ **起点已知，⛔ 不要从零复现**：`gap-drain-on-routine-driver-empties-round-and-respawn-loops`（done）记载的日志形态与本任务**字面几乎一致**（`driver exited code=0` → `respawning driver in 5s`，每 5 秒一次），但其根因是 **halted 状态下 `runResidentQualityGateLoop` 用 `break` 退出整个循环**（`quality-gate-driver.ts:692-697`），修法 `break`→`continue`。**本任务已排除该成因**（2026-09-13 实测：archguard 的 `promotion-control.json` / `worker-control.json` 的 `halted` 均为 `false`，且 driver 日志显示 `currentRound: 3` 在正常干活）⇒ 是另一条路径。先读那条既有任务作对照，再往下查。
 3. **决定正确形态**：例程型 kind 应当 (a) 由 supervisor 按 interval 定时重启单轮进程，还是 (b) driver 自身常驻并按 interval 循环？**给出选择理由**，⛔ 不要两种都实现。
 4. **接线**：让声明值真正决定节奏。
 5. **⛔ 不得顺手改 `promotion`/`worker`**：这两个 kind 当前工作正常（实测本机 promotion 31 进程、worker 1 进程持续运行），改动面须限定在例程型 kind。
