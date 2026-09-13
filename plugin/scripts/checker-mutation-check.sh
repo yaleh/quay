@@ -33,6 +33,9 @@
 #   checker-mutation-check.sh --selftest           # meta-mutation self-check (AC4)
 #   checker-mutation-check.sh --repo-root <dir>    # parse THIS root's test.sh/workflows (tests only)
 #   checker-mutation-check.sh --meta-inject <mode> # test-only breakage: empty-manifest|skip-cases|invert-red
+#   checker-mutation-check.sh --check --only <csv> # run ONLY the named checkers' cases (narrowed cost)
+#   checker-mutation-check.sh --check-changed      # change-tier companion: run the cases of only the
+#                                                  # checkers THIS delta touches (see below)
 #
 # Case-script contract (plugin/scripts/checker-mutation-cases/<name>.sh):
 #   bash <case>.sh <workdir>
@@ -43,6 +46,42 @@
 #
 # Exit codes: 0 = all mutation cases behaved; 1 = violations found (stayed-green / always-red /
 # uncovered checker / empty manifest); 2 = usage/environment error.
+#
+# ── --check-changed: the CHANGE-TIER COMPANION (gap-checker-mutation-check-has-no-change-tier-companion) ──
+# The full-tier registration above is the whole-store兜底: it mutation-tests ALL registered checkers
+# in one ~19s-median (55.6s median over the last 7 recorded) pass, and it is DEFERRED out of scoped
+# runs — so the cost of a stale mutation case falls on an UNRELATED task's fan-in, but the task that
+# actually edited the checker never pays. Measured (`.quay/verification-round.jsonl`,
+# `STATIC_CHECK_FAILED: checker-mutation-check`): 8 fan-in静态闸 failures, last 2026-09-13T04:41:32Z.
+# This mode is the既定解法 this repo already used for the same defect class
+# (`quay-init-closure-ratchet-stale`, gap-quay-init-closure-ratchet-manual-reanchor-recurs: its
+# companion drove that checker's fan-in reds 35 → 0 after 2026-09-06): narrow the judgment to THIS
+# delta so it fires at the CHANGER's own scoped gate, while the full-tier check stays byte-unchanged
+# as the whole-store兜底 (delay ≠ drop, same design as gap-scoped-runs-pay-full-static-check-overhead).
+#
+# Judgment domain = the checkers THIS delta touches, derived from git (NOT the whole 71):
+#   base = first resolvable of develop / origin/develop / master / origin/master
+#   delta = `git diff --name-only base...HEAD` ∪ `git diff --name-only HEAD` ∪ untracked
+#   carriers = delta paths that name a REGISTERED checker, either
+#              `plugin/scripts/<name>.{sh,ts}` or `plugin/scripts/checker-mutation-cases/<name>.sh`
+#              (the mutation case IS a checker carrier: editing it changes what the checker is
+#              proven to catch). Plus: if the MANIFEST SOURCE itself changed
+#              (`plugin/scripts/runner-static-gate.ts` / `scripts/test.sh` / `.github/workflows/*.yml`)
+#              the registered SET may have grown ⇒ the whole-manifest覆盖度 (uncovered) dimension is
+#              re-verified here too — cheap, `--list`-based, no case execution.
+#   exit 0 = every touched checker's case behaved (and, when the manifest source moved, uncovered=0)
+#   exit 1 = a touched checker's case stayed-green / always-red / errored, OR a registered checker
+#            has no mutation case after a manifest-source change
+#
+# NOT-EVALUATED is reported as an explicit `NOT-EVALUATED` LINE with exit 0, NOT as exit 3 — a
+# deliberate deviation from this script's own exit-3 convention: the SCOPED runner
+# (`scripts/test.sh:run_scoped_static_checks_sel`) evaluates each selected checker command with a raw
+# `eval` under `set -euo pipefail`, so any non-zero — including 3 — ABORTS an innocent task's scoped
+# run. A delta whose Touches name a checker but whose actual git delta does not contain it (Touches
+# ⊋ delta is normal) must not abort; it must say so. Same scoped-safe convention as
+# `suite-bucket-drift-check` ("缓存缺失 ⇒ NOT-EVALUATED (exit 0 但可区分输出, 硬规则 3b)"). The
+# output vocabulary stays three-valued (PASS / RED / NOT-EVALUATED), so hard rule 3b holds: the
+# not-evaluated state is visible and never同形于 pass.
 
 # ── 统一 --help（gap-scripts-sprawl：用法在前、退出 0、无业务副作用）────────────────────
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
@@ -62,6 +101,9 @@ WORKFLOWS_GLOB="${repo_root}/.github/workflows/*.yml"
 
 # ── arg defaults ───────────────────────────────────────────────────────────────────────────────────
 meta_inject=""
+# --only <csv>: restrict the case run to these registered checkers (narrowed cost — the change-tier
+# companion's narrowing primitive; `--check-changed` fills it from the delta). Empty = whole manifest.
+_only_csv=""
 
 # ── manifest parsing (AC1: run_static_checks + run_operational_checks + run_doc_checks + CI, never hand-written) ──
 
@@ -119,6 +161,18 @@ source_of() {
 # has a mutation case file?
 has_case() {
   [ -f "${CASES_DIR}/$1.sh" ]
+}
+
+# _in_list <needle> <haystack...> — exact membership. Bash-native on purpose: `grep -q` would exit
+# early and (under a caller's `pipefail`) turn a TRUE predicate into a 141 pipeline failure
+# (memory: pipefail-plus-grep-q-makes-predicates-read-false-when-true).
+_in_list() {
+  local _needle="$1"; shift
+  local _item
+  for _item in ${1+"$@"}; do
+    [ "$_item" = "$_needle" ] && return 0
+  done
+  return 1
 }
 
 # ── helpers ────────────────────────────────────────────────────────────────────────────────────────
@@ -214,9 +268,31 @@ run_cases() {
   _json_mode="$1"
   _stayed_green=0; _always_red=0; _errors=0; _uncovered_count=0; _regression_green=0
   _stayed_names=(); _always_names=(); _error_names=(); _uncovered_names=()
+  _executed_names=()
   _results_json=""
   local checkers=() name case_list=() reg
-  while IFS= read -r name; do checkers+=("$name"); done < <(all_registered_checkers)
+  local all=() ; while IFS= read -r name; do all+=("$name"); done < <(all_registered_checkers)
+  if [ -n "${_only_csv}" ]; then
+    # --only: restrict the run to the named registered checkers. An unregistered name is a usage
+    # error (exit 2), never a silent no-op — a narrowed run that silently ran nothing would be
+    # indistinguishable from a green one (hard rule 3b).
+    local on
+    for on in ${_only_csv//,/ }; do
+      on="${on//[[:space:]]/}"
+      [ -n "$on" ] || continue
+      if ! _in_list "$on" ${all[@]+"${all[@]}"}; then
+        echo "checker-mutation-check: ERROR — --only names an unregistered checker: ${on}" >&2
+        return 2
+      fi
+      _in_list "$on" ${checkers[@]+"${checkers[@]}"} || checkers+=("$on")
+    done
+    if [ "${#checkers[@]}" -eq 0 ]; then
+      echo "checker-mutation-check: ERROR — --only carried no checker name ('${_only_csv}')" >&2
+      return 2
+    fi
+  else
+    checkers=(${all[@]+"${all[@]}"})
+  fi
   for name in "${checkers[@]}"; do
     if has_case "$name"; then
       case_list+=("$name")
@@ -224,13 +300,18 @@ run_cases() {
       _uncovered_count=$((_uncovered_count + 1)); _uncovered_names+=("$name")
     fi
   done
-  for reg in regression-rename-negative-control-probe regression-live-telemetry-empty-activity; do
-    if has_case "$reg"; then
-      case_list+=("$reg")
-    else
-      _uncovered_count=$((_uncovered_count + 1)); _uncovered_names+=("$reg")
-    fi
-  done
+  # The two AC5 regression cases are part of the mechanism's WHOLE-STORE self-check, not of a
+  # per-delta judgment — in --only mode they are out of scope by construction (the full-tier
+  # registration still runs them every round).
+  if [ -z "${_only_csv}" ]; then
+    for reg in regression-rename-negative-control-probe regression-live-telemetry-empty-activity; do
+      if has_case "$reg"; then
+        case_list+=("$reg")
+      else
+        _uncovered_count=$((_uncovered_count + 1)); _uncovered_names+=("$reg")
+      fi
+    done
+  fi
   # Any --meta-inject short-circuits the case loop: the injection IS the broken state being
   # demonstrated (parser empty / loop skipped / detection inverted), so the gate must fail
   # without paying the cost of a real run. The per-case behavior is tested by the plain run.
@@ -240,6 +321,7 @@ run_cases() {
 
   local start_ms end_ms
   start_ms="$(now_ms)"
+  _executed_names=(${case_list[@]+"${case_list[@]}"})
   for name in "${case_list[@]}"; do
     local workdir exit_code res
     workdir="$(mktemp -d "${TMPDIR:-/tmp}/cmc-case-XXXXXX")"
@@ -291,6 +373,12 @@ run_plain() {
   run_cases 0
   local overall=$?
   echo ""
+  # Narrowed runs say so LOUDLY (hard rule 3b): `checkers_total` is a manifest fact (whole store),
+  # so a reader must never mistake "1 case ran" for "71 checkers verified".
+  if [ -n "${_only_csv}" ]; then
+    echo "checkers_executed: ${#_executed_names[@]}"
+    echo "only (delta-narrowed — ⛔ NOT the whole manifest): ${_executed_names[*]}"
+  fi
   echo "checkers_total: $(registered_count)"
   echo "checkers_with_mutation: $(covered_count)"
   echo "mutations_that_stayed_green: ${_stayed_green}"
@@ -311,6 +399,8 @@ run_plain() {
   echo "duration_ms: ${_run_duration_ms}"
   if [ "$overall" -ne 0 ]; then
     echo "RESULT: FAIL — a checker stayed green under a defect it should catch, or the manifest is incomplete/broken."
+  elif [ -n "${_only_csv}" ]; then
+    echo "RESULT: PASS — every checker IN THIS DELTA went RED under its injected defect and GREEN on restore (narrowed run; the whole-store set is the full-tier registration's job)."
   else
     echo "RESULT: PASS — every registered checker went RED under its injected defect and GREEN on restore; mutations_that_stayed_green = 0."
   fi
@@ -332,15 +422,137 @@ join_json_names() {
 run_json() {
   run_cases 1
   local overall=$?
-  printf '{"checkers_total":%d,"checkers_with_mutation":%d,"mutations_that_stayed_green":%d,"stayed_green":[%s],"mutations_that_always_red":%d,"always_red":[%s],"errors":%d,"error_names":[%s],"uncovered":[%s],"results":%s,"duration_ms":%d}\n' \
+  printf '{"checkers_total":%d,"checkers_with_mutation":%d,"mutations_that_stayed_green":%d,"stayed_green":[%s],"mutations_that_always_red":%d,"always_red":[%s],"errors":%d,"error_names":[%s],"uncovered":[%s],"results":%s,"duration_ms":%d,"only":[%s],"checkers_executed":[%s]}\n' \
     "$(registered_count)" "$(covered_count)" \
     "$_stayed_green" "$(join_json_names ${_stayed_names[@]+"${_stayed_names[@]}"})" \
     "$_always_red" "$(join_json_names ${_always_names[@]+"${_always_names[@]}"})" \
     "$_errors" "$(join_json_names ${_error_names[@]+"${_error_names[@]}"})" \
     "$(join_json_names ${_uncovered_names[@]+"${_uncovered_names[@]}"})" \
     "$_results_json" \
-    "$_run_duration_ms"
+    "$_run_duration_ms" \
+    "$(csv_to_json_array "${_only_csv}")" \
+    "$(join_json_names ${_executed_names[@]+"${_executed_names[@]}"})"
   return "$overall"
+}
+
+# csv_to_json_array <csv> — emit a JSON string array from a comma-separated list ([] for empty).
+csv_to_json_array() {
+  local _csv="$1" _first=1 _n
+  if [ -n "$_csv" ]; then
+    for _n in ${_csv//,/ }; do
+      _n="${_n//[[:space:]]/}"
+      [ -n "$_n" ] || continue
+      [ "$_first" -eq 1 ] || printf ','
+      printf '"%s"' "$_n"
+      _first=0
+    done
+  fi
+}
+
+# ── --check-changed (change-tier companion) ────────────────────────────────────────────────────────
+
+# The first resolvable delta base under $repo_root. Empty + non-zero when none resolves (a non-git
+# root, or a checkout with no develop/master) — "读不懂输入" must not be turned into "no carriers".
+delta_base() {
+  local _b
+  for _b in develop origin/develop master origin/master; do
+    if git -C "$repo_root" rev-parse --verify --quiet "${_b}^{commit}" >/dev/null 2>&1; then
+      printf '%s\n' "$_b"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# This delta's changed paths, repo-relative, deduped — committed branch delta (three-dot, so a
+# develop that advanced past the fork does not show up as OUR change) ∪ working-tree delta vs HEAD
+# ∪ untracked. A committed change and an uncommitted one are both "this delta" (the worker runs the
+# scoped gate before AND after committing).
+delta_files() {
+  local _base
+  _base="$(delta_base)" || return 1
+  { git -C "$repo_root" diff --name-only "${_base}...HEAD" 2>/dev/null || true
+    git -C "$repo_root" diff --name-only HEAD 2>/dev/null || true
+    git -C "$repo_root" ls-files --others --exclude-standard 2>/dev/null || true
+  } | sed -e 's|^\./||' -e '/^[[:space:]]*$/d' | sort -u
+}
+
+run_changed() {
+  local _json="$1"
+  local _base _delta _f _n _rc=0
+  if ! _base="$(delta_base)"; then
+    echo "checker-mutation-check [--check-changed]: NOT-EVALUATED — no delta base (develop / origin/develop / master / origin/master) resolvable under ${repo_root}; cannot derive this change's checker carriers."
+    return 0
+  fi
+  if ! _delta="$(delta_files)"; then
+    echo "checker-mutation-check [--check-changed]: NOT-EVALUATED — git could not enumerate the delta against ${_base} under ${repo_root}."
+    return 0
+  fi
+
+  # Names of the REGISTERED checkers this delta carries — either the checker script itself or its
+  # mutation case (editing the case changes what the checker is proven to catch).
+  local _reg_list=" $(all_registered_checkers | tr '\n' ' ')"
+  local carriers=() registry_hit=0
+  while IFS= read -r _f; do
+    [ -n "$_f" ] || continue
+    case "$_f" in
+      plugin/scripts/runner-static-gate.ts|scripts/test.sh|.github/workflows/*.yml) registry_hit=1 ;;
+    esac
+    case "$_f" in
+      plugin/scripts/checker-mutation-cases/*.sh) _n="$(basename "$_f" .sh)" ;;
+      plugin/scripts/*.sh|plugin/scripts/*.ts)
+        _n="$(basename "$_f")"; _n="${_n%.sh}"; _n="${_n%.ts}" ;;
+      *) continue ;;
+    esac
+    if [ "${_reg_list#*" $_n "}" != "$_reg_list" ]; then
+      _in_list "$_n" ${carriers[@]+"${carriers[@]}"} || carriers+=("$_n")
+    fi
+  done <<< "$_delta"
+
+  if [ "${#carriers[@]}" -eq 0 ] && [ "$registry_hit" -eq 0 ]; then
+    echo "checker-mutation-check [--check-changed]: NOT-EVALUATED — this delta (base ${_base}) carries no checker carrier (no registered checker script, no mutation case, and no manifest source), so no mutation case of it can be stale. The whole-store set is still verified by the full-tier registration."
+    return 0
+  fi
+
+  # The manifest source moved ⇒ the registered SET may have grown ⇒ re-verify the whole-manifest
+  # 覆盖度 (uncovered) HERE, at the changer's gate — this is the AC1b dimension ("a new checker with
+  # no mutation case can never silently slip through") arriving at the task that added it instead of
+  # at an unrelated task's fan-in. Cheap: --list-grade file existence, no case execution.
+  local uncovered=() _nm
+  if [ "$registry_hit" -eq 1 ]; then
+    while IFS= read -r _nm; do has_case "$_nm" || uncovered+=("$_nm"); done < <(all_registered_checkers)
+    if [ "${#uncovered[@]}" -gt 0 ]; then
+      _rc=1
+      echo "checker-mutation-check [--check-changed]: RED — the manifest source (runner-static-gate.ts / scripts/test.sh / .github/workflows) changed in this delta and ${#uncovered[@]} registered checker(s) have NO mutation case:"
+      printf '  - %s\n' "${uncovered[@]}"
+    else
+      echo "checker-mutation-check [--check-changed]: manifest source changed in this delta — all $(registered_count) registered checkers have a mutation case (uncovered = 0)."
+    fi
+  fi
+
+  if [ "${#carriers[@]}" -eq 0 ]; then
+    if [ "$_json" = "1" ]; then
+      printf '{"mode":"check-changed","delta_base":"%s","registry_changed":true,"carriers":[],"uncovered":[%s],"checkers_total":%d,"result":"%s"}\n' \
+        "$_base" "$(join_json_names ${uncovered[@]+"${uncovered[@]}"})" "$(registered_count)" \
+        "$([ "$_rc" -eq 0 ] && echo pass || echo fail)"
+    else
+      echo "checker-mutation-check [--check-changed]: no checker carrier in this delta — 只做了 manifest 覆盖度复验（未执行任何 mutation case；whole-store 全量仍由 full-tier 注册承担）。"
+      echo "checkers_total: $(registered_count)"
+      echo "uncovered: ${#uncovered[@]}"
+      echo "duration_ms: 0"
+      if [ "$_rc" -ne 0 ]; then
+        echo "RESULT: FAIL — a registered checker has no mutation case (uncovered > 0)."
+      else
+        echo "RESULT: PASS — manifest coverage verified; nothing else to judge for this delta."
+      fi
+    fi
+    return "$_rc"
+  fi
+
+  echo "checker-mutation-check [--check-changed]: delta base ${_base}; ${#carriers[@]} checker carrier(s) in THIS delta (⛔ not the whole $(registered_count)-checker manifest): ${carriers[*]}"
+  _only_csv="$(IFS=,; echo "${carriers[*]}")"
+  if [ "$_json" = "1" ]; then run_json || _rc=1; else run_plain || _rc=1; fi
+  return "$_rc"
 }
 
 # ── --selftest (AC4 meta-mutation: break the mechanism, it must fail) ─────────────────────────────
@@ -383,6 +595,8 @@ while [ "$#" -gt 0 ]; do
     --run) cmd="run" ;;
     --check) cmd="check" ;;
     --selftest) cmd="selftest" ;;
+    --check-changed) cmd="check-changed" ;;
+    --only) shift; _only_csv="${_only_csv:+${_only_csv},}${1:-}" ;;
     --json) json=1 ;;
     --repo-root) shift; repo_root="$1"; CASES_DIR="${repo_root}/plugin/scripts/checker-mutation-cases"; TEST_SH="${repo_root}/scripts/test.sh"; STATIC_GATE="${repo_root}/plugin/scripts/runner-static-gate.ts"; WORKFLOWS_GLOB="${repo_root}/.github/workflows/*.yml" ;;
     --meta-inject) shift; meta_inject="$1" ;;
@@ -391,6 +605,12 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
+
+# --check-changed derives its own narrowing from the delta; an explicit --only would silently
+# override it (fail-closed on the ambiguous combination rather than picking one).
+if [ "$cmd" = "check-changed" ] && [ -n "$_only_csv" ]; then
+  die_usage
+fi
 
 case "$cmd" in
   list)
@@ -402,6 +622,9 @@ case "$cmd" in
     else
       run_plain
     fi
+    ;;
+  check-changed)
+    run_changed "$json"
     ;;
   selftest)
     run_selftest

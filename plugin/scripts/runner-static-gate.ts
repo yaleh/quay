@@ -376,6 +376,32 @@ run_static_checks() {
   # must be 0 (AC3), and the mechanism also mutates itself (AC4, --selftest).
   # @static-tier full  (the ~13s meta-check on the checkers THEMSELVES — deferred to the full-suite gate)
   run_checker "checker-mutation-check" bash "${repo_root}/plugin/scripts/checker-mutation-check.sh" --check
+  echo "== checker-mutation change-tier companion (gap-checker-mutation-check-has-no-change-tier-companion) =="
+  # A change-tier companion to the FULL-tier whole-store mutation check directly above (which is left
+  # byte-unchanged — deferred, never dropped): the same script in `--check-changed` mode, which derives
+  # the checker carriers of THIS delta from git and runs ONLY their mutation cases. The full-tier check
+  # measured 55.6s (median of the last 7 `.quay/checker-cost.jsonl` rows) and runs in the full suite
+  # only, so a mutation case broken by a task reddened an UNRELATED task's fan-in while the task that
+  # broke it shipped scoped-green — measured 8 such fan-in reds, the last at 2026-09-13T04:41:32Z
+  # (`STATIC_CHECK_FAILED: checker-mutation-check` in .quay/verification-round.jsonl). This is the
+  # repo's既定解法 for exactly this defect class, not a new invention: `quay-init-closure-ratchet-stale`
+  # (:571-573 above) is the same shape and drove that checker's fan-in reds 35 → 0 after 2026-09-06.
+  # Cost is ∝ the delta's carriers (measured 0.5s for 1 carrier), NOT the 55.6s whole-store pass —
+  # which is why the full-tier check is NOT simply moved forward (that would add 55.6s to every task).
+  # Attribution: the full tier was deferred precisely because its red is NOT guaranteed to come from
+  # this delta (whole-store / meta-check); a delta-narrowed run's red IS attributable by construction.
+  # The @static-object is the checker carriers + the manifest source: an edited checker script, an
+  # edited mutation case, or the registry itself (runner-static-gate.ts / scripts/test.sh / CI, whose
+  # change can add a NEW checker — the companion then also re-verifies manifest-wide coverage, so
+  # "a new checker with no mutation case" reds at ITS OWN task instead of at a stranger's fan-in).
+  # ⛔ NOT-EVALUATED is an explicit line + exit 0, not exit 3: the scoped runner evals raw commands
+  # under `set -euo pipefail`, so exit 3 would ABORT an innocent task whose Touches name a checker but
+  # whose git delta does not contain one (Touches ⊋ delta is normal). Same scoped-safe convention as
+  # suite-bucket-drift-check. Pinned by plugin/test/select-static-checks-for-touches.test.mjs
+  # (tier/object parse vs --list, with an injected-inconsistency red control).
+  # @static-tier change
+  # @static-object plugin/scripts/runner-static-gate.ts scripts/test.sh plugin/scripts/checker-mutation-check.sh plugin/scripts/checker-mutation-cases/ .github/workflows/
+  run_checker "checker-mutation-check-changed" bash "${repo_root}/plugin/scripts/checker-mutation-check.sh" --check-changed --repo-root "${repo_root}"
   echo "== check-set-after-change check (gap-check-set-after-change-diff-nameonly-intersect-judged-objects, A0b③) =="
   # After editing a file, which tests run is computed mechanically as git diff --name-only ∩ the
   # test/checker's SELF-DECLARED judged objects (`@judges <glob>…` in the file header — no central
