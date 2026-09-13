@@ -1,0 +1,494 @@
+// probe-routine.ts — the generic bridge that turns a DECLARED routine (`.quay/config.yml`
+// `loop.routines:` entry with a `probe:`) into a live Layer-1b `RoutineSpec` that a resident driver
+// actually runs. This is SPEC-capability-planes-and-mechanism-lifecycle §5.2's `llmProbeRoutine`
+// (选定的落地项 1「probe 轨道机械化」), minus the invented `probe-driver` kind §5.1 ruled out.
+//
+// WHY THIS EXISTS（实测，SPEC §2.3）: the probe track was never mechanically wired. Its only caller
+// was fast-mode-tick-core.md's A14 — a layer that has since been RETIRED — and its "last run"
+// state was maintained by PROSE handed to an LLM (`run-routines.js:29` tells an agent to write the
+// epoch-ms back into `.quay/routine-last-run.json`). Measured consequence: that file held ONE key
+// with an mtime of 2026-08-12, i.e. the track had been dead for weeks with nothing able to say so
+// (硬规则 9: 守与不守在记录上无法区分). Meanwhile `.quay/config.yml` still declared four routines
+// whose triggers (`every(N)`) belong to the retired iteration counter ⇒ they could never fire.
+//
+// THE FIVE STEPS (SPEC §5.2's target shape — four parts already existed):
+//   ① readProbeSpec(probe)            — existing (read-probe-spec.ts); unreadable ⇒ not-evaluated
+//   ② spawn a fresh-context agent     — existing (launchArgv + runAsync)
+//   ③ FILE-ONLY guard                 — existing (probe-write-guard.ts, shared with meta-driver)
+//   ④ record structured findings      — THIS module: append to a queryable carrier
+//   ⑤ Fact[]                          — existing (driver-runtime.ts Layer 1b)
+//
+// WHAT THIS MODULE ADDS ON TOP OF SPEC §5.2, and why:
+//   - **Durable last-run** (`.quay/routine-last-run.json`). `runResidentQualityGateLoop`'s own
+//     `lastRun` map is IN-MEMORY (quality-gate-driver.ts:1042) ⇒ every driver restart re-fires every
+//     interval routine. For a cheap mechanical reading that is harmless; for a deep scan that spawns
+//     LLM sub-agents on a ~2000-entity corpus it is a cost bug (the driver respawns whenever its
+//     watched sources change). So the routine consults/updates a persisted window itself, and says
+//     so in the Fact (never a silent skip).
+//   - **Shard reporting**: the probe's output contract carries `shards`/`inventory`, and the carrier
+//     records them, so "the deep mode ran (N shards)" is distinguishable from "one agent skimmed".
+//
+// ⛔ NOT a hot-path gate (the `gap-fan-in-remove-archguard-gate` lesson): nothing here is called by
+// fan-in / scoped-gate / any per-task path. The ONLY caller is the quality driver's routine table.
+//
+// Usage (production): `probeRoutinesFromConfig(root, opts)` → RoutineSpec[] → the caller appends
+// them to its Layer-1b routine table. Tests import the pure functions directly.
+
+import fs from "node:fs";
+import path from "node:path";
+import YAML from "yaml";
+import { parseTrigger } from "./routine-scheduler.ts";
+import { readProbeSpec } from "./read-probe-spec.ts";
+import { launchArgv, runAsync } from "./driver-runtime.ts";
+import { probeWriteViolations, snapshotTrackedChanges } from "./probe-write-guard.ts";
+import type { Fact, RoutineSpec } from "./driver-runtime.ts";
+
+/** 结构化 finding 的载体（追加式 JSONL）。登记在任务 ## Touches 里 ⇒ 是**可查的落地产物**，
+ *  ⛔ 不是 gitignored 的运行时字节（`.gitignore` 未列它；同族先例 `.quay/it0-split-or-commit-…jsonl`）。 */
+export const ROUTINE_FINDINGS_REL = path.posix.join(".quay", "routine-findings.jsonl");
+/** 持久 last-run 表（`{ "<routine>": <epoch-ms> }`，merge 写回）。 */
+export const ROUTINE_LAST_RUN_REL = path.posix.join(".quay", "routine-last-run.json");
+
+/** 探针 spawn 的 role 名（`launchArgv(role, …)` → profiles.yml → launcher/model/-n）。
+ *  ⚠️ 刻意复用既有 role，不新造 `probe-runner`：role 表由 quay-init 的 profiles 模板同步，
+ *  而该模板的「覆盖全部 driver 请求的 role」检查正由 in-flight 任务
+ *  `gap-quay-init-profiles-template-omits-every-role-the-drivers-request` 落地——此刻新增 role
+ *  会在两个任务合流后让那条检查对**未在本任务 Touches 内的 quay-init.sh** 报红。
+ *  `meta-driver` 的语义与其注释（「例程的语义半，短命 claude -p，每轮全新上下文」）正是本模块所做的事。 */
+export const PROBE_ROLE_DEFAULT = "meta-driver";
+
+/** FILE-ONLY 违约扫描里**豁免**的路径前缀。旧 routines 契约（plugin/skills/routines/SKILL.md）
+ *  就允许例程新增 tasksDir 文件；共享检出里 tasks/*.md 也正被别的 driver 持续改写
+ *  ⇒ 不豁免它会让每一次真实运行都因**别人的**写入而违约（假阳性）。 */
+const FILE_ONLY_ALLOWED_PREFIXES = ["tasks/"];
+
+// ── 配置读取（kernel 侧；形状与 suite-params.ts 同族）────────────────────────────────────────────
+// 为什么在这里读 YAML 而不是 import packages/quay/src/loop-params.ts：kernel（plugin/scripts）在
+// 第三方工作区里与 packages/quay/src 不同源（可能只有 plugin/ 一份）——suite-params.ts 已为同族
+// 需求立了这个先例。⚠️ 代价是「第二个读者」，故 trigger 文法复用 routine-scheduler.parseTrigger
+// （唯一文法实现），且 plugin/test/probe-routine.test.mjs 用同一批 fixture 对 readLoopParams
+// 做 no-drift 断言（形状分歧会被那条用例抓住）。
+
+/** 一条声明式 routine（与 loop-params.ts 校验的名字段同名）。 */
+export interface RoutineDecl {
+  name: string;
+  trigger: string;
+  probe: string | null;
+  dispatch: string | null;
+}
+
+/** 读 `.quay/config.yml` 的 `loop.routines:`。**无该节 ⇒ `[]`**（本节可选，同 suite-params 的契约）。
+ *  YAML 坏 / 节形状坏 / 单条形状坏 ⇒ **fail-closed throw**（⛔ 不静默降级成「没有 routine」）。 */
+export function readRoutinesConfig(workspaceRoot: string): RoutineDecl[] {
+  const configPath = path.join(workspaceRoot, ".quay", "config.yml");
+  if (!fs.existsSync(configPath)) return []; // 无统一 config ⇒ 本节不存在（branch-B 工作区不归本读者管）
+  let parsed: unknown;
+  try {
+    parsed = YAML.parse(fs.readFileSync(configPath, "utf8"));
+  } catch (e) {
+    throw new Error(`FAIL-CLOSED: .quay/config.yml is malformed YAML — ${(e as Error).message}`);
+  }
+  const loop = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).loop : undefined;
+  if (loop === undefined || loop === null) return [];
+  if (typeof loop !== "object" || Array.isArray(loop)) {
+    throw new Error(`FAIL-CLOSED: .quay/config.yml 'loop:' must be a mapping (got ${Array.isArray(loop) ? "array" : typeof loop})`);
+  }
+  const raw = (loop as Record<string, unknown>).routines;
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    throw new Error(`FAIL-CLOSED: .quay/config.yml 'loop.routines:' must be an array (got ${typeof raw})`);
+  }
+  return raw.map((r, i) => {
+    if (!r || typeof r !== "object" || Array.isArray(r)) {
+      throw new Error(`FAIL-CLOSED: .quay/config.yml loop.routines[${i}] must be a mapping`);
+    }
+    const rec = r as Record<string, unknown>;
+    const name = typeof rec.name === "string" ? rec.name.trim() : "";
+    if (!name) throw new Error(`FAIL-CLOSED: .quay/config.yml loop.routines[${i}] needs a non-empty string 'name'`);
+    if (typeof rec.trigger !== "string") {
+      throw new Error(`FAIL-CLOSED: .quay/config.yml loop.routines[${i}] ('${name}') needs a string 'trigger'`);
+    }
+    // 文法单一实现：routine-scheduler.parseTrigger 对非法 trigger 抛错（fail-closed）。
+    try { parseTrigger(rec.trigger); } catch (e) {
+      throw new Error(`FAIL-CLOSED: .quay/config.yml loop.routines[${i}] ('${name}') — ${(e as Error).message}`);
+    }
+    const probe = typeof rec.probe === "string" && rec.probe.trim() ? rec.probe.trim() : null;
+    const dispatch = typeof rec.dispatch === "string" && rec.dispatch.trim() ? rec.dispatch.trim() : null;
+    if (!probe && !dispatch) {
+      throw new Error(`FAIL-CLOSED: .quay/config.yml loop.routines[${i}] ('${name}') needs 'probe' (DIR-056) or 'dispatch' (legacy)`);
+    }
+    return { name, trigger: rec.trigger.trim(), probe, dispatch };
+  });
+}
+
+/** 从声明里挑出**本机制能驱动**的（有 `probe:` 且 trigger 是两层模式的时间量 `interval:<N>m`）。
+ *  其余逐条给出**可见的**跳过理由（⛔ 不静默丢；硬规则 3b）：
+ *   - `every(N)` 依赖已退役的迭代计数（ADR-022）⇒ 两层模式下永不 due；
+ *   - `on(<event>)` 需要事件生产者，当前无人发布这些事件名；
+ *   - 只有 `dispatch:` 的旧形态归 legacy 派发器，不由本机制承接。 */
+export function selectProbeRoutines(decls: readonly RoutineDecl[]): {
+  probes: RoutineDecl[];
+  skipped: { name: string; trigger: string; reason: string }[];
+} {
+  const probes: RoutineDecl[] = [];
+  const skipped: { name: string; trigger: string; reason: string }[] = [];
+  for (const d of decls) {
+    const t = parseTrigger(d.trigger);
+    if (!d.probe) {
+      skipped.push({ name: d.name, trigger: d.trigger, reason: "no 'probe:' — legacy 'dispatch:' form is not hosted here" });
+      continue;
+    }
+    if (t.kind !== "interval") {
+      skipped.push({ name: d.name, trigger: d.trigger, reason: `trigger kind '${t.kind}' — only 'interval:<N>m' is a two-layer quantity the driver can evaluate` });
+      continue;
+    }
+    probes.push(d);
+  }
+  return { probes, skipped };
+}
+
+// ── 探针输出的解析（结构化 finding 契约，见 plugin/probes/semantic-dedup-scan.md）─────────────────
+
+/** 一条结构化 finding（AC2 ③：**具体文件路径 + 函数名 + 判定理由**，⛔ 不是一个绿/红布尔）。 */
+export interface ProbeFinding {
+  id: string | null;
+  kind: string | null;
+  symbols: string[];
+  files: string[];
+  verdict: string | null;
+  rationale: string;
+  suggestedAction: string | null;
+}
+
+export interface ParsedProbeOutput {
+  findings: ProbeFinding[];
+  /** 形状读不懂的 finding 条数（⛔ 与「没有 finding」不同形；硬规则 3b）。 */
+  malformed: number;
+  /** 探针自报的分片数（深模式 = 多个 fresh-context agent 各自核实一批；null = 未自报）。 */
+  shards: number | null;
+  /** 探针自报的全量实体清单规模（`{<surface>: <count>}`）。 */
+  inventory: Record<string, number> | null;
+  notes: string | null;
+}
+
+/** 字符串感知的「平衡花括号切片」扫描：返回文本里所有**顶层** `{…}` 片段（按出现顺序）。
+ *  用于 agent 在 JSON 前后夹了散文、或一次打了多个对象的情形——只做**选取**（挑 agent 自己打出来的
+ *  那一个），⛔ 不合成、不修补、不猜字段。 */
+export function balancedObjectSlices(text: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = -1;
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inStr) {
+      if (esc) { esc = false; continue; }
+      if (c === "\\") { esc = true; continue; }
+      if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') { inStr = true; continue; }
+    if (c === "{") { if (depth === 0) start = i; depth += 1; continue; }
+    if (c === "}") {
+      depth -= 1;
+      if (depth === 0 && start >= 0) { out.push(text.slice(start, i + 1)); start = -1; }
+      if (depth < 0) depth = 0;
+    }
+  }
+  return out;
+}
+
+/** 从**任意**探针 stdout 里取出那一个 JSON 对象。读不出 ⇒ null（调用方记 failed，⛔ 不猜）。
+ *  依次尝试：围栏块 → 整段 → 第一个 `{` 到最后一个 `}` → 每个顶层平衡 `{…}` 切片（按序）。
+ *  多个候选都能解析时，**优先带 `findings` 键的那个**（探针契约的主字段），否则取第一个。 */
+function extractJsonObject(stdout: string): unknown | null {
+  const text = String(stdout ?? "").trim();
+  if (!text) return null;
+  const candidates: string[] = [];
+  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) candidates.push(fence[1].trim());
+  candidates.push(text);
+  const first = text.indexOf("{");
+  const last = text.lastIndexOf("}");
+  if (first >= 0 && last > first) candidates.push(text.slice(first, last + 1));
+  candidates.push(...balancedObjectSlices(text));
+  const parsed: unknown[] = [];
+  for (const c of candidates) {
+    try {
+      const j = JSON.parse(c);
+      if (j && typeof j === "object" && !Array.isArray(j)) parsed.push(j);
+      else if (Array.isArray(j)) parsed.push({ findings: j }); // 只给数组的探针也认（宽容但形状明确）
+    } catch { /* 试下一个候选 */ }
+  }
+  if (parsed.length === 0) return null;
+  return parsed.find((p) => Array.isArray((p as Record<string, unknown>).findings)) ?? parsed[0];
+}
+
+const strArray = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.trim()).map((x) => String(x).trim()) : [];
+
+/** 解析探针输出。整体读不出 ⇒ null；逐条 finding 读不懂 ⇒ 计入 `malformed`（⛔ 不静默丢）。 */
+export function parseProbeFindings(stdout: string): ParsedProbeOutput | null {
+  const obj = extractJsonObject(stdout) as Record<string, unknown> | null;
+  if (!obj) return null;
+  const rawFindings = Array.isArray(obj.findings) ? obj.findings : [];
+  const findings: ProbeFinding[] = [];
+  let malformed = 0;
+  for (const raw of rawFindings) {
+    const r = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : null) as Record<string, unknown> | null;
+    if (!r) { malformed += 1; continue; }
+    const files = strArray(r.files);
+    const symbols = strArray(r.symbols);
+    const rationale = typeof r.rationale === "string" ? r.rationale.trim() : "";
+    // AC2 ③ 的三要素缺一 ⇒ 不是一条可用的 finding（计入 malformed，⛔ 不伪装成通过）。
+    if (files.length === 0 || symbols.length === 0 || rationale.length === 0) { malformed += 1; continue; }
+    findings.push({
+      id: typeof r.id === "string" && r.id.trim() ? r.id.trim() : null,
+      kind: typeof r.kind === "string" && r.kind.trim() ? r.kind.trim() : null,
+      symbols,
+      files,
+      verdict: typeof r.verdict === "string" && r.verdict.trim() ? r.verdict.trim() : null,
+      rationale,
+      suggestedAction: typeof r.suggestedAction === "string" && r.suggestedAction.trim() ? r.suggestedAction.trim() : null,
+    });
+  }
+  const inv = obj.inventory && typeof obj.inventory === "object" && !Array.isArray(obj.inventory)
+    ? Object.fromEntries(
+      Object.entries(obj.inventory as Record<string, unknown>)
+        .filter(([, v]) => typeof v === "number" && Number.isFinite(v)),
+    ) as Record<string, number>
+    : null;
+  return {
+    findings,
+    malformed,
+    shards: typeof obj.shards === "number" && Number.isFinite(obj.shards) ? obj.shards : null,
+    inventory: inv && Object.keys(inv).length ? inv : null,
+    notes: typeof obj.notes === "string" && obj.notes.trim() ? obj.notes.trim() : null,
+  };
+}
+
+// ── 载体（追加式 JSONL）──────────────────────────────────────────────────────────────────────
+/** 追加记录到载体；返回实际追加条数。目录自动创建。 */
+export function appendRoutineFindings(findingsPath: string, records: readonly Record<string, unknown>[]): number {
+  if (records.length === 0) return 0;
+  fs.mkdirSync(path.dirname(findingsPath), { recursive: true });
+  fs.appendFileSync(findingsPath, records.map((r) => JSON.stringify(r) + "\n").join(""), "utf8");
+  return records.length;
+}
+
+/** 持久 last-run 表（读不出/坏 JSON ⇒ `{}`：**从未运行 ⇒ due**，与 routine-scheduler.isDue 同契约）。 */
+export function readLastRunMap(lastRunPath: string): Record<string, number> {
+  try {
+    const j = JSON.parse(fs.readFileSync(lastRunPath, "utf8"));
+    return j && typeof j === "object" && !Array.isArray(j) ? (j as Record<string, number>) : {};
+  } catch { return {}; }
+}
+
+/** merge 写回一条 last-run（⛔ 不覆盖别的 routine 的键）。 */
+export function writeLastRun(lastRunPath: string, name: string, ts: number): void {
+  const map = readLastRunMap(lastRunPath);
+  map[name] = ts;
+  fs.mkdirSync(path.dirname(lastRunPath), { recursive: true });
+  fs.writeFileSync(lastRunPath, JSON.stringify(map, null, 1), "utf8");
+}
+
+// ── prompt 组装（唯一构造点，同 launchArgv 的 AC140 纪律）──────────────────────────────────────
+/** 探针 prompt = `WORKSPACE:` 头（让 agent 能解析工作区相对路径）+ 探针规格的 objective + 机器可读
+ *  输出契约 + READ-ONLY 边界。⛔ objective 逐字来自 `plugin/probes/<name>.md`，不在此处改写方法。 */
+export function buildProbePrompt(objective: string, opts: { workspace: string; name: string }): string {
+  return [
+    `WORKSPACE: ${opts.workspace}`,
+    `You are the fresh-context probe runner for the standing routine "${opts.name}" (probe spec: plugin/probes/${opts.name}.md, objective below).`,
+    "⛔ READ-ONLY: do NOT modify, create, or delete any file in the workspace. Your entire product is the JSON object on stdout — every write to disk is performed mechanically by the routine afterwards.",
+    "",
+    String(objective ?? "").trim(),
+    "",
+    "OUTPUT CONTRACT (the routine parses your stdout mechanically — a boolean, a summary, or prose is NOT a usable answer):",
+    'Reply with ONLY one JSON object: {"findings":[{"id":"<slug>","kind":"<kind>","symbols":["<fn>"],"files":["<path:line>"],"verdict":"<verdict>","rationale":"<one line>","suggestedAction":"<one line>"}],"shards":<int>,"inventory":{"<surface>":<int>},"notes":"<one line>"}',
+    "Every finding MUST carry files (concrete paths), symbols (function/entity names) and a rationale — a finding missing any of the three is DROPPED by the parser and counted as malformed.",
+    "If you found nothing, reply with an empty findings array (that is a real measurement, not a failure).",
+  ].join("\n");
+}
+
+// ── 例程本体 ─────────────────────────────────────────────────────────────────────────────────
+
+export interface ProbeRoutineOptions {
+  /** 工作区根 = 探针要分析/记录的仓库；也是 FILE-ONLY 快照与 `WORKSPACE:` 头的取值处。 */
+  root: string;
+  /** 探针规格所在 plugin 根（`<pluginRoot>/probes/<name>.md`）。 */
+  pluginRoot: string;
+  /** 单次 spawn 的 wall-clock 上限（ms）。**由调用方从 driver 的例程看门狗派生**（default
+   *  `Math.max(60_000, routineWatchdogMs - 60_000)`）——⛔ 本模块不另立字面量（硬规则 4 推论二：
+   *  写死一个「合理」的秒数，换台机器/换个负载就变成真限制，且静默）。 */
+  probeTimeoutMs: number;
+  /** spawn 用的 role（缺省 PROBE_ROLE_DEFAULT）。 */
+  role?: string;
+  /** 状态目录（缺省 `<root>/.quay`）：载体与 last-run 都落在这里。测试缝（⛔ 别让测试写进真工作区）。 */
+  stateDir?: string;
+  /** 载体路径覆盖（缺省 `<stateDir>/routine-findings.jsonl`）。 */
+  findingsPath?: string;
+  /** last-run 路径覆盖（缺省 `<stateDir>/routine-last-run.json`）。 */
+  lastRunPath?: string;
+  /** argv 构造缝（测试用假探针；缺省 `launchArgv(role, prompt, root)`）。 */
+  probeArgv?: (prompt: string, decl: RoutineDecl) => string[];
+  /** spawn 缝（缺省 runAsync）。 */
+  spawnFn?: typeof runAsync;
+  /** 时钟缝（缺省 Date.now）。 */
+  now?: () => number;
+}
+
+/** 把一条声明变成 Layer-1b 例程。`schedule` 用 routine-scheduler 的解析结果（**interval:<N>m 是
+ *  唯一被本机制接受的形态**——两层模式没有迭代计数，见 parseTrigger 的注释）。 */
+export function llmProbeRoutine(decl: RoutineDecl, opts: ProbeRoutineOptions): RoutineSpec {
+  const trigger = parseTrigger(decl.trigger) as { kind: string; minutes?: number };
+  const role = opts.role ?? PROBE_ROLE_DEFAULT;
+  const stateDir = opts.stateDir ?? path.join(opts.root, ".quay");
+  const findingsPath = opts.findingsPath ?? path.join(stateDir, path.basename(ROUTINE_FINDINGS_REL));
+  const lastRunPath = opts.lastRunPath ?? path.join(stateDir, path.basename(ROUTINE_LAST_RUN_REL));
+  const spawnFn = opts.spawnFn ?? runAsync;
+  const clock = opts.now ?? Date.now;
+
+  return {
+    name: decl.name,
+    schedule: trigger,
+    run: async (ctx): Promise<Fact<Record<string, unknown>>[]> => {
+      const started = clock();
+      const fact = (state: Fact["state"], value: Record<string, unknown>, reason: string): Fact<Record<string, unknown>>[] =>
+        [{ name: decl.name, value, state, reason }];
+
+      // ① 持久窗口：driver 重启不重触发（loop 的 lastRun 是进程内存态；见本文件头注释）。
+      if (trigger.kind === "interval" && typeof trigger.minutes === "number") {
+        const last = Number(readLastRunMap(lastRunPath)[decl.name]);
+        if (Number.isFinite(last) && last > 0 && started - last < trigger.minutes * 60_000) {
+          const agoMin = Math.round((started - last) / 60_000);
+          return fact("not-evaluated", { fired: false, carrier: path.relative(opts.root, findingsPath) },
+            `within durable last-run window (ran ${agoMin}m ago, interval ${trigger.minutes}m) — not re-fired`);
+        }
+      }
+
+      // ② 探针规格 fail-closed（读不到 ⇒ 未评估，⛔ 不伪装成「没找到重复」）。
+      let spec: Awaited<ReturnType<typeof readProbeSpec>>;
+      try {
+        spec = readProbeSpec(decl.probe as string, opts.pluginRoot);
+      } catch (e) {
+        return fact("not-evaluated", { fired: false, carrier: path.relative(opts.root, findingsPath) },
+          `probe spec unreadable: ${(e as Error).message}`);
+      }
+
+      // ③ halt 是轮内的闸：只挡 spawn，不挡观测（gap-drain-on-routine-driver-empties-…）。
+      if (ctx?.halted === true) {
+        return fact("not-evaluated", { fired: false, probe: decl.probe, carrier: path.relative(opts.root, findingsPath) },
+          "halted: probe spawn suppressed (halt gates the spawn, not the routine track)");
+      }
+
+      // ④ spawn 一个全新上下文（每次都是新进程 ⇒ 抗漂移靠这个，不靠提示词）。
+      const prompt = buildProbePrompt(spec.objective, { workspace: opts.root, name: decl.name });
+      let argv: string[];
+      try {
+        argv = opts.probeArgv ? opts.probeArgv(prompt, decl) : launchArgv(role, prompt, opts.root);
+      } catch (e) {
+        return fact("failed", { fired: false, probe: decl.probe }, `probe argv unavailable (profiles?): ${(e as Error).message}`);
+      }
+      const before = snapshotTrackedChanges(opts.root);
+      const r = await spawnFn(argv, { timeoutMs: opts.probeTimeoutMs, collectStderr: true });
+      const durationMs = clock() - started;
+      const base = { fired: true, probe: decl.probe, role, durationMs, exit: r.status, carrier: path.relative(opts.root, findingsPath) };
+      if (r.error) {
+        return fact("failed", base, `probe spawn error: ${r.error.message}`);
+      }
+
+      // ⑤ FILE-ONLY 守卫：探针运行期间不得改动 tracked 文件（除 tasksDir——旧 routines 契约允许的落点）。
+      const violations = probeWriteViolations(
+        before,
+        snapshotTrackedChanges(opts.root),
+      );
+      if (violations === null) {
+        return fact("not-evaluated", base, "FILE-ONLY guard could not read the tree (git unavailable) — probe output NOT trusted, nothing recorded");
+      }
+      const real = violations.filter((f) => !FILE_ONLY_ALLOWED_PREFIXES.some((p) => f.startsWith(p)));
+      if (real.length > 0) {
+        return fact("failed", { ...base, writeViolations: real.slice(0, 10) },
+          `probe violated FILE-ONLY: ${real.length} tracked file(s) changed during the spawn (${real.slice(0, 3).join(", ")}) ⇒ nothing recorded`);
+      }
+
+      // ⑥ 结构化产出 → 载体。读不懂 ⇒ failed（⛔ 不猜、不落半条）。
+      const parsed = parseProbeFindings(r.stdout ?? "");
+      if (!parsed) {
+        // 诊断落盘：「读不懂」若不留原件，就只剩一句无法追查的话（硬规则 3b 的代价形态——
+        // 第一次真跑 310s 的输出因此不可查）。原文写到 stateDir，路径进 Fact。
+        const rawPath = path.join(stateDir, `routine-probe-failed-${started}.out`);
+        let rawRel: string | null = null;
+        try {
+          fs.mkdirSync(path.dirname(rawPath), { recursive: true });
+          fs.writeFileSync(rawPath, String(r.stdout ?? ""), "utf8");
+          rawRel = path.relative(opts.root, rawPath);
+        } catch { /* 诊断落盘失败不致命 */ }
+        return fact("failed", { ...base, ...(rawRel ? { rawProbeOutput: rawRel } : {}) },
+          `unparseable probe output (exit ${r.status})${rawRel ? ` — raw stdout saved to ${rawRel}` : ""} — expected one JSON object per the probe's output contract`);
+      }
+      const runId = `${decl.name}-${started}`;
+      const records: Record<string, unknown>[] = [{
+        ts: new Date(started).toISOString(),
+        kind: "scan-round",
+        routine: decl.name,
+        probe: decl.probe,
+        role,
+        runId,
+        findings: parsed.findings.length,
+        malformed: parsed.malformed,
+        shards: parsed.shards,
+        inventory: parsed.inventory,
+        notes: parsed.notes,
+        exit: r.status,
+        durationMs,
+      }, ...parsed.findings.map((f) => ({
+        ts: new Date(started).toISOString(),
+        kind: "finding",
+        routine: decl.name,
+        probe: decl.probe,
+        runId,
+        findingId: f.id,
+        dupKind: f.kind,
+        symbols: f.symbols,
+        files: f.files,
+        verdict: f.verdict,
+        rationale: f.rationale,
+        suggestedAction: f.suggestedAction,
+      }))];
+      let recorded = 0;
+      try {
+        recorded = appendRoutineFindings(findingsPath, records);
+      } catch (e) {
+        return fact("failed", base, `carrier append failed: ${(e as Error).message}`);
+      }
+      // last-run 只在**真的产出了记录**之后写回：违约/失败轮不占窗口，下一轮仍会重试。
+      try { writeLastRun(lastRunPath, decl.name, started); } catch { /* last-run 写失败 ⇒ 下轮重跑，不致命 */ }
+      return fact("verified", {
+        ...base,
+        runId,
+        findings: parsed.findings.length,
+        malformed: parsed.malformed,
+        shards: parsed.shards,
+        inventory: parsed.inventory,
+        recordsAppended: recorded,
+      }, `deep scan ran: ${parsed.findings.length} structured finding(s), ${parsed.malformed} malformed, ${parsed.shards ?? "?"} shard(s), ${recorded} record(s) appended to ${path.relative(opts.root, findingsPath)}`);
+    },
+  };
+}
+
+/** 生产入口：读配置 → 选可驱动的 → 造例程表。**永不抛**（一条可选的例程轨道不得拖垮宿主 driver
+ *  的启动）；读不出配置时把理由经 `error` 交回调用方去**可见地**报告（⛔ 不静默变空转）。 */
+export function probeRoutinesFromConfig(
+  root: string,
+  opts: Omit<ProbeRoutineOptions, "root">,
+): { routines: RoutineSpec[]; skipped: { name: string; trigger: string; reason: string }[]; error: string | null } {
+  let decls: RoutineDecl[];
+  try {
+    decls = readRoutinesConfig(root);
+  } catch (e) {
+    return { routines: [], skipped: [], error: (e as Error).message };
+  }
+  const { probes, skipped } = selectProbeRoutines(decls);
+  return { routines: probes.map((d) => llmProbeRoutine(d, { ...opts, root })), skipped, error: null };
+}
