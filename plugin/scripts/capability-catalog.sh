@@ -1839,6 +1839,8 @@ declare -A CONSUMER=(
   [agent-panel-classify.ts]="谁按：agent-panel-classify.test.mjs（迁移测试）import 纯函数；条件=要复用面板行分类原语（函数级复用，⛔ 非复制粘贴）"
   [enum-surface-parity-check.ts]="谁按：scripts/test.sh 的 run_static_checks 每轮全量 gate 无条件按 （runner-static-gate.ts @static-tier change）+ scoped 子集（本检查器自身/权威/表层文件被触碰时）；条件=要判定某个枚举事实的交付表层是否与权威一致（两向差集），并在新增/删除枚举值时立刻发现未同步的表层"
   [packaging-hygiene-check.ts]="谁按：quality-gate-driver.ts 的 packaging-hygiene 例程按（interval 60min，runResidentQualityGateLoop 评估 due 后跑，⛔ 非 loop.routines——后者已死）；条件=两维度打包卫生检查要跑一轮（config-key 消费者枚举 + shipped-entry 可运行性），漂移非空时 spawn gap-filing agent 经 ABI（quay-file-task）立案"
+  [peer-identity-probe.ts]="谁按：方案 C 路的验证者 / 后续接线者在需要核证「一个非 Claude 进程能否被平台 SendMessage 投递」时按（node --experimental-strip-types plugin/scripts/peer-identity-probe.ts serve|patch|shutdown|cleanup）；条件=要复测 peer 登记的可达性、逐字段必要性（patch 改自己记录的一个字段后立刻投递），或按 AC13 结论做接线前的对照复测"
+  [channel-probe-server.ts]="谁按：Channels 路的验证者 / 后续接线者在需要把外部事件推入一个运行中的 Claude Code 会话时按（node --experimental-strip-types plugin/scripts/channel-probe-server.ts --evidence <path> --http-port 8799，由 Claude Code 以 MCP server 起；--selfcheck 可独立自检 capability 声明）；条件=要核证官方 Channels 契约（experimental['claude/channel'] + notifications/claude/channel）在本机是否可达，或按 AC13 结论做接线前的对照复测"
 )
 # ── superseded capability table (gap-retired-script-still-callable, human ruling 2026-08-10) ──
 # One capability = ONE implementation. A superseded implementation must NOT exist in the

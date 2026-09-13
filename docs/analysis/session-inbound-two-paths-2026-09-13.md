@@ -34,7 +34,7 @@
 |---|---|---|---|
 | ① | **会话无需预先配置即可被寻址**（发现式寻址） | **可达**。探针登记后立即出现在**任意**会话的 `ListAgents` 里（`quay-server-1695152 [79036c] · bg · idle`），对端**零配置**；投递用裸名即可 | **不可**。目标会话必须在**启动时**带 `--channels`/`--dangerously-load-development-channels`；官方原文：*"Being in `.mcp.json` isn't enough to push messages: a server also has to be named in `--channels`"*。实测：server 在 `--mcp-config` 里连上且 capability 正确声明，channel 仍**不注册** |
 | ② | **已在运行的会话能否接入** | **可达**（本任务全部正控制都是在**已在运行**的会话里直接 `SendMessage`，对端会话无任何改动） | **不可**（无运行时接入入口；实测必须在启动时给 flag，且该 flag 要交互确认。代价见 AC10） |
-| ③ | **第三方 provider 会话可用性** | **未隔离**。发送侧本次就是第三方 provider 会话（`deepseek-v4-pro-anthropic` @ fjdac），投递正常 ⇒ 说明**入站与发送侧模型无关**。但「第三方 provider 的**接收**会话」本任务未单独测 ⇒ `not-evaluated` | **未隔离（实测未达，但与确认闸混淆）**。第三方 env 下未收到事件；官方文档明确 *"not available on Amazon Bedrock, Google Cloud's Agent Platform, or Microsoft Foundry"*。⚠️ 本任务的第三方失败**无法归因给 provider**——因为同一次运行里 `-p` 模式本身就无法回答 dev-flag 确认闸（见 AC12） |
+| ③ | **第三方 provider 会话可用性** | **发送侧实测可用，接收侧未评**。发送侧本次就是第三方 provider 会话（`deepseek-v4-pro-anthropic` @ fjdac），21 条投递全部正常 ⇒ **发送（客户端）不因第三方 provider 受限**。但「第三方 provider 的**接收**会话能否收到」本任务未单独测 ⇒ `not-evaluated` | **未隔离（实测未达，但与确认闸混淆）**。第三方 env 下未收到事件；官方文档明确 *"not available on Amazon Bedrock, Google Cloud's Agent Platform, or Microsoft Foundry"*。⚠️ 本任务的第三方失败**无法归因给 provider**——因为同一次运行里 `-p` 模式本身就无法回答 dev-flag 确认闸（见 AC12） |
 | ④ | **契约稳定性**（文档化与否） | **未文档化**。官方 `cross-session-messaging` 文档只描述行为，**注册表字段语义与过滤规则均无文档**；且实测与「静态读二进制推断」就**矛盾**（推断说 `agent` 会被读出但不参与排除——这条✓；推断说活的 `pid` 字段参与判定——**这条✗**，实测见 AC4） | **文档化**（`docs/en/channels.md` + `channels-reference.md`，本任务引用均附来源）。⚠️ 但官方明标 **research preview**：*"the `--channels` flag syntax and protocol contract may change"* |
 | ⑤ | **外→会话 与 会话→外 两个方向是否都通** | **会话→server 通**（AC1 实测）；**server→会话**在本仓库已有实现（`packages/quay/src/serve-send.ts` 的 `sendSessionFrames`，2026-08-15 实测到达），**本次未复测** ⇒ 该方向 `not-evaluated` | **外→会话 未达**（AC8，事件未到达）；**会话→外 未达**（AC9，无 tool 调用）。⇒ 两向皆未达 |
 | ⑥ | **落进 quay 现有架构的位置与改动量** | 需新增**常驻入站进程**（socket server + 注册器 + 生命周期/清理），且要与 driver 共存（谁注册、谁清理、崩溃后谁扫残留）。本任务两个探针已证明「注册 + 监听 + 逐帧落盘 + 自清理」约 400 行可完成；但**清理不可靠**（`kill -9` 会留残留，见 AC7） | 需**改造目标会话的启动方式**（加 flag + 交互确认），并且自研 channel 永远在 dev flag 上（官方 allowlist 只有 Anthropic 自维护的那几个）。⇒ 对**既有**运行会话改动量为「重启 + 人工确认」，无法批量 |
@@ -183,10 +183,14 @@ from-mode = "bypass"
 `"another Claude session on this machine"`（平台自己的措辞，非本方声明）。这不构成本方伪装，
 但说明**平台侧没有任何机制区分「真会话」与「如实登记的非会话进程」**——这正是 §4 的采用顾虑之一。
 
-### 2.6 AC6（共享状态安全）—— 达成
+### 2.6 AC6（共享状态安全）—— 达成，**但字面判据有一处偏差，见 §5**
 
-- 任务开始时对 `~/.claude/sessions/` 做快照（文件名 + mtime + sha256），任务结束后再做一次，两次快照落盘
-  （`/tmp/registry-snapshot-{before,after}.json`），逐文件比对。
+> ⚠️ 先读这句：AC6 的判据原文是「**任一**他人记录的 sha256 变化 ⇒ 不达成」。
+> 实测**确实发生了 1 条他人记录变化**（且已证明不是本任务写的）。**该字面判据在活机器上不可满足**，
+> 完整的读数、归因与「替代判据」见 **§5**。本节的「达成」指的是**它要保护的安全性质**成立（探针只动自己的文件）。
+
+- 任务开始时对 `~/.claude/sessions/` 做快照（文件名 + mtime + sha256），任务结束后再做一次；
+  两次快照**已追加进证据文件** `.quay/peer-identity-probe-evidence.jsonl`（`kind: registry-snapshot-before/after`），逐文件比对。
 - 探针的清理闸（`shouldCleanupFile`）**只允许**删「自己 pid 的文件」或「带本脚本 marker 的文件」，
   单测里对「别人的记录」「只带相同 pid 前缀的别的 pid」「无 marker 的孤儿」三类负控制各有一条断言。
 - 比对结果、以及「探针遗留文件 = 0」的读数见 §5 的落地读数。
