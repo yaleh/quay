@@ -5,7 +5,6 @@ status: ready
 labels:
   - gap
   - defect
-  - delivery-critical
   - mechanism
 parent: null
 children: []
@@ -84,6 +83,26 @@ extra:
 - test/quay-init-config-env-keys.test.mjs
 - tasks/gap-quay-init-omits-adr-goal-meta-dir-env-third-party-leak.md
 
+## 共同形态（本条是同一根因族的第一个实例）
+
+**quay 运行时把「工作区 root」与「quay 代码所在地」当成同一个目录**。在 quay 自己的检出里这两者
+恰好重合 ⇒ 全部自测绿；**upgrade-channel（vendor）安装下两者分离 ⇒ 整层失效**，且失效形态是
+静默的（读到的是 quay 自己的数据，而不是报错）。本条是该族在 **provider 载体解析**面的实例
+（`findRepoRoot(process.cwd())` 把 quay 仓库当成第三方项目的 root）。
+
+已知另两个同族实例（**id 由 coordinator 2026-09-13 提供；本条立案时 `task_get` 在本 workspace 的
+default provider 对两者均返回 `no such task`，`task_list` 搜索连续超时未能复核 ⇒ 引用前请先核对
+id 是否已落盘、或是否落在另一个 store**）：
+
+- `gap-start-drivers-cli-resolve-blind-to-vendor-layout-and-swallows-enoent`
+  —— start-drivers 的 CLI 解析只认 dev 源码树与 PATH。
+- `gap-drivers-resolve-quay-scripts-under-project-root-not-plugin-root`
+  —— driver 运行时按 `<project-root>/packages/...` 找 quay 自己的脚本；实测第三方项目上
+  goal-ring failed、outer 六条 fact unreadable。
+
+⇒ 三条应按**同一根因族**一起看：修完本条的载体面，另两条的**代码定位面**仍会独立失效；
+反之亦然。⛔ 不要把其中任一条的修复当作该族已闭合的证据（硬规则 5b：在某处修好 X ≠ X 只在那一处）。
+
 ## 相关任务（立案时按机制查重的记录，非上文证据的一部分）
 
 `gap-quay-init-env-only-tasks-dir-goals-adr-meta-land-inside-npm-package`（**status: done**，2026-09-10）
@@ -101,3 +120,19 @@ extra:
   `plugin/scripts/quay-init.sh:989-990` 生成的 `env:` 块**只有 `QUAY_NATIVE_TASKS_DIR` 一个键**——
   即前一条任务 AC2/AC3 声称的「四个 `QUAY_NATIVE_*_DIR` 键」**在当前生产脚本里不存在**。
   本条的 AC3/AC4 因此是对该配置面的重新落实，实现时应先核对这段历史（是从未落地、落在了另一个副本、还是被回退）。
+
+## 标签裁定记录（2026-09-13）
+
+立案时曾打 `delivery-critical`，随后由 coordinator 裁定**去掉**：quay 当前 goal store 里没有一条 active
+的 AC 适合承接「第三方项目安装面」这个方向（AC-174/AC-245 已 achieved，AC-180..187 已 retired），
+而**为了让任务能晋升去新建 goal AC，是把 goal 当晋升通行证用，方向反了**。
+⇒ 现标签 `gap`/`defect`/`mechanism`，`goal_ac` 留空，走正常晋升路径。
+
+**⚠️ 同轮实测，与「delivery-critical + `goal_ac: null` ⇒ 结构上永不晋升」这条既有说法不符，记录读数**：
+本任务以 `todo` + `delivery-critical` + `goal_ac: null` 建立后，**约 49 秒内就被另一写者翻成 `ready`**
+（`updatedAt` 1789287438222 → 1789287487646；标签编辑的 CAS 因此撞到 conflict 才暴露出来）。
+⇒ 至少在 **author→ready 这条边**上，该组合**没有**阻止晋升。
+⛔ 不要据此反推「那条说法是错的」——它可能针对的是另一条边（ready→派发/goal-backed 晋升，
+即 `ready-pool-check` 的 `candidates[].goalAcMissing`）。这里只记录**直接读数**，不给成因结论
+（硬规则 4 推论四：能解释现象的说法不是被检验的结论）。写这段的会话无 Bash/git 工具，
+**未能核实翻转者身份**（形态符合 promotion-driver 的机械晋升，但未验证）。
