@@ -28,6 +28,9 @@ import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+// Shared session-liveness primitive — ONE copy, byte-identical to the pinned quay-fleet blob
+// (packages/quay/src/primitives/PROVENANCE.md).
+import { readProcStat } from "../../packages/quay/src/primitives/session-liveness.mjs";
 
 // ── 常量 ──────────────────────────────────────────────────────────────────────────────────────────
 
@@ -241,7 +244,20 @@ export interface FactIo {
   readlinkSync: (p: string) => string;
 }
 
+/**
+ * Read a live process's field-22 starttime.
+ *
+ * The PRODUCTION path (no injected `io`) routes through the shared session-liveness primitive
+ * (`readProcStat`), so the field-22 parse exists exactly once in the repo — the local hand-rolled
+ * read is gone. The injectable `io` below is a TEST SEAM (`plugin/test/peer-identity-probe.test.mjs`
+ * drives `parseProcStart` with synthetic /proc content): the shared reader is pinned to the real
+ * `/proc` and exposes no content-injection seam, so the seam path keeps the pure `parseProcStart`
+ * helper rather than shelling the synthetic content through a fake pid.
+ */
 export function readProcStart(pid: number, io: FactIo = fs as unknown as FactIo): string | null {
+  if (io === (fs as unknown as FactIo)) {
+    return readProcStat(pid)?.starttime ?? null;
+  }
   try {
     return parseProcStart(io.readFileSync(`/proc/${pid}/stat`, "utf8"));
   } catch {
