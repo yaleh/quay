@@ -90,6 +90,35 @@ run_static_checks() {
   echo "== split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) =="
   # @static-tier full  (whole-store ratchet — deferred to the full-suite gate in scoped mode)
   run_checker "it0-split-or-commit-check" bash "${repo_root}/plugin/scripts/it0-split-or-commit-check.sh" "${repo_root}"
+  echo "== split-or-commit delta-scoped companion (gap-it0-split-or-commit-check-needs-change-tier-companion) =="
+  # A change-tier companion to the FULL-tier whole-store ratchet directly above (which is left
+  # byte-unchanged — deferred, never dropped): the SAME script in `--changed` mode, which derives
+  # THE DELTA's task files from git (never from ## Touches) and judges ONLY those plus their 1-hop
+  # neighbour closure (children / parent / depends_on). The full-tier pass judges the whole task
+  # tree, so a relation broken by one task reddens an UNRELATED task's fan-in while the task that
+  # broke it ships scoped-green — measured 17 such fan-in reds in .quay/verification-round.jsonl
+  # (first 2026-08-13T14:24:11Z, last 2026-09-04T08:16:12Z; 17/17 rounds tests==0 ∧ fail==0, i.e.
+  # pure static red). This is the repo's既定解法 for exactly this defect class, not a new invention:
+  # `quay-init-closure-ratchet-stale` (:571-573 above) is the same shape and drove that checker's
+  # fan-in reds 35 → 0 after 2026-09-06. Cost is ∝ the delta's fan-out (measured 0.06–0.09 s for a
+  # 1-task delta), NOT the whole-store pass (measured 0.49 s for 2090 tasks) — which is why the
+  # full-tier pass is NOT simply moved forward (that would add its whole-store cost to every task).
+  # Attribution: the full tier was deferred precisely because its red is NOT guaranteed to come from
+  # this delta (whole-store); a delta-narrowed run's red IS attributable by construction (a violation
+  # is reported only when one of the tasks IT NAMES is a delta task), which is what绕开s the
+  # attribution problem instead of ignoring it.
+  # ⛔ NOT-EVALUATED is an explicit line + exit 0, never exit 3: the scoped runner evals raw commands
+  # under `set -euo pipefail`, so exit 3 would ABORT an innocent task whose delta carries no task
+  # file. Same scoped-safe convention as suite-bucket-drift-check.
+  # ⚠️ `@static-object tasks/` means this is selected for every task-file delta (the selector always
+  # appends `tasks/<id>.md` in --task mode, select-static-checks-for-touches.ts:834) — the store IS
+  # this checker's carrier, and `landing-target-check` (:307) carries the identical object at the
+  # same tier. It is NOT `always` tier: a delta with no task file (any --touches file-list outside
+  # `tasks/`) selects nothing here. What keeps the per-task cost affordable is the delta-scoped
+  # loading (① above), not a narrower trigger.
+  # @static-tier change
+  # @static-object tasks/ plugin/scripts/runner-static-gate.ts plugin/scripts/it0-split-or-commit-check.ts plugin/scripts/it0-split-or-commit-check.sh plugin/scripts/checker-mutation-cases/it0-split-or-commit-check.sh
+  run_checker "it0-split-or-commit-check-changed" bash "${repo_root}/plugin/scripts/it0-split-or-commit-check.sh" --changed --base develop "${repo_root}"
   echo "== checker mechanical-spine check (gap-b1-mechanical-spine-doc-checker, AC1/AC2/AC3) =="
   # Mechanical spine (B1, SPEC-checker-mechanical-spine-contract-2026-08-28.md): every checker's
   # exit-code vocabulary must be within {0,1,2,3} (0=PASS, 1=FAIL, 2=usage/env-error,

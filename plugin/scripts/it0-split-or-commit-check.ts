@@ -42,16 +42,38 @@
 //
 // Usage:
 //   node it0-split-or-commit-check.ts <workspace-root>
+//   node it0-split-or-commit-check.ts --changed [--base <ref>] [--only <id,id,…>] <workspace-root>
 //   node it0-split-or-commit-check.ts --selftest
 //
+// --changed: the DELTA-SCOPED mode (gap-it0-split-or-commit-check-needs-change-tier-companion).
+// The five rules above are WHOLE-STORE invariants, so the full-tier registration defers them to the
+// full-suite gate — and a violation introduced by task A then reddens an UNRELATED task B's fan-in
+// (measured: `STATIC_CHECK_FAILED: it0-split-or-commit-check` 17× in
+// `.quay/verification-round.jsonl`, every one of them `tests==0 ∧ fail==0` pure-static red, first
+// 2026-08-13T14:24:11Z / last 2026-09-04T08:16:12Z). This mode narrows the JUDGMENT to the delta:
+//
+//   ① the delta's task files are the `tasks/*.md` this change added or modified (git diff vs
+//      `--base`, default `develop`, plus untracked files) — or the explicit `--only` id list;
+//   ② only those files are LOADED, plus their 1-hop neighbour closure (children / parent /
+//      depends_on) — so the cost is ∝ the delta's fan-out, NOT the store size (measured: 0.06–0.09 s
+//      for a 1-task delta vs 0.49 s for the 2090-task whole-store pass);
+//   ③ the SAME `runChecks` rules are then applied to that closure, and a violation is reported only
+//      when at least one task NAMED by it is a delta task — a violation with NO delta participant is
+//      a pre-existing one elsewhere in the store and is left to the full-tier backstop (延迟发现 ≠
+//      丢弃), which is why this is a companion and not a replacement.
+//   No delta task file (or an unusable git context) ⇒ an explicit `NOT-EVALUATED:` line + exit 0 —
+//   never exit 3: the scoped runner evaluates raw commands under `set -euo pipefail`, so a non-zero
+//   here would abort an innocent task whose delta legitimately carries no task file.
+//
 // Exit codes:
-//   0 = all checks PASS
+//   0 = all checks PASS (also: `--changed` with nothing to evaluate — NOT-EVALUATED)
 //   1 = at least one violation found
 //   2 = usage/environment error
 
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { helpExit } from "./gate-script-base.ts";
 
@@ -125,6 +147,80 @@ export function loadTasks(tasksDir: string): Map<string, TaskFrontmatter> {
   return taskMap;
 }
 
+// ── readTaskFile — read ONE tasks/<id>.md by id (the delta-scoped loader's unit of work). ─────────
+function readTaskFile(tasksDir: string, id: string): TaskFrontmatter | null {
+  const p = path.join(tasksDir, `${id}.md`);
+  if (!fs.existsSync(p)) return null;
+  const t = parseFrontmatter(fs.readFileSync(p, "utf8"));
+  return t && t.id ? t : null;
+}
+
+// ── loadClosure — the delta + its 1-hop neighbour closure (children / parent / depends_on). ──────
+// WHY a closure and not the whole store: every one of the five rules above is decidable from a task
+// and its DIRECT relations — CHECK 1 needs a done compound's children's statuses, CHECK 3 needs the
+// declaring task's parent's `children` list, CHECK 4/5 need the declared prerequisites. So a delta
+// task plus one hop of neighbours is a SUFFICIENT input for judging that delta task, and the cost
+// stays ∝ the delta's fan-out instead of ∝ the store size. This is what makes the change-tier
+// companion affordable on every scoped run (the reason the whole-store pass was deferred in the
+// first place is exactly that it is not).
+//
+// ⚠️ Consequence, stated explicitly: a violation whose subject is NOT in the delta and whose named
+// tasks do not intersect the delta is NOT produced here (its neighbours were never loaded). That is
+// the intended division of labour — the full-tier registration still runs the whole-store pass, so
+// 延迟发现 ≠ 丢弃. The delta-scoped mode exists to make the CHANGER pay for what the changer broke.
+export function loadClosure(tasksDir: string, seedIds: string[]): Map<string, TaskFrontmatter> {
+  const map = new Map<string, TaskFrontmatter>();
+  for (const id of seedIds) {
+    const t = readTaskFile(tasksDir, id);
+    if (t) map.set(t.id as string, t);
+  }
+  const neighbours = new Set<string>();
+  for (const t of map.values()) {
+    for (const c of t.children || []) neighbours.add(c);
+    if (t.parent && t.parent !== "null") neighbours.add(t.parent);
+    for (const d of t.dependsOn || []) neighbours.add(d);
+  }
+  for (const nid of neighbours) {
+    if (map.has(nid)) continue;
+    const t = readTaskFile(tasksDir, nid);
+    if (t) map.set(t.id as string, t);
+  }
+  return map;
+}
+
+// ── gitDeltaTaskIds — the delta's task ids, derived from git (never from ## Touches). ────────────
+// `git diff --name-only <base>` compares the base COMMIT to the WORKING TREE, so committed-on-branch
+// AND uncommitted tracked edits are both covered by one call; `git ls-files --others` adds a task
+// file the delta created but has not committed yet (the `quay-file-task` → fan-in window). Reading
+// the delta from git — not from the task's declared `## Touches` — is deliberate: Touches ⊋ delta is
+// normal (a task authorizes more than it edits) and Touches ⊉ delta is the anti-drift defect, so
+// Touches is the wrong source for "what did this change actually change".
+export function gitDeltaTaskIds(
+  root: string,
+  base: string,
+  tasksDirRelative: string,
+): { ids: string[]; notEvaluated: string | null } {
+  const rel = tasksDirRelative.replace(/\/+$/, "");
+  const run = (argv: string[]): { ok: boolean; out: string } => {
+    const r = spawnSync("git", ["-C", root, ...argv], { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
+    return { ok: r.status === 0, out: r.stdout || "" };
+  };
+  if (!run(["rev-parse", "--verify", "--quiet", `${base}^{commit}`]).ok) {
+    return { ids: [], notEvaluated: `base ref "${base}" does not resolve in ${root}` };
+  }
+  const diff = run(["diff", "--name-only", base, "--", `${rel}/`]);
+  if (!diff.ok) return { ids: [], notEvaluated: `git diff ${base} failed in ${root}` };
+  const untracked = run(["ls-files", "--others", "--exclude-standard", "--", `${rel}/`]);
+  if (!untracked.ok) return { ids: [], notEvaluated: `git ls-files failed in ${root}` };
+  const files = [...diff.out.split("\n"), ...untracked.out.split("\n")].map((s) => s.trim()).filter(Boolean);
+  const ids = [...new Set(
+    files
+      .filter((f) => f.startsWith(`${rel}/`) && f.endsWith(".md"))
+      .map((f) => path.basename(f, ".md")),
+  )].sort();
+  return { ids, notEvaluated: null };
+}
+
 // ── isCompound — a task is compound if role===compound OR it has a non-empty children array. ─────
 function isCompound(t: TaskFrontmatter): boolean {
   return t.role === "compound" || (t.children && t.children.length > 0);
@@ -141,8 +237,16 @@ export interface CheckResult {
 // violations (e.g. grandparent→parent→grandchild) are caught at each level independently by the
 // same rule when the gate runs on the full task set. This avoids duplicating the recursive walk
 // and is the right shape for a gate: produce one clear error per violated boundary.
-export function runChecks(taskMap: Map<string, TaskFrontmatter>): CheckResult {
+export function runChecks(taskMap: Map<string, TaskFrontmatter>, attributeTo?: Set<string>): CheckResult {
   const failures: string[] = [];
+
+  // ATTRIBUTION FILTER — used by `--changed` ONLY (undefined ⇒ whole-store behaviour, byte-identical
+  // to every existing caller). A violation is a RELATION among named tasks; it is reported here only
+  // when at least one of those tasks is in the delta, because that is what makes the red attributable
+  // to THIS change by construction (the property the whole-store pass cannot have, and the reason the
+  // full tier was deferred). A violation naming no delta task is a pre-existing one elsewhere in the
+  // store: the full-tier registration still catches it, so this is deferred, never dropped.
+  const keep = (ids: string[]): boolean => !attributeTo || ids.some((i) => attributeTo.has(i));
 
   // CHECK 1: PARENT-DONE-IFF-CHILDREN
   // For every compound task with status `done`, verify all direct children also have status `done`.
@@ -154,14 +258,16 @@ export function runChecks(taskMap: Map<string, TaskFrontmatter>): CheckResult {
     if (children.length === 0) continue; // done compound with no children is fine (leaf-compound)
 
     const nonDoneChildren: string[] = [];
+    const nonDoneChildIds: string[] = [];
     for (const childId of children) {
       const child = taskMap.get(childId);
       const childStatus = child ? child.status : "missing";
       if (childStatus !== "done") {
         nonDoneChildren.push(`${childId} (status: ${childStatus})`);
+        nonDoneChildIds.push(childId);
       }
     }
-    if (nonDoneChildren.length > 0) {
+    if (nonDoneChildren.length > 0 && keep([id, ...nonDoneChildIds])) {
       failures.push(
         `PARENT-DONE-IFF-CHILDREN: task "${id}" is done but has ${nonDoneChildren.length} non-done child(ren): ${nonDoneChildren.join(", ")} — a done parent requires ALL children done (DIR-026)`
       );
@@ -175,7 +281,7 @@ export function runChecks(taskMap: Map<string, TaskFrontmatter>): CheckResult {
     if (t.status !== "todo" && t.status !== "ready") continue;
     if (t.role !== "compound") continue; // only explicit compound role triggers this check
     const children = t.children || [];
-    if (children.length === 0) {
+    if (children.length === 0 && keep([id])) {
       failures.push(
         `SELECT-SPLIT: task "${id}" is a compound task with status "${t.status}" and NO children — compound tasks must be split into children before being SELECTed for a milestone (DIR-026)`
       );
@@ -195,13 +301,15 @@ export function runChecks(taskMap: Map<string, TaskFrontmatter>): CheckResult {
     if (!parentId || parentId === "null") continue; // no parent declared
     const parent = taskMap.get(parentId);
     if (!parent) {
-      failures.push(
-        `CHILD-LINK-SYMMETRY: task "${id}" declares parent "${parentId}" but no such task exists — dangling parent link (DIR-026)`
-      );
+      if (keep([id, parentId])) {
+        failures.push(
+          `CHILD-LINK-SYMMETRY: task "${id}" declares parent "${parentId}" but no such task exists — dangling parent link (DIR-026)`
+        );
+      }
       continue;
     }
     const siblings = parent.children || [];
-    if (!siblings.includes(id)) {
+    if (!siblings.includes(id) && keep([id, parentId])) {
       failures.push(
         `CHILD-LINK-SYMMETRY: task "${id}" declares parent "${parentId}" but "${parentId}".children omits it — a one-way link lets the parent be marked done while this child is excluded from parent-done-iff-children, judging the program prematurely complete (DIR-026)`
       );
@@ -220,12 +328,16 @@ export function runChecks(taskMap: Map<string, TaskFrontmatter>): CheckResult {
     const deps = t.dependsOn || [];
     if (deps.length === 0) continue;
     const nonDoneDeps: string[] = [];
+    const nonDoneDepIds: string[] = [];
     for (const depId of deps) {
       const dep = taskMap.get(depId);
       const depStatus = dep ? dep.status : "missing";
-      if (depStatus !== "done") nonDoneDeps.push(`${depId} (status: ${depStatus})`);
+      if (depStatus !== "done") {
+        nonDoneDeps.push(`${depId} (status: ${depStatus})`);
+        nonDoneDepIds.push(depId);
+      }
     }
-    if (nonDoneDeps.length > 0) {
+    if (nonDoneDeps.length > 0 && keep([id, ...nonDoneDepIds])) {
       failures.push(
         `DEP-DONE-IFF-DEPS: task "${id}" is done but has ${nonDoneDeps.length} non-done prerequisite(s) in depends_on: ${nonDoneDeps.join(", ")} — a done task requires ALL its depends_on prerequisites done (gap-prerequisite-gates-prose-invisible-to-mechanisms)`
       );
@@ -238,7 +350,7 @@ export function runChecks(taskMap: Map<string, TaskFrontmatter>): CheckResult {
   // is invisible here; a DANGLING edge is the opposite defect (the edge exists but points nowhere).
   for (const [id, t] of taskMap) {
     for (const depId of t.dependsOn || []) {
-      if (!taskMap.has(depId)) {
+      if (!taskMap.has(depId) && keep([id, depId])) {
         failures.push(
           `DEP-DANGLING: task "${id}" declares depends_on "${depId}" but no such task exists — dangling prerequisite edge (gap-prerequisite-gates-prose-invisible-to-mechanisms)`
         );
@@ -370,6 +482,7 @@ export function selftest(): boolean {
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 function usage(): never {
   console.error("usage: node it0-split-or-commit-check.ts [--allow-empty] [--tasks-dir <dir>] <workspace-root>");
+  console.error("       node it0-split-or-commit-check.ts --changed [--base <ref>] [--only <id,id,…>] [--tasks-dir <dir>] <workspace-root>");
   console.error("       node it0-split-or-commit-check.ts --selftest");
   process.exit(2);
 }
@@ -377,20 +490,74 @@ function usage(): never {
 const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]) && path.basename(process.argv[1]).replace(/.(?:js|ts|mjs)$/, "") === "it0-split-or-commit-check";
 if (isDirect) {
   const args = process.argv.slice(2);
-  if (args.includes("--help") || args.includes("-h")) helpExit("usage: node it0-split-or-commit-check.ts [--allow-empty] [--tasks-dir <dir>] <workspace-root>");
+  const USAGE = "usage: node it0-split-or-commit-check.ts [--allow-empty] [--changed [--base <ref>] [--only <id,id,…>]] [--tasks-dir <dir>] <workspace-root>";
+  if (args.includes("--help") || args.includes("-h")) helpExit(USAGE);
   if (args.includes("--selftest")) {
     const ok = selftest();
     process.exit(ok ? 0 : 1);
   }
-  const wsRoot = args.find((a) => !a.startsWith("--"));
+  // Flag parsing: consume the VALUE of each value-taking flag so it can never be mistaken for the
+  // positional workspace-root (the previous `args.find(a => !a.startsWith("--"))` returned the value
+  // of `--tasks-dir` when that flag was used).
+  const VALUE_FLAGS = new Set(["--tasks-dir", "--base", "--only"]);
+  const flagValue = (name: string): string | null => {
+    const i = args.indexOf(name);
+    return i >= 0 && i + 1 < args.length ? args[i + 1] : null;
+  };
+  const positionals: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (VALUE_FLAGS.has(args[i])) { i++; continue; }
+    if (args[i].startsWith("--")) continue;
+    positionals.push(args[i]);
+  }
+  const wsRoot = positionals[0];
   if (!wsRoot) usage();
   const resolvedRoot = path.resolve(process.cwd(), wsRoot);
   // --tasks-dir: override the tasks subdirectory (default "tasks")
-  let tasksDirRelative = "tasks";
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--tasks-dir") { tasksDirRelative = args[++i]; continue; }
-  }
+  const tasksDirRelative = flagValue("--tasks-dir") ?? "tasks";
   const tasksDir = path.resolve(resolvedRoot, tasksDirRelative);
+
+  // ── --changed: the DELTA-SCOPED mode (see the header). ───────────────────────────────────────────
+  if (args.includes("--changed")) {
+    const base = flagValue("--base") ?? "develop";
+    const only = flagValue("--only");
+    let seedIds: string[];
+    let notEvaluated: string | null = null;
+    if (only !== null) {
+      seedIds = only.split(",").map((s) => s.trim()).filter(Boolean);
+    } else {
+      const d = gitDeltaTaskIds(resolvedRoot, base, tasksDirRelative);
+      seedIds = d.ids;
+      notEvaluated = d.notEvaluated;
+    }
+    if (notEvaluated !== null) {
+      console.log(`NOT-EVALUATED: it0-split-or-commit-check --changed — ${notEvaluated}; the delta-scoped split-or-commit judgment could not be made (⛔ NOT conflated with PASS — hard rule 3b: 'could not read the input' must not share an output with 'checked and clean'). The full-tier whole-store registration still runs at the full-suite gate (deferred ≠ dropped).`);
+      process.exit(0);
+    }
+    if (seedIds.length === 0) {
+      console.log(`NOT-EVALUATED: it0-split-or-commit-check --changed — no task file in this delta (base ${base}); nothing for the delta-scoped judgment to attribute (⛔ NOT conflated with PASS). The full-tier whole-store registration still runs at the full-suite gate.`);
+      process.exit(0);
+    }
+    if (!fs.existsSync(tasksDir)) {
+      console.log(`NOT-EVALUATED: it0-split-or-commit-check --changed — tasks directory not found: ${tasksDir} (⛔ NOT conflated with PASS).`);
+      process.exit(0);
+    }
+    const closure = loadClosure(tasksDir, seedIds);
+    const deltaSet = new Set(seedIds);
+    if (closure.size === 0) {
+      console.log(`NOT-EVALUATED: it0-split-or-commit-check --changed — none of the ${seedIds.length} delta task file(s) resolved in ${tasksDir} (⛔ NOT conflated with PASS).`);
+      process.exit(0);
+    }
+    const { failures } = runChecks(closure, deltaSet);
+    if (failures.length > 0) {
+      console.log(`FAIL: ${failures.length} split-or-commit violation(s) attributable to THIS delta (${seedIds.length} delta task file(s), ${closure.size} task(s) in the delta+1-hop closure — ⛔ not the whole store):`);
+      for (const f of failures) console.log(`  - ${f}`);
+      process.exit(1);
+    }
+    console.log(`PASS: ${seedIds.length} delta task file(s) + neighbours (${closure.size} task(s) total) — no split-or-commit violation attributable to this delta (base ${base}); the whole-store pass remains at the full-tier gate.`);
+    process.exit(0);
+  }
+
   if (!fs.existsSync(tasksDir)) {
     console.error(`ERROR: tasks directory not found: ${tasksDir}`);
     process.exit(2);
