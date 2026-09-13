@@ -1,7 +1,7 @@
 ---
 id: gap-verification-round-empty-state-lumps-three-distinct-causes
 title: /tests 空状态把三个不同成因合并成一句「尚未跑过验证轮」—— 结构性问题被说成时序问题
-status: todo
+status: ready
 labels:
   - gap
   - defect
