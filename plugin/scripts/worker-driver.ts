@@ -1932,16 +1932,55 @@ export interface RetryExemptionJudgment {
  *  flaky 复发语义一致（两周前的 flaky 不算「已知反复出现」）；测试缝可覆盖。 */
 export const RETRY_EXEMPTION_WINDOW_MS_DEFAULT = 48 * 3600 * 1000;
 
+/** 断言签名的【唯一】归一化点（gap-retry-exemption-signature-keeps-volatile-values）。
+ *
+ *  WHY：签名是「同一缺陷是否复发」的**身份**。签名里只要留下每次运行都变的量（pid / 毫秒 / 端口 /
+ *  绝对路径 / 哈希），同一缺陷在**每个任务**上都会得到一个**新**签名 ⇒ 「≥2 个不同任务命中同一签名」
+ *  结构上永不成立 ⇒ 这个专为「不相关 flaky 不该压垮受害任务」而造的豁免，对最需要它的那一半失败恒空
+ *  （硬规则 4：一个结构上不可能取真的判据不是测量）。实证：同一生产缺陷（`driver-runtime.test.mjs`
+ *  AC4）在 3 个任务的 suite log 里给出 3 条互不相同的签名，只因 pid/confirmed_ms 不同。
+ *
+ *  三分类的取舍：把「每次都会变、且不改变缺陷身份」的**量**折成占位；把**措辞**逐字保留——措辞才是
+ *  缺陷身份。⛔ 不折词、不截断、不折长引文：`'change' !== 'full'` 里的引文正是区分「两种不同缺陷」
+ *  的内容，折掉它就把「不同」变成「同一」（硬规则 3b 的镜像面：不得把「读不懂」变成「合格」，这里
+ *  是不得把「不同缺陷」变成「同一缺陷」）。故本函数**不**复用 `meta-driver.ts:errorSignature`——那个
+ *  正本面向「错误聚合」，会截断到 200 字符并折掉长引文，两者是**不同**的身份语义（AC5 已枚举该兄弟点）。
+ *
+ *  退化的归一化结果（折叠后除占位符外一个字母都不剩，如 `1 !== 2` ⇒ `<n> !== <n>`）**丢掉**，不当作
+ *  签名：它在不同缺陷间恒等 ⇒ 留下它等于制造假豁免。全丢掉 ⇒ 调用侧落
+ *  `insufficient-data-fallback`（照常计数），fail-closed。 */
+export function normalizeAssertionSignature(text: string): string {
+  let s = String(text ?? "").replace(/\s+/g, " ").trim();
+  // ① 哈希/uuid/sha/commit（先于数字：32 位 sha 会被 ② 拆成一堆 <n>，拆完丢掉「这是个哈希」这一形）。
+  //    要求命中里**同时含 a–f 与数字**：纯数字串是量不是哈希，交给 ②；只由 a–f 组成的英文词
+  //    （`defaced`/`acceded`）不得被当成哈希抹掉，否则把不同缺陷并成一个签名。
+  s = s.replace(/\b[0-9a-f]{7,40}\b/gi, (m) => (/[a-f]/i.test(m) && /\d/.test(m) ? "<hex>" : m));
+  // ② 绝对路径（≥2 段）。⚠️ 前导 `/` 必须不在词中间：`AC1/AC2/AC3` 的前导 `/` 前面是 `1`（词字符）
+  //    ⇒ 不匹配；路径在文本里总是空格/括号/冒号/= 之后 ⇒ 匹配。段字符类含 `-`（worktree 名 / 任务 id）。
+  s = s.replace(/(?<![\w])(?:\/[\w.@+-]+){2,}\/?/g, "<path>");
+  // ③ 数字字面量（pid / confirmed_ms / 端口 / 计数 / 行号）。⚠️ 只折【数字 token】——词内数字
+  //    （`dr-ac4-short` 的 `4`）**不折**：那是**稳定**标识符的一部分，折掉它会把 `ac4` 与 `ac7` 两个
+  //    不同的用例并成同一签名（正是本函数开头禁的「把不同缺陷变成同一缺陷」）。判据 = 数字串前面
+  //    不是词字符；`530ms` 这类「数字+单位」仍折（单位文本保留）⇒ 数量变、单位不变 ⇒ 签名不变。
+  s = s.replace(/(?<!\w)\d+(?:\.\d+)?/g, "<n>");
+  return s.trim();
+}
+
 /** 从 suite 日志提取归一化断言签名（`AssertionError [ERR_ASSERTION]: msg` / `AssertionError: msg`）。
- *  归一化 = trim + 折叠内部空白（同一断言换行/缩进差异折叠成同一签名）。读不出 ⇒ []（不伪造；动态
- *  路径断言每次不同 ⇒ 归一化后仍不同 ⇒ 不匹配，fail-closed 朝「不复返、照常计数」，硬规则 3b）。 */
+ *  归一化 = trim + 折叠内部空白 + **易变量折占位**（唯一正本点 `normalizeAssertionSignature`——所有
+ *  消费者都经由本函数拿到**已归一化**的签名，⛔ 不存在第二份「哪些字符算易变量」的清单）。
+ *  读不出 ⇒ []（不伪造），fail-closed 朝「不复返、照常计数」，硬规则 3b。 */
 export function assertionSignaturesFromSuiteLog(logText: string): string[] {
   const out: string[] = [];
   for (const raw of String(logText ?? "").split("\n")) {
     const m = /AssertionError(?:\s*\[[^\]]*\])?:\s*(.+)$/.exec(raw);
     if (!m) continue;
-    const sig = m[1].trim().replace(/\s+/g, " ");
-    if (sig && !out.includes(sig)) out.push(sig);
+    const sig = normalizeAssertionSignature(m[1]);
+    // 退化签名（折叠后**除占位符外**一个字母都不剩，如 `1 !== 2` ⇒ `<n> !== <n>`）不当作身份：它在
+    // 不同缺陷间恒等 ⇒ 留下它等于制造假豁免。⚠️ 判据必须先把占位符形态**泛型**剥掉再找字母——
+    // `<n>` 自己含字母 `n`，不剥就会把退化签名误判成合格（本轮实测踩到过）。
+    if (!sig || !/\p{L}/u.test(sig.replace(/<[a-z]+>/g, ""))) continue;
+    if (!out.includes(sig)) out.push(sig);
   }
   return out;
 }
