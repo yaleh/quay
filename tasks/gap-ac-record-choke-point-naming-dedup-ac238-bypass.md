@@ -2,7 +2,7 @@
 id: gap-ac-record-choke-point-naming-dedup-ac238-bypass
 title: ac89_append_goal009 命名脱离职责、与 ac_record_append_fragment 重复入口、AC-238 绕过
   choke point —— 三合一整改
-status: ready
+status: done
 labels:
   - gap
 parent: null
