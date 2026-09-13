@@ -54,7 +54,50 @@ async function loadSendSessionFrames(): Promise<
   return mod.sendSessionFrames;
 }
 
-const args = process.argv.slice(2);
+// ── L2 (raw keys / control-plane) mode ────────────────────────────────────────────────────────────
+// `--keys --sock <pty.sock> [--token <authToken>] [--audit <path>] "<text>"`
+//
+// This is the mode the cross-session MESSAGING socket cannot serve: a slash command such as `/clear`
+// has no native cross-session form, and hand-rolled `tmux send-keys` is forbidden in this repo. The
+// bytes go out as a pty.sock DATA frame, unmodified (control bytes included). The delivery + audit
+// implementation lives in packages/quay/src/serve-send.ts's `sendKeysToSession` (one copy of the
+// frame codec + audit ledger for the whole repo) — this script only parses argv and resolves paths.
+//
+// ⛔ The socket path is REQUIRED and never guessed: this repo has no verified pty.sock discovery
+// convention, and inventing one would fabricate a fact (硬规则 6).
+if (args.includes("--keys")) {
+  const one = (name: string): string | undefined => {
+    const i = args.indexOf(name);
+    return i === -1 ? undefined : args[i + 1];
+  };
+  const sockPath = one("--sock");
+  if (!sockPath) {
+    console.error("⛔ --keys 需要 --sock <pty.sock>（本仓库无已验证的 pty.sock 发现约定，⛔ 不猜）");
+    process.exit(2);
+  }
+  const authToken = one("--token") ?? "";
+  const auditLogPath = one("--audit") ?? path.join(os.homedir(), ".claude", "pty-keys-audit.jsonl");
+  const bytes =
+    args.filter((a, i) => !a.startsWith("--") && i !== args.indexOf("--sock") + 1 &&
+      i !== args.indexOf("--token") + 1 && i !== args.indexOf("--audit") + 1).join(" ") || "/clear";
+  console.error(`  socket = ${sockPath}`);
+  console.error(`  audit  = ${auditLogPath}`);
+  console.error(`  bytes  = ${JSON.stringify(bytes)}（原样注入，含控制字节；⛔ 不自动补换行）`);
+  try {
+    const mod = await import("../../packages/quay/src/serve-send.ts");
+    const out = await mod.sendKeysToSession({ sockPath, authToken, bytes, auditLogPath, who: `script-${process.pid}` });
+    if (out.delivered) {
+      console.error("  ✅ DATA 帧已写出（拒绝帧未先到）");
+      process.exit(0);
+    }
+    console.error(`  ⛔ 未投递: ${out.error ?? "unknown"}${out.rejectedAs ? ` (rejectedAs=${out.rejectedAs})` : ""}`);
+    process.exit(4);
+  } catch (e) {
+    console.error(`  ⛔ 共享 keys 投递模块不可用: ${e instanceof Error ? e.message : String(e)}`);
+    process.exit(4);
+  }
+}
+
 const self = args.includes("--self");
 const pidIdx = args.indexOf("--pid");
 const tokenIdx = args.indexOf("--token");

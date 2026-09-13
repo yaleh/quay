@@ -601,6 +601,19 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/ experiments/quay-perpetual-stream/scripts/ plugin/scripts/mirror-pair-drift-check.ts plugin/scripts/mirror-pair-drift-allowlist.json plugin/test/mirror-pair-drift-check.test.mjs
   run_checker "mirror-pair-drift-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/mirror-pair-drift-check.ts" --root "${repo_root}"
+  echo "== primitives-drift-check (gap-ac253-session-primitives-shared-layer-adoption — packages/quay/src/primitives/*.mjs vs the pinned quay-fleet blob) =="
+  # The four session read/write primitives are a DELIBERATE two-copy arrangement (quay-fleet is the
+  # reference; this repo carries the copy its product + scripts consume). Two copies without a
+  # mechanical check is the failure mode SPEC §3.3 names ("唯一不可接受的是第二份手写实现"), and the
+  # fleet working tree moves — the four files changed on the day the copy was taken. This checker
+  # re-reads BOTH sides every run against a pinned SHA + four sha256 values and reports THREE states:
+  # exit 0 = consistent; exit 1 = drift (either side, reported per file with both hashes); exit 3 =
+  # NOT-EVALUATED when the fleet repo / pinned SHA is unreachable — never conflated with "consistent"
+  # (硬规则 3b; run_checker passes exit 3 through as STATIC_CHECK_NOT_EVALUATED, so an unrelated
+  # machine without the fleet checkout does not inherit a fabricated red OR a fabricated green).
+  # @static-tier change
+  # @static-object packages/quay/src/primitives/ plugin/scripts/primitives-drift-check.ts plugin/scripts/primitives-drift-manifest.json plugin/test/primitives-drift-check.test.mjs
+  run_checker "primitives-drift-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/primitives-drift-check.ts" --root "${repo_root}"
   echo "== rhythm-consumer-check (gap-ac73 判据1/2/3 — cadence consumer contract gate) =="
   # AC73's own checker — the rhythm column's consumer contract: non-按需 mechanisms must have a
   # call site in test.sh / an execution core (or wired elsewhere, or baselined), 按需 mechanisms

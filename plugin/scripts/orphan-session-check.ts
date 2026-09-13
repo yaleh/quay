@@ -43,6 +43,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { helpExit } from "./gate-script-base.ts";
+// Shared session-liveness primitive — ONE copy, byte-identical to the pinned quay-fleet blob
+// (packages/quay/src/primitives/PROVENANCE.md). The `/proc/<pid>/stat` field-22 read below used to
+// be a local hand-rolled copy; it is not any more (SPEC §3.3: a second implementation is the one
+// unacceptable outcome).
+import { readProcStat } from "../../packages/quay/src/primitives/session-liveness.mjs";
 
 export interface ClaudeSessionProc {
   pid: number;
@@ -150,22 +155,23 @@ export function readProcArgv(pid: number): string[] | null {
   }
 }
 
-/** Read one process's elapsed wall-seconds from /proc/<pid>/stat field 22 (starttime); null on failure. */
+/**
+ * Read one process's elapsed wall-seconds from /proc/<pid>/stat field 22 (starttime); null on failure.
+ *
+ * The field-22 read (including the "comm may contain spaces/parens ⇒ count fields from the LAST ')'
+ * rule) is the SHARED session-liveness primitive's job — this function only does the elapsed-time
+ * arithmetic around it, so there is one implementation of the parse in the repo.
+ */
 export function readProcEtimes(pid: number): number | null {
+  const stat = readProcStat(pid);
+  if (!stat) return null;
+  const starttimeTick = Number(stat.starttime);
+  if (!Number.isFinite(starttimeTick)) return null;
   try {
-    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
-    // /proc/<pid>/stat: comm may contain spaces/parens — match the LAST ')' then split the tail.
-    const close = stat.lastIndexOf(")");
-    if (close === -1) return null;
-    const tail = stat.slice(close + 1).trim().split(/\s+/);
-    // after comm: state(3) ppid(4) ... starttime(22). tail[0] is state, so starttime is tail[22-3]=tail[19].
-    const starttimeTick = Number(tail[19]);
-    if (!Number.isFinite(starttimeTick)) return null;
     const hertz = 100; // CONFIG_HZ on Linux — good enough for a display value
     const uptime = Number(fs.readFileSync("/proc/uptime", "utf8").split(/\s+/)[0] ?? "0");
     if (!Number.isFinite(uptime)) return null;
-    const seconds = Math.max(0, Math.floor(uptime - starttimeTick / hertz));
-    return seconds;
+    return Math.max(0, Math.floor(uptime - starttimeTick / hertz));
   } catch {
     return null;
   }

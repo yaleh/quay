@@ -28,6 +28,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import net from "node:net";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -36,6 +37,11 @@ import { promisify } from "node:util";
 import { isValidSessionId, sessionTranscriptPath } from "./observation.ts";
 import { html, escapeHtml, pageStyles, modernistStyles, renderSiteNav, renderMobileChrome } from "./serve-render.ts";
 import { resolvePluginScriptExec } from "./plugin-root.ts";
+// Shared session read/write primitives — the frame codec and the input-face audit ledger each exist
+// exactly ONCE in this repo, byte-identical to the pinned quay-fleet blob
+// (packages/quay/src/primitives/PROVENANCE.md; re-checked by plugin/scripts/primitives-drift-check.ts).
+import { decodeFrames, encodeCtrl, encodeData } from "./primitives/pty-frame.mjs";
+import { appendAuditRecord, summarizePayload } from "./primitives/delivery-audit.mjs";
 
 const execFileP = promisify(execFile);
 
@@ -50,6 +56,14 @@ export interface MessageReceipt {
   message: string;
   state: "delivered" | "held" | "error";
   sentAtMs: number;
+  /**
+   * The payload SUMMARY (`{length, sha256_12, firstLine}`, from the shared `summarizePayload`) —
+   * the audit-ledger discipline of never reducing a delivery record to "it worked": the summary is
+   * cheap, correlatable, and bounded, and it is what makes a receipt comparable across attempts.
+   * Optional because pre-existing readers/fixtures construct receipts without it; a missing summary
+   * degrades to `undefined`, never to a fabricated one (硬规则 6: 缺值 = 未查).
+   */
+  payloadSummary?: { length: number; sha256_12: string; firstLine: string };
 }
 
 /** How long a held message waits for approval before it is reported expired. Matches the platform's
@@ -239,11 +253,18 @@ export function resolveSessionEndpoint(sessionId: string, home: string = os.home
 // ── Receipt store (held→expired observability) ─────────────────────────────────────────────────────
 
 /** Append one receipt to `<dir>/message-receipts.jsonl`. Never throws — receipt persistence must never
- *  break the send itself (the send already happened; the receipt is the honest record of it). */
+ *  break the send itself (the send already happened; the receipt is the honest record of it).
+ *
+ *  The WRITE itself goes through the shared `appendAuditRecord` (primitives/delivery-audit.mjs), so
+ *  there is exactly one implementation of "append one JSON line to a delivery ledger" in this repo.
+ *  The JSON object written is unchanged byte-for-byte — the shared helper is the same
+ *  `mkdirSync(dirname)` + `appendFileSync(JSON.stringify(record) + "\n")` pair, so every existing
+ *  reader of `message-receipts.jsonl` keeps working (⛔ this is a re-implementation swap, not a
+ *  format change — see the task result's "journal format" decision).
+ */
 export function appendMessageReceipt(dir: string, receipt: MessageReceipt): void {
   try {
-    fs.mkdirSync(dir, { recursive: true });
-    fs.appendFileSync(path.join(dir, MESSAGE_RECEIPTS_FILENAME), JSON.stringify(receipt) + "\n");
+    appendAuditRecord(path.join(dir, MESSAGE_RECEIPTS_FILENAME), receipt);
   } catch {
     // best-effort only
   }
@@ -340,15 +361,35 @@ export async function sendToSession(opts: SendToSessionOpts): Promise<SendOutcom
   const sessionId = opts.sessionId;
   const message = (opts.message ?? "").trim();
 
+  // The audit discipline the shared delivery-audit module exists to enforce: success and FAILURE
+  // leave through the SAME write path. "Only recording successes" is not an audit trail — it is
+  // exactly the gap the old tmux injection chain had. Every early return below persists its receipt
+  // before returning, so a delivery that never reached the socket is still on the ledger.
+  const payloadSummary = summarizePayload(message);
+  const persist = (state: MessageReceipt["state"], name: string | null): void => {
+    if (opts.receiptDir == null) return;
+    appendMessageReceipt(opts.receiptDir, {
+      sessionId,
+      name,
+      message,
+      state,
+      sentAtMs: opts.nowMs ?? Date.now(),
+      payloadSummary,
+    });
+  };
+
   if (!isValidSessionId(sessionId)) {
+    persist("error", null);
     return { state: "error", detail: `sessionId 非法（须为 UUID）：${sessionId}`, sessionId, name: null, message };
   }
   if (!message) {
+    persist("error", null);
     return { state: "error", detail: "消息为空", sessionId, name: null, message };
   }
 
   const endpoint = opts.endpoint !== undefined ? opts.endpoint : resolveSessionEndpoint(sessionId, home);
   if (endpoint == null) {
+    persist("error", null);
     return { state: "error", detail: "未找到目标会话（不在运行注册表，或已结束）", sessionId, name: null, message };
   }
 
@@ -359,6 +400,7 @@ export async function sendToSession(opts: SendToSessionOpts): Promise<SendOutcom
     fromName: WEB_SEND_FROM_NAME,
   });
   if (!sent.ok) {
+    persist("error", endpoint.name);
     return { state: "error", detail: `连接/写入失败：${sent.reason ?? "unknown"}`, sessionId, name: endpoint.name, message };
   }
 
@@ -379,16 +421,121 @@ export async function sendToSession(opts: SendToSessionOpts): Promise<SendOutcom
       ? "消息被丢弃（enqueue 后未物化即 remove）"
       : "已发送，transcript 尚未物化（待确认/待批准）；到期仍未物化则 expired";
 
-  if (opts.receiptDir != null) {
-    appendMessageReceipt(opts.receiptDir, {
-      sessionId,
-      name: endpoint.name,
-      message,
-      state,
-      sentAtMs: opts.nowMs ?? Date.now(),
-    });
-  }
+  persist(state === "delivered" ? "delivered" : state === "error" ? "error" : "held", endpoint.name);
   return { state, detail, sessionId, name: endpoint.name, message };
+}
+
+// ── L2 (raw keys / control-plane) delivery over a pty.sock ────────────────────────────────────────
+
+export interface KeysDeliveryOutcome {
+  /** True only when the DATA frame carrying `bytes` was flushed and no rejection arrived first. */
+  delivered: boolean;
+  /** Null on success; the rejection/timeout/connection reason otherwise. */
+  error: string | null;
+  /** Human-readable rejection tag when the peer answered with an explicit CTRL rejection. */
+  rejectedAs: string | null;
+}
+
+/**
+ * Deliver RAW TERMINAL BYTES to a session's pty socket — the L2/keys lane (fleet design §A.2).
+ *
+ * This is the control-plane path CLAUDE.md records as having no native equivalent: slash commands
+ * like `/clear` cannot be delivered through the cross-session messaging socket, and the repo
+ * forbids hand-rolled `tmux send-keys`. Bytes pass through UNMODIFIED — `0x03` (SIGINT) and every
+ * other control byte are injected exactly as typed, never stripped or re-encoded.
+ *
+ * The frame codec comes from `primitives/pty-frame.mjs` (`encodeCtrl` / `encodeData` /
+ * `decodeFrames`) and the audit ledger from `primitives/delivery-audit.mjs` (`appendAuditRecord` /
+ * `summarizePayload`) — ⛔ neither is re-implemented here. What this function owns is the repo's
+ * own orchestration: endpoint/auth conventions, the grace-window inference, and the audit path,
+ * which are this repo's, not the fleet facade's. An audit record is appended on EVERY exit path —
+ * success, connection error, explicit auth rejection, and timeout — matching the shared module's
+ * contract that a delivery failure can never simply skip the ledger.
+ */
+export function sendKeysToSession(opts: {
+  sockPath: string;
+  authToken: string;
+  bytes: Buffer | string;
+  auditLogPath: string;
+  who?: string;
+  target?: string;
+  timeoutMs?: number;
+  /** How long to wait after the auth frame for an explicit rejection before sending DATA. */
+  authGraceMs?: number;
+}): Promise<KeysDeliveryOutcome> {
+  const dataBuffer = Buffer.isBuffer(opts.bytes) ? opts.bytes : Buffer.from(opts.bytes);
+  const timeoutMs = opts.timeoutMs ?? 2000;
+  const authGraceMs = opts.authGraceMs ?? 50;
+  const id = crypto.randomUUID();
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let recvBuf: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+    let graceTimer: ReturnType<typeof setTimeout> | null = null;
+    let rejectedAs: string | null = null;
+
+    const finish = (delivered: boolean, error: string | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (graceTimer) clearTimeout(graceTimer);
+      try { socket.destroy(); } catch { /* already gone */ }
+      // Same write path on every exit — the shared ledger helper, never a bespoke append.
+      try {
+        appendAuditRecord(opts.auditLogPath, {
+          id,
+          level: "L2",
+          who: opts.who ?? "quay-serve",
+          when: new Date().toISOString(),
+          target: opts.target ?? opts.sockPath,
+          payloadSummary: summarizePayload(dataBuffer),
+          delivered,
+          error: error ?? null,
+          firstStatusChangeAt: null,
+        });
+      } catch {
+        // ledger persistence is best-effort — the delivery already happened or already failed
+      }
+      resolve({ delivered, error, rejectedAs });
+    };
+
+    const timer = setTimeout(() => finish(false, "timeout"), timeoutMs);
+    const socket = net.createConnection(opts.sockPath);
+
+    socket.on("data", (chunk: Buffer) => {
+      recvBuf = Buffer.concat([recvBuf, chunk]);
+      const { frames, rest } = decodeFrames(recvBuf);
+      recvBuf = rest; // a partial tail is kept, never thrown away — the codec's whole point
+      for (const frame of frames) {
+        if (frame.tag !== 1) continue; // only CTRL frames carry auth outcomes
+        let ctrl: { t?: string; message?: string } | null = null;
+        try { ctrl = JSON.parse(frame.payload.toString("utf8")); } catch { continue; }
+        if (ctrl?.t === "auth-required" || ctrl?.t === "error") {
+          rejectedAs = ctrl.t;
+          finish(false, `auth rejected: ${ctrl.t}${ctrl.message ? ` (${ctrl.message})` : ""}`);
+          return;
+        }
+      }
+    });
+
+    socket.on("error", (err: Error) => finish(false, err?.message ?? String(err)));
+
+    socket.on("connect", () => {
+      socket.write(encodeCtrl({ t: "auth", token: opts.authToken }), (err?: Error | null) => {
+        if (err) { finish(false, err.message); return; }
+        if (settled) return; // a rejection already arrived synchronously
+        // No documented server->client "auth accepted" message exists, so acceptance is inferred
+        // by ABSENCE: if no rejection shows up inside the grace window, the DATA frame goes out.
+        graceTimer = setTimeout(() => {
+          if (settled) return;
+          socket.write(encodeData(dataBuffer), (err2?: Error | null) => {
+            if (err2) finish(false, err2.message);
+            else finish(true, null);
+          });
+        }, authGraceMs);
+      });
+    });
+  });
 }
 
 // ── Rendering ──────────────────────────────────────────────────────────────────────────────────────
