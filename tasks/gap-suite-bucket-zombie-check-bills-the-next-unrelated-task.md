@@ -1,7 +1,7 @@
 ---
 id: gap-suite-bucket-zombie-check-bills-the-next-unrelated-task
 title: suite-bucket-reattr ③-AC8 的僵尸检查把账记在「下一个跑套件的任务」头上（已提交 reattr 表 vs 活盘文件集）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
