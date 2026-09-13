@@ -52,8 +52,11 @@
 // `.quay/verification-round.jsonl`, every one of them `tests==0 ∧ fail==0` pure-static red, first
 // 2026-08-13T14:24:11Z / last 2026-09-04T08:16:12Z). This mode narrows the JUDGMENT to the delta:
 //
-//   ① the delta's task files are the `tasks/*.md` this change added or modified (git diff vs
-//      `--base`, default `develop`, plus untracked files) — or the explicit `--only` id list;
+//   ① the delta's task files are the `tasks/*.md` this change added or modified — `git diff
+//      <base>...HEAD` (three-dot ⇒ merge-base, so a base branch that moved ahead contributes
+//      nothing) ∪ uncommitted tracked edits ∪ untracked, where <base> is `--base` or the first
+//      resolvable of develop / origin/develop / master / origin/master — or the explicit `--only`
+//      id list;
 //   ② only those files are LOADED, plus their 1-hop neighbour closure (children / parent /
 //      depends_on) — so the cost is ∝ the delta's fan-out, NOT the store size (measured: 0.06–0.09 s
 //      for a 1-task delta vs 0.49 s for the 2090-task whole-store pass);
@@ -189,36 +192,61 @@ export function loadClosure(tasksDir: string, seedIds: string[]): Map<string, Ta
 }
 
 // ── gitDeltaTaskIds — the delta's task ids, derived from git (never from ## Touches). ────────────
-// `git diff --name-only <base>` compares the base COMMIT to the WORKING TREE, so committed-on-branch
-// AND uncommitted tracked edits are both covered by one call; `git ls-files --others` adds a task
-// file the delta created but has not committed yet (the `quay-file-task` → fan-in window). Reading
-// the delta from git — not from the task's declared `## Touches` — is deliberate: Touches ⊋ delta is
-// normal (a task authorizes more than it edits) and Touches ⊉ delta is the anti-drift defect, so
-// Touches is the wrong source for "what did this change actually change".
+// Reading the delta from git — not from the task's declared `## Touches` — is deliberate: Touches ⊋
+// delta is normal (a task authorizes more than it edits) and Touches ⊉ delta is the anti-drift
+// defect, so Touches is the wrong source for "what did this change actually change".
+//
+// The construction is the SAME one the sibling change-tier companion uses
+// (checker-mutation-check.sh --check-changed, gap-checker-mutation-check-has-no-change-tier-companion),
+// and it is chosen to be robust to the base branch ADVANCING while this branch sits still — the
+// normal state of this repo, where fan-ins land on develop every few minutes:
+//
+//   base   = the --base override, else the first resolvable of develop / origin/develop / master /
+//            origin/master (portable to third-party projects that have no `develop`)
+//   delta  = `git diff --name-only <base>...HEAD`   (three-dot ⇒ merge-base: MY side only, so a
+//                                                     develop that moved ahead contributes nothing)
+//          ∪ `git diff --name-only HEAD`             (uncommitted: staged + unstaged)
+//          ∪ `git ls-files --others --exclude-standard` (a task file created but not yet committed —
+//                                                     the `quay-file-task` → fan-in window)
+export const DEFAULT_BASES = ["develop", "origin/develop", "master", "origin/master"];
+
 export function gitDeltaTaskIds(
   root: string,
-  base: string,
+  base: string | null,
   tasksDirRelative: string,
-): { ids: string[]; notEvaluated: string | null } {
+): { ids: string[]; base: string | null; notEvaluated: string | null } {
   const rel = tasksDirRelative.replace(/\/+$/, "");
   const run = (argv: string[]): { ok: boolean; out: string } => {
     const r = spawnSync("git", ["-C", root, ...argv], { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
     return { ok: r.status === 0, out: r.stdout || "" };
   };
-  if (!run(["rev-parse", "--verify", "--quiet", `${base}^{commit}`]).ok) {
-    return { ids: [], notEvaluated: `base ref "${base}" does not resolve in ${root}` };
+  const resolves = (ref: string): boolean => run(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).ok;
+  let resolvedBase: string | null = null;
+  if (base !== null) {
+    if (!resolves(base)) return { ids: [], base: null, notEvaluated: `base ref "${base}" does not resolve in ${root}` };
+    resolvedBase = base;
+  } else {
+    resolvedBase = DEFAULT_BASES.find((b) => resolves(b)) ?? null;
+    if (resolvedBase === null) {
+      return { ids: [], base: null, notEvaluated: `none of the base refs (${DEFAULT_BASES.join(", ")}) resolve in ${root}` };
+    }
   }
-  const diff = run(["diff", "--name-only", base, "--", `${rel}/`]);
-  if (!diff.ok) return { ids: [], notEvaluated: `git diff ${base} failed in ${root}` };
+  const committed = run(["diff", "--name-only", `${resolvedBase}...HEAD`, "--", `${rel}/`]);
+  if (!committed.ok) return { ids: [], base: resolvedBase, notEvaluated: `git diff ${resolvedBase}...HEAD failed in ${root}` };
+  const working = run(["diff", "--name-only", "HEAD", "--", `${rel}/`]);
+  if (!working.ok) return { ids: [], base: resolvedBase, notEvaluated: `git diff HEAD failed in ${root}` };
   const untracked = run(["ls-files", "--others", "--exclude-standard", "--", `${rel}/`]);
-  if (!untracked.ok) return { ids: [], notEvaluated: `git ls-files failed in ${root}` };
-  const files = [...diff.out.split("\n"), ...untracked.out.split("\n")].map((s) => s.trim()).filter(Boolean);
+  if (!untracked.ok) return { ids: [], base: resolvedBase, notEvaluated: `git ls-files failed in ${root}` };
+  const files = [committed.out, working.out, untracked.out]
+    .flatMap((s) => s.split("\n"))
+    .map((s) => s.trim())
+    .filter(Boolean);
   const ids = [...new Set(
     files
       .filter((f) => f.startsWith(`${rel}/`) && f.endsWith(".md"))
       .map((f) => path.basename(f, ".md")),
   )].sort();
-  return { ids, notEvaluated: null };
+  return { ids, base: resolvedBase, notEvaluated: null };
 }
 
 // ── isCompound — a task is compound if role===compound OR it has a non-empty children array. ─────
@@ -519,9 +547,10 @@ if (isDirect) {
 
   // ── --changed: the DELTA-SCOPED mode (see the header). ───────────────────────────────────────────
   if (args.includes("--changed")) {
-    const base = flagValue("--base") ?? "develop";
+    const base = flagValue("--base");
     const only = flagValue("--only");
     let seedIds: string[];
+    let baseLabel = base ?? "(unresolved)";
     let notEvaluated: string | null = null;
     if (only !== null) {
       seedIds = only.split(",").map((s) => s.trim()).filter(Boolean);
@@ -529,13 +558,14 @@ if (isDirect) {
       const d = gitDeltaTaskIds(resolvedRoot, base, tasksDirRelative);
       seedIds = d.ids;
       notEvaluated = d.notEvaluated;
+      if (d.base !== null) baseLabel = d.base;
     }
     if (notEvaluated !== null) {
       console.log(`NOT-EVALUATED: it0-split-or-commit-check --changed — ${notEvaluated}; the delta-scoped split-or-commit judgment could not be made (⛔ NOT conflated with PASS — hard rule 3b: 'could not read the input' must not share an output with 'checked and clean'). The full-tier whole-store registration still runs at the full-suite gate (deferred ≠ dropped).`);
       process.exit(0);
     }
     if (seedIds.length === 0) {
-      console.log(`NOT-EVALUATED: it0-split-or-commit-check --changed — no task file in this delta (base ${base}); nothing for the delta-scoped judgment to attribute (⛔ NOT conflated with PASS). The full-tier whole-store registration still runs at the full-suite gate.`);
+      console.log(`NOT-EVALUATED: it0-split-or-commit-check --changed — no task file in this delta (base ${baseLabel}); nothing for the delta-scoped judgment to attribute (⛔ NOT conflated with PASS). The full-tier whole-store registration still runs at the full-suite gate.`);
       process.exit(0);
     }
     if (!fs.existsSync(tasksDir)) {
@@ -554,7 +584,7 @@ if (isDirect) {
       for (const f of failures) console.log(`  - ${f}`);
       process.exit(1);
     }
-    console.log(`PASS: ${seedIds.length} delta task file(s) + neighbours (${closure.size} task(s) total) — no split-or-commit violation attributable to this delta (base ${base}); the whole-store pass remains at the full-tier gate.`);
+    console.log(`PASS: ${seedIds.length} delta task file(s) + neighbours (${closure.size} task(s) total) — no split-or-commit violation attributable to this delta (base ${baseLabel}); the whole-store pass remains at the full-tier gate.`);
     process.exit(0);
   }
 

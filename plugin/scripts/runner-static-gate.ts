@@ -118,7 +118,7 @@ run_static_checks() {
   # loading (① above), not a narrower trigger.
   # @static-tier change
   # @static-object tasks/ plugin/scripts/runner-static-gate.ts plugin/scripts/it0-split-or-commit-check.ts plugin/scripts/it0-split-or-commit-check.sh plugin/scripts/checker-mutation-cases/it0-split-or-commit-check.sh
-  run_checker "it0-split-or-commit-check-changed" bash "${repo_root}/plugin/scripts/it0-split-or-commit-check.sh" --changed --base develop "${repo_root}"
+  run_checker "it0-split-or-commit-check-changed" bash "${repo_root}/plugin/scripts/it0-split-or-commit-check.sh" --changed "${repo_root}"
   echo "== checker mechanical-spine check (gap-b1-mechanical-spine-doc-checker, AC1/AC2/AC3) =="
   # Mechanical spine (B1, SPEC-checker-mechanical-spine-contract-2026-08-28.md): every checker's
   # exit-code vocabulary must be within {0,1,2,3} (0=PASS, 1=FAIL, 2=usage/env-error,
