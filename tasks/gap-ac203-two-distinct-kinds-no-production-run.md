@@ -2,7 +2,7 @@
 id: gap-ac203-two-distinct-kinds-no-production-run
 title: AC-203 判据 2026-09-13 收紧为「≥2 个不同 kind」后生产载体一条合格记录都没有 —— 既有 3 条记录无 kind
   字段，产出侧已补齐但从未在真第三方主机跑过一次
-status: needs-human
+status: ready
 needs_human_cause: human-adjudication
 labels:
   - gap
