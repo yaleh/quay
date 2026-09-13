@@ -93,8 +93,18 @@ const FAKE_WORKER_DRIVER = [
   "setInterval(() => {}, 1000);",
 ].join("\n");
 
+// ⚠️ 本文件测的是**多进程 supervisor 机制**（respawn / --restart-delay / kill -9 supervisor /
+// 源码自刷新杀 child / supervisor 陈旧判定 / spawn 预写 pid 的代理量语义）。GOAL-017/AC-255（SPEC §7
+// 阶段 C）把生产默认路径换成了**单进程 anchor**（六个 kind 的循环住在一个进程的事件循环里，supervisor
+// 退役）——但该路径**被显式保留为可回退形态**（`QUAY_DRIVER_LEGACY_SUPERVISOR=1`，SPEC §7「每阶段独立
+// 可回退」）。本文件的夹具（fake driver 是**独立进程**、只会 `require`+idle，不导出 main）结构上只能跑
+// supervisor 路径，故这里显式钉住回退开关：**它测的是被保留的那条路径**，⛔ 不是生产默认。
+//
+// anchor（生产默认）路径的等价覆盖在新文件 plugin/test/driver-anchor.test.mjs 里（收敛 + 六心跳 +
+// 单 kind 停机 + §6.10 活性负控制）。⛔ 两个文件合起来才是完整覆盖——只看本文件会把一条已退役的路径
+// 误读成「生产在跑的东西」。
 function run(args, opts = {}) {
-  const env = { ...process.env, ...(opts.env || {}) };
+  const env = { QUAY_DRIVER_LEGACY_SUPERVISOR: "1", ...process.env, ...(opts.env || {}) };
   // AC-203：kernel 从自身安装位置（或 QUAY_PLUGIN_ROOT）解析 driver/脚本——测试的 fake driver 住在
   // <tmp>/plugin/scripts/，故经 QUAY_PLUGIN_ROOT 指向 fake plugin root（同 Core plugin-root.ts 手法）。
   if (opts.pluginRoot) env.QUAY_PLUGIN_ROOT = opts.pluginRoot;

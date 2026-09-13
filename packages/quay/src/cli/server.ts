@@ -70,6 +70,26 @@ interface ServiceReport {
   liveness: ServiceProbe;
 }
 
+/** SPEC §6.10「每服务独立健康读数」对 **driver kind** 的那一半（GOAL-017/AC-255）。
+ *
+ *  合并成「一个 anchor 承载六个 kind 循环」之后，`ps` 只剩一行 ⇒ 「进程活着」与「这个 kind 还在转」
+ *  在外部不再可区分（§6.7 禁止的那种折叠）。故每行给一条**直接量**：该服务**自己的 round 心跳**的
+ *  最后一条记录的 `ts`（⛔ 不是「宿主 pid 活着」这种推导，⛔ 也不是 pid 文件存在性）。
+ *
+ *  ⛔ 本行**不参与**顶层 `status` 的判定（`running`/`degraded` 仍是 AC-251 的 pid 同一性契约）——
+ *  一个工作区里没有 driver 在跑是**常态**（未冷启动 / 已 drain），把它折进 `status` 会让
+ *  「统一 server 不在」与「driver 没起」同形。它有自己的取值：`liveness.alive`。 */
+interface DriverServiceReport {
+  name: string;
+  kind: string;
+  pid: number | null;
+  host: string;
+  liveness: ServiceProbe;
+}
+
+/** 心跳新鲜度窗口（ms）。与 AC-255 的 criterion 同值（60min）——同一个量、同一个阈值，⛔ 不各写一份。 */
+const DRIVER_HEARTBEAT_FRESH_MS = 3600_000;
+
 /** Resolve the workspace root the way every other workspace-scoped command does: `--root` when
  *  given, else an upward walk from the process cwd. Fail-closed — a directory without
  *  `.quay/config.yml` is never silently replaced by cwd (gap-task-list-root-does-not-scope-
@@ -111,6 +131,73 @@ export async function handleServer(ctx: CliCtx) {
     return;
   }
   await statusCommand(ctx);
+}
+
+/** 一个 driver kind 的健康读数：**直接量** = 它自己 round 心跳载体的最后一条记录的 `ts`。
+ *  三态（硬规则 3b）：fresh(`alive:true`) / stale(`alive:false`) / not-evaluated（读不到载体或 ts
+ *  不可解析 ⇒ `evaluated:false`，⛔ 与「停摆」不同形——「读不懂」不得伪装成「不合格」。 */
+function driverServiceReport(workspaceRoot: string, kind: string): DriverServiceReport {
+  const name = `driver:${kind}`;
+  const r = runDriver("status", kind, ["--kind", kind, "--json"], workspaceRoot);
+  const base: DriverServiceReport = { name, kind, pid: null, host: "local", liveness: unevaluated("driver status unavailable") };
+  if (!r.ok) return { ...base, liveness: unevaluated(r.reason ?? "driver status unavailable") };
+  const line = r.stdout.split("\n").find((l) => l.trim().startsWith("{"));
+  if (!line) return { ...base, liveness: unevaluated(`driver status produced no JSON frame (exit ${r.exitCode})`) };
+  let j: {
+    driver_pid?: number | null;
+    anchor_pid?: number | null;
+    driver_alive?: number | null;
+    carrier_path?: string | null;
+    last_record_ts?: string | null;
+  };
+  try {
+    j = JSON.parse(line) as typeof j;
+  } catch {
+    return { ...base, liveness: unevaluated("driver status JSON was unparseable") };
+  }
+  const pid = j.driver_pid ?? j.anchor_pid ?? null;
+  const carrier = j.carrier_path;
+  const tsRaw = j.last_record_ts;
+  // ⚠️ **没有活着的承载进程** 是一个独立的、必须先判的取值（GOAL-017/AC-255 的负控制实测教训）：
+  // 只看心跳新鲜度会让「这个 kind 已经被停掉」在 **60 分钟**内与「一切正常」同形（心跳窗口是 60min，
+  // 而停掉的循环当然不会再写 —— 于是它的最后一条记录在窗口内仍然「新鲜」）。实测：`stop --kind meta`
+  // 之后该行仍报 alive:true，只有 pid 变 null。那不是「服务在转」的读数。
+  // ⇒ 先判承载进程（`driver_alive` = 该 kind 的 pid 载体所指进程是否活着），再判心跳。
+  if (j.driver_alive !== 1) {
+    return {
+      ...base,
+      pid,
+      liveness: {
+        evaluated: true,
+        alive: false,
+        source: "driver pid",
+        detail: `no live carrying process for ${name} (pid=${pid ?? "none"}) — the loop is not running`,
+      },
+    };
+  }
+  if (!carrier || !tsRaw) {
+    return { ...base, pid, liveness: unevaluated(`no round heartbeat carrier record yet (carrier=${carrier ?? "null"})`) };
+  }
+  const at = Date.parse(tsRaw);
+  if (!Number.isFinite(at)) {
+    return { ...base, pid, liveness: unevaluated(`carrier ${carrier} last ts is unparseable (${tsRaw})`) };
+  }
+  const ageMs = Date.now() - at;
+  const stale = ageMs > DRIVER_HEARTBEAT_FRESH_MS;
+  return {
+    name,
+    kind,
+    pid,
+    host: "local",
+    liveness: {
+      evaluated: true,
+      alive: !stale,
+      source: `carrier:${carrier} last ts`,
+      detail: stale
+        ? `last round heartbeat ${Math.round(ageMs / 60000)}min ago (> ${DRIVER_HEARTBEAT_FRESH_MS / 60000}min) — this service is NOT turning`
+        : `last round heartbeat ${Math.round(ageMs / 1000)}s ago`,
+    },
+  };
 }
 
 async function statusCommand({ flags, wantsJson }: CliCtx) {
@@ -192,6 +279,10 @@ async function statusCommand({ flags, wantsJson }: CliCtx) {
         ? EXIT_NOT_RUNNING
         : EXIT_RUNNING;
 
+  // SPEC §6.10 的另一半（GOAL-017/AC-255）：六个 driver kind 各一行，活性取**该服务自己的 round 心跳**。
+  // ⛔ 不在 `status`/`not-running` 分支里跳过——那正是最需要看「哪个 kind 不转了」的时刻。
+  const drivers = DRIVER_SERVICE_KINDS.map((kind) => driverServiceReport(workspaceRoot, kind));
+
   if (wantsJson) {
     process.stdout.write(
       JSON.stringify(
@@ -205,6 +296,7 @@ async function statusCommand({ flags, wantsJson }: CliCtx) {
           pid: hostPid,
           startedAt,
           services,
+          drivers,
         },
         null,
         2,
@@ -224,6 +316,13 @@ async function statusCommand({ flags, wantsJson }: CliCtx) {
         : "not-evaluated";
       process.stdout.write(
         `  ${s.name.padEnd(8)} pid ${String(s.pid ?? "—").padEnd(8)} ${s.host}:${s.port}  ${liveness} (${s.liveness.source ?? "no probe"}) — ${s.liveness.detail}\n`,
+      );
+    }
+    process.stdout.write(`  driver services (§6.10 — 活性取各自 round 心跳的直接量，⛔ 非「进程在」):\n`);
+    for (const d of drivers) {
+      const liveness = d.liveness.evaluated ? (d.liveness.alive === true ? "alive" : "DOWN") : "not-evaluated";
+      process.stdout.write(
+        `  ${d.name.padEnd(18)} pid ${String(d.pid ?? "—").padEnd(8)} ${liveness.padEnd(14)} (${d.liveness.source ?? "no carrier"}) — ${d.liveness.detail}\n`,
       );
     }
   }

@@ -2532,6 +2532,7 @@ export async function main(argv: string[]): Promise<number> {
       root, intervalMs, once: false, maxRounds,
       roundLogFile: path.join(root, ROUND_CARRIER_REL),
       runId, json, pidFile,
+      kind: "meta",
       controlStateRel: META_CONTROL_STATE_REL,
       routines: metaDriverRoutines(root, { reviewIntervalMinutes, k, judgeFloorMs, focus }),
     });

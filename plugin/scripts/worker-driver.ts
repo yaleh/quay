@@ -195,7 +195,9 @@ import {
   defaultSelectorArgv,
   parseSelectorOutput,
   runSelectorWorker,
+  kindStopRequested,
   makeStopCondition,
+  registerKindStop,
   resolveKernelSibling,
   resolveKernelScriptsDir,
   resolveKernelPluginRoot,
@@ -4944,6 +4946,10 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
    *  下一轮重读 stopCondition。⛔ AC151：判停经 Layer 0 的 makeStopCondition 消费（halt ∧ resourceGate
    *  单一实现），不各写一遍。 */
   const stopCondition = makeStopCondition(rootDir, "worker", resourceGateArgv);
+  // AC-255（SPEC §7 阶段 C）：停机登记。anchor 请求停本 kind 时，本循环**与 mcp-halt 走同一条路**：
+  // 不再起新 worker（下面的 dispatch-loop 条件），在飞全部跑完后 break（`running.length === 0` 那一支）
+  // ⇒ ⛔ 不杀在飞子进程（§6.9 不变式 3，与旧 `quay driver stop` 的语义逐字相同）。
+  registerKindStop("worker");
 
   /** worker 终态记账（spawnSelected 与 adoptOrphanWorker 共用，⛔ 不各写一遍）：结果入 results + 重试上限
    *  （exited-not-landed 达上限标 needs-human）+ 快速死亡退避。spawnSelected 与 adopt 的 worker 退出后
@@ -5180,7 +5186,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       //    stopCondition（gap-worker-driver-stopreason-latch-permanent-stop：stopReason 一旦赋值永不复位 ⇒
       //    瞬时拒被永久 latch ⇒ 1h48m 零派发）。
       step = "dispatch-loop";
-      while (running.length < cap && !stopReason) {
+      while (running.length < cap && !stopReason && !kindStopRequested("worker")) {
         const sc = stopCondition();
         if (sc.stop) {
           if (sc.terminal) stopReason = sc.reason;
@@ -5235,7 +5241,7 @@ export async function runResidentLoop(opts: ResidentOptions): Promise<number> {
       // 3. 无在飞 ⇒ 终态 halt（stopReason latch）才退出；瞬时 WAIT（池可能再补 / 闸可能已放行）⇒
       //    等 intervalMs 重读，⛔ 不退出（gap-worker-driver-stopreason-latch-permanent-stop AC3）。
       if (running.length === 0) {
-        if (stopReason) break;
+        if (stopReason || kindStopRequested("worker")) break;
         step = "sleep";
         await sleep(intervalMs);
         continue;
