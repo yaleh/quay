@@ -553,7 +553,10 @@ export function taskRunsBlock(
 ): string {
   const records = readWorkerOutcomeRecords(root).filter((r) => r.task === taskId);
 
-  const live = opts.liveWorkers ?? (workerDriverActive(root) ? readLiveWorkerProcesses("/proc") : []);
+  // Scope the host-global /proc scan to THIS workspace (gap-observation-hardcodes-quay-worktrees-
+  // ignoring-config-worktree-root, sibling site of observation.readLive's scan): `workerDriverActive`
+  // says this workspace HAS a driver, not that the scanned processes are its workers.
+  const live = opts.liveWorkers ?? (workerDriverActive(root) ? readLiveWorkerProcesses("/proc", { root }) : []);
   const inFlight = live.filter((w) => w && w.taskId === taskId);
 
   if (records.length === 0 && inFlight.length === 0) {

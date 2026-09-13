@@ -1,7 +1,7 @@
 ---
 id: AC-253
 title: 会话读写原语统一到共享层 —— 四个模块在本仓库可用且有非测试消费者（SPEC 阶段 A3）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-017
 criterion: |-
@@ -38,4 +38,10 @@ origin: SPEC
   §3.3。四个零依赖模块（pty-frame/delivery-audit/session-liveness/session-schema）已在
   quay-fleet 踩实；本仓库若自己再写一份就是「两份实现 = 假」。⛔ 判据含「有非测试消费者」以防拷进来就算达成。
 activatedAt: 2026-09-13T14:40:10.876Z
+statusLog:
+  - at: 2026-09-13T17:04:48.397Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---

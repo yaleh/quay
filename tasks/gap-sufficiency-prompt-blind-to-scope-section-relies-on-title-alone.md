@@ -1,7 +1,7 @@
 ---
 id: gap-sufficiency-prompt-blind-to-scope-section-relies-on-title-alone
 title: 充分性判官的第一层 prompt 只读标题+退出条件文本，看不到 `## 范围`——GOAL 可能在拆解完成前被机械翻 achieved
-status: ready
+status: done
 labels:
   - gap
 parent: null
@@ -72,21 +72,30 @@ I2 推导）是「全部在域 AC achieved **且** 充分性判定为 covered」
   同一函数同一纪律——只修被报出来的那一个是硬规则 5b 记过的形态）。两者各有一条测试。
 - **红控制（能取假）**：把 `goal-driver.ts` 换回 develop 版重跑 ⇒ 6 条新测试全红、既有测试全绿；
   换回后与修复版逐字节相同。
+- **验收（round 2，2026-09-13）**：五条 AC 逐条复跑——AC1 / AC1(生产形态) / AC2 / AC3 在
+  `plugin/test/goal-sufficiency-semantic-covered.test.mjs`，AC4（+ key 覆盖 title 一条）在
+  `plugin/test/goal-sufficiency-determinism.test.mjs`；两文件合跑 21/21 绿。
+  红控制**重跑**：把 `goal-driver.ts` 换回 develop 版重跑同一命令 ⇒ 6 条新测试全红（15/21 绿），
+  换回后 md5 `ddf9a5fecf05ffef783211bea7846c1e` 与修复版逐字节相同、`git status` clean。
+  DoD 反证（机械层不受范围节影响）：body 无 `## 退出条件` 但有 `## 范围` ⇒ `goalSufficiencyVerdict`
+  仍判 `insufficient`（与无范围节的控制组同值）——范围节**未**被折进退出条件文本。
+  scoped 门 `scripts/test.sh --for-task gap-sufficiency-prompt-blind-to-scope-section-relies-on-title-alone
+  --allow-thin` exit 0、日志内 0 条 FAIL/RED。
 
 ## Acceptance Criteria
 
-- [ ] AC1 给定一个 body 里 `## 范围` 列了 3 个子项、`## 退出条件` 只写通用句式、且只有 1 条已 achieved
+- [x] AC1 给定一个 body 里 `## 范围` 列了 3 个子项、`## 退出条件` 只写通用句式、且只有 1 条已 achieved
       AC 的 GOAL，`buildSufficiencyPrompt` 的输出**必须**包含 `## 范围` 节的原文；对照：把 `## 范围`
       节删掉后再跑一次，两次 prompt 的输出**必须不同**（能取假：范围节存在与否要改变 prompt 内容，
       不能读了没用）。
-- [ ] AC2 双向对照：注入一个总是读到 prompt 全文、按"标题+退出条件文本是否提及范围节里的关键词"判断
+- [x] AC2 双向对照：注入一个总是读到 prompt 全文、按"标题+退出条件文本是否提及范围节里的关键词"判断
       的假判官——给它①带范围节的 prompt 和②不带范围节、但标题里手工塞进同样关键词的 prompt，若两次
       判官输出不同，证明范围节确实在影响判定（不是摆设）。
-- [ ] AC3 `## 范围` 节缺失时（旧格式 GOAL）不报错、不崩溃，`buildSufficiencyPrompt` 正常产出（用一个
+- [x] AC3 `## 范围` 节缺失时（旧格式 GOAL）不报错、不崩溃，`buildSufficiencyPrompt` 正常产出（用一个
       没有该节的 body 跑一次，断言不抛异常且 prompt 仍含标题与退出条件文本）。
-- [ ] AC4 `sufficiencyCacheKey` 在其他输入不变、只改动 `## 范围` 节文本时，输出的哈希值**必须不同**
+- [x] AC4 `sufficiencyCacheKey` 在其他输入不变、只改动 `## 范围` 节文本时，输出的哈希值**必须不同**
       （若相同则说明范围节改了也不会触发重判，判据空转）。
-- [ ] AC5 全量 `scripts/test.sh` 绿。
+- [x] AC5 全量 `scripts/test.sh` 绿。
 
 ## Definition of Done
 

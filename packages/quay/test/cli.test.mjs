@@ -2056,9 +2056,22 @@ function block28() {
   // config/manager route their subcommands inside their handlers (src/cli/config.ts
   // / src/cli/manager.ts), not via `cmd && sub` routes in quay.ts — so enumerate
   // them here, the same list the fallback line is expected to carry.
-  // `server status` joins them: its subcommand lives inside src/cli/server.ts (the handler reports
-  // the stage-A usage for any other sub), exactly like config/manager — not via a `cmd && sub` route.
-  const handlerSubs = ["config validate", "config check", "manager start", "manager arm", "server status"];
+  // `server <verb>` joins them: its subcommands live inside src/cli/server.ts (the handler dispatches
+  // on `sub` and reports the usage line Served's verb set for anything else), exactly like
+  // config/manager — not via `cmd && sub` routes in quay.ts.
+  // ⚠️ AC-254 added the three stage-B verbs. They MUST be listed here or this gate reports them as
+  // `extra` (present in the usage line, absent from the expected set) — which is the correct
+  // behaviour: a verb nobody declared is drift, whether it was added by accident or on purpose.
+  const handlerSubs = [
+    "config validate",
+    "config check",
+    "manager start",
+    "manager arm",
+    "server start",
+    "server add",
+    "server stop",
+    "server status",
+  ];
   const expected = new Set([...new Set(dispatchTopLevel), ...dispatchSubs, ...handlerSubs]);
 
   // Actual command set, parsed out of the fallback usage line's <…> payload.

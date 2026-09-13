@@ -272,7 +272,14 @@ function coreSrcAliasPlugin() {
   return {
     name: "core-src-alias",
     setup(build) {
-      build.onResolve({ filter: /packages\/quay\/src\/[A-Za-z0-9_./-]+\.ts$/ }, (args) => {
+      // The filter also covers `.mjs` Core-src modules (gap-ac253-session-primitives-shared-layer-
+      // adoption): plugin/scripts/*.ts import the shared session primitives at
+      // `../../packages/quay/src/primitives/<name>.mjs`, and the SAME repo-root-relative-path
+      // problem applies — in the STAGED `packages/quay/plugin/` layout that literal resolves to
+      // `packages/quay/plugin/packages/quay/src/primitives/…` (nonexistent) and esbuild fails with
+      // "Could not resolve". The mapping below is by the `packages/quay/src/` suffix, so the
+      // extension only decides whether the resolver claims the specifier.
+      build.onResolve({ filter: /packages\/quay\/src\/[A-Za-z0-9_./-]+\.(?:ts|mjs)$/ }, (args) => {
         const idx = args.path.indexOf("packages/quay/src/");
         const rel = idx >= 0 ? args.path.slice(idx + "packages/quay/src/".length) : args.path.split("/").pop();
         return { path: path.join(pkgDir, "src", rel) };

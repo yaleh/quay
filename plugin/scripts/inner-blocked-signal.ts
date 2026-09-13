@@ -140,6 +140,10 @@ import { fileURLToPath } from "node:url";
 import { writeJsonAtomic } from "./write-json-atomic.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { SCHEMA_VERSION, validateEvent, emitEvent } from "./workflow-event-schema.mjs";
+// Shared session-liveness primitive — ONE copy, byte-identical to the pinned quay-fleet blob
+// (packages/quay/src/primitives/PROVENANCE.md). The main transcript's own mtime (the "never a
+// self-reported field" reading) now comes from here instead of a local `fs.statSync`.
+import { readTranscriptMtime } from "../../packages/quay/src/primitives/session-liveness.mjs";
 import {
   FAST_MODE_STAGE,
   FAST_MODE_AGENT_LABEL,
@@ -695,12 +699,12 @@ export const RULING_REQUIRED_PANE_SAMPLES = 3;
  * @returns {number} 0 when the path does not exist.
  */
 export function transcriptHeartbeatMtimeMs(transcriptPath) {
-  let max = 0;
-  try {
-    max = fs.statSync(transcriptPath).mtimeMs;
-  } catch (_) {
-    return 0;
-  }
+  // The main transcript's mtime comes from the shared session-liveness primitive (one copy of that
+  // read in the repo). Its `null` (missing/unreadable) is preserved as this function's historical
+  // `0` — and, as before, a missing main transcript returns EARLY without scanning subagents.
+  const mainMtimeMs = readTranscriptMtime(transcriptPath);
+  if (mainMtimeMs == null) return 0;
+  let max = mainMtimeMs;
   const subDir = transcriptPath.replace(/\.jsonl$/, "") + "/subagents";
   try {
     for (const f of fs.readdirSync(subDir)) {
