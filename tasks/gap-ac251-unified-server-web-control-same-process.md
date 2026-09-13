@@ -2,7 +2,7 @@
 id: gap-ac251-unified-server-web-control-same-process
 title: GOAL-017/AC-251：web 与 control 合入同一进程 —— 新增 `quay server status --json`
   且二者同 pid（SPEC 阶段 A2）
-status: todo
+status: ready
 labels:
   - gap
 parent: null
