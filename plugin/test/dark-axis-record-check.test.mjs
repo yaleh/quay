@@ -21,11 +21,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
+import { makeTmpDir } from "./helpers/tmp-workspace.mjs";
 import {
   classifyDarkAxisRecord,
   darkAxisGateCheck,
@@ -45,7 +45,10 @@ function runCli(args, cwd = REPO_ROOT) {
 }
 
 function tmpTasksDir(files) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "quay-dark-axis-"));
+  // The shared helper's own after() hook removes it at the end of this file — no raw mkdtemp here
+  // (tmp-leak-pairing-check / test-isolation AC5 block on an unpaired mkdtemp, and the pairing
+  // discipline is the point: a leaked fixture dir is hidden cross-test state, not just bytes).
+  const root = makeTmpDir("quay-dark-axis-");
   const tasksDir = path.join(root, "tasks");
   fs.mkdirSync(tasksDir, { recursive: true });
   for (const [id, text] of Object.entries(files)) {
