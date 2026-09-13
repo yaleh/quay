@@ -82,16 +82,16 @@ init 模板是它的一份人工同步副本，而副本落后了。同工作区
 
 ## Acceptance Criteria
 
-- [ ] AC1（负控制，改前必须红）：在干净临时目录跑一次真 `quay-init`，改前其 `.gitignore`
+- [x] AC1（负控制，改前必须红）：在干净临时目录跑一次真 `quay-init`，改前其 `.gitignore`
       **不含** `.quay-parse-cache.json`；改后包含。同样断言 `milestones/fast-mode-telemetry`。
-- [ ] AC2（后果级，端到端）：在该临时项目里跑一次会写 parse-cache 的 quay 命令
+- [x] AC2（后果级，端到端）：在该临时项目里跑一次会写 parse-cache 的 quay 命令
       （如 `quay task list`），改前 `git status --porcelain` **非空**且含 `tasks/.quay-parse-cache.json`；
       改后为**空**。这条是本缺陷的真实后果，⛔ 不要只断言文件内容。
-- [ ] AC3（防漂移，结构性）：静态检查比对「quay 自己 `.gitignore` 中标为运行时产物的条目集」
+- [x] AC3（防漂移，结构性）：静态检查比对「quay 自己 `.gitignore` 中标为运行时产物的条目集」
       与「init 写出的忽略清单」，前者未被后者覆盖即红。双向控制：给 quay 的 `.gitignore`
       加一条新的运行时条目而 init 未跟进 ⇒ 必须红；两边一致 ⇒ 绿。
-- [ ] AC4：全量 `scripts/test.sh` 绿。
-- [ ] AC5（存量项目，能取假）：在一个**已经含有** quay 运行时残留（如 `milestones/`）的第三方项目上
+- [ ] AC4：全量 `scripts/test.sh` 绿（本任务 delta 的 scoped 门已绿；**全量**由 fan-in 的全量 suite 判定；worker 结构上不跑套件，落地前 ff 的 suite 证书闸就是它的判据）（待外部）
+- [x] AC5（存量项目，能取假）：在一个**已经含有** quay 运行时残留（如 `milestones/`）的第三方项目上
       跑 fan-in 的 `ff` 步骤，改前 reason 为裸 `working tree not clean`；改后 reason 必须点名
       「这些文件由 quay 运行时写出」并指出处置方式。⛔ 不得只在新项目上验——那会漏掉存量项目这一整类。
 
@@ -101,10 +101,72 @@ init 模板是它的一份人工同步副本，而副本落后了。同工作区
 且一条任务的 fan-in 能走完 `ff` 步骤而不因 quay 自身运行时产物失败。
 fixture 满足不算数（硬规则 4 推论三）。
 
+## 证据（本任务实测读数，非 fixture）
+
+**AC1 / AC2 双控制** —— 干净临时 git 项目（`git init` + 一条任务），真 `quay-init.sh` + 真 CLI
+(`packages/quay/bin/quay.js`)。改前用的是 develop 的 `quay-init.sh` 副本（`git diff develop` 为空 ⇒ 同一份）。
+
+```
+改前（develop 版 quay-init）:
+  .gitignore 尾部 = .quay/* / !.quay/config.yml / !.quay/profiles.yml      ← 无任何运行时产物条目
+  $ quay task list  &&  git status --porcelain
+  ?? tasks/.quay-parse-cache.json        ← 仅【读】一次任务台账即脏（parse cache 138 B 落盘）
+改后（本 worktree 版 quay-init）:
+  appended: quay runtime-artifact block (9 pattern(s) from plugin/scripts/quay-runtime-artifacts.txt)
+  $ quay task list  &&  git status --porcelain
+  （空；tasks/.quay-parse-cache.json 138 B 仍在磁盘、已被忽略）
+```
+
+**AC5 + DoD** —— 真实第三方项目 **quay-fleet** 的副本（真实任务台账、真实残留
+`tasks/.quay-parse-cache.json` + `milestones/fast-mode-telemetry/2026-09-13.json`；真实 issue：
+该项目的 `.gitignore` 曾被**手工**补过两行——正是本条要取代的「修一个实例」做法）。
+
+```
+改前 ff-merge 模块（develop 版），同一棵真实树上跑:
+  fan-in-ff-merge: working tree not clean in <fleet copy> — …            ← 裸 reason（无归因）
+  fan-in-ff-merge:   ?? milestones/
+  fan-in-ff-merge:   ?? tasks/.quay-parse-cache.json
+  exit=2
+改后 ff-merge 模块（本 worktree）同一棵树:
+  fan-in-ff-merge: 2 of the path(s) above are written by QUAY ITSELF, not by this task … manifest: …/quay-runtime-artifacts.txt
+  fan-in-ff-merge:   QUAY RUNTIME ARTIFACT AREA: milestones — quay writes runtime state under this directory ("milestones/fast-mode-telemetry/*.json"); …
+  fan-in-ff-merge:   QUAY RUNTIME ARTIFACT: tasks/.quay-parse-cache.json (matches "**/.quay-parse-cache.json" in the manifest)
+  fan-in-ff-merge: disposition — quay-init writes these patterns into a NEW project's .gitignore; for an EXISTING project add the manifest's patterns to .gitignore (or re-run quay-init), …
+仅留 quay 自己那个 parse cache（真文件、真大小）时:
+  改前 exit=2 裸拒；改后 passed through a benign runtime-dirty tree … [quay's own runtime artifacts per …/quay-runtime-artifacts.txt: tasks/.quay-parse-cache.json]
+  ⇒ 越过 clean-tree 闸，停在【与之无关的】suite 证书闸（该副本没有 suite capture）⇒「不再因 quay 自身产物失败」
+在该副本上跑修好的 quay-init（追加 9 条）后再跑一次 quay task list:
+  $ git status --porcelain
+  （空）                                  ← DoD 第一条；parse cache 3621 B 仍在磁盘
+```
+
+**AC3** —— `gitignore-runtime-coverage-check.ts` 对真实树绿（9 条标记 ⇔ manifest 9 条）；两个方向的
+红由单测（judged-2「标记多于 manifest」/ judged-3「manifest 多于标记」）与 mutation case
+(`checker-mutation-cases/gitignore-runtime-coverage-check.sh`，两向注入 + 复原) 各取一次。
+
+**AC4 的结构性说明** —— scoped 门（`scripts/test.sh --for-task … --allow-thin`）两次全绿：
+merge develop **前** 118 tests / 0 fail，merge develop **后的最终树** 331 tests / 0 fail，
+两次皆 0 STATIC_CHECK_FAILED；**全量** suite 由 fan-in 跑，故本项标注（待外部），
+落地前 ff 的 suite 证书闸强制它。
+
+**footprint（shrink-only ratchet 的正当增长记账）** —— `--reanchor` 后 `3 files / 568 → 1022 bytes`
+(+454 = 新 `.gitignore` 块一行头 + 9 条 pattern)；`--gate` 复测同值 ⇒ 记录的是真实 laydown，非洗白。
+
 ## Touches
 
-- plugin/scripts/quay-init.sh
-- plugin/scripts/worker-driver.ts
+- .gitignore
+- docs/analysis/quay-init-closure-ratchet.baseline.json
+- packages/quay/src/fan-in/ff-merge.ts
+- packages/quay/src/runtime-artifacts.ts
+- plugin/scripts/capability-catalog.sh
+- plugin/scripts/checker-mutation-cases/gitignore-runtime-coverage-check.sh
 - plugin/scripts/gitignore-runtime-coverage-check.ts
+- plugin/scripts/quay-init.sh
+- plugin/scripts/quay-runtime-artifacts.txt
+- plugin/scripts/runner-static-gate.ts
+- plugin/scripts/touches-orthogonality-check.ts
+- plugin/scripts/worker-driver.ts
+- plugin/test/driver-cli.test.mjs
+- plugin/test/fan-in-ff-merge.test.mjs
 - plugin/test/gitignore-runtime-coverage-check.test.mjs
 - tasks/gap-quay-init-gitignore-misses-quay-runtime-artifacts-outside-dot-quay.md
