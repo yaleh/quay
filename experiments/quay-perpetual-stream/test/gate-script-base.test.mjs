@@ -408,34 +408,51 @@ test("requireArg: exits 2 for false (falsy boolean)", () => {
 
 // ── isDirectEntry ────────────────────────────────────────────────────────────────────────────────
 
-test("isDirectEntry: returns true when importMeta.url matches process.argv[1]", () => {
-  // When running as test, this file is process.argv[1], so calling isDirectEntry
-  // with THIS module's importMeta should return true.
-  const entry = isDirectEntry(import.meta);
+// The identity is NAME-based, never URL-based (gap-drivers-yml-interval-not-honored-for-routine-kinds):
+// under bundling every inlined module shares ONE `import.meta.url`, so a URL/file-identity guard is
+// true for every inlined library at once and the first one in bundle order wins — measured on the
+// shipped plugin/scripts/dist bundles, where the three routine drivers all ran pool-quality-judge's
+// main instead of their own. `expectedBase` is therefore REQUIRED and `importMeta` is ignored.
+
+const THIS_BASE = path.basename(fileURLToPath(import.meta.url)).replace(/\.(?:js|ts|mjs)$/, "");
+
+test("isDirectEntry: returns true when argv1's basename matches expectedBase", () => {
+  // When running as test, this file is process.argv[1], so the named form must match it.
+  const entry = isDirectEntry(import.meta, undefined, THIS_BASE);
   assert.equal(entry, true, `expected isDirectEntry to return true for the test file; got ${entry}`);
 });
 
-test("isDirectEntry: returns false when importMeta.url does not match argv1", () => {
+test("isDirectEntry: returns false when argv1's basename does not match expectedBase", () => {
   const fakeImportMeta = { url: "file:///some/other/script.ts" };
-  const entry = isDirectEntry(fakeImportMeta, "/actual/entry/point.mjs");
+  const entry = isDirectEntry(fakeImportMeta, "/actual/entry/point.mjs", "some-other-tool");
   assert.equal(entry, false);
 });
 
-test("isDirectEntry: returns false when argv1 is empty", () => {
+test("isDirectEntry: returns false when argv1 is empty and process.argv[1] does not match", () => {
   const fakeImportMeta = { url: "file:///some/script.ts" };
-  const entry = isDirectEntry(fakeImportMeta, "");
+  const entry = isDirectEntry(fakeImportMeta, "", "definitely-not-the-running-entry");
   assert.equal(entry, false);
 });
 
-test("isDirectEntry: resolves relative paths", () => {
-  // gap-touches-orthogonality-symlink-isdirect-mismatch (2026-07-31): isDirectEntry() now calls
-  // fs.realpathSync(path.resolve(entry)), which throws ENOENT for a path that doesn't exist on
-  // disk (the previous pure-string-comparison implementation didn't need a real file). Use a
-  // real, existing file — this test module itself — so the property under test ("relative/
-  // absolute path resolution matches importMeta.url") is exercised against real filesystem state,
-  // the same way every real CLI invocation's argv1 always names a real, existing script.
+test("isDirectEntry: resolves both relative and absolute argv1 by basename", () => {
+  // The check is basename-based, so a relative argv1 and its absolute form resolve identically —
+  // and no filesystem stat is involved (the retired URL form needed fs.realpathSync and threw ENOENT
+  // for a path not on disk; the name form has no such dependency).
   const realFile = fileURLToPath(import.meta.url);
   const fakeImportMeta = { url: pathToFileURL(realFile).href };
-  const entry = isDirectEntry(fakeImportMeta, realFile);
-  assert.equal(entry, true);
+  const base = path.basename(realFile).replace(/\.(?:js|ts|mjs)$/, "");
+  assert.equal(isDirectEntry(fakeImportMeta, realFile, base), true);
+  assert.equal(isDirectEntry(fakeImportMeta, path.relative(process.cwd(), realFile), base), true);
+  assert.equal(isDirectEntry(fakeImportMeta, "/nonexistent/on/disk/nowhere.ts", "nowhere"), true);
+});
+
+test("isDirectEntry: importMeta.url is NOT consulted (the bundling-hijack invariant)", () => {
+  // This is the regression guard for the defect itself: a mismatching — or entirely absent — URL
+  // must NOT change the verdict, because under bundling every inlined module carries the SAME URL.
+  // A URL-sensitive implementation here would re-open the hijack window.
+  const matching = "some-tool";
+  assert.equal(isDirectEntry({ url: "file:///totally/different/place.ts" }, "/a/b/some-tool.js", matching), true);
+  assert.equal(isDirectEntry(undefined, "/a/b/some-tool.js", matching), true);
+  // ...and the converse: a matching URL with a non-matching basename is still false.
+  assert.equal(isDirectEntry({ url: pathToFileURL(fileURLToPath(import.meta.url)).href }, "/a/b/other.ts", matching), false);
 });
