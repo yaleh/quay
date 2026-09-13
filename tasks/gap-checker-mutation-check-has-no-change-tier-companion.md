@@ -2,7 +2,7 @@
 id: gap-checker-mutation-check-has-no-change-tier-companion
 title: checker-mutation-check 是 full-tier 且末次静态闸失败就在今天——按本仓库既定解法（change-tier
   伴生检查）让改 checker 的那个任务在自己的 scoped 门被抓到
-status: ready
+status: done
 needs_human_cause: human-adjudication
 labels:
   - gap

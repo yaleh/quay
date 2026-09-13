@@ -678,6 +678,139 @@ print("  wrote: .quay/config.yml loop: (repo_root/test_command/tmux_session/work
 PYEOF
 }
 
+# ensure_provider_carrier_env: pin the provider's carrier directories in an EXISTING
+# `.quay/config.yml`'s `providers.native.env` map (AC4 of
+# gap-quay-init-omits-adr-goal-meta-dir-env-third-party-leak).
+#
+# WHY THE PIN EXISTS EVEN THOUGH THE ROOT CAUSE IS FIXED: packages/quay-native's carrier-dirs.ts now
+# derives adr/goals/meta from the RESOLVED tasks dir, so the isolation is correct without any pin.
+# The pin is the second, independent half — it makes the isolation VISIBLE AND AUDITABLE in the
+# config the user owns, instead of leaving it implicit in a resolution rule. Before the root-cause fix
+# a config carrying only QUAY_NATIVE_TASKS_DIR leaked its adr/goal/meta stores into whichever quay
+# workspace sat above the provider package (measured 2026-09-13: a real third-party project's
+# `goal list` returned quay's own AC-143…AC-157 and `adr list` quay's ADR-001…ADR-011).
+#
+# VALUE FORM: the siblings MIRROR the existing QUAY_NATIVE_TASKS_DIR value's form — `./tasks` gets
+# `./adr`, an absolute `/ws/tasks` gets `/ws/adr` — so the env block stays internally consistent
+# rather than mixing forms. Core resolves `./`-relative values against workspaceRoot
+# (packages/quay/src/provider-env.ts), so both forms point at the same place.
+#
+# IDEMPOTENT + MINIMAL (AC4): a LINE-LEVEL insert, never a yaml round-trip. `yaml.safe_dump`
+# reformats the whole document (an inline `mcp_entry: [...]` becomes a block sequence, comments are
+# lost), so "add three keys" implemented that way would silently rewrite every other key of a file
+# that needed no change. Here only the missing keys are appended to the env block, adjacent to the
+# existing ones; a key already present is NEVER overwritten (a user's own value wins), and a config
+# whose env block already carries all four is left byte-for-byte untouched — no write, hence no diff.
+ensure_provider_carrier_env() {
+  local cfg="$WORKSPACE_ROOT/.quay/config.yml"
+  if [ ! -f "$cfg" ]; then return; fi
+  python3 - "$cfg" "$WORKSPACE_ROOT" "$DRY_RUN" <<'PYEOF'
+import re, sys
+
+cfg, ws_root = sys.argv[1], sys.argv[2]
+dry_run = sys.argv[3] == "true"
+
+KINDS = [("QUAY_NATIVE_ADR_DIR", "adr"),
+         ("QUAY_NATIVE_GOAL_DIR", "goals"),
+         ("QUAY_NATIVE_META_DIR", "meta")]
+
+with open(cfg, encoding="utf-8") as f:
+    lines = f.read().split("\n")
+
+
+def indent_of(s):
+    return len(s) - len(s.lstrip(" "))
+
+
+def block_end(start, parent_ind):
+    """First index >= start+1 that is non-blank with indent <= parent_ind, else len(lines)."""
+    j = start + 1
+    while j < len(lines):
+        if lines[j].strip() and indent_of(lines[j]) <= parent_ind:
+            return j
+        j += 1
+    return len(lines)
+
+
+def find_child(start, end, key, min_indent):
+    """(index, indent) of the first `key:` line in [start, end) at indent >= min_indent."""
+    pat = re.compile(r"^(\s*)" + re.escape(key) + r"\s*:")
+    for i in range(start, end):
+        m = pat.match(lines[i])
+        if m and len(m.group(1)) >= min_indent:
+            return i, len(m.group(1))
+    return None, None
+
+
+# ── locate providers[: -> <id>: -> env:] by INDENTATION, not by a yaml round-trip ────────────────
+prov_i, prov_ind = find_child(0, len(lines), "providers", 0)
+if prov_i is None:
+    print("  note: .quay/config.yml has no providers: section — carrier env pins not applicable (nothing written)")
+    sys.exit(0)
+native_i, native_ind = find_child(prov_i + 1, block_end(prov_i, prov_ind), "native", prov_ind + 1)
+if native_i is None:
+    print("  note: providers: has no native: entry — carrier env pins not applicable (nothing written)")
+    sys.exit(0)
+native_end = block_end(native_i, native_ind)
+env_i, env_ind = find_child(native_i + 1, native_end, "env", native_ind + 1)
+
+# ── collect the keys the env block already carries ───────────────────────────────────────────────
+key_re = re.compile(r"^(\s*)(QUAY_NATIVE_\w+)\s*:\s*(.*)$")
+present = {}
+if env_i is not None:
+    rest = lines[env_i].split(":", 1)[1].strip()
+    if rest and not rest.startswith("{"):
+        print("  note: providers.native.env has an unrecognized inline form — carrier env pins NOT applied "
+              "(add QUAY_NATIVE_ADR_DIR/QUAY_NATIVE_GOAL_DIR/QUAY_NATIVE_META_DIR by hand)", file=sys.stderr)
+        sys.exit(0)
+    if rest.startswith("{"):
+        for m in re.finditer(r"(QUAY_NATIVE_\w+)\s*:", rest):
+            present[m.group(1)] = ""
+    else:
+        for i in range(env_i + 1, block_end(env_i, env_ind)):
+            m = key_re.match(lines[i])
+            if m and len(m.group(1)) > env_ind:
+                present[m.group(2)] = m.group(3).strip()
+
+missing = [(k, kind) for k, kind in KINDS if k not in present]
+if not missing:
+    print("  unchanged: .quay/config.yml providers.native.env: (four carrier dirs already pinned — no rewrite, AC4)")
+    sys.exit(0)
+
+# Mirror the form of the existing tasks-dir pin so the env block does not mix absolute and relative.
+tasks_val = present.get("QUAY_NATIVE_TASKS_DIR", "./tasks").strip().strip('"').strip("'")
+absolute = tasks_val.startswith("/") or tasks_val.startswith("~")
+def value_for(kind):
+    return f"{ws_root}/{kind}" if absolute else f"./{kind}"
+
+if dry_run:
+    for k, kind in missing:
+        print(f"  would-pin: providers.native.env.{k}: \"{value_for(kind)}\" (carrier dir pin — AC4)")
+    sys.exit(0)
+
+# ── append the missing keys to the END of the env block (or create the block, if absent) ─────────
+new_lines = list(lines)
+if env_i is None:
+    insert_at = native_end
+    base_ind = native_ind + 2
+    added = [f'{" " * base_ind}env:'] + [f'{" " * (base_ind + 2)}{k}: "{value_for(kind)}"' for k, kind in missing]
+else:
+    last = env_i
+    for i in range(env_i + 1, block_end(env_i, env_ind)):
+        if lines[i].strip():
+            last = i
+    insert_at = last + 1
+    base_ind = env_ind + 2
+    added = [f'{" " * base_ind}{k}: "{value_for(kind)}"' for k, kind in missing]
+
+new_lines[insert_at:insert_at] = added
+with open(cfg, "w", encoding="utf-8") as f:
+    f.write("\n".join(new_lines))
+for k, kind in missing:
+    print(f'  pinned: .quay/config.yml providers.native.env.{k}: "{value_for(kind)}" (carrier dir pin — AC4)')
+PYEOF
+}
+
 # migrate_stale_mcp_entry: the UPGRADE-CHANNEL migration for the RETIRED project-local runtime
 # (gap-dist-runtime-not-self-contained-reads-external-package-json AC4; extended by
 # gap-upgrade-leaves-legacy-project-runtime-stale-and-unmigrated AC1/AC2/AC3).
@@ -959,6 +1092,22 @@ rollback_config_on_exit() {
   fi
 }
 
+# ⛔ DEAD CODE — NEVER CALLED. The live config generator is `write_config` (search it below); this
+# function is a superseded earlier copy whose heredoc still writes the RETIRED project-local
+# `.quay/runtime` provider path and a ONE-KEY env block (`QUAY_NATIVE_TASKS_DIR` alone).
+#
+# It is labelled rather than deleted because it is actively misleading, not merely unused: the task
+# gap-quay-init-omits-adr-goal-meta-dir-env-third-party-leak was FILED against this function's line
+# numbers ("quay-init.sh:989-990 generates only QUAY_NATIVE_TASKS_DIR"), concluding the live script
+# omitted the three carrier pins — when the live path (`write_config`) already writes all four. That
+# misreading is exactly the two-copies drift this repo's single-source-of-truth principle warns about.
+# A reader who greps for `QUAY_NATIVE_TASKS_DIR` hits this copy first and reaches the same wrong
+# conclusion, so the label is the cheap fix that keeps the trap from springing twice.
+#
+# NOTHING WRITES THROUGH THIS FUNCTION. Deleting it (and its sibling dead pair `backup_config` /
+# `rollback_config_on_exit`) is the follow-up cleanup; that is deliberately NOT bundled here, since
+# this task's job is the carrier-dir defect and a green scoped gate should not be carrying an
+# unrelated 150-line deletion.
 write_provider_config() {
   local cfg="$WORKSPACE_ROOT/.quay/config.yml"
   if [ "$DRY_RUN" = true ]; then
@@ -2196,6 +2345,11 @@ write_config() {
   if [ -f "$cfg" ]; then
     echo "  note: .quay/config.yml already exists — upgrade path: the provider binding is migrated to the plugin's delivered native runtime (absolute), and the retired project-local .quay/runtime/ is cleared if unreferenced + stale (AC1/AC2)"
     migrate_stale_mcp_entry
+    # Carrier-dir pins: independent of the runtime migration above. A project installed before the
+    # carrier pins existed carries QUAY_NATIVE_TASKS_DIR alone, and its adr/goal/meta stores then
+    # resolved through the provider package's own location (AC4 of
+    # gap-quay-init-omits-adr-goal-meta-dir-env-third-party-leak). Backfilled here, idempotently.
+    ensure_provider_carrier_env
     ensure_loop_config
   elif [ "$DRY_RUN" = true ]; then
     echo "  would-write: .quay/config.yml (provider map → plugin vendored native runtime; loop: repo_root/test_command/tmux_session/worktree_root/fork_baseline)"

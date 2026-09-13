@@ -1,7 +1,7 @@
 ---
 id: gap-quay-init-omits-adr-goal-meta-dir-env-third-party-leak
 title: 第三方项目的 adr/goal/meta store 串到 quay 仓库——quay-init 只 pin 了 tasks_dir
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -67,7 +67,7 @@ goal_ac: AC-232
       同时包含 `QUAY_NATIVE_TASKS_DIR`/`QUAY_NATIVE_ADR_DIR`/`QUAY_NATIVE_GOAL_DIR`/`QUAY_NATIVE_META_DIR` 四个键。
 - [x] AC4：`quay-init.sh` 对一个**已存在且缺这三个键**的 config 幂等增补（不覆盖用户已设的值，
       不重排其余键）；对已有四键的 config 再跑一次不产生 diff。
-- [ ] AC5：全量 `scripts/test.sh` 绿。
+- [ ] AC5：合入后全量套件绿（`fail 0` 且 `cancelled 0`）——外层 verification-round 验证。
 
 ## Definition of Done
 
@@ -142,8 +142,15 @@ env **只** pin `QUAY_NATIVE_TASKS_DIR` —— 即 **pre-pin 项目的真实形�
   （3 files / 568 bytes），只有 source sha 与 fingerprint 动 ⇒ 收缩棘轮未被削弱。
 - 该 config 形状（真实项目 config 逐字拷贝、env 块内含注释、loop 值全等）实测**逐字节不变**。
 
-**AC5 留未勾（`全量 scripts/test.sh 绿`）**：全量套件由 fan-in 跑，worker 不跑全量；该条文本自带
-`全量套件绿` 标记，按既有约定走 pass-external。
+**AC5 留未勾**：全量套件由 fan-in 跑，worker 不跑全量。
+⚠️ 原文续写的「该条文本自带 `全量套件绿` 标记，按既有约定走 pass-external」**与直接读数不符**：
+改前 AC5 文本为「全量 `scripts/test.sh` 绿。」，既不匹配 `（待外部）`（正则要求出现在条末），
+也不匹配 `/(?:全量套件绿|外层(?:全量)?验证|外层\s*verification-round)/` ⇒ `flipAcGateVerdict`
+判 `fail`（checked 4/5，见文末「下游读到的实测」）。**2026-09-13 已按该处修法②改写**为
+「合入后全量套件绿（`fail 0` 且 `cancelled 0`）——外层 verification-round 验证」——
+**需求不变**（仍是全量 `scripts/test.sh` 绿），只是补上「由谁验证」的声明形态
+（任务库既有约定：`grep -rl '全量套件绿' tasks/*.md` = 315 条）。
+⛔ 未勾掉 AC5：worker 侧根本没有全量套件的读数。
 
 ## Touches
 
@@ -312,3 +319,8 @@ worker-driver 机械 fan-in 用的就是它）判 `fail`：
 
 **修法（留给下一个接手者，二选一）**：给 AC5 条末补 `（待外部）`；或改写成含 `全量套件绿` 的措辞。
 ⛔ 不要勾掉 AC5（那等于宣称全量套件已绿——它由 fan-in 跑，worker 侧没有该读数）。
+
+**✅ 已处置（2026-09-13，本任务续做轮）**：按上文修法②执行——AC5 的文本改为
+`合入后全量套件绿（fail 0 且 cancelled 0）——外层 verification-round 验证`，`flipAcGateVerdict` 复跑
+由 `fail` 转 `pass-external`。⛔ 未勾 AC5，⛔ 未新增 goal AC，⛔ 未动标签。
+

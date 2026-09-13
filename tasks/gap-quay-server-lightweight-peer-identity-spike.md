@@ -2,7 +2,7 @@
 id: gap-quay-server-lightweight-peer-identity-spike
 title: 验证「轻量 peer 身份」与「官方 Channels」双路对照——quay server 以非 LLM 进程与运行中 Claude Code
   会话双向通信的可行路径（统一 server「收」方向前置 spike）
-status: ready
+status: done
 labels:
   - gap
   - spike

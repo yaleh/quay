@@ -2,7 +2,7 @@
 id: gap-ac242-derived-criterion-double-judged-and-amendment-unguarded
 title: AC-242 是【派生判据】却被 I5 当独立常设不变式判 violated（③ 已把同一条真相判成 in-progress）⇒ 每轮为
   AC-242 立一条永远关不掉的任务；且「对已 achieved 的 AC 修订 criterion」无入库闸，AC-203 就是这样进入禁态的
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
