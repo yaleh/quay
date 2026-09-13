@@ -34,6 +34,7 @@ import {
   pidArgFile,
   pidAlive,
   preferredAnchorKernel,
+  readAnchorPid,
   readDesired,
   requestKindStop,
   resolveKernelSibling,
@@ -182,13 +183,35 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
   fs.mkdirSync(path.dirname(logFile), { recursive: true });
   const log = (line: string): void => { appendLog(logFile, line); };
 
-  // 接管：等旧 anchor 退出后再写自己的 pid 文件（⛔ 不做双写——两个 anchor 同时调度 = 双派发）。
+  const shutdownGraceMs = Number(process.env.QUAY_ANCHOR_SHUTDOWN_GRACE_MS ?? 120_000);
+
+  // 接管：等旧 anchor 退出后再写自己的 pid 文件（⛔ 不做双写——两个 anchor 同时调度 = **双派发**）。
+  //
+  // ⚠️ 实测缺陷（2026-09-13 生产现场，代价：两个 anchor 并发跑了同一组六个 kind 约 3 分钟）：
+  // 初版等 60s，而旧 anchor 的**有界停机宽限是 120s** ⇒ 60s 到点时旧 anchor 仍在 drain，初版打印
+  // 「STILL ALIVE after 60s (starting anyway)」**照样起循环** ⇒ 两个进程同时派发。修法两条，缺一不可：
+  //   ① 等待上限必须 **> 停机宽限**（否则「等」永远等不到一个正常收敛的旧 anchor）；
+  //   ② 到点仍活着 ⇒ **放弃接管并退出**（⛔ 不是「照样起」）—— 延迟自刷新是可恢复的，双派发不是。
   if (opts.takeoverPid) {
-    const deadline = Date.now() + 60_000;
+    const takeoverDeadlineMs = shutdownGraceMs + 60_000;
+    const deadline = Date.now() + takeoverDeadlineMs;
     while (pidAlive(opts.takeoverPid) && Date.now() < deadline) {
       await new Promise<void>((r) => setTimeout(r, 200));
     }
-    log(`${ts()} anchor: takeover ${opts.takeoverPid} ${pidAlive(opts.takeoverPid) ? "STILL ALIVE after 60s (starting anyway)" : "exited"}`);
+    if (pidAlive(opts.takeoverPid)) {
+      log(`${ts()} anchor: takeover ${opts.takeoverPid} STILL ALIVE after ${takeoverDeadlineMs}ms — REFUSING to start (two anchors would double-dispatch); this refresh attempt is abandoned`);
+      return 1;
+    }
+    log(`${ts()} anchor: takeover ${opts.takeoverPid} exited — taking over`);
+  }
+  // 双派发硬闸（与上面的等待互补，覆盖「等待被绕过 / 无 --takeover 的并发起法」）：盘上 anchor.pid
+  // 指向一个**活着的、不是我**的进程 ⇒ 拒绝起循环。宁可不起，⛔ 不可两个 anchor 同时派发。
+  {
+    const incumbent = readAnchorPid(opts.root);
+    if (incumbent !== null && incumbent !== process.pid && pidAlive(incumbent)) {
+      log(`${ts()} anchor: another anchor is live (pid=${incumbent}, me=${process.pid}) — REFUSING to start (double-dispatch guard)`);
+      return 1;
+    }
   }
 
   const paths = anchorPaths(opts.root);
@@ -231,7 +254,6 @@ export async function runAnchor(opts: AnchorOptions): Promise<number> {
   // 收尾」在结构上可以是**无界**的：实测一次 SIGTERM 之后 anchor 卡在 stopping 态 10 分钟以上不退出。
   // 这里给停机一个**有界宽限**：超时后如实记一条并退出（在飞 worker 子进程是**独立 OS 进程**，⛔ 不会
   // 因 anchor 退出而被杀 —— 与旧 `quay driver stop` 的语义逐字相同：杀调度者，不是在跑的工作）。
-  const shutdownGraceMs = Number(process.env.QUAY_ANCHOR_SHUTDOWN_GRACE_MS ?? 120_000);
   const requestAnchorStop = (): void => {
     if (stopping) return;
     stopping = true;

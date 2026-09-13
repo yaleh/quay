@@ -30,6 +30,7 @@ import { DRIVER_KINDS, KNOWN_KINDS } from "../scripts/driver-runtime.ts";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const KERNEL = path.join(REPO_ROOT, "plugin", "scripts", "driver-runtime.ts");
+const ANCHOR_SCRIPT = path.join(REPO_ROOT, "plugin", "scripts", "driver-anchor.ts");
 const DRIVER_RUNTIME_ABS = path.join(REPO_ROOT, "plugin", "scripts", "driver-runtime.ts");
 
 // ── 夹具 ───────────────────────────────────────────────────────────────────────────────────────────
@@ -372,4 +373,38 @@ test("§6.9 inv.3（有界半边）— 循环不响应停机 ⇒ anchor 在停�
   const log = fs.readFileSync(logFile, "utf8");
   assert.match(log, /independent OS processes and are NOT killed/, "the log states the in-flight children are not killed");
   await waitFor(() => { try { process.kill(anchorPid, 0); return false; } catch { return true; } }, 30_000, "the anchor to exit");
+});
+
+// ── 双派发硬闸（实测缺陷回归，2026-09-13 生产现场） ─────────────────────────────────────────────
+//
+// 现场读数：源码自刷新的替换 anchor 等旧 anchor 60s 而旧的**有界停机宽限是 120s** ⇒ 它打印
+// 「STILL ALIVE after 60s (starting anyway)」然后**照样起循环** ⇒ 两个 anchor 并发跑同一组六个
+// kind 约 3 分钟（双派发）。修法两条：① 等待上限 > 停机宽限；② 到点仍活着 ⇒ 放弃接管。
+// 本测钉住的是那条**与等待互补的硬闸**：盘上 anchor.pid 指向一个活着的、不是我自己的进程 ⇒
+// 新的 anchor 必须**拒绝起循环**（宁可不起，⛔ 不可两个 anchor 同时派发）。
+
+test("双派发硬闸 — 盘上已有活 anchor（不是我）⇒ 第二个 anchor 拒绝起循环并留痕", async (t) => {
+  const root = makeFixture("dup-guard", ["outer"]);
+  t.after(() => cleanup(root));
+  assert.equal(kernel(["start", "--kind", "outer", "--root", root, "--confirm-timeout", "20"], root).status, 0, "first anchor starts");
+  const first = anchorPidOf(root);
+  const carrier = path.join(root, ".quay", "outer-round.jsonl");
+  const before = fs.statSync(carrier).mtimeMs;
+
+  // 直接起第二个 anchor（同 root，⛔ 不带 --takeover —— 模拟「两条起法撞在一起」）。
+  const second = spawnSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-strip-types", ANCHOR_SCRIPT, "__anchor", "--root", root, "--kinds", "outer"],
+    {
+      encoding: "utf8",
+      timeout: 30_000,
+      env: { ...process.env, QUAY_PLUGIN_ROOT: path.join(root, "plugin"), QUAY_ANCHOR_SHUTDOWN_GRACE_MS: "3000" },
+    },
+  );
+  assert.equal(second.status, 1, `the second anchor refuses (got status ${second.status}, stderr ${second.stderr})`);
+  const log = fs.readFileSync(path.join(root, ".quay", "anchor.log"), "utf8");
+  assert.match(log, /another anchor is live \(pid=\d+/, "the refusal is logged with the incumbent pid (⛔ not silent)");
+  // 原 anchor 的循环不受影响（⛔ 第二个进程没有抢走它）。
+  assert.equal(anchorPidOf(root), first, "the incumbent still owns anchor.pid");
+  await waitFor(() => fs.statSync(carrier).mtimeMs > before, 20_000, "the incumbent's loop to keep beating");
 });
