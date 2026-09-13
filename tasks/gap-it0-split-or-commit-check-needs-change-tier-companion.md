@@ -175,6 +175,21 @@ checker-cost-lib: run_checker_parallel_wait — static checks FAILED (fail-close
 
 **10 行三列全部有取值。**标为「该有而无」的只有 #4，**已实际立案并附 id**（⛔ 无「建议后续」项）；#8 按硬规则 12 降为观察项并附发生率读数。**本条未另立新任务**——唯一的「该有而无」行已有任务 id。
 
+**⚠️ 2026-09-13 续做轮更正（硬规则 5b 的诚实面）：#4 的「develop 上无」已失效。** 续做轮 merge develop 后实测：`checker-mutation-check-changed` 的登记**已存在于 develop**（`plugin/scripts/runner-static-gate.ts:441`，`run_checker "checker-mutation-check-changed" … --check-changed`），即 `gap-checker-mutation-check-has-no-change-tier-companion` 的交付**已落地**。⇒ #4 当前应读作「**有**（已落地）」，上表 #4 的「⚠️ develop 上无 / 该缺陷在 develop 上仍然活着」是**立案时刻（2026-09-13 上午）的快照**，现在是过期陈述。AC6 的判据（该有而无的须立案 + 附 id）不受影响——它要的立案确已发生且已完成交付；此处更正的是**快照的可信期**，不是 AC6 的结论。
+
 ### 镜像副产物（AC1 反向控制暴露的真实前置）
 
 `plugin/scripts/` ↔ `experiments/quay-perpetual-stream/scripts/` 是 **40 对真文件镜像**（`mirror-pair-drift-check`），改前者必须同步后者，否则 scoped 门红在 `mirror-pair-drift-check`（**不是**伴生的红）。本条已 `cp` 同步 `it0-split-or-commit-check.{sh,ts}` 两个镜像副本（漂移 4 → 2 允许项 / 2 真漂移 → 0 未豁免），并把这两个路径补进 `## Touches`（否则 fan-in 的 anti-drift 是 HARD-FAIL）。
+
+### 覆盖边界（2026-09-13 续做轮·本任务自身 scoped 门的实测读数）
+
+续做轮跑**本条自己的** scoped 门（driver fan-in 用的同一条：`scripts/test.sh --for-task gap-it0-split-or-commit-check-needs-change-tier-companion --allow-thin`）时，伴生**确实被选中并执行**，但报的是 `NOT-EVALUATED`：
+
+```
+scoped check: run_checker "it0-split-or-commit-check-changed" bash "<wt>/plugin/scripts/it0-split-or-commit-check.sh" --changed "<wt>"
+NOT-EVALUATED: it0-split-or-commit-check --changed — no task file in this delta (base develop); nothing for the delta-scoped judgment to attribute (⛔ NOT conflated with PASS). The full-tier whole-store registration still runs at the full-suite gate.
+```
+
+原因（同一 worktree 内的机械读数，非推断）：`git diff develop...HEAD --name-only | grep -c '^tasks/'` ⇒ **0**，`git log develop...HEAD -- tasks/` ⇒ **空**。即：**本任务所在的 task worktree 分支，其三点 delta 里一个任务文件都没有**——本任务的任务文件改动（立案 / AC 勾选）经 `task_write` 落在**主检出**侧，不在 worktree 分支上。
+
+⇒ **如实记录一条能力边界**（⚠️ 不是新缺陷、不阻塞本条、不改动任何 AC）：伴生对本任务这类 delta 取 `NOT-EVALUATED`，因此**AC1 用注入 probe 得到的绿/红，证明的是「机制能在有任务文件的 delta 上产出正确判定」，不是「生产流程里每个任务都会给出判定」**（硬规则 4 推论三的形态：能被 fixture 满足的判据只证明「能产出」）。本仓库既有先例：`worker-task-write-lands-on-main-not-worktree`（task_write 落主检出，AC tick 靠 fan-in 的 `git merge develop` 才进 worktree）。**这不改变 Plan 1 的可行性结论**（判定域收窄仍成立），也不改变三点的**归属正确性**选择（三点而非两点是刻意的：两点会把 develop 侧别人的改动算进本 delta，正是要避免的误归属）。它改变的是**覆盖率**——哪些任务的 delta 会带上任务文件，取决于该任务的任务文件是否在分支上被提交（本仓库确有分支如此，如 `gap-fan-in-ff-merge-token-gate-fail-closed` 的 `b7f4e3411`）。⇒ **本条的疗效主张只由 AC5（外部）承载**，此处不另作主张。
