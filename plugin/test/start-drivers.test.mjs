@@ -6,8 +6,9 @@
 //
 // Coverage:
 //   - pure helpers: parseDriverStatus (alive/dead/unreadable are three distinguishable values),
-//     resolveWorkspaceRoot, resolveCliInvocation (explicit/source-tree/PATH precedence),
-//     planActions (the idempotency decision), probeUrl.
+//     resolveWorkspaceRoot, resolveCliInvocation (explicit/source-tree/vendor-bundle/PATH
+//     precedence — the vendor-bundle branch and its own coverage live in
+//     start-drivers-cli-resolution.test.mjs), planActions (the idempotency decision), probeUrl.
 //   - full flow (hermetic): a fake `quay` CLI scripts `driver status`/`driver start` and actually
 //     listens for `serve`, proving run#1 starts everything and run#2 starts nothing (idempotent).
 //   - failure relay: a fake CLI whose `driver start` exits 1 with a "halted" message — the script
@@ -152,9 +153,13 @@ test("resolveCliInvocation — explicit .ts / explicit .js / source-tree / PATH 
   fs.writeFileSync(path.join(root, "packages", "quay", "bin", "quay.ts"), "");
   const src = resolveCliInvocation(root);
   assert.deepEqual(src.args, ["--experimental-strip-types", path.join(root, "packages", "quay", "bin", "quay.ts")]);
-  // PATH fallback when no source tree
+  // PATH fallback when no source tree AND no vendor bundle.
+  // `pluginRoot: null` is the explicit "there is no plugin root to probe" seam — the vendor branch
+  // (`<plugin-root>/vendor/quay/dist/quay.js`, gap-start-drivers-cli-resolve-blind-to-vendor-layout-
+  // and-swallows-enoent) sits between the source tree and PATH, and would otherwise find THIS repo's
+  // real bundle here and never reach PATH.
   const bare = fs.mkdtempSync(path.join(os.tmpdir(), "sdr-cli2-"));
-  const pathFallback = resolveCliInvocation(bare);
+  const pathFallback = resolveCliInvocation(bare, undefined, { pluginRoot: null });
   assert.equal(pathFallback.argv0, "quay");
   assert.deepEqual(pathFallback.args, []);
   fs.rmSync(root, { recursive: true, force: true });
