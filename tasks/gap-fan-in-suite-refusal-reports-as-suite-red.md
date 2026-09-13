@@ -36,7 +36,7 @@ extra:
 
 **现有覆盖（均不覆盖本形态）**：`gap-runner-spawn-single-flight`(done) 引入了该拒绝闸但未对其可观测性提任何要求；`gap-fan-in-suite-red-reason-carries-split-or-commit-title`(done) 修的是「从日志取错行」，而本条日志为空；`gap-goal-closure-freezes-failing-ac-outside-reverify-scope`(done) 记录的 0 字节是 **15 分钟静默看门狗 SIGKILL**（`exit:null` + `hung`）——本条是**独立子形态**：取到槽 + runner 启动 + `exit:1` 拒绝。另有两个零覆盖缺口：①fan-in suite log 只捕获 stdout，runner 全部诊断不可见；②拒绝路径不写状态文件，被拒轮与「从未跑过」不可分。
 
-## AC（draft）
+## AC
 
 - [ ] AC1（可取假）——runner 的每条「未跑就返回」分支（`:1842-1851` 单飞拒绝 / `:1856-1870` 资源闸 WAIT）在 suite log 中留下**可读的一行**（含分支名与原因）。判据：干跑一次拒绝路径 ⇒ suite log 非空且含该分支标记；负控制：闸 GO 且无在飞 runner 时该行**不出现**。
 - [ ] AC2（三态可分）——被拒绝的一轮在下游与「跑了且绿」/「跑了且红」**可区分**：`mechanical_fan_in.reason`（或等价 verdict 字段）不得再出现裸 `"suite red"`，须指名「未运行（拒绝）+ 哪条分支」。
