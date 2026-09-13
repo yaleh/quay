@@ -442,6 +442,17 @@ export interface CarrierStats {
    *  ⛔ 不报一个不存在的路径——路径与 records 必须同源同态（硬规则 3b：「读不到」不得与
    *  「正常读数」同形：有路径 + 有计数 + 有时间戳看起来一切正常，实际谁都没读到）。 */
   primaryPath: string | null;
+  /** 【提供 `lastTs` 的那个】载体的绝对路径；`lastTs` 为 null ⇔ 本字段为 null（同态，硬规则 3b）。
+   *
+   *  ⛔ 与 `primaryPath` 是**两个不同的量**：`primaryPath` = carriers 里首个存在的（「谁在盘上」），
+   *  本字段 = 末条 ts 最大的那个（「这个 ts 从哪来」）。真实工作区上两者会不同名——实测
+   *  2026-09-13 生产 `/home/yale/work/quay` 的 `promotion`：`promotion-outcome.jsonl` 存在但末条 ts
+   *  停在 20:01:48Z（2.5h 陈旧），`promotion-round.jsonl` 每 30s 一条、末条 22:33:30Z ⇒ 报出的
+   *  `last_record_ts` 来自后者，而读 `carrier_path` 的人看的是前者。
+   *  ⇒ 「ts 大 ⇒ ts 来自 primaryPath」是一条**只在上游注里成立**的推断，落到渲染面上就是
+   *  「真读数被归因到没供数的载体」（硬规则 3b/4b：一条读数声称的来源不是它的来源）。
+   *  见 gap-driver-status-carrier-path-source-label-mismatch。 */
+  lastTsCarrier: string | null;
   /** 逐载体分解（哪个存在、哪个没有、各自多少行）。 */
   files: CarrierFileStat[];
 }
@@ -462,6 +473,9 @@ export function carrierStats(root: string, kind: DriverKind): CarrierStats {
   // ⇒ 一个诊断字段谎报自己的来源。见 gap-driver-status-carrier-path-names-first-entry-not-the-existing-one；
   // 同一现象独立复现于 gap-cross-host-evidence-run-incomplete-and-step-order-makes-ac234-unsatisfiable:73-75）。
   let primaryPath: string | null = null;
+  // 提供 lastTs 的那个载体（⛔ 与 primaryPath 分开跟踪——两者是「谁在盘上」与「ts 从哪来」两个量）。
+  // 比较用严格 `>`（相等不更新）⇒ 并列时保留**首个**供数载体，与 lastTs 的取值规则逐字一致。
+  let lastTsCarrier: string | null = null;
   const files: CarrierFileStat[] = [];
   for (const name of spec.carriers) {
     const file = path.join(root, ".quay", name);
@@ -489,6 +503,7 @@ export function carrierStats(root: string, kind: DriverKind): CarrierStats {
         for (const k of tsKeys) {
           if (j && typeof j[k] === "string" && j[k] && (lastTs === null || j[k] > lastTs)) {
             lastTs = j[k];
+            lastTsCarrier = file;
           }
         }
       } catch {
@@ -496,7 +511,7 @@ export function carrierStats(root: string, kind: DriverKind): CarrierStats {
       }
     }
   }
-  return { records, lastTs, primaryPath, files };
+  return { records, lastTs, primaryPath, lastTsCarrier, files };
 }
 
 /** 派生状态文件的绝对路径（supervisor 共享的一份路径规则，⛔ kind 差异由 registry 表承载）。 */
@@ -1650,13 +1665,22 @@ export function aliveness(root: string, kind: DriverKind): {
 }
 
 /** status 输出（JSON 与人类可读两态）。alive 与 running 同值（alive 是 AC139-3 字段名，running 保留
- *  backward compat）。carrier_path / carrier_records / last_record_ts 三者同源（同一个 carrierStats 读数），
+ *  backward compat）。carrier_path / carrier_records / last_record_ts / last_record_carrier 全部出自
+ *  **同一个 carrierStats 读数**，但⛔ **不是同一个量**：carrier_path = 首个存在的载体（「谁在盘上」）；
+ *  last_record_ts = 全载体末条 ts 最大值；last_record_carrier = **提供该 ts 的那个载体**（「从哪来」）。
+ *  ⛔ 不得把 carrier_path 读成 last_record_ts 的来源——两者在真实工作区上会不同名
+ *  （见 CarrierStats.lastTsCarrier 的实测；gap-driver-status-carrier-path-source-label-mismatch）。
  *  carrier_path 为 null ⇔ 无任何载体存在 ⇔ records=0（⛔ 不报一个不存在的路径——AC1/AC2）。
  *  carrier_files 是逐载体分解（哪个存在/哪个没有/各多少行）：让「新旧载体名并存」在读数上可见。 */
 export function statusForKind(root: string, kind: DriverKind, json: boolean, out: (s: string) => void): number {
   const spec = DRIVER_KINDS[kind];
   const a = aliveness(root, kind);
   const stats = carrierStats(root, kind);
+  // 人类可读面：ts 与它的【来源】必须相邻出现；来源 ≠ carrier_path 时把「跨载体最大值」标注出来——
+  // 否则读者会把行内先出现的 carrier_path 当成这个 ts 的来源（正是本任务修的缺陷）。
+  // ⛔ 只改打印的并置关系，不改任何取值规则（carrier_path 语义不变，由既有测试钉住）。
+  const crossCarrier =
+    stats.lastTsCarrier !== null && stats.lastTsCarrier !== stats.primaryPath ? " (cross-carrier max)" : "";
   if (json) {
     out(JSON.stringify({
       kind,
@@ -1669,6 +1693,8 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
       carrier_path: stats.primaryPath,
       carrier_records: stats.records,
       last_record_ts: stats.lastTs,
+      // ts 的【来源】单列：`carrier_path` 是「首个存在」，⛔ 不是「供这个 ts 的那个」。
+      last_record_carrier: stats.lastTsCarrier,
       carrier_files: stats.files,
       supervisor_started_at: a.supervisorStartedAt,
       supervisor_stale: a.supervisorStale === true ? "stale" : a.supervisorStale === false ? "fresh" : "not-evaluated",
@@ -1684,7 +1710,9 @@ export function statusForKind(root: string, kind: DriverKind, json: boolean, out
       `supervisor_stale=${a.supervisorStale === true ? "stale" : a.supervisorStale === false ? "fresh" : "not-evaluated"} · ` +
       // ⛔ 不打印空串：显式 "null"（= 无载体存在），与 last_record_ts 的 null 表达同形（硬规则 3b）。
       `carrier_path=${stats.primaryPath ?? "null"} · carrier_records=${stats.records} · ` +
-      `last_record_ts=${stats.lastTs ?? "null"} · ` +
+      `last_record_ts=${stats.lastTs ?? "null"}${crossCarrier} · ` +
+      // ⛔ 紧邻上面那一项：这就是「这条 ts 从哪来」的答案（`carrier_path` 回答的是另一个问题）。
+      `last_record_carrier=${stats.lastTsCarrier ?? "null"} · ` +
       `carrier_files=${stats.files.map((f) => `${f.name}:${f.exists ? f.records : "missing"}`).join(",")}\n`,
     );
   }

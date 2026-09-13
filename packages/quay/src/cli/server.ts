@@ -148,6 +148,7 @@ function driverServiceReport(workspaceRoot: string, kind: string): DriverService
     anchor_pid?: number | null;
     driver_alive?: number | null;
     carrier_path?: string | null;
+    last_record_carrier?: string | null;
     last_record_ts?: string | null;
   };
   try {
@@ -157,6 +158,13 @@ function driverServiceReport(workspaceRoot: string, kind: string): DriverService
   }
   const pid = j.driver_pid ?? j.anchor_pid ?? null;
   const carrier = j.carrier_path;
+  // ⛔ `carrier_path` 是「首个存在的载体」，**不是**这个 ts 的来源——两者在真实工作区上会不同名
+  // （实测 2026-09-13 生产 `promotion`：outcome 存在但末条 ts 停在 2.5h 前、round 每 30s 一条）。
+  // 把 ts 归因给 `carrier_path` 就是让一条真读数声称一个假的来源（硬规则 3b/4b）。来源由 kernel 的
+  // `last_record_carrier` 单列给出；⛔ 它缺失时【不点名任何载体】，而不是退回 `carrier_path` 再谎报一次
+  // （gap-driver-status-carrier-path-source-label-mismatch）。
+  const tsCarrier =
+    typeof j.last_record_carrier === "string" && j.last_record_carrier !== "" ? j.last_record_carrier : null;
   const tsRaw = j.last_record_ts;
   // ⚠️ **没有活着的承载进程** 是一个独立的、必须先判的取值（GOAL-017/AC-255 的负控制实测教训）：
   // 只看心跳新鲜度会让「这个 kind 已经被停掉」在 **60 分钟**内与「一切正常」同形（心跳窗口是 60min，
@@ -192,7 +200,9 @@ function driverServiceReport(workspaceRoot: string, kind: string): DriverService
     liveness: {
       evaluated: true,
       alive: !stale,
-      source: `carrier:${carrier} last ts`,
+      // 点名**真正供这个 ts 的**载体。kernel 没报来源时（旧 kernel/旧 bundle）⇒ 不声称具体载体
+      // （AC2 允许的另一半：只断言实际量到的那个事实），⛔ 不用 `carrier_path` 顶替。
+      source: tsCarrier !== null ? `carrier:${tsCarrier} last ts` : "driver status last_record_ts (carrier not named by the kernel)",
       detail: stale
         ? `last round heartbeat ${Math.round(ageMs / 60000)}min ago (> ${DRIVER_HEARTBEAT_FRESH_MS / 60000}min) — this service is NOT turning`
         : `last round heartbeat ${Math.round(ageMs / 1000)}s ago`,
