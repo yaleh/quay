@@ -43,6 +43,46 @@ extra:
 
 **为什么必须是 spike 而不是直接实现**：上述三个未知（枚举过滤规则 / 投递校验规则 / 诚实标注下的可达性）任何一个取假，方案 C 的形态就完全不同（从「几十行注册+socket server」变成「必须常驻真会话」= 退回方案 A）。先量再改（硬规则 4 推论）。
 
+### 立案当轮已取得的线索（2026-09-13，manager 会话，Claude Code 2.1.270）
+
+**⚠️ 下列①②是【静态读 minified 二进制的推断】，⛔ 不是实测结论，⛔ 不得用来替代任何一条 AC。** 它们只是给执行者的起点：告诉你去测什么、预期看到什么，**若实测与推断矛盾，以实测为准并在报告中记下这次矛盾**（推断错了本身是有价值的读数）。
+
+**① 会话记录枚举实现（`/home/yale/.local/share/claude/versions/2.1.270` 内，函数经 minify）**：
+枚举只按**文件名** `^\d+\.json$` 过滤，逐个解析；解析结果里 `agent` 字段**被读出但不参与排除**（`agent: typeof o.agent === "string" ? o.agent : void 0`）。
+⇒ **对 AC3 的预期**：如实填 `agent:"quay"` 时记录**可能仍可见**。⚠️ 但 AC3 仍必须实测三行——静态可见 ≠ SendMessage 可投递（两者是不同的判定路径）。
+
+**② 存活/身份判定（对 AC4、AC7 直接相关）**：
+```
+pidDomain 与本机不同      ⇒ "present"（跨容器/跨机记录不判死）
+pid 不存在                ⇒ "gone"
+procStart（/proc starttime）不匹配 ⇒ "recycled"（pid 复用防护）
+```
+⇒ **对方案 C 是好消息**：quay server 是真进程，`pid`/`procStart`/`pidDomain` 如实填即可通过，**无需伪造**。
+⇒ **同时读到两条反向事实，AC6/AC7 必须覆盖**：(a) `spare === true || parkedJobId !== undefined` 的记录会被**排除**；(b) 被判 `gone` 的记录会被**其它会话主动删除**，文件名非 canonical 的记录**直接删文件** ⇒ 探针的记录可能被别人清掉，这不是 bug 而是平台设计，AC7 要量它。
+
+**③ 发送侧校验消息清单（二进制内字符串，实测可见）**——AC2 负控制预期看到的错误形态可能出自这批：
+```
+Refusing to send: cannot vet reply target
+Refusing to send: reply target is a symlink
+Refusing to send: connected endpoint identity could not be read
+Refusing to send: connected endpoint is not the expected process
+Refusing to send: connected endpoint owner could not be read
+Refusing to send: connected endpoint is not owned by this user
+Refusing to send: connected endpoint is a different process with the expected pid
+```
+
+**④ ⚠️ 平台侧存在一条【文档化的官方等价通道】：Channels —— 本任务结论必须与它对照，否则结论不完整。**
+实测（本机 2.1.270）：`claude --channels <servers...>` 是真实存在的 CLI 参数（`--help` 不显示，传空参数报 `option '--channels <servers...>' argument missing`）。二进制内含接入示例：**一个 channel 就是一个 MCP server**，在 capabilities 里声明 `experimental: { 'claude/channel': {} }`（注释原文：`Required: presence of this key registers the channel notification listener on Claude's side`），外部事件以 `<channel source="...">` 注入会话，会话回话走 reply tool。配套闸：`channelsEnabled`（managed settings）/ `allowedChannelPlugins`（org allowlist）/ `--dangerously-load-development-channels`（本地开发）。**已知限制**：二进制内字符串 `Channels are not available on third-party providers` ⇒ 跑 `claude-fjdac`/deepseek 的 worker 收不到；未启用时 `Inbound messages will be silently dropped`。
+
+**⑤ 官方文档侧的定性（2026-09-13 核实，含来源）**：`~/.claude/sessions/` 注册表的**结构、字段语义、ListAgents 的过滤规则均无官方文档**——官方只说"会话把自己注册到磁盘文件，Claude 列出/发消息时读这些文件"（https://code.claude.com/docs/en/cross-session-messaging.md），字段与过滤规则属**内部实现细节、不承诺稳定**；第三方进程接入**完全无文档支持**；官方推荐的等价路径是 **Channels**（https://code.claude.com/docs/en/channels.md）。
+**⊢ 这一条直接构成本任务结论的一个必答项**：即使 AC1–AC7 全部实测为「技术上可行」，**报告仍必须回答「赌一个未文档化的内部契约是否值得」**——本仓库已有同族漂移的实测先例：`plugin/scripts/send-to-session.ts:98` 记着同一套协议在 2.1.233 → 2.1.241 跨 8 patch 行为已变（当时的记述被实测推翻）。
+
+**⊢ 两条路径提供的能力不同，⛔ 不是纯替代**（这是本任务结论要帮人裁定的真正取舍点）：
+```
+方案 C 独有：quay server 出现在别的会话的 ListAgents 里，任何会话【无需预先配置】即可寻址它
+Channels 独有：官方契约 + policy 闸 + 跨机；但 quay server 不是 peer，会话须在启动时 --channels 声明
+```
+
 ## Plan
 
 1. **读协议**：以 `packages/quay/src/serve-send.ts`（`sendSessionFrames` / `resolveSessionEndpoint`）与 `plugin/scripts/send-to-session.ts` 为发送侧的已知形态，推导接收侧最小实现：unix socket server → 读第一行 auth 帧（`{"type":"auth","token":…}`）校验 token → 读后续 user 帧（`{"type":"user","message":{"role":"user","content":"<cross-session-message …>…"}}`）。
