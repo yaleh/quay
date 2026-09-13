@@ -2,7 +2,8 @@
 id: gap-ac203-two-distinct-kinds-no-production-run
 title: AC-203 判据 2026-09-13 收紧为「≥2 个不同 kind」后生产载体一条合格记录都没有 —— 既有 3 条记录无 kind
   字段，产出侧已补齐但从未在真第三方主机跑过一次
-status: ready
+status: needs-human
+needs_human_cause: human-adjudication
 labels:
   - gap
   - delivery-critical
@@ -158,3 +159,15 @@ $ node --trace-exit <shipped dist>/goal-driver.js --root /tmp --zzz
 - plugin/test/verify-deliver-coldstart.test.mjs
 - plugin/test/develop-deliver-tgz-evidence-transport.test.mjs
 - tasks/gap-ac203-two-distinct-kinds-no-production-run.md
+
+## Needs-Human
+
+**执行 2026-09-13T07:59:19.428Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: suite hung: silence watchdog killed the suite (no output ≥ silence timeout)
+- run_id：wk-prod-1789139008
+- session_id：7d8f0f35-50f5-4936-9e1b-e33d307b8669
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-ac203-two-distinct-kinds-no-production-run~wk-prod-1789139008~1789283949198-b46ce0.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-ac203-two-distinct-kinds-no-production-run-wk-prod-1789139008.log

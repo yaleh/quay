@@ -372,6 +372,39 @@ run_doc_checks() {
 # (select-static-checks-for-touches.ts parses the `# @static-tier` / `# @static-object` annotations
 # in run_static_checks — the SAME single source checker-mutation-check.sh parses; never a
 # hand-maintained list, AC3).
+#
+# EXECUTION MODE: the selected checkers run in PARALLEL (gap-scoped-static-gate-sequential-pays-sum-
+# not-max) ⇒ wall ≈ max(selected), not Σ(selected) — the same mode run_static_checks already uses.
+# The block inside run_scoped_static_checks_sel carries the argument for why this is NOT the
+# run_doc_checks fail-open shape (that function forces the mode OFF because it reads `$?` per call).
+# record_scoped_static_evidence — the BEFORE/AFTER wall carrier for
+# gap-scoped-static-gate-sequential-pays-sum-not-max (AC1). Env-gated: with
+# QUAY_SCOPED_STATIC_EVIDENCE unset it is a single `[ -n ]` test and writes nothing, so production
+# and every existing test are unperturbed. When set, ONE JSON row is appended per scoped-gate run
+# FROM THIS REAL PATH — the readings are never taken from a re-implemented copy of the gate (a copy
+# measures the copy; hard rule 4/4b).
+#   $1 checkerCount  $2 startEpochRealtime  $3 parallel(true|false, the mode ACTUALLY used)  $4 label
+# `parallel` is passed in rather than read back from RUN_CHECKER_PARALLEL at record time because
+# run_checker_parallel_wait RESETS that flag to 0 before returning — reading it after the wait would
+# report false for a run that was genuinely parallel (an instrument that lies, hard rule 3b).
+record_scoped_static_evidence() {
+  [ -n "${QUAY_SCOPED_STATIC_EVIDENCE:-}" ] || return 0
+  local _cnt="$1" _start="$2" _par="$3" _label="$4"
+  local _sha
+  _sha="$(git -C "${repo_root}" rev-parse develop 2>/dev/null || echo unknown)"
+  local _ms
+  _ms="$(awk -v s="${_start}" -v e="${EPOCHREALTIME}" 'BEGIN{printf "%d", (e-s)*1000}')"
+  # `load` (loadavg 1m at record time) is an EXTRA field, not one of AC1's five: this box runs
+  # several worker sessions concurrently, and a wall reading taken under load 12 is not comparable
+  # with one taken under load 2 — recording it is what lets a reader tell the two apart instead of
+  # attributing the difference to the change under test.
+  local _load
+  _load="$(awk '{print $1}' /proc/loadavg 2>/dev/null || echo 0)"
+  printf '{"ts":"%s","taskId":"%s","developSha":"%s","checkerCount":%s,"wallMs":%s,"parallel":%s,"load":%s}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${_label}" "${_sha}" "${_cnt}" "${_ms}" "${_par}" "${_load}" \
+    >> "${QUAY_SCOPED_STATIC_EVIDENCE}"
+}
+
 run_scoped_static_checks_sel() {
   # "$@" = --task <id> OR --touches <csv>
   if [ "${QUAY_TEST_NESTED:-}" = "1" ] && [ "${QUAY_TEST_NESTED_ROOT:-}" = "${repo_root}" ]; then
@@ -392,12 +425,46 @@ run_scoped_static_checks_sel() {
     echo "scripts/test.sh: scoped static checks — no change-relevant checkers selected (deferred to the full-suite gate)"
     return 0
   fi
+  # ── PARALLEL scoped tier (gap-scoped-static-gate-sequential-pays-sum-not-max AC1/AC2) ───────────
+  # The loop below used to eval every selected checker synchronously ⇒ wall = Σ(selected), while the
+  # full gate (run_static_checks) pays max(selected) via its own RUN_CHECKER_PARALLEL=1. Same
+  # mechanism, two execution modes — this is the scoped-side half of
+  # gap-run-static-checks-zero-concurrency-can-parallelize (which deliberately left
+  # "The scoped tier leaves this unset.").
+  #
+  # ⛔ THIS IS NOT THE run_doc_checks FAIL-OPEN SHAPE, and the difference is structural, not a
+  # promise. run_doc_checks forces RUN_CHECKER_PARALLEL=0 because it reads each checker's exit code
+  # IMMEDIATELY (`_doc_rc=$(( _doc_rc || $? ))` right after run_checker): in parallel mode
+  # run_checker backgrounds the checker and returns 0 before it has run, so that `$?` is the
+  # backgrounding, not the checker — a failure would be indistinguishable from a pass (hard rule 3b).
+  # The scoped loop never reads a per-call exit code. The rcs all come back through
+  # run_checker's own results file at ONE place — run_checker_parallel_wait — which fails closed
+  # (returns the first failing checker's code and emits `STATIC_CHECK_FAILED: <name> exit=<rc>` per
+  # failure), and its return value IS this function's return value (test.sh calls this bare under
+  # `set -e`). plugin/test/scoped-static-checks.test.mjs pins both halves as live controls:
+  # ① two checkers genuinely in flight at once (measured by [start,end) interval overlap, never by
+  # reading the flag back), and ② a necessarily-failing checker in parallel mode still exits the
+  # tier non-zero with its machine line.
+  #
+  # Concurrency bound: run_checker's own STATIC_CHECK_CONCURRENCY (default `nproc`) — the SAME
+  # host-derived expression the full path uses. ⛔ No literal here: a number that happens to equal
+  # this box's core count becomes a real limit on a bigger box, silently (hard rule 4 推论二).
+  local _prev_parallel="${RUN_CHECKER_PARALLEL:-0}"
+  RUN_CHECKER_PARALLEL=1
   local cmd
+  local _scoped_count=0
+  local _scoped_start="${EPOCHREALTIME}"
   while IFS= read -r cmd; do
     [ -n "${cmd}" ] || continue
+    _scoped_count=$((_scoped_count + 1))
     echo "  scoped check: ${cmd}"
     eval "${cmd}"
   done <<< "${cmds}"
+  local _scoped_rc=0
+  run_checker_parallel_wait || _scoped_rc=$?
+  RUN_CHECKER_PARALLEL="${_prev_parallel}"
+  record_scoped_static_evidence "${_scoped_count}" "${_scoped_start}" "true" "${2:-}"
+  return "${_scoped_rc}"
 }
 run_scoped_static_checks() { run_scoped_static_checks_sel --task "$1"; }
 run_scoped_static_checks_touches() { run_scoped_static_checks_sel --touches "$1"; }
