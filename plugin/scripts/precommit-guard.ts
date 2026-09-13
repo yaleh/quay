@@ -55,6 +55,22 @@
 //   不新增第二个 Touches parser。scoped 静态层 check（run_static_checks）原地保留——本 detector 是
 //   撰写面补充（提交时红），不是替换。
 //
+// ④ `delivery-critical` 新立案任务必须声明 `goal_ac`（gap-ac190-goal-ac-rule-not-enforced-at-filing）:
+//   AC-190 的判据（long-term-guarantee-goal-backed-check.ts）住在 goal 层、每轮【事后】跑：它看得见
+//   违反，却没有任何权力阻止违反发生——一份只读报告。实证（2026-09-13）：生效线
+//   （2026-09-09T00:00:00Z）之后第一条 delivery-critical 任务经本仓自己的立案路径写入、promotion-driver
+//   机械晋升到 ready，全程没有任何一步问过 goal_ac（硬规则⑨：规则只在违反发生之后有产物 ⇒ 等于靠意志）。
+//   本 detector 把【同一条规则】接到写入那一刻：凡 staged `tasks/*.md` 中带 `delivery-critical` 标签、
+//   生效线之后立案、且 `goal_ac` 空者 ⇒ 拒提交（reason=delivery-critical-without-goal-ac），输出含文件
+//   路径（= 补救位置）。判定函数【单源复用】检测器已导出的纯函数（`isDeliveryCritical` / `hasGoalAc` /
+//   `filedAfterCutoff`），⛔ 不复制第二份字符串比较（硬规则 1）。
+//   生效线语义与检测器逐字一致（AC5 不误伤）：判定的 scope 是【全部 staged tasks/*.md】，每条按 git
+//   first-add 时刻定「立案时刻」——已存在于 HEAD 的存量（生效线之前那批无 goal_ac 的 delivery-critical）
+//   照跑判定、结果是 grandfathered ⇒ 放行。⛔ 不把 scope 收成 `--diff-filter=A`：那会把存量排除在
+//   判定之外，让 grandfather 分支在写入面【结构上不可达】（硬规则 4b：一个永不被执行的判定不是测量）。
+//   无 add commit 的路径 = 本提交正在新增它 ⇒ 按「现在立案」判；下限取生效线，使宿主时钟落后于生效线时
+//   也不得静默 grandfathered（fail-closed，硬规则 3b）。
+//
 // <!-- enforcement: plugin/scripts/precommit-guard.ts -->
 
 import fs from "node:fs";
@@ -64,6 +80,17 @@ import { fileURLToPath } from "node:url";
 // Touches「一条目一路径」judgment — the SAME judgment the static checker uses (no second parser).
 import { checkTaskOneEntryOnePath, readOneEntryBaseline } from "./touches-one-entry-one-path-check.ts";
 import { repoRoot, mainCheckoutRoot } from "./repo-root.ts";
+// goal_ac write-surface judgment — the SAME pure functions the AC-190 detector uses (no second
+// string comparison; single source of the delivery-critical / goal_ac / activation-line semantics).
+import {
+  activationLineMs,
+  filedAfterCutoff,
+  hasGoalAc,
+  isDeliveryCritical,
+} from "./long-term-guarantee-goal-backed-check.ts";
+// Frontmatter reading routes through the ONE parser + the SAME projections the detector's readTasks
+// uses (task-schema.ts) — the staged blob is judged with the same field semantics as the disk read.
+import { parseFrontmatterCompletely, frontmatterLabels, frontmatterGoalAc } from "./task-schema.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -82,6 +109,8 @@ export interface Verdict {
   docCheckOutput: string | null;
   /** gap-touches-one-entry-detector-not-enforcer: Touches detector output (present when reason === "touches-multi-path-bullet"). */
   touchesCheckOutput: string | null;
+  /** gap-ac190-goal-ac-rule-not-enforced-at-filing: goal_ac write-surface output (present when reason === "delivery-critical-without-goal-ac"). */
+  goalAcCheckOutput: string | null;
   /** pre-merge-commit 上下文（钩子传 --merge；文档检查行为与 commit 一致，仅标注）。 */
   merge: boolean;
 }
@@ -337,6 +366,108 @@ export function runTouchesChecks(root: string): TouchesCheckResult {
   return { ok: false, output: lines.join("\n") };
 }
 
+// ── goal_ac 写入面判定（gap-ac190-goal-ac-rule-not-enforced-at-filing）────────────────────────────
+// AC-190 的规则原文（goals/AC-190-task-ac.md）：带 `delivery-critical` 标签的【新立案】任务必须声明
+// 非空 `goal_ac`（task→AC 的 goal 层背书）。检测器每轮在 goal 层事后跑；本段把【同一条规则】的判定
+// 搬到提交这一刻。scope = staged `tasks/*.md`（复用 stagedTaskFiles——与 Touches detector 同一 scope
+// 派生，不新增第二个 `git diff --cached` 调用）。
+
+export interface GoalAcCheckResult {
+  ok: boolean;
+  output: string;
+}
+
+/** A staged task candidate: the STAGED blob (what WILL be committed) + its first-add time. */
+export interface StagedTaskCandidate {
+  /** repo-relative path (`tasks/<id>.md`) — printed on rejection as the remediation location. */
+  rel: string;
+  /** the staged (index) content of the file. */
+  content: string;
+  /** first-add ms epoch; null when the path has NO add commit (⇒ this commit is filing it now). */
+  filedAtMs: number | null;
+}
+
+/**
+ * First-add epoch ms of a repo-relative path — the committer date of the commit that ADDED it
+ * (`git log --diff-filter=A -1`), i.e. the same event the detector's post-cutoff set is built from.
+ * null when git has no add commit for the path (a new, not-yet-committed file) or git fails
+ * (缺值 = 未查, 硬规则 6 — the caller decides, never conflated with "filed long ago").
+ */
+export function pathFirstAddMs(root: string, rel: string): number | null {
+  try {
+    const out = execFileSync("git", ["log", "--diff-filter=A", "--format=%ct", "-1", "--", rel], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 10_000,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    const sec = Number(out.split("\n").map((l) => l.trim()).filter(Boolean).pop() ?? "");
+    return Number.isFinite(sec) && sec > 0 ? sec * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The write-surface position judgment: return the offender descriptions (empty = allow). Pure — the
+ * caller supplies the candidates, so every branch is directly testable and every input axis
+ * (label / goal_ac / first-add time / non-task path) can be driven to BOTH values (硬规则 4).
+ *
+ * The judgment is the detector's own (`isDeliveryCritical` ∧ `filedAfterCutoff` ∧ ¬`hasGoalAc`), in
+ * the detector's own order, with the detector's activation line — the write surface cannot drift
+ * from the round-level report (硬规则 1: one judgment, two moments).
+ */
+export function judgeStagedDeliveryCritical(
+  candidates: readonly StagedTaskCandidate[],
+  cutoffMs: number = activationLineMs(),
+): string[] {
+  const offenders: string[] = [];
+  for (const c of candidates) {
+    const fmMatch = c.content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    // No frontmatter ⇒ not a task file this judgment can speak about (a deleted staged path, or a
+    // file whose shape is judged elsewhere: task-contract-check / the task-file-violation-ledger).
+    // ⛔ Not reported as a violation: this detector's subject is `delivery-critical` WITHOUT
+    // `goal_ac`, and an unreadable frontmatter cannot carry the label (硬规则 3b's mirror: it must
+    // not be reported as PASS either — it is simply not in this judgment's population).
+    if (!fmMatch) continue;
+    const fm = parseFrontmatterCompletely(fmMatch[1]) as Record<string, unknown>;
+    const id = path.basename(c.rel, ".md");
+    const task = {
+      id,
+      labels: frontmatterLabels(fm),
+      goal_ac: frontmatterGoalAc(fm),
+      // A path with no add commit IS being filed by the commit under judgment ⇒ "filed now". The
+      // floor is the activation line so a host clock BEHIND the cutoff cannot silently grandfather a
+      // brand-new file (fail-closed — the direction the detector's own 缺值⇒true takes).
+      filedAtMs: c.filedAtMs ?? Math.max(Date.now(), cutoffMs),
+    };
+    if (!isDeliveryCritical(task)) continue;
+    if (!filedAfterCutoff(task, cutoffMs)) continue; // pre-cutoff stock: same judgment ⇒ grandfathered
+    if (hasGoalAc(task)) continue;
+    offenders.push(`${c.rel} (id=${id})`);
+  }
+  return offenders;
+}
+
+/**
+ * Run the goal_ac judgment over the staged task files. A commit with NO staged task file is always ok
+ * (nothing to judge). The staged BLOB is read (`git show :<rel>`), not the working-tree copy — the
+ * commit being judged carries the index content, and a working-tree edit that is not staged must not
+ * change the verdict (same discipline as the Touches detector).
+ */
+export function runGoalAcChecks(root: string): GoalAcCheckResult {
+  const staged = stagedTaskFiles(root);
+  if (staged.length === 0) return { ok: true, output: "" };
+  const candidates: StagedTaskCandidate[] = staged.map((rel) => ({
+    rel,
+    content: stagedBlob(root, rel),
+    filedAtMs: pathFirstAddMs(root, rel),
+  }));
+  const offenders = judgeStagedDeliveryCritical(candidates);
+  if (offenders.length === 0) return { ok: true, output: "" };
+  return { ok: false, output: offenders.join("\n") };
+}
+
 // ── 断言面集合（full-suite-runner 复用；守卫本身不再读它——② 退役）─────────────────────────────────
 
 export interface RegistryShape {
@@ -401,6 +532,7 @@ export function judge(
         docResult.output,
       docCheckOutput: docResult.output,
       touchesCheckOutput: null,
+      goalAcCheckOutput: null,
       merge: opts.merge === true,
     };
   }
@@ -423,6 +555,30 @@ export function judge(
         touchesResult.output,
       docCheckOutput: null,
       touchesCheckOutput: touchesResult.output,
+      goalAcCheckOutput: null,
+      merge: opts.merge === true,
+    };
+  }
+
+  // ③ goal_ac 写入面判定（gap-ac190-goal-ac-rule-not-enforced-at-filing）：staged tasks/*.md 里
+  //    「delivery-critical + 生效线之后立案 + goal_ac 空」在提交这一刻即拒——不再只有 goal 层的事后
+  //    报告（那时任务已经写进 store、并且已被机械晋升到 ready）。
+  const goalAcResult = runGoalAcChecks(root);
+  if (!goalAcResult.ok) {
+    return {
+      verdict: "reject",
+      reason: "delivery-critical-without-goal-ac",
+      message:
+        "pre-commit 守卫：delivery-critical 新立案任务未声明 goal_ac（AC-190 判据的写入面，\n" +
+        "goals/AC-190-task-ac.md）。带 `delivery-critical` 标签的任务必须有 goal 层背书：它的\n" +
+        "top-level frontmatter 要有非空 `goal_ac: <AC-id>`（指向 goal store 里领域覆盖本任务的那条 AC）。\n" +
+        "修复：给该任务的 frontmatter 补 `goal_ac`（并说明为什么是这条 AC）后重新提交。\n" +
+        "⛔ 去掉 `delivery-critical` 标签也能绕开本判定——那属于放宽判据，需在该任务体里写明理由。\n" +
+        "─── goal_ac 检查输出 ───\n" +
+        goalAcResult.output,
+      docCheckOutput: null,
+      touchesCheckOutput: null,
+      goalAcCheckOutput: goalAcResult.output,
       merge: opts.merge === true,
     };
   }
@@ -430,9 +586,10 @@ export function judge(
   return {
     verdict: "allow",
     reason: "doc-checks-pass",
-    message: "pre-commit 守卫：文档类检查通过（①）+ Touches 单路径（②），放行。",
+    message: "pre-commit 守卫：文档类检查通过（①）+ Touches 单路径（②）+ goal_ac 写入面（③），放行。",
     docCheckOutput: null,
     touchesCheckOutput: null,
+    goalAcCheckOutput: null,
     merge: opts.merge === true,
   };
 }
@@ -470,7 +627,10 @@ function hookShim(root: string): string {
     "# ② runs the Touches「一条目一路径」detector on staged tasks/*.md at the commit moment",
     "#    (gap-touches-one-entry-detector-not-enforcer — a multi-path Touches bullet reds HERE,",
     "#    not at the suite's static layer).",
-    "# (③ rejecting running-round assertion-surface commits was RETIRED under AC64 — see",
+    "# ③ runs the goal_ac write-surface judgment on staged tasks/*.md (gap-ac190-goal-ac-rule-not-",
+    "#    enforced-at-filing — a delivery-critical task filed after the activation line WITHOUT",
+    "#    goal_ac is rejected HERE, where it is written, instead of only in the goal-layer report).",
+    "# (④ rejecting running-round assertion-surface commits was RETIRED under AC64 — see",
     "# orchestration/archive/AC58-retired-clauses.md#R27.)",
     'ROOT="$(git rev-parse --show-toplevel)"',
     guardExecLine(false),
@@ -491,8 +651,10 @@ export function preMergeCommitShim(root: string): string {
     "#!/usr/bin/env bash",
     `# ${HOOK_FINGERPRINT} — installed by plugin/scripts/precommit-guard.ts --install-hook`,
     "# pre-merge-commit guard: ① runs the DOC-CLASS checks at merge time (AC51 断言面拆分);",
-    "# ② runs the Touches「一条目一路径」detector on the merged-in tasks/*.md at the merge moment.",
-    "# (③ rejecting running-round merges was RETIRED under AC64 — see",
+    "# ② runs the Touches「一条目一路径」detector on the merged-in tasks/*.md at the merge moment;",
+    "# ③ runs the goal_ac write-surface judgment on the merged-in tasks/*.md (a delivery-critical",
+    "#    task filed after the activation line without goal_ac is rejected at the merge moment too).",
+    "# (④ rejecting running-round merges was RETIRED under AC64 — see",
     "# orchestration/archive/AC58-retired-clauses.md#R27.)",
     'ROOT="$(git rev-parse --show-toplevel)"',
     guardExecLine(true),
@@ -550,7 +712,9 @@ export function uninstallHook(root: string): { removed: boolean; hookPath: strin
 const USAGE = `precommit-guard.ts — 写入那一刻的守卫：① 文档类检查（AC51 断言面拆分）；
 ② Touches「一条目一路径」detector（gap-touches-one-entry-detector-not-enforcer——staged tasks/*.md
 的 ## Touches 多路径 bullet 在提交这一刻红掉，不必等套件静态层）；
-③ 拒绝「轮 running 且触及断言面」的写入已退役（AC64）→ orchestration/archive/AC58-retired-clauses.md#R27。
+③ delivery-critical 新立案任务必须声明 goal_ac（gap-ac190-goal-ac-rule-not-enforced-at-filing——
+AC-190 判据的写入面：带 delivery-critical 标签、生效线之后立案、goal_ac 空 ⇒ 拒提交）；
+④ 拒绝「轮 running 且触及断言面」的写入已退役（AC64）→ orchestration/archive/AC58-retired-clauses.md#R27。
 
 用法:
   node --experimental-strip-types plugin/scripts/precommit-guard.ts [--root <dir>]
@@ -563,10 +727,12 @@ const USAGE = `precommit-guard.ts — 写入那一刻的守卫：① 文档类�
   --uninstall-hook    移除上述两个钩子中的本守卫 shim（幂等）
   --merge             本轮判定在 merge 上下文（pre-merge-commit 钩子传此 flag；文档检查行为与
                       commit 一致，仅输出标注）
-  --json              机器可读输出（{verdict, reason, message, docCheckOutput, touchesCheckOutput, merge}）
+  --json              机器可读输出（{verdict, reason, message, docCheckOutput, touchesCheckOutput,
+                      goalAcCheckOutput, merge}）
   --help              本帮助
 
-退出码: 0=放行 1=拒（doc-check-failed / touches-multi-path-bullet） 2=用法/环境错`;
+退出码: 0=放行 1=拒（doc-check-failed / touches-multi-path-bullet /
+        delivery-critical-without-goal-ac） 2=用法/环境错`;
 
 function main(): number {
   const args = process.argv.slice(2);
@@ -638,6 +804,7 @@ function main(): number {
           message: verdict.message,
           docCheckOutput: verdict.docCheckOutput,
           touchesCheckOutput: verdict.touchesCheckOutput,
+          goalAcCheckOutput: verdict.goalAcCheckOutput,
           merge: verdict.merge,
         },
         null,

@@ -12,6 +12,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -125,4 +126,32 @@ test("--inject-unbacked-fixture 注入未声明 goal_ac 的新立案任务 ⇒ e
   const r = runChecker(["--inject-unbacked-fixture"]);
   assert.notEqual(r.status, 0, `injected run must be red, got status=${r.status}`);
   assert.match(r.stdout, new RegExp(INJECTED_UNBACKED_ID));
+});
+
+// ── AC6 单源：写入面判定复用本检测器的判定函数（gap-ac190-goal-ac-rule-not-enforced-at-filing）──────
+// AC-190 的规则有两个生效时刻——goal 层每轮事后跑（本文件），提交那一刻的写入面（precommit-guard
+// 的 ③）。两处必须是【同一个判定】：判据在此处，写入面只许 import，⛔ 不许出现第二份字符串比较
+// （硬规则 1：用机件、不手搓；硬规则 5b：修一处不等于只有一处）。本测试钉住那条 import 行本身——
+// 「单源」在记录上必须可分辨，否则两份实现会在下一次改动时分叉。
+
+test("AC6 — precommit-guard.ts 的写入面判定 import 本检测器的 isDeliveryCritical/hasGoalAc（⛔ 不是第二份字符串比较）", () => {
+  const guardSrc = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "precommit-guard.ts"), "utf8");
+  const importMatch = guardSrc.match(
+    /import\s*\{([^}]*)\}\s*from\s*["'][^"']*long-term-guarantee-goal-backed-check\.ts["']/,
+  );
+  assert.ok(importMatch, "precommit-guard.ts must import from long-term-guarantee-goal-backed-check.ts");
+  const imported = importMatch[1].split(",").map((s) => s.trim()).filter(Boolean);
+  for (const name of ["isDeliveryCritical", "hasGoalAc", "filedAfterCutoff", "activationLineMs"]) {
+    assert.ok(imported.includes(name), `the write surface must reuse ${name} (imported: ${imported.join(", ")})`);
+  }
+  // AC6's ⛔ half: no SECOND string comparison for the label anywhere in the guard (a mention in a
+  // message/comment is fine — the position that matters is the comparison/call).
+  assert.ok(
+    !/\.includes\(\s*["']delivery-critical["']\s*\)/.test(guardSrc),
+    "the guard must not re-implement the delivery-critical label comparison (single source)",
+  );
+  assert.ok(
+    !/labels\s*!==\s*undefined[^\n]*goal_ac/.test(guardSrc),
+    "the guard must not hand-roll its own label/goal_ac predicate",
+  );
 });
