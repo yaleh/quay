@@ -126,26 +126,46 @@ env: {CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"}}`。
 
 ## Acceptance Criteria
 
-- [ ] AC1（负控制，对 **init 的实际产出**，改前必须红）：在一个干净临时目录跑一次**真** `quay-init`，
+- [x] AC1（负控制，对 **init 的实际产出**，改前必须红）：在一个干净临时目录跑一次**真** `quay-init`，
       **改前**：产出的 `.quay/profiles.yml` 的 roles 集 == `{manager, outer, inner}`，且
       `launchArgv("fix-worker", "", <tmp>)` 抛错；
       **改后**：roles ⊇ `{fix-worker, task-worker, pool-judge, selector, meta-driver}`，
       且该调用不抛、返回 argv 中 `-n` 后的名字非空。对 `task-worker` 同样断言。
       （⚠️ 该形态已于 2026-09-13 用当前主检出实测为**红**，⛔ 不是恒绿空转。）
-- [ ] AC2（结构性，防漂移）：静态检查器比对「**一次真 init 产出的** `.quay/profiles.yml` 的 roles 键集」
+      **执行者实测（双向）**：改前产物保留在 `/tmp/quayinit-ac1-WoHLGW` —— roles == `{inner, manager, outer}`，
+      `launchArgv("fix-worker","",…)` 与 `("task-worker",…)` 均抛 `role not found`；
+      改后产物 roles 七个齐全，两者都解析出非空 `-n` 名（`<项目名>-fix-worker` / `-task-worker`）。
+      双向已固化为 `plugin/test/profiles-role-coverage-check.test.mjs` 的两条测试
+      （正向 + 「删掉该 role 后 launchArgv 必抛」的负控制），6/6 绿。
+- [x] AC2（结构性，防漂移）：静态检查器比对「**一次真 init 产出的** `.quay/profiles.yml` 的 roles 键集」
       与「driver 通过 `launchArgv` 请求的 **profile role** 名集合」（即 `plugin/scripts/**` 中
       `launchArgv("<role>"` 的 role 名集合），前者未覆盖后者即红。
       **⛔ 断言对象是 init 产出，不是 `plugin/.quay/profiles.yml`。**
       双向控制：从模板删一个 profile role 必须红；给代码加一个新 profile role 名而模板未跟进也必须红。
       **第三个控制（针对本缺陷的成因）**：把两份模板改成不一致 ⇒ 必须红
       （检查器不得只看其中一份而给出绿）。
-- [ ] AC3（对 **init 产出**断言）：一次真 init 产出的 `.quay/profiles.yml` 不再含 `inner`
+      **执行者实测**：`plugin/scripts/profiles-role-coverage-check.ts` 的断言对象是一次真
+      `quay init` 写进临时工作区的 `.quay/profiles.yml`（Core CLI 源码内联产出，⛔ 不读模板文件），
+      并逐条对照 shipped 载体与 `launchArgv` 请求集；本仓 PASS。四个红控制全部实测为红：
+      ①删 shipped 一个 role ②driver 请求一个无人声明的 role ③两份模板漂移 ④退休 role。
+      已登记进 `runner-static-gate.ts` 的 `run_static_checks`（`@static-tier change` +
+      `@static-object`），补 capability-catalog 六行（`--entry-surface` exit 0，310/310 已声明），
+      并配 `checker-mutation-cases/profiles-role-coverage-check.sh`（7 步双向，exit 0）；
+      `checker-mutation-check.sh --check` 全量 72/72 通过、`mutations_that_stayed_green=0`。
+- [x] AC3（对 **init 产出**断言）：一次真 init 产出的 `.quay/profiles.yml` 不再含 `inner`
       （已退役的 profile role），且该断言由 AC2 的同一检查器覆盖
       （没有任何 driver 通过 `launchArgv` 请求 `inner` ⇒ 产出含它属于反向冗余，检查器应能报出）。
       （⚠️ 当前 ① 里仍有 `inner`（`init.ts:405`）⇒ 这条现在也是**红**的，有意义。）
-- [ ] AC4：两个不同项目各自 `quay-init` 后，其 profiles 的 `name` 值互不相同
+      **执行者实测**：检查器把 `inner` 列为显式退休 role 并**判 FAIL**（⛔ 不是仅报告——只报告的条件
+      结构上不可能报红，正是本任务要消灭的形态）；mutation case 的 RED-4 把 `inner` 放回 shipped
+      载体即变红；测试另断言真 init 产出里 `inner` 缺席。
+- [x] AC4：两个不同项目各自 `quay-init` 后，其 profiles 的 `name` 值互不相同
       （断言不含硬编码的 `quay-` 字面前缀，或按项目名派生）。
-- [ ] AC5：全量 `scripts/test.sh` 绿。
+      **执行者实测**：会话名由项目名派生（TS 侧 `generateProfilesContent(basename(root))`、
+      shell 侧 `profiles_name_prefix()` + 落盘后改写），两条路径产出的名字逐字节一致。
+      测试断言 `proj-alpha` 与 `proj-beta` 的 `manager`/`task-worker` 名互不相同、各自含自己的项目名，
+      且 shipped 的 `quay-<role>` 字面名一律不残留。
+- [ ] AC5：全量 `scripts/test.sh` 绿（待外部）
 
 ## Definition of Done
 
@@ -164,7 +184,48 @@ env: {CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"}}`。
 - plugin/scripts/runner-static-gate.ts
 - plugin/scripts/checker-mutation-cases/profiles-role-coverage-check.sh
 - plugin/test/profiles-role-coverage-check.test.mjs
+- docs/analysis/quay-init-closure-ratchet.baseline.json
 - tasks/gap-quay-init-profiles-template-omits-every-role-the-drivers-request.md
+
+## 执行者注记（⛔ 非立案原始内容，落地时追加）
+
+**A. 一条与立案根因段部分冲突的实测读数，照实记账（硬规则 4 推论四：我的说法也必须带可区分的对照）。**
+本机主检出的 `packages/quay/dist/quay.js` 与 `plugin/vendor/quay/dist/quay.js` 都停在
+2026-09-10 23:42 的构建物，而 `--branch-model-only`（本任务链路上的关键 flag）落在
+`51595c008`（2026-09-11 12:11）⇒ **该 bundle 里 `branch-model-only` 出现 0 次**。
+于是 `quay-init.sh:2510` 那次调用跑的是**完整 TS init**（而不是早退），它才写了内联的 ①。
+对照：先用 `bash plugin/scripts/sync-vendor.sh` 重建 bundle（套件每轮本来就会做，
+`scripts/test.sh build_dist_once`），再在同样的干净目录跑真 init ⇒ **产出直接是七个 role**，
+`skipped (exists)` 那一行也不再出现。
+⇒ **判断**：`skipped (exists)` + 双模板这条链**确实存在且已由本任务修好**（Plan 2 + 四个红控制），
+但**它在立案实验里被观测到的那个红，其直接触发条件是主检出里那份过期的 vendored bundle**——
+两者不是二选一：前者决定「一旦 TS 全量 init 跑起来就必然错」，后者决定「它什么时候真的跑起来」。
+⛔ 本任务**不**顺手改 `sync-vendor.sh --check`（它把镜像与**已过期的** `packages/quay/dist` 比，
+两份都旧 ⇒ 报 CLEAN，因此结构上抓不到 source↔dist 漂移）——那超出本任务 Touches，
+且需要自己的 AC；此处只记读数与对照，不据它行动。
+**一条观察项（⛔ 非阻塞）**：主检出的 vendored bundle 之所以能停在那里，是因为
+`scripts/test.sh` 只在**它自己所在的检出**里 rebuild（worktree 各建各的），主检出自 09-11 起
+大概没跑过全量套件。是否要为此加一条 source↔dist 漂移检测 ⇒ 留给后续任务判定。
+
+**B. 检查器断言面的一处刻意取舍（说清楚，避免被读成「覆盖了两条路径」）。**
+`profiles-role-coverage-check.ts` 运行的是 **Core CLI 的 `quay init`**（源码内联、无 git 依赖、
+~1.7s、对 bundle 新旧不敏感），而不是 shell 的 `quay-init.sh`（需 git + 测试命令 + vendored bundle，
+~2.3s，且它自己就依赖被检查链路上的 bundle）。两条 init 路径的覆盖是**分开取的**、不是一条断言包办：
+Core 产出由检查器逐条断言（AC2/AC3），shell 产出由 `plugin/test/profiles-role-coverage-check.test.mjs`
+端到端断言（真跑 `quay-init.sh`，6/6 绿）。这样分工的原因是：把 shell 跑进静态检查器会给
+每次 scoped 门加上 git/bundle 两个环境依赖，而 mutation case 的 fixture 将被迫复制整棵 plugin——
+**代价与收益不成比例**。两份模板之间的漂移由检查器的
+`init 产出 roles == shipped 载体 roles` 一条断言同时兜住（AC2 的第三个控制）。
+
+**C. scoped 门与 ratchet 的实测读数。**
+改 `plugin/scripts/quay-init.sh` 会如预期把 `quay-init-closure-ratchet` 判 stale
+（它是被 fingerprint 的 source 之一）⇒ 按既有纪律**把 `--reanchor` 放在最后一步**执行：
+`3 files / 568 bytes` → `3 files / 481 bytes`（**未增长**，shrink-only 仍成立），
+`--gate` PASS。落点 `docs/analysis/quay-init-closure-ratchet.baseline.json` 已列入 Touches。
+其后 `bash scripts/test.sh --for-task <id> --allow-thin` **exit 0，154/154 绿**。
+**⚠️ scoped-gate 缓存以我实际验证过的那个 develop tip 为准**（即本 worktree merge 进来的 tip），
+⛔ 不写「当时 `rev-parse develop` 恰好指向、但我没验证过」的 sha
+（那会把「没评估」记成「评估过」）；develop 若已前进则缓存不命中、driver 照跑 scoped 门，fail-closed。
 
 ## 立案备注（quay-task 立案/改写时追加，⛔ 非报告原文）
 

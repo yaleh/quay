@@ -65,7 +65,22 @@ adopter 项目，同样的三轮空烧会重演**——因为 driver 的分类�
 直到撞上重试上限。每一轮的代价是一个完整的 Claude 会话，而成功率为零
 （worker 无法从一份不含可修对象的日志里修出任何东西）。
 
+> **实测触发面（2026-09-13，全量而非抽样）**：本缺陷不是第三方项目的边缘情形。
+> 对 quay **自己仓库** `.quay/worker-round.jsonl` 的 `retry_exemptions` 做全量统计，
+> 291 条判定中 **`insufficient-data-fallback` 占 127 条（44%）**，
+> 与 `own-defect-counted`（136 条，47%）几乎持平。
+> ⇒ **接近一半的 suite-red 重试判定，走的正是「判不出归因却照常重派」这条路径。**
+> 相关任务 `gap-retry-exemption-signature-keeps-volatile-values` 的 DoD 里那个
+> 「29 条中 24 条」是更早的抽样快照，方向一致、量级更小；以本条全量读数为准。
+
 ## Plan
+
+> **⚠️ 与 `gap-retry-exemption-signature-keeps-volatile-values` 的 AC4 不矛盾，实现者必须显式区分两件事**：
+> 那条 AC4 钉的是「签名提取失败 ⇒ verdict 仍落 `insufficient-data-fallback`、**照常计入重试预算**，
+> ⛔ 不得因判不出而放行」——管的是**计数/归责**。
+> 本任务管的是**同一 verdict 下的后续动作：是否再派一个 worker**。
+> **「仍照常计数」∧「不再重派」可以同时成立**，且正是本任务要的终态：
+> 预算照扣（不放行），但不再拿一个新会话去撞同一堵墙。
 
 1. **让动作跟着读数分叉**：`insufficient-data-fallback`（以及任何「无法归因到具体失败测试文件」的
    verdict）不得走与「已归因的实现缺陷」相同的重派路径。至少要做到：**不重派**，
@@ -106,3 +121,7 @@ adopter 项目，同样的三轮空烧会重演**——因为 driver 的分类�
 - plugin/scripts/worker-driver.ts
 - plugin/test/worker-driver-retry-classification.test.mjs
 - tasks/gap-fan-in-suite-red-with-no-attributable-test-still-redispatches-worker.md
+
+⚠️ `plugin/test/worker-driver-retry-classification.test.mjs` 是**新文件**——同族既有用例都在
+`plugin/test/worker-driver-fan-in.test.mjs`。**若实现者选择把用例并入既有文件，必须同步改上面的 Touches**，
+否则 `--for-task` scoped 门取不到它（声明与实际改动漂移）。
