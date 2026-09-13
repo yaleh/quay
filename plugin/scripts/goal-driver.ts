@@ -598,17 +598,62 @@ export function goalCloseBlockFromRecords(
   return { verdict: "clear", acs: [], cause: null };
 }
 
+/** 一个被抽出的节：`heading` = 标题行去掉前导 `##`/空白后的**逐字**文本（含标题自带的后缀限定语，
+ *  如 `范围（docs/design/… §7 阶段2）`——判官要能看到限定语本身，见 `scopeSections`），
+ *  `text` = 标题后至下一 `## ` 标题（或结尾）的节体，已 trim。 */
+interface BodySection {
+  heading: string;
+  text: string;
+}
+
+/** 通用『取 body 里标题为 `heading` 的全部节』帮助函数（`退出条件` 与 `范围` 两处共用一份正则逻辑，
+ *  ⛔ 不抄第二份——两份漂移是下一个「读不到」缺陷的源头）。
+ *
+ *  `heading` 逐字匹配（正则元字符转义）。`allowHeadingSuffix` 打开时标题按**前缀**匹配（`## 范围` 命中
+ *  `## 范围（…）` / `## 范围与非目标`）——真实 GOAL 的节标题几乎都带后缀（quay-fleet 的
+ *  `## 范围（docs/design/quay-fleet-design.md §2/§3.1/§7 阶段2）`、本仓的 `## 范围与非目标`），
+ *  逐字正则在这种情况下**结构上读不到这一节**，正是本任务要修的缺陷原样重现（同
+ *  `task-status-drift-check.ts` 的 `## Acceptance Criteria (runnable — …)` 那个实例）。
+ *  ⛔ 退出条件**不开**该项：`hasExitConditions` 是机械可证层，其语义不得因本次改动而变。
+ *
+ *  ⛔ 标题后只允许水平空白（或整行剩余文本），不用 `\s*`——`\s` 含 \n，会把「标题后紧跟的空行 + 下一节
+ *  标题」吞进标题匹配，导致空节被误判为「有内容」（原 `exitConditionsText` 注释的同一理由）。 */
+function extractSections(body: string, heading: string, opts: { allowHeadingSuffix?: boolean } = {}): BodySection[] {
+  const esc = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const suffix = opts.allowHeadingSuffix === true ? "[^\\r\\n]*" : "[ \\t]*";
+  const re = new RegExp(`##[ \\t]+(${esc}${suffix})\\r?\\n([\\s\\S]*?)(?=\\r?\\n##[ \\t]|$)`, "g");
+  const out: BodySection[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(body)) !== null) {
+    out.push({ heading: m[1].trim(), text: m[2].trim() });
+    // 空匹配不可能出现（每个匹配至少吃掉标题行 + 换行），但显式防御死循环。
+    if (re.lastIndex === m.index) re.lastIndex += 1;
+  }
+  return out;
+}
+
 /** 取 body 的 `## 退出条件` 节文本（标题后至下一 `## ` 标题或结尾；节体 trim）。无该节 / 节体空 ⇒ ""。
- *  ⛔ 标题后只允许水平空白 [ \t]*，不用 \s*——\s 含 \n，会把「标题后紧跟的空行 + 下一节标题」吞进
- *  标题匹配，导致空节被误判为「有内容」。 */
+ *  ⛔ 逐字标题（`allowHeadingSuffix` 不开）——行为与本次改动前逐字节一致，机械层不受影响。 */
 function exitConditionsText(body: string): string {
-  const m = body.match(/##[ \t]+退出条件[ \t]*\r?\n([\s\S]*?)(?=\r?\n##[ \t]|$)/);
-  return m !== null ? m[1].trim() : "";
+  const all = extractSections(body, "退出条件");
+  return all.length > 0 ? all[0].text : "";
 }
 
 /** body 是否含非空的 `## 退出条件` 节（标题存在且节体有非空白内容——「写下了」，⛔ 不是「只有标题」）。 */
 function hasExitConditions(body: string): boolean {
   return exitConditionsText(body).length > 0;
+}
+
+/** 取 body 里全部 `## 范围…` 节（标题前缀匹配 ⇒ 带后缀的标题也算，见 `extractSections`）。
+ *  只收**节体非空**的节（空节不携带任何「该目标有几块」的信息，进 prompt 只会占位）。
+ *
+ *  WHY（本任务的机制缺口）：`buildSufficiencyPrompt` 原先把 `goal_title` + `## 退出条件` + 在域 AC
+ *  三样喂给充分性判官。而本仓/靶子仓的退出条件刻意写成**不写死数字**的结构性自指句式（「本目标名下未被
+ *  superseded 的全部 criterion 状态为 achieved」）——它对任意数量的在域 AC 都同样成立，本身**不携带**
+ *  「这个目标应该有几块」的信息。那个信息实际写在 `## 范围` 节，而判官看不到这一节 ⇒ 判官能否识别
+ *  「当前只有 1 条 AC，还不够」完全依赖**标题是否恰好写得够详细**，没有任何结构性保障。 */
+function scopeSections(body: string): BodySection[] {
+  return extractSections(body, "范围", { allowHeadingSuffix: true }).filter((s) => s.text.length > 0);
 }
 
 /** 一条 GOAL 的充分性判定（机械可证部分）：读 body 的 `## 退出条件` vs 在域 AC 集合。
@@ -653,8 +698,19 @@ export function parseSemanticSufficiencyVerdict(stdout: string | null, exitCode:
   return "not-evaluated";
 }
 
-/** 充分性语义判定的 prompt：把 GOAL 的退出条件文本 + 在域 AC 集合（id/title/expect）结构化给 LLM，
- *  要求只输出一行 JSON。⛔ 非散文指令——结构化事实 + 输出契约（解析靠 parseSemanticSufficiencyVerdict）。 */
+/** 充分性语义判定的 prompt：把 GOAL 的退出条件文本 + `## 范围` 节 + 在域 AC 集合（id/title/expect）
+ *  结构化给 LLM，要求只输出一行 JSON。⛔ 非散文指令——结构化事实 + 输出契约
+ *  （解析靠 parseSemanticSufficiencyVerdict）。
+ *
+ *  ⛔ 范围节**单独成节**、不与退出条件文本合并：判官必须能分辨「哪段是手段（退出条件）、哪段是目的
+ *  分解（范围）」（Plan 第 1 条的可追溯性）。且 `hasExitConditions`/`goalSufficiencyVerdict` 的机械层
+ *  ⛔ 不因范围节非空而改变行为——本函数只扩展**语义判官的输入**。
+ *
+ *  范围节**缺失**时的取值是显式选择（Plan 第 2 条要求明确选一个）：**不改判结构，但在 prompt 里把
+ *  「没写」这件事说出来**。理由：① 不 fail-closed 成 insufficient——那等于给「必须写 `## 范围`」加了
+ *  一条硬性前置，历史 GOAL（GOAL-001 等可能没写这节）会被结构性判死（DoD 明确排除该范围）；
+ *  ② 也不静默当成「没有范围限制」——那正是本任务要修的形态（缺席与「已声明无限制」同形，硬规则 3b）。
+ *  说出缺席是零代价的：判定权仍在判官手里，但「AC 集是否完整」不再有一个看不见的默认答案。 */
 export function buildSufficiencyPrompt(
   goal: Record<string, unknown>,
   inScopeAcs: Array<Record<string, unknown>>,
@@ -662,33 +718,62 @@ export function buildSufficiencyPrompt(
 ): string {
   const gid = String(goal.id ?? "");
   const title = String(goal.title ?? "");
-  const exitText = exitConditionsText(String(goal.body ?? ""));
+  const body = String(goal.body ?? "");
+  const exitText = exitConditionsText(body);
+  const scope = scopeSections(body);
+  const scopeLines = scope.length === 0
+    ? [
+        "## 范围 (scope):",
+        "(NOT WRITTEN DOWN in the goal body. The title and the exit conditions above are therefore your ONLY",
+        "basis for judging completeness. Do NOT read the absence of a scope section as evidence that the AC set",
+        "is complete; if the title and exit conditions do not themselves enumerate the work, answer insufficient.)",
+      ]
+    : [
+        "## 范围 (scope, verbatim headings and bodies from the goal body):",
+        ...scope.map((s) => `### ${s.heading}\n${s.text}`),
+      ];
   const acLines = inScopeAcs.length === 0
     ? "(none)"
     : inScopeAcs.map((ac) => `- ${String(ac.id ?? "")}: ${String(ac.title ?? "")} | expect=${String(ac.expect ?? "")}`).join("\n");
   return [
     "You are a sufficiency judge in the quay repo. Decide whether the goal's in-scope AC set fully covers its exit conditions.",
+    "The exit conditions often do not enumerate how many pieces of work the goal contains (they are written as a",
+    "structural self-reference valid for ANY number of ACs). The scope section, when present, is where that",
+    "decomposition is actually written down — judge the AC set against it, not against the exit conditions alone.",
     `Repo root: ${root}.`,
     `goal_id=${gid} goal_title=${title}`,
     "## 退出条件 (exit conditions):",
     exitText,
+    ...scopeLines,
     "## In-scope ACs:",
     acLines,
     'Reply with EXACTLY one line of JSON and nothing else: {"verdict":"covered"} if every exit condition is covered by the AC set, otherwise {"verdict":"insufficient"}.',
   ].join("\n");
 }
 
-/** 充分性判定的输入哈希（确定性缓存 key）：goal.id ‖ 退出条件文本 ‖ 在域 AC 的 (id,title,expect)
- *  有序列表——即 buildSufficiencyPrompt 的全部【语义】输入（⛔ root 与固定指令文本是常量，不入 key；
- *  换机器/换指令文本会按各自常量独立判，不影响「语义输入是否变化」）。任一在域 AC 的 expect / goal
- *  退出条件 / AC 集合（增删序）变化 ⇒ 哈希变 ⇒ 自动重判（AC3 的「输入变化必重判」）。 */
+/** 充分性判定的输入哈希（确定性缓存 key）：goal.id ‖ **goal.title** ‖ 退出条件文本 ‖ `## 范围` 节文本
+ *  ‖ 在域 AC 的 (id,title,expect) 有序列表——即 buildSufficiencyPrompt 的全部【语义】输入（⛔ root 与
+ *  固定指令文本是常量，不入 key；换机器/换指令文本会按各自常量独立判，不影响「语义输入是否变化」）。
+ *  任一在域 AC 的 expect / goal 标题 / 退出条件 / **范围节** / AC 集合（增删序）变化 ⇒ 哈希变 ⇒ 自动
+ *  重判（AC3 的「输入变化必重判」）。
+ *
+ *  ⛔ 范围节必须进 key（与「AC 集合变化触发重判」同一条纪律）：范围节是判官的输入之一，若它改了而 key
+ *  不变，缓存会把**旧范围下的裁决**原样回给新范围——判据空转，且与「判过了」同形（硬规则 3b）。
+ *  含标题逐字（`范围（…）` vs `范围与非目标` 是两个不同的节）。
+ *
+ *  ⛔ title 也进 key：它与范围节同理（都是 prompt 的语义输入），原先漏掉。而本任务的实测证据恰好指出
+ *  判官此刻**唯一**的结构性依赖就是标题——标题改了而 key 不变，等于把「标题写得不够详细」时得到的
+ *  insufficient 原样回给一个标题已改详细的目标，与「领域知识最新」同形。本条与本任务同源、同一函数、
+ *  同一条纪律，故一并修（⛔ 只修被报出来的那一个，是硬规则 5b 记过的形态）。 */
 export function sufficiencyCacheKey(
   goal: Record<string, unknown>,
   inScopeAcs: Array<Record<string, unknown>>,
 ): string {
   const canonical = JSON.stringify({
     goal: String(goal.id ?? ""),
+    title: String(goal.title ?? ""),
     exit: exitConditionsText(String(goal.body ?? "")),
+    scope: scopeSections(String(goal.body ?? "")).map((s) => [s.heading, s.text]),
     acs: inScopeAcs.map((ac) => [String(ac.id ?? ""), String(ac.title ?? ""), String(ac.expect ?? "")]),
   });
   return createHash("sha256").update(canonical).digest("hex");
