@@ -704,7 +704,17 @@ test("AC4 — the retrigger reuses the runner's resource gate: WAIT blocks the r
     assert.ok(s, "the state file still exists");
     assert.equal(s.state, "green", "state stays terminal (untouched) on WAIT — the retrigger does not start into a busy machine");
     assert.equal(s.finishedAt, terminal.finishedAt, "the terminal state is byte-untouched (same round)");
-    assert.ok(!fs.existsSync(path.join(root, ".quay", "full-suite.log")), "the suite was NEVER spawned on WAIT");
+    // gap-fan-in-suite-refusal-reports-as-suite-red: log-file EXISTENCE stopped being a valid proxy for
+    // "was the suite spawned" — the runner now appends a SUITE-NOT-RUN provenance line to the suite log
+    // on EVERY pre-suite return (the refusal must be visible in the log, not only on the stderr that the
+    // caller discards; that 0-byte log + bare `suite red` is the defect this replaced). 硬规则 4b：把代理量
+    // 换成直接量——「suite 到底跑没跑」= the suite command's OWN output must never reach the log.
+    const waitLogPath = path.join(root, ".quay", "full-suite.log");
+    const waitLog = fs.existsSync(waitLogPath) ? fs.readFileSync(waitLogPath, "utf8") : "";
+    assert.ok(
+      !waitLog.includes("fake suite — must not run on WAIT"),
+      "the suite was NEVER spawned on WAIT (its own output never reached the log)",
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

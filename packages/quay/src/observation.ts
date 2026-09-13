@@ -15,6 +15,14 @@
 // distinguishable (AC5). No source can throw out of this module — observation never 500s the
 // page. The read path never writes a file (AC6 — the same principle as `--report`'s pure read).
 //
+// REFINEMENT (gap-verification-round-empty-state-lumps-three-distinct-causes, 2026-09-13): the
+// contract above is a LOWER bound, not the ceiling — it separates 「无数据」 from 「读失败」 but says
+// nothing about WHY there is no data. A source whose absence has more than one distinct cause
+// enumerates them in `status` (see `TestsStatus`: 「无写者接入」 vs 「有写者、零记录」), because a
+// boolean/catch-all empty value makes a structural problem and a timing problem render identically.
+// This widens the value set; it does NOT relax 「无数据 ≠ 读失败」, and `error` still means PRESENT
+// but unreadable for every source.
+//
 // TELEMETRY PATH — deviation from the task body's literal `.quay/fast-mode-telemetry.jsonl`:
 // the real store is `.workflow-events/*.jsonl`. fast-mode-telemetry.ts reads and writes
 // `<root>/.workflow-events/<runId>.jsonl`, and AC2 pins /live against
@@ -3322,10 +3330,96 @@ export interface TestRunRecord {
   runId?: string | null;
 }
 
+/**
+ * `/tests` no-record cause enumerator (gap-verification-round-empty-state-lumps-three-distinct-causes).
+ *
+ * WHY THIS IS NOT A BOOLEAN (硬规则 3 — 枚举，不布尔): `empty` used to be ONE value carrying ONE reason
+ * string (「尚未跑过验证轮 → 未接入」) for three structurally different situations:
+ *   - `empty-no-writer`             — NOTHING in this workspace can ever write the ledger (no
+ *                                     `scripts/test.sh`, no `loop.test_command`). A WIRING statement.
+ *   - `empty-writer-zero-records`   — a writer IS wired; it just has not landed a row yet. The only
+ *                                     one of the three that is a TIMING statement.
+ *   - `error`                       — the ledger is present but unreadable (「读失败」; the existing
+ *                                     DEGRADATION CONTRACT in this file's header).
+ * Rendering (a) as 「尚未跑过验证轮」 sends the reader down a fix path — «run another round» — that does
+ * not exist for it: a workspace with no suite entry can run a thousand rounds and the ledger stays
+ * empty. Hard rule 3 forbids exactly that conflation.
+ *
+ * ⛔ THE DISCRIMINATOR LIVES IN `status`, NOT ONLY IN THE PROSE. DoD forbids "adding one sentence to
+ * the page while the three causes still share one `status`" — a downstream reader of the DATA (not the
+ * page) must be able to tell them apart. `reason` carries the evidence (WHICH signals were found);
+ * `status` carries the cause.
+ */
+export type TestsStatus = "ok" | "empty-no-writer" | "empty-writer-zero-records" | "error";
+
 export interface TestsResult {
-  status: ObservationStatus;
+  status: TestsStatus;
   reason: string | null;
   runs: TestRunRecord[];
+}
+
+/**
+ * Result of probing whether THIS workspace has a path that can land a row in
+ * `.quay/verification-round.jsonl` — the direct quantity behind `empty-no-writer` vs
+ * `empty-writer-zero-records` (硬规则 4c: it must be readable THROUGH observation.ts, i.e. from
+ * `<root>` alone, never a driver-side quantity — and it must be able to take `false`).
+ *
+ * `wired` is the SAME predicate the mechanical fan-in itself resolves on: worker-driver.ts
+ * `resolveScopedGateCommand` / `suiteRunsOutsideRunner` run a suite iff `scripts/test.sh` EXISTS
+ * (quay-shaped entry) or `loop.test_command` is declared (the third-party delegated entry). Finding
+ * neither means no fan-in step can ever run here ⇒ the ledger is structurally unwritable.
+ *
+ * `signals` is the ENUMERATION of what was actually found (⛔ never a boolean dressed up as evidence):
+ * a reader of a rendered page must be able to see WHICH declaration produced 「已接入」.
+ */
+export interface RoundWriterPath {
+  wired: boolean;
+  /** The signals found on disk, in probe order (`scripts/test.sh`, `loop.test_command`, `loop.test_output`). */
+  signals: string[];
+}
+
+/** The `loop:` keys that decide whether a project's suite can run at all vs. how its output is parsed.
+ *  `test_command` = runnable entry (decides `wired`); `test_output` = declared parse contract (reported
+ *  as evidence only — a parse contract with no entry runs nothing). */
+export const ROUND_WRITER_LOOP_KEYS = ["test_command", "test_output"] as const;
+
+/** See `RoundWriterPath`. Reads `<root>/.quay/config.yml` DIRECTLY (⛔ no upward search — a workspace
+ *  is judged by its OWN declarations, not by a parent directory's) with the same YAML 口径 as
+ *  worker-driver.ts `readLoopTestCommand`/`readLoopTestOutput`, which are the writer-side consumers of
+ *  these same keys. Never throws — an unreadable config yields `wired:false` + no signals. */
+export function detectRoundWriterPath(root: string): RoundWriterPath {
+  const signals: string[] = [];
+
+  let testSh = false;
+  try {
+    testSh = fs.statSync(path.join(root, "scripts", "test.sh")).isFile();
+  } catch {
+    testSh = false;
+  }
+  if (testSh) signals.push("scripts/test.sh");
+
+  let loop: Record<string, unknown> | null = null;
+  try {
+    const parsed: unknown = YAML.parse(fs.readFileSync(path.join(root, ".quay", "config.yml"), "utf8"));
+    const l = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>).loop : undefined;
+    if (l && typeof l === "object" && !Array.isArray(l)) loop = l as Record<string, unknown>;
+  } catch {
+    loop = null;
+  }
+
+  const rawCmd = loop ? loop.test_command : undefined;
+  const cmd = typeof rawCmd === "string" && rawCmd.trim() !== "" ? rawCmd.trim() : null;
+  if (cmd) signals.push("loop.test_command");
+
+  const decl = loop ? loop.test_output : undefined;
+  const hasOutputDecl =
+    !!decl &&
+    typeof decl === "object" &&
+    !Array.isArray(decl) &&
+    Object.values(decl as Record<string, unknown>).some((v) => typeof v === "string" && v.trim() !== "");
+  if (hasOutputDecl) signals.push("loop.test_output");
+
+  return { wired: testSh || cmd !== null, signals };
 }
 
 export const VERIFICATION_ROUND_REL = "../../../.quay/verification-round.jsonl";
@@ -3440,12 +3534,41 @@ export function readTests(root: string): TestsResult {
 function readTestsUncached(root: string): TestsResult {
   const roundsPath = path.join(root, ".quay", "verification-round.jsonl");
   const runs: TestRunRecord[] = [];
-  let statePathStatus: ObservationStatus = "ok";
+  let statePathStatus: TestsStatus = "ok";
   let reason: string | null = null;
   try {
     if (!fs.existsSync(roundsPath)) {
-      statePathStatus = "empty";
-      reason = ".quay/verification-round.jsonl 不存在（尚未跑过验证轮 → 未接入）";
+      // gap-verification-round-empty-state-lumps-three-distinct-causes — the absence of the ledger is
+      // TWO different facts, and only one of them is about time. Probe the workspace for a writer path
+      // (the direct quantity, see detectRoundWriterPath) and say which fact this is.
+      const writer = detectRoundWriterPath(root);
+      if (writer.wired) {
+        statePathStatus = "empty-writer-zero-records";
+        reason =
+          ".quay/verification-round.jsonl 不存在，但本项目已接入写者（" +
+          writer.signals.join(" + ") +
+          "）—— 机械 fan-in 在下一轮 suite 完成后即写入该载体（尚未产出记录，不是未接入）";
+      } else {
+        // ── AC4 (② of the task's either/or): THE LEDGER-WRITE CONTRACT, stated where the guidance is
+        // emitted. A third-party project lands rows through the MECHANICAL FAN-IN — quay exposes no
+        // standalone "append a round" subcommand for it (the one general writer,
+        // plugin/scripts/pre-verified-round-record.ts, is RETIRED from the fan-in path by its own
+        // header ruling; do not re-wire it). The fan-in runs a project's suite iff `scripts/test.sh`
+        // exists or `loop.test_command` is declared — which is exactly `detectRoundWriterPath`'s
+        // `wired` — and then calls `appendDelegatedSuiteRound`. A project MAY additionally write its
+        // own rows from its own suite script (the real third-party quay-fleet does), but it does not
+        // have to: declaring the entry is sufficient. Proof this contract is TRUE, on a real
+        // third-party project: quay-fleet's `.quay/verification-round.jsonl` contains rows with
+        // `runner:"inner"`, `taskId:"fleet-agent-sessions-transcript-endpoint"` and
+        // `runId:"mfi-…"` — written by the mechanical fan-in, not by quay's own checkout.
+        statePathStatus = "empty-no-writer";
+        reason =
+          "未接入：.quay/verification-round.jsonl 不存在，且本项目无写者接入该载体（未发现 scripts/test.sh；" +
+          ".quay/config.yml 的 loop 段也未声明 " +
+          ROUND_WRITER_LOOP_KEYS.join(" / ") +
+          "）—— 再跑多少轮也不会有记录。接入方式：在本项目 .quay/config.yml 的 loop 段声明 test_command" +
+          "（plugin/scripts/quay-init.sh 写入；等价入口 /quay:init --all --loop），机械 fan-in 即会落账";
+      }
     } else {
       const text = fs.readFileSync(roundsPath, "utf8");
       for (const line of text.split(/\r?\n/)) {
@@ -3454,8 +3577,11 @@ function readTestsUncached(root: string): TestsResult {
         if (rec) runs.push(rec);
       }
       if (runs.length === 0) {
-        statePathStatus = "empty";
-        reason = "verification-round.jsonl 存在但无有效记录";
+        // The file exists ⇒ SOME writer ran. That is a writer/wiring fact, not a timing one — the same
+        // value as the missing-ledger-but-wired case, with its own reason (a reader can still tell the
+        // two apart from `reason`; `status` answers the question they share: 「写者接入了吗 ⇒ 是」).
+        statePathStatus = "empty-writer-zero-records";
+        reason = "verification-round.jsonl 存在但无有效记录（写者已落过盘，没有任何一行可解析）";
       } else {
         // The suite writer appends oldest→newest; the page shows 最新在前, so present newest-first.
         runs.reverse();

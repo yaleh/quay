@@ -24,89 +24,20 @@ import { readManifest } from "../src/manifest.ts";
 // DIR-098: quay init — workspace scaffolding (shared with Core CLI)
 import { runInit, printNextSteps } from "quay/init";
 
-function findRepoRoot(startDir) {
-  // Walk upward looking for the workspace marker (.quay/config.yml) so the
-  // default tasks dir resolves to the repo root's `tasks/`, not to whatever
-  // directory `quay-native` happened to be invoked from. This fixes the
-  // CWD-resolution footgun flagged by the independent audit in iteration 2
-  // and reconfirmed in iteration 3 (experiments/quay-native-bootstrap/audits/iteration-3-independent-
-  // adjudicate.md "New bugs found" #1): omitting QUAY_NATIVE_TASKS_DIR while
-  // running from packages/quay-native/ silently resolved tasks from
-  // packages/quay-native/tasks/ (a near-empty stray directory) instead of the
-  // real repo-root tasks/, producing confusing "not found" gate failures.
-  let dir = startDir;
-  for (;;) {
-    if (fs.existsSync(path.join(dir, ".quay", "config.yml"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
-}
-
-function resolveTasksDir() {
-  // v0: resolve relative to CWD's .quay/config.yml if present, else ./tasks
-  // (kept minimal per G5 — a real config loader is `quay` Core's job, not
-  // quay-native's; quay-native itself just needs *a* tasks dir).
-  const envDir = process.env.QUAY_NATIVE_TASKS_DIR;
-  if (envDir) return path.resolve(envDir);
-  const repoRoot = findRepoRoot(process.cwd());
-  if (repoRoot) return path.resolve(repoRoot, "tasks");
-  return path.resolve(process.cwd(), "tasks");
-}
-
-// resolveSiblingDir — resolve a provider-carrier directory (adr/goal/meta) that SHARES a common
-// parent with tasks/ (a repo-root sibling by default). Priority: env override → repo-root sibling
-// → cwd fallback. The cwd fallback is the gap-quay-init-env-only-tasks-dir-goals-adr-meta-land-
-// inside-npm-package defect: when env is unset AND findRepoRoot finds no .quay/config.yml upward
-// (the provider is spawned in the vendored package dir, which has no project marker above it), the
-// silent `path.resolve(process.cwd(), kind)` lands the carrier INSIDE the installed npm package. We
-// keep the fallback (fail-open — a bare quay-native invocation has always resolved cwd-relative and
-// a hard failure would break existing callers) but PRINT where it resolved to (hard rule 3b: a value
-// that "could not be determined correctly" must not look identical to "resolved correctly").
-function resolveSiblingDir(envName, kind) {
-  const envDir = process.env[envName];
-  if (envDir) return path.resolve(envDir);
-  const repoRoot = findRepoRoot(process.cwd());
-  if (repoRoot) return path.resolve(repoRoot, kind);
-  const fallback = path.resolve(process.cwd(), kind);
-  console.error(
-    `quay-native: ${envName} not set and no .quay/config.yml found upward — defaulting ${kind} to ${fallback} (cwd-relative fallback; set ${envName} to point it inside the project)`,
-  );
-  return fallback;
-}
-
-function resolveAdrDir() {
-  // ADRs live in a directory that SHARES a common parent with tasks/ (a repo-root
-  // sibling by default). Env override QUAY_NATIVE_ADR_DIR, else repo-root ./adr.
-  return resolveSiblingDir("QUAY_NATIVE_ADR_DIR", "adr");
-}
-
-function resolveDocsDir() {
-  // D1 (exp5-M-CRYST-D1): managed documents live in a directory that SHARES a
-  // common parent with tasks/ and adr/ (a repo-root sibling by default), same
-  // resolution shape as resolveAdrDir(). Env override QUAY_NATIVE_DOCS_DIR,
-  // else repo-root ./docs-managed.
-  const envDir = process.env.QUAY_NATIVE_DOCS_DIR;
-  if (envDir) return path.resolve(envDir);
-  const repoRoot = findRepoRoot(process.cwd());
-  if (repoRoot) return path.resolve(repoRoot, "docs-managed");
-  return path.resolve(process.cwd(), "docs-managed");
-}
-
-function resolveGoalDir() {
-  // Goals (SPEC-goal-mechanism-2026-09-06.md §5.2) are now provider-backed: they
-  // live in a directory that SHARES a common parent with tasks/ (a repo-root
-  // sibling by default, like adr/). Env override QUAY_NATIVE_GOAL_DIR, else
-  // repo-root ./goals.
-  return resolveSiblingDir("QUAY_NATIVE_GOAL_DIR", "goals");
-}
-
-function resolveMetaDir() {
-  // Meta records (gap-meta-records-should-be-a-first-class-store-kind-not-a-task-label) are
-  // provider-backed like goals: a repo-root sibling of tasks/ (default ./meta). Env override
-  // QUAY_NATIVE_META_DIR, else repo-root ./meta.
-  return resolveSiblingDir("QUAY_NATIVE_META_DIR", "meta");
-}
+// The five carrier-dir resolvers used to live here as private functions. They moved to
+// src/carrier-dirs.ts (gap-quay-init-omits-adr-goal-meta-dir-env-third-party-leak) so the
+// resolution that decides WHICH workspace's adr/goal/meta store this process reads and writes is
+// importable and directly unit-testable — this bin calls main() unconditionally at import, so a
+// test could never reach them here. Read that module's header for the invariant and for the
+// third-party-store-collision defect it exists to prevent.
+import {
+  findRepoRoot,
+  resolveTasksDir,
+  resolveAdrDir,
+  resolveDocsDir,
+  resolveGoalDir,
+  resolveMetaDir,
+} from "../src/carrier-dirs.ts";
 
 /**
  * DIR-047: load the per-provider `default_task_status` from .quay/config.yml.

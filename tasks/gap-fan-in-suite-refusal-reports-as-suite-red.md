@@ -2,7 +2,7 @@
 id: gap-fan-in-suite-refusal-reports-as-suite-red
 title: fan-in suite 拒绝启动被报成「suite red」——runner 诊断全走 stderr 而 suite log 只 tee
   stdout ⇒ 0 字节日志 + 裸「suite red」，「没跑」与「跑了且失败」同形
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -48,7 +48,7 @@ extra:
 2. **consumer（`worker-driver.ts`）**：`extractSuiteNotRunLine`（与 writer import 同一常量前缀）+ 把标记行列入 `isNoiseLine`（拒绝**不是**一条测试失败，⛔ 不得被 `extractFirstFailureLine` 当失败摘要）。suite 步失败时**先判「跑没跑」再判「为什么红」**：被拒轮 `reason` = `suite NOT run (refused) — <标记行>`，`suite-end` 的 trace 同步自报（Finding 实证的形态正是那条 `reason:"suite red"`），且被拒轮**不写**第三方 path 的 red 轮次（那会记成「跑了且红」）。
 
 **⛔ 明确不改**：`isRunnerInFlight` 判定语义（`gap-runner-spawn-single-flight` 的产物）；单飞槽数与 `.concurrency`。
-**⛔ 一个被考虑后否决的方案**：在 `suite-driver.ts` 无条件把 stderr 也 tee 进 suite log。它能让**全部** runner 诊断可见，但会改变**每一轮**的失败行提取（runner 的终判行含 `exit=<n>`，命中 `isFailureSignalLine` 的松散分支），落地风险覆盖整套 suite；且 AC1 只要求「未跑就返回」的分支可见，那条已由 producer 侧标记确定性地满足。故 `suite-driver.ts` 保留在 Touches 里（Finding 指名的机制层、后续若要做全量 stderr tee 的落点）但**本轮未改**。
+**⛔ 一个被考虑后否决的方案**：在 `suite-driver.ts` 无条件把 stderr 也 tee 进 suite log。它能让**全部** runner 诊断可见，但会改变**每一轮**的失败行提取（runner 的终判行含 `exit=<n>`，命中 `isFailureLine` 的松散分支），落地风险覆盖整套 suite；且 AC1 只要求「未跑就返回」的分支可见，那条已由 producer 侧标记确定性地满足。故 `suite-driver.ts` 保留在 Touches 里（Finding 指名的机制层、后续若要做全量 stderr tee 的落点）但**本轮未改**。
 
 ## AC
 
@@ -65,7 +65,7 @@ extra:
 
 ## Evidence
 
-落地物：`plugin/scripts/full-suite-runner.ts`（标记常量 + `recordSuiteNotRun`/`appendSuiteLogMarker` + 9 个调用点 + RUN-START 写入）、`plugin/scripts/worker-driver.ts`（`extractSuiteNotRunLine` + `isNoiseLine` + 归因顺序 + `suite-end.refused`）。分支 `task/gap-fan-in-suite-refusal-reports-as-suite-red`，提交 `bb0c15ac6`。
+落地物：`plugin/scripts/full-suite-runner.ts`（标记常量 + `recordSuiteNotRun`/`appendSuiteLogMarker` + 9 个调用点 + RUN-START 写入）、`plugin/scripts/worker-driver.ts`（`extractSuiteNotRunLine` + `isNoiseLine` + 归因顺序 + `suite-end.refused`）、`plugin/test/suite-state-trigger.test.mjs`（同类代理量修正，见 §5）。分支 `task/gap-fan-in-suite-refusal-reports-as-suite-red`，提交 `bb0c15ac6` + `441eec2ae`。
 
 **§1 AC1 干跑（真实 runner 进程，非 fixture）**
 - 单飞拒绝：写 `<T>/.quay/full-suite-state.json` = `{state:"running",pid:<live>}`，跑
@@ -74,13 +74,13 @@ extra:
   `SUITE-NOT-RUN branch=single-flight-refusal … reason="another runner is already in flight (state=running, pid=…)…" — no test was executed by this round`。
 - 资源闸 WAIT：`QUAY_TEST_SKIP_RESOURCE_GATE=0 RESOURCE_GATE_TEST_CPU_AVG10=84.77 RESOURCE_GATE_TEST_LOAD_OVERRIDE=1` ⇒ exit 1，日志 **278 字节**，含 `branch=resource-gate-wait reason="resource gate says WAIT — => WAIT: CPU 饥饿…"`。标记行有界（detail 压平 + 截断 300 字符——首版嵌整块 gate 输出成 4.6KB 单行，已修）。
 - 负控制：闸 GO（`CPU_AVG10=10`）⇒ exit 0、suite 真被 spawn、日志里 `grep -c SUITE-NOT-RUN` = **0**。
-- 测试：`plugin/test/full-suite-runner.test.mjs` 新增 4 个（含负控制），全绿。
+- 测试：`plugin/test/full-suite-runner.test.mjs` 新增 4 个（含负控制），整文件 **81/81 绿**。
 - **红控制（prefix code swap）**：把 `appendSuiteLogMarker` 体置空（pre-fix 行为）⇒ 3 个标记存在性测试**转红**、负控制仍绿（证明这组测试不空转）；换回后 4/4 绿。
 
 **§2 AC2 归因（含红控制）**
 - 测试：`plugin/test/worker-driver-fan-in.test.mjs` 新增 3 个。忠实模拟拒绝（suite 命令写标记行后 exit 1、一条测试都没跑）⇒ `r.reason` = `suite NOT run (refused) — [full-suite-runner] SUITE-NOT-RUN branch=single-flight-refusal …`，且过程日志 `suite-end` 行 `reason` 不再为裸 `"suite red"`、带 `refused:true`；负控制（真跑且真红、无标记）⇒ reason 仍为 `AssertionError …`，⛔ 不冒称「未运行」。
 - **红控制**：把 `refusalLine = extractSuiteNotRunLine(...)` 改为 `null`（pre-fix 行为）⇒ AC2 测试转红，`actual: 'suite red'`，正是 Finding 描述的病；负控制仍绿。还原后 3/3 绿。
-- 跨模块一致性：`import` 检查 reader 常量与 writer 常量同值，且两个标记都被 `extractFirstFailureLine` 判为噪声（返回 `""`）——⛔ 标记不会伪装成一条测试失败。
+- 跨模块一致性：`import` 检查 reader 常量与 writer 常量同值，且两个标记都被 `extractFirstFailureLine` 与 `runner-red-parse` 的 `isFailureLine` 判为**非**失败行（前者返回 `""`，后者 `false`）——⛔ 标记不会伪装成一条测试失败。
 
 **§3 AC3 两态可取假（同一轮同时取证）**
 - 非拒绝轮（真跑、绿）：日志含 `SUITE-RUN-START ts=… runId=… scope=main pid=… `，**不含** `SUITE-NOT-RUN`。
@@ -94,12 +94,16 @@ extra:
 - `.quay/fan-in-step-trace.jsonl`：失败 `suite-end` 行全时 **204** 条，其中 `reason` 为裸 `"suite red"` **194** 条（95%）；窗口内失败 **12** 条，裸 `"suite red"` **11** 条（Finding 引用的 `gap-suite-wallclock-budgets-literals-depend-on-host-capacity` 08:14:57.865Z 那一条在列，exit 1、裸 `"suite red"`）。
 ⇒ 本实现**尚未在产线跑过**，「落地后新 0 字节日志的 reason」这个量在本窗口内**结构上不存在**（硬规则 4 推论三：只能被注入数据满足的判据不是测量）⇒ 记 **not-evaluated（待外部）**，并把上述窗口 runs 数写明，⛔ 不以「窗口内无新 0 字节日志」宣告修好。
 
+**§5 同类点（硬规则 5b）——`plugin/test/suite-state-trigger.test.mjs`**
+本改动让 WAIT / 单飞拒绝轮也留下一个**非空的** `<stateDir>/full-suite.log`。全仓 grep「用日志文件存在性当『suite 跑没跑』的代理」命中一处：`suite-state-trigger.test.mjs` 的 AC4 断言 `!existsSync(<root>/.quay/full-suite.log)`（判词「the suite was NEVER spawned on WAIT」）——正是硬规则 4b 的代理量。改为**直接量**：断言 suite 命令**自己的输出**从未落进日志（`--command` 的 echo 原文）。红控制：同参数但闸 GO ⇒ 该字符串确实出现在日志里（`grep -c` = **1**）⇒ 新断言可取假、不空转。该文件整文件 **53/53 绿**。
+
 ## Touches
 
 - plugin/scripts/full-suite-runner.ts
 - plugin/scripts/worker-driver.ts
 - plugin/test/full-suite-runner.test.mjs
 - plugin/test/worker-driver-fan-in.test.mjs
+- plugin/test/suite-state-trigger.test.mjs
 - plugin/scripts/suite-driver.ts
 - plugin/test/suite-driver.test.mjs
 - tasks/gap-fan-in-suite-refusal-reports-as-suite-red.md

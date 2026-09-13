@@ -423,6 +423,8 @@ declare -A QUESTION=(
   [identity-replication-check.ts]="How many code files independently name or judge the SAME runtime entity (P2 identity replication, docs/proposals/archguard-generation-era-primitives.md §3) — literal-replication degree (full-text vs code-position counts side by side, comments/docs excluded by position, import/source single-accessor distinguished from hardcoded string literals), judgment rewrites (read /proc/<pid>/cmdline ∧ name-compare fingerprint), product-source *_REL path-literal constants, plugin/scripts↔experiments/*/scripts byte-identical pairs, and the gate-script-base.ts shared-module negative control (a single-accessor module must NOT be flagged as replicated)?"
   [deletion-closure-check.ts]="For a component X, what is its deletion closure DC(X) — the set of files that must be modified for X to cease existing without leaving dangling references or permanently-red checks (P1 deletion closure, docs/proposals/archguard-generation-era-primitives.md §3)? Position-aware union (code/comment/doc) over import/require, bash/exec/source/spawn shell-outs (including constructed-path-then-source), string-literal path/basename references, output-schema parsers, test fixtures, and tasks ## Touches declarations — with CallGraph (structural calls only) kept separate so the profile ratio R=|DC|/|CallGraph| never counts narrative references as structural edges?"
   [guard-lineage-check.ts]="How many of the repo's guards declare the object/invariant they protect — the P4 guard-lineage detector (docs/proposals/archguard-generation-era-primitives.md §3): guards enumerated across plugin/scripts + experiments/quay-perpetual-stream/scripts + plugin/gate-scripts (deduped per directory), reporting the declared-guard-object ratio (AC1, 0% before this task), the window-fired ratio read from checker-cost.jsonl's verdict field (AC2, NOT-EVALUATED when verdict absent), per-guard object presence (AC3, file:path existence vs invariant: not-mechanically-checkable), and a preventive-vs-suspicious disposition that weighs BOTH last-fired and mutation-verified so a preventive guard like checker-mutation-check is never flagged suspicious just for never having fired (AC4 reverse criterion)?"
+  [peer-identity-probe.ts]="Can a NON-Claude process be delivered to by other Claude Code sessions on this machine — does registering an HONEST peer identity (real pid/procStart/pidDomain/socket path, agent:'quay', explicitly NOT impersonating a Claude session) into ~/.claude/sessions/<pid>.json make it addressable by the platform SendMessage tool, and which record fields are actually load-bearing for that reachability (agent/pid/procStart/messagingSocketPath/spare/parkedJobId...) — the 方案 C feasibility spike (tasks/gap-quay-server-lightweight-peer-identity-spike)?"
+  [channel-probe-server.ts]="Can a quay-side process be pushed INTO a running Claude Code session through the OFFICIAL Channels contract — a plain MCP server declaring capabilities.experimental['claude/channel'] and emitting notifications/claude/channel — and what does attaching a CUSTOM channel to an already-running session actually cost (which interactive gates must be passed, does --mcp-config satisfy server:<name> resolution, is managed settings required, does a third-party-provider session receive) — the 方案 C vs Channels 对照 spike (tasks/gap-quay-server-lightweight-peer-identity-spike)?"
 )
 
 # ── GUARD_OBJECT (P4 守卫谱系声明块, tasks/gap-archguard-p4-guard-lineage-declaration-and-registry) ──
@@ -468,7 +470,7 @@ declare -A CADENCE=(
   [capability-catalog.sh]="每轮"
   [capability-manifest-check.ts]="每轮"
   [check-set-after-change-check.ts]="每轮"
-   [checked-in-write-check.ts]="按需"
+   [checked-in-write-check.ts]="每轮"
   [checker-cost-lib.sh]="每红窗"
   [checker-cost.ts]="每红窗"
   [checker-lib.ts]="按需"
@@ -754,6 +756,8 @@ declare -A CADENCE=(
   [main-thread-edit-check.ts]="每轮"
   [identity-replication-check.ts]="按需"
   [deletion-closure-check.ts]="按需"
+  [peer-identity-probe.ts]="按需"
+  [channel-probe-server.ts]="按需"
 )
 
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
@@ -786,7 +790,7 @@ declare -A INVALIDATION=(
   [capability-catalog.sh]="失效前提：仓库仍以脚本文件系统为交付面（plugin/scripts/*.{sh,ts,mjs}）；若交付形式改为单一打包产物（脚本不再是独立文件），本条的表驱动判定不再适用"
   [capability-manifest-check.ts]="失效前提：仍以 delivery-manifest.json 为交付物能力清单正本，且三类能力的源码仍在 driver-runtime.ts DRIVER_KINDS / quay.ts dispatch / packages/*/src/mcp-server.ts；若能力清单迁出 manifest 或源码位置迁移，本条读取面失效"
   [check-set-after-change-check.ts]="失效前提：仍以文件头 @judges 声明为判定对象来源（mutation case 证明删除/改错声明即红）；若改为集中表或执行面不再有自声明文件，本条按 ④ 失效"
-   [checked-in-write-check.ts]="失效前提：node:fs 的写动词仍可被 --require 预载在 ESM facade 实例化之前打补丁（若 Node 冻结内建导出、或 facade 在预载前已快照，判定面须改为 loader hook）；且被判定树本身不在 os.tmpdir() 之内——根先于临时目录判定"
+   [checked-in-write-check.ts]="失效前提：node:fs 的写动词仍可被 --require 预载在 ESM facade 实例化之前打补丁（若 Node 冻结内建导出、或 facade 在预载前已快照，判定面须改为 loader hook）；且被判定树本身不在 os.tmpdir() 之内——根先于临时目录判定；--changed 模式另需一个可解析的 delta base（develop/origin/develop/master/origin/master）与至少一个仍存在于工作树的 delta 测试文件，两者缺一即报 NOT-EVALUATED（exit 0，scoped-safe），⛔ 不得读成「干净」"
   [checker-cost-lib.sh]="无可测前提，靠周期复核"
   [checker-cost.ts]="无可测前提，靠周期复核"
   [checker-lib.ts]="失效前提：仍有检查器需要位置判定/枚举式存在性原语；若无任何 import 者，本条按 ④ 失效"
@@ -1072,6 +1076,8 @@ declare -A INVALIDATION=(
   [main-thread-edit-check.ts]="无可测前提，靠周期复核"
   [identity-replication-check.ts]="失效前提：本仓库仍以 plugin/scripts ↔ experiments/*/scripts 双副本、产品源码 *_REL 字符串路径耦合、以及 /proc/<pid>/cmdline 进程识别为实现身份复制的发生面；若迁移到单一打包产物或单一 import 访问器（import 图可见），本条的复制度读数归零或语义变更，需同步"
   [deletion-closure-check.ts]="失效前提：本仓库仍以字符串字面量路径/basename、跨语言 shell-out（bash/exec/source/spawn）、Touches 段声明为实现构件耦合的发生面（import 图不可见）；若迁移到单一 import 图可见的打包产物，闭包边归零或语义变更，需同步"
+  [peer-identity-probe.ts]="失效前提：平台仍以 ~/.claude/sessions/<pid>.json 注册表 + 记录内 procStart 与【文件名 pid】的 /proc starttime 一致性判可达；若平台改为原生 API 投递、或改掉该判定（本任务实测 2.1.270 的判定与静态推断不同：记录里 pid 字段不参与、.key 文件完全不被读），本条退休"
+  [channel-probe-server.ts]="失效前提：官方 Channels 仍以 MCP server 的 capabilities.experimental['claude/channel'] + notifications/claude/channel 注入；官方标 research preview 并明说 --channels 语法与协议可能变，契约一变本条需同步"
 )
 
 # ── LAST_REAFFIRMED (last-reaffirmed stamp (③) — the date someone last looked at this mechanism and stamped it; 超 N 天未被任何调用/检查/复核触及 → 待重新确认 (只看一眼盖章, 不判断对错)) ──
@@ -1104,7 +1110,7 @@ declare -A LAST_REAFFIRMED=(
   [capability-catalog.sh]="2026-08-10"
   [capability-manifest-check.ts]="2026-09-10"
   [check-set-after-change-check.ts]="2026-08-13"
-   [checked-in-write-check.ts]="2026-09-11"
+   [checked-in-write-check.ts]="2026-09-13"
   [checker-cost-lib.sh]="2026-08-10"
   [checker-cost.ts]="2026-08-10"
   [checker-lib.ts]="2026-08-10"
@@ -1390,6 +1396,8 @@ declare -A LAST_REAFFIRMED=(
   [main-thread-edit-check.ts]="2026-09-01"
   [identity-replication-check.ts]="2026-09-04"
   [deletion-closure-check.ts]="2026-09-04"
+  [peer-identity-probe.ts]="2026-09-13"
+  [channel-probe-server.ts]="2026-09-13"
 )
 
 # ── MATCHING (matching-method declaration (④) — how this checker judges: position (按位置不按关键词) | keyword | enumerative (枚举式存在性) | n/a (non-judgment lib/data). New checkers MUST declare which matching they use) ──
@@ -1707,6 +1715,8 @@ declare -A MATCHING=(
   [main-thread-edit-check.ts]="keyword"
   [identity-replication-check.ts]="position"
   [deletion-closure-check.ts]="position"
+  [peer-identity-probe.ts]="n/a"
+  [channel-probe-server.ts]="n/a"
 )
 # ── CONSUMER (rhythm-column consumer contract, gap-ac73-catalog-rhythm-consumer-check) ──
 # A mechanism's RHYTHM is only a claim until someone presses it. This table makes the consumer
@@ -1725,7 +1735,7 @@ declare -A CONSUMER=(
   [ac61-staleness-disposition-check.ts]="谁按：manager 在 AC61 清单处置表态时按；条件=清单项要做 A-1..B-4 的处置判定"
   [anti-drift-touches-check.ts]="谁按：任务 subagent 在落地后核验 Touches 一致性时按；条件=任务落地要验证 touches 精确命中"
   [axis-generator.ts]="谁按：判据作者在定义新判据的测量轴时按；条件=要量化判据的时间/范围轴"
-   [checked-in-write-check.ts]="谁按：改动 plugin/test/** 下测试文件、或某测试被怀疑与整树拷贝并发产生假红时，由维护者手动跑（node --experimental-strip-types plugin/scripts/checked-in-write-check.ts --files <改动的测试文件>；全表面用 --dir plugin/test）；条件=要判定某个【已执行】的测试文件是否在已签入路径下建/删条目"
+   [checked-in-write-check.ts]="谁按：run_static_checks（plugin/scripts/runner-static-gate.ts，@static-tier change，对象 plugin/test/ 等）每次全量套件调用按 --changed 判定本次 delta 的测试文件；scoped 门在 delta 命中 plugin/test/** 时同样选中它（gap-suite-glob-universe-fixture-write-toctou 接线，接线前它零调用点=不变式无执行者）。维护者也可手动全表面扫：node --experimental-strip-types plugin/scripts/checked-in-write-check.ts --dir plugin/test；条件=要判定某个【已执行】的测试文件是否在已签入路径下建/删条目（--changed 只看 delta，未改动的测试文件不在其判定面内，这是已知的覆盖边界，空 delta 报 NOT-EVALUATED 而非 PASS）"
   [checker-lib.ts]="谁按：新检查器作者在实现按位置/枚举判定时 import；条件=要复用 matchAtCommandPosition / enumerativeExistence"
   [checker-io.ts]="谁按：已迁移到 DriverResult 的 checker（outer-anchor-check / load-sensitive-release-check / dead-code-after-return-check / adr016-screen-use-check）在判定函数返回 DriverResult 后经 driverResultToExit 映射退出码；条件=一个 checker 的判定结果要收敛到 DriverResult 词表（gap-b4-checker-reuse-driver-result）"
   [claim-task.sh]="谁按：派发器/inner 在认领任务分支时按；条件=任务要被某台机器认领（claim 协议）"
@@ -1835,6 +1845,8 @@ declare -A CONSUMER=(
   [agent-panel-classify.ts]="谁按：agent-panel-classify.test.mjs（迁移测试）import 纯函数；条件=要复用面板行分类原语（函数级复用，⛔ 非复制粘贴）"
   [enum-surface-parity-check.ts]="谁按：scripts/test.sh 的 run_static_checks 每轮全量 gate 无条件按 （runner-static-gate.ts @static-tier change）+ scoped 子集（本检查器自身/权威/表层文件被触碰时）；条件=要判定某个枚举事实的交付表层是否与权威一致（两向差集），并在新增/删除枚举值时立刻发现未同步的表层"
   [packaging-hygiene-check.ts]="谁按：quality-gate-driver.ts 的 packaging-hygiene 例程按（interval 60min，runResidentQualityGateLoop 评估 due 后跑，⛔ 非 loop.routines——后者已死）；条件=两维度打包卫生检查要跑一轮（config-key 消费者枚举 + shipped-entry 可运行性），漂移非空时 spawn gap-filing agent 经 ABI（quay-file-task）立案"
+  [peer-identity-probe.ts]="谁按：方案 C 路的验证者 / 后续接线者在需要核证「一个非 Claude 进程能否被平台 SendMessage 投递」时按（node --experimental-strip-types plugin/scripts/peer-identity-probe.ts serve|patch|shutdown|cleanup）；条件=要复测 peer 登记的可达性、逐字段必要性（patch 改自己记录的一个字段后立刻投递），或按 AC13 结论做接线前的对照复测"
+  [channel-probe-server.ts]="谁按：Channels 路的验证者 / 后续接线者在需要把外部事件推入一个运行中的 Claude Code 会话时按（node --experimental-strip-types plugin/scripts/channel-probe-server.ts --evidence <path> --http-port 8799，由 Claude Code 以 MCP server 起；--selfcheck 可独立自检 capability 声明）；条件=要核证官方 Channels 契约（experimental['claude/channel'] + notifications/claude/channel）在本机是否可达，或按 AC13 结论做接线前的对照复测"
 )
 # ── superseded capability table (gap-retired-script-still-callable, human ruling 2026-08-10) ──
 # One capability = ONE implementation. A superseded implementation must NOT exist in the

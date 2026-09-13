@@ -85,6 +85,53 @@ test("extractWriterKeys — derives keys from BOTH the heredoc `loop:` block and
   );
 });
 
+test("extractWriterKeys — an INDENTED comment inside the loop: block does not truncate the key set", () => {
+  // Regression: the AC4 contract note written next to `test_command` inside quay-init's heredoc made
+  // the old extractor stop at that comment, silently dropping every key after it (`fork_baseline` —
+  // the block's last key — disappeared, and host-repo-surface-ratchet went red on the shrink).
+  const src = [
+    "loop:",
+    "  repo_root: ${ROOT}",
+    "  # a note about the key below (indented comment, not a key)",
+    "  test_command: ${TEST}",
+    "  fork_baseline: develop",
+    "EOF",
+  ].join("\n");
+  assert.deepEqual(
+    extractWriterKeys(src),
+    ["fork_baseline", "repo_root", "test_command"],
+    "a key written after an indented comment must still be enumerated",
+  );
+});
+
+test("extractWriterKeys — a COLUMN-0 comment still terminates the block (negative control for the skip)", () => {
+  // Without this half, the skip above would let the scan walk past the end of the loop: block into
+  // the next top-level block and enumerate ITS indented keys as loop keys.
+  const src = [
+    "loop:",
+    "  repo_root: ${ROOT}",
+    "# a top-level comment ends the loop: block",
+    "providers:",
+    "  native:",
+    "    tasks_dir: tasks",
+  ].join("\n");
+  assert.deepEqual(
+    extractWriterKeys(src),
+    ["repo_root"],
+    "a column-0 comment terminates the block; the providers: block's keys are NOT loop keys",
+  );
+});
+
+test("extractWriterKeys — a blank line still terminates the block (pre-existing contract unchanged)", () => {
+  const src = [
+    "loop:",
+    "  repo_root: ${ROOT}",
+    "",
+    "  not_a_loop_key: x",
+  ].join("\n");
+  assert.deepEqual(extractWriterKeys(src), ["repo_root"], "a blank line ends the block");
+});
+
 test("AC3 — the three states are distinguishable (has-consumer / no-consumer-to-wire / documented-with-reason)", () => {
   const consumers = new Map([["plugin/scripts/a.ts", "reads consumed_key somewhere"]]);
   assert.equal(classifyKey("consumed_key", consumers, []).state, "has-consumer");

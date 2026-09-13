@@ -66,6 +66,7 @@ import {
   OBJECTIVE_EVIDENCE_CARRIERS,
   OBJECTIVE_ASSERTION_FIELDS,
 } from '../scripts/goal-driver.ts';
+import { readsFrozenPopulation } from '../../packages/quay/src/goal-store.ts';
 import { runResidentQualityGateLoop } from '../scripts/quality-gate-driver.ts';
 import { DRIVER_KINDS, KNOWN_KINDS } from '../scripts/driver-runtime.ts';
 // cli/driver.ts 的 KINDS 白名单（AC6 断言对象；已导出）。
@@ -2009,4 +2010,119 @@ test('DoD: runGoalRound 同时产出两层 fact（goal-sufficiency 与 goal-obje
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// ── 派生判据：② 不得对【真值派生自 ③ 主体population】的常设判据独立立案 ──────────────────────────
+// gap-ac242-derived-criterion-double-judged-and-amendment-unguarded 缺陷①。
+//
+// 同一条真相——「冻结population 中有一条 AC 此刻为假」——被**两个判官**判成两个主体、两个结论：
+//   ③ 冻结population 分支：主体 = **那条为假的 AC**（AC-203），态 = frozen-violated / in-progress
+//      ⇒ 正确路由（有 owner 就不重复立案）；
+//   ② AC-216 常设不变式分支：主体 = **AC-242**（它自己的 criterion 读的正是 ③ 的输入面），
+//      态 = standing-violated（没有任何在飞任务持 `goal_ac: AC-242`）⇒ 为 AC-242 立案。
+// 而 AC-242 的复绿条件**不在它自己的域内**：它的 expect 逐字要求「冻结population 中不存在此刻为假的
+// AC」，当前为假的那条是 AC-203 ⇒ 任何 AC-242 域内的改动都不能使它转绿；唯一出口是把 AC-203 变真，
+// 而那是 AC-203 的域、且已有 owner 在飞。⇒ ② 为它立的每一条任务，其 DoD 都结构上只能由【另一条 AC
+// 的 owner】关闭 —— 每轮一条、永远关不掉。
+//
+// 修法：② 对**真值派生自 ③ 主体population** 的判据（criterion 读 ③ 的输入面 `check --stale-pass`）
+// 让位给 ③ —— ③ 是那个命题的唯一判据、且已在本轮为那条为假的 AC 产出了路由。判据 AC-242 本身**不动**
+// （它保持诚实）；让位只发生在 ③ 本轮**确实判了 violated**（派生条件成立）时，读不到 / 未评估 ⇒ 照旧
+// 立案（⛔ 闸不恒开，见下面的负控制 c）。
+
+/** 一份最小的 ②/③ 夹具：GOAL-900 已关闭（achieved ⇒ 非 active）。三条 achieved AC：
+ *  AC-203 未声明 long-term ⇒ **冻结population**（③ 的主体）；AC-242 声明 long-term 且 criterion 读
+ *  `check --stale-pass` ⇒ ② 的**派生判据**；AC-214 声明 long-term 而 criterion 与 ③ 无关 ⇒ ② 的
+ *  **普通常设判据**（用来证明让位不是「所有常设判据都不再立案」）。 */
+function derivedCriterionRecords() {
+  return [
+    { id: 'GOAL-900', title: 'closed goal', status: 'achieved' },
+    { id: 'AC-203', title: 'frozen subject', status: 'achieved', goal: 'GOAL-900', expect: 'e', criterion: 'exit 1' },
+    { id: 'AC-242', title: 'derived meta', status: 'achieved', goal: 'GOAL-900', longTerm: true, expect: 'e', criterion: 'node goal-store.ts check --stale-pass' },
+    { id: 'AC-214', title: 'ordinary standing', status: 'achieved', goal: 'GOAL-900', longTerm: true, expect: 'e', criterion: 'exit 0' },
+  ];
+}
+
+const derivedByAc = (gaps) => new Map(gaps.map((g) => [g.ac, g]));
+
+test('派生判据 (a)：无 owner ⇒ ③ 产 frozen-violated，② ⛔ 不产 goal_ac: AC-242 立案', () => {
+  const records = derivedCriterionRecords();
+  // I5 的读数：AC-242 的判据此刻为假（冻结population 里有一条为假），AC-214 不受影响。
+  const standings = { achievedButFailing: ['AC-242'], evaluated: true };
+  // ③ 的读数：那条冻结 AC 此刻为假。
+  const frozen = parseFrozenFailingReading(JSON.stringify({ failing: ['AC-203'], frozenScope: 1 }), 1);
+  assert.equal(frozen.judgment, 'violated');
+  const gaps = computeGoalGaps(records, [], null, standings, frozen);
+  const by = derivedByAc(gaps);
+
+  assert.equal(by.get('AC-203').state, 'frozen-violated', '③ 的主体仍被立案（让位⛔ 不波及 ③ 自己）');
+  assert.ok(isFilingGapState(by.get('AC-203').state), 'frozen-violated 在 spawn 选取面内');
+  assert.equal(by.get('AC-242').state, 'derived-routed', '② 让位：红归 ③ 的主体 AC，不归这条元判据');
+  assert.equal(isFilingGapState(by.get('AC-242').state), false, '⛔ derived-routed 不消耗 spawn 名额');
+  assert.notEqual(by.get('AC-242').state, 'standing-ok', '⛔ 不是 standing-ok：它此刻确实为假（说它成立即假绿）');
+  assert.notEqual(by.get('AC-242').state, 'not-evaluated', '⛔ 不是 not-evaluated：读数在、违反也在，只是成因已由另一个判官接管');
+  assert.equal(by.get('AC-242').taskCount, null, '⛔ 与 0 不同形：本态回答的不是「有几条任务是它的」');
+  assert.equal(by.get('AC-214').state, 'standing-ok', '对照组：非派生的常设判据此刻成立 ⇒ 仍走原判定');
+
+  // 端到端：spawn 选取面只挑 AC-203 一条。
+  const r = runGapSpawnPass(gaps, records, os.tmpdir(), { gapWorkerCmd: 'true', resourceGateArgv: ['true'], spawnCap: 5 });
+  assert.deepEqual(r.outcomes.map((o) => o.ac), ['AC-203'], '只有 ③ 的主体 AC 消耗名额（AC-242 不再每轮一条）');
+});
+
+test('派生判据 (b)：有 owner（现状）⇒ ③ 产 in-progress，② 同样⛔ 不产立案', () => {
+  const records = derivedCriterionRecords();
+  const standings = { achievedButFailing: ['AC-242'], evaluated: true };
+  const frozen = parseFrozenFailingReading(JSON.stringify({ failing: ['AC-203'], frozenScope: 1 }), 1);
+  // 一条在飞任务持 goal_ac: AC-203（这正是生产上 gap-ac203-two-distinct-kinds-no-production-run 的形态）。
+  const tasks = [{ id: 'gap-ac203-owner', status: 'ready', goalAc: 'AC-203' }];
+  const gaps = computeGoalGaps(records, tasks, null, standings, frozen);
+  const by = derivedByAc(gaps);
+
+  assert.equal(by.get('AC-203').state, 'in-progress', '③ 认得 owner ⇒ 不再重复立案');
+  assert.equal(by.get('AC-242').state, 'derived-routed', '② 仍让位（有主更要让位）');
+  assert.equal(isFilingGapState(by.get('AC-242').state), false);
+  const r = runGapSpawnPass(gaps, records, os.tmpdir(), { gapWorkerCmd: 'true', resourceGateArgv: ['true'], spawnCap: 5 });
+  assert.deepEqual(r.outcomes, [], '两条都不该消耗名额');
+});
+
+test('派生判据 (c) 负控制：闸不恒开 —— ③ 说不了话时仍立案；非派生的违反也仍立案', () => {
+  const records = derivedCriterionRecords();
+
+  // (c1) ③ 未评估（台账读不到 / 轮转从未跑过）⇒ 派生条件不成立 ⇒ 回落 standing-violated（成因不明
+  //      时仍要有人看，硬规则 6：缺值 = 未查 ≠ 为假）。
+  const standings0 = { achievedButFailing: ['AC-242'], evaluated: true };
+  const notEval = parseFrozenFailingReading('not json at all', null);
+  assert.equal(notEval.judgment, 'not-evaluated');
+  const g1 = derivedByAc(computeGoalGaps(records, [], null, standings0, notEval));
+  assert.equal(g1.get('AC-242').state, 'standing-violated', '③ 说不了话 ⇒ ⛔ 不静默放行，照旧立案');
+  assert.ok(isFilingGapState(g1.get('AC-242').state));
+  // 对照：③ 读到了但【判 clean】（无违反）⇒ 同样不满足派生条件（派生量按定义为假，二者矛盾）⇒ 仍立案。
+  const clean = parseFrozenFailingReading(JSON.stringify({ failing: [], frozenScope: 1 }), 0);
+  const g2 = derivedByAc(computeGoalGaps(records, [], null, standings0, clean));
+  assert.equal(g2.get('AC-242').state, 'standing-violated', '③ 判 clean ⇒ 派生条件不成立 ⇒ 仍立案（⛔ 不静默吞掉一条红）');
+
+  // (c2) 非派生的常设判据此刻违反 ⇒ ② **仍**立案（证明让位是逐条的，不是「常设判据一律不立」）。
+  const standings214 = { achievedButFailing: ['AC-214'], evaluated: true };
+  const g3 = derivedByAc(computeGoalGaps(records, [], null, standings214, clean));
+  assert.equal(g3.get('AC-214').state, 'standing-violated', '普通常设判据的违反照旧立案');
+  assert.ok(isFilingGapState(g3.get('AC-214').state));
+  const r3 = runGapSpawnPass(computeGoalGaps(records, [], null, standings214, clean), records, os.tmpdir(), { gapWorkerCmd: 'true', resourceGateArgv: ['true'], spawnCap: 5 });
+  assert.deepEqual(r3.outcomes.map((o) => o.ac), ['AC-214'], '让位没有把整个 ② 分支关掉（闸不恒开）');
+
+  // (c3) ③ 的违反对象无主 ⇒ 立案**仍然发生**（只是发生在 ③ 的主体 AC 上）。
+  const violated = parseFrozenFailingReading(JSON.stringify({ failing: ['AC-203'], frozenScope: 1 }), 1);
+  const g4 = computeGoalGaps(records, [], null, standings0, violated);
+  assert.ok(g4.some((g) => isFilingGapState(g.state)), '让位后仍有一条可立案的读数（③ 的主体 AC）');
+});
+
+test('派生判据的识别式：按【位置】（判据里成词出现）判定，⛔ 不按子串/散文提及', () => {
+  assert.equal(readsFrozenPopulation('node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts check --stale-pass'), true);
+  assert.equal(readsFrozenPopulation('quay goal check --stale-pass --sweep'), true);
+  assert.equal(readsFrozenPopulation('exit 0'), false);
+  assert.equal(readsFrozenPopulation(''), false);
+  assert.equal(readsFrozenPopulation(null), false);
+  // ⛔ 子串不算（成词判定）：`--stale-pass-notes` 不是那个旗标。
+  assert.equal(readsFrozenPopulation('echo --stale-pass-notes'), false);
+  // 双向控制：与 ③ 无关的常设判据（AC-214 形态：读交付面载体）不得被误判。
+  assert.equal(readsFrozenPopulation('python3 - <<\'P\'\nimport json\nP'), false);
 });

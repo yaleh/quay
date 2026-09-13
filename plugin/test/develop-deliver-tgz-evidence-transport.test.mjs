@@ -362,3 +362,21 @@ test("AC-249 — the declared ac set is exactly GOAL-016-AC-249, and the remote 
   assert.ok(!/--ac248-adr-flip/.test(body),
     "this mode must NOT also declare AC-248 — the two ACs are separate readings with separate transports (a combined run would fail whenever either one fails)");
 });
+
+// ⑥ (gap-ac203-two-distinct-kinds-no-production-run AC1): 记录身份必须包含判据用来区分记录的每一个维度。
+// 实测反例（2026-09-13，B 机）：同一次远端运行写出的两条 AC-203 记录 ts/ac/host/project_root 逐字相同、
+// 【仅 kind 不同】，而 transport 的 sig 只取那四个键 ⇒ 第二条被静默丢弃 ⇒ 驱动方载体里永远只有一种 kind
+// ⇒ AC-203「合格记录覆盖 ≥2 个不同 kind」在【运输层】被抵消（与产出侧、与判据都无关）。
+// 取假条件：把 sig 换回四键元组 ⇒ 本测试 RED（appended=1）。
+test("⑥ AC-203 kind dimension survives transport: same (ts,ac,host,project_root), differing only in kind → both land", () => {
+  const r = run(["--selfcheck-evidence", "positive"]);
+  assert.equal(r.status, 0, `--selfcheck-evidence positive must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /kind-dimension \(same ts\/ac\/host\/project_root, differing only in kind\) → EVIDENCE-TRANSPORT appended=2/,
+    "two AC-203 records differing ONLY in kind must BOTH be appended (the old 4-key signature collapsed them)");
+  assert.match(r.stdout, /kind-dimension carrier lines=2/,
+    "both kinds must actually reach the carrier (a collapsed transport leaves 1)");
+  assert.match(r.stdout, /kind-dimension repeat-append → EVIDENCE-TRANSPORT appended=0/,
+    "record identity must stay tight enough that re-transporting the same file is still idempotent");
+  assert.match(r.stdout, /kind dimension preserved/,
+    "the positive PASS line must name the kind dimension (so a silent regression cannot hide behind a bare PASS)");
+});
