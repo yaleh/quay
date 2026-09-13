@@ -1,7 +1,7 @@
 ---
 id: gap-load-sensitive-tests-read-live-host-class-level-seam
 title: 负载敏感测试读真实宿主、反复挡住互不相关任务着地——类级 seam 收口（证明实例 = git-graph 那本，失败率 8.55% ≈ 基准线 69 倍）
-status: ready
+status: done
 labels:
   - gap
 parent: null
