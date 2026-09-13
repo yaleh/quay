@@ -1,7 +1,7 @@
 ---
 id: AC-254
 title: 服务可独立起停 —— 停 web 后 driver 的 round 心跳仍在推进（SPEC 阶段 B / §6.9 不变式 2）
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-017
 criterion: |-
@@ -46,4 +46,10 @@ expect: exit 0 = 载体中存在一条记录：停掉 `web` 后**六个 kind**�
 origin: 人 2026-09-13 裁定⑤原则②：「更灵活的启动和停止选项——仅启动部分服务、追加启动部分服务、关闭部分服务」。⊢ 现状 13 进程时
   `quay driver stop --kind X` 已可用，合并后若只能整体起停就是能力回退。
 activatedAt: 2026-09-13T14:40:11.938Z
+statusLog:
+  - at: 2026-09-13T16:34:16.196Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---
