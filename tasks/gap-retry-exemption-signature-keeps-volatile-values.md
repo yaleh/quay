@@ -2,7 +2,7 @@
 id: gap-retry-exemption-signature-keeps-volatile-values
 title: 重试豁免判不出复发：签名归一化只折叠空白，pid/ms/路径留在签名里 ⇒ 同一缺陷跨任务产生不同签名 ⇒ 已判「与本任务无关」的 suite
   red 仍被计入该任务重试上限
-status: todo
+status: ready
 labels:
   - gap
   - mechanism
