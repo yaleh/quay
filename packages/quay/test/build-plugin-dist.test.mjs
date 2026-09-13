@@ -29,7 +29,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -41,6 +41,12 @@ import {
   scanPluginSelfReferences,
   closureMissing,
   bundleEntries,
+  topLevelIfConditions,
+  activeFileIdentityGuards,
+  staticImportClosure,
+  findEntryGuardHijacks,
+  findUnnamedEntryGuards,
+  REQUIRE_BANNER,
 } from "../scripts/build-plugin-dist.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -332,6 +338,162 @@ test("AC1 (AC-205) — bundled send-to-session.js is self-contained (serve-send 
       "no runtime dynamic import of the dev-tree packages/quay/src may survive (self-contained)");
     assert.ok(!/\.\.\/\.\.\/packages\/quay\/src/.test(bundle),
       "the dev-tree relative path literal must not survive as a runtime reference");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── gap-drivers-yml-interval-not-honored-for-routine-kinds ─────────────────────────────────────────
+// The shipped bundles ran the WRONG tool's main. A module's "am I the entry?" guard written as FILE
+// identity (`realpath(argv[1]) === import.meta.url`, `fileURLToPath(import.meta.url) === argv[1]`, …)
+// is true for EVERY inlined module of a bundle (they share the bundle's import.meta.url). esbuild
+// emits imports BEFORE importers, so the first such inlined guard wins: measured 2026-09-13,
+// dist/{goal-driver,quality-gate-driver,meta-driver}.js all ran `pool-quality-judge`'s main, printed
+// its JSON and exited 0 in <1s — so the supervisor respawned them every --restart-delay (5s) and the
+// declared `drivers.yml <kind>.interval_ms` never entered the observed cadence. The tests below pin
+// both halves: the static gate (nothing that hijacks may be packaged) and the product-surface
+// behaviour (each driver bundle runs its own main).
+
+test("AC1 — topLevelIfConditions reads top-level if conditions only, with balanced parens", () => {
+  const text = [
+    'if (a && f(b, g(c))) { x(); }',
+    '  if (indented()) { y(); }',           // not top-level
+    'const s = "if (notACondition) {";',   // inside a string literal, not column 0
+    'if (d) { z(); }',
+  ].join("\n");
+  const conds = topLevelIfConditions(text);
+  assert.deepEqual(conds, ["a && f(b, g(c))", "d"]);
+});
+
+test("AC1 — activeFileIdentityGuards: file-identity is ACTIVE, basename form is INERT (negative control)", () => {
+  const dir = tmp();
+  try {
+    const bare = path.join(dir, "bare.ts");
+    fs.writeFileSync(bare, 'import { isDirectEntry } from "./gate-script-base.ts";\nif (isDirectEntry(import.meta)) {\n  main();\n}\n');
+    assert.equal(activeFileIdentityGuards(bare).length, 1,
+      "a bare isDirectEntry(import.meta) guard must be ACTIVE (it fires for every inlined module)");
+
+    const handRolled = path.join(dir, "hand.ts");
+    fs.writeFileSync(handRolled, 'if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {\n  main();\n}\n');
+    assert.equal(activeFileIdentityGuards(handRolled).length, 1,
+      "a hand-rolled file-identity guard is the same hazard (it was a real offender)");
+
+    const safe = path.join(dir, "safe.ts");
+    fs.writeFileSync(safe, 'import { isDirectEntry } from "./gate-script-base.ts";\nif (isDirectEntry(import.meta, undefined, "safe")) {\n  main();\n}\n');
+    assert.equal(activeFileIdentityGuards(safe).length, 0,
+      "the named form is bundler-safe and must NOT be flagged (the predicate can take false)");
+
+    // A module that DEFINES its own isDirectEntry is not the shared helper's hazard — two real
+    // modules do this (workflow-event-schema.mjs / precommit-guard.ts) and are name-based/inert.
+    const localDef = path.join(dir, "local.ts");
+    fs.writeFileSync(localDef, 'function isDirectEntry(argv1) { return basename(argv1 || process.argv[1]) === "local"; }\nif (isDirectEntry()) {\n  main();\n}\n');
+    assert.equal(activeFileIdentityGuards(localDef).length, 0,
+      "a locally-defined guard is judged by its own definition, not by the shared helper's arity");
+
+    const beltAndBraces = path.join(dir, "bb.ts");
+    fs.writeFileSync(beltAndBraces, 'if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href && path.basename(process.argv[1]).replace(/\\.(?:js|ts|mjs)$/, "") === "bb") {\n  main();\n}\n');
+    assert.equal(activeFileIdentityGuards(beltAndBraces).length, 0,
+      "a file-identity condition that ALSO compares a basename to a literal is inert under bundling");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — the shipped plugin surface carries ZERO inlined entry-guard hijacks", () => {
+  const hijacks = findEntryGuardHijacks(PLUGIN_ROOT);
+  assert.deepEqual(hijacks, [],
+    `every shipped entry must run its OWN main; these inlined modules would hijack it:\n` +
+    hijacks.map((h) => `  ${h.entry} <- ${h.module} :: ${h.condition}`).join("\n"));
+});
+
+test("AC1 — negative control: the hijack gate TAKES FALSE (a synthetic inlined bare guard is flagged)", () => {
+  const dir = tmp();
+  try {
+    // Named after a QUAY_INIT_EXPLICIT member so deriveEntries() picks it up as a real entry.
+    fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "scripts", "gate-script-base.ts"),
+      'import { helper } from "./helper.ts";\nexport function isDirectEntry(_m, _a, b) { return b === "x"; }\nhelper();\n');
+    fs.writeFileSync(path.join(dir, "scripts", "helper.ts"),
+      'import { isDirectEntry } from "./gate-script-base.ts";\nif (isDirectEntry(import.meta)) {\n  console.log("hijacked");\n}\n');
+    const hijacks = findEntryGuardHijacks(dir);
+    assert.equal(hijacks.length, 1, "the gate must flag the synthetic inlined bare guard (it is not vacuous)");
+    assert.equal(hijacks[0].module, "scripts/helper.ts");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — the shipped scripts surface carries ZERO unnamed (dead) entry guards", () => {
+  const dead = findUnnamedEntryGuards(PLUGIN_ROOT);
+  assert.deepEqual(dead, [],
+    `expectedBase is REQUIRED, so these top-level blocks can never fire (main() never runs; the ` +
+    `process exits 0 with no output — a silent no-op that reads exactly like a pass):\n` +
+    dead.map((d) => `  ${d.module} :: ${d.condition}`).join("\n"));
+});
+
+test("AC1 — negative control: the unnamed-guard gate TAKES FALSE (bare form flagged, named + local-def not)", () => {
+  const dir = tmp();
+  try {
+    fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+    const write = (name, body) => fs.writeFileSync(path.join(dir, "scripts", name), body);
+
+    // POSITIVE: imports the SHARED helper and calls it with 1 argument — dead after the signature change.
+    write("bare.ts", 'import { isDirectEntry } from "./gate-script-base.ts";\nif (isDirectEntry(import.meta)) {\n  main();\n}\n');
+    // POSITIVE: the 2-argument form is just as dead (it omits expectedBase too).
+    write("twoarg.ts", 'import { isDirectEntry } from "./gate-script-base.ts";\nif (isDirectEntry(import.meta, process.argv[1])) {\n  main();\n}\n');
+    // NEGATIVE: the named form.
+    write("named.ts", 'import { isDirectEntry } from "./gate-script-base.ts";\nif (isDirectEntry(import.meta, undefined, "named")) {\n  main();\n}\n');
+    // NEGATIVE: a module that DEFINES its own isDirectEntry decides its own arity.
+    write("local.ts", 'function isDirectEntry(argv1) { return basename(argv1 || process.argv[1]) === "local"; }\nif (isDirectEntry()) {\n  main();\n}\n');
+    // NEGATIVE: does not import the shared helper at all.
+    write("plain.ts", 'if (isDirectEntry(import.meta)) {\n  main();\n}\n');
+    // NEGATIVE: fixture dirs are out of scope — checker-mutation-cases embeds the anti-pattern on purpose.
+    fs.mkdirSync(path.join(dir, "scripts", "checker-mutation-cases"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "scripts", "checker-mutation-cases", "x.ts"),
+      'import { isDirectEntry } from "./gate-script-base.ts";\nif (isDirectEntry(import.meta)) {\n  main();\n}\n');
+
+    const dead = findUnnamedEntryGuards(dir);
+    assert.deepEqual(dead.map((d) => d.module).sort(), ["scripts/bare.ts", "scripts/twoarg.ts"],
+      "only the shared-helper calls with fewer than 3 arguments are dead guards");
+
+    // An UNREADABLE module must be reported, not skipped: "nothing was examined" and "every guard is
+    // named" both come back as an empty list, and only one of them is a pass (硬規則 3b).
+    fs.symlinkSync(path.join(dir, "does-not-exist.ts"), path.join(dir, "scripts", "dangling.ts"));
+    const withDangling = findUnnamedEntryGuards(dir);
+    assert.deepEqual(withDangling.map((d) => d.module).sort(), ["scripts/bare.ts", "scripts/dangling.ts", "scripts/twoarg.ts"]);
+    assert.match(withDangling.find((d) => d.module === "scripts/dangling.ts").condition, /NOT-EVALUATED/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — product surface: each driver bundle runs its OWN main (routine kinds + controls)", async () => {
+  const { build } = await import("esbuild");
+  const dir = tmp();
+  try {
+    // Each tool's own HELP banner is the identity marker; the hijacker's banner is the negative.
+    const cases = [
+      ["goal-driver", "goal 机械环例程型 driver"],
+      ["quality-gate-driver", "AC144"],
+      ["meta-driver", "机制演进的观测/提案例程"],
+      ["outer-driver", "AC143"],
+      ["promotion-driver", "AC130"],
+      ["worker-driver", "SPEC §5 阶段 2+3+4"],
+    ];
+    for (const [name, marker] of cases) {
+      const outfile = path.join(dir, `${name}.js`);
+      await build({
+        entryPoints: [path.join(PLUGIN_ROOT, "scripts", `${name}.ts`)],
+        bundle: true, platform: "node", format: "esm", outfile,
+        loader: { ".json": "json" }, banner: { js: REQUIRE_BANNER }, logLevel: "silent",
+      });
+      const r = spawnSync(process.execPath, [outfile, "--help"], { encoding: "utf8", timeout: 120_000 });
+      const probe = `${r.stdout ?? ""}\n${r.stderr ?? ""}`;
+      assert.ok(!probe.includes("pool 任务质量语义闸"),
+        `${name}.js must not run the inlined pool-quality-judge main (that is the hijack signature)`);
+      assert.ok(probe.includes(marker),
+        `dist/${name}.js must run its OWN main — expected marker ${JSON.stringify(marker)} in its output`);
+    }
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

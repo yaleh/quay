@@ -244,6 +244,6 @@ function main(argv: string[]): number {
   );
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "long-term-guarantee-goal-backed-check")) {
   process.exit(main(process.argv));
 }

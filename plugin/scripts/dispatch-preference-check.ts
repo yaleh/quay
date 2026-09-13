@@ -26,6 +26,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDirectEntry } from "./gate-script-base.ts";
 
 // The preference file's repo-relative path (implementation surface's call; SPEC §7 doesn't prescribe).
 export const PREFERENCE_FILE_REL = "orchestration/dispatch-preference.md";
@@ -179,6 +180,11 @@ export function main(argv: string[]): number {
 }
 
 // Direct entry guard (gate-script-base convention): run main() only when this module is the entry point.
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// ⛔ 必须走共享机制，⛔ 不手搓 file-identity 比较：`realpath(argv[1]) === import.meta.url` 在【被打包进
+// 别的入口】时对每个 inlined 模块都为真（它们共享 bundle 的 import.meta.url），于是本模块的 main()
+// 会在别的工具启动时抢跑（实测：它是 goal-driver / meta-driver 两个 dist bundle 里第一个为真的守卫，
+// 使这两个例程型 driver 每轮只跑本模块就 exit 0，supervisor 因此每 5s 重启一次，
+// drivers.yml 声明的 interval_ms 从未进入节奏）——gap-drivers-yml-interval-not-honored-for-routine-kinds。
+if (isDirectEntry(import.meta, undefined, "dispatch-preference-check")) {
   process.exitCode = main(process.argv.slice(2));
 }

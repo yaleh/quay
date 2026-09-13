@@ -342,7 +342,7 @@ function main(argv: string[]): { code: number; json?: unknown } {
   return { code: 1 };
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "check-set-after-change-check")) {
   const r = main(process.argv.slice(2));
   process.exitCode = r.code;
 }

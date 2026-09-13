@@ -50,7 +50,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { isDirectEntry } from "./gate-script-base.ts";
 import { execFileSync } from "node:child_process";
 
 import { verified, notEvaluated, failed, driverResultToExit } from "./checker-io.ts";
@@ -419,7 +419,10 @@ function parseArgs(argv: string[]): {
   return out;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Bundler-safe entry guard — see gate-script-base.isDirectEntry
+// (gap-drivers-yml-interval-not-honored-for-routine-kinds): a hand-rolled file-identity comparison is
+// true for EVERY inlined module of a dist bundle, so it hijacks any bundle that inlines this module.
+if (isDirectEntry(import.meta, undefined, "outer-anchor-check")) {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     process.stdout.write(USAGE + "\n");

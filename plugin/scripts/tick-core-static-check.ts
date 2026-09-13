@@ -895,7 +895,7 @@ export function main(argv: string[]): CliResult {
   return { code: res.ok ? 0 : 1, json: res };
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "tick-core-static-check")) {
   const r = main(process.argv.slice(2));
   process.exitCode = r.code;
 }

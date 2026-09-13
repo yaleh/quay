@@ -1,5 +1,11 @@
-// cli/driver.ts — `quay driver <start|stop|drain|status|restart> --kind <promotion|worker>` handler.
-// (tasks/gap-ac139-unified-driver-subcommand)
+// cli/driver.ts — the `quay driver` subcommand handler (tasks/gap-ac139-unified-driver-subcommand).
+//
+// ⛔ 单一真源（gap-driver-cli-help-hides-four-of-six-kinds）：本文件的 **每一个** 帮助文本里的
+// verb/kind 词表都是 `${VERBS.join("|")}` / `${KINDS.join("|")}` 的运行时插值——⛔ 不再手抄任何一份
+// verb 或 kind 联合字面量（本文件曾有 3 处 kind 副本 + 2 处 verb 副本，取值 2/4/5/6 四种，互不一致；
+// 用户实际看到的那份（cli/help.ts）只列 2 个 kind ⇒ 四个已实现的 driver kind 在产品表层等于不存在）。
+// 该不变式由 plugin/scripts/enum-surface-parity-check.ts 的面 cli-driver-help-kind /
+// cli-driver-usage-verbs 机械守着（字面量副本重现 ⇒ RED；见其 derivesFrom 判定）。
 //
 // AC139: the two drivers' launch surface converges onto ONE `quay` subcommand. AC151 (gap-ac151-
 // two-level-driver-layer-landing) ports the supervisor into TS: the single generalized supervisor
@@ -27,10 +33,11 @@ import { findConfig } from "../config.ts";
 import { resolvePluginScriptExec } from "../plugin-root.ts";
 import type { CliCtx } from "./context.ts";
 
-const VERBS = ["start", "stop", "drain", "resume", "status", "restart"];
-// ⛔ 白名单必须与 kernel 的 DRIVER_KINDS 一致（suite 已按人 2026-09-07 裁定退役移除）。导出供
-// goal-driver.test.mjs 断言两者集合相等（gap-goal-driver-mechanical-ring AC6）。
-export const KINDS = ["promotion", "worker", "outer", "quality", "meta", "goal"];
+// VERBS 与 KINDS 定义在 cli/driver-vocab.ts（零依赖叶模块——help.ts 静态 import 它，⛔ 不能把这两个
+// 常量留在本文件：本文件的传递闭包带 config.ts/plugin-root.ts，实测会让 `quay --help` 每次调用贵 0.4s）。
+// 此处 import + 再导出，保持既有 import 位点（goal-driver.test.mjs AC6）不变。
+import { KINDS, VERBS } from "./driver-vocab.ts";
+export { KINDS, VERBS };
 
 /** Resolve the workspace root from `--root` (walk-up) or the process cwd; null when no config. */
 function resolveRoot(rootFlag: string | undefined): string | null {
@@ -65,10 +72,10 @@ export async function handleDriver({ sub, rest, positional }: CliCtx) {
   const { flags } = parseFlags([sub, ...rest].filter((a) => a !== undefined));
 
   if (sub === "--help" || sub === "-h" || flags.help) {
-    process.stdout.write(`quay driver — start/stop/drain/resume/status/restart the promotion & worker drivers (AC139)
+    process.stdout.write(`quay driver — start/stop/drain/resume/status/restart the resident quay drivers (AC139)
 
 Usage:
-  quay driver <start|stop|drain|resume|status|restart> --kind <promotion|worker|outer|quality> [--root <path>] [flags]
+  quay driver <${VERBS.join("|")}> --kind <${KINDS.join("|")}> [--root <path>] [flags]
 
   start      Start the resident driver under the single supervisor (respawn on exit/kill/crash).
              ⛔ Refuses (exit non-zero) if the driver is halted — clear the halt with \`resume\` first.
@@ -83,7 +90,7 @@ Usage:
              record count, which cannot distinguish "growing" from "stalled").
   restart    stop then start.
 
-  --kind <promotion|worker|outer|quality>   Required. Which driver the command targets.
+  --kind <${KINDS.join("|")}>   Required. Which driver the command targets.
   --root <path>               Workspace root (default: discovered via .quay/config.yml from cwd).
   --reconcile-interval <s>    (worker only) Coordination floor: reconcile at least every N seconds
                               even if every edge event (worker exit) is lost — degrade to

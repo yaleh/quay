@@ -312,6 +312,6 @@ export function main(argv: string[]): number {
   return report.drift ? 1 : 0;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "judgment-consumer-check")) {
   process.exit(main(process.argv));
 }

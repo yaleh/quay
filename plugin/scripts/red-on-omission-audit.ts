@@ -540,6 +540,6 @@ export function main(argv: string[]): number {
   return pass ? 0 : 1;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "red-on-omission-audit")) {
   process.exitCode = main(process.argv.slice(2));
 }

@@ -337,6 +337,6 @@ export function main(argv: string[]): number {
   );
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "provider-binding-resolvability-check")) {
   process.exit(main(process.argv));
 }

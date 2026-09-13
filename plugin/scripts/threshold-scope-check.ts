@@ -605,6 +605,6 @@ export function runCli(argv: string[]): number {
   return growth ? 1 : 0;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "threshold-scope-check")) {
   process.exit(runCli(process.argv.slice(2)));
 }

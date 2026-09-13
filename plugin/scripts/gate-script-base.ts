@@ -6,7 +6,6 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 // ── Types ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -244,27 +243,33 @@ export function requireArg(value: any, name: string): void {
 
 // ── isDirectEntry ───────────────────────────────────────────────────────────────────────────────────
 // Standard "is this file being run directly?" check for CLI scripts.
-// Usage:
-//   if (isDirectEntry(import.meta)) main(process.argv).then(code => process.exit(code));
-//   // bundler-friendly form (see expectedBase below):
+// Usage (expectedBase is REQUIRED — see below):
 //   if (isDirectEntry(import.meta, undefined, "tool-name")) main(process.argv).then(code => process.exit(code));
 //
 // BUNDLER-FRIENDLY (gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact): when a
 // plugin .ts is bundled into a single ESM file, EVERY inlined module shares the bundle's
 // `import.meta.url`, so the URL-equality check alone returns true for imported libraries too — the
 // library's top-level CLI block would fire while another tool runs. Callers therefore pass their own
-// canonical basename as `expectedBase`; when provided, the check requires the executed file's
-// basename to match, which holds for the entry in both source and bundle forms and never for an
-// inlined library (the bundle's basename is the entry's, not the library's).
-export function isDirectEntry(importMeta: ImportMeta, argv1?: string, expectedBase?: string): boolean {
+// canonical basename as `expectedBase`; the check requires the executed file's basename to match,
+// which holds for the entry in both source and bundle forms and never for an inlined library (the
+// bundle's basename is the entry's, not the library's).
+//
+// ⛔ The bare `isDirectEntry(import.meta)` form NO LONGER EXISTS, on purpose
+// (gap-drivers-yml-interval-not-honored-for-routine-kinds). It compared `realpath(argv[1])` against
+// `import.meta.url`, which is a FILE identity — correct in the source layout, but under bundling the
+// whole inlined module set shares one file, so every inlined module's guard became true at once and
+// the FIRST one in bundle order won. Measured 2026-09-13 on the shipped `plugin/scripts/dist/`
+// bundles: `dist/{goal,quality-gate,meta}-driver.js` all executed `pool-quality-judge`'s main (the
+// first inlined library carrying a bare guard) instead of their own — the routine drivers therefore
+// printed the pool judge's JSON and exited 0 in <1s, and the supervisor respawned them every
+// `--restart-delay` (5s). The declared `drivers.yml <kind>.interval_ms` never entered the cadence
+// because the driver process never reached its resident loop. Making `expectedBase` REQUIRED is the
+// mechanism, not a reminder: a bare guard is now a type error instead of a silent wrong-module run.
+// `importMeta` is kept ONLY for call-site compatibility (100+ callers pass it positionally) and is
+// deliberately not consulted — module identity cannot come from the URL under bundling.
+export function isDirectEntry(importMeta: ImportMeta, argv1: string | undefined, expectedBase: string): boolean {
+  void importMeta; // identity is name-based, never URL-based (see above)
   const entry = argv1 || process.argv[1];
   if (!entry) return false;
-  try {
-    if (expectedBase !== undefined) {
-      return path.basename(entry).replace(/\.(?:js|ts|mjs)$/, "") === expectedBase;
-    }
-    return fs.realpathSync(path.resolve(entry)) === fileURLToPath(importMeta.url);
-  } catch {
-    return false;
-  }
+  return path.basename(entry).replace(/\.(?:js|ts|mjs)$/, "") === expectedBase;
 }

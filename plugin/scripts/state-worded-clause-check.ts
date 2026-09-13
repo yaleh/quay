@@ -228,7 +228,7 @@ export function main(argv: string[]): CliResult {
   return { code: total === 0 ? 0 : 1, json: out };
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "state-worded-clause-check")) {
   const res = main(process.argv.slice(2));
   process.exitCode = res.code;
 }
