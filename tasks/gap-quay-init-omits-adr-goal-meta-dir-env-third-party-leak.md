@@ -292,3 +292,23 @@ env **只** pin `QUAY_NATIVE_TASKS_DIR` —— 即 **pre-pin 项目的真实形�
 > **为什么由本条补**：`gap-ac190-goal-ac-rule-not-enforced-at-filing` 的 AC3/DoD 要求反例被**真实背书**
 > 而不是被删掉标签消掉；同时那条任务自己的 DoD 逐字要求「⛔ 只补这一条任务的 `goal_ac` 而不接写入面
 > ⇒ 不算完成」。两半合起来才是「规则在违反发生的那一刻起作用，且现存的违反真的被清掉」。
+
+
+## ⚠️ 下游读到的实测（2026-09-13，由 `gap-ac190-goal-ac-rule-not-enforced-at-filing` 的 worker 留痕；⛔ 未改动本任务的任何 AC）
+
+**本任务若按现状走机械 fan-in，翻 done 的闸会拒**：`flipAcGateVerdict`（`plugin/scripts/fan-in-ac-completion-gate.ts`，
+worker-driver 机械 fan-in 用的就是它）判 `fail`：
+
+    {"ok":false,"status":"fail","total":5,"checked":4,"unchecked":1,
+     "message":"AC 未全勾（checked 4/5，剩余未勾 1 含非待外部项）——未翻 done"}
+    isLandedCodeComplete=false
+
+**根因（不是闸错，是注解形态不对）**：AC5 的正文「全量 `scripts/test.sh` 绿。」**不匹配**两条被判为
+「外部验证」的形态——① 行尾注解 `（待外部）`（`isExternalVerificationItem` 的正则要求它出现在条末）；
+② 内容形态 `/(?:全量套件绿|外层(?:全量)?验证|外层\s*verification-round)/`。本条的「全量 `scripts/test.sh` 绿」
+两个都不是（不是连续的「全量套件绿」、也没有行尾注解）⇒ 该未勾项被判为 `（待本任务）`（fail-closed 默认），
+闸拒翻。本任务体「实现记录」末段写的「该条文本自带 `全量套件绿` 标记，按既有约定走 pass-external」
+**与直接读数不符**（读数见上）。
+
+**修法（留给下一个接手者，二选一）**：给 AC5 条末补 `（待外部）`；或改写成含 `全量套件绿` 的措辞。
+⛔ 不要勾掉 AC5（那等于宣称全量套件已绿——它由 fan-in 跑，worker 侧没有该读数）。

@@ -200,6 +200,8 @@ import {
   resolveKernelSibling,
   resolveKernelScriptsDir,
   resolveKernelPluginRoot,
+  resolveKernelShellSibling,
+  resolveQuaySrcModule,
   type LivenessResult,
 } from "./driver-runtime.ts";
 // 机械 fan-in（gap-fan-in-driver-mechanical-orchestration / SPEC-fan-in-driver-mechanical-
@@ -1293,15 +1295,10 @@ export function docCheckCommandFor(worktree: string): string[] | null {
   return hasTestSh(worktree) ? ["bash", testSh, "--static-checks-doc"] : null;
 }
 
-/** 解析本 kernel 的一个 shell sibling（.sh）到 kernel plugin root 的 scripts/<name>（⛔ 非 root ——
+/** 解析本 kernel 的一个 shell sibling（.sh）—— 实现已上收 `driver-runtime.resolveKernelShellSibling`
+ *  （单一入口，⛔ 不各写一份 basename==="dist" 上跳逻辑）。本文件经 import 消费，⛔ 不再本地复制一份。
  *  gap-promotion-driver-ready-pool-check-path-third-party：第三方项目无 plugin/scripts/，.sh 以 loose
- *  形态随包住在 scripts/ 而非 dist/）。缺 ⇒ null（调用方 fail-closed）。与 driver-shared.ts
- *  resolveResourceGateScript 同法，但经 resolveKernelPluginRoot 单一真相源（⛔ 不各写一份
- *  basename==="dist" 上跳逻辑）。 */
-function resolveKernelShellSibling(name: string): string | null {
-  const script = path.join(resolveKernelPluginRoot(), "scripts", name);
-  return fs.existsSync(script) ? script : null;
-}
+ *  形态随包住在 scripts/ 而非 dist/。缺 ⇒ null（调用方 fail-closed）。 */
 
 /** 解析一个 kernel sibling 脚本到运行 argv 前缀（不含 "node" 可执行名）：原始 .ts ⇒
  *  ["--experimental-strip-types", <path>]；bundled dist/*.js ⇒ [<path>]（不带 flag）。两者都不在 ⇒
@@ -3511,9 +3508,12 @@ async function flipTaskDone(
  *  保留为布局解析单一真相源 + 测试锚点（AC4「双向不变」）；生产已无调用点。
  */
 export function resolveKernelSrcModule(base: string, rel: string): string {
-  const sourcePath = path.join(base, "packages", "quay", "src", rel);
-  if (fs.existsSync(sourcePath)) return sourcePath;
-  return path.join(path.dirname(resolveKernelPluginRoot()), "src", rel);
+  // 布局判定已上收 driver-runtime.resolveQuaySrcModule（单一入口，⛔ 不再就地拼 `packages/quay/src`）：
+  // 源树形（base 是 quay 源树 ⇒ 命中）与 shipped 打平形都在那一个入口里；两形皆无 ⇒ 旧契约的
+  // shipped 形路径（以 **kernel 包根**为基准退回，⛔ 不是 base——base 是消费方/第三方 worktree，
+  // 它没有 <base>/src），由调用方的 best-effort catch 兜。本函数已无生产调用点，仅测试锚点。
+  return resolveQuaySrcModule(rel, base)
+    ?? path.join(path.dirname(resolveKernelPluginRoot()), "src", rel);
 }
 
 /** gap-mechanical-fan-in-writes-no-complete-gateevent — 机械 fan-in 翻 done 后经既有 gate-event-store
