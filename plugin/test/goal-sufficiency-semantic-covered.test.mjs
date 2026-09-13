@@ -22,6 +22,7 @@ import {
   parseSemanticSufficiencyVerdict,
   buildSufficiencyPrompt,
   semanticSufficiencyVerdict,
+  resetSufficiencyCacheForTest,
   runGoalRound,
 } from '../scripts/goal-driver.ts';
 
@@ -160,3 +161,105 @@ test('buildSufficiencyPrompt: 内嵌 GOAL 退出条件文本 + 在域 AC（id/ti
   assert.ok(p.includes('ac 一') && p.includes('覆盖条件甲'), 'prompt 内嵌 AC title/expect');
   assert.ok(p.includes('GOAL-001') && p.includes('目标标题'), 'prompt 内嵌 goal id/title');
 });
+
+// ── gap-sufficiency-prompt-blind-to-scope-section-relies-on-title-alone ──────────────────────────
+// 充分性判官的第一层 prompt 原先只喂 title + `## 退出条件` + 在域 AC，⛔ **看不到 goal body 的 `## 范围`
+// 节**。而退出条件刻意写成**不写死数字**的结构性自指句式（「本目标名下未被 superseded 的全部 criterion
+// 状态为 achieved」）——它对任意数量的在域 AC 都同样成立，本身不携带「这个目标应该有几块」的信息；
+// 那个信息实际写在范围节。⇒ 判官能否识别「当前只有 1 条 AC，还不够」完全依赖**标题是否恰好写得够详细**。
+//
+// 下面覆盖 AC1/AC2/AC3（AC4 在 goal-sufficiency-determinism.test.mjs，那里 import 了 sufficiencyCacheKey）。
+
+const SCOPE_EXIT = '## 退出条件\n\n本目标名下、未被 superseded 的全部 criterion 状态为 achieved，不写死数字。\n';
+/** 三个子项的范围节（quay-fleet GOAL-003 body 的真实形态，标题无后缀）。 */
+const SCOPE_THREE = '## 范围\n\n1. PWA 壳静态服务\n2. SSE 驱动实时列表\n3. Web Push 订阅机制\n';
+/** 三个范围关键词（假判官按它们在【整个 prompt】里是否可见判）。 */
+const SCOPE_KEYWORDS = ['PWA 壳静态服务', 'SSE 驱动实时列表', 'Web Push 订阅机制'];
+
+test('AC1: buildSufficiencyPrompt 必须内嵌 `## 范围` 节原文；删掉范围节后两次 prompt 必须不同', () => {
+  const acs = [{ id: 'AC-016', title: '推送订阅', expect: '三块都要' }];
+  const withScope = buildSufficiencyPrompt(
+    { id: 'GOAL-003', title: 'PWA 与推送', body: '## 命题\np\n\n' + SCOPE_THREE + SCOPE_EXIT },
+    acs, '/repo',
+  );
+  const withoutScope = buildSufficiencyPrompt(
+    { id: 'GOAL-003', title: 'PWA 与推送', body: '## 命题\np\n\n' + SCOPE_EXIT },
+    acs, '/repo',
+  );
+  assert.ok(
+    SCOPE_KEYWORDS.every((k) => withScope.includes(k)),
+    '范围节三个子项逐字进 prompt（读了且带着用——⛔ 不是「读了没用」）',
+  );
+  assert.notEqual(
+    withScope, withoutScope,
+    '范围节存在与否**必须**改变 prompt 内容（能取假：把 scopeSections 从 buildSufficiencyPrompt 里摘掉 ⇒ 本条红）',
+  );
+});
+
+test('AC1(生产形态): 带后缀的范围节标题（`## 范围（docs/design/… §7 阶段2）` / `## 范围与非目标`）也必须被读到', () => {
+  const acs = [{ id: 'AC-001', title: 'a', expect: 'e' }];
+  // quay-fleet GOAL-002/GOAL-003 的真实标题形态——逐字正则在这一版上**结构上读不到**这一节，
+  // 只按前缀匹配才读得到（同 task-status-drift-check 的 `## Acceptance Criteria (runnable — …)` 实例）。
+  const suffixed = buildSufficiencyPrompt(
+    { id: 'GOAL-002', title: '跨机聚合', body: '## 命题\np\n\n## 范围（docs/design/quay-fleet-design.md §2/§3.1/§7 阶段2）\n\n1. 全局 sessionKey\n2. 多机视图归并\n3. 本机 tailscale 身份只读\n\n' + SCOPE_EXIT },
+    acs, '/repo',
+  );
+  assert.ok(
+    suffixed.includes('3. 本机 tailscale 身份只读'),
+    '带后缀标题的范围节内容进 prompt（⛔ 只逐字匹配 `## 范围` 会在生产形态上恒不命中——判据空转）',
+  );
+  assert.ok(suffixed.includes('范围（docs/design/quay-fleet-design.md §2/§3.1/§7 阶段2）'), '标题逐字保留（判官要看到限定语）');
+  assert.ok(!suffixed.includes('命题正文'), '范围节的界在下一个 `## ` 标题处——不吞并后续节');
+  // 本仓的实际形态。
+  const andNonGoals = buildSufficiencyPrompt(
+    { id: 'GOAL-001', title: 't', body: '## 背景\nbg\n\n## 范围与非目标\n\n- 做的：A\n- 不做的：B\n\n' + SCOPE_EXIT },
+    acs, '/repo',
+  );
+  assert.ok(andNonGoals.includes('- 不做的：B'), '`## 范围与非目标` 同样被读到');
+});
+
+test('AC2: 双向对照——假判官按「prompt 里能否看到范围关键词」判 ⇒ 范围节确实在影响判定（不是摆设）', async () => {
+  resetSufficiencyCacheForTest();
+  // 假判官：读【整个 prompt】（缝把 prompt 作末参数追加），三个范围关键词全可见 ⇒ covered，否则 insufficient。
+  // ⛔ 它给出的是「范围节是不是判官真正看得见的东西」的**直接读数**——若 buildSufficiencyPrompt 不含范围节，
+  // ①（带范围节）也会判 insufficient ⇒ 下面的 notEqual 必红。
+  const judge = [
+    'node', '-e',
+    'const p = process.argv[1] || "";' +
+    `const k = ${JSON.stringify(SCOPE_KEYWORDS)};` +
+    'process.stdout.write(JSON.stringify({ verdict: k.every((x) => p.includes(x)) ? "covered" : "insufficient" }));',
+  ];
+  const acs = [{ id: 'AC-016', title: '推送订阅', expect: '三块都要' }];
+  const withScope = { id: 'GOAL-003', title: 'PWA 与推送', body: '## 命题\np\n\n' + SCOPE_THREE + SCOPE_EXIT };
+  const noScope = { id: 'GOAL-003', title: 'PWA 与推送', body: '## 命题\np\n\n' + SCOPE_EXIT };
+  // ③ 负控制：无范围节，但把**同样的关键词**手工塞进标题 ⇒ 关键词仍可见 ⇒ covered。
+  //    它证明假判官的关键词判据不是恒假（否则 ①≠② 的差可能只是「这个判官永远说不覆盖」），
+  //    因而 ①≠② 的差只能归因于 **prompt 里范围节的有无**。
+  const titleStuffed = { ...noScope, title: 'PWA 与推送：' + SCOPE_KEYWORDS.join('、') };
+
+  const vWith = await semanticSufficiencyVerdict(withScope, acs, repoRoot, { sufficiencyCmd: judge });
+  const vWithout = await semanticSufficiencyVerdict(noScope, acs, repoRoot, { sufficiencyCmd: judge });
+  const vStuffed = await semanticSufficiencyVerdict(titleStuffed, acs, repoRoot, { sufficiencyCmd: judge });
+
+  assert.equal(vWith, 'covered', '① 带范围节 ⇒ 判官看得见三块 ⇒ covered');
+  assert.equal(vWithout, 'insufficient', '② 删掉范围节（标题/退出条件逐字不变）⇒ 判官看不见 ⇒ insufficient');
+  assert.notEqual(vWith, vWithout, '范围节的有无必须改变判官输出（⛔ 范围节不是摆设）');
+  assert.equal(vStuffed, 'covered', '③ 负控制：无范围节但标题含同样关键词 ⇒ covered（假判官判据非恒假）');
+});
+
+test('AC3: 无 `## 范围` 节的旧格式 body ⇒ 不抛异常，prompt 仍含标题与退出条件文本', () => {
+  const acs = [{ id: 'AC-001', title: 'a', expect: 'e' }];
+  const legacy = { id: 'GOAL-001', title: '旧格式目标', body: '## 背景\nbg\n\n' + SCOPE_EXIT };
+  let p = '';
+  assert.doesNotThrow(() => { p = buildSufficiencyPrompt(legacy, acs, '/repo'); }, '缺该节不得抛异常');
+  assert.ok(p.includes('goal_title=旧格式目标'), 'prompt 仍含标题');
+  assert.ok(p.includes('不写死数字'), 'prompt 仍含退出条件文本');
+  assert.ok(
+    p.includes('NOT WRITTEN DOWN'),
+    '「没写范围节」被显式说出（Plan 第2条：⛔ 不静默当成「没有范围限制」——缺席与「已声明无限制」不同形）',
+  );
+  // 极端旧格式：连 `## 退出条件` 都没有（机械层判 insufficient 的那一形态）⇒ 同样不得抛。
+  assert.doesNotThrow(() => { buildSufficiencyPrompt({ id: 'GOAL-005', title: 'x', body: '## 背景\nbg\n' }, acs, '/repo'); });
+  assert.doesNotThrow(() => { buildSufficiencyPrompt({ id: 'GOAL-005', title: 'x' }, acs, '/repo'); }, 'body 整个缺失也不得抛');
+});
+

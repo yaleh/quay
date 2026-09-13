@@ -89,9 +89,9 @@
 //   - forceDispatch(task)  ⇒ append forced[]（强制派发记录，驻留驱动的 selector 环消费；本阶段驱动仍用
 //     显式 --task，forceDispatch 落盘记录即可观测）
 //
-// Run（MCP 控制面）:
-//   node --experimental-strip-types plugin/scripts/worker-driver.ts --serve \
-//     --root <repo> [--host 127.0.0.1] [--port <n>] [--json]
+// Run（MCP 控制面）—— ⛔ 本文件没有控制面入口：控制面由每个 kind 的 supervisor 起（Layer 0，
+// `driver-runtime.ts` 的 runSupervisor → serveKindControlPlane）。逐 kind 的 URL/端口回读面 =
+// `<root>/.quay/<prefix>-control-plane.json`（`statePaths().controlPlaneFile`）。见 GOAL-017/AC-252。
 //
 // 阶段 4 新增（AC129，SPEC §5 阶段 4——常驻驱动 + 自主选任务，把「谁决定现在跑哪个任务」从 inner 的
 // LLM tick 会话移到本常驻进程）：
@@ -136,7 +136,6 @@ import { parseLoadSensitiveAnnotation } from "./known-load-sensitive.ts";
 // （函数级复用，⛔ 非复制粘贴）。本文件仍 re-export 保持旧 import 面（worker-driver.test.mjs 等）。
 import {
   resourceGateCheck,
-  serveControlPlane,
   isHalted,
 } from "./driver-shared.ts";
 export {
@@ -1932,16 +1931,55 @@ export interface RetryExemptionJudgment {
  *  flaky 复发语义一致（两周前的 flaky 不算「已知反复出现」）；测试缝可覆盖。 */
 export const RETRY_EXEMPTION_WINDOW_MS_DEFAULT = 48 * 3600 * 1000;
 
+/** 断言签名的【唯一】归一化点（gap-retry-exemption-signature-keeps-volatile-values）。
+ *
+ *  WHY：签名是「同一缺陷是否复发」的**身份**。签名里只要留下每次运行都变的量（pid / 毫秒 / 端口 /
+ *  绝对路径 / 哈希），同一缺陷在**每个任务**上都会得到一个**新**签名 ⇒ 「≥2 个不同任务命中同一签名」
+ *  结构上永不成立 ⇒ 这个专为「不相关 flaky 不该压垮受害任务」而造的豁免，对最需要它的那一半失败恒空
+ *  （硬规则 4：一个结构上不可能取真的判据不是测量）。实证：同一生产缺陷（`driver-runtime.test.mjs`
+ *  AC4）在 3 个任务的 suite log 里给出 3 条互不相同的签名，只因 pid/confirmed_ms 不同。
+ *
+ *  三分类的取舍：把「每次都会变、且不改变缺陷身份」的**量**折成占位；把**措辞**逐字保留——措辞才是
+ *  缺陷身份。⛔ 不折词、不截断、不折长引文：`'change' !== 'full'` 里的引文正是区分「两种不同缺陷」
+ *  的内容，折掉它就把「不同」变成「同一」（硬规则 3b 的镜像面：不得把「读不懂」变成「合格」，这里
+ *  是不得把「不同缺陷」变成「同一缺陷」）。故本函数**不**复用 `meta-driver.ts:errorSignature`——那个
+ *  正本面向「错误聚合」，会截断到 200 字符并折掉长引文，两者是**不同**的身份语义（AC5 已枚举该兄弟点）。
+ *
+ *  退化的归一化结果（折叠后除占位符外一个字母都不剩，如 `1 !== 2` ⇒ `<n> !== <n>`）**丢掉**，不当作
+ *  签名：它在不同缺陷间恒等 ⇒ 留下它等于制造假豁免。全丢掉 ⇒ 调用侧落
+ *  `insufficient-data-fallback`（照常计数），fail-closed。 */
+export function normalizeAssertionSignature(text: string): string {
+  let s = String(text ?? "").replace(/\s+/g, " ").trim();
+  // ① 哈希/uuid/sha/commit（先于数字：32 位 sha 会被 ② 拆成一堆 <n>，拆完丢掉「这是个哈希」这一形）。
+  //    要求命中里**同时含 a–f 与数字**：纯数字串是量不是哈希，交给 ②；只由 a–f 组成的英文词
+  //    （`defaced`/`acceded`）不得被当成哈希抹掉，否则把不同缺陷并成一个签名。
+  s = s.replace(/\b[0-9a-f]{7,40}\b/gi, (m) => (/[a-f]/i.test(m) && /\d/.test(m) ? "<hex>" : m));
+  // ② 绝对路径（≥2 段）。⚠️ 前导 `/` 必须不在词中间：`AC1/AC2/AC3` 的前导 `/` 前面是 `1`（词字符）
+  //    ⇒ 不匹配；路径在文本里总是空格/括号/冒号/= 之后 ⇒ 匹配。段字符类含 `-`（worktree 名 / 任务 id）。
+  s = s.replace(/(?<![\w])(?:\/[\w.@+-]+){2,}\/?/g, "<path>");
+  // ③ 数字字面量（pid / confirmed_ms / 端口 / 计数 / 行号）。⚠️ 只折【数字 token】——词内数字
+  //    （`dr-ac4-short` 的 `4`）**不折**：那是**稳定**标识符的一部分，折掉它会把 `ac4` 与 `ac7` 两个
+  //    不同的用例并成同一签名（正是本函数开头禁的「把不同缺陷变成同一缺陷」）。判据 = 数字串前面
+  //    不是词字符；`530ms` 这类「数字+单位」仍折（单位文本保留）⇒ 数量变、单位不变 ⇒ 签名不变。
+  s = s.replace(/(?<!\w)\d+(?:\.\d+)?/g, "<n>");
+  return s.trim();
+}
+
 /** 从 suite 日志提取归一化断言签名（`AssertionError [ERR_ASSERTION]: msg` / `AssertionError: msg`）。
- *  归一化 = trim + 折叠内部空白（同一断言换行/缩进差异折叠成同一签名）。读不出 ⇒ []（不伪造；动态
- *  路径断言每次不同 ⇒ 归一化后仍不同 ⇒ 不匹配，fail-closed 朝「不复返、照常计数」，硬规则 3b）。 */
+ *  归一化 = trim + 折叠内部空白 + **易变量折占位**（唯一正本点 `normalizeAssertionSignature`——所有
+ *  消费者都经由本函数拿到**已归一化**的签名，⛔ 不存在第二份「哪些字符算易变量」的清单）。
+ *  读不出 ⇒ []（不伪造），fail-closed 朝「不复返、照常计数」，硬规则 3b。 */
 export function assertionSignaturesFromSuiteLog(logText: string): string[] {
   const out: string[] = [];
   for (const raw of String(logText ?? "").split("\n")) {
     const m = /AssertionError(?:\s*\[[^\]]*\])?:\s*(.+)$/.exec(raw);
     if (!m) continue;
-    const sig = m[1].trim().replace(/\s+/g, " ");
-    if (sig && !out.includes(sig)) out.push(sig);
+    const sig = normalizeAssertionSignature(m[1]);
+    // 退化签名（折叠后**除占位符外**一个字母都不剩，如 `1 !== 2` ⇒ `<n> !== <n>`）不当作身份：它在
+    // 不同缺陷间恒等 ⇒ 留下它等于制造假豁免。⚠️ 判据必须先把占位符形态**泛型**剥掉再找字母——
+    // `<n>` 自己含字母 `n`，不剥就会把退化签名误判成合格（本轮实测踩到过）。
+    if (!sig || !/\p{L}/u.test(sig.replace(/<[a-z]+>/g, ""))) continue;
+    if (!out.includes(sig)) out.push(sig);
   }
   return out;
 }
@@ -5265,9 +5303,6 @@ export async function main(argv: string[]): Promise<number> {
   let outcomePath: string | undefined;
   let runId: string | undefined;
   let json = false;
-  let serve = false;
-  let host: string | undefined;
-  let port: number | undefined;
   let mechanicalFanIn = false;
   let mechWorktree: string | undefined;
   let mechMergeTarget: string | undefined;
@@ -5298,9 +5333,6 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--outcome") outcomePath = args[++i];
     else if (a === "--run-id") runId = args[++i];
     else if (a === "--json") json = true;
-    else if (a === "--serve") serve = true;
-    else if (a === "--host") host = args[++i];
-    else if (a === "--port") port = Number(args[++i]);
     else if (a === "--mechanical-fan-in") mechanicalFanIn = true;
     else if (a === "--worktree") mechWorktree = args[++i];
     else if (a === "--merge-target") mechMergeTarget = args[++i];
@@ -5322,7 +5354,8 @@ export async function main(argv: string[]): Promise<number> {
           "  [--backoff-max-ms <ms>]  退避等待上限 ms（指数增长封顶，缺省 300000）\n" +
           "  --mechanical-fan-in --task <id> --worktree <path>  每任务新进程入口：加载当前代码跑机械 fan-in，stdout 单行 JSON result（exit 0=landed / 2=red）\n" +
           "  --write-scoped-gate-cache --task <id> --develop-sha <sha>  写 scoped-gate 缓存（worker 退出前跑绿后调用；stdout 单行 JSON）\n" +
-          "  --serve [--host <ip>] [--port <n>]  起 MCP 控制面（halt / setPreference / forceDispatch，身份 header 或 caller 参数）",
+          "  ⛔ 无 --serve：MCP 控制面（halt / setPreference / forceDispatch）已上收进 Layer 0——由每个 kind 的\n" +
+          "     supervisor（driver-runtime.ts runSupervisor）起，逐 kind 写 <prefix>-control-plane.json 回读面",
       );
       return 0;
     } else {
@@ -5370,16 +5403,10 @@ export async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
-  // --serve：起 MCP 控制面（常驻）。listening socket 保持事件循环存活 ⇒ 进程不退出，直到 SIGINT/SIGTERM。
-  if (serve) {
-    const handle = await serveControlPlane({ root: rootDir, host, port, name: "worker-driver-control" });
-    if (json) process.stdout.write(`${JSON.stringify({ event: "control-plane-serving", url: handle.url, port: handle.port })}\n`);
-    else console.log(`worker-driver control plane serving at ${handle.url}`);
-    const stop = () => { void handle.close(); };
-    process.on("SIGINT", stop);
-    process.on("SIGTERM", stop);
-    return 0;
-  }
+  // ⛔ 本文件【不再】自带 serveControlPlane 调用点（GOAL-017/AC-252，SPEC §7 阶段 A1）：控制面已上收进
+  // Layer 0——每个 kind 的 supervisor（driver-runtime.ts runSupervisor）起一个，六个 kind 全部从共享骨架
+  // 获得入站控制面（⛔ 不是六个 kind 各自直调）。旧 `--serve` flag 一并删除，⛔ 不留「解析了但没人消费」
+  // 的死 flag（硬规则 3b）；控制面入口在 Layer 0，不在本 kind 的 argv 面。
 
   const outcomeFile = outcomePath ? path.resolve(outcomePath) : path.join(rootDir, WORKER_OUTCOME_REL);
   const timeoutMs = parseTimeoutMs(timeoutRaw);

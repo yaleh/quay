@@ -121,6 +121,7 @@ import {
   appendCompleteGateEvent,
   failingTestFilesFromSuiteLog,
   assertionSignaturesFromSuiteLog,
+  normalizeAssertionSignature,
   judgeRetryExemption,
   RETRY_EXEMPTION_WINDOW_MS_DEFAULT,
 } from "../scripts/worker-driver.ts";
@@ -915,6 +916,127 @@ test("assertionSignaturesFromSuiteLog — 提取并归一化 AssertionError 签�
 
 test("RETRY_EXEMPTION_WINDOW_MS_DEFAULT — 48h 窗口缺省（与提案 48h 复盘同窗）", () => {
   assert.equal(RETRY_EXEMPTION_WINDOW_MS_DEFAULT, 48 * 3600 * 1000, "48h default window");
+});
+
+// ── gap-retry-exemption-signature-keeps-volatile-values：签名归一化必须折易变量 ⛔ 不折身份 ──────────
+// 根因：归一化只折叠空白 ⇒ pid / 毫秒 / 路径 / 哈希留在签名里 ⇒ 同一缺陷每次运行给出**新**签名 ⇒
+// 「≥2 个不同任务命中同一签名」结构上永不成立 ⇒ 专为「不相关 flaky 不压垮受害任务」而造的豁免恒空。
+// 本段是**双向控制**：①同一缺陷（易变量各异）跨 2 任务 ⇒ 必须豁免；②两个**不同**缺陷（易变量各异）
+// ⇒ 必须仍计数。②是①的取假器——把归一化写过头的实现（例如抹掉整个签名）会让②立刻翻红。
+
+test("AC3 (反向控制) — 两个【不同】缺陷（易变量各异）跨 2 任务 ⇒ 仍 own-defect-counted（⛔ 归一化过头即红）", (t) => {
+  const root = makeRoot("exempt-volatile-ac3");
+  t.after(() => rmSafe(root));
+  writeExemptionTask(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]);
+  writeFailingTest(root, EXEMPT_TEST);
+  const nowMs = Date.parse("2026-09-03T00:00:00.000Z");
+  // 缺陷 A 与缺陷 B：措辞不同（缺陷身份不同），但**都**带 pid/路径易变量——若归一化把量抹成恒等占位
+  // 甚至抹掉整条签名，两条会并成同一签名 ⇒ 本条从 own-defect-counted 翻成 unrelated-flaky-exempt ⇒ 红。
+  const defectA = "probe must be alive: pid=1234 at /home/yale/work/quay-worktrees/gap-a/plugin/test/obs.test.mjs";
+  const defectB = "queue depth exceeded: pid=9999 at /home/yale/work/quay-worktrees/gap-b/plugin/test/obs.test.mjs";
+  writeSuiteRedLog(root, "fan-in-suite-gap-a.log", EXEMPT_TEST, defectA);
+  writeSuiteRedLog(root, "fan-in-suite-gap-b.log", EXEMPT_TEST, defectB);
+  appendOtherSuiteRed(root, "gap-b", new Date(nowMs - 3600_000).toISOString(), "fan-in-suite-gap-b.log");
+
+  assert.notEqual(
+    normalizeAssertionSignature(defectA), normalizeAssertionSignature(defectB),
+    "AC3 取假器：两个不同缺陷归一化后必须仍不同（相同 ⇒ 归一化把「不同」变成了「同一」）",
+  );
+  const j = judgeRetryExemption(root, "gap-a", { mechanical_fan_in: { step: "suite", suiteLog: "fan-in-suite-gap-a.log" } }, { nowMs });
+  assert.equal(j.verdict, "own-defect-counted", "different defect ⇒ NOT exempt (count normally)");
+  assert.deepEqual(j.recurredTasks, [], "no other task recurred this defect's signature");
+});
+
+test("AC2 (正控制) — 同一缺陷的易变量（pid/ms/路径）各异跨 2 任务 ⇒ unrelated-flaky-exempt（⛔ 改前 own-defect-counted）", (t) => {
+  const root = makeRoot("exempt-volatile-ac2");
+  t.after(() => rmSafe(root));
+  writeExemptionTask(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]);
+  writeFailingTest(root, EXEMPT_TEST);
+  const nowMs = Date.parse("2026-09-03T00:00:00.000Z");
+  // 同一缺陷（driver-runtime AC4「未确认存活」）的两次运行：pid / 耗时 / 工作树路径全不同。
+  // 这两条逐字取自 2026-09-13 现场 suite 日志（见任务体 AC1 读数），此处只换 worktree 路径段。
+  const run1 = "未确认存活 ⇒ 非零退出：started: supervisor pid=955396 kind=promotion run_id=dr-ac4-short driver pid=955909 confirmed_ms=1044";
+  const run2 = "未确认存活 ⇒ 非零退出：started: supervisor pid=2765126 kind=promotion run_id=dr-ac4-short driver pid=2765880 confirmed_ms=1045";
+  writeSuiteRedLog(root, "fan-in-suite-gap-a.log", EXEMPT_TEST, run1);
+  writeSuiteRedLog(root, "fan-in-suite-gap-b.log", EXEMPT_TEST, run2);
+  appendOtherSuiteRed(root, "gap-b", new Date(nowMs - 3600_000).toISOString(), "fan-in-suite-gap-b.log");
+
+  // 生产缺陷（driver-runtime AC4）在两次运行里逐字不同 ⇒ 改前这两条签名不相等（AC1 能取假读数）。
+  assert.notEqual(run1, run2, "AC1 取假：同一缺陷的两次运行逐字不同");
+  assert.equal(
+    normalizeAssertionSignature(run1), normalizeAssertionSignature(run2),
+    "AC2：同一缺陷的易变量折叠后必须相等",
+  );
+  const j = judgeRetryExemption(root, "gap-a", { mechanical_fan_in: { step: "suite", suiteLog: "fan-in-suite-gap-a.log" } }, { nowMs });
+  assert.equal(j.verdict, "unrelated-flaky-exempt", "same defect (volatile values differ) across ≥2 tasks ⇒ exempt");
+  assert.deepEqual(j.recurredTasks, ["gap-b"], "the other task that recurred the signature is named");
+});
+
+test("normalizeAssertionSignature — 折易变量（数字/哈希/绝对路径）∧ ⛔ 不折词内数字与措辞", () => {
+  // 折：pid / 毫秒 / 端口 / 计数（数字 token）、sha、绝对路径。单位文本保留 ⇒ 数量变、签名不变。
+  assert.equal(
+    normalizeAssertionSignature("pid=955396 confirmed_ms=1044 at /home/yale/work/quay-worktrees/gap-x/plugin/test/obs.test.mjs"),
+    "pid=<n> confirmed_ms=<n> at <path>",
+  );
+  assert.equal(normalizeAssertionSignature("probe 530ms port 34567"), "probe <n>ms port <n>");
+  assert.equal(
+    normalizeAssertionSignature("head 4f2a9c1b3d5e6f70819a2b3c4d5e6f708192a3b4"),
+    "head <hex>",
+  );
+  // ⛔ 不折词内数字：`dr-ac4-short` 是**稳定**标识符，折掉它会把 ac4 与 ac7 两个不同用例并成同一签名。
+  assert.equal(normalizeAssertionSignature("run_id=dr-ac4-short"), "run_id=dr-ac4-short");
+  assert.notEqual(normalizeAssertionSignature("run_id=dr-ac4-short"), normalizeAssertionSignature("run_id=dr-ac7-short"));
+  // ⛔ 不折普通英文词里恰好由 a–f 组成的字母（`defaced` 不是哈希）。
+  assert.equal(normalizeAssertionSignature("defaced artifact"), "defaced artifact");
+  // ⛔ 不折措辞：`AC1/AC2/AC3` 的斜杠不在词首，不当作路径。
+  assert.equal(normalizeAssertionSignature("AC1/AC2/AC3 covered"), "AC1/AC2/AC3 covered");
+});
+
+test("DoD (落点映射·机械) — 签名归一化只有一个正本点：提取点/归一化点各一处，⛔ 不留第二份易变量清单", () => {
+  // 把「唯一正本点」做成可执行判据（⛔ 不是散文承诺）：源码里出现第二处签名提取或第二处空白归一化
+  // ⇒ 立刻红。这样「后来有人又在别处拼一份签名逻辑」是机械可见的，不靠记得。
+  const src = fs.readFileSync(new URL("../scripts/worker-driver.ts", import.meta.url), "utf8");
+  const count = (re) => (src.match(re) || []).length;
+  assert.equal(count(/AssertionError\(\?:/g), 1, "断言签名的提取点只许有一处");
+  assert.equal(count(/export function normalizeAssertionSignature\(/g), 1, "归一化函数只许定义一次");
+  assert.equal(count(/\\s\+\/g/g), 1, "空白归一化只许在唯一正本点里做（第二处 = 第二份清单）");
+  // 消费者：两个（跨任务复发扫描 + 判定入口），都经 assertionSignaturesFromSuiteLog 拿到已归一化签名。
+  assert.equal(count(/assertionSignaturesFromSuiteLog\(/g), 3, "1 处定义 + 2 处消费者，全部经同一提取点");
+});
+
+test("AC4 (硬规则 3b) — 判不出（退化签名 / 无断言行 / suite log 读不到）⇒ insufficient-data-fallback，⛔ 不与豁免同形", (t) => {
+  const root = makeRoot("exempt-volatile-ac4");
+  t.after(() => rmSafe(root));
+  writeExemptionTask(root, "gap-a", ["packages/quay/src/serve-dashboard.ts"]);
+  writeFailingTest(root, EXEMPT_TEST);
+
+  // ① 退化签名：折叠后连一个字母都不剩（`1 !== 2`）⇒ 在不同缺陷间恒等 ⇒ 不得当作身份 ⇒ 判不出。
+  writeSuiteRedLog(root, "fan-in-suite-gap-degenerate.log", EXEMPT_TEST, "1 !== 2");
+  const degenerate = judgeRetryExemption(root, "gap-a", { mechanical_fan_in: { step: "suite", suiteLog: "fan-in-suite-gap-degenerate.log" } });
+  assert.equal(degenerate.verdict, "insufficient-data-fallback", "degenerate signature ⇒ insufficient-data-fallback");
+  assert.notEqual(degenerate.verdict, "unrelated-flaky-exempt", "判不出 ≠ 判为无关（硬规则 3b）");
+
+  // ② suite 日志里一条 AssertionError 都没有 ⇒ 判不出（⛔ 不伪造成「无复发」）。
+  const p = path.join(root, ".quay", "fan-in-suite-gap-noassert.log");
+  fs.writeFileSync(p, `__PERFILE__ duration_ms=10 ${EXEMPT_TEST} passed=false end_ms=1\n`, "utf8");
+  const noAssert = judgeRetryExemption(root, "gap-a", { mechanical_fan_in: { step: "suite", suiteLog: "fan-in-suite-gap-noassert.log" } });
+  assert.equal(noAssert.verdict, "insufficient-data-fallback", "no assertion line ⇒ insufficient-data-fallback");
+  assert.notEqual(noAssert.verdict, "unrelated-flaky-exempt", "读不懂 ≠ 豁免");
+
+  // ③ suite log 读不到 / outcome 缺字段 ⇒ 判不出。
+  assert.equal(
+    judgeRetryExemption(root, "gap-a", { mechanical_fan_in: { step: "suite", suiteLog: "no-such-log.log" } }).verdict,
+    "insufficient-data-fallback", "unreadable suite log ⇒ insufficient-data-fallback");
+  assert.equal(
+    judgeRetryExemption(root, "gap-a", { final_state: "exited-not-landed" }).verdict,
+    "insufficient-data-fallback", "outcome with no mechanical_fan_in ⇒ insufficient-data-fallback");
+
+  // ④ 退化签名与好签名并存 ⇒ 好签名仍起作用（退化只被丢弃，不污染整条日志）。
+  const mixedPath = path.join(root, ".quay", "fan-in-suite-gap-mixed.log");
+  fs.writeFileSync(mixedPath,
+    `__PERFILE__ duration_ms=10 ${EXEMPT_TEST} passed=false end_ms=1\n  AssertionError [ERR_ASSERTION]: 1 !== 2\n  AssertionError [ERR_ASSERTION]: probe must be alive\n`, "utf8");
+  assert.deepEqual(assertionSignaturesFromSuiteLog(fs.readFileSync(mixedPath, "utf8")), ["probe must be alive"],
+    "degenerate signature dropped, non-degenerate one kept");
 });
 
 // ── gap-worker-driver-selector-api-error-no-backoff：selector API 错误/快速死亡无退避 ───────────────

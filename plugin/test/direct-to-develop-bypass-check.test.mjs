@@ -1169,3 +1169,147 @@ test("exit-3 pin — rev-list 不可读（非 git 根）⇒ evaluated:false ⇒ 
     cleanup(dir);
   }
 });
+
+// ── PROMOTION REGRESSION (tasks/gap-correctness-checkers-opt-in-not-default-suite-member) ───────────
+//
+// This checker used to live in run_operational_checks() — the OPT-IN tier whose ONLY invocation is a
+// human typing `scripts/test.sh --static-checks-operational`. Measured 2026-09-13: ZERO automatic
+// callers anywhere in the repo, while this is the ONLY detector for a direct code-surface commit to
+// develop that bypasses fan-in's ff-lock / anti-drift-touches / AC-completion gates (11b / C17).
+//
+// Two things had to be true for the promotion to be worth anything, and BOTH are pinned here:
+//   (1) REGISTRATION — it is in run_static_checks() (the default full-suite gate ⇒ every fan-in) and
+//       no longer in the opt-in tier, reading the MAIN checkout via --root main_root (develop reflog
+//       + lock events are MAIN-checkout state; with repo_root a worktree round would be vacuous);
+//   (2) EVALUABILITY — the registered argv must actually EVALUATE. This is not hypothetical: the
+//       wiring's original `--baseline b11ce7202b46406d5d5bc82ef7c030c4aed05b` was a FROZEN sha that
+//       develop had run 5147 first-parent commits past while the reflog reached back only 4692, so
+//       455 spine commits fell outside every reflog bracket, `unclassifiable-commits-in-range` fired
+//       unconditionally, and the checker answered exit 3 NOT-EVALUATED forever — while GOAL AC-194,
+//       measuring the SAME invariant through `--baseline develop~100`, said pass. Wiring a
+//       permanently-NOT-EVALUATED checker is 硬规则 3b one layer up: a line in every suite log that
+//       reads like a verdict and never is one.
+
+const GATE_FILE = path.join(REPO_ROOT, "plugin", "scripts", "runner-static-gate.ts");
+
+/** The flag list of the gate's registered `run_checker "<name>"` line inside `fnName`'s body.
+ *  SINGLE SOURCE: the test never restates the flags — it reads what the gate actually runs. */
+function registeredCheckerFlags(name, fnName) {
+  const text = fs.readFileSync(GATE_FILE, "utf8");
+  const start = text.indexOf(`${fnName}() {`);
+  assert.ok(start >= 0, `${fnName}() must exist in runner-static-gate.ts`);
+  const body = text.slice(start, text.indexOf("\n}\n", start));
+  const line = body.split("\n").find((l) => l.includes(`run_checker "${name}"`));
+  assert.ok(line, `${name} must be registered in ${fnName}()`);
+  const flags = line.replace(/^.*?\.ts"\s*/, "");
+  assert.notEqual(flags, line.trim(), "the registered line must name a .ts script");
+  return flags.trim();
+}
+
+/** Run the checker with the gate's OWN registered flags, redirecting only the root to `dir`
+ *  (the gate's root variables are shell paths a test cannot satisfy; every other flag is verbatim
+ *  from the gate — so the BASELINE under test is the one production uses). */
+function runRegisteredFlags(name, fnName, dir) {
+  const flags = registeredCheckerFlags(name, fnName)
+    .replaceAll('"${main_root}"', JSON.stringify(dir))
+    .replaceAll('"${repo_root}"', JSON.stringify(dir))
+    .replaceAll("${main_root}", dir)
+    .replaceAll("${repo_root}", dir);
+  const argv = flags.match(/"[^"]*"|\S+/g).map((s) => s.replace(/^"|"$/g, ""));
+  const r = spawnSync("node", ["--no-warnings", "--experimental-strip-types", CHECKER, ...argv], { encoding: "utf8" });
+  return r;
+}
+
+/** A fixture develop DEEP ENOUGH for the registered `develop~100` window to resolve (a 2-commit
+ *  fixture makes `develop~100` unresolvable ⇒ the checker早退 exit 3 on `rev-list-unreadable`, and
+ *  the test would then be measuring the WRONG failure — it must measure the window it claims to).
+ *  101 design-internal commits (docs/ ⇒ 排除集); the code-surface commit is injected later so ONE
+ *  fixture serves baseline → inject → restore (the mutation-case shape, and half the git cost). */
+function makeDevelopSpineRepo() {
+  const dir = makeTmp("registered-argv");
+  gitCmd(dir, "init", "-q");
+  gitCmd(dir, "config", "user.name", "promotion-regression");
+  gitCmd(dir, "config", "user.email", "pr@example.com");
+  gitCmd(dir, "branch", "-M", "develop");
+  fs.mkdirSync(path.join(dir, "docs"), { recursive: true });
+  for (let i = 0; i <= 100; i++) {
+    fs.writeFileSync(path.join(dir, "docs", `note-${i}.md`), `note ${i}\n`, "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", `docs: note ${i}`);
+  }
+  return dir;
+}
+
+/** Inject a direct code-surface commit on develop's spine (the shape fan-in's locks cannot see). */
+function injectCodeSurfaceDirectCommit(dir) {
+  fs.mkdirSync(path.join(dir, "plugin", "test"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "plugin", "test", "injected.test.mjs"), "export const x = 1;\n", "utf8");
+  gitCmd(dir, "add", "-A");
+  gitCmd(dir, "commit", "-q", "-m", "test: injected direct code-surface commit");
+}
+
+test("PROMOTED: registered in run_static_checks() (default gate), NOT in the opt-in tier, --root main_root", () => {
+  const text = fs.readFileSync(GATE_FILE, "utf8");
+  const bodyOf = (fn) => {
+    const start = text.indexOf(`${fn}() {`);
+    assert.ok(start >= 0, `${fn}() must exist`);
+    return text.slice(start, text.indexOf("\n}\n", start));
+  };
+  assert.ok(
+    bodyOf("run_static_checks").includes('run_checker "direct-to-develop-bypass-check"'),
+    "the bypass checker must be registered in run_static_checks (the default full-suite gate)",
+  );
+  assert.ok(
+    !bodyOf("run_operational_checks").includes('run_checker "direct-to-develop-bypass-check"'),
+    "it must NOT also sit in run_operational_checks — the opt-in tier has no automatic caller",
+  );
+  assert.match(
+    registeredCheckerFlags("direct-to-develop-bypass-check", "run_static_checks"),
+    /--root\s+"?\$\{main_root\}/,
+    "the registered --root must be main_root (develop reflog + lock events are MAIN-checkout state)",
+  );
+});
+
+test("EVALUABILITY: the registered --baseline is a ref-relative window, never a frozen sha that silently expires", () => {
+  // The measured defect: a 40-hex enforcement sha that develop outran while the reflog stayed put.
+  // Such a value turns the check into a permanent NOT-EVALUATED — indistinguishable in the record
+  // from "always passing". 硬规则 4 推论二: a literal whose validity depends on how far the host has
+  // moved must be read from the host, not frozen.
+  const flags = registeredCheckerFlags("direct-to-develop-bypass-check", "run_static_checks");
+  const m = flags.match(/--baseline\s+"?([^\s"]+)"?/);
+  assert.ok(m, `the registered argv must pass an explicit --baseline:\n${flags}`);
+  const baseline = m[1];
+  assert.ok(
+    !/^[0-9a-f]{40}$/.test(baseline),
+    `the registered --baseline must not be a frozen 40-hex sha (got "${baseline}") — develop outruns it ` +
+      `and the reflog horizon does not, so the checker degrades to a permanent NOT-EVALUATED`,
+  );
+  assert.match(baseline, /~/, `the registered --baseline must be a ref-relative window (got "${baseline}")`);
+});
+
+test("NEGATIVE CONTROL on the REGISTERED argv: a code-surface direct commit to develop REDs; its absence is GREEN", () => {
+  const dir = makeDevelopSpineRepo();
+  try {
+    const green = runRegisteredFlags("direct-to-develop-bypass-check", "run_static_checks", dir);
+    assert.equal(green.status, 0,
+      `GREEN baseline: the registered argv must EVALUATE (not NOT-EVALUATED) on a clean develop spine:\n${green.stdout}${green.stderr}`);
+    assert.equal(JSON.parse(green.stdout).evaluated, true, "the registered argv must produce a real verdict, not exit 3");
+
+    injectCodeSurfaceDirectCommit(dir);
+    const red = runRegisteredFlags("direct-to-develop-bypass-check", "run_static_checks", dir);
+    assert.equal(red.status, 1,
+      `the REGISTERED argv must RED on a direct code-surface commit to develop (a wired-but-never-\n` +
+        `evaluating check is the defect this promotion cures):\n${red.stdout}${red.stderr}`);
+    const out = JSON.parse(red.stdout);
+    assert.equal(out.ok, false, "RED must report ok:false");
+    assert.equal(out.reason, "direct-commit-bypasses-fan-in", "RED's reason must name the bypass");
+    assert.ok(out.denominator.codeSurfaceCommits >= 1, "the injected commit must be counted as code-surface");
+
+    // RESTORE — proves the RED came from the injected commit, not from a checker that is stuck red.
+    gitCmd(dir, "reset", "-q", "--hard", "HEAD~1");
+    const restored = runRegisteredFlags("direct-to-develop-bypass-check", "run_static_checks", dir);
+    assert.equal(restored.status, 0, `RESTORE must return to GREEN:\n${restored.stdout}${restored.stderr}`);
+  } finally {
+    cleanup(dir);
+  }
+});

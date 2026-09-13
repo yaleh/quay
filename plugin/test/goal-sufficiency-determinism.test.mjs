@@ -251,3 +251,48 @@ test('AC4(成因不改语义): 三种成因下 verdict 均 not-evaluated，goalA
     );
   }
 });
+
+// ── gap-sufficiency-prompt-blind-to-scope-section-relies-on-title-alone AC4 ─────────────────────
+// 缓存 key 必须覆盖 prompt 的**全部**语义输入——任一输入改了而 key 不变，缓存就会把旧输入下的裁决原样
+// 回给新输入，判据空转且与「判过了」同形（硬规则 3b）。本任务新增的 `## 范围` 节与（原先漏掉的）title
+// 都属于此类。
+
+/** 通用句式退出条件（同一 body 里其余节保持逐字不变，只动被测的那一节）。 */
+const KEY_EXIT = '## 退出条件\n\n本目标名下、未被 superseded 的全部 criterion 状态为 achieved，不写死数字。\n';
+const KEY_ACS = [{ id: 'AC-001', title: 'a', expect: 'e' }];
+
+test('AC4(范围节进 key): 其它输入逐字不变、只改 `## 范围` 节 ⇒ sufficiencyCacheKey 必须不同', () => {
+  const base = { id: 'GOAL-003', title: 't', body: '## 命题\np\n\n## 范围\n\n1. 甲\n\n' + KEY_EXIT };
+  const edited = { id: 'GOAL-003', title: 't', body: base.body.replace('1. 甲', '1. 甲\n2. 乙') };
+  const removed = { id: 'GOAL-003', title: 't', body: '## 命题\np\n\n' + KEY_EXIT };
+
+  assert.notEqual(
+    sufficiencyCacheKey(base, KEY_ACS), sufficiencyCacheKey(edited, KEY_ACS),
+    '只改范围节文本 ⇒ key 必变（否则范围节改了也不重判——判据空转）',
+  );
+  assert.notEqual(
+    sufficiencyCacheKey(base, KEY_ACS), sufficiencyCacheKey(removed, KEY_ACS),
+    '删掉范围节 ⇒ key 必变',
+  );
+  assert.equal(
+    sufficiencyCacheKey(base, KEY_ACS), sufficiencyCacheKey({ ...base }, KEY_ACS),
+    '同一输入 ⇒ 同一 key（确定性——不是「key 一直在变所以当然不同」）',
+  );
+  // 负控制：只改**无关节**（`## 命题`）⇒ key 不变（证明上面的差不是「改了 body 就变」这种粗糙实现）。
+  assert.equal(
+    sufficiencyCacheKey(base, KEY_ACS),
+    sufficiencyCacheKey({ ...base, body: base.body.replace('## 命题\np', '## 命题\nq') }, KEY_ACS),
+    '只改 prompt 读不到的节 ⇒ key 不变（排除「body 一动 key 就变」的虚假通过）',
+  );
+});
+
+test('缓存 key 覆盖 title（prompt 的语义输入之一，原先漏掉——与本任务同源，同一函数同一纪律）', () => {
+  const acs = KEY_ACS;
+  const a = { id: 'GOAL-003', title: 'PWA 与推送', body: '## 命题\np\n\n' + KEY_EXIT };
+  const b = { ...a, title: 'PWA 与推送：PWA 壳静态服务、SSE 驱动实时列表、Web Push 订阅机制' };
+  assert.notEqual(
+    sufficiencyCacheKey(a, acs), sufficiencyCacheKey(b, acs),
+    '标题改了 ⇒ key 必变（标题是 prompt 的语义输入；原样复用旧裁决 = 「标题已写详细」却仍拿旧 insufficient）',
+  );
+});
+
