@@ -3672,6 +3672,13 @@ export function appendDelegatedSuiteRound(o: {
   suiteLog: string;
   /** 受测 checkout（读它的 .quay/config.yml 的 loop.test_output —— AC5：项目声明的输出约定）。 */
   worktree: string;
+  /**
+   * gap-watchdog-killed-round-writes-no-verification-round-record — 这一轮【没有任何结论】时给一个
+   * 机器 token（今天的取值：`watchdog-killed`）。与 `state` 一起传时产出 NOT-EVALUATED 形状
+   * （state=red + evaluated=false + reason=<token>，⛔ 无 failures[]）。省略 = 既有行为逐字不变。
+   * ⛔ 该形状与绿轮/红轮都可区分（evaluated:false vs true），这正是硬规则 3b 要的「独立取值」。
+   */
+  notEvaluated?: string;
 }): { ok: boolean; reason: string | null; applied: Record<string, number> | null } {
   try {
     // AC5 — 项目自己声明的输出约定（缺声明 ⇒ null ⇒ writer 走内建解析，零回归）。
@@ -3687,6 +3694,9 @@ export function appendDelegatedSuiteRound(o: {
       preverified: false,
       runner: "inner",
       state: o.state,
+      // ⛔ 未传时显式 undefined（不是空串）——空串会落进 builder 的 token 校验分支并 fail-closed，
+      // 把「评估过的一轮」误判成参数错（可区分取值不得被一个缺席参数伪造，硬规则 6）。
+      notEvaluated: o.notEvaluated,
       suiteLog: o.suiteLog,
       // ⚠️ 字面量 "null"（字符串）而不是 JS null：writer 的「考虑过但取不到」哨兵是 CLI 形态的
       // `--cpu-time-s null`（builder 里 `raw === "null"` ⇒ 记录 cpu_time_s=null，硬规则 6/AC6），而 JS
@@ -4095,12 +4105,20 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     // loop.test_command 跑，不经 full-suite-runner）的 verification-round 入账。绿/红共用这一处
     // （⛔ 不两条分支各写一份——那正是硬规则 5b 的成簇漏改形态）。本仓库形态（有 scripts/test.sh）⇒
     // suiteRunsOutsideRunner=false 直接返回，runner 已写，行为逐字不变（AC2 负控制）。
-    const recordDelegatedRound = (state: "green" | "red", startedAt: string, durationMs: number): void => {
-      if (!suiteRunsOutsideRunner(worktree)) return;
+    const recordDelegatedRound = (state: "green" | "red", startedAt: string, durationMs: number, o?: { force?: boolean; notEvaluated?: string }): void => {
+      // gap-watchdog-killed-round-writes-no-verification-round-record — `force` 是「本轮的预定 writer 已
+      // 经死了」这一事实的显式表达：suiteRunsOutsideRunner=false 时预定的 writer 是 full-suite-runner，而
+      // 静默看门狗 SIGKILL 的是【整个进程组】——runner 与它的 suite 一起死，它【结构上】写不成
+      // （这正是既有 `recordDelegatedRound` 提前返回没能覆盖本子类的根因）。此时活着的写者只剩 driver
+      // 进程自己（spawnSuiteAndWait 的调用方），记录必须由它补写。⛔ 只在「runner 不可能再写」的
+      // 情形下 force（调用点只有两个，且都在同一行：hungByWatchdog / spawnFailed——前者 runner 被
+      // 整组杀掉、后者 runner 根本没被 spawn），否则就是同一轮双写、round 号虚增。
+      if (!o?.force && !suiteRunsOutsideRunner(worktree)) return;
       const t0 = Date.now();
       const rd = appendDelegatedSuiteRound({
         task, runId: perSuiteRunId, root, commit: suiteHead,
         startedAt, durationMs, state, suiteLog: suiteLogFile, worktree,
+        notEvaluated: o?.notEvaluated,
       });
       // AC5 的可见性：项目声明了输出约定时，把【实际应用到的派生字段】写进 trace —— 声明有效但一条都
       // 没匹配上（applied={}）必须与「没声明」（applied=null）在记录上可分（硬规则 3b）。
@@ -4188,7 +4206,18 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
         const firstFailure = extractFirstFailureLine(suiteLogText);
         // gap-verification-round-bound-to-quay-shaped-suite-entry：第三方路径的红轮同样入账
         // （「跑了且红」必须与「没跑过」可分，硬规则 3b；与 full-suite-runner 的红绿皆入账契约一致）。
-        recordDelegatedRound("red", sr.startedAt, sr.durationMs);
+        // gap-watchdog-killed-round-writes-no-verification-round-record — `hung`（看门狗 SIGKILL 整组）
+        // 与 `red`（跑了且红）【不是同一件事】，入账形态也不同：被看门狗杀的这一轮没有任何结论 ⇒ 走
+        // NOT-EVALUATED 形状（evaluated:false + reason=watchdog-killed），且必须 force 写——预定的 writer
+        // （full-suite-runner）就在被杀的那个进程组里，它写不成。⛔ 控制流逐字不变（两者都返回 failSuite），
+        // 本改动只增加一条记录（AC5：不得让 exited-not-landed 比例上升）。
+        // 硬规则 5b：同一行上还有【第二个】同根形态——`spawnFailed`（suite 从未起来）同样使预定的 writer
+        // 不在路径上（runner 根本没被 spawn）。一起覆盖，⛔ 不留给下一个人再发现一次（本族前两次就是
+        // 一个一个被发现的）。两者的共同点是「本轮无结论」，故共用 NOT-EVALUATED 形状，只有 reason token 不同。
+        recordDelegatedRound("red", sr.startedAt, sr.durationMs,
+          sr.hungByWatchdog ? { force: true, notEvaluated: "watchdog-killed" }
+            : sr.spawnFailed === true ? { force: true, notEvaluated: "spawn-failed" }
+              : undefined);
         return failSuite(firstFailure || `suite ${sr.outcome}${sr.error ? `: ${sr.error}` : ""}`, sr.exitCode);
       }
       writeSuiteCapture(suiteCapture, {
