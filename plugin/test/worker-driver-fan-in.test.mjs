@@ -971,8 +971,52 @@ test("AC1+AC3 pure — recordQuickDeathBackoff: 退避按 task、间隔随次数
   assert.equal(s2.backoffUntil.get("gap-b"), undefined, "backoff cleared on non-quick-death");
 });
 
-test("AC1 pure — 按 task 隔离：一个 task 退避不影响另一个 task 的退避状态", () => {
-  const state = newQuickDeathBackoffState();
+// ── gap-reconcile-finalizes-live-worker-as-exited-and-double-dispatches-same-task（AC4）────────────
+// 孤儿 finalize 的 outcome 带 orphan_pid_liveness（/proc 实测取值）。⛔ 一个【没测量出来的】死亡不得
+// 烧重试预算：unknown（/proc 读不到）与 alive（其实还活着）都不算快速死亡，也不打断已测量的连续序列。
+
+test("AC4 (三值分流) — isQuickDeath/recordQuickDeathBackoff：只有实测 'exited' 才算死亡；'unknown'/'alive' 不计入连续计数", () => {
+  const cfg = { quickDeathMs: 60_000, backoffThreshold: 1, baseBackoffMs: 1000, maxBackoffMs: 5000 };
+
+  // ① 纯函数面：同一 (finalState, wallClock) 下三个取值给出不同判定。
+  assert.equal(isQuickDeath("failed", 5000, cfg, "exited"), true, "measured exit ⇒ quick death (既有语义不变)");
+  assert.equal(isQuickDeath("failed", 5000, cfg, "unknown"), false, "⛔ 没测成的死亡不是死亡");
+  assert.equal(isQuickDeath("failed", 5000, cfg, "alive"), false, "⛔ 还活着当然不是死亡");
+  assert.equal(isQuickDeath("failed", 5000, cfg, undefined), true, "缺字段（普通 worker 终态）⇒ 既有语义不变");
+
+  // ② AC4 左臂：N 次「无法判定」（N > backoffMaxRetries）⇒ 永远不 needs-human，且状态【不动】。
+  const unknownState = newQuickDeathBackoffState();
+  for (let i = 0; i < 5; i++) {
+    const r = recordQuickDeathBackoff(unknownState, "gap-unk", "failed", 5000, 100_000 + i, 3, cfg, "unknown");
+    assert.equal(r.quickDeath, false, `AC4: unknown #${i + 1} is not a quick death`);
+    assert.equal(r.newlyNeedsHuman, false, `AC4: unknown #${i + 1} never parks the task needs-human`);
+  }
+  assert.equal(unknownState.counts.get("gap-unk"), undefined, "AC4: unknown 不计数（⛔ 不烧重试预算）");
+  assert.equal(unknownState.backoffUntil.get("gap-unk"), undefined, "AC4: unknown 也不产生退避（没有死亡可退避）");
+
+  // ③ AC4 右臂（同构对照）：同样 N 次，换成「确认已退出」⇒ 到上限即 needs-human。
+  const exitedState = newQuickDeathBackoffState();
+  let parked = false;
+  for (let i = 0; i < 5; i++) {
+    parked = recordQuickDeathBackoff(exitedState, "gap-exi", "failed", 5000, 100_000 + i, 3, cfg, "exited").newlyNeedsHuman || parked;
+  }
+  assert.equal(parked, true, "AC4 对照：5 次【实测】快速死亡 ⇒ 到 maxRetries 标 needs-human");
+  assert.ok(exitedState.counts.get("gap-exi") >= 3, "AC4 对照：连续计数已达 maxRetries=3");
+  assert.notEqual(unknownState.counts.get("gap-unk"), exitedState.counts.get("gap-exi"),
+    "AC4 承重：同一构造下 unknown 与 exited 必须给出【不同】计数结果（否则这条判据什么也没测）");
+
+  // ④ unknown 不打断【已测量】的连续死亡序列（⛔ 与「非快速死亡 ⇒ 复位」刻意不同形，硬规则 3）。
+  const mixed = newQuickDeathBackoffState();
+  recordQuickDeathBackoff(mixed, "gap-mix", "failed", 5000, 100_000, 3, cfg, "exited");
+  assert.equal(mixed.counts.get("gap-mix"), 1, "one measured quick death");
+  recordQuickDeathBackoff(mixed, "gap-mix", "failed", 5000, 100_001, 3, cfg, "unknown");
+  assert.equal(mixed.counts.get("gap-mix"), 1, "unknown 后计数保持 1（⛔ 不复位——否则交错注入 unknown 可洗白真实 streak）");
+  const third = recordQuickDeathBackoff(mixed, "gap-mix", "failed", 5000, 100_002, 3, cfg, "exited");
+  assert.equal(mixed.counts.get("gap-mix"), 2, "the measured streak continues past an unknown");
+  assert.equal(third.newlyNeedsHuman, false, "2 < maxRetries ⇒ not yet parked");
+});
+
+test("AC1 pure — 按 task 隔离：一个 task 退避不影响另一个 task 的退避状态", () => {  const state = newQuickDeathBackoffState();
   const cfg = { quickDeathMs: 60_000, backoffThreshold: 1, baseBackoffMs: 1000, maxBackoffMs: 5000 };
   recordQuickDeathBackoff(state, "gap-a", "failed", 5000, 100_000, 3, cfg);
   assert.equal(isBackedOff(state, "gap-a", 100_000), true, "gap-a backed off");
