@@ -338,6 +338,12 @@ Usage:
 
   --kind <promotion|worker>   Required. Which driver the command targets.
   --root <path>               Workspace root (default: discovered via .quay/config.yml from cwd).
+  --confirm-timeout <s>       (start/restart) Liveness-confirmation window (default 30). \`start\` reports
+                              success ONLY after supervisor+driver are both confirmed alive; a supervisor
+                              that exited with no driver ⇒ \`start-failed:\` + the supervisor log tail,
+                              exit 1; a window that expires with the supervisor STILL alive ⇒
+                              \`start-pending:\` (explicitly NOT a death verdict — slow starts and
+                              crash-respawn loops look the same, so neither is called dead).
 
 Starting from a git worktree (quay-worktrees/…) is REJECTED — the resident supervisor must be
 carried from the workspace root (main checkout), not a short-lived worktree.

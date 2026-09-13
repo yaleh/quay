@@ -2,7 +2,7 @@
 id: gap-ac203-record-schema-has-no-kind-dimension
 title: AC-203「driver 在第三方项目真活」的记录 schema 没有 kind 维度 —— 三条证据无法区分验的是哪个 driver
   kind，而 goal/quality/meta 当场复现了它声称已排除的形态
-status: ready
+status: done
 labels:
   - gap
   - mechanism
@@ -175,3 +175,4 @@ already-running: confirmed driver pid=469455 confirmed_ms=2780
 - plugin/test/verify-deliver-coldstart.test.mjs
 - plugin/test/driver-runtime.test.mjs
 - tasks/gap-ac203-record-schema-has-no-kind-dimension.md
+- packages/quay/src/cli/help.ts

@@ -1100,6 +1100,10 @@ ac207_read_and_write() {
 # 允许 claude -p 作验证手段，但产品文档与 skill 文案不得声称 quay 会启动会话（SPEC-tmux-retirement）。
 step5_e2e() {
   local root="$1" qrl task_id goal_id bodyfile i status_json
+  # 本步探测/记录的 driver kind（gap-ac203-record-schema-has-no-kind-dimension AC1）：写成【一个】变量并被
+  # 下面三处同时消费（start / status 探测 / AC-203 记录里的 kind），⛔ 不是三处各写一个字面量——
+  # 「记录里的 kind 必须就是真正 start 过的那个 kind」这层绑定要由【代码】保证，⛔ 不是由注释保证。
+  local ac240_probe_kind="promotion"
   qrl="${STEP1_PREFIX}/bin/quay"; qrl="$(readlink -f "$qrl" 2>/dev/null || echo "$qrl")"
   AC207_HOST="$(hostname 2>/dev/null || echo '')"
   AC207_PROJECT_ROOT="$root"
@@ -1147,7 +1151,7 @@ BODY
   fi
   rm -f "$bodyfile"
   # ② 起 *-drivers（promotion 晋升 todo→ready；worker 派发 claude -p worker 实现）
-  node "$qrl" driver start --kind promotion --root "$root" >/dev/null 2>&1 || true
+  node "$qrl" driver start --kind "$ac240_probe_kind" --root "$root" >/dev/null 2>&1 || true
   node "$qrl" driver start --kind worker --root "$root" >/dev/null 2>&1 || true
   # ③ 轮询 done（至多 AC207_POLL_SECS，缺省 1800s=30min——worker 完整实现（worktree→开发→fan-in→suite）
   # 需较长时间；fail-closed 不无限等，超时即不写记录）
@@ -1165,17 +1169,19 @@ BODY
        && [ $(( (i - 1) % ac240_probe_every )) -eq 0 ]; then
       # 当场 probe（⛔ 非字面量）：driver_alive / carrier_records 由 probe_ac203_driver_status 解析
       # status 载体 JSON 得出；has_plugin_dir 由上面 stat $root/plugin 得出。
-      ac240_status="$(node "$qrl" driver status --kind promotion --root "$root" --json 2>/dev/null || true)"
+      ac240_status="$(node "$qrl" driver status --kind "$ac240_probe_kind" --root "$root" --json 2>/dev/null || true)"
       probe_ac203_driver_status "$ac240_status"
       echo "  [⑤ e2e] AC-203 probe (same run, same root): driver_alive=$AC203_DRIVER_ALIVE carrier_records=$AC203_CARRIER_RECORDS has_plugin_dir=$ac240_hpd evaluated=$AC203_EVALUATED"
       if [ "$AC203_EVALUATED" = "1" ] && [ "$AC203_DRIVER_ALIVE" = "1" ] && [ "$AC203_CARRIER_RECORDS" -gt 0 ] 2>/dev/null; then
         # 入参来源（⛔ 非字面量）：$AC203_DRIVER_ALIVE / $AC203_CARRIER_RECORDS ← probe_ac203_driver_status
         # 当场解析的 status 载体；$ac240_hpd ← 当场 stat 的 $root/plugin。复用唯一写入点
         # write_ac203_record（它经 ac_record_append 统一补 top-level build_sha）——⛔ 不新造第二个写入者。
-        if write_ac203_record "$AC203_HOST" "$root" "$ac240_hpd" "$AC203_DRIVER_ALIVE" "$AC203_CARRIER_RECORDS"; then
+        # kind 的值来源 = `$ac240_probe_kind` —— 与上面 start/status 消费的是【同一个变量】（⛔ 不是
+        # 凭记忆复述的字面量）：记录里的 kind 必须就是真正被 start 过的那个 kind。
+        if write_ac203_record "$AC203_HOST" "$root" "$ac240_hpd" "$AC203_DRIVER_ALIVE" "$AC203_CARRIER_RECORDS" "$ac240_probe_kind"; then
           AC203_WRITTEN_THIS_RUN=1
           AC203_WRITTEN_ROOT="$root"
-          echo "  [⑤ e2e] ac203 record written (same run, same root=$root) → $AC89"
+          echo "  [⑤ e2e] ac203 record written (same run, same root=$root, kind=$ac240_probe_kind) → $AC89"
         else
           echo "  [⑤ e2e] NOTE: AC-203 record NOT written (fail-closed: BUILD_SHA missing/non-40-hex or AC89 path empty — 缺值≠合格)"
         fi
@@ -3358,9 +3364,16 @@ probe_ac203_driver_status() {
 }
 
 # 写 GOAL-009-AC-203 记录（经 ac_record_append 统一补 top-level build_sha/ts——AC-214 新鲜度锚）。
-# 缺任一有效读数（host/project_root 空、driver_alive≠1、carrier_records 非正、has_plugin_dir≠0）
-# ⇒ 不写 return 1（硬规则 3b：缺值 ≠ 合格）。五字段逐字满足 criterion 过滤：
+# 缺任一有效读数（host/project_root 空、driver_alive≠1、carrier_records 非正、has_plugin_dir≠0、
+# kind 空/形状非法）⇒ 不写 return 1（硬规则 3b：缺值 ≠ 合格）。六字段逐字满足 criterion 过滤：
 # has_plugin_dir 必须是 JSON 字面 false（criterion 用 `is not False` 判）、driver_alive/carrier_records 是整数。
+#
+# `$6 = kind`（gap-ac203-record-schema-has-no-kind-dimension AC1/AC2）：该 AC 的判据现在要求记录集里
+# 存在【至少两个不同的 kind 取值】——「记录能区分验的是哪个 driver kind」是它标题那句「driver 真活」
+# 的最低可判形式。kind 的取值【不是】本 writer 决定的，而是调用点真正执行的那条 `driver start --kind
+# <k>` 的 `$k`（机械绑定，⛔ 不是调用方凭记忆复述）⇒ 词表的单一真源仍是 cli/driver.ts 的 KINDS。
+# 本 writer 只校验【形状】（非空 ∧ `^[a-z][a-z0-9-]*$`）：空值/畸形值拒写（缺值≠合格），但⛔ 不在此处
+# 复制一份 kind 白名单——那会造出第二个真源，正是本仓库反复踩过的漂移形态（见 AC_RECORD_SCHEMA 上方注释）。
 # gap-ac203-record-lacks-build-sha-makes-ac214-permanently-unsatisfiable：本写入点原为裸 printf、不带
 # top-level build_sha，而 AC-214 的 NEED 含 GOAL-009-AC-203 且其判据取 `sha = r.get("build_sha") or
 # r.get("commit")`（取不到 ⇒ 该 ac 落进 missing ⇒ exit 1）⇒ AC-203 即便产出也被判「无证据」。
@@ -3369,13 +3382,19 @@ probe_ac203_driver_status() {
 # 调用方先置全局（同 control 16/17 的既有形态）。helper 的 fail-closed 语义原样保留：BUILD_SHA 非
 # 40-hex 或 AC89 空 ⇒ 不写且 return 非 0，⛔ 不降级成「至少写点什么」的无锚记录（硬规则 3b）。
 write_ac203_record() {
-  local host="$1" project_root="$2" has_plugin_dir="$3" driver_alive="$4" carrier_records="$5"
+  local host="$1" project_root="$2" has_plugin_dir="$3" driver_alive="$4" carrier_records="$5" kind="$6"
   [ -n "$host" ] || return 1
   [ -n "$project_root" ] || return 1
   [ "$has_plugin_dir" = "0" ] || return 1
   [ "$driver_alive" = "1" ] || return 1
   [ "$carrier_records" -gt 0 ] 2>/dev/null || return 1
-  ac_record_append ",\"ac\":\"GOAL-009-AC-203\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"has_plugin_dir\":false,\"driver_alive\":$driver_alive,\"carrier_records\":$carrier_records"
+  # kind 的形状校验（值语义的其余部分归调用点：它传的是真正 start 过的那个 kind）。
+  # ⛔ 用 case 而非 `printf | grep -q`：pipefail 下 grep -q 命中即早退 ⇒ printf 收 SIGPIPE ⇒ 管道 141
+  # ⇒ 条件成立时反而判假（本仓实测过的形态，见 driver-runtime.test.mjs control 15 的同款注释）。
+  case "$kind" in
+    ""|*[!a-z0-9-]*|[!a-z]*) return 1 ;;
+  esac
+  ac_record_append ",\"ac\":\"GOAL-009-AC-203\",\"host\":\"$host\",\"project_root\":\"$project_root\",\"has_plugin_dir\":false,\"driver_alive\":$driver_alive,\"carrier_records\":$carrier_records,\"kind\":\"$kind\""
 }
 
 # ── 运行级「闭环由本次运行自证」取值（GOAL-009-AC-240）──────────────────────────────────────
@@ -3466,10 +3485,21 @@ step5_dual_carrier() {
   return 0
 }
 
-# step ④：在第三方项目（$ROOT，无 plugin/）里用 installed quay CLI start promotion driver，轮询 status 载体
-# 确认 driver_alive=1 ∧ carrier_records>0 ⇒ 写 AC-203 记录。缺任一生效读数不写（fail-closed）。
+# step ④ 要逐一验证存活的 driver kind 列表（空格分隔；测试/手动运行可用 AC203_KINDS 覆盖）。
+#
+# 为什么是【两个】而不是一个（gap-ac203-record-schema-has-no-kind-dimension AC1）：AC-203 的判据现在
+# 要求记录集里存在【至少两个不同的 kind 取值】——「某一个（未记录是哪个）kind 活过」曾被当成它标题
+# 那句「**driver** 在第三方项目里真活」的证明，而记录 schema 里根本没有 kind 维度，判据结构上无法
+# 区分（实测：三条记录全部来自 promotion，字段集里无 kind）。一个任务型（promotion）+ 一个例程型
+# （goal）恰好跨两类 ⇒ 判据的 kind 维度【能区分】。
+# ⛔ 不是「五个 kind 全跑」——那属于另一条边界（见该任务 DoD：五个 kind 已在 archguard 上手工跑过，
+# 本任务只负责让记录能区分，从而让「报成功但实际死亡」今后被机械拦下）。
+AC203_KINDS="${AC203_KINDS:-promotion goal}"
+
+# step ④：在第三方项目（$ROOT，无 plugin/）里用 installed quay CLI 逐个 start driver，轮询 status 载体
+# 确认 driver_alive=1 ∧ carrier_records>0 ⇒ 【按 kind 各写一条】AC-203 记录。缺任一生效读数不写（fail-closed）。
 step4_driver_liveness() {
-  local root="$1" qrl i status_json
+  local root="$1" qrl i status_json k
   # installed quay CLI 经 realpath（npm bin symlink 不派发——step1 已实测；loop 也走 realpath 的 .quay/runtime/bin/quay.js）。
   qrl="${STEP1_PREFIX}/bin/quay"
   qrl="$(readlink -f "$qrl" 2>/dev/null || echo "$qrl")"
@@ -3477,35 +3507,40 @@ step4_driver_liveness() {
   AC203_PROJECT_ROOT="$root"
   AC203_HAS_PLUGIN_DIR=1
   [ -d "$root/plugin" ] || AC203_HAS_PLUGIN_DIR=0
-  echo "== ④ driver liveness (AC-203): start promotion driver in the third-party project, read the status carrier =="
-  if ! node "$qrl" driver start --kind promotion --root "$root" >/dev/null 2>&1; then
-    echo "  FAIL: quay driver start --kind promotion exited non-zero (see $root/.quay logs)"
-    return 1
-  fi
-  # 轮询 status 至多 30s，等 driver 首轮写 round 心跳（carrier_records>0 的直接量）。
-  for i in $(seq 1 60); do
-    status_json="$(node "$qrl" driver status --kind promotion --root "$root" --json 2>/dev/null || true)"
-    probe_ac203_driver_status "$status_json"
-    if [ "$AC203_EVALUATED" = "1" ] && [ "$AC203_DRIVER_ALIVE" = "1" ] && [ "$AC203_CARRIER_RECORDS" -gt 0 ] 2>/dev/null; then break; fi
-    sleep 0.5
-  done
-  echo "  driver_alive=$AC203_DRIVER_ALIVE carrier_records=$AC203_CARRIER_RECORDS has_plugin_dir=$AC203_HAS_PLUGIN_DIR evaluated=$AC203_EVALUATED host=$AC203_HOST"
-  if [ "$AC203_EVALUATED" = "1" ] && [ "$AC203_DRIVER_ALIVE" = "1" ] && [ "$AC203_CARRIER_RECORDS" -gt 0 ] 2>/dev/null && [ "$AC203_HAS_PLUGIN_DIR" = "0" ]; then
-    # 写入点是 helper（统一补 top-level build_sha）；helper fail-closed ⇒ rc≠0 时【不写】。
-    # ⛔ 不因 rc≠0 中止本步（后续步骤不依赖该记录，且中止会把「缺锚」伪装成「脚本崩了」）；
-    # 但也 ⛔ 不静默——如实打印，与下一分支的 NOTE 同形（缺值≠合格，硬规则 3b）。
-    if write_ac203_record "$AC203_HOST" "$AC203_PROJECT_ROOT" "0" "1" "$AC203_CARRIER_RECORDS"; then
-      # AC-240：本次运行写出了 AC-203（step④ 是另一条产出路径，与 step⑤ 的探测点等价——
-      # 两者共用同一个 $ROOT，谁先写成算谁的；取值只看「本次运行写没写」，⛔ 不回读载体反推）。
-      AC203_WRITTEN_THIS_RUN=1
-      AC203_WRITTEN_ROOT="$AC203_PROJECT_ROOT"
-      echo "  ac203 record written → $AC89"
-    else
-      echo "  NOTE: AC-203 record NOT written (fail-closed: BUILD_SHA missing/non-40-hex or AC89 path empty — 缺值≠合格)"
+  echo "== ④ driver liveness (AC-203): start each of [$AC203_KINDS] in the third-party project, read each status carrier =="
+  # ⛔ 每个 kind 独立判定：一个 kind 起不来【不】中止整步、也不影响别的 kind 的记录——「一个死了」与
+  # 「这批全死了」必须可区分（硬规则 3b：单点失败不得被读成全体失败，也不得被读成全体成功）。
+  for k in $AC203_KINDS; do
+    if ! node "$qrl" driver start --kind "$k" --root "$root" >/dev/null 2>&1; then
+      echo "  FAIL: quay driver start --kind $k exited non-zero (see $root/.quay/${k}-driver-supervisor.log)"
+      continue
     fi
-    return 0
-  fi
-  echo "  NOTE: AC-203 record NOT written (driver not alive / no carrier records / plugin dir present — 缺值≠合格)"
+    # 轮询 status 至多 30s，等 driver 首轮写 round 心跳（carrier_records>0 的直接量）。
+    for i in $(seq 1 60); do
+      status_json="$(node "$qrl" driver status --kind "$k" --root "$root" --json 2>/dev/null || true)"
+      probe_ac203_driver_status "$status_json"
+      if [ "$AC203_EVALUATED" = "1" ] && [ "$AC203_DRIVER_ALIVE" = "1" ] && [ "$AC203_CARRIER_RECORDS" -gt 0 ] 2>/dev/null; then break; fi
+      sleep 0.5
+    done
+    echo "  kind=$k driver_alive=$AC203_DRIVER_ALIVE carrier_records=$AC203_CARRIER_RECORDS has_plugin_dir=$AC203_HAS_PLUGIN_DIR evaluated=$AC203_EVALUATED host=$AC203_HOST"
+    if [ "$AC203_EVALUATED" = "1" ] && [ "$AC203_DRIVER_ALIVE" = "1" ] && [ "$AC203_CARRIER_RECORDS" -gt 0 ] 2>/dev/null && [ "$AC203_HAS_PLUGIN_DIR" = "0" ]; then
+      # 写入点是 helper（统一补 top-level build_sha）；helper fail-closed ⇒ rc≠0 时【不写】。
+      # ⛔ 不因 rc≠0 中止本步（后续步骤不依赖该记录，且中止会把「缺锚」伪装成「脚本崩了」）；
+      # 但也 ⛔ 不静默——如实打印，与下一分支的 NOTE 同形（缺值≠合格，硬规则 3b）。
+      # `$k` 就是本条记录 kind 的值来源：它来自本行真正执行的那条 start（⛔ 不是凭记忆复述的常量）。
+      if write_ac203_record "$AC203_HOST" "$AC203_PROJECT_ROOT" "0" "1" "$AC203_CARRIER_RECORDS" "$k"; then
+        # AC-240：本次运行写出了 AC-203（step④ 是另一条产出路径，与 step⑤ 的探测点等价——
+        # 两者共用同一个 $ROOT，谁先写成算谁的；取值只看「本次运行写没写」，⛔ 不回读载体反推）。
+        AC203_WRITTEN_THIS_RUN=1
+        AC203_WRITTEN_ROOT="$AC203_PROJECT_ROOT"
+        echo "  ac203 record written (kind=$k) → $AC89"
+      else
+        echo "  NOTE: AC-203 record NOT written for kind=$k (fail-closed: BUILD_SHA missing/non-40-hex or AC89 path empty — 缺值≠合格)"
+      fi
+    else
+      echo "  NOTE: AC-203 record NOT written for kind=$k (driver not alive / no carrier records / plugin dir present — 缺值≠合格)"
+    fi
+  done
   return 0
 }
 
@@ -4327,13 +4362,15 @@ FAKE_NPM
   # point，与 control 16/17 同形）。
   local ac203_file="$tmp/ac203.jsonl" ac203_wrote=0 ac203_fields_ok=0 ac203_refused=0 ac203_ts="2026-09-09T00:00:00Z"
   local ac203_sha_hex=0 ac203_line="" ac203_neg_rc=0 ac203_neg_msg=0 ac203_neg_err="" ac203_lb=0 ac203_la=0
+  local ac203_kind_missing=0 ac203_kind_bad=0 ac203_kind_line=""
   AC89="$ac203_file"; TS="$ac203_ts"; BUILD_SHA="0123456789abcdef0123456789abcdef01234567"
-  if write_ac203_record "hostB-fake" "/tmp/third-party-fake" "0" "1" "5"; then
+  if write_ac203_record "hostB-fake" "/tmp/third-party-fake" "0" "1" "5" "goal"; then
     ac203_wrote=1
     if grep -q '"ac":"GOAL-009-AC-203"' "$ac203_file" \
        && grep -q '"has_plugin_dir":false' "$ac203_file" \
        && grep -q '"driver_alive":1' "$ac203_file" \
-       && grep -q '"carrier_records":5' "$ac203_file"; then
+       && grep -q '"carrier_records":5' "$ac203_file" \
+       && grep -q '"kind":"goal"' "$ac203_file"; then
       ac203_fields_ok=1
     fi
     ac203_line="$(tail -n 1 "$ac203_file")"
@@ -4341,14 +4378,19 @@ FAKE_NPM
     # ⇒ 管道 141 ⇒ 条件成立时反而判假（实测过的形态），且是否复现取决于宿主 grep。结构上避开管道。
     if [[ "$ac203_line" =~ \"build_sha\":\"[0-9a-f]{40}\" ]]; then ac203_sha_hex=1; fi
   fi
-  if ! write_ac203_record "hostB-fake" "/tmp/third-party-fake" "0" "0" "5" 2>/dev/null; then
+  if ! write_ac203_record "hostB-fake" "/tmp/third-party-fake" "0" "0" "5" "goal" 2>/dev/null; then
     ac203_refused=1
   fi
+  # kind 维度的 fail-closed（gap-ac203-record-schema-has-no-kind-dimension AC1/AC2）：空 kind 与
+  # 形状非法的 kind【都】拒写（缺值≠合格；typed kind 与拼错的 kind 不可互换）——两者行数都不变。
+  ac203_kind_line="$(tail -n 1 "$ac203_file" 2>/dev/null || true)"
+  if write_ac203_record "hostB-fake" "/tmp/third-party-fake" "0" "1" "5" "" >/dev/null 2>&1; then ac203_kind_missing=1; fi
+  if write_ac203_record "hostB-fake" "/tmp/third-party-fake" "0" "1" "5" "Promotion X" >/dev/null 2>&1; then ac203_kind_bad=1; fi
   # AC4 负控制：读数全有效、唯独 BUILD_SHA 空 ⇒ helper 拒写（rc≠0 ∧ stderr 带拒写提示 ∧ 行数不变）。
   ac203_lb="$(wc -l < "$ac203_file" 2>/dev/null || echo 0)"
   BUILD_SHA=""
   set +e
-  ac203_neg_err="$(write_ac203_record "hostB-fake" "/tmp/third-party-fake" "0" "1" "5" 2>&1 >/dev/null)"
+  ac203_neg_err="$(write_ac203_record "hostB-fake" "/tmp/third-party-fake" "0" "1" "5" "goal" 2>&1 >/dev/null)"
   ac203_neg_rc=$?
   set -e
   if [[ "$ac203_neg_err" == *"BUILD_SHA not 40-hex"* ]]; then ac203_neg_msg=1; fi
@@ -4357,7 +4399,55 @@ FAKE_NPM
   echo "selfcheck: ac203-record(valid) wrote=$ac203_wrote fields_ok=$ac203_fields_ok build_sha_40hex=$ac203_sha_hex (expect 1/1/1 — top-level 40-hex build_sha)"
   echo "selfcheck: ac203-record(valid) line=$ac203_line"
   echo "selfcheck: ac203-record(dead-driver) refused=$ac203_refused (expect 1 — driver_alive=0 拒写, 缺值≠合格)"
+  echo "selfcheck: ac203-record(kind-empty) wrote=$ac203_kind_missing (expect 0 — 空 kind 拒写)"
+  echo "selfcheck: ac203-record(kind-ill-formed) wrote=$ac203_kind_bad (expect 0 — 'Promotion X' 形状非法, 拒写)"
   echo "selfcheck: ac203-record(no-build-sha) rc=$ac203_neg_rc msg=$ac203_neg_msg lines=$ac203_lb→$ac203_la (expect non-0/1/1→1 — 空 BUILD_SHA 拒写且不降级成无锚记录)"
+
+  # control 15c (AC-203 kind 维度【判据级】可失败控制，gap-ac203-record-schema-has-no-kind-dimension AC1)：
+  #   ⛔ 上面 control 15 只测到【写入侧】带上了 kind，那不足以证明判据读了它（判据没读 ⇒ 记录写了也
+  #   白写，硬规则 4c 的「空转」半边：恒真但什么也没验到）。这里造一个【真夹具根】——
+  #   `<fx>/.quay/productization-verification.jsonl`（载体）+ `<fx>/goals/AC-203-*.md`（**真实判据本体**，
+  #   从本仓库拷入，⛔ 不是复刻一份）——再经唯一写入 choke point 落记录：`ac_record_finalize` 会拿
+  #   【真判据】在该根下复跑，退出码落在 AC_RECORD_RERUN_RC。三态：
+  #     ① 只写一条（kind=promotion）        ⇒ rerun_rc=1（一个 kind 不够）
+  #     ② 再写一条（kind=goal，取值不同）   ⇒ rerun_rc=0（两个不同 kind ⇒ 判据翻绿）
+  #     ③ 另一根：写两条**同 kind**         ⇒ rerun_rc=1（「有两条」不等于「能区分」——
+  #        这正是「某一个 kind 活过」冒充「driver 真活」的形态；负控制，⛔ 少了它 ② 可以是恒绿）
+  local ac203k_fx="$tmp/ac203k" ac203k_repo="" ac203k_g="" ac203k_l1="" ac203k_l2="" ac203k_rc1=""
+  local ac203k_rc2="" ac203k_same_fx="$tmp/ac203k-same" ac203k_same_rc=""
+  ac203k_repo="$(cd "$(dirname "$0")/../.." && pwd)"
+  mkdir -p "$ac203k_fx/.quay" "$ac203k_fx/goals" "$ac203k_same_fx/.quay" "$ac203k_same_fx/goals"
+  AC203K_RC1="not-evaluated"; AC203K_RC2="not-evaluated"; AC203K_SAME_RC="not-evaluated"
+  ac203k_g="$(ls "$ac203k_repo"/goals/AC-203-*.md 2>/dev/null | head -1 || true)"
+  if [ -n "$ac203k_g" ] && [ -r "$ac203k_g" ]; then
+    cp "$ac203k_g" "$ac203k_fx/goals/"
+    cp "$ac203k_g" "$ac203k_same_fx/goals/"
+    TS="$ac203_ts"; BUILD_SHA="0123456789abcdef0123456789abcdef01234567"
+    AC89="$ac203k_fx/.quay/productization-verification.jsonl"
+    write_ac203_record "hostB-fake" "/tmp/third-party-fake" "0" "1" "5" "promotion" >/dev/null 2>&1 || true
+    AC203K_RC1="${AC_RECORD_RERUN_RC}"
+    # ⚠️ 取【带上 ac 的那一行】而不是 tail -n 1：复跑判据会在同一载体追加一条 ac="…#criterion-rerun"
+    # 的独立记录（⛔ 不是本 AC 的记录，criterion 会跳过它）——tail 会取到那条，打印出来就不是「两条
+    # 记录原文」了。
+    ac203k_l1="$(grep '"ac":"GOAL-009-AC-203"' "$ac203k_fx/.quay/productization-verification.jsonl" 2>/dev/null | tail -n 1 || true)"
+    write_ac203_record "hostB-fake" "/tmp/third-party-fake" "0" "1" "5" "goal" >/dev/null 2>&1 || true
+    AC203K_RC2="${AC_RECORD_RERUN_RC}"
+    ac203k_l2="$(grep '"ac":"GOAL-009-AC-203"' "$ac203k_fx/.quay/productization-verification.jsonl" 2>/dev/null | tail -n 1 || true)"
+    AC89="$ac203k_same_fx/.quay/productization-verification.jsonl"
+    write_ac203_record "hostB-fake" "/tmp/third-party-fake" "0" "1" "5" "promotion" >/dev/null 2>&1 || true
+    write_ac203_record "hostB-fake" "/tmp/third-party-fake" "0" "1" "5" "promotion" >/dev/null 2>&1 || true
+    AC203K_SAME_RC="${AC_RECORD_RERUN_RC}"
+    AC89=""; TS=""; BUILD_SHA=""
+  fi
+  echo "selfcheck: ac203-kind-criterion(one-kind) rerun_rc=$AC203K_RC1 (expect 1 — 单 kind 记录集不满足「>=2 个不同 kind」)"
+  echo "selfcheck: ac203-kind-criterion(two-distinct-kinds) rerun_rc=$AC203K_RC2 (expect 0 — promotion+goal ⇒ 真判据翻绿)"
+  echo "selfcheck: ac203-kind-criterion(two-SAME-kind) rerun_rc=$AC203K_SAME_RC (expect 1 — 两条同 kind 不算能区分; 负控制, ⛔ 少了它上一条可以是恒绿)"
+  echo "selfcheck: ac203-kind-record(promotion) $ac203k_l1"
+  echo "selfcheck: ac203-kind-record(goal) $ac203k_l2"
+  if [ -z "$ac203k_g" ]; then fail="$fail AC203-kind-criterion-fixture-goal-file-missing"; fi
+  [ "$AC203K_RC1" = "1" ] || fail="$fail AC203-kind-criterion-accepts-a-single-kind"
+  [ "$AC203K_RC2" = "0" ] || fail="$fail AC203-kind-criterion-rejects-two-distinct-kinds"
+  [ "$AC203K_SAME_RC" = "1" ] || fail="$fail AC203-kind-criterion-accepts-two-identical-kinds"
 
   # control 15b (AC-203 status 解析, gap-cross-host-evidence-run-incomplete-… AC5 真因):
   #   probe_ac203_driver_status 的 node 曾把 alive= / recs= 打在同一行 ⇒ sed `^recs=` 永不命中（
@@ -4383,7 +4473,7 @@ FAKE_NPM
   BUILD_SHA="0123456789abcdef0123456789abcdef01234567"
   # ⚠️ 片段按 AC_RECORD_SCHEMA 的 AC-203 行【写全】：写入通道现在会先按声明校验（AC3），
   # 只带 host 的片段今天会被 schema 拒（那是「漏字段」的负控制，另有专门用例），此处要测的是补锚。
-  ac_record_append ',"ac":"GOAL-009-AC-203","host":"B","project_root":"/tmp/third-party-fake","has_plugin_dir":false,"driver_alive":1,"carrier_records":5'; g15_rc=$?
+  ac_record_append ',"ac":"GOAL-009-AC-203","host":"B","project_root":"/tmp/third-party-fake","has_plugin_dir":false,"driver_alive":1,"carrier_records":5,"kind":"promotion"'; g15_rc=$?
   g15_pos="$(grep -c '"ac":"GOAL-009-AC-203"' "$g009_file" 2>/dev/null || echo 0)"
   g15_build="$(grep -c '"build_sha":"0123456789abcdef0123456789abcdef01234567"' "$g009_file" 2>/dev/null || echo 0)"
   BUILD_SHA=""
@@ -5237,7 +5327,7 @@ AC250NEG
      && [ "$fn_v_neg" = "0" ] && [ "$fn_w_neg" = "0" ] \
      && [ "$bl_ok" = "1" ] \
      && [ "$tp_ok" = "1" ]; then
-    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the five criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0) and refuses to write a dead-driver record (fail-closed); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed); AC-204 carrier record writes the five criterion fields verbatim (forbidden_count=0 integer, enable_declared=true literal) and refuses a forbidden-copy or no-enable record (fail-closed, 成对判定); AC-205 carrier record writes the three criterion fields verbatim (shipped_from_installed_artifact=true + transcript_confirmed=true literals, top-level build_sha) with transcript_confirmed derived from transcript-delivery-check reading the transcript (hit ⇒ delivered / miss ⇒ not) — never from a send exit code — and refuses shipped=false / transcript_confirmed=false / empty-host (fail-closed, AC4 负控制); AC-234 render counts are derived from rendered HTML content (task/goal anchors + round-row anchors — never an HTTP status code, AC2) and can take false (empty-shell page ⇒ 0/0/0); the AC-234 carrier record writes the six criterion fields verbatim (tasks_rendered/goals_rendered/round_records_rendered as JSON integers) and refuses a zero-count or empty-host record (fail-closed, AC4 负控制); the AC-232 carrier record writes the three criterion fields verbatim (goal_write_ok/goal_read_back_ok as JSON literals, goal_records as a JSON integer) with a top-level build_sha anchor, truthfully writes false/0 when the goal write fails or read-back is empty (缺件如实非静默, AC4 负控制 — 写调用 0 与空文件同形), and refuses an empty-host record (fail-closed, 硬规则 3b); AC-207 carrier record writes the eight criterion fields verbatim (produced_by_driver=true literal, gate_events>0, task_status=done, commit_sha/task_id non-empty, commit_files non-empty JSON array with ≥1 path outside the tasks/ goals/ .quay/ triplet, top-level build_sha) and refuses produced_by_driver=false / gate_events=0 / bookkeeping-files-only / no-files (fail-closed, 硬规则 3b); AC-207 implementation-commit SELECTION picks the real implementation commit even when newer bookkeeping commits sit on top of it (the old grep-v-chore-quay-init-then-head-1 form picked the 翻-done commit — gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit), yields empty + non-zero when only bookkeeping commits exist (⇒ no record, never a bookkeeping commit dressed up as one), and the bookkeeping judgment is positional (touched files, not commit-message text); AC-240 run-level closure self-evidence takes three DISTINGUISHABLE values (1 = AC-203 and AC-207 both written by THIS run for the SAME project_root; 0 = this run attempted the e2e but the closure is not self-evidenced, with a non-empty NOTE naming the sub-reason; not-evaluated = --ac207-e2e not passed — 未评估 ≠ 不合格, 硬规则 3b), where 0 also covers the origin defect's own shape (AC-207 written, AC-203 never probed in step⑤) and the both-written-but-different-roots case (the pairing is on the SAME project_root, not on both being non-empty), and the AC-203 generation-side probe/write call is POSITIONALLY inside step5_e2e's body (0 before this task — the same-run pairing existed only as an accident, never as a requirement); segment ① (step1_install, the delivery-install path) leaves the operator's real ~/.claude/settings.json BYTE-IDENTICAL (HOME isolated to \${PREFIX}.home + QUAY_SKIP_PLUGIN_CLI=1 — the CLI materialization that re-reddened AC-161), with the isolated HOME proven to have received the postinstall write (so the green is not a not-run vacuity), and that assertion can take FALSE (isolation target pointed back at the real HOME ⇒ signature changes); and the AC-239 landing-baseline pre-flight classifier takes every value (REUSED⇒compatible / ADOPTED⇒divergent / BLOCKED⇒divergent / CREATED⇒absent / no-line-or-rc≠0⇒unreadable) — so a target copy whose 'develop' is a foreign fork stops ⑦b with an attributable 5-second reading instead of an hour-long poll whose non-done end state is indistinguishable from a worker that failed to implement (gap-aged-project-post-upgrade-driver-e2e 本轮新增); and the AC-247 takeover producer writes its eight criterion fields verbatim (host / project_root / pre_task_count / post_task_count / stale_days / driver_alive / carrier_records, plus the top-level build_sha coming from the ONE anchor choke point — the writer's own body carries no second anchor literal) and refuses EVERY one of them when it cannot be read (including stale_days one thousandth below the 14-day boundary, while 14.000 itself is accepted — so the threshold is neither always-true nor always-false), takes its liveness reading from the SAME status carrier the AC-203 parser reads and never from \`driver start\`'s exit code (negative control: swapping the right-hand side to the start rc flips the predicate), counts the project's OWN task store through its own ABI with ONE implementation read at both moments (a non-JSON or empty CLI reply is NOT a zero — it prints nothing and returns non-zero), and derives stale_days from the HEAD commit time captured BEFORE the takeover action (GOAL-016 AC-247 本轮新增); and the AC-248 adr-check producer reads a FLIP — the SAME reading (the target project's OWN checker's candidate set, taken by calling that checker's own exported enumerator, never a quay-side 「equivalent」 ADR-007 judgment) at the implementation commit's parent and at the implementation commit itself, both materialized with \`git archive\` into isolated paths so the two runs differ by the fix alone; it writes the record ONLY when the newly-entered tool name (the set difference — empty ⇒ no probe ⇒ no record) is strictly outside the before set and strictly inside the after set, refuses reversed direction / \`0\`-\`1\` / \`\"false\"\` strings / missing fields / bookkeeping-only commit_files / empty probe tool, and its writer body carries ZERO \`true\`/\`false\` literals (the booleans are the two run readings verbatim, emitted as JSON booleans; a single run's exit code is never a criterion field — that is exactly the value that is already green today and therefore carries no information) (GOAL-016 AC-248 本轮新增); and the AC-record schema mechanism (gap-ac-record-schema-duplicated-between-criterion-and-writer) makes the field list a SINGLE declarative source (AC_RECORD_SCHEMA) enforced at the ONE write choke point: a record missing a declared field (or carrying the wrong JSON type, or belonging to an unregistered ac) is REFUSED at production time with the field named and NOTHING written — the failing write writes zero lines, the completed one writes exactly one, and an unregistered ac is refused too (so adding an AC means adding a declaration row, not a new hand-written writer); a brand-new AC produces a valid record by adding ONE schema row and calling the generic write_ac_record with NO new write_acNNN_record function; every declared field of GOAL-016 AC-247/248/249/250 is individually enforced at write time (omitting any one of them is refused); and after a record lands the corresponding criterion is AUTOMATICALLY re-run with its exit code recorded (a green criterion records rerun_rc=0 silently, while an appended record whose criterion still exits 1 is recorded rerun_rc=1 AND loudly reported as AC-RECORD-RERUN-FAILED — never silently treated as success); and the drift report can take FALSE (dropping a criterion-read field from the declaration flips it to DRIFT naming that field, and removing a whole declaration row is caught by the producer-side unregistered check — 硬规则 4/5: 一个永远打印 ok 的检查不是测量, 而「少一行」会让按行驱动的报告打印全绿)"
+    echo "selfcheck: PASS — AC2 direct measures can take false (chore auto-commit excluded; proc_ok demoted by startup-prompt) and true (loop work; proc_ok + passed-prompt); L1 closed-set is parsed from SPEC (spec-mutate flips verdict, missing-spec is NOT-evaluated ≠ qualified); AC5 can take false (old build), true (recent build), and be distinct when not evaluated; marketplace channel (AC168) registers via register-plugin.mjs and can take false (no-register ⇒ no entry) and true (register ⇒ entry + no enabledPlugins leak), and a register failure is recorded structurally (exit code not swallowed, AC5); AC-203 carrier record writes the six criterion fields verbatim (has_plugin_dir=false literal, driver_alive=1, carrier_records>0, kind=<the kind actually started>) and refuses to write a dead-driver record (fail-closed) as well as an empty or ill-formed kind, and the AC-203 CRITERION itself can take all three values against a fixture root carrying the real goal file (one recorded kind ⇒ rerun_rc=1, two DISTINCT kinds ⇒ 0, two IDENTICAL kinds ⇒ 1 — so "some unnamed kind was alive" can no longer be read as "the driver is really alive", gap-ac203-record-schema-has-no-kind-dimension AC1/AC2); AC-201 record append writes top-level {ts,ac,build_sha,tgz_sha256} only when BUILD_SHA and SHA256_QUAY are both non-empty (positive 40-hex/64-hex; negative empty-BUILD_SHA writes nothing, 硬规则 3b); GOAL-009 anchor helper appends top-level build_sha on a 40-hex BUILD_SHA and refuses (non-zero, no write) on an empty BUILD_SHA (AC-214 fail-closed); AC-206 carrier record writes the four boolean fields verbatim (goals_dir_created/tasks_dir_created/goal_store_readable/task_store_readable) and refuses an empty-host record (fail-closed); AC-204 carrier record writes the five criterion fields verbatim (forbidden_count=0 integer, enable_declared=true literal) and refuses a forbidden-copy or no-enable record (fail-closed, 成对判定); AC-205 carrier record writes the three criterion fields verbatim (shipped_from_installed_artifact=true + transcript_confirmed=true literals, top-level build_sha) with transcript_confirmed derived from transcript-delivery-check reading the transcript (hit ⇒ delivered / miss ⇒ not) — never from a send exit code — and refuses shipped=false / transcript_confirmed=false / empty-host (fail-closed, AC4 负控制); AC-234 render counts are derived from rendered HTML content (task/goal anchors + round-row anchors — never an HTTP status code, AC2) and can take false (empty-shell page ⇒ 0/0/0); the AC-234 carrier record writes the six criterion fields verbatim (tasks_rendered/goals_rendered/round_records_rendered as JSON integers) and refuses a zero-count or empty-host record (fail-closed, AC4 负控制); the AC-232 carrier record writes the three criterion fields verbatim (goal_write_ok/goal_read_back_ok as JSON literals, goal_records as a JSON integer) with a top-level build_sha anchor, truthfully writes false/0 when the goal write fails or read-back is empty (缺件如实非静默, AC4 负控制 — 写调用 0 与空文件同形), and refuses an empty-host record (fail-closed, 硬规则 3b); AC-207 carrier record writes the eight criterion fields verbatim (produced_by_driver=true literal, gate_events>0, task_status=done, commit_sha/task_id non-empty, commit_files non-empty JSON array with ≥1 path outside the tasks/ goals/ .quay/ triplet, top-level build_sha) and refuses produced_by_driver=false / gate_events=0 / bookkeeping-files-only / no-files (fail-closed, 硬规则 3b); AC-207 implementation-commit SELECTION picks the real implementation commit even when newer bookkeeping commits sit on top of it (the old grep-v-chore-quay-init-then-head-1 form picked the 翻-done commit — gap-ac207-commit-sha-points-at-bookkeeping-flip-not-implementation-commit), yields empty + non-zero when only bookkeeping commits exist (⇒ no record, never a bookkeeping commit dressed up as one), and the bookkeeping judgment is positional (touched files, not commit-message text); AC-240 run-level closure self-evidence takes three DISTINGUISHABLE values (1 = AC-203 and AC-207 both written by THIS run for the SAME project_root; 0 = this run attempted the e2e but the closure is not self-evidenced, with a non-empty NOTE naming the sub-reason; not-evaluated = --ac207-e2e not passed — 未评估 ≠ 不合格, 硬规则 3b), where 0 also covers the origin defect's own shape (AC-207 written, AC-203 never probed in step⑤) and the both-written-but-different-roots case (the pairing is on the SAME project_root, not on both being non-empty), and the AC-203 generation-side probe/write call is POSITIONALLY inside step5_e2e's body (0 before this task — the same-run pairing existed only as an accident, never as a requirement); segment ① (step1_install, the delivery-install path) leaves the operator's real ~/.claude/settings.json BYTE-IDENTICAL (HOME isolated to \${PREFIX}.home + QUAY_SKIP_PLUGIN_CLI=1 — the CLI materialization that re-reddened AC-161), with the isolated HOME proven to have received the postinstall write (so the green is not a not-run vacuity), and that assertion can take FALSE (isolation target pointed back at the real HOME ⇒ signature changes); and the AC-239 landing-baseline pre-flight classifier takes every value (REUSED⇒compatible / ADOPTED⇒divergent / BLOCKED⇒divergent / CREATED⇒absent / no-line-or-rc≠0⇒unreadable) — so a target copy whose 'develop' is a foreign fork stops ⑦b with an attributable 5-second reading instead of an hour-long poll whose non-done end state is indistinguishable from a worker that failed to implement (gap-aged-project-post-upgrade-driver-e2e 本轮新增); and the AC-247 takeover producer writes its eight criterion fields verbatim (host / project_root / pre_task_count / post_task_count / stale_days / driver_alive / carrier_records, plus the top-level build_sha coming from the ONE anchor choke point — the writer's own body carries no second anchor literal) and refuses EVERY one of them when it cannot be read (including stale_days one thousandth below the 14-day boundary, while 14.000 itself is accepted — so the threshold is neither always-true nor always-false), takes its liveness reading from the SAME status carrier the AC-203 parser reads and never from \`driver start\`'s exit code (negative control: swapping the right-hand side to the start rc flips the predicate), counts the project's OWN task store through its own ABI with ONE implementation read at both moments (a non-JSON or empty CLI reply is NOT a zero — it prints nothing and returns non-zero), and derives stale_days from the HEAD commit time captured BEFORE the takeover action (GOAL-016 AC-247 本轮新增); and the AC-248 adr-check producer reads a FLIP — the SAME reading (the target project's OWN checker's candidate set, taken by calling that checker's own exported enumerator, never a quay-side 「equivalent」 ADR-007 judgment) at the implementation commit's parent and at the implementation commit itself, both materialized with \`git archive\` into isolated paths so the two runs differ by the fix alone; it writes the record ONLY when the newly-entered tool name (the set difference — empty ⇒ no probe ⇒ no record) is strictly outside the before set and strictly inside the after set, refuses reversed direction / \`0\`-\`1\` / \`\"false\"\` strings / missing fields / bookkeeping-only commit_files / empty probe tool, and its writer body carries ZERO \`true\`/\`false\` literals (the booleans are the two run readings verbatim, emitted as JSON booleans; a single run's exit code is never a criterion field — that is exactly the value that is already green today and therefore carries no information) (GOAL-016 AC-248 本轮新增); and the AC-record schema mechanism (gap-ac-record-schema-duplicated-between-criterion-and-writer) makes the field list a SINGLE declarative source (AC_RECORD_SCHEMA) enforced at the ONE write choke point: a record missing a declared field (or carrying the wrong JSON type, or belonging to an unregistered ac) is REFUSED at production time with the field named and NOTHING written — the failing write writes zero lines, the completed one writes exactly one, and an unregistered ac is refused too (so adding an AC means adding a declaration row, not a new hand-written writer); a brand-new AC produces a valid record by adding ONE schema row and calling the generic write_ac_record with NO new write_acNNN_record function; every declared field of GOAL-016 AC-247/248/249/250 is individually enforced at write time (omitting any one of them is refused); and after a record lands the corresponding criterion is AUTOMATICALLY re-run with its exit code recorded (a green criterion records rerun_rc=0 silently, while an appended record whose criterion still exits 1 is recorded rerun_rc=1 AND loudly reported as AC-RECORD-RERUN-FAILED — never silently treated as success); and the drift report can take FALSE (dropping a criterion-read field from the declaration flips it to DRIFT naming that field, and removing a whole declaration row is caught by the producer-side unregistered check — 硬规则 4/5: 一个永远打印 ok 的检查不是测量, 而「少一行」会让按行驱动的报告打印全绿)"
     rc=0
   else
     echo "selfcheck: FAIL — d1=$d1 d2=$d2 a1=$a1 a2=$a2 ac249_self_ok=$ac249_self_ok p1=$p1 p2=$p2 p3=$p3 p4=$p4 p5=$p5 n1=$n1 n2=$n2 s_ok1=$s_ok1 s_cnt1=$s_cnt1 s_ok2=$s_ok2 s_cnt2=$s_cnt2 c3_e=$c3_e c3_ok=$c3_ok c4_e=$c4_e c4_ok=$c4_ok c5_e=$c5_e c5_ok=$c5_ok m1_ev=$m1_ev m1_reg=$m1_reg m1_ok=$m1_ok m1_leak=$m1_leak m2_ok=$m2_ok m3_ok=$m3_ok m3_leak=$m3_leak m4_reg=$m4_reg m4_rc=$m4_rc ac203_wrote=$ac203_wrote ac203_fields_ok=$ac203_fields_ok ac203_refused=$ac203_refused ac203_parse_alive=$ac203_parse_alive ac203_parse_recs=$ac203_parse_recs ac201_pos_w=$ac201_pos_w ac201_pos_ac=$ac201_pos_ac ac201_neg_w=$ac201_neg_w ac201_neg_lines=$ac201_neg_lines g15_rc=$g15_rc g15_pos=$g15_pos g15_build=$g15_build g16_rc=$g16_rc g16_before=$g16_before g16_after=$g16_after ac206_wrote=$ac206_wrote ac206_fields_ok=$ac206_fields_ok ac206_neg_ok=$ac206_neg_ok ac206_refused=$ac206_refused ac204_wrote=$ac204_wrote ac204_fields_ok=$ac204_fields_ok ac204_refused_fc=$ac204_refused_fc ac204_refused_en=$ac204_refused_en ac205_tc_hit=$ac205_tc_hit ac205_tc_miss=$ac205_tc_miss ac205_wrote=$ac205_wrote ac205_fields_ok=$ac205_fields_ok ac205_ship_refused=$ac205_ship_refused ac205_conf_refused=$ac205_conf_refused ac205_host_refused=$ac205_host_refused ac234_tasks_pos=$ac234_tasks_pos ac234_goals_pos=$ac234_goals_pos ac234_rounds_pos=$ac234_rounds_pos ac234_tasks_neg=$ac234_tasks_neg ac234_goals_neg=$ac234_goals_neg ac234_rounds_neg=$ac234_rounds_neg ac234_wrote=$ac234_wrote ac234_fields_ok=$ac234_fields_ok ac234_refused_zc=$ac234_refused_zc ac234_refused_em=$ac234_refused_em ac232_wrote=$ac232_wrote ac232_fields_ok=$ac232_fields_ok ac232_neg_ok=$ac232_neg_ok ac232_refused=$ac232_refused ac207_wrote=$ac207_wrote ac207_fields_ok=$ac207_fields_ok ac207_refused_pdb=$ac207_refused_pdb ac207_refused_ge=$ac207_refused_ge ac207_refused_bkfiles=$ac207_refused_bkfiles ac207_refused_nofiles=$ac207_refused_nofiles ac207_sel_rc=$ac207_sel_rc ac207_only_rc=$ac207_only_rc ac207_bk_tasks_only=$ac207_bk_tasks_only ac207_impl_marker=$ac207_impl_marker ac207_before=$ac207_before ac207_after_neg=$ac207_after_neg ac207_neg_trace=$ac207_neg_trace ac207_after_pos=$ac207_after_pos ac207_pipe_grep=$ac207_pipe_grep ac240_v1=$ac240_v1 ac240_v0=$ac240_v0 ac240_vdiff=$ac240_vdiff ac240_vne=$ac240_vne ac240_step5_hits=$ac240_step5_hits fn_v_pos=$fn_v_pos fn_w_pos=$fn_w_pos fn_iso_written=$fn_iso_written fn_sent_same=$fn_sent_same fn_v_neg=$fn_v_neg fn_w_neg=$fn_w_neg tp_ok=$tp_ok tp_pos_status=$tp_pos_status tp_pos_launcher=$tp_pos_launcher tp_pos_model=$tp_pos_model tp_pos_auth=$tp_pos_auth tp_neg_status=$tp_neg_status tp_neg_rc=$tp_neg_rc tp_ovr_launcher=$tp_ovr_launcher tp_ovr_model=$tp_ovr_model tp_ovr_auth=$tp_ovr_auth tp_res1=$tp_res1 tp_res2=$tp_res2 bl_ok=$bl_ok bl_reused=$bl_reused bl_adopted=$bl_adopted bl_blocked=$bl_blocked bl_created=$bl_created bl_noline=$bl_noline bl_badrc=$bl_badrc"
@@ -5668,7 +5758,14 @@ selfcheck_ac249() {
 # 地址非回环、driver_alive=1、任务状态翻 done…）仍留在各自 writer 体内——那里有上下文，本表不重复它。
 AC_RECORD_SCHEMA='
 GOAL-009-AC-201 build_sha:hex40 tgz_sha256:str
-GOAL-009-AC-203 host:str project_root:str has_plugin_dir:bool driver_alive:int carrier_records:int
+# AC-203 `kind:str`（gap-ac203-record-schema-has-no-kind-dimension）：该 AC 声称的命题是「**driver**
+# 在无 plugin/ 的第三方项目里真活」，而它原来的字段集里【没有 kind 这个维度】⇒ 结构上不可能区分
+# 「验的是 promotion 还是 goal」；绿只能说明「某一个（未记录是哪个）kind 活过」。人 2026-09-13 裁定
+# 所有 driver kind 都要在目标项目实际运行后，该 AC 的覆盖对象从 1 个 kind 扩到 5 个 ⇒ 必须能区分。
+# ⚠️ 本行【不】声明 kind 的取值词表：词表的单一真源是 cli/driver.ts 的 KINDS（经 `--kind` 传给驱动）
+# ——在这里再抄一份就是制造第二个真源（本仓库反复踩过的漂移形态）。本表只管「字段在不在 + 类型」，
+# 值的形状在下游 writer 里校验（同本表头注释的分工），值的来源是【真正被启动的那个 --kind】。
+GOAL-009-AC-203 host:str project_root:str has_plugin_dir:bool driver_alive:int carrier_records:int kind:str
 GOAL-009-AC-204 host:str project_root:str forbidden_count:int enable_declared:bool
 GOAL-009-AC-205 host:str shipped_from_installed_artifact:bool transcript_confirmed:bool
 GOAL-009-AC-206 host:str project_root:str goals_dir_created:bool tasks_dir_created:bool goal_store_readable:bool task_store_readable:bool

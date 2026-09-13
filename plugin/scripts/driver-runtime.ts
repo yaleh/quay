@@ -1226,21 +1226,132 @@ export function livenessForKind(root: string, kind: DriverKind, json: boolean, o
   return a.deaths.length > 0 ? 1 : 0;
 }
 
-/** start：无活 supervisor ⇒ 清孤儿驱动、spawn detached supervisor（setsid+nohup 等价）、等 driver pid
- *  落盘。有活 supervisor ⇒ already-running。 */
+/** start 的【存活确认窗口】（秒，缺省值）。⚠️ 它不是「死亡判定窗」——窗口用尽只产出
+ *  `start-pending`（第三种取值），死亡只在【决断信号】上判（见 startKind 的确认段注释）。 */
+const DEFAULT_CONFIRM_TIMEOUT_SECS = 30;
+/** 确认轮询间隔（ms）。轻量（读 pid 文件 + kill -0 判定），远小于窗口。 */
+const CONFIRM_POLL_MS = 250;
+
+/** 一个文件的末 N 行（报死因时贴出 supervisor 日志尾；读不到 ⇒ 空串，⛔ 不是「无死因」）。 */
+function fileTailLines(file: string, n = 8): string {
+  try {
+    return fs.readFileSync(file, "utf8").split("\n").filter((l) => l.trim() !== "").slice(-n).join("\n");
+  } catch {
+    return "";
+  }
+}
+
+/** 存活确认的判决（⛔ 三态不是布尔——硬规则 3b：「查过且起来了」与「查不成/还没起来」必须不同形）。
+ *  `confirmed` = supervisor ∧ driver 双活且【连续两次】轮询都读到；`dead` = 决断信号（supervisor 已
+ *  退出且无 driver）；`pending` = 窗口用尽而 supervisor 仍活（慢启动 / 崩溃-重拉循环）。 */
+export type ConfirmVerdict = "confirmed" | "dead" | "pending";
+
+export interface ConfirmResult {
+  verdict: ConfirmVerdict;
+  driverPid: number | null;
+  supervisorAlive: boolean;
+  driverAlive: boolean;
+  elapsedMs: number;
+}
+
+/** 等 driver 被确认存活（start 的【唯一】确认实现；spawn 路径与 already-running 路径共用，⛔ 不写两份）。
+ *  `supervisorGone` = supervisor 是否已不在（决断信号），由调用方给：spawn 路径用 spawn 句柄的 exit
+ *  事件（⛔ 不用 pidAlive——未 reap 的子进程是可 signal 的僵尸，见 startKind 注释）；already-running
+ *  路径用 `pidAlive(pid)`（那个进程不是我们的子进程，无僵尸问题）。 */
+async function awaitDriverConfirmation(
+  root: string,
+  kind: DriverKind,
+  opts: { supervisorGone: () => boolean; confirmSecs: number },
+): Promise<ConfirmResult> {
+  const confirmStartedAt = Date.now();
+  const deadline = confirmStartedAt + Math.max(0, opts.confirmSecs) * 1000;
+  // 稳定判据：双活必须被【连续两次】轮询都读到（`firstAliveAt` 起算 ≥ 一个轮询间隔）。为什么不是
+  // 「读到一次就确认」：`pidAlive` 对「刚 spawn 出来、尚未 import 完就自己退了」的进程会读到一次
+  // true（进程表里确实存在过）——一次采样分不开「起来了」与「短暂存在过」（硬规则 4b）。⛔ 这只推迟
+  // 确认，不产生假死（慢启动照样在窗口内确认）。
+  const settleMs = CONFIRM_POLL_MS;
+  let firstAliveAt = 0;
+  for (;;) {
+    const a = aliveness(root, kind);
+    if (a.supervisorAlive && a.driverAlive) {
+      if (firstAliveAt === 0) firstAliveAt = Date.now();
+      if (Date.now() - firstAliveAt >= settleMs) {
+        return { verdict: "confirmed", driverPid: a.driverPid, supervisorAlive: true, driverAlive: true, elapsedMs: Date.now() - confirmStartedAt };
+      }
+    } else {
+      firstAliveAt = 0;
+    }
+    if (opts.supervisorGone() && !a.driverAlive) {
+      return { verdict: "dead", driverPid: a.driverPid, supervisorAlive: a.supervisorAlive, driverAlive: a.driverAlive, elapsedMs: Date.now() - confirmStartedAt };
+    }
+    if (Date.now() >= deadline) {
+      return { verdict: "pending", driverPid: a.driverPid, supervisorAlive: a.supervisorAlive, driverAlive: a.driverAlive, elapsedMs: Date.now() - confirmStartedAt };
+    }
+    await sleep(CONFIRM_POLL_MS);
+  }
+}
+
+/** 把「未确认存活」如实报出（⛔ 不静默、⛔ 不与已确认同形）：死/未确认两种取值 + supervisor 日志尾
+ *  （死因在那里；⛔ 日志读不到时要说明「这不等于无死因」）。 */
+function reportUnconfirmed(root: string, kind: DriverKind, v: ConfirmResult, confirmSecs: number, err: (s: string) => void): void {
+  const st = statePaths(root, kind);
+  const tail = fileTailLines(st.supervisorLog);
+  if (v.verdict === "dead") {
+    err(`start-failed: kind=${kind} — supervisor 已退出且无 driver 存活（elapsed_ms=${v.elapsedMs}）。死因（${st.supervisorLog} 尾）:\n`);
+  } else {
+    err(
+      `start-pending: kind=${kind} — 确认窗口 ${confirmSecs}s 用尽，driver 未被确认存活` +
+      `（supervisor alive=${v.supervisorAlive ? 1 : 0}，driver pid=${v.driverPid ?? "none"} alive=${v.driverAlive ? 1 : 0}，elapsed_ms=${v.elapsedMs}）。` +
+      `⛔ 这不是死亡判定（慢启动 / 驱动崩溃-重拉循环与此同形）；复读用 quay driver status --kind ${kind}。日志尾:\n`,
+    );
+  }
+  err(tail ? `${tail}\n` : "(supervisor 日志为空/读不到 —— ⛔ 这不等于「无死因」)\n");
+}
+
+/** start：无活 supervisor ⇒ 清孤儿驱动、spawn detached supervisor（setsid+nohup 等价）、**确认 driver
+ *  真的活了**才报成功。有活 supervisor ⇒ already-running（⛔ 但同样要确认 driver 真活）。
+ *
+ *  gap-ac203-record-schema-has-no-kind-dimension（AC3/AC4）：本函数此前【无条件】打印
+ *  `started: …` 并返回 0（statusForKind 恒返回 0），而 driver 根本没活时同样如此——「报成功但实际
+ *  死亡」与「真的起来了」共用一种输出（硬规则 3b）。实测代价见 tasks/gap-ac203-record-schema-has-no-
+ *  kind-dimension.md 的 Proposal（2026-09-13 三个 kind 全中，真实死因只写在目标项目内部日志里）。
+ *
+ *  修法：把两个信号【分开取值】，⛔ 不用「等 N 秒看有没有 pid」当死亡判据（那是把【慢】读成【死】）：
+ *    · `started:`       supervisor 活 ∧ driver pid 文件在 ∧ driver 进程活，且该读数被**连续两次**轮询
+ *                       读到（一次采样分不开「起来了」与「刚 spawn 出来就退了」）—— 窗口内确认即成功。
+ *    · `start-failed:`  我们 spawn 的那个 supervisor 进程**已退出** ∧ driver 不活 ⇒ 再也没有谁会拉起
+ *                       driver。这是【决断信号】，与窗口大小无关（缺 driver 脚本、解释器不接受启动参数
+ *                       等都在此列），并贴出 supervisor 日志尾作为死因。
+ *    · `start-pending:` 窗口用尽而 supervisor **仍活着**（慢启动 / 驱动崩溃-重拉循环）⇒ 独立取值，
+ *                       ⛔ 不报「死」、⛔ 不打印 `started:`。退出码非 0 = 「未确认」≠「死」。
+ */
 export async function startKind(
   root: string,
   kind: DriverKind,
-  opts: { cap?: string; interval?: string; reconcileInterval?: string; restartDelaySecs: number; runId?: string },
+  opts: { cap?: string; interval?: string; reconcileInterval?: string; restartDelaySecs: number; runId?: string; confirmTimeoutSecs?: number },
   out: (s: string) => void = (s) => process.stdout.write(s),
   err: (s: string) => void = (s) => process.stderr.write(s),
 ): Promise<number> {
   const spec = DRIVER_KINDS[kind];
   const st = statePaths(root, kind);
+  const confirmSecs = Math.max(0, opts.confirmTimeoutSecs ?? DEFAULT_CONFIRM_TIMEOUT_SECS);
   const spidRaw = readPidFile(st.supervisorPidFile);
   if (spidRaw && pidAlive(spidRaw)) {
     out(`already-running: supervisor pid=${spidRaw}\n`);
-    return statusForKind(root, kind, true, out);
+    // ⚠️ 「supervisor 已在」⛔ 不等于「driver 真活」：supervisor 与 driver 之间隔着一次 spawn，
+    // driver 崩在重拉间隙里（或压根起不来）时，旧实现照样 exit 0 —— 与上面那条同一种「报成功但
+    // 实际死亡」（硬规则 5b：缺陷是成簇的，⛔ 只修被报出来的那一个）。⇒ 同一条确认通道走一遍：
+    // supervisor 会自己重拉 driver，故这里只需等，⛔ 不另写一份判定。
+    const v = await awaitDriverConfirmation(root, kind, {
+      supervisorGone: () => !pidAlive(spidRaw),
+      confirmSecs,
+    });
+    if (v.verdict === "confirmed") {
+      out(`already-running: confirmed driver pid=${v.driverPid ?? "?"} confirmed_ms=${v.elapsedMs}\n`);
+      return statusForKind(root, kind, true, out);
+    }
+    reportUnconfirmed(root, kind, v, confirmSecs, err);
+    return 1;
   }
   // gap-driver-drain-no-inverse AC2：drain 写 halted=true 后，start 照常 spawn supervisor 会起一个用户
   // 已 halt 的驱动。1a 类（promotion/worker）读到 halt ⇒ 本轮 break 退出 ⇒ supervisor respawn；
@@ -1299,13 +1410,20 @@ export async function startKind(
   });
   sup.unref();
   if (sup.pid) writePidFile(st.supervisorPidFile, sup.pid);
-  // 等 driver 真正 spawn（supervisor 首轮 spawn 后写 <prefix>.pid）。
-  for (let i = 0; i < 20; i++) {
-    if (fs.existsSync(st.driverPidFile)) break;
-    await sleep(500);
+
+  // ── 存活确认（见本函数头注释：三种取值分开，⛔ 不以窗口当死亡判据）────────────────────────────
+  // 决断信号用 spawn 句柄的 exit 事件（直接量），⛔ 不用 pidAlive(sup.pid)：被 spawn 的子进程在
+  // 未回收前仍是可 signal 的僵尸 ⇒ kill -0 对「已死但未 reap」返回成功（硬规则 4b：代理量与它要
+  // 代表的东西脱节）。
+  let supervisorExited = false;
+  sup.on("exit", () => { supervisorExited = true; });
+  const v = await awaitDriverConfirmation(root, kind, { supervisorGone: () => supervisorExited, confirmSecs });
+  if (v.verdict === "confirmed") {
+    out(`started: supervisor pid=${sup.pid ?? "?"} kind=${kind} run_id=${runId} driver pid=${v.driverPid ?? "?"} confirmed_ms=${v.elapsedMs}\n`);
+    return statusForKind(root, kind, true, out);
   }
-  out(`started: supervisor pid=${sup.pid ?? "?"} kind=${kind} run_id=${runId}\n`);
-  return statusForKind(root, kind, true, out);
+  reportUnconfirmed(root, kind, v, confirmSecs, err);
+  return 1;
 }
 
 /** stop（硬停：杀 supervisor + 驱动；⛔ 不杀 worker 在飞子进程）。 */
@@ -1371,7 +1489,7 @@ export function resumeKind(root: string, kind: DriverKind, out: (s: string) => v
 export async function restartKind(
   root: string,
   kind: DriverKind,
-  opts: { cap?: string; interval?: string; reconcileInterval?: string; restartDelaySecs: number; runId?: string },
+  opts: { cap?: string; interval?: string; reconcileInterval?: string; restartDelaySecs: number; runId?: string; confirmTimeoutSecs?: number },
   out: (s: string) => void = (s) => process.stdout.write(s),
   err: (s: string) => void = (s) => process.stderr.write(s),
 ): Promise<number> {
@@ -1393,6 +1511,7 @@ function parseKernelArgs(argv: string[]) {
   let cap: string | undefined;
   let restartDelay = "5";
   let runId: string | undefined;
+  let confirmTimeout: string | undefined;
   let json = false;
   for (let i = 1; i < args.length; i++) {
     const a = args[i];
@@ -1403,11 +1522,12 @@ function parseKernelArgs(argv: string[]) {
     else if (a === "--cap") cap = args[++i];
     else if (a === "--restart-delay") restartDelay = args[++i];
     else if (a === "--run-id") runId = args[++i];
+    else if (a === "--confirm-timeout") confirmTimeout = args[++i];
     else if (a === "--json") json = true;
     else if (a === "--help" || a === "-h") return { help: true } as const;
     else return { error: `driver-runtime: unknown argument: ${a}` } as const;
   }
-  return { cmd, kind, root, interval, reconcileInterval, cap, restartDelay, runId, json };
+  return { cmd, kind, root, interval, reconcileInterval, cap, restartDelay, runId, confirmTimeout, json };
 }
 
 function isNonNegInt(s: string): boolean {
@@ -1424,7 +1544,11 @@ export async function main(argv: string[]): Promise<number> {
 Usage:
   node --experimental-strip-types plugin/scripts/driver-runtime.ts <start|stop|drain|resume|status|restart|liveness> \\
     --kind <promotion|worker|outer|quality|meta|goal> [--root <repo>] [--interval <ms>] [--reconcile-interval <s>] [--cap <n>] \\
-    [--restart-delay <s>] [--run-id <id>] [--json]
+    [--restart-delay <s>] [--run-id <id>] [--confirm-timeout <s>] [--json]
+
+  --confirm-timeout <s>  start/restart 的【存活确认窗口】(default ${DEFAULT_CONFIRM_TIMEOUT_SECS})。窗口内确认 supervisor+driver
+                         双活 ⇒ \`started:\` 且退出 0；supervisor 进程已退出且无 driver ⇒ \`start-failed:\` 且退出 1
+                         并贴出 supervisor 日志尾；窗口用尽而 supervisor 仍活 ⇒ \`start-pending:\`（⛔ 不是死亡判定）。
 `);
     return 0;
   }
@@ -1433,7 +1557,7 @@ Usage:
     return 2;
   }
 
-  const { cmd, kind, root: rawRoot, interval, reconcileInterval, cap, restartDelay, runId, json } = parsed;
+  const { cmd, kind, root: rawRoot, interval, reconcileInterval, cap, restartDelay, runId, confirmTimeout, json } = parsed;
 
   if (!KNOWN_KINDS.includes(kind as DriverKind)) {
     process.stderr.write(`driver-runtime: unknown --kind: ${kind || "<empty>"} (expected ${KNOWN_KINDS.join("|")})\n`);
@@ -1477,14 +1601,19 @@ Usage:
     process.stderr.write(`driver-runtime: invalid --restart-delay: ${restartDelay}\n`);
     return 2;
   }
+  if (confirmTimeout !== undefined && !isNonNegInt(confirmTimeout)) {
+    process.stderr.write(`driver-runtime: invalid --confirm-timeout: ${confirmTimeout}\n`);
+    return 2;
+  }
 
   const restartDelaySecs = Number(restartDelay);
+  const confirmTimeoutSecs = confirmTimeout === undefined ? undefined : Number(confirmTimeout);
   const out = (s: string) => process.stdout.write(s);
   const err = (s: string) => process.stderr.write(s);
 
   switch (cmd) {
     case "start":
-      return await startKind(root, k, { cap, interval, reconcileInterval, restartDelaySecs, runId }, out, err);
+      return await startKind(root, k, { cap, interval, reconcileInterval, restartDelaySecs, runId, confirmTimeoutSecs }, out, err);
     case "stop":
       return await stopKind(root, k, out);
     case "drain":
@@ -1496,7 +1625,7 @@ Usage:
     case "liveness":
       return livenessForKind(root, k, json, out);
     case "restart":
-      return await restartKind(root, k, { cap, interval, reconcileInterval, restartDelaySecs, runId }, out, err);
+      return await restartKind(root, k, { cap, interval, reconcileInterval, restartDelaySecs, runId, confirmTimeoutSecs }, out, err);
     case "__supervise": {
       const supervisorRunId = runId || `${spec.runPrefix}-${Math.floor(Date.now() / 1000)}`;
       return await runSupervisor({ root, kind: k, cap, interval, reconcileInterval, restartDelaySecs, runId: supervisorRunId });

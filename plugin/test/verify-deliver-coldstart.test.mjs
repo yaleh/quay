@@ -129,6 +129,26 @@ test("AC2+AC5 — --selfcheck exits 0, reports PASS, and exercises both direct-m
     "AC-203 record: valid record written with has_plugin_dir=false literal + driver_alive=1 + carrier_records>0");
   assert.match(r.stdout, /ac203-record\(dead-driver\) refused=1/,
     "AC-203 record: a dead-driver (driver_alive=0) record is refused — the criterion can take false");
+  // gap-ac203-record-schema-has-no-kind-dimension AC1/AC2: the AC-203 record now carries a `kind`
+  // dimension (one record per started `driver start --kind <k>`) and the criterion requires >=2
+  // DISTINCT kinds — without it the AC's green only said "SOME unnamed kind was alive", which cannot
+  // distinguish promotion from goal. Two controls: the writer refuses an empty/ill-formed kind, and
+  // the REAL criterion (copied goal file, run by ac_record_finalize in a fixture root) takes all
+  // three values: one kind ⇒ 1, two distinct ⇒ 0, two IDENTICAL ⇒ 1.
+  assert.match(r.stdout, /ac203-record\(kind-empty\) wrote=0/,
+    "AC-203 record: an empty kind is refused at write time (缺值≠合格, 硬规则 3b)");
+  assert.match(r.stdout, /ac203-record\(kind-ill-formed\) wrote=0/,
+    "AC-203 record: an ill-formed kind ('Promotion X') is refused at write time");
+  assert.match(r.stdout, /ac203-kind-criterion\(one-kind\) rerun_rc=1/,
+    "AC-203 criterion: a single recorded kind does NOT satisfy it (the criterion really reads the kind dimension)");
+  assert.match(r.stdout, /ac203-kind-criterion\(two-distinct-kinds\) rerun_rc=0/,
+    "AC-203 criterion: promotion + goal ⇒ the REAL criterion turns green");
+  assert.match(r.stdout, /ac203-kind-criterion\(two-SAME-kind\) rerun_rc=1/,
+    "AC-203 criterion: two records of the SAME kind do not count as 'can distinguish' (negative control)");
+  assert.match(r.stdout, /ac203-kind-record\(promotion\) .*"kind":"promotion"/,
+    "AC-203 kind records are printed verbatim (record 1: promotion)");
+  assert.match(r.stdout, /ac203-kind-record\(goal\) .*"kind":"goal"/,
+    "AC-203 kind records are printed verbatim (record 2: goal)");
   // gap-cross-host-evidence-run-incomplete-… AC5 真因: probe_ac203_driver_status 的 node 曾把
   // alive=/recs= 打在同一行 ⇒ sed ^recs= 永不命中、^alive= 抓到 "1 recs=2" ⇒ AC-203 记录结构上写不出。
   // 此控制钉住两字段分两行解析（feed {"driver_alive":1,"carrier_records":2} ⇒ alive=1 recs=2）。

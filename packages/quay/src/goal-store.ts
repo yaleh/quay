@@ -73,8 +73,14 @@ import { queryGateEvents } from "./gate/gate-event-store.ts";
 import { commitStoreWrite, commitStoreBatch, resolveGitRoot, type CommitOutcome } from "./store-commit.ts";
 import { criterionFidelityVerdict, type FidelityInvokeJudge } from "./criterion-fidelity.ts";
 import { resolvePluginRoot } from "./plugin-root.ts";
+import { GOAL_STATUSES } from "./abi.ts";
 
-export const VALID_GOAL_STATUSES = ["draft", "active", "achieved", "superseded", "retired", "needs-human"];
+// ADR-036 (枚举事实的单一真源): the goal-status vocabulary is DEFINED ONCE, in the ABI declaration
+// (`abi.ts:GOAL_STATUSES`), and this store derives from it — ⛔ not a second hand-copied literal.
+// Kept as an independent exported array (not a re-export alias) because it is the store's public
+// validation surface consumed across packages (quay-native imports it); `string[]` (not readonly)
+// preserves the previous type for those consumers.
+export const VALID_GOAL_STATUSES: string[] = [...GOAL_STATUSES];
 
 // gap-goal-record-completeness-undefined — "what counts as a COMPLETE goal record" was never
 // defined: `origin` was required while `body` was optional, inverting the incentive (8 goals, 5

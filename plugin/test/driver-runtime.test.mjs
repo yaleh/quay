@@ -650,3 +650,98 @@ test("supervisor-stale — aliveness 报 supervisorStale=true 当被监视源码
   const afterRestart = aliveness(root, "promotion");
   assert.equal(afterRestart.supervisorStale, false, `fresh again after restart: ${JSON.stringify(afterRestart)}`);
 });
+
+// ── gap-ac203-record-schema-has-no-kind-dimension AC3/AC4: `start` 的存活确认 ─────────────────────
+//
+// 缺陷：startKind 之前【无条件】打印 `started: …` 并返回 0（statusForKind 恒 0），而 driver 根本没活
+// 时同样如此 —— 「报成功但实际死亡」与「真的起来了」共用一种输出（硬规则 3b）。实测：2026-09-13 在
+// 第三方项目上起 goal/quality/meta 三个 kind，三次都打印 started + exit 0，而三个载体全部不存在，
+// 真实死因只写在目标项目内部日志里。
+//
+// AC3（能取假）：注入一个【必死】的启动 ⇒ `start` 必须非零退出并贴出死因；移除注入 ⇒ 正常启动成功。
+//   注入形态 = supervisor 找不到 driver 脚本（`resolveKernelSibling` 返回 null ⇒ supervisor 打印
+//   `driver-runtime: driver not found at …` 并退出 2）——这正是 GOAL-009 记载的那条死亡形态
+//   （driver-runtime.ts:986 把路径锚在 opts.root），且它【确定性地】杀掉 supervisor（⛔ 不是「等一会
+//   看看」的不确定判据）。两态输出逐字打印（本测试的 stdout 即留档）。
+// AC4（慢启动不误判）：造一个启动明显长于确认窗口的 driver ⇒ 窗口用尽只产出 `start-pending`
+//   （第三种取值，⛔ 不是死亡判定）；同一夹具给足窗口 ⇒ 确认成功。两态都要取到。
+//
+// 夹具：SLOW_START_DRIVER 前 3 秒「起来即退」（用一个 stamp 文件跨 respawn 记住首次启动时刻——每个
+// respawn 是新进程，内存里记不住），3 秒后转入常驻。它对本次确认的意义 = 「driver 需要 3 秒才就绪」。
+
+const SLOW_START_DRIVER = [
+  "const fs = require('node:fs');",
+  "const argv = process.argv.slice(2);",
+  "const i = argv.indexOf('--pid-file');",
+  "const pf = i >= 0 ? argv[i + 1] : null;",
+  "const stamp = pf ? pf + '.first-start' : null;",
+  "let first = Date.now();",
+  "try { const v = Number(fs.readFileSync(stamp, 'utf8')); if (v > 0) first = v; } catch { try { fs.writeFileSync(stamp, String(first)); } catch {} }",
+  "if (Date.now() - first < 3000) process.exit(1);",
+  "if (pf) fs.writeFileSync(pf, String(process.pid));",
+  "setInterval(() => {}, 1000);",
+].join("\n");
+
+function makeBareRoot(tag) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `dr-${tag}-`));
+  return root;
+}
+
+test("AC3 (gap-ac203) — 必死启动 ⇒ start 非零退出 + 死因；移除注入 ⇒ 正常启动成功（两态逐字留档）", (t) => {
+  // 注入：plugin root 里有 scripts/ 但【没有】driver 脚本（⇒ supervisor 找不到 driver 而退出）。
+  const deadRoot = makeBareRoot("ac3-dead");
+  const deadPlugin = path.join(deadRoot, "plugin", "scripts");
+  fs.mkdirSync(deadPlugin, { recursive: true });
+  t.after(() => fs.rmSync(deadRoot, { recursive: true, force: true }));
+
+  const dead = run(["start", "--kind", "promotion", "--root", deadRoot, "--restart-delay", "1", "--run-id", "dr-ac3-dead", "--confirm-timeout", "10"], { pluginRoot: path.join(deadRoot, "plugin") });
+  console.log(`[AC3 注入态] exit=${dead.status}\n  stdout: ${dead.stdout.trim()}\n  stderr: ${dead.stderr.trim()}`);
+  assert.notEqual(dead.status, 0, `必死启动必须非零退出（旧实现恒 0）：${dead.stdout}\n${dead.stderr}`);
+  assert.match(dead.stderr, /start-failed/, `必须报出 start-failed：${dead.stderr}`);
+  assert.ok(!/^started:/m.test(dead.stdout), `⛔ 未确认存活时不得打印 started:：${dead.stdout}`);
+  assert.match(dead.stderr, /driver not found at/, `必须贴出死因（supervisor 日志尾）：${dead.stderr}`);
+
+  // 移除注入：同一个 root 换成带 driver 脚本的 plugin root ⇒ 正常启动成功。
+  const liveRoot = makeRoot("ac3-live");
+  t.after(() => fs.rmSync(liveRoot, { recursive: true, force: true }));
+  const live = run(["start", "--kind", "promotion", "--root", liveRoot, "--restart-delay", "1", "--run-id", "dr-ac3-live", "--confirm-timeout", "15"], { pluginRoot: path.join(liveRoot, "plugin") });
+  console.log(`[AC3 正常态] exit=${live.status}\n  stdout: ${live.stdout.trim()}\n  stderr: ${live.stderr.trim()}`);
+  t.after(() => run(["stop", "--kind", "promotion", "--root", liveRoot], { pluginRoot: path.join(liveRoot, "plugin"), timeout: 20000 }));
+  assert.equal(live.status, 0, `正常启动必须成功：${live.stdout}\n${live.stderr}`);
+  assert.match(live.stdout, /^started: /m, `正常态打印 started:：${live.stdout}`);
+  assert.match(live.stdout, /confirmed_ms=\d+/, `started: 行带 confirmed_ms（可核的耗时读数）：${live.stdout}`);
+  assert.ok(!/start-failed/.test(live.stderr), `正常态不得出现 start-failed：${live.stderr}`);
+});
+
+test("AC4 (gap-ac203) — 慢启动（3s > 窗口）⇒ start-pending（⛔ 非死亡）；给足窗口 ⇒ 确认成功", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dr-ac4-"));
+  const scripts = path.join(root, "plugin", "scripts");
+  fs.mkdirSync(scripts, { recursive: true });
+  fs.writeFileSync(path.join(scripts, "promotion-driver.ts"), SLOW_START_DRIVER, "utf8");
+  const pluginRoot = path.join(root, "plugin");
+  t.after(() => {
+    run(["stop", "--kind", "promotion", "--root", root], { pluginRoot, timeout: 20000 });
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  // ① 窗口 1s，driver 要 3s 才就绪 ⇒ 窗口用尽 ⇒ start-pending，⛔ 不得报 start-failed。
+  const t0 = Date.now();
+  const short = run(["start", "--kind", "promotion", "--root", root, "--restart-delay", "1", "--run-id", "dr-ac4-short", "--confirm-timeout", "1"], { pluginRoot, timeout: 30000 });
+  const shortWall = Date.now() - t0;
+  console.log(`[AC4 窗口=1s] exit=${short.status} wall_ms=${shortWall}\n  stdout: ${short.stdout.trim()}\n  stderr: ${short.stderr.trim()}`);
+  assert.notEqual(short.status, 0, `未确认存活 ⇒ 非零退出：${short.stdout}\n${short.stderr}`);
+  assert.match(short.stderr, /start-pending/, `必须是 start-pending 这一独立取值：${short.stderr}`);
+  assert.ok(!/start-failed/.test(short.stderr), `⛔ 慢启动不得被判为死亡：${short.stderr}`);
+  assert.ok(!/^started:/m.test(short.stdout), `⛔ 未确认存活时不得打印 started:：${short.stdout}`);
+
+  // ② 同一夹具、给足窗口 ⇒ 确认成功（证明①里那个进程确实只是慢，不是死）。① 留下的 supervisor 还活着
+  // ⇒ 走 already-running 路径，那条路径【同样】要确认 driver 真活才 exit 0（supervisor 在而 driver
+  // 死在重拉间隙里，是同一种「报成功但实际死亡」）。
+  const long = run(["start", "--kind", "promotion", "--root", root, "--restart-delay", "1", "--run-id", "dr-ac4-long", "--confirm-timeout", "30"], { pluginRoot, timeout: 60000 });
+  console.log(`[AC4 窗口=30s] exit=${long.status}\n  stdout: ${long.stdout.trim()}\n  stderr: ${long.stderr.trim()}`);
+  assert.equal(long.status, 0, `给足窗口后必须确认成功：${long.stdout}\n${long.stderr}`);
+  assert.match(long.stdout, /^started: |^already-running: confirmed /m, `确认成功的两种形态之一：${long.stdout}`);
+  const m = long.stdout.match(/confirmed_ms=(\d+)/);
+  assert.ok(m, `confirmed_ms 必须在：${long.stdout}`);
+  assert.ok(Number(m[1]) >= 1000, `慢启动的确认耗时确实 > 窗口(1s)：confirmed_ms=${m[1]}`);
+});

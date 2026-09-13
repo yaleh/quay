@@ -653,6 +653,20 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/scripts/criterion-failure-attribution-check.ts docs/analysis/criterion-failure-attribution.baseline.json plugin/scripts/checker-mutation-cases/criterion-failure-attribution-check.sh plugin/test/criterion-failure-attribution-check.test.mjs
   run_checker "criterion-failure-attribution-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/criterion-failure-attribution-check.ts" --root "${repo_root}"
+  echo "== enum surface parity check (ADR-036, gap-enum-surfaces-hand-copied-across-cli-web-docs) =="
+  # 同一件枚举事实在多处表层（实现常量 / CLI 帮助 / Web 控制面 / MCP 工具描述 / 项目文档）的副本必须
+  # 一致 —— 此前【无人守】，实测 driver kind 一个事实有 7 处副本、4 种取值，GOAL_STATUSES 与
+  # VALID_GOAL_STATUSES 取值已经不同。检查器持显式登记表做两向差集（exact / subset+代码处豁免注释），
+  # 并识别「派生化」表层（规范 2 的更强形态）。三态：0 PASS / 1 RED（未豁免违规或台账【增长】）/
+  # 3 NOT-EVALUATED（权威或面读不出 —— ⛔ 不与「一致」共用输出，硬规则 3b）。已知漂移用 shrink-only
+  # 台账报出而不阻断（范围边界：文档面与 driver 帮助的存量归位由别的任务承接）。
+  # ⛔ @static-object 刻意【不】登记 CLAUDE.md / plugin/skills/**：它们是 DOC_SURFACES 路径，登记会让
+  # isDocPath 把它们由 doc 翻成 CODE，打红别的测试（同 criterion-failure-attribution-check 上方的实证坑）。
+  # 诚实记下覆盖代价：只改那两个文档面的 delta 会让本检查器在 scoped 轮缺席；覆盖来自
+  # ①本检查器自身文件被触碰时的 scoped 子集，②任何一次真正跑起来的全量 suite（本行无条件执行）。
+  # @static-tier change
+  # @static-object plugin/scripts/enum-surface-parity-check.ts plugin/scripts/checker-mutation-cases/enum-surface-parity-check.sh plugin/test/enum-surface-parity-check.test.mjs plugin/scripts/driver-runtime.ts plugin/scripts/driver-config.ts plugin/scripts/start-drivers.ts plugin/scripts/task-status.ts packages/quay/src/abi.ts packages/quay/src/goal-store.ts packages/quay/src/serve-sessions.ts packages/quay/src/cli/driver.ts packages/quay/src/cli/help.ts packages/quay/src/serve-goal.ts packages/quay/src/adr-store.ts packages/quay/src/document-store.ts packages/quay/src/mcp-handlers.ts packages/quay-native/src/mcp-server.ts
+  run_checker "enum-surface-parity-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/enum-surface-parity-check.ts" --root "${repo_root}"
   # Wait for all parallelized checkers and fail closed if any failed (see the RUN_CHECKER_PARALLEL
   # note at the top of this function — AC3 failure visibility, AC4 cost-ledger completeness).
   run_checker_parallel_wait
