@@ -111,6 +111,22 @@ quay-fleet 的 driver 在跑 ⇒ 扫描照跑 ⇒ 把 quay 的 5 个 worker 当�
       （第二处字面量红 / plugin 侧字面量红 / 唯一命中不在 resolver 声明处红），证明它会咬。
       ⚠️ 检查器自身**不含**该字面量（它搜 `JSON.stringify(DEFAULT_WORKTREE_NAMESPACE_NAME)`），
       否则它会把自己算成第二处。
+      **⚠️ 补（2026-09-13，本轮；硬规则 5b：造出机件 ≠ 机件在跑）**：上一轮只造出检查器，
+      **它当时没有任何调用点**——而 capability catalog 声明的节奏是「每轮」。
+      `rhythm-consumer-check` 判据1 抓的正是这个形态（声明了非「按需」的节奏却无 strict 面上的
+      call site），scoped 门因此逐轮红、任务连续两轮 exited-not-landed。
+      **修法是让声明为真，不是把节奏改标成「按需」**（把新机制塞进 `KNOWN_UNWIRED` 同理不可——
+      那份基线注释钉死「NEW 的非按需机制无 call site ⇒ RED」，塞进去正是该检查器要治的病）。
+      已登记进 `plugin/scripts/runner-static-gate.ts` 的 `run_static_checks`
+      （`@static-tier change` / `@static-object packages/quay/src/ plugin/scripts/`），
+      并补上 manifest 门（`checker-mutation-check.sh --check`）要求的 mutation case
+      `plugin/scripts/checker-mutation-cases/worktree-namespace-literal-check.sh`。
+      实测：`rhythm-consumer-check` 判据1 由 **1 violation → 0**；
+      `checker-mutation-check.sh --check` → **72/72 covered、stayed_green 0、always_red 0、
+      uncovered 0**；`checker-mechanical-spine-check.ts` → 0 violation（121 checker）；
+      `capability-catalog.sh --entry-surface` → exit 0。
+      ⛔ 登记处的注释**故意不写那个双引号字面量**——`runner-static-gate.ts` 自己就在
+      `plugin/scripts/` 下（正是检查器的扫描根之一），写出来就是它要抓的第二处命中。
 - [ ] AC4：全量 `scripts/test.sh` 绿（待外部）
 
 ## Definition of Done
@@ -138,8 +154,9 @@ fixture 满足不算数（硬规则 4 推论三）。
   于是旧推导 `dirname(B)/quay-worktrees` 正落在 A 的 namespace 内 —— 测试**显式断言该前提为真**
   （改前必红），再断言改后 `false`。
 * **typecheck**：`for d in packages/*/; do npx tsc --noEmit -p "$d"; done` 全绿。
-* **scoped gate**（`scripts/test.sh --for-task <id> --allow-thin`）：**绿，264/264，0 fail**
-  （含 `packages/quay/test/npm-pack-e2e.test.mjs` 9/9）。
+* **scoped gate**（`scripts/test.sh --for-task <id> --allow-thin`）：**绿，280/280，0 fail**
+  （含 `packages/quay/test/npm-pack-e2e.test.mjs` 9/9）。⚠️ 上一轮此门因
+  `rhythm-consumer-check` 判据1 红而拦住落地（见 AC3 补记）。
 * **受影响既有测试**：`packages/quay/test/observation.test.mjs`、`packages/quay/test/serve.test.mjs`、
   `packages/quay/test/serve-task.test.mjs`、`plugin/test/fast-mode-telemetry.test.mjs`、
   `plugin/test/measure-trend-check.test.mjs`、`plugin/test/suite-lpt-order.test.mjs` —— 全绿。
@@ -155,8 +172,23 @@ fixture 满足不算数（硬规则 4 推论三）。
      已按入口闸补齐 QUESTION / CADENCE / INVALIDATION / LAST_REAFFIRMED / MATCHING / CONSUMER 六行；
      MATCHING 诚实填 **keyword**（它确是字面量扫描 = AC 自身谓词；假阳性面——非引号正则/注释/散文
      用法——被单独放进 advisory 桶，永不导致失败）。
+* **检查器无调用点（本轮真因，`rhythm-consumer-check` 判据1 RED）**：AC3 只造出检查器、
+  未登记进任何每轮执行面 ⇒ 「每轮」这条声明为假。已登记进 `run_static_checks` + 补 mutation case
+  （见 AC3 补记）。**没有把它加进 `KNOWN_UNWIRED` 基线**（理由同上）。
+* **mutation case 的相位**（`plugin/scripts/checker-mutation-cases/worktree-namespace-literal-check.sh`）：
+  baseline 绿 → src 侧第二处字面量红 → restore 绿 → plugin 侧第二处红 → restore 绿 →
+  唯一命中不在声明处红 → restore 绿 → 非引号出现（path 正则 + 散文）绿 → restore 绿。
+  ⚠️ 该 case 文件**不写那个双引号字面量**（它自己就在 `plugin/scripts/` 扫描根下），
+  而是从真声明 `sed` 出名字 —— 否则真仓扫描会因它自己报第二处命中，case 就会「因错的理由通过」。
+* **advisory 计数更新**：真仓运行现在报 **43** 条非引号出现（上一版 38+），
+  +2 来自本 mutation case 的两行注释（`/home/yale/work/quay-worktrees` 路径散文）；
+  advisory 永不判红（硬规则 5b 的兄弟可见性）。
+* **scoped-gate 缓存写入用的是【门实际合并的 develop tip】（`HEAD^2` = `66ce50ff`），不是写缓存
+  那刻的 `rev-parse develop`（`c4fc06df`，其间已前进）**：driver 读侧按**精确相等**跳过门，
+  记一个没评估过的 tip = 把「没评估」记成「评估过」（硬规则 3b）。故本任务宁愿让 fan-in
+  因不等而**照跑**一次 scoped 门，也不记一个未评估的 sha。
 * **兄弟硬编码点清单（硬规则 5b：报出，非全改）**：检查器每次运行打印 advisory 命中数
-  （当前 38+ 条，含注释）。其中**仍是真假设**的完整枚举：
+  （当前 43 条，含注释）。其中**仍是真假设**的完整枚举：
   `plugin/scripts/suite-lpt-order.ts:34`（`repoRelKey`，与 `normalizePerFileKey` 同口径；
   **未改**，以免把爆炸半径伸进套件自身调度路径）、
   `packages/quay/src/cli/driver.ts:54` + `cli/help.ts:356`（`driver start` 从 worktree 启动的**拒绝**判定，
@@ -173,6 +205,8 @@ fixture 满足不算数（硬规则 4 推论三）。
 - plugin/scripts/fast-mode-telemetry.ts
 - plugin/scripts/measure-trend-check.ts
 - plugin/scripts/worktree-namespace-literal-check.ts
+- plugin/scripts/runner-static-gate.ts
+- plugin/scripts/checker-mutation-cases/worktree-namespace-literal-check.sh
 - plugin/scripts/capability-catalog.sh
 - packages/quay/test/observation-worktree-namespace.test.mjs
 - plugin/test/worktree-namespace-literal-check.test.mjs

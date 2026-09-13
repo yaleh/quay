@@ -1,6 +1,6 @@
 ---
 id: gap-quay-init-profiles-template-omits-every-role-the-drivers-request
-title: quay-init 的 profiles 模板缺少生产 driver 请求的全部五个角色 —— 第三方项目 GOAL 永不闭环、worker 永远派不出
+title: quay-init 的 profiles 落地走内联陈旧模板，shipped 模板被 skip —— 第三方项目缺全部五个 worker role
 status: ready
 labels:
   - gap
@@ -44,31 +44,49 @@ goal-sufficiency  verified  sufficiency=not-evaluated（cause=judge-unavailable�
 I2 的 flip 条件是「全部在域 AC achieved **且** 充分性判定为 `covered`」（`goal-driver.ts`），
 充分性停在 `not-evaluated` ⇒ 永不 flip。
 
-**根因（定位到行）**：充分性判定是一次真 LLM spawn，生产路径是
+**近因（定位到行）**：充分性判定是一次真 LLM spawn，生产路径是
 `goal-driver.ts:775` `argv = launchArgv("fix-worker", prompt, root)`，
 而 `driver-runtime.ts:639 launchArgv()` 会 `resolveRole(config, role)`，**解析不到角色就抛错**
 （`role "..." resolves an empty launcher/name`）。goal-driver 的 catch 把它记成
 `judge-unavailable`（注释原文：「launchArgv 失败（profiles 缺失）… ⛔ 不回落 covered」——
 **fail-closed 是对的，问题在配置侧**）。
 
-**模板缺的不止一个角色，是全部五个。** 统计生产代码实际请求的 profile role：
+### 根因：两份模板，先写的那份赢，修好的那份被 skip（2026-09-13 干净对照实验查实）
+
+**⛔ 不是「陈旧安装物」**——决定性实验用**当前主检出**在一个全新空目录 + 全新 git repo 上跑：
 
 ```
-launchArgv("fix-worker"   21 处
-launchArgv("task-worker"   9 处
-launchArgv("pool-judge"    2 处
-launchArgv("selector"      1 处
-launchArgv("meta-driver"   1 处
+bash plugin/scripts/quay-init.sh --root <tmp> --plugin-root /home/yale/work/quay/plugin ...
+  init says: Created <tmp>/.quay/profiles.yml
+  init says:   skipped (exists): <tmp>/.quay/profiles.yml
+结果： roles = ['inner', 'manager', 'outer']
+       header = "# .quay/profiles.yml — Claude Code profile 承载（quay init 默认模板，AC154 profile 抽层）。"
 ```
 
-而 `quay-init` 复制的模板 `plugin/.quay/profiles.yml`（`quay-init.sh:2550/2563` `write_template`）
-只给出 `manager` / `outer` / `inner` 三个角色：
+（先单独验证过 `--dry-run` 无副作用——空目录跑完仍无该文件 ⇒ 排除「dry-run 先写脏」这个竞争解释。）
+
+**仓库里存在两份 profiles 模板，头注释就能区分它们**：
 
 ```
-quay 自己的 roles     : fix-worker, manager, meta-driver, outer, pool-judge, selector, task-worker
-quay-init 给第三方的  : manager, outer, inner
-缺失                  : fix-worker, task-worker, pool-judge, selector, meta-driver（全部五个）
+① packages/quay/src/init.ts:374  内联模板（generateProfilesContent()，:372 起）
+   头注释 "…（quay init 默认模板，AC154 profile 抽层）"
+   → roles: manager(:399) / outer(:402) / inner(:405)   ⇒ 含已退役的 inner，五个 worker role 一个都没有
+   函数自己的 doc 注释 :369 仍写着 "3 roles"
+   最近改动 51595c008（2026-09-11）
+
+② plugin/.quay/profiles.yml      头注释 "…shipped fallback profile carrier"
+   → roles 七个齐全（manager/outer/task-worker/selector/fix-worker/pool-judge/meta-driver），
+     且 task-worker(:42) 与 fix-worker(:50) 已带 CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"
+   最近改动 3524b3a3f（2026-09-09）← 正是 gap-shipped-profiles-missing-worker-roles 那次修复
 ```
+
+**执行顺序决定了结果**：init 路径**先用 ① 创建**该文件，随后 `write_template ②`
+（`quay-init.sh:2550/2563`）看到文件已存在 ⇒ 打印 `skipped (exists)` ⇒ **② 从未落地**。
+
+⇒ **`gap-shipped-profiles-missing-worker-roles`（done）修的是一份在 init 路径上不被使用的文件。**
+它的 AC 大概率是对着 ② 验的，所以当时绿；而真实新项目拿到的一直是 ①。
+**⊢ 本任务最重要的一条推论：光把五个 role 补进 ② 无效——那正是上一条任务已经做过、且已经被证明无效的事。**
+（同形教训本工作区已有：修了一个副本、生产用的是另一个。）
 
 **两个已实证/可推定的后果**：
 1. **GOAL 永不闭环**（已实证）——`fix-worker` 缺失 ⇒ 充分性 judge 不可用 ⇒ I2 不 flip。
@@ -83,34 +101,48 @@ quay-init 给第三方的  : manager, outer, inner
   第三方项目照抄后，其会话名与 quay 自己的会话**撞名** ⇒ SendMessage 按名寻址会误路由
   （本工作区已知：共用 worker 名导致误投）。
 
-**已验证的修复形态**（我在 quay-fleet 上补齐五个角色后实测）：`launchArgv` 对
+**已验证的修复形态**（在 quay-fleet 上补齐五个角色后实测）：`launchArgv` 对
 fix-worker/task-worker/pool-judge/selector/meta-driver/manager/outer **七个角色全部解析成功**。
 角色定义本身极简，例如 `fix-worker: {profile: worker-default, name: <前缀>-fix-worker,
 env: {CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"}}`。
 
 ## Plan
 
-1. `plugin/.quay/profiles.yml` 模板补齐五个 profile role（照 quay 自己的定义，`profile: worker-default`；
-   `fix-worker`/`task-worker` 需带 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"`——
-   缺该键会导致 spawn 超时，见 `gap-fix-worker-spawn-timeout-persists-post-fix`）。
-2. 删除已退役的 `inner` 角色。
+⛔ **原 Plan 的 1/2（「把五个 role 补进 `plugin/.quay/profiles.yml` / 从中删 inner」）作废**——
+那份文件在 init 路径上不被使用，补它等于重做一遍已被证明无效的修复。
+
+1. **消除双模板**：`packages/quay/src/init.ts` 的内联模板（`generateProfilesContent()`）与
+   `plugin/.quay/profiles.yml` 必须收敛为**单一真相源**。推荐：init.ts 不再内联，改为读 shipped 文件；
+   若因打包约束必须内联，则加一条**构建期/测试期的逐字节一致断言**（⛔ 不接受「人工保持同步」）。
+2. **修正 skip 语义**：`write_template` 对一个**本次 init 自己刚创建的**文件报 `skipped (exists)` 是错的
+   ——必须区分「用户已有的文件，尊重不覆盖」与「本次运行自己刚写的中间产物」
+   （⛔ 两者共用一个取值，正是本缺陷得以静默存活的原因；硬规则 3b）。
 3. `name` 不再硬编码 `quay-` 前缀：改为 quay-init 按目标项目名生成（或模板用占位符由 init 替换），
    使两个项目的会话名不相撞。
-4. **加一条结构性静态检查防止再漂移**：模板声明的 profile role 集合必须 ⊇
-   driver 通过 `launchArgv` 请求的 **profile role** 集合（即生产代码中 `launchArgv("<role>"` 出现的
-   role 名集合）。这条是本缺陷的根治——否则下次新增一个 driver 角色，模板又会静默落后。
+4. **加一条结构性静态检查防止再漂移（保留且更重要）**：模板声明的 profile role 集合必须 ⊇
+   driver 通过 `launchArgv` 请求的 **profile role** 集合。
+   **⚠️ 该检查器必须对【init 实际产出的文件】做断言，⛔ 不得对 `plugin/.quay/profiles.yml` 做断言**
+   ——否则下次又会出现「检查器盯着一份没人用的文件，全绿」（这正是本缺陷的成因形态）。
 
 ## Acceptance Criteria
 
-- [ ] AC1（负控制，改前必须红）：用当前模板 `quay-init` 一个全新临时 workspace，
-      改前 `launchArgv("fix-worker","",<ws>)` 抛错；改后返回一个 argv 且 `-n` 后的名字非空。
-      对 `task-worker` 同样断言。
-- [ ] AC2（结构性，防漂移）：静态检查器比对「`plugin/.quay/profiles.yml` 的 roles 键集」与
-      「driver 通过 `launchArgv` 请求的 **profile role** 名集合」（即 `plugin/scripts/**` 中
+- [ ] AC1（负控制，对 **init 的实际产出**，改前必须红）：在一个干净临时目录跑一次**真** `quay-init`，
+      **改前**：产出的 `.quay/profiles.yml` 的 roles 集 == `{manager, outer, inner}`，且
+      `launchArgv("fix-worker", "", <tmp>)` 抛错；
+      **改后**：roles ⊇ `{fix-worker, task-worker, pool-judge, selector, meta-driver}`，
+      且该调用不抛、返回 argv 中 `-n` 后的名字非空。对 `task-worker` 同样断言。
+      （⚠️ 该形态已于 2026-09-13 用当前主检出实测为**红**，⛔ 不是恒绿空转。）
+- [ ] AC2（结构性，防漂移）：静态检查器比对「**一次真 init 产出的** `.quay/profiles.yml` 的 roles 键集」
+      与「driver 通过 `launchArgv` 请求的 **profile role** 名集合」（即 `plugin/scripts/**` 中
       `launchArgv("<role>"` 的 role 名集合），前者未覆盖后者即红。
+      **⛔ 断言对象是 init 产出，不是 `plugin/.quay/profiles.yml`。**
       双向控制：从模板删一个 profile role 必须红；给代码加一个新 profile role 名而模板未跟进也必须红。
-- [ ] AC3：模板不再含 `inner`（已退役的 profile role），且该断言由 AC2 的同一检查器覆盖
-      （没有任何 driver 通过 `launchArgv` 请求 `inner` ⇒ 模板含它属于反向冗余，检查器应能报出）。
+      **第三个控制（针对本缺陷的成因）**：把两份模板改成不一致 ⇒ 必须红
+      （检查器不得只看其中一份而给出绿）。
+- [ ] AC3（对 **init 产出**断言）：一次真 init 产出的 `.quay/profiles.yml` 不再含 `inner`
+      （已退役的 profile role），且该断言由 AC2 的同一检查器覆盖
+      （没有任何 driver 通过 `launchArgv` 请求 `inner` ⇒ 产出含它属于反向冗余，检查器应能报出）。
+      （⚠️ 当前 ① 里仍有 `inner`（`init.ts:405`）⇒ 这条现在也是**红**的，有意义。）
 - [ ] AC4：两个不同项目各自 `quay-init` 后，其 profiles 的 `name` 值互不相同
       （断言不含硬编码的 `quay-` 字面前缀，或按项目名派生）。
 - [ ] AC5：全量 `scripts/test.sh` 绿。
@@ -123,55 +155,62 @@ env: {CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"}}`。
 
 ## Touches
 
+- packages/quay/src/init.ts
 - plugin/.quay/profiles.yml
 - plugin/scripts/quay-init.sh
 - plugin/scripts/profiles-role-coverage-check.ts
 - plugin/test/profiles-role-coverage-check.test.mjs
 - tasks/gap-quay-init-profiles-template-omits-every-role-the-drivers-request.md
 
-## 立案备注（quay-task 立案时追加，⛔ 非报告原文，⛔ 不改上文任何一字）
+## 立案备注（quay-task 立案/改写时追加，⛔ 非报告原文）
 
-**① 查重结果（按机制，不按症状）**：机制「init 模板的 profile role 集与 driver 通过 `launchArgv`
-请求的 profile role 集不匹配 ⇒ `resolveRole` 抛错」**已有一条既有任务**：
+**① 查重结果（按机制，不按症状）**：机制「init 产出的 profile role 集与 driver 经 `launchArgv`
+请求的集合不匹配 ⇒ `resolveRole` 抛错」**已有一条既有任务**：
 `gap-shipped-profiles-missing-worker-roles`（**status: done**，goal_ac=AC-207，2026-09-09）。
-它的 Proposal 逐字描述同一条链：「roles 只有 manager/outer，缺 task-worker
-（及 selector/fix-worker/pool-judge/meta-driver）；worker-driver 派发走 `launchArgv("task-worker", …)`
-→ `profile-policy.ts:140` `resolveRole` 对缺失 role 抛 `role not found`」。它的 AC1/AC2 已勾，
-**AC3（全量 suite 绿）仍未勾，标「待外部」**。
+**但根因查实后，本条与它的关系变了**：它不是「同一缺陷的重复立案」，而是
+**它那次修复打在了一份 init 路径上不被使用的文件上**（见 Proposal 根因段）⇒
+本条要修的是**它没碰到的那一份 ①，以及让这种「修错副本还全绿」得以发生的机制**（Plan 1/2/4）。
 相关但不同的第二条：`gap-ac207-e2e-target-driver-driven-real-commit-task-done`（done）把同一缺陷
-记为其「阻塞①」。**本条不是它们的重复**——见 ③。
+记为其「阻塞①」，其解除记录写的也是「② 已落 develop」——**同样是对着不被使用的那份文件确认的**。
 
-**② ⚠️ 与当前源码的事实冲突（立案者当场读盘核实，⛔ 不是推测）**：上文 Proposal 断言
-「`plugin/.quay/profiles.yml` 只给出 manager / outer / inner 三个角色」，而**本仓库当前该文件
-（`/home/yale/work/quay/plugin/.quay/profiles.yml`，2026-09-13 读盘）实际声明七个 profile role**：
-`manager`(:28) `outer`(:31) `task-worker`(:38) `selector`(:43) `fix-worker`(:46) `pool-judge`(:51)
-`meta-driver`(:54)，**且不含 `inner`**；`task-worker`(:42) 与 `fix-worker`(:50) 均已带
-`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"`。`quay-init.sh:2550/2563` 的 `write_template` 逐字复制
-的就是这个文件（无内联第二份模板）。
-⇒ **「模板缺五个 profile role」在当前源码上不复现**。quay-fleet 观测到的形态与**修复前**的模板一致，
-最可能的成因是**该项目装的是 `gap-shipped-profiles-missing-worker-roles` 落地之前的安装物**
-（同族先例：AC-207 第 10 轮的「缺陷 B——安装物陈旧」）。
-**⊢ 执行者第一步必须做的对照**（硬规则 4b：别用代理量，读直接量）：在 quay-fleet 上读
-**它自己安装物**里的 `plugin/.quay/profiles.yml` 与其安装 build_sha，与本仓库 develop tip 比对；
-若确系陈旧安装物 ⇒ 本条的 AC1 之「改前必须红」在当前源码上**结构上不可满足**（会恒绿空转，硬规则 4c），
-届时应把 AC1 改写为「对陈旧安装物复现 + 对当前源码为绿」的双向对照，⛔ 不要为了让它红而改坏模板。
+**② ⚠️ 我（立案者）在第一版备注里给出的「陈旧安装物」推测已被证否，照实记账。**
+第一版我读盘发现 ② 有七个 role、且不含 `inner`，据此推测 quay-fleet 装的是修复前的安装物。
+**那是一个能【解释】现象的说法，不是一个被【检验】的结论**（硬规则 4 推论四）。
+推翻它的是协调方做的一个**能区分的对照**：用**当前主检出**在干净空目录跑真 init ⇒ 产出仍是
+`{inner, manager, outer}` ⇒ **与安装物新旧无关**。若我的推测为真，这个实验应当产出七个 role。
+⇒ 真因是**双模板 + `skipped (exists)`**。
+**⊢ 本条 Proposal 的根因段与 Plan/AC 已按该实验整体改写；⛔ 不要再按「去查 quay-fleet 安装物 build_sha」行动。**
 
-**③ 本条仍然成立、且不被既有任务覆盖的部分（真正的新增价值）**：
-- **AC2 的结构性检查器从不存在**——`task_list(search:"profiles-role-coverage")` 计数 **0**
+**③ 根因已由立案者独立按位置复核（⛔ 不是采信转述）**：`packages/quay/src/init.ts`
+`generateProfilesContent()`（:372）返回的数组中，`roles:`(:398) 下**只有**
+`manager`(:399) / `outer`(:402) / `inner`(:405) 三个键，header 行 :374 与实验输出逐字一致；
+该函数自己的 doc 注释 :369 仍写着「3 roles」——**注释与缺陷同时存在，说明这不是回归，是从未跟进**。
+
+**④ 本条的新增价值（不被既有任务覆盖）**：
+- **AC2 的防漂移检查器从不存在**——`task_list(search:"profiles-role-coverage")` 计数 **0**
   （零计数已按硬规则 2 校准：同形谓词对已知为真的串 `quay-init-closure-ratchet` 返回 61 条 ⇒ 谓词有效），
   且 `plugin/scripts/profiles-role-coverage-check.ts` 在盘上**不存在**（Read ⇒ File does not exist）。
-  **这条正是既有任务只修了被报出来的那一个实例、没造防漂移产物的缺口**（硬规则 5b）。
-- **AC4 的 `name` 硬编码 `quay-` 前缀确实仍在**（上述七个 profile role 的 name 逐个为 `quay-*`），
-  既有任务从未处理撞名问题。
-- **AC3 的 `inner` 反向冗余**：当前模板已无 `inner`，该断言在本仓库上会直接绿；
-  其价值在于由 AC2 的检查器**持续**钉住（⛔ 若只当一次性断言写死，就是一个恒真量，非测量——硬规则 4）。
+- **它必须盯 init 产出**：一个盯着 ② 的检查器今天就会全绿，而生产照样坏——
+  **那正是「一个恒绿的检查比没有检查更贵」的实例**（硬规则 3b）。
+- **AC4 的 `quay-` 前缀撞名**既有任务从未处理；**AC1/AC3 在当前源码上均为红**，⛔ 非空转。
 
-**④ 未打 `delivery-critical`**（按要求）。**未设 `goal_ac`**——注意
+**⑤ 未打 `delivery-critical`**（按要求）。**未设 `goal_ac`**——注意
 `delivery-critical-without-goal-ac-never-promotes` 的反面：本条不带该标签，故无此结构性阻塞。
 
-**⑤ 术语澄清段的来源**：Proposal 开头的「术语澄清」由协调方 2026-09-13 逐字追加（人指出原措辞
-把 role 名说得像 driver 名）。本次 CAS 追加同时把 Plan 4 / AC2 / AC3 中「driver 请求的角色」
-统一改写为「driver 通过 `launchArgv` 请求的 **profile role**」，⛔ 现象/根因/两个后果/`inner` 退役/
-`quay-` 前缀撞名/AC1–AC5 判据内容/DoD/Touches 逐字未变。
-**⚠️ 标题仍写作「生产 driver 请求的全部五个角色」**——协调方本次只授权改正文，标题未在授权范围内，
-故保留；读标题时按本段术语理解为「driver 通过 `launchArgv` 请求的 profile role」。
+**⑥ 改写授权与范围**：Proposal 术语澄清段、根因段改写、Plan 1/2 作废与重写、AC1/AC2/AC3 改写、
+Touches 增补 `packages/quay/src/init.ts`、**标题改写**，均由协调方 2026-09-13 逐条授权。
+⛔ 未改动：现象段、两个后果的实证、`quay-` 撞名、AC4/AC5、DoD。
+**状态说明**：本任务建时为 `todo`（按要求），随后由生产 promotion-driver 自行晋升为 `ready`
+（第二次写曾因此撞 CAS 冲突、被拒且盘上零改动，读回确认后才改用 `expectedStatus: ready` 重发）。
+
+**⑦ 观察项（⛔ 非阻塞、⛔ 非本任务 AC；协调方 2026-09-13 裁定）**：
+`gap-shipped-profiles-missing-worker-roles`（done，goal_ac=AC-207）的验收是对着
+`plugin/.quay/profiles.yml`（② 号、init 路径不使用的那份）做的。
+**AC-207 自己的 criterion 读 `.quay/productization-verification.jsonl`，不碰 profiles，
+因此 I5（achieved-but-failing）复跑不会自动证否它**——criterion 查的是别的对象，
+「让机制自己发现」这条路在这里不通。
+这意味着 AC-207 的**前置阻塞解除判定用的是错对象**，**但不等于 AC-207 的结论为假**
+——它当时在 archguard / ad-arm1 上真跑过，那里的 profiles 来源未查（也不该在本任务里查）。
+**⇒ 本任务落地后**，若第三方项目的 e2e 派发能力发生实质变化，才值得回头复核 AC-207；
+在此之前**不动它**（硬规则 12：给不出「AC-207 结论为假」的发生率 ⇒ 前置降为观察项，不作阻塞）。
+⛔ 执行者不得因本段去修改 AC-207 或那两条 done 任务。
