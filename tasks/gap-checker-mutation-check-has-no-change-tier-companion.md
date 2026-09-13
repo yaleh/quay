@@ -95,7 +95,8 @@ STATIC_CHECK_FAILED: checker-mutation-check-changed exit=1
 **反向控制**：`git checkout -- plugin/scripts/provider-binding-resolvability-check.ts` 还原后，**同一条命令、同一 worktree** ⇒ **退出码 = 0**（唯一载体是本任务自己的 `checker-mutation-check`，pass）⇒ 红可归因于被改的那个文件，而不是 delta 整体（硬规则 4 推论四：附一个「若 Y 为假则结果会不同」的对照）。
 
 ### AC2 负控制（不误伤）
-真实 CLI `select-static-checks-for-touches.ts --touches <path> --names` 输出中 `^checker-mutation-check$` 的行数：
+⚠️ **读数已更正（续做轮实测）**：原表用 `--names` 输出匹配 `^checker-mutation-check$`。**实测 `--names` 打印的不是门真正执行的那个名字**——同一次运行里 `--names` 打印 `checker-mutation-check`（full-tier 的派生名），而 `.commands[]` 打印 `run_checker "checker-mutation-check-changed" … --check-changed`；`quay-init-closure-ratchet` 与其伴生 `-stale` 同形（`--names` 出 full 名、`commands` 出伴生名）。⇒ 旧表的 3 个「1」命中的是 **full-tier 名**，**并未证明伴生被选中**；四个「0」结论仍然对，但该谓词不具区分力。**权威读法是 `.commands` / `--commands`。**
+更正后的读数（真实 CLI `select-static-checks-for-touches.ts --touches <path> --commands` 输出中 `checker-mutation-check-changed` 的行数）：
 | delta 路径 | 伴生被选中 |
 |---|---|
 | `plugin/scripts/repo-root.ts` | 0 |
@@ -105,8 +106,8 @@ STATIC_CHECK_FAILED: checker-mutation-check-changed exit=1
 | `plugin/scripts/checker-mutation-cases/provider-binding-resolvability-check.sh` | 1 |
 | `plugin/scripts/runner-static-gate.ts` | 1 |
 | `scripts/test.sh` | 1 |
-⇒ 四个「0」各自对齐**真实路径**逐一列出；同一次运行里的 3 个「1」即正样本（硬规则 2：零计数配一个已知为真的样本干跑）。伴生没有变成 `always` tier。
-
+| `plugin/scripts/checker-mutation-check.sh` | 1 |
+⇒ 四个「0」各自对齐**真实路径**逐一列出，与同一次运行里的 4 个「1」并存（硬规则 2：零计数配一个已知为真的样本干跑）。**伴生没有变成 `always` tier**——另由真实 scoped 门日志独立复核：`scoped check: run_checker "checker-mutation-check-changed" … --check-changed --repo-root …` ∧ `delta base develop; 1 checker carrier(s) in THIS delta (⛔ not the whole 71-checker manifest): checker-mutation-check`（只跑 delta 的 1 本，不是 71 本）。
 ### AC3 成本按 delta 收窄
 同机同时段（2026-09-13T06:3x–06:4xZ）两次实测：
 - **① 伴生**（delta = 恰好 1 本注册 checker、无注册表变更；探针 worktree `/tmp/ac3-probe-wt` = detach 在 develop + 本任务的 `checker-mutation-check.sh`）：
@@ -150,3 +151,15 @@ STATIC_CHECK_FAILED: checker-mutation-check-changed exit=1
 
 ### 附带交付：full-tier 变更时的覆盖度前置
 delta 含**注册表源**（`runner-static-gate.ts` / `scripts/test.sh` / `.github/workflows/`）时，伴生额外做一次**全 manifest 覆盖度复验**（uncovered = 0，`--list` 级、不跑 case）——即 `checker-mutation-check.sh` 注释里的 AC1b 维度（「新 checker 无 mutation case 不得静默溜过」）也在**加它的那个任务**的 scoped 门被前置。实测（本次 AC1 运行）：`manifest source changed in this delta — all 71 registered checkers have a mutation case (uncovered = 0).`
+
+### 续做轮复核（Touches 修复后实测，2026-09-13）
+本任务首轮**因 anti-drift HARD FAIL 退出未落地**：`out-of-declared: task wrote plugin/scripts/checker-mutation-check.sh (matches no declared Touches glob)`。按本任务 `## Definition of Done` 的「⚠️ Touches 补充义务」把该实现文件补进 `## Touches` 后，`node --experimental-strip-types plugin/scripts/anti-drift-touches-check.ts --task gap-checker-mutation-check-has-no-change-tier-companion --worktree <wt> --merge-target develop` ⇒ **`ANTI-DRIFT OK: task … — 3 actual file(s), all within declared Touches (4 glob(s))`**。
+复核读数（探针 worktree `/tmp/ac208-probe` = detach 在本分支 tip；跑完即 `git worktree remove --force` 清除，现已不在 `git worktree list` 中）：
+- **AC1 再验（可咬 + 反向控制）**：把 `plugin/scripts/provider-binding-resolvability-check.ts:199` 的 `row.state = "bare-path-name"` 改为 `"path-resolved"` 后，
+  `bash plugin/scripts/checker-mutation-check.sh --check-changed --repo-root /tmp/ac208-probe`
+  ⇒ **退出码 1**，`checkers_executed: 2`、`only (delta-narrowed — ⛔ NOT the whole manifest): checker-mutation-check provider-binding-resolvability-check`、`always-red (restore still red): provider-binding-resolvability-check`、`duration_ms: 794`、`RESULT: FAIL …` ⇒ **门非零 ∧ 点名该 checker**。
+  ⚠️ 诚实标注：本次 sabotage 落在 **always-red** 方向（改的是 checker 自己算出的 state），首轮 `## 读数段` 记录的是 **stayed-green** 方向；两者都是「门非零 ∧ 点名」，但**不是同一个方向**，故此处不声称复现了首轮那一行。
+  **反向控制**：`git checkout -- plugin/scripts/provider-binding-resolvability-check.ts` 还原后**同一条命令、同一探针** ⇒ **退出码 0**、`checkers_executed: 1`、`RESULT: PASS`（唯一载体是本任务自己的 `checker-mutation-check`）⇒ 红可归因于被改的那个文件，而非 delta 整体（硬规则 4 推论四的对照）。
+- **AC3 再验（成本按 delta 收窄）**：同上两次墙钟 **794 ms（2 载体）** 与 **555 ms（1 载体）**，对 full-tier 全量 **78.9 s** ⇒ ≈ **1/100**，显著小于；同两次 `checkers_total: 71` 而 `checkers_executed: 1–2`。
+- **AC4 再验（逐字）**：`git diff develop...HEAD -U0 -- plugin/scripts/runner-static-gate.ts | grep -c '^-[^-]'` ⇒ **0**（该 hunk 无任何删除行）；`# @static-tier full  (the ~13s meta-check on the checkers THEMSELVES — deferred to the full-suite gate)` 与 `run_checker "checker-mutation-check" bash "${repo_root}/plugin/scripts/checker-mutation-check.sh" --check` 在 `-U3` 输出中以**未变化的上下文行**（前导空格）出现。
+- **scoped 门复核**：`bash scripts/test.sh --for-task gap-checker-mutation-check-has-no-change-tier-companion --allow-thin` ⇒ **退出码 0**（33 tests / 0 fail），且日志中伴生确实执行（见 AC2 末段引的两行）。
