@@ -88,13 +88,14 @@ exit=1
 **生产读数（主检出 `/home/yale/work/quay`，⛔ 非夹具）**
 - `.quay/anchor.json` = `{"pid":3057428,"startedAt":"2026-09-13T20:34:46.314Z","kinds":["quality","promotion","worker","outer","goal","meta"],"host":"anchor"}`
 - 六个 `.quay/<kind>-driver.pid` **全部 = 3057428**；`*-supervisor.pid` 文件 **0 个**；去重存活 pid = **1**。
-- `ps`：全机仅 1 个 anchor（`3057428 … driver-anchor.ts __anchor --root /home/yale/work/quay`），历史 anchor pid（2613082/2786098/2950510/3010591）**全 DEAD** ⇒ 无双派发残留。
+- `ps`：全机 `--root /home/yale/work/quay` 的 driver 载体**只有 1 个** —— `3057428 … driver-anchor.ts __anchor --root /home/yale/work/quay`，历史 anchor pid（2613082/2786098/2950510/3010591）**全 DEAD** ⇒ 无双派发残留。
 
 **AC1（ps 直接量 · 收敛前/后对照）**
 - 收敛前（前一轮真实生产实测）：`BEFORE: pid files matching criterion globs = 12`、`distinct pids = 12, live = 12`，ps 逐行列出的正是那 12 个长驻 driver 进程；+ `quay serve` = **13**。
 - 可复现对照（隔离 temp root，`QUAY_DRIVER_LEGACY_SUPERVISOR=1` 起六 kind）：`LEGACY long-lived driver processes (ps direct): 12`，pid 文件 12 个（6 `<kind>-driver.pid` + 6 `<kind>-driver-supervisor.pid`）。
 - 同脚本的 anchor 形态：`long-lived anchor processes (ps direct): 1`，6 个 pid 文件 → distinct live = **1**。
-- 生产收敛后：**1 anchor + 1 `quay serve` = 2** ≤ 2。
+- 生产收敛后（**判定对象 = AC1 自己限定的「承载 driver 循环的长驻进程」**）：该量为 **1**（逐一核过 `ps` 的 `--root`：唯一的 driver 载体是 pid 3057428 的 anchor；另有一批 `/tmp/dr-sup-stale-*` 与 `/tmp/dr-ac3-live-*` —— 测试夹具遗留 —— 以及 `--root /home/yale/work/quay-fleet` 的 4 个 —— **另一个工作区**，⛔ 均非本工作区，按 `--root` 位置判定而非关键词）。⇒ **12 → 1**；加 1 个 server（`.quay/server.json` 发布的 pid 1323037）= **2** ≤ 2。
+- ⚠️ **精确化（本轮实测修正上一版「1 quay serve」的措辞，⛔ 不掩盖）**：cwd=`/home/yale/work/quay` 的 `quay serve` **长驻进程有 3 个** —— pid 1222579（Sep 10 起，监听 `0.0.0.0:4173`，RSS 750MB）、pid 1323037（Sep 13 18:52 起 = `.quay/server.json` 发布的统一 server，监听 `127.0.0.1:44191`+`127.0.0.1:46353`）、pid 3157065（Sep 9 起 `--watch` 变体，RSS 16MB，未监听任何端口）。⇒ 若把 AC1 读成「本 root 的**全部**长驻进程 ≤2」则为 **4**；按 AC1 自己的限定词「**承载 driver 循环的**」则为 **1**（3 个 serve 均不承载 driver 循环）。三者**全部早于本任务实现落地（20:34:46Z）**、属 web/control 服务生命周期面 ⇒ 见残留 5。
 
 **AC2（criterion 逐字 exit 0）** 从 `goals/AC-255-*.md` 的 `criterion:` 抽出、**原样**交 bash（`python3 - <<'P' … P` 片段不剥壳）⇒ `EXIT=0`（2026-09-13T22:26Z）。两条同时成立：去重存活 pid = 1 ≤ 2 ∧ 六心跳新鲜。
 
@@ -129,7 +130,7 @@ exit=1
 
 **第 2 步要求的落地形态说明（独立 anchor vs §5 统一 server 的对齐理由 —— Plan 第 2 条明写「若实际落在独立 anchor，须在结果段写明并给出与 §5/§7 的对齐理由」）**
 - **实际落在【独立 anchor 进程】，⛔ 不是并入 `quay server` 进程** —— 这不是偏离：**§6.1 与 §7 阶段 C2 逐字这么写**。§6.1：「剩余的不可恢复故障（OOM、段错误）由**一个**外层 anchor 兜（不是六个 supervisor）」；§7 C2 行：「多进程 supervisor 退役为**一个**外层 anchor」，其判据列：「进程数 **→ 2**（server + anchor）」。
-- ⇒ **「1 个 server + 1 个独立 anchor」正是 C2 判据点名的形态**，`driver-anchor.ts` 实现的就是这**一个** anchor（六个 kind 的 async 常驻循环 + 每 kind 独立错误边界 + 重启计数）。AC-255 的 criterion（`alive>2` ⇒ 红）对 1 与 2 都成立，故收敛后实测的 **2** 与判据一致。
+- ⇒ **「1 个 server + 1 个独立 anchor」正是 C2 判据点名的形态**，`driver-anchor.ts` 实现的就是这**一个** anchor（六个 kind 的 async 常驻循环 + 每 kind 独立错误边界 + 重启计数）。AC-255 的 criterion（`alive>2` ⇒ 红）对 1 与 2 都成立，故收敛后实测的 driver 载体数 1（+server）与判据一致。
 - **与 §5 图的唯一差别是「drivers 画在 `quay server` 进程框内」**：§5 是**目标态图**；「anchor 并入 server ⇒ 1 进程」是 §5 图的进一步收敛，**不在阶段 C 的判据内**（C 的判据是 ≤2），**本任务未做**（见残留 4）。⇒ ⛔ 不声称本任务已达到 §5 图的一进程终态。
 - 回退面按 §7「每阶段独立可回退」保留：`QUAY_DRIVER_LEGACY_SUPERVISOR=1` ⇒ 回到 12 进程 supervisor 形态（`plugin/test/driver-runtime.test.mjs` 显式钉住这条被保留的路径）。
 
@@ -142,6 +143,7 @@ exit=1
 - AC2/AC4：criterion 逐字 **exit 0** —— `LIVE distinct pids = 1`；六心跳年龄 `promotion 1.6 / worker 7.3 / outer 0.0 / goal 7.3 / quality 1.6 / meta 1.6 min`，窗口起点 20:34:46Z ⇒ 窗口 **178 min ≥ 60**，六个各自至少一次。
 - AC5：`server status --json`（**分支代码**读出，`--root /home/yale/work/quay` 读**生产状态**）⇒ `drivers[]` 六行，全部 `evaluated:true alive:true`，每行 `source` 指向**该 kind 自己的载体**，年龄 promotion 29s / worker 29s / outer 46s / quality 30s / meta 34s / goal 491s。
 - AC3/AC6：`node --test plugin/test/driver-anchor.test.mjs` ⇒ **7/7 pass, 0 fail**（7 条：AC1/AC2/AC4 收敛 + AC3① 心跳负控制 + AC3② pid 负控制 + AC6 `stop --kind X` 只停 X 且不杀在飞子进程 + §6.1 单 kind 抛错不波及其余 + §6.9 inv.3 停机有界 + 双派发硬闸）。
+- AC1：`ps` 按 `--root` 逐一核过（见上 AC1 末两条）⇒ 本工作区 driver 载体 = 1。
 - ⚠️ **读数来源分层（诚实登记，同残留 1）**：AC2/AC4 的判定值来自**生产状态**（与代码无关）；AC5 的 `drivers[]` 需要**分支代码**，故从 worktree 读出、`--root` 指生产。**主检出此刻仍跑 develop 代码**（`quay server status --json` 在主检出上**无 `drivers[]`**，本轮实测）⇒ fan-in 落地 + 主检出同步后，该读数才在主检出上生效。
 
 **⚠️ 诚实登记的残留（⛔ 不掩盖）**
@@ -149,6 +151,7 @@ exit=1
 2. **goal kind 的 round 间隔退化 ~8×**（前一轮实测：135–200s → 1107/1406/1132s ≈ 19 min；其余五 kind 未见同量级退化；本轮 goal 末条年龄 7.3–8.2 min，仍在窗口内）。判据仍满足（新鲜窗口 60 min），但这是 SPEC §9 开放问题 1「事件循环层内收会不会互相饿死」的**首个本机读数**。⛔ 未缓解；若越过 60 min，按 §9 正确做法是给它**单独的 anchor 实例**（`--kinds goal`），⛔ 不是在 kind 文件里另写循环。
 3. **§6.10 读数的 `source` 标注可能与供 ts 的载体不同名**（实测 `promotion`）：`carrier_path` 报 `promotion-outcome.jsonl`（其真实末条 ts = `20:01:48Z`），而 `last_record_ts` = `23:31:43Z` **实来自 `promotion-round.jsonl`**（本轮复验同形：`source` 写 `promotion-outcome.jsonl`，年龄 29s 只能来自 round 载体）。判定值（该 kind 是否在转）**仍正确**，但 `source` 串声称的来源不成立 —— `carrierStats` 的 `primaryPath`（首个存在）与 `lastTs`（全载体最大）本就是两个量（`driver-runtime.ts:1653` 有注），而 `server.ts` 把它渲染成 `carrier:<X> last ts`。修法：status 增报 `lastTsCarrier`，或改 `server.ts` 措辞。**本次未修（超出本任务判据的最小面），登记为缺陷。**
 4. **§5 图的「anchor 并入 server（⇒ 1 进程）」未做**：阶段 C 的判据是 ≤2，本任务按 §7 C2 的判据落地为 **server + anchor = 2**（§6.1/§7 C2 逐字点名的形态）。⇒ 与 §5 目标态图的一进程终态仍有一步之差，**登记为后续项**，⛔ 不声称本任务已完成 §5 图。
+5. **`/home/yale/work/quay` 有 3 个长驻 `quay serve`，其中 2 个在监听（⛔ 非本任务引入、⛔ 未处置）**：pid 1222579（Sep 10 05:43 起，**监听 `0.0.0.0:4173`** = quay 对外端口，RSS 750MB）、pid 1323037（Sep 13 18:52 起 = `.quay/server.json` 发布的统一 server，监听 `127.0.0.1:44191`+`46353`）、pid 3157065（Sep 9 22:18 起 `--watch` 变体，RSS 16MB，**未监听任何端口**）。三者**全部早于本任务实现落地（20:34:46Z）**，因此**不是本任务引入**，也**不承载 driver 循环**（driver 循环只在 anchor 里）⇒ 属 **web/control 服务生命周期**面（`gap-ac251-unified-server-web-control-same-process` / `gap-ac254-partial-stop-web-driver-round-record` 的后续）。**本轮只如实登记，⛔ 未停任何 serve**（停生产 server 不属本任务授权面）。⚠️ 影响面：AC1 若被读成「本 root **全部**长驻进程 ≤2」则为 **4**；按 AC1 自己的限定词「**承载 driver 循环的**」则为 **1**（+1 server = 2）。⇒ 提请下一轮分派**服务生命周期**任务处置（停掉 Sep 9/Sep 10 两个陈旧 serve 并核对 4173 的归属）。
 
 ## DoD
 
