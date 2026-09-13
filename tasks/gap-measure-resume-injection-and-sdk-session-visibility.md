@@ -2,7 +2,7 @@
 id: gap-measure-resume-injection-and-sdk-session-visibility
 title: 量两条会话通道的开放问题——`claude -p --resume` 对【运行中】会话是注入还是起副本 / Agent SDK 会话是否出现在
   `claude agents --json`
-status: ready
+status: done
 labels:
   - gap
   - spike
