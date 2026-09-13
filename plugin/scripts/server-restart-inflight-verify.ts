@@ -573,6 +573,21 @@ async function main(argv: string[]): Promise<number> {
     out(json, { ac: AC_ID, verdict: "NOT-EVALUATED", reason: `the pid in ${driverPidFile} (${driverPidBefore}) is not alive-and-non-zombie — refusing to sample a corpse` });
     return 2;
   }
+  // ⚠️ 独立推导放在【所有拒绝之前】：它是纯读操作，而且**拒绝路径上它恰恰最有价值** ——
+  // 「自报集合 vs 进程树推导」的并列读数在形态被拒时同样成立，把两个数字都贴出来，才能让人
+  // 看见它们差多少（硬规则 4b：被测对象自己维护的集合，在它停摆时恰好也停止更新）。
+  const workerName = resolveWorkerProcessName(root);
+  const declaredBefore = parsePidFile(readProc(path.join(root, ".quay", `${DRIVER_KINDS.worker.prefix}-inflight.pid`)));
+  const inflight = deriveInflight(driverPidBefore, workerName, declaredBefore);
+  const derivation = {
+    inflight_source: INFLIGHT_SOURCE,
+    inflight_worker_pids_before: inflight.pids,
+    inflight_declared_by_driver: inflight.declared,
+    inflight_declared_vs_derived: samePidSet(inflight.declared, inflight.pids) ? "identical" : "DIFFERENT — the independent derivation is authoritative",
+    driver_children_all: inflight.allChildren,
+    driver_children_digest: childDigest(inflight.allChildren),
+    workspace_worker_name: workerName,
+  };
   const driverPidBeforeAlive = cmdlineIsWorkerDriver(driverPidBefore);
   if (!driverPidBeforeAlive) {
     if (anchor !== null && anchor.pid === driverPidBefore) {
@@ -591,6 +606,7 @@ async function main(argv: string[]): Promise<number> {
         anchor_pid: anchor.pid,
         anchor_kinds: anchor.kinds,
         worker_driver_pid_file: driverPidFile,
+        ...derivation,
       });
       return 2;
     }
@@ -598,12 +614,11 @@ async function main(argv: string[]): Promise<number> {
       ac: AC_ID,
       verdict: "NOT-EVALUATED",
       reason: `the pid in ${driverPidFile} (${driverPidBefore}) is alive but its cmdline does not identify it as ${WORKER_DRIVER_MARKER} (cmdline: ${JSON.stringify(procCmdline(driverPidBefore))}) — refusing to act on an unrelated process`,
+      record_written: false,
+      ...derivation,
     });
     return 2;
   }
-  const workerName = resolveWorkerProcessName(root);
-  const declaredBefore = parsePidFile(readProc(path.join(root, ".quay", `${DRIVER_KINDS.worker.prefix}-inflight.pid`)));
-  const inflight = deriveInflight(driverPidBefore, workerName, declaredBefore);
   const inflightBeforeAllAlive = inflight.pids.length > 0 && inflight.pids.every((p) => aliveNonZombie(p));
   if (inflight.pids.length < 1) {
     // 空集 ⇒ NOT-EVALUATED、⛔ 不写记录、⛔ 不得为凑读数而制造假在飞 worker（DoD 逐字）。
@@ -611,11 +626,13 @@ async function main(argv: string[]): Promise<number> {
       ac: AC_ID,
       verdict: "NOT-EVALUATED",
       reason: `no in-flight worker child of driver pid ${driverPidBefore} matched the workspace worker name '${workerName}' — 'not one of them died' would be vacuously true (空转控制 a). Children seen: ${JSON.stringify(childDigest(inflight.allChildren))}`,
+      record_written: false,
+      ...derivation,
     });
     return 2;
   }
   if (!inflightBeforeAllAlive) {
-    out(json, { ac: AC_ID, verdict: "NOT-EVALUATED", reason: `in-flight set ${JSON.stringify(inflight.pids)} contains a dead/zombie pid — vacuous-before-set control (空转控制 b)` });
+    out(json, { ac: AC_ID, verdict: "NOT-EVALUATED", reason: `in-flight set ${JSON.stringify(inflight.pids)} contains a dead/zombie pid — vacuous-before-set control (空转控制 b)`, record_written: false, ...derivation });
     return 2;
   }
   const roundBefore = readWorkerRound(root);

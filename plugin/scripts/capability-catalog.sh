@@ -1756,7 +1756,7 @@ declare -A MATCHING=(
   [peer-identity-probe.ts]="n/a"
   [channel-probe-server.ts]="n/a"
   [server-partial-stop-verify.ts]="n/a"
-  [server-restart-inflight-verify.ts]="n/a (producer；它写记录，不判定) "
+  [server-restart-inflight-verify.ts]="n/a"
 )
 # ── CONSUMER (rhythm-column consumer contract, gap-ac73-catalog-rhythm-consumer-check) ──
 # A mechanism's RHYTHM is only a claim until someone presses it. This table makes the consumer
