@@ -99,6 +99,7 @@ unset _cs_violations
 # as a specific QUESTION, never the generic "checks correctness" (AC5 negative control:
 # a catalog where every entry says "checks correctness" is indistinguishable from none).
 declare -A QUESTION=(
+  [gitignore-runtime-coverage-check.ts]="Do the runtime-artifact patterns quay MARKS in its own .gitignore equal the patterns of the single-source manifest (plugin/scripts/quay-runtime-artifacts.txt) that quay-init writes into a consumer project — either direction of divergence RED (marked-but-absent ⇒ quay-init would not ignore it; present-but-unmarked ⇒ an unreferenced rule); unreadable manifest ⇒ NOT-EVALUATED never conflated with 'no drift' (tasks/gap-quay-init-gitignore-misses-quay-runtime-artifacts-outside-dot-quay)?"
   [psi-failure-correlation-check.ts]="Does PSI (cpu_stall) have incremental predictive power for test FAILURE beyond the concurrent-file count — via TWO SPLIT data sources (never merged): (a) ACTIVE induction of failures by running serial/lowconc + verified-clean historical-failure candidates (excluding plugin/test-isolation-violations.txt hits) under controlled busy-wait CPU oversubscription while sampling /proc/pressure/cpu, adjudicating each induced failure against isolation-conflict signatures before it counts; and (b) PASSIVE historical join of .quay/verification-round.jsonl perFile {file, startedAtMs, endedAtMs, passed} with .quay/suite-load-<runId>.jsonl {t, cpu_stall}, comparing failing vs passing files WITHIN each concurrency bin, with a MIN_N floor below which a bin reports 「样本不足」 not a direction (the Phase 0 go/no-go that decides whether to build a PSI feedback admission controller, gap-psi-shadow-admission-controller)?"
   [psi-window-join.ts]="What is the system-level PSI (cpu_stall) sample series for ONE test file's ONE run — the .quay/verification-round.jsonl perFile {file, startedAtMs, endedAtMs} window joined against the .quay/suite-load-<runId>.jsonl system-level periodic samples {t, cpu_stall} (approximate time-window join, honestly labeled, never an exclusive per-file value), fail-closed on missing carriers / missing perFile record (tasks/gap-perfile-psi-window-join)?"
   [archguard-runner.ts]="Does the repo's TypeScript code have dependency cycles — a REAL archguard CLI analyze run at suite time, whose structural verdict (metricVector.sccCount === 0, no non-trivial SCCs) is read back from the produced ArchJSON, fail-closed (archguard missing / analyze failed / cycles > 0 ⇒ exit 1, tasks/gap-archguard-zero-production-calls)?"
@@ -441,6 +442,7 @@ declare -A GUARD_OBJECT=(
 
 # ── CADENCE (cadence declaration (②a, gap-crystallization-five-directions) — every declared check declares how often it is supposed to run; 零调用 > 3× 声明周期 → 待表态 (not a uniform day count)) ──
 declare -A CADENCE=(
+  [gitignore-runtime-coverage-check.ts]="每轮"
   [psi-failure-correlation-check.ts]="按需"
   [psi-window-join.ts]="按需"
   [archguard-runner.ts]="每轮"
@@ -760,6 +762,7 @@ declare -A CADENCE=(
 
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
 declare -A INVALIDATION=(
+  [gitignore-runtime-coverage-check.ts]="失效前提：① 绑定仍是【quay 自己 .gitignore 的标记行 ⇔ manifest】两表示（标记约定 = 紧邻上一行含 @quay-runtime-artifact 的注释）；若标记约定改名、或该检查改读第三份列表（那正是它要防的漂移），本条需同步；② manifest 仍是 quay-init / fan-in ff / --runtime-dirty 判定三者的唯一来源；③ .quay/* 仍覆盖 .quay/ 内运行时状态（故它们刻意不入选 manifest）"
   [psi-failure-correlation-check.ts]="失效前提：被动源依赖 .quay/verification-round.jsonl 的 perFile 字段（file/startedAtMs/endedAtMs/passed）与 .quay/suite-load-<runId>.jsonl 的 {t, cpu_stall} 字段口径、以及 round.runId ↔ suite-load 文件名 <runId> 的对应关系不变；主动源依赖 plugin/test-isolation-violations.txt 的 file:type 行格式与 serial/lowconc 的 @test-group 分类口径不变；若任一载体字段语义变化或隔离违规名单格式变化，本条需同步"
   [psi-window-join.ts]="失效前提：依赖 .quay/verification-round.jsonl 的 perFile 字段（file/startedAtMs/endedAtMs）与 .quay/suite-load-<runId>.jsonl 的 {t, cpu_stall} 字段口径、以及 round.runId ↔ suite-load 文件名 <runId> 的对应关系不变；若任一载体字段语义变化，本条需同步"
   [archguard-runner.ts]="失效前提：archguard CLI 在 PATH 上、TypeScript 能解析（tsconfig 存在）、六个 scope（packages/quay/src + plugin/scripts + packages/quay-native/src + packages/quay-github/src + packages/quay-backlog/src + experiments/quay-perpetual-stream/scripts）目录结构不变；若 archguard 移除/scope 变更/sccCount 语义变更，本条需同步"
@@ -1079,6 +1082,7 @@ declare -A INVALIDATION=(
 
 # ── LAST_REAFFIRMED (last-reaffirmed stamp (③) — the date someone last looked at this mechanism and stamped it; 超 N 天未被任何调用/检查/复核触及 → 待重新确认 (只看一眼盖章, 不判断对错)) ──
 declare -A LAST_REAFFIRMED=(
+  [gitignore-runtime-coverage-check.ts]="2026-09-13"
   [psi-failure-correlation-check.ts]="2026-09-05"
   [psi-window-join.ts]="2026-09-07"
   [archguard-runner.ts]="2026-08-27"
@@ -1398,6 +1402,7 @@ declare -A LAST_REAFFIRMED=(
 
 # ── MATCHING (matching-method declaration (④) — how this checker judges: position (按位置不按关键词) | keyword | enumerative (枚举式存在性) | n/a (non-judgment lib/data). New checkers MUST declare which matching they use) ──
 declare -A MATCHING=(
+  [gitignore-runtime-coverage-check.ts]="position"
   [psi-failure-correlation-check.ts]="n/a"
   [psi-window-join.ts]="n/a"
   [archguard-runner.ts]="n/a"
@@ -1723,6 +1728,7 @@ declare -A MATCHING=(
 # Non-按需 mechanisms wired into the suite/execution cores need no CONSUMER row — their wiring IS
 # the consumer. The rhythm-consumer-check.ts reads this table; see its 判据1/2/3.
 declare -A CONSUMER=(
+  [gitignore-runtime-coverage-check.ts]="谁按：run_static_checks（scripts/test.sh 静态检查链，change tier，@static-object 命中 .gitignore / plugin/scripts/quay-runtime-artifacts.txt / 本检查自身时）；条件=要判 quay 自己 .gitignore 里标为运行时产物的条目集与 quay-init 写出的 manifest 是否仍然一致（漂移即红，manifest 读不到 NOT-EVALUATED）"
   [psi-failure-correlation-check.ts]="谁按：任务实现者在 gap-psi-shadow-admission-controller 的 Phase 0 go/no-go 判定时按（node --experimental-strip-types plugin/scripts/psi-failure-correlation-check.ts --source active|passive|both --root <主检出>）；条件=要用主动诱发 + 被动历史两条独立数据源判定 PSI 对失败是否有超出并发数的增量预测力"
   [psi-window-join.ts]="谁按：任务实现者在需要回答「这个测试这一次跑的时候机器多忙」的诊断可见性问题时按（node --experimental-strip-types plugin/scripts/psi-window-join.ts --run-id <runId> --file <relpath> [--root <主检出>]）；条件=要查某测试单次运行的 PSI 时间窗采样序列"
   [archguard-runner.ts]="谁按：scripts/test.sh run_selected 全量 suite 路径按（run_static_checks 之后，code-class gate）；条件=每次全量验证轮跑 archguard analyze + 读产物判依赖环，fail-closed（archguard 缺失/analyze 失败/有环 ⇒ exit 1）"

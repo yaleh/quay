@@ -68,6 +68,16 @@ const KERNEL_DEPS = [
   "write-json-atomic.ts",
 ];
 
+// Repo-root-relative kernel deps (NOT under plugin/scripts ⇒ the flat copy above cannot carry them).
+// gap-quay-init-gitignore-misses-quay-runtime-artifacts-outside-dot-quay: touches-orthogonality-check.ts
+// (in KERNEL_DEPS) now imports the Core module `packages/quay/src/runtime-artifacts.ts` — the ONE
+// implementation of "is this path a quay runtime artifact?" (shared with fan-in/ff-merge.ts). Same
+// transitive-closure obligation as the plugin-flat entries above: without it, the hermetic temp root's
+// copy of the kernel dies with ERR_MODULE_NOT_FOUND. The Core direction is the only allowed one —
+// a published Core package must stay dependency-free on the plugin layer (engine.ts rule), so the
+// shared module lives in Core and the plugin imports it, never the reverse.
+const KERNEL_DEPS_REPO_REL = ["packages/quay/src/runtime-artifacts.ts"];
+
 // 两个 kind 的夹具【不同】，因为 --pid-file 的语义按 registry 的 pidSelf 分叉（DRIVER_KINDS[*].pidSelf）：
 //   · pidSelf=true（promotion/outer/quality/meta/goal）：--pid-file = **驱动自己**的 pid 文件，写者 =
 //     驱动，写在【进入常驻循环之后】。它同时是 driver-runtime 存活确认的**就绪判据**
@@ -97,6 +107,13 @@ function copyKernel(scripts) {
   // dispatch-worktree-setup.sh 的手法），让裸说明符 `import "yaml"` 从 temp root 向上可解析。
   const root = path.resolve(scripts, "..", "..");
   fs.symlinkSync(path.join(REPO_ROOT, "node_modules"), path.join(root, "node_modules"), "dir");
+  // The Core-side deps land at their real repo-relative paths under the temp root so the copied
+  // kernel's `../../packages/quay/src/…` specifiers resolve there too.
+  for (const dep of KERNEL_DEPS_REPO_REL) {
+    const dst = path.join(root, dep);
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    fs.copyFileSync(path.join(REPO_ROOT, dep), dst);
+  }
   fs.writeFileSync(path.join(scripts, "promotion-driver.ts"), FAKE_SELF_PID_DRIVER, "utf8");
   fs.writeFileSync(path.join(scripts, "worker-driver.ts"), FAKE_DRIVER, "utf8");
 }

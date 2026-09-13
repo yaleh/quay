@@ -1532,3 +1532,173 @@ test("AC6 — dev/build layout: the registry is at the MERGE ROOT (unreachable b
     cleanup(dir); cleanup(st); cleanup(fx.build);
   }
 });
+
+// ── runtime-artifact manifest (tasks/gap-quay-init-gitignore-misses-quay-runtime-artifacts-outside-dot-quay) ──
+// The benign pass-through used to recognize ONLY `?? .quay/…`, while quay also writes runtime state
+// OUTSIDE `.quay/` — `<tasksDir>/.quay-parse-cache.json` (written by merely READING the store),
+// `milestones/fast-mode-telemetry/*.json`, the `orchestration/` ledgers, `.workflow-events/`. Untracked
+// and un-ignored, those refused the ff for EVERY task: measured on a real third-party project
+// (quay-fleet, 2026-09-13), a task whose suite was 55/55 green could never land. The whitelist is now
+// READ from the single-source manifest `plugin/scripts/quay-runtime-artifacts.txt` (the same list
+// quay-init writes into a consumer `.gitignore`), and a refusal that DOES involve such a path says so.
+//
+// ⛔ The pre-fix control is a real second control, not a paraphrase: `PRE_FIX_MERGE_SCRIPT` (when the
+// sibling pre-fix worktree exists) is the SAME ff-merge module from BEFORE this change, driven with the
+// SAME fixture — the assertion that its reason is the bare `working tree not clean` is what proves the
+// attribution lines are new behavior rather than always-present text.
+
+const PRE_FIX_MERGE_SCRIPT = process.env.FANIN_FF_PREFIX_MODULE
+  ?? path.resolve(REPO_ROOT, "..", "negctl-old-init", "packages", "quay", "src", "fan-in", "ff-merge.ts");
+
+function runMergeModule(modulePath, args) {
+  return spawnSync("node", ["--experimental-strip-types", modulePath, ...args, "--token", "test-token"], { encoding: "utf8" });
+}
+
+/** The REAL plugin scripts dir — where the runtime-artifact manifest lives (dev tree). */
+const REAL_SCRIPTS_DIR = path.join(REPO_ROOT, "plugin", "scripts");
+
+test("runtime-artifacts AC1 — an untracked `tasks/.quay-parse-cache.json` (outside Touches) is passed through and the ff LANDS", () => {
+  const dir = makeTmp("rtpass");
+  const st = stateDir("rtpass");
+  try {
+    initRepoTrackedQuay(dir);
+    writeTaskFileWithTouches(dir, "rt-t", "ready", ["plugin/scripts/fan-in-ff-merge.sh", "tasks/rt-t.md"]);
+    const tip = makeTaskBranch(dir, "rt-t");
+    // THE writer shape from production: the native store's parse cache, written by a READ (`task list`).
+    fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "tasks", ".quay-parse-cache.json"), '{"tasks/T-1.md":{"mtimeMs":1}}\n', "utf8");
+    const capArgs = captureArgs(st, "rt-t", tip);
+    const r = runMergeModule(MERGE_SCRIPT, ["--task", "rt-t", "--root", dir, "--scripts-dir", REAL_SCRIPTS_DIR, ...capArgs]);
+
+    assert.equal(r.status, 0, `the parse cache must be benign runtime dirty (quay wrote it):\n${r.stdout}${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /not clean/, "the pass-through must remove the refusal, not report it");
+    assert.match(r.stderr, /passed through a benign runtime-dirty tree/);
+    assert.match(r.stderr, /quay's own runtime artifacts per .*quay-runtime-artifacts\.txt: tasks\/\.quay-parse-cache\.json/,
+      "the pass-through must ATTRIBUTE the file to quay's manifest, not just tolerate it");
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), tip, "develop fast-forwarded to the task tip");
+    // 仅放行不处置 (unchanged): NOT committed, NOT deleted — the file stays untracked on disk.
+    assert.ok(fs.existsSync(path.join(dir, "tasks", ".quay-parse-cache.json")), "the runtime file stays on disk");
+  } finally {
+    cleanup(dir); cleanup(st);
+  }
+});
+
+test("runtime-artifacts AC1b — untracked `milestones/fast-mode-telemetry/*.json` also passes through (the second measured pattern)", () => {
+  const dir = makeTmp("rttele");
+  const st = stateDir("rttele");
+  try {
+    initRepoTrackedQuay(dir);
+    // The telemetry DIRECTORY is tracked (it is, in the real repo — historical snapshots are committed
+    // before the ignore rule; and quay-fleet has it too), so the new snapshot shows up as its OWN
+    // porcelain line rather than the collapsed `?? milestones/` the AREA rule covers (AC5's shape).
+    fs.mkdirSync(path.join(dir, "milestones", "fast-mode-telemetry"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "milestones", "fast-mode-telemetry", ".gitkeep"), "", "utf8");
+    gitCmd(dir, "add", "-A");
+    gitCmd(dir, "commit", "-q", "-m", "track the telemetry dir");
+    writeTaskFileWithTouches(dir, "rt-t", "ready", ["plugin/scripts/fan-in-ff-merge.sh", "tasks/rt-t.md"]);
+    const tip = makeTaskBranch(dir, "rt-t");
+    fs.writeFileSync(path.join(dir, "milestones", "fast-mode-telemetry", "2026-09-13.json"), "{}\n", "utf8");
+    const capArgs = captureArgs(st, "rt-t", tip);
+    const r = runMergeModule(MERGE_SCRIPT, ["--task", "rt-t", "--root", dir, "--scripts-dir", REAL_SCRIPTS_DIR, ...capArgs]);
+    assert.equal(r.status, 0, `fast-mode telemetry must be benign runtime dirty:\n${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /passed through a benign runtime-dirty tree/);
+    assert.match(r.stderr, /milestones\/fast-mode-telemetry\/2026-09-13\.json/, "the attribution names the telemetry snapshot");
+  } finally {
+    cleanup(dir); cleanup(st);
+  }
+});
+
+test("runtime-artifacts AC5 — a dirty path in a directory quay writes under (collapsed `?? milestones/`) refuses, naming quay and the disposition", () => {
+  const dir = makeTmp("rtarea");
+  const st = stateDir("rtarea");
+  try {
+    initRepoTrackedQuay(dir);
+    writeTaskFileWithTouches(dir, "rt-t", "ready", ["plugin/scripts/fan-in-ff-merge.sh", "tasks/rt-t.md"]);
+    makeTaskBranch(dir, "rt-t");
+    // The quay-fleet shape: an untracked DIRECTORY holding a leftover telemetry file. git collapses it
+    // to `?? milestones/`, which matches no manifest pattern (only the AREA rule relates it) ⇒ refuse.
+    fs.mkdirSync(path.join(dir, "milestones", "fast-mode-telemetry"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "milestones", "fast-mode-telemetry", "2026-09-13.json"), "{}\n", "utf8");
+    fs.writeFileSync(path.join(dir, "milestones", "leftover-from-another-loop.txt"), "residue\n", "utf8");
+    const retries = path.join(st, "retries.jsonl");
+    const r = runMergeModule(MERGE_SCRIPT, ["--task", "rt-t", "--root", dir, "--scripts-dir", REAL_SCRIPTS_DIR, "--retry-record", retries]);
+
+    assert.equal(r.status, 2, `an unattributable residue must still refuse exit 2:\n${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /not clean/);
+    assert.match(r.stderr, /QUAY RUNTIME ARTIFACT AREA: milestones/, `the reason must name quay as the author:\n${r.stderr}`);
+    assert.match(r.stderr, /milestones\/fast-mode-telemetry\/\*\.json/, "the reason must name the relating manifest pattern");
+    assert.match(r.stderr, /disposition — quay-init writes these patterns/, "the reason must state the disposition");
+    assert.ok(!fs.existsSync(retries), "an environment guard, not an ff failure — no retry record");
+
+    // THE PRE-FIX CONTROL (same fixture, the pre-change module): the reason is the BARE refusal. This is
+    // what makes the attribution lines above a measured delta rather than a constant string.
+    if (fs.existsSync(PRE_FIX_MERGE_SCRIPT)) {
+      const r0 = runMergeModule(PRE_FIX_MERGE_SCRIPT, ["--task", "rt-t", "--root", dir, "--scripts-dir", REAL_SCRIPTS_DIR]);
+      assert.equal(r0.status, 2, `pre-fix control must also refuse: ${r0.stdout}${r0.stderr}`);
+      assert.match(r0.stderr, /not clean/);
+      assert.doesNotMatch(r0.stderr, /QUAY RUNTIME ARTIFACT/, `pre-fix reason is bare — no attribution:\n${r0.stderr}`);
+      assert.doesNotMatch(r0.stderr, /disposition/, "pre-fix reason states no disposition");
+    }
+  } finally {
+    cleanup(dir); cleanup(st);
+  }
+});
+
+test("runtime-artifacts AC3 — the whitelist extension comes from the MANIFEST, not a hard-coded path (negative + positive controls)", () => {
+  const dir = makeTmp("rtneg");
+  const st = stateDir("rtneg");
+  const emptyScriptsDir = makeTmp("rtempty");
+  try {
+    initRepoTrackedQuay(dir);
+    writeTaskFileWithTouches(dir, "rt-t", "ready", ["plugin/scripts/fan-in-ff-merge.sh", "tasks/rt-t.md"]);
+    const tip = makeTaskBranch(dir, "rt-t");
+    fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "tasks", ".quay-parse-cache.json"), "{}\n", "utf8");
+    const capArgs = captureArgs(st, "rt-t", tip);
+
+    // (a) NEGATIVE CONTROL: the SAME file, with an unresolvable manifest (empty scripts dir) ⇒ refuses.
+    //     This proves the pass-through is not a hard-coded exception for `.quay-parse-cache.json`.
+    const r0 = runMergeModule(MERGE_SCRIPT, ["--task", "rt-t", "--root", dir, "--scripts-dir", emptyScriptsDir, ...capArgs]);
+    assert.equal(r0.status, 2, `with no manifest the file is NOT certified benign:\n${r0.stdout}${r0.stderr}`);
+    assert.match(r0.stderr, /not clean/);
+
+    // (b) POSITIVE: the real manifest ⇒ the same file passes through.
+    const r1 = runMergeModule(MERGE_SCRIPT, ["--task", "rt-t", "--root", dir, "--scripts-dir", REAL_SCRIPTS_DIR, ...capArgs]);
+    assert.equal(r1.status, 0, `with the manifest the file IS benign:\n${r1.stdout}${r1.stderr}`);
+
+    // (c) NEGATIVE, the other direction — the widening is BOUNDED: an untracked path that is in NO
+    //     manifest pattern and no area still refuses (else "widened" would mean "anything goes").
+    fs.rmSync(path.join(dir, "tasks", ".quay-parse-cache.json"));
+    fs.writeFileSync(path.join(dir, "totally-unrelated-residue.txt"), "junk\n", "utf8");
+    const r2 = runMergeModule(MERGE_SCRIPT, ["--task", "rt-t", "--root", dir, "--scripts-dir", REAL_SCRIPTS_DIR, ...capArgs]);
+    assert.equal(r2.status, 2, `an unrelated untracked file must still refuse:\n${r2.stdout}${r2.stderr}`);
+    assert.match(r2.stderr, /totally-unrelated-residue\.txt/);
+  } finally {
+    cleanup(dir); cleanup(st); cleanup(emptyScriptsDir);
+  }
+});
+
+test("runtime-artifacts pure — pattern compilation, path matching, and the fail-closed null manifest", async () => {
+  const m = await import(MERGE_SCRIPT);
+  // `**/x` matches both a top-level and a nested x (the parse cache can land under any tasksDir).
+  assert.ok(m.isRuntimeArtifactPath("tasks/.quay-parse-cache.json", ["**/.quay-parse-cache.json"]));
+  assert.ok(m.isRuntimeArtifactPath("nested/deep/.quay-parse-cache.json", ["**/.quay-parse-cache.json"]));
+  // `*` stays inside one segment; `**` crosses.
+  assert.ok(m.isRuntimeArtifactPath("milestones/fast-mode-telemetry/2026-09-13.json", ["milestones/fast-mode-telemetry/*.json"]));
+  assert.ok(!m.isRuntimeArtifactPath("milestones/fast-mode-telemetry/sub/x.json", ["milestones/fast-mode-telemetry/*.json"]));
+  // A trailing `/` denotes a directory — the porcelain shape for an untracked dir keeps its `/`.
+  assert.ok(m.isRuntimeArtifactPath(".workflow-events/", [".workflow-events/"]));
+  assert.ok(m.isRuntimeArtifactPath(".workflow-events/2026-09-13.jsonl", [".workflow-events/"]));
+  // A literal `.` in a pattern is escaped, never a regex wildcard.
+  assert.ok(!m.isRuntimeArtifactPath("orchestrationX/tick-log.md", ["orchestration/tick-log.md"]));
+  // The AREA relation: the collapsed `?? milestones/` is related to a pattern under it.
+  assert.equal(m.runtimeArtifactAreaPattern("milestones/", ["milestones/fast-mode-telemetry/*.json"]), "milestones/fast-mode-telemetry/*.json");
+  assert.equal(m.runtimeArtifactAreaPattern("docs/", ["milestones/fast-mode-telemetry/*.json"]), null);
+  // ⛔ fail-closed: an unreadable manifest attributes NOTHING (never "everything is quay's").
+  assert.deepEqual(m.classifyRuntimeArtifactDirty(["tasks/.quay-parse-cache.json"], null), []);
+  assert.deepEqual(m.classifyRuntimeArtifactDirty(["tasks/.quay-parse-cache.json"], []), []);
+  const hits = m.classifyRuntimeArtifactDirty(["tasks/.quay-parse-cache.json", "milestones/", "src/app.ts"], ["**/.quay-parse-cache.json", "milestones/fast-mode-telemetry/*.json"]);
+  assert.deepEqual(hits.map((h) => h.path), ["tasks/.quay-parse-cache.json", "milestones"], "the trailing `/` of a porcelain dir path is stripped in the report");
+  assert.equal(hits[0].pattern, "**/.quay-parse-cache.json");
+  assert.equal(hits[1].area, "milestones/fast-mode-telemetry/*.json");
+});
