@@ -235,16 +235,15 @@ export const DEFAULT_REGISTRY: Registry = {
 };
 
 // ── extraction ────────────────────────────────────────────────────────────────────────────────────
-export interface ExtractOk {
-  ok: true;
-  /** One entry per occurrence/symbol — a surface group has exactly one; text surfaces have one per match. */
+// ⛔ 非判别式联合：本仓库的 tsconfig 是 strict:false（strictNullChecks 关），字面量判别式在该设置下
+// 不参与收窄 —— 用 {ok, groups, reason} 的平坦形状，两种结果都带全部字段（调用方无需收窄即可读）。
+export interface ExtractResult {
+  ok: boolean;
+  /** One entry per occurrence/symbol — a symbol-kind surface has exactly one; text surfaces one per match. */
   groups: { index: number; values: string[] }[];
+  /** Set when ok is false — why the surface could not be read. */
+  reason: string | null;
 }
-export interface ExtractFail {
-  ok: false;
-  reason: string;
-}
-export type ExtractResult = ExtractOk | ExtractFail;
 
 /** Token normalisation: strip surrounding quotes/brackets/commas, keep lowercase lifecycle words. */
 export function tokenize(raw: string): string[] {
@@ -297,34 +296,34 @@ function extractTsArray(src: string, spec: { symbol?: string; anchor?: string })
   if (spec.symbol) {
     const decl = new RegExp(`(?:export\\s+)?const\\s+${spec.symbol}\\b`);
     const m = decl.exec(src);
-    if (!m) return { ok: false, reason: `declaration of \`${spec.symbol}\` not found` };
+    if (!m) return { ok: false, groups: [], reason: `declaration of \`${spec.symbol}\` not found` };
     const eq = firstCodeChar(src, m.index + m[0].length, "=");
-    if (eq < 0) return { ok: false, reason: `\`${spec.symbol}\` has no initialiser` };
+    if (eq < 0) return { ok: false, groups: [], reason: `\`${spec.symbol}\` has no initialiser` };
     openIdx = firstCodeChar(src, eq, "[");
-    if (openIdx < 0) return { ok: false, reason: `\`${spec.symbol}\` initialiser is not an array literal` };
+    if (openIdx < 0) return { ok: false, groups: [], reason: `\`${spec.symbol}\` initialiser is not an array literal` };
   } else if (spec.anchor) {
     const m = new RegExp(spec.anchor).exec(src);
-    if (!m) return { ok: false, reason: `anchor /${spec.anchor}/ matched 0 times` };
+    if (!m) return { ok: false, groups: [], reason: `anchor /${spec.anchor}/ matched 0 times` };
     openIdx = m.index + m[0].indexOf("[");
-    if (openIdx < 0 || src[openIdx] !== "[") return { ok: false, reason: `anchor /${spec.anchor}/ did not land on a [ literal` };
+    if (openIdx < 0 || src[openIdx] !== "[") return { ok: false, groups: [], reason: `anchor /${spec.anchor}/ did not land on a [ literal` };
   } else {
-    return { ok: false, reason: "ts-array needs a symbol or an anchor" };
+    return { ok: false, groups: [], reason: "ts-array needs a symbol or an anchor" };
   }
   const end = initialiserSpan(src, openIdx, "[", "]");
-  if (end < 0) return { ok: false, reason: "unbalanced array literal" };
-  return { ok: true, groups: [{ index: 0, values: stringLiteralsIn(src, openIdx, end) }] };
+  if (end < 0) return { ok: false, groups: [], reason: "unbalanced array literal" };
+  return { ok: true, groups: [{ index: 0, values: stringLiteralsIn(src, openIdx, end) }], reason: null };
 }
 
 function extractTsObjectKeys(src: string, symbol: string): ExtractResult {
   const decl = new RegExp(`(?:export\\s+)?const\\s+${symbol}\\b`);
   const m = decl.exec(src);
-  if (!m) return { ok: false, reason: `declaration of \`${symbol}\` not found` };
+  if (!m) return { ok: false, groups: [], reason: `declaration of \`${symbol}\` not found` };
   const eq = firstCodeChar(src, m.index + m[0].length, "=");
-  if (eq < 0) return { ok: false, reason: `\`${symbol}\` has no initialiser` };
+  if (eq < 0) return { ok: false, groups: [], reason: `\`${symbol}\` has no initialiser` };
   const openIdx = firstCodeChar(src, eq, "{");
-  if (openIdx < 0) return { ok: false, reason: `\`${symbol}\` initialiser is not an object literal` };
+  if (openIdx < 0) return { ok: false, groups: [], reason: `\`${symbol}\` initialiser is not an object literal` };
   const end = initialiserSpan(src, openIdx, "{", "}");
-  if (end < 0) return { ok: false, reason: "unbalanced object literal" };
+  if (end < 0) return { ok: false, groups: [], reason: "unbalanced object literal" };
   const mask = buildNonCodeMask(src);
   const body = src.slice(openIdx + 1, end);
   const bodyMask = mask.slice(openIdx + 1, end);
@@ -343,19 +342,19 @@ function extractTsObjectKeys(src: string, symbol: string): ExtractResult {
       }
     }
   }
-  return { ok: true, groups: [{ index: 0, values: keys }] };
+  return { ok: true, groups: [{ index: 0, values: keys }], reason: null };
 }
 
 function extractTsStringUnion(src: string, anchor: string): ExtractResult {
   const m = new RegExp(anchor).exec(src);
-  if (!m) return { ok: false, reason: `anchor /${anchor}/ matched 0 times` };
+  if (!m) return { ok: false, groups: [], reason: `anchor /${anchor}/ matched 0 times` };
   const from = m.index + m[0].length;
   // The union expression runs until a delimiter that cannot belong to it.
   let to = from;
   while (to < src.length && !/[;)\n]/.test(src[to])) to++;
   const values = stringLiteralsIn(src, from, to);
-  if (values.length === 0) return { ok: false, reason: `anchor /${anchor}/ matched but no string literals followed` };
-  return { ok: true, groups: [{ index: 0, values }] };
+  if (values.length === 0) return { ok: false, groups: [], reason: `anchor /${anchor}/ matched but no string literals followed` };
+  return { ok: true, groups: [{ index: 0, values }], reason: null };
 }
 
 function extractText(src: string, spec: { anchor: string; indices?: number[] }): ExtractResult {
@@ -371,9 +370,9 @@ function extractText(src: string, spec: { anchor: string; indices?: number[] }):
     if (m.index === re.lastIndex) re.lastIndex++; // zero-width guard
   }
   if (groups.length === 0) {
-    return { ok: false, reason: `anchor /${spec.anchor}/ matched 0 times` };
+    return { ok: false, groups: [], reason: `anchor /${spec.anchor}/ matched 0 times` };
   }
-  return { ok: true, groups };
+  return { ok: true, groups, reason: null };
 }
 
 export function extract(src: string, kind: ExtractKind, spec: { symbol?: string; anchor?: string; indices?: number[] }): ExtractResult {
@@ -381,13 +380,13 @@ export function extract(src: string, kind: ExtractKind, spec: { symbol?: string;
     case "ts-array":
       return extractTsArray(src, spec);
     case "ts-object-keys":
-      return spec.symbol ? extractTsObjectKeys(src, spec.symbol) : { ok: false, reason: "ts-object-keys needs a symbol" };
+      return spec.symbol ? extractTsObjectKeys(src, spec.symbol) : { ok: false, groups: [], reason: "ts-object-keys needs a symbol" };
     case "ts-string-union":
-      return spec.anchor ? extractTsStringUnion(src, spec.anchor) : { ok: false, reason: "ts-string-union needs an anchor" };
+      return spec.anchor ? extractTsStringUnion(src, spec.anchor) : { ok: false, groups: [], reason: "ts-string-union needs an anchor" };
     case "text":
-      return spec.anchor ? extractText(src, { anchor: spec.anchor, indices: spec.indices }) : { ok: false, reason: "text needs an anchor" };
+      return spec.anchor ? extractText(src, { anchor: spec.anchor, indices: spec.indices }) : { ok: false, groups: [], reason: "text needs an anchor" };
     default:
-      return { ok: false, reason: `unknown extract kind ${String(kind)}` };
+      return { ok: false, groups: [], reason: `unknown extract kind ${String(kind)}` };
   }
 }
 
@@ -466,12 +465,18 @@ export function diff(values: string[], authority: string[]): Diff {
   };
 }
 
-function readText(root: string, rel: string): { ok: true; text: string } | { ok: false; reason: string } {
+/** Flat (non-discriminated) read result — see the ExtractResult note on strict:false narrowing. */
+export interface ReadResult {
+  ok: boolean;
+  text: string;
+  reason: string | null;
+}
+function readText(root: string, rel: string): ReadResult {
   try {
-    return { ok: true, text: fs.readFileSync(path.join(root, rel), "utf8") };
+    return { ok: true, text: fs.readFileSync(path.join(root, rel), "utf8"), reason: null };
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
-    return { ok: false, reason: code === "ENOENT" ? `${rel}: file not found` : `${rel}: ${code ?? "unreadable"}` };
+    return { ok: false, text: "", reason: code === "ENOENT" ? `${rel}: file not found` : `${rel}: ${code ?? "unreadable"}` };
   }
 }
 
@@ -482,7 +487,7 @@ function readText(root: string, rel: string): { ok: true; text: string } | { ok:
  * ⛔ 只在提取不到字面量时才走这条路：字面量副本按两向差集判，派生按构造判。
  */
 export function authorityDerivation(
-  read: { ok: true; text: string } | { ok: false; reason: string },
+  read: ReadResult,
   authorityFile: string,
   authoritySymbol: string | undefined,
 ): string | null {

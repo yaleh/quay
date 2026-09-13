@@ -1,13 +1,41 @@
 ---
 id: ADR-036
 title: 枚举事实的单一真源与表层派生 —— 实现/帮助/Web/文档不得各存一份手抄副本
-status: proposed
+status: accepted
 ---
-**状态**: Proposed
+**状态**: Accepted（2026-09-13 落地；机械强制 = `plugin/scripts/enum-surface-parity-check.ts`）
 **日期**: 2026-09-13
 **触发**: 人 2026-09-13 裁定「所有 driver 都应当作为产品化的一部分分发，并在目标项目开发过程中实际运行」后，执行该裁定当场撞见实现/帮助/Web/文档四面不一致，人追问「当前交付物中还有多少类似的不一致？如何统一？」
 
+<!-- enforcement: plugin/scripts/enum-surface-parity-check.ts -->
+
 ---
+
+## 实施记录（2026-09-13 落地，implementation carrier = `gap-enum-surfaces-hand-copied-across-cli-web-docs`）
+
+**规范 4/5 已机械化**：`plugin/scripts/enum-surface-parity-check.ts` 持显式登记表（7 个权威枚举、
+25 个表层副本）做两向差集，挂在 `run_static_checks`（每轮全量 gate）上。三态：0 PASS / 1 RED /
+3 NOT-EVALUATED（读不出权威或表层时**独立取值**，不与「一致」共用输出）。
+
+**对本文上文的修正（实测）**：
+
+1. driver kind 的**真源不是** `cli/driver.ts:33 KINDS`（上文如此记），而是 kernel 的数据表
+   `plugin/scripts/driver-runtime.ts:DRIVER_KINDS` —— respawn 循环、pid/控制态、carrier、per-kind
+   动词全部由它驱动（新增一个 kind 的第一处永远是它）。`cli/driver.ts:KINDS`、`driver-config.ts`
+   的 kind 联合类型、以及本文上文列的 6 处帮助/文档副本都是它的**表层**。⇒ 真源已按此改判。
+2. 两处活漂移已消除：`GOAL_STATUSES`（ABI 少一个 `needs-human`，而 store 接受它且它是最高频 reopen
+   来源）补齐并成为**唯一真源**（`goal-store.ts:VALID_GOAL_STATUSES` 改为派生）；`WEB_DRIVER_KINDS` /
+   `WEB_DRIVER_VERBS` 保持子集但补上**带理由的代码处豁免**（规范 5）。
+3. **规范 2 的「派生化」被检查器识别**（`import` 权威符号 ⇒ 按构造一致），这是比「逐一相等的字面量
+   副本」更强的形态：新增一个值只需改权威一处。
+4. **本文未涵盖的存量**（范围边界，另行处理）：`CLAUDE.md` / `plugin/skills/drivers/SKILL.md` 的
+   driver kind 清单、`cli/driver.ts` 与 `cli/help.ts` 的帮助文本（归 `gap-driver-cli-help-hides-four-of-six-kinds`）、
+   `start-drivers.ts` 的 4-kind 列表、quay-native 的 goal_write 描述、`serve-goal.ts` 的排序/筛选项。
+   它们**每轮原样报出**在 `KNOWN_DRIFT` 台账里（shrink-only：差集【增长】即 RED，收窄容忍）。
+
+**已知覆盖边界（⛔ 说清没查什么）**：面来自显式登记表而非全仓发现（未登记的候选子集字面量由
+`--discover` 段列出，仅供参考、不参与退出码）；生成的打包副本（`plugin/vendor/**`、`*/dist/**`）不登记
+（`sync-vendor.sh --check` / plugin-packaging 守 src→vendor 一致性）；测试夹具不是交付面。
 
 ## 上下文
 
