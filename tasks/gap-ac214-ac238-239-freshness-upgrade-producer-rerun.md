@@ -90,13 +90,13 @@ bash plugin/scripts/develop-deliver-tgz.sh --verify-upgrade --upgrade-source wor
 
 ## Acceptance Criteria
 
-- [ ] AC1 改前读数（能取假）：本仓库根逐字跑 AC-214 criterion ⇒ **exit 1**，stderr 逐字含 `stale evidence: GOAL-009-AC-238:206/200 (margin -6), GOAL-009-AC-239:206/200 (margin -6)`；并贴载体里 AC-238/AC-239 **全部**记录的 `ts`/`build_sha`，证明最新一条停在 2026-09-11（`3b0932db…`）。⛔ 引述本节不算，须实现者复跑。
-- [ ] AC2 产出运行的真读数（⛔ 不是 `--selfcheck`、⛔ 不是夹具、⛔ 不是 `--check`）：贴 `develop-deliver-tgz.sh --verify-upgrade --upgrade-source work/meta-cc --ac239-e2e --hosts B --force --root /home/yale/work/quay` 的**退出码** + 全部 `develop-deliver:` 行 + 前置核的 `df -h` 读数；并贴 `.quay/verify-upgrade-remote-B-<tip8>.log` 的 ⑦/⑦b 两段（`ac238 record written` 与 `ac239 record written … ✓`，或失败时的 fail-closed 原文 + `UPGRADE_PAIR_MISSING` 行）。
-- [ ] AC3 生产载体上的新读数（硬规则 4 推论三：判据必须读**生产载体**、且只计**运行之后**的时间窗）：**主检出** `/home/yale/work/quay/.quay/productization-verification.jsonl` 中新增 ≥1 条 `ac="GOAL-009-AC-238"` **且** ≥1 条 `ac="GOAL-009-AC-239"` 记录，两者 `ts` 均晚于本次运行开始时刻、`build_sha` 为 40-hex，**且两条 `project_root` 逐字相同**；各贴全文 + `git rev-list --count <该 build_sha>..develop -- <交付面 paths>` ≤ 200 的读数（paths 由 `packages/quay/package.json` 的 `files` 机械推导，⛔ 不手写）。⛔ 手写记录 / 搬运旧记录 / `--selfcheck` 注入的记录一律不算。
-- [ ] AC4 判据真转绿：AC-214 criterion 干跑 **exit 0**，贴七行 freshness（每条 `margin > 0`）与 `.quay/goal-freshness-margin.json` 全文（`subjects` 七项 margin 全正）；`goal-store gate AC-214 --root .` ⇒ exit 0。⛔ 通过放宽 criterion 达成不算。
-- [ ] AC5 负控制（判据仍能取假，且转绿不来自放宽）：① `QUAY_GOAL009_FRESHNESS_K=1` 下 AC-214 criterion ⇒ **exit 1** 且 stderr 逐条指名陈旧主体；② `git diff --exit-code -- goals/` 为空（判据文本逐字节未变）；③ `md5sum .quay/productization-verification.jsonl` 在负控制前后相同（该命令只读）。三条读数全部贴出。
-- [ ] AC6 落点正确（⛔ 防空转）：贴出记录**在主检出**载体中的位置（绝对路径 + 载体行数）**且** worktree 的 `.quay/productization-verification.jsonl` 中**没有**本次新增（若 worktree 里也出现 ⇒ `--root` 传错、判据读不到 ⇒ 未达成，须说明并重跑）。
-- [ ] AC7 零代码改动（本任务不改产品代码、也不改判据 ⇒ 着地路径最轻）：`git diff --name-only <base>..HEAD -- plugin/ packages/ goals/` 为空；贴 scoped 门读数（`--for-task <本任务 id>`）与着地归属说明（全量套件归机械 fan-in 的一步，本 worker 不持该共享锁）。
+- [x] AC1 改前读数（能取假）：本仓库根逐字跑 AC-214 criterion ⇒ **exit 1**，stderr 逐字含 `stale evidence: GOAL-009-AC-238:206/200 (margin -6), GOAL-009-AC-239:206/200 (margin -6)`；并贴载体里 AC-238/AC-239 **全部**记录的 `ts`/`build_sha`，证明最新一条停在 2026-09-11（`3b0932db…`）。⛔ 引述本节不算，须实现者复跑。
+- [x] AC2 产出运行的真读数（⛔ 不是 `--selfcheck`、⛔ 不是夹具、⛔ 不是 `--check`）：贴 `develop-deliver-tgz.sh --verify-upgrade --upgrade-source work/meta-cc --ac239-e2e --hosts B --force --root /home/yale/work/quay` 的**退出码** + 全部 `develop-deliver:` 行 + 前置核的 `df -h` 读数；并贴 `.quay/verify-upgrade-remote-B-<tip8>.log` 的 ⑦/⑦b 两段（`ac238 record written` 与 `ac239 record written … ✓`，或失败时的 fail-closed 原文 + `UPGRADE_PAIR_MISSING` 行）。
+- [x] AC3 生产载体上的新读数（硬规则 4 推论三：判据必须读**生产载体**、且只计**运行之后**的时间窗）：**主检出** `/home/yale/work/quay/.quay/productization-verification.jsonl` 中新增 ≥1 条 `ac="GOAL-009-AC-238"` **且** ≥1 条 `ac="GOAL-009-AC-239"` 记录，两者 `ts` 均晚于本次运行开始时刻、`build_sha` 为 40-hex，**且两条 `project_root` 逐字相同**；各贴全文 + `git rev-list --count <该 build_sha>..develop -- <交付面 paths>` ≤ 200 的读数（paths 由 `packages/quay/package.json` 的 `files` 机械推导，⛔ 不手写）。⛔ 手写记录 / 搬运旧记录 / `--selfcheck` 注入的记录一律不算。
+- [x] AC4 判据真转绿：AC-214 criterion 干跑 **exit 0**，贴七行 freshness（每条 `margin > 0`）与 `.quay/goal-freshness-margin.json` 全文（`subjects` 七项 margin 全正）；`goal-store gate AC-214 --root .` ⇒ exit 0。⛔ 通过放宽 criterion 达成不算。
+- [x] AC5 负控制（判据仍能取假，且转绿不来自放宽）：① `QUAY_GOAL009_FRESHNESS_K=1` 下 AC-214 criterion ⇒ **exit 1** 且 stderr 逐条指名陈旧主体；② `git diff --exit-code -- goals/` 为空（判据文本逐字节未变）；③ `md5sum .quay/productization-verification.jsonl` 在负控制前后相同（该命令只读）。三条读数全部贴出。
+- [x] AC6 落点正确（⛔ 防空转）：贴出记录**在主检出**载体中的位置（绝对路径 + 载体行数）**且** worktree 的 `.quay/productization-verification.jsonl` 中**没有**本次新增（若 worktree 里也出现 ⇒ `--root` 传错、判据读不到 ⇒ 未达成，须说明并重跑）。
+- [x] AC7 零代码改动（本任务不改产品代码、也不改判据 ⇒ 着地路径最轻）：`git diff --name-only <base>..HEAD -- plugin/ packages/ goals/` 为空；贴 scoped 门读数（`--for-task <本任务 id>`）与着地归属说明（全量套件归机械 fan-in 的一步，本 worker 不持该共享锁）。
 
 ## Definition of Done
 
