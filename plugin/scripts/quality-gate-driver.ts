@@ -90,6 +90,10 @@ import {
 // outer-driver / promotion-driver 的接法）。quality 段由此前的「字面量 60_000」改为从
 // loadDriverConfig(root).quality.intervalMs 派生（缺省 30000，与 outer 例程型 kind 对齐）。
 import { defaultDriverConfig, loadDriverConfig } from "./driver-config.ts";
+// SPEC-capability-planes-and-mechanism-lifecycle §5.2：probe 轨道（`.quay/config.yml` `loop.routines:`
+// 的 interval 例程 → 派 fresh-context 探针 → 结构化 finding 落载体）。本 driver 是承载它的活调用点
+// （§5.1：⛔ 不为 probe 新造 driver kind——Layer 1b 的 RoutineSpec 已经是 probe 抽象）。
+import { PROBE_ROLE_DEFAULT, probeRoutinesFromConfig } from "./probe-routine.ts";
 
 // ── 常量（由 DRIVER_KINDS registry 派生，⛔ 不另写一份路径字面量）──────────────────────────
 const QUALITY_SPEC = DRIVER_KINDS.quality;
@@ -919,6 +923,11 @@ export interface QualityGateOptions {
   /** 架构复核的 gap-filing agent 命令（测试缝；prompt 末参数追加）。缺省 null ⇒ 生产 launchArgv。 */
   archGapWorkerCmd: string | null;
   archGapWorkerTimeoutMs: number;
+  /** probe 轨道（SPEC-capability-planes-and-mechanism-lifecycle §5.2）的例程表：由调用方
+   *  （main()）从 `.quay/config.yml` `loop.routines:` 装配后**注入**，⛔ 本函数不自己读配置
+   *  （读配置会让 qualityGateRoutines 的行为依赖工作区的 gitignored 状态 ⇒ 测试不再确定）。
+   *  缺省 [] = 无 probe 轨道（老行为）。 */
+  probeRoutines?: RoutineSpec[];
 }
 
 /** 四条例程（B15 pool-quality-judge + B17 judgment-consumer-check + 架构复核 + packaging-hygiene）。
@@ -961,6 +970,11 @@ export function qualityGateRoutines(root: string, opts: QualityGateOptions): Rou
         halted: ctx?.halted === true,
       })],
     },
+    // 第五类：**声明式** probe 轨道（SPEC §5.2）。与前四条的区别是「例程不是写在这个文件里的，
+    // 是工作区 `.quay/config.yml` 声明的」——这才是让 `loop.routines:` 从死配置变回活机制的那条线。
+    // ⛔ 与 fan-in/scoped-gate 无任何关系（gap-fan-in-remove-archguard-gate 的教训：深扫成本高得多的
+    //   东西更不能上每任务必经的热路径）。
+    ...(opts.probeRoutines ?? []),
   ];
 }
 
@@ -1111,6 +1125,10 @@ const HELP = [
   "  --packaging-gap-worker-timeout <ms> gap-filing spawn 上限（毫秒，缺省 900000）",
   "  --arch-gap-worker-cmd <argv> 覆盖架构复核的 gap-filing agent 命令（测试缝；prompt 末参数追加）",
   "  --arch-gap-worker-timeout <ms> 架构复核 gap-filing spawn 上限（毫秒，缺省 900000，与 packaging 同源）",
+  "  --probe-runner-cmd <argv> 覆盖 probe 轨道（.quay/config.yml loop.routines: 的 interval 例程）的",
+  "                            探针 agent 命令（测试缝；prompt 末参数追加）。⛔ 不传 = 真 LLM spawn",
+  "  --probe-state-dir <dir>   probe 轨道的状态目录（载体 routine-findings.jsonl + last-run.json；",
+  "                            缺省 <root>/.quay）。测试缝：⛔ 别让测试写进真工作区的载体",
   "  --round-log <path>        轮记录文件（缺省 <root>/.quay/quality-round.jsonl）",
   "  --pid-file <path>         把驱动自身 pid 写到该文件（外部观测 + kill 抓手）",
   "  --json                    每轮向 stdout 打一条 JSON 事件行",
@@ -1153,6 +1171,8 @@ export async function main(argv: string[]): Promise<number> {
   let packagingGapWorkerTimeoutRaw: string | undefined;
   let archGapWorkerCmd: string | undefined;
   let archGapWorkerTimeoutRaw: string | undefined;
+  let probeRunnerCmd: string | undefined;
+  let probeStateDirRaw: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -1181,6 +1201,8 @@ export async function main(argv: string[]): Promise<number> {
     else if (a === "--packaging-gap-worker-timeout") packagingGapWorkerTimeoutRaw = args[++i];
     else if (a === "--arch-gap-worker-cmd") archGapWorkerCmd = args[++i];
     else if (a === "--arch-gap-worker-timeout") archGapWorkerTimeoutRaw = args[++i];
+    else if (a === "--probe-runner-cmd") probeRunnerCmd = args[++i];
+    else if (a === "--probe-state-dir") probeStateDirRaw = args[++i];
     else if (a === "--json") json = true;
     else if (a === "--help" || a === "-h") { console.log(HELP); return 0; }
     else { console.error(`quality-gate-driver: unknown argument: ${a}`); return 2; }
@@ -1212,6 +1234,36 @@ export async function main(argv: string[]): Promise<number> {
   // liveness 监测读不到心跳、假报 stall（gap-meta-round-log-rel）。
   const roundLogFile = roundLogPath ? path.resolve(roundLogPath) : path.join(rootDir, ".quay", ROUND_LOG_REL);
   const resolvedRunId = runId || `qg-${Date.now()}`;
+
+  // probe 轨道（SPEC §5.2）：声明在 `.quay/config.yml` `loop.routines:` 里、由本 driver 的例程表承载。
+  // spawn 上限**从例程看门狗派生**（⛔ 不另立字面量，硬规则 4 推论二）：探针必须在看门狗判定之前
+  // 自己返回，否则被放弃的是仍在跑的 spawn（子进程泄漏 + 记一条 failed 而真相未知）。
+  const probeTimeoutMs = Math.max(60_000, routineWatchdogMs - 60_000);
+  const probeStateDir = probeStateDirRaw ? path.resolve(probeStateDirRaw) : undefined;
+  const probeArgv = probeRunnerCmd
+    ? (prompt: string) => {
+      const prefix = splitArgs(probeRunnerCmd as string);
+      return prefix.length === 0 ? launchArgv(PROBE_ROLE_DEFAULT, prompt, rootDir) : [...prefix, prompt];
+    }
+    : undefined;
+  const probeSelection = probeRoutinesFromConfig(rootDir, {
+    pluginRoot: path.join(rootDir, "plugin"),
+    probeTimeoutMs,
+    ...(probeStateDir ? { stateDir: probeStateDir } : {}),
+    ...(probeArgv ? { probeArgv } : {}),
+  });
+  // ⛔ 可见地报告跳过/读不出的例程：一条声明了却不被驱动的 routine，与「没有这条声明」在记录上
+  //    本来同形（硬规则 3b/9），故此处把理由打到 stderr（配置坏了 ⇒ driver 照常起，但说出原因）。
+  if (probeSelection.error) {
+    console.error(`quality-gate-driver: probe 轨道未装配 — ${probeSelection.error}`);
+  }
+  for (const s of probeSelection.skipped) {
+    console.error(`quality-gate-driver: routine "${s.name}" (${s.trigger}) 未被 probe 轨道驱动 — ${s.reason}`);
+  }
+  if (probeSelection.routines.length > 0) {
+    console.error(`quality-gate-driver: probe 轨道已装配 ${probeSelection.routines.length} 条例程（${probeSelection.routines.map((r) => r.name).join(", ")}）`);
+  }
+
   const routines = qualityGateRoutines(rootDir, {
     planCmd: planCmd ? splitArgs(planCmd) : null,
     judgeArgv: judgeCmd ? splitArgs(judgeCmd) : null,
@@ -1230,6 +1282,7 @@ export async function main(argv: string[]): Promise<number> {
     packagingHygieneIntervalMinutes,
     archGapWorkerCmd: archGapWorkerCmd ?? null,
     archGapWorkerTimeoutMs,
+    probeRoutines: probeSelection.routines,
   });
 
   return runResidentQualityGateLoop({ root: rootDir, intervalMs: interval, once, maxRounds, roundLogFile, runId: resolvedRunId, json, pidFile, routines, routineWatchdogMs });
