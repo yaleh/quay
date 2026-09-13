@@ -36,6 +36,11 @@ try {
     outfile,
     plugins: [redirectVersionPlugin],
     loader: { ".json": "json" },
+    // Same additional resolution root as build-dist.mjs (see bundleNodePaths there): this bundle
+    // also inlines plugin/scripts/driver-shared.ts via src/serve.ts, and a self-contained bundle's
+    // bare specifiers must resolve against the bundle's own package, not against the directory of an
+    // inlined source file that has no node_modules above it.
+    nodePaths: [path.join(pkgDir, "node_modules")],
     logLevel: "info",
   });
   if (result.errors && result.errors.length > 0) {

@@ -2,6 +2,7 @@
 id: gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root
 title: 第三方项目 dashboard 的「在飞」显示的是别的项目的任务——observation 硬编码 quay-worktrees
 status: ready
+needs_human_cause: human-adjudication
 labels:
   - gap
   - defect
@@ -211,3 +212,14 @@ fixture 满足不算数（硬规则 4 推论三）。
 - packages/quay/test/observation-worktree-namespace.test.mjs
 - plugin/test/worktree-namespace-literal-check.test.mjs
 - tasks/gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root.md（自身）
+## Needs-Human
+
+**执行 2026-09-13T13:44:05.267Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: # fail 5
+- run_id：wk-prod-1789139008
+- session_id：f0910e38-2fbb-418a-b018-620d2be1e125
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root~wk-prod-1789139008~1789306838971-372b72.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-observation-hardcodes-quay-worktrees-ignoring-config-worktree-root-wk-prod-1789139008.log

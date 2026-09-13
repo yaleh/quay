@@ -3,6 +3,7 @@ id: gap-retry-exemption-signature-keeps-volatile-values
 title: 重试豁免判不出复发：签名归一化只折叠空白，pid/ms/路径留在签名里 ⇒ 同一缺陷跨任务产生不同签名 ⇒ 已判「与本任务无关」的 suite
   red 仍被计入该任务重试上限
 status: ready
+needs_human_cause: human-adjudication
 labels:
   - gap
   - mechanism
@@ -123,3 +124,14 @@ gap-ac203-two-distinct-kinds-no-production-run   06:13  慢启动的确认耗时
 - [x] 在 `plugin/test/worker-driver-fan-in.test.mjs` 里留下双向控制的用例（同一缺陷豁免 ∧ 不同缺陷不豁免）。
 
 > `AC2 (正控制)`（同一缺陷易变量各异跨 2 任务 ⇒ `unrelated-flaky-exempt`）∧ `AC3 (反向控制)`（两个不同缺陷 ⇒ 仍 `own-defect-counted`）。**红控制已跑**：把归一化换回改前语义（只折空白）重跑 ⇒ `AC2 (正控制)` 与 `normalizeAssertionSignature` 单测**红**，`AC3 (反向控制)` 与三态控制**保持绿**（反向控制本就该在改前改后都绿，它防的是归一化**过头**）⇒ 新用例确实在测这条缺陷，不是恒绿。改后 12 个相关用例全绿。
+
+## Needs-Human
+
+**执行 2026-09-13T13:33:52.446Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 成因类：human-adjudication
+- 失败步/判词：step=anti-drift: ANTI-DRIFT HARD FAIL: task gap-retry-exemption-signature-keeps-volatile-values — 2 violation(s)
+- run_id：wk-prod-1789139008
+- session_id：9d0f0667-b364-4644-82fd-60968bc476a1
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-retry-exemption-signature-keeps-volatile-values-wk-prod-1789139008.log

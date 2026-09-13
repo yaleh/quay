@@ -2,7 +2,7 @@
 id: gap-measure-resume-injection-and-sdk-session-visibility
 title: 量两条会话通道的开放问题——`claude -p --resume` 对【运行中】会话是注入还是起副本 / Agent SDK 会话是否出现在
   `claude agents --json`
-status: ready
+status: done
 labels:
   - gap
   - spike
@@ -57,8 +57,43 @@ messaging socket 直投（`cc-socks/<pid>.sock`）与 pty.sock 按键注入。�
 - ⛔ **不改任何产品代码**：不碰 `packages/`、不碰 `plugin/scripts/`（本任务是纯测量）。
 - **任一条结论为 not-evaluated 同样算完成**——本任务交付的是有依据的读数，不是特定的答案；一个诚实的「量不到，原因是 X」比一个推断出来的答案更有价值。
 
+## Evidence
+
+**主交付**：`docs/analysis/resume-injection-and-sdk-visibility-2026-09-13.md`（内嵌全部原始读数——
+探针目录在仓库外，不受版本控制，故读数不落盘于别处）。核心读数：
+
+- **AC1 ⇒ 起了副本**（CC 2.1.270）。`claude -p --resume <运行中 id>` exit 0、**无**「已在运行/副本」
+  提示、**无**新 session-id/新 transcript，那一轮写进**同一个** session-id 的**同一个** transcript
+  但由 resume 进程自己执行（该轮 `entrypoint:"sdk-cli"`，目标会话各轮 `entrypoint:"cli"`）
+  ⇒ **运行中会话的活上下文从不接收它**（问它收到哪些 user 消息 → 不含；两个 nonce 直接问 → "No — for both"）。
+- ⚠️ **方法论**：AC 原定三项读数全是**文件代理量**，而该文件此时有两个写者 ⇒ 三条合起来会把
+  「起了副本」判成「注入原会话」。判定「输入是否到达运行中会话」的唯一直接量是那个会话自己看得见什么。
+- **文档缺口**：`--bg --resume` 的冲突检测存在且明说
+  （`note: session 0e20eed2 is open in another Claude Code process, so this started a copy as becb979c.
+  The original conversation is unchanged.` + 新 session-id + 新 transcript）；
+  **`-p --resume` 的同一检测缺席** ⇒ 静默双写。
+- **AC2**：已停止会话两组读数在文件层面**完全相同** ⇒ 「when the session is already running」
+  这个条件从句对 `-p --resume` **不产生差别**（产生差别的是另一条命令 `--bg --resume`）。
+  干净子对照 AC2b（无后台残留）符合文档：同 session-id 续跑、
+  `--output-format json` → `{"result":"38a1c770","num_turns":1,"is_error":false}`。
+- **AC3 ⇒ 两处都在，无 SDK 盲区**（SDK 0.3.270）。⚠️ 限定：`agents --json` 把它报成
+  `kind:"interactive"`（与交互式同形），区分只能靠 `~/.claude/sessions/<pid>.json` 的
+  `entrypoint`（SDK=`sdk-cli`），而 `agents --json` 不暴露该字段。
+
+**承接的一处非本任务 delta 的修复（已在本任务分支上，见 `762008ffd`）**：
+`spec-declaration-point-check` 全 store 红——develop 侧新增的
+`orchestration/SPEC-unified-quay-server-2026-09-13.md`（1ba2d8e5f, 12:56）未在两个声明点声明
+⇒ 任何任务的 scoped 门 fail-closed（实测 worktree 与原 checkout 同红，与本任务 delta 无关）。
+同形修复已由 in-flight 的 `gap-quay-init-profiles-template-omits-every-role-the-drivers-request`
+写好（`77574e92b`, 13:14:48），但该任务机械 fan-in 重试耗尽、已翻转 **needs-human**（`75f2338cf`）
+⇒ 该修复不会落地，故由本任务接管，内容**逐字节取自 `77574e92b`**
+（`git checkout 77574e92b -- <两文件>` 后 `diff` 验证相同；该任务日后若重派落地，内容一致、合并无分歧）。
+⇒ 由此本任务 Touches 增加上述两个声明点文件。
+
 ## Touches
 
 - tasks/gap-measure-resume-injection-and-sdk-session-visibility.md
 - orchestration/SPEC-unified-quay-server-2026-09-13.md
 - docs/analysis/resume-injection-and-sdk-visibility-2026-09-13.md (new)
+- plugin/skills/init/SKILL.md
+- plugin/skills/manager/SKILL.md

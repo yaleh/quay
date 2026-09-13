@@ -1,0 +1,65 @@
+# quay-runtime-artifacts.txt — THE manifest of quay's runtime artifacts that a workspace's
+# `.gitignore` must carry. Single source of truth; consumers read THIS file, never a copy.
+#
+# (tasks/gap-quay-init-gitignore-misses-quay-runtime-artifacts-outside-dot-quay)
+#
+# WHY IT EXISTS: quay writes runtime state into a workspace it is installed in. The state that lands
+# under `<workspace>/.quay/` is covered by the `.quay/*` rule quay-init already writes, but quay ALSO
+# writes state OUTSIDE `.quay/` — the native store's parse cache goes to `<tasksDir>/.quay-parse-cache.json`
+# (i.e. `tasks/.quay-parse-cache.json`), the loop's fast-mode telemetry to `milestones/fast-mode-telemetry/`,
+# the tick ledgers to `orchestration/`, per-run event logs to `.workflow-events/`. Untracked and
+# un-ignored, those files make the working tree dirty as a side effect of merely READING the task store
+# (`task_list` / `task_get`, and the fan-in's own `ac-precheck` / `anti-drift` steps) — and a dirty tree
+# makes the mechanical fan-in's `ff` step fail (`fan-in-ff-merge: working tree not clean`) for EVERY task,
+# forever. Measured on a real third-party project (quay-fleet, 2026-09-13): `tasks/.quay-parse-cache.json`
+# + `milestones/fast-mode-telemetry/2026-09-13.json` blocked the ff of a task whose suite was 55/55 green.
+#
+# THE SINGLE SOURCE, AND HOW THE TWO HALVES ARE BOUND: the same pattern set must appear in BOTH
+#   (a) quay's OWN `.gitignore` (each line marked with the marker comment `# @quay-runtime-artifact`
+#       on the line directly above it), and
+#   (b) THIS file — which is what quay-init writes into a consumer project's `.gitignore`.
+# `plugin/scripts/gitignore-runtime-coverage-check.ts` asserts (a) == (b) as a SET: adding a marked
+# runtime artifact to `.gitignore` without adding it here REDs (init would not ignore it), and adding
+# one here without marking it there REDs as well (an unreferenced rule). ⛔ Do NOT hand-add two lines
+# to a consumer project instead — that fixes one instance and leaves the generator drifting (hard rule 5b).
+#
+# CONSUMERS (all read this file; none keeps a private copy):
+#   1. plugin/scripts/quay-init.sh — `ensure_runtime_artifacts_gitignore()` appends every pattern below
+#      to the target project's `.gitignore` (idempotent, append-only, never rewrites other content).
+#   2. packages/quay/src/fan-in/ff-merge.ts — the ff's clean-tree check reads it so that (i) untracked
+#      paths matching these patterns are treated as BENIGN runtime dirty (same family as the existing
+#      `?? .quay/…` pass-through) instead of blocking the ff, and (ii) when a dirty path DOES block the
+#      ff, the reason names quay as its author instead of leaving the reader to suspect their own change.
+#   3. plugin/scripts/gitignore-runtime-coverage-check.ts — the anti-drift check above.
+#
+# FORMAT: `#` comments and blank lines are ignored; every other line is ONE gitignore pattern
+# (no leading/trailing whitespace, no inline comments — gitignore has no trailing-comment syntax).
+# Patterns are gitignore syntax, matched against workspace-relative paths.
+#
+# INCLUSION CRITERION (so this list is derivable, not taste): "runtime state that quay's own CLI /
+# drivers / loop write into a quay workspace at a path OUTSIDE `<workspace>/.quay/`". Runtime state
+# under `.quay/` is deliberately NOT listed — quay-init's static `.quay/*` rule already covers it.
+# Deliberately NOT listed (different owners/classes): build outputs (`dist/`, `node_modules/`),
+# scratch patterns (`*.bak`, `tmp/`), and the manager layer's own analysis notes under `docs/`
+# (the manager is a per-host cross-project actor, not a per-workspace runtime writer).
+
+# per-run event log (fan-in / telemetry records) — root-level, written by the loop
+.workflow-events/
+# inner layer's append-only idle-reason log (one line per "round ended, no pending work")
+orchestration/inner-idle-log.jsonl
+# manager tick ledger (runtime telemetry — 人 2026-08-07 裁定「记账进 gitignore」)
+orchestration/manager-tick-log.md
+# outer + inner tick ledger (same ruling, same family)
+orchestration/tick-log.md
+# fast-mode telemetry snapshots (fast-mode-telemetry.ts --snapshot, every tick)
+milestones/fast-mode-telemetry/*.json
+# AC55 dispatch record (one line per inner dispatch: preference-file fingerprint + reason)
+orchestration/dispatch-record.jsonl
+# AC145 semantic-face dispatch record (one line per manager semantic dispatch)
+orchestration/semantic-face-dispatch-record.jsonl
+# manager pending queue (condition-triggered items, rebuilt from the repo on restart)
+orchestration/manager-pending.md
+# the native store's persistent parse cache — written to <tasksDir>/.quay-parse-cache.json by
+# store.ts's list() surface. THE case that motivates this file: it lands under tasks/, so the
+# `.quay/*` rule cannot reach it, and merely listing tasks dirties the tree.
+**/.quay-parse-cache.json

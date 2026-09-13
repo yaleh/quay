@@ -117,6 +117,8 @@ import {
   upsertDispatchRecord,
   removeDispatchRecord,
   readPidCmdline,
+  probePidLiveness,
+  resolveWorkerProcessName,
   classifyOrphanDispatch,
   orphanDispatchCandidates,
   computeOrphanFinalizedOutcome,
@@ -2443,6 +2445,195 @@ test("AC3 (能取假) — reconcile 对 pid 存活的孤儿（原始截止已过
   assert.equal(readDispatchStore(dispatchStoreFile(root))[taskId], undefined, "adopt 终态后 dispatch 记录被清");
   const outcomes = readOutcomeLines(root);
   assert.ok(outcomes.some((o) => o.task === taskId && o.final_state === "timed-out"), "worker-outcome.jsonl 新增 timed-out 记录");
+});
+
+// ── gap-reconcile-finalizes-live-worker-as-exited-and-double-dispatches-same-task ─────────────────
+// 缺陷：computeOrphanFinalizedOutcome「无条件」写 `worker pid N already exited` —— 那是断言不是测量
+// （硬规则 4）。实测代价（quay-fleet 2026-09-13）：仍在飞的 pid 3653433 被写成 already exited，同任务
+// 随即被派第二个 worker，两个 worker 共用一份 git 检出。修法 = 先实测 /proc，三取值互不同形。
+// ⚠️ 这两条断言的是【同一函数的双向对照】：两个输入除存活外逐字相同，输出必须不同。
+
+test("AC1 (双向对照) — computeOrphanFinalizedOutcome 实测 /proc：存活 pid ⇒ 不含 already exited；确已退出 ⇒ 含且取值可区分", async (t) => {
+  const root = makeRoot("orphan-liveness-ac1");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const taskId = "gap-orphan-liveness-ac1";
+  const base = { task: taskId, selectorReason: "ac1 selector reason", runId: "fm-ac1", startedAtMs: Date.now() - 1000 };
+
+  // ARM 1 — 当前【存活】的 pid（且它确实是本任务的 worker：cmdline 含 worker 名 + task id）。
+  const alive = spawn(process.execPath, ["-e", "setTimeout(()=>{},60000)", WORKER_PROCESS_NAME, taskId], { stdio: "ignore" });
+  t.after(() => { try { alive.kill("SIGKILL"); } catch { /* gone */ } });
+  await new Promise((r) => setTimeout(r, 100)); // 让 /proc/<pid>/cmdline 可读
+  assert.equal(probePidLiveness(alive.pid), "alive", "precondition: the witness is measurable as alive via /proc");
+
+  const liveOutcome = computeOrphanFinalizedOutcome({ ...base, workerPid: alive.pid, endedAtMs: Date.now() });
+  assert.equal(liveOutcome.orphan_pid_liveness, "alive", "AC1 arm1: the /proc measurement records 'alive'");
+  assert.doesNotMatch(liveOutcome.failure_reason, /already exited/,
+    "AC1 arm1 承重：a LIVE pid must NOT be reported as 'already exited'（这正是本缺陷）");
+
+  // ARM 2 — 一个【确已退出】的 pid。⛔ 不是编一个大数：真 spawn、真等它退出、真等 /proc 条目消失
+  //   （「确已退出」本身也要是测量出来的，否则这条对照的右臂同样是断言）。
+  const dead = spawn(process.execPath, ["-e", "process.exit(0)"], { stdio: "ignore" });
+  await new Promise((r) => dead.once("exit", r));
+  await waitFor(() => probePidLiveness(dead.pid) !== "alive", 15000);
+  const deadPid = dead.pid;
+  assert.equal(probePidLiveness(deadPid), "exited", "precondition: the exited witness is measurably absent from /proc");
+
+  const deadOutcome = computeOrphanFinalizedOutcome({ ...base, workerPid: deadPid, endedAtMs: Date.now() });
+  assert.equal(deadOutcome.orphan_pid_liveness, "exited", "AC1 arm2: the /proc measurement records 'exited'");
+  assert.match(deadOutcome.failure_reason, /already exited/,
+    "AC1 arm2: a MEASURED-exited pid keeps the original wording (既有下游按它判读，⛔ 不改)");
+
+  // 双向：两个输入（只差存活）必须给出【不同】输出。
+  assert.notEqual(liveOutcome.failure_reason, deadOutcome.failure_reason, "AC1: 两臂输出必须不同（否则这个对照什么也没测）");
+  assert.equal(liveOutcome.final_state, "failed", "both arms stay non-completed");
+});
+
+test("AC2 (三值互不同形) — /proc 读不到（空 procDir）⇒ 独立取值，既不是已退出也不是存活，且不含 already exited", async (t) => {
+  const root = makeRoot("orphan-liveness-ac2");
+  const emptyProc = fs.mkdtempSync(path.join(os.tmpdir(), "empty-proc-"));
+  t.after(() => { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(emptyProc, { recursive: true, force: true }); });
+  const taskId = "gap-orphan-liveness-ac2";
+  const base = { task: taskId, selectorReason: "ac2 selector reason", runId: "fm-ac2v", workerPid: 999999999, startedAtMs: Date.now() - 1000 };
+
+  // ① 空 procDir：看不到进程表 ⇒ 没查成。⛔ 若与 "exited" 同形，就等于「读不懂 ⇒ 伪装成查过」（硬规则 3b）。
+  assert.equal(probePidLiveness(999999999, emptyProc), "unknown", "an empty procDir yields 'unknown' (no process table seen)");
+  const unknownOutcome = computeOrphanFinalizedOutcome({ ...base, endedAtMs: Date.now(), procDir: emptyProc });
+  assert.equal(unknownOutcome.orphan_pid_liveness, "unknown", "AC2: the outcome carries the third value");
+  assert.doesNotMatch(unknownOutcome.failure_reason, /already exited/, "AC2 承重：无法判定 ⇒ ⛔ 不得声称已退出");
+
+  // ② 读不到（目录不存在）：同样是「没查成」，与 ① 同取值（都与"已退出"不同形）。
+  assert.equal(probePidLiveness(999999999, "/nonexistent-proc-dir"), "unknown", "unreadable procDir ⇒ 'unknown'");
+
+  // ③ 一个真 procfs：同一个 pid ⇒ 测到「不在」= "exited"（与 ①② 取值不同）。
+  assert.equal(probePidLiveness(999999999), "exited", "a real procfs that lacks the pid ⇒ measured 'exited'");
+
+  // 三取值两两不同形（硬规则 3）：把三条 reason 摆在一起比。
+  const three = [
+    computeOrphanFinalizedOutcome({ ...base, endedAtMs: Date.now(), procDir: emptyProc }).failure_reason,
+    computeOrphanFinalizedOutcome({ ...base, endedAtMs: Date.now() }).failure_reason,
+  ];
+  assert.notEqual(three[0], three[1], "unknown 与 exited 的措辞必须不同（⛔ 不得合并成同一取值）");
+  assert.ok(three.every((r) => typeof r === "string" && r.length > 0), "both reasons are non-empty strings");
+});
+
+test("AC1/AC3 (存活闸) — finalizeOrphanDispatch 对【仍是本任务活 worker】的 pid 拒绝 finalize：⛔ 不写终态、⛔ 不清 worktree、⛔ 不清记录", async (t) => {
+  const root = makeGitRoot("orphan-refuse-live");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}-refuse`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  const taskId = "gap-orphan-refuse-live";
+  writeTaskFile(root, taskId, "ready");
+  runGit(root, ["branch", "develop"]);
+  runGit(root, ["worktree", "add", "-q", "-b", `task/${taskId}`, wtPath]);
+  assert.equal(worktreePresentForTask(root, taskId), true, "precondition: worktree present");
+
+  // 活 worker 见证进程：cmdline 含本 workspace 的 worker 名 + task id ⇒ classifyOrphanDispatch 判 adopt。
+  // root 无 .quay/profiles.yml ⇒ resolveWorkerProcessName 回落到 WORKER_PROCESS_NAME。
+  const live = spawn(process.execPath, ["-e", "setTimeout(()=>{},60000)", WORKER_PROCESS_NAME, taskId], { stdio: "ignore" });
+  t.after(() => { try { live.kill("SIGKILL"); } catch { /* gone */ } });
+
+  const record = {
+    taskId, runId: "fm-refuse", workerPid: live.pid, selectorReason: "s",
+    startedAtMs: Date.now() - 1000, timeoutDeadlineMs: 0,
+    cmdlineFingerprint: `claude -n ${WORKER_PROCESS_NAME} -p '... Task: ${taskId} ...'`,
+  };
+  upsertDispatchRecord(dispatchStoreFile(root), record);
+  const outcomeFile = path.join(root, WORKER_OUTCOME_REL);
+
+  const res = finalizeOrphanDispatch({ root, outcomeFile, record });
+  assert.equal(res.refusedLiveWorker, true, "AC1 存活闸：仍是本任务活 worker ⇒ 拒绝 finalize");
+  assert.equal(res.cleanup, null, "⛔ 不做 worktree 清理（活 worker 可能正在里面写）");
+  assert.equal(fs.existsSync(outcomeFile) ? readOutcomeLines(root).length : 0, 0,
+    "⛔ 不写假终态记录（这正是本缺陷产出的那条假记录）");
+  assert.ok(readDispatchStore(dispatchStoreFile(root))[taskId], "⛔ 不清 dispatch 记录（下一轮还要用它 adopt）");
+  assert.equal(worktreePresentForTask(root, taskId), true, "⛔ 不清 worktree");
+
+  // 对照：worker 真的退出后，同一构造必须能 finalize（⛔ 不是永远拒绝 ⇒ 记录永久占位）。
+  try { live.kill("SIGKILL"); } catch { /* gone */ }
+  const r = await new Promise((resolve) => {
+    const poll = () => {
+      if (probePidLiveness(record.workerPid) === "alive") return setTimeout(poll, 20);
+      resolve(finalizeOrphanDispatch({ root, outcomeFile, record }));
+    };
+    poll();
+  });
+  assert.equal(r.refusedLiveWorker, false, "对照：worker 退出后不再拒绝");
+  assert.equal(readOutcomeLines(root).filter((o) => o.task === taskId).length, 1, "对照：worker 退出后写入恰好一条终态");
+  assert.equal(readDispatchStore(dispatchStoreFile(root))[taskId], undefined, "对照：记录被清（任务不再被孤儿记录永久占位）");
+});
+
+test("AC1/AC3 (存活闸, 名字解析失败形态) — worker 名解析错（quay-fleet 形）时闸仍拦住：⛔ 不写假终态、⛔ 不删在飞 worker 的 worktree", async (t) => {
+  // 这是【生产事故的逐字形态】：载体把 task-worker 命名成 quay-test-worker，而 worker 进程实际带着
+  // 别的名字跑（改名 / 解析失败）⇒ classifyOrphanDispatch 认不出它 ⇒ 判 finalize。
+  // ⛔ 此时若闸依赖 classifyOrphanDispatch（也要名字），它就是空的；闸必须用【名字无关】的 /proc 存在性。
+  const root = makeGitRoot("orphan-refuse-namemiss");
+  const wtPath = path.join(root, "..", `wt-${path.basename(root)}-namemiss`);
+  t.after(() => {
+    try { runGit(root, ["worktree", "remove", "--force", wtPath]); } catch { /* best-effort */ }
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(wtPath, { recursive: true, force: true });
+  });
+  writeProfileCarrier(root); // 解析出的 worker 名 = quay-test-worker
+  assert.equal(resolveWorkerProcessName(root), "quay-test-worker", "precondition: 名字来自载体");
+  const taskId = "gap-orphan-refuse-namemiss";
+  writeTaskFile(root, taskId, "ready");
+  runGit(root, ["branch", "develop"]);
+  runGit(root, ["worktree", "add", "-q", "-b", `task/${taskId}`, wtPath]);
+
+  // 活 worker，但 cmdline 带的是【另一个】名字 ⇒ 名字相关的探测认不出它（正是本缺陷的成因）。
+  const live = spawn(process.execPath, ["-e", "setTimeout(()=>{},60000)", WORKER_PROCESS_NAME, taskId], { stdio: "ignore" });
+  t.after(() => { try { live.kill("SIGKILL"); } catch { /* gone */ } });
+  await new Promise((r) => setTimeout(r, 100));
+  const record = {
+    taskId, runId: "fm-namemiss", workerPid: live.pid, selectorReason: "s",
+    startedAtMs: Date.now() - 1000, timeoutDeadlineMs: 0, cmdlineFingerprint: "x",
+  };
+  // 前置：名字相关的分类确实认不出它 ⇒ 走的正是 finalize 分支（因此闸是唯一防线）。
+  assert.equal(classifyOrphanDispatch(record, "/proc", resolveWorkerProcessName(root)), "finalize",
+    "precondition: 名字解析错 ⇒ 分类判 finalize（本缺陷的入口）");
+
+  const outcomeFile = path.join(root, WORKER_OUTCOME_REL);
+  const res = finalizeOrphanDispatch({ root, outcomeFile, record });
+  assert.equal(res.refusedLiveWorker, true, "AC1/AC3: 名字无关的 /proc 存活闸仍然拦住（⛔ 依赖名字的闸在这里是空的）");
+  assert.equal(res.outcome.orphan_pid_liveness, "alive", "the refusal carries the measured value");
+  assert.equal(fs.existsSync(outcomeFile) ? readOutcomeLines(root).length : 0, 0, "⛔ 不写假终态（本缺陷写的就是这条）");
+  assert.equal(worktreePresentForTask(root, taskId), true, "⛔ 不删在飞 worker 正在写的 worktree");
+});
+
+test("AC3 (名字解析, 承重对照) — worker 名解析自 .quay/profiles.yml：同一 argv 只改角色名，存活探测给出相反取值", async (t) => {
+  // 这是本缺陷在第三方项目上的【根因】：探测此前写死 `quay-task-worker`，而 quay-fleet 的 roles.
+  // task-worker 名叫 `fleet-task-worker` ⇒ hasLiveWorkerForTask 对【每一个真实 worker】恒 false，
+  // 于是 reconcile 把在飞 worker 判为已退出 + 冷启动排除集恒空 ⇒ 假记录 + 同任务双派。
+  // 两臂只差一个名字，输出必须相反（⛔ 不是「碰巧没命中」——argv 由真实 workerArgvForTask 构造）。
+  const root = makeGitRoot("worker-name-resolve");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const taskId = "gap-worker-name-resolve";
+  writeTaskFile(root, taskId, "ready");
+  // 载体把 task-worker 命名为 `quay-test-worker`（⛔ 刻意不是 quay-task-worker）。
+  writeProfileCarrier(root);
+  const resolved = resolveWorkerProcessName(root);
+  assert.equal(resolved, "quay-test-worker", "AC3: the worker name is resolved from the workspace config, not hardcoded");
+
+  const argv = await workerArgvForTaskAsync(taskId, root, { prefix: null, exact: null });
+  const cmdline = argv.join(" ");
+  assert.ok(cmdline.includes("quay-test-worker"), "the real worker argv carries the CONFIGURED -n name");
+  assert.ok(cmdline.includes(taskId), "the real worker argv carries the task id (prompt)");
+
+  assert.equal(hasLiveWorkerForTask(taskId, [cmdline], resolved), true,
+    "AC3 arm1: with the name resolved from config, a genuine worker argv IS recognized as live");
+  assert.equal(hasLiveWorkerForTask(taskId, [cmdline], WORKER_PROCESS_NAME), false,
+    "AC3 arm2 (the pre-fix behaviour): with the hardcoded literal, the SAME argv is invisible ⇒ 'already exited' + double dispatch");
+
+  // 三处探测统一消费解析出的名字（⛔ 不是只修一处：硬规则 5b）。
+  const cold = enumerateColdStartInflight(root, { worktreeTasks: [taskId], workerCmdlines: [cmdline] });
+  assert.deepEqual([...cold], [taskId], "cold-start in-flight exclusion honors the resolved name (⛔ empty set ⇒ double dispatch)");
+  // AC3 的另一臂（派发计数 = 1 的那一臂）：存活 worker 不在 ⇒ 排除集为空 ⇒ 该任务可派。
+  // （「派发计数 = 0 / = 1」的端到端两臂由 worker-driver-fan-in 的 cold-start AC1 + 其对照承担。）
+  assert.deepEqual([...enumerateColdStartInflight(root, { worktreeTasks: [taskId], workerCmdlines: [] })], [],
+    "AC3 对照臂: 无存活 worker ⇒ 排除集为空 ⇒ 该任务进入可派集");
 });
 
 test("④ (记录缺失不越权) — orphanDispatchCandidates：无记录 ⇒ 不纳入（手工起的 worker 不被接管）；running 中的在飞 ⇒ 跳过", () => {
