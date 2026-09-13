@@ -71,6 +71,7 @@ fan-in 的 `step=suite` 红分两类——**(A) 静态检查/全仓枚举不变�
 - tasks/gap-checker-mutation-check-has-no-change-tier-companion.md
 - plugin/scripts/runner-static-gate.ts
 - plugin/test/select-static-checks-for-touches.test.mjs
+- plugin/scripts/checker-mutation-check.sh
 
 ## 读数段
 
