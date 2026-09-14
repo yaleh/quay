@@ -63,12 +63,12 @@ acceptance failed (exit 1) — stale evidence: GOAL-009-AC-232:202/200 (margin -
 
 ## Acceptance Criteria
 
-- [ ] AC1 改前读数（能取假）：AC-214 criterion 干跑 ⇒ **exit 1**，`reason` 逐字含 `stale evidence: GOAL-009-AC-232:202/200 (margin -2), GOAL-009-AC-205:202/200 (margin -2), GOAL-009-AC-207:202/200 (margin -2), GOAL-009-AC-203:202/200 (margin -2)`；并贴 `.quay/productization-verification.jsonl` 里 AC-203/205/207/232 各自最新记录的 `ts`/`build_sha`/`host`，证明四条同为 `60136b79…` @ 2026-09-13T11:21:24Z。⛔ 引述不算，须实现者复跑。
-- [ ] AC2 产出运行的**真**读数（⛔ 不是 `--selfcheck`、⛔ 不是夹具）：贴 `develop-deliver-tgz.sh --verify-coldstart --ac207-e2e --hosts "B"` 的退出码 + 全部 `develop-deliver:` 行 + `.quay/verify-coldstart-remote-B-<tip8>.log` 中 step⑤ 与 AC-203/205/207/232 的 `record written` 行；并贴本次运行**实测墙钟**（观察项①的成本读数：`date -u` 起止差）。
-- [ ] AC3 生产载体上的新读数（硬规则 4 推论三：判据必须读**生产载体**且只计**运行之后**的时间窗）：`.quay/productization-verification.jsonl` 中新增 ≥1 条 `ac="GOAL-009-AC-203"`（同理 AC-205/207/232）记录，`ts` 晚于本次运行开始时刻、`build_sha` 为 40-hex。⛔ 手写记录 / 搬运旧记录 / `--selfcheck` 注入的记录一律不算。
-- [ ] AC4 判据真转绿：AC-214 criterion 干跑 **exit 0**，贴七行 `freshness`（每条 `margin > 0`）与 `.quay/goal-freshness-margin.json` 全文（`subjects` **七项** margin 全正，⛔ 不是只贴四条），并贴 `git rev-list --count <新 build_sha>..develop -- <交付面 paths>` 读数。⛔ 通过放宽 criterion 达成不算（`goals/AC-214-*.md` 不得出现在本任务的 diff 里）。
-- [ ] AC5 负控制（判据仍能取假）：`QUAY_GOAL009_FRESHNESS_K=1` 下 AC-214 criterion ⇒ **exit 1** 且 stderr 逐条指名陈旧主体；贴该输出 + 负控制前后载体 `md5sum` 相同。
-- [ ] AC6 零产品代码改动（着地路径最轻）：`git diff --name-only <base>..HEAD -- plugin/ packages/ goals/` 为空；贴 scoped 门读数（`--for-task <本任务 id>`）与着地归属说明（全量套件归机械 fan-in 的一步，本 worker 不持该共享锁）。
+- [x] AC1 改前读数（能取假）：AC-214 criterion 干跑 ⇒ **exit 1**，`reason` 逐字含 `stale evidence: GOAL-009-AC-232:202/200 (margin -2), GOAL-009-AC-205:202/200 (margin -2), GOAL-009-AC-207:202/200 (margin -2), GOAL-009-AC-203:202/200 (margin -2)`；并贴 `.quay/productization-verification.jsonl` 里 AC-203/205/207/232 各自最新记录的 `ts`/`build_sha`/`host`，证明四条同为 `60136b79…` @ 2026-09-13T11:21:24Z。⛔ 引述不算，须实现者复跑。
+- [x] AC2 产出运行的**真**读数（⛔ 不是 `--selfcheck`、⛔ 不是夹具）：贴 `develop-deliver-tgz.sh --verify-coldstart --ac207-e2e --hosts "B"` 的退出码 + 全部 `develop-deliver:` 行 + `.quay/verify-coldstart-remote-B-<tip8>.log` 中 step⑤ 与 AC-203/205/207/232 的 `record written` 行；并贴本次运行**实测墙钟**（观察项①的成本读数：`date -u` 起止差）。
+- [x] AC3 生产载体上的新读数（硬规则 4 推论三：判据必须读**生产载体**且只计**运行之后**的时间窗）：`.quay/productization-verification.jsonl` 中新增 ≥1 条 `ac="GOAL-009-AC-203"`（同理 AC-205/207/232）记录，`ts` 晚于本次运行开始时刻、`build_sha` 为 40-hex。⛔ 手写记录 / 搬运旧记录 / `--selfcheck` 注入的记录一律不算。
+- [x] AC4 判据真转绿：AC-214 criterion 干跑 **exit 0**，贴七行 `freshness`（每条 `margin > 0`）与 `.quay/goal-freshness-margin.json` 全文（`subjects` **七项** margin 全正，⛔ 不是只贴四条），并贴 `git rev-list --count <新 build_sha>..develop -- <交付面 paths>` 读数。⛔ 通过放宽 criterion 达成不算（`goals/AC-214-*.md` 不得出现在本任务的 diff 里）。
+- [x] AC5 负控制（判据仍能取假）：`QUAY_GOAL009_FRESHNESS_K=1` 下 AC-214 criterion ⇒ **exit 1** 且 stderr 逐条指名陈旧主体；贴该输出 + 负控制前后载体 `md5sum` 相同。
+- [x] AC6 零产品代码改动（着地路径最轻）：`git diff --name-only <base>..HEAD -- plugin/ packages/ goals/` 为空；贴 scoped 门读数（`--for-task <本任务 id>`）与着地归属说明（全量套件归机械 fan-in 的一步，本 worker 不持该共享锁）。
 
 ## Definition of Done
 
@@ -78,3 +78,160 @@ acceptance failed (exit 1) — stale evidence: GOAL-009-AC-232:202/200 (margin -
 
 - `.quay/productization-verification.jsonl`（本 AC 的载体：本次运行 append 的记录落在这里。⚠️ anti-drift-touches-check 只比对 `git diff --name-only <merge-target>...HEAD`（**已跟踪**文件）；该载体被 `.gitignore:339` 忽略 ⇒ 不进那个集合，声明它是为了表明「本任务的产出落在这里」，⛔ 不是可提交物）
 - `tasks/gap-ac214-coldstart-face-evidence-aged-past-k-third-crossing.md`（自身文件：勾 AC + 贴实跑证据）
+
+## Evidence
+
+**运行实测（2026-09-14，全部读数本轮复跑，⛔ 非引述）。完整原始输出：`.quay/ac214-3rd-evidence-bundle.txt`；产出运行 stdout：`.quay/ac214-3rd-producer-run.log`；远端 stdout：`.quay/verify-coldstart-remote-B-f19397c6.log`。**
+
+### AC1 改前读数（能取假）
+
+`node --no-warnings --experimental-strip-types packages/quay/src/goal-store.ts gate AC-214 --root /home/yale/work/quay` @ `2026-09-14T14:22:26.817Z` ⇒ **exit 1**，`reason` 逐字：
+
+```
+acceptance failed (exit 1) — stale evidence: GOAL-009-AC-232:211/200 (margin -11), GOAL-009-AC-205:211/200 (margin -11), GOAL-009-AC-207:211/200 (margin -11), GOAL-009-AC-203:211/200 (margin -11)
+```
+
+⚠️ 立案时读数是 `202/200 (margin -2)`，本轮复跑为 `211/200 (margin -11)`：**同一批主体、同一条记录**，差值 9 = 立案（14:15Z）到本轮（14:22Z）之间 develop 前进的交付面提交数（7 分钟）。这正是本 AC 的设计（AC 正文逐字：证明随 develop 前进会自动转红）。
+
+四条主体的**最新**载体记录（按位置，⛔ 不是「过期了」一句）：
+
+| ac | ts | build_sha | host | project_root |
+|---|---|---|---|---|
+| GOAL-009-AC-203 | 2026-09-13T11:21:24Z | 60136b79785da73973618d3bcfec2c3f5fc32be0 | orangevps | /home/yale/quay-verify-coldstart-60136b79-root |
+| GOAL-009-AC-205 | 2026-09-13T11:21:24Z | 60136b79785da73973618d3bcfec2c3f5fc32be0 | orangevps | /home/yale/quay-verify-coldstart-60136b79-root |
+| GOAL-009-AC-207 | 2026-09-13T11:21:24Z | 60136b79785da73973618d3bcfec2c3f5fc32be0 | orangevps | /home/yale/quay-verify-coldstart-60136b79-root |
+| GOAL-009-AC-232 | 2026-09-13T11:21:24Z | 60136b79785da73973618d3bcfec2c3f5fc32be0 | orangevps | /home/yale/quay-verify-coldstart-60136b79-root |
+
+⇒ 四条**同为** `60136b79…` @ `2026-09-13T11:21:24Z`（= 09-13 那次 `--verify-coldstart` 跨机运行），与立案描述一致。
+
+### AC2 产出运行的真读数
+
+命令：`bash plugin/scripts/develop-deliver-tgz.sh --verify-coldstart --ac207-e2e --hosts "B" --root /home/yale/work/quay`
+**退出码 = 0**（`PRODUCER_EXIT=0`）。全部 `develop-deliver:` 行（逐字）：
+
+```
+develop-deliver: develop tip = f19397c66473 (f19397c66473698968f016bcfce916c388b5d7fb)
+develop-deliver: creating detached worktree at develop tip: /home/yale/work/quay/.quay/deliver-worktree-f19397c66473
+develop-deliver: package.sh (quay .tgz)...
+  → /home/yale/work/quay/.quay/deliver-worktree-f19397c66473/packages/quay/quay-0.6.3.tgz
+  → /home/yale/work/quay/.quay/deliver-worktree-f19397c66473/packages/quay-native/quay-native-0.6.3.tgz
+develop-deliver: --verify-coldstart develop=f19397c66473 build_date=2026-09-14T14:22:25+00:00 carrier=/home/yale/work/quay/.quay/productization-verification.jsonl
+develop-deliver: B (orangevps.wan.hwang.men) — scp verify-deliver-coldstart.sh + its FULL closure ($SCRIPT_DIR siblings + node_modules deps) + SPEC + both .tgz
+develop-deliver: B (orangevps.wan.hwang.men) remote stdout persisted → /home/yale/work/quay/.quay/verify-coldstart-remote-B-f19397c6.log (rc=0)
+develop-deliver: B (orangevps.wan.hwang.men) remote verify rc=0 evidence_lines=10
+develop-deliver: B (orangevps.wan.hwang.men) — scp back: scp -o BatchMode=yes -o ConnectTimeout=8 orangevps.wan.hwang.men:/home/yale/quay-verify-coldstart-evidence-f19397c6.jsonl /home/yale/work/quay/.quay/verify-coldstart-evidence-B-f19397c6.jsonl
+EVIDENCE-TRANSPORT appended=10 carrier=/home/yale/work/quay/.quay/productization-verification.jsonl evidence=/home/yale/work/quay/.quay/verify-coldstart-evidence-B-f19397c6.jsonl
+develop-deliver: evidence-completeness COMPLETE present=6
+develop-deliver: e2e-pairing E2E-PAIR OK host=orangevps roots=/home/yale/quay-verify-coldstart-f19397c6-root
+develop-deliver: --verify-coldstart OK — evidence transported into /home/yale/work/quay/.quay/productization-verification.jsonl
+```
+
+`.quay/verify-coldstart-remote-B-f19397c6.log` 的 step⑤ 与各条 `record written`（逐字）：
+
+```
+  ac204 record written → /home/yale/quay-verify-coldstart-evidence-f19397c6.jsonl
+== ④ driver liveness (AC-203): start each of [promotion goal] in the third-party project, read each status carrier ==
+  ac203 record written (kind=promotion) → /home/yale/quay-verify-coldstart-evidence-f19397c6.jsonl
+  ac203 record written (kind=goal) → /home/yale/quay-verify-coldstart-evidence-f19397c6.jsonl
+== ⑤ dual carrier (AC-206): goals/ + tasks/ both created and stores readable ==
+  ac206 record written → /home/yale/quay-verify-coldstart-evidence-f19397c6.jsonl
+== ⑨ goal carrier write+read-back (AC-232): goal write + show/list read-back into the third-party project ==
+  ac232 record written → /home/yale/quay-verify-coldstart-evidence-f19397c6.jsonl
+  ac234 record written → /home/yale/quay-verify-coldstart-evidence-f19397c6.jsonl
+== ⑦ session delivery (AC-205): installed dist/send-to-session.js → same-host target → transcript-verified ==
+  ac205 record written → /home/yale/quay-verify-coldstart-evidence-f19397c6.jsonl
+== ⑤ end-to-end (AC-207): third-party project's own *-drivers drive a real commit → task done ==
+  NOTE: goal write failed — 双载体 goal 侧未落地（不阻塞任务侧；AC-207 记录只读 task 侧）
+  task_status=done commit_sha=4dce3ec51322 commit_files=["e2e-marker.txt"] gate_events=1 produced_by_driver=1 evaluated=1 host=orangevps
+  ac207 record written → /home/yale/quay-verify-coldstart-evidence-f19397c6.jsonl
+```
+
+```
+E2E_CLOSURE_SELF_EVIDENCED=1 (1 = 本次运行对同一 project_root 写出了 AC-203 与 AC-207；0 = 本次尝试了 e2e 但闭环不自证；not-evaluated = 未尝试 e2e —— 三态可区分, 硬规则 3b)
+E2E_CLOSURE_NOTE=AC-203 与 AC-207 均由本次运行对同一 project_root 写出（host=orangevps root=/home/yale/quay-verify-coldstart-f19397c6-root）
+```
+
+⇒ 越界的四条（203/205/207/232）**全部**有 `record written` 行，⛔ 无 fail-closed 缺值。
+
+**实测墙钟（观察项①要的成本读数）**：`date -u` 起 `2026-09-14T14:23:25Z` → 止 `2026-09-14T14:44:01Z` = **20 分 36 秒**（含 `--ac207-e2e` 在远端第三方项目里真 spawn worker → 驱动真提交 → task done）。
+
+### AC3 生产载体上的新读数
+
+`.quay/productization-verification.jsonl` 中 `ts` 晚于运行开始（`2026-09-14T14:23:25Z`）的新记录 **6 条**，全部 `ts=2026-09-14T14:25:05Z`、`build_sha=f19397c66473698968f016bcfce916c388b5d7fb`（40-hex）：AC-203 ×2（kind=promotion / kind=goal）、AC-232、AC-205、AC-207、AC-201。逐条全文见 `.quay/ac214-3rd-evidence-bundle.txt`。关键行：
+
+```
+{"ac": "GOAL-009-AC-203", "build_sha": "f19397c66473698968f016bcfce916c388b5d7fb", "driver_alive": 1, "host": "orangevps", "kind": "promotion", "project_root": "/home/yale/quay-verify-coldstart-f19397c6-root", "ts": "2026-09-14T14:25:05Z"}
+{"ac": "GOAL-009-AC-205", "build_sha": "f19397c66473698968f016bcfce916c388b5d7fb", "host": "orangevps", "shipped_from_installed_artifact": true, "transcript_confirmed": true, "ts": "2026-09-14T14:25:05Z"}
+{"ac": "GOAL-009-AC-207", "build_sha": "f19397c66473698968f016bcfce916c388b5d7fb", "commit_files": ["e2e-marker.txt"], "commit_sha": "4dce3ec51322bee6547ccd4498e96f59b96c87b4", "gate_events": 1, "host": "orangevps", "produced_by_driver": true, "project_root": "/home/yale/quay-verify-coldstart-f19397c6-root", "task_id": "e2e-verify-207", "task_status": "done", "ts": "2026-09-14T14:25:05Z"}
+{"ac": "GOAL-009-AC-232", "build_sha": "f19397c66473698968f016bcfce916c388b5d7fb", "goal_read_back_ok": true, "goal_records": 1, "goal_write_ok": true, "host": "orangevps", "project_root": "/home/yale/quay-verify-coldstart-f19397c6-root", "ts": "2026-09-14T14:25:05Z"}
+```
+
+⛔ 无手写记录 / ⛔ 无搬运旧记录 / ⛔ 非 `--selfcheck` 注入。
+
+### AC4 判据真转绿
+
+`goal-store.ts gate AC-214 --root /home/yale/work/quay --dry-run` ⇒ **verdict = pass / exit 0** @ `2026-09-14T14:44:07.056Z`。
+
+criterion 逐字（从 stored record 提取，⛔ 非手抄）七行 freshness：
+
+```
+freshness GOAL-009-AC-201: 19/200 (margin 181)
+freshness GOAL-009-AC-232: 19/200 (margin 181)
+freshness GOAL-009-AC-205: 19/200 (margin 181)
+freshness GOAL-009-AC-207: 19/200 (margin 181)
+freshness GOAL-009-AC-203: 19/200 (margin 181)
+freshness GOAL-009-AC-238: 165/200 (margin 35)
+freshness GOAL-009-AC-239: 165/200 (margin 35)
+```
+
+`.quay/goal-freshness-margin.json` 全文（**七项** margin 全正）：
+
+```json
+{"at": "2026-09-14T14:44:08Z", "k": 200, "subjects": {"GOAL-009-AC-201": {"K": 200, "d": 19, "margin": 181}, "GOAL-009-AC-203": {"K": 200, "d": 19, "margin": 181}, "GOAL-009-AC-205": {"K": 200, "d": 19, "margin": 181}, "GOAL-009-AC-207": {"K": 200, "d": 19, "margin": 181}, "GOAL-009-AC-232": {"K": 200, "d": 19, "margin": 181}, "GOAL-009-AC-238": {"K": 200, "d": 165, "margin": 35}, "GOAL-009-AC-239": {"K": 200, "d": 165, "margin": 35}}}
+```
+
+`git rev-list --count f19397c66473698968f016bcfce916c388b5d7fb..develop -- <交付面 paths>` = **19**（≤ K=200，margin 181）。
+
+⛔ **未放宽 criterion**：`goals/` 不出现在本任务 diff 里（见 AC6），K 仍是 200、主体仍由载体机械推导。
+
+### AC5 负控制（判据仍能取假）
+
+`QUAY_GOAL009_FRESHNESS_K=1` 下同一条 criterion ⇒ **exit 1**，stderr 逐条指名：
+
+```
+stale evidence: GOAL-009-AC-201:19/1 (margin -18), GOAL-009-AC-232:19/1 (margin -18), GOAL-009-AC-205:19/1 (margin -18), GOAL-009-AC-207:19/1 (margin -18), GOAL-009-AC-203:19/1 (margin -18), GOAL-009-AC-238:165/1 (margin -164), GOAL-009-AC-239:165/1 (margin -164)
+```
+
+载体 md5 负控制前后**相同**：`292df238b82553583fbcdd1f1bc784b4`（前）/ `292df238b82553583fbcdd1f1bc784b4`（后）⇒ `CARRIER_UNCHANGED=1`。
+（K=1 那一跑会把 `.quay/goal-freshness-margin.json` 覆盖成 `k=1`；已用默认 K 复跑还原为 `k=200` —— AC4 贴的是还原后的那份。）
+
+### AC6 零产品代码改动
+
+`git -C <本任务 worktree> diff --name-only develop..HEAD -- plugin/ packages/ goals/` ⇒ **0 行**（HEAD `a21d04337` == develop `a21d04337`）。
+`git diff --name-only f19397c66473698968f016bcfce916c388b5d7fb..HEAD`（分支自有 delta）⇒ **0 文件**——本任务**无**产品代码改动。
+
+⚠️ 中途一次读数曾显示 14 个 plugin/packages 文件；核实为**兄弟任务 `gap-ac257-ad-arm1-archguard-project-scope-quay-init-merge-rerun` 的 fan-in 落 develop**（`git log HEAD..develop` 逐条为其合并提交），与本任务 delta 无关；重新 merge develop 后归 0。（硬规则 2 的动作：引用计数前打印命中内容。）
+
+scoped 门（与 driver fan-in 同一条）：`bash <worktree>/scripts/test.sh --for-task gap-ac214-coldstart-face-evidence-aged-past-k-third-crossing --allow-thin`
+
+```
+scripts/test.sh: --for-task gap-ac214-coldstart-face-evidence-aged-past-k-third-crossing — selector selected 0 test files (thin allowed); nothing to run, full suite still runs at fan-in
+SCOPED_GATE_RC=0
+```
+
+三个 tip 各跑一次，**均 RC=0**：`f19397c66`（`.quay/ac214-3rd-scoped-gate.log`）、`a21d04337`（`.quay/ac214-3rd-scoped-gate2.log`）、`bf268a339`（`.quay/ac214-3rd-scoped-gate3.log` —— 即写入 scoped-gate cache 的那个 tip，`developSha=bf268a339986db8351cf5910c2709c4d5fcc678a`、`ok:true`）。另 `PASS — every declared landing target == forward branch 'develop' (0 violations)` 与 `superseded-capability check: PASS — every superseded capability is removed from the executable layer and not taught (5 superseded)`。
+
+**着地归属**：本任务**无代码 delta** ⇒ 全量套件归机械 fan-in 的一步（两跑均 `selected 0 test files`，thin allowed），本 worker 不持 `.git/full-suite.lock.*` 共享锁。
+
+### 节奏读数（供 AC-214 正文 2026-10-09 复核点使用）
+
+- **K=200 现状窗口明显短于 AC 正文假设**：本次实测 develop 前进速率 ≈ **19 交付面提交 / 20 分钟**（从 build_sha `f19397c66` 到 AC4 复跑时的 develop tip），远高于 AC 正文记载的 **83/天** 基线。
+- **三次越界全部落在 27 小时内**（立案表，本条为第 3 次）。
+- **一次冷启动面产出的实测墙钟 = 20 分 36 秒**（观察项①要的成本读数）。
+⇒ 冷启动面与升级面两个产出者都需在 K 窗口内**重复**刷新；本条只**记录**分布与成本，⛔ 不重估 K，⛔ 不改 `goals/AC-214-*.md`。
+
+### 观察项（⛔ 非阻塞）
+
+1. **缺 K 窗口内的刷新节奏**（发生率 **3**）——本条仍未把它做成阻塞性交付：①落点 `.quay/config.yml` 的 `loop.routines` 被 `.gitignore:436` 忽略 ⇒ 不是受版本控制、可核对的产物；②成本已由本条测得（20m36s/次），但「多久一次」的确定性修法仍留在 AC-214 正文自己的复核点内（2026-10-09）。
+2. ⛔ 不动 K（复核点 2026-10-09；起算 2026-09-09）。
+3. ⛔ 本任务不改 `goals/AC-214-*.md`（AC4 已核：`goals/` 不在本任务 diff 里）。
