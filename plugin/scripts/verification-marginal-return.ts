@@ -836,7 +836,7 @@ export async function loadCarriers(root: string, over: Partial<Record<string, st
     gates: over.gates ?? path.join(root, ".quay", "gate-events.jsonl"),
     promotion: over.promotion ?? path.join(root, ".quay", "promotion-outcome.jsonl"),
     rounds: over.rounds ?? path.join(root, ".quay", "verification-round.jsonl"),
-    registry: over.registry ?? path.join(root, "plugin", "scripts", "runner-static-gate.ts"),
+    registry: over.registry ?? path.join(root, "plugin", "scripts", "runner-static-gate.ts"),  // kernel-sibling-dev-tree-only: dev-tree-only — repo-local plugin/scripts use, not third-party sibling resolution.
     registryExtra: over.registryExtra ?? path.join(root, "scripts", "test.sh"),
     mutationCases: over.mutationCases ?? path.join(root, "plugin", "scripts", "checker-mutation-cases"),
   };
