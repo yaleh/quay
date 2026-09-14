@@ -1,7 +1,7 @@
 ---
 id: gap-cost-per-defect-caught-verification-marginal-return
 title: 算每拦下一个缺陷的验证成本——给 ADR-005「验证是绑定约束」一个数（ready-pool-check 独占 97.8%）
-status: needs-human
+status: todo
 needs_human_cause: human-adjudication
 labels:
   - gap
