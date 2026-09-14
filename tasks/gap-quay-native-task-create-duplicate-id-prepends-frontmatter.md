@@ -53,6 +53,14 @@ actor=`quay-driver`）。一次 `task create TASK-TSCONFIG-EXTENDS --title "AC-2
 4. 复核 AC-257 模式里那条「先 `task view` 再决定建不建」的写法是否仍需要（它是本缺陷的下游回避，
    产品修好后可作为防御保留，但⛔ 不得把它当成产品已修的替代）。
 
+## Touches
+
+- tasks/gap-quay-native-task-create-duplicate-id-prepends-frontmatter.md（自身文件：勾 AC + 贴 invoke 证据授权）
+- packages/quay/src/cli/task-create.ts（core CLI `task create` 分发：目前直接 `client.taskWrite({id, ...patch})`，无存在性判定）
+- packages/quay-native/src/store.ts（provider 写路径：空文件被插入整段 frontmatter 的根因处）
+- packages/quay-native/bin/quay-native.ts（native CLI `task create` 子命令入口）
+- packages/quay-native/test/create-validation.test.mjs（AC3 两条断言的宿主测试文件，QN-025 的同族用例已在此）
+
 ## AC
 
 - [ ] AC1 复现与修复：对一条**已存在**的 id 跑 `task create` ⇒ 退出码非 0，且该文件 **md5 逐字节不变**；贴命令、退出码与前后 md5。
