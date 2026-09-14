@@ -59,11 +59,11 @@ exit 0
 
 ## AC
 
-- [ ] AC1（AC-169 criterion 逐字 exit 0）：`v=$(python3 -c "import json;print(json.load(open('plugin/.claude-plugin/plugin.json'))['version'])") && grep -q "v$v" plugin/README.md && ! grep -qE 'v0\.4\.0' plugin/README.md && echo PASS`（贴命令与 exit code）
-- [ ] AC2（README 进入受检集）：`scripts/version-consistency-check.ts` 的 `VERSION_ENTRIES` 含 `plugin/README.md` 条目；在真实树上 `node --experimental-strip-types scripts/version-consistency-check.ts` exit 0（贴全文输出）
-- [ ] AC3（按对象负控制——本任务新增的那一路）：临时 root 副本上只改 README 版本 ⇒ exit 1 且 `--json` 的 `mode=="drift"`；改回 ⇒ exit 0（贴两次命令、exit code 与 `mode` 字段）
-- [ ] AC4（既有产物同步后可评估）：`node --experimental-strip-types --test scripts/version-consistency-check.test.ts` exit 0 ∧ `plugin/scripts/checker-mutation-cases/version-consistency-check.sh` 对临时 workdir 跑出 GREEN→RED→GREEN（exit 0，**非** exit 3/4）
-- [ ] AC5（schema）：`node plugin/scripts/task-schema-check.ts tasks/gap-ac169-readme-version-not-in-version-consistency-set.md` exit 0
+- [x] AC1（AC-169 criterion 逐字 exit 0）：`v=$(python3 -c "import json;print(json.load(open('plugin/.claude-plugin/plugin.json'))['version'])") && grep -q "v$v" plugin/README.md && ! grep -qE 'v0\.4\.0' plugin/README.md && echo PASS`（贴命令与 exit code）
+- [x] AC2（README 进入受检集）：`scripts/version-consistency-check.ts` 的 `VERSION_ENTRIES` 含 `plugin/README.md` 条目；在真实树上 `node --experimental-strip-types scripts/version-consistency-check.ts` exit 0（贴全文输出）
+- [x] AC3（按对象负控制——本任务新增的那一路）：临时 root 副本上只改 README 版本 ⇒ exit 1 且 `--json` 的 `mode=="drift"`；改回 ⇒ exit 0（贴两次命令、exit code 与 `mode` 字段）
+- [x] AC4（既有产物同步后可评估）：`node --experimental-strip-types --test scripts/version-consistency-check.test.ts` exit 0 ∧ `plugin/scripts/checker-mutation-cases/version-consistency-check.sh` 对临时 workdir 跑出 GREEN→RED→GREEN（exit 0，**非** exit 3/4）
+- [x] AC5（schema）：`node plugin/scripts/task-schema-check.ts tasks/gap-ac169-readme-version-not-in-version-consistency-set.md` exit 0
 
 ## DoD
 
