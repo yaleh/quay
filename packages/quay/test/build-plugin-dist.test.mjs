@@ -552,10 +552,9 @@ test("AC1 — the reference closure on the REAL plugin root derives + requires d
 // Staging mirrors package.sh: raw .ts sources → bundled dist/<name>.js, node_modules resolvable (the
 // staged copy lives outside the repo, so link the repo's), and the kernel run FROM its dist form —
 // which is what makes the defect reachable at all (a dev-tree run resolves the raw .ts sibling).
-let stagedClosure = null;
-async function stagedDistClosure() {
-  if (stagedClosure) return stagedClosure;
-  const stage = fs.mkdtempSync(path.join(os.tmpdir(), "dist-closure-stage-"));
+// The returned stage is the caller's to rmSync (each call site cleans it in a finally).
+async function buildStagedClosure(prefix) {
+  const stage = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   for (const d of ["scripts", "gate-scripts"]) {
     const src = path.join(PLUGIN_ROOT, d);
     if (!fs.existsSync(src)) continue;
@@ -564,7 +563,6 @@ async function stagedDistClosure() {
   fs.symlinkSync(path.join(REPO_ROOT, "node_modules"), path.join(stage, "node_modules"), "dir");
   const { scripts, gateScripts } = deriveEntries(stage);
   await bundleEntries(stage, [...scripts, ...gateScripts]);
-  stagedClosure = stage;
   return stage;
 }
 
@@ -618,13 +616,13 @@ function killAnchor(ws) {
 }
 
 test("AC5 — the packaged dist closure STARTS A DRIVER for real (driver-runtime.js from dist, rc=0, host=anchor)", async () => {
-  const stage = await stagedDistClosure();
-  const dist = path.join(stage, "scripts", "dist");
-  // The artifact carries the bundle at all — the entry the closure used to miss.
-  assert.ok(fs.existsSync(path.join(dist, "driver-anchor.js")),
-    `the built closure must carry dist/driver-anchor.js (got: ${fs.readdirSync(dist).filter((f) => /anchor/.test(f)).join(", ") || "no anchor bundle"})`);
+  const stage = await buildStagedClosure("dist-closure-stage-");
   const ws = fakePromotionWorkspace();
   try {
+    const dist = path.join(stage, "scripts", "dist");
+    // The artifact carries the bundle at all — the entry the closure used to miss.
+    assert.ok(fs.existsSync(path.join(dist, "driver-anchor.js")),
+      `the built closure must carry dist/driver-anchor.js (got: ${fs.readdirSync(dist).filter((f) => /anchor/.test(f)).join(", ") || "no anchor bundle"})`);
     const r = startDriver(dist, ws);
     const out = `${r.stdout ?? ""}\n${r.stderr ?? ""}`;
     assert.doesNotMatch(out, /cannot spawn driver anchor/,
@@ -635,16 +633,16 @@ test("AC5 — the packaged dist closure STARTS A DRIVER for real (driver-runtime
   } finally {
     killAnchor(ws);
     fs.rmSync(ws, { recursive: true, force: true });
+    fs.rmSync(stage, { recursive: true, force: true });
   }
 });
 
-test("AC5 — negative control: the SAME packaged artifact without dist/driver-anchor.js reproduces the production failure (rc=1 + the exact error)", async () => {
-  const stage = await stagedDistClosure();
-  const dist = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "dist-closure-noanchor-")), "dist");
-  fs.cpSync(path.join(stage, "scripts", "dist"), dist, { recursive: true });
-  fs.rmSync(path.join(dist, "driver-anchor.js"));
+test("AC5 — negative control: the SAME packaged artifact minus dist/driver-anchor.js reproduces the production failure (rc=1 + the exact error)", async () => {
+  const stage = await buildStagedClosure("dist-closure-noanchor-");
   const ws = fakePromotionWorkspace();
   try {
+    const dist = path.join(stage, "scripts", "dist");
+    fs.rmSync(path.join(dist, "driver-anchor.js"));
     const r = startDriver(dist, ws);
     const out = `${r.stdout ?? ""}\n${r.stderr ?? ""}`;
     assert.equal(r.status, 1, `an artifact whose closure dropped the anchor must fail closed. Output:\n${out}`);
@@ -653,7 +651,7 @@ test("AC5 — negative control: the SAME packaged artifact without dist/driver-a
   } finally {
     killAnchor(ws);
     fs.rmSync(ws, { recursive: true, force: true });
-    fs.rmSync(path.dirname(dist), { recursive: true, force: true });
+    fs.rmSync(stage, { recursive: true, force: true });
   }
 });
 
