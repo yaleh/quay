@@ -3,6 +3,7 @@ id: gap-worktree-suite-red-from-quay-plugin-root-override-in-driver-env
 title: worktree 全量套件结构性恒红 —— driver 环境带的 `QUAY_PLUGIN_ROOT` 覆盖指针 +
   一条把【断言者所在树】当【kernel 安装树】的断言（loop 自 2026-09-14T06:40Z 起零落地）
 status: ready
+needs_human_cause: unclassified
 labels:
   - gap
   - defect
@@ -198,3 +199,13 @@ B) 无该键 ⇒ ℹ tests 7 / pass 5 / fail 2 ：✖AC3a            ✖AC3a''-r
 
 （若选 (a) 环境面，则本任务零代码改动，Touches 保留为「两条候选修法的落点」并在任务体注明实际未改。）
 （**实际选定 (b)**：只改了 `plugin/test/…test.mjs`；`plugin/scripts/suite-driver.ts` 保留为落点声明、实际未改。）
+
+## Needs-Human
+
+**执行 2026-09-14T08:05:48.603Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：unclassified
+- 失败步/判词：AC 未全勾（checked 2/3，剩余未勾 1）——续做只需验证并勾选 AC
+- run_id：wk-prod-1789367589
+- session_id：561c8809-573e-477e-9604-60429656f327
