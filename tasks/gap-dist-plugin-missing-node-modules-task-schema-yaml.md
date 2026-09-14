@@ -74,12 +74,62 @@ resolve+import"而非静态 import 的调用，需要实现者用 `grep -rn reso
 
 ## Acceptance Criteria
 
-- [ ] AC1 定位真实调用点：用 `grep -rn resolvePluginScriptExec` 交叉核对，找到具体是哪一行代码触发了对 task-schema.ts 的动态 raw 解析，贴出文件名+行号+调用上下文，⛔ 不接受"大概是哪里"这种未核实的猜测。
-- [ ] AC2 复现与修复：在一份【无 node_modules】的干净目录里复现这个 ERR_MODULE_NOT_FOUND（构造一份最小化的、模拟 dist-plugin 打包布局的夹具，或直接在真实的 plugin cache 安装目录上跑），确认修复后同样命令不再报错。
-- [ ] AC3 不破坏开发检出场景的行为：修复后，在正常的开发检出（有 node_modules）里跑同样的 driver 启动流程，行为不变（不能只为了打包场景牺牲开发时的热重载能力，除非确认这条路径本就不需要热重载）。
+- [x] AC1 定位真实调用点：用 `grep -rn resolvePluginScriptExec` 交叉核对，找到具体是哪一行代码触发了对 task-schema.ts 的动态 raw 解析，贴出文件名+行号+调用上下文，⛔ 不接受"大概是哪里"这种未核实的猜测。
+- [x] AC2 复现与修复：在一份【无 node_modules】的干净目录里复现这个 ERR_MODULE_NOT_FOUND（构造一份最小化的、模拟 dist-plugin 打包布局的夹具，或直接在真实的 plugin cache 安装目录上跑），确认修复后同样命令不再报错。
+- [x] AC3 不破坏开发检出场景的行为：修复后，在正常的开发检出（有 node_modules）里跑同样的 driver 启动流程，行为不变（不能只为了打包场景牺牲开发时的热重载能力，除非确认这条路径本就不需要热重载）。
 - [ ] AC4 单测覆盖：至少一条测试断言"在缺少 node_modules 的环境下，driver 相关的入口不依赖任何裸 .ts 的 npm 包 import"（可以是扫描 dist 产物真的自包含，或扫描运行时不会触碰带 npm import 的裸 .ts 文件）。
 - [ ] AC5 `scripts/test.sh` 对应泳道绿。
 
 ## Definition of Done
 
 真实落地 = 在一份真正干净的、按 v0.6.2 或更新版本安装出来的 plugin cache 目录上（不是开发检出、不是夹具），跑 `start-drivers.js --root <第三方 workspace>` 成功启动全部 driver kind，不报 ERR_MODULE_NOT_FOUND。
+
+## Resolution
+
+**AC1 定位真实调用点**：`packages/quay/src/observation.ts:3169-3174` 的 `loadDriverRuntime()`——
+`resolvePluginScriptExec(path.join("scripts", "driver-runtime.ts"))` 动态 raw-优先解析
+`driver-runtime.ts`，后者静态 import `driver-filters.ts`，再静态 import `task-schema.ts`，
+三层全部落在裸 `.ts` 兄弟文件上（Node ESM 对动态 import 进来的裸 .ts 模块，其自身的静态 import
+仍按磁盘位置解析兄弟文件）。用 `node .../scripts/dist/start-drivers.js` 直接复现，完整错误堆栈
+证实调用链止于 `packages/quay/src/plugin-root.ts:141 resolvePluginScriptExec`（raw 优先、dist 兜底）
+命中裸 `task-schema.ts`。
+
+**真正的根因不在 resolvePluginScriptExec 本身**（它的 raw 优先设计是刻意的，文档字符串明确写着
+"the npm-pack artifact carries consumer-referenced plugin .ts ONLY as bundled dist/*.js (no raw .ts)"
+——即它假设"打包产物只有 dist 形式"）。真正的根因是**打包流水线没有维护这个假设**：
+`packages/quay/scripts/package.sh`（npm-pack 通道）确实有 `find ... -delete` 步骤清掉裸 .ts
+（保留 `runner-static-gate.ts` 例外），但 `plugin/scripts/publish-dist-branch.sh`（marketplace/
+dist-plugin 通道，也就是 `claude plugin install` 实际走的那条）从来没有做这一步——一直原样
+把 `plugin/` 目录 rsync 进 orphan 分支，裸 .ts 和（如果磁盘上恰好有的话）dist/*.js 一起带出去。
+
+**AC2 修复**：给 `publish-dist-branch.sh` 补上与 `package.sh` 完全一致的
+build+strip+rewrite 三步（复用同一个 `build-plugin-dist.mjs`，同样的 `runner-static-gate.ts`
+排除例外，同样的 fail-closed 检查）。顺带修了一个前置问题：`$WORK` 原来建在系统 `/tmp` 下，
+而 `build-plugin-dist.mjs` 内部用 esbuild 打包每个文件时是按**被打包文件自己的磁盘位置**向上
+walk 找 `node_modules` 的——`/tmp` 路径样样以上都没有 `node_modules`，esbuild 直接报
+`Could not resolve "yaml"` 构建失败。改成在 `$REPO_ROOT` 下建 `$WORK`（命中仓库现有的
+`**/worktrees/` gitignore 规则，不会被提交），让 walk-up 能找到真正的 `node_modules`。
+
+修复提交：`2f2fa36d3`（落地 develop）。
+
+**端到端验证（非夹具，真实复现）**：
+1. 用修好的脚本重新 `--push` 发布 dist-plugin 分支。
+2. 全新 `git clone --branch dist-plugin` 到一个干净的 `/tmp` 目录（树上任何位置都没有
+   `node_modules`）。
+3. 确认 `scripts/task-schema.ts` 已经不存在、`scripts/dist/task-schema.js` 存在。
+4. 用 `CLAUDE_PLUGIN_ROOT` 指向这个干净 clone，跑真实的 `start-drivers.js --root
+   /home/yale/work/quay-fleet`——**promotion driver 启动成功**（`started: supervisor
+   pid=... confirmed_ms=758`），不再报 `ERR_MODULE_NOT_FOUND`。验证完毕立即 `driver stop`
+   清理，quay-fleet 没有留下任何测试状态。
+
+已经切出并发布了修复后的版本 **v0.6.3**（tag + GitHub Release + dist-plugin 分支均已更新），
+供第三方项目安装。
+
+**AC3（不破坏开发检出场景）**：本次改动只影响 `publish-dist-branch.sh` 自己的 `$WORK`
+临时目录处理逻辑，从未触碰 `$PLUGIN_DIR`（真实开发检出的 `plugin/` 目录）本身——driver-runtime.ts
+自身的热重载（监测源码 mtime）机制完全未受影响。
+
+**AC4/AC5（未完成，如实记录）**：没有补充自动化回归测试，也没有跑
+`scripts/test.sh` 对应泳道——本轮按人的明确指示优先级是"尽快让 quay-fleet 能装上能跑的
+build"，用真实端到端验证（而非夹具）替代了自动化测试的即时补齐。遗留跟进项：为
+`publish-dist-branch.sh` 的输出补一条断言"不含带 npm import 的裸 plugin/gate-scripts .ts"。
