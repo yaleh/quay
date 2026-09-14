@@ -6,10 +6,14 @@ kind: criterion
 goal: GOAL-003
 criterion: >-
   grep -h '^allowed-tools:' plugin/skills/*/SKILL.md 2>/dev/null | grep -q
-  'mcp__quay__' && exit 1
+  'mcp__quay__' && { echo "AC-163 fail: a plugin/skills/*/SKILL.md allowed-tools
+  line still uses the bare mcp__quay__ prefix" >&2; exit 1; }
 
   node --experimental-strip-types
-  plugin/scripts/allowed-tools-plugin-prefix-check.ts >/dev/null 2>&1
+  plugin/scripts/allowed-tools-plugin-prefix-check.ts >/dev/null 2>&1 || { echo
+  "AC-163 fail: static checker
+  plugin/scripts/allowed-tools-plugin-prefix-check.ts did not exit 0" >&2; exit
+  1; }
 expect: exit 0（无 SKILL.md 的 allowed-tools 使用裸 mcp__quay__ ∧ 静态检查器
   allowed-tools-plugin-prefix-check.ts 存在且退出 0——前半已达成，后半是本条的实质）
 origin: |
