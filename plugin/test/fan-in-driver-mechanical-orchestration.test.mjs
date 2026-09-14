@@ -1,4 +1,4 @@
-// @test-group engine
+// @test-group serial
 // fan-in-driver-mechanical-orchestration.test.mjs — gap-fan-in-driver-mechanical-orchestration
 // (SPEC-fan-in-driver-mechanical-orchestration-2026-08-27): driver 机械驱动 fan-in 的机械部分
 // （锁/merge/delta/typecheck/scoped门/suite/ff），suite 不 detach（driver 子进程 + 异步 poll），
