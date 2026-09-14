@@ -117,7 +117,7 @@ jobs:
 
   # M132 (exp5-M-VERSION-CHECK-CI): fail-closed version consistency gate.
   # Runs version-consistency-check.ts on every push; fails the build if any
-  # of the 8 version-bearing artifacts has drifted from the unified version.
+  # of the 9 version-bearing artifacts has drifted from the unified version.
   version-consistency:
     runs-on: ubuntu-latest
     timeout-minutes: 2
