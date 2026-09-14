@@ -191,6 +191,17 @@ build_ref=""      # --build-ref: build the deliverable from THIS ref instead of 
 ac257_task=""     # --ac257-task-id: the REAL defect-fix task in the target project that this run drives to done
 ac257_task_body="" # --ac257-task-body: LOCAL path to that task's body file (shipped to the host, ⛔ not hand-typed there)
 ac257_plugin_root="" # --ac257-plugin-root: ABSOLUTE path (on the remote host) of the PERSISTENT plugin delivery (…/quay/plugin) the target is bound to
+verify_ac258=0    # 1 = GOAL-018-AC-258: user-scope delete-key re-registration + quay-init rerun + a real driven todo→done, ON the host; transport only its AC-258 record
+ac258_root=""     # --target-root (shared with AC-257/248/249, recorded separately): the REAL project the AC-258 record names
+ac258_task=""     # --ac258-task-id: the REAL task in the target project that this run drives to done
+ac258_task_body="" # --ac258-task-body: LOCAL path to that task's body file (shipped to the host, ⛔ not hand-typed there)
+ac258_poll_secs="" # --ac258-poll-secs: how long the remote step may poll for the task to reach done (⛔ the verify script's default is 3600s; a real driven todo→done needs its own budget)
+# AC-258 前置探测的【谓词】。⛔ 与 verify-deliver-coldstart.sh 的 AC258_WORKER_PROBE_PREDICATE 必须
+# 逐字相同 —— 两处由 plugin/test/develop-deliver-tgz-evidence-transport.test.mjs 机械互校（不一致即红），
+# 所以它是【一处真源 + 一个检查】，而不是两处各自漂移的副本。
+# 为什么本文件也要一份：这台机器上的探测发生在 build 之前（一台起不了 worker 的目标机不该花一次
+# develop-tip 构建），而那一刻 verify-deliver-coldstart.sh 还没被 ship 过去 —— 用不了它的函数。
+ac258_probe_predicate='claude -p "say ok"'
 adr_flip_task=""  # --task-id: the task IN THAT PROJECT whose driven-out fix the record is about
 verify_complete_change=0 # 1 = GOAL-016-AC-249: read the SAME task's commit_files UNION (code side AND ADR-007 doc side) and transport only its AC-249 record
 selfcheck_evidence=0
@@ -199,6 +210,7 @@ selfcheck_evidence_completeness=0
 selfcheck_e2e_pairing=0   # 1 = hermetic controls of check_e2e_pairing (AC-240 传输侧配对判定)
 selfcheck_upgrade_pairing=0  # 1 = hermetic controls of check_upgrade_pairing (AC-239 传输侧同源判定)
 selfcheck_transport_closure_flag=0  # 1 = hermetic closure controls of the shipped set (AC1..AC4)
+selfcheck_worker_preflight_flag=0   # 1 = hermetic controls of the AC-258 worker-usability preflight (five verdicts + every-host enumeration)
 selfcheck_takeover_transport_flag=0 # 1 = hermetic controls of the AC-247 transport (GOAL-016)
 selfcheck_adrflip_transport_flag=0  # 1 = hermetic controls of the AC-248 transport (GOAL-016)
 selfcheck_complete_change_transport_flag=0 # 1 = hermetic controls of the AC-249 transport (GOAL-016)
@@ -221,13 +233,17 @@ while [ $# -gt 0 ]; do
     # --target-root / --task-id 由 AC-248 与 AC-249 两条 verify 模式【共用】（同一条被驱动任务的两条读数）。
     # AC-257 与 AC-248/249 量的是【两个不同的项目】（前者是被 project-scope 取证的真实本体，后者是
     # 被驱动出修复的那个副本）⇒ 同一个 --target-root 旗标各自记录到各自的名字，⛔ 不互相覆盖语义。
-    --target-root) adr_flip_root="$2"; ac257_root="$2"; shift 2 ;;
+    --target-root) adr_flip_root="$2"; ac257_root="$2"; ac258_root="$2"; shift 2 ;;
     --task-id) adr_flip_task="$2"; shift 2 ;;
     --build-ref) build_ref="$2"; shift 2 ;;
     --verify-ac257) verify_ac257=1; shift ;;
     --ac257-task-id) ac257_task="$2"; shift 2 ;;
     --ac257-task-body) ac257_task_body="$2"; shift 2 ;;
     --ac257-plugin-root) ac257_plugin_root="$2"; shift 2 ;;
+    --verify-ac258) verify_ac258=1; shift ;;
+    --ac258-task-id) ac258_task="$2"; shift 2 ;;
+    --ac258-task-body) ac258_task_body="$2"; shift 2 ;;
+    --ac258-poll-secs) ac258_poll_secs="$2"; shift 2 ;;
     --verify-complete-change) verify_complete_change=1; shift ;;
     --selfcheck-evidence)
       selfcheck_evidence=1
@@ -240,6 +256,7 @@ while [ $# -gt 0 ]; do
     --selfcheck-takeover-transport) selfcheck_takeover_transport_flag=1; shift ;;
     --selfcheck-adrflip-transport) selfcheck_adrflip_transport_flag=1; shift ;;
     --selfcheck-complete-change-transport) selfcheck_complete_change_transport_flag=1; shift ;;
+    --selfcheck-worker-preflight) selfcheck_worker_preflight_flag=1; shift ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -2302,6 +2319,387 @@ REMOTE
   return 0
 }
 
+# validate_ac258_args — the ONE place that decides whether the AC-258 transport flags are usable.
+# 与 validate_ac257_args 同一条纪律、同样在 build 之前判（⛔ 一个坏参数不该花一次 develop-tip 构建）：
+#   · --target-root 必须是【目标机上的绝对路径】：它在远端解析，相对路径会静默落到远端 $HOME ⇒
+#     被取证的是【另一个项目】，而判据侧的 project_root 会如实记下那个错的项目。
+#   · --ac258-task-id 必填：被取证的是【那一条被驱动到 done 的任务】；让脚本去猜（或取最新一条）正是
+#     AC-207 已经踩过的坑（「最新一条提交」= 记账提交）。
+#   · --ac258-task-body 必须是【本地存在的文件】：它被 scp 到远端再喂给 task create，⛔ 不在远端手打。
+# ⚠️ 与 AC-257 的差别：**没有** --ac258-plugin-root —— 本模式把交付物装到它自己派生的【持久前缀】
+# （$HOME/.local/opt/quay/<tgz 版本>），plugin root 由该前缀推出。少一个调用方可以拧错的旋钮
+# （「前缀是什么」与「plugin root 是什么」若是两个入参就能互相矛盾，硬规则 3b）。
+validate_ac258_args() {
+  if [ -z "${ac258_root}" ]; then
+    echo "develop-deliver: --verify-ac258 requires --target-root <absolute path ON the remote host of the REAL project>" >&2
+    return 1
+  fi
+  case "${ac258_root}" in
+    /*) ;;
+    *) echo "develop-deliver: --verify-ac258 --target-root must be an ABSOLUTE path on the remote host (got: ${ac258_root})" >&2; return 1 ;;
+  esac
+  if [ -z "${ac258_task}" ]; then
+    echo "develop-deliver: --verify-ac258 requires --ac258-task-id <the task in THAT project driven to done>" >&2
+    return 1
+  fi
+  if [ -z "${ac258_task_body}" ] || [ ! -f "${ac258_task_body}" ]; then
+    echo "develop-deliver: --verify-ac258 requires --ac258-task-body <local path to that task's body file> (got: ${ac258_task_body:-<empty>})" >&2
+    return 1
+  fi
+  return 0
+}
+
+# ── ac258_probe_target_worker — 目标机 worker 可用性的【本地侧】前置探测 ─────────────────────────
+# 存在的理由见 verify-deliver-coldstart.sh 的 ac258_worker_preflight 头注释（同一个 gap：AC-258 把
+# 「目标机能否跑 worker」这个可秒级探测的后置条件排在【三步破坏性且自耗】的动作之后）。本函数是那
+# 条纪律的【最早一个】落点：它排在 build_develop_tgz 之前 —— 与 validate_ac258_args 的「一个坏参数
+# 不该花一次 develop-tip 构建」完全同一条纪律，只是这里的「坏」是【目标机起不了 worker】。
+#
+# 与远端那个函数的分工：远端的是【权威】判定（它就在那台机器上跑，且在删键前再判一次，保护直接
+# 调用那个脚本的人）；本地这一份多出一个【只有本地能观测】的取值 —— ssh 不可达。
+#
+# 返回（硬规则 3b：读不懂输入不得返回与【合格】同形的值 ⇒ 每一态各自取值）：
+#   0 = usable       探测通过
+#   1 = credentials  目标机上的探测跑了但失败（凭据不可用 / 模型不可达 —— 原样输出点名）
+#   2 = absent       目标机上没有 `claude`（⛔ 与 1 分开：一个是装没装，一个是登录态）
+#   3 = timeout      探测超时（ssh 挂住 或 远端探测挂住；⛔ 与 4 分开：挂住 ≠ 到不了）
+#   4 = unreachable  ssh 到不了目标机（连接被拒 / 主机不可达）
+# stdout 恒为一枚单行 `AC258-PREFLIGHT <verdict> <detail>`。
+ac258_probe_target_worker() {
+  local target="${1:?target required}" timeout_secs="${2:-${QUAY_AC258_PROBE_TIMEOUT_SECS:-30}}"
+  local probe_cmd="${QUAY_AC258_WORKER_PROBE_CMD:-$ac258_probe_predicate}"
+  local out="" rc=0 remote_guard=""
+  # (1) 传输层：ssh 到不到得了。⛔ 与「探测失败」分成两个取值 —— 二者的修法完全不同
+  #     （一个是网络/主机名，一个是那台机器上的登录态），而合并它们会让运维照着错的线索查。
+  set +e
+  out="$(timeout "$timeout_secs" ssh "${ssh_opts[@]}" "$target" 'true' 2>&1)"
+  rc=$?
+  set -e
+  if [ "$rc" = "124" ]; then
+    echo "AC258-PREFLIGHT timeout ssh connect exceeded ${timeout_secs}s (target=$target)"
+    return 3
+  fi
+  if [ "$rc" != "0" ]; then
+    echo "AC258-PREFLIGHT unreachable ssh rc=$rc (target=$target) ⇒ $(printf '%s' "$out" | tail -2 | tr '\n' ' ')"
+    return 4
+  fi
+  # (2) 应用层：在那台机器上真的跑一次探测。⚠️ `bash -ls`（【登录】shell）—— 与远端函数同一条理由：
+  #     `claude` 常只装在 ~/.local/bin、且不在非登录 shell 的 PATH 里（非登录 ⇒ NO_CLAUDE 伪影，
+  #     硬规则 4b）。`command -v claude` 那道闸只对【缺省谓词】成立 —— 调用方显式换了命令时，被探测
+  #     的就是它自己指的那个可执行文件。
+  if [ -z "${QUAY_AC258_WORKER_PROBE_CMD:-}" ]; then
+    remote_guard='command -v claude >/dev/null 2>&1 || { echo "NO_CLAUDE on the LOGIN shell PATH"; exit 42; }'
+  fi
+  set +e
+  out="$(timeout "$timeout_secs" ssh "${ssh_opts[@]}" "$target" "bash -ls" <<REMOTE_PROBE 2>&1
+${remote_guard}
+${probe_cmd}
+REMOTE_PROBE
+)"
+  rc=$?
+  set -e
+  if [ "$rc" = "124" ]; then
+    echo "AC258-PREFLIGHT timeout remote probe exceeded ${timeout_secs}s (target=$target, partial: $(printf '%s' "$out" | tail -2 | tr '\n' ' '))"
+    return 3
+  fi
+  if [ "$rc" = "0" ]; then
+    echo "AC258-PREFLIGHT usable remote probe exited 0 (target=$target) ⇒ $(printf '%s' "$out" | tail -1)"
+    return 0
+  fi
+  if [ "$rc" = "42" ] || [ "$rc" = "127" ]; then
+    echo "AC258-PREFLIGHT absent \`claude\` not on the target's LOGIN-shell PATH (rc=$rc, target=$target) ⇒ $(printf '%s' "$out" | tail -2 | tr '\n' ' ')"
+    return 2
+  fi
+  echo "AC258-PREFLIGHT credentials remote probe exited ${rc} (target=$target) ⇒ $(printf '%s' "$out" | tail -3 | tr '\n' ' ')"
+  return 1
+}
+
+# ── worker_preflight_every_host — 每个目标机都过一遍探测；任一不过 ⇒ 非 0（调用方据此在 build 前退出）──
+# 与 validate_ac258_args 的「一个坏参数不该花一次 develop-tip 构建」同一条纪律：一台起不了 worker 的
+# 目标机，既不该花一次构建，更不该让三步破坏性步骤跑起来。
+# ⚠️ 逐个 host 都判、⛔ 不短路在第一个失败上：多目标运行时「哪几台过不了」本身就是读数（硬规则 3：枚举）。
+worker_preflight_every_host() {
+  local hk target out rc fail=0
+  for hk in ${hosts}; do
+    target="${host_target[$hk]:-}"
+    if [ -z "${target}" ] || [ "${target}" = "${hk}" ]; then
+      # AC-258 首跑实测的缺陷正是【把 host KEY 当成连接名传下去】⇒ 空查与查错在同一处发生（同 verify_ac258_mode）。
+      echo "develop-deliver: ${hk} — host_target lookup unusable (got '${target}') (NOT-EVALUATED)"
+      fail=1
+      continue
+    fi
+    set +e
+    out="$(ac258_probe_target_worker "${target}" 2>&1)"
+    rc=$?
+    set -e
+    printf 'develop-deliver: %s (%s) worker preflight: %s\n' "${hk}" "${target}" "${out}"
+    if [ "${rc}" != "0" ]; then
+      echo "develop-deliver: ${hk} (${target}) — worker preflight FAILED (rc=${rc}, verdict=$(printf '%s' "${out}" | awk '{print $2}')) ⇒ ⛔ 一个破坏性步骤都没有执行（未构建、未 ship、未删键、未装、未 quay-init 重跑）" >&2
+      fail=1
+    fi
+  done
+  if [ "${fail}" -eq 1 ]; then
+    echo "develop-deliver: ABORTED before any destructive step (worker preflight did not pass on every host — see per-host lines above)" >&2
+    return 1
+  fi
+  return 0
+}
+
+# ── selfcheck_worker_preflight — AC-258 前置探测的 hermetic 正/负控制 ────────────────────────────
+# 全部走【假 ssh】（临时目录里一个脚本，两个阶段的退出码/输出由 $FAKE_STATE 下的文件决定），
+# ⛔ 不碰任何真实主机 —— 但被驱动的是【真的】ac258_probe_target_worker / worker_preflight_every_host，
+# 判定逻辑一行都没有复刻（夹具只承担「该判据能被证伪」这一半，硬规则 4 推论三）。
+# 五种取值都要真的取到、且互不相同：没有独立取值的判定无法区分「查过且合格」与「没查成」（硬规则 3b）。
+selfcheck_worker_preflight() {
+  local t rc=0 bin out r=0
+  t="$(mktemp -d 2>/dev/null)" || { echo "selfcheck-worker-preflight: tmp-unavailable (夹具造不出 ⇒ 本组读数一律取假)" >&2; return 1; }
+  bin="$t/bin"; mkdir -p "$bin" "$t/state"
+  cat > "$bin/ssh" <<'FAKESSH'
+#!/usr/bin/env bash
+# 假 ssh：最后一个参数是 `true` ⇒ 传输阶段；否则 ⇒ 应用（探测）阶段。
+# 两阶段的退出码/输出由 $FAKE_STATE 下的文件决定 ⇒ 每一例可控、可复现、⛔ 不依赖真实网络。
+state="${FAKE_STATE:?FAKE_STATE must be set}"
+last="${!#}"
+# 两个阶段【各自】可控（含各自的 sleep）—— 因为「ssh 挂住」与「远端探测挂住」在探测函数里是
+# 两条不同的代码路径，只测其中一条会让另一条静默无人守（硬规则 5b）。
+if [ "$last" = "true" ]; then
+  if [ -f "$state/transport.sleep" ]; then sleep "$(cat "$state/transport.sleep")"; fi
+  cat "$state/transport.out" 2>/dev/null || true
+  exit "$(cat "$state/transport.rc" 2>/dev/null || echo 0)"
+fi
+if [ -f "$state/probe.sleep" ]; then sleep "$(cat "$state/probe.sleep")"; fi
+cat "$state/probe.out" 2>/dev/null || true
+exit "$(cat "$state/probe.rc" 2>/dev/null || echo 0)"
+FAKESSH
+  chmod +x "$bin/ssh"
+  printf '%s\n' "$t" > "$t/marker"
+
+  local -a verd_rc=() verd_word=()
+  # 每一例：(名字, transport.rc, probe.rc, 期望退出码, 期望 verdict 词)
+  local name want_rc want_word tr_rc pr_rc
+  for spec in \
+      "unreachable:255:0:4:unreachable" \
+      "credentials:0:1:1:credentials" \
+      "absent:0:42:2:absent" \
+      "usable:0:0:0:usable" ; do
+    name="${spec%%:*}"; spec="${spec#*:}"
+    tr_rc="${spec%%:*}"; spec="${spec#*:}"
+    pr_rc="${spec%%:*}"; spec="${spec#*:}"
+    want_rc="${spec%%:*}"; want_word="${spec#*:}"
+    : > "$t/state/transport.out"; printf '%s' "$tr_rc" > "$t/state/transport.rc"
+    : > "$t/state/probe.out";   printf '%s' "$pr_rc" > "$t/state/probe.rc"
+    rm -f "$t/state/transport.sleep" "$t/state/probe.sleep"
+    case "$name" in
+      unreachable) printf '%s\n' "ssh: connect to host example.invalid port 22: Connection refused" > "$t/state/transport.out" ;;
+      credentials) printf '%s\n' "Failed to authenticate: OAuth session expired and could not be refreshed" > "$t/state/probe.out" ;;
+      absent)      printf '%s\n' "NO_CLAUDE on the LOGIN shell PATH" > "$t/state/probe.out" ;;
+      usable)      printf '%s\n' "ok" > "$t/state/probe.out" ;;
+    esac
+    set +e
+    out="$(PATH="$bin:$PATH" FAKE_STATE="$t/state" ac258_probe_target_worker "example.invalid" 2>&1)"
+    r=$?
+    set -e
+    echo "selfcheck: worker-preflight($name) rc=$r verdict='$(printf '%s' "$out" | awk '{print $2}')' (expect rc=$want_rc verdict=$want_word) — '$(printf '%s' "$out" | cut -c1-100)'"
+    [ "$r" = "$want_rc" ] || { echo "selfcheck: worker-preflight FAIL — $name expected rc=$want_rc got $r" >&2; rc=1; }
+    [ "$(printf '%s' "$out" | awk '{print $2}')" = "$want_word" ] || { echo "selfcheck: worker-preflight FAIL — $name expected verdict=$want_word" >&2; rc=1; }
+    verd_rc+=("$r"); verd_word+=("$(printf '%s' "$out" | awk '{print $2}')")
+  done
+  # 超时【两条路径各一例】，都走【真的】timeout(1)：假 ssh 先睡 5s、外层预算 1s ⇒ 被 SIGTERM ⇒ rc=124。
+  # ⚠️ 只测其中一条会让另一条成为无人守的空白（硬规则 5b：兄弟实例常在同一函数里）—— 而它们确实是
+  # 两段不同的代码（传输阶段 vs 应用阶段），失败形态却相同（都是 124）。
+  for tstage in transport probe; do
+    : > "$t/state/transport.out"; printf '0' > "$t/state/transport.rc"; printf '0' > "$t/state/probe.rc"
+    rm -f "$t/state/transport.sleep" "$t/state/probe.sleep"
+    printf '5' > "$t/state/${tstage}.sleep"
+    set +e
+    out="$(PATH="$bin:$PATH" FAKE_STATE="$t/state" QUAY_AC258_PROBE_TIMEOUT_SECS=1 ac258_probe_target_worker "example.invalid" 2>&1)"
+    r=$?
+    set -e
+    echo "selfcheck: worker-preflight(timeout, ${tstage} stage) rc=$r verdict='$(printf '%s' "$out" | awk '{print $2}')' (expect rc=3 verdict=timeout — 挂住 ≠ 到不了，也 ≠ 凭据不可用) — '$(printf '%s' "$out" | cut -c1-90)'"
+    [ "$r" = "3" ] || { echo "selfcheck: worker-preflight FAIL — ${tstage}-stage timeout expected rc=3 got $r" >&2; rc=1; }
+    [ "$(printf '%s' "$out" | awk '{print $2}')" = "timeout" ] || { echo "selfcheck: worker-preflight FAIL — ${tstage}-stage timeout verdict" >&2; rc=1; }
+    # 两阶段的超时信息必须【可区分】（一个说 ssh connect，一个说 remote probe）—— 否则运维照着错的线索查。
+    tstage_words="ssh connect"; [ "$tstage" = "probe" ] && tstage_words="remote probe"
+    case "$out" in
+      *"$tstage_words"*) ;;
+      *) echo "selfcheck: worker-preflight FAIL — ${tstage}-stage timeout did not name the stage ('$tstage_words')" >&2; rc=1 ;;
+    esac
+    verd_rc+=("$r"); verd_word+=("$(printf '%s' "$out" | awk '{print $2}')")
+  done
+  rm -f "$t/state/transport.sleep" "$t/state/probe.sleep"
+  # 五态互不相同（⛔ 「不与探测通过共用同一个结构」）。
+  local n_words; n_words="$(printf '%s\n' "${verd_word[@]}" | sort -u | wc -l | tr -d ' ')"
+  echo "selfcheck: worker-preflight(verdict vocabulary) distinct=$n_words of ${#verd_word[@]} samples (expect 5 distinct — 五态各有独立取值，⛔ 两条超时路径共用 timeout 是对的：对调用方它们是同一件事)"
+  [ "$n_words" = "5" ] || { echo "selfcheck: worker-preflight FAIL — verdicts not distinct" >&2; rc=1; }
+
+  # 任一 host 不过 ⇒ 整体非 0；且【逐个 host 都判】（⛔ 不短路在第一个失败上 —— 多目标运行时
+  # 「哪几台过不了」本身就是读数，硬规则 3：枚举，不布尔）。
+  local saved_hosts="$hosts" saved_b saved_c lines
+  saved_b="${host_target[B]:-}"; saved_c="${host_target[C]:-}"
+  hosts="B C"; host_target[B]="host-b.invalid"; host_target[C]="host-c.invalid"
+  : > "$t/state/transport.out"; printf '0' > "$t/state/transport.rc"; printf '0' > "$t/state/probe.rc"; printf '%s\n' ok > "$t/state/probe.out"
+  set +e
+  out="$(PATH="$bin:$PATH" FAKE_STATE="$t/state" worker_preflight_every_host 2>&1)"
+  r=$?
+  set -e
+  lines="$(printf '%s\n' "$out" | grep -c 'worker preflight:')"
+  echo "selfcheck: worker-preflight(every-host, all pass) rc=$r hosts-reported=$lines (expect 0/2)"
+  [ "$r" = "0" ] || { echo "selfcheck: worker-preflight FAIL — all-pass run returned $r" >&2; rc=1; }
+  [ "$lines" = "2" ] || { echo "selfcheck: worker-preflight FAIL — not every host was judged ($lines)" >&2; rc=1; }
+  printf '1' > "$t/state/probe.rc"; printf '%s\n' "Failed to authenticate: OAuth session expired" > "$t/state/probe.out"
+  set +e
+  out="$(PATH="$bin:$PATH" FAKE_STATE="$t/state" worker_preflight_every_host 2>&1)"
+  r=$?
+  set -e
+  lines="$(printf '%s\n' "$out" | grep -c 'worker preflight:')"
+  echo "selfcheck: worker-preflight(every-host, one fails) rc=$r hosts-reported=$lines aborted-before-destructive=$([ "$r" != "0" ] && echo 1 || echo 0) (expect non-0/2/1 — 且失败的那台被点名)"
+  [ "$r" != "0" ] || { echo "selfcheck: worker-preflight FAIL — a failing host did not abort the run" >&2; rc=1; }
+  [ "$lines" = "2" ] || { echo "selfcheck: worker-preflight FAIL — enumeration stopped at the first failure ($lines hosts judged)" >&2; rc=1; }
+  case "$out" in *'worker preflight FAILED'*) ;; *) echo "selfcheck: worker-preflight FAIL — the failing host was not named" >&2; rc=1 ;; esac
+  hosts="$saved_hosts"; host_target[B]="$saved_b"; host_target[C]="$saved_c"
+
+  # 与 verify-deliver-coldstart.sh 的谓词【逐字互校】：两处是同一件事的两端，漂移了必须红 ——
+  # 否则一台机器上「能跑」而另一台上「不能跑」会被读成环境差异，而不是这两份副本已经不一致。
+  local pred_here pred_there
+  pred_here="$(printf '%s' "$ac258_probe_predicate")"
+  pred_there="$(grep -m1 "^AC258_WORKER_PROBE_PREDICATE=" "${SCRIPT_DIR}/verify-deliver-coldstart.sh" 2>/dev/null | sed "s/^AC258_WORKER_PROBE_PREDICATE=//; s/^'//; s/'$//")"
+  echo "selfcheck: worker-preflight(predicate single-spelling) here='$pred_here' there='$pred_there' (expect 逐字相同)"
+  if [ "$pred_here" != "$pred_there" ]; then
+    echo "selfcheck: worker-preflight FAIL — the probe predicate drifted between the two scripts" >&2
+    rc=1
+  fi
+  rm -rf "$t"
+  return $rc
+}
+
+# ── verify_ac258_mode — GOAL-018-AC-258：user scope 删键重注册 + quay-init 重跑 + 真实 todo→done ──
+# 与 verify_ac257_mode 同一组原语（ship_verify_closure / transport_evidence_append /
+# check_evidence_completeness），差别在**被测对象**：AC-257 量的是目标【项目级】的安装与 settings 合并
+# 语义；本模式量的是目标机 **user scope 的注册本身**（三处枚举的删键 + install_scope=user 的可核形态）。
+# ⛔ 因此本模式【不】预先安装：把交付物装到持久前缀这件事本身是被测动作的一部分（删键→重注册的前后
+# 读数必须在同一个函数体内取），远端脚本切到 --ac258-user-scope 并自己完成三段。
+# 版本号从 tgz 名解析（⛔ 不另写一份版本真源）；持久前缀 = $HOME/.local/opt/quay/<ver>。
+# 只取回 ac=GOAL-018-AC-258 那一条记录；没有 ⇒ NOT-EVALUATED + 非 0（硬规则 3b）。
+verify_ac258_mode() {
+  local build_date local_carrier fail hk target remote_script out remote_rc remote_log remote_evidence evidence_local ck_rc
+  build_date="$(git -C "${repo_root}" log -1 --format=%cI "${develop_tip}" 2>/dev/null || echo "")"
+  local_carrier="${repo_root}/.quay/productization-verification.jsonl"
+  echo "develop-deliver: --verify-ac258 tip=${develop_tip:0:12} build_date=${build_date} target_root=${ac258_root} task=${ac258_task} carrier=${local_carrier}"
+  if ! validate_ac258_args; then return 2; fi
+  local expected_acs="GOAL-018-AC-258"
+  local ac258_ver
+  ac258_ver="$(basename "${quay_tgz}")"; ac258_ver="${ac258_ver#quay-}"; ac258_ver="${ac258_ver%.tgz}"
+  if [ -z "${ac258_ver}" ]; then
+    echo "develop-deliver: --verify-ac258 cannot derive the version from the tgz name ($(basename "${quay_tgz}"))" >&2
+    return 2
+  fi
+  echo "develop-deliver: --verify-ac258 delivery version=${ac258_ver} ⇒ persistent prefix \$HOME/.local/opt/quay/${ac258_ver}"
+  fail=0
+  for hk in ${hosts}; do
+    target="${host_target[$hk]:-}"
+    if [ -z "${target}" ] || [ "${target}" = "${hk}" ]; then
+      # ⚠️ 后半个条件不是多余的：AC-258 首跑实测的缺陷正是【把 host KEY 当成连接名传下去】
+      # （`--ac258-host-fqdn "${hk}"` ⇒ 远端读到 'B' ⇒ 解析不出、模式在门口 NOT-EVALUATED，
+      # 而失败形态是「记录没写出来」，与「机制坏了」同形，硬规则 3b）。关联数组查空与查错在同一处
+      # 发生，而它们同形 ⇒ 这里一次挡住两个（空 = 未知 host key；等于 key = 传错了对象）。
+      echo "develop-deliver: ${hk} — host_target lookup unusable (got '${target}') (NOT-EVALUATED)"
+      fail=1
+      continue
+    fi
+    echo "develop-deliver: ${hk} (${target}) — scp verify-deliver-coldstart.sh + its FULL closure + both .tgz + the task body"
+    # ⛔ 闭集的单一真相源在 transport_flat_files / transport_node_modules_deps（由 selfcheck 证完整）。
+    if ! ship_verify_closure "${target}" "${quay_tgz}" "${qn_tgz}"; then
+      echo "develop-deliver: ${hk} (${target}) — scp FAILED (NOT-EVALUATED)"
+      fail=1
+      continue
+    fi
+    # ⚠️ scp 目标写 `~/`，⛔ 不是 `\$HOME/`：现代 scp 走 SFTP 子系统，远端路径不做 shell 展开
+    # （AC-257 实测过一次：整个模式在门口 NOT-EVALUATED）。
+    if ! scp "${ssh_opts[@]}" "${ac258_task_body}" "${target}:~/ac258-task-body.md" >/dev/null 2>&1; then
+      echo "develop-deliver: ${hk} (${target}) — task-body scp FAILED (NOT-EVALUATED)"
+      fail=1
+      continue
+    fi
+    remote_script=$(cat <<REMOTE
+$(verify_node_export_for "${hk}")
+EV="\${HOME}/quay-verify-ac258-evidence-${develop_tip:0:8}.jsonl"
+rm -f "\${EV}"
+PREFIX="\${HOME}/.local/opt/quay/${ac258_ver}"
+echo "AC258-PERSISTENT-PREFIX \${PREFIX}"
+bash "\${HOME}/verify-deliver-coldstart.sh" \
+  --ac258-user-scope \
+  --target-root "${ac258_root}" \
+  --ac258-plugin-root "\${PREFIX}/lib/node_modules/quay/plugin" \
+  --ac258-tgz "\${HOME}/$(basename "${quay_tgz}")" \
+  --ac258-qn-tgz "\${HOME}/$(basename "${qn_tgz}")" \
+  --ac258-prefix "\${PREFIX}" \
+  --ac258-task-id "${ac258_task}" \
+  --ac258-task-body "\${HOME}/ac258-task-body.md" \
+  --ac258-poll-secs "${ac258_poll_secs:-2700}" \
+  --ac258-host-fqdn "${host_target[$hk]}" \
+  --build-sha "${develop_tip}" \
+  --ac89 "\${EV}"
+RC=\$?
+echo "VERIFY-RC \${RC}"
+if [ -f "\${EV}" ]; then
+  echo "EVIDENCE-PATH \${EV}"
+  echo "EVIDENCE-LINES \$(wc -l < "\${EV}")"
+else
+  echo "EVIDENCE-ABSENT \${EV}"
+fi
+REMOTE
+)
+    set +e
+    # ⚠️ `bash -ls`（【登录】shell）：本模式要跑 `npm install -g` 的 postinstall，而它调 `claude` 去
+    # materialize 插件 —— orangevps 上 `claude` 只装在 ~/.local/bin、且【不在非登录 shell 的 PATH 里】
+    # （实测：非登录 ⇒ NO_CLAUDE，`bash -lc` ⇒ /home/yale/.local/bin/claude）。用非登录 shell 会让
+    # materialization 整段被跳过 ⇒ installed_plugins.json 永远不出现 scope=user 条目 ⇒ 本 AC 结构上
+    # 不可能达成，而失败形态是「记录没写出来」，与「机制坏了」同形（硬规则 3b / 4b）。
+    out="$(ssh "${ssh_opts[@]}" "${target}" "bash -ls" <<< "${remote_script}" 2>&1)"
+    remote_rc=$?
+    set -e
+    remote_log="${repo_root}/.quay/verify-ac258-remote-${hk}-${develop_tip:0:8}.log"
+    mkdir -p "$(dirname "${remote_log}")"
+    printf '%s\n' "${out}" > "${remote_log}"
+    echo "develop-deliver: ${hk} (${target}) remote stdout persisted → ${remote_log} (rc=${remote_rc})"
+    remote_evidence="$(printf '%s\n' "${out}" | grep -oE 'EVIDENCE-PATH .*' | tail -1 | sed 's/^EVIDENCE-PATH //' || echo "")"
+    if [ -z "${remote_evidence}" ]; then
+      echo "develop-deliver: ${hk} (${target}) — NOT-EVALUATED (remote produced no evidence path)"
+      printf '%s\n' "${out}" | tail -12
+      fail=1
+      continue
+    fi
+    evidence_local="${repo_root}/.quay/verify-ac258-evidence-${hk}-${develop_tip:0:8}.jsonl"
+    rm -f "${evidence_local}"
+    if ! scp "${ssh_opts[@]}" "${target}:${remote_evidence}" "${evidence_local}" >/dev/null 2>&1; then
+      echo "develop-deliver: ${hk} (${target}) — evidence scp-back FAILED (NOT-EVALUATED)"
+      fail=1
+      continue
+    fi
+    if ! transport_evidence_append "${local_carrier}" "${evidence_local}"; then
+      echo "develop-deliver: ${hk} (${target}) — evidence NOT-EVALUATED (no transport)"
+      rm -f "${evidence_local}"
+      fail=1
+      continue
+    fi
+    if check_evidence_completeness "${evidence_local}" "${expected_acs}"; then ck_rc=0; else ck_rc=$?; fi
+    if [ "${ck_rc}" != "0" ]; then
+      echo "develop-deliver: ${hk} (${target}) — NOT-EVALUATED (declared ac set [${expected_acs}] not present in transported evidence: rc=${ck_rc})"
+      fail=1
+    else
+      echo "develop-deliver: ${hk} (${target}) — declared ac set [${expected_acs}] transported into ${local_carrier} ✓"
+    fi
+    rm -f "${evidence_local}"
+  done
+  git -C "${repo_root}" worktree remove --force "${wt}" 2>/dev/null || rm -rf "${wt}"
+  if [ "${fail}" -eq 1 ]; then
+    echo "develop-deliver: --verify-ac258 FAILED (a host produced no AC-258 record — see per-host lines above)" >&2
+    return 1
+  fi
+  echo "develop-deliver: --verify-ac258 OK — GOAL-018-AC-258 record transported into ${local_carrier}"
+  return 0
+}
+
 # validate_adr_flip_args — the ONE place that decides whether --target-root / --task-id are usable.
 # 与 validate_takeover_args 同一条纪律、同样在 build 之前判（⛔ 一个坏参数不该花一次 develop-tip 构建）：
 #   · --target-root 必须是【目标机上的绝对路径】：它在远端解析，相对路径会静默落到远端 $HOME ⇒
@@ -2565,13 +2963,40 @@ if [ "${verify_complete_change}" -eq 1 ]; then
   exit $?
 fi
 
+if [ "${selfcheck_worker_preflight_flag}" -eq 1 ]; then
+  selfcheck_worker_preflight
+  exit $?
+fi
+
 if [ "${verify_ac257}" -eq 1 ]; then
   # ⛔ 用法错误在 build 之前判（一个坏参数必须只花一次用法错误的代价，⛔ 不是一次 develop-tip 构建）。
   validate_ac257_args || exit 2
+  # 目标机 worker 可用性前置探测 —— 与上面同一条纪律，且必须【早于任何不可逆的事】。
+  # AC-257 与 AC-258 共用同一段步骤序（破坏性的 quay-init 重跑 + 安装排在「真实 todo→done」之前），
+  # 所以它也要这一道（gap-ac258-pipeline-destructive-steps-before-worker-preflight 的 DoD 逐字：
+  # 「及同族的 --verify-ac257，若共用同一段步骤序」）。
+  if ! worker_preflight_every_host; then
+    exit 1
+  fi
   if ! build_develop_tgz; then
     exit 1
   fi
   verify_ac257_mode
+  exit $?
+fi
+
+if [ "${verify_ac258}" -eq 1 ]; then
+  # ⛔ 用法错误在 build 之前判（一个坏参数必须只花一次用法错误的代价，⛔ 不是一次 develop-tip 构建）。
+  validate_ac258_args || exit 2
+  # 目标机 worker 可用性前置探测（本 gap 的主对象）—— 位置就是判据：它在 build 之前、在任何 ssh
+  # 破坏性动作之前。失败 ⇒ 连交付物都不构建、不 ship，更不碰目标机的三处注册。
+  if ! worker_preflight_every_host; then
+    exit 1
+  fi
+  if ! build_develop_tgz; then
+    exit 1
+  fi
+  verify_ac258_mode
   exit $?
 fi
 
