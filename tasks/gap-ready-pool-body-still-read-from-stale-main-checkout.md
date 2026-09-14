@@ -179,6 +179,19 @@ fan-in 若发现 develop 已前进 ⇒ 缓存未命中 ⇒ 照跑 scoped 门(fai
 - **范围纪律不受影响**:本轮仍未改 body 读源(AC3 不变);上面这次改动**不在**本任务的 delta 语义内,
   它是**机制性的全局修复**,归属写在此处以免被误读为本条的实现。
 
+**本轮最终读数**(合并 develop 后共跑三次 scoped 门,fix 前一次红、fix 后两次绿且互相一致):
+`bash scripts/test.sh --for-task gap-ready-pool-body-still-read-from-stale-main-checkout --allow-thin`
+⇒ **exit 0** · `tests 219 / pass 219 / fail 0`;`quay-init-closure-ratchet: laydown source fingerprint
+fresh (58d2c6a57caf03e3…, 4 sources) — baseline in sync`;**7 条新增用例逐字按名核到被选中执行**
+(与 AC5 同一份名单,零条遗漏);`ANTI-DRIFT OK: task … — 6 actual file(s), all within declared Touches`。
+三点 diff(`git diff develop...HEAD --name-only`)恰好 = 上列 6 个 Touches 文件,**⛔ 不含
+`plugin/.claude-plugin/plugin.json`**——即"bump 不是本条的 delta"这句有可复核的读数支撑。
+
+**scoped-gate 缓存键 = `HEAD^2`**(本轮实际合并并跑绿的那个 tip = `d1fac462…`),**⛔ 不是写缓存那一刻的
+`develop`**(彼时已前进到 `a4169be5…`,2 个提交且全是别的任务的 task 文件)——沿用 AC5 上一段同一条纪律
+(`scoped-gate-cache-sha-must-be-the-tip-you-gated`;⛔ 记录一个没跑过的 tip 等于宣称验过一个没验过的状态,
+硬规则 3b)。develop 若在缓存写入后继续前进 ⇒ 键失配 ⇒ fan-in 照跑 scoped 门(fail-closed,设计如此)。
+
 ## Touches
 
 - `plugin/scripts/ready-pool-check.ts`
