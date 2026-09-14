@@ -39,8 +39,10 @@ import {
   touchCoversFile,
   requiresTypecheck,
   resolveTypecheckCommand,
+  resolveTypecheckCommandDetailed,
+  resolveConfigLoaderPath,
   runTypecheckGate,
-  CANONICAL_TYPECHECK_CMD,
+  FALLBACK_TYPECHECK_CMD,
   main,
 } from "../scripts/fan-in-ts-typecheck-gate.ts";
 
@@ -125,26 +127,89 @@ test("requiresTypecheck: RED — Touches cover new/moved .ts (the cli-import-mig
   assert.equal(requiresTypecheck(["src/"], ["src/other.ts", "src/cli/a.ts"]), true);
 });
 
-// ── resolveTypecheckCommand: workspace data, config-aware with canonical fallback ───────────────────
-test("resolveTypecheckCommand: config-absent root falls back to the canonical per-package loop", async () => {
-  const cmd = await resolveTypecheckCommand(REPO_ROOT);
-  assert.equal(cmd, CANONICAL_TYPECHECK_CMD);
+// ── resolveTypecheckCommand: workspace data read ACROSS the project boundary ────────────────────────
+// The defect (gap-fan-in-ts-typecheck-gate-cannot-read-third-party-config): the loader MODULE base was
+// `repoRoot(configRoot)` — the project under test — so a third-party project (no quay source tree)
+// could never have its own declaration read, and the fallback was quay's own `packages/*/` loop,
+// which dies with TS5058 on any project without a `packages/` dir.
+//
+// `makeThirdPartyProject` is the hermetic fixture for that shape. It is deliberately a CONSUMER root
+// (package.json + .quay/config.yml, no `packages/`, no quay source) AND a git repo, so the PRE-FIX
+// `repoRoot(configRoot)` resolves to the fixture itself and finds no loader — i.e. the AC1/AC2
+// assertions below are RED on the pre-fix code, not vacuously green via a cwd fallback.
+function makeThirdPartyProject({ declared }) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-ts-gate-3p-"));
+  fs.writeFileSync(path.join(tmp, "package.json"), JSON.stringify({ name: "third-party-fixture", private: true }), "utf8");
+  fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+  const gate = declared == null ? "" : `gates:\n  testPass:\n    - name: ${declared.name}\n      command: "${declared.command}"\n`;
+  fs.writeFileSync(path.join(tmp, ".quay", "config.yml"), gate, "utf8");
+  try { runGit(tmp, ["init", "-q"]); } catch { /* git optional — package.json already pins repoRoot */ }
+  return tmp;
+}
+
+test("resolveConfigLoaderPath: the loader is found from THIS script's install location, not the target project", () => {
+  // The probe's anchor is the script's own dir, so the quay source is reachable even when the
+  // workspace under test has none. (Pre-fix there was no probe at all: the base was the workspace.)
+  const found = resolveConfigLoaderPath();
+  assert.ok(found, "expected a reachable Core config loader from the script's own install location");
+  assert.ok(found.endsWith(path.join("gate", "config", "loader.ts")), `unexpected loader path: ${found}`);
 });
 
-test("resolveTypecheckCommand: a config declaring ts-typecheck yields ITS command (ADR-013)", async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fan-in-ts-gate-cfg-"));
+test("AC1: a third-party project (no packages/ tree) declaring `ts-typecheck` yields ITS command verbatim", async () => {
+  const declared = "npx tsc --noEmit -p tsconfig.json";
+  const tmp = makeThirdPartyProject({ declared: { name: "ts-typecheck", command: declared } });
   try {
-    const declared = 'for d in packages/*/; do echo custom-typecheck; done';
-    fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
-    fs.writeFileSync(path.join(tmp, ".quay", "config.yml"),
-      `gates:\n  testPass:\n    - name: ts-typecheck\n      command: "${declared}"\n`, "utf8");
-    // configRoot has no packages tree — the loader module resolves from REPO_ROOT's packages tree
-    // (moduleRoot), while the config TEXT is read from configRoot.
-    const cmd = await resolveTypecheckCommand(tmp, REPO_ROOT);
-    assert.equal(cmd, declared);
+    assert.equal(fs.existsSync(path.join(tmp, "packages")), false, "fixture must have no packages/ tree");
+    // NO explicit moduleRoot — this is the production call shape (main() passes the worktree's own
+    // root, which the probe then fails to find the loader under and falls through to script-side).
+    const r = await resolveTypecheckCommandDetailed(tmp);
+    assert.equal(r.command, declared, "the project's OWN declared command, verbatim");
+    assert.equal(r.source, "config");
+    assert.equal(r.declaredAs, "ts-typecheck");
+    // and the same through main()'s call shape: the workspace root as the explicit module base
+    assert.equal(await resolveTypecheckCommand(tmp, tmp), declared);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test("AC2: the same project with NO typecheck declaration falls back to a third-party-valid command (never `packages/*/`)", async () => {
+  const tmp = makeThirdPartyProject({ declared: null });
+  try {
+    const r = await resolveTypecheckCommandDetailed(tmp);
+    assert.equal(r.command, FALLBACK_TYPECHECK_CMD);
+    assert.equal(r.source, "fallback");
+    assert.equal(r.reason, "no-declaration");
+    // The defect's signature string: bash leaves `packages/*/` unexpanded ⇒ tsc TS5058 on any
+    // project without that dir. It must never come back as the fallback.
+    assert.doesNotMatch(r.command, /packages\/\*\//, `fallback still assumes quay's layout: ${r.command}`);
+    assert.equal(await resolveTypecheckCommand(tmp, tmp), FALLBACK_TYPECHECK_CMD);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveTypecheckCommand: a config declaring `typecheck` is also read (the real third-party name)", async () => {
+  // ad-arm1/archguard declares `- name: typecheck` / `command: npx tsc --noEmit` (measured
+  // 2026-09-14). Matching only `ts-typecheck` would leave that project's declaration unread.
+  const tmp = makeThirdPartyProject({ declared: { name: "typecheck", command: "npx tsc --noEmit" } });
+  try {
+    const r = await resolveTypecheckCommandDetailed(tmp);
+    assert.equal(r.command, "npx tsc --noEmit");
+    assert.equal(r.source, "config");
+    assert.equal(r.declaredAs, "typecheck");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveTypecheckCommand: quay's own repo still reads its declared per-package loop (no regression)", async () => {
+  // DoD control: quay's own ts-typecheck judgement is unchanged — it declares `ts-typecheck` in
+  // `.quay/config.yml`, which is matched FIRST (ahead of the `typecheck` alias).
+  const r = await resolveTypecheckCommandDetailed(REPO_ROOT);
+  assert.equal(r.source, "config");
+  assert.equal(r.declaredAs, "ts-typecheck");
+  assert.match(r.command, /packages\/\*\//, "quay's own gate keeps the per-package loop");
 });
 
 // ── runTypecheckGate: fake-gate verdict wiring (test-only backdoor) ─────────────────────────────────
