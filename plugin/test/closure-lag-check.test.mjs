@@ -87,7 +87,12 @@ function writeTrace(root, { ranAt, flipped = 0 }) {
   );
 }
 
-const nowEpoch = Math.floor(Date.now() / 1000);
+// Wall-clock readings are taken AT USE, never at module load. A module-load constant would make
+// every "N seconds ago" / "is fresh" assertion a function of how long this FILE has been running:
+// under concurrent load the file takes 2-3x longer (measured 2026-09-13: this file 116s loaded vs
+// 27s isolated), and a fixed 60s load-to-assertion margin is then breached by the load alone, not
+// by any defect. Epoch SECONDS (`date +%s` semantics), matching what the shell script writes.
+const epochNow = () => Math.floor(Date.now() / 1000);
 
 // ── AC2: backlog over threshold ⇒ signal ──────────────────────────────────────────────────────────
 
@@ -108,7 +113,7 @@ test("AC2 — not-yet-flipped backlog over --threshold ⇒ exit 1 + CLOSURE-LAG-
 test("AC2 — closure-pass overdue (trace older than --timeout) ⇒ exit 1 + CLOSURE-LAG-WARN", () => {
   const w = makeWorkspace("ac2b");
   try {
-    writeTrace(w, { ranAt: nowEpoch - 5000, flipped: 1 });
+    writeTrace(w, { ranAt: epochNow() - 5000, flipped: 1 });
     const r = run(["--root", w, "--timeout", "1"]);
     assert.equal(r.status, 1, `overdue signal must exit 1:\n${r.stdout}${r.stderr}`);
     assert.match(r.stdout, /CLOSURE-LAG-WARN/);
@@ -135,7 +140,7 @@ test("negative control — below threshold + fresh trace ⇒ exit 0, silent", ()
   const w = makeWorkspace("ctrl");
   try {
     writeNotYetFlippedTask(w, "GAP-D");
-    writeTrace(w, { ranAt: nowEpoch - 5, flipped: 1 });
+    writeTrace(w, { ranAt: epochNow() - 5, flipped: 1 });
     const r = run(["--root", w, "--threshold", "30"]);
     assert.equal(r.status, 0, `normal state must exit 0:\n${r.stdout}${r.stderr}`);
     assert.doesNotMatch(r.stdout, /CLOSURE-LAG-WARN/, "normal state must be silent");
@@ -160,7 +165,12 @@ test("AC3 — --record --flipped N writes timestamp + flip count; measure reads 
   const w = makeWorkspace("ac3");
   try {
     writeNotYetFlippedTask(w, "GAP-E");
+    // Bound the "fresh" window with readings taken IMMEDIATELY around the --record call itself, so
+    // the assertion is "this call wrote the timestamp" (load-independent) rather than "the file
+    // reached this line within 60s of module load" (a function of concurrent load).
+    const beforeRecord = epochNow();
     const rec = run(["--root", w, "--record", "--flipped", "3"]);
+    const afterRecord = epochNow();
     assert.equal(rec.status, 0, `--record must exit 0:\n${rec.stdout}${rec.stderr}`);
     assert.match(rec.stdout, /recorded closure-pass trace/);
 
@@ -168,7 +178,10 @@ test("AC3 — --record --flipped N writes timestamp + flip count; measure reads 
     const parsed = JSON.parse(readFileSync(tracePath, "utf8"));
     assert.ok(typeof parsed.ranAt === "number" && Number.isInteger(parsed.ranAt), "ranAt is an epoch timestamp");
     assert.equal(parsed.flipped, 3, "flip count recorded");
-    assert.ok(Math.abs(parsed.ranAt - nowEpoch) < 60, "trace timestamp is fresh");
+    assert.ok(
+      parsed.ranAt >= beforeRecord && parsed.ranAt <= afterRecord,
+      `trace timestamp is fresh — written by THIS --record call: ranAt=${parsed.ranAt} window=[${beforeRecord}, ${afterRecord}]`,
+    );
 
     // A consumer (measure mode) now sees a FRESH pass even with pending work below the threshold.
     const fresh = run(["--root", w, "--threshold", "1"]);
@@ -196,12 +209,13 @@ test("--json reports the signal shape and never writes a trace", () => {
     assert.equal(existsSync(tracePath), false, "--json must not create the trace");
 
     // Normal state: --json exits 0 with signal=false.
-    writeTrace(w, { ranAt: nowEpoch - 5, flipped: 1 });
+    const staleBy5 = epochNow() - 5;
+    writeTrace(w, { ranAt: staleBy5, flipped: 1 });
     const ok = run(["--root", w, "--threshold", "30", "--json"]);
     assert.equal(ok.status, 0, `normal --json must exit 0:\n${ok.stdout}${ok.stderr}`);
     const j2 = JSON.parse(ok.stdout);
     assert.equal(j2.signal, false);
-    assert.equal(j2.closure_pass_last_run, nowEpoch - 5);
+    assert.equal(j2.closure_pass_last_run, staleBy5);
     assert.equal(j2.last_flipped, 1);
   } finally { cleanup(w); }
 });
