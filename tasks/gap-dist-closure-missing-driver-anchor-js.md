@@ -73,7 +73,7 @@ _（本键由 `gap-ac258-orangevps-meta-cc-user-scope-quay-init-merge-preserved`
 
 ## Resolution
 
-**实现（commit `6b1aa601f`）**：`packages/quay/scripts/build-plugin-dist.mjs` 新增第 4 种引用形状的扫描
+**实现（commit `6b1aa601f`，测试补齐 `4c60479be`）**：`packages/quay/scripts/build-plugin-dist.mjs` 新增第 4 种引用形状的扫描
 `scanPluginSiblingReferences()` —— **目录变量**的兄弟拼接 `path.join(<dirExpr>, "<name>.ts")`（及其安装形态孪生
 `"<name>.js"`，反查同名 `.ts`），对**全部** plugin 源码扫描（scripts/ + gate-scripts/，跳过 dist/test/vendor 等构建与夹具目录）。
 `<dirExpr>` 限定为「标识符起头、可选带一次调用」的项（`here` / `SCRIPT_DIR` / `resolveKernelScriptsDir()` / `path.dirname(x)`）
@@ -128,7 +128,14 @@ promotion-driver.pid -> 3636788 ；worker-driver.pid -> 3636788   （一个 anch
 ④ **打包产物**级：从暂存副本构建**真实** dist 闭包、从它的 dist 形态跑**真实** `driver start`（rc=0、`started:`、`host=anchor`），
 并配一个**同产物**负控制（摘掉 `driver-anchor.js` ⇒ rc=1 且逐字复现生产错误串）。⛔ 断言落在真实启动成功性上，不是文件存在性。
 
-**原始输出**：`.quay/ac-dist-anchor-evidence.md`（本 worktree，gitignored）。
+**scoped 门**：`bash scripts/test.sh --for-task gap-dist-closure-missing-driver-anchor-js --allow-thin` **RC=0**（29/29 绿）。
+首轮红在两条静态检查上、根因是本文件新测试自己的 temp 泄漏（`tmp-leak-pairing-check` 的 `mkdtemp-no-cleanup` +
+`test-isolation-check` 的 ratchet +1）⇒ 已改为「每个 artifact 测试各建各的 stage、`finally` 里 rmSync」并复跑转绿。
+scoped-gate 缓存按**实际被合并进本 worktree 的 develop tip** 写入（`.quay/scoped-gate-cache.json` 是**单条**缓存，
+并发写入者会覆盖它 ⇒ 未命中时 fan-in 照跑门，fail-closed，无静默跳过风险）。
+
+**原始输出**：`.quay/ac-dist-anchor-evidence.md`（本 worktree 的**未提交**运行时证据文件；与主检出处 `.quay/` 下既有的
+59 个证据文件同形，不进 git delta。⛔ 该目录**并未**被 gitignore——前一版本条写成「gitignored」是错的，此处更正）。
 
 **一处未验证、故不作断言的观察**：`driver-anchor.ts` 是否在 `quay-init` 的 laydown 集合里，本次**没有**取到读数
 （`quay-init.sh --loop --dry-run` 在本机 RC=2，未走到 laydown 清单）。因为 anchor 一律从**内核自身安装位置**解析
