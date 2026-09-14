@@ -27,7 +27,16 @@ const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const binPath = QUAY_NATIVE_CLI;
 const nativePkgDir = path.resolve(__dirname, "..");
-const tasksDir = path.join(__dirname, ".tmp-create-validation-test");
+// Fixtures live in a process-private temp dir, NOT under the checked-in tree
+// (checked-in-write-check judges the resolved path — hard rule 2 — and a test
+// that creates/deletes entries inside the repo races every concurrent
+// whole-tree copier; gap-fixture-dir-write-races-whole-tree-copy).
+// This file's fixtures previously sat at <here>/.tmp-create-validation-test,
+// i.e. inside the repo. That was a REAL violation that stayed invisible only
+// because the judge runs `--changed` and this file was never in a delta until
+// now: "no check ran" and "the check passed" are not the same reading.
+const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-create-validation-"));
+const tasksDir = path.join(tmpRoot, "tasks");
 
 let failures = 0;
 function assert(cond, msg) {
@@ -87,7 +96,7 @@ function makeCoreWorkspace() {
 }
 
 async function run() {
-  fs.rmSync(tasksDir, { recursive: true, force: true });
+  fs.rmSync(tmpRoot, { recursive: true, force: true });
   fs.mkdirSync(tasksDir, { recursive: true });
   const env = { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir };
 
@@ -176,7 +185,7 @@ async function run() {
     assert(JSON.parse(stdout).title === "second smoke", "new id: task reads back as created");
   }
 
-  fs.rmSync(tasksDir, { recursive: true, force: true });
+  fs.rmSync(tmpRoot, { recursive: true, force: true });
 
   // Cases 6-7: the SAME duplicate-id guarantee through Core's front door
   // (`quay task create`), which reaches the task store over the Provider ABI
