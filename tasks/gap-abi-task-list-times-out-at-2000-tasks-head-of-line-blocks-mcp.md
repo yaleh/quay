@@ -2,7 +2,7 @@
 id: gap-abi-task-list-times-out-at-2000-tasks-head-of-line-blocks-mcp
 title: ABI task_list 在 2123 个任务时超时并队头阻塞整个 MCP 读面——ABI-only 的 quay-task subagent
   结构上不可用（gap-serve-search-timeout-all-body-fetch 的兄弟实例，硬规则 5b）
-status: todo
+status: ready
 labels:
   - gap
   - defect
