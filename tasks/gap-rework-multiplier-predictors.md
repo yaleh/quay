@@ -1,7 +1,7 @@
 ---
 id: gap-rework-multiplier-predictors
 title: 找返工的预测因子——什么样的任务注定被执行 5 次以上（中位 2 次、p90 5 次、最高 27 次）
-status: needs-human
+status: todo
 needs_human_cause: human-adjudication
 labels:
   - gap
@@ -73,3 +73,5 @@ extra: {}
 
 - 阻碍原因：连续修满 3 次仍不合格（闸在重验证后仍判不合格）
 - 成因类：human-adjudication
+
+**已裁定并解除（2026-09-14，人裁定 + manager 复核）**：本条 needs-human 不是立案质量问题，而是闸连续三轮读到了**过期的任务体**。补 `(new)` 标注的修复提交 `c6ebc6c5b` 落在 2026-09-14T05:05:16Z，而其后的 round188/189 仍报 `touchesResolve=false`。历史重放（同一个 `checkTaskTouchesResolve`、同一个 root）证明：立案版 `c21a93310` = `mustExist:5 / missing:3 / majorityMissing:true` ⇒ 不能过闸；修复版 `c6ebc6c5b` = `mustExist:2 / missing:0 / majorityMissing:false` ⇒ **结构上就能过闸**。⇒ 那两轮读到的不是修复版。同一次 task_write 在 `.quay/store-commit-propagation.jsonl` 记为 `propagated:false`（`branchClass:"other"`）。机制侧已另立 `gap-ready-pool-body-still-read-from-stale-main-checkout` 承接。本任务翻回 `todo` 重新入池——`reconcileNeedsHumanWithDisk` 在盘上 status 离开 needs-human 时会**同时清零**该 id 的连续失败计数，给全新重试预算，⛔ 无需重启 driver。
