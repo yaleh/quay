@@ -1,7 +1,7 @@
 ---
 id: gap-git-graph-pagination-ac2-oracle-races-live-refs
 title: git 图分页 AC2 的对拍 oracle 读实时的 `--all`——套件运行期间任何 ref 前进都会把它误判成列号错位（已受控复现）
-status: ready
+status: done
 labels:
   - gap
   - webui
