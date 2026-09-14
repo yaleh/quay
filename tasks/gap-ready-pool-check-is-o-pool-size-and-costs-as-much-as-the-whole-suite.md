@@ -3,6 +3,7 @@ id: gap-ready-pool-check-is-o-pool-size-and-costs-as-much-as-the-whole-suite
 title: ready-pool-check 占全仓 checker 成本 97.8%（212.7h，与整个测试套件同量级）且三周涨 5
   倍——每次轮询重解析全部 2123 个任务，同根已让 MCP task_list 超时
 status: ready
+needs_human_cause: human-adjudication
 labels:
   - gap
   - defect
@@ -161,3 +162,15 @@ extra: {}
 就是 per-checker 成本趋势（其头注释点名 `ready-pool-check` 的 35.8→91.2→157.0 斜率为其第 10 号实例），
 本任务的读数正是从它读的那条载体上取的。
 **未闭合的一条**：≥3 天真实生产对照（见 AC「生产成本下降」）—— 落地后按该 AC 取读数。
+
+## Needs-Human
+
+**执行 2026-09-14T10:16:33.488Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: __PERFILE__ duration_ms=51850 packages/quay/test/serve-handlers.test.mjs passed=false end_ms=1789380824315 cpu_ms=67026.058
+- run_id：wk-prod-1789367589
+- session_id：0dbf5d10-4432-4664-adea-dbacf32616fb
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-ready-pool-check-is-o-pool-size-and-costs-as-much-as-the-whole-suite~wk-prod-1789367589~1789379352618-79ae72.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-ready-pool-check-is-o-pool-size-and-costs-as-much-as-the-whole-suite-wk-prod-1789367589.log
