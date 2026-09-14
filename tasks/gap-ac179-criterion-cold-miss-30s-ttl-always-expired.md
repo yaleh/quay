@@ -2,7 +2,7 @@
 id: gap-ac179-criterion-cold-miss-30s-ttl-always-expired
 title: AC-179 判据恒冷：/dashboard 的 30s TTL 与每小时复验节奏结构性错开 ⇒ 每次复验都是冷未命中（实测冷 19.17s /
   热 1.61s），越过 criterion 的 --max-time 10
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -82,7 +82,7 @@ curl -sf --max-time 60  /dashboard   rc= 0         wall= 1.43s  bytes=78277  id=
 
 - `serve-dashboard.ts`：`buildDashboardSnapshot` / `peekDashboardSnapshot` / `startDashboardSnapshotRefresh`（unref'd 30s tick，启动时冷构建）；`handleDashboard` 与 `handleDashboardCards` 的**请求路径只做一次同步 map 查找**（零 reader I/O）；`goals`（`client.goalList()` 走真 ABI 实测 987 ms，不是计划估的 6 ms）也进快照，否则请求路径上仍留一个宿主相关常量。kill switch `QUAY_DASHBOARD_SNAPSHOT_DISABLED=1` 让 tick 与请求路径**同时**失效（负控制）。
 - `observation.ts`：`readTestsNonBlocking`（异步读 + 分片解析 + 片间 `yieldToEventLoop`，与 sync `readTests` 共用缓存/解析器/空态判定 —— 一个真相两种循环形状）；`readLive` 对 2.4 MB outcome 载体与 11.7 MB round 载体**只读一次**并把文本交给下游（纯去重，省 ~250 ms 事件循环占用）。
-- `serve.ts`：在 `startDevelopRefBackgroundRefresh` 旁启动该 tick，并把 `{stop, rebuildNow}` 挂在 server 上（测试卫生 + AC3/AC4 的按需重建）。
+- `serve.ts`：在 `startDevelopRefBackgroundRefresh` 旁启动该 tick，并把 `{stop, rebuildNow}` 挂在 server 上（测试卫生 + AC3/AC4 的按需重建）；**tick 随 host 结束**（`shutdownHost()` 里 `stop()`，见 Evidence 本轮补充 ③）。
 
 ## AC
 
@@ -221,6 +221,59 @@ DoD 第 1 条要求「判据在**运行中的生产 serve 实例**上实跑 + `.
 ⚠️ **重启前的残留风险（已量化）**：冷启动到首快照之间仍有一段窗口走旧的在请求内构建路径
 （本机实测 `snapshot present after 8118–13615 ms`），窗口内落到的请求会慢。goal-sweep 是每小时一次，
 撞进这段 ~10 s 窗口的概率 ~0.3%；窗口之后即恒为快照路径（AC1 的 5/5 就是窗口之后测的）。
+
+### 本轮补充（2026-09-14 08:0xZ–09:3xZ）—— 两条套件红的取证 + 本任务引入并修复的一处缺陷
+
+**① `plugin/test/driver-resolves-code-root-separate-from-workspace.test.mjs` 的 `AC3a'` —— 环境变量所致，⛔ 非本任务。**
+它在本仓**每个 worktree 里结构性恒红**：`.quay/verification-round.jsonl` 中 2026-09-14 **连续 5 轮、5 个不同任务**
+（06:40 / 06:56 / 07:14 / 07:28 / 07:45Z）同一断言 `passed=false`，其中 4 轮的 commit 与本任务无关。
+**两向对照（本 worktree 内实测）**：
+
+```
+WITH    QUAY_PLUGIN_ROOT=/home/yale/work/quay/plugin   ⇒ ✖ AC3a' 失败
+WITHOUT (env -u QUAY_PLUGIN_ROOT)                      ⇒ ✔ AC3a' 通过
+```
+
+根因：driver 环境带 `QUAY_PLUGIN_ROOT` ⇒ `resolveQuayCodeRoot()` 指向**主检出**而非 worktree，
+而该断言比较 `kernelConfigPath(...).startsWith(REPO_ROOT = 断言者所在树)`。
+⇒ 正本任务 `gap-worktree-suite-red-from-quay-plugin-root-override-in-driver-env`（ready）已覆盖；
+**本任务不修**（不在 Touches，改它即 anti-drift）。
+⚠️ **本任务的 fan-in 全量套件会继续因它而红，与本任务代码无关**；scoped 门选择集**不含**该文件
+⇒ **scoped 门绿 ≠ 全量套件绿**。
+
+**② `packages/quay/test/serve-handlers.test.mjs`（file-level abort、无具名测试）—— 未复现，判为负载相关。**
+- worktree 内**单跑该文件：63/63 通过、exit 0、19.3 s**（已含本任务新增的 tick）。
+- 失败轮（r1693）它的窗口内 **59 个文件并发**、宿主 **load 40.64**（邻座 `worker-driver-fan-in` 单文件 219 s），
+  它自身 84.5 s（单跑 19.3 s）⇒ 4.4× 与并发度同形。
+- 该文件在 1076 条 perFile 里历史失败 5 次，**前 4 次都具名到具体测试**（09-04/09-05/09-12/09-13，各次还不同）；
+  本次是**唯一** file-level、无具名形态。
+- **本任务对它新增的成本已实测**：每次 `startServer()` 多一次后台冷构建；temp workspace 上快照 **~26 ms** 可用
+  （`startServer` 自身 2.8–3.4 s 是既有基线）⇒ 29 次 server 启动合计 **~2 s**，**不可能解释 19.3 s → 84.5 s**。
+  ⇒ 按「负载相关、非本任务」记录，诚实标注：**未复现**。
+
+**③ 本任务引入的一处真实缺陷（本轮找到并已修）—— tick 不随 host 结束。**
+`serve.ts` 每次 `startServer()` 起 snapshot tick，却**没有任何 close 路径 stop 它**。同一探测脚本内的两向对照：
+
+```
+修复前：server.close() + rmSync(workspace) 之后，tick 仍在 +30s / +60s 重建 ⇒ builtAt 推进两次
+修复后：同一序列 ⇒ builtAt 全程冻结（70 s 内零新重建）
+```
+
+形态：tick 会**无限期**重建一个调用方可能已删的 workspace，并继续对可能已关闭的 `ProviderClient` 调 `goalList()`。
+生产只有一个长驻 server 所以从未暴露；**每个起 server 的测试都会中**。
+修法：在 `shutdownHost()`（host 收尾处，`reconcileTimer` 已在此 clear）里 `dashboardSnapshot.stop()`；
+`stop()` 只退 interval，`rebuildNow()` 仍可用 ⇒ AC3/AC4 的按需重建不受影响。
+⇒ 这是对本任务**自己新增机制**的卫生修补，不削弱任何 AC。
+
+**④ 本轮 scoped 门（重跑于含最新 develop 的合并 HEAD）**：
+`bash scripts/test.sh --for-task gap-ac179-… --allow-thin` ⇒ **SCOPED_GATE_EXIT=0**，整轮 `✖` **0**；
+`AC1′` / `AC3′+AC4′` / `readTestsNonBlocking 与 sync readTests 同结果` 三条实测通过。
+scoped-gate 缓存按**门实际合并的 tip**（`d1e15f84`，= 当时的 `HEAD^2`）写入，⛔ 不写「写缓存那一刻的 develop」
+——那是**没验过**的读数（hard rule 3b）。develop 此后又前进 ⇒ 本次缓存大概率不命中，
+**fan-in 重跑 scoped 门是正确行为，不是缺陷**。
+
+**⑤ DoD 第 3 条独立复核**：`goals/AC-179-web-card-and-cli.md` md5 = `59c88b885b09753adbb368f51e9065c0`
+（与本任务 Evidence 首段记录逐字相同）；且 `criterion:` 字段字节与 `develop` 完全相同（两侧 md5 相等）。
 
 ## DoD
 
