@@ -94,6 +94,7 @@ CLI    node packages/quay/bin/quay.js server restart --only driver:worker
 - `packages/quay/bin/quay.ts`（`restart` 的动词派发 + usage 行）
 - `packages/quay/src/cli/help.ts`（`server restart` 帮助条目 ⚠️ 用户可见的帮助正本在 `cli/help.ts`，⛔ 不是 `cli/driver.ts` 内联那份）
 - `packages/quay/test/server-status-web-control-same-pid.test.mjs`（AC-251 的用法行断言原先钉死四动词字面量；动词集合法长大后它变红并把它报成「文档没跟上」—— 改为从 `SERVER_VERBS` 派生）
+- `packages/quay/test/cli.test.mjs`（AC-256 的**第二处**同类陈旧点，与上一行是【同一次硬规则 5b 扫描的两个实例】：usage-fallback drift gate 的 `handlerSubs` 手工清单里 `server <verb>` 那一角没跟上 `restart` 动词 ⇒ 门把新动词报成 `extra`、整个文件红；修法同型 —— 从 `SERVER_VERBS` 派生，⛔ 不手抄第二份）
 - `plugin/test/server-restart-inflight-verify.test.mjs` (new)（生产者的类型 / fail-closed / 负控制 / /proc 直接量 / 逐字跑 criterion）
 - `packages/quay/test/server-restart.test.mjs` (new)（服务级 restart 的语义 + `start` no-op 对照 + anchor 安全闸的活体负控制）
 - `tasks/gap-ac256-worker-restart-preserves-inflight-children.md`（自身文件：勾 AC + 贴实跑证据）
@@ -223,6 +224,46 @@ startKind）的组合形态，⛔ 未新增任何杀进程路径。
 
 只剩 **AC10**（全量套件绿 —— 外层 verification-round 验证）⛔ 保持未勾：它的量产生在 fan-in /
 外层 suite 轮，⛔ 不是 worker 自己的读数（scoped 门绿 ≠ 全量绿）。其余 9 条全部达成。
+
+### ⑧ 本趟（2026-09-14 续做）：上一趟那堵「归因不出」的 suite 红已定位并修掉
+
+上一趟以「suite 红但归因不出任何失败测试文件」标了 needs-human。**本趟查明它不是基建缺陷 —— 是一个真缺陷 + 一个跑法陷阱**。
+
+**根因（真缺陷，本任务自己的 `5d6d61d91` 引入）**：AC-256 把 `restart` 加进了 `bin/quay.ts` 的 fallback
+usage 行，却漏了 `packages/quay/test/cli.test.mjs` 的 usage-fallback drift gate（block28）里那份**手工抄的**
+`handlerSubs` 清单 ⇒ 门把新动词报成 `extra`（present in the usage line, absent from the expected set），整个文件红。
+**这正是硬规则 5b**：上一趟已在 `47680e3f5` 把**兄弟实例**（`server-status-web-control-same-pid.test.mjs` 的用法行断言）
+改成从 `SERVER_VERBS` 派生，**只修了被报出来的那一个**，漏了同一缺陷类在这份载体里的第二个实例。
+**修法同型**：`handlerSubs` 的 `server <verb>` 一角也改为 `SERVER_VERBS.map((v) => \`server ${v}\`)` —— 类被关掉，不是打一个补丁。
+
+**为什么上一趟「归因不出」**：`cli.test.mjs` 用**自带 harness**（自定义 `FAIL: …` 打到 stdout、然后 exit 1），
+而全量套件日志**不落该文件的 stdout** ⇒ 日志里只剩 `test at …:1:1 'test failed'`，**没有任何测试名**。
+⇒ 归因的位置不是在套件日志里找，是**单独跑那个文件**。（同族硬规则 3b：一个只报「失败」不报「哪条失败」的载体，与「查不出」同形。）
+
+**第二个红（10 条 golden-replay）是跑法陷阱，⛔ 不是缺陷**：直接 `node --test` 时 `dist/` 是陈旧的
+⇒ `cli-entry.mjs` 回退到 `.ts` 源，**子进程**于是为 `plugin/scripts/shape-sections.ts`（根 `package.json` 无 `"type":"module"`）
+打出 `MODULE_TYPELESS_PACKAGE_JSON` 警告，**而该警告文本里带 node 进程号** ⇒ 与进程内那侧**永远不可能**逐字节相同。
+**⇒ 走 `scripts/test.sh`（会重建 dist）才有意义** —— 与本仓既知陷阱 `direct-node-test-in-worktree-reds-golden-replay-no-dist` 同形。
+
+**本趟读数（⛔ 非 fixture；`cli.test.mjs` 一行为 fresh dist 下无任何 env 技巧直跑）**：
+
+| 读数 | 值 |
+|---|---|
+| `packages/quay/test/cli.test.mjs`（fresh dist） | **exit 0，pass 1 / fail 0，0 条 `FAIL:`** |
+| 同文件 · 改前对照（main checkout，无本修） | `FAIL: usage fallback command set == dispatch-table command set (missing: , extra: server restart)` |
+| `plugin/test/driver-resolves-code-root-separate-from-workspace.test.mjs` | **7 pass / 0 fail**（上一趟另一条红；随 merge 带入 develop 的 `951fbb15c` 后消失 —— 纯滞后，非缺陷） |
+| `anti-drift-touches-check` | **`ANTI-DRIFT OK` — 9 actual file(s), all within declared Touches (11 globs)** |
+| AC-256 criterion（生产 root，从 frontmatter 折叠块解出后逐字跑） | **exit 0**（载体 4 行、`GOAL-017-AC-256` 记录 1 条） |
+| scoped 门 `--for-task … --allow-thin` | **exit 0** |
+
+**5b 扫描（本趟产物）**：按「手工抄的 server 动词集」在 `packages/quay/{src,test,bin}` + `plugin/{scripts,test}` 全扫，
+命中 **3 处**：`src/cli/server.ts`（`SERVER_VERBS` 单一真源 ✓）、`bin/quay.ts:223`（fallback usage 行，已含 `restart` ✓）、
+`src/cli/help.ts:61/389`（两处 `quay server restart` 都在 ✓）⇒ **陈旧的手工清单只有 `cli.test.mjs` 这一处**，已修。
+
+**⚠️ 一处结构性遗留（本趟未动，⛔ 不在本任务范围）**：scoped 门的测试选择是按每个测试文件**自报的 `@judges` glob** 取交，
+而 `cli.test.mjs` 不声明自己 ⇒ **本趟的改动不在 scoped 门的选择面内**（实测：门选中 105 个测试文件，其中**没有** `cli.test.mjs`）。
+**这正是上一趟「scoped 绿而全量红」的机制半边** —— scoped 门绿 ⇒ 不等于这个文件被跑过。
+
 
 ## Definition of Done
 
