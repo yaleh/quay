@@ -3,6 +3,7 @@ id: gap-ac257-ad-arm1-archguard-project-scope-quay-init-merge-rerun
 title: ad-arm1/archguard 真机重验：project scope 装 0.7.0 + quay-init 重跑（非空
   settings.json 合并语义）+ 真实 todo→done（GOAL-018/AC-257）
 status: ready
+needs_human_cause: human-adjudication
 labels:
   - gap
   - delivery-critical
@@ -309,3 +310,15 @@ NO-MODES -> []  ⇒ 由新增的 assert.ok(modeDefs.length >= 5) 兜住（否则
   写进项目级 `settings.json`（`extraKnownMarketplaces`），而 `quay-init` 自己的安装说明把 marketplace
   注册定为 **user scope「不提交」**。收尾时该行已退回 HEAD（⛔ 项目级 `enabledPlugins` 那条**未动**，
   它才是本 AC `install_scope=project` 的可核锚点）。
+
+## Needs-Human
+
+**执行 2026-09-14T10:26:19.180Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：worker-driver 连续 3 次 exited-not-landed 未落地（重试上限）
+- 成因类：human-adjudication
+- 失败步/判词：step=suite: AssertionError [ERR_ASSERTION]: The input did not match the regular expression /95\.0 min/. Input:
+- run_id：wk-prod-1789367589
+- session_id：d4b5291f-ac8d-4361-a63d-d2da925035c0
+- suite 日志：/home/yale/work/quay/.quay/fan-in-suite-gap-ac257-ad-arm1-archguard-project-scope-quay-init-merge-rerun~wk-prod-1789367589~1789379993178-4b51a8.log
+- fan-in 日志：/home/yale/work/quay/.quay/fan-in-gap-ac257-ad-arm1-archguard-project-scope-quay-init-merge-rerun-wk-prod-1789367589.log
