@@ -3974,10 +3974,21 @@ step_ac258_user_scope() {
     echo "  AC258-NOT-EVALUATED: 两条注册通道未指向本次持久前缀（want=$want_dir settings=$after_set_path known=$after_km_path）⇒ 记录 NOT written" >&2
     return 1
   fi
-  case "$after_user_entry" in
-    *"$want_dir"*) ;;
-    *) echo "  AC258-NOT-EVALUATED: user-scope 条目的 installPath 未指向本次持久前缀（entry=$after_user_entry want=$want_dir）⇒ 记录 NOT written" >&2; return 1 ;;
-  esac
+  # ⚠️ user-scope 条目的 installPath：criterion 只要求「非空 ∧ 不匹配 verify-|probe|/tmp/」——
+  # ⛔ **不**要求它等于 want_dir。实测 2026-09-14（orangevps 真机第 4 跑）：Claude Code 的 CLI 把插件
+  # materialize 进它**自己的缓存** `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>`，而**不是**
+  # marketplace 的源路径。那是产品本来的形态（缓存在用户 home 下的持久位置，版本段就是本次交付版本），
+  # 把它判成不合格是【判据写错了】而不是被测对象错了 —— 而失败形态是「记录没写出来」+ 一句把成因指向
+  # 被测对象的话，两者都与「机制坏了」同形（硬规则 3b）。原实现要求 installPath 含 want_dir ⇒
+  # 每一次真机运行都会停在这里。⇒ 按 criterion 的原文判，并把实际路径打出来供 AC-5 的交叉核对。
+  local entry_ip=""
+  entry_ip="$(printf '%s' "$after_user_entry" | "$VC_NODE" --no-warnings -e '
+    let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{ try{ const j=JSON.parse(s); process.stdout.write(String(j.installPath||"")); }catch{} });' 2>/dev/null)"
+  if [ -z "$entry_ip" ] || ac257_is_probe_path "$entry_ip"; then
+    echo "  AC258-NOT-EVALUATED: user-scope 条目的 installPath 为空或命中探测模式（='$entry_ip'）⇒ 记录 NOT written" >&2
+    return 1
+  fi
+  echo "          user-scope installPath=$entry_ip (Claude Code 的插件缓存：持久位置，⛔ 不是 marketplace 源路径 —— 判据不要求二者相等)"
   AC258_MARKETPLACE_PATH="$after_set_path"
   AC258_KNOWN_MARKETPLACE_PATH="$after_km_path"
   AC258_INSTALL_SCOPE="user"
