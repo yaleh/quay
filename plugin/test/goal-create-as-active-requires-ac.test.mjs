@@ -24,9 +24,9 @@
 //   ④ 取假控制：新 GOAL 以 --status draft 创建仍放行（⛔ 闸不是「一律拒绝创建」）
 //   ⑤ 取假控制：新 GOAL 出生时若【已有】一条 AC 点名它 ⇒ 放行（⛔ 闸不是「凡 create-as-active 必拒」，
 //      它测的是 AC 条数这个【量】，不是 create 这个【事件】）
-//   ⑥ 边界控制：`activating` 本身未被加宽 —— CRITERION 记录的 create-as-active 行为【不变】
-//      （P6/P6b 那两道闸问的是「这条 criterion 能不能跑/能不能取假」，对全新记录仍由 create 完整性
-//      契约回答；本任务 ⛔ 不扩大它们的射程）
+//   ⑥ 边界控制：闸仍被【记录种类】守卫（`goalActivating && isGoalRecord`）。⚠️ 它取假的形态是唯一的：
+//      摘掉 `isGoalRecord` 守卫（把射程扩大到所有记录）。⛔ 它【不】验「AC 的 create-as-active 语义」——
+//      那由 create 完整性契约回答，本任务不扩大 P6/P6b 的射程。
 //
 // Run: node --no-warnings --experimental-strip-types --test plugin/test/goal-create-as-active-requires-ac.test.mjs
 
@@ -180,7 +180,11 @@ test('⑥ CRITERION 记录以 --status active 出生 ⇒ 行为不变（本任�
   try {
     writeGoalFile(tmp, { id: 'GOAL-006', status: 'active' });
     writeGoalFile(tmp, { id: 'AC-906', status: 'draft', kind: 'criterion', goal: 'GOAL-006' });
-    // 一条【空的】criterion：若 P6 也覆盖了 create，这条会被「criterion not-evaluated」拒绝。
+    // 这条断言钉的是【记录种类守卫】(`goalActivating && isGoalRecord`)，⛔ 不是「空 criterion」：
+    // 空 criterion 在 create 路径上由 create 完整性契约拒绝（实测 exit 2，另一道闸、另一句话），
+    // 故它无法区分本闸有没有覆盖 create。真正能取假的是：若有人把 `isGoalRecord` 守卫摘掉
+    // （= 把这道闸的射程扩大到所有记录），本条记录自己的 id 是 `AC-907`，枚举 `goal: AC-907` 的 AC
+    // 恒为 0 ⇒ 会被拒 ⇒ 本断言红。⛔ 别把它读成「AC 的 create-as-active 语义被验过了」。
     const r = goalStoreWrite(tmp, [
       'AC-907', '--goal', 'GOAL-006', '--status', 'active', '--title', 'born active',
       '--criterion', 'exit 0', '--expect', 'the criterion measures X', '--origin', 'test fixture',
