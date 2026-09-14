@@ -902,20 +902,25 @@ if ! bash ${worktree}/plugin/scripts/closure-lag-check.sh --close-task --taskId 
 fi
 # bracket-close-block-end
 
-【持锁段 step 5.5b — 补写 `complete` pass GateEvent（仅 ff 成功后）】
+【持锁段 step 5.5b — 补写 complete pass GateEvent（仅 ff 成功后）】
 # complete-gate-event-block-start
 # gap-complete-gateevent-coverage-has-a-residual-gap（残留缺口，逐条追因见任务体 ## Finding）：
-# 本 workflow 的 flip 块（上方 `sed -i 's/^status: ready$/status: done/'`）此前【只翻 status + commit】，
-# 全文零 GateEvent ⇒ 这条落地路径的每一次 done 在生产载体 `.quay/gate-events.jsonl` 上都不留痕。
-# 实测（09-04~09-14，`git log develop` × carrier 按【落地】= 每任务最后一次 `翻 X done` 提交 join）：
+# 本 workflow 的 flip 块（上方 sed -i s/^status: ready$/status: done/）此前【只翻 status + commit】，
+# 全文零 GateEvent ⇒ 这条落地路径的每一次 done 在生产载体 .quay/gate-events.jsonl 上都不留痕。
+# 实测（09-04~09-14，git log develop × carrier 按【落地】= 每任务最后一次翻 X done 提交 join）：
 #   机械 fan-in 路径 386/388 有事件；本路径 2/2 无事件（0%）——即残留缺口里唯一【仍在生产的】那一条。
 # 与机械 fan-in 的 9.4b 写侧同源：⛔ 不手搓 JSON，经 worker-driver.ts --append-complete-gate-event
 # 调 appendCompleteGateEvent（内部就是 gate-event-store 的 appendGateEvent，与 CLI/loop 同一载体）。
 # 只在 ff 成功后写（同机械路径：flip 先发生，ff 失败会 reset 回 ready ⇒ 那次不是落地，不该写事件）。
 # actor 标 "quay-fan-in-workflow" 以区别于 "quay-driver"（机械路径）/"quay-cli"/"outer"。
+# ⚠️ 写失败**不致命**（只告警、⛔ 不 exit）：与机械 fan-in 的 9.4b 逐字同款语义——那边
+# appendCompleteGateEvent 的契约就是「best-effort：写失败返回 ok:false，不抛——fan-in 已 landed，
+# 观测写不得阻塞主执行」。这里若改成 exit 1，就等于**只在兜底路径上**新增一条阻塞前置
+# （硬规则 12：要求一个新前置之前先给出它的发生率——给不出就不作阻塞），且两条路径对同一个失败
+# 给出相反后果。漏记不靠这一步静默：日覆盖率判据 gate-event-coverage-check 会在次日把它报出来
+# （这正是它存在的理由），所以告警 + 可检测 = 该失败不可能与「一切正常」同形。
 if ! node --no-warnings --experimental-strip-types ${worktree}/plugin/scripts/worker-driver.ts --append-complete-gate-event --task ${task} --root ${root} --actor quay-fan-in-workflow; then
-  echo "FATAL: complete GateEvent 补写失败（${task} ff 已成功但事件未落盘）——landing 完成但载体漏记（覆盖率判据 gate-event-coverage-check 会报出）" >&2
-  exit 1
+  echo "WARN: complete GateEvent 补写失败（${task} ff 已成功但事件未落盘）——landing 照常完成；该漏记会由 gate-event-coverage-check 在次日覆盖率判据上报出（⛔ 不在此阻塞 landing，与机械 fan-in 的 best-effort 契约一致）" >&2
 fi
 # complete-gate-event-block-end
 

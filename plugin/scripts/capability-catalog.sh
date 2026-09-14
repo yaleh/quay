@@ -777,7 +777,7 @@ declare -A CADENCE=(
   [peer-identity-probe.ts]="按需"
   [channel-probe-server.ts]="按需"
   [server-partial-stop-verify.ts]="按需"
-  [gate-event-coverage-check.ts]="每轮（run_static_checks，@static-tier change，--days 1）"
+  [gate-event-coverage-check.ts]="每轮"
 )
 
 # ── INVALIDATION (invalidation-precondition declaration (①) — every hard constraint / mechanism declaration carries a 失效前提 field; when a testable precondition can be written, write it, when not, mark the explicit '无可测前提，靠周期复核' (标出来别假装有). Missing field = entry-gate reject below) ──
