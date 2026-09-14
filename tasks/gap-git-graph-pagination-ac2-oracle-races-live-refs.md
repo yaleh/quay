@@ -80,13 +80,31 @@ extra:
 3. 负控制：关掉冻结/重试 ⇒ 并发 ref 推进下必须重新报出 `git=undefined` 类不一致；开启 ⇒ 绿。
 4. 收口：`scripts/test.sh --for-task <本任务>` 绿 + 全量 suite 绿。
 
+## Implementation（取 Plan 1a：冻结 ref 窗口）
+
+实现全部落在测试文件，**生产读路径 `observation.ts` 零改动**——冻结列表经它既有的 `exec` 宿主读取缝隙
+（`GitExec`，`observation.ts:2573-2582`，其存在理由逐字就是"hand the reader a frozen snapshot of the host
+instead of racing the live repo"）进入生产读路径。选 1a 而非改 `readGitHistory` 签名，是因为任务 Touches
+只声明了测试文件 + 任务文件，而该缝隙正是本仓库为这一类 race 造的机件。
+
+- `snapshotRefWindow()`：`git for-each-ref --format=%(objectname)%09%(refname)`（外加 `rev-parse HEAD`，
+  因为 `--all` 含 HEAD 而 `for-each-ref refs/` 不含）⇒ 冻结成不可变对象名 + 出处记录
+  （`refCount`/`heads`/`tags`/`at`）。
+- `frozenGitExec(shas)`：把每个 `log` 调用的 `--all` 替换为冻结列表。
+- `gitGraphReferenceColumns(n, refs)`：oracle 用**同一个** `refs`。
+- 取值时机：`renderAfterLoads()` 顶部**一次性**冻结，feed 与 oracle 都由它供给。
+- 第三态：`judgeColumnWindow()` 返回 `state: "evaluated" | "not-evaluated"`；`not-evaluated` 时
+  `mismatch: null` 且 reason 说明窗口对不齐——**⛔ 不与 mismatch 计数或"通过"同形**（硬规则 3b）。
+- 负控制缝隙：`QUAY_TEST_GIT_GRAPH_LIVE_REFS=1` ⇒ 两侧退回各自实时读 `--all`（修前形态）。
+- ⛔ 未用回声、未反推 `assignGitColumns`、未比较交集。
+
 ## Acceptance Criteria
 
-- [ ] AC1（能取假，受控复现）：在隔离克隆里复跑本文件，只加"跑测试期间推进 scratch ref"这一个变量 ⇒ AC2 报出 `git=undefined` 类不一致；不加扰动 ⇒ 7/7 绿。两次读数都留档（命令 + 原文）。
-- [ ] AC2（修法可执行）：feed 与 oracle 的读数取自**同一个不可变 ref 集合**（快照或等价机制），而非各自实时读 `--all`；打印实现位置与取值时机。
-- [ ] AC3（负控制，取假）：把冻结/重试关掉 ⇒ 并发 ref 推进下必须重新报红；打开 ⇒ 绿。（两次都要真实读数，不得只跑一边。）
-- [ ] AC4（判据不得退化）：`refCols.size === loaded`（"oracle 解析同一个已加载窗口"）修后仍成立、`loaded > LIMIT` 仍可满足；且"重试超限/无法评估"必须是**可区分的第三态**，⛔ 不得与"通过"同形。
-- [ ] AC5（生产读数，非 fixture）：修后 AC1/AC2/AC3 的取值仍来自真实本仓库（>500 行、有跨列边），不是合成 fixture。
+- [x] AC1（能取假，受控复现）：在隔离克隆里复跑本文件，只加"跑测试期间推进 scratch ref"这一个变量 ⇒ AC2 报出 `git=undefined` 类不一致；不加扰动 ⇒ 7/7 绿。两次读数都留档（命令 + 原文）。
+- [x] AC2（修法可执行）：feed 与 oracle 的读数取自**同一个不可变 ref 集合**（快照或等价机制），而非各自实时读 `--all`；打印实现位置与取值时机。
+- [x] AC3（负控制，取假）：把冻结/重试关掉 ⇒ 并发 ref 推进下必须重新报红；打开 ⇒ 绿。（两次都要真实读数，不得只跑一边。）
+- [x] AC4（判据不得退化）：`refCols.size === loaded`（"oracle 解析同一个已加载窗口"）修后仍成立、`loaded > LIMIT` 仍可满足；且"重试超限/无法评估"必须是**可区分的第三态**，⛔ 不得与"通过"同形。
+- [x] AC5（生产读数，非 fixture）：修后 AC1/AC2/AC3 的取值仍来自真实本仓库（>500 行、有跨列边），不是合成 fixture。
 - [ ] AC6 全量 `scripts/test.sh` 绿（待外部；由 fan-in 那一次全量运行判定）
 
 ## Definition of Done
@@ -100,3 +118,88 @@ extra:
 
 - packages/quay/test/gap-git-graph-pagination-appends-page-relative-col-and-torow.test.mjs（oracle 的不可变 ref 窗口 + AC1 受控复现 + AC3 负控制）
 - tasks/gap-git-graph-pagination-ac2-oracle-races-live-refs.md（自身）
+
+## Evidence（2026-09-14 实现与读数留档）
+
+### E0 落笔前当场干跑：冻结列表 ≡ `--all`（硬规则 4c）
+
+在 `/home/yale/work/quay`（真仓库）逐个形态比对，`REFS = for-each-ref refs/ 的 objectname ∪ rev-parse HEAD`：
+
+| 形态 | 结果 |
+|---|---|
+| `git log --all --topo-order -n 500` vs `git log <REFS> --topo-order -n 500` | **逐字节相同**（499 行） |
+| `--skip=500` / `--skip=1000` / `--skip=1500` 同上 | **逐字节相同**（各 500 行） |
+| `git log --graph --all -n 2000` vs `git log --graph <REFS> -n 2000` | **逐字节相同**；oracle map size = 2000 |
+| `git log --graph --topo-order --all` vs `git log --graph --all` | 相同（`--graph` 本身即 topo-order） |
+| ref 对象类型 | 147 `commit` + 11 `tag`（全部可 peel 到 commit）；去重后 148 个对象名 |
+
+### E1 受控复现（AC1）—— 隔离克隆，单一变量
+
+```
+git clone --shared /home/yale/work/quay <clone>
+cp <worktree>/packages/quay/test/gap-git-graph-pagination-appends-page-relative-col-and-torow.test.mjs \
+   <clone>/packages/quay/test/
+ln -s /home/yale/work/quay/node_modules <clone>/node_modules
+# 唯一变量：每 250ms 往 scratch ref 推进一个空提交
+while :; do git -C <clone> -c user.name=r -c user.email=r@x commit -q --allow-empty -m churn \
+  && git -C <clone> update-ref refs/scratch/race HEAD; sleep 0.25; done &
+node --test <clone>/packages/quay/test/gap-git-graph-pagination-appends-page-relative-col-and-torow.test.mjs
+```
+
+**修前 · 不加扰动**（原文）：
+```
+== prefx-noperturb (churn=off) rc=0 pass=7 fail=0
+✔ AC2: after N pages every rendered commit's column equals git log --graph --all -n <loaded> (mismatch = 0) (646.558157ms)
+```
+
+**修前 · 加扰动**（原文）：
+```
+== prefx-churn (churn=on) rc=1 pass=6 fail=1
+✖ AC2: after N pages every rendered commit's column equals git log --graph --all -n <loaded> (mismatch = 0) (734.000265ms)
+  AssertionError [ERR_ASSERTION]: column mismatch after 3 pages = 0 (got 1 of 2000: bf65649 rendered=1 git=undefined)
+```
+⇒ 与真实样本**同一签名**（K=1、`git=undefined`、`rendered=<数字>`）。复现成立，且"列号算错"这一支被排除。
+
+### E2 负控制（AC3）—— 修后四臂矩阵，隔离克隆
+
+| 冻结 | 扰动 | 读数 |
+|---|---|---|
+| **关**（`QUAY_TEST_GIT_GRAPH_LIVE_REFS=1`） | 开 | **红**：`rc=1 pass=6 fail=1` / `column mismatch after 3 pages = 0 (got 1 of 1999: b1d487d rendered=1 git=undefined)` |
+| 关 | 关 | 绿 `rc=0 pass=7 fail=0` |
+| **开**（缺省） | 开 | **绿** `rc=0 pass=7 fail=0` |
+| 开 | 关 | 绿 `rc=0 pass=7 fail=0` |
+
+⇒ 单变量可区分：**同一份代码**，只翻转冻结开关，红/绿互换。⛔ 两臂都是真实读数，不是只跑一边。
+
+### E3 实现位置与取值时机（AC2）
+
+- 位置：`packages/quay/test/gap-git-graph-pagination-appends-page-relative-col-and-torow.test.mjs`
+  `snapshotRefWindow()` / `resolveRefWindow()` / `frozenGitExec()` / `gitGraphReferenceColumns()` /
+  `judgeColumnWindow()`；`productionFeed()` 把 `refs` 穿过 `readGitHistory` 的 `exec` 缝隙。
+- 取值时机：`renderAfterLoads()` 顶部一次性冻结，**早于两侧任何读**；运行时可核（每轮套件日志里都有）：
+```
+[AC2] oracle window: FROZEN at 2026-09-14T04:03:57.229Z (148 ref object names); n=2000
+```
+
+### E4 判据不得退化（AC4）
+
+- `refCols.size === loaded`：修后由 `judged.state === "evaluated"` 表达（其定义就是 `oracleCols.size === loaded`）；实测 `n=2000 → map size 2000` ✔ 仍成立。
+- `loaded > LIMIT`：实测 `loaded = 2000 > 500 = LIMIT` ✔ 仍可满足（断言仍在）。
+- **第三态可达且可区分**：`judgeColumnWindow()` 对**真实窗口**的错位读数（`gitGraphReferenceColumns(loaded - 1, refs)` → size 1999 ≠ 2000）返回 `state: "not-evaluated"` + `mismatch: null`，测试断言它**不是**"通过"、且**不带** mismatch 计数。⚠️ 实现取 Plan 1a（冻结），**没有重试路径** ⇒ 「无法评估」以「窗口对不齐 / 快照不可得」形态出现，而非"重试超限"；AC4 要求的"可区分第三态"由此满足。
+
+### E5 生产读数，非 fixture（AC5）
+
+AC7 全绿：窗口含 `refs/heads/` ≥1 与 `refs/tags/` ≥1（真实 ref 密集生产仓库的特征），合并窗口 > LIMIT 行、跨列边 > 0。冻结列表由测试自身在 `REPO_ROOT` 上用 `git for-each-ref` 现取；被替换的只是**起点列表**（`--all` → 不可变对象名），跑的仍是真 `git` 读真仓库，**不是 fixture**。
+
+### E6 scoped 门
+
+`bash <worktree>/scripts/test.sh --for-task gap-git-graph-pagination-ac2-oracle-races-live-refs --allow-thin` ⇒ **EXIT=0**，目标文件 7/7 绿，且该文件**不在** test-isolation-check 的 24 条既有 violation 内。
+
+### E7 fan-in 预期（scoped-gate 缓存的口径）
+
+写缓存用的是**门实际验证过的那个 develop tip**（`HEAD^2` = `12ecdb4bb75044da40013f098e4c1930d6af9807`），
+**不是**写缓存那刻的 `git rev-parse develop`（那已是 `4331b7187`——loop 在我跑门期间又推进了 develop）。
+⚠️ `worker-driver.ts:1406` 打印的指引签名写的是 `--develop-sha "$(git -C <worktree> rev-parse develop)"`，
+在 develop 于 worker 运行期间前进时它会记下一个**本门从未验证过**的 SHA ⇒ 潜在地造成 fan-in 假命中。本条按
+fan-in 的真实判据（`worker-driver.ts:4437-4438`：与**锁内 merge 到的** develop tip 逐字相符才算命中）写诚实值：
+develop 此后若再前进 ⇒ 缓存未命中 ⇒ 门照跑（fail-closed，安全方向）。该指引缺陷不属本任务 Touches，另记。
