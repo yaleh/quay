@@ -2,7 +2,7 @@
 id: gap-quay-native-task-create-duplicate-id-prepends-frontmatter
 title: quay-native task create 对已存在 id 返回 0 并把第二段 frontmatter 前置（静默损坏任务文件 + ABI
   的 status 变成 todo）
-status: todo
+status: ready
 needs_human_cause: human-adjudication
 labels:
   - gap
@@ -52,6 +52,14 @@ actor=`quay-driver`）。一次 `task create TASK-TSCONFIG-EXTENDS --title "AC-2
    沿用既有 `makeWorkspace()`（裸 tasks 目录不是合法 workspace）。
 4. 复核 AC-257 模式里那条「先 `task view` 再决定建不建」的写法是否仍需要（它是本缺陷的下游回避，
    产品修好后可作为防御保留，但⛔ 不得把它当成产品已修的替代）。
+
+## Touches
+
+- tasks/gap-quay-native-task-create-duplicate-id-prepends-frontmatter.md（自身文件：勾 AC + 贴 invoke 证据授权）
+- packages/quay/src/cli/task-create.ts（core CLI `task create` 分发：目前直接 `client.taskWrite({id, ...patch})`，无存在性判定）
+- packages/quay-native/src/store.ts（provider 写路径：空文件被插入整段 frontmatter 的根因处）
+- packages/quay-native/bin/quay-native.ts（native CLI `task create` 子命令入口）
+- packages/quay-native/test/create-validation.test.mjs（AC3 两条断言的宿主测试文件，QN-025 的同族用例已在此）
 
 ## AC
 
