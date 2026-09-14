@@ -4,10 +4,17 @@ title: 第二副本退役 —— .claude 双副本 archive + manager-tick-core �
 status: achieved
 kind: criterion
 goal: GOAL-003
-criterion: |-
-  [ -e .claude/workflows/manager-tick-core.js ] && exit 1
-  [ -f plugin/workflows/manager-tick-core.js ] || exit 1
-  [ "$(ls -A .claude/skills 2>/dev/null | wc -l)" = 0 ] || exit 1
+criterion: >-
+  [ -e .claude/workflows/manager-tick-core.js ] && { echo "AC-166 fail:
+  .claude/workflows/manager-tick-core.js still exists (second copy not retired)"
+  >&2; exit 1; }
+
+  [ -f plugin/workflows/manager-tick-core.js ] || { echo "AC-166 fail:
+  plugin/workflows/manager-tick-core.js is missing" >&2; exit 1; }
+
+  [ "$(ls -A .claude/skills 2>/dev/null | wc -l)" = 0 ] || { echo "AC-166 fail:
+  .claude/skills is not empty" >&2; exit 1; }
+
   exit 0
 expect: exit 0（.claude/workflows/manager-tick-core.js 已不存在 ∧
   plugin/workflows/manager-tick-core.js 存在 ∧ .claude/skills 已空）

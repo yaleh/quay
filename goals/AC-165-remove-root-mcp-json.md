@@ -10,11 +10,13 @@ criterion: >-
   import json,sys
 
   if 'quay' in (json.load(open('.mcp.json')).get('mcpServers') or {}):
+  sys.stderr.write("AC-165 fail - .mcp.json mcpServers still has a quay key\n");
   sys.exit(1)
 
   if 'quay' in
   (json.load(open('.claude/settings.local.json')).get('enabledMcpjsonServers')
-  or []): sys.exit(1)
+  or []): sys.stderr.write("AC-165 fail - .claude/settings.local.json
+  enabledMcpjsonServers still contains quay\n"); sys.exit(1)
 
   sys.exit(0)
 

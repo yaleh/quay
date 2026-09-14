@@ -8,9 +8,11 @@ criterion: >-
   v=$(python3 -c "import
   json;print(json.load(open('plugin/.claude-plugin/plugin.json'))['version'])")
 
-  grep -q "v$v" plugin/README.md || exit 1
+  grep -q "v$v" plugin/README.md || { echo "AC-169 fail: plugin/README.md does
+  not mention the current plugin.json version v$v" >&2; exit 1; }
 
-  grep -qE 'v0\.4\.0' plugin/README.md && exit 1
+  grep -qE 'v0\.4\.0' plugin/README.md && { echo "AC-169 fail: plugin/README.md
+  still mentions the stale version v0.4.0" >&2; exit 1; }
 
   exit 0
 expect: exit 0（plugin/README.md 含 plugin.json 的当前版本号 ∧ 不再出现陈旧的 v0.4.0）
