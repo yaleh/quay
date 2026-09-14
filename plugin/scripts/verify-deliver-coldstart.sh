@@ -1920,6 +1920,30 @@ EOF
   printf '%s\n' "${fqdn%%.*}"
 }
 
+# ── 交付物 CLI 入口的解析（⛔ 不硬编码 `bin/quay`）──────────────────────────────────────────
+# 实测 2026-09-14：npm 装出来的 quay 包【没有 bin/ 目录】—— `package.json` 的 bin 是
+# `{"quay":"./dist/quay.js"}`，npm 只在 <prefix>/bin/quay 放一个软链。原实现把 CLI 写死成
+# `<plugin>/../bin/quay`，于是 --ac257-project-scope 在【门口】就 NOT-EVALUATED（记录不落盘），
+# 而失败形态与「机制坏了」同形（硬规则 3b）。⇒ 从安装物自己的 package.json 的 bin 字段解析，
+# ⛔ 不猜第二份真源。读不出 ⇒ 不打印、返回 1（调用方保留旧候选并由存在性检查 fail-closed）。
+ac257_delivery_cli() {
+  local plugin_root="$1" pkg="$1/../package.json" rel="" dir=""
+  [ -f "$pkg" ] || return 1
+  rel="$("$VC_NODE" --no-warnings -e '
+    const fs = require("fs");
+    let d; try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { process.exit(1); }
+    const b = d && d.bin;
+    let v = "";
+    if (typeof b === "string") { v = b; }
+    else if (b && typeof b === "object") { v = b[Object.keys(b)[0]] || ""; }
+    if (typeof v === "string" && v) { process.stdout.write(v + "\n"); process.exit(0); }
+    process.exit(1);' "$pkg" 2>/dev/null)" || true
+  [ -n "$rel" ] || return 1
+  dir="$(cd "$(dirname "$pkg")" 2>/dev/null && pwd)" || return 1
+  [ -n "$dir" ] || return 1
+  printf '%s\n' "$dir/${rel#./}"
+}
+
 # ── AC-257 记录写（fail-closed）───────────────────────────────────────────────────────────
 # 经 ac_record_append 统一补 top-level build_sha/ts（AC-214 唯一补锚 choke point）——⛔ 本函数体内
 # 不出现 `build_sha` 字面量（多一个补锚点 = 下次改锚格式必漏一处）。
@@ -7014,7 +7038,11 @@ if [ "$AC257_PROJECT_SCOPE" = 1 ]; then
   else
     AC257_PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
   fi
-  AC257_QRL="${AC257_PLUGIN_ROOT}/../bin/quay"
+  # CLI 入口从安装物自己的 package.json 解析（见 ac257_delivery_cli 头注释：实测 quay 包没有
+  # bin/ 目录，bin.quay=./dist/quay.js ⇒ 硬编码 bin/quay 会在门口 NOT-EVALUATED）。解析不出 ⇒
+  # 保留旧候选，由下面的存在性检查 fail-closed（⛔ 不静默退回一个 PATH 上的 quay）。
+  AC257_QRL="$(ac257_delivery_cli "$AC257_PLUGIN_ROOT" 2>/dev/null || true)"
+  [ -n "$AC257_QRL" ] || AC257_QRL="${AC257_PLUGIN_ROOT}/../bin/quay"
   echo "== verify-deliver-coldstart (AC-257 project-scope 模式) =="
   echo "ts=$TS | ac89=$AC89 | root=${ROOT:-<unset>} | plugin_root=$AC257_PLUGIN_ROOT | cli=$AC257_QRL"
   if [ -z "$ROOT" ] || [ ! -d "$ROOT" ]; then
