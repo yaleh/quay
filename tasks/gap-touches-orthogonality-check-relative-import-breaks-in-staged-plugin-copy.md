@@ -65,7 +65,8 @@ stripTypes: true}`），而 staged 副本在"刚被完整刷新"（`package.sh` 
 形态**在任何 staged 状态下都不可解析**，与该文件是否进过 dist 无关：只要它以 raw 执行，那行字面量
 就落在不存在的 `packages/quay/packages/quay/src/…`。⇒ **修法只能落在"让这行字面量不再假设目录深度"
 （Plan 步骤 2），加名单/换解析顺序都不解决 raw 形态。**（AC2 要求"在副本路径下运行同一个文件"也正是
-这个方向。）
+这个方向。）因此 `packages/quay/scripts/build-plugin-dist.mjs` **本任务不改动**（原 Touches 括注要求
+"先核实预编译名单是否需要变更，再精确声明是否真的改动"——核实结论：不需要变更）。
 
 ### 1. 复现（修复前，真实载体，非构造）
 
@@ -191,7 +192,4 @@ fallback 那行在 bundle 里是**取不到的死码**：primary 已内联，不
 - plugin/scripts/core-src-import.ts（新增：布局无关的 Core-src 取得，静态字面量 primary + 走位 fallback）
 - plugin/scripts/touches-orthogonality-check.ts
 - plugin/scripts/fast-mode-telemetry.ts（`quay driver` 闭包内第二个同类调用点，AC3 要求一并修）
-- plugin/scripts/capability-catalog.sh（新脚本入件必须补的目录声明 5 行，否则 AC1c 门 exit 1）
-- ~~packages/quay/scripts/build-plugin-dist.mjs~~：**已核实不需要改动**（该文件本来就在派生 entry 集里，
-  `touches-orthogonality-check.ts` 的 dist bundle 一直存在；缺的不是编译，是 raw 执行路径）。
-  按 Plan 步骤 1 的要求"精确声明是否真的改动"，结论是不改动 ⇒ 从 Touches 移除。
+- plugin/scripts/capability-catalog.sh（新脚本入件必须补的目录声明，否则 catalog 的 AC1c 门 exit 1）
