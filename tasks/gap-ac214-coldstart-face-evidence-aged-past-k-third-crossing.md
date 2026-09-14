@@ -219,7 +219,7 @@ scripts/test.sh: --for-task gap-ac214-coldstart-face-evidence-aged-past-k-third-
 SCOPED_GATE_RC=0
 ```
 
-tip `f19397c66` 与 `a21d04337` 各跑一次，均 **RC=0**；另 `PASS — every declared landing target == forward branch 'develop' (0 violations)` 与 `superseded-capability check: PASS`。日志：`.quay/ac214-3rd-scoped-gate.log` / `.quay/ac214-3rd-scoped-gate2.log`。
+三个 tip 各跑一次，**均 RC=0**：`f19397c66`（`.quay/ac214-3rd-scoped-gate.log`）、`a21d04337`（`.quay/ac214-3rd-scoped-gate2.log`）、`bf268a339`（`.quay/ac214-3rd-scoped-gate3.log` —— 即写入 scoped-gate cache 的那个 tip，`developSha=bf268a339986db8351cf5910c2709c4d5fcc678a`、`ok:true`）。另 `PASS — every declared landing target == forward branch 'develop' (0 violations)` 与 `superseded-capability check: PASS — every superseded capability is removed from the executable layer and not taught (5 superseded)`。
 
 **着地归属**：本任务**无代码 delta** ⇒ 全量套件归机械 fan-in 的一步（两跑均 `selected 0 test files`，thin allowed），本 worker 不持 `.git/full-suite.lock.*` 共享锁。
 
