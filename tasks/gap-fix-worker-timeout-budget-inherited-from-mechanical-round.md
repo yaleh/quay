@@ -53,7 +53,7 @@ depends_on:
 - [ ] **未截断分布已取到**:放宽后的记录中出现 **≥3 条 `durationMs > 180000` 的干净返回** ⇒ 证明此前那批超时里确有一部分只是「没跑完」,而非挂死(这条同时是成因判断的事后对照)。
 - [ ] **步骤 3 有交代**:归因要么闭合(区分性对照的实际输出贴进 `## Resolution`),要么显式写明降为观察项及理由。⛔ 不静默省略。
 - [ ] `bash scripts/test.sh --for-task gap-fix-worker-timeout-budget-inherited-from-mechanical-round` 全绿,且新增/改动的用例在该轮**被实际选中执行**(按测试名核对,不看总数)。
-- [ ] `node plugin/scripts/task-schema-check.ts tasks/gap-fix-worker-timeout-budget-inherited-from-mechanical-round.md` exit 0。
+- [ ] **结构判据须能取假**（⚠️ 立案当轮就地更正，⛔ 不静默删除：这里原写「`task-schema-check.ts` … exit 0」，而实测本文件被判 `N/A legacy (no schema marker)`、与同族任务一致，该脚本明示 `N/A-legacy` 为 exit-0-neutral ⇒ 该命令对本文件**结构上不可能报 fail**，是空转判据）：改判 `quay task check` 在 `author->ready` 闸对本任务报四件套齐备 —— `{shape:"plan", artifacts:{proposal,plan,ac,dod} 四项全 true}`；**负控制**：临时移除任意一个 `##` 章节后同一闸即报该项 missing。两次读数都贴进 `## Resolution`。
 
 ## Definition of Done
 
