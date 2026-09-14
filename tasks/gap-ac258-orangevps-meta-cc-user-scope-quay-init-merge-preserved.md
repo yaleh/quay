@@ -2,7 +2,8 @@
 id: gap-ac258-orangevps-meta-cc-user-scope-quay-init-merge-preserved
 title: orangevps/meta-cc 真机重验：user scope 装 0.7.0 + quay-init 重跑（删键重注册，非探测路径）+ 真实
   todo→done（GOAL-018/AC-258）
-status: ready
+status: needs-human
+needs_human_cause: unclassified
 labels:
   - gap
   - delivery-critical
@@ -343,3 +344,12 @@ bash plugin/scripts/develop-deliver-tgz.sh --hosts B --verify-ac258 \
 （重跑前需把 user scope 的三处注册恢复到「指向探测路径」的起点 —— 本任务用
 `~/ac258-fixture-reset.sh` 做过两次并把 md5 留在 `.quay/ac258-fixture-reset*.txt`：
 该实验在定义上会吃掉自己的前提（删键→重注册），这与 AC-257 的 ⑨b 基线重置同一性质。）
+## Needs-Human
+
+**执行 2026-09-14T15:39:54.714Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：suite 红但归因不出任何失败测试文件（基建/契约疑似，非实现缺陷）——停止重派，⛔ 不再拿新会话撞同一堵墙：suite red could not be attributed to any failing test file in 2 consecutive rounds (bounded to at most one retry) — infra/contract suspected, not an implementable defect (the suite log names nothing a worker could fix); stopping instead of spending another worker session
+- 成因类：unclassified
+- 失败步/判词：AC 未全勾（checked 10/13，剩余未勾 3）——续做只需验证并勾选 AC
+- run_id：wk-prod-1789367589
+- session_id：8c3c039f-8948-453f-a338-8ed17c8bca83
