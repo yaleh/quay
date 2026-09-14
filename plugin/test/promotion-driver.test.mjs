@@ -59,6 +59,9 @@ import {
   CAP_DEFAULT,
   MAX_FIX_RETRIES_DEFAULT,
   FIX_WORKER_TIMEOUT_MS,
+  FIX_WORKER_TIMEOUT_ENV,
+  ROUND_TIMEOUT_MS,
+  resolveFixWorkerTimeoutMs,
 } from "../scripts/promotion-driver.ts";
 // AC150-3：资源门/halt 判定与 worker-driver 共用同一份实现（driver-shared.ts）。
 import {
@@ -631,8 +634,14 @@ test("gap-fix-worker-spawn-timeout-persists-post-fix AC4 — failure record carr
   const root = makeRoot("ac4-diag");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   // 非零退出（失败）：argv 逐字、durationMs 有限、exitCode 落盘。
+  // 超时用生产默认值（FIX_WORKER_TIMEOUT_MS，gap-fix-worker-timeout-budget-inherited-from-mechanical-round
+  // 后为 600s），⛔ 不再传硬字面 5000：本断言要测的是「非零退出被记录」，而 5000ms 是「模块加载后
+  // spawn 一个 node 必须 <5s」的墙钟余量——并发负载下本文件耗时 222s（隔离 70s，实测 2026-09-13）
+  // ⇒ 子进程起不来、exitCode 变成 null，余量被负载击穿。默认值余量更大，与相邻 runFixPass 测试
+  // （也断言 timedOut===false）一致。
   const argv = ["node", "-e", "process.stderr.write('boom');process.exit(3)"];
-  const r = spawnFixWorker(argv, root, 5000);
+  const r = spawnFixWorker(argv, root, FIX_WORKER_TIMEOUT_MS);
+  assert.equal(r.timedOut, false, `a fast exit must NOT be reported as a timeout (timeoutMs=${FIX_WORKER_TIMEOUT_MS})`);
   assert.equal(r.exitCode, 3, "exit code recorded");
   assert.deepEqual(r.argv, argv, "argv recorded verbatim");
   assert.ok(Number.isFinite(r.durationMs) && r.durationMs >= 0, `durationMs recorded: ${r.durationMs}`);
@@ -679,6 +688,120 @@ test("AC142 AC1 — spawnFixWorker timeout ⇒ timedOut=true + error (ETIMEDOUT)
   assert.equal(r.timedOut, true, "timeout fired ⇒ timedOut=true");
   assert.ok(r.error, "timeout produces an error");
   assert.equal(r.exitCode, null, "no exit code on timeout");
+});
+
+// ── gap-fix-worker-timeout-budget-inherited-from-mechanical-round ──────────────────────────────────
+// AC1: the fix worker's budget is DECOUPLED from the mechanical round's and is OVERRIDABLE. The two
+// halves are separately falsifiable: (a) the constants differ AND the resolver's three states are
+// distinguishable; (b) a REAL spawn honours a passed override near that value (not near the default).
+test("gap-fix-worker-timeout-budget AC1 — budget decoupled from ROUND_TIMEOUT_MS and resolvable (CLI > env > default)", () => {
+  // (a) Decoupling: the two constants constrain objects with different cost structures — a zero-LLM
+  // mechanical script vs. a `claude -p` agent call. Equal values were the inherited-budget defect.
+  assert.notEqual(
+    FIX_WORKER_TIMEOUT_MS, ROUND_TIMEOUT_MS,
+    "FIX_WORKER_TIMEOUT_MS must NOT equal ROUND_TIMEOUT_MS (the inherited-budget defect)",
+  );
+  assert.ok(
+    FIX_WORKER_TIMEOUT_MS > ROUND_TIMEOUT_MS,
+    `the agent budget must exceed the mechanical script's (got ${FIX_WORKER_TIMEOUT_MS} vs ${ROUND_TIMEOUT_MS})`,
+  );
+
+  // (b) Three resolvable states, each distinguishable (⛔ a single number would collapse them).
+  const none = resolveFixWorkerTimeoutMs(undefined, {});
+  assert.equal(none.ok, true);
+  assert.equal(none.source, "default", "no override ⇒ default");
+  assert.equal(none.value, FIX_WORKER_TIMEOUT_MS);
+
+  const viaEnv = resolveFixWorkerTimeoutMs(undefined, { [FIX_WORKER_TIMEOUT_ENV]: "5000" });
+  assert.equal(viaEnv.ok, true);
+  assert.equal(viaEnv.source, "env", "env override is a distinct state");
+  assert.equal(viaEnv.value, 5000);
+
+  // CLI wins over env (two different override paths ⇒ precedence is observable, not assumed).
+  const viaCli = resolveFixWorkerTimeoutMs("7000", { [FIX_WORKER_TIMEOUT_ENV]: "5000" });
+  assert.equal(viaCli.ok, true);
+  assert.equal(viaCli.source, "cli");
+  assert.equal(viaCli.value, 7000);
+
+  // Fail-closed: an unparseable / non-positive override is REJECTED (hard rule 3b — "misconfigured"
+  // must not be indistinguishable from "not configured", which is the state that takes the default).
+  // (An empty string means "not set" — the same convention mergeEnv uses — so it takes the default;
+  // only a NON-empty unparseable value is a misconfiguration and is rejected.)
+  assert.equal(resolveFixWorkerTimeoutMs("", {}).source, "default", "empty ⇒ not set ⇒ default");
+  for (const bad of ["0", "-1", "abc", "1.5"]) {
+    const r = resolveFixWorkerTimeoutMs(bad, {});
+    assert.equal(r.ok, false, `invalid override ${JSON.stringify(bad)} must be rejected, got ${JSON.stringify(r)}`);
+  }
+  const badEnv = resolveFixWorkerTimeoutMs(undefined, { [FIX_WORKER_TIMEOUT_ENV]: "not-a-number" });
+  assert.equal(badEnv.ok, false, "an unparseable env override must be rejected, not silently defaulted");
+});
+
+// AC1 取假 (the half that matters): a REAL spawn must time out NEAR the passed value. The control is
+// the sibling `--fix-worker-cmd` round-trip test above, where the same shape of command exits fast
+// under the default — so a pass here is not "everything times out".
+test("gap-fix-worker-timeout-budget AC1 — a real fix-worker spawn honours a passed override (times out near 1500ms, not at the 600s default)", (t) => {
+  const root = makeRoot("timeout-budget");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const decided = [{ id: "gap-budget", fixable: true, missing: ["fourArtifacts=false missing=[dod]"], unfixable: [], prompt: "p" }];
+
+  // NOTE the command shape: runFixPass appends the structured prompt as the LAST argv element
+  // (buildFixWorkerArgv), so the command must tolerate a trailing argument — `sleep 30 <prompt>`
+  // makes sleep reject two operands and exit instantly. A space-free `node -e` that just waits does.
+  const started = Date.now();
+  const outs = runFixPass(decided, root, "node -e setTimeout(()=>{},30000)", 1500);
+  const elapsed = Date.now() - started;
+
+  assert.equal(outs[0].spawned, true);
+  assert.equal(outs[0].timedOut, true, "a command outliving the budget must be reported as a timeout");
+  assert.equal(outs[0].exitCode, null);
+  assert.ok(
+    Number.isFinite(outs[0].durationMs) && outs[0].durationMs >= 1400 && outs[0].durationMs < 10000,
+    `durationMs must sit near the 1500ms override, got ${outs[0].durationMs}`,
+  );
+  assert.ok(elapsed < 15000, `the spawn must end near the override, not at the default budget: ${elapsed}ms`);
+  // Negative control, read from the constant rather than by waiting it out: the default is far above
+  // both the override and the budget it was inherited from (180_000) — so the timeout above cannot be
+  // the default firing. (Actually spawning to the default would take 10 minutes; the reading is the
+  // honest, cheap control here.)
+  assert.ok(FIX_WORKER_TIMEOUT_MS > 180_000, `the default must be looser than the inherited 180_000, got ${FIX_WORKER_TIMEOUT_MS}`);
+  assert.ok(elapsed < FIX_WORKER_TIMEOUT_MS / 10, `elapsed ${elapsed}ms is nowhere near the default ${FIX_WORKER_TIMEOUT_MS}ms`);
+});
+
+test("gap-fix-worker-timeout-budget — --fix-worker-timeout-ms reaches the round record (end-to-end through the real CLI)", (t) => {
+  const root = makeRoot("timeout-cli");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-budget-cli");
+
+  // A misconfigured value is rejected at the CLI boundary (exit 2, fail-closed — never a silent default).
+  assert.throws(
+    () => runDriver(root, ["--once", "--fix-worker-timeout-ms", "nope"]),
+    (e) => e.status === 2,
+    "an unparseable --fix-worker-timeout-ms must exit 2",
+  );
+
+  // The effective budget is recorded per round, so a reading is attributable to the budget that
+  // produced it (⛔ otherwise pre-/post-widening records are indistinguishable in the carrier).
+  runDriver(root, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ok:true}))",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--fix-worker-timeout-ms", "5000",
+    "--once",
+  ]);
+  const lines = readRoundLines(root);
+  assert.equal(lines.length, 1, `one round record expected, got ${lines.length}`);
+  assert.equal(lines[0].fix_worker_timeout_ms, 5000, "the CLI override must reach the round record verbatim");
+
+  // Control: a run with no override records the module default — i.e. the field is a real reading
+  // of the effective budget, not a constant echo of whatever the test passed.
+  const root2 = makeRoot("timeout-cli-default");
+  t.after(() => fs.rmSync(root2, { recursive: true, force: true }));
+  writeTask(root2, "gap-budget-cli-2");
+  runDriver(root2, [
+    "--ready-pool-cmd", "node -e console.log(JSON.stringify({ok:true}))",
+    "--resource-gate-cmd", "node -e process.exit(0)",
+    "--once",
+  ]);
+  assert.equal(readRoundLines(root2)[0].fix_worker_timeout_ms, FIX_WORKER_TIMEOUT_MS);
 });
 
 test("AC132 AC2 — DoD<40 todo ⇒ fix worker prompt contains the structured missing identifier (falsifiable)", (t) => {

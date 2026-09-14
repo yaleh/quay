@@ -55,6 +55,14 @@ profiles:
       - CLAUDE_CODE_AUTO_COMPACT_WINDOW
       - CLAUDE_AUTOCOMPACT_PCT_OVERRIDE
 
+# ── 角色层 MCP 黑名单（gap-worker-mcp-blacklist-strict-config）────────────────────────────────
+# 纯写代码的 role 派发时【不连接】的 MCP server 名：chrome-devtools / playwright 各带完整进程树
+# （实测 48 + 12 个 server 进程 + watchdog ≈ 3.24GB RSS，2026-09-14 内存压力最大单一来源）。
+# ⚠️ 位置：必须挂在【角色】层。外层 worker-default profile 被 outer 共享，而 outer 按 ADR-010
+#   milestone e2e 可能真需要浏览器工具 ⇒ 把黑名单挂 profile 会把 outer 连坐（validateProfiles 拒）。
+# 消费点：plugin/scripts/driver-runtime.ts launchArgv → mcp-blacklist-resolve.ts。
+# ⛔ outer / manager / pool-judge / meta-driver 不设（argv 与改动前逐字一致）。
+
 roles:
   manager:
     profile: manager-local
@@ -67,14 +75,31 @@ roles:
     name: quay-task-worker
     env:
       CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"    # 驱动的外部超时是唯一兜底（SPEC-worker-driven-inner §4④）
+    mcpBlacklist:
+      - chrome-devtools
+      - playwright
   selector:
     profile: worker-default
     name: quay-selector
+    mcpBlacklist:
+      - chrome-devtools
+      - playwright
   fix-worker:
     profile: worker-default
     name: quay-fix-worker
     env:
-      CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"    # 同 task-worker：无此键 claude -p 有 600s end_turn 后台任务宽限 > 180s spawnSync 超时 ⇒ 恒 timedOut（gap-fix-worker-spawn-timeout-persists-post-fix）
+      CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"    # 同 task-worker：无此键 claude -p 有 600s end_turn 后台任务宽限 ⇒ 恒 timedOut（gap-fix-worker-spawn-timeout-persists-post-fix）
+    # ⚠️ fix worker 的 spawnSync wall-clock 预算【不在本文件里配】（gap-fix-worker-timeout-budget-inherited-from-mechanical-round）：
+    #   本文件 `env:` 是【喂给被 spawn 的 claude 子进程】的环境，而预算是【驱动进程自己】读的量——
+    #   写在这里的键到不了 promotion-driver。真实覆盖路径（经 driver-runtime 的 `env: {...process.env}`
+    #   透传进驱动进程）：
+    #     ① CLI  `promotion-driver.ts --fix-worker-timeout-ms <ms>`
+    #     ② env  `QUAY_FIX_WORKER_TIMEOUT_MS=<ms>`（设在 supervisor/driver 启动环境里）
+    #     ③ 缺省 promotion-driver.ts `FIX_WORKER_TIMEOUT_MS`（600000，已与 ready-pool-check 的
+    #        ROUND_TIMEOUT_MS 解耦；⛔ 勿再把两者当同一个数——一个是机械脚本、一个是 agent 调用）。
+    mcpBlacklist:
+      - chrome-devtools
+      - playwright
   pool-judge:
     profile: worker-default
     name: quay-pool-judge

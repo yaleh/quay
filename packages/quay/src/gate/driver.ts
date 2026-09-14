@@ -19,7 +19,9 @@ import { runComplete } from "./lifecycle.ts";
 import { TASK_STATUS, type Task } from "../abi.ts";
 
 interface DriverClient {
-  taskList: (filter: { status: string }) => Promise<{ tasks: Task[]; malformed: Array<{ file: string; error: string }> }>;
+  // `includeBody` is part of the ABI's task_list surface (the frontmatter-only projection every
+  // render-only consumer uses) — declared here because scanActionable asks for it.
+  taskList: (filter: { status: string; includeBody?: boolean }) => Promise<{ tasks: Task[]; malformed: Array<{ file: string; error: string }> }>;
   taskGet: (id: string) => Promise<Task | null>;
   taskWrite: (args: { id: string; status: string; expectedStatus: string }) => Promise<unknown>;
   taskCheck: (id: string) => Promise<{ ok: boolean; reason: string }>;
@@ -84,7 +86,14 @@ export function isActionable(task: Task): boolean {
  * most once per run and the scan drains to `[]` → clean fixpoint.
  */
 export async function scanActionable(client: DriverClient, seen: Set<string> = new Set()): Promise<string[]> {
-  const { tasks } = await client.taskList({ status: TASK_STATUS.READY });
+  // gap-abi-task-list-times-out-at-2000-tasks-head-of-line-blocks-mcp: this scan reads
+  // only `status`, `id` and `extra.acceptance` (isActionable below) — never a body — so
+  // it asks the ABI for the frontmatter-only projection. `ready` is a small subset of the
+  // store, but the Provider's task_list resolves the filtered set BEFORE it can project,
+  // so without `includeBody:false` this driver-internal scan paid for every matching body
+  // on every pass. The projection keeps `extra` (only `body` is stripped), which is what
+  // isActionable reads.
+  const { tasks } = await client.taskList({ status: TASK_STATUS.READY, includeBody: false });
   return tasks
     .filter(isActionable)
     .map((t) => t.id)
