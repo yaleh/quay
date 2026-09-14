@@ -11,7 +11,8 @@ criterion: >-
 
   p='.quay/goal-round.jsonl'
 
-  if not os.path.exists(p): sys.exit(1)
+  if not os.path.exists(p): sys.stderr.write("AC-185 fail - carrier
+  .quay/goal-round.jsonl does not exist\n"); sys.exit(1)
 
   rs=[]
 
@@ -38,7 +39,9 @@ criterion: >-
           ac=g.get('ac'); st=g.get('state')
           if st=='gap' and sp>0 and ac not in first_gap: first_gap[ac]=i
           elif st=='in-progress' and ac in first_gap and i>first_gap[ac]: ok=True
-  sys.exit(0 if ok else 1)
+  sys.stderr.write("AC-185 fail - no round pair in .quay/goal-round.jsonl where
+  the same AC is gap with spawned>0 and then in-progress\n") if not ok else
+  None; sys.exit(0 if ok else 1)
 
   P
 expect: exit 0（生产载体 .quay/goal-round.jsonl 中存在两轮 R1<R2：R1 里某条 AC state=gap 且该轮

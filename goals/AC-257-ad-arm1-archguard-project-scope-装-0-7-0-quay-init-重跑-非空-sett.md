@@ -2,7 +2,7 @@
 id: AC-257
 title: ad-arm1/archguard：project scope 装 0.7.0 + quay-init 重跑（非空 settings.json
   合并）+ 真实 todo→done
-status: active
+status: achieved
 kind: criterion
 goal: GOAL-018
 criterion: >-
@@ -54,4 +54,10 @@ expect: exit 0 = 载体中存在一条 ac=GOAL-018-AC-257 的记录：host=ad-ar
 origin: 人 2026-09-14 裁定：ad-arm1/archguard 扛 project scope（archguard 已有非空、带无关
   Stop hook 的 .claude/settings.json，是验证"合并而非覆盖"语义的真实场景）。
 activatedAt: 2026-09-14T04:03:19.975Z
+statusLog:
+  - at: 2026-09-14T07:47:39.588Z
+    from: active
+    to: achieved
+    actor: goal-driver
+    reason: "I2: criterion pass"
 ---

@@ -980,23 +980,38 @@ export function readWorkerOutcomeRecords(root: string): WorkerOutcomeRecord[] {
  * inner-era ghost (its worktree may still exist, but it is now managed by the driver, not the retired
  * inner dispatch path).
  */
-export function workerDriverOnlineMs(root: string): number | null {
+export function workerDriverOnlineMs(
+  root: string,
+  // gap-ac179-criterion-cold-miss-30s-ttl-always-expired: a caller that ALREADY holds a carrier's
+  // text can hand it in instead of making this read it again. readLive is that caller — it reads the
+  // outcome carrier for its worker-in-flight merge and the round carrier for its round-carrier merge
+  // a few lines earlier — and on the live store those two carriers are 2.4 MB + 11.7 MB, so the
+  // re-read + re-parse here measured ~250 ms of the ~830 ms readLive spends holding the event loop.
+  // Pure dedup: byte-identical inputs, byte-identical result. Omitted ⇒ read from disk, unchanged.
+  preRead: { outcomeText?: string | null; roundText?: string | null } = {},
+): number | null {
   let onlineMs: number | null = null;
   const consider = (ms: number) => {
     if (!Number.isFinite(ms)) return;
     if (onlineMs == null || ms < onlineMs) onlineMs = ms;
   };
 
-  const outcomeText = readWorkerOutcomeText(root);
+  const outcomeText = preRead.outcomeText !== undefined ? preRead.outcomeText : readWorkerOutcomeText(root);
   if (outcomeText != null) {
     for (const r of parseWorkerOutcomeRecords(outcomeText)) {
       if (r.started_at != null) consider(Date.parse(r.started_at));
     }
   }
 
-  try {
-    const roundText = fs.readFileSync(path.join(root, WORKER_ROUND_REL), "utf8");
-    for (const line of String(roundText).split("\n")) {
+  let roundText: string | null;
+  if (preRead.roundText !== undefined) {
+    roundText = preRead.roundText;
+  } else {
+    try { roundText = fs.readFileSync(path.join(root, WORKER_ROUND_REL), "utf8"); }
+    catch { roundText = null; } // no round carrier — the outcome carrier alone still yields an instant
+  }
+  if (roundText != null) {
+    for (const line of roundText.split("\n")) {
       const s = line.trim();
       if (!s) continue;
       try {
@@ -1004,8 +1019,6 @@ export function workerDriverOnlineMs(root: string): number | null {
         if (typeof j.ts === "string") consider(Date.parse(j.ts));
       } catch { /* skip malformed round line */ }
     }
-  } catch {
-    // no round carrier — the outcome carrier alone (if any) still yields a valid online instant
   }
 
   return onlineMs;
@@ -1034,9 +1047,13 @@ interface RoundInFlightTask {
  * snapshot is superseded). A missing/ill-formed start for a task ⇒ startedAtMs null (honest unknown,
  * not a fabricated value).
  */
-function readWorkerRoundInFlightTasks(root: string): RoundInFlightTask[] {
+function readWorkerRoundInFlightTasks(root: string, preReadRoundText?: string | null): RoundInFlightTask[] {
   try {
-    const roundText = fs.readFileSync(path.join(root, WORKER_ROUND_REL), "utf8");
+    // gap-ac179-criterion-cold-miss-30s-ttl-always-expired: the round carrier is 11.7 MB on the live
+    // store; readLive already holds its text (it passes the same value to workerDriverOnlineMs), so it
+    // hands it in rather than making this read it a second time. Omitted ⇒ read from disk, unchanged.
+    const roundText = preReadRoundText !== undefined ? preReadRoundText : fs.readFileSync(path.join(root, WORKER_ROUND_REL), "utf8");
+    if (roundText == null) return [];
     let tasks: RoundInFlightTask[] = [];
     for (const line of String(roundText).split("\n")) {
       const s = line.trim();
@@ -1755,9 +1772,17 @@ export function readLive(
   // gap-live-page-worker-driver-inflight-invisible: merge the worker-driver's carrier-derived
   // in-flight set, and drop workflow-events runs that predate the driver (stale inner-era ghosts).
   // A worker-carrier read failure degrades to the workflow-events-only view — never 500s the page.
+  // gap-ac179-criterion-cold-miss-30s-ttl-always-expired: read each carrier ONCE for the whole call
+  // and hand the text to every consumer below (workerDriverOnlineMs / readWorkerRoundInFlightTasks).
+  // They used to re-read + re-parse the SAME 2.4 MB outcome carrier and 11.7 MB round carrier, which
+  // measured ~250 ms of this function's event-loop block — and this function's block is exactly what
+  // a concurrent `/health` waits for while the dashboard snapshot rebuilds (AC4).
+  const outcomeText = readWorkerOutcomeText(root); // never throws (own try/catch → null)
+  let roundText: string | null = null;
+  try { roundText = fs.readFileSync(path.join(root, WORKER_ROUND_REL), "utf8"); } catch { roundText = null; }
+
   let workerInFlight: InFlightTask[] = [];
   try {
-    const outcomeText = readWorkerOutcomeText(root);
     if (outcomeText != null) {
       workerInFlight = workerInFlightTasks(parseWorkerOutcomeRecords(outcomeText), nowMs);
     }
@@ -1773,7 +1798,7 @@ export function readLive(
   // gap-live-fan-in-window-elapsed-zero: read the TRUE dispatch start (`in_flight_task_starts`) first;
   // only when the round carries no start for the task do we fall back to nowMs ("just now", never a
   // fabricated long elapsed — honest ③b).
-  for (const { taskId, startedAtMs } of readWorkerRoundInFlightTasks(root)) {
+  for (const { taskId, startedAtMs } of readWorkerRoundInFlightTasks(root, roundText)) {
     const started = startedAtMs ?? nowMs;
     workerInFlight.push({
       taskId,
@@ -1840,7 +1865,7 @@ export function readLive(
   // AC2: a workflow-events start-without-end run whose start is BEFORE the driver came online is a
   // stale inner-era ghost — its worktree may still exist (now managed by the driver), so the
   // worktree-released filter above does not remove it. Drop it here by the direct量 (start < online).
-  const workerOnlineMs = workerDriverOnlineMs(root);
+  const workerOnlineMs = workerDriverOnlineMs(root, { outcomeText, roundText });
   if (workerOnlineMs != null) {
     inFlight = inFlight.filter((t) => t.startedAtMs >= workerOnlineMs);
   }
@@ -3535,8 +3560,82 @@ export function readTests(root: string): TestsResult {
   return result;
 }
 
+/** The reason a ledger that EXISTS but parsed to zero records carries. Shared by the sync and
+ *  non-blocking readers so the two cannot report different words for the same fact. */
+const EMPTY_ROUNDS_LEDGER_REASON = "verification-round.jsonl 存在但无有效记录（写者已落过盘，没有任何一行可解析）";
+
+/** The missing-ledger branch's two outcomes, keyed on the DIRECT quantity (is a writer path wired?).
+ *  gap-verification-round-empty-state-lumps-three-distinct-causes — the absence of the ledger is TWO
+ *  different facts, and only one of them is about time. Probe the workspace for a writer path (see
+ *  detectRoundWriterPath) and say which fact this is.
+ *
+ *  ⛔ Extracted so `readTestsUncached` (sync) and `readTestsUncachedAsync` (non-blocking) report the
+ *  identical status/reason pair — a second inline copy is how two readers of one carrier start
+ *  disagreeing (硬规则 5b).
+ *
+ *  ── AC4 (② of the task's either/or): THE LEDGER-WRITE CONTRACT, stated where the guidance is
+ *  emitted. A third-party project lands rows through the MECHANICAL FAN-IN — quay exposes no
+ *  standalone "append a round" subcommand for it (the one general writer,
+ *  plugin/scripts/pre-verified-round-record.ts, is RETIRED from the fan-in path by its own
+ *  header ruling; do not re-wire it). The fan-in runs a project's suite iff `scripts/test.sh`
+ *  exists or `loop.test_command` is declared — which is exactly `detectRoundWriterPath`'s
+ *  `wired` — and then calls `appendDelegatedSuiteRound`. A project MAY additionally write its
+ *  own rows from its own suite script (the real third-party quay-fleet does), but it does not
+ *  have to: declaring the entry is sufficient. Proof this contract is TRUE, on a real
+ *  third-party project: quay-fleet's `.quay/verification-round.jsonl` contains rows with
+ *  `runner:"inner"`, `taskId:"fleet-agent-sessions-transcript-endpoint"` and
+ *  `runId:"mfi-…"` — written by the mechanical fan-in, not by quay's own checkout. */
+function missingRoundsLedger(root: string): { status: TestsStatus; reason: string } {
+  const writer = detectRoundWriterPath(root);
+  if (writer.wired) {
+    return {
+      status: "empty-writer-zero-records",
+      reason:
+        ".quay/verification-round.jsonl 不存在，但本项目已接入写者（" +
+        writer.signals.join(" + ") +
+        "）—— 机械 fan-in 在下一轮 suite 完成后即写入该载体（尚未产出记录，不是未接入）",
+    };
+  }
+  return {
+    status: "empty-no-writer",
+    reason:
+      "未接入：.quay/verification-round.jsonl 不存在，且本项目无写者接入该载体（未发现 scripts/test.sh；" +
+      ".quay/config.yml 的 loop 段也未声明 " +
+      ROUND_WRITER_LOOP_KEYS.join(" / ") +
+      "）—— 再跑多少轮也不会有记录。接入方式：在本项目 .quay/config.yml 的 loop 段声明 test_command" +
+      "（plugin/scripts/quay-init.sh 写入；等价入口 /quay:init --all --loop），机械 fan-in 即会落账",
+  };
+}
+
+/** THE parse loop over the ledger's lines — called once with every line by the sync reader and in
+ *  bounded slices by the non-blocking reader, so both parse with the same rule (one implementation,
+ *  no drift). Blank lines skipped; malformed lines skipped, never fatal. */
+function parseRoundLines(lines: readonly string[], into: TestRunRecord[]): void {
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const rec = parseVerificationRound(line);
+    if (rec) into.push(rec);
+  }
+}
+
+/** The file-exists branch's tail: zero parsed records is a writer/wiring fact (not a timing one), and
+ *  otherwise the page presents newest-first. Shared by both readers for the reason above. */
+function finishRoundsFromLedger(runs: TestRunRecord[]): { status: TestsStatus; reason: string | null } {
+  if (runs.length === 0) {
+    // The file exists ⇒ SOME writer ran. That is a writer/wiring fact, not a timing one — the same
+    // value as the missing-ledger-but-wired case, with its own reason (a reader can still tell the
+    // two apart from `reason`; `status` answers the question they share: 「写者接入了吗 ⇒ 是」).
+    return { status: "empty-writer-zero-records", reason: EMPTY_ROUNDS_LEDGER_REASON };
+  }
+  // The suite writer appends oldest→newest; the page shows 最新在前, so present newest-first.
+  runs.reverse();
+  return { status: "ok", reason: null };
+}
+
 /** Uncached half of readTests (the real read + parse), kept separate so the cache wrapper and any
- *  future bounded reader share one implementation. */
+ *  future bounded reader share one implementation. ⛔ SYNC by contract — it blocks on a ledger that
+ *  is ~70 MB on the live store. A background caller must use `readTestsNonBlocking` instead
+ *  (gap-ac179-criterion-cold-miss-30s-ttl-always-expired). */
 function readTestsUncached(root: string): TestsResult {
   const roundsPath = path.join(root, ".quay", "verification-round.jsonl");
   const runs: TestRunRecord[] = [];
@@ -3544,54 +3643,10 @@ function readTestsUncached(root: string): TestsResult {
   let reason: string | null = null;
   try {
     if (!fs.existsSync(roundsPath)) {
-      // gap-verification-round-empty-state-lumps-three-distinct-causes — the absence of the ledger is
-      // TWO different facts, and only one of them is about time. Probe the workspace for a writer path
-      // (the direct quantity, see detectRoundWriterPath) and say which fact this is.
-      const writer = detectRoundWriterPath(root);
-      if (writer.wired) {
-        statePathStatus = "empty-writer-zero-records";
-        reason =
-          ".quay/verification-round.jsonl 不存在，但本项目已接入写者（" +
-          writer.signals.join(" + ") +
-          "）—— 机械 fan-in 在下一轮 suite 完成后即写入该载体（尚未产出记录，不是未接入）";
-      } else {
-        // ── AC4 (② of the task's either/or): THE LEDGER-WRITE CONTRACT, stated where the guidance is
-        // emitted. A third-party project lands rows through the MECHANICAL FAN-IN — quay exposes no
-        // standalone "append a round" subcommand for it (the one general writer,
-        // plugin/scripts/pre-verified-round-record.ts, is RETIRED from the fan-in path by its own
-        // header ruling; do not re-wire it). The fan-in runs a project's suite iff `scripts/test.sh`
-        // exists or `loop.test_command` is declared — which is exactly `detectRoundWriterPath`'s
-        // `wired` — and then calls `appendDelegatedSuiteRound`. A project MAY additionally write its
-        // own rows from its own suite script (the real third-party quay-fleet does), but it does not
-        // have to: declaring the entry is sufficient. Proof this contract is TRUE, on a real
-        // third-party project: quay-fleet's `.quay/verification-round.jsonl` contains rows with
-        // `runner:"inner"`, `taskId:"fleet-agent-sessions-transcript-endpoint"` and
-        // `runId:"mfi-…"` — written by the mechanical fan-in, not by quay's own checkout.
-        statePathStatus = "empty-no-writer";
-        reason =
-          "未接入：.quay/verification-round.jsonl 不存在，且本项目无写者接入该载体（未发现 scripts/test.sh；" +
-          ".quay/config.yml 的 loop 段也未声明 " +
-          ROUND_WRITER_LOOP_KEYS.join(" / ") +
-          "）—— 再跑多少轮也不会有记录。接入方式：在本项目 .quay/config.yml 的 loop 段声明 test_command" +
-          "（plugin/scripts/quay-init.sh 写入；等价入口 /quay:init --all --loop），机械 fan-in 即会落账";
-      }
+      ({ status: statePathStatus, reason } = missingRoundsLedger(root));
     } else {
-      const text = fs.readFileSync(roundsPath, "utf8");
-      for (const line of text.split(/\r?\n/)) {
-        if (!line.trim()) continue;
-        const rec = parseVerificationRound(line);
-        if (rec) runs.push(rec);
-      }
-      if (runs.length === 0) {
-        // The file exists ⇒ SOME writer ran. That is a writer/wiring fact, not a timing one — the same
-        // value as the missing-ledger-but-wired case, with its own reason (a reader can still tell the
-        // two apart from `reason`; `status` answers the question they share: 「写者接入了吗 ⇒ 是」).
-        statePathStatus = "empty-writer-zero-records";
-        reason = "verification-round.jsonl 存在但无有效记录（写者已落过盘，没有任何一行可解析）";
-      } else {
-        // The suite writer appends oldest→newest; the page shows 最新在前, so present newest-first.
-        runs.reverse();
-      }
+      parseRoundLines(fs.readFileSync(roundsPath, "utf8").split(/\r?\n/), runs);
+      ({ status: statePathStatus, reason } = finishRoundsFromLedger(runs));
     }
   } catch (err) {
     statePathStatus = "error";
@@ -3600,6 +3655,66 @@ function readTestsUncached(root: string): TestsResult {
 
   // /tests 页是历史/可观测性面，只读数据面载体 verification-round.jsonl（红绿都入账）；控制面
   // 单状态文件 full-suite-state.json（gate 信号、D7 镜像只写绿、scope 标注）不进入显示层。
+  return { status: statePathStatus, reason, runs };
+}
+
+/** Ledger lines parsed per macrotask in `readTestsNonBlocking`. The live ledger's lines are ~40 KB
+ *  each, so 200 lines ≈ 60 ms of JSON.parse — small enough that a background refresh never holds the
+ *  event loop long enough to delay /health, large enough that the per-chunk overhead is invisible. */
+export const ROUNDS_PARSE_CHUNK_LINES = 200;
+
+/** Yield to the event loop once (one macrotask boundary), so a long cooperative read lets pending
+ *  I/O — notably an in-flight `/health` — be served between slices. */
+export function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => { setImmediate(resolve); });
+}
+
+/**
+ * NON-BLOCKING half of `readTests`: the same RESULT, the same cache, the same decision helpers — but
+ * the two pieces that made the sync reader hold the event loop for ~1.6 s on the live store are moved
+ * off it: the ~70 MB read is `await`ed (threadpool, not the event loop) and the per-line JSON.parse
+ * runs in `ROUNDS_PARSE_CHUNK_LINES`-line slices with a macrotask yield between slices.
+ *
+ * ⊢ Why this exists (gap-ac179-criterion-cold-miss-30s-ttl-always-expired): the dashboard's snapshot
+ * rebuild runs on a BACKGROUND tick, and a sync reader there would stall every concurrent request —
+ * `/health` included — for the whole parse. The request path must never pay this cost in any form.
+ *
+ * ⊢ Why a second entry point rather than "just make readTests async": `readTests` is SYNC by contract
+ * for its many in-request callers. Sharing the cache, the line parser and the empty/missing-ledger
+ * decision helpers keeps the two readers on ONE truth (硬规则 5b) — only the loop shape differs.
+ */
+export async function readTestsNonBlocking(root: string): Promise<TestsResult> {
+  const hit = verificationRoundCache.get(root);
+  if (hit && Date.now() - hit.at < VERIFICATION_ROUND_CACHE_TTL_MS) return hit.result;
+  const result = await readTestsUncachedAsync(root);
+  verificationRoundCache.set(root, { at: Date.now(), result });
+  return result;
+}
+
+/** Async half of `readTestsNonBlocking` — see it for the contract. Byte-for-byte the same decisions
+ *  as `readTestsUncached`; only the read (`await`) and the parse (sliced + yielded) differ. */
+async function readTestsUncachedAsync(root: string): Promise<TestsResult> {
+  const roundsPath = path.join(root, ".quay", "verification-round.jsonl");
+  const runs: TestRunRecord[] = [];
+  let statePathStatus: TestsStatus = "ok";
+  let reason: string | null = null;
+  try {
+    if (!fs.existsSync(roundsPath)) {
+      ({ status: statePathStatus, reason } = missingRoundsLedger(root));
+    } else {
+      const text = await fs.promises.readFile(roundsPath, "utf8");
+      const lines = text.split(/\r?\n/);
+      for (let i = 0; i < lines.length; i += ROUNDS_PARSE_CHUNK_LINES) {
+        parseRoundLines(lines.slice(i, i + ROUNDS_PARSE_CHUNK_LINES), runs);
+        // Yield only when another slice follows — the last slice needs no hand-off.
+        if (i + ROUNDS_PARSE_CHUNK_LINES < lines.length) await yieldToEventLoop();
+      }
+      ({ status: statePathStatus, reason } = finishRoundsFromLedger(runs));
+    }
+  } catch (err) {
+    statePathStatus = "error";
+    reason = `verification-round.jsonl 读失败：${err instanceof Error ? err.message : String(err)}`;
+  }
   return { status: statePathStatus, reason, runs };
 }
 

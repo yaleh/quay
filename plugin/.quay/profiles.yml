@@ -35,19 +35,34 @@ roles:
   # 只声明 name 差异（launcher/model 从 profile 继承）。role 键集一致是 DoD——worker-driver 派发
   # `launchArgv("task-worker", …)` 经 profile-policy.ts resolveRole，缺失 role 抛 `role not found`
   # （fail-closed，无回退）⇒ 第三方项目永不派发（gap-shipped-profiles-missing-worker-roles）。
+  # ⚠️ mcpBlacklist 同样必须在【两份 carrier】上都落地（gap-worker-mcp-blacklist-strict-config）：
+  #   本文件是 quay-init 逐字铺进消费者 .quay/ 的那一份；只改 dev-tree 根 ⇒ 第三方项目功能静默失效
+  #   ——这正是 profiles-role-coverage-check.ts 存在的那个「修了一份、init 铺的是另一份」缺陷形状。
   task-worker:
     profile: worker-default
     name: quay-task-worker
     env:
       CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"    # 驱动的外部超时是唯一兜底（无此键 claude -p 有 600s end_turn 后台任务宽限）
+    # 角色层（⛔ 非 profile 层）：outer 与它们共享 worker-default，挂 profile 会连坐 outer。
+    # 三个 role 各写一份（⛔ 不用 YAML 锚点——本文件被 quay-launch.sh 的 python3+yaml 与 TS 的
+    # profile-policy.ts 两条路径读，保持与两份 carrier 既有写法一致的朴素形状）。
+    mcpBlacklist:
+      - chrome-devtools
+      - playwright
   selector:
     profile: worker-default
     name: quay-selector
+    mcpBlacklist:
+      - chrome-devtools
+      - playwright
   fix-worker:
     profile: worker-default
     name: quay-fix-worker
     env:
       CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"    # 同 task-worker
+    mcpBlacklist:
+      - chrome-devtools
+      - playwright
   pool-judge:
     profile: worker-default
     name: quay-pool-judge

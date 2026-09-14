@@ -52,6 +52,19 @@ function daysAgo(n) {
   return Date.now() - n * 24 * 60 * 60 * 1000;
 }
 
+/** The per-status mini-list cap is a single constant in serve-dashboard.ts. This file's AC4 "0 tasks →
+ *  no block" assertion is an ABSENCE assertion on the block's heading, so it has to name the cap string
+ *  the heading actually uses: pinning the literal `3` here (2026-09-14 human ruling raised it to 10)
+ *  would leave the assertion green while asserting the absence of a string that can no longer appear —
+ *  a tautology, not a check. Read the constant instead; its VALUE is pinned by the owning task's own
+ *  test (serve-dashboard.test.mjs: 12 ready ⇒ exactly 10 rows). */
+function readMiniListN(src) {
+  const m = /const\s+MINI_LIST_N\s*=\s*(\d+)\s*;/.exec(src);
+  assert.ok(m, "MINI_LIST_N declaration found in serve-dashboard.ts");
+  return Number(m[1]);
+}
+const MINI_LIST_N = readMiniListN(fs.readFileSync(SERVE_DASHBOARD_SRC, "utf8"));
+
 /** Extract the `const miniList = (…) => { … }` arrow-function body from the source file (balanced braces). */
 function miniListBody(src) {
   const start = src.indexOf("const miniList = ");
@@ -128,7 +141,7 @@ test("AC4: entry separator on the 2nd+ row, none on a single row, and 0-task sta
   const zero = renderDashboardPage(makeDashboardArgs([
     { id: "D-1", title: "done", status: "done", labels: [], updatedAt: daysAgo(1) },
   ]));
-  assert.ok(!zero.includes("ready（最近 3 条）"), "0 ready tasks → no ready mini-list block");
+  assert.ok(!zero.includes(`ready（最近 ${MINI_LIST_N} 条）`), "0 ready tasks → no ready mini-list block");
 });
 
 test("AC3: miniList function body no longer carries the four dead-ellipsis tokens", () => {

@@ -1,7 +1,8 @@
 ---
 id: gap-rework-multiplier-predictors
 title: 找返工的预测因子——什么样的任务注定被执行 5 次以上（中位 2 次、p90 5 次、最高 27 次）
-status: todo
+status: needs-human
+needs_human_cause: human-adjudication
 labels:
   - gap
   - analysis
@@ -35,10 +36,10 @@ extra: {}
 
 ## Touches
 
-- `plugin/scripts/rework-predictors.ts`
-- `plugin/test/rework-predictors.test.mjs`
+- `plugin/scripts/rework-predictors.ts` (new)
+- `plugin/test/rework-predictors.test.mjs` (new)
 - `plugin/scripts/capability-catalog.sh`
-- `docs/analysis/rework-multiplier-predictors.md`
+- `docs/analysis/rework-multiplier-predictors.md` (new)
 - `tasks/gap-rework-multiplier-predictors.md`
 
 ## Acceptance Criteria
@@ -65,3 +66,10 @@ extra: {}
 ⚠️ 注意 `worker-outcome.jsonl` 的已知取值陷阱：`final_state == "landed"` 是死取值
 （见 `tasks/gap-worker-outcome-final-state-landed-is-a-dead-value.md`），
 成功态实为 `completed`——用错字段会把返工次数算错，必须在脚本里显式处理并在文档里说明口径。
+
+## Needs-Human
+
+**执行 2026-09-14T05:17:35.275Z — 连续修满重试上限仍不合格（标 needs-human）**
+
+- 阻碍原因：连续修满 3 次仍不合格（闸在重验证后仍判不合格）
+- 成因类：human-adjudication
