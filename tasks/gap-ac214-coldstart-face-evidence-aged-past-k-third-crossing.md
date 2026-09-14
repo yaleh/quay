@@ -2,7 +2,7 @@
 id: gap-ac214-coldstart-face-evidence-aged-past-k-third-crossing
 title: AC-214 第三次因【陈旧】转红：冷启动面四条主体 AC-203/205/207/232 同批越过 K（202/200，margin
   −2）——27 小时内第 3 次，缺 K 窗口内的刷新节奏
-status: todo
+status: ready
 labels:
   - gap
   - delivery-critical
