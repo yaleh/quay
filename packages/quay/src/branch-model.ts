@@ -566,8 +566,10 @@ export type DocBranchState =
   | "unreadable";
 
 /** What the operation did (or would have done). Kept apart from `DocBranchState` so a mutation that
- *  FAILED is not silently reported as the classification it failed to act on. */
-export type DocBranchAction = "created" | "switched" | "noop" | "blocked" | "unreadable" | "failed";
+ *  FAILED is not silently reported as the classification it failed to act on, and so an `adopted`
+ *  collision (`state: "blocked"`, `action: "adopted"`) does not print the refusal marker the shell
+ *  relays on. */
+export type DocBranchAction = "created" | "switched" | "noop" | "blocked" | "adopted" | "unreadable" | "failed";
 
 export interface DocBranchReport {
   state: DocBranchState;
@@ -595,6 +597,16 @@ export interface EnsureDocBranchOptions {
   name: string;
   /** Plan only — classify and report, mutate nothing (no branch created, HEAD not moved). */
   dryRun?: boolean;
+  /**
+   * The NAME-COLLISION decision, opt-in and never default. False ⇒ a branch carrying `name` that
+   * shares no ancestry with the baseline is REFUSED (`state: "blocked"`, nothing moved). True ⇒ the
+   * SAME adopt primitive `ensureBranchModel` uses for a divergent landing baseline: preserve the
+   * colliding tip under `<name>-pre-quay-init-<sha>`, re-point `name` at the baseline, switch to it.
+   * Nothing is destroyed either way; this flag only decides whether the operator's decision is
+   * carried out or handed back to them. ⛔ Not to be confused with the landing-baseline role's
+   * `adopt`: both are the SAME declared decision (`--adopt-branch-model`), applied to two roles.
+   */
+  adopt?: boolean;
 }
 
 /**
@@ -619,6 +631,7 @@ export interface EnsureDocBranchOptions {
 export function ensureDocBranch(root: string, opts: EnsureDocBranchOptions): DocBranchReport {
   const name = (opts.name ?? "").trim();
   const dryRun = opts.dryRun === true;
+  const adopt = opts.adopt === true;
   const base = {
     name,
     checkedOut: null as string | null,
@@ -738,12 +751,58 @@ export function ensureDocBranch(root: string, opts: EnsureDocBranchOptions): Doc
     );
   }
   if (!nameContainsBaseline && !baselineContainsName) {
-    return blocked(
-      `branch '${name}' (${preexistingSha.slice(0, 8)}) shares NO ancestry with ` +
-        `'${LANDING_BASELINE_ROLE}' (${baselineSha.slice(0, 8)}) — a name collision, not a doc branch. ` +
-        `Switching the main checkout onto it would move the human edit surface onto a foreign line. ` +
-        `NOTHING WAS MOVED. Resolve it by hand, or re-run with a different --doc-branch-name.`,
-    );
+    const shortSha = preexistingSha.slice(0, 8);
+    const backupRef = `${name}-pre-quay-init-${shortSha}`;
+    const collision =
+      `branch '${name}' (${shortSha}) shares NO ancestry with '${LANDING_BASELINE_ROLE}' ` +
+      `(${baselineSha.slice(0, 8)}) — a name collision, not a doc branch. Switching the main ` +
+      `checkout onto it would move the human edit surface onto a foreign line.`;
+    if (!adopt) {
+      return blocked(
+        `${collision} NOTHING WAS MOVED. Resolve it by hand, re-run with a different ` +
+          `--doc-branch-name, or carry out the adoption decision (--adopt-branch-model) — which ` +
+          `preserves the colliding tip as '${backupRef}' and re-points '${name}' at the baseline.`,
+      );
+    }
+    if (dryRun) {
+      return {
+        ...base,
+        state: "blocked",
+        action: "adopted",
+        ok: true,
+        notEvaluated: false,
+        sha: baselineSha,
+        detail: `would preserve '${name}' (${shortSha}) as '${backupRef}', re-point '${name}' at '${LANDING_BASELINE_ROLE}' (${baselineSha.slice(0, 8)}) and switch the main checkout to it`,
+      };
+    }
+    // The SAME primitive `ensureBranchModel` uses for a divergent landing baseline: nothing is
+    // destroyed, the old tip stays reachable under the backup ref.
+    const backup = git(root, ["branch", backupRef, name]);
+    const repoint = git(root, ["branch", "-f", name, LANDING_BASELINE_ROLE]);
+    if (repoint.ok !== true) {
+      return {
+        ...base,
+        state: "blocked",
+        action: "failed",
+        ok: false,
+        notEvaluated: false,
+        sha: preexistingSha,
+        detail: `${collision} adopt failed: git branch -f ${name} returned non-zero: ${repoint.err}`,
+      };
+    }
+    const co = git(root, ["checkout", name]);
+    return {
+      ...base,
+      state: "blocked",
+      action: co.ok === true ? "adopted" : "failed",
+      ok: co.ok === true,
+      notEvaluated: false,
+      sha: baselineSha,
+      detail:
+        co.ok === true
+          ? `'${name}' was an unrelated line (${shortSha}); preserved as '${backupRef}' and re-pointed at '${LANDING_BASELINE_ROLE}' (${baselineSha.slice(0, 8)}), then the main checkout was switched to it${backup.ok === true ? "" : ` — ⚠️ backup failed: ${backup.err}`}`
+          : `re-pointed '${name}' at '${LANDING_BASELINE_ROLE}' but could not switch to it: git checkout returned non-zero: ${co.err}`,
+    };
   }
 
   if (dryRun) {
@@ -779,14 +838,17 @@ export function ensureDocBranch(root: string, opts: EnsureDocBranchOptions): Doc
  * the judgment — ADR-004).
  */
 export function formatDocBranchReport(report: DocBranchReport): string {
-  const mark =
-    report.state === "blocked"
+  // The MARKER describes what HAPPENED (the action), not what was classified (the state): an
+  // adopted collision is `state: "blocked"` but must NOT print `[BLOCKED]` — the shell entry relays
+  // that literal as a refusal (`quay-init.sh`'s `case`), and printing it for a successful adoption
+  // would report a refusal for work that was carried out.
+  const mark = report.notEvaluated
+    ? "NOT-EVALUATED"
+    : report.action === "blocked"
       ? "BLOCKED"
-      : report.notEvaluated
-        ? "NOT-EVALUATED"
-        : report.action === "failed"
-          ? "FAILED"
-          : report.action.toUpperCase();
+      : report.action === "failed"
+        ? "FAILED"
+        : report.action.toUpperCase();
   return [
     `doc branch (name: ${report.name === "" ? "(none supplied)" : report.name}, landing baseline: ${LANDING_BASELINE_ROLE}):`,
     `  [${mark}] doc-branch -> ${report.name === "" ? "(none)" : report.name} — ${report.detail}`,

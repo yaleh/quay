@@ -158,7 +158,10 @@ Description:
       // the main checkout is git metadata + the same commit's tree, never a config/content write.
       // Called UNCONDITIONALLY — an absent name is its own reported state (NOT-EVALUATED), never a
       // silently skipped step (硬规则 3b: "did not look" must not be shaped like "nothing to do").
-      const docBranch = ensureDocBranch(targetRoot, { name: docBranchName ?? "", dryRun });
+      // `--adopt-branch-model` is the SAME declared decision for BOTH roles: it already carries the
+      // doc-branch collision (`--adopt-branch-model`'s own help text names 'author'), so it is
+      // threaded straight through rather than inventing a second adoption flag.
+      const docBranch = ensureDocBranch(targetRoot, { name: docBranchName ?? "", dryRun, adopt: adoptBranchModel });
       console.log(formatDocBranchReport(docBranch));
       // Fail-closed on a real refusal (a name collision) or a failed mutation; a dry run only
       // reports, and an unreadable HEAD is NOT a failure (hard rule 3b).

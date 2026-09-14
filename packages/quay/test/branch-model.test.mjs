@@ -640,6 +640,33 @@ test("doc branch ③: the name is taken by an UNRELATED branch ⇒ BLOCKED, both
   assert.match(formatDocBranchReport(r), /\[BLOCKED\] doc-branch -> docwork/);
 });
 
+test("doc branch ③ + adoption: the SAME adopt primitive preserves the colliding tip and re-points", () => {
+  // The refusal is the DEFAULT, not the only outcome: `--adopt-branch-model` is the operator's
+  // declared decision for exactly this shape (its own help text names 'author'), and it is carried
+  // out with the primitive `ensureBranchModel` already uses — the old tip stays reachable.
+  const dir = onDevelopRepo("docb-adopt");
+  git(dir, ["checkout", "-q", "--orphan", "docwork"]);
+  git(dir, ["rm", "-r", "-q", "--cached", "."]);
+  fs.writeFileSync(path.join(dir, "orphan.txt"), "unrelated\n");
+  commit(dir, "an unrelated line");
+  const collisionSha = git(dir, ["rev-parse", "docwork"]);
+  git(dir, ["checkout", "-q", "develop"]);
+  const beforeDevelop = git(dir, ["rev-parse", "develop"]);
+
+  const r = ensureDocBranch(dir, { name: "docwork", adopt: true });
+
+  assert.equal(r.action, "adopted");
+  assert.equal(r.ok, true);
+  assert.equal(git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]), "docwork");
+  assert.equal(git(dir, ["rev-parse", "docwork"]), beforeDevelop, "re-pointed at the baseline");
+  assert.equal(git(dir, ["rev-parse", `docwork-pre-quay-init-${collisionSha.slice(0, 8)}`]), collisionSha, "the colliding tip is preserved, not destroyed");
+  // ⛔ The marker must follow the ACTION: an adopted collision is still `state: "blocked"`, and the
+  // shell relays the literal `[BLOCKED] doc-branch` as a REFUSAL — printing it here would report a
+  // refusal for work that was carried out.
+  assert.match(formatDocBranchReport(r), /\[ADOPTED\] doc-branch -> docwork/);
+  assert.doesNotMatch(formatDocBranchReport(r), /\[BLOCKED\]/);
+});
+
 test("doc branch ④: a detached HEAD is NOT-EVALUATED, never ① or ②", () => {
   const dir = onDevelopRepo("docb-detached");
   git(dir, ["checkout", "-q", "--detach", "develop"]);
