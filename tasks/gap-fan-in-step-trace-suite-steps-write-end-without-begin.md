@@ -2,7 +2,7 @@
 id: gap-fan-in-step-trace-suite-steps-write-end-without-begin
 title: fan-in-step-trace 的 4 个 suite 步骤只写 step-end 不写 step-begin——最贵的 suite
   步骤在该载体里结构上不可测时长
-status: ready
+status: done
 labels:
   - gap
   - defect

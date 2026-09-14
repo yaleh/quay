@@ -3528,7 +3528,21 @@ export async function mechSh(argv: string[], timeoutMs = 120_000): Promise<MechS
 
 /** 机械 fan-in 步骤 trace 载体（.quay/fan-in-step-trace.jsonl，gitignored 运行时诊断日志——AC1：
  *  每步 begin/end 各一条；begin 无 end ⇒ 该步挂起/未返回，据 epoch 定位）。best-effort：写失败不致命
- *  （诊断载体失败 ≠ fan-in 失败，硬规则 3b 的镜像半边）。 */
+ *  （诊断载体失败 ≠ fan-in 失败，硬规则 3b 的镜像半边）。
+ *
+ *  ── 时长通道（gap-fan-in-step-trace-suite-steps-write-end-without-begin AC2）──────────────────
+ *  **每条 `step-end` 自带 `durationMs`（该步真实墙钟毫秒）——读时长⛔不要用 begin/end 配对。**
+ *  两个理由，都不是风格问题：
+ *  1) **4 个 suite 决策步只有 end 没有 begin**（见 traceSuiteEvent）：ac-precheck / suite-start /
+ *     suite-end / suite-skip 是【单发决策事件】而非区间——它们没有可配对的 begin，任何配对读法
+ *     对它们恒返回「无数据」，而「无数据」与「这一步不存在」同形（硬规则 3b）。实测一位分析者
+ *     正是用配对读法得出「suite 结构上不在这个载体里」的错误结论（该结论已收回，见
+ *     docs/analysis/suite-got-5x-faster-and-throughput-did-not-follow.md §5 错误一）。
+ *  2) 配对读法**对它覆盖的那 8 步也不可靠**：跨天/跨轮的陈旧 begin 会与新的 end 配错。自带时长
+ *     没有这个失败模式。
+ *  ⛔ 因此：**不要**给这 4 个决策事件补一个「紧挨着 end 写的 begin」来把孤儿率刷到 0 —— 一个
+ *  写下去就立刻被配掉的 begin 结构上不可能与 end 分离（硬规则 4：恒等式不是测量），那是给指标
+ *  看的样子，不是仪器。 */
 export function appendFanInStepTrace(
   root: string,
   task: string,
@@ -4316,19 +4330,34 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
   // 监控的读者，如 gap-archguard-p5-instrument-decay-standing-guard）——两者服务不同读者，⛔ 互斥=分裂
   // （原 bug：只写 per-run 让共享读者永久看不到这批步骤）。phase 统一 "end"（单发事件，⛔ 用 "begin"
   // 会给挂起检测留下「begin 无 end」的假挂起）。与 trace() 一一对应 ⇒ 两载体 suite 条目数一致（AC3）。
+  //
+  // 时长（gap-fan-in-step-trace-suite-steps-write-end-without-begin AC2）：共享载体上这批事件
+  // **自带 `durationMs`**（= per-run 的 `wall_ms`，同一读数），因此 suite 时长不必、也不能靠
+  // begin/end 配对得到（它们本就没有 begin——AC1 的孤儿根因）。两个载体各自的时长效字段名不同是
+  // 刻意的：per-run 的读者（web 详情页 / fan-in-execute 的 poll 证书）认 `wall_ms`，共享载体的
+  // 聚合读者认 `durationMs`；⛔ 不互相复制一份（同载体两个同义字段 = 漂移源）。
   const traceSuiteEvent = (step: string, extra: Record<string, unknown>): void => {
-    appendFanInStepTrace(root, task, runId, step, "end", extra);
+    const { wall_ms, ...rest } = extra as Record<string, unknown> & { wall_ms?: number };
+    // 缺 wall_ms 的调用点是编码错误，不是「时长 0」——不过滤成 0，留 null 让读者看得出「没测」
+    // （硬规则 6/3b：缺值 = 未查，⛔ 不与「合格」共用取值）。
+    appendFanInStepTrace(root, task, runId, step, "end", {
+      ...rest,
+      durationMs: typeof wall_ms === "number" ? wall_ms : null,
+    });
     trace({ step, ...extra });
   };
   // mechSh 步的包层：跑 + 计时 + 两路 trace——① appendFanInStepTrace begin/end（挂起 = begin 无 end，
   // 据 epoch 定位挂起步；gap-fan-in-subprocess-hang-timeout-recovery AC1）；② A1 一行过程日志。
+  // `durMs` 算【一次】，共享载体的 `durationMs` 与 per-run 的 `wall_ms` 用同一个读数——⛔ 不各算一次
+  // （两次 Date.now() 会给出两个不一致的「同一步时长」）。
   const step = async (name: string, argv: string[], timeoutMs = 120_000): Promise<MechShResult> => {
     const t0 = Date.now();
     appendFanInStepTrace(root, task, runId, name, "begin");
     const r = await mechSh(argv, timeoutMs);
-    appendFanInStepTrace(root, task, runId, name, "end", { ok: r.ok });
+    const durMs = Date.now() - t0;
+    appendFanInStepTrace(root, task, runId, name, "end", { ok: r.ok, durationMs: durMs });
     trace({
-      step: name, exit: r.status, wall_ms: Date.now() - t0, ok: r.ok,
+      step: name, exit: r.status, wall_ms: durMs, ok: r.ok,
       ...(r.ok ? {} : { reason: extractFailureSummary(combinedOutput(r.stdout, r.stderr)) || `exit ${r.status}` }),
     });
     return r;
@@ -4438,8 +4467,9 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       // third-party-no-doc-check-tooling（⛔ 不与「doc 检查真的跑了且失败」同形，硬规则 3b）。
       if (docCmd === null) {
         const reason = "third-party-no-doc-check-tooling";
-        appendFanInStepTrace(root, task, runId, "doc-check", "end", { ok: true, reason });
-        trace({ step: "doc-check", exit: 0, wall_ms: Date.now() - t0, ok: true, reason });
+        const durMs = Date.now() - t0;
+        appendFanInStepTrace(root, task, runId, "doc-check", "end", { ok: true, reason, durationMs: durMs });
+        trace({ step: "doc-check", exit: 0, wall_ms: durMs, ok: true, reason });
         return { ok: true, status: 0, stdout: "", stderr: "", error: null };
       }
       const docKey = computeDocCheckFaceKey(worktree);
@@ -4475,8 +4505,9 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
     // 全量 suite，可区分取值 third-party-no-scoped-tooling（⛔ 不与「scoped 门跑了且失败」同形，硬规则 3b）。
     if (scopedCmd === null) {
       const reason = "third-party-no-scoped-tooling";
-      appendFanInStepTrace(root, task, runId, "scoped-gate", "end", { ok: true, reason });
-      trace({ step: "scoped-gate", exit: 0, wall_ms: Date.now() - scopedT0, ok: true, reason });
+      const durMs = Date.now() - scopedT0;
+      appendFanInStepTrace(root, task, runId, "scoped-gate", "end", { ok: true, reason, durationMs: durMs });
+      trace({ step: "scoped-gate", exit: 0, wall_ms: durMs, ok: true, reason });
     } else {
       const scopedDevelopSha = (await mechSh(["git", "-C", worktree, "rev-parse", mergeTarget], 30_000)).stdout.trim();
       const scopedCacheHit = scopedDevelopSha !== "" && readScopedGateCache(scopedCacheFile, scopedGateKey(task, scopedDevelopSha)) === true;
@@ -4658,8 +4689,9 @@ export async function runMechanicalFanIn(opts: MechanicalFanInOptions): Promise<
       task, root, mergeTarget, runId, attemptKey: perSuiteRunId, worktree, suiteCapture, suiteState: suiteStateFile,
       lockWaitSecs: 30, token: ffToken, scriptsDir,
     });
-    appendFanInStepTrace(root, task, runId, "ff", "end", { ok: ff.code === 0 });
-    trace({ step: "ff", exit: ff.code, wall_ms: Date.now() - ffT0, ok: ff.code === 0, ...(ff.code === 0 ? {} : { reason: (ff.stderr || ff.stdout || "").trim() || `exit ${ff.code}` }) });
+    const ffDurMs = Date.now() - ffT0;
+    appendFanInStepTrace(root, task, runId, "ff", "end", { ok: ff.code === 0, durationMs: ffDurMs });
+    trace({ step: "ff", exit: ff.code, wall_ms: ffDurMs, ok: ff.code === 0, ...(ff.code === 0 ? {} : { reason: (ff.stderr || ff.stdout || "").trim() || `exit ${ff.code}` }) });
     if (ff.code !== 0) return fail("ff", { ok: false, status: ff.code, stdout: ff.stdout, stderr: ff.stderr, error: null });
 
     // 9.4b 写 complete pass GateEvent（gap-mechanical-fan-in-writes-no-complete-gateevent AC2）：机械

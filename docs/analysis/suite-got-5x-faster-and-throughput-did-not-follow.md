@@ -103,9 +103,38 @@ corr(中位 suite 时长, 当日 suite 轮数) = −0.37
 **错误一：把「fan-in 耗时几乎全是排队」说死了。**
 分步耗时显示 8 个步骤合计中位仅 ~2 min（`scoped-gate` 76 s 占 53%、`doc-check` 29 s、
 `merge-develop` 25 s），而单次 fan-in 端到端中位 **9.7 min**、p90 **154.6 min**、最大 693 min。
-初稿据此断言「75% 以上是等待」。**但复核发现：最贵的 suite 步骤结构上不在这个载体里**
-（见 §6），所以那段差值里既有排队也有 suite 本身，**不能全算等待**。真实结论只能是
-「端到端时长远大于已记录步骤之和，缺口的构成尚未拆开」。
+初稿据此断言「75% 以上是等待」。
+
+**2026-09-14 第二版：缺口已拆开，初稿错在【读法】，不在数据。**
+根因不是「suite 没写进载体」（§6 旧表述如此，已随之更正），而是**这个载体上有两套互不相交的
+时长读法**：8 个步骤靠 `step-begin`/`step-end` 配对算，4 个 suite 决策步只有 `step-end`
+（它们是**单发决策事件**，不是区间，本就没有可配对的 begin）——**配对读法对它们恒返回「无数据」，
+而「无数据」与「这一步不存在」同形**。初稿用的正是配对读法，于是把一个**存在**的数据读成了
+**缺席**（这正是硬规则 3b 的字面实例）。修法：`step-end` 一律自带 `durationMs`，不依赖配对
+（`worker-driver.ts` `appendFanInStepTrace`；见 §6）。
+
+按新读法复算，窗口 09-04 → 09-14 的真实读数（全部取自生产载体，`n=757` 次同时有 suite 与
+acquire→release 锁段的 fan-in，非 fixture）：
+
+| 量 | 定义（载体） | 中位 | p90 |
+|---|---|---|---|
+| 锁段端到端 | `fan-in-lock-events.jsonl` 的 acquire→release | **382 s** | 668 s |
+| 其中 **suite** | `fan-in-step-trace.jsonl` `step-end[step=suite-end].durationMs` | **312 s** | 600 s |
+| 其中其余 8 步 | 同载体的 begin/end 配对之和 | 133 s | 205 s |
+
+**⊢ suite 一步就占锁段的 80%（按每次 run 的比值取中位）；其余 8 步合计 35%。**
+**⊢ 锁段内没有大块空白**：「8 步 ≈ 2 min vs 端到端 9.7 min」这个缺口，绝大部分**就是 suite
+本身**，不是排队。**初稿「75% 以上是等待」是错的，且错的方向是低估了 suite。**
+
+**⊢ 独立载体交叉核对**：`verification-round.jsonl` 同期（09-04+，n=730）套件时长中位 253 s，
+本载体的 suite 读数中位 312 s——**同一量级（差 19%）**。两者口径不同（前者含第三方路径与分泳道
+记录），⛔ 因此不要把二者的差值当结论，只用它证「两个独立读法没有互相矛盾」。
+
+**仍然量不出来的那一半（诚实标注）**：**锁外**的等待——一次 fan-in 从「决定要跑」到「真正拿到
+锁」之间的时长——**没有任何载体记录**（`fan-in-lock-events.jsonl` 只有 `acquire`/`release`
+两种事件，没有「开始等待」）。所以「排队占多少」目前只能回答**锁段内 ≈ 0**，不能回答整段
+端到端。要补这一半，需要给 `acquire-fan-in-lock` 也写 begin/end——它是**真区间**，与上面那 4 个
+决策事件不同类（见 §7）。
 
 **错误二：把一个已修复的缺陷当成现存缺陷。**
 初稿断言「机械 fan-in 不写 `complete` GateEvent（396 条 vs 940 次落地）」。按天拆开后：
@@ -130,7 +159,7 @@ corr(中位 suite 时长, 当日 suite 轮数) = −0.37
 |---|---|---|
 | ~~`worker-outcome.final_state` 有死取值 `landed`~~ → **已修**（`gap-worker-outcome-final-state-landed-is-a-dead-value`） | 死取值全库 **1** 条（2026-08-28，手工 fan-in 手写落盘，⛔ 非代码所写）；真实成功态是 `completed`。**修复** = 词表闸 `assertFinalState` 挂在唯一落盘点 `appendOutcomeToFile` 上（词表外取值写不进去）+ 载体正本写明「成功态 = `completed`」 | 修复前：拿 `landed` 统计吞吐会得到「吞吐 ≈ 0」（与「系统停摆」同形）。修复后仍**不能**靠词表外的取值读数——闸只保证「不再写进去」，⛔ 不追改历史那条 |
 | **（读数口径陷阱，修 `landed` 时当场发现）** 用 `git log \| grep '翻 … done'` 的**提交数**当地落数会**高估** | 同一任务可在一天内被多次翻 done ⇒ 09-09 提交 **71** 条 vs 去重任务 **54** 个（重复 17），09-10 54/44，09-11 43/34 | 提交数当分母 ⇒ 偏差被抬到 17.8–49.4%（看起来像「载体漏记」）；改用**去重任务数** ⇒ 同一窗口偏差 ≤4.8%。**这是同一个缺陷的另一张脸：口径错 ⇒ 读数与某异常态同形** |
-| `fan-in-step-trace` 孤儿 `step-end` | 2,097 / 7,204 = 29%，**100% 集中在 4 个 step**（`ac-precheck` 697、`suite-start` 697、`suite-end` 695、`suite-skip` 15），其余 8 个步骤孤儿率 **0%** | 这 4 步的 `step-begin` 自 08-28 改写去 per-run 文件而 `step-end` 仍写共享载体 ⇒ **最贵的 suite 步骤在该载体里结构上不可测时长**；已 done 的 `gap-fan-in-step-trace-suite-step-stopped-writing` 认为这批步骤已整体停写，与盘上实际（end 仍在写）不符 |
+| `fan-in-step-trace` 孤儿 `step-end` | 09-14 现场：2,150 / 7,353 = **29%**，**100% 集中在 4 个 suite 决策步**（`ac-precheck` 713、`suite-start` 713、`suite-end` 709、`suite-skip` 15），其余 8 个步骤孤儿率 **0%** | **这条的旧表述（「suite 结构上不可测时长」）已于 09-14 更正**：孤儿是真的，但它不是「数据不在」——那 4 条 `step-end` **自带时长**，是**配对读法**看不见它们（详见 §5 错误一第二版）。修法是让 `step-end` 一律自带 `durationMs`（12 组统一），**不是**给这 4 步补一个「写下去就立刻被配掉」的 begin——那种 begin 结构上不可能与 end 分离，是给孤儿率看的样子，不是挂起检测（硬规则 4）。另：`gap-fan-in-step-trace-suite-step-stopped-writing` 曾称这批步骤「整体停写」，与盘上实际（`step-end` 一直在写）不符，已在该任务体里更正 |
 | `complete` GateEvent 覆盖率 | 修复后 74–94%，非 100% | 用它统计完成数会少 6–26% |
 
 ## 7. 还能做什么
@@ -147,9 +176,14 @@ corr(中位 suite 时长, 当日 suite 轮数) = −0.37
    立案者）回归。
 
 **需要先补仪器：**
-5. **缺陷发现延迟**——每个 gap 任务的「缺陷引入时刻（git blame）→ 立案时刻」配对，
+5. **锁外等待（fan-in 排队）**——§5 错误一第二版把锁段内的构成拆开了（suite 80%），但
+   「决定要跑到拿到锁」这一段仍**无载体**：`fan-in-lock-events.jsonl` 只有 acquire/release。
+   最小补法是在 `acquireFanInLock` 前后各写一条 `acquire-fan-in-lock` 的
+   `step-begin`/`step-end`（**它是真区间**，与 4 个单发决策事件不同类），并把它加进
+   `instrument-decay-check.ts` 的 MANIFEST `expected`。补上它，「排队占多少」才第一次可算。
+6. **缺陷发现延迟**——每个 gap 任务的「缺陷引入时刻（git blame）→ 立案时刻」配对，
    给硬规则「频率 × 静默」一个定量版本。现无现成字段。
-6. **谁先发现**（人 / 循环 / 套件）——`维度边界与结晶.md` §2.1 的 n=5 需要扩到几百例，
+7. **谁先发现**（人 / 循环 / 套件）——`维度边界与结晶.md` §2.1 的 n=5 需要扩到几百例，
    要从任务体抽取发现路径。
 
 **结构上做不了：** 08-11 之前无遥测；连续数学（Fisher / 本征维度 / ρ）这次没有任何一个
@@ -189,4 +223,13 @@ corr(中位 suite 时长, 当日 suite 轮数) = −0.37
   ⚠️ 窗口敏感，如实记录：同一判据在 08-23…08-31 与 09-06 上是 12–29%（**未归因**——无对照，
   不声称成因）；载体本身从 08-23 起才有 `final_state`。故「<10%」是**最近窗口**的性质，⛔ 不是全载体的性质。
 - 验证税：`.quay/checker-cost.jsonl` 的 `name`/`ms`/`at`
+- 分步时长（§5 错误一第二版）——**读 `step-end` 自带的 `durationMs`，⛔ 不要配对 begin/end**：
+  ```bash
+  # 每组步骤的时长分布（12 组统一；suite 那 4 组只有 end，配对读法对它们恒空）
+  jq -rc 'select(.event=="step-end" and (.durationMs|type)=="number") | [.step,.durationMs] | @tsv' \
+    .quay/fan-in-step-trace.jsonl | awk '{a[$1]=a[$1]" "$2} END{for(k in a) print k, a[k]}'
+  # 锁段端到端：.quay/fan-in-lock-events.jsonl 的 acquire→release 配对（⚠️ epoch 是【秒】）
+  ```
 - ⚠️ `fan-in-step-trace.jsonl` 的 `epoch` 字段单位是**秒**不是毫秒（初稿在此栽过一次）
+- ⚠️ **配对读法已废弃**：对 4 个 suite 决策步（`ac-precheck`/`suite-start`/`suite-end`/`suite-skip`）
+  它恒返回「无数据」，而那不是「没跑过」——初稿正是这样把一个存在的数据读成了缺席（§5 错误一）。
