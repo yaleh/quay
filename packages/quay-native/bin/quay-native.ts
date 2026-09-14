@@ -405,7 +405,24 @@ Description:
       // gap-cli-write-surface-lacks-toplevel-fields: same top-level fields as `task edit`.
       if (flags["depends-on"] !== undefined) patch.depends_on = String(flags["depends-on"]).split(",").filter(Boolean);
       if (flags["goal-ac"] !== undefined) patch.goal_ac = flags["goal-ac"];
-      const t = store.write(id, patch);
+      // gap-quay-native-task-create-duplicate-id-prepends-frontmatter: `create` is NOT `edit`.
+      // Without `{ create: true }` this call fell through to write()'s ordinary read-modify-write,
+      // so re-creating an existing id exited 0 while silently re-statusing the task (a settled
+      // `done` became whatever `--status` said) and, when a body was supplied, leaving the original
+      // document below a second `---` block. Fail closed instead: non-zero exit, zero write, and the
+      // message names the id. Mirrors the sibling CAS branch below (`err.name === "ConflictError"`)
+      // rather than instanceof, matching this file's existing style.
+      let t;
+      try {
+        t = store.write(id, patch, { create: true });
+      } catch (err) {
+        if (err && err.name === "AlreadyExistsError") {
+          console.error(`task create: ${err.message}`);
+          process.exitCode = 1;
+          return;
+        }
+        throw err;
+      }
       if (flags.json) printJson(t);
       else console.log(`created ${id}`);
       return;
