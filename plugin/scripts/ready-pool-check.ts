@@ -1968,8 +1968,15 @@ export function maxMutuallyDisjointSubset(parsed, expand) {
   return best;
 }
 
-function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask = new Map(), parentRefCount = new Map(), dependedOnCount = new Map(), develop = "develop") {
+function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask = new Map(), parentRefCount = new Map(), dependedOnCount = new Map(), develop = "develop", bodyFreshnessOf = null) {
   const kind = classifyKind(id);
+  // BODY-FRESHNESS (gap-ready-pool-body-still-read-from-stale-main-checkout): the body-derived
+  // judgments below (touchesResolve / touchesNarrow / fourArtifacts / selfTouch / prosePrereqGap)
+  // are computed from `task.body` — the copy the analysis READ (the develop ref when taskReadRef is
+  // set). When the write face is measurably ahead of that read source, those judgments are about a
+  // body the mechanism cannot vouch for, so they carry a THIRD state instead of a verdict.
+  const bodyFreshness = bodyFreshnessOf ? bodyFreshnessOf(id) : { status: "fresh", reason: "not-applicable", evidence: null };
+  const bodyEvaluated = bodyFreshness.status === "fresh";
   const touches = checkTaskTouchesResolve(task.body, root);
   const touchesResolve = !touches.majorityMissing;
   // TOUCHES-WIDTH (2026-08-28, gap-touches-breadth-silent-global-dispatch-lock): a directory-level
@@ -2080,6 +2087,16 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     selfTouchOk: selfTouch.ok,
     // PROSE-PREREQUISITE GAP (AC3): prose-declared prereqs with no relation edge — never eligible.
     prosePrereqGap: prosePrereqGapIds,
+    // BODY-FRESHNESS (gap-ready-pool-body-still-read-from-stale-main-checkout): the three-valued
+    // freshness of the body the checks above were computed from, plus the boolean the `eligible`
+    // conjunction consumes. `fresh` is the ONLY value that lets the body verdicts stand; the other
+    // two are carried with their own reason + evidence so "not evaluated" never shares a shape with
+    // "evaluated and clean" (硬规则 3b). The consumer is promotion-driver's classifyCandidate, which
+    // must NOT send a fix worker for these (the defect may exist only in the stale copy).
+    bodyFreshness: bodyFreshness.status,
+    bodyEvaluated,
+    bodyFreshnessReason: bodyFreshness.reason,
+    bodyStaleEvidence: bodyFreshness.evidence,
     // AC5: the touchesResolve guard is KEPT — majority-missing candidates are never eligible.
     // AC1: the retired-mechanism guard is ADDED — a candidate targeting a retired pipeline mechanism
     // is never eligible either.
@@ -2094,7 +2111,12 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     // pool while in flight; the fix-worker narrows it before it ever enters ready).
     // GOAL-LAYER SOURCE IS NOT AN ADMISSION INPUT (see the invariant above): no goal-derived term
     // may enter this conjunction — `eligible-no-goal-source-check.ts` asserts exactly that.
-    eligible: depsReady && four.complete && touchesResolve && touchesNarrow.narrow && !retiredMechanism && !superseded && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok,
+    // BODY-FRESHNESS (gap-ready-pool-body-still-read-from-stale-main-checkout): `bodyEvaluated` is
+    // ADDED — a body judged from a read source measurably behind the write face must not be promoted
+    // on that judgment. It is NOT a goal-derived term (the invariant above is untouched) and it is
+    // fail-closed only toward WITHHOLDING a promotion, never toward a needs-human flip: the consumer
+    // (promotion-driver) treats it as its own class, not as a fixable defect.
+    eligible: depsReady && four.complete && touchesResolve && touchesNarrow.narrow && !retiredMechanism && !superseded && prosePrereqGapIds.length === 0 && !compound && selfTouch.ok && bodyEvaluated,
   };
 }
 
@@ -2294,6 +2316,146 @@ export function readTaskFilesAtRefBatch(root, ref, ids) {
  *  reader; null when the ref/path is absent or git fails). */
 export function readTaskFileAtRef(root, ref, taskId) {
   return readTaskFilesAtRefBatch(root, ref, [taskId]).get(taskId) ?? null;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// BODY-FRESHNESS — the third state for "the gate's read source may not carry the write face's body"
+// (tasks/gap-ready-pool-body-still-read-from-stale-main-checkout)
+//
+// THE OBSERVED DEFECT (2026-09-14, read from the production carriers, not inferred). `gap-rework-
+// multiplier-predictors` was flipped needs-human not because its authoring was bad but because the
+// gate judged a body the write face had already replaced:
+//   04:47:15Z  filing committed on the write face (author/disk), ff-propagated to develop   ⇒ propagated:true
+//   05:05:16Z  the FIX (the missing `(new)` annotations) committed on the write face
+//   05:05:17Z  its propagation FAILED — `.quay/store-commit-propagation.jsonl` records
+//              `branchClass:"other" changeKind:"must-propagate" propagated:false`
+//   ~05:09Z/05:12Z  the gate (which reads the DEVELOP REF — `taskReadRef`, not the disk) still read
+//              the pre-fix body ⇒ `touchesResolve=false` ⇒ fix worker ⇒ timeout ⇒ retry ⇒ 3rd ⇒
+//              needs-human.
+// Replaying both historical bodies through the SAME `checkTaskTouchesResolve` on the SAME root: the
+// filed body ⇒ `mustExist:5 missing:3 majorityMissing:true`, the fixed body ⇒ `mustExist:2 missing:0
+// majorityMissing:false`. The fixed body passes the gate BY CONSTRUCTION — so the gate did not read
+// it. The read SOURCE was correct (the ref); the ref was BEHIND THE WRITE FACE.
+//
+// WHY THIS IS NOT THE `gap-dispatch-reads-stale-main-checkout-task-status` FAMILY — it is its mirror.
+// That family: the disk lags the ref, so reading the REF is the fix. This one: the WRITE FACE
+// (author/disk, where every task write lands first — 人 2026-08-31 裁定) is ahead of the ref because
+// a propagation FAILED, so reading the ref is what goes stale. The two directions need opposite
+// evidence, and only the propagation ledger carries it.
+//
+// ⛔ SCOPE (this round, deliberately narrow — see the task's Plan 1/2): the ledger trace is CONSUMED
+// and the judgment gets a distinguishable third state; the body READ SOURCE is NOT changed. Widening
+// to the read source requires a reading of the reverse trap (Plan 3) that does not exist yet.
+//
+// ── The trigger is TWO independent readings, one of which is a DIRECT量 (硬规则 4b) ────────────────
+//   (a) the LEDGER says the write face's last write for this task failed to propagate — the trace
+//       that was previously written by nobody-reads (`logPropagationOutcome`, store.ts); and
+//   (b) `git rev-list --count <ref>..HEAD -- tasks/<id>.md` > 0 — commits touching THIS task file
+//       that exist on the write face but NOT on the ref. That count is the direct量: it answers the
+//       direction question (which side is behind) natively, so the "disk lags the ref" case — the
+//       NORMAL case this repo already handles by reading the ref — measures 0 and is NOT flagged.
+//   (a) alone would over-fire (a failed propagate is usually healed by the next sync, and the ledger
+//   keeps saying `false`); (b) alone would fire on every in-flight write. Together they are precise.
+//
+// ── Three values, never two (硬规则 3b) ───────────────────────────────────────────────────────────
+//   "fresh"          — the ref carries the write face's content for this task (or there is no
+//                      evidence of a failed write at all) ⇒ the body judgment stands.
+//   "stale-suspected"— the write face is measurably ahead of the read source ⇒ NOT EVALUATED.
+//   "unknown"        — the failed-propagate trace exists but the direction could not be MEASURED
+//                      (git unavailable / ref missing). Distinct from both of the above: a reading
+//                      that could not be taken must never share a value with one that was taken and
+//                      came back clean.
+//   `bodyEvaluated` (= status === "fresh") is the single boolean the admission conjunction consumes.
+//
+// ── Self-healing, by construction ────────────────────────────────────────────────────────────────
+//   Nothing here is sticky: once the content reaches the ref (a later successful write, or any sync
+//   that brings the write face to the ref) reading (b) returns 0 and the task is judged normally on
+//   the next round. There is no cache and no recorded state — both readings are taken每轮.
+
+/** The propagation ledger (relative to the repo root). Written best-effort by
+ *  `packages/quay-native/src/store.ts`'s `logPropagationOutcome`, one JSON line per committed
+ *  task write/delete. */
+export const PROPAGATION_LEDGER_REL = ".quay/store-commit-propagation.jsonl";
+
+/** Last ledger record per task id, or an EMPTY map when the ledger is absent/unreadable. Absent is
+ *  not "clean" — it is "nothing was ever recorded", which the judgment below treats as no failed
+ *  write (the ledger is append-only and chronological, so the last record for an id is its latest
+ *  write attempt). */
+export function readLastPropagationRecords(root) {
+  const map = new Map();
+  let text;
+  try {
+    text = fs.readFileSync(path.join(root, PROPAGATION_LEDGER_REL), "utf8");
+  } catch {
+    return map;
+  }
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    let rec;
+    try { rec = JSON.parse(line); } catch { continue; } // a torn/partial line is skipped, not fatal
+    if (!rec || typeof rec !== "object" || typeof rec.id !== "string") continue;
+    map.set(rec.id, rec);
+  }
+  return map;
+}
+
+/** Is this ledger record a WRITE-FACE PROPAGATION FAILURE? Narrow on purpose — two other shapes in
+ *  the same ledger say `propagated:false` BY DESIGN and are not staleness:
+ *    `branchClass:"task-branch"`  — a worktree write: fan-in is its only path into develop;
+ *    `changeKind:"self-only"`     — an AC tick / Evidence write on a non-task branch, carried by
+ *                                   the task's own fan-in.
+ *  Only `other` + `must-propagate` + `false` means "a write that HAD to reach develop did not". */
+export function isWriteFacePropagationFailure(rec) {
+  return !!rec && rec.propagated === false && rec.changeKind === "must-propagate" && rec.branchClass === "other";
+}
+
+/** Commits that touch `tasks/<id>.md` and exist on HEAD (the write face) but NOT on `ref` — the
+ *  DIRECT量 for "which side is behind". `> 0` ⇒ the write face carries a version of this task file
+ *  the ref does not. Returns null when the reading could not be taken (no ref / git failure) —
+ *  never a positive from an unavailable source (硬规则 5/6). */
+export function commitsAheadOfRefForTask(root, ref, id) {
+  if (!ref) return null;
+  try {
+    const out = execFileSync(
+      "git",
+      ["-C", root, "rev-list", "--count", `${ref}..HEAD`, "--", `tasks/${id}.md`],
+      { encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "ignore"] },
+    ).trim();
+    const n = Number(out);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The body-freshness judgment: `{ status, reason, evidence }` with status ∈
+ *  "fresh" | "stale-suspected" | "unknown". `ref` is the ref the store was actually READ from
+ *  (`taskReadRef`); null ⇒ the analysis read the disk, and the disk IS the write face, so nothing
+ *  can be stale relative to it. */
+export function judgeBodyFreshness({ root, id, ref, lastRecords }) {
+  const rec = lastRecords ? lastRecords.get(id) : null;
+  if (!rec) return { status: "fresh", reason: "no-propagation-record", evidence: null };
+  const evidence = {
+    ts: typeof rec.ts === "string" ? rec.ts : null,
+    verb: rec.verb ?? null,
+    changeKind: rec.changeKind ?? null,
+    branchClass: rec.branchClass ?? null,
+    propagated: rec.propagated ?? null,
+  };
+  if (!isWriteFacePropagationFailure(rec)) {
+    return { status: "fresh", reason: "last-write-not-a-failed-propagate", evidence };
+  }
+  if (!ref) return { status: "fresh", reason: "no-ref-read", evidence };
+  const ahead = commitsAheadOfRefForTask(root, ref, id);
+  if (ahead === null) {
+    // The trace says a write failed; the direction could not be measured ⇒ NOT the same value as a
+    // measurement that came back clean (硬规则 3b).
+    return { status: "unknown", reason: "ahead-unmeasurable", evidence };
+  }
+  if (ahead > 0) {
+    return { status: "stale-suspected", reason: "write-face-ahead-of-ref", evidence: { ...evidence, commitsAhead: ahead } };
+  }
+  return { status: "fresh", reason: "ref-not-behind-write-face", evidence };
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
@@ -2702,6 +2864,21 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     allTasks.set(id, task);
   }
 
+  // BODY-FRESHNESS (gap-ready-pool-body-still-read-from-stale-main-checkout): ONE ledger read per
+  // analysis; the per-task git measurement is MEMOIZED and only paid for the tasks whose last ledger
+  // record is a write-face propagation failure (rare — the ledger's `propagated:false` is mostly the
+  // by-design task-branch/self-only shapes, which `isWriteFacePropagationFailure` excludes).
+  // `taskReadRef` is the ref the store was actually read from: null ⇒ the analysis read the disk,
+  // which IS the write face, so nothing can be stale relative to it.
+  const lastPropagationRecords = readLastPropagationRecords(root);
+  const bodyFreshnessMemo = new Map();
+  const bodyFreshnessOf = (id) => {
+    if (!bodyFreshnessMemo.has(id)) {
+      bodyFreshnessMemo.set(id, judgeBodyFreshness({ root, id, ref: taskReadRef, lastRecords: lastPropagationRecords }));
+    }
+    return bodyFreshnessMemo.get(id);
+  };
+
   // Value-prioritization index (built once — blocking needs to know if ANY other task names this id
   // as its parent, so the maps are precomputed here rather than re-scanned per task).
   const childrenByTask = new Map();
@@ -2922,7 +3099,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   for (const [id, t] of allTasks) {
     if (t.status !== TASK_STATUS.TODO) continue;
     if (isFixture(t) || isParked(t)) continue; // never promotion candidates
-    candidates.push(buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount, dependedOnCount, develop));
+    candidates.push(buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount, dependedOnCount, develop, bodyFreshnessOf));
   }
   // AC4: disjointness FIRST (how many pool/in-flight tasks the candidate is pairwise-disjoint
   // from) — the non-negotiable concurrency-safety axis (AC3: priority NEVER overrides it); then
@@ -2951,7 +3128,21 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     if (c.superseded) intercepted.push({ id: c.id, reason: "superseded" });
     if (c.compound) intercepted.push({ id: c.id, reason: "compound-not-dispatchable" });
     if (!c.selfTouchOk) intercepted.push({ id: c.id, reason: "self-touch-missing-c8" });
+    // BODY-FRESHNESS (gap-ready-pool-body-still-read-from-stale-main-checkout): a candidate withheld
+    // because its body could not be judged is recorded here too — a withheld promotion must stay a
+    // traceable decision. The reason carries the freshness value + its cause, so `stale-suspected`
+    // (measured) is never confusable with `unknown` (unmeasurable).
+    if (!c.bodyEvaluated) intercepted.push({ id: c.id, reason: `body-not-evaluated (${c.bodyFreshness}: ${c.bodyFreshnessReason})` });
   }
+  // BODY-FRESHNESS — the output's OWN word-list entry for the third state (AC2 of
+  // gap-ready-pool-body-still-read-from-stale-main-checkout): the candidates whose body dimensions
+  // were NOT evaluated, each with the distinct freshness value, its cause, and the evidence (the
+  // ledger record + the measured commit gap). Separate from `intercepted` because it is a READING of
+  // the read source's freshness, not a defect list — and separate from `promotions`/`candidates`, so
+  // a consumer can answer "was anything withheld for staleness this round?" in one read.
+  const notEvaluated = candidates
+    .filter((c) => !c.bodyEvaluated)
+    .map((c) => ({ id: c.id, freshness: c.bodyFreshness, reason: c.bodyFreshnessReason, evidence: c.bodyStaleEvidence }));
   // RETIRED GATE (AC48): the `promotions.length >= deficit` cap is removed — the bulk path now
   // promotes EVERY eligible candidate (合格即晋), not just enough to reach the floor.
   for (const c of candidates) {
@@ -2985,7 +3176,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     for (const [id, t] of allTasks) {
       if (t.status !== TASK_STATUS.TODO) continue;
       if (isFixture(t) || isParked(t)) continue;
-      const c = buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount, dependedOnCount, develop);
+      const c = buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount, dependedOnCount, develop, bodyFreshnessOf);
       ranked.push({ id, kind: c.kind, kindOrder: c.kindOrder, relevance: c.relevance, eligible: c.eligible, reason: c.relevance.reason });
     }
     ranked.sort(
@@ -3065,6 +3256,12 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     candidates,
     promotions,
     intercepted,
+    // BODY-FRESHNESS (gap-ready-pool-body-still-read-from-stale-main-checkout): the third state —
+    // candidates whose body dimensions were not evaluated because the read source is measurably
+    // behind the write face (`stale-suspected`), or because that direction could not be measured
+    // (`unknown`). Empty ⇒ every candidate's body was judged from content the write face agrees with
+    // (the normal case: negative control).
+    not_evaluated: notEvaluated,
     // REVALUATION (AC46 判据3 / AC2 — gap-ac46-pool-criteria-in-gate-plus-revaluation-executor): the
     // ready tasks whose static conditions have decayed, each with grep-able `reasons` + a
     // `destination: "todo"` (the legal ready.back="todo" transition). The revaluation EXECUTOR

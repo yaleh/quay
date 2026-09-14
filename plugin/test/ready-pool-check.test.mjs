@@ -94,6 +94,11 @@ import {
   loadParsedTaskStoreAtRef,
   loadLandingIndex,
   rpcStoreCacheMaxBytes,
+  PROPAGATION_LEDGER_REL,
+  readLastPropagationRecords,
+  isWriteFacePropagationFailure,
+  commitsAheadOfRefForTask,
+  judgeBodyFreshness,
 } from "../scripts/ready-pool-check.ts";
 import { INFLIGHT_WORKTREE_STALE_MS } from "../scripts/concurrent-batch-scheduler.ts";
 import { propagateDocBranchToDevelop } from "../scripts/driver-filters.ts";
@@ -4549,6 +4554,234 @@ test("AC6 — --apply promotion decision reads develop: develop=ready + disk=tod
   assert.equal(parsed.applied_promotions.length, 0, "AC6: zero promotions applied");
   // The disk stays todo — the promotion did NOT re-land.
   assert.match(fs.readFileSync(path.join(root, "tasks", "gap-promoted.md"), "utf8"), /^status:\s*todo/m, "AC6: disk stays todo (no duplicate promotion)");
+});
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// BODY-FRESHNESS — the third state for a read source behind the write face
+// (tasks/gap-ready-pool-body-still-read-from-stale-main-checkout)
+//
+// THE DEFECT, REPLAYED. 2026-09-14: the gate read the DEVELOP REF (taskReadRef — that part of the
+// read face was already fixed), but a task_write whose fix carried the missing `(new)` annotations
+// FAILED to propagate there (`.quay/store-commit-propagation.jsonl`:
+// `branchClass:"other" changeKind:"must-propagate" propagated:false`). Rounds 188/189 therefore kept
+// reading the PRE-FIX body ⇒ `touchesResolve=false` ⇒ fix worker ⇒ timeout ⇒ 3 retries ⇒ needs-human.
+// Replaying both historical bodies through the SAME `checkTaskTouchesResolve` on the SAME root: the
+// pre-fix body ⇒ majorityMissing:true, the fixed body ⇒ majorityMissing:false. The fixed body passes
+// BY CONSTRUCTION — so the gate did not read it. The read SOURCE was right; the ref was BEHIND THE
+// WRITE FACE (the mirror of the disk-lags-develop family, and only the ledger carries that direction).
+//
+// These fixtures reproduce that shape with the exact mechanism: 3 declared Touches files absent from
+// disk (pre-fix) vs the same 3 annotated `(new)` (fixed).
+
+/** The pre-fix / post-fix Touches pair from the 2026-09-14 replay: three NEW files, unannotated
+ *  (⇒ mustExist 3, majority missing ⇒ touchesResolve=false) vs annotated `(new)` (⇒ touchesResolve=true). */
+function bodyUnannotatedNewFiles(id) {
+  return fourArtifactBody({
+    touches: [
+      "- plugin/scripts/fresh-a.ts",
+      "- plugin/scripts/fresh-b.ts",
+      "- plugin/scripts/fresh-c.ts",
+      `- tasks/${id}.md`,
+    ],
+  });
+}
+function bodyAnnotatedNewFiles(id) {
+  return fourArtifactBody({
+    touches: [
+      "- plugin/scripts/fresh-a.ts (new)",
+      "- plugin/scripts/fresh-b.ts (new)",
+      "- plugin/scripts/fresh-c.ts (new)",
+      `- tasks/${id}.md`,
+    ],
+  });
+}
+
+/** Append a propagation-ledger record (the shape store.ts's logPropagationOutcome writes). */
+function appendPropagationRecord(root, rec) {
+  const file = path.join(root, PROPAGATION_LEDGER_REL);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, `${JSON.stringify(rec)}\n`, "utf8");
+  return file;
+}
+
+test("body-freshness: the free functions — ledger read, the narrow failure predicate, the ahead measure (AC2)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-freshfn-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-b", "develop", "-q", ".");
+  git("config", "user.email", "t@t");
+  git("config", "user.name", "t");
+  writeTask(root, "gap-f", { status: "todo", labels: ["gap"], body: bodyUnannotatedNewFiles("gap-f") });
+  git("add", ".");
+  git("commit", "-q", "-m", "seed");
+
+  // ── No ledger ⇒ no records ⇒ NOT "clean", just "nothing recorded" (缺值 = 未查, 硬规则 6) ──
+  assert.equal(readLastPropagationRecords(root).size, 0, "absent ledger ⇒ empty map, never a positive");
+  assert.equal(judgeBodyFreshness({ root, id: "gap-f", ref: "develop", lastRecords: readLastPropagationRecords(root) }).status, "fresh");
+  assert.equal(
+    judgeBodyFreshness({ root, id: "gap-f", ref: "develop", lastRecords: readLastPropagationRecords(root) }).reason,
+    "no-propagation-record",
+  );
+
+  // ── The predicate is NARROW: two ledger shapes say propagated:false BY DESIGN and are not staleness ──
+  assert.equal(isWriteFacePropagationFailure({ propagated: false, changeKind: "must-propagate", branchClass: "other" }), true, "the write-face failure shape");
+  assert.equal(isWriteFacePropagationFailure({ propagated: false, changeKind: "must-propagate", branchClass: "task-branch" }), false, "a worktree write: fan-in carries it — NOT a failure");
+  assert.equal(isWriteFacePropagationFailure({ propagated: false, changeKind: "self-only", branchClass: "other" }), false, "an AC-tick self-only write: carried by the task's own fan-in");
+  assert.equal(isWriteFacePropagationFailure({ propagated: true, changeKind: "must-propagate", branchClass: "other" }), false, "a SUCCESSFUL propagate is not a failure");
+  assert.equal(isWriteFacePropagationFailure(null), false, "no record ⇒ not a failure");
+
+  // ── The ahead measure: 0 when the write face holds nothing the ref lacks; >0 after a write face commit ──
+  assert.equal(commitsAheadOfRefForTask(root, "develop", "gap-f"), 0, "HEAD == develop ⇒ nothing ahead");
+  git("checkout", "-q", "-b", "author");
+  writeTask(root, "gap-f", { status: "todo", labels: ["gap"], body: bodyAnnotatedNewFiles("gap-f") });
+  git("add", ".");
+  git("commit", "-q", "-m", "fix (not propagated)");
+  assert.equal(commitsAheadOfRefForTask(root, "develop", "gap-f"), 1, "one commit on the write face the ref lacks");
+  assert.equal(commitsAheadOfRefForTask(root, "no-such-ref", "gap-f"), null, "an unresolvable ref ⇒ null (unmeasurable, never a positive)");
+  // Direction is native to this measure: a task file the REF has and the write face does not measures 0,
+  // so the normal "disk lags develop" case can never be flagged as write-face staleness.
+  assert.equal(commitsAheadOfRefForTask(root, "author", "gap-f"), 0, "ref == write face ⇒ 0 (both directions)");
+});
+
+test("body-freshness: AC1 — a body dimension's verdict FLIPS with the read source, and the gate's third state fires on the production read source", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-fresh-ac1-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-b", "develop", "-q", ".");
+  git("config", "user.email", "t@t");
+  git("config", "user.name", "t");
+  const tasksDir = path.join(root, "tasks");
+
+  // develop: the PRE-FIX body (3 unannotated new files ⇒ touchesResolve=false). This is what the
+  // 05:05 filing committed and successfully propagated.
+  writeTask(root, "gap-body-stale", { status: "todo", labels: ["gap"], body: bodyUnannotatedNewFiles("gap-body-stale") });
+  git("add", ".");
+  git("commit", "-q", "-m", "gap-body-stale: filing (propagated)");
+
+  // The WRITE FACE: the FIX body (annotated `(new)` ⇒ touchesResolve=true), committed but NOT
+  // propagated — exactly the 05:05:16/17 pair.
+  git("checkout", "-q", "-b", "author");
+  writeTask(root, "gap-body-stale", { status: "todo", labels: ["gap"], body: bodyAnnotatedNewFiles("gap-body-stale") });
+  git("add", ".");
+  git("commit", "-q", "-m", "gap-body-stale: fix the (new) annotations (propagation FAILED)");
+  appendPropagationRecord(root, {
+    ts: "2026-09-14T05:05:17.097Z", id: "gap-body-stale", verb: "task_write",
+    changeKind: "must-propagate", branchClass: "other", propagated: false,
+  });
+
+  // AC1 first reading — the gate's production read source (the develop ref) judges the PRE-FIX body.
+  const rRef = analyzeTasks({ tasksDir, root, cap: 3, floorMult: 1, taskReadRef: "develop" });
+  const cRef = rRef.candidates.find((c) => c.id === "gap-body-stale");
+  assert.ok(cRef, "the todo is a candidate");
+  assert.equal(cRef.touchesResolve, false, "ref read ⇒ the pre-fix body ⇒ touchesResolve=false (the 05:09/05:12 reading, reproduced)");
+  // AC2 — and the read source is measurably behind the write face ⇒ THIRD STATE, not that verdict.
+  assert.equal(cRef.bodyFreshness, "stale-suspected", "the failed propagate + a write face ahead of the ref ⇒ stale-suspected");
+  assert.equal(cRef.bodyEvaluated, false, "not evaluated — the verdict above is not vouched for");
+  assert.equal(cRef.bodyFreshnessReason, "write-face-ahead-of-ref");
+  assert.equal(cRef.eligible, false, "a body the mechanism cannot vouch for is never promoted on that judgment");
+  assert.deepEqual(rRef.promotions.map((p) => p.id), [], "zero promotions from a stale body — this is the fix-worker retry burn's root");
+  assert.deepEqual(
+    rRef.not_evaluated.map((n) => [n.id, n.freshness, n.reason]),
+    [["gap-body-stale", "stale-suspected", "write-face-ahead-of-ref"]],
+    "AC2: the output's own word list carries the independent not-evaluated value + its cause",
+  );
+  assert.equal(rRef.not_evaluated[0].evidence.commitsAhead, 1, "the evidence carries the measured gap");
+  assert.equal(rRef.not_evaluated[0].evidence.ts, "2026-09-14T05:05:17.097Z", "…and the ledger record it came from");
+  // The withheld promotion is traceable (a no-promotion is never a silent skip).
+  assert.ok(rRef.intercepted.some((i) => i.id === "gap-body-stale" && /^body-not-evaluated \(stale-suspected/.test(i.reason)), "the withheld promotion is in `intercepted` with its reason");
+
+  // AC1 second reading — the DISK read source judges the SAME task from the FIX body.
+  const rDisk = analyzeTasks({ tasksDir, root, cap: 3, floorMult: 1 });
+  const cDisk = rDisk.candidates.find((c) => c.id === "gap-body-stale");
+  assert.equal(cDisk.touchesResolve, true, "disk read ⇒ the fix body ⇒ touchesResolve=true — THE SAME DIMENSION, OPPOSITE VERDICT");
+  assert.equal(cDisk.bodyFreshness, "fresh", "no ref read ⇒ the disk IS the write face ⇒ nothing can be stale relative to it");
+  assert.equal(cDisk.bodyEvaluated, true);
+  assert.equal(cDisk.eligible, true, "the fix body is promotion-eligible — it passes the gate by construction (the replay's other half)");
+  assert.deepEqual(rDisk.promotions.map((p) => p.id), ["gap-body-stale"], "…and it IS promoted from that read source");
+
+  // AC1 NEGATIVE CONTROL — when the two sides AGREE, both read sources give the SAME verdict.
+  // Bring HEAD onto develop (the fix never landed there; it is still the pre-fix body) ⇒ ahead = 0.
+  git("checkout", "-q", "develop");
+  assert.equal(commitsAheadOfRefForTask(root, "develop", "gap-body-stale"), 0, "control: the write face holds nothing the ref lacks");
+  const nRef = analyzeTasks({ tasksDir, root, cap: 3, floorMult: 1, taskReadRef: "develop" });
+  const nDisk = analyzeTasks({ tasksDir, root, cap: 3, floorMult: 1 });
+  const nCRef = nRef.candidates.find((c) => c.id === "gap-body-stale");
+  const nCDisk = nDisk.candidates.find((c) => c.id === "gap-body-stale");
+  assert.equal(nCRef.bodyFreshness, "fresh", "control: ref and write face agree ⇒ fresh");
+  assert.equal(nCRef.bodyEvaluated, true, "control: evaluated");
+  assert.equal(nCRef.touchesResolve, nCDisk.touchesResolve, "control: identical bodies ⇒ identical verdict from either read source");
+  assert.equal(nCRef.touchesResolve, false, "control: both read the pre-fix body ⇒ both say false");
+  assert.deepEqual(nRef.not_evaluated, [], "control: nothing withheld for staleness");
+  assert.deepEqual(nDisk.not_evaluated, [], "control: the disk read never withholds");
+});
+
+test("body-freshness: AC2 negative controls — a HEALED propagate and the two by-design `propagated:false` shapes never withhold a promotion", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-fresh-heal-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-b", "develop", "-q", ".");
+  git("config", "user.email", "t@t");
+  git("config", "user.name", "t");
+  const tasksDir = path.join(root, "tasks");
+  writeTask(root, "gap-healed", { status: "todo", labels: ["gap"], body: bodyAnnotatedNewFiles("gap-healed") });
+  git("add", ".");
+  git("commit", "-q", "-m", "seed (the fixed body IS on the ref)");
+
+  // The ledger still carries a FAILED write for this task — but the write face holds nothing the ref
+  // lacks (the sync healed it). A ledger-only trigger would withhold this promotion forever; the
+  // measured gap says there is nothing to withhold. This is the control that makes the trigger
+  // takeable-false in the useful direction.
+  appendPropagationRecord(root, { ts: "2026-09-14T05:05:17.097Z", id: "gap-healed", verb: "task_write", changeKind: "must-propagate", branchClass: "other", propagated: false });
+  const healed = analyzeTasks({ tasksDir, root, cap: 3, floorMult: 1, taskReadRef: "develop" });
+  const hc = healed.candidates.find((c) => c.id === "gap-healed");
+  assert.equal(hc.bodyFreshness, "fresh", "a healed propagate ⇒ fresh (the ledger record alone is NOT staleness)");
+  assert.equal(hc.bodyFreshnessReason, "ref-not-behind-write-face");
+  assert.deepEqual(healed.not_evaluated, [], "nothing withheld");
+  assert.deepEqual(healed.promotions.map((p) => p.id), ["gap-healed"], "the healthy candidate still promotes");
+
+  // The two by-design `propagated:false` shapes (a worktree write and a self-only AC tick) must not
+  // withhold either — they are the majority of the ledger's false values.
+  for (const [tag, rec] of [
+    ["task-branch", { ts: "2026-09-14T06:00:00.000Z", id: "gap-wt", verb: "task_write", changeKind: "must-propagate", branchClass: "task-branch", propagated: false }],
+    ["self-only", { ts: "2026-09-14T06:00:01.000Z", id: "gap-so", verb: "task_write", changeKind: "self-only", branchClass: "other", propagated: false }],
+  ]) {
+    writeTask(root, rec.id, { status: "todo", labels: ["gap"], body: bodyAnnotatedNewFiles(rec.id) });
+    git("add", ".");
+    git("commit", "-q", "-m", `${rec.id}: seed`);
+    appendPropagationRecord(root, rec);
+    const r = analyzeTasks({ tasksDir, root, cap: 3, floorMult: 1, taskReadRef: "develop" });
+    const c = r.candidates.find((x) => x.id === rec.id);
+    assert.equal(c.bodyFreshness, "fresh", `${tag}: by-design propagated:false ⇒ fresh`);
+    assert.equal(c.eligible, true, `${tag}: still eligible (no withholding)`);
+  }
+});
+
+test("body-freshness: AC2 — an unmeasurable direction is `unknown`, its own value, never `fresh` (硬规则 3b)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-fresh-unknown-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-b", "main", "-q", "."); // ⛔ no `develop` branch: the direction cannot be measured
+  git("config", "user.email", "t@t");
+  git("config", "user.name", "t");
+  writeTask(root, "gap-unk", { status: "todo", labels: ["gap"], body: bodyAnnotatedNewFiles("gap-unk") });
+  git("add", ".");
+  git("commit", "-q", "-m", "seed");
+  appendPropagationRecord(root, { ts: "2026-09-14T05:05:17.097Z", id: "gap-unk", verb: "task_write", changeKind: "must-propagate", branchClass: "other", propagated: false });
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1, taskReadRef: "develop" });
+  const c = r.candidates.find((x) => x.id === "gap-unk");
+  assert.equal(c.bodyFreshness, "unknown", "the trace exists but the direction is unmeasurable ⇒ `unknown`");
+  assert.equal(c.bodyFreshnessReason, "ahead-unmeasurable");
+  assert.equal(c.bodyEvaluated, false, "unknown is NOT evaluated — it must never share a value with a clean measurement");
+  assert.notEqual(c.bodyFreshness, "fresh", "⛔ never folded into `fresh`");
+  assert.deepEqual(r.not_evaluated.map((n) => [n.id, n.freshness]), [["gap-unk", "unknown"]], "the word list distinguishes the two not-evaluated causes");
 });
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════

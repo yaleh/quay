@@ -3810,12 +3810,22 @@ step_ac234_web_render() {
   AC234_EVALUATED=0
   echo "== ⑧ web render (AC-234): quay serve → third-party project, count REAL rendered carriers + round records =="
   # (a) goals_rendered>0 前置：quay-init 只 mkdir goals/、不写 goal 记录 ⇒ 空 goals/ 时经 ABI 补一条真实 goal。
+  # ⚠️ 两处修正（gap-goal-create-as-active-skips-zero-ac-gate 落地时实测暴露，均为【该分支从未成功过】）：
+  #   ① id 逐字 `GOAL-VERIFY-AC234` 结构上非法（goal-store 的 GOAL_ID_RE 要求 `GOAL-\d{3,}`）⇒ 该命令
+  #      一直以 `invalid goal id` exit 1 被这里的 `if` 吞成一句 NOTE，故本分支自建立起就没写进过任何 goal。
+  #      改为合法且在本步骤作用域内唯一的 `GOAL-234`。
+  #   ② `--status draft`（⛔ 不是 active）：goal-store 的 P6-goal 闸现在也覆盖【出生路径】——一条新 GOAL
+  #      名下 0 条 AC 时不得出生即 active（gap-goal-create-as-active-skips-zero-ac-gate），而本步骤补的这条
+  #      goal 恰恰一条 AC 都没有（补 AC 又要先有 goal，正是该闸禁止的循环）。本步骤要的读数只是
+  #      `goals_rendered>0`（`/goal` 列出真实 goal 载体，draft 与 active 一样是一行），故以 draft 播种。
+  # 该分支在正常流程里通常【不执行】：同段的 step_ac232_goal_carrier_write（步骤⑨，先于本步骤）已写
+  # 入一条 draft GOAL-001 ⇒ goals/ 非空；此处是它写失败时的兜底，兜底同样不许伪造读数。
   if [ -d "$root/goals" ] && [ -z "$(find "$root/goals" -maxdepth 1 -name '*.md' -print -quit 2>/dev/null)" ]; then
     goal_body="第三方项目 web 渲染验证用 goal——由 verify-deliver-coldstart AC-234 步骤经 Provider ABI 写入（背景：证明 /goal 渲染真实 goal 载体，非空壳页）。"
-    if node "$qrl" goal write GOAL-VERIFY-AC234 --title "web 渲染验证 goal (AC-234)" --status active \
+    if node "$qrl" goal write GOAL-234 --title "web 渲染验证 goal (AC-234)" --status draft \
         --origin "verify-deliver-coldstart AC-234 步骤经 Provider ABI 写入——证明 /goal 渲染真实载体" \
         --body "$goal_body" --root "$root" >/dev/null 2>&1; then
-      echo "  seeded goal via ABI: GOAL-VERIFY-AC234 (quay-init does not create goal records — goals_rendered>0 前置)"
+      echo "  seeded goal via ABI: GOAL-234 --status draft (quay-init does not create goal records — goals_rendered>0 前置)"
     else
       echo "  NOTE: goal seed via ABI failed — goals_rendered 可能为 0（空 /goal 状态如实计数，不伪造）"
     fi
